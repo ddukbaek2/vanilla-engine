@@ -1,0 +1,136 @@
+//==============================================================================
+// 바닐라엔진(Vanilla Engine). 크레이트 이름은 vanilla-engine, 코드에서는 vanilla 로 쓴다.
+// - vanilla.js 엔진을 러스트로 옮긴 것이다. 공개 API 는 원본의 이름과 쓰임새를 따른다.
+// - 원본의 WebGL2 렌더러는 OpenGL 3.3 코어(glow)로, 캔버스와 DOM 이벤트는 창(winit)과 GL 컨텍스트(glutin)로 바꿨다.
+//   웹(wasm32)으로 빌드하면 원본처럼 캔버스와 WebGL2, requestAnimationFrame 으로 돈다. (core/engine.rs 의 web 모듈)
+// - 이름은 원본과 같이 camelCase 다. 러스트 기본 꼴(snake_case) 경고는 끈다.
+//==============================================================================
+#![allow(non_snake_case)]
+#![allow(non_camel_case_types)]
+#![allow(non_upper_case_globals)]
+#![allow(clippy::too_many_arguments)]
+
+pub mod animation;
+pub mod base;
+pub mod core;
+pub mod effect;
+pub mod game;
+pub mod graphics3d;
+pub mod misc;
+pub mod platform;
+pub mod resource;
+pub mod ui;
+pub mod web;
+
+pub use crate::base::color::Color;
+pub use crate::base::colors::Colors;
+pub use crate::base::fsm::{FiniteStateMachine, StateHandlers};
+pub use crate::base::math;
+pub use crate::base::matrix4::{Matrix4, TransformedPoint};
+pub use crate::base::obb::OBB;
+pub use crate::base::objectpool::ObjectPool;
+pub use crate::base::pivot::Pivot;
+pub use crate::base::platform::{BrowserType, Platform, PlatformType};
+pub use crate::base::quaternion::Quaternion;
+pub use crate::base::rect::Rect;
+pub use crate::base::seededrandom::SeededRandom;
+pub use crate::base::timer::{Cooldown, RepeatTimer};
+pub use crate::base::transformmatrix::TransformMatrix;
+pub use crate::base::vector2::Vector2;
+pub use crate::base::vector3::Vector3;
+pub use crate::base::version::Version;
+pub use crate::core::animation::Animation;
+pub use crate::core::audiomanager::AudioManager;
+pub use crate::core::audioplayer::AudioPlayer;
+pub use crate::core::asset::{Asset, AssetBase, AssetLoadHandle, AssetLoadState, AssetType};
+pub use crate::core::component::mask::Mask;
+pub use crate::core::component::paint::Paint;
+pub use crate::core::component::richtext::{RichText, RichTextAttributes, RichTextLayout, RichTextRun, RichTextSegment};
+pub use crate::core::component::sprite::{Sprite, SpriteBlendMode, SpriteDrawMode};
+pub use crate::core::component::text::Text;
+pub use crate::core::component::{Component, ComponentBase};
+pub use crate::core::engine::{Engine, EngineConfiguration};
+pub use crate::core::frame::Frame;
+pub use crate::core::fullscreenpass::FullscreenPass;
+pub use crate::core::gamepadmanager::{Gamepad, GamepadAnalogStickCode, GamepadButton, GamepadButtonCode, GamepadInputCallback, GamepadInputType, GamepadManager, GamepadTriggerCode};
+pub use crate::core::graphic::{BlendMode, Graphic, TextAlign, TextBaseline};
+pub use crate::core::image::Image;
+pub use crate::core::inputmanager::{InputManager, KeyCode};
+pub use crate::core::textinput::{TextInput, TextInputEvent, TextInputEventKind, TextInputFieldState, TextInputKey};
+pub use crate::core::node::nodetree::{ComponentContext, NodeId, NodeTree, TouchKind};
+pub use crate::core::node::worldnode::{NodeTransform, WorldNode};
+pub use crate::core::scene::{Scene, SceneBase};
+pub use crate::core::soundeffectpool::SoundEffectPool;
+pub use crate::core::timemanager::TimeManager;
+pub use crate::core::tween::{easingFunction, Tween, TweenId, TweenProperty, TweenValue, TweenValues};
+pub use crate::core::viewmanager::{ViewManager, ViewScaleMode};
+pub use crate::effect::particlesystem::ParticleSystem;
+pub use crate::effect::screeneffect::{ScreenEffect, ScreenEffectRegion, ScreenEffectType, SCREEN_EFFECT_PARAMETER_NAMES};
+pub use crate::effect::shadersprite::{ShaderSprite, ShaderSpriteEffect};
+pub use crate::effect::trailrenderer::TrailRenderer;
+pub use crate::graphics3d::ambientocclusioneffect::AmbientOcclusionEffect;
+pub use crate::graphics3d::bloomeffect::BloomEffect;
+pub use crate::graphics3d::material::{ImageDescription, ImageDescriptionOptions, ImageSource, Material, MaterialDescription};
+pub use crate::graphics3d::rendertarget::{RenderTarget, RenderTargetOptions};
+pub use crate::graphics3d::shadowmap::ShadowMap;
+pub use crate::graphics3d::skinnedmodel::{AnimationClip, AnimationPath, Drawable, MeshDescription, MorphTarget, Skin, SkinnedModel, SkinnedModelNode, MORPH_TARGET_MAXIMUM};
+pub use crate::graphics3d::skinnedmodelrenderer::{SkinnedModelRenderer, MORPH_GLSL};
+pub use crate::graphics3d::subsurfacescatteringeffect::SubsurfaceScatteringEffect;
+pub use crate::misc::beepplayer::{BeepPlayer, BeepTone, BeepWaveform};
+pub use crate::misc::camera2d::Camera2D;
+pub use crate::misc::collision2d::{CircleOverlapPush, Collision2D};
+pub use crate::misc::dialogue::{DialogueCurrent, DialogueEntry, DialogueOption, DialogueRunner, DialogueScriptParser};
+pub use crate::misc::floatingtext::{FloatingText, FloatingTextOptions};
+pub use crate::misc::focusnavigator::{FocusNavigator, FocusNavigatorOptions};
+pub use crate::misc::grid::{Grid, GridCell};
+pub use crate::misc::imagescroller::ImageScroller;
+pub use crate::misc::localization::{Localization, LocalizationTable, LocalizationValue};
+pub use crate::misc::localstorage::LocalStorage;
+pub use crate::misc::nodelayout::{NodeLayout, NodeLayoutFanOptions};
+pub use crate::misc::pathfinder::PathFinder;
+pub use crate::misc::persistedstore::{PersistedStore, PersistedStoreSubscription};
+pub use crate::misc::platformerbody::PlatformerBody;
+pub use crate::misc::pointergesture::{PointerGesture, PointerGestureOptions};
+pub use crate::misc::shaker::{Shaker, ShakerOptions};
+pub use crate::misc::spriteanimator::{SpriteAnimator, SpriteAnimatorPlayOptions};
+pub use crate::misc::steering2d::Steering2D;
+pub use crate::misc::toucheffect::{TouchEffect, TouchParticle};
+pub use crate::misc::typewriter::{Typewriter, TypewriterOptions, TypewriterTarget};
+pub use crate::misc::virtualpad::{VirtualPad, VirtualPadState};
+pub use crate::resource::audioasset::AudioAsset;
+pub use crate::resource::blobasset::BlobAsset;
+pub use crate::resource::fontasset::FontAsset;
+pub use crate::resource::imageasset::ImageAsset;
+pub use crate::resource::textasset::{JsonAsset, TextAsset};
+pub use crate::ui::popupmotion::{PopupMotion, PopupMotionEvent, PopupMotionOptions, PopupMotionState};
+pub use crate::ui::touchrecognizer::TouchRecognizer;
+pub use crate::ui::uibutton::{ButtonState, UIButton, UIButtonEvent};
+pub use crate::ui::uichart::{UIBarChart, UILineChart};
+pub use crate::ui::uicontextmenu::{UIContextMenu, UIContextMenuHandler, UIContextMenuItem, UIContextMenuOptions};
+pub use crate::ui::uicontrol::UIControl;
+pub use crate::ui::uidialog::{UIDialog, UIDialogHandler, UIDialogOptions, UIDialogShowOptions};
+pub use crate::ui::uidraggable::{UIDraggable, UIDraggableEvent, UIDraggablePositionEvent};
+pub use crate::ui::uidropdown::{UIDropdown, UIDropdownEvent, UIDropdownOptions};
+pub use crate::ui::uiimageview::UIImageView;
+pub use crate::ui::uiinputfield::{TextEditBuffer, UIInputField, UIInputFieldEvent, UIInputFieldMenuAction};
+pub use crate::ui::uilabel::UILabel;
+pub use crate::ui::uilistview::{UIListView, UIListViewBindItemEvent, UIListViewCreateItemEvent, UIListViewReachEndEvent};
+pub use crate::ui::uiprogressview::{ProgressDirection, UIProgressView};
+pub use crate::ui::uiscrollbar::{ScrollBarAxis, UIScrollBar};
+pub use crate::ui::uiscrollview::{ScrollMode, UIScrollView};
+pub use crate::ui::uislider::{UISlider, UISliderEvent};
+pub use crate::ui::uisnapscrollview::UISnapScrollView;
+pub use crate::ui::uispinner::{UISpinner, UISpinnerOptions};
+pub use crate::ui::uitoast::{UIToast, UIToastOptions};
+pub use crate::ui::uitogglebutton::{UIToggleButton, UIToggleButtonEvent};
+pub use crate::ui::uiview::UIView;
+pub use crate::animation::action::{Action, ActionCallbacks};
+pub use crate::animation::animator::{AnimationState, AnimationTransition, Animator};
+pub use crate::animation::timeline::{composeTimelineColor, createBezierEasing, findTimelinePropertyDefinition, parseTimelineColor, resolveTimelineEasing, Timeline, TimelineEasing, TimelineExternalProperty, TimelineKey, TimelineMarker, TimelineNodeDescription, TimelinePropertyDefinition, TimelinePropertyKind, TimelinePropertyTarget, TimelineSound, TimelineSpriteFrameGrid, TimelineTarget, TimelineValue, TIMELINE_EASING_NAMES, TIMELINE_NODE_DEFAULTS, TIMELINE_PROPERTY_DEFINITIONS};
+pub use crate::effect::heathazeeffect::HeatHazeEffect;
+pub use crate::game::gamescene::GameSceneBase;
+pub use crate::misc::indicator::Indicator;
+pub use crate::misc::visual::Visual;
+pub use crate::resource::bunchasset::BunchAsset;
+pub use crate::resource::visualasset::VisualAsset;
+pub use crate::web::websocketclient::{WebSocketClient, WebSocketReceiveEvent};

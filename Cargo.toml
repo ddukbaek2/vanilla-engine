@@ -1,0 +1,64 @@
+[package]
+name = "vanilla-engine"
+version = "0.3.2"
+description = "바닐라엔진(Vanilla Engine). vanilla.js 를 러스트로 옮긴 게임 엔진. 데스크탑과 웹(wasm)에서 돈다"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/ddukbaek2/vanilla-engine"
+keywords = ["gamedev", "engine", "2d", "3d", "wasm"]
+categories = ["game-engines"]
+
+# 코드에서 쓰는 이름. (use vanilla::...) 크레이트 이름은 vanilla-engine 이고, 고도(godotengine → godot), 베비(bevyengine → bevy)처럼 코드에서는 짧게 부른다
+[lib]
+name = "vanilla"
+
+[dependencies]
+glow = "0.18"
+fontdue = "0.9"
+# 웹 글꼴(WOFF, WOFF2)을 TTF 로 푼다. (원본 기본 글꼴 DOSGothic 이 .woff)
+wuff = "0.2"
+# JsonAsset 이 JSON 을 푼다. (원본 JSON.parse 자리)
+serde_json = "1"
+# FBX 압축 배열(zlib deflate)을 푼다. (원본 DecompressionStream 자리, 순수 러스트 miniz_oxide 기본 백엔드라 wasm32 에서도 돈다)
+flate2 = "1"
+# 이미지 해석. (게임들이 png, jpg, webp 를 쓴다)
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+# 노드 핸들. (세대 번호가 붙은 키로 씬의 노드 저장소를 가리킨다)
+slotmap = "1"
+# performance.now() 를 쓰는 Instant. (네이티브에서는 std::time 그대로)
+web-time = "1"
+# 게임패드. (데스크탑은 OS 입력, 웹은 navigator.getGamepads() 를 읽는다. 원본 GamepadManager 의 입력원)
+gilrs = "0.11"
+# 웹소켓. (데스크탑은 tungstenite 스레드, 웹은 브라우저 WebSocket. 원본 web/websocketclient.js 의 WebSocket 자리)
+ewebsock = "0.8"
+
+# 데스크탑: 창(winit)과 GL 3.3 코어 컨텍스트(glutin).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+winit = "0.30"
+glutin = "0.32"
+glutin-winit = "0.5"
+raw-window-handle = "0.6"
+# 소리. (믹서 트랙, 정적 소리. 기본 기능을 끄고 cpal 출력과 ogg(vorbis), mp3, wav(pcm) 해석만 켠다)
+kira = { version = "0.12", default-features = false, features = ["cpal", "cpal-realtime", "ogg", "vorbis", "mp3", "wav", "pcm"] }
+# 시스템 클립보드. (입력 필드의 복사, 잘라내기, 붙여넣기. winit 에 클립보드가 없다. 그림 기능은 끈다)
+arboard = { version = "3", default-features = false }
+
+# 웹(wasm): 캔버스와 WebGL2, requestAnimationFrame, WebAudio, fetch.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlCanvasElement", "WebGl2RenderingContext", "CssStyleDeclaration", "HtmlElement", "KeyboardEvent", "console", "AudioContext", "BaseAudioContext", "OfflineAudioContext", "AudioBuffer", "AudioBufferSourceNode", "AudioScheduledSourceNode", "AudioNode", "AudioDestinationNode", "AudioParam", "GainNode", "OscillatorNode", "OscillatorType", "Response", "Performance", "Navigator", "VisibilityState", "Storage", "HtmlInputElement", "HtmlHeadElement", "Event", "CompositionEvent", "MouseEvent", "TouchEvent", "TouchList", "Touch", "DomRect", "Node", "AddEventListenerOptions", "CanvasRenderingContext2d", "TextMetrics", "ImageData"] }
+
+# 출시 빌드. (한 덩어리로 묶어 최적화하고 디버그 기호를 뺀다. 이 저장소를 맨 위로 빌드할 때만 쓰인다)
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = true
+panic = "abort"
+
+# 웹(wasm) 출시 빌드. (release 와 같되 기호를 남겨 wasm-bindgen 이 wasm 기능 정보를 읽게 한다. 줄이는 건 wasm-bindgen 이 한다)
+[profile.wasm-release]
+inherits = "release"
+strip = false

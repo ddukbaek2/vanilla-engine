@@ -1,0 +1,25 @@
+//==============================================================================
+// 오디오 백엔드.
+// - AudioManager, AudioPlayer, AudioAsset, BeepPlayer 가 소리를 낼 때 부르는 아래층이다. 공통 코드는 core, resource, misc 에 있다.
+// - 백엔드마다 아래 이름을 같은 꼴로 낸다.
+//   AudioContext(공유 컨텍스트), AudioBuffer(디코딩한 소리), AudioPlatformState(매니저가 드는 백엔드 상태),
+//   AudioPlayerBackend(플레이어 하나의 소리 내는 부분), HAS_USER_GESTURE_AT_START,
+//   createAudioPlatformState, createAudioContext, resumeAudioContext, isAudioContextRunning,
+//   loadAudioFile, loadAudioBytes, getAudioBufferDuration, playBeepTone
+// - 데스크탑: kira 0.12. (desktop.rs)
+// - 웹: 원본과 같은 WebAudio 를 web-sys 로 직접 부른다. (web.rs, kira 는 wasm 에서 파일 읽기와 스트리밍이 안 된다)
+// - 게임 코드가 이름을 부를 수 있게 AudioContext, AudioBuffer 두 타입만 밖으로 낸다. 나머지는 엔진 안에서만 쓴다.
+//==============================================================================
+#[cfg(not(target_arch = "wasm32"))]
+mod desktop;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use desktop::*;
+#[cfg(not(target_arch = "wasm32"))]
+pub use desktop::{AudioBuffer, AudioContext};
+
+#[cfg(target_arch = "wasm32")]
+mod web;
+#[cfg(target_arch = "wasm32")]
+pub(crate) use web::*;
+#[cfg(target_arch = "wasm32")]
+pub use web::{AudioBuffer, AudioContext};
