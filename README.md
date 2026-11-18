@@ -39,6 +39,8 @@
 | <img src="docs/images/effectgallery.jpg" alt="효과 갤러리"> | <img src="docs/images/modelviewer.jpg" alt="3D 모델 보기"> |
 | **타임라인** | **같은 UI 갤러리를 크롬(wasm)에서** |
 | <img src="docs/images/timelineshowcase.jpg" alt="타임라인 쇼케이스"> | <img src="docs/images/web_uigallery.jpg" alt="웹에서 돌린 UI 갤러리"> |
+| **리스트, 스냅 스크롤, 차트, 대화 상자** | **카메라, 길찾기, 대사, 떠오르는 글자** |
+| <img src="docs/images/uigallery2.jpg" alt="UI 위젯 갤러리 2"> | <img src="docs/images/misctour.jpg" alt="misc 도구 둘러보기"> |
 
 ## 빠른 시작
 
@@ -118,6 +120,8 @@ cargo run --example quickstart
 ### 노드와 컴포넌트
 
 노드를 만들고 컴포넌트를 붙입니다. 직접 만든 컴포넌트는 `tick` 에서 자기 노드를 움직입니다. ([`examples/nodebasics.rs`](examples/nodebasics.rs))
+
+<img src="docs/images/nodebasics.jpg" alt="nodebasics 예제: 도는 사각형 셋" width="480">
 
 ```rust
 struct Spin {
