@@ -10,7 +10,7 @@
 [![renderer](https://img.shields.io/badge/renderer-OpenGL%203.3%20%2F%20WebGL2-3f3f46?style=flat-square)](src/core/graphic.rs)
 [![platform](https://img.shields.io/badge/platform-desktop%20%2F%20web%20%28wasm%29-3f3f46?style=flat-square)](src/platform)
 
-[왜 바닐라엔진인가](#왜-바닐라엔진인가) / [빠른 시작](#빠른-시작) / [사용법](#사용법) / [예제](#예제) / [기술 노트](#기술-노트) / [성능](#성능) / [업데이트 기록](UPDATE.md)
+[왜 바닐라엔진인가](#왜-바닐라엔진인가) / [빠른 시작](#빠른-시작) / [사용법](#사용법) / [예제](#예제) / [기술 노트](#기술-노트) / [성능](#성능) / [외부 의존성](#외부-의존성) / [업데이트 기록](UPDATE.md)
 
 <img src="docs/images/hero.jpg" alt="바닐라엔진 예제 화면: 3D 모델, 셰이더 효과, UI 위젯, 한글 입력 필드" width="100%">
 
@@ -285,6 +285,43 @@ cargo run --release --example modelviewer
 
 웹(wasm, 크롬, 배칭 켬)에서는 적 1만 6천 마리 장면이 배칭 전 24.5 fps 에서 40.4 fps 가 되었습니다.
 
+## 외부 의존성
+
+엔진이 직접 쓰는 크레이트입니다. 버전은 `Cargo.lock` 기준이고, 직접 의존성은 모두 MIT, Apache-2.0, Zlib 같은 허용적 라이선스입니다.
+
+**데스크탑, 웹 공통**
+
+| 크레이트 | 버전 | 쓰는 곳 | 하는 일 | 라이선스 |
+| --- | --- | --- | --- | --- |
+| [glow](https://crates.io/crates/glow) | 0.18.0 | `core/graphic.rs`, `graphics3d/`, `effect/` | OpenGL 3.3 과 WebGL2 를 같은 API 로 감싼 GL 바인딩. 모든 렌더링이 이 위에서 돕니다 | MIT / Apache-2.0 / Zlib |
+| [fontdue](https://crates.io/crates/fontdue) | 0.9.5 | `core/textstringtexturecache.rs` | 폰트 래스터라이즈. 문자열을 텍스처로 베이크합니다 | MIT / Apache-2.0 / Zlib |
+| [wuff](https://crates.io/crates/wuff) | 0.2.10 | `core/textstringtexturecache.rs` | WOFF, WOFF2 웹 폰트 디코딩 | MIT |
+| [image](https://crates.io/crates/image) | 0.25.10 | `core/image.rs`, `graphics3d/material.rs`, 창 아이콘, 화면 저장 | png, jpeg, webp 디코딩과 PNG 저장 (이 세 형식만 켭니다) | MIT / Apache-2.0 |
+| [slotmap](https://crates.io/crates/slotmap) | 1.1.1 | `core/node/nodetree.rs` | 노드 저장소. 제너레이셔널 핸들 `NodeId` 를 만듭니다 | Zlib |
+| [serde_json](https://crates.io/crates/serde_json) | 1.0.154 | JSON 애셋, 타임라인, 애니메이터, 파티클 설정, 다국어, 로컬 저장소, 애니메이션 클립, 웹소켓 메시지 | JSON 파싱과 저장 | MIT / Apache-2.0 |
+| [flate2](https://crates.io/crates/flate2) | 1.1.11 | `graphics3d/fbxloader.rs` | FBX 의 압축 배열(zlib) 해제. 순수 러스트 백엔드라 wasm 에서도 돕니다 | MIT / Apache-2.0 |
+| [web-time](https://crates.io/crates/web-time) | 1.1.0 | `core/engine.rs`, `base/math.rs` | 프레임 시계와 난수 시드. 데스크탑은 `std::time`, 웹은 `performance.now()` 를 같은 API 로 씁니다 | MIT / Apache-2.0 |
+| [gilrs](https://crates.io/crates/gilrs) | 0.11.2 | `core/gamepadmanager.rs` | 게임패드 입력. 데스크탑은 OS 입력, 웹은 Gamepad API 를 읽습니다 | MIT / Apache-2.0 |
+| [ewebsock](https://crates.io/crates/ewebsock) | 0.8.0 | `web/websocketclient.rs` | 웹소켓. 데스크탑은 tungstenite, 웹은 브라우저 WebSocket 을 씁니다 | MIT / Apache-2.0 |
+
+**데스크탑만**
+
+| 크레이트 | 버전 | 쓰는 곳 | 하는 일 | 라이선스 |
+| --- | --- | --- | --- | --- |
+| [winit](https://crates.io/crates/winit) | 0.30.13 | `platform/desktop.rs` | 창, 키보드, 마우스, 터치, IME 이벤트와 이벤트 루프 | Apache-2.0 |
+| [glutin](https://crates.io/crates/glutin), [glutin-winit](https://crates.io/crates/glutin-winit) | 0.32.3, 0.5.0 | `platform/desktop.rs` | OpenGL 3.3 코어 컨텍스트 생성 (깊이 24, 스텐실 8) | Apache-2.0, MIT |
+| [raw-window-handle](https://crates.io/crates/raw-window-handle) | 0.6.2 | `platform/desktop.rs` | winit 창을 glutin 에 넘깁니다 | MIT / Apache-2.0 / Zlib |
+| [kira](https://crates.io/crates/kira) | 0.12.6 | `platform/audio/desktop.rs` | 오디오 재생과 믹서 트랙. ogg, mp3, wav 디코딩만 켭니다 | MIT / Apache-2.0 |
+| [arboard](https://crates.io/crates/arboard) | 3.7.0 | `platform/desktop/textinput.rs` | 시스템 클립보드. 입력 필드의 복사, 잘라내기, 붙여넣기 | MIT / Apache-2.0 |
+
+**웹(wasm)만**
+
+| 크레이트 | 버전 | 쓰는 곳 | 하는 일 | 라이선스 |
+| --- | --- | --- | --- | --- |
+| [wasm-bindgen](https://crates.io/crates/wasm-bindgen), [js-sys](https://crates.io/crates/js-sys) | 0.2.130, 0.3.107 | `platform/web.rs` 외 | 러스트와 자바스크립트 연결 | MIT / Apache-2.0 |
+| [web-sys](https://crates.io/crates/web-sys) | 0.3.107 | `platform/web.rs`, `platform/audio/web.rs`, 입력 필드, 로컬 저장소 | 캔버스, WebGL2, DOM 이벤트, WebAudio, fetch, localStorage | MIT / Apache-2.0 |
+| [wasm-bindgen-futures](https://crates.io/crates/wasm-bindgen-futures) | 0.4.80 | `platform/web.rs`, `platform/audio/web.rs` | fetch, 오디오 디코딩 같은 브라우저 비동기 API 를 엔진 안에서 기다립니다. 게임 코드는 async 를 쓰지 않습니다 | MIT / Apache-2.0 |
+
 ## 진행 상황
 
 - 버전 0.3.2. 버전 번호는 vanilla.js 0.3.2 에서 이어 받았습니다.
@@ -305,7 +342,7 @@ vanilla.js 와 같은 스타일을 씁니다.
 
 - Windows 11 Pro
 - Rust 1.99.1
-- 주요 크레이트: glow, winit, glutin, fontdue, image, kira(데스크탑 오디오), gilrs(게임패드), ewebsock(웹소켓), wasm-bindgen(웹)
+- 쓰는 크레이트는 [외부 의존성](#외부-의존성) 에 정리했습니다
 
 ## 링크
 
