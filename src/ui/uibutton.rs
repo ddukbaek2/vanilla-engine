@@ -297,6 +297,9 @@ impl UIButton {
 			return;
 		}
 		let current_button_state = self.get_button_state();
+		if current_button_state == ButtonState::Pressed {
+			context.get_engine().get_pointer_cursor().mark_over_button();
+		}
 		if current_button_state == ButtonState::Pressed || current_button_state == ButtonState::Disabled {
 			return;
 		}
@@ -314,6 +317,9 @@ impl UIButton {
 			self.set_button_state(ButtonState::Normal);
 			self.collect_color_targets(context);
 			self.tint_progress = 0.0;
+		}
+		if is_hovering {
+			context.get_engine().get_pointer_cursor().mark_over_button();
 		}
 	}
 

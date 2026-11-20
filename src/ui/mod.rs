@@ -23,6 +23,7 @@ pub mod uiinputfield;
 pub mod uilabel;
 pub mod uilistview;
 pub mod uiprogressview;
+pub mod uiprogressring;
 pub mod uiscrollbar;
 pub mod uiscrollview;
 pub mod uislider;

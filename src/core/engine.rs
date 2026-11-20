@@ -26,6 +26,7 @@ use crate::core::audiomanager::AudioManager;
 use crate::core::graphic::{Graphic, TextAlign, TextBaseline};
 use crate::core::image::Image;
 use crate::core::inputmanager::InputManager;
+use crate::core::pointercursor::PointerCursor;
 use crate::core::scene::Scene;
 use crate::core::timemanager::TimeManager;
 use crate::core::viewmanager::{ViewManager, ViewScaleMode};
@@ -135,6 +136,7 @@ pub struct Engine {
 	time_manager: TimeManager,
 	view_manager: ViewManager,
 	input_manager: InputManager,
+	pointer_cursor: PointerCursor,
 	audio_manager: AudioManager,
 	pub(crate) platform_window: Option<PlatformWindow>,
 	frame_number: u64,
@@ -159,6 +161,7 @@ impl Engine {
 			time_manager: TimeManager::new(),
 			view_manager: ViewManager::new(reference_resolution_size, view_scale_mode),
 			input_manager: InputManager::new(),
+			pointer_cursor: PointerCursor::new(),
 			audio_manager: AudioManager::new(),
 			platform_window: None,
 			frame_number: 0,
@@ -346,6 +349,24 @@ impl Engine {
 
 	pub fn get_input_manager_mut(&mut self) -> &mut InputManager {
 		&mut self.input_manager
+	}
+
+	//==============================================================================
+	// 마우스 커서. (켜면 프레임 끝마다 창이나 캔버스의 커서를 정한다)
+	//==============================================================================
+	pub fn get_pointer_cursor(&self) -> &PointerCursor {
+		&self.pointer_cursor
+	}
+
+	pub fn get_pointer_cursor_mut(&mut self) -> &mut PointerCursor {
+		&mut self.pointer_cursor
+	}
+
+	//==============================================================================
+	// 주된 손이 손가락인지. (CSS 의 pointer: coarse, 데스크탑은 false)
+	//==============================================================================
+	pub fn is_coarse_pointer(&self) -> bool {
+		platform::is_coarse_pointer()
 	}
 
 	//==============================================================================
@@ -715,6 +736,12 @@ impl EngineRunner {
 		// 개발 정보 출력.
 		if self.engine.engine_configuration.use_statistics {
 			draw_statistics(&self.engine, graphic);
+		}
+
+		// 마우스 커서. (켜져 있고 바뀌었을 때만 플랫폼에 넘긴다)
+		let is_coarse_pointer = platform::is_coarse_pointer();
+		if let Some(cursor_value) = self.engine.pointer_cursor.take_cursor_change(is_coarse_pointer) {
+			platform::set_cursor(self.engine.platform_window.as_ref(), &cursor_value.css_value, &cursor_value.fallback_name);
 		}
 
 		// 입력 관련해서 상태 유지가 아닌, 현재 프레임이 끝난 후에는 다음 프레임에서는 상태를 유지하지 않음. (1회성)

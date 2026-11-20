@@ -9,6 +9,8 @@
 use crate::core::asset::AssetLoadHandle;
 use crate::core::engine::EngineRunner;
 use crate::core::graphic::Graphic;
+use crate::core::inputmanager::{MouseButton, TouchPoint};
+use crate::base::vector2::Vector2;
 use std::cell::RefCell;
 use std::rc::Rc;
 use wasm_bindgen::closure::Closure;
@@ -38,6 +40,25 @@ pub fn set_cursor_visible(platform_window: Option<&PlatformWindow>, is_visible: 
 		};
 		let _ = canvas.style().set_property("cursor", cursor_value);
 	}
+}
+
+//==============================================================================
+// 커서 모양 설정. (캔버스의 cursor 스타일에 CSS 값을 쓴다, 빈 값이면 브라우저의 기본)
+//==============================================================================
+pub fn set_cursor(platform_window: Option<&PlatformWindow>, css_value: &str, _cursor_name: &str) {
+	if let Some(canvas) = platform_window {
+		let _ = canvas.style().set_property("cursor", css_value);
+	}
+}
+
+//==============================================================================
+// 주된 손이 손가락인지. (CSS 의 pointer: coarse)
+//==============================================================================
+pub fn is_coarse_pointer() -> bool {
+	web_sys::window()
+		.and_then(|window| window.match_media("(pointer: coarse)").ok().flatten())
+		.map(|media_query_list| media_query_list.matches())
+		.unwrap_or(false)
 }
 
 //==============================================================================
@@ -108,6 +129,7 @@ pub fn run(engine_runner: EngineRunner) -> Result<(), String> {
 		web_application.engine_runner.apply_pending_scenes();
 	}
 	add_keyboard_listeners(&web_application_cell)?;
+	add_pointer_listeners(&web_application_cell)?;
 	add_audio_listeners(&web_application_cell)?;
 	let canvas = web_application_cell.borrow().engine_runner.engine.platform_window.clone();
 	if let Some(canvas) = canvas {
@@ -188,6 +210,163 @@ fn add_keyboard_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) ->
 }
 
 //==============================================================================
+// 마우스와 손가락 입력. (원본 engine.js 의 mousedown, mousemove, mouseup, wheel, touchstart, touchmove, touchend, touchcancel)
+// - 마우스 왼쪽 단추와 첫 손가락을 엔진의 터치로 넘기고, 단추 셋과 손가락 목록, 휠의 Ctrl 을 입력 매니저에 적는다.
+// - 손가락을 뗀 바로 뒤에 브라우저가 흉내 내 보내는 마우스 사건은 무시한다. (터치로 한 번, 마우스로 또 한 번 눌리지 않게)
+// - 캔버스 위의 손가락은 기본 동작(스크롤, 확대)을 막는다. 오른쪽 클릭 메뉴도 막는다.
+// - 프레임 안에서 사건이 바로 불려도 겹쳐 빌리지 않게 try_borrow_mut 로 본다. (못 빌리면 그 사건은 버린다)
+//==============================================================================
+const COMPATIBILITY_MOUSE_MILLISECONDS: f64 = 800.0;
+
+fn add_pointer_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> Result<(), String> {
+	let window = web_sys::window().ok_or_else(|| String::from("window 없음"))?;
+	let canvas = web_application_cell.borrow().engine_runner.engine.platform_window.clone().ok_or_else(|| String::from("캔버스 없음"))?;
+	let last_touch_time = Rc::new(std::cell::Cell::new(-COMPATIBILITY_MOUSE_MILLISECONDS));
+
+	// 마우스 누름. (캔버스 위에서만)
+	let web_application_cell_for_mouse_down = web_application_cell.clone();
+	let last_touch_time_for_mouse_down = last_touch_time.clone();
+	let mouse_down_callback: Closure<dyn FnMut(web_sys::MouseEvent)> = Closure::new(move |mouse_event: web_sys::MouseEvent| {
+		if is_compatibility_mouse(last_touch_time_for_mouse_down.get()) {
+			return;
+		}
+		if let Ok(mut web_application) = web_application_cell_for_mouse_down.try_borrow_mut() {
+			web_application.update_pointer_position(mouse_event.client_x() as f64, mouse_event.client_y() as f64);
+			let input_manager = web_application.engine_runner.engine.get_input_manager_mut();
+			input_manager.set_touch_input(false);
+			let mouse_button = read_mouse_button(mouse_event.button());
+			if let Some(mouse_button) = mouse_button {
+				input_manager.set_mouse_button_down(mouse_button, true);
+			}
+			if mouse_button == Some(MouseButton::Left) {
+				input_manager.set_touch_pressed(true);
+				input_manager.set_touch_moved(true);
+				input_manager.set_touch_down(true);
+			}
+			if mouse_button == Some(MouseButton::Middle) {
+				mouse_event.prevent_default();
+			}
+		}
+	});
+
+	// 마우스 움직임과 뗌. (캔버스 밖으로 끌고 나가도 받게 창에 단다)
+	let web_application_cell_for_mouse_move = web_application_cell.clone();
+	let last_touch_time_for_mouse_move = last_touch_time.clone();
+	let mouse_move_callback: Closure<dyn FnMut(web_sys::MouseEvent)> = Closure::new(move |mouse_event: web_sys::MouseEvent| {
+		if is_compatibility_mouse(last_touch_time_for_mouse_move.get()) {
+			return;
+		}
+		if let Ok(mut web_application) = web_application_cell_for_mouse_move.try_borrow_mut() {
+			web_application.update_pointer_position(mouse_event.client_x() as f64, mouse_event.client_y() as f64);
+			let input_manager = web_application.engine_runner.engine.get_input_manager_mut();
+			input_manager.set_touch_input(false);
+			input_manager.set_touch_moved(true);
+		}
+	});
+	let web_application_cell_for_mouse_up = web_application_cell.clone();
+	let last_touch_time_for_mouse_up = last_touch_time.clone();
+	let mouse_up_callback: Closure<dyn FnMut(web_sys::MouseEvent)> = Closure::new(move |mouse_event: web_sys::MouseEvent| {
+		if is_compatibility_mouse(last_touch_time_for_mouse_up.get()) {
+			return;
+		}
+		if let Ok(mut web_application) = web_application_cell_for_mouse_up.try_borrow_mut() {
+			web_application.update_pointer_position(mouse_event.client_x() as f64, mouse_event.client_y() as f64);
+			let input_manager = web_application.engine_runner.engine.get_input_manager_mut();
+			let mouse_button = read_mouse_button(mouse_event.button());
+			if let Some(mouse_button) = mouse_button {
+				input_manager.set_mouse_button_down(mouse_button, false);
+			}
+			if mouse_button == Some(MouseButton::Left) && input_manager.is_touch_down() {
+				input_manager.set_touch_moved(false);
+				input_manager.set_touch_released(true);
+				input_manager.set_touch_down(false);
+			}
+		}
+	});
+
+	// 휠. (Ctrl 을 함께 눌렀는지 적고, 페이지가 스크롤되지 않게 막는다)
+	let web_application_cell_for_wheel = web_application_cell.clone();
+	let wheel_callback: Closure<dyn FnMut(web_sys::WheelEvent)> = Closure::new(move |wheel_event: web_sys::WheelEvent| {
+		wheel_event.prevent_default();
+		if let Ok(mut web_application) = web_application_cell_for_wheel.try_borrow_mut() {
+			web_application.update_pointer_position(wheel_event.client_x() as f64, wheel_event.client_y() as f64);
+			let input_manager = web_application.engine_runner.engine.get_input_manager_mut();
+			input_manager.add_wheel_delta(wheel_event.delta_x() as f32, wheel_event.delta_y() as f32);
+			input_manager.set_wheel_with_ctrl(wheel_event.ctrl_key());
+		}
+	});
+
+	// 손가락. (닿은 손가락 목록을 통째로 새로 쓰고, 첫 손가락의 누름과 뗌을 터치로 넘긴다)
+	let web_application_cell_for_touch = web_application_cell.clone();
+	let last_touch_time_for_touch = last_touch_time.clone();
+	let touch_callback: Closure<dyn FnMut(web_sys::TouchEvent)> = Closure::new(move |touch_event: web_sys::TouchEvent| {
+		touch_event.prevent_default();
+		let now = read_now_milliseconds();
+		last_touch_time_for_touch.set(now);
+		if let Ok(mut web_application) = web_application_cell_for_touch.try_borrow_mut() {
+			web_application.handle_touch_event(&touch_event);
+		}
+	});
+
+	// 오른쪽 클릭 메뉴 막기.
+	let context_menu_callback: Closure<dyn FnMut(web_sys::Event)> = Closure::new(move |event: web_sys::Event| {
+		event.prevent_default();
+	});
+
+	let passive_false_options = web_sys::AddEventListenerOptions::new();
+	passive_false_options.set_passive(false);
+	canvas.add_event_listener_with_callback("mousedown", mouse_down_callback.as_ref().unchecked_ref()).map_err(describe_js_error)?;
+	window.add_event_listener_with_callback("mousemove", mouse_move_callback.as_ref().unchecked_ref()).map_err(describe_js_error)?;
+	window.add_event_listener_with_callback("mouseup", mouse_up_callback.as_ref().unchecked_ref()).map_err(describe_js_error)?;
+	canvas.add_event_listener_with_callback_and_add_event_listener_options("wheel", wheel_callback.as_ref().unchecked_ref(), &passive_false_options).map_err(describe_js_error)?;
+	for event_name in ["touchstart", "touchmove", "touchend", "touchcancel"] {
+		canvas.add_event_listener_with_callback_and_add_event_listener_options(event_name, touch_callback.as_ref().unchecked_ref(), &passive_false_options).map_err(describe_js_error)?;
+	}
+	canvas.add_event_listener_with_callback("contextmenu", context_menu_callback.as_ref().unchecked_ref()).map_err(describe_js_error)?;
+	mouse_down_callback.forget();
+	mouse_move_callback.forget();
+	mouse_up_callback.forget();
+	wheel_callback.forget();
+	touch_callback.forget();
+	context_menu_callback.forget();
+	Ok(())
+}
+
+//==============================================================================
+// 지금 시각. (밀리초, performance.now)
+//==============================================================================
+fn read_now_milliseconds() -> f64 {
+	web_sys::window().and_then(|window| window.performance()).map(|performance| performance.now()).unwrap_or(0.0)
+}
+
+//==============================================================================
+// 손가락을 뗀 바로 뒤의 마우스 사건인지. (브라우저가 흉내 내 보내는 것)
+//==============================================================================
+fn is_compatibility_mouse(last_touch_time: f64) -> bool {
+	read_now_milliseconds() - last_touch_time < COMPATIBILITY_MOUSE_MILLISECONDS
+}
+
+//==============================================================================
+// MouseEvent.button 을 마우스 단추로. (0 왼쪽, 1 가운데, 2 오른쪽, 그 밖은 없음)
+//==============================================================================
+fn read_mouse_button(button: i16) -> Option<MouseButton> {
+	match button {
+		0 => {
+			Some(MouseButton::Left)
+		}
+		1 => {
+			Some(MouseButton::Middle)
+		}
+		2 => {
+			Some(MouseButton::Right)
+		}
+		_ => {
+			None
+		}
+	}
+}
+
+//==============================================================================
 // 오디오 재개 이벤트. (원본 setupAllDocumentEvents 의 오디오 부분)
 // - 프레임 안에서 이벤트가 바로 불려도 겹쳐 빌리지 않게 try_borrow 로 본다. (못 빌리면 다음 이벤트에 맡긴다)
 //==============================================================================
@@ -248,6 +427,89 @@ fn describe_js_error(error: JsValue) -> String {
 }
 
 impl WebApplication {
+	//==============================================================================
+	// 화면(client) 좌표를 캔버스 논리 좌표와 뷰 좌표로 바꿔 입력 매니저에 적기.
+	//==============================================================================
+	fn update_pointer_position(&mut self, client_x: f64, client_y: f64) {
+		let canvas_native_position = match self.read_canvas_native_position(client_x, client_y) {
+			Some(canvas_native_position) => {
+				canvas_native_position
+			}
+			None => {
+				return;
+			}
+		};
+		let engine = &mut self.engine_runner.engine;
+		let view_input_position = engine.get_view_manager().canvas_position_to_view_position(canvas_native_position);
+		let input_manager = engine.get_input_manager_mut();
+		input_manager.set_canvas_native_input_position(canvas_native_position);
+		input_manager.set_view_input_position(view_input_position);
+	}
+
+	//==============================================================================
+	// 화면(client) 좌표를 캔버스 논리 좌표로. (캔버스의 실제 자리를 읽는다)
+	//==============================================================================
+	fn read_canvas_native_position(&self, client_x: f64, client_y: f64) -> Option<Vector2> {
+		let canvas = self.engine_runner.engine.platform_window.as_ref()?;
+		let canvas_rect = canvas.get_bounding_client_rect();
+		Some(Vector2::create((client_x - canvas_rect.left()) as f32, (client_y - canvas_rect.top()) as f32))
+	}
+
+	//==============================================================================
+	// 손가락 사건. (닿은 손가락 목록을 새로 쓰고, 첫 손가락의 누름, 움직임, 뗌을 터치로 넘긴다)
+	//==============================================================================
+	fn handle_touch_event(&mut self, touch_event: &web_sys::TouchEvent) {
+		let event_type = touch_event.type_();
+		let touch_list = touch_event.touches();
+		let mut touch_points: Vec<TouchPoint> = Vec::new();
+		for touch_index in 0..touch_list.length() {
+			if let Some(touch) = touch_list.get(touch_index) {
+				if let Some(canvas_native_position) = self.read_canvas_native_position(touch.client_x() as f64, touch.client_y() as f64) {
+					touch_points.push(TouchPoint { identifier: touch.identifier() as i64, canvas_native_position });
+				}
+			}
+		}
+		let changed_touch = touch_event.changed_touches().get(0);
+		let was_down = self.engine_runner.engine.get_input_manager().is_touch_down();
+		let previous_first_identifier = self.engine_runner.engine.get_input_manager().get_touch_points().first().map(|touch_point| touch_point.identifier);
+		if let Some(changed_touch) = &changed_touch {
+			let is_first_finger = previous_first_identifier.is_none() || previous_first_identifier == Some(changed_touch.identifier() as i64);
+			if is_first_finger {
+				self.update_pointer_position(changed_touch.client_x() as f64, changed_touch.client_y() as f64);
+			}
+		}
+		let input_manager = self.engine_runner.engine.get_input_manager_mut();
+		input_manager.set_touch_points(touch_points);
+		input_manager.set_touch_input(true);
+		match event_type.as_str() {
+			"touchstart" => {
+				if !was_down {
+					input_manager.set_touch_pressed(true);
+					input_manager.set_touch_moved(true);
+					input_manager.set_touch_down(true);
+				}
+			}
+			"touchmove" => {
+				input_manager.set_touch_moved(true);
+			}
+			"touchend" => {
+				if was_down && touch_list.length() == 0 {
+					input_manager.set_touch_moved(false);
+					input_manager.set_touch_released(true);
+					input_manager.set_touch_down(false);
+				}
+			}
+			"touchcancel" => {
+				if was_down && touch_list.length() == 0 {
+					input_manager.set_touch_cancelled(true);
+					input_manager.set_touch_down(false);
+				}
+			}
+			_ => {
+			}
+		}
+	}
+
 	//==============================================================================
 	// 캔버스와 WebGL2 컨텍스트, 그래픽 만들기.
 	//==============================================================================

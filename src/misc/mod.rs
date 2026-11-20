@@ -4,10 +4,12 @@
 //==============================================================================
 pub mod beepplayer;
 pub mod camera2d;
+pub mod cameragestures;
 pub mod collision2d;
 pub mod dialogue;
 pub mod floatingtext;
 pub mod focusnavigator;
+pub mod frameprobe;
 pub mod grid;
 pub mod imagescroller;
 pub mod indicator;

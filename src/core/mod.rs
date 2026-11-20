@@ -14,6 +14,7 @@ pub mod graphic;
 pub mod image;
 pub mod imagetexturecache;
 pub mod inputmanager;
+pub mod pointercursor;
 pub mod node;
 pub mod scene;
 pub mod shaderprogram;

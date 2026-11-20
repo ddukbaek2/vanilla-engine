@@ -1,0 +1,166 @@
+//==============================================================================
+// 마우스 커서. (vanilla.js core/pointercursor.js 의 PointerCursor)
+// - 엔진이 하나 든다. (Engine::get_pointer_cursor_mut) 켜면(set_enabled(true)) 엔진이 프레임 끝마다 창이나 캔버스의 커서를 정한다.
+//   꺼져 있으면(기본) 아무것도 하지 않아 지금까지와 같다.
+// - UIButton 위(누르는 중 포함)면 단추의 커서(처음은 손가락 pointer), 아니면 화면이 set_screen_cursor 로 정한 커서다.
+// - 이름은 CSS cursor 이름이다. (pointer, crosshair, not-allowed, grab, grabbing, text, move, help, wait, progress, none, default)
+//   데스크탑은 winit 의 커서 아이콘으로 바꿔 쓰고, 웹은 캔버스의 cursor 스타일에 쓴다.
+// - register_image_cursor 로 그림 커서를 더하면 웹은 그 그림(1 배와 2 배)을, 데스크탑은 함께 준 CSS 커서를 쓴다.
+// - 손가락 기기(pointer: coarse)에서는 건드리지 않는다. 바뀔 때만 플랫폼에 넘긴다.
+//==============================================================================
+use std::cell::Cell;
+use std::collections::HashMap;
+
+// 쓸 수 있는 CSS 커서 이름. (그 밖의 이름은 기본 화살표)
+const SHOWN_CURSOR_NAMES: [&str; 11] = ["pointer", "crosshair", "not-allowed", "grab", "grabbing", "text", "move", "help", "wait", "progress", "none"];
+
+//==============================================================================
+// 플랫폼에 넘길 커서. (웹의 CSS 값, 데스크탑이 쓸 CSS 이름)
+//==============================================================================
+#[derive(Clone, PartialEq, Debug)]
+pub struct CursorValue {
+	pub css_value: String,
+	pub fallback_name: String,
+}
+
+pub struct PointerCursor {
+	is_enabled: bool,
+	image_cursor_values: HashMap<String, CursorValue>,
+	button_cursor_name: String,
+	default_cursor_name: String,
+	screen_cursor_name: String,
+	is_over_button: Cell<bool>,
+	applied_cursor_value: Option<CursorValue>,
+}
+
+impl PointerCursor {
+	//==============================================================================
+	// 생성.
+	//==============================================================================
+	pub fn new() -> PointerCursor {
+		PointerCursor {
+			is_enabled: false,
+			image_cursor_values: HashMap::new(),
+			button_cursor_name: String::from("pointer"),
+			default_cursor_name: String::from("default"),
+			screen_cursor_name: String::from("default"),
+			is_over_button: Cell::new(false),
+			applied_cursor_value: None,
+		}
+	}
+
+	//==============================================================================
+	// 켜기 설정. (끄면 다음 프레임에 기본 커서로 돌린다)
+	//==============================================================================
+	pub fn set_enabled(&mut self, is_enabled: bool) {
+		self.is_enabled = is_enabled;
+		self.is_over_button.set(false);
+		self.applied_cursor_value = None;
+	}
+
+	//==============================================================================
+	// 켜져 있는지.
+	//==============================================================================
+	pub fn is_enabled(&self) -> bool {
+		self.is_enabled
+	}
+
+	//==============================================================================
+	// 마우스가 단추 위에 있다고 알리기. (올려 둔 단추가 매 프레임 부른다, 컴포넌트는 엔진을 빌려 읽기만 하므로 &self)
+	//==============================================================================
+	pub fn mark_over_button(&self) {
+		self.is_over_button.set(true);
+	}
+
+	//==============================================================================
+	// 화면의 커서 설정. (단추 위가 아닐 때 보일 커서)
+	//==============================================================================
+	pub fn set_screen_cursor(&mut self, cursor_name: &str) {
+		self.screen_cursor_name = String::from(cursor_name);
+	}
+
+	//==============================================================================
+	// 화면의 커서 반환.
+	//==============================================================================
+	pub fn get_screen_cursor(&self) -> &str {
+		&self.screen_cursor_name
+	}
+
+	//==============================================================================
+	// 단추 위와 기본의 커서 설정.
+	//==============================================================================
+	pub fn set_cursor_names(&mut self, button_cursor_name: &str, default_cursor_name: &str) {
+		self.button_cursor_name = String::from(button_cursor_name);
+		self.default_cursor_name = String::from(default_cursor_name);
+	}
+
+	//==============================================================================
+	// 그림 커서 더하기. (1 배와 2 배 그림 주소, 1 배 그림 기준 핫스팟, 그림을 못 쓸 때와 데스크탑의 CSS 커서)
+	//==============================================================================
+	pub fn register_image_cursor(&mut self, name: &str, url: &str, url_2x: &str, hotspot_x: f32, hotspot_y: f32, fallback_cursor_name: &str) {
+		let hotspot_text = format!(" {} {}, {}", hotspot_x.round() as i32, hotspot_y.round() as i32, fallback_cursor_name);
+		let css_value = if url_2x.is_empty() {
+			format!("url(\"{}\"){}", url, hotspot_text)
+		}
+		else {
+			format!("-webkit-image-set(url(\"{}\") 1x, url(\"{}\") 2x){}", url, url_2x, hotspot_text)
+		};
+		self.image_cursor_values.insert(String::from(name), CursorValue { css_value, fallback_name: String::from(fallback_cursor_name) });
+	}
+
+	//==============================================================================
+	// 커서 이름을 플랫폼에 넘길 값으로. (그림 커서면 그 값, 쓸 수 있는 CSS 이름이면 그대로, 아니면 기본 화살표)
+	//==============================================================================
+	pub fn read_cursor_value(&self, cursor_name: &str) -> CursorValue {
+		if let Some(image_cursor_value) = self.image_cursor_values.get(cursor_name) {
+			return image_cursor_value.clone();
+		}
+		let shown_name = if SHOWN_CURSOR_NAMES.contains(&cursor_name) { cursor_name } else { "" };
+		CursorValue { css_value: String::from(shown_name), fallback_name: String::from(shown_name) }
+	}
+
+	//==============================================================================
+	// 이번 프레임의 커서가 바뀌었으면 꺼내기. (엔진이 프레임 끝마다 부른다, 단추 표시를 비운다)
+	//==============================================================================
+	pub fn take_cursor_change(&mut self, is_coarse_pointer: bool) -> Option<CursorValue> {
+		let is_over_button = self.is_over_button.replace(false);
+		if !self.is_enabled || is_coarse_pointer {
+			return None;
+		}
+		let mut wanted_cursor_name = if is_over_button { self.button_cursor_name.clone() } else { self.screen_cursor_name.clone() };
+		if wanted_cursor_name == "default" {
+			wanted_cursor_name = self.default_cursor_name.clone();
+		}
+		let cursor_value = self.read_cursor_value(&wanted_cursor_name);
+		if self.applied_cursor_value.as_ref() == Some(&cursor_value) {
+			return None;
+		}
+		self.applied_cursor_value = Some(cursor_value.clone());
+		Some(cursor_value)
+	}
+}
+
+impl Default for PointerCursor {
+	fn default() -> PointerCursor {
+		PointerCursor::new()
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn button_cursor_wins_and_changes_once() {
+		let mut pointer_cursor = PointerCursor::new();
+		assert_eq!(pointer_cursor.take_cursor_change(false), None);
+		pointer_cursor.set_enabled(true);
+		pointer_cursor.set_screen_cursor("crosshair");
+		assert_eq!(pointer_cursor.take_cursor_change(false).map(|value| value.css_value), Some(String::from("crosshair")));
+		assert_eq!(pointer_cursor.take_cursor_change(false), None);
+		pointer_cursor.mark_over_button();
+		assert_eq!(pointer_cursor.take_cursor_change(false).map(|value| value.css_value), Some(String::from("pointer")));
+		pointer_cursor.mark_over_button();
+		assert_eq!(pointer_cursor.take_cursor_change(true), None);
+	}
+}

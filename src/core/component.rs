@@ -7,8 +7,10 @@
 // - enable / gizmo 같은 공통 상태는 ComponentBase 에 두고, 구현체는 그것을 돌려주기만 한다.
 //==============================================================================
 pub mod mask;
+pub mod outline;
 pub mod paint;
 pub mod richtext;
+pub mod softshade;
 pub mod sprite;
 pub mod text;
 

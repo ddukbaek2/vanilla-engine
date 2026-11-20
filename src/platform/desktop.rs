@@ -21,8 +21,10 @@ use std::time::Duration;
 use web_time::Instant;
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
-use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
+use winit::event::{ElementState, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent};
+use crate::core::inputmanager::{MouseButton as EngineMouseButton, TouchPoint};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+use winit::window::CursorIcon;
 use winit::keyboard::PhysicalKey;
 use winit::window::{Icon, Window, WindowId};
 
@@ -66,6 +68,68 @@ pub fn set_cursor_visible(platform_window: Option<&PlatformWindow>, is_visible: 
 	if let Some(window) = platform_window {
 		window.set_cursor_visible(is_visible);
 	}
+}
+
+//==============================================================================
+// 커서 모양 설정. (CSS 커서 이름을 winit 커서 아이콘으로, none 이면 감춤, 모르는 이름은 기본 화살표)
+//==============================================================================
+pub fn set_cursor(platform_window: Option<&PlatformWindow>, _css_value: &str, cursor_name: &str) {
+	let window = match platform_window {
+		Some(window) => {
+			window
+		}
+		None => {
+			return;
+		}
+	};
+	if cursor_name == "none" {
+		window.set_cursor_visible(false);
+		return;
+	}
+	window.set_cursor_visible(true);
+	let cursor_icon = match cursor_name {
+		"pointer" => {
+			CursorIcon::Pointer
+		}
+		"crosshair" => {
+			CursorIcon::Crosshair
+		}
+		"not-allowed" => {
+			CursorIcon::NotAllowed
+		}
+		"grab" => {
+			CursorIcon::Grab
+		}
+		"grabbing" => {
+			CursorIcon::Grabbing
+		}
+		"text" => {
+			CursorIcon::Text
+		}
+		"move" => {
+			CursorIcon::Move
+		}
+		"help" => {
+			CursorIcon::Help
+		}
+		"wait" => {
+			CursorIcon::Wait
+		}
+		"progress" => {
+			CursorIcon::Progress
+		}
+		_ => {
+			CursorIcon::Default
+		}
+	};
+	window.set_cursor(cursor_icon);
+}
+
+//==============================================================================
+// 주된 손이 손가락인지. (데스크탑은 마우스가 주된 손이다)
+//==============================================================================
+pub fn is_coarse_pointer() -> bool {
+	false
 }
 
 //==============================================================================
@@ -225,6 +289,58 @@ impl DesktopApplication {
 	}
 
 	//==============================================================================
+	// 손가락. (닿아 있는 손가락 목록을 새로 쓰고, 첫 손가락은 마우스 왼쪽 단추처럼 터치로 넘긴다)
+	//==============================================================================
+	fn handle_touch(&mut self, touch: winit::event::Touch) {
+		let device_pixel_ratio = self.engine_runner.engine.get_view_manager().get_device_pixel_ratio();
+		let canvas_native_position = Vector2::create(touch.location.x as f32 / device_pixel_ratio, touch.location.y as f32 / device_pixel_ratio);
+		let identifier = touch.id as i64;
+		let mut touch_points: Vec<TouchPoint> = self.engine_runner.engine.get_input_manager().get_touch_points().to_vec();
+		let is_first_finger = touch_points.is_empty() || touch_points[0].identifier == identifier;
+		match touch.phase {
+			TouchPhase::Started | TouchPhase::Moved => {
+				match touch_points.iter_mut().find(|touch_point| touch_point.identifier == identifier) {
+					Some(touch_point) => {
+						touch_point.canvas_native_position = canvas_native_position;
+					}
+					None => {
+						touch_points.push(TouchPoint { identifier, canvas_native_position });
+					}
+				}
+			}
+			TouchPhase::Ended | TouchPhase::Cancelled => {
+				touch_points.retain(|touch_point| touch_point.identifier != identifier);
+			}
+		}
+		if is_first_finger {
+			self.update_input_position(touch.location.x, touch.location.y);
+		}
+		let input_manager = self.engine_runner.engine.get_input_manager_mut();
+		input_manager.set_touch_points(touch_points);
+		input_manager.set_touch_input(true);
+		if !is_first_finger {
+			return;
+		}
+		match touch.phase {
+			TouchPhase::Started => {
+				input_manager.set_touch_pressed(true);
+				input_manager.set_touch_down(true);
+			}
+			TouchPhase::Moved => {
+				input_manager.set_touch_moved(true);
+			}
+			TouchPhase::Ended => {
+				input_manager.set_touch_released(true);
+				input_manager.set_touch_down(false);
+			}
+			TouchPhase::Cancelled => {
+				input_manager.set_touch_cancelled(true);
+				input_manager.set_touch_down(false);
+			}
+		}
+	}
+
+	//==============================================================================
 	// 한 프레임 돌고 화면 넘기기.
 	//==============================================================================
 	fn update_frame(&mut self) {
@@ -297,7 +413,9 @@ impl ApplicationHandler for DesktopApplication {
 			}
 			WindowEvent::CursorMoved { position, .. } => {
 				self.update_input_position(position.x, position.y);
-				self.engine_runner.engine.get_input_manager_mut().set_touch_moved(true);
+				let input_manager = self.engine_runner.engine.get_input_manager_mut();
+				input_manager.set_touch_moved(true);
+				input_manager.set_touch_input(false);
 			}
 			WindowEvent::CursorLeft { .. } => {
 				let input_manager = self.engine_runner.engine.get_input_manager_mut();
@@ -308,6 +426,8 @@ impl ApplicationHandler for DesktopApplication {
 			}
 			WindowEvent::MouseInput { state, button: MouseButton::Left, .. } => {
 				let input_manager = self.engine_runner.engine.get_input_manager_mut();
+				input_manager.set_mouse_button_down(EngineMouseButton::Left, state == ElementState::Pressed);
+				input_manager.set_touch_input(false);
 				match state {
 					ElementState::Pressed => {
 						input_manager.set_touch_pressed(true);
@@ -319,13 +439,27 @@ impl ApplicationHandler for DesktopApplication {
 					}
 				}
 			}
-			WindowEvent::MouseInput { state: ElementState::Pressed, button: MouseButton::Right, .. } => {
+			WindowEvent::MouseInput { state, button: MouseButton::Right, .. } => {
 				let input_manager = self.engine_runner.engine.get_input_manager_mut();
-				let view_input_position = input_manager.get_view_input_position();
-				input_manager.get_text_input_mut().set_context_menu_request_position(Some(view_input_position));
+				input_manager.set_mouse_button_down(EngineMouseButton::Right, state == ElementState::Pressed);
+				input_manager.set_touch_input(false);
+				if state == ElementState::Pressed {
+					let view_input_position = input_manager.get_view_input_position();
+					input_manager.get_text_input_mut().set_context_menu_request_position(Some(view_input_position));
+				}
+			}
+			WindowEvent::MouseInput { state, button: MouseButton::Middle, .. } => {
+				let input_manager = self.engine_runner.engine.get_input_manager_mut();
+				input_manager.set_mouse_button_down(EngineMouseButton::Middle, state == ElementState::Pressed);
+				input_manager.set_touch_input(false);
+			}
+			WindowEvent::Touch(touch) => {
+				self.handle_touch(touch);
 			}
 			WindowEvent::MouseWheel { delta, .. } => {
 				let input_manager = self.engine_runner.engine.get_input_manager_mut();
+				let is_ctrl_pressed = input_manager.is_key_pressed("ControlLeft") || input_manager.is_key_pressed("ControlRight");
+				input_manager.set_wheel_with_ctrl(is_ctrl_pressed);
 				match delta {
 					MouseScrollDelta::LineDelta(line_x, line_y) => {
 						input_manager.add_wheel_delta(-line_x * WHEEL_LINE_PIXEL_SIZE, -line_y * WHEEL_LINE_PIXEL_SIZE);

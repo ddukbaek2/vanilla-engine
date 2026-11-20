@@ -3,6 +3,17 @@
 # 아직 release 에 합치지 않은 것 (release 에 합칠 때 패치 판을 하나 올려 매긴다)
 - 이름을 러스트 규칙(Rust API Guidelines C-CASE)으로 바꿨다. 함수, 메서드, 변수, 필드, 모듈은 snake_case, 열거 값은 UpperCamelCase, 연관 상수는 SCREAMING_SNAKE_CASE. (setFillColor → set_fill_color, Colors::white → Colors::WHITE, Pivot::topLeft → Pivot::TOP_LEFT, ButtonState::normal → ButtonState::Normal) 이름 경고를 끄던 #![allow(non_snake_case)] 등을 lib.rs 와 예제에서 뺐다. 엔진을 쓰는 코드는 같은 규칙으로 이름을 바꿔야 한다. (공개 API 를 바꾸는 일이다) 바꾼 곳 11,071 군데, 동작은 같다. (cargo test 252 통과, 데스크탑과 웹 빌드 경고 0, 예제 화면이 전과 같음)
 - README: macOS(애플 실리콘) 데스크탑에서 확인함을 적었다
+- 외계행성 광부 키우기가 게임 쪽에 따로 만들어 쓰던 범용 기능을 엔진으로 옮긴다. (vanilla.js 에 먼저 넣은 것과 같은 기능, 게임의 콘텐츠 구현은 가져오지 않는다)
+- Outline: 테만 그리는 컴포넌트. 둥근 네모 테(set_round_size) 또는 동그라미 테(set_circle), 선은 내용 크기 안쪽에 들어온다
+- UIProgressRing: 노드 꼴을 따라 위 가운데에서 시계 방향으로 채우는 진행 고리. 둘레의 점은 크기가 바뀔 때만 셈한다
+- SoftShade, SoftShadeShape: 띠(Band) 또는 바닥(Bottom) 그라데이션을 작은 그림에 구워 내용 크기로 늘려 그리는 부드러운 그늘
+- FrameProbe: 처음 몇 초의 프레임 간격으로 처지는 기기를 가린다. (목표 간격의 1.4 배를 넘긴 프레임이 25% 이상, 90 Hz 의 한 장 걸러 그리기는 처진 것이 아니다)
+- InputManager: 마우스 단추 셋(MouseButton::Left, Middle, Right)의 눌림과 이번 프레임의 누름과 뗌(is_mouse_button_down, is_mouse_button_just_pressed, is_mouse_button_just_released), 닿아 있는 손가락 목록(get_touch_points, TouchPoint), 마지막 입력이 손가락인지(is_touch_input), 휠을 Ctrl 과 함께 굴렸는지(is_wheel_with_ctrl)
+- 웹: 마우스(누름, 움직임, 뗌, 휠)와 손가락(touchstart, touchmove, touchend, touchcancel)을 엔진 입력에 넣는다. 지금까지 웹 빌드는 캔버스의 누름을 엔진에 넘기지 않아, 웹에서는 UIButton 같은 위젯이 눌리지 않았다. 왼쪽 단추와 첫 손가락은 터치로 넘기고, 손가락을 뗀 바로 뒤 브라우저가 흉내 내 보내는 마우스 사건은 무시한다. 캔버스 위 손가락의 스크롤과 확대, 오른쪽 클릭 메뉴, 휠의 페이지 스크롤을 막는다
+- 데스크탑: 가운데와 오른쪽 단추, 손가락(winit Touch)을 입력 매니저에 넣는다. 휠의 Ctrl 을 적는다
+- CameraGestures: 카메라 손짓. 오른쪽 끌기(가로는 돌리기, 캔버스 너비가 한 바퀴, 세로는 기울이기, 끌지 않고 떼면 오른쪽 클릭), 가운데 끌기(밀기), 두 손가락(밀기, 오므려 키우기, 문턱을 넘게 비틀면 돌리기). 매 프레임 update(input_manager, view_manager) 로 읽고 take_pan, take_rotation, take_tilt, take_zoom 으로 꺼낸다
+- PointerCursor, CursorValue: 마우스 커서. 엔진이 하나 들고(get_pointer_cursor_mut) 켜면 프레임 끝마다 커서를 정한다. UIButton 위(누르는 중 포함)면 단추의 커서, 아니면 set_screen_cursor 의 커서. 데스크탑은 winit 커서 아이콘, 웹은 캔버스 cursor 스타일(register_image_cursor 의 그림 커서 포함). 꺼져 있으면(기본) 지금까지와 같다
+- Engine: is_coarse_pointer() (웹은 CSS pointer: coarse, 데스크탑은 false). 플랫폼 층에 set_cursor, is_coarse_pointer 를 더했다
 - README: 장점 위주 소개, 예제 화면 사진(docs/images), 사용법(씬 생명주기, 노드와 컴포넌트, 애셋 로딩, 웹 빌드), 기술 노트(제너레이셔널 핸들 노드 트리, 컴포넌트 접근, 배칭, 컬링, async 없는 애셋 로딩, 텍스트 렌더링, 2D 와 3D, 웹 한글 입력, 플랫폼 레이어), 성능 표를 새로 썼다
 - README: 외부 의존성 섹션. 크레이트마다 버전, 쓰는 곳, 하는 일, 라이선스를 공통, 데스크탑, 웹으로 나눠 표로 정리했다
 - 예제: nodebasics. 노드를 만들고 Paint, Text, 직접 만든 컴포넌트(Spin)를 붙인다. (README '노드와 컴포넌트'의 코드)

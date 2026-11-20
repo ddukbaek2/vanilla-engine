@@ -2,7 +2,9 @@
 // 입력 관리자.
 // - 키 이름은 원본과 같이 KeyboardEvent.code 꼴이다. ("KeyA", "ArrowLeft", "Space" ...)
 //   winit 의 KeyCode 이름이 같은 W3C 규약을 따르므로 그대로 문자열로 바꿔 쓴다.
-// - 마우스 왼쪽 버튼을 터치로 다룬다. (원본은 마우스와 터치를 하나로 모은다)
+// - 마우스 왼쪽 버튼(또는 첫 손가락)을 터치로 다룬다. (원본은 마우스와 터치를 하나로 모은다)
+// - 그 밖에 마우스 단추 셋(왼쪽, 가운데, 오른쪽)의 눌림, 닿아 있는 손가락 목록, 마지막 입력이 손가락인지, 휠을 Ctrl 과 함께 굴렸는지를 둔다.
+//   카메라 손짓(CameraGestures)처럼 단추 하나 터치 밖의 입력을 쓰는 곳이 읽는다. 플랫폼이 채운다. (vanilla.js 는 캔버스 DOM 사건을 직접 읽던 것)
 // - 게임패드는 원본과 같이 InputManager 가 GamepadManager 를 들고 tick 에서 폴링한다. (core/gamepadmanager.rs)
 // - 글 입력(확정 글, IME 조합, 편집 키)은 TextInput 줄에 모은다. 입력 필드가 꺼내 쓴다. (core/textinput.rs, 원본에 없는 층)
 //==============================================================================
@@ -86,6 +88,44 @@ impl KeyCode {
 	pub const F12: &'static str = "F12";
 }
 
+//==============================================================================
+// 마우스 단추.
+//==============================================================================
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum MouseButton {
+	Left,
+	Middle,
+	Right,
+}
+
+impl MouseButton {
+	//==============================================================================
+	// 단추 칸 번호.
+	//==============================================================================
+	pub fn get_index(&self) -> usize {
+		match self {
+			MouseButton::Left => {
+				0
+			}
+			MouseButton::Middle => {
+				1
+			}
+			MouseButton::Right => {
+				2
+			}
+		}
+	}
+}
+
+//==============================================================================
+// 닿아 있는 손가락 하나. (자리는 캔버스 논리 좌표, 플랫폼의 손가락 번호)
+//==============================================================================
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct TouchPoint {
+	pub identifier: i64,
+	pub canvas_native_position: Vector2,
+}
+
 pub struct InputManager {
 	pressed_keys: HashSet<String>,
 	previous_pressed_keys: HashSet<String>,
@@ -100,6 +140,11 @@ pub struct InputManager {
 	wheel_delta_y: f32,
 	gamepad_manager: GamepadManager,
 	text_input: TextInput,
+	mouse_buttons_down: [bool; 3],
+	previous_mouse_buttons_down: [bool; 3],
+	touch_points: Vec<TouchPoint>,
+	is_touch_input: bool,
+	is_wheel_with_ctrl: bool,
 }
 
 impl InputManager {
@@ -121,6 +166,11 @@ impl InputManager {
 			wheel_delta_y: 0.0,
 			gamepad_manager: GamepadManager::new(),
 			text_input: TextInput::new(),
+			mouse_buttons_down: [false; 3],
+			previous_mouse_buttons_down: [false; 3],
+			touch_points: Vec::new(),
+			is_touch_input: false,
+			is_wheel_with_ctrl: false,
 		}
 	}
 
@@ -143,6 +193,8 @@ impl InputManager {
 		self.is_touch_cancelled = false;
 		self.is_touch_moved = false;
 		self.clear_wheel_delta();
+		self.mouse_buttons_down = [false; 3];
+		self.touch_points.clear();
 	}
 
 	//==============================================================================
@@ -210,6 +262,79 @@ impl InputManager {
 	//==============================================================================
 	pub fn update_frame_snapshot(&mut self) {
 		self.previous_pressed_keys = self.pressed_keys.clone();
+		self.previous_mouse_buttons_down = self.mouse_buttons_down;
+	}
+
+	//==============================================================================
+	// 마우스 단추 눌림 설정. (플랫폼이 부른다)
+	//==============================================================================
+	pub fn set_mouse_button_down(&mut self, mouse_button: MouseButton, is_down: bool) {
+		self.mouse_buttons_down[mouse_button.get_index()] = is_down;
+	}
+
+	//==============================================================================
+	// 마우스 단추가 눌려 있는지.
+	//==============================================================================
+	pub fn is_mouse_button_down(&self, mouse_button: MouseButton) -> bool {
+		self.mouse_buttons_down[mouse_button.get_index()]
+	}
+
+	//==============================================================================
+	// 이번 프레임에 마우스 단추를 눌렀는지.
+	//==============================================================================
+	pub fn is_mouse_button_just_pressed(&self, mouse_button: MouseButton) -> bool {
+		let button_index = mouse_button.get_index();
+		self.mouse_buttons_down[button_index] && !self.previous_mouse_buttons_down[button_index]
+	}
+
+	//==============================================================================
+	// 이번 프레임에 마우스 단추를 뗐는지.
+	//==============================================================================
+	pub fn is_mouse_button_just_released(&self, mouse_button: MouseButton) -> bool {
+		let button_index = mouse_button.get_index();
+		!self.mouse_buttons_down[button_index] && self.previous_mouse_buttons_down[button_index]
+	}
+
+	//==============================================================================
+	// 닿아 있는 손가락 목록 설정. (플랫폼이 손가락이 바뀔 때마다 통째로 넘긴다)
+	//==============================================================================
+	pub fn set_touch_points(&mut self, touch_points: Vec<TouchPoint>) {
+		self.touch_points = touch_points;
+	}
+
+	//==============================================================================
+	// 닿아 있는 손가락 목록.
+	//==============================================================================
+	pub fn get_touch_points(&self) -> &[TouchPoint] {
+		&self.touch_points
+	}
+
+	//==============================================================================
+	// 마지막 입력이 손가락인지 설정. (플랫폼이 부른다)
+	//==============================================================================
+	pub fn set_touch_input(&mut self, is_touch_input: bool) {
+		self.is_touch_input = is_touch_input;
+	}
+
+	//==============================================================================
+	// 마지막 입력이 손가락인지. (마우스면 false)
+	//==============================================================================
+	pub fn is_touch_input(&self) -> bool {
+		self.is_touch_input
+	}
+
+	//==============================================================================
+	// 마지막 휠을 Ctrl 과 함께 굴렸는지 설정. (노트북 터치패드의 오므리기도 Ctrl 휠로 온다)
+	//==============================================================================
+	pub fn set_wheel_with_ctrl(&mut self, is_wheel_with_ctrl: bool) {
+		self.is_wheel_with_ctrl = is_wheel_with_ctrl;
+	}
+
+	//==============================================================================
+	// 마지막 휠을 Ctrl 과 함께 굴렸는지.
+	//==============================================================================
+	pub fn is_wheel_with_ctrl(&self) -> bool {
+		self.is_wheel_with_ctrl
 	}
 
 	//==============================================================================
