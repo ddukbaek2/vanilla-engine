@@ -20,6 +20,11 @@
 - ButtonMotion, ButtonMotionStyle, ButtonMotionArea, set_button_motion_area, shake_button: 단추 반응. Normal 꼴은 올리면 커지고 누르는 동안 줄고 떼면 통 튄다. Inset 꼴(창 안)은 커지지 않고, 올린 동안 바탕 Paint 를 밝히고 안쪽에 흰 테를 그린다. 꼴은 단추마다(set_style) 또는 위 노드에 set_button_motion_area 로 건다. 피봇을 읽어 가운데를 두고 키운다. 스크롤 칸 안 단추도 누르는 동안 줄인다. 손가락 기기는 올림을 쓰지 않는다. 반응이 없을 때는 노드를 건드리지 않는다. 꾸밈이 제 모양으로 밝히게 하려면 set_lit_handler
 - ShaderWarmer, ShaderWarmerSource: 셰이더 미리 링크. 켤 때 같은 소스를 KHR_parallel_shader_compile 로 뒤에서 링크해 드라이버(웹은 브라우저)의 프로그램 캐시에 남겨, 나중에 ShaderProgram 이 같은 소스를 지을 때 멈추지 않게 한다. 확장이 없으면 아무것도 하지 않는다. 매 프레임 update(gl), is_finished, is_supported
 - ShaderProgram 을 크레이트 맨 위에서 내보낸다
+- 툰 3D(graphics3d/toon): 점토 같은 한 색 재질과 바깥선. (외계행성 광부 키우기의 판 3D 에서 범용 몫만)
+  - MeshBuilder, ToonGeometry, ToonPartOptions, ToonQuad, ToonMeshArrays: 상자, 둥근 상자, 원기둥과 원뿔, 구, 회전체, 캡슐, 고리, 팔면체(create_*_geometry)를 자리, 돌림, 크기(create_part_matrix)를 곱해 한 덩어리로 담는다. 꼭짓점은 자리 3, 노멀 3, 색 3(sRGB), 재질 2(빛남, 빛을 받지 않음), 무늬 4(번호와 색, 뜻은 셰이더가 정함). 바깥선은 같은 자리의 점끼리 함께, 모서리에서 너무 튀지 않게 민 껍데기(inverted hull)이고, 밀다 접혀 뒤집힌 면은 뺀다. 감기는 노멀을 보고 바깥이 앞면이 되게 맞춘다. 면으로 지은 지형은 add_quad, add_quad_shell
+  - read_glb_arrays, read_glb_node_arrays, read_glb_node_infos, write_skin_pose, read_animation_swing, ToonOutlineOptions, ToonSkeleton: 텍스처 없이 재질 색으로 칠하는 GLB 를 배열로 읽는다. baseColorFactor 는 sRGB 로, emissiveFactor 는 빛남으로, 재질 extras 의 outline(껍데기)과 basic(빛을 받지 않음). 바깥선 설정을 주면 ".outline" 짝이 있는 노드(또는 added_parts)의 몸으로 껍데기를 새로 짓는다. 뼈대와 움직임(extras 의 loop "once" 포함)을 읽고 한 순간의 본 행렬을 셈한다. (앞 움직임과 섞기, 흔들림 배율) 엔진의 SkinnedModel(텍스처 PBR)과는 따로다
+  - ToonRenderer, ToonMesh, ToonDrawOptions: 해와 하늘색, 땅색 바탕빛, set_band_count 로 셀 셰이딩, 빛남과 빛을 받지 않음, 틴트와 불투명도, 바깥선 껍데기를 뒷면으로 그린다. 뼈대는 96 개까지. (SkinnedModelRenderer 와 같다) begin_frame 이 앞의 그리기 상태를 적고 end_frame 이 돌려, 2D 그리기 사이(flush_batch 뒤, restore_render_state 앞)에 끼운다. read_program_sources 를 ShaderWarmer 에 넘길 수 있다
+- 예제: toonshowcase. 기본 도형 일곱과 soldier.glb 의 걷기를 툰으로 그린다. TOON_MODEL_PATH 에 GLB 경로를 주면 그 모형도 놓는다. (데스크탑)
 - 예제: engineextras. 테, 진행 고리, 넓힌 누름 자리, 단추 반응과 토스트, 부드러운 그늘, 마우스 커서, 카메라 손짓, 입력 상태를 한 화면에 놓는다. 입력을 흉내 내지 않아 데스크탑과 웹에서 직접 눌러 본다
 - README: 장점 위주 소개, 예제 화면 사진(docs/images), 사용법(씬 생명주기, 노드와 컴포넌트, 애셋 로딩, 웹 빌드), 기술 노트(제너레이셔널 핸들 노드 트리, 컴포넌트 접근, 배칭, 컬링, async 없는 애셋 로딩, 텍스트 렌더링, 2D 와 3D, 웹 한글 입력, 플랫폼 레이어), 성능 표를 새로 썼다
 - README: 외부 의존성 섹션. 크레이트마다 버전, 쓰는 곳, 하는 일, 라이선스를 공통, 데스크탑, 웹으로 나눠 표로 정리했다

@@ -16,6 +16,7 @@ pub mod shadowmap;
 pub mod skinnedmodel;
 pub mod skinnedmodelrenderer;
 pub mod subsurfacescatteringeffect;
+pub mod toon;
 
 // 풀스크린 패스는 core 의 것을 쓴다. (원본 fullscreenpass.js, ScreenEffect 와 같이 쓰는 부품)
 pub use crate::core::fullscreenpass;
