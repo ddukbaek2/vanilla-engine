@@ -32,7 +32,11 @@
 - AudioPlayer: set_playback_rate. 재생 빠르기(음 높이도 같이, 다음 play 부터). 데스크탑 kira playback_rate, 웹 AudioBufferSourceNode.playbackRate
 - 오디오 백엔드의 모듈 별칭 audioBackend 를 audio_backend 로 (이름 규칙)
 - Localization: 언어 태그를 뒤 조각부터 하나씩 떼며 맞추고(zh-Hant-TW → zh-hant → zh, 밑줄은 하이픈) set_language_aliases 의 별칭도 본다. 오른쪽에서 왼쪽으로 쓰는 언어(is_right_to_left, set_right_to_left, 처음은 ar, fa, he, ur, ps, yi, dv), 넣는 값을 방향 격리 문자로 묶기(isolate_text), 이름 자리 채우기(text_named, 빗금으로만 이은 값들은 통째로 한 번 묶는다). (vanilla.js 의 LanguagePack 가운데 엔진 몫만, 목록 파일 읽기와 탭 제목과 글꼴 연결은 게임 틀 몫이라 옮기지 않았다)
-- 예제: engineextras. 테, 진행 고리, 넓힌 누름 자리, 단추 반응과 토스트, 부드러운 그늘, 마우스 커서, 카메라 손짓, 입력 상태를 한 화면에 놓는다. 입력을 흉내 내지 않아 데스크탑과 웹에서 직접 눌러 본다
+- ShadowText: 그림자를 깐 한 줄 글. 그림자 위에 글을 얹은 모습을 그림 한 장에 구워 노드의 불투명도가 한 장째로 먹는다. 그림자는 상자 흐림 세 번으로 번지게, 넘치면 set_fit_minimum_ratio 까지 줄인다. 웹에서 글꼴 바이트 없이 시스템 글꼴로 굽는 경우는 그림자 없이 Graphic 의 글로 그린다
+- ShadowImage: 그림자를 깐 그림. 그림(또는 조각)을 노드 안에 비를 지켜 가운데로, 그림의 모양 밑에 그림자를 깔아 한 장으로 굽는다. set_image_color 로 한 빛으로 칠한다. 줄이기는 겹친 넓이로 고르게 섞는다
+- blur_coverage, compose_shadow_image: 덮인 정도를 번지게 하기와 그림자 위에 모양을 얹은 그림 짓기 (ShadowText, ShadowImage 가 쓴다)
+- TextStringTextureCache: rasterize_text(text, font_string, bake_scale, padding) → TextRaster. 글의 모양만 래스터로 받는다. (텍스처로 올리지 않는다)
+- 예제: engineextras. 테, 진행 고리, 넓힌 누름 자리, 단추 반응과 토스트, 그림자 글과 그림자 그림, 부드러운 그늘, 마우스 커서, 카메라 손짓, 입력 상태를 한 화면에 놓는다. 입력을 흉내 내지 않아 데스크탑과 웹에서 직접 눌러 본다
 - README: 장점 위주 소개, 예제 화면 사진(docs/images), 사용법(씬 생명주기, 노드와 컴포넌트, 애셋 로딩, 웹 빌드), 기술 노트(제너레이셔널 핸들 노드 트리, 컴포넌트 접근, 배칭, 컬링, async 없는 애셋 로딩, 텍스트 렌더링, 2D 와 3D, 웹 한글 입력, 플랫폼 레이어), 성능 표를 새로 썼다
 - README: 외부 의존성 섹션. 크레이트마다 버전, 쓰는 곳, 하는 일, 라이선스를 공통, 데스크탑, 웹으로 나눠 표로 정리했다
 - 예제: nodebasics. 노드를 만들고 Paint, Text, 직접 만든 컴포넌트(Spin)를 붙인다. (README '노드와 컴포넌트'의 코드)

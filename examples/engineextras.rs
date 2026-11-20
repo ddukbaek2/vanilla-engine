@@ -9,6 +9,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 use vanilla::core::graphic::{TextAlign, TextBaseline};
 use vanilla::{
+	Image, ShadowImage, ShadowText,
 	set_button_motion_area, ButtonMotion, ButtonMotionStyle, ToastMotion,
 	CameraGestures, Color, ComponentContext, Engine, EngineConfiguration, Graphic, MouseButton, NodeId, NodeTree, Outline, Paint, Pivot, Scene, SceneBase, SoftShade, SoftShadeShape, TouchRecognizer, UIButton, UIHitArea, UILabel, UIProgressRing, Vector2, ViewScaleMode,
 };
@@ -128,6 +129,27 @@ impl EngineExtrasScene {
 		let band = node_tree[band_id].add_component(SoftShade::new());
 		band.set_shade(SoftShadeShape::Band, "#000000", 0.6, 120.0);
 		create_label_node(node_tree, bright_id, "bandText", Vector2::create(40.0, 50.0), Vector2::create(500.0, 50.0), "SoftShade 띠 위의 흰 글", 30.0, "#ffffff");
+		// 그림자를 깐 글과 그림. (밝은 판 아래쪽)
+		let shadow_text_id = create_box_node(node_tree, bright_id, "shadowText", Vector2::create(20.0, 110.0), Vector2::create(300.0, 36.0));
+		let shadow_text = node_tree[shadow_text_id].add_component(ShadowText::create_with_text("ShadowText 그림자 글", 26.0));
+		shadow_text.set_text_style(26.0, true, "#ffffff");
+		shadow_text.set_shadow(vanilla::Color::create(0.0, 0.0, 0.0, 0.8), 3.0, 4.0);
+		let mut icon_pixels = vec![0u8; 64 * 64 * 4];
+		for y in 0..64usize {
+			for x in 0..64usize {
+				let is_inside = (x as i32 - 32).abs() * 2 < y as i32 && y > 4 && y < 60;
+				if is_inside {
+					let offset = (y * 64 + x) * 4;
+					icon_pixels[offset..offset + 4].copy_from_slice(&[255, 85, 119, 255]);
+				}
+			}
+		}
+		let icon_image = Image::create_from_pixels(64, 64, icon_pixels);
+		let shadow_image_id = create_box_node(node_tree, bright_id, "shadowImage", Vector2::create(440.0, 20.0), Vector2::create(100.0, 100.0));
+		let shadow_image = node_tree[shadow_image_id].add_component(ShadowImage::new());
+		shadow_image.set_image(Some(icon_image), None);
+		shadow_image.set_shadow(vanilla::Color::create(0.0, 0.0, 0.0, 0.7), 6.0, 8.0);
+
 		let bottom_id = create_box_node(node_tree, root_id, "bottomShade", Vector2::create(0.0, 620.0), Vector2::create(VIEW_WIDTH, 100.0));
 		let bottom = node_tree[bottom_id].add_component(SoftShade::new());
 		bottom.set_shade(SoftShadeShape::Bottom, "#4466ff", 0.8, 0.0);

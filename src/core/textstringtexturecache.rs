@@ -39,6 +39,21 @@ pub struct TextEntry {
 }
 
 //==============================================================================
+// 글 모양 래스터. (덮인 정도 0 ~ 255, 길이 단위는 굽는 배율을 곱한 픽셀)
+//==============================================================================
+#[derive(Clone, Debug)]
+pub struct TextRaster {
+	pub coverage: Vec<u8>,
+	pub width: i32,
+	pub height: i32,
+	pub origin_x: f32,
+	pub baseline_y: f32,
+	pub advance_width: f32,
+	pub font_ascent: f32,
+	pub font_descent: f32,
+}
+
+//==============================================================================
 // 문자열 측정 결과. (Canvas2D TextMetrics 의 쓰는 칸만)
 //==============================================================================
 #[derive(Clone, Copy, Debug, Default)]
@@ -206,6 +221,75 @@ impl TextStringTextureCache {
 				}
 			}
 		}
+	}
+
+	//==============================================================================
+	// 글의 모양만 래스터로 받기. (텍스처로 올리지 않는다, 그림자를 깐 글처럼 따로 굽는 쪽이 쓴다)
+	// - 글꼴 바이트가 없으면 None. (웹에서 시스템 글꼴로 굽는 경우)
+	//==============================================================================
+	pub fn rasterize_text(&self, text: &str, font_string: &str, bake_scale: f32, padding: i32) -> Option<TextRaster> {
+		if text.is_empty() {
+			return None;
+		}
+		let font_description = parse_font_string(font_string);
+		let font_list = self.resolve_font_list(&font_description);
+		if font_list.is_empty() {
+			return None;
+		}
+		let pixel_size = font_description.font_size * bake_scale;
+		let glyph_placements = layout_glyphs(&font_list, text, pixel_size);
+		let advance_width = calculate_advance_width(&font_list, &glyph_placements, pixel_size);
+		let (font_ascent, font_descent) = read_line_metrics(&font_list[0], pixel_size);
+		let mut minimum_x: f32 = 0.0;
+		let mut maximum_x: f32 = advance_width;
+		let mut top_extent: f32 = font_ascent;
+		let mut bottom_extent: f32 = font_descent;
+		for glyph_placement in &glyph_placements {
+			let metrics = glyph_placement.metrics;
+			if metrics.width == 0 || metrics.height == 0 {
+				continue;
+			}
+			let left_x = glyph_placement.pen_x + metrics.xmin as f32;
+			minimum_x = minimum_x.min(left_x);
+			maximum_x = maximum_x.max(left_x + metrics.width as f32);
+			top_extent = top_extent.max((metrics.ymin + metrics.height as i32) as f32);
+			bottom_extent = bottom_extent.max(-(metrics.ymin as f32));
+		}
+		let padding = padding.max(1);
+		let origin_x = padding as f32 - minimum_x.floor();
+		let baseline_y = padding + top_extent.ceil() as i32;
+		let width = (origin_x + maximum_x).ceil() as i32 + padding;
+		let height = baseline_y + bottom_extent.ceil() as i32 + padding;
+		if width <= 0 || height <= 0 {
+			return None;
+		}
+		let mut coverage = vec![0u8; (width * height) as usize];
+		for glyph_placement in &glyph_placements {
+			let metrics = glyph_placement.metrics;
+			if metrics.width == 0 || metrics.height == 0 {
+				continue;
+			}
+			let font = &font_list[glyph_placement.font_index];
+			let (glyph_metrics, glyph_bitmap) = font.rasterize_indexed(glyph_placement.glyph_index, pixel_size);
+			let glyph_left_x = (origin_x + glyph_placement.pen_x).round() as i32 + glyph_metrics.xmin;
+			let glyph_top_y = baseline_y - (glyph_metrics.ymin + glyph_metrics.height as i32);
+			for glyph_y in 0..glyph_metrics.height as i32 {
+				let bitmap_y = glyph_top_y + glyph_y;
+				if bitmap_y < 0 || bitmap_y >= height {
+					continue;
+				}
+				for glyph_x in 0..glyph_metrics.width as i32 {
+					let bitmap_x = glyph_left_x + glyph_x;
+					if bitmap_x < 0 || bitmap_x >= width {
+						continue;
+					}
+					let glyph_value = glyph_bitmap[(glyph_y * glyph_metrics.width as i32 + glyph_x) as usize];
+					let bitmap_index = (bitmap_y * width + bitmap_x) as usize;
+					coverage[bitmap_index] = coverage[bitmap_index].max(glyph_value);
+				}
+			}
+		}
+		Some(TextRaster { coverage, width, height, origin_x, baseline_y: baseline_y as f32, advance_width, font_ascent, font_descent })
 	}
 
 	//==============================================================================

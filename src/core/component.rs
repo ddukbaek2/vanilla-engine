@@ -10,6 +10,8 @@ pub mod mask;
 pub mod outline;
 pub mod paint;
 pub mod richtext;
+pub mod shadowimage;
+pub mod shadowtext;
 pub mod softshade;
 pub mod sprite;
 pub mod text;
