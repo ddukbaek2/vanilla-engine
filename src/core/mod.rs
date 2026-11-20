@@ -18,6 +18,7 @@ pub mod pointercursor;
 pub mod node;
 pub mod scene;
 pub mod shaderprogram;
+pub mod shaderwarmer;
 pub mod soundeffectpool;
 pub mod textinput;
 pub mod textstringtexturecache;

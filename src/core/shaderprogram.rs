@@ -110,12 +110,12 @@ impl ShaderProgram {
 // GLSL ES 3.00 머리를 데스크탑 GLSL 3.30 으로 바꾼다. (웹 WebGL2 에서는 원본 그대로)
 //==============================================================================
 #[cfg(not(target_arch = "wasm32"))]
-fn convert_to_desktop_source(source: &str) -> String {
+pub(crate) fn convert_to_desktop_source(source: &str) -> String {
 	source.replacen("#version 300 es", "#version 330 core", 1)
 }
 
 #[cfg(target_arch = "wasm32")]
-fn convert_to_desktop_source(source: &str) -> String {
+pub(crate) fn convert_to_desktop_source(source: &str) -> String {
 	source.to_string()
 }
 

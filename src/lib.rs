@@ -50,6 +50,8 @@ pub use crate::core::component::text::Text;
 pub use crate::core::component::{Component, ComponentBase};
 pub use crate::core::engine::{Engine, EngineConfiguration};
 pub use crate::core::frame::Frame;
+pub use crate::core::shaderprogram::ShaderProgram;
+pub use crate::core::shaderwarmer::{ShaderWarmer, ShaderWarmerSource};
 pub use crate::core::fullscreenpass::FullscreenPass;
 pub use crate::core::gamepadmanager::{Gamepad, GamepadAnalogStickCode, GamepadButton, GamepadButtonCode, GamepadInputCallback, GamepadInputType, GamepadManager, GamepadTriggerCode};
 pub use crate::core::graphic::{BlendMode, Graphic, TextAlign, TextBaseline};
