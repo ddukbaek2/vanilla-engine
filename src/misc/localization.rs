@@ -10,6 +10,9 @@
 //   원본은 클래스의 정적 필드에 표를 든다. 러스트 판은 스레드 하나의 전역 상태로 든다. (엔진은 한 스레드에서 돈다)
 //   표의 값은 글 하나 또는 글 목록(LocalizationValue)이다. JSON 표(JsonAsset 으로 읽은 것)는 set_table_from_json 으로 넣는다.
 //   text 의 가변 인자는 Display 참조 목록(&[&dyn Display])이다.
+// - 외계행성 광부 키우기에서 엔진으로 옮긴 것: 언어 태그를 뒤 조각부터 하나씩 떼며 맞추기와 별칭(set_language_aliases),
+//   오른쪽에서 왼쪽으로 쓰는 언어(is_right_to_left, set_right_to_left)와 넣는 값을 방향 격리 문자로 묶기(isolate_text),
+//   이름 자리 채우기(text_named, "{seconds}" 꼴, 빗금으로만 이은 값들은 통째로 한 번 묶는다).
 //   detect_language 는 웹에서 원본처럼 navigator.languages 를 읽고, 데스크탑에서는 LANGUAGE / LC_ALL / LC_MESSAGES / LANG 환경 변수를 읽는다.
 //     (윈도우는 보통 이 변수가 없어서 기본 언어가 된다)
 //==============================================================================
@@ -72,7 +75,15 @@ struct LocalizationState {
 	table_by_language: HashMap<String, LocalizationTable>,
 	language_code: String,
 	fallback_language_code: String,
+	alias_to_language: HashMap<String, String>,
+	right_to_left_languages: HashSet<String>,
 }
+
+// 처음부터 오른쪽에서 왼쪽으로 쓰는 언어. (아랍어, 페르시아어, 히브리어, 우르두어, 파슈토어, 이디시어, 디베히어)
+const DEFAULT_RIGHT_TO_LEFT_LANGUAGES: [&str; 7] = ["ar", "fa", "he", "ur", "ps", "yi", "dv"];
+// 방향 격리 문자. (처음 나오는 방향이 강한 글자로 방향을 정하는 격리의 시작과 끝)
+const FIRST_STRONG_ISOLATE: char = '\u{2068}';
+const POP_DIRECTIONAL_ISOLATE: char = '\u{2069}';
 
 thread_local! {
 	static LOCALIZATION_STATE: RefCell<Option<LocalizationState>> = const { RefCell::new(None) };
@@ -88,6 +99,8 @@ fn with_state<R>(visitor: impl FnOnce(&mut LocalizationState) -> R) -> R {
 			table_by_language: HashMap::new(),
 			language_code: String::from("ko"),
 			fallback_language_code: String::from("ko"),
+			alias_to_language: HashMap::new(),
+			right_to_left_languages: DEFAULT_RIGHT_TO_LEFT_LANGUAGES.iter().map(|code| String::from(*code)).collect(),
 		});
 		visitor(state)
 	})
@@ -111,19 +124,177 @@ impl Localization {
 	//==============================================================================
 	// 선호 언어 목록에서 지원하는 첫 언어 고르기. (detect_language 의 대조 부분)
 	//==============================================================================
+	// - 태그의 뒤 조각부터 하나씩 떼며 지원 목록의 코드와 별칭을 본다. ("zh-Hant-TW" → "zh-hant-tw", "zh-hant", "zh", 밑줄은 하이픈으로)
 	pub fn select_language(candidate_list: &[String], supported_language_codes: &[&str], default_language_code: &str) -> String {
 		let supported_set: HashSet<String> = supported_language_codes.iter().map(|code| code.to_lowercase()).collect();
+		let alias_to_language = with_state(|state| state.alias_to_language.clone());
 		for language_tag in candidate_list {
-			let lowered_tag = language_tag.to_lowercase();
-			if supported_set.contains(&lowered_tag) {
-				return lowered_tag;
-			}
-			let primary_code = lowered_tag.split('-').next().unwrap_or("").to_string();
-			if supported_set.contains(&primary_code) {
-				return primary_code;
+			let lowered_tag = language_tag.to_lowercase().replace('_', "-");
+			let subtag_list: Vec<&str> = lowered_tag.split('-').collect();
+			for subtag_count in (1..=subtag_list.len()).rev() {
+				let candidate_tag = subtag_list[..subtag_count].join("-");
+				if supported_set.contains(&candidate_tag) {
+					return candidate_tag;
+				}
+				if let Some(alias_language) = alias_to_language.get(&candidate_tag) {
+					if supported_set.contains(alias_language) {
+						return alias_language.clone();
+					}
+				}
 			}
 		}
 		default_language_code.to_string()
+	}
+
+	//==============================================================================
+	// 언어의 별칭 설정. (예: "zh-hant" 에 "zh-tw", "zh-hk", 태그를 맞출 때 별칭도 그 언어로 본다)
+	//==============================================================================
+	pub fn set_language_aliases(language_code: &str, alias_list: &[&str]) {
+		let lowered_language_code = language_code.to_lowercase();
+		with_state(|state| {
+			for alias in alias_list {
+				state.alias_to_language.insert(alias.to_lowercase().replace('_', "-"), lowered_language_code.clone());
+			}
+		});
+	}
+
+	//==============================================================================
+	// 오른쪽에서 왼쪽으로 쓰는 언어로 정하거나 풀기. (처음은 ar, fa, he, ur, ps, yi, dv)
+	//==============================================================================
+	pub fn set_right_to_left(language_code: &str, is_right_to_left: bool) {
+		let primary_code = language_code.to_lowercase().replace('_', "-").split('-').next().unwrap_or("").to_string();
+		with_state(|state| {
+			if is_right_to_left {
+				state.right_to_left_languages.insert(primary_code);
+			}
+			else {
+				state.right_to_left_languages.remove(&primary_code);
+			}
+		});
+	}
+
+	//==============================================================================
+	// 지금 언어가 오른쪽에서 왼쪽으로 쓰는 언어인지. (글자를 그 방향으로 굽고 배치를 좌우로 뒤집을 때)
+	//==============================================================================
+	pub fn is_right_to_left() -> bool {
+		with_state(|state| {
+			let primary_code = state.language_code.split('-').next().unwrap_or("");
+			state.right_to_left_languages.contains(primary_code)
+		})
+	}
+
+	//==============================================================================
+	// 글 사이에 끼우는 값 묶기. (오른쪽에서 왼쪽 언어면 방향 격리 문자로 묶고, 아니면 그대로)
+	// - 숫자와 단위(123°/s, +60%)나 사람 이름이 앞뒤 글과 섞여 흩어지지 않고 제 방향으로 한 덩어리로 놓이게 한다.
+	//==============================================================================
+	pub fn isolate_text(text: &str) -> String {
+		if text.is_empty() || !Localization::is_right_to_left() {
+			return text.to_string();
+		}
+		format!("{}{}{}", FIRST_STRONG_ISOLATE, text, POP_DIRECTIONAL_ISOLATE)
+	}
+
+	//==============================================================================
+	// 이름 자리 채우기. ("Restart {seconds}" + [("seconds", &3)] → "Restart 3")
+	// - 오른쪽에서 왼쪽 언어면 넣은 값을 방향 격리 문자로 묶는다.
+	// - 빗금으로만 이은 값들("{count}/{limit}")은 값마다가 아니라 통째로 한 번 묶는다. (값마다 묶으면 1/40 이 40/1 로 보인다)
+	// - 이름이 없는 자리는 그대로 둔다.
+	//==============================================================================
+	pub fn text_named(key: &str, values: &[(&str, &dyn Display)]) -> String {
+		let text = Localization::text(key, &[]);
+		let characters: Vec<char> = text.chars().collect();
+		let mut result = String::new();
+		let mut index = 0;
+		while index < characters.len() {
+			let (group_end, group_text, is_filled) = Localization::read_placeholder_group(&characters, index, values);
+			if group_end > index {
+				if is_filled {
+					result.push_str(&Localization::isolate_text(&group_text));
+				}
+				else {
+					result.push_str(&group_text);
+				}
+				index = group_end;
+				continue;
+			}
+			result.push(characters[index]);
+			index += 1;
+		}
+		result
+	}
+
+	//==============================================================================
+	// index 에서 시작하는 자리 무리 읽기. ({이름} 하나, 또는 빗금(앞뒤 빈칸 허용)으로만 이은 여럿)
+	// - (무리 끝, 채운 글, 하나라도 채웠는지), 자리가 아니면 끝이 index 그대로
+	//==============================================================================
+	fn read_placeholder_group(characters: &[char], index: usize, values: &[(&str, &dyn Display)]) -> (usize, String, bool) {
+		let mut cursor = index;
+		let mut group_text = String::new();
+		let mut is_filled = false;
+		let mut group_end = index;
+		loop {
+			let (placeholder_end, name) = match Localization::read_placeholder(characters, cursor) {
+				Some(placeholder) => {
+					placeholder
+				}
+				None => {
+					break;
+				}
+			};
+			if group_end > index {
+				let separator: String = characters[group_end..cursor].iter().collect();
+				group_text.push_str(&separator);
+			}
+			match values.iter().find(|(value_name, _)| *value_name == name) {
+				Some((_, value)) => {
+					group_text.push_str(&value.to_string());
+					is_filled = true;
+				}
+				None => {
+					group_text.push('{');
+					group_text.push_str(&name);
+					group_text.push('}');
+				}
+			}
+			group_end = placeholder_end;
+
+			// 다음이 빈칸, 빗금, 빈칸 뒤 자리면 같은 무리로 잇는다.
+			let mut next = group_end;
+			while next < characters.len() && characters[next] == ' ' {
+				next += 1;
+			}
+			if next >= characters.len() || characters[next] != '/' {
+				break;
+			}
+			next += 1;
+			while next < characters.len() && characters[next] == ' ' {
+				next += 1;
+			}
+			if Localization::read_placeholder(characters, next).is_none() {
+				break;
+			}
+			cursor = next;
+		}
+		(group_end, group_text, is_filled)
+	}
+
+	//==============================================================================
+	// index 에서 시작하는 {이름} 하나 읽기. (이름은 영문과 숫자, (끝, 이름))
+	//==============================================================================
+	fn read_placeholder(characters: &[char], index: usize) -> Option<(usize, String)> {
+		if characters.get(index) != Some(&'{') {
+			return None;
+		}
+		let mut cursor = index + 1;
+		let mut name = String::new();
+		while cursor < characters.len() && characters[cursor].is_ascii_alphanumeric() {
+			name.push(characters[cursor]);
+			cursor += 1;
+		}
+		if name.is_empty() || characters.get(cursor) != Some(&'}') {
+			return None;
+		}
+		Some((cursor + 1, name))
 	}
 
 	//==============================================================================
@@ -369,5 +540,30 @@ mod tests {
 		assert_eq!(convert_locale_to_language_tag("C.UTF-8"), "");
 		let detected_language = Localization::detect_language(&["ko", "en"], "ko");
 		assert!(detected_language == "ko" || detected_language == "en");
+	}
+
+	//==============================================================================
+	// 태그를 조각마다 떼며 맞추기, 별칭, 쓰기 방향, 이름 자리와 빗금 무리 묶기.
+	//==============================================================================
+	#[test]
+	fn tag_matching_direction_and_named_placeholders() {
+		Localization::set_language_aliases("zh-hant", &["zh-tw", "zh_HK"]);
+		assert_eq!(Localization::select_language(&[String::from("zh-Hant-TW")], &["en", "zh-hant"], "en"), "zh-hant");
+		assert_eq!(Localization::select_language(&[String::from("zh_HK")], &["en", "zh-hant"], "en"), "zh-hant");
+		assert_eq!(Localization::select_language(&[String::from("pt-BR")], &["en", "pt"], "en"), "pt");
+		assert_eq!(Localization::select_language(&[String::from("xx")], &["en"], "en"), "en");
+
+		Localization::set_table("ar", [("restart", "اعادة {seconds}"), ("count", "{count}/{limit} عمال"), ("name", "{who} و {unknown}")]);
+		Localization::set_language("ar");
+		assert!(Localization::is_right_to_left());
+		assert_eq!(Localization::text_named("restart", &[("seconds", &3)]), "اعادة \u{2068}3\u{2069}");
+		assert_eq!(Localization::text_named("count", &[("count", &1), ("limit", &40)]), "\u{2068}1/40\u{2069} عمال");
+		assert_eq!(Localization::text_named("name", &[("who", &"Ann")]), "\u{2068}Ann\u{2069} و {unknown}");
+		Localization::set_language("en");
+		assert!(!Localization::is_right_to_left());
+		assert_eq!(Localization::text_named("{a} / {b}", &[("a", &2), ("b", &5)]), "2 / 5");
+		Localization::set_right_to_left("en", true);
+		assert!(Localization::is_right_to_left());
+		Localization::set_right_to_left("en", false);
 	}
 }
