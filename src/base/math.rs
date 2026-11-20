@@ -34,14 +34,14 @@ pub fn clamp01(value: f32) -> f32 {
 //==============================================================================
 // 도 → 라디안.
 //==============================================================================
-pub fn degreeToRadian(degree: f32) -> f32 {
+pub fn degree_to_radian(degree: f32) -> f32 {
 	degree * (PI / 180.0)
 }
 
 //==============================================================================
 // 라디안 → 도.
 //==============================================================================
-pub fn radianToDegree(radian: f32) -> f32 {
+pub fn radian_to_degree(radian: f32) -> f32 {
 	radian * (180.0 / PI)
 }
 
@@ -56,8 +56,8 @@ pub fn lerp(from: f32, to: f32, time: f32) -> f32 {
 // 0 이상 1 미만 난수.
 //==============================================================================
 pub fn random() -> f32 {
-	RANDOM_STATE.with(|randomState| {
-		let mut state = randomState.get();
+	RANDOM_STATE.with(|random_state| {
+		let mut state = random_state.get();
 		if state == 0 {
 			let nanoseconds = SystemTime::now().duration_since(UNIX_EPOCH).map(|duration| duration.as_nanos() as u64).unwrap_or(0x9E3779B97F4A7C15);
 			state = nanoseconds | 1;
@@ -65,7 +65,7 @@ pub fn random() -> f32 {
 		state ^= state >> 12;
 		state ^= state << 25;
 		state ^= state >> 27;
-		randomState.set(state);
+		random_state.set(state);
 		let mixed = state.wrapping_mul(0x2545F4914F6CDD1D);
 		((mixed >> 40) as f32) / ((1u64 << 24) as f32)
 	})
@@ -74,14 +74,14 @@ pub fn random() -> f32 {
 //==============================================================================
 // 범위 난수. (minimum 이상 maximum 미만)
 //==============================================================================
-pub fn randomRange(minimum: f32, maximum: f32) -> f32 {
-	let randomValue = random();
-	minimum + (maximum - minimum) * randomValue
+pub fn random_range(minimum: f32, maximum: f32) -> f32 {
+	let random_value = random();
+	minimum + (maximum - minimum) * random_value
 }
 
 //==============================================================================
 // 이징: 바깥으로 감속하는 2차 곡선.
 //==============================================================================
-pub fn easeOutQuad(time: f32) -> f32 {
+pub fn ease_out_quad(time: f32) -> f32 {
 	1.0 - (1.0 - time) * (1.0 - time)
 }

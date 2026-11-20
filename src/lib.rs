@@ -1,13 +1,10 @@
 //==============================================================================
 // 바닐라엔진(Vanilla Engine). 크레이트 이름은 vanilla-engine, 코드에서는 vanilla 로 쓴다.
-// - vanilla.js 엔진을 러스트로 옮긴 것이다. 공개 API 는 원본의 이름과 쓰임새를 따른다.
+// - vanilla.js 엔진을 러스트로 옮긴 것이다. 공개 API 는 원본의 쓰임새를 따르고, 이름은 원본 이름을 러스트 규칙으로 바꾼 것이다.
 // - 원본의 WebGL2 렌더러는 OpenGL 3.3 코어(glow)로, 캔버스와 DOM 이벤트는 창(winit)과 GL 컨텍스트(glutin)로 바꿨다.
-//   웹(wasm32)으로 빌드하면 원본처럼 캔버스와 WebGL2, requestAnimationFrame 으로 돈다. (core/engine.rs 의 web 모듈)
-// - 이름은 원본과 같이 camelCase 다. 러스트 기본 꼴(snake_case) 경고는 끈다.
+//   웹(wasm32)으로 빌드하면 원본처럼 캔버스와 WebGL2, request_animation_frame 으로 돈다. (core/engine.rs 의 web 모듈)
+// - 이름은 러스트 규칙을 따른다. (함수와 변수는 snake_case, 타입과 열거 값은 UpperCamelCase, 상수는 SCREAMING_SNAKE_CASE, 원본의 setFillColor 는 set_fill_color)
 //==============================================================================
-#![allow(non_snake_case)]
-#![allow(non_camel_case_types)]
-#![allow(non_upper_case_globals)]
 #![allow(clippy::too_many_arguments)]
 
 pub mod animation;
@@ -62,7 +59,7 @@ pub use crate::core::node::worldnode::{NodeTransform, WorldNode};
 pub use crate::core::scene::{Scene, SceneBase};
 pub use crate::core::soundeffectpool::SoundEffectPool;
 pub use crate::core::timemanager::TimeManager;
-pub use crate::core::tween::{easingFunction, Tween, TweenId, TweenProperty, TweenValue, TweenValues};
+pub use crate::core::tween::{easing_function, Tween, TweenId, TweenProperty, TweenValue, TweenValues};
 pub use crate::core::viewmanager::{ViewManager, ViewScaleMode};
 pub use crate::effect::particlesystem::ParticleSystem;
 pub use crate::effect::screeneffect::{ScreenEffect, ScreenEffectRegion, ScreenEffectType, SCREEN_EFFECT_PARAMETER_NAMES};
@@ -126,7 +123,7 @@ pub use crate::ui::uitogglebutton::{UIToggleButton, UIToggleButtonEvent};
 pub use crate::ui::uiview::UIView;
 pub use crate::animation::action::{Action, ActionCallbacks};
 pub use crate::animation::animator::{AnimationState, AnimationTransition, Animator};
-pub use crate::animation::timeline::{composeTimelineColor, createBezierEasing, findTimelinePropertyDefinition, parseTimelineColor, resolveTimelineEasing, Timeline, TimelineEasing, TimelineExternalProperty, TimelineKey, TimelineMarker, TimelineNodeDescription, TimelinePropertyDefinition, TimelinePropertyKind, TimelinePropertyTarget, TimelineSound, TimelineSpriteFrameGrid, TimelineTarget, TimelineValue, TIMELINE_EASING_NAMES, TIMELINE_NODE_DEFAULTS, TIMELINE_PROPERTY_DEFINITIONS};
+pub use crate::animation::timeline::{compose_timeline_color, create_bezier_easing, find_timeline_property_definition, parse_timeline_color, resolve_timeline_easing, Timeline, TimelineEasing, TimelineExternalProperty, TimelineKey, TimelineMarker, TimelineNodeDescription, TimelinePropertyDefinition, TimelinePropertyKind, TimelinePropertyTarget, TimelineSound, TimelineSpriteFrameGrid, TimelineTarget, TimelineValue, TIMELINE_EASING_NAMES, TIMELINE_NODE_DEFAULTS, TIMELINE_PROPERTY_DEFINITIONS};
 pub use crate::effect::heathazeeffect::HeatHazeEffect;
 pub use crate::game::gamescene::GameSceneBase;
 pub use crate::misc::indicator::Indicator;

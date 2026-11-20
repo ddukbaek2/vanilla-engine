@@ -2,16 +2,16 @@
 // 2D 카메라.
 // - 원본 misc/camera2d.js 를 옮긴 것이다. 추적, 월드 경계 클램프, 드래그 팬, 커서 고정 줌, 관성, 이동 트윈을 한 곳에 모았다.
 // - position 은 카메라가 바라보는 월드 좌표(화면 가운데), zoom 은 확대 배율이다.
-// - 원본처럼 컴포넌트가 아니라 그냥 값이다. 들고 있는 쪽(씬 등)이 tick 을 부르고, 월드를 그리기 전에 applyTransform 을 건다.
+// - 원본처럼 컴포넌트가 아니라 그냥 값이다. 들고 있는 쪽(씬 등)이 tick 을 부르고, 월드를 그리기 전에 apply_transform 을 건다.
 // - 사용:
-//     camera.setViewSize(viewSize);                    // 매 프레임 또는 리사이즈 시
-//     camera.follow(&[heroPosition], 6.0, timeDelta);  // 추적 (선택)
-//     camera.tick(timeDelta);
-//     graphic.pushState(); camera.applyTransform(graphic); ...월드 렌더... graphic.popState();
+//     camera.set_view_size(view_size);                    // 매 프레임 또는 리사이즈 시
+//     camera.follow(&[hero_position], 6.0, time_delta);  // 추적 (선택)
+//     camera.tick(time_delta);
+//     graphic.push_state(); camera.apply_transform(graphic); ...월드 렌더... graphic.pop_state();
 // - 원본과 다른 점:
-//   이름을 줄이지 않는 규칙에 따라 minZoom / maxZoom 을 minimumZoom / maximumZoom 으로 쓴다. (setZoomRange 의 뜻은 같다)
+//   이름을 줄이지 않는 규칙에 따라 minZoom / maxZoom 을 minimum_zoom / maximum_zoom 으로 쓴다. (set_zoom_range 의 뜻은 같다)
 //   원본 base/math.js 의 approach 는 러스트 판 base/math 에 아직 없어서 이 파일 안에 같은 식으로 둔다.
-//   tweenTo 의 기본 길이 0.4 초는 DEFAULT_TWEEN_DURATION 상수로 넘긴다. (러스트는 기본 인자가 없다)
+//   tween_to 의 기본 길이 0.4 초는 DEFAULT_TWEEN_DURATION 상수로 넘긴다. (러스트는 기본 인자가 없다)
 //==============================================================================
 use crate::base::math;
 use crate::base::rect::Rect;
@@ -19,16 +19,16 @@ use crate::base::vector2::Vector2;
 use crate::core::graphic::Graphic;
 
 //==============================================================================
-// 이동 트윈 상태. (원본 #tweenState 객체)
+// 이동 트윈 상태. (원본 #tween_state 객체)
 //==============================================================================
 #[derive(Clone, Copy, Debug)]
 struct CameraTweenState {
-	fromPosition: Vector2,
-	toPosition: Vector2,
-	fromZoom: f32,
-	toZoom: f32,
+	from_position: Vector2,
+	to_position: Vector2,
+	from_zoom: f32,
+	to_zoom: f32,
 	duration: f32,
-	elapsedSeconds: f32,
+	elapsed_seconds: f32,
 }
 
 //==============================================================================
@@ -38,25 +38,25 @@ struct CameraTweenState {
 pub struct Camera2D {
 	position: Vector2,
 	zoom: f32,
-	viewSize: Vector2,
-	worldBounds: Option<Rect>,
+	view_size: Vector2,
+	world_bounds: Option<Rect>,
 	velocity: Vector2,
-	inertiaDamping: f32,
-	minimumZoom: f32,
-	maximumZoom: f32,
-	tweenState: Option<CameraTweenState>,
+	inertia_damping: f32,
+	minimum_zoom: f32,
+	maximum_zoom: f32,
+	tween_state: Option<CameraTweenState>,
 }
 
 //==============================================================================
 // 값을 목표로 지수 감쇠하며 다가가게 한다. (프레임 독립, 원본 base/math.js 의 approach)
 //==============================================================================
-fn approach(currentValue: f32, targetValue: f32, rate: f32, timeDelta: f32) -> f32 {
-	let blendRatio = 1.0 - (-rate * timeDelta).exp();
-	currentValue + (targetValue - currentValue) * blendRatio
+fn approach(current_value: f32, target_value: f32, rate: f32, time_delta: f32) -> f32 {
+	let blend_ratio = 1.0 - (-rate * time_delta).exp();
+	current_value + (target_value - current_value) * blend_ratio
 }
 
 impl Camera2D {
-	// tweenTo 의 기본 길이. (초, 원본 duration = 0.4)
+	// tween_to 의 기본 길이. (초, 원본 duration = 0.4)
 	pub const DEFAULT_TWEEN_DURATION: f32 = 0.4;
 
 	//==============================================================================
@@ -66,24 +66,24 @@ impl Camera2D {
 		Camera2D {
 			position: Vector2::zero(),
 			zoom: 1.0,
-			viewSize: Vector2::create(960.0, 640.0),
-			worldBounds: None,
+			view_size: Vector2::create(960.0, 640.0),
+			world_bounds: None,
 			velocity: Vector2::zero(),
-			inertiaDamping: 6.0,
-			minimumZoom: 0.1,
-			maximumZoom: 8.0,
-			tweenState: None,
+			inertia_damping: 6.0,
+			minimum_zoom: 0.1,
+			maximum_zoom: 8.0,
+			tween_state: None,
 		}
 	}
 
 	//==============================================================================
 	// 갱신. (관성 이동, 이동 트윈, 경계 클램프 순서)
 	//==============================================================================
-	pub fn tick(&mut self, timeDelta: f32) {
+	pub fn tick(&mut self, time_delta: f32) {
 		// 관성.
 		if self.velocity.x != 0.0 || self.velocity.y != 0.0 {
-			self.position = Vector2::create(self.position.x + self.velocity.x * timeDelta, self.position.y + self.velocity.y * timeDelta);
-			let damping = (-self.inertiaDamping * timeDelta).exp();
+			self.position = Vector2::create(self.position.x + self.velocity.x * time_delta, self.position.y + self.velocity.y * time_delta);
+			let damping = (-self.inertia_damping * time_delta).exp();
 			self.velocity = Vector2::create(self.velocity.x * damping, self.velocity.y * damping);
 			if self.velocity.x.abs() < 1.0 && self.velocity.y.abs() < 1.0 {
 				self.velocity = Vector2::zero();
@@ -91,97 +91,97 @@ impl Camera2D {
 		}
 
 		// 이동 트윈. (줌은 등비 보간으로 미끄러짐 없이)
-		if let Some(mut tweenState) = self.tweenState {
-			tweenState.elapsedSeconds += timeDelta;
-			let linearRatio = (tweenState.elapsedSeconds / tweenState.duration).min(1.0);
-			let easedRatio = 1.0 - (1.0 - linearRatio).powi(3);
-			self.zoom = tweenState.fromZoom * (tweenState.toZoom / tweenState.fromZoom).powf(easedRatio);
-			let positionX = math::lerp(tweenState.fromPosition.x, tweenState.toPosition.x, easedRatio);
-			let positionY = math::lerp(tweenState.fromPosition.y, tweenState.toPosition.y, easedRatio);
-			self.position = Vector2::create(positionX, positionY);
-			if linearRatio >= 1.0 {
-				self.tweenState = None;
+		if let Some(mut tween_state) = self.tween_state {
+			tween_state.elapsed_seconds += time_delta;
+			let linear_ratio = (tween_state.elapsed_seconds / tween_state.duration).min(1.0);
+			let eased_ratio = 1.0 - (1.0 - linear_ratio).powi(3);
+			self.zoom = tween_state.from_zoom * (tween_state.to_zoom / tween_state.from_zoom).powf(eased_ratio);
+			let position_x = math::lerp(tween_state.from_position.x, tween_state.to_position.x, eased_ratio);
+			let position_y = math::lerp(tween_state.from_position.y, tween_state.to_position.y, eased_ratio);
+			self.position = Vector2::create(position_x, position_y);
+			if linear_ratio >= 1.0 {
+				self.tween_state = None;
 			}
 			else {
-				self.tweenState = Some(tweenState);
+				self.tween_state = Some(tween_state);
 			}
 		}
 
-		self.clampToBounds();
+		self.clamp_to_bounds();
 	}
 
 	//==============================================================================
 	// 대상 추적. (여러 대상이면 중점을 따라간다. 프레임 독립 지수 감쇠, rate 가 클수록 빨리 붙는다)
 	//==============================================================================
-	pub fn follow(&mut self, targetPositions: &[Vector2], rate: f32, timeDelta: f32) {
-		if targetPositions.is_empty() {
+	pub fn follow(&mut self, target_positions: &[Vector2], rate: f32, time_delta: f32) {
+		if target_positions.is_empty() {
 			return;
 		}
-		let mut centerX = 0.0;
-		let mut centerY = 0.0;
-		for targetPosition in targetPositions {
-			centerX += targetPosition.x;
-			centerY += targetPosition.y;
+		let mut center_x = 0.0;
+		let mut center_y = 0.0;
+		for target_position in target_positions {
+			center_x += target_position.x;
+			center_y += target_position.y;
 		}
-		let targetCount = targetPositions.len() as f32;
-		centerX /= targetCount;
-		centerY /= targetCount;
-		let positionX = approach(self.position.x, centerX, rate, timeDelta);
-		let positionY = approach(self.position.y, centerY, rate, timeDelta);
-		self.position = Vector2::create(positionX, positionY);
+		let target_count = target_positions.len() as f32;
+		center_x /= target_count;
+		center_y /= target_count;
+		let position_x = approach(self.position.x, center_x, rate, time_delta);
+		let position_y = approach(self.position.y, center_y, rate, time_delta);
+		self.position = Vector2::create(position_x, position_y);
 	}
 
 	//==============================================================================
 	// 화면 픽셀 단위 팬. (드래그 팬. 줌을 반영해 월드 이동량으로 바꾼다)
 	//==============================================================================
-	pub fn panByScreen(&mut self, screenDeltaX: f32, screenDeltaY: f32) {
-		self.position = Vector2::create(self.position.x - screenDeltaX / self.zoom, self.position.y - screenDeltaY / self.zoom);
-		self.clampToBounds();
+	pub fn pan_by_screen(&mut self, screen_delta_x: f32, screen_delta_y: f32) {
+		self.position = Vector2::create(self.position.x - screen_delta_x / self.zoom, self.position.y - screen_delta_y / self.zoom);
+		self.clamp_to_bounds();
 	}
 
 	//==============================================================================
 	// 관성 던지기. (드래그를 놓을 때 화면 픽셀 속도를 넘긴다)
 	//==============================================================================
-	pub fn fling(&mut self, screenVelocityX: f32, screenVelocityY: f32) {
-		self.velocity = Vector2::create(-screenVelocityX / self.zoom, -screenVelocityY / self.zoom);
+	pub fn fling(&mut self, screen_velocity_x: f32, screen_velocity_y: f32) {
+		self.velocity = Vector2::create(-screen_velocity_x / self.zoom, -screen_velocity_y / self.zoom);
 	}
 
 	//==============================================================================
-	// 화면 기준점을 고정한 줌. (휠 / 핀치. anchorScreen 아래의 월드 지점이 움직이지 않는다, 1.1 = 10% 확대)
+	// 화면 기준점을 고정한 줌. (휠 / 핀치. anchor_screen 아래의 월드 지점이 움직이지 않는다, 1.1 = 10% 확대)
 	//==============================================================================
-	pub fn zoomAt(&mut self, anchorScreen: Vector2, zoomFactor: f32) {
-		let previousZoom = self.zoom;
-		let nextZoom = math::clamp(previousZoom * zoomFactor, self.minimumZoom, self.maximumZoom);
-		if nextZoom == previousZoom {
+	pub fn zoom_at(&mut self, anchor_screen: Vector2, zoom_factor: f32) {
+		let previous_zoom = self.zoom;
+		let next_zoom = math::clamp(previous_zoom * zoom_factor, self.minimum_zoom, self.maximum_zoom);
+		if next_zoom == previous_zoom {
 			return;
 		}
-		let anchorWorld = self.screenToWorld(anchorScreen);
-		self.zoom = nextZoom;
-		let anchorWorldAfter = self.screenToWorld(anchorScreen);
-		self.position = Vector2::create(self.position.x + (anchorWorld.x - anchorWorldAfter.x), self.position.y + (anchorWorld.y - anchorWorldAfter.y));
-		self.clampToBounds();
+		let anchor_world = self.screen_to_world(anchor_screen);
+		self.zoom = next_zoom;
+		let anchor_world_after = self.screen_to_world(anchor_screen);
+		self.position = Vector2::create(self.position.x + (anchor_world.x - anchor_world_after.x), self.position.y + (anchor_world.y - anchor_world_after.y));
+		self.clamp_to_bounds();
 	}
 
 	//==============================================================================
 	// 위치 / 줌으로 이동 트윈 시작. (관성은 멈춘다. 기본 길이는 DEFAULT_TWEEN_DURATION)
 	//==============================================================================
-	pub fn tweenTo(&mut self, targetPosition: Vector2, targetZoom: f32, duration: f32) {
+	pub fn tween_to(&mut self, target_position: Vector2, target_zoom: f32, duration: f32) {
 		self.velocity = Vector2::zero();
-		self.tweenState = Some(CameraTweenState {
-			fromPosition: self.position,
-			toPosition: targetPosition,
-			fromZoom: self.zoom,
-			toZoom: math::clamp(targetZoom, self.minimumZoom, self.maximumZoom),
+		self.tween_state = Some(CameraTweenState {
+			from_position: self.position,
+			to_position: target_position,
+			from_zoom: self.zoom,
+			to_zoom: math::clamp(target_zoom, self.minimum_zoom, self.maximum_zoom),
 			duration: duration.max(0.0001),
-			elapsedSeconds: 0.0,
+			elapsed_seconds: 0.0,
 		});
 	}
 
 	//==============================================================================
-	// 그리기 변환 적용. (부른 쪽에서 pushState / popState 로 감싼다)
+	// 그리기 변환 적용. (부른 쪽에서 push_state / pop_state 로 감싼다)
 	//==============================================================================
-	pub fn applyTransform(&self, graphic: &mut Graphic) {
-		graphic.translate(self.viewSize.x * 0.5, self.viewSize.y * 0.5);
+	pub fn apply_transform(&self, graphic: &mut Graphic) {
+		graphic.translate(self.view_size.x * 0.5, self.view_size.y * 0.5);
 		graphic.scale(self.zoom, self.zoom);
 		graphic.translate(-self.position.x, -self.position.y);
 	}
@@ -189,26 +189,26 @@ impl Camera2D {
 	//==============================================================================
 	// 화면 좌표 → 월드 좌표.
 	//==============================================================================
-	pub fn screenToWorld(&self, screenPosition: Vector2) -> Vector2 {
-		let worldX = (screenPosition.x - self.viewSize.x * 0.5) / self.zoom + self.position.x;
-		let worldY = (screenPosition.y - self.viewSize.y * 0.5) / self.zoom + self.position.y;
-		Vector2::create(worldX, worldY)
+	pub fn screen_to_world(&self, screen_position: Vector2) -> Vector2 {
+		let world_x = (screen_position.x - self.view_size.x * 0.5) / self.zoom + self.position.x;
+		let world_y = (screen_position.y - self.view_size.y * 0.5) / self.zoom + self.position.y;
+		Vector2::create(world_x, world_y)
 	}
 
 	//==============================================================================
 	// 월드 좌표 → 화면 좌표.
 	//==============================================================================
-	pub fn worldToScreen(&self, worldPosition: Vector2) -> Vector2 {
-		let screenX = (worldPosition.x - self.position.x) * self.zoom + self.viewSize.x * 0.5;
-		let screenY = (worldPosition.y - self.position.y) * self.zoom + self.viewSize.y * 0.5;
-		Vector2::create(screenX, screenY)
+	pub fn world_to_screen(&self, world_position: Vector2) -> Vector2 {
+		let screen_x = (world_position.x - self.position.x) * self.zoom + self.view_size.x * 0.5;
+		let screen_y = (world_position.y - self.position.y) * self.zoom + self.view_size.y * 0.5;
+		Vector2::create(screen_x, screen_y)
 	}
 
 	//==============================================================================
 	// 월드 경계로 클램프. (뷰가 경계보다 크면(줌아웃) 그 축은 가운데에 맞춘다)
 	//==============================================================================
-	pub fn clampToBounds(&mut self) {
-		let bounds = match self.worldBounds {
+	pub fn clamp_to_bounds(&mut self) {
+		let bounds = match self.world_bounds {
 			Some(bounds) => {
 				bounds
 			}
@@ -216,110 +216,110 @@ impl Camera2D {
 				return;
 			}
 		};
-		let halfViewWidth = self.viewSize.x * 0.5 / self.zoom;
-		let halfViewHeight = self.viewSize.y * 0.5 / self.zoom;
-		let clampedX = if halfViewWidth * 2.0 >= bounds.size.x {
+		let half_view_width = self.view_size.x * 0.5 / self.zoom;
+		let half_view_height = self.view_size.y * 0.5 / self.zoom;
+		let clamped_x = if half_view_width * 2.0 >= bounds.size.x {
 			bounds.position.x + bounds.size.x * 0.5
 		}
 		else {
-			math::clamp(self.position.x, bounds.position.x + halfViewWidth, bounds.position.x + bounds.size.x - halfViewWidth)
+			math::clamp(self.position.x, bounds.position.x + half_view_width, bounds.position.x + bounds.size.x - half_view_width)
 		};
-		let clampedY = if halfViewHeight * 2.0 >= bounds.size.y {
+		let clamped_y = if half_view_height * 2.0 >= bounds.size.y {
 			bounds.position.y + bounds.size.y * 0.5
 		}
 		else {
-			math::clamp(self.position.y, bounds.position.y + halfViewHeight, bounds.position.y + bounds.size.y - halfViewHeight)
+			math::clamp(self.position.y, bounds.position.y + half_view_height, bounds.position.y + bounds.size.y - half_view_height)
 		};
-		self.position = Vector2::create(clampedX, clampedY);
+		self.position = Vector2::create(clamped_x, clamped_y);
 	}
 
 	//==============================================================================
 	// 위치 설정. (경계로 클램프한다)
 	//==============================================================================
-	pub fn setPosition(&mut self, position: Vector2) {
+	pub fn set_position(&mut self, position: Vector2) {
 		self.position = position;
-		self.clampToBounds();
+		self.clamp_to_bounds();
 	}
 
 	//==============================================================================
 	// 위치 반환.
 	//==============================================================================
-	pub fn getPosition(&self) -> Vector2 {
+	pub fn get_position(&self) -> Vector2 {
 		self.position
 	}
 
 	//==============================================================================
 	// 배율 설정. (배율 범위로 자르고 경계로 클램프한다)
 	//==============================================================================
-	pub fn setZoom(&mut self, zoom: f32) {
-		self.zoom = math::clamp(zoom, self.minimumZoom, self.maximumZoom);
-		self.clampToBounds();
+	pub fn set_zoom(&mut self, zoom: f32) {
+		self.zoom = math::clamp(zoom, self.minimum_zoom, self.maximum_zoom);
+		self.clamp_to_bounds();
 	}
 
 	//==============================================================================
 	// 배율 반환.
 	//==============================================================================
-	pub fn getZoom(&self) -> f32 {
+	pub fn get_zoom(&self) -> f32 {
 		self.zoom
 	}
 
 	//==============================================================================
 	// 뷰 크기 설정. (화면 가운데를 정하는 크기)
 	//==============================================================================
-	pub fn setViewSize(&mut self, viewSize: Vector2) {
-		self.viewSize = viewSize;
+	pub fn set_view_size(&mut self, view_size: Vector2) {
+		self.view_size = view_size;
 	}
 
 	//==============================================================================
 	// 뷰 크기 반환.
 	//==============================================================================
-	pub fn getViewSize(&self) -> Vector2 {
-		self.viewSize
+	pub fn get_view_size(&self) -> Vector2 {
+		self.view_size
 	}
 
 	//==============================================================================
 	// 월드 경계 설정. (None 이면 경계 없음)
 	//==============================================================================
-	pub fn setWorldBounds(&mut self, worldBounds: Option<Rect>) {
-		self.worldBounds = worldBounds;
-		self.clampToBounds();
+	pub fn set_world_bounds(&mut self, world_bounds: Option<Rect>) {
+		self.world_bounds = world_bounds;
+		self.clamp_to_bounds();
 	}
 
 	//==============================================================================
 	// 월드 경계 반환.
 	//==============================================================================
-	pub fn getWorldBounds(&self) -> Option<Rect> {
-		self.worldBounds
+	pub fn get_world_bounds(&self) -> Option<Rect> {
+		self.world_bounds
 	}
 
 	//==============================================================================
 	// 배율 범위 설정. (지금 배율도 새 범위로 다시 자른다)
 	//==============================================================================
-	pub fn setZoomRange(&mut self, minimumZoom: f32, maximumZoom: f32) {
-		self.minimumZoom = minimumZoom;
-		self.maximumZoom = maximumZoom;
+	pub fn set_zoom_range(&mut self, minimum_zoom: f32, maximum_zoom: f32) {
+		self.minimum_zoom = minimum_zoom;
+		self.maximum_zoom = maximum_zoom;
 		let zoom = self.zoom;
-		self.setZoom(zoom);
+		self.set_zoom(zoom);
 	}
 
 	//==============================================================================
 	// 관성 감쇠 설정. (클수록 빨리 멈춘다)
 	//==============================================================================
-	pub fn setInertiaDamping(&mut self, inertiaDamping: f32) {
-		self.inertiaDamping = inertiaDamping;
+	pub fn set_inertia_damping(&mut self, inertia_damping: f32) {
+		self.inertia_damping = inertia_damping;
 	}
 
 	//==============================================================================
 	// 이동 트윈 중인지.
 	//==============================================================================
-	pub fn isTweening(&self) -> bool {
-		self.tweenState.is_some()
+	pub fn is_tweening(&self) -> bool {
+		self.tween_state.is_some()
 	}
 
 	//==============================================================================
 	// 관성 정지.
 	//==============================================================================
-	pub fn stopInertia(&mut self) {
+	pub fn stop_inertia(&mut self) {
 		self.velocity = Vector2::zero();
 	}
 }
@@ -343,7 +343,7 @@ mod tests {
 	//==============================================================================
 	// 두 값이 거의 같은지.
 	//==============================================================================
-	fn isNear(left: f32, right: f32) -> bool {
+	fn is_near(left: f32, right: f32) -> bool {
 		(left - right).abs() < 0.001
 	}
 
@@ -351,90 +351,90 @@ mod tests {
 	// 추적은 1 - exp(-rate * dt) 만큼 중점으로 다가간다.
 	//==============================================================================
 	#[test]
-	fn followApproachesCenter() {
+	fn follow_approaches_center() {
 		let mut camera = Camera2D::new();
-		let targetPositions = [Vector2::create(100.0, 0.0), Vector2::create(300.0, 200.0)];
-		camera.follow(&targetPositions, 6.0, 0.1);
-		let expectedRatio = 1.0 - (-0.6f32).exp();
-		let position = camera.getPosition();
-		assert!(isNear(position.x, 200.0 * expectedRatio));
-		assert!(isNear(position.y, 100.0 * expectedRatio));
+		let target_positions = [Vector2::create(100.0, 0.0), Vector2::create(300.0, 200.0)];
+		camera.follow(&target_positions, 6.0, 0.1);
+		let expected_ratio = 1.0 - (-0.6f32).exp();
+		let position = camera.get_position();
+		assert!(is_near(position.x, 200.0 * expected_ratio));
+		assert!(is_near(position.y, 100.0 * expected_ratio));
 
 		// 대상이 없으면 그대로.
 		camera.follow(&[], 6.0, 0.1);
-		assert_eq!(camera.getPosition(), position);
+		assert_eq!(camera.get_position(), position);
 	}
 
 	//==============================================================================
 	// 경계 클램프. (뷰 절반만큼 안쪽, 뷰가 경계보다 크면 가운데)
 	//==============================================================================
 	#[test]
-	fn clampKeepsViewInsideBounds() {
+	fn clamp_keeps_view_inside_bounds() {
 		let mut camera = Camera2D::new();
-		camera.setViewSize(Vector2::create(200.0, 100.0));
-		camera.setWorldBounds(Some(Rect::create(0.0, 0.0, 1000.0, 500.0)));
-		camera.setPosition(Vector2::create(-50.0, 900.0));
-		assert_eq!(camera.getPosition(), Vector2::create(100.0, 450.0));
+		camera.set_view_size(Vector2::create(200.0, 100.0));
+		camera.set_world_bounds(Some(Rect::create(0.0, 0.0, 1000.0, 500.0)));
+		camera.set_position(Vector2::create(-50.0, 900.0));
+		assert_eq!(camera.get_position(), Vector2::create(100.0, 450.0));
 
 		// 줌아웃해서 뷰(200/0.1 = 2000)가 경계보다 커지면 가운데.
-		camera.setZoom(0.1);
-		assert_eq!(camera.getPosition(), Vector2::create(500.0, 250.0));
+		camera.set_zoom(0.1);
+		assert_eq!(camera.get_position(), Vector2::create(500.0, 250.0));
 	}
 
 	//==============================================================================
 	// 화면 → 월드 → 화면 왕복과 커서 고정 줌.
 	//==============================================================================
 	#[test]
-	fn zoomAtKeepsAnchorWorldPoint() {
+	fn zoom_at_keeps_anchor_world_point() {
 		let mut camera = Camera2D::new();
-		camera.setViewSize(Vector2::create(800.0, 600.0));
-		camera.setPosition(Vector2::create(50.0, 70.0));
-		let anchorScreen = Vector2::create(600.0, 150.0);
-		let anchorWorldBefore = camera.screenToWorld(anchorScreen);
-		let screenAgain = camera.worldToScreen(anchorWorldBefore);
-		assert!(isNear(screenAgain.x, anchorScreen.x) && isNear(screenAgain.y, anchorScreen.y));
+		camera.set_view_size(Vector2::create(800.0, 600.0));
+		camera.set_position(Vector2::create(50.0, 70.0));
+		let anchor_screen = Vector2::create(600.0, 150.0);
+		let anchor_world_before = camera.screen_to_world(anchor_screen);
+		let screen_again = camera.world_to_screen(anchor_world_before);
+		assert!(is_near(screen_again.x, anchor_screen.x) && is_near(screen_again.y, anchor_screen.y));
 
-		camera.zoomAt(anchorScreen, 2.0);
-		assert!(isNear(camera.getZoom(), 2.0));
-		let anchorWorldAfter = camera.screenToWorld(anchorScreen);
-		assert!(isNear(anchorWorldAfter.x, anchorWorldBefore.x));
-		assert!(isNear(anchorWorldAfter.y, anchorWorldBefore.y));
+		camera.zoom_at(anchor_screen, 2.0);
+		assert!(is_near(camera.get_zoom(), 2.0));
+		let anchor_world_after = camera.screen_to_world(anchor_screen);
+		assert!(is_near(anchor_world_after.x, anchor_world_before.x));
+		assert!(is_near(anchor_world_after.y, anchor_world_before.y));
 
 		// 범위 끝에서는 움직이지 않는다.
-		camera.setZoomRange(0.5, 2.0);
-		let positionBefore = camera.getPosition();
-		camera.zoomAt(anchorScreen, 3.0);
-		assert_eq!(camera.getPosition(), positionBefore);
+		camera.set_zoom_range(0.5, 2.0);
+		let position_before = camera.get_position();
+		camera.zoom_at(anchor_screen, 3.0);
+		assert_eq!(camera.get_position(), position_before);
 	}
 
 	//==============================================================================
 	// 팬, 관성, 트윈.
 	//==============================================================================
 	#[test]
-	fn panFlingAndTween() {
+	fn pan_fling_and_tween() {
 		let mut camera = Camera2D::new();
-		camera.setZoom(2.0);
-		camera.panByScreen(20.0, -10.0);
-		assert_eq!(camera.getPosition(), Vector2::create(-10.0, 5.0));
+		camera.set_zoom(2.0);
+		camera.pan_by_screen(20.0, -10.0);
+		assert_eq!(camera.get_position(), Vector2::create(-10.0, 5.0));
 
 		camera.fling(100.0, 0.0);
 		camera.tick(0.1);
-		assert!(isNear(camera.getPosition().x, -10.0 - 50.0 * 0.1));
+		assert!(is_near(camera.get_position().x, -10.0 - 50.0 * 0.1));
 		for _ in 0..200 {
 			camera.tick(0.05);
 		}
-		let restingPosition = camera.getPosition();
+		let resting_position = camera.get_position();
 		camera.tick(0.05);
-		assert_eq!(camera.getPosition(), restingPosition);
+		assert_eq!(camera.get_position(), resting_position);
 
-		camera.tweenTo(Vector2::create(300.0, 400.0), 4.0, 0.5);
-		assert!(camera.isTweening());
+		camera.tween_to(Vector2::create(300.0, 400.0), 4.0, 0.5);
+		assert!(camera.is_tweening());
 		camera.tick(0.25);
-		assert!(camera.isTweening());
+		assert!(camera.is_tweening());
 		camera.tick(0.25);
-		assert!(!camera.isTweening());
-		assert!(isNear(camera.getPosition().x, 300.0));
-		assert!(isNear(camera.getPosition().y, 400.0));
-		assert!(isNear(camera.getZoom(), 4.0));
+		assert!(!camera.is_tweening());
+		assert!(is_near(camera.get_position().x, 300.0));
+		assert!(is_near(camera.get_position().y, 400.0));
+		assert!(is_near(camera.get_zoom(), 4.0));
 	}
 }

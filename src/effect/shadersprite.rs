@@ -3,17 +3,17 @@
 // - 원본 effect/shadersprite.js 를 옮긴 것이다. Sprite 와 같지만 프래그먼트 셰이더 효과(디졸브 / 섬광 / 외곽선 / 홀로그램 / 물결 / 모자이크 / 글리치 / 광택 / 실루엣 / 무채색 / 색상 회전 / 와이프 / 아이리스 / 색수차)를 건다.
 // - 효과의 시간은 스스로 흐르고(tick), 진행도(progress)는 트윈 / 타임라인이 밀어 넣는다.
 // - 효과 이름, 기본 파라미터, 기본 색, GLSL 본문은 원본 표를 그대로 옮겼다. 셰이더는 GLSL ES 3.00 이고, 데스크탑은 ShaderProgram 이 머리만 #version 330 core 로 바꾼다.
-// - 그리기: 효과가 있으면 Graphic.setShaderProgramOverride 로 효과 프로그램을 바꿔 끼우고 효과 유니폼을 올린 뒤 Sprite 출력 경로를 그대로 탄다.
+// - 그리기: 효과가 있으면 Graphic.set_shader_program_override 로 효과 프로그램을 바꿔 끼우고 효과 유니폼을 올린 뒤 Sprite 출력 경로를 그대로 탄다.
 //   바꿔 끼운 동안은 묶어 그리지 않는다. (효과 없는 ShaderSprite 는 Sprite 와 같이 묶인다)
 // - 사용:
-//     let shaderSprite = node.addComponent(ShaderSprite::createWithImage(image));
-//     shaderSprite.setEffect(ShaderSpriteEffect::dissolve);
-//     shaderSprite.setEffectProgress(0.5);
+//     let shader_sprite = node.add_component(ShaderSprite::create_with_image(image));
+//     shader_sprite.set_effect(ShaderSpriteEffect::Dissolve);
+//     shader_sprite.set_effect_progress(0.5);
 // - 원본과 다른 점:
-//   - 원본은 Sprite 를 상속한다. 러스트 판은 Sprite 를 품고 Deref / DerefMut 로 Sprite 함수(setImage, setImageRect, setColor ...)를 그대로 부르게 한다.
-//     그래서 getComponent::<Sprite>() 로는 찾지 못하고 getComponent::<ShaderSprite>() 로 찾는다.
-//   - 효과는 문자열 대신 ShaderSpriteEffect 열거형이다. (원본 문자열 이름은 getName / fromName)
-//   - 효과 프로그램 캐시는 원본의 컨텍스트별 WeakMap 대신 Graphic.resolveShaderProgram 이 든다.
+//   - 원본은 Sprite 를 상속한다. 러스트 판은 Sprite 를 품고 Deref / DerefMut 로 Sprite 함수(set_image, set_image_rect, set_color ...)를 그대로 부르게 한다.
+//     그래서 get_component::<Sprite>() 로는 찾지 못하고 get_component::<ShaderSprite>() 로 찾는다.
+//   - 효과는 문자열 대신 ShaderSpriteEffect 열거형이다. (원본 문자열 이름은 get_name / from_name)
+//   - 효과 프로그램 캐시는 원본의 컨텍스트별 WeakMap 대신 Graphic.resolve_shader_program 이 든다.
 //   - 프로그램 만들기에 실패하면 원본은 예외를 던지고, 러스트 판은 한 번 알리고 효과 없이 Sprite 로 그린다.
 //==============================================================================
 use crate::base::color::Color;
@@ -35,264 +35,264 @@ use std::rc::Rc;
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ShaderSpriteEffect {
-	none,
+	None,
 	// --- 색 ---
-	flash,         // 실루엣을 단색으로 덮음. (피격 섬광: progress = 세기, color = 덮을 색)
-	silhouette,    // 실루엣 단색. (progress = 세기, color = 색: 그림자 / 잔상)
-	colorize,      // 곱셈 틴트. (progress = 세기, color = 곱할 색)
-	grayscale,     // 무채색. (progress = 세기, color = 틴트)
-	sepia,         // 세피아.
-	invert,        // 색 반전.
-	hueShift,      // 색상 회전. (progress 0 → 1 = 0 → 360도)
-	colorAdjust,   // 대비 / 채도 / 밝기. (parameters = [대비, 채도, 밝기], progress = 적용 비율)
-	posterize,     // 포스터화. (parameters = [단계 수])
-	threshold,     // 흑백 문턱. (parameters = [문턱])
-	gradientMap,   // 밝기를 두 색 사이로 매핑. (parameters.xyz = 어두운 색, color = 밝은 색)
+	Flash,         // 실루엣을 단색으로 덮음. (피격 섬광: progress = 세기, color = 덮을 색)
+	Silhouette,    // 실루엣 단색. (progress = 세기, color = 색: 그림자 / 잔상)
+	Colorize,      // 곱셈 틴트. (progress = 세기, color = 곱할 색)
+	Grayscale,     // 무채색. (progress = 세기, color = 틴트)
+	Sepia,         // 세피아.
+	Invert,        // 색 반전.
+	HueShift,      // 색상 회전. (progress 0 → 1 = 0 → 360도)
+	ColorAdjust,   // 대비 / 채도 / 밝기. (parameters = [대비, 채도, 밝기], progress = 적용 비율)
+	Posterize,     // 포스터화. (parameters = [단계 수])
+	Threshold,     // 흑백 문턱. (parameters = [문턱])
+	GradientMap,   // 밝기를 두 색 사이로 매핑. (parameters.xyz = 어두운 색, color = 밝은 색)
 	// --- 외곽 ---
-	outline,       // 실루엣 바깥 외곽선. (color = 선 색, parameters = [두께 픽셀])
-	innerOutline,  // 실루엣 안쪽 외곽선. (color = 선 색, parameters = [두께 픽셀])
-	glow,          // 바깥 발광. (color = 빛 색, parameters = [반지름 픽셀])
-	innerGlow,     // 안쪽 발광. (color = 빛 색, parameters = [반지름 픽셀])
-	shadow,        // 드롭 섀도. (color = 그림자 색, parameters = [오프셋 x 픽셀, 오프셋 y 픽셀])
-	edgeDetect,    // 윤곽 검출. (color = 선 색)
-	emboss,        // 엠보스.
-	sharpen,       // 샤픈.
+	Outline,       // 실루엣 바깥 외곽선. (color = 선 색, parameters = [두께 픽셀])
+	InnerOutline,  // 실루엣 안쪽 외곽선. (color = 선 색, parameters = [두께 픽셀])
+	Glow,          // 바깥 발광. (color = 빛 색, parameters = [반지름 픽셀])
+	InnerGlow,     // 안쪽 발광. (color = 빛 색, parameters = [반지름 픽셀])
+	Shadow,        // 드롭 섀도. (color = 그림자 색, parameters = [오프셋 x 픽셀, 오프셋 y 픽셀])
+	EdgeDetect,    // 윤곽 검출. (color = 선 색)
+	Emboss,        // 엠보스.
+	Sharpen,       // 샤픈.
 	// --- 흐림 ---
-	blur,          // 가우시안 블러. (parameters = [반지름 픽셀])
-	motionBlur,    // 방향 블러. (parameters = [방향 x, 방향 y, 길이 픽셀])
-	radialBlur,    // 중심 방사 블러. (parameters = [길이 0 ~ 1])
+	Blur,          // 가우시안 블러. (parameters = [반지름 픽셀])
+	MotionBlur,    // 방향 블러. (parameters = [방향 x, 방향 y, 길이 픽셀])
+	RadialBlur,    // 중심 방사 블러. (parameters = [길이 0 ~ 1])
 	// --- 왜곡 ---
-	wave,          // 가로 물결 왜곡. (parameters = [빈도, 속도, 진폭])
-	flag,          // 깃발 펄럭임. (parameters = [빈도, 속도, 진폭])
-	ripple,        // 중심 파문. (parameters = [빈도, 속도, 진폭])
-	heatHaze,      // 아지랑이. (parameters = [노이즈 배율, 속도, 진폭])
-	bulge,         // 볼록 / 오목. (parameters = [세기: 음수면 오목])
-	swirl,         // 소용돌이. (parameters = [회전 수])
-	mirror,        // 좌우 대칭. (parameters = [0 가로 / 1 세로])
-	kaleidoscope,  // 만화경. (parameters = [조각 수])
-	jitter,        // 흔들림. (parameters = [진폭 픽셀, 초당 변화])
-	pixelate,      // 모자이크. (parameters = [가장 거친 블록 수])
-	glitch,        // 가로 줄 어긋남 + 색 분리. (parameters = [줄 수, 초당 변화, 어긋남 폭])
-	chromatic,     // 색수차. (parameters = [분리 픽셀])
+	Wave,          // 가로 물결 왜곡. (parameters = [빈도, 속도, 진폭])
+	Flag,          // 깃발 펄럭임. (parameters = [빈도, 속도, 진폭])
+	Ripple,        // 중심 파문. (parameters = [빈도, 속도, 진폭])
+	HeatHaze,      // 아지랑이. (parameters = [노이즈 배율, 속도, 진폭])
+	Bulge,         // 볼록 / 오목. (parameters = [세기: 음수면 오목])
+	Swirl,         // 소용돌이. (parameters = [회전 수])
+	Mirror,        // 좌우 대칭. (parameters = [0 가로 / 1 세로])
+	Kaleidoscope,  // 만화경. (parameters = [조각 수])
+	Jitter,        // 흔들림. (parameters = [진폭 픽셀, 초당 변화])
+	Pixelate,      // 모자이크. (parameters = [가장 거친 블록 수])
+	Glitch,        // 가로 줄 어긋남 + 색 분리. (parameters = [줄 수, 초당 변화, 어긋남 폭])
+	Chromatic,     // 색수차. (parameters = [분리 픽셀])
 	// --- 화면 무늬 ---
-	hologram,      // 주사선 + 틴트 + 깜빡임. (color = 틴트, parameters = [주사선 수, 흐르는 속도])
-	scanlines,     // 주사선. (parameters = [주사선 수])
-	oldFilm,       // 낡은 필름. (세피아 + 그레인 + 스크래치 + 깜빡임)
-	vignette,      // 비네트. (color = 가장자리 색, parameters = [시작, 끝])
-	shine,         // 대각선 하이라이트 띠가 지나감. (color = 띠 색, parameters = [띠 폭])
+	Hologram,      // 주사선 + 틴트 + 깜빡임. (color = 틴트, parameters = [주사선 수, 흐르는 속도])
+	Scanlines,     // 주사선. (parameters = [주사선 수])
+	OldFilm,       // 낡은 필름. (세피아 + 그레인 + 스크래치 + 깜빡임)
+	Vignette,      // 비네트. (color = 가장자리 색, parameters = [시작, 끝])
+	Shine,         // 대각선 하이라이트 띠가 지나감. (color = 띠 색, parameters = [띠 폭])
 	// --- 사라짐 / 드러남 (progress 0 → 1) ---
-	dissolve,      // 노이즈로 타 들어가며 사라짐. (color = 가장자리 색, parameters = [노이즈 배율, 가장자리 폭])
-	burn,          // 불에 타듯 사라짐. (안쪽 밝은 띠 + 바깥 그을음, parameters = [노이즈 배율, 띠 폭])
-	noiseFade,     // 노이즈 알파 페이드. (parameters = [노이즈 배율, 부드러움])
-	pixelDissolve, // 블록 단위로 사라짐. (parameters = [블록 수])
-	wipe,          // 방향 와이프로 드러남. (parameters = [방향 x, 방향 y, 부드러움])
-	iris,          // 원형 아이리스로 드러남. (parameters = [중심 x, 중심 y, 부드러움])
-	diamondWipe,   // 마름모 와이프. (parameters = [부드러움])
-	clockWipe,     // 시계 방향 와이프. (parameters = [부드러움])
-	blinds,        // 블라인드. (parameters = [줄 수, 부드러움])
-	checkerWipe,   // 체커 보드. (parameters = [칸 수])
+	Dissolve,      // 노이즈로 타 들어가며 사라짐. (color = 가장자리 색, parameters = [노이즈 배율, 가장자리 폭])
+	Burn,          // 불에 타듯 사라짐. (안쪽 밝은 띠 + 바깥 그을음, parameters = [노이즈 배율, 띠 폭])
+	NoiseFade,     // 노이즈 알파 페이드. (parameters = [노이즈 배율, 부드러움])
+	PixelDissolve, // 블록 단위로 사라짐. (parameters = [블록 수])
+	Wipe,          // 방향 와이프로 드러남. (parameters = [방향 x, 방향 y, 부드러움])
+	Iris,          // 원형 아이리스로 드러남. (parameters = [중심 x, 중심 y, 부드러움])
+	DiamondWipe,   // 마름모 와이프. (parameters = [부드러움])
+	ClockWipe,     // 시계 방향 와이프. (parameters = [부드러움])
+	Blinds,        // 블라인드. (parameters = [줄 수, 부드러움])
+	CheckerWipe,   // 체커 보드. (parameters = [칸 수])
 }
 
 // 효과 목록. (선언 차례, 아래 표들의 차례와 같다)
 const EFFECT_LIST: [ShaderSpriteEffect; 50] = [
-	ShaderSpriteEffect::none, ShaderSpriteEffect::flash, ShaderSpriteEffect::silhouette, ShaderSpriteEffect::colorize, ShaderSpriteEffect::grayscale, ShaderSpriteEffect::sepia,
-	ShaderSpriteEffect::invert, ShaderSpriteEffect::hueShift, ShaderSpriteEffect::colorAdjust, ShaderSpriteEffect::posterize, ShaderSpriteEffect::threshold, ShaderSpriteEffect::gradientMap,
-	ShaderSpriteEffect::outline, ShaderSpriteEffect::innerOutline, ShaderSpriteEffect::glow, ShaderSpriteEffect::innerGlow, ShaderSpriteEffect::shadow, ShaderSpriteEffect::edgeDetect,
-	ShaderSpriteEffect::emboss, ShaderSpriteEffect::sharpen, ShaderSpriteEffect::blur, ShaderSpriteEffect::motionBlur, ShaderSpriteEffect::radialBlur, ShaderSpriteEffect::wave,
-	ShaderSpriteEffect::flag, ShaderSpriteEffect::ripple, ShaderSpriteEffect::heatHaze, ShaderSpriteEffect::bulge, ShaderSpriteEffect::swirl, ShaderSpriteEffect::mirror,
-	ShaderSpriteEffect::kaleidoscope, ShaderSpriteEffect::jitter, ShaderSpriteEffect::pixelate, ShaderSpriteEffect::glitch, ShaderSpriteEffect::chromatic, ShaderSpriteEffect::hologram,
-	ShaderSpriteEffect::scanlines, ShaderSpriteEffect::oldFilm, ShaderSpriteEffect::vignette, ShaderSpriteEffect::shine, ShaderSpriteEffect::dissolve, ShaderSpriteEffect::burn,
-	ShaderSpriteEffect::noiseFade, ShaderSpriteEffect::pixelDissolve, ShaderSpriteEffect::wipe, ShaderSpriteEffect::iris, ShaderSpriteEffect::diamondWipe, ShaderSpriteEffect::clockWipe,
-	ShaderSpriteEffect::blinds, ShaderSpriteEffect::checkerWipe,
+	ShaderSpriteEffect::None, ShaderSpriteEffect::Flash, ShaderSpriteEffect::Silhouette, ShaderSpriteEffect::Colorize, ShaderSpriteEffect::Grayscale, ShaderSpriteEffect::Sepia,
+	ShaderSpriteEffect::Invert, ShaderSpriteEffect::HueShift, ShaderSpriteEffect::ColorAdjust, ShaderSpriteEffect::Posterize, ShaderSpriteEffect::Threshold, ShaderSpriteEffect::GradientMap,
+	ShaderSpriteEffect::Outline, ShaderSpriteEffect::InnerOutline, ShaderSpriteEffect::Glow, ShaderSpriteEffect::InnerGlow, ShaderSpriteEffect::Shadow, ShaderSpriteEffect::EdgeDetect,
+	ShaderSpriteEffect::Emboss, ShaderSpriteEffect::Sharpen, ShaderSpriteEffect::Blur, ShaderSpriteEffect::MotionBlur, ShaderSpriteEffect::RadialBlur, ShaderSpriteEffect::Wave,
+	ShaderSpriteEffect::Flag, ShaderSpriteEffect::Ripple, ShaderSpriteEffect::HeatHaze, ShaderSpriteEffect::Bulge, ShaderSpriteEffect::Swirl, ShaderSpriteEffect::Mirror,
+	ShaderSpriteEffect::Kaleidoscope, ShaderSpriteEffect::Jitter, ShaderSpriteEffect::Pixelate, ShaderSpriteEffect::Glitch, ShaderSpriteEffect::Chromatic, ShaderSpriteEffect::Hologram,
+	ShaderSpriteEffect::Scanlines, ShaderSpriteEffect::OldFilm, ShaderSpriteEffect::Vignette, ShaderSpriteEffect::Shine, ShaderSpriteEffect::Dissolve, ShaderSpriteEffect::Burn,
+	ShaderSpriteEffect::NoiseFade, ShaderSpriteEffect::PixelDissolve, ShaderSpriteEffect::Wipe, ShaderSpriteEffect::Iris, ShaderSpriteEffect::DiamondWipe, ShaderSpriteEffect::ClockWipe,
+	ShaderSpriteEffect::Blinds, ShaderSpriteEffect::CheckerWipe,
 ];
 
 // 효과별 원본 이름.
 const EFFECT_NAME_TABLE: [(ShaderSpriteEffect, &str); 50] = [
-	(ShaderSpriteEffect::none, "none"),
-	(ShaderSpriteEffect::flash, "flash"),
-	(ShaderSpriteEffect::silhouette, "silhouette"),
-	(ShaderSpriteEffect::colorize, "colorize"),
-	(ShaderSpriteEffect::grayscale, "grayscale"),
-	(ShaderSpriteEffect::sepia, "sepia"),
-	(ShaderSpriteEffect::invert, "invert"),
-	(ShaderSpriteEffect::hueShift, "hueShift"),
-	(ShaderSpriteEffect::colorAdjust, "colorAdjust"),
-	(ShaderSpriteEffect::posterize, "posterize"),
-	(ShaderSpriteEffect::threshold, "threshold"),
-	(ShaderSpriteEffect::gradientMap, "gradientMap"),
-	(ShaderSpriteEffect::outline, "outline"),
-	(ShaderSpriteEffect::innerOutline, "innerOutline"),
-	(ShaderSpriteEffect::glow, "glow"),
-	(ShaderSpriteEffect::innerGlow, "innerGlow"),
-	(ShaderSpriteEffect::shadow, "shadow"),
-	(ShaderSpriteEffect::edgeDetect, "edgeDetect"),
-	(ShaderSpriteEffect::emboss, "emboss"),
-	(ShaderSpriteEffect::sharpen, "sharpen"),
-	(ShaderSpriteEffect::blur, "blur"),
-	(ShaderSpriteEffect::motionBlur, "motionBlur"),
-	(ShaderSpriteEffect::radialBlur, "radialBlur"),
-	(ShaderSpriteEffect::wave, "wave"),
-	(ShaderSpriteEffect::flag, "flag"),
-	(ShaderSpriteEffect::ripple, "ripple"),
-	(ShaderSpriteEffect::heatHaze, "heatHaze"),
-	(ShaderSpriteEffect::bulge, "bulge"),
-	(ShaderSpriteEffect::swirl, "swirl"),
-	(ShaderSpriteEffect::mirror, "mirror"),
-	(ShaderSpriteEffect::kaleidoscope, "kaleidoscope"),
-	(ShaderSpriteEffect::jitter, "jitter"),
-	(ShaderSpriteEffect::pixelate, "pixelate"),
-	(ShaderSpriteEffect::glitch, "glitch"),
-	(ShaderSpriteEffect::chromatic, "chromatic"),
-	(ShaderSpriteEffect::hologram, "hologram"),
-	(ShaderSpriteEffect::scanlines, "scanlines"),
-	(ShaderSpriteEffect::oldFilm, "oldFilm"),
-	(ShaderSpriteEffect::vignette, "vignette"),
-	(ShaderSpriteEffect::shine, "shine"),
-	(ShaderSpriteEffect::dissolve, "dissolve"),
-	(ShaderSpriteEffect::burn, "burn"),
-	(ShaderSpriteEffect::noiseFade, "noiseFade"),
-	(ShaderSpriteEffect::pixelDissolve, "pixelDissolve"),
-	(ShaderSpriteEffect::wipe, "wipe"),
-	(ShaderSpriteEffect::iris, "iris"),
-	(ShaderSpriteEffect::diamondWipe, "diamondWipe"),
-	(ShaderSpriteEffect::clockWipe, "clockWipe"),
-	(ShaderSpriteEffect::blinds, "blinds"),
-	(ShaderSpriteEffect::checkerWipe, "checkerWipe"),
+	(ShaderSpriteEffect::None, "none"),
+	(ShaderSpriteEffect::Flash, "flash"),
+	(ShaderSpriteEffect::Silhouette, "silhouette"),
+	(ShaderSpriteEffect::Colorize, "colorize"),
+	(ShaderSpriteEffect::Grayscale, "grayscale"),
+	(ShaderSpriteEffect::Sepia, "sepia"),
+	(ShaderSpriteEffect::Invert, "invert"),
+	(ShaderSpriteEffect::HueShift, "hueShift"),
+	(ShaderSpriteEffect::ColorAdjust, "colorAdjust"),
+	(ShaderSpriteEffect::Posterize, "posterize"),
+	(ShaderSpriteEffect::Threshold, "threshold"),
+	(ShaderSpriteEffect::GradientMap, "gradientMap"),
+	(ShaderSpriteEffect::Outline, "outline"),
+	(ShaderSpriteEffect::InnerOutline, "innerOutline"),
+	(ShaderSpriteEffect::Glow, "glow"),
+	(ShaderSpriteEffect::InnerGlow, "innerGlow"),
+	(ShaderSpriteEffect::Shadow, "shadow"),
+	(ShaderSpriteEffect::EdgeDetect, "edgeDetect"),
+	(ShaderSpriteEffect::Emboss, "emboss"),
+	(ShaderSpriteEffect::Sharpen, "sharpen"),
+	(ShaderSpriteEffect::Blur, "blur"),
+	(ShaderSpriteEffect::MotionBlur, "motionBlur"),
+	(ShaderSpriteEffect::RadialBlur, "radialBlur"),
+	(ShaderSpriteEffect::Wave, "wave"),
+	(ShaderSpriteEffect::Flag, "flag"),
+	(ShaderSpriteEffect::Ripple, "ripple"),
+	(ShaderSpriteEffect::HeatHaze, "heatHaze"),
+	(ShaderSpriteEffect::Bulge, "bulge"),
+	(ShaderSpriteEffect::Swirl, "swirl"),
+	(ShaderSpriteEffect::Mirror, "mirror"),
+	(ShaderSpriteEffect::Kaleidoscope, "kaleidoscope"),
+	(ShaderSpriteEffect::Jitter, "jitter"),
+	(ShaderSpriteEffect::Pixelate, "pixelate"),
+	(ShaderSpriteEffect::Glitch, "glitch"),
+	(ShaderSpriteEffect::Chromatic, "chromatic"),
+	(ShaderSpriteEffect::Hologram, "hologram"),
+	(ShaderSpriteEffect::Scanlines, "scanlines"),
+	(ShaderSpriteEffect::OldFilm, "oldFilm"),
+	(ShaderSpriteEffect::Vignette, "vignette"),
+	(ShaderSpriteEffect::Shine, "shine"),
+	(ShaderSpriteEffect::Dissolve, "dissolve"),
+	(ShaderSpriteEffect::Burn, "burn"),
+	(ShaderSpriteEffect::NoiseFade, "noiseFade"),
+	(ShaderSpriteEffect::PixelDissolve, "pixelDissolve"),
+	(ShaderSpriteEffect::Wipe, "wipe"),
+	(ShaderSpriteEffect::Iris, "iris"),
+	(ShaderSpriteEffect::DiamondWipe, "diamondWipe"),
+	(ShaderSpriteEffect::ClockWipe, "clockWipe"),
+	(ShaderSpriteEffect::Blinds, "blinds"),
+	(ShaderSpriteEffect::CheckerWipe, "checkerWipe"),
 ];
 
 // 효과별 기본 파라미터.
 const DEFAULT_PARAMETER_TABLE: [(ShaderSpriteEffect, [f32; 4]); 50] = [
-	(ShaderSpriteEffect::none, [0.0, 0.0, 0.0, 0.0]),
-	(ShaderSpriteEffect::flash, [0.0, 0.0, 0.0, 0.0]),
-	(ShaderSpriteEffect::silhouette, [0.0, 0.0, 0.0, 0.0]),
-	(ShaderSpriteEffect::colorize, [0.0, 0.0, 0.0, 0.0]),
-	(ShaderSpriteEffect::grayscale, [0.0, 0.0, 0.0, 0.0]),
-	(ShaderSpriteEffect::sepia, [0.0, 0.0, 0.0, 0.0]),
-	(ShaderSpriteEffect::invert, [0.0, 0.0, 0.0, 0.0]),
-	(ShaderSpriteEffect::hueShift, [0.0, 0.0, 0.0, 0.0]),
-	(ShaderSpriteEffect::colorAdjust, [1.4, 1.3, 1.1, 0.0]),
-	(ShaderSpriteEffect::posterize, [4.0, 0.0, 0.0, 0.0]),
-	(ShaderSpriteEffect::threshold, [0.5, 0.0, 0.0, 0.0]),
-	(ShaderSpriteEffect::gradientMap, [0.1, 0.05, 0.25, 0.0]),
-	(ShaderSpriteEffect::outline, [2.0, 0.0, 0.0, 0.0]),
-	(ShaderSpriteEffect::innerOutline, [2.0, 0.0, 0.0, 0.0]),
-	(ShaderSpriteEffect::glow, [6.0, 0.0, 0.0, 0.0]),
-	(ShaderSpriteEffect::innerGlow, [5.0, 0.0, 0.0, 0.0]),
-	(ShaderSpriteEffect::shadow, [6.0, 6.0, 0.0, 0.0]),
-	(ShaderSpriteEffect::edgeDetect, [0.0, 0.0, 0.0, 0.0]),
-	(ShaderSpriteEffect::emboss, [0.0, 0.0, 0.0, 0.0]),
-	(ShaderSpriteEffect::sharpen, [0.0, 0.0, 0.0, 0.0]),
-	(ShaderSpriteEffect::blur, [3.0, 0.0, 0.0, 0.0]),
-	(ShaderSpriteEffect::motionBlur, [1.0, 0.0, 12.0, 0.0]),
-	(ShaderSpriteEffect::radialBlur, [0.12, 0.0, 0.0, 0.0]),
-	(ShaderSpriteEffect::wave, [12.0, 4.0, 0.03, 0.0]),
-	(ShaderSpriteEffect::flag, [8.0, 5.0, 0.06, 0.0]),
-	(ShaderSpriteEffect::ripple, [40.0, 6.0, 0.02, 0.0]),
-	(ShaderSpriteEffect::heatHaze, [6.0, 1.5, 0.02, 0.0]),
-	(ShaderSpriteEffect::bulge, [0.6, 0.0, 0.0, 0.0]),
-	(ShaderSpriteEffect::swirl, [1.0, 0.0, 0.0, 0.0]),
-	(ShaderSpriteEffect::mirror, [0.0, 0.0, 0.0, 0.0]),
-	(ShaderSpriteEffect::kaleidoscope, [6.0, 0.0, 0.0, 0.0]),
-	(ShaderSpriteEffect::jitter, [4.0, 24.0, 0.0, 0.0]),
-	(ShaderSpriteEffect::pixelate, [24.0, 0.0, 0.0, 0.0]),
-	(ShaderSpriteEffect::glitch, [18.0, 12.0, 0.15, 0.0]),
-	(ShaderSpriteEffect::chromatic, [3.0, 0.0, 0.0, 0.0]),
-	(ShaderSpriteEffect::hologram, [120.0, 6.0, 0.0, 0.0]),
-	(ShaderSpriteEffect::scanlines, [90.0, 0.0, 0.0, 0.0]),
-	(ShaderSpriteEffect::oldFilm, [0.0, 0.0, 0.0, 0.0]),
-	(ShaderSpriteEffect::vignette, [0.4, 1.0, 0.0, 0.0]),
-	(ShaderSpriteEffect::shine, [0.15, 0.0, 0.0, 0.0]),
-	(ShaderSpriteEffect::dissolve, [8.0, 0.08, 0.0, 0.0]),
-	(ShaderSpriteEffect::burn, [8.0, 0.06, 0.0, 0.0]),
-	(ShaderSpriteEffect::noiseFade, [6.0, 0.2, 0.0, 0.0]),
-	(ShaderSpriteEffect::pixelDissolve, [16.0, 0.0, 0.0, 0.0]),
-	(ShaderSpriteEffect::wipe, [1.0, 0.0, 0.05, 0.0]),
-	(ShaderSpriteEffect::iris, [0.5, 0.5, 0.05, 0.0]),
-	(ShaderSpriteEffect::diamondWipe, [0.05, 0.0, 0.0, 0.0]),
-	(ShaderSpriteEffect::clockWipe, [0.02, 0.0, 0.0, 0.0]),
-	(ShaderSpriteEffect::blinds, [8.0, 0.05, 0.0, 0.0]),
-	(ShaderSpriteEffect::checkerWipe, [8.0, 0.0, 0.0, 0.0]),
+	(ShaderSpriteEffect::None, [0.0, 0.0, 0.0, 0.0]),
+	(ShaderSpriteEffect::Flash, [0.0, 0.0, 0.0, 0.0]),
+	(ShaderSpriteEffect::Silhouette, [0.0, 0.0, 0.0, 0.0]),
+	(ShaderSpriteEffect::Colorize, [0.0, 0.0, 0.0, 0.0]),
+	(ShaderSpriteEffect::Grayscale, [0.0, 0.0, 0.0, 0.0]),
+	(ShaderSpriteEffect::Sepia, [0.0, 0.0, 0.0, 0.0]),
+	(ShaderSpriteEffect::Invert, [0.0, 0.0, 0.0, 0.0]),
+	(ShaderSpriteEffect::HueShift, [0.0, 0.0, 0.0, 0.0]),
+	(ShaderSpriteEffect::ColorAdjust, [1.4, 1.3, 1.1, 0.0]),
+	(ShaderSpriteEffect::Posterize, [4.0, 0.0, 0.0, 0.0]),
+	(ShaderSpriteEffect::Threshold, [0.5, 0.0, 0.0, 0.0]),
+	(ShaderSpriteEffect::GradientMap, [0.1, 0.05, 0.25, 0.0]),
+	(ShaderSpriteEffect::Outline, [2.0, 0.0, 0.0, 0.0]),
+	(ShaderSpriteEffect::InnerOutline, [2.0, 0.0, 0.0, 0.0]),
+	(ShaderSpriteEffect::Glow, [6.0, 0.0, 0.0, 0.0]),
+	(ShaderSpriteEffect::InnerGlow, [5.0, 0.0, 0.0, 0.0]),
+	(ShaderSpriteEffect::Shadow, [6.0, 6.0, 0.0, 0.0]),
+	(ShaderSpriteEffect::EdgeDetect, [0.0, 0.0, 0.0, 0.0]),
+	(ShaderSpriteEffect::Emboss, [0.0, 0.0, 0.0, 0.0]),
+	(ShaderSpriteEffect::Sharpen, [0.0, 0.0, 0.0, 0.0]),
+	(ShaderSpriteEffect::Blur, [3.0, 0.0, 0.0, 0.0]),
+	(ShaderSpriteEffect::MotionBlur, [1.0, 0.0, 12.0, 0.0]),
+	(ShaderSpriteEffect::RadialBlur, [0.12, 0.0, 0.0, 0.0]),
+	(ShaderSpriteEffect::Wave, [12.0, 4.0, 0.03, 0.0]),
+	(ShaderSpriteEffect::Flag, [8.0, 5.0, 0.06, 0.0]),
+	(ShaderSpriteEffect::Ripple, [40.0, 6.0, 0.02, 0.0]),
+	(ShaderSpriteEffect::HeatHaze, [6.0, 1.5, 0.02, 0.0]),
+	(ShaderSpriteEffect::Bulge, [0.6, 0.0, 0.0, 0.0]),
+	(ShaderSpriteEffect::Swirl, [1.0, 0.0, 0.0, 0.0]),
+	(ShaderSpriteEffect::Mirror, [0.0, 0.0, 0.0, 0.0]),
+	(ShaderSpriteEffect::Kaleidoscope, [6.0, 0.0, 0.0, 0.0]),
+	(ShaderSpriteEffect::Jitter, [4.0, 24.0, 0.0, 0.0]),
+	(ShaderSpriteEffect::Pixelate, [24.0, 0.0, 0.0, 0.0]),
+	(ShaderSpriteEffect::Glitch, [18.0, 12.0, 0.15, 0.0]),
+	(ShaderSpriteEffect::Chromatic, [3.0, 0.0, 0.0, 0.0]),
+	(ShaderSpriteEffect::Hologram, [120.0, 6.0, 0.0, 0.0]),
+	(ShaderSpriteEffect::Scanlines, [90.0, 0.0, 0.0, 0.0]),
+	(ShaderSpriteEffect::OldFilm, [0.0, 0.0, 0.0, 0.0]),
+	(ShaderSpriteEffect::Vignette, [0.4, 1.0, 0.0, 0.0]),
+	(ShaderSpriteEffect::Shine, [0.15, 0.0, 0.0, 0.0]),
+	(ShaderSpriteEffect::Dissolve, [8.0, 0.08, 0.0, 0.0]),
+	(ShaderSpriteEffect::Burn, [8.0, 0.06, 0.0, 0.0]),
+	(ShaderSpriteEffect::NoiseFade, [6.0, 0.2, 0.0, 0.0]),
+	(ShaderSpriteEffect::PixelDissolve, [16.0, 0.0, 0.0, 0.0]),
+	(ShaderSpriteEffect::Wipe, [1.0, 0.0, 0.05, 0.0]),
+	(ShaderSpriteEffect::Iris, [0.5, 0.5, 0.05, 0.0]),
+	(ShaderSpriteEffect::DiamondWipe, [0.05, 0.0, 0.0, 0.0]),
+	(ShaderSpriteEffect::ClockWipe, [0.02, 0.0, 0.0, 0.0]),
+	(ShaderSpriteEffect::Blinds, [8.0, 0.05, 0.0, 0.0]),
+	(ShaderSpriteEffect::CheckerWipe, [8.0, 0.0, 0.0, 0.0]),
 ];
 
 // 효과별 기본 색.
 const DEFAULT_COLOR_TABLE: [(ShaderSpriteEffect, [f32; 4]); 50] = [
-	(ShaderSpriteEffect::none, [1.0, 1.0, 1.0, 1.0]),
-	(ShaderSpriteEffect::flash, [1.0, 1.0, 1.0, 1.0]),
-	(ShaderSpriteEffect::silhouette, [0.0, 0.0, 0.0, 1.0]),
-	(ShaderSpriteEffect::colorize, [1.0, 0.5, 0.5, 1.0]),
-	(ShaderSpriteEffect::grayscale, [1.0, 1.0, 1.0, 1.0]),
-	(ShaderSpriteEffect::sepia, [1.0, 1.0, 1.0, 1.0]),
-	(ShaderSpriteEffect::invert, [1.0, 1.0, 1.0, 1.0]),
-	(ShaderSpriteEffect::hueShift, [1.0, 1.0, 1.0, 1.0]),
-	(ShaderSpriteEffect::colorAdjust, [1.0, 1.0, 1.0, 1.0]),
-	(ShaderSpriteEffect::posterize, [1.0, 1.0, 1.0, 1.0]),
-	(ShaderSpriteEffect::threshold, [1.0, 1.0, 1.0, 1.0]),
-	(ShaderSpriteEffect::gradientMap, [1.0, 0.85, 0.5, 1.0]),
-	(ShaderSpriteEffect::outline, [1.0, 1.0, 1.0, 1.0]),
-	(ShaderSpriteEffect::innerOutline, [1.0, 1.0, 1.0, 1.0]),
-	(ShaderSpriteEffect::glow, [1.0, 0.85, 0.4, 1.0]),
-	(ShaderSpriteEffect::innerGlow, [1.0, 0.85, 0.4, 1.0]),
-	(ShaderSpriteEffect::shadow, [0.0, 0.0, 0.0, 0.6]),
-	(ShaderSpriteEffect::edgeDetect, [1.0, 1.0, 1.0, 1.0]),
-	(ShaderSpriteEffect::emboss, [1.0, 1.0, 1.0, 1.0]),
-	(ShaderSpriteEffect::sharpen, [1.0, 1.0, 1.0, 1.0]),
-	(ShaderSpriteEffect::blur, [1.0, 1.0, 1.0, 1.0]),
-	(ShaderSpriteEffect::motionBlur, [1.0, 1.0, 1.0, 1.0]),
-	(ShaderSpriteEffect::radialBlur, [1.0, 1.0, 1.0, 1.0]),
-	(ShaderSpriteEffect::wave, [1.0, 1.0, 1.0, 1.0]),
-	(ShaderSpriteEffect::flag, [1.0, 1.0, 1.0, 1.0]),
-	(ShaderSpriteEffect::ripple, [1.0, 1.0, 1.0, 1.0]),
-	(ShaderSpriteEffect::heatHaze, [1.0, 1.0, 1.0, 1.0]),
-	(ShaderSpriteEffect::bulge, [1.0, 1.0, 1.0, 1.0]),
-	(ShaderSpriteEffect::swirl, [1.0, 1.0, 1.0, 1.0]),
-	(ShaderSpriteEffect::mirror, [1.0, 1.0, 1.0, 1.0]),
-	(ShaderSpriteEffect::kaleidoscope, [1.0, 1.0, 1.0, 1.0]),
-	(ShaderSpriteEffect::jitter, [1.0, 1.0, 1.0, 1.0]),
-	(ShaderSpriteEffect::pixelate, [1.0, 1.0, 1.0, 1.0]),
-	(ShaderSpriteEffect::glitch, [1.0, 1.0, 1.0, 1.0]),
-	(ShaderSpriteEffect::chromatic, [1.0, 1.0, 1.0, 1.0]),
-	(ShaderSpriteEffect::hologram, [0.4, 0.9, 1.0, 1.0]),
-	(ShaderSpriteEffect::scanlines, [1.0, 1.0, 1.0, 1.0]),
-	(ShaderSpriteEffect::oldFilm, [1.0, 1.0, 1.0, 1.0]),
-	(ShaderSpriteEffect::vignette, [0.0, 0.0, 0.0, 1.0]),
-	(ShaderSpriteEffect::shine, [1.0, 1.0, 1.0, 1.0]),
-	(ShaderSpriteEffect::dissolve, [1.0, 0.6, 0.2, 1.0]),
-	(ShaderSpriteEffect::burn, [1.0, 0.7, 0.25, 1.0]),
-	(ShaderSpriteEffect::noiseFade, [1.0, 1.0, 1.0, 1.0]),
-	(ShaderSpriteEffect::pixelDissolve, [1.0, 1.0, 1.0, 1.0]),
-	(ShaderSpriteEffect::wipe, [1.0, 1.0, 1.0, 1.0]),
-	(ShaderSpriteEffect::iris, [1.0, 1.0, 1.0, 1.0]),
-	(ShaderSpriteEffect::diamondWipe, [1.0, 1.0, 1.0, 1.0]),
-	(ShaderSpriteEffect::clockWipe, [1.0, 1.0, 1.0, 1.0]),
-	(ShaderSpriteEffect::blinds, [1.0, 1.0, 1.0, 1.0]),
-	(ShaderSpriteEffect::checkerWipe, [1.0, 1.0, 1.0, 1.0]),
+	(ShaderSpriteEffect::None, [1.0, 1.0, 1.0, 1.0]),
+	(ShaderSpriteEffect::Flash, [1.0, 1.0, 1.0, 1.0]),
+	(ShaderSpriteEffect::Silhouette, [0.0, 0.0, 0.0, 1.0]),
+	(ShaderSpriteEffect::Colorize, [1.0, 0.5, 0.5, 1.0]),
+	(ShaderSpriteEffect::Grayscale, [1.0, 1.0, 1.0, 1.0]),
+	(ShaderSpriteEffect::Sepia, [1.0, 1.0, 1.0, 1.0]),
+	(ShaderSpriteEffect::Invert, [1.0, 1.0, 1.0, 1.0]),
+	(ShaderSpriteEffect::HueShift, [1.0, 1.0, 1.0, 1.0]),
+	(ShaderSpriteEffect::ColorAdjust, [1.0, 1.0, 1.0, 1.0]),
+	(ShaderSpriteEffect::Posterize, [1.0, 1.0, 1.0, 1.0]),
+	(ShaderSpriteEffect::Threshold, [1.0, 1.0, 1.0, 1.0]),
+	(ShaderSpriteEffect::GradientMap, [1.0, 0.85, 0.5, 1.0]),
+	(ShaderSpriteEffect::Outline, [1.0, 1.0, 1.0, 1.0]),
+	(ShaderSpriteEffect::InnerOutline, [1.0, 1.0, 1.0, 1.0]),
+	(ShaderSpriteEffect::Glow, [1.0, 0.85, 0.4, 1.0]),
+	(ShaderSpriteEffect::InnerGlow, [1.0, 0.85, 0.4, 1.0]),
+	(ShaderSpriteEffect::Shadow, [0.0, 0.0, 0.0, 0.6]),
+	(ShaderSpriteEffect::EdgeDetect, [1.0, 1.0, 1.0, 1.0]),
+	(ShaderSpriteEffect::Emboss, [1.0, 1.0, 1.0, 1.0]),
+	(ShaderSpriteEffect::Sharpen, [1.0, 1.0, 1.0, 1.0]),
+	(ShaderSpriteEffect::Blur, [1.0, 1.0, 1.0, 1.0]),
+	(ShaderSpriteEffect::MotionBlur, [1.0, 1.0, 1.0, 1.0]),
+	(ShaderSpriteEffect::RadialBlur, [1.0, 1.0, 1.0, 1.0]),
+	(ShaderSpriteEffect::Wave, [1.0, 1.0, 1.0, 1.0]),
+	(ShaderSpriteEffect::Flag, [1.0, 1.0, 1.0, 1.0]),
+	(ShaderSpriteEffect::Ripple, [1.0, 1.0, 1.0, 1.0]),
+	(ShaderSpriteEffect::HeatHaze, [1.0, 1.0, 1.0, 1.0]),
+	(ShaderSpriteEffect::Bulge, [1.0, 1.0, 1.0, 1.0]),
+	(ShaderSpriteEffect::Swirl, [1.0, 1.0, 1.0, 1.0]),
+	(ShaderSpriteEffect::Mirror, [1.0, 1.0, 1.0, 1.0]),
+	(ShaderSpriteEffect::Kaleidoscope, [1.0, 1.0, 1.0, 1.0]),
+	(ShaderSpriteEffect::Jitter, [1.0, 1.0, 1.0, 1.0]),
+	(ShaderSpriteEffect::Pixelate, [1.0, 1.0, 1.0, 1.0]),
+	(ShaderSpriteEffect::Glitch, [1.0, 1.0, 1.0, 1.0]),
+	(ShaderSpriteEffect::Chromatic, [1.0, 1.0, 1.0, 1.0]),
+	(ShaderSpriteEffect::Hologram, [0.4, 0.9, 1.0, 1.0]),
+	(ShaderSpriteEffect::Scanlines, [1.0, 1.0, 1.0, 1.0]),
+	(ShaderSpriteEffect::OldFilm, [1.0, 1.0, 1.0, 1.0]),
+	(ShaderSpriteEffect::Vignette, [0.0, 0.0, 0.0, 1.0]),
+	(ShaderSpriteEffect::Shine, [1.0, 1.0, 1.0, 1.0]),
+	(ShaderSpriteEffect::Dissolve, [1.0, 0.6, 0.2, 1.0]),
+	(ShaderSpriteEffect::Burn, [1.0, 0.7, 0.25, 1.0]),
+	(ShaderSpriteEffect::NoiseFade, [1.0, 1.0, 1.0, 1.0]),
+	(ShaderSpriteEffect::PixelDissolve, [1.0, 1.0, 1.0, 1.0]),
+	(ShaderSpriteEffect::Wipe, [1.0, 1.0, 1.0, 1.0]),
+	(ShaderSpriteEffect::Iris, [1.0, 1.0, 1.0, 1.0]),
+	(ShaderSpriteEffect::DiamondWipe, [1.0, 1.0, 1.0, 1.0]),
+	(ShaderSpriteEffect::ClockWipe, [1.0, 1.0, 1.0, 1.0]),
+	(ShaderSpriteEffect::Blinds, [1.0, 1.0, 1.0, 1.0]),
+	(ShaderSpriteEffect::CheckerWipe, [1.0, 1.0, 1.0, 1.0]),
 ];
 
 // 효과별 프래그먼트 본문. (uv / local / textureColor 를 바꾸거나 다시 샘플한다. 텍스처는 프리멀티플라이드 알파)
 // - 공용: sampleSprite(uv) / sampleLocal(local) / unpremultiply(color) / luminanceAt(uv) / hash21 / valueNoise.
 const EFFECT_BODY_TABLE: [(ShaderSpriteEffect, &str); 49] = [
-	(ShaderSpriteEffect::flash, "
+	(ShaderSpriteEffect::Flash, "
 	textureColor.rgb = mix(textureColor.rgb, effectColor.rgb * textureColor.a, effectProgress * effectColor.a);
 	"),
-	(ShaderSpriteEffect::silhouette, "
+	(ShaderSpriteEffect::Silhouette, "
 	textureColor.rgb = mix(textureColor.rgb, effectColor.rgb * textureColor.a, effectProgress);
 	textureColor *= mix(1.0, effectColor.a, effectProgress);
 	"),
-	(ShaderSpriteEffect::colorize, "
+	(ShaderSpriteEffect::Colorize, "
 	textureColor.rgb *= mix(vec3(1.0), effectColor.rgb, effectProgress * effectColor.a);
 	"),
-	(ShaderSpriteEffect::grayscale, "
+	(ShaderSpriteEffect::Grayscale, "
 	float gray = dot(textureColor.rgb, vec3(0.299, 0.587, 0.114));
 	textureColor.rgb = mix(textureColor.rgb, vec3(gray) * effectColor.rgb, effectProgress);
 	"),
-	(ShaderSpriteEffect::sepia, "
+	(ShaderSpriteEffect::Sepia, "
 	float gray = dot(textureColor.rgb, vec3(0.299, 0.587, 0.114));
 	textureColor.rgb = mix(textureColor.rgb, gray * vec3(1.2, 1.0, 0.78), effectProgress);
 	"),
-	(ShaderSpriteEffect::invert, "
+	(ShaderSpriteEffect::Invert, "
 	textureColor.rgb = mix(textureColor.rgb, vec3(textureColor.a) - textureColor.rgb, effectProgress);
 	"),
-	(ShaderSpriteEffect::hueShift, "
+	(ShaderSpriteEffect::HueShift, "
 	float hueAngle = effectProgress * 6.28318530718;
 	vec3 yiq = mat3(0.299, 0.596, 0.211, 0.587, -0.274, -0.523, 0.114, -0.322, 0.312) * textureColor.rgb;
 	float chroma = length(yiq.yz);
@@ -300,7 +300,7 @@ const EFFECT_BODY_TABLE: [(ShaderSpriteEffect, &str); 49] = [
 	yiq.yz = vec2(cos(hue), sin(hue)) * chroma;
 	textureColor.rgb = mat3(1.0, 1.0, 1.0, 0.956, -0.272, -1.106, 0.621, -0.647, 1.703) * yiq;
 	"),
-	(ShaderSpriteEffect::colorAdjust, "
+	(ShaderSpriteEffect::ColorAdjust, "
 	vec3 straight = unpremultiply(textureColor);
 	float gray = dot(straight, vec3(0.299, 0.587, 0.114));
 	vec3 adjusted = mix(vec3(gray), straight, effectParameters.y);
@@ -308,25 +308,25 @@ const EFFECT_BODY_TABLE: [(ShaderSpriteEffect, &str); 49] = [
 	adjusted *= effectParameters.z;
 	textureColor.rgb = mix(textureColor.rgb, clamp(adjusted, 0.0, 1.0) * textureColor.a, effectProgress);
 	"),
-	(ShaderSpriteEffect::posterize, "
+	(ShaderSpriteEffect::Posterize, "
 	vec3 straight = unpremultiply(textureColor);
 	float levels = max(effectParameters.x, 1.0);
 	vec3 posterized = floor(straight * levels + 0.5) / levels;
 	textureColor.rgb = mix(textureColor.rgb, posterized * textureColor.a, effectProgress);
 	"),
-	(ShaderSpriteEffect::threshold, "
+	(ShaderSpriteEffect::Threshold, "
 	vec3 straight = unpremultiply(textureColor);
 	float gray = dot(straight, vec3(0.299, 0.587, 0.114));
 	vec3 binary = vec3(step(effectParameters.x, gray)) * effectColor.rgb;
 	textureColor.rgb = mix(textureColor.rgb, binary * textureColor.a, effectProgress);
 	"),
-	(ShaderSpriteEffect::gradientMap, "
+	(ShaderSpriteEffect::GradientMap, "
 	vec3 straight = unpremultiply(textureColor);
 	float gray = dot(straight, vec3(0.299, 0.587, 0.114));
 	vec3 mapped = mix(effectParameters.xyz, effectColor.rgb, gray);
 	textureColor.rgb = mix(textureColor.rgb, mapped * textureColor.a, effectProgress);
 	"),
-	(ShaderSpriteEffect::outline, "
+	(ShaderSpriteEffect::Outline, "
 	vec2 outlineStep = texelSize * effectParameters.x;
 	float neighborAlpha = 0.0;
 	for (int sampleIndex = 0; sampleIndex < 8; ++sampleIndex) {
@@ -337,7 +337,7 @@ const EFFECT_BODY_TABLE: [(ShaderSpriteEffect, &str); 49] = [
 	textureColor.rgb += effectColor.rgb * outlineMask;
 	textureColor.a += outlineMask;
 	"),
-	(ShaderSpriteEffect::innerOutline, "
+	(ShaderSpriteEffect::InnerOutline, "
 	vec2 outlineStep = texelSize * effectParameters.x;
 	float minimumAlpha = 1.0;
 	for (int sampleIndex = 0; sampleIndex < 8; ++sampleIndex) {
@@ -347,7 +347,7 @@ const EFFECT_BODY_TABLE: [(ShaderSpriteEffect, &str); 49] = [
 	float edgeMask = clamp(textureColor.a - minimumAlpha, 0.0, 1.0) * effectProgress * effectColor.a;
 	textureColor.rgb = mix(textureColor.rgb, effectColor.rgb * textureColor.a, edgeMask);
 	"),
-	(ShaderSpriteEffect::glow, "
+	(ShaderSpriteEffect::Glow, "
 	float alphaSum = 0.0;
 	for (int sampleIndex = 0; sampleIndex < 12; ++sampleIndex) {
 		float angle = float(sampleIndex) * 0.52359878;
@@ -359,7 +359,7 @@ const EFFECT_BODY_TABLE: [(ShaderSpriteEffect, &str); 49] = [
 	textureColor.rgb += effectColor.rgb * glowAlpha;
 	textureColor.a += glowAlpha;
 	"),
-	(ShaderSpriteEffect::innerGlow, "
+	(ShaderSpriteEffect::InnerGlow, "
 	float alphaSum = 0.0;
 	for (int sampleIndex = 0; sampleIndex < 12; ++sampleIndex) {
 		float angle = float(sampleIndex) * 0.52359878;
@@ -370,13 +370,13 @@ const EFFECT_BODY_TABLE: [(ShaderSpriteEffect, &str); 49] = [
 	float glowMask = clamp(1.0 - alphaSum / 24.0, 0.0, 1.0) * textureColor.a * effectProgress * effectColor.a;
 	textureColor.rgb = mix(textureColor.rgb, effectColor.rgb * textureColor.a, glowMask);
 	"),
-	(ShaderSpriteEffect::shadow, "
+	(ShaderSpriteEffect::Shadow, "
 	vec2 shadowOffset = effectParameters.xy * texelSize;
 	float shadowAlpha = sampleSprite(uv - shadowOffset).a * effectColor.a * effectProgress * (1.0 - textureColor.a);
 	textureColor.rgb += effectColor.rgb * shadowAlpha;
 	textureColor.a += shadowAlpha;
 	"),
-	(ShaderSpriteEffect::edgeDetect, "
+	(ShaderSpriteEffect::EdgeDetect, "
 	float gradientX = 0.0;
 	float gradientY = 0.0;
 	gradientX += luminanceAt(uv + vec2(-texelSize.x, -texelSize.y)) * -1.0 + luminanceAt(uv + vec2(texelSize.x, -texelSize.y));
@@ -388,18 +388,18 @@ const EFFECT_BODY_TABLE: [(ShaderSpriteEffect, &str); 49] = [
 	float edge = clamp(length(vec2(gradientX, gradientY)) * 2.0, 0.0, 1.0);
 	textureColor = mix(textureColor, vec4(effectColor.rgb * edge, edge) * effectColor.a, effectProgress);
 	"),
-	(ShaderSpriteEffect::emboss, "
+	(ShaderSpriteEffect::Emboss, "
 	vec3 lower = sampleSprite(uv - texelSize).rgb;
 	vec3 upper = sampleSprite(uv + texelSize).rgb;
 	float relief = dot(upper - lower, vec3(0.299, 0.587, 0.114)) * 2.0 + 0.5;
 	textureColor.rgb = mix(textureColor.rgb, vec3(clamp(relief, 0.0, 1.0)) * textureColor.a, effectProgress);
 	"),
-	(ShaderSpriteEffect::sharpen, "
+	(ShaderSpriteEffect::Sharpen, "
 	vec4 neighbors = sampleSprite(uv + vec2(texelSize.x, 0.0)) + sampleSprite(uv - vec2(texelSize.x, 0.0)) + sampleSprite(uv + vec2(0.0, texelSize.y)) + sampleSprite(uv - vec2(0.0, texelSize.y));
 	vec4 sharpened = clamp(textureColor * 5.0 - neighbors, 0.0, 1.0);
 	textureColor = mix(textureColor, sharpened, effectProgress);
 	"),
-	(ShaderSpriteEffect::blur, "
+	(ShaderSpriteEffect::Blur, "
 	vec2 blurStep = texelSize * effectParameters.x * effectProgress;
 	vec4 sum = vec4(0.0);
 	for (int y = -1; y <= 1; ++y) {
@@ -410,7 +410,7 @@ const EFFECT_BODY_TABLE: [(ShaderSpriteEffect, &str); 49] = [
 	}
 	textureColor = sum / 16.0;
 	"),
-	(ShaderSpriteEffect::motionBlur, "
+	(ShaderSpriteEffect::MotionBlur, "
 	vec2 blurDirection = normalize(effectParameters.xy + vec2(0.0001, 0.0)) * texelSize * effectParameters.z * effectProgress;
 	vec4 sum = vec4(0.0);
 	for (int sampleIndex = 0; sampleIndex < 8; ++sampleIndex) {
@@ -419,7 +419,7 @@ const EFFECT_BODY_TABLE: [(ShaderSpriteEffect, &str); 49] = [
 	}
 	textureColor = sum / 8.0;
 	"),
-	(ShaderSpriteEffect::radialBlur, "
+	(ShaderSpriteEffect::RadialBlur, "
 	vec2 toCenter = (vec2(0.5) - local) * effectParameters.x * effectProgress;
 	vec4 sum = vec4(0.0);
 	for (int sampleIndex = 0; sampleIndex < 8; ++sampleIndex) {
@@ -427,32 +427,32 @@ const EFFECT_BODY_TABLE: [(ShaderSpriteEffect, &str); 49] = [
 	}
 	textureColor = sum / 8.0;
 	"),
-	(ShaderSpriteEffect::wave, "
+	(ShaderSpriteEffect::Wave, "
 	float waveOffset = sin(local.y * effectParameters.x + effectTime * effectParameters.y) * effectParameters.z * effectProgress;
 	textureColor = sampleLocal(local + vec2(waveOffset, 0.0));
 	"),
-	(ShaderSpriteEffect::flag, "
+	(ShaderSpriteEffect::Flag, "
 	float flagOffset = sin(local.x * effectParameters.x - effectTime * effectParameters.y) * effectParameters.z * effectProgress * local.x;
 	textureColor = sampleLocal(local + vec2(0.0, flagOffset));
 	"),
-	(ShaderSpriteEffect::ripple, "
+	(ShaderSpriteEffect::Ripple, "
 	vec2 fromCenter = local - 0.5;
 	float rippleDistance = length(fromCenter);
 	float rippleWave = sin(rippleDistance * effectParameters.x - effectTime * effectParameters.y) * effectParameters.z * effectProgress;
 	vec2 rippleDirection = rippleDistance > 0.0001 ? fromCenter / rippleDistance : vec2(0.0);
 	textureColor = sampleLocal(local + rippleDirection * rippleWave);
 	"),
-	(ShaderSpriteEffect::heatHaze, "
+	(ShaderSpriteEffect::HeatHaze, "
 	vec2 hazeOffset = vec2(valueNoise(local * effectParameters.x + vec2(0.0, effectTime * effectParameters.y)), valueNoise(local * effectParameters.x + vec2(effectTime * effectParameters.y, 7.3))) - 0.5;
 	textureColor = sampleLocal(local + hazeOffset * effectParameters.z * effectProgress);
 	"),
-	(ShaderSpriteEffect::bulge, "
+	(ShaderSpriteEffect::Bulge, "
 	vec2 fromCenter = local - 0.5;
 	float bulgeRadius = length(fromCenter) * 2.0;
 	float bulgeFactor = 1.0 - effectParameters.x * effectProgress * (1.0 - clamp(bulgeRadius, 0.0, 1.0));
 	textureColor = sampleLocal(0.5 + fromCenter * bulgeFactor);
 	"),
-	(ShaderSpriteEffect::swirl, "
+	(ShaderSpriteEffect::Swirl, "
 	vec2 fromCenter = local - 0.5;
 	float swirlRadius = length(fromCenter) * 2.0;
 	float swirlAngle = effectParameters.x * effectProgress * 6.28318530718 * pow(1.0 - clamp(swirlRadius, 0.0, 1.0), 2.0);
@@ -460,7 +460,7 @@ const EFFECT_BODY_TABLE: [(ShaderSpriteEffect, &str); 49] = [
 	float sine = sin(swirlAngle);
 	textureColor = sampleLocal(0.5 + vec2(fromCenter.x * cosine - fromCenter.y * sine, fromCenter.x * sine + fromCenter.y * cosine));
 	"),
-	(ShaderSpriteEffect::mirror, "
+	(ShaderSpriteEffect::Mirror, "
 	vec2 mirrored = local;
 	if (effectParameters.x < 0.5) {
 		mirrored.x = local.x < 0.5 ? local.x : 1.0 - local.x;
@@ -470,7 +470,7 @@ const EFFECT_BODY_TABLE: [(ShaderSpriteEffect, &str); 49] = [
 	}
 	textureColor = mix(textureColor, sampleLocal(mirrored), step(0.5, effectProgress));
 	"),
-	(ShaderSpriteEffect::kaleidoscope, "
+	(ShaderSpriteEffect::Kaleidoscope, "
 	vec2 fromCenter = local - 0.5;
 	float kaleidoRadius = length(fromCenter);
 	float segmentAngle = 6.28318530718 / max(effectParameters.x, 1.0);
@@ -479,17 +479,17 @@ const EFFECT_BODY_TABLE: [(ShaderSpriteEffect, &str); 49] = [
 	vec4 kaleidoColor = sampleLocal(0.5 + vec2(cos(kaleidoAngle), sin(kaleidoAngle)) * kaleidoRadius);
 	textureColor = mix(textureColor, kaleidoColor, effectProgress);
 	"),
-	(ShaderSpriteEffect::jitter, "
+	(ShaderSpriteEffect::Jitter, "
 	float jitterSeed = floor(effectTime * effectParameters.y) + effectSeed;
 	vec2 jitterOffset = (vec2(hash21(vec2(jitterSeed, 1.0)), hash21(vec2(jitterSeed, 2.0))) - 0.5) * effectParameters.x * effectProgress;
 	textureColor = sampleSprite(uv + jitterOffset * texelSize);
 	"),
-	(ShaderSpriteEffect::pixelate, "
+	(ShaderSpriteEffect::Pixelate, "
 	float blockCount = mix(512.0, max(1.0, effectParameters.x), effectProgress);
 	vec2 blockLocal = (floor(local * blockCount) + 0.5) / blockCount;
 	textureColor = sampleLocal(blockLocal);
 	"),
-	(ShaderSpriteEffect::glitch, "
+	(ShaderSpriteEffect::Glitch, "
 	float glitchSeed = floor(effectTime * effectParameters.y) + effectSeed;
 	float glitchRow = floor(local.y * effectParameters.x);
 	float rowRandom = hash21(vec2(glitchRow, glitchSeed));
@@ -500,12 +500,12 @@ const EFFECT_BODY_TABLE: [(ShaderSpriteEffect, &str); 49] = [
 	textureColor.r = sampleLocal(shiftedLocal + vec2(split, 0.0)).r;
 	textureColor.b = sampleLocal(shiftedLocal - vec2(split, 0.0)).b;
 	"),
-	(ShaderSpriteEffect::chromatic, "
+	(ShaderSpriteEffect::Chromatic, "
 	vec2 chromaticStep = vec2(texelSize.x * effectParameters.x * effectProgress, 0.0);
 	textureColor.r = sampleSprite(uv + chromaticStep).r;
 	textureColor.b = sampleSprite(uv - chromaticStep).b;
 	"),
-	(ShaderSpriteEffect::hologram, "
+	(ShaderSpriteEffect::Hologram, "
 	float scan = 0.7 + 0.3 * sin(local.y * effectParameters.x - effectTime * effectParameters.y);
 	float flicker = 0.92 + 0.08 * sin(effectTime * 23.0 + effectSeed);
 	float jitter = step(0.97, hash21(vec2(floor(effectTime * 14.0), effectSeed))) * 0.03;
@@ -516,11 +516,11 @@ const EFFECT_BODY_TABLE: [(ShaderSpriteEffect, &str); 49] = [
 	textureColor.rgb = mix(textureColor.rgb, holoColor, effectProgress * effectColor.a);
 	textureColor.a *= mix(1.0, 0.8 * scan, effectProgress);
 	"),
-	(ShaderSpriteEffect::scanlines, "
+	(ShaderSpriteEffect::Scanlines, "
 	float lines = 0.5 + 0.5 * sin(local.y * effectParameters.x);
 	textureColor.rgb *= 1.0 - effectProgress * 0.5 * lines;
 	"),
-	(ShaderSpriteEffect::oldFilm, "
+	(ShaderSpriteEffect::OldFilm, "
 	float gray = dot(textureColor.rgb, vec3(0.299, 0.587, 0.114));
 	vec3 filmColor = gray * vec3(1.15, 1.0, 0.8);
 	float grain = (hash21(local * 300.0 + fract(effectTime * 9.1) * 100.0) - 0.5) * 0.25 * textureColor.a;
@@ -532,18 +532,18 @@ const EFFECT_BODY_TABLE: [(ShaderSpriteEffect, &str); 49] = [
 	vec3 aged = (filmColor + grain + scratch * 0.8) * flicker * vignette;
 	textureColor.rgb = mix(textureColor.rgb, clamp(aged, 0.0, 1.0), effectProgress);
 	"),
-	(ShaderSpriteEffect::vignette, "
+	(ShaderSpriteEffect::Vignette, "
 	float vignetteDistance = distance(local, vec2(0.5)) * 1.4142;
 	float vignetteMask = smoothstep(effectParameters.x, effectParameters.y, vignetteDistance) * effectProgress * effectColor.a;
 	textureColor.rgb = mix(textureColor.rgb, effectColor.rgb * textureColor.a, vignetteMask);
 	"),
-	(ShaderSpriteEffect::shine, "
+	(ShaderSpriteEffect::Shine, "
 	float band = local.x * 0.8 + local.y * 0.5;
 	float bandCenter = mix(-0.4, 1.7, effectProgress);
 	float glow = 1.0 - smoothstep(0.0, max(effectParameters.x, 0.001), abs(band - bandCenter));
 	textureColor.rgb += effectColor.rgb * glow * glow * textureColor.a * effectColor.a;
 	"),
-	(ShaderSpriteEffect::dissolve, "
+	(ShaderSpriteEffect::Dissolve, "
 	float dissolveNoise = valueNoise(local * effectParameters.x + vec2(effectSeed * 17.0, effectSeed * 31.0));
 	float threshold = effectProgress * (1.0 + effectParameters.y * 2.0) - effectParameters.y;
 	float edge = smoothstep(threshold, threshold + effectParameters.y, dissolveNoise);
@@ -552,7 +552,7 @@ const EFFECT_BODY_TABLE: [(ShaderSpriteEffect, &str); 49] = [
 	textureColor.rgb = mix(edgeColor, textureColor.rgb, edge) * keep;
 	textureColor.a *= keep;
 	"),
-	(ShaderSpriteEffect::burn, "
+	(ShaderSpriteEffect::Burn, "
 	float burnNoise = valueNoise(local * effectParameters.x + vec2(effectSeed * 13.0, effectSeed * 29.0));
 	float threshold = effectProgress * (1.0 + effectParameters.y * 4.0) - effectParameters.y * 2.0;
 	float keep = step(threshold, burnNoise);
@@ -563,50 +563,50 @@ const EFFECT_BODY_TABLE: [(ShaderSpriteEffect, &str); 49] = [
 	textureColor.rgb = mix(emberColor, mix(sootColor, textureColor.rgb, outerBand), innerBand) * keep;
 	textureColor.a *= keep;
 	"),
-	(ShaderSpriteEffect::noiseFade, "
+	(ShaderSpriteEffect::NoiseFade, "
 	float fadeNoise = valueNoise(local * effectParameters.x + vec2(effectSeed * 11.0, effectSeed * 23.0));
 	float softness = max(effectParameters.y, 0.001);
 	float fadeMask = smoothstep(effectProgress * (1.0 + softness) - softness, effectProgress * (1.0 + softness), fadeNoise);
 	textureColor *= fadeMask;
 	"),
-	(ShaderSpriteEffect::pixelDissolve, "
+	(ShaderSpriteEffect::PixelDissolve, "
 	vec2 blockCell = floor(local * effectParameters.x);
 	float blockRandom = hash21(blockCell + effectSeed);
 	textureColor *= step(effectProgress, blockRandom);
 	"),
-	(ShaderSpriteEffect::wipe, "
+	(ShaderSpriteEffect::Wipe, "
 	vec2 wipeDirection = normalize(effectParameters.xy + vec2(0.0001, 0.0));
 	float wipeDistance = dot(local - 0.5, wipeDirection) + 0.5;
 	float softness = max(effectParameters.z, 0.0001);
 	float reveal = 1.0 - smoothstep(effectProgress * (1.0 + softness) - softness, effectProgress * (1.0 + softness), wipeDistance);
 	textureColor *= reveal;
 	"),
-	(ShaderSpriteEffect::iris, "
+	(ShaderSpriteEffect::Iris, "
 	float irisRadius = effectProgress * 0.7072;
 	float softness = max(effectParameters.z, 0.0001);
 	float reveal = 1.0 - smoothstep(irisRadius, irisRadius + softness, distance(local, effectParameters.xy));
 	textureColor *= reveal;
 	"),
-	(ShaderSpriteEffect::diamondWipe, "
+	(ShaderSpriteEffect::DiamondWipe, "
 	float diamondDistance = abs(local.x - 0.5) + abs(local.y - 0.5);
 	float softness = max(effectParameters.x, 0.0001);
 	float reveal = 1.0 - smoothstep(effectProgress * (1.0 + softness), effectProgress * (1.0 + softness) + softness, diamondDistance);
 	textureColor *= reveal;
 	"),
-	(ShaderSpriteEffect::clockWipe, "
+	(ShaderSpriteEffect::ClockWipe, "
 	vec2 fromCenter = local - 0.5;
 	float clockAngle = (atan(fromCenter.x, -fromCenter.y) + 3.14159265) / 6.28318530718;
 	float softness = max(effectParameters.x, 0.0001);
 	float reveal = 1.0 - smoothstep(effectProgress, effectProgress + softness, clockAngle);
 	textureColor *= reveal;
 	"),
-	(ShaderSpriteEffect::blinds, "
+	(ShaderSpriteEffect::Blinds, "
 	float stripe = fract(local.y * effectParameters.x);
 	float softness = max(effectParameters.y, 0.0001);
 	float reveal = 1.0 - smoothstep(effectProgress, effectProgress + softness, stripe);
 	textureColor *= reveal;
 	"),
-	(ShaderSpriteEffect::checkerWipe, "
+	(ShaderSpriteEffect::CheckerWipe, "
 	vec2 checkerCell = floor(local * effectParameters.x);
 	float parity = mod(checkerCell.x + checkerCell.y, 2.0);
 	float cellThreshold = parity * 0.5 + hash21(checkerCell + effectSeed) * 0.5;
@@ -702,21 +702,21 @@ impl ShaderSpriteEffect {
 	//==============================================================================
 	// 원본 이름 반환. ("dissolve" 같은 문자열)
 	//==============================================================================
-	pub fn getName(&self) -> &'static str {
+	pub fn get_name(&self) -> &'static str {
 		EFFECT_NAME_TABLE[*self as usize].1
 	}
 
 	//==============================================================================
 	// 원본 이름으로 찾기. (모르는 이름이면 None)
 	//==============================================================================
-	pub fn fromName(name: &str) -> Option<ShaderSpriteEffect> {
-		EFFECT_NAME_TABLE.iter().find(|(_, effectName)| *effectName == name).map(|(effect, _)| *effect)
+	pub fn from_name(name: &str) -> Option<ShaderSpriteEffect> {
+		EFFECT_NAME_TABLE.iter().find(|(_, effect_name)| *effect_name == name).map(|(effect, _)| *effect)
 	}
 
 	//==============================================================================
 	// 효과 목록 반환. (선언 차례, 원본 Object.keys(ShaderSpriteEffect) 자리)
 	//==============================================================================
-	pub fn getEffectList() -> &'static [ShaderSpriteEffect] {
+	pub fn get_effect_list() -> &'static [ShaderSpriteEffect] {
 		&EFFECT_LIST
 	}
 }
@@ -724,29 +724,29 @@ impl ShaderSpriteEffect {
 //==============================================================================
 // 효과 본문 반환. (none 이면 None)
 //==============================================================================
-fn findEffectBody(effect: ShaderSpriteEffect) -> Option<&'static str> {
-	EFFECT_BODY_TABLE.iter().find(|(bodyEffect, _)| *bodyEffect == effect).map(|(_, effectBody)| *effectBody)
+fn find_effect_body(effect: ShaderSpriteEffect) -> Option<&'static str> {
+	EFFECT_BODY_TABLE.iter().find(|(body_effect, _)| *body_effect == effect).map(|(_, effect_body)| *effect_body)
 }
 
 //==============================================================================
 // 효과 프로그램 반환. (없으면 컴파일해 Graphic 캐시에 담는다. 실패했거나 본문이 없으면 None)
 //==============================================================================
-fn resolveEffectProgram(graphic: &mut Graphic, effect: ShaderSpriteEffect) -> Option<Rc<ShaderProgram>> {
-	let effectBody = findEffectBody(effect)?;
-	graphic.resolveShaderProgram(PROGRAM_GROUP_NAME, effect.getName(), || {
-		let fragmentShaderSource = FRAGMENTSHADER_TEMPLATE.replace("EFFECT_BODY", effectBody);
-		(VERTEXSHADER_SOURCE.to_string(), fragmentShaderSource)
+fn resolve_effect_program(graphic: &mut Graphic, effect: ShaderSpriteEffect) -> Option<Rc<ShaderProgram>> {
+	let effect_body = find_effect_body(effect)?;
+	graphic.resolve_shader_program(PROGRAM_GROUP_NAME, effect.get_name(), || {
+		let fragment_shader_source = FRAGMENTSHADER_TEMPLATE.replace("EFFECT_BODY", effect_body);
+		(VERTEXSHADER_SOURCE.to_string(), fragment_shader_source)
 	})
 }
 
 pub struct ShaderSprite {
 	sprite: Sprite,
 	effect: ShaderSpriteEffect,
-	effectProgress: f32,
-	effectTime: f32,
-	effectSeed: f32,
-	effectColor: Color,
-	effectParameters: [f32; 4],
+	effect_progress: f32,
+	effect_time: f32,
+	effect_seed: f32,
+	effect_color: Color,
+	effect_parameters: [f32; 4],
 }
 
 impl ShaderSprite {
@@ -756,137 +756,137 @@ impl ShaderSprite {
 	pub fn new() -> ShaderSprite {
 		ShaderSprite {
 			sprite: Sprite::new(),
-			effect: ShaderSpriteEffect::none,
-			effectProgress: 0.0,
-			effectTime: 0.0,
-			effectSeed: math::random() * 100.0,
-			effectColor: Color::white(),
-			effectParameters: [0.0, 0.0, 0.0, 0.0],
+			effect: ShaderSpriteEffect::None,
+			effect_progress: 0.0,
+			effect_time: 0.0,
+			effect_seed: math::random() * 100.0,
+			effect_color: Color::white(),
+			effect_parameters: [0.0, 0.0, 0.0, 0.0],
 		}
 	}
 
 	//==============================================================================
 	// 이미지와 함께 생성.
 	//==============================================================================
-	pub fn createWithImage(image: Rc<Image>) -> ShaderSprite {
-		let mut shaderSprite = ShaderSprite::new();
-		shaderSprite.sprite.setImage(Some(image));
-		shaderSprite
+	pub fn create_with_image(image: Rc<Image>) -> ShaderSprite {
+		let mut shader_sprite = ShaderSprite::new();
+		shader_sprite.sprite.set_image(Some(image));
+		shader_sprite
 	}
 
 	//==============================================================================
 	// 품은 Sprite 반환.
 	//==============================================================================
-	pub fn getSprite(&self) -> &Sprite {
+	pub fn get_sprite(&self) -> &Sprite {
 		&self.sprite
 	}
 
 	//==============================================================================
 	// 품은 Sprite 반환. (변경용)
 	//==============================================================================
-	pub fn getSpriteMut(&mut self) -> &mut Sprite {
+	pub fn get_sprite_mut(&mut self) -> &mut Sprite {
 		&mut self.sprite
 	}
 
 	//==============================================================================
 	// 효과 설정. (효과별 기본 파라미터 / 색으로 되돌린다)
 	//==============================================================================
-	pub fn setEffect(&mut self, effect: ShaderSpriteEffect) {
+	pub fn set_effect(&mut self, effect: ShaderSpriteEffect) {
 		self.effect = effect;
-		self.effectParameters = ShaderSprite::getDefaultParameters(effect);
-		self.effectColor = ShaderSprite::getDefaultColor(effect);
+		self.effect_parameters = ShaderSprite::get_default_parameters(effect);
+		self.effect_color = ShaderSprite::get_default_color(effect);
 	}
 
 	//==============================================================================
 	// 효과 반환.
 	//==============================================================================
-	pub fn getEffect(&self) -> ShaderSpriteEffect {
+	pub fn get_effect(&self) -> ShaderSpriteEffect {
 		self.effect
 	}
 
 	//==============================================================================
 	// 진행도 설정. (0 ~ 1)
 	//==============================================================================
-	pub fn setEffectProgress(&mut self, effectProgress: f32) {
-		self.effectProgress = effectProgress.clamp(0.0, 1.0);
+	pub fn set_effect_progress(&mut self, effect_progress: f32) {
+		self.effect_progress = effect_progress.clamp(0.0, 1.0);
 	}
 
 	//==============================================================================
 	// 진행도 반환.
 	//==============================================================================
-	pub fn getEffectProgress(&self) -> f32 {
-		self.effectProgress
+	pub fn get_effect_progress(&self) -> f32 {
+		self.effect_progress
 	}
 
 	//==============================================================================
 	// 효과 시간 설정.
 	//==============================================================================
-	pub fn setEffectTime(&mut self, effectTime: f32) {
-		self.effectTime = effectTime;
+	pub fn set_effect_time(&mut self, effect_time: f32) {
+		self.effect_time = effect_time;
 	}
 
 	//==============================================================================
 	// 효과 시간 반환.
 	//==============================================================================
-	pub fn getEffectTime(&self) -> f32 {
-		self.effectTime
+	pub fn get_effect_time(&self) -> f32 {
+		self.effect_time
 	}
 
 	//==============================================================================
 	// 시드 설정. (같은 노이즈 무늬를 원할 때 고정)
 	//==============================================================================
-	pub fn setEffectSeed(&mut self, effectSeed: f32) {
-		self.effectSeed = effectSeed;
+	pub fn set_effect_seed(&mut self, effect_seed: f32) {
+		self.effect_seed = effect_seed;
 	}
 
 	//==============================================================================
 	// 시드 반환.
 	//==============================================================================
-	pub fn getEffectSeed(&self) -> f32 {
-		self.effectSeed
+	pub fn get_effect_seed(&self) -> f32 {
+		self.effect_seed
 	}
 
 	//==============================================================================
 	// 효과 색 설정. (Color 또는 "#rrggbb" 같은 문자열)
 	//==============================================================================
-	pub fn setEffectColor(&mut self, color: impl Into<Color>) {
-		self.effectColor = color.into();
+	pub fn set_effect_color(&mut self, color: impl Into<Color>) {
+		self.effect_color = color.into();
 	}
 
 	//==============================================================================
 	// 효과 색 반환.
 	//==============================================================================
-	pub fn getEffectColor(&self) -> Color {
-		self.effectColor
+	pub fn get_effect_color(&self) -> Color {
+		self.effect_color
 	}
 
 	//==============================================================================
 	// 효과 파라미터 설정. (효과마다 뜻이 다르다. ShaderSpriteEffect 주석 참고, 원본의 y / z / w 기본값 0 은 직접 넘긴다)
 	//==============================================================================
-	pub fn setEffectParameters(&mut self, x: f32, y: f32, z: f32, w: f32) {
-		self.effectParameters = [x, y, z, w];
+	pub fn set_effect_parameters(&mut self, x: f32, y: f32, z: f32, w: f32) {
+		self.effect_parameters = [x, y, z, w];
 	}
 
 	//==============================================================================
 	// 효과 파라미터 반환.
 	//==============================================================================
-	pub fn getEffectParameters(&self) -> [f32; 4] {
-		self.effectParameters
+	pub fn get_effect_parameters(&self) -> [f32; 4] {
+		self.effect_parameters
 	}
 
 	//==============================================================================
 	// 효과 기본 파라미터 반환. (정적)
 	//==============================================================================
-	pub fn getDefaultParameters(effect: ShaderSpriteEffect) -> [f32; 4] {
+	pub fn get_default_parameters(effect: ShaderSpriteEffect) -> [f32; 4] {
 		DEFAULT_PARAMETER_TABLE[effect as usize].1
 	}
 
 	//==============================================================================
 	// 효과 기본 색 반환. (정적)
 	//==============================================================================
-	pub fn getDefaultColor(effect: ShaderSpriteEffect) -> Color {
-		let defaultColor = DEFAULT_COLOR_TABLE[effect as usize].1;
-		Color::create(defaultColor[0], defaultColor[1], defaultColor[2], defaultColor[3])
+	pub fn get_default_color(effect: ShaderSpriteEffect) -> Color {
+		let default_color = DEFAULT_COLOR_TABLE[effect as usize].1;
+		Color::create(default_color[0], default_color[1], default_color[2], default_color[3])
 	}
 }
 
@@ -911,40 +911,40 @@ impl DerefMut for ShaderSprite {
 }
 
 impl Component for ShaderSprite {
-	fn getComponentBase(&self) -> &ComponentBase {
-		self.sprite.getComponentBase()
+	fn get_component_base(&self) -> &ComponentBase {
+		self.sprite.get_component_base()
 	}
 
-	fn getComponentBaseMut(&mut self) -> &mut ComponentBase {
-		self.sprite.getComponentBaseMut()
+	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
+		self.sprite.get_component_base_mut()
 	}
 
-	fn getComponentType(&self) -> &'static str {
+	fn get_component_type(&self) -> &'static str {
 		"ShaderSprite"
 	}
 
 	// 효과 시간을 흘려야 하므로 Sprite 와 달리 tick 을 받는다.
-	fn isTickNeeded(&self) -> bool {
+	fn is_tick_needed(&self) -> bool {
 		true
 	}
 
 	// 효과는 이미지 쿼드 안에서만 그려지므로 Sprite 와 같다.
-	fn isDrawnInsideContent(&self) -> bool {
-		self.sprite.isDrawnInsideContent()
+	fn is_drawn_inside_content(&self) -> bool {
+		self.sprite.is_drawn_inside_content()
 	}
 
 	//==============================================================================
 	// 갱신. (효과 시간 누적)
 	//==============================================================================
-	fn tick(&mut self, _context: &mut ComponentContext, timeDelta: f32) {
-		self.effectTime += timeDelta;
+	fn tick(&mut self, _context: &mut ComponentContext, time_delta: f32) {
+		self.effect_time += time_delta;
 	}
 
 	//==============================================================================
 	// 출력. (효과가 있으면 프로그램을 바꿔 끼우고 Sprite 출력 경로를 그대로 탄다)
 	//==============================================================================
 	fn draw(&mut self, transform: &NodeTransform, graphic: &mut Graphic) {
-		let image = match self.sprite.getImage() {
+		let image = match self.sprite.get_image() {
 			Some(image) => {
 				image.clone()
 			}
@@ -953,50 +953,50 @@ impl Component for ShaderSprite {
 				return;
 			}
 		};
-		let effect = self.getEffect();
-		if effect == ShaderSpriteEffect::none {
+		let effect = self.get_effect();
+		if effect == ShaderSpriteEffect::None {
 			self.sprite.draw(transform, graphic);
 			return;
 		}
-		let shaderProgram = match resolveEffectProgram(graphic, effect) {
-			Some(shaderProgram) => {
-				shaderProgram
+		let shader_program = match resolve_effect_program(graphic, effect) {
+			Some(shader_program) => {
+				shader_program
 			}
 			None => {
 				self.sprite.draw(transform, graphic);
 				return;
 			}
 		};
-		graphic.setShaderProgramOverride(Some(shaderProgram.clone()));
+		graphic.set_shader_program_override(Some(shader_program.clone()));
 
 		// 효과 유니폼. (바꿔 끼운 프로그램이 사용 중이다)
-		let mut imageRect = self.sprite.getImageRect();
-		if imageRect.isZero() {
-			imageRect = Rect::create(0.0, 0.0, image.getWidth() as f32, image.getHeight() as f32);
+		let mut image_rect = self.sprite.get_image_rect();
+		if image_rect.is_zero() {
+			image_rect = Rect::create(0.0, 0.0, image.get_width() as f32, image.get_height() as f32);
 		}
-		let imageWidth = image.getWidth().max(1) as f32;
-		let imageHeight = image.getHeight().max(1) as f32;
-		let effectColor = self.getEffectColor();
-		let effectParameters = self.getEffectParameters();
-		let gl = graphic.getGL();
+		let image_width = image.get_width().max(1) as f32;
+		let image_height = image.get_height().max(1) as f32;
+		let effect_color = self.get_effect_color();
+		let effect_parameters = self.get_effect_parameters();
+		let gl = graphic.get_gl();
 		unsafe {
-			gl.uniform_1_f32(shaderProgram.getUniformLocation(gl, "effectTime").as_ref(), self.getEffectTime());
-			gl.uniform_1_f32(shaderProgram.getUniformLocation(gl, "effectProgress").as_ref(), self.getEffectProgress());
-			gl.uniform_1_f32(shaderProgram.getUniformLocation(gl, "effectSeed").as_ref(), self.getEffectSeed());
-			gl.uniform_4_f32(shaderProgram.getUniformLocation(gl, "effectColor").as_ref(), effectColor.red, effectColor.green, effectColor.blue, effectColor.alpha);
-			gl.uniform_4_f32(shaderProgram.getUniformLocation(gl, "effectParameters").as_ref(), effectParameters[0], effectParameters[1], effectParameters[2], effectParameters[3]);
+			gl.uniform_1_f32(shader_program.get_uniform_location(gl, "effectTime").as_ref(), self.get_effect_time());
+			gl.uniform_1_f32(shader_program.get_uniform_location(gl, "effectProgress").as_ref(), self.get_effect_progress());
+			gl.uniform_1_f32(shader_program.get_uniform_location(gl, "effectSeed").as_ref(), self.get_effect_seed());
+			gl.uniform_4_f32(shader_program.get_uniform_location(gl, "effectColor").as_ref(), effect_color.red, effect_color.green, effect_color.blue, effect_color.alpha);
+			gl.uniform_4_f32(shader_program.get_uniform_location(gl, "effectParameters").as_ref(), effect_parameters[0], effect_parameters[1], effect_parameters[2], effect_parameters[3]);
 			gl.uniform_4_f32(
-				shaderProgram.getUniformLocation(gl, "textureRect").as_ref(),
-				imageRect.position.x / imageWidth,
-				imageRect.position.y / imageHeight,
-				(imageRect.position.x + imageRect.size.x) / imageWidth,
-				(imageRect.position.y + imageRect.size.y) / imageHeight,
+				shader_program.get_uniform_location(gl, "textureRect").as_ref(),
+				image_rect.position.x / image_width,
+				image_rect.position.y / image_height,
+				(image_rect.position.x + image_rect.size.x) / image_width,
+				(image_rect.position.y + image_rect.size.y) / image_height,
 			);
-			gl.uniform_2_f32(shaderProgram.getUniformLocation(gl, "texelSize").as_ref(), 1.0 / imageWidth, 1.0 / imageHeight);
+			gl.uniform_2_f32(shader_program.get_uniform_location(gl, "texelSize").as_ref(), 1.0 / image_width, 1.0 / image_height);
 		}
 
 		self.sprite.draw(transform, graphic);
-		graphic.setShaderProgramOverride(None);
+		graphic.set_shader_program_override(None);
 	}
 }
 
@@ -1005,16 +1005,16 @@ mod tests {
 	use super::*;
 
 	//==============================================================================
-	// 표들이 열거형 선언 차례와 맞는지. (getName, 기본값 표는 효과 번호로 바로 찾는다)
+	// 표들이 열거형 선언 차례와 맞는지. (get_name, 기본값 표는 효과 번호로 바로 찾는다)
 	//==============================================================================
 	#[test]
-	fn tablesFollowEnumOrder() {
-		for (effectIndex, effect) in EFFECT_LIST.iter().enumerate() {
-			assert_eq!(*effect as usize, effectIndex);
-			assert_eq!(EFFECT_NAME_TABLE[effectIndex].0, *effect);
-			assert_eq!(DEFAULT_PARAMETER_TABLE[effectIndex].0, *effect);
-			assert_eq!(DEFAULT_COLOR_TABLE[effectIndex].0, *effect);
-			assert_eq!(ShaderSpriteEffect::fromName(effect.getName()), Some(*effect));
+	fn tables_follow_enum_order() {
+		for (effect_index, effect) in EFFECT_LIST.iter().enumerate() {
+			assert_eq!(*effect as usize, effect_index);
+			assert_eq!(EFFECT_NAME_TABLE[effect_index].0, *effect);
+			assert_eq!(DEFAULT_PARAMETER_TABLE[effect_index].0, *effect);
+			assert_eq!(DEFAULT_COLOR_TABLE[effect_index].0, *effect);
+			assert_eq!(ShaderSpriteEffect::from_name(effect.get_name()), Some(*effect));
 		}
 	}
 
@@ -1022,26 +1022,26 @@ mod tests {
 	// none 을 뺀 효과는 모두 본문이 있다.
 	//==============================================================================
 	#[test]
-	fn everyEffectHasBody() {
+	fn every_effect_has_body() {
 		for effect in EFFECT_LIST.iter() {
-			let hasBody = findEffectBody(*effect).is_some();
-			assert_eq!(hasBody, *effect != ShaderSpriteEffect::none, "{:?}", effect);
+			let has_body = find_effect_body(*effect).is_some();
+			assert_eq!(has_body, *effect != ShaderSpriteEffect::None, "{:?}", effect);
 		}
 	}
 
 	//==============================================================================
-	// setEffect 는 기본 파라미터 / 색으로 되돌리고, 진행도는 0 ~ 1 로 자른다.
+	// set_effect 는 기본 파라미터 / 색으로 되돌리고, 진행도는 0 ~ 1 로 자른다.
 	//==============================================================================
 	#[test]
-	fn setEffectResetsDefaults() {
-		let mut shaderSprite = ShaderSprite::new();
-		shaderSprite.setEffectParameters(9.0, 9.0, 9.0, 9.0);
-		shaderSprite.setEffect(ShaderSpriteEffect::glow);
-		assert_eq!(shaderSprite.getEffectParameters(), [6.0, 0.0, 0.0, 0.0]);
-		assert_eq!(shaderSprite.getEffectColor(), Color::create(1.0, 0.85, 0.4, 1.0));
-		shaderSprite.setEffectProgress(1.5);
-		assert_eq!(shaderSprite.getEffectProgress(), 1.0);
-		shaderSprite.setEffectProgress(-1.0);
-		assert_eq!(shaderSprite.getEffectProgress(), 0.0);
+	fn set_effect_resets_defaults() {
+		let mut shader_sprite = ShaderSprite::new();
+		shader_sprite.set_effect_parameters(9.0, 9.0, 9.0, 9.0);
+		shader_sprite.set_effect(ShaderSpriteEffect::Glow);
+		assert_eq!(shader_sprite.get_effect_parameters(), [6.0, 0.0, 0.0, 0.0]);
+		assert_eq!(shader_sprite.get_effect_color(), Color::create(1.0, 0.85, 0.4, 1.0));
+		shader_sprite.set_effect_progress(1.5);
+		assert_eq!(shader_sprite.get_effect_progress(), 1.0);
+		shader_sprite.set_effect_progress(-1.0);
+		assert_eq!(shader_sprite.get_effect_progress(), 0.0);
 	}
 }

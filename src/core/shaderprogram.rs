@@ -10,48 +10,48 @@ use std::collections::HashMap;
 
 pub struct ShaderProgram {
 	program: crate::core::graphic::GlProgram,
-	uniformLocationTable: RefCell<HashMap<String, Option<crate::core::graphic::GlUniformLocation>>>,
-	attributeLocationTable: RefCell<HashMap<String, Option<u32>>>,
+	uniform_location_table: RefCell<HashMap<String, Option<crate::core::graphic::GlUniformLocation>>>,
+	attribute_location_table: RefCell<HashMap<String, Option<u32>>>,
 }
 
 impl ShaderProgram {
 	//==============================================================================
 	// 생성. (컴파일 / 링크 실패면 로그를 담은 오류)
 	//==============================================================================
-	pub fn new(gl: &glow::Context, vertexShaderSource: &str, fragmentShaderSource: &str) -> Result<ShaderProgram, String> {
-		ShaderProgram::createWithAttributeLocations(gl, vertexShaderSource, fragmentShaderSource, &[])
+	pub fn new(gl: &glow::Context, vertex_shader_source: &str, fragment_shader_source: &str) -> Result<ShaderProgram, String> {
+		ShaderProgram::create_with_attribute_locations(gl, vertex_shader_source, fragment_shader_source, &[])
 	}
 
 	//==============================================================================
-	// 어트리뷰트 위치를 링크 전에 고정해 생성. (원본 생성자의 attributeLocationTable 인자, 다른 프로그램의 버텍스 어레이를 함께 쓸 때)
+	// 어트리뷰트 위치를 링크 전에 고정해 생성. (원본 생성자의 attribute_location_table 인자, 다른 프로그램의 버텍스 어레이를 함께 쓸 때)
 	//==============================================================================
-	pub fn createWithAttributeLocations(gl: &glow::Context, vertexShaderSource: &str, fragmentShaderSource: &str, attributeLocationList: &[(&str, u32)]) -> Result<ShaderProgram, String> {
-		let desktopVertexShaderSource = convertToDesktopSource(vertexShaderSource);
-		let desktopFragmentShaderSource = convertToDesktopSource(fragmentShaderSource);
+	pub fn create_with_attribute_locations(gl: &glow::Context, vertex_shader_source: &str, fragment_shader_source: &str, attribute_location_list: &[(&str, u32)]) -> Result<ShaderProgram, String> {
+		let desktop_vertex_shader_source = convert_to_desktop_source(vertex_shader_source);
+		let desktop_fragment_shader_source = convert_to_desktop_source(fragment_shader_source);
 		unsafe {
-			let vertexShader = compileShader(gl, glow::VERTEX_SHADER, &desktopVertexShaderSource)?;
-			let fragmentShader = compileShader(gl, glow::FRAGMENT_SHADER, &desktopFragmentShaderSource)?;
+			let vertex_shader = compile_shader(gl, glow::VERTEX_SHADER, &desktop_vertex_shader_source)?;
+			let fragment_shader = compile_shader(gl, glow::FRAGMENT_SHADER, &desktop_fragment_shader_source)?;
 			let program = gl.create_program()?;
-			gl.attach_shader(program, vertexShader);
-			gl.attach_shader(program, fragmentShader);
-			for (attributeName, attributeLocation) in attributeLocationList {
-				gl.bind_attrib_location(program, *attributeLocation, attributeName);
+			gl.attach_shader(program, vertex_shader);
+			gl.attach_shader(program, fragment_shader);
+			for (attribute_name, attribute_location) in attribute_location_list {
+				gl.bind_attrib_location(program, *attribute_location, attribute_name);
 			}
 			gl.link_program(program);
-			let isLinked = gl.get_program_link_status(program);
-			gl.detach_shader(program, vertexShader);
-			gl.detach_shader(program, fragmentShader);
-			gl.delete_shader(vertexShader);
-			gl.delete_shader(fragmentShader);
-			if !isLinked {
-				let programInfoLog = gl.get_program_info_log(program);
+			let is_linked = gl.get_program_link_status(program);
+			gl.detach_shader(program, vertex_shader);
+			gl.detach_shader(program, fragment_shader);
+			gl.delete_shader(vertex_shader);
+			gl.delete_shader(fragment_shader);
+			if !is_linked {
+				let program_info_log = gl.get_program_info_log(program);
 				gl.delete_program(program);
-				return Err(format!("셰이더 프로그램 링크 실패: {}", programInfoLog));
+				return Err(format!("셰이더 프로그램 링크 실패: {}", program_info_log));
 			}
 			Ok(ShaderProgram {
 				program,
-				uniformLocationTable: RefCell::new(HashMap::new()),
-				attributeLocationTable: RefCell::new(HashMap::new()),
+				uniform_location_table: RefCell::new(HashMap::new()),
+				attribute_location_table: RefCell::new(HashMap::new()),
 			})
 		}
 	}
@@ -59,7 +59,7 @@ impl ShaderProgram {
 	//==============================================================================
 	// 사용. (원본 use(). 러스트에서 use 는 예약어라 이름을 바꿨다)
 	//==============================================================================
-	pub fn useProgram(&self, gl: &glow::Context) {
+	pub fn use_program(&self, gl: &glow::Context) {
 		unsafe {
 			gl.use_program(Some(self.program));
 		}
@@ -70,38 +70,38 @@ impl ShaderProgram {
 	//==============================================================================
 	// 웹 판 때문에 clone 을 쓴다. (데스크탑에서는 Copy 라 clippy 가 말린다)
 	#[allow(clippy::clone_on_copy)]
-	pub fn getUniformLocation(&self, gl: &glow::Context, name: &str) -> Option<crate::core::graphic::GlUniformLocation> {
-		let mut uniformLocationTable = self.uniformLocationTable.borrow_mut();
-		if let Some(location) = uniformLocationTable.get(name) {
+	pub fn get_uniform_location(&self, gl: &glow::Context, name: &str) -> Option<crate::core::graphic::GlUniformLocation> {
+		let mut uniform_location_table = self.uniform_location_table.borrow_mut();
+		if let Some(location) = uniform_location_table.get(name) {
 			// 웹의 위치 객체는 Copy 가 아니라 복제한다. (데스크탑은 정수 하나라 복사와 같다)
 			return location.clone();
 		}
 		let location = unsafe {
 			gl.get_uniform_location(self.program, name)
 		};
-		uniformLocationTable.insert(name.to_string(), location.clone());
+		uniform_location_table.insert(name.to_string(), location.clone());
 		location
 	}
 
 	//==============================================================================
 	// 어트리뷰트 위치 반환.
 	//==============================================================================
-	pub fn getAttributeLocation(&self, gl: &glow::Context, name: &str) -> Option<u32> {
-		let mut attributeLocationTable = self.attributeLocationTable.borrow_mut();
-		if let Some(location) = attributeLocationTable.get(name) {
+	pub fn get_attribute_location(&self, gl: &glow::Context, name: &str) -> Option<u32> {
+		let mut attribute_location_table = self.attribute_location_table.borrow_mut();
+		if let Some(location) = attribute_location_table.get(name) {
 			return *location;
 		}
 		let location = unsafe {
 			gl.get_attrib_location(self.program, name)
 		};
-		attributeLocationTable.insert(name.to_string(), location);
+		attribute_location_table.insert(name.to_string(), location);
 		location
 	}
 
 	//==============================================================================
 	// GL 프로그램 반환.
 	//==============================================================================
-	pub fn getProgram(&self) -> crate::core::graphic::GlProgram {
+	pub fn get_program(&self) -> crate::core::graphic::GlProgram {
 		self.program
 	}
 }
@@ -110,26 +110,26 @@ impl ShaderProgram {
 // GLSL ES 3.00 머리를 데스크탑 GLSL 3.30 으로 바꾼다. (웹 WebGL2 에서는 원본 그대로)
 //==============================================================================
 #[cfg(not(target_arch = "wasm32"))]
-fn convertToDesktopSource(source: &str) -> String {
+fn convert_to_desktop_source(source: &str) -> String {
 	source.replacen("#version 300 es", "#version 330 core", 1)
 }
 
 #[cfg(target_arch = "wasm32")]
-fn convertToDesktopSource(source: &str) -> String {
+fn convert_to_desktop_source(source: &str) -> String {
 	source.to_string()
 }
 
 //==============================================================================
 // 셰이더 하나 컴파일.
 //==============================================================================
-unsafe fn compileShader(gl: &glow::Context, shaderType: u32, source: &str) -> Result<crate::core::graphic::GlShader, String> {
-	let shader = gl.create_shader(shaderType)?;
+unsafe fn compile_shader(gl: &glow::Context, shader_type: u32, source: &str) -> Result<crate::core::graphic::GlShader, String> {
+	let shader = gl.create_shader(shader_type)?;
 	gl.shader_source(shader, source);
 	gl.compile_shader(shader);
 	if !gl.get_shader_compile_status(shader) {
-		let shaderInfoLog = gl.get_shader_info_log(shader);
+		let shader_info_log = gl.get_shader_info_log(shader);
 		gl.delete_shader(shader);
-		return Err(format!("셰이더 컴파일 실패: {}", shaderInfoLog));
+		return Err(format!("셰이더 컴파일 실패: {}", shader_info_log));
 	}
 	Ok(shader)
 }

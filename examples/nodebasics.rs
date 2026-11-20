@@ -3,7 +3,6 @@
 // - 씬의 노드 트리에 노드를 만들고 Paint, Text 와 직접 만든 Spin 컴포넌트를 붙인다.
 // - 실행: cargo run --example nodebasics
 //==============================================================================
-#![allow(non_snake_case)]
 
 use vanilla::{Component, ComponentBase, ComponentContext, Engine, EngineConfiguration, Graphic, Paint, Pivot, Scene, SceneBase, Text, TextAlign, Vector2};
 
@@ -11,30 +10,30 @@ use vanilla::{Component, ComponentBase, ComponentContext, Engine, EngineConfigur
 // 노드를 돌리는 컴포넌트.
 //==============================================================================
 struct Spin {
-	componentBase: ComponentBase,
-	degreesPerSecond: f32,
+	component_base: ComponentBase,
+	degrees_per_second: f32,
 }
 
 impl Component for Spin {
-	fn getComponentBase(&self) -> &ComponentBase {
-		&self.componentBase
+	fn get_component_base(&self) -> &ComponentBase {
+		&self.component_base
 	}
 
-	fn getComponentBaseMut(&mut self) -> &mut ComponentBase {
-		&mut self.componentBase
+	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
+		&mut self.component_base
 	}
 
-	fn getComponentType(&self) -> &'static str {
+	fn get_component_type(&self) -> &'static str {
 		"Spin"
 	}
 
 	//==============================================================================
 	// 주기적 갱신. (자기 노드를 돌린다)
 	//==============================================================================
-	fn tick(&mut self, context: &mut ComponentContext, timeDelta: f32) {
-		let transform = context.getTransformMut();
-		let localRotation = transform.getLocalRotation();
-		transform.setLocalRotation(localRotation + self.degreesPerSecond * timeDelta);
+	fn tick(&mut self, context: &mut ComponentContext, time_delta: f32) {
+		let transform = context.get_transform_mut();
+		let local_rotation = transform.get_local_rotation();
+		transform.set_local_rotation(local_rotation + self.degrees_per_second * time_delta);
 	}
 }
 
@@ -42,56 +41,56 @@ impl Component for Spin {
 // 첫 씬.
 //==============================================================================
 struct MainScene {
-	sceneBase: SceneBase,
+	scene_base: SceneBase,
 }
 
 impl Scene for MainScene {
-	fn getSceneBase(&self) -> &SceneBase {
-		&self.sceneBase
+	fn get_scene_base(&self) -> &SceneBase {
+		&self.scene_base
 	}
 
-	fn getSceneBaseMut(&mut self) -> &mut SceneBase {
-		&mut self.sceneBase
+	fn get_scene_base_mut(&mut self) -> &mut SceneBase {
+		&mut self.scene_base
 	}
 
 	//==============================================================================
 	// 초기화. (노드 트리를 만든다)
 	//==============================================================================
 	fn initialize(&mut self, _engine: &mut Engine) {
-		self.sceneBase.setSceneBackgroundColor("#1e1915");
-		let rootId = self.sceneBase.getRootId();
-		let nodeTree = self.sceneBase.getNodeTreeMut();
+		self.scene_base.set_scene_background_color("#1e1915");
+		let root_id = self.scene_base.get_root_id();
+		let node_tree = self.scene_base.get_node_tree_mut();
 
 		// 도는 사각형 셋.
-		for squareIndex in 0..3 {
-			let squareId = nodeTree.createChild(rootId, "square");
-			let squareNode = &mut nodeTree[squareId];
-			squareNode.setLocalPosition(Vector2::create(340.0 + squareIndex as f32 * 300.0, 380.0));
-			squareNode.setContentSize(Vector2::create(160.0, 160.0));
-			squareNode.setPivot(Pivot::middleCenter);
-			squareNode.addComponent(Paint::createWithColor("#f3e5ab"));
-			squareNode.addComponent(Spin {
-				componentBase: ComponentBase::new(),
-				degreesPerSecond: 45.0 * (squareIndex + 1) as f32,
+		for square_index in 0..3 {
+			let square_id = node_tree.create_child(root_id, "square");
+			let square_node = &mut node_tree[square_id];
+			square_node.set_local_position(Vector2::create(340.0 + square_index as f32 * 300.0, 380.0));
+			square_node.set_content_size(Vector2::create(160.0, 160.0));
+			square_node.set_pivot(Pivot::MIDDLE_CENTER);
+			square_node.add_component(Paint::create_with_color("#f3e5ab"));
+			square_node.add_component(Spin {
+				component_base: ComponentBase::new(),
+				degrees_per_second: 45.0 * (square_index + 1) as f32,
 			});
 		}
 
 		// 제목 글자.
-		let titleId = nodeTree.createChild(rootId, "title");
-		let titleNode = &mut nodeTree[titleId];
-		titleNode.setLocalPosition(Vector2::create(64.0, 64.0));
-		titleNode.setPivot(Pivot::topLeft);
-		titleNode.setContentSize(Vector2::create(800.0, 60.0));
-		let titleText = titleNode.addComponent(Text::createWithText("바닐라엔진", 48.0));
-		titleText.setTextColor("#f3e5ab");
-		titleText.setTextAlign(TextAlign::left);
+		let title_id = node_tree.create_child(root_id, "title");
+		let title_node = &mut node_tree[title_id];
+		title_node.set_local_position(Vector2::create(64.0, 64.0));
+		title_node.set_pivot(Pivot::TOP_LEFT);
+		title_node.set_content_size(Vector2::create(800.0, 60.0));
+		let title_text = title_node.add_component(Text::create_with_text("바닐라엔진", 48.0));
+		title_text.set_text_color("#f3e5ab");
+		title_text.set_text_align(TextAlign::Left);
 	}
 
 	//==============================================================================
 	// 이전 출력. (배경을 칠하고 기준 해상도 좌표계를 건다)
 	//==============================================================================
-	fn preDraw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
-		self.sceneBase.drawSceneBackground(engine, graphic);
+	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(engine, graphic);
 	}
 }
 
@@ -99,14 +98,14 @@ impl Scene for MainScene {
 // 시작.
 //==============================================================================
 fn main() {
-	let mut engineConfiguration = EngineConfiguration::new();
-	engineConfiguration.title = String::from("노드와 컴포넌트 (바닐라엔진)");
-	engineConfiguration.referenceResolutionSize = Vector2::create(1280.0, 720.0);
-	let engine = Engine::new(engineConfiguration);
-	let mainScene = MainScene {
-		sceneBase: SceneBase::new(),
+	let mut engine_configuration = EngineConfiguration::new();
+	engine_configuration.title = String::from("노드와 컴포넌트 (바닐라엔진)");
+	engine_configuration.reference_resolution_size = Vector2::create(1280.0, 720.0);
+	let engine = Engine::new(engine_configuration);
+	let main_scene = MainScene {
+		scene_base: SceneBase::new(),
 	};
-	if let Err(error) = engine.run(Box::new(mainScene)) {
+	if let Err(error) = engine.run(Box::new(main_scene)) {
 		eprintln!("{}", error);
 		std::process::exit(1);
 	}

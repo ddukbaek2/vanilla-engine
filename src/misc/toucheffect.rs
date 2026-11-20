@@ -3,12 +3,12 @@
 // - 원본 misc/toucheffect.js 를 옮긴 것이다. 누른 자리에 하늘색 빛 입자를 흩뿌리고 0.4 초 동안 흐려지며 퍼지게 한다.
 // - 입자는 흰색 방사형 그라디언트 그림(64x64, 한 번만 만든다)을 하늘색(rgb 100, 200, 255)으로 틴트하고 더하기(lighter) 블렌드로 그린다.
 // - 사용:
-//     let touchEffectId = nodeTree.createChild(rootId, "TouchEffect");
-//     nodeTree[touchEffectId].setPivot(Pivot::topLeft);
-//     nodeTree[touchEffectId].addComponent(TouchEffect::new());
-//     // 누를 때: nodeTree[touchEffectId].getComponentMut::<TouchEffect>().unwrap().createTouchParticle(x, y);
+//     let touch_effect_id = node_tree.create_child(root_id, "TouchEffect");
+//     node_tree[touch_effect_id].set_pivot(Pivot::TOP_LEFT);
+//     node_tree[touch_effect_id].add_component(TouchEffect::new());
+//     // 누를 때: node_tree[touch_effect_id].get_component_mut::<TouchEffect>().unwrap().create_touch_particle(x, y);
 // - 원본과 다른 점:
-//   원본은 WorldNode 를 상속한 노드이고 pushTransform / popTransform 에서 블렌드를 바꿔 자식까지 더하기로 그린다.
+//   원본은 WorldNode 를 상속한 노드이고 push_transform / pop_transform 에서 블렌드를 바꿔 자식까지 더하기로 그린다.
 //   러스트 판은 노드에 붙는 컴포넌트라 자기 draw 동안만 블렌드를 바꾸고, 끝나면 앞의 블렌드로 되돌린다. (자식은 원래 블렌드로 그린다)
 //   그라디언트는 오프스크린 캔버스 대신 픽셀로 직접 만든 Image 다.
 //==============================================================================
@@ -34,29 +34,29 @@ thread_local! {
 //==============================================================================
 // 방사형 그라디언트 그림 반환. (가운데 불투명 흰색 → 가장자리 투명, 직선 보간. 없으면 한 번 만든다)
 //==============================================================================
-fn getParticleGradientImage() -> Rc<Image> {
-	PARTICLE_GRADIENT_IMAGE.with(|imageCell| {
-		let mut imageOption = imageCell.borrow_mut();
-		let gradientImage = imageOption.get_or_insert_with(|| {
-			let imageSize = PARTICLE_GRADIENT_IMAGE_SIZE as usize;
-			let halfSize = imageSize as f32 * 0.5;
-			let mut pixels = vec![0u8; imageSize * imageSize * 4];
-			for pixelY in 0..imageSize {
-				for pixelX in 0..imageSize {
-					let deltaX = pixelX as f32 + 0.5 - halfSize;
-					let deltaY = pixelY as f32 + 0.5 - halfSize;
-					let distanceRatio = (deltaX * deltaX + deltaY * deltaY).sqrt() / halfSize;
-					let alpha = math::clamp01(1.0 - distanceRatio);
-					let pixelIndex = (pixelY * imageSize + pixelX) * 4;
-					pixels[pixelIndex] = 255;
-					pixels[pixelIndex + 1] = 255;
-					pixels[pixelIndex + 2] = 255;
-					pixels[pixelIndex + 3] = (alpha * 255.0).round() as u8;
+fn get_particle_gradient_image() -> Rc<Image> {
+	PARTICLE_GRADIENT_IMAGE.with(|image_cell| {
+		let mut image_option = image_cell.borrow_mut();
+		let gradient_image = image_option.get_or_insert_with(|| {
+			let image_size = PARTICLE_GRADIENT_IMAGE_SIZE as usize;
+			let half_size = image_size as f32 * 0.5;
+			let mut pixels = vec![0u8; image_size * image_size * 4];
+			for pixel_y in 0..image_size {
+				for pixel_x in 0..image_size {
+					let delta_x = pixel_x as f32 + 0.5 - half_size;
+					let delta_y = pixel_y as f32 + 0.5 - half_size;
+					let distance_ratio = (delta_x * delta_x + delta_y * delta_y).sqrt() / half_size;
+					let alpha = math::clamp01(1.0 - distance_ratio);
+					let pixel_index = (pixel_y * image_size + pixel_x) * 4;
+					pixels[pixel_index] = 255;
+					pixels[pixel_index + 1] = 255;
+					pixels[pixel_index + 2] = 255;
+					pixels[pixel_index + 3] = (alpha * 255.0).round() as u8;
 				}
 			}
-			Image::createFromPixels(PARTICLE_GRADIENT_IMAGE_SIZE, PARTICLE_GRADIENT_IMAGE_SIZE, pixels)
+			Image::create_from_pixels(PARTICLE_GRADIENT_IMAGE_SIZE, PARTICLE_GRADIENT_IMAGE_SIZE, pixels)
 		});
-		gradientImage.clone()
+		gradient_image.clone()
 	})
 }
 
@@ -68,7 +68,7 @@ pub struct TouchParticle {
 	pub position: Vector2,
 	pub velocity: Vector2,
 	pub life: f32,
-	pub maxLife: f32,
+	pub max_life: f32,
 	pub radius: f32,
 }
 
@@ -81,7 +81,7 @@ impl TouchParticle {
 			position: Vector2::zero(),
 			velocity: Vector2::zero(),
 			life: 1.0,
-			maxLife: 1.0,
+			max_life: 1.0,
 			radius: 0.0,
 		}
 	}
@@ -100,8 +100,8 @@ impl Default for TouchParticle {
 // 터치 효과 컴포넌트.
 //==============================================================================
 pub struct TouchEffect {
-	componentBase: ComponentBase,
-	touchParticles: Vec<TouchParticle>,
+	component_base: ComponentBase,
+	touch_particles: Vec<TouchParticle>,
 }
 
 impl TouchEffect {
@@ -110,37 +110,37 @@ impl TouchEffect {
 	//==============================================================================
 	pub fn new() -> TouchEffect {
 		TouchEffect {
-			componentBase: ComponentBase::new(),
-			touchParticles: Vec::new(),
+			component_base: ComponentBase::new(),
+			touch_particles: Vec::new(),
 		}
 	}
 
 	//==============================================================================
 	// 터치 입자 만들기. (노드 영역 좌표, ±5 픽셀 흩뿌림, ±60 픽셀/초 속도, 반지름 10 ~ 35)
 	//==============================================================================
-	pub fn createTouchParticle(&mut self, x: f32, y: f32) {
+	pub fn create_touch_particle(&mut self, x: f32, y: f32) {
 		let mut particle = TouchParticle::new();
 		particle.position = Vector2::create(x + (math::random() - 0.5) * 10.0, y + (math::random() - 0.5) * 10.0);
 		particle.velocity = Vector2::create((math::random() - 0.5) * 120.0, (math::random() - 0.5) * 120.0);
 		particle.life = 1.0;
-		particle.maxLife = 1.0;
+		particle.max_life = 1.0;
 		particle.radius = math::random() * 25.0 + 10.0;
-		self.touchParticles.push(particle);
+		self.touch_particles.push(particle);
 	}
 
 	//==============================================================================
 	// 터치 입자 갱신. (수명이 초당 2.5 씩 줄고, 다 되면 뺀다)
 	//==============================================================================
-	pub fn updateTouchParticles(&mut self, timeDelta: f32) {
-		let mut particleIndex = self.touchParticles.len();
-		while particleIndex > 0 {
-			particleIndex -= 1;
-			let particle = &mut self.touchParticles[particleIndex];
-			particle.life -= timeDelta * 2.5;
-			particle.position.x += particle.velocity.x * timeDelta;
-			particle.position.y += particle.velocity.y * timeDelta;
+	pub fn update_touch_particles(&mut self, time_delta: f32) {
+		let mut particle_index = self.touch_particles.len();
+		while particle_index > 0 {
+			particle_index -= 1;
+			let particle = &mut self.touch_particles[particle_index];
+			particle.life -= time_delta * 2.5;
+			particle.position.x += particle.velocity.x * time_delta;
+			particle.position.y += particle.velocity.y * time_delta;
 			if particle.life <= 0.0 {
-				self.touchParticles.remove(particleIndex);
+				self.touch_particles.remove(particle_index);
 			}
 		}
 	}
@@ -148,30 +148,30 @@ impl TouchEffect {
 	//==============================================================================
 	// 터치 입자 출력. (흰색 그라디언트를 입자 색으로 틴트하고, 남은 수명만큼 흐리게)
 	//==============================================================================
-	pub fn drawTouchParticles(&self, graphic: &mut Graphic) {
-		if self.touchParticles.is_empty() {
+	pub fn draw_touch_particles(&self, graphic: &mut Graphic) {
+		if self.touch_particles.is_empty() {
 			return;
 		}
-		let gradientImage = getParticleGradientImage();
-		let particleColor = Color::createFromRGBA("rgb(100, 200, 255)");
-		let originalAlpha = graphic.getGlobalAlpha();
-		graphic.setImageTintColor(Some(particleColor));
-		for particle in self.touchParticles.iter() {
-			let opacity = (particle.life / particle.maxLife).max(0.0);
-			graphic.setGlobalAlpha(originalAlpha * opacity * 0.8);
-			let drawPosition = Vector2::create(particle.position.x - particle.radius, particle.position.y - particle.radius);
-			let drawSize = Vector2::create(particle.radius * 2.0, particle.radius * 2.0);
-			graphic.drawImage(&gradientImage, drawPosition, drawSize);
+		let gradient_image = get_particle_gradient_image();
+		let particle_color = Color::create_from_rgba("rgb(100, 200, 255)");
+		let original_alpha = graphic.get_global_alpha();
+		graphic.set_image_tint_color(Some(particle_color));
+		for particle in self.touch_particles.iter() {
+			let opacity = (particle.life / particle.max_life).max(0.0);
+			graphic.set_global_alpha(original_alpha * opacity * 0.8);
+			let draw_position = Vector2::create(particle.position.x - particle.radius, particle.position.y - particle.radius);
+			let draw_size = Vector2::create(particle.radius * 2.0, particle.radius * 2.0);
+			graphic.draw_image(&gradient_image, draw_position, draw_size);
 		}
-		graphic.setImageTintColor(None);
-		graphic.setGlobalAlpha(originalAlpha);
+		graphic.set_image_tint_color(None);
+		graphic.set_global_alpha(original_alpha);
 	}
 
 	//==============================================================================
 	// 살아 있는 입자 수. (러스트 판에서 더한 것)
 	//==============================================================================
-	pub fn getParticleCount(&self) -> usize {
-		self.touchParticles.len()
+	pub fn get_particle_count(&self) -> usize {
+		self.touch_particles.len()
 	}
 }
 
@@ -188,42 +188,42 @@ impl Component for TouchEffect {
 	//==============================================================================
 	// 공통 상태 반환.
 	//==============================================================================
-	fn getComponentBase(&self) -> &ComponentBase {
-		&self.componentBase
+	fn get_component_base(&self) -> &ComponentBase {
+		&self.component_base
 	}
 
 	//==============================================================================
 	// 공통 상태 반환. (변경용)
 	//==============================================================================
-	fn getComponentBaseMut(&mut self) -> &mut ComponentBase {
-		&mut self.componentBase
+	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
+		&mut self.component_base
 	}
 
 	//==============================================================================
 	// 컴포넌트 이름.
 	//==============================================================================
-	fn getComponentType(&self) -> &'static str {
+	fn get_component_type(&self) -> &'static str {
 		"TouchEffect"
 	}
 
 	//==============================================================================
 	// 갱신.
 	//==============================================================================
-	fn tick(&mut self, _context: &mut ComponentContext, timeDelta: f32) {
-		self.updateTouchParticles(timeDelta);
+	fn tick(&mut self, _context: &mut ComponentContext, time_delta: f32) {
+		self.update_touch_particles(time_delta);
 	}
 
 	//==============================================================================
 	// 출력. (더하기 블렌드로 그리고 앞의 블렌드로 되돌린다)
 	//==============================================================================
 	fn draw(&mut self, _transform: &NodeTransform, graphic: &mut Graphic) {
-		if self.touchParticles.is_empty() {
+		if self.touch_particles.is_empty() {
 			return;
 		}
-		let originalBlendMode = graphic.getBlendMode();
-		graphic.setBlendMode(BlendMode::lighter);
-		self.drawTouchParticles(graphic);
-		graphic.setBlendMode(originalBlendMode);
+		let original_blend_mode = graphic.get_blend_mode();
+		graphic.set_blend_mode(BlendMode::Lighter);
+		self.draw_touch_particles(graphic);
+		graphic.set_blend_mode(original_blend_mode);
 	}
 }
 
@@ -238,36 +238,36 @@ mod tests {
 	// 입자는 흩뿌린 범위 안에서 생기고, 0.4 초 뒤 사라진다.
 	//==============================================================================
 	#[test]
-	fn particlesSpawnAndExpire() {
-		let mut touchEffect = TouchEffect::new();
+	fn particles_spawn_and_expire() {
+		let mut touch_effect = TouchEffect::new();
 		for _ in 0..10 {
-			touchEffect.createTouchParticle(100.0, 50.0);
+			touch_effect.create_touch_particle(100.0, 50.0);
 		}
-		assert_eq!(touchEffect.getParticleCount(), 10);
-		for particle in touchEffect.touchParticles.iter() {
+		assert_eq!(touch_effect.get_particle_count(), 10);
+		for particle in touch_effect.touch_particles.iter() {
 			assert!((particle.position.x - 100.0).abs() <= 5.0);
 			assert!((particle.position.y - 50.0).abs() <= 5.0);
 			assert!(particle.radius >= 10.0 && particle.radius < 35.0);
 		}
-		touchEffect.updateTouchParticles(0.2);
-		assert_eq!(touchEffect.getParticleCount(), 10);
-		assert!((touchEffect.touchParticles[0].life - 0.5).abs() < 0.0001);
-		touchEffect.updateTouchParticles(0.2);
-		assert_eq!(touchEffect.getParticleCount(), 0);
+		touch_effect.update_touch_particles(0.2);
+		assert_eq!(touch_effect.get_particle_count(), 10);
+		assert!((touch_effect.touch_particles[0].life - 0.5).abs() < 0.0001);
+		touch_effect.update_touch_particles(0.2);
+		assert_eq!(touch_effect.get_particle_count(), 0);
 	}
 
 	//==============================================================================
 	// 그라디언트 그림은 가운데가 불투명하고 모서리는 투명하며, 한 번만 만든다.
 	//==============================================================================
 	#[test]
-	fn gradientImageIsRadial() {
-		let gradientImage = getParticleGradientImage();
-		assert_eq!(gradientImage.getWidth(), PARTICLE_GRADIENT_IMAGE_SIZE);
-		let pixels = gradientImage.getPixels();
-		let rowStride = PARTICLE_GRADIENT_IMAGE_SIZE as usize * 4;
-		let centerIndex = 32 * rowStride + 32 * 4;
-		assert!(pixels[centerIndex + 3] >= 245);
+	fn gradient_image_is_radial() {
+		let gradient_image = get_particle_gradient_image();
+		assert_eq!(gradient_image.get_width(), PARTICLE_GRADIENT_IMAGE_SIZE);
+		let pixels = gradient_image.get_pixels();
+		let row_stride = PARTICLE_GRADIENT_IMAGE_SIZE as usize * 4;
+		let center_index = 32 * row_stride + 32 * 4;
+		assert!(pixels[center_index + 3] >= 245);
 		assert_eq!(pixels[3], 0);
-		assert!(Rc::ptr_eq(&gradientImage, &getParticleGradientImage()));
+		assert!(Rc::ptr_eq(&gradient_image, &get_particle_gradient_image()));
 	}
 }

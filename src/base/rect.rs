@@ -30,21 +30,21 @@ impl Rect {
 	//==============================================================================
 	// 모든 값이 0 인지.
 	//==============================================================================
-	pub fn isZero(&self) -> bool {
+	pub fn is_zero(&self) -> bool {
 		self.position.x == 0.0 && self.position.y == 0.0 && self.size.x == 0.0 && self.size.y == 0.0
 	}
 
 	//==============================================================================
 	// 너비.
 	//==============================================================================
-	pub fn getWidth(&self) -> f32 {
+	pub fn get_width(&self) -> f32 {
 		self.size.x
 	}
 
 	//==============================================================================
 	// 높이.
 	//==============================================================================
-	pub fn getHeight(&self) -> f32 {
+	pub fn get_height(&self) -> f32 {
 		self.size.y
 	}
 
@@ -52,19 +52,19 @@ impl Rect {
 	// 점이 안에 있는지.
 	//==============================================================================
 	pub fn contains(&self, point: Vector2) -> bool {
-		let rightX = self.position.x + self.size.x;
-		let bottomY = self.position.y + self.size.y;
-		point.x >= self.position.x && point.x <= rightX && point.y >= self.position.y && point.y <= bottomY
+		let right_x = self.position.x + self.size.x;
+		let bottom_y = self.position.y + self.size.y;
+		point.x >= self.position.x && point.x <= right_x && point.y >= self.position.y && point.y <= bottom_y
 	}
 
 	//==============================================================================
 	// 다른 사각형과 겹치는지.
 	//==============================================================================
 	pub fn intersects(&self, other: &Rect) -> bool {
-		let rightX = self.position.x + self.size.x;
-		let bottomY = self.position.y + self.size.y;
-		let otherRightX = other.position.x + other.size.x;
-		let otherBottomY = other.position.y + other.size.y;
-		self.position.x < otherRightX && rightX > other.position.x && self.position.y < otherBottomY && bottomY > other.position.y
+		let right_x = self.position.x + self.size.x;
+		let bottom_y = self.position.y + self.size.y;
+		let other_right_x = other.position.x + other.size.x;
+		let other_bottom_y = other.position.y + other.size.y;
+		self.position.x < other_right_x && right_x > other.position.x && self.position.y < other_bottom_y && bottom_y > other.position.y
 	}
 }

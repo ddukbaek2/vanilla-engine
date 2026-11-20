@@ -4,7 +4,7 @@
 // - 판 번호(version)가 다르거나 해석에 실패하면 기본값으로 돌아간다.
 // - 저장은 LocalStorage 를 쓴다. 저장 꼴({"version":1,"state":{...}})이 원본과 같아서 웹에서는 원본 게임의 저장을 그대로 읽는다.
 // - 사용:
-//     let mut store = PersistedStore::new("game.settings", serde_json::json!({ "volume": 0.8, "isMuted": false }), 1);
+//     let mut store = PersistedStore::new("game.settings", serde_json::json!({ "volume": 0.8, "is_muted": false }), 1);
 //     store.set(serde_json::json!({ "volume": 0.5 }));
 //     let volume = store.get()["volume"].as_f64();
 // - 원본과 다른 점:
@@ -28,21 +28,21 @@ type PersistedStoreSubscriber = Box<dyn FnMut(&Value)>;
 // 지속 저장소.
 //==============================================================================
 pub struct PersistedStore {
-	storageKey: String,
+	storage_key: String,
 	version: i64,
-	defaultState: Map<String, Value>,
+	default_state: Map<String, Value>,
 	state: Value,
-	subscriberList: Vec<(PersistedStoreSubscription, PersistedStoreSubscriber)>,
-	nextSubscriptionNumber: u64,
+	subscriber_list: Vec<(PersistedStoreSubscription, PersistedStoreSubscriber)>,
+	next_subscription_number: u64,
 }
 
 //==============================================================================
 // 값을 객체 맵으로. (객체가 아니면 빈 맵)
 //==============================================================================
-fn toObjectMap(value: Value) -> Map<String, Value> {
+fn to_object_map(value: Value) -> Map<String, Value> {
 	match value {
-		Value::Object(objectMap) => {
-			objectMap
+		Value::Object(object_map) => {
+			object_map
 		}
 		_ => {
 			Map::new()
@@ -54,17 +54,17 @@ impl PersistedStore {
 	//==============================================================================
 	// 생성. (만들면서 저장소에서 읽는다)
 	//==============================================================================
-	pub fn new(storageKey: &str, defaultState: Value, version: i64) -> PersistedStore {
-		let mut persistedStore = PersistedStore {
-			storageKey: storageKey.to_string(),
+	pub fn new(storage_key: &str, default_state: Value, version: i64) -> PersistedStore {
+		let mut persisted_store = PersistedStore {
+			storage_key: storage_key.to_string(),
 			version,
-			defaultState: toObjectMap(defaultState),
+			default_state: to_object_map(default_state),
 			state: Value::Object(Map::new()),
-			subscriberList: Vec::new(),
-			nextSubscriptionNumber: 1,
+			subscriber_list: Vec::new(),
+			next_subscription_number: 1,
 		};
-		persistedStore.state = persistedStore.readFromStorage();
-		persistedStore
+		persisted_store.state = persisted_store.read_from_storage();
+		persisted_store
 	}
 
 	//==============================================================================
@@ -77,22 +77,22 @@ impl PersistedStore {
 	//==============================================================================
 	// 상태 일부 갱신. (얕은 병합 뒤 저장하고 구독자에게 알린다)
 	//==============================================================================
-	pub fn set(&mut self, partialState: Value) {
-		let mut mergedState = toObjectMap(self.state.clone());
-		for (key, value) in toObjectMap(partialState) {
-			mergedState.insert(key, value);
+	pub fn set(&mut self, partial_state: Value) {
+		let mut merged_state = to_object_map(self.state.clone());
+		for (key, value) in to_object_map(partial_state) {
+			merged_state.insert(key, value);
 		}
-		self.state = Value::Object(mergedState);
-		self.writeToStorage();
+		self.state = Value::Object(merged_state);
+		self.write_to_storage();
 		self.notify();
 	}
 
 	//==============================================================================
 	// 상태 전체 교체.
 	//==============================================================================
-	pub fn replace(&mut self, nextState: Value) {
-		self.state = Value::Object(toObjectMap(nextState));
-		self.writeToStorage();
+	pub fn replace(&mut self, next_state: Value) {
+		self.state = Value::Object(to_object_map(next_state));
+		self.write_to_storage();
 		self.notify();
 	}
 
@@ -100,17 +100,17 @@ impl PersistedStore {
 	// 기본값으로 초기화.
 	//==============================================================================
 	pub fn reset(&mut self) {
-		let defaultState = Value::Object(self.defaultState.clone());
-		self.replace(defaultState);
+		let default_state = Value::Object(self.default_state.clone());
+		self.replace(default_state);
 	}
 
 	//==============================================================================
 	// 구독. (구독 번호를 돌려준다)
 	//==============================================================================
 	pub fn subscribe(&mut self, subscriber: impl FnMut(&Value) + 'static) -> PersistedStoreSubscription {
-		let subscription = PersistedStoreSubscription(self.nextSubscriptionNumber);
-		self.nextSubscriptionNumber += 1;
-		self.subscriberList.push((subscription, Box::new(subscriber)));
+		let subscription = PersistedStoreSubscription(self.next_subscription_number);
+		self.next_subscription_number += 1;
+		self.subscriber_list.push((subscription, Box::new(subscriber)));
 		subscription
 	}
 
@@ -118,14 +118,14 @@ impl PersistedStore {
 	// 구독 해지. (원본 subscribe 가 돌려준 해지 함수 자리)
 	//==============================================================================
 	pub fn unsubscribe(&mut self, subscription: PersistedStoreSubscription) {
-		self.subscriberList.retain(|(candidateSubscription, _)| *candidateSubscription != subscription);
+		self.subscriber_list.retain(|(candidate_subscription, _)| *candidate_subscription != subscription);
 	}
 
 	//==============================================================================
 	// 구독자 알림. (구독한 순서대로)
 	//==============================================================================
 	pub fn notify(&mut self) {
-		for (_, subscriber) in self.subscriberList.iter_mut() {
+		for (_, subscriber) in self.subscriber_list.iter_mut() {
 			subscriber(&self.state);
 		}
 	}
@@ -133,55 +133,55 @@ impl PersistedStore {
 	//==============================================================================
 	// 저장소에서 읽기. (기본값 위에 저장된 state 를 덮는다. 기본값에 없던 키도 살리고, 새로 생긴 기본 키는 기본값으로 채운다)
 	//==============================================================================
-	pub fn readFromStorage(&self) -> Value {
-		let defaultState = Value::Object(self.defaultState.clone());
-		let storedText = LocalStorage::getString(&self.storageKey, "");
-		if storedText.is_empty() {
-			return defaultState;
+	pub fn read_from_storage(&self) -> Value {
+		let default_state = Value::Object(self.default_state.clone());
+		let stored_text = LocalStorage::get_string(&self.storage_key, "");
+		if stored_text.is_empty() {
+			return default_state;
 		}
-		let parsedValue: Value = match serde_json::from_str(&storedText) {
-			Ok(parsedValue) => {
-				parsedValue
+		let parsed_value: Value = match serde_json::from_str(&stored_text) {
+			Ok(parsed_value) => {
+				parsed_value
 			}
 			Err(_) => {
-				return defaultState;
+				return default_state;
 			}
 		};
-		let storedVersion = parsedValue.get("version").and_then(|versionValue| versionValue.as_f64());
-		if storedVersion != Some(self.version as f64) {
-			return defaultState;
+		let stored_version = parsed_value.get("version").and_then(|version_value| version_value.as_f64());
+		if stored_version != Some(self.version as f64) {
+			return default_state;
 		}
-		let storedState = match parsedValue.get("state") {
-			Some(Value::Object(storedState)) => {
-				storedState
+		let stored_state = match parsed_value.get("state") {
+			Some(Value::Object(stored_state)) => {
+				stored_state
 			}
 			_ => {
-				return defaultState;
+				return default_state;
 			}
 		};
-		let mut mergedState = self.defaultState.clone();
-		for (key, value) in storedState {
-			mergedState.insert(key.clone(), value.clone());
+		let mut merged_state = self.default_state.clone();
+		for (key, value) in stored_state {
+			merged_state.insert(key.clone(), value.clone());
 		}
-		Value::Object(mergedState)
+		Value::Object(merged_state)
 	}
 
 	//==============================================================================
 	// 저장소에 쓰기. ({"version": 판 번호, "state": 상태})
 	//==============================================================================
-	pub fn writeToStorage(&self) {
+	pub fn write_to_storage(&self) {
 		let mut payload = Map::new();
 		payload.insert(String::from("version"), Value::from(self.version));
 		payload.insert(String::from("state"), self.state.clone());
-		let payloadText = Value::Object(payload).to_string();
-		LocalStorage::setString(&self.storageKey, &payloadText);
+		let payload_text = Value::Object(payload).to_string();
+		LocalStorage::set_string(&self.storage_key, &payload_text);
 	}
 
 	//==============================================================================
 	// 저장 키 반환.
 	//==============================================================================
-	pub fn getStorageKey(&self) -> &str {
-		&self.storageKey
+	pub fn get_storage_key(&self) -> &str {
+		&self.storage_key
 	}
 }
 
@@ -199,54 +199,54 @@ mod tests {
 	//==============================================================================
 	// 시험마다 다른 임시 폴더를 저장 폴더로 정한다.
 	//==============================================================================
-	fn useTemporaryStorageDirectory(testName: &str) -> PathBuf {
-		let uniqueSuffix = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|duration| duration.as_nanos()).unwrap_or(0);
-		let storageDirectoryPath = std::env::temp_dir().join(format!("vanilla-persistedstore-{}-{}-{}", testName, std::process::id(), uniqueSuffix));
-		LocalStorage::setStorageDirectory(Some(storageDirectoryPath.clone()));
-		storageDirectoryPath
+	fn use_temporary_storage_directory(test_name: &str) -> PathBuf {
+		let unique_suffix = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|duration| duration.as_nanos()).unwrap_or(0);
+		let storage_directory_path = std::env::temp_dir().join(format!("vanilla-persistedstore-{}-{}-{}", test_name, std::process::id(), unique_suffix));
+		LocalStorage::set_storage_directory(Some(storage_directory_path.clone()));
+		storage_directory_path
 	}
 
 	//==============================================================================
 	// 저장, 다시 읽기, 병합, 구독, 판 번호가 다르면 기본값.
 	//==============================================================================
 	#[test]
-	fn storeRoundTripAndVersion() {
-		let storageDirectoryPath = useTemporaryStorageDirectory("roundtrip");
+	fn store_round_trip_and_version() {
+		let storage_directory_path = use_temporary_storage_directory("roundtrip");
 		let mut store = PersistedStore::new("game.settings", json!({ "volume": 0.8, "isMuted": false }), 2);
 		assert_eq!(store.get()["volume"], json!(0.8));
 
-		let notifyCount = Rc::new(Cell::new(0));
-		let notifyCountForSubscriber = notifyCount.clone();
+		let notify_count = Rc::new(Cell::new(0));
+		let notify_count_for_subscriber = notify_count.clone();
 		let subscription = store.subscribe(move |state| {
 			assert!(state.get("volume").is_some());
-			notifyCountForSubscriber.set(notifyCountForSubscriber.get() + 1);
+			notify_count_for_subscriber.set(notify_count_for_subscriber.get() + 1);
 		});
 		store.set(json!({ "volume": 0.5, "language": "ko" }));
-		assert_eq!(notifyCount.get(), 1);
+		assert_eq!(notify_count.get(), 1);
 		assert_eq!(store.get()["isMuted"], json!(false));
 
 		// 다시 읽으면 저장한 값, 새로 생긴 기본 키는 기본값.
-		LocalStorage::setStorageDirectory(Some(storageDirectoryPath.clone()));
-		let reloadedStore = PersistedStore::new("game.settings", json!({ "volume": 0.8, "isMuted": false, "isVibration": true }), 2);
-		assert_eq!(reloadedStore.get()["volume"], json!(0.5));
-		assert_eq!(reloadedStore.get()["language"], json!("ko"));
-		assert_eq!(reloadedStore.get()["isVibration"], json!(true));
+		LocalStorage::set_storage_directory(Some(storage_directory_path.clone()));
+		let reloaded_store = PersistedStore::new("game.settings", json!({ "volume": 0.8, "isMuted": false, "isVibration": true }), 2);
+		assert_eq!(reloaded_store.get()["volume"], json!(0.5));
+		assert_eq!(reloaded_store.get()["language"], json!("ko"));
+		assert_eq!(reloaded_store.get()["isVibration"], json!(true));
 
 		// 판 번호가 다르면 기본값.
-		let newVersionStore = PersistedStore::new("game.settings", json!({ "volume": 0.8 }), 3);
-		assert_eq!(newVersionStore.get(), &json!({ "volume": 0.8 }));
+		let new_version_store = PersistedStore::new("game.settings", json!({ "volume": 0.8 }), 3);
+		assert_eq!(new_version_store.get(), &json!({ "volume": 0.8 }));
 
 		// 깨진 글이면 기본값.
-		LocalStorage::setString("game.broken", "{not json");
-		let brokenStore = PersistedStore::new("game.broken", json!({ "count": 1 }), 1);
-		assert_eq!(brokenStore.get(), &json!({ "count": 1 }));
+		LocalStorage::set_string("game.broken", "{not json");
+		let broken_store = PersistedStore::new("game.broken", json!({ "count": 1 }), 1);
+		assert_eq!(broken_store.get(), &json!({ "count": 1 }));
 
 		store.unsubscribe(subscription);
 		store.reset();
-		assert_eq!(notifyCount.get(), 1);
+		assert_eq!(notify_count.get(), 1);
 		assert_eq!(store.get(), &json!({ "volume": 0.8, "isMuted": false }));
-		assert_eq!(store.getStorageKey(), "game.settings");
+		assert_eq!(store.get_storage_key(), "game.settings");
 
-		let _ = std::fs::remove_dir_all(&storageDirectoryPath);
+		let _ = std::fs::remove_dir_all(&storage_directory_path);
 	}
 }

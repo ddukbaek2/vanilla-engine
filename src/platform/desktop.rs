@@ -27,7 +27,7 @@ use winit::keyboard::PhysicalKey;
 use winit::window::{Icon, Window, WindowId};
 
 mod textinput;
-pub use textinput::{readClipboardText, writeClipboardText};
+pub use textinput::{read_clipboard_text, write_clipboard_text};
 
 // 엔진이 들고 있는 창 손잡이. (커서, 제목을 바꿀 때)
 pub type PlatformWindow = Rc<Window>;
@@ -36,22 +36,22 @@ pub type PlatformWindow = Rc<Window>;
 const WHEEL_LINE_PIXEL_SIZE: f32 = 40.0;
 
 //==============================================================================
-// 시작. (창을 닫거나 exitApplication 을 부를 때까지 돌아오지 않는다)
+// 시작. (창을 닫거나 exit_application 을 부를 때까지 돌아오지 않는다)
 //==============================================================================
-pub fn run(engineRunner: EngineRunner) -> Result<(), String> {
-	let eventLoop = EventLoop::new().map_err(|error| format!("이벤트 루프 생성 실패: {}", error))?;
-	eventLoop.set_control_flow(ControlFlow::Poll);
-	let mut desktopApplication = DesktopApplication {
-		engineRunner,
-		windowState: None,
-		nextFrameInstant: Instant::now(),
-		fatalError: None,
-		textInputState: textinput::DesktopTextInputState::new(),
+pub fn run(engine_runner: EngineRunner) -> Result<(), String> {
+	let event_loop = EventLoop::new().map_err(|error| format!("이벤트 루프 생성 실패: {}", error))?;
+	event_loop.set_control_flow(ControlFlow::Poll);
+	let mut desktop_application = DesktopApplication {
+		engine_runner,
+		window_state: None,
+		next_frame_instant: Instant::now(),
+		fatal_error: None,
+		text_input_state: textinput::DesktopTextInputState::new(),
 	};
-	eventLoop.run_app(&mut desktopApplication).map_err(|error| format!("이벤트 루프 실행 실패: {}", error))?;
-	match desktopApplication.fatalError.take() {
-		Some(fatalError) => {
-			Err(fatalError)
+	event_loop.run_app(&mut desktop_application).map_err(|error| format!("이벤트 루프 실행 실패: {}", error))?;
+	match desktop_application.fatal_error.take() {
+		Some(fatal_error) => {
+			Err(fatal_error)
 		}
 		None => {
 			Ok(())
@@ -62,17 +62,17 @@ pub fn run(engineRunner: EngineRunner) -> Result<(), String> {
 //==============================================================================
 // 커서 보이기 설정.
 //==============================================================================
-pub fn setCursorVisible(platformWindow: Option<&PlatformWindow>, isVisible: bool) {
-	if let Some(window) = platformWindow {
-		window.set_cursor_visible(isVisible);
+pub fn set_cursor_visible(platform_window: Option<&PlatformWindow>, is_visible: bool) {
+	if let Some(window) = platform_window {
+		window.set_cursor_visible(is_visible);
 	}
 }
 
 //==============================================================================
 // 창 제목 설정.
 //==============================================================================
-pub fn setTitle(platformWindow: Option<&PlatformWindow>, title: &str) {
-	if let Some(window) = platformWindow {
+pub fn set_title(platform_window: Option<&PlatformWindow>, title: &str) {
+	if let Some(window) = platform_window {
 		window.set_title(title);
 	}
 }
@@ -80,9 +80,9 @@ pub fn setTitle(platformWindow: Option<&PlatformWindow>, title: &str) {
 //==============================================================================
 // 애셋 바이트 읽기. (파일을 그 자리에서 읽고 끝낸다)
 //==============================================================================
-pub fn requestAssetBytes(assetLocation: String, loadHandle: AssetLoadHandle) {
-	let result = std::fs::read(&assetLocation).map_err(|error| format!("애셋 읽기 실패 ({}): {}", assetLocation, error));
-	loadHandle.finish(result);
+pub fn request_asset_bytes(asset_location: String, load_handle: AssetLoadHandle) {
+	let result = std::fs::read(&asset_location).map_err(|error| format!("애셋 읽기 실패 ({}): {}", asset_location, error));
+	load_handle.finish(result);
 }
 
 //==============================================================================
@@ -98,42 +98,42 @@ struct WindowState {
 // 이벤트 루프에 물리는 데스크탑 실행자.
 //==============================================================================
 struct DesktopApplication {
-	engineRunner: EngineRunner,
-	windowState: Option<WindowState>,
-	nextFrameInstant: Instant,
-	fatalError: Option<String>,
-	textInputState: textinput::DesktopTextInputState,
+	engine_runner: EngineRunner,
+	window_state: Option<WindowState>,
+	next_frame_instant: Instant,
+	fatal_error: Option<String>,
+	text_input_state: textinput::DesktopTextInputState,
 }
 
 impl DesktopApplication {
 	//==============================================================================
 	// 창과 GL 컨텍스트, 그래픽 만들기.
 	//==============================================================================
-	fn createWindow(&mut self, eventLoop: &ActiveEventLoop) -> Result<(), String> {
-		let engine = &self.engineRunner.engine;
-		let engineConfiguration = engine.getEngineConfiguration();
-		let windowSize = if engineConfiguration.windowSize.x > 0.0 && engineConfiguration.windowSize.y > 0.0 {
-			engineConfiguration.windowSize
+	fn create_window(&mut self, event_loop: &ActiveEventLoop) -> Result<(), String> {
+		let engine = &self.engine_runner.engine;
+		let engine_configuration = engine.get_engine_configuration();
+		let window_size = if engine_configuration.window_size.x > 0.0 && engine_configuration.window_size.y > 0.0 {
+			engine_configuration.window_size
 		}
 		else {
-			engineConfiguration.referenceResolutionSize
+			engine_configuration.reference_resolution_size
 		};
-		let mut windowAttributes = Window::default_attributes()
-			.with_title(engineConfiguration.title.clone())
-			.with_inner_size(LogicalSize::new(windowSize.x as f64, windowSize.y as f64))
-			.with_resizable(engineConfiguration.isResizable);
+		let mut window_attributes = Window::default_attributes()
+			.with_title(engine_configuration.title.clone())
+			.with_inner_size(LogicalSize::new(window_size.x as f64, window_size.y as f64))
+			.with_resizable(engine_configuration.is_resizable);
 		// 검증용: VANILLA_WINDOW_POSITION=x,y 면 창을 그 자리(물리 픽셀)에 띄운다. (화면 밖에 두고 잴 때)
-		if let Ok(windowPositionText) = std::env::var("VANILLA_WINDOW_POSITION") {
-			let positionList: Vec<i32> = windowPositionText.split(',').filter_map(|part| part.trim().parse::<i32>().ok()).collect();
-			if positionList.len() == 2 {
-				windowAttributes = windowAttributes.with_position(winit::dpi::PhysicalPosition::new(positionList[0], positionList[1]));
+		if let Ok(window_position_text) = std::env::var("VANILLA_WINDOW_POSITION") {
+			let position_list: Vec<i32> = window_position_text.split(',').filter_map(|part| part.trim().parse::<i32>().ok()).collect();
+			if position_list.len() == 2 {
+				window_attributes = window_attributes.with_position(winit::dpi::PhysicalPosition::new(position_list[0], position_list[1]));
 			}
 		}
-		if !engineConfiguration.windowIconPath.is_empty() {
-			let windowIconPath = engine.resolveAssetPath(&engineConfiguration.windowIconPath);
-			match loadWindowIcon(&windowIconPath) {
-				Ok(windowIcon) => {
-					windowAttributes = windowAttributes.with_window_icon(Some(windowIcon));
+		if !engine_configuration.window_icon_path.is_empty() {
+			let window_icon_path = engine.resolve_asset_path(&engine_configuration.window_icon_path);
+			match load_window_icon(&window_icon_path) {
+				Ok(window_icon) => {
+					window_attributes = window_attributes.with_window_icon(Some(window_icon));
 				}
 				Err(error) => {
 					eprintln!("Engine: {}", error);
@@ -142,46 +142,46 @@ impl DesktopApplication {
 		}
 
 		// 깊이 24 / 스텐실 8 비트가 있는 설정 가운데 멀티샘플 4 에 가까운 것. (원본 WebGL 컨텍스트의 기본 depth: true 와 안티에일리어싱 자리, 깊이는 3D 가 쓴다)
-		let configTemplateBuilder = ConfigTemplateBuilder::new().with_alpha_size(8).with_depth_size(24).with_stencil_size(8);
-		let displayBuilder = DisplayBuilder::new().with_window_attributes(Some(windowAttributes));
-		let (window, glConfig) = displayBuilder.build(eventLoop, configTemplateBuilder, pickConfig).map_err(|error| format!("GL 설정 고르기 실패: {}", error))?;
+		let config_template_builder = ConfigTemplateBuilder::new().with_alpha_size(8).with_depth_size(24).with_stencil_size(8);
+		let display_builder = DisplayBuilder::new().with_window_attributes(Some(window_attributes));
+		let (window, gl_config) = display_builder.build(event_loop, config_template_builder, pick_config).map_err(|error| format!("GL 설정 고르기 실패: {}", error))?;
 		let window = window.ok_or_else(|| String::from("창 생성 실패"))?;
 
-		let rawWindowHandle = window.window_handle().ok().map(|windowHandle| windowHandle.as_raw());
-		let glDisplay = glConfig.display();
-		let contextAttributes = ContextAttributesBuilder::new()
+		let raw_window_handle = window.window_handle().ok().map(|window_handle| window_handle.as_raw());
+		let gl_display = gl_config.display();
+		let context_attributes = ContextAttributesBuilder::new()
 			.with_context_api(ContextApi::OpenGl(Some(GlVersion::new(3, 3))))
 			.with_profile(GlProfile::Core)
-			.build(rawWindowHandle);
-		let notCurrentContext = unsafe {
-			glDisplay.create_context(&glConfig, &contextAttributes)
+			.build(raw_window_handle);
+		let not_current_context = unsafe {
+			gl_display.create_context(&gl_config, &context_attributes)
 		}.map_err(|error| format!("GL 3.3 코어 컨텍스트 생성 실패: {}", error))?;
-		let surfaceAttributes = window.build_surface_attributes(SurfaceAttributesBuilder::<WindowSurface>::new()).map_err(|error| format!("서피스 속성 실패: {}", error))?;
+		let surface_attributes = window.build_surface_attributes(SurfaceAttributesBuilder::<WindowSurface>::new()).map_err(|error| format!("서피스 속성 실패: {}", error))?;
 		let surface = unsafe {
-			glDisplay.create_window_surface(&glConfig, &surfaceAttributes)
+			gl_display.create_window_surface(&gl_config, &surface_attributes)
 		}.map_err(|error| format!("서피스 생성 실패: {}", error))?;
-		let context = notCurrentContext.make_current(&surface).map_err(|error| format!("컨텍스트 활성화 실패: {}", error))?;
+		let context = not_current_context.make_current(&surface).map_err(|error| format!("컨텍스트 활성화 실패: {}", error))?;
 
-		let useVerticalSync = engineConfiguration.useVerticalSync;
-		let swapInterval = if useVerticalSync {
+		let use_vertical_sync = engine_configuration.use_vertical_sync;
+		let swap_interval = if use_vertical_sync {
 			SwapInterval::Wait(NonZeroU32::new(1).expect("one"))
 		}
 		else {
 			SwapInterval::DontWait
 		};
-		if let Err(error) = surface.set_swap_interval(&context, swapInterval) {
+		if let Err(error) = surface.set_swap_interval(&context, swap_interval) {
 			eprintln!("Engine: 수직 동기 설정 실패: {}", error);
 		}
 
 		let gl = unsafe {
-			glow::Context::from_loader_function_cstr(|symbolName| glDisplay.get_proc_address(symbolName) as *const _)
+			glow::Context::from_loader_function_cstr(|symbol_name| gl_display.get_proc_address(symbol_name) as *const _)
 		};
 		let graphic = Graphic::new(gl)?;
 
 		let window = Rc::new(window);
-		self.engineRunner.attachGraphic(graphic);
-		self.engineRunner.engine.platformWindow = Some(window.clone());
-		self.windowState = Some(WindowState {
+		self.engine_runner.attach_graphic(graphic);
+		self.engine_runner.engine.platform_window = Some(window.clone());
+		self.window_state = Some(WindowState {
 			window,
 			surface,
 			context,
@@ -194,47 +194,47 @@ impl DesktopApplication {
 	// 해상도 변경됨. (서피스 크기를 맞추고 뷰 영역을 다시 계산한 뒤 씬에 알린다)
 	//==============================================================================
 	fn resize(&mut self) {
-		let windowState = match &self.windowState {
-			Some(windowState) => {
-				windowState
+		let window_state = match &self.window_state {
+			Some(window_state) => {
+				window_state
 			}
 			None => {
 				return;
 			}
 		};
-		let physicalSize = windowState.window.inner_size();
-		let scaleFactor = windowState.window.scale_factor() as f32;
-		if let (Some(width), Some(height)) = (NonZeroU32::new(physicalSize.width), NonZeroU32::new(physicalSize.height)) {
-			windowState.surface.resize(&windowState.context, width, height);
+		let physical_size = window_state.window.inner_size();
+		let scale_factor = window_state.window.scale_factor() as f32;
+		if let (Some(width), Some(height)) = (NonZeroU32::new(physical_size.width), NonZeroU32::new(physical_size.height)) {
+			window_state.surface.resize(&window_state.context, width, height);
 		}
-		self.engineRunner.engine.getViewManagerMut().calculateViewRect(physicalSize.width, physicalSize.height, scaleFactor);
-		self.engineRunner.notifySceneResize();
+		self.engine_runner.engine.get_view_manager_mut().calculate_view_rect(physical_size.width, physical_size.height, scale_factor);
+		self.engine_runner.notify_scene_resize();
 	}
 
 	//==============================================================================
 	// 창 안쪽 물리 좌표 → 입력 위치 갱신.
 	//==============================================================================
-	fn updateInputPosition(&mut self, physicalX: f64, physicalY: f64) {
-		let engine = &mut self.engineRunner.engine;
-		let devicePixelRatio = engine.getViewManager().getDevicePixelRatio();
-		let canvasNativeInputPosition = Vector2::create(physicalX as f32 / devicePixelRatio, physicalY as f32 / devicePixelRatio);
-		let viewInputPosition = engine.getViewManager().canvasPositionToViewPosition(canvasNativeInputPosition);
-		let inputManager = engine.getInputManagerMut();
-		inputManager.setCanvasNativeInputPosition(canvasNativeInputPosition);
-		inputManager.setViewInputPosition(viewInputPosition);
+	fn update_input_position(&mut self, physical_x: f64, physical_y: f64) {
+		let engine = &mut self.engine_runner.engine;
+		let device_pixel_ratio = engine.get_view_manager().get_device_pixel_ratio();
+		let canvas_native_input_position = Vector2::create(physical_x as f32 / device_pixel_ratio, physical_y as f32 / device_pixel_ratio);
+		let view_input_position = engine.get_view_manager().canvas_position_to_view_position(canvas_native_input_position);
+		let input_manager = engine.get_input_manager_mut();
+		input_manager.set_canvas_native_input_position(canvas_native_input_position);
+		input_manager.set_view_input_position(view_input_position);
 	}
 
 	//==============================================================================
 	// 한 프레임 돌고 화면 넘기기.
 	//==============================================================================
-	fn updateFrame(&mut self) {
-		if self.windowState.is_none() {
+	fn update_frame(&mut self) {
+		if self.window_state.is_none() {
 			return;
 		}
-		self.engineRunner.updateEngine();
-		if let Some(windowState) = &self.windowState {
-			self.textInputState.applyActiveField(&windowState.window, self.engineRunner.engine.getInputManager().getTextInput());
-			if let Err(error) = windowState.surface.swap_buffers(&windowState.context) {
+		self.engine_runner.update_engine();
+		if let Some(window_state) = &self.window_state {
+			self.text_input_state.apply_active_field(&window_state.window, self.engine_runner.engine.get_input_manager().get_text_input());
+			if let Err(error) = window_state.surface.swap_buffers(&window_state.context) {
 				eprintln!("Engine: 화면 넘기기 실패: {}", error);
 			}
 		}
@@ -245,100 +245,100 @@ impl ApplicationHandler for DesktopApplication {
 	//==============================================================================
 	// 창 만들 차례. (데스크탑에서는 시작할 때 한 번)
 	//==============================================================================
-	fn resumed(&mut self, eventLoop: &ActiveEventLoop) {
-		if self.windowState.is_some() {
+	fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+		if self.window_state.is_some() {
 			return;
 		}
-		if let Err(error) = self.createWindow(eventLoop) {
+		if let Err(error) = self.create_window(event_loop) {
 			eprintln!("Engine: {}", error);
-			self.fatalError = Some(error);
-			eventLoop.exit();
+			self.fatal_error = Some(error);
+			event_loop.exit();
 			return;
 		}
-		self.engineRunner.applyPendingScenes();
+		self.engine_runner.apply_pending_scenes();
 	}
 
 	//==============================================================================
 	// 창 이벤트.
 	//==============================================================================
-	fn window_event(&mut self, eventLoop: &ActiveEventLoop, _windowId: WindowId, windowEvent: WindowEvent) {
-		match windowEvent {
+	fn window_event(&mut self, event_loop: &ActiveEventLoop, _window_id: WindowId, window_event: WindowEvent) {
+		match window_event {
 			WindowEvent::CloseRequested => {
-				eventLoop.exit();
+				event_loop.exit();
 			}
 			WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
 				self.resize();
 			}
-			WindowEvent::Focused(isFocused) => {
-				if !isFocused {
-					self.engineRunner.engine.getInputManagerMut().clear();
+			WindowEvent::Focused(is_focused) => {
+				if !is_focused {
+					self.engine_runner.engine.get_input_manager_mut().clear();
 				}
 			}
-			WindowEvent::KeyboardInput { event: keyEvent, .. } => {
-				if let PhysicalKey::Code(keyCode) = keyEvent.physical_key {
-					let key = format!("{:?}", keyCode);
-					let inputManager = self.engineRunner.engine.getInputManagerMut();
-					match keyEvent.state {
+			WindowEvent::KeyboardInput { event: key_event, .. } => {
+				if let PhysicalKey::Code(key_code) = key_event.physical_key {
+					let key = format!("{:?}", key_code);
+					let input_manager = self.engine_runner.engine.get_input_manager_mut();
+					match key_event.state {
 						ElementState::Pressed => {
-							inputManager.pushKey(&key);
+							input_manager.push_key(&key);
 						}
 						ElementState::Released => {
-							inputManager.popKey(&key);
+							input_manager.pop_key(&key);
 						}
 					}
 				}
-				self.textInputState.handleKeyEvent(&keyEvent, self.engineRunner.engine.getInputManagerMut().getTextInputMut());
+				self.text_input_state.handle_key_event(&key_event, self.engine_runner.engine.get_input_manager_mut().get_text_input_mut());
 			}
 			WindowEvent::ModifiersChanged(modifiers) => {
-				self.textInputState.setModifiers(modifiers.state());
+				self.text_input_state.set_modifiers(modifiers.state());
 			}
 			WindowEvent::Ime(ime) => {
-				self.textInputState.handleImeEvent(ime, self.engineRunner.engine.getInputManagerMut().getTextInputMut());
+				self.text_input_state.handle_ime_event(ime, self.engine_runner.engine.get_input_manager_mut().get_text_input_mut());
 			}
 			WindowEvent::CursorMoved { position, .. } => {
-				self.updateInputPosition(position.x, position.y);
-				self.engineRunner.engine.getInputManagerMut().setTouchMoved(true);
+				self.update_input_position(position.x, position.y);
+				self.engine_runner.engine.get_input_manager_mut().set_touch_moved(true);
 			}
 			WindowEvent::CursorLeft { .. } => {
-				let inputManager = self.engineRunner.engine.getInputManagerMut();
-				if inputManager.isTouchDown() {
-					inputManager.setTouchDown(false);
-					inputManager.setTouchCancelled(true);
+				let input_manager = self.engine_runner.engine.get_input_manager_mut();
+				if input_manager.is_touch_down() {
+					input_manager.set_touch_down(false);
+					input_manager.set_touch_cancelled(true);
 				}
 			}
 			WindowEvent::MouseInput { state, button: MouseButton::Left, .. } => {
-				let inputManager = self.engineRunner.engine.getInputManagerMut();
+				let input_manager = self.engine_runner.engine.get_input_manager_mut();
 				match state {
 					ElementState::Pressed => {
-						inputManager.setTouchPressed(true);
-						inputManager.setTouchDown(true);
+						input_manager.set_touch_pressed(true);
+						input_manager.set_touch_down(true);
 					}
 					ElementState::Released => {
-						inputManager.setTouchReleased(true);
-						inputManager.setTouchDown(false);
+						input_manager.set_touch_released(true);
+						input_manager.set_touch_down(false);
 					}
 				}
 			}
 			WindowEvent::MouseInput { state: ElementState::Pressed, button: MouseButton::Right, .. } => {
-				let inputManager = self.engineRunner.engine.getInputManagerMut();
-				let viewInputPosition = inputManager.getViewInputPosition();
-				inputManager.getTextInputMut().setContextMenuRequestPosition(Some(viewInputPosition));
+				let input_manager = self.engine_runner.engine.get_input_manager_mut();
+				let view_input_position = input_manager.get_view_input_position();
+				input_manager.get_text_input_mut().set_context_menu_request_position(Some(view_input_position));
 			}
 			WindowEvent::MouseWheel { delta, .. } => {
-				let inputManager = self.engineRunner.engine.getInputManagerMut();
+				let input_manager = self.engine_runner.engine.get_input_manager_mut();
 				match delta {
-					MouseScrollDelta::LineDelta(lineX, lineY) => {
-						inputManager.addWheelDelta(-lineX * WHEEL_LINE_PIXEL_SIZE, -lineY * WHEEL_LINE_PIXEL_SIZE);
+					MouseScrollDelta::LineDelta(line_x, line_y) => {
+						input_manager.add_wheel_delta(-line_x * WHEEL_LINE_PIXEL_SIZE, -line_y * WHEEL_LINE_PIXEL_SIZE);
 					}
-					MouseScrollDelta::PixelDelta(pixelDelta) => {
-						inputManager.addWheelDelta(-pixelDelta.x as f32, -pixelDelta.y as f32);
+					MouseScrollDelta::PixelDelta(pixel_delta) => {
+						input_manager.add_wheel_delta(-pixel_delta.x as f32, -pixel_delta.y as f32);
 					}
 				}
 			}
 			WindowEvent::RedrawRequested => {
-				self.updateFrame();
-				if self.engineRunner.engine.isExitRequested() {
-					eventLoop.exit();
+				self.update_frame();
+				if self.engine_runner.engine.is_exit_requested() {
+					event_loop.exit();
 				}
 			}
 			_ => {
@@ -349,75 +349,75 @@ impl ApplicationHandler for DesktopApplication {
 	//==============================================================================
 	// 이벤트를 다 처리한 뒤. (다음 프레임 요청, 최대 FPS 제한)
 	//==============================================================================
-	fn about_to_wait(&mut self, eventLoop: &ActiveEventLoop) {
-		if self.engineRunner.engine.isExitRequested() {
-			eventLoop.exit();
+	fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+		if self.engine_runner.engine.is_exit_requested() {
+			event_loop.exit();
 			return;
 		}
-		let windowState = match &self.windowState {
-			Some(windowState) => {
-				windowState
+		let window_state = match &self.window_state {
+			Some(window_state) => {
+				window_state
 			}
 			None => {
 				return;
 			}
 		};
-		let maximumFramePerSecond = self.engineRunner.engine.getEngineConfiguration().maximumFramePerSecond;
-		if maximumFramePerSecond <= 0.0 {
-			eventLoop.set_control_flow(ControlFlow::Poll);
-			windowState.window.request_redraw();
+		let maximum_frame_per_second = self.engine_runner.engine.get_engine_configuration().maximum_frame_per_second;
+		if maximum_frame_per_second <= 0.0 {
+			event_loop.set_control_flow(ControlFlow::Poll);
+			window_state.window.request_redraw();
 			return;
 		}
 
 		// 차례가 된 프레임만 그린다. (한 프레임 넘게 밀렸으면 지금부터 다시 센다)
-		let frameInterval = Duration::from_secs_f64(1.0 / maximumFramePerSecond as f64);
+		let frame_interval = Duration::from_secs_f64(1.0 / maximum_frame_per_second as f64);
 		let now = Instant::now();
-		if now >= self.nextFrameInstant {
-			windowState.window.request_redraw();
-			self.nextFrameInstant += frameInterval;
-			if self.nextFrameInstant + frameInterval < now {
-				self.nextFrameInstant = now + frameInterval;
+		if now >= self.next_frame_instant {
+			window_state.window.request_redraw();
+			self.next_frame_instant += frame_interval;
+			if self.next_frame_instant + frame_interval < now {
+				self.next_frame_instant = now + frame_interval;
 			}
 		}
-		eventLoop.set_control_flow(ControlFlow::WaitUntil(self.nextFrameInstant));
+		event_loop.set_control_flow(ControlFlow::WaitUntil(self.next_frame_instant));
 	}
 }
 
 //==============================================================================
 // GL 설정 고르기. (스텐실 8 비트 이상, 멀티샘플은 4 에 가까운 것)
 //==============================================================================
-fn pickConfig(configs: Box<dyn Iterator<Item = Config> + '_>) -> Config {
-	let configList: Vec<Config> = configs.collect();
-	let mut bestConfig: Option<Config> = None;
-	for config in configList.iter() {
+fn pick_config(configs: Box<dyn Iterator<Item = Config> + '_>) -> Config {
+	let config_list: Vec<Config> = configs.collect();
+	let mut best_config: Option<Config> = None;
+	for config in config_list.iter() {
 		if config.stencil_size() < 8 {
 			continue;
 		}
-		let sampleCount = config.num_samples();
-		let isBetter = match &bestConfig {
+		let sample_count = config.num_samples();
+		let is_better = match &best_config {
 			None => {
 				true
 			}
-			Some(currentConfig) => {
-				let currentSampleCount = currentConfig.num_samples();
-				if sampleCount <= 4 {
-					currentSampleCount > 4 || sampleCount > currentSampleCount
+			Some(current_config) => {
+				let current_sample_count = current_config.num_samples();
+				if sample_count <= 4 {
+					current_sample_count > 4 || sample_count > current_sample_count
 				}
 				else {
-					currentSampleCount > 4 && sampleCount < currentSampleCount
+					current_sample_count > 4 && sample_count < current_sample_count
 				}
 			}
 		};
-		if isBetter {
-			bestConfig = Some(config.clone());
+		if is_better {
+			best_config = Some(config.clone());
 		}
 	}
-	match bestConfig {
-		Some(bestConfig) => {
-			bestConfig
+	match best_config {
+		Some(best_config) => {
+			best_config
 		}
 		None => {
-			configList.into_iter().next().expect("GL 설정이 하나도 없습니다")
+			config_list.into_iter().next().expect("GL 설정이 하나도 없습니다")
 		}
 	}
 }
@@ -425,10 +425,10 @@ fn pickConfig(configs: Box<dyn Iterator<Item = Config> + '_>) -> Config {
 //==============================================================================
 // 창 아이콘 읽기. (PNG, 스트레이트 알파)
 //==============================================================================
-fn loadWindowIcon(iconPath: &std::path::Path) -> Result<Icon, String> {
-	let iconBytes = std::fs::read(iconPath).map_err(|error| format!("창 아이콘 읽기 실패 ({}): {}", iconPath.display(), error))?;
-	let iconImage = image::load_from_memory(&iconBytes).map_err(|error| format!("창 아이콘 해석 실패: {}", error))?.to_rgba8();
-	let iconWidth = iconImage.width();
-	let iconHeight = iconImage.height();
-	Icon::from_rgba(iconImage.into_raw(), iconWidth, iconHeight).map_err(|error| format!("창 아이콘 생성 실패: {}", error))
+fn load_window_icon(icon_path: &std::path::Path) -> Result<Icon, String> {
+	let icon_bytes = std::fs::read(icon_path).map_err(|error| format!("창 아이콘 읽기 실패 ({}): {}", icon_path.display(), error))?;
+	let icon_image = image::load_from_memory(&icon_bytes).map_err(|error| format!("창 아이콘 해석 실패: {}", error))?.to_rgba8();
+	let icon_width = icon_image.width();
+	let icon_height = icon_image.height();
+	Icon::from_rgba(icon_image.into_raw(), icon_width, icon_height).map_err(|error| format!("창 아이콘 생성 실패: {}", error))
 }

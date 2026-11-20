@@ -1,14 +1,14 @@
 //==============================================================================
 // 스크롤 뷰. (원본 ui/uiscrollview.js 의 UIScrollView, ScrollMode)
-// - 호스트 contentSize 를 보이는 영역으로 쓰고, content 노드를 끌거나 휠을 굴려 움직인다. 스크롤 오프셋 = content 노드의 로컬 위치.
-// - 원본처럼 호스트에 Mask 를 붙여(require) content 를 자르고, 호스트를 interactable 로 켠다. nodeTree.addComponent(nodeId, UIScrollView::new()) 로 붙인다.
+// - 호스트 content_size 를 보이는 영역으로 쓰고, content 노드를 끌거나 휠을 굴려 움직인다. 스크롤 오프셋 = content 노드의 로컬 위치.
+// - 원본처럼 호스트에 Mask 를 붙여(require) content 를 자르고, 호스트를 interactable 로 켠다. node_tree.add_component(node_id, UIScrollView::new()) 로 붙인다.
 // - 스크롤바(UIScrollBar 가 붙은 노드)는 원본 코드처럼 호스트의 자식(content 의 형제)으로 만든다.
 // - 휠: 원본 TouchRaycaster.touchWheel → UIScrollView.wheel 길. 엔진이 터치 아래 노드부터 부모 쪽으로 wheel 을 묻고, 이 컴포넌트가 받아 쓴다.
 // - 원본과 다른 것:
-//   - 원본은 setScrollOffset / setScrollContentSize / setShows...ScrollBar 에서 바로 노드를 바꾼다. 러스트 판의 씬 코드는 컴포넌트만 쥐고 있어
-//     값을 정해 두고 다음 tick 에 content 노드와 스크롤바 노드에 반영한다. 같은 프레임에 바로 옮기려면 UIScrollView::setScrollOffsetInTree 를 쓴다.
-//   - 그래서 getVerticalScrollBar / getHorizontalScrollBar 는 보이기로 정한 뒤 첫 tick 이 지나야 노드 핸들을 돌려준다.
-//   - 보이는 영역 크기(호스트 contentSize)는 붙을 때와 tick / 터치 / 휠 때 읽어 둔다. 씬 코드에서 정한 오프셋은 다음 tick 에 새 크기로 다시 자른다.
+//   - 원본은 set_scroll_offset / set_scroll_content_size / setShows...ScrollBar 에서 바로 노드를 바꾼다. 러스트 판의 씬 코드는 컴포넌트만 쥐고 있어
+//     값을 정해 두고 다음 tick 에 content 노드와 스크롤바 노드에 반영한다. 같은 프레임에 바로 옮기려면 UIScrollView::set_scroll_offset_in_tree 를 쓴다.
+//   - 그래서 get_vertical_scroll_bar / get_horizontal_scroll_bar 는 보이기로 정한 뒤 첫 tick 이 지나야 노드 핸들을 돌려준다.
+//   - 보이는 영역 크기(호스트 content_size)는 붙을 때와 tick / 터치 / 휠 때 읽어 둔다. 씬 코드에서 정한 오프셋은 다음 tick 에 새 크기로 다시 자른다.
 //   - 드래그를 위 스크롤 뷰로 넘기는 손짓(원본 TouchRecognizer)은 ui/touchrecognizer.rs 에 따로 있다. 씬이 골라 쓴다.
 // - 원본 그대로인 버릇: 콘텐트가 영역 안에 들어와 스스로 꺼진(자동 숨김) 스크롤바 노드는 tick 이 돌지 않아 저절로 다시 켜지지 않는다.
 //   setShows...ScrollBar(true) 를 다시 부르면 켜진다.
@@ -41,40 +41,40 @@ const FRICTION_COEFFICIENT: f32 = 5.0;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ScrollMode {
 	// 경계를 넘지 않는 기본 모드.
-	clamp,
+	Clamp,
 	// 경계를 넘으면 저항이 생기고, 놓으면 스프링처럼 튕겨 돌아온다.
-	elastic,
+	Elastic,
 }
 
 //==============================================================================
 // 스크롤 뷰.
 //==============================================================================
 pub struct UIScrollView {
-	uiView: UIView,
-	scrollContentSize: Vector2,
-	scrollMode: ScrollMode,
-	scrollVelocity: Vector2,
-	previousViewInputPosition: Vector2,
-	currentViewInputPosition: Vector2,
-	horizontalEnabled: bool,
-	verticalEnabled: bool,
-	scrollOffset: Vector2,
-	isDragging: bool,
-	dragStartViewPosition: Vector2,
-	dragStartOffset: Vector2,
-	dragSensitivity: f32,
-	verticalScrollBarId: Option<NodeId>,
-	horizontalScrollBarId: Option<NodeId>,
-	showsVerticalScrollBar: bool,
-	showsHorizontalScrollBar: bool,
-	pendingVerticalScrollBarActive: Option<bool>,
-	pendingHorizontalScrollBarActive: Option<bool>,
-	wheelScrollScale: f32,
-	passesCrossAxisDrag: bool,
-	viewportSize: Vector2,
-	isOffsetClampPending: bool,
-	isContentPositionSyncPending: bool,
-	isContentSizeSyncPending: bool,
+	ui_view: UIView,
+	scroll_content_size: Vector2,
+	scroll_mode: ScrollMode,
+	scroll_velocity: Vector2,
+	previous_view_input_position: Vector2,
+	current_view_input_position: Vector2,
+	horizontal_enabled: bool,
+	vertical_enabled: bool,
+	scroll_offset: Vector2,
+	is_dragging: bool,
+	drag_start_view_position: Vector2,
+	drag_start_offset: Vector2,
+	drag_sensitivity: f32,
+	vertical_scroll_bar_id: Option<NodeId>,
+	horizontal_scroll_bar_id: Option<NodeId>,
+	shows_vertical_scroll_bar: bool,
+	shows_horizontal_scroll_bar: bool,
+	pending_vertical_scroll_bar_active: Option<bool>,
+	pending_horizontal_scroll_bar_active: Option<bool>,
+	wheel_scroll_scale: f32,
+	passes_cross_axis_drag: bool,
+	viewport_size: Vector2,
+	is_offset_clamp_pending: bool,
+	is_content_position_sync_pending: bool,
+	is_content_size_sync_pending: bool,
 }
 
 impl UIScrollView {
@@ -83,97 +83,97 @@ impl UIScrollView {
 	//==============================================================================
 	pub fn new() -> UIScrollView {
 		UIScrollView {
-			uiView: UIView::new(),
-			scrollContentSize: Vector2::zero(),
-			scrollMode: ScrollMode::clamp,
-			scrollVelocity: Vector2::zero(),
-			previousViewInputPosition: Vector2::zero(),
-			currentViewInputPosition: Vector2::zero(),
-			horizontalEnabled: true,
-			verticalEnabled: true,
-			scrollOffset: Vector2::zero(),
-			isDragging: false,
-			dragStartViewPosition: Vector2::zero(),
-			dragStartOffset: Vector2::zero(),
-			dragSensitivity: 1.0,
-			verticalScrollBarId: None,
-			horizontalScrollBarId: None,
-			showsVerticalScrollBar: false,
-			showsHorizontalScrollBar: false,
-			pendingVerticalScrollBarActive: None,
-			pendingHorizontalScrollBarActive: None,
-			wheelScrollScale: WHEEL_SCROLL_SCALE,
-			passesCrossAxisDrag: false,
-			viewportSize: Vector2::zero(),
-			isOffsetClampPending: false,
-			isContentPositionSyncPending: false,
-			isContentSizeSyncPending: false,
+			ui_view: UIView::new(),
+			scroll_content_size: Vector2::zero(),
+			scroll_mode: ScrollMode::Clamp,
+			scroll_velocity: Vector2::zero(),
+			previous_view_input_position: Vector2::zero(),
+			current_view_input_position: Vector2::zero(),
+			horizontal_enabled: true,
+			vertical_enabled: true,
+			scroll_offset: Vector2::zero(),
+			is_dragging: false,
+			drag_start_view_position: Vector2::zero(),
+			drag_start_offset: Vector2::zero(),
+			drag_sensitivity: 1.0,
+			vertical_scroll_bar_id: None,
+			horizontal_scroll_bar_id: None,
+			shows_vertical_scroll_bar: false,
+			shows_horizontal_scroll_bar: false,
+			pending_vertical_scroll_bar_active: None,
+			pending_horizontal_scroll_bar_active: None,
+			wheel_scroll_scale: WHEEL_SCROLL_SCALE,
+			passes_cross_axis_drag: false,
+			viewport_size: Vector2::zero(),
+			is_offset_clamp_pending: false,
+			is_content_position_sync_pending: false,
+			is_content_size_sync_pending: false,
 		}
 	}
 
 	//==============================================================================
 	// 품은 뷰 반환.
 	//==============================================================================
-	pub fn getUIView(&self) -> &UIView {
-		&self.uiView
+	pub fn get_uiview(&self) -> &UIView {
+		&self.ui_view
 	}
 
 	//==============================================================================
 	// 품은 뷰 반환. (변경용)
 	//==============================================================================
-	pub fn getUIViewMut(&mut self) -> &mut UIView {
-		&mut self.uiView
+	pub fn get_uiview_mut(&mut self) -> &mut UIView {
+		&mut self.ui_view
 	}
 
 	//==============================================================================
 	// 컨텐트 노드 핸들. (스크롤할 자식 노드를 여기에 붙인다)
 	//==============================================================================
-	pub fn getContent(&self) -> Option<NodeId> {
-		self.uiView.getContent()
+	pub fn get_content(&self) -> Option<NodeId> {
+		self.ui_view.get_content()
 	}
 
 	//==============================================================================
 	// 배경색 설정.
 	//==============================================================================
-	pub fn setBackgroundColor(&mut self, backgroundColor: impl Into<Color>) {
-		self.uiView.setBackgroundColor(backgroundColor);
+	pub fn set_background_color(&mut self, background_color: impl Into<Color>) {
+		self.ui_view.set_background_color(background_color);
 	}
 
 	//==============================================================================
 	// 배경색 반환.
 	//==============================================================================
-	pub fn getBackgroundColor(&self) -> Color {
-		self.uiView.getBackgroundColor()
+	pub fn get_background_color(&self) -> Color {
+		self.ui_view.get_background_color()
 	}
 
 	//==============================================================================
 	// 트리 안에서 오프셋을 정하고 content 노드를 바로 옮긴다. (스크롤 뷰가 없거나 지금 꺼내져 있으면 false)
 	// - 스크롤바가 끌 때, 그리고 씬 코드가 같은 프레임에 바로 옮기고 싶을 때 쓴다.
 	//==============================================================================
-	pub fn setScrollOffsetInTree(nodeTree: &mut NodeTree, scrollNodeId: NodeId, offset: Vector2) -> bool {
-		let viewportSize = match nodeTree.getNode(scrollNodeId) {
-			Some(scrollNode) => {
-				scrollNode.getContentSize()
+	pub fn set_scroll_offset_in_tree(node_tree: &mut NodeTree, scroll_node_id: NodeId, offset: Vector2) -> bool {
+		let viewport_size = match node_tree.get_node(scroll_node_id) {
+			Some(scroll_node) => {
+				scroll_node.get_content_size()
 			}
 			None => {
 				return false;
 			}
 		};
-		let (contentId, scrollOffset) = match nodeTree[scrollNodeId].getComponentMut::<UIScrollView>() {
-			Some(scrollView) => {
-				scrollView.viewportSize = viewportSize;
-				scrollView.applyScrollOffset(offset);
-				scrollView.isContentPositionSyncPending = false;
-				let contentId = scrollView.getContent();
-				let scrollOffset = scrollView.getScrollOffset();
-				(contentId, scrollOffset)
+		let (content_id, scroll_offset) = match node_tree[scroll_node_id].get_component_mut::<UIScrollView>() {
+			Some(scroll_view) => {
+				scroll_view.viewport_size = viewport_size;
+				scroll_view.apply_scroll_offset(offset);
+				scroll_view.is_content_position_sync_pending = false;
+				let content_id = scroll_view.get_content();
+				let scroll_offset = scroll_view.get_scroll_offset();
+				(content_id, scroll_offset)
 			}
 			None => {
 				return false;
 			}
 		};
-		if let Some(content) = contentId.and_then(|contentId| nodeTree.getNodeMut(contentId)) {
-			content.setLocalPosition(scrollOffset);
+		if let Some(content) = content_id.and_then(|content_id| node_tree.get_node_mut(content_id)) {
+			content.set_local_position(scroll_offset);
 		}
 		true
 	}
@@ -181,283 +181,283 @@ impl UIScrollView {
 	//==============================================================================
 	// 미뤄 둔 content 노드 위치 / 크기 반영. (tick / 터치 / 휠 때)
 	//==============================================================================
-	fn syncContentNode(&mut self, context: &mut ComponentContext) {
-		if !self.isContentPositionSyncPending && !self.isContentSizeSyncPending {
+	fn sync_content_node(&mut self, context: &mut ComponentContext) {
+		if !self.is_content_position_sync_pending && !self.is_content_size_sync_pending {
 			return;
 		}
-		let contentId = match self.getContent() {
-			Some(contentId) => {
-				contentId
+		let content_id = match self.get_content() {
+			Some(content_id) => {
+				content_id
 			}
 			None => {
 				return;
 			}
 		};
-		let scrollOffset = self.getScrollOffset();
-		let scrollContentSize = self.getScrollContentSize();
-		if let Some(content) = context.getNodeTreeMut().getNodeMut(contentId) {
-			if self.isContentPositionSyncPending {
-				content.setLocalPosition(scrollOffset);
+		let scroll_offset = self.get_scroll_offset();
+		let scroll_content_size = self.get_scroll_content_size();
+		if let Some(content) = context.get_node_tree_mut().get_node_mut(content_id) {
+			if self.is_content_position_sync_pending {
+				content.set_local_position(scroll_offset);
 			}
-			if self.isContentSizeSyncPending {
-				content.setContentSize(scrollContentSize);
+			if self.is_content_size_sync_pending {
+				content.set_content_size(scroll_content_size);
 			}
 		}
-		self.isContentPositionSyncPending = false;
-		self.isContentSizeSyncPending = false;
+		self.is_content_position_sync_pending = false;
+		self.is_content_size_sync_pending = false;
 	}
 
 	//==============================================================================
-	// 보이는 영역 크기 읽어 두기. (호스트 contentSize)
+	// 보이는 영역 크기 읽어 두기. (호스트 content_size)
 	//==============================================================================
-	fn updateViewportSize(&mut self, context: &ComponentContext) {
-		self.viewportSize = context.getTransform().getContentSize();
+	fn update_viewport_size(&mut self, context: &ComponentContext) {
+		self.viewport_size = context.get_transform().get_content_size();
 	}
 
 	//==============================================================================
 	// 오프셋 범위. (최소 x, 최소 y. 최대는 둘 다 0. 끈 축은 0)
 	//==============================================================================
-	fn calculateMinimumOffset(&self) -> Vector2 {
-		let viewportSize = self.viewportSize;
-		let scrollContentSize = self.getScrollContentSize();
-		let minimumX = if self.isHorizontal() {
-			(viewportSize.x - scrollContentSize.x).min(0.0)
+	fn calculate_minimum_offset(&self) -> Vector2 {
+		let viewport_size = self.viewport_size;
+		let scroll_content_size = self.get_scroll_content_size();
+		let minimum_x = if self.is_horizontal() {
+			(viewport_size.x - scroll_content_size.x).min(0.0)
 		}
 		else {
 			0.0
 		};
-		let minimumY = if self.isVertical() {
-			(viewportSize.y - scrollContentSize.y).min(0.0)
+		let minimum_y = if self.is_vertical() {
+			(viewport_size.y - scroll_content_size.y).min(0.0)
 		}
 		else {
 			0.0
 		};
-		Vector2::create(minimumX, minimumY)
+		Vector2::create(minimum_x, minimum_y)
 	}
 
 	//==============================================================================
 	// 드래그 중 오프셋과 속도 계산. (tick)
 	//==============================================================================
-	fn updateDrag(&mut self, timeDelta: f32) {
-		let viewInputPosition = self.currentViewInputPosition;
-		let dragSensitivity = self.getDragSensitivity();
-		let rawDeltaX = (viewInputPosition.x - self.dragStartViewPosition.x) * dragSensitivity;
-		let rawDeltaY = (viewInputPosition.y - self.dragStartViewPosition.y) * dragSensitivity;
-		let deltaX = if self.isHorizontal() {
-			rawDeltaX
+	fn update_drag(&mut self, time_delta: f32) {
+		let view_input_position = self.current_view_input_position;
+		let drag_sensitivity = self.get_drag_sensitivity();
+		let raw_delta_x = (view_input_position.x - self.drag_start_view_position.x) * drag_sensitivity;
+		let raw_delta_y = (view_input_position.y - self.drag_start_view_position.y) * drag_sensitivity;
+		let delta_x = if self.is_horizontal() {
+			raw_delta_x
 		}
 		else {
 			0.0
 		};
-		let deltaY = if self.isVertical() {
-			rawDeltaY
+		let delta_y = if self.is_vertical() {
+			raw_delta_y
 		}
 		else {
 			0.0
 		};
-		let proposedOffset = Vector2::create(self.dragStartOffset.x + deltaX, self.dragStartOffset.y + deltaY);
-		if self.getScrollMode() == ScrollMode::elastic {
-			// 원본처럼 탄성 범위는 끈 축도 계산한다. (끈 축은 deltaX / deltaY 가 0 이라 넘지 않는다)
-			let viewportSize = self.viewportSize;
-			let scrollContentSize = self.getScrollContentSize();
-			let elasticMaximumX = 0.0;
-			let elasticMinimumX = (viewportSize.x - scrollContentSize.x).min(0.0);
-			let elasticMaximumY = 0.0;
-			let elasticMinimumY = (viewportSize.y - scrollContentSize.y).min(0.0);
-			let mut elasticOffsetX = proposedOffset.x;
-			let mut elasticOffsetY = proposedOffset.y;
-			if elasticOffsetX > elasticMaximumX {
-				elasticOffsetX = elasticMaximumX + (elasticOffsetX - elasticMaximumX) * ELASTIC_RESISTANCE;
+		let proposed_offset = Vector2::create(self.drag_start_offset.x + delta_x, self.drag_start_offset.y + delta_y);
+		if self.get_scroll_mode() == ScrollMode::Elastic {
+			// 원본처럼 탄성 범위는 끈 축도 계산한다. (끈 축은 delta_x / delta_y 가 0 이라 넘지 않는다)
+			let viewport_size = self.viewport_size;
+			let scroll_content_size = self.get_scroll_content_size();
+			let elastic_maximum_x = 0.0;
+			let elastic_minimum_x = (viewport_size.x - scroll_content_size.x).min(0.0);
+			let elastic_maximum_y = 0.0;
+			let elastic_minimum_y = (viewport_size.y - scroll_content_size.y).min(0.0);
+			let mut elastic_offset_x = proposed_offset.x;
+			let mut elastic_offset_y = proposed_offset.y;
+			if elastic_offset_x > elastic_maximum_x {
+				elastic_offset_x = elastic_maximum_x + (elastic_offset_x - elastic_maximum_x) * ELASTIC_RESISTANCE;
 			}
-			else if elasticOffsetX < elasticMinimumX {
-				elasticOffsetX = elasticMinimumX + (elasticOffsetX - elasticMinimumX) * ELASTIC_RESISTANCE;
+			else if elastic_offset_x < elastic_minimum_x {
+				elastic_offset_x = elastic_minimum_x + (elastic_offset_x - elastic_minimum_x) * ELASTIC_RESISTANCE;
 			}
-			if elasticOffsetY > elasticMaximumY {
-				elasticOffsetY = elasticMaximumY + (elasticOffsetY - elasticMaximumY) * ELASTIC_RESISTANCE;
+			if elastic_offset_y > elastic_maximum_y {
+				elastic_offset_y = elastic_maximum_y + (elastic_offset_y - elastic_maximum_y) * ELASTIC_RESISTANCE;
 			}
-			else if elasticOffsetY < elasticMinimumY {
-				elasticOffsetY = elasticMinimumY + (elasticOffsetY - elasticMinimumY) * ELASTIC_RESISTANCE;
+			else if elastic_offset_y < elastic_minimum_y {
+				elastic_offset_y = elastic_minimum_y + (elastic_offset_y - elastic_minimum_y) * ELASTIC_RESISTANCE;
 			}
-			self.scrollOffset = Vector2::create(elasticOffsetX, elasticOffsetY);
-			self.isContentPositionSyncPending = true;
+			self.scroll_offset = Vector2::create(elastic_offset_x, elastic_offset_y);
+			self.is_content_position_sync_pending = true;
 
-			if timeDelta > 0.0 {
-				let rawVelocityX = (viewInputPosition.x - self.previousViewInputPosition.x) / timeDelta;
-				let rawVelocityY = (viewInputPosition.y - self.previousViewInputPosition.y) / timeDelta;
-				let velocityX = if self.isHorizontal() {
-					rawVelocityX
+			if time_delta > 0.0 {
+				let raw_velocity_x = (view_input_position.x - self.previous_view_input_position.x) / time_delta;
+				let raw_velocity_y = (view_input_position.y - self.previous_view_input_position.y) / time_delta;
+				let velocity_x = if self.is_horizontal() {
+					raw_velocity_x
 				}
 				else {
 					0.0
 				};
-				let velocityY = if self.isVertical() {
-					rawVelocityY
+				let velocity_y = if self.is_vertical() {
+					raw_velocity_y
 				}
 				else {
 					0.0
 				};
-				self.scrollVelocity = Vector2::create(velocityX, velocityY);
+				self.scroll_velocity = Vector2::create(velocity_x, velocity_y);
 			}
 		}
 		else {
-			self.applyScrollOffset(proposedOffset);
+			self.apply_scroll_offset(proposed_offset);
 		}
-		self.previousViewInputPosition = viewInputPosition;
+		self.previous_view_input_position = view_input_position;
 	}
 
 	//==============================================================================
 	// 탄성 모드에서 놓은 뒤 스프링 / 마찰 물리. (tick)
 	//==============================================================================
-	fn updateElasticPhysics(&mut self, timeDelta: f32) {
-		let minimumOffset = self.calculateMinimumOffset();
-		let boundsMaximumX = 0.0;
-		let boundsMinimumX = minimumOffset.x;
-		let boundsMaximumY = 0.0;
-		let boundsMinimumY = minimumOffset.y;
-		let scrollVelocity = self.getScrollVelocity();
-		let mut velocityX = scrollVelocity.x;
-		let mut velocityY = scrollVelocity.y;
-		let currentScrollOffset = self.getScrollOffset();
-		let mut offsetX = currentScrollOffset.x;
-		let mut offsetY = currentScrollOffset.y;
-		let clampedX = math::clamp(offsetX, boundsMinimumX, boundsMaximumX);
-		let clampedY = math::clamp(offsetY, boundsMinimumY, boundsMaximumY);
-		let displacementX = offsetX - clampedX;
-		let displacementY = offsetY - clampedY;
-		let isOutOfBounds = displacementX != 0.0 || displacementY != 0.0;
-		if isOutOfBounds {
-			let springForceX = -displacementX * SPRING_CONSTANT;
-			let springForceY = -displacementY * SPRING_CONSTANT;
-			let dampingForceX = -velocityX * DAMPING_COEFFICIENT;
-			let dampingForceY = -velocityY * DAMPING_COEFFICIENT;
-			velocityX += (springForceX + dampingForceX) * timeDelta;
-			velocityY += (springForceY + dampingForceY) * timeDelta;
+	fn update_elastic_physics(&mut self, time_delta: f32) {
+		let minimum_offset = self.calculate_minimum_offset();
+		let bounds_maximum_x = 0.0;
+		let bounds_minimum_x = minimum_offset.x;
+		let bounds_maximum_y = 0.0;
+		let bounds_minimum_y = minimum_offset.y;
+		let scroll_velocity = self.get_scroll_velocity();
+		let mut velocity_x = scroll_velocity.x;
+		let mut velocity_y = scroll_velocity.y;
+		let current_scroll_offset = self.get_scroll_offset();
+		let mut offset_x = current_scroll_offset.x;
+		let mut offset_y = current_scroll_offset.y;
+		let clamped_x = math::clamp(offset_x, bounds_minimum_x, bounds_maximum_x);
+		let clamped_y = math::clamp(offset_y, bounds_minimum_y, bounds_maximum_y);
+		let displacement_x = offset_x - clamped_x;
+		let displacement_y = offset_y - clamped_y;
+		let is_out_of_bounds = displacement_x != 0.0 || displacement_y != 0.0;
+		if is_out_of_bounds {
+			let spring_force_x = -displacement_x * SPRING_CONSTANT;
+			let spring_force_y = -displacement_y * SPRING_CONSTANT;
+			let damping_force_x = -velocity_x * DAMPING_COEFFICIENT;
+			let damping_force_y = -velocity_y * DAMPING_COEFFICIENT;
+			velocity_x += (spring_force_x + damping_force_x) * time_delta;
+			velocity_y += (spring_force_y + damping_force_y) * time_delta;
 		}
 		else {
-			let frictionFactor = (1.0 - FRICTION_COEFFICIENT * timeDelta).max(0.0);
-			velocityX *= frictionFactor;
-			velocityY *= frictionFactor;
+			let friction_factor = (1.0 - FRICTION_COEFFICIENT * time_delta).max(0.0);
+			velocity_x *= friction_factor;
+			velocity_y *= friction_factor;
 		}
-		offsetX += velocityX * timeDelta;
-		offsetY += velocityY * timeDelta;
+		offset_x += velocity_x * time_delta;
+		offset_y += velocity_y * time_delta;
 
 		// 경계 밖에서 돌아오다 경계를 넘어 안으로 들어오면 경계에서 멈춘다.
-		if displacementX > 0.0 && offsetX < boundsMaximumX {
-			offsetX = boundsMaximumX;
-			velocityX = 0.0;
+		if displacement_x > 0.0 && offset_x < bounds_maximum_x {
+			offset_x = bounds_maximum_x;
+			velocity_x = 0.0;
 		}
-		else if displacementX < 0.0 && offsetX > boundsMinimumX {
-			offsetX = boundsMinimumX;
-			velocityX = 0.0;
+		else if displacement_x < 0.0 && offset_x > bounds_minimum_x {
+			offset_x = bounds_minimum_x;
+			velocity_x = 0.0;
 		}
-		if displacementY > 0.0 && offsetY < boundsMaximumY {
-			offsetY = boundsMaximumY;
-			velocityY = 0.0;
+		if displacement_y > 0.0 && offset_y < bounds_maximum_y {
+			offset_y = bounds_maximum_y;
+			velocity_y = 0.0;
 		}
-		else if displacementY < 0.0 && offsetY > boundsMinimumY {
-			offsetY = boundsMinimumY;
-			velocityY = 0.0;
+		else if displacement_y < 0.0 && offset_y > bounds_minimum_y {
+			offset_y = bounds_minimum_y;
+			velocity_y = 0.0;
 		}
 
-		let newClampedX = math::clamp(offsetX, boundsMinimumX, boundsMaximumX);
-		let newClampedY = math::clamp(offsetY, boundsMinimumY, boundsMaximumY);
-		let newDisplacementX = offsetX - newClampedX;
-		let newDisplacementY = offsetY - newClampedY;
-		let speedSquared = velocityX * velocityX + velocityY * velocityY;
-		if speedSquared < 1.0 && newDisplacementX.abs() < 0.5 && newDisplacementY.abs() < 0.5 {
-			offsetX = newClampedX;
-			offsetY = newClampedY;
-			velocityX = 0.0;
-			velocityY = 0.0;
+		let new_clamped_x = math::clamp(offset_x, bounds_minimum_x, bounds_maximum_x);
+		let new_clamped_y = math::clamp(offset_y, bounds_minimum_y, bounds_maximum_y);
+		let new_displacement_x = offset_x - new_clamped_x;
+		let new_displacement_y = offset_y - new_clamped_y;
+		let speed_squared = velocity_x * velocity_x + velocity_y * velocity_y;
+		if speed_squared < 1.0 && new_displacement_x.abs() < 0.5 && new_displacement_y.abs() < 0.5 {
+			offset_x = new_clamped_x;
+			offset_y = new_clamped_y;
+			velocity_x = 0.0;
+			velocity_y = 0.0;
 		}
-		self.scrollOffset = Vector2::create(offsetX, offsetY);
-		self.isContentPositionSyncPending = true;
-		self.scrollVelocity = Vector2::create(velocityX, velocityY);
+		self.scroll_offset = Vector2::create(offset_x, offset_y);
+		self.is_content_position_sync_pending = true;
+		self.scroll_velocity = Vector2::create(velocity_x, velocity_y);
 	}
 
 	//==============================================================================
 	// 오프셋 적용. (범위로 자른다. content 노드는 다음 반영 때 옮긴다)
 	//==============================================================================
-	pub fn applyScrollOffset(&mut self, offset: Vector2) {
-		let minimumOffset = self.calculateMinimumOffset();
-		self.scrollOffset = Vector2::create(math::clamp(offset.x, minimumOffset.x, 0.0), math::clamp(offset.y, minimumOffset.y, 0.0));
-		self.isContentPositionSyncPending = true;
+	pub fn apply_scroll_offset(&mut self, offset: Vector2) {
+		let minimum_offset = self.calculate_minimum_offset();
+		self.scroll_offset = Vector2::create(math::clamp(offset.x, minimum_offset.x, 0.0), math::clamp(offset.y, minimum_offset.y, 0.0));
+		self.is_content_position_sync_pending = true;
 	}
 
 	//==============================================================================
 	// 오프셋 설정. (씬 코드용. 다음 tick 에 그때의 영역 크기로 다시 잘라 content 를 옮긴다)
 	//==============================================================================
-	pub fn setScrollOffset(&mut self, offset: Vector2) {
-		self.applyScrollOffset(offset);
-		self.isOffsetClampPending = true;
+	pub fn set_scroll_offset(&mut self, offset: Vector2) {
+		self.apply_scroll_offset(offset);
+		self.is_offset_clamp_pending = true;
 	}
 
 	//==============================================================================
 	// 오프셋 반환. (content 노드의 로컬 위치, 아래로 스크롤하면 y 가 음수)
 	//==============================================================================
-	pub fn getScrollOffset(&self) -> Vector2 {
-		self.scrollOffset
+	pub fn get_scroll_offset(&self) -> Vector2 {
+		self.scroll_offset
 	}
 
 	//==============================================================================
 	// 가로 스크롤 켜기 설정.
 	//==============================================================================
-	pub fn setHorizontal(&mut self, isHorizontal: bool) {
-		self.horizontalEnabled = isHorizontal;
+	pub fn set_horizontal(&mut self, is_horizontal: bool) {
+		self.horizontal_enabled = is_horizontal;
 	}
 
 	//==============================================================================
 	// 가로 스크롤 켜짐 여부.
 	//==============================================================================
-	pub fn isHorizontal(&self) -> bool {
-		self.horizontalEnabled
+	pub fn is_horizontal(&self) -> bool {
+		self.horizontal_enabled
 	}
 
 	//==============================================================================
 	// 세로 스크롤 켜기 설정.
 	//==============================================================================
-	pub fn setVertical(&mut self, isVertical: bool) {
-		self.verticalEnabled = isVertical;
+	pub fn set_vertical(&mut self, is_vertical: bool) {
+		self.vertical_enabled = is_vertical;
 	}
 
 	//==============================================================================
 	// 세로 스크롤 켜짐 여부.
 	//==============================================================================
-	pub fn isVertical(&self) -> bool {
-		self.verticalEnabled
+	pub fn is_vertical(&self) -> bool {
+		self.vertical_enabled
 	}
 
 	//==============================================================================
 	// 스크롤하지 않는 축으로 끄는 손가락을 누른 노드에 남길지 설정. (기본 false, TouchRecognizer 가 읽는다)
 	//==============================================================================
-	pub fn setPassesCrossAxisDrag(&mut self, passesCrossAxisDrag: bool) {
-		self.passesCrossAxisDrag = passesCrossAxisDrag;
+	pub fn set_passes_cross_axis_drag(&mut self, passes_cross_axis_drag: bool) {
+		self.passes_cross_axis_drag = passes_cross_axis_drag;
 	}
 
 	//==============================================================================
 	// 스크롤하지 않는 축으로 끄는 손가락을 누른 노드에 남기는지.
 	//==============================================================================
-	pub fn isPassingCrossAxisDrag(&self) -> bool {
-		self.passesCrossAxisDrag
+	pub fn is_passing_cross_axis_drag(&self) -> bool {
+		self.passes_cross_axis_drag
 	}
 
 	//==============================================================================
 	// 끈 방향이 이 뷰가 가져갈 드래그인지. (스크롤하지 않는 축의 드래그를 남기는 옵션을 켰을 때만 가려낸다)
 	//==============================================================================
-	pub fn isScrollDrag(&self, deltaX: f32, deltaY: f32) -> bool {
-		if !self.passesCrossAxisDrag {
+	pub fn is_scroll_drag(&self, delta_x: f32, delta_y: f32) -> bool {
+		if !self.passes_cross_axis_drag {
 			return true;
 		}
-		if self.horizontalEnabled && self.verticalEnabled {
+		if self.horizontal_enabled && self.vertical_enabled {
 			return true;
 		}
-		let absoluteX = deltaX.abs();
-		let absoluteY = deltaY.abs();
-		if self.verticalEnabled {
-			return absoluteY >= absoluteX;
+		let absolute_x = delta_x.abs();
+		let absolute_y = delta_y.abs();
+		if self.vertical_enabled {
+			return absolute_y >= absolute_x;
 		}
-		if self.horizontalEnabled {
-			return absoluteX >= absoluteY;
+		if self.horizontal_enabled {
+			return absolute_x >= absolute_y;
 		}
 		false
 	}
@@ -465,95 +465,95 @@ impl UIScrollView {
 	//==============================================================================
 	// 드래그 반영량 배율 설정. (1 = 기본, 2 = 두 배 빠르게)
 	//==============================================================================
-	pub fn setDragSensitivity(&mut self, dragSensitivity: f32) {
-		self.dragSensitivity = dragSensitivity;
+	pub fn set_drag_sensitivity(&mut self, drag_sensitivity: f32) {
+		self.drag_sensitivity = drag_sensitivity;
 	}
 
 	//==============================================================================
 	// 드래그 반영량 배율 반환.
 	//==============================================================================
-	pub fn getDragSensitivity(&self) -> f32 {
-		self.dragSensitivity
+	pub fn get_drag_sensitivity(&self) -> f32 {
+		self.drag_sensitivity
 	}
 
 	//==============================================================================
 	// 스크롤 모드 설정.
 	//==============================================================================
-	pub fn setScrollMode(&mut self, scrollMode: ScrollMode) {
-		self.scrollMode = scrollMode;
+	pub fn set_scroll_mode(&mut self, scroll_mode: ScrollMode) {
+		self.scroll_mode = scroll_mode;
 	}
 
 	//==============================================================================
 	// 스크롤 모드 반환.
 	//==============================================================================
-	pub fn getScrollMode(&self) -> ScrollMode {
-		self.scrollMode
+	pub fn get_scroll_mode(&self) -> ScrollMode {
+		self.scroll_mode
 	}
 
 	//==============================================================================
 	// 스크롤 콘텐츠 크기 설정. (보이는 영역보다 커야 스크롤된다. content 노드 크기는 다음 tick 에 맞춘다)
 	//==============================================================================
-	pub fn setScrollContentSize(&mut self, scrollContentSize: Vector2) {
-		self.scrollContentSize = scrollContentSize;
-		self.isContentSizeSyncPending = true;
+	pub fn set_scroll_content_size(&mut self, scroll_content_size: Vector2) {
+		self.scroll_content_size = scroll_content_size;
+		self.is_content_size_sync_pending = true;
 	}
 
 	//==============================================================================
 	// 스크롤 콘텐츠 크기 반환.
 	//==============================================================================
-	pub fn getScrollContentSize(&self) -> Vector2 {
-		self.scrollContentSize
+	pub fn get_scroll_content_size(&self) -> Vector2 {
+		self.scroll_content_size
 	}
 
 	//==============================================================================
 	// 드래그 중인지.
 	//==============================================================================
-	pub fn isDragging(&self) -> bool {
-		self.isDragging
+	pub fn is_dragging(&self) -> bool {
+		self.is_dragging
 	}
 
 	//==============================================================================
 	// 지금 스크롤 속도 반환.
 	//==============================================================================
-	pub fn getScrollVelocity(&self) -> Vector2 {
-		self.scrollVelocity
+	pub fn get_scroll_velocity(&self) -> Vector2 {
+		self.scroll_velocity
 	}
 
 	//==============================================================================
 	// 세로 스크롤바 보이기 설정. (true 면 다음 tick 에 호스트의 자식으로 만들어 켠다)
 	//==============================================================================
-	pub fn setShowsVerticalScrollBar(&mut self, shows: bool) {
-		self.showsVerticalScrollBar = shows;
-		self.pendingVerticalScrollBarActive = Some(shows);
+	pub fn set_shows_vertical_scroll_bar(&mut self, shows: bool) {
+		self.shows_vertical_scroll_bar = shows;
+		self.pending_vertical_scroll_bar_active = Some(shows);
 	}
 
 	//==============================================================================
 	// 가로 스크롤바 보이기 설정.
 	//==============================================================================
-	pub fn setShowsHorizontalScrollBar(&mut self, shows: bool) {
-		self.showsHorizontalScrollBar = shows;
-		self.pendingHorizontalScrollBarActive = Some(shows);
+	pub fn set_shows_horizontal_scroll_bar(&mut self, shows: bool) {
+		self.shows_horizontal_scroll_bar = shows;
+		self.pending_horizontal_scroll_bar_active = Some(shows);
 	}
 
 	//==============================================================================
-	// 세로 스크롤바 노드 핸들. (꾸밀 때 nodeTree[id].getComponentMut::<UIScrollBar>())
+	// 세로 스크롤바 노드 핸들. (꾸밀 때 node_tree[id].get_component_mut::<UIScrollBar>())
 	//==============================================================================
-	pub fn getVerticalScrollBar(&self) -> Option<NodeId> {
-		self.verticalScrollBarId
+	pub fn get_vertical_scroll_bar(&self) -> Option<NodeId> {
+		self.vertical_scroll_bar_id
 	}
 
 	//==============================================================================
 	// 가로 스크롤바 노드 핸들.
 	//==============================================================================
-	pub fn getHorizontalScrollBar(&self) -> Option<NodeId> {
-		self.horizontalScrollBarId
+	pub fn get_horizontal_scroll_bar(&self) -> Option<NodeId> {
+		self.horizontal_scroll_bar_id
 	}
 
 	//==============================================================================
 	// 세로 스크롤바가 차지하는 폭. (보이는 중일 때만)
 	//==============================================================================
-	pub fn getVerticalScrollBarReservedWidth(&self) -> f32 {
-		if self.showsVerticalScrollBar && self.verticalScrollBarId.is_some() {
+	pub fn get_vertical_scroll_bar_reserved_width(&self) -> f32 {
+		if self.shows_vertical_scroll_bar && self.vertical_scroll_bar_id.is_some() {
 			SCROLLBAR_THICKNESS + SCROLLBAR_MARGIN * 2.0
 		}
 		else {
@@ -564,8 +564,8 @@ impl UIScrollView {
 	//==============================================================================
 	// 가로 스크롤바가 차지하는 높이. (보이는 중일 때만)
 	//==============================================================================
-	pub fn getHorizontalScrollBarReservedHeight(&self) -> f32 {
-		if self.showsHorizontalScrollBar && self.horizontalScrollBarId.is_some() {
+	pub fn get_horizontal_scroll_bar_reserved_height(&self) -> f32 {
+		if self.shows_horizontal_scroll_bar && self.horizontal_scroll_bar_id.is_some() {
 			SCROLLBAR_THICKNESS + SCROLLBAR_MARGIN * 2.0
 		}
 		else {
@@ -576,55 +576,55 @@ impl UIScrollView {
 	//==============================================================================
 	// 스크롤바를 뺀, 콘텐트가 그려질 수 있는 보이는 영역 크기.
 	//==============================================================================
-	pub fn getInnerContentSize(&self) -> Vector2 {
-		let viewportSize = self.viewportSize;
-		let reservedX = self.getVerticalScrollBarReservedWidth();
-		let reservedY = self.getHorizontalScrollBarReservedHeight();
-		Vector2::create((viewportSize.x - reservedX).max(0.0), (viewportSize.y - reservedY).max(0.0))
+	pub fn get_inner_content_size(&self) -> Vector2 {
+		let viewport_size = self.viewport_size;
+		let reserved_x = self.get_vertical_scroll_bar_reserved_width();
+		let reserved_y = self.get_horizontal_scroll_bar_reserved_height();
+		Vector2::create((viewport_size.x - reserved_x).max(0.0), (viewport_size.y - reserved_y).max(0.0))
 	}
 
 	//==============================================================================
 	// 휠 스크롤 배율 설정.
 	//==============================================================================
-	pub fn setWheelScrollScale(&mut self, wheelScrollScale: f32) {
-		self.wheelScrollScale = wheelScrollScale;
+	pub fn set_wheel_scroll_scale(&mut self, wheel_scroll_scale: f32) {
+		self.wheel_scroll_scale = wheel_scroll_scale;
 	}
 
 	//==============================================================================
 	// 스크롤바 노드 하나 만들기. (호스트의 자식)
 	//==============================================================================
-	fn createScrollBar(context: &mut ComponentContext, name: &str, axis: ScrollBarAxis) -> NodeId {
-		let scrollNodeId = context.getNodeId();
-		let nodeTree = context.getNodeTreeMut();
-		let scrollBarId = nodeTree.createChild(scrollNodeId, name);
-		let mut scrollBar = UIScrollBar::new();
-		scrollBar.setAxis(axis);
-		scrollBar.setScrollView(Some(scrollNodeId));
-		nodeTree.addComponent(scrollBarId, scrollBar);
-		scrollBarId
+	fn create_scroll_bar(context: &mut ComponentContext, name: &str, axis: ScrollBarAxis) -> NodeId {
+		let scroll_node_id = context.get_node_id();
+		let node_tree = context.get_node_tree_mut();
+		let scroll_bar_id = node_tree.create_child(scroll_node_id, name);
+		let mut scroll_bar = UIScrollBar::new();
+		scroll_bar.set_axis(axis);
+		scroll_bar.set_scroll_view(Some(scroll_node_id));
+		node_tree.add_component(scroll_bar_id, scroll_bar);
+		scroll_bar_id
 	}
 
 	//==============================================================================
 	// 보이기로 정한 스크롤바를 만들고, 미뤄 둔 켜기 / 끄기를 반영한다.
 	//==============================================================================
-	fn updateScrollBarNodes(&mut self, context: &mut ComponentContext) {
-		if self.showsVerticalScrollBar && self.verticalScrollBarId.is_none() {
-			let scrollBarId = UIScrollView::createScrollBar(context, "verticalScrollBar", ScrollBarAxis::vertical);
-			self.verticalScrollBarId = Some(scrollBarId);
+	fn update_scroll_bar_nodes(&mut self, context: &mut ComponentContext) {
+		if self.shows_vertical_scroll_bar && self.vertical_scroll_bar_id.is_none() {
+			let scroll_bar_id = UIScrollView::create_scroll_bar(context, "verticalScrollBar", ScrollBarAxis::Vertical);
+			self.vertical_scroll_bar_id = Some(scroll_bar_id);
 		}
-		if self.showsHorizontalScrollBar && self.horizontalScrollBarId.is_none() {
-			let scrollBarId = UIScrollView::createScrollBar(context, "horizontalScrollBar", ScrollBarAxis::horizontal);
-			self.horizontalScrollBarId = Some(scrollBarId);
+		if self.shows_horizontal_scroll_bar && self.horizontal_scroll_bar_id.is_none() {
+			let scroll_bar_id = UIScrollView::create_scroll_bar(context, "horizontalScrollBar", ScrollBarAxis::Horizontal);
+			self.horizontal_scroll_bar_id = Some(scroll_bar_id);
 		}
-		let nodeTree = context.getNodeTreeMut();
-		if let Some(isActive) = self.pendingVerticalScrollBarActive.take() {
-			if let Some(scrollBar) = self.verticalScrollBarId.and_then(|scrollBarId| nodeTree.getNodeMut(scrollBarId)) {
-				scrollBar.setActive(isActive);
+		let node_tree = context.get_node_tree_mut();
+		if let Some(is_active) = self.pending_vertical_scroll_bar_active.take() {
+			if let Some(scroll_bar) = self.vertical_scroll_bar_id.and_then(|scroll_bar_id| node_tree.get_node_mut(scroll_bar_id)) {
+				scroll_bar.set_active(is_active);
 			}
 		}
-		if let Some(isActive) = self.pendingHorizontalScrollBarActive.take() {
-			if let Some(scrollBar) = self.horizontalScrollBarId.and_then(|scrollBarId| nodeTree.getNodeMut(scrollBarId)) {
-				scrollBar.setActive(isActive);
+		if let Some(is_active) = self.pending_horizontal_scroll_bar_active.take() {
+			if let Some(scroll_bar) = self.horizontal_scroll_bar_id.and_then(|scroll_bar_id| node_tree.get_node_mut(scroll_bar_id)) {
+				scroll_bar.set_active(is_active);
 			}
 		}
 	}
@@ -632,29 +632,29 @@ impl UIScrollView {
 	//==============================================================================
 	// 매 tick 스크롤바 위치 / 크기 갱신.
 	//==============================================================================
-	fn layoutScrollBars(&mut self, context: &mut ComponentContext) {
-		let viewportSize = self.viewportSize;
-		let reservedX = self.getVerticalScrollBarReservedWidth();
-		let reservedY = self.getHorizontalScrollBarReservedHeight();
-		let showsVerticalScrollBar = self.showsVerticalScrollBar;
-		let showsHorizontalScrollBar = self.showsHorizontalScrollBar;
-		let nodeTree = context.getNodeTreeMut();
-		if showsVerticalScrollBar {
-			if let Some(scrollBar) = self.verticalScrollBarId.and_then(|scrollBarId| nodeTree.getNodeMut(scrollBarId)) {
-				let positionX = viewportSize.x - SCROLLBAR_THICKNESS - SCROLLBAR_MARGIN;
-				let positionY = SCROLLBAR_MARGIN;
-				let height = (viewportSize.y - SCROLLBAR_MARGIN * 2.0 - reservedY).max(0.0);
-				scrollBar.setLocalPosition(Vector2::create(positionX, positionY));
-				scrollBar.setContentSize(Vector2::create(SCROLLBAR_THICKNESS, height));
+	fn layout_scroll_bars(&mut self, context: &mut ComponentContext) {
+		let viewport_size = self.viewport_size;
+		let reserved_x = self.get_vertical_scroll_bar_reserved_width();
+		let reserved_y = self.get_horizontal_scroll_bar_reserved_height();
+		let shows_vertical_scroll_bar = self.shows_vertical_scroll_bar;
+		let shows_horizontal_scroll_bar = self.shows_horizontal_scroll_bar;
+		let node_tree = context.get_node_tree_mut();
+		if shows_vertical_scroll_bar {
+			if let Some(scroll_bar) = self.vertical_scroll_bar_id.and_then(|scroll_bar_id| node_tree.get_node_mut(scroll_bar_id)) {
+				let position_x = viewport_size.x - SCROLLBAR_THICKNESS - SCROLLBAR_MARGIN;
+				let position_y = SCROLLBAR_MARGIN;
+				let height = (viewport_size.y - SCROLLBAR_MARGIN * 2.0 - reserved_y).max(0.0);
+				scroll_bar.set_local_position(Vector2::create(position_x, position_y));
+				scroll_bar.set_content_size(Vector2::create(SCROLLBAR_THICKNESS, height));
 			}
 		}
-		if showsHorizontalScrollBar {
-			if let Some(scrollBar) = self.horizontalScrollBarId.and_then(|scrollBarId| nodeTree.getNodeMut(scrollBarId)) {
-				let positionX = SCROLLBAR_MARGIN;
-				let positionY = viewportSize.y - SCROLLBAR_THICKNESS - SCROLLBAR_MARGIN;
-				let width = (viewportSize.x - SCROLLBAR_MARGIN * 2.0 - reservedX).max(0.0);
-				scrollBar.setLocalPosition(Vector2::create(positionX, positionY));
-				scrollBar.setContentSize(Vector2::create(width, SCROLLBAR_THICKNESS));
+		if shows_horizontal_scroll_bar {
+			if let Some(scroll_bar) = self.horizontal_scroll_bar_id.and_then(|scroll_bar_id| node_tree.get_node_mut(scroll_bar_id)) {
+				let position_x = SCROLLBAR_MARGIN;
+				let position_y = viewport_size.y - SCROLLBAR_THICKNESS - SCROLLBAR_MARGIN;
+				let width = (viewport_size.x - SCROLLBAR_MARGIN * 2.0 - reserved_x).max(0.0);
+				scroll_bar.set_local_position(Vector2::create(position_x, position_y));
+				scroll_bar.set_content_size(Vector2::create(width, SCROLLBAR_THICKNESS));
 			}
 		}
 	}
@@ -667,115 +667,115 @@ impl Default for UIScrollView {
 }
 
 impl Component for UIScrollView {
-	fn getComponentBase(&self) -> &ComponentBase {
-		self.uiView.getComponentBase()
+	fn get_component_base(&self) -> &ComponentBase {
+		self.ui_view.get_component_base()
 	}
 
-	fn getComponentBaseMut(&mut self) -> &mut ComponentBase {
-		self.uiView.getComponentBaseMut()
+	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
+		self.ui_view.get_component_base_mut()
 	}
 
-	fn getComponentType(&self) -> &'static str {
+	fn get_component_type(&self) -> &'static str {
 		"ScrollView"
 	}
 
 	fn attach(&mut self, transform: &mut NodeTransform) {
-		self.viewportSize = transform.getContentSize();
+		self.viewport_size = transform.get_content_size();
 	}
 
 	//==============================================================================
 	// 트리에 붙음. (content 노드, Mask, interactable)
 	//==============================================================================
-	fn attachToTree(&mut self, nodeTree: &mut NodeTree, nodeId: NodeId) {
-		self.uiView.createContentNode(nodeTree, nodeId);
-		let scrollNode = &mut nodeTree[nodeId];
-		if !scrollNode.hasComponent::<Mask>() {
-			scrollNode.addComponent(Mask::new());
+	fn attach_to_tree(&mut self, node_tree: &mut NodeTree, node_id: NodeId) {
+		self.ui_view.create_content_node(node_tree, node_id);
+		let scroll_node = &mut node_tree[node_id];
+		if !scroll_node.has_component::<Mask>() {
+			scroll_node.add_component(Mask::new());
 		}
-		scrollNode.setInteractable(true);
+		scroll_node.set_interactable(true);
 	}
 
 	//==============================================================================
 	// 갱신. (스크롤바 → 드래그 → 탄성 물리 → content 노드 반영)
 	//==============================================================================
-	fn tick(&mut self, context: &mut ComponentContext, timeDelta: f32) {
-		self.updateViewportSize(context);
-		if self.isOffsetClampPending {
-			self.isOffsetClampPending = false;
-			let scrollOffset = self.scrollOffset;
-			self.applyScrollOffset(scrollOffset);
+	fn tick(&mut self, context: &mut ComponentContext, time_delta: f32) {
+		self.update_viewport_size(context);
+		if self.is_offset_clamp_pending {
+			self.is_offset_clamp_pending = false;
+			let scroll_offset = self.scroll_offset;
+			self.apply_scroll_offset(scroll_offset);
 		}
 
 		// 스크롤바 자동 레이아웃.
-		self.updateScrollBarNodes(context);
-		self.layoutScrollBars(context);
+		self.update_scroll_bar_nodes(context);
+		self.layout_scroll_bars(context);
 
 		// 드래그 중 오프셋과 속도.
-		if self.isDragging() {
-			self.updateDrag(timeDelta);
+		if self.is_dragging() {
+			self.update_drag(time_delta);
 		}
 
 		// 탄성 모드에서 놓은 뒤.
-		if self.getScrollMode() == ScrollMode::elastic && !self.isDragging() {
-			self.updateElasticPhysics(timeDelta);
+		if self.get_scroll_mode() == ScrollMode::Elastic && !self.is_dragging() {
+			self.update_elastic_physics(time_delta);
 		}
-		self.syncContentNode(context);
+		self.sync_content_node(context);
 	}
 
 	fn draw(&mut self, transform: &NodeTransform, graphic: &mut Graphic) {
-		self.uiView.drawBackground(transform, graphic);
+		self.ui_view.draw_background(transform, graphic);
 	}
 
-	fn isDrawnInsideContent(&self) -> bool {
+	fn is_drawn_inside_content(&self) -> bool {
 		true
 	}
 
-	fn touchPress(&mut self, context: &mut ComponentContext, viewInputPosition: Vector2) {
-		self.updateViewportSize(context);
-		self.isDragging = true;
-		self.dragStartViewPosition = viewInputPosition;
-		self.dragStartOffset = self.getScrollOffset();
-		self.scrollVelocity = Vector2::zero();
-		self.previousViewInputPosition = viewInputPosition;
-		self.currentViewInputPosition = viewInputPosition;
+	fn touch_press(&mut self, context: &mut ComponentContext, view_input_position: Vector2) {
+		self.update_viewport_size(context);
+		self.is_dragging = true;
+		self.drag_start_view_position = view_input_position;
+		self.drag_start_offset = self.get_scroll_offset();
+		self.scroll_velocity = Vector2::zero();
+		self.previous_view_input_position = view_input_position;
+		self.current_view_input_position = view_input_position;
 	}
 
-	fn touchMove(&mut self, _context: &mut ComponentContext, viewInputPosition: Vector2) {
-		if self.isDragging() {
-			self.currentViewInputPosition = viewInputPosition;
+	fn touch_move(&mut self, _context: &mut ComponentContext, view_input_position: Vector2) {
+		if self.is_dragging() {
+			self.current_view_input_position = view_input_position;
 		}
 	}
 
-	fn touchRelease(&mut self, _context: &mut ComponentContext, _viewInputPosition: Vector2) {
-		self.isDragging = false;
+	fn touch_release(&mut self, _context: &mut ComponentContext, _view_input_position: Vector2) {
+		self.is_dragging = false;
 	}
 
-	fn touchCancel(&mut self, _context: &mut ComponentContext, _viewInputPosition: Vector2) {
-		self.isDragging = false;
+	fn touch_cancel(&mut self, _context: &mut ComponentContext, _view_input_position: Vector2) {
+		self.is_dragging = false;
 	}
 
 	//==============================================================================
 	// 휠. (DOM WheelEvent 와 같은 부호: 아래로 굴리면 +y → 콘텐트가 위로. 늘 받아 쓴다)
 	//==============================================================================
-	fn wheel(&mut self, context: &mut ComponentContext, wheelDelta: Vector2) -> bool {
-		self.updateViewportSize(context);
-		let offset = self.getScrollOffset();
-		let deltaX = if self.isHorizontal() {
-			wheelDelta.x * self.wheelScrollScale
+	fn wheel(&mut self, context: &mut ComponentContext, wheel_delta: Vector2) -> bool {
+		self.update_viewport_size(context);
+		let offset = self.get_scroll_offset();
+		let delta_x = if self.is_horizontal() {
+			wheel_delta.x * self.wheel_scroll_scale
 		}
 		else {
 			0.0
 		};
-		let deltaY = if self.isVertical() {
-			wheelDelta.y * self.wheelScrollScale
+		let delta_y = if self.is_vertical() {
+			wheel_delta.y * self.wheel_scroll_scale
 		}
 		else {
 			0.0
 		};
-		self.applyScrollOffset(Vector2::create(offset.x - deltaX, offset.y - deltaY));
+		self.apply_scroll_offset(Vector2::create(offset.x - delta_x, offset.y - delta_y));
 		// 휠 다음에는 탄성 모드의 남은 속도를 비워 튕기지 않게 한다.
-		self.scrollVelocity = Vector2::zero();
-		self.syncContentNode(context);
+		self.scroll_velocity = Vector2::zero();
+		self.sync_content_node(context);
 		true
 	}
 }
@@ -790,143 +790,143 @@ mod tests {
 	//==============================================================================
 	// 시험 장면. (왼쪽 위 (100, 100), 크기 200 x 100 인 스크롤 뷰, 콘텐트 200 x 400)
 	//==============================================================================
-	fn createScrollTree() -> (NodeTree, NodeId) {
-		let mut nodeTree = NodeTree::new();
-		let rootId = nodeTree.getRootId();
-		let scrollId = nodeTree.createChild(rootId, "scroll");
-		let scrollNode = &mut nodeTree[scrollId];
-		scrollNode.setPivot(Pivot::topLeft);
-		scrollNode.setLocalPosition(Vector2::create(100.0, 100.0));
-		scrollNode.setContentSize(Vector2::create(200.0, 100.0));
-		let scrollView = nodeTree.addComponent(scrollId, UIScrollView::new()).expect("scroll view");
-		scrollView.setScrollContentSize(Vector2::create(200.0, 400.0));
-		(nodeTree, scrollId)
+	fn create_scroll_tree() -> (NodeTree, NodeId) {
+		let mut node_tree = NodeTree::new();
+		let root_id = node_tree.get_root_id();
+		let scroll_id = node_tree.create_child(root_id, "scroll");
+		let scroll_node = &mut node_tree[scroll_id];
+		scroll_node.set_pivot(Pivot::TOP_LEFT);
+		scroll_node.set_local_position(Vector2::create(100.0, 100.0));
+		scroll_node.set_content_size(Vector2::create(200.0, 100.0));
+		let scroll_view = node_tree.add_component(scroll_id, UIScrollView::new()).expect("scroll view");
+		scroll_view.set_scroll_content_size(Vector2::create(200.0, 400.0));
+		(node_tree, scroll_id)
 	}
 
 	//==============================================================================
 	// 스크롤 뷰 반환.
 	//==============================================================================
-	fn getScrollView(nodeTree: &mut NodeTree, scrollId: NodeId) -> &mut UIScrollView {
-		nodeTree[scrollId].getComponentMut::<UIScrollView>().expect("scroll view")
+	fn get_scroll_view(node_tree: &mut NodeTree, scroll_id: NodeId) -> &mut UIScrollView {
+		node_tree[scroll_id].get_component_mut::<UIScrollView>().expect("scroll view")
 	}
 
 	//==============================================================================
 	// 붙이면 content, Mask, interactable 이 생기고 tick 에 content 크기가 맞춰진다.
 	//==============================================================================
 	#[test]
-	fn attachCreatesContentAndMask() {
+	fn attach_creates_content_and_mask() {
 		let engine = Engine::new(EngineConfiguration::new());
-		let (mut nodeTree, scrollId) = createScrollTree();
-		assert!(nodeTree[scrollId].hasComponent::<Mask>());
-		assert!(nodeTree[scrollId].isInteractable());
-		let contentId = getScrollView(&mut nodeTree, scrollId).getContent().expect("content");
-		nodeTree.tick(&engine, 0.016);
-		assert_eq!(nodeTree[contentId].getContentSize(), Vector2::create(200.0, 400.0));
+		let (mut node_tree, scroll_id) = create_scroll_tree();
+		assert!(node_tree[scroll_id].has_component::<Mask>());
+		assert!(node_tree[scroll_id].is_interactable());
+		let content_id = get_scroll_view(&mut node_tree, scroll_id).get_content().expect("content");
+		node_tree.tick(&engine, 0.016);
+		assert_eq!(node_tree[content_id].get_content_size(), Vector2::create(200.0, 400.0));
 	}
 
 	//==============================================================================
 	// 오프셋은 [보이는 크기 - 콘텐트 크기, 0] 으로 잘린다. 끈 축은 0.
 	//==============================================================================
 	#[test]
-	fn offsetClamping() {
+	fn offset_clamping() {
 		let engine = Engine::new(EngineConfiguration::new());
-		let (mut nodeTree, scrollId) = createScrollTree();
+		let (mut node_tree, scroll_id) = create_scroll_tree();
 		{
-			let scrollView = getScrollView(&mut nodeTree, scrollId);
-			scrollView.setScrollOffset(Vector2::create(-50.0, -1000.0));
-			assert_eq!(scrollView.getScrollOffset(), Vector2::create(0.0, -300.0));
-			scrollView.setScrollOffset(Vector2::create(0.0, 30.0));
-			assert_eq!(scrollView.getScrollOffset(), Vector2::create(0.0, 0.0));
-			scrollView.setScrollOffset(Vector2::create(0.0, -120.0));
+			let scroll_view = get_scroll_view(&mut node_tree, scroll_id);
+			scroll_view.set_scroll_offset(Vector2::create(-50.0, -1000.0));
+			assert_eq!(scroll_view.get_scroll_offset(), Vector2::create(0.0, -300.0));
+			scroll_view.set_scroll_offset(Vector2::create(0.0, 30.0));
+			assert_eq!(scroll_view.get_scroll_offset(), Vector2::create(0.0, 0.0));
+			scroll_view.set_scroll_offset(Vector2::create(0.0, -120.0));
 		}
-		let contentId = getScrollView(&mut nodeTree, scrollId).getContent().expect("content");
-		nodeTree.tick(&engine, 0.016);
-		assert_eq!(nodeTree[contentId].getLocalPosition(), Vector2::create(0.0, -120.0));
+		let content_id = get_scroll_view(&mut node_tree, scroll_id).get_content().expect("content");
+		node_tree.tick(&engine, 0.016);
+		assert_eq!(node_tree[content_id].get_local_position(), Vector2::create(0.0, -120.0));
 
 		// 세로를 끄면 y 는 0 으로 잘린다.
-		getScrollView(&mut nodeTree, scrollId).setVertical(false);
-		getScrollView(&mut nodeTree, scrollId).setScrollOffset(Vector2::create(0.0, -120.0));
-		assert_eq!(getScrollView(&mut nodeTree, scrollId).getScrollOffset(), Vector2::zero());
+		get_scroll_view(&mut node_tree, scroll_id).set_vertical(false);
+		get_scroll_view(&mut node_tree, scroll_id).set_scroll_offset(Vector2::create(0.0, -120.0));
+		assert_eq!(get_scroll_view(&mut node_tree, scroll_id).get_scroll_offset(), Vector2::zero());
 
 		// 트리 안에서 정하면 content 가 바로 옮겨진다.
-		getScrollView(&mut nodeTree, scrollId).setVertical(true);
-		assert!(UIScrollView::setScrollOffsetInTree(&mut nodeTree, scrollId, Vector2::create(0.0, -80.0)));
-		assert_eq!(nodeTree[contentId].getLocalPosition(), Vector2::create(0.0, -80.0));
+		get_scroll_view(&mut node_tree, scroll_id).set_vertical(true);
+		assert!(UIScrollView::set_scroll_offset_in_tree(&mut node_tree, scroll_id, Vector2::create(0.0, -80.0)));
+		assert_eq!(node_tree[content_id].get_local_position(), Vector2::create(0.0, -80.0));
 	}
 
 	//==============================================================================
 	// 휠은 content 의 자식에서 스크롤 뷰까지 올라와 받아 쓰이고, 경계에서 멈춘다.
 	//==============================================================================
 	#[test]
-	fn wheelScrolls() {
+	fn wheel_scrolls() {
 		let engine = Engine::new(EngineConfiguration::new());
-		let (mut nodeTree, scrollId) = createScrollTree();
-		let contentId = getScrollView(&mut nodeTree, scrollId).getContent().expect("content");
-		let itemId = nodeTree.createChild(contentId, "item");
-		let isHandled = nodeTree.dispatchWheel(itemId, &engine, Vector2::create(0.0, 120.0));
-		assert!(isHandled);
-		assert_eq!(getScrollView(&mut nodeTree, scrollId).getScrollOffset(), Vector2::create(0.0, -120.0));
-		assert_eq!(nodeTree[contentId].getLocalPosition(), Vector2::create(0.0, -120.0));
-		nodeTree.dispatchWheel(itemId, &engine, Vector2::create(0.0, 1000.0));
-		assert_eq!(getScrollView(&mut nodeTree, scrollId).getScrollOffset(), Vector2::create(0.0, -300.0));
-		nodeTree.dispatchWheel(itemId, &engine, Vector2::create(0.0, -1000.0));
-		assert_eq!(getScrollView(&mut nodeTree, scrollId).getScrollOffset(), Vector2::zero());
+		let (mut node_tree, scroll_id) = create_scroll_tree();
+		let content_id = get_scroll_view(&mut node_tree, scroll_id).get_content().expect("content");
+		let item_id = node_tree.create_child(content_id, "item");
+		let is_handled = node_tree.dispatch_wheel(item_id, &engine, Vector2::create(0.0, 120.0));
+		assert!(is_handled);
+		assert_eq!(get_scroll_view(&mut node_tree, scroll_id).get_scroll_offset(), Vector2::create(0.0, -120.0));
+		assert_eq!(node_tree[content_id].get_local_position(), Vector2::create(0.0, -120.0));
+		node_tree.dispatch_wheel(item_id, &engine, Vector2::create(0.0, 1000.0));
+		assert_eq!(get_scroll_view(&mut node_tree, scroll_id).get_scroll_offset(), Vector2::create(0.0, -300.0));
+		node_tree.dispatch_wheel(item_id, &engine, Vector2::create(0.0, -1000.0));
+		assert_eq!(get_scroll_view(&mut node_tree, scroll_id).get_scroll_offset(), Vector2::zero());
 	}
 
 	//==============================================================================
 	// 누르고 끌면 tick 에서 끈 만큼 움직인다.
 	//==============================================================================
 	#[test]
-	fn dragScrolls() {
+	fn drag_scrolls() {
 		let engine = Engine::new(EngineConfiguration::new());
-		let (mut nodeTree, scrollId) = createScrollTree();
-		nodeTree.dispatchTouch(scrollId, &engine, TouchKind::press, Vector2::create(150.0, 180.0));
-		nodeTree.dispatchTouch(scrollId, &engine, TouchKind::moved, Vector2::create(150.0, 140.0));
-		nodeTree.tick(&engine, 0.016);
-		assert_eq!(getScrollView(&mut nodeTree, scrollId).getScrollOffset(), Vector2::create(0.0, -40.0));
-		assert!(getScrollView(&mut nodeTree, scrollId).isDragging());
-		nodeTree.dispatchTouch(scrollId, &engine, TouchKind::release, Vector2::create(150.0, 140.0));
-		assert!(!getScrollView(&mut nodeTree, scrollId).isDragging());
+		let (mut node_tree, scroll_id) = create_scroll_tree();
+		node_tree.dispatch_touch(scroll_id, &engine, TouchKind::Press, Vector2::create(150.0, 180.0));
+		node_tree.dispatch_touch(scroll_id, &engine, TouchKind::Moved, Vector2::create(150.0, 140.0));
+		node_tree.tick(&engine, 0.016);
+		assert_eq!(get_scroll_view(&mut node_tree, scroll_id).get_scroll_offset(), Vector2::create(0.0, -40.0));
+		assert!(get_scroll_view(&mut node_tree, scroll_id).is_dragging());
+		node_tree.dispatch_touch(scroll_id, &engine, TouchKind::Release, Vector2::create(150.0, 140.0));
+		assert!(!get_scroll_view(&mut node_tree, scroll_id).is_dragging());
 	}
 
 	//==============================================================================
 	// 탄성 모드: 끌어서 경계를 넘으면 절반만 따라오고, 놓으면 경계로 돌아온다.
 	//==============================================================================
 	#[test]
-	fn elasticSpringsBack() {
+	fn elastic_springs_back() {
 		let engine = Engine::new(EngineConfiguration::new());
-		let (mut nodeTree, scrollId) = createScrollTree();
-		getScrollView(&mut nodeTree, scrollId).setScrollMode(ScrollMode::elastic);
-		nodeTree.dispatchTouch(scrollId, &engine, TouchKind::press, Vector2::create(150.0, 120.0));
-		nodeTree.dispatchTouch(scrollId, &engine, TouchKind::moved, Vector2::create(150.0, 180.0));
-		nodeTree.tick(&engine, 0.016);
-		assert_eq!(getScrollView(&mut nodeTree, scrollId).getScrollOffset(), Vector2::create(0.0, 30.0));
-		nodeTree.dispatchTouch(scrollId, &engine, TouchKind::release, Vector2::create(150.0, 180.0));
+		let (mut node_tree, scroll_id) = create_scroll_tree();
+		get_scroll_view(&mut node_tree, scroll_id).set_scroll_mode(ScrollMode::Elastic);
+		node_tree.dispatch_touch(scroll_id, &engine, TouchKind::Press, Vector2::create(150.0, 120.0));
+		node_tree.dispatch_touch(scroll_id, &engine, TouchKind::Moved, Vector2::create(150.0, 180.0));
+		node_tree.tick(&engine, 0.016);
+		assert_eq!(get_scroll_view(&mut node_tree, scroll_id).get_scroll_offset(), Vector2::create(0.0, 30.0));
+		node_tree.dispatch_touch(scroll_id, &engine, TouchKind::Release, Vector2::create(150.0, 180.0));
 		for _ in 0..300 {
-			nodeTree.tick(&engine, 0.016);
+			node_tree.tick(&engine, 0.016);
 		}
-		assert_eq!(getScrollView(&mut nodeTree, scrollId).getScrollOffset(), Vector2::zero());
+		assert_eq!(get_scroll_view(&mut node_tree, scroll_id).get_scroll_offset(), Vector2::zero());
 	}
 
 	//==============================================================================
 	// 세로 스크롤바: 첫 tick 에 호스트의 자식으로 만들어져 오른쪽에 놓인다.
 	//==============================================================================
 	#[test]
-	fn verticalScrollBarIsCreatedAndLaidOut() {
+	fn vertical_scroll_bar_is_created_and_laid_out() {
 		let engine = Engine::new(EngineConfiguration::new());
-		let (mut nodeTree, scrollId) = createScrollTree();
-		getScrollView(&mut nodeTree, scrollId).setShowsVerticalScrollBar(true);
-		assert!(getScrollView(&mut nodeTree, scrollId).getVerticalScrollBar().is_none());
-		nodeTree.tick(&engine, 0.016);
-		let scrollBarId = getScrollView(&mut nodeTree, scrollId).getVerticalScrollBar().expect("scroll bar");
-		assert_eq!(nodeTree.getParentId(scrollBarId), Some(scrollId));
-		assert_eq!(nodeTree[scrollBarId].getLocalPosition(), Vector2::create(200.0 - 12.0 - 6.0, 6.0));
-		assert_eq!(nodeTree[scrollBarId].getContentSize(), Vector2::create(12.0, 88.0));
-		assert!(nodeTree[scrollBarId].isActive());
-		assert_eq!(getScrollView(&mut nodeTree, scrollId).getInnerContentSize(), Vector2::create(176.0, 100.0));
+		let (mut node_tree, scroll_id) = create_scroll_tree();
+		get_scroll_view(&mut node_tree, scroll_id).set_shows_vertical_scroll_bar(true);
+		assert!(get_scroll_view(&mut node_tree, scroll_id).get_vertical_scroll_bar().is_none());
+		node_tree.tick(&engine, 0.016);
+		let scroll_bar_id = get_scroll_view(&mut node_tree, scroll_id).get_vertical_scroll_bar().expect("scroll bar");
+		assert_eq!(node_tree.get_parent_id(scroll_bar_id), Some(scroll_id));
+		assert_eq!(node_tree[scroll_bar_id].get_local_position(), Vector2::create(200.0 - 12.0 - 6.0, 6.0));
+		assert_eq!(node_tree[scroll_bar_id].get_content_size(), Vector2::create(12.0, 88.0));
+		assert!(node_tree[scroll_bar_id].is_active());
+		assert_eq!(get_scroll_view(&mut node_tree, scroll_id).get_inner_content_size(), Vector2::create(176.0, 100.0));
 
-		getScrollView(&mut nodeTree, scrollId).setShowsVerticalScrollBar(false);
-		nodeTree.tick(&engine, 0.016);
-		assert!(!nodeTree[scrollBarId].isActive());
+		get_scroll_view(&mut node_tree, scroll_id).set_shows_vertical_scroll_bar(false);
+		node_tree.tick(&engine, 0.016);
+		assert!(!node_tree[scroll_bar_id].is_active());
 	}
 }

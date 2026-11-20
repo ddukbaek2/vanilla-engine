@@ -3,25 +3,25 @@
 // - 원본 misc/nodelayout.js 를 옮긴 것이다. 지역 변수 없이 노드 계층을 선언하듯 짜는 플루언트 빌더다.
 // - Vector2 없이 숫자쌍(x, y)으로 위치와 크기를 정한다.
 // - 사용:
-//     let panelId = NodeLayout::create()
-//         .pivot(Pivot::middleCenter)
-//         .contentSize(680.0, 900.0)
-//         .componentWith(Paint::new(), |paint| { paint.setColor(Color::create(0.1, 0.1, 0.1, 1.0)); })
+//     let panel_id = NodeLayout::create()
+//         .pivot(Pivot::MIDDLE_CENTER)
+//         .content_size(680.0, 900.0)
+//         .component_with(Paint::new(), |paint| { paint.set_color(Color::create(0.1, 0.1, 0.1, 1.0)); })
 //         .children([
 //             NodeLayout::create()
-//                 .contentSize(120.0, 70.0)
-//                 .componentWith(Text::new(), |text| { text.setText("확인"); }),
+//                 .content_size(120.0, 70.0)
+//                 .component_with(Text::new(), |text| { text.set_text("확인"); }),
 //         ])
-//         .build(nodeTree, Some(parentId));
+//         .build(node_tree, Some(parent_id));
 // - 원본과 다른 점:
-//   러스트 판은 노드가 트리(NodeTree) 안에만 있어서, 빌더는 설정을 차례대로 모아 두었다가 build(nodeTree, parentId) 때 노드를 만들고 그 순서대로 건다.
-//   그래서 컴포넌트도 build 때 nodeTree.addComponent 로 붙는다. (attachToTree 가 불려 자식 노드를 만드는 컴포넌트도 된다)
+//   러스트 판은 노드가 트리(NodeTree) 안에만 있어서, 빌더는 설정을 차례대로 모아 두었다가 build(node_tree, parent_id) 때 노드를 만들고 그 순서대로 건다.
+//   그래서 컴포넌트도 build 때 node_tree.add_component 로 붙는다. (attach_to_tree 가 불려 자식 노드를 만드는 컴포넌트도 된다)
 //   노드 클래스가 없으므로 create(nodeClass) 대신 create() 다.
-//   component(type, callback) 은 component(값) 과 componentWith(값, 콜백) 둘로 나눴다. (러스트는 생략 인자가 없다)
+//   component(type, callback) 은 component(값) 과 component_with(값, 콜백) 둘로 나눴다. (러스트는 생략 인자가 없다)
 //   children(...layouts) 의 가변 인자는 배열이나 Vec 하나로 받는다.
-//   anchoredPosition 은 build 때 부모 contentSize 기준으로 건다. 원본은 부모가 붙기 전에 불려서 사실상 localPosition 과 같았다.
-//   arrangeFan 은 원본이 System 을 가져오지 않아 부르면 멈추고, 라디안 값을 도 단위 회전에 넣는다. 러스트 판은 각도를 도로 바꿔 건다.
-//   maskEnabled(false) 는 원본처럼 첫 마스크만이 아니라 그 노드의 Mask 를 모두 뗀다.
+//   anchored_position 은 build 때 부모 content_size 기준으로 건다. 원본은 부모가 붙기 전에 불려서 사실상 local_position 과 같았다.
+//   arrange_fan 은 원본이 System 을 가져오지 않아 부르면 멈추고, 라디안 값을 도 단위 회전에 넣는다. 러스트 판은 각도를 도로 바꿔 건다.
+//   mask_enabled(false) 는 원본처럼 첫 마스크만이 아니라 그 노드의 Mask 를 모두 뗀다.
 //==============================================================================
 use crate::base::math;
 use crate::base::vector2::Vector2;
@@ -34,21 +34,21 @@ use crate::core::node::worldnode::WorldNode;
 type NodeLayoutAction = Box<dyn FnOnce(&mut NodeTree, NodeId)>;
 
 //==============================================================================
-// 부채꼴 배치 설정. (원본 options = { centerX, centerY, radius, angleStepRadian = 0.12, baseAngleRadian = -PI/2, rotateNodes = true })
+// 부채꼴 배치 설정. (원본 options = { center_x, center_y, radius, angle_step_radian = 0.12, base_angle_radian = -PI/2, rotate_nodes = true })
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct NodeLayoutFanOptions {
 	// 호의 중심.
-	pub centerX: f32,
-	pub centerY: f32,
+	pub center_x: f32,
+	pub center_y: f32,
 	// 호의 반지름.
 	pub radius: f32,
 	// 이웃한 항목 사이 각도. (라디안)
-	pub angleStepRadian: f32,
+	pub angle_step_radian: f32,
 	// 가운데 항목이 바라보는 방향. (라디안, 기본 위쪽)
-	pub baseAngleRadian: f32,
+	pub base_angle_radian: f32,
 	// 항목 회전도 호의 접선에 맞출지.
-	pub rotateNodes: bool,
+	pub rotate_nodes: bool,
 }
 
 impl Default for NodeLayoutFanOptions {
@@ -57,12 +57,12 @@ impl Default for NodeLayoutFanOptions {
 	//==============================================================================
 	fn default() -> NodeLayoutFanOptions {
 		NodeLayoutFanOptions {
-			centerX: 0.0,
-			centerY: 0.0,
+			center_x: 0.0,
+			center_y: 0.0,
 			radius: 0.0,
-			angleStepRadian: 0.12,
-			baseAngleRadian: -math::PI / 2.0,
-			rotateNodes: true,
+			angle_step_radian: 0.12,
+			base_angle_radian: -math::PI / 2.0,
+			rotate_nodes: true,
 		}
 	}
 }
@@ -72,8 +72,8 @@ impl Default for NodeLayoutFanOptions {
 //==============================================================================
 pub struct NodeLayout {
 	actions: Vec<NodeLayoutAction>,
-	childLayouts: Vec<NodeLayout>,
-	parentId: Option<NodeId>,
+	child_layouts: Vec<NodeLayout>,
+	parent_id: Option<NodeId>,
 }
 
 impl NodeLayout {
@@ -83,8 +83,8 @@ impl NodeLayout {
 	pub fn new() -> NodeLayout {
 		NodeLayout {
 			actions: Vec::new(),
-			childLayouts: Vec::new(),
-			parentId: None,
+			child_layouts: Vec::new(),
+			parent_id: None,
 		}
 	}
 
@@ -97,17 +97,17 @@ impl NodeLayout {
 
 	//==============================================================================
 	// 부채꼴 배치. (손패 카드처럼 노드들을 호 위에 펼친다)
-	// - 가운데 항목이 baseAngleRadian 방향을 보도록 좌우 대칭으로 벌린다.
-	// - rotateNodes 면 각 노드의 회전(도)도 호의 접선에 맞춘다.
+	// - 가운데 항목이 base_angle_radian 방향을 보도록 좌우 대칭으로 벌린다.
+	// - rotate_nodes 면 각 노드의 회전(도)도 호의 접선에 맞춘다.
 	//==============================================================================
-	pub fn arrangeFan(nodeTree: &mut NodeTree, nodeIds: &[NodeId], options: NodeLayoutFanOptions) {
-		let count = nodeIds.len();
+	pub fn arrange_fan(node_tree: &mut NodeTree, node_ids: &[NodeId], options: NodeLayoutFanOptions) {
+		let count = node_ids.len();
 		if count == 0 {
 			return;
 		}
-		let middleIndex = (count as f32 - 1.0) / 2.0;
-		for (index, nodeId) in nodeIds.iter().enumerate() {
-			let node = match nodeTree.getNodeMut(*nodeId) {
+		let middle_index = (count as f32 - 1.0) / 2.0;
+		for (index, node_id) in node_ids.iter().enumerate() {
+			let node = match node_tree.get_node_mut(*node_id) {
 				Some(node) => {
 					node
 				}
@@ -115,13 +115,13 @@ impl NodeLayout {
 					continue;
 				}
 			};
-			let angleRadian = options.baseAngleRadian + (index as f32 - middleIndex) * options.angleStepRadian;
-			let positionX = options.centerX + angleRadian.cos() * options.radius;
-			let positionY = options.centerY + angleRadian.sin() * options.radius;
-			node.setLocalPosition(Vector2::create(positionX, positionY));
-			if options.rotateNodes {
-				let rotationDegree = math::radianToDegree(angleRadian - options.baseAngleRadian);
-				node.setLocalRotation(rotationDegree);
+			let angle_radian = options.base_angle_radian + (index as f32 - middle_index) * options.angle_step_radian;
+			let position_x = options.center_x + angle_radian.cos() * options.radius;
+			let position_y = options.center_y + angle_radian.sin() * options.radius;
+			node.set_local_position(Vector2::create(position_x, position_y));
+			if options.rotate_nodes {
+				let rotation_degree = math::radian_to_degree(angle_radian - options.base_angle_radian);
+				node.set_local_rotation(rotation_degree);
 			}
 		}
 	}
@@ -129,7 +129,7 @@ impl NodeLayout {
 	//==============================================================================
 	// 설정 하나를 뒤에 붙인다. (build 때 붙인 순서대로 걸린다)
 	//==============================================================================
-	fn pushAction(mut self, action: NodeLayoutAction) -> NodeLayout {
+	fn push_action(mut self, action: NodeLayoutAction) -> NodeLayout {
 		self.actions.push(action);
 		self
 	}
@@ -138,17 +138,17 @@ impl NodeLayout {
 	// 노드 직접 접근. (빌더에 없는 속성을 정할 때)
 	//==============================================================================
 	pub fn apply(self, callback: impl FnOnce(&mut WorldNode) + 'static) -> NodeLayout {
-		self.pushAction(Box::new(move |nodeTree, nodeId| {
-			callback(&mut nodeTree[nodeId]);
+		self.push_action(Box::new(move |node_tree, node_id| {
+			callback(&mut node_tree[node_id]);
 		}))
 	}
 
 	//==============================================================================
 	// 활성화 설정.
 	//==============================================================================
-	pub fn active(self, isActive: bool) -> NodeLayout {
-		self.pushAction(Box::new(move |nodeTree, nodeId| {
-			nodeTree[nodeId].setActive(isActive);
+	pub fn active(self, is_active: bool) -> NodeLayout {
+		self.push_action(Box::new(move |node_tree, node_id| {
+			node_tree[node_id].set_active(is_active);
 		}))
 	}
 
@@ -157,8 +157,8 @@ impl NodeLayout {
 	//==============================================================================
 	pub fn name(self, name: &str) -> NodeLayout {
 		let name = name.to_string();
-		self.pushAction(Box::new(move |nodeTree, nodeId| {
-			nodeTree[nodeId].setName(&name);
+		self.push_action(Box::new(move |node_tree, node_id| {
+			node_tree[node_id].set_name(&name);
 		}))
 	}
 
@@ -166,18 +166,18 @@ impl NodeLayout {
 	// 컴포넌트 추가. (설정은 넘기기 전에 값에 해 둔다)
 	//==============================================================================
 	pub fn component<T: Component + 'static>(self, component: T) -> NodeLayout {
-		self.pushAction(Box::new(move |nodeTree, nodeId| {
-			nodeTree.addComponent(nodeId, component);
+		self.push_action(Box::new(move |node_tree, node_id| {
+			node_tree.add_component(node_id, component);
 		}))
 	}
 
 	//==============================================================================
 	// 컴포넌트 추가 후 콜백으로 설정. (원본 component(type, callback))
 	//==============================================================================
-	pub fn componentWith<T: Component + 'static>(self, component: T, callback: impl FnOnce(&mut T) + 'static) -> NodeLayout {
-		self.pushAction(Box::new(move |nodeTree, nodeId| {
-			if let Some(addedComponent) = nodeTree.addComponent(nodeId, component) {
-				callback(addedComponent);
+	pub fn component_with<T: Component + 'static>(self, component: T, callback: impl FnOnce(&mut T) + 'static) -> NodeLayout {
+		self.push_action(Box::new(move |node_tree, node_id| {
+			if let Some(added_component) = node_tree.add_component(node_id, component) {
+				callback(added_component);
 			}
 		}))
 	}
@@ -187,7 +187,7 @@ impl NodeLayout {
 	//==============================================================================
 	pub fn children(mut self, layouts: impl IntoIterator<Item = NodeLayout>) -> NodeLayout {
 		for layout in layouts {
-			self.childLayouts.push(layout);
+			self.child_layouts.push(layout);
 		}
 		self
 	}
@@ -195,9 +195,9 @@ impl NodeLayout {
 	//==============================================================================
 	// 로컬 위치 설정.
 	//==============================================================================
-	pub fn localPosition(self, x: f32, y: f32) -> NodeLayout {
-		self.pushAction(Box::new(move |nodeTree, nodeId| {
-			nodeTree[nodeId].setLocalPosition(Vector2::create(x, y));
+	pub fn local_position(self, x: f32, y: f32) -> NodeLayout {
+		self.push_action(Box::new(move |node_tree, node_id| {
+			node_tree[node_id].set_local_position(Vector2::create(x, y));
 		}))
 	}
 
@@ -205,34 +205,34 @@ impl NodeLayout {
 	// 피봇 설정.
 	//==============================================================================
 	pub fn pivot(self, pivot: Vector2) -> NodeLayout {
-		self.pushAction(Box::new(move |nodeTree, nodeId| {
-			nodeTree[nodeId].setPivot(pivot);
+		self.push_action(Box::new(move |node_tree, node_id| {
+			node_tree[node_id].set_pivot(pivot);
 		}))
 	}
 
 	//==============================================================================
 	// 컨텐츠 크기 설정.
 	//==============================================================================
-	pub fn contentSize(self, x: f32, y: f32) -> NodeLayout {
-		self.pushAction(Box::new(move |nodeTree, nodeId| {
-			nodeTree[nodeId].setContentSize(Vector2::create(x, y));
+	pub fn content_size(self, x: f32, y: f32) -> NodeLayout {
+		self.push_action(Box::new(move |node_tree, node_id| {
+			node_tree[node_id].set_content_size(Vector2::create(x, y));
 		}))
 	}
 
 	//==============================================================================
 	// 로컬 크기 설정.
 	//==============================================================================
-	pub fn localScale(self, x: f32, y: f32) -> NodeLayout {
-		self.pushAction(Box::new(move |nodeTree, nodeId| {
-			nodeTree[nodeId].setLocalScale(Vector2::create(x, y));
+	pub fn local_scale(self, x: f32, y: f32) -> NodeLayout {
+		self.push_action(Box::new(move |node_tree, node_id| {
+			node_tree[node_id].set_local_scale(Vector2::create(x, y));
 		}))
 	}
 
 	//==============================================================================
 	// 부모 노드 설정. (build 에 부모를 넘기지 않으면 이 부모의 자식으로 붙는다)
 	//==============================================================================
-	pub fn parent(mut self, parentId: NodeId) -> NodeLayout {
-		self.parentId = Some(parentId);
+	pub fn parent(mut self, parent_id: NodeId) -> NodeLayout {
+		self.parent_id = Some(parent_id);
 		self
 	}
 
@@ -240,64 +240,64 @@ impl NodeLayout {
 	// 앵커 설정.
 	//==============================================================================
 	pub fn anchor(self, x: f32, y: f32) -> NodeLayout {
-		self.pushAction(Box::new(move |nodeTree, nodeId| {
-			nodeTree[nodeId].setAnchor(Vector2::create(x, y));
+		self.push_action(Box::new(move |node_tree, node_id| {
+			node_tree[node_id].set_anchor(Vector2::create(x, y));
 		}))
 	}
 
 	//==============================================================================
-	// 앵커 기준 위치 설정. (부모가 있으면 부모 contentSize 의 앵커 점 기준, 없으면 로컬 위치 그대로)
+	// 앵커 기준 위치 설정. (부모가 있으면 부모 content_size 의 앵커 점 기준, 없으면 로컬 위치 그대로)
 	//==============================================================================
-	pub fn anchoredPosition(self, x: f32, y: f32) -> NodeLayout {
-		self.pushAction(Box::new(move |nodeTree, nodeId| {
-			let anchoredPosition = Vector2::create(x, y);
-			let parentContentSize = match nodeTree.getParentId(nodeId) {
-				Some(parentId) => {
-					nodeTree[parentId].getContentSize()
+	pub fn anchored_position(self, x: f32, y: f32) -> NodeLayout {
+		self.push_action(Box::new(move |node_tree, node_id| {
+			let anchored_position = Vector2::create(x, y);
+			let parent_content_size = match node_tree.get_parent_id(node_id) {
+				Some(parent_id) => {
+					node_tree[parent_id].get_content_size()
 				}
 				None => {
 					Vector2::zero()
 				}
 			};
-			nodeTree[nodeId].getTransformMut().setAnchoredPosition(anchoredPosition, parentContentSize);
+			node_tree[node_id].get_transform_mut().set_anchored_position(anchored_position, parent_content_size);
 		}))
 	}
 
 	//==============================================================================
 	// 마스크 켜기 / 끄기. (켜면 Mask 가 없을 때만 붙이고, 끄면 뗀다)
 	//==============================================================================
-	pub fn maskEnabled(self, isEnabled: bool) -> NodeLayout {
-		self.pushAction(Box::new(move |nodeTree, nodeId| {
-			if isEnabled {
-				let hasMask = nodeTree[nodeId].hasComponent::<Mask>();
-				if !hasMask {
-					nodeTree.addComponent(nodeId, Mask::new());
+	pub fn mask_enabled(self, is_enabled: bool) -> NodeLayout {
+		self.push_action(Box::new(move |node_tree, node_id| {
+			if is_enabled {
+				let has_mask = node_tree[node_id].has_component::<Mask>();
+				if !has_mask {
+					node_tree.add_component(node_id, Mask::new());
 				}
 			}
 			else {
-				nodeTree[nodeId].removeComponent::<Mask>();
+				node_tree[node_id].remove_component::<Mask>();
 			}
 		}))
 	}
 
 	//==============================================================================
 	// 빌드. (노드를 만들어 부모에 붙이고, 모은 설정을 차례대로 건 뒤, 자식 레이아웃을 재귀로 빌드한다)
-	// - parentId 를 넘기면 그 부모에, 없으면 parent() 로 정한 부모에 붙인다. 둘 다 없으면 어디에도 붙지 않는다.
+	// - parent_id 를 넘기면 그 부모에, 없으면 parent() 로 정한 부모에 붙인다. 둘 다 없으면 어디에도 붙지 않는다.
 	// - 만든 노드의 핸들을 돌려준다.
 	//==============================================================================
-	pub fn build(self, nodeTree: &mut NodeTree, parentId: Option<NodeId>) -> NodeId {
-		let nodeId = nodeTree.createNode("");
-		let targetParentId = parentId.or(self.parentId);
-		if let Some(targetParentId) = targetParentId {
-			nodeTree.addChild(targetParentId, nodeId);
+	pub fn build(self, node_tree: &mut NodeTree, parent_id: Option<NodeId>) -> NodeId {
+		let node_id = node_tree.create_node("");
+		let target_parent_id = parent_id.or(self.parent_id);
+		if let Some(target_parent_id) = target_parent_id {
+			node_tree.add_child(target_parent_id, node_id);
 		}
 		for action in self.actions {
-			action(nodeTree, nodeId);
+			action(node_tree, node_id);
 		}
-		for childLayout in self.childLayouts {
-			childLayout.build(nodeTree, Some(nodeId));
+		for child_layout in self.child_layouts {
+			child_layout.build(node_tree, Some(node_id));
 		}
-		nodeId
+		node_id
 	}
 }
 
@@ -325,84 +325,84 @@ mod tests {
 	// 중첩 레이아웃이 이름, 크기, 위치, 컴포넌트, 부모 관계를 그대로 만든다.
 	//==============================================================================
 	#[test]
-	fn buildCreatesNestedNodes() {
-		let mut nodeTree = NodeTree::new();
-		let rootId = nodeTree.getRootId();
-		let panelId = NodeLayout::create()
+	fn build_creates_nested_nodes() {
+		let mut node_tree = NodeTree::new();
+		let root_id = node_tree.get_root_id();
+		let panel_id = NodeLayout::create()
 			.name("panel")
-			.pivot(Pivot::topLeft)
-			.contentSize(680.0, 900.0)
-			.localPosition(10.0, 20.0)
-			.componentWith(Paint::new(), |paint| {
-				paint.setColor(Color::create(0.1, 0.2, 0.3, 1.0));
+			.pivot(Pivot::TOP_LEFT)
+			.content_size(680.0, 900.0)
+			.local_position(10.0, 20.0)
+			.component_with(Paint::new(), |paint| {
+				paint.set_color(Color::create(0.1, 0.2, 0.3, 1.0));
 			})
 			.apply(|node| {
-				node.setInteractable(true);
+				node.set_interactable(true);
 			})
 			.children([
-				NodeLayout::create().name("title").contentSize(120.0, 70.0).componentWith(Text::new(), |text| {
-					text.setText("확인");
+				NodeLayout::create().name("title").content_size(120.0, 70.0).component_with(Text::new(), |text| {
+					text.set_text("확인");
 				}),
-				NodeLayout::create().name("corner").anchor(1.0, 1.0).anchoredPosition(-10.0, -20.0).active(false),
+				NodeLayout::create().name("corner").anchor(1.0, 1.0).anchored_position(-10.0, -20.0).active(false),
 			])
-			.build(&mut nodeTree, Some(rootId));
+			.build(&mut node_tree, Some(root_id));
 
-		let panel = &nodeTree[panelId];
-		assert_eq!(panel.getName(), "panel");
-		assert_eq!(panel.getContentSize(), Vector2::create(680.0, 900.0));
-		assert_eq!(panel.getLocalPosition(), Vector2::create(10.0, 20.0));
-		assert_eq!(panel.getPivot(), Pivot::topLeft);
-		assert!(panel.isInteractable());
-		assert_eq!(panel.getComponent::<Paint>().expect("paint").getColor().green, 0.2);
-		assert_eq!(nodeTree.getParentId(panelId), Some(rootId));
+		let panel = &node_tree[panel_id];
+		assert_eq!(panel.get_name(), "panel");
+		assert_eq!(panel.get_content_size(), Vector2::create(680.0, 900.0));
+		assert_eq!(panel.get_local_position(), Vector2::create(10.0, 20.0));
+		assert_eq!(panel.get_pivot(), Pivot::TOP_LEFT);
+		assert!(panel.is_interactable());
+		assert_eq!(panel.get_component::<Paint>().expect("paint").get_color().green, 0.2);
+		assert_eq!(node_tree.get_parent_id(panel_id), Some(root_id));
 
-		let titleId = nodeTree.findChildByName(panelId, "title").expect("title");
-		assert_eq!(nodeTree[titleId].getComponent::<Text>().expect("text").getText(), "확인");
-		let cornerId = nodeTree.findChildByName(panelId, "corner").expect("corner");
-		assert_eq!(nodeTree[cornerId].getLocalPosition(), Vector2::create(670.0, 880.0));
-		assert!(!nodeTree[cornerId].isActive());
-		assert_eq!(nodeTree.getChildIds(panelId), &[titleId, cornerId]);
+		let title_id = node_tree.find_child_by_name(panel_id, "title").expect("title");
+		assert_eq!(node_tree[title_id].get_component::<Text>().expect("text").get_text(), "확인");
+		let corner_id = node_tree.find_child_by_name(panel_id, "corner").expect("corner");
+		assert_eq!(node_tree[corner_id].get_local_position(), Vector2::create(670.0, 880.0));
+		assert!(!node_tree[corner_id].is_active());
+		assert_eq!(node_tree.get_child_ids(panel_id), &[title_id, corner_id]);
 	}
 
 	//==============================================================================
 	// parent() 로 정한 부모, 마스크 켜고 끄기.
 	//==============================================================================
 	#[test]
-	fn parentAndMaskToggle() {
-		let mut nodeTree = NodeTree::new();
-		let rootId = nodeTree.getRootId();
-		let maskedId = NodeLayout::create().parent(rootId).maskEnabled(true).maskEnabled(true).build(&mut nodeTree, None);
-		assert_eq!(nodeTree.getParentId(maskedId), Some(rootId));
-		let maskCount = nodeTree[maskedId].getAllComponents().len();
-		assert_eq!(maskCount, 1);
-		let unmaskedId = NodeLayout::create().maskEnabled(true).maskEnabled(false).build(&mut nodeTree, None);
-		assert!(!nodeTree[unmaskedId].hasComponent::<Mask>());
-		assert_eq!(nodeTree.getParentId(unmaskedId), None);
+	fn parent_and_mask_toggle() {
+		let mut node_tree = NodeTree::new();
+		let root_id = node_tree.get_root_id();
+		let masked_id = NodeLayout::create().parent(root_id).mask_enabled(true).mask_enabled(true).build(&mut node_tree, None);
+		assert_eq!(node_tree.get_parent_id(masked_id), Some(root_id));
+		let mask_count = node_tree[masked_id].get_all_components().len();
+		assert_eq!(mask_count, 1);
+		let unmasked_id = NodeLayout::create().mask_enabled(true).mask_enabled(false).build(&mut node_tree, None);
+		assert!(!node_tree[unmasked_id].has_component::<Mask>());
+		assert_eq!(node_tree.get_parent_id(unmasked_id), None);
 	}
 
 	//==============================================================================
 	// 부채꼴 배치. (가운데는 위쪽, 좌우 대칭, 회전은 도)
 	//==============================================================================
 	#[test]
-	fn arrangeFanSpreadsSymmetrically() {
-		let mut nodeTree = NodeTree::new();
-		let rootId = nodeTree.getRootId();
-		let nodeIds: Vec<NodeId> = (0..3).map(|_| nodeTree.createChild(rootId, "card")).collect();
-		NodeLayout::arrangeFan(&mut nodeTree, &nodeIds, NodeLayoutFanOptions {
-			centerX: 100.0,
-			centerY: 500.0,
+	fn arrange_fan_spreads_symmetrically() {
+		let mut node_tree = NodeTree::new();
+		let root_id = node_tree.get_root_id();
+		let node_ids: Vec<NodeId> = (0..3).map(|_| node_tree.create_child(root_id, "card")).collect();
+		NodeLayout::arrange_fan(&mut node_tree, &node_ids, NodeLayoutFanOptions {
+			center_x: 100.0,
+			center_y: 500.0,
 			radius: 200.0,
 			..NodeLayoutFanOptions::default()
 		});
-		let middlePosition = nodeTree[nodeIds[1]].getLocalPosition();
-		assert!((middlePosition.x - 100.0).abs() < 0.001);
-		assert!((middlePosition.y - 300.0).abs() < 0.001);
-		assert_eq!(nodeTree[nodeIds[1]].getLocalRotation(), 0.0);
-		let leftPosition = nodeTree[nodeIds[0]].getLocalPosition();
-		let rightPosition = nodeTree[nodeIds[2]].getLocalPosition();
-		assert!((leftPosition.x - 100.0 + (rightPosition.x - 100.0)).abs() < 0.001);
-		assert!((leftPosition.y - rightPosition.y).abs() < 0.001);
-		let rightRotation = nodeTree[nodeIds[2]].getLocalRotation();
-		assert!((rightRotation - math::radianToDegree(0.12)).abs() < 0.001);
+		let middle_position = node_tree[node_ids[1]].get_local_position();
+		assert!((middle_position.x - 100.0).abs() < 0.001);
+		assert!((middle_position.y - 300.0).abs() < 0.001);
+		assert_eq!(node_tree[node_ids[1]].get_local_rotation(), 0.0);
+		let left_position = node_tree[node_ids[0]].get_local_position();
+		let right_position = node_tree[node_ids[2]].get_local_position();
+		assert!((left_position.x - 100.0 + (right_position.x - 100.0)).abs() < 0.001);
+		assert!((left_position.y - right_position.y).abs() < 0.001);
+		let right_rotation = node_tree[node_ids[2]].get_local_rotation();
+		assert!((right_rotation - math::radian_to_degree(0.12)).abs() < 0.001);
 	}
 }

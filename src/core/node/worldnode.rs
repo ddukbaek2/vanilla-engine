@@ -3,7 +3,7 @@
 // - 부모/자식 계층 + 활성화 (원본 Node)
 // - 컴포넌트 보유 + tick (원본 ComponentNode)
 // - 로컬 TRS + 렌더 재귀 (원본 TransformNode)
-// - pivot / anchor / contentSize + 터치 (원본 WorldNode)
+// - pivot / anchor / content_size + 터치 (원본 WorldNode)
 // - 노드는 씬의 NodeTree 저장소에 들어 있고, 부모와 자식은 핸들(NodeId)로 잇는다.
 //   트리를 바꾸는 일(자식 붙이기, 지우기, 찾기)과 트리를 도는 일(tick, draw, 터치)은 NodeTree 가 한다.
 //==============================================================================
@@ -20,19 +20,19 @@ use crate::core::node::nodetree::NodeId;
 
 //==============================================================================
 // 노드 트랜스폼. (컴포넌트가 tick / draw 에서 받아 읽고 바꾸는 노드 상태)
-// - localPosition 은 부모 영역 안에서 자기 피봇 점의 좌표다. (anchor 는 anchoredPosition 계산용)
-// - localRotation 은 도 단위. (원본과 같음)
+// - local_position 은 부모 영역 안에서 자기 피봇 점의 좌표다. (anchor 는 anchored_position 계산용)
+// - local_rotation 은 도 단위. (원본과 같음)
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct NodeTransform {
-	localPosition: Vector2,
-	localScale: Vector2,
-	localRotation: f32,
-	localOpacity: f32,
+	local_position: Vector2,
+	local_scale: Vector2,
+	local_rotation: f32,
+	local_opacity: f32,
 	pivot: Vector2,
-	contentSize: Vector2,
+	content_size: Vector2,
 	anchor: Vector2,
-	isVisible: bool,
+	is_visible: bool,
 }
 
 impl NodeTransform {
@@ -41,164 +41,164 @@ impl NodeTransform {
 	//==============================================================================
 	pub fn new() -> NodeTransform {
 		NodeTransform {
-			localPosition: Vector2::zero(),
-			localScale: Vector2::one(),
-			localRotation: 0.0,
-			localOpacity: 1.0,
-			pivot: Pivot::middleCenter,
-			contentSize: Vector2::zero(),
-			anchor: Pivot::middleCenter,
-			isVisible: true,
+			local_position: Vector2::zero(),
+			local_scale: Vector2::one(),
+			local_rotation: 0.0,
+			local_opacity: 1.0,
+			pivot: Pivot::MIDDLE_CENTER,
+			content_size: Vector2::zero(),
+			anchor: Pivot::MIDDLE_CENTER,
+			is_visible: true,
 		}
 	}
 
 	//==============================================================================
 	// 로컬 위치 설정.
 	//==============================================================================
-	pub fn setLocalPosition(&mut self, localPosition: Vector2) {
-		self.localPosition = localPosition;
+	pub fn set_local_position(&mut self, local_position: Vector2) {
+		self.local_position = local_position;
 	}
 
 	//==============================================================================
 	// 로컬 위치 반환.
 	//==============================================================================
-	pub fn getLocalPosition(&self) -> Vector2 {
-		self.localPosition
+	pub fn get_local_position(&self) -> Vector2 {
+		self.local_position
 	}
 
 	//==============================================================================
 	// 로컬 크기 설정.
 	//==============================================================================
-	pub fn setLocalScale(&mut self, localScale: Vector2) {
-		self.localScale = localScale;
+	pub fn set_local_scale(&mut self, local_scale: Vector2) {
+		self.local_scale = local_scale;
 	}
 
 	//==============================================================================
 	// 로컬 크기 반환.
 	//==============================================================================
-	pub fn getLocalScale(&self) -> Vector2 {
-		self.localScale
+	pub fn get_local_scale(&self) -> Vector2 {
+		self.local_scale
 	}
 
 	//==============================================================================
 	// 로컬 회전 설정. (도)
 	//==============================================================================
-	pub fn setLocalRotation(&mut self, localRotation: f32) {
-		self.localRotation = localRotation;
+	pub fn set_local_rotation(&mut self, local_rotation: f32) {
+		self.local_rotation = local_rotation;
 	}
 
 	//==============================================================================
 	// 로컬 회전 반환. (도)
 	//==============================================================================
-	pub fn getLocalRotation(&self) -> f32 {
-		self.localRotation
+	pub fn get_local_rotation(&self) -> f32 {
+		self.local_rotation
 	}
 
 	//==============================================================================
 	// 로컬 투명도 설정. (자식에게 곱해져 내려간다)
 	//==============================================================================
-	pub fn setLocalOpacity(&mut self, localOpacity: f32) {
-		self.localOpacity = math::clamp01(localOpacity);
+	pub fn set_local_opacity(&mut self, local_opacity: f32) {
+		self.local_opacity = math::clamp01(local_opacity);
 	}
 
 	//==============================================================================
 	// 로컬 투명도 반환.
 	//==============================================================================
-	pub fn getLocalOpacity(&self) -> f32 {
-		self.localOpacity
+	pub fn get_local_opacity(&self) -> f32 {
+		self.local_opacity
 	}
 
 	//==============================================================================
-	// 피봇 설정. (contentSize 안에서 기준점의 비율, 기본 가운데)
+	// 피봇 설정. (content_size 안에서 기준점의 비율, 기본 가운데)
 	//==============================================================================
-	pub fn setPivot(&mut self, pivot: Vector2) {
+	pub fn set_pivot(&mut self, pivot: Vector2) {
 		self.pivot = pivot;
 	}
 
 	//==============================================================================
 	// 피봇 반환.
 	//==============================================================================
-	pub fn getPivot(&self) -> Vector2 {
+	pub fn get_pivot(&self) -> Vector2 {
 		self.pivot
 	}
 
 	//==============================================================================
 	// 컨텐츠 크기 설정.
 	//==============================================================================
-	pub fn setContentSize(&mut self, contentSize: Vector2) {
-		self.contentSize = contentSize;
+	pub fn set_content_size(&mut self, content_size: Vector2) {
+		self.content_size = content_size;
 	}
 
 	//==============================================================================
 	// 컨텐츠 크기 반환.
 	//==============================================================================
-	pub fn getContentSize(&self) -> Vector2 {
-		self.contentSize
+	pub fn get_content_size(&self) -> Vector2 {
+		self.content_size
 	}
 
 	//==============================================================================
-	// 앵커 설정. (부모 contentSize 안의 비율)
+	// 앵커 설정. (부모 content_size 안의 비율)
 	//==============================================================================
-	pub fn setAnchor(&mut self, anchor: Vector2) {
+	pub fn set_anchor(&mut self, anchor: Vector2) {
 		self.anchor = anchor;
 	}
 
 	//==============================================================================
 	// 앵커 반환.
 	//==============================================================================
-	pub fn getAnchor(&self) -> Vector2 {
+	pub fn get_anchor(&self) -> Vector2 {
 		self.anchor
 	}
 
 	//==============================================================================
-	// 앵커 기준 위치 설정. (부모 contentSize 를 알아야 한다)
+	// 앵커 기준 위치 설정. (부모 content_size 를 알아야 한다)
 	//==============================================================================
-	pub fn setAnchoredPosition(&mut self, anchoredPosition: Vector2, parentContentSize: Vector2) {
-		let anchorPoint = parentContentSize.multiply(self.anchor);
-		self.localPosition = anchorPoint.add(anchoredPosition);
+	pub fn set_anchored_position(&mut self, anchored_position: Vector2, parent_content_size: Vector2) {
+		let anchor_point = parent_content_size.multiply(self.anchor);
+		self.local_position = anchor_point.add(anchored_position);
 	}
 
 	//==============================================================================
 	// 앵커 기준 위치 반환.
 	//==============================================================================
-	pub fn getAnchoredPosition(&self, parentContentSize: Vector2) -> Vector2 {
-		let anchorPoint = parentContentSize.multiply(self.anchor);
-		self.localPosition.subtract(anchorPoint)
+	pub fn get_anchored_position(&self, parent_content_size: Vector2) -> Vector2 {
+		let anchor_point = parent_content_size.multiply(self.anchor);
+		self.local_position.subtract(anchor_point)
 	}
 
 	//==============================================================================
-	// 보이기 설정. (꺼도 tick 은 돈다. 원본 isVisible)
+	// 보이기 설정. (꺼도 tick 은 돈다. 원본 is_visible)
 	//==============================================================================
-	pub fn setVisible(&mut self, isVisible: bool) {
-		self.isVisible = isVisible;
+	pub fn set_visible(&mut self, is_visible: bool) {
+		self.is_visible = is_visible;
 	}
 
 	//==============================================================================
 	// 보이기 여부.
 	//==============================================================================
-	pub fn isVisible(&self) -> bool {
-		self.isVisible
+	pub fn is_visible(&self) -> bool {
+		self.is_visible
 	}
 
 	//==============================================================================
-	// 로컬 변환 행렬. (pushTransform 과 같은 순서: 이동 → 회전 → 크기 → 피봇 보정)
+	// 로컬 변환 행렬. (push_transform 과 같은 순서: 이동 → 회전 → 크기 → 피봇 보정)
 	//==============================================================================
-	pub fn calculateLocalMatrix(&self) -> TransformMatrix {
-		let mut localMatrix = TransformMatrix::identity();
-		localMatrix.translate(self.localPosition.x, self.localPosition.y);
-		localMatrix.rotate(math::degreeToRadian(self.localRotation));
-		localMatrix.scale(self.localScale.x, self.localScale.y);
-		localMatrix.translate(-self.contentSize.x * self.pivot.x, -self.contentSize.y * self.pivot.y);
-		localMatrix
+	pub fn calculate_local_matrix(&self) -> TransformMatrix {
+		let mut local_matrix = TransformMatrix::identity();
+		local_matrix.translate(self.local_position.x, self.local_position.y);
+		local_matrix.rotate(math::degree_to_radian(self.local_rotation));
+		local_matrix.scale(self.local_scale.x, self.local_scale.y);
+		local_matrix.translate(-self.content_size.x * self.pivot.x, -self.content_size.y * self.pivot.y);
+		local_matrix
 	}
 
 	//==============================================================================
 	// 부모 영역에서 본 경계 사각형. (회전이 없을 때 정확하다. 충돌 검사 등)
 	//==============================================================================
-	pub fn getLocalBounds(&self) -> Rect {
-		let width = self.contentSize.x * self.localScale.x.abs();
-		let height = self.contentSize.y * self.localScale.y.abs();
-		Rect::create(self.localPosition.x - width * self.pivot.x, self.localPosition.y - height * self.pivot.y, width, height)
+	pub fn get_local_bounds(&self) -> Rect {
+		let width = self.content_size.x * self.local_scale.x.abs();
+		let height = self.content_size.y * self.local_scale.y.abs();
+		Rect::create(self.local_position.x - width * self.pivot.x, self.local_position.y - height * self.pivot.y, width, height)
 	}
 }
 
@@ -213,219 +213,219 @@ impl Default for NodeTransform {
 // 월드 노드.
 //==============================================================================
 pub struct WorldNode {
-	instanceId: u64,
+	instance_id: u64,
 	name: String,
-	isActive: bool,
-	isInteractable: bool,
-	isGizmoVisible: bool,
+	is_active: bool,
+	is_interactable: bool,
+	is_gizmo_visible: bool,
 	transform: NodeTransform,
 	pub(crate) components: Vec<Box<dyn Component>>,
-	pub(crate) parentId: Option<NodeId>,
-	pub(crate) childIds: Vec<NodeId>,
+	pub(crate) parent_id: Option<NodeId>,
+	pub(crate) child_ids: Vec<NodeId>,
 }
 
 impl WorldNode {
 	//==============================================================================
-	// 생성. (트리에 넣을 때는 NodeTree::createNode 를 쓴다)
+	// 생성. (트리에 넣을 때는 NodeTree::create_node 를 쓴다)
 	//==============================================================================
 	pub fn new(name: &str) -> WorldNode {
 		WorldNode {
-			instanceId: identifier::createInstanceId(),
+			instance_id: identifier::create_instance_id(),
 			name: name.to_string(),
-			isActive: true,
-			isInteractable: false,
-			isGizmoVisible: false,
+			is_active: true,
+			is_interactable: false,
+			is_gizmo_visible: false,
 			transform: NodeTransform::new(),
 			components: Vec::new(),
-			parentId: None,
-			childIds: Vec::new(),
+			parent_id: None,
+			child_ids: Vec::new(),
 		}
 	}
 
 	//==============================================================================
 	// 인스턴스 식별자.
 	//==============================================================================
-	pub fn getInstanceId(&self) -> u64 {
-		self.instanceId
+	pub fn get_instance_id(&self) -> u64 {
+		self.instance_id
 	}
 
 	//==============================================================================
 	// 이름 설정.
 	//==============================================================================
-	pub fn setName(&mut self, name: &str) {
+	pub fn set_name(&mut self, name: &str) {
 		self.name = name.to_string();
 	}
 
 	//==============================================================================
 	// 이름 반환.
 	//==============================================================================
-	pub fn getName(&self) -> &str {
+	pub fn get_name(&self) -> &str {
 		&self.name
 	}
 
 	//==============================================================================
 	// 부모 핸들. (루트이거나 아직 붙지 않았으면 None)
 	//==============================================================================
-	pub fn getParentId(&self) -> Option<NodeId> {
-		self.parentId
+	pub fn get_parent_id(&self) -> Option<NodeId> {
+		self.parent_id
 	}
 
 	//==============================================================================
 	// 자식 핸들 목록. (그리는 순서)
 	//==============================================================================
-	pub fn getChildIds(&self) -> &[NodeId] {
-		&self.childIds
+	pub fn get_child_ids(&self) -> &[NodeId] {
+		&self.child_ids
 	}
 
 	//==============================================================================
 	// 자식 수.
 	//==============================================================================
-	pub fn getChildCount(&self) -> usize {
-		self.childIds.len()
+	pub fn get_child_count(&self) -> usize {
+		self.child_ids.len()
 	}
 
 	//==============================================================================
 	// 활성화 설정. (꺼지면 tick 도 draw 도 하지 않는다)
 	//==============================================================================
-	pub fn setActive(&mut self, isActive: bool) {
-		self.isActive = isActive;
+	pub fn set_active(&mut self, is_active: bool) {
+		self.is_active = is_active;
 	}
 
 	//==============================================================================
 	// 활성화 여부.
 	//==============================================================================
-	pub fn isActive(&self) -> bool {
-		self.isActive
+	pub fn is_active(&self) -> bool {
+		self.is_active
 	}
 
 	//==============================================================================
 	// 터치를 받을지 설정.
 	//==============================================================================
-	pub fn setInteractable(&mut self, isInteractable: bool) {
-		self.isInteractable = isInteractable;
+	pub fn set_interactable(&mut self, is_interactable: bool) {
+		self.is_interactable = is_interactable;
 	}
 
 	//==============================================================================
 	// 터치를 받는지.
 	//==============================================================================
-	pub fn isInteractable(&self) -> bool {
-		self.isInteractable
+	pub fn is_interactable(&self) -> bool {
+		self.is_interactable
 	}
 
 	//==============================================================================
 	// 기즈모 표시 설정.
 	//==============================================================================
-	pub fn setGizmoVisible(&mut self, isGizmoVisible: bool) {
-		self.isGizmoVisible = isGizmoVisible;
+	pub fn set_gizmo_visible(&mut self, is_gizmo_visible: bool) {
+		self.is_gizmo_visible = is_gizmo_visible;
 	}
 
 	//==============================================================================
 	// 기즈모 표시 여부.
 	//==============================================================================
-	pub fn isGizmoVisible(&self) -> bool {
-		self.isGizmoVisible
+	pub fn is_gizmo_visible(&self) -> bool {
+		self.is_gizmo_visible
 	}
 
 	//==============================================================================
 	// 트랜스폼 반환.
 	//==============================================================================
-	pub fn getTransform(&self) -> &NodeTransform {
+	pub fn get_transform(&self) -> &NodeTransform {
 		&self.transform
 	}
 
 	//==============================================================================
 	// 트랜스폼 반환. (변경용)
 	//==============================================================================
-	pub fn getTransformMut(&mut self) -> &mut NodeTransform {
+	pub fn get_transform_mut(&mut self) -> &mut NodeTransform {
 		&mut self.transform
 	}
 
 	//==============================================================================
 	// 트랜스폼 바로가기.
 	//==============================================================================
-	pub fn setLocalPosition(&mut self, localPosition: Vector2) {
-		self.transform.setLocalPosition(localPosition);
+	pub fn set_local_position(&mut self, local_position: Vector2) {
+		self.transform.set_local_position(local_position);
 	}
 
-	pub fn getLocalPosition(&self) -> Vector2 {
-		self.transform.getLocalPosition()
+	pub fn get_local_position(&self) -> Vector2 {
+		self.transform.get_local_position()
 	}
 
-	pub fn setLocalScale(&mut self, localScale: Vector2) {
-		self.transform.setLocalScale(localScale);
+	pub fn set_local_scale(&mut self, local_scale: Vector2) {
+		self.transform.set_local_scale(local_scale);
 	}
 
-	pub fn getLocalScale(&self) -> Vector2 {
-		self.transform.getLocalScale()
+	pub fn get_local_scale(&self) -> Vector2 {
+		self.transform.get_local_scale()
 	}
 
-	pub fn setLocalRotation(&mut self, localRotation: f32) {
-		self.transform.setLocalRotation(localRotation);
+	pub fn set_local_rotation(&mut self, local_rotation: f32) {
+		self.transform.set_local_rotation(local_rotation);
 	}
 
-	pub fn getLocalRotation(&self) -> f32 {
-		self.transform.getLocalRotation()
+	pub fn get_local_rotation(&self) -> f32 {
+		self.transform.get_local_rotation()
 	}
 
-	pub fn setLocalOpacity(&mut self, localOpacity: f32) {
-		self.transform.setLocalOpacity(localOpacity);
+	pub fn set_local_opacity(&mut self, local_opacity: f32) {
+		self.transform.set_local_opacity(local_opacity);
 	}
 
-	pub fn getLocalOpacity(&self) -> f32 {
-		self.transform.getLocalOpacity()
+	pub fn get_local_opacity(&self) -> f32 {
+		self.transform.get_local_opacity()
 	}
 
-	pub fn setPivot(&mut self, pivot: Vector2) {
-		self.transform.setPivot(pivot);
+	pub fn set_pivot(&mut self, pivot: Vector2) {
+		self.transform.set_pivot(pivot);
 	}
 
-	pub fn getPivot(&self) -> Vector2 {
-		self.transform.getPivot()
+	pub fn get_pivot(&self) -> Vector2 {
+		self.transform.get_pivot()
 	}
 
-	pub fn setContentSize(&mut self, contentSize: Vector2) {
-		self.transform.setContentSize(contentSize);
+	pub fn set_content_size(&mut self, content_size: Vector2) {
+		self.transform.set_content_size(content_size);
 	}
 
-	pub fn getContentSize(&self) -> Vector2 {
-		self.transform.getContentSize()
+	pub fn get_content_size(&self) -> Vector2 {
+		self.transform.get_content_size()
 	}
 
-	pub fn setAnchor(&mut self, anchor: Vector2) {
-		self.transform.setAnchor(anchor);
+	pub fn set_anchor(&mut self, anchor: Vector2) {
+		self.transform.set_anchor(anchor);
 	}
 
-	pub fn getAnchor(&self) -> Vector2 {
-		self.transform.getAnchor()
+	pub fn get_anchor(&self) -> Vector2 {
+		self.transform.get_anchor()
 	}
 
-	pub fn setVisible(&mut self, isVisible: bool) {
-		self.transform.setVisible(isVisible);
+	pub fn set_visible(&mut self, is_visible: bool) {
+		self.transform.set_visible(is_visible);
 	}
 
-	pub fn isVisible(&self) -> bool {
-		self.transform.isVisible()
+	pub fn is_visible(&self) -> bool {
+		self.transform.is_visible()
 	}
 
 	//==============================================================================
 	// 컴포넌트 추가. (추가한 컴포넌트를 돌려준다)
 	//==============================================================================
-	pub fn addComponent<T: Component + 'static>(&mut self, component: T) -> &mut T {
-		let mut boxedComponent: Box<dyn Component> = Box::new(component);
-		boxedComponent.attach(&mut self.transform);
-		self.components.push(boxedComponent);
-		let lastComponent = self.components.last_mut().expect("added component");
-		let componentReference: &mut dyn Component = lastComponent.as_mut();
-		componentReference.asAnyMut().downcast_mut::<T>().expect("added component type")
+	pub fn add_component<T: Component + 'static>(&mut self, component: T) -> &mut T {
+		let mut boxed_component: Box<dyn Component> = Box::new(component);
+		boxed_component.attach(&mut self.transform);
+		self.components.push(boxed_component);
+		let last_component = self.components.last_mut().expect("added component");
+		let component_reference: &mut dyn Component = last_component.as_mut();
+		component_reference.as_any_mut().downcast_mut::<T>().expect("added component type")
 	}
 
 	//==============================================================================
 	// 컴포넌트 반환. (그 타입의 첫 번째)
 	//==============================================================================
-	pub fn getComponent<T: Component + 'static>(&self) -> Option<&T> {
+	pub fn get_component<T: Component + 'static>(&self) -> Option<&T> {
 		for component in self.components.iter() {
-			let componentReference: &dyn Component = component.as_ref();
-			if let Some(found) = componentReference.asAny().downcast_ref::<T>() {
+			let component_reference: &dyn Component = component.as_ref();
+			if let Some(found) = component_reference.as_any().downcast_ref::<T>() {
 				return Some(found);
 			}
 		}
@@ -435,10 +435,10 @@ impl WorldNode {
 	//==============================================================================
 	// 컴포넌트 반환. (변경용, 그 타입의 첫 번째)
 	//==============================================================================
-	pub fn getComponentMut<T: Component + 'static>(&mut self) -> Option<&mut T> {
+	pub fn get_component_mut<T: Component + 'static>(&mut self) -> Option<&mut T> {
 		for component in self.components.iter_mut() {
-			let componentReference: &mut dyn Component = component.as_mut();
-			if let Some(found) = componentReference.asAnyMut().downcast_mut::<T>() {
+			let component_reference: &mut dyn Component = component.as_mut();
+			if let Some(found) = component_reference.as_any_mut().downcast_mut::<T>() {
 				return Some(found);
 			}
 		}
@@ -448,131 +448,131 @@ impl WorldNode {
 	//==============================================================================
 	// 컴포넌트가 있는지.
 	//==============================================================================
-	pub fn hasComponent<T: Component + 'static>(&self) -> bool {
-		self.getComponent::<T>().is_some()
+	pub fn has_component<T: Component + 'static>(&self) -> bool {
+		self.get_component::<T>().is_some()
 	}
 
 	//==============================================================================
 	// 컴포넌트 제거. (그 타입 모두, 제거한 수)
 	//==============================================================================
-	pub fn removeComponent<T: Component + 'static>(&mut self) -> usize {
-		let beforeCount = self.components.len();
+	pub fn remove_component<T: Component + 'static>(&mut self) -> usize {
+		let before_count = self.components.len();
 		self.components.retain(|component| {
-			let componentReference: &dyn Component = component.as_ref();
-			!componentReference.asAny().is::<T>()
+			let component_reference: &dyn Component = component.as_ref();
+			!component_reference.as_any().is::<T>()
 		});
-		beforeCount - self.components.len()
+		before_count - self.components.len()
 	}
 
 	//==============================================================================
 	// 모든 컴포넌트.
 	//==============================================================================
-	pub fn getAllComponents(&self) -> &Vec<Box<dyn Component>> {
+	pub fn get_all_components(&self) -> &Vec<Box<dyn Component>> {
 		&self.components
 	}
 
 	//==============================================================================
 	// 출력 상태 시작. (이동 → 회전 → 크기 → 피봇 보정 → 투명도 곱)
 	//==============================================================================
-	pub fn pushTransform(&self, graphic: &mut Graphic) {
-		graphic.pushState();
+	pub fn push_transform(&self, graphic: &mut Graphic) {
+		graphic.push_state();
 
 		// 트랜스폼 반영.
-		// localPosition 은 부모 영역 내 자기 객체의 기준점 좌표 (anchor 영향 없음).
-		let localPosition = self.transform.getLocalPosition();
-		let localRotation = self.transform.getLocalRotation();
-		let radian = math::degreeToRadian(localRotation);
-		let localScale = self.transform.getLocalScale();
-		graphic.translate(localPosition.x, localPosition.y);
+		// local_position 은 부모 영역 내 자기 객체의 기준점 좌표 (anchor 영향 없음).
+		let local_position = self.transform.get_local_position();
+		let local_rotation = self.transform.get_local_rotation();
+		let radian = math::degree_to_radian(local_rotation);
+		let local_scale = self.transform.get_local_scale();
+		graphic.translate(local_position.x, local_position.y);
 		graphic.rotate(radian);
-		graphic.scale(localScale.x, localScale.y);
+		graphic.scale(local_scale.x, local_scale.y);
 
 		// 현재 노드의 피봇 반영.
 		// 기준점을 좌상으로 여기고 우하방향으로 그림을 그리므로, 컨텐트사이즈 기준 피봇만큼 당긴다.
-		let pivot = self.transform.getPivot();
-		let contentSize = self.transform.getContentSize();
-		graphic.translate(-contentSize.x * pivot.x, -contentSize.y * pivot.y);
+		let pivot = self.transform.get_pivot();
+		let content_size = self.transform.get_content_size();
+		graphic.translate(-content_size.x * pivot.x, -content_size.y * pivot.y);
 
 		// 투명도 반영.
-		let localOpacity = self.transform.getLocalOpacity();
-		graphic.multiplyGlobalAlpha(localOpacity);
+		let local_opacity = self.transform.get_local_opacity();
+		graphic.multiply_global_alpha(local_opacity);
 	}
 
 	//==============================================================================
 	// 컴포넌트 출력. (자식은 NodeTree 가 그린다)
 	// - 돌려주는 것: (Mask 가 있으면 둥근 크기, 화면 밖이라 건너뛰었는지)
-	// - 켜진 컴포넌트가 모두 contentSize 안에만 그리면(isDrawnInsideContent) 영역이 화면 밖일 때 그리지 않는다.
+	// - 켜진 컴포넌트가 모두 content_size 안에만 그리면(is_drawn_inside_content) 영역이 화면 밖일 때 그리지 않는다.
 	//==============================================================================
-	pub fn drawComponents(&mut self, graphic: &mut Graphic) -> (Option<f32>, bool) {
-		let mut isCulled = false;
-		let contentSize = self.transform.getContentSize();
-		if !self.components.is_empty() && graphic.isCullingEnabled() && contentSize.x > 0.0 && contentSize.y > 0.0 {
-			let isAllInsideContent = self.components.iter().all(|component| !component.isEnable() || component.isDrawnInsideContent());
-			if isAllInsideContent {
-				let contentRect = Rect::create(0.0, 0.0, contentSize.x, contentSize.y);
-				isCulled = !graphic.isLocalRectVisible(contentRect);
+	pub fn draw_components(&mut self, graphic: &mut Graphic) -> (Option<f32>, bool) {
+		let mut is_culled = false;
+		let content_size = self.transform.get_content_size();
+		if !self.components.is_empty() && graphic.is_culling_enabled() && content_size.x > 0.0 && content_size.y > 0.0 {
+			let is_all_inside_content = self.components.iter().all(|component| !component.is_enable() || component.is_drawn_inside_content());
+			if is_all_inside_content {
+				let content_rect = Rect::create(0.0, 0.0, content_size.x, content_size.y);
+				is_culled = !graphic.is_local_rect_visible(content_rect);
 			}
 		}
 
-		let mut clipRoundSize: Option<f32> = None;
+		let mut clip_round_size: Option<f32> = None;
 		for component in self.components.iter_mut() {
-			if !component.isEnable() {
+			if !component.is_enable() {
 				continue;
 			}
-			if !isCulled {
+			if !is_culled {
 				component.draw(&self.transform, graphic);
 			}
-			if let Some(roundSize) = component.getClipRoundSize() {
-				clipRoundSize = Some(roundSize);
+			if let Some(round_size) = component.get_clip_round_size() {
+				clip_round_size = Some(round_size);
 			}
 		}
-		(clipRoundSize, isCulled)
+		(clip_round_size, is_culled)
 	}
 
 	//==============================================================================
-	// 기즈모 출력. (contentSize 테두리와 피봇 점)
+	// 기즈모 출력. (content_size 테두리와 피봇 점)
 	//==============================================================================
-	pub fn drawGizmos(&mut self, graphic: &mut Graphic) {
-		let originalAlpha = graphic.getGlobalAlpha();
-		graphic.setGlobalAlpha(1.0);
+	pub fn draw_gizmos(&mut self, graphic: &mut Graphic) {
+		let original_alpha = graphic.get_global_alpha();
+		graphic.set_global_alpha(1.0);
 
-		let contentSize = self.transform.getContentSize();
-		let pivot = self.transform.getPivot();
-		graphic.setStrokeColor(Color::create(0.2, 1.0, 0.4, 1.0));
-		graphic.drawStrokeRect(Rect::create(0.0, 0.0, contentSize.x, contentSize.y), 1.0);
-		graphic.setFillColor(Color::create(1.0, 0.3, 0.3, 1.0));
-		graphic.drawCircle(contentSize.multiply(pivot), 3.0);
+		let content_size = self.transform.get_content_size();
+		let pivot = self.transform.get_pivot();
+		graphic.set_stroke_color(Color::create(0.2, 1.0, 0.4, 1.0));
+		graphic.draw_stroke_rect(Rect::create(0.0, 0.0, content_size.x, content_size.y), 1.0);
+		graphic.set_fill_color(Color::create(1.0, 0.3, 0.3, 1.0));
+		graphic.draw_circle(content_size.multiply(pivot), 3.0);
 
 		for component in self.components.iter_mut() {
-			if component.isGizmoVisible() {
-				component.drawGizmos(&self.transform, graphic);
+			if component.is_gizmo_visible() {
+				component.draw_gizmos(&self.transform, graphic);
 			}
 		}
 
-		graphic.setGlobalAlpha(originalAlpha);
+		graphic.set_global_alpha(original_alpha);
 	}
 
 	//==============================================================================
 	// 출력 상태 종료.
 	//==============================================================================
-	pub fn popTransform(&self, graphic: &mut Graphic) {
-		graphic.popState();
+	pub fn pop_transform(&self, graphic: &mut Graphic) {
+		graphic.pop_state();
 	}
 
 	//==============================================================================
-	// 점이 이 노드의 contentSize 영역 안에 있는지. (worldMatrix 는 이 노드까지 누적한 행렬)
+	// 점이 이 노드의 content_size 영역 안에 있는지. (world_matrix 는 이 노드까지 누적한 행렬)
 	//==============================================================================
-	pub fn containsPoint(&self, worldMatrix: &TransformMatrix, viewPosition: Vector2) -> bool {
-		let inverseMatrix = match worldMatrix.invert() {
-			Some(inverseMatrix) => {
-				inverseMatrix
+	pub fn contains_point(&self, world_matrix: &TransformMatrix, view_position: Vector2) -> bool {
+		let inverse_matrix = match world_matrix.invert() {
+			Some(inverse_matrix) => {
+				inverse_matrix
 			}
 			None => {
 				return false;
 			}
 		};
-		let localPoint = inverseMatrix.transformPoint(viewPosition.x, viewPosition.y);
-		let contentSize = self.transform.getContentSize();
-		localPoint.x >= 0.0 && localPoint.y >= 0.0 && localPoint.x <= contentSize.x && localPoint.y <= contentSize.y
+		let local_point = inverse_matrix.transform_point(view_position.x, view_position.y);
+		let content_size = self.transform.get_content_size();
+		local_point.x >= 0.0 && local_point.y >= 0.0 && local_point.x <= content_size.x && local_point.y <= content_size.y
 	}
 }

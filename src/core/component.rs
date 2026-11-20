@@ -1,7 +1,7 @@
 //==============================================================================
 // 컴포넌트.
 // - 노드에 붙는 기능 단위. 원본은 Component 클래스를 상속하고, 여기서는 Component 트레이트를 구현한다.
-// - 원본의 컴포넌트는 getNode() 로 자기 노드를 찾는다. 러스트 판은 tick / 터치 때 ComponentContext 를 넘겨 준다.
+// - 원본의 컴포넌트는 get_node() 로 자기 노드를 찾는다. 러스트 판은 tick / 터치 때 ComponentContext 를 넘겨 준다.
 //   문맥에서 자기 노드(트랜스폼), 트리 전체(다른 노드 찾기, 만들기, 지우기), 엔진(입력, 시간, 뷰)을 꺼낸다.
 // - draw 는 노드 트랜스폼이 걸린 상태에서 자기 트랜스폼만 받는다. (그리는 동안에는 트리를 바꾸지 않는다)
 // - enable / gizmo 같은 공통 상태는 ComponentBase 에 두고, 구현체는 그것을 돌려주기만 한다.
@@ -19,19 +19,19 @@ use crate::core::node::worldnode::NodeTransform;
 use std::any::Any;
 
 //==============================================================================
-// 구체 타입으로 꺼내기 위한 도움 트레이트. (getComponent::<Sprite>() 같은 곳)
+// 구체 타입으로 꺼내기 위한 도움 트레이트. (get_component::<Sprite>() 같은 곳)
 //==============================================================================
 pub trait AsAny {
-	fn asAny(&self) -> &dyn Any;
-	fn asAnyMut(&mut self) -> &mut dyn Any;
+	fn as_any(&self) -> &dyn Any;
+	fn as_any_mut(&mut self) -> &mut dyn Any;
 }
 
 impl<T: Component + 'static> AsAny for T {
-	fn asAny(&self) -> &dyn Any {
+	fn as_any(&self) -> &dyn Any {
 		self
 	}
 
-	fn asAnyMut(&mut self) -> &mut dyn Any {
+	fn as_any_mut(&mut self) -> &mut dyn Any {
 		self
 	}
 }
@@ -41,8 +41,8 @@ impl<T: Component + 'static> AsAny for T {
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct ComponentBase {
-	isEnable: bool,
-	isGizmoVisible: bool,
+	is_enable: bool,
+	is_gizmo_visible: bool,
 }
 
 impl ComponentBase {
@@ -51,37 +51,37 @@ impl ComponentBase {
 	//==============================================================================
 	pub fn new() -> ComponentBase {
 		ComponentBase {
-			isEnable: true,
-			isGizmoVisible: false,
+			is_enable: true,
+			is_gizmo_visible: false,
 		}
 	}
 
 	//==============================================================================
 	// 활성화 설정.
 	//==============================================================================
-	pub fn setEnable(&mut self, isEnable: bool) {
-		self.isEnable = isEnable;
+	pub fn set_enable(&mut self, is_enable: bool) {
+		self.is_enable = is_enable;
 	}
 
 	//==============================================================================
 	// 활성화 여부.
 	//==============================================================================
-	pub fn isEnable(&self) -> bool {
-		self.isEnable
+	pub fn is_enable(&self) -> bool {
+		self.is_enable
 	}
 
 	//==============================================================================
 	// 기즈모 표시 설정.
 	//==============================================================================
-	pub fn setGizmoVisible(&mut self, isGizmoVisible: bool) {
-		self.isGizmoVisible = isGizmoVisible;
+	pub fn set_gizmo_visible(&mut self, is_gizmo_visible: bool) {
+		self.is_gizmo_visible = is_gizmo_visible;
 	}
 
 	//==============================================================================
 	// 기즈모 표시 여부.
 	//==============================================================================
-	pub fn isGizmoVisible(&self) -> bool {
-		self.isGizmoVisible
+	pub fn is_gizmo_visible(&self) -> bool {
+		self.is_gizmo_visible
 	}
 }
 
@@ -98,47 +98,47 @@ pub trait Component: AsAny {
 	//==============================================================================
 	// 공통 상태 반환.
 	//==============================================================================
-	fn getComponentBase(&self) -> &ComponentBase;
+	fn get_component_base(&self) -> &ComponentBase;
 
 	//==============================================================================
 	// 공통 상태 반환. (변경용)
 	//==============================================================================
-	fn getComponentBaseMut(&mut self) -> &mut ComponentBase;
+	fn get_component_base_mut(&mut self) -> &mut ComponentBase;
 
 	//==============================================================================
-	// 컴포넌트 이름. (원본 getComponentType)
+	// 컴포넌트 이름. (원본 get_component_type)
 	//==============================================================================
-	fn getComponentType(&self) -> &'static str;
+	fn get_component_type(&self) -> &'static str;
 
 	//==============================================================================
-	// 노드에 붙을 때. (WorldNode::addComponent 와 NodeTree::addComponent 둘 다 부른다)
+	// 노드에 붙을 때. (WorldNode::add_component 와 NodeTree::add_component 둘 다 부른다)
 	//==============================================================================
 	fn attach(&mut self, _transform: &mut NodeTransform) {
 	}
 
 	//==============================================================================
-	// 트리 안의 노드에 붙을 때. (NodeTree::addComponent 만 부른다. 자식 노드를 만드는 컴포넌트는 여기서 만든다)
-	// - 원본 UIView.attach 가 content 노드를 만들어 붙이는 자리. 이런 컴포넌트는 nodeTree.addComponent 로 붙인다.
+	// 트리 안의 노드에 붙을 때. (NodeTree::add_component 만 부른다. 자식 노드를 만드는 컴포넌트는 여기서 만든다)
+	// - 원본 UIView.attach 가 content 노드를 만들어 붙이는 자리. 이런 컴포넌트는 node_tree.add_component 로 붙인다.
 	//==============================================================================
-	fn attachToTree(&mut self, _nodeTree: &mut NodeTree, _nodeId: NodeId) {
+	fn attach_to_tree(&mut self, _node_tree: &mut NodeTree, _node_id: NodeId) {
 	}
 
 	//==============================================================================
 	// 주기적 갱신.
 	//==============================================================================
-	fn tick(&mut self, _context: &mut ComponentContext, _timeDelta: f32) {
+	fn tick(&mut self, _context: &mut ComponentContext, _time_delta: f32) {
 	}
 
 	//==============================================================================
 	// tick 이 할 일이 있는지. (false 면 노드를 돌 때 이 컴포넌트를 부르지 않는다. 기본 true)
 	// - 그리기만 하는 Paint, Sprite, Text, Mask 는 false. 컴포넌트가 이것만 붙은 노드는 tick 때 꺼내지 않는다.
 	//==============================================================================
-	fn isTickNeeded(&self) -> bool {
+	fn is_tick_needed(&self) -> bool {
 		true
 	}
 
 	//==============================================================================
-	// 출력. (노드 트랜스폼이 걸린 상태에서 불린다. 원점은 노드 contentSize 영역의 왼쪽 위)
+	// 출력. (노드 트랜스폼이 걸린 상태에서 불린다. 원점은 노드 content_size 영역의 왼쪽 위)
 	//==============================================================================
 	fn draw(&mut self, _transform: &NodeTransform, _graphic: &mut Graphic) {
 	}
@@ -146,80 +146,80 @@ pub trait Component: AsAny {
 	//==============================================================================
 	// 기즈모 출력.
 	//==============================================================================
-	fn drawGizmos(&mut self, _transform: &NodeTransform, _graphic: &mut Graphic) {
+	fn draw_gizmos(&mut self, _transform: &NodeTransform, _graphic: &mut Graphic) {
 	}
 
 	//==============================================================================
 	// 자식 출력을 이 영역으로 자를지. (Mask 만 Some(둥근 크기) 를 돌려준다)
 	//==============================================================================
-	fn getClipRoundSize(&self) -> Option<f32> {
+	fn get_clip_round_size(&self) -> Option<f32> {
 		None
 	}
 
 	//==============================================================================
-	// 노드 contentSize 영역 안에만 그리는지. (true 면 영역이 화면 밖일 때 엔진이 draw 를 건너뛴다)
+	// 노드 content_size 영역 안에만 그리는지. (true 면 영역이 화면 밖일 때 엔진이 draw 를 건너뛴다)
 	// - Paint, Sprite, Mask 는 true. 글자, 파티클처럼 영역 밖으로 나가는 것은 false. (기본 false)
 	//==============================================================================
-	fn isDrawnInsideContent(&self) -> bool {
+	fn is_drawn_inside_content(&self) -> bool {
 		false
 	}
 
 	//==============================================================================
 	// 터치 눌림. (노드가 interactable 이고 맨 위에 있을 때)
 	//==============================================================================
-	fn touchPress(&mut self, _context: &mut ComponentContext, _viewInputPosition: Vector2) {
+	fn touch_press(&mut self, _context: &mut ComponentContext, _view_input_position: Vector2) {
 	}
 
 	//==============================================================================
 	// 터치 이동. (눌린 노드에)
 	//==============================================================================
-	fn touchMove(&mut self, _context: &mut ComponentContext, _viewInputPosition: Vector2) {
+	fn touch_move(&mut self, _context: &mut ComponentContext, _view_input_position: Vector2) {
 	}
 
 	//==============================================================================
 	// 터치 뗌. (눌린 노드에)
 	//==============================================================================
-	fn touchRelease(&mut self, _context: &mut ComponentContext, _viewInputPosition: Vector2) {
+	fn touch_release(&mut self, _context: &mut ComponentContext, _view_input_position: Vector2) {
 	}
 
 	//==============================================================================
 	// 터치 취소. (눌린 노드에)
 	//==============================================================================
-	fn touchCancel(&mut self, _context: &mut ComponentContext, _viewInputPosition: Vector2) {
+	fn touch_cancel(&mut self, _context: &mut ComponentContext, _view_input_position: Vector2) {
 	}
 
 	//==============================================================================
 	// 마우스 휠. (터치 아래 노드부터 부모 쪽으로 올라가며 묻는다. 받아 썼으면 true, 원본 UIScrollView.wheel)
 	//==============================================================================
-	fn wheel(&mut self, _context: &mut ComponentContext, _wheelDelta: Vector2) -> bool {
+	fn wheel(&mut self, _context: &mut ComponentContext, _wheel_delta: Vector2) -> bool {
 		false
 	}
 
 	//==============================================================================
 	// 활성화 여부.
 	//==============================================================================
-	fn isEnable(&self) -> bool {
-		self.getComponentBase().isEnable()
+	fn is_enable(&self) -> bool {
+		self.get_component_base().is_enable()
 	}
 
 	//==============================================================================
 	// 활성화 설정.
 	//==============================================================================
-	fn setEnable(&mut self, isEnable: bool) {
-		self.getComponentBaseMut().setEnable(isEnable);
+	fn set_enable(&mut self, is_enable: bool) {
+		self.get_component_base_mut().set_enable(is_enable);
 	}
 
 	//==============================================================================
 	// 기즈모 표시 여부.
 	//==============================================================================
-	fn isGizmoVisible(&self) -> bool {
-		self.getComponentBase().isGizmoVisible()
+	fn is_gizmo_visible(&self) -> bool {
+		self.get_component_base().is_gizmo_visible()
 	}
 
 	//==============================================================================
 	// 기즈모 표시 설정.
 	//==============================================================================
-	fn setGizmoVisible(&mut self, isGizmoVisible: bool) {
-		self.getComponentBaseMut().setGizmoVisible(isGizmoVisible);
+	fn set_gizmo_visible(&mut self, is_gizmo_visible: bool) {
+		self.get_component_base_mut().set_gizmo_visible(is_gizmo_visible);
 	}
 }

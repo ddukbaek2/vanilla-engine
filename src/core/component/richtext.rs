@@ -1,16 +1,16 @@
 //==============================================================================
-// 리치텍스트 컴포넌트. (원본 core/component/richtext.js 의 RichText, parseMarkupToSegments)
+// 리치텍스트 컴포넌트. (원본 core/component/richtext.js 의 RichText, parse_markup_to_segments)
 // - 마크업(Unity TMP 와 같은 꼴)을 풀어 조각(segment)마다 폰트, 크기, 색, 굵게, 기울임, 밑줄, 취소선을 달리해 한 줄로 잇는다.
 //   지원 태그: <b>, <i>, <u>, <s>, <color=#RRGGBB[AA]>, <color=이름>, <size=N>. 모르는 태그는 글 그대로 보인다.
 // - 원본은 Text 를 상속한다. 러스트 판은 Text 를 품고(UILabel 이 Text 를 품는 것과 같은 꼴) 세터를 넘긴다.
 //   마크업이 없으면 품은 Text 의 draw 로 그린다. (여러 줄, 줄바꿈 폭 그대로) 조각의 정하지 않은 속성은 Text 의 값을 쓴다.
-// - 조각 배치(layoutSegments)는 Graphic 없이 재는 함수를 받아 한다. draw 는 글자 텍스처 캐시(textstringtexturecache)의 measureText 로 잰다.
+// - 조각 배치(layout_segments)는 Graphic 없이 재는 함수를 받아 한다. draw 는 글자 텍스처 캐시(textstringtexturecache)의 measure_text 로 잰다.
 // - 원본과 다른 것:
-//   - 조각 속성 fontFace(FontFace / FontAsset) 는 fontFamily(등록한 폰트 이름) 다.
+//   - 조각 속성 fontFace(FontFace / FontAsset) 는 font_family(등록한 폰트 이름) 다.
 //   - Text 에 밑줄 / 취소선 / 기울임 그리기가 없어서, 전역(Text) 밑줄과 취소선은 없다. 조각의 <u>, <s> 는 원본처럼 선을 긋는다.
 //     <i> 는 폰트 문자열에 italic 을 넣지만 글자 캐시가 기울여 그리지 않는다. (Text 와 같음)
 //   - 잘못된 #색(16진수가 아닌 글자)은 흰색이다. (원본은 NaN 색)
-//   - getIntrinsicContentSize 는 재는 함수를 받는 calculateIntrinsicContentSize 다.
+//   - getIntrinsicContentSize 는 재는 함수를 받는 calculate_intrinsic_content_size 다.
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::vector2::Vector2;
@@ -52,15 +52,15 @@ const NAMED_COLOR_LIST: [(&str, &str); 22] = [
 //==============================================================================
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RichTextAttributes {
-	pub textColor: Option<Color>,
-	pub fontSize: Option<f32>,
-	pub fontFamily: Option<String>,
-	pub strokeColor: Option<Color>,
-	pub strokeWidth: Option<f32>,
-	pub isBold: bool,
-	pub isItalic: bool,
-	pub isUnderline: bool,
-	pub isStrikethrough: bool,
+	pub text_color: Option<Color>,
+	pub font_size: Option<f32>,
+	pub font_family: Option<String>,
+	pub stroke_color: Option<Color>,
+	pub stroke_width: Option<f32>,
+	pub is_bold: bool,
+	pub is_italic: bool,
+	pub is_underline: bool,
+	pub is_strikethrough: bool,
 }
 
 impl RichTextAttributes {
@@ -74,26 +74,26 @@ impl RichTextAttributes {
 	//==============================================================================
 	// 안쪽 속성을 덮어쓰기. (정한 것만, 원본 mergeAttributeStack)
 	//==============================================================================
-	fn mergeFrom(&mut self, innerAttributes: &RichTextAttributes) {
-		if innerAttributes.textColor.is_some() {
-			self.textColor = innerAttributes.textColor;
+	fn merge_from(&mut self, inner_attributes: &RichTextAttributes) {
+		if inner_attributes.text_color.is_some() {
+			self.text_color = inner_attributes.text_color;
 		}
-		if innerAttributes.fontSize.is_some() {
-			self.fontSize = innerAttributes.fontSize;
+		if inner_attributes.font_size.is_some() {
+			self.font_size = inner_attributes.font_size;
 		}
-		if innerAttributes.fontFamily.is_some() {
-			self.fontFamily = innerAttributes.fontFamily.clone();
+		if inner_attributes.font_family.is_some() {
+			self.font_family = inner_attributes.font_family.clone();
 		}
-		if innerAttributes.strokeColor.is_some() {
-			self.strokeColor = innerAttributes.strokeColor;
+		if inner_attributes.stroke_color.is_some() {
+			self.stroke_color = inner_attributes.stroke_color;
 		}
-		if innerAttributes.strokeWidth.is_some() {
-			self.strokeWidth = innerAttributes.strokeWidth;
+		if inner_attributes.stroke_width.is_some() {
+			self.stroke_width = inner_attributes.stroke_width;
 		}
-		self.isBold = self.isBold || innerAttributes.isBold;
-		self.isItalic = self.isItalic || innerAttributes.isItalic;
-		self.isUnderline = self.isUnderline || innerAttributes.isUnderline;
-		self.isStrikethrough = self.isStrikethrough || innerAttributes.isStrikethrough;
+		self.is_bold = self.is_bold || inner_attributes.is_bold;
+		self.is_italic = self.is_italic || inner_attributes.is_italic;
+		self.is_underline = self.is_underline || inner_attributes.is_underline;
+		self.is_strikethrough = self.is_strikethrough || inner_attributes.is_strikethrough;
 	}
 }
 
@@ -112,15 +112,15 @@ pub struct RichTextSegment {
 #[derive(Clone, Debug, PartialEq)]
 pub struct RichTextRun {
 	pub text: String,
-	pub fontString: String,
-	pub fontSize: f32,
+	pub font_string: String,
+	pub font_size: f32,
 	pub x: f32,
 	pub width: f32,
-	pub textColor: Color,
-	pub strokeColor: Color,
-	pub strokeWidth: f32,
-	pub isUnderline: bool,
-	pub isStrikethrough: bool,
+	pub text_color: Color,
+	pub stroke_color: Color,
+	pub stroke_width: f32,
+	pub is_underline: bool,
+	pub is_strikethrough: bool,
 }
 
 //==============================================================================
@@ -128,10 +128,10 @@ pub struct RichTextRun {
 //==============================================================================
 #[derive(Clone, Debug, PartialEq)]
 pub struct RichTextLayout {
-	pub runList: Vec<RichTextRun>,
-	pub totalWidth: f32,
-	pub maximumFontSize: f32,
-	pub baselineY: f32,
+	pub run_list: Vec<RichTextRun>,
+	pub total_width: f32,
+	pub maximum_font_size: f32,
+	pub baseline_y: f32,
 }
 
 //==============================================================================
@@ -156,46 +156,46 @@ impl RichText {
 	//==============================================================================
 	// 글과 크기로 생성.
 	//==============================================================================
-	pub fn createWithText(text: &str, fontSize: f32) -> RichText {
-		let mut richText = RichText::new();
-		richText.setText(text);
-		richText.setFontSize(fontSize);
-		richText
+	pub fn create_with_text(text: &str, font_size: f32) -> RichText {
+		let mut rich_text = RichText::new();
+		rich_text.set_text(text);
+		rich_text.set_font_size(font_size);
+		rich_text
 	}
 
 	//==============================================================================
 	// 품은 글자 컴포넌트 반환. (전역 속성과 마크업이 없을 때의 그리기)
 	//==============================================================================
-	pub fn getTextComponent(&self) -> &Text {
+	pub fn get_text_component(&self) -> &Text {
 		&self.text
 	}
 
 	//==============================================================================
 	// 품은 글자 컴포넌트 반환. (변경용)
 	//==============================================================================
-	pub fn getTextComponentMut(&mut self) -> &mut Text {
+	pub fn get_text_component_mut(&mut self) -> &mut Text {
 		&mut self.text
 	}
 
 	//==============================================================================
 	// 글 설정. (마크업을 풀어 조각으로 둔다. 알려진 태그가 없으면 조각을 비우고 일반 글로 그린다)
 	//==============================================================================
-	pub fn setText(&mut self, text: &str) {
-		self.text.setText(text);
-		self.segments = parseMarkupToSegments(text).unwrap_or_default();
+	pub fn set_text(&mut self, text: &str) {
+		self.text.set_text(text);
+		self.segments = parse_markup_to_segments(text).unwrap_or_default();
 	}
 
 	//==============================================================================
 	// 글 반환. (마크업이 든 원래 글)
 	//==============================================================================
-	pub fn getText(&self) -> &str {
-		self.text.getText()
+	pub fn get_text(&self) -> &str {
+		self.text.get_text()
 	}
 
 	//==============================================================================
 	// 조각 하나 더하기. (마크업 없이 코드로 조각을 쌓을 때)
 	//==============================================================================
-	pub fn appendSegment(&mut self, text: &str, attributes: RichTextAttributes) -> &mut RichText {
+	pub fn append_segment(&mut self, text: &str, attributes: RichTextAttributes) -> &mut RichText {
 		self.segments.push(RichTextSegment {
 			text: text.to_string(),
 			attributes,
@@ -206,285 +206,285 @@ impl RichText {
 	//==============================================================================
 	// 조각 모두 지우기.
 	//==============================================================================
-	pub fn clearSegments(&mut self) {
+	pub fn clear_segments(&mut self) {
 		self.segments.clear();
 	}
 
 	//==============================================================================
 	// 조각 목록.
 	//==============================================================================
-	pub fn getSegments(&self) -> &[RichTextSegment] {
+	pub fn get_segments(&self) -> &[RichTextSegment] {
 		&self.segments
 	}
 
 	//==============================================================================
 	// 글이 있는 조각이 하나라도 있는지.
 	//==============================================================================
-	pub fn hasSegments(&self) -> bool {
+	pub fn has_segments(&self) -> bool {
 		self.segments.iter().any(|segment| !segment.text.is_empty())
 	}
 
 	//==============================================================================
 	// 글자 크기 설정.
 	//==============================================================================
-	pub fn setFontSize(&mut self, fontSize: f32) {
-		self.text.setFontSize(fontSize);
+	pub fn set_font_size(&mut self, font_size: f32) {
+		self.text.set_font_size(font_size);
 	}
 
 	//==============================================================================
 	// 글자 크기 반환.
 	//==============================================================================
-	pub fn getFontSize(&self) -> f32 {
-		self.text.getFontSize()
+	pub fn get_font_size(&self) -> f32 {
+		self.text.get_font_size()
 	}
 
 	//==============================================================================
 	// 폰트 이름 설정.
 	//==============================================================================
-	pub fn setFontFamily(&mut self, fontFamily: &str) {
-		self.text.setFontFamily(fontFamily);
+	pub fn set_font_family(&mut self, font_family: &str) {
+		self.text.set_font_family(font_family);
 	}
 
 	//==============================================================================
 	// 폰트 이름 반환.
 	//==============================================================================
-	pub fn getFontFamily(&self) -> &str {
-		self.text.getFontFamily()
+	pub fn get_font_family(&self) -> &str {
+		self.text.get_font_family()
 	}
 
 	//==============================================================================
 	// 글자 색 설정.
 	//==============================================================================
-	pub fn setTextColor(&mut self, color: impl Into<Color>) {
-		self.text.setTextColor(color);
+	pub fn set_text_color(&mut self, color: impl Into<Color>) {
+		self.text.set_text_color(color);
 	}
 
 	//==============================================================================
 	// 글자 색 반환.
 	//==============================================================================
-	pub fn getTextColor(&self) -> Color {
-		self.text.getTextColor()
+	pub fn get_text_color(&self) -> Color {
+		self.text.get_text_color()
 	}
 
 	//==============================================================================
 	// 외곽선 색 설정.
 	//==============================================================================
-	pub fn setStrokeColor(&mut self, color: impl Into<Color>) {
-		self.text.setStrokeColor(color);
+	pub fn set_stroke_color(&mut self, color: impl Into<Color>) {
+		self.text.set_stroke_color(color);
 	}
 
 	//==============================================================================
 	// 외곽선 색 반환.
 	//==============================================================================
-	pub fn getStrokeColor(&self) -> Color {
-		self.text.getStrokeColor()
+	pub fn get_stroke_color(&self) -> Color {
+		self.text.get_stroke_color()
 	}
 
 	//==============================================================================
 	// 외곽선 두께 설정.
 	//==============================================================================
-	pub fn setStrokeWidth(&mut self, strokeWidth: f32) {
-		self.text.setStrokeWidth(strokeWidth);
+	pub fn set_stroke_width(&mut self, stroke_width: f32) {
+		self.text.set_stroke_width(stroke_width);
 	}
 
 	//==============================================================================
 	// 외곽선 두께 반환.
 	//==============================================================================
-	pub fn getStrokeWidth(&self) -> f32 {
-		self.text.getStrokeWidth()
+	pub fn get_stroke_width(&self) -> f32 {
+		self.text.get_stroke_width()
 	}
 
 	//==============================================================================
 	// 굵게 설정.
 	//==============================================================================
-	pub fn setBold(&mut self, isBold: bool) {
-		self.text.setBold(isBold);
+	pub fn set_bold(&mut self, is_bold: bool) {
+		self.text.set_bold(is_bold);
 	}
 
 	//==============================================================================
 	// 굵게 여부.
 	//==============================================================================
-	pub fn isBold(&self) -> bool {
-		self.text.isBold()
+	pub fn is_bold(&self) -> bool {
+		self.text.is_bold()
 	}
 
 	//==============================================================================
 	// 기울임 설정.
 	//==============================================================================
-	pub fn setItalic(&mut self, isItalic: bool) {
-		self.text.setItalic(isItalic);
+	pub fn set_italic(&mut self, is_italic: bool) {
+		self.text.set_italic(is_italic);
 	}
 
 	//==============================================================================
 	// 기울임 여부.
 	//==============================================================================
-	pub fn isItalic(&self) -> bool {
-		self.text.isItalic()
+	pub fn is_italic(&self) -> bool {
+		self.text.is_italic()
 	}
 
 	//==============================================================================
 	// 가로 정렬 설정.
 	//==============================================================================
-	pub fn setTextAlign(&mut self, textAlign: TextAlign) {
-		self.text.setTextAlign(textAlign);
+	pub fn set_text_align(&mut self, text_align: TextAlign) {
+		self.text.set_text_align(text_align);
 	}
 
 	//==============================================================================
 	// 가로 정렬 반환.
 	//==============================================================================
-	pub fn getTextAlign(&self) -> TextAlign {
-		self.text.getTextAlign()
+	pub fn get_text_align(&self) -> TextAlign {
+		self.text.get_text_align()
 	}
 
 	//==============================================================================
 	// 세로 기준선 설정.
 	//==============================================================================
-	pub fn setTextBaseline(&mut self, textBaseline: TextBaseline) {
-		self.text.setTextBaseline(textBaseline);
+	pub fn set_text_baseline(&mut self, text_baseline: TextBaseline) {
+		self.text.set_text_baseline(text_baseline);
 	}
 
 	//==============================================================================
 	// 세로 기준선 반환.
 	//==============================================================================
-	pub fn getTextBaseline(&self) -> TextBaseline {
-		self.text.getTextBaseline()
+	pub fn get_text_baseline(&self) -> TextBaseline {
+		self.text.get_text_baseline()
 	}
 
 	//==============================================================================
 	// 줄바꿈 폭 설정. (마크업이 없을 때만 쓰인다. 조각은 원본처럼 한 줄)
 	//==============================================================================
-	pub fn setWordWrapWidth(&mut self, wordWrapWidth: f32) {
-		self.text.setWordWrapWidth(wordWrapWidth);
+	pub fn set_word_wrap_width(&mut self, word_wrap_width: f32) {
+		self.text.set_word_wrap_width(word_wrap_width);
 	}
 
 	//==============================================================================
 	// 줄바꿈 폭 반환.
 	//==============================================================================
-	pub fn getWordWrapWidth(&self) -> f32 {
-		self.text.getWordWrapWidth()
+	pub fn get_word_wrap_width(&self) -> f32 {
+		self.text.get_word_wrap_width()
 	}
 
 	//==============================================================================
 	// 줄 간격 설정.
 	//==============================================================================
-	pub fn setLineSpacing(&mut self, lineSpacing: f32) {
-		self.text.setLineSpacing(lineSpacing);
+	pub fn set_line_spacing(&mut self, line_spacing: f32) {
+		self.text.set_line_spacing(line_spacing);
 	}
 
 	//==============================================================================
 	// 줄 간격 반환.
 	//==============================================================================
-	pub fn getLineSpacing(&self) -> f32 {
-		self.text.getLineSpacing()
+	pub fn get_line_spacing(&self) -> f32 {
+		self.text.get_line_spacing()
 	}
 
 	//==============================================================================
 	// 조각의 폰트 문자열과 크기. (Canvas2D font 꼴)
 	//==============================================================================
-	fn resolveSegmentFont(&self, attributes: &RichTextAttributes) -> (String, f32) {
-		let fontSize = attributes.fontSize.unwrap_or(self.text.getFontSize());
-		let fontFamily = attributes.fontFamily.as_deref().unwrap_or(self.text.getFontFamily());
-		let isBold = attributes.isBold || self.text.isBold();
-		let isItalic = attributes.isItalic || self.text.isItalic();
-		(buildFontString(fontFamily, fontSize, isBold, isItalic), fontSize)
+	fn resolve_segment_font(&self, attributes: &RichTextAttributes) -> (String, f32) {
+		let font_size = attributes.font_size.unwrap_or(self.text.get_font_size());
+		let font_family = attributes.font_family.as_deref().unwrap_or(self.text.get_font_family());
+		let is_bold = attributes.is_bold || self.text.is_bold();
+		let is_italic = attributes.is_italic || self.text.is_italic();
+		(build_font_string(font_family, font_size, is_bold, is_italic), font_size)
 	}
 
 	//==============================================================================
-	// 조각 배치. (합친 폭과 가장 큰 글자 크기로 정렬, 기준선은 Text 와 같은 규칙. 원본 drawSegments 의 자리 계산)
-	// - measureWidth(폰트 문자열, 글) 은 글 폭을 돌려준다.
+	// 조각 배치. (합친 폭과 가장 큰 글자 크기로 정렬, 기준선은 Text 와 같은 규칙. 원본 draw_segments 의 자리 계산)
+	// - measure_width(폰트 문자열, 글) 은 글 폭을 돌려준다.
 	//==============================================================================
-	pub fn layoutSegments(&self, contentSize: Vector2, measureWidth: &mut dyn FnMut(&str, &str) -> f32) -> RichTextLayout {
-		let mut runList: Vec<RichTextRun> = Vec::new();
-		let mut totalWidth = 0.0;
-		let mut maximumFontSize: f32 = 0.0;
+	pub fn layout_segments(&self, content_size: Vector2, measure_width: &mut dyn FnMut(&str, &str) -> f32) -> RichTextLayout {
+		let mut run_list: Vec<RichTextRun> = Vec::new();
+		let mut total_width = 0.0;
+		let mut maximum_font_size: f32 = 0.0;
 		for segment in self.segments.iter() {
 			if segment.text.is_empty() {
 				continue;
 			}
 			let attributes = &segment.attributes;
-			let (fontString, fontSize) = self.resolveSegmentFont(attributes);
-			let width = measureWidth(&fontString, &segment.text);
-			runList.push(RichTextRun {
+			let (font_string, font_size) = self.resolve_segment_font(attributes);
+			let width = measure_width(&font_string, &segment.text);
+			run_list.push(RichTextRun {
 				text: segment.text.clone(),
-				fontString,
-				fontSize,
-				x: totalWidth,
+				font_string,
+				font_size,
+				x: total_width,
 				width,
-				textColor: attributes.textColor.unwrap_or(self.text.getTextColor()),
-				strokeColor: attributes.strokeColor.unwrap_or(self.text.getStrokeColor()),
-				strokeWidth: attributes.strokeWidth.unwrap_or(self.text.getStrokeWidth()),
-				isUnderline: attributes.isUnderline,
-				isStrikethrough: attributes.isStrikethrough,
+				text_color: attributes.text_color.unwrap_or(self.text.get_text_color()),
+				stroke_color: attributes.stroke_color.unwrap_or(self.text.get_stroke_color()),
+				stroke_width: attributes.stroke_width.unwrap_or(self.text.get_stroke_width()),
+				is_underline: attributes.is_underline,
+				is_strikethrough: attributes.is_strikethrough,
 			});
-			totalWidth += width;
-			maximumFontSize = maximumFontSize.max(fontSize);
+			total_width += width;
+			maximum_font_size = maximum_font_size.max(font_size);
 		}
 
 		// 시작 x.
-		let startX = match self.text.getTextAlign() {
-			TextAlign::left | TextAlign::start => {
+		let start_x = match self.text.get_text_align() {
+			TextAlign::Left | TextAlign::Start => {
 				0.0
 			}
-			TextAlign::right | TextAlign::end => {
-				contentSize.x - totalWidth
+			TextAlign::Right | TextAlign::End => {
+				content_size.x - total_width
 			}
-			TextAlign::center => {
-				(contentSize.x - totalWidth) * 0.5
+			TextAlign::Center => {
+				(content_size.x - total_width) * 0.5
 			}
 		};
-		for run in runList.iter_mut() {
-			run.x += startX;
+		for run in run_list.iter_mut() {
+			run.x += start_x;
 		}
 
 		// 기준선 y.
-		let baselineY = match self.text.getTextBaseline() {
-			TextBaseline::top | TextBaseline::hanging => {
+		let baseline_y = match self.text.get_text_baseline() {
+			TextBaseline::Top | TextBaseline::Hanging => {
 				0.0
 			}
-			TextBaseline::bottom | TextBaseline::ideographic | TextBaseline::alphabetic => {
-				contentSize.y
+			TextBaseline::Bottom | TextBaseline::Ideographic | TextBaseline::Alphabetic => {
+				content_size.y
 			}
-			TextBaseline::middle => {
-				contentSize.y * 0.5
+			TextBaseline::Middle => {
+				content_size.y * 0.5
 			}
 		};
 		RichTextLayout {
-			runList,
-			totalWidth,
-			maximumFontSize,
-			baselineY,
+			run_list,
+			total_width,
+			maximum_font_size,
+			baseline_y,
 		}
 	}
 
 	//==============================================================================
 	// 글의 자연 크기. (조각이 있으면 합친 폭 x 가장 큰 글자 크기, 없으면 일반 글 폭 x 글자 크기. 원본 getIntrinsicContentSize)
 	//==============================================================================
-	pub fn calculateIntrinsicContentSize(&self, measureWidth: &mut dyn FnMut(&str, &str) -> f32) -> Vector2 {
-		if !self.hasSegments() {
-			let fontString = self.text.buildFontString();
-			let width = measureWidth(&fontString, self.text.getText());
-			return Vector2::create(width, self.text.getFontSize());
+	pub fn calculate_intrinsic_content_size(&self, measure_width: &mut dyn FnMut(&str, &str) -> f32) -> Vector2 {
+		if !self.has_segments() {
+			let font_string = self.text.build_font_string();
+			let width = measure_width(&font_string, self.text.get_text());
+			return Vector2::create(width, self.text.get_font_size());
 		}
-		let layout = self.layoutSegments(Vector2::zero(), measureWidth);
-		let maximumFontSize = if layout.maximumFontSize > 0.0 {
-			layout.maximumFontSize
+		let layout = self.layout_segments(Vector2::zero(), measure_width);
+		let maximum_font_size = if layout.maximum_font_size > 0.0 {
+			layout.maximum_font_size
 		}
 		else {
-			self.text.getFontSize()
+			self.text.get_font_size()
 		};
-		Vector2::create(layout.totalWidth, maximumFontSize)
+		Vector2::create(layout.total_width, maximum_font_size)
 	}
 
 	//==============================================================================
 	// 밑줄 y 오프셋. (원본 Text.computeUnderlineOffsetY)
 	//==============================================================================
-	fn calculateUnderlineOffsetY(&self, fontSize: f32) -> f32 {
-		match self.text.getTextBaseline() {
-			TextBaseline::top | TextBaseline::hanging => {
-				fontSize + 2.0
+	fn calculate_underline_offset_y(&self, font_size: f32) -> f32 {
+		match self.text.get_text_baseline() {
+			TextBaseline::Top | TextBaseline::Hanging => {
+				font_size + 2.0
 			}
-			TextBaseline::middle => {
-				fontSize * 0.5 + 2.0
+			TextBaseline::Middle => {
+				font_size * 0.5 + 2.0
 			}
 			_ => {
 				4.0
@@ -495,50 +495,50 @@ impl RichText {
 	//==============================================================================
 	// 취소선 y 오프셋. (원본 Text.computeStrikethroughOffsetY)
 	//==============================================================================
-	fn calculateStrikethroughOffsetY(&self, fontSize: f32) -> f32 {
-		match self.text.getTextBaseline() {
-			TextBaseline::top | TextBaseline::hanging => {
-				fontSize * 0.55
+	fn calculate_strikethrough_offset_y(&self, font_size: f32) -> f32 {
+		match self.text.get_text_baseline() {
+			TextBaseline::Top | TextBaseline::Hanging => {
+				font_size * 0.55
 			}
-			TextBaseline::middle => {
+			TextBaseline::Middle => {
 				0.0
 			}
 			_ => {
-				-fontSize * 0.35
+				-font_size * 0.35
 			}
 		}
 	}
 
 	//==============================================================================
-	// 조각 그리기. (원본 drawSegments)
+	// 조각 그리기. (원본 draw_segments)
 	//==============================================================================
-	pub fn drawSegments(&self, graphic: &mut Graphic, contentSize: Vector2) {
+	pub fn draw_segments(&self, graphic: &mut Graphic, content_size: Vector2) {
 		let layout = {
-			let textStringTextureCache = graphic.getTextStringTextureCache();
-			self.layoutSegments(contentSize, &mut |fontString: &str, text: &str| textStringTextureCache.measureText(fontString, text).width)
+			let text_string_texture_cache = graphic.get_text_string_texture_cache();
+			self.layout_segments(content_size, &mut |font_string: &str, text: &str| text_string_texture_cache.measure_text(font_string, text).width)
 		};
-		let baselineY = layout.baselineY;
-		graphic.setTextAlign(TextAlign::left);
-		graphic.setTextBaseline(self.text.getTextBaseline());
-		for run in layout.runList.iter() {
-			graphic.setFontString(&run.fontString);
-			if run.strokeWidth > 0.0 {
-				graphic.setStrokeColor(run.strokeColor);
-				graphic.drawStrokeText(&run.text, run.x, baselineY, run.strokeWidth);
+		let baseline_y = layout.baseline_y;
+		graphic.set_text_align(TextAlign::Left);
+		graphic.set_text_baseline(self.text.get_text_baseline());
+		for run in layout.run_list.iter() {
+			graphic.set_font_string(&run.font_string);
+			if run.stroke_width > 0.0 {
+				graphic.set_stroke_color(run.stroke_color);
+				graphic.draw_stroke_text(&run.text, run.x, baseline_y, run.stroke_width);
 			}
-			graphic.setFillColor(run.textColor);
-			graphic.drawFillText(&run.text, run.x, baselineY);
+			graphic.set_fill_color(run.text_color);
+			graphic.draw_fill_text(&run.text, run.x, baseline_y);
 
-			let decorationLineWidth = (run.fontSize / 16.0).max(1.0);
-			if run.isUnderline {
-				let underlineY = baselineY + self.calculateUnderlineOffsetY(run.fontSize);
-				graphic.setStrokeColor(run.textColor);
-				graphic.drawLine(&[Vector2::create(run.x, underlineY), Vector2::create(run.x + run.width, underlineY)], decorationLineWidth);
+			let decoration_line_width = (run.font_size / 16.0).max(1.0);
+			if run.is_underline {
+				let underline_y = baseline_y + self.calculate_underline_offset_y(run.font_size);
+				graphic.set_stroke_color(run.text_color);
+				graphic.draw_line(&[Vector2::create(run.x, underline_y), Vector2::create(run.x + run.width, underline_y)], decoration_line_width);
 			}
-			if run.isStrikethrough {
-				let strikethroughY = baselineY + self.calculateStrikethroughOffsetY(run.fontSize);
-				graphic.setStrokeColor(run.textColor);
-				graphic.drawLine(&[Vector2::create(run.x, strikethroughY), Vector2::create(run.x + run.width, strikethroughY)], decorationLineWidth);
+			if run.is_strikethrough {
+				let strikethrough_y = baseline_y + self.calculate_strikethrough_offset_y(run.font_size);
+				graphic.set_stroke_color(run.text_color);
+				graphic.draw_line(&[Vector2::create(run.x, strikethrough_y), Vector2::create(run.x + run.width, strikethrough_y)], decoration_line_width);
 			}
 		}
 	}
@@ -551,112 +551,112 @@ impl Default for RichText {
 }
 
 impl Component for RichText {
-	fn getComponentBase(&self) -> &ComponentBase {
-		self.text.getComponentBase()
+	fn get_component_base(&self) -> &ComponentBase {
+		self.text.get_component_base()
 	}
 
-	fn getComponentBaseMut(&mut self) -> &mut ComponentBase {
-		self.text.getComponentBaseMut()
+	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
+		self.text.get_component_base_mut()
 	}
 
-	fn getComponentType(&self) -> &'static str {
+	fn get_component_type(&self) -> &'static str {
 		"RichText"
 	}
 
-	fn isTickNeeded(&self) -> bool {
+	fn is_tick_needed(&self) -> bool {
 		false
 	}
 
 	fn draw(&mut self, transform: &NodeTransform, graphic: &mut Graphic) {
-		if !self.hasSegments() {
+		if !self.has_segments() {
 			self.text.draw(transform, graphic);
 			return;
 		}
-		self.drawSegments(graphic, transform.getContentSize());
+		self.draw_segments(graphic, transform.get_content_size());
 	}
 }
 
 //==============================================================================
-// Canvas2D font 꼴 문자열. (원본 text.js 의 buildFontString)
+// Canvas2D font 꼴 문자열. (원본 text.js 의 build_font_string)
 //==============================================================================
-pub fn buildFontString(fontFamily: &str, fontSize: f32, isBold: bool, isItalic: bool) -> String {
-	let mut styleParts: Vec<String> = Vec::new();
-	if isItalic {
-		styleParts.push(String::from("italic"));
+pub fn build_font_string(font_family: &str, font_size: f32, is_bold: bool, is_italic: bool) -> String {
+	let mut style_parts: Vec<String> = Vec::new();
+	if is_italic {
+		style_parts.push(String::from("italic"));
 	}
-	if isBold {
-		styleParts.push(String::from("bold"));
+	if is_bold {
+		style_parts.push(String::from("bold"));
 	}
-	styleParts.push(format!("{}px", fontSize));
-	styleParts.push(fontFamily.to_string());
-	styleParts.join(" ")
+	style_parts.push(format!("{}px", font_size));
+	style_parts.push(font_family.to_string());
+	style_parts.join(" ")
 }
 
 //==============================================================================
-// 색 값(#RRGGBB / #RRGGBBAA / 이름) 풀기. (원본 parseColorValue)
+// 색 값(#RRGGBB / #RRGGBBAA / 이름) 풀기. (원본 parse_color_value)
 //==============================================================================
-fn parseColorValue(value: Option<&str>) -> Option<Color> {
-	let trimmedValue = value?.trim();
-	if trimmedValue.is_empty() {
+fn parse_color_value(value: Option<&str>) -> Option<Color> {
+	let trimmed_value = value?.trim();
+	if trimmed_value.is_empty() {
 		return None;
 	}
-	if let Some(hexText) = trimmedValue.strip_prefix('#') {
-		if !hexText.is_ascii() {
+	if let Some(hex_text) = trimmed_value.strip_prefix('#') {
+		if !hex_text.is_ascii() {
 			return Some(Color::white());
 		}
-		return Some(Color::createFromHEX(trimmedValue));
+		return Some(Color::create_from_hex(trimmed_value));
 	}
-	let lowercaseValue = trimmedValue.to_lowercase();
-	NAMED_COLOR_LIST.iter().find(|(colorName, _)| *colorName == lowercaseValue).map(|(_, hexText)| Color::createFromHEX(hexText))
+	let lowercase_value = trimmed_value.to_lowercase();
+	NAMED_COLOR_LIST.iter().find(|(color_name, _)| *color_name == lowercase_value).map(|(_, hex_text)| Color::create_from_hex(hex_text))
 }
 
 //==============================================================================
 // 자바스크립트 parseInt(텍스트, 10) 처럼 앞쪽 정수 읽기. (부호와 숫자까지, 숫자가 없으면 None)
 //==============================================================================
-fn parseLeadingInteger(text: &str) -> Option<i64> {
-	let trimmedText = text.trim();
-	let mut digitText = String::new();
-	for (characterIndex, character) in trimmedText.chars().enumerate() {
-		if characterIndex == 0 && (character == '+' || character == '-') {
-			digitText.push(character);
+fn parse_leading_integer(text: &str) -> Option<i64> {
+	let trimmed_text = text.trim();
+	let mut digit_text = String::new();
+	for (character_index, character) in trimmed_text.chars().enumerate() {
+		if character_index == 0 && (character == '+' || character == '-') {
+			digit_text.push(character);
 			continue;
 		}
 		if character.is_ascii_digit() {
-			digitText.push(character);
+			digit_text.push(character);
 			continue;
 		}
 		break;
 	}
-	digitText.parse::<i64>().ok()
+	digit_text.parse::<i64>().ok()
 }
 
 //==============================================================================
-// 태그 하나 → 속성. (모르는 태그나 값이 틀리면 None. 원본 buildAttributesForTag)
+// 태그 하나 → 속성. (모르는 태그나 값이 틀리면 None. 원본 build_attributes_for_tag)
 //==============================================================================
-fn buildAttributesForTag(tagName: &str, tagValue: Option<&str>) -> Option<RichTextAttributes> {
+fn build_attributes_for_tag(tag_name: &str, tag_value: Option<&str>) -> Option<RichTextAttributes> {
 	let mut attributes = RichTextAttributes::new();
-	match tagName {
+	match tag_name {
 		"color" => {
-			attributes.textColor = Some(parseColorValue(tagValue)?);
+			attributes.text_color = Some(parse_color_value(tag_value)?);
 		}
 		"size" => {
-			let fontSize = parseLeadingInteger(tagValue.unwrap_or(""))?;
-			if fontSize <= 0 {
+			let font_size = parse_leading_integer(tag_value.unwrap_or(""))?;
+			if font_size <= 0 {
 				return None;
 			}
-			attributes.fontSize = Some(fontSize as f32);
+			attributes.font_size = Some(font_size as f32);
 		}
 		"b" => {
-			attributes.isBold = true;
+			attributes.is_bold = true;
 		}
 		"i" => {
-			attributes.isItalic = true;
+			attributes.is_italic = true;
 		}
 		"u" => {
-			attributes.isUnderline = true;
+			attributes.is_underline = true;
 		}
 		"s" => {
-			attributes.isStrikethrough = true;
+			attributes.is_strikethrough = true;
 		}
 		_ => {
 			return None;
@@ -669,33 +669,33 @@ fn buildAttributesForTag(tagName: &str, tagValue: Option<&str>) -> Option<RichTe
 // 마크업 태그 하나 맞추기. (원본 정규식 /<(\/?)([a-zA-Z]+)(?:=([^>]+))?>/ 와 같다)
 // - 맞으면 (끝 바이트 자리, 닫는 태그인지, 소문자 태그 이름, 값).
 //==============================================================================
-fn matchTagAt(input: &str, startByteIndex: usize) -> Option<(usize, bool, String, Option<String>)> {
+fn match_tag_at(input: &str, start_byte_index: usize) -> Option<(usize, bool, String, Option<String>)> {
 	let bytes = input.as_bytes();
-	let mut position = startByteIndex + 1;
-	let isClose = bytes.get(position) == Some(&b'/');
-	if isClose {
+	let mut position = start_byte_index + 1;
+	let is_close = bytes.get(position) == Some(&b'/');
+	if is_close {
 		position += 1;
 	}
-	let nameStart = position;
+	let name_start = position;
 	while position < bytes.len() && bytes[position].is_ascii_alphabetic() {
 		position += 1;
 	}
-	if position == nameStart {
+	if position == name_start {
 		return None;
 	}
-	let tagName = input[nameStart..position].to_lowercase();
+	let tag_name = input[name_start..position].to_lowercase();
 	match bytes.get(position) {
 		Some(b'>') => {
-			Some((position + 1, isClose, tagName, None))
+			Some((position + 1, is_close, tag_name, None))
 		}
 		Some(b'=') => {
-			let valueStart = position + 1;
-			let valueLength = input[valueStart..].find('>')?;
-			if valueLength == 0 {
+			let value_start = position + 1;
+			let value_length = input[value_start..].find('>')?;
+			if value_length == 0 {
 				return None;
 			}
-			let valueEnd = valueStart + valueLength;
-			Some((valueEnd + 1, isClose, tagName, Some(input[valueStart..valueEnd].to_string())))
+			let value_end = value_start + value_length;
+			Some((value_end + 1, is_close, tag_name, Some(input[value_start..value_end].to_string())))
 		}
 		_ => {
 			None
@@ -704,78 +704,78 @@ fn matchTagAt(input: &str, startByteIndex: usize) -> Option<(usize, bool, String
 }
 
 //==============================================================================
-// 마크업 → 조각 목록. (알려진 태그가 하나도 없으면 None. 원본 parseMarkupToSegments)
+// 마크업 → 조각 목록. (알려진 태그가 하나도 없으면 None. 원본 parse_markup_to_segments)
 // - 모르는 여는 태그는 글로 남긴다. 닫는 태그는 짝이 없어도 글에서 빠진다. (원본과 같음)
 //==============================================================================
-pub fn parseMarkupToSegments(input: &str) -> Option<Vec<RichTextSegment>> {
+pub fn parse_markup_to_segments(input: &str) -> Option<Vec<RichTextSegment>> {
 	if input.is_empty() || !input.contains('<') {
 		return None;
 	}
 	let mut segments: Vec<RichTextSegment> = Vec::new();
 	let mut stack: Vec<(String, RichTextAttributes)> = Vec::new();
-	let mut lastIndex = 0;
-	let mut searchIndex = 0;
-	let mut hasFoundKnownTag = false;
-	let mergeStack = |stack: &Vec<(String, RichTextAttributes)>| -> RichTextAttributes {
-		let mut mergedAttributes = RichTextAttributes::new();
+	let mut last_index = 0;
+	let mut search_index = 0;
+	let mut has_found_known_tag = false;
+	let merge_stack = |stack: &Vec<(String, RichTextAttributes)>| -> RichTextAttributes {
+		let mut merged_attributes = RichTextAttributes::new();
 		for (_, attributes) in stack.iter() {
-			mergedAttributes.mergeFrom(attributes);
+			merged_attributes.merge_from(attributes);
 		}
-		mergedAttributes
+		merged_attributes
 	};
-	while let Some(foundOffset) = input[searchIndex..].find('<') {
-		let matchStart = searchIndex + foundOffset;
-		let (matchEnd, isClose, tagName, tagValue) = match matchTagAt(input, matchStart) {
-			Some(tagMatch) => {
-				tagMatch
+	while let Some(found_offset) = input[search_index..].find('<') {
+		let match_start = search_index + found_offset;
+		let (match_end, is_close, tag_name, tag_value) = match match_tag_at(input, match_start) {
+			Some(tag_match) => {
+				tag_match
 			}
 			None => {
-				searchIndex = matchStart + 1;
+				search_index = match_start + 1;
 				continue;
 			}
 		};
-		searchIndex = matchEnd;
+		search_index = match_end;
 
-		let precedingText = &input[lastIndex..matchStart];
-		if !precedingText.is_empty() {
+		let preceding_text = &input[last_index..match_start];
+		if !preceding_text.is_empty() {
 			segments.push(RichTextSegment {
-				text: precedingText.to_string(),
-				attributes: mergeStack(&stack),
+				text: preceding_text.to_string(),
+				attributes: merge_stack(&stack),
 			});
 		}
 
-		if isClose {
-			if let Some(stackIndex) = stack.iter().rposition(|(stackTagName, _)| *stackTagName == tagName) {
-				stack.remove(stackIndex);
-				hasFoundKnownTag = true;
+		if is_close {
+			if let Some(stack_index) = stack.iter().rposition(|(stack_tag_name, _)| *stack_tag_name == tag_name) {
+				stack.remove(stack_index);
+				has_found_known_tag = true;
 			}
-			lastIndex = matchEnd;
+			last_index = match_end;
 			continue;
 		}
 
-		match buildAttributesForTag(&tagName, tagValue.as_deref()) {
-			Some(tagAttributes) => {
-				stack.push((tagName, tagAttributes));
-				hasFoundKnownTag = true;
+		match build_attributes_for_tag(&tag_name, tag_value.as_deref()) {
+			Some(tag_attributes) => {
+				stack.push((tag_name, tag_attributes));
+				has_found_known_tag = true;
 			}
 			None => {
 				segments.push(RichTextSegment {
-					text: input[matchStart..matchEnd].to_string(),
-					attributes: mergeStack(&stack),
+					text: input[match_start..match_end].to_string(),
+					attributes: merge_stack(&stack),
 				});
 			}
 		}
-		lastIndex = matchEnd;
+		last_index = match_end;
 	}
 
-	let trailingText = &input[lastIndex..];
-	if !trailingText.is_empty() {
+	let trailing_text = &input[last_index..];
+	if !trailing_text.is_empty() {
 		segments.push(RichTextSegment {
-			text: trailingText.to_string(),
-			attributes: mergeStack(&stack),
+			text: trailing_text.to_string(),
+			attributes: merge_stack(&stack),
 		});
 	}
-	if !hasFoundKnownTag {
+	if !has_found_known_tag {
 		return None;
 	}
 	Some(segments)
@@ -788,15 +788,15 @@ mod tests {
 	//==============================================================================
 	// 시험용 재기. (글자 하나 = 크기의 절반 폭. 폰트 문자열의 "Npx" 를 읽는다)
 	//==============================================================================
-	fn measureByFontSize(fontString: &str, text: &str) -> f32 {
-		let fontDescription = crate::core::textstringtexturecache::parseFontString(fontString);
-		text.chars().count() as f32 * fontDescription.fontSize * 0.5
+	fn measure_by_font_size(font_string: &str, text: &str) -> f32 {
+		let font_description = crate::core::textstringtexturecache::parse_font_string(font_string);
+		text.chars().count() as f32 * font_description.font_size * 0.5
 	}
 
 	//==============================================================================
 	// 조각 글 목록.
 	//==============================================================================
-	fn collectSegmentTexts(segments: &[RichTextSegment]) -> Vec<&str> {
+	fn collect_segment_texts(segments: &[RichTextSegment]) -> Vec<&str> {
 		segments.iter().map(|segment| segment.text.as_str()).collect()
 	}
 
@@ -804,82 +804,82 @@ mod tests {
 	// 태그 풀기: 굵게, 색(HEX, 이름), 크기, 겹침, 모르는 태그, 짝 없는 닫는 태그.
 	//==============================================================================
 	#[test]
-	fn parseMarkup() {
-		assert!(parseMarkupToSegments("plain text").is_none());
-		assert!(parseMarkupToSegments("a < b and <unknown>tag</unknown>").is_none());
-		assert!(parseMarkupToSegments("").is_none());
+	fn parse_markup() {
+		assert!(parse_markup_to_segments("plain text").is_none());
+		assert!(parse_markup_to_segments("a < b and <unknown>tag</unknown>").is_none());
+		assert!(parse_markup_to_segments("").is_none());
 
-		let segments = parseMarkupToSegments("A<b>B<color=#ff000080>C</color></b><size=20px>D</size>E").expect("segments");
-		assert_eq!(collectSegmentTexts(&segments), vec!["A", "B", "C", "D", "E"]);
+		let segments = parse_markup_to_segments("A<b>B<color=#ff000080>C</color></b><size=20px>D</size>E").expect("segments");
+		assert_eq!(collect_segment_texts(&segments), vec!["A", "B", "C", "D", "E"]);
 		assert_eq!(segments[0].attributes, RichTextAttributes::new());
-		assert!(segments[1].attributes.isBold);
-		assert!(segments[2].attributes.isBold);
-		assert_eq!(segments[2].attributes.textColor, Some(Color::createFromBytes(255, 0, 0, 128)));
-		assert_eq!(segments[3].attributes.fontSize, Some(20.0));
-		assert!(!segments[3].attributes.isBold);
+		assert!(segments[1].attributes.is_bold);
+		assert!(segments[2].attributes.is_bold);
+		assert_eq!(segments[2].attributes.text_color, Some(Color::create_from_bytes(255, 0, 0, 128)));
+		assert_eq!(segments[3].attributes.font_size, Some(20.0));
+		assert!(!segments[3].attributes.is_bold);
 		assert_eq!(segments[4].attributes, RichTextAttributes::new());
 
 		// 안쪽 색이 이긴다. 이름 색은 대소문자를 가리지 않는다.
-		let nested = parseMarkupToSegments("<color=red>R<COLOR=Navy>N</color>R</color>").expect("segments");
-		assert_eq!(collectSegmentTexts(&nested), vec!["R", "N", "R"]);
-		assert_eq!(nested[1].attributes.textColor, Some(Color::createFromHEX("#000080")));
-		assert_eq!(nested[2].attributes.textColor, Some(Color::createFromHEX("#ff0000")));
+		let nested = parse_markup_to_segments("<color=red>R<COLOR=Navy>N</color>R</color>").expect("segments");
+		assert_eq!(collect_segment_texts(&nested), vec!["R", "N", "R"]);
+		assert_eq!(nested[1].attributes.text_color, Some(Color::create_from_hex("#000080")));
+		assert_eq!(nested[2].attributes.text_color, Some(Color::create_from_hex("#ff0000")));
 
 		// 모르는 여는 태그와 틀린 값은 글로 남고, 짝 없는 닫는 태그는 빠진다.
-		let unknown = parseMarkupToSegments("<u>x</u><foo>y</foo><size=0>z<color=zzz>w<b=>").expect("segments");
-		assert_eq!(collectSegmentTexts(&unknown), vec!["x", "<foo>", "y", "<size=0>", "z", "<color=zzz>", "w<b=>"]);
-		assert!(unknown[0].attributes.isUnderline);
+		let unknown = parse_markup_to_segments("<u>x</u><foo>y</foo><size=0>z<color=zzz>w<b=>").expect("segments");
+		assert_eq!(collect_segment_texts(&unknown), vec!["x", "<foo>", "y", "<size=0>", "z", "<color=zzz>", "w<b=>"]);
+		assert!(unknown[0].attributes.is_underline);
 
 		// 값에 '<' 가 들어가도 첫 '>' 까지가 값이다. 16진수가 아닌 # 색은 흰색.
-		let strange = parseMarkupToSegments("<s>취소</s><color=#가나>한</color>").expect("segments");
-		assert!(strange[0].attributes.isStrikethrough);
-		assert_eq!(strange[1].attributes.textColor, Some(Color::white()));
+		let strange = parse_markup_to_segments("<s>취소</s><color=#가나>한</color>").expect("segments");
+		assert!(strange[0].attributes.is_strikethrough);
+		assert_eq!(strange[1].attributes.text_color, Some(Color::white()));
 	}
 
 	//==============================================================================
 	// 배치: 조각이 왼쪽부터 이어지고, 정렬은 합친 폭 기준, 기준선은 Text 규칙. 속성이 없으면 Text 값을 쓴다.
 	//==============================================================================
 	#[test]
-	fn layoutRuns() {
-		let mut richText = RichText::createWithText("ab<size=40>cd</size><b><color=blue>e</color></b>", 20.0);
-		richText.setTextColor("#00ff00");
-		richText.setTextAlign(TextAlign::center);
-		richText.setTextBaseline(TextBaseline::middle);
-		let layout = richText.layoutSegments(Vector2::create(200.0, 60.0), &mut measureByFontSize);
-		assert_eq!(layout.runList.len(), 3);
-		assert_eq!(layout.totalWidth, 20.0 + 40.0 + 10.0);
-		assert_eq!(layout.maximumFontSize, 40.0);
-		assert_eq!(layout.baselineY, 30.0);
-		let startX = (200.0 - 70.0) * 0.5;
-		assert_eq!(layout.runList[0].x, startX);
-		assert_eq!(layout.runList[0].fontString, "20px default");
-		assert_eq!(layout.runList[0].textColor, Color::createFromHEX("#00ff00"));
-		assert_eq!(layout.runList[1].x, startX + 20.0);
-		assert_eq!(layout.runList[1].fontSize, 40.0);
-		assert_eq!(layout.runList[2].x, startX + 60.0);
-		assert_eq!(layout.runList[2].fontString, "bold 20px default");
-		assert_eq!(layout.runList[2].textColor, Color::createFromHEX("#0000ff"));
+	fn layout_runs() {
+		let mut rich_text = RichText::create_with_text("ab<size=40>cd</size><b><color=blue>e</color></b>", 20.0);
+		rich_text.set_text_color("#00ff00");
+		rich_text.set_text_align(TextAlign::Center);
+		rich_text.set_text_baseline(TextBaseline::Middle);
+		let layout = rich_text.layout_segments(Vector2::create(200.0, 60.0), &mut measure_by_font_size);
+		assert_eq!(layout.run_list.len(), 3);
+		assert_eq!(layout.total_width, 20.0 + 40.0 + 10.0);
+		assert_eq!(layout.maximum_font_size, 40.0);
+		assert_eq!(layout.baseline_y, 30.0);
+		let start_x = (200.0 - 70.0) * 0.5;
+		assert_eq!(layout.run_list[0].x, start_x);
+		assert_eq!(layout.run_list[0].font_string, "20px default");
+		assert_eq!(layout.run_list[0].text_color, Color::create_from_hex("#00ff00"));
+		assert_eq!(layout.run_list[1].x, start_x + 20.0);
+		assert_eq!(layout.run_list[1].font_size, 40.0);
+		assert_eq!(layout.run_list[2].x, start_x + 60.0);
+		assert_eq!(layout.run_list[2].font_string, "bold 20px default");
+		assert_eq!(layout.run_list[2].text_color, Color::create_from_hex("#0000ff"));
 
-		richText.setTextAlign(TextAlign::right);
-		richText.setTextBaseline(TextBaseline::top);
-		let rightLayout = richText.layoutSegments(Vector2::create(200.0, 60.0), &mut measureByFontSize);
-		assert_eq!(rightLayout.runList[0].x, 130.0);
-		assert_eq!(rightLayout.baselineY, 0.0);
-		assert_eq!(richText.calculateIntrinsicContentSize(&mut measureByFontSize), Vector2::create(70.0, 40.0));
+		rich_text.set_text_align(TextAlign::Right);
+		rich_text.set_text_baseline(TextBaseline::Top);
+		let right_layout = rich_text.layout_segments(Vector2::create(200.0, 60.0), &mut measure_by_font_size);
+		assert_eq!(right_layout.run_list[0].x, 130.0);
+		assert_eq!(right_layout.baseline_y, 0.0);
+		assert_eq!(rich_text.calculate_intrinsic_content_size(&mut measure_by_font_size), Vector2::create(70.0, 40.0));
 
 		// 마크업이 없으면 조각이 없고 일반 글 크기를 잰다. 코드로 조각을 쌓을 수도 있다.
-		richText.setText("plain");
-		assert!(!richText.hasSegments());
-		assert_eq!(richText.calculateIntrinsicContentSize(&mut measureByFontSize), Vector2::create(50.0, 20.0));
-		let mut underlineAttributes = RichTextAttributes::new();
-		underlineAttributes.isUnderline = true;
-		underlineAttributes.fontFamily = Some(String::from("DOSGothic"));
-		richText.appendSegment("x", underlineAttributes);
-		assert!(richText.hasSegments());
-		let appendedLayout = richText.layoutSegments(Vector2::create(100.0, 20.0), &mut measureByFontSize);
-		assert_eq!(appendedLayout.runList[0].fontString, "20px DOSGothic");
-		assert!(appendedLayout.runList[0].isUnderline);
-		richText.clearSegments();
-		assert!(richText.getSegments().is_empty());
+		rich_text.set_text("plain");
+		assert!(!rich_text.has_segments());
+		assert_eq!(rich_text.calculate_intrinsic_content_size(&mut measure_by_font_size), Vector2::create(50.0, 20.0));
+		let mut underline_attributes = RichTextAttributes::new();
+		underline_attributes.is_underline = true;
+		underline_attributes.font_family = Some(String::from("DOSGothic"));
+		rich_text.append_segment("x", underline_attributes);
+		assert!(rich_text.has_segments());
+		let appended_layout = rich_text.layout_segments(Vector2::create(100.0, 20.0), &mut measure_by_font_size);
+		assert_eq!(appended_layout.run_list[0].font_string, "20px DOSGothic");
+		assert!(appended_layout.run_list[0].is_underline);
+		rich_text.clear_segments();
+		assert!(rich_text.get_segments().is_empty());
 	}
 }

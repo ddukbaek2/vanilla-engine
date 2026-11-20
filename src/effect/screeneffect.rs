@@ -1,23 +1,23 @@
 //==============================================================================
 // 화면 효과. (씬 후처리 사슬)
 // - 원본 effect/screeneffect.js 를 옮긴 것이다. 효과 이름, 적용 차례, 기본 파라미터, 파라미터 이름, 기본 색, GLSL 본문은 원본 표를 그대로 옮겼다.
-// - 씬은 화면에 그대로 그리고, end() 에서 화면(또는 setRegion 으로 정한 영역)을 떠 와 켜진 효과를 차례로 건 뒤 같은 자리에 되돌려 놓는다.
+// - 씬은 화면에 그대로 그리고, end() 에서 화면(또는 set_region 으로 정한 영역)을 떠 와 켜진 효과를 차례로 건 뒤 같은 자리에 되돌려 놓는다.
 //   화면은 copyTexSubImage2D 로 RGB8 텍스처에 떠 오고, 효과는 핑퐁 / 절반 크기 프레임버퍼를 오가며 FullscreenPass 로 건다. 마지막 단계는 기본 프레임버퍼에 그린다.
 // - 영역은 캔버스 픽셀 좌표(왼쪽 위 원점)이며 둥근 모서리 반지름을 주면 그 바깥은 원본을 유지한다.
 // - 셰이더는 GLSL ES 3.00 이다. 데스크탑(GL 3.3 코어)은 ShaderProgram 이 머리만 #version 330 core 로 바꾸고, 웹(WebGL2)은 그대로 쓴다.
-// - 엔진은 고치지 않는다. 원본처럼 씬이 preDraw 첫머리에서 begin, postDraw 끝에서 end, tick 에서 tick 을 부른다:
+// - 엔진은 고치지 않는다. 원본처럼 씬이 pre_draw 첫머리에서 begin, post_draw 끝에서 end, tick 에서 tick 을 부른다:
 //     // 씬 create 에서
-//     self.screenEffect = ScreenEffect::new();
-//     self.screenEffect.setEnabled(ScreenEffectType::vignette, true);
-//     // preDraw 처음 / postDraw 끝에서
-//     self.screenEffect.begin(graphic);  ...  self.screenEffect.end(graphic);
+//     self.screen_effect = ScreenEffect::new();
+//     self.screen_effect.set_enabled(ScreenEffectType::Vignette, true);
+//     // pre_draw 처음 / post_draw 끝에서
+//     self.screen_effect.begin(graphic);  ...  self.screen_effect.end(graphic);
 //     // tick 에서
-//     self.screenEffect.tick(timeDelta);
+//     self.screen_effect.tick(time_delta);
 // - 원본과 다른 점:
 //   - 원본은 생성자에서 Graphic 을 받아 GL 컨텍스트를 든다. 러스트 판은 아무것도 받지 않고 만들며, GL 자원은 처음 end 에서 만들고 함수마다 Graphic 을 받는다.
 //     그래서 destroy 도 Graphic 을 받는다. 씬을 내리기 전에 destroy 를 부르지 않으면 GL 자원은 컨텍스트가 없어질 때까지 남는다.
-//   - 효과는 문자열 대신 ScreenEffectType 열거형이다. (원본 문자열 이름은 getName / fromName)
-//   - setTimelineProperty 의 값은 문자열로 받는다. (원본은 숫자, 문자열, 참거짓을 받는다. "0.5", "#ff0000", "true")
+//   - 효과는 문자열 대신 ScreenEffectType 열거형이다. (원본 문자열 이름은 get_name / from_name)
+//   - set_timeline_property 의 값은 문자열로 받는다. (원본은 숫자, 문자열, 참거짓을 받는다. "0.5", "#ff0000", "true")
 //   - 패스 셰이더 만들기에 실패하면 원본은 예외를 던지고, 러스트 판은 한 번 알리고 그 단계를 건너뛴다.
 //   - destroy 는 렌더 대상과 함께 패스 프로그램도 지운다. (원본은 렌더 대상만 지운다)
 //==============================================================================
@@ -37,294 +37,294 @@ type GlRenderbuffer = <glow::Context as glow::HasContext>::Renderbuffer;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ScreenEffectType {
 	// --- 형태 왜곡 ---
-	lensDistortion, // 배럴 / 핀쿠션 렌즈 왜곡. (parameters = [세기: 음수면 핀쿠션])
-	bulge,          // 볼록 / 오목. (parameters = [중심 x, 중심 y, 세기, 반지름])
-	swirl,          // 소용돌이. (parameters = [중심 x, 중심 y, 회전 수, 반지름])
-	kaleidoscope,   // 만화경. (parameters = [조각 수])
-	mirror,         // 대칭. (parameters = [0 가로 / 1 세로])
-	ripple,         // 물 파문. (parameters = [중심 x, 중심 y, 빈도, 속도])
-	heatHaze,       // 아지랑이. (parameters = [노이즈 배율, 속도])
-	jitter,         // 화면 흔들림. (parameters = [진폭 픽셀, 초당 변화])
-	doubleVision,   // 겹쳐 보임. (parameters = [간격, 흔들리는 속도])
-	pixelate,       // 모자이크. (strength 0 → 1, parameters = [가장 큰 블록 픽셀])
-	shockwave,      // 충격파 링 왜곡. (parameters = [중심 x, 중심 y, 반지름 0 ~ 1.5, 폭], color = 링 빛)
-	wave,           // 화면 물결. (parameters = [빈도, 속도])
+	LensDistortion, // 배럴 / 핀쿠션 렌즈 왜곡. (parameters = [세기: 음수면 핀쿠션])
+	Bulge,          // 볼록 / 오목. (parameters = [중심 x, 중심 y, 세기, 반지름])
+	Swirl,          // 소용돌이. (parameters = [중심 x, 중심 y, 회전 수, 반지름])
+	Kaleidoscope,   // 만화경. (parameters = [조각 수])
+	Mirror,         // 대칭. (parameters = [0 가로 / 1 세로])
+	Ripple,         // 물 파문. (parameters = [중심 x, 중심 y, 빈도, 속도])
+	HeatHaze,       // 아지랑이. (parameters = [노이즈 배율, 속도])
+	Jitter,         // 화면 흔들림. (parameters = [진폭 픽셀, 초당 변화])
+	DoubleVision,   // 겹쳐 보임. (parameters = [간격, 흔들리는 속도])
+	Pixelate,       // 모자이크. (strength 0 → 1, parameters = [가장 큰 블록 픽셀])
+	Shockwave,      // 충격파 링 왜곡. (parameters = [중심 x, 중심 y, 반지름 0 ~ 1.5, 폭], color = 링 빛)
+	Wave,           // 화면 물결. (parameters = [빈도, 속도])
 	// --- 흐림 ---
-	motionBlur,     // 방향 블러. (parameters = [각도 라디안, 길이 픽셀])
-	zoomBlur,       // 중심으로 뻗는 방사 블러. (parameters = [중심 x, 중심 y, 길이])
-	blur,           // 가우시안 블러. (parameters = [반지름 픽셀])
-	tiltShift,      // 틸트 시프트. (parameters = [초점 y, 초점 폭, 반지름 픽셀])
-	godRays,        // 빛줄기. (parameters = [중심 x, 중심 y, 문턱, 감쇠], color = 빛 색)
-	bloom,          // 밝은 곳 번짐. (parameters = [문턱, 세기 배율, 반지름 픽셀])
-	anamorphic,     // 가로 렌즈 플레어. (parameters = [문턱, 세기 배율, 폭 픽셀], color = 플레어 색)
+	MotionBlur,     // 방향 블러. (parameters = [각도 라디안, 길이 픽셀])
+	ZoomBlur,       // 중심으로 뻗는 방사 블러. (parameters = [중심 x, 중심 y, 길이])
+	Blur,           // 가우시안 블러. (parameters = [반지름 픽셀])
+	TiltShift,      // 틸트 시프트. (parameters = [초점 y, 초점 폭, 반지름 픽셀])
+	GodRays,        // 빛줄기. (parameters = [중심 x, 중심 y, 문턱, 감쇠], color = 빛 색)
+	Bloom,          // 밝은 곳 번짐. (parameters = [문턱, 세기 배율, 반지름 픽셀])
+	Anamorphic,     // 가로 렌즈 플레어. (parameters = [문턱, 세기 배율, 폭 픽셀], color = 플레어 색)
 	// --- 글리치 ---
-	glitch,         // 가로 줄 어긋남 + 색 분리 + 블록 반전. (parameters = [줄 수, 초당 변화, 어긋남 폭])
-	vhs,            // VHS 테이프. (흔들림 + 색 번짐 + 노이즈 줄, parameters = [흔들림, 노이즈])
-	chromatic,      // 색수차. (parameters = [배율])
+	Glitch,         // 가로 줄 어긋남 + 색 분리 + 블록 반전. (parameters = [줄 수, 초당 변화, 어긋남 폭])
+	Vhs,            // VHS 테이프. (흔들림 + 색 번짐 + 노이즈 줄, parameters = [흔들림, 노이즈])
+	Chromatic,      // 색수차. (parameters = [배율])
 	// --- 색 ---
-	whiteBalance,   // 색온도 / 틴트. (parameters = [온도 -1 ~ 1, 틴트 -1 ~ 1])
-	liftGammaGain,  // 리프트 / 감마 / 게인. (parameters = [리프트, 감마, 게인])
-	colorGrade,     // 대비 / 채도 / 밝기 + 틴트. (parameters = [대비, 채도, 밝기], color = 틴트)
-	hueShift,       // 색상 회전. (parameters = [회전 수: strength 와 곱])
-	splitToning,    // 스플릿 토닝. (parameters.xyz = 그림자 색, color = 하이라이트 색, w = 균형)
-	tonemap,        // ACES 톤매핑. (parameters = [노출])
-	gradientMap,    // 밝기를 두 색 사이로 매핑. (parameters.xyz = 어두운 색, color = 밝은 색)
-	sepia,          // 세피아.
-	grayscale,      // 무채색.
-	posterize,      // 포스터화. (parameters = [단계 수])
-	dither,         // 오더드 디더링. (parameters = [단계 수, 픽셀 크기])
-	halftone,       // 하프톤 점. (parameters = [격자 픽셀])
-	sharpen,        // 샤픈.
-	edgeDetect,     // 윤곽 검출. (color = 선 색)
-	oldFilm,        // 낡은 필름. (세피아 + 그레인 + 스크래치 + 깜빡임)
-	nightVision,    // 야시경. (color = 틴트)
-	invert,         // 색 반전.
+	WhiteBalance,   // 색온도 / 틴트. (parameters = [온도 -1 ~ 1, 틴트 -1 ~ 1])
+	LiftGammaGain,  // 리프트 / 감마 / 게인. (parameters = [리프트, 감마, 게인])
+	ColorGrade,     // 대비 / 채도 / 밝기 + 틴트. (parameters = [대비, 채도, 밝기], color = 틴트)
+	HueShift,       // 색상 회전. (parameters = [회전 수: strength 와 곱])
+	SplitToning,    // 스플릿 토닝. (parameters.xyz = 그림자 색, color = 하이라이트 색, w = 균형)
+	Tonemap,        // ACES 톤매핑. (parameters = [노출])
+	GradientMap,    // 밝기를 두 색 사이로 매핑. (parameters.xyz = 어두운 색, color = 밝은 색)
+	Sepia,          // 세피아.
+	Grayscale,      // 무채색.
+	Posterize,      // 포스터화. (parameters = [단계 수])
+	Dither,         // 오더드 디더링. (parameters = [단계 수, 픽셀 크기])
+	Halftone,       // 하프톤 점. (parameters = [격자 픽셀])
+	Sharpen,        // 샤픈.
+	EdgeDetect,     // 윤곽 검출. (color = 선 색)
+	OldFilm,        // 낡은 필름. (세피아 + 그레인 + 스크래치 + 깜빡임)
+	NightVision,    // 야시경. (color = 틴트)
+	Invert,         // 색 반전.
 	// --- 무늬 / 마스크 ---
-	scanline,       // CRT 곡면 + 주사선 + RGB 마스크. (parameters = [곡률, 주사선 밀도])
-	grain,          // 필름 그레인.
-	rain,           // 빗줄기. (parameters = [줄 수, 밀도, 속도], color = 빗줄기 색)
-	fog,            // 세로 안개. (parameters = [시작 y, 끝 y], color = 안개 색)
-	vignette,       // 비네트. (parameters = [시작 거리, 끝 거리], color = 가장자리 색)
-	spotlight,      // 스포트라이트 바깥 어둡힘. (parameters = [중심 x, 중심 y, 반지름, 부드러움], color = 바깥 색)
-	speedLines,     // 집중선. (parameters = [중심 x, 중심 y, 밀도, 속도], color = 선 색)
-	letterbox,      // 위아래 / 좌우 검은 띠. (parameters = [세로 띠 비율, 가로 띠 비율], color = 띠 색)
+	Scanline,       // CRT 곡면 + 주사선 + RGB 마스크. (parameters = [곡률, 주사선 밀도])
+	Grain,          // 필름 그레인.
+	Rain,           // 빗줄기. (parameters = [줄 수, 밀도, 속도], color = 빗줄기 색)
+	Fog,            // 세로 안개. (parameters = [시작 y, 끝 y], color = 안개 색)
+	Vignette,       // 비네트. (parameters = [시작 거리, 끝 거리], color = 가장자리 색)
+	Spotlight,      // 스포트라이트 바깥 어둡힘. (parameters = [중심 x, 중심 y, 반지름, 부드러움], color = 바깥 색)
+	SpeedLines,     // 집중선. (parameters = [중심 x, 중심 y, 밀도, 속도], color = 선 색)
+	Letterbox,      // 위아래 / 좌우 검은 띠. (parameters = [세로 띠 비율, 가로 띠 비율], color = 띠 색)
 	// --- 전환 (strength 0 → 1 로 color 에 덮인다) ---
-	pixelDissolve,  // 블록 디졸브. (parameters = [블록 수])
-	wipe,           // 방향 와이프. (parameters = [방향 x, 방향 y, 부드러움])
-	irisWipe,       // 원형 아이리스. (parameters = [중심 x, 중심 y, 부드러움])
-	diamondWipe,    // 마름모 와이프. (parameters = [부드러움])
-	clockWipe,      // 시계 와이프. (parameters = [부드러움])
-	blinds,         // 블라인드. (parameters = [줄 수, 부드러움])
-	checkerWipe,    // 체커 보드. (parameters = [칸 수])
-	noiseFade,      // 노이즈 페이드. (parameters = [노이즈 배율, 부드러움])
-	burn,           // 불에 타듯. (parameters = [노이즈 배율, 띠 폭], color = 덮을 색, 띠는 주황)
-	tvOff,          // 브라운관 끄기. (세로로 눌리며 밝은 선으로)
-	fade,           // 단색으로 페이드. (color = 목표 색)
+	PixelDissolve,  // 블록 디졸브. (parameters = [블록 수])
+	Wipe,           // 방향 와이프. (parameters = [방향 x, 방향 y, 부드러움])
+	IrisWipe,       // 원형 아이리스. (parameters = [중심 x, 중심 y, 부드러움])
+	DiamondWipe,    // 마름모 와이프. (parameters = [부드러움])
+	ClockWipe,      // 시계 와이프. (parameters = [부드러움])
+	Blinds,         // 블라인드. (parameters = [줄 수, 부드러움])
+	CheckerWipe,    // 체커 보드. (parameters = [칸 수])
+	NoiseFade,      // 노이즈 페이드. (parameters = [노이즈 배율, 부드러움])
+	Burn,           // 불에 타듯. (parameters = [노이즈 배율, 띠 폭], color = 덮을 색, 띠는 주황)
+	TvOff,          // 브라운관 끄기. (세로로 눌리며 밝은 선으로)
+	Fade,           // 단색으로 페이드. (color = 목표 색)
 }
 
 // 적용 차례. (형태 왜곡 → 흐림 → 글리치 → 색 → 무늬 → 전환)
 const EFFECT_ORDER: [ScreenEffectType; 58] = [
-	ScreenEffectType::lensDistortion, ScreenEffectType::bulge, ScreenEffectType::swirl, ScreenEffectType::kaleidoscope, ScreenEffectType::mirror, ScreenEffectType::ripple, ScreenEffectType::heatHaze, ScreenEffectType::jitter, ScreenEffectType::doubleVision, ScreenEffectType::pixelate, ScreenEffectType::shockwave, ScreenEffectType::wave,
-	ScreenEffectType::motionBlur, ScreenEffectType::zoomBlur, ScreenEffectType::blur, ScreenEffectType::tiltShift, ScreenEffectType::godRays, ScreenEffectType::bloom, ScreenEffectType::anamorphic,
-	ScreenEffectType::glitch, ScreenEffectType::vhs, ScreenEffectType::chromatic,
-	ScreenEffectType::whiteBalance, ScreenEffectType::liftGammaGain, ScreenEffectType::colorGrade, ScreenEffectType::hueShift, ScreenEffectType::splitToning, ScreenEffectType::tonemap, ScreenEffectType::gradientMap, ScreenEffectType::sepia, ScreenEffectType::grayscale, ScreenEffectType::posterize, ScreenEffectType::dither, ScreenEffectType::halftone, ScreenEffectType::sharpen, ScreenEffectType::edgeDetect, ScreenEffectType::oldFilm, ScreenEffectType::nightVision, ScreenEffectType::invert,
-	ScreenEffectType::scanline, ScreenEffectType::grain, ScreenEffectType::rain, ScreenEffectType::fog, ScreenEffectType::vignette, ScreenEffectType::spotlight, ScreenEffectType::speedLines, ScreenEffectType::letterbox,
-	ScreenEffectType::pixelDissolve, ScreenEffectType::wipe, ScreenEffectType::irisWipe, ScreenEffectType::diamondWipe, ScreenEffectType::clockWipe, ScreenEffectType::blinds, ScreenEffectType::checkerWipe, ScreenEffectType::noiseFade, ScreenEffectType::burn, ScreenEffectType::tvOff, ScreenEffectType::fade,
+	ScreenEffectType::LensDistortion, ScreenEffectType::Bulge, ScreenEffectType::Swirl, ScreenEffectType::Kaleidoscope, ScreenEffectType::Mirror, ScreenEffectType::Ripple, ScreenEffectType::HeatHaze, ScreenEffectType::Jitter, ScreenEffectType::DoubleVision, ScreenEffectType::Pixelate, ScreenEffectType::Shockwave, ScreenEffectType::Wave,
+	ScreenEffectType::MotionBlur, ScreenEffectType::ZoomBlur, ScreenEffectType::Blur, ScreenEffectType::TiltShift, ScreenEffectType::GodRays, ScreenEffectType::Bloom, ScreenEffectType::Anamorphic,
+	ScreenEffectType::Glitch, ScreenEffectType::Vhs, ScreenEffectType::Chromatic,
+	ScreenEffectType::WhiteBalance, ScreenEffectType::LiftGammaGain, ScreenEffectType::ColorGrade, ScreenEffectType::HueShift, ScreenEffectType::SplitToning, ScreenEffectType::Tonemap, ScreenEffectType::GradientMap, ScreenEffectType::Sepia, ScreenEffectType::Grayscale, ScreenEffectType::Posterize, ScreenEffectType::Dither, ScreenEffectType::Halftone, ScreenEffectType::Sharpen, ScreenEffectType::EdgeDetect, ScreenEffectType::OldFilm, ScreenEffectType::NightVision, ScreenEffectType::Invert,
+	ScreenEffectType::Scanline, ScreenEffectType::Grain, ScreenEffectType::Rain, ScreenEffectType::Fog, ScreenEffectType::Vignette, ScreenEffectType::Spotlight, ScreenEffectType::SpeedLines, ScreenEffectType::Letterbox,
+	ScreenEffectType::PixelDissolve, ScreenEffectType::Wipe, ScreenEffectType::IrisWipe, ScreenEffectType::DiamondWipe, ScreenEffectType::ClockWipe, ScreenEffectType::Blinds, ScreenEffectType::CheckerWipe, ScreenEffectType::NoiseFade, ScreenEffectType::Burn, ScreenEffectType::TvOff, ScreenEffectType::Fade,
 ];
 
 // 효과별 원본 이름. (적용 차례)
 const EFFECT_NAME_TABLE: [(ScreenEffectType, &str); 58] = [
-	(ScreenEffectType::lensDistortion, "lensDistortion"),
-	(ScreenEffectType::bulge, "bulge"),
-	(ScreenEffectType::swirl, "swirl"),
-	(ScreenEffectType::kaleidoscope, "kaleidoscope"),
-	(ScreenEffectType::mirror, "mirror"),
-	(ScreenEffectType::ripple, "ripple"),
-	(ScreenEffectType::heatHaze, "heatHaze"),
-	(ScreenEffectType::jitter, "jitter"),
-	(ScreenEffectType::doubleVision, "doubleVision"),
-	(ScreenEffectType::pixelate, "pixelate"),
-	(ScreenEffectType::shockwave, "shockwave"),
-	(ScreenEffectType::wave, "wave"),
-	(ScreenEffectType::motionBlur, "motionBlur"),
-	(ScreenEffectType::zoomBlur, "zoomBlur"),
-	(ScreenEffectType::blur, "blur"),
-	(ScreenEffectType::tiltShift, "tiltShift"),
-	(ScreenEffectType::godRays, "godRays"),
-	(ScreenEffectType::bloom, "bloom"),
-	(ScreenEffectType::anamorphic, "anamorphic"),
-	(ScreenEffectType::glitch, "glitch"),
-	(ScreenEffectType::vhs, "vhs"),
-	(ScreenEffectType::chromatic, "chromatic"),
-	(ScreenEffectType::whiteBalance, "whiteBalance"),
-	(ScreenEffectType::liftGammaGain, "liftGammaGain"),
-	(ScreenEffectType::colorGrade, "colorGrade"),
-	(ScreenEffectType::hueShift, "hueShift"),
-	(ScreenEffectType::splitToning, "splitToning"),
-	(ScreenEffectType::tonemap, "tonemap"),
-	(ScreenEffectType::gradientMap, "gradientMap"),
-	(ScreenEffectType::sepia, "sepia"),
-	(ScreenEffectType::grayscale, "grayscale"),
-	(ScreenEffectType::posterize, "posterize"),
-	(ScreenEffectType::dither, "dither"),
-	(ScreenEffectType::halftone, "halftone"),
-	(ScreenEffectType::sharpen, "sharpen"),
-	(ScreenEffectType::edgeDetect, "edgeDetect"),
-	(ScreenEffectType::oldFilm, "oldFilm"),
-	(ScreenEffectType::nightVision, "nightVision"),
-	(ScreenEffectType::invert, "invert"),
-	(ScreenEffectType::scanline, "scanline"),
-	(ScreenEffectType::grain, "grain"),
-	(ScreenEffectType::rain, "rain"),
-	(ScreenEffectType::fog, "fog"),
-	(ScreenEffectType::vignette, "vignette"),
-	(ScreenEffectType::spotlight, "spotlight"),
-	(ScreenEffectType::speedLines, "speedLines"),
-	(ScreenEffectType::letterbox, "letterbox"),
-	(ScreenEffectType::pixelDissolve, "pixelDissolve"),
-	(ScreenEffectType::wipe, "wipe"),
-	(ScreenEffectType::irisWipe, "irisWipe"),
-	(ScreenEffectType::diamondWipe, "diamondWipe"),
-	(ScreenEffectType::clockWipe, "clockWipe"),
-	(ScreenEffectType::blinds, "blinds"),
-	(ScreenEffectType::checkerWipe, "checkerWipe"),
-	(ScreenEffectType::noiseFade, "noiseFade"),
-	(ScreenEffectType::burn, "burn"),
-	(ScreenEffectType::tvOff, "tvOff"),
-	(ScreenEffectType::fade, "fade"),
+	(ScreenEffectType::LensDistortion, "lensDistortion"),
+	(ScreenEffectType::Bulge, "bulge"),
+	(ScreenEffectType::Swirl, "swirl"),
+	(ScreenEffectType::Kaleidoscope, "kaleidoscope"),
+	(ScreenEffectType::Mirror, "mirror"),
+	(ScreenEffectType::Ripple, "ripple"),
+	(ScreenEffectType::HeatHaze, "heatHaze"),
+	(ScreenEffectType::Jitter, "jitter"),
+	(ScreenEffectType::DoubleVision, "doubleVision"),
+	(ScreenEffectType::Pixelate, "pixelate"),
+	(ScreenEffectType::Shockwave, "shockwave"),
+	(ScreenEffectType::Wave, "wave"),
+	(ScreenEffectType::MotionBlur, "motionBlur"),
+	(ScreenEffectType::ZoomBlur, "zoomBlur"),
+	(ScreenEffectType::Blur, "blur"),
+	(ScreenEffectType::TiltShift, "tiltShift"),
+	(ScreenEffectType::GodRays, "godRays"),
+	(ScreenEffectType::Bloom, "bloom"),
+	(ScreenEffectType::Anamorphic, "anamorphic"),
+	(ScreenEffectType::Glitch, "glitch"),
+	(ScreenEffectType::Vhs, "vhs"),
+	(ScreenEffectType::Chromatic, "chromatic"),
+	(ScreenEffectType::WhiteBalance, "whiteBalance"),
+	(ScreenEffectType::LiftGammaGain, "liftGammaGain"),
+	(ScreenEffectType::ColorGrade, "colorGrade"),
+	(ScreenEffectType::HueShift, "hueShift"),
+	(ScreenEffectType::SplitToning, "splitToning"),
+	(ScreenEffectType::Tonemap, "tonemap"),
+	(ScreenEffectType::GradientMap, "gradientMap"),
+	(ScreenEffectType::Sepia, "sepia"),
+	(ScreenEffectType::Grayscale, "grayscale"),
+	(ScreenEffectType::Posterize, "posterize"),
+	(ScreenEffectType::Dither, "dither"),
+	(ScreenEffectType::Halftone, "halftone"),
+	(ScreenEffectType::Sharpen, "sharpen"),
+	(ScreenEffectType::EdgeDetect, "edgeDetect"),
+	(ScreenEffectType::OldFilm, "oldFilm"),
+	(ScreenEffectType::NightVision, "nightVision"),
+	(ScreenEffectType::Invert, "invert"),
+	(ScreenEffectType::Scanline, "scanline"),
+	(ScreenEffectType::Grain, "grain"),
+	(ScreenEffectType::Rain, "rain"),
+	(ScreenEffectType::Fog, "fog"),
+	(ScreenEffectType::Vignette, "vignette"),
+	(ScreenEffectType::Spotlight, "spotlight"),
+	(ScreenEffectType::SpeedLines, "speedLines"),
+	(ScreenEffectType::Letterbox, "letterbox"),
+	(ScreenEffectType::PixelDissolve, "pixelDissolve"),
+	(ScreenEffectType::Wipe, "wipe"),
+	(ScreenEffectType::IrisWipe, "irisWipe"),
+	(ScreenEffectType::DiamondWipe, "diamondWipe"),
+	(ScreenEffectType::ClockWipe, "clockWipe"),
+	(ScreenEffectType::Blinds, "blinds"),
+	(ScreenEffectType::CheckerWipe, "checkerWipe"),
+	(ScreenEffectType::NoiseFade, "noiseFade"),
+	(ScreenEffectType::Burn, "burn"),
+	(ScreenEffectType::TvOff, "tvOff"),
+	(ScreenEffectType::Fade, "fade"),
 ];
 
 // 효과별 기본 파라미터. (적용 차례)
 const DEFAULT_PARAMETER_TABLE: [(ScreenEffectType, [f32; 4]); 58] = [
-	(ScreenEffectType::lensDistortion, [0.35, 0.0, 0.0, 0.0]),
-	(ScreenEffectType::bulge, [0.5, 0.5, 0.5, 0.5]),
-	(ScreenEffectType::swirl, [0.5, 0.5, 0.6, 0.5]),
-	(ScreenEffectType::kaleidoscope, [6.0, 0.0, 0.0, 0.0]),
-	(ScreenEffectType::mirror, [0.0, 0.0, 0.0, 0.0]),
-	(ScreenEffectType::ripple, [0.5, 0.5, 40.0, 6.0]),
-	(ScreenEffectType::heatHaze, [6.0, 1.5, 0.0, 0.0]),
-	(ScreenEffectType::jitter, [8.0, 24.0, 0.0, 0.0]),
-	(ScreenEffectType::doubleVision, [0.02, 3.0, 0.0, 0.0]),
-	(ScreenEffectType::pixelate, [12.0, 0.0, 0.0, 0.0]),
-	(ScreenEffectType::shockwave, [0.5, 0.5, 0.0, 0.1]),
-	(ScreenEffectType::wave, [18.0, 4.0, 0.0, 0.0]),
-	(ScreenEffectType::motionBlur, [0.0, 24.0, 0.0, 0.0]),
-	(ScreenEffectType::zoomBlur, [0.5, 0.5, 0.35, 0.0]),
-	(ScreenEffectType::blur, [4.0, 0.0, 0.0, 0.0]),
-	(ScreenEffectType::tiltShift, [0.5, 0.18, 6.0, 0.0]),
-	(ScreenEffectType::godRays, [0.5, 0.35, 0.6, 0.94]),
-	(ScreenEffectType::bloom, [0.65, 1.2, 4.0, 0.0]),
-	(ScreenEffectType::anamorphic, [0.75, 1.5, 24.0, 0.0]),
-	(ScreenEffectType::glitch, [20.0, 10.0, 0.08, 0.0]),
-	(ScreenEffectType::vhs, [0.01, 0.35, 0.0, 0.0]),
-	(ScreenEffectType::chromatic, [1.0, 0.0, 0.0, 0.0]),
-	(ScreenEffectType::whiteBalance, [0.4, 0.0, 0.0, 0.0]),
-	(ScreenEffectType::liftGammaGain, [0.0, 1.0, 1.0, 0.0]),
-	(ScreenEffectType::colorGrade, [1.0, 1.0, 1.0, 0.0]),
-	(ScreenEffectType::hueShift, [1.0, 0.0, 0.0, 0.0]),
-	(ScreenEffectType::splitToning, [0.1, 0.15, 0.45, 0.5]),
-	(ScreenEffectType::tonemap, [1.0, 0.0, 0.0, 0.0]),
-	(ScreenEffectType::gradientMap, [0.05, 0.03, 0.2, 0.0]),
-	(ScreenEffectType::sepia, [0.0, 0.0, 0.0, 0.0]),
-	(ScreenEffectType::grayscale, [0.0, 0.0, 0.0, 0.0]),
-	(ScreenEffectType::posterize, [5.0, 0.0, 0.0, 0.0]),
-	(ScreenEffectType::dither, [4.0, 2.0, 0.0, 0.0]),
-	(ScreenEffectType::halftone, [6.0, 0.0, 0.0, 0.0]),
-	(ScreenEffectType::sharpen, [0.0, 0.0, 0.0, 0.0]),
-	(ScreenEffectType::edgeDetect, [0.0, 0.0, 0.0, 0.0]),
-	(ScreenEffectType::oldFilm, [0.0, 0.0, 0.0, 0.0]),
-	(ScreenEffectType::nightVision, [0.0, 0.0, 0.0, 0.0]),
-	(ScreenEffectType::invert, [0.0, 0.0, 0.0, 0.0]),
-	(ScreenEffectType::scanline, [0.15, 0.5, 0.0, 0.0]),
-	(ScreenEffectType::grain, [0.0, 0.0, 0.0, 0.0]),
-	(ScreenEffectType::rain, [90.0, 8.0, 1.6, 0.0]),
-	(ScreenEffectType::fog, [0.35, 1.0, 0.0, 0.0]),
-	(ScreenEffectType::vignette, [0.45, 1.1, 0.0, 0.0]),
-	(ScreenEffectType::spotlight, [0.5, 0.5, 0.25, 0.2]),
-	(ScreenEffectType::speedLines, [0.5, 0.5, 14.0, 6.0]),
-	(ScreenEffectType::letterbox, [0.12, 0.0, 0.0, 0.0]),
-	(ScreenEffectType::pixelDissolve, [24.0, 0.0, 0.0, 0.0]),
-	(ScreenEffectType::wipe, [1.0, 0.0, 0.05, 0.0]),
-	(ScreenEffectType::irisWipe, [0.5, 0.5, 0.05, 0.0]),
-	(ScreenEffectType::diamondWipe, [0.05, 0.0, 0.0, 0.0]),
-	(ScreenEffectType::clockWipe, [0.02, 0.0, 0.0, 0.0]),
-	(ScreenEffectType::blinds, [10.0, 0.05, 0.0, 0.0]),
-	(ScreenEffectType::checkerWipe, [10.0, 0.0, 0.0, 0.0]),
-	(ScreenEffectType::noiseFade, [5.0, 0.2, 0.0, 0.0]),
-	(ScreenEffectType::burn, [5.0, 0.06, 0.0, 0.0]),
-	(ScreenEffectType::tvOff, [0.0, 0.0, 0.0, 0.0]),
-	(ScreenEffectType::fade, [0.0, 0.0, 0.0, 0.0]),
+	(ScreenEffectType::LensDistortion, [0.35, 0.0, 0.0, 0.0]),
+	(ScreenEffectType::Bulge, [0.5, 0.5, 0.5, 0.5]),
+	(ScreenEffectType::Swirl, [0.5, 0.5, 0.6, 0.5]),
+	(ScreenEffectType::Kaleidoscope, [6.0, 0.0, 0.0, 0.0]),
+	(ScreenEffectType::Mirror, [0.0, 0.0, 0.0, 0.0]),
+	(ScreenEffectType::Ripple, [0.5, 0.5, 40.0, 6.0]),
+	(ScreenEffectType::HeatHaze, [6.0, 1.5, 0.0, 0.0]),
+	(ScreenEffectType::Jitter, [8.0, 24.0, 0.0, 0.0]),
+	(ScreenEffectType::DoubleVision, [0.02, 3.0, 0.0, 0.0]),
+	(ScreenEffectType::Pixelate, [12.0, 0.0, 0.0, 0.0]),
+	(ScreenEffectType::Shockwave, [0.5, 0.5, 0.0, 0.1]),
+	(ScreenEffectType::Wave, [18.0, 4.0, 0.0, 0.0]),
+	(ScreenEffectType::MotionBlur, [0.0, 24.0, 0.0, 0.0]),
+	(ScreenEffectType::ZoomBlur, [0.5, 0.5, 0.35, 0.0]),
+	(ScreenEffectType::Blur, [4.0, 0.0, 0.0, 0.0]),
+	(ScreenEffectType::TiltShift, [0.5, 0.18, 6.0, 0.0]),
+	(ScreenEffectType::GodRays, [0.5, 0.35, 0.6, 0.94]),
+	(ScreenEffectType::Bloom, [0.65, 1.2, 4.0, 0.0]),
+	(ScreenEffectType::Anamorphic, [0.75, 1.5, 24.0, 0.0]),
+	(ScreenEffectType::Glitch, [20.0, 10.0, 0.08, 0.0]),
+	(ScreenEffectType::Vhs, [0.01, 0.35, 0.0, 0.0]),
+	(ScreenEffectType::Chromatic, [1.0, 0.0, 0.0, 0.0]),
+	(ScreenEffectType::WhiteBalance, [0.4, 0.0, 0.0, 0.0]),
+	(ScreenEffectType::LiftGammaGain, [0.0, 1.0, 1.0, 0.0]),
+	(ScreenEffectType::ColorGrade, [1.0, 1.0, 1.0, 0.0]),
+	(ScreenEffectType::HueShift, [1.0, 0.0, 0.0, 0.0]),
+	(ScreenEffectType::SplitToning, [0.1, 0.15, 0.45, 0.5]),
+	(ScreenEffectType::Tonemap, [1.0, 0.0, 0.0, 0.0]),
+	(ScreenEffectType::GradientMap, [0.05, 0.03, 0.2, 0.0]),
+	(ScreenEffectType::Sepia, [0.0, 0.0, 0.0, 0.0]),
+	(ScreenEffectType::Grayscale, [0.0, 0.0, 0.0, 0.0]),
+	(ScreenEffectType::Posterize, [5.0, 0.0, 0.0, 0.0]),
+	(ScreenEffectType::Dither, [4.0, 2.0, 0.0, 0.0]),
+	(ScreenEffectType::Halftone, [6.0, 0.0, 0.0, 0.0]),
+	(ScreenEffectType::Sharpen, [0.0, 0.0, 0.0, 0.0]),
+	(ScreenEffectType::EdgeDetect, [0.0, 0.0, 0.0, 0.0]),
+	(ScreenEffectType::OldFilm, [0.0, 0.0, 0.0, 0.0]),
+	(ScreenEffectType::NightVision, [0.0, 0.0, 0.0, 0.0]),
+	(ScreenEffectType::Invert, [0.0, 0.0, 0.0, 0.0]),
+	(ScreenEffectType::Scanline, [0.15, 0.5, 0.0, 0.0]),
+	(ScreenEffectType::Grain, [0.0, 0.0, 0.0, 0.0]),
+	(ScreenEffectType::Rain, [90.0, 8.0, 1.6, 0.0]),
+	(ScreenEffectType::Fog, [0.35, 1.0, 0.0, 0.0]),
+	(ScreenEffectType::Vignette, [0.45, 1.1, 0.0, 0.0]),
+	(ScreenEffectType::Spotlight, [0.5, 0.5, 0.25, 0.2]),
+	(ScreenEffectType::SpeedLines, [0.5, 0.5, 14.0, 6.0]),
+	(ScreenEffectType::Letterbox, [0.12, 0.0, 0.0, 0.0]),
+	(ScreenEffectType::PixelDissolve, [24.0, 0.0, 0.0, 0.0]),
+	(ScreenEffectType::Wipe, [1.0, 0.0, 0.05, 0.0]),
+	(ScreenEffectType::IrisWipe, [0.5, 0.5, 0.05, 0.0]),
+	(ScreenEffectType::DiamondWipe, [0.05, 0.0, 0.0, 0.0]),
+	(ScreenEffectType::ClockWipe, [0.02, 0.0, 0.0, 0.0]),
+	(ScreenEffectType::Blinds, [10.0, 0.05, 0.0, 0.0]),
+	(ScreenEffectType::CheckerWipe, [10.0, 0.0, 0.0, 0.0]),
+	(ScreenEffectType::NoiseFade, [5.0, 0.2, 0.0, 0.0]),
+	(ScreenEffectType::Burn, [5.0, 0.06, 0.0, 0.0]),
+	(ScreenEffectType::TvOff, [0.0, 0.0, 0.0, 0.0]),
+	(ScreenEffectType::Fade, [0.0, 0.0, 0.0, 0.0]),
 ];
 
 // 효과별 파라미터 이름. (타임라인 속성 "효과.이름" 으로 접근, 적용 차례)
 pub const SCREEN_EFFECT_PARAMETER_NAMES: [(ScreenEffectType, &[&str]); 58] = [
-	(ScreenEffectType::lensDistortion, &["intensity"]),
-	(ScreenEffectType::bulge, &["centerX", "centerY", "intensity", "radius"]),
-	(ScreenEffectType::swirl, &["centerX", "centerY", "turns", "radius"]),
-	(ScreenEffectType::kaleidoscope, &["segments"]),
-	(ScreenEffectType::mirror, &["axis"]),
-	(ScreenEffectType::ripple, &["centerX", "centerY", "frequency", "speed"]),
-	(ScreenEffectType::heatHaze, &["scale", "speed"]),
-	(ScreenEffectType::jitter, &["amplitude", "rate"]),
-	(ScreenEffectType::doubleVision, &["offset", "speed"]),
-	(ScreenEffectType::pixelate, &["blockSize"]),
-	(ScreenEffectType::shockwave, &["centerX", "centerY", "radius", "width"]),
-	(ScreenEffectType::wave, &["frequency", "speed"]),
-	(ScreenEffectType::motionBlur, &["angle", "length"]),
-	(ScreenEffectType::zoomBlur, &["centerX", "centerY", "length"]),
-	(ScreenEffectType::blur, &["radius"]),
-	(ScreenEffectType::tiltShift, &["focusY", "focusWidth", "radius"]),
-	(ScreenEffectType::godRays, &["centerX", "centerY", "threshold", "decay"]),
-	(ScreenEffectType::bloom, &["threshold", "intensity", "radius"]),
-	(ScreenEffectType::anamorphic, &["threshold", "intensity", "width"]),
-	(ScreenEffectType::glitch, &["rows", "rate", "shift"]),
-	(ScreenEffectType::vhs, &["wobble", "noise"]),
-	(ScreenEffectType::chromatic, &["scale"]),
-	(ScreenEffectType::whiteBalance, &["temperature", "tint"]),
-	(ScreenEffectType::liftGammaGain, &["lift", "gamma", "gain"]),
-	(ScreenEffectType::colorGrade, &["contrast", "saturation", "brightness"]),
-	(ScreenEffectType::hueShift, &["turns"]),
-	(ScreenEffectType::splitToning, &["shadowRed", "shadowGreen", "shadowBlue", "balance"]),
-	(ScreenEffectType::tonemap, &["exposure"]),
-	(ScreenEffectType::gradientMap, &["darkRed", "darkGreen", "darkBlue"]),
-	(ScreenEffectType::sepia, &[]),
-	(ScreenEffectType::grayscale, &[]),
-	(ScreenEffectType::posterize, &["levels"]),
-	(ScreenEffectType::dither, &["levels", "pixelSize"]),
-	(ScreenEffectType::halftone, &["cellSize"]),
-	(ScreenEffectType::sharpen, &[]),
-	(ScreenEffectType::edgeDetect, &[]),
-	(ScreenEffectType::oldFilm, &[]),
-	(ScreenEffectType::nightVision, &[]),
-	(ScreenEffectType::invert, &[]),
-	(ScreenEffectType::scanline, &["curvature", "density"]),
-	(ScreenEffectType::grain, &[]),
-	(ScreenEffectType::rain, &["columns", "density", "speed"]),
-	(ScreenEffectType::fog, &["start", "end"]),
-	(ScreenEffectType::vignette, &["inner", "outer"]),
-	(ScreenEffectType::spotlight, &["centerX", "centerY", "radius", "softness"]),
-	(ScreenEffectType::speedLines, &["centerX", "centerY", "density", "speed"]),
-	(ScreenEffectType::letterbox, &["vertical", "horizontal"]),
-	(ScreenEffectType::pixelDissolve, &["blocks"]),
-	(ScreenEffectType::wipe, &["directionX", "directionY", "softness"]),
-	(ScreenEffectType::irisWipe, &["centerX", "centerY", "softness"]),
-	(ScreenEffectType::diamondWipe, &["softness"]),
-	(ScreenEffectType::clockWipe, &["softness"]),
-	(ScreenEffectType::blinds, &["count", "softness"]),
-	(ScreenEffectType::checkerWipe, &["cells"]),
-	(ScreenEffectType::noiseFade, &["scale", "softness"]),
-	(ScreenEffectType::burn, &["scale", "width"]),
-	(ScreenEffectType::tvOff, &[]),
-	(ScreenEffectType::fade, &[]),
+	(ScreenEffectType::LensDistortion, &["intensity"]),
+	(ScreenEffectType::Bulge, &["centerX", "centerY", "intensity", "radius"]),
+	(ScreenEffectType::Swirl, &["centerX", "centerY", "turns", "radius"]),
+	(ScreenEffectType::Kaleidoscope, &["segments"]),
+	(ScreenEffectType::Mirror, &["axis"]),
+	(ScreenEffectType::Ripple, &["centerX", "centerY", "frequency", "speed"]),
+	(ScreenEffectType::HeatHaze, &["scale", "speed"]),
+	(ScreenEffectType::Jitter, &["amplitude", "rate"]),
+	(ScreenEffectType::DoubleVision, &["offset", "speed"]),
+	(ScreenEffectType::Pixelate, &["blockSize"]),
+	(ScreenEffectType::Shockwave, &["centerX", "centerY", "radius", "width"]),
+	(ScreenEffectType::Wave, &["frequency", "speed"]),
+	(ScreenEffectType::MotionBlur, &["angle", "length"]),
+	(ScreenEffectType::ZoomBlur, &["centerX", "centerY", "length"]),
+	(ScreenEffectType::Blur, &["radius"]),
+	(ScreenEffectType::TiltShift, &["focusY", "focusWidth", "radius"]),
+	(ScreenEffectType::GodRays, &["centerX", "centerY", "threshold", "decay"]),
+	(ScreenEffectType::Bloom, &["threshold", "intensity", "radius"]),
+	(ScreenEffectType::Anamorphic, &["threshold", "intensity", "width"]),
+	(ScreenEffectType::Glitch, &["rows", "rate", "shift"]),
+	(ScreenEffectType::Vhs, &["wobble", "noise"]),
+	(ScreenEffectType::Chromatic, &["scale"]),
+	(ScreenEffectType::WhiteBalance, &["temperature", "tint"]),
+	(ScreenEffectType::LiftGammaGain, &["lift", "gamma", "gain"]),
+	(ScreenEffectType::ColorGrade, &["contrast", "saturation", "brightness"]),
+	(ScreenEffectType::HueShift, &["turns"]),
+	(ScreenEffectType::SplitToning, &["shadowRed", "shadowGreen", "shadowBlue", "balance"]),
+	(ScreenEffectType::Tonemap, &["exposure"]),
+	(ScreenEffectType::GradientMap, &["darkRed", "darkGreen", "darkBlue"]),
+	(ScreenEffectType::Sepia, &[]),
+	(ScreenEffectType::Grayscale, &[]),
+	(ScreenEffectType::Posterize, &["levels"]),
+	(ScreenEffectType::Dither, &["levels", "pixelSize"]),
+	(ScreenEffectType::Halftone, &["cellSize"]),
+	(ScreenEffectType::Sharpen, &[]),
+	(ScreenEffectType::EdgeDetect, &[]),
+	(ScreenEffectType::OldFilm, &[]),
+	(ScreenEffectType::NightVision, &[]),
+	(ScreenEffectType::Invert, &[]),
+	(ScreenEffectType::Scanline, &["curvature", "density"]),
+	(ScreenEffectType::Grain, &[]),
+	(ScreenEffectType::Rain, &["columns", "density", "speed"]),
+	(ScreenEffectType::Fog, &["start", "end"]),
+	(ScreenEffectType::Vignette, &["inner", "outer"]),
+	(ScreenEffectType::Spotlight, &["centerX", "centerY", "radius", "softness"]),
+	(ScreenEffectType::SpeedLines, &["centerX", "centerY", "density", "speed"]),
+	(ScreenEffectType::Letterbox, &["vertical", "horizontal"]),
+	(ScreenEffectType::PixelDissolve, &["blocks"]),
+	(ScreenEffectType::Wipe, &["directionX", "directionY", "softness"]),
+	(ScreenEffectType::IrisWipe, &["centerX", "centerY", "softness"]),
+	(ScreenEffectType::DiamondWipe, &["softness"]),
+	(ScreenEffectType::ClockWipe, &["softness"]),
+	(ScreenEffectType::Blinds, &["count", "softness"]),
+	(ScreenEffectType::CheckerWipe, &["cells"]),
+	(ScreenEffectType::NoiseFade, &["scale", "softness"]),
+	(ScreenEffectType::Burn, &["scale", "width"]),
+	(ScreenEffectType::TvOff, &[]),
+	(ScreenEffectType::Fade, &[]),
 ];
 
 // 효과별 기본 색. (없는 효과는 흰색)
 const DEFAULT_COLOR_TABLE: [(ScreenEffectType, [f32; 4]); 25] = [
-	(ScreenEffectType::shockwave, [1.0, 1.0, 1.0, 0.6]),
-	(ScreenEffectType::godRays, [1.0, 0.95, 0.8, 1.0]),
-	(ScreenEffectType::anamorphic, [0.5, 0.7, 1.0, 1.0]),
-	(ScreenEffectType::colorGrade, [1.0, 1.0, 1.0, 0.0]),
-	(ScreenEffectType::splitToning, [1.0, 0.85, 0.55, 1.0]),
-	(ScreenEffectType::gradientMap, [1.0, 0.9, 0.6, 1.0]),
-	(ScreenEffectType::edgeDetect, [1.0, 1.0, 1.0, 1.0]),
-	(ScreenEffectType::nightVision, [0.35, 1.0, 0.45, 1.0]),
-	(ScreenEffectType::rain, [0.8, 0.9, 1.0, 0.45]),
-	(ScreenEffectType::fog, [0.75, 0.8, 0.9, 1.0]),
-	(ScreenEffectType::vignette, [0.0, 0.0, 0.0, 1.0]),
-	(ScreenEffectType::spotlight, [0.0, 0.0, 0.0, 1.0]),
-	(ScreenEffectType::speedLines, [1.0, 1.0, 1.0, 0.8]),
-	(ScreenEffectType::letterbox, [0.0, 0.0, 0.0, 1.0]),
-	(ScreenEffectType::pixelDissolve, [0.0, 0.0, 0.0, 1.0]),
-	(ScreenEffectType::wipe, [0.0, 0.0, 0.0, 1.0]),
-	(ScreenEffectType::irisWipe, [0.0, 0.0, 0.0, 1.0]),
-	(ScreenEffectType::diamondWipe, [0.0, 0.0, 0.0, 1.0]),
-	(ScreenEffectType::clockWipe, [0.0, 0.0, 0.0, 1.0]),
-	(ScreenEffectType::blinds, [0.0, 0.0, 0.0, 1.0]),
-	(ScreenEffectType::checkerWipe, [0.0, 0.0, 0.0, 1.0]),
-	(ScreenEffectType::noiseFade, [0.0, 0.0, 0.0, 1.0]),
-	(ScreenEffectType::burn, [0.0, 0.0, 0.0, 1.0]),
-	(ScreenEffectType::tvOff, [0.0, 0.0, 0.0, 1.0]),
-	(ScreenEffectType::fade, [0.0, 0.0, 0.0, 1.0]),
+	(ScreenEffectType::Shockwave, [1.0, 1.0, 1.0, 0.6]),
+	(ScreenEffectType::GodRays, [1.0, 0.95, 0.8, 1.0]),
+	(ScreenEffectType::Anamorphic, [0.5, 0.7, 1.0, 1.0]),
+	(ScreenEffectType::ColorGrade, [1.0, 1.0, 1.0, 0.0]),
+	(ScreenEffectType::SplitToning, [1.0, 0.85, 0.55, 1.0]),
+	(ScreenEffectType::GradientMap, [1.0, 0.9, 0.6, 1.0]),
+	(ScreenEffectType::EdgeDetect, [1.0, 1.0, 1.0, 1.0]),
+	(ScreenEffectType::NightVision, [0.35, 1.0, 0.45, 1.0]),
+	(ScreenEffectType::Rain, [0.8, 0.9, 1.0, 0.45]),
+	(ScreenEffectType::Fog, [0.75, 0.8, 0.9, 1.0]),
+	(ScreenEffectType::Vignette, [0.0, 0.0, 0.0, 1.0]),
+	(ScreenEffectType::Spotlight, [0.0, 0.0, 0.0, 1.0]),
+	(ScreenEffectType::SpeedLines, [1.0, 1.0, 1.0, 0.8]),
+	(ScreenEffectType::Letterbox, [0.0, 0.0, 0.0, 1.0]),
+	(ScreenEffectType::PixelDissolve, [0.0, 0.0, 0.0, 1.0]),
+	(ScreenEffectType::Wipe, [0.0, 0.0, 0.0, 1.0]),
+	(ScreenEffectType::IrisWipe, [0.0, 0.0, 0.0, 1.0]),
+	(ScreenEffectType::DiamondWipe, [0.0, 0.0, 0.0, 1.0]),
+	(ScreenEffectType::ClockWipe, [0.0, 0.0, 0.0, 1.0]),
+	(ScreenEffectType::Blinds, [0.0, 0.0, 0.0, 1.0]),
+	(ScreenEffectType::CheckerWipe, [0.0, 0.0, 0.0, 1.0]),
+	(ScreenEffectType::NoiseFade, [0.0, 0.0, 0.0, 1.0]),
+	(ScreenEffectType::Burn, [0.0, 0.0, 0.0, 1.0]),
+	(ScreenEffectType::TvOff, [0.0, 0.0, 0.0, 1.0]),
+	(ScreenEffectType::Fade, [0.0, 0.0, 0.0, 1.0]),
 ];
 
 // 프래그먼트 셰이더 공통 머리. (효과 본문은 uv / color 를 다룬다)
@@ -829,21 +829,21 @@ impl ScreenEffectType {
 	//==============================================================================
 	// 원본 이름 반환. ("vignette" 같은 문자열)
 	//==============================================================================
-	pub fn getName(&self) -> &'static str {
+	pub fn get_name(&self) -> &'static str {
 		EFFECT_NAME_TABLE[*self as usize].1
 	}
 
 	//==============================================================================
 	// 원본 이름으로 찾기. (모르는 이름이면 None)
 	//==============================================================================
-	pub fn fromName(name: &str) -> Option<ScreenEffectType> {
-		EFFECT_NAME_TABLE.iter().find(|(_, effectName)| *effectName == name).map(|(effectType, _)| *effectType)
+	pub fn from_name(name: &str) -> Option<ScreenEffectType> {
+		EFFECT_NAME_TABLE.iter().find(|(_, effect_name)| *effect_name == name).map(|(effect_type, _)| *effect_type)
 	}
 
 	//==============================================================================
 	// 파라미터 이름 목록 반환. (SCREEN_EFFECT_PARAMETER_NAMES)
 	//==============================================================================
-	pub fn getParameterNames(&self) -> &'static [&'static str] {
+	pub fn get_parameter_names(&self) -> &'static [&'static str] {
 		SCREEN_EFFECT_PARAMETER_NAMES[*self as usize].1
 	}
 }
@@ -853,7 +853,7 @@ impl ScreenEffectType {
 //==============================================================================
 #[derive(Clone, Copy, Debug)]
 struct ScreenEffectState {
-	isEnabled: bool,
+	is_enabled: bool,
 	strength: f32,
 	parameters: [f32; 4],
 	color: Color,
@@ -869,7 +869,7 @@ pub struct ScreenEffectRegion {
 	pub width: f32,
 	pub height: f32,
 	// 둥근 모서리 반지름. (픽셀, 0 이면 사각형)
-	pub cornerRadius: f32,
+	pub corner_radius: f32,
 }
 
 //==============================================================================
@@ -878,7 +878,7 @@ pub struct ScreenEffectRegion {
 struct RenderTarget {
 	framebuffer: GlFramebuffer,
 	texture: GlTexture,
-	stencilRenderbuffer: Option<GlRenderbuffer>,
+	stencil_renderbuffer: Option<GlRenderbuffer>,
 	width: i32,
 	height: i32,
 }
@@ -887,11 +887,11 @@ struct RenderTarget {
 // 렌더 대상 모음. (씬 사본, 핑퐁, 절반 크기 둘)
 //==============================================================================
 struct RenderTargetSet {
-	sceneTarget: RenderTarget,
-	pingTarget: RenderTarget,
-	pongTarget: RenderTarget,
-	halfTargetA: RenderTarget,
-	halfTargetB: RenderTarget,
+	scene_target: RenderTarget,
+	ping_target: RenderTarget,
+	pong_target: RenderTarget,
+	half_target_a: RenderTarget,
+	half_target_b: RenderTarget,
 }
 
 //==============================================================================
@@ -899,9 +899,9 @@ struct RenderTargetSet {
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PassStepTarget {
-	pingPong,
-	halfA,
-	halfB,
+	PingPong,
+	HalfA,
+	HalfB,
 }
 
 //==============================================================================
@@ -909,10 +909,10 @@ enum PassStepTarget {
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PassStepTexture {
-	previous,
-	halfA,
-	halfB,
-	scene,
+	Previous,
+	HalfA,
+	HalfB,
+	Scene,
 }
 
 //==============================================================================
@@ -920,7 +920,7 @@ enum PassStepTexture {
 //==============================================================================
 #[derive(Clone, Copy, Debug)]
 struct PassStep {
-	passName: &'static str,
+	pass_name: &'static str,
 	strength: f32,
 	color: Color,
 	parameters: [f32; 4],
@@ -932,17 +932,17 @@ struct PassStep {
 //==============================================================================
 // 패스 단계 만들기. (상태가 없으면 세기 1, 흰색)
 //==============================================================================
-fn createPassStep(passName: &'static str, effectState: Option<&ScreenEffectState>, parameters: [f32; 4], target: PassStepTarget, source: PassStepTexture, auxiliary: Option<PassStepTexture>) -> PassStep {
-	let (strength, color) = match effectState {
-		Some(effectState) => {
-			(effectState.strength, effectState.color)
+fn create_pass_step(pass_name: &'static str, effect_state: Option<&ScreenEffectState>, parameters: [f32; 4], target: PassStepTarget, source: PassStepTexture, auxiliary: Option<PassStepTexture>) -> PassStep {
+	let (strength, color) = match effect_state {
+		Some(effect_state) => {
+			(effect_state.strength, effect_state.color)
 		}
 		None => {
 			(1.0, Color::white())
 		}
 	};
 	PassStep {
-		passName,
+		pass_name,
 		strength,
 		color,
 		parameters,
@@ -955,11 +955,11 @@ fn createPassStep(passName: &'static str, effectState: Option<&ScreenEffectState
 //==============================================================================
 // 색 텍스처 생성. (RGBA8, 화면 사본은 RGB8: 기본 프레임버퍼(알파 없음)에서 copyTexSubImage2D 로 떠 오려면 성분이 같아야 한다)
 //==============================================================================
-fn createColorTexture(gl: &glow::Context, width: i32, height: i32, isOpaque: bool) -> Result<GlTexture, String> {
+fn create_color_texture(gl: &glow::Context, width: i32, height: i32, is_opaque: bool) -> Result<GlTexture, String> {
 	unsafe {
 		let texture = gl.create_texture()?;
 		gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-		if isOpaque {
+		if is_opaque {
 			gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::RGB8 as i32, width, height, 0, glow::RGB, glow::UNSIGNED_BYTE, glow::PixelUnpackData::Slice(None));
 		}
 		else {
@@ -976,25 +976,25 @@ fn createColorTexture(gl: &glow::Context, width: i32, height: i32, isOpaque: boo
 //==============================================================================
 // 렌더 대상 생성. (색 텍스처 + 필요하면 스텐실 렌더버퍼)
 //==============================================================================
-fn createRenderTarget(gl: &glow::Context, width: i32, height: i32, useStencil: bool, isOpaque: bool) -> Result<RenderTarget, String> {
-	let texture = createColorTexture(gl, width, height, isOpaque)?;
+fn create_render_target(gl: &glow::Context, width: i32, height: i32, use_stencil: bool, is_opaque: bool) -> Result<RenderTarget, String> {
+	let texture = create_color_texture(gl, width, height, is_opaque)?;
 	unsafe {
 		let framebuffer = gl.create_framebuffer()?;
 		gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
 		gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(texture), 0);
-		let mut stencilRenderbuffer = None;
-		if useStencil {
+		let mut stencil_renderbuffer = None;
+		if use_stencil {
 			let renderbuffer = gl.create_renderbuffer()?;
 			gl.bind_renderbuffer(glow::RENDERBUFFER, Some(renderbuffer));
 			gl.renderbuffer_storage(glow::RENDERBUFFER, glow::DEPTH24_STENCIL8, width, height);
 			gl.framebuffer_renderbuffer(glow::FRAMEBUFFER, glow::DEPTH_STENCIL_ATTACHMENT, glow::RENDERBUFFER, Some(renderbuffer));
-			stencilRenderbuffer = Some(renderbuffer);
+			stencil_renderbuffer = Some(renderbuffer);
 		}
 		gl.bind_framebuffer(glow::FRAMEBUFFER, None);
 		Ok(RenderTarget {
 			framebuffer,
 			texture,
-			stencilRenderbuffer,
+			stencil_renderbuffer,
 			width,
 			height,
 		})
@@ -1004,12 +1004,12 @@ fn createRenderTarget(gl: &glow::Context, width: i32, height: i32, useStencil: b
 //==============================================================================
 // 렌더 대상 파괴.
 //==============================================================================
-fn destroyRenderTarget(gl: &glow::Context, renderTarget: &RenderTarget) {
+fn destroy_render_target(gl: &glow::Context, render_target: &RenderTarget) {
 	unsafe {
-		gl.delete_framebuffer(renderTarget.framebuffer);
-		gl.delete_texture(renderTarget.texture);
-		if let Some(stencilRenderbuffer) = renderTarget.stencilRenderbuffer {
-			gl.delete_renderbuffer(stencilRenderbuffer);
+		gl.delete_framebuffer(render_target.framebuffer);
+		gl.delete_texture(render_target.texture);
+		if let Some(stencil_renderbuffer) = render_target.stencil_renderbuffer {
+			gl.delete_renderbuffer(stencil_renderbuffer);
 		}
 	}
 }
@@ -1017,28 +1017,28 @@ fn destroyRenderTarget(gl: &glow::Context, renderTarget: &RenderTarget) {
 //==============================================================================
 // 렌더 대상 모음 파괴.
 //==============================================================================
-fn destroyRenderTargetSet(gl: &glow::Context, renderTargetSet: &RenderTargetSet) {
-	destroyRenderTarget(gl, &renderTargetSet.sceneTarget);
-	destroyRenderTarget(gl, &renderTargetSet.pingTarget);
-	destroyRenderTarget(gl, &renderTargetSet.pongTarget);
-	destroyRenderTarget(gl, &renderTargetSet.halfTargetA);
-	destroyRenderTarget(gl, &renderTargetSet.halfTargetB);
+fn destroy_render_target_set(gl: &glow::Context, render_target_set: &RenderTargetSet) {
+	destroy_render_target(gl, &render_target_set.scene_target);
+	destroy_render_target(gl, &render_target_set.ping_target);
+	destroy_render_target(gl, &render_target_set.pong_target);
+	destroy_render_target(gl, &render_target_set.half_target_a);
+	destroy_render_target(gl, &render_target_set.half_target_b);
 }
 
 //==============================================================================
 // 패스 본문 반환. (모르는 이름이면 None)
 //==============================================================================
-fn findEffectBody(passName: &str) -> Option<&'static str> {
-	EFFECT_BODY_TABLE.iter().find(|(bodyName, _)| *bodyName == passName).map(|(_, effectBody)| *effectBody)
+fn find_effect_body(pass_name: &str) -> Option<&'static str> {
+	EFFECT_BODY_TABLE.iter().find(|(body_name, _)| *body_name == pass_name).map(|(_, effect_body)| *effect_body)
 }
 
 pub struct ScreenEffect {
-	passTable: HashMap<&'static str, Option<FullscreenPass>>,
-	effectStateList: Vec<ScreenEffectState>,
-	renderTargetSet: Option<RenderTargetSet>,
-	stepList: Vec<PassStep>,
+	pass_table: HashMap<&'static str, Option<FullscreenPass>>,
+	effect_state_list: Vec<ScreenEffectState>,
+	render_target_set: Option<RenderTargetSet>,
+	step_list: Vec<PassStep>,
 	time: f32,
-	isBound: bool,
+	is_bound: bool,
 	region: Option<ScreenEffectRegion>,
 }
 
@@ -1047,180 +1047,180 @@ impl ScreenEffect {
 	// 생성. (GL 자원은 처음 end 에서 만든다)
 	//==============================================================================
 	pub fn new() -> ScreenEffect {
-		let mut screenEffect = ScreenEffect {
-			passTable: HashMap::new(),
-			effectStateList: Vec::with_capacity(EFFECT_ORDER.len()),
-			renderTargetSet: None,
-			stepList: Vec::new(),
+		let mut screen_effect = ScreenEffect {
+			pass_table: HashMap::new(),
+			effect_state_list: Vec::with_capacity(EFFECT_ORDER.len()),
+			render_target_set: None,
+			step_list: Vec::new(),
 			time: 0.0,
-			isBound: false,
+			is_bound: false,
 			region: None,
 		};
-		screenEffect.resetAll();
-		screenEffect
+		screen_effect.reset_all();
+		screen_effect
 	}
 
 	//==============================================================================
 	// 전부 기본값으로. (끄고, 세기 1, 파라미터 / 색 기본. 모드 전환 때 이전 설정이 남지 않게)
 	//==============================================================================
-	pub fn resetAll(&mut self) {
-		self.effectStateList.clear();
-		for effectType in EFFECT_ORDER {
-			let defaultParameters = DEFAULT_PARAMETER_TABLE[effectType as usize].1;
-			let defaultColor = match DEFAULT_COLOR_TABLE.iter().find(|(colorEffectType, _)| *colorEffectType == effectType) {
-				Some((_, defaultColor)) => {
-					*defaultColor
+	pub fn reset_all(&mut self) {
+		self.effect_state_list.clear();
+		for effect_type in EFFECT_ORDER {
+			let default_parameters = DEFAULT_PARAMETER_TABLE[effect_type as usize].1;
+			let default_color = match DEFAULT_COLOR_TABLE.iter().find(|(color_effect_type, _)| *color_effect_type == effect_type) {
+				Some((_, default_color)) => {
+					*default_color
 				}
 				None => {
 					[1.0, 1.0, 1.0, 1.0]
 				}
 			};
-			self.effectStateList.push(ScreenEffectState {
-				isEnabled: false,
+			self.effect_state_list.push(ScreenEffectState {
+				is_enabled: false,
 				strength: 1.0,
-				parameters: defaultParameters,
-				color: Color::create(defaultColor[0], defaultColor[1], defaultColor[2], defaultColor[3]),
+				parameters: default_parameters,
+				color: Color::create(default_color[0], default_color[1], default_color[2], default_color[3]),
 			});
 		}
 	}
 
 	//==============================================================================
-	// 적용 영역 설정. (캔버스 픽셀, 왼쪽 위 원점. cornerRadius 는 둥근 모서리 반지름(픽셀), 0 이면 사각형)
+	// 적용 영역 설정. (캔버스 픽셀, 왼쪽 위 원점. corner_radius 는 둥근 모서리 반지름(픽셀), 0 이면 사각형)
 	//==============================================================================
-	pub fn setRegion(&mut self, x: f32, y: f32, width: f32, height: f32, cornerRadius: f32) {
+	pub fn set_region(&mut self, x: f32, y: f32, width: f32, height: f32, corner_radius: f32) {
 		self.region = Some(ScreenEffectRegion {
 			x,
 			y,
 			width,
 			height,
-			cornerRadius: cornerRadius.max(0.0),
+			corner_radius: corner_radius.max(0.0),
 		});
 	}
 
 	//==============================================================================
 	// 적용 영역 해제. (화면 전체)
 	//==============================================================================
-	pub fn clearRegion(&mut self) {
+	pub fn clear_region(&mut self) {
 		self.region = None;
 	}
 
 	//==============================================================================
 	// 적용 영역 반환. (None 이면 화면 전체)
 	//==============================================================================
-	pub fn getRegion(&self) -> Option<ScreenEffectRegion> {
+	pub fn get_region(&self) -> Option<ScreenEffectRegion> {
 		self.region
 	}
 
 	//==============================================================================
 	// 갱신. (애니메이션 효과의 시간)
 	//==============================================================================
-	pub fn tick(&mut self, timeDelta: f32) {
-		self.time += timeDelta;
+	pub fn tick(&mut self, time_delta: f32) {
+		self.time += time_delta;
 	}
 
 	//==============================================================================
-	// 시작. (씬 preDraw 첫머리. 씬은 화면에 그대로 그린다. 켜진 효과가 있을 때만 end 가 일한다)
+	// 시작. (씬 pre_draw 첫머리. 씬은 화면에 그대로 그린다. 켜진 효과가 있을 때만 end 가 일한다)
 	//==============================================================================
 	pub fn begin(&mut self, _graphic: &mut Graphic) {
-		self.isBound = self.hasActiveEffect();
+		self.is_bound = self.has_active_effect();
 	}
 
 	//==============================================================================
-	// 효과 적용. (씬 postDraw 끝. 화면의 영역을 떠 와 효과를 걸고 같은 자리에 되돌려 놓는다)
+	// 효과 적용. (씬 post_draw 끝. 화면의 영역을 떠 와 효과를 걸고 같은 자리에 되돌려 놓는다)
 	//==============================================================================
 	pub fn end(&mut self, graphic: &mut Graphic) {
-		if !self.isBound {
+		if !self.is_bound {
 			return;
 		}
-		self.isBound = false;
+		self.is_bound = false;
 
 		// 묶어 그리기로 쌓인 것을 먼저 화면에 그린다. (그 화면을 떠 온다)
-		graphic.flushBatch();
-		let bufferWidth = graphic.getDrawingBufferWidth();
-		let bufferHeight = graphic.getDrawingBufferHeight();
-		if bufferWidth <= 0 || bufferHeight <= 0 {
+		graphic.flush_batch();
+		let buffer_width = graphic.get_drawing_buffer_width();
+		let buffer_height = graphic.get_drawing_buffer_height();
+		if buffer_width <= 0 || buffer_height <= 0 {
 			return;
 		}
 
 		// 영역 결정. (버퍼 안으로 자른다)
-		let mut regionX = 0;
-		let mut regionY = 0;
-		let mut regionWidth = bufferWidth;
-		let mut regionHeight = bufferHeight;
-		let mut cornerRadius = 0.0;
+		let mut region_x = 0;
+		let mut region_y = 0;
+		let mut region_width = buffer_width;
+		let mut region_height = buffer_height;
+		let mut corner_radius = 0.0;
 		if let Some(region) = self.region {
-			regionX = (region.x.round() as i32).max(0);
-			regionY = (region.y.round() as i32).max(0);
-			regionWidth = (bufferWidth - regionX).min(region.width.round() as i32);
-			regionHeight = (bufferHeight - regionY).min(region.height.round() as i32);
-			cornerRadius = region.cornerRadius;
+			region_x = (region.x.round() as i32).max(0);
+			region_y = (region.y.round() as i32).max(0);
+			region_width = (buffer_width - region_x).min(region.width.round() as i32);
+			region_height = (buffer_height - region_y).min(region.height.round() as i32);
+			corner_radius = region.corner_radius;
 		}
-		if regionWidth <= 0 || regionHeight <= 0 {
+		if region_width <= 0 || region_height <= 0 {
 			return;
 		}
-		let width = regionWidth;
-		let height = regionHeight;
-		let gl = graphic.getGL();
-		if let Err(error) = self.ensureTargets(gl, width, height) {
+		let width = region_width;
+		let height = region_height;
+		let gl = graphic.get_gl();
+		if let Err(error) = self.ensure_targets(gl, width, height) {
 			eprintln!("ScreenEffect: render target failed: {}", error);
 			return;
 		}
 
 		// 켜진 효과를 패스 단계 목록으로 편다. (블러는 가로 / 세로 2단계, 블룸은 밝기 추출 → 하프 블러 2단계 → 합성)
-		self.stepList.clear();
-		for effectType in EFFECT_ORDER {
-			let effectState = self.effectStateList[effectType as usize];
-			if !effectState.isEnabled || effectState.strength <= 0.0 {
+		self.step_list.clear();
+		for effect_type in EFFECT_ORDER {
+			let effect_state = self.effect_state_list[effect_type as usize];
+			if !effect_state.is_enabled || effect_state.strength <= 0.0 {
 				continue;
 			}
-			let parameters = effectState.parameters;
-			let state = Some(&effectState);
-			match effectType {
-				ScreenEffectType::blur => {
-					self.stepList.push(createPassStep("blur", state, [parameters[0], 0.0, 1.0, 0.0], PassStepTarget::pingPong, PassStepTexture::previous, None));
-					self.stepList.push(createPassStep("blur", state, [parameters[0], 0.0, 0.0, 1.0], PassStepTarget::pingPong, PassStepTexture::previous, None));
+			let parameters = effect_state.parameters;
+			let state = Some(&effect_state);
+			match effect_type {
+				ScreenEffectType::Blur => {
+					self.step_list.push(create_pass_step("blur", state, [parameters[0], 0.0, 1.0, 0.0], PassStepTarget::PingPong, PassStepTexture::Previous, None));
+					self.step_list.push(create_pass_step("blur", state, [parameters[0], 0.0, 0.0, 1.0], PassStepTarget::PingPong, PassStepTexture::Previous, None));
 				}
-				ScreenEffectType::bloom => {
-					self.stepList.push(createPassStep("bloomBright", state, parameters, PassStepTarget::halfA, PassStepTexture::previous, None));
-					self.stepList.push(createPassStep("blur", state, [parameters[2], 0.0, 1.0, 0.0], PassStepTarget::halfB, PassStepTexture::halfA, None));
-					self.stepList.push(createPassStep("blur", state, [parameters[2], 0.0, 0.0, 1.0], PassStepTarget::halfA, PassStepTexture::halfB, None));
-					self.stepList.push(createPassStep("bloomComposite", state, parameters, PassStepTarget::pingPong, PassStepTexture::previous, Some(PassStepTexture::halfA)));
+				ScreenEffectType::Bloom => {
+					self.step_list.push(create_pass_step("bloomBright", state, parameters, PassStepTarget::HalfA, PassStepTexture::Previous, None));
+					self.step_list.push(create_pass_step("blur", state, [parameters[2], 0.0, 1.0, 0.0], PassStepTarget::HalfB, PassStepTexture::HalfA, None));
+					self.step_list.push(create_pass_step("blur", state, [parameters[2], 0.0, 0.0, 1.0], PassStepTarget::HalfA, PassStepTexture::HalfB, None));
+					self.step_list.push(create_pass_step("bloomComposite", state, parameters, PassStepTarget::PingPong, PassStepTexture::Previous, Some(PassStepTexture::HalfA)));
 				}
-				ScreenEffectType::anamorphic => {
-					self.stepList.push(createPassStep("bloomBright", state, parameters, PassStepTarget::halfA, PassStepTexture::previous, None));
-					self.stepList.push(createPassStep("blur", state, [parameters[2], 0.0, 1.0, 0.0], PassStepTarget::halfB, PassStepTexture::halfA, None));
-					self.stepList.push(createPassStep("blur", state, [parameters[2] * 0.5, 0.0, 1.0, 0.0], PassStepTarget::halfA, PassStepTexture::halfB, None));
-					self.stepList.push(createPassStep("anamorphicComposite", state, parameters, PassStepTarget::pingPong, PassStepTexture::previous, Some(PassStepTexture::halfA)));
+				ScreenEffectType::Anamorphic => {
+					self.step_list.push(create_pass_step("bloomBright", state, parameters, PassStepTarget::HalfA, PassStepTexture::Previous, None));
+					self.step_list.push(create_pass_step("blur", state, [parameters[2], 0.0, 1.0, 0.0], PassStepTarget::HalfB, PassStepTexture::HalfA, None));
+					self.step_list.push(create_pass_step("blur", state, [parameters[2] * 0.5, 0.0, 1.0, 0.0], PassStepTarget::HalfA, PassStepTexture::HalfB, None));
+					self.step_list.push(create_pass_step("anamorphicComposite", state, parameters, PassStepTarget::PingPong, PassStepTexture::Previous, Some(PassStepTexture::HalfA)));
 				}
-				ScreenEffectType::tiltShift => {
-					self.stepList.push(createPassStep("tiltShift", state, [parameters[0], parameters[1], parameters[2], 0.0], PassStepTarget::pingPong, PassStepTexture::previous, None));
-					self.stepList.push(createPassStep("tiltShift", state, [parameters[0], parameters[1], 0.0, parameters[2]], PassStepTarget::pingPong, PassStepTexture::previous, None));
+				ScreenEffectType::TiltShift => {
+					self.step_list.push(create_pass_step("tiltShift", state, [parameters[0], parameters[1], parameters[2], 0.0], PassStepTarget::PingPong, PassStepTexture::Previous, None));
+					self.step_list.push(create_pass_step("tiltShift", state, [parameters[0], parameters[1], 0.0, parameters[2]], PassStepTarget::PingPong, PassStepTexture::Previous, None));
 				}
 				_ => {
-					self.stepList.push(createPassStep(effectType.getName(), state, parameters, PassStepTarget::pingPong, PassStepTexture::previous, None));
+					self.step_list.push(create_pass_step(effect_type.get_name(), state, parameters, PassStepTarget::PingPong, PassStepTexture::Previous, None));
 				}
 			}
 		}
-		if self.stepList.is_empty() {
-			self.stepList.push(createPassStep("copy", None, [0.0, 0.0, 0.0, 0.0], PassStepTarget::pingPong, PassStepTexture::previous, None));
+		if self.step_list.is_empty() {
+			self.step_list.push(create_pass_step("copy", None, [0.0, 0.0, 0.0, 0.0], PassStepTarget::PingPong, PassStepTexture::Previous, None));
 		}
 		// 둥근 모서리 영역이면 마지막에 원본과 합성한다. (모서리 바깥은 원본 그대로)
-		if cornerRadius > 0.0 {
-			self.stepList.push(createPassStep("regionComposite", None, [cornerRadius, 0.0, 0.0, 0.0], PassStepTarget::pingPong, PassStepTexture::previous, Some(PassStepTexture::scene)));
+		if corner_radius > 0.0 {
+			self.step_list.push(create_pass_step("regionComposite", None, [corner_radius, 0.0, 0.0, 0.0], PassStepTarget::PingPong, PassStepTexture::Previous, Some(PassStepTexture::Scene)));
 		}
 
 		// 마지막 화면 출력 단계를 찾는다. (하프 대상에 그리는 단계는 화면이 될 수 없다)
-		let lastScreenIndex = self.stepList.iter().rposition(|step| step.target == PassStepTarget::pingPong);
+		let last_screen_index = self.step_list.iter().rposition(|step| step.target == PassStepTarget::PingPong);
 
 		// 쓰는 패스를 미리 만든다.
-		for stepIndex in 0..self.stepList.len() {
-			let passName = self.stepList[stepIndex].passName;
-			self.ensurePass(gl, passName);
+		for step_index in 0..self.step_list.len() {
+			let pass_name = self.step_list[step_index].pass_name;
+			self.ensure_pass(gl, pass_name);
 		}
 
-		let renderTargetSet = match &self.renderTargetSet {
-			Some(renderTargetSet) => {
-				renderTargetSet
+		let render_target_set = match &self.render_target_set {
+			Some(render_target_set) => {
+				render_target_set
 			}
 			None => {
 				return;
@@ -1228,20 +1228,20 @@ impl ScreenEffect {
 		};
 
 		// 화면 영역 → 씬 대상 복사. (GL 은 아래가 0. 기본 프레임버퍼는 멀티샘플 / 무알파일 수 있어 blitFramebuffer 대신 copyTexSubImage2D 로 RGB8 텍스처에 떠 온다)
-		let glRegionY = bufferHeight - (regionY + regionHeight);
+		let gl_region_y = buffer_height - (region_y + region_height);
 		unsafe {
 			gl.bind_framebuffer(glow::FRAMEBUFFER, None);
 			gl.active_texture(glow::TEXTURE0);
-			gl.bind_texture(glow::TEXTURE_2D, Some(renderTargetSet.sceneTarget.texture));
-			gl.copy_tex_sub_image_2d(glow::TEXTURE_2D, 0, 0, 0, regionX, glRegionY, width, height);
+			gl.bind_texture(glow::TEXTURE_2D, Some(render_target_set.scene_target.texture));
+			gl.copy_tex_sub_image_2d(glow::TEXTURE_2D, 0, 0, 0, region_x, gl_region_y, width, height);
 			gl.disable(glow::BLEND);
 			gl.disable(glow::STENCIL_TEST);
 		}
 
-		let mut previousTexture = renderTargetSet.sceneTarget.texture;
-		let mut pingPongTurn = 0;
-		for (stepIndex, step) in self.stepList.iter().enumerate() {
-			let pass = match self.passTable.get(step.passName) {
+		let mut previous_texture = render_target_set.scene_target.texture;
+		let mut ping_pong_turn = 0;
+		for (step_index, step) in self.step_list.iter().enumerate() {
+			let pass = match self.pass_table.get(step.pass_name) {
 				Some(Some(pass)) => {
 					pass
 				}
@@ -1249,95 +1249,95 @@ impl ScreenEffect {
 					continue;
 				}
 			};
-			let isHalfTarget = step.target != PassStepTarget::pingPong;
+			let is_half_target = step.target != PassStepTarget::PingPong;
 
 			// 대상 바인드.
-			let mut targetTexture = None;
+			let mut target_texture = None;
 			unsafe {
-				if Some(stepIndex) == lastScreenIndex {
+				if Some(step_index) == last_screen_index {
 					gl.bind_framebuffer(glow::FRAMEBUFFER, None);
-					gl.viewport(regionX, glRegionY, width, height);
+					gl.viewport(region_x, gl_region_y, width, height);
 					gl.enable(glow::SCISSOR_TEST);
-					gl.scissor(regionX, glRegionY, width, height);
+					gl.scissor(region_x, gl_region_y, width, height);
 				}
-				else if isHalfTarget {
-					let halfTarget = if step.target == PassStepTarget::halfA {
-						&renderTargetSet.halfTargetA
+				else if is_half_target {
+					let half_target = if step.target == PassStepTarget::HalfA {
+						&render_target_set.half_target_a
 					}
 					else {
-						&renderTargetSet.halfTargetB
+						&render_target_set.half_target_b
 					};
-					gl.bind_framebuffer(glow::FRAMEBUFFER, Some(halfTarget.framebuffer));
-					gl.viewport(0, 0, halfTarget.width, halfTarget.height);
-					targetTexture = Some(halfTarget.texture);
+					gl.bind_framebuffer(glow::FRAMEBUFFER, Some(half_target.framebuffer));
+					gl.viewport(0, 0, half_target.width, half_target.height);
+					target_texture = Some(half_target.texture);
 				}
 				else {
-					let pingPongTarget = if pingPongTurn % 2 == 0 {
-						&renderTargetSet.pingTarget
+					let ping_pong_target = if ping_pong_turn % 2 == 0 {
+						&render_target_set.ping_target
 					}
 					else {
-						&renderTargetSet.pongTarget
+						&render_target_set.pong_target
 					};
-					pingPongTurn += 1;
-					gl.bind_framebuffer(glow::FRAMEBUFFER, Some(pingPongTarget.framebuffer));
+					ping_pong_turn += 1;
+					gl.bind_framebuffer(glow::FRAMEBUFFER, Some(ping_pong_target.framebuffer));
 					gl.viewport(0, 0, width, height);
-					targetTexture = Some(pingPongTarget.texture);
+					target_texture = Some(ping_pong_target.texture);
 				}
 			}
 
 			// 소스 결정. (하프 단계는 지정한 하프 텍스처, 블룸 합성은 마지막 전체 해상도 결과)
-			let sourceTexture = match step.source {
-				PassStepTexture::halfA => {
-					renderTargetSet.halfTargetA.texture
+			let source_texture = match step.source {
+				PassStepTexture::HalfA => {
+					render_target_set.half_target_a.texture
 				}
-				PassStepTexture::halfB => {
-					renderTargetSet.halfTargetB.texture
+				PassStepTexture::HalfB => {
+					render_target_set.half_target_b.texture
 				}
 				_ => {
-					previousTexture
+					previous_texture
 				}
 			};
-			let (passWidth, passHeight) = if isHalfTarget {
-				(renderTargetSet.halfTargetA.width, renderTargetSet.halfTargetA.height)
+			let (pass_width, pass_height) = if is_half_target {
+				(render_target_set.half_target_a.width, render_target_set.half_target_a.height)
 			}
 			else {
 				(width, height)
 			};
 
-			pass.useProgram(gl);
+			pass.use_program(gl);
 			unsafe {
 				gl.active_texture(glow::TEXTURE0);
-				gl.bind_texture(glow::TEXTURE_2D, Some(sourceTexture));
-				gl.uniform_1_i32(pass.getUniformLocation(gl, "sourceTexture").as_ref(), 0);
+				gl.bind_texture(glow::TEXTURE_2D, Some(source_texture));
+				gl.uniform_1_i32(pass.get_uniform_location(gl, "sourceTexture").as_ref(), 0);
 				if let Some(auxiliary) = step.auxiliary {
-					let auxiliaryTexture = match auxiliary {
-						PassStepTexture::halfA => {
-							renderTargetSet.halfTargetA.texture
+					let auxiliary_texture = match auxiliary {
+						PassStepTexture::HalfA => {
+							render_target_set.half_target_a.texture
 						}
-						PassStepTexture::scene => {
-							renderTargetSet.sceneTarget.texture
+						PassStepTexture::Scene => {
+							render_target_set.scene_target.texture
 						}
 						_ => {
-							renderTargetSet.halfTargetB.texture
+							render_target_set.half_target_b.texture
 						}
 					};
 					gl.active_texture(glow::TEXTURE1);
-					gl.bind_texture(glow::TEXTURE_2D, Some(auxiliaryTexture));
-					gl.uniform_1_i32(pass.getUniformLocation(gl, "auxiliaryTexture").as_ref(), 1);
+					gl.bind_texture(glow::TEXTURE_2D, Some(auxiliary_texture));
+					gl.uniform_1_i32(pass.get_uniform_location(gl, "auxiliaryTexture").as_ref(), 1);
 					gl.active_texture(glow::TEXTURE0);
 				}
-				gl.uniform_2_f32(pass.getUniformLocation(gl, "resolution").as_ref(), passWidth as f32, passHeight as f32);
-				gl.uniform_1_f32(pass.getUniformLocation(gl, "time").as_ref(), self.time);
-				gl.uniform_1_f32(pass.getUniformLocation(gl, "strength").as_ref(), step.strength);
-				gl.uniform_4_f32(pass.getUniformLocation(gl, "parameters").as_ref(), step.parameters[0], step.parameters[1], step.parameters[2], step.parameters[3]);
-				gl.uniform_4_f32(pass.getUniformLocation(gl, "effectColor").as_ref(), step.color.red, step.color.green, step.color.blue, step.color.alpha);
+				gl.uniform_2_f32(pass.get_uniform_location(gl, "resolution").as_ref(), pass_width as f32, pass_height as f32);
+				gl.uniform_1_f32(pass.get_uniform_location(gl, "time").as_ref(), self.time);
+				gl.uniform_1_f32(pass.get_uniform_location(gl, "strength").as_ref(), step.strength);
+				gl.uniform_4_f32(pass.get_uniform_location(gl, "parameters").as_ref(), step.parameters[0], step.parameters[1], step.parameters[2], step.parameters[3]);
+				gl.uniform_4_f32(pass.get_uniform_location(gl, "effectColor").as_ref(), step.color.red, step.color.green, step.color.blue, step.color.alpha);
 			}
 			pass.draw(gl);
 
 			// 하프 단계는 전체 해상도 사슬의 "이전 결과" 를 바꾸지 않는다.
-			if !isHalfTarget {
-				if let Some(targetTexture) = targetTexture {
-					previousTexture = targetTexture;
+			if !is_half_target {
+				if let Some(target_texture) = target_texture {
+					previous_texture = target_texture;
 				}
 			}
 		}
@@ -1347,133 +1347,133 @@ impl ScreenEffect {
 			gl.bind_framebuffer(glow::FRAMEBUFFER, None);
 			gl.bind_vertex_array(None);
 		}
-		graphic.restoreRenderState();
+		graphic.restore_render_state();
 	}
 
 	//==============================================================================
 	// 켜진 효과 여부. (세기 0 은 꺼진 것으로 본다)
 	//==============================================================================
-	pub fn hasActiveEffect(&self) -> bool {
-		self.effectStateList.iter().any(|effectState| effectState.isEnabled && effectState.strength > 0.0)
+	pub fn has_active_effect(&self) -> bool {
+		self.effect_state_list.iter().any(|effect_state| effect_state.is_enabled && effect_state.strength > 0.0)
 	}
 
 	//==============================================================================
 	// 렌더 대상 준비. (크기가 바뀌면 다시 만든다)
 	//==============================================================================
-	fn ensureTargets(&mut self, gl: &glow::Context, width: i32, height: i32) -> Result<(), String> {
-		if let Some(renderTargetSet) = &self.renderTargetSet {
-			if renderTargetSet.sceneTarget.width == width && renderTargetSet.sceneTarget.height == height {
+	fn ensure_targets(&mut self, gl: &glow::Context, width: i32, height: i32) -> Result<(), String> {
+		if let Some(render_target_set) = &self.render_target_set {
+			if render_target_set.scene_target.width == width && render_target_set.scene_target.height == height {
 				return Ok(());
 			}
-			destroyRenderTargetSet(gl, renderTargetSet);
-			self.renderTargetSet = None;
+			destroy_render_target_set(gl, render_target_set);
+			self.render_target_set = None;
 		}
-		let halfWidth = ((width as f32 / 2.0).round() as i32).max(1);
-		let halfHeight = ((height as f32 / 2.0).round() as i32).max(1);
-		let renderTargetSet = RenderTargetSet {
-			sceneTarget: createRenderTarget(gl, width, height, false, true)?,
-			pingTarget: createRenderTarget(gl, width, height, false, false)?,
-			pongTarget: createRenderTarget(gl, width, height, false, false)?,
-			halfTargetA: createRenderTarget(gl, halfWidth, halfHeight, false, false)?,
-			halfTargetB: createRenderTarget(gl, halfWidth, halfHeight, false, false)?,
+		let half_width = ((width as f32 / 2.0).round() as i32).max(1);
+		let half_height = ((height as f32 / 2.0).round() as i32).max(1);
+		let render_target_set = RenderTargetSet {
+			scene_target: create_render_target(gl, width, height, false, true)?,
+			ping_target: create_render_target(gl, width, height, false, false)?,
+			pong_target: create_render_target(gl, width, height, false, false)?,
+			half_target_a: create_render_target(gl, half_width, half_height, false, false)?,
+			half_target_b: create_render_target(gl, half_width, half_height, false, false)?,
 		};
-		self.renderTargetSet = Some(renderTargetSet);
+		self.render_target_set = Some(render_target_set);
 		Ok(())
 	}
 
 	//==============================================================================
 	// 패스 준비. (없으면 컴파일해 담는다. 실패도 담아 두고 한 번만 알린다. 원본 resolvePass)
 	//==============================================================================
-	fn ensurePass(&mut self, gl: &glow::Context, passName: &'static str) {
-		if self.passTable.contains_key(passName) {
+	fn ensure_pass(&mut self, gl: &glow::Context, pass_name: &'static str) {
+		if self.pass_table.contains_key(pass_name) {
 			return;
 		}
-		let effectBody = findEffectBody(passName).unwrap_or("");
-		let fragmentShaderSource = format!("{}{}{}", FRAGMENTSHADER_HEADER, effectBody, FRAGMENTSHADER_FOOTER);
-		let pass = match FullscreenPass::new(gl, &fragmentShaderSource) {
+		let effect_body = find_effect_body(pass_name).unwrap_or("");
+		let fragment_shader_source = format!("{}{}{}", FRAGMENTSHADER_HEADER, effect_body, FRAGMENTSHADER_FOOTER);
+		let pass = match FullscreenPass::new(gl, &fragment_shader_source) {
 			Ok(pass) => {
 				Some(pass)
 			}
 			Err(error) => {
-				eprintln!("ScreenEffect: pass \"{}\" failed: {}", passName, error);
+				eprintln!("ScreenEffect: pass \"{}\" failed: {}", pass_name, error);
 				None
 			}
 		};
-		self.passTable.insert(passName, pass);
+		self.pass_table.insert(pass_name, pass);
 	}
 
 	//==============================================================================
 	// 효과 켜기 / 끄기.
 	//==============================================================================
-	pub fn setEnabled(&mut self, effectType: ScreenEffectType, isEnabled: bool) {
-		self.effectStateList[effectType as usize].isEnabled = isEnabled;
+	pub fn set_enabled(&mut self, effect_type: ScreenEffectType, is_enabled: bool) {
+		self.effect_state_list[effect_type as usize].is_enabled = is_enabled;
 	}
 
 	//==============================================================================
 	// 효과 켜짐 여부 반환.
 	//==============================================================================
-	pub fn isEnabled(&self, effectType: ScreenEffectType) -> bool {
-		self.effectStateList[effectType as usize].isEnabled
+	pub fn is_enabled(&self, effect_type: ScreenEffectType) -> bool {
+		self.effect_state_list[effect_type as usize].is_enabled
 	}
 
 	//==============================================================================
 	// 세기 설정. (0 이면 꺼진 것과 같다)
 	//==============================================================================
-	pub fn setStrength(&mut self, effectType: ScreenEffectType, strength: f32) {
-		self.effectStateList[effectType as usize].strength = strength;
+	pub fn set_strength(&mut self, effect_type: ScreenEffectType, strength: f32) {
+		self.effect_state_list[effect_type as usize].strength = strength;
 	}
 
 	//==============================================================================
 	// 세기 반환.
 	//==============================================================================
-	pub fn getStrength(&self, effectType: ScreenEffectType) -> f32 {
-		self.effectStateList[effectType as usize].strength
+	pub fn get_strength(&self, effect_type: ScreenEffectType) -> f32 {
+		self.effect_state_list[effect_type as usize].strength
 	}
 
 	//==============================================================================
 	// 파라미터 설정. (효과마다 뜻이 다르다. ScreenEffectType 주석 참고, 원본의 y / z / w 기본값 0 은 직접 넘긴다)
 	//==============================================================================
-	pub fn setParameters(&mut self, effectType: ScreenEffectType, x: f32, y: f32, z: f32, w: f32) {
-		self.effectStateList[effectType as usize].parameters = [x, y, z, w];
+	pub fn set_parameters(&mut self, effect_type: ScreenEffectType, x: f32, y: f32, z: f32, w: f32) {
+		self.effect_state_list[effect_type as usize].parameters = [x, y, z, w];
 	}
 
 	//==============================================================================
 	// 파라미터 하나 설정. (이름은 SCREEN_EFFECT_PARAMETER_NAMES)
 	//==============================================================================
-	pub fn setParameter(&mut self, effectType: ScreenEffectType, parameterName: &str, value: f32) {
-		let parameterNames = effectType.getParameterNames();
-		if let Some(parameterIndex) = parameterNames.iter().position(|name| *name == parameterName) {
-			self.effectStateList[effectType as usize].parameters[parameterIndex] = value;
+	pub fn set_parameter(&mut self, effect_type: ScreenEffectType, parameter_name: &str, value: f32) {
+		let parameter_names = effect_type.get_parameter_names();
+		if let Some(parameter_index) = parameter_names.iter().position(|name| *name == parameter_name) {
+			self.effect_state_list[effect_type as usize].parameters[parameter_index] = value;
 		}
 	}
 
 	//==============================================================================
 	// 파라미터 반환.
 	//==============================================================================
-	pub fn getParameters(&self, effectType: ScreenEffectType) -> [f32; 4] {
-		self.effectStateList[effectType as usize].parameters
+	pub fn get_parameters(&self, effect_type: ScreenEffectType) -> [f32; 4] {
+		self.effect_state_list[effect_type as usize].parameters
 	}
 
 	//==============================================================================
 	// 색 설정. (Color 또는 "#rrggbb" 같은 문자열)
 	//==============================================================================
-	pub fn setColor(&mut self, effectType: ScreenEffectType, color: impl Into<Color>) {
-		self.effectStateList[effectType as usize].color = color.into();
+	pub fn set_color(&mut self, effect_type: ScreenEffectType, color: impl Into<Color>) {
+		self.effect_state_list[effect_type as usize].color = color.into();
 	}
 
 	//==============================================================================
 	// 색 반환.
 	//==============================================================================
-	pub fn getColor(&self, effectType: ScreenEffectType) -> Color {
-		self.effectStateList[effectType as usize].color
+	pub fn get_color(&self, effect_type: ScreenEffectType) -> Color {
+		self.effect_state_list[effect_type as usize].color
 	}
 
 	//==============================================================================
 	// 전부 끄기.
 	//==============================================================================
-	pub fn disableAll(&mut self) {
-		for effectState in self.effectStateList.iter_mut() {
-			effectState.isEnabled = false;
+	pub fn disable_all(&mut self) {
+		for effect_state in self.effect_state_list.iter_mut() {
+			effect_state.is_enabled = false;
 		}
 	}
 
@@ -1481,59 +1481,59 @@ impl ScreenEffect {
 	// 타임라인 속성 적용. ("vignette" = 세기(0 이면 끔), "shockwave.radius" = 파라미터, "fade.color" = 색, "fade.enabled" = 켜기)
 	// - 값은 문자열이다. 숫자는 원본 Number() 처럼 읽고(빈 문자열은 0, 못 읽으면 NaN), 색은 "#rrggbb" 다.
 	//==============================================================================
-	pub fn setTimelineProperty(&mut self, propertyName: &str, value: &str) {
-		let (effectName, memberName) = match propertyName.find('.') {
-			Some(separatorIndex) => {
-				(&propertyName[..separatorIndex], &propertyName[separatorIndex + 1..])
+	pub fn set_timeline_property(&mut self, property_name: &str, value: &str) {
+		let (effect_name, member_name) = match property_name.find('.') {
+			Some(separator_index) => {
+				(&property_name[..separator_index], &property_name[separator_index + 1..])
 			}
 			None => {
-				(propertyName, "")
+				(property_name, "")
 			}
 		};
-		let effectType = match ScreenEffectType::fromName(effectName) {
-			Some(effectType) => {
-				effectType
+		let effect_type = match ScreenEffectType::from_name(effect_name) {
+			Some(effect_type) => {
+				effect_type
 			}
 			None => {
 				return;
 			}
 		};
-		if memberName.is_empty() {
-			let strength = parseTimelineNumber(value);
-			let effectState = &mut self.effectStateList[effectType as usize];
-			effectState.strength = strength;
-			effectState.isEnabled = strength > 0.0;
+		if member_name.is_empty() {
+			let strength = parse_timeline_number(value);
+			let effect_state = &mut self.effect_state_list[effect_type as usize];
+			effect_state.strength = strength;
+			effect_state.is_enabled = strength > 0.0;
 			return;
 		}
-		if memberName == "color" {
-			self.effectStateList[effectType as usize].color = Color::createFromHEX(value);
+		if member_name == "color" {
+			self.effect_state_list[effect_type as usize].color = Color::create_from_hex(value);
 			return;
 		}
-		if memberName == "enabled" {
-			self.effectStateList[effectType as usize].isEnabled = value == "true";
+		if member_name == "enabled" {
+			self.effect_state_list[effect_type as usize].is_enabled = value == "true";
 			return;
 		}
-		self.setParameter(effectType, memberName, parseTimelineNumber(value));
+		self.set_parameter(effect_type, member_name, parse_timeline_number(value));
 	}
 
 	//==============================================================================
 	// 시간 반환.
 	//==============================================================================
-	pub fn getTime(&self) -> f32 {
+	pub fn get_time(&self) -> f32 {
 		self.time
 	}
 
 	//==============================================================================
 	// 씬 텍스처 반환. (end 이후, 마지막 프레임에 떠 온 영역 원본)
 	//==============================================================================
-	pub fn getSceneTexture(&self) -> Option<GlTexture> {
-		self.renderTargetSet.as_ref().map(|renderTargetSet| renderTargetSet.sceneTarget.texture)
+	pub fn get_scene_texture(&self) -> Option<GlTexture> {
+		self.render_target_set.as_ref().map(|render_target_set| render_target_set.scene_target.texture)
 	}
 
 	//==============================================================================
 	// 적용 차례 반환. (정적)
 	//==============================================================================
-	pub fn getEffectOrder() -> Vec<ScreenEffectType> {
+	pub fn get_effect_order() -> Vec<ScreenEffectType> {
 		EFFECT_ORDER.to_vec()
 	}
 
@@ -1541,14 +1541,14 @@ impl ScreenEffect {
 	// 파괴. (GL 자원 해제: 렌더 대상과 패스 프로그램)
 	//==============================================================================
 	pub fn destroy(&mut self, graphic: &mut Graphic) {
-		let gl = graphic.getGL();
-		if let Some(renderTargetSet) = self.renderTargetSet.take() {
-			destroyRenderTargetSet(gl, &renderTargetSet);
+		let gl = graphic.get_gl();
+		if let Some(render_target_set) = self.render_target_set.take() {
+			destroy_render_target_set(gl, &render_target_set);
 		}
-		for pass in self.passTable.values().flatten() {
+		for pass in self.pass_table.values().flatten() {
 			pass.destroy(gl);
 		}
-		self.passTable.clear();
+		self.pass_table.clear();
 	}
 }
 
@@ -1561,12 +1561,12 @@ impl Default for ScreenEffect {
 //==============================================================================
 // 타임라인 값을 숫자로 읽기. (원본 Number(): 빈 문자열은 0, 못 읽으면 NaN)
 //==============================================================================
-fn parseTimelineNumber(value: &str) -> f32 {
-	let trimmedValue = value.trim();
-	if trimmedValue.is_empty() {
+fn parse_timeline_number(value: &str) -> f32 {
+	let trimmed_value = value.trim();
+	if trimmed_value.is_empty() {
 		return 0.0;
 	}
-	trimmedValue.parse::<f32>().unwrap_or(f32::NAN)
+	trimmed_value.parse::<f32>().unwrap_or(f32::NAN)
 }
 
 #[cfg(test)]
@@ -1574,16 +1574,16 @@ mod tests {
 	use super::*;
 
 	//==============================================================================
-	// 표들이 적용 차례(열거형 선언 차례)와 맞는지. (getName, 기본값 표는 효과 번호로 바로 찾는다)
+	// 표들이 적용 차례(열거형 선언 차례)와 맞는지. (get_name, 기본값 표는 효과 번호로 바로 찾는다)
 	//==============================================================================
 	#[test]
-	fn tablesFollowEffectOrder() {
-		for (effectIndex, effectType) in EFFECT_ORDER.iter().enumerate() {
-			assert_eq!(*effectType as usize, effectIndex);
-			assert_eq!(EFFECT_NAME_TABLE[effectIndex].0, *effectType);
-			assert_eq!(DEFAULT_PARAMETER_TABLE[effectIndex].0, *effectType);
-			assert_eq!(SCREEN_EFFECT_PARAMETER_NAMES[effectIndex].0, *effectType);
-			assert_eq!(ScreenEffectType::fromName(effectType.getName()), Some(*effectType));
+	fn tables_follow_effect_order() {
+		for (effect_index, effect_type) in EFFECT_ORDER.iter().enumerate() {
+			assert_eq!(*effect_type as usize, effect_index);
+			assert_eq!(EFFECT_NAME_TABLE[effect_index].0, *effect_type);
+			assert_eq!(DEFAULT_PARAMETER_TABLE[effect_index].0, *effect_type);
+			assert_eq!(SCREEN_EFFECT_PARAMETER_NAMES[effect_index].0, *effect_type);
+			assert_eq!(ScreenEffectType::from_name(effect_type.get_name()), Some(*effect_type));
 		}
 	}
 
@@ -1591,15 +1591,15 @@ mod tests {
 	// 단계로 쓰이는 패스는 모두 본문이 있다. (bloom, anamorphic 은 내부 패스로 펴진다)
 	//==============================================================================
 	#[test]
-	fn everyPassHasBody() {
-		for effectType in EFFECT_ORDER.iter() {
-			if *effectType == ScreenEffectType::bloom || *effectType == ScreenEffectType::anamorphic {
+	fn every_pass_has_body() {
+		for effect_type in EFFECT_ORDER.iter() {
+			if *effect_type == ScreenEffectType::Bloom || *effect_type == ScreenEffectType::Anamorphic {
 				continue;
 			}
-			assert!(findEffectBody(effectType.getName()).is_some(), "{:?}", effectType);
+			assert!(find_effect_body(effect_type.get_name()).is_some(), "{:?}", effect_type);
 		}
-		for passName in ["copy", "bloomBright", "bloomComposite", "anamorphicComposite", "regionComposite"] {
-			assert!(findEffectBody(passName).is_some(), "{}", passName);
+		for pass_name in ["copy", "bloomBright", "bloomComposite", "anamorphicComposite", "regionComposite"] {
+			assert!(find_effect_body(pass_name).is_some(), "{}", pass_name);
 		}
 	}
 
@@ -1607,23 +1607,23 @@ mod tests {
 	// 타임라인 속성: 세기, 파라미터 이름, 색, 켜기.
 	//==============================================================================
 	#[test]
-	fn timelinePropertyUpdatesState() {
-		let mut screenEffect = ScreenEffect::new();
-		assert!(!screenEffect.hasActiveEffect());
-		screenEffect.setTimelineProperty("vignette", "0.5");
-		assert!(screenEffect.isEnabled(ScreenEffectType::vignette));
-		assert_eq!(screenEffect.getStrength(ScreenEffectType::vignette), 0.5);
-		assert!(screenEffect.hasActiveEffect());
-		screenEffect.setTimelineProperty("vignette", "0");
-		assert!(!screenEffect.isEnabled(ScreenEffectType::vignette));
-		screenEffect.setTimelineProperty("shockwave.radius", "0.75");
-		assert_eq!(screenEffect.getParameters(ScreenEffectType::shockwave), [0.5, 0.5, 0.75, 0.1]);
-		screenEffect.setTimelineProperty("fade.color", "#ff0000");
-		assert_eq!(screenEffect.getColor(ScreenEffectType::fade), Color::create(1.0, 0.0, 0.0, 1.0));
-		screenEffect.setTimelineProperty("fade.enabled", "true");
-		assert!(screenEffect.isEnabled(ScreenEffectType::fade));
-		screenEffect.resetAll();
-		assert!(!screenEffect.isEnabled(ScreenEffectType::fade));
-		assert_eq!(screenEffect.getColor(ScreenEffectType::fade), Color::create(0.0, 0.0, 0.0, 1.0));
+	fn timeline_property_updates_state() {
+		let mut screen_effect = ScreenEffect::new();
+		assert!(!screen_effect.has_active_effect());
+		screen_effect.set_timeline_property("vignette", "0.5");
+		assert!(screen_effect.is_enabled(ScreenEffectType::Vignette));
+		assert_eq!(screen_effect.get_strength(ScreenEffectType::Vignette), 0.5);
+		assert!(screen_effect.has_active_effect());
+		screen_effect.set_timeline_property("vignette", "0");
+		assert!(!screen_effect.is_enabled(ScreenEffectType::Vignette));
+		screen_effect.set_timeline_property("shockwave.radius", "0.75");
+		assert_eq!(screen_effect.get_parameters(ScreenEffectType::Shockwave), [0.5, 0.5, 0.75, 0.1]);
+		screen_effect.set_timeline_property("fade.color", "#ff0000");
+		assert_eq!(screen_effect.get_color(ScreenEffectType::Fade), Color::create(1.0, 0.0, 0.0, 1.0));
+		screen_effect.set_timeline_property("fade.enabled", "true");
+		assert!(screen_effect.is_enabled(ScreenEffectType::Fade));
+		screen_effect.reset_all();
+		assert!(!screen_effect.is_enabled(ScreenEffectType::Fade));
+		assert_eq!(screen_effect.get_color(ScreenEffectType::Fade), Color::create(0.0, 0.0, 0.0, 1.0));
 	}
 }

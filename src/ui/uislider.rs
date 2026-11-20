@@ -1,12 +1,12 @@
 //==============================================================================
 // 슬라이더. (원본 ui/uislider.js 의 UISlider)
 // - 끌거나 눌러서 값을 고른다. 트랙 + 채움 + 손잡이(원)를 직접 그린다. 값은 범위로 자르기만 한다. (원본에도 눈금 맞추기는 없다)
-// - 손잡이 노드(setThumbNode)를 정하면 원을 그리지 않고 그 노드를 손잡이 자리로 옮긴다.
+// - 손잡이 노드(set_thumb_node)를 정하면 원을 그리지 않고 그 노드를 손잡이 자리로 옮긴다.
 // - 원본과 다른 것:
 //   - 원본은 draw 안에서 손잡이 노드를 옮긴다. 러스트 판은 그리는 동안 트리를 바꿀 수 없어 tick 에서 옮긴다. (손잡이 노드는 호스트의 자식으로 둔다)
 //   - 입력 좌표는 원본처럼 호스트 왼쪽 위 모서리 기준이되, 노드 행렬의 역으로 바꿔 크기와 회전까지 따른다. (원본은 모서리 위치만 뺀다)
-//   - 값 바뀜 이벤트는 슬라이더와 문맥을 받는다. 씬 코드에서 부르는 fireValueChanged 는 다음 tick 에 이벤트를 부른다.
-// - attachToTree 에서 호스트 노드를 interactable 로 켠다. nodeTree.addComponent(nodeId, UISlider::new()) 로 붙인다.
+//   - 값 바뀜 이벤트는 슬라이더와 문맥을 받는다. 씬 코드에서 부르는 fire_value_changed 는 다음 tick 에 이벤트를 부른다.
+// - attach_to_tree 에서 호스트 노드를 interactable 로 켠다. node_tree.add_component(node_id, UISlider::new()) 로 붙인다.
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::math;
@@ -28,22 +28,22 @@ pub type UISliderEvent = Box<dyn FnMut(&mut UISlider, &mut ComponentContext)>;
 // 슬라이더.
 //==============================================================================
 pub struct UISlider {
-	uiControl: UIControl,
+	ui_control: UIControl,
 	value: f32,
-	minValue: f32,
-	maxValue: f32,
-	trackColor: Color,
-	fillColor: Color,
-	thumbColor: Color,
-	thumbRadius: f32,
-	trackThickness: f32,
-	thumbNodeId: Option<NodeId>,
-	cornerRadius: f32,
+	min_value: f32,
+	max_value: f32,
+	track_color: Color,
+	fill_color: Color,
+	thumb_color: Color,
+	thumb_radius: f32,
+	track_thickness: f32,
+	thumb_node_id: Option<NodeId>,
+	corner_radius: f32,
 	direction: ProgressDirection,
-	isDragging: bool,
-	isInteractable: bool,
-	valueChangedEvent: Option<UISliderEvent>,
-	isValueChangedFirePending: bool,
+	is_dragging: bool,
+	is_interactable: bool,
+	value_changed_event: Option<UISliderEvent>,
+	is_value_changed_fire_pending: bool,
 }
 
 impl UISlider {
@@ -52,57 +52,57 @@ impl UISlider {
 	//==============================================================================
 	pub fn new() -> UISlider {
 		UISlider {
-			uiControl: UIControl::new(),
+			ui_control: UIControl::new(),
 			value: 0.0,
-			minValue: 0.0,
-			maxValue: 1.0,
-			trackColor: Color::create(0.7, 0.7, 0.7, 1.0),
-			fillColor: Color::create(0.23, 0.51, 0.96, 1.0),
-			thumbColor: Color::white(),
-			thumbRadius: 16.0,
-			trackThickness: 0.0,
-			thumbNodeId: None,
-			cornerRadius: 0.0,
-			direction: ProgressDirection::horizontal,
-			isDragging: false,
-			isInteractable: true,
-			valueChangedEvent: None,
-			isValueChangedFirePending: false,
+			min_value: 0.0,
+			max_value: 1.0,
+			track_color: Color::create(0.7, 0.7, 0.7, 1.0),
+			fill_color: Color::create(0.23, 0.51, 0.96, 1.0),
+			thumb_color: Color::white(),
+			thumb_radius: 16.0,
+			track_thickness: 0.0,
+			thumb_node_id: None,
+			corner_radius: 0.0,
+			direction: ProgressDirection::Horizontal,
+			is_dragging: false,
+			is_interactable: true,
+			value_changed_event: None,
+			is_value_changed_fire_pending: false,
 		}
 	}
 
 	//==============================================================================
 	// 품은 컨트롤 반환.
 	//==============================================================================
-	pub fn getUIControl(&self) -> &UIControl {
-		&self.uiControl
+	pub fn get_uicontrol(&self) -> &UIControl {
+		&self.ui_control
 	}
 
 	//==============================================================================
 	// 품은 컨트롤 반환. (변경용)
 	//==============================================================================
-	pub fn getUIControlMut(&mut self) -> &mut UIControl {
-		&mut self.uiControl
+	pub fn get_uicontrol_mut(&mut self) -> &mut UIControl {
+		&mut self.ui_control
 	}
 
 	//==============================================================================
 	// 컨텐트 노드 핸들.
 	//==============================================================================
-	pub fn getContent(&self) -> Option<NodeId> {
-		self.uiControl.getContent()
+	pub fn get_content(&self) -> Option<NodeId> {
+		self.ui_control.get_content()
 	}
 
 	//==============================================================================
 	// 손잡이 중심 자리. (호스트 영역 안)
 	//==============================================================================
-	fn calculateThumbCenter(&self, contentSize: Vector2) -> Vector2 {
-		let ratio = self.getRatio();
+	fn calculate_thumb_center(&self, content_size: Vector2) -> Vector2 {
+		let ratio = self.get_ratio();
 		match self.direction {
-			ProgressDirection::vertical => {
-				Vector2::create(contentSize.x * 0.5, contentSize.y * (1.0 - ratio))
+			ProgressDirection::Vertical => {
+				Vector2::create(content_size.x * 0.5, content_size.y * (1.0 - ratio))
 			}
-			ProgressDirection::horizontal => {
-				Vector2::create(contentSize.x * ratio, contentSize.y * 0.5)
+			ProgressDirection::Horizontal => {
+				Vector2::create(content_size.x * ratio, content_size.y * 0.5)
 			}
 		}
 	}
@@ -110,24 +110,24 @@ impl UISlider {
 	//==============================================================================
 	// 사각형 채우기. (둥근 크기가 있으면 둥글게)
 	//==============================================================================
-	fn fillRect(&self, graphic: &mut Graphic, rect: Rect, color: Color) {
-		graphic.setFillColor(color);
-		if self.cornerRadius > 0.0 {
-			graphic.drawRoundRect(rect, self.cornerRadius);
+	fn fill_rect(&self, graphic: &mut Graphic, rect: Rect, color: Color) {
+		graphic.set_fill_color(color);
+		if self.corner_radius > 0.0 {
+			graphic.draw_round_rect(rect, self.corner_radius);
 		}
 		else {
-			graphic.drawRect(rect);
+			graphic.draw_rect(rect);
 		}
 	}
 
 	//==============================================================================
 	// 값 바뀜 이벤트 부르기.
 	//==============================================================================
-	fn fireValueChangedEvent(&mut self, context: &mut ComponentContext) {
-		if let Some(mut valueChangedEvent) = self.valueChangedEvent.take() {
-			valueChangedEvent(self, context);
-			if self.valueChangedEvent.is_none() {
-				self.valueChangedEvent = Some(valueChangedEvent);
+	fn fire_value_changed_event(&mut self, context: &mut ComponentContext) {
+		if let Some(mut value_changed_event) = self.value_changed_event.take() {
+			value_changed_event(self, context);
+			if self.value_changed_event.is_none() {
+				self.value_changed_event = Some(value_changed_event);
 			}
 		}
 	}
@@ -135,239 +135,239 @@ impl UISlider {
 	//==============================================================================
 	// 입력 좌표로 값 갱신. (바뀌었으면 이벤트)
 	//==============================================================================
-	fn updateValueFromInput(&mut self, context: &mut ComponentContext, viewInputPosition: Vector2) {
-		let nodeId = context.getNodeId();
-		let localPosition = match context.getNodeTree().convertViewPositionToNodePosition(nodeId, viewInputPosition) {
-			Some(localPosition) => {
-				localPosition
+	fn update_value_from_input(&mut self, context: &mut ComponentContext, view_input_position: Vector2) {
+		let node_id = context.get_node_id();
+		let local_position = match context.get_node_tree().convert_view_position_to_node_position(node_id, view_input_position) {
+			Some(local_position) => {
+				local_position
 			}
 			None => {
 				return;
 			}
 		};
-		let contentSize = context.getTransform().getContentSize();
+		let content_size = context.get_transform().get_content_size();
 		let ratio = match self.direction {
-			ProgressDirection::vertical => {
-				if contentSize.y > 0.0 {
-					1.0 - localPosition.y / contentSize.y
+			ProgressDirection::Vertical => {
+				if content_size.y > 0.0 {
+					1.0 - local_position.y / content_size.y
 				}
 				else {
 					0.0
 				}
 			}
-			ProgressDirection::horizontal => {
-				if contentSize.x > 0.0 {
-					localPosition.x / contentSize.x
+			ProgressDirection::Horizontal => {
+				if content_size.x > 0.0 {
+					local_position.x / content_size.x
 				}
 				else {
 					0.0
 				}
 			}
 		};
-		let clampedRatio = math::clamp(ratio, 0.0, 1.0);
-		let previousValue = self.value;
-		let newValue = self.minValue + (self.maxValue - self.minValue) * clampedRatio;
-		self.setValue(newValue);
-		if self.value != previousValue {
-			self.fireValueChangedEvent(context);
+		let clamped_ratio = math::clamp(ratio, 0.0, 1.0);
+		let previous_value = self.value;
+		let new_value = self.min_value + (self.max_value - self.min_value) * clamped_ratio;
+		self.set_value(new_value);
+		if self.value != previous_value {
+			self.fire_value_changed_event(context);
 		}
 	}
 
 	//==============================================================================
 	// 0 ~ 1 비율 반환.
 	//==============================================================================
-	pub fn getRatio(&self) -> f32 {
-		let range = self.maxValue - self.minValue;
+	pub fn get_ratio(&self) -> f32 {
+		let range = self.max_value - self.min_value;
 		if range <= 0.0 {
 			return 0.0;
 		}
-		let ratio = (self.value - self.minValue) / range;
+		let ratio = (self.value - self.min_value) / range;
 		math::clamp(ratio, 0.0, 1.0)
 	}
 
 	//==============================================================================
 	// 값 설정. (범위로 자른다. 이벤트는 부르지 않는다)
 	//==============================================================================
-	pub fn setValue(&mut self, value: f32) {
-		self.value = math::clamp(value, self.minValue, self.maxValue);
+	pub fn set_value(&mut self, value: f32) {
+		self.value = math::clamp(value, self.min_value, self.max_value);
 	}
 
 	//==============================================================================
 	// 값 반환.
 	//==============================================================================
-	pub fn getValue(&self) -> f32 {
+	pub fn get_value(&self) -> f32 {
 		self.value
 	}
 
 	//==============================================================================
 	// 범위 설정. (지금 값을 새 범위로 다시 자른다)
 	//==============================================================================
-	pub fn setRange(&mut self, minValue: f32, maxValue: f32) {
-		self.minValue = minValue;
-		self.maxValue = maxValue;
+	pub fn set_range(&mut self, min_value: f32, max_value: f32) {
+		self.min_value = min_value;
+		self.max_value = max_value;
 		let value = self.value;
-		self.setValue(value);
+		self.set_value(value);
 	}
 
 	//==============================================================================
 	// 최소값 반환.
 	//==============================================================================
-	pub fn getMinValue(&self) -> f32 {
-		self.minValue
+	pub fn get_min_value(&self) -> f32 {
+		self.min_value
 	}
 
 	//==============================================================================
 	// 최대값 반환.
 	//==============================================================================
-	pub fn getMaxValue(&self) -> f32 {
-		self.maxValue
+	pub fn get_max_value(&self) -> f32 {
+		self.max_value
 	}
 
 	//==============================================================================
-	// 값 바뀜 이벤트를 억지로 부르기. (씬 코드에서 setValue 한 뒤. 다음 tick 에 부른다)
+	// 값 바뀜 이벤트를 억지로 부르기. (씬 코드에서 set_value 한 뒤. 다음 tick 에 부른다)
 	//==============================================================================
-	pub fn fireValueChanged(&mut self) {
-		self.isValueChangedFirePending = true;
+	pub fn fire_value_changed(&mut self) {
+		self.is_value_changed_fire_pending = true;
 	}
 
 	//==============================================================================
 	// 트랙 색 설정.
 	//==============================================================================
-	pub fn setTrackColor(&mut self, color: impl Into<Color>) {
-		self.trackColor = color.into();
+	pub fn set_track_color(&mut self, color: impl Into<Color>) {
+		self.track_color = color.into();
 	}
 
 	//==============================================================================
 	// 트랙 색 반환.
 	//==============================================================================
-	pub fn getTrackColor(&self) -> Color {
-		self.trackColor
+	pub fn get_track_color(&self) -> Color {
+		self.track_color
 	}
 
 	//==============================================================================
 	// 채움 색 설정.
 	//==============================================================================
-	pub fn setFillColor(&mut self, color: impl Into<Color>) {
-		self.fillColor = color.into();
+	pub fn set_fill_color(&mut self, color: impl Into<Color>) {
+		self.fill_color = color.into();
 	}
 
 	//==============================================================================
 	// 채움 색 반환.
 	//==============================================================================
-	pub fn getFillColor(&self) -> Color {
-		self.fillColor
+	pub fn get_fill_color(&self) -> Color {
+		self.fill_color
 	}
 
 	//==============================================================================
 	// 손잡이 색 설정.
 	//==============================================================================
-	pub fn setThumbColor(&mut self, color: impl Into<Color>) {
-		self.thumbColor = color.into();
+	pub fn set_thumb_color(&mut self, color: impl Into<Color>) {
+		self.thumb_color = color.into();
 	}
 
 	//==============================================================================
 	// 손잡이 색 반환.
 	//==============================================================================
-	pub fn getThumbColor(&self) -> Color {
-		self.thumbColor
+	pub fn get_thumb_color(&self) -> Color {
+		self.thumb_color
 	}
 
 	//==============================================================================
 	// 손잡이 반지름 설정.
 	//==============================================================================
-	pub fn setThumbRadius(&mut self, thumbRadius: f32) {
-		self.thumbRadius = thumbRadius;
+	pub fn set_thumb_radius(&mut self, thumb_radius: f32) {
+		self.thumb_radius = thumb_radius;
 	}
 
 	//==============================================================================
 	// 손잡이 반지름 반환.
 	//==============================================================================
-	pub fn getThumbRadius(&self) -> f32 {
-		self.thumbRadius
+	pub fn get_thumb_radius(&self) -> f32 {
+		self.thumb_radius
 	}
 
 	//==============================================================================
 	// 트랙 두께 설정. (0 이면 호스트 영역 전체, 아니면 가운데에 그 두께로)
 	//==============================================================================
-	pub fn setTrackThickness(&mut self, trackThickness: f32) {
-		self.trackThickness = trackThickness;
+	pub fn set_track_thickness(&mut self, track_thickness: f32) {
+		self.track_thickness = track_thickness;
 	}
 
 	//==============================================================================
 	// 트랙 두께 반환.
 	//==============================================================================
-	pub fn getTrackThickness(&self) -> f32 {
-		self.trackThickness
+	pub fn get_track_thickness(&self) -> f32 {
+		self.track_thickness
 	}
 
 	//==============================================================================
 	// 손잡이 노드 설정. (호스트의 자식. 정하면 원 대신 이 노드를 손잡이 자리로 옮긴다)
 	//==============================================================================
-	pub fn setThumbNode(&mut self, thumbNodeId: Option<NodeId>) {
-		self.thumbNodeId = thumbNodeId;
+	pub fn set_thumb_node(&mut self, thumb_node_id: Option<NodeId>) {
+		self.thumb_node_id = thumb_node_id;
 	}
 
 	//==============================================================================
 	// 손잡이 노드 반환.
 	//==============================================================================
-	pub fn getThumbNode(&self) -> Option<NodeId> {
-		self.thumbNodeId
+	pub fn get_thumb_node(&self) -> Option<NodeId> {
+		self.thumb_node_id
 	}
 
 	//==============================================================================
 	// 둥근 모서리 반지름 설정.
 	//==============================================================================
-	pub fn setCornerRadius(&mut self, cornerRadius: f32) {
-		self.cornerRadius = cornerRadius;
+	pub fn set_corner_radius(&mut self, corner_radius: f32) {
+		self.corner_radius = corner_radius;
 	}
 
 	//==============================================================================
 	// 둥근 모서리 반지름 반환.
 	//==============================================================================
-	pub fn getCornerRadius(&self) -> f32 {
-		self.cornerRadius
+	pub fn get_corner_radius(&self) -> f32 {
+		self.corner_radius
 	}
 
 	//==============================================================================
 	// 방향 설정.
 	//==============================================================================
-	pub fn setDirection(&mut self, direction: ProgressDirection) {
+	pub fn set_direction(&mut self, direction: ProgressDirection) {
 		self.direction = direction;
 	}
 
 	//==============================================================================
 	// 방향 반환.
 	//==============================================================================
-	pub fn getDirection(&self) -> ProgressDirection {
+	pub fn get_direction(&self) -> ProgressDirection {
 		self.direction
 	}
 
 	//==============================================================================
 	// 값 바뀜 이벤트 설정.
 	//==============================================================================
-	pub fn setValueChangedEvent(&mut self, valueChangedEvent: UISliderEvent) {
-		self.valueChangedEvent = Some(valueChangedEvent);
+	pub fn set_value_changed_event(&mut self, value_changed_event: UISliderEvent) {
+		self.value_changed_event = Some(value_changed_event);
 	}
 
 	//==============================================================================
 	// 사용 가능 설정. (끄면 누름을 받지 않는다)
 	//==============================================================================
-	pub fn setInteractable(&mut self, isInteractable: bool) {
-		self.isInteractable = isInteractable;
+	pub fn set_interactable(&mut self, is_interactable: bool) {
+		self.is_interactable = is_interactable;
 	}
 
 	//==============================================================================
 	// 사용 가능 여부.
 	//==============================================================================
-	pub fn getInteractable(&self) -> bool {
-		self.isInteractable
+	pub fn get_interactable(&self) -> bool {
+		self.is_interactable
 	}
 
 	//==============================================================================
 	// 끄는 중인지.
 	//==============================================================================
-	pub fn isDragging(&self) -> bool {
-		self.isDragging
+	pub fn is_dragging(&self) -> bool {
+		self.is_dragging
 	}
 }
 
@@ -378,50 +378,50 @@ impl Default for UISlider {
 }
 
 impl Component for UISlider {
-	fn getComponentBase(&self) -> &ComponentBase {
-		self.uiControl.getComponentBase()
+	fn get_component_base(&self) -> &ComponentBase {
+		self.ui_control.get_component_base()
 	}
 
-	fn getComponentBaseMut(&mut self) -> &mut ComponentBase {
-		self.uiControl.getComponentBaseMut()
+	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
+		self.ui_control.get_component_base_mut()
 	}
 
-	fn getComponentType(&self) -> &'static str {
+	fn get_component_type(&self) -> &'static str {
 		"UISlider"
 	}
 
-	fn attachToTree(&mut self, nodeTree: &mut NodeTree, nodeId: NodeId) {
-		self.uiControl.getUIViewMut().createContentNode(nodeTree, nodeId);
-		nodeTree[nodeId].setInteractable(true);
+	fn attach_to_tree(&mut self, node_tree: &mut NodeTree, node_id: NodeId) {
+		self.ui_control.get_uiview_mut().create_content_node(node_tree, node_id);
+		node_tree[node_id].set_interactable(true);
 	}
 
-	fn isTickNeeded(&self) -> bool {
-		self.thumbNodeId.is_some() || self.isValueChangedFirePending
+	fn is_tick_needed(&self) -> bool {
+		self.thumb_node_id.is_some() || self.is_value_changed_fire_pending
 	}
 
 	//==============================================================================
 	// 갱신. (미뤄 둔 값 바뀜 이벤트, 손잡이 노드 자리)
 	//==============================================================================
-	fn tick(&mut self, context: &mut ComponentContext, _timeDelta: f32) {
-		if self.isValueChangedFirePending {
-			self.isValueChangedFirePending = false;
-			self.fireValueChangedEvent(context);
+	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f32) {
+		if self.is_value_changed_fire_pending {
+			self.is_value_changed_fire_pending = false;
+			self.fire_value_changed_event(context);
 		}
-		let thumbNodeId = match self.thumbNodeId {
-			Some(thumbNodeId) => {
-				thumbNodeId
+		let thumb_node_id = match self.thumb_node_id {
+			Some(thumb_node_id) => {
+				thumb_node_id
 			}
 			None => {
 				return;
 			}
 		};
-		let contentSize = context.getTransform().getContentSize();
-		let thumbCenter = self.calculateThumbCenter(contentSize);
-		if let Some(thumbNode) = context.getNodeTreeMut().getNodeMut(thumbNodeId) {
+		let content_size = context.get_transform().get_content_size();
+		let thumb_center = self.calculate_thumb_center(content_size);
+		if let Some(thumb_node) = context.get_node_tree_mut().get_node_mut(thumb_node_id) {
 			// 원본처럼 로컬 위치를 (중심 - 크기 절반) 에 둔다. (피봇이 왼쪽 위인 손잡이 노드면 가운데가 손잡이 자리에 온다)
-			let thumbSize = thumbNode.getContentSize();
-			let thumbPosition = Vector2::create(thumbCenter.x - thumbSize.x * 0.5, thumbCenter.y - thumbSize.y * 0.5);
-			thumbNode.setLocalPosition(thumbPosition);
+			let thumb_size = thumb_node.get_content_size();
+			let thumb_position = Vector2::create(thumb_center.x - thumb_size.x * 0.5, thumb_center.y - thumb_size.y * 0.5);
+			thumb_node.set_local_position(thumb_position);
 		}
 	}
 
@@ -429,78 +429,78 @@ impl Component for UISlider {
 	// 출력. (트랙 + 채움 + 손잡이)
 	//==============================================================================
 	fn draw(&mut self, transform: &NodeTransform, graphic: &mut Graphic) {
-		let contentSize = transform.getContentSize();
-		if contentSize.x <= 0.0 || contentSize.y <= 0.0 {
+		let content_size = transform.get_content_size();
+		if content_size.x <= 0.0 || content_size.y <= 0.0 {
 			return;
 		}
 
 		// 트랙. (두께를 정했으면 노드 가운데에 그 두께로 그린다)
-		let trackThickness = self.trackThickness;
-		let mut trackRect = Rect::create(0.0, 0.0, contentSize.x, contentSize.y);
-		if trackThickness > 0.0 {
-			trackRect = match self.direction {
-				ProgressDirection::vertical => {
-					Rect::create((contentSize.x - trackThickness) * 0.5, 0.0, trackThickness, contentSize.y)
+		let track_thickness = self.track_thickness;
+		let mut track_rect = Rect::create(0.0, 0.0, content_size.x, content_size.y);
+		if track_thickness > 0.0 {
+			track_rect = match self.direction {
+				ProgressDirection::Vertical => {
+					Rect::create((content_size.x - track_thickness) * 0.5, 0.0, track_thickness, content_size.y)
 				}
-				ProgressDirection::horizontal => {
-					Rect::create(0.0, (contentSize.y - trackThickness) * 0.5, contentSize.x, trackThickness)
+				ProgressDirection::Horizontal => {
+					Rect::create(0.0, (content_size.y - track_thickness) * 0.5, content_size.x, track_thickness)
 				}
 			};
 		}
-		let trackColor = self.trackColor;
-		self.fillRect(graphic, trackRect, trackColor);
+		let track_color = self.track_color;
+		self.fill_rect(graphic, track_rect, track_color);
 
 		// 채움.
-		let ratio = self.getRatio();
+		let ratio = self.get_ratio();
 		if ratio > 0.0 {
-			let fillRect = match self.direction {
-				ProgressDirection::vertical => {
-					let fillHeight = contentSize.y * ratio;
-					Rect::create(trackRect.position.x, contentSize.y - fillHeight, trackRect.size.x, fillHeight)
+			let fill_rect = match self.direction {
+				ProgressDirection::Vertical => {
+					let fill_height = content_size.y * ratio;
+					Rect::create(track_rect.position.x, content_size.y - fill_height, track_rect.size.x, fill_height)
 				}
-				ProgressDirection::horizontal => {
-					let fillWidth = contentSize.x * ratio;
-					Rect::create(0.0, trackRect.position.y, fillWidth, trackRect.size.y)
+				ProgressDirection::Horizontal => {
+					let fill_width = content_size.x * ratio;
+					Rect::create(0.0, track_rect.position.y, fill_width, track_rect.size.y)
 				}
 			};
-			let fillColor = self.fillColor;
-			self.fillRect(graphic, fillRect, fillColor);
+			let fill_color = self.fill_color;
+			self.fill_rect(graphic, fill_rect, fill_color);
 		}
 
 		// 손잡이 노드를 정했으면 원은 그리지 않는다. (자리는 tick 이 옮긴다)
-		if self.thumbNodeId.is_some() {
+		if self.thumb_node_id.is_some() {
 			return;
 		}
-		let thumbCenter = self.calculateThumbCenter(contentSize);
-		graphic.setFillColor(self.thumbColor);
-		graphic.drawCircle(thumbCenter, self.thumbRadius);
+		let thumb_center = self.calculate_thumb_center(content_size);
+		graphic.set_fill_color(self.thumb_color);
+		graphic.draw_circle(thumb_center, self.thumb_radius);
 	}
 
-	fn touchPress(&mut self, context: &mut ComponentContext, viewInputPosition: Vector2) {
-		if !self.isInteractable {
+	fn touch_press(&mut self, context: &mut ComponentContext, view_input_position: Vector2) {
+		if !self.is_interactable {
 			return;
 		}
-		self.isDragging = true;
-		self.updateValueFromInput(context, viewInputPosition);
+		self.is_dragging = true;
+		self.update_value_from_input(context, view_input_position);
 	}
 
-	fn touchMove(&mut self, context: &mut ComponentContext, viewInputPosition: Vector2) {
-		if !self.isDragging {
+	fn touch_move(&mut self, context: &mut ComponentContext, view_input_position: Vector2) {
+		if !self.is_dragging {
 			return;
 		}
-		self.updateValueFromInput(context, viewInputPosition);
+		self.update_value_from_input(context, view_input_position);
 	}
 
-	fn touchRelease(&mut self, context: &mut ComponentContext, viewInputPosition: Vector2) {
-		if !self.isDragging {
+	fn touch_release(&mut self, context: &mut ComponentContext, view_input_position: Vector2) {
+		if !self.is_dragging {
 			return;
 		}
-		self.updateValueFromInput(context, viewInputPosition);
-		self.isDragging = false;
+		self.update_value_from_input(context, view_input_position);
+		self.is_dragging = false;
 	}
 
-	fn touchCancel(&mut self, _context: &mut ComponentContext, _viewInputPosition: Vector2) {
-		self.isDragging = false;
+	fn touch_cancel(&mut self, _context: &mut ComponentContext, _view_input_position: Vector2) {
+		self.is_dragging = false;
 	}
 }
 
@@ -517,71 +517,71 @@ mod tests {
 	// 값은 범위로 잘린다. 범위를 바꾸면 지금 값도 다시 잘린다.
 	//==============================================================================
 	#[test]
-	fn valueClamp() {
+	fn value_clamp() {
 		let mut slider = UISlider::new();
-		slider.setValue(2.0);
-		assert_eq!(slider.getValue(), 1.0);
-		slider.setValue(-1.0);
-		assert_eq!(slider.getValue(), 0.0);
-		slider.setRange(10.0, 20.0);
-		assert_eq!(slider.getValue(), 10.0);
-		slider.setValue(17.5);
-		assert_eq!(slider.getRatio(), 0.75);
-		slider.setRange(0.0, 5.0);
-		assert_eq!(slider.getValue(), 5.0);
+		slider.set_value(2.0);
+		assert_eq!(slider.get_value(), 1.0);
+		slider.set_value(-1.0);
+		assert_eq!(slider.get_value(), 0.0);
+		slider.set_range(10.0, 20.0);
+		assert_eq!(slider.get_value(), 10.0);
+		slider.set_value(17.5);
+		assert_eq!(slider.get_ratio(), 0.75);
+		slider.set_range(0.0, 5.0);
+		assert_eq!(slider.get_value(), 5.0);
 	}
 
 	//==============================================================================
 	// 누르고 끌면 그 자리 비율로 값이 바뀌고 이벤트가 난다. 영역 밖으로 끌면 끝 값에 멈춘다.
 	//==============================================================================
 	#[test]
-	fn dragUpdatesValue() {
+	fn drag_updates_value() {
 		let engine = Engine::new(EngineConfiguration::new());
-		let mut nodeTree = NodeTree::new();
-		let rootId = nodeTree.getRootId();
-		let sliderId = nodeTree.createChild(rootId, "slider");
-		let sliderNode = &mut nodeTree[sliderId];
-		sliderNode.setPivot(Pivot::topLeft);
-		sliderNode.setLocalPosition(Vector2::create(100.0, 50.0));
-		sliderNode.setContentSize(Vector2::create(200.0, 20.0));
-		let changedCount = Rc::new(Cell::new(0));
+		let mut node_tree = NodeTree::new();
+		let root_id = node_tree.get_root_id();
+		let slider_id = node_tree.create_child(root_id, "slider");
+		let slider_node = &mut node_tree[slider_id];
+		slider_node.set_pivot(Pivot::TOP_LEFT);
+		slider_node.set_local_position(Vector2::create(100.0, 50.0));
+		slider_node.set_content_size(Vector2::create(200.0, 20.0));
+		let changed_count = Rc::new(Cell::new(0));
 		{
-			let slider = nodeTree.addComponent(sliderId, UISlider::new()).expect("slider");
-			slider.setRange(0.0, 100.0);
-			let changedCountForEvent = changedCount.clone();
-			slider.setValueChangedEvent(Box::new(move |_slider: &mut UISlider, _context: &mut ComponentContext| {
-				changedCountForEvent.set(changedCountForEvent.get() + 1);
+			let slider = node_tree.add_component(slider_id, UISlider::new()).expect("slider");
+			slider.set_range(0.0, 100.0);
+			let changed_count_for_event = changed_count.clone();
+			slider.set_value_changed_event(Box::new(move |_slider: &mut UISlider, _context: &mut ComponentContext| {
+				changed_count_for_event.set(changed_count_for_event.get() + 1);
 			}));
 		}
-		assert!(nodeTree[sliderId].isInteractable());
+		assert!(node_tree[slider_id].is_interactable());
 
-		nodeTree.dispatchTouch(sliderId, &engine, TouchKind::press, Vector2::create(150.0, 60.0));
-		assert_eq!(nodeTree[sliderId].getComponent::<UISlider>().expect("slider").getValue(), 25.0);
-		assert_eq!(changedCount.get(), 1);
-		nodeTree.dispatchTouch(sliderId, &engine, TouchKind::moved, Vector2::create(500.0, 60.0));
-		assert_eq!(nodeTree[sliderId].getComponent::<UISlider>().expect("slider").getValue(), 100.0);
-		assert_eq!(changedCount.get(), 2);
+		node_tree.dispatch_touch(slider_id, &engine, TouchKind::Press, Vector2::create(150.0, 60.0));
+		assert_eq!(node_tree[slider_id].get_component::<UISlider>().expect("slider").get_value(), 25.0);
+		assert_eq!(changed_count.get(), 1);
+		node_tree.dispatch_touch(slider_id, &engine, TouchKind::Moved, Vector2::create(500.0, 60.0));
+		assert_eq!(node_tree[slider_id].get_component::<UISlider>().expect("slider").get_value(), 100.0);
+		assert_eq!(changed_count.get(), 2);
 		// 같은 값이면 이벤트가 나지 않는다.
-		nodeTree.dispatchTouch(sliderId, &engine, TouchKind::moved, Vector2::create(600.0, 60.0));
-		assert_eq!(changedCount.get(), 2);
-		nodeTree.dispatchTouch(sliderId, &engine, TouchKind::release, Vector2::create(100.0, 60.0));
-		assert_eq!(nodeTree[sliderId].getComponent::<UISlider>().expect("slider").getValue(), 0.0);
-		assert_eq!(changedCount.get(), 3);
-		assert!(!nodeTree[sliderId].getComponent::<UISlider>().expect("slider").isDragging());
+		node_tree.dispatch_touch(slider_id, &engine, TouchKind::Moved, Vector2::create(600.0, 60.0));
+		assert_eq!(changed_count.get(), 2);
+		node_tree.dispatch_touch(slider_id, &engine, TouchKind::Release, Vector2::create(100.0, 60.0));
+		assert_eq!(node_tree[slider_id].get_component::<UISlider>().expect("slider").get_value(), 0.0);
+		assert_eq!(changed_count.get(), 3);
+		assert!(!node_tree[slider_id].get_component::<UISlider>().expect("slider").is_dragging());
 
 		// 손잡이 노드는 tick 에서 손잡이 자리로 옮겨진다.
-		let thumbId = nodeTree.createChild(sliderId, "thumb");
-		nodeTree[thumbId].setPivot(Pivot::topLeft);
-		nodeTree[thumbId].setContentSize(Vector2::create(10.0, 10.0));
+		let thumb_id = node_tree.create_child(slider_id, "thumb");
+		node_tree[thumb_id].set_pivot(Pivot::TOP_LEFT);
+		node_tree[thumb_id].set_content_size(Vector2::create(10.0, 10.0));
 		{
-			let slider = nodeTree[sliderId].getComponentMut::<UISlider>().expect("slider");
-			slider.setThumbNode(Some(thumbId));
-			slider.setValue(50.0);
-			slider.fireValueChanged();
+			let slider = node_tree[slider_id].get_component_mut::<UISlider>().expect("slider");
+			slider.set_thumb_node(Some(thumb_id));
+			slider.set_value(50.0);
+			slider.fire_value_changed();
 		}
-		assert_eq!(changedCount.get(), 3);
-		nodeTree.tick(&engine, 0.016);
-		assert_eq!(nodeTree[thumbId].getLocalPosition(), Vector2::create(95.0, 5.0));
-		assert_eq!(changedCount.get(), 4);
+		assert_eq!(changed_count.get(), 3);
+		node_tree.tick(&engine, 0.016);
+		assert_eq!(node_tree[thumb_id].get_local_position(), Vector2::create(95.0, 5.0));
+		assert_eq!(changed_count.get(), 4);
 	}
 }

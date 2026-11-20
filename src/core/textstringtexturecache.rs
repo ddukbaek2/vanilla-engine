@@ -19,8 +19,8 @@ const MAXIMUM_ENTRY_COUNT: usize = 512;
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TextDrawKind {
-	fill,
-	stroke,
+	Fill,
+	Stroke,
 }
 
 //==============================================================================
@@ -29,13 +29,13 @@ pub enum TextDrawKind {
 #[derive(Clone, Copy, Debug)]
 pub struct TextEntry {
 	pub texture: crate::core::graphic::GlTexture,
-	pub advanceWidth: f32,
-	pub fontAscent: f32,
-	pub fontDescent: f32,
-	pub penOffsetX: f32,
-	pub baselineOffsetY: f32,
-	pub quadWidth: f32,
-	pub quadHeight: f32,
+	pub advance_width: f32,
+	pub font_ascent: f32,
+	pub font_descent: f32,
+	pub pen_offset_x: f32,
+	pub baseline_offset_y: f32,
+	pub quad_width: f32,
+	pub quad_height: f32,
 }
 
 //==============================================================================
@@ -44,8 +44,8 @@ pub struct TextEntry {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct TextMetrics {
 	pub width: f32,
-	pub fontAscent: f32,
-	pub fontDescent: f32,
+	pub font_ascent: f32,
+	pub font_descent: f32,
 }
 
 //==============================================================================
@@ -53,30 +53,30 @@ pub struct TextMetrics {
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct FontDescription {
-	pub fontSize: f32,
-	pub isBold: bool,
-	pub familyName: String,
+	pub font_size: f32,
+	pub is_bold: bool,
+	pub family_name: String,
 }
 
 struct CachedTextEntry {
 	entry: TextEntry,
-	lastUsedFrameNumber: u64,
+	last_used_frame_number: u64,
 }
 
 struct GlyphPlacement {
-	fontIndex: usize,
-	glyphIndex: u16,
-	penX: f32,
+	font_index: usize,
+	glyph_index: u16,
+	pen_x: f32,
 	metrics: fontdue::Metrics,
 }
 
 pub struct TextStringTextureCache {
-	fontTable: HashMap<String, Rc<fontdue::Font>>,
-	defaultFont: Option<Rc<fontdue::Font>>,
-	defaultBoldFont: Option<Rc<fontdue::Font>>,
-	fallbackFontList: Vec<Rc<fontdue::Font>>,
-	entryTable: HashMap<String, CachedTextEntry>,
-	frameNumber: u64,
+	font_table: HashMap<String, Rc<fontdue::Font>>,
+	default_font: Option<Rc<fontdue::Font>>,
+	default_bold_font: Option<Rc<fontdue::Font>>,
+	fallback_font_list: Vec<Rc<fontdue::Font>>,
+	entry_table: HashMap<String, CachedTextEntry>,
+	frame_number: u64,
 }
 
 impl TextStringTextureCache {
@@ -85,42 +85,42 @@ impl TextStringTextureCache {
 	//==============================================================================
 	pub fn new() -> TextStringTextureCache {
 		TextStringTextureCache {
-			fontTable: HashMap::new(),
-			defaultFont: None,
-			defaultBoldFont: None,
-			fallbackFontList: Vec::new(),
-			entryTable: HashMap::new(),
-			frameNumber: 0,
+			font_table: HashMap::new(),
+			default_font: None,
+			default_bold_font: None,
+			fallback_font_list: Vec::new(),
+			entry_table: HashMap::new(),
+			frame_number: 0,
 		}
 	}
 
 	//==============================================================================
 	// 프레임 시작. (LRU 순서를 프레임 번호로 센다)
 	//==============================================================================
-	pub fn beginFrame(&mut self) {
-		self.frameNumber += 1;
+	pub fn begin_frame(&mut self) {
+		self.frame_number += 1;
 	}
 
 	//==============================================================================
 	// 폰트 등록. (폰트 문자열의 이름으로 찾는다. 대소문자 구분 없음)
 	//==============================================================================
-	pub fn registerFont(&mut self, familyName: &str, isBold: bool, fontBytes: Vec<u8>) -> Result<(), String> {
-		let font = loadFont(fontBytes)?;
-		let fontKey = createFontKey(familyName, isBold);
-		self.fontTable.insert(fontKey, Rc::new(font));
+	pub fn register_font(&mut self, family_name: &str, is_bold: bool, font_bytes: Vec<u8>) -> Result<(), String> {
+		let font = load_font(font_bytes)?;
+		let font_key = create_font_key(family_name, is_bold);
+		self.font_table.insert(font_key, Rc::new(font));
 		Ok(())
 	}
 
 	//==============================================================================
 	// 기본 폰트 설정. (이름을 찾지 못한 폰트 문자열과 글자 대체에 쓴다)
 	//==============================================================================
-	pub fn setDefaultFont(&mut self, isBold: bool, fontBytes: Vec<u8>) -> Result<(), String> {
-		let font = Rc::new(loadFont(fontBytes)?);
-		if isBold {
-			self.defaultBoldFont = Some(font);
+	pub fn set_default_font(&mut self, is_bold: bool, font_bytes: Vec<u8>) -> Result<(), String> {
+		let font = Rc::new(load_font(font_bytes)?);
+		if is_bold {
+			self.default_bold_font = Some(font);
 		}
 		else {
-			self.defaultFont = Some(font);
+			self.default_font = Some(font);
 		}
 		Ok(())
 	}
@@ -128,68 +128,68 @@ impl TextStringTextureCache {
 	//==============================================================================
 	// 대체 폰트 추가. (앞 폰트들에 없는 글자를 찾는다)
 	//==============================================================================
-	pub fn addFallbackFont(&mut self, fontBytes: Vec<u8>) -> Result<(), String> {
-		let font = loadFont(fontBytes)?;
-		self.fallbackFontList.push(Rc::new(font));
+	pub fn add_fallback_font(&mut self, font_bytes: Vec<u8>) -> Result<(), String> {
+		let font = load_font(font_bytes)?;
+		self.fallback_font_list.push(Rc::new(font));
 		Ok(())
 	}
 
 	//==============================================================================
 	// 기본 폰트가 있는지.
 	//==============================================================================
-	pub fn hasDefaultFont(&self) -> bool {
-		self.defaultFont.is_some()
+	pub fn has_default_font(&self) -> bool {
+		self.default_font.is_some()
 	}
 
 	//==============================================================================
 	// 문자열 측정.
 	//==============================================================================
-	pub fn measureText(&self, fontString: &str, text: &str) -> TextMetrics {
-		let fontDescription = parseFontString(fontString);
-		let fontList = self.resolveFontList(&fontDescription);
-		if fontList.is_empty() {
+	pub fn measure_text(&self, font_string: &str, text: &str) -> TextMetrics {
+		let font_description = parse_font_string(font_string);
+		let font_list = self.resolve_font_list(&font_description);
+		if font_list.is_empty() {
 			// 웹: 글꼴 바이트가 없으면 브라우저 시스템 글꼴로 잰다.
 			#[cfg(target_arch = "wasm32")]
 			{
-				return crate::platform::web::systemfont::measureText(&fontDescription, text);
+				return crate::platform::web::systemfont::measure_text(&font_description, text);
 			}
 			#[cfg(not(target_arch = "wasm32"))]
 			{
 				return TextMetrics::default();
 			}
 		}
-		let fontSize = fontDescription.fontSize;
-		let glyphPlacements = layoutGlyphs(&fontList, text, fontSize);
-		let advanceWidth = calculateAdvanceWidth(&fontList, &glyphPlacements, fontSize);
-		let (fontAscent, fontDescent) = readLineMetrics(&fontList[0], fontSize);
+		let font_size = font_description.font_size;
+		let glyph_placements = layout_glyphs(&font_list, text, font_size);
+		let advance_width = calculate_advance_width(&font_list, &glyph_placements, font_size);
+		let (font_ascent, font_descent) = read_line_metrics(&font_list[0], font_size);
 		TextMetrics {
-			width: advanceWidth,
-			fontAscent,
-			fontDescent,
+			width: advance_width,
+			font_ascent,
+			font_descent,
 		}
 	}
 
 	//==============================================================================
 	// 구운 문자열 반환. (없으면 굽는다)
 	//==============================================================================
-	pub fn getEntry(&mut self, gl: &glow::Context, textDrawKind: TextDrawKind, text: &str, fontString: &str, lineWidth: f32, bakeScale: f32) -> Option<TextEntry> {
+	pub fn get_entry(&mut self, gl: &glow::Context, text_draw_kind: TextDrawKind, text: &str, font_string: &str, line_width: f32, bake_scale: f32) -> Option<TextEntry> {
 		if text.is_empty() {
 			return None;
 		}
-		let entryKey = format!("{:?}|{}|{}|{}|{}", textDrawKind, fontString, lineWidth, bakeScale, text);
-		let frameNumber = self.frameNumber;
-		if let Some(cachedTextEntry) = self.entryTable.get_mut(&entryKey) {
-			cachedTextEntry.lastUsedFrameNumber = frameNumber;
-			return Some(cachedTextEntry.entry);
+		let entry_key = format!("{:?}|{}|{}|{}|{}", text_draw_kind, font_string, line_width, bake_scale, text);
+		let frame_number = self.frame_number;
+		if let Some(cached_text_entry) = self.entry_table.get_mut(&entry_key) {
+			cached_text_entry.last_used_frame_number = frame_number;
+			return Some(cached_text_entry.entry);
 		}
 
-		let entry = self.bakeEntry(gl, textDrawKind, text, fontString, lineWidth, bakeScale)?;
-		if self.entryTable.len() >= MAXIMUM_ENTRY_COUNT {
-			self.evictOldestEntry(gl);
+		let entry = self.bake_entry(gl, text_draw_kind, text, font_string, line_width, bake_scale)?;
+		if self.entry_table.len() >= MAXIMUM_ENTRY_COUNT {
+			self.evict_oldest_entry(gl);
 		}
-		self.entryTable.insert(entryKey, CachedTextEntry {
+		self.entry_table.insert(entry_key, CachedTextEntry {
 			entry,
-			lastUsedFrameNumber: frameNumber,
+			last_used_frame_number: frame_number,
 		});
 		Some(entry)
 	}
@@ -197,12 +197,12 @@ impl TextStringTextureCache {
 	//==============================================================================
 	// 가장 오래 안 쓴 문자열 하나 버리기.
 	//==============================================================================
-	fn evictOldestEntry(&mut self, gl: &glow::Context) {
-		let oldestEntryKey = self.entryTable.iter().min_by_key(|(_, cachedTextEntry)| cachedTextEntry.lastUsedFrameNumber).map(|(entryKey, _)| entryKey.clone());
-		if let Some(oldestEntryKey) = oldestEntryKey {
-			if let Some(cachedTextEntry) = self.entryTable.remove(&oldestEntryKey) {
+	fn evict_oldest_entry(&mut self, gl: &glow::Context) {
+		let oldest_entry_key = self.entry_table.iter().min_by_key(|(_, cached_text_entry)| cached_text_entry.last_used_frame_number).map(|(entry_key, _)| entry_key.clone());
+		if let Some(oldest_entry_key) = oldest_entry_key {
+			if let Some(cached_text_entry) = self.entry_table.remove(&oldest_entry_key) {
 				unsafe {
-					gl.delete_texture(cachedTextEntry.entry.texture);
+					gl.delete_texture(cached_text_entry.entry.texture);
 				}
 			}
 		}
@@ -211,48 +211,48 @@ impl TextStringTextureCache {
 	//==============================================================================
 	// 구운 문자열 수.
 	//==============================================================================
-	pub fn getEntryCount(&self) -> usize {
-		self.entryTable.len()
+	pub fn get_entry_count(&self) -> usize {
+		self.entry_table.len()
 	}
 
 	//==============================================================================
 	// 폰트 문자열에 맞는 폰트 목록. (첫 번째가 주 폰트, 뒤는 글자 대체 순서)
 	//==============================================================================
-	fn resolveFontList(&self, fontDescription: &FontDescription) -> Vec<Rc<fontdue::Font>> {
-		let mut fontList: Vec<Rc<fontdue::Font>> = Vec::new();
-		let fontKey = createFontKey(&fontDescription.familyName, fontDescription.isBold);
-		let regularFontKey = createFontKey(&fontDescription.familyName, false);
-		if let Some(font) = self.fontTable.get(&fontKey) {
-			fontList.push(font.clone());
+	fn resolve_font_list(&self, font_description: &FontDescription) -> Vec<Rc<fontdue::Font>> {
+		let mut font_list: Vec<Rc<fontdue::Font>> = Vec::new();
+		let font_key = create_font_key(&font_description.family_name, font_description.is_bold);
+		let regular_font_key = create_font_key(&font_description.family_name, false);
+		if let Some(font) = self.font_table.get(&font_key) {
+			font_list.push(font.clone());
 		}
-		else if let Some(font) = self.fontTable.get(&regularFontKey) {
-			fontList.push(font.clone());
+		else if let Some(font) = self.font_table.get(&regular_font_key) {
+			font_list.push(font.clone());
 		}
-		if fontDescription.isBold {
-			if let Some(defaultBoldFont) = &self.defaultBoldFont {
-				fontList.push(defaultBoldFont.clone());
+		if font_description.is_bold {
+			if let Some(default_bold_font) = &self.default_bold_font {
+				font_list.push(default_bold_font.clone());
 			}
 		}
-		if let Some(defaultFont) = &self.defaultFont {
-			fontList.push(defaultFont.clone());
+		if let Some(default_font) = &self.default_font {
+			font_list.push(default_font.clone());
 		}
-		for fallbackFont in &self.fallbackFontList {
-			fontList.push(fallbackFont.clone());
+		for fallback_font in &self.fallback_font_list {
+			font_list.push(fallback_font.clone());
 		}
-		fontList
+		font_list
 	}
 
 	//==============================================================================
 	// 문자열 굽기.
 	//==============================================================================
-	fn bakeEntry(&self, gl: &glow::Context, textDrawKind: TextDrawKind, text: &str, fontString: &str, lineWidth: f32, bakeScale: f32) -> Option<TextEntry> {
-		let fontDescription = parseFontString(fontString);
-		let fontList = self.resolveFontList(&fontDescription);
-		if fontList.is_empty() {
+	fn bake_entry(&self, gl: &glow::Context, text_draw_kind: TextDrawKind, text: &str, font_string: &str, line_width: f32, bake_scale: f32) -> Option<TextEntry> {
+		let font_description = parse_font_string(font_string);
+		let font_list = self.resolve_font_list(&font_description);
+		if font_list.is_empty() {
 			// 웹: 글꼴 바이트가 없으면 브라우저 시스템 글꼴로 굽는다.
 			#[cfg(target_arch = "wasm32")]
 			{
-				return bakeSystemFontEntry(gl, textDrawKind, text, &fontDescription, lineWidth, bakeScale);
+				return bake_system_font_entry(gl, text_draw_kind, text, &font_description, line_width, bake_scale);
 			}
 			#[cfg(not(target_arch = "wasm32"))]
 			{
@@ -261,78 +261,78 @@ impl TextStringTextureCache {
 		}
 
 		// 배율을 곱한 크기로 배치.
-		let pixelSize = fontDescription.fontSize * bakeScale;
-		let glyphPlacements = layoutGlyphs(&fontList, text, pixelSize);
-		let advanceWidth = calculateAdvanceWidth(&fontList, &glyphPlacements, pixelSize);
-		let (fontAscent, fontDescent) = readLineMetrics(&fontList[0], pixelSize);
+		let pixel_size = font_description.font_size * bake_scale;
+		let glyph_placements = layout_glyphs(&font_list, text, pixel_size);
+		let advance_width = calculate_advance_width(&font_list, &glyph_placements, pixel_size);
+		let (font_ascent, font_descent) = read_line_metrics(&font_list[0], pixel_size);
 
 		// 글자 경계. (펜 원점 기준, 위가 양수)
-		let mut minimumX: f32 = 0.0;
-		let mut maximumX: f32 = advanceWidth;
-		let mut topExtent: f32 = fontAscent;
-		let mut bottomExtent: f32 = fontDescent;
-		for glyphPlacement in &glyphPlacements {
-			let metrics = glyphPlacement.metrics;
+		let mut minimum_x: f32 = 0.0;
+		let mut maximum_x: f32 = advance_width;
+		let mut top_extent: f32 = font_ascent;
+		let mut bottom_extent: f32 = font_descent;
+		for glyph_placement in &glyph_placements {
+			let metrics = glyph_placement.metrics;
 			if metrics.width == 0 || metrics.height == 0 {
 				continue;
 			}
-			let leftX = glyphPlacement.penX + metrics.xmin as f32;
-			let rightX = leftX + metrics.width as f32;
-			minimumX = minimumX.min(leftX);
-			maximumX = maximumX.max(rightX);
-			topExtent = topExtent.max((metrics.ymin + metrics.height as i32) as f32);
-			bottomExtent = bottomExtent.max(-(metrics.ymin as f32));
+			let left_x = glyph_placement.pen_x + metrics.xmin as f32;
+			let right_x = left_x + metrics.width as f32;
+			minimum_x = minimum_x.min(left_x);
+			maximum_x = maximum_x.max(right_x);
+			top_extent = top_extent.max((metrics.ymin + metrics.height as i32) as f32);
+			bottom_extent = bottom_extent.max(-(metrics.ymin as f32));
 		}
 
 		// 비트맵 크기. (외곽선 두께만큼 여백)
-		let strokeRadius = match textDrawKind {
-			TextDrawKind::stroke => {
-				(lineWidth * bakeScale * 0.5).max(0.5)
+		let stroke_radius = match text_draw_kind {
+			TextDrawKind::Stroke => {
+				(line_width * bake_scale * 0.5).max(0.5)
 			}
-			TextDrawKind::fill => {
+			TextDrawKind::Fill => {
 				0.0
 			}
 		};
-		let padding = strokeRadius.ceil() as i32 + 1;
-		let originX = padding as f32 - minimumX.floor();
-		let baselineY = padding + topExtent.ceil() as i32;
-		let bitmapWidth = (originX + maximumX).ceil() as i32 + padding;
-		let bitmapHeight = baselineY + bottomExtent.ceil() as i32 + padding;
-		if bitmapWidth <= 0 || bitmapHeight <= 0 {
+		let padding = stroke_radius.ceil() as i32 + 1;
+		let origin_x = padding as f32 - minimum_x.floor();
+		let baseline_y = padding + top_extent.ceil() as i32;
+		let bitmap_width = (origin_x + maximum_x).ceil() as i32 + padding;
+		let bitmap_height = baseline_y + bottom_extent.ceil() as i32 + padding;
+		if bitmap_width <= 0 || bitmap_height <= 0 {
 			return None;
 		}
 
 		// 글자 래스터화. (겹치는 곳은 큰 값)
-		let mut coverage = vec![0u8; (bitmapWidth * bitmapHeight) as usize];
-		for glyphPlacement in &glyphPlacements {
-			let metrics = glyphPlacement.metrics;
+		let mut coverage = vec![0u8; (bitmap_width * bitmap_height) as usize];
+		for glyph_placement in &glyph_placements {
+			let metrics = glyph_placement.metrics;
 			if metrics.width == 0 || metrics.height == 0 {
 				continue;
 			}
-			let font = &fontList[glyphPlacement.fontIndex];
-			let (glyphMetrics, glyphBitmap) = font.rasterize_indexed(glyphPlacement.glyphIndex, pixelSize);
-			let glyphLeftX = (originX + glyphPlacement.penX).round() as i32 + glyphMetrics.xmin;
-			let glyphTopY = baselineY - (glyphMetrics.ymin + glyphMetrics.height as i32);
-			for glyphY in 0..glyphMetrics.height as i32 {
-				let bitmapY = glyphTopY + glyphY;
-				if bitmapY < 0 || bitmapY >= bitmapHeight {
+			let font = &font_list[glyph_placement.font_index];
+			let (glyph_metrics, glyph_bitmap) = font.rasterize_indexed(glyph_placement.glyph_index, pixel_size);
+			let glyph_left_x = (origin_x + glyph_placement.pen_x).round() as i32 + glyph_metrics.xmin;
+			let glyph_top_y = baseline_y - (glyph_metrics.ymin + glyph_metrics.height as i32);
+			for glyph_y in 0..glyph_metrics.height as i32 {
+				let bitmap_y = glyph_top_y + glyph_y;
+				if bitmap_y < 0 || bitmap_y >= bitmap_height {
 					continue;
 				}
-				for glyphX in 0..glyphMetrics.width as i32 {
-					let bitmapX = glyphLeftX + glyphX;
-					if bitmapX < 0 || bitmapX >= bitmapWidth {
+				for glyph_x in 0..glyph_metrics.width as i32 {
+					let bitmap_x = glyph_left_x + glyph_x;
+					if bitmap_x < 0 || bitmap_x >= bitmap_width {
 						continue;
 					}
-					let glyphValue = glyphBitmap[(glyphY * glyphMetrics.width as i32 + glyphX) as usize];
-					let bitmapIndex = (bitmapY * bitmapWidth + bitmapX) as usize;
-					coverage[bitmapIndex] = coverage[bitmapIndex].max(glyphValue);
+					let glyph_value = glyph_bitmap[(glyph_y * glyph_metrics.width as i32 + glyph_x) as usize];
+					let bitmap_index = (bitmap_y * bitmap_width + bitmap_x) as usize;
+					coverage[bitmap_index] = coverage[bitmap_index].max(glyph_value);
 				}
 			}
 		}
 
 		// 외곽선: 윤곽 바깥으로 반두께 넓힌 것에서 안으로 반두께 좁힌 것을 뺀 띠. (Canvas2D strokeText 는 윤곽선 가운데에 선을 긋는다)
-		if textDrawKind == TextDrawKind::stroke {
-			coverage = buildStrokeCoverage(&coverage, bitmapWidth, bitmapHeight, strokeRadius);
+		if text_draw_kind == TextDrawKind::Stroke {
+			coverage = build_stroke_coverage(&coverage, bitmap_width, bitmap_height, stroke_radius);
 		}
 
 		// 흰색 프리멀티플라이드 RGBA 로 올리기.
@@ -343,17 +343,17 @@ impl TextStringTextureCache {
 			pixels.push(*value);
 			pixels.push(*value);
 		}
-		let texture = uploadTextTexture(gl, bitmapWidth, bitmapHeight, &pixels)?;
+		let texture = upload_text_texture(gl, bitmap_width, bitmap_height, &pixels)?;
 
 		Some(TextEntry {
 			texture,
-			advanceWidth: advanceWidth / bakeScale,
-			fontAscent: fontAscent / bakeScale,
-			fontDescent: fontDescent / bakeScale,
-			penOffsetX: originX / bakeScale,
-			baselineOffsetY: baselineY as f32 / bakeScale,
-			quadWidth: bitmapWidth as f32 / bakeScale,
-			quadHeight: bitmapHeight as f32 / bakeScale,
+			advance_width: advance_width / bake_scale,
+			font_ascent: font_ascent / bake_scale,
+			font_descent: font_descent / bake_scale,
+			pen_offset_x: origin_x / bake_scale,
+			baseline_offset_y: baseline_y as f32 / bake_scale,
+			quad_width: bitmap_width as f32 / bake_scale,
+			quad_height: bitmap_height as f32 / bake_scale,
 		})
 	}
 }
@@ -368,25 +368,25 @@ impl Default for TextStringTextureCache {
 // 브라우저 시스템 글꼴로 굽기. (웹. 글꼴 바이트가 하나도 없을 때)
 //==============================================================================
 #[cfg(target_arch = "wasm32")]
-fn bakeSystemFontEntry(gl: &glow::Context, textDrawKind: TextDrawKind, text: &str, fontDescription: &FontDescription, lineWidth: f32, bakeScale: f32) -> Option<TextEntry> {
-	let systemFontBitmap = crate::platform::web::systemfont::bakeText(textDrawKind, text, fontDescription, lineWidth, bakeScale)?;
-	let texture = uploadTextTexture(gl, systemFontBitmap.bitmapWidth, systemFontBitmap.bitmapHeight, &systemFontBitmap.pixels)?;
+fn bake_system_font_entry(gl: &glow::Context, text_draw_kind: TextDrawKind, text: &str, font_description: &FontDescription, line_width: f32, bake_scale: f32) -> Option<TextEntry> {
+	let system_font_bitmap = crate::platform::web::systemfont::bake_text(text_draw_kind, text, font_description, line_width, bake_scale)?;
+	let texture = upload_text_texture(gl, system_font_bitmap.bitmap_width, system_font_bitmap.bitmap_height, &system_font_bitmap.pixels)?;
 	Some(TextEntry {
 		texture,
-		advanceWidth: systemFontBitmap.advanceWidth / bakeScale,
-		fontAscent: systemFontBitmap.fontAscent / bakeScale,
-		fontDescent: systemFontBitmap.fontDescent / bakeScale,
-		penOffsetX: systemFontBitmap.penX / bakeScale,
-		baselineOffsetY: systemFontBitmap.baselineY / bakeScale,
-		quadWidth: systemFontBitmap.bitmapWidth as f32 / bakeScale,
-		quadHeight: systemFontBitmap.bitmapHeight as f32 / bakeScale,
+		advance_width: system_font_bitmap.advance_width / bake_scale,
+		font_ascent: system_font_bitmap.font_ascent / bake_scale,
+		font_descent: system_font_bitmap.font_descent / bake_scale,
+		pen_offset_x: system_font_bitmap.pen_x / bake_scale,
+		baseline_offset_y: system_font_bitmap.baseline_y / bake_scale,
+		quad_width: system_font_bitmap.bitmap_width as f32 / bake_scale,
+		quad_height: system_font_bitmap.bitmap_height as f32 / bake_scale,
 	})
 }
 
 //==============================================================================
 // 구운 픽셀을 텍스처로 올리기. (흰색 프리멀티플라이드 RGBA)
 //==============================================================================
-fn uploadTextTexture(gl: &glow::Context, bitmapWidth: i32, bitmapHeight: i32, pixels: &[u8]) -> Option<crate::core::graphic::GlTexture> {
+fn upload_text_texture(gl: &glow::Context, bitmap_width: i32, bitmap_height: i32, pixels: &[u8]) -> Option<crate::core::graphic::GlTexture> {
 	unsafe {
 		let texture = gl.create_texture().ok()?;
 		gl.bind_texture(glow::TEXTURE_2D, Some(texture));
@@ -395,8 +395,8 @@ fn uploadTextTexture(gl: &glow::Context, bitmapWidth: i32, bitmapHeight: i32, pi
 			glow::TEXTURE_2D,
 			0,
 			glow::RGBA8 as i32,
-			bitmapWidth,
-			bitmapHeight,
+			bitmap_width,
+			bitmap_height,
 			0,
 			glow::RGBA,
 			glow::UNSIGNED_BYTE,
@@ -413,89 +413,89 @@ fn uploadTextTexture(gl: &glow::Context, bitmapWidth: i32, bitmapHeight: i32, pi
 //==============================================================================
 // 폰트 문자열 해석. ("bold 16px DOSGothic" → 크기 16, 굵게, 이름 DOSGothic)
 //==============================================================================
-pub fn parseFontString(fontString: &str) -> FontDescription {
-	let mut fontSize: f32 = 10.0;
-	let mut isBold = false;
-	let mut familyNameParts: Vec<&str> = Vec::new();
-	let mut hasFoundSize = false;
-	for token in fontString.split_whitespace() {
-		if hasFoundSize {
-			familyNameParts.push(token);
+pub fn parse_font_string(font_string: &str) -> FontDescription {
+	let mut font_size: f32 = 10.0;
+	let mut is_bold = false;
+	let mut family_name_parts: Vec<&str> = Vec::new();
+	let mut has_found_size = false;
+	for token in font_string.split_whitespace() {
+		if has_found_size {
+			family_name_parts.push(token);
 			continue;
 		}
-		let lowercaseToken = token.to_lowercase();
-		if lowercaseToken == "bold" || lowercaseToken == "bolder" {
-			isBold = true;
+		let lowercase_token = token.to_lowercase();
+		if lowercase_token == "bold" || lowercase_token == "bolder" {
+			is_bold = true;
 			continue;
 		}
-		if let Ok(fontWeight) = lowercaseToken.parse::<u32>() {
-			if fontWeight >= 600 {
-				isBold = true;
+		if let Ok(font_weight) = lowercase_token.parse::<u32>() {
+			if font_weight >= 600 {
+				is_bold = true;
 			}
 			continue;
 		}
-		if let Some(sizeText) = lowercaseToken.strip_suffix("px") {
-			if let Ok(parsedFontSize) = sizeText.parse::<f32>() {
-				fontSize = parsedFontSize;
-				hasFoundSize = true;
+		if let Some(size_text) = lowercase_token.strip_suffix("px") {
+			if let Ok(parsed_font_size) = size_text.parse::<f32>() {
+				font_size = parsed_font_size;
+				has_found_size = true;
 			}
 			continue;
 		}
 	}
-	let familyName = familyNameParts.join(" ").trim_matches(|character| character == '"' || character == '\'').to_string();
+	let family_name = family_name_parts.join(" ").trim_matches(|character| character == '"' || character == '\'').to_string();
 	FontDescription {
-		fontSize,
-		isBold,
-		familyName,
+		font_size,
+		is_bold,
+		family_name,
 	}
 }
 
 //==============================================================================
 // 폰트 표의 키.
 //==============================================================================
-fn createFontKey(familyName: &str, isBold: bool) -> String {
-	let lowercaseFamilyName = familyName.to_lowercase();
-	if isBold {
-		format!("{}|bold", lowercaseFamilyName)
+fn create_font_key(family_name: &str, is_bold: bool) -> String {
+	let lowercase_family_name = family_name.to_lowercase();
+	if is_bold {
+		format!("{}|bold", lowercase_family_name)
 	}
 	else {
-		lowercaseFamilyName
+		lowercase_family_name
 	}
 }
 
 //==============================================================================
 // 폰트 읽기.
 //==============================================================================
-fn loadFont(fontBytes: Vec<u8>) -> Result<fontdue::Font, String> {
-	let fontBytes = decompressWebFont(fontBytes)?;
-	fontdue::Font::from_bytes(fontBytes, fontdue::FontSettings::default()).map_err(|error| format!("폰트 읽기 실패: {}", error))
+fn load_font(font_bytes: Vec<u8>) -> Result<fontdue::Font, String> {
+	let font_bytes = decompress_web_font(font_bytes)?;
+	fontdue::Font::from_bytes(font_bytes, fontdue::FontSettings::default()).map_err(|error| format!("폰트 읽기 실패: {}", error))
 }
 
 //==============================================================================
 // 웹 글꼴이면 TTF 로 풀기. (머리 4 바이트가 "wOFF" 면 WOFF, "wOF2" 면 WOFF2. 아니면 그대로)
 // - fontdue 는 ttf, ttc, otf 만 읽는다. 원본 기본 글꼴 DOSGothic 이 .woff 라서 푼다.
 //==============================================================================
-fn decompressWebFont(fontBytes: Vec<u8>) -> Result<Vec<u8>, String> {
-	let signature = fontBytes.get(0..4).unwrap_or(&[]);
+fn decompress_web_font(font_bytes: Vec<u8>) -> Result<Vec<u8>, String> {
+	let signature = font_bytes.get(0..4).unwrap_or(&[]);
 	if signature == b"wOFF" {
-		return wuff::decompress_woff1(&fontBytes).map_err(|error| format!("WOFF 풀기 실패: {:?}", error));
+		return wuff::decompress_woff1(&font_bytes).map_err(|error| format!("WOFF 풀기 실패: {:?}", error));
 	}
 	if signature == b"wOF2" {
-		return wuff::decompress_woff2(&fontBytes).map_err(|error| format!("WOFF2 풀기 실패: {:?}", error));
+		return wuff::decompress_woff2(&font_bytes).map_err(|error| format!("WOFF2 풀기 실패: {:?}", error));
 	}
-	Ok(fontBytes)
+	Ok(font_bytes)
 }
 
 //==============================================================================
 // 줄 높이 값. (위로 올라간 길이, 아래로 내려간 길이. 둘 다 양수)
 //==============================================================================
-fn readLineMetrics(font: &fontdue::Font, pixelSize: f32) -> (f32, f32) {
-	match font.horizontal_line_metrics(pixelSize) {
-		Some(lineMetrics) => {
-			(lineMetrics.ascent, -lineMetrics.descent)
+fn read_line_metrics(font: &fontdue::Font, pixel_size: f32) -> (f32, f32) {
+	match font.horizontal_line_metrics(pixel_size) {
+		Some(line_metrics) => {
+			(line_metrics.ascent, -line_metrics.descent)
 		}
 		None => {
-			(pixelSize * 0.8, pixelSize * 0.2)
+			(pixel_size * 0.8, pixel_size * 0.2)
 		}
 	}
 }
@@ -503,51 +503,51 @@ fn readLineMetrics(font: &fontdue::Font, pixelSize: f32) -> (f32, f32) {
 //==============================================================================
 // 글자 배치. (글자마다 그 글자를 가진 첫 폰트를 고른다)
 //==============================================================================
-fn layoutGlyphs(fontList: &[Rc<fontdue::Font>], text: &str, pixelSize: f32) -> Vec<GlyphPlacement> {
-	let mut glyphPlacements: Vec<GlyphPlacement> = Vec::new();
-	let mut penX: f32 = 0.0;
-	let mut previousGlyph: Option<(usize, u16)> = None;
+fn layout_glyphs(font_list: &[Rc<fontdue::Font>], text: &str, pixel_size: f32) -> Vec<GlyphPlacement> {
+	let mut glyph_placements: Vec<GlyphPlacement> = Vec::new();
+	let mut pen_x: f32 = 0.0;
+	let mut previous_glyph: Option<(usize, u16)> = None;
 	for character in text.chars() {
-		let mut resolvedFontIndex = 0;
-		let mut resolvedGlyphIndex = fontList[0].lookup_glyph_index(character);
-		if resolvedGlyphIndex == 0 {
-			for (fontIndex, font) in fontList.iter().enumerate().skip(1) {
-				let glyphIndex = font.lookup_glyph_index(character);
-				if glyphIndex != 0 {
-					resolvedFontIndex = fontIndex;
-					resolvedGlyphIndex = glyphIndex;
+		let mut resolved_font_index = 0;
+		let mut resolved_glyph_index = font_list[0].lookup_glyph_index(character);
+		if resolved_glyph_index == 0 {
+			for (font_index, font) in font_list.iter().enumerate().skip(1) {
+				let glyph_index = font.lookup_glyph_index(character);
+				if glyph_index != 0 {
+					resolved_font_index = font_index;
+					resolved_glyph_index = glyph_index;
 					break;
 				}
 			}
 		}
-		let font = &fontList[resolvedFontIndex];
-		if let Some((previousFontIndex, previousGlyphIndex)) = previousGlyph {
-			if previousFontIndex == resolvedFontIndex {
-				if let Some(kerning) = font.horizontal_kern_indexed(previousGlyphIndex, resolvedGlyphIndex, pixelSize) {
-					penX += kerning;
+		let font = &font_list[resolved_font_index];
+		if let Some((previous_font_index, previous_glyph_index)) = previous_glyph {
+			if previous_font_index == resolved_font_index {
+				if let Some(kerning) = font.horizontal_kern_indexed(previous_glyph_index, resolved_glyph_index, pixel_size) {
+					pen_x += kerning;
 				}
 			}
 		}
-		let metrics = font.metrics_indexed(resolvedGlyphIndex, pixelSize);
-		glyphPlacements.push(GlyphPlacement {
-			fontIndex: resolvedFontIndex,
-			glyphIndex: resolvedGlyphIndex,
-			penX,
+		let metrics = font.metrics_indexed(resolved_glyph_index, pixel_size);
+		glyph_placements.push(GlyphPlacement {
+			font_index: resolved_font_index,
+			glyph_index: resolved_glyph_index,
+			pen_x,
 			metrics,
 		});
-		penX += metrics.advance_width;
-		previousGlyph = Some((resolvedFontIndex, resolvedGlyphIndex));
+		pen_x += metrics.advance_width;
+		previous_glyph = Some((resolved_font_index, resolved_glyph_index));
 	}
-	glyphPlacements
+	glyph_placements
 }
 
 //==============================================================================
 // 배치된 글자들의 전체 전진 폭.
 //==============================================================================
-fn calculateAdvanceWidth(_fontList: &[Rc<fontdue::Font>], glyphPlacements: &[GlyphPlacement], _pixelSize: f32) -> f32 {
-	match glyphPlacements.last() {
-		Some(lastGlyphPlacement) => {
-			lastGlyphPlacement.penX + lastGlyphPlacement.metrics.advance_width
+fn calculate_advance_width(_font_list: &[Rc<fontdue::Font>], glyph_placements: &[GlyphPlacement], _pixel_size: f32) -> f32 {
+	match glyph_placements.last() {
+		Some(last_glyph_placement) => {
+			last_glyph_placement.pen_x + last_glyph_placement.metrics.advance_width
 		}
 		None => {
 			0.0
@@ -558,39 +558,39 @@ fn calculateAdvanceWidth(_fontList: &[Rc<fontdue::Font>], glyphPlacements: &[Gly
 //==============================================================================
 // 외곽선 띠 만들기. (원 모양으로 넓힌 값 - 원 모양으로 좁힌 값)
 //==============================================================================
-fn buildStrokeCoverage(coverage: &[u8], bitmapWidth: i32, bitmapHeight: i32, strokeRadius: f32) -> Vec<u8> {
-	let radiusCeiling = strokeRadius.ceil() as i32;
-	let mut offsetList: Vec<(i32, i32)> = Vec::new();
-	for offsetY in -radiusCeiling..=radiusCeiling {
-		for offsetX in -radiusCeiling..=radiusCeiling {
-			let distance = ((offsetX * offsetX + offsetY * offsetY) as f32).sqrt();
-			if distance <= strokeRadius + 0.5 {
-				offsetList.push((offsetX, offsetY));
+fn build_stroke_coverage(coverage: &[u8], bitmap_width: i32, bitmap_height: i32, stroke_radius: f32) -> Vec<u8> {
+	let radius_ceiling = stroke_radius.ceil() as i32;
+	let mut offset_list: Vec<(i32, i32)> = Vec::new();
+	for offset_y in -radius_ceiling..=radius_ceiling {
+		for offset_x in -radius_ceiling..=radius_ceiling {
+			let distance = ((offset_x * offset_x + offset_y * offset_y) as f32).sqrt();
+			if distance <= stroke_radius + 0.5 {
+				offset_list.push((offset_x, offset_y));
 			}
 		}
 	}
 
-	let readCoverage = |positionX: i32, positionY: i32| -> u8 {
-		if positionX < 0 || positionY < 0 || positionX >= bitmapWidth || positionY >= bitmapHeight {
+	let read_coverage = |position_x: i32, position_y: i32| -> u8 {
+		if position_x < 0 || position_y < 0 || position_x >= bitmap_width || position_y >= bitmap_height {
 			return 0;
 		}
-		coverage[(positionY * bitmapWidth + positionX) as usize]
+		coverage[(position_y * bitmap_width + position_x) as usize]
 	};
 
-	let mut strokeCoverage = vec![0u8; coverage.len()];
-	for positionY in 0..bitmapHeight {
-		for positionX in 0..bitmapWidth {
-			let mut dilatedValue: u8 = 0;
-			let mut erodedValue: u8 = 255;
-			for (offsetX, offsetY) in &offsetList {
-				let value = readCoverage(positionX + offsetX, positionY + offsetY);
-				dilatedValue = dilatedValue.max(value);
-				erodedValue = erodedValue.min(value);
+	let mut stroke_coverage = vec![0u8; coverage.len()];
+	for position_y in 0..bitmap_height {
+		for position_x in 0..bitmap_width {
+			let mut dilated_value: u8 = 0;
+			let mut eroded_value: u8 = 255;
+			for (offset_x, offset_y) in &offset_list {
+				let value = read_coverage(position_x + offset_x, position_y + offset_y);
+				dilated_value = dilated_value.max(value);
+				eroded_value = eroded_value.min(value);
 			}
-			strokeCoverage[(positionY * bitmapWidth + positionX) as usize] = dilatedValue.saturating_sub(erodedValue);
+			stroke_coverage[(position_y * bitmap_width + position_x) as usize] = dilated_value.saturating_sub(eroded_value);
 		}
 	}
-	strokeCoverage
+	stroke_coverage
 }
 
 #[cfg(test)]
@@ -601,30 +601,30 @@ mod tests {
 	// WOFF 글꼴이 풀려서 읽히는지. (VANILLA_TEST_WOFF_PATH 에 .woff 경로를 줄 때만 본다)
 	//==============================================================================
 	#[test]
-	fn loadWoffFont() {
-		let fontPath = match std::env::var("VANILLA_TEST_WOFF_PATH") {
-			Ok(fontPath) => {
-				fontPath
+	fn load_woff_font() {
+		let font_path = match std::env::var("VANILLA_TEST_WOFF_PATH") {
+			Ok(font_path) => {
+				font_path
 			}
 			Err(_) => {
 				return;
 			}
 		};
-		let fontBytes = std::fs::read(&fontPath).expect("woff file");
-		let font = loadFont(fontBytes).expect("woff font");
-		let glyphCount = font.glyph_count();
-		let hangulGlyphIndex = font.lookup_glyph_index('가');
-		assert!(glyphCount > 0);
-		assert!(hangulGlyphIndex != 0);
+		let font_bytes = std::fs::read(&font_path).expect("woff file");
+		let font = load_font(font_bytes).expect("woff font");
+		let glyph_count = font.glyph_count();
+		let hangul_glyph_index = font.lookup_glyph_index('가');
+		assert!(glyph_count > 0);
+		assert!(hangul_glyph_index != 0);
 	}
 
 	//==============================================================================
 	// 웹 글꼴이 아닌 바이트는 그대로 둔다.
 	//==============================================================================
 	#[test]
-	fn keepPlainFontBytes() {
-		let plainBytes: Vec<u8> = vec![0, 1, 0, 0, 9, 9];
-		let resultBytes = decompressWebFont(plainBytes.clone()).expect("plain bytes");
-		assert_eq!(resultBytes, plainBytes);
+	fn keep_plain_font_bytes() {
+		let plain_bytes: Vec<u8> = vec![0, 1, 0, 0, 9, 9];
+		let result_bytes = decompress_web_font(plain_bytes.clone()).expect("plain bytes");
+		assert_eq!(result_bytes, plain_bytes);
 	}
 }

@@ -11,7 +11,7 @@ use crate::core::engine::Engine;
 // 글 애셋.
 //==============================================================================
 pub struct TextAsset {
-	assetBase: AssetBase,
+	asset_base: AssetBase,
 	text: Option<String>,
 }
 
@@ -21,7 +21,7 @@ impl TextAsset {
 	//==============================================================================
 	pub fn new() -> TextAsset {
 		TextAsset {
-			assetBase: AssetBase::new(AssetType::text),
+			asset_base: AssetBase::new(AssetType::Text),
 			text: None,
 		}
 	}
@@ -29,32 +29,32 @@ impl TextAsset {
 	//==============================================================================
 	// 읽기 요청. (원본 load)
 	//==============================================================================
-	pub fn load(&mut self, engine: &Engine, assetPath: &str) {
-		self.assetBase.requestLoad(engine, assetPath);
+	pub fn load(&mut self, engine: &Engine, asset_path: &str) {
+		self.asset_base.request_load(engine, asset_path);
 	}
 
 	//==============================================================================
 	// 이미 가진 바이트로 읽기.
 	//==============================================================================
-	pub fn loadFromBytes(&mut self, assetPath: &str, bytes: Vec<u8>) {
+	pub fn load_from_bytes(&mut self, asset_path: &str, bytes: Vec<u8>) {
 		self.text = None;
-		self.assetBase.loadFromBytes(assetPath, bytes);
+		self.asset_base.load_from_bytes(asset_path, bytes);
 	}
 
 	//==============================================================================
 	// 내리기.
 	//==============================================================================
 	pub fn unload(&mut self) {
-		self.assetBase.unload();
+		self.asset_base.unload();
 		self.text = None;
 	}
 
 	//==============================================================================
 	// 글. (다 읽히기 전이면 None. UTF-8 이 아닌 바이트는 대체 문자로 바꾼다)
 	//==============================================================================
-	pub fn getText(&mut self) -> Option<&str> {
+	pub fn get_text(&mut self) -> Option<&str> {
 		if self.text.is_none() {
-			let bytes = self.assetBase.getBytes()?;
+			let bytes = self.asset_base.get_bytes()?;
 			let text = String::from_utf8_lossy(&bytes).into_owned();
 			self.text = Some(text);
 		}
@@ -69,12 +69,12 @@ impl Default for TextAsset {
 }
 
 impl Asset for TextAsset {
-	fn getAssetBase(&self) -> &AssetBase {
-		&self.assetBase
+	fn get_asset_base(&self) -> &AssetBase {
+		&self.asset_base
 	}
 
-	fn getAssetBaseMut(&mut self) -> &mut AssetBase {
-		&mut self.assetBase
+	fn get_asset_base_mut(&mut self) -> &mut AssetBase {
+		&mut self.asset_base
 	}
 }
 
@@ -82,9 +82,9 @@ impl Asset for TextAsset {
 // JSON 애셋.
 //==============================================================================
 pub struct JsonAsset {
-	assetBase: AssetBase,
+	asset_base: AssetBase,
 	data: Option<serde_json::Value>,
-	isParseFailed: bool,
+	is_parse_failed: bool,
 }
 
 impl JsonAsset {
@@ -93,50 +93,50 @@ impl JsonAsset {
 	//==============================================================================
 	pub fn new() -> JsonAsset {
 		JsonAsset {
-			assetBase: AssetBase::new(AssetType::json),
+			asset_base: AssetBase::new(AssetType::Json),
 			data: None,
-			isParseFailed: false,
+			is_parse_failed: false,
 		}
 	}
 
 	//==============================================================================
 	// 읽기 요청. (원본 load)
 	//==============================================================================
-	pub fn load(&mut self, engine: &Engine, assetPath: &str) {
-		self.assetBase.requestLoad(engine, assetPath);
+	pub fn load(&mut self, engine: &Engine, asset_path: &str) {
+		self.asset_base.request_load(engine, asset_path);
 	}
 
 	//==============================================================================
 	// 이미 가진 바이트로 읽기.
 	//==============================================================================
-	pub fn loadFromBytes(&mut self, assetPath: &str, bytes: Vec<u8>) {
+	pub fn load_from_bytes(&mut self, asset_path: &str, bytes: Vec<u8>) {
 		self.data = None;
-		self.isParseFailed = false;
-		self.assetBase.loadFromBytes(assetPath, bytes);
+		self.is_parse_failed = false;
+		self.asset_base.load_from_bytes(asset_path, bytes);
 	}
 
 	//==============================================================================
 	// 내리기.
 	//==============================================================================
 	pub fn unload(&mut self) {
-		self.assetBase.unload();
+		self.asset_base.unload();
 		self.data = None;
-		self.isParseFailed = false;
+		self.is_parse_failed = false;
 	}
 
 	//==============================================================================
 	// 자료. (원본 data. 다 읽히기 전이거나 해석에 실패하면 None)
 	//==============================================================================
-	pub fn getData(&mut self) -> Option<&serde_json::Value> {
-		if self.data.is_none() && !self.isParseFailed {
-			let bytes = self.assetBase.getBytes()?;
+	pub fn get_data(&mut self) -> Option<&serde_json::Value> {
+		if self.data.is_none() && !self.is_parse_failed {
+			let bytes = self.asset_base.get_bytes()?;
 			match serde_json::from_slice::<serde_json::Value>(&bytes) {
 				Ok(data) => {
 					self.data = Some(data);
 				}
 				Err(error) => {
-					eprintln!("JsonAsset: Error loading json: {} ({})", self.assetBase.getAssetPath(), error);
-					self.isParseFailed = true;
+					eprintln!("JsonAsset: Error loading json: {} ({})", self.asset_base.get_asset_path(), error);
+					self.is_parse_failed = true;
 				}
 			}
 		}
@@ -151,11 +151,11 @@ impl Default for JsonAsset {
 }
 
 impl Asset for JsonAsset {
-	fn getAssetBase(&self) -> &AssetBase {
-		&self.assetBase
+	fn get_asset_base(&self) -> &AssetBase {
+		&self.asset_base
 	}
 
-	fn getAssetBaseMut(&mut self) -> &mut AssetBase {
-		&mut self.assetBase
+	fn get_asset_base_mut(&mut self) -> &mut AssetBase {
+		&mut self.asset_base
 	}
 }

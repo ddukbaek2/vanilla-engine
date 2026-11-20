@@ -63,7 +63,7 @@ impl Vector2 {
 	//==============================================================================
 	// 스칼라 곱하기.
 	//==============================================================================
-	pub fn multiplyScalar(&self, scalar: f32) -> Vector2 {
+	pub fn multiply_scalar(&self, scalar: f32) -> Vector2 {
 		Vector2::create(self.x * scalar, self.y * scalar)
 	}
 

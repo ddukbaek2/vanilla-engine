@@ -4,7 +4,6 @@
 // - 윈도우의 gilrs(Windows.Gaming.Input)는 포커스된 창이 있어야 입력 이벤트를 받는다. 창이 없는 이 예제는 연결 목록만 본다.
 // - 실행: cargo run --example gamepadlist
 //==============================================================================
-#![allow(non_snake_case)]
 
 use std::time::{Duration, Instant};
 use vanilla::GamepadManager;
@@ -13,19 +12,19 @@ use vanilla::GamepadManager;
 // 시작.
 //==============================================================================
 fn main() {
-	let mut gamepadManager = GamepadManager::new();
-	let frameInterval = Duration::from_millis(16);
-	let runDuration = Duration::from_secs(1);
-	let startInstant = Instant::now();
-	while startInstant.elapsed() < runDuration {
-		let timeDelta = frameInterval.as_secs_f32();
-		gamepadManager.tick(timeDelta);
-		std::thread::sleep(frameInterval);
+	let mut gamepad_manager = GamepadManager::new();
+	let frame_interval = Duration::from_millis(16);
+	let run_duration = Duration::from_secs(1);
+	let start_instant = Instant::now();
+	while start_instant.elapsed() < run_duration {
+		let time_delta = frame_interval.as_secs_f32();
+		gamepad_manager.tick(time_delta);
+		std::thread::sleep(frame_interval);
 	}
 
-	let connectedGamepadCount = gamepadManager.getConnectedGamepadCount();
-	println!("연결된 게임패드: {}개", connectedGamepadCount);
-	for gamepad in gamepadManager.getAllConnectedGamepads() {
+	let connected_gamepad_count = gamepad_manager.get_connected_gamepad_count();
+	println!("연결된 게임패드: {}개", connected_gamepad_count);
+	for gamepad in gamepad_manager.get_all_connected_gamepads() {
 		println!("- index {}: {} (버튼 {}개, 축 {}개)", gamepad.index, gamepad.id, gamepad.buttons.len(), gamepad.axes.len());
 	}
 }

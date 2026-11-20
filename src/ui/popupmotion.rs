@@ -1,8 +1,8 @@
 //==============================================================================
 // 팝업 등장 / 퇴장 전환기. (원본 ui/popupmotion.js 의 PopupMotion, PopupMotionState)
 // - closed → opening → open → closing → closed 네 상태를 오가며 배율(등장: 0.45 → 1.18 되튕김 → 1, 퇴장: 1 → 1.08 → 0.08)과
-//   어둡게 가리는 비율(dimRatio)을 산출한다. 노드도 컴포넌트도 아닌 계산기라서 원본 그대로 옮겼다.
-// - 매 프레임 tick(timeDelta) 뒤 getScale() / getDimRatio() 를 읽어 노드 배율 / 막 알파에 건다. setInstantEnabled(true) 면 연출 없이 바로 바뀐다.
+//   어둡게 가리는 비율(dim_ratio)을 산출한다. 노드도 컴포넌트도 아닌 계산기라서 원본 그대로 옮겼다.
+// - 매 프레임 tick(time_delta) 뒤 get_scale() / get_dim_ratio() 를 읽어 노드 배율 / 막 알파에 건다. set_instant_enabled(true) 면 연출 없이 바로 바뀐다.
 // - 원본과 다른 것:
 //   - 상태는 문자열 대신 PopupMotionState 열거형이다.
 //   - options 객체는 PopupMotionOptions 구조체다. 열림 / 닫힘 알림은 인자 없는 Box<dyn FnMut()> 다.
@@ -14,21 +14,21 @@
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PopupMotionState {
-	closed,
-	opening,
-	open,
-	closing,
+	Closed,
+	Opening,
+	Open,
+	Closing,
 }
 
 //==============================================================================
-// 전환기 설정. (원본 options = { openDuration = 0.32, closeDuration = 0.22 })
+// 전환기 설정. (원본 options = { open_duration = 0.32, close_duration = 0.22 })
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PopupMotionOptions {
 	// 등장 시간. (초)
-	pub openDuration: f32,
+	pub open_duration: f32,
 	// 퇴장 시간. (초)
-	pub closeDuration: f32,
+	pub close_duration: f32,
 }
 
 impl Default for PopupMotionOptions {
@@ -37,8 +37,8 @@ impl Default for PopupMotionOptions {
 	//==============================================================================
 	fn default() -> PopupMotionOptions {
 		PopupMotionOptions {
-			openDuration: 0.32,
-			closeDuration: 0.22,
+			open_duration: 0.32,
+			close_duration: 0.22,
 		}
 	}
 }
@@ -53,12 +53,12 @@ pub type PopupMotionEvent = Box<dyn FnMut()>;
 //==============================================================================
 pub struct PopupMotion {
 	state: PopupMotionState,
-	elapsedSeconds: f32,
-	openDuration: f32,
-	closeDuration: f32,
-	isInstantEnabled: bool,
-	openedEvent: Option<PopupMotionEvent>,
-	closedEvent: Option<PopupMotionEvent>,
+	elapsed_seconds: f32,
+	open_duration: f32,
+	close_duration: f32,
+	is_instant_enabled: bool,
+	opened_event: Option<PopupMotionEvent>,
+	closed_event: Option<PopupMotionEvent>,
 }
 
 impl PopupMotion {
@@ -66,39 +66,39 @@ impl PopupMotion {
 	// 생성. (기본 시간)
 	//==============================================================================
 	pub fn new() -> PopupMotion {
-		PopupMotion::createWithOptions(PopupMotionOptions::default())
+		PopupMotion::create_with_options(PopupMotionOptions::default())
 	}
 
 	//==============================================================================
 	// 설정으로 생성.
 	//==============================================================================
-	pub fn createWithOptions(options: PopupMotionOptions) -> PopupMotion {
+	pub fn create_with_options(options: PopupMotionOptions) -> PopupMotion {
 		PopupMotion {
-			state: PopupMotionState::closed,
-			elapsedSeconds: 0.0,
-			openDuration: options.openDuration,
-			closeDuration: options.closeDuration,
-			isInstantEnabled: false,
-			openedEvent: None,
-			closedEvent: None,
+			state: PopupMotionState::Closed,
+			elapsed_seconds: 0.0,
+			open_duration: options.open_duration,
+			close_duration: options.close_duration,
+			is_instant_enabled: false,
+			opened_event: None,
+			closed_event: None,
 		}
 	}
 
 	//==============================================================================
 	// 열림 알림 부르기.
 	//==============================================================================
-	fn fireOpenedEvent(&mut self) {
-		if let Some(openedEvent) = self.openedEvent.as_mut() {
-			openedEvent();
+	fn fire_opened_event(&mut self) {
+		if let Some(opened_event) = self.opened_event.as_mut() {
+			opened_event();
 		}
 	}
 
 	//==============================================================================
 	// 닫힘 알림 부르기.
 	//==============================================================================
-	fn fireClosedEvent(&mut self) {
-		if let Some(closedEvent) = self.closedEvent.as_mut() {
-			closedEvent();
+	fn fire_closed_event(&mut self) {
+		if let Some(closed_event) = self.closed_event.as_mut() {
+			closed_event();
 		}
 	}
 
@@ -106,50 +106,50 @@ impl PopupMotion {
 	// 열기. (이미 열렸거나 열리는 중이면 그대로)
 	//==============================================================================
 	pub fn open(&mut self) {
-		if self.state == PopupMotionState::open || self.state == PopupMotionState::opening {
+		if self.state == PopupMotionState::Open || self.state == PopupMotionState::Opening {
 			return;
 		}
-		if self.isInstantEnabled {
-			self.state = PopupMotionState::open;
-			self.fireOpenedEvent();
+		if self.is_instant_enabled {
+			self.state = PopupMotionState::Open;
+			self.fire_opened_event();
 			return;
 		}
-		self.state = PopupMotionState::opening;
-		self.elapsedSeconds = 0.0;
+		self.state = PopupMotionState::Opening;
+		self.elapsed_seconds = 0.0;
 	}
 
 	//==============================================================================
 	// 닫기. (이미 닫혔거나 닫히는 중이면 그대로)
 	//==============================================================================
 	pub fn close(&mut self) {
-		if self.state == PopupMotionState::closed || self.state == PopupMotionState::closing {
+		if self.state == PopupMotionState::Closed || self.state == PopupMotionState::Closing {
 			return;
 		}
-		if self.isInstantEnabled {
-			self.state = PopupMotionState::closed;
-			self.fireClosedEvent();
+		if self.is_instant_enabled {
+			self.state = PopupMotionState::Closed;
+			self.fire_closed_event();
 			return;
 		}
-		self.state = PopupMotionState::closing;
-		self.elapsedSeconds = 0.0;
+		self.state = PopupMotionState::Closing;
+		self.elapsed_seconds = 0.0;
 	}
 
 	//==============================================================================
 	// 갱신. (등장 / 퇴장 시간이 다 차면 다음 상태로 넘기고 알린다)
 	//==============================================================================
-	pub fn tick(&mut self, timeDelta: f32) {
-		if self.state == PopupMotionState::opening {
-			self.elapsedSeconds += timeDelta;
-			if self.elapsedSeconds >= self.openDuration {
-				self.state = PopupMotionState::open;
-				self.fireOpenedEvent();
+	pub fn tick(&mut self, time_delta: f32) {
+		if self.state == PopupMotionState::Opening {
+			self.elapsed_seconds += time_delta;
+			if self.elapsed_seconds >= self.open_duration {
+				self.state = PopupMotionState::Open;
+				self.fire_opened_event();
 			}
 		}
-		else if self.state == PopupMotionState::closing {
-			self.elapsedSeconds += timeDelta;
-			if self.elapsedSeconds >= self.closeDuration {
-				self.state = PopupMotionState::closed;
-				self.fireClosedEvent();
+		else if self.state == PopupMotionState::Closing {
+			self.elapsed_seconds += time_delta;
+			if self.elapsed_seconds >= self.close_duration {
+				self.state = PopupMotionState::Closed;
+				self.fire_closed_event();
 			}
 		}
 	}
@@ -157,31 +157,31 @@ impl PopupMotion {
 	//==============================================================================
 	// 지금 배율 반환.
 	//==============================================================================
-	pub fn getScale(&self) -> f32 {
+	pub fn get_scale(&self) -> f32 {
 		match self.state {
-			PopupMotionState::open => {
+			PopupMotionState::Open => {
 				1.0
 			}
-			PopupMotionState::closed => {
+			PopupMotionState::Closed => {
 				0.0
 			}
-			PopupMotionState::opening => {
+			PopupMotionState::Opening => {
 				// 0.45 에서 시작해 1.18 로 부풀었다가 1 로 자리 잡는 되튕김.
-				let ratio = (self.elapsedSeconds / self.openDuration).min(1.0);
+				let ratio = (self.elapsed_seconds / self.open_duration).min(1.0);
 				let smooth = ratio * ratio * (3.0 - 2.0 * ratio);
 				if smooth < 0.72 {
 					return 0.45 + (1.18 - 0.45) * (smooth / 0.72);
 				}
 				1.18 - (1.18 - 1.0) * ((smooth - 0.72) / 0.28)
 			}
-			PopupMotionState::closing => {
+			PopupMotionState::Closing => {
 				// 1 → 1.08 로 살짝 부풀었다가 0.08 로 수축.
-				let ratio = (self.elapsedSeconds / self.closeDuration).min(1.0);
+				let ratio = (self.elapsed_seconds / self.close_duration).min(1.0);
 				if ratio < 0.25 {
 					return 1.0 + (1.08 - 1.0) * (ratio / 0.25);
 				}
-				let shrinkRatio = (ratio - 0.25) / 0.75;
-				let eased = shrinkRatio * shrinkRatio * shrinkRatio;
+				let shrink_ratio = (ratio - 0.25) / 0.75;
+				let eased = shrink_ratio * shrink_ratio * shrink_ratio;
 				1.08 - (1.08 - 0.08) * eased
 			}
 		}
@@ -190,19 +190,19 @@ impl PopupMotion {
 	//==============================================================================
 	// 어둡게 가리는 비율 반환. (0 ~ 1)
 	//==============================================================================
-	pub fn getDimRatio(&self) -> f32 {
+	pub fn get_dim_ratio(&self) -> f32 {
 		match self.state {
-			PopupMotionState::open => {
+			PopupMotionState::Open => {
 				1.0
 			}
-			PopupMotionState::closed => {
+			PopupMotionState::Closed => {
 				0.0
 			}
-			PopupMotionState::opening => {
-				(self.elapsedSeconds / self.openDuration).min(1.0)
+			PopupMotionState::Opening => {
+				(self.elapsed_seconds / self.open_duration).min(1.0)
 			}
-			PopupMotionState::closing => {
-				1.0 - (self.elapsedSeconds / self.closeDuration).min(1.0)
+			PopupMotionState::Closing => {
+				1.0 - (self.elapsed_seconds / self.close_duration).min(1.0)
 			}
 		}
 	}
@@ -210,50 +210,50 @@ impl PopupMotion {
 	//==============================================================================
 	// 조작 가능 여부. (완전히 열린 뒤에만 참)
 	//==============================================================================
-	pub fn isInteractive(&self) -> bool {
-		self.state == PopupMotionState::open
+	pub fn is_interactive(&self) -> bool {
+		self.state == PopupMotionState::Open
 	}
 
 	//==============================================================================
 	// 상태 반환.
 	//==============================================================================
-	pub fn getState(&self) -> PopupMotionState {
+	pub fn get_state(&self) -> PopupMotionState {
 		self.state
 	}
 
 	//==============================================================================
 	// 보이는 중인지. (닫힘이 아니면 참)
 	//==============================================================================
-	pub fn isVisible(&self) -> bool {
-		self.state != PopupMotionState::closed
+	pub fn is_visible(&self) -> bool {
+		self.state != PopupMotionState::Closed
 	}
 
 	//==============================================================================
 	// 즉시 전환 설정. (연출 없는 UI 톤)
 	//==============================================================================
-	pub fn setInstantEnabled(&mut self, isInstantEnabled: bool) {
-		self.isInstantEnabled = isInstantEnabled;
+	pub fn set_instant_enabled(&mut self, is_instant_enabled: bool) {
+		self.is_instant_enabled = is_instant_enabled;
 	}
 
 	//==============================================================================
 	// 즉시 전환 여부.
 	//==============================================================================
-	pub fn isInstantEnabled(&self) -> bool {
-		self.isInstantEnabled
+	pub fn is_instant_enabled(&self) -> bool {
+		self.is_instant_enabled
 	}
 
 	//==============================================================================
 	// 열림 알림 설정.
 	//==============================================================================
-	pub fn setOpenedEvent(&mut self, openedEvent: PopupMotionEvent) {
-		self.openedEvent = Some(openedEvent);
+	pub fn set_opened_event(&mut self, opened_event: PopupMotionEvent) {
+		self.opened_event = Some(opened_event);
 	}
 
 	//==============================================================================
 	// 닫힘 알림 설정.
 	//==============================================================================
-	pub fn setClosedEvent(&mut self, closedEvent: PopupMotionEvent) {
-		self.closedEvent = Some(closedEvent);
+	pub fn set_closed_event(&mut self, closed_event: PopupMotionEvent) {
+		self.closed_event = Some(closed_event);
 	}
 }
 
@@ -273,65 +273,65 @@ mod tests {
 	// 열기 → 0.32 초 뒤 열림 → 닫기 → 0.22 초 뒤 닫힘. 배율과 막 비율이 원본 공식대로 움직인다.
 	//==============================================================================
 	#[test]
-	fn openAndCloseFollowOriginalCurve() {
-		let mut popupMotion = PopupMotion::new();
-		let openedCount = Rc::new(Cell::new(0));
-		let closedCount = Rc::new(Cell::new(0));
-		let openedCounter = openedCount.clone();
-		popupMotion.setOpenedEvent(Box::new(move || {
-			openedCounter.set(openedCounter.get() + 1);
+	fn open_and_close_follow_original_curve() {
+		let mut popup_motion = PopupMotion::new();
+		let opened_count = Rc::new(Cell::new(0));
+		let closed_count = Rc::new(Cell::new(0));
+		let opened_counter = opened_count.clone();
+		popup_motion.set_opened_event(Box::new(move || {
+			opened_counter.set(opened_counter.get() + 1);
 		}));
-		let closedCounter = closedCount.clone();
-		popupMotion.setClosedEvent(Box::new(move || {
-			closedCounter.set(closedCounter.get() + 1);
+		let closed_counter = closed_count.clone();
+		popup_motion.set_closed_event(Box::new(move || {
+			closed_counter.set(closed_counter.get() + 1);
 		}));
-		assert_eq!(popupMotion.getScale(), 0.0);
-		assert!(!popupMotion.isVisible());
+		assert_eq!(popup_motion.get_scale(), 0.0);
+		assert!(!popup_motion.is_visible());
 
-		popupMotion.open();
-		assert_eq!(popupMotion.getState(), PopupMotionState::opening);
-		assert!((popupMotion.getScale() - 0.45).abs() < 0.0001);
-		assert!(!popupMotion.isInteractive());
-		popupMotion.tick(0.16);
+		popup_motion.open();
+		assert_eq!(popup_motion.get_state(), PopupMotionState::Opening);
+		assert!((popup_motion.get_scale() - 0.45).abs() < 0.0001);
+		assert!(!popup_motion.is_interactive());
+		popup_motion.tick(0.16);
 		// 진행 0.5 → smooth 0.5 → 0.45 + 0.73 * (0.5 / 0.72)
-		let expectedScale = 0.45 + 0.73 * (0.5 / 0.72);
-		assert!((popupMotion.getScale() - expectedScale).abs() < 0.0001);
-		assert!((popupMotion.getDimRatio() - 0.5).abs() < 0.0001);
-		popupMotion.tick(0.16);
-		assert_eq!(popupMotion.getState(), PopupMotionState::open);
-		assert_eq!(openedCount.get(), 1);
-		assert!(popupMotion.isInteractive());
-		assert_eq!(popupMotion.getScale(), 1.0);
+		let expected_scale = 0.45 + 0.73 * (0.5 / 0.72);
+		assert!((popup_motion.get_scale() - expected_scale).abs() < 0.0001);
+		assert!((popup_motion.get_dim_ratio() - 0.5).abs() < 0.0001);
+		popup_motion.tick(0.16);
+		assert_eq!(popup_motion.get_state(), PopupMotionState::Open);
+		assert_eq!(opened_count.get(), 1);
+		assert!(popup_motion.is_interactive());
+		assert_eq!(popup_motion.get_scale(), 1.0);
 
-		popupMotion.close();
-		popupMotion.tick(0.055);
+		popup_motion.close();
+		popup_motion.tick(0.055);
 		// 진행 0.25 → 1.08
-		assert!((popupMotion.getScale() - 1.08).abs() < 0.001);
-		popupMotion.tick(0.2);
-		assert_eq!(popupMotion.getState(), PopupMotionState::closed);
-		assert_eq!(closedCount.get(), 1);
-		assert_eq!(popupMotion.getDimRatio(), 0.0);
+		assert!((popup_motion.get_scale() - 1.08).abs() < 0.001);
+		popup_motion.tick(0.2);
+		assert_eq!(popup_motion.get_state(), PopupMotionState::Closed);
+		assert_eq!(closed_count.get(), 1);
+		assert_eq!(popup_motion.get_dim_ratio(), 0.0);
 	}
 
 	//==============================================================================
 	// 즉시 전환이면 열기 / 닫기가 그 자리에서 끝나고 알림이 바로 온다.
 	//==============================================================================
 	#[test]
-	fn instantModeSwitchesImmediately() {
-		let mut popupMotion = PopupMotion::new();
-		let closedCount = Rc::new(Cell::new(0));
-		let closedCounter = closedCount.clone();
-		popupMotion.setClosedEvent(Box::new(move || {
-			closedCounter.set(closedCounter.get() + 1);
+	fn instant_mode_switches_immediately() {
+		let mut popup_motion = PopupMotion::new();
+		let closed_count = Rc::new(Cell::new(0));
+		let closed_counter = closed_count.clone();
+		popup_motion.set_closed_event(Box::new(move || {
+			closed_counter.set(closed_counter.get() + 1);
 		}));
-		popupMotion.setInstantEnabled(true);
-		popupMotion.open();
-		assert!(popupMotion.isInteractive());
-		popupMotion.open();
-		popupMotion.close();
-		assert_eq!(popupMotion.getState(), PopupMotionState::closed);
-		assert_eq!(closedCount.get(), 1);
-		popupMotion.close();
-		assert_eq!(closedCount.get(), 1);
+		popup_motion.set_instant_enabled(true);
+		popup_motion.open();
+		assert!(popup_motion.is_interactive());
+		popup_motion.open();
+		popup_motion.close();
+		assert_eq!(popup_motion.get_state(), PopupMotionState::Closed);
+		assert_eq!(closed_count.get(), 1);
+		popup_motion.close();
+		assert_eq!(closed_count.get(), 1);
 	}
 }

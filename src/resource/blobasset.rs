@@ -10,7 +10,7 @@ use std::rc::Rc;
 // 바이너리 애셋.
 //==============================================================================
 pub struct BlobAsset {
-	assetBase: AssetBase,
+	asset_base: AssetBase,
 }
 
 impl BlobAsset {
@@ -19,36 +19,36 @@ impl BlobAsset {
 	//==============================================================================
 	pub fn new() -> BlobAsset {
 		BlobAsset {
-			assetBase: AssetBase::new(AssetType::blob),
+			asset_base: AssetBase::new(AssetType::Blob),
 		}
 	}
 
 	//==============================================================================
 	// 읽기 요청. (원본 load)
 	//==============================================================================
-	pub fn load(&mut self, engine: &Engine, assetPath: &str) {
-		self.assetBase.requestLoad(engine, assetPath);
+	pub fn load(&mut self, engine: &Engine, asset_path: &str) {
+		self.asset_base.request_load(engine, asset_path);
 	}
 
 	//==============================================================================
 	// 이미 가진 바이트로 읽기.
 	//==============================================================================
-	pub fn loadFromBytes(&mut self, assetPath: &str, bytes: Vec<u8>) {
-		self.assetBase.loadFromBytes(assetPath, bytes);
+	pub fn load_from_bytes(&mut self, asset_path: &str, bytes: Vec<u8>) {
+		self.asset_base.load_from_bytes(asset_path, bytes);
 	}
 
 	//==============================================================================
 	// 내리기.
 	//==============================================================================
 	pub fn unload(&mut self) {
-		self.assetBase.unload();
+		self.asset_base.unload();
 	}
 
 	//==============================================================================
-	// 바이트. (원본 getBlob. 다 읽히기 전이면 None)
+	// 바이트. (원본 get_blob. 다 읽히기 전이면 None)
 	//==============================================================================
-	pub fn getBlob(&self) -> Option<Rc<Vec<u8>>> {
-		self.assetBase.getBytes()
+	pub fn get_blob(&self) -> Option<Rc<Vec<u8>>> {
+		self.asset_base.get_bytes()
 	}
 }
 
@@ -59,11 +59,11 @@ impl Default for BlobAsset {
 }
 
 impl Asset for BlobAsset {
-	fn getAssetBase(&self) -> &AssetBase {
-		&self.assetBase
+	fn get_asset_base(&self) -> &AssetBase {
+		&self.asset_base
 	}
 
-	fn getAssetBaseMut(&mut self) -> &mut AssetBase {
-		&mut self.assetBase
+	fn get_asset_base_mut(&mut self) -> &mut AssetBase {
+		&mut self.asset_base
 	}
 }

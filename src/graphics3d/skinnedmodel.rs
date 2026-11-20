@@ -2,21 +2,21 @@
 // 스킨드 모델. (원본 experimental/graphics/skinnedmodel.js)
 // - 모델 인스턴스, 메시/본/스킨/머티리얼/애니메이션 데이터 + 포즈 상태. 렌더링은 SkinnedModelRenderer 가 맡는다.
 // - GLB(바이너리 glTF)와 바이너리 FBX 를 공통 중립 스키마(MeshDescription + MaterialDescription)로 해석해 GL 리소스를 구성한다.
-//   (임포터는 파싱만 → 중립 스키마 → 공용 GL 업로드 uploadMeshesAndMaterials)
+//   (임포터는 파싱만 → 중립 스키마 → 공용 GL 업로드 upload_meshes_and_materials)
 // - 스킨 없는 정적 메시는 합성 스킨(조인트 1개)으로, 모프 타깃은 실수 텍스처로 올려 같은 스키닝 경로로 그린다.
 // - 애니메이션 크로스페이드와 조인트 회전 오프셋(절차 포즈 가공), 모프 가중치(glTF weights / 프로그램)를 원본처럼 지원한다.
 // - 원본과 다른 것:
-//   - 원본은 async 이고 URL 을 fetch 한다. 러스트 판은 바이트를 받는 loadFromBytes / loadFromFbxBytes / addAnimationsFromFbxBytes 와
-//     데스크탑 경로를 읽는 loadFromPath / loadFromFbxPath / addAnimationsFromFbxPath 를 둔다. (웹은 BlobAsset 의 바이트를 넘긴다)
-//   - GL 을 쓰는 함수는 gl 을 받는다. update(deltaTime) 는 GL 을 쓰지 않는다. 원본 update 6단계(바뀐 모프 타깃 업로드)는
-//     렌더러의 draw / drawDepth / drawWireframe 가 uploadPendingMorphTargets 로 대신한다. (그래서 그리기 함수가 &mut 모델을 받는다)
+//   - 원본은 async 이고 URL 을 fetch 한다. 러스트 판은 바이트를 받는 load_from_bytes / load_from_fbx_bytes / add_animations_from_fbx_bytes 와
+//     데스크탑 경로를 읽는 load_from_path / load_from_fbx_path / add_animations_from_fbx_path 를 둔다. (웹은 BlobAsset 의 바이트를 넘긴다)
+//   - GL 을 쓰는 함수는 gl 을 받는다. update(delta_time) 는 GL 을 쓰지 않는다. 원본 update 6단계(바뀐 모프 타깃 업로드)는
+//     렌더러의 draw / draw_depth / draw_wireframe 가 upload_pending_morph_targets 로 대신한다. (그래서 그리기 함수가 &mut 모델을 받는다)
 //     덕분에 씬의 tick 에서 update 를 부를 수 있다.
-//   - 해석과 업로드를 나눠 부를 수 있다: interpretContent / interpretFbxContent 는 노드, 스킨, 애니메이션을 채우고 중립 서술을 돌려준다.
-//     셰이더 없이 만든 모델(createWithoutShaderProgram)은 포즈 계산만 한다. (애니메이션 원본 모델, 단위 시험)
+//   - 해석과 업로드를 나눠 부를 수 있다: interpret_content / interpret_fbx_content 는 노드, 스킨, 애니메이션을 채우고 중립 서술을 돌려준다.
+//     셰이더 없이 만든 모델(create_without_shader_program)은 포즈 계산만 한다. (애니메이션 원본 모델, 단위 시험)
 //   - 원본 노드 / 드로어블 / 스킨 / 클립 객체는 SkinnedModelNode / Drawable / Skin / AnimationClip 구조체다.
-//     드로어블의 머티리얼은 Rc<Material> 이다. 클립은 인덱스로 가리키고, sampleAnimation 도 클립 인덱스를 받는다.
-//   - 드로어블의 meshDescription 은 모프 타깃을 morphTargetList 로 옮긴 뒤라 morphTargets 가 비어 있다. (큰 델타 배열을 두 벌 들지 않는다)
-//   - 원본이 TypeError 로 멈추는 자리 가운데 몇 곳은 건너뛴다: glTF 바깥(uri) 이미지는 텍스처 없음, inverseBindMatrices 가 없는 스킨은
+//     드로어블의 머티리얼은 Rc<Material> 이다. 클립은 인덱스로 가리키고, sample_animation 도 클립 인덱스를 받는다.
+//   - 드로어블의 mesh_description 은 모프 타깃을 morph_target_list 로 옮긴 뒤라 morph_targets 가 비어 있다. (큰 델타 배열을 두 벌 들지 않는다)
+//   - 원본이 TypeError 로 멈추는 자리 가운데 몇 곳은 건너뛴다: glTF 바깥(uri) 이미지는 텍스처 없음, inverse_bind_matrices 가 없는 스킨은
 //     단위 행렬, 본이 없는 클러스터는 단위 조인트, 노드가 없거나 알 수 없는 경로의 채널은 버린다. 원본처럼 노드 matrix 와
 //     CUBICSPLINE 보간, 프리미티브 mode, glTF 노드의 weights 는 보지 않는다. FBX 는 원본처럼 스킨이 붙은 메시만 그린다.
 //   - 원본에 없는 destroy 를 더했다. (버텍스 어레이, 버퍼, 모프 텍스처, 이 모델만 쓰는 머티리얼 텍스처를 지운다)
@@ -58,29 +58,29 @@ pub const MORPH_TARGET_MAXIMUM: usize = 96;
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum AnimationPath {
-	translation,
-	rotation,
-	scale,
-	weights,
+	Translation,
+	Rotation,
+	Scale,
+	Weights,
 }
 
 impl AnimationPath {
 	//==============================================================================
 	// glTF 경로 문자열로부터. (모르는 경로면 None)
 	//==============================================================================
-	pub fn fromName(pathName: &str) -> Option<AnimationPath> {
-		match pathName {
+	pub fn from_name(path_name: &str) -> Option<AnimationPath> {
+		match path_name {
 			"translation" => {
-				Some(AnimationPath::translation)
+				Some(AnimationPath::Translation)
 			}
 			"rotation" => {
-				Some(AnimationPath::rotation)
+				Some(AnimationPath::Rotation)
 			}
 			"scale" => {
-				Some(AnimationPath::scale)
+				Some(AnimationPath::Scale)
 			}
 			"weights" => {
-				Some(AnimationPath::weights)
+				Some(AnimationPath::Weights)
 			}
 			_ => {
 				None
@@ -90,21 +90,21 @@ impl AnimationPath {
 }
 
 //==============================================================================
-// 모델 노드. (본 계층 + 포즈 상태, 원본 nodeList 원소)
+// 모델 노드. (본 계층 + 포즈 상태, 원본 node_list 원소)
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct SkinnedModelNode {
 	pub name: String,
-	pub childIndices: Vec<usize>,
-	pub meshIndex: Option<usize>,
-	pub skinIndex: Option<usize>,
-	pub baseTranslation: [f32; 3],
-	pub baseRotation: Quaternion,
-	pub baseScale: [f32; 3],
-	pub currentTranslation: [f32; 3],
-	pub currentRotation: Quaternion,
-	pub currentScale: [f32; 3],
-	pub worldMatrix: Matrix4,
+	pub child_indices: Vec<usize>,
+	pub mesh_index: Option<usize>,
+	pub skin_index: Option<usize>,
+	pub base_translation: [f32; 3],
+	pub base_rotation: Quaternion,
+	pub base_scale: [f32; 3],
+	pub current_translation: [f32; 3],
+	pub current_rotation: Quaternion,
+	pub current_scale: [f32; 3],
+	pub world_matrix: Matrix4,
 }
 
 //==============================================================================
@@ -112,9 +112,9 @@ pub struct SkinnedModelNode {
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct Skin {
-	pub jointNodeIndices: Vec<usize>,
-	pub inverseBindMatrices: Vec<Matrix4>,
-	pub jointMatrixArray: Vec<f32>,
+	pub joint_node_indices: Vec<usize>,
+	pub inverse_bind_matrices: Vec<Matrix4>,
+	pub joint_matrix_array: Vec<f32>,
 }
 
 //==============================================================================
@@ -123,8 +123,8 @@ pub struct Skin {
 #[derive(Clone, Debug, PartialEq)]
 pub struct MorphTarget {
 	pub name: String,
-	pub positionDeltas: Vec<f32>,
-	pub normalDeltas: Option<Vec<f32>>,
+	pub position_deltas: Vec<f32>,
+	pub normal_deltas: Option<Vec<f32>>,
 }
 
 //==============================================================================
@@ -132,8 +132,8 @@ pub struct MorphTarget {
 //==============================================================================
 #[derive(Clone, Debug, PartialEq)]
 pub enum IndexArray {
-	unsignedShort(Vec<u16>),
-	unsignedInt(Vec<u32>),
+	UnsignedShort(Vec<u16>),
+	UnsignedInt(Vec<u32>),
 }
 
 impl IndexArray {
@@ -142,10 +142,10 @@ impl IndexArray {
 	//==============================================================================
 	pub fn len(&self) -> usize {
 		match self {
-			IndexArray::unsignedShort(indices) => {
+			IndexArray::UnsignedShort(indices) => {
 				indices.len()
 			}
-			IndexArray::unsignedInt(indices) => {
+			IndexArray::UnsignedInt(indices) => {
 				indices.len()
 			}
 		}
@@ -163,10 +163,10 @@ impl IndexArray {
 	//==============================================================================
 	pub fn get(&self, position: usize) -> usize {
 		match self {
-			IndexArray::unsignedShort(indices) => {
+			IndexArray::UnsignedShort(indices) => {
 				indices[position] as usize
 			}
-			IndexArray::unsignedInt(indices) => {
+			IndexArray::UnsignedInt(indices) => {
 				indices[position] as usize
 			}
 		}
@@ -175,12 +175,12 @@ impl IndexArray {
 	//==============================================================================
 	// GL 원소 타입. (UNSIGNED_SHORT / UNSIGNED_INT)
 	//==============================================================================
-	pub fn getGlComponentType(&self) -> u32 {
+	pub fn get_gl_component_type(&self) -> u32 {
 		match self {
-			IndexArray::unsignedShort(_) => {
+			IndexArray::UnsignedShort(_) => {
 				glow::UNSIGNED_SHORT
 			}
-			IndexArray::unsignedInt(_) => {
+			IndexArray::UnsignedInt(_) => {
 				glow::UNSIGNED_INT
 			}
 		}
@@ -189,27 +189,27 @@ impl IndexArray {
 	//==============================================================================
 	// 바이트로 보기. (GL 버퍼 업로드용)
 	//==============================================================================
-	fn asBytes(&self) -> &[u8] {
+	fn as_bytes(&self) -> &[u8] {
 		match self {
-			IndexArray::unsignedShort(indices) => {
-				sliceToBytes(indices)
+			IndexArray::UnsignedShort(indices) => {
+				slice_to_bytes(indices)
 			}
-			IndexArray::unsignedInt(indices) => {
-				sliceToBytes(indices)
+			IndexArray::UnsignedInt(indices) => {
+				slice_to_bytes(indices)
 			}
 		}
 	}
 }
 
 //==============================================================================
-// 접근자 배열. (원본 readAccessorArray 가 돌려주는 타입 배열, 컴포넌트 타입 그대로)
+// 접근자 배열. (원본 read_accessor_array 가 돌려주는 타입 배열, 컴포넌트 타입 그대로)
 //==============================================================================
 #[derive(Clone, Debug, PartialEq)]
 pub enum AccessorArray {
-	unsignedByte(Vec<u8>),
-	unsignedShort(Vec<u16>),
-	unsignedInt(Vec<u32>),
-	float(Vec<f32>),
+	UnsignedByte(Vec<u8>),
+	UnsignedShort(Vec<u16>),
+	UnsignedInt(Vec<u32>),
+	Float(Vec<f32>),
 }
 
 impl AccessorArray {
@@ -218,16 +218,16 @@ impl AccessorArray {
 	//==============================================================================
 	pub fn len(&self) -> usize {
 		match self {
-			AccessorArray::unsignedByte(values) => {
+			AccessorArray::UnsignedByte(values) => {
 				values.len()
 			}
-			AccessorArray::unsignedShort(values) => {
+			AccessorArray::UnsignedShort(values) => {
 				values.len()
 			}
-			AccessorArray::unsignedInt(values) => {
+			AccessorArray::UnsignedInt(values) => {
 				values.len()
 			}
-			AccessorArray::float(values) => {
+			AccessorArray::Float(values) => {
 				values.len()
 			}
 		}
@@ -243,18 +243,18 @@ impl AccessorArray {
 	//==============================================================================
 	// 컴포넌트 타입. (5121 / 5123 / 5125 / 5126)
 	//==============================================================================
-	pub fn getComponentType(&self) -> u32 {
+	pub fn get_component_type(&self) -> u32 {
 		match self {
-			AccessorArray::unsignedByte(_) => {
+			AccessorArray::UnsignedByte(_) => {
 				COMPONENT_TYPE_UNSIGNED_BYTE
 			}
-			AccessorArray::unsignedShort(_) => {
+			AccessorArray::UnsignedShort(_) => {
 				COMPONENT_TYPE_UNSIGNED_SHORT
 			}
-			AccessorArray::unsignedInt(_) => {
+			AccessorArray::UnsignedInt(_) => {
 				COMPONENT_TYPE_UNSIGNED_INT
 			}
-			AccessorArray::float(_) => {
+			AccessorArray::Float(_) => {
 				COMPONENT_TYPE_FLOAT
 			}
 		}
@@ -263,18 +263,18 @@ impl AccessorArray {
 	//==============================================================================
 	// 실수 목록으로. (원본 new Float32Array(typedArray), 정수는 정규화하지 않고 값 그대로)
 	//==============================================================================
-	pub fn toFloatList(&self) -> Vec<f32> {
+	pub fn to_float_list(&self) -> Vec<f32> {
 		match self {
-			AccessorArray::unsignedByte(values) => {
+			AccessorArray::UnsignedByte(values) => {
 				values.iter().map(|value| *value as f32).collect()
 			}
-			AccessorArray::unsignedShort(values) => {
+			AccessorArray::UnsignedShort(values) => {
 				values.iter().map(|value| *value as f32).collect()
 			}
-			AccessorArray::unsignedInt(values) => {
+			AccessorArray::UnsignedInt(values) => {
 				values.iter().map(|value| *value as f32).collect()
 			}
-			AccessorArray::float(values) => {
+			AccessorArray::Float(values) => {
 				values.clone()
 			}
 		}
@@ -283,18 +283,18 @@ impl AccessorArray {
 	//==============================================================================
 	// 16비트 정수 목록으로. (원본 new Uint16Array(typedArray))
 	//==============================================================================
-	pub fn toUnsignedShortList(&self) -> Vec<u16> {
+	pub fn to_unsigned_short_list(&self) -> Vec<u16> {
 		match self {
-			AccessorArray::unsignedByte(values) => {
+			AccessorArray::UnsignedByte(values) => {
 				values.iter().map(|value| *value as u16).collect()
 			}
-			AccessorArray::unsignedShort(values) => {
+			AccessorArray::UnsignedShort(values) => {
 				values.clone()
 			}
-			AccessorArray::unsignedInt(values) => {
+			AccessorArray::UnsignedInt(values) => {
 				values.iter().map(|value| *value as u16).collect()
 			}
-			AccessorArray::float(values) => {
+			AccessorArray::Float(values) => {
 				values.iter().map(|value| *value as u16).collect()
 			}
 		}
@@ -303,64 +303,64 @@ impl AccessorArray {
 	//==============================================================================
 	// 인덱스 배열로. (원본: Uint8 은 Uint16 으로 넓히고 나머지는 그대로)
 	//==============================================================================
-	pub fn toIndexArray(&self) -> IndexArray {
+	pub fn to_index_array(&self) -> IndexArray {
 		match self {
-			AccessorArray::unsignedInt(values) => {
-				IndexArray::unsignedInt(values.clone())
+			AccessorArray::UnsignedInt(values) => {
+				IndexArray::UnsignedInt(values.clone())
 			}
 			_ => {
-				IndexArray::unsignedShort(self.toUnsignedShortList())
+				IndexArray::UnsignedShort(self.to_unsigned_short_list())
 			}
 		}
 	}
 }
 
 //==============================================================================
-// 중립 메시 서술. (원본 meshDescription, 순수 CPU 배열)
-// - joints / weights 는 정점마다 4개, materialIndex 가 None 이면 기본 머티리얼, nodeIndex 는 모프 가중치 채널의 대상 노드.
+// 중립 메시 서술. (원본 mesh_description, 순수 CPU 배열)
+// - joints / weights 는 정점마다 4개, material_index 가 None 이면 기본 머티리얼, node_index 는 모프 가중치 채널의 대상 노드.
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct MeshDescription {
 	pub positions: Vec<f32>,
 	pub normals: Option<Vec<f32>>,
-	pub textureCoordinates: Option<Vec<f32>>,
+	pub texture_coordinates: Option<Vec<f32>>,
 	pub joints: Vec<u16>,
 	pub weights: Vec<f32>,
 	pub indices: Option<IndexArray>,
-	pub skinIndex: usize,
-	pub materialIndex: Option<usize>,
-	pub materialName: String,
-	pub nodeIndex: Option<usize>,
-	pub morphTargets: Vec<MorphTarget>,
-	pub morphWeights: Vec<f32>,
+	pub skin_index: usize,
+	pub material_index: Option<usize>,
+	pub material_name: String,
+	pub node_index: Option<usize>,
+	pub morph_targets: Vec<MorphTarget>,
+	pub morph_weights: Vec<f32>,
 }
 
 //==============================================================================
-// 드로어블. (원본 drawableList 원소, 버텍스 어레이, 인덱스, 스킨, 머티리얼 참조, 모프 상태)
+// 드로어블. (원본 drawable_list 원소, 버텍스 어레이, 인덱스, 스킨, 머티리얼 참조, 모프 상태)
 //==============================================================================
 pub struct Drawable {
-	pub vertexArray: GlVertexArray,
-	pub vertexBufferList: Vec<GlBuffer>,
-	pub isIndexed: bool,
-	pub indexBuffer: Option<GlBuffer>,
-	pub indexCount: usize,
-	pub indexComponentType: u32,
-	pub indexByteOffset: i32,
-	pub wireframeIndexBuffer: Option<GlBuffer>,
-	pub wireframeIndexCount: usize,
-	pub wireframeIndexComponentType: u32,
-	pub vertexCount: usize,
+	pub vertex_array: GlVertexArray,
+	pub vertex_buffer_list: Vec<GlBuffer>,
+	pub is_indexed: bool,
+	pub index_buffer: Option<GlBuffer>,
+	pub index_count: usize,
+	pub index_component_type: u32,
+	pub index_byte_offset: i32,
+	pub wireframe_index_buffer: Option<GlBuffer>,
+	pub wireframe_index_count: usize,
+	pub wireframe_index_component_type: u32,
+	pub vertex_count: usize,
 	pub material: Rc<Material>,
-	pub materialName: String,
-	pub skinIndex: usize,
-	pub nodeIndex: Option<usize>,
-	pub meshDescription: MeshDescription,
-	pub morphTargetList: Vec<MorphTarget>,
-	pub morphWeights: Vec<f32>,
-	pub morphTexture: Option<GlTexture>,
-	pub morphRowsPerTarget: i32,
-	pub morphTextureWidth: i32,
-	pub isMorphDirty: bool,
+	pub material_name: String,
+	pub skin_index: usize,
+	pub node_index: Option<usize>,
+	pub mesh_description: MeshDescription,
+	pub morph_target_list: Vec<MorphTarget>,
+	pub morph_weights: Vec<f32>,
+	pub morph_texture: Option<GlTexture>,
+	pub morph_rows_per_target: i32,
+	pub morph_texture_width: i32,
+	pub is_morph_dirty: bool,
 }
 
 //==============================================================================
@@ -368,7 +368,7 @@ pub struct Drawable {
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct AnimationChannel {
-	pub nodeIndex: usize,
+	pub node_index: usize,
 	pub path: AnimationPath,
 	pub times: Vec<f32>,
 	pub values: Vec<f32>,
@@ -389,123 +389,123 @@ pub struct AnimationClip {
 // 스킨드 모델.
 //==============================================================================
 pub struct SkinnedModel {
-	shaderProgram: Option<Rc<ShaderProgram>>,
-	nodeList: Vec<SkinnedModelNode>,
-	rootNodeIndices: Vec<usize>,
-	skinList: Vec<Skin>,
-	drawableList: Vec<Drawable>,
-	animationList: Vec<AnimationClip>,
-	currentAnimationIndex: Option<usize>,
-	previousAnimationIndex: Option<usize>,
-	currentTime: f32,
-	previousTime: f32,
-	fadeDuration: f32,
-	fadeElapsed: f32,
-	timeScale: f32,
-	jointRotationOffsets: Vec<(usize, Quaternion)>,
+	shader_program: Option<Rc<ShaderProgram>>,
+	node_list: Vec<SkinnedModelNode>,
+	root_node_indices: Vec<usize>,
+	skin_list: Vec<Skin>,
+	drawable_list: Vec<Drawable>,
+	animation_list: Vec<AnimationClip>,
+	current_animation_index: Option<usize>,
+	previous_animation_index: Option<usize>,
+	current_time: f32,
+	previous_time: f32,
+	fade_duration: f32,
+	fade_elapsed: f32,
+	time_scale: f32,
+	joint_rotation_offsets: Vec<(usize, Quaternion)>,
 }
 
 impl SkinnedModel {
 	//==============================================================================
-	// 생성. (셰이더 프로그램은 렌더러의 템플릿, renderer.getShaderProgram())
+	// 생성. (셰이더 프로그램은 렌더러의 템플릿, renderer.get_shader_program())
 	//==============================================================================
-	pub fn new(shaderProgram: Rc<ShaderProgram>) -> SkinnedModel {
-		let mut skinnedModel = SkinnedModel::createWithoutShaderProgram();
-		skinnedModel.shaderProgram = Some(shaderProgram);
-		skinnedModel
+	pub fn new(shader_program: Rc<ShaderProgram>) -> SkinnedModel {
+		let mut skinned_model = SkinnedModel::create_without_shader_program();
+		skinned_model.shader_program = Some(shader_program);
+		skinned_model
 	}
 
 	//==============================================================================
-	// 셰이더 없이 생성. (원본에 없는 것, 해석과 포즈 계산만 하는 모델, uploadMeshesAndMaterials 는 오류)
+	// 셰이더 없이 생성. (원본에 없는 것, 해석과 포즈 계산만 하는 모델, upload_meshes_and_materials 는 오류)
 	//==============================================================================
-	pub fn createWithoutShaderProgram() -> SkinnedModel {
+	pub fn create_without_shader_program() -> SkinnedModel {
 		SkinnedModel {
-			shaderProgram: None,
-			nodeList: Vec::new(),
-			rootNodeIndices: Vec::new(),
-			skinList: Vec::new(),
-			drawableList: Vec::new(),
-			animationList: Vec::new(),
-			currentAnimationIndex: None,
-			previousAnimationIndex: None,
-			currentTime: 0.0,
-			previousTime: 0.0,
-			fadeDuration: 0.0,
-			fadeElapsed: 0.0,
-			timeScale: 1.0,
-			jointRotationOffsets: Vec::new(),
+			shader_program: None,
+			node_list: Vec::new(),
+			root_node_indices: Vec::new(),
+			skin_list: Vec::new(),
+			drawable_list: Vec::new(),
+			animation_list: Vec::new(),
+			current_animation_index: None,
+			previous_animation_index: None,
+			current_time: 0.0,
+			previous_time: 0.0,
+			fade_duration: 0.0,
+			fade_elapsed: 0.0,
+			time_scale: 1.0,
+			joint_rotation_offsets: Vec::new(),
 		}
 	}
 
 	//==============================================================================
 	// 바이트로부터 로드. (GLB 바이너리 glTF, 원본 정적 loadFromUrl 의 fetch 뒤 부분)
 	//==============================================================================
-	pub fn loadFromBytes(gl: &glow::Context, bytes: &[u8], skinnedModelRenderer: &SkinnedModelRenderer) -> Result<SkinnedModel, String> {
-		let mut skinnedModel = SkinnedModel::new(skinnedModelRenderer.getShaderProgram());
-		skinnedModel.parseBinary(gl, bytes)?;
-		Ok(skinnedModel)
+	pub fn load_from_bytes(gl: &glow::Context, bytes: &[u8], skinned_model_renderer: &SkinnedModelRenderer) -> Result<SkinnedModel, String> {
+		let mut skinned_model = SkinnedModel::new(skinned_model_renderer.get_shader_program());
+		skinned_model.parse_binary(gl, bytes)?;
+		Ok(skinned_model)
 	}
 
 	//==============================================================================
 	// 바이트로부터 로드. (바이너리 FBX, 원본 정적 loadFromFbxUrl 의 fetch 뒤 부분)
 	//==============================================================================
-	pub fn loadFromFbxBytes(gl: &glow::Context, bytes: &[u8], skinnedModelRenderer: &SkinnedModelRenderer) -> Result<SkinnedModel, String> {
-		let sceneData = FbxLoader::new().parse(bytes)?;
-		let mut skinnedModel = SkinnedModel::new(skinnedModelRenderer.getShaderProgram());
-		skinnedModel.parseFbxContent(gl, &sceneData)?;
-		Ok(skinnedModel)
+	pub fn load_from_fbx_bytes(gl: &glow::Context, bytes: &[u8], skinned_model_renderer: &SkinnedModelRenderer) -> Result<SkinnedModel, String> {
+		let scene_data = FbxLoader::new().parse(bytes)?;
+		let mut skinned_model = SkinnedModel::new(skinned_model_renderer.get_shader_program());
+		skinned_model.parse_fbx_content(gl, &scene_data)?;
+		Ok(skinned_model)
 	}
 
 	//==============================================================================
 	// 파일로부터 로드. (GLB, 원본 정적 loadFromUrl 의 데스크탑 판)
 	//==============================================================================
 	#[cfg(not(target_arch = "wasm32"))]
-	pub fn loadFromPath(gl: &glow::Context, path: &std::path::Path, skinnedModelRenderer: &SkinnedModelRenderer) -> Result<SkinnedModel, String> {
+	pub fn load_from_path(gl: &glow::Context, path: &std::path::Path, skinned_model_renderer: &SkinnedModelRenderer) -> Result<SkinnedModel, String> {
 		let bytes = std::fs::read(path).map_err(|error| format!("SkinnedModel load failed: {} ({})", path.display(), error))?;
-		SkinnedModel::loadFromBytes(gl, &bytes, skinnedModelRenderer)
+		SkinnedModel::load_from_bytes(gl, &bytes, skinned_model_renderer)
 	}
 
 	//==============================================================================
 	// 파일로부터 로드. (바이너리 FBX, 원본 정적 loadFromFbxUrl 의 데스크탑 판)
 	//==============================================================================
 	#[cfg(not(target_arch = "wasm32"))]
-	pub fn loadFromFbxPath(gl: &glow::Context, path: &std::path::Path, skinnedModelRenderer: &SkinnedModelRenderer) -> Result<SkinnedModel, String> {
-		let sceneData = FbxLoader::loadFromPath(path)?;
-		let mut skinnedModel = SkinnedModel::new(skinnedModelRenderer.getShaderProgram());
-		skinnedModel.parseFbxContent(gl, &sceneData)?;
-		Ok(skinnedModel)
+	pub fn load_from_fbx_path(gl: &glow::Context, path: &std::path::Path, skinned_model_renderer: &SkinnedModelRenderer) -> Result<SkinnedModel, String> {
+		let scene_data = FbxLoader::load_from_path(path)?;
+		let mut skinned_model = SkinnedModel::new(skinned_model_renderer.get_shader_program());
+		skinned_model.parse_fbx_content(gl, &scene_data)?;
+		Ok(skinned_model)
 	}
 
 	//==============================================================================
 	// GLB 청크 읽기. (머리 확인 + JSON 청크 + BIN 청크, GL 무관)
 	//==============================================================================
-	pub fn readGlbChunks(bytes: &[u8]) -> Result<(Value, Vec<u8>), String> {
-		if readUint32(bytes, 0) != Some(GLB_MAGIC) {
+	pub fn read_glb_chunks(bytes: &[u8]) -> Result<(Value, Vec<u8>), String> {
+		if read_uint32(bytes, 0) != Some(GLB_MAGIC) {
 			return Err(String::from("SkinnedModel: not a GLB file."));
 		}
 
 		// 청크 순회. (JSON + BIN)
 		let mut json: Option<Value> = None;
-		let mut binaryBuffer: Option<Vec<u8>> = None;
-		let mut chunkOffset = 12usize;
-		while chunkOffset < bytes.len() {
-			let chunkLength = readUint32(bytes, chunkOffset).ok_or_else(|| String::from("SkinnedModel: invalid GLB chunks."))? as usize;
-			let chunkType = readUint32(bytes, chunkOffset + 4).ok_or_else(|| String::from("SkinnedModel: invalid GLB chunks."))?;
-			let chunkStart = chunkOffset + 8;
-			let chunkEnd = chunkStart.checked_add(chunkLength).filter(|chunkEnd| *chunkEnd <= bytes.len()).ok_or_else(|| String::from("SkinnedModel: invalid GLB chunks."))?;
-			if chunkType == GLB_CHUNKTYPE_JSON {
-				let jsonText = String::from_utf8_lossy(&bytes[chunkStart..chunkEnd]);
-				let parsedJson: Value = serde_json::from_str(&jsonText).map_err(|error| format!("SkinnedModel: invalid glTF JSON: {}", error))?;
-				json = Some(parsedJson);
+		let mut binary_buffer: Option<Vec<u8>> = None;
+		let mut chunk_offset = 12usize;
+		while chunk_offset < bytes.len() {
+			let chunk_length = read_uint32(bytes, chunk_offset).ok_or_else(|| String::from("SkinnedModel: invalid GLB chunks."))? as usize;
+			let chunk_type = read_uint32(bytes, chunk_offset + 4).ok_or_else(|| String::from("SkinnedModel: invalid GLB chunks."))?;
+			let chunk_start = chunk_offset + 8;
+			let chunk_end = chunk_start.checked_add(chunk_length).filter(|chunk_end| *chunk_end <= bytes.len()).ok_or_else(|| String::from("SkinnedModel: invalid GLB chunks."))?;
+			if chunk_type == GLB_CHUNKTYPE_JSON {
+				let json_text = String::from_utf8_lossy(&bytes[chunk_start..chunk_end]);
+				let parsed_json: Value = serde_json::from_str(&json_text).map_err(|error| format!("SkinnedModel: invalid glTF JSON: {}", error))?;
+				json = Some(parsed_json);
 			}
-			else if chunkType == GLB_CHUNKTYPE_BINARY {
-				binaryBuffer = Some(bytes[chunkStart..chunkEnd].to_vec());
+			else if chunk_type == GLB_CHUNKTYPE_BINARY {
+				binary_buffer = Some(bytes[chunk_start..chunk_end].to_vec());
 			}
-			chunkOffset = chunkEnd;
+			chunk_offset = chunk_end;
 		}
-		match (json, binaryBuffer) {
-			(Some(json), Some(binaryBuffer)) => {
-				Ok((json, binaryBuffer))
+		match (json, binary_buffer) {
+			(Some(json), Some(binary_buffer)) => {
+				Ok((json, binary_buffer))
 			}
 			_ => {
 				Err(String::from("SkinnedModel: invalid GLB chunks."))
@@ -516,163 +516,163 @@ impl SkinnedModel {
 	//==============================================================================
 	// GLB 바이너리 해석. (청크 읽기 → 내용 해석 → GL 업로드)
 	//==============================================================================
-	pub fn parseBinary(&mut self, gl: &glow::Context, bytes: &[u8]) -> Result<(), String> {
-		let (json, binaryBuffer) = SkinnedModel::readGlbChunks(bytes)?;
-		self.parseContent(gl, &json, &binaryBuffer)
+	pub fn parse_binary(&mut self, gl: &glow::Context, bytes: &[u8]) -> Result<(), String> {
+		let (json, binary_buffer) = SkinnedModel::read_glb_chunks(bytes)?;
+		self.parse_content(gl, &json, &binary_buffer)
 	}
 
 	//==============================================================================
 	// glTF 내용 해석. (노드 / 스킨 / 메시 / 애니메이션 / 텍스처 → GL 업로드)
 	//==============================================================================
-	pub fn parseContent(&mut self, gl: &glow::Context, json: &Value, binaryBuffer: &[u8]) -> Result<(), String> {
-		let (meshDescriptionList, materialDescriptionList) = self.interpretContent(json, binaryBuffer)?;
-		self.uploadMeshesAndMaterials(gl, meshDescriptionList, materialDescriptionList)
+	pub fn parse_content(&mut self, gl: &glow::Context, json: &Value, binary_buffer: &[u8]) -> Result<(), String> {
+		let (mesh_description_list, material_description_list) = self.interpret_content(json, binary_buffer)?;
+		self.upload_meshes_and_materials(gl, mesh_description_list, material_description_list)
 	}
 
 	//==============================================================================
 	// glTF 내용 해석. (GL 무관, 노드 / 스킨 / 애니메이션을 채우고 중립 메시 / 머티리얼 서술을 돌려준다)
 	//==============================================================================
-	pub fn interpretContent(&mut self, json: &Value, binaryBuffer: &[u8]) -> Result<(Vec<MeshDescription>, Vec<MaterialDescription>), String> {
+	pub fn interpret_content(&mut self, json: &Value, binary_buffer: &[u8]) -> Result<(Vec<MeshDescription>, Vec<MaterialDescription>), String> {
 		// 노드 구성.
-		let nodeValueList = json["nodes"].as_array().ok_or_else(|| String::from("SkinnedModel: glTF has no nodes."))?;
-		let mut nodeList = Vec::with_capacity(nodeValueList.len());
-		for nodeValue in nodeValueList.iter() {
-			let rotation = match readFloatArray(&nodeValue["rotation"]) {
-				Some(rotationValues) if rotationValues.len() >= 4 => {
-					Quaternion::create(rotationValues[0], rotationValues[1], rotationValues[2], rotationValues[3])
+		let node_value_list = json["nodes"].as_array().ok_or_else(|| String::from("SkinnedModel: glTF has no nodes."))?;
+		let mut node_list = Vec::with_capacity(node_value_list.len());
+		for node_value in node_value_list.iter() {
+			let rotation = match read_float_array(&node_value["rotation"]) {
+				Some(rotation_values) if rotation_values.len() >= 4 => {
+					Quaternion::create(rotation_values[0], rotation_values[1], rotation_values[2], rotation_values[3])
 				}
 				_ => {
 					Quaternion::identity()
 				}
 			};
-			nodeList.push(SkinnedModelNode {
-				name: nodeValue["name"].as_str().unwrap_or("").to_string(),
-				childIndices: readIndexArray(&nodeValue["children"]),
-				meshIndex: readIndex(&nodeValue["mesh"]),
-				skinIndex: readIndex(&nodeValue["skin"]),
-				baseTranslation: readVector3(&nodeValue["translation"], [0.0, 0.0, 0.0]),
-				baseRotation: rotation,
-				baseScale: readVector3(&nodeValue["scale"], [1.0, 1.0, 1.0]),
-				currentTranslation: [0.0, 0.0, 0.0],
-				currentRotation: Quaternion::identity(),
-				currentScale: [1.0, 1.0, 1.0],
-				worldMatrix: Matrix4::createIdentity(),
+			node_list.push(SkinnedModelNode {
+				name: node_value["name"].as_str().unwrap_or("").to_string(),
+				child_indices: read_index_array(&node_value["children"]),
+				mesh_index: read_index(&node_value["mesh"]),
+				skin_index: read_index(&node_value["skin"]),
+				base_translation: read_vector3(&node_value["translation"], [0.0, 0.0, 0.0]),
+				base_rotation: rotation,
+				base_scale: read_vector3(&node_value["scale"], [1.0, 1.0, 1.0]),
+				current_translation: [0.0, 0.0, 0.0],
+				current_rotation: Quaternion::identity(),
+				current_scale: [1.0, 1.0, 1.0],
+				world_matrix: Matrix4::create_identity(),
 			});
 		}
-		self.nodeList = nodeList;
-		let sceneIndex = readIndex(&json["scene"]).unwrap_or(0);
-		let scene = json["scenes"].get(sceneIndex).ok_or_else(|| String::from("SkinnedModel: glTF scene not found."))?;
-		self.rootNodeIndices = readIndexArray(&scene["nodes"]);
+		self.node_list = node_list;
+		let scene_index = read_index(&json["scene"]).unwrap_or(0);
+		let scene = json["scenes"].get(scene_index).ok_or_else(|| String::from("SkinnedModel: glTF scene not found."))?;
+		self.root_node_indices = read_index_array(&scene["nodes"]);
 
 		// 스킨 구성.
-		let mut skinList = Vec::new();
-		if let Some(skinValueList) = json["skins"].as_array() {
-			for skinValue in skinValueList.iter() {
-				let jointNodeIndices = readIndexArray(&skinValue["joints"]);
-				let inverseBindArray = match readIndex(&skinValue["inverseBindMatrices"]) {
-					Some(accessorIndex) => {
-						readAccessorArray(json, binaryBuffer, accessorIndex)?.toFloatList()
+		let mut skin_list = Vec::new();
+		if let Some(skin_value_list) = json["skins"].as_array() {
+			for skin_value in skin_value_list.iter() {
+				let joint_node_indices = read_index_array(&skin_value["joints"]);
+				let inverse_bind_array = match read_index(&skin_value["inverseBindMatrices"]) {
+					Some(accessor_index) => {
+						read_accessor_array(json, binary_buffer, accessor_index)?.to_float_list()
 					}
 					None => {
 						Vec::new()
 					}
 				};
-				let mut inverseBindMatrices = Vec::with_capacity(jointNodeIndices.len());
-				for jointIndex in 0..jointNodeIndices.len() {
-					let mut matrix = Matrix4::createIdentity();
-					if let Some(matrixValues) = inverseBindArray.get(jointIndex * 16..jointIndex * 16 + 16) {
-						matrix.elements.copy_from_slice(matrixValues);
+				let mut inverse_bind_matrices = Vec::with_capacity(joint_node_indices.len());
+				for joint_index in 0..joint_node_indices.len() {
+					let mut matrix = Matrix4::create_identity();
+					if let Some(matrix_values) = inverse_bind_array.get(joint_index * 16..joint_index * 16 + 16) {
+						matrix.elements.copy_from_slice(matrix_values);
 					}
-					inverseBindMatrices.push(matrix);
+					inverse_bind_matrices.push(matrix);
 				}
-				skinList.push(Skin {
-					jointMatrixArray: vec![0.0; jointNodeIndices.len() * 16],
-					jointNodeIndices,
-					inverseBindMatrices,
+				skin_list.push(Skin {
+					joint_matrix_array: vec![0.0; joint_node_indices.len() * 16],
+					joint_node_indices,
+					inverse_bind_matrices,
 				});
 			}
 		}
-		self.skinList = skinList;
+		self.skin_list = skin_list;
 
 		// 중립 머티리얼 서술 구성. (glTF metallic-roughness → 그대로 매핑)
-		let mut materialDescriptionList = Vec::new();
-		if let Some(materialValueList) = json["materials"].as_array() {
-			for materialValue in materialValueList.iter() {
-				let mut description = Material::createDefaultDescription();
-				let pbrMetallicRoughness = &materialValue["pbrMetallicRoughness"];
-				if pbrMetallicRoughness.is_object() {
-					if let Some(baseColorFactor) = readFloatArray(&pbrMetallicRoughness["baseColorFactor"]) {
-						if baseColorFactor.len() >= 3 {
-							description.baseColorFactor = [baseColorFactor[0], baseColorFactor[1], baseColorFactor[2]];
+		let mut material_description_list = Vec::new();
+		if let Some(material_value_list) = json["materials"].as_array() {
+			for material_value in material_value_list.iter() {
+				let mut description = Material::create_default_description();
+				let pbr_metallic_roughness = &material_value["pbrMetallicRoughness"];
+				if pbr_metallic_roughness.is_object() {
+					if let Some(base_color_factor) = read_float_array(&pbr_metallic_roughness["baseColorFactor"]) {
+						if base_color_factor.len() >= 3 {
+							description.base_color_factor = [base_color_factor[0], base_color_factor[1], base_color_factor[2]];
 						}
 					}
-					description.metallicFactor = pbrMetallicRoughness["metallicFactor"].as_f64().map(|value| value as f32).unwrap_or(1.0);
-					description.roughnessFactor = pbrMetallicRoughness["roughnessFactor"].as_f64().map(|value| value as f32).unwrap_or(1.0);
-					description.baseColorImage = createGltfImageDescription(json, binaryBuffer, &pbrMetallicRoughness["baseColorTexture"]);
-					description.metallicRoughnessImage = createGltfImageDescription(json, binaryBuffer, &pbrMetallicRoughness["metallicRoughnessTexture"]);
+					description.metallic_factor = pbr_metallic_roughness["metallicFactor"].as_f64().map(|value| value as f32).unwrap_or(1.0);
+					description.roughness_factor = pbr_metallic_roughness["roughnessFactor"].as_f64().map(|value| value as f32).unwrap_or(1.0);
+					description.base_color_image = create_gltf_image_description(json, binary_buffer, &pbr_metallic_roughness["baseColorTexture"]);
+					description.metallic_roughness_image = create_gltf_image_description(json, binary_buffer, &pbr_metallic_roughness["metallicRoughnessTexture"]);
 				}
-				description.normalImage = createGltfImageDescription(json, binaryBuffer, &materialValue["normalTexture"]);
-				description.occlusionImage = createGltfImageDescription(json, binaryBuffer, &materialValue["occlusionTexture"]);
-				description.emissiveImage = createGltfImageDescription(json, binaryBuffer, &materialValue["emissiveTexture"]);
-				if let Some(emissiveFactor) = readFloatArray(&materialValue["emissiveFactor"]) {
-					if emissiveFactor.len() >= 3 {
-						description.emissiveFactor = [emissiveFactor[0], emissiveFactor[1], emissiveFactor[2]];
+				description.normal_image = create_gltf_image_description(json, binary_buffer, &material_value["normalTexture"]);
+				description.occlusion_image = create_gltf_image_description(json, binary_buffer, &material_value["occlusionTexture"]);
+				description.emissive_image = create_gltf_image_description(json, binary_buffer, &material_value["emissiveTexture"]);
+				if let Some(emissive_factor) = read_float_array(&material_value["emissiveFactor"]) {
+					if emissive_factor.len() >= 3 {
+						description.emissive_factor = [emissive_factor[0], emissive_factor[1], emissive_factor[2]];
 					}
 				}
-				materialDescriptionList.push(description);
+				material_description_list.push(description);
 			}
 		}
 
 		// 중립 메시 서술 구성. (메시 노드의 프리미티브, 접근자를 CPU 배열로 펼침)
 		// - 스킨 없는 정적 메시는 노드 자신을 유일한 조인트로 갖는 합성 스킨을 붙여 같은 스키닝 경로로 그린다.
-		let mut meshDescriptionList = Vec::new();
-		for nodeIndex in 0..self.nodeList.len() {
-			let meshIndex = match self.nodeList[nodeIndex].meshIndex {
-				Some(meshIndex) => {
-					meshIndex
+		let mut mesh_description_list = Vec::new();
+		for node_index in 0..self.node_list.len() {
+			let mesh_index = match self.node_list[node_index].mesh_index {
+				Some(mesh_index) => {
+					mesh_index
 				}
 				None => {
 					continue;
 				}
 			};
-			let meshValue = json["meshes"].get(meshIndex).ok_or_else(|| format!("SkinnedModel: mesh {} not found.", meshIndex))?;
-			let isStaticMesh = self.nodeList[nodeIndex].skinIndex.is_none();
-			if isStaticMesh {
-				self.skinList.push(Skin {
-					jointNodeIndices: vec![nodeIndex],
-					inverseBindMatrices: vec![Matrix4::createIdentity()],
-					jointMatrixArray: vec![0.0; 16],
+			let mesh_value = json["meshes"].get(mesh_index).ok_or_else(|| format!("SkinnedModel: mesh {} not found.", mesh_index))?;
+			let is_static_mesh = self.node_list[node_index].skin_index.is_none();
+			if is_static_mesh {
+				self.skin_list.push(Skin {
+					joint_node_indices: vec![node_index],
+					inverse_bind_matrices: vec![Matrix4::create_identity()],
+					joint_matrix_array: vec![0.0; 16],
 				});
-				self.nodeList[nodeIndex].skinIndex = Some(self.skinList.len() - 1);
+				self.node_list[node_index].skin_index = Some(self.skin_list.len() - 1);
 			}
-			let skinIndex = self.nodeList[nodeIndex].skinIndex.unwrap_or(0);
-			let targetNameList: Vec<String> = match meshValue["extras"]["targetNames"].as_array() {
-				Some(targetNameValues) => {
-					targetNameValues.iter().map(|targetNameValue| targetNameValue.as_str().unwrap_or("").to_string()).collect()
+			let skin_index = self.node_list[node_index].skin_index.unwrap_or(0);
+			let target_name_list: Vec<String> = match mesh_value["extras"]["targetNames"].as_array() {
+				Some(target_name_values) => {
+					target_name_values.iter().map(|target_name_value| target_name_value.as_str().unwrap_or("").to_string()).collect()
 				}
 				None => {
 					Vec::new()
 				}
 			};
 			// 기본 모프 가중치. (원본은 내부 노드 객체에서 weights 를 찾아 늘 비어 있으므로 메시 weights 만 쓴다)
-			let baseMorphWeights = readFloatArray(&meshValue["weights"]).unwrap_or_default();
-			let primitiveValueList = meshValue["primitives"].as_array().map(|primitiveValues| primitiveValues.as_slice()).unwrap_or(&[]);
-			for primitiveValue in primitiveValueList.iter() {
-				let attributes = &primitiveValue["attributes"];
-				let positionAccessorIndex = readIndex(&attributes["POSITION"]).ok_or_else(|| String::from("SkinnedModel: primitive has no POSITION."))?;
-				let positions = readAccessorArray(json, binaryBuffer, positionAccessorIndex)?.toFloatList();
-				let vertexCount = positions.len() / 3;
-				let normals = match readIndex(&attributes["NORMAL"]) {
-					Some(accessorIndex) => {
-						Some(readAccessorArray(json, binaryBuffer, accessorIndex)?.toFloatList())
+			let base_morph_weights = read_float_array(&mesh_value["weights"]).unwrap_or_default();
+			let primitive_value_list = mesh_value["primitives"].as_array().map(|primitive_values| primitive_values.as_slice()).unwrap_or(&[]);
+			for primitive_value in primitive_value_list.iter() {
+				let attributes = &primitive_value["attributes"];
+				let position_accessor_index = read_index(&attributes["POSITION"]).ok_or_else(|| String::from("SkinnedModel: primitive has no POSITION."))?;
+				let positions = read_accessor_array(json, binary_buffer, position_accessor_index)?.to_float_list();
+				let vertex_count = positions.len() / 3;
+				let normals = match read_index(&attributes["NORMAL"]) {
+					Some(accessor_index) => {
+						Some(read_accessor_array(json, binary_buffer, accessor_index)?.to_float_list())
 					}
 					None => {
 						None
 					}
 				};
-				let textureCoordinates = match readIndex(&attributes["TEXCOORD_0"]) {
-					Some(accessorIndex) => {
-						Some(readAccessorArray(json, binaryBuffer, accessorIndex)?.toFloatList())
+				let texture_coordinates = match read_index(&attributes["TEXCOORD_0"]) {
+					Some(accessor_index) => {
+						Some(read_accessor_array(json, binary_buffer, accessor_index)?.to_float_list())
 					}
 					None => {
 						None
@@ -680,35 +680,35 @@ impl SkinnedModel {
 				};
 				let joints;
 				let mut weights;
-				if isStaticMesh {
-					joints = vec![0u16; vertexCount * 4];
-					weights = vec![0.0f32; vertexCount * 4];
-					for vertexIndex in 0..vertexCount {
-						weights[vertexIndex * 4] = 1.0;
+				if is_static_mesh {
+					joints = vec![0u16; vertex_count * 4];
+					weights = vec![0.0f32; vertex_count * 4];
+					for vertex_index in 0..vertex_count {
+						weights[vertex_index * 4] = 1.0;
 					}
 				}
 				else {
-					let jointAccessorIndex = readIndex(&attributes["JOINTS_0"]).ok_or_else(|| String::from("SkinnedModel: skinned primitive has no JOINTS_0."))?;
-					let weightAccessorIndex = readIndex(&attributes["WEIGHTS_0"]).ok_or_else(|| String::from("SkinnedModel: skinned primitive has no WEIGHTS_0."))?;
-					joints = readAccessorArray(json, binaryBuffer, jointAccessorIndex)?.toUnsignedShortList();
-					let weightSource = readAccessorArray(json, binaryBuffer, weightAccessorIndex)?;
-					weights = weightSource.toFloatList();
-					let componentType = weightSource.getComponentType();
-					if componentType != COMPONENT_TYPE_FLOAT {
-						let normalizeDivisor = if componentType == COMPONENT_TYPE_UNSIGNED_BYTE {
+					let joint_accessor_index = read_index(&attributes["JOINTS_0"]).ok_or_else(|| String::from("SkinnedModel: skinned primitive has no JOINTS_0."))?;
+					let weight_accessor_index = read_index(&attributes["WEIGHTS_0"]).ok_or_else(|| String::from("SkinnedModel: skinned primitive has no WEIGHTS_0."))?;
+					joints = read_accessor_array(json, binary_buffer, joint_accessor_index)?.to_unsigned_short_list();
+					let weight_source = read_accessor_array(json, binary_buffer, weight_accessor_index)?;
+					weights = weight_source.to_float_list();
+					let component_type = weight_source.get_component_type();
+					if component_type != COMPONENT_TYPE_FLOAT {
+						let normalize_divisor = if component_type == COMPONENT_TYPE_UNSIGNED_BYTE {
 							255.0
 						}
 						else {
 							65535.0
 						};
 						for weight in weights.iter_mut() {
-							*weight /= normalizeDivisor;
+							*weight /= normalize_divisor;
 						}
 					}
 				}
-				let indices = match readIndex(&primitiveValue["indices"]) {
-					Some(accessorIndex) => {
-						Some(readAccessorArray(json, binaryBuffer, accessorIndex)?.toIndexArray())
+				let indices = match read_index(&primitive_value["indices"]) {
+					Some(accessor_index) => {
+						Some(read_accessor_array(json, binary_buffer, accessor_index)?.to_index_array())
 					}
 					None => {
 						None
@@ -716,222 +716,222 @@ impl SkinnedModel {
 				};
 
 				// 모프 타깃. (위치 델타 필수, 노멀 델타 선택, 이름은 mesh.extras.targetNames)
-				let mut morphTargets = Vec::new();
-				if let Some(targetValueList) = primitiveValue["targets"].as_array() {
-					for (targetIndex, targetValue) in targetValueList.iter().enumerate() {
-						let positionAccessorIndex = match readIndex(&targetValue["POSITION"]) {
-							Some(positionAccessorIndex) => {
-								positionAccessorIndex
+				let mut morph_targets = Vec::new();
+				if let Some(target_value_list) = primitive_value["targets"].as_array() {
+					for (target_index, target_value) in target_value_list.iter().enumerate() {
+						let position_accessor_index = match read_index(&target_value["POSITION"]) {
+							Some(position_accessor_index) => {
+								position_accessor_index
 							}
 							None => {
 								continue;
 							}
 						};
-						let positionDeltas = readAccessorArray(json, binaryBuffer, positionAccessorIndex)?.toFloatList();
-						let normalDeltas = match readIndex(&targetValue["NORMAL"]) {
-							Some(accessorIndex) => {
-								Some(readAccessorArray(json, binaryBuffer, accessorIndex)?.toFloatList())
+						let position_deltas = read_accessor_array(json, binary_buffer, position_accessor_index)?.to_float_list();
+						let normal_deltas = match read_index(&target_value["NORMAL"]) {
+							Some(accessor_index) => {
+								Some(read_accessor_array(json, binary_buffer, accessor_index)?.to_float_list())
 							}
 							None => {
 								None
 							}
 						};
-						let targetName = match targetNameList.get(targetIndex) {
-							Some(targetName) => {
-								targetName.clone()
+						let target_name = match target_name_list.get(target_index) {
+							Some(target_name) => {
+								target_name.clone()
 							}
 							None => {
-								format!("target{}", targetIndex)
+								format!("target{}", target_index)
 							}
 						};
-						morphTargets.push(MorphTarget { name: targetName, positionDeltas, normalDeltas });
+						morph_targets.push(MorphTarget { name: target_name, position_deltas, normal_deltas });
 					}
 				}
-				let mut morphWeights = vec![0.0f32; morphTargets.len()];
-				for (weightIndex, morphWeight) in morphWeights.iter_mut().enumerate() {
-					*morphWeight = baseMorphWeights.get(weightIndex).copied().unwrap_or(0.0);
+				let mut morph_weights = vec![0.0f32; morph_targets.len()];
+				for (weight_index, morph_weight) in morph_weights.iter_mut().enumerate() {
+					*morph_weight = base_morph_weights.get(weight_index).copied().unwrap_or(0.0);
 				}
 
-				let materialIndex = readIndex(&primitiveValue["material"]);
-				let materialName = match materialIndex {
-					Some(materialIndex) => {
-						json["materials"][materialIndex]["name"].as_str().unwrap_or("").to_string()
+				let material_index = read_index(&primitive_value["material"]);
+				let material_name = match material_index {
+					Some(material_index) => {
+						json["materials"][material_index]["name"].as_str().unwrap_or("").to_string()
 					}
 					None => {
 						String::new()
 					}
 				};
-				meshDescriptionList.push(MeshDescription {
+				mesh_description_list.push(MeshDescription {
 					positions,
 					normals,
-					textureCoordinates,
+					texture_coordinates,
 					joints,
 					weights,
 					indices,
-					skinIndex,
-					materialIndex,
-					materialName,
-					nodeIndex: Some(nodeIndex),
-					morphTargets,
-					morphWeights,
+					skin_index,
+					material_index,
+					material_name,
+					node_index: Some(node_index),
+					morph_targets,
+					morph_weights,
 				});
 			}
 		}
 
 		// 애니메이션 구성.
-		let mut animationList = Vec::new();
-		if let Some(animationValueList) = json["animations"].as_array() {
-			for animationValue in animationValueList.iter() {
+		let mut animation_list = Vec::new();
+		if let Some(animation_value_list) = json["animations"].as_array() {
+			for animation_value in animation_value_list.iter() {
 				let mut duration = 0.0f32;
 				let mut channels = Vec::new();
-				let channelValueList = animationValue["channels"].as_array().map(|channelValues| channelValues.as_slice()).unwrap_or(&[]);
-				for channelValue in channelValueList.iter() {
-					let samplerIndex = readIndex(&channelValue["sampler"]).ok_or_else(|| String::from("SkinnedModel: animation channel has no sampler."))?;
-					let samplerValue = &animationValue["samplers"][samplerIndex];
-					let inputAccessorIndex = readIndex(&samplerValue["input"]).ok_or_else(|| String::from("SkinnedModel: animation sampler has no input."))?;
-					let outputAccessorIndex = readIndex(&samplerValue["output"]).ok_or_else(|| String::from("SkinnedModel: animation sampler has no output."))?;
-					let times = readAccessorArray(json, binaryBuffer, inputAccessorIndex)?.toFloatList();
-					let values = readAccessorArray(json, binaryBuffer, outputAccessorIndex)?.toFloatList();
-					if let Some(lastTime) = times.last() {
-						duration = duration.max(*lastTime);
+				let channel_value_list = animation_value["channels"].as_array().map(|channel_values| channel_values.as_slice()).unwrap_or(&[]);
+				for channel_value in channel_value_list.iter() {
+					let sampler_index = read_index(&channel_value["sampler"]).ok_or_else(|| String::from("SkinnedModel: animation channel has no sampler."))?;
+					let sampler_value = &animation_value["samplers"][sampler_index];
+					let input_accessor_index = read_index(&sampler_value["input"]).ok_or_else(|| String::from("SkinnedModel: animation sampler has no input."))?;
+					let output_accessor_index = read_index(&sampler_value["output"]).ok_or_else(|| String::from("SkinnedModel: animation sampler has no output."))?;
+					let times = read_accessor_array(json, binary_buffer, input_accessor_index)?.to_float_list();
+					let values = read_accessor_array(json, binary_buffer, output_accessor_index)?.to_float_list();
+					if let Some(last_time) = times.last() {
+						duration = duration.max(*last_time);
 					}
-					let nodeIndex = readIndex(&channelValue["target"]["node"]);
-					let path = channelValue["target"]["path"].as_str().and_then(AnimationPath::fromName);
-					if let (Some(nodeIndex), Some(path)) = (nodeIndex, path) {
-						channels.push(AnimationChannel { nodeIndex, path, times, values, cursor: 0 });
+					let node_index = read_index(&channel_value["target"]["node"]);
+					let path = channel_value["target"]["path"].as_str().and_then(AnimationPath::from_name);
+					if let (Some(node_index), Some(path)) = (node_index, path) {
+						channels.push(AnimationChannel { node_index, path, times, values, cursor: 0 });
 					}
 				}
-				animationList.push(AnimationClip {
-					name: animationValue["name"].as_str().unwrap_or("").to_string(),
+				animation_list.push(AnimationClip {
+					name: animation_value["name"].as_str().unwrap_or("").to_string(),
 					duration,
 					channels,
 				});
 			}
 		}
-		self.animationList = animationList;
-		if !self.animationList.is_empty() {
-			self.currentAnimationIndex = Some(0);
+		self.animation_list = animation_list;
+		if !self.animation_list.is_empty() {
+			self.current_animation_index = Some(0);
 		}
-		Ok((meshDescriptionList, materialDescriptionList))
+		Ok((mesh_description_list, material_description_list))
 	}
 
 	//==============================================================================
 	// FBX 중간 표현 해석. (노드/스킨/메시/텍스처/애니메이션 → 기존 스키닝 파이프라인)
 	//==============================================================================
-	pub fn parseFbxContent(&mut self, gl: &glow::Context, sceneData: &FbxSceneData) -> Result<(), String> {
-		let (meshDescriptionList, materialDescriptionList) = self.interpretFbxContent(sceneData)?;
-		self.uploadMeshesAndMaterials(gl, meshDescriptionList, materialDescriptionList)
+	pub fn parse_fbx_content(&mut self, gl: &glow::Context, scene_data: &FbxSceneData) -> Result<(), String> {
+		let (mesh_description_list, material_description_list) = self.interpret_fbx_content(scene_data)?;
+		self.upload_meshes_and_materials(gl, mesh_description_list, material_description_list)
 	}
 
 	//==============================================================================
 	// FBX 중간 표현 해석. (GL 무관, 노드 / 스킨 / 애니메이션을 채우고 중립 메시 / 머티리얼 서술을 돌려준다)
 	//==============================================================================
-	pub fn interpretFbxContent(&mut self, sceneData: &FbxSceneData) -> Result<(Vec<MeshDescription>, Vec<MaterialDescription>), String> {
+	pub fn interpret_fbx_content(&mut self, scene_data: &FbxSceneData) -> Result<(Vec<MeshDescription>, Vec<MaterialDescription>), String> {
 		// 노드 구성. (오일러 도 → 쿼터니언, 사전회전 우측 누적)
-		self.nodeList = sceneData.nodeList.iter().map(|fbxNode| {
-			let rotationQuaternion = createQuaternionFromFbxEuler(fbxNode.rotationEulerDegrees[0], fbxNode.rotationEulerDegrees[1], fbxNode.rotationEulerDegrees[2]);
-			let preRotationQuaternion = createQuaternionFromFbxEuler(fbxNode.preRotationDegrees[0], fbxNode.preRotationDegrees[1], fbxNode.preRotationDegrees[2]);
-			let baseRotation = preRotationQuaternion.multiply(rotationQuaternion);
+		self.node_list = scene_data.node_list.iter().map(|fbx_node| {
+			let rotation_quaternion = create_quaternion_from_fbx_euler(fbx_node.rotation_euler_degrees[0], fbx_node.rotation_euler_degrees[1], fbx_node.rotation_euler_degrees[2]);
+			let pre_rotation_quaternion = create_quaternion_from_fbx_euler(fbx_node.pre_rotation_degrees[0], fbx_node.pre_rotation_degrees[1], fbx_node.pre_rotation_degrees[2]);
+			let base_rotation = pre_rotation_quaternion.multiply(rotation_quaternion);
 			SkinnedModelNode {
-				name: fbxNode.name.clone(),
-				childIndices: fbxNode.childIndices.clone(),
-				meshIndex: None,
-				skinIndex: None,
-				baseTranslation: [fbxNode.translation[0] as f32, fbxNode.translation[1] as f32, fbxNode.translation[2] as f32],
-				baseRotation,
-				baseScale: [fbxNode.scale[0] as f32, fbxNode.scale[1] as f32, fbxNode.scale[2] as f32],
-				currentTranslation: [0.0, 0.0, 0.0],
-				currentRotation: Quaternion::identity(),
-				currentScale: [1.0, 1.0, 1.0],
-				worldMatrix: Matrix4::createIdentity(),
+				name: fbx_node.name.clone(),
+				child_indices: fbx_node.child_indices.clone(),
+				mesh_index: None,
+				skin_index: None,
+				base_translation: [fbx_node.translation[0] as f32, fbx_node.translation[1] as f32, fbx_node.translation[2] as f32],
+				base_rotation,
+				base_scale: [fbx_node.scale[0] as f32, fbx_node.scale[1] as f32, fbx_node.scale[2] as f32],
+				current_translation: [0.0, 0.0, 0.0],
+				current_rotation: Quaternion::identity(),
+				current_scale: [1.0, 1.0, 1.0],
+				world_matrix: Matrix4::create_identity(),
 			}
 		}).collect();
-		self.rootNodeIndices = sceneData.rootNodeIndices.clone();
+		self.root_node_indices = scene_data.root_node_indices.clone();
 
 		// 스킨 구성. (클러스터 → 조인트 노드 인덱스 + 링크 변환의 역행렬)
-		let skinIdList = sceneData.skinDeformerById.keys().to_vec();
-		let mut skinList = Vec::with_capacity(skinIdList.len());
-		for skinId in skinIdList.iter() {
-			let skinDeformer = match sceneData.skinDeformerById.get(*skinId) {
-				Some(skinDeformer) => {
-					skinDeformer
+		let skin_id_list = scene_data.skin_deformer_by_id.keys().to_vec();
+		let mut skin_list = Vec::with_capacity(skin_id_list.len());
+		for skin_id in skin_id_list.iter() {
+			let skin_deformer = match scene_data.skin_deformer_by_id.get(*skin_id) {
+				Some(skin_deformer) => {
+					skin_deformer
 				}
 				None => {
 					continue;
 				}
 			};
-			let mut jointNodeIndices = Vec::with_capacity(skinDeformer.clusterIds.len());
-			let mut inverseBindMatrices = Vec::with_capacity(skinDeformer.clusterIds.len());
-			for clusterId in skinDeformer.clusterIds.iter() {
-				let cluster = sceneData.clusterById.get(*clusterId);
-				let boneNodeIndex = cluster.and_then(|cluster| cluster.boneNodeId).and_then(|boneNodeId| sceneData.nodeIdToIndex.get(&boneNodeId).copied());
-				jointNodeIndices.push(boneNodeIndex.unwrap_or(usize::MAX));
+			let mut joint_node_indices = Vec::with_capacity(skin_deformer.cluster_ids.len());
+			let mut inverse_bind_matrices = Vec::with_capacity(skin_deformer.cluster_ids.len());
+			for cluster_id in skin_deformer.cluster_ids.iter() {
+				let cluster = scene_data.cluster_by_id.get(*cluster_id);
+				let bone_node_index = cluster.and_then(|cluster| cluster.bone_node_id).and_then(|bone_node_id| scene_data.node_id_to_index.get(&bone_node_id).copied());
+				joint_node_indices.push(bone_node_index.unwrap_or(usize::MAX));
 				// 클러스터 Transform = TransformLink^-1 x 메시 바인드 전역행렬, 그 자체가 역바인드 행렬.
 				// 미보유 시 TransformLink 의 역행렬로 대체. (메시 전역 = 단위행렬 가정)
-				let mut inverseBindMatrix = Matrix4::createIdentity();
+				let mut inverse_bind_matrix = Matrix4::create_identity();
 				if let Some(cluster) = cluster {
 					if let Some(transform) = cluster.transform.as_ref().filter(|transform| transform.len() >= 16) {
-						for (elementIndex, element) in inverseBindMatrix.elements.iter_mut().enumerate() {
-							*element = transform[elementIndex] as f32;
+						for (element_index, element) in inverse_bind_matrix.elements.iter_mut().enumerate() {
+							*element = transform[element_index] as f32;
 						}
 					}
-					else if let Some(transformLink) = cluster.transformLink.as_ref().filter(|transformLink| transformLink.len() >= 16) {
-						let mut linkMatrix = Matrix4::createIdentity();
-						for (elementIndex, element) in linkMatrix.elements.iter_mut().enumerate() {
-							*element = transformLink[elementIndex] as f32;
+					else if let Some(transform_link) = cluster.transform_link.as_ref().filter(|transform_link| transform_link.len() >= 16) {
+						let mut link_matrix = Matrix4::create_identity();
+						for (element_index, element) in link_matrix.elements.iter_mut().enumerate() {
+							*element = transform_link[element_index] as f32;
 						}
-						inverseBindMatrix = Matrix4::createInverse(&linkMatrix);
+						inverse_bind_matrix = Matrix4::create_inverse(&link_matrix);
 					}
 				}
-				inverseBindMatrices.push(inverseBindMatrix);
+				inverse_bind_matrices.push(inverse_bind_matrix);
 			}
-			skinList.push(Skin {
-				jointMatrixArray: vec![0.0; jointNodeIndices.len() * 16],
-				jointNodeIndices,
-				inverseBindMatrices,
+			skin_list.push(Skin {
+				joint_matrix_array: vec![0.0; joint_node_indices.len() * 16],
+				joint_node_indices,
+				inverse_bind_matrices,
 			});
 		}
-		self.skinList = skinList;
+		self.skin_list = skin_list;
 
 		// 이미지 서술 구성 헬퍼. (텍스처 id → 임베디드 이미지 바이트, FBX 는 상하 반전 필요)
-		let createFbxImageDescription = |textureId: Option<i64>| -> Option<ImageDescription> {
-			let texture = sceneData.textureById.get(textureId?)?;
-			let video = sceneData.videoById.get(texture.videoId?)?;
-			let contentBytes = video.contentBytes.as_ref().filter(|contentBytes| !contentBytes.is_empty())?;
+		let create_fbx_image_description = |texture_id: Option<i64>| -> Option<ImageDescription> {
+			let texture = scene_data.texture_by_id.get(texture_id?)?;
+			let video = scene_data.video_by_id.get(texture.video_id?)?;
+			let content_bytes = video.content_bytes.as_ref().filter(|content_bytes| !content_bytes.is_empty())?;
 			Some(ImageDescription {
-				bytes: contentBytes.clone(),
-				mimeType: None,
+				bytes: content_bytes.clone(),
+				mime_type: None,
 				source: None,
-				flipY: true,
-				isColorData: false,
+				flip_y: true,
+				is_color_data: false,
 				anisotropy: 0.0,
 			})
 		};
 
 		// 중립 머티리얼 서술 구성. (FBX phong → 비금속 + 스펙큘러/글로스 근사 경로)
-		let mut materialDescriptionList = Vec::with_capacity(sceneData.materialById.len());
-		for fbxMaterial in sceneData.materialById.values().iter() {
-			let mut description = Material::createDefaultDescription();
-			description.baseColorFactor = [fbxMaterial.diffuseColor[0] as f32, fbxMaterial.diffuseColor[1] as f32, fbxMaterial.diffuseColor[2] as f32];
-			description.baseColorImage = createFbxImageDescription(fbxMaterial.diffuseTextureId);
-			description.normalImage = createFbxImageDescription(fbxMaterial.normalTextureId);
-			description.specularImage = createFbxImageDescription(fbxMaterial.specularTextureId);
-			description.glossinessImage = createFbxImageDescription(fbxMaterial.glossTextureId);
-			materialDescriptionList.push(description);
+		let mut material_description_list = Vec::with_capacity(scene_data.material_by_id.len());
+		for fbx_material in scene_data.material_by_id.values().iter() {
+			let mut description = Material::create_default_description();
+			description.base_color_factor = [fbx_material.diffuse_color[0] as f32, fbx_material.diffuse_color[1] as f32, fbx_material.diffuse_color[2] as f32];
+			description.base_color_image = create_fbx_image_description(fbx_material.diffuse_texture_id);
+			description.normal_image = create_fbx_image_description(fbx_material.normal_texture_id);
+			description.specular_image = create_fbx_image_description(fbx_material.specular_texture_id);
+			description.glossiness_image = create_fbx_image_description(fbx_material.gloss_texture_id);
+			material_description_list.push(description);
 		}
 
 		// 스킨드 메시 → 중립 메시 서술 구성.
-		let mut meshDescriptionList = Vec::new();
-		for (skinListIndex, skinId) in skinIdList.iter().enumerate() {
-			let skinDeformer = match sceneData.skinDeformerById.get(*skinId) {
-				Some(skinDeformer) => {
-					skinDeformer
+		let mut mesh_description_list = Vec::new();
+		for (skin_list_index, skin_id) in skin_id_list.iter().enumerate() {
+			let skin_deformer = match scene_data.skin_deformer_by_id.get(*skin_id) {
+				Some(skin_deformer) => {
+					skin_deformer
 				}
 				None => {
 					continue;
 				}
 			};
-			let geometry = match skinDeformer.geometryId.and_then(|geometryId| sceneData.geometryById.get(geometryId)) {
+			let geometry = match skin_deformer.geometry_id.and_then(|geometry_id| scene_data.geometry_by_id.get(geometry_id)) {
 				Some(geometry) => {
 					geometry
 				}
@@ -941,10 +941,10 @@ impl SkinnedModel {
 			};
 
 			// 정점별 스킨 영향 누적. (클러스터 로컬 조인트 인덱스 + 가중치)
-			let originalVertexCount = geometry.originalVertexCount;
-			let mut influencesPerVertex: Vec<Vec<(u16, f64)>> = vec![Vec::new(); originalVertexCount];
-			for (clusterLocalIndex, clusterId) in skinDeformer.clusterIds.iter().enumerate() {
-				let cluster = match sceneData.clusterById.get(*clusterId) {
+			let original_vertex_count = geometry.original_vertex_count;
+			let mut influences_per_vertex: Vec<Vec<(u16, f64)>> = vec![Vec::new(); original_vertex_count];
+			for (cluster_local_index, cluster_id) in skin_deformer.cluster_ids.iter().enumerate() {
+				let cluster = match scene_data.cluster_by_id.get(*cluster_id) {
 					Some(cluster) => {
 						cluster
 					}
@@ -952,116 +952,116 @@ impl SkinnedModel {
 						continue;
 					}
 				};
-				for (influenceIndex, vertexIndex) in cluster.vertexIndices.iter().enumerate() {
-					let weight = cluster.weights.get(influenceIndex).copied().unwrap_or(0.0);
-					if *vertexIndex >= 0 && (*vertexIndex as usize) < originalVertexCount {
-						influencesPerVertex[*vertexIndex as usize].push((clusterLocalIndex as u16, weight));
+				for (influence_index, vertex_index) in cluster.vertex_indices.iter().enumerate() {
+					let weight = cluster.weights.get(influence_index).copied().unwrap_or(0.0);
+					if *vertex_index >= 0 && (*vertex_index as usize) < original_vertex_count {
+						influences_per_vertex[*vertex_index as usize].push((cluster_local_index as u16, weight));
 					}
 				}
 			}
 
 			// 정점별 상위 4개 선택 + 정규화.
-			let mut vertexJointArray = vec![0u16; originalVertexCount * 4];
-			let mut vertexWeightArray = vec![0.0f32; originalVertexCount * 4];
-			for (vertexIndex, influenceList) in influencesPerVertex.iter_mut().enumerate() {
-				influenceList.sort_by(|left, right| right.1.partial_cmp(&left.1).unwrap_or(std::cmp::Ordering::Equal));
-				let usedCount = influenceList.len().min(4);
-				let mut weightSum: f64 = influenceList.iter().take(usedCount).map(|influence| influence.1).sum();
-				if weightSum <= 0.0 {
-					weightSum = 1.0;
+			let mut vertex_joint_array = vec![0u16; original_vertex_count * 4];
+			let mut vertex_weight_array = vec![0.0f32; original_vertex_count * 4];
+			for (vertex_index, influence_list) in influences_per_vertex.iter_mut().enumerate() {
+				influence_list.sort_by(|left, right| right.1.partial_cmp(&left.1).unwrap_or(std::cmp::Ordering::Equal));
+				let used_count = influence_list.len().min(4);
+				let mut weight_sum: f64 = influence_list.iter().take(used_count).map(|influence| influence.1).sum();
+				if weight_sum <= 0.0 {
+					weight_sum = 1.0;
 				}
-				for slotIndex in 0..usedCount {
-					vertexJointArray[vertexIndex * 4 + slotIndex] = influenceList[slotIndex].0;
-					vertexWeightArray[vertexIndex * 4 + slotIndex] = (influenceList[slotIndex].1 / weightSum) as f32;
+				for slot_index in 0..used_count {
+					vertex_joint_array[vertex_index * 4 + slot_index] = influence_list[slot_index].0;
+					vertex_weight_array[vertex_index * 4 + slot_index] = (influence_list[slot_index].1 / weight_sum) as f32;
 				}
 			}
 
 			// 코너 단위(비인덱스)로 조인트/가중치 펼침.
-			let cornerCount = geometry.cornerCount;
-			let mut cornerJointArray = vec![0u16; cornerCount * 4];
-			let mut cornerWeightArray = vec![0.0f32; cornerCount * 4];
-			for cornerIndex in 0..cornerCount {
-				let originalVertexIndex = geometry.originalVertexIndices[cornerIndex];
-				if originalVertexIndex < 0 || originalVertexIndex as usize >= originalVertexCount {
+			let corner_count = geometry.corner_count;
+			let mut corner_joint_array = vec![0u16; corner_count * 4];
+			let mut corner_weight_array = vec![0.0f32; corner_count * 4];
+			for corner_index in 0..corner_count {
+				let original_vertex_index = geometry.original_vertex_indices[corner_index];
+				if original_vertex_index < 0 || original_vertex_index as usize >= original_vertex_count {
 					continue;
 				}
-				let sourceOffset = originalVertexIndex as usize * 4;
-				cornerJointArray[cornerIndex * 4..cornerIndex * 4 + 4].copy_from_slice(&vertexJointArray[sourceOffset..sourceOffset + 4]);
-				cornerWeightArray[cornerIndex * 4..cornerIndex * 4 + 4].copy_from_slice(&vertexWeightArray[sourceOffset..sourceOffset + 4]);
+				let source_offset = original_vertex_index as usize * 4;
+				corner_joint_array[corner_index * 4..corner_index * 4 + 4].copy_from_slice(&vertex_joint_array[source_offset..source_offset + 4]);
+				corner_weight_array[corner_index * 4..corner_index * 4 + 4].copy_from_slice(&vertex_weight_array[source_offset..source_offset + 4]);
 			}
 
 			// 머티리얼 인덱스 조회. (지오메트리 소유 노드의 첫 머티리얼)
-			let ownerNodeIndex = sceneData.nodeList.iter().position(|fbxNode| fbxNode.geometryId.is_some() && fbxNode.geometryId == skinDeformer.geometryId);
-			let materialIndex = ownerNodeIndex.and_then(|ownerNodeIndex| sceneData.nodeList[ownerNodeIndex].materialIds.first().copied()).and_then(|materialId| sceneData.materialById.indexOf(materialId));
+			let owner_node_index = scene_data.node_list.iter().position(|fbx_node| fbx_node.geometry_id.is_some() && fbx_node.geometry_id == skin_deformer.geometry_id);
+			let material_index = owner_node_index.and_then(|owner_node_index| scene_data.node_list[owner_node_index].material_ids.first().copied()).and_then(|material_id| scene_data.material_by_id.index_of(material_id));
 
-			meshDescriptionList.push(MeshDescription {
+			mesh_description_list.push(MeshDescription {
 				positions: geometry.positions.clone(),
 				normals: Some(geometry.normals.clone()),
-				textureCoordinates: Some(geometry.textureCoordinates.clone()),
-				joints: cornerJointArray,
-				weights: cornerWeightArray,
+				texture_coordinates: Some(geometry.texture_coordinates.clone()),
+				joints: corner_joint_array,
+				weights: corner_weight_array,
 				indices: None,
-				skinIndex: skinListIndex,
-				materialIndex,
-				materialName: String::new(),
-				nodeIndex: ownerNodeIndex,
-				morphTargets: Vec::new(),
-				morphWeights: Vec::new(),
+				skin_index: skin_list_index,
+				material_index,
+				material_name: String::new(),
+				node_index: owner_node_index,
+				morph_targets: Vec::new(),
+				morph_weights: Vec::new(),
 			});
 		}
 
 		// 애니메이션 구성. (회전 채널은 오일러 도 → 사전회전 합성 쿼터니언 4성분으로 변환)
-		self.animationList = sceneData.animationList.iter().map(|fbxAnimation| {
-			let channels = convertFbxAnimationChannels(sceneData, fbxAnimation, Some);
+		self.animation_list = scene_data.animation_list.iter().map(|fbx_animation| {
+			let channels = convert_fbx_animation_channels(scene_data, fbx_animation, Some);
 			AnimationClip {
-				name: fbxAnimation.name.clone(),
-				duration: fbxAnimation.duration,
+				name: fbx_animation.name.clone(),
+				duration: fbx_animation.duration,
 				channels,
 			}
 		}).collect();
-		if !self.animationList.is_empty() {
-			self.currentAnimationIndex = Some(0);
+		if !self.animation_list.is_empty() {
+			self.current_animation_index = Some(0);
 		}
-		Ok((meshDescriptionList, materialDescriptionList))
+		Ok((mesh_description_list, material_description_list))
 	}
 
 	//==============================================================================
 	// 애니메이션 FBX 추가. (본 이름 매칭 리타게팅, Mixamo 애니메이션 전용 FBX 의 중간 표현)
 	// - 동일 스켈레톤을 전제로, 채널을 현재 모델의 노드 인덱스로 재지정해 클립을 추가한다.
-	// - ignoreTranslation: 루트 모션이 박힌 클립에서 이동 채널을 버린다. (게임 로직이 위치를 제어할 때)
+	// - ignore_translation: 루트 모션이 박힌 클립에서 이동 채널을 버린다. (게임 로직이 위치를 제어할 때)
 	//==============================================================================
-	pub fn addAnimationsFromFbxSceneData(&mut self, sceneData: &FbxSceneData, clipName: &str, ignoreTranslation: bool) {
-		let mut nodeIndexByName: HashMap<&str, usize> = HashMap::new();
-		for (nodeIndex, node) in self.nodeList.iter().enumerate() {
-			nodeIndexByName.insert(node.name.as_str(), nodeIndex);
+	pub fn add_animations_from_fbx_scene_data(&mut self, scene_data: &FbxSceneData, clip_name: &str, ignore_translation: bool) {
+		let mut node_index_by_name: HashMap<&str, usize> = HashMap::new();
+		for (node_index, node) in self.node_list.iter().enumerate() {
+			node_index_by_name.insert(node.name.as_str(), node_index);
 		}
-		let mut addedClipList = Vec::new();
-		for fbxAnimation in sceneData.animationList.iter() {
-			if fbxAnimation.channels.is_empty() {
+		let mut added_clip_list = Vec::new();
+		for fbx_animation in scene_data.animation_list.iter() {
+			if fbx_animation.channels.is_empty() {
 				continue;
 			}
-			let mut channels = convertFbxAnimationChannels(sceneData, fbxAnimation, |nodeIndex| {
-				let sourceName = sceneData.nodeList.get(nodeIndex)?.name.as_str();
-				nodeIndexByName.get(sourceName).copied()
+			let mut channels = convert_fbx_animation_channels(scene_data, fbx_animation, |node_index| {
+				let source_name = scene_data.node_list.get(node_index)?.name.as_str();
+				node_index_by_name.get(source_name).copied()
 			});
-			if ignoreTranslation {
-				channels.retain(|channel| channel.path != AnimationPath::translation);
+			if ignore_translation {
+				channels.retain(|channel| channel.path != AnimationPath::Translation);
 			}
-			addedClipList.push(AnimationClip {
-				name: clipName.to_string(),
-				duration: fbxAnimation.duration,
+			added_clip_list.push(AnimationClip {
+				name: clip_name.to_string(),
+				duration: fbx_animation.duration,
 				channels,
 			});
 		}
-		self.animationList.append(&mut addedClipList);
+		self.animation_list.append(&mut added_clip_list);
 	}
 
 	//==============================================================================
 	// 애니메이션 FBX 추가. (바이트, 원본 addAnimationsFromFbxUrl 의 fetch 뒤 부분)
 	//==============================================================================
-	pub fn addAnimationsFromFbxBytes(&mut self, bytes: &[u8], clipName: &str, ignoreTranslation: bool) -> Result<(), String> {
-		let sceneData = FbxLoader::new().parse(bytes)?;
-		self.addAnimationsFromFbxSceneData(&sceneData, clipName, ignoreTranslation);
+	pub fn add_animations_from_fbx_bytes(&mut self, bytes: &[u8], clip_name: &str, ignore_translation: bool) -> Result<(), String> {
+		let scene_data = FbxLoader::new().parse(bytes)?;
+		self.add_animations_from_fbx_scene_data(&scene_data, clip_name, ignore_translation);
 		Ok(())
 	}
 
@@ -1069,122 +1069,122 @@ impl SkinnedModel {
 	// 애니메이션 FBX 추가. (파일, 원본 addAnimationsFromFbxUrl 의 데스크탑 판)
 	//==============================================================================
 	#[cfg(not(target_arch = "wasm32"))]
-	pub fn addAnimationsFromFbxPath(&mut self, path: &std::path::Path, clipName: &str, ignoreTranslation: bool) -> Result<(), String> {
-		let sceneData = FbxLoader::loadFromPath(path)?;
-		self.addAnimationsFromFbxSceneData(&sceneData, clipName, ignoreTranslation);
+	pub fn add_animations_from_fbx_path(&mut self, path: &std::path::Path, clip_name: &str, ignore_translation: bool) -> Result<(), String> {
+		let scene_data = FbxLoader::load_from_path(path)?;
+		self.add_animations_from_fbx_scene_data(&scene_data, clip_name, ignore_translation);
 		Ok(())
 	}
 
 	//==============================================================================
 	// 중립 메시/머티리얼 서술 업로드. (공용, Material 생성 + 버텍스 어레이/드로어블 구성)
 	//==============================================================================
-	pub fn uploadMeshesAndMaterials(&mut self, gl: &glow::Context, meshDescriptionList: Vec<MeshDescription>, materialDescriptionList: Vec<MaterialDescription>) -> Result<(), String> {
-		let shaderProgram = match &self.shaderProgram {
-			Some(shaderProgram) => {
-				shaderProgram.clone()
+	pub fn upload_meshes_and_materials(&mut self, gl: &glow::Context, mesh_description_list: Vec<MeshDescription>, material_description_list: Vec<MaterialDescription>) -> Result<(), String> {
+		let shader_program = match &self.shader_program {
+			Some(shader_program) => {
+				shader_program.clone()
 			}
 			None => {
 				return Err(String::from("SkinnedModel: no shader program to upload with."));
 			}
 		};
-		let mut materialList = Vec::with_capacity(materialDescriptionList.len());
-		for materialDescription in materialDescriptionList.iter() {
-			let material = Material::createFromDescription(gl, shaderProgram.clone(), materialDescription)?;
-			materialList.push(Rc::new(material));
+		let mut material_list = Vec::with_capacity(material_description_list.len());
+		for material_description in material_description_list.iter() {
+			let material = Material::create_from_description(gl, shader_program.clone(), material_description)?;
+			material_list.push(Rc::new(material));
 		}
-		let defaultDescription = Material::createDefaultDescription();
-		let defaultMaterial = Rc::new(Material::createFromDescription(gl, shaderProgram.clone(), &defaultDescription)?);
+		let default_description = Material::create_default_description();
+		let default_material = Rc::new(Material::create_from_description(gl, shader_program.clone(), &default_description)?);
 
-		self.drawableList = Vec::with_capacity(meshDescriptionList.len());
-		for mut meshDescription in meshDescriptionList.into_iter() {
-			let generatedNormals;
-			let normals = match &meshDescription.normals {
+		self.drawable_list = Vec::with_capacity(mesh_description_list.len());
+		for mut mesh_description in mesh_description_list.into_iter() {
+			let generated_normals;
+			let normals = match &mesh_description.normals {
 				Some(normals) => {
 					normals
 				}
 				None => {
-					generatedNormals = SkinnedModel::generateSmoothNormals(&meshDescription.positions, meshDescription.indices.as_ref());
-					&generatedNormals
+					generated_normals = SkinnedModel::generate_smooth_normals(&mesh_description.positions, mesh_description.indices.as_ref());
+					&generated_normals
 				}
 			};
-			let vertexArray = unsafe {
+			let vertex_array = unsafe {
 				gl.create_vertex_array()?
 			};
-			let mut vertexBufferList = Vec::new();
+			let mut vertex_buffer_list = Vec::new();
 			unsafe {
-				gl.bind_vertex_array(Some(vertexArray));
+				gl.bind_vertex_array(Some(vertex_array));
 			}
-			if let Some(vertexBuffer) = SkinnedModel::bindFloatAttribute(gl, &shaderProgram, "vertexPosition", &meshDescription.positions, 3)? {
-				vertexBufferList.push(vertexBuffer);
+			if let Some(vertex_buffer) = SkinnedModel::bind_float_attribute(gl, &shader_program, "vertexPosition", &mesh_description.positions, 3)? {
+				vertex_buffer_list.push(vertex_buffer);
 			}
-			if let Some(vertexBuffer) = SkinnedModel::bindFloatAttribute(gl, &shaderProgram, "vertexNormal", normals, 3)? {
-				vertexBufferList.push(vertexBuffer);
+			if let Some(vertex_buffer) = SkinnedModel::bind_float_attribute(gl, &shader_program, "vertexNormal", normals, 3)? {
+				vertex_buffer_list.push(vertex_buffer);
 			}
-			if let Some(textureCoordinates) = &meshDescription.textureCoordinates {
-				if let Some(vertexBuffer) = SkinnedModel::bindFloatAttribute(gl, &shaderProgram, "vertexTextureCoordinate", textureCoordinates, 2)? {
-					vertexBufferList.push(vertexBuffer);
+			if let Some(texture_coordinates) = &mesh_description.texture_coordinates {
+				if let Some(vertex_buffer) = SkinnedModel::bind_float_attribute(gl, &shader_program, "vertexTextureCoordinate", texture_coordinates, 2)? {
+					vertex_buffer_list.push(vertex_buffer);
 				}
 			}
-			if let Some(vertexBuffer) = SkinnedModel::bindIntegerAttribute(gl, &shaderProgram, "vertexJoints", &meshDescription.joints, 4)? {
-				vertexBufferList.push(vertexBuffer);
+			if let Some(vertex_buffer) = SkinnedModel::bind_integer_attribute(gl, &shader_program, "vertexJoints", &mesh_description.joints, 4)? {
+				vertex_buffer_list.push(vertex_buffer);
 			}
-			if let Some(vertexBuffer) = SkinnedModel::bindFloatAttribute(gl, &shaderProgram, "vertexWeights", &meshDescription.weights, 4)? {
-				vertexBufferList.push(vertexBuffer);
+			if let Some(vertex_buffer) = SkinnedModel::bind_float_attribute(gl, &shader_program, "vertexWeights", &mesh_description.weights, 4)? {
+				vertex_buffer_list.push(vertex_buffer);
 			}
 
 			// 인덱스. (없는 메시는 drawArrays 로 출력)
-			let mut indexCount = 0;
-			let mut indexComponentType = 0;
-			let mut indexBuffer = None;
-			let isIndexed = meshDescription.indices.is_some();
-			if let Some(indices) = &meshDescription.indices {
+			let mut index_count = 0;
+			let mut index_component_type = 0;
+			let mut index_buffer = None;
+			let is_indexed = mesh_description.indices.is_some();
+			if let Some(indices) = &mesh_description.indices {
 				unsafe {
-					let createdIndexBuffer = gl.create_buffer()?;
-					gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(createdIndexBuffer));
-					gl.buffer_data_u8_slice(glow::ELEMENT_ARRAY_BUFFER, indices.asBytes(), glow::STATIC_DRAW);
-					indexBuffer = Some(createdIndexBuffer);
+					let created_index_buffer = gl.create_buffer()?;
+					gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(created_index_buffer));
+					gl.buffer_data_u8_slice(glow::ELEMENT_ARRAY_BUFFER, indices.as_bytes(), glow::STATIC_DRAW);
+					index_buffer = Some(created_index_buffer);
 				}
-				indexCount = indices.len();
-				indexComponentType = indices.getGlComponentType();
+				index_count = indices.len();
+				index_component_type = indices.get_gl_component_type();
 			}
 			unsafe {
 				gl.bind_vertex_array(None);
 			}
 
-			let material = match meshDescription.materialIndex.and_then(|materialIndex| materialList.get(materialIndex)) {
+			let material = match mesh_description.material_index.and_then(|material_index| material_list.get(material_index)) {
 				Some(material) => {
 					material.clone()
 				}
 				None => {
-					defaultMaterial.clone()
+					default_material.clone()
 				}
 			};
-			let morphTargetList = std::mem::take(&mut meshDescription.morphTargets);
-			let morphWeights = meshDescription.morphWeights.clone();
-			let isMorphDirty = !morphTargetList.is_empty();
-			self.drawableList.push(Drawable {
-				vertexArray,
-				vertexBufferList,
-				isIndexed,
-				indexBuffer,
-				indexCount,
-				indexComponentType,
-				indexByteOffset: 0,
-				wireframeIndexBuffer: None,
-				wireframeIndexCount: 0,
-				wireframeIndexComponentType: 0,
-				vertexCount: meshDescription.positions.len() / 3,
+			let morph_target_list = std::mem::take(&mut mesh_description.morph_targets);
+			let morph_weights = mesh_description.morph_weights.clone();
+			let is_morph_dirty = !morph_target_list.is_empty();
+			self.drawable_list.push(Drawable {
+				vertex_array,
+				vertex_buffer_list,
+				is_indexed,
+				index_buffer,
+				index_count,
+				index_component_type,
+				index_byte_offset: 0,
+				wireframe_index_buffer: None,
+				wireframe_index_count: 0,
+				wireframe_index_component_type: 0,
+				vertex_count: mesh_description.positions.len() / 3,
 				material,
-				materialName: meshDescription.materialName.clone(),
-				skinIndex: meshDescription.skinIndex,
-				nodeIndex: meshDescription.nodeIndex,
-				meshDescription,
-				morphTargetList,
-				morphWeights,
-				morphTexture: None,
-				morphRowsPerTarget: 0,
-				morphTextureWidth: 0,
-				isMorphDirty,
+				material_name: mesh_description.material_name.clone(),
+				skin_index: mesh_description.skin_index,
+				node_index: mesh_description.node_index,
+				mesh_description,
+				morph_target_list,
+				morph_weights,
+				morph_texture: None,
+				morph_rows_per_target: 0,
+				morph_texture_width: 0,
+				is_morph_dirty,
 			});
 		}
 		Ok(())
@@ -1194,145 +1194,145 @@ impl SkinnedModel {
 	// 와이어프레임 인덱스 업로드. (삼각형 인덱스 → 중복 없는 모서리 선 인덱스, 비인덱스 메시는 삼각형별 3변)
 	// - 드로어블의 버텍스 어레이와 무관한 별도 엘리먼트 버퍼. 렌더러가 선 출력 시 잠시 바꿔 끼운다.
 	//==============================================================================
-	pub fn uploadWireframeIndices(&mut self, gl: &glow::Context, drawableIndex: usize) -> Result<(), String> {
-		let drawable = self.drawableList.get_mut(drawableIndex).ok_or_else(|| format!("SkinnedModel: drawable {} not found.", drawableIndex))?;
-		let edgeList = SkinnedModel::buildWireframeEdgeList(drawable.meshDescription.indices.as_ref(), drawable.vertexCount);
-		let useUnsignedInt = drawable.vertexCount > 65535;
-		let wireframeIndices = if useUnsignedInt {
-			IndexArray::unsignedInt(edgeList.iter().map(|index| *index as u32).collect())
+	pub fn upload_wireframe_indices(&mut self, gl: &glow::Context, drawable_index: usize) -> Result<(), String> {
+		let drawable = self.drawable_list.get_mut(drawable_index).ok_or_else(|| format!("SkinnedModel: drawable {} not found.", drawable_index))?;
+		let edge_list = SkinnedModel::build_wireframe_edge_list(drawable.mesh_description.indices.as_ref(), drawable.vertex_count);
+		let use_unsigned_int = drawable.vertex_count > 65535;
+		let wireframe_indices = if use_unsigned_int {
+			IndexArray::UnsignedInt(edge_list.iter().map(|index| *index as u32).collect())
 		}
 		else {
-			IndexArray::unsignedShort(edgeList.iter().map(|index| *index as u16).collect())
+			IndexArray::UnsignedShort(edge_list.iter().map(|index| *index as u16).collect())
 		};
 		unsafe {
-			let wireframeIndexBuffer = gl.create_buffer()?;
+			let wireframe_index_buffer = gl.create_buffer()?;
 			gl.bind_vertex_array(None);
-			gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(wireframeIndexBuffer));
-			gl.buffer_data_u8_slice(glow::ELEMENT_ARRAY_BUFFER, wireframeIndices.asBytes(), glow::STATIC_DRAW);
+			gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(wireframe_index_buffer));
+			gl.buffer_data_u8_slice(glow::ELEMENT_ARRAY_BUFFER, wireframe_indices.as_bytes(), glow::STATIC_DRAW);
 			gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, None);
-			drawable.wireframeIndexBuffer = Some(wireframeIndexBuffer);
+			drawable.wireframe_index_buffer = Some(wireframe_index_buffer);
 		}
-		drawable.wireframeIndexCount = wireframeIndices.len();
-		drawable.wireframeIndexComponentType = wireframeIndices.getGlComponentType();
+		drawable.wireframe_index_count = wireframe_indices.len();
+		drawable.wireframe_index_component_type = wireframe_indices.get_gl_component_type();
 		Ok(())
 	}
 
 	//==============================================================================
 	// 와이어프레임 모서리 목록 만들기. (GL 무관, 인덱스 쌍 목록)
 	//==============================================================================
-	pub fn buildWireframeEdgeList(triangleIndices: Option<&IndexArray>, vertexCount: usize) -> Vec<usize> {
-		let mut edgeList = Vec::new();
-		match triangleIndices {
-			Some(triangleIndices) => {
-				let mut edgeKeySet: HashSet<usize> = HashSet::new();
-				let triangleCount = triangleIndices.len() / 3;
-				for triangleIndex in 0..triangleCount {
-					for cornerIndex in 0..3 {
-						let indexA = triangleIndices.get(triangleIndex * 3 + cornerIndex);
-						let indexB = triangleIndices.get(triangleIndex * 3 + (cornerIndex + 1) % 3);
-						let minimumIndex = indexA.min(indexB);
-						let maximumIndex = indexA.max(indexB);
-						let edgeKey = minimumIndex * vertexCount + maximumIndex;
-						if edgeKeySet.contains(&edgeKey) {
+	pub fn build_wireframe_edge_list(triangle_indices: Option<&IndexArray>, vertex_count: usize) -> Vec<usize> {
+		let mut edge_list = Vec::new();
+		match triangle_indices {
+			Some(triangle_indices) => {
+				let mut edge_key_set: HashSet<usize> = HashSet::new();
+				let triangle_count = triangle_indices.len() / 3;
+				for triangle_index in 0..triangle_count {
+					for corner_index in 0..3 {
+						let index_a = triangle_indices.get(triangle_index * 3 + corner_index);
+						let index_b = triangle_indices.get(triangle_index * 3 + (corner_index + 1) % 3);
+						let minimum_index = index_a.min(index_b);
+						let maximum_index = index_a.max(index_b);
+						let edge_key = minimum_index * vertex_count + maximum_index;
+						if edge_key_set.contains(&edge_key) {
 							continue;
 						}
-						edgeKeySet.insert(edgeKey);
-						edgeList.push(minimumIndex);
-						edgeList.push(maximumIndex);
+						edge_key_set.insert(edge_key);
+						edge_list.push(minimum_index);
+						edge_list.push(maximum_index);
 					}
 				}
 			}
 			None => {
-				let mut vertexIndex = 0;
-				while vertexIndex + 2 < vertexCount {
-					edgeList.extend_from_slice(&[vertexIndex, vertexIndex + 1, vertexIndex + 1, vertexIndex + 2, vertexIndex + 2, vertexIndex]);
-					vertexIndex += 3;
+				let mut vertex_index = 0;
+				while vertex_index + 2 < vertex_count {
+					edge_list.extend_from_slice(&[vertex_index, vertex_index + 1, vertex_index + 1, vertex_index + 2, vertex_index + 2, vertex_index]);
+					vertex_index += 3;
 				}
 			}
 		}
-		edgeList
+		edge_list
 	}
 
 	//==============================================================================
 	// 모프 타깃 업로드. (드로어블의 델타 목록 → RGBA32F 텍스처, 타깃마다 위치 블록 + 노멀 블록)
 	// - 텍셀 인덱스 = 정점 인덱스. 블록 시작 행 = 타깃 인덱스 x 2 x 타깃당 행 수.
 	//==============================================================================
-	pub fn uploadMorphTargets(&mut self, gl: &glow::Context, drawableIndex: usize) -> Result<(), String> {
-		let drawable = self.drawableList.get_mut(drawableIndex).ok_or_else(|| format!("SkinnedModel: drawable {} not found.", drawableIndex))?;
-		let targetCount = drawable.morphTargetList.len();
-		let vertexCount = drawable.vertexCount;
-		if targetCount == 0 || vertexCount == 0 {
-			if let Some(morphTexture) = drawable.morphTexture.take() {
+	pub fn upload_morph_targets(&mut self, gl: &glow::Context, drawable_index: usize) -> Result<(), String> {
+		let drawable = self.drawable_list.get_mut(drawable_index).ok_or_else(|| format!("SkinnedModel: drawable {} not found.", drawable_index))?;
+		let target_count = drawable.morph_target_list.len();
+		let vertex_count = drawable.vertex_count;
+		if target_count == 0 || vertex_count == 0 {
+			if let Some(morph_texture) = drawable.morph_texture.take() {
 				unsafe {
-					gl.delete_texture(morphTexture);
+					gl.delete_texture(morph_texture);
 				}
 			}
-			drawable.isMorphDirty = false;
+			drawable.is_morph_dirty = false;
 			return Ok(());
 		}
-		let (textureWidth, rowsPerTarget, texelData) = SkinnedModel::buildMorphTexelData(&drawable.morphTargetList, vertexCount);
-		let textureHeight = rowsPerTarget * 2 * targetCount;
+		let (texture_width, rows_per_target, texel_data) = SkinnedModel::build_morph_texel_data(&drawable.morph_target_list, vertex_count);
+		let texture_height = rows_per_target * 2 * target_count;
 		unsafe {
-			let morphTexture = match drawable.morphTexture {
-				Some(morphTexture) => {
-					morphTexture
+			let morph_texture = match drawable.morph_texture {
+				Some(morph_texture) => {
+					morph_texture
 				}
 				None => {
 					gl.create_texture()?
 				}
 			};
-			drawable.morphTexture = Some(morphTexture);
-			gl.bind_texture(glow::TEXTURE_2D, Some(morphTexture));
-			gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::RGBA32F as i32, textureWidth as i32, textureHeight as i32, 0, glow::RGBA, glow::FLOAT, glow::PixelUnpackData::Slice(Some(sliceToBytes(&texelData))));
+			drawable.morph_texture = Some(morph_texture);
+			gl.bind_texture(glow::TEXTURE_2D, Some(morph_texture));
+			gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::RGBA32F as i32, texture_width as i32, texture_height as i32, 0, glow::RGBA, glow::FLOAT, glow::PixelUnpackData::Slice(Some(slice_to_bytes(&texel_data))));
 			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
 			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
 			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
 			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
 			gl.bind_texture(glow::TEXTURE_2D, None);
 		}
-		drawable.morphRowsPerTarget = rowsPerTarget as i32;
-		drawable.morphTextureWidth = textureWidth as i32;
-		drawable.isMorphDirty = false;
+		drawable.morph_rows_per_target = rows_per_target as i32;
+		drawable.morph_texture_width = texture_width as i32;
+		drawable.is_morph_dirty = false;
 		Ok(())
 	}
 
 	//==============================================================================
 	// 모프 텍셀 데이터 만들기. (GL 무관, 텍스처 가로, 타깃당 행 수, RGBA 실수 배열)
 	//==============================================================================
-	pub fn buildMorphTexelData(morphTargetList: &[MorphTarget], vertexCount: usize) -> (usize, usize, Vec<f32>) {
-		let targetCount = morphTargetList.len();
-		let textureWidth = vertexCount.clamp(1, MORPH_TEXTURE_WIDTH);
-		let rowsPerTarget = vertexCount.div_ceil(textureWidth);
-		let textureHeight = rowsPerTarget * 2 * targetCount;
-		let mut texelData = vec![0.0f32; textureWidth * textureHeight * 4];
-		for (targetIndex, morphTarget) in morphTargetList.iter().enumerate() {
-			let positionBlockOffset = targetIndex * 2 * rowsPerTarget * textureWidth;
-			let normalBlockOffset = positionBlockOffset + rowsPerTarget * textureWidth;
-			for vertexIndex in 0..vertexCount {
-				let positionTexelOffset = (positionBlockOffset + vertexIndex) * 4;
-				for componentIndex in 0..3 {
-					texelData[positionTexelOffset + componentIndex] = morphTarget.positionDeltas.get(vertexIndex * 3 + componentIndex).copied().unwrap_or(0.0);
+	pub fn build_morph_texel_data(morph_target_list: &[MorphTarget], vertex_count: usize) -> (usize, usize, Vec<f32>) {
+		let target_count = morph_target_list.len();
+		let texture_width = vertex_count.clamp(1, MORPH_TEXTURE_WIDTH);
+		let rows_per_target = vertex_count.div_ceil(texture_width);
+		let texture_height = rows_per_target * 2 * target_count;
+		let mut texel_data = vec![0.0f32; texture_width * texture_height * 4];
+		for (target_index, morph_target) in morph_target_list.iter().enumerate() {
+			let position_block_offset = target_index * 2 * rows_per_target * texture_width;
+			let normal_block_offset = position_block_offset + rows_per_target * texture_width;
+			for vertex_index in 0..vertex_count {
+				let position_texel_offset = (position_block_offset + vertex_index) * 4;
+				for component_index in 0..3 {
+					texel_data[position_texel_offset + component_index] = morph_target.position_deltas.get(vertex_index * 3 + component_index).copied().unwrap_or(0.0);
 				}
-				if let Some(normalDeltas) = &morphTarget.normalDeltas {
-					let normalTexelOffset = (normalBlockOffset + vertexIndex) * 4;
-					for componentIndex in 0..3 {
-						texelData[normalTexelOffset + componentIndex] = normalDeltas.get(vertexIndex * 3 + componentIndex).copied().unwrap_or(0.0);
+				if let Some(normal_deltas) = &morph_target.normal_deltas {
+					let normal_texel_offset = (normal_block_offset + vertex_index) * 4;
+					for component_index in 0..3 {
+						texel_data[normal_texel_offset + component_index] = normal_deltas.get(vertex_index * 3 + component_index).copied().unwrap_or(0.0);
 					}
 				}
 			}
 		}
-		(textureWidth, rowsPerTarget, texelData)
+		(texture_width, rows_per_target, texel_data)
 	}
 
 	//==============================================================================
 	// 바뀐 모프 타깃 업로드. (원본 update 6단계, 추가/변경된 드로어블만, 렌더러가 그리기 전에 부른다)
 	//==============================================================================
-	pub fn uploadPendingMorphTargets(&mut self, gl: &glow::Context) {
-		for drawableIndex in 0..self.drawableList.len() {
-			if self.drawableList[drawableIndex].isMorphDirty {
-				if let Err(error) = self.uploadMorphTargets(gl, drawableIndex) {
+	pub fn upload_pending_morph_targets(&mut self, gl: &glow::Context) {
+		for drawable_index in 0..self.drawable_list.len() {
+			if self.drawable_list[drawable_index].is_morph_dirty {
+				if let Err(error) = self.upload_morph_targets(gl, drawable_index) {
 					eprintln!("SkinnedModel: {}", error);
-					self.drawableList[drawableIndex].isMorphDirty = false;
+					self.drawable_list[drawable_index].is_morph_dirty = false;
 				}
 			}
 		}
@@ -1341,28 +1341,28 @@ impl SkinnedModel {
 	//==============================================================================
 	// 모프 타깃 추가. (프로그램 생성, 정점별 위치 델타 [+ 노멀 델타], 다음 그리기 전에 업로드)
 	//==============================================================================
-	pub fn addMorphTarget(&mut self, drawableIndex: usize, targetName: &str, positionDeltas: Vec<f32>, normalDeltas: Option<Vec<f32>>) -> Result<(), String> {
-		let drawable = self.drawableList.get_mut(drawableIndex).ok_or_else(|| format!("SkinnedModel: drawable {} not found.", drawableIndex))?;
-		if drawable.morphTargetList.len() >= MORPH_TARGET_MAXIMUM {
+	pub fn add_morph_target(&mut self, drawable_index: usize, target_name: &str, position_deltas: Vec<f32>, normal_deltas: Option<Vec<f32>>) -> Result<(), String> {
+		let drawable = self.drawable_list.get_mut(drawable_index).ok_or_else(|| format!("SkinnedModel: drawable {} not found.", drawable_index))?;
+		if drawable.morph_target_list.len() >= MORPH_TARGET_MAXIMUM {
 			return Err(format!("SkinnedModel: morph target limit {} exceeded.", MORPH_TARGET_MAXIMUM));
 		}
-		if positionDeltas.len() != drawable.vertexCount * 3 {
-			return Err(format!("SkinnedModel: morph target \"{}\" delta count mismatch.", targetName));
+		if position_deltas.len() != drawable.vertex_count * 3 {
+			return Err(format!("SkinnedModel: morph target \"{}\" delta count mismatch.", target_name));
 		}
-		drawable.morphTargetList.push(MorphTarget { name: targetName.to_string(), positionDeltas, normalDeltas });
-		drawable.morphWeights.resize(drawable.morphTargetList.len(), 0.0);
-		drawable.isMorphDirty = true;
+		drawable.morph_target_list.push(MorphTarget { name: target_name.to_string(), position_deltas, normal_deltas });
+		drawable.morph_weights.resize(drawable.morph_target_list.len(), 0.0);
+		drawable.is_morph_dirty = true;
 		Ok(())
 	}
 
 	//==============================================================================
 	// 모프 가중치 설정. (이름 일치 타깃 전부, 드로어블 여러 개가 같은 이름을 가질 수 있음)
 	//==============================================================================
-	pub fn setMorphWeight(&mut self, targetName: &str, weight: f32) {
-		for drawable in self.drawableList.iter_mut() {
-			for targetIndex in 0..drawable.morphTargetList.len() {
-				if drawable.morphTargetList[targetIndex].name == targetName {
-					drawable.morphWeights[targetIndex] = weight;
+	pub fn set_morph_weight(&mut self, target_name: &str, weight: f32) {
+		for drawable in self.drawable_list.iter_mut() {
+			for target_index in 0..drawable.morph_target_list.len() {
+				if drawable.morph_target_list[target_index].name == target_name {
+					drawable.morph_weights[target_index] = weight;
 				}
 			}
 		}
@@ -1371,11 +1371,11 @@ impl SkinnedModel {
 	//==============================================================================
 	// 모프 가중치 반환. (첫 일치 타깃, 없으면 0)
 	//==============================================================================
-	pub fn getMorphWeight(&self, targetName: &str) -> f32 {
-		for drawable in self.drawableList.iter() {
-			for targetIndex in 0..drawable.morphTargetList.len() {
-				if drawable.morphTargetList[targetIndex].name == targetName {
-					return drawable.morphWeights[targetIndex];
+	pub fn get_morph_weight(&self, target_name: &str) -> f32 {
+		for drawable in self.drawable_list.iter() {
+			for target_index in 0..drawable.morph_target_list.len() {
+				if drawable.morph_target_list[target_index].name == target_name {
+					return drawable.morph_weights[target_index];
 				}
 			}
 		}
@@ -1385,8 +1385,8 @@ impl SkinnedModel {
 	//==============================================================================
 	// 머티리얼 교체. (드로어블 단위, 외부 텍스처로 만든 머티리얼 인스턴스 적용)
 	//==============================================================================
-	pub fn setMaterial(&mut self, drawableIndex: usize, material: Rc<Material>) -> Result<(), String> {
-		let drawable = self.drawableList.get_mut(drawableIndex).ok_or_else(|| format!("SkinnedModel: drawable {} not found.", drawableIndex))?;
+	pub fn set_material(&mut self, drawable_index: usize, material: Rc<Material>) -> Result<(), String> {
+		let drawable = self.drawable_list.get_mut(drawable_index).ok_or_else(|| format!("SkinnedModel: drawable {} not found.", drawable_index))?;
 		drawable.material = material;
 		Ok(())
 	}
@@ -1394,9 +1394,9 @@ impl SkinnedModel {
 	//==============================================================================
 	// 스무스 노멀 생성. (노멀 미보유 메시, 바인드 포즈 기준, 스키닝 회전은 셰이더에서 적용)
 	//==============================================================================
-	pub fn generateSmoothNormals(positions: &[f32], indices: Option<&IndexArray>) -> Vec<f32> {
+	pub fn generate_smooth_normals(positions: &[f32], indices: Option<&IndexArray>) -> Vec<f32> {
 		let mut normals = vec![0.0f32; positions.len()];
-		let triangleCount = match indices {
+		let triangle_count = match indices {
 			Some(indices) => {
 				indices.len() / 3
 			}
@@ -1404,44 +1404,44 @@ impl SkinnedModel {
 				positions.len() / 9
 			}
 		};
-		for triangleIndex in 0..triangleCount {
-			let readCorner = |cornerIndex: usize| -> usize {
+		for triangle_index in 0..triangle_count {
+			let read_corner = |corner_index: usize| -> usize {
 				match indices {
 					Some(indices) => {
-						indices.get(triangleIndex * 3 + cornerIndex) * 3
+						indices.get(triangle_index * 3 + corner_index) * 3
 					}
 					None => {
-						(triangleIndex * 3 + cornerIndex) * 3
+						(triangle_index * 3 + corner_index) * 3
 					}
 				}
 			};
-			let indexA = readCorner(0);
-			let indexB = readCorner(1);
-			let indexC = readCorner(2);
-			if indexA + 2 >= positions.len() || indexB + 2 >= positions.len() || indexC + 2 >= positions.len() {
+			let index_a = read_corner(0);
+			let index_b = read_corner(1);
+			let index_c = read_corner(2);
+			if index_a + 2 >= positions.len() || index_b + 2 >= positions.len() || index_c + 2 >= positions.len() {
 				continue;
 			}
-			let edgeABX = positions[indexB] - positions[indexA];
-			let edgeABY = positions[indexB + 1] - positions[indexA + 1];
-			let edgeABZ = positions[indexB + 2] - positions[indexA + 2];
-			let edgeACX = positions[indexC] - positions[indexA];
-			let edgeACY = positions[indexC + 1] - positions[indexA + 1];
-			let edgeACZ = positions[indexC + 2] - positions[indexA + 2];
-			let faceNormalX = edgeABY * edgeACZ - edgeABZ * edgeACY;
-			let faceNormalY = edgeABZ * edgeACX - edgeABX * edgeACZ;
-			let faceNormalZ = edgeABX * edgeACY - edgeABY * edgeACX;
-			for cornerOffset in [indexA, indexB, indexC] {
-				normals[cornerOffset] += faceNormalX;
-				normals[cornerOffset + 1] += faceNormalY;
-				normals[cornerOffset + 2] += faceNormalZ;
+			let edge_abx = positions[index_b] - positions[index_a];
+			let edge_aby = positions[index_b + 1] - positions[index_a + 1];
+			let edge_abz = positions[index_b + 2] - positions[index_a + 2];
+			let edge_acx = positions[index_c] - positions[index_a];
+			let edge_acy = positions[index_c + 1] - positions[index_a + 1];
+			let edge_acz = positions[index_c + 2] - positions[index_a + 2];
+			let face_normal_x = edge_aby * edge_acz - edge_abz * edge_acy;
+			let face_normal_y = edge_abz * edge_acx - edge_abx * edge_acz;
+			let face_normal_z = edge_abx * edge_acy - edge_aby * edge_acx;
+			for corner_offset in [index_a, index_b, index_c] {
+				normals[corner_offset] += face_normal_x;
+				normals[corner_offset + 1] += face_normal_y;
+				normals[corner_offset + 2] += face_normal_z;
 			}
 		}
 		for normal in normals.as_chunks_mut::<3>().0 {
-			let normalLength = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
-			if normalLength > 0.0 {
-				normal[0] /= normalLength;
-				normal[1] /= normalLength;
-				normal[2] /= normalLength;
+			let normal_length = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
+			if normal_length > 0.0 {
+				normal[0] /= normal_length;
+				normal[1] /= normal_length;
+				normal[2] /= normal_length;
 			}
 		}
 		normals
@@ -1450,78 +1450,78 @@ impl SkinnedModel {
 	//==============================================================================
 	// 실수형 어트리뷰트 바인드. (신규 버퍼 생성 + 포인터 설정, 셰이더가 안 쓰는 어트리뷰트면 None)
 	//==============================================================================
-	pub fn bindFloatAttribute(gl: &glow::Context, shaderProgram: &ShaderProgram, attributeName: &str, dataArray: &[f32], componentCount: i32) -> Result<Option<GlBuffer>, String> {
-		let attributeLocation = match shaderProgram.getAttributeLocation(gl, attributeName) {
-			Some(attributeLocation) => {
-				attributeLocation
+	pub fn bind_float_attribute(gl: &glow::Context, shader_program: &ShaderProgram, attribute_name: &str, data_array: &[f32], component_count: i32) -> Result<Option<GlBuffer>, String> {
+		let attribute_location = match shader_program.get_attribute_location(gl, attribute_name) {
+			Some(attribute_location) => {
+				attribute_location
 			}
 			None => {
 				return Ok(None);
 			}
 		};
 		unsafe {
-			let vertexBuffer = gl.create_buffer()?;
-			gl.bind_buffer(glow::ARRAY_BUFFER, Some(vertexBuffer));
-			gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, sliceToBytes(dataArray), glow::STATIC_DRAW);
-			gl.enable_vertex_attrib_array(attributeLocation);
-			gl.vertex_attrib_pointer_f32(attributeLocation, componentCount, glow::FLOAT, false, 0, 0);
-			Ok(Some(vertexBuffer))
+			let vertex_buffer = gl.create_buffer()?;
+			gl.bind_buffer(glow::ARRAY_BUFFER, Some(vertex_buffer));
+			gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice_to_bytes(data_array), glow::STATIC_DRAW);
+			gl.enable_vertex_attrib_array(attribute_location);
+			gl.vertex_attrib_pointer_f32(attribute_location, component_count, glow::FLOAT, false, 0, 0);
+			Ok(Some(vertex_buffer))
 		}
 	}
 
 	//==============================================================================
 	// 정수형 어트리뷰트 바인드. (조인트 인덱스, 셰이더가 안 쓰는 어트리뷰트면 None)
 	//==============================================================================
-	pub fn bindIntegerAttribute(gl: &glow::Context, shaderProgram: &ShaderProgram, attributeName: &str, dataArray: &[u16], componentCount: i32) -> Result<Option<GlBuffer>, String> {
-		let attributeLocation = match shaderProgram.getAttributeLocation(gl, attributeName) {
-			Some(attributeLocation) => {
-				attributeLocation
+	pub fn bind_integer_attribute(gl: &glow::Context, shader_program: &ShaderProgram, attribute_name: &str, data_array: &[u16], component_count: i32) -> Result<Option<GlBuffer>, String> {
+		let attribute_location = match shader_program.get_attribute_location(gl, attribute_name) {
+			Some(attribute_location) => {
+				attribute_location
 			}
 			None => {
 				return Ok(None);
 			}
 		};
 		unsafe {
-			let vertexBuffer = gl.create_buffer()?;
-			gl.bind_buffer(glow::ARRAY_BUFFER, Some(vertexBuffer));
-			gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, sliceToBytes(dataArray), glow::STATIC_DRAW);
-			gl.enable_vertex_attrib_array(attributeLocation);
-			gl.vertex_attrib_pointer_i32(attributeLocation, componentCount, glow::UNSIGNED_SHORT, 0, 0);
-			Ok(Some(vertexBuffer))
+			let vertex_buffer = gl.create_buffer()?;
+			gl.bind_buffer(glow::ARRAY_BUFFER, Some(vertex_buffer));
+			gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice_to_bytes(data_array), glow::STATIC_DRAW);
+			gl.enable_vertex_attrib_array(attribute_location);
+			gl.vertex_attrib_pointer_i32(attribute_location, component_count, glow::UNSIGNED_SHORT, 0, 0);
+			Ok(Some(vertex_buffer))
 		}
 	}
 
 	//==============================================================================
-	// 애니메이션 재생. (크로스페이드, 같은 이름이 여럿이면 원본처럼 마지막 것, 원본 fadeDuration 기본값 0.25)
+	// 애니메이션 재생. (크로스페이드, 같은 이름이 여럿이면 원본처럼 마지막 것, 원본 fade_duration 기본값 0.25)
 	//==============================================================================
-	pub fn playAnimation(&mut self, animationName: &str, fadeDuration: f32) {
-		if let Some(currentAnimationIndex) = self.currentAnimationIndex {
-			if self.animationList[currentAnimationIndex].name == animationName {
+	pub fn play_animation(&mut self, animation_name: &str, fade_duration: f32) {
+		if let Some(current_animation_index) = self.current_animation_index {
+			if self.animation_list[current_animation_index].name == animation_name {
 				return;
 			}
 		}
-		let foundAnimationIndex = self.animationList.iter().rposition(|animation| animation.name == animationName);
-		let foundAnimationIndex = match foundAnimationIndex {
-			Some(foundAnimationIndex) => {
-				foundAnimationIndex
+		let found_animation_index = self.animation_list.iter().rposition(|animation| animation.name == animation_name);
+		let found_animation_index = match found_animation_index {
+			Some(found_animation_index) => {
+				found_animation_index
 			}
 			None => {
 				return;
 			}
 		};
-		self.previousAnimationIndex = self.currentAnimationIndex;
-		self.previousTime = self.currentTime;
-		self.currentAnimationIndex = Some(foundAnimationIndex);
-		self.currentTime = 0.0;
-		self.fadeDuration = fadeDuration;
-		self.fadeElapsed = 0.0;
+		self.previous_animation_index = self.current_animation_index;
+		self.previous_time = self.current_time;
+		self.current_animation_index = Some(found_animation_index);
+		self.current_time = 0.0;
+		self.fade_duration = fade_duration;
+		self.fade_elapsed = 0.0;
 	}
 
 	//==============================================================================
 	// 애니메이션 샘플링. (클립 인덱스, 현재 노드 포즈에 가중 블렌딩)
 	//==============================================================================
-	pub fn sampleAnimation(&mut self, animationIndex: usize, time: f32, blendWeight: f32) {
-		let animation = match self.animationList.get_mut(animationIndex) {
+	pub fn sample_animation(&mut self, animation_index: usize, time: f32, blend_weight: f32) {
+		let animation = match self.animation_list.get_mut(animation_index) {
 			Some(animation) => {
 				animation
 			}
@@ -1529,65 +1529,65 @@ impl SkinnedModel {
 				return;
 			}
 		};
-		sampleAnimationClip(animation, &mut self.nodeList, &mut self.drawableList, time, blendWeight);
+		sample_animation_clip(animation, &mut self.node_list, &mut self.drawable_list, time, blend_weight);
 	}
 
 	//==============================================================================
 	// 갱신. (시간 전진 → 포즈 샘플링 → 월드/조인트 행렬 계산, GL 무관)
 	//==============================================================================
-	pub fn update(&mut self, deltaTime: f32) {
+	pub fn update(&mut self, delta_time: f32) {
 		// 애니메이션이 없어도 기본 포즈로 월드/조인트 행렬은 계산한다. (정적 모델 지원)
-		let currentAnimationIndex = self.currentAnimationIndex;
-		if currentAnimationIndex.is_some() {
-			self.currentTime += deltaTime * self.timeScale;
-			if self.previousAnimationIndex.is_some() {
-				self.previousTime += deltaTime * self.timeScale;
-				self.fadeElapsed += deltaTime;
-				if self.fadeElapsed >= self.fadeDuration {
-					self.previousAnimationIndex = None;
+		let current_animation_index = self.current_animation_index;
+		if current_animation_index.is_some() {
+			self.current_time += delta_time * self.time_scale;
+			if self.previous_animation_index.is_some() {
+				self.previous_time += delta_time * self.time_scale;
+				self.fade_elapsed += delta_time;
+				if self.fade_elapsed >= self.fade_duration {
+					self.previous_animation_index = None;
 				}
 			}
 		}
 
 		// 1. 기본 포즈로 리셋.
-		for node in self.nodeList.iter_mut() {
-			node.currentTranslation = node.baseTranslation;
-			node.currentScale = node.baseScale;
-			node.currentRotation = node.baseRotation;
+		for node in self.node_list.iter_mut() {
+			node.current_translation = node.base_translation;
+			node.current_scale = node.base_scale;
+			node.current_rotation = node.base_rotation;
 		}
 
 		// 2. 이전/현재 클립 샘플링. (크로스페이드)
-		if let Some(currentAnimationIndex) = currentAnimationIndex {
-			match self.previousAnimationIndex {
-				Some(previousAnimationIndex) => {
-					let previousTime = self.previousTime;
-					self.sampleAnimation(previousAnimationIndex, previousTime, 1.0);
-					let blendWeight = (self.fadeElapsed / self.fadeDuration.max(0.0001)).min(1.0);
-					let currentTime = self.currentTime;
-					self.sampleAnimation(currentAnimationIndex, currentTime, blendWeight);
+		if let Some(current_animation_index) = current_animation_index {
+			match self.previous_animation_index {
+				Some(previous_animation_index) => {
+					let previous_time = self.previous_time;
+					self.sample_animation(previous_animation_index, previous_time, 1.0);
+					let blend_weight = (self.fade_elapsed / self.fade_duration.max(0.0001)).min(1.0);
+					let current_time = self.current_time;
+					self.sample_animation(current_animation_index, current_time, blend_weight);
 				}
 				None => {
-					let currentTime = self.currentTime;
-					self.sampleAnimation(currentAnimationIndex, currentTime, 1.0);
+					let current_time = self.current_time;
+					self.sample_animation(current_animation_index, current_time, 1.0);
 				}
 			}
 		}
 
 		// 3. 조인트 회전 오프셋. (절차 포즈 가공)
-		for (nodeIndex, offsetRotation) in self.jointRotationOffsets.iter() {
-			if let Some(node) = self.nodeList.get_mut(*nodeIndex) {
-				node.currentRotation = node.currentRotation.multiply(*offsetRotation);
+		for (node_index, offset_rotation) in self.joint_rotation_offsets.iter() {
+			if let Some(node) = self.node_list.get_mut(*node_index) {
+				node.current_rotation = node.current_rotation.multiply(*offset_rotation);
 			}
 		}
 
 		// 4. 월드 행렬 계산. (루트부터 명시적 스택 순회)
-		let mut traversalStack: Vec<(usize, Option<usize>)> = Vec::new();
-		for rootIndex in self.rootNodeIndices.iter() {
-			traversalStack.push((*rootIndex, None));
+		let mut traversal_stack: Vec<(usize, Option<usize>)> = Vec::new();
+		for root_index in self.root_node_indices.iter() {
+			traversal_stack.push((*root_index, None));
 		}
-		while let Some((nodeIndex, parentIndex)) = traversalStack.pop() {
-			let parentWorldMatrix = parentIndex.and_then(|parentIndex| self.nodeList.get(parentIndex)).map(|parentNode| parentNode.worldMatrix);
-			let node = match self.nodeList.get_mut(nodeIndex) {
+		while let Some((node_index, parent_index)) = traversal_stack.pop() {
+			let parent_world_matrix = parent_index.and_then(|parent_index| self.node_list.get(parent_index)).map(|parent_node| parent_node.world_matrix);
+			let node = match self.node_list.get_mut(node_index) {
 				Some(node) => {
 					node
 				}
@@ -1595,40 +1595,40 @@ impl SkinnedModel {
 					continue;
 				}
 			};
-			let mut localMatrix = Matrix4::createTranslation(node.currentTranslation[0], node.currentTranslation[1], node.currentTranslation[2]);
-			let rotationMatrix = Matrix4::createRotationFromQuaternion(node.currentRotation);
-			localMatrix.multiply(&rotationMatrix);
-			localMatrix.scale(node.currentScale[0], node.currentScale[1], node.currentScale[2]);
-			match parentWorldMatrix {
-				Some(parentWorldMatrix) => {
-					let mut worldMatrix = parentWorldMatrix;
-					worldMatrix.multiply(&localMatrix);
-					node.worldMatrix = worldMatrix;
+			let mut local_matrix = Matrix4::create_translation(node.current_translation[0], node.current_translation[1], node.current_translation[2]);
+			let rotation_matrix = Matrix4::create_rotation_from_quaternion(node.current_rotation);
+			local_matrix.multiply(&rotation_matrix);
+			local_matrix.scale(node.current_scale[0], node.current_scale[1], node.current_scale[2]);
+			match parent_world_matrix {
+				Some(parent_world_matrix) => {
+					let mut world_matrix = parent_world_matrix;
+					world_matrix.multiply(&local_matrix);
+					node.world_matrix = world_matrix;
 				}
 				None => {
-					node.worldMatrix = localMatrix;
+					node.world_matrix = local_matrix;
 				}
 			}
-			for childIndex in node.childIndices.iter() {
-				traversalStack.push((*childIndex, Some(nodeIndex)));
+			for child_index in node.child_indices.iter() {
+				traversal_stack.push((*child_index, Some(node_index)));
 			}
 		}
 
 		// 5. 조인트 행렬. (월드 x 역바인드, 본이 없는 조인트는 단위 행렬)
-		let nodeList = &self.nodeList;
-		for skin in self.skinList.iter_mut() {
-			for jointIndex in 0..skin.jointNodeIndices.len() {
-				let jointMatrix = match nodeList.get(skin.jointNodeIndices[jointIndex]) {
-					Some(jointNode) => {
-						let mut jointMatrix = jointNode.worldMatrix;
-						jointMatrix.multiply(&skin.inverseBindMatrices[jointIndex]);
-						jointMatrix
+		let node_list = &self.node_list;
+		for skin in self.skin_list.iter_mut() {
+			for joint_index in 0..skin.joint_node_indices.len() {
+				let joint_matrix = match node_list.get(skin.joint_node_indices[joint_index]) {
+					Some(joint_node) => {
+						let mut joint_matrix = joint_node.world_matrix;
+						joint_matrix.multiply(&skin.inverse_bind_matrices[joint_index]);
+						joint_matrix
 					}
 					None => {
-						Matrix4::createIdentity()
+						Matrix4::create_identity()
 					}
 				};
-				jointMatrix.writeToSlice(&mut skin.jointMatrixArray, jointIndex * 16);
+				joint_matrix.write_to_slice(&mut skin.joint_matrix_array, joint_index * 16);
 			}
 		}
 	}
@@ -1636,17 +1636,17 @@ impl SkinnedModel {
 	//==============================================================================
 	// 조인트 회전 오프셋 설정. (이름 부분 일치 노드에 로컬 회전 누적)
 	//==============================================================================
-	pub fn setJointRotationOffset(&mut self, jointNamePart: &str, offsetRotation: Quaternion) {
-		for nodeIndex in 0..self.nodeList.len() {
-			if !self.nodeList[nodeIndex].name.contains(jointNamePart) {
+	pub fn set_joint_rotation_offset(&mut self, joint_name_part: &str, offset_rotation: Quaternion) {
+		for node_index in 0..self.node_list.len() {
+			if !self.node_list[node_index].name.contains(joint_name_part) {
 				continue;
 			}
-			match self.jointRotationOffsets.iter_mut().find(|entry| entry.0 == nodeIndex) {
+			match self.joint_rotation_offsets.iter_mut().find(|entry| entry.0 == node_index) {
 				Some(entry) => {
-					entry.1 = offsetRotation;
+					entry.1 = offset_rotation;
 				}
 				None => {
-					self.jointRotationOffsets.push((nodeIndex, offsetRotation));
+					self.joint_rotation_offsets.push((node_index, offset_rotation));
 				}
 			}
 		}
@@ -1655,106 +1655,106 @@ impl SkinnedModel {
 	//==============================================================================
 	// 조인트 회전 오프셋 전체 해제.
 	//==============================================================================
-	pub fn clearJointRotationOffsets(&mut self) {
-		self.jointRotationOffsets.clear();
+	pub fn clear_joint_rotation_offsets(&mut self) {
+		self.joint_rotation_offsets.clear();
 	}
 
 	//==============================================================================
 	// 애니메이션 이름 목록 반환.
 	//==============================================================================
-	pub fn getAnimationNameList(&self) -> Vec<String> {
-		self.animationList.iter().map(|animation| animation.name.clone()).collect()
+	pub fn get_animation_name_list(&self) -> Vec<String> {
+		self.animation_list.iter().map(|animation| animation.name.clone()).collect()
 	}
 
 	//==============================================================================
 	// 재생 속도 설정.
 	//==============================================================================
-	pub fn setTimeScale(&mut self, timeScale: f32) {
-		self.timeScale = timeScale;
+	pub fn set_time_scale(&mut self, time_scale: f32) {
+		self.time_scale = time_scale;
 	}
 
 	//==============================================================================
 	// 셰이더 프로그램 반환. (셰이더 없이 만든 모델이면 None)
 	//==============================================================================
-	pub fn getShaderProgram(&self) -> Option<&Rc<ShaderProgram>> {
-		self.shaderProgram.as_ref()
+	pub fn get_shader_program(&self) -> Option<&Rc<ShaderProgram>> {
+		self.shader_program.as_ref()
 	}
 
 	//==============================================================================
 	// 노드 목록 반환.
 	//==============================================================================
-	pub fn getNodeList(&self) -> &[SkinnedModelNode] {
-		&self.nodeList
+	pub fn get_node_list(&self) -> &[SkinnedModelNode] {
+		&self.node_list
 	}
 
 	//==============================================================================
 	// 노드 목록 반환. (변경용, 원본은 살아 있는 배열을 내준다)
 	//==============================================================================
-	pub fn getNodeListMut(&mut self) -> &mut [SkinnedModelNode] {
-		&mut self.nodeList
+	pub fn get_node_list_mut(&mut self) -> &mut [SkinnedModelNode] {
+		&mut self.node_list
 	}
 
 	//==============================================================================
 	// 루트 노드 인덱스 목록 반환.
 	//==============================================================================
-	pub fn getRootNodeIndices(&self) -> &[usize] {
-		&self.rootNodeIndices
+	pub fn get_root_node_indices(&self) -> &[usize] {
+		&self.root_node_indices
 	}
 
 	//==============================================================================
 	// 스킨 목록 반환.
 	//==============================================================================
-	pub fn getSkinList(&self) -> &[Skin] {
-		&self.skinList
+	pub fn get_skin_list(&self) -> &[Skin] {
+		&self.skin_list
 	}
 
 	//==============================================================================
 	// 드로어블 목록 반환.
 	//==============================================================================
-	pub fn getDrawableList(&self) -> &[Drawable] {
-		&self.drawableList
+	pub fn get_drawable_list(&self) -> &[Drawable] {
+		&self.drawable_list
 	}
 
 	//==============================================================================
 	// 드로어블 목록 반환. (변경용)
 	//==============================================================================
-	pub fn getDrawableListMut(&mut self) -> &mut [Drawable] {
-		&mut self.drawableList
+	pub fn get_drawable_list_mut(&mut self) -> &mut [Drawable] {
+		&mut self.drawable_list
 	}
 
 	//==============================================================================
 	// 애니메이션 클립 목록 반환. (원본에 없는 것, 길이, 채널 보기)
 	//==============================================================================
-	pub fn getAnimationList(&self) -> &[AnimationClip] {
-		&self.animationList
+	pub fn get_animation_list(&self) -> &[AnimationClip] {
+		&self.animation_list
 	}
 
 	//==============================================================================
 	// 파괴. (GL 리소스 해제, 원본에 없는 것, 다른 곳에서도 쓰는 머티리얼은 남긴다)
 	//==============================================================================
 	pub fn destroy(&mut self, gl: &glow::Context) {
-		let mut destroyedMaterialList: Vec<*const Material> = Vec::new();
-		for drawable in self.drawableList.drain(..) {
+		let mut destroyed_material_list: Vec<*const Material> = Vec::new();
+		for drawable in self.drawable_list.drain(..) {
 			unsafe {
-				gl.delete_vertex_array(drawable.vertexArray);
-				for vertexBuffer in drawable.vertexBufferList.iter() {
-					gl.delete_buffer(*vertexBuffer);
+				gl.delete_vertex_array(drawable.vertex_array);
+				for vertex_buffer in drawable.vertex_buffer_list.iter() {
+					gl.delete_buffer(*vertex_buffer);
 				}
-				if let Some(indexBuffer) = drawable.indexBuffer {
-					gl.delete_buffer(indexBuffer);
+				if let Some(index_buffer) = drawable.index_buffer {
+					gl.delete_buffer(index_buffer);
 				}
-				if let Some(wireframeIndexBuffer) = drawable.wireframeIndexBuffer {
-					gl.delete_buffer(wireframeIndexBuffer);
+				if let Some(wireframe_index_buffer) = drawable.wireframe_index_buffer {
+					gl.delete_buffer(wireframe_index_buffer);
 				}
-				if let Some(morphTexture) = drawable.morphTexture {
-					gl.delete_texture(morphTexture);
+				if let Some(morph_texture) = drawable.morph_texture {
+					gl.delete_texture(morph_texture);
 				}
 			}
-			let materialPointer = Rc::as_ptr(&drawable.material);
-			if destroyedMaterialList.contains(&materialPointer) {
+			let material_pointer = Rc::as_ptr(&drawable.material);
+			if destroyed_material_list.contains(&material_pointer) {
 				continue;
 			}
-			destroyedMaterialList.push(materialPointer);
+			destroyed_material_list.push(material_pointer);
 			if Rc::strong_count(&drawable.material) == 1 {
 				drawable.material.destroy(gl);
 			}
@@ -1763,17 +1763,17 @@ impl SkinnedModel {
 }
 
 //==============================================================================
-// 애니메이션 클립 샘플링. (현재 노드 포즈에 가중 블렌딩, 원본 sampleAnimation 본문)
+// 애니메이션 클립 샘플링. (현재 노드 포즈에 가중 블렌딩, 원본 sample_animation 본문)
 //==============================================================================
-fn sampleAnimationClip(animation: &mut AnimationClip, nodeList: &mut [SkinnedModelNode], drawableList: &mut [Drawable], time: f32, blendWeight: f32) {
-	let loopedTime = if animation.duration > 0.0 {
+fn sample_animation_clip(animation: &mut AnimationClip, node_list: &mut [SkinnedModelNode], drawable_list: &mut [Drawable], time: f32, blend_weight: f32) {
+	let looped_time = if animation.duration > 0.0 {
 		time % animation.duration
 	}
 	else {
 		0.0
 	};
 	for channel in animation.channels.iter_mut() {
-		let node = match nodeList.get_mut(channel.nodeIndex) {
+		let node = match node_list.get_mut(channel.node_index) {
 			Some(node) => {
 				node
 			}
@@ -1782,23 +1782,23 @@ fn sampleAnimationClip(animation: &mut AnimationClip, nodeList: &mut [SkinnedMod
 			}
 		};
 		let times = &channel.times;
-		let keyCount = times.len();
-		if keyCount == 0 {
+		let key_count = times.len();
+		if key_count == 0 {
 			continue;
 		}
 
 		// 키프레임 커서 탐색. (역방향 점프 시 리셋 후 전진)
-		if channel.cursor + 1 >= keyCount || times[channel.cursor] > loopedTime {
+		if channel.cursor + 1 >= key_count || times[channel.cursor] > looped_time {
 			channel.cursor = 0;
 		}
-		while channel.cursor + 2 < keyCount && times[channel.cursor + 1] < loopedTime {
+		while channel.cursor + 2 < key_count && times[channel.cursor + 1] < looped_time {
 			channel.cursor += 1;
 		}
-		let frameIndex = channel.cursor;
-		let nextIndex = (frameIndex + 1).min(keyCount - 1);
-		let spanDuration = times[nextIndex] - times[frameIndex];
-		let factor = if spanDuration > 0.0 {
-			((loopedTime - times[frameIndex]) / spanDuration).clamp(0.0, 1.0)
+		let frame_index = channel.cursor;
+		let next_index = (frame_index + 1).min(key_count - 1);
+		let span_duration = times[next_index] - times[frame_index];
+		let factor = if span_duration > 0.0 {
+			((looped_time - times[frame_index]) / span_duration).clamp(0.0, 1.0)
 		}
 		else {
 			0.0
@@ -1806,59 +1806,59 @@ fn sampleAnimationClip(animation: &mut AnimationClip, nodeList: &mut [SkinnedMod
 		let values = &channel.values;
 
 		match channel.path {
-			AnimationPath::rotation => {
-				let baseOffset = frameIndex * 4;
-				let nextOffset = nextIndex * 4;
-				if nextOffset + 4 > values.len() || baseOffset + 4 > values.len() {
+			AnimationPath::Rotation => {
+				let base_offset = frame_index * 4;
+				let next_offset = next_index * 4;
+				if next_offset + 4 > values.len() || base_offset + 4 > values.len() {
 					continue;
 				}
-				let fromRotation = Quaternion::create(values[baseOffset], values[baseOffset + 1], values[baseOffset + 2], values[baseOffset + 3]);
-				let toRotation = Quaternion::create(values[nextOffset], values[nextOffset + 1], values[nextOffset + 2], values[nextOffset + 3]);
-				let sampledRotation = Quaternion::slerp(fromRotation, toRotation, factor);
-				if blendWeight >= 1.0 {
-					node.currentRotation = sampledRotation;
+				let from_rotation = Quaternion::create(values[base_offset], values[base_offset + 1], values[base_offset + 2], values[base_offset + 3]);
+				let to_rotation = Quaternion::create(values[next_offset], values[next_offset + 1], values[next_offset + 2], values[next_offset + 3]);
+				let sampled_rotation = Quaternion::slerp(from_rotation, to_rotation, factor);
+				if blend_weight >= 1.0 {
+					node.current_rotation = sampled_rotation;
 				}
 				else {
-					node.currentRotation = Quaternion::slerp(node.currentRotation, sampledRotation, blendWeight);
+					node.current_rotation = Quaternion::slerp(node.current_rotation, sampled_rotation, blend_weight);
 				}
 			}
-			AnimationPath::translation | AnimationPath::scale => {
-				let baseOffset = frameIndex * 3;
-				let nextOffset = nextIndex * 3;
-				if nextOffset + 3 > values.len() || baseOffset + 3 > values.len() {
+			AnimationPath::Translation | AnimationPath::Scale => {
+				let base_offset = frame_index * 3;
+				let next_offset = next_index * 3;
+				if next_offset + 3 > values.len() || base_offset + 3 > values.len() {
 					continue;
 				}
-				let targetArray = if channel.path == AnimationPath::translation {
-					&mut node.currentTranslation
+				let target_array = if channel.path == AnimationPath::Translation {
+					&mut node.current_translation
 				}
 				else {
-					&mut node.currentScale
+					&mut node.current_scale
 				};
-				for componentIndex in 0..3 {
-					let fromValue = values[baseOffset + componentIndex];
-					let toValue = values[nextOffset + componentIndex];
-					let sampledValue = fromValue + (toValue - fromValue) * factor;
-					targetArray[componentIndex] += (sampledValue - targetArray[componentIndex]) * blendWeight;
+				for component_index in 0..3 {
+					let from_value = values[base_offset + component_index];
+					let to_value = values[next_offset + component_index];
+					let sampled_value = from_value + (to_value - from_value) * factor;
+					target_array[component_index] += (sampled_value - target_array[component_index]) * blend_weight;
 				}
 			}
-			AnimationPath::weights => {
+			AnimationPath::Weights => {
 				// 모프 가중치. (키마다 타깃 개수만큼의 값, 해당 노드의 드로어블 전부에 적용)
-				for drawable in drawableList.iter_mut() {
-					if drawable.nodeIndex != Some(channel.nodeIndex) {
+				for drawable in drawable_list.iter_mut() {
+					if drawable.node_index != Some(channel.node_index) {
 						continue;
 					}
-					let targetCount = drawable.morphWeights.len();
-					let baseOffset = frameIndex * targetCount;
-					let nextOffset = nextIndex * targetCount;
-					if nextOffset + targetCount > values.len() || baseOffset + targetCount > values.len() {
+					let target_count = drawable.morph_weights.len();
+					let base_offset = frame_index * target_count;
+					let next_offset = next_index * target_count;
+					if next_offset + target_count > values.len() || base_offset + target_count > values.len() {
 						continue;
 					}
-					for targetIndex in 0..targetCount {
-						let fromValue = values[baseOffset + targetIndex];
-						let toValue = values[nextOffset + targetIndex];
-						let sampledValue = fromValue + (toValue - fromValue) * factor;
-						let currentWeight = drawable.morphWeights[targetIndex];
-						drawable.morphWeights[targetIndex] = currentWeight + (sampledValue - currentWeight) * blendWeight;
+					for target_index in 0..target_count {
+						let from_value = values[base_offset + target_index];
+						let to_value = values[next_offset + target_index];
+						let sampled_value = from_value + (to_value - from_value) * factor;
+						let current_weight = drawable.morph_weights[target_index];
+						drawable.morph_weights[target_index] = current_weight + (sampled_value - current_weight) * blend_weight;
 					}
 				}
 			}
@@ -1869,79 +1869,79 @@ fn sampleAnimationClip(animation: &mut AnimationClip, nodeList: &mut [SkinnedMod
 //==============================================================================
 // FBX 오일러(도) → 쿼터니언. (eEulerXYZ = X 먼저 적용, 열벡터 기준 Rz x Ry x Rx 합성)
 //==============================================================================
-pub fn createQuaternionFromFbxEuler(xDegree: f64, yDegree: f64, zDegree: f64) -> Quaternion {
-	let degreeToRadian = std::f64::consts::PI / 180.0;
-	let rotationX = Quaternion::createFromEuler((xDegree * degreeToRadian) as f32, 0.0, 0.0);
-	let rotationY = Quaternion::createFromEuler(0.0, (yDegree * degreeToRadian) as f32, 0.0);
-	let rotationZ = Quaternion::createFromEuler(0.0, 0.0, (zDegree * degreeToRadian) as f32);
-	let rotationZY = rotationZ.multiply(rotationY);
-	rotationZY.multiply(rotationX)
+pub fn create_quaternion_from_fbx_euler(x_degree: f64, y_degree: f64, z_degree: f64) -> Quaternion {
+	let degree_to_radian = std::f64::consts::PI / 180.0;
+	let rotation_x = Quaternion::create_from_euler((x_degree * degree_to_radian) as f32, 0.0, 0.0);
+	let rotation_y = Quaternion::create_from_euler(0.0, (y_degree * degree_to_radian) as f32, 0.0);
+	let rotation_z = Quaternion::create_from_euler(0.0, 0.0, (z_degree * degree_to_radian) as f32);
+	let rotation_zy = rotation_z.multiply(rotation_y);
+	rotation_zy.multiply(rotation_x)
 }
 
 //==============================================================================
 // FBX 애니메이션 채널 변환. (회전 = 오일러 도 → 사전회전 합성 쿼터니언 4성분)
-// - resolveNodeIndex 로 대상 노드 인덱스를 재지정한다. (본 이름 매칭 리타게팅용, None 이면 버린다)
+// - resolve_node_index 로 대상 노드 인덱스를 재지정한다. (본 이름 매칭 리타게팅용, None 이면 버린다)
 //==============================================================================
-fn convertFbxAnimationChannels(sceneData: &FbxSceneData, fbxAnimation: &FbxAnimation, resolveNodeIndex: impl Fn(usize) -> Option<usize>) -> Vec<AnimationChannel> {
-	let mut channels = Vec::with_capacity(fbxAnimation.channels.len());
-	for fbxChannel in fbxAnimation.channels.iter() {
-		let targetNodeIndex = match resolveNodeIndex(fbxChannel.nodeIndex) {
-			Some(targetNodeIndex) => {
-				targetNodeIndex
+fn convert_fbx_animation_channels(scene_data: &FbxSceneData, fbx_animation: &FbxAnimation, resolve_node_index: impl Fn(usize) -> Option<usize>) -> Vec<AnimationChannel> {
+	let mut channels = Vec::with_capacity(fbx_animation.channels.len());
+	for fbx_channel in fbx_animation.channels.iter() {
+		let target_node_index = match resolve_node_index(fbx_channel.node_index) {
+			Some(target_node_index) => {
+				target_node_index
 			}
 			None => {
 				continue;
 			}
 		};
-		if fbxChannel.path == AnimationPath::rotation {
-			let preRotationDegrees = sceneData.nodeList.get(fbxChannel.nodeIndex).map(|sourceFbxNode| sourceFbxNode.preRotationDegrees).unwrap_or([0.0, 0.0, 0.0]);
-			let preRotationQuaternion = createQuaternionFromFbxEuler(preRotationDegrees[0], preRotationDegrees[1], preRotationDegrees[2]);
-			let keyCount = fbxChannel.times.len();
-			let mut quaternionValues = vec![0.0f32; keyCount * 4];
-			for keyIndex in 0..keyCount {
-				let readValue = |componentIndex: usize| fbxChannel.values.get(keyIndex * 3 + componentIndex).copied().unwrap_or(0.0) as f64;
-				let eulerQuaternion = createQuaternionFromFbxEuler(readValue(0), readValue(1), readValue(2));
-				let rotationQuaternion = preRotationQuaternion.multiply(eulerQuaternion);
-				quaternionValues[keyIndex * 4] = rotationQuaternion.x;
-				quaternionValues[keyIndex * 4 + 1] = rotationQuaternion.y;
-				quaternionValues[keyIndex * 4 + 2] = rotationQuaternion.z;
-				quaternionValues[keyIndex * 4 + 3] = rotationQuaternion.w;
+		if fbx_channel.path == AnimationPath::Rotation {
+			let pre_rotation_degrees = scene_data.node_list.get(fbx_channel.node_index).map(|source_fbx_node| source_fbx_node.pre_rotation_degrees).unwrap_or([0.0, 0.0, 0.0]);
+			let pre_rotation_quaternion = create_quaternion_from_fbx_euler(pre_rotation_degrees[0], pre_rotation_degrees[1], pre_rotation_degrees[2]);
+			let key_count = fbx_channel.times.len();
+			let mut quaternion_values = vec![0.0f32; key_count * 4];
+			for key_index in 0..key_count {
+				let read_value = |component_index: usize| fbx_channel.values.get(key_index * 3 + component_index).copied().unwrap_or(0.0) as f64;
+				let euler_quaternion = create_quaternion_from_fbx_euler(read_value(0), read_value(1), read_value(2));
+				let rotation_quaternion = pre_rotation_quaternion.multiply(euler_quaternion);
+				quaternion_values[key_index * 4] = rotation_quaternion.x;
+				quaternion_values[key_index * 4 + 1] = rotation_quaternion.y;
+				quaternion_values[key_index * 4 + 2] = rotation_quaternion.z;
+				quaternion_values[key_index * 4 + 3] = rotation_quaternion.w;
 			}
-			channels.push(AnimationChannel { nodeIndex: targetNodeIndex, path: fbxChannel.path, times: fbxChannel.times.clone(), values: quaternionValues, cursor: 0 });
+			channels.push(AnimationChannel { node_index: target_node_index, path: fbx_channel.path, times: fbx_channel.times.clone(), values: quaternion_values, cursor: 0 });
 		}
 		else {
-			channels.push(AnimationChannel { nodeIndex: targetNodeIndex, path: fbxChannel.path, times: fbxChannel.times.clone(), values: fbxChannel.values.clone(), cursor: 0 });
+			channels.push(AnimationChannel { node_index: target_node_index, path: fbx_channel.path, times: fbx_channel.times.clone(), values: fbx_channel.values.clone(), cursor: 0 });
 		}
 	}
 	channels
 }
 
 //==============================================================================
-// 접근자 CPU 읽기. (촘촘한 배치 + 인터리브(byteStride) 배치 + 희소(sparse) 접근자 지원)
+// 접근자 CPU 읽기. (촘촘한 배치 + 인터리브(byte_stride) 배치 + 희소(sparse) 접근자 지원)
 //==============================================================================
-pub fn readAccessorArray(json: &Value, binaryBuffer: &[u8], accessorIndex: usize) -> Result<AccessorArray, String> {
-	let accessor = json["accessors"].get(accessorIndex).ok_or_else(|| format!("SkinnedModel: accessor {} not found.", accessorIndex))?;
-	let typeName = accessor["type"].as_str().unwrap_or("");
-	let componentCount = typeComponentCount(typeName).ok_or_else(|| format!("SkinnedModel: unknown accessor type {}.", typeName))?;
-	let componentType = accessor["componentType"].as_u64().unwrap_or(0) as u32;
-	let componentByteSize = componentTypeByteSize(componentType).ok_or_else(|| format!("SkinnedModel: unsupported accessor component type {}.", componentType))?;
-	let count = readIndex(&accessor["count"]).unwrap_or(0);
-	let tightByteSize = componentCount * componentByteSize;
-	let mut elementBytes = vec![0u8; count * tightByteSize];
+pub fn read_accessor_array(json: &Value, binary_buffer: &[u8], accessor_index: usize) -> Result<AccessorArray, String> {
+	let accessor = json["accessors"].get(accessor_index).ok_or_else(|| format!("SkinnedModel: accessor {} not found.", accessor_index))?;
+	let type_name = accessor["type"].as_str().unwrap_or("");
+	let component_count = type_component_count(type_name).ok_or_else(|| format!("SkinnedModel: unknown accessor type {}.", type_name))?;
+	let component_type = accessor["componentType"].as_u64().unwrap_or(0) as u32;
+	let component_byte_size = component_type_byte_size(component_type).ok_or_else(|| format!("SkinnedModel: unsupported accessor component type {}.", component_type))?;
+	let count = read_index(&accessor["count"]).unwrap_or(0);
+	let tight_byte_size = component_count * component_byte_size;
+	let mut element_bytes = vec![0u8; count * tight_byte_size];
 
-	if let Some(bufferViewIndex) = readIndex(&accessor["bufferView"]) {
-		let bufferView = json["bufferViews"].get(bufferViewIndex).ok_or_else(|| format!("SkinnedModel: bufferView {} not found.", bufferViewIndex))?;
-		let elementOffset = readIndex(&bufferView["byteOffset"]).unwrap_or(0) + readIndex(&accessor["byteOffset"]).unwrap_or(0);
-		let byteStride = readIndex(&bufferView["byteStride"]).unwrap_or(0);
-		if byteStride == 0 || byteStride == tightByteSize {
-			let sourceBytes = binaryBuffer.get(elementOffset..elementOffset + count * tightByteSize).ok_or_else(|| String::from("SkinnedModel: accessor out of buffer range."))?;
-			elementBytes.copy_from_slice(sourceBytes);
+	if let Some(buffer_view_index) = read_index(&accessor["bufferView"]) {
+		let buffer_view = json["bufferViews"].get(buffer_view_index).ok_or_else(|| format!("SkinnedModel: bufferView {} not found.", buffer_view_index))?;
+		let element_offset = read_index(&buffer_view["byteOffset"]).unwrap_or(0) + read_index(&accessor["byteOffset"]).unwrap_or(0);
+		let byte_stride = read_index(&buffer_view["byteStride"]).unwrap_or(0);
+		if byte_stride == 0 || byte_stride == tight_byte_size {
+			let source_bytes = binary_buffer.get(element_offset..element_offset + count * tight_byte_size).ok_or_else(|| String::from("SkinnedModel: accessor out of buffer range."))?;
+			element_bytes.copy_from_slice(source_bytes);
 		}
 		else {
-			for elementIndex in 0..count {
-				let sourceStart = elementOffset + elementIndex * byteStride;
-				let sourceBytes = binaryBuffer.get(sourceStart..sourceStart + tightByteSize).ok_or_else(|| String::from("SkinnedModel: accessor out of buffer range."))?;
-				elementBytes[elementIndex * tightByteSize..(elementIndex + 1) * tightByteSize].copy_from_slice(sourceBytes);
+			for element_index in 0..count {
+				let source_start = element_offset + element_index * byte_stride;
+				let source_bytes = binary_buffer.get(source_start..source_start + tight_byte_size).ok_or_else(|| String::from("SkinnedModel: accessor out of buffer range."))?;
+				element_bytes[element_index * tight_byte_size..(element_index + 1) * tight_byte_size].copy_from_slice(source_bytes);
 			}
 		}
 	}
@@ -1949,76 +1949,76 @@ pub fn readAccessorArray(json: &Value, binaryBuffer: &[u8], accessorIndex: usize
 	// 희소 접근자. (인덱스 목록의 요소만 값으로 덮어쓴다, 모프 타깃 델타에 흔히 쓰인다)
 	let sparse = &accessor["sparse"];
 	if sparse.is_object() {
-		let sparseCount = readIndex(&sparse["count"]).unwrap_or(0);
-		let sparseIndices = &sparse["indices"];
-		let indexBufferViewIndex = readIndex(&sparseIndices["bufferView"]).ok_or_else(|| String::from("SkinnedModel: sparse indices have no bufferView."))?;
-		let indexBufferView = &json["bufferViews"][indexBufferViewIndex];
-		let indexComponentType = sparseIndices["componentType"].as_u64().unwrap_or(0) as u32;
-		let indexByteSize = componentTypeByteSize(indexComponentType).ok_or_else(|| format!("SkinnedModel: unsupported sparse index type {}.", indexComponentType))?;
-		let indexOffset = readIndex(&indexBufferView["byteOffset"]).unwrap_or(0) + readIndex(&sparseIndices["byteOffset"]).unwrap_or(0);
-		let sparseValues = &sparse["values"];
-		let valueBufferViewIndex = readIndex(&sparseValues["bufferView"]).ok_or_else(|| String::from("SkinnedModel: sparse values have no bufferView."))?;
-		let valueBufferView = &json["bufferViews"][valueBufferViewIndex];
-		let valueOffset = readIndex(&valueBufferView["byteOffset"]).unwrap_or(0) + readIndex(&sparseValues["byteOffset"]).unwrap_or(0);
-		for sparseIndex in 0..sparseCount {
-			let indexStart = indexOffset + sparseIndex * indexByteSize;
-			let indexBytes = binaryBuffer.get(indexStart..indexStart + indexByteSize).ok_or_else(|| String::from("SkinnedModel: sparse indices out of buffer range."))?;
-			let targetElement = match indexByteSize {
+		let sparse_count = read_index(&sparse["count"]).unwrap_or(0);
+		let sparse_indices = &sparse["indices"];
+		let index_buffer_view_index = read_index(&sparse_indices["bufferView"]).ok_or_else(|| String::from("SkinnedModel: sparse indices have no bufferView."))?;
+		let index_buffer_view = &json["bufferViews"][index_buffer_view_index];
+		let index_component_type = sparse_indices["componentType"].as_u64().unwrap_or(0) as u32;
+		let index_byte_size = component_type_byte_size(index_component_type).ok_or_else(|| format!("SkinnedModel: unsupported sparse index type {}.", index_component_type))?;
+		let index_offset = read_index(&index_buffer_view["byteOffset"]).unwrap_or(0) + read_index(&sparse_indices["byteOffset"]).unwrap_or(0);
+		let sparse_values = &sparse["values"];
+		let value_buffer_view_index = read_index(&sparse_values["bufferView"]).ok_or_else(|| String::from("SkinnedModel: sparse values have no bufferView."))?;
+		let value_buffer_view = &json["bufferViews"][value_buffer_view_index];
+		let value_offset = read_index(&value_buffer_view["byteOffset"]).unwrap_or(0) + read_index(&sparse_values["byteOffset"]).unwrap_or(0);
+		for sparse_index in 0..sparse_count {
+			let index_start = index_offset + sparse_index * index_byte_size;
+			let index_bytes = binary_buffer.get(index_start..index_start + index_byte_size).ok_or_else(|| String::from("SkinnedModel: sparse indices out of buffer range."))?;
+			let target_element = match index_byte_size {
 				1 => {
-					indexBytes[0] as usize
+					index_bytes[0] as usize
 				}
 				2 => {
-					u16::from_le_bytes([indexBytes[0], indexBytes[1]]) as usize
+					u16::from_le_bytes([index_bytes[0], index_bytes[1]]) as usize
 				}
 				_ => {
-					u32::from_le_bytes([indexBytes[0], indexBytes[1], indexBytes[2], indexBytes[3]]) as usize
+					u32::from_le_bytes([index_bytes[0], index_bytes[1], index_bytes[2], index_bytes[3]]) as usize
 				}
 			};
-			let valueStart = valueOffset + sparseIndex * tightByteSize;
-			let valueBytes = binaryBuffer.get(valueStart..valueStart + tightByteSize).ok_or_else(|| String::from("SkinnedModel: sparse values out of buffer range."))?;
-			if let Some(targetBytes) = elementBytes.get_mut(targetElement * tightByteSize..(targetElement + 1) * tightByteSize) {
-				targetBytes.copy_from_slice(valueBytes);
+			let value_start = value_offset + sparse_index * tight_byte_size;
+			let value_bytes = binary_buffer.get(value_start..value_start + tight_byte_size).ok_or_else(|| String::from("SkinnedModel: sparse values out of buffer range."))?;
+			if let Some(target_bytes) = element_bytes.get_mut(target_element * tight_byte_size..(target_element + 1) * tight_byte_size) {
+				target_bytes.copy_from_slice(value_bytes);
 			}
 		}
 	}
 
 	// 바이트 → 컴포넌트 타입 배열. (리틀 엔디언)
-	let accessorArray = match componentType {
+	let accessor_array = match component_type {
 		COMPONENT_TYPE_UNSIGNED_BYTE => {
-			AccessorArray::unsignedByte(elementBytes)
+			AccessorArray::UnsignedByte(element_bytes)
 		}
 		COMPONENT_TYPE_UNSIGNED_SHORT => {
-			AccessorArray::unsignedShort(elementBytes.as_chunks::<2>().0.iter().map(|chunk| u16::from_le_bytes(*chunk)).collect())
+			AccessorArray::UnsignedShort(element_bytes.as_chunks::<2>().0.iter().map(|chunk| u16::from_le_bytes(*chunk)).collect())
 		}
 		COMPONENT_TYPE_UNSIGNED_INT => {
-			AccessorArray::unsignedInt(elementBytes.as_chunks::<4>().0.iter().map(|chunk| u32::from_le_bytes(*chunk)).collect())
+			AccessorArray::UnsignedInt(element_bytes.as_chunks::<4>().0.iter().map(|chunk| u32::from_le_bytes(*chunk)).collect())
 		}
 		_ => {
-			AccessorArray::float(elementBytes.as_chunks::<4>().0.iter().map(|chunk| f32::from_le_bytes(*chunk)).collect())
+			AccessorArray::Float(element_bytes.as_chunks::<4>().0.iter().map(|chunk| f32::from_le_bytes(*chunk)).collect())
 		}
 	};
-	Ok(accessorArray)
+	Ok(accessor_array)
 }
 
 //==============================================================================
 // 이미지 서술 구성. (텍스처 참조 → 임베디드 이미지 바이트, 버퍼뷰가 없는 이미지는 None)
 //==============================================================================
-fn createGltfImageDescription(json: &Value, binaryBuffer: &[u8], textureInfo: &Value) -> Option<ImageDescription> {
-	let textureIndex = readIndex(&textureInfo["index"])?;
-	let texture = json["textures"].get(textureIndex)?;
-	let imageIndex = readIndex(&texture["source"])?;
-	let image = json["images"].get(imageIndex)?;
-	let bufferViewIndex = readIndex(&image["bufferView"])?;
-	let bufferView = json["bufferViews"].get(bufferViewIndex)?;
-	let byteOffset = readIndex(&bufferView["byteOffset"]).unwrap_or(0);
-	let byteLength = readIndex(&bufferView["byteLength"]).unwrap_or(0);
-	let imageBytes = binaryBuffer.get(byteOffset..byteOffset + byteLength)?;
+fn create_gltf_image_description(json: &Value, binary_buffer: &[u8], texture_info: &Value) -> Option<ImageDescription> {
+	let texture_index = read_index(&texture_info["index"])?;
+	let texture = json["textures"].get(texture_index)?;
+	let image_index = read_index(&texture["source"])?;
+	let image = json["images"].get(image_index)?;
+	let buffer_view_index = read_index(&image["bufferView"])?;
+	let buffer_view = json["bufferViews"].get(buffer_view_index)?;
+	let byte_offset = read_index(&buffer_view["byteOffset"]).unwrap_or(0);
+	let byte_length = read_index(&buffer_view["byteLength"]).unwrap_or(0);
+	let image_bytes = binary_buffer.get(byte_offset..byte_offset + byte_length)?;
 	Some(ImageDescription {
-		bytes: Rc::new(imageBytes.to_vec()),
-		mimeType: image["mimeType"].as_str().map(|mimeType| mimeType.to_string()),
+		bytes: Rc::new(image_bytes.to_vec()),
+		mime_type: image["mimeType"].as_str().map(|mime_type| mime_type.to_string()),
 		source: None,
-		flipY: false,
-		isColorData: false,
+		flip_y: false,
+		is_color_data: false,
 		anisotropy: 0.0,
 	})
 }
@@ -2026,8 +2026,8 @@ fn createGltfImageDescription(json: &Value, binaryBuffer: &[u8], textureInfo: &V
 //==============================================================================
 // 어트리뷰트 타입별 컴포넌트 수. (원본 TYPE_COMPONENT_COUNT_TABLE)
 //==============================================================================
-fn typeComponentCount(typeName: &str) -> Option<usize> {
-	match typeName {
+fn type_component_count(type_name: &str) -> Option<usize> {
+	match type_name {
 		"SCALAR" => {
 			Some(1)
 		}
@@ -2052,8 +2052,8 @@ fn typeComponentCount(typeName: &str) -> Option<usize> {
 //==============================================================================
 // 컴포넌트 타입별 바이트 크기. (원본 COMPONENT_ARRAY_TABLE 의 BYTES_PER_ELEMENT, 표에 없으면 None)
 //==============================================================================
-fn componentTypeByteSize(componentType: u32) -> Option<usize> {
-	match componentType {
+fn component_type_byte_size(component_type: u32) -> Option<usize> {
+	match component_type {
 		COMPONENT_TYPE_UNSIGNED_BYTE => {
 			Some(1)
 		}
@@ -2072,17 +2072,17 @@ fn componentTypeByteSize(componentType: u32) -> Option<usize> {
 //==============================================================================
 // JSON 인덱스 읽기. (음이 아닌 정수만)
 //==============================================================================
-fn readIndex(value: &Value) -> Option<usize> {
+fn read_index(value: &Value) -> Option<usize> {
 	value.as_u64().map(|index| index as usize)
 }
 
 //==============================================================================
 // JSON 인덱스 배열 읽기. (없으면 빈 목록)
 //==============================================================================
-fn readIndexArray(value: &Value) -> Vec<usize> {
+fn read_index_array(value: &Value) -> Vec<usize> {
 	match value.as_array() {
-		Some(indexValues) => {
-			indexValues.iter().filter_map(readIndex).collect()
+		Some(index_values) => {
+			index_values.iter().filter_map(read_index).collect()
 		}
 		None => {
 			Vec::new()
@@ -2093,20 +2093,20 @@ fn readIndexArray(value: &Value) -> Vec<usize> {
 //==============================================================================
 // JSON 실수 배열 읽기. (배열이 아니면 None)
 //==============================================================================
-fn readFloatArray(value: &Value) -> Option<Vec<f32>> {
-	value.as_array().map(|numberValues| numberValues.iter().map(|numberValue| numberValue.as_f64().unwrap_or(0.0) as f32).collect())
+fn read_float_array(value: &Value) -> Option<Vec<f32>> {
+	value.as_array().map(|number_values| number_values.iter().map(|number_value| number_value.as_f64().unwrap_or(0.0) as f32).collect())
 }
 
 //==============================================================================
 // JSON 3성분 벡터 읽기. (없거나 짧으면 기본값)
 //==============================================================================
-fn readVector3(value: &Value, defaultValue: [f32; 3]) -> [f32; 3] {
-	match readFloatArray(value) {
+fn read_vector3(value: &Value, default_value: [f32; 3]) -> [f32; 3] {
+	match read_float_array(value) {
 		Some(values) if values.len() >= 3 => {
 			[values[0], values[1], values[2]]
 		}
 		_ => {
-			defaultValue
+			default_value
 		}
 	}
 }
@@ -2114,15 +2114,15 @@ fn readVector3(value: &Value, defaultValue: [f32; 3]) -> [f32; 3] {
 //==============================================================================
 // 부호 없는 32비트 읽기. (리틀 엔디언, 밖이면 None)
 //==============================================================================
-fn readUint32(bytes: &[u8], offset: usize) -> Option<u32> {
-	let valueBytes = bytes.get(offset..offset + 4)?;
-	Some(u32::from_le_bytes([valueBytes[0], valueBytes[1], valueBytes[2], valueBytes[3]]))
+fn read_uint32(bytes: &[u8], offset: usize) -> Option<u32> {
+	let value_bytes = bytes.get(offset..offset + 4)?;
+	Some(u32::from_le_bytes([value_bytes[0], value_bytes[1], value_bytes[2], value_bytes[3]]))
 }
 
 //==============================================================================
 // 숫자 배열을 바이트 배열로 본다. (GL 버퍼 업로드용, 리틀 엔디언 대상)
 //==============================================================================
-fn sliceToBytes<T: Copy>(values: &[T]) -> &[u8] {
+fn slice_to_bytes<T: Copy>(values: &[T]) -> &[u8] {
 	unsafe {
 		std::slice::from_raw_parts(values.as_ptr() as *const u8, std::mem::size_of_val(values))
 	}
@@ -2137,11 +2137,11 @@ mod tests {
 	const EXAMPLE_ASSET_DIRECTORY: &str = "../vanilla.js/examples/ancientmountain/assets";
 
 	//==============================================================================
-	// 시험용 GLB 바이너리 버퍼. (바이트를 붙이고 bufferView 를 기록한다)
+	// 시험용 GLB 바이너리 버퍼. (바이트를 붙이고 buffer_view 를 기록한다)
 	//==============================================================================
 	struct GlbBufferBuilder {
-		binaryBytes: Vec<u8>,
-		bufferViewList: Vec<Value>,
+		binary_bytes: Vec<u8>,
+		buffer_view_list: Vec<Value>,
 	}
 
 	impl GlbBufferBuilder {
@@ -2150,59 +2150,59 @@ mod tests {
 		//==============================================================================
 		fn new() -> GlbBufferBuilder {
 			GlbBufferBuilder {
-				binaryBytes: Vec::new(),
-				bufferViewList: Vec::new(),
+				binary_bytes: Vec::new(),
+				buffer_view_list: Vec::new(),
 			}
 		}
 
 		//==============================================================================
-		// 바이트 붙이기. (4 바이트 맞춤, byteStride 가 0 이 아니면 기록, bufferView 번호를 돌려준다)
+		// 바이트 붙이기. (4 바이트 맞춤, byte_stride 가 0 이 아니면 기록, buffer_view 번호를 돌려준다)
 		//==============================================================================
-		fn addBufferView(&mut self, bytes: &[u8], byteStride: usize) -> usize {
-			while !self.binaryBytes.len().is_multiple_of(4) {
-				self.binaryBytes.push(0);
+		fn add_buffer_view(&mut self, bytes: &[u8], byte_stride: usize) -> usize {
+			while !self.binary_bytes.len().is_multiple_of(4) {
+				self.binary_bytes.push(0);
 			}
-			let mut bufferView = json!({ "buffer": 0, "byteOffset": self.binaryBytes.len(), "byteLength": bytes.len() });
-			if byteStride > 0 {
-				bufferView["byteStride"] = json!(byteStride);
+			let mut buffer_view = json!({ "buffer": 0, "byteOffset": self.binary_bytes.len(), "byteLength": bytes.len() });
+			if byte_stride > 0 {
+				buffer_view["byteStride"] = json!(byte_stride);
 			}
-			self.binaryBytes.extend_from_slice(bytes);
-			self.bufferViewList.push(bufferView);
-			self.bufferViewList.len() - 1
+			self.binary_bytes.extend_from_slice(bytes);
+			self.buffer_view_list.push(buffer_view);
+			self.buffer_view_list.len() - 1
 		}
 	}
 
 	//==============================================================================
 	// 실수 목록을 리틀 엔디언 바이트로.
 	//==============================================================================
-	fn floatBytes(values: &[f32]) -> Vec<u8> {
+	fn float_bytes(values: &[f32]) -> Vec<u8> {
 		values.iter().flat_map(|value| value.to_le_bytes()).collect()
 	}
 
 	//==============================================================================
 	// JSON + BIN 을 GLB 파일 바이트로 감싼다.
 	//==============================================================================
-	fn wrapGlb(json: &Value, binaryBytes: &[u8]) -> Vec<u8> {
-		let mut jsonBytes = serde_json::to_vec(json).expect("json");
-		while !jsonBytes.len().is_multiple_of(4) {
-			jsonBytes.push(b' ');
+	fn wrap_glb(json: &Value, binary_bytes: &[u8]) -> Vec<u8> {
+		let mut json_bytes = serde_json::to_vec(json).expect("json");
+		while !json_bytes.len().is_multiple_of(4) {
+			json_bytes.push(b' ');
 		}
-		let mut paddedBinaryBytes = binaryBytes.to_vec();
-		while !paddedBinaryBytes.len().is_multiple_of(4) {
-			paddedBinaryBytes.push(0);
+		let mut padded_binary_bytes = binary_bytes.to_vec();
+		while !padded_binary_bytes.len().is_multiple_of(4) {
+			padded_binary_bytes.push(0);
 		}
-		let totalLength = 12 + 8 + jsonBytes.len() + 8 + paddedBinaryBytes.len();
-		let mut glbBytes = Vec::with_capacity(totalLength);
-		glbBytes.extend_from_slice(&GLB_MAGIC.to_le_bytes());
-		glbBytes.extend_from_slice(&2u32.to_le_bytes());
-		glbBytes.extend_from_slice(&(totalLength as u32).to_le_bytes());
-		glbBytes.extend_from_slice(&(jsonBytes.len() as u32).to_le_bytes());
-		glbBytes.extend_from_slice(&GLB_CHUNKTYPE_JSON.to_le_bytes());
-		glbBytes.extend_from_slice(&jsonBytes);
-		glbBytes.extend_from_slice(&(paddedBinaryBytes.len() as u32).to_le_bytes());
-		glbBytes.extend_from_slice(&GLB_CHUNKTYPE_BINARY.to_le_bytes());
-		glbBytes.extend_from_slice(&paddedBinaryBytes);
-		glbBytes
+		let total_length = 12 + 8 + json_bytes.len() + 8 + padded_binary_bytes.len();
+		let mut glb_bytes = Vec::with_capacity(total_length);
+		glb_bytes.extend_from_slice(&GLB_MAGIC.to_le_bytes());
+		glb_bytes.extend_from_slice(&2u32.to_le_bytes());
+		glb_bytes.extend_from_slice(&(total_length as u32).to_le_bytes());
+		glb_bytes.extend_from_slice(&(json_bytes.len() as u32).to_le_bytes());
+		glb_bytes.extend_from_slice(&GLB_CHUNKTYPE_JSON.to_le_bytes());
+		glb_bytes.extend_from_slice(&json_bytes);
+		glb_bytes.extend_from_slice(&(padded_binary_bytes.len() as u32).to_le_bytes());
+		glb_bytes.extend_from_slice(&GLB_CHUNKTYPE_BINARY.to_le_bytes());
+		glb_bytes.extend_from_slice(&padded_binary_bytes);
+		glb_bytes
 	}
 
 	//==============================================================================
@@ -2210,26 +2210,26 @@ mod tests {
 	// - 노드 0 Root(자식 1, 2, 3), 1 Joint(이동 0,1,0), 2 스킨 메시, 3 정적 메시(이동 5,0,0).
 	// - 클립 A: Joint 이동 (0,1,0) → (0,3,0) 0~2초, 클립 B: Joint 이동 (4,1,0) 고정 + 회전 Z 90도.
 	//==============================================================================
-	fn buildTestGlb() -> Vec<u8> {
-		let mut bufferBuilder = GlbBufferBuilder::new();
+	fn build_test_glb() -> Vec<u8> {
+		let mut buffer_builder = GlbBufferBuilder::new();
 
 		// 위치 + UV 인터리브. (정점 3개, 정점당 20 바이트)
-		let interleavedValues: [f32; 15] = [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0];
-		let interleavedView = bufferBuilder.addBufferView(&floatBytes(&interleavedValues), 20);
-		let indexView = bufferBuilder.addBufferView(&[0u8, 1, 2], 0);
-		let jointView = bufferBuilder.addBufferView(&[0u8, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0], 0);
-		let weightView = bufferBuilder.addBufferView(&[128u8, 127, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0], 0);
-		let mut inverseBindValues = Vec::new();
-		inverseBindValues.extend_from_slice(Matrix4::createIdentity().getElements());
-		inverseBindValues.extend_from_slice(Matrix4::createTranslation(0.0, -1.0, 0.0).getElements());
-		let inverseBindView = bufferBuilder.addBufferView(&floatBytes(&inverseBindValues), 0);
-		let timeView = bufferBuilder.addBufferView(&floatBytes(&[0.0, 2.0]), 0);
-		let translationAView = bufferBuilder.addBufferView(&floatBytes(&[0.0, 1.0, 0.0, 0.0, 3.0, 0.0]), 0);
-		let translationBView = bufferBuilder.addBufferView(&floatBytes(&[4.0, 1.0, 0.0, 4.0, 1.0, 0.0]), 0);
-		let halfSquareRoot = std::f32::consts::FRAC_1_SQRT_2;
-		let rotationBView = bufferBuilder.addBufferView(&floatBytes(&[0.0, 0.0, halfSquareRoot, halfSquareRoot, 0.0, 0.0, halfSquareRoot, halfSquareRoot]), 0);
-		let sparseIndexView = bufferBuilder.addBufferView(&[2u8], 0);
-		let sparseValueView = bufferBuilder.addBufferView(&floatBytes(&[7.0, 8.0, 9.0]), 0);
+		let interleaved_values: [f32; 15] = [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0];
+		let interleaved_view = buffer_builder.add_buffer_view(&float_bytes(&interleaved_values), 20);
+		let index_view = buffer_builder.add_buffer_view(&[0u8, 1, 2], 0);
+		let joint_view = buffer_builder.add_buffer_view(&[0u8, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0], 0);
+		let weight_view = buffer_builder.add_buffer_view(&[128u8, 127, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0], 0);
+		let mut inverse_bind_values = Vec::new();
+		inverse_bind_values.extend_from_slice(Matrix4::create_identity().get_elements());
+		inverse_bind_values.extend_from_slice(Matrix4::create_translation(0.0, -1.0, 0.0).get_elements());
+		let inverse_bind_view = buffer_builder.add_buffer_view(&float_bytes(&inverse_bind_values), 0);
+		let time_view = buffer_builder.add_buffer_view(&float_bytes(&[0.0, 2.0]), 0);
+		let translation_aview = buffer_builder.add_buffer_view(&float_bytes(&[0.0, 1.0, 0.0, 0.0, 3.0, 0.0]), 0);
+		let translation_bview = buffer_builder.add_buffer_view(&float_bytes(&[4.0, 1.0, 0.0, 4.0, 1.0, 0.0]), 0);
+		let half_square_root = std::f32::consts::FRAC_1_SQRT_2;
+		let rotation_bview = buffer_builder.add_buffer_view(&float_bytes(&[0.0, 0.0, half_square_root, half_square_root, 0.0, 0.0, half_square_root, half_square_root]), 0);
+		let sparse_index_view = buffer_builder.add_buffer_view(&[2u8], 0);
+		let sparse_value_view = buffer_builder.add_buffer_view(&float_bytes(&[7.0, 8.0, 9.0]), 0);
 
 		let json = json!({
 			"asset": { "version": "2.0" },
@@ -2254,44 +2254,44 @@ mod tests {
 				}]
 			}],
 			"accessors": [
-				{ "bufferView": interleavedView, "byteOffset": 0, "componentType": 5126, "count": 3, "type": "VEC3" },
-				{ "bufferView": interleavedView, "byteOffset": 12, "componentType": 5126, "count": 3, "type": "VEC2" },
-				{ "bufferView": indexView, "componentType": 5121, "count": 3, "type": "SCALAR" },
-				{ "bufferView": jointView, "componentType": 5121, "count": 3, "type": "VEC4" },
-				{ "bufferView": weightView, "componentType": 5121, "normalized": true, "count": 3, "type": "VEC4" },
-				{ "bufferView": inverseBindView, "componentType": 5126, "count": 2, "type": "MAT4" },
-				{ "bufferView": timeView, "componentType": 5126, "count": 2, "type": "SCALAR" },
-				{ "bufferView": translationAView, "componentType": 5126, "count": 2, "type": "VEC3" },
-				{ "bufferView": translationBView, "componentType": 5126, "count": 2, "type": "VEC3" },
-				{ "bufferView": rotationBView, "componentType": 5126, "count": 2, "type": "VEC4" },
-				{ "componentType": 5126, "count": 3, "type": "VEC3", "sparse": { "count": 1, "indices": { "bufferView": sparseIndexView, "componentType": 5121 }, "values": { "bufferView": sparseValueView } } },
-				{ "componentType": 5126, "count": 3, "type": "VEC3", "sparse": { "count": 1, "indices": { "bufferView": sparseIndexView, "componentType": 5121 }, "values": { "bufferView": sparseValueView } } }
+				{ "bufferView": interleaved_view, "byteOffset": 0, "componentType": 5126, "count": 3, "type": "VEC3" },
+				{ "bufferView": interleaved_view, "byteOffset": 12, "componentType": 5126, "count": 3, "type": "VEC2" },
+				{ "bufferView": index_view, "componentType": 5121, "count": 3, "type": "SCALAR" },
+				{ "bufferView": joint_view, "componentType": 5121, "count": 3, "type": "VEC4" },
+				{ "bufferView": weight_view, "componentType": 5121, "normalized": true, "count": 3, "type": "VEC4" },
+				{ "bufferView": inverse_bind_view, "componentType": 5126, "count": 2, "type": "MAT4" },
+				{ "bufferView": time_view, "componentType": 5126, "count": 2, "type": "SCALAR" },
+				{ "bufferView": translation_aview, "componentType": 5126, "count": 2, "type": "VEC3" },
+				{ "bufferView": translation_bview, "componentType": 5126, "count": 2, "type": "VEC3" },
+				{ "bufferView": rotation_bview, "componentType": 5126, "count": 2, "type": "VEC4" },
+				{ "componentType": 5126, "count": 3, "type": "VEC3", "sparse": { "count": 1, "indices": { "bufferView": sparse_index_view, "componentType": 5121 }, "values": { "bufferView": sparse_value_view } } },
+				{ "componentType": 5126, "count": 3, "type": "VEC3", "sparse": { "count": 1, "indices": { "bufferView": sparse_index_view, "componentType": 5121 }, "values": { "bufferView": sparse_value_view } } }
 			],
 			"animations": [
 				{ "name": "A", "samplers": [{ "input": 6, "output": 7 }], "channels": [{ "sampler": 0, "target": { "node": 1, "path": "translation" } }] },
 				{ "name": "B", "samplers": [{ "input": 6, "output": 8 }, { "input": 6, "output": 9 }], "channels": [{ "sampler": 0, "target": { "node": 1, "path": "translation" } }, { "sampler": 1, "target": { "node": 1, "path": "rotation" } }] }
 			],
-			"bufferViews": bufferBuilder.bufferViewList,
-			"buffers": [{ "byteLength": bufferBuilder.binaryBytes.len() }]
+			"bufferViews": buffer_builder.buffer_view_list,
+			"buffers": [{ "byteLength": buffer_builder.binary_bytes.len() }]
 		});
-		wrapGlb(&json, &bufferBuilder.binaryBytes)
+		wrap_glb(&json, &buffer_builder.binary_bytes)
 	}
 
 	//==============================================================================
 	// 시험용 GLB 를 셰이더 없는 모델로 해석한다.
 	//==============================================================================
-	fn interpretTestGlb() -> (SkinnedModel, Vec<MeshDescription>, Vec<MaterialDescription>) {
-		let glbBytes = buildTestGlb();
-		let (json, binaryBuffer) = SkinnedModel::readGlbChunks(&glbBytes).expect("glb chunks");
-		let mut skinnedModel = SkinnedModel::createWithoutShaderProgram();
-		let (meshDescriptionList, materialDescriptionList) = skinnedModel.interpretContent(&json, &binaryBuffer).expect("interpret");
-		(skinnedModel, meshDescriptionList, materialDescriptionList)
+	fn interpret_test_glb() -> (SkinnedModel, Vec<MeshDescription>, Vec<MaterialDescription>) {
+		let glb_bytes = build_test_glb();
+		let (json, binary_buffer) = SkinnedModel::read_glb_chunks(&glb_bytes).expect("glb chunks");
+		let mut skinned_model = SkinnedModel::create_without_shader_program();
+		let (mesh_description_list, material_description_list) = skinned_model.interpret_content(&json, &binary_buffer).expect("interpret");
+		(skinned_model, mesh_description_list, material_description_list)
 	}
 
 	//==============================================================================
 	// 값 두 개가 허용 오차 안에서 같은지.
 	//==============================================================================
-	fn assertNear(actual: f32, expected: f32) {
+	fn assert_near(actual: f32, expected: f32) {
 		assert!((actual - expected).abs() < 1.0e-5, "{} expected {}", actual, expected);
 	}
 
@@ -2299,232 +2299,232 @@ mod tests {
 	// GLB 청크와 접근자 해석. (인터리브, 8비트 인덱스 → 16비트, 희소 접근자, 잘못된 머리)
 	//==============================================================================
 	#[test]
-	fn glbAccessorDecoding() {
-		let glbBytes = buildTestGlb();
-		let (json, binaryBuffer) = SkinnedModel::readGlbChunks(&glbBytes).expect("glb chunks");
-		let positions = readAccessorArray(&json, &binaryBuffer, 0).expect("positions");
-		assert_eq!(positions, AccessorArray::float(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0]));
-		let textureCoordinates = readAccessorArray(&json, &binaryBuffer, 1).expect("uv");
-		assert_eq!(textureCoordinates, AccessorArray::float(vec![0.0, 1.0, 1.0, 1.0, 0.0, 0.0]));
-		let indices = readAccessorArray(&json, &binaryBuffer, 2).expect("indices");
-		assert_eq!(indices.getComponentType(), COMPONENT_TYPE_UNSIGNED_BYTE);
-		assert_eq!(indices.toIndexArray(), IndexArray::unsignedShort(vec![0, 1, 2]));
-		let sparseArray = readAccessorArray(&json, &binaryBuffer, 10).expect("sparse");
-		assert_eq!(sparseArray, AccessorArray::float(vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 7.0, 8.0, 9.0]));
-		let inverseBind = readAccessorArray(&json, &binaryBuffer, 5).expect("inverse bind").toFloatList();
-		assert_eq!(inverseBind.len(), 32);
-		assert_eq!(inverseBind[16 + 13], -1.0);
+	fn glb_accessor_decoding() {
+		let glb_bytes = build_test_glb();
+		let (json, binary_buffer) = SkinnedModel::read_glb_chunks(&glb_bytes).expect("glb chunks");
+		let positions = read_accessor_array(&json, &binary_buffer, 0).expect("positions");
+		assert_eq!(positions, AccessorArray::Float(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0]));
+		let texture_coordinates = read_accessor_array(&json, &binary_buffer, 1).expect("uv");
+		assert_eq!(texture_coordinates, AccessorArray::Float(vec![0.0, 1.0, 1.0, 1.0, 0.0, 0.0]));
+		let indices = read_accessor_array(&json, &binary_buffer, 2).expect("indices");
+		assert_eq!(indices.get_component_type(), COMPONENT_TYPE_UNSIGNED_BYTE);
+		assert_eq!(indices.to_index_array(), IndexArray::UnsignedShort(vec![0, 1, 2]));
+		let sparse_array = read_accessor_array(&json, &binary_buffer, 10).expect("sparse");
+		assert_eq!(sparse_array, AccessorArray::Float(vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 7.0, 8.0, 9.0]));
+		let inverse_bind = read_accessor_array(&json, &binary_buffer, 5).expect("inverse bind").to_float_list();
+		assert_eq!(inverse_bind.len(), 32);
+		assert_eq!(inverse_bind[16 + 13], -1.0);
 
-		let mut brokenBytes = glbBytes.clone();
-		brokenBytes[0] = 0;
-		assert!(SkinnedModel::readGlbChunks(&brokenBytes).is_err());
-		assert!(SkinnedModel::readGlbChunks(&glbBytes[..20]).is_err());
+		let mut broken_bytes = glb_bytes.clone();
+		broken_bytes[0] = 0;
+		assert!(SkinnedModel::read_glb_chunks(&broken_bytes).is_err());
+		assert!(SkinnedModel::read_glb_chunks(&glb_bytes[..20]).is_err());
 	}
 
 	//==============================================================================
 	// 내용 해석. (노드, 루트, 실제 스킨 + 정적 메시의 합성 스킨, 가중치 정규화, 모프 타깃, 머티리얼 서술, 클립)
 	//==============================================================================
 	#[test]
-	fn interpretContentBuildsNeutralSchema() {
-		let (skinnedModel, meshDescriptionList, materialDescriptionList) = interpretTestGlb();
-		let nodeList = skinnedModel.getNodeList();
-		assert_eq!(nodeList.len(), 4);
-		assert_eq!(nodeList[0].childIndices, vec![1, 2, 3]);
-		assert_eq!(skinnedModel.getRootNodeIndices(), &[0]);
-		assert_eq!(nodeList[1].baseTranslation, [0.0, 1.0, 0.0]);
+	fn interpret_content_builds_neutral_schema() {
+		let (skinned_model, mesh_description_list, material_description_list) = interpret_test_glb();
+		let node_list = skinned_model.get_node_list();
+		assert_eq!(node_list.len(), 4);
+		assert_eq!(node_list[0].child_indices, vec![1, 2, 3]);
+		assert_eq!(skinned_model.get_root_node_indices(), &[0]);
+		assert_eq!(node_list[1].base_translation, [0.0, 1.0, 0.0]);
 
-		let skinList = skinnedModel.getSkinList();
-		assert_eq!(skinList.len(), 2);
-		assert_eq!(skinList[0].jointNodeIndices, vec![0, 1]);
-		assert_eq!(skinList[1].jointNodeIndices, vec![3]);
-		assert_eq!(nodeList[3].skinIndex, Some(1));
+		let skin_list = skinned_model.get_skin_list();
+		assert_eq!(skin_list.len(), 2);
+		assert_eq!(skin_list[0].joint_node_indices, vec![0, 1]);
+		assert_eq!(skin_list[1].joint_node_indices, vec![3]);
+		assert_eq!(node_list[3].skin_index, Some(1));
 
-		assert_eq!(meshDescriptionList.len(), 2);
-		let skinnedMesh = &meshDescriptionList[0];
-		assert_eq!(skinnedMesh.skinIndex, 0);
-		assert_eq!(skinnedMesh.joints, vec![0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]);
-		assertNear(skinnedMesh.weights[0], 128.0 / 255.0);
-		assertNear(skinnedMesh.weights[4], 1.0);
-		assert_eq!(skinnedMesh.indices, Some(IndexArray::unsignedShort(vec![0, 1, 2])));
-		assert!(skinnedMesh.normals.is_none());
-		assert_eq!(skinnedMesh.materialIndex, Some(0));
-		assert_eq!(skinnedMesh.materialName, "testMaterial");
-		assert_eq!(skinnedMesh.morphTargets.len(), 1);
-		assert_eq!(skinnedMesh.morphTargets[0].name, "smile");
-		assert_eq!(skinnedMesh.morphWeights, vec![0.25]);
-		let staticMesh = &meshDescriptionList[1];
-		assert_eq!(staticMesh.skinIndex, 1);
-		assert_eq!(staticMesh.joints, vec![0u16; 12]);
-		assert_eq!(staticMesh.weights, vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]);
+		assert_eq!(mesh_description_list.len(), 2);
+		let skinned_mesh = &mesh_description_list[0];
+		assert_eq!(skinned_mesh.skin_index, 0);
+		assert_eq!(skinned_mesh.joints, vec![0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]);
+		assert_near(skinned_mesh.weights[0], 128.0 / 255.0);
+		assert_near(skinned_mesh.weights[4], 1.0);
+		assert_eq!(skinned_mesh.indices, Some(IndexArray::UnsignedShort(vec![0, 1, 2])));
+		assert!(skinned_mesh.normals.is_none());
+		assert_eq!(skinned_mesh.material_index, Some(0));
+		assert_eq!(skinned_mesh.material_name, "testMaterial");
+		assert_eq!(skinned_mesh.morph_targets.len(), 1);
+		assert_eq!(skinned_mesh.morph_targets[0].name, "smile");
+		assert_eq!(skinned_mesh.morph_weights, vec![0.25]);
+		let static_mesh = &mesh_description_list[1];
+		assert_eq!(static_mesh.skin_index, 1);
+		assert_eq!(static_mesh.joints, vec![0u16; 12]);
+		assert_eq!(static_mesh.weights, vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]);
 
-		assert_eq!(materialDescriptionList.len(), 1);
-		assert_eq!(materialDescriptionList[0].baseColorFactor, [0.25, 0.5, 0.75]);
-		assert_eq!(materialDescriptionList[0].metallicFactor, 1.0);
-		assert_eq!(materialDescriptionList[0].roughnessFactor, 0.5);
+		assert_eq!(material_description_list.len(), 1);
+		assert_eq!(material_description_list[0].base_color_factor, [0.25, 0.5, 0.75]);
+		assert_eq!(material_description_list[0].metallic_factor, 1.0);
+		assert_eq!(material_description_list[0].roughness_factor, 0.5);
 
-		assert_eq!(skinnedModel.getAnimationNameList(), vec![String::from("A"), String::from("B")]);
-		assert_eq!(skinnedModel.getAnimationList()[0].duration, 2.0);
+		assert_eq!(skinned_model.get_animation_name_list(), vec![String::from("A"), String::from("B")]);
+		assert_eq!(skinned_model.get_animation_list()[0].duration, 2.0);
 	}
 
 	//==============================================================================
 	// 애니메이션 샘플링과 반복, 크로스페이드. (선형 이동, 루프, 페이드 중간 가중 0.5, 페이드 끝)
 	//==============================================================================
 	#[test]
-	fn animationSamplingAndCrossfade() {
-		let (mut skinnedModel, _meshDescriptionList, _materialDescriptionList) = interpretTestGlb();
+	fn animation_sampling_and_crossfade() {
+		let (mut skinned_model, _mesh_description_list, _material_description_list) = interpret_test_glb();
 
 		// 클립 A 0.5초: (0, 1.5, 0). 2.5초는 반복해 0.5초와 같다.
-		skinnedModel.update(0.5);
-		assertNear(skinnedModel.getNodeList()[1].currentTranslation[1], 1.5);
-		skinnedModel.update(2.0);
-		assertNear(skinnedModel.getNodeList()[1].currentTranslation[1], 1.5);
+		skinned_model.update(0.5);
+		assert_near(skinned_model.get_node_list()[1].current_translation[1], 1.5);
+		skinned_model.update(2.0);
+		assert_near(skinned_model.get_node_list()[1].current_translation[1], 1.5);
 
 		// 클립 B 로 1초 페이드. 0.5초 뒤: A(3초 → 반복 1초 = y 2) 와 B(4, 1, 0) 를 반씩.
-		skinnedModel.playAnimation("B", 1.0);
-		skinnedModel.update(0.5);
-		let translation = skinnedModel.getNodeList()[1].currentTranslation;
-		assertNear(translation[0], 2.0);
-		assertNear(translation[1], 1.5);
+		skinned_model.play_animation("B", 1.0);
+		skinned_model.update(0.5);
+		let translation = skinned_model.get_node_list()[1].current_translation;
+		assert_near(translation[0], 2.0);
+		assert_near(translation[1], 1.5);
 		// 회전은 단위에서 Z 90도 쪽으로 반. (Z 45도)
-		let rotation = skinnedModel.getNodeList()[1].currentRotation;
-		let expectedRotation = Quaternion::createFromEuler(0.0, 0.0, std::f32::consts::FRAC_PI_4);
-		assertNear(rotation.z, expectedRotation.z);
-		assertNear(rotation.w, expectedRotation.w);
+		let rotation = skinned_model.get_node_list()[1].current_rotation;
+		let expected_rotation = Quaternion::create_from_euler(0.0, 0.0, std::f32::consts::FRAC_PI_4);
+		assert_near(rotation.z, expected_rotation.z);
+		assert_near(rotation.w, expected_rotation.w);
 
 		// 페이드가 끝나면 B 만.
-		skinnedModel.update(0.6);
-		let finalTranslation = skinnedModel.getNodeList()[1].currentTranslation;
-		assertNear(finalTranslation[0], 4.0);
-		assertNear(finalTranslation[1], 1.0);
+		skinned_model.update(0.6);
+		let final_translation = skinned_model.get_node_list()[1].current_translation;
+		assert_near(final_translation[0], 4.0);
+		assert_near(final_translation[1], 1.0);
 
 		// 같은 클립을 다시 틀면 무시, 없는 클립도 무시.
-		skinnedModel.playAnimation("B", 0.25);
-		skinnedModel.playAnimation("none", 0.25);
-		skinnedModel.update(0.0);
-		assertNear(skinnedModel.getNodeList()[1].currentTranslation[0], 4.0);
+		skinned_model.play_animation("B", 0.25);
+		skinned_model.play_animation("none", 0.25);
+		skinned_model.update(0.0);
+		assert_near(skinned_model.get_node_list()[1].current_translation[0], 4.0);
 
 		// 재생 속도 0 이면 시간이 멈춘다. (A 를 페이드 없이 0초에)
-		skinnedModel.playAnimation("A", 0.0);
-		skinnedModel.setTimeScale(0.0);
-		skinnedModel.update(1.0);
-		assertNear(skinnedModel.getNodeList()[1].currentTranslation[1], 1.0);
+		skinned_model.play_animation("A", 0.0);
+		skinned_model.set_time_scale(0.0);
+		skinned_model.update(1.0);
+		assert_near(skinned_model.get_node_list()[1].current_translation[1], 1.0);
 	}
 
 	//==============================================================================
 	// 월드 행렬과 조인트 행렬. (바인드 포즈면 조인트 행렬이 단위, 움직이면 월드 x 역바인드, 정적 메시 합성 스킨, 회전 오프셋)
 	//==============================================================================
 	#[test]
-	fn jointMatrixComputation() {
-		let (mut skinnedModel, _meshDescriptionList, _materialDescriptionList) = interpretTestGlb();
-		skinnedModel.setTimeScale(0.0);
-		skinnedModel.update(0.0);
-		let skinList = skinnedModel.getSkinList();
-		assert_eq!(&skinList[0].jointMatrixArray[16..32], Matrix4::createIdentity().getElements());
-		assert_eq!(&skinList[1].jointMatrixArray[0..16], Matrix4::createTranslation(5.0, 0.0, 0.0).getElements());
+	fn joint_matrix_computation() {
+		let (mut skinned_model, _mesh_description_list, _material_description_list) = interpret_test_glb();
+		skinned_model.set_time_scale(0.0);
+		skinned_model.update(0.0);
+		let skin_list = skinned_model.get_skin_list();
+		assert_eq!(&skin_list[0].joint_matrix_array[16..32], Matrix4::create_identity().get_elements());
+		assert_eq!(&skin_list[1].joint_matrix_array[0..16], Matrix4::create_translation(5.0, 0.0, 0.0).get_elements());
 
 		// 0.5초 (Joint 이동 y 1.5) → 조인트 행렬 = 이동(0, 1.5, 0) x 이동(0, -1, 0) = 이동(0, 0.5, 0).
-		skinnedModel.setTimeScale(1.0);
-		skinnedModel.update(0.5);
-		let jointMatrixArray = &skinnedModel.getSkinList()[0].jointMatrixArray;
-		assertNear(jointMatrixArray[16 + 13], 0.5);
-		assertNear(jointMatrixArray[16 + 12], 0.0);
+		skinned_model.set_time_scale(1.0);
+		skinned_model.update(0.5);
+		let joint_matrix_array = &skinned_model.get_skin_list()[0].joint_matrix_array;
+		assert_near(joint_matrix_array[16 + 13], 0.5);
+		assert_near(joint_matrix_array[16 + 12], 0.0);
 
 		// 회전 오프셋 (이름 부분 일치): Joint 를 X 90도 돌리면 월드 행렬의 Y 축이 +Z 로 간다.
-		skinnedModel.setTimeScale(0.0);
-		skinnedModel.setJointRotationOffset("Joi", Quaternion::createFromEuler(std::f32::consts::FRAC_PI_2, 0.0, 0.0));
-		skinnedModel.update(0.0);
-		let worldElements = skinnedModel.getNodeList()[1].worldMatrix.elements;
-		assertNear(worldElements[4], 0.0);
-		assertNear(worldElements[5], 0.0);
-		assertNear(worldElements[6], 1.0);
-		skinnedModel.clearJointRotationOffsets();
-		skinnedModel.update(0.0);
-		assertNear(skinnedModel.getNodeList()[1].worldMatrix.elements[5], 1.0);
+		skinned_model.set_time_scale(0.0);
+		skinned_model.set_joint_rotation_offset("Joi", Quaternion::create_from_euler(std::f32::consts::FRAC_PI_2, 0.0, 0.0));
+		skinned_model.update(0.0);
+		let world_elements = skinned_model.get_node_list()[1].world_matrix.elements;
+		assert_near(world_elements[4], 0.0);
+		assert_near(world_elements[5], 0.0);
+		assert_near(world_elements[6], 1.0);
+		skinned_model.clear_joint_rotation_offsets();
+		skinned_model.update(0.0);
+		assert_near(skinned_model.get_node_list()[1].world_matrix.elements[5], 1.0);
 	}
 
 	//==============================================================================
 	// 스무스 노멀과 와이어프레임 모서리, 모프 텍셀 배치. (GL 무관 부분)
 	//==============================================================================
 	#[test]
-	fn generatedGeometryHelpers() {
+	fn generated_geometry_helpers() {
 		let positions = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
-		let normals = SkinnedModel::generateSmoothNormals(&positions, None);
+		let normals = SkinnedModel::generate_smooth_normals(&positions, None);
 		assert_eq!(normals, vec![0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0]);
 
-		let quadIndices = IndexArray::unsignedShort(vec![0, 1, 2, 2, 1, 3]);
-		let edgeList = SkinnedModel::buildWireframeEdgeList(Some(&quadIndices), 4);
-		assert_eq!(edgeList, vec![0, 1, 1, 2, 0, 2, 1, 3, 2, 3]);
-		assert_eq!(SkinnedModel::buildWireframeEdgeList(None, 3), vec![0, 1, 1, 2, 2, 0]);
+		let quad_indices = IndexArray::UnsignedShort(vec![0, 1, 2, 2, 1, 3]);
+		let edge_list = SkinnedModel::build_wireframe_edge_list(Some(&quad_indices), 4);
+		assert_eq!(edge_list, vec![0, 1, 1, 2, 0, 2, 1, 3, 2, 3]);
+		assert_eq!(SkinnedModel::build_wireframe_edge_list(None, 3), vec![0, 1, 1, 2, 2, 0]);
 
-		let morphTargetList = vec![
-			MorphTarget { name: String::from("first"), positionDeltas: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], normalDeltas: Some(vec![0.5, 0.5, 0.5, 0.25, 0.25, 0.25]) },
-			MorphTarget { name: String::from("second"), positionDeltas: vec![7.0, 8.0, 9.0, 10.0, 11.0, 12.0], normalDeltas: None },
+		let morph_target_list = vec![
+			MorphTarget { name: String::from("first"), position_deltas: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], normal_deltas: Some(vec![0.5, 0.5, 0.5, 0.25, 0.25, 0.25]) },
+			MorphTarget { name: String::from("second"), position_deltas: vec![7.0, 8.0, 9.0, 10.0, 11.0, 12.0], normal_deltas: None },
 		];
-		let (textureWidth, rowsPerTarget, texelData) = SkinnedModel::buildMorphTexelData(&morphTargetList, 2);
-		assert_eq!((textureWidth, rowsPerTarget), (2, 1));
-		assert_eq!(texelData.len(), 2 * 4 * 4);
-		assert_eq!(&texelData[0..8], &[1.0, 2.0, 3.0, 0.0, 4.0, 5.0, 6.0, 0.0]);
-		assert_eq!(&texelData[8..12], &[0.5, 0.5, 0.5, 0.0]);
-		assert_eq!(&texelData[16..20], &[7.0, 8.0, 9.0, 0.0]);
-		assert_eq!(&texelData[24..32], &[0.0; 8]);
+		let (texture_width, rows_per_target, texel_data) = SkinnedModel::build_morph_texel_data(&morph_target_list, 2);
+		assert_eq!((texture_width, rows_per_target), (2, 1));
+		assert_eq!(texel_data.len(), 2 * 4 * 4);
+		assert_eq!(&texel_data[0..8], &[1.0, 2.0, 3.0, 0.0, 4.0, 5.0, 6.0, 0.0]);
+		assert_eq!(&texel_data[8..12], &[0.5, 0.5, 0.5, 0.0]);
+		assert_eq!(&texel_data[16..20], &[7.0, 8.0, 9.0, 0.0]);
+		assert_eq!(&texel_data[24..32], &[0.0; 8]);
 	}
 
 	//==============================================================================
 	// FBX 오일러 변환. (X 먼저 적용, Rz x Ry x Rx)
 	//==============================================================================
 	#[test]
-	fn fbxEulerOrderIsXFirst() {
-		let rotation = createQuaternionFromFbxEuler(90.0, 0.0, 90.0);
-		let rotationMatrix = Matrix4::createRotationFromQuaternion(rotation);
+	fn fbx_euler_order_is_xfirst() {
+		let rotation = create_quaternion_from_fbx_euler(90.0, 0.0, 90.0);
+		let rotation_matrix = Matrix4::create_rotation_from_quaternion(rotation);
 		// +Y 를 X 90도 → +Z, 다시 Z 90도 → +Z 그대로.
-		let rotatedY = rotationMatrix.transformDirection(0.0, 1.0, 0.0);
-		assertNear(rotatedY.x, 0.0);
-		assertNear(rotatedY.y, 0.0);
-		assertNear(rotatedY.z, 1.0);
+		let rotated_y = rotation_matrix.transform_direction(0.0, 1.0, 0.0);
+		assert_near(rotated_y.x, 0.0);
+		assert_near(rotated_y.y, 0.0);
+		assert_near(rotated_y.z, 1.0);
 		// +X 를 X 90도 → +X, 다시 Z 90도 → +Y.
-		let rotatedX = rotationMatrix.transformDirection(1.0, 0.0, 0.0);
-		assertNear(rotatedX.y, 1.0);
+		let rotated_x = rotation_matrix.transform_direction(1.0, 0.0, 0.0);
+		assert_near(rotated_x.y, 1.0);
 	}
 
 	//==============================================================================
 	// 실제 GLB. (원본 예제 fox.glb, 조인트 24개, 클립 Survey/Walk/Run, 노멀 없음, 인덱스 없음, PNG 텍스처, 파일이 없으면 건너뛴다)
 	//==============================================================================
 	#[test]
-	fn foxGlbFromExamples() {
-		let foxPath = std::path::Path::new(EXAMPLE_ASSET_DIRECTORY).join("fox.glb");
-		let glbBytes = match std::fs::read(&foxPath) {
-			Ok(glbBytes) => {
-				glbBytes
+	fn fox_glb_from_examples() {
+		let fox_path = std::path::Path::new(EXAMPLE_ASSET_DIRECTORY).join("fox.glb");
+		let glb_bytes = match std::fs::read(&fox_path) {
+			Ok(glb_bytes) => {
+				glb_bytes
 			}
 			Err(_) => {
 				eprintln!("fox.glb 없음, 건너뜀");
 				return;
 			}
 		};
-		let (json, binaryBuffer) = SkinnedModel::readGlbChunks(&glbBytes).expect("fox chunks");
-		let mut skinnedModel = SkinnedModel::createWithoutShaderProgram();
-		let (meshDescriptionList, materialDescriptionList) = skinnedModel.interpretContent(&json, &binaryBuffer).expect("fox interpret");
-		assert_eq!(skinnedModel.getAnimationNameList(), vec![String::from("Survey"), String::from("Walk"), String::from("Run")]);
-		assert_eq!(skinnedModel.getSkinList()[0].jointNodeIndices.len(), 24);
-		assert_eq!(meshDescriptionList.len(), 1);
-		let foxMesh = &meshDescriptionList[0];
-		assert!(foxMesh.normals.is_none() && foxMesh.indices.is_none());
-		assert_eq!(foxMesh.positions.len() / 3, foxMesh.weights.len() / 4);
-		let normals = SkinnedModel::generateSmoothNormals(&foxMesh.positions, None);
-		let firstLength = (normals[0] * normals[0] + normals[1] * normals[1] + normals[2] * normals[2]).sqrt();
-		assertNear(firstLength, 1.0);
-		let baseColorImage = materialDescriptionList[0].baseColorImage.as_ref().expect("fox texture");
-		assert_eq!(baseColorImage.mimeType.as_deref(), Some("image/png"));
-		let (imageWidth, imageHeight, pixels) = crate::graphics3d::material::decodeImageBytes(&baseColorImage.bytes).expect("fox png");
-		assert_eq!(pixels.len(), (imageWidth * imageHeight * 4) as usize);
+		let (json, binary_buffer) = SkinnedModel::read_glb_chunks(&glb_bytes).expect("fox chunks");
+		let mut skinned_model = SkinnedModel::create_without_shader_program();
+		let (mesh_description_list, material_description_list) = skinned_model.interpret_content(&json, &binary_buffer).expect("fox interpret");
+		assert_eq!(skinned_model.get_animation_name_list(), vec![String::from("Survey"), String::from("Walk"), String::from("Run")]);
+		assert_eq!(skinned_model.get_skin_list()[0].joint_node_indices.len(), 24);
+		assert_eq!(mesh_description_list.len(), 1);
+		let fox_mesh = &mesh_description_list[0];
+		assert!(fox_mesh.normals.is_none() && fox_mesh.indices.is_none());
+		assert_eq!(fox_mesh.positions.len() / 3, fox_mesh.weights.len() / 4);
+		let normals = SkinnedModel::generate_smooth_normals(&fox_mesh.positions, None);
+		let first_length = (normals[0] * normals[0] + normals[1] * normals[1] + normals[2] * normals[2]).sqrt();
+		assert_near(first_length, 1.0);
+		let base_color_image = material_description_list[0].base_color_image.as_ref().expect("fox texture");
+		assert_eq!(base_color_image.mime_type.as_deref(), Some("image/png"));
+		let (image_width, image_height, pixels) = crate::graphics3d::material::decode_image_bytes(&base_color_image.bytes).expect("fox png");
+		assert_eq!(pixels.len(), (image_width * image_height * 4) as usize);
 
 		// 걷기 클립 중간에서 조인트 행렬이 바인드 포즈와 달라야 한다.
-		skinnedModel.playAnimation("Walk", 0.0);
-		skinnedModel.update(0.0);
-		let restMatrixArray = skinnedModel.getSkinList()[0].jointMatrixArray.clone();
-		skinnedModel.update(0.3);
-		let walkMatrixArray = &skinnedModel.getSkinList()[0].jointMatrixArray;
-		assert!(walkMatrixArray.iter().all(|value| value.is_finite()));
-		assert!(restMatrixArray.iter().zip(walkMatrixArray.iter()).any(|(restValue, walkValue)| (restValue - walkValue).abs() > 1.0e-3));
+		skinned_model.play_animation("Walk", 0.0);
+		skinned_model.update(0.0);
+		let rest_matrix_array = skinned_model.get_skin_list()[0].joint_matrix_array.clone();
+		skinned_model.update(0.3);
+		let walk_matrix_array = &skinned_model.get_skin_list()[0].joint_matrix_array;
+		assert!(walk_matrix_array.iter().all(|value| value.is_finite()));
+		assert!(rest_matrix_array.iter().zip(walk_matrix_array.iter()).any(|(rest_value, walk_value)| (rest_value - walk_value).abs() > 1.0e-3));
 	}
 }

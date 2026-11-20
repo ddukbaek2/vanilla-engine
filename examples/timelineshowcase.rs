@@ -3,13 +3,12 @@
 // - 원본 examples/timelineshowcase 의 문서 8 개(*.timeline.json)와 그림을 그대로 읽어 무대를 만들고 차례로 튼다.
 //   애셋은 원본 저장소 폴더에서 읽기만 한다. (modelviewer 예제와 같은 방식)
 // - 씬은 GameSceneBase 를 품는다: 로딩 화면, 세이프 에어리어 노드, 뷰 크기가 바뀌면 다시 놓기, 배경 칠하기.
-// - "screen" 트랙은 external 대상이라 tick 뒤에 applyExternalProperties 로 ScreenEffect 에 넘긴다.
+// - "screen" 트랙은 external 대상이라 tick 뒤에 apply_external_properties 로 ScreenEffect 에 넘긴다.
 // - 무대 오른쪽 아래에 HeatHazeEffect 노드(아지랑이), 머리 오른쪽에 Indicator(돌아가는 톱니)를 같이 띄운다.
 // - 화면 저장이 같은 모양으로 나오게 타임라인은 프레임마다 1/60 초씩 흘린다. 150 프레임마다 다음 문서로, 누르면 바로 다음으로 넘어간다.
 // - 실행: cargo run --release --example timelineshowcase
 //   화면 저장: VANILLA_CAPTURE_PATH=shots/timeline_{frame}.png VANILLA_CAPTURE_FRAMES=90,240,390 VANILLA_CAPTURE_EXIT=1
 //==============================================================================
-#![allow(non_snake_case)]
 
 use serde_json::Value;
 use std::cell::RefCell;
@@ -48,7 +47,7 @@ const MODE_DEFINITIONS: [(&str, &str); 8] = [
 // 모드 하나. (무대 뿌리 노드, 타임라인, 제목)
 //==============================================================================
 struct TimelineMode {
-	rootId: NodeId,
+	root_id: NodeId,
 	timeline: Timeline,
 	title: String,
 }
@@ -57,18 +56,18 @@ struct TimelineMode {
 // 타임라인 쇼케이스 씬.
 //==============================================================================
 struct TimelineShowcaseScene {
-	gameSceneBase: GameSceneBase,
-	timelineAssetList: Vec<JsonAsset>,
-	imageAssetList: Vec<(String, ImageAsset)>,
-	modeList: Vec<TimelineMode>,
-	currentModeIndex: usize,
-	modeFrameCount: u64,
-	screenEffect: ScreenEffect,
-	stageId: Option<NodeId>,
-	titleLabelId: Option<NodeId>,
-	statusLabelId: Option<NodeId>,
+	game_scene_base: GameSceneBase,
+	timeline_asset_list: Vec<JsonAsset>,
+	image_asset_list: Vec<(String, ImageAsset)>,
+	mode_list: Vec<TimelineMode>,
+	current_mode_index: usize,
+	mode_frame_count: u64,
+	screen_effect: ScreenEffect,
+	stage_id: Option<NodeId>,
+	title_label_id: Option<NodeId>,
+	status_label_id: Option<NodeId>,
 	// 마지막 마커 / 이벤트. (핸들러가 적고 상태 줄이 읽는다)
-	lastSignal: Rc<RefCell<String>>,
+	last_signal: Rc<RefCell<String>>,
 	indicator: Indicator,
 }
 
@@ -78,17 +77,17 @@ impl TimelineShowcaseScene {
 	//==============================================================================
 	fn new() -> TimelineShowcaseScene {
 		TimelineShowcaseScene {
-			gameSceneBase: GameSceneBase::new(),
-			timelineAssetList: Vec::new(),
-			imageAssetList: Vec::new(),
-			modeList: Vec::new(),
-			currentModeIndex: 0,
-			modeFrameCount: 0,
-			screenEffect: ScreenEffect::new(),
-			stageId: None,
-			titleLabelId: None,
-			statusLabelId: None,
-			lastSignal: Rc::new(RefCell::new(String::new())),
+			game_scene_base: GameSceneBase::new(),
+			timeline_asset_list: Vec::new(),
+			image_asset_list: Vec::new(),
+			mode_list: Vec::new(),
+			current_mode_index: 0,
+			mode_frame_count: 0,
+			screen_effect: ScreenEffect::new(),
+			stage_id: None,
+			title_label_id: None,
+			status_label_id: None,
+			last_signal: Rc::new(RefCell::new(String::new())),
 			indicator: Indicator::new(),
 		}
 	}
@@ -96,40 +95,40 @@ impl TimelineShowcaseScene {
 	//==============================================================================
 	// 라벨 노드 만들기. (왼쪽 정렬 글)
 	//==============================================================================
-	fn createLabel(nodeTree: &mut NodeTree, parentId: NodeId, name: &str, position: Vector2, fontSize: f32, color: Color) -> NodeId {
-		let labelId = nodeTree.createChild(parentId, name);
-		let label = &mut nodeTree[labelId];
-		label.setPivot(Pivot::topLeft);
-		label.setAnchor(Pivot::topLeft);
-		label.setLocalPosition(position);
-		label.setContentSize(Vector2::create(900.0, fontSize * 1.4));
-		let text = label.addComponent(Text::createWithText("", fontSize));
-		text.setTextAlign(TextAlign::left);
-		text.setTextColor(color);
-		labelId
+	fn create_label(node_tree: &mut NodeTree, parent_id: NodeId, name: &str, position: Vector2, font_size: f32, color: Color) -> NodeId {
+		let label_id = node_tree.create_child(parent_id, name);
+		let label = &mut node_tree[label_id];
+		label.set_pivot(Pivot::TOP_LEFT);
+		label.set_anchor(Pivot::TOP_LEFT);
+		label.set_local_position(position);
+		label.set_content_size(Vector2::create(900.0, font_size * 1.4));
+		let text = label.add_component(Text::create_with_text("", font_size));
+		text.set_text_align(TextAlign::Left);
+		text.set_text_color(color);
+		label_id
 	}
 
 	//==============================================================================
-	// 모드 고르기. (모두 멈추고 화면 효과를 되돌린 뒤 고른 문서를 처음부터 튼다. 원본 selectMode)
+	// 모드 고르기. (모두 멈추고 화면 효과를 되돌린 뒤 고른 문서를 처음부터 튼다. 원본 select_mode)
 	//==============================================================================
-	fn selectMode(&mut self, modeIndex: usize) {
-		let nodeTree = self.gameSceneBase.getSceneBaseMut().getNodeTreeMut();
-		for mode in self.modeList.iter_mut() {
-			mode.timeline.stop(nodeTree);
-			nodeTree[mode.rootId].setActive(false);
+	fn select_mode(&mut self, mode_index: usize) {
+		let node_tree = self.game_scene_base.get_scene_base_mut().get_node_tree_mut();
+		for mode in self.mode_list.iter_mut() {
+			mode.timeline.stop(node_tree);
+			node_tree[mode.root_id].set_active(false);
 		}
-		self.screenEffect.resetAll();
-		self.currentModeIndex = modeIndex;
-		self.modeFrameCount = 0;
-		self.lastSignal.borrow_mut().clear();
-		if let Some(mode) = self.modeList.get_mut(modeIndex) {
-			nodeTree[mode.rootId].setActive(true);
-			mode.timeline.seek(nodeTree, 0.0);
+		self.screen_effect.reset_all();
+		self.current_mode_index = mode_index;
+		self.mode_frame_count = 0;
+		self.last_signal.borrow_mut().clear();
+		if let Some(mode) = self.mode_list.get_mut(mode_index) {
+			node_tree[mode.root_id].set_active(true);
+			mode.timeline.seek(node_tree, 0.0);
 			mode.timeline.play();
-			mode.timeline.applyExternalProperties("screen", &mut self.screenEffect);
-			if let Some(titleLabelId) = self.titleLabelId {
-				if let Some(text) = nodeTree[titleLabelId].getComponentMut::<Text>() {
-					text.setText(&format!("TIMELINE SHOWCASE  {} / {}  {}", modeIndex + 1, MODE_DEFINITIONS.len(), mode.title));
+			mode.timeline.apply_external_properties("screen", &mut self.screen_effect);
+			if let Some(title_label_id) = self.title_label_id {
+				if let Some(text) = node_tree[title_label_id].get_component_mut::<Text>() {
+					text.set_text(&format!("TIMELINE SHOWCASE  {} / {}  {}", mode_index + 1, MODE_DEFINITIONS.len(), mode.title));
 				}
 			}
 		}
@@ -139,99 +138,99 @@ impl TimelineShowcaseScene {
 	// 무대를 세이프 에어리어 안에 맞춰 놓는다. (씬의 layout, 원본 layout 재정의 자리)
 	//==============================================================================
 	fn layout(&mut self) {
-		let safeAreaRect = self.gameSceneBase.getSafeAreaRect();
-		let stageId = match self.stageId {
-			Some(stageId) => {
-				stageId
+		let safe_area_rect = self.game_scene_base.get_safe_area_rect();
+		let stage_id = match self.stage_id {
+			Some(stage_id) => {
+				stage_id
 			}
 			None => {
 				return;
 			}
 		};
-		let availableWidth = (safeAreaRect.size.x - 32.0).max(1.0);
-		let availableHeight = (safeAreaRect.size.y - HEADER_HEIGHT - 16.0).max(1.0);
-		let stageScale = (availableWidth / DOCUMENT_WIDTH).min(availableHeight / DOCUMENT_HEIGHT);
-		let stageX = (safeAreaRect.size.x - DOCUMENT_WIDTH * stageScale) * 0.5;
-		let stage = &mut self.gameSceneBase.getSceneBaseMut().getNodeTreeMut()[stageId];
-		stage.setLocalScale(Vector2::create(stageScale, stageScale));
-		stage.setLocalPosition(Vector2::create(stageX, HEADER_HEIGHT));
+		let available_width = (safe_area_rect.size.x - 32.0).max(1.0);
+		let available_height = (safe_area_rect.size.y - HEADER_HEIGHT - 16.0).max(1.0);
+		let stage_scale = (available_width / DOCUMENT_WIDTH).min(available_height / DOCUMENT_HEIGHT);
+		let stage_x = (safe_area_rect.size.x - DOCUMENT_WIDTH * stage_scale) * 0.5;
+		let stage = &mut self.game_scene_base.get_scene_base_mut().get_node_tree_mut()[stage_id];
+		stage.set_local_scale(Vector2::create(stage_scale, stage_scale));
+		stage.set_local_position(Vector2::create(stage_x, HEADER_HEIGHT));
 	}
 }
 
 impl Scene for TimelineShowcaseScene {
-	fn getSceneBase(&self) -> &SceneBase {
-		self.gameSceneBase.getSceneBase()
+	fn get_scene_base(&self) -> &SceneBase {
+		self.game_scene_base.get_scene_base()
 	}
 
-	fn getSceneBaseMut(&mut self) -> &mut SceneBase {
-		self.gameSceneBase.getSceneBaseMut()
+	fn get_scene_base_mut(&mut self) -> &mut SceneBase {
+		self.game_scene_base.get_scene_base_mut()
 	}
 
 	//==============================================================================
 	// 생성. (로딩 화면을 시작하고 문서와 그림을 요청해 맡긴다)
 	//==============================================================================
 	fn create(&mut self, engine: &mut Engine) {
-		self.gameSceneBase.setViewScaleMode(ViewScaleMode::stretchShort, None);
-		self.gameSceneBase.setLoadingMinDurationMs(0.0);
-		self.gameSceneBase.setSceneBackgroundColor(Color::createFromHEX("#14171e"));
-		self.gameSceneBase.create(engine);
-		for (fileName, _) in MODE_DEFINITIONS.iter() {
-			let mut timelineAsset = JsonAsset::new();
-			timelineAsset.load(engine, fileName);
-			self.gameSceneBase.getSceneBaseMut().trackAsset(&timelineAsset);
-			self.timelineAssetList.push(timelineAsset);
+		self.game_scene_base.set_view_scale_mode(ViewScaleMode::StretchShort, None);
+		self.game_scene_base.set_loading_min_duration_ms(0.0);
+		self.game_scene_base.set_scene_background_color(Color::create_from_hex("#14171e"));
+		self.game_scene_base.create(engine);
+		for (file_name, _) in MODE_DEFINITIONS.iter() {
+			let mut timeline_asset = JsonAsset::new();
+			timeline_asset.load(engine, file_name);
+			self.game_scene_base.get_scene_base_mut().track_asset(&timeline_asset);
+			self.timeline_asset_list.push(timeline_asset);
 		}
-		for imageName in IMAGE_NAME_LIST.iter() {
-			let mut imageAsset = ImageAsset::new();
-			imageAsset.load(engine, imageName);
-			self.gameSceneBase.getSceneBaseMut().trackAsset(&imageAsset);
-			self.imageAssetList.push((imageName.to_string(), imageAsset));
+		for image_name in IMAGE_NAME_LIST.iter() {
+			let mut image_asset = ImageAsset::new();
+			image_asset.load(engine, image_name);
+			self.game_scene_base.get_scene_base_mut().track_asset(&image_asset);
+			self.image_asset_list.push((image_name.to_string(), image_asset));
 		}
 	}
 
 	//==============================================================================
 	// 로딩 화면.
 	//==============================================================================
-	fn drawOnLoad(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
-		self.gameSceneBase.drawOnLoad(engine, graphic);
+	fn draw_on_load(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+		self.game_scene_base.draw_on_load(engine, graphic);
 	}
 
 	//==============================================================================
 	// 초기화. (머리 글, 무대, 모드마다 무대 뿌리와 타임라인)
 	//==============================================================================
 	fn initialize(&mut self, engine: &mut Engine) {
-		self.gameSceneBase.initialize(engine);
-		let safeAreaId = self.gameSceneBase.getSafeAreaNodeId().expect("safe area node");
-		let mut imageTable: HashMap<String, Rc<Image>> = HashMap::new();
-		for (imageName, imageAsset) in self.imageAssetList.iter_mut() {
-			if let Some(image) = imageAsset.getImage() {
-				imageTable.insert(imageName.clone(), image);
+		self.game_scene_base.initialize(engine);
+		let safe_area_id = self.game_scene_base.get_safe_area_node_id().expect("safe area node");
+		let mut image_table: HashMap<String, Rc<Image>> = HashMap::new();
+		for (image_name, image_asset) in self.image_asset_list.iter_mut() {
+			if let Some(image) = image_asset.get_image() {
+				image_table.insert(image_name.clone(), image);
 			}
 		}
-		let descriptionList: Vec<Option<Value>> = self.timelineAssetList.iter_mut().map(|timelineAsset| timelineAsset.getData().cloned()).collect();
+		let description_list: Vec<Option<Value>> = self.timeline_asset_list.iter_mut().map(|timeline_asset| timeline_asset.get_data().cloned()).collect();
 
-		let nodeTree = self.gameSceneBase.getSceneBaseMut().getNodeTreeMut();
-		self.titleLabelId = Some(TimelineShowcaseScene::createLabel(nodeTree, safeAreaId, "Title", Vector2::create(24.0, 10.0), 22.0, Color::createFromHEX("#e8ebf2")));
-		self.statusLabelId = Some(TimelineShowcaseScene::createLabel(nodeTree, safeAreaId, "Status", Vector2::create(24.0, 38.0), 14.0, Color::createFromHEX("#9aa2b2")));
+		let node_tree = self.game_scene_base.get_scene_base_mut().get_node_tree_mut();
+		self.title_label_id = Some(TimelineShowcaseScene::create_label(node_tree, safe_area_id, "Title", Vector2::create(24.0, 10.0), 22.0, Color::create_from_hex("#e8ebf2")));
+		self.status_label_id = Some(TimelineShowcaseScene::create_label(node_tree, safe_area_id, "Status", Vector2::create(24.0, 38.0), 14.0, Color::create_from_hex("#9aa2b2")));
 
 		// 무대. (문서 크기, 둥근 모서리로 자른다)
-		let stageId = nodeTree.createChild(safeAreaId, "Stage");
+		let stage_id = node_tree.create_child(safe_area_id, "Stage");
 		{
-			let stage = &mut nodeTree[stageId];
-			stage.setPivot(Pivot::topLeft);
-			stage.setAnchor(Pivot::topLeft);
-			stage.setContentSize(Vector2::create(DOCUMENT_WIDTH, DOCUMENT_HEIGHT));
-			stage.addComponent(Paint::createWithColor(Color::createFromHEX("#0d1017")));
+			let stage = &mut node_tree[stage_id];
+			stage.set_pivot(Pivot::TOP_LEFT);
+			stage.set_anchor(Pivot::TOP_LEFT);
+			stage.set_content_size(Vector2::create(DOCUMENT_WIDTH, DOCUMENT_HEIGHT));
+			stage.add_component(Paint::create_with_color(Color::create_from_hex("#0d1017")));
 			let mut mask = Mask::new();
-			mask.setRoundSize(12.0);
-			stage.addComponent(mask);
+			mask.set_round_size(12.0);
+			stage.add_component(mask);
 		}
-		self.stageId = Some(stageId);
+		self.stage_id = Some(stage_id);
 
-		let imageResolver = |imageName: &str| -> Option<Rc<Image>> {
-			imageTable.get(imageName).cloned()
+		let image_resolver = |image_name: &str| -> Option<Rc<Image>> {
+			image_table.get(image_name).cloned()
 		};
-		for ((_, title), description) in MODE_DEFINITIONS.iter().zip(descriptionList) {
+		for ((_, title), description) in MODE_DEFINITIONS.iter().zip(description_list) {
 			let description = match description {
 				Some(description) => {
 					description
@@ -241,103 +240,103 @@ impl Scene for TimelineShowcaseScene {
 					continue;
 				}
 			};
-			let rootId = nodeTree.createChild(stageId, title);
+			let root_id = node_tree.create_child(stage_id, title);
 			{
-				let root = &mut nodeTree[rootId];
-				root.setPivot(Pivot::topLeft);
-				root.setAnchor(Pivot::topLeft);
-				root.setContentSize(Vector2::create(DOCUMENT_WIDTH, DOCUMENT_HEIGHT));
-				root.setActive(false);
+				let root = &mut node_tree[root_id];
+				root.set_pivot(Pivot::TOP_LEFT);
+				root.set_anchor(Pivot::TOP_LEFT);
+				root.set_content_size(Vector2::create(DOCUMENT_WIDTH, DOCUMENT_HEIGHT));
+				root.set_active(false);
 			}
 			let mut timeline = Timeline::new(Some(description));
-			timeline.buildStage(nodeTree, rootId, Some(&imageResolver));
-			timeline.setTargetResolver(Some(Box::new(|targetName: &str| {
-				if targetName == "screen" {
-					Some(TimelineTarget::external)
+			timeline.build_stage(node_tree, root_id, Some(&image_resolver));
+			timeline.set_target_resolver(Some(Box::new(|target_name: &str| {
+				if target_name == "screen" {
+					Some(TimelineTarget::External)
 				}
 				else {
 					None
 				}
 			})));
-			let markerSignal = self.lastSignal.clone();
-			timeline.setMarkerHandler(Some(Box::new(move |markerName: &str, _marker: &TimelineMarker, _nodeTree: &mut NodeTree| {
-				*markerSignal.borrow_mut() = format!("marker {}", markerName);
+			let marker_signal = self.last_signal.clone();
+			timeline.set_marker_handler(Some(Box::new(move |marker_name: &str, _marker: &TimelineMarker, _node_tree: &mut NodeTree| {
+				*marker_signal.borrow_mut() = format!("marker {}", marker_name);
 			})));
-			let eventSignal = self.lastSignal.clone();
-			timeline.setEventHandler(Some(Box::new(move |targetName: &str, eventName: &str, _key: &TimelineKey, _nodeTree: &mut NodeTree| {
-				*eventSignal.borrow_mut() = format!("event {} {}", targetName, eventName);
+			let event_signal = self.last_signal.clone();
+			timeline.set_event_handler(Some(Box::new(move |target_name: &str, event_name: &str, _key: &TimelineKey, _node_tree: &mut NodeTree| {
+				*event_signal.borrow_mut() = format!("event {} {}", target_name, event_name);
 			})));
-			self.modeList.push(TimelineMode { rootId, timeline, title: title.to_string() });
+			self.mode_list.push(TimelineMode { root_id, timeline, title: title.to_string() });
 		}
 		// 아지랑이. (무대의 마지막 자식이라 문서 위에 그려진다)
-		let hazeId = nodeTree.createChild(stageId, "HeatHaze");
+		let haze_id = node_tree.create_child(stage_id, "HeatHaze");
 		{
-			let haze = &mut nodeTree[hazeId];
-			haze.setPivot(Pivot::topLeft);
-			haze.setAnchor(Pivot::topLeft);
-			haze.setLocalPosition(Vector2::create(DOCUMENT_WIDTH - 340.0, DOCUMENT_HEIGHT - 220.0));
-			haze.setContentSize(Vector2::create(320.0, 200.0));
-			let heatHazeEffect = haze.addComponent(HeatHazeEffect::new());
-			heatHazeEffect.setAmplitude(6.0);
-			heatHazeEffect.setFrequency(0.08);
+			let haze = &mut node_tree[haze_id];
+			haze.set_pivot(Pivot::TOP_LEFT);
+			haze.set_anchor(Pivot::TOP_LEFT);
+			haze.set_local_position(Vector2::create(DOCUMENT_WIDTH - 340.0, DOCUMENT_HEIGHT - 220.0));
+			haze.set_content_size(Vector2::create(320.0, 200.0));
+			let heat_haze_effect = haze.add_component(HeatHazeEffect::new());
+			heat_haze_effect.set_amplitude(6.0);
+			heat_haze_effect.set_frequency(0.08);
 		}
-		self.indicator.setRadius(14.0);
-		self.indicator.setColor(Color::createFromHEX("#d4b06a"));
-		self.selectMode(0);
+		self.indicator.set_radius(14.0);
+		self.indicator.set_color(Color::create_from_hex("#d4b06a"));
+		self.select_mode(0);
 	}
 
 	//==============================================================================
 	// 화면 크기 변경.
 	//==============================================================================
-	fn resize(&mut self, engine: &mut Engine, canvasNativeSize: Vector2) {
-		self.gameSceneBase.resize(engine, canvasNativeSize);
+	fn resize(&mut self, engine: &mut Engine, canvas_native_size: Vector2) {
+		self.game_scene_base.resize(engine, canvas_native_size);
 		self.layout();
 	}
 
 	//==============================================================================
 	// 갱신. (노드 / 터치 / 레이아웃 → 타임라인 → 화면 효과, 150 프레임마다 또는 누르면 다음 문서)
 	//==============================================================================
-	fn tick(&mut self, engine: &mut Engine, _timeDelta: f32) {
-		if self.gameSceneBase.tick(engine, TIMELINE_FRAME_STEP) {
+	fn tick(&mut self, engine: &mut Engine, _time_delta: f32) {
+		if self.game_scene_base.tick(engine, TIMELINE_FRAME_STEP) {
 			self.layout();
 		}
-		self.modeFrameCount += 1;
-		let isTouchPressed = engine.getInputManager().isTouchPressed();
-		if (self.modeFrameCount >= MODE_FRAME_COUNT || isTouchPressed) && !self.modeList.is_empty() {
-			let nextModeIndex = (self.currentModeIndex + 1) % self.modeList.len();
-			self.selectMode(nextModeIndex);
+		self.mode_frame_count += 1;
+		let is_touch_pressed = engine.get_input_manager().is_touch_pressed();
+		if (self.mode_frame_count >= MODE_FRAME_COUNT || is_touch_pressed) && !self.mode_list.is_empty() {
+			let next_mode_index = (self.current_mode_index + 1) % self.mode_list.len();
+			self.select_mode(next_mode_index);
 		}
-		let nodeTree = self.gameSceneBase.getSceneBaseMut().getNodeTreeMut();
-		if let Some(mode) = self.modeList.get_mut(self.currentModeIndex) {
-			mode.timeline.tick(nodeTree, TIMELINE_FRAME_STEP);
-			mode.timeline.applyExternalProperties("screen", &mut self.screenEffect);
-			let statusText = format!("{:.2} / {:.2} s  {}  {}", mode.timeline.getTime(), mode.timeline.getDuration(), if mode.timeline.isLoop() { "loop" } else { "once" }, self.lastSignal.borrow());
-			if let Some(statusLabelId) = self.statusLabelId {
-				if let Some(text) = nodeTree[statusLabelId].getComponentMut::<Text>() {
-					text.setText(&statusText);
+		let node_tree = self.game_scene_base.get_scene_base_mut().get_node_tree_mut();
+		if let Some(mode) = self.mode_list.get_mut(self.current_mode_index) {
+			mode.timeline.tick(node_tree, TIMELINE_FRAME_STEP);
+			mode.timeline.apply_external_properties("screen", &mut self.screen_effect);
+			let status_text = format!("{:.2} / {:.2} s  {}  {}", mode.timeline.get_time(), mode.timeline.get_duration(), if mode.timeline.is_loop() { "loop" } else { "once" }, self.last_signal.borrow());
+			if let Some(status_label_id) = self.status_label_id {
+				if let Some(text) = node_tree[status_label_id].get_component_mut::<Text>() {
+					text.set_text(&status_text);
 				}
 			}
 		}
-		self.screenEffect.tick(TIMELINE_FRAME_STEP);
+		self.screen_effect.tick(TIMELINE_FRAME_STEP);
 		self.indicator.tick(TIMELINE_FRAME_STEP);
 	}
 
 	//==============================================================================
 	// 이전 출력. (화면 효과 시작 → 배경)
 	//==============================================================================
-	fn preDraw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
-		self.screenEffect.begin(graphic);
-		self.gameSceneBase.preDraw(engine, graphic);
+	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+		self.screen_effect.begin(graphic);
+		self.game_scene_base.pre_draw(engine, graphic);
 	}
 
 	//==============================================================================
 	// 이후 출력. (화면 효과 끝)
 	//==============================================================================
-	fn postDraw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
-		let viewSize = engine.getViewManager().getViewSize();
-		self.indicator.setPosition(viewSize.x - 40.0, 36.0);
+	fn post_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+		let view_size = engine.get_view_manager().get_view_size();
+		self.indicator.set_position(view_size.x - 40.0, 36.0);
 		self.indicator.draw(graphic);
-		self.screenEffect.end(graphic);
+		self.screen_effect.end(graphic);
 	}
 
 	//==============================================================================
@@ -351,13 +350,13 @@ impl Scene for TimelineShowcaseScene {
 // 진입점.
 //==============================================================================
 fn main() {
-	let mut engineConfiguration = EngineConfiguration::new();
-	engineConfiguration.title = String::from("타임라인 쇼케이스 (바닐라엔진)");
-	engineConfiguration.referenceResolutionSize = Vector2::create(VIEW_WIDTH, VIEW_HEIGHT);
-	engineConfiguration.viewScaleMode = ViewScaleMode::stretchShort;
-	engineConfiguration.windowSize = Vector2::create(VIEW_WIDTH, VIEW_HEIGHT);
-	engineConfiguration.assetDirectoryPaths = vec![PathBuf::from(EXAMPLE_ASSET_DIRECTORY)];
-	let engine = Engine::new(engineConfiguration);
+	let mut engine_configuration = EngineConfiguration::new();
+	engine_configuration.title = String::from("타임라인 쇼케이스 (바닐라엔진)");
+	engine_configuration.reference_resolution_size = Vector2::create(VIEW_WIDTH, VIEW_HEIGHT);
+	engine_configuration.view_scale_mode = ViewScaleMode::StretchShort;
+	engine_configuration.window_size = Vector2::create(VIEW_WIDTH, VIEW_HEIGHT);
+	engine_configuration.asset_directory_paths = vec![PathBuf::from(EXAMPLE_ASSET_DIRECTORY)];
+	let engine = Engine::new(engine_configuration);
 	if let Err(error) = engine.run(Box::new(TimelineShowcaseScene::new())) {
 		eprintln!("{}", error);
 		std::process::exit(1);

@@ -56,42 +56,40 @@ vanilla-engine = { git = "https://github.com/ddukbaek2/vanilla-engine" }
 `src/main.rs`:
 
 ```rust
-#![allow(non_snake_case)]
-
 use vanilla::{Colors, Engine, EngineConfiguration, Graphic, Rect, Scene, SceneBase, Vector2};
 
 struct MainScene {
-	sceneBase: SceneBase,
+	scene_base: SceneBase,
 }
 
 impl Scene for MainScene {
-	fn getSceneBase(&self) -> &SceneBase {
-		&self.sceneBase
+	fn get_scene_base(&self) -> &SceneBase {
+		&self.scene_base
 	}
 
-	fn getSceneBaseMut(&mut self) -> &mut SceneBase {
-		&mut self.sceneBase
+	fn get_scene_base_mut(&mut self) -> &mut SceneBase {
+		&mut self.scene_base
 	}
 
-	fn preDraw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
-		self.sceneBase.drawSceneBackground(engine, graphic);
+	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+		self.scene_base.draw_scene_background(engine, graphic);
 	}
 
 	fn draw(&mut self, _engine: &mut Engine, graphic: &mut Graphic) {
-		graphic.setFillColor(Colors::white);
-		graphic.drawRect(Rect::create(100.0, 100.0, 200.0, 120.0));
+		graphic.set_fill_color(Colors::WHITE);
+		graphic.draw_rect(Rect::create(100.0, 100.0, 200.0, 120.0));
 	}
 }
 
 fn main() {
-	let mut engineConfiguration = EngineConfiguration::new();
-	engineConfiguration.title = String::from("바닐라엔진");
-	engineConfiguration.referenceResolutionSize = Vector2::create(1280.0, 720.0);
-	let engine = Engine::new(engineConfiguration);
-	let mainScene = MainScene {
-		sceneBase: SceneBase::new(),
+	let mut engine_configuration = EngineConfiguration::new();
+	engine_configuration.title = String::from("바닐라엔진");
+	engine_configuration.reference_resolution_size = Vector2::create(1280.0, 720.0);
+	let engine = Engine::new(engine_configuration);
+	let main_scene = MainScene {
+		scene_base: SceneBase::new(),
 	};
-	if let Err(error) = engine.run(Box::new(mainScene)) {
+	if let Err(error) = engine.run(Box::new(main_scene)) {
 		eprintln!("{}", error);
 		std::process::exit(1);
 	}
@@ -102,7 +100,7 @@ fn main() {
 cargo run --example quickstart
 ```
 
-`referenceResolutionSize` 는 게임이 그리는 기준 해상도입니다. 창이나 브라우저 크기가 달라도 엔진이 그 크기에 맞춰 늘리고 줄입니다.
+`reference_resolution_size` 는 게임이 그리는 기준 해상도입니다. 창이나 브라우저 크기가 달라도 엔진이 그 크기에 맞춰 늘리고 줄입니다.
 
 ## 사용법
 
@@ -110,11 +108,11 @@ cargo run --example quickstart
 
 | 단계 | 하는 일 |
 | --- | --- |
-| `create` | 애셋 로딩을 요청하고 `sceneBase.trackAsset` 으로 등록합니다 |
-| `drawOnLoad` | 등록한 애셋의 로딩이 끝날 때까지 매 프레임 호출됩니다. 로딩 화면을 그립니다 |
+| `create` | 애셋 로딩을 요청하고 `scene_base.track_asset` 으로 등록합니다 |
+| `draw_on_load` | 등록한 애셋의 로딩이 끝날 때까지 매 프레임 호출됩니다. 로딩 화면을 그립니다 |
 | `initialize` | 로딩이 끝난 뒤 한 번 호출됩니다. 노드 트리를 만듭니다 |
 | `tick` | 매 프레임 업데이트. 기본 구현이 노드와 컴포넌트, 터치, 트윈을 업데이트합니다 |
-| `preDraw`, `draw`, `postDraw` | 매 프레임 렌더링. 기본 `draw` 가 노드 트리를 그립니다 |
+| `pre_draw`, `draw`, `post_draw` | 매 프레임 렌더링. 기본 `draw` 가 노드 트리를 그립니다 |
 | `destroy` | 씬이 언로드될 때 |
 
 ### 노드와 컴포넌트
@@ -125,55 +123,55 @@ cargo run --example quickstart
 
 ```rust
 struct Spin {
-	componentBase: ComponentBase,
-	degreesPerSecond: f32,
+	component_base: ComponentBase,
+	degrees_per_second: f32,
 }
 
 impl Component for Spin {
-	fn getComponentBase(&self) -> &ComponentBase {
-		&self.componentBase
+	fn get_component_base(&self) -> &ComponentBase {
+		&self.component_base
 	}
 
-	fn getComponentBaseMut(&mut self) -> &mut ComponentBase {
-		&mut self.componentBase
+	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
+		&mut self.component_base
 	}
 
-	fn getComponentType(&self) -> &'static str {
+	fn get_component_type(&self) -> &'static str {
 		"Spin"
 	}
 
-	fn tick(&mut self, context: &mut ComponentContext, timeDelta: f32) {
-		let transform = context.getTransformMut();
-		let localRotation = transform.getLocalRotation();
-		transform.setLocalRotation(localRotation + self.degreesPerSecond * timeDelta);
+	fn tick(&mut self, context: &mut ComponentContext, time_delta: f32) {
+		let transform = context.get_transform_mut();
+		let local_rotation = transform.get_local_rotation();
+		transform.set_local_rotation(local_rotation + self.degrees_per_second * time_delta);
 	}
 }
 
 // 씬의 initialize 에서
-let rootId = self.sceneBase.getRootId();
-let nodeTree = self.sceneBase.getNodeTreeMut();
-let squareId = nodeTree.createChild(rootId, "square");
-let squareNode = &mut nodeTree[squareId];
-squareNode.setLocalPosition(Vector2::create(640.0, 360.0));
-squareNode.setContentSize(Vector2::create(160.0, 160.0));
-squareNode.setPivot(Pivot::middleCenter);
-squareNode.addComponent(Paint::createWithColor("#f3e5ab"));
-squareNode.addComponent(Spin {
-	componentBase: ComponentBase::new(),
-	degreesPerSecond: 90.0,
+let root_id = self.scene_base.get_root_id();
+let node_tree = self.scene_base.get_node_tree_mut();
+let square_id = node_tree.create_child(root_id, "square");
+let square_node = &mut node_tree[square_id];
+square_node.set_local_position(Vector2::create(640.0, 360.0));
+square_node.set_content_size(Vector2::create(160.0, 160.0));
+square_node.set_pivot(Pivot::MIDDLE_CENTER);
+square_node.add_component(Paint::create_with_color("#f3e5ab"));
+square_node.add_component(Spin {
+	component_base: ComponentBase::new(),
+	degrees_per_second: 90.0,
 });
 ```
 
 - `ComponentContext` 로 자기 노드와 트랜스폼, 트리 전체(다른 노드 찾기, 만들기, 지우기), 엔진(입력, 시간, 뷰, 오디오)에 접근합니다.
-- 같은 노드의 다른 컴포넌트는 `context.getNodeMut().getComponentMut::<T>()` 로 찾습니다.
-- 씬 코드에서 컴포넌트와 트리를 함께 수정할 때는 `nodeTree.withComponentMut::<T, _>(nodeId, |component, tree| ...)` 를 씁니다.
-- `nodeTree.destroyNode(nodeId)` 는 자식 노드까지 삭제합니다. tick 이나 터치 처리 도중에 호출해도 순회가 끝난 뒤에 안전하게 삭제합니다.
+- 같은 노드의 다른 컴포넌트는 `context.get_node_mut().get_component_mut::<T>()` 로 찾습니다.
+- 씬 코드에서 컴포넌트와 트리를 함께 수정할 때는 `node_tree.with_component_mut::<T, _>(node_id, |component, tree| ...)` 를 씁니다.
+- `node_tree.destroy_node(node_id)` 는 자식 노드까지 삭제합니다. tick 이나 터치 처리 도중에 호출해도 순회가 끝난 뒤에 안전하게 삭제합니다.
 
 ### 애셋 로딩
 
 ```rust
 struct GameScene {
-	sceneBase: SceneBase,
+	scene_base: SceneBase,
 	logoAsset: ImageAsset,
 }
 
@@ -182,22 +180,22 @@ impl Scene for GameScene {
 
 	fn create(&mut self, engine: &mut Engine) {
 		self.logoAsset.load(engine, "images/logo.png");
-		self.sceneBase.trackAsset(&self.logoAsset);
+		self.scene_base.track_asset(&self.logoAsset);
 	}
 
 	fn initialize(&mut self, _engine: &mut Engine) {
-		let rootId = self.sceneBase.getRootId();
-		let logoImage = self.logoAsset.getImage();
-		let nodeTree = self.sceneBase.getNodeTreeMut();
+		let root_id = self.scene_base.get_root_id();
+		let logoImage = self.logoAsset.get_image();
+		let node_tree = self.scene_base.get_node_tree_mut();
 		if let Some(logoImage) = logoImage {
-			let logoId = nodeTree.createChild(rootId, "logo");
-			nodeTree[logoId].addComponent(Sprite::createWithImage(logoImage));
+			let logoId = node_tree.create_child(root_id, "logo");
+			node_tree[logoId].add_component(Sprite::create_with_image(logoImage));
 		}
 	}
 }
 ```
 
-- 데스크탑은 `EngineConfiguration.assetDirectoryPaths` 폴더에서 바로 읽고, 웹은 `assetBaseUrl + 경로` 를 fetch 합니다. 게임 코드는 같습니다.
+- 데스크탑은 `EngineConfiguration.asset_directory_paths` 폴더에서 바로 읽고, 웹은 `asset_base_url + 경로` 를 fetch 합니다. 게임 코드는 같습니다.
 - 이미지(png, jpg, webp), 텍스트, JSON, 바이너리, 폰트(ttf, otf, woff, woff2), 오디오(ogg, mp3, wav)를 지원합니다.
 - 로딩에 실패한 애셋도 완료로 처리해서 씬이 멈추지 않습니다.
 
@@ -226,7 +224,7 @@ init();
 </html>
 ```
 
-캔버스는 `EngineConfiguration.canvasId`(기본 `mainCanvas`)로 찾고, 없으면 엔진이 만듭니다.
+캔버스는 `EngineConfiguration.canvas_id`(기본 `mainCanvas`)로 찾고, 없으면 엔진이 만듭니다.
 
 ## 예제
 
@@ -258,15 +256,15 @@ cargo run --release --example modelviewer
 
 **컴포넌트가 자기 노드와 트리에 동시에 접근하는 방법.** 컴포넌트의 `tick` 을 호출할 때는 그 컴포넌트 하나만 노드에서 잠시 꺼내고 플레이스홀더로 바꿔 둡니다. 그래서 컴포넌트는 `&mut self` 를 가진 채로 자기 노드, 트리 전체, 같은 노드의 형제 컴포넌트, 엔진에 빌림 충돌 없이 접근할 수 있습니다.
 
-**하나의 경로로 모이는 2D 렌더링.** 스프라이트, 도형, 텍스트, 파티클이 모두 `Graphic.drawVertices` 하나를 거칩니다. 버텍스를 CPU 에서 변환해 모아 두었다가 같은 텍스처가 이어지는 동안 드로우 콜 한 번으로 그리고, 블렌드 모드가 바뀌거나 클리핑이 걸릴 때, 프레임이 끝날 때 플러시합니다. 버텍스 컬러 셰이더를 파티클과 함께 써서 색이 다른 그리기도 같은 배치에 들어갑니다. 벤치 장면에서 배칭을 켠 화면과 끈 화면을 비교하면 픽셀까지 같습니다.
+**하나의 경로로 모이는 2D 렌더링.** 스프라이트, 도형, 텍스트, 파티클이 모두 `Graphic.draw_vertices` 하나를 거칩니다. 버텍스를 CPU 에서 변환해 모아 두었다가 같은 텍스처가 이어지는 동안 드로우 콜 한 번으로 그리고, 블렌드 모드가 바뀌거나 클리핑이 걸릴 때, 프레임이 끝날 때 플러시합니다. 버텍스 컬러 셰이더를 파티클과 함께 써서 색이 다른 그리기도 같은 배치에 들어갑니다. 벤치 장면에서 배칭을 켠 화면과 끈 화면을 비교하면 픽셀까지 같습니다.
 
 **컬링과 업데이트 생략.** 영역 안에만 그리는 컴포넌트(Paint, Sprite, Mask)만 붙은 노드는 화면 밖이면 그리지 않습니다. 그리기만 하는 컴포넌트만 붙은 노드는 업데이트에서 아예 건너뜁니다.
 
-**async 없는 애셋 로딩.** 애셋을 요청하면 로딩 핸들을 받고, 데이터가 도착하면 상태가 완료로 바뀝니다. 데스크탑은 파일을 바로 읽어서 `create` 직후에 `initialize` 가 호출되고, 웹은 fetch 가 끝나는 프레임까지 `drawOnLoad` 로 로딩 화면을 그립니다. 같은 게임 코드가 두 플랫폼에서 그대로 돌아갑니다.
+**async 없는 애셋 로딩.** 애셋을 요청하면 로딩 핸들을 받고, 데이터가 도착하면 상태가 완료로 바뀝니다. 데스크탑은 파일을 바로 읽어서 `create` 직후에 `initialize` 가 호출되고, 웹은 fetch 가 끝나는 프레임까지 `draw_on_load` 로 로딩 화면을 그립니다. 같은 게임 코드가 두 플랫폼에서 그대로 돌아갑니다.
 
 **텍스트 렌더링.** 문자열 하나를 [fontdue](https://crates.io/crates/fontdue) 로 래스터라이즈해 텍스처 한 장으로 베이크하고, 최근에 쓴 512 개를 LRU 캐시에 둡니다. 첫 폰트에 없는 글자는 기본 폰트, 폴백 폰트 순으로 찾습니다. 웹 폰트(WOFF, WOFF2)도 디코딩해 쓰고, 웹에서 폰트를 지정하지 않으면 브라우저 Canvas2D 로 베이크해 시스템 폰트로 나옵니다.
 
-**GL 컨텍스트 하나에 2D 와 3D.** 씬의 `preDraw` 에서 그림자, 3D 장면, 블룸 패스를 그리고 `graphic.restoreRenderState()` 로 2D 상태를 되살린 뒤 UI 를 그립니다. 화면 효과는 화면(또는 영역)을 텍스처로 캡처해 풀스크린 패스를 체인으로 연결합니다.
+**GL 컨텍스트 하나에 2D 와 3D.** 씬의 `pre_draw` 에서 그림자, 3D 장면, 블룸 패스를 그리고 `graphic.restore_render_state()` 로 2D 상태를 되살린 뒤 UI 를 그립니다. 화면 효과는 화면(또는 영역)을 텍스처로 캡처해 풀스크린 패스를 체인으로 연결합니다.
 
 **웹에서도 제대로 되는 한글 입력.** 웹에서는 입력 필드마다 숨겨진 DOM `<input>` 을 두고 IME 조합 이벤트를 받아 캔버스에 그립니다. iOS 처럼 사용자 입력 안에서만 키보드가 뜨는 브라우저를 위해 터치 핸들러 안에서 포커스를 줍니다. 데스크탑은 winit 의 IME 이벤트를 씁니다.
 
@@ -327,13 +325,13 @@ cargo run --release --example modelviewer
 - 버전 0.3.2. 버전 번호는 vanilla.js 0.3.2 에서 이어 받았습니다.
 - vanilla.js 의 원본 160 파일 가운데 121 파일을 옮겼습니다. 20 파일은 러스트에 필요 없어서(컬렉션, 죽은 코드 같은 것) 옮기지 않았습니다.
 - 다음에 옮길 것: UINode, UIScene, UIDocument, 오토레이아웃, DevTools, DynamicFont, web/Pane, HumanSkinRenderer
-- 윈도우 11 데스크탑과 크롬에서 확인했습니다. macOS, 리눅스, 실제 모바일 기기는 아직 돌려 보지 않았습니다.
+- 윈도우 11 데스크탑, macOS(애플 실리콘) 데스크탑, 크롬에서 확인했습니다. 리눅스와 실제 모바일 기기는 아직 돌려 보지 않았습니다.
 
 ## 코드 스타일
 
-vanilla.js 와 같은 스타일을 씁니다.
+이름은 러스트 규칙([Rust API Guidelines C-CASE](https://rust-lang.github.io/api-guidelines/naming.html))을 따르고, 나머지는 vanilla.js 와 같은 스타일을 씁니다.
 
-- 이름은 모두 camelCase 입니다. 줄임말을 쓰지 않습니다. (러스트 기본 이름 경고는 끕니다)
+- 함수, 메서드, 변수, 필드, 모듈은 snake_case, 타입과 트레이트와 열거 값은 UpperCamelCase, 상수는 SCREAMING_SNAKE_CASE 입니다. 그래서 vanilla.js 의 `setFillColor` 는 `set_fill_color`, `Colors.white` 는 `Colors::WHITE` 입니다. 줄임말을 쓰지 않습니다.
 - 중괄호를 늘 쓰고, `else` 는 새 줄에서 시작합니다. 들여쓰기는 탭입니다.
 - 함수마다 `//====` 머리 주석을 달고, 파일 머리에 원본의 어느 파일을 옮겼는지 적습니다.
 - rustfmt 는 쓰지 않습니다.

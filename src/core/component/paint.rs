@@ -1,5 +1,5 @@
 //==============================================================================
-// 색 채우기 컴포넌트. (노드 contentSize 영역을 단색 / 둥근 사각형으로 칠한다)
+// 색 채우기 컴포넌트. (노드 content_size 영역을 단색 / 둥근 사각형으로 칠한다)
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::rect::Rect;
@@ -8,9 +8,9 @@ use crate::core::graphic::Graphic;
 use crate::core::node::worldnode::NodeTransform;
 
 pub struct Paint {
-	componentBase: ComponentBase,
+	component_base: ComponentBase,
 	color: Color,
-	roundSize: f32,
+	round_size: f32,
 }
 
 impl Paint {
@@ -19,64 +19,64 @@ impl Paint {
 	//==============================================================================
 	pub fn new() -> Paint {
 		Paint {
-			componentBase: ComponentBase::new(),
+			component_base: ComponentBase::new(),
 			color: Color::white(),
-			roundSize: 0.0,
+			round_size: 0.0,
 		}
 	}
 
 	//==============================================================================
 	// 색과 함께 생성.
 	//==============================================================================
-	pub fn createWithColor(color: impl Into<Color>) -> Paint {
+	pub fn create_with_color(color: impl Into<Color>) -> Paint {
 		let mut paint = Paint::new();
-		paint.setColor(color);
+		paint.set_color(color);
 		paint
 	}
 
 	//==============================================================================
 	// 출력. (Sprite 가 이미지 없을 때도 이것을 쓴다)
 	//==============================================================================
-	pub fn drawPaint(&self, transform: &NodeTransform, graphic: &mut Graphic) {
-		let contentSize = transform.getContentSize();
-		let color = self.getColor();
-		let rect = Rect::create(0.0, 0.0, contentSize.x, contentSize.y);
+	pub fn draw_paint(&self, transform: &NodeTransform, graphic: &mut Graphic) {
+		let content_size = transform.get_content_size();
+		let color = self.get_color();
+		let rect = Rect::create(0.0, 0.0, content_size.x, content_size.y);
 
-		graphic.setFillColor(color);
-		if self.roundSize > 0.0 {
-			graphic.drawRoundRect(rect, self.roundSize);
+		graphic.set_fill_color(color);
+		if self.round_size > 0.0 {
+			graphic.draw_round_rect(rect, self.round_size);
 		}
 		else {
-			graphic.drawRect(rect);
+			graphic.draw_rect(rect);
 		}
 	}
 
 	//==============================================================================
 	// 색상 설정. (Color 또는 "#rrggbb" 같은 문자열)
 	//==============================================================================
-	pub fn setColor(&mut self, color: impl Into<Color>) {
+	pub fn set_color(&mut self, color: impl Into<Color>) {
 		self.color = color.into();
 	}
 
 	//==============================================================================
 	// 색상 반환.
 	//==============================================================================
-	pub fn getColor(&self) -> Color {
+	pub fn get_color(&self) -> Color {
 		self.color
 	}
 
 	//==============================================================================
 	// 라운드 크기 설정.
 	//==============================================================================
-	pub fn setRoundSize(&mut self, roundSize: f32) {
-		self.roundSize = roundSize;
+	pub fn set_round_size(&mut self, round_size: f32) {
+		self.round_size = round_size;
 	}
 
 	//==============================================================================
 	// 라운드 크기 반환.
 	//==============================================================================
-	pub fn getRoundSize(&self) -> f32 {
-		self.roundSize
+	pub fn get_round_size(&self) -> f32 {
+		self.round_size
 	}
 }
 
@@ -87,27 +87,27 @@ impl Default for Paint {
 }
 
 impl Component for Paint {
-	fn getComponentBase(&self) -> &ComponentBase {
-		&self.componentBase
+	fn get_component_base(&self) -> &ComponentBase {
+		&self.component_base
 	}
 
-	fn getComponentBaseMut(&mut self) -> &mut ComponentBase {
-		&mut self.componentBase
+	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
+		&mut self.component_base
 	}
 
-	fn getComponentType(&self) -> &'static str {
+	fn get_component_type(&self) -> &'static str {
 		"Paint"
 	}
 
-	fn isTickNeeded(&self) -> bool {
+	fn is_tick_needed(&self) -> bool {
 		false
 	}
 
-	fn isDrawnInsideContent(&self) -> bool {
+	fn is_drawn_inside_content(&self) -> bool {
 		true
 	}
 
 	fn draw(&mut self, transform: &NodeTransform, graphic: &mut Graphic) {
-		self.drawPaint(transform, graphic);
+		self.draw_paint(transform, graphic);
 	}
 }

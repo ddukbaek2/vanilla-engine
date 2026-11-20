@@ -3,10 +3,10 @@
 // - 원본 misc/beepplayer.js. 오디오 파일 없이 UI 효과음을 합성한다.
 //   attack / sustain / release 엔벨로프로 클릭음이 나지 않게 한다.
 // - click / confirm / cancel / error / success / warning / notification 프리셋과
-//   임의 톤 시퀀스 재생(playSequence)을 제공한다.
+//   임의 톤 시퀀스 재생(play_sequence)을 제공한다.
 // - 사용:
-//     let beepPlayer = BeepPlayer::new(engine.getAudioManager(), BeepPlayer::DEFAULT_VOLUME);
-//     beepPlayer.playPreset("confirm");
+//     let beep_player = BeepPlayer::new(engine.get_audio_manager(), BeepPlayer::DEFAULT_VOLUME);
+//     beep_player.play_preset("confirm");
 // - 소리를 내는 곳:
 //   웹: 원본처럼 OscillatorNode + GainNode 를 만들어 오디오 컨텍스트의 출력에 바로 잇는다.
 //   데스크탑: 같은 엔벨로프로 파형을 샘플로 그려 kira 메인 트랙에 바로 튼다. (지연은 kira 의 지연 시작)
@@ -14,7 +14,7 @@
 //   파형 이름은 문자열 대신 BeepWaveform, 시퀀스의 톤은 BeepTone 이다. 프리셋 이름은 원본처럼 문자열이다.
 //   데스크탑의 파형은 대역 제한 없이 그린 것이라 square, sawtooth 의 높은 배음이 WebAudio 와 조금 다르다.
 //==============================================================================
-use crate::core::audiomanager::{resumeAudioManagerState, AudioManager, AudioManagerState};
+use crate::core::audiomanager::{resume_audio_manager_state, AudioManager, AudioManagerState};
 use crate::platform::audio as audioBackend;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -24,14 +24,14 @@ use std::rc::Rc;
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BeepWaveform {
-	sine,
-	square,
-	sawtooth,
-	triangle,
+	Sine,
+	Square,
+	Sawtooth,
+	Triangle,
 }
 
 //==============================================================================
-// 시퀀스의 톤 하나. (원본 { frequency, duration, waveform?, volumeScale? })
+// 시퀀스의 톤 하나. (원본 { frequency, duration, waveform?, volume_scale? })
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BeepTone {
@@ -41,75 +41,75 @@ pub struct BeepTone {
 	pub duration: f64,
 	pub waveform: BeepWaveform,
 	// 이 톤만의 음량 배율.
-	pub volumeScale: f32,
+	pub volume_scale: f32,
 }
 
 impl BeepTone {
 	//==============================================================================
-	// 생성. (사인파, 배율 1. 원본에서 waveform, volumeScale 을 비운 꼴)
+	// 생성. (사인파, 배율 1. 원본에서 waveform, volume_scale 을 비운 꼴)
 	//==============================================================================
 	pub const fn create(frequency: f32, duration: f64) -> BeepTone {
 		BeepTone {
 			frequency,
 			duration,
-			waveform: BeepWaveform::sine,
-			volumeScale: 1.0,
+			waveform: BeepWaveform::Sine,
+			volume_scale: 1.0,
 		}
 	}
 
 	//==============================================================================
 	// 파형과 배율까지 정해 생성.
 	//==============================================================================
-	pub const fn createWithWaveform(frequency: f32, duration: f64, waveform: BeepWaveform, volumeScale: f32) -> BeepTone {
+	pub const fn create_with_waveform(frequency: f32, duration: f64, waveform: BeepWaveform, volume_scale: f32) -> BeepTone {
 		BeepTone {
 			frequency,
 			duration,
 			waveform,
-			volumeScale,
+			volume_scale,
 		}
 	}
 }
 
 //==============================================================================
-// 톤 하나의 엔벨로프. (원본 playTone 이 계산하는 값들. 시간은 톤 시작 기준 초)
+// 톤 하나의 엔벨로프. (원본 play_tone 이 계산하는 값들. 시간은 톤 시작 기준 초)
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct BeepEnvelope {
 	pub(crate) frequency: f32,
 	pub(crate) waveform: BeepWaveform,
-	pub(crate) delaySeconds: f64,
-	pub(crate) durationSeconds: f64,
-	pub(crate) attackSeconds: f64,
-	pub(crate) releaseSeconds: f64,
-	pub(crate) peakVolume: f32,
+	pub(crate) delay_seconds: f64,
+	pub(crate) duration_seconds: f64,
+	pub(crate) attack_seconds: f64,
+	pub(crate) release_seconds: f64,
+	pub(crate) peak_volume: f32,
 }
 
 // 엔벨로프의 바닥 음량. (원본 0.0001, 지수 램프는 0 으로 갈 수 없다)
 pub(crate) const BEEP_FLOOR_VOLUME: f32 = 0.0001;
-// 오실레이터를 엔벨로프 끝보다 조금 더 돌리는 시간. (초, 원본 stop(endTime + 0.01))
+// 오실레이터를 엔벨로프 끝보다 조금 더 돌리는 시간. (초, 원본 stop(end_time + 0.01))
 pub(crate) const BEEP_STOP_MARGIN_SECONDS: f64 = 0.01;
 
 impl BeepEnvelope {
 	//==============================================================================
-	// 생성. (원본 playTone 의 attack, release, peak 계산)
+	// 생성. (원본 play_tone 의 attack, release, peak 계산)
 	//==============================================================================
-	pub(crate) fn create(frequency: f32, durationSeconds: f64, waveform: BeepWaveform, delaySeconds: f64, volume: f32, volumeScale: f32) -> BeepEnvelope {
+	pub(crate) fn create(frequency: f32, duration_seconds: f64, waveform: BeepWaveform, delay_seconds: f64, volume: f32, volume_scale: f32) -> BeepEnvelope {
 		BeepEnvelope {
 			frequency,
 			waveform,
-			delaySeconds,
-			durationSeconds,
-			attackSeconds: 0.005f64.min(durationSeconds * 0.25),
-			releaseSeconds: 0.02f64.min(durationSeconds * 0.5),
-			peakVolume: BEEP_FLOOR_VOLUME.max(volume * volumeScale),
+			delay_seconds,
+			duration_seconds,
+			attack_seconds: 0.005f64.min(duration_seconds * 0.25),
+			release_seconds: 0.02f64.min(duration_seconds * 0.5),
+			peak_volume: BEEP_FLOOR_VOLUME.max(volume * volume_scale),
 		}
 	}
 
 	//==============================================================================
-	// 최고 음량을 유지하다가 줄어들기 시작하는 시각. (원본 max(startTime + attack, endTime - release))
+	// 최고 음량을 유지하다가 줄어들기 시작하는 시각. (원본 max(start_time + attack, end_time - release))
 	//==============================================================================
-	pub(crate) fn getReleaseStartSeconds(&self) -> f64 {
-		self.attackSeconds.max(self.durationSeconds - self.releaseSeconds)
+	pub(crate) fn get_release_start_seconds(&self) -> f64 {
+		self.attack_seconds.max(self.duration_seconds - self.release_seconds)
 	}
 }
 
@@ -117,9 +117,9 @@ impl BeepEnvelope {
 // 절차적 비프 재생기.
 //==============================================================================
 pub struct BeepPlayer {
-	audioManagerState: Rc<RefCell<AudioManagerState>>,
+	audio_manager_state: Rc<RefCell<AudioManagerState>>,
 	volume: f32,
-	isMuted: bool,
+	is_muted: bool,
 }
 
 impl BeepPlayer {
@@ -129,84 +129,84 @@ impl BeepPlayer {
 	//==============================================================================
 	// 생성. (volume: 0 ~ 1. 원본처럼 매니저를 참조로 든다)
 	//==============================================================================
-	pub fn new(audioManager: &AudioManager, volume: f32) -> BeepPlayer {
-		let audioManagerState = audioManager.getSharedState();
+	pub fn new(audio_manager: &AudioManager, volume: f32) -> BeepPlayer {
+		let audio_manager_state = audio_manager.get_shared_state();
 		BeepPlayer {
-			audioManagerState,
+			audio_manager_state,
 			volume,
-			isMuted: false,
+			is_muted: false,
 		}
 	}
 
 	//==============================================================================
 	// 단일 톤 재생.
-	// - frequency: 주파수(Hz), durationSeconds: 길이(초), delaySeconds: 시작 지연(초), volumeScale: 이 톤만의 음량 배율.
+	// - frequency: 주파수(Hz), duration_seconds: 길이(초), delay_seconds: 시작 지연(초), volume_scale: 이 톤만의 음량 배율.
 	// - 컨텍스트가 없거나 돌고 있지 않으면 아무것도 하지 않는다.
 	//==============================================================================
-	pub fn playTone(&self, frequency: f32, durationSeconds: f64, waveform: BeepWaveform, delaySeconds: f64, volumeScale: f32) {
-		if self.isMuted {
+	pub fn play_tone(&self, frequency: f32, duration_seconds: f64, waveform: BeepWaveform, delay_seconds: f64, volume_scale: f32) {
+		if self.is_muted {
 			return;
 		}
-		resumeAudioManagerState(&self.audioManagerState);
-		let mut audioManagerState = self.audioManagerState.borrow_mut();
-		let audioContext = match audioManagerState.audioContext.as_mut() {
-			Some(audioContext) => {
-				audioContext
+		resume_audio_manager_state(&self.audio_manager_state);
+		let mut audio_manager_state = self.audio_manager_state.borrow_mut();
+		let audio_context = match audio_manager_state.audio_context.as_mut() {
+			Some(audio_context) => {
+				audio_context
 			}
 			None => {
 				return;
 			}
 		};
-		if !audioBackend::isAudioContextRunning(audioContext) {
+		if !audioBackend::is_audio_context_running(audio_context) {
 			return;
 		}
-		let beepEnvelope = BeepEnvelope::create(frequency, durationSeconds, waveform, delaySeconds, self.volume, volumeScale);
-		audioBackend::playBeepTone(audioContext, &beepEnvelope);
+		let beep_envelope = BeepEnvelope::create(frequency, duration_seconds, waveform, delay_seconds, self.volume, volume_scale);
+		audioBackend::play_beep_tone(audio_context, &beep_envelope);
 	}
 
 	//==============================================================================
 	// 톤 시퀀스 재생. (차례로 이어 튼다)
 	//==============================================================================
-	pub fn playSequence(&self, toneList: &[BeepTone]) {
-		let mut delaySeconds = 0.0;
-		for tone in toneList {
-			self.playTone(tone.frequency, tone.duration, tone.waveform, delaySeconds, tone.volumeScale);
-			delaySeconds += tone.duration;
+	pub fn play_sequence(&self, tone_list: &[BeepTone]) {
+		let mut delay_seconds = 0.0;
+		for tone in tone_list {
+			self.play_tone(tone.frequency, tone.duration, tone.waveform, delay_seconds, tone.volume_scale);
+			delay_seconds += tone.duration;
 		}
 	}
 
 	//==============================================================================
 	// 프리셋 재생. ("click" | "confirm" | "cancel" | "error" | "success" | "warning" | "notification", 모르는 이름은 click)
 	//==============================================================================
-	pub fn playPreset(&self, presetName: &str) {
-		match presetName {
+	pub fn play_preset(&self, preset_name: &str) {
+		match preset_name {
 			"confirm" => {
-				self.playSequence(&[BeepTone::create(660.0, 0.06), BeepTone::create(990.0, 0.09)]);
+				self.play_sequence(&[BeepTone::create(660.0, 0.06), BeepTone::create(990.0, 0.09)]);
 			}
 			"cancel" => {
-				self.playSequence(&[BeepTone::create(520.0, 0.06), BeepTone::create(360.0, 0.09)]);
+				self.play_sequence(&[BeepTone::create(520.0, 0.06), BeepTone::create(360.0, 0.09)]);
 			}
 			"error" => {
-				self.playSequence(&[
-					BeepTone::createWithWaveform(220.0, 0.1, BeepWaveform::square, 0.7),
-					BeepTone::createWithWaveform(180.0, 0.14, BeepWaveform::square, 0.7),
+				self.play_sequence(&[
+					BeepTone::create_with_waveform(220.0, 0.1, BeepWaveform::Square, 0.7),
+					BeepTone::create_with_waveform(180.0, 0.14, BeepWaveform::Square, 0.7),
 				]);
 			}
 			"success" => {
-				self.playSequence(&[BeepTone::create(523.0, 0.07), BeepTone::create(659.0, 0.07), BeepTone::create(784.0, 0.12)]);
+				self.play_sequence(&[BeepTone::create(523.0, 0.07), BeepTone::create(659.0, 0.07), BeepTone::create(784.0, 0.12)]);
 			}
 			"warning" => {
-				self.playSequence(&[
-					BeepTone::createWithWaveform(740.0, 0.08, BeepWaveform::triangle, 1.0),
-					BeepTone::createWithWaveform(740.0, 0.08, BeepWaveform::triangle, 1.0),
+				self.play_sequence(&[
+					BeepTone::create_with_waveform(740.0, 0.08, BeepWaveform::Triangle, 1.0),
+					BeepTone::create_with_waveform(740.0, 0.08, BeepWaveform::Triangle, 1.0),
 				]);
 			}
 			"notification" => {
-				self.playSequence(&[BeepTone::create(1047.0, 0.06), BeepTone::create(1319.0, 0.1)]);
+				self.play_sequence(&[BeepTone::create(1047.0, 0.06), BeepTone::create(1319.0, 0.1)]);
 			}
 			_ => {
 				// "click" 과 모르는 이름.
-				self.playTone(880.0, 0.045, BeepWaveform::sine, 0.0, 1.0);
+				self.play_tone(880.0, 0.045, BeepWaveform::Sine, 0.0, 1.0);
 			}
 		}
 	}
@@ -214,29 +214,29 @@ impl BeepPlayer {
 	//==============================================================================
 	// 기본 음량 설정. (0 ~ 1)
 	//==============================================================================
-	pub fn setVolume(&mut self, volume: f32) {
+	pub fn set_volume(&mut self, volume: f32) {
 		self.volume = volume.clamp(0.0, 1.0);
 	}
 
 	//==============================================================================
 	// 기본 음량 반환.
 	//==============================================================================
-	pub fn getVolume(&self) -> f32 {
+	pub fn get_volume(&self) -> f32 {
 		self.volume
 	}
 
 	//==============================================================================
 	// 음소거 설정.
 	//==============================================================================
-	pub fn setMuted(&mut self, isMuted: bool) {
-		self.isMuted = isMuted;
+	pub fn set_muted(&mut self, is_muted: bool) {
+		self.is_muted = is_muted;
 	}
 
 	//==============================================================================
 	// 음소거 여부.
 	//==============================================================================
-	pub fn isMuted(&self) -> bool {
-		self.isMuted
+	pub fn is_muted(&self) -> bool {
+		self.is_muted
 	}
 }
 
@@ -245,21 +245,21 @@ mod tests {
 	use super::*;
 
 	//==============================================================================
-	// 엔벨로프 값은 원본 playTone 의 계산과 같다.
+	// 엔벨로프 값은 원본 play_tone 의 계산과 같다.
 	//==============================================================================
 	#[test]
-	fn envelopeMatchesOriginalFormula() {
-		let clickEnvelope = BeepEnvelope::create(880.0, 0.045, BeepWaveform::sine, 0.0, 0.35, 1.0);
-		assert!((clickEnvelope.attackSeconds - 0.005).abs() < 1e-9);
-		assert!((clickEnvelope.releaseSeconds - 0.02).abs() < 1e-9);
-		assert!((clickEnvelope.peakVolume - 0.35).abs() < 1e-6);
-		assert!((clickEnvelope.getReleaseStartSeconds() - 0.025).abs() < 1e-9);
+	fn envelope_matches_original_formula() {
+		let click_envelope = BeepEnvelope::create(880.0, 0.045, BeepWaveform::Sine, 0.0, 0.35, 1.0);
+		assert!((click_envelope.attack_seconds - 0.005).abs() < 1e-9);
+		assert!((click_envelope.release_seconds - 0.02).abs() < 1e-9);
+		assert!((click_envelope.peak_volume - 0.35).abs() < 1e-6);
+		assert!((click_envelope.get_release_start_seconds() - 0.025).abs() < 1e-9);
 
 		// 아주 짧은 톤은 attack 이 길이의 1/4, release 가 1/2 로 줄어든다.
-		let shortEnvelope = BeepEnvelope::create(440.0, 0.01, BeepWaveform::square, 0.2, 0.0, 1.0);
-		assert!((shortEnvelope.attackSeconds - 0.0025).abs() < 1e-9);
-		assert!((shortEnvelope.releaseSeconds - 0.005).abs() < 1e-9);
-		assert_eq!(shortEnvelope.peakVolume, BEEP_FLOOR_VOLUME);
-		assert!((shortEnvelope.delaySeconds - 0.2).abs() < 1e-9);
+		let short_envelope = BeepEnvelope::create(440.0, 0.01, BeepWaveform::Square, 0.2, 0.0, 1.0);
+		assert!((short_envelope.attack_seconds - 0.0025).abs() < 1e-9);
+		assert!((short_envelope.release_seconds - 0.005).abs() < 1e-9);
+		assert_eq!(short_envelope.peak_volume, BEEP_FLOOR_VOLUME);
+		assert!((short_envelope.delay_seconds - 0.2).abs() < 1e-9);
 	}
 }

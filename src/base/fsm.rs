@@ -1,21 +1,21 @@
 //==============================================================================
 // 유한 상태 기계. (원본 base/fsm.js 의 FiniteStateMachine)
 // - 여러 게임이 "문자열 상태 + switch 문 + 수동 전이" 를 제각각 만들던 것을 표준화했다.
-// - 상태마다 enter / tick / exit 처리를 등록하고 changeState() 로 전이한다.
-// - setTransitionGuard() 로 허용되지 않은 전이를 막을 수 있다.
+// - 상태마다 enter / tick / exit 처리를 등록하고 change_state() 로 전이한다.
+// - set_transition_guard() 로 허용되지 않은 전이를 막을 수 있다.
 // - 원본 상태 이름은 문자열이다. 러스트 판은 상태 이름 타입을 고를 수 있게 했다. (기본은 String, 열거형이나 &'static str 도 된다)
 //   원본의 null 상태(아직 아무 상태도 아님)는 None 이다.
 // - 원본 handlers 객체 { enter?, tick?, exit? } 는 StateHandlers 구조체다. 콜백은 Box<dyn FnMut> 라서
 //   게임 상태를 바꾸려면 Rc<Cell> / Rc<RefCell> 을 잡아 넣는다.
-// - 원본은 처리 함수 안에서 같은 기계의 changeState 를 다시 부를 수 있다. 러스트 판은 처리 함수가 기계를 빌릴 수 없어서
-//   그렇게 못 한다. 처리 함수가 다음 상태를 표시해 두고, 바깥에서 tick 뒤에 changeState 를 부른다.
+// - 원본은 처리 함수 안에서 같은 기계의 change_state 를 다시 부를 수 있다. 러스트 판은 처리 함수가 기계를 빌릴 수 없어서
+//   그렇게 못 한다. 처리 함수가 다음 상태를 표시해 두고, 바깥에서 tick 뒤에 change_state 를 부른다.
 //==============================================================================
 use std::collections::HashMap;
 use std::hash::Hash;
 
 // 상태에 들어갈 때 부른다. (이전 상태 이름, 처음이면 None)
 pub type StateEnterHandler<StateName> = Box<dyn FnMut(Option<&StateName>)>;
-// 상태에 머무는 동안 tick 마다 부른다. (timeDelta, 이 상태에 머문 초)
+// 상태에 머무는 동안 tick 마다 부른다. (time_delta, 이 상태에 머문 초)
 pub type StateTickHandler = Box<dyn FnMut(f32, f32)>;
 // 상태에서 나갈 때 부른다. (다음 상태 이름)
 pub type StateExitHandler<StateName> = Box<dyn FnMut(&StateName)>;
@@ -25,7 +25,7 @@ pub type TransitionGuard<StateName> = Box<dyn FnMut(Option<&StateName>, &StateNa
 pub type TransitionEvent<StateName> = Box<dyn FnMut(Option<&StateName>, &StateName)>;
 
 //==============================================================================
-// 상태 처리 함수 묶음. (원본 addState 의 handlers: { enter?, tick?, exit? })
+// 상태 처리 함수 묶음. (원본 add_state 의 handlers: { enter?, tick?, exit? })
 //==============================================================================
 pub struct StateHandlers<StateName> {
 	pub enter: Option<StateEnterHandler<StateName>>,
@@ -46,11 +46,11 @@ impl<StateName> Default for StateHandlers<StateName> {
 // 유한 상태 기계.
 //==============================================================================
 pub struct FiniteStateMachine<StateName = String> {
-	stateTable: HashMap<StateName, StateHandlers<StateName>>,
-	stateName: Option<StateName>,
-	stateSeconds: f32,
-	transitionGuard: Option<TransitionGuard<StateName>>,
-	transitionEvent: Option<TransitionEvent<StateName>>,
+	state_table: HashMap<StateName, StateHandlers<StateName>>,
+	state_name: Option<StateName>,
+	state_seconds: f32,
+	transition_guard: Option<TransitionGuard<StateName>>,
+	transition_event: Option<TransitionEvent<StateName>>,
 }
 
 impl<StateName: Clone + Eq + Hash> Default for FiniteStateMachine<StateName> {
@@ -68,60 +68,60 @@ impl<StateName: Clone + Eq + Hash> FiniteStateMachine<StateName> {
 	//==============================================================================
 	pub fn new() -> FiniteStateMachine<StateName> {
 		FiniteStateMachine {
-			stateTable: HashMap::new(),
-			stateName: None,
-			stateSeconds: 0.0,
-			transitionGuard: None,
-			transitionEvent: None,
+			state_table: HashMap::new(),
+			state_name: None,
+			state_seconds: 0.0,
+			transition_guard: None,
+			transition_event: None,
 		}
 	}
 
 	//==============================================================================
 	// 상태 등록. (같은 이름이 있으면 처리 함수를 바꾼다)
 	//==============================================================================
-	pub fn addState(&mut self, stateName: StateName, handlers: StateHandlers<StateName>) {
-		self.stateTable.insert(stateName, handlers);
+	pub fn add_state(&mut self, state_name: StateName, handlers: StateHandlers<StateName>) {
+		self.state_table.insert(state_name, handlers);
 	}
 
 	//==============================================================================
 	// 상태 전이. (전이 성공 여부를 돌려준다)
 	// - 등록되지 않은 상태로는 가지 않는다.
-	// - 같은 상태로의 전이는 기본적으로 무시한다. (isForced 가 참이면 exit / enter 를 다시 부른다)
+	// - 같은 상태로의 전이는 기본적으로 무시한다. (is_forced 가 참이면 exit / enter 를 다시 부른다)
 	// - 전이 가드가 거짓을 돌려주면 전이하지 않는다.
 	// - 순서: 이전 상태 exit → 상태 바꾸고 머문 시간 0 → 전이 알림 → 다음 상태 enter.
 	//==============================================================================
-	pub fn changeState(&mut self, nextStateName: StateName, isForced: bool) -> bool {
-		if !self.stateTable.contains_key(&nextStateName) {
+	pub fn change_state(&mut self, next_state_name: StateName, is_forced: bool) -> bool {
+		if !self.state_table.contains_key(&next_state_name) {
 			return false;
 		}
-		let previousStateName = self.stateName.clone();
-		if previousStateName.as_ref() == Some(&nextStateName) && !isForced {
+		let previous_state_name = self.state_name.clone();
+		if previous_state_name.as_ref() == Some(&next_state_name) && !is_forced {
 			return false;
 		}
-		if let Some(transitionGuard) = self.transitionGuard.as_mut() {
-			if !transitionGuard(previousStateName.as_ref(), &nextStateName) {
+		if let Some(transition_guard) = self.transition_guard.as_mut() {
+			if !transition_guard(previous_state_name.as_ref(), &next_state_name) {
 				return false;
 			}
 		}
 
-		if let Some(previousName) = previousStateName.as_ref() {
-			if let Some(previousState) = self.stateTable.get_mut(previousName) {
-				if let Some(exit) = previousState.exit.as_mut() {
-					exit(&nextStateName);
+		if let Some(previous_name) = previous_state_name.as_ref() {
+			if let Some(previous_state) = self.state_table.get_mut(previous_name) {
+				if let Some(exit) = previous_state.exit.as_mut() {
+					exit(&next_state_name);
 				}
 			}
 		}
 
-		self.stateName = Some(nextStateName.clone());
-		self.stateSeconds = 0.0;
+		self.state_name = Some(next_state_name.clone());
+		self.state_seconds = 0.0;
 
-		if let Some(transitionEvent) = self.transitionEvent.as_mut() {
-			transitionEvent(previousStateName.as_ref(), &nextStateName);
+		if let Some(transition_event) = self.transition_event.as_mut() {
+			transition_event(previous_state_name.as_ref(), &next_state_name);
 		}
 
-		if let Some(nextState) = self.stateTable.get_mut(&nextStateName) {
-			if let Some(enter) = nextState.enter.as_mut() {
-				enter(previousStateName.as_ref());
+		if let Some(next_state) = self.state_table.get_mut(&next_state_name) {
+			if let Some(enter) = next_state.enter.as_mut() {
+				enter(previous_state_name.as_ref());
 			}
 		}
 		true
@@ -130,19 +130,19 @@ impl<StateName: Clone + Eq + Hash> FiniteStateMachine<StateName> {
 	//==============================================================================
 	// 갱신. (머문 시간을 늘리고 현재 상태의 tick 을 부른다)
 	//==============================================================================
-	pub fn tick(&mut self, timeDelta: f32) {
-		let stateName = match self.stateName.as_ref() {
-			Some(stateName) => {
-				stateName
+	pub fn tick(&mut self, time_delta: f32) {
+		let state_name = match self.state_name.as_ref() {
+			Some(state_name) => {
+				state_name
 			}
 			None => {
 				return;
 			}
 		};
-		self.stateSeconds += timeDelta;
-		if let Some(currentState) = self.stateTable.get_mut(stateName) {
-			if let Some(tick) = currentState.tick.as_mut() {
-				tick(timeDelta, self.stateSeconds);
+		self.state_seconds += time_delta;
+		if let Some(current_state) = self.state_table.get_mut(state_name) {
+			if let Some(tick) = current_state.tick.as_mut() {
+				tick(time_delta, self.state_seconds);
 			}
 		}
 	}
@@ -150,36 +150,36 @@ impl<StateName: Clone + Eq + Hash> FiniteStateMachine<StateName> {
 	//==============================================================================
 	// 현재 상태 이름 반환. (아직 아무 상태도 아니면 None)
 	//==============================================================================
-	pub fn getStateName(&self) -> Option<&StateName> {
-		self.stateName.as_ref()
+	pub fn get_state_name(&self) -> Option<&StateName> {
+		self.state_name.as_ref()
 	}
 
 	//==============================================================================
 	// 현재 상태에 머문 시간 반환. (초)
 	//==============================================================================
-	pub fn getStateSeconds(&self) -> f32 {
-		self.stateSeconds
+	pub fn get_state_seconds(&self) -> f32 {
+		self.state_seconds
 	}
 
 	//==============================================================================
 	// 상태 존재 여부.
 	//==============================================================================
-	pub fn hasState(&self, stateName: &StateName) -> bool {
-		self.stateTable.contains_key(stateName)
+	pub fn has_state(&self, state_name: &StateName) -> bool {
+		self.state_table.contains_key(state_name)
 	}
 
 	//==============================================================================
 	// 전이 가드 설정. (previous, next) → bool, None 이면 가드 없음
 	//==============================================================================
-	pub fn setTransitionGuard(&mut self, transitionGuard: Option<TransitionGuard<StateName>>) {
-		self.transitionGuard = transitionGuard;
+	pub fn set_transition_guard(&mut self, transition_guard: Option<TransitionGuard<StateName>>) {
+		self.transition_guard = transition_guard;
 	}
 
 	//==============================================================================
 	// 전이 알림 설정. (previous, next), exit 뒤, enter 앞에 불린다. None 이면 알림 없음
 	//==============================================================================
-	pub fn setTransitionEvent(&mut self, transitionEvent: Option<TransitionEvent<StateName>>) {
-		self.transitionEvent = transitionEvent;
+	pub fn set_transition_event(&mut self, transition_event: Option<TransitionEvent<StateName>>) {
+		self.transition_event = transition_event;
 	}
 }
 
@@ -191,28 +191,28 @@ mod tests {
 
 	#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 	enum TestState {
-		idle,
-		run,
-		dead,
-		unknown,
+		Idle,
+		Run,
+		Dead,
+		Unknown,
 	}
 
 	//==============================================================================
 	// 기록을 남기는 처리 함수 묶음을 만든다.
 	//==============================================================================
-	fn createRecordingHandlers(name: &'static str, records: &Rc<RefCell<Vec<String>>>) -> StateHandlers<TestState> {
-		let enterRecords = records.clone();
-		let tickRecords = records.clone();
-		let exitRecords = records.clone();
+	fn create_recording_handlers(name: &'static str, records: &Rc<RefCell<Vec<String>>>) -> StateHandlers<TestState> {
+		let enter_records = records.clone();
+		let tick_records = records.clone();
+		let exit_records = records.clone();
 		StateHandlers {
-			enter: Some(Box::new(move |previousStateName: Option<&TestState>| {
-				enterRecords.borrow_mut().push(format!("{}.enter({:?})", name, previousStateName));
+			enter: Some(Box::new(move |previous_state_name: Option<&TestState>| {
+				enter_records.borrow_mut().push(format!("{}.enter({:?})", name, previous_state_name));
 			})),
-			tick: Some(Box::new(move |timeDelta: f32, stateSeconds: f32| {
-				tickRecords.borrow_mut().push(format!("{}.tick({}, {})", name, timeDelta, stateSeconds));
+			tick: Some(Box::new(move |time_delta: f32, state_seconds: f32| {
+				tick_records.borrow_mut().push(format!("{}.tick({}, {})", name, time_delta, state_seconds));
 			})),
-			exit: Some(Box::new(move |nextStateName: &TestState| {
-				exitRecords.borrow_mut().push(format!("{}.exit({:?})", name, nextStateName));
+			exit: Some(Box::new(move |next_state_name: &TestState| {
+				exit_records.borrow_mut().push(format!("{}.exit({:?})", name, next_state_name));
 			})),
 		}
 	}
@@ -223,69 +223,69 @@ mod tests {
 	#[test]
 	fn transitions() {
 		let records = Rc::new(RefCell::new(Vec::<String>::new()));
-		let mut stateMachine = FiniteStateMachine::<TestState>::new();
-		stateMachine.addState(TestState::idle, createRecordingHandlers("idle", &records));
-		stateMachine.addState(TestState::run, createRecordingHandlers("run", &records));
-		stateMachine.addState(TestState::dead, StateHandlers::default());
-		let eventRecords = records.clone();
-		stateMachine.setTransitionEvent(Some(Box::new(move |previousStateName: Option<&TestState>, nextStateName: &TestState| {
-			eventRecords.borrow_mut().push(format!("event({:?}, {:?})", previousStateName, nextStateName));
+		let mut state_machine = FiniteStateMachine::<TestState>::new();
+		state_machine.add_state(TestState::Idle, create_recording_handlers("idle", &records));
+		state_machine.add_state(TestState::Run, create_recording_handlers("run", &records));
+		state_machine.add_state(TestState::Dead, StateHandlers::default());
+		let event_records = records.clone();
+		state_machine.set_transition_event(Some(Box::new(move |previous_state_name: Option<&TestState>, next_state_name: &TestState| {
+			event_records.borrow_mut().push(format!("event({:?}, {:?})", previous_state_name, next_state_name));
 		})));
 
-		assert!(stateMachine.hasState(&TestState::idle));
-		assert!(!stateMachine.hasState(&TestState::unknown));
-		assert_eq!(stateMachine.getStateName(), None);
-		stateMachine.tick(1.0);
-		assert_eq!(stateMachine.getStateSeconds(), 0.0);
-		assert!(!stateMachine.changeState(TestState::unknown, false));
+		assert!(state_machine.has_state(&TestState::Idle));
+		assert!(!state_machine.has_state(&TestState::Unknown));
+		assert_eq!(state_machine.get_state_name(), None);
+		state_machine.tick(1.0);
+		assert_eq!(state_machine.get_state_seconds(), 0.0);
+		assert!(!state_machine.change_state(TestState::Unknown, false));
 
-		assert!(stateMachine.changeState(TestState::idle, false));
-		assert_eq!(stateMachine.getStateName(), Some(&TestState::idle));
-		stateMachine.tick(0.25);
-		stateMachine.tick(0.5);
-		assert_eq!(stateMachine.getStateSeconds(), 0.75);
-		assert!(!stateMachine.changeState(TestState::idle, false));
-		assert_eq!(stateMachine.getStateSeconds(), 0.75);
-		assert!(stateMachine.changeState(TestState::idle, true));
-		assert_eq!(stateMachine.getStateSeconds(), 0.0);
-		assert!(stateMachine.changeState(TestState::run, false));
+		assert!(state_machine.change_state(TestState::Idle, false));
+		assert_eq!(state_machine.get_state_name(), Some(&TestState::Idle));
+		state_machine.tick(0.25);
+		state_machine.tick(0.5);
+		assert_eq!(state_machine.get_state_seconds(), 0.75);
+		assert!(!state_machine.change_state(TestState::Idle, false));
+		assert_eq!(state_machine.get_state_seconds(), 0.75);
+		assert!(state_machine.change_state(TestState::Idle, true));
+		assert_eq!(state_machine.get_state_seconds(), 0.0);
+		assert!(state_machine.change_state(TestState::Run, false));
 
 		let expected = vec![
-			"event(None, idle)",
+			"event(None, Idle)",
 			"idle.enter(None)",
 			"idle.tick(0.25, 0.25)",
 			"idle.tick(0.5, 0.75)",
-			"idle.exit(idle)",
-			"event(Some(idle), idle)",
-			"idle.enter(Some(idle))",
-			"idle.exit(run)",
-			"event(Some(idle), run)",
-			"run.enter(Some(idle))",
+			"idle.exit(Idle)",
+			"event(Some(Idle), Idle)",
+			"idle.enter(Some(Idle))",
+			"idle.exit(Run)",
+			"event(Some(Idle), Run)",
+			"run.enter(Some(Idle))",
 		];
 		assert_eq!(*records.borrow(), expected);
 
 		// 죽으면 어디로도 못 간다.
-		stateMachine.setTransitionGuard(Some(Box::new(|previousStateName: Option<&TestState>, _nextStateName: &TestState| {
-			previousStateName != Some(&TestState::dead)
+		state_machine.set_transition_guard(Some(Box::new(|previous_state_name: Option<&TestState>, _next_state_name: &TestState| {
+			previous_state_name != Some(&TestState::Dead)
 		})));
-		assert!(stateMachine.changeState(TestState::dead, false));
-		assert!(!stateMachine.changeState(TestState::idle, false));
-		assert!(!stateMachine.changeState(TestState::idle, true));
-		assert_eq!(stateMachine.getStateName(), Some(&TestState::dead));
-		stateMachine.setTransitionGuard(None);
-		assert!(stateMachine.changeState(TestState::idle, false));
+		assert!(state_machine.change_state(TestState::Dead, false));
+		assert!(!state_machine.change_state(TestState::Idle, false));
+		assert!(!state_machine.change_state(TestState::Idle, true));
+		assert_eq!(state_machine.get_state_name(), Some(&TestState::Dead));
+		state_machine.set_transition_guard(None);
+		assert!(state_machine.change_state(TestState::Idle, false));
 	}
 
 	//==============================================================================
 	// 원본처럼 문자열 이름으로도 쓴다. (기본 타입 String)
 	//==============================================================================
 	#[test]
-	fn stringStateNames() {
-		let mut stateMachine: FiniteStateMachine = FiniteStateMachine::new();
-		stateMachine.addState("title".to_string(), StateHandlers::default());
-		stateMachine.addState("play".to_string(), StateHandlers::default());
-		assert!(stateMachine.changeState("title".to_string(), false));
-		assert!(stateMachine.changeState("play".to_string(), false));
-		assert_eq!(stateMachine.getStateName().map(|stateName| stateName.as_str()), Some("play"));
+	fn string_state_names() {
+		let mut state_machine: FiniteStateMachine = FiniteStateMachine::new();
+		state_machine.add_state("title".to_string(), StateHandlers::default());
+		state_machine.add_state("play".to_string(), StateHandlers::default());
+		assert!(state_machine.change_state("title".to_string(), false));
+		assert!(state_machine.change_state("play".to_string(), false));
+		assert_eq!(state_machine.get_state_name().map(|state_name| state_name.as_str()), Some("play"));
 	}
 }

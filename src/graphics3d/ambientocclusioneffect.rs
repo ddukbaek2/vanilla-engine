@@ -1,6 +1,6 @@
 //==============================================================================
 // 화면 공간 앰비언트 오클루전. (원본 experimental/graphics/ambientocclusioneffect.js)
-// - 깊이 + 노멀 버퍼 → 반구 표본 차폐 → 깊이 인식 블러. 결과는 getResultTexture() 의 r 채널 가시율(1 = 차폐 없음).
+// - 깊이 + 노멀 버퍼 → 반구 표본 차폐 → 깊이 인식 블러. 결과는 get_result_texture() 의 r 채널 가시율(1 = 차폐 없음).
 // - render() 입력은 본 패스의 깊이 텍스처와 월드 노멀 텍스처(알파 = 커버리지), 카메라의 뷰 회전 / 투영 파라미터.
 // - GLSL 과 커널, 기본값(반경 0.03, 강도 1, 바이어스 0.002, 배율 0.5)은 원본과 같다. 원본 ${SAMPLE_COUNT} 는 숫자 16 으로 옮겼다.
 // - GL 을 쓰는 함수는 gl 을 받고, 생성과 크기 변경은 GL 객체를 못 만들면 오류(Result)를 돌려준다.
@@ -117,12 +117,12 @@ void main() {
 // 화면 공간 앰비언트 오클루전.
 //==============================================================================
 pub struct AmbientOcclusionEffect {
-	occlusionPass: FullscreenPass,
-	blurPass: FullscreenPass,
-	occlusionRenderTarget: RenderTarget,
-	pingRenderTarget: RenderTarget,
-	pongRenderTarget: RenderTarget,
-	sampleKernel: [f32; SAMPLE_COUNT * 3],
+	occlusion_pass: FullscreenPass,
+	blur_pass: FullscreenPass,
+	occlusion_render_target: RenderTarget,
+	ping_render_target: RenderTarget,
+	pong_render_target: RenderTarget,
+	sample_kernel: [f32; SAMPLE_COUNT * 3],
 	radius: f32,
 	intensity: f32,
 	bias: f32,
@@ -134,123 +134,123 @@ impl AmbientOcclusionEffect {
 	// 생성. (패스 2개 + 반정밀 실수 타겟 3장, resize 로 크기를 맞춘다)
 	//==============================================================================
 	pub fn new(gl: &glow::Context) -> Result<AmbientOcclusionEffect, String> {
-		let floatColorOptions = RenderTargetOptions {
-			useFloatColor: true,
+		let float_color_options = RenderTargetOptions {
+			use_float_color: true,
 			..RenderTargetOptions::default()
 		};
-		let mut ambientOcclusionEffect = AmbientOcclusionEffect {
-			occlusionPass: FullscreenPass::new(gl, OCCLUSION_FRAGMENTSHADER_SOURCE)?,
-			blurPass: FullscreenPass::new(gl, BLUR_FRAGMENTSHADER_SOURCE)?,
-			occlusionRenderTarget: RenderTarget::new(gl, 2, 2, false, Some(floatColorOptions))?,
-			pingRenderTarget: RenderTarget::new(gl, 2, 2, false, Some(floatColorOptions))?,
-			pongRenderTarget: RenderTarget::new(gl, 2, 2, false, Some(floatColorOptions))?,
-			sampleKernel: [0.0; SAMPLE_COUNT * 3],
+		let mut ambient_occlusion_effect = AmbientOcclusionEffect {
+			occlusion_pass: FullscreenPass::new(gl, OCCLUSION_FRAGMENTSHADER_SOURCE)?,
+			blur_pass: FullscreenPass::new(gl, BLUR_FRAGMENTSHADER_SOURCE)?,
+			occlusion_render_target: RenderTarget::new(gl, 2, 2, false, Some(float_color_options))?,
+			ping_render_target: RenderTarget::new(gl, 2, 2, false, Some(float_color_options))?,
+			pong_render_target: RenderTarget::new(gl, 2, 2, false, Some(float_color_options))?,
+			sample_kernel: [0.0; SAMPLE_COUNT * 3],
 			radius: 0.03,
 			intensity: 1.0,
 			bias: 0.002,
 			scale: 0.5,
 		};
-		ambientOcclusionEffect.computeKernel();
-		Ok(ambientOcclusionEffect)
+		ambient_occlusion_effect.compute_kernel();
+		Ok(ambient_occlusion_effect)
 	}
 
 	//==============================================================================
 	// 표본 커널 계산. (반구 안에 고르게, 중심 쪽에 더 촘촘히)
 	//==============================================================================
-	pub fn computeKernel(&mut self) {
-		self.sampleKernel = AmbientOcclusionEffect::buildSampleKernel();
+	pub fn compute_kernel(&mut self) {
+		self.sample_kernel = AmbientOcclusionEffect::build_sample_kernel();
 	}
 
 	//==============================================================================
 	// 표본 커널 만들기. (GL 무관, 황금각 나선, 높이 고르게, 크기 0.15 ~ 1 제곱 분포)
 	//==============================================================================
-	pub fn buildSampleKernel() -> [f32; SAMPLE_COUNT * 3] {
-		let mut sampleKernel = [0.0f32; SAMPLE_COUNT * 3];
-		for sampleIndex in 0..SAMPLE_COUNT {
-			let goldenAngle = 2.39996323f64;
-			let angle = sampleIndex as f64 * goldenAngle;
-			let height = (sampleIndex as f64 + 0.5) / SAMPLE_COUNT as f64;
+	pub fn build_sample_kernel() -> [f32; SAMPLE_COUNT * 3] {
+		let mut sample_kernel = [0.0f32; SAMPLE_COUNT * 3];
+		for sample_index in 0..SAMPLE_COUNT {
+			let golden_angle = 2.39996323f64;
+			let angle = sample_index as f64 * golden_angle;
+			let height = (sample_index as f64 + 0.5) / SAMPLE_COUNT as f64;
 			let ring = (1.0 - height * height).sqrt();
-			let mut scale = (sampleIndex as f64 + 1.0) / SAMPLE_COUNT as f64;
+			let mut scale = (sample_index as f64 + 1.0) / SAMPLE_COUNT as f64;
 			scale = 0.15 + 0.85 * scale * scale;
-			sampleKernel[sampleIndex * 3] = (angle.cos() * ring * scale) as f32;
-			sampleKernel[sampleIndex * 3 + 1] = (angle.sin() * ring * scale) as f32;
-			sampleKernel[sampleIndex * 3 + 2] = (height * scale) as f32;
+			sample_kernel[sample_index * 3] = (angle.cos() * ring * scale) as f32;
+			sample_kernel[sample_index * 3 + 1] = (angle.sin() * ring * scale) as f32;
+			sample_kernel[sample_index * 3 + 2] = (height * scale) as f32;
 		}
-		sampleKernel
+		sample_kernel
 	}
 
 	//==============================================================================
 	// 크기 변경. (본 패스 해상도, 내부는 축소 배율 적용)
 	//==============================================================================
 	pub fn resize(&mut self, gl: &glow::Context, width: i32, height: i32) -> Result<(), String> {
-		let scaledWidth = ((width as f32 * self.scale).floor() as i32).max(1);
-		let scaledHeight = ((height as f32 * self.scale).floor() as i32).max(1);
-		self.occlusionRenderTarget.resize(gl, scaledWidth, scaledHeight)?;
-		self.pingRenderTarget.resize(gl, scaledWidth, scaledHeight)?;
-		self.pongRenderTarget.resize(gl, scaledWidth, scaledHeight)?;
+		let scaled_width = ((width as f32 * self.scale).floor() as i32).max(1);
+		let scaled_height = ((height as f32 * self.scale).floor() as i32).max(1);
+		self.occlusion_render_target.resize(gl, scaled_width, scaled_height)?;
+		self.ping_render_target.resize(gl, scaled_width, scaled_height)?;
+		self.pong_render_target.resize(gl, scaled_width, scaled_height)?;
 		Ok(())
 	}
 
 	//==============================================================================
-	// 차폐 렌더링. (차폐 → 가로 블러 → 세로 블러, 결과는 getResultTexture())
-	// - viewMatrixElements 는 뷰 행렬 원소(열 우선 4x4), fieldOfViewRadian 은 세로 시야각.
+	// 차폐 렌더링. (차폐 → 가로 블러 → 세로 블러, 결과는 get_result_texture())
+	// - view_matrix_elements 는 뷰 행렬 원소(열 우선 4x4), field_of_view_radian 은 세로 시야각.
 	// - 부수 효과: 깊이/블렌드 비활성, TEXTURE0 활성, 프레임버퍼 바인드가 변경된다.
 	//==============================================================================
-	pub fn render(&self, gl: &glow::Context, depthTexture: Option<GlTexture>, normalTexture: Option<GlTexture>, viewMatrixElements: &[f32; 16], fieldOfViewRadian: f32, aspectRatio: f32, nearDistance: f32, farDistance: f32) {
+	pub fn render(&self, gl: &glow::Context, depth_texture: Option<GlTexture>, normal_texture: Option<GlTexture>, view_matrix_elements: &[f32; 16], field_of_view_radian: f32, aspect_ratio: f32, near_distance: f32, far_distance: f32) {
 		unsafe {
 			gl.disable(glow::DEPTH_TEST);
 			gl.disable(glow::BLEND);
 		}
 
 		// 1. 차폐.
-		let occlusionPass = &self.occlusionPass;
-		occlusionPass.useProgram(gl);
-		let viewRotation = [viewMatrixElements[0], viewMatrixElements[1], viewMatrixElements[2], viewMatrixElements[4], viewMatrixElements[5], viewMatrixElements[6], viewMatrixElements[8], viewMatrixElements[9], viewMatrixElements[10]];
-		let tangentHalfFieldOfView = (fieldOfViewRadian * 0.5).tan();
+		let occlusion_pass = &self.occlusion_pass;
+		occlusion_pass.use_program(gl);
+		let view_rotation = [view_matrix_elements[0], view_matrix_elements[1], view_matrix_elements[2], view_matrix_elements[4], view_matrix_elements[5], view_matrix_elements[6], view_matrix_elements[8], view_matrix_elements[9], view_matrix_elements[10]];
+		let tangent_half_field_of_view = (field_of_view_radian * 0.5).tan();
 		unsafe {
-			gl.uniform_1_i32(occlusionPass.getUniformLocation(gl, "depthTexture").as_ref(), 0);
-			gl.uniform_1_i32(occlusionPass.getUniformLocation(gl, "normalTexture").as_ref(), 2);
-			gl.uniform_matrix_3_f32_slice(occlusionPass.getUniformLocation(gl, "viewRotation").as_ref(), false, &viewRotation);
-			gl.uniform_2_f32(occlusionPass.getUniformLocation(gl, "depthRange").as_ref(), nearDistance, farDistance);
-			gl.uniform_2_f32(occlusionPass.getUniformLocation(gl, "projectionScale").as_ref(), tangentHalfFieldOfView * aspectRatio, tangentHalfFieldOfView);
-			gl.uniform_3_f32_slice(occlusionPass.getUniformLocation(gl, "sampleKernel[0]").as_ref(), &self.sampleKernel);
-			gl.uniform_1_f32(occlusionPass.getUniformLocation(gl, "radius").as_ref(), self.radius);
-			gl.uniform_1_f32(occlusionPass.getUniformLocation(gl, "intensity").as_ref(), self.intensity);
-			gl.uniform_1_f32(occlusionPass.getUniformLocation(gl, "bias").as_ref(), self.bias);
+			gl.uniform_1_i32(occlusion_pass.get_uniform_location(gl, "depthTexture").as_ref(), 0);
+			gl.uniform_1_i32(occlusion_pass.get_uniform_location(gl, "normalTexture").as_ref(), 2);
+			gl.uniform_matrix_3_f32_slice(occlusion_pass.get_uniform_location(gl, "viewRotation").as_ref(), false, &view_rotation);
+			gl.uniform_2_f32(occlusion_pass.get_uniform_location(gl, "depthRange").as_ref(), near_distance, far_distance);
+			gl.uniform_2_f32(occlusion_pass.get_uniform_location(gl, "projectionScale").as_ref(), tangent_half_field_of_view * aspect_ratio, tangent_half_field_of_view);
+			gl.uniform_3_f32_slice(occlusion_pass.get_uniform_location(gl, "sampleKernel[0]").as_ref(), &self.sample_kernel);
+			gl.uniform_1_f32(occlusion_pass.get_uniform_location(gl, "radius").as_ref(), self.radius);
+			gl.uniform_1_f32(occlusion_pass.get_uniform_location(gl, "intensity").as_ref(), self.intensity);
+			gl.uniform_1_f32(occlusion_pass.get_uniform_location(gl, "bias").as_ref(), self.bias);
 			gl.active_texture(glow::TEXTURE2);
-			gl.bind_texture(glow::TEXTURE_2D, normalTexture);
+			gl.bind_texture(glow::TEXTURE_2D, normal_texture);
 			gl.active_texture(glow::TEXTURE0);
-			gl.bind_texture(glow::TEXTURE_2D, depthTexture);
+			gl.bind_texture(glow::TEXTURE_2D, depth_texture);
 		}
-		let occlusionRenderTarget = &self.occlusionRenderTarget;
-		occlusionRenderTarget.bind(gl);
-		occlusionPass.draw(gl);
+		let occlusion_render_target = &self.occlusion_render_target;
+		occlusion_render_target.bind(gl);
+		occlusion_pass.draw(gl);
 
 		// 2. 블러. (가로 → 핑, 세로 → 퐁)
-		let blurPass = &self.blurPass;
-		blurPass.useProgram(gl);
-		let blurDirectionLocation = blurPass.getUniformLocation(gl, "blurDirection");
-		let occlusionWidth = occlusionRenderTarget.getWidth() as f32;
-		let occlusionHeight = occlusionRenderTarget.getHeight() as f32;
+		let blur_pass = &self.blur_pass;
+		blur_pass.use_program(gl);
+		let blur_direction_location = blur_pass.get_uniform_location(gl, "blurDirection");
+		let occlusion_width = occlusion_render_target.get_width() as f32;
+		let occlusion_height = occlusion_render_target.get_height() as f32;
 		unsafe {
-			gl.uniform_1_i32(blurPass.getUniformLocation(gl, "sourceTexture").as_ref(), 0);
-			gl.uniform_2_f32(blurPass.getUniformLocation(gl, "texelSize").as_ref(), 1.0 / occlusionWidth, 1.0 / occlusionHeight);
+			gl.uniform_1_i32(blur_pass.get_uniform_location(gl, "sourceTexture").as_ref(), 0);
+			gl.uniform_2_f32(blur_pass.get_uniform_location(gl, "texelSize").as_ref(), 1.0 / occlusion_width, 1.0 / occlusion_height);
 		}
-		let pingRenderTarget = &self.pingRenderTarget;
-		pingRenderTarget.bind(gl);
+		let ping_render_target = &self.ping_render_target;
+		ping_render_target.bind(gl);
 		unsafe {
-			gl.uniform_2_f32(blurDirectionLocation.as_ref(), 1.0, 0.0);
-			gl.bind_texture(glow::TEXTURE_2D, occlusionRenderTarget.getColorTexture(0));
+			gl.uniform_2_f32(blur_direction_location.as_ref(), 1.0, 0.0);
+			gl.bind_texture(glow::TEXTURE_2D, occlusion_render_target.get_color_texture(0));
 		}
-		blurPass.draw(gl);
-		let pongRenderTarget = &self.pongRenderTarget;
-		pongRenderTarget.bind(gl);
+		blur_pass.draw(gl);
+		let pong_render_target = &self.pong_render_target;
+		pong_render_target.bind(gl);
 		unsafe {
-			gl.uniform_2_f32(blurDirectionLocation.as_ref(), 0.0, 1.0);
-			gl.bind_texture(glow::TEXTURE_2D, pingRenderTarget.getColorTexture(0));
+			gl.uniform_2_f32(blur_direction_location.as_ref(), 0.0, 1.0);
+			gl.bind_texture(glow::TEXTURE_2D, ping_render_target.get_color_texture(0));
 		}
-		blurPass.draw(gl);
+		blur_pass.draw(gl);
 
 		unsafe {
 			gl.active_texture(glow::TEXTURE2);
@@ -262,14 +262,14 @@ impl AmbientOcclusionEffect {
 	//==============================================================================
 	// 결과 텍스처 반환. (render() 이후, r 가시율)
 	//==============================================================================
-	pub fn getResultTexture(&self) -> Option<GlTexture> {
-		self.pongRenderTarget.getColorTexture(0)
+	pub fn get_result_texture(&self) -> Option<GlTexture> {
+		self.pong_render_target.get_color_texture(0)
 	}
 
 	//==============================================================================
 	// 파라미터 설정. (표본 반경(월드) / 강도 / 깊이 바이어스)
 	//==============================================================================
-	pub fn setParameters(&mut self, radius: f32, intensity: f32, bias: f32) {
+	pub fn set_parameters(&mut self, radius: f32, intensity: f32, bias: f32) {
 		self.radius = radius;
 		self.intensity = intensity;
 		self.bias = bias;
@@ -278,7 +278,7 @@ impl AmbientOcclusionEffect {
 	//==============================================================================
 	// 내부 해상도 배율 설정. (resize 전에 호출)
 	//==============================================================================
-	pub fn setScale(&mut self, scale: f32) {
+	pub fn set_scale(&mut self, scale: f32) {
 		self.scale = scale;
 	}
 
@@ -286,71 +286,71 @@ impl AmbientOcclusionEffect {
 	// 파괴. (GL 리소스 해제)
 	//==============================================================================
 	pub fn destroy(&mut self, gl: &glow::Context) {
-		self.occlusionRenderTarget.destroy(gl);
-		self.pingRenderTarget.destroy(gl);
-		self.pongRenderTarget.destroy(gl);
+		self.occlusion_render_target.destroy(gl);
+		self.ping_render_target.destroy(gl);
+		self.pong_render_target.destroy(gl);
 	}
 
 	//==============================================================================
 	// 차폐 패스 반환.
 	//==============================================================================
-	pub fn getOcclusionPass(&self) -> &FullscreenPass {
-		&self.occlusionPass
+	pub fn get_occlusion_pass(&self) -> &FullscreenPass {
+		&self.occlusion_pass
 	}
 
 	//==============================================================================
 	// 블러 패스 반환.
 	//==============================================================================
-	pub fn getBlurPass(&self) -> &FullscreenPass {
-		&self.blurPass
+	pub fn get_blur_pass(&self) -> &FullscreenPass {
+		&self.blur_pass
 	}
 
 	//==============================================================================
 	// 차폐 렌더 타겟 반환.
 	//==============================================================================
-	pub fn getOcclusionRenderTarget(&self) -> &RenderTarget {
-		&self.occlusionRenderTarget
+	pub fn get_occlusion_render_target(&self) -> &RenderTarget {
+		&self.occlusion_render_target
 	}
 
 	//==============================================================================
 	// 핑 렌더 타겟 반환. (가로 블러 결과)
 	//==============================================================================
-	pub fn getPingRenderTarget(&self) -> &RenderTarget {
-		&self.pingRenderTarget
+	pub fn get_ping_render_target(&self) -> &RenderTarget {
+		&self.ping_render_target
 	}
 
 	//==============================================================================
 	// 퐁 렌더 타겟 반환. (최종 결과 보관)
 	//==============================================================================
-	pub fn getPongRenderTarget(&self) -> &RenderTarget {
-		&self.pongRenderTarget
+	pub fn get_pong_render_target(&self) -> &RenderTarget {
+		&self.pong_render_target
 	}
 
 	//==============================================================================
 	// 표본 반경 반환.
 	//==============================================================================
-	pub fn getRadius(&self) -> f32 {
+	pub fn get_radius(&self) -> f32 {
 		self.radius
 	}
 
 	//==============================================================================
 	// 강도 반환.
 	//==============================================================================
-	pub fn getIntensity(&self) -> f32 {
+	pub fn get_intensity(&self) -> f32 {
 		self.intensity
 	}
 
 	//==============================================================================
 	// 깊이 바이어스 반환.
 	//==============================================================================
-	pub fn getBias(&self) -> f32 {
+	pub fn get_bias(&self) -> f32 {
 		self.bias
 	}
 
 	//==============================================================================
 	// 내부 해상도 배율 반환.
 	//==============================================================================
-	pub fn getScale(&self) -> f32 {
+	pub fn get_scale(&self) -> f32 {
 		self.scale
 	}
 }
@@ -363,18 +363,18 @@ mod tests {
 	// 커널이 반구 안(z > 0, 길이 1 이하)에 있고 첫 표본이 원본 식과 같은지.
 	//==============================================================================
 	#[test]
-	fn sampleKernelStaysInHemisphere() {
-		let sampleKernel = AmbientOcclusionEffect::buildSampleKernel();
-		for sample in sampleKernel.as_chunks::<3>().0 {
+	fn sample_kernel_stays_in_hemisphere() {
+		let sample_kernel = AmbientOcclusionEffect::build_sample_kernel();
+		for sample in sample_kernel.as_chunks::<3>().0 {
 			assert!(sample[2] > 0.0);
 			let length = (sample[0] * sample[0] + sample[1] * sample[1] + sample[2] * sample[2]).sqrt();
 			assert!(length <= 1.0 + 1.0e-5);
 		}
 		// 0 번: 각 0, 높이 1/32, 크기 0.15 + 0.85 / 256.
-		let firstScale = 0.15 + 0.85 / 256.0;
-		let firstHeight = 0.5 / 16.0;
-		assert!((sampleKernel[0] - ((1.0f64 - firstHeight * firstHeight).sqrt() * firstScale) as f32).abs() < 1.0e-6);
-		assert!(sampleKernel[1].abs() < 1.0e-6);
-		assert!((sampleKernel[2] - (firstHeight * firstScale) as f32).abs() < 1.0e-6);
+		let first_scale = 0.15 + 0.85 / 256.0;
+		let first_height = 0.5 / 16.0;
+		assert!((sample_kernel[0] - ((1.0f64 - first_height * first_height).sqrt() * first_scale) as f32).abs() < 1.0e-6);
+		assert!(sample_kernel[1].abs() < 1.0e-6);
+		assert!((sample_kernel[2] - (first_height * first_scale) as f32).abs() < 1.0e-6);
 	}
 }

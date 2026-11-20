@@ -1,12 +1,12 @@
 //==============================================================================
 // 노드 트리.
 // - 씬의 노드를 저장소 하나(slotmap)에 담고, 부모와 자식을 핸들(NodeId)로 잇는다.
-// - 게임 코드는 NodeId 를 들고 다니다가 getNode / getNodeMut (또는 tree[nodeId]) 로 노드를 꺼낸다.
-//   지운 노드의 NodeId 는 getNode 가 None 을 돌려준다. (원본 isDestroyed 자리)
+// - 게임 코드는 NodeId 를 들고 다니다가 get_node / get_node_mut (또는 tree[node_id]) 로 노드를 꺼낸다.
+//   지운 노드의 NodeId 는 get_node 가 None 을 돌려준다. (원본 isDestroyed 자리)
 // - 원본은 부모가 children[] 으로 자식 객체를 들고 자식이 parent 로 거꾸로 가리킨다.
 //   러스트에서 그 꼴(Rc<RefCell>)은 실행 중 빌림 검사 비용과 순환 참조가 생겨서 핸들로 바꿨다.
 // - tick / 터치를 돌 때는 부르는 컴포넌트 하나만 노드에서 잠깐 꺼내(그 자리에는 빈 자리표를 둔다) ComponentContext(자기 노드 + 트리 전체 + 엔진)를 넘긴다.
-//   그래서 컴포넌트가 다른 노드를 찾고 바꾸고 만들 수 있고, 같은 노드의 다른 컴포넌트(형제)도 getNodeMut().getComponentMut::<T>() 로 찾는다.
+//   그래서 컴포넌트가 다른 노드를 찾고 바꾸고 만들 수 있고, 같은 노드의 다른 컴포넌트(형제)도 get_node_mut().get_component_mut::<T>() 로 찾는다.
 // - 도는 중에 지운 노드는 그 자리에서 비활성으로 두고, 다 돈 뒤에 실제로 지운다.
 //==============================================================================
 use crate::base::rect::Rect;
@@ -26,14 +26,14 @@ new_key_type! {
 }
 
 //==============================================================================
-// 터치 종류. (NodeTree::dispatchTouch 가 컴포넌트의 어느 함수를 부를지)
+// 터치 종류. (NodeTree::dispatch_touch 가 컴포넌트의 어느 함수를 부를지)
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TouchKind {
-	press,
-	moved,
-	release,
-	cancel,
+	Press,
+	Moved,
+	Release,
+	Cancel,
 }
 
 //==============================================================================
@@ -41,10 +41,10 @@ pub enum TouchKind {
 //==============================================================================
 pub struct NodeTree {
 	nodes: SlotMap<NodeId, WorldNode>,
-	rootId: NodeId,
-	traversalDepth: u32,
-	pendingDestroyIds: Vec<NodeId>,
-	culledNodeCount: u32,
+	root_id: NodeId,
+	traversal_depth: u32,
+	pending_destroy_ids: Vec<NodeId>,
+	culled_node_count: u32,
 }
 
 impl NodeTree {
@@ -54,131 +54,131 @@ impl NodeTree {
 	pub fn new() -> NodeTree {
 		let mut nodes: SlotMap<NodeId, WorldNode> = SlotMap::with_key();
 		let mut root = WorldNode::new("root");
-		root.setPivot(Vector2::zero());
-		let rootId = nodes.insert(root);
+		root.set_pivot(Vector2::zero());
+		let root_id = nodes.insert(root);
 		NodeTree {
 			nodes,
-			rootId,
-			traversalDepth: 0,
-			pendingDestroyIds: Vec::new(),
-			culledNodeCount: 0,
+			root_id,
+			traversal_depth: 0,
+			pending_destroy_ids: Vec::new(),
+			culled_node_count: 0,
 		}
 	}
 
 	//==============================================================================
 	// 루트 노드 핸들.
 	//==============================================================================
-	pub fn getRootId(&self) -> NodeId {
-		self.rootId
+	pub fn get_root_id(&self) -> NodeId {
+		self.root_id
 	}
 
 	//==============================================================================
 	// 노드 수. (루트와 아직 트리에 붙지 않은 노드까지)
 	//==============================================================================
-	pub fn getNodeCount(&self) -> usize {
+	pub fn get_node_count(&self) -> usize {
 		self.nodes.len()
 	}
 
 	//==============================================================================
 	// 노드가 살아 있는지.
 	//==============================================================================
-	pub fn contains(&self, nodeId: NodeId) -> bool {
-		self.nodes.contains_key(nodeId)
+	pub fn contains(&self, node_id: NodeId) -> bool {
+		self.nodes.contains_key(node_id)
 	}
 
 	//==============================================================================
 	// 노드 반환.
 	//==============================================================================
-	pub fn getNode(&self, nodeId: NodeId) -> Option<&WorldNode> {
-		self.nodes.get(nodeId)
+	pub fn get_node(&self, node_id: NodeId) -> Option<&WorldNode> {
+		self.nodes.get(node_id)
 	}
 
 	//==============================================================================
 	// 노드 반환. (변경용)
 	//==============================================================================
-	pub fn getNodeMut(&mut self, nodeId: NodeId) -> Option<&mut WorldNode> {
-		self.nodes.get_mut(nodeId)
+	pub fn get_node_mut(&mut self, node_id: NodeId) -> Option<&mut WorldNode> {
+		self.nodes.get_mut(node_id)
 	}
 
 	//==============================================================================
-	// 노드 만들기. (아직 어느 부모에도 붙지 않는다. addChild 로 붙여야 그려진다)
+	// 노드 만들기. (아직 어느 부모에도 붙지 않는다. add_child 로 붙여야 그려진다)
 	//==============================================================================
-	pub fn createNode(&mut self, name: &str) -> NodeId {
+	pub fn create_node(&mut self, name: &str) -> NodeId {
 		self.nodes.insert(WorldNode::new(name))
 	}
 
 	//==============================================================================
-	// 자식 노드 만들기. (만들어서 parentId 의 맨 뒤 자식으로 붙인다)
+	// 자식 노드 만들기. (만들어서 parent_id 의 맨 뒤 자식으로 붙인다)
 	//==============================================================================
-	pub fn createChild(&mut self, parentId: NodeId, name: &str) -> NodeId {
-		let childId = self.createNode(name);
-		self.addChild(parentId, childId);
-		childId
+	pub fn create_child(&mut self, parent_id: NodeId, name: &str) -> NodeId {
+		let child_id = self.create_node(name);
+		self.add_child(parent_id, child_id);
+		child_id
 	}
 
 	//==============================================================================
 	// 자식 붙이기. (맨 뒤. 다른 부모에 붙어 있으면 떼어서 옮긴다)
 	// - 자기 자신이나 자기 조상 밑으로는 붙이지 않는다. (false)
 	//==============================================================================
-	pub fn addChild(&mut self, parentId: NodeId, childId: NodeId) -> bool {
-		let childCount = self.getChildCount(parentId);
-		self.insertChild(parentId, childId, childCount)
+	pub fn add_child(&mut self, parent_id: NodeId, child_id: NodeId) -> bool {
+		let child_count = self.get_child_count(parent_id);
+		self.insert_child(parent_id, child_id, child_count)
 	}
 
 	//==============================================================================
-	// 자식 끼워 넣기. (childIndex 자리, 자식 수보다 크면 맨 뒤)
+	// 자식 끼워 넣기. (child_index 자리, 자식 수보다 크면 맨 뒤)
 	//==============================================================================
-	pub fn insertChild(&mut self, parentId: NodeId, childId: NodeId, childIndex: usize) -> bool {
-		if !self.nodes.contains_key(parentId) || !self.nodes.contains_key(childId) {
+	pub fn insert_child(&mut self, parent_id: NodeId, child_id: NodeId, child_index: usize) -> bool {
+		if !self.nodes.contains_key(parent_id) || !self.nodes.contains_key(child_id) {
 			return false;
 		}
-		if childId == self.rootId || self.isAncestorOrSelf(childId, parentId) {
+		if child_id == self.root_id || self.is_ancestor_or_self(child_id, parent_id) {
 			return false;
 		}
-		self.removeFromParent(childId);
-		let parentNode = &mut self.nodes[parentId];
-		let insertIndex = childIndex.min(parentNode.childIds.len());
-		parentNode.childIds.insert(insertIndex, childId);
-		self.nodes[childId].parentId = Some(parentId);
+		self.remove_from_parent(child_id);
+		let parent_node = &mut self.nodes[parent_id];
+		let insert_index = child_index.min(parent_node.child_ids.len());
+		parent_node.child_ids.insert(insert_index, child_id);
+		self.nodes[child_id].parent_id = Some(parent_id);
 		true
 	}
 
 	//==============================================================================
-	// 부모에서 떼기. (노드는 지우지 않는다. 다시 addChild 할 수 있다)
+	// 부모에서 떼기. (노드는 지우지 않는다. 다시 add_child 할 수 있다)
 	//==============================================================================
-	pub fn removeFromParent(&mut self, childId: NodeId) {
-		let parentId = match self.nodes.get(childId).and_then(|childNode| childNode.parentId) {
-			Some(parentId) => {
-				parentId
+	pub fn remove_from_parent(&mut self, child_id: NodeId) {
+		let parent_id = match self.nodes.get(child_id).and_then(|child_node| child_node.parent_id) {
+			Some(parent_id) => {
+				parent_id
 			}
 			None => {
 				return;
 			}
 		};
-		if let Some(parentNode) = self.nodes.get_mut(parentId) {
-			parentNode.childIds.retain(|candidateId| *candidateId != childId);
+		if let Some(parent_node) = self.nodes.get_mut(parent_id) {
+			parent_node.child_ids.retain(|candidate_id| *candidate_id != child_id);
 		}
-		self.nodes[childId].parentId = None;
+		self.nodes[child_id].parent_id = None;
 	}
 
 	//==============================================================================
 	// 노드 지우기. (자손까지. 루트는 지우지 않는다)
 	// - tick / 터치를 도는 중이면 비활성으로 두고 다 돈 뒤에 지운다.
 	//==============================================================================
-	pub fn destroyNode(&mut self, nodeId: NodeId) {
-		if nodeId == self.rootId || !self.nodes.contains_key(nodeId) {
+	pub fn destroy_node(&mut self, node_id: NodeId) {
+		if node_id == self.root_id || !self.nodes.contains_key(node_id) {
 			return;
 		}
-		if self.traversalDepth > 0 {
-			self.nodes[nodeId].setActive(false);
-			self.pendingDestroyIds.push(nodeId);
+		if self.traversal_depth > 0 {
+			self.nodes[node_id].set_active(false);
+			self.pending_destroy_ids.push(node_id);
 			return;
 		}
-		self.removeFromParent(nodeId);
-		let mut destroyStack: Vec<NodeId> = vec![nodeId];
-		while let Some(destroyId) = destroyStack.pop() {
-			if let Some(destroyedNode) = self.nodes.remove(destroyId) {
-				destroyStack.extend(destroyedNode.childIds.iter().copied());
+		self.remove_from_parent(node_id);
+		let mut destroy_stack: Vec<NodeId> = vec![node_id];
+		while let Some(destroy_id) = destroy_stack.pop() {
+			if let Some(destroyed_node) = self.nodes.remove(destroy_id) {
+				destroy_stack.extend(destroyed_node.child_ids.iter().copied());
 			}
 		}
 	}
@@ -186,63 +186,63 @@ impl NodeTree {
 	//==============================================================================
 	// 자식 모두 지우기.
 	//==============================================================================
-	pub fn destroyChildren(&mut self, parentId: NodeId) {
-		let childIds: Vec<NodeId> = self.getChildIds(parentId).to_vec();
-		for childId in childIds {
-			self.destroyNode(childId);
+	pub fn destroy_children(&mut self, parent_id: NodeId) {
+		let child_ids: Vec<NodeId> = self.get_child_ids(parent_id).to_vec();
+		for child_id in child_ids {
+			self.destroy_node(child_id);
 		}
 	}
 
 	//==============================================================================
 	// 조건에 맞는 자식 지우기. (지운 수)
 	//==============================================================================
-	pub fn destroyChildrenWhere(&mut self, parentId: NodeId, predicate: impl Fn(&WorldNode) -> bool) -> usize {
-		let childIds: Vec<NodeId> = self.getChildIds(parentId).to_vec();
-		let mut destroyedCount = 0;
-		for childId in childIds {
-			let isMatched = match self.nodes.get(childId) {
-				Some(childNode) => {
-					predicate(childNode)
+	pub fn destroy_children_where(&mut self, parent_id: NodeId, predicate: impl Fn(&WorldNode) -> bool) -> usize {
+		let child_ids: Vec<NodeId> = self.get_child_ids(parent_id).to_vec();
+		let mut destroyed_count = 0;
+		for child_id in child_ids {
+			let is_matched = match self.nodes.get(child_id) {
+				Some(child_node) => {
+					predicate(child_node)
 				}
 				None => {
 					false
 				}
 			};
-			if isMatched {
-				self.destroyNode(childId);
-				destroyedCount += 1;
+			if is_matched {
+				self.destroy_node(child_id);
+				destroyed_count += 1;
 			}
 		}
-		destroyedCount
+		destroyed_count
 	}
 
 	//==============================================================================
 	// 미뤄 둔 지우기 처리. (tick / 터치를 다 돈 뒤)
 	//==============================================================================
-	fn flushPendingDestroy(&mut self) {
-		if self.traversalDepth > 0 || self.pendingDestroyIds.is_empty() {
+	fn flush_pending_destroy(&mut self) {
+		if self.traversal_depth > 0 || self.pending_destroy_ids.is_empty() {
 			return;
 		}
-		let pendingDestroyIds = std::mem::take(&mut self.pendingDestroyIds);
-		for pendingDestroyId in pendingDestroyIds {
-			self.destroyNode(pendingDestroyId);
+		let pending_destroy_ids = std::mem::take(&mut self.pending_destroy_ids);
+		for pending_destroy_id in pending_destroy_ids {
+			self.destroy_node(pending_destroy_id);
 		}
 	}
 
 	//==============================================================================
 	// 부모 핸들.
 	//==============================================================================
-	pub fn getParentId(&self, nodeId: NodeId) -> Option<NodeId> {
-		self.nodes.get(nodeId).and_then(|node| node.parentId)
+	pub fn get_parent_id(&self, node_id: NodeId) -> Option<NodeId> {
+		self.nodes.get(node_id).and_then(|node| node.parent_id)
 	}
 
 	//==============================================================================
 	// 자식 핸들 목록. (그리는 순서)
 	//==============================================================================
-	pub fn getChildIds(&self, nodeId: NodeId) -> &[NodeId] {
-		match self.nodes.get(nodeId) {
+	pub fn get_child_ids(&self, node_id: NodeId) -> &[NodeId] {
+		match self.nodes.get(node_id) {
 			Some(node) => {
-				&node.childIds
+				&node.child_ids
 			}
 			None => {
 				&[]
@@ -253,20 +253,20 @@ impl NodeTree {
 	//==============================================================================
 	// 자식 수.
 	//==============================================================================
-	pub fn getChildCount(&self, nodeId: NodeId) -> usize {
-		self.getChildIds(nodeId).len()
+	pub fn get_child_count(&self, node_id: NodeId) -> usize {
+		self.get_child_ids(node_id).len()
 	}
 
 	//==============================================================================
-	// ancestorId 가 nodeId 자신이거나 조상인지.
+	// ancestor_id 가 node_id 자신이거나 조상인지.
 	//==============================================================================
-	pub fn isAncestorOrSelf(&self, ancestorId: NodeId, nodeId: NodeId) -> bool {
-		let mut currentId = Some(nodeId);
-		while let Some(candidateId) = currentId {
-			if candidateId == ancestorId {
+	pub fn is_ancestor_or_self(&self, ancestor_id: NodeId, node_id: NodeId) -> bool {
+		let mut current_id = Some(node_id);
+		while let Some(candidate_id) = current_id {
+			if candidate_id == ancestor_id {
 				return true;
 			}
-			currentId = self.getParentId(candidateId);
+			current_id = self.get_parent_id(candidate_id);
 		}
 		false
 	}
@@ -274,20 +274,20 @@ impl NodeTree {
 	//==============================================================================
 	// 이름으로 자식 찾기. (바로 아래만, 처음 하나)
 	//==============================================================================
-	pub fn findChildByName(&self, parentId: NodeId, name: &str) -> Option<NodeId> {
-		self.getChildIds(parentId).iter().copied().find(|childId| self.nodes[*childId].getName() == name)
+	pub fn find_child_by_name(&self, parent_id: NodeId, name: &str) -> Option<NodeId> {
+		self.get_child_ids(parent_id).iter().copied().find(|child_id| self.nodes[*child_id].get_name() == name)
 	}
 
 	//==============================================================================
 	// 이름으로 자손 찾기. (깊이 우선, 그리는 순서로 처음 하나)
 	//==============================================================================
-	pub fn findDescendantByName(&self, parentId: NodeId, name: &str) -> Option<NodeId> {
-		for childId in self.getChildIds(parentId).iter().copied() {
-			if self.nodes[childId].getName() == name {
-				return Some(childId);
+	pub fn find_descendant_by_name(&self, parent_id: NodeId, name: &str) -> Option<NodeId> {
+		for child_id in self.get_child_ids(parent_id).iter().copied() {
+			if self.nodes[child_id].get_name() == name {
+				return Some(child_id);
 			}
-			if let Some(foundId) = self.findDescendantByName(childId, name) {
-				return Some(foundId);
+			if let Some(found_id) = self.find_descendant_by_name(child_id, name) {
+				return Some(found_id);
 			}
 		}
 		None
@@ -296,46 +296,46 @@ impl NodeTree {
 	//==============================================================================
 	// 월드 행렬. (루트부터 이 노드까지 로컬 행렬을 곱한 것. 루트의 부모 좌표계 = 뷰 좌표계)
 	//==============================================================================
-	pub fn calculateWorldMatrix(&self, nodeId: NodeId) -> TransformMatrix {
-		let mut chainIds: Vec<NodeId> = Vec::new();
-		let mut currentId = Some(nodeId);
-		while let Some(candidateId) = currentId {
-			if !self.nodes.contains_key(candidateId) {
+	pub fn calculate_world_matrix(&self, node_id: NodeId) -> TransformMatrix {
+		let mut chain_ids: Vec<NodeId> = Vec::new();
+		let mut current_id = Some(node_id);
+		while let Some(candidate_id) = current_id {
+			if !self.nodes.contains_key(candidate_id) {
 				break;
 			}
-			chainIds.push(candidateId);
-			currentId = self.getParentId(candidateId);
+			chain_ids.push(candidate_id);
+			current_id = self.get_parent_id(candidate_id);
 		}
-		let mut worldMatrix = TransformMatrix::identity();
-		for chainId in chainIds.iter().rev() {
-			let localMatrix = self.nodes[*chainId].getTransform().calculateLocalMatrix();
-			worldMatrix = worldMatrix.multiply(&localMatrix);
+		let mut world_matrix = TransformMatrix::identity();
+		for chain_id in chain_ids.iter().rev() {
+			let local_matrix = self.nodes[*chain_id].get_transform().calculate_local_matrix();
+			world_matrix = world_matrix.multiply(&local_matrix);
 		}
-		worldMatrix
+		world_matrix
 	}
 
 	//==============================================================================
 	// 노드 영역 안의 점 → 뷰 좌표.
 	//==============================================================================
-	pub fn convertNodePositionToViewPosition(&self, nodeId: NodeId, nodePosition: Vector2) -> Vector2 {
-		let worldMatrix = self.calculateWorldMatrix(nodeId);
-		worldMatrix.transformPoint(nodePosition.x, nodePosition.y)
+	pub fn convert_node_position_to_view_position(&self, node_id: NodeId, node_position: Vector2) -> Vector2 {
+		let world_matrix = self.calculate_world_matrix(node_id);
+		world_matrix.transform_point(node_position.x, node_position.y)
 	}
 
 	//==============================================================================
 	// 뷰 좌표 → 노드 영역 안의 점. (행렬이 뒤집히지 않으면 None)
 	//==============================================================================
-	pub fn convertViewPositionToNodePosition(&self, nodeId: NodeId, viewPosition: Vector2) -> Option<Vector2> {
-		let worldMatrix = self.calculateWorldMatrix(nodeId);
-		let inverseMatrix = worldMatrix.invert()?;
-		Some(inverseMatrix.transformPoint(viewPosition.x, viewPosition.y))
+	pub fn convert_view_position_to_node_position(&self, node_id: NodeId, view_position: Vector2) -> Option<Vector2> {
+		let world_matrix = self.calculate_world_matrix(node_id);
+		let inverse_matrix = world_matrix.invert()?;
+		Some(inverse_matrix.transform_point(view_position.x, view_position.y))
 	}
 
 	//==============================================================================
 	// 노드의 컴포넌트를 잠깐 꺼내 하나씩 부른다. (꺼낸 동안 붙인 컴포넌트는 뒤에 이어 붙인다)
 	//==============================================================================
-	fn visitComponents(&mut self, nodeId: NodeId, engine: &Engine, visitor: &mut dyn FnMut(&mut dyn Component, &mut ComponentContext)) {
-		let componentCount = match self.nodes.get(nodeId) {
+	fn visit_components(&mut self, node_id: NodeId, engine: &Engine, visitor: &mut dyn FnMut(&mut dyn Component, &mut ComponentContext)) {
+		let component_count = match self.nodes.get(node_id) {
 			Some(node) => {
 				node.components.len()
 			}
@@ -343,155 +343,155 @@ impl NodeTree {
 				return;
 			}
 		};
-		self.traversalDepth += 1;
-		for componentIndex in 0..componentCount {
+		self.traversal_depth += 1;
+		for component_index in 0..component_count {
 			// 부르는 컴포넌트만 꺼내고 그 자리에 빈 자리표를 둔다. (형제 컴포넌트는 노드에 그대로 남는다)
-			let mut component = match self.nodes.get_mut(nodeId) {
+			let mut component = match self.nodes.get_mut(node_id) {
 				Some(node) => {
-					if componentIndex >= node.components.len() {
+					if component_index >= node.components.len() {
 						break;
 					}
 					let placeholder: Box<dyn Component> = Box::new(ComponentPlaceholder::new());
-					std::mem::replace(&mut node.components[componentIndex], placeholder)
+					std::mem::replace(&mut node.components[component_index], placeholder)
 				}
 				None => {
 					break;
 				}
 			};
-			if component.isEnable() {
+			if component.is_enable() {
 				let mut context = ComponentContext {
-					nodeTree: self,
-					nodeId,
+					node_tree: self,
+					node_id,
 					engine,
 				};
 				visitor(component.as_mut(), &mut context);
 			}
 
 			// 빈 자리표가 있는 곳에 되돌린다. (도는 중에 다른 컴포넌트를 지웠으면 자리가 당겨졌을 수 있다)
-			if let Some(node) = self.nodes.get_mut(nodeId) {
-				let placeholderIndex = node.components.iter().position(|candidate| {
-					let candidateReference: &dyn Component = candidate.as_ref();
-					candidateReference.asAny().is::<ComponentPlaceholder>()
+			if let Some(node) = self.nodes.get_mut(node_id) {
+				let placeholder_index = node.components.iter().position(|candidate| {
+					let candidate_reference: &dyn Component = candidate.as_ref();
+					candidate_reference.as_any().is::<ComponentPlaceholder>()
 				});
-				if let Some(placeholderIndex) = placeholderIndex {
-					node.components[placeholderIndex] = component;
+				if let Some(placeholder_index) = placeholder_index {
+					node.components[placeholder_index] = component;
 				}
 			}
 		}
-		self.traversalDepth -= 1;
+		self.traversal_depth -= 1;
 	}
 
 	//==============================================================================
 	// 주기적 갱신. (루트부터 깊이 우선: 컴포넌트 → 자식 순, 원본 ComponentNode.tick)
 	//==============================================================================
-	pub fn tick(&mut self, engine: &Engine, timeDelta: f32) {
-		let rootId = self.rootId;
-		self.traversalDepth += 1;
-		self.tickNode(rootId, engine, timeDelta);
-		self.traversalDepth -= 1;
-		self.flushPendingDestroy();
+	pub fn tick(&mut self, engine: &Engine, time_delta: f32) {
+		let root_id = self.root_id;
+		self.traversal_depth += 1;
+		self.tick_node(root_id, engine, time_delta);
+		self.traversal_depth -= 1;
+		self.flush_pending_destroy();
 	}
 
 	//==============================================================================
-	// 컴포넌트 붙이기. (attach 다음 attachToTree 를 불러, 컴포넌트가 자식 노드를 만들 수 있게 한다)
+	// 컴포넌트 붙이기. (attach 다음 attach_to_tree 를 불러, 컴포넌트가 자식 노드를 만들 수 있게 한다)
 	// - UIView 처럼 자식 노드를 만드는 컴포넌트는 이것으로 붙인다. 붙인 컴포넌트를 돌려준다.
 	//==============================================================================
-	pub fn addComponent<T: Component + 'static>(&mut self, nodeId: NodeId, component: T) -> Option<&mut T> {
-		if !self.nodes.contains_key(nodeId) {
+	pub fn add_component<T: Component + 'static>(&mut self, node_id: NodeId, component: T) -> Option<&mut T> {
+		if !self.nodes.contains_key(node_id) {
 			return None;
 		}
 		let mut component = component;
-		component.attach(self.nodes[nodeId].getTransformMut());
-		component.attachToTree(self, nodeId);
-		let node = self.nodes.get_mut(nodeId)?;
+		component.attach(self.nodes[node_id].get_transform_mut());
+		component.attach_to_tree(self, node_id);
+		let node = self.nodes.get_mut(node_id)?;
 		node.components.push(Box::new(component));
-		let lastComponent = node.components.last_mut()?;
-		let componentReference: &mut dyn Component = lastComponent.as_mut();
-		componentReference.asAnyMut().downcast_mut::<T>()
+		let last_component = node.components.last_mut()?;
+		let component_reference: &mut dyn Component = last_component.as_mut();
+		component_reference.as_any_mut().downcast_mut::<T>()
 	}
 
 	//==============================================================================
 	// 컴포넌트 하나를 트리와 함께 쥐고 부르기. (씬 코드에서 위젯처럼 다른 노드도 만지는 컴포넌트를 바로 바꿀 때)
-	// - nodeId 노드의 첫 번째 T 컴포넌트만 잠깐 빼고, 그 컴포넌트와 트리를 action 에 넘긴다. 없으면 None.
-	// - 예: nodeTree.withComponentMut::<UIScrollView, _>(scrollId, |scrollView, tree| scrollView.setScrollOffsetInTree(tree, scrollId, offset))
+	// - node_id 노드의 첫 번째 T 컴포넌트만 잠깐 빼고, 그 컴포넌트와 트리를 action 에 넘긴다. 없으면 None.
+	// - 예: node_tree.with_component_mut::<UIScrollView, _>(scroll_id, |scroll_view, tree| scroll_view.set_scroll_offset_in_tree(tree, scroll_id, offset))
 	//==============================================================================
-	pub fn withComponentMut<T: Component + 'static, R>(&mut self, nodeId: NodeId, action: impl FnOnce(&mut T, &mut NodeTree) -> R) -> Option<R> {
-		let componentIndex = self.nodes.get(nodeId)?.components.iter().position(|candidate| {
-			let candidateReference: &dyn Component = candidate.as_ref();
-			candidateReference.asAny().is::<T>()
+	pub fn with_component_mut<T: Component + 'static, R>(&mut self, node_id: NodeId, action: impl FnOnce(&mut T, &mut NodeTree) -> R) -> Option<R> {
+		let component_index = self.nodes.get(node_id)?.components.iter().position(|candidate| {
+			let candidate_reference: &dyn Component = candidate.as_ref();
+			candidate_reference.as_any().is::<T>()
 		})?;
 		let placeholder: Box<dyn Component> = Box::new(ComponentPlaceholder::new());
-		let mut component = std::mem::replace(&mut self.nodes[nodeId].components[componentIndex], placeholder);
-		self.traversalDepth += 1;
+		let mut component = std::mem::replace(&mut self.nodes[node_id].components[component_index], placeholder);
+		self.traversal_depth += 1;
 		let result = {
-			let componentReference: &mut dyn Component = component.as_mut();
-			let typedComponent = componentReference.asAnyMut().downcast_mut::<T>().expect("component type");
-			action(typedComponent, self)
+			let component_reference: &mut dyn Component = component.as_mut();
+			let typed_component = component_reference.as_any_mut().downcast_mut::<T>().expect("component type");
+			action(typed_component, self)
 		};
-		self.traversalDepth -= 1;
-		if let Some(node) = self.nodes.get_mut(nodeId) {
-			let placeholderIndex = node.components.iter().position(|candidate| {
-				let candidateReference: &dyn Component = candidate.as_ref();
-				candidateReference.asAny().is::<ComponentPlaceholder>()
+		self.traversal_depth -= 1;
+		if let Some(node) = self.nodes.get_mut(node_id) {
+			let placeholder_index = node.components.iter().position(|candidate| {
+				let candidate_reference: &dyn Component = candidate.as_ref();
+				candidate_reference.as_any().is::<ComponentPlaceholder>()
 			});
-			if let Some(placeholderIndex) = placeholderIndex {
-				node.components[placeholderIndex] = component;
+			if let Some(placeholder_index) = placeholder_index {
+				node.components[placeholder_index] = component;
 			}
 		}
-		self.flushPendingDestroy();
+		self.flush_pending_destroy();
 		Some(result)
 	}
 
 	//==============================================================================
 	// 노드 하나와 그 자손 갱신.
 	//==============================================================================
-	fn tickNode(&mut self, nodeId: NodeId, engine: &Engine, timeDelta: f32) {
-		let isTickNeeded = match self.nodes.get(nodeId) {
+	fn tick_node(&mut self, node_id: NodeId, engine: &Engine, time_delta: f32) {
+		let is_tick_needed = match self.nodes.get(node_id) {
 			Some(node) => {
-				if !node.isActive() {
+				if !node.is_active() {
 					return;
 				}
-				node.components.iter().any(|component| component.isEnable() && component.isTickNeeded())
+				node.components.iter().any(|component| component.is_enable() && component.is_tick_needed())
 			}
 			None => {
 				return;
 			}
 		};
-		if isTickNeeded {
-			self.visitComponents(nodeId, engine, &mut |component, context| {
-				if component.isTickNeeded() {
-					component.tick(context, timeDelta);
+		if is_tick_needed {
+			self.visit_components(node_id, engine, &mut |component, context| {
+				if component.is_tick_needed() {
+					component.tick(context, time_delta);
 				}
 			});
 		}
 
 		// 자식. (도는 중에 자식 목록이 바뀌어도 건너뛰거나 두 번 돌지 않게, 지금 자리의 자식이 그대로일 때만 다음으로 간다)
-		let mut childIndex = 0;
-		while let Some(childId) = self.nodes.get(nodeId).and_then(|node| node.childIds.get(childIndex).copied()) {
-			self.tickNode(childId, engine, timeDelta);
-			let isSameChild = self.nodes.get(nodeId).and_then(|node| node.childIds.get(childIndex).copied()) == Some(childId);
-			if isSameChild {
-				childIndex += 1;
+		let mut child_index = 0;
+		while let Some(child_id) = self.nodes.get(node_id).and_then(|node| node.child_ids.get(child_index).copied()) {
+			self.tick_node(child_id, engine, time_delta);
+			let is_same_child = self.nodes.get(node_id).and_then(|node| node.child_ids.get(child_index).copied()) == Some(child_id);
+			if is_same_child {
+				child_index += 1;
 			}
 		}
 	}
 
 	//==============================================================================
-	// 출력. (루트부터 재귀, 원본 Graphic.drawNode)
+	// 출력. (루트부터 재귀, 원본 Graphic.draw_node)
 	//==============================================================================
 	pub fn draw(&mut self, graphic: &mut Graphic) {
-		self.culledNodeCount = 0;
-		let rootId = self.rootId;
-		self.drawNode(rootId, graphic);
-		graphic.addCulledNodeCount(self.culledNodeCount);
+		self.culled_node_count = 0;
+		let root_id = self.root_id;
+		self.draw_node(root_id, graphic);
+		graphic.add_culled_node_count(self.culled_node_count);
 	}
 
 	//==============================================================================
 	// 노드 하나와 그 자손 출력.
-	// - pushTransform → 컴포넌트 → (Mask 면 클립 시작) → 자식 → (클립 끝) → 기즈모 → popTransform
+	// - push_transform → 컴포넌트 → (Mask 면 클립 시작) → 자식 → (클립 끝) → 기즈모 → pop_transform
 	//==============================================================================
-	pub fn drawNode(&mut self, nodeId: NodeId, graphic: &mut Graphic) {
-		let node = match self.nodes.get_mut(nodeId) {
+	pub fn draw_node(&mut self, node_id: NodeId, graphic: &mut Graphic) {
+		let node = match self.nodes.get_mut(node_id) {
 			Some(node) => {
 				node
 			}
@@ -499,57 +499,57 @@ impl NodeTree {
 				return;
 			}
 		};
-		if !node.isActive() {
+		if !node.is_active() {
 			return;
 		}
-		node.pushTransform(graphic);
+		node.push_transform(graphic);
 
-		if node.isVisible() {
+		if node.is_visible() {
 			// 컴포넌트. (화면 밖이면 건너뛴다)
-			let (clipRoundSize, isCulled) = node.drawComponents(graphic);
-			if isCulled {
-				self.culledNodeCount += 1;
+			let (clip_round_size, is_culled) = node.draw_components(graphic);
+			if is_culled {
+				self.culled_node_count += 1;
 			}
 
 			// 마스크가 있으면 자식 출력 전에 클리핑 시작.
-			if let Some(roundSize) = clipRoundSize {
-				let transform = self.nodes[nodeId].getTransform().clone();
-				Mask::beginClip(&transform, roundSize, graphic);
+			if let Some(round_size) = clip_round_size {
+				let transform = self.nodes[node_id].get_transform().clone();
+				Mask::begin_clip(&transform, round_size, graphic);
 			}
 
 			// 자식. (그리는 동안에는 트리가 바뀌지 않는다)
-			let childCount = self.nodes[nodeId].childIds.len();
-			for childIndex in 0..childCount {
-				let childId = self.nodes[nodeId].childIds[childIndex];
-				self.drawNode(childId, graphic);
+			let child_count = self.nodes[node_id].child_ids.len();
+			for child_index in 0..child_count {
+				let child_id = self.nodes[node_id].child_ids[child_index];
+				self.draw_node(child_id, graphic);
 			}
 
 			// 마스크가 있으면 클리핑 종료.
-			if clipRoundSize.is_some() {
-				Mask::endClip(graphic);
+			if clip_round_size.is_some() {
+				Mask::end_clip(graphic);
 			}
 		}
 
-		let node = &mut self.nodes[nodeId];
-		let isForceGizmosVisible = graphic.isForceGizmosVisible();
-		if isForceGizmosVisible || node.isGizmoVisible() {
-			node.drawGizmos(graphic);
+		let node = &mut self.nodes[node_id];
+		let is_force_gizmos_visible = graphic.is_force_gizmos_visible();
+		if is_force_gizmos_visible || node.is_gizmo_visible() {
+			node.draw_gizmos(graphic);
 		}
-		node.popTransform(graphic);
+		node.pop_transform(graphic);
 	}
 
 	//==============================================================================
 	// 그리는 순서로 돌며 점 아래 맨 위의 interactable 노드 찾기. (원본 TouchRecognizer 의 대상 고르기)
 	//==============================================================================
-	pub fn findTopmostInteractableNode(&self, viewPosition: Vector2) -> Option<NodeId> {
-		let mut foundId: Option<NodeId> = None;
-		let identityMatrix = TransformMatrix::identity();
-		self.findTopmostInteractableNodeRecursive(self.rootId, &identityMatrix, viewPosition, &mut foundId);
-		foundId
+	pub fn find_topmost_interactable_node(&self, view_position: Vector2) -> Option<NodeId> {
+		let mut found_id: Option<NodeId> = None;
+		let identity_matrix = TransformMatrix::identity();
+		self.find_topmost_interactable_node_recursive(self.root_id, &identity_matrix, view_position, &mut found_id);
+		found_id
 	}
 
-	fn findTopmostInteractableNodeRecursive(&self, nodeId: NodeId, parentMatrix: &TransformMatrix, viewPosition: Vector2, foundId: &mut Option<NodeId>) {
-		let node = match self.nodes.get(nodeId) {
+	fn find_topmost_interactable_node_recursive(&self, node_id: NodeId, parent_matrix: &TransformMatrix, view_position: Vector2, found_id: &mut Option<NodeId>) {
+		let node = match self.nodes.get(node_id) {
 			Some(node) => {
 				node
 			}
@@ -557,79 +557,79 @@ impl NodeTree {
 				return;
 			}
 		};
-		if !node.isActive() || !node.isVisible() {
+		if !node.is_active() || !node.is_visible() {
 			return;
 		}
-		let localMatrix = node.getTransform().calculateLocalMatrix();
-		let worldMatrix = parentMatrix.multiply(&localMatrix);
-		if node.isInteractable() && node.containsPoint(&worldMatrix, viewPosition) {
-			*foundId = Some(nodeId);
+		let local_matrix = node.get_transform().calculate_local_matrix();
+		let world_matrix = parent_matrix.multiply(&local_matrix);
+		if node.is_interactable() && node.contains_point(&world_matrix, view_position) {
+			*found_id = Some(node_id);
 		}
 
 		// 잘라 그리는(Mask) 노드 밖이면 자손은 보이지 않으므로 맞지 않는다. (원본 TouchRaycaster.isMaskedOut)
-		let isClipping = node.components.iter().any(|component| component.isEnable() && component.getClipRoundSize().is_some());
-		if isClipping && !node.containsPoint(&worldMatrix, viewPosition) {
+		let is_clipping = node.components.iter().any(|component| component.is_enable() && component.get_clip_round_size().is_some());
+		if is_clipping && !node.contains_point(&world_matrix, view_position) {
 			return;
 		}
-		for childId in node.childIds.iter().copied() {
-			self.findTopmostInteractableNodeRecursive(childId, &worldMatrix, viewPosition, foundId);
+		for child_id in node.child_ids.iter().copied() {
+			self.find_topmost_interactable_node_recursive(child_id, &world_matrix, view_position, found_id);
 		}
 	}
 
 	//==============================================================================
 	// 터치 전달. (노드의 컴포넌트들에게)
 	//==============================================================================
-	pub fn dispatchTouch(&mut self, nodeId: NodeId, engine: &Engine, touchKind: TouchKind, viewInputPosition: Vector2) {
-		self.traversalDepth += 1;
-		self.visitComponents(nodeId, engine, &mut |component, context| {
-			match touchKind {
-				TouchKind::press => {
-					component.touchPress(context, viewInputPosition);
+	pub fn dispatch_touch(&mut self, node_id: NodeId, engine: &Engine, touch_kind: TouchKind, view_input_position: Vector2) {
+		self.traversal_depth += 1;
+		self.visit_components(node_id, engine, &mut |component, context| {
+			match touch_kind {
+				TouchKind::Press => {
+					component.touch_press(context, view_input_position);
 				}
-				TouchKind::moved => {
-					component.touchMove(context, viewInputPosition);
+				TouchKind::Moved => {
+					component.touch_move(context, view_input_position);
 				}
-				TouchKind::release => {
-					component.touchRelease(context, viewInputPosition);
+				TouchKind::Release => {
+					component.touch_release(context, view_input_position);
 				}
-				TouchKind::cancel => {
-					component.touchCancel(context, viewInputPosition);
+				TouchKind::Cancel => {
+					component.touch_cancel(context, view_input_position);
 				}
 			}
 		});
-		self.traversalDepth -= 1;
-		self.flushPendingDestroy();
+		self.traversal_depth -= 1;
+		self.flush_pending_destroy();
 	}
 
 	//==============================================================================
-	// 휠 전달. (nodeId 자신부터 부모 쪽으로 올라가며 처음 받아 쓴 컴포넌트에서 멈춘다. 원본 touchWheel)
+	// 휠 전달. (node_id 자신부터 부모 쪽으로 올라가며 처음 받아 쓴 컴포넌트에서 멈춘다. 원본 touchWheel)
 	//==============================================================================
-	pub fn dispatchWheel(&mut self, nodeId: NodeId, engine: &Engine, wheelDelta: Vector2) -> bool {
-		let mut currentId = Some(nodeId);
-		while let Some(candidateId) = currentId {
-			let mut isHandled = false;
-			self.traversalDepth += 1;
-			self.visitComponents(candidateId, engine, &mut |component, context| {
-				if !isHandled && component.wheel(context, wheelDelta) {
-					isHandled = true;
+	pub fn dispatch_wheel(&mut self, node_id: NodeId, engine: &Engine, wheel_delta: Vector2) -> bool {
+		let mut current_id = Some(node_id);
+		while let Some(candidate_id) = current_id {
+			let mut is_handled = false;
+			self.traversal_depth += 1;
+			self.visit_components(candidate_id, engine, &mut |component, context| {
+				if !is_handled && component.wheel(context, wheel_delta) {
+					is_handled = true;
 				}
 			});
-			self.traversalDepth -= 1;
-			if isHandled {
-				self.flushPendingDestroy();
+			self.traversal_depth -= 1;
+			if is_handled {
+				self.flush_pending_destroy();
 				return true;
 			}
-			currentId = self.getParentId(candidateId);
+			current_id = self.get_parent_id(candidate_id);
 		}
-		self.flushPendingDestroy();
+		self.flush_pending_destroy();
 		false
 	}
 
 	//==============================================================================
 	// 노드 경계 사각형을 부모 영역 기준으로. (회전 없을 때 정확, 충돌 검사 등)
 	//==============================================================================
-	pub fn getLocalBounds(&self, nodeId: NodeId) -> Option<Rect> {
-		self.nodes.get(nodeId).map(|node| node.getTransform().getLocalBounds())
+	pub fn get_local_bounds(&self, node_id: NodeId) -> Option<Rect> {
+		self.nodes.get(node_id).map(|node| node.get_transform().get_local_bounds())
 	}
 }
 
@@ -643,16 +643,16 @@ impl Index<NodeId> for NodeTree {
 	type Output = WorldNode;
 
 	//==============================================================================
-	// tree[nodeId]. (지운 노드면 멈춘다. 있을지 모르면 getNode)
+	// tree[node_id]. (지운 노드면 멈춘다. 있을지 모르면 get_node)
 	//==============================================================================
-	fn index(&self, nodeId: NodeId) -> &WorldNode {
-		self.nodes.get(nodeId).expect("NodeTree: destroyed or unknown node id")
+	fn index(&self, node_id: NodeId) -> &WorldNode {
+		self.nodes.get(node_id).expect("NodeTree: destroyed or unknown node id")
 	}
 }
 
 impl IndexMut<NodeId> for NodeTree {
-	fn index_mut(&mut self, nodeId: NodeId) -> &mut WorldNode {
-		self.nodes.get_mut(nodeId).expect("NodeTree: destroyed or unknown node id")
+	fn index_mut(&mut self, node_id: NodeId) -> &mut WorldNode {
+		self.nodes.get_mut(node_id).expect("NodeTree: destroyed or unknown node id")
 	}
 }
 
@@ -660,44 +660,44 @@ impl IndexMut<NodeId> for NodeTree {
 // 빈 자리표. (tick / 터치 중인 컴포넌트가 잠깐 비운 자리. 아무것도 하지 않는다)
 //==============================================================================
 struct ComponentPlaceholder {
-	componentBase: ComponentBase,
+	component_base: ComponentBase,
 }
 
 impl ComponentPlaceholder {
 	fn new() -> ComponentPlaceholder {
-		let mut componentBase = ComponentBase::new();
-		componentBase.setEnable(false);
+		let mut component_base = ComponentBase::new();
+		component_base.set_enable(false);
 		ComponentPlaceholder {
-			componentBase,
+			component_base,
 		}
 	}
 }
 
 impl Component for ComponentPlaceholder {
-	fn getComponentBase(&self) -> &ComponentBase {
-		&self.componentBase
+	fn get_component_base(&self) -> &ComponentBase {
+		&self.component_base
 	}
 
-	fn getComponentBaseMut(&mut self) -> &mut ComponentBase {
-		&mut self.componentBase
+	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
+		&mut self.component_base
 	}
 
-	fn getComponentType(&self) -> &'static str {
+	fn get_component_type(&self) -> &'static str {
 		"ComponentPlaceholder"
 	}
 
-	fn isTickNeeded(&self) -> bool {
+	fn is_tick_needed(&self) -> bool {
 		false
 	}
 }
 
 //==============================================================================
 // 컴포넌트 문맥. (tick / 터치 때 컴포넌트가 받는 것: 자기 노드, 트리 전체, 엔진)
-// - 원본 컴포넌트의 getNode(), getNode().getParent(), Engine.getEngine() 자리.
+// - 원본 컴포넌트의 get_node(), get_node().getParent(), Engine.get_engine() 자리.
 //==============================================================================
 pub struct ComponentContext<'a> {
-	nodeTree: &'a mut NodeTree,
-	nodeId: NodeId,
+	node_tree: &'a mut NodeTree,
+	node_id: NodeId,
 	engine: &'a Engine,
 }
 
@@ -705,71 +705,71 @@ impl<'a> ComponentContext<'a> {
 	//==============================================================================
 	// 자기 노드 핸들.
 	//==============================================================================
-	pub fn getNodeId(&self) -> NodeId {
-		self.nodeId
+	pub fn get_node_id(&self) -> NodeId {
+		self.node_id
 	}
 
 	//==============================================================================
-	// 자기 노드. (지금 불리는 컴포넌트만 빠져 있고, 같은 노드의 다른 컴포넌트는 getComponent 로 찾는다)
+	// 자기 노드. (지금 불리는 컴포넌트만 빠져 있고, 같은 노드의 다른 컴포넌트는 get_component 로 찾는다)
 	//==============================================================================
-	pub fn getNode(&self) -> &WorldNode {
-		&self.nodeTree[self.nodeId]
+	pub fn get_node(&self) -> &WorldNode {
+		&self.node_tree[self.node_id]
 	}
 
 	//==============================================================================
 	// 자기 노드. (변경용)
 	//==============================================================================
-	pub fn getNodeMut(&mut self) -> &mut WorldNode {
-		let nodeId = self.nodeId;
-		&mut self.nodeTree[nodeId]
+	pub fn get_node_mut(&mut self) -> &mut WorldNode {
+		let node_id = self.node_id;
+		&mut self.node_tree[node_id]
 	}
 
 	//==============================================================================
 	// 자기 노드 트랜스폼.
 	//==============================================================================
-	pub fn getTransform(&self) -> &NodeTransform {
-		self.nodeTree[self.nodeId].getTransform()
+	pub fn get_transform(&self) -> &NodeTransform {
+		self.node_tree[self.node_id].get_transform()
 	}
 
 	//==============================================================================
 	// 자기 노드 트랜스폼. (변경용)
 	//==============================================================================
-	pub fn getTransformMut(&mut self) -> &mut NodeTransform {
-		let nodeId = self.nodeId;
-		self.nodeTree[nodeId].getTransformMut()
+	pub fn get_transform_mut(&mut self) -> &mut NodeTransform {
+		let node_id = self.node_id;
+		self.node_tree[node_id].get_transform_mut()
 	}
 
 	//==============================================================================
 	// 트리 전체.
 	//==============================================================================
-	pub fn getNodeTree(&self) -> &NodeTree {
-		self.nodeTree
+	pub fn get_node_tree(&self) -> &NodeTree {
+		self.node_tree
 	}
 
 	//==============================================================================
 	// 트리 전체. (변경용. 다른 노드를 바꾸거나 만들고 지울 때)
 	//==============================================================================
-	pub fn getNodeTreeMut(&mut self) -> &mut NodeTree {
-		self.nodeTree
+	pub fn get_node_tree_mut(&mut self) -> &mut NodeTree {
+		self.node_tree
 	}
 
 	//==============================================================================
 	// 엔진. (입력, 시간, 뷰)
 	//==============================================================================
-	pub fn getEngine(&self) -> &Engine {
+	pub fn get_engine(&self) -> &Engine {
 		self.engine
 	}
 
 	//==============================================================================
 	// 다른 노드(또는 자기 노드)의 T 컴포넌트를 그 노드의 문맥과 함께 부르기. (없거나 지금 꺼내져 있으면 None)
-	// - 위젯 안의 행 버튼이 위젯 본체를 부를 때 쓴다: context.withComponentMut::<UIDropdown, _>(dropdownId, |dropdown, dropdownContext| ...)
+	// - 위젯 안의 행 버튼이 위젯 본체를 부를 때 쓴다: context.with_component_mut::<UIDropdown, _>(dropdown_id, |dropdown, dropdown_context| ...)
 	//==============================================================================
-	pub fn withComponentMut<T: Component + 'static, R>(&mut self, nodeId: NodeId, action: impl FnOnce(&mut T, &mut ComponentContext) -> R) -> Option<R> {
+	pub fn with_component_mut<T: Component + 'static, R>(&mut self, node_id: NodeId, action: impl FnOnce(&mut T, &mut ComponentContext) -> R) -> Option<R> {
 		let engine = self.engine;
-		self.nodeTree.withComponentMut::<T, R>(nodeId, |component: &mut T, nodeTree: &mut NodeTree| {
+		self.node_tree.with_component_mut::<T, R>(node_id, |component: &mut T, node_tree: &mut NodeTree| {
 			let mut context = ComponentContext {
-				nodeTree,
-				nodeId,
+				node_tree,
+				node_id,
 				engine,
 			};
 			action(component, &mut context)
@@ -789,25 +789,25 @@ mod tests {
 	// tick 마다 자기 노드를 지우는 시험 컴포넌트.
 	//==============================================================================
 	struct SelfDestroyer {
-		componentBase: ComponentBase,
+		component_base: ComponentBase,
 	}
 
 	impl Component for SelfDestroyer {
-		fn getComponentBase(&self) -> &ComponentBase {
-			&self.componentBase
+		fn get_component_base(&self) -> &ComponentBase {
+			&self.component_base
 		}
 
-		fn getComponentBaseMut(&mut self) -> &mut ComponentBase {
-			&mut self.componentBase
+		fn get_component_base_mut(&mut self) -> &mut ComponentBase {
+			&mut self.component_base
 		}
 
-		fn getComponentType(&self) -> &'static str {
+		fn get_component_type(&self) -> &'static str {
 			"SelfDestroyer"
 		}
 
-		fn tick(&mut self, context: &mut ComponentContext, _timeDelta: f32) {
-			let nodeId = context.getNodeId();
-			context.getNodeTreeMut().destroyNode(nodeId);
+		fn tick(&mut self, context: &mut ComponentContext, _time_delta: f32) {
+			let node_id = context.get_node_id();
+			context.get_node_tree_mut().destroy_node(node_id);
 		}
 	}
 
@@ -815,30 +815,30 @@ mod tests {
 	// tick 마다 오른쪽으로 1 옮기는 시험 컴포넌트. (처음에 형제 노드도 하나 만든다)
 	//==============================================================================
 	struct Mover {
-		componentBase: ComponentBase,
-		isSiblingCreated: bool,
+		component_base: ComponentBase,
+		is_sibling_created: bool,
 	}
 
 	impl Component for Mover {
-		fn getComponentBase(&self) -> &ComponentBase {
-			&self.componentBase
+		fn get_component_base(&self) -> &ComponentBase {
+			&self.component_base
 		}
 
-		fn getComponentBaseMut(&mut self) -> &mut ComponentBase {
-			&mut self.componentBase
+		fn get_component_base_mut(&mut self) -> &mut ComponentBase {
+			&mut self.component_base
 		}
 
-		fn getComponentType(&self) -> &'static str {
+		fn get_component_type(&self) -> &'static str {
 			"Mover"
 		}
 
-		fn tick(&mut self, context: &mut ComponentContext, _timeDelta: f32) {
-			let localPosition = context.getTransform().getLocalPosition();
-			context.getTransformMut().setLocalPosition(Vector2::create(localPosition.x + 1.0, localPosition.y));
-			if !self.isSiblingCreated {
-				self.isSiblingCreated = true;
-				let parentId = context.getNode().getParentId().expect("parent");
-				context.getNodeTreeMut().createChild(parentId, "sibling");
+		fn tick(&mut self, context: &mut ComponentContext, _time_delta: f32) {
+			let local_position = context.get_transform().get_local_position();
+			context.get_transform_mut().set_local_position(Vector2::create(local_position.x + 1.0, local_position.y));
+			if !self.is_sibling_created {
+				self.is_sibling_created = true;
+				let parent_id = context.get_node().get_parent_id().expect("parent");
+				context.get_node_tree_mut().create_child(parent_id, "sibling");
 			}
 		}
 	}
@@ -847,25 +847,25 @@ mod tests {
 	// 휠을 받아 쓰는 시험 컴포넌트.
 	//==============================================================================
 	struct WheelCatcher {
-		componentBase: ComponentBase,
-		wheelTotal: f32,
+		component_base: ComponentBase,
+		wheel_total: f32,
 	}
 
 	impl Component for WheelCatcher {
-		fn getComponentBase(&self) -> &ComponentBase {
-			&self.componentBase
+		fn get_component_base(&self) -> &ComponentBase {
+			&self.component_base
 		}
 
-		fn getComponentBaseMut(&mut self) -> &mut ComponentBase {
-			&mut self.componentBase
+		fn get_component_base_mut(&mut self) -> &mut ComponentBase {
+			&mut self.component_base
 		}
 
-		fn getComponentType(&self) -> &'static str {
+		fn get_component_type(&self) -> &'static str {
 			"WheelCatcher"
 		}
 
-		fn wheel(&mut self, _context: &mut ComponentContext, wheelDelta: Vector2) -> bool {
-			self.wheelTotal += wheelDelta.y;
+		fn wheel(&mut self, _context: &mut ComponentContext, wheel_delta: Vector2) -> bool {
+			self.wheel_total += wheel_delta.y;
 			true
 		}
 	}
@@ -873,7 +873,7 @@ mod tests {
 	//==============================================================================
 	// 시험용 엔진. (창 없이 만든다)
 	//==============================================================================
-	fn createTestEngine() -> Engine {
+	fn create_test_engine() -> Engine {
 		Engine::new(EngineConfiguration::new())
 	}
 
@@ -881,149 +881,149 @@ mod tests {
 	// 만들기, 붙이기, 찾기, 지우기, 옛 핸들.
 	//==============================================================================
 	#[test]
-	fn createFindDestroy() {
-		let mut nodeTree = NodeTree::new();
-		let rootId = nodeTree.getRootId();
-		let layerId = nodeTree.createChild(rootId, "layer");
-		let firstId = nodeTree.createChild(layerId, "first");
-		let secondId = nodeTree.createChild(layerId, "second");
-		let grandchildId = nodeTree.createChild(secondId, "grandchild");
-		assert_eq!(nodeTree.getChildIds(layerId), &[firstId, secondId]);
-		assert_eq!(nodeTree.getParentId(grandchildId), Some(secondId));
-		assert_eq!(nodeTree.findChildByName(layerId, "second"), Some(secondId));
-		assert_eq!(nodeTree.findDescendantByName(rootId, "grandchild"), Some(grandchildId));
-		assert_eq!(nodeTree.getNodeCount(), 5);
+	fn create_find_destroy() {
+		let mut node_tree = NodeTree::new();
+		let root_id = node_tree.get_root_id();
+		let layer_id = node_tree.create_child(root_id, "layer");
+		let first_id = node_tree.create_child(layer_id, "first");
+		let second_id = node_tree.create_child(layer_id, "second");
+		let grandchild_id = node_tree.create_child(second_id, "grandchild");
+		assert_eq!(node_tree.get_child_ids(layer_id), &[first_id, second_id]);
+		assert_eq!(node_tree.get_parent_id(grandchild_id), Some(second_id));
+		assert_eq!(node_tree.find_child_by_name(layer_id, "second"), Some(second_id));
+		assert_eq!(node_tree.find_descendant_by_name(root_id, "grandchild"), Some(grandchild_id));
+		assert_eq!(node_tree.get_node_count(), 5);
 
-		nodeTree.destroyNode(secondId);
-		assert!(nodeTree.getNode(secondId).is_none());
-		assert!(nodeTree.getNode(grandchildId).is_none());
-		assert_eq!(nodeTree.getChildIds(layerId), &[firstId]);
-		assert_eq!(nodeTree.getNodeCount(), 3);
+		node_tree.destroy_node(second_id);
+		assert!(node_tree.get_node(second_id).is_none());
+		assert!(node_tree.get_node(grandchild_id).is_none());
+		assert_eq!(node_tree.get_child_ids(layer_id), &[first_id]);
+		assert_eq!(node_tree.get_node_count(), 3);
 
 		// 지운 칸을 다시 써도 옛 핸들은 걸러진다.
-		let reusedId = nodeTree.createChild(layerId, "reused");
-		assert!(nodeTree.getNode(secondId).is_none());
-		assert!(nodeTree.getNode(reusedId).is_some());
+		let reused_id = node_tree.create_child(layer_id, "reused");
+		assert!(node_tree.get_node(second_id).is_none());
+		assert!(node_tree.get_node(reused_id).is_some());
 
 		// 루트는 지우지 않는다.
-		nodeTree.destroyNode(rootId);
-		assert!(nodeTree.contains(rootId));
+		node_tree.destroy_node(root_id);
+		assert!(node_tree.contains(root_id));
 	}
 
 	//==============================================================================
 	// 옮기기, 끼워 넣기, 자기 자손 밑으로 붙이기 막기.
 	//==============================================================================
 	#[test]
-	fn reparentAndCycleGuard() {
-		let mut nodeTree = NodeTree::new();
-		let rootId = nodeTree.getRootId();
-		let parentId = nodeTree.createChild(rootId, "parent");
-		let childId = nodeTree.createChild(parentId, "child");
-		let otherId = nodeTree.createChild(rootId, "other");
+	fn reparent_and_cycle_guard() {
+		let mut node_tree = NodeTree::new();
+		let root_id = node_tree.get_root_id();
+		let parent_id = node_tree.create_child(root_id, "parent");
+		let child_id = node_tree.create_child(parent_id, "child");
+		let other_id = node_tree.create_child(root_id, "other");
 
-		assert!(!nodeTree.addChild(childId, parentId));
-		assert!(!nodeTree.addChild(parentId, parentId));
-		assert!(!nodeTree.addChild(childId, rootId));
+		assert!(!node_tree.add_child(child_id, parent_id));
+		assert!(!node_tree.add_child(parent_id, parent_id));
+		assert!(!node_tree.add_child(child_id, root_id));
 
-		assert!(nodeTree.addChild(otherId, childId));
-		assert_eq!(nodeTree.getParentId(childId), Some(otherId));
-		assert!(nodeTree.getChildIds(parentId).is_empty());
+		assert!(node_tree.add_child(other_id, child_id));
+		assert_eq!(node_tree.get_parent_id(child_id), Some(other_id));
+		assert!(node_tree.get_child_ids(parent_id).is_empty());
 
-		let firstId = nodeTree.createChild(otherId, "first");
-		assert!(nodeTree.insertChild(otherId, firstId, 0));
-		assert_eq!(nodeTree.getChildIds(otherId), &[firstId, childId]);
+		let first_id = node_tree.create_child(other_id, "first");
+		assert!(node_tree.insert_child(other_id, first_id, 0));
+		assert_eq!(node_tree.get_child_ids(other_id), &[first_id, child_id]);
 
-		nodeTree.removeFromParent(childId);
-		assert_eq!(nodeTree.getParentId(childId), None);
-		assert!(nodeTree.contains(childId));
+		node_tree.remove_from_parent(child_id);
+		assert_eq!(node_tree.get_parent_id(child_id), None);
+		assert!(node_tree.contains(child_id));
 	}
 
 	//==============================================================================
 	// tick 중에 지우면 다 돈 뒤에 지워지고, 옆 형제는 그대로 돈다.
 	//==============================================================================
 	#[test]
-	fn destroyDuringTickIsDeferred() {
-		let engine = createTestEngine();
-		let mut nodeTree = NodeTree::new();
-		let rootId = nodeTree.getRootId();
-		let doomedId = nodeTree.createChild(rootId, "doomed");
-		nodeTree[doomedId].addComponent(SelfDestroyer {
-			componentBase: ComponentBase::new(),
+	fn destroy_during_tick_is_deferred() {
+		let engine = create_test_engine();
+		let mut node_tree = NodeTree::new();
+		let root_id = node_tree.get_root_id();
+		let doomed_id = node_tree.create_child(root_id, "doomed");
+		node_tree[doomed_id].add_component(SelfDestroyer {
+			component_base: ComponentBase::new(),
 		});
-		let moverId = nodeTree.createChild(rootId, "mover");
-		nodeTree[moverId].addComponent(Mover {
-			componentBase: ComponentBase::new(),
-			isSiblingCreated: false,
+		let mover_id = node_tree.create_child(root_id, "mover");
+		node_tree[mover_id].add_component(Mover {
+			component_base: ComponentBase::new(),
+			is_sibling_created: false,
 		});
 
-		nodeTree.tick(&engine, 0.016);
-		assert!(nodeTree.getNode(doomedId).is_none());
-		assert_eq!(nodeTree[moverId].getLocalPosition().x, 1.0);
-		assert!(nodeTree.findChildByName(rootId, "sibling").is_some());
-		assert!(nodeTree[moverId].hasComponent::<Mover>());
+		node_tree.tick(&engine, 0.016);
+		assert!(node_tree.get_node(doomed_id).is_none());
+		assert_eq!(node_tree[mover_id].get_local_position().x, 1.0);
+		assert!(node_tree.find_child_by_name(root_id, "sibling").is_some());
+		assert!(node_tree[mover_id].has_component::<Mover>());
 
-		nodeTree.tick(&engine, 0.016);
-		assert_eq!(nodeTree[moverId].getLocalPosition().x, 2.0);
+		node_tree.tick(&engine, 0.016);
+		assert_eq!(node_tree[mover_id].get_local_position().x, 2.0);
 	}
 
 	//==============================================================================
 	// 맨 위 노드 찾기. (그리는 순서로 뒤가 위, 마스크 밖 자손은 맞지 않는다)
 	//==============================================================================
 	#[test]
-	fn topmostTouchAndMaskClip() {
-		let mut nodeTree = NodeTree::new();
-		let rootId = nodeTree.getRootId();
-		let panelId = nodeTree.createChild(rootId, "panel");
-		let panel = &mut nodeTree[panelId];
-		panel.setPivot(Vector2::zero());
-		panel.setLocalPosition(Vector2::create(100.0, 100.0));
-		panel.setContentSize(Vector2::create(100.0, 100.0));
-		panel.addComponent(Mask::new());
+	fn topmost_touch_and_mask_clip() {
+		let mut node_tree = NodeTree::new();
+		let root_id = node_tree.get_root_id();
+		let panel_id = node_tree.create_child(root_id, "panel");
+		let panel = &mut node_tree[panel_id];
+		panel.set_pivot(Vector2::zero());
+		panel.set_local_position(Vector2::create(100.0, 100.0));
+		panel.set_content_size(Vector2::create(100.0, 100.0));
+		panel.add_component(Mask::new());
 
-		let insideId = nodeTree.createChild(panelId, "inside");
-		let inside = &mut nodeTree[insideId];
-		inside.setPivot(Vector2::zero());
-		inside.setContentSize(Vector2::create(300.0, 50.0));
-		inside.setInteractable(true);
+		let inside_id = node_tree.create_child(panel_id, "inside");
+		let inside = &mut node_tree[inside_id];
+		inside.set_pivot(Vector2::zero());
+		inside.set_content_size(Vector2::create(300.0, 50.0));
+		inside.set_interactable(true);
 
-		let overId = nodeTree.createChild(rootId, "over");
-		let over = &mut nodeTree[overId];
-		over.setPivot(Vector2::zero());
-		over.setLocalPosition(Vector2::create(150.0, 100.0));
-		over.setContentSize(Vector2::create(10.0, 10.0));
-		over.setInteractable(true);
+		let over_id = node_tree.create_child(root_id, "over");
+		let over = &mut node_tree[over_id];
+		over.set_pivot(Vector2::zero());
+		over.set_local_position(Vector2::create(150.0, 100.0));
+		over.set_content_size(Vector2::create(10.0, 10.0));
+		over.set_interactable(true);
 
-		assert_eq!(nodeTree.findTopmostInteractableNode(Vector2::create(120.0, 120.0)), Some(insideId));
-		assert_eq!(nodeTree.findTopmostInteractableNode(Vector2::create(155.0, 105.0)), Some(overId));
+		assert_eq!(node_tree.find_topmost_interactable_node(Vector2::create(120.0, 120.0)), Some(inside_id));
+		assert_eq!(node_tree.find_topmost_interactable_node(Vector2::create(155.0, 105.0)), Some(over_id));
 		// inside 는 폭이 300 이지만 패널(마스크) 밖인 250 에서는 맞지 않는다.
-		assert_eq!(nodeTree.findTopmostInteractableNode(Vector2::create(250.0, 120.0)), None);
+		assert_eq!(node_tree.find_topmost_interactable_node(Vector2::create(250.0, 120.0)), None);
 	}
 
 	//==============================================================================
 	// 휠은 맞은 노드부터 부모 쪽으로 올라가 처음 받아 쓴 컴포넌트에서 멈춘다.
 	//==============================================================================
 	#[test]
-	fn wheelBubblesToAncestor() {
-		let engine = createTestEngine();
-		let mut nodeTree = NodeTree::new();
-		let rootId = nodeTree.getRootId();
-		let scrollId = nodeTree.createChild(rootId, "scroll");
-		nodeTree[scrollId].addComponent(WheelCatcher {
-			componentBase: ComponentBase::new(),
-			wheelTotal: 0.0,
+	fn wheel_bubbles_to_ancestor() {
+		let engine = create_test_engine();
+		let mut node_tree = NodeTree::new();
+		let root_id = node_tree.get_root_id();
+		let scroll_id = node_tree.create_child(root_id, "scroll");
+		node_tree[scroll_id].add_component(WheelCatcher {
+			component_base: ComponentBase::new(),
+			wheel_total: 0.0,
 		});
-		let itemId = nodeTree.createChild(scrollId, "item");
-		let isHandled = nodeTree.dispatchWheel(itemId, &engine, Vector2::create(0.0, 40.0));
-		assert!(isHandled);
-		let wheelTotal = nodeTree[scrollId].getComponent::<WheelCatcher>().expect("catcher").wheelTotal;
-		assert_eq!(wheelTotal, 40.0);
-		let isRootHandled = nodeTree.dispatchWheel(rootId, &engine, Vector2::create(0.0, 40.0));
-		assert!(!isRootHandled);
+		let item_id = node_tree.create_child(scroll_id, "item");
+		let is_handled = node_tree.dispatch_wheel(item_id, &engine, Vector2::create(0.0, 40.0));
+		assert!(is_handled);
+		let wheel_total = node_tree[scroll_id].get_component::<WheelCatcher>().expect("catcher").wheel_total;
+		assert_eq!(wheel_total, 40.0);
+		let is_root_handled = node_tree.dispatch_wheel(root_id, &engine, Vector2::create(0.0, 40.0));
+		assert!(!is_root_handled);
 	}
 }
 
 #[cfg(test)]
-mod siblingTests {
+mod sibling_tests {
 	use super::*;
 	use crate::base::color::Color;
 	use crate::core::component::mask::Mask;
@@ -1035,33 +1035,33 @@ mod siblingTests {
 	// tick 에서 같은 노드의 Paint 색을 바꾸는 시험 컴포넌트.
 	//==============================================================================
 	struct SiblingPainter {
-		componentBase: ComponentBase,
+		component_base: ComponentBase,
 	}
 
 	impl Component for SiblingPainter {
-		fn getComponentBase(&self) -> &ComponentBase {
-			&self.componentBase
+		fn get_component_base(&self) -> &ComponentBase {
+			&self.component_base
 		}
 
-		fn getComponentBaseMut(&mut self) -> &mut ComponentBase {
-			&mut self.componentBase
+		fn get_component_base_mut(&mut self) -> &mut ComponentBase {
+			&mut self.component_base
 		}
 
-		fn getComponentType(&self) -> &'static str {
+		fn get_component_type(&self) -> &'static str {
 			"SiblingPainter"
 		}
 
-		fn tick(&mut self, context: &mut ComponentContext, _timeDelta: f32) {
-			let node = context.getNodeMut();
-			let isSelfVisible = node.hasComponent::<SiblingPainter>();
-			if let Some(paint) = node.getComponentMut::<Paint>() {
-				let red = if isSelfVisible {
+		fn tick(&mut self, context: &mut ComponentContext, _time_delta: f32) {
+			let node = context.get_node_mut();
+			let is_self_visible = node.has_component::<SiblingPainter>();
+			if let Some(paint) = node.get_component_mut::<Paint>() {
+				let red = if is_self_visible {
 					0.5
 				}
 				else {
 					1.0
 				};
-				paint.setColor(Color::create(red, 0.0, 0.0, 1.0));
+				paint.set_color(Color::create(red, 0.0, 0.0, 1.0));
 			}
 		}
 	}
@@ -1070,22 +1070,22 @@ mod siblingTests {
 	// 씬 코드에서 컴포넌트와 트리를 같이 쥐고 부를 수 있다. (다른 노드를 만들고 형제도 본다)
 	//==============================================================================
 	#[test]
-	fn withComponentMutGivesTree() {
-		let mut nodeTree = NodeTree::new();
-		let rootId = nodeTree.getRootId();
-		let nodeId = nodeTree.createChild(rootId, "painted");
-		nodeTree[nodeId].addComponent(Paint::createWithColor(Color::white()));
-		nodeTree[nodeId].addComponent(SiblingPainter {
-			componentBase: ComponentBase::new(),
+	fn with_component_mut_gives_tree() {
+		let mut node_tree = NodeTree::new();
+		let root_id = node_tree.get_root_id();
+		let node_id = node_tree.create_child(root_id, "painted");
+		node_tree[node_id].add_component(Paint::create_with_color(Color::white()));
+		node_tree[node_id].add_component(SiblingPainter {
+			component_base: ComponentBase::new(),
 		});
-		let createdId = nodeTree.withComponentMut::<SiblingPainter, _>(nodeId, |_painter, tree| {
-			let hasPaint = tree[nodeId].hasComponent::<Paint>();
-			assert!(hasPaint);
-			tree.createChild(nodeId, "created")
+		let created_id = node_tree.with_component_mut::<SiblingPainter, _>(node_id, |_painter, tree| {
+			let has_paint = tree[node_id].has_component::<Paint>();
+			assert!(has_paint);
+			tree.create_child(node_id, "created")
 		}).expect("painter");
-		assert_eq!(nodeTree.getParentId(createdId), Some(nodeId));
-		assert!(nodeTree[nodeId].hasComponent::<SiblingPainter>());
-		let missing = nodeTree.withComponentMut::<Mask, _>(nodeId, |_mask, _tree| 0);
+		assert_eq!(node_tree.get_parent_id(created_id), Some(node_id));
+		assert!(node_tree[node_id].has_component::<SiblingPainter>());
+		let missing = node_tree.with_component_mut::<Mask, _>(node_id, |_mask, _tree| 0);
 		assert!(missing.is_none());
 	}
 
@@ -1093,20 +1093,20 @@ mod siblingTests {
 	// tick 중인 컴포넌트가 형제 컴포넌트를 찾아 바꿀 수 있다. (자기 자신은 그동안 빠져 있다)
 	//==============================================================================
 	#[test]
-	fn componentReachesSiblingDuringTick() {
+	fn component_reaches_sibling_during_tick() {
 		let engine = Engine::new(EngineConfiguration::new());
-		let mut nodeTree = NodeTree::new();
-		let rootId = nodeTree.getRootId();
-		let nodeId = nodeTree.createChild(rootId, "painted");
-		nodeTree[nodeId].addComponent(Paint::createWithColor(Color::white()));
-		nodeTree[nodeId].addComponent(SiblingPainter {
-			componentBase: ComponentBase::new(),
+		let mut node_tree = NodeTree::new();
+		let root_id = node_tree.get_root_id();
+		let node_id = node_tree.create_child(root_id, "painted");
+		node_tree[node_id].add_component(Paint::create_with_color(Color::white()));
+		node_tree[node_id].add_component(SiblingPainter {
+			component_base: ComponentBase::new(),
 		});
-		nodeTree.tick(&engine, 0.016);
-		let paintColor = nodeTree[nodeId].getComponent::<Paint>().expect("paint").getColor();
-		assert_eq!(paintColor.red, 1.0);
-		assert_eq!(paintColor.green, 0.0);
-		assert!(nodeTree[nodeId].hasComponent::<SiblingPainter>());
-		assert_eq!(nodeTree[nodeId].getAllComponents().len(), 2);
+		node_tree.tick(&engine, 0.016);
+		let paint_color = node_tree[node_id].get_component::<Paint>().expect("paint").get_color();
+		assert_eq!(paint_color.red, 1.0);
+		assert_eq!(paint_color.green, 0.0);
+		assert!(node_tree[node_id].has_component::<SiblingPainter>());
+		assert_eq!(node_tree[node_id].get_all_components().len(), 2);
 	}
 }

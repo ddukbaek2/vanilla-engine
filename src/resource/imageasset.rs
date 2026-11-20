@@ -1,7 +1,7 @@
 //==============================================================================
 // 이미지 애셋. (원본 resource/imageasset.js)
 // - 원본은 HTMLImageElement 에 src 를 넣고 onload 를 기다린다.
-//   러스트 판은 엔진에게 바이트를 부탁하고, 다 오면 처음 getImage 할 때 풀어서 Image 로 만든다. (PNG, JPEG)
+//   러스트 판은 엔진에게 바이트를 부탁하고, 다 오면 처음 get_image 할 때 풀어서 Image 로 만든다. (PNG, JPEG)
 //==============================================================================
 use crate::base::vector2::Vector2;
 use crate::core::asset::{Asset, AssetBase, AssetType};
@@ -13,9 +13,9 @@ use std::rc::Rc;
 // 이미지 애셋.
 //==============================================================================
 pub struct ImageAsset {
-	assetBase: AssetBase,
+	asset_base: AssetBase,
 	image: Option<Rc<Image>>,
-	isDecodeFailed: bool,
+	is_decode_failed: bool,
 }
 
 impl ImageAsset {
@@ -24,56 +24,56 @@ impl ImageAsset {
 	//==============================================================================
 	pub fn new() -> ImageAsset {
 		ImageAsset {
-			assetBase: AssetBase::new(AssetType::image),
+			asset_base: AssetBase::new(AssetType::Image),
 			image: None,
-			isDecodeFailed: false,
+			is_decode_failed: false,
 		}
 	}
 
 	//==============================================================================
 	// 읽기 요청. (원본 load)
 	//==============================================================================
-	pub fn load(&mut self, engine: &Engine, assetPath: &str) {
-		self.assetBase.requestLoad(engine, assetPath);
+	pub fn load(&mut self, engine: &Engine, asset_path: &str) {
+		self.asset_base.request_load(engine, asset_path);
 	}
 
 	//==============================================================================
 	// 이미 가진 바이트로 읽기.
 	//==============================================================================
-	pub fn loadFromBytes(&mut self, assetPath: &str, bytes: Vec<u8>) {
+	pub fn load_from_bytes(&mut self, asset_path: &str, bytes: Vec<u8>) {
 		self.image = None;
-		self.isDecodeFailed = false;
-		self.assetBase.loadFromBytes(assetPath, bytes);
+		self.is_decode_failed = false;
+		self.asset_base.load_from_bytes(asset_path, bytes);
 	}
 
 	//==============================================================================
 	// 내리기.
 	//==============================================================================
 	pub fn unload(&mut self) {
-		self.assetBase.unload();
+		self.asset_base.unload();
 		self.image = None;
-		self.isDecodeFailed = false;
+		self.is_decode_failed = false;
 	}
 
 	//==============================================================================
 	// 이미지. (다 읽히기 전이거나 풀기에 실패하면 None)
 	//==============================================================================
-	pub fn getImage(&mut self) -> Option<Rc<Image>> {
+	pub fn get_image(&mut self) -> Option<Rc<Image>> {
 		if let Some(image) = &self.image {
 			return Some(image.clone());
 		}
-		if self.isDecodeFailed {
+		if self.is_decode_failed {
 			return None;
 		}
-		let bytes = self.assetBase.getBytes()?;
-		match Image::loadFromMemory(&bytes) {
+		let bytes = self.asset_base.get_bytes()?;
+		match Image::load_from_memory(&bytes) {
 			Ok(image) => {
 				self.image = Some(image.clone());
 				Some(image)
 			}
 			Err(error) => {
-				eprintln!("ImageAsset: {} ({})", error, self.assetBase.getAssetPath());
-				self.isDecodeFailed = true;
+				eprintln!("ImageAsset: {} ({})", error, self.asset_base.get_asset_path());
+				self.is_decode_failed = true;
 				None
 			}
 		}
@@ -82,10 +82,10 @@ impl ImageAsset {
 	//==============================================================================
 	// 이미지 크기. (픽셀, 아직 없으면 0)
 	//==============================================================================
-	pub fn getImageSize(&mut self) -> Vector2 {
-		match self.getImage() {
+	pub fn get_image_size(&mut self) -> Vector2 {
+		match self.get_image() {
 			Some(image) => {
-				Vector2::create(image.getWidth() as f32, image.getHeight() as f32)
+				Vector2::create(image.get_width() as f32, image.get_height() as f32)
 			}
 			None => {
 				Vector2::zero()
@@ -101,11 +101,11 @@ impl Default for ImageAsset {
 }
 
 impl Asset for ImageAsset {
-	fn getAssetBase(&self) -> &AssetBase {
-		&self.assetBase
+	fn get_asset_base(&self) -> &AssetBase {
+		&self.asset_base
 	}
 
-	fn getAssetBaseMut(&mut self) -> &mut AssetBase {
-		&mut self.assetBase
+	fn get_asset_base_mut(&mut self) -> &mut AssetBase {
+		&mut self.asset_base
 	}
 }

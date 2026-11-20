@@ -19,7 +19,7 @@ impl Version {
 	//==============================================================================
 	// "major.minor.patch" 문자열.
 	//==============================================================================
-	pub fn toString(&self) -> String {
+	pub fn to_string(&self) -> String {
 		format!("{}.{}.{}", self.major, self.minor, self.patch)
 	}
 }

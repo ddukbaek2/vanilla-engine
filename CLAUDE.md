@@ -43,13 +43,13 @@
 - 다단계 작업의 경우 짧은 계획을 명시한다.
 
 ## 원본과의 관계
-- 원본은 vanilla.js 다. 공개 API 는 원본의 이름과 쓰임새를 따른다. 러스트에서 그대로 될 수 없는 것만 바꾸고, 바꾼 까닭을 파일 머리 주석에 적는다.
+- 원본은 vanilla.js 다. 공개 API 는 원본의 쓰임새를 따르고, 이름은 원본 이름을 러스트 규칙으로 바꾼 것이다. 러스트에서 그대로 될 수 없는 것만 바꾸고, 바꾼 까닭을 파일 머리 주석에 적는다.
 - 원본 구조는 vanilla.js 의 ARCHITECTURE.md, 러스트 판에서 달라진 것은 이 저장소의 ARCHITECTURE.md 에 있다.
 - 원본의 버그를 옮기다 찾으면 러스트 판에서 고치고 UPDATE.md 에 적는다.
 - 프로젝트 내에 존재하지 않는 가상의 함수나 타입을 창작하여 사용하지 않는다.
 
 ## 필수 코딩 스타일
-- **이름:** 모두 camelCase 다. (타입은 PascalCase, 열거 값과 상수 목록은 원본을 따른다) 러스트 기본 꼴(snake_case) 경고는 lib.rs 에서 끈다.
+- **이름:** 러스트 규칙(Rust API Guidelines C-CASE)을 따른다. 함수, 메서드, 변수, 필드, 모듈은 snake_case, 타입과 트레이트와 열거 값은 UpperCamelCase, 상수와 static 은 SCREAMING_SNAKE_CASE. vanilla.js 의 camelCase 이름은 이 규칙으로 바꿔 옮긴다. (setFillColor → set_fill_color, Colors.white → Colors::WHITE) 이름 경고(non_snake_case 등)는 끄지 않는다.
 - **축약 금지:** 변수명을 줄여 쓰거나 약어를 사용하지 않는다. (`context` 를 `ctx`, `button` 을 `btn`, `value` 를 `val` 로 줄이지 않는다) 화면에 보이는 문자열에도 같다.
 - **중괄호 강제:** 모든 조건문, 반복문, 함수, match 갈래는 중괄호 `{}` 를 쓴다. 1줄이라도 생략하지 않는다.
 - **조건문 개행 강제:** `else`, `else if` 는 반드시 다음 행에서 시작한다. (예: `}\nelse {`)

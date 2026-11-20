@@ -9,12 +9,12 @@
 use crate::base::rect::Rect;
 
 //==============================================================================
-// 내비게이터 설정. (원본 options = { crossAxisPenalty = 2.5 })
+// 내비게이터 설정. (원본 options = { cross_axis_penalty = 2.5 })
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FocusNavigatorOptions {
 	// 이동 축에서 벗어난 거리에 곱하는 벌점.
-	pub crossAxisPenalty: f32,
+	pub cross_axis_penalty: f32,
 }
 
 impl Default for FocusNavigatorOptions {
@@ -23,7 +23,7 @@ impl Default for FocusNavigatorOptions {
 	//==============================================================================
 	fn default() -> FocusNavigatorOptions {
 		FocusNavigatorOptions {
-			crossAxisPenalty: 2.5,
+			cross_axis_penalty: 2.5,
 		}
 	}
 }
@@ -42,9 +42,9 @@ struct FocusItem {
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct FocusNavigator {
-	itemList: Vec<FocusItem>,
-	focusedId: Option<String>,
-	crossAxisPenalty: f32,
+	item_list: Vec<FocusItem>,
+	focused_id: Option<String>,
+	cross_axis_penalty: f32,
 }
 
 impl FocusNavigator {
@@ -53,17 +53,17 @@ impl FocusNavigator {
 	//==============================================================================
 	pub fn new(options: FocusNavigatorOptions) -> FocusNavigator {
 		FocusNavigator {
-			itemList: Vec::new(),
-			focusedId: None,
-			crossAxisPenalty: options.crossAxisPenalty,
+			item_list: Vec::new(),
+			focused_id: None,
+			cross_axis_penalty: options.cross_axis_penalty,
 		}
 	}
 
 	//==============================================================================
 	// 항목 등록.
 	//==============================================================================
-	pub fn addItem(&mut self, id: &str, rect: Rect) {
-		self.itemList.push(FocusItem {
+	pub fn add_item(&mut self, id: &str, rect: Rect) {
+		self.item_list.push(FocusItem {
 			id: id.to_string(),
 			rect,
 		});
@@ -73,90 +73,90 @@ impl FocusNavigator {
 	// 항목 모두 빼기. (포커스도 비운다)
 	//==============================================================================
 	pub fn clear(&mut self) {
-		self.itemList.clear();
-		self.focusedId = None;
+		self.item_list.clear();
+		self.focused_id = None;
 	}
 
 	//==============================================================================
 	// 포커스 정하기.
 	//==============================================================================
-	pub fn setFocusedId(&mut self, id: Option<&str>) {
-		self.focusedId = id.map(|id| id.to_string());
+	pub fn set_focused_id(&mut self, id: Option<&str>) {
+		self.focused_id = id.map(|id| id.to_string());
 	}
 
 	//==============================================================================
 	// 지금 포커스 반환.
 	//==============================================================================
-	pub fn getFocusedId(&self) -> Option<&str> {
-		self.focusedId.as_deref()
+	pub fn get_focused_id(&self) -> Option<&str> {
+		self.focused_id.as_deref()
 	}
 
 	//==============================================================================
-	// 방향 이동. (directionX / directionY 는 -1, 0, 1. 예: 오른쪽 = (1, 0))
+	// 방향 이동. (direction_x / direction_y 는 -1, 0, 1. 예: 오른쪽 = (1, 0))
 	// - 포커스가 없으면 방향과 상관없이 가장 왼쪽 위 항목을 고른다.
 	// - 포커스한 항목이 목록에 없으면 첫 항목을 고른다.
 	// - 옮길 곳이 없으면 포커스를 그대로 두고 None 을 돌려준다.
 	//==============================================================================
-	pub fn moveFocus(&mut self, directionX: f32, directionY: f32) -> Option<String> {
-		let firstListItem = self.itemList.first()?;
-		let focusedId = match &self.focusedId {
-			Some(focusedId) => {
-				focusedId.clone()
+	pub fn move_focus(&mut self, direction_x: f32, direction_y: f32) -> Option<String> {
+		let first_list_item = self.item_list.first()?;
+		let focused_id = match &self.focused_id {
+			Some(focused_id) => {
+				focused_id.clone()
 			}
 			None => {
-				let mut firstItem = firstListItem;
-				for item in self.itemList.iter() {
-					let itemScore = item.rect.position.y * 10000.0 + item.rect.position.x;
-					let firstScore = firstItem.rect.position.y * 10000.0 + firstItem.rect.position.x;
-					if itemScore < firstScore {
-						firstItem = item;
+				let mut first_item = first_list_item;
+				for item in self.item_list.iter() {
+					let item_score = item.rect.position.y * 10000.0 + item.rect.position.x;
+					let first_score = first_item.rect.position.y * 10000.0 + first_item.rect.position.x;
+					if item_score < first_score {
+						first_item = item;
 					}
 				}
-				let firstId = firstItem.id.clone();
-				self.focusedId = Some(firstId.clone());
-				return Some(firstId);
+				let first_id = first_item.id.clone();
+				self.focused_id = Some(first_id.clone());
+				return Some(first_id);
 			}
 		};
 
-		let currentItem = match self.itemList.iter().find(|item| item.id == focusedId) {
-			Some(currentItem) => {
-				currentItem
+		let current_item = match self.item_list.iter().find(|item| item.id == focused_id) {
+			Some(current_item) => {
+				current_item
 			}
 			None => {
-				let firstId = firstListItem.id.clone();
-				self.focusedId = Some(firstId.clone());
-				return Some(firstId);
+				let first_id = first_list_item.id.clone();
+				self.focused_id = Some(first_id.clone());
+				return Some(first_id);
 			}
 		};
-		let currentCenterX = currentItem.rect.position.x + currentItem.rect.size.x * 0.5;
-		let currentCenterY = currentItem.rect.position.y + currentItem.rect.size.y * 0.5;
+		let current_center_x = current_item.rect.position.x + current_item.rect.size.x * 0.5;
+		let current_center_y = current_item.rect.position.y + current_item.rect.size.y * 0.5;
 
-		let mut bestItem: Option<&FocusItem> = None;
-		let mut bestScore = f32::INFINITY;
-		for item in self.itemList.iter() {
-			if item.id == focusedId {
+		let mut best_item: Option<&FocusItem> = None;
+		let mut best_score = f32::INFINITY;
+		for item in self.item_list.iter() {
+			if item.id == focused_id {
 				continue;
 			}
-			let itemCenterX = item.rect.position.x + item.rect.size.x * 0.5;
-			let itemCenterY = item.rect.position.y + item.rect.size.y * 0.5;
-			let deltaX = itemCenterX - currentCenterX;
-			let deltaY = itemCenterY - currentCenterY;
+			let item_center_x = item.rect.position.x + item.rect.size.x * 0.5;
+			let item_center_y = item.rect.position.y + item.rect.size.y * 0.5;
+			let delta_x = item_center_x - current_center_x;
+			let delta_y = item_center_y - current_center_y;
 
 			// 이동 방향 앞쪽에 있는 항목만 후보로 삼는다.
-			let forwardDistance = deltaX * directionX + deltaY * directionY;
-			if forwardDistance <= 0.0 {
+			let forward_distance = delta_x * direction_x + delta_y * direction_y;
+			if forward_distance <= 0.0 {
 				continue;
 			}
-			let crossDistance = (deltaX * directionY).abs() + (deltaY * directionX).abs();
-			let score = forwardDistance + crossDistance * self.crossAxisPenalty;
-			if score < bestScore {
-				bestScore = score;
-				bestItem = Some(item);
+			let cross_distance = (delta_x * direction_y).abs() + (delta_y * direction_x).abs();
+			let score = forward_distance + cross_distance * self.cross_axis_penalty;
+			if score < best_score {
+				best_score = score;
+				best_item = Some(item);
 			}
 		}
-		let bestId = bestItem?.id.clone();
-		self.focusedId = Some(bestId.clone());
-		Some(bestId)
+		let best_id = best_item?.id.clone();
+		self.focused_id = Some(best_id.clone());
+		Some(best_id)
 	}
 }
 
@@ -180,31 +180,31 @@ mod tests {
 	// 2x2 격자와 멀리 떨어진 대각선 항목에서 방향 이동.
 	//==============================================================================
 	#[test]
-	fn moveFocusPicksNearestAlongDirection() {
-		let mut focusNavigator = FocusNavigator::default();
-		assert_eq!(focusNavigator.moveFocus(1.0, 0.0), None);
-		focusNavigator.addItem("bottomRight", Rect::create(200.0, 100.0, 80.0, 40.0));
-		focusNavigator.addItem("topLeft", Rect::create(0.0, 0.0, 80.0, 40.0));
-		focusNavigator.addItem("topRight", Rect::create(200.0, 0.0, 80.0, 40.0));
-		focusNavigator.addItem("bottomLeft", Rect::create(0.0, 100.0, 80.0, 40.0));
+	fn move_focus_picks_nearest_along_direction() {
+		let mut focus_navigator = FocusNavigator::default();
+		assert_eq!(focus_navigator.move_focus(1.0, 0.0), None);
+		focus_navigator.add_item("bottomRight", Rect::create(200.0, 100.0, 80.0, 40.0));
+		focus_navigator.add_item("topLeft", Rect::create(0.0, 0.0, 80.0, 40.0));
+		focus_navigator.add_item("topRight", Rect::create(200.0, 0.0, 80.0, 40.0));
+		focus_navigator.add_item("bottomLeft", Rect::create(0.0, 100.0, 80.0, 40.0));
 
 		// 포커스가 없으면 왼쪽 위.
-		assert_eq!(focusNavigator.moveFocus(0.0, 1.0), Some(String::from("topLeft")));
-		assert_eq!(focusNavigator.moveFocus(1.0, 0.0), Some(String::from("topRight")));
-		assert_eq!(focusNavigator.moveFocus(0.0, 1.0), Some(String::from("bottomRight")));
-		assert_eq!(focusNavigator.moveFocus(-1.0, 0.0), Some(String::from("bottomLeft")));
+		assert_eq!(focus_navigator.move_focus(0.0, 1.0), Some(String::from("topLeft")));
+		assert_eq!(focus_navigator.move_focus(1.0, 0.0), Some(String::from("topRight")));
+		assert_eq!(focus_navigator.move_focus(0.0, 1.0), Some(String::from("bottomRight")));
+		assert_eq!(focus_navigator.move_focus(-1.0, 0.0), Some(String::from("bottomLeft")));
 
 		// 앞쪽에 아무것도 없으면 그대로.
-		assert_eq!(focusNavigator.moveFocus(-1.0, 0.0), None);
-		assert_eq!(focusNavigator.getFocusedId(), Some("bottomLeft"));
+		assert_eq!(focus_navigator.move_focus(-1.0, 0.0), None);
+		assert_eq!(focus_navigator.get_focused_id(), Some("bottomLeft"));
 
 		// 축에서 벗어난 거리에 벌점: 위로 갈 때 바로 위(거리 100)가 오른쪽 위 대각선보다 낫다.
-		assert_eq!(focusNavigator.moveFocus(0.0, -1.0), Some(String::from("topLeft")));
+		assert_eq!(focus_navigator.move_focus(0.0, -1.0), Some(String::from("topLeft")));
 
 		// 목록에 없는 포커스면 첫 항목.
-		focusNavigator.setFocusedId(Some("missing"));
-		assert_eq!(focusNavigator.moveFocus(1.0, 0.0), Some(String::from("bottomRight")));
-		focusNavigator.clear();
-		assert_eq!(focusNavigator.getFocusedId(), None);
+		focus_navigator.set_focused_id(Some("missing"));
+		assert_eq!(focus_navigator.move_focus(1.0, 0.0), Some(String::from("bottomRight")));
+		focus_navigator.clear();
+		assert_eq!(focus_navigator.get_focused_id(), None);
 	}
 }

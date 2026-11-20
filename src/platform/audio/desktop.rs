@@ -7,7 +7,7 @@
 //   재생할 때마다 버퍼를 복제해 그 트랙에 튼다. 트랙 핸들을 버리면 트랙과 그 위의 소리가 같이 없어진다.
 // - 음량(0 ~ 1)은 데시벨로 바꿔 건다. kira 는 -60dB 이하를 무음으로 친다.
 // - 원본 WebAudio 처럼 음량 바꾸기와 정지는 바로 한다. (트윈 0초)
-// - BeepPlayer 의 톤은 엔벨로프를 곱한 파형을 샘플로 그려 메인 트랙(원본 audioContext.destination 자리)에 튼다.
+// - BeepPlayer 의 톤은 엔벨로프를 곱한 파형을 샘플로 그려 메인 트랙(원본 audio_context.destination 자리)에 튼다.
 //==============================================================================
 use crate::core::audiomanager::AudioManagerState;
 use crate::misc::beepplayer::{BeepEnvelope, BeepWaveform, BEEP_FLOOR_VOLUME, BEEP_STOP_MARGIN_SECONDS};
@@ -42,39 +42,39 @@ const BEEP_SAMPLE_RATE: u32 = 44100;
 //==============================================================================
 pub struct AudioPlatformState {
 	// 소리 장치를 열지 못했는지. (한 번 실패하면 다시 열지 않는다)
-	isAudioContextFailed: bool,
+	is_audio_context_failed: bool,
 }
 
 //==============================================================================
 // 백엔드 상태 생성.
 //==============================================================================
-pub fn createAudioPlatformState() -> AudioPlatformState {
+pub fn create_audio_platform_state() -> AudioPlatformState {
 	AudioPlatformState {
-		isAudioContextFailed: false,
+		is_audio_context_failed: false,
 	}
 }
 
 //==============================================================================
 // 오디오 컨텍스트 생성. (kira 매니저와 기본 출력 장치)
 //==============================================================================
-pub fn createAudioContext(audioPlatformState: &mut AudioPlatformState) -> Option<AudioContext> {
-	if audioPlatformState.isAudioContextFailed {
+pub fn create_audio_context(audio_platform_state: &mut AudioPlatformState) -> Option<AudioContext> {
+	if audio_platform_state.is_audio_context_failed {
 		return None;
 	}
-	let audioManagerSettings = AudioManagerSettings::<DefaultBackend> {
+	let audio_manager_settings = AudioManagerSettings::<DefaultBackend> {
 		capacities: Capacities {
 			sub_track_capacity: SUB_TRACK_CAPACITY,
 			..Capacities::default()
 		},
 		..AudioManagerSettings::default()
 	};
-	match AudioContext::new(audioManagerSettings) {
-		Ok(audioContext) => {
-			Some(audioContext)
+	match AudioContext::new(audio_manager_settings) {
+		Ok(audio_context) => {
+			Some(audio_context)
 		}
 		Err(error) => {
 			eprintln!("AudioManager: 소리 장치를 열지 못했습니다. 소리 없이 계속합니다. ({})", error);
-			audioPlatformState.isAudioContextFailed = true;
+			audio_platform_state.is_audio_context_failed = true;
 			None
 		}
 	}
@@ -83,20 +83,20 @@ pub fn createAudioContext(audioPlatformState: &mut AudioPlatformState) -> Option
 //==============================================================================
 // 오디오 컨텍스트 재개. (kira 에는 멈춤 상태가 없어 할 일이 없다)
 //==============================================================================
-pub fn resumeAudioContext(_stateCell: &Rc<RefCell<AudioManagerState>>) {
+pub fn resume_audio_context(_state_cell: &Rc<RefCell<AudioManagerState>>) {
 }
 
 //==============================================================================
 // 오디오 컨텍스트가 돌고 있는지. (kira 매니저는 만든 뒤 늘 돈다)
 //==============================================================================
-pub fn isAudioContextRunning(_audioContext: &AudioContext) -> bool {
+pub fn is_audio_context_running(_audio_context: &AudioContext) -> bool {
 	true
 }
 
 //==============================================================================
 // 바로 끝나는 트윈. (원본 gain.value 대입, source.stop() 처럼 바로 바꾼다)
 //==============================================================================
-fn createImmediateTween() -> Tween {
+fn create_immediate_tween() -> Tween {
 	Tween {
 		duration: Duration::ZERO,
 		..Tween::default()
@@ -106,7 +106,7 @@ fn createImmediateTween() -> Tween {
 //==============================================================================
 // 선형 음량(0 ~ 1)을 데시벨로. (0 이하는 무음)
 //==============================================================================
-pub(crate) fn amplitudeToDecibels(amplitude: f32) -> Decibels {
+pub(crate) fn amplitude_to_decibels(amplitude: f32) -> Decibels {
 	if amplitude <= 0.0 {
 		return Decibels::SILENCE;
 	}
@@ -118,21 +118,21 @@ pub(crate) fn amplitudeToDecibels(amplitude: f32) -> Decibels {
 // 플레이어 하나의 소리 내는 부분. (하위 트랙 하나와 지금 재생 중인 소리 핸들)
 //==============================================================================
 pub struct AudioPlayerBackend {
-	trackHandle: Option<TrackHandle>,
-	soundHandle: Option<StaticSoundHandle>,
+	track_handle: Option<TrackHandle>,
+	sound_handle: Option<StaticSoundHandle>,
 }
 
 impl AudioPlayerBackend {
 	//==============================================================================
 	// 생성. (컨텍스트가 있으면 하위 트랙을 하나 만든다. 없거나 트랙이 모자라면 소리 없는 플레이어)
 	//==============================================================================
-	pub fn create(audioContext: Option<&mut AudioContext>) -> AudioPlayerBackend {
-		let trackHandle = match audioContext {
-			Some(audioContext) => {
-				let trackBuilder = TrackBuilder::new().sound_capacity(PLAYER_SOUND_CAPACITY);
-				match audioContext.add_sub_track(trackBuilder) {
-					Ok(trackHandle) => {
-						Some(trackHandle)
+	pub fn create(audio_context: Option<&mut AudioContext>) -> AudioPlayerBackend {
+		let track_handle = match audio_context {
+			Some(audio_context) => {
+				let track_builder = TrackBuilder::new().sound_capacity(PLAYER_SOUND_CAPACITY);
+				match audio_context.add_sub_track(track_builder) {
+					Ok(track_handle) => {
+						Some(track_handle)
 					}
 					Err(error) => {
 						eprintln!("AudioPlayer: 믹서 트랙을 만들지 못했습니다. ({})", error);
@@ -145,24 +145,24 @@ impl AudioPlayerBackend {
 			}
 		};
 		AudioPlayerBackend {
-			trackHandle,
-			soundHandle: None,
+			track_handle,
+			sound_handle: None,
 		}
 	}
 
 	//==============================================================================
-	// 소리를 낼 수 있는지. (원본 audioContext && gainNode)
+	// 소리를 낼 수 있는지. (원본 audio_context && gain_node)
 	//==============================================================================
-	pub fn isAvailable(&self) -> bool {
-		self.trackHandle.is_some()
+	pub fn is_available(&self) -> bool {
+		self.track_handle.is_some()
 	}
 
 	//==============================================================================
 	// 재생 중인 소리를 멈춘다.
 	//==============================================================================
-	pub fn stopSource(&mut self) {
-		if let Some(mut soundHandle) = self.soundHandle.take() {
-			soundHandle.stop(createImmediateTween());
+	pub fn stop_source(&mut self) {
+		if let Some(mut sound_handle) = self.sound_handle.take() {
+			sound_handle.stop(create_immediate_tween());
 		}
 	}
 
@@ -170,31 +170,31 @@ impl AudioPlayerBackend {
 	// 정지.
 	//==============================================================================
 	pub fn stop(&mut self) {
-		self.stopSource();
+		self.stop_source();
 	}
 
 	//==============================================================================
 	// 재생 시작. (버퍼를 복제해 time 초부터, 루프면 처음부터 끝까지 되풀이)
 	//==============================================================================
-	pub fn startPlayback(&mut self, audioBuffer: &AudioBuffer, isLoop: bool, time: f64) {
-		let trackHandle = match self.trackHandle.as_mut() {
-			Some(trackHandle) => {
-				trackHandle
+	pub fn start_playback(&mut self, audio_buffer: &AudioBuffer, is_loop: bool, time: f64) {
+		let track_handle = match self.track_handle.as_mut() {
+			Some(track_handle) => {
+				track_handle
 			}
 			None => {
 				return;
 			}
 		};
-		let loopRegion: Option<Region> = if isLoop {
+		let loop_region: Option<Region> = if is_loop {
 			Some(Region::from(..))
 		}
 		else {
 			None
 		};
-		let soundData = audioBuffer.start_position(time).loop_region(loopRegion);
-		match trackHandle.play(soundData) {
-			Ok(soundHandle) => {
-				self.soundHandle = Some(soundHandle);
+		let sound_data = audio_buffer.start_position(time).loop_region(loop_region);
+		match track_handle.play(sound_data) {
+			Ok(sound_handle) => {
+				self.sound_handle = Some(sound_handle);
 			}
 			Err(error) => {
 				eprintln!("AudioPlayer: 재생하지 못했습니다. ({})", error);
@@ -205,20 +205,20 @@ impl AudioPlayerBackend {
 	//==============================================================================
 	// 음량 설정. (트랙 음량, 0 ~ 1)
 	//==============================================================================
-	pub fn setGain(&mut self, gain: f32) {
-		if let Some(trackHandle) = self.trackHandle.as_mut() {
-			let decibels = amplitudeToDecibels(gain);
-			trackHandle.set_volume(decibels, createImmediateTween());
+	pub fn set_gain(&mut self, gain: f32) {
+		if let Some(track_handle) = self.track_handle.as_mut() {
+			let decibels = amplitude_to_decibels(gain);
+			track_handle.set_volume(decibels, create_immediate_tween());
 		}
 	}
 
 	//==============================================================================
 	// 재생 중인지. (소리 핸들이 있고 아직 멈추지 않았으면 참)
 	//==============================================================================
-	pub fn isPlaying(&self) -> bool {
-		match &self.soundHandle {
-			Some(soundHandle) => {
-				soundHandle.state() != PlaybackState::Stopped
+	pub fn is_playing(&self) -> bool {
+		match &self.sound_handle {
+			Some(sound_handle) => {
+				sound_handle.state() != PlaybackState::Stopped
 			}
 			None => {
 				false
@@ -230,16 +230,16 @@ impl AudioPlayerBackend {
 //==============================================================================
 // 파일 읽기. (그 자리에서 읽고 디코딩한다)
 //==============================================================================
-pub fn loadAudioFile(audioAsset: &Rc<AudioAsset>, assetPath: &Path) -> Result<(), String> {
-	match StaticSoundData::from_file(assetPath) {
-		Ok(audioBuffer) => {
-			audioAsset.setAudioBuffer(audioBuffer);
+pub fn load_audio_file(audio_asset: &Rc<AudioAsset>, asset_path: &Path) -> Result<(), String> {
+	match StaticSoundData::from_file(asset_path) {
+		Ok(audio_buffer) => {
+			audio_asset.set_audio_buffer(audio_buffer);
 			Ok(())
 		}
 		Err(error) => {
-			let loadError = format!("Error loading sound: {} ({})", assetPath.display(), error);
-			audioAsset.setLoadError(loadError.clone());
-			Err(loadError)
+			let load_error = format!("Error loading sound: {} ({})", asset_path.display(), error);
+			audio_asset.set_load_error(load_error.clone());
+			Err(load_error)
 		}
 	}
 }
@@ -247,16 +247,16 @@ pub fn loadAudioFile(audioAsset: &Rc<AudioAsset>, assetPath: &Path) -> Result<()
 //==============================================================================
 // 메모리에서 읽기. (그 자리에서 디코딩한다)
 //==============================================================================
-pub fn loadAudioBytes(audioAsset: &Rc<AudioAsset>, bytes: Vec<u8>) -> Result<(), String> {
+pub fn load_audio_bytes(audio_asset: &Rc<AudioAsset>, bytes: Vec<u8>) -> Result<(), String> {
 	match StaticSoundData::from_cursor(Cursor::new(bytes)) {
-		Ok(audioBuffer) => {
-			audioAsset.setAudioBuffer(audioBuffer);
+		Ok(audio_buffer) => {
+			audio_asset.set_audio_buffer(audio_buffer);
 			Ok(())
 		}
 		Err(error) => {
-			let loadError = format!("Error loading sound from memory ({})", error);
-			audioAsset.setLoadError(loadError.clone());
-			Err(loadError)
+			let load_error = format!("Error loading sound from memory ({})", error);
+			audio_asset.set_load_error(load_error.clone());
+			Err(load_error)
 		}
 	}
 }
@@ -264,28 +264,28 @@ pub fn loadAudioBytes(audioAsset: &Rc<AudioAsset>, bytes: Vec<u8>) -> Result<(),
 //==============================================================================
 // 버퍼의 재생 시간. (초)
 //==============================================================================
-pub fn getAudioBufferDuration(audioBuffer: &AudioBuffer) -> f64 {
-	audioBuffer.duration().as_secs_f64()
+pub fn get_audio_buffer_duration(audio_buffer: &AudioBuffer) -> f64 {
+	audio_buffer.duration().as_secs_f64()
 }
 
 //==============================================================================
 // 비프 톤 하나 재생. (그린 샘플을 메인 트랙에, 지연이 있으면 kira 의 지연 시작으로)
 //==============================================================================
-pub fn playBeepTone(audioContext: &mut AudioContext, beepEnvelope: &BeepEnvelope) {
-	let frameList = renderBeepFrames(beepEnvelope, BEEP_SAMPLE_RATE);
-	let startTime = if beepEnvelope.delaySeconds > 0.0 {
-		StartTime::Delayed(Duration::from_secs_f64(beepEnvelope.delaySeconds))
+pub fn play_beep_tone(audio_context: &mut AudioContext, beep_envelope: &BeepEnvelope) {
+	let frame_list = render_beep_frames(beep_envelope, BEEP_SAMPLE_RATE);
+	let start_time = if beep_envelope.delay_seconds > 0.0 {
+		StartTime::Delayed(Duration::from_secs_f64(beep_envelope.delay_seconds))
 	}
 	else {
 		StartTime::Immediate
 	};
-	let beepSoundData = StaticSoundData {
+	let beep_sound_data = StaticSoundData {
 		sample_rate: BEEP_SAMPLE_RATE,
-		frames: Arc::from(frameList),
-		settings: StaticSoundSettings::new().start_time(startTime),
+		frames: Arc::from(frame_list),
+		settings: StaticSoundSettings::new().start_time(start_time),
 		slice: None,
 	};
-	if let Err(error) = audioContext.play(beepSoundData) {
+	if let Err(error) = audio_context.play(beep_sound_data) {
 		eprintln!("BeepPlayer: 재생하지 못했습니다. ({})", error);
 	}
 }
@@ -293,55 +293,55 @@ pub fn playBeepTone(audioContext: &mut AudioContext, beepEnvelope: &BeepEnvelope
 //==============================================================================
 // 비프 톤을 샘플로 그린다. (원본 오실레이터가 도는 길이 = 엔벨로프 길이 + 0.01초)
 //==============================================================================
-fn renderBeepFrames(beepEnvelope: &BeepEnvelope, sampleRate: u32) -> Vec<Frame> {
-	let sampleRateValue = sampleRate as f64;
-	let totalSeconds = beepEnvelope.durationSeconds + BEEP_STOP_MARGIN_SECONDS;
-	let frameCount = (totalSeconds * sampleRateValue).ceil() as usize;
-	let phaseStep = beepEnvelope.frequency as f64 / sampleRateValue;
+fn render_beep_frames(beep_envelope: &BeepEnvelope, sample_rate: u32) -> Vec<Frame> {
+	let sample_rate_value = sample_rate as f64;
+	let total_seconds = beep_envelope.duration_seconds + BEEP_STOP_MARGIN_SECONDS;
+	let frame_count = (total_seconds * sample_rate_value).ceil() as usize;
+	let phase_step = beep_envelope.frequency as f64 / sample_rate_value;
 	let mut phase = 0.0f64;
-	let mut frameList = Vec::with_capacity(frameCount);
-	for frameIndex in 0..frameCount {
-		let elapsedSeconds = frameIndex as f64 / sampleRateValue;
-		let gain = getBeepEnvelopeGain(beepEnvelope, elapsedSeconds);
-		let sample = getWaveformSample(beepEnvelope.waveform, phase) * gain;
-		frameList.push(Frame::from_mono(sample));
-		phase += phaseStep;
+	let mut frame_list = Vec::with_capacity(frame_count);
+	for frame_index in 0..frame_count {
+		let elapsed_seconds = frame_index as f64 / sample_rate_value;
+		let gain = get_beep_envelope_gain(beep_envelope, elapsed_seconds);
+		let sample = get_waveform_sample(beep_envelope.waveform, phase) * gain;
+		frame_list.push(Frame::from_mono(sample));
+		phase += phase_step;
 		phase -= phase.floor();
 	}
-	frameList
+	frame_list
 }
 
 //==============================================================================
-// 엔벨로프 음량. (원본 GainNode 자동화와 같은 값, elapsedSeconds 는 톤 시작 기준)
+// 엔벨로프 음량. (원본 GainNode 자동화와 같은 값, elapsed_seconds 는 톤 시작 기준)
 // - 0 ~ attack: 바닥에서 최고까지 선형, attack ~ release 시작: 최고 유지, release 시작 ~ 끝: 바닥까지 지수, 그 뒤 바닥.
 //==============================================================================
-fn getBeepEnvelopeGain(beepEnvelope: &BeepEnvelope, elapsedSeconds: f64) -> f32 {
-	let floorVolume = BEEP_FLOOR_VOLUME as f64;
-	let peakVolume = beepEnvelope.peakVolume as f64;
-	let releaseStartSeconds = beepEnvelope.getReleaseStartSeconds();
-	if elapsedSeconds < beepEnvelope.attackSeconds {
-		let progress = elapsedSeconds / beepEnvelope.attackSeconds;
-		return (floorVolume + (peakVolume - floorVolume) * progress) as f32;
+fn get_beep_envelope_gain(beep_envelope: &BeepEnvelope, elapsed_seconds: f64) -> f32 {
+	let floor_volume = BEEP_FLOOR_VOLUME as f64;
+	let peak_volume = beep_envelope.peak_volume as f64;
+	let release_start_seconds = beep_envelope.get_release_start_seconds();
+	if elapsed_seconds < beep_envelope.attack_seconds {
+		let progress = elapsed_seconds / beep_envelope.attack_seconds;
+		return (floor_volume + (peak_volume - floor_volume) * progress) as f32;
 	}
-	if elapsedSeconds < releaseStartSeconds {
-		return peakVolume as f32;
+	if elapsed_seconds < release_start_seconds {
+		return peak_volume as f32;
 	}
-	if elapsedSeconds < beepEnvelope.durationSeconds {
-		let progress = (elapsedSeconds - releaseStartSeconds) / (beepEnvelope.durationSeconds - releaseStartSeconds);
-		return (peakVolume * (floorVolume / peakVolume).powf(progress)) as f32;
+	if elapsed_seconds < beep_envelope.duration_seconds {
+		let progress = (elapsed_seconds - release_start_seconds) / (beep_envelope.duration_seconds - release_start_seconds);
+		return (peak_volume * (floor_volume / peak_volume).powf(progress)) as f32;
 	}
-	floorVolume as f32
+	floor_volume as f32
 }
 
 //==============================================================================
 // 파형 한 점. (phase: 0 ~ 1. WebAudio 오실레이터처럼 0 에서 시작해 위로 올라가는 꼴, 대역 제한은 없다)
 //==============================================================================
-fn getWaveformSample(beepWaveform: BeepWaveform, phase: f64) -> f32 {
-	let sample = match beepWaveform {
-		BeepWaveform::sine => {
+fn get_waveform_sample(beep_waveform: BeepWaveform, phase: f64) -> f32 {
+	let sample = match beep_waveform {
+		BeepWaveform::Sine => {
 			(phase * std::f64::consts::TAU).sin()
 		}
-		BeepWaveform::square => {
+		BeepWaveform::Square => {
 			if phase < 0.5 {
 				1.0
 			}
@@ -349,10 +349,10 @@ fn getWaveformSample(beepWaveform: BeepWaveform, phase: f64) -> f32 {
 				-1.0
 			}
 		}
-		BeepWaveform::sawtooth => {
+		BeepWaveform::Sawtooth => {
 			2.0 * (phase - (phase + 0.5).floor())
 		}
-		BeepWaveform::triangle => {
+		BeepWaveform::Triangle => {
 			if phase < 0.25 {
 				4.0 * phase
 			}
@@ -375,56 +375,56 @@ mod tests {
 	// 음량을 데시벨로 바꾸면 1 은 0dB, 0.5 는 약 -6dB, 0 과 아주 작은 값은 무음이다.
 	//==============================================================================
 	#[test]
-	fn amplitudeToDecibelsMapsVolume() {
-		assert_eq!(amplitudeToDecibels(1.0), Decibels::IDENTITY);
-		assert!((amplitudeToDecibels(0.5).0 - (-6.0206)).abs() < 1e-3);
-		assert_eq!(amplitudeToDecibels(0.0), Decibels::SILENCE);
-		assert_eq!(amplitudeToDecibels(0.00001), Decibels::SILENCE);
-		assert!((amplitudeToDecibels(0.5).as_amplitude() - 0.5).abs() < 1e-5);
+	fn amplitude_to_decibels_maps_volume() {
+		assert_eq!(amplitude_to_decibels(1.0), Decibels::IDENTITY);
+		assert!((amplitude_to_decibels(0.5).0 - (-6.0206)).abs() < 1e-3);
+		assert_eq!(amplitude_to_decibels(0.0), Decibels::SILENCE);
+		assert_eq!(amplitude_to_decibels(0.00001), Decibels::SILENCE);
+		assert!((amplitude_to_decibels(0.5).as_amplitude() - 0.5).abs() < 1e-5);
 	}
 
 	//==============================================================================
 	// 엔벨로프는 바닥에서 올라 최고를 지키다 바닥으로 내려간다.
 	//==============================================================================
 	#[test]
-	fn beepEnvelopeGainFollowsAutomation() {
-		let beepEnvelope = BeepEnvelope::create(880.0, 0.045, BeepWaveform::sine, 0.0, 0.35, 1.0);
-		assert!((getBeepEnvelopeGain(&beepEnvelope, 0.0) - BEEP_FLOOR_VOLUME).abs() < 1e-7);
-		assert!((getBeepEnvelopeGain(&beepEnvelope, 0.0025) - (0.0001 + 0.3499 * 0.5)).abs() < 1e-5);
-		assert!((getBeepEnvelopeGain(&beepEnvelope, 0.01) - 0.35).abs() < 1e-6);
-		assert!((getBeepEnvelopeGain(&beepEnvelope, 0.024) - 0.35).abs() < 1e-6);
-		let middleGain = getBeepEnvelopeGain(&beepEnvelope, 0.035);
-		assert!((middleGain as f64 - (0.35f64 * 0.0001).sqrt()).abs() < 1e-5);
-		assert!((getBeepEnvelopeGain(&beepEnvelope, 0.05) - BEEP_FLOOR_VOLUME).abs() < 1e-7);
+	fn beep_envelope_gain_follows_automation() {
+		let beep_envelope = BeepEnvelope::create(880.0, 0.045, BeepWaveform::Sine, 0.0, 0.35, 1.0);
+		assert!((get_beep_envelope_gain(&beep_envelope, 0.0) - BEEP_FLOOR_VOLUME).abs() < 1e-7);
+		assert!((get_beep_envelope_gain(&beep_envelope, 0.0025) - (0.0001 + 0.3499 * 0.5)).abs() < 1e-5);
+		assert!((get_beep_envelope_gain(&beep_envelope, 0.01) - 0.35).abs() < 1e-6);
+		assert!((get_beep_envelope_gain(&beep_envelope, 0.024) - 0.35).abs() < 1e-6);
+		let middle_gain = get_beep_envelope_gain(&beep_envelope, 0.035);
+		assert!((middle_gain as f64 - (0.35f64 * 0.0001).sqrt()).abs() < 1e-5);
+		assert!((get_beep_envelope_gain(&beep_envelope, 0.05) - BEEP_FLOOR_VOLUME).abs() < 1e-7);
 	}
 
 	//==============================================================================
 	// 파형은 0 에서 시작해 위로 올라간다.
 	//==============================================================================
 	#[test]
-	fn waveformSamplesStartAtZeroGoingUp() {
-		for beepWaveform in [BeepWaveform::sine, BeepWaveform::sawtooth, BeepWaveform::triangle] {
-			assert!(getWaveformSample(beepWaveform, 0.0).abs() < 1e-6);
-			assert!(getWaveformSample(beepWaveform, 0.1) > 0.0);
+	fn waveform_samples_start_at_zero_going_up() {
+		for beep_waveform in [BeepWaveform::Sine, BeepWaveform::Sawtooth, BeepWaveform::Triangle] {
+			assert!(get_waveform_sample(beep_waveform, 0.0).abs() < 1e-6);
+			assert!(get_waveform_sample(beep_waveform, 0.1) > 0.0);
 		}
-		assert_eq!(getWaveformSample(BeepWaveform::square, 0.1), 1.0);
-		assert_eq!(getWaveformSample(BeepWaveform::square, 0.6), -1.0);
-		assert!((getWaveformSample(BeepWaveform::triangle, 0.25) - 1.0).abs() < 1e-6);
-		assert!((getWaveformSample(BeepWaveform::triangle, 0.75) + 1.0).abs() < 1e-6);
-		assert!((getWaveformSample(BeepWaveform::sawtooth, 0.75) + 0.5).abs() < 1e-6);
+		assert_eq!(get_waveform_sample(BeepWaveform::Square, 0.1), 1.0);
+		assert_eq!(get_waveform_sample(BeepWaveform::Square, 0.6), -1.0);
+		assert!((get_waveform_sample(BeepWaveform::Triangle, 0.25) - 1.0).abs() < 1e-6);
+		assert!((get_waveform_sample(BeepWaveform::Triangle, 0.75) + 1.0).abs() < 1e-6);
+		assert!((get_waveform_sample(BeepWaveform::Sawtooth, 0.75) + 0.5).abs() < 1e-6);
 	}
 
 	//==============================================================================
 	// 그린 샘플 수는 (길이 + 0.01초) x 샘플레이트다.
 	//==============================================================================
 	#[test]
-	fn renderBeepFramesLength() {
-		let beepEnvelope = BeepEnvelope::create(440.0, 0.09, BeepWaveform::square, 0.06, 0.35, 0.7);
-		let frameList = renderBeepFrames(&beepEnvelope, 44100);
+	fn render_beep_frames_length() {
+		let beep_envelope = BeepEnvelope::create(440.0, 0.09, BeepWaveform::Square, 0.06, 0.35, 0.7);
+		let frame_list = render_beep_frames(&beep_envelope, 44100);
 		// (0.09 + 0.01 의 부동소수 오차로 마지막 한 샘플은 올림에 따라 달라진다)
-		let expectedFrameCount = (0.1f64 * 44100.0) as i64;
-		assert!((frameList.len() as i64 - expectedFrameCount).abs() <= 1);
-		let peakSample = frameList.iter().map(|frame| frame.left.abs()).fold(0.0f32, f32::max);
-		assert!((peakSample - 0.35 * 0.7).abs() < 1e-5);
+		let expected_frame_count = (0.1f64 * 44100.0) as i64;
+		assert!((frame_list.len() as i64 - expected_frame_count).abs() <= 1);
+		let peak_sample = frame_list.iter().map(|frame| frame.left.abs()).fold(0.0f32, f32::max);
+		assert!((peak_sample - 0.35 * 0.7).abs() < 1e-5);
 	}
 }

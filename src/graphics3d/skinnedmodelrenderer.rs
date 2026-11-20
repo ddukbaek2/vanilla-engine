@@ -6,11 +6,11 @@
 //   (파생 렌더러는 셰이더를 쓴 뒤 고유 유니폼을 설정하고 draw() 를 부른다)
 // - GLSL 은 원본과 같다. (쿡-토런스 GGX, 화면공간 미분 코탄젠트 노멀맵, 3x3 PCF 섀도우, 반구 앰비언트, 거리 안개)
 //   원본 템플릿 문자열의 ${MORPH_GLSL} / ${MORPH_TARGET_MAXIMUM} 은 concat! 과 숫자 96 으로 옮겼다. (시험이 둘이 같은지 본다)
-// - 텍스처 유닛: 0 = baseColor, 1 = 섀도우 맵, 2 ~ 8 = 머티리얼 슬롯, 15 = 모프 타깃 텍스처.
+// - 텍스처 유닛: 0 = base_color, 1 = 섀도우 맵, 2 ~ 8 = 머티리얼 슬롯, 15 = 모프 타깃 텍스처.
 // - 원본과 다른 것:
 //   - 그리기 함수는 gl 과 &mut SkinnedModel 을 받는다. 바뀐 모프 타깃 업로드(원본 update 6단계)와 와이어프레임 인덱스 업로드를
-//     여기서 먼저 한다. 행렬 인자는 원본 getElements() 처럼 &[f32; 16] 이다. (matrix.getElements())
-//   - setShadowMap 은 원본처럼 배열을 참조로 들지 않고 16개를 복사해 둔다.
+//     여기서 먼저 한다. 행렬 인자는 원본 get_elements() 처럼 &[f32; 16] 이다. (matrix.get_elements())
+//   - set_shadow_map 은 원본처럼 배열을 참조로 들지 않고 16개를 복사해 둔다.
 //   - 생성은 셰이더 컴파일 실패를 오류(Result)로 돌려준다.
 //==============================================================================
 use crate::core::graphic::GlTexture;
@@ -99,7 +99,7 @@ void main() {
 
 // 스키닝 프래그먼트 셰이더. (metallic-roughness PBR + 태양/반구 라이팅 + 섀도우 맵 + 거리 안개)
 // - 노멀 매핑은 화면 공간 미분 기반 코탄젠트 프레임 사용. (탄젠트 어트리뷰트 불필요)
-// - FBX 스펙큘러/글로스 경로: useGlossiness=1 이면 러프니스 = 1 - 글로스, 스펙큘러 맵은 F0 변조.
+// - FBX 스펙큘러/글로스 경로: use_glossiness=1 이면 러프니스 = 1 - 글로스, 스펙큘러 맵은 F0 변조.
 pub const SKINNED_FRAGMENTSHADER_SOURCE: &str = "#version 300 es
 precision highp float;
 in vec3 worldPosition;
@@ -292,16 +292,16 @@ void main() {
 // 스킨드 모델 렌더러.
 //==============================================================================
 pub struct SkinnedModelRenderer {
-	shaderProgram: Rc<ShaderProgram>,
-	depthShaderProgram: ShaderProgram,
-	wireframeShaderProgram: ShaderProgram,
-	shadowMapTexture: Option<GlTexture>,
-	lightViewProjectionElements: Option<[f32; 16]>,
-	shadowStrength: f32,
-	shadowTexelSize: f32,
-	sunDirection: [f32; 3],
-	fogColor: [f32; 3],
-	fogRange: [f32; 2],
+	shader_program: Rc<ShaderProgram>,
+	depth_shader_program: ShaderProgram,
+	wireframe_shader_program: ShaderProgram,
+	shadow_map_texture: Option<GlTexture>,
+	light_view_projection_elements: Option<[f32; 16]>,
+	shadow_strength: f32,
+	shadow_texel_size: f32,
+	sun_direction: [f32; 3],
+	fog_color: [f32; 3],
+	fog_range: [f32; 2],
 }
 
 impl SkinnedModelRenderer {
@@ -309,23 +309,23 @@ impl SkinnedModelRenderer {
 	// 생성. (대체 프래그먼트 / 버텍스 셰이더 소스, None 이면 기본 PBR / 기본 스키닝)
 	// - 대체 버텍스 셰이더는 같은 어트리뷰트 위치 / 출력 규약을 지켜야 한다.
 	//==============================================================================
-	pub fn new(gl: &glow::Context, fragmentShaderSource: Option<&str>, vertexShaderSource: Option<&str>) -> Result<SkinnedModelRenderer, String> {
-		let resolvedFragmentShaderSource = fragmentShaderSource.unwrap_or(SKINNED_FRAGMENTSHADER_SOURCE);
-		let resolvedVertexShaderSource = vertexShaderSource.unwrap_or(SKINNED_VERTEXSHADER_SOURCE);
-		let shaderProgram = ShaderProgram::new(gl, resolvedVertexShaderSource.trim(), resolvedFragmentShaderSource.trim())?;
-		let depthShaderProgram = ShaderProgram::new(gl, SKINNED_DEPTH_VERTEXSHADER_SOURCE.trim(), SKINNED_DEPTH_FRAGMENTSHADER_SOURCE.trim())?;
-		let wireframeShaderProgram = ShaderProgram::new(gl, SKINNED_WIREFRAME_VERTEXSHADER_SOURCE.trim(), SKINNED_WIREFRAME_FRAGMENTSHADER_SOURCE.trim())?;
+	pub fn new(gl: &glow::Context, fragment_shader_source: Option<&str>, vertex_shader_source: Option<&str>) -> Result<SkinnedModelRenderer, String> {
+		let resolved_fragment_shader_source = fragment_shader_source.unwrap_or(SKINNED_FRAGMENTSHADER_SOURCE);
+		let resolved_vertex_shader_source = vertex_shader_source.unwrap_or(SKINNED_VERTEXSHADER_SOURCE);
+		let shader_program = ShaderProgram::new(gl, resolved_vertex_shader_source.trim(), resolved_fragment_shader_source.trim())?;
+		let depth_shader_program = ShaderProgram::new(gl, SKINNED_DEPTH_VERTEXSHADER_SOURCE.trim(), SKINNED_DEPTH_FRAGMENTSHADER_SOURCE.trim())?;
+		let wireframe_shader_program = ShaderProgram::new(gl, SKINNED_WIREFRAME_VERTEXSHADER_SOURCE.trim(), SKINNED_WIREFRAME_FRAGMENTSHADER_SOURCE.trim())?;
 		Ok(SkinnedModelRenderer {
-			shaderProgram: Rc::new(shaderProgram),
-			depthShaderProgram,
-			wireframeShaderProgram,
-			shadowMapTexture: None,
-			lightViewProjectionElements: None,
-			shadowStrength: 0.0,
-			shadowTexelSize: 1.0 / 2048.0,
-			sunDirection: [0.0, 1.0, 0.0],
-			fogColor: [0.8, 0.85, 0.92],
-			fogRange: [55.0, 250.0],
+			shader_program: Rc::new(shader_program),
+			depth_shader_program,
+			wireframe_shader_program,
+			shadow_map_texture: None,
+			light_view_projection_elements: None,
+			shadow_strength: 0.0,
+			shadow_texel_size: 1.0 / 2048.0,
+			sun_direction: [0.0, 1.0, 0.0],
+			fog_color: [0.8, 0.85, 0.92],
+			fog_range: [55.0, 250.0],
 		})
 	}
 
@@ -333,54 +333,54 @@ impl SkinnedModelRenderer {
 	// 출력. (모델 인스턴스의 드로어블 순회, 머티리얼 적용 + 조인트 행렬 업로드)
 	// - 깊이 테스트 / 컬링 / 블렌드 / 프레임버퍼는 호출자가 잡는다. (원본과 같다)
 	//==============================================================================
-	pub fn draw(&self, gl: &glow::Context, skinnedModel: &mut SkinnedModel, viewProjectionElements: &[f32; 16], modelMatrixElements: &[f32; 16], cameraX: f32, cameraY: f32, cameraZ: f32) {
-		skinnedModel.uploadPendingMorphTargets(gl);
-		let shaderProgram = &*self.shaderProgram;
-		shaderProgram.useProgram(gl);
-		let viewProjectionLocation = shaderProgram.getUniformLocation(gl, "viewProjectionMatrix");
-		let modelMatrixLocation = shaderProgram.getUniformLocation(gl, "modelMatrix");
-		let sunDirectionLocation = shaderProgram.getUniformLocation(gl, "sunDirection");
-		let cameraPositionLocation = shaderProgram.getUniformLocation(gl, "cameraPosition");
-		let fogColorLocation = shaderProgram.getUniformLocation(gl, "fogColor");
-		let fogRangeLocation = shaderProgram.getUniformLocation(gl, "fogRange");
-		let shadowStrengthLocation = shaderProgram.getUniformLocation(gl, "shadowStrength");
-		let shadowMapTextureLocation = shaderProgram.getUniformLocation(gl, "shadowMapTexture");
+	pub fn draw(&self, gl: &glow::Context, skinned_model: &mut SkinnedModel, view_projection_elements: &[f32; 16], model_matrix_elements: &[f32; 16], camera_x: f32, camera_y: f32, camera_z: f32) {
+		skinned_model.upload_pending_morph_targets(gl);
+		let shader_program = &*self.shader_program;
+		shader_program.use_program(gl);
+		let view_projection_location = shader_program.get_uniform_location(gl, "viewProjectionMatrix");
+		let model_matrix_location = shader_program.get_uniform_location(gl, "modelMatrix");
+		let sun_direction_location = shader_program.get_uniform_location(gl, "sunDirection");
+		let camera_position_location = shader_program.get_uniform_location(gl, "cameraPosition");
+		let fog_color_location = shader_program.get_uniform_location(gl, "fogColor");
+		let fog_range_location = shader_program.get_uniform_location(gl, "fogRange");
+		let shadow_strength_location = shader_program.get_uniform_location(gl, "shadowStrength");
+		let shadow_map_texture_location = shader_program.get_uniform_location(gl, "shadowMapTexture");
 		unsafe {
-			gl.uniform_matrix_4_f32_slice(viewProjectionLocation.as_ref(), false, viewProjectionElements);
-			gl.uniform_matrix_4_f32_slice(modelMatrixLocation.as_ref(), false, modelMatrixElements);
-			gl.uniform_3_f32(sunDirectionLocation.as_ref(), self.sunDirection[0], self.sunDirection[1], self.sunDirection[2]);
-			gl.uniform_3_f32(cameraPositionLocation.as_ref(), cameraX, cameraY, cameraZ);
-			gl.uniform_3_f32(fogColorLocation.as_ref(), self.fogColor[0], self.fogColor[1], self.fogColor[2]);
-			gl.uniform_2_f32(fogRangeLocation.as_ref(), self.fogRange[0], self.fogRange[1]);
+			gl.uniform_matrix_4_f32_slice(view_projection_location.as_ref(), false, view_projection_elements);
+			gl.uniform_matrix_4_f32_slice(model_matrix_location.as_ref(), false, model_matrix_elements);
+			gl.uniform_3_f32(sun_direction_location.as_ref(), self.sun_direction[0], self.sun_direction[1], self.sun_direction[2]);
+			gl.uniform_3_f32(camera_position_location.as_ref(), camera_x, camera_y, camera_z);
+			gl.uniform_3_f32(fog_color_location.as_ref(), self.fog_color[0], self.fog_color[1], self.fog_color[2]);
+			gl.uniform_2_f32(fog_range_location.as_ref(), self.fog_range[0], self.fog_range[1]);
 		}
 
 		// 섀도우 맵 수신. (섀도우 샘플러 타입 불일치로 드로우가 무효화되지 않도록 강도와 무관하게 항상 바인드)
-		match (self.shadowMapTexture, &self.lightViewProjectionElements) {
-			(Some(shadowMapTexture), Some(lightViewProjectionElements)) => {
-				let lightViewProjectionLocation = shaderProgram.getUniformLocation(gl, "lightViewProjectionMatrix");
-				let shadowTexelSizeLocation = shaderProgram.getUniformLocation(gl, "shadowTexelSize");
+		match (self.shadow_map_texture, &self.light_view_projection_elements) {
+			(Some(shadow_map_texture), Some(light_view_projection_elements)) => {
+				let light_view_projection_location = shader_program.get_uniform_location(gl, "lightViewProjectionMatrix");
+				let shadow_texel_size_location = shader_program.get_uniform_location(gl, "shadowTexelSize");
 				unsafe {
-					gl.uniform_matrix_4_f32_slice(lightViewProjectionLocation.as_ref(), false, lightViewProjectionElements);
-					gl.uniform_1_i32(shadowMapTextureLocation.as_ref(), TEXTURE_UNIT_SHADOWMAP as i32);
-					gl.uniform_1_f32(shadowTexelSizeLocation.as_ref(), self.shadowTexelSize);
-					gl.uniform_1_f32(shadowStrengthLocation.as_ref(), self.shadowStrength);
+					gl.uniform_matrix_4_f32_slice(light_view_projection_location.as_ref(), false, light_view_projection_elements);
+					gl.uniform_1_i32(shadow_map_texture_location.as_ref(), TEXTURE_UNIT_SHADOWMAP as i32);
+					gl.uniform_1_f32(shadow_texel_size_location.as_ref(), self.shadow_texel_size);
+					gl.uniform_1_f32(shadow_strength_location.as_ref(), self.shadow_strength);
 					gl.active_texture(glow::TEXTURE0 + TEXTURE_UNIT_SHADOWMAP);
-					gl.bind_texture(glow::TEXTURE_2D, Some(shadowMapTexture));
+					gl.bind_texture(glow::TEXTURE_2D, Some(shadow_map_texture));
 					gl.active_texture(glow::TEXTURE0);
 				}
 			}
 			_ => {
 				unsafe {
-					gl.uniform_1_i32(shadowMapTextureLocation.as_ref(), TEXTURE_UNIT_SHADOWMAP as i32);
-					gl.uniform_1_f32(shadowStrengthLocation.as_ref(), 0.0);
+					gl.uniform_1_i32(shadow_map_texture_location.as_ref(), TEXTURE_UNIT_SHADOWMAP as i32);
+					gl.uniform_1_f32(shadow_strength_location.as_ref(), 0.0);
 				}
 			}
 		}
 
-		let jointMatricesLocation = shaderProgram.getUniformLocation(gl, "jointMatrices[0]");
-		let skinList = skinnedModel.getSkinList();
-		for drawable in skinnedModel.getDrawableList().iter() {
-			let skin = match skinList.get(drawable.skinIndex) {
+		let joint_matrices_location = shader_program.get_uniform_location(gl, "jointMatrices[0]");
+		let skin_list = skinned_model.get_skin_list();
+		for drawable in skinned_model.get_drawable_list().iter() {
+			let skin = match skin_list.get(drawable.skin_index) {
 				Some(skin) => {
 					skin
 				}
@@ -389,11 +389,11 @@ impl SkinnedModelRenderer {
 				}
 			};
 			unsafe {
-				gl.uniform_matrix_4_f32_slice(jointMatricesLocation.as_ref(), false, &skin.jointMatrixArray);
+				gl.uniform_matrix_4_f32_slice(joint_matrices_location.as_ref(), false, &skin.joint_matrix_array);
 			}
-			self.applyMorphUniforms(gl, shaderProgram, drawable);
+			self.apply_morph_uniforms(gl, shader_program, drawable);
 			drawable.material.apply(gl);
-			drawDrawableTriangles(gl, drawable);
+			draw_drawable_triangles(gl, drawable);
 		}
 		unsafe {
 			gl.bind_vertex_array(None);
@@ -401,22 +401,22 @@ impl SkinnedModelRenderer {
 	}
 
 	//==============================================================================
-	// 깊이 패스 출력. (섀도우 맵 캐스팅, ShadowMap.beginRender() 이후 호출)
+	// 깊이 패스 출력. (섀도우 맵 캐스팅, ShadowMap.begin_render() 이후 호출)
 	//==============================================================================
-	pub fn drawDepth(&self, gl: &glow::Context, skinnedModel: &mut SkinnedModel, lightViewProjectionElements: &[f32; 16], modelMatrixElements: &[f32; 16]) {
-		skinnedModel.uploadPendingMorphTargets(gl);
-		let depthShaderProgram = &self.depthShaderProgram;
-		depthShaderProgram.useProgram(gl);
-		let lightViewProjectionLocation = depthShaderProgram.getUniformLocation(gl, "lightViewProjectionMatrix");
-		let modelMatrixLocation = depthShaderProgram.getUniformLocation(gl, "modelMatrix");
-		let jointMatricesLocation = depthShaderProgram.getUniformLocation(gl, "jointMatrices[0]");
+	pub fn draw_depth(&self, gl: &glow::Context, skinned_model: &mut SkinnedModel, light_view_projection_elements: &[f32; 16], model_matrix_elements: &[f32; 16]) {
+		skinned_model.upload_pending_morph_targets(gl);
+		let depth_shader_program = &self.depth_shader_program;
+		depth_shader_program.use_program(gl);
+		let light_view_projection_location = depth_shader_program.get_uniform_location(gl, "lightViewProjectionMatrix");
+		let model_matrix_location = depth_shader_program.get_uniform_location(gl, "modelMatrix");
+		let joint_matrices_location = depth_shader_program.get_uniform_location(gl, "jointMatrices[0]");
 		unsafe {
-			gl.uniform_matrix_4_f32_slice(lightViewProjectionLocation.as_ref(), false, lightViewProjectionElements);
-			gl.uniform_matrix_4_f32_slice(modelMatrixLocation.as_ref(), false, modelMatrixElements);
+			gl.uniform_matrix_4_f32_slice(light_view_projection_location.as_ref(), false, light_view_projection_elements);
+			gl.uniform_matrix_4_f32_slice(model_matrix_location.as_ref(), false, model_matrix_elements);
 		}
-		let skinList = skinnedModel.getSkinList();
-		for drawable in skinnedModel.getDrawableList().iter() {
-			let skin = match skinList.get(drawable.skinIndex) {
+		let skin_list = skinned_model.get_skin_list();
+		for drawable in skinned_model.get_drawable_list().iter() {
+			let skin = match skin_list.get(drawable.skin_index) {
 				Some(skin) => {
 					skin
 				}
@@ -425,10 +425,10 @@ impl SkinnedModelRenderer {
 				}
 			};
 			unsafe {
-				gl.uniform_matrix_4_f32_slice(jointMatricesLocation.as_ref(), false, &skin.jointMatrixArray);
+				gl.uniform_matrix_4_f32_slice(joint_matrices_location.as_ref(), false, &skin.joint_matrix_array);
 			}
-			self.applyMorphUniforms(gl, depthShaderProgram, drawable);
-			drawDrawableTriangles(gl, drawable);
+			self.apply_morph_uniforms(gl, depth_shader_program, drawable);
+			draw_drawable_triangles(gl, drawable);
 		}
 		unsafe {
 			gl.bind_vertex_array(None);
@@ -439,45 +439,45 @@ impl SkinnedModelRenderer {
 	// 와이어프레임 출력. (모서리 선, 모프 / 스키닝 반영, 블렌드 / 깊이 상태는 호출자가 잡는다)
 	// - 드로어블 버텍스 어레이의 엘리먼트 버퍼를 잠시 선 인덱스로 바꿔 그리고 원래 인덱스로 되돌린다.
 	//==============================================================================
-	pub fn drawWireframe(&self, gl: &glow::Context, skinnedModel: &mut SkinnedModel, viewProjectionElements: &[f32; 16], modelMatrixElements: &[f32; 16], red: f32, green: f32, blue: f32, alpha: f32) {
-		skinnedModel.uploadPendingMorphTargets(gl);
-		for drawableIndex in 0..skinnedModel.getDrawableList().len() {
-			if skinnedModel.getDrawableList()[drawableIndex].wireframeIndexBuffer.is_none() {
-				if let Err(error) = skinnedModel.uploadWireframeIndices(gl, drawableIndex) {
+	pub fn draw_wireframe(&self, gl: &glow::Context, skinned_model: &mut SkinnedModel, view_projection_elements: &[f32; 16], model_matrix_elements: &[f32; 16], red: f32, green: f32, blue: f32, alpha: f32) {
+		skinned_model.upload_pending_morph_targets(gl);
+		for drawable_index in 0..skinned_model.get_drawable_list().len() {
+			if skinned_model.get_drawable_list()[drawable_index].wireframe_index_buffer.is_none() {
+				if let Err(error) = skinned_model.upload_wireframe_indices(gl, drawable_index) {
 					eprintln!("SkinnedModelRenderer: {}", error);
 				}
 			}
 		}
-		let wireframeShaderProgram = &self.wireframeShaderProgram;
-		wireframeShaderProgram.useProgram(gl);
-		let viewProjectionLocation = wireframeShaderProgram.getUniformLocation(gl, "viewProjectionMatrix");
-		let modelMatrixLocation = wireframeShaderProgram.getUniformLocation(gl, "modelMatrix");
-		let wireframeColorLocation = wireframeShaderProgram.getUniformLocation(gl, "wireframeColor");
-		let jointMatricesLocation = wireframeShaderProgram.getUniformLocation(gl, "jointMatrices[0]");
+		let wireframe_shader_program = &self.wireframe_shader_program;
+		wireframe_shader_program.use_program(gl);
+		let view_projection_location = wireframe_shader_program.get_uniform_location(gl, "viewProjectionMatrix");
+		let model_matrix_location = wireframe_shader_program.get_uniform_location(gl, "modelMatrix");
+		let wireframe_color_location = wireframe_shader_program.get_uniform_location(gl, "wireframeColor");
+		let joint_matrices_location = wireframe_shader_program.get_uniform_location(gl, "jointMatrices[0]");
 		unsafe {
-			gl.uniform_matrix_4_f32_slice(viewProjectionLocation.as_ref(), false, viewProjectionElements);
-			gl.uniform_matrix_4_f32_slice(modelMatrixLocation.as_ref(), false, modelMatrixElements);
-			gl.uniform_4_f32(wireframeColorLocation.as_ref(), red, green, blue, alpha);
+			gl.uniform_matrix_4_f32_slice(view_projection_location.as_ref(), false, view_projection_elements);
+			gl.uniform_matrix_4_f32_slice(model_matrix_location.as_ref(), false, model_matrix_elements);
+			gl.uniform_4_f32(wireframe_color_location.as_ref(), red, green, blue, alpha);
 		}
-		let skinList = skinnedModel.getSkinList();
-		for drawable in skinnedModel.getDrawableList().iter() {
-			let (skin, wireframeIndexBuffer) = match (skinList.get(drawable.skinIndex), drawable.wireframeIndexBuffer) {
-				(Some(skin), Some(wireframeIndexBuffer)) => {
-					(skin, wireframeIndexBuffer)
+		let skin_list = skinned_model.get_skin_list();
+		for drawable in skinned_model.get_drawable_list().iter() {
+			let (skin, wireframe_index_buffer) = match (skin_list.get(drawable.skin_index), drawable.wireframe_index_buffer) {
+				(Some(skin), Some(wireframe_index_buffer)) => {
+					(skin, wireframe_index_buffer)
 				}
 				_ => {
 					continue;
 				}
 			};
 			unsafe {
-				gl.uniform_matrix_4_f32_slice(jointMatricesLocation.as_ref(), false, &skin.jointMatrixArray);
+				gl.uniform_matrix_4_f32_slice(joint_matrices_location.as_ref(), false, &skin.joint_matrix_array);
 			}
-			self.applyMorphUniforms(gl, wireframeShaderProgram, drawable);
+			self.apply_morph_uniforms(gl, wireframe_shader_program, drawable);
 			unsafe {
-				gl.bind_vertex_array(Some(drawable.vertexArray));
-				gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(wireframeIndexBuffer));
-				gl.draw_elements(glow::LINES, drawable.wireframeIndexCount as i32, drawable.wireframeIndexComponentType, 0);
-				gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, drawable.indexBuffer);
+				gl.bind_vertex_array(Some(drawable.vertex_array));
+				gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(wireframe_index_buffer));
+				gl.draw_elements(glow::LINES, drawable.wireframe_index_count as i32, drawable.wireframe_index_component_type, 0);
+				gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, drawable.index_buffer);
 			}
 		}
 		unsafe {
@@ -488,33 +488,33 @@ impl SkinnedModelRenderer {
 	//==============================================================================
 	// 모프 유니폼 적용. (드로어블의 모프 텍스처/가중치, 타깃이 없으면 개수 0 으로 비활성)
 	//==============================================================================
-	pub fn applyMorphUniforms(&self, gl: &glow::Context, shaderProgram: &ShaderProgram, drawable: &Drawable) {
-		let morphTargetCountLocation = shaderProgram.getUniformLocation(gl, "morphTargetCount");
-		let targetCount = match drawable.morphTexture {
+	pub fn apply_morph_uniforms(&self, gl: &glow::Context, shader_program: &ShaderProgram, drawable: &Drawable) {
+		let morph_target_count_location = shader_program.get_uniform_location(gl, "morphTargetCount");
+		let target_count = match drawable.morph_texture {
 			Some(_) => {
-				drawable.morphTargetList.len()
+				drawable.morph_target_list.len()
 			}
 			None => {
 				0
 			}
 		};
 		unsafe {
-			gl.uniform_1_i32(morphTargetCountLocation.as_ref(), targetCount as i32);
+			gl.uniform_1_i32(morph_target_count_location.as_ref(), target_count as i32);
 		}
-		if targetCount == 0 {
+		if target_count == 0 {
 			return;
 		}
-		let morphRowsPerTargetLocation = shaderProgram.getUniformLocation(gl, "morphRowsPerTarget");
-		let morphTextureWidthLocation = shaderProgram.getUniformLocation(gl, "morphTextureWidth");
-		let morphWeightsLocation = shaderProgram.getUniformLocation(gl, "morphWeights[0]");
-		let morphTextureLocation = shaderProgram.getUniformLocation(gl, "morphTexture");
+		let morph_rows_per_target_location = shader_program.get_uniform_location(gl, "morphRowsPerTarget");
+		let morph_texture_width_location = shader_program.get_uniform_location(gl, "morphTextureWidth");
+		let morph_weights_location = shader_program.get_uniform_location(gl, "morphWeights[0]");
+		let morph_texture_location = shader_program.get_uniform_location(gl, "morphTexture");
 		unsafe {
-			gl.uniform_1_i32(morphRowsPerTargetLocation.as_ref(), drawable.morphRowsPerTarget);
-			gl.uniform_1_i32(morphTextureWidthLocation.as_ref(), drawable.morphTextureWidth);
-			gl.uniform_1_f32_slice(morphWeightsLocation.as_ref(), &drawable.morphWeights);
-			gl.uniform_1_i32(morphTextureLocation.as_ref(), MORPH_TEXTURE_UNIT as i32);
+			gl.uniform_1_i32(morph_rows_per_target_location.as_ref(), drawable.morph_rows_per_target);
+			gl.uniform_1_i32(morph_texture_width_location.as_ref(), drawable.morph_texture_width);
+			gl.uniform_1_f32_slice(morph_weights_location.as_ref(), &drawable.morph_weights);
+			gl.uniform_1_i32(morph_texture_location.as_ref(), MORPH_TEXTURE_UNIT as i32);
 			gl.active_texture(glow::TEXTURE0 + MORPH_TEXTURE_UNIT);
-			gl.bind_texture(glow::TEXTURE_2D, drawable.morphTexture);
+			gl.bind_texture(glow::TEXTURE_2D, drawable.morph_texture);
 			gl.active_texture(glow::TEXTURE0);
 		}
 	}
@@ -522,73 +522,73 @@ impl SkinnedModelRenderer {
 	//==============================================================================
 	// 섀도우 맵 설정. (본 패스에서 그림자 수신, 행렬은 복사해 둔다)
 	//==============================================================================
-	pub fn setShadowMap(&mut self, shadowMapTexture: Option<GlTexture>, lightViewProjectionElements: Option<&[f32; 16]>, texelSize: f32) {
-		self.shadowMapTexture = shadowMapTexture;
-		self.lightViewProjectionElements = lightViewProjectionElements.copied();
-		self.shadowTexelSize = texelSize;
+	pub fn set_shadow_map(&mut self, shadow_map_texture: Option<GlTexture>, light_view_projection_elements: Option<&[f32; 16]>, texel_size: f32) {
+		self.shadow_map_texture = shadow_map_texture;
+		self.light_view_projection_elements = light_view_projection_elements.copied();
+		self.shadow_texel_size = texel_size;
 	}
 
 	//==============================================================================
 	// 그림자 강도 설정. (0 = 수신 안 함)
 	//==============================================================================
-	pub fn setShadowStrength(&mut self, shadowStrength: f32) {
-		self.shadowStrength = shadowStrength;
+	pub fn set_shadow_strength(&mut self, shadow_strength: f32) {
+		self.shadow_strength = shadow_strength;
 	}
 
 	//==============================================================================
 	// 태양 방향 설정.
 	//==============================================================================
-	pub fn setSunDirection(&mut self, x: f32, y: f32, z: f32) {
-		self.sunDirection = [x, y, z];
+	pub fn set_sun_direction(&mut self, x: f32, y: f32, z: f32) {
+		self.sun_direction = [x, y, z];
 	}
 
 	//==============================================================================
 	// 안개 색 설정.
 	//==============================================================================
-	pub fn setFogColor(&mut self, red: f32, green: f32, blue: f32) {
-		self.fogColor = [red, green, blue];
+	pub fn set_fog_color(&mut self, red: f32, green: f32, blue: f32) {
+		self.fog_color = [red, green, blue];
 	}
 
 	//==============================================================================
 	// 안개 거리 범위 설정.
 	//==============================================================================
-	pub fn setFogRange(&mut self, startDistance: f32, endDistance: f32) {
-		self.fogRange = [startDistance, endDistance];
+	pub fn set_fog_range(&mut self, start_distance: f32, end_distance: f32) {
+		self.fog_range = [start_distance, end_distance];
 	}
 
 	//==============================================================================
 	// 셰이더 프로그램 반환. (스키닝 PBR 템플릿, 모델과 머티리얼이 나눠 든다)
 	//==============================================================================
-	pub fn getShaderProgram(&self) -> Rc<ShaderProgram> {
-		self.shaderProgram.clone()
+	pub fn get_shader_program(&self) -> Rc<ShaderProgram> {
+		self.shader_program.clone()
 	}
 
 	//==============================================================================
 	// 깊이 셰이더 프로그램 반환.
 	//==============================================================================
-	pub fn getDepthShaderProgram(&self) -> &ShaderProgram {
-		&self.depthShaderProgram
+	pub fn get_depth_shader_program(&self) -> &ShaderProgram {
+		&self.depth_shader_program
 	}
 
 	//==============================================================================
 	// 와이어프레임 셰이더 프로그램 반환.
 	//==============================================================================
-	pub fn getWireframeShaderProgram(&self) -> &ShaderProgram {
-		&self.wireframeShaderProgram
+	pub fn get_wireframe_shader_program(&self) -> &ShaderProgram {
+		&self.wireframe_shader_program
 	}
 }
 
 //==============================================================================
 // 드로어블 삼각형 출력. (인덱스가 있으면 drawElements, 없으면 drawArrays)
 //==============================================================================
-fn drawDrawableTriangles(gl: &glow::Context, drawable: &Drawable) {
+fn draw_drawable_triangles(gl: &glow::Context, drawable: &Drawable) {
 	unsafe {
-		gl.bind_vertex_array(Some(drawable.vertexArray));
-		if drawable.isIndexed {
-			gl.draw_elements(glow::TRIANGLES, drawable.indexCount as i32, drawable.indexComponentType, drawable.indexByteOffset);
+		gl.bind_vertex_array(Some(drawable.vertex_array));
+		if drawable.is_indexed {
+			gl.draw_elements(glow::TRIANGLES, drawable.index_count as i32, drawable.index_component_type, drawable.index_byte_offset);
 		}
 		else {
-			gl.draw_arrays(glow::TRIANGLES, 0, drawable.vertexCount as i32);
+			gl.draw_arrays(glow::TRIANGLES, 0, drawable.vertex_count as i32);
 		}
 	}
 }
@@ -602,9 +602,9 @@ mod tests {
 	// 셰이더 소스의 배열 크기가 상수와 같은지. (원본 템플릿 ${MORPH_TARGET_MAXIMUM} 자리)
 	//==============================================================================
 	#[test]
-	fn morphGlslMatchesMaximum() {
-		let expectedDeclaration = format!("uniform float morphWeights[{}];", MORPH_TARGET_MAXIMUM);
-		assert!(MORPH_GLSL.contains(&expectedDeclaration));
+	fn morph_glsl_matches_maximum() {
+		let expected_declaration = format!("uniform float morphWeights[{}];", MORPH_TARGET_MAXIMUM);
+		assert!(MORPH_GLSL.contains(&expected_declaration));
 		for source in [SKINNED_VERTEXSHADER_SOURCE, SKINNED_DEPTH_VERTEXSHADER_SOURCE, SKINNED_WIREFRAME_VERTEXSHADER_SOURCE] {
 			assert!(source.starts_with("#version 300 es"));
 			assert!(source.contains(MORPH_GLSL));

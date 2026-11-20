@@ -1,7 +1,7 @@
 //==============================================================================
 // 그리드 길찾기. (A*)
 // - 원본 misc/pathfinder.js 를 옮긴 것이다. 4방향 이동, 맨해튼 거리 휴리스틱, 이진 최소 힙으로 열린 목록을 관리한다.
-// - isBlockedHandler(column, row) 가 참이면 막힌 칸이다.
+// - is_blocked_handler(column, row) 가 참이면 막힌 칸이다.
 // - 결과는 시작 칸을 빼고 도착 칸까지의 칸 목록. 길이 없으면 None.
 // - 원본과 다른 점:
 //   { column, row } 는 GridCell, null 은 None 이다.
@@ -10,11 +10,11 @@
 use crate::misc::grid::{GridCell, NEIGHBOR_OFFSETS};
 
 //==============================================================================
-// 열린 목록. ([예상 총비용, 칸 번호] 쌍의 이진 최소 힙, 원본 heapScores / heapIndices)
+// 열린 목록. ([예상 총비용, 칸 번호] 쌍의 이진 최소 힙, 원본 heap_scores / heap_indices)
 //==============================================================================
 struct OpenHeap {
-	heapScores: Vec<f64>,
-	heapIndices: Vec<usize>,
+	heap_scores: Vec<f64>,
+	heap_indices: Vec<usize>,
 }
 
 impl OpenHeap {
@@ -23,33 +23,33 @@ impl OpenHeap {
 	//==============================================================================
 	fn new() -> OpenHeap {
 		OpenHeap {
-			heapScores: Vec::new(),
-			heapIndices: Vec::new(),
+			heap_scores: Vec::new(),
+			heap_indices: Vec::new(),
 		}
 	}
 
 	//==============================================================================
 	// 비었는지.
 	//==============================================================================
-	fn isEmpty(&self) -> bool {
-		self.heapScores.is_empty()
+	fn is_empty(&self) -> bool {
+		self.heap_scores.is_empty()
 	}
 
 	//==============================================================================
 	// 넣기. (맨 뒤에 넣고 부모보다 작으면 올린다)
 	//==============================================================================
-	fn push(&mut self, score: f64, cellIndex: usize) {
-		self.heapScores.push(score);
-		self.heapIndices.push(cellIndex);
-		let mut childPosition = self.heapScores.len() - 1;
-		while childPosition > 0 {
-			let parentPosition = (childPosition - 1) >> 1;
-			if self.heapScores[parentPosition] <= self.heapScores[childPosition] {
+	fn push(&mut self, score: f64, cell_index: usize) {
+		self.heap_scores.push(score);
+		self.heap_indices.push(cell_index);
+		let mut child_position = self.heap_scores.len() - 1;
+		while child_position > 0 {
+			let parent_position = (child_position - 1) >> 1;
+			if self.heap_scores[parent_position] <= self.heap_scores[child_position] {
 				break;
 			}
-			self.heapScores.swap(parentPosition, childPosition);
-			self.heapIndices.swap(parentPosition, childPosition);
-			childPosition = parentPosition;
+			self.heap_scores.swap(parent_position, child_position);
+			self.heap_indices.swap(parent_position, child_position);
+			child_position = parent_position;
 		}
 	}
 
@@ -57,33 +57,33 @@ impl OpenHeap {
 	// 가장 작은 것 꺼내기. (맨 뒤 것을 위로 올리고 자식보다 크면 내린다)
 	//==============================================================================
 	fn pop(&mut self) -> Option<usize> {
-		let topIndex = *self.heapIndices.first()?;
-		let lastScore = self.heapScores.pop()?;
-		let lastIndex = self.heapIndices.pop()?;
-		if !self.heapScores.is_empty() {
-			self.heapScores[0] = lastScore;
-			self.heapIndices[0] = lastIndex;
-			let heapLength = self.heapScores.len();
-			let mut parentPosition = 0;
+		let top_index = *self.heap_indices.first()?;
+		let last_score = self.heap_scores.pop()?;
+		let last_index = self.heap_indices.pop()?;
+		if !self.heap_scores.is_empty() {
+			self.heap_scores[0] = last_score;
+			self.heap_indices[0] = last_index;
+			let heap_length = self.heap_scores.len();
+			let mut parent_position = 0;
 			loop {
-				let leftPosition = parentPosition * 2 + 1;
-				let rightPosition = leftPosition + 1;
-				let mut smallestPosition = parentPosition;
-				if leftPosition < heapLength && self.heapScores[leftPosition] < self.heapScores[smallestPosition] {
-					smallestPosition = leftPosition;
+				let left_position = parent_position * 2 + 1;
+				let right_position = left_position + 1;
+				let mut smallest_position = parent_position;
+				if left_position < heap_length && self.heap_scores[left_position] < self.heap_scores[smallest_position] {
+					smallest_position = left_position;
 				}
-				if rightPosition < heapLength && self.heapScores[rightPosition] < self.heapScores[smallestPosition] {
-					smallestPosition = rightPosition;
+				if right_position < heap_length && self.heap_scores[right_position] < self.heap_scores[smallest_position] {
+					smallest_position = right_position;
 				}
-				if smallestPosition == parentPosition {
+				if smallest_position == parent_position {
 					break;
 				}
-				self.heapScores.swap(parentPosition, smallestPosition);
-				self.heapIndices.swap(parentPosition, smallestPosition);
-				parentPosition = smallestPosition;
+				self.heap_scores.swap(parent_position, smallest_position);
+				self.heap_indices.swap(parent_position, smallest_position);
+				parent_position = smallest_position;
 			}
 		}
-		Some(topIndex)
+		Some(top_index)
 	}
 }
 
@@ -96,60 +96,60 @@ impl PathFinder {
 	//==============================================================================
 	// 경로 찾기. (시작이나 도착이 밖이거나 도착이 막혔으면 None, 시작과 도착이 같으면 빈 목록)
 	//==============================================================================
-	pub fn findPath(columnCount: i32, rowCount: i32, start: GridCell, goal: GridCell, mut isBlockedHandler: impl FnMut(i32, i32) -> bool) -> Option<Vec<GridCell>> {
-		let isInside = |column: i32, row: i32| -> bool {
-			column >= 0 && column < columnCount && row >= 0 && row < rowCount
+	pub fn find_path(column_count: i32, row_count: i32, start: GridCell, goal: GridCell, mut is_blocked_handler: impl FnMut(i32, i32) -> bool) -> Option<Vec<GridCell>> {
+		let is_inside = |column: i32, row: i32| -> bool {
+			column >= 0 && column < column_count && row >= 0 && row < row_count
 		};
-		if !isInside(start.column, start.row) || !isInside(goal.column, goal.row) {
+		if !is_inside(start.column, start.row) || !is_inside(goal.column, goal.row) {
 			return None;
 		}
-		if isBlockedHandler(goal.column, goal.row) {
+		if is_blocked_handler(goal.column, goal.row) {
 			return None;
 		}
 		if start == goal {
 			return Some(Vec::new());
 		}
 
-		let cellCount = (columnCount * rowCount) as usize;
-		let toIndex = |column: i32, row: i32| -> usize {
-			(row * columnCount + column) as usize
+		let cell_count = (column_count * row_count) as usize;
+		let to_index = |column: i32, row: i32| -> usize {
+			(row * column_count + column) as usize
 		};
-		let toCell = |cellIndex: usize| -> GridCell {
-			let column = (cellIndex % columnCount as usize) as i32;
-			let row = (cellIndex / columnCount as usize) as i32;
+		let to_cell = |cell_index: usize| -> GridCell {
+			let column = (cell_index % column_count as usize) as i32;
+			let row = (cell_index / column_count as usize) as i32;
 			GridCell::create(column, row)
 		};
 		let heuristic = |column: i32, row: i32| -> f64 {
 			((column - goal.column).abs() + (row - goal.row).abs()) as f64
 		};
-		let mut costFromStart = vec![f64::INFINITY; cellCount];
-		let mut cameFrom: Vec<Option<usize>> = vec![None; cellCount];
-		let mut isClosed = vec![false; cellCount];
-		let mut openHeap = OpenHeap::new();
+		let mut cost_from_start = vec![f64::INFINITY; cell_count];
+		let mut came_from: Vec<Option<usize>> = vec![None; cell_count];
+		let mut is_closed = vec![false; cell_count];
+		let mut open_heap = OpenHeap::new();
 
-		let startIndex = toIndex(start.column, start.row);
-		let goalIndex = toIndex(goal.column, goal.row);
-		costFromStart[startIndex] = 0.0;
-		openHeap.push(heuristic(start.column, start.row), startIndex);
+		let start_index = to_index(start.column, start.row);
+		let goal_index = to_index(goal.column, goal.row);
+		cost_from_start[start_index] = 0.0;
+		open_heap.push(heuristic(start.column, start.row), start_index);
 
-		while !openHeap.isEmpty() {
-			let currentIndex = match openHeap.pop() {
-				Some(currentIndex) => {
-					currentIndex
+		while !open_heap.is_empty() {
+			let current_index = match open_heap.pop() {
+				Some(current_index) => {
+					current_index
 				}
 				None => {
 					break;
 				}
 			};
-			if currentIndex == goalIndex {
+			if current_index == goal_index {
 				// 경로 거꾸로 따라가기.
 				let mut path: Vec<GridCell> = Vec::new();
-				let mut traceIndex = goalIndex;
-				while traceIndex != startIndex {
-					path.push(toCell(traceIndex));
-					traceIndex = match cameFrom[traceIndex] {
-						Some(previousIndex) => {
-							previousIndex
+				let mut trace_index = goal_index;
+				while trace_index != start_index {
+					path.push(to_cell(trace_index));
+					trace_index = match came_from[trace_index] {
+						Some(previous_index) => {
+							previous_index
 						}
 						None => {
 							break;
@@ -159,30 +159,30 @@ impl PathFinder {
 				path.reverse();
 				return Some(path);
 			}
-			if isClosed[currentIndex] {
+			if is_closed[current_index] {
 				continue;
 			}
-			isClosed[currentIndex] = true;
+			is_closed[current_index] = true;
 
-			let currentCell = toCell(currentIndex);
-			for (offsetColumn, offsetRow) in NEIGHBOR_OFFSETS {
-				let nextColumn = currentCell.column + offsetColumn;
-				let nextRow = currentCell.row + offsetRow;
-				if !isInside(nextColumn, nextRow) {
+			let current_cell = to_cell(current_index);
+			for (offset_column, offset_row) in NEIGHBOR_OFFSETS {
+				let next_column = current_cell.column + offset_column;
+				let next_row = current_cell.row + offset_row;
+				if !is_inside(next_column, next_row) {
 					continue;
 				}
-				if isBlockedHandler(nextColumn, nextRow) {
+				if is_blocked_handler(next_column, next_row) {
 					continue;
 				}
-				let nextIndex = toIndex(nextColumn, nextRow);
-				if isClosed[nextIndex] {
+				let next_index = to_index(next_column, next_row);
+				if is_closed[next_index] {
 					continue;
 				}
-				let nextCost = costFromStart[currentIndex] + 1.0;
-				if nextCost < costFromStart[nextIndex] {
-					costFromStart[nextIndex] = nextCost;
-					cameFrom[nextIndex] = Some(currentIndex);
-					openHeap.push(nextCost + heuristic(nextColumn, nextRow), nextIndex);
+				let next_cost = cost_from_start[current_index] + 1.0;
+				if next_cost < cost_from_start[next_index] {
+					cost_from_start[next_index] = next_cost;
+					came_from[next_index] = Some(current_index);
+					open_heap.push(next_cost + heuristic(next_column, next_row), next_index);
 				}
 			}
 		}
@@ -200,7 +200,7 @@ mod tests {
 	//==============================================================================
 	// 글 지도의 칸이 막혔는지. ('#' 이 벽)
 	//==============================================================================
-	fn isWall(map: &[&str], column: i32, row: i32) -> bool {
+	fn is_wall(map: &[&str], column: i32, row: i32) -> bool {
 		map[row as usize].as_bytes()[column as usize] == b'#'
 	}
 
@@ -208,7 +208,7 @@ mod tests {
 	// 벽을 돌아가는 최단 경로. (시작 칸은 빼고 이웃 칸끼리 이어진다)
 	//==============================================================================
 	#[test]
-	fn findsShortestPathAroundWall() {
+	fn finds_shortest_path_around_wall() {
 		let map = [
 			".....",
 			".###.",
@@ -217,15 +217,15 @@ mod tests {
 		];
 		let start = GridCell::create(0, 2);
 		let goal = GridCell::create(4, 2);
-		let path = PathFinder::findPath(5, 4, start, goal, |column, row| isWall(&map, column, row)).expect("path");
+		let path = PathFinder::find_path(5, 4, start, goal, |column, row| is_wall(&map, column, row)).expect("path");
 		assert_eq!(path.len(), 6);
 		assert_eq!(*path.last().expect("goal"), goal);
-		let mut previousCell = start;
+		let mut previous_cell = start;
 		for cell in path.iter() {
-			let stepLength = (cell.column - previousCell.column).abs() + (cell.row - previousCell.row).abs();
-			assert_eq!(stepLength, 1);
-			assert!(!isWall(&map, cell.column, cell.row));
-			previousCell = *cell;
+			let step_length = (cell.column - previous_cell.column).abs() + (cell.row - previous_cell.row).abs();
+			assert_eq!(step_length, 1);
+			assert!(!is_wall(&map, cell.column, cell.row));
+			previous_cell = *cell;
 		}
 	}
 
@@ -233,16 +233,16 @@ mod tests {
 	// 길이 없거나, 도착이 막혔거나, 밖이거나, 같은 칸.
 	//==============================================================================
 	#[test]
-	fn edgeCases() {
-		let closedMap = [
+	fn edge_cases() {
+		let closed_map = [
 			"..#..",
 			"..#..",
 		];
-		assert!(PathFinder::findPath(5, 2, GridCell::create(0, 0), GridCell::create(4, 0), |column, row| isWall(&closedMap, column, row)).is_none());
-		assert!(PathFinder::findPath(5, 2, GridCell::create(0, 0), GridCell::create(2, 0), |column, row| isWall(&closedMap, column, row)).is_none());
-		assert!(PathFinder::findPath(5, 2, GridCell::create(0, 0), GridCell::create(5, 0), |_, _| false).is_none());
-		assert_eq!(PathFinder::findPath(5, 2, GridCell::create(1, 1), GridCell::create(1, 1), |_, _| false), Some(Vec::new()));
-		let straightPath = PathFinder::findPath(3, 1, GridCell::create(0, 0), GridCell::create(2, 0), |_, _| false).expect("path");
-		assert_eq!(straightPath, vec![GridCell::create(1, 0), GridCell::create(2, 0)]);
+		assert!(PathFinder::find_path(5, 2, GridCell::create(0, 0), GridCell::create(4, 0), |column, row| is_wall(&closed_map, column, row)).is_none());
+		assert!(PathFinder::find_path(5, 2, GridCell::create(0, 0), GridCell::create(2, 0), |column, row| is_wall(&closed_map, column, row)).is_none());
+		assert!(PathFinder::find_path(5, 2, GridCell::create(0, 0), GridCell::create(5, 0), |_, _| false).is_none());
+		assert_eq!(PathFinder::find_path(5, 2, GridCell::create(1, 1), GridCell::create(1, 1), |_, _| false), Some(Vec::new()));
+		let straight_path = PathFinder::find_path(3, 1, GridCell::create(0, 0), GridCell::create(2, 0), |_, _| false).expect("path");
+		assert_eq!(straight_path, vec![GridCell::create(1, 0), GridCell::create(2, 0)]);
 	}
 }

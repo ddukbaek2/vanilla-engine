@@ -1,20 +1,20 @@
 //==============================================================================
 // 컨텍스트 메뉴. (원본 ui/uicontextmenu.js 의 UIContextMenu, 우클릭 / 길게 누름 메뉴)
-// - show(nodeTree, position, itemList) 로 항목 목록을 그 자리에 띄운다. 바깥을 누르면 닫히고, 항목을 누르면 닫힌 뒤 처리기를 부른다.
+// - show(node_tree, position, item_list) 로 항목 목록을 그 자리에 띄운다. 바깥을 누르면 닫히고, 항목을 누르면 닫힌 뒤 처리기를 부른다.
 // - 메뉴가 부모 영역 밖으로 나가지 않게 오른쪽 / 아래 끝에 붙인다. (부모 크기를 모르면 960 x 640)
 // - 씬 뿌리의 맨 위(마지막 자식)에 두고 쓴다.
 // - 원본은 WorldNode 를 상속한 노드다. 러스트 판은 노드(호스트)에 붙는 컴포넌트이고, 붙을 때 원본 생성자처럼
 //   호스트를 꾸미고(왼쪽 위 피봇, 비활성) 바깥 누름 막(투명 UIButton)과 메뉴 판(둥근 Paint)을 자식으로 만든다.
-//   UIContextMenu::create(nodeTree, parentId, options) 가 원본 new UIContextMenu(options) + addChild 자리다.
+//   UIContextMenu::create(node_tree, parent_id, options) 가 원본 new UIContextMenu(options) + add_child 자리다.
 // - 사용:
-//     let menuId = UIContextMenu::create(nodeTree, rootId, UIContextMenuOptions::default());
-//     nodeTree.withComponentMut::<UIContextMenu, _>(menuId, |contextMenu, tree| {
-//         contextMenu.show(tree, viewPosition, vec![UIContextMenuItem::create("복사", Box::new(|context| { ... })), UIContextMenuItem::createDisabled("삭제")]);
+//     let menu_id = UIContextMenu::create(node_tree, root_id, UIContextMenuOptions::default());
+//     node_tree.with_component_mut::<UIContextMenu, _>(menu_id, |context_menu, tree| {
+//         context_menu.show(tree, view_position, vec![UIContextMenuItem::create("복사", Box::new(|context| { ... })), UIContextMenuItem::create_disabled("삭제")]);
 //     });
 // - 원본과 다른 것:
-//   - show / close 는 노드를 바꾸므로 트리를 받는다. 씬 코드는 nodeTree.withComponentMut 로 부른다.
-//   - 항목은 UIContextMenuItem 구조체({ text, handler?, isDisabled }), 처리기는 누른 행 노드의 문맥을 받는 한 번짜리 함수(FnOnce)다.
-//   - isShowing 은 노드 활성 대신 show / close 가 고치는 값을 돌려준다.
+//   - show / close 는 노드를 바꾸므로 트리를 받는다. 씬 코드는 node_tree.with_component_mut 로 부른다.
+//   - 항목은 UIContextMenuItem 구조체({ text, handler?, is_disabled }), 처리기는 누른 행 노드의 문맥을 받는 한 번짜리 함수(FnOnce)다.
+//   - is_showing 은 노드 활성 대신 show / close 가 고치는 값을 돌려준다.
 //   - 이전 행은 떼기(removeChild) 대신 지운다. 행 노드 이름은 원본처럼 "ContextMenuItem{번호}" 다.
 //==============================================================================
 use crate::base::color::Color;
@@ -32,15 +32,15 @@ const DEFAULT_AREA_WIDTH: f32 = 960.0;
 const DEFAULT_AREA_HEIGHT: f32 = 640.0;
 
 //==============================================================================
-// 컨텍스트 메뉴 설정. (원본 options = { menuWidth = 168, itemHeight = 28, fontSize = 12, panelColor?, textColor? })
+// 컨텍스트 메뉴 설정. (원본 options = { menu_width = 168, item_height = 28, font_size = 12, panel_color?, text_color? })
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UIContextMenuOptions {
-	pub menuWidth: f32,
-	pub itemHeight: f32,
-	pub fontSize: f32,
-	pub panelColor: Color,
-	pub textColor: Color,
+	pub menu_width: f32,
+	pub item_height: f32,
+	pub font_size: f32,
+	pub panel_color: Color,
+	pub text_color: Color,
 }
 
 impl Default for UIContextMenuOptions {
@@ -49,11 +49,11 @@ impl Default for UIContextMenuOptions {
 	//==============================================================================
 	fn default() -> UIContextMenuOptions {
 		UIContextMenuOptions {
-			menuWidth: 168.0,
-			itemHeight: 28.0,
-			fontSize: 12.0,
-			panelColor: Color::create(0.086, 0.106, 0.165, 1.0),
-			textColor: Color::create(0.91, 0.925, 0.957, 1.0),
+			menu_width: 168.0,
+			item_height: 28.0,
+			font_size: 12.0,
+			panel_color: Color::create(0.086, 0.106, 0.165, 1.0),
+			text_color: Color::create(0.91, 0.925, 0.957, 1.0),
 		}
 	}
 }
@@ -64,12 +64,12 @@ impl Default for UIContextMenuOptions {
 pub type UIContextMenuHandler = Box<dyn FnOnce(&mut ComponentContext)>;
 
 //==============================================================================
-// 메뉴 항목. (원본 { text, handler?, isDisabled? })
+// 메뉴 항목. (원본 { text, handler?, is_disabled? })
 //==============================================================================
 pub struct UIContextMenuItem {
 	pub text: String,
 	pub handler: Option<UIContextMenuHandler>,
-	pub isDisabled: bool,
+	pub is_disabled: bool,
 }
 
 impl UIContextMenuItem {
@@ -80,18 +80,18 @@ impl UIContextMenuItem {
 		UIContextMenuItem {
 			text: text.to_string(),
 			handler: Some(handler),
-			isDisabled: false,
+			is_disabled: false,
 		}
 	}
 
 	//==============================================================================
 	// 누를 수 없는 항목 생성. (회색 글자)
 	//==============================================================================
-	pub fn createDisabled(text: &str) -> UIContextMenuItem {
+	pub fn create_disabled(text: &str) -> UIContextMenuItem {
 		UIContextMenuItem {
 			text: text.to_string(),
 			handler: None,
-			isDisabled: true,
+			is_disabled: true,
 		}
 	}
 }
@@ -100,13 +100,13 @@ impl UIContextMenuItem {
 // 컨텍스트 메뉴.
 //==============================================================================
 pub struct UIContextMenu {
-	componentBase: ComponentBase,
+	component_base: ComponentBase,
 	options: UIContextMenuOptions,
-	nodeId: Option<NodeId>,
-	overlayNodeId: Option<NodeId>,
-	panelNodeId: Option<NodeId>,
-	rowNodeIds: Vec<NodeId>,
-	isShowing: bool,
+	node_id: Option<NodeId>,
+	overlay_node_id: Option<NodeId>,
+	panel_node_id: Option<NodeId>,
+	row_node_ids: Vec<NodeId>,
+	is_showing: bool,
 }
 
 impl UIContextMenu {
@@ -114,78 +114,78 @@ impl UIContextMenu {
 	// 생성. (기본 설정)
 	//==============================================================================
 	pub fn new() -> UIContextMenu {
-		UIContextMenu::createWithOptions(UIContextMenuOptions::default())
+		UIContextMenu::create_with_options(UIContextMenuOptions::default())
 	}
 
 	//==============================================================================
-	// 설정으로 생성. (노드에는 nodeTree.addComponent 로 붙인다)
+	// 설정으로 생성. (노드에는 node_tree.add_component 로 붙인다)
 	//==============================================================================
-	pub fn createWithOptions(options: UIContextMenuOptions) -> UIContextMenu {
+	pub fn create_with_options(options: UIContextMenuOptions) -> UIContextMenu {
 		UIContextMenu {
-			componentBase: ComponentBase::new(),
+			component_base: ComponentBase::new(),
 			options,
-			nodeId: None,
-			overlayNodeId: None,
-			panelNodeId: None,
-			rowNodeIds: Vec::new(),
-			isShowing: false,
+			node_id: None,
+			overlay_node_id: None,
+			panel_node_id: None,
+			row_node_ids: Vec::new(),
+			is_showing: false,
 		}
 	}
 
 	//==============================================================================
-	// 노드 만들기. (parentId 밑에 "UIContextMenu" 노드를 만들어 붙인다. 원본 new UIContextMenu(options) + addChild)
+	// 노드 만들기. (parent_id 밑에 "UIContextMenu" 노드를 만들어 붙인다. 원본 new UIContextMenu(options) + add_child)
 	//==============================================================================
-	pub fn create(nodeTree: &mut NodeTree, parentId: NodeId, options: UIContextMenuOptions) -> NodeId {
-		let menuId = nodeTree.createChild(parentId, "UIContextMenu");
-		nodeTree.addComponent(menuId, UIContextMenu::createWithOptions(options));
-		menuId
+	pub fn create(node_tree: &mut NodeTree, parent_id: NodeId, options: UIContextMenuOptions) -> NodeId {
+		let menu_id = node_tree.create_child(parent_id, "UIContextMenu");
+		node_tree.add_component(menu_id, UIContextMenu::create_with_options(options));
+		menu_id
 	}
 
 	//==============================================================================
 	// 메뉴 열기. (position 은 메뉴 왼쪽 위의 뷰 좌표. 행을 다시 만들고 영역 안에 붙여 띄운다)
 	//==============================================================================
-	pub fn show(&mut self, nodeTree: &mut NodeTree, position: Vector2, itemList: Vec<UIContextMenuItem>) {
-		let (menuId, overlayId, panelId) = match (self.nodeId, self.overlayNodeId, self.panelNodeId) {
-			(Some(menuId), Some(overlayId), Some(panelId)) => {
-				(menuId, overlayId, panelId)
+	pub fn show(&mut self, node_tree: &mut NodeTree, position: Vector2, item_list: Vec<UIContextMenuItem>) {
+		let (menu_id, overlay_id, panel_id) = match (self.node_id, self.overlay_node_id, self.panel_node_id) {
+			(Some(menu_id), Some(overlay_id), Some(panel_id)) => {
+				(menu_id, overlay_id, panel_id)
 			}
 			_ => {
 				return;
 			}
 		};
-		if !nodeTree.contains(menuId) || !nodeTree.contains(panelId) {
+		if !node_tree.contains(menu_id) || !node_tree.contains(panel_id) {
 			return;
 		}
 
 		// 이전 행을 지우고 다시 만든다. (항목 수가 적어 부담 없다)
-		for rowNodeId in self.rowNodeIds.drain(..) {
-			nodeTree.destroyNode(rowNodeId);
+		for row_node_id in self.row_node_ids.drain(..) {
+			node_tree.destroy_node(row_node_id);
 		}
 		let options = self.options;
-		let panelHeight = itemList.len() as f32 * options.itemHeight + 8.0;
-		nodeTree[panelId].setContentSize(Vector2::create(options.menuWidth, panelHeight));
-		for (itemIndex, itemData) in itemList.into_iter().enumerate() {
-			let rowName = format!("ContextMenuItem{}", itemIndex);
-			let rowId = nodeTree.createChild(panelId, &rowName);
-			let rowNode = &mut nodeTree[rowId];
-			rowNode.setPivot(Pivot::topLeft);
-			rowNode.setAnchor(Pivot::topLeft);
-			rowNode.setContentSize(Vector2::create(options.menuWidth - 8.0, options.itemHeight));
-			rowNode.setLocalPosition(Vector2::create(4.0, 4.0 + itemIndex as f32 * options.itemHeight));
-			rowNode.setInteractable(true);
-			let rowPaint = rowNode.addComponent(Paint::createWithColor(Color::transparent()));
-			rowPaint.setRoundSize(6.0);
-			let isDisabled = itemData.isDisabled;
-			if let Some(rowButton) = nodeTree.addComponent(rowId, UIButton::new()) {
-				rowButton.setPressedTintColor(Color::create(1.0, 1.0, 1.0, 0.08));
-				if isDisabled {
-					rowButton.setInteractable(false);
+		let panel_height = item_list.len() as f32 * options.item_height + 8.0;
+		node_tree[panel_id].set_content_size(Vector2::create(options.menu_width, panel_height));
+		for (item_index, item_data) in item_list.into_iter().enumerate() {
+			let row_name = format!("ContextMenuItem{}", item_index);
+			let row_id = node_tree.create_child(panel_id, &row_name);
+			let row_node = &mut node_tree[row_id];
+			row_node.set_pivot(Pivot::TOP_LEFT);
+			row_node.set_anchor(Pivot::TOP_LEFT);
+			row_node.set_content_size(Vector2::create(options.menu_width - 8.0, options.item_height));
+			row_node.set_local_position(Vector2::create(4.0, 4.0 + item_index as f32 * options.item_height));
+			row_node.set_interactable(true);
+			let row_paint = row_node.add_component(Paint::create_with_color(Color::transparent()));
+			row_paint.set_round_size(6.0);
+			let is_disabled = item_data.is_disabled;
+			if let Some(row_button) = node_tree.add_component(row_id, UIButton::new()) {
+				row_button.set_pressed_tint_color(Color::create(1.0, 1.0, 1.0, 0.08));
+				if is_disabled {
+					row_button.set_interactable(false);
 				}
 				else {
-					let mut handler = itemData.handler;
-					rowButton.setClickedEvent(Box::new(move |_button: &mut UIButton, context: &mut ComponentContext| {
-						context.getNodeTreeMut().withComponentMut::<UIContextMenu, _>(menuId, |contextMenu, tree| {
-							contextMenu.close(tree);
+					let mut handler = item_data.handler;
+					row_button.set_clicked_event(Box::new(move |_button: &mut UIButton, context: &mut ComponentContext| {
+						context.get_node_tree_mut().with_component_mut::<UIContextMenu, _>(menu_id, |context_menu, tree| {
+							context_menu.close(tree);
 						});
 						if let Some(handler) = handler.take() {
 							handler(context);
@@ -193,79 +193,79 @@ impl UIContextMenu {
 					}));
 				}
 			}
-			if let Some(rowLabel) = nodeTree.addComponent(rowId, UILabel::new()) {
-				rowLabel.setText(&itemData.text);
-				rowLabel.setFontSize(options.fontSize);
-				rowLabel.setTextAlign(TextAlign::left);
-				let labelColor = if isDisabled {
+			if let Some(row_label) = node_tree.add_component(row_id, UILabel::new()) {
+				row_label.set_text(&item_data.text);
+				row_label.set_font_size(options.font_size);
+				row_label.set_text_align(TextAlign::Left);
+				let label_color = if is_disabled {
 					Color::create(0.4, 0.43, 0.5, 1.0)
 				}
 				else {
-					options.textColor
+					options.text_color
 				};
-				rowLabel.setTextColor(labelColor);
+				row_label.set_text_color(label_color);
 			}
-			self.rowNodeIds.push(rowId);
+			self.row_node_ids.push(row_id);
 		}
 
 		// 부모 크기에 맞춰 막을 깔고, 메뉴가 영역 밖으로 나가지 않게 붙인다.
-		let mut areaWidth = DEFAULT_AREA_WIDTH;
-		let mut areaHeight = DEFAULT_AREA_HEIGHT;
-		if let Some(parentNode) = nodeTree.getParentId(menuId).and_then(|parentId| nodeTree.getNode(parentId)) {
-			let parentSize = parentNode.getContentSize();
-			if parentSize.x > 0.0 && parentSize.y > 0.0 {
-				areaWidth = parentSize.x;
-				areaHeight = parentSize.y;
+		let mut area_width = DEFAULT_AREA_WIDTH;
+		let mut area_height = DEFAULT_AREA_HEIGHT;
+		if let Some(parent_node) = node_tree.get_parent_id(menu_id).and_then(|parent_id| node_tree.get_node(parent_id)) {
+			let parent_size = parent_node.get_content_size();
+			if parent_size.x > 0.0 && parent_size.y > 0.0 {
+				area_width = parent_size.x;
+				area_height = parent_size.y;
 			}
 		}
-		let areaSize = Vector2::create(areaWidth, areaHeight);
-		nodeTree[menuId].setContentSize(areaSize);
-		if let Some(overlayNode) = nodeTree.getNodeMut(overlayId) {
-			overlayNode.setContentSize(areaSize);
+		let area_size = Vector2::create(area_width, area_height);
+		node_tree[menu_id].set_content_size(area_size);
+		if let Some(overlay_node) = node_tree.get_node_mut(overlay_id) {
+			overlay_node.set_content_size(area_size);
 		}
-		let menuX = position.x.min(areaWidth - options.menuWidth - 4.0);
-		let menuY = position.y.min(areaHeight - panelHeight - 4.0);
-		nodeTree[panelId].setLocalPosition(Vector2::create(menuX, menuY));
-		nodeTree[menuId].setActive(true);
-		self.isShowing = true;
+		let menu_x = position.x.min(area_width - options.menu_width - 4.0);
+		let menu_y = position.y.min(area_height - panel_height - 4.0);
+		node_tree[panel_id].set_local_position(Vector2::create(menu_x, menu_y));
+		node_tree[menu_id].set_active(true);
+		self.is_showing = true;
 	}
 
 	//==============================================================================
 	// 닫기.
 	//==============================================================================
-	pub fn close(&mut self, nodeTree: &mut NodeTree) {
-		if let Some(menuNode) = self.nodeId.and_then(|menuId| nodeTree.getNodeMut(menuId)) {
-			menuNode.setActive(false);
+	pub fn close(&mut self, node_tree: &mut NodeTree) {
+		if let Some(menu_node) = self.node_id.and_then(|menu_id| node_tree.get_node_mut(menu_id)) {
+			menu_node.set_active(false);
 		}
-		self.isShowing = false;
+		self.is_showing = false;
 	}
 
 	//==============================================================================
 	// 보이는 중인지.
 	//==============================================================================
-	pub fn isShowing(&self) -> bool {
-		self.isShowing
+	pub fn is_showing(&self) -> bool {
+		self.is_showing
 	}
 
 	//==============================================================================
 	// 바깥 누름 막 노드 핸들.
 	//==============================================================================
-	pub fn getOverlayNode(&self) -> Option<NodeId> {
-		self.overlayNodeId
+	pub fn get_overlay_node(&self) -> Option<NodeId> {
+		self.overlay_node_id
 	}
 
 	//==============================================================================
 	// 메뉴 판 노드 핸들.
 	//==============================================================================
-	pub fn getPanelNode(&self) -> Option<NodeId> {
-		self.panelNodeId
+	pub fn get_panel_node(&self) -> Option<NodeId> {
+		self.panel_node_id
 	}
 
 	//==============================================================================
 	// 항목 행 노드 핸들 목록.
 	//==============================================================================
-	pub fn getItemNodes(&self) -> &[NodeId] {
-		&self.rowNodeIds
+	pub fn get_item_nodes(&self) -> &[NodeId] {
+		&self.row_node_ids
 	}
 }
 
@@ -276,55 +276,55 @@ impl Default for UIContextMenu {
 }
 
 impl Component for UIContextMenu {
-	fn getComponentBase(&self) -> &ComponentBase {
-		&self.componentBase
+	fn get_component_base(&self) -> &ComponentBase {
+		&self.component_base
 	}
 
-	fn getComponentBaseMut(&mut self) -> &mut ComponentBase {
-		&mut self.componentBase
+	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
+		&mut self.component_base
 	}
 
-	fn getComponentType(&self) -> &'static str {
+	fn get_component_type(&self) -> &'static str {
 		"UIContextMenu"
 	}
 
 	//==============================================================================
 	// 트리에 붙음. (원본 생성자: 호스트 꾸미기, 바깥 누름 막, 메뉴 판)
 	//==============================================================================
-	fn attachToTree(&mut self, nodeTree: &mut NodeTree, nodeId: NodeId) {
-		self.nodeId = Some(nodeId);
-		let menuNode = &mut nodeTree[nodeId];
-		menuNode.setPivot(Pivot::topLeft);
-		menuNode.setAnchor(Pivot::topLeft);
-		menuNode.setActive(false);
+	fn attach_to_tree(&mut self, node_tree: &mut NodeTree, node_id: NodeId) {
+		self.node_id = Some(node_id);
+		let menu_node = &mut node_tree[node_id];
+		menu_node.set_pivot(Pivot::TOP_LEFT);
+		menu_node.set_anchor(Pivot::TOP_LEFT);
+		menu_node.set_active(false);
 
 		// 바깥 누름 감지 막. (투명)
-		let overlayId = nodeTree.createChild(nodeId, "ContextMenuOverlay");
-		let overlayNode = &mut nodeTree[overlayId];
-		overlayNode.setPivot(Pivot::topLeft);
-		overlayNode.setAnchor(Pivot::topLeft);
-		overlayNode.setInteractable(true);
-		if let Some(overlayButton) = nodeTree.addComponent(overlayId, UIButton::new()) {
-			overlayButton.setPressedTintColor(Color::transparent());
-			overlayButton.setClickedEvent(Box::new(move |_button: &mut UIButton, context: &mut ComponentContext| {
-				context.getNodeTreeMut().withComponentMut::<UIContextMenu, _>(nodeId, |contextMenu, tree| {
-					contextMenu.close(tree);
+		let overlay_id = node_tree.create_child(node_id, "ContextMenuOverlay");
+		let overlay_node = &mut node_tree[overlay_id];
+		overlay_node.set_pivot(Pivot::TOP_LEFT);
+		overlay_node.set_anchor(Pivot::TOP_LEFT);
+		overlay_node.set_interactable(true);
+		if let Some(overlay_button) = node_tree.add_component(overlay_id, UIButton::new()) {
+			overlay_button.set_pressed_tint_color(Color::transparent());
+			overlay_button.set_clicked_event(Box::new(move |_button: &mut UIButton, context: &mut ComponentContext| {
+				context.get_node_tree_mut().with_component_mut::<UIContextMenu, _>(node_id, |context_menu, tree| {
+					context_menu.close(tree);
 				});
 			}));
 		}
-		self.overlayNodeId = Some(overlayId);
+		self.overlay_node_id = Some(overlay_id);
 
 		// 메뉴 판.
-		let panelId = nodeTree.createChild(nodeId, "ContextMenuPanel");
-		let panelNode = &mut nodeTree[panelId];
-		panelNode.setPivot(Pivot::topLeft);
-		panelNode.setAnchor(Pivot::topLeft);
-		let panelPaint = panelNode.addComponent(Paint::createWithColor(self.options.panelColor));
-		panelPaint.setRoundSize(8.0);
-		self.panelNodeId = Some(panelId);
+		let panel_id = node_tree.create_child(node_id, "ContextMenuPanel");
+		let panel_node = &mut node_tree[panel_id];
+		panel_node.set_pivot(Pivot::TOP_LEFT);
+		panel_node.set_anchor(Pivot::TOP_LEFT);
+		let panel_paint = panel_node.add_component(Paint::create_with_color(self.options.panel_color));
+		panel_paint.set_round_size(8.0);
+		self.panel_node_id = Some(panel_id);
 	}
 
-	fn isTickNeeded(&self) -> bool {
+	fn is_tick_needed(&self) -> bool {
 		false
 	}
 }
@@ -340,18 +340,18 @@ mod tests {
 	//==============================================================================
 	// 시험 장면. (800 x 600 뿌리 밑의 메뉴)
 	//==============================================================================
-	fn createMenuTree() -> (NodeTree, NodeId) {
-		let mut nodeTree = NodeTree::new();
-		let rootId = nodeTree.getRootId();
-		nodeTree[rootId].setContentSize(Vector2::create(800.0, 600.0));
-		let menuId = UIContextMenu::create(&mut nodeTree, rootId, UIContextMenuOptions::default());
-		(nodeTree, menuId)
+	fn create_menu_tree() -> (NodeTree, NodeId) {
+		let mut node_tree = NodeTree::new();
+		let root_id = node_tree.get_root_id();
+		node_tree[root_id].set_content_size(Vector2::create(800.0, 600.0));
+		let menu_id = UIContextMenu::create(&mut node_tree, root_id, UIContextMenuOptions::default());
+		(node_tree, menu_id)
 	}
 
 	//==============================================================================
 	// 셈하는 항목.
 	//==============================================================================
-	fn createCountingItem(text: &str, counter: &Rc<Cell<u32>>) -> UIContextMenuItem {
+	fn create_counting_item(text: &str, counter: &Rc<Cell<u32>>) -> UIContextMenuItem {
 		let counter = counter.clone();
 		UIContextMenuItem::create(text, Box::new(move |_context: &mut ComponentContext| {
 			counter.set(counter.get() + 1);
@@ -361,61 +361,61 @@ mod tests {
 	//==============================================================================
 	// 메뉴 열기. (셈 항목 둘 + 누를 수 없는 항목 하나)
 	//==============================================================================
-	fn showMenu(nodeTree: &mut NodeTree, menuId: NodeId, position: Vector2, copyCount: &Rc<Cell<u32>>, pasteCount: &Rc<Cell<u32>>) {
-		let itemList = vec![createCountingItem("복사", copyCount), createCountingItem("붙여넣기", pasteCount), UIContextMenuItem::createDisabled("삭제")];
-		nodeTree.withComponentMut::<UIContextMenu, _>(menuId, |contextMenu, tree| {
-			contextMenu.show(tree, position, itemList);
+	fn show_menu(node_tree: &mut NodeTree, menu_id: NodeId, position: Vector2, copy_count: &Rc<Cell<u32>>, paste_count: &Rc<Cell<u32>>) {
+		let item_list = vec![create_counting_item("복사", copy_count), create_counting_item("붙여넣기", paste_count), UIContextMenuItem::create_disabled("삭제")];
+		node_tree.with_component_mut::<UIContextMenu, _>(menu_id, |context_menu, tree| {
+			context_menu.show(tree, position, item_list);
 		});
 	}
 
 	//==============================================================================
 	// 노드 가운데를 누르고 뗀다.
 	//==============================================================================
-	fn clickNode(nodeTree: &mut NodeTree, engine: &Engine, nodeId: NodeId) {
-		let contentSize = nodeTree[nodeId].getContentSize();
-		let center = nodeTree.convertNodePositionToViewPosition(nodeId, contentSize.multiplyScalar(0.5));
-		nodeTree.dispatchTouch(nodeId, engine, TouchKind::press, center);
-		nodeTree.dispatchTouch(nodeId, engine, TouchKind::release, center);
+	fn click_node(node_tree: &mut NodeTree, engine: &Engine, node_id: NodeId) {
+		let content_size = node_tree[node_id].get_content_size();
+		let center = node_tree.convert_node_position_to_view_position(node_id, content_size.multiply_scalar(0.5));
+		node_tree.dispatch_touch(node_id, engine, TouchKind::Press, center);
+		node_tree.dispatch_touch(node_id, engine, TouchKind::Release, center);
 	}
 
 	//==============================================================================
 	// 열면 영역 안으로 붙고, 항목을 누르면 처리기를 부르고 닫힌다. 바깥을 누르면 처리기 없이 닫힌다.
 	//==============================================================================
 	#[test]
-	fn showClampItemClickAndOverlayClose() {
+	fn show_clamp_item_click_and_overlay_close() {
 		let engine = Engine::new(EngineConfiguration::new());
-		let (mut nodeTree, menuId) = createMenuTree();
-		assert!(!nodeTree[menuId].isActive());
-		let copyCount = Rc::new(Cell::new(0));
-		let pasteCount = Rc::new(Cell::new(0));
-		showMenu(&mut nodeTree, menuId, Vector2::create(700.0, 580.0), &copyCount, &pasteCount);
-		let (panelId, overlayId, itemIds) = {
-			let contextMenu = nodeTree[menuId].getComponent::<UIContextMenu>().expect("menu");
-			assert!(contextMenu.isShowing());
-			(contextMenu.getPanelNode().expect("panel"), contextMenu.getOverlayNode().expect("overlay"), contextMenu.getItemNodes().to_vec())
+		let (mut node_tree, menu_id) = create_menu_tree();
+		assert!(!node_tree[menu_id].is_active());
+		let copy_count = Rc::new(Cell::new(0));
+		let paste_count = Rc::new(Cell::new(0));
+		show_menu(&mut node_tree, menu_id, Vector2::create(700.0, 580.0), &copy_count, &paste_count);
+		let (panel_id, overlay_id, item_ids) = {
+			let context_menu = node_tree[menu_id].get_component::<UIContextMenu>().expect("menu");
+			assert!(context_menu.is_showing());
+			(context_menu.get_panel_node().expect("panel"), context_menu.get_overlay_node().expect("overlay"), context_menu.get_item_nodes().to_vec())
 		};
-		assert!(nodeTree[menuId].isActive());
-		assert_eq!(nodeTree[overlayId].getContentSize(), Vector2::create(800.0, 600.0));
-		assert_eq!(nodeTree[panelId].getContentSize(), Vector2::create(168.0, 92.0));
-		assert_eq!(nodeTree[panelId].getLocalPosition(), Vector2::create(628.0, 504.0));
-		assert_eq!(itemIds.len(), 3);
-		assert_eq!(nodeTree[itemIds[1]].getName(), "ContextMenuItem1");
+		assert!(node_tree[menu_id].is_active());
+		assert_eq!(node_tree[overlay_id].get_content_size(), Vector2::create(800.0, 600.0));
+		assert_eq!(node_tree[panel_id].get_content_size(), Vector2::create(168.0, 92.0));
+		assert_eq!(node_tree[panel_id].get_local_position(), Vector2::create(628.0, 504.0));
+		assert_eq!(item_ids.len(), 3);
+		assert_eq!(node_tree[item_ids[1]].get_name(), "ContextMenuItem1");
 
-		clickNode(&mut nodeTree, &engine, itemIds[1]);
-		assert_eq!(pasteCount.get(), 1);
-		assert_eq!(copyCount.get(), 0);
-		assert!(!nodeTree[menuId].isActive());
-		assert!(!nodeTree[menuId].getComponent::<UIContextMenu>().expect("menu").isShowing());
+		click_node(&mut node_tree, &engine, item_ids[1]);
+		assert_eq!(paste_count.get(), 1);
+		assert_eq!(copy_count.get(), 0);
+		assert!(!node_tree[menu_id].is_active());
+		assert!(!node_tree[menu_id].get_component::<UIContextMenu>().expect("menu").is_showing());
 
 		// 다시 열고 누를 수 없는 항목을 누르면 아무 일도 없다. 바깥을 누르면 닫힌다.
-		showMenu(&mut nodeTree, menuId, Vector2::create(100.0, 100.0), &copyCount, &pasteCount);
-		let itemIds = nodeTree[menuId].getComponent::<UIContextMenu>().expect("menu").getItemNodes().to_vec();
-		assert_eq!(nodeTree[panelId].getLocalPosition(), Vector2::create(100.0, 100.0));
-		clickNode(&mut nodeTree, &engine, itemIds[2]);
-		assert!(nodeTree[menuId].isActive());
-		nodeTree.dispatchTouch(overlayId, &engine, TouchKind::press, Vector2::create(10.0, 10.0));
-		nodeTree.dispatchTouch(overlayId, &engine, TouchKind::release, Vector2::create(10.0, 10.0));
-		assert!(!nodeTree[menuId].isActive());
-		assert_eq!(copyCount.get() + pasteCount.get(), 1);
+		show_menu(&mut node_tree, menu_id, Vector2::create(100.0, 100.0), &copy_count, &paste_count);
+		let item_ids = node_tree[menu_id].get_component::<UIContextMenu>().expect("menu").get_item_nodes().to_vec();
+		assert_eq!(node_tree[panel_id].get_local_position(), Vector2::create(100.0, 100.0));
+		click_node(&mut node_tree, &engine, item_ids[2]);
+		assert!(node_tree[menu_id].is_active());
+		node_tree.dispatch_touch(overlay_id, &engine, TouchKind::Press, Vector2::create(10.0, 10.0));
+		node_tree.dispatch_touch(overlay_id, &engine, TouchKind::Release, Vector2::create(10.0, 10.0));
+		assert!(!node_tree[menu_id].is_active());
+		assert_eq!(copy_count.get() + paste_count.get(), 1);
 	}
 }

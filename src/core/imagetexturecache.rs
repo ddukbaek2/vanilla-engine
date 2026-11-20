@@ -11,12 +11,12 @@ use std::rc::{Rc, Weak};
 struct ImageTextureEntry {
 	image: Weak<Image>,
 	texture: crate::core::graphic::GlTexture,
-	isSmoothing: bool,
-	isMipmap: bool,
+	is_smoothing: bool,
+	is_mipmap: bool,
 }
 
 pub struct ImageTextureCache {
-	entryTable: HashMap<u64, ImageTextureEntry>,
+	entry_table: HashMap<u64, ImageTextureEntry>,
 }
 
 impl ImageTextureCache {
@@ -25,23 +25,23 @@ impl ImageTextureCache {
 	//==============================================================================
 	pub fn new() -> ImageTextureCache {
 		ImageTextureCache {
-			entryTable: HashMap::new(),
+			entry_table: HashMap::new(),
 		}
 	}
 
 	//==============================================================================
 	// 이미지의 텍스처 반환. (없으면 올리고, 필터 설정이 바뀌었으면 다시 건다)
 	//==============================================================================
-	pub fn getTexture(&mut self, gl: &glow::Context, image: &Rc<Image>, isSmoothing: bool, isMipmap: bool) -> Option<crate::core::graphic::GlTexture> {
-		let instanceId = image.getInstanceId();
-		if let Some(entry) = self.entryTable.get_mut(&instanceId) {
-			if entry.isSmoothing != isSmoothing || entry.isMipmap != isMipmap {
+	pub fn get_texture(&mut self, gl: &glow::Context, image: &Rc<Image>, is_smoothing: bool, is_mipmap: bool) -> Option<crate::core::graphic::GlTexture> {
+		let instance_id = image.get_instance_id();
+		if let Some(entry) = self.entry_table.get_mut(&instance_id) {
+			if entry.is_smoothing != is_smoothing || entry.is_mipmap != is_mipmap {
 				unsafe {
 					gl.bind_texture(glow::TEXTURE_2D, Some(entry.texture));
-					applyFilter(gl, isSmoothing, isMipmap);
+					apply_filter(gl, is_smoothing, is_mipmap);
 				}
-				entry.isSmoothing = isSmoothing;
-				entry.isMipmap = isMipmap;
+				entry.is_smoothing = is_smoothing;
+				entry.is_mipmap = is_mipmap;
 			}
 			return Some(entry.texture);
 		}
@@ -49,14 +49,14 @@ impl ImageTextureCache {
 		let texture = unsafe {
 			let texture = gl.create_texture().ok()?;
 			gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-			let pixels = image.getPixels();
+			let pixels = image.get_pixels();
 			gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
 			gl.tex_image_2d(
 				glow::TEXTURE_2D,
 				0,
 				glow::RGBA8 as i32,
-				image.getWidth() as i32,
-				image.getHeight() as i32,
+				image.get_width() as i32,
+				image.get_height() as i32,
 				0,
 				glow::RGBA,
 				glow::UNSIGNED_BYTE,
@@ -65,14 +65,14 @@ impl ImageTextureCache {
 			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
 			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
 			gl.generate_mipmap(glow::TEXTURE_2D);
-			applyFilter(gl, isSmoothing, isMipmap);
+			apply_filter(gl, is_smoothing, is_mipmap);
 			texture
 		};
-		self.entryTable.insert(instanceId, ImageTextureEntry {
+		self.entry_table.insert(instance_id, ImageTextureEntry {
 			image: Rc::downgrade(image),
 			texture,
-			isSmoothing,
-			isMipmap,
+			is_smoothing,
+			is_mipmap,
 		});
 		Some(texture)
 	}
@@ -81,22 +81,22 @@ impl ImageTextureCache {
 	// 원본 이미지가 사라진 텍스처 지우기.
 	//==============================================================================
 	pub fn sweep(&mut self, gl: &glow::Context) {
-		self.entryTable.retain(|_, entry| {
-			let isAlive = entry.image.strong_count() > 0;
-			if !isAlive {
+		self.entry_table.retain(|_, entry| {
+			let is_alive = entry.image.strong_count() > 0;
+			if !is_alive {
 				unsafe {
 					gl.delete_texture(entry.texture);
 				}
 			}
-			isAlive
+			is_alive
 		});
 	}
 
 	//==============================================================================
 	// 올라가 있는 텍스처 수.
 	//==============================================================================
-	pub fn getTextureCount(&self) -> usize {
-		self.entryTable.len()
+	pub fn get_texture_count(&self) -> usize {
+		self.entry_table.len()
 	}
 }
 
@@ -109,15 +109,15 @@ impl Default for ImageTextureCache {
 //==============================================================================
 // 텍스처 필터 적용. (스무딩 끄면 도트가 또렷한 NEAREST)
 //==============================================================================
-unsafe fn applyFilter(gl: &glow::Context, isSmoothing: bool, isMipmap: bool) {
-	let magnifyFilter = if isSmoothing {
+unsafe fn apply_filter(gl: &glow::Context, is_smoothing: bool, is_mipmap: bool) {
+	let magnify_filter = if is_smoothing {
 		glow::LINEAR
 	}
 	else {
 		glow::NEAREST
 	};
-	let minifyFilter = if isMipmap {
-		if isSmoothing {
+	let minify_filter = if is_mipmap {
+		if is_smoothing {
 			glow::LINEAR_MIPMAP_LINEAR
 		}
 		else {
@@ -125,8 +125,8 @@ unsafe fn applyFilter(gl: &glow::Context, isSmoothing: bool, isMipmap: bool) {
 		}
 	}
 	else {
-		magnifyFilter
+		magnify_filter
 	};
-	gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, minifyFilter as i32);
-	gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, magnifyFilter as i32);
+	gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, minify_filter as i32);
+	gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, magnify_filter as i32);
 }

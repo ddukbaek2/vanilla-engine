@@ -1,10 +1,10 @@
 //==============================================================================
 // 이미지 스크롤러.
-// - 원본 misc/imagescroller.js 를 옮긴 것이다. 이미지 한 장을 보이는 영역(viewRect) 안에 타일처럼 깔고, 속도에 맞춰 흘려 그린다. (무한 배경)
+// - 원본 misc/imagescroller.js 를 옮긴 것이다. 이미지 한 장을 보이는 영역(view_rect) 안에 타일처럼 깔고, 속도에 맞춰 흘려 그린다. (무한 배경)
 // - 원본처럼 컴포넌트가 아니라 그냥 값이다. 들고 있는 쪽이 tick 과 draw 를 불러 준다.
 // - 원본과 다른 점:
-//   이미지는 Rc<Image> 다. 원본 setImage 가 받던 ImageAsset 은 setImageAsset 으로 넘긴다.
-//   getScrollPosition / getScrollSpeed 는 원본처럼 고칠 수 있는 참조가 아니라 값을 돌려준다. (tick 은 안에서 바로 더한다)
+//   이미지는 Rc<Image> 다. 원본 set_image 가 받던 ImageAsset 은 set_image_asset 으로 넘긴다.
+//   get_scroll_position / get_scroll_speed 는 원본처럼 고칠 수 있는 참조가 아니라 값을 돌려준다. (tick 은 안에서 바로 더한다)
 //==============================================================================
 use crate::base::rect::Rect;
 use crate::base::vector2::Vector2;
@@ -19,9 +19,9 @@ use std::rc::Rc;
 #[derive(Clone, Default)]
 pub struct ImageScroller {
 	image: Option<Rc<Image>>,
-	viewRect: Rect,
-	scrollPosition: Vector2,
-	scrollSpeed: Vector2,
+	view_rect: Rect,
+	scroll_position: Vector2,
+	scroll_speed: Vector2,
 }
 
 impl ImageScroller {
@@ -31,39 +31,39 @@ impl ImageScroller {
 	pub fn new() -> ImageScroller {
 		ImageScroller {
 			image: None,
-			viewRect: Rect::zero(),
-			scrollPosition: Vector2::zero(),
-			scrollSpeed: Vector2::zero(),
+			view_rect: Rect::zero(),
+			scroll_position: Vector2::zero(),
+			scroll_speed: Vector2::zero(),
 		}
 	}
 
 	//==============================================================================
 	// 갱신. (속도만큼 스크롤 위치를 옮긴다)
 	//==============================================================================
-	pub fn tick(&mut self, timeDelta: f32) {
-		self.scrollPosition.x += self.scrollSpeed.x * timeDelta;
-		self.scrollPosition.y += self.scrollSpeed.y * timeDelta;
+	pub fn tick(&mut self, time_delta: f32) {
+		self.scroll_position.x += self.scroll_speed.x * time_delta;
+		self.scroll_position.y += self.scroll_speed.y * time_delta;
 	}
 
 	//==============================================================================
 	// 첫 타일의 시작 좌표. (스크롤 위치를 이미지 크기로 나눈 나머지만큼 당긴다. 좌표는 정수로 내려 틈을 막는다)
 	//==============================================================================
-	pub fn calculateTileStart(&self, imageWidth: f32, imageHeight: f32) -> Vector2 {
-		let remainderX = (self.scrollPosition.x % imageWidth).floor();
-		let remainderY = (self.scrollPosition.y % imageHeight).floor();
-		let startX = if remainderX <= 0.0 {
-			remainderX
+	pub fn calculate_tile_start(&self, image_width: f32, image_height: f32) -> Vector2 {
+		let remainder_x = (self.scroll_position.x % image_width).floor();
+		let remainder_y = (self.scroll_position.y % image_height).floor();
+		let start_x = if remainder_x <= 0.0 {
+			remainder_x
 		}
 		else {
-			remainderX - imageWidth
+			remainder_x - image_width
 		};
-		let startY = if remainderY <= 0.0 {
-			remainderY
+		let start_y = if remainder_y <= 0.0 {
+			remainder_y
 		}
 		else {
-			remainderY - imageHeight
+			remainder_y - image_height
 		};
-		Vector2::create(self.viewRect.position.x + startX, self.viewRect.position.y + startY)
+		Vector2::create(self.view_rect.position.x + start_x, self.view_rect.position.y + start_y)
 	}
 
 	//==============================================================================
@@ -78,102 +78,102 @@ impl ImageScroller {
 				return;
 			}
 		};
-		let imageWidth = image.getWidth() as f32;
-		let imageHeight = image.getHeight() as f32;
-		if imageWidth == 0.0 || imageHeight == 0.0 {
+		let image_width = image.get_width() as f32;
+		let image_height = image.get_height() as f32;
+		if image_width == 0.0 || image_height == 0.0 {
 			return;
 		}
 
-		let tileStart = self.calculateTileStart(imageWidth, imageHeight);
-		let viewRect = self.getViewRect();
-		let viewRight = viewRect.position.x + viewRect.size.x;
-		let viewBottom = viewRect.position.y + viewRect.size.y;
-		graphic.beginClipRect(viewRect, 0.0);
+		let tile_start = self.calculate_tile_start(image_width, image_height);
+		let view_rect = self.get_view_rect();
+		let view_right = view_rect.position.x + view_rect.size.x;
+		let view_bottom = view_rect.position.y + view_rect.size.y;
+		graphic.begin_clip_rect(view_rect, 0.0);
 
 		let overlap = 1.5;
-		let tileSize = Vector2::create(imageWidth + overlap, imageHeight + overlap);
-		let mut tileX = tileStart.x;
-		while tileX < viewRight {
-			let mut tileY = tileStart.y;
-			while tileY < viewBottom {
-				let tilePosition = Vector2::create(tileX.floor(), tileY.floor());
-				graphic.drawImage(image, tilePosition, tileSize);
-				tileY += imageHeight;
+		let tile_size = Vector2::create(image_width + overlap, image_height + overlap);
+		let mut tile_x = tile_start.x;
+		while tile_x < view_right {
+			let mut tile_y = tile_start.y;
+			while tile_y < view_bottom {
+				let tile_position = Vector2::create(tile_x.floor(), tile_y.floor());
+				graphic.draw_image(image, tile_position, tile_size);
+				tile_y += image_height;
 			}
-			tileX += imageWidth;
+			tile_x += image_width;
 		}
 
-		graphic.endClipRect();
+		graphic.end_clip_rect();
 	}
 
 	//==============================================================================
 	// 이미지 설정. (None 이면 그리지 않는다)
 	//==============================================================================
-	pub fn setImage(&mut self, image: Option<Rc<Image>>) {
+	pub fn set_image(&mut self, image: Option<Rc<Image>>) {
 		self.image = image;
 	}
 
 	//==============================================================================
 	// 이미지 애셋의 이미지로 설정. (아직 읽히지 않았으면 None)
 	//==============================================================================
-	pub fn setImageAsset(&mut self, imageAsset: &mut ImageAsset) {
-		self.image = imageAsset.getImage();
+	pub fn set_image_asset(&mut self, image_asset: &mut ImageAsset) {
+		self.image = image_asset.get_image();
 	}
 
 	//==============================================================================
 	// 이미지 반환.
 	//==============================================================================
-	pub fn getImage(&self) -> Option<&Rc<Image>> {
+	pub fn get_image(&self) -> Option<&Rc<Image>> {
 		self.image.as_ref()
 	}
 
 	//==============================================================================
 	// 보이는 영역 설정. (부른 쪽 좌표계)
 	//==============================================================================
-	pub fn setViewRect(&mut self, rect: Rect) {
-		self.viewRect = rect;
+	pub fn set_view_rect(&mut self, rect: Rect) {
+		self.view_rect = rect;
 	}
 
 	//==============================================================================
 	// 보이는 영역 반환.
 	//==============================================================================
-	pub fn getViewRect(&self) -> Rect {
-		self.viewRect
+	pub fn get_view_rect(&self) -> Rect {
+		self.view_rect
 	}
 
 	//==============================================================================
 	// 세로 스크롤 속도 설정. (초당 픽셀)
 	//==============================================================================
-	pub fn setVerticalScrollSpeed(&mut self, speed: f32) {
-		self.scrollSpeed.y = speed;
+	pub fn set_vertical_scroll_speed(&mut self, speed: f32) {
+		self.scroll_speed.y = speed;
 	}
 
 	//==============================================================================
 	// 가로 스크롤 속도 설정. (초당 픽셀)
 	//==============================================================================
-	pub fn setHorizontalScrollSpeed(&mut self, speed: f32) {
-		self.scrollSpeed.x = speed;
+	pub fn set_horizontal_scroll_speed(&mut self, speed: f32) {
+		self.scroll_speed.x = speed;
 	}
 
 	//==============================================================================
 	// 스크롤 속도 반환.
 	//==============================================================================
-	pub fn getScrollSpeed(&self) -> Vector2 {
-		self.scrollSpeed
+	pub fn get_scroll_speed(&self) -> Vector2 {
+		self.scroll_speed
 	}
 
 	//==============================================================================
 	// 스크롤 위치 설정.
 	//==============================================================================
-	pub fn setScrollPosition(&mut self, position: Vector2) {
-		self.scrollPosition = position;
+	pub fn set_scroll_position(&mut self, position: Vector2) {
+		self.scroll_position = position;
 	}
 
 	//==============================================================================
 	// 스크롤 위치 반환.
 	//==============================================================================
-	pub fn getScrollPosition(&self) -> Vector2 {
-		self.scrollPosition
+	pub fn get_scroll_position(&self) -> Vector2 {
+		self.scroll_position
 	}
 }
 
@@ -188,17 +188,17 @@ mod tests {
 	// 스크롤 위치에 따라 첫 타일이 영역 왼쪽 위나 그보다 앞에서 시작한다.
 	//==============================================================================
 	#[test]
-	fn tileStartFollowsScroll() {
-		let mut imageScroller = ImageScroller::new();
-		imageScroller.setViewRect(Rect::create(10.0, 20.0, 300.0, 200.0));
-		imageScroller.setHorizontalScrollSpeed(-50.0);
-		imageScroller.setVerticalScrollSpeed(30.0);
-		imageScroller.tick(1.0);
-		assert_eq!(imageScroller.getScrollPosition(), Vector2::create(-50.0, 30.0));
+	fn tile_start_follows_scroll() {
+		let mut image_scroller = ImageScroller::new();
+		image_scroller.set_view_rect(Rect::create(10.0, 20.0, 300.0, 200.0));
+		image_scroller.set_horizontal_scroll_speed(-50.0);
+		image_scroller.set_vertical_scroll_speed(30.0);
+		image_scroller.tick(1.0);
+		assert_eq!(image_scroller.get_scroll_position(), Vector2::create(-50.0, 30.0));
 		// x: -50 % 100 = -50 → 그대로, y: 30 % 100 = 30 → 30 - 100.
-		assert_eq!(imageScroller.calculateTileStart(100.0, 100.0), Vector2::create(-40.0, -50.0));
-		imageScroller.setScrollPosition(Vector2::create(250.5, 0.0));
-		assert_eq!(imageScroller.calculateTileStart(100.0, 100.0), Vector2::create(10.0 + 50.0 - 100.0, 20.0));
-		assert!(imageScroller.getImage().is_none());
+		assert_eq!(image_scroller.calculate_tile_start(100.0, 100.0), Vector2::create(-40.0, -50.0));
+		image_scroller.set_scroll_position(Vector2::create(250.5, 0.0));
+		assert_eq!(image_scroller.calculate_tile_start(100.0, 100.0), Vector2::create(10.0 + 50.0 - 100.0, 20.0));
+		assert!(image_scroller.get_image().is_none());
 	}
 }

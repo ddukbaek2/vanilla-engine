@@ -33,14 +33,14 @@ impl TransformMatrix {
 	//==============================================================================
 	// 단위 행렬로 초기화.
 	//==============================================================================
-	pub fn setIdentity(&mut self) {
+	pub fn set_identity(&mut self) {
 		*self = TransformMatrix::identity();
 	}
 
 	//==============================================================================
 	// 값 직접 설정.
 	//==============================================================================
-	pub fn setTransform(&mut self, a: f32, b: f32, c: f32, d: f32, e: f32, f: f32) {
+	pub fn set_transform(&mut self, a: f32, b: f32, c: f32, d: f32, e: f32, f: f32) {
 		self.a = a;
 		self.b = b;
 		self.c = c;
@@ -108,37 +108,37 @@ impl TransformMatrix {
 		if determinant == 0.0 {
 			return None;
 		}
-		let inverseDeterminant = 1.0 / determinant;
+		let inverse_determinant = 1.0 / determinant;
 		Some(TransformMatrix {
-			a: self.d * inverseDeterminant,
-			b: -self.b * inverseDeterminant,
-			c: -self.c * inverseDeterminant,
-			d: self.a * inverseDeterminant,
-			e: (self.c * self.f - self.d * self.e) * inverseDeterminant,
-			f: (self.b * self.e - self.a * self.f) * inverseDeterminant,
+			a: self.d * inverse_determinant,
+			b: -self.b * inverse_determinant,
+			c: -self.c * inverse_determinant,
+			d: self.a * inverse_determinant,
+			e: (self.c * self.f - self.d * self.e) * inverse_determinant,
+			f: (self.b * self.e - self.a * self.f) * inverse_determinant,
 		})
 	}
 
 	//==============================================================================
 	// 점 변환.
 	//==============================================================================
-	pub fn transformPoint(&self, x: f32, y: f32) -> Vector2 {
+	pub fn transform_point(&self, x: f32, y: f32) -> Vector2 {
 		Vector2::create(self.a * x + self.c * y + self.e, self.b * x + self.d * y + self.f)
 	}
 
 	//==============================================================================
 	// 두 축 가운데 큰 쪽의 크기 배율.
 	//==============================================================================
-	pub fn getMaximumScale(&self) -> f32 {
-		let scaleX = (self.a * self.a + self.b * self.b).sqrt();
-		let scaleY = (self.c * self.c + self.d * self.d).sqrt();
-		scaleX.max(scaleY)
+	pub fn get_maximum_scale(&self) -> f32 {
+		let scale_x = (self.a * self.a + self.b * self.b).sqrt();
+		let scale_y = (self.c * self.c + self.d * self.d).sqrt();
+		scale_x.max(scale_y)
 	}
 
 	//==============================================================================
 	// 셰이더 mat3 (열 우선) 배열로 기록.
 	//==============================================================================
-	pub fn writeToArray(&self, array: &mut [f32; 9]) {
+	pub fn write_to_array(&self, array: &mut [f32; 9]) {
 		array[0] = self.a;
 		array[1] = self.b;
 		array[2] = 0.0;

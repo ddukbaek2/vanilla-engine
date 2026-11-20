@@ -8,7 +8,7 @@ use std::path::Path;
 use std::rc::Rc;
 
 pub struct Image {
-	instanceId: u64,
+	instance_id: u64,
 	width: u32,
 	height: u32,
 	pixels: Vec<u8>,
@@ -20,26 +20,26 @@ impl Image {
 	//==============================================================================
 	pub fn load(path: &Path) -> Result<Rc<Image>, String> {
 		let bytes = std::fs::read(path).map_err(|error| format!("이미지 읽기 실패 ({}): {}", path.display(), error))?;
-		Image::loadFromMemory(&bytes)
+		Image::load_from_memory(&bytes)
 	}
 
 	//==============================================================================
 	// 메모리에서 읽기. (PNG)
 	//==============================================================================
-	pub fn loadFromMemory(bytes: &[u8]) -> Result<Rc<Image>, String> {
-		let dynamicImage = image::load_from_memory(bytes).map_err(|error| format!("이미지 해석 실패: {}", error))?;
-		let rgbaImage = dynamicImage.to_rgba8();
-		let width = rgbaImage.width();
-		let height = rgbaImage.height();
-		let straightPixels = rgbaImage.into_raw();
-		Ok(Image::createFromPixels(width, height, straightPixels))
+	pub fn load_from_memory(bytes: &[u8]) -> Result<Rc<Image>, String> {
+		let dynamic_image = image::load_from_memory(bytes).map_err(|error| format!("이미지 해석 실패: {}", error))?;
+		let rgba_image = dynamic_image.to_rgba8();
+		let width = rgba_image.width();
+		let height = rgba_image.height();
+		let straight_pixels = rgba_image.into_raw();
+		Ok(Image::create_from_pixels(width, height, straight_pixels))
 	}
 
 	//==============================================================================
 	// 스트레이트 알파 RGBA 픽셀로 생성. (코드로 만든 그림)
 	//==============================================================================
-	pub fn createFromPixels(width: u32, height: u32, straightPixels: Vec<u8>) -> Rc<Image> {
-		let mut pixels = straightPixels;
+	pub fn create_from_pixels(width: u32, height: u32, straight_pixels: Vec<u8>) -> Rc<Image> {
+		let mut pixels = straight_pixels;
 		for pixel in pixels.as_chunks_mut::<4>().0 {
 			let alpha = pixel[3] as u32;
 			pixel[0] = ((pixel[0] as u32 * alpha + 127) / 255) as u8;
@@ -47,7 +47,7 @@ impl Image {
 			pixel[2] = ((pixel[2] as u32 * alpha + 127) / 255) as u8;
 		}
 		Rc::new(Image {
-			instanceId: identifier::createInstanceId(),
+			instance_id: identifier::create_instance_id(),
 			width,
 			height,
 			pixels,
@@ -57,28 +57,28 @@ impl Image {
 	//==============================================================================
 	// 인스턴스 식별자.
 	//==============================================================================
-	pub fn getInstanceId(&self) -> u64 {
-		self.instanceId
+	pub fn get_instance_id(&self) -> u64 {
+		self.instance_id
 	}
 
 	//==============================================================================
 	// 너비. (픽셀)
 	//==============================================================================
-	pub fn getWidth(&self) -> u32 {
+	pub fn get_width(&self) -> u32 {
 		self.width
 	}
 
 	//==============================================================================
 	// 높이. (픽셀)
 	//==============================================================================
-	pub fn getHeight(&self) -> u32 {
+	pub fn get_height(&self) -> u32 {
 		self.height
 	}
 
 	//==============================================================================
 	// 프리멀티플라이드 RGBA 픽셀.
 	//==============================================================================
-	pub fn getPixels(&self) -> &[u8] {
+	pub fn get_pixels(&self) -> &[u8] {
 		&self.pixels
 	}
 }

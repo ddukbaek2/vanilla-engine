@@ -3,8 +3,8 @@
 // - 원본은 new ImageAsset() 뒤에 await asset.load(경로) 로 읽는다. 러스트는 씬 생성에서 기다릴 수 없어서
 //   "읽기 요청 → 나중에 다 읽힘" 꼴로 바꿨다. 요청하면 AssetLoadHandle 을 받고, 바이트가 다 오면 상태가 loaded 가 된다.
 //   데스크탑은 요청하는 자리에서 파일을 바로 읽어 끝내고, 웹은 fetch 가 끝난 뒤 다음 프레임들 사이에 끝난다.
-// - 씬은 create 에서 애셋을 요청하고 sceneBase.trackAsset 으로 맡겨 두면, 맡긴 애셋이 다 읽힌 뒤 엔진이 start 를 부른다.
-//   그동안은 원본처럼 drawOnLoad 로 로딩 화면을 그린다.
+// - 씬은 create 에서 애셋을 요청하고 scene_base.track_asset 으로 맡겨 두면, 맡긴 애셋이 다 읽힌 뒤 엔진이 start 를 부른다.
+//   그동안은 원본처럼 draw_on_load 로 로딩 화면을 그린다.
 // - 중앙 리소스 매니저는 원본처럼 두지 않는다. 애셋은 씬이 멤버로 든다.
 //==============================================================================
 use crate::core::engine::Engine;
@@ -16,15 +16,15 @@ use std::rc::Rc;
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AssetType {
-	none,
-	image,
-	audio,
-	json,
-	text,
-	font,
-	blob,
-	bunch,
-	visual,
+	None,
+	Image,
+	Audio,
+	Json,
+	Text,
+	Font,
+	Blob,
+	Bunch,
+	Visual,
 }
 
 //==============================================================================
@@ -32,9 +32,9 @@ pub enum AssetType {
 //==============================================================================
 #[derive(Clone, Debug)]
 pub enum AssetLoadState {
-	pending,
-	loaded(Rc<Vec<u8>>),
-	failed(String),
+	Pending,
+	Loaded(Rc<Vec<u8>>),
+	Failed(String),
 }
 
 //==============================================================================
@@ -42,65 +42,65 @@ pub enum AssetLoadState {
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct AssetLoadHandle {
-	assetPath: String,
-	loadState: Rc<RefCell<AssetLoadState>>,
+	asset_path: String,
+	load_state: Rc<RefCell<AssetLoadState>>,
 }
 
 impl AssetLoadHandle {
 	//==============================================================================
 	// 생성. (읽는 중)
 	//==============================================================================
-	pub fn createPending(assetPath: &str) -> AssetLoadHandle {
+	pub fn create_pending(asset_path: &str) -> AssetLoadHandle {
 		AssetLoadHandle {
-			assetPath: assetPath.to_string(),
-			loadState: Rc::new(RefCell::new(AssetLoadState::pending)),
+			asset_path: asset_path.to_string(),
+			load_state: Rc::new(RefCell::new(AssetLoadState::Pending)),
 		}
 	}
 
 	//==============================================================================
 	// 생성. (이미 가진 바이트로 바로 끝난 것)
 	//==============================================================================
-	pub fn createLoaded(assetPath: &str, bytes: Vec<u8>) -> AssetLoadHandle {
+	pub fn create_loaded(asset_path: &str, bytes: Vec<u8>) -> AssetLoadHandle {
 		AssetLoadHandle {
-			assetPath: assetPath.to_string(),
-			loadState: Rc::new(RefCell::new(AssetLoadState::loaded(Rc::new(bytes)))),
+			asset_path: asset_path.to_string(),
+			load_state: Rc::new(RefCell::new(AssetLoadState::Loaded(Rc::new(bytes)))),
 		}
 	}
 
 	//==============================================================================
 	// 요청 경로.
 	//==============================================================================
-	pub fn getAssetPath(&self) -> &str {
-		&self.assetPath
+	pub fn get_asset_path(&self) -> &str {
+		&self.asset_path
 	}
 
 	//==============================================================================
 	// 다 읽혔는지.
 	//==============================================================================
-	pub fn isLoaded(&self) -> bool {
-		matches!(*self.loadState.borrow(), AssetLoadState::loaded(_))
+	pub fn is_loaded(&self) -> bool {
+		matches!(*self.load_state.borrow(), AssetLoadState::Loaded(_))
 	}
 
 	//==============================================================================
 	// 실패했는지.
 	//==============================================================================
-	pub fn isFailed(&self) -> bool {
-		matches!(*self.loadState.borrow(), AssetLoadState::failed(_))
+	pub fn is_failed(&self) -> bool {
+		matches!(*self.load_state.borrow(), AssetLoadState::Failed(_))
 	}
 
 	//==============================================================================
 	// 끝났는지. (읽혔거나 실패했거나)
 	//==============================================================================
-	pub fn isFinished(&self) -> bool {
-		!matches!(*self.loadState.borrow(), AssetLoadState::pending)
+	pub fn is_finished(&self) -> bool {
+		!matches!(*self.load_state.borrow(), AssetLoadState::Pending)
 	}
 
 	//==============================================================================
 	// 읽은 바이트. (다 읽혔을 때만)
 	//==============================================================================
-	pub fn getBytes(&self) -> Option<Rc<Vec<u8>>> {
-		match &*self.loadState.borrow() {
-			AssetLoadState::loaded(bytes) => {
+	pub fn get_bytes(&self) -> Option<Rc<Vec<u8>>> {
+		match &*self.load_state.borrow() {
+			AssetLoadState::Loaded(bytes) => {
 				Some(bytes.clone())
 			}
 			_ => {
@@ -112,10 +112,10 @@ impl AssetLoadHandle {
 	//==============================================================================
 	// 실패 까닭.
 	//==============================================================================
-	pub fn getErrorMessage(&self) -> Option<String> {
-		match &*self.loadState.borrow() {
-			AssetLoadState::failed(errorMessage) => {
-				Some(errorMessage.clone())
+	pub fn get_error_message(&self) -> Option<String> {
+		match &*self.load_state.borrow() {
+			AssetLoadState::Failed(error_message) => {
+				Some(error_message.clone())
 			}
 			_ => {
 				None
@@ -127,85 +127,85 @@ impl AssetLoadHandle {
 	// 읽기 끝냄. (읽는 쪽이 부른다)
 	//==============================================================================
 	pub fn finish(&self, result: Result<Vec<u8>, String>) {
-		let loadState = match result {
+		let load_state = match result {
 			Ok(bytes) => {
-				AssetLoadState::loaded(Rc::new(bytes))
+				AssetLoadState::Loaded(Rc::new(bytes))
 			}
-			Err(errorMessage) => {
-				eprintln!("Asset: {}", errorMessage);
-				AssetLoadState::failed(errorMessage)
+			Err(error_message) => {
+				eprintln!("Asset: {}", error_message);
+				AssetLoadState::Failed(error_message)
 			}
 		};
-		*self.loadState.borrow_mut() = loadState;
+		*self.load_state.borrow_mut() = load_state;
 	}
 }
 
 //==============================================================================
-// 애셋 공통 상태. (원본 Asset 의 assetPath, assetType)
+// 애셋 공통 상태. (원본 Asset 의 asset_path, asset_type)
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct AssetBase {
-	assetType: AssetType,
-	loadHandle: Option<AssetLoadHandle>,
+	asset_type: AssetType,
+	load_handle: Option<AssetLoadHandle>,
 }
 
 impl AssetBase {
 	//==============================================================================
 	// 생성.
 	//==============================================================================
-	pub fn new(assetType: AssetType) -> AssetBase {
+	pub fn new(asset_type: AssetType) -> AssetBase {
 		AssetBase {
-			assetType,
-			loadHandle: None,
+			asset_type,
+			load_handle: None,
 		}
 	}
 
 	//==============================================================================
 	// 애셋 타입.
 	//==============================================================================
-	pub fn getAssetType(&self) -> AssetType {
-		self.assetType
+	pub fn get_asset_type(&self) -> AssetType {
+		self.asset_type
 	}
 
 	//==============================================================================
 	// 읽기 요청. (엔진에게 바이트를 부탁한다. 이미 요청했으면 다시 하지 않는다)
 	//==============================================================================
-	pub fn requestLoad(&mut self, engine: &Engine, assetPath: &str) {
-		if self.loadHandle.is_some() {
+	pub fn request_load(&mut self, engine: &Engine, asset_path: &str) {
+		if self.load_handle.is_some() {
 			return;
 		}
-		let loadHandle = engine.requestAssetBytes(assetPath);
-		self.loadHandle = Some(loadHandle);
+		let load_handle = engine.request_asset_bytes(asset_path);
+		self.load_handle = Some(load_handle);
 	}
 
 	//==============================================================================
 	// 이미 가진 바이트로 읽기. (내장 자료나 직접 받은 것)
 	//==============================================================================
-	pub fn loadFromBytes(&mut self, assetPath: &str, bytes: Vec<u8>) {
-		self.loadHandle = Some(AssetLoadHandle::createLoaded(assetPath, bytes));
+	pub fn load_from_bytes(&mut self, asset_path: &str, bytes: Vec<u8>) {
+		self.load_handle = Some(AssetLoadHandle::create_loaded(asset_path, bytes));
 	}
 
 	//==============================================================================
 	// 내리기. (원본 unload)
 	//==============================================================================
 	pub fn unload(&mut self) {
-		self.loadHandle = None;
+		self.load_handle = None;
 	}
 
 	//==============================================================================
 	// 읽기 손잡이.
 	//==============================================================================
-	pub fn getLoadHandle(&self) -> Option<&AssetLoadHandle> {
-		self.loadHandle.as_ref()
+	pub fn get_load_handle(&self) -> Option<&AssetLoadHandle> {
+		self.load_handle.as_ref()
 	}
 
 	//==============================================================================
 	// 요청 경로. (요청 전이면 빈 글)
 	//==============================================================================
-	pub fn getAssetPath(&self) -> &str {
-		match &self.loadHandle {
-			Some(loadHandle) => {
-				loadHandle.getAssetPath()
+	pub fn get_asset_path(&self) -> &str {
+		match &self.load_handle {
+			Some(load_handle) => {
+				load_handle.get_asset_path()
 			}
 			None => {
 				""
@@ -216,10 +216,10 @@ impl AssetBase {
 	//==============================================================================
 	// 바이트가 다 왔는지.
 	//==============================================================================
-	pub fn isLoaded(&self) -> bool {
-		match &self.loadHandle {
-			Some(loadHandle) => {
-				loadHandle.isLoaded()
+	pub fn is_loaded(&self) -> bool {
+		match &self.load_handle {
+			Some(load_handle) => {
+				load_handle.is_loaded()
 			}
 			None => {
 				false
@@ -230,36 +230,36 @@ impl AssetBase {
 	//==============================================================================
 	// 읽은 바이트.
 	//==============================================================================
-	pub fn getBytes(&self) -> Option<Rc<Vec<u8>>> {
-		self.loadHandle.as_ref().and_then(|loadHandle| loadHandle.getBytes())
+	pub fn get_bytes(&self) -> Option<Rc<Vec<u8>>> {
+		self.load_handle.as_ref().and_then(|load_handle| load_handle.get_bytes())
 	}
 }
 
 //==============================================================================
-// 애셋 트레이트. (씬의 trackAsset 이 읽기 손잡이를 꺼낼 때 쓴다)
+// 애셋 트레이트. (씬의 track_asset 이 읽기 손잡이를 꺼낼 때 쓴다)
 //==============================================================================
 pub trait Asset {
 	//==============================================================================
 	// 공통 상태.
 	//==============================================================================
-	fn getAssetBase(&self) -> &AssetBase;
+	fn get_asset_base(&self) -> &AssetBase;
 
 	//==============================================================================
 	// 공통 상태. (변경용)
 	//==============================================================================
-	fn getAssetBaseMut(&mut self) -> &mut AssetBase;
+	fn get_asset_base_mut(&mut self) -> &mut AssetBase;
 
 	//==============================================================================
 	// 다 읽혔는지.
 	//==============================================================================
-	fn isLoaded(&self) -> bool {
-		self.getAssetBase().isLoaded()
+	fn is_loaded(&self) -> bool {
+		self.get_asset_base().is_loaded()
 	}
 
 	//==============================================================================
 	// 요청 경로.
 	//==============================================================================
-	fn getAssetPath(&self) -> &str {
-		self.getAssetBase().getAssetPath()
+	fn get_asset_path(&self) -> &str {
+		self.get_asset_base().get_asset_path()
 	}
 }

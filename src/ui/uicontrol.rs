@@ -15,7 +15,7 @@ use crate::ui::uiview::UIView;
 // UI 컨트롤.
 //==============================================================================
 pub struct UIControl {
-	uiView: UIView,
+	ui_view: UIView,
 }
 
 impl UIControl {
@@ -24,43 +24,43 @@ impl UIControl {
 	//==============================================================================
 	pub fn new() -> UIControl {
 		UIControl {
-			uiView: UIView::new(),
+			ui_view: UIView::new(),
 		}
 	}
 
 	//==============================================================================
 	// 품은 뷰 반환.
 	//==============================================================================
-	pub fn getUIView(&self) -> &UIView {
-		&self.uiView
+	pub fn get_uiview(&self) -> &UIView {
+		&self.ui_view
 	}
 
 	//==============================================================================
 	// 품은 뷰 반환. (변경용)
 	//==============================================================================
-	pub fn getUIViewMut(&mut self) -> &mut UIView {
-		&mut self.uiView
+	pub fn get_uiview_mut(&mut self) -> &mut UIView {
+		&mut self.ui_view
 	}
 
 	//==============================================================================
 	// 컨텐트 노드 핸들.
 	//==============================================================================
-	pub fn getContent(&self) -> Option<NodeId> {
-		self.uiView.getContent()
+	pub fn get_content(&self) -> Option<NodeId> {
+		self.ui_view.get_content()
 	}
 
 	//==============================================================================
 	// 배경색 설정.
 	//==============================================================================
-	pub fn setBackgroundColor(&mut self, backgroundColor: impl Into<Color>) {
-		self.uiView.setBackgroundColor(backgroundColor);
+	pub fn set_background_color(&mut self, background_color: impl Into<Color>) {
+		self.ui_view.set_background_color(background_color);
 	}
 
 	//==============================================================================
 	// 배경색 반환.
 	//==============================================================================
-	pub fn getBackgroundColor(&self) -> Color {
-		self.uiView.getBackgroundColor()
+	pub fn get_background_color(&self) -> Color {
+		self.ui_view.get_background_color()
 	}
 }
 
@@ -71,31 +71,31 @@ impl Default for UIControl {
 }
 
 impl Component for UIControl {
-	fn getComponentBase(&self) -> &ComponentBase {
-		self.uiView.getComponentBase()
+	fn get_component_base(&self) -> &ComponentBase {
+		self.ui_view.get_component_base()
 	}
 
-	fn getComponentBaseMut(&mut self) -> &mut ComponentBase {
-		self.uiView.getComponentBaseMut()
+	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
+		self.ui_view.get_component_base_mut()
 	}
 
-	fn getComponentType(&self) -> &'static str {
+	fn get_component_type(&self) -> &'static str {
 		"UIControl"
 	}
 
-	fn attachToTree(&mut self, nodeTree: &mut NodeTree, nodeId: NodeId) {
-		self.uiView.createContentNode(nodeTree, nodeId);
+	fn attach_to_tree(&mut self, node_tree: &mut NodeTree, node_id: NodeId) {
+		self.ui_view.create_content_node(node_tree, node_id);
 	}
 
-	fn isTickNeeded(&self) -> bool {
+	fn is_tick_needed(&self) -> bool {
 		false
 	}
 
-	fn isDrawnInsideContent(&self) -> bool {
+	fn is_drawn_inside_content(&self) -> bool {
 		true
 	}
 
 	fn draw(&mut self, transform: &NodeTransform, graphic: &mut Graphic) {
-		self.uiView.drawBackground(transform, graphic);
+		self.ui_view.draw_background(transform, graphic);
 	}
 }

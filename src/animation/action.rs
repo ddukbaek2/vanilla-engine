@@ -4,17 +4,17 @@
 //   start 뒤 매 프레임 step 을 부르면 차례로 돈다.
 // - 사용:
 //     let mut action: Action<WorldNode> = Action::new()
-//         .wait(1.0, ActionCallbacks::new().updated(|progress, node: &mut WorldNode| node.setLocalOpacity(progress)))
-//         .condition(|node: &WorldNode| node.isActive(), ActionCallbacks::new())
-//         .call(|node: &mut WorldNode| node.setLocalScale(Vector2::create(2.0, 2.0)))
+//         .wait(1.0, ActionCallbacks::new().updated(|progress, node: &mut WorldNode| node.set_local_opacity(progress)))
+//         .condition(|node: &WorldNode| node.is_active(), ActionCallbacks::new())
+//         .call(|node: &mut WorldNode| node.set_local_scale(Vector2::create(2.0, 2.0)))
 //         .repeat(3, Action::new().wait(0.5, ActionCallbacks::new()))
 //         .forever(Action::new().wait(2.0, ActionCallbacks::new()));
-//     action.start(&mut nodeTree[nodeId]);
+//     action.start(&mut node_tree[node_id]);
 //     // 매 프레임:
-//     action.step(&mut nodeTree[nodeId], timeDelta);
+//     action.step(&mut node_tree[node_id], time_delta);
 // - 원본과 다른 점:
 //   - 원본은 start(target) 에서 대상을 들고 있다가 step 마다 콜백에 넘긴다. 러스트는 대상을 빌려 들 수 없어서
-//     start 와 step 이 대상(&mut T)을 받아 콜백에 넘긴다. 그래서 getTarget 과 start() 의 "대상을 안 주면 이전 대상" 은 없다.
+//     start 와 step 이 대상(&mut T)을 받아 콜백에 넘긴다. 그래서 get_target 과 start() 의 "대상을 안 주면 이전 대상" 은 없다.
 //     T 는 기본 WorldNode 이고, 노드 여럿이나 게임 상태를 다루려면 그것을 T 로 쓴다.
 //   - 콜백 객체({ started, updated, completed })는 ActionCallbacks 이다. updated 는 늘 (진행률, 대상)을 받는다.
 //     condition 스텝의 updated 에는 원본에 없는 진행률 자리에 0 을 넘긴다.
@@ -36,9 +36,9 @@ type ActionConditionFunction<T> = Box<dyn FnMut(&T) -> bool>;
 // 스텝 콜백 묶음. (원본 { started, updated, completed })
 //==============================================================================
 pub struct ActionCallbacks<T> {
-	startedCallback: Option<ActionTargetCallback<T>>,
-	updatedCallback: Option<ActionUpdateCallback<T>>,
-	completedCallback: Option<ActionTargetCallback<T>>,
+	started_callback: Option<ActionTargetCallback<T>>,
+	updated_callback: Option<ActionUpdateCallback<T>>,
+	completed_callback: Option<ActionTargetCallback<T>>,
 }
 
 impl<T> ActionCallbacks<T> {
@@ -47,9 +47,9 @@ impl<T> ActionCallbacks<T> {
 	//==============================================================================
 	pub fn new() -> ActionCallbacks<T> {
 		ActionCallbacks {
-			startedCallback: None,
-			updatedCallback: None,
-			completedCallback: None,
+			started_callback: None,
+			updated_callback: None,
+			completed_callback: None,
 		}
 	}
 
@@ -57,7 +57,7 @@ impl<T> ActionCallbacks<T> {
 	// 스텝 시작 때 부를 콜백. ((대상))
 	//==============================================================================
 	pub fn started(mut self, callback: impl FnMut(&mut T) + 'static) -> ActionCallbacks<T> {
-		self.startedCallback = Some(Box::new(callback));
+		self.started_callback = Some(Box::new(callback));
 		self
 	}
 
@@ -65,7 +65,7 @@ impl<T> ActionCallbacks<T> {
 	// 매 프레임 부를 콜백. ((진행률 0 ~ 1, 대상). condition 스텝은 진행률 0)
 	//==============================================================================
 	pub fn updated(mut self, callback: impl FnMut(f32, &mut T) + 'static) -> ActionCallbacks<T> {
-		self.updatedCallback = Some(Box::new(callback));
+		self.updated_callback = Some(Box::new(callback));
 		self
 	}
 
@@ -73,34 +73,34 @@ impl<T> ActionCallbacks<T> {
 	// 스텝 완료 때 부를 콜백. ((대상))
 	//==============================================================================
 	pub fn completed(mut self, callback: impl FnMut(&mut T) + 'static) -> ActionCallbacks<T> {
-		self.completedCallback = Some(Box::new(callback));
+		self.completed_callback = Some(Box::new(callback));
 		self
 	}
 
 	//==============================================================================
 	// 시작 콜백 부르기.
 	//==============================================================================
-	fn callStarted(&mut self, target: &mut T) {
-		if let Some(startedCallback) = self.startedCallback.as_mut() {
-			startedCallback(target);
+	fn call_started(&mut self, target: &mut T) {
+		if let Some(started_callback) = self.started_callback.as_mut() {
+			started_callback(target);
 		}
 	}
 
 	//==============================================================================
 	// 갱신 콜백 부르기.
 	//==============================================================================
-	fn callUpdated(&mut self, progress: f32, target: &mut T) {
-		if let Some(updatedCallback) = self.updatedCallback.as_mut() {
-			updatedCallback(progress, target);
+	fn call_updated(&mut self, progress: f32, target: &mut T) {
+		if let Some(updated_callback) = self.updated_callback.as_mut() {
+			updated_callback(progress, target);
 		}
 	}
 
 	//==============================================================================
 	// 완료 콜백 부르기.
 	//==============================================================================
-	fn callCompleted(&mut self, target: &mut T) {
-		if let Some(completedCallback) = self.completedCallback.as_mut() {
-			completedCallback(target);
+	fn call_completed(&mut self, target: &mut T) {
+		if let Some(completed_callback) = self.completed_callback.as_mut() {
+			completed_callback(target);
 		}
 	}
 }
@@ -116,32 +116,32 @@ impl<T> Default for ActionCallbacks<T> {
 //==============================================================================
 enum ActionStep<T> {
 	// 일정 시간 대기.
-	wait {
+	Wait {
 		duration: f32,
 		callbacks: ActionCallbacks<T>,
 	},
 	// 조건이 참이 될 때까지 대기.
-	condition {
-		conditionFunction: ActionConditionFunction<T>,
+	Condition {
+		condition_function: ActionConditionFunction<T>,
 		callbacks: ActionCallbacks<T>,
 	},
 	// 즉시 호출.
-	call {
+	Call {
 		function: ActionTargetCallback<T>,
 	},
 	// 안쪽 액션을 times 번 반복.
-	repeat {
+	Repeat {
 		times: u32,
-		innerAction: Box<Action<T>>,
+		inner_action: Box<Action<T>>,
 	},
 	// 안쪽 액션을 끝없이 반복.
-	forever {
-		innerAction: Box<Action<T>>,
+	Forever {
+		inner_action: Box<Action<T>>,
 	},
 	// 조건이 참인 동안 안쪽 액션을 반복. (원본 loop)
-	whileLoop {
-		conditionFunction: ActionConditionFunction<T>,
-		innerAction: Box<Action<T>>,
+	WhileLoop {
+		condition_function: ActionConditionFunction<T>,
+		inner_action: Box<Action<T>>,
 	},
 }
 
@@ -150,12 +150,12 @@ enum ActionStep<T> {
 //==============================================================================
 pub struct Action<T = WorldNode> {
 	steps: Vec<ActionStep<T>>,
-	currentStepIndex: usize,
-	currentStepElapsed: f32,
-	// 지금 repeat 스텝이 끝낸 횟수. (원본 currentStepState.completedCount)
-	completedCount: u32,
-	isRunning: bool,
-	isDone: bool,
+	current_step_index: usize,
+	current_step_elapsed: f32,
+	// 지금 repeat 스텝이 끝낸 횟수. (원본 currentStepState.completed_count)
+	completed_count: u32,
+	is_running: bool,
+	is_done: bool,
 }
 
 impl<T> Action<T> {
@@ -165,53 +165,53 @@ impl<T> Action<T> {
 	pub fn new() -> Action<T> {
 		Action {
 			steps: Vec::new(),
-			currentStepIndex: 0,
-			currentStepElapsed: 0.0,
-			completedCount: 0,
-			isRunning: false,
-			isDone: false,
+			current_step_index: 0,
+			current_step_elapsed: 0.0,
+			completed_count: 0,
+			is_running: false,
+			is_done: false,
 		}
 	}
 
 	//==============================================================================
 	// 현재 스텝 시작 처리. (call 스텝과 조건이 거짓인 loop 스텝은 그 자리에서 넘긴다)
 	//==============================================================================
-	fn startCurrentStep(&mut self, target: &mut T) {
+	fn start_current_step(&mut self, target: &mut T) {
 		loop {
-			if self.currentStepIndex >= self.steps.len() {
-				self.isRunning = false;
-				self.isDone = true;
+			if self.current_step_index >= self.steps.len() {
+				self.is_running = false;
+				self.is_done = true;
 				return;
 			}
-			self.currentStepElapsed = 0.0;
-			self.completedCount = 0;
-			match &mut self.steps[self.currentStepIndex] {
-				ActionStep::call { function } => {
+			self.current_step_elapsed = 0.0;
+			self.completed_count = 0;
+			match &mut self.steps[self.current_step_index] {
+				ActionStep::Call { function } => {
 					function(target);
-					self.currentStepIndex += 1;
+					self.current_step_index += 1;
 				}
-				ActionStep::wait { callbacks, .. } => {
-					callbacks.callStarted(target);
+				ActionStep::Wait { callbacks, .. } => {
+					callbacks.call_started(target);
 					return;
 				}
-				ActionStep::condition { callbacks, .. } => {
-					callbacks.callStarted(target);
+				ActionStep::Condition { callbacks, .. } => {
+					callbacks.call_started(target);
 					return;
 				}
-				ActionStep::repeat { innerAction, .. } => {
-					innerAction.start(target);
+				ActionStep::Repeat { inner_action, .. } => {
+					inner_action.start(target);
 					return;
 				}
-				ActionStep::forever { innerAction } => {
-					innerAction.start(target);
+				ActionStep::Forever { inner_action } => {
+					inner_action.start(target);
 					return;
 				}
-				ActionStep::whileLoop { conditionFunction, innerAction } => {
-					if !conditionFunction(target) {
-						self.currentStepIndex += 1;
+				ActionStep::WhileLoop { condition_function, inner_action } => {
+					if !condition_function(target) {
+						self.current_step_index += 1;
 						continue;
 					}
-					innerAction.start(target);
+					inner_action.start(target);
 					return;
 				}
 			}
@@ -221,24 +221,24 @@ impl<T> Action<T> {
 	//==============================================================================
 	// 다음 스텝으로 이동.
 	//==============================================================================
-	fn advanceStep(&mut self, target: &mut T) {
-		self.currentStepIndex += 1;
-		self.startCurrentStep(target);
+	fn advance_step(&mut self, target: &mut T) {
+		self.current_step_index += 1;
+		self.start_current_step(target);
 	}
 
 	//==============================================================================
 	// 일정 시간 대기. (started(대상), updated(진행률 0 ~ 1, 대상) 매 프레임, completed(대상))
 	//==============================================================================
 	pub fn wait(mut self, duration: f32, callbacks: ActionCallbacks<T>) -> Action<T> {
-		self.steps.push(ActionStep::wait { duration, callbacks });
+		self.steps.push(ActionStep::Wait { duration, callbacks });
 		self
 	}
 
 	//==============================================================================
 	// 조건이 참이 될 때까지 대기. (started(대상), updated(0, 대상) 조건 충족 전 매 프레임, completed(대상))
 	//==============================================================================
-	pub fn condition(mut self, conditionFunction: impl FnMut(&T) -> bool + 'static, callbacks: ActionCallbacks<T>) -> Action<T> {
-		self.steps.push(ActionStep::condition { conditionFunction: Box::new(conditionFunction), callbacks });
+	pub fn condition(mut self, condition_function: impl FnMut(&T) -> bool + 'static, callbacks: ActionCallbacks<T>) -> Action<T> {
+		self.steps.push(ActionStep::Condition { condition_function: Box::new(condition_function), callbacks });
 		self
 	}
 
@@ -246,31 +246,31 @@ impl<T> Action<T> {
 	// 즉시 콜백 호출.
 	//==============================================================================
 	pub fn call(mut self, function: impl FnMut(&mut T) + 'static) -> Action<T> {
-		self.steps.push(ActionStep::call { function: Box::new(function) });
+		self.steps.push(ActionStep::Call { function: Box::new(function) });
 		self
 	}
 
 	//==============================================================================
 	// 안쪽 액션을 times 번 반복. (0 이어도 원본처럼 한 번은 돈다)
 	//==============================================================================
-	pub fn repeat(mut self, times: u32, innerAction: Action<T>) -> Action<T> {
-		self.steps.push(ActionStep::repeat { times, innerAction: Box::new(innerAction) });
+	pub fn repeat(mut self, times: u32, inner_action: Action<T>) -> Action<T> {
+		self.steps.push(ActionStep::Repeat { times, inner_action: Box::new(inner_action) });
 		self
 	}
 
 	//==============================================================================
 	// 안쪽 액션을 끝없이 반복.
 	//==============================================================================
-	pub fn forever(mut self, innerAction: Action<T>) -> Action<T> {
-		self.steps.push(ActionStep::forever { innerAction: Box::new(innerAction) });
+	pub fn forever(mut self, inner_action: Action<T>) -> Action<T> {
+		self.steps.push(ActionStep::Forever { inner_action: Box::new(inner_action) });
 		self
 	}
 
 	//==============================================================================
 	// 조건이 참인 동안 안쪽 액션을 반복. (시작할 때와 안쪽이 끝날 때마다 묻는다)
 	//==============================================================================
-	pub fn r#loop(mut self, conditionFunction: impl FnMut(&T) -> bool + 'static, innerAction: Action<T>) -> Action<T> {
-		self.steps.push(ActionStep::whileLoop { conditionFunction: Box::new(conditionFunction), innerAction: Box::new(innerAction) });
+	pub fn r#loop(mut self, condition_function: impl FnMut(&T) -> bool + 'static, inner_action: Action<T>) -> Action<T> {
+		self.steps.push(ActionStep::WhileLoop { condition_function: Box::new(condition_function), inner_action: Box::new(inner_action) });
 		self
 	}
 
@@ -278,107 +278,107 @@ impl<T> Action<T> {
 	// 실행 시작. (처음 스텝부터)
 	//==============================================================================
 	pub fn start(&mut self, target: &mut T) {
-		self.currentStepIndex = 0;
-		self.currentStepElapsed = 0.0;
-		self.completedCount = 0;
-		self.isRunning = true;
-		self.isDone = false;
-		self.startCurrentStep(target);
+		self.current_step_index = 0;
+		self.current_step_elapsed = 0.0;
+		self.completed_count = 0;
+		self.is_running = true;
+		self.is_done = false;
+		self.start_current_step(target);
 	}
 
 	//==============================================================================
 	// 실행 중단. (끝난 것으로 친다)
 	//==============================================================================
 	pub fn stop(&mut self) {
-		self.isRunning = false;
-		self.isDone = true;
+		self.is_running = false;
+		self.is_done = true;
 	}
 
 	//==============================================================================
 	// 갱신. (매 프레임 호출)
 	//==============================================================================
-	pub fn step(&mut self, target: &mut T, timeDelta: f32) {
-		if !self.isRunning || self.isDone {
+	pub fn step(&mut self, target: &mut T, time_delta: f32) {
+		if !self.is_running || self.is_done {
 			return;
 		}
-		if self.currentStepIndex >= self.steps.len() {
-			self.isRunning = false;
-			self.isDone = true;
+		if self.current_step_index >= self.steps.len() {
+			self.is_running = false;
+			self.is_done = true;
 			return;
 		}
-		let mut isAdvancing = false;
-		match &mut self.steps[self.currentStepIndex] {
-			ActionStep::wait { duration, callbacks } => {
-				self.currentStepElapsed += timeDelta;
+		let mut is_advancing = false;
+		match &mut self.steps[self.current_step_index] {
+			ActionStep::Wait { duration, callbacks } => {
+				self.current_step_elapsed += time_delta;
 				let progress = if *duration > 0.0 {
-					(self.currentStepElapsed / *duration).clamp(0.0, 1.0)
+					(self.current_step_elapsed / *duration).clamp(0.0, 1.0)
 				}
 				else {
 					1.0
 				};
-				callbacks.callUpdated(progress, target);
-				if self.currentStepElapsed >= *duration {
-					callbacks.callCompleted(target);
-					isAdvancing = true;
+				callbacks.call_updated(progress, target);
+				if self.current_step_elapsed >= *duration {
+					callbacks.call_completed(target);
+					is_advancing = true;
 				}
 			}
-			ActionStep::condition { conditionFunction, callbacks } => {
-				callbacks.callUpdated(0.0, target);
-				if conditionFunction(target) {
-					callbacks.callCompleted(target);
-					isAdvancing = true;
+			ActionStep::Condition { condition_function, callbacks } => {
+				callbacks.call_updated(0.0, target);
+				if condition_function(target) {
+					callbacks.call_completed(target);
+					is_advancing = true;
 				}
 			}
-			ActionStep::repeat { times, innerAction } => {
-				innerAction.step(target, timeDelta);
-				if innerAction.isDone() {
-					self.completedCount += 1;
-					if self.completedCount >= *times {
-						isAdvancing = true;
+			ActionStep::Repeat { times, inner_action } => {
+				inner_action.step(target, time_delta);
+				if inner_action.is_done() {
+					self.completed_count += 1;
+					if self.completed_count >= *times {
+						is_advancing = true;
 					}
 					else {
-						innerAction.start(target);
+						inner_action.start(target);
 					}
 				}
 			}
-			ActionStep::forever { innerAction } => {
-				innerAction.step(target, timeDelta);
-				if innerAction.isDone() {
-					innerAction.start(target);
+			ActionStep::Forever { inner_action } => {
+				inner_action.step(target, time_delta);
+				if inner_action.is_done() {
+					inner_action.start(target);
 				}
 			}
-			ActionStep::whileLoop { conditionFunction, innerAction } => {
-				innerAction.step(target, timeDelta);
-				if innerAction.isDone() {
-					if conditionFunction(target) {
-						innerAction.start(target);
+			ActionStep::WhileLoop { condition_function, inner_action } => {
+				inner_action.step(target, time_delta);
+				if inner_action.is_done() {
+					if condition_function(target) {
+						inner_action.start(target);
 					}
 					else {
-						isAdvancing = true;
+						is_advancing = true;
 					}
 				}
 			}
-			ActionStep::call { .. } => {
+			ActionStep::Call { .. } => {
 				// call 은 시작할 때 이미 넘겼다.
 			}
 		}
-		if isAdvancing {
-			self.advanceStep(target);
+		if is_advancing {
+			self.advance_step(target);
 		}
 	}
 
 	//==============================================================================
 	// 완료 여부 반환.
 	//==============================================================================
-	pub fn isDone(&self) -> bool {
-		self.isDone
+	pub fn is_done(&self) -> bool {
+		self.is_done
 	}
 
 	//==============================================================================
 	// 실행 중 여부 반환.
 	//==============================================================================
-	pub fn isRunning(&self) -> bool {
-		self.isRunning
+	pub fn is_running(&self) -> bool {
+		self.is_running
 	}
 }
 
@@ -399,7 +399,7 @@ mod tests {
 	#[derive(Default)]
 	struct Recorder {
 		log: Vec<String>,
-		isReady: bool,
+		is_ready: bool,
 		counter: u32,
 	}
 
@@ -407,7 +407,7 @@ mod tests {
 	// wait 은 시작, 매 프레임 진행률, 완료를 차례로 부르고 다음 스텝으로 넘어간다.
 	//==============================================================================
 	#[test]
-	fn waitCallsCallbacksInOrder() {
+	fn wait_calls_callbacks_in_order() {
 		let mut recorder = Recorder::default();
 		let mut action: Action<Recorder> = Action::new()
 			.wait(1.0, ActionCallbacks::new()
@@ -420,8 +420,8 @@ mod tests {
 		action.step(&mut recorder, 0.5);
 		action.step(&mut recorder, 0.75);
 		assert_eq!(recorder.log, vec!["started", "updated 0.50", "updated 1.00", "completed", "called"]);
-		assert!(action.isDone());
-		assert!(!action.isRunning());
+		assert!(action.is_done());
+		assert!(!action.is_running());
 		action.step(&mut recorder, 1.0);
 		assert_eq!(recorder.log.len(), 5);
 	}
@@ -430,92 +430,92 @@ mod tests {
 	// condition 은 조건이 참이 될 때까지 매 프레임 묻고, call 이 앞에 있으면 start 에서 바로 돈다.
 	//==============================================================================
 	#[test]
-	fn conditionWaitsUntilTrue() {
+	fn condition_waits_until_true() {
 		let mut recorder = Recorder::default();
 		let mut action: Action<Recorder> = Action::new()
 			.call(|recorder: &mut Recorder| recorder.counter += 1)
-			.condition(|recorder: &Recorder| recorder.isReady, ActionCallbacks::new().updated(|progress, recorder: &mut Recorder| recorder.log.push(format!("waiting {}", progress))))
+			.condition(|recorder: &Recorder| recorder.is_ready, ActionCallbacks::new().updated(|progress, recorder: &mut Recorder| recorder.log.push(format!("waiting {}", progress))))
 			.call(|recorder: &mut Recorder| recorder.counter += 10);
 		action.start(&mut recorder);
 		assert_eq!(recorder.counter, 1);
 		action.step(&mut recorder, 0.1);
 		action.step(&mut recorder, 0.1);
 		assert_eq!(recorder.log, vec!["waiting 0", "waiting 0"]);
-		assert!(!action.isDone());
-		recorder.isReady = true;
+		assert!(!action.is_done());
+		recorder.is_ready = true;
 		action.step(&mut recorder, 0.1);
 		assert_eq!(recorder.counter, 11);
-		assert!(action.isDone());
+		assert!(action.is_done());
 	}
 
 	//==============================================================================
 	// repeat 은 안쪽 액션을 정한 횟수만큼 돌리고 넘어간다. (0 이면 한 번)
 	//==============================================================================
 	#[test]
-	fn repeatRunsInnerActionTimes() {
+	fn repeat_runs_inner_action_times() {
 		let mut recorder = Recorder::default();
-		let innerAction: Action<Recorder> = Action::new().wait(0.5, ActionCallbacks::new().completed(|recorder: &mut Recorder| recorder.counter += 1));
-		let onceAction: Action<Recorder> = Action::new().wait(0.5, ActionCallbacks::new().completed(|recorder: &mut Recorder| recorder.counter += 100));
-		let mut action: Action<Recorder> = Action::new().repeat(3, innerAction).repeat(0, onceAction);
+		let inner_action: Action<Recorder> = Action::new().wait(0.5, ActionCallbacks::new().completed(|recorder: &mut Recorder| recorder.counter += 1));
+		let once_action: Action<Recorder> = Action::new().wait(0.5, ActionCallbacks::new().completed(|recorder: &mut Recorder| recorder.counter += 100));
+		let mut action: Action<Recorder> = Action::new().repeat(3, inner_action).repeat(0, once_action);
 		action.start(&mut recorder);
 		for _ in 0..3 {
 			action.step(&mut recorder, 0.5);
 		}
 		assert_eq!(recorder.counter, 3);
-		assert!(!action.isDone());
+		assert!(!action.is_done());
 		action.step(&mut recorder, 0.5);
 		assert_eq!(recorder.counter, 103);
-		assert!(action.isDone());
+		assert!(action.is_done());
 	}
 
 	//==============================================================================
 	// loop 는 조건이 참인 동안 안쪽을 다시 돌리고, 처음부터 거짓이면 건너뛴다. forever 는 끝나지 않는다. stop 은 끝낸다.
 	//==============================================================================
 	#[test]
-	fn loopForeverAndStop() {
+	fn loop_forever_and_stop() {
 		let mut recorder = Recorder::default();
-		let mut loopAction: Action<Recorder> = Action::new()
+		let mut loop_action: Action<Recorder> = Action::new()
 			.r#loop(|recorder: &Recorder| recorder.counter < 2, Action::new().wait(0.1, ActionCallbacks::new().completed(|recorder: &mut Recorder| recorder.counter += 1)))
 			.r#loop(|_recorder: &Recorder| false, Action::new().call(|recorder: &mut Recorder| recorder.counter += 1000))
 			.call(|recorder: &mut Recorder| recorder.log.push(String::from("after loop")));
-		loopAction.start(&mut recorder);
-		loopAction.step(&mut recorder, 0.1);
-		assert!(!loopAction.isDone());
-		loopAction.step(&mut recorder, 0.1);
+		loop_action.start(&mut recorder);
+		loop_action.step(&mut recorder, 0.1);
+		assert!(!loop_action.is_done());
+		loop_action.step(&mut recorder, 0.1);
 		assert_eq!(recorder.counter, 2);
 		assert_eq!(recorder.log, vec!["after loop"]);
-		assert!(loopAction.isDone());
+		assert!(loop_action.is_done());
 
-		let mut foreverAction: Action<Recorder> = Action::new().forever(Action::new().wait(0.1, ActionCallbacks::new().completed(|recorder: &mut Recorder| recorder.counter += 1)));
-		foreverAction.start(&mut recorder);
+		let mut forever_action: Action<Recorder> = Action::new().forever(Action::new().wait(0.1, ActionCallbacks::new().completed(|recorder: &mut Recorder| recorder.counter += 1)));
+		forever_action.start(&mut recorder);
 		for _ in 0..5 {
-			foreverAction.step(&mut recorder, 0.1);
+			forever_action.step(&mut recorder, 0.1);
 		}
 		assert_eq!(recorder.counter, 7);
-		assert!(foreverAction.isRunning());
-		foreverAction.stop();
-		foreverAction.step(&mut recorder, 0.1);
+		assert!(forever_action.is_running());
+		forever_action.stop();
+		forever_action.step(&mut recorder, 0.1);
 		assert_eq!(recorder.counter, 7);
-		assert!(foreverAction.isDone());
+		assert!(forever_action.is_done());
 	}
 
 	//==============================================================================
 	// 기본 대상은 WorldNode 다. (노드 투명도를 진행률로 올린다)
 	//==============================================================================
 	#[test]
-	fn worldNodeTargetFadesIn() {
+	fn world_node_target_fades_in() {
 		let mut node = WorldNode::new("fade");
 		let mut action: Action = Action::new()
-			.call(|node: &mut WorldNode| node.setLocalOpacity(0.0))
-			.wait(2.0, ActionCallbacks::new().updated(|progress, node: &mut WorldNode| node.setLocalOpacity(progress)))
-			.call(|node: &mut WorldNode| node.setLocalScale(Vector2::create(2.0, 2.0)));
+			.call(|node: &mut WorldNode| node.set_local_opacity(0.0))
+			.wait(2.0, ActionCallbacks::new().updated(|progress, node: &mut WorldNode| node.set_local_opacity(progress)))
+			.call(|node: &mut WorldNode| node.set_local_scale(Vector2::create(2.0, 2.0)));
 		action.start(&mut node);
-		assert_eq!(node.getLocalOpacity(), 0.0);
+		assert_eq!(node.get_local_opacity(), 0.0);
 		action.step(&mut node, 1.0);
-		assert_eq!(node.getLocalOpacity(), 0.5);
+		assert_eq!(node.get_local_opacity(), 0.5);
 		action.step(&mut node, 1.0);
-		assert_eq!(node.getLocalOpacity(), 1.0);
-		assert_eq!(node.getLocalScale(), Vector2::create(2.0, 2.0));
-		assert!(action.isDone());
+		assert_eq!(node.get_local_opacity(), 1.0);
+		assert_eq!(node.get_local_scale(), Vector2::create(2.0, 2.0));
+		assert!(action.is_done());
 	}
 }

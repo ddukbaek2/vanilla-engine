@@ -6,11 +6,11 @@
 //   러스트 판도 그 범위만 옮기고 전환 논리를 지어내지 않았다.
 // - 원본과 다른 점:
 //   - 원본 private 필드는 읽는 곳이 없어 러스트에서는 쓰이지 않는 필드가 된다. 그래서 읽고 쓰는 함수를 더했다:
-//     AnimationState.setClip / getClip, AnimationTransition.setFrom / getFrom / setTo / getTo,
-//     Animator.getAnimation(Mut) / addState / getStates / addTransition / getTransitions.
+//     AnimationState.set_clip / get_clip, AnimationTransition.set_from / get_from / set_to / get_to,
+//     Animator.get_animation(Mut) / add_state / get_states / add_transition / get_transitions.
 //   - 전환의 from / to 는 상태 객체 참조 대신 Animator 상태 목록의 번호다.
 //   - 프로퍼티 값은 원본 아무 값 대신 serde_json::Value 다. (숫자, 참거짓, 글 모두 담는다)
-//   - getProperty 는 없으면 None 이다. (원본 undefined)
+//   - get_property 는 없으면 None 이다. (원본 undefined)
 //==============================================================================
 use crate::core::animation::Animation;
 use crate::resource::animationclip::AnimationClip;
@@ -38,14 +38,14 @@ impl AnimationState {
 	//==============================================================================
 	// 클립 설정.
 	//==============================================================================
-	pub fn setClip(&mut self, clip: Option<AnimationClip>) {
+	pub fn set_clip(&mut self, clip: Option<AnimationClip>) {
 		self.clip = clip;
 	}
 
 	//==============================================================================
 	// 클립 반환.
 	//==============================================================================
-	pub fn getClip(&self) -> Option<&AnimationClip> {
+	pub fn get_clip(&self) -> Option<&AnimationClip> {
 		self.clip.as_ref()
 	}
 }
@@ -73,28 +73,28 @@ impl AnimationTransition {
 	//==============================================================================
 	// 출발 상태 설정.
 	//==============================================================================
-	pub fn setFrom(&mut self, from: Option<usize>) {
+	pub fn set_from(&mut self, from: Option<usize>) {
 		self.from = from;
 	}
 
 	//==============================================================================
 	// 출발 상태 반환.
 	//==============================================================================
-	pub fn getFrom(&self) -> Option<usize> {
+	pub fn get_from(&self) -> Option<usize> {
 		self.from
 	}
 
 	//==============================================================================
 	// 도착 상태 설정.
 	//==============================================================================
-	pub fn setTo(&mut self, to: Option<usize>) {
+	pub fn set_to(&mut self, to: Option<usize>) {
 		self.to = to;
 	}
 
 	//==============================================================================
 	// 도착 상태 반환.
 	//==============================================================================
-	pub fn getTo(&self) -> Option<usize> {
+	pub fn get_to(&self) -> Option<usize> {
 		self.to
 	}
 }
@@ -125,49 +125,49 @@ impl Animator {
 	//==============================================================================
 	// 갱신. (처리기에 넘긴다)
 	//==============================================================================
-	pub fn tick(&mut self, timeDelta: f32) {
-		self.animation.tick(timeDelta);
+	pub fn tick(&mut self, time_delta: f32) {
+		self.animation.tick(time_delta);
 	}
 
 	//==============================================================================
 	// 프로퍼티 설정. (같은 이름이 있으면 바꾼다)
 	//==============================================================================
-	pub fn setProperty(&mut self, name: &str, value: impl Into<Value>) {
+	pub fn set_property(&mut self, name: &str, value: impl Into<Value>) {
 		self.properties.insert(name.to_string(), value.into());
 	}
 
 	//==============================================================================
 	// 프로퍼티 반환. (없으면 None)
 	//==============================================================================
-	pub fn getProperty(&self, name: &str) -> Option<&Value> {
+	pub fn get_property(&self, name: &str) -> Option<&Value> {
 		self.properties.get(name)
 	}
 
 	//==============================================================================
 	// 모든 프로퍼티 반환.
 	//==============================================================================
-	pub fn getProperties(&self) -> &HashMap<String, Value> {
+	pub fn get_properties(&self) -> &HashMap<String, Value> {
 		&self.properties
 	}
 
 	//==============================================================================
 	// 처리기 반환.
 	//==============================================================================
-	pub fn getAnimation(&self) -> &Animation {
+	pub fn get_animation(&self) -> &Animation {
 		&self.animation
 	}
 
 	//==============================================================================
 	// 처리기 반환. (변경용, 프레임을 넣고 재생할 때)
 	//==============================================================================
-	pub fn getAnimationMut(&mut self) -> &mut Animation {
+	pub fn get_animation_mut(&mut self) -> &mut Animation {
 		&mut self.animation
 	}
 
 	//==============================================================================
 	// 상태 더하기. (번호를 돌려준다)
 	//==============================================================================
-	pub fn addState(&mut self, state: AnimationState) -> usize {
+	pub fn add_state(&mut self, state: AnimationState) -> usize {
 		self.states.push(state);
 		self.states.len() - 1
 	}
@@ -175,14 +175,14 @@ impl Animator {
 	//==============================================================================
 	// 상태 목록 반환.
 	//==============================================================================
-	pub fn getStates(&self) -> &[AnimationState] {
+	pub fn get_states(&self) -> &[AnimationState] {
 		&self.states
 	}
 
 	//==============================================================================
 	// 전환 더하기. (번호를 돌려준다)
 	//==============================================================================
-	pub fn addTransition(&mut self, transition: AnimationTransition) -> usize {
+	pub fn add_transition(&mut self, transition: AnimationTransition) -> usize {
 		self.transitions.push(transition);
 		self.transitions.len() - 1
 	}
@@ -190,7 +190,7 @@ impl Animator {
 	//==============================================================================
 	// 전환 목록 반환.
 	//==============================================================================
-	pub fn getTransitions(&self) -> &[AnimationTransition] {
+	pub fn get_transitions(&self) -> &[AnimationTransition] {
 		&self.transitions
 	}
 }
@@ -212,51 +212,51 @@ mod tests {
 	// 프로퍼티는 이름으로 넣고 바꾸고 꺼낸다. (없으면 None)
 	//==============================================================================
 	#[test]
-	fn propertiesSetReplaceAndGet() {
+	fn properties_set_replace_and_get() {
 		let mut animator = Animator::new();
-		animator.setProperty("speed", 1.5);
-		animator.setProperty("isGrounded", true);
-		animator.setProperty("speed", 3);
-		assert_eq!(animator.getProperty("speed"), Some(&json!(3)));
-		assert_eq!(animator.getProperty("isGrounded"), Some(&json!(true)));
-		assert_eq!(animator.getProperty("missing"), None);
-		assert_eq!(animator.getProperties().len(), 2);
+		animator.set_property("speed", 1.5);
+		animator.set_property("isGrounded", true);
+		animator.set_property("speed", 3);
+		assert_eq!(animator.get_property("speed"), Some(&json!(3)));
+		assert_eq!(animator.get_property("isGrounded"), Some(&json!(true)));
+		assert_eq!(animator.get_property("missing"), None);
+		assert_eq!(animator.get_properties().len(), 2);
 	}
 
 	//==============================================================================
 	// tick 은 처리기에 넘긴다. (재생 중인 Animation 의 프레임이 넘어간다)
 	//==============================================================================
 	#[test]
-	fn tickAdvancesAnimation() {
-		let image = Image::createFromPixels(32, 16, vec![0u8; 32 * 16 * 4]);
+	fn tick_advances_animation() {
+		let image = Image::create_from_pixels(32, 16, vec![0u8; 32 * 16 * 4]);
 		let mut animator = Animator::new();
-		animator.getAnimationMut().setFramesFromRects(image, &[Rect::create(0.0, 0.0, 16.0, 16.0), Rect::create(16.0, 0.0, 16.0, 16.0)]);
-		animator.getAnimationMut().setAnimationSpeed(10.0);
-		animator.getAnimationMut().play();
+		animator.get_animation_mut().set_frames_from_rects(image, &[Rect::create(0.0, 0.0, 16.0, 16.0), Rect::create(16.0, 0.0, 16.0, 16.0)]);
+		animator.get_animation_mut().set_animation_speed(10.0);
+		animator.get_animation_mut().play();
 		animator.tick(0.15);
-		assert_eq!(animator.getAnimation().getCurrentFrameIndex(), 1);
+		assert_eq!(animator.get_animation().get_current_frame_index(), 1);
 	}
 
 	//==============================================================================
 	// 상태와 전환은 목록 번호로 잇는다.
 	//==============================================================================
 	#[test]
-	fn statesAndTransitionsAreLinkedByIndex() {
+	fn states_and_transitions_are_linked_by_index() {
 		let mut animator = Animator::new();
-		let mut idleState = AnimationState::new();
-		let mut idleClip = AnimationClip::new();
-		idleClip.setLoop(true);
-		idleState.setClip(Some(idleClip));
-		let idleIndex = animator.addState(idleState);
-		let runIndex = animator.addState(AnimationState::new());
+		let mut idle_state = AnimationState::new();
+		let mut idle_clip = AnimationClip::new();
+		idle_clip.set_loop(true);
+		idle_state.set_clip(Some(idle_clip));
+		let idle_index = animator.add_state(idle_state);
+		let run_index = animator.add_state(AnimationState::new());
 		let mut transition = AnimationTransition::new();
-		transition.setFrom(Some(idleIndex));
-		transition.setTo(Some(runIndex));
-		animator.addTransition(transition);
-		assert_eq!(animator.getStates().len(), 2);
-		assert!(animator.getStates()[idleIndex].getClip().is_some_and(|clip| clip.isLoop()));
-		assert!(animator.getStates()[runIndex].getClip().is_none());
-		assert_eq!(animator.getTransitions()[0].getFrom(), Some(0));
-		assert_eq!(animator.getTransitions()[0].getTo(), Some(1));
+		transition.set_from(Some(idle_index));
+		transition.set_to(Some(run_index));
+		animator.add_transition(transition);
+		assert_eq!(animator.get_states().len(), 2);
+		assert!(animator.get_states()[idle_index].get_clip().is_some_and(|clip| clip.is_loop()));
+		assert!(animator.get_states()[run_index].get_clip().is_none());
+		assert_eq!(animator.get_transitions()[0].get_from(), Some(0));
+		assert_eq!(animator.get_transitions()[0].get_to(), Some(1));
 	}
 }

@@ -28,9 +28,9 @@ impl Frame {
 				rect
 			}
 			None => {
-				let imageWidth = image.getWidth() as f32;
-				let imageHeight = image.getHeight() as f32;
-				Rect::create(0.0, 0.0, imageWidth, imageHeight)
+				let image_width = image.get_width() as f32;
+				let image_height = image.get_height() as f32;
+				Rect::create(0.0, 0.0, image_width, image_height)
 			}
 		};
 		Frame {
@@ -42,14 +42,14 @@ impl Frame {
 	//==============================================================================
 	// 이미지 반환.
 	//==============================================================================
-	pub fn getImage(&self) -> &Rc<Image> {
+	pub fn get_image(&self) -> &Rc<Image> {
 		&self.image
 	}
 
 	//==============================================================================
 	// 이미지 내부 영역 반환.
 	//==============================================================================
-	pub fn getImageRect(&self) -> Rect {
+	pub fn get_image_rect(&self) -> Rect {
 		self.rect
 	}
 }
@@ -64,35 +64,35 @@ mod tests {
 	//==============================================================================
 	// 시험용 빈 이미지를 만든다.
 	//==============================================================================
-	fn createTestImage(width: u32, height: u32) -> Rc<Image> {
+	fn create_test_image(width: u32, height: u32) -> Rc<Image> {
 		let pixels = vec![0u8; (width * height * 4) as usize];
-		Image::createFromPixels(width, height, pixels)
+		Image::create_from_pixels(width, height, pixels)
 	}
 
 	//==============================================================================
 	// 영역을 주지 않으면 이미지 전체가 영역이 된다.
 	//==============================================================================
 	#[test]
-	fn frameWithoutRectCoversWholeImage() {
-		let image = createTestImage(64, 32);
+	fn frame_without_rect_covers_whole_image() {
+		let image = create_test_image(64, 32);
 		let frame = Frame::new(image.clone(), None);
-		let imageRect = frame.getImageRect();
-		assert_eq!(imageRect, Rect::create(0.0, 0.0, 64.0, 32.0));
-		assert!(Rc::ptr_eq(frame.getImage(), &image));
+		let image_rect = frame.get_image_rect();
+		assert_eq!(image_rect, Rect::create(0.0, 0.0, 64.0, 32.0));
+		assert!(Rc::ptr_eq(frame.get_image(), &image));
 	}
 
 	//==============================================================================
 	// 영역을 주면 자르지 않고 그대로 쓴다. (이미지 밖으로 나가도)
 	//==============================================================================
 	#[test]
-	fn frameWithRectKeepsRect() {
-		let image = createTestImage(64, 32);
-		let sheetRect = Rect::create(16.0, 8.0, 16.0, 16.0);
-		let frame = Frame::new(image.clone(), Some(sheetRect));
-		assert_eq!(frame.getImageRect(), sheetRect);
+	fn frame_with_rect_keeps_rect() {
+		let image = create_test_image(64, 32);
+		let sheet_rect = Rect::create(16.0, 8.0, 16.0, 16.0);
+		let frame = Frame::new(image.clone(), Some(sheet_rect));
+		assert_eq!(frame.get_image_rect(), sheet_rect);
 
-		let outsideRect = Rect::create(48.0, 16.0, 32.0, 32.0);
-		let outsideFrame = Frame::new(image, Some(outsideRect));
-		assert_eq!(outsideFrame.getImageRect(), outsideRect);
+		let outside_rect = Rect::create(48.0, 16.0, 32.0, 32.0);
+		let outside_frame = Frame::new(image, Some(outside_rect));
+		assert_eq!(outside_frame.get_image_rect(), outside_rect);
 	}
 }

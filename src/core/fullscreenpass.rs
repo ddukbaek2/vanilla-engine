@@ -27,37 +27,37 @@ void main() {
 ";
 
 pub struct FullscreenPass {
-	shaderProgram: ShaderProgram,
-	vertexArray: GlVertexArray,
+	shader_program: ShaderProgram,
+	vertex_array: GlVertexArray,
 }
 
 impl FullscreenPass {
 	//==============================================================================
 	// 생성. (프래그먼트 셰이더 컴파일 / 링크 실패면 로그를 담은 오류)
 	//==============================================================================
-	pub fn new(gl: &glow::Context, fragmentShaderSource: &str) -> Result<FullscreenPass, String> {
-		let shaderProgram = ShaderProgram::new(gl, FULLSCREEN_VERTEXSHADER_SOURCE.trim(), fragmentShaderSource.trim())?;
-		let vertexArray = unsafe {
+	pub fn new(gl: &glow::Context, fragment_shader_source: &str) -> Result<FullscreenPass, String> {
+		let shader_program = ShaderProgram::new(gl, FULLSCREEN_VERTEXSHADER_SOURCE.trim(), fragment_shader_source.trim())?;
+		let vertex_array = unsafe {
 			gl.create_vertex_array()?
 		};
 		Ok(FullscreenPass {
-			shaderProgram,
-			vertexArray,
+			shader_program,
+			vertex_array,
 		})
 	}
 
 	//==============================================================================
 	// 패스 사용 시작. (프로그램 + 빈 버텍스 어레이 바인드, 원본 use())
 	//==============================================================================
-	pub fn useProgram(&self, gl: &glow::Context) {
-		self.shaderProgram.useProgram(gl);
+	pub fn use_program(&self, gl: &glow::Context) {
+		self.shader_program.use_program(gl);
 		unsafe {
-			gl.bind_vertex_array(Some(self.vertexArray));
+			gl.bind_vertex_array(Some(self.vertex_array));
 		}
 	}
 
 	//==============================================================================
-	// 출력. (useProgram 과 유니폼 설정 이후 호출)
+	// 출력. (use_program 과 유니폼 설정 이후 호출)
 	//==============================================================================
 	pub fn draw(&self, gl: &glow::Context) {
 		unsafe {
@@ -68,22 +68,22 @@ impl FullscreenPass {
 	//==============================================================================
 	// 유니폼 위치 반환. (캐시)
 	//==============================================================================
-	pub fn getUniformLocation(&self, gl: &glow::Context, uniformName: &str) -> Option<GlUniformLocation> {
-		self.shaderProgram.getUniformLocation(gl, uniformName)
+	pub fn get_uniform_location(&self, gl: &glow::Context, uniform_name: &str) -> Option<GlUniformLocation> {
+		self.shader_program.get_uniform_location(gl, uniform_name)
 	}
 
 	//==============================================================================
 	// 셰이더 프로그램 반환.
 	//==============================================================================
-	pub fn getShaderProgram(&self) -> &ShaderProgram {
-		&self.shaderProgram
+	pub fn get_shader_program(&self) -> &ShaderProgram {
+		&self.shader_program
 	}
 
 	//==============================================================================
 	// 버텍스 어레이 반환.
 	//==============================================================================
-	pub fn getVertexArray(&self) -> GlVertexArray {
-		self.vertexArray
+	pub fn get_vertex_array(&self) -> GlVertexArray {
+		self.vertex_array
 	}
 
 	//==============================================================================
@@ -91,8 +91,8 @@ impl FullscreenPass {
 	//==============================================================================
 	pub fn destroy(&self, gl: &glow::Context) {
 		unsafe {
-			gl.delete_program(self.shaderProgram.getProgram());
-			gl.delete_vertex_array(self.vertexArray);
+			gl.delete_program(self.shader_program.get_program());
+			gl.delete_vertex_array(self.vertex_array);
 		}
 	}
 }
