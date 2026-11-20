@@ -9,7 +9,9 @@
 //   붙을 때 원본 생성자처럼 호스트를 꾸미고 자식 노드를 만든다. 각 위젯의 create(node_tree, parent_id, options) 가 new + add_child 자리다.
 // - 옮기지 않은 것: UIDocument(리플렉션 직렬화), UINode / 오토레이아웃 / UIScene 노선.
 //==============================================================================
+pub mod buttonmotion;
 pub mod popupmotion;
+pub mod toastmotion;
 pub mod touchrecognizer;
 pub mod uibutton;
 pub mod uichart;

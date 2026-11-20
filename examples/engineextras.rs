@@ -9,6 +9,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 use vanilla::core::graphic::{TextAlign, TextBaseline};
 use vanilla::{
+	set_button_motion_area, ButtonMotion, ButtonMotionStyle, ToastMotion,
 	CameraGestures, Color, ComponentContext, Engine, EngineConfiguration, Graphic, MouseButton, NodeId, NodeTree, Outline, Paint, Pivot, Scene, SceneBase, SoftShade, SoftShadeShape, TouchRecognizer, UIButton, UIHitArea, UILabel, UIProgressRing, Vector2, ViewScaleMode,
 };
 
@@ -145,6 +146,20 @@ impl EngineExtrasScene {
 		button_label.set_text_color("#ffffff");
 		button_label.set_bold(true);
 		let counter_id = create_label_node(node_tree, root_id, "counter", Vector2::create(280.0, 480.0), Vector2::create(300.0, 56.0), "클릭 0번", 22.0, TEXT_COLOR);
+		// 알림 노드. (위에서 내려오는 토스트)
+		let toast_id = create_box_node(node_tree, root_id, "toast", Vector2::create(900.0, 30.0), Vector2::create(320.0, 50.0));
+		let toast_paint = node_tree[toast_id].add_component(Paint::create_with_color("#45b585"));
+		toast_paint.set_round_size(25.0);
+		let toast_label = node_tree.add_component(toast_id, UILabel::create_with_text("", 20.0)).expect("label");
+		toast_label.set_text_color("#ffffff");
+		node_tree[toast_id].set_visible(false);
+		let toast_motion = node_tree.add_component(toast_id, ToastMotion::new(-1.0)).expect("toast");
+		toast_motion.set_apply_text_handler(Box::new(|context: &mut ComponentContext, text: &str| {
+			if let Some(label) = context.get_node_mut().get_component_mut::<UILabel>() {
+				label.set_text(text);
+			}
+		}));
+
 		let button = node_tree.add_component(button_id, UIButton::new()).expect("button");
 		button.set_click_event(Box::new(move |_button: &mut UIButton, context: &mut ComponentContext| {
 			let next_click_count = click_count.get() + 1;
@@ -153,7 +168,24 @@ impl EngineExtrasScene {
 			if let Some(counter_label) = counter_label {
 				counter_label.set_text(&format!("클릭 {}번", next_click_count));
 			}
+			if let Some(toast_motion) = context.get_node_tree_mut().get_node_mut(toast_id).and_then(|toast_node| toast_node.get_component_mut::<ToastMotion>()) {
+				toast_motion.show(&format!("{}번 눌렀어요", next_click_count), 1.5);
+			}
 		}));
+		node_tree.add_component(button_id, ButtonMotion::new());
+
+		// 창 안 꼴(Inset) 단추. (판에 꼴을 걸고 그 안의 단추는 커지지 않고 밝힌다)
+		let inset_panel_id = create_box_node(node_tree, root_id, "insetPanel", Vector2::create(330.0, 640.0), Vector2::create(330.0, 70.0));
+		let inset_panel_paint = node_tree[inset_panel_id].add_component(Paint::create_with_color(PANEL_COLOR));
+		inset_panel_paint.set_round_size(14.0);
+		set_button_motion_area(node_tree, inset_panel_id, ButtonMotionStyle::Inset);
+		let inset_button_id = create_box_node(node_tree, inset_panel_id, "insetButton", Vector2::create(12.0, 10.0), Vector2::create(306.0, 50.0));
+		let inset_paint = node_tree[inset_button_id].add_component(Paint::create_with_color("#3c4457"));
+		inset_paint.set_round_size(10.0);
+		let inset_label = node_tree.add_component(inset_button_id, UILabel::create_with_text("창 안 단추 (Inset)", 20.0)).expect("label");
+		inset_label.set_text_color(TEXT_COLOR);
+		node_tree.add_component(inset_button_id, UIButton::new());
+		node_tree.add_component(inset_button_id, ButtonMotion::new());
 
 		let area_id = create_box_node(node_tree, root_id, "gestureArea", Vector2::create(700.0, 260.0), Vector2::create(540.0, 330.0));
 		let area_outline = node_tree[area_id].add_component(Outline::new());
