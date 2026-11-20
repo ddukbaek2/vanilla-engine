@@ -18,6 +18,7 @@ pub mod uicontrol;
 pub mod uidialog;
 pub mod uidraggable;
 pub mod uidropdown;
+pub mod uihitarea;
 pub mod uiimageview;
 pub mod uiinputfield;
 pub mod uilabel;

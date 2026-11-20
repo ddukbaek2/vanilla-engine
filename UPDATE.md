@@ -14,7 +14,9 @@
 - CameraGestures: 카메라 손짓. 오른쪽 끌기(가로는 돌리기, 캔버스 너비가 한 바퀴, 세로는 기울이기, 끌지 않고 떼면 오른쪽 클릭), 가운데 끌기(밀기), 두 손가락(밀기, 오므려 키우기, 문턱을 넘게 비틀면 돌리기). 매 프레임 update(input_manager, view_manager) 로 읽고 take_pan, take_rotation, take_tilt, take_zoom 으로 꺼낸다
 - PointerCursor, CursorValue: 마우스 커서. 엔진이 하나 들고(get_pointer_cursor_mut) 켜면 프레임 끝마다 커서를 정한다. UIButton 위(누르는 중 포함)면 단추의 커서, 아니면 set_screen_cursor 의 커서. 데스크탑은 winit 커서 아이콘, 웹은 캔버스 cursor 스타일(register_image_cursor 의 그림 커서 포함). 꺼져 있으면(기본) 지금까지와 같다
 - Engine: is_coarse_pointer() (웹은 CSS pointer: coarse, 데스크탑은 false). 플랫폼 층에 set_cursor, is_coarse_pointer 를 더했다
-- 예제: engineextras. 테, 진행 고리, 부드러운 그늘, 마우스 커서, 카메라 손짓, 입력 상태를 한 화면에 놓는다. 입력을 흉내 내지 않아 데스크탑과 웹에서 직접 눌러 본다
+- UIHitArea: 누르는 자리 넓히기. UIHitArea::attach(node_tree, button_id, minimum_size) 로 단추 바로 뒤 형제로 투명한 누름 자리를 두어 가로세로를 minimum_size 이상으로 넓힌다. 넓힌 몫의 클릭은 단추의 Clicked, Click 알림을 부른다. 단추의 자리, 크기, 피봇을 프레임마다 따라가고, set_clip_node 로 넓힌 몫을 창이나 스크롤 칸 안으로 자른다. (부모가 돌아 있어도 노드 좌표로 바꿔 자른다)
+- UIButton: fire_click_events(context). 누르지 않고 클릭 알림(Clicked, Click)만 부른다
+- 예제: engineextras. 테, 진행 고리, 넓힌 누름 자리, 부드러운 그늘, 마우스 커서, 카메라 손짓, 입력 상태를 한 화면에 놓는다. 입력을 흉내 내지 않아 데스크탑과 웹에서 직접 눌러 본다
 - README: 장점 위주 소개, 예제 화면 사진(docs/images), 사용법(씬 생명주기, 노드와 컴포넌트, 애셋 로딩, 웹 빌드), 기술 노트(제너레이셔널 핸들 노드 트리, 컴포넌트 접근, 배칭, 컬링, async 없는 애셋 로딩, 텍스트 렌더링, 2D 와 3D, 웹 한글 입력, 플랫폼 레이어), 성능 표를 새로 썼다
 - README: 외부 의존성 섹션. 크레이트마다 버전, 쓰는 곳, 하는 일, 라이선스를 공통, 데스크탑, 웹으로 나눠 표로 정리했다
 - 예제: nodebasics. 노드를 만들고 Paint, Text, 직접 만든 컴포넌트(Spin)를 붙인다. (README '노드와 컴포넌트'의 코드)

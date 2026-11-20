@@ -9,7 +9,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 use vanilla::core::graphic::{TextAlign, TextBaseline};
 use vanilla::{
-	CameraGestures, ComponentContext, Engine, EngineConfiguration, Graphic, MouseButton, NodeId, NodeTree, Outline, Paint, Pivot, Scene, SceneBase, SoftShade, SoftShadeShape, TouchRecognizer, UIButton, UILabel, UIProgressRing, Vector2, ViewScaleMode,
+	CameraGestures, Color, ComponentContext, Engine, EngineConfiguration, Graphic, MouseButton, NodeId, NodeTree, Outline, Paint, Pivot, Scene, SceneBase, SoftShade, SoftShadeShape, TouchRecognizer, UIButton, UIHitArea, UILabel, UIProgressRing, Vector2, ViewScaleMode,
 };
 
 // 뷰 크기.
@@ -169,6 +169,24 @@ impl EngineExtrasScene {
 		let target_paint = target_node.add_component(Paint::create_with_color("#f3e5ab"));
 		target_paint.set_round_size(16.0);
 		self.target_id = Some(target_id);
+
+		// 작은 단추와 넓힌 누름 자리. (누름 자리를 옅게 칠해 보인다)
+		let small_click_count = Rc::new(Cell::new(0u32));
+		let small_button_id = create_box_node(node_tree, root_id, "smallButton", Vector2::create(520.0, 490.0), Vector2::create(40.0, 30.0));
+		let small_paint = node_tree[small_button_id].add_component(Paint::create_with_color("#e06058"));
+		small_paint.set_round_size(6.0);
+		let small_counter_id = create_label_node(node_tree, root_id, "smallCounter", Vector2::create(600.0, 490.0), Vector2::create(90.0, 30.0), "0", 20.0, TEXT_COLOR);
+		let small_button = node_tree.add_component(small_button_id, UIButton::new()).expect("button");
+		small_button.set_click_event(Box::new(move |_button: &mut UIButton, context: &mut ComponentContext| {
+			let next_click_count = small_click_count.get() + 1;
+			small_click_count.set(next_click_count);
+			if let Some(counter_label) = context.get_node_tree_mut().get_node_mut(small_counter_id).and_then(|counter_node| counter_node.get_component_mut::<UILabel>()) {
+				counter_label.set_text(&format!("{}", next_click_count));
+			}
+		}));
+		if let Some(hit_id) = UIHitArea::attach(node_tree, small_button_id, 100.0) {
+			node_tree[hit_id].add_component(Paint::create_with_color(Color::create(1.0, 1.0, 1.0, 0.12)));
+		}
 
 		let status_id = create_label_node(node_tree, root_id, "status", Vector2::create(40.0, 560.0), Vector2::create(620.0, 40.0), "", 18.0, CAPTION_COLOR);
 		self.status_id = Some(status_id);

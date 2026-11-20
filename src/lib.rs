@@ -113,6 +113,7 @@ pub use crate::ui::uicontrol::UIControl;
 pub use crate::ui::uidialog::{UIDialog, UIDialogHandler, UIDialogOptions, UIDialogShowOptions};
 pub use crate::ui::uidraggable::{UIDraggable, UIDraggableEvent, UIDraggablePositionEvent};
 pub use crate::ui::uidropdown::{UIDropdown, UIDropdownEvent, UIDropdownOptions};
+pub use crate::ui::uihitarea::UIHitArea;
 pub use crate::ui::uiimageview::UIImageView;
 pub use crate::ui::uiinputfield::{TextEditBuffer, UIInputField, UIInputFieldEvent, UIInputFieldMenuAction};
 pub use crate::ui::uilabel::UILabel;
