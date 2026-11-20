@@ -13,7 +13,7 @@
 //   Asset 기반 클래스(애셋 타입)가 없다. 읽기 실패는 예외 대신 Err 나 get_load_error() 로 알린다.
 //   플레이어들이 같이 들 수 있게 Rc<AudioAsset> 로 쓰고, 웹에서 디코딩이 끝난 뒤 채우도록 안쪽을 RefCell 로 둔다.
 //==============================================================================
-use crate::platform::audio::{self as audioBackend, AudioBuffer};
+use crate::platform::audio::{self as audio_backend, AudioBuffer};
 use std::cell::{Cell, RefCell};
 use std::path::Path;
 use std::rc::Rc;
@@ -48,7 +48,7 @@ impl AudioAsset {
 			return Ok(());
 		}
 		self.load_error.replace(None);
-		audioBackend::load_audio_file(self, asset_path)
+		audio_backend::load_audio_file(self, asset_path)
 	}
 
 	//==============================================================================
@@ -59,7 +59,7 @@ impl AudioAsset {
 			return Ok(());
 		}
 		self.load_error.replace(None);
-		audioBackend::load_audio_bytes(self, bytes)
+		audio_backend::load_audio_bytes(self, bytes)
 	}
 
 	//==============================================================================
@@ -89,7 +89,7 @@ impl AudioAsset {
 	pub fn get_duration(&self) -> f64 {
 		match self.audio_buffer.borrow().as_ref() {
 			Some(audio_buffer) => {
-				audioBackend::get_audio_buffer_duration(audio_buffer)
+				audio_backend::get_audio_buffer_duration(audio_buffer)
 			}
 			None => {
 				0.0

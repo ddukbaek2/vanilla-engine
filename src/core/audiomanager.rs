@@ -15,7 +15,7 @@
 //   생성자는 엔진을 받지 않는다. (원본은 iOS 판별에 엔진의 플랫폼 정보를 쓰고, 여기서는 웹 백엔드가 같은 규칙으로 직접 판별한다)
 //==============================================================================
 use crate::core::audioplayer::AudioPlayer;
-use crate::platform::audio::{self as audioBackend, AudioContext, AudioPlatformState, AudioPlayerBackend};
+use crate::platform::audio::{self as audio_backend, AudioContext, AudioPlatformState, AudioPlayerBackend};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -34,7 +34,7 @@ impl AudioManagerState {
 	//==============================================================================
 	pub(crate) fn ensure_audio_context(&mut self) -> Option<&mut AudioContext> {
 		if self.audio_context.is_none() {
-			self.audio_context = audioBackend::create_audio_context(&mut self.platform_state);
+			self.audio_context = audio_backend::create_audio_context(&mut self.platform_state);
 		}
 		self.audio_context.as_mut()
 	}
@@ -54,7 +54,7 @@ pub(crate) fn resume_audio_manager_state(state_cell: &Rc<RefCell<AudioManagerSta
 			return;
 		}
 	}
-	audioBackend::resume_audio_context(state_cell);
+	audio_backend::resume_audio_context(state_cell);
 }
 
 //==============================================================================
@@ -69,11 +69,11 @@ impl AudioManager {
 	// 생성. (AudioContext 는 아직 만들지 않는다)
 	//==============================================================================
 	pub fn new() -> AudioManager {
-		let platform_state = audioBackend::create_audio_platform_state();
+		let platform_state = audio_backend::create_audio_platform_state();
 		AudioManager {
 			state: Rc::new(RefCell::new(AudioManagerState {
 				audio_context: None,
-				has_user_gesture: audioBackend::HAS_USER_GESTURE_AT_START,
+				has_user_gesture: audio_backend::HAS_USER_GESTURE_AT_START,
 				platform_state,
 			})),
 		}

@@ -91,6 +91,14 @@ impl AudioPlayer {
 	}
 
 	//==============================================================================
+	// 재생 빠르기 설정. (1 이면 그대로, 음 높이도 같이 바뀐다, 다음 play 부터, 원본에 없는 것)
+	//==============================================================================
+	pub fn set_playback_rate(&mut self, playback_rate: f64) {
+		let playback_rate = if playback_rate.is_finite() && playback_rate > 0.0 { playback_rate } else { 1.0 };
+		self.audio_player_backend.set_playback_rate(playback_rate);
+	}
+
+	//==============================================================================
 	// 정지.
 	//==============================================================================
 	pub fn stop(&mut self) {

@@ -338,6 +338,7 @@ pub struct AudioPlayerBackend {
 	audio_context: Option<AudioContext>,
 	gain_node: Option<web_sys::GainNode>,
 	playback_state: Rc<RefCell<PlaybackState>>,
+	playback_rate: f64,
 }
 
 impl AudioPlayerBackend {
@@ -362,6 +363,7 @@ impl AudioPlayerBackend {
 				ended_callback: None,
 				is_playing: false,
 			})),
+			playback_rate: 1.0,
 		}
 	}
 
@@ -411,17 +413,25 @@ impl AudioPlayerBackend {
 			};
 			let weak_playback_state = Rc::downgrade(&self.playback_state);
 			let audio_buffer = audio_buffer.clone();
+			let playback_rate = self.playback_rate;
 			spawn_local(async move {
 				if JsFuture::from(resume_promise).await.is_err() {
 					return;
 				}
 				if let Some(playback_state_cell) = weak_playback_state.upgrade() {
-					start_source(&playback_state_cell, &audio_context, &gain_node, &audio_buffer, is_loop, time);
+					start_source(&playback_state_cell, &audio_context, &gain_node, &audio_buffer, is_loop, time, playback_rate);
 				}
 			});
 			return;
 		}
-		start_source(&self.playback_state, &audio_context, &gain_node, audio_buffer, is_loop, time);
+		start_source(&self.playback_state, &audio_context, &gain_node, audio_buffer, is_loop, time, self.playback_rate);
+	}
+
+	//==============================================================================
+	// 재생 빠르기 설정. (1 이면 그대로, 음 높이도 같이 바뀐다, 다음 재생부터)
+	//==============================================================================
+	pub fn set_playback_rate(&mut self, playback_rate: f64) {
+		self.playback_rate = playback_rate;
 	}
 
 	//==============================================================================
@@ -457,7 +467,7 @@ impl Drop for AudioPlayerBackend {
 //==============================================================================
 // 소스 노드를 만들어 튼다. (원본 start_playback)
 //==============================================================================
-fn start_source(playback_state_cell: &Rc<RefCell<PlaybackState>>, audio_context: &AudioContext, gain_node: &web_sys::GainNode, audio_buffer: &AudioBuffer, is_loop: bool, time: f64) {
+fn start_source(playback_state_cell: &Rc<RefCell<PlaybackState>>, audio_context: &AudioContext, gain_node: &web_sys::GainNode, audio_buffer: &AudioBuffer, is_loop: bool, time: f64, playback_rate: f64) {
 	let audio_source = match audio_context.create_buffer_source() {
 		Ok(audio_source) => {
 			audio_source
@@ -468,6 +478,7 @@ fn start_source(playback_state_cell: &Rc<RefCell<PlaybackState>>, audio_context:
 	};
 	audio_source.set_buffer(Some(audio_buffer));
 	audio_source.set_loop(is_loop);
+	audio_source.playback_rate().set_value(playback_rate as f32);
 	if audio_source.connect_with_audio_node(gain_node).is_err() {
 		return;
 	}

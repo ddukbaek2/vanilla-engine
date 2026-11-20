@@ -63,6 +63,7 @@ pub use crate::core::node::nodetree::{ComponentContext, NodeId, NodeTree, TouchK
 pub use crate::core::node::worldnode::{NodeTransform, WorldNode};
 pub use crate::core::scene::{Scene, SceneBase};
 pub use crate::core::soundeffectpool::SoundEffectPool;
+pub use crate::core::soundsystem::{SoundRow, SoundSystem};
 pub use crate::core::timemanager::TimeManager;
 pub use crate::core::tween::{easing_function, Tween, TweenId, TweenProperty, TweenValue, TweenValues};
 pub use crate::core::viewmanager::{ViewManager, ViewScaleMode};

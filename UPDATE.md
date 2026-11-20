@@ -25,6 +25,9 @@
   - read_glb_arrays, read_glb_node_arrays, read_glb_node_infos, write_skin_pose, read_animation_swing, ToonOutlineOptions, ToonSkeleton: 텍스처 없이 재질 색으로 칠하는 GLB 를 배열로 읽는다. baseColorFactor 는 sRGB 로, emissiveFactor 는 빛남으로, 재질 extras 의 outline(껍데기)과 basic(빛을 받지 않음). 바깥선 설정을 주면 ".outline" 짝이 있는 노드(또는 added_parts)의 몸으로 껍데기를 새로 짓는다. 뼈대와 움직임(extras 의 loop "once" 포함)을 읽고 한 순간의 본 행렬을 셈한다. (앞 움직임과 섞기, 흔들림 배율) 엔진의 SkinnedModel(텍스처 PBR)과는 따로다
   - ToonRenderer, ToonMesh, ToonDrawOptions: 해와 하늘색, 땅색 바탕빛, set_band_count 로 셀 셰이딩, 빛남과 빛을 받지 않음, 틴트와 불투명도, 바깥선 껍데기를 뒷면으로 그린다. 뼈대는 96 개까지. (SkinnedModelRenderer 와 같다) begin_frame 이 앞의 그리기 상태를 적고 end_frame 이 돌려, 2D 그리기 사이(flush_batch 뒤, restore_render_state 앞)에 끼운다. read_program_sources 를 ShaderWarmer 에 넘길 수 있다
 - 예제: toonshowcase. 기본 도형 일곱과 soldier.glb 의 걷기를 툰으로 그린다. TOON_MODEL_PATH 에 GLB 경로를 주면 그 모형도 놓는다. (데스크탑)
+- SoundSystem, SoundRow: 소리 표로 다루는 배경음악과 효과음. 녹음 무리에서 바로 앞과 다른 것 고르기, 같은 소리를 다시 낼 수 있는 간격, 같은 소리와 전체의 동시 수 제한(넘으면 오래된 것을 끊음), 음 높이 흔들기, 앞 몇 초만 틀고 줄여 끄기, 배경음악 겹쳐 바꾸기와 멈춘 자리에서 잇기, 음악 크기와 음악의 비와 효과음 크기. 음소거는 사용자, 페이지 가려짐(set_page_hidden), 바깥(set_external_mute_provider) 가운데 하나라도 맞으면 건다. load_sounds(engine) 로 애셋 폴더에서 받고, add_sound_asset 으로 메모리의 소리를 더한다. 매 프레임 update(time_delta)
+- AudioPlayer: set_playback_rate. 재생 빠르기(음 높이도 같이, 다음 play 부터). 데스크탑 kira playback_rate, 웹 AudioBufferSourceNode.playbackRate
+- 오디오 백엔드의 모듈 별칭 audioBackend 를 audio_backend 로 (이름 규칙)
 - 예제: engineextras. 테, 진행 고리, 넓힌 누름 자리, 단추 반응과 토스트, 부드러운 그늘, 마우스 커서, 카메라 손짓, 입력 상태를 한 화면에 놓는다. 입력을 흉내 내지 않아 데스크탑과 웹에서 직접 눌러 본다
 - README: 장점 위주 소개, 예제 화면 사진(docs/images), 사용법(씬 생명주기, 노드와 컴포넌트, 애셋 로딩, 웹 빌드), 기술 노트(제너레이셔널 핸들 노드 트리, 컴포넌트 접근, 배칭, 컬링, async 없는 애셋 로딩, 텍스트 렌더링, 2D 와 3D, 웹 한글 입력, 플랫폼 레이어), 성능 표를 새로 썼다
 - README: 외부 의존성 섹션. 크레이트마다 버전, 쓰는 곳, 하는 일, 라이선스를 공통, 데스크탑, 웹으로 나눠 표로 정리했다

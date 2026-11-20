@@ -15,7 +15,7 @@
 //   데스크탑의 파형은 대역 제한 없이 그린 것이라 square, sawtooth 의 높은 배음이 WebAudio 와 조금 다르다.
 //==============================================================================
 use crate::core::audiomanager::{resume_audio_manager_state, AudioManager, AudioManagerState};
-use crate::platform::audio as audioBackend;
+use crate::platform::audio as audio_backend;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -157,11 +157,11 @@ impl BeepPlayer {
 				return;
 			}
 		};
-		if !audioBackend::is_audio_context_running(audio_context) {
+		if !audio_backend::is_audio_context_running(audio_context) {
 			return;
 		}
 		let beep_envelope = BeepEnvelope::create(frequency, duration_seconds, waveform, delay_seconds, self.volume, volume_scale);
-		audioBackend::play_beep_tone(audio_context, &beep_envelope);
+		audio_backend::play_beep_tone(audio_context, &beep_envelope);
 	}
 
 	//==============================================================================

@@ -120,6 +120,7 @@ pub(crate) fn amplitude_to_decibels(amplitude: f32) -> Decibels {
 pub struct AudioPlayerBackend {
 	track_handle: Option<TrackHandle>,
 	sound_handle: Option<StaticSoundHandle>,
+	playback_rate: f64,
 }
 
 impl AudioPlayerBackend {
@@ -147,6 +148,7 @@ impl AudioPlayerBackend {
 		AudioPlayerBackend {
 			track_handle,
 			sound_handle: None,
+			playback_rate: 1.0,
 		}
 	}
 
@@ -191,7 +193,7 @@ impl AudioPlayerBackend {
 		else {
 			None
 		};
-		let sound_data = audio_buffer.start_position(time).loop_region(loop_region);
+		let sound_data = audio_buffer.start_position(time).loop_region(loop_region).playback_rate(self.playback_rate);
 		match track_handle.play(sound_data) {
 			Ok(sound_handle) => {
 				self.sound_handle = Some(sound_handle);
@@ -200,6 +202,13 @@ impl AudioPlayerBackend {
 				eprintln!("AudioPlayer: 재생하지 못했습니다. ({})", error);
 			}
 		}
+	}
+
+	//==============================================================================
+	// 재생 빠르기 설정. (1 이면 그대로, 음 높이도 같이 바뀐다, 다음 재생부터)
+	//==============================================================================
+	pub fn set_playback_rate(&mut self, playback_rate: f64) {
+		self.playback_rate = playback_rate;
 	}
 
 	//==============================================================================
