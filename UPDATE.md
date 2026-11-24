@@ -46,6 +46,7 @@
 - Rect: 원본 base/rect.js 의 남은 것. overlaps(변이 닿아도 겹친 것), intersection, union, Rect::clamp, get_min / set_min, get_max / set_max, get_center / set_center, get_left / get_top / get_right / get_bottom 과 set_..., set_width, set_height
 - Vector2: 원본 base/vector2.js 의 남은 것. divide, divide_scalar, modulo, modulo_scalar, add_scalar, subtract_scalar, half, cross, length_squared, angle, get_x, get_y, minus_one, positive_infinity, negative_infinity, Vector2::lerp(원본 식 from * (1 - t) + to * t), Vector2::clamp. 원본의 버그 둘을 고쳤다: modulo 가 나누기를 하던 것을 나머지로, half 가 두 배를 돌려주던 것을 반으로
 - math: 원본 base/math.js 의 남은 것. random_int(양 끝 포함), pick_random, shuffle, shuffle_with_random_function, approach, move_towards, min, max, round(반은 +무한대 쪽, -2.5 → -2), POSITIVE_INFINITY, NEGATIVE_INFINITY. 원본이 손으로 다시 짠 floor, ceil, sqrt, abs, 삼각함수, pow 는 f32 메서드로 갈음한다. (원본 sqrt 는 바빌로니아법 10 번이라 1e4 를 넘으면 틀린다)
+- NodeTree: 형제 순서와 계층 판정. set_sibling_index(끝을 넘으면 맨 뒤), get_sibling_index, get_child_index, get_sibling_ids, is_active_in_hierarchy, is_visible_in_hierarchy(활성, 보이기 플래그, 불투명도 > 0 을 루트까지). WorldNode: get_child_index. (원본 base/node.js, core/node/transformnode.js)
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.
