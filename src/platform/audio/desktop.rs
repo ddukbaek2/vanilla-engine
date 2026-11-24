@@ -1,7 +1,10 @@
 //==============================================================================
 // 데스크탑 오디오 백엔드. (윈도우, 맥, 리눅스, kira 0.12)
 // - AudioContext 자리: kira::AudioManager. 만들 때 cpal 로 기본 출력 장치를 연다. 장치가 없으면 한 번 알리고 다시 열지 않는다.
-//   브라우저 자동재생 정책도, suspended 상태도 없어서 user gesture 는 처음부터 있는 것으로 두고 resume 은 할 일이 없다.
+//   브라우저 자동재생 정책도, suspended 상태도 없어서 user gesture 는 처음부터 있는 것으로 둔다.
+// - 컨텍스트 멈춤(SoundSystem 이 음소거 동안 부른다): kira 매니저에는 멈춤이 없어 메인 트랙을 무음으로 두고, resume 이 되돌린다.
+//   (원본 AudioContext.suspend 와 달리 소리의 시간은 그동안에도 흐른다)
+// - 좌우(pan): 재생할 때 소리 설정의 panning 으로 건다. (-1 왼쪽 ~ 1 오른쪽, 원본 StereoPannerNode 자리, 다음 재생부터)
 // - AudioBuffer 자리: kira 의 StaticSoundData. 파일 전체를 디코딩해 들고, 복제는 Arc 하나라 값싸다.
 // - AudioPlayer 하나 = 믹서 하위 트랙 하나. (원본 GainNode 자리, 트랙 음량이 플레이어 음량이다)
 //   재생할 때마다 버퍼를 복제해 그 트랙에 튼다. 트랙 핸들을 버리면 트랙과 그 위의 소리가 같이 없어진다.
@@ -43,6 +46,8 @@ const BEEP_SAMPLE_RATE: u32 = 44100;
 pub struct AudioPlatformState {
 	// 소리 장치를 열지 못했는지. (한 번 실패하면 다시 열지 않는다)
 	is_audio_context_failed: bool,
+	// 컨텍스트를 멈춰 두었는지. (메인 트랙을 무음으로 둔 동안)
+	is_audio_context_suspended: bool,
 }
 
 //==============================================================================
@@ -51,6 +56,7 @@ pub struct AudioPlatformState {
 pub fn create_audio_platform_state() -> AudioPlatformState {
 	AudioPlatformState {
 		is_audio_context_failed: false,
+		is_audio_context_suspended: false,
 	}
 }
 
@@ -81,9 +87,28 @@ pub fn create_audio_context(audio_platform_state: &mut AudioPlatformState) -> Op
 }
 
 //==============================================================================
-// 오디오 컨텍스트 재개. (kira 에는 멈춤 상태가 없어 할 일이 없다)
+// 오디오 컨텍스트 재개. (suspend_audio_context 로 멈춰 둔 것만 메인 트랙 음량을 되돌린다)
 //==============================================================================
-pub fn resume_audio_context(_state_cell: &Rc<RefCell<AudioManagerState>>) {
+pub fn resume_audio_context(state_cell: &Rc<RefCell<AudioManagerState>>) {
+	let state = &mut *state_cell.borrow_mut();
+	if !state.platform_state.is_audio_context_suspended {
+		return;
+	}
+	if let Some(audio_context) = state.audio_context.as_mut() {
+		audio_context.main_track().set_volume(Decibels::IDENTITY, create_immediate_tween());
+		state.platform_state.is_audio_context_suspended = false;
+	}
+}
+
+//==============================================================================
+// 오디오 컨텍스트 멈춤. (메인 트랙을 무음으로, 원본 audio_context.suspend() 자리)
+//==============================================================================
+pub fn suspend_audio_context(state_cell: &Rc<RefCell<AudioManagerState>>) {
+	let state = &mut *state_cell.borrow_mut();
+	if let Some(audio_context) = state.audio_context.as_mut() {
+		audio_context.main_track().set_volume(Decibels::SILENCE, create_immediate_tween());
+		state.platform_state.is_audio_context_suspended = true;
+	}
 }
 
 //==============================================================================
@@ -121,6 +146,7 @@ pub struct AudioPlayerBackend {
 	track_handle: Option<TrackHandle>,
 	sound_handle: Option<StaticSoundHandle>,
 	playback_rate: f64,
+	panning: f32,
 }
 
 impl AudioPlayerBackend {
@@ -149,6 +175,7 @@ impl AudioPlayerBackend {
 			track_handle,
 			sound_handle: None,
 			playback_rate: 1.0,
+			panning: 0.0,
 		}
 	}
 
@@ -193,7 +220,7 @@ impl AudioPlayerBackend {
 		else {
 			None
 		};
-		let sound_data = audio_buffer.start_position(time).loop_region(loop_region).playback_rate(self.playback_rate);
+		let sound_data = audio_buffer.start_position(time).loop_region(loop_region).playback_rate(self.playback_rate).panning(self.panning);
 		match track_handle.play(sound_data) {
 			Ok(sound_handle) => {
 				self.sound_handle = Some(sound_handle);
@@ -209,6 +236,13 @@ impl AudioPlayerBackend {
 	//==============================================================================
 	pub fn set_playback_rate(&mut self, playback_rate: f64) {
 		self.playback_rate = playback_rate;
+	}
+
+	//==============================================================================
+	// 좌우 설정. (-1 왼쪽 ~ 1 오른쪽, 다음 재생부터)
+	//==============================================================================
+	pub fn set_pan(&mut self, pan: f32) {
+		self.panning = pan;
 	}
 
 	//==============================================================================

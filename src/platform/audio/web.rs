@@ -9,6 +9,8 @@
 //   복원 뒤 "running" 인데 0.5초 동안 current_time 이 실제 시간의 1/4 보다 덜 흐르면 suspend() 후 resume() 하고 다시 확인한다.
 //   그 resume() 이 거부되면 같은 간격 뒤 resume_context() 로 다시 복원한다. 한 번에 하나만 돈다.
 // - 디코딩: 원본처럼 OfflineAudioContext(1, 1, 44100) 로 한다. 없으면 잠시 쓰는 AudioContext 로 하고 닫는다.
+// - 컨텍스트 멈춤: 원본 SoundSystem.applyContextPause 처럼 "running" 일 때만 suspend() 하고, 거부되면 알리고 넘긴다.
+// - 좌우(pan): 원본 SoundSystem.playEffect 처럼 0 이 아니면 StereoPannerNode 를 GainNode 와 출력 사이에 끼운다. (createStereoPanner 가 없으면 끼우지 않는다)
 // - 비동기: 프로미스는 wasm-bindgen-futures 의 spawn_local 과 JsFuture 로 기다린다. (원본 then / await 자리)
 //   콜백은 매니저나 플레이어의 상태를 Weak 로 들어, 그 사이 버려졌으면 아무것도 하지 않는다.
 // - 원본과 다른 점:
@@ -221,6 +223,37 @@ pub fn resume_audio_context(state_cell: &Rc<RefCell<AudioManagerState>>) {
 }
 
 //==============================================================================
+// 오디오 컨텍스트 멈춤. ("running" 일 때만 suspend(), 거부되면 알린다)
+//==============================================================================
+pub fn suspend_audio_context(state_cell: &Rc<RefCell<AudioManagerState>>) {
+	let audio_context = match &state_cell.borrow().audio_context {
+		Some(audio_context) => {
+			audio_context.clone()
+		}
+		None => {
+			return;
+		}
+	};
+	if !is_audio_context_running(&audio_context) {
+		return;
+	}
+	let suspend_promise = match audio_context.suspend() {
+		Ok(suspend_promise) => {
+			suspend_promise
+		}
+		Err(error) => {
+			web_sys::console::warn_2(&JsValue::from_str("[sound] AudioContext 를 멈추지 못했습니다."), &error);
+			return;
+		}
+	};
+	spawn_local(async move {
+		if let Err(error) = JsFuture::from(suspend_promise).await {
+			web_sys::console::warn_2(&JsValue::from_str("[sound] AudioContext 를 멈추지 못했습니다."), &error);
+		}
+	});
+}
+
+//==============================================================================
 // 복원 뒤 시계 확인. (iOS 전용, 원본 verify_context_clock)
 // - CONTEXT_CLOCK_CHECK_INTERVAL 동안 current_time 이 흐르는지 보고, 멈춰 있으면 suspend() 후 resume() 하고 다시 확인한다.
 // - 그 resume() 이 거부되면 같은 간격 뒤 resume_context() 로 다시 복원한다.
@@ -337,6 +370,8 @@ impl PlaybackState {
 pub struct AudioPlayerBackend {
 	audio_context: Option<AudioContext>,
 	gain_node: Option<web_sys::GainNode>,
+	// 좌우 노드. (StereoPannerNode, 0 이 아닌 좌우를 처음 걸 때 만든다)
+	panner_node: Option<web_sys::AudioNode>,
 	playback_state: Rc<RefCell<PlaybackState>>,
 	playback_rate: f64,
 }
@@ -358,6 +393,7 @@ impl AudioPlayerBackend {
 		AudioPlayerBackend {
 			audio_context,
 			gain_node,
+			panner_node: None,
 			playback_state: Rc::new(RefCell::new(PlaybackState {
 				audio_source: None,
 				ended_callback: None,
@@ -435,6 +471,36 @@ impl AudioPlayerBackend {
 	}
 
 	//==============================================================================
+	// 좌우 설정. (-1 왼쪽 ~ 1 오른쪽, 0 이 아니면 GainNode → StereoPannerNode → 출력으로 잇는다)
+	//==============================================================================
+	pub fn set_pan(&mut self, pan: f32) {
+		if self.panner_node.is_none() && pan != 0.0 {
+			self.panner_node = self.create_panner_node();
+		}
+		if let Some(panner_node) = &self.panner_node {
+			let pan_parameter = js_sys::Reflect::get(panner_node, &JsValue::from_str("pan")).ok().and_then(|value| value.dyn_into::<web_sys::AudioParam>().ok());
+			if let Some(pan_parameter) = pan_parameter {
+				pan_parameter.set_value(pan);
+			}
+		}
+	}
+
+	//==============================================================================
+	// StereoPannerNode 를 만들어 GainNode 와 출력 사이에 끼운다. (createStereoPanner 가 없으면 None)
+	//==============================================================================
+	fn create_panner_node(&self) -> Option<web_sys::AudioNode> {
+		let audio_context = self.audio_context.as_ref()?;
+		let gain_node = self.gain_node.as_ref()?;
+		let create_function: js_sys::Function = js_sys::Reflect::get(audio_context, &JsValue::from_str("createStereoPanner")).ok()?.dyn_into().ok()?;
+		let panner_node: web_sys::AudioNode = create_function.call0(audio_context).ok()?.dyn_into().ok()?;
+		let destination = audio_context.destination();
+		let _ = gain_node.disconnect();
+		let _ = gain_node.connect_with_audio_node(&panner_node);
+		let _ = panner_node.connect_with_audio_node(&destination);
+		Some(panner_node)
+	}
+
+	//==============================================================================
 	// 음량 설정. (gain_node.gain.value)
 	//==============================================================================
 	pub fn set_gain(&mut self, gain: f32) {
@@ -460,6 +526,9 @@ impl Drop for AudioPlayerBackend {
 		self.playback_state.borrow_mut().stop_source();
 		if let Some(gain_node) = &self.gain_node {
 			let _ = gain_node.disconnect();
+		}
+		if let Some(panner_node) = &self.panner_node {
+			let _ = panner_node.disconnect();
 		}
 	}
 }

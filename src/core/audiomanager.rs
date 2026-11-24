@@ -38,6 +38,20 @@ impl AudioManagerState {
 		}
 		self.audio_context.as_mut()
 	}
+
+	//==============================================================================
+	// AudioContext 가 있고 돌고 있는지. (원본 audio_context !== null && state === "running")
+	//==============================================================================
+	pub(crate) fn is_context_running(&self) -> bool {
+		match &self.audio_context {
+			Some(audio_context) => {
+				audio_backend::is_audio_context_running(audio_context)
+			}
+			None => {
+				false
+			}
+		}
+	}
 }
 
 //==============================================================================
@@ -111,6 +125,13 @@ impl AudioManager {
 		let audio_context = state.ensure_audio_context();
 		let audio_player_backend = AudioPlayerBackend::create(audio_context);
 		AudioPlayer::new(audio_player_backend)
+	}
+
+	//==============================================================================
+	// AudioContext 가 있고 돌고 있는지. (SoundSystem 이 소리를 낼지 정할 때)
+	//==============================================================================
+	pub(crate) fn is_context_running(&self) -> bool {
+		self.state.borrow().is_context_running()
 	}
 
 	//==============================================================================
