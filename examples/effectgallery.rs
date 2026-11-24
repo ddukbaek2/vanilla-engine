@@ -4,14 +4,16 @@
 //   그림은 코드로 만든 두 칸짜리 시트이고 모든 칸이 왼쪽 칸(image_rect)만 쓴다. 오른쪽 칸은 (경계 두 줄을 빼고) 새빨간 사각형이라 textureRect 자르기가 틀리면 빨강이 번져 보인다.
 // - 오른쪽: 둥근 모서리 무대에만 ScreenEffect 를 건다. (set_region) 30 프레임마다 효과 묶음이 바뀌고, 120 프레임 묶음은 화면 전체(clear_region)에 건다.
 //   3 프레임째에는 모든 효과를 한꺼번에 켜서 패스 셰이더가 다 컴파일되는지 본다. (실패하면 stderr 에 ScreenEffect: pass ... failed)
-// - 아래: TrailRenderer 둘. (보통 합성, 더하기 합성) 무대 안에도 더하기 합성 트레일이 하나 돈다.
+// - 아래 왼쪽: TrailRenderer 둘. (보통 합성, 더하기 합성) 무대 안에도 더하기 합성 트레일이 하나 돈다.
+// - 아래 오른쪽: ParticleSystem 칸 여덟. 렌더 모양 넷(circle 분수, rect 색종이, streak 불티, image 별)과 끌개(소용돌이), 흔들림(물방울), edge(눈), 월드 공간(도는 방출점이 남기는 자국).
+//   저장한 화면이 실행마다 같게 수동 tick 으로 프레임마다 1/60 초씩, 씨앗을 고정해 흘리고, 처음 2 초를 미리 흘려 둔다.
 // - 실행: cargo run --release --example effectgallery
 //   화면 저장: VANILLA_CAPTURE_PATH=shots/effect_{frame}.png VANILLA_CAPTURE_FRAMES=60,120 VANILLA_CAPTURE_EXIT=1
 //==============================================================================
 
 use std::rc::Rc;
 use vanilla::core::graphic::TextAlign;
-use vanilla::{math, Color, Component, ComponentBase, ComponentContext, Engine, EngineConfiguration, Graphic, Image, NodeId, Paint, Pivot, Rect, Scene, SceneBase, ScreenEffect, ScreenEffectType, ShaderSprite, ShaderSpriteEffect, Sprite, Text, TrailRenderer, Vector2, ViewScaleMode};
+use vanilla::{math, Color, Component, ComponentBase, ComponentContext, EmitterShape, Engine, EngineConfiguration, Graphic, Image, Mask, NodeId, Paint, ParticleRenderShape, ParticleSystem, Pivot, Rect, Scene, SceneBase, ScreenEffect, ScreenEffectType, ShaderSprite, ShaderSpriteEffect, Sprite, Text, TrailRenderer, Vector2, ViewScaleMode};
 
 //==============================================================================
 // 전역 상수 목록.
@@ -39,6 +41,17 @@ const EFFECT_SET_COUNT: usize = 8;
 const COMPILE_CHECK_FRAME: u64 = 3;
 // 움직이는 노드가 프레임마다 가는 시간. (창이 뜨기 전 첫 프레임들은 수직 동기 없이 빨리 돌아서, 실제 시간으로 움직이면 저장한 프레임 모양이 실행마다 다르다)
 const MOVER_FRAME_STEP: f32 = 1.0 / 60.0;
+// 아래 트레일이 오가는 오른쪽 끝. (그 오른쪽은 파티클 칸)
+const TRAIL_END_X: f32 = 410.0;
+// 파티클 칸 줄.
+const PARTICLE_ROW_LEFT: f32 = 455.0;
+const PARTICLE_ROW_TOP: f32 = 588.0;
+const PARTICLE_CELL_STEP: f32 = 101.25;
+const PARTICLE_CELL_WIDTH: f32 = 97.0;
+const PARTICLE_CELL_HEIGHT: f32 = 124.0;
+const PARTICLE_STAR_SIZE: u32 = 32;
+// 파티클을 미리 흘려 두는 시간. (초)
+const PARTICLE_WARM_UP_SECONDS: f32 = 2.0;
 
 //==============================================================================
 // 원을 따라 도는 노드. (무대 안 트레일)
@@ -182,6 +195,36 @@ fn create_character_sheet() -> Rc<Image> {
 }
 
 //==============================================================================
+// 별 그림 만들기. (다섯 뿔, 가장자리 부드럽게. 파티클 image 모양용)
+//==============================================================================
+fn create_star_image() -> Rc<Image> {
+	let image_size = PARTICLE_STAR_SIZE;
+	let mut pixels = vec![0u8; (image_size * image_size * 4) as usize];
+	let center = image_size as f32 * 0.5;
+	for pixel_y in 0..image_size {
+		for pixel_x in 0..image_size {
+			let delta_x = pixel_x as f32 + 0.5 - center;
+			let delta_y = pixel_y as f32 + 0.5 - center;
+			let distance = (delta_x * delta_x + delta_y * delta_y).sqrt();
+			let angle = delta_y.atan2(delta_x) + math::PI * 0.5;
+			let point_ratio = (0.5 + 0.5 * (angle * 5.0).cos()).powi(3);
+			let edge_distance = center * (0.42 + 0.56 * point_ratio);
+			let coverage = math::clamp01(edge_distance - distance + 0.5);
+			if coverage <= 0.0 {
+				continue;
+			}
+			let pixel_index = ((pixel_y * image_size + pixel_x) * 4) as usize;
+			let shine = math::clamp01(1.0 - distance / center);
+			pixels[pixel_index] = 255;
+			pixels[pixel_index + 1] = (200.0 + 55.0 * shine) as u8;
+			pixels[pixel_index + 2] = (60.0 + 160.0 * shine) as u8;
+			pixels[pixel_index + 3] = (coverage * 255.0) as u8;
+		}
+	}
+	Image::create_from_pixels(image_size, image_size, pixels)
+}
+
+//==============================================================================
 // 칸 효과의 진행도. (사라짐 / 드러남은 절반, 광택은 띠가 가운데, 섬광은 조금 덜)
 //==============================================================================
 fn get_gallery_effect_progress(effect: ShaderSpriteEffect) -> f32 {
@@ -210,6 +253,7 @@ struct EffectGalleryScene {
 	applied_effect_set_index: Option<usize>,
 	is_full_screen_effect: bool,
 	effect_set_text_id: Option<NodeId>,
+	particle_node_ids: Vec<NodeId>,
 }
 
 impl EffectGalleryScene {
@@ -223,6 +267,7 @@ impl EffectGalleryScene {
 			applied_effect_set_index: None,
 			is_full_screen_effect: false,
 			effect_set_text_id: None,
+			particle_node_ids: Vec::new(),
 		}
 	}
 
@@ -368,7 +413,7 @@ impl EffectGalleryScene {
 				component_base: ComponentBase::new(),
 				elapsed_time: 0.0,
 				start_x: GRID_LEFT + 40.0,
-				end_x: GRID_LEFT + CELL_WIDTH * GRID_COLUMN_COUNT as f32 - 20.0,
+				end_x: TRAIL_END_X,
 				horizontal_frequency: 1.3,
 				base_y,
 				amplitude,
@@ -383,6 +428,196 @@ impl EffectGalleryScene {
 		self.add_label(root_id, Vector2::create(GRID_LEFT + 4.0, 575.0), Vector2::create(400.0, 16.0), "TrailRenderer: 위 보통 합성, 아래 더하기 합성", 13.0, TextAlign::Left);
 		let effect_set_text_id = self.add_label(root_id, Vector2::create(STAGE_X + 4.0, 575.0), Vector2::create(STAGE_WIDTH, 16.0), "", 13.0, TextAlign::Left);
 		self.effect_set_text_id = Some(effect_set_text_id);
+	}
+
+	//==============================================================================
+	// 파티클 칸 하나. (둥근 바탕과 자르기, 아래 이름. 파티클 노드를 칸 왼쪽 위 기준 position 에 만들어 돌려준다)
+	//==============================================================================
+	fn add_particle_cell(&mut self, root_id: NodeId, cell_index: usize, title: &str, position: Vector2) -> NodeId {
+		let cell_left = PARTICLE_ROW_LEFT + cell_index as f32 * PARTICLE_CELL_STEP;
+		let node_tree = self.scene_base.get_node_tree_mut();
+		let cell_id = node_tree.create_child(root_id, "particleCell");
+		let cell_node = &mut node_tree[cell_id];
+		cell_node.set_pivot(Pivot::TOP_LEFT);
+		cell_node.set_local_position(Vector2::create(cell_left, PARTICLE_ROW_TOP));
+		cell_node.set_content_size(Vector2::create(PARTICLE_CELL_WIDTH, PARTICLE_CELL_HEIGHT));
+		let cell_paint = cell_node.add_component(Paint::create_with_color(CELL_COLOR));
+		cell_paint.set_round_size(8.0);
+		cell_node.add_component(Mask::new()).set_round_size(8.0);
+
+		let particle_id = node_tree.create_child(cell_id, "particle");
+		node_tree[particle_id].set_local_position(position);
+		self.add_label(cell_id, Vector2::create(PARTICLE_CELL_WIDTH * 0.5, PARTICLE_CELL_HEIGHT - 10.0), Vector2::create(PARTICLE_CELL_WIDTH, 14.0), title, 12.0, TextAlign::Center);
+		particle_id
+	}
+
+	//==============================================================================
+	// 파티클 붙이기. (수동 tick, 칸마다 다른 씨앗, 처음 몇 초를 미리 흘린다)
+	//==============================================================================
+	fn attach_particle_system(&mut self, particle_id: NodeId, particle_system: ParticleSystem) {
+		let mut particle_system = particle_system;
+		particle_system.set_manual_tick(true);
+		particle_system.set_random_seed(100 + self.particle_node_ids.len() as u32);
+		let mut warm_up_seconds = 0.0;
+		while warm_up_seconds < PARTICLE_WARM_UP_SECONDS {
+			particle_system.simulate(MOVER_FRAME_STEP, Vector2::zero());
+			warm_up_seconds += MOVER_FRAME_STEP;
+		}
+		self.scene_base.get_node_tree_mut()[particle_id].add_component(particle_system);
+		self.particle_node_ids.push(particle_id);
+	}
+
+	//==============================================================================
+	// 파티클 칸 여덟. (렌더 모양 넷, 끌개, 흔들림, edge, 월드 공간)
+	//==============================================================================
+	fn create_particle_showcase(&mut self, root_id: NodeId) {
+		let cell_center_x = PARTICLE_CELL_WIDTH * 0.5;
+		let fade_out = vec![(0.0, Color::white()), (0.7, Color::white()), (1.0, Color::create(1.0, 1.0, 1.0, 0.0))];
+
+		// circle: 위로 뿜었다 떨어지는 분수.
+		let mut fountain = ParticleSystem::new();
+		fountain.set_emitter_shape(EmitterShape::Cone);
+		fountain.set_cone_angle(math::degree_to_radian(30.0));
+		fountain.set_emission_rate(70.0);
+		fountain.set_start_speed(150.0, 190.0);
+		fountain.set_gravity(0.0, 260.0);
+		fountain.set_start_lifetime(1.0, 1.3);
+		fountain.set_start_size(4.0, 7.0);
+		fountain.set_start_color(Color::create(1.0, 0.85, 0.4, 1.0), Color::create(1.0, 0.5, 0.2, 1.0));
+		fountain.set_color_over_lifetime(fade_out.clone());
+		let fountain_id = self.add_particle_cell(root_id, 0, "circle", Vector2::create(cell_center_x, 100.0));
+		self.attach_particle_system(fountain_id, fountain);
+
+		// rect: 돌며 떨어지는 색종이.
+		let mut confetti = ParticleSystem::new();
+		confetti.set_emitter_shape(EmitterShape::Edge);
+		confetti.set_edge_width(90.0);
+		confetti.set_emission_rate(24.0);
+		confetti.set_start_speed(15.0, 35.0);
+		confetti.set_gravity(0.0, 30.0);
+		confetti.set_start_lifetime(3.0, 3.5);
+		confetti.set_start_size(6.0, 9.0);
+		confetti.set_start_rotation(0.0, math::PI * 2.0);
+		confetti.set_angular_velocity(-6.0, 6.0);
+		confetti.set_start_color(Color::create(1.0, 0.35, 0.45, 1.0), Color::create(0.35, 0.75, 1.0, 1.0));
+		confetti.set_wobble(6.0, 3.0);
+		confetti.set_render_shape(ParticleRenderShape::Rect);
+		let confetti_id = self.add_particle_cell(root_id, 1, "rect", Vector2::create(cell_center_x, -6.0));
+		self.attach_particle_system(confetti_id, confetti);
+
+		// streak: 사방으로 튀는 불티. (더하기 합성)
+		let mut sparks = ParticleSystem::new();
+		sparks.set_emission_rate(50.0);
+		sparks.set_start_speed(90.0, 170.0);
+		sparks.set_damping(1.8);
+		sparks.set_gravity(0.0, 60.0);
+		sparks.set_start_lifetime(0.5, 0.9);
+		sparks.set_start_size(2.0, 3.0);
+		sparks.set_start_color(Color::create(1.0, 0.9, 0.5, 1.0), Color::create(1.0, 0.6, 0.2, 1.0));
+		sparks.set_color_over_lifetime(fade_out.clone());
+		sparks.set_render_shape(ParticleRenderShape::Streak);
+		sparks.set_streak_scale(0.08);
+		sparks.set_additive(true);
+		let sparks_id = self.add_particle_cell(root_id, 2, "streak", Vector2::create(cell_center_x, 56.0));
+		self.attach_particle_system(sparks_id, sparks);
+
+		// image: 돌며 퍼지는 별 그림.
+		let mut stars = ParticleSystem::new();
+		stars.set_emitter_shape(EmitterShape::Circle);
+		stars.set_shape_radius(10.0);
+		stars.set_emission_rate(8.0);
+		stars.set_start_speed(20.0, 40.0);
+		stars.set_start_lifetime(1.4, 1.8);
+		stars.set_start_size(14.0, 22.0);
+		stars.set_start_rotation(0.0, math::PI * 2.0);
+		stars.set_angular_velocity(-2.0, 2.0);
+		stars.set_size_over_lifetime(1.0, 0.6);
+		stars.set_image(Some(create_star_image()));
+		stars.set_render_shape(ParticleRenderShape::Image);
+		let stars_id = self.add_particle_cell(root_id, 3, "image", Vector2::create(cell_center_x, 56.0));
+		self.attach_particle_system(stars_id, stars);
+
+		// 끌개: 가운데로 빨려 들며 도는 소용돌이. (더하기 합성)
+		let mut vortex = ParticleSystem::new();
+		vortex.set_emitter_shape(EmitterShape::Circle);
+		vortex.set_shape_radius(46.0);
+		vortex.set_emission_rate(140.0);
+		vortex.set_start_speed(0.0, 6.0);
+		vortex.set_attractor(0.0, 0.0, 260.0, 140.0);
+		vortex.set_damping(1.6);
+		vortex.set_start_lifetime(1.6, 2.4);
+		vortex.set_start_size(2.0, 4.0);
+		vortex.set_size_over_lifetime(1.0, 0.5);
+		vortex.set_start_color(Color::create(0.5, 0.7, 1.0, 1.0), Color::create(0.8, 0.6, 1.0, 1.0));
+		vortex.set_color_over_lifetime(vec![(0.0, Color::create(1.0, 1.0, 1.0, 0.0)), (0.15, Color::white()), (0.85, Color::create(1.0, 1.0, 1.0, 0.9)), (1.0, Color::create(1.0, 1.0, 1.0, 0.0))]);
+		vortex.set_additive(true);
+		let vortex_id = self.add_particle_cell(root_id, 4, "attractor", Vector2::create(cell_center_x, 54.0));
+		self.attach_particle_system(vortex_id, vortex);
+
+		// 흔들림: 살랑이며 오르는 물방울.
+		let mut bubbles = ParticleSystem::new();
+		bubbles.set_emitter_shape(EmitterShape::Rectangle);
+		bubbles.set_box_size(70.0, 0.0);
+		bubbles.set_cone_angle(math::degree_to_radian(20.0));
+		bubbles.set_emission_rate(12.0);
+		bubbles.set_start_speed(25.0, 40.0);
+		bubbles.set_wobble(10.0, 3.0);
+		bubbles.set_start_lifetime(2.4, 3.0);
+		bubbles.set_start_size(5.0, 9.0);
+		bubbles.set_size_over_lifetime(0.6, 1.2);
+		bubbles.set_start_color(Color::create(0.6, 0.85, 1.0, 0.75), Color::create(0.8, 0.95, 1.0, 0.75));
+		let bubbles_id = self.add_particle_cell(root_id, 5, "wobble", Vector2::create(cell_center_x, 108.0));
+		self.attach_particle_system(bubbles_id, bubbles);
+
+		// edge: 위 가로 선분에서 내리는 눈.
+		let mut snow = ParticleSystem::new();
+		snow.set_emitter_shape(EmitterShape::Edge);
+		snow.set_edge_width(110.0);
+		snow.set_emission_rate(20.0);
+		snow.set_start_speed(15.0, 30.0);
+		snow.set_gravity(0.0, 8.0);
+		snow.set_wobble(5.0, 1.4);
+		snow.set_start_lifetime(4.0, 5.0);
+		snow.set_start_size(3.0, 5.0);
+		snow.set_start_color(Color::create(1.0, 1.0, 1.0, 0.9), Color::create(0.85, 0.92, 1.0, 0.9));
+		let snow_id = self.add_particle_cell(root_id, 6, "edge", Vector2::create(cell_center_x, -4.0));
+		self.attach_particle_system(snow_id, snow);
+
+		// 월드 공간: 도는 방출점이 남긴 입자가 제자리에 남아 자국이 된다. (더하기 합성)
+		let mut trail_particles = ParticleSystem::new();
+		trail_particles.set_emission_rate(70.0);
+		trail_particles.set_start_speed(4.0, 12.0);
+		trail_particles.set_start_lifetime(0.9, 1.2);
+		trail_particles.set_start_size(4.0, 7.0);
+		trail_particles.set_start_color(Color::create(0.5, 1.0, 0.7, 1.0), Color::create(0.4, 0.9, 1.0, 1.0));
+		trail_particles.set_color_over_lifetime(vec![(0.0, Color::white()), (1.0, Color::create(1.0, 1.0, 1.0, 0.0))]);
+		trail_particles.set_world_space(true);
+		trail_particles.set_additive(true);
+		let orbit_center = Vector2::create(cell_center_x, 54.0);
+		let orbit_particle_id = self.add_particle_cell(root_id, 7, "world space", orbit_center);
+		// 도는 컴포넌트를 먼저 붙여, 파티클이 tick 에서 읽는 노드 위치가 이번 프레임 것이 되게 한다.
+		self.scene_base.get_node_tree_mut()[orbit_particle_id].add_component(OrbitMover {
+			component_base: ComponentBase::new(),
+			center: orbit_center,
+			radius: 26.0,
+			angular_speed: 3.0,
+			angle: 0.0,
+		});
+		self.attach_particle_system(orbit_particle_id, trail_particles);
+
+		self.add_label(root_id, Vector2::create(PARTICLE_ROW_LEFT + 4.0, 575.0), Vector2::create(400.0, 16.0), "ParticleSystem: 렌더 모양 넷과 끌개, 흔들림, edge, 월드 공간", 13.0, TextAlign::Left);
+	}
+
+	//==============================================================================
+	// 파티클 시간 진행. (수동 tick, 프레임마다 같은 시간)
+	//==============================================================================
+	fn simulate_particles(&mut self) {
+		let node_tree = self.scene_base.get_node_tree_mut();
+		for particle_id in self.particle_node_ids.iter() {
+			if let Some(particle_system) = node_tree[*particle_id].get_component_mut::<ParticleSystem>() {
+				particle_system.simulate(MOVER_FRAME_STEP, Vector2::zero());
+			}
+		}
 	}
 
 	//==============================================================================
@@ -512,6 +747,7 @@ impl Scene for EffectGalleryScene {
 		self.create_shader_sprite_grid(root_id, &sheet_image);
 		self.create_stage(root_id, &sheet_image);
 		self.create_trail_showcase(root_id);
+		self.create_particle_showcase(root_id);
 		self.add_label(root_id, Vector2::create(GRID_LEFT + 430.0, 26.0), Vector2::create(400.0, 18.0), "ShaderSpriteEffect 50 가지", 15.0, TextAlign::Left);
 	}
 
@@ -536,6 +772,7 @@ impl Scene for EffectGalleryScene {
 		self.screen_effect.set_parameters(ScreenEffectType::Shockwave, stage_center_x, stage_center_y, shockwave_radius, 0.12);
 		self.screen_effect.tick(time_delta);
 		self.scene_base.tick(engine, time_delta);
+		self.simulate_particles();
 	}
 
 	//==============================================================================

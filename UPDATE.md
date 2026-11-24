@@ -45,6 +45,10 @@
 - Sprite: set_image_path, get_image_path(원본 sprite.imagePath), set_round_size, get_round_size(원본은 Paint 를 상속해 쓰던 것). UIImageView: set_image_path, get_image_path. ShadowText: get_text_align, get_fit_minimum_ratio. ShadowImage: get_image_color, set_image_path, get_image_path
 - serde_json 의 preserve_order 를 켰다. JSON 객체 키가 적힌 차례를 지킨다. (UIDocument 가 원본 JSON.stringify 와 같은 차례로 쓴다. 지금까지는 이름 차례였다)
 - 예제: scenedocument. 원본 UIDocument 와 에디터 저장 꼴로 만든 씬 파일(examples/assets/scenedocument.scene.json)을 읽어 그리고, 다시 내보내 읽은 문서와 같은지 화면에 적는다
+- ParticleSystem: 원본의 렌더 모양(ParticleRenderShape 의 Circle, Rect, Streak, Image 와 set_render_shape), 끌개(set_attractor, clear_attractor, 방출점 기준 자리), 흔들림(set_wobble), 늘어짐 길이(set_streak_scale), 월드 공간(set_world_space), edge 방출 모양(EmitterShape::Edge, set_edge_width)을 옮겼다. 서술(apply_description)도 renderShape, attractor, wobble, streakScale, worldSpace, edgeWidth 를 원본 이름으로 읽는다. 그리기는 모양마다 쿼드를 모아 한 번에 그린다. (circle 은 부드러운 원, rect 와 streak 은 흰 텍스처, image 는 그림 텍스처) image 는 원본처럼 색 곡선 없이 시작 알파 x (1 - 수명 비율) 로만 흐려진다
+- ParticleSystem 의 바뀐 동작: 그림을 넣으면 늘 그림으로 그리던 것을 원본처럼 렌더 모양이 image 일 때만 그림으로 그린다. 서술의 edge 를 위로 퍼지는 납작한 사각형으로 읽던 것을 원본처럼 아래로 낸다. 입자마다 흔들림 위상을 뽑아 씨앗을 고정한 파티클(타임라인)의 입자 자리가 전과 다르다. circle 은 원본처럼 돌리지 않은 쿼드로, 크기는 0.1 아래로, 알파는 0 ~ 1 밖으로 가지 않는다
+- EmitterShape, ParticleRenderShape 를 크레이트 맨 위에서 내보낸다
+- 예제 effectgallery: 아래 오른쪽에 ParticleSystem 칸 여덟(circle 분수, rect 색종이, streak 불티, image 별, 끌개 소용돌이, 흔들림 물방울, edge 눈, 월드 공간 자국)을 두었다. 아래 트레일은 왼쪽만 오간다
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.

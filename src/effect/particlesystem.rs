@@ -1,8 +1,17 @@
 //==============================================================================
 // 파티클 시스템 컴포넌트.
-// - 원본 ParticleSystem 의 줄인 판. 이름과 쓰임새(play / stop / emit / setStart...)는 원본을 따른다.
+// - 원본 effect/particlesystem.js 의 ParticleSystem. 이름과 쓰임새(play / stop / emit / setStart...)는 원본을 따른다.
 // - 입자는 노드 로컬 좌표(content_size 가운데가 방출점)에서 움직이고, 정점마다 색을 실어 draw_colored_quads 한 번으로 그린다.
-// - 원본에서 옮기지 않은 것: 끌개, 흔들림, 늘어짐, 월드 공간, 렌더 모양, edge 방출 모양(서술의 edge 는 폭 edge_width, 높이 0 인 rectangle 로 읽는다).
+// - 렌더 모양(set_render_shape)은 원본처럼 circle(부드러운 원 텍스처), rect(흰 텍스처의 도는 판), streak(속도 방향으로 늘인 띠, 길이는 속도 x streak_scale),
+//   image(set_image 의 그림, 그림이 없으면 흰 판)다. 원본은 image 를 입자마다 따로 그린다. 러스트 판은 그림 텍스처로 한 번에 그리되,
+//   원본처럼 색 곡선과 시작 색(r, g, b)을 쓰지 않고 시작 알파 x (1 - 수명 비율) 로만 흐려진다.
+// - 끌개(set_attractor)는 원본처럼 중심 쪽 가속과 접선 쪽 가속(소용돌이)을 더한다. 자리는 방출점 기준이다. (원본은 방출점이 노드 원점이라 같은 뜻)
+// - 흔들림(set_wobble)은 원본처럼 그릴 때만 가로로 sin 만큼 민다. 입자마다 위상이 다르다.
+// - 월드 공간(set_world_space)은 원본처럼 노드의 로컬 위치만 따진다. 낼 때 위치를 더하고 그릴 때 빼서, 낸 뒤 노드가 움직여도 입자는 제자리다.
+//   낼 때 쓰는 위치는 tick 에서 읽어 둔다. (수동 tick 이어도 읽는다)
+// - edge 방출 모양은 원본처럼 가로 선분(set_edge_width) 위 무작위 자리에서 아래(+Y)로 낸다.
+// - 원본과 다른 것: 기본값(최대 1000 개, 속도 100, 크기 16, 원뿔 전체 폭 30 도), 원뿔(cone)은 반지름 없이 방출점 한 점에서 내고,
+//   box(rectangle)는 위로만이 아니라 원뿔 폭으로 퍼진다. 낼 때 난수를 뽑는 차례도 원본과 달라 같은 씨앗이어도 원본과 같은 입자가 나오지 않는다.
 // - 타임라인이 쓰는 것은 옮겼다: 버스트 목록(set_burst_list), 수동 tick(set_manual_tick + simulate), 씨앗 고정(set_random_seed), 서술 적용(apply_description).
 //   simulate 는 원본과 달리 방출점(노드 로컬, 보통 content_size 가운데)을 같이 받는다. (emit 과 같은 까닭: 노드 없이 부른다)
 //==============================================================================
@@ -30,15 +39,44 @@ pub enum EmitterShape {
 	Cone,
 	// box_size 사각형 안의 (원본 이름은 box, 러스트 예약어라 rectangle) 무작위 점에서, 위쪽(-Y)을 가운데로 cone_angle 폭 안의 방향으로.
 	Rectangle,
+	// edge_width 가로 선분 위 무작위 점에서 아래쪽(+Y)으로. (눈, 비처럼 위에서 뿌릴 때)
+	Edge,
 }
 
 // 서술의 방출 모양 이름. (원본 ParticleEmitterShape 값, box 는 rectangle)
-const EMITTER_SHAPE_NAME_TABLE: [(EmitterShape, &str); 4] = [
+const EMITTER_SHAPE_NAME_TABLE: [(EmitterShape, &str); 5] = [
 	(EmitterShape::Point, "point"),
 	(EmitterShape::Circle, "circle"),
 	(EmitterShape::Cone, "cone"),
 	(EmitterShape::Rectangle, "box"),
+	(EmitterShape::Edge, "edge"),
 ];
+
+//==============================================================================
+// 렌더 모양. (원본 ParticleRenderShape)
+//==============================================================================
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ParticleRenderShape {
+	// 부드러운 원. (기본)
+	Circle,
+	// 사각형. (색종이 조각처럼 도는 판)
+	Rect,
+	// 진행 방향으로 늘인 띠. (비, 유성)
+	Streak,
+	// set_image 로 넣은 그림.
+	Image,
+}
+
+// 서술의 렌더 모양 이름. (원본 ParticleRenderShape 값)
+const RENDER_SHAPE_NAME_TABLE: [(ParticleRenderShape, &str); 4] = [
+	(ParticleRenderShape::Circle, "circle"),
+	(ParticleRenderShape::Rect, "rect"),
+	(ParticleRenderShape::Streak, "streak"),
+	(ParticleRenderShape::Image, "image"),
+];
+
+// 쿼드 네 모서리의 텍스처 좌표. (왼쪽 위, 오른쪽 위, 오른쪽 아래, 왼쪽 아래)
+const QUAD_TEXTURE_COORDINATES: [(f32, f32); 4] = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)];
 
 //==============================================================================
 // 버스트 하나. (재생 시작부터 time 초에 count 개를 한 번에 낸다. 반복이면 duration 주기마다)
@@ -58,6 +96,7 @@ struct Particle {
 	start_color: Color,
 	age: f32,
 	lifetime: f32,
+	wobble_phase: f32,
 }
 
 pub struct ParticleSystem {
@@ -73,6 +112,7 @@ pub struct ParticleSystem {
 	shape_radius: f32,
 	cone_angle: f32,
 	box_size: Vector2,
+	edge_width: f32,
 	start_lifetime: (f32, f32),
 	start_speed: (f32, f32),
 	start_size: (f32, f32),
@@ -83,8 +123,17 @@ pub struct ParticleSystem {
 	angular_velocity: (f32, f32),
 	gravity: Vector2,
 	damping: f32,
+	attractor_position: Option<Vector2>,
+	attractor_strength: f32,
+	attractor_swirl: f32,
+	wobble_amplitude: f32,
+	wobble_frequency: f32,
+	render_shape: ParticleRenderShape,
 	image: Option<Rc<Image>>,
 	blend_mode: BlendMode,
+	streak_scale: f32,
+	is_world_space: bool,
+	node_position: Vector2,
 	max_particle_count: usize,
 	burst_list: Vec<ParticleBurst>,
 	is_manual_tick: bool,
@@ -110,6 +159,7 @@ impl ParticleSystem {
 			shape_radius: 0.0,
 			cone_angle: math::degree_to_radian(30.0),
 			box_size: Vector2::zero(),
+			edge_width: 0.0,
 			start_lifetime: (1.0, 1.0),
 			start_speed: (100.0, 100.0),
 			start_size: (16.0, 16.0),
@@ -120,8 +170,17 @@ impl ParticleSystem {
 			angular_velocity: (0.0, 0.0),
 			gravity: Vector2::zero(),
 			damping: 0.0,
+			attractor_position: None,
+			attractor_strength: 0.0,
+			attractor_swirl: 0.0,
+			wobble_amplitude: 0.0,
+			wobble_frequency: 4.0,
+			render_shape: ParticleRenderShape::Circle,
 			image: None,
 			blend_mode: BlendMode::Normal,
+			streak_scale: 0.06,
+			is_world_space: false,
+			node_position: Vector2::zero(),
 			max_particle_count: 1000,
 			burst_list: Vec::new(),
 			is_manual_tick: false,
@@ -157,7 +216,7 @@ impl ParticleSystem {
 	}
 
 	//==============================================================================
-	// 즉시 방출. (재생 여부와 상관없이 count 개)
+	// 즉시 방출. (재생 여부와 상관없이 count 개, 방출점은 노드 로컬 좌표. 월드 공간이면 노드 위치를 더해 둔다)
 	//==============================================================================
 	pub fn emit(&mut self, count: usize, emitter_center: Vector2) {
 		for _ in 0..count {
@@ -194,15 +253,24 @@ impl ParticleSystem {
 				let offset_y = self.random_range(-0.5, 0.5) * self.box_size.y;
 				(Vector2::create(offset_x, offset_y), radian)
 			}
+			EmitterShape::Edge => {
+				let offset_x = self.random_range(-0.5, 0.5) * self.edge_width;
+				(Vector2::create(offset_x, 0.0), math::PI * 0.5)
+			}
 		};
+		let mut spawn_position = emitter_center.add(offset);
+		if self.is_world_space {
+			spawn_position = spawn_position.add(self.node_position);
+		}
 		let speed = self.random_between(self.start_speed);
 		let color_mix = self.random_range(0.0, 1.0);
 		let rotation = self.random_between(self.start_rotation);
 		let angular_velocity = self.random_between(self.angular_velocity);
 		let start_size = self.random_between(self.start_size);
 		let lifetime = self.random_between(self.start_lifetime).max(0.01);
+		let wobble_phase = self.random_range(0.0, math::PI * 2.0);
 		Particle {
-			position: emitter_center.add(offset),
+			position: spawn_position,
 			velocity: Vector2::create(direction_radian.cos() * speed, direction_radian.sin() * speed),
 			rotation,
 			angular_velocity,
@@ -210,6 +278,7 @@ impl ParticleSystem {
 			start_color: Color::lerp(self.start_color.0, self.start_color.1, color_mix),
 			age: 0.0,
 			lifetime,
+			wobble_phase,
 		}
 	}
 
@@ -255,12 +324,24 @@ impl ParticleSystem {
 			}
 		}
 
-		// 입자 갱신.
+		// 입자 갱신. (중력 → 끌개 → 감쇠, 원본 차례)
 		let gravity = self.gravity;
 		let damping_factor = (1.0 - self.damping * time_delta).max(0.0);
+		let attractor_center = self.attractor_position.map(|attractor_position| emitter_center.add(attractor_position));
+		let attractor_strength = self.attractor_strength;
+		let attractor_swirl = self.attractor_swirl;
 		for particle in self.particles.iter_mut() {
 			particle.age += time_delta;
-			particle.velocity = particle.velocity.add(gravity.multiply_scalar(time_delta)).multiply_scalar(damping_factor);
+			let mut velocity = particle.velocity.add(gravity.multiply_scalar(time_delta));
+			if let Some(attractor_center) = attractor_center {
+				// 가까이 붙어 튀지 않게 거리는 4 아래로 내리지 않는다. (원본과 같음)
+				let to_center = attractor_center.subtract(particle.position);
+				let center_distance = to_center.length().max(4.0);
+				let direction = to_center.multiply_scalar(1.0 / center_distance);
+				velocity = velocity.add(direction.multiply_scalar(attractor_strength * time_delta));
+				velocity = velocity.add(Vector2::create(-direction.y, direction.x).multiply_scalar(attractor_swirl * time_delta));
+			}
+			particle.velocity = velocity.multiply_scalar(damping_factor);
 			particle.position = particle.position.add(particle.velocity.multiply_scalar(time_delta));
 			particle.rotation += particle.angular_velocity * time_delta;
 		}
@@ -338,6 +419,13 @@ impl ParticleSystem {
 		self.box_size = Vector2::create(width, height);
 	}
 
+	//==============================================================================
+	// edge 방출 모양의 가로 길이.
+	//==============================================================================
+	pub fn set_edge_width(&mut self, edge_width: f32) {
+		self.edge_width = edge_width;
+	}
+
 	pub fn set_start_lifetime(&mut self, minimum_seconds: f32, maximum_seconds: f32) {
 		self.start_lifetime = (minimum_seconds, maximum_seconds);
 	}
@@ -382,7 +470,52 @@ impl ParticleSystem {
 	}
 
 	//==============================================================================
-	// 입자 이미지. (None 이면 부드러운 원)
+	// 끌개 설정. (방출점 기준 자리, 중심 쪽 가속(음수면 밀어냄), 접선 쪽 가속(소용돌이). 원본 setAttractor)
+	//==============================================================================
+	pub fn set_attractor(&mut self, x: f32, y: f32, strength: f32, swirl: f32) {
+		self.attractor_position = Some(Vector2::create(x, y));
+		self.attractor_strength = strength;
+		self.attractor_swirl = swirl;
+	}
+
+	//==============================================================================
+	// 끌개 해제.
+	//==============================================================================
+	pub fn clear_attractor(&mut self) {
+		self.attractor_position = None;
+	}
+
+	//==============================================================================
+	// 흔들림 설정. (가로로 살랑이는 폭, 초당 각속도. 원본 기본 각속도는 4)
+	//==============================================================================
+	pub fn set_wobble(&mut self, amplitude: f32, frequency: f32) {
+		self.wobble_amplitude = amplitude;
+		self.wobble_frequency = frequency;
+	}
+
+	//==============================================================================
+	// 렌더 모양 설정. (기본 circle)
+	//==============================================================================
+	pub fn set_render_shape(&mut self, render_shape: ParticleRenderShape) {
+		self.render_shape = render_shape;
+	}
+
+	//==============================================================================
+	// streak 길이 비율. (띠의 길이 = 속도 x 이 값)
+	//==============================================================================
+	pub fn set_streak_scale(&mut self, streak_scale: f32) {
+		self.streak_scale = streak_scale;
+	}
+
+	//==============================================================================
+	// 월드 공간 설정. (켜면 낸 뒤 노드가 움직여도 입자는 그 자리에 남는다)
+	//==============================================================================
+	pub fn set_world_space(&mut self, is_world_space: bool) {
+		self.is_world_space = is_world_space;
+	}
+
+	//==============================================================================
+	// 입자 이미지. (렌더 모양이 image 일 때 쓴다)
 	//==============================================================================
 	pub fn set_image(&mut self, image: Option<Rc<Image>>) {
 		self.image = image;
@@ -463,8 +596,8 @@ impl ParticleSystem {
 
 	//==============================================================================
 	// 서술(JSON) 적용. (원본 apply_description. 준 항목만 반영한다. 색은 [r, g, b, a] 배열)
-	// - 옮기지 않은 항목(attractor, wobble, renderShape, streakScale, worldSpace)은 읽지 않는다.
 	// - cone_angle 은 원본처럼 가운데에서 한쪽으로 벌어지는 각이라, 전체 폭을 받는 set_cone_angle 에는 두 배로 넣는다.
+	// - attractor 는 { x, y, strength, swirl } 이고 null 이면 끌개를 푼다. wobble 은 [폭, 각속도] 이고 각속도를 빼면 4 다.
 	//==============================================================================
 	pub fn apply_description(&mut self, description: &serde_json::Value) {
 		let read_number = |name: &str| description.get(name).and_then(|value| value.as_f64()).map(|value| value as f32);
@@ -509,10 +642,8 @@ impl ParticleSystem {
 		if let Some((width, height)) = read_pair("boxSize") {
 			self.set_box_size(width, height);
 		}
-		if shape_name == Some("edge") {
-			let edge_width = read_number("edgeWidth").unwrap_or(0.0);
-			self.set_emitter_shape(EmitterShape::Rectangle);
-			self.set_box_size(edge_width, 0.0);
+		if let Some(edge_width) = read_number("edgeWidth") {
+			self.set_edge_width(edge_width);
 		}
 		if let Some((minimum, maximum)) = read_pair("lifetime") {
 			self.set_start_lifetime(minimum, maximum);
@@ -550,8 +681,35 @@ impl ParticleSystem {
 		if let Some(damping) = read_number("damping") {
 			self.set_damping(damping);
 		}
+		match description.get("attractor") {
+			Some(serde_json::Value::Object(attractor)) => {
+				let read_attractor_number = |name: &str| attractor.get(name).and_then(|value| value.as_f64()).unwrap_or(0.0) as f32;
+				self.set_attractor(read_attractor_number("x"), read_attractor_number("y"), read_attractor_number("strength"), read_attractor_number("swirl"));
+			}
+			Some(serde_json::Value::Null) | Some(serde_json::Value::Bool(false)) => {
+				self.clear_attractor();
+			}
+			_ => {
+			}
+		}
+		if let Some(wobble_array) = description.get("wobble").and_then(|value| value.as_array()) {
+			let amplitude = wobble_array.first().and_then(|value| value.as_f64()).unwrap_or(0.0) as f32;
+			let frequency = wobble_array.get(1).and_then(|value| value.as_f64()).unwrap_or(4.0) as f32;
+			self.set_wobble(amplitude, frequency);
+		}
+		if let Some(render_shape_name) = description.get("renderShape").and_then(|value| value.as_str()) {
+			if let Some((render_shape, _)) = RENDER_SHAPE_NAME_TABLE.iter().find(|(_, name)| *name == render_shape_name) {
+				self.set_render_shape(*render_shape);
+			}
+		}
 		if let Some(blend_mode) = description.get("blendMode").and_then(|value| value.as_str()).and_then(BlendMode::from_name) {
 			self.set_blend_mode(blend_mode);
+		}
+		if let Some(streak_scale) = read_number("streakScale") {
+			self.set_streak_scale(streak_scale);
+		}
+		if let Some(is_world_space) = description.get("worldSpace").and_then(|value| value.as_bool()) {
+			self.set_world_space(is_world_space);
 		}
 	}
 }
@@ -576,6 +734,7 @@ impl Component for ParticleSystem {
 	}
 
 	fn tick(&mut self, context: &mut ComponentContext, time_delta: f32) {
+		self.node_position = context.get_transform().get_local_position();
 		if self.is_manual_tick {
 			return;
 		}
@@ -583,48 +742,103 @@ impl Component for ParticleSystem {
 		self.simulate(time_delta, emitter_center);
 	}
 
-	fn draw(&mut self, _transform: &NodeTransform, graphic: &mut Graphic) {
+	//==============================================================================
+	// 출력. (모양마다 쿼드 한 장씩 모아 한 번에. circle 은 부드러운 원, rect / streak 은 흰 텍스처, image 는 그림 텍스처, 원본 draw)
+	//==============================================================================
+	fn draw(&mut self, transform: &NodeTransform, graphic: &mut Graphic) {
 		if self.particles.is_empty() {
 			return;
 		}
-		let texture = match &self.image {
-			Some(image) => {
+		let image_texture = match (self.render_shape, &self.image) {
+			(ParticleRenderShape::Image, Some(image)) => {
 				match graphic.get_image_texture(image) {
 					Some(texture) => {
-						texture
+						Some(texture)
 					}
 					None => {
 						return;
 					}
 				}
 			}
+			_ => {
+				None
+			}
+		};
+		let is_image_drawn = image_texture.is_some();
+		let texture = match image_texture {
+			Some(texture) => {
+				texture
+			}
 			None => {
-				graphic.get_soft_disc_texture()
+				if self.render_shape == ParticleRenderShape::Circle {
+					graphic.get_soft_disc_texture()
+				}
+				else {
+					graphic.get_white_texture()
+				}
 			}
 		};
 
-		// 입자마다 쿼드 한 장. (회전한 네 모서리 + 정점 색)
+		// 월드 공간이면 노드 이동을 상쇄해 낸 자리에 고정한다.
+		let base_offset = if self.is_world_space {
+			transform.get_local_position().multiply_scalar(-1.0)
+		}
+		else {
+			Vector2::zero()
+		};
+
 		let particle_count = self.particles.len();
 		let mut vertex_values: Vec<f32> = Vec::with_capacity(particle_count * 6 * PARTICLE_FLOATS_PER_VERTEX);
 		for particle in self.particles.iter() {
 			let life_ratio = math::clamp01(particle.age / particle.lifetime);
-			let size = particle.start_size * math::lerp(self.size_over_lifetime.0, self.size_over_lifetime.1, life_ratio);
-			let color = self.evaluate_color(particle.start_color, life_ratio);
-			let half_size = size * 0.5;
-			let cosine = particle.rotation.cos() * half_size;
-			let sine = particle.rotation.sin() * half_size;
-			let center_x = particle.position.x;
-			let center_y = particle.position.y;
-			let corners: [(f32, f32, f32, f32); 4] = [
-				(center_x - cosine + sine, center_y - sine - cosine, 0.0, 0.0),
-				(center_x + cosine + sine, center_y + sine - cosine, 1.0, 0.0),
-				(center_x - cosine - sine, center_y - sine + cosine, 0.0, 1.0),
-				(center_x + cosine - sine, center_y + sine + cosine, 1.0, 1.0),
-			];
-			for corner_index in [0usize, 1, 2, 2, 1, 3] {
-				let (corner_x, corner_y, corner_u, corner_v) = corners[corner_index];
-				vertex_values.extend_from_slice(&[corner_x, corner_y, corner_u, corner_v, color.red, color.green, color.blue, color.alpha]);
+			let draw_size = (particle.start_size * math::lerp(self.size_over_lifetime.0, self.size_over_lifetime.1, life_ratio)).max(0.1);
+			let half_size = draw_size * 0.5;
+			let mut draw_x = particle.position.x + base_offset.x;
+			let draw_y = particle.position.y + base_offset.y;
+			if self.wobble_amplitude > 0.0 {
+				draw_x += (particle.age * self.wobble_frequency + particle.wobble_phase).sin() * self.wobble_amplitude;
 			}
+
+			// 그림은 원본처럼 색 곡선 없이 시작 알파 x (1 - 수명 비율) 로만 흐린다.
+			let color = if is_image_drawn {
+				Color::create(1.0, 1.0, 1.0, math::clamp01(particle.start_color.alpha * (1.0 - life_ratio)))
+			}
+			else {
+				let evaluated_color = self.evaluate_color(particle.start_color, life_ratio);
+				Color::create(evaluated_color.red, evaluated_color.green, evaluated_color.blue, math::clamp01(evaluated_color.alpha))
+			};
+
+			let corners: [(f32, f32); 4] = if self.render_shape == ParticleRenderShape::Streak {
+				// 속도 방향으로 길게 늘인 쿼드. (머리가 지금 자리, 꼬리가 속도 x streak_scale 만큼 뒤)
+				let speed = particle.velocity.length().max(0.001);
+				let direction_x = particle.velocity.x / speed;
+				let direction_y = particle.velocity.y / speed;
+				let tail_x = draw_x - particle.velocity.x * self.streak_scale;
+				let tail_y = draw_y - particle.velocity.y * self.streak_scale;
+				let side_x = -direction_y * half_size;
+				let side_y = direction_x * half_size;
+				[(draw_x + side_x, draw_y + side_y), (draw_x - side_x, draw_y - side_y), (tail_x - side_x, tail_y - side_y), (tail_x + side_x, tail_y + side_y)]
+			}
+			else if self.render_shape == ParticleRenderShape::Rect || is_image_drawn {
+				// 도는 사각형. (그림도 원본처럼 입자의 회전으로 돌린다)
+				let cosine = particle.rotation.cos();
+				let sine = particle.rotation.sin();
+				let axis_x1 = cosine * half_size;
+				let axis_y1 = sine * half_size;
+				let axis_x2 = -sine * half_size;
+				let axis_y2 = cosine * half_size;
+				[
+					(draw_x - axis_x1 - axis_x2, draw_y - axis_y1 - axis_y2),
+					(draw_x + axis_x1 - axis_x2, draw_y + axis_y1 - axis_y2),
+					(draw_x + axis_x1 + axis_x2, draw_y + axis_y1 + axis_y2),
+					(draw_x - axis_x1 + axis_x2, draw_y - axis_y1 + axis_y2),
+				]
+			}
+			else {
+				// 축 정렬 쿼드. (circle 은 부드러운 원 텍스처가 모양을 만든다)
+				[(draw_x - half_size, draw_y - half_size), (draw_x + half_size, draw_y - half_size), (draw_x + half_size, draw_y + half_size), (draw_x - half_size, draw_y + half_size)]
+			};
+			push_quad(&mut vertex_values, corners, color);
 		}
 
 		let particle_vertex_data = graphic.get_particle_vertex_data(vertex_values.len());
@@ -636,6 +850,17 @@ impl Component for ParticleSystem {
 		graphic.set_blend_mode(self.blend_mode);
 		graphic.draw_colored_quads(vertex_count, texture);
 		graphic.set_blend_mode(previous_blend_mode);
+	}
+}
+
+//==============================================================================
+// 쿼드 한 장 넣기. (모서리 넷은 왼쪽 위, 오른쪽 위, 오른쪽 아래, 왼쪽 아래 차례. 삼각형 둘 = 정점 여섯, 정점마다 색)
+//==============================================================================
+fn push_quad(vertex_values: &mut Vec<f32>, corners: [(f32, f32); 4], color: Color) {
+	for corner_index in [0usize, 1, 2, 0, 2, 3] {
+		let (corner_x, corner_y) = corners[corner_index];
+		let (corner_u, corner_v) = QUAD_TEXTURE_COORDINATES[corner_index];
+		vertex_values.extend_from_slice(&[corner_x, corner_y, corner_u, corner_v, color.red, color.green, color.blue, color.alpha]);
 	}
 }
 
@@ -653,4 +878,105 @@ fn read_description_color(value: &serde_json::Value) -> Option<Color> {
 //==============================================================================
 fn multiply_color(color_a: Color, color_b: Color) -> Color {
 	Color::create(color_a.red * color_b.red, color_a.green * color_b.green, color_a.blue * color_b.blue, color_a.alpha * color_b.alpha)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	//==============================================================================
+	// edge 는 가로 선분 위에서 아래(+Y)로 낸다.
+	//==============================================================================
+	#[test]
+	fn edge_shape_emits_downward_on_line() {
+		let mut particle_system = ParticleSystem::new();
+		particle_system.set_random_seed(7);
+		particle_system.set_emitter_shape(EmitterShape::Edge);
+		particle_system.set_edge_width(200.0);
+		particle_system.emit(50, Vector2::create(100.0, 20.0));
+		assert_eq!(particle_system.get_particle_count(), 50);
+		for particle in particle_system.particles.iter() {
+			assert!(particle.position.x >= 0.0 && particle.position.x <= 200.0);
+			assert_eq!(particle.position.y, 20.0);
+			assert!(particle.velocity.y > 0.0);
+			assert!(particle.velocity.x.abs() < 0.001);
+		}
+	}
+
+	//==============================================================================
+	// 끌개는 방출점 기준 자리 쪽으로 당기고, 소용돌이는 그 접선 쪽으로 민다.
+	//==============================================================================
+	#[test]
+	fn attractor_pulls_and_swirls() {
+		let mut particle_system = ParticleSystem::new();
+		particle_system.set_random_seed(3);
+		particle_system.set_emission_rate(0.0);
+		particle_system.set_start_speed(0.0, 0.0);
+		particle_system.set_start_lifetime(10.0, 10.0);
+		particle_system.set_emitter_shape(EmitterShape::Edge);
+		particle_system.set_edge_width(0.0);
+		particle_system.emit(1, Vector2::create(50.0, 50.0));
+		particle_system.set_attractor(100.0, 0.0, 200.0, 0.0);
+		particle_system.simulate(0.1, Vector2::create(50.0, 50.0));
+		let pulled_velocity = particle_system.particles[0].velocity;
+		assert!(pulled_velocity.x > 0.0);
+		assert!(pulled_velocity.y.abs() < 0.001);
+
+		particle_system.stop(true);
+		particle_system.emit(1, Vector2::create(50.0, 50.0));
+		particle_system.set_attractor(100.0, 0.0, 0.0, 300.0);
+		particle_system.simulate(0.1, Vector2::create(50.0, 50.0));
+		let swirled_velocity = particle_system.particles[0].velocity;
+		assert!(swirled_velocity.x.abs() < 0.001);
+		assert!(swirled_velocity.y > 0.0);
+
+		particle_system.clear_attractor();
+		particle_system.simulate(0.1, Vector2::create(50.0, 50.0));
+		assert_eq!(particle_system.particles[0].velocity, swirled_velocity);
+	}
+
+	//==============================================================================
+	// 월드 공간이면 낼 때 노드의 로컬 위치를 더해 둔다.
+	//==============================================================================
+	#[test]
+	fn world_space_adds_node_position_on_spawn() {
+		let mut particle_system = ParticleSystem::new();
+		particle_system.set_emitter_shape(EmitterShape::Edge);
+		particle_system.set_edge_width(0.0);
+		particle_system.node_position = Vector2::create(300.0, 40.0);
+		particle_system.emit(1, Vector2::zero());
+		assert_eq!(particle_system.particles[0].position, Vector2::zero());
+		particle_system.set_world_space(true);
+		particle_system.emit(1, Vector2::zero());
+		assert_eq!(particle_system.particles[1].position, Vector2::create(300.0, 40.0));
+	}
+
+	//==============================================================================
+	// 서술의 새 항목을 원본 이름으로 읽는다.
+	//==============================================================================
+	#[test]
+	fn description_reads_render_and_force_fields() {
+		let mut particle_system = ParticleSystem::new();
+		particle_system.apply_description(&serde_json::json!({
+			"shape": "edge",
+			"edgeWidth": 320,
+			"renderShape": "streak",
+			"streakScale": 0.04,
+			"wobble": [16, 1.4],
+			"attractor": { "x": 10, "y": -20, "strength": 190, "swirl": 260 },
+			"worldSpace": true,
+		}));
+		assert_eq!(particle_system.emitter_shape, EmitterShape::Edge);
+		assert_eq!(particle_system.edge_width, 320.0);
+		assert_eq!(particle_system.render_shape, ParticleRenderShape::Streak);
+		assert_eq!(particle_system.streak_scale, 0.04);
+		assert_eq!((particle_system.wobble_amplitude, particle_system.wobble_frequency), (16.0, 1.4));
+		assert_eq!(particle_system.attractor_position, Some(Vector2::create(10.0, -20.0)));
+		assert_eq!((particle_system.attractor_strength, particle_system.attractor_swirl), (190.0, 260.0));
+		assert!(particle_system.is_world_space);
+
+		particle_system.apply_description(&serde_json::json!({ "attractor": null, "wobble": [6] }));
+		assert_eq!(particle_system.attractor_position, None);
+		assert_eq!((particle_system.wobble_amplitude, particle_system.wobble_frequency), (6.0, 4.0));
+	}
 }

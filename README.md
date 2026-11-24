@@ -234,7 +234,7 @@ init();
 | `nodebasics` | 노드, Paint, Text, 직접 만든 컴포넌트 |
 | `uigallery`, `uigallery2` | UI 위젯 전부 |
 | `inputgallery` | 입력 필드, 한글 IME 조합, 선택 영역, 리치텍스트 |
-| `effectgallery` | 셰이더 스프라이트 50종, 화면 효과, 트레일 |
+| `effectgallery` | 셰이더 스프라이트 50종, 화면 효과, 트레일, 파티클(렌더 모양 넷, 끌개, 흔들림, edge, 월드 공간) |
 | `misctour` | 카메라, 길찾기, 대화 시스템, 화면 흔들림, 플로팅 텍스트 |
 | `timelineshowcase` | 타임라인 문서 재생 |
 | `modelviewer` | 스키닝 3D(glTF, FBX), 그림자, 블룸 |
