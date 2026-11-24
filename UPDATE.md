@@ -43,6 +43,9 @@
 - Format(base/format.rs, 원본 base/format.js): format_number(로캘 천 단위 표기), format_number_with_unit, format_compact_number(1.2K, 5.6M, 1.3B), format_padded_number(범위 자르기와 0 채우기), format_minutes_seconds(분:초). 반올림, 음수와 -0, 단위 경계, NaN 과 무한대, String(수)의 지수 꼴까지 원본과 같은 글을 낸다. 로캘은 Intl 대신 node 25(ICU 78.3)에서 뽑은 표(121 줄: 소수점, 천 단위 기호, 음수 앞붙이, 숫자 모양, 인도식 묶음, 최소 묶음 자리, NaN 글)로 쓰고, 표에 없는 태그는 en-US 다. (원본은 브라우저 기본 로캘, 틀린 태그는 RangeError) 원본 format.js 를 node 로 돌린 값 2 만 4 천 건과 같다
 - Version: branch 필드와 create_with_branch. 브랜치가 있으면 to_string 이 "major.minor.patch-branch" 를 낸다. (원본 base/version.js) 브랜치가 글이라 Version 은 이제 Copy 가 아니다
 - Platform: is_desktop_web(). 모바일이 아니고, 맥이라고 알리면서 손가락 입력이 여럿(navigator.maxTouchPoints > 1)인 아이패드도 아니면 true. 데스크탑 빌드는 늘 true (원본 base/platform.js)
+- Rect: 원본 base/rect.js 의 남은 것. overlaps(변이 닿아도 겹친 것), intersection, union, Rect::clamp, get_min / set_min, get_max / set_max, get_center / set_center, get_left / get_top / get_right / get_bottom 과 set_..., set_width, set_height
+- Vector2: 원본 base/vector2.js 의 남은 것. divide, divide_scalar, modulo, modulo_scalar, add_scalar, subtract_scalar, half, cross, length_squared, angle, get_x, get_y, minus_one, positive_infinity, negative_infinity, Vector2::lerp(원본 식 from * (1 - t) + to * t), Vector2::clamp. 원본의 버그 둘을 고쳤다: modulo 가 나누기를 하던 것을 나머지로, half 가 두 배를 돌려주던 것을 반으로
+- math: 원본 base/math.js 의 남은 것. random_int(양 끝 포함), pick_random, shuffle, shuffle_with_random_function, approach, move_towards, min, max, round(반은 +무한대 쪽, -2.5 → -2), POSITIVE_INFINITY, NEGATIVE_INFINITY. 원본이 손으로 다시 짠 floor, ceil, sqrt, abs, 삼각함수, pow 는 f32 메서드로 갈음한다. (원본 sqrt 는 바빌로니아법 10 번이라 1e4 를 넘으면 틀린다)
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.
