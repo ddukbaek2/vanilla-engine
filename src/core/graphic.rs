@@ -10,6 +10,8 @@
 // - 화면 밖 거르기(기본 켬): NodeTree 가 노드를 그리기 전에 is_local_rect_visible 로 묻는다. 원본은 전부 그린다.
 // - 셰이더 바꿔 끼우기(set_shader_program_override): ShaderSprite 같은 효과가 기본 프로그램 대신 제 프로그램으로 그린다. 바꿔 끼운 동안은 묶지 않는다.
 //   바꿔 끼울 프로그램은 resolve_shader_program 이 이름으로 담아 두고, 어트리뷰트 위치를 기본 프로그램과 같게 고정해 기본 버텍스 어레이를 같이 쓴다.
+// - 마지막으로 건 셰이더 프로그램과 텍스처 유닛 0 의 텍스처를 기억해, 같은 것을 다시 거는 GL 호출을 건너뛴다. (원본은 늘 건다)
+//   GL 을 밖에서 만질 수 있는 때(get_gl 로 컨텍스트를 내줄 때, restore_render_state, 프레임 시작과 끝)에는 잊고 다음에 다시 건다.
 // - 원본에서 옮기지 않은 것: 오른쪽에서 왼쪽 글자 방향, 밉맵 바이어스 설정.
 //==============================================================================
 use crate::base::color::Color;
@@ -22,6 +24,7 @@ use crate::core::imagetexturecache::ImageTextureCache;
 use crate::core::shaderprogram::ShaderProgram;
 use crate::core::textstringtexturecache::{TextDrawKind, TextEntry, TextMetrics, TextStringTextureCache};
 use glow::HasContext;
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
@@ -380,6 +383,10 @@ pub struct Graphic {
 	batch_vertex_count: usize,
 	batch_texture: Option<GlTexture>,
 	is_culling_enabled: bool,
+	// 마지막으로 사용 중으로 건 셰이더 프로그램. (모르면 None, 같으면 use_program 을 건너뛴다)
+	bound_program: Cell<Option<GlProgram>>,
+	// 텍스처 유닛 0 에 마지막으로 바인드한 텍스처. (모르면 None, 같으면 bind_texture 를 건너뛴다)
+	bound_texture: Cell<Option<GlTexture>>,
 }
 
 impl Graphic {
@@ -501,6 +508,8 @@ impl Graphic {
 			batch_vertex_count: 0,
 			batch_texture: None,
 			is_culling_enabled: true,
+			bound_program: Cell::new(None),
+			bound_texture: Cell::new(None),
 		})
 	}
 
@@ -527,8 +536,9 @@ impl Graphic {
 			self.applied_viewport_height = drawing_buffer_height;
 		}
 
-		// 프로그램/버퍼 바인딩 및 프로젝션 업로드.
-		self.shader_program.use_program(&self.gl);
+		// 프로그램/버퍼 바인딩 및 프로젝션 업로드. (프레임 사이에 GL 이 바뀌었을 수 있어 기억한 것을 잊고 다시 건다)
+		self.forget_bound_render_state();
+		self.use_shader_program(&self.shader_program);
 		let projection_matrix_location = self.shader_program.get_uniform_location(&self.gl, "projectionMatrix");
 		unsafe {
 			self.gl.bind_vertex_array(Some(self.vertex_array));
@@ -567,6 +577,40 @@ impl Graphic {
 		if self.frame_number.is_multiple_of(IMAGE_TEXTURE_SWEEP_INTERVAL) {
 			self.image_texture_cache.sweep(&self.gl);
 		}
+		self.forget_bound_render_state();
+	}
+
+	//==============================================================================
+	// 셰이더 프로그램을 사용 중으로 건다. (마지막으로 건 것과 같으면 건너뛴다)
+	//==============================================================================
+	fn use_shader_program(&self, shader_program: &ShaderProgram) {
+		let program = shader_program.get_program();
+		if self.bound_program.get() == Some(program) {
+			return;
+		}
+		shader_program.use_program(&self.gl);
+		self.bound_program.set(Some(program));
+	}
+
+	//==============================================================================
+	// 텍스처 유닛 0 에 텍스처를 바인드한다. (마지막으로 바인드한 것과 같으면 건너뛴다)
+	//==============================================================================
+	fn bind_main_texture(&self, texture: GlTexture) {
+		if self.bound_texture.get() == Some(texture) {
+			return;
+		}
+		unsafe {
+			self.gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+		}
+		self.bound_texture.set(Some(texture));
+	}
+
+	//==============================================================================
+	// 기억한 프로그램과 텍스처를 잊는다. (GL 을 밖에서 만졌을 수 있을 때. 다음에 거는 것은 건너뛰지 않는다)
+	//==============================================================================
+	fn forget_bound_render_state(&self) {
+		self.bound_program.set(None);
+		self.bound_texture.set(None);
 	}
 
 	//==============================================================================
@@ -875,12 +919,13 @@ impl Graphic {
 			self.gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, vertex_bytes, glow::DYNAMIC_DRAW);
 		}
 
-		// 유니폼 업로드.
+		// 유니폼 업로드. (묶음을 내보낸 뒤에는 묶음 프로그램이 걸려 있을 수 있어 지금 쓰는 프로그램을 건다)
+		self.use_shader_program(self.get_shader_program());
 		self.upload_draw_uniforms(color);
 
 		// 텍스처 바인드 및 출력.
+		self.bind_main_texture(texture);
 		unsafe {
-			self.gl.bind_texture(glow::TEXTURE_2D, Some(texture));
 			self.gl.draw_arrays(glow::TRIANGLES, 0, vertex_count as i32);
 		}
 		self.draw_call_count += 1;
@@ -1021,7 +1066,7 @@ impl Graphic {
 				return;
 			}
 		};
-		batch_shader_program.use_program(&self.gl);
+		self.use_shader_program(batch_shader_program);
 		let projection_matrix_location = batch_shader_program.get_uniform_location(&self.gl, "projectionMatrix");
 		let vertex_bytes = float_slice_to_bytes(&self.batch_vertex_data[..vertex_count * BATCH_FLOATS_PER_VERTEX]);
 		unsafe {
@@ -1029,14 +1074,15 @@ impl Graphic {
 			self.gl.bind_buffer(glow::ARRAY_BUFFER, self.batch_vertex_buffer);
 			self.gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, vertex_bytes, glow::DYNAMIC_DRAW);
 			self.gl.uniform_matrix_3_f32_slice(projection_matrix_location.as_ref(), false, &self.projection_matrix_array);
-			self.gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+		}
+		self.bind_main_texture(texture);
+		unsafe {
 			self.gl.draw_arrays(glow::TRIANGLES, 0, vertex_count as i32);
 
-			// 기본 프로그램으로 복귀.
+			// 기본 버텍스 어레이로 복귀. (프로그램은 다음에 낱장으로 그릴 때 건다)
 			self.gl.bind_vertex_array(Some(self.vertex_array));
 			self.gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vertex_buffer));
 		}
-		self.get_shader_program().use_program(&self.gl);
 		self.draw_call_count += 1;
 		self.draw_vertex_count += vertex_count as u32;
 	}
@@ -1175,14 +1221,13 @@ impl Graphic {
 			self.batch_vertex_array = Some(batch_vertex_array);
 			self.batch_vertex_buffer = Some(batch_vertex_buffer);
 		}
-		batch_shader_program.use_program(&self.gl);
+		self.use_shader_program(&batch_shader_program);
 		let main_texture_location = batch_shader_program.get_uniform_location(&self.gl, "mainTexture");
 		let texture_lod_bias_location = batch_shader_program.get_uniform_location(&self.gl, "textureLodBias");
 		unsafe {
 			self.gl.uniform_1_i32(main_texture_location.as_ref(), 0);
 			self.gl.uniform_1_f32(texture_lod_bias_location.as_ref(), 0.0);
 		}
-		self.get_shader_program().use_program(&self.gl);
 		self.batch_shader_program = Some(batch_shader_program);
 		Ok(())
 	}
@@ -1215,14 +1260,13 @@ impl Graphic {
 			self.particle_vertex_array = Some(particle_vertex_array);
 			self.particle_vertex_buffer = Some(particle_vertex_buffer);
 		}
-		particle_shader_program.use_program(&self.gl);
+		self.use_shader_program(&particle_shader_program);
 		let main_texture_location = particle_shader_program.get_uniform_location(&self.gl, "mainTexture");
 		let texture_lod_bias_location = particle_shader_program.get_uniform_location(&self.gl, "textureLodBias");
 		unsafe {
 			self.gl.uniform_1_i32(main_texture_location.as_ref(), 0);
 			self.gl.uniform_1_f32(texture_lod_bias_location.as_ref(), 0.0);
 		}
-		self.get_shader_program().use_program(&self.gl);
 		self.particle_shader_program = Some(particle_shader_program);
 		Ok(())
 	}
@@ -1261,7 +1305,7 @@ impl Graphic {
 			}
 		};
 		self.transform_matrix.write_to_array(&mut self.model_matrix_array);
-		particle_shader_program.use_program(&self.gl);
+		self.use_shader_program(particle_shader_program);
 		let projection_matrix_location = particle_shader_program.get_uniform_location(&self.gl, "projectionMatrix");
 		let model_matrix_location = particle_shader_program.get_uniform_location(&self.gl, "modelMatrix");
 		let global_alpha_location = particle_shader_program.get_uniform_location(&self.gl, "globalAlpha");
@@ -1273,14 +1317,15 @@ impl Graphic {
 			self.gl.uniform_matrix_3_f32_slice(projection_matrix_location.as_ref(), false, &self.projection_matrix_array);
 			self.gl.uniform_matrix_3_f32_slice(model_matrix_location.as_ref(), false, &self.model_matrix_array);
 			self.gl.uniform_1_f32(global_alpha_location.as_ref(), self.global_alpha);
-			self.gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+		}
+		self.bind_main_texture(texture);
+		unsafe {
 			self.gl.draw_arrays(glow::TRIANGLES, 0, vertex_count as i32);
 
-			// 기본 프로그램으로 복귀.
+			// 기본 버텍스 어레이로 복귀. (프로그램은 다음에 낱장으로 그릴 때 건다)
 			self.gl.bind_vertex_array(Some(self.vertex_array));
 			self.gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vertex_buffer));
 		}
-		self.get_shader_program().use_program(&self.gl);
 		self.draw_call_count += 1;
 		self.draw_vertex_count += vertex_count as u32;
 	}
@@ -1328,6 +1373,7 @@ impl Graphic {
 			self.gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
 			texture
 		};
+		self.bound_texture.set(Some(soft_disc_texture));
 		self.soft_disc_texture = Some(soft_disc_texture);
 		soft_disc_texture
 	}
@@ -1338,6 +1384,12 @@ impl Graphic {
 	pub fn get_image_texture(&mut self, image: &Rc<Image>) -> Option<GlTexture> {
 		let is_image_smoothing_enabled = self.is_image_smoothing_enabled();
 		let is_image_mipmap_enabled = self.is_image_mipmap_enabled();
+		if let Some(texture) = self.image_texture_cache.find_texture(image, is_image_smoothing_enabled, is_image_mipmap_enabled) {
+			return Some(texture);
+		}
+
+		// 새로 올리거나 필터를 다시 걸면 텍스처 바인드가 바뀐다.
+		self.bound_texture.set(None);
 		self.image_texture_cache.get_texture(&self.gl, image, is_image_smoothing_enabled, is_image_mipmap_enabled)
 	}
 
@@ -1892,7 +1944,7 @@ impl Graphic {
 		// 글자는 흰색으로 굽고 그릴 때 색을 곱한다.
 		let fill_color = self.get_fill_color();
 		let bake_scale = self.calculate_text_bake_scale();
-		let entry = self.text_string_texture_cache.get_entry(&self.gl, TextDrawKind::Fill, text, &self.font_string, 0.0, bake_scale);
+		let entry = self.get_text_entry(TextDrawKind::Fill, text, 0.0, bake_scale);
 		if let Some(entry) = entry {
 			self.draw_text_entry(entry, x, y, Some(fill_color));
 		}
@@ -1909,10 +1961,23 @@ impl Graphic {
 
 		let stroke_color = self.get_stroke_color();
 		let bake_scale = self.calculate_text_bake_scale();
-		let entry = self.text_string_texture_cache.get_entry(&self.gl, TextDrawKind::Stroke, text, &self.font_string, line_width, bake_scale);
+		let entry = self.get_text_entry(TextDrawKind::Stroke, text, line_width, bake_scale);
 		if let Some(entry) = entry {
 			self.draw_text_entry(entry, x, y, Some(stroke_color));
 		}
+	}
+
+	//==============================================================================
+	// 현재 폰트 문자열로 구운 문자열 반환. (없으면 굽는다)
+	//==============================================================================
+	fn get_text_entry(&mut self, text_draw_kind: TextDrawKind, text: &str, line_width: f32, bake_scale: f32) -> Option<TextEntry> {
+		if let Some(entry) = self.text_string_texture_cache.find_entry(text_draw_kind, text, &self.font_string, line_width, bake_scale) {
+			return Some(entry);
+		}
+
+		// 새로 굽거나 오래된 것을 버리면 텍스처 바인드가 바뀐다.
+		self.bound_texture.set(None);
+		self.text_string_texture_cache.get_entry(&self.gl, text_draw_kind, text, &self.font_string, line_width, bake_scale)
 	}
 
 	//==============================================================================
@@ -2031,7 +2096,7 @@ impl Graphic {
 		self.flush_batch();
 		self.shader_program_override = shader_program;
 		let active_shader_program = self.get_shader_program();
-		active_shader_program.use_program(&self.gl);
+		self.use_shader_program(active_shader_program);
 		let projection_matrix_location = active_shader_program.get_uniform_location(&self.gl, "projectionMatrix");
 		let main_texture_location = active_shader_program.get_uniform_location(&self.gl, "mainTexture");
 		unsafe {
@@ -2074,10 +2139,12 @@ impl Graphic {
 	//==============================================================================
 	// 렌더 상태 복구. (외부 GL 패스가 프로그램 / 버텍스 어레이 / 뷰포트 / 블렌드를 바꾼 뒤 Graphic 출력을 이어갈 때)
 	// - 원본과 같고, 클립 중이면 스텐실 테스트도 다시 켠다. (원본은 켜지 않는다)
+	// - 기억한 프로그램과 텍스처를 잊고 다시 건다.
 	//==============================================================================
 	pub fn restore_render_state(&mut self) {
+		self.forget_bound_render_state();
 		let shader_program = self.get_shader_program();
-		shader_program.use_program(&self.gl);
+		self.use_shader_program(shader_program);
 		let projection_matrix_location = shader_program.get_uniform_location(&self.gl, "projectionMatrix");
 		let main_texture_location = shader_program.get_uniform_location(&self.gl, "mainTexture");
 		unsafe {
@@ -2139,8 +2206,10 @@ impl Graphic {
 
 	//==============================================================================
 	// GL 컨텍스트 반환.
+	// - 받은 쪽이 프로그램이나 텍스처를 바꿀 수 있어, 기억한 프로그램과 텍스처를 잊는다. (다음 그리기에서 다시 건다)
 	//==============================================================================
 	pub fn get_gl(&self) -> &glow::Context {
+		self.forget_bound_render_state();
 		&self.gl
 	}
 

@@ -191,13 +191,12 @@ impl TextStringTextureCache {
 		if text.is_empty() {
 			return None;
 		}
-		let entry_key = format!("{:?}|{}|{}|{}|{}", text_draw_kind, font_string, line_width, bake_scale, text);
-		let frame_number = self.frame_number;
-		if let Some(cached_text_entry) = self.entry_table.get_mut(&entry_key) {
-			cached_text_entry.last_used_frame_number = frame_number;
-			return Some(cached_text_entry.entry);
+		if let Some(entry) = self.find_entry(text_draw_kind, text, font_string, line_width, bake_scale) {
+			return Some(entry);
 		}
 
+		let entry_key = format!("{:?}|{}|{}|{}|{}", text_draw_kind, font_string, line_width, bake_scale, text);
+		let frame_number = self.frame_number;
 		let entry = self.bake_entry(gl, text_draw_kind, text, font_string, line_width, bake_scale)?;
 		if self.entry_table.len() >= MAXIMUM_ENTRY_COUNT {
 			self.evict_oldest_entry(gl);
@@ -207,6 +206,17 @@ impl TextStringTextureCache {
 			last_used_frame_number: frame_number,
 		});
 		Some(entry)
+	}
+
+	//==============================================================================
+	// 이미 구운 문자열 찾기. (GL 을 건드리지 않는다, 없으면 None)
+	//==============================================================================
+	pub(crate) fn find_entry(&mut self, text_draw_kind: TextDrawKind, text: &str, font_string: &str, line_width: f32, bake_scale: f32) -> Option<TextEntry> {
+		let entry_key = format!("{:?}|{}|{}|{}|{}", text_draw_kind, font_string, line_width, bake_scale, text);
+		let frame_number = self.frame_number;
+		let cached_text_entry = self.entry_table.get_mut(&entry_key)?;
+		cached_text_entry.last_used_frame_number = frame_number;
+		Some(cached_text_entry.entry)
 	}
 
 	//==============================================================================

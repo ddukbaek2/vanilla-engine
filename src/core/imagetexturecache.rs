@@ -30,6 +30,17 @@ impl ImageTextureCache {
 	}
 
 	//==============================================================================
+	// 이미 올라가 있고 필터 설정도 같은 텍스처 찾기. (GL 을 건드리지 않는다, 없으면 None)
+	//==============================================================================
+	pub(crate) fn find_texture(&self, image: &Image, is_smoothing: bool, is_mipmap: bool) -> Option<crate::core::graphic::GlTexture> {
+		let entry = self.entry_table.get(&image.get_instance_id())?;
+		if entry.is_smoothing != is_smoothing || entry.is_mipmap != is_mipmap {
+			return None;
+		}
+		Some(entry.texture)
+	}
+
+	//==============================================================================
 	// 이미지의 텍스처 반환. (없으면 올리고, 필터 설정이 바뀌었으면 다시 건다)
 	//==============================================================================
 	pub fn get_texture(&mut self, gl: &glow::Context, image: &Rc<Image>, is_smoothing: bool, is_mipmap: bool) -> Option<crate::core::graphic::GlTexture> {
