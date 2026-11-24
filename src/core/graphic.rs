@@ -1452,6 +1452,55 @@ impl Graphic {
 	}
 
 	//==============================================================================
+	// GPU 에 올리며 놓은 이미지의 CPU 픽셀을 텍스처에서 다시 읽어 되돌린다. (ShadowImage 굽기처럼 픽셀을 다시 읽어야 할 때)
+	// - 픽셀이 남아 있으면 그대로 true. 올린 텍스처가 없거나 읽지 못하면 false.
+	// - 텍스처를 프레임버퍼에 붙여 읽고, 그 전에 걸려 있던 프레임버퍼로 되돌린다. (올린 그대로의 프리멀티플라이드 RGBA 가 나온다)
+	//==============================================================================
+	pub(crate) fn restore_image_pixels(&mut self, image: &Rc<Image>) -> bool {
+		if image.has_pixels() {
+			return true;
+		}
+		let texture = match self.image_texture_cache.find_uploaded_texture(image) {
+			Some(texture) => {
+				texture
+			}
+			None => {
+				return false;
+			}
+		};
+		self.flush_batch();
+		let width = image.get_width() as i32;
+		let height = image.get_height() as i32;
+		let mut pixels = vec![0u8; (width * height * 4) as usize];
+		let is_read = unsafe {
+			let previous_framebuffer = self.gl.get_parameter_framebuffer(glow::FRAMEBUFFER_BINDING);
+			let framebuffer = match self.gl.create_framebuffer() {
+				Ok(framebuffer) => {
+					framebuffer
+				}
+				Err(_) => {
+					return false;
+				}
+			};
+			self.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
+			self.gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(texture), 0);
+			let is_complete = self.gl.check_framebuffer_status(glow::FRAMEBUFFER) == glow::FRAMEBUFFER_COMPLETE;
+			if is_complete {
+				self.gl.pixel_store_i32(glow::PACK_ALIGNMENT, 1);
+				self.gl.read_pixels(0, 0, width, height, glow::RGBA, glow::UNSIGNED_BYTE, glow::PixelPackData::Slice(Some(&mut pixels)));
+			}
+			self.gl.bind_framebuffer(glow::FRAMEBUFFER, previous_framebuffer);
+			self.gl.delete_framebuffer(framebuffer);
+			is_complete
+		};
+		if !is_read {
+			return false;
+		}
+		image.restore_pixels(pixels);
+		true
+	}
+
+	//==============================================================================
 	// 선 출력.
 	// - set_stroke_color()
 	//==============================================================================

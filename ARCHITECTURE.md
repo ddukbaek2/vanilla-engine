@@ -115,6 +115,7 @@ EngineRunner (플랫폼이 들고 프레임마다 부른다)
 - 실패한 애셋도 "끝난 것"으로 쳐서 씬이 멈추지 않는다.
 - `AudioAsset` 은 오디오 백엔드와 붙어 있어 `engine.load_audio_asset` 으로 읽고 `track_audio_asset` 으로 맡긴다.
 - 이미지는 png, jpeg, webp 를 푼다. 글꼴은 ttf, otf, woff, woff2 를 읽는다.
+- 이미지는 GPU 에 올린 뒤 CPU 픽셀을 놓는다. 픽셀을 다시 읽을 그림은 `Image.set_pixels_retained(true)` 로 남긴다. (ShadowImage 는 받은 그림을 스스로 남기고, 이미 놓였으면 텍스처를 프레임버퍼에 붙여 되읽는다) GL 컨텍스트를 잃었다 되살리는 길은 아직 없다.
 - 기본 글꼴은 엔진에 넣지 않는다. 둘 다 시스템 글꼴이 기본이다. 데스크탑은 default_font_paths 의 글꼴 파일(윈도우는 맑은 고딕)을 fontdue 로 굽고, 웹은 글꼴 바이트가 하나도 없으면 원본처럼 브라우저 Canvas2D 로 구워 브라우저가 고른 시스템 글꼴이 나온다(platform/web/systemfont.rs). 게임 글꼴은 `default_font_url`, `default_font_bytes`, FontAsset 가운데 하나로 주면 fontdue 길로 굽는다. (원본 기본값 DOSGothic 은 뺐다)
 
 ## 8. 코드 꼴

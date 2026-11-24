@@ -5,6 +5,7 @@
 //   노드의 불투명도가 그림과 그림자에 한 장째로 먹는다.
 // - 그림 색을 주면 그림을 그 색 한 빛의 모양으로 칠한다. (같은 자리 위에 원래 그림을 얹어 그림자만 남기는 감쌈 등)
 // - 굽는 배율, 그림, 색, 그림자, 노드 크기가 바뀌면 다시 굽는다. 줄이기는 겹친 넓이로 고르게 섞는다.
+// - 다시 구울 때 그림의 CPU 픽셀을 읽으므로 받은 그림은 GPU 에 올린 뒤에도 픽셀을 남기게 한다. 이미 놓였으면 텍스처에서 되읽는다.
 //==============================================================================
 use std::rc::Rc;
 
@@ -143,6 +144,10 @@ impl ShadowImage {
 		let bake_scale = graphic.calculate_text_bake_scale();
 		let bake_key = format!("{}|{:?}|{:?}|{}|{}|{}|{}|{}", self.image_version, self.image_color, self.shadow_color, self.shadow_offset, self.shadow_blur, image_width, image_height, bake_scale);
 		if bake_key != self.bake_key {
+			// 그림이 다른 곳에서 먼저 그려져 CPU 픽셀을 놓았으면 텍스처에서 되읽는다.
+			if !graphic.restore_image_pixels(&image) {
+				return;
+			}
 			self.bake_key = bake_key;
 			self.bake(&image, source_rect, image_width, image_height, bake_scale);
 		}
@@ -204,6 +209,9 @@ impl ShadowImage {
 	// 그림 설정. (조각을 주지 않으면 그림 전체)
 	//==============================================================================
 	pub fn set_image(&mut self, image: Option<Rc<Image>>, image_rect: Option<Rect>) {
+		if let Some(image) = &image {
+			image.set_pixels_retained(true);
+		}
 		self.image = image;
 		self.image_rect = image_rect;
 		self.image_version += 1;

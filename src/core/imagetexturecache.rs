@@ -2,6 +2,7 @@
 // 이미지 텍스처 캐시.
 // - 원본은 WeakMap<image, texture> 로 원본 이미지가 수거되면 텍스처도 같이 사라진다.
 // - 여기서는 Weak<Image> 를 들고, sweep() 이 원본이 사라진 텍스처를 지운다.
+// - 올린 뒤에는 이미지의 CPU 픽셀을 놓는다. (Image.set_pixels_retained 로 남기게 한 그림은 둔다)
 //==============================================================================
 use crate::core::image::Image;
 use glow::HasContext;
@@ -41,7 +42,14 @@ impl ImageTextureCache {
 	}
 
 	//==============================================================================
-	// 이미지의 텍스처 반환. (없으면 올리고, 필터 설정이 바뀌었으면 다시 건다)
+	// 이미 올라가 있는 텍스처 찾기. (필터 설정은 보지 않는다, GL 을 건드리지 않는다)
+	//==============================================================================
+	pub(crate) fn find_uploaded_texture(&self, image: &Image) -> Option<crate::core::graphic::GlTexture> {
+		self.entry_table.get(&image.get_instance_id()).map(|entry| entry.texture)
+	}
+
+	//==============================================================================
+	// 이미지의 텍스처 반환. (없으면 올리고 CPU 픽셀을 놓는다, 필터 설정이 바뀌었으면 다시 건다)
 	//==============================================================================
 	pub fn get_texture(&mut self, gl: &glow::Context, image: &Rc<Image>, is_smoothing: bool, is_mipmap: bool) -> Option<crate::core::graphic::GlTexture> {
 		let instance_id = image.get_instance_id();
@@ -71,14 +79,16 @@ impl ImageTextureCache {
 				0,
 				glow::RGBA,
 				glow::UNSIGNED_BYTE,
-				glow::PixelUnpackData::Slice(Some(pixels)),
+				glow::PixelUnpackData::Slice(Some(&pixels)),
 			);
+			drop(pixels);
 			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
 			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
 			gl.generate_mipmap(glow::TEXTURE_2D);
 			apply_filter(gl, is_smoothing, is_mipmap);
 			texture
 		};
+		image.release_pixels();
 		self.entry_table.insert(instance_id, ImageTextureEntry {
 			image: Rc::downgrade(image),
 			texture,
