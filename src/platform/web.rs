@@ -5,9 +5,11 @@
 // - 입력은 아직 키보드만 받는다. 입력 필드의 글 입력(숨긴 DOM <input>, IME 조합, 문맥 메뉴)과 클립보드는 web/textinput.rs 가 맡는다.
 // - 오디오: 원본 engine.js 처럼 click / touchstart / keydown(설정하면 touchend / pointerup 도)은 user gesture 로 보고
 //   engine.resume_on_user_gesture(), focus 와 페이지가 다시 보일 때는 engine.resume() 을 부른다.
+// - 페이지: visibilitychange, blur, focus, pointerdown 을 엔진의 페이지 이벤트로 넘기고, 다시 보이면 on_page_visibility_restored,
+//   문서 resume 과 pageshow(persisted) 면 on_page_process_restored 를 부른다. (원본 setupAllDocumentEvents)
 //==============================================================================
 use crate::core::asset::AssetLoadHandle;
-use crate::core::engine::EngineRunner;
+use crate::core::engine::{EngineRunner, PageEvent};
 use crate::core::graphic::Graphic;
 use crate::core::inputmanager::{MouseButton, TouchPoint};
 use crate::base::vector2::Vector2;
@@ -62,6 +64,58 @@ pub fn is_coarse_pointer() -> bool {
 }
 
 //==============================================================================
+// 페이지 주소의 쿼리 값. (원본처럼 location.search 를 URLSearchParams 로 읽어 처음 값, 없으면 None)
+//==============================================================================
+pub fn read_page_query_value(name: &str) -> Option<String> {
+	let window = web_sys::window()?;
+	let location = js_sys::Reflect::get(&window, &JsValue::from_str("location")).ok()?;
+	let search_text = js_sys::Reflect::get(&location, &JsValue::from_str("search")).ok()?.as_string()?;
+	let constructor: js_sys::Function = js_sys::Reflect::get(&js_sys::global(), &JsValue::from_str("URLSearchParams")).ok()?.dyn_into().ok()?;
+	let search_parameters = js_sys::Reflect::construct(&constructor, &js_sys::Array::of1(&JsValue::from_str(&search_text))).ok()?;
+	let get_function: js_sys::Function = js_sys::Reflect::get(&search_parameters, &JsValue::from_str("get")).ok()?.dyn_into().ok()?;
+	get_function.call1(&search_parameters, &JsValue::from_str(name)).ok()?.as_string()
+}
+
+thread_local! {
+	// env(safe-area-inset-*) 를 재는 숨은 요소. (처음 잴 때 만들어 body 에 붙여 둔다)
+	static SAFE_AREA_PROBE_ELEMENT: RefCell<Option<web_sys::HtmlElement>> = const { RefCell::new(None) };
+}
+
+//==============================================================================
+// CSS env(safe-area-inset-*) 세이프 에어리어 인셋. (원본 view_manager.readSafeAreaFromEnvironment, CSS 픽셀 [위, 오른쪽, 아래, 왼쪽])
+// - 숨은 요소의 padding 에 env() 를 걸고 계산된 값을 parseFloat 로 읽는다. 문서나 body 가 없으면 0.
+//==============================================================================
+pub fn read_safe_area_insets() -> [f32; 4] {
+	let read_insets = || -> Option<[f32; 4]> {
+		let window = web_sys::window()?;
+		let document = window.document()?;
+		let body = document.body()?;
+		let probe_element = SAFE_AREA_PROBE_ELEMENT.with(|probe_element_cell| -> Option<web_sys::HtmlElement> {
+			if let Some(probe_element) = probe_element_cell.borrow().as_ref() {
+				return Some(probe_element.clone());
+			}
+			let probe_element: web_sys::HtmlElement = document.create_element("div").ok()?.dyn_into().ok()?;
+			probe_element.style().set_css_text("position:fixed;left:0;top:0;width:0;height:0;visibility:hidden;pointer-events:none;padding-top:env(safe-area-inset-top);padding-right:env(safe-area-inset-right);padding-bottom:env(safe-area-inset-bottom);padding-left:env(safe-area-inset-left);");
+			body.append_child(&probe_element).ok()?;
+			*probe_element_cell.borrow_mut() = Some(probe_element.clone());
+			Some(probe_element)
+		})?;
+		let computed_style = window.get_computed_style(&probe_element).ok()??;
+		let read_padding = |property_name: &str| -> f32 {
+			let value = crate::core::viewmanager::parse_leading_float(&computed_style.get_property_value(property_name).unwrap_or_default());
+			if value.is_nan() {
+				0.0
+			}
+			else {
+				value as f32
+			}
+		};
+		Some([read_padding("padding-top"), read_padding("padding-right"), read_padding("padding-bottom"), read_padding("padding-left")])
+	};
+	read_insets().unwrap_or([0.0, 0.0, 0.0, 0.0])
+}
+
+//==============================================================================
 // 창 제목 설정. (문서 제목)
 //==============================================================================
 pub fn set_title(_platform_window: Option<&PlatformWindow>, title: &str) {
@@ -98,7 +152,7 @@ async fn fetch_bytes(asset_location: &str) -> Result<Vec<u8>, String> {
 }
 
 //==============================================================================
-// 캔버스 상태. (마지막으로 맞춘 창 크기와 배율)
+// 캔버스 상태. (마지막으로 맞춘 창 크기와 배율, 배율은 렌더 배율 상한을 건 값)
 //==============================================================================
 struct WindowState {
 	canvas: web_sys::HtmlCanvasElement,
@@ -131,6 +185,7 @@ pub fn run(engine_runner: EngineRunner) -> Result<(), String> {
 	add_keyboard_listeners(&web_application_cell)?;
 	add_pointer_listeners(&web_application_cell)?;
 	add_audio_listeners(&web_application_cell)?;
+	add_page_listeners(&web_application_cell)?;
 	let canvas = web_application_cell.borrow().engine_runner.engine.platform_window.clone();
 	if let Some(canvas) = canvas {
 		textinput::add_text_input_listeners(&canvas)?;
@@ -420,6 +475,77 @@ fn add_audio_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> Re
 }
 
 //==============================================================================
+// 페이지 이벤트와 복원. (원본 setupAllDocumentEvents 의 resume, pageshow, visibilitychange 와 SoundSystem 의 blur, focus, pointerdown)
+// - 엔진을 고쳐 써야 해서 try_borrow_mut 로 본다. (이 이벤트들은 프레임 콜백 안에서 겹쳐 불리지 않는다)
+//==============================================================================
+fn add_page_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> Result<(), String> {
+	let window = web_sys::window().ok_or_else(|| String::from("window 없음"))?;
+	let document = window.document().ok_or_else(|| String::from("document 없음"))?;
+
+	// 처음부터 가려져 있으면 엔진에 적어 둔다.
+	if document.visibility_state() == web_sys::VisibilityState::Hidden {
+		web_application_cell.borrow_mut().engine_runner.engine.dispatch_page_event(PageEvent::Hidden);
+	}
+
+	// 가려짐과 다시 보임. (다시 보이면 복구하고 씬마다 on_page_visibility_restored)
+	let web_application_cell_for_visibility = web_application_cell.clone();
+	let visibility_callback: Closure<dyn FnMut()> = Closure::new(move || {
+		let is_visible = web_sys::window()
+			.and_then(|window| window.document())
+			.map(|document| document.visibility_state() == web_sys::VisibilityState::Visible)
+			.unwrap_or(false);
+		if let Ok(mut web_application) = web_application_cell_for_visibility.try_borrow_mut() {
+			if is_visible {
+				web_application.engine_runner.engine.dispatch_page_event(PageEvent::Visible);
+				web_application.engine_runner.notify_page_visibility_restored();
+			}
+			else {
+				web_application.engine_runner.engine.dispatch_page_event(PageEvent::Hidden);
+			}
+		}
+	});
+
+	// 페이지 프로세스 복원. (Chromium freeze 뒤 문서 resume, bfcache 에서 돌아온 pageshow 의 persisted)
+	let web_application_cell_for_resume = web_application_cell.clone();
+	let resume_callback: Closure<dyn FnMut()> = Closure::new(move || {
+		if let Ok(mut web_application) = web_application_cell_for_resume.try_borrow_mut() {
+			web_application.engine_runner.notify_page_process_restored();
+		}
+	});
+	let web_application_cell_for_page_show = web_application_cell.clone();
+	let page_show_callback: Closure<dyn FnMut(web_sys::Event)> = Closure::new(move |event: web_sys::Event| {
+		let is_persisted = js_sys::Reflect::get(&event, &JsValue::from_str("persisted")).ok().and_then(|value| value.as_bool()).unwrap_or(false);
+		if !is_persisted {
+			return;
+		}
+		if let Ok(mut web_application) = web_application_cell_for_page_show.try_borrow_mut() {
+			web_application.engine_runner.notify_page_process_restored();
+		}
+	});
+
+	// 창 포커스와 누름.
+	let page_event_callback_list: Vec<(&str, PageEvent)> = vec![("blur", PageEvent::Blurred), ("focus", PageEvent::Focused), ("pointerdown", PageEvent::PointerDown)];
+	for (event_name, page_event) in page_event_callback_list {
+		let web_application_cell_for_page_event = web_application_cell.clone();
+		let page_event_callback: Closure<dyn FnMut()> = Closure::new(move || {
+			if let Ok(mut web_application) = web_application_cell_for_page_event.try_borrow_mut() {
+				web_application.engine_runner.engine.dispatch_page_event(page_event);
+			}
+		});
+		window.add_event_listener_with_callback(event_name, page_event_callback.as_ref().unchecked_ref()).map_err(describe_js_error)?;
+		page_event_callback.forget();
+	}
+
+	document.add_event_listener_with_callback("visibilitychange", visibility_callback.as_ref().unchecked_ref()).map_err(describe_js_error)?;
+	document.add_event_listener_with_callback("resume", resume_callback.as_ref().unchecked_ref()).map_err(describe_js_error)?;
+	window.add_event_listener_with_callback("pageshow", page_show_callback.as_ref().unchecked_ref()).map_err(describe_js_error)?;
+	visibility_callback.forget();
+	resume_callback.forget();
+	page_show_callback.forget();
+	Ok(())
+}
+
+//==============================================================================
 // 자바스크립트 오류를 글로.
 //==============================================================================
 fn describe_js_error(error: JsValue) -> String {
@@ -577,6 +703,8 @@ impl WebApplication {
 		else {
 			1.0
 		};
+		// 렌더 배율 상한을 건다. (상한이 바뀌어도 이 값이 달라져 다시 맞춘다)
+		let device_pixel_ratio = self.engine_runner.engine.get_view_manager().limit_render_pixel_ratio(device_pixel_ratio as f32) as f64;
 		let window_state = match self.window_state.as_mut() {
 			Some(window_state) => {
 				window_state

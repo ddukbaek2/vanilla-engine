@@ -7,6 +7,9 @@
 // - 원본 GameScene 의 pre_draw (캔버스 전체를 배경색으로 칠하고 뷰 좌표계를 거는 것)는 SceneBase::draw_scene_background 로 옮겼다.
 // - 트윈은 원본처럼 씬이 목록으로 들고(start_tween), tick 에서 노드 → 터치 다음에 돌리며 끝난 것을 뺀다.
 //   원본은 트윈 객체로 가리키지만, 러스트 판은 트윈을 넘겨받고 TweenId 를 돌려준다. (stop_tween(tween_id))
+// - 원본 SceneManager.unloadScene(scene) 은 씬 객체로 가리킨다. 러스트 판은 엔진이 씬을 들고 있어 load_scene 이 돌려주는 SceneId 로 가리킨다.
+//   씬 스스로는 get_scene_base().get_scene_id() 로 자기 핸들을 안다.
+// - 페이지 복원 훅(on_page_process_restored, on_page_visibility_restored)은 원본과 달리 엔진을 받는다. (전역 엔진이 없다)
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::rect::Rect;
@@ -45,6 +48,12 @@ impl TrackedLoad {
 }
 
 //==============================================================================
+// 씬 핸들. (Engine::load_scene 이 돌려주고 Engine::unload_scene 이 받는다)
+//==============================================================================
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct SceneId(pub(crate) u64);
+
+//==============================================================================
 // 씬 공통 상태.
 //==============================================================================
 pub struct SceneBase {
@@ -57,6 +66,7 @@ pub struct SceneBase {
 	tracked_load_list: Vec<TrackedLoad>,
 	has_ever_touched: bool,
 	first_touch_callback: Option<Box<dyn FnMut()>>,
+	scene_id: Option<SceneId>,
 }
 
 impl SceneBase {
@@ -74,7 +84,22 @@ impl SceneBase {
 			tracked_load_list: Vec::new(),
 			has_ever_touched: false,
 			first_touch_callback: None,
+			scene_id: None,
 		}
+	}
+
+	//==============================================================================
+	// 씬 핸들. (엔진에 load_scene 으로 넘긴 뒤부터 있다)
+	//==============================================================================
+	pub fn get_scene_id(&self) -> Option<SceneId> {
+		self.scene_id
+	}
+
+	//==============================================================================
+	// 씬 핸들 설정. (Engine::load_scene 이 부른다)
+	//==============================================================================
+	pub(crate) fn set_scene_id(&mut self, scene_id: SceneId) {
+		self.scene_id = Some(scene_id);
 	}
 
 	//==============================================================================
@@ -415,6 +440,20 @@ pub trait Scene {
 	// 해제. (엔진이 씬을 내릴 때 한 번)
 	//==============================================================================
 	fn destroy(&mut self, _engine: &mut Engine) {
+	}
+
+	//==============================================================================
+	// 페이지 프로세스 파기 뒤 복원. (Chromium 의 freeze 뒤 resume, bfcache 에서 돌아온 pageshow 등)
+	// - 엔진이 소리를 다시 깨우고 입력 상태를 비운 뒤 불러온 모든 씬에 부른다.
+	//==============================================================================
+	fn on_page_process_restored(&mut self, _engine: &mut Engine) {
+	}
+
+	//==============================================================================
+	// 페이지 가시성 복원. (백그라운드 → 포어그라운드, 웹 visibilitychange 의 visible, 데스크탑 창 가림이 풀림)
+	// - 엔진이 소리를 다시 깨우고 입력 상태를 비운 뒤 불러온 모든 씬에 부른다.
+	//==============================================================================
+	fn on_page_visibility_restored(&mut self, _engine: &mut Engine) {
 	}
 
 	//==============================================================================

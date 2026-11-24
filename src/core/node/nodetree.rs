@@ -8,6 +8,9 @@
 // - tick / 터치를 돌 때는 부르는 컴포넌트 하나만 노드에서 잠깐 꺼내(그 자리에는 빈 자리표를 둔다) ComponentContext(자기 노드 + 트리 전체 + 엔진)를 넘긴다.
 //   그래서 컴포넌트가 다른 노드를 찾고 바꾸고 만들 수 있고, 같은 노드의 다른 컴포넌트(형제)도 get_node_mut().get_component_mut::<T>() 로 찾는다.
 // - 도는 중에 지운 노드는 그 자리에서 비활성으로 두고, 다 돈 뒤에 실제로 지운다.
+// - 형제 순서(원본 Node.setSiblingIndex, getSiblingIndex, getSiblings)와 계층 판정(isActiveInHierarchy, TransformNode.isVisibleInHierarchy)은
+//   부모를 봐야 해서 NodeTree 가 노드 핸들을 받아 한다. 원본의 -1 과 null 은 None 이다.
+//   원본 isVisible 은 활성이고 불투명도가 0 보다 큰 것이다. 러스트 판은 그리기를 끄는 보이기 플래그(set_visible)가 따로 있어 그것까지 본다.
 //==============================================================================
 use crate::base::rect::Rect;
 use crate::base::transformmatrix::TransformMatrix;
@@ -255,6 +258,117 @@ impl NodeTree {
 	//==============================================================================
 	pub fn get_child_count(&self, node_id: NodeId) -> usize {
 		self.get_child_ids(node_id).len()
+	}
+
+	//==============================================================================
+	// 자식의 자리. (그리는 순서의 번호, parent_id 의 자식이 아니면 None)
+	//==============================================================================
+	pub fn get_child_index(&self, parent_id: NodeId, child_id: NodeId) -> Option<usize> {
+		self.nodes.get(parent_id).and_then(|parent_node| parent_node.get_child_index(child_id))
+	}
+
+	//==============================================================================
+	// 형제 목록. (자기 자신을 포함한 부모의 자식 핸들, 부모가 없으면 None)
+	//==============================================================================
+	pub fn get_sibling_ids(&self, node_id: NodeId) -> Option<&[NodeId]> {
+		let parent_id = self.get_parent_id(node_id)?;
+		Some(self.get_child_ids(parent_id))
+	}
+
+	//==============================================================================
+	// 형제 사이의 자리. (부모가 없으면 None)
+	//==============================================================================
+	pub fn get_sibling_index(&self, node_id: NodeId) -> Option<usize> {
+		let parent_id = self.get_parent_id(node_id)?;
+		self.get_child_index(parent_id, node_id)
+	}
+
+	//==============================================================================
+	// 형제 사이의 자리 설정. (자식 수 - 1 까지로 자르고, 그 자리로 옮긴다. 부모가 없으면 아무것도 하지 않는다)
+	// - 앞일수록 먼저 그려져 뒤에 깔린다.
+	//==============================================================================
+	pub fn set_sibling_index(&mut self, node_id: NodeId, child_index: usize) {
+		let parent_id = match self.get_parent_id(node_id) {
+			Some(parent_id) => {
+				parent_id
+			}
+			None => {
+				return;
+			}
+		};
+		let parent_node = match self.nodes.get_mut(parent_id) {
+			Some(parent_node) => {
+				parent_node
+			}
+			None => {
+				return;
+			}
+		};
+		let old_child_index = match parent_node.get_child_index(node_id) {
+			Some(old_child_index) => {
+				old_child_index
+			}
+			None => {
+				return;
+			}
+		};
+		let new_child_index = child_index.min(parent_node.child_ids.len() - 1);
+		if old_child_index == new_child_index {
+			return;
+		}
+		parent_node.child_ids.remove(old_child_index);
+		parent_node.child_ids.insert(new_child_index, node_id);
+	}
+
+	//==============================================================================
+	// 자기부터 루트까지 모두 활성인지. (하나라도 꺼져 있으면 false, 없는 노드도 false)
+	//==============================================================================
+	pub fn is_active_in_hierarchy(&self, node_id: NodeId) -> bool {
+		if !self.nodes.contains_key(node_id) {
+			return false;
+		}
+		let mut current_id = Some(node_id);
+		while let Some(candidate_id) = current_id {
+			let candidate_node = match self.nodes.get(candidate_id) {
+				Some(candidate_node) => {
+					candidate_node
+				}
+				None => {
+					break;
+				}
+			};
+			if !candidate_node.is_active() {
+				return false;
+			}
+			current_id = candidate_node.parent_id;
+		}
+		true
+	}
+
+	//==============================================================================
+	// 자기부터 루트까지 모두 보이는지. (활성, 보이기 플래그, 불투명도 > 0 가운데 하나라도 아니면 false, 없는 노드도 false)
+	//==============================================================================
+	pub fn is_visible_in_hierarchy(&self, node_id: NodeId) -> bool {
+		if !self.nodes.contains_key(node_id) {
+			return false;
+		}
+		let mut current_id = Some(node_id);
+		while let Some(candidate_id) = current_id {
+			let candidate_node = match self.nodes.get(candidate_id) {
+				Some(candidate_node) => {
+					candidate_node
+				}
+				None => {
+					break;
+				}
+			};
+			let is_candidate_visible = candidate_node.is_active() && candidate_node.is_visible() && candidate_node.get_local_opacity() > 0.0;
+			if !is_candidate_visible {
+				return false;
+			}
+			current_id = candidate_node.parent_id;
+		}
+		true
 	}
 
 	//==============================================================================
@@ -936,6 +1050,73 @@ mod tests {
 		node_tree.remove_from_parent(child_id);
 		assert_eq!(node_tree.get_parent_id(child_id), None);
 		assert!(node_tree.contains(child_id));
+	}
+
+	//==============================================================================
+	// 형제 순서: 자리 읽기, 옮기기(끝을 넘으면 맨 뒤), 부모가 없으면 None 이고 옮기지 않는다.
+	//==============================================================================
+	#[test]
+	fn sibling_order() {
+		let mut node_tree = NodeTree::new();
+		let root_id = node_tree.get_root_id();
+		let parent_id = node_tree.create_child(root_id, "parent");
+		let first_id = node_tree.create_child(parent_id, "first");
+		let second_id = node_tree.create_child(parent_id, "second");
+		let third_id = node_tree.create_child(parent_id, "third");
+		let detached_id = node_tree.create_node("detached");
+
+		assert_eq!(node_tree.get_sibling_index(second_id), Some(1));
+		assert_eq!(node_tree.get_child_index(parent_id, third_id), Some(2));
+		assert_eq!(node_tree.get_child_index(parent_id, detached_id), None);
+		assert_eq!(node_tree[parent_id].get_child_index(first_id), Some(0));
+		assert_eq!(node_tree.get_sibling_ids(first_id), Some(&[first_id, second_id, third_id][..]));
+		assert_eq!(node_tree.get_sibling_ids(detached_id), None);
+		assert_eq!(node_tree.get_sibling_index(detached_id), None);
+		assert_eq!(node_tree.get_sibling_index(root_id), None);
+
+		node_tree.set_sibling_index(third_id, 0);
+		assert_eq!(node_tree.get_child_ids(parent_id), &[third_id, first_id, second_id]);
+		node_tree.set_sibling_index(third_id, 100);
+		assert_eq!(node_tree.get_child_ids(parent_id), &[first_id, second_id, third_id]);
+		node_tree.set_sibling_index(first_id, 1);
+		assert_eq!(node_tree.get_child_ids(parent_id), &[second_id, first_id, third_id]);
+		node_tree.set_sibling_index(first_id, 1);
+		assert_eq!(node_tree.get_child_ids(parent_id), &[second_id, first_id, third_id]);
+		node_tree.set_sibling_index(detached_id, 0);
+		assert_eq!(node_tree.get_parent_id(detached_id), None);
+	}
+
+	//==============================================================================
+	// 계층 판정: 조상 하나라도 꺼지거나(활성) 안 보이면(보이기 플래그, 불투명도 0) false.
+	//==============================================================================
+	#[test]
+	fn active_and_visible_in_hierarchy() {
+		let mut node_tree = NodeTree::new();
+		let root_id = node_tree.get_root_id();
+		let parent_id = node_tree.create_child(root_id, "parent");
+		let child_id = node_tree.create_child(parent_id, "child");
+		assert!(node_tree.is_active_in_hierarchy(child_id));
+		assert!(node_tree.is_visible_in_hierarchy(child_id));
+
+		node_tree[parent_id].set_active(false);
+		assert!(!node_tree.is_active_in_hierarchy(child_id));
+		assert!(!node_tree.is_visible_in_hierarchy(child_id));
+		assert!(node_tree.is_active_in_hierarchy(root_id));
+		node_tree[parent_id].set_active(true);
+
+		node_tree[parent_id].set_local_opacity(0.0);
+		assert!(node_tree.is_active_in_hierarchy(child_id));
+		assert!(!node_tree.is_visible_in_hierarchy(child_id));
+		node_tree[parent_id].set_local_opacity(0.5);
+		assert!(node_tree.is_visible_in_hierarchy(child_id));
+
+		node_tree[child_id].set_visible(false);
+		assert!(!node_tree.is_visible_in_hierarchy(child_id));
+		assert!(node_tree.is_visible_in_hierarchy(parent_id));
+
+		node_tree.destroy_node(child_id);
+		assert!(!node_tree.is_active_in_hierarchy(child_id));
+		assert!(!node_tree.is_visible_in_hierarchy(child_id));
 	}
 
 	//==============================================================================

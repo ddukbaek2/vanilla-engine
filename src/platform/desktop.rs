@@ -4,10 +4,12 @@
 // - 창 이벤트를 입력 관리자 꼴로 바꿔 넣는다. (키는 W3C KeyboardEvent.code 와 같은 이름, 마우스 왼쪽 단추는 터치)
 // - 엔진 본체(EngineRunner)는 창을 모른다. 여기서 프레임을 부르고, 그린 뒤 화면을 넘긴다.
 // - 글 입력(키 글자, 편집 키, IME 조합)과 클립보드는 desktop/textinput.rs 가 맡는다. 오른쪽 단추는 입력 필드 문맥 메뉴 요청이다.
+// - 페이지 이벤트: 창 가림(Occluded, 맥과 X11 만 알린다)은 Hidden / Visible, 포커스는 Focused / Blurred, 마우스 단추와 손가락 누름은 PointerDown.
+//   가림이 풀리면 on_page_visibility_restored, suspended 뒤 resumed 면 on_page_process_restored. (윈도우, 맥, 리눅스는 suspended 가 오지 않는다)
 //==============================================================================
 use crate::base::vector2::Vector2;
 use crate::core::asset::AssetLoadHandle;
-use crate::core::engine::EngineRunner;
+use crate::core::engine::{EngineRunner, PageEvent};
 use crate::core::graphic::Graphic;
 use glutin::config::{Config, ConfigTemplateBuilder, GlConfig};
 use glutin::context::{ContextApi, ContextAttributesBuilder, GlProfile, NotCurrentGlContext, PossiblyCurrentContext, Version as GlVersion};
@@ -49,6 +51,7 @@ pub fn run(engine_runner: EngineRunner) -> Result<(), String> {
 		next_frame_instant: Instant::now(),
 		fatal_error: None,
 		text_input_state: textinput::DesktopTextInputState::new(),
+		is_suspended: false,
 	};
 	event_loop.run_app(&mut desktop_application).map_err(|error| format!("이벤트 루프 실행 실패: {}", error))?;
 	match desktop_application.fatal_error.take() {
@@ -133,6 +136,20 @@ pub fn is_coarse_pointer() -> bool {
 }
 
 //==============================================================================
+// 페이지 주소의 쿼리 값. (데스크탑에는 주소가 없어 늘 None)
+//==============================================================================
+pub fn read_page_query_value(_name: &str) -> Option<String> {
+	None
+}
+
+//==============================================================================
+// CSS env(safe-area-inset-*) 세이프 에어리어 인셋. (데스크탑에는 없어 0)
+//==============================================================================
+pub fn read_safe_area_insets() -> [f32; 4] {
+	[0.0, 0.0, 0.0, 0.0]
+}
+
+//==============================================================================
 // 창 제목 설정.
 //==============================================================================
 pub fn set_title(platform_window: Option<&PlatformWindow>, title: &str) {
@@ -167,6 +184,8 @@ struct DesktopApplication {
 	next_frame_instant: Instant,
 	fatal_error: Option<String>,
 	text_input_state: textinput::DesktopTextInputState,
+	// 앱이 suspended 되었는지. (다시 resumed 되면 페이지 프로세스 복원으로 알린다)
+	is_suspended: bool,
 }
 
 impl DesktopApplication {
@@ -363,6 +382,10 @@ impl ApplicationHandler for DesktopApplication {
 	//==============================================================================
 	fn resumed(&mut self, event_loop: &ActiveEventLoop) {
 		if self.window_state.is_some() {
+			if self.is_suspended {
+				self.is_suspended = false;
+				self.engine_runner.notify_page_process_restored();
+			}
 			return;
 		}
 		if let Err(error) = self.create_window(event_loop) {
@@ -375,9 +398,21 @@ impl ApplicationHandler for DesktopApplication {
 	}
 
 	//==============================================================================
+	// 앱이 멈춤. (모바일의 앱 전환, 윈도우, 맥, 리눅스에서는 오지 않는다)
+	//==============================================================================
+	fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
+		self.is_suspended = true;
+	}
+
+	//==============================================================================
 	// 창 이벤트.
 	//==============================================================================
 	fn window_event(&mut self, event_loop: &ActiveEventLoop, _window_id: WindowId, window_event: WindowEvent) {
+		// 마우스 단추와 손가락 누름은 페이지 이벤트로도 알린다. (원본 window 의 pointerdown)
+		let is_pointer_down = matches!(window_event, WindowEvent::MouseInput { state: ElementState::Pressed, .. } | WindowEvent::Touch(winit::event::Touch { phase: TouchPhase::Started, .. }));
+		if is_pointer_down {
+			self.engine_runner.engine.dispatch_page_event(PageEvent::PointerDown);
+		}
 		match window_event {
 			WindowEvent::CloseRequested => {
 				event_loop.exit();
@@ -389,7 +424,24 @@ impl ApplicationHandler for DesktopApplication {
 				if !is_focused {
 					self.engine_runner.engine.get_input_manager_mut().clear();
 				}
+				let page_event = if is_focused {
+					PageEvent::Focused
+				}
+				else {
+					PageEvent::Blurred
+				};
+				self.engine_runner.engine.dispatch_page_event(page_event);
 			}
+			WindowEvent::Occluded(is_occluded) => {
+				if is_occluded {
+					self.engine_runner.engine.dispatch_page_event(PageEvent::Hidden);
+				}
+				else {
+					self.engine_runner.engine.dispatch_page_event(PageEvent::Visible);
+					self.engine_runner.notify_page_visibility_restored();
+				}
+			}
+
 			WindowEvent::KeyboardInput { event: key_event, .. } => {
 				if let PhysicalKey::Code(key_code) = key_event.physical_key {
 					let key = format!("{:?}", key_code);

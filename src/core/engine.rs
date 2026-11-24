@@ -7,6 +7,17 @@
 // - Graphic 은 플랫폼이 GL 컨텍스트를 만든 뒤 attach_graphic 으로 넘겨받고, 씬의 draw 계열에 따로 넘긴다.
 // - 오디오 매니저를 원본처럼 생성할 때 만들어 든다. AudioContext(소리 장치)는 처음 쓸 때 만든다. 프레임마다 하는 오디오 일은 없다.
 //   웹은 플랫폼이 click / touchstart / keydown 에서 resume_on_user_gesture, focus / visibilitychange 에서 resume 을 부른다.
+// - 씬 하나만 내리기(unload_scene)는 원본 SceneManager.unloadScene 자리다. 원본은 씬 객체로, 러스트 판은 load_scene 이 돌려준 SceneId 로 가리키고,
+//   unload_all_scenes 처럼 이번 프레임이 끝난 뒤 내린다. 아직 create 전인(같은 프레임에 불러온) 씬이면 create 도 destroy 도 부르지 않고 뺀다.
+// - 페이지 이벤트(PageEvent): 원본은 모듈마다 document / window 에 리스너를 단다. 러스트 판은 플랫폼이 엔진에 알리고
+//   엔진이 add_page_event_listener 로 받은 리스너에 그 자리에서 넘긴다. (SoundSystem 이 가려짐과 포커스를 이것으로 받는다)
+//   웹: visibilitychange(Hidden, Visible), blur(Blurred), focus(Focused), pointerdown(PointerDown).
+//   데스크탑: 창 가림(Occluded, 맥과 X11 만 winit 이 알린다, 윈도우와 웨이랜드는 오지 않는다), 포커스, 마우스 단추와 손가락 누름.
+// - 페이지 복원 훅: 원본 setupAllDocumentEvents 처럼 소리를 다시 깨우고 입력을 비운 뒤 씬마다 부른다.
+//   웹: visibilitychange 의 visible → on_page_visibility_restored, 문서 resume 과 pageshow(persisted) → on_page_process_restored.
+//   원본은 pageshow 에서 정의되지 않은 dispatchPageProcessRestored 를 불러 예외가 났다. 러스트 판은 resume 과 같은 복구를 한다.
+//   데스크탑: 창 가림이 풀리면 on_page_visibility_restored, 앱이 suspended 뒤 resumed 되면 on_page_process_restored.
+//   (윈도우, 맥, 리눅스의 winit 은 suspended 를 보내지 않아 데스크탑에서는 on_page_process_restored 가 불리지 않는다)
 //
 // 매 프레임 (update_engine):
 // 1. graphic.apply_settings()      # 뷰포트/프로젝션 갱신 + 상태 리셋 + 화면 비우기
@@ -27,13 +38,14 @@ use crate::core::graphic::{Graphic, TextAlign, TextBaseline};
 use crate::core::image::Image;
 use crate::core::inputmanager::InputManager;
 use crate::core::pointercursor::PointerCursor;
-use crate::core::scene::Scene;
+use crate::core::scene::{Scene, SceneId};
 use crate::core::timemanager::TimeManager;
 use crate::core::viewmanager::{ViewManager, ViewScaleMode};
 use crate::platform::{self, PlatformWindow};
 use crate::resource::audioasset::AudioAsset;
+use std::cell::RefCell;
 use std::path::PathBuf;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use web_time::Instant;
 
 // 엔진 판. (원본 vanilla.js 0.3.2 를 옮긴 첫 판)
@@ -129,6 +141,26 @@ impl Default for EngineConfiguration {
 }
 
 //==============================================================================
+// 페이지 이벤트. (플랫폼이 엔진에 알리고, 엔진이 리스너에 그 자리에서 넘긴다)
+//==============================================================================
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PageEvent {
+	// 페이지가 가려짐. (다른 탭, 앱 전환, 창이 가려짐)
+	Hidden,
+	// 페이지가 다시 보임.
+	Visible,
+	// 창이 포커스를 잃음. (blur)
+	Blurred,
+	// 창이 포커스를 얻음. (focus)
+	Focused,
+	// 창을 누름. (pointerdown, 포커스를 알리지 않아도 누르면 창은 포커스를 가진 것이다)
+	PointerDown,
+}
+
+// 페이지 이벤트 리스너. (엔진은 약한 참조로 들어, 리스너를 버리면 더 부르지 않는다)
+pub type PageEventListener = Rc<RefCell<dyn FnMut(PageEvent)>>;
+
+//==============================================================================
 // 엔진.
 //==============================================================================
 pub struct Engine {
@@ -147,6 +179,10 @@ pub struct Engine {
 	pending_font_registration_list: Vec<(String, bool, AssetLoadHandle)>,
 	pending_default_font_handle: Option<AssetLoadHandle>,
 	platform: Platform,
+	next_scene_number: u64,
+	pending_unload_scene_id_list: Vec<SceneId>,
+	is_page_hidden: bool,
+	page_event_listener_list: RefCell<Vec<Weak<RefCell<dyn FnMut(PageEvent)>>>>,
 }
 
 impl Engine {
@@ -172,6 +208,10 @@ impl Engine {
 			pending_font_registration_list: Vec::new(),
 			pending_default_font_handle: None,
 			platform: Platform::new(),
+			next_scene_number: 0,
+			pending_unload_scene_id_list: Vec::new(),
+			is_page_hidden: false,
+			page_event_listener_list: RefCell::new(Vec::new()),
 		}
 	}
 
@@ -185,10 +225,21 @@ impl Engine {
 	}
 
 	//==============================================================================
-	// 씬 불러오기. (이번 프레임이 끝난 뒤 목록에 더한다)
+	// 씬 불러오기. (이번 프레임이 끝난 뒤 목록에 더한다. unload_scene 에 넘길 핸들을 돌려준다)
 	//==============================================================================
-	pub fn load_scene(&mut self, scene: Box<dyn Scene>) {
+	pub fn load_scene(&mut self, mut scene: Box<dyn Scene>) -> SceneId {
+		self.next_scene_number += 1;
+		let scene_id = SceneId(self.next_scene_number);
+		scene.get_scene_base_mut().set_scene_id(scene_id);
 		self.pending_scene_list.push(scene);
+		scene_id
+	}
+
+	//==============================================================================
+	// 씬 하나 내리기. (이번 프레임이 끝난 뒤 destroy 를 부르고 목록에서 뺀다. 없는 핸들이면 아무것도 하지 않는다)
+	//==============================================================================
+	pub fn unload_scene(&mut self, scene_id: SceneId) {
+		self.pending_unload_scene_id_list.push(scene_id);
 	}
 
 	//==============================================================================
@@ -385,6 +436,47 @@ impl Engine {
 
 	pub fn get_platform(&self) -> &Platform {
 		&self.platform
+	}
+
+	//==============================================================================
+	// 페이지가 가려져 있는지. (다른 탭, 앱 전환, 창이 가려짐. 데스크탑은 winit 이 가림을 알리는 맥과 X11 만)
+	//==============================================================================
+	pub fn is_page_hidden(&self) -> bool {
+		self.is_page_hidden
+	}
+
+	//==============================================================================
+	// 페이지 이벤트 리스너 더하기. (리스너를 버리면 더 부르지 않는다, &Engine 으로도 더할 수 있다)
+	//==============================================================================
+	pub fn add_page_event_listener(&self, page_event_listener: &PageEventListener) {
+		self.page_event_listener_list.borrow_mut().push(Rc::downgrade(page_event_listener));
+	}
+
+	//==============================================================================
+	// 페이지 이벤트 알리기. (플랫폼이 부른다. 가려짐을 적고 살아 있는 리스너에 그 자리에서 넘긴다)
+	// - 리스너가 다른 일로 빌려져 있으면 그 리스너는 이번 이벤트를 건너뛴다.
+	//==============================================================================
+	pub(crate) fn dispatch_page_event(&mut self, page_event: PageEvent) {
+		match page_event {
+			PageEvent::Hidden => {
+				self.is_page_hidden = true;
+			}
+			PageEvent::Visible => {
+				self.is_page_hidden = false;
+			}
+			_ => {
+			}
+		}
+		let listener_list: Vec<PageEventListener> = {
+			let mut page_event_listener_list = self.page_event_listener_list.borrow_mut();
+			page_event_listener_list.retain(|weak_listener| weak_listener.strong_count() > 0);
+			page_event_listener_list.iter().filter_map(|weak_listener| weak_listener.upgrade()).collect()
+		};
+		for page_event_listener in listener_list {
+			if let Ok(mut listener) = page_event_listener.try_borrow_mut() {
+				(*listener)(page_event);
+			}
+		}
 	}
 
 	pub fn get_frame_number(&self) -> u64 {
@@ -655,6 +747,40 @@ impl EngineRunner {
 	}
 
 	//==============================================================================
+	// 페이지 가시성 복원 알림. (소리를 다시 깨우고 입력을 비운 뒤 씬마다 on_page_visibility_restored)
+	//==============================================================================
+	pub(crate) fn notify_page_visibility_restored(&mut self) {
+		self.recover_engine_state();
+		let mut scene_list = std::mem::take(&mut self.scene_list);
+		for scene in scene_list.iter_mut() {
+			scene.on_page_visibility_restored(&mut self.engine);
+		}
+		scene_list.append(&mut self.scene_list);
+		self.scene_list = scene_list;
+	}
+
+	//==============================================================================
+	// 페이지 프로세스 복원 알림. (소리를 다시 깨우고 입력을 비운 뒤 씬마다 on_page_process_restored)
+	//==============================================================================
+	pub(crate) fn notify_page_process_restored(&mut self) {
+		self.recover_engine_state();
+		let mut scene_list = std::mem::take(&mut self.scene_list);
+		for scene in scene_list.iter_mut() {
+			scene.on_page_process_restored(&mut self.engine);
+		}
+		scene_list.append(&mut self.scene_list);
+		self.scene_list = scene_list;
+	}
+
+	//==============================================================================
+	// 엔진 복구. (백그라운드나 파기에서 돌아올 때. 멈춘 오디오 컨텍스트를 깨우고, 눌린 채 남은 키와 터치를 비운다)
+	//==============================================================================
+	fn recover_engine_state(&mut self) {
+		self.engine.get_audio_manager().resume_context();
+		self.engine.get_input_manager_mut().clear();
+	}
+
+	//==============================================================================
 	// 미뤄 둔 씬 내리기 / 불러오기.
 	//==============================================================================
 	pub(crate) fn apply_pending_scenes(&mut self) {
@@ -663,6 +789,17 @@ impl EngineRunner {
 			let mut scene_list = std::mem::take(&mut self.scene_list);
 			for scene in scene_list.iter_mut() {
 				scene.destroy(&mut self.engine);
+			}
+		}
+		while !self.engine.pending_unload_scene_id_list.is_empty() {
+			let pending_unload_scene_id_list = std::mem::take(&mut self.engine.pending_unload_scene_id_list);
+			for scene_id in pending_unload_scene_id_list {
+				self.engine.pending_scene_list.retain(|pending_scene| pending_scene.get_scene_base().get_scene_id() != Some(scene_id));
+				let scene_index = self.scene_list.iter().position(|scene| scene.get_scene_base().get_scene_id() == Some(scene_id));
+				if let Some(scene_index) = scene_index {
+					let mut scene = self.scene_list.remove(scene_index);
+					scene.destroy(&mut self.engine);
+				}
 			}
 		}
 		while !self.engine.pending_scene_list.is_empty() {
@@ -800,4 +937,138 @@ fn initialize_scene_if_ready(engine: &mut Engine, scene: &mut dyn Scene) {
 	scene.get_scene_base_mut().set_loaded(true);
 	let canvas_native_size = engine.view_manager.get_canvas_native_size();
 	scene.resize(engine, canvas_native_size);
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::core::scene::SceneBase;
+	use std::cell::Cell;
+
+	//==============================================================================
+	// 시험용 씬. (create, destroy, 페이지 복원 훅이 불린 수를 센다)
+	//==============================================================================
+	struct CountingScene {
+		scene_base: SceneBase,
+		create_count: Rc<Cell<u32>>,
+		destroy_count: Rc<Cell<u32>>,
+		restore_count: Rc<Cell<u32>>,
+	}
+
+	impl CountingScene {
+		//==============================================================================
+		// 세는 칸을 나눠 들고 생성.
+		//==============================================================================
+		fn create_boxed(create_count: &Rc<Cell<u32>>, destroy_count: &Rc<Cell<u32>>, restore_count: &Rc<Cell<u32>>) -> Box<dyn Scene> {
+			Box::new(CountingScene {
+				scene_base: SceneBase::new(),
+				create_count: create_count.clone(),
+				destroy_count: destroy_count.clone(),
+				restore_count: restore_count.clone(),
+			})
+		}
+	}
+
+	impl Scene for CountingScene {
+		fn get_scene_base(&self) -> &SceneBase {
+			&self.scene_base
+		}
+
+		fn get_scene_base_mut(&mut self) -> &mut SceneBase {
+			&mut self.scene_base
+		}
+
+		fn create(&mut self, _engine: &mut Engine) {
+			self.create_count.set(self.create_count.get() + 1);
+		}
+
+		fn destroy(&mut self, _engine: &mut Engine) {
+			self.destroy_count.set(self.destroy_count.get() + 1);
+		}
+
+		fn on_page_process_restored(&mut self, _engine: &mut Engine) {
+			self.restore_count.set(self.restore_count.get() + 100);
+		}
+
+		fn on_page_visibility_restored(&mut self, _engine: &mut Engine) {
+			self.restore_count.set(self.restore_count.get() + 1);
+		}
+	}
+
+	//==============================================================================
+	// 씬 하나 내리기: 프레임이 끝날 때 그 씬만 destroy, 다른 씬은 남고, create 전인 씬은 create 없이 빠진다.
+	//==============================================================================
+	#[test]
+	fn unload_scene_removes_only_that_scene() {
+		let first_counts = [Rc::new(Cell::new(0)), Rc::new(Cell::new(0)), Rc::new(Cell::new(0))];
+		let second_counts = [Rc::new(Cell::new(0)), Rc::new(Cell::new(0)), Rc::new(Cell::new(0))];
+		let third_counts = [Rc::new(Cell::new(0)), Rc::new(Cell::new(0)), Rc::new(Cell::new(0))];
+		let mut engine_runner = EngineRunner::new(Engine::new(EngineConfiguration::new()), CountingScene::create_boxed(&first_counts[0], &first_counts[1], &first_counts[2]));
+		engine_runner.apply_pending_scenes();
+		let second_scene_id = engine_runner.engine.load_scene(CountingScene::create_boxed(&second_counts[0], &second_counts[1], &second_counts[2]));
+		engine_runner.apply_pending_scenes();
+		assert_eq!(engine_runner.scene_list.len(), 2);
+		let first_scene_id = engine_runner.scene_list[0].get_scene_base().get_scene_id().expect("핸들");
+		assert_ne!(first_scene_id, second_scene_id);
+
+		engine_runner.engine.unload_scene(first_scene_id);
+		assert_eq!(first_counts[1].get(), 0);
+		engine_runner.apply_pending_scenes();
+		assert_eq!(first_counts[1].get(), 1);
+		assert_eq!(second_counts[1].get(), 0);
+		assert_eq!(engine_runner.scene_list.len(), 1);
+		assert_eq!(engine_runner.scene_list[0].get_scene_base().get_scene_id(), Some(second_scene_id));
+
+		// 같은 프레임에 불러오고 내리면 create 도 destroy 도 없다. 이미 내린 핸들은 아무것도 하지 않는다.
+		let third_scene_id = engine_runner.engine.load_scene(CountingScene::create_boxed(&third_counts[0], &third_counts[1], &third_counts[2]));
+		engine_runner.engine.unload_scene(third_scene_id);
+		engine_runner.engine.unload_scene(first_scene_id);
+		engine_runner.apply_pending_scenes();
+		assert_eq!(third_counts[0].get(), 0);
+		assert_eq!(third_counts[1].get(), 0);
+		assert_eq!(first_counts[1].get(), 1);
+		assert_eq!(engine_runner.scene_list.len(), 1);
+	}
+
+	//==============================================================================
+	// 페이지 복원: 입력을 비우고 씬마다 훅을 부른다.
+	//==============================================================================
+	#[test]
+	fn page_restore_hooks_reach_scenes_and_clear_input() {
+		let counts = [Rc::new(Cell::new(0)), Rc::new(Cell::new(0)), Rc::new(Cell::new(0))];
+		let mut engine_runner = EngineRunner::new(Engine::new(EngineConfiguration::new()), CountingScene::create_boxed(&counts[0], &counts[1], &counts[2]));
+		engine_runner.apply_pending_scenes();
+		engine_runner.engine.get_input_manager_mut().push_key("KeyA");
+		assert!(engine_runner.engine.get_input_manager().is_key_pressed("KeyA"));
+		engine_runner.notify_page_visibility_restored();
+		assert_eq!(counts[2].get(), 1);
+		assert!(!engine_runner.engine.get_input_manager().is_key_pressed("KeyA"));
+		engine_runner.notify_page_process_restored();
+		assert_eq!(counts[2].get(), 101);
+		assert_eq!(engine_runner.scene_list.len(), 1);
+	}
+
+	//==============================================================================
+	// 페이지 이벤트: 가려짐을 적고 리스너에 넘긴다. 버린 리스너는 더 부르지 않는다.
+	//==============================================================================
+	#[test]
+	fn page_events_reach_listeners() {
+		let mut engine = Engine::new(EngineConfiguration::new());
+		let received_list: Rc<RefCell<Vec<PageEvent>>> = Rc::new(RefCell::new(Vec::new()));
+		let received_list_for_listener = received_list.clone();
+		let page_event_listener: PageEventListener = Rc::new(RefCell::new(move |page_event: PageEvent| {
+			received_list_for_listener.borrow_mut().push(page_event);
+		}));
+		engine.add_page_event_listener(&page_event_listener);
+		assert!(!engine.is_page_hidden());
+		engine.dispatch_page_event(PageEvent::Hidden);
+		assert!(engine.is_page_hidden());
+		engine.dispatch_page_event(PageEvent::Blurred);
+		engine.dispatch_page_event(PageEvent::Visible);
+		assert!(!engine.is_page_hidden());
+		assert_eq!(*received_list.borrow(), vec![PageEvent::Hidden, PageEvent::Blurred, PageEvent::Visible]);
+		drop(page_event_listener);
+		engine.dispatch_page_event(PageEvent::Focused);
+		assert_eq!(received_list.borrow().len(), 3);
+	}
 }

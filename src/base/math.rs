@@ -1,14 +1,71 @@
 //==============================================================================
-// 수학 보조 함수.
+// 수학 보조 함수. (원본 base/math.js)
+// - 원본 수는 f64 이고 러스트 판은 엔진의 다른 값처럼 f32 다. random_int 만 i32 다.
+// - 원본의 floor, ceil, sqrt, abs, sin, cos, tan, asin, acos, pow 는 표준 함수를 손으로 다시 짠 것이라 f32 의 같은 이름 메서드로 갈음하고 옮기지 않았다.
+//   유한한 값에서 floor, ceil, abs 는 같고, 원본 sqrt 는 바빌로니아법 10 번이라 1e4 를 넘으면 크게 틀린다. (sqrt(1e6) 이 1296)
+//   round 는 반을 +무한대 쪽으로 올리는 점(-2.5 → -2)이 f32::round(-2.5 → -3)와 달라 옮겼다.
+// - 무작위는 엔진의 random(xorshift64*)을 쓴다. (원본 Math.random 자리)
+// - 원본 shuffle 의 randomFunction 기본 인자는 shuffle(엔진 random), shuffle_with_random_function(넘긴 함수)으로 나눴다.
 //==============================================================================
 use std::cell::Cell;
 use web_time::{SystemTime, UNIX_EPOCH};
 
 pub const PI: f32 = std::f32::consts::PI;
 
+// 양의 무한대. (원본 PositiveInfinity)
+pub const POSITIVE_INFINITY: f32 = f32::INFINITY;
+
+// 음의 무한대. (원본 NegativeInfinity)
+pub const NEGATIVE_INFINITY: f32 = f32::NEG_INFINITY;
+
 thread_local! {
 	// 난수 상태. (xorshift64*, 처음 쓸 때 시각으로 씨앗을 정한다)
 	static RANDOM_STATE: Cell<u64> = const { Cell::new(0) };
+}
+
+//==============================================================================
+// 더 낮은 수. (원본처럼 left < right 가 아니면 right, NaN 이 끼면 f32::min 과 다르다)
+//==============================================================================
+pub fn min(left: f32, right: f32) -> f32 {
+	if left < right {
+		left
+	}
+	else {
+		right
+	}
+}
+
+//==============================================================================
+// 더 높은 수. (원본처럼 left > right 가 아니면 right)
+//==============================================================================
+pub fn max(left: f32, right: f32) -> f32 {
+	if left > right {
+		left
+	}
+	else {
+		right
+	}
+}
+
+//==============================================================================
+// 반올림. (원본 round: 반은 +무한대 쪽으로, -2.5 → -2, -0.5 → 0, 무한대는 NaN)
+//==============================================================================
+pub fn round(value: f32) -> f32 {
+	let remainder = value % 1.0;
+	if value >= 0.0 {
+		if remainder >= 0.5 {
+			value - remainder + 1.0
+		}
+		else {
+			value - remainder
+		}
+	}
+	else if remainder < -0.5 {
+		value - remainder - 1.0
+	}
+	else {
+		value - remainder
+	}
 }
 
 //==============================================================================
@@ -80,8 +137,153 @@ pub fn random_range(minimum: f32, maximum: f32) -> f32 {
 }
 
 //==============================================================================
+// 정수 범위 난수. (minimum 이상 maximum 이하)
+//==============================================================================
+pub fn random_int(minimum: i32, maximum: i32) -> i32 {
+	let random_value = random() as f64;
+	let offset = (random_value * (maximum as f64 - minimum as f64 + 1.0)).floor();
+	(minimum as f64 + offset) as i32
+}
+
+//==============================================================================
+// 배열에서 무작위로 하나. (비었으면 None, 원본 undefined)
+//==============================================================================
+pub fn pick_random<T>(array: &[T]) -> Option<&T> {
+	if array.is_empty() {
+		return None;
+	}
+	let index = random_int(0, array.len() as i32 - 1) as usize;
+	array.get(index)
+}
+
+//==============================================================================
+// 배열 제자리 섞기. (Fisher-Yates, 엔진 random)
+//==============================================================================
+pub fn shuffle<T>(array: &mut [T]) {
+	shuffle_with_random_function(array, || random() as f64);
+}
+
+//==============================================================================
+// 넘긴 난수 함수(0 이상 1 미만)로 배열 제자리 섞기. (SeededRandom 의 next_value 등)
+//==============================================================================
+pub fn shuffle_with_random_function<T>(array: &mut [T], mut random_function: impl FnMut() -> f64) {
+	let mut index = array.len();
+	while index > 1 {
+		index -= 1;
+		let swap_index = ((random_function() * (index + 1) as f64).floor() as usize).min(index);
+		array.swap(index, swap_index);
+	}
+}
+
+//==============================================================================
+// 프레임률 독립 지수 감쇠 추종. (목표가 도중에 바뀌어도 튀지 않는다, rate 가 클수록 빨리 붙는다)
+// - current + (target - current) * (1 - e^(-rate * time_delta))
+//==============================================================================
+pub fn approach(current_value: f32, target_value: f32, rate: f32, time_delta: f32) -> f32 {
+	let blend_ratio = 1.0 - (-rate * time_delta).exp();
+	current_value + (target_value - current_value) * blend_ratio
+}
+
+//==============================================================================
+// 값을 일정 속도로 목표까지 옮기기. (지나치지 않는다)
+//==============================================================================
+pub fn move_towards(current_value: f32, target_value: f32, maximum_delta: f32) -> f32 {
+	let difference = target_value - current_value;
+	if difference.abs() <= maximum_delta {
+		return target_value;
+	}
+	if difference > 0.0 {
+		current_value + maximum_delta
+	}
+	else {
+		current_value - maximum_delta
+	}
+}
+
+//==============================================================================
 // 이징: 바깥으로 감속하는 2차 곡선.
 //==============================================================================
 pub fn ease_out_quad(time: f32) -> f32 {
 	1.0 - (1.0 - time) * (1.0 - time)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	//==============================================================================
+	// min, max, round 가 원본과 같은지. (NaN 이 끼면 둘째 값, 반은 +무한대 쪽, 무한대는 NaN)
+	//==============================================================================
+	#[test]
+	fn minimum_maximum_and_round() {
+		assert_eq!(min(2.0, 1.0), 1.0);
+		assert_eq!(max(2.0, 1.0), 2.0);
+		assert!(min(1.0, f32::NAN).is_nan());
+		assert_eq!(min(f32::NAN, 1.0), 1.0);
+		assert_eq!(max(f32::NAN, 1.0), 1.0);
+		let case_list: [(f32, f32); 9] = [(2.5, 3.0), (-2.5, -2.0), (-2.6, -3.0), (-2.4, -2.0), (0.5, 1.0), (-0.5, 0.0), (1.5, 2.0), (-1.5, -1.0), (7.0, 7.0)];
+		for (value, expected_value) in case_list {
+			assert_eq!(round(value), expected_value, "{}", value);
+		}
+		assert!(round(f32::INFINITY).is_nan());
+		assert!(round(f32::NAN).is_nan());
+		assert_eq!(POSITIVE_INFINITY, f32::INFINITY);
+		assert_eq!(NEGATIVE_INFINITY, f32::NEG_INFINITY);
+	}
+
+	//==============================================================================
+	// 정수 난수는 양 끝을 포함하고, 뽑기는 빈 배열이면 None, 섞기는 원소를 잃지 않는다.
+	//==============================================================================
+	#[test]
+	fn random_int_pick_and_shuffle() {
+		let mut seen = [false; 4];
+		for _ in 0..2000 {
+			let value = random_int(-1, 2);
+			assert!((-1..=2).contains(&value));
+			seen[(value + 1) as usize] = true;
+		}
+		assert!(seen.iter().all(|is_seen| *is_seen));
+		assert_eq!(random_int(5, 5), 5);
+
+		let empty_list: [i32; 0] = [];
+		assert!(pick_random(&empty_list).is_none());
+		let one_list = [42];
+		assert_eq!(pick_random(&one_list), Some(&42));
+
+		let mut number_list: Vec<i32> = (0..50).collect();
+		shuffle(&mut number_list);
+		let mut sorted_list = number_list.clone();
+		sorted_list.sort();
+		assert_eq!(sorted_list, (0..50).collect::<Vec<i32>>());
+	}
+
+	//==============================================================================
+	// 넘긴 난수 함수로 섞기. (원본 shuffle 에 randomFunction 을 넘긴 것과 같은 차례)
+	// - 원본: [1, 2, 3, 4] 를 늘 0 을 돌려주는 함수로 섞으면 [2, 3, 4, 1], 늘 0.999 면 그대로.
+	//==============================================================================
+	#[test]
+	fn shuffle_with_given_random_function() {
+		let mut number_list = [1, 2, 3, 4];
+		shuffle_with_random_function(&mut number_list, || 0.0);
+		assert_eq!(number_list, [2, 3, 4, 1]);
+		let mut number_list = [1, 2, 3, 4];
+		shuffle_with_random_function(&mut number_list, || 0.999);
+		assert_eq!(number_list, [1, 2, 3, 4]);
+		let mut empty_list: [i32; 0] = [];
+		shuffle_with_random_function(&mut empty_list, || 0.5);
+	}
+
+	//==============================================================================
+	// 지수 감쇠 추종과 일정 속도 옮기기.
+	//==============================================================================
+	#[test]
+	fn approach_and_move_towards() {
+		assert_eq!(approach(0.0, 10.0, 5.0, 0.0), 0.0);
+		let approached_value = approach(0.0, 10.0, 1.0, 1.0);
+		assert!((approached_value - 10.0 * (1.0 - (-1.0f32).exp())).abs() < 1e-5);
+		assert_eq!(move_towards(0.0, 10.0, 3.0), 3.0);
+		assert_eq!(move_towards(0.0, -10.0, 3.0), -3.0);
+		assert_eq!(move_towards(9.0, 10.0, 3.0), 10.0);
+		assert_eq!(move_towards(10.0, 10.0, 0.0), 10.0);
+	}
 }
