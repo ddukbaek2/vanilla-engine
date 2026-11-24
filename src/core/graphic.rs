@@ -5,7 +5,7 @@
 // - 모든 드로우는 draw_vertices() 한 지점으로 수렴한다. 단색 도형도 1x1 흰색 텍스처로 텍스처 경로와 통일.
 // - 클리핑은 스텐실 버퍼 기반. 텍스트는 문자열 텍스처로 구워 출력.
 // - 묶어 그리기(기본 켬): 같은 텍스처를 잇달아 그리면 정점을 CPU 에서 변환해 모았다가 한 번에 그린다.
-//   정점마다 색을 싣는 파티클 셰이더를 같이 쓴다. 틴트가 걸린 그리기와 클립 영역 기록은 묶지 않는다.
+//   원본과 같은 묶음 셰이더로 정점마다 색과 틴트를 실어, 틴트가 걸린 그리기도 묶는다. 클립 영역 기록은 묶지 않는다.
 //   블렌드, 클립, 파티클 그리기, 프레임 끝에서 모은 것을 먼저 내보낸다(flush_batch). 원본은 setSpriteBatchingEnabled 로 켜야 묶는다.
 // - 화면 밖 거르기(기본 켬): NodeTree 가 노드를 그리기 전에 is_local_rect_visible 로 묻는다. 원본은 전부 그린다.
 // - 셰이더 바꿔 끼우기(set_shader_program_override): ShaderSprite 같은 효과가 기본 프로그램 대신 제 프로그램으로 그린다. 바꿔 끼운 동안은 묶지 않는다.
@@ -105,11 +105,48 @@ void main() {
 }
 ";
 
+// 묶어 그리기 버텍스 셰이더. (정점은 쌓을 때 이미 디바이스 픽셀 좌표로 바꿔 둔다, 원본과 같음)
+const BATCH_VERTEXSHADER_SOURCE: &str = "#version 300 es
+in vec2 vertexPosition;
+in vec2 vertexTextureCoordinate;
+in vec4 vertexColor;
+in vec4 vertexTintColor;
+uniform mat3 projectionMatrix;
+out vec2 fragmentTextureCoordinate;
+out vec4 fragmentColor;
+out vec4 fragmentTintColor;
+void main() {
+	vec3 transformedPosition = projectionMatrix * vec3(vertexPosition, 1.0);
+	gl_Position = vec4(transformedPosition.xy, 0.0, 1.0);
+	fragmentTextureCoordinate = vertexTextureCoordinate;
+	fragmentColor = vertexColor;
+	fragmentTintColor = vertexTintColor;
+}
+";
+
+// 묶어 그리기 프래그먼트 셰이더. (기본 셰이더와 같은 셈. 정점 색은 mainColor.rgb * mainColor.a * globalAlpha 와 mainColor.a * globalAlpha, 원본과 같음)
+const BATCH_FRAGMENTSHADER_SOURCE: &str = "#version 300 es
+precision highp float;
+in vec2 fragmentTextureCoordinate;
+in vec4 fragmentColor;
+in vec4 fragmentTintColor;
+uniform sampler2D mainTexture;
+uniform float textureLodBias;
+out vec4 outputColor;
+void main() {
+	vec4 textureColor = texture(mainTexture, fragmentTextureCoordinate, textureLodBias);
+	vec3 tintedColor = mix(textureColor.rgb, fragmentTintColor.rgb * textureColor.a, fragmentTintColor.a);
+	outputColor = vec4(tintedColor * fragmentColor.rgb, textureColor.a * fragmentColor.a);
+}
+";
+
 // 버텍스 1개당 float 수. (x, y, u, v)
 pub const FLOATS_PER_VERTEX: usize = 4;
 // 파티클 버텍스 1개당 float 수. (x, y, u, v, r, g, b, a)
 pub const PARTICLE_FLOATS_PER_VERTEX: usize = 8;
 const PARTICLE_VERTEX_CAPACITY: usize = 8192;
+// 묶어 그리기 버텍스 1개당 float 수. (x, y, u, v, r, g, b, a, 틴트 r, g, b, a)
+const BATCH_FLOATS_PER_VERTEX: usize = 12;
 
 // 스크래치 버텍스 버퍼 용량. (버텍스 수)
 const VERTEX_CAPACITY: usize = 4096;
@@ -305,6 +342,9 @@ pub struct Graphic {
 	particle_vertex_buffer: Option<GlBuffer>,
 	particle_vertex_data: Vec<f32>,
 	soft_disc_texture: Option<GlTexture>,
+	batch_shader_program: Option<ShaderProgram>,
+	batch_vertex_array: Option<GlVertexArray>,
+	batch_vertex_buffer: Option<GlBuffer>,
 	image_texture_cache: ImageTextureCache,
 	text_string_texture_cache: TextStringTextureCache,
 	transform_matrix: TransformMatrix,
@@ -423,6 +463,9 @@ impl Graphic {
 			particle_vertex_buffer: None,
 			particle_vertex_data: Vec::new(),
 			soft_disc_texture: None,
+			batch_shader_program: None,
+			batch_vertex_array: None,
+			batch_vertex_buffer: None,
 			image_texture_cache: ImageTextureCache::new(),
 			text_string_texture_cache: TextStringTextureCache::new(),
 			transform_matrix: TransformMatrix::identity(),
@@ -454,7 +497,7 @@ impl Graphic {
 			round_rect_unit_table: build_round_rect_unit_table(),
 			is_batching_enabled: true,
 			batch_suspend_depth: 0,
-			batch_vertex_data: vec![0.0f32; BATCH_VERTEX_CAPACITY * PARTICLE_FLOATS_PER_VERTEX],
+			batch_vertex_data: vec![0.0f32; BATCH_VERTEX_CAPACITY * BATCH_FLOATS_PER_VERTEX],
 			batch_vertex_count: 0,
 			batch_texture: None,
 			is_culling_enabled: true,
@@ -817,8 +860,8 @@ impl Graphic {
 			return;
 		}
 
-		// 묶어 그리기. (틴트가 없고 클립 영역 기록 중이 아니고 바꿔 끼운 셰이더가 없을 때. 바꿔 끼운 셰이더는 제 유니폼을 쓰므로 바로 그린다)
-		let is_batchable = self.is_batching_enabled && self.batch_suspend_depth == 0 && self.image_tint_color.is_none() && self.shader_program_override.is_none();
+		// 묶어 그리기. (클립 영역 기록 중이 아니고 바꿔 끼운 셰이더가 없을 때. 바꿔 끼운 셰이더는 제 유니폼을 쓰므로 바로 그린다)
+		let is_batchable = self.is_batching_enabled && self.batch_suspend_depth == 0 && self.shader_program_override.is_none();
 		if is_batchable {
 			self.append_batch_vertices(vertex_count, texture, color);
 			return;
@@ -909,7 +952,7 @@ impl Graphic {
 	}
 
 	//==============================================================================
-	// 묶음에 정점 더하기. (현재 변환을 CPU 에서 곱하고, 색에 전역 투명도를 접어 정점마다 싣는다)
+	// 묶음에 정점 더하기. (현재 변환을 CPU 에서 곱하고, 기본 셰이더와 같은 색 셈을 정점 색 하나로 미리 곱해 틴트와 함께 정점마다 싣는다)
 	//==============================================================================
 	fn append_batch_vertices(&mut self, vertex_count: usize, texture: GlTexture, color: Color) {
 		if self.batch_texture != Some(texture) || self.batch_vertex_count + vertex_count > BATCH_VERTEX_CAPACITY {
@@ -917,22 +960,34 @@ impl Graphic {
 			self.batch_texture = Some(texture);
 		}
 		let matrix = self.transform_matrix;
-		let alpha = color.alpha * self.global_alpha;
-		let mut write_offset = self.batch_vertex_count * PARTICLE_FLOATS_PER_VERTEX;
+		let color_alpha = color.alpha * self.global_alpha;
+		let color_red = color.red * color_alpha;
+		let color_green = color.green * color_alpha;
+		let color_blue = color.blue * color_alpha;
+		let tint_color_value_list = match self.image_tint_color {
+			Some(image_tint_color) => {
+				[image_tint_color.red, image_tint_color.green, image_tint_color.blue, image_tint_color.alpha]
+			}
+			None => {
+				[0.0, 0.0, 0.0, 0.0]
+			}
+		};
+		let mut write_offset = self.batch_vertex_count * BATCH_FLOATS_PER_VERTEX;
 		for vertex_index in 0..vertex_count {
 			let read_offset = vertex_index * FLOATS_PER_VERTEX;
 			let position_x = self.vertex_data[read_offset];
 			let position_y = self.vertex_data[read_offset + 1];
-			let batch_vertex = &mut self.batch_vertex_data[write_offset..write_offset + PARTICLE_FLOATS_PER_VERTEX];
+			let batch_vertex = &mut self.batch_vertex_data[write_offset..write_offset + BATCH_FLOATS_PER_VERTEX];
 			batch_vertex[0] = matrix.a * position_x + matrix.c * position_y + matrix.e;
 			batch_vertex[1] = matrix.b * position_x + matrix.d * position_y + matrix.f;
 			batch_vertex[2] = self.vertex_data[read_offset + 2];
 			batch_vertex[3] = self.vertex_data[read_offset + 3];
-			batch_vertex[4] = color.red;
-			batch_vertex[5] = color.green;
-			batch_vertex[6] = color.blue;
-			batch_vertex[7] = alpha;
-			write_offset += PARTICLE_FLOATS_PER_VERTEX;
+			batch_vertex[4] = color_red;
+			batch_vertex[5] = color_green;
+			batch_vertex[6] = color_blue;
+			batch_vertex[7] = color_alpha;
+			batch_vertex[8..12].copy_from_slice(&tint_color_value_list);
+			write_offset += BATCH_FLOATS_PER_VERTEX;
 		}
 		self.batch_vertex_count += vertex_count;
 	}
@@ -954,31 +1009,26 @@ impl Graphic {
 				return;
 			}
 		};
-		if let Err(error) = self.ensure_particle_batch_resources() {
+		if let Err(error) = self.ensure_batch_resources() {
 			eprintln!("Graphic: batch resources failed: {}", error);
 			return;
 		}
-		let particle_shader_program = match &self.particle_shader_program {
-			Some(particle_shader_program) => {
-				particle_shader_program
+		let batch_shader_program = match &self.batch_shader_program {
+			Some(batch_shader_program) => {
+				batch_shader_program
 			}
 			None => {
 				return;
 			}
 		};
-		let identity_matrix_array: [f32; 9] = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0];
-		particle_shader_program.use_program(&self.gl);
-		let projection_matrix_location = particle_shader_program.get_uniform_location(&self.gl, "projectionMatrix");
-		let model_matrix_location = particle_shader_program.get_uniform_location(&self.gl, "modelMatrix");
-		let global_alpha_location = particle_shader_program.get_uniform_location(&self.gl, "globalAlpha");
-		let vertex_bytes = float_slice_to_bytes(&self.batch_vertex_data[..vertex_count * PARTICLE_FLOATS_PER_VERTEX]);
+		batch_shader_program.use_program(&self.gl);
+		let projection_matrix_location = batch_shader_program.get_uniform_location(&self.gl, "projectionMatrix");
+		let vertex_bytes = float_slice_to_bytes(&self.batch_vertex_data[..vertex_count * BATCH_FLOATS_PER_VERTEX]);
 		unsafe {
-			self.gl.bind_vertex_array(self.particle_vertex_array);
-			self.gl.bind_buffer(glow::ARRAY_BUFFER, self.particle_vertex_buffer);
+			self.gl.bind_vertex_array(self.batch_vertex_array);
+			self.gl.bind_buffer(glow::ARRAY_BUFFER, self.batch_vertex_buffer);
 			self.gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, vertex_bytes, glow::DYNAMIC_DRAW);
 			self.gl.uniform_matrix_3_f32_slice(projection_matrix_location.as_ref(), false, &self.projection_matrix_array);
-			self.gl.uniform_matrix_3_f32_slice(model_matrix_location.as_ref(), false, &identity_matrix_array);
-			self.gl.uniform_1_f32(global_alpha_location.as_ref(), 1.0);
 			self.gl.bind_texture(glow::TEXTURE_2D, Some(texture));
 			self.gl.draw_arrays(glow::TRIANGLES, 0, vertex_count as i32);
 
@@ -1096,6 +1146,45 @@ impl Graphic {
 	//==============================================================================
 	pub fn get_last_frame_triangle_count(&self) -> u32 {
 		self.last_frame_draw_vertex_count / 3
+	}
+
+	//==============================================================================
+	// 묶어 그리기 자원 준비. (셰이더, 버텍스 어레이, 버텍스 버퍼. 처음 쓸 때 만든다)
+	//==============================================================================
+	fn ensure_batch_resources(&mut self) -> Result<(), String> {
+		if self.batch_shader_program.is_some() {
+			return Ok(());
+		}
+		let batch_shader_program = ShaderProgram::new(&self.gl, BATCH_VERTEXSHADER_SOURCE, BATCH_FRAGMENTSHADER_SOURCE)?;
+		unsafe {
+			let batch_vertex_array = self.gl.create_vertex_array()?;
+			let batch_vertex_buffer = self.gl.create_buffer()?;
+			self.gl.bind_vertex_array(Some(batch_vertex_array));
+			self.gl.bind_buffer(glow::ARRAY_BUFFER, Some(batch_vertex_buffer));
+			let stride_bytes = (BATCH_FLOATS_PER_VERTEX * 4) as i32;
+			let attribute_layout: [(&str, i32, i32); 4] = [("vertexPosition", 2, 0), ("vertexTextureCoordinate", 2, 8), ("vertexColor", 4, 16), ("vertexTintColor", 4, 32)];
+			for (attribute_name, component_count, byte_offset) in attribute_layout {
+				let attribute_location = batch_shader_program.get_attribute_location(&self.gl, attribute_name);
+				if let Some(attribute_location) = attribute_location {
+					self.gl.enable_vertex_attrib_array(attribute_location);
+					self.gl.vertex_attrib_pointer_f32(attribute_location, component_count, glow::FLOAT, false, stride_bytes, byte_offset);
+				}
+			}
+			self.gl.bind_vertex_array(Some(self.vertex_array));
+			self.gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vertex_buffer));
+			self.batch_vertex_array = Some(batch_vertex_array);
+			self.batch_vertex_buffer = Some(batch_vertex_buffer);
+		}
+		batch_shader_program.use_program(&self.gl);
+		let main_texture_location = batch_shader_program.get_uniform_location(&self.gl, "mainTexture");
+		let texture_lod_bias_location = batch_shader_program.get_uniform_location(&self.gl, "textureLodBias");
+		unsafe {
+			self.gl.uniform_1_i32(main_texture_location.as_ref(), 0);
+			self.gl.uniform_1_f32(texture_lod_bias_location.as_ref(), 0.0);
+		}
+		self.get_shader_program().use_program(&self.gl);
+		self.batch_shader_program = Some(batch_shader_program);
+		Ok(())
 	}
 
 	//==============================================================================
