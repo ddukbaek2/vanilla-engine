@@ -21,6 +21,7 @@ pub mod web;
 
 pub use crate::base::color::Color;
 pub use crate::base::colors::Colors;
+pub use crate::base::format;
 pub use crate::base::fsm::{FiniteStateMachine, StateHandlers};
 pub use crate::base::math;
 pub use crate::base::matrix4::{Matrix4, TransformedPoint};

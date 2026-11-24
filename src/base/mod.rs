@@ -3,6 +3,7 @@
 //==============================================================================
 pub mod color;
 pub mod colors;
+pub mod format;
 pub mod fsm;
 pub mod identifier;
 pub mod math;
