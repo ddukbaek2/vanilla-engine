@@ -5,9 +5,11 @@
 // - 입력은 아직 키보드만 받는다. 입력 필드의 글 입력(숨긴 DOM <input>, IME 조합, 문맥 메뉴)과 클립보드는 web/textinput.rs 가 맡는다.
 // - 오디오: 원본 engine.js 처럼 click / touchstart / keydown(설정하면 touchend / pointerup 도)은 user gesture 로 보고
 //   engine.resume_on_user_gesture(), focus 와 페이지가 다시 보일 때는 engine.resume() 을 부른다.
+// - 페이지: visibilitychange, blur, focus, pointerdown 을 엔진의 페이지 이벤트로 넘기고, 다시 보이면 on_page_visibility_restored,
+//   문서 resume 과 pageshow(persisted) 면 on_page_process_restored 를 부른다. (원본 setupAllDocumentEvents)
 //==============================================================================
 use crate::core::asset::AssetLoadHandle;
-use crate::core::engine::EngineRunner;
+use crate::core::engine::{EngineRunner, PageEvent};
 use crate::core::graphic::Graphic;
 use crate::core::inputmanager::{MouseButton, TouchPoint};
 use crate::base::vector2::Vector2;
@@ -183,6 +185,7 @@ pub fn run(engine_runner: EngineRunner) -> Result<(), String> {
 	add_keyboard_listeners(&web_application_cell)?;
 	add_pointer_listeners(&web_application_cell)?;
 	add_audio_listeners(&web_application_cell)?;
+	add_page_listeners(&web_application_cell)?;
 	let canvas = web_application_cell.borrow().engine_runner.engine.platform_window.clone();
 	if let Some(canvas) = canvas {
 		textinput::add_text_input_listeners(&canvas)?;
@@ -468,6 +471,77 @@ fn add_audio_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> Re
 	user_gesture_callback.forget();
 	focus_callback.forget();
 	visibility_callback.forget();
+	Ok(())
+}
+
+//==============================================================================
+// 페이지 이벤트와 복원. (원본 setupAllDocumentEvents 의 resume, pageshow, visibilitychange 와 SoundSystem 의 blur, focus, pointerdown)
+// - 엔진을 고쳐 써야 해서 try_borrow_mut 로 본다. (이 이벤트들은 프레임 콜백 안에서 겹쳐 불리지 않는다)
+//==============================================================================
+fn add_page_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> Result<(), String> {
+	let window = web_sys::window().ok_or_else(|| String::from("window 없음"))?;
+	let document = window.document().ok_or_else(|| String::from("document 없음"))?;
+
+	// 처음부터 가려져 있으면 엔진에 적어 둔다.
+	if document.visibility_state() == web_sys::VisibilityState::Hidden {
+		web_application_cell.borrow_mut().engine_runner.engine.dispatch_page_event(PageEvent::Hidden);
+	}
+
+	// 가려짐과 다시 보임. (다시 보이면 복구하고 씬마다 on_page_visibility_restored)
+	let web_application_cell_for_visibility = web_application_cell.clone();
+	let visibility_callback: Closure<dyn FnMut()> = Closure::new(move || {
+		let is_visible = web_sys::window()
+			.and_then(|window| window.document())
+			.map(|document| document.visibility_state() == web_sys::VisibilityState::Visible)
+			.unwrap_or(false);
+		if let Ok(mut web_application) = web_application_cell_for_visibility.try_borrow_mut() {
+			if is_visible {
+				web_application.engine_runner.engine.dispatch_page_event(PageEvent::Visible);
+				web_application.engine_runner.notify_page_visibility_restored();
+			}
+			else {
+				web_application.engine_runner.engine.dispatch_page_event(PageEvent::Hidden);
+			}
+		}
+	});
+
+	// 페이지 프로세스 복원. (Chromium freeze 뒤 문서 resume, bfcache 에서 돌아온 pageshow 의 persisted)
+	let web_application_cell_for_resume = web_application_cell.clone();
+	let resume_callback: Closure<dyn FnMut()> = Closure::new(move || {
+		if let Ok(mut web_application) = web_application_cell_for_resume.try_borrow_mut() {
+			web_application.engine_runner.notify_page_process_restored();
+		}
+	});
+	let web_application_cell_for_page_show = web_application_cell.clone();
+	let page_show_callback: Closure<dyn FnMut(web_sys::Event)> = Closure::new(move |event: web_sys::Event| {
+		let is_persisted = js_sys::Reflect::get(&event, &JsValue::from_str("persisted")).ok().and_then(|value| value.as_bool()).unwrap_or(false);
+		if !is_persisted {
+			return;
+		}
+		if let Ok(mut web_application) = web_application_cell_for_page_show.try_borrow_mut() {
+			web_application.engine_runner.notify_page_process_restored();
+		}
+	});
+
+	// 창 포커스와 누름.
+	let page_event_callback_list: Vec<(&str, PageEvent)> = vec![("blur", PageEvent::Blurred), ("focus", PageEvent::Focused), ("pointerdown", PageEvent::PointerDown)];
+	for (event_name, page_event) in page_event_callback_list {
+		let web_application_cell_for_page_event = web_application_cell.clone();
+		let page_event_callback: Closure<dyn FnMut()> = Closure::new(move || {
+			if let Ok(mut web_application) = web_application_cell_for_page_event.try_borrow_mut() {
+				web_application.engine_runner.engine.dispatch_page_event(page_event);
+			}
+		});
+		window.add_event_listener_with_callback(event_name, page_event_callback.as_ref().unchecked_ref()).map_err(describe_js_error)?;
+		page_event_callback.forget();
+	}
+
+	document.add_event_listener_with_callback("visibilitychange", visibility_callback.as_ref().unchecked_ref()).map_err(describe_js_error)?;
+	document.add_event_listener_with_callback("resume", resume_callback.as_ref().unchecked_ref()).map_err(describe_js_error)?;
+	window.add_event_listener_with_callback("pageshow", page_show_callback.as_ref().unchecked_ref()).map_err(describe_js_error)?;
+	visibility_callback.forget();
+	resume_callback.forget();
+	page_show_callback.forget();
 	Ok(())
 }
 

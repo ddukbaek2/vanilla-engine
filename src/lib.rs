@@ -52,6 +52,7 @@ pub use crate::core::component::softshade::{SoftShade, SoftShadeShape};
 pub use crate::core::component::text::Text;
 pub use crate::core::component::{Component, ComponentBase};
 pub use crate::core::engine::{Engine, EngineConfiguration};
+pub use crate::core::engine::{PageEvent, PageEventListener};
 pub use crate::core::frame::Frame;
 pub use crate::core::shaderprogram::ShaderProgram;
 pub use crate::core::shaderwarmer::{ShaderWarmer, ShaderWarmerSource};
@@ -66,6 +67,7 @@ pub use crate::core::textinput::{TextInput, TextInputEvent, TextInputEventKind, 
 pub use crate::core::node::nodetree::{ComponentContext, NodeId, NodeTree, TouchKind};
 pub use crate::core::node::worldnode::{NodeTransform, WorldNode};
 pub use crate::core::scene::{Scene, SceneBase};
+pub use crate::core::scene::SceneId;
 pub use crate::core::soundeffectpool::SoundEffectPool;
 pub use crate::core::soundsystem::{SoundRow, SoundSystem};
 pub use crate::core::timemanager::TimeManager;
