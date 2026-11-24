@@ -150,3 +150,4 @@ pub use crate::misc::visual::Visual;
 pub use crate::resource::bunchasset::BunchAsset;
 pub use crate::resource::visualasset::VisualAsset;
 pub use crate::web::websocketclient::{WebSocketClient, WebSocketReceiveEvent};
+pub use crate::ui::uidocument::{UIDocument, UIDocumentLoadContext, UIDocumentSaveContext, UIDOCUMENT_VERSION};

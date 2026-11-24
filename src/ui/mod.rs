@@ -35,3 +35,4 @@ pub mod uispinner;
 pub mod uitoast;
 pub mod uitogglebutton;
 pub mod uiview;
+pub mod uidocument;

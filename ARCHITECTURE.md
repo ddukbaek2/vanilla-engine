@@ -124,5 +124,6 @@ EngineRunner (플랫폼이 들고 프레임마다 부른다)
 ## 9. 아직 안 옮긴 것
 
 - UINode, 오토레이아웃(ui/autolayout), UIScene: 게임들이 쓰지 않아 미뤘다.
-- DevTools(F2 하이어라키/인스펙터), DynamicFont, UIDocument(리플렉션 직렬화), web/Pane(DOM 창), HumanSkinRenderer(게임들이 쓰지 않음).
+- DevTools(F2 하이어라키/인스펙터), DynamicFont, web/Pane(DOM 창), HumanSkinRenderer(게임들이 쓰지 않음).
+- UIDocument 는 옮겼다. 원본의 리플렉션 직렬화 대신 종류 이름마다 짓기, 쓰기, 읽기 함수를 표에 등록하고, 원본이 반사로 저장하는 종류는 원본 반사 결과와 같은 키로 쓴다. (ui/uidocument.rs)
 - 원본 160파일 가운데 121파일을 옮겼고, 20파일은 죽은 코드이거나 러스트 표준으로 대신해서 일부러 옮기지 않았다. (2026-11-17)

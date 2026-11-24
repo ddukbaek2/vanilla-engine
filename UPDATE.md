@@ -40,6 +40,11 @@
 - README: 장점 위주 소개, 예제 화면 사진(docs/images), 사용법(씬 생명주기, 노드와 컴포넌트, 애셋 로딩, 웹 빌드), 기술 노트(제너레이셔널 핸들 노드 트리, 컴포넌트 접근, 배칭, 컬링, async 없는 애셋 로딩, 텍스트 렌더링, 2D 와 3D, 웹 한글 입력, 플랫폼 레이어), 성능 표를 새로 썼다
 - README: 외부 의존성 섹션. 크레이트마다 버전, 쓰는 곳, 하는 일, 라이선스를 공통, 데스크탑, 웹으로 나눠 표로 정리했다
 - 예제: nodebasics. 노드를 만들고 Paint, Text, 직접 만든 컴포넌트(Spin)를 붙인다. (README '노드와 컴포넌트'의 코드)
+- UIDocument, UIDocumentSaveContext, UIDocumentLoadContext, UIDOCUMENT_VERSION: 노드 트리를 vanilla.js UIDocument 와 같은 JSON 문서(.scene.json, 비주얼 에디터가 저장하는 꼴)로 내보내고(to_json_text, serialize_node) 읽어 짓는다(from_json_text, deserialize_node). 키 차례와 탭 들여쓰기, 수의 글꼴까지 원본 toJsonText 가 낸 글과 같다. 리플렉션 대신 종류 이름마다 짓기, 쓰기, 읽기 함수를 표에 등록하고(register_component_type, 위젯은 register_widget_type), 원본 표의 Paint, Sprite, Text, RichText, Mask, Outline, SoftShade, ShadowText, UIProgressRing, UILabel, UIImageView, UIButton, UIToggleButton, UIProgressView, UISlider, UIScrollView 와 ShadowImage 를 등록해 둔다. 원본이 반사로 저장하는 종류는 원본 반사 결과와 같은 키로 쓴다. 위젯의 content 안 자식(contentChildren), 위젯이 스스로 붙이는 컴포넌트 빼기, 노드 참조($nodeRef)도 원본대로다. 등록하지 않은 종류는 경고를 내고 건너뛴다. 그림 경로는 이미지 해석기(set_image_resolver)로 찾거나, 해석기가 없으면 load_images 가 요청한 ImageAsset 에서 찾고 나중에 읽힌 그림은 bind_pending_images 가 붙인다
+- UIDocument 를 옮기다 찾은 원본 버그: Sprite 의 nineSlice 를 쓰기만 하고 읽지 않던 것. 러스트 판은 원본이 쓰는 꼴(Rect 의 left, top, right, bottom)을 거꾸로 풀어 읽는다
+- Sprite: set_image_path, get_image_path(원본 sprite.imagePath), set_round_size, get_round_size(원본은 Paint 를 상속해 쓰던 것). UIImageView: set_image_path, get_image_path. ShadowText: get_text_align, get_fit_minimum_ratio. ShadowImage: get_image_color, set_image_path, get_image_path
+- serde_json 의 preserve_order 를 켰다. JSON 객체 키가 적힌 차례를 지킨다. (UIDocument 가 원본 JSON.stringify 와 같은 차례로 쓴다. 지금까지는 이름 차례였다)
+- 예제: scenedocument. 원본 UIDocument 와 에디터 저장 꼴로 만든 씬 파일(examples/assets/scenedocument.scene.json)을 읽어 그리고, 다시 내보내 읽은 문서와 같은지 화면에 적는다
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.

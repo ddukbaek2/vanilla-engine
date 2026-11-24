@@ -17,8 +17,8 @@ glow = "0.18"
 fontdue = "0.9"
 # 웹 글꼴(WOFF, WOFF2)을 TTF 로 푼다. (원본 기본 글꼴 DOSGothic 이 .woff)
 wuff = "0.2"
-# JsonAsset 이 JSON 을 푼다. (원본 JSON.parse 자리)
-serde_json = "1"
+# JsonAsset 이 JSON 을 푼다. (원본 JSON.parse 자리) 객체 키는 적힌 차례를 지킨다. (UIDocument 가 원본 JSON.stringify 와 같은 차례로 쓴다)
+serde_json = { version = "1", features = ["preserve_order"] }
 # FBX 압축 배열(zlib deflate)을 푼다. (원본 DecompressionStream 자리, 순수 러스트 miniz_oxide 기본 백엔드라 wasm32 에서도 돈다)
 flate2 = "1"
 # 이미지 해석. (게임들이 png, jpg, webp 를 쓴다)

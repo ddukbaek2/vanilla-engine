@@ -172,6 +172,20 @@ impl UIImageView {
 	pub fn set_nine_slice(&mut self, nine_slice: Rect) {
 		self.sprite.set_nine_slice(nine_slice);
 	}
+
+	//==============================================================================
+	// 그림 경로 설정. (원본 imageView.imagePath, 품은 스프라이트에 둔다. UI 문서가 적고 읽는다)
+	//==============================================================================
+	pub fn set_image_path(&mut self, image_path: &str) {
+		self.sprite.set_image_path(image_path);
+	}
+
+	//==============================================================================
+	// 그림 경로 반환.
+	//==============================================================================
+	pub fn get_image_path(&self) -> &str {
+		self.sprite.get_image_path()
+	}
 }
 
 impl Default for UIImageView {

@@ -2,6 +2,7 @@
 // 스프라이트 출력자 컴포넌트.
 // - 이미지가 없으면 Paint 처럼 색 사각형을 그린다. (원본은 Paint 를 상속, 여기서는 Paint 를 품는다)
 // - 색의 알파가 0 보다 크면 이미지 실루엣 안쪽에만 그 색을 덮는다. (틴트)
+// - 그림 경로(image_path)는 원본이 sprite.imagePath 로 덧붙여 쓰는 값이다. UI 문서(UIDocument)가 그림 대신 이 경로를 적고 읽는다. 그리기에는 쓰지 않는다.
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::rect::Rect;
@@ -35,6 +36,7 @@ pub struct Sprite {
 	sprite_draw_mode: SpriteDrawMode,
 	sprite_blend_mode: SpriteBlendMode,
 	nine_slice: Rect,
+	image_path: String,
 }
 
 impl Sprite {
@@ -53,6 +55,7 @@ impl Sprite {
 			sprite_draw_mode: SpriteDrawMode::Simple,
 			sprite_blend_mode: BlendMode::Normal,
 			nine_slice: Rect::zero(),
+			image_path: String::new(),
 		}
 	}
 
@@ -119,6 +122,20 @@ impl Sprite {
 	//==============================================================================
 	pub fn get_image(&self) -> Option<&Rc<Image>> {
 		self.image.as_ref()
+	}
+
+	//==============================================================================
+	// 그림 경로 설정. (원본 sprite.imagePath, UI 문서가 적고 읽는다)
+	//==============================================================================
+	pub fn set_image_path(&mut self, image_path: &str) {
+		self.image_path = String::from(image_path);
+	}
+
+	//==============================================================================
+	// 그림 경로 반환. (정하지 않았으면 빈 글)
+	//==============================================================================
+	pub fn get_image_path(&self) -> &str {
+		&self.image_path
 	}
 
 	//==============================================================================
@@ -194,6 +211,20 @@ impl Sprite {
 	//==============================================================================
 	pub fn get_color(&self) -> Color {
 		self.paint.get_color()
+	}
+
+	//==============================================================================
+	// 둥근 모서리 크기 설정. (이미지가 없을 때 칠하는 사각형, 원본은 Paint 를 상속해 같은 함수를 쓴다)
+	//==============================================================================
+	pub fn set_round_size(&mut self, round_size: f32) {
+		self.paint.set_round_size(round_size);
+	}
+
+	//==============================================================================
+	// 둥근 모서리 크기 반환.
+	//==============================================================================
+	pub fn get_round_size(&self) -> f32 {
+		self.paint.get_round_size()
 	}
 }
 
