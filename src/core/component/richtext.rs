@@ -7,14 +7,13 @@
 // - 조각 배치(layout_segments)는 Graphic 없이 재는 함수를 받아 한다. draw 는 글자 텍스처 캐시(textstringtexturecache)의 measure_text 로 잰다.
 // - 원본과 다른 것:
 //   - 조각 속성 fontFace(FontFace / FontAsset) 는 font_family(등록한 폰트 이름) 다.
-//   - Text 에 밑줄 / 취소선 / 기울임 그리기가 없어서, 전역(Text) 밑줄과 취소선은 없다. 조각의 <u>, <s> 는 원본처럼 선을 긋는다.
-//     <i> 는 폰트 문자열에 italic 을 넣지만 글자 캐시가 기울여 그리지 않는다. (Text 와 같음)
+//   - 조각의 밑줄, 취소선, 기울임은 원본처럼 조각 속성이 없으면 Text 의 값(set_underline, set_strikethrough, set_italic)을 쓴다.
 //   - 잘못된 #색(16진수가 아닌 글자)은 흰색이다. (원본은 NaN 색)
 //   - getIntrinsicContentSize 는 재는 함수를 받는 calculate_intrinsic_content_size 다.
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::vector2::Vector2;
-use crate::core::component::text::Text;
+use crate::core::component::text::{Text, TextWrapMode};
 use crate::core::component::{Component, ComponentBase};
 use crate::core::graphic::{Graphic, TextAlign, TextBaseline};
 use crate::core::node::worldnode::NodeTransform;
@@ -323,6 +322,48 @@ impl RichText {
 	}
 
 	//==============================================================================
+	// 밑줄 설정. (조각에 <u> 가 없어도 모든 조각에 긋는다)
+	//==============================================================================
+	pub fn set_underline(&mut self, is_underline: bool) {
+		self.text.set_underline(is_underline);
+	}
+
+	//==============================================================================
+	// 밑줄 여부.
+	//==============================================================================
+	pub fn is_underline(&self) -> bool {
+		self.text.is_underline()
+	}
+
+	//==============================================================================
+	// 취소선 설정. (조각에 <s> 가 없어도 모든 조각에 긋는다)
+	//==============================================================================
+	pub fn set_strikethrough(&mut self, is_strikethrough: bool) {
+		self.text.set_strikethrough(is_strikethrough);
+	}
+
+	//==============================================================================
+	// 취소선 여부.
+	//==============================================================================
+	pub fn is_strikethrough(&self) -> bool {
+		self.text.is_strikethrough()
+	}
+
+	//==============================================================================
+	// 줄바꿈 방식 설정. (마크업이 없을 때만 쓰인다. 조각은 원본처럼 한 줄)
+	//==============================================================================
+	pub fn set_wrap_mode(&mut self, wrap_mode: TextWrapMode) {
+		self.text.set_wrap_mode(wrap_mode);
+	}
+
+	//==============================================================================
+	// 줄바꿈 방식 반환.
+	//==============================================================================
+	pub fn get_wrap_mode(&self) -> TextWrapMode {
+		self.text.get_wrap_mode()
+	}
+
+	//==============================================================================
 	// 가로 정렬 설정.
 	//==============================================================================
 	pub fn set_text_align(&mut self, text_align: TextAlign) {
@@ -413,8 +454,8 @@ impl RichText {
 				text_color: attributes.text_color.unwrap_or(self.text.get_text_color()),
 				stroke_color: attributes.stroke_color.unwrap_or(self.text.get_stroke_color()),
 				stroke_width: attributes.stroke_width.unwrap_or(self.text.get_stroke_width()),
-				is_underline: attributes.is_underline,
-				is_strikethrough: attributes.is_strikethrough,
+				is_underline: attributes.is_underline || self.text.is_underline(),
+				is_strikethrough: attributes.is_strikethrough || self.text.is_strikethrough(),
 			});
 			total_width += width;
 			maximum_font_size = maximum_font_size.max(font_size);

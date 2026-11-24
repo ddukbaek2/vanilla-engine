@@ -8,15 +8,20 @@
 // - 굽는 배율, 글, 꼴, 노드 너비가 바뀌면 다시 굽는다.
 // - 화면 밖 거르기는 마지막으로 구운 한 장이 놓이는 사각형(넘친 글, 그림자 여백 포함)으로 판정한다. 세터로 바꾼 뒤 아직 굽지 않았거나 노드 너비나 굽는 배율이 달라졌으면 거르지 않는다.
 // - 원본과 다른 것: 웹에서 글꼴 바이트 없이 시스템 글꼴로 굽는 경우는 모양을 받을 수 없어 그림자 없이 Graphic 의 글로 그린다.
+//   기울임, 밑줄, 취소선(set_italic, set_underline, set_strikethrough)을 더했다. (원본에는 없다) 이름과 선의 자리, 두께는 Text 의 가운데 기준선과 같고,
+//   선도 글과 함께 구워 그림자가 깔린다. 한 줄을 줄여 맞추는 글이라 줄바꿈 방식은 두지 않는다.
 //==============================================================================
 use std::rc::Rc;
 
 use crate::base::color::Color;
 use crate::base::rect::Rect;
+use crate::base::vector2::Vector2;
+use crate::core::component::richtext::build_font_string;
 use crate::core::component::{Component, ComponentBase};
 use crate::core::graphic::{Graphic, TextAlign, TextBaseline};
 use crate::core::image::Image;
 use crate::core::node::worldnode::NodeTransform;
+use crate::core::textstringtexturecache::TextRaster;
 
 // 구운 그림의 가장자리 여유. (안티앨리어싱, 픽셀)
 const BAKE_PADDING: i32 = 2;
@@ -127,6 +132,9 @@ pub struct ShadowText {
 	font_family: String,
 	font_size: f32,
 	is_bold: bool,
+	is_italic: bool,
+	is_underline: bool,
+	is_strikethrough: bool,
 	text_align: TextAlign,
 	text_color: Color,
 	shadow_color: Color,
@@ -150,6 +158,9 @@ impl ShadowText {
 			font_family: String::from("default"),
 			font_size: 16.0,
 			is_bold: false,
+			is_italic: false,
+			is_underline: false,
+			is_strikethrough: false,
 			text_align: TextAlign::Center,
 			text_color: Color::white(),
 			shadow_color: Color::black(),
@@ -172,13 +183,18 @@ impl ShadowText {
 		shadow_text
 	}
 
+	//==============================================================================
+	// Canvas2D font 꼴 문자열. (Text 와 같은 꼴)
+	//==============================================================================
 	fn build_font_string(&self, font_size: f32) -> String {
-		if self.is_bold {
-			format!("bold {}px {}", font_size, self.font_family)
-		}
-		else {
-			format!("{}px {}", font_size, self.font_family)
-		}
+		build_font_string(&self.font_family, font_size, self.is_bold, self.is_italic)
+	}
+
+	//==============================================================================
+	// 밑줄 / 취소선 두께. (Text 와 같이 max(1, 글자 크기 / 16))
+	//==============================================================================
+	fn calculate_decoration_line_width(font_size: f32) -> f32 {
+		(font_size / 16.0).max(1.0)
 	}
 
 	//==============================================================================
@@ -190,7 +206,7 @@ impl ShadowText {
 		}
 		let content_size = transform.get_content_size();
 		let bake_scale = graphic.calculate_text_bake_scale();
-		let bake_key = format!("{}|{}|{}|{}|{:?}|{:?}|{}|{}|{}|{}|{}", self.text, self.font_family, self.font_size, self.is_bold, self.text_color, self.shadow_color, self.shadow_offset, self.shadow_blur, self.fit_minimum_ratio, content_size.x, bake_scale);
+		let bake_key = format!("{}|{}|{}|{}|{}|{}|{}|{:?}|{:?}|{}|{}|{}|{}|{}", self.text, self.font_family, self.font_size, self.is_bold, self.is_italic, self.is_underline, self.is_strikethrough, self.text_color, self.shadow_color, self.shadow_offset, self.shadow_blur, self.fit_minimum_ratio, content_size.x, bake_scale);
 		if bake_key != self.bake_key {
 			self.bake_key = bake_key;
 			self.baked_text = self.bake(graphic, content_size.x, bake_scale);
@@ -220,6 +236,30 @@ impl ShadowText {
 				graphic.set_text_baseline(TextBaseline::Middle);
 				graphic.set_fill_color(self.text_color);
 				graphic.draw_fill_text(&self.text, anchor_x, content_size.y * 0.5);
+				if self.is_underline || self.is_strikethrough {
+					let text_width = graphic.measure_text(&self.text).width;
+					let start_x = match graphic.resolve_text_align(text_align) {
+						TextAlign::Left => {
+							anchor_x
+						}
+						TextAlign::Right => {
+							anchor_x - text_width
+						}
+						_ => {
+							anchor_x - text_width * 0.5
+						}
+					};
+					let line_width = ShadowText::calculate_decoration_line_width(self.font_size);
+					let middle_y = content_size.y * 0.5;
+					graphic.set_stroke_color(self.text_color);
+					if self.is_underline {
+						let underline_y = middle_y + self.font_size * 0.5 + 2.0;
+						graphic.draw_line(&[Vector2::create(start_x, underline_y), Vector2::create(start_x + text_width, underline_y)], line_width);
+					}
+					if self.is_strikethrough {
+						graphic.draw_line(&[Vector2::create(start_x, middle_y), Vector2::create(start_x + text_width, middle_y)], line_width);
+					}
+				}
 				return;
 			}
 		};
@@ -267,8 +307,13 @@ impl ShadowText {
 		let font_string = self.build_font_string(font_size);
 		let scaled_blur = self.shadow_blur * bake_scale;
 		let scaled_offset = (self.shadow_offset * bake_scale).round() as i32;
-		let padding = BAKE_PADDING + scaled_blur.ceil() as i32 * 2 + scaled_offset.max(0);
-		let text_raster = graphic.get_text_string_texture_cache().rasterize_text(&self.text, &font_string, bake_scale, padding)?;
+		let mut padding = BAKE_PADDING + scaled_blur.ceil() as i32 * 2 + scaled_offset.max(0);
+		if self.is_underline {
+			// 밑줄은 기준선 아래로 내려가므로 여유를 더 둔다.
+			padding += ((font_size * 0.25 + 2.0) * bake_scale).ceil() as i32;
+		}
+		let mut text_raster = graphic.get_text_string_texture_cache().rasterize_text(&self.text, &font_string, bake_scale, padding)?;
+		self.draw_decoration_lines(&mut text_raster, font_size, bake_scale);
 		let image = compose_shadow_image(&text_raster.coverage, None, text_raster.width, text_raster.height, self.text_color, self.shadow_color, scaled_blur, scaled_offset);
 		Some(BakedText {
 			image,
@@ -280,6 +325,35 @@ impl ShadowText {
 			font_ascent: text_raster.font_ascent / bake_scale,
 			font_descent: text_raster.font_descent / bake_scale,
 		})
+	}
+
+	//==============================================================================
+	// 밑줄 / 취소선을 글 모양 래스터에 긋기. (가운데 기준선 자리에서 Text 와 같은 오프셋, 길이는 전진폭)
+	//==============================================================================
+	fn draw_decoration_lines(&self, text_raster: &mut TextRaster, font_size: f32, bake_scale: f32) {
+		if !self.is_underline && !self.is_strikethrough {
+			return;
+		}
+		let middle_y = text_raster.baseline_y - (text_raster.font_ascent - text_raster.font_descent) * 0.5;
+		let line_width = ShadowText::calculate_decoration_line_width(font_size) * bake_scale;
+		let mut center_y_list: Vec<f32> = Vec::new();
+		if self.is_underline {
+			center_y_list.push(middle_y + (font_size * 0.5 + 2.0) * bake_scale);
+		}
+		if self.is_strikethrough {
+			center_y_list.push(middle_y);
+		}
+		let start_x = text_raster.origin_x.floor().max(0.0) as i32;
+		let end_x = ((text_raster.origin_x + text_raster.advance_width).ceil() as i32).min(text_raster.width);
+		for center_y in center_y_list {
+			let start_y = (center_y - line_width * 0.5).round().max(0.0) as i32;
+			let end_y = ((center_y + line_width * 0.5).round() as i32).max(start_y + 1).min(text_raster.height);
+			for position_y in start_y..end_y {
+				for position_x in start_x..end_x {
+					text_raster.coverage[(position_y * text_raster.width + position_x) as usize] = 255;
+				}
+			}
+		}
 	}
 
 	//==============================================================================
@@ -310,6 +384,51 @@ impl ShadowText {
 		self.is_bold = is_bold;
 		self.text_color = text_color.into();
 		self.is_bake_dirty = true;
+	}
+
+	//==============================================================================
+	// 기울임 설정.
+	//==============================================================================
+	pub fn set_italic(&mut self, is_italic: bool) {
+		self.is_italic = is_italic;
+		self.is_bake_dirty = true;
+	}
+
+	//==============================================================================
+	// 기울임 여부.
+	//==============================================================================
+	pub fn is_italic(&self) -> bool {
+		self.is_italic
+	}
+
+	//==============================================================================
+	// 밑줄 설정.
+	//==============================================================================
+	pub fn set_underline(&mut self, is_underline: bool) {
+		self.is_underline = is_underline;
+		self.is_bake_dirty = true;
+	}
+
+	//==============================================================================
+	// 밑줄 여부.
+	//==============================================================================
+	pub fn is_underline(&self) -> bool {
+		self.is_underline
+	}
+
+	//==============================================================================
+	// 취소선 설정.
+	//==============================================================================
+	pub fn set_strikethrough(&mut self, is_strikethrough: bool) {
+		self.is_strikethrough = is_strikethrough;
+		self.is_bake_dirty = true;
+	}
+
+	//==============================================================================
+	// 취소선 여부.
+	//==============================================================================
+	pub fn is_strikethrough(&self) -> bool {
+		self.is_strikethrough
 	}
 
 	//==============================================================================

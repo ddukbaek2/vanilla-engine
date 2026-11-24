@@ -139,10 +139,16 @@ pub fn bake_text(text_draw_kind: TextDrawKind, text: &str, font_description: &Fo
 }
 
 //==============================================================================
-// CSS 폰트 문자열 만들기. ("bold 32px "이름", 시스템 글꼴 목록")
+// CSS 폰트 문자열 만들기. ("italic bold 32px "이름", 시스템 글꼴 목록")
 // - 이름이 비었거나 "default" 면 시스템 글꼴 목록만 쓴다. 이름에 쉼표가 있으면 이미 목록이라 그대로 앞에 둔다.
 //==============================================================================
 fn build_css_font_string(font_description: &FontDescription, bake_scale: f32) -> String {
+	let style_text = if font_description.is_italic {
+		"italic "
+	}
+	else {
+		""
+	};
 	let weight_text = if font_description.is_bold {
 		"bold "
 	}
@@ -160,7 +166,7 @@ fn build_css_font_string(font_description: &FontDescription, bake_scale: f32) ->
 	else {
 		format!("\"{}\", {}", family_name.replace('"', ""), SYSTEM_FONT_STRING)
 	};
-	format!("{}{}px {}", weight_text, pixel_size, family_list)
+	format!("{}{}{}px {}", style_text, weight_text, pixel_size, family_list)
 }
 
 //==============================================================================

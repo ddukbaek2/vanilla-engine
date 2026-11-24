@@ -3,18 +3,34 @@
 // - 한 줄, 그리고 줄바꿈 문자나 word_wrap_width 가 있으면 여러 줄로 그린다.
 // - 나눈 줄과 줄 폭은 글, 폰트 문자열, 줄바꿈 폭, 등록된 글꼴이 바뀔 때만 다시 센다.
 // - 화면 밖 거르기는 정렬, 넘침, 줄바꿈 결과로 셈한 글 사각형으로 판정한다. (원본은 거르지 않는다)
-// - 원본에서 옮기지 않은 것: 밑줄 / 취소선, 오른쪽에서 왼쪽 방향, 기울임(italic 은 값만 든다).
+// - 밑줄 / 취소선은 원본처럼 글자 색 선을 긋는다. (두께 max(1, 글자 크기 / 16), 자리는 원본 computeUnderlineOffsetY / computeStrikethroughOffsetY)
+// - 줄바꿈 방식(set_wrap_mode): Word 는 공백 단위로 채우고 넘치는 단어는 글자 단위로 나눈다. Character 는 처음부터 글자 단위. (원본 "word" / "char")
+//   원본은 Intl.Segmenter 로 글자 묶음과 단어(공백 없이 쓰는 글자 포함)를 찾는다. 여기서는 글자(char) 단위와 공백 단위로만 나눈다.
+// - 기울임은 폰트 문자열에 italic 을 넣는다. 글자 캐시가 fontdue 래스터를 기울여 흉내 내고, 웹 시스템 글꼴은 Canvas2D 가 italic 으로 굽는다.
+// - 원본에서 옮기지 않은 것: 오른쪽에서 왼쪽 방향.
 // - 글자 수만큼 보이기(set_visible_character_count, 타자기 연출)는 원본처럼 앞에서부터 자른다. 원본은 UTF-16 단위로 세고, 여기서는 글자(char) 단위로 센다.
 //   여러 줄일 때 원본은 남은 수가 음수로 떨어지면 다음 줄을 통째로 그린다. 여기서는 0 에서 멈춰 다음 줄을 그리지 않는다.
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::rect::Rect;
+use crate::base::vector2::Vector2;
 use crate::core::component::{Component, ComponentBase};
 use crate::core::graphic::{Graphic, TextAlign, TextBaseline};
 use crate::core::node::worldnode::NodeTransform;
 
 // 폰트 이름을 정하지 않았을 때 쓰는 이름. (등록된 이름이 없으면 엔진 기본 폰트로 그린다)
 const DEFAULT_FONT_FAMILY: &str = "default";
+
+//==============================================================================
+// 줄바꿈 방식. (원본 wrapMode "word" / "char")
+//==============================================================================
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextWrapMode {
+	// 공백 단위로 채우고, 한 단어가 폭을 넘으면 글자 단위로 나눈다. (공백 없는 한중일 문장은 통째로 한 단어라 글자 단위가 된다)
+	Word,
+	// 처음부터 글자 단위로 나눈다.
+	Character,
+}
 
 pub struct Text {
 	component_base: ComponentBase,
@@ -26,9 +42,12 @@ pub struct Text {
 	stroke_width: f32,
 	is_bold: bool,
 	is_italic: bool,
+	is_underline: bool,
+	is_strikethrough: bool,
 	text_align: TextAlign,
 	text_baseline: TextBaseline,
 	word_wrap_width: f32,
+	wrap_mode: TextWrapMode,
 	line_spacing: f32,
 	visible_character_count: i32,
 	// 폰트 문자열. (폰트 이름, 크기, 굵게, 기울임이 바뀔 때만 다시 만든다)
@@ -60,9 +79,12 @@ impl Text {
 			stroke_width: 0.0,
 			is_bold: false,
 			is_italic: false,
+			is_underline: false,
+			is_strikethrough: false,
 			text_align: TextAlign::Center,
 			text_baseline: TextBaseline::Middle,
 			word_wrap_width: 0.0,
+			wrap_mode: TextWrapMode::Word,
 			line_spacing: 1.25,
 			visible_character_count: -1,
 			font_string: String::new(),
@@ -240,13 +262,31 @@ impl Text {
 	}
 
 	//==============================================================================
-	// 폭에 맞춰 줄 나누기. (공백 단위로 채우고, 한 단어가 폭을 넘으면 글자 단위로 나눈다)
+	// 폭에 맞춰 줄 나누기. (줄바꿈 방식을 따른다. 줄바꿈 문자는 늘 지킨다, 재는 폰트는 Graphic 의 현재 폰트 문자열)
+	// - Word: 공백 단위로 채우고, 한 단어가 폭을 넘으면 글자 단위로 나눈다.
+	// - Character: 처음부터 글자 단위로 나눈다.
 	//==============================================================================
 	pub fn wrap_text_to_lines(&self, graphic: &Graphic, text: &str, maximum_width: f32) -> Vec<String> {
 		let mut line_list: Vec<String> = Vec::new();
 		for paragraph in text.split('\n') {
 			if maximum_width <= 0.0 {
 				line_list.push(paragraph.to_string());
+				continue;
+			}
+			if self.wrap_mode == TextWrapMode::Character {
+				let mut current_line = String::new();
+				for character in paragraph.chars() {
+					let mut candidate_line = current_line.clone();
+					candidate_line.push(character);
+					if !current_line.is_empty() && graphic.measure_text(&candidate_line).width > maximum_width {
+						line_list.push(current_line);
+						current_line = character.to_string();
+					}
+					else {
+						current_line = candidate_line;
+					}
+				}
+				line_list.push(current_line);
 				continue;
 			}
 			let mut current_line = String::new();
@@ -311,9 +351,74 @@ impl Text {
 	}
 
 	//==============================================================================
-	// 한 줄 출력.
+	// 밑줄 시작 x. (실제 정렬 기준, 원본 computeUnderlineStartX)
 	//==============================================================================
-	fn draw_plain_text(&self, graphic: &mut Graphic, content_width: f32, content_height: f32, text: &str) {
+	fn calculate_underline_start_x(&self, draw_x: f32, text_width: f32, text_align: TextAlign) -> f32 {
+		match text_align {
+			TextAlign::Left | TextAlign::Start => {
+				draw_x
+			}
+			TextAlign::Right | TextAlign::End => {
+				draw_x - text_width
+			}
+			_ => {
+				draw_x - text_width * 0.5
+			}
+		}
+	}
+
+	//==============================================================================
+	// 밑줄 y 오프셋. (기준선에서 아래로, 원본 computeUnderlineOffsetY)
+	//==============================================================================
+	fn calculate_underline_offset_y(&self, font_size: f32) -> f32 {
+		match self.text_baseline {
+			TextBaseline::Top | TextBaseline::Hanging => {
+				font_size + 2.0
+			}
+			TextBaseline::Middle => {
+				font_size * 0.5 + 2.0
+			}
+			_ => {
+				4.0
+			}
+		}
+	}
+
+	//==============================================================================
+	// 취소선 y 오프셋. (원본 computeStrikethroughOffsetY)
+	//==============================================================================
+	fn calculate_strikethrough_offset_y(&self, font_size: f32) -> f32 {
+		match self.text_baseline {
+			TextBaseline::Top | TextBaseline::Hanging => {
+				font_size * 0.55
+			}
+			TextBaseline::Middle => {
+				0.0
+			}
+			_ => {
+				-font_size * 0.35
+			}
+		}
+	}
+
+	//==============================================================================
+	// 가로 선 긋기. (밑줄 / 취소선, 원본 strokeHorizontalLine. 선 색은 미리 set_stroke_color)
+	//==============================================================================
+	fn draw_horizontal_line(&self, graphic: &mut Graphic, x: f32, y: f32, width: f32, line_width: f32) {
+		graphic.draw_line(&[Vector2::create(x, y), Vector2::create(x + width, y)], line_width);
+	}
+
+	//==============================================================================
+	// 밑줄 / 취소선 두께. (원본과 같이 max(1, 글자 크기 / 16))
+	//==============================================================================
+	fn calculate_decoration_line_width(&self) -> f32 {
+		(self.font_size / 16.0).max(1.0)
+	}
+
+	//==============================================================================
+	// 한 줄 출력. (text_width 는 밑줄 / 취소선 길이, 꾸밈이 없으면 쓰지 않는다)
+	//==============================================================================
+	fn draw_plain_text(&self, graphic: &mut Graphic, content_width: f32, content_height: f32, text: &str, text_width: f32) {
 		let (draw_x, text_align) = self.calculate_draw_x(graphic, content_width);
 		let draw_y = match self.text_baseline {
 			TextBaseline::Top | TextBaseline::Hanging => {
@@ -337,6 +442,20 @@ impl Text {
 		}
 		graphic.set_fill_color(self.text_color);
 		graphic.draw_fill_text(text, draw_x, draw_y);
+
+		if self.is_underline || self.is_strikethrough {
+			let start_x = self.calculate_underline_start_x(draw_x, text_width, text_align);
+			let line_width = self.calculate_decoration_line_width();
+			graphic.set_stroke_color(self.text_color);
+			if self.is_underline {
+				let underline_y = draw_y + self.calculate_underline_offset_y(self.font_size);
+				self.draw_horizontal_line(graphic, start_x, underline_y, text_width, line_width);
+			}
+			if self.is_strikethrough {
+				let strikethrough_y = draw_y + self.calculate_strikethrough_offset_y(self.font_size);
+				self.draw_horizontal_line(graphic, start_x, strikethrough_y, text_width, line_width);
+			}
+		}
 	}
 
 	//==============================================================================
@@ -389,6 +508,25 @@ impl Text {
 			}
 			graphic.set_fill_color(self.text_color);
 			graphic.draw_fill_text(line_text, draw_x, line_y);
+
+			// 밑줄 / 취소선. (원본처럼 밑줄은 줄 가운데에서 글자 크기 반과 선 두께만큼 아래, 취소선은 줄 가운데)
+			if self.is_underline || self.is_strikethrough {
+				let line_width = if line_text.len() == full_line_text.len() {
+					self.line_width_list.get(line_index).copied().unwrap_or(0.0)
+				}
+				else {
+					graphic.measure_text(line_text).width
+				};
+				let start_x = self.calculate_underline_start_x(draw_x, line_width, text_align);
+				let decoration_line_width = self.calculate_decoration_line_width();
+				graphic.set_stroke_color(self.text_color);
+				if self.is_underline {
+					self.draw_horizontal_line(graphic, start_x, line_y + self.font_size * 0.5 + decoration_line_width, line_width, decoration_line_width);
+				}
+				if self.is_strikethrough {
+					self.draw_horizontal_line(graphic, start_x, line_y, line_width, decoration_line_width);
+				}
+			}
 		}
 	}
 
@@ -503,7 +641,7 @@ impl Text {
 	}
 
 	//==============================================================================
-	// 기울임 설정. (값만 든다)
+	// 기울임 설정. (폰트 문자열에 italic 을 넣는다)
 	//==============================================================================
 	pub fn set_italic(&mut self, is_italic: bool) {
 		if self.is_italic != is_italic {
@@ -517,6 +655,34 @@ impl Text {
 	//==============================================================================
 	pub fn is_italic(&self) -> bool {
 		self.is_italic
+	}
+
+	//==============================================================================
+	// 밑줄 설정.
+	//==============================================================================
+	pub fn set_underline(&mut self, is_underline: bool) {
+		self.is_underline = is_underline;
+	}
+
+	//==============================================================================
+	// 밑줄 여부.
+	//==============================================================================
+	pub fn is_underline(&self) -> bool {
+		self.is_underline
+	}
+
+	//==============================================================================
+	// 취소선 설정.
+	//==============================================================================
+	pub fn set_strikethrough(&mut self, is_strikethrough: bool) {
+		self.is_strikethrough = is_strikethrough;
+	}
+
+	//==============================================================================
+	// 취소선 여부.
+	//==============================================================================
+	pub fn is_strikethrough(&self) -> bool {
+		self.is_strikethrough
 	}
 
 	//==============================================================================
@@ -562,6 +728,23 @@ impl Text {
 	//==============================================================================
 	pub fn get_word_wrap_width(&self) -> f32 {
 		self.word_wrap_width
+	}
+
+	//==============================================================================
+	// 줄바꿈 방식 설정. (기본 Word)
+	//==============================================================================
+	pub fn set_wrap_mode(&mut self, wrap_mode: TextWrapMode) {
+		if self.wrap_mode != wrap_mode {
+			self.wrap_mode = wrap_mode;
+			self.is_layout_dirty = true;
+		}
+	}
+
+	//==============================================================================
+	// 줄바꿈 방식 반환.
+	//==============================================================================
+	pub fn get_wrap_mode(&self) -> TextWrapMode {
+		self.wrap_mode
 	}
 
 	//==============================================================================
@@ -651,10 +834,23 @@ impl Component for Text {
 			self.draw_wrapped_text(graphic, content_size.x, content_size.y);
 			return;
 		}
-		let visible_text = self.apply_visible_character_count(&self.text);
-		if visible_text.is_empty() {
+		let visible_length = self.apply_visible_character_count(&self.text).len();
+		if visible_length == 0 {
 			return;
 		}
-		self.draw_plain_text(graphic, content_size.x, content_size.y, visible_text);
+
+		// 밑줄 / 취소선 길이. (글 전체면 담아 둔 폭, 앞에서 잘랐으면 잘린 글을 잰다)
+		let mut text_width = 0.0;
+		if self.is_underline || self.is_strikethrough {
+			self.update_layout(graphic, content_size.x);
+			if visible_length == self.text.len() {
+				text_width = self.line_width_list.first().copied().unwrap_or(0.0);
+			}
+			else {
+				graphic.set_font_string(&self.font_string);
+				text_width = graphic.measure_text(&self.text[..visible_length]).width;
+			}
+		}
+		self.draw_plain_text(graphic, content_size.x, content_size.y, &self.text[..visible_length], text_width);
 	}
 }

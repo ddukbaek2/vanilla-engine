@@ -8,14 +8,13 @@
 // - 원본은 Text 와 RichText 두 벌에 세터를 같이 걸고 use_rich_text 로 어느 쪽을 켤지 고른다. 러스트 판은 한 벌이라 맞출 일이 없다.
 //   use_rich_text(true) 면 RichText 로(마크업 해석), 아니면 품은 Text 로 그린다. append_segment / clear_segments 는 RichText 에 넘긴다.
 // - 원본 setFont(FontFace) 는 set_font_family(등록한 폰트 이름) 로 바꿨다.
-// - 원본에서 옮기지 않은 것: 밑줄 / 취소선, 글자 방향, 줄바꿈 방식(word / char), 표시 글자 수 (Text 에 없다),
-//   invalidateIntrinsicContentSize (UINode 노선 전용).
+// - 원본에서 옮기지 않은 것: 글자 방향, 표시 글자 수 (원본 UILabel 에 없다), invalidateIntrinsicContentSize (UINode 노선 전용).
 // - 배경색(UIView)은 글자보다 먼저 그린다. (원본은 Text 가 먼저 붙어 배경이 글자를 덮는다. 기본 배경이 투명이라 보통은 차이가 없다)
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::rect::Rect;
 use crate::core::component::richtext::{RichText, RichTextAttributes};
-use crate::core::component::text::Text;
+use crate::core::component::text::{Text, TextWrapMode};
 use crate::core::component::{Component, ComponentBase};
 use crate::core::graphic::{Graphic, TextAlign, TextBaseline};
 use crate::core::node::nodetree::{NodeId, NodeTree};
@@ -195,6 +194,20 @@ impl UILabel {
 	}
 
 	//==============================================================================
+	// 줄바꿈 방식 설정. (원본 setWrapMode, Word 또는 Character)
+	//==============================================================================
+	pub fn set_wrap_mode(&mut self, wrap_mode: TextWrapMode) {
+		self.rich_text.set_wrap_mode(wrap_mode);
+	}
+
+	//==============================================================================
+	// 줄바꿈 방식 반환.
+	//==============================================================================
+	pub fn get_wrap_mode(&self) -> TextWrapMode {
+		self.rich_text.get_wrap_mode()
+	}
+
+	//==============================================================================
 	// 줄 간격 배율 설정.
 	//==============================================================================
 	pub fn set_line_spacing(&mut self, line_spacing: f32) {
@@ -244,7 +257,7 @@ impl UILabel {
 	}
 
 	//==============================================================================
-	// 기울임 설정. (Text 처럼 값만 든다)
+	// 기울임 설정.
 	//==============================================================================
 	pub fn set_italic(&mut self, is_italic: bool) {
 		self.rich_text.set_italic(is_italic);
@@ -255,6 +268,34 @@ impl UILabel {
 	//==============================================================================
 	pub fn is_italic(&self) -> bool {
 		self.rich_text.is_italic()
+	}
+
+	//==============================================================================
+	// 밑줄 설정.
+	//==============================================================================
+	pub fn set_underline(&mut self, is_underline: bool) {
+		self.rich_text.set_underline(is_underline);
+	}
+
+	//==============================================================================
+	// 밑줄 여부.
+	//==============================================================================
+	pub fn is_underline(&self) -> bool {
+		self.rich_text.is_underline()
+	}
+
+	//==============================================================================
+	// 취소선 설정.
+	//==============================================================================
+	pub fn set_strikethrough(&mut self, is_strikethrough: bool) {
+		self.rich_text.set_strikethrough(is_strikethrough);
+	}
+
+	//==============================================================================
+	// 취소선 여부.
+	//==============================================================================
+	pub fn is_strikethrough(&self) -> bool {
+		self.rich_text.is_strikethrough()
 	}
 
 	//==============================================================================

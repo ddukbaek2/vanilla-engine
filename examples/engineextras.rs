@@ -2,6 +2,7 @@
 // 엔진에 더한 범용 기능 예제. (외계행성 광부 키우기에서 엔진으로 옮긴 것)
 // - 테(Outline), 진행 고리(UIProgressRing), 부드러운 그늘(SoftShade), 마우스 커서(PointerCursor), 카메라 손짓(CameraGestures),
 //   입력 매니저의 마우스 단추와 손가락 목록을 한 화면에 놓는다. 입력은 흉내 내지 않는다. (데스크탑과 웹에서 직접 눌러 본다)
+// - 오른쪽 위: 글자 꾸밈. (밑줄, 취소선, 기울임, 그림자 글의 기울임과 밑줄, 글자 단위 줄바꿈)
 // - 오른쪽 단추로 끌면 가운데 사각형이 돌고, 가운데 단추로 끌면 움직이고, 휠이나 두 손가락으로 키운다.
 // - 실행: cargo run --example engineextras
 //==============================================================================
@@ -11,7 +12,7 @@ use vanilla::core::graphic::{TextAlign, TextBaseline};
 use vanilla::{
 	Image, ShadowImage, ShadowText,
 	set_button_motion_area, ButtonMotion, ButtonMotionStyle, ToastMotion,
-	CameraGestures, Color, ComponentContext, Engine, EngineConfiguration, Graphic, MouseButton, NodeId, NodeTree, Outline, Paint, Pivot, Scene, SceneBase, SoftShade, SoftShadeShape, TouchRecognizer, UIButton, UIHitArea, UILabel, UIProgressRing, Vector2, ViewScaleMode,
+	CameraGestures, Color, ComponentContext, Engine, EngineConfiguration, Graphic, MouseButton, NodeId, NodeTree, Outline, Paint, Pivot, Scene, SceneBase, SoftShade, SoftShadeShape, TextWrapMode, TouchRecognizer, UIButton, UIHitArea, UILabel, UIProgressRing, Vector2, ViewScaleMode,
 };
 
 // 뷰 크기.
@@ -153,6 +154,39 @@ impl EngineExtrasScene {
 		let bottom_id = create_box_node(node_tree, root_id, "bottomShade", Vector2::create(0.0, 620.0), Vector2::create(VIEW_WIDTH, 100.0));
 		let bottom = node_tree[bottom_id].add_component(SoftShade::new());
 		bottom.set_shade(SoftShadeShape::Bottom, "#4466ff", 0.8, 0.0);
+	}
+
+	//==============================================================================
+	// 글자 꾸밈 구역. (오른쪽 위)
+	//==============================================================================
+	fn create_text_decoration_section(&mut self, root_id: NodeId) {
+		let node_tree = self.scene_base.get_node_tree_mut();
+		create_label_node(node_tree, root_id, "decorationCaption", Vector2::create(960.0, 90.0), Vector2::create(280.0, 22.0), "글자 꾸밈", 15.0, CAPTION_COLOR);
+		let underline_id = create_label_node(node_tree, root_id, "underline", Vector2::create(960.0, 114.0), Vector2::create(130.0, 30.0), "밑줄 글", 20.0, TEXT_COLOR);
+		if let Some(label) = node_tree[underline_id].get_component_mut::<UILabel>() {
+			label.set_underline(true);
+		}
+		let strikethrough_id = create_label_node(node_tree, root_id, "strikethrough", Vector2::create(1100.0, 114.0), Vector2::create(140.0, 30.0), "취소선 글", 20.0, TEXT_COLOR);
+		if let Some(label) = node_tree[strikethrough_id].get_component_mut::<UILabel>() {
+			label.set_strikethrough(true);
+		}
+		let italic_id = create_label_node(node_tree, root_id, "italic", Vector2::create(960.0, 146.0), Vector2::create(130.0, 30.0), "기울임 Italic", 20.0, TEXT_COLOR);
+		if let Some(label) = node_tree[italic_id].get_component_mut::<UILabel>() {
+			label.set_italic(true);
+		}
+		let shadow_text_id = create_box_node(node_tree, root_id, "decoratedShadowText", Vector2::create(960.0, 178.0), Vector2::create(280.0, 32.0));
+		let shadow_text = node_tree[shadow_text_id].add_component(ShadowText::create_with_text("그림자 글 기울임 밑줄", 22.0));
+		shadow_text.set_text_style(22.0, true, "#ffcc55");
+		shadow_text.set_text_align(TextAlign::Left);
+		shadow_text.set_italic(true);
+		shadow_text.set_underline(true);
+		shadow_text.set_shadow(vanilla::Color::create(0.0, 0.0, 0.0, 0.9), 2.0, 2.0);
+		let wrap_id = create_label_node(node_tree, root_id, "characterWrap", Vector2::create(960.0, 214.0), Vector2::create(280.0, 36.0), "Character 줄바꿈은 낱말도 Characters 글자 단위로 끊는다", 14.0, TEXT_COLOR);
+		if let Some(label) = node_tree[wrap_id].get_component_mut::<UILabel>() {
+			label.set_text_baseline(TextBaseline::Top);
+			label.set_word_wrap_width(280.0);
+			label.set_wrap_mode(TextWrapMode::Character);
+		}
 	}
 
 	//==============================================================================
@@ -307,6 +341,7 @@ impl Scene for EngineExtrasScene {
 		create_label_node(node_tree, root_id, "title", Vector2::create(40.0, 30.0), Vector2::create(900.0, 50.0), "엔진에 더한 범용 기능", 34.0, TEXT_COLOR);
 		self.create_outline_section(root_id);
 		self.create_shade_section(root_id);
+		self.create_text_decoration_section(root_id);
 		self.create_input_section(root_id);
 		engine.get_pointer_cursor_mut().set_enabled(true);
 	}

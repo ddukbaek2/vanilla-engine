@@ -4,7 +4,8 @@
 // - 여기서는 fontdue 로 글자를 래스터화해 문자열 한 장으로 굽는다. 상한과 키 구성(방식, 폰트 문자열, 선 두께, 배율, 글)은 원본과 같다.
 //   원본은 키를 문자열로 이어 붙인다. 여기서는 찾을 때마다 문자열을 만들지 않게 키의 해시로 찾고, 같은 해시 안에서 키를 하나씩 맞춰 본다.
 // - 글자는 흰색으로 굽고, 그릴 때 색을 곱한다. (색이 바뀌어도 다시 굽지 않는다)
-// - 폰트 문자열은 Canvas2D font 와 같은 꼴을 읽는다. 예: "16px DOSGothic", "bold 24px default"
+// - 폰트 문자열은 Canvas2D font 와 같은 꼴을 읽는다. 예: "16px DOSGothic", "bold 24px default", "italic 16px default"
+// - 기울임(italic, oblique)은 기울임 글꼴을 찾지 않고 래스터를 가로로 밀어 흉내 낸다. (기준선 위는 오른쪽, 아래는 왼쪽, 높이의 0.2 배. 전진폭은 그대로)
 // - 첫 폰트에 없는 글자는 기본 폰트, 대체 폰트 순으로 찾는다. (브라우저의 글꼴 대체와 같은 자리)
 // - 웹에서 글꼴 바이트가 하나도 없으면 원본처럼 브라우저 Canvas2D 로 굽고 잰다. 그래서 시스템 글꼴로 나온다. (platform/web/systemfont.rs)
 //==============================================================================
@@ -16,6 +17,9 @@ use std::rc::Rc;
 
 // 캐시 상한. (원본과 같음)
 const MAXIMUM_ENTRY_COUNT: usize = 512;
+
+// 흉내 낸 기울임의 기울기. (기준선에서 1 픽셀 올라갈 때 오른쪽으로 밀리는 픽셀, 약 11 도)
+const ITALIC_SHEAR: f32 = 0.2;
 
 //==============================================================================
 // 굽는 방식.
@@ -73,6 +77,7 @@ pub struct TextMetrics {
 pub struct FontDescription {
 	pub font_size: f32,
 	pub is_bold: bool,
+	pub is_italic: bool,
 	pub family_name: String,
 }
 
@@ -330,6 +335,9 @@ impl TextStringTextureCache {
 			top_extent = top_extent.max((metrics.ymin + metrics.height as i32) as f32);
 			bottom_extent = bottom_extent.max(-(metrics.ymin as f32));
 		}
+		let italic_shear = calculate_italic_shear(&font_description);
+		minimum_x -= bottom_extent * italic_shear;
+		maximum_x += top_extent * italic_shear;
 		let padding = padding.max(1);
 		let origin_x = padding as f32 - minimum_x.floor();
 		let baseline_y = padding + top_extent.ceil() as i32;
@@ -363,6 +371,9 @@ impl TextStringTextureCache {
 					coverage[bitmap_index] = coverage[bitmap_index].max(glyph_value);
 				}
 			}
+		}
+		if italic_shear > 0.0 {
+			coverage = shear_coverage(&coverage, width, height, baseline_y as f32, italic_shear);
 		}
 		Some(TextRaster { coverage, width, height, origin_x, baseline_y: baseline_y as f32, advance_width, font_ascent, font_descent })
 	}
@@ -443,6 +454,11 @@ impl TextStringTextureCache {
 			bottom_extent = bottom_extent.max(-(metrics.ymin as f32));
 		}
 
+		// 기울이면 기준선 위는 오른쪽, 아래는 왼쪽으로 밀리므로 그만큼 경계를 넓힌다.
+		let italic_shear = calculate_italic_shear(&font_description);
+		minimum_x -= bottom_extent * italic_shear;
+		maximum_x += top_extent * italic_shear;
+
 		// 비트맵 크기. (외곽선 두께만큼 여백)
 		let stroke_radius = match text_draw_kind {
 			TextDrawKind::Stroke => {
@@ -487,6 +503,11 @@ impl TextStringTextureCache {
 					coverage[bitmap_index] = coverage[bitmap_index].max(glyph_value);
 				}
 			}
+		}
+
+		// 기울임 흉내. (외곽선은 기울인 모양에 긋는다)
+		if italic_shear > 0.0 {
+			coverage = shear_coverage(&coverage, bitmap_width, bitmap_height, baseline_y as f32, italic_shear);
 		}
 
 		// 외곽선: 윤곽 바깥으로 반두께 넓힌 것에서 안으로 반두께 좁힌 것을 뺀 띠. (Canvas2D strokeText 는 윤곽선 가운데에 선을 긋는다)
@@ -588,6 +609,7 @@ fn create_entry_hash(text_draw_kind: TextDrawKind, text: &str, font_string: &str
 pub fn parse_font_string(font_string: &str) -> FontDescription {
 	let mut font_size: f32 = 10.0;
 	let mut is_bold = false;
+	let mut is_italic = false;
 	let mut family_name_parts: Vec<&str> = Vec::new();
 	let mut has_found_size = false;
 	for token in font_string.split_whitespace() {
@@ -598,6 +620,10 @@ pub fn parse_font_string(font_string: &str) -> FontDescription {
 		let lowercase_token = token.to_lowercase();
 		if lowercase_token == "bold" || lowercase_token == "bolder" {
 			is_bold = true;
+			continue;
+		}
+		if lowercase_token == "italic" || lowercase_token == "oblique" {
+			is_italic = true;
 			continue;
 		}
 		if let Ok(font_weight) = lowercase_token.parse::<u32>() {
@@ -618,6 +644,7 @@ pub fn parse_font_string(font_string: &str) -> FontDescription {
 	FontDescription {
 		font_size,
 		is_bold,
+		is_italic,
 		family_name,
 	}
 }
@@ -728,6 +755,44 @@ fn calculate_advance_width(_font_list: &[Rc<fontdue::Font>], glyph_placements: &
 }
 
 //==============================================================================
+// 흉내 낸 기울임의 기울기. (italic 이 아니면 0)
+//==============================================================================
+fn calculate_italic_shear(font_description: &FontDescription) -> f32 {
+	if font_description.is_italic {
+		ITALIC_SHEAR
+	}
+	else {
+		0.0
+	}
+}
+
+//==============================================================================
+// 덮인 정도를 가로로 기울이기. (기준선 위 줄은 오른쪽, 아래 줄은 왼쪽으로 줄 높이 × 기울기만큼 밀고, 두 픽셀 사이는 섞는다)
+//==============================================================================
+fn shear_coverage(coverage: &[u8], bitmap_width: i32, bitmap_height: i32, baseline_y: f32, shear: f32) -> Vec<u8> {
+	let read_coverage = |position_x: i32, position_y: i32| -> f32 {
+		if position_x < 0 || position_x >= bitmap_width {
+			return 0.0;
+		}
+		coverage[(position_y * bitmap_width + position_x) as usize] as f32
+	};
+	let mut sheared_coverage = vec![0u8; coverage.len()];
+	for position_y in 0..bitmap_height {
+		let shift = (baseline_y - (position_y as f32 + 0.5)) * shear;
+		let shift_floor = shift.floor();
+		let fraction = shift - shift_floor;
+		let shift_integer = shift_floor as i32;
+		for position_x in 0..bitmap_width {
+			// 밀린 자리 x 의 값은 원래 자리 x - shift 에서 온다.
+			let source_x = position_x - shift_integer;
+			let value = read_coverage(source_x, position_y) * (1.0 - fraction) + read_coverage(source_x - 1, position_y) * fraction;
+			sheared_coverage[(position_y * bitmap_width + position_x) as usize] = value.round().clamp(0.0, 255.0) as u8;
+		}
+	}
+	sheared_coverage
+}
+
+//==============================================================================
 // 외곽선 띠 만들기. (원 모양으로 넓힌 값 - 원 모양으로 좁힌 값)
 //==============================================================================
 fn build_stroke_coverage(coverage: &[u8], bitmap_width: i32, bitmap_height: i32, stroke_radius: f32) -> Vec<u8> {
@@ -823,6 +888,39 @@ mod tests {
 		assert!(!cached_text_entry.is_same_key(TextDrawKind::Fill, "가나", "16px default", 0.0, 1.5));
 		assert!(!cached_text_entry.is_same_key(TextDrawKind::Fill, "가나다", "bold 16px default", 0.0, 1.5));
 		assert!(!cached_text_entry.is_same_key(TextDrawKind::Fill, "가나다", "16px default", 2.0, 1.5));
+	}
+
+	//==============================================================================
+	// italic 을 읽고, 기울이면 기준선 위는 오른쪽으로 아래는 왼쪽으로 밀린다.
+	//==============================================================================
+	#[test]
+	fn italic_shears_coverage() {
+		let font_description = parse_font_string("italic bold 20px \"My Font\"");
+		assert!(font_description.is_italic);
+		assert!(font_description.is_bold);
+		assert_eq!(font_description.family_name, "My Font");
+		assert!(!parse_font_string("20px default").is_italic);
+		// 세로 막대 하나. (x = 5, 줄 0 ~ 9, 기준선은 줄 10)
+		let width = 12;
+		let height = 12;
+		let mut coverage = vec![0u8; (width * height) as usize];
+		for position_y in 0..10 {
+			coverage[(position_y * width + 5) as usize] = 255;
+		}
+		let sheared_coverage = shear_coverage(&coverage, width, height, 10.0, 0.5);
+		let find_center_x = |position_y: i32| -> f32 {
+			let mut weighted_sum = 0.0;
+			let mut weight_sum = 0.0;
+			for position_x in 0..width {
+				let value = sheared_coverage[(position_y * width + position_x) as usize] as f32;
+				weighted_sum += value * position_x as f32;
+				weight_sum += value;
+			}
+			weighted_sum / weight_sum
+		};
+		assert!((find_center_x(9) - 5.25).abs() < 0.05);
+		assert!((find_center_x(0) - 9.75).abs() < 0.05);
+		assert!(find_center_x(0) > find_center_x(5));
 	}
 
 	//==============================================================================
