@@ -253,6 +253,20 @@ impl Component for ShadowImage {
 		true
 	}
 
+	fn calculate_drawn_rect(&mut self, transform: &NodeTransform, graphic: &mut Graphic) -> Option<Rect> {
+		// 그림은 content 안에 들지만 구운 한 장은 그림자 여백(번짐, 아래로 내림)만큼 넓다. (bake 와 같은 셈)
+		let content_size = transform.get_content_size();
+		if content_size.x <= 0.0 || content_size.y <= 0.0 {
+			return None;
+		}
+		let bake_scale = graphic.calculate_text_bake_scale();
+		let scaled_blur = self.shadow_blur * bake_scale;
+		let scaled_offset = (self.shadow_offset * bake_scale).round() as i32;
+		let padding = (BAKE_PADDING + scaled_blur.ceil() as i32 * 2) as f32 / bake_scale;
+		let offset = scaled_offset.max(0) as f32 / bake_scale;
+		Some(Rect::create(-padding, -padding, content_size.x + padding * 2.0, content_size.y + padding * 2.0 + offset))
+	}
+
 	fn draw(&mut self, transform: &NodeTransform, graphic: &mut Graphic) {
 		self.draw_shadow_image(transform, graphic);
 	}

@@ -13,6 +13,7 @@
 // - 배경색(UIView)은 글자보다 먼저 그린다. (원본은 Text 가 먼저 붙어 배경이 글자를 덮는다. 기본 배경이 투명이라 보통은 차이가 없다)
 //==============================================================================
 use crate::base::color::Color;
+use crate::base::rect::Rect;
 use crate::core::component::richtext::{RichText, RichTextAttributes};
 use crate::core::component::text::Text;
 use crate::core::component::{Component, ComponentBase};
@@ -310,6 +311,20 @@ impl Component for UILabel {
 
 	fn is_tick_needed(&self) -> bool {
 		false
+	}
+
+	fn calculate_drawn_rect(&mut self, transform: &NodeTransform, graphic: &mut Graphic) -> Option<Rect> {
+		// 리치텍스트는 조각 배치를 따로 재지 않아 거르지 않는다. 품은 Text 로 그릴 때는 배경(content 영역)과 글 사각형을 합친다.
+		if self.use_rich_text {
+			return None;
+		}
+		let text_rect = self.rich_text.get_text_component_mut().calculate_drawn_rect(transform, graphic)?;
+		let content_size = transform.get_content_size();
+		let left_x = text_rect.position.x.min(0.0);
+		let top_y = text_rect.position.y.min(0.0);
+		let right_x = (text_rect.position.x + text_rect.size.x).max(content_size.x);
+		let bottom_y = (text_rect.position.y + text_rect.size.y).max(content_size.y);
+		Some(Rect::create(left_x, top_y, right_x - left_x, bottom_y - top_y))
 	}
 
 	fn draw(&mut self, transform: &NodeTransform, graphic: &mut Graphic) {

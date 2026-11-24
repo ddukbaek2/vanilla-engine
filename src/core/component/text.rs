@@ -1,11 +1,14 @@
 //==============================================================================
 // 텍스트 컴포넌트. (노드 content_size 영역 안에 정렬해 글자를 그린다)
 // - 한 줄, 그리고 줄바꿈 문자나 word_wrap_width 가 있으면 여러 줄로 그린다.
+// - 나눈 줄과 줄 폭은 글, 폰트 문자열, 줄바꿈 폭, 등록된 글꼴이 바뀔 때만 다시 센다.
+// - 화면 밖 거르기는 정렬, 넘침, 줄바꿈 결과로 셈한 글 사각형으로 판정한다. (원본은 거르지 않는다)
 // - 원본에서 옮기지 않은 것: 밑줄 / 취소선, 오른쪽에서 왼쪽 방향, 기울임(italic 은 값만 든다).
 // - 글자 수만큼 보이기(set_visible_character_count, 타자기 연출)는 원본처럼 앞에서부터 자른다. 원본은 UTF-16 단위로 세고, 여기서는 글자(char) 단위로 센다.
 //   여러 줄일 때 원본은 남은 수가 음수로 떨어지면 다음 줄을 통째로 그린다. 여기서는 0 에서 멈춰 다음 줄을 그리지 않는다.
 //==============================================================================
 use crate::base::color::Color;
+use crate::base::rect::Rect;
 use crate::core::component::{Component, ComponentBase};
 use crate::core::graphic::{Graphic, TextAlign, TextBaseline};
 use crate::core::node::worldnode::NodeTransform;
@@ -35,8 +38,11 @@ pub struct Text {
 	// 마지막으로 줄을 나눈 폭과 그때의 글꼴 등록 횟수. (폭이 바뀌거나 글꼴이 새로 들어오면 다시 센다)
 	layout_wrap_width: f32,
 	layout_font_registration_count: u64,
-	// 나눈 줄.
+	// 나눈 줄과 줄마다 잰 폭, 글꼴의 위아래 길이. (한 줄로 그릴 때는 글 전체가 한 줄)
 	line_list: Vec<String>,
+	line_width_list: Vec<f32>,
+	layout_font_ascent: f32,
+	layout_font_descent: f32,
 }
 
 impl Text {
@@ -64,6 +70,9 @@ impl Text {
 			layout_wrap_width: 0.0,
 			layout_font_registration_count: 0,
 			line_list: Vec::new(),
+			line_width_list: Vec::new(),
+			layout_font_ascent: 0.0,
+			layout_font_descent: 0.0,
 		};
 		text.font_string = text.build_font_string();
 		text
@@ -107,10 +116,21 @@ impl Text {
 	}
 
 	//==============================================================================
-	// 나눈 줄 갱신. (글, 폰트 문자열, 줄바꿈 폭, 등록된 글꼴이 그대로면 지난번 결과를 쓴다)
+	// 여러 줄로 그리는지. (줄바꿈 폭이 있거나 글에 줄바꿈 문자가 있으면)
 	//==============================================================================
-	fn update_line_list(&mut self, graphic: &mut Graphic, content_width: f32) {
-		let wrap_width = if self.word_wrap_width > 0.0 {
+	fn is_wrapped(&self) -> bool {
+		self.word_wrap_width > 0.0 || self.text.contains('\n')
+	}
+
+	//==============================================================================
+	// 나눈 줄과 줄 폭 갱신. (글, 폰트 문자열, 줄바꿈 폭, 등록된 글꼴이 그대로면 지난번 결과를 쓴다)
+	//==============================================================================
+	fn update_layout(&mut self, graphic: &mut Graphic, content_width: f32) {
+		let is_wrapped = self.is_wrapped();
+		let wrap_width = if !is_wrapped {
+			0.0
+		}
+		else if self.word_wrap_width > 0.0 {
 			self.word_wrap_width
 		}
 		else {
@@ -121,11 +141,102 @@ impl Text {
 			return;
 		}
 		graphic.set_font_string(&self.font_string);
-		let line_list = self.wrap_text_to_lines(graphic, &self.text, wrap_width);
+		let line_list = if is_wrapped {
+			self.wrap_text_to_lines(graphic, &self.text, wrap_width)
+		}
+		else {
+			vec![self.text.clone()]
+		};
+		self.line_width_list.clear();
+		self.layout_font_ascent = 0.0;
+		self.layout_font_descent = 0.0;
+		for line_text in &line_list {
+			let line_metrics = graphic.measure_text(line_text);
+			self.line_width_list.push(line_metrics.width);
+			self.layout_font_ascent = self.layout_font_ascent.max(line_metrics.font_ascent);
+			self.layout_font_descent = self.layout_font_descent.max(line_metrics.font_descent);
+		}
 		self.line_list = line_list;
 		self.layout_wrap_width = wrap_width;
 		self.layout_font_registration_count = font_registration_count;
 		self.is_layout_dirty = false;
+	}
+
+	//==============================================================================
+	// 그리는 사각형 셈하기. (content 좌표. 정렬, 넘침, 줄바꿈 결과를 따르고, 글자 삐침, 외곽선, 기울임, 밑줄 몫을 넉넉히 더한다)
+	//==============================================================================
+	fn calculate_text_rect(&mut self, graphic: &mut Graphic, content_width: f32, content_height: f32) -> Rect {
+		self.update_layout(graphic, content_width);
+		let maximum_line_width = self.line_width_list.iter().fold(0.0f32, |maximum_width, line_width| maximum_width.max(*line_width));
+		let left_x = match graphic.resolve_text_align(self.text_align) {
+			TextAlign::Left => {
+				0.0
+			}
+			TextAlign::Right => {
+				content_width - maximum_line_width
+			}
+			_ => {
+				(content_width - maximum_line_width) * 0.5
+			}
+		};
+		let font_ascent = self.layout_font_ascent;
+		let font_descent = self.layout_font_descent;
+		let (top_y, bottom_y) = if self.is_wrapped() {
+			// 줄마다 가운데 기준선으로 그린다. (draw_wrapped_text 와 같은 자리)
+			let line_height = self.font_size * self.line_spacing;
+			let line_count = self.line_list.len().max(1) as f32;
+			let block_height = line_count * line_height;
+			let block_top = match self.text_baseline {
+				TextBaseline::Top | TextBaseline::Hanging => {
+					0.0
+				}
+				TextBaseline::Bottom | TextBaseline::Ideographic | TextBaseline::Alphabetic => {
+					content_height - block_height
+				}
+				TextBaseline::Middle => {
+					(content_height - block_height) * 0.5
+				}
+			};
+			let half_text_height = (font_ascent + font_descent) * 0.5;
+			let first_line_y = block_top + 0.5 * line_height;
+			let last_line_y = block_top + (line_count - 0.5) * line_height;
+			(first_line_y.min(last_line_y) - half_text_height, first_line_y.max(last_line_y) + half_text_height)
+		}
+		else {
+			// 기준선 자리는 draw_plain_text 와, 기준선 맞춤은 Graphic.draw_text_entry 와 같은 셈이다.
+			let draw_y = match self.text_baseline {
+				TextBaseline::Top | TextBaseline::Hanging => {
+					0.0
+				}
+				TextBaseline::Bottom | TextBaseline::Ideographic | TextBaseline::Alphabetic => {
+					content_height
+				}
+				TextBaseline::Middle => {
+					content_height * 0.5
+				}
+			};
+			let baseline_offset = match self.text_baseline {
+				TextBaseline::Top => {
+					font_ascent
+				}
+				TextBaseline::Hanging => {
+					font_ascent * 0.8
+				}
+				TextBaseline::Middle => {
+					(font_ascent - font_descent) * 0.5
+				}
+				TextBaseline::Ideographic | TextBaseline::Bottom => {
+					-font_descent
+				}
+				TextBaseline::Alphabetic => {
+					0.0
+				}
+			};
+			let baseline_y = draw_y + baseline_offset;
+			(baseline_y - font_ascent, baseline_y + font_descent)
+		};
+		let margin = self.font_size.abs() * 0.5 + self.stroke_width.max(0.0) + 2.0;
+		Rect::create(left_x - margin, top_y - margin, maximum_line_width + margin * 2.0, (bottom_y - top_y).max(0.0) + margin * 2.0)
 	}
 
 	//==============================================================================
@@ -229,7 +340,7 @@ impl Text {
 	}
 
 	//==============================================================================
-	// 여러 줄 출력. (update_line_list 로 나눈 줄을 그린다)
+	// 여러 줄 출력. (update_layout 으로 나눈 줄을 그린다)
 	//==============================================================================
 	fn draw_wrapped_text(&self, graphic: &mut Graphic, content_width: f32, content_height: f32) {
 		graphic.set_font_string(&self.font_string);
@@ -440,7 +551,10 @@ impl Text {
 	// 줄바꿈 폭 설정. (0 이면 줄바꿈 문자로만 나눈다)
 	//==============================================================================
 	pub fn set_word_wrap_width(&mut self, word_wrap_width: f32) {
-		self.word_wrap_width = word_wrap_width;
+		if self.word_wrap_width != word_wrap_width {
+			self.word_wrap_width = word_wrap_width;
+			self.is_layout_dirty = true;
+		}
 	}
 
 	//==============================================================================
@@ -519,13 +633,21 @@ impl Component for Text {
 		false
 	}
 
+	fn calculate_drawn_rect(&mut self, transform: &NodeTransform, graphic: &mut Graphic) -> Option<Rect> {
+		if self.text.is_empty() {
+			return Some(Rect::create(0.0, 0.0, 0.0, 0.0));
+		}
+		let content_size = transform.get_content_size();
+		Some(self.calculate_text_rect(graphic, content_size.x, content_size.y))
+	}
+
 	fn draw(&mut self, transform: &NodeTransform, graphic: &mut Graphic) {
 		if self.text.is_empty() {
 			return;
 		}
 		let content_size = transform.get_content_size();
-		if self.word_wrap_width > 0.0 || self.text.contains('\n') {
-			self.update_line_list(graphic, content_size.x);
+		if self.is_wrapped() {
+			self.update_layout(graphic, content_size.x);
 			self.draw_wrapped_text(graphic, content_size.x, content_size.y);
 			return;
 		}

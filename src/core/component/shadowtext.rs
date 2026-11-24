@@ -6,11 +6,13 @@
 // - 글이 노드 너비를 넘으면 처음 크기에서 최소 비율(set_fit_minimum_ratio)까지 줄여 맞춘다.
 // - 그림자는 상자 흐림 세 번(가우시안에 가까움)으로 번지게 할 수 있다. 번지는 만큼 구운 그림의 가장자리를 넓힌다.
 // - 굽는 배율, 글, 꼴, 노드 너비가 바뀌면 다시 굽는다.
+// - 화면 밖 거르기는 마지막으로 구운 한 장이 놓이는 사각형(넘친 글, 그림자 여백 포함)으로 판정한다. 세터로 바꾼 뒤 아직 굽지 않았거나 노드 너비나 굽는 배율이 달라졌으면 거르지 않는다.
 // - 원본과 다른 것: 웹에서 글꼴 바이트 없이 시스템 글꼴로 굽는 경우는 모양을 받을 수 없어 그림자 없이 Graphic 의 글로 그린다.
 //==============================================================================
 use std::rc::Rc;
 
 use crate::base::color::Color;
+use crate::base::rect::Rect;
 use crate::core::component::{Component, ComponentBase};
 use crate::core::graphic::{Graphic, TextAlign, TextBaseline};
 use crate::core::image::Image;
@@ -106,11 +108,12 @@ pub fn compose_shadow_image(shape_coverage: &[u8], shape_pixels: Option<&[u8]>, 
 }
 
 //==============================================================================
-// 구운 한 장. (그림, 논리 좌표의 펜 자리와 기준선, 전진폭, 위아래, 배율)
+// 구운 한 장. (그림, 논리 좌표의 펜 자리와 기준선, 전진폭, 위아래, 배율, 구울 때의 노드 너비)
 //==============================================================================
 struct BakedText {
 	image: Rc<Image>,
 	scale: f32,
+	content_width: f32,
 	pen_offset_x: f32,
 	baseline_offset_y: f32,
 	advance_width: f32,
@@ -132,6 +135,8 @@ pub struct ShadowText {
 	fit_minimum_ratio: f32,
 	baked_text: Option<BakedText>,
 	bake_key: String,
+	// 세터로 바꾼 뒤 아직 굽지 않았는지. (화면 밖 거르기가 지난 한 장을 믿을지 가린다)
+	is_bake_dirty: bool,
 }
 
 impl ShadowText {
@@ -153,6 +158,7 @@ impl ShadowText {
 			fit_minimum_ratio: 0.6,
 			baked_text: None,
 			bake_key: String::new(),
+			is_bake_dirty: true,
 		}
 	}
 
@@ -189,6 +195,7 @@ impl ShadowText {
 			self.bake_key = bake_key;
 			self.baked_text = self.bake(graphic, content_size.x, bake_scale);
 		}
+		self.is_bake_dirty = false;
 		let baked_text = match &self.baked_text {
 			Some(baked_text) => {
 				baked_text
@@ -217,25 +224,33 @@ impl ShadowText {
 			}
 		};
 
-		// 가로는 정렬대로, 세로는 가운데(middle 기준선)에 놓는다.
+		let image_width = baked_text.image.get_width() as f32;
+		let image_height = baked_text.image.get_height() as f32;
+		let image = baked_text.image.clone();
+		let quad_rect = self.calculate_quad_rect(graphic, baked_text, content_size.x, content_size.y);
+		graphic.draw_image_with_source_and_destination(&image, 0.0, 0.0, image_width, image_height, quad_rect.position.x, quad_rect.position.y, quad_rect.size.x, quad_rect.size.y);
+	}
+
+	//==============================================================================
+	// 구운 한 장이 놓이는 사각형. (가로는 정렬대로, 세로는 가운데(middle 기준선)에 놓는다)
+	//==============================================================================
+	fn calculate_quad_rect(&self, graphic: &Graphic, baked_text: &BakedText, content_width: f32, content_height: f32) -> Rect {
 		let (anchor_x, align_offset) = match graphic.resolve_text_align(self.text_align) {
 			TextAlign::Left => {
 				(0.0, 0.0)
 			}
 			TextAlign::Right => {
-				(content_size.x, -baked_text.advance_width)
+				(content_width, -baked_text.advance_width)
 			}
 			_ => {
-				(content_size.x * 0.5, -baked_text.advance_width * 0.5)
+				(content_width * 0.5, -baked_text.advance_width * 0.5)
 			}
 		};
 		let quad_x = anchor_x + align_offset - baked_text.pen_offset_x;
-		let quad_y = content_size.y * 0.5 + (baked_text.font_ascent - baked_text.font_descent) * 0.5 - baked_text.baseline_offset_y;
+		let quad_y = content_height * 0.5 + (baked_text.font_ascent - baked_text.font_descent) * 0.5 - baked_text.baseline_offset_y;
 		let image_width = baked_text.image.get_width() as f32;
 		let image_height = baked_text.image.get_height() as f32;
-		let image = baked_text.image.clone();
-		let scale = baked_text.scale;
-		graphic.draw_image_with_source_and_destination(&image, 0.0, 0.0, image_width, image_height, quad_x, quad_y, image_width / scale, image_height / scale);
+		Rect::create(quad_x, quad_y, image_width / baked_text.scale, image_height / baked_text.scale)
 	}
 
 	//==============================================================================
@@ -258,6 +273,7 @@ impl ShadowText {
 		Some(BakedText {
 			image,
 			scale: bake_scale,
+			content_width: fit_width,
 			pen_offset_x: text_raster.origin_x / bake_scale,
 			baseline_offset_y: text_raster.baseline_y / bake_scale,
 			advance_width: text_raster.advance_width / bake_scale,
@@ -271,6 +287,7 @@ impl ShadowText {
 	//==============================================================================
 	pub fn set_text(&mut self, text: &str) {
 		self.text = String::from(text);
+		self.is_bake_dirty = true;
 	}
 
 	pub fn get_text(&self) -> &str {
@@ -282,6 +299,7 @@ impl ShadowText {
 	//==============================================================================
 	pub fn set_font_family(&mut self, font_family: &str) {
 		self.font_family = String::from(font_family);
+		self.is_bake_dirty = true;
 	}
 
 	//==============================================================================
@@ -291,6 +309,7 @@ impl ShadowText {
 		self.font_size = font_size;
 		self.is_bold = is_bold;
 		self.text_color = text_color.into();
+		self.is_bake_dirty = true;
 	}
 
 	//==============================================================================
@@ -307,6 +326,7 @@ impl ShadowText {
 		self.shadow_color = shadow_color.into();
 		self.shadow_offset = shadow_offset;
 		self.shadow_blur = shadow_blur.max(0.0);
+		self.is_bake_dirty = true;
 	}
 
 	//==============================================================================
@@ -314,6 +334,7 @@ impl ShadowText {
 	//==============================================================================
 	pub fn set_fit_minimum_ratio(&mut self, fit_minimum_ratio: f32) {
 		self.fit_minimum_ratio = fit_minimum_ratio.clamp(0.01, 1.0);
+		self.is_bake_dirty = true;
 	}
 }
 
@@ -342,6 +363,21 @@ impl Component for ShadowText {
 
 	fn is_drawn_inside_content(&self) -> bool {
 		true
+	}
+
+	fn calculate_drawn_rect(&mut self, transform: &NodeTransform, graphic: &mut Graphic) -> Option<Rect> {
+		if self.text.is_empty() {
+			return Some(Rect::create(0.0, 0.0, 0.0, 0.0));
+		}
+		if self.is_bake_dirty {
+			return None;
+		}
+		let baked_text = self.baked_text.as_ref()?;
+		let content_size = transform.get_content_size();
+		if baked_text.content_width != content_size.x || baked_text.scale != graphic.calculate_text_bake_scale() {
+			return None;
+		}
+		Some(self.calculate_quad_rect(graphic, baked_text, content_size.x, content_size.y))
 	}
 
 	fn draw(&mut self, transform: &NodeTransform, graphic: &mut Graphic) {

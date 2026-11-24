@@ -501,16 +501,44 @@ impl WorldNode {
 	//==============================================================================
 	// 컴포넌트 출력. (자식은 NodeTree 가 그린다)
 	// - 돌려주는 것: (Mask 가 있으면 둥근 크기, 화면 밖이라 건너뛰었는지)
-	// - 켜진 컴포넌트가 모두 content_size 안에만 그리면(is_drawn_inside_content) 영역이 화면 밖일 때 그리지 않는다.
+	// - 켜진 컴포넌트가 모두 그리는 사각형을 알려 주면(calculate_drawn_rect) 그 합을 지금 Graphic 변환으로 화면에 대 보고, 밖이면 그리지 않는다.
+	//   하나라도 모르면 거르지 않는다. 걸러도 자식은 NodeTree 가 따로 판정한다.
 	//==============================================================================
 	pub fn draw_components(&mut self, graphic: &mut Graphic) -> (Option<f32>, bool) {
 		let mut is_culled = false;
-		let content_size = self.transform.get_content_size();
-		if !self.components.is_empty() && graphic.is_culling_enabled() && content_size.x > 0.0 && content_size.y > 0.0 {
-			let is_all_inside_content = self.components.iter().all(|component| !component.is_enable() || component.is_drawn_inside_content());
-			if is_all_inside_content {
-				let content_rect = Rect::create(0.0, 0.0, content_size.x, content_size.y);
-				is_culled = !graphic.is_local_rect_visible(content_rect);
+		if !self.components.is_empty() && graphic.is_culling_enabled() {
+			let mut drawn_rect: Option<Rect> = None;
+			let mut is_drawn_rect_known = true;
+			for component in self.components.iter_mut() {
+				if !component.is_enable() {
+					continue;
+				}
+				let component_rect = match component.calculate_drawn_rect(&self.transform, graphic) {
+					Some(component_rect) => {
+						component_rect
+					}
+					None => {
+						is_drawn_rect_known = false;
+						break;
+					}
+				};
+				drawn_rect = match drawn_rect {
+					Some(drawn_rect) => {
+						let left_x = drawn_rect.position.x.min(component_rect.position.x);
+						let top_y = drawn_rect.position.y.min(component_rect.position.y);
+						let right_x = (drawn_rect.position.x + drawn_rect.size.x).max(component_rect.position.x + component_rect.size.x);
+						let bottom_y = (drawn_rect.position.y + drawn_rect.size.y).max(component_rect.position.y + component_rect.size.y);
+						Some(Rect::create(left_x, top_y, right_x - left_x, bottom_y - top_y))
+					}
+					None => {
+						Some(component_rect)
+					}
+				};
+			}
+			if is_drawn_rect_known {
+				if let Some(drawn_rect) = drawn_rect {
+					is_culled = !graphic.is_local_rect_visible(drawn_rect);
+				}
 			}
 		}
 
