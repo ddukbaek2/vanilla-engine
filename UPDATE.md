@@ -42,6 +42,7 @@
 - 예제: nodebasics. 노드를 만들고 Paint, Text, 직접 만든 컴포넌트(Spin)를 붙인다. (README '노드와 컴포넌트'의 코드)
 - Graphic: 틴트가 걸린 그리기도 묶는다. 원본처럼 정점마다 색과 틴트를 싣는 묶음 셰이더를 따로 두었다. (지금까지는 틴트가 걸리면 묶지 않고 하나씩 그렸다) 화면은 전과 같다. (uigallery 드로우콜 63 → 61, misctour 24 → 12)
 - Graphic: 마지막으로 건 셰이더 프로그램과 텍스처 유닛 0 의 텍스처를 기억해, 같은 것을 다시 거는 use_program 과 bind_texture 를 건너뛴다. 묶음을 내보낸 뒤 기본 프로그램으로 되돌리는 호출도 다음에 낱장으로 그릴 때로 미뤘다. get_gl 로 GL 을 내줄 때, restore_render_state, 프레임 시작과 끝에는 기억을 잊어 툰, 스키닝, 블룸, SSAO, ScreenEffect, ShaderSprite 처럼 GL 을 직접 만지는 쪽 뒤에도 틀린 그림이 나오지 않는다
+- Graphic: set_image_mipmap_bias, get_image_mipmap_bias. (원본 setImageMipmapBias) 밉맵 단계를 고를 때 더하는 값을 기본, 묶음, 파티클 셰이더의 textureLodBias 로 건다. 바꿔 끼운 셰이더는 그 유니폼이 있으면 받는다. 지금까지는 0 으로 박혀 있었다
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.

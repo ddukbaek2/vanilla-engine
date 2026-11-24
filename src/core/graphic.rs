@@ -12,7 +12,8 @@
 //   바꿔 끼울 프로그램은 resolve_shader_program 이 이름으로 담아 두고, 어트리뷰트 위치를 기본 프로그램과 같게 고정해 기본 버텍스 어레이를 같이 쓴다.
 // - 마지막으로 건 셰이더 프로그램과 텍스처 유닛 0 의 텍스처를 기억해, 같은 것을 다시 거는 GL 호출을 건너뛴다. (원본은 늘 건다)
 //   GL 을 밖에서 만질 수 있는 때(get_gl 로 컨텍스트를 내줄 때, restore_render_state, 프레임 시작과 끝)에는 잊고 다음에 다시 건다.
-// - 원본에서 옮기지 않은 것: 오른쪽에서 왼쪽 글자 방향, 밉맵 바이어스 설정.
+// - 밉맵 단계 보정(set_image_mipmap_bias)은 기본, 묶음, 파티클 셰이더의 textureLodBias 유니폼으로 건다. 바꿔 끼운 셰이더는 그 유니폼이 있으면 받는다. (원본과 같음)
+// - 원본에서 옮기지 않은 것: 오른쪽에서 왼쪽 글자 방향.
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::math;
@@ -319,6 +320,7 @@ pub struct Graphic {
 	is_force_gizmos_visible: bool,
 	is_image_smoothing_enabled: bool,
 	is_image_mipmap_enabled: bool,
+	image_mipmap_bias: f32,
 	shader_program: ShaderProgram,
 	// 드로우에 잠시 바꿔 끼우는 프로그램. (ShaderSprite 등)
 	shader_program_override: Option<Rc<ShaderProgram>>,
@@ -450,6 +452,7 @@ impl Graphic {
 			is_force_gizmos_visible: false,
 			is_image_smoothing_enabled: true,
 			is_image_mipmap_enabled: false,
+			image_mipmap_bias: 0.0,
 			shader_program,
 			shader_program_override: None,
 			shader_program_cache_table: HashMap::new(),
@@ -640,6 +643,46 @@ impl Graphic {
 	//==============================================================================
 	pub fn is_image_mipmap_enabled(&self) -> bool {
 		self.is_image_mipmap_enabled
+	}
+
+	//==============================================================================
+	// 이미지 밉맵 단계 보정 설정. (기본 0, 원본 setImageMipmapBias)
+	// - 밉맵 단계를 고를 때 더하는 값. 음수면 한 단계 큰 그림 쪽을 골라 또렷해지고, 너무 작으면 다시 자글거린다. (-0.5 안팎)
+	// - 기본 셰이더(낱장, 묶어 그리기, 파티클)에 적용한다. 바꿔 끼운 셰이더는 textureLodBias 유니폼이 있으면 받는다.
+	//==============================================================================
+	pub fn set_image_mipmap_bias(&mut self, value: f32) {
+		self.flush_batch();
+		self.image_mipmap_bias = value;
+		let shader_program_list: [Option<&ShaderProgram>; 4] = [Some(&self.shader_program), self.batch_shader_program.as_ref(), self.particle_shader_program.as_ref(), self.shader_program_override.as_deref()];
+		for shader_program in shader_program_list.into_iter().flatten() {
+			self.use_shader_program(shader_program);
+			self.apply_image_mipmap_bias(shader_program);
+		}
+		self.use_shader_program(self.get_shader_program());
+	}
+
+	//==============================================================================
+	// 이미지 밉맵 단계 보정 반환.
+	//==============================================================================
+	pub fn get_image_mipmap_bias(&self) -> f32 {
+		self.image_mipmap_bias
+	}
+
+	//==============================================================================
+	// 사용 중인 셰이더 프로그램에 밉맵 단계 보정 적용. (유니폼이 없는 프로그램은 넘어간다)
+	//==============================================================================
+	fn apply_image_mipmap_bias(&self, shader_program: &ShaderProgram) {
+		let texture_lod_bias_location = match shader_program.get_uniform_location(&self.gl, "textureLodBias") {
+			Some(texture_lod_bias_location) => {
+				texture_lod_bias_location
+			}
+			None => {
+				return;
+			}
+		};
+		unsafe {
+			self.gl.uniform_1_f32(Some(&texture_lod_bias_location), self.image_mipmap_bias);
+		}
 	}
 
 	//==============================================================================
@@ -1223,11 +1266,10 @@ impl Graphic {
 		}
 		self.use_shader_program(&batch_shader_program);
 		let main_texture_location = batch_shader_program.get_uniform_location(&self.gl, "mainTexture");
-		let texture_lod_bias_location = batch_shader_program.get_uniform_location(&self.gl, "textureLodBias");
 		unsafe {
 			self.gl.uniform_1_i32(main_texture_location.as_ref(), 0);
-			self.gl.uniform_1_f32(texture_lod_bias_location.as_ref(), 0.0);
 		}
+		self.apply_image_mipmap_bias(&batch_shader_program);
 		self.batch_shader_program = Some(batch_shader_program);
 		Ok(())
 	}
@@ -1262,11 +1304,10 @@ impl Graphic {
 		}
 		self.use_shader_program(&particle_shader_program);
 		let main_texture_location = particle_shader_program.get_uniform_location(&self.gl, "mainTexture");
-		let texture_lod_bias_location = particle_shader_program.get_uniform_location(&self.gl, "textureLodBias");
 		unsafe {
 			self.gl.uniform_1_i32(main_texture_location.as_ref(), 0);
-			self.gl.uniform_1_f32(texture_lod_bias_location.as_ref(), 0.0);
 		}
+		self.apply_image_mipmap_bias(&particle_shader_program);
 		self.particle_shader_program = Some(particle_shader_program);
 		Ok(())
 	}
@@ -2103,6 +2144,7 @@ impl Graphic {
 			self.gl.uniform_matrix_3_f32_slice(projection_matrix_location.as_ref(), false, &self.projection_matrix_array);
 			self.gl.uniform_1_i32(main_texture_location.as_ref(), 0);
 		}
+		self.apply_image_mipmap_bias(active_shader_program);
 	}
 
 	//==============================================================================
