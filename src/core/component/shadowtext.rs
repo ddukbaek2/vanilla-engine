@@ -6,15 +6,22 @@
 // - 글이 노드 너비를 넘으면 처음 크기에서 최소 비율(set_fit_minimum_ratio)까지 줄여 맞춘다.
 // - 그림자는 상자 흐림 세 번(가우시안에 가까움)으로 번지게 할 수 있다. 번지는 만큼 구운 그림의 가장자리를 넓힌다.
 // - 굽는 배율, 글, 꼴, 노드 너비가 바뀌면 다시 굽는다.
+// - 화면 밖 거르기는 마지막으로 구운 한 장이 놓이는 사각형(넘친 글, 그림자 여백 포함)으로 판정한다. 세터로 바꾼 뒤 아직 굽지 않았거나 노드 너비나 굽는 배율이 달라졌으면 거르지 않는다.
 // - 원본과 다른 것: 웹에서 글꼴 바이트 없이 시스템 글꼴로 굽는 경우는 모양을 받을 수 없어 그림자 없이 Graphic 의 글로 그린다.
+//   기울임, 밑줄, 취소선(set_italic, set_underline, set_strikethrough)을 더했다. (원본에는 없다) 이름과 선의 자리, 두께는 Text 의 가운데 기준선과 같고,
+//   선도 글과 함께 구워 그림자가 깔린다. 한 줄을 줄여 맞추는 글이라 줄바꿈 방식은 두지 않는다.
 //==============================================================================
 use std::rc::Rc;
 
 use crate::base::color::Color;
+use crate::base::rect::Rect;
+use crate::base::vector2::Vector2;
+use crate::core::component::richtext::build_font_string;
 use crate::core::component::{Component, ComponentBase};
 use crate::core::graphic::{Graphic, TextAlign, TextBaseline};
 use crate::core::image::Image;
 use crate::core::node::worldnode::NodeTransform;
+use crate::core::textstringtexturecache::TextRaster;
 
 // 구운 그림의 가장자리 여유. (안티앨리어싱, 픽셀)
 const BAKE_PADDING: i32 = 2;
@@ -106,11 +113,12 @@ pub fn compose_shadow_image(shape_coverage: &[u8], shape_pixels: Option<&[u8]>, 
 }
 
 //==============================================================================
-// 구운 한 장. (그림, 논리 좌표의 펜 자리와 기준선, 전진폭, 위아래, 배율)
+// 구운 한 장. (그림, 논리 좌표의 펜 자리와 기준선, 전진폭, 위아래, 배율, 구울 때의 노드 너비)
 //==============================================================================
 struct BakedText {
 	image: Rc<Image>,
 	scale: f32,
+	content_width: f32,
 	pen_offset_x: f32,
 	baseline_offset_y: f32,
 	advance_width: f32,
@@ -124,6 +132,9 @@ pub struct ShadowText {
 	font_family: String,
 	font_size: f32,
 	is_bold: bool,
+	is_italic: bool,
+	is_underline: bool,
+	is_strikethrough: bool,
 	text_align: TextAlign,
 	text_color: Color,
 	shadow_color: Color,
@@ -132,6 +143,8 @@ pub struct ShadowText {
 	fit_minimum_ratio: f32,
 	baked_text: Option<BakedText>,
 	bake_key: String,
+	// 세터로 바꾼 뒤 아직 굽지 않았는지. (화면 밖 거르기가 지난 한 장을 믿을지 가린다)
+	is_bake_dirty: bool,
 }
 
 impl ShadowText {
@@ -145,6 +158,9 @@ impl ShadowText {
 			font_family: String::from("default"),
 			font_size: 16.0,
 			is_bold: false,
+			is_italic: false,
+			is_underline: false,
+			is_strikethrough: false,
 			text_align: TextAlign::Center,
 			text_color: Color::white(),
 			shadow_color: Color::black(),
@@ -153,6 +169,7 @@ impl ShadowText {
 			fit_minimum_ratio: 0.6,
 			baked_text: None,
 			bake_key: String::new(),
+			is_bake_dirty: true,
 		}
 	}
 
@@ -166,13 +183,18 @@ impl ShadowText {
 		shadow_text
 	}
 
+	//==============================================================================
+	// Canvas2D font 꼴 문자열. (Text 와 같은 꼴)
+	//==============================================================================
 	fn build_font_string(&self, font_size: f32) -> String {
-		if self.is_bold {
-			format!("bold {}px {}", font_size, self.font_family)
-		}
-		else {
-			format!("{}px {}", font_size, self.font_family)
-		}
+		build_font_string(&self.font_family, font_size, self.is_bold, self.is_italic)
+	}
+
+	//==============================================================================
+	// 밑줄 / 취소선 두께. (Text 와 같이 max(1, 글자 크기 / 16))
+	//==============================================================================
+	fn calculate_decoration_line_width(font_size: f32) -> f32 {
+		(font_size / 16.0).max(1.0)
 	}
 
 	//==============================================================================
@@ -184,11 +206,12 @@ impl ShadowText {
 		}
 		let content_size = transform.get_content_size();
 		let bake_scale = graphic.calculate_text_bake_scale();
-		let bake_key = format!("{}|{}|{}|{}|{:?}|{:?}|{}|{}|{}|{}|{}", self.text, self.font_family, self.font_size, self.is_bold, self.text_color, self.shadow_color, self.shadow_offset, self.shadow_blur, self.fit_minimum_ratio, content_size.x, bake_scale);
+		let bake_key = format!("{}|{}|{}|{}|{}|{}|{}|{:?}|{:?}|{}|{}|{}|{}|{}", self.text, self.font_family, self.font_size, self.is_bold, self.is_italic, self.is_underline, self.is_strikethrough, self.text_color, self.shadow_color, self.shadow_offset, self.shadow_blur, self.fit_minimum_ratio, content_size.x, bake_scale);
 		if bake_key != self.bake_key {
 			self.bake_key = bake_key;
 			self.baked_text = self.bake(graphic, content_size.x, bake_scale);
 		}
+		self.is_bake_dirty = false;
 		let baked_text = match &self.baked_text {
 			Some(baked_text) => {
 				baked_text
@@ -213,29 +236,61 @@ impl ShadowText {
 				graphic.set_text_baseline(TextBaseline::Middle);
 				graphic.set_fill_color(self.text_color);
 				graphic.draw_fill_text(&self.text, anchor_x, content_size.y * 0.5);
+				if self.is_underline || self.is_strikethrough {
+					let text_width = graphic.measure_text(&self.text).width;
+					let start_x = match graphic.resolve_text_align(text_align) {
+						TextAlign::Left => {
+							anchor_x
+						}
+						TextAlign::Right => {
+							anchor_x - text_width
+						}
+						_ => {
+							anchor_x - text_width * 0.5
+						}
+					};
+					let line_width = ShadowText::calculate_decoration_line_width(self.font_size);
+					let middle_y = content_size.y * 0.5;
+					graphic.set_stroke_color(self.text_color);
+					if self.is_underline {
+						let underline_y = middle_y + self.font_size * 0.5 + 2.0;
+						graphic.draw_line(&[Vector2::create(start_x, underline_y), Vector2::create(start_x + text_width, underline_y)], line_width);
+					}
+					if self.is_strikethrough {
+						graphic.draw_line(&[Vector2::create(start_x, middle_y), Vector2::create(start_x + text_width, middle_y)], line_width);
+					}
+				}
 				return;
 			}
 		};
 
-		// 가로는 정렬대로, 세로는 가운데(middle 기준선)에 놓는다.
+		let image_width = baked_text.image.get_width() as f32;
+		let image_height = baked_text.image.get_height() as f32;
+		let image = baked_text.image.clone();
+		let quad_rect = self.calculate_quad_rect(graphic, baked_text, content_size.x, content_size.y);
+		graphic.draw_image_with_source_and_destination(&image, 0.0, 0.0, image_width, image_height, quad_rect.position.x, quad_rect.position.y, quad_rect.size.x, quad_rect.size.y);
+	}
+
+	//==============================================================================
+	// 구운 한 장이 놓이는 사각형. (가로는 정렬대로, 세로는 가운데(middle 기준선)에 놓는다)
+	//==============================================================================
+	fn calculate_quad_rect(&self, graphic: &Graphic, baked_text: &BakedText, content_width: f32, content_height: f32) -> Rect {
 		let (anchor_x, align_offset) = match graphic.resolve_text_align(self.text_align) {
 			TextAlign::Left => {
 				(0.0, 0.0)
 			}
 			TextAlign::Right => {
-				(content_size.x, -baked_text.advance_width)
+				(content_width, -baked_text.advance_width)
 			}
 			_ => {
-				(content_size.x * 0.5, -baked_text.advance_width * 0.5)
+				(content_width * 0.5, -baked_text.advance_width * 0.5)
 			}
 		};
 		let quad_x = anchor_x + align_offset - baked_text.pen_offset_x;
-		let quad_y = content_size.y * 0.5 + (baked_text.font_ascent - baked_text.font_descent) * 0.5 - baked_text.baseline_offset_y;
+		let quad_y = content_height * 0.5 + (baked_text.font_ascent - baked_text.font_descent) * 0.5 - baked_text.baseline_offset_y;
 		let image_width = baked_text.image.get_width() as f32;
 		let image_height = baked_text.image.get_height() as f32;
-		let image = baked_text.image.clone();
-		let scale = baked_text.scale;
-		graphic.draw_image_with_source_and_destination(&image, 0.0, 0.0, image_width, image_height, quad_x, quad_y, image_width / scale, image_height / scale);
+		Rect::create(quad_x, quad_y, image_width / baked_text.scale, image_height / baked_text.scale)
 	}
 
 	//==============================================================================
@@ -252,12 +307,18 @@ impl ShadowText {
 		let font_string = self.build_font_string(font_size);
 		let scaled_blur = self.shadow_blur * bake_scale;
 		let scaled_offset = (self.shadow_offset * bake_scale).round() as i32;
-		let padding = BAKE_PADDING + scaled_blur.ceil() as i32 * 2 + scaled_offset.max(0);
-		let text_raster = graphic.get_text_string_texture_cache().rasterize_text(&self.text, &font_string, bake_scale, padding)?;
+		let mut padding = BAKE_PADDING + scaled_blur.ceil() as i32 * 2 + scaled_offset.max(0);
+		if self.is_underline {
+			// 밑줄은 기준선 아래로 내려가므로 여유를 더 둔다.
+			padding += ((font_size * 0.25 + 2.0) * bake_scale).ceil() as i32;
+		}
+		let mut text_raster = graphic.get_text_string_texture_cache().rasterize_text(&self.text, &font_string, bake_scale, padding)?;
+		self.draw_decoration_lines(&mut text_raster, font_size, bake_scale);
 		let image = compose_shadow_image(&text_raster.coverage, None, text_raster.width, text_raster.height, self.text_color, self.shadow_color, scaled_blur, scaled_offset);
 		Some(BakedText {
 			image,
 			scale: bake_scale,
+			content_width: fit_width,
 			pen_offset_x: text_raster.origin_x / bake_scale,
 			baseline_offset_y: text_raster.baseline_y / bake_scale,
 			advance_width: text_raster.advance_width / bake_scale,
@@ -267,10 +328,40 @@ impl ShadowText {
 	}
 
 	//==============================================================================
+	// 밑줄 / 취소선을 글 모양 래스터에 긋기. (가운데 기준선 자리에서 Text 와 같은 오프셋, 길이는 전진폭)
+	//==============================================================================
+	fn draw_decoration_lines(&self, text_raster: &mut TextRaster, font_size: f32, bake_scale: f32) {
+		if !self.is_underline && !self.is_strikethrough {
+			return;
+		}
+		let middle_y = text_raster.baseline_y - (text_raster.font_ascent - text_raster.font_descent) * 0.5;
+		let line_width = ShadowText::calculate_decoration_line_width(font_size) * bake_scale;
+		let mut center_y_list: Vec<f32> = Vec::new();
+		if self.is_underline {
+			center_y_list.push(middle_y + (font_size * 0.5 + 2.0) * bake_scale);
+		}
+		if self.is_strikethrough {
+			center_y_list.push(middle_y);
+		}
+		let start_x = text_raster.origin_x.floor().max(0.0) as i32;
+		let end_x = ((text_raster.origin_x + text_raster.advance_width).ceil() as i32).min(text_raster.width);
+		for center_y in center_y_list {
+			let start_y = (center_y - line_width * 0.5).round().max(0.0) as i32;
+			let end_y = ((center_y + line_width * 0.5).round() as i32).max(start_y + 1).min(text_raster.height);
+			for position_y in start_y..end_y {
+				for position_x in start_x..end_x {
+					text_raster.coverage[(position_y * text_raster.width + position_x) as usize] = 255;
+				}
+			}
+		}
+	}
+
+	//==============================================================================
 	// 글 설정.
 	//==============================================================================
 	pub fn set_text(&mut self, text: &str) {
 		self.text = String::from(text);
+		self.is_bake_dirty = true;
 	}
 
 	pub fn get_text(&self) -> &str {
@@ -282,6 +373,7 @@ impl ShadowText {
 	//==============================================================================
 	pub fn set_font_family(&mut self, font_family: &str) {
 		self.font_family = String::from(font_family);
+		self.is_bake_dirty = true;
 	}
 
 	//==============================================================================
@@ -291,6 +383,52 @@ impl ShadowText {
 		self.font_size = font_size;
 		self.is_bold = is_bold;
 		self.text_color = text_color.into();
+		self.is_bake_dirty = true;
+	}
+
+	//==============================================================================
+	// 기울임 설정.
+	//==============================================================================
+	pub fn set_italic(&mut self, is_italic: bool) {
+		self.is_italic = is_italic;
+		self.is_bake_dirty = true;
+	}
+
+	//==============================================================================
+	// 기울임 여부.
+	//==============================================================================
+	pub fn is_italic(&self) -> bool {
+		self.is_italic
+	}
+
+	//==============================================================================
+	// 밑줄 설정.
+	//==============================================================================
+	pub fn set_underline(&mut self, is_underline: bool) {
+		self.is_underline = is_underline;
+		self.is_bake_dirty = true;
+	}
+
+	//==============================================================================
+	// 밑줄 여부.
+	//==============================================================================
+	pub fn is_underline(&self) -> bool {
+		self.is_underline
+	}
+
+	//==============================================================================
+	// 취소선 설정.
+	//==============================================================================
+	pub fn set_strikethrough(&mut self, is_strikethrough: bool) {
+		self.is_strikethrough = is_strikethrough;
+		self.is_bake_dirty = true;
+	}
+
+	//==============================================================================
+	// 취소선 여부.
+	//==============================================================================
+	pub fn is_strikethrough(&self) -> bool {
+		self.is_strikethrough
 	}
 
 	//==============================================================================
@@ -314,6 +452,7 @@ impl ShadowText {
 		self.shadow_color = shadow_color.into();
 		self.shadow_offset = shadow_offset;
 		self.shadow_blur = shadow_blur.max(0.0);
+		self.is_bake_dirty = true;
 	}
 
 	//==============================================================================
@@ -321,6 +460,7 @@ impl ShadowText {
 	//==============================================================================
 	pub fn set_fit_minimum_ratio(&mut self, fit_minimum_ratio: f32) {
 		self.fit_minimum_ratio = fit_minimum_ratio.clamp(0.01, 1.0);
+		self.is_bake_dirty = true;
 	}
 
 	//==============================================================================
@@ -356,6 +496,21 @@ impl Component for ShadowText {
 
 	fn is_drawn_inside_content(&self) -> bool {
 		true
+	}
+
+	fn calculate_drawn_rect(&mut self, transform: &NodeTransform, graphic: &mut Graphic) -> Option<Rect> {
+		if self.text.is_empty() {
+			return Some(Rect::create(0.0, 0.0, 0.0, 0.0));
+		}
+		if self.is_bake_dirty {
+			return None;
+		}
+		let baked_text = self.baked_text.as_ref()?;
+		let content_size = transform.get_content_size();
+		if baked_text.content_width != content_size.x || baked_text.scale != graphic.calculate_text_bake_scale() {
+			return None;
+		}
+		Some(self.calculate_quad_rect(graphic, baked_text, content_size.x, content_size.y))
 	}
 
 	fn draw(&mut self, transform: &NodeTransform, graphic: &mut Graphic) {

@@ -6,6 +6,7 @@
 // - 그림 색을 주면 그림을 그 색 한 빛의 모양으로 칠한다. (같은 자리 위에 원래 그림을 얹어 그림자만 남기는 감쌈 등)
 // - 굽는 배율, 그림, 색, 그림자, 노드 크기가 바뀌면 다시 굽는다. 줄이기는 겹친 넓이로 고르게 섞는다.
 // - 그림 경로(image_path)는 Sprite 의 것과 같이 UI 문서(UIDocument)가 그림 대신 적고 읽는 값이다. 그리기에는 쓰지 않는다.
+// - 다시 구울 때 그림의 CPU 픽셀을 읽으므로 받은 그림은 GPU 에 올린 뒤에도 픽셀을 남기게 한다. 이미 놓였으면 텍스처에서 되읽는다.
 //==============================================================================
 use std::rc::Rc;
 
@@ -146,6 +147,10 @@ impl ShadowImage {
 		let bake_scale = graphic.calculate_text_bake_scale();
 		let bake_key = format!("{}|{:?}|{:?}|{}|{}|{}|{}|{}", self.image_version, self.image_color, self.shadow_color, self.shadow_offset, self.shadow_blur, image_width, image_height, bake_scale);
 		if bake_key != self.bake_key {
+			// 그림이 다른 곳에서 먼저 그려져 CPU 픽셀을 놓았으면 텍스처에서 되읽는다.
+			if !graphic.restore_image_pixels(&image) {
+				return;
+			}
 			self.bake_key = bake_key;
 			self.bake(&image, source_rect, image_width, image_height, bake_scale);
 		}
@@ -207,6 +212,9 @@ impl ShadowImage {
 	// 그림 설정. (조각을 주지 않으면 그림 전체)
 	//==============================================================================
 	pub fn set_image(&mut self, image: Option<Rc<Image>>, image_rect: Option<Rect>) {
+		if let Some(image) = &image {
+			image.set_pixels_retained(true);
+		}
 		self.image = image;
 		self.image_rect = image_rect;
 		self.image_version += 1;
@@ -275,6 +283,20 @@ impl Component for ShadowImage {
 
 	fn is_drawn_inside_content(&self) -> bool {
 		true
+	}
+
+	fn calculate_drawn_rect(&mut self, transform: &NodeTransform, graphic: &mut Graphic) -> Option<Rect> {
+		// 그림은 content 안에 들지만 구운 한 장은 그림자 여백(번짐, 아래로 내림)만큼 넓다. (bake 와 같은 셈)
+		let content_size = transform.get_content_size();
+		if content_size.x <= 0.0 || content_size.y <= 0.0 {
+			return None;
+		}
+		let bake_scale = graphic.calculate_text_bake_scale();
+		let scaled_blur = self.shadow_blur * bake_scale;
+		let scaled_offset = (self.shadow_offset * bake_scale).round() as i32;
+		let padding = (BAKE_PADDING + scaled_blur.ceil() as i32 * 2) as f32 / bake_scale;
+		let offset = scaled_offset.max(0) as f32 / bake_scale;
+		Some(Rect::create(-padding, -padding, content_size.x + padding * 2.0, content_size.y + padding * 2.0 + offset))
 	}
 
 	fn draw(&mut self, transform: &NodeTransform, graphic: &mut Graphic) {

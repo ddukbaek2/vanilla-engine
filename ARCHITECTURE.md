@@ -79,7 +79,7 @@ EngineRunner (플랫폼이 들고 프레임마다 부른다)
 - 컴포넌트 문맥(ComponentContext): tick, 터치, 휠에서 받는다. 자기 노드와 트랜스폼, 트리 전체(다른 노드 찾기, 만들기, 지우기), 엔진(입력, 시간, 뷰, 오디오)을 꺼낸다. 부르는 컴포넌트 하나만 노드에서 잠깐 빠져 있고, 같은 노드의 다른 컴포넌트는 `context.get_node_mut().get_component_mut::<T>()` 로 찾는다.
 - 씬 코드에서 다른 노드도 만지는 컴포넌트(위젯 같은)를 바로 바꿀 때는 `node_tree.with_component_mut::<T, _>(node_id, |component, tree| ...)` 로 컴포넌트와 트리를 같이 쥔다.
 - draw 는 노드 트랜스폼이 걸린 상태에서 자기 트랜스폼만 받는다. 그리는 동안 트리는 바뀌지 않는다.
-- `is_drawn_inside_content` 가 true 인 컴포넌트(Paint, Sprite, Mask)만 붙은 노드는 영역이 화면 밖이면 그리지 않는다. `is_tick_needed` 가 false 인 컴포넌트(Paint, Sprite, Text, Mask)만 붙은 노드는 tick 때 꺼내지 않는다.
+- 노드의 켜진 컴포넌트가 모두 그리는 사각형(`calculate_drawn_rect`)을 알려 주면, 그 합을 그릴 때의 Graphic 변환(노드 배율, 회전, 부모가 밀어 넣은 변환 포함)으로 화면에 대 보고 밖이면 그 노드의 컴포넌트를 그리지 않는다. 자식은 따로 판정한다. 기본은 `is_drawn_inside_content` 가 true 인 컴포넌트(Paint, Sprite, Mask 등)만 content 영역을 알려 주고 나머지는 모른다(거르지 않음). Text 와 UILabel 은 정렬, 넘침, 줄바꿈 결과로 셈한 글 사각형을, ShadowText 와 ShadowImage 는 그림자 여백까지 넣은 사각형을 알려 준다. `is_tick_needed` 가 false 인 컴포넌트(Paint, Sprite, Text, Mask)만 붙은 노드는 tick 때 꺼내지 않는다.
 
 ## 5. 프레임 루프
 
@@ -102,7 +102,7 @@ EngineRunner (플랫폼이 들고 프레임마다 부른다)
 
 ## 6. 그리기
 
-- 모든 2D 그리기는 `Graphic.draw_vertices` 한 곳으로 모인다. 묶을 수 있으면(틴트 없음, 클립 영역 기록 중 아님) 정점을 CPU 에서 변환해 모았다가 같은 텍스처가 이어지는 동안 한 번에 그린다. 정점마다 색을 싣는 파티클 셰이더를 같이 쓴다.
+- 모든 2D 그리기는 `Graphic.draw_vertices` 한 곳으로 모인다. 묶을 수 있으면(클립 영역 기록 중 아님, 바꿔 낀 셰이더 없음) 정점을 CPU 에서 변환해 모았다가 같은 텍스처가 이어지는 동안 한 번에 그린다. 원본과 같은 묶음 셰이더로 정점마다 색과 틴트를 실어 틴트가 걸린 그리기도 묶는다.
 - 블렌드가 바뀔 때, 클립을 걸거나 풀 때, 파티클을 그릴 때, 프레임 끝에 모은 것을 먼저 내보낸다(`flush_batch`). GL 을 직접 쓰는 코드는 그 전에 flush_batch 를 부른다.
 - 셰이더 바꿔 끼우기: `set_shader_program_override` 가 걸린 동안은 묶지 않고 바꿔 낀 프로그램으로 바로 그린다(ShaderSprite). 바꿔 낄 프로그램은 `resolve_shader_program` 이 이름으로 담아 두고, 어트리뷰트 위치를 기본 프로그램과 같게 고정해 기본 버텍스 어레이를 같이 쓴다.
 - 화면 효과(ScreenEffect)는 엔진을 거치지 않는다. 씬이 pre_draw 첫머리에서 begin, post_draw 끝에서 end 를 부르면, end 가 화면(또는 영역)을 텍스처로 떠 와 FullscreenPass 사슬을 걸고 되돌려 놓은 뒤 `restore_render_state` 로 Graphic 상태를 되살린다.
@@ -115,6 +115,7 @@ EngineRunner (플랫폼이 들고 프레임마다 부른다)
 - 실패한 애셋도 "끝난 것"으로 쳐서 씬이 멈추지 않는다.
 - `AudioAsset` 은 오디오 백엔드와 붙어 있어 `engine.load_audio_asset` 으로 읽고 `track_audio_asset` 으로 맡긴다.
 - 이미지는 png, jpeg, webp 를 푼다. 글꼴은 ttf, otf, woff, woff2 를 읽는다.
+- 이미지는 GPU 에 올린 뒤 CPU 픽셀을 놓는다. 픽셀을 다시 읽을 그림은 `Image.set_pixels_retained(true)` 로 남긴다. (ShadowImage 는 받은 그림을 스스로 남기고, 이미 놓였으면 텍스처를 프레임버퍼에 붙여 되읽는다) GL 컨텍스트를 잃었다 되살리는 길은 아직 없다.
 - 기본 글꼴은 엔진에 넣지 않는다. 둘 다 시스템 글꼴이 기본이다. 데스크탑은 default_font_paths 의 글꼴 파일(윈도우는 맑은 고딕)을 fontdue 로 굽고, 웹은 글꼴 바이트가 하나도 없으면 원본처럼 브라우저 Canvas2D 로 구워 브라우저가 고른 시스템 글꼴이 나온다(platform/web/systemfont.rs). 게임 글꼴은 `default_font_url`, `default_font_bytes`, FontAsset 가운데 하나로 주면 fontdue 길로 굽는다. (원본 기본값 DOSGothic 은 뺐다)
 
 ## 8. 코드 꼴

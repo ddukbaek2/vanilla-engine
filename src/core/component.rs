@@ -16,6 +16,7 @@ pub mod softshade;
 pub mod sprite;
 pub mod text;
 
+use crate::base::rect::Rect;
 use crate::base::vector2::Vector2;
 use crate::core::graphic::Graphic;
 use crate::core::node::nodetree::{ComponentContext, NodeId, NodeTree};
@@ -166,6 +167,23 @@ pub trait Component: AsAny {
 	//==============================================================================
 	fn is_drawn_inside_content(&self) -> bool {
 		false
+	}
+
+	//==============================================================================
+	// 화면 밖 거르기에 쓰는, 실제로 그리는 사각형. (노드의 content 좌표, draw 와 같은 Graphic 변환이 걸린 때 부른다)
+	// - None 이면 모른다는 뜻이라 노드를 거르지 않는다. 노드의 켜진 컴포넌트가 모두 사각형을 주면 그 합이 화면 밖일 때 거른다.
+	// - 기본은 is_drawn_inside_content 가 true 이고 content_size 가 있으면 content 영역, 아니면 None.
+	// - 글자처럼 정렬, 넘침, 줄바꿈으로 content 밖에도 그리는 컴포넌트는 그리는 사각형을 넉넉히 셈해 돌려준다.
+	//==============================================================================
+	fn calculate_drawn_rect(&mut self, transform: &NodeTransform, _graphic: &mut Graphic) -> Option<Rect> {
+		if !self.is_drawn_inside_content() {
+			return None;
+		}
+		let content_size = transform.get_content_size();
+		if content_size.x <= 0.0 || content_size.y <= 0.0 {
+			return None;
+		}
+		Some(Rect::create(0.0, 0.0, content_size.x, content_size.y))
 	}
 
 	//==============================================================================

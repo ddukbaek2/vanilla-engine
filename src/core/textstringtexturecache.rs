@@ -1,23 +1,36 @@
 //==============================================================================
 // 문자열 텍스처 캐시.
 // - 원본은 오프스크린 2D 캔버스에 fillText / strokeText 로 문자열을 구워 텍스처로 쓴다. (LRU 상한 512)
-// - 여기서는 fontdue 로 글자를 래스터화해 문자열 한 장으로 굽는다. 상한과 키 구성은 원본과 같다.
+// - 여기서는 fontdue 로 글자를 래스터화해 문자열 한 장으로 굽는다. 상한과 키 구성(방식, 폰트 문자열, 선 두께, 배율, 글)은 원본과 같다.
+//   원본은 키를 문자열로 이어 붙인다. 여기서는 찾을 때마다 문자열을 만들지 않게 키의 해시로 찾고, 같은 해시 안에서 키를 하나씩 맞춰 본다.
 // - 글자는 흰색으로 굽고, 그릴 때 색을 곱한다. (색이 바뀌어도 다시 굽지 않는다)
-// - 폰트 문자열은 Canvas2D font 와 같은 꼴을 읽는다. 예: "16px DOSGothic", "bold 24px default"
+// - 폰트 문자열은 Canvas2D font 와 같은 꼴을 읽는다. 예: "16px DOSGothic", "bold 24px default", "italic 16px default"
+// - 기울임(italic, oblique)은 기울임 글꼴을 찾지 않고 래스터를 가로로 밀어 흉내 낸다. (기준선 위는 오른쪽, 아래는 왼쪽, 높이의 0.2 배. 전진폭은 그대로)
 // - 첫 폰트에 없는 글자는 기본 폰트, 대체 폰트 순으로 찾는다. (브라우저의 글꼴 대체와 같은 자리)
 // - 웹에서 글꼴 바이트가 하나도 없으면 원본처럼 브라우저 Canvas2D 로 굽고 잰다. 그래서 시스템 글꼴로 나온다. (platform/web/systemfont.rs)
+// - 글자 안티앨리어싱(set_text_antialias_enabled, 원본 setTextAntialiasEnabled): 끄면 구운 글자의 알파를 문턱값 128 로 0 과 255 로 가르고 텍스처를 NEAREST 로 뽑는다.
+//   도트 글꼴을 설계 크기의 정수 배로 그리는 프로젝트가 끈다. 원본은 모듈 전역 값이고 이미 구운 글자는 그대로 둔다.
+//   여기서는 캐시가 들고, 켜짐 여부를 키에 넣어 바꾼 다음 그리는 글자부터 바로 그 방식으로 굽는다. (rasterize_text 는 원본 ShadowText 처럼 받지 않는다)
 //==============================================================================
 use glow::HasContext;
+use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 // 캐시 상한. (원본과 같음)
 const MAXIMUM_ENTRY_COUNT: usize = 512;
 
+// 안티앨리어싱을 끈 글자의 알파 문턱값. (원본과 같음)
+const ALPHA_THRESHOLD: u8 = 128;
+
+// 흉내 낸 기울임의 기울기. (기준선에서 1 픽셀 올라갈 때 오른쪽으로 밀리는 픽셀, 약 11 도)
+const ITALIC_SHEAR: f32 = 0.2;
+
 //==============================================================================
 // 굽는 방식.
 //==============================================================================
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TextDrawKind {
 	Fill,
 	Stroke,
@@ -70,12 +83,28 @@ pub struct TextMetrics {
 pub struct FontDescription {
 	pub font_size: f32,
 	pub is_bold: bool,
+	pub is_italic: bool,
 	pub family_name: String,
 }
 
 struct CachedTextEntry {
+	text_draw_kind: TextDrawKind,
+	is_antialias: bool,
+	text: String,
+	font_string: String,
+	line_width: f32,
+	bake_scale: f32,
 	entry: TextEntry,
 	last_used_frame_number: u64,
+}
+
+impl CachedTextEntry {
+	//==============================================================================
+	// 키가 같은지. (선 두께와 배율은 비트로 맞춘다)
+	//==============================================================================
+	fn is_same_key(&self, text_draw_kind: TextDrawKind, is_antialias: bool, text: &str, font_string: &str, line_width: f32, bake_scale: f32) -> bool {
+		self.text_draw_kind == text_draw_kind && self.is_antialias == is_antialias && self.line_width.to_bits() == line_width.to_bits() && self.bake_scale.to_bits() == bake_scale.to_bits() && self.font_string == font_string && self.text == text
+	}
 }
 
 struct GlyphPlacement {
@@ -90,8 +119,14 @@ pub struct TextStringTextureCache {
 	default_font: Option<Rc<fontdue::Font>>,
 	default_bold_font: Option<Rc<fontdue::Font>>,
 	fallback_font_list: Vec<Rc<fontdue::Font>>,
-	entry_table: HashMap<String, CachedTextEntry>,
+	// 키의 해시 → 그 해시를 가진 구운 문자열들.
+	entry_table: HashMap<u64, Vec<CachedTextEntry>>,
+	entry_count: usize,
 	frame_number: u64,
+	// 글꼴을 등록한 횟수. (늘면 재 둔 글 폭이 바뀌었을 수 있다)
+	font_registration_count: u64,
+	// 글자 안티앨리어싱. (기본 켬)
+	is_text_antialias_enabled: bool,
 }
 
 impl TextStringTextureCache {
@@ -105,7 +140,10 @@ impl TextStringTextureCache {
 			default_bold_font: None,
 			fallback_font_list: Vec::new(),
 			entry_table: HashMap::new(),
+			entry_count: 0,
 			frame_number: 0,
+			font_registration_count: 0,
+			is_text_antialias_enabled: true,
 		}
 	}
 
@@ -123,6 +161,7 @@ impl TextStringTextureCache {
 		let font = load_font(font_bytes)?;
 		let font_key = create_font_key(family_name, is_bold);
 		self.font_table.insert(font_key, Rc::new(font));
+		self.font_registration_count += 1;
 		Ok(())
 	}
 
@@ -137,6 +176,7 @@ impl TextStringTextureCache {
 		else {
 			self.default_font = Some(font);
 		}
+		self.font_registration_count += 1;
 		Ok(())
 	}
 
@@ -146,7 +186,29 @@ impl TextStringTextureCache {
 	pub fn add_fallback_font(&mut self, font_bytes: Vec<u8>) -> Result<(), String> {
 		let font = load_font(font_bytes)?;
 		self.fallback_font_list.push(Rc::new(font));
+		self.font_registration_count += 1;
 		Ok(())
+	}
+
+	//==============================================================================
+	// 글자 안티앨리어싱 켬 / 끔. (원본 setTextAntialiasEnabled, 바꾼 다음 그리는 글자부터 그 방식으로 굽는다)
+	//==============================================================================
+	pub fn set_text_antialias_enabled(&mut self, value: bool) {
+		self.is_text_antialias_enabled = value;
+	}
+
+	//==============================================================================
+	// 글자 안티앨리어싱이 켜져 있는지. (원본 isTextAntialiasOn)
+	//==============================================================================
+	pub fn is_text_antialias_on(&self) -> bool {
+		self.is_text_antialias_enabled
+	}
+
+	//==============================================================================
+	// 글꼴을 등록한 횟수. (등록, 기본 글꼴, 대체 글꼴. 재 둔 글 폭을 다시 잴지 가린다)
+	//==============================================================================
+	pub fn get_font_registration_count(&self) -> u64 {
+		self.font_registration_count
 	}
 
 	//==============================================================================
@@ -191,35 +253,80 @@ impl TextStringTextureCache {
 		if text.is_empty() {
 			return None;
 		}
-		let entry_key = format!("{:?}|{}|{}|{}|{}", text_draw_kind, font_string, line_width, bake_scale, text);
-		let frame_number = self.frame_number;
-		if let Some(cached_text_entry) = self.entry_table.get_mut(&entry_key) {
-			cached_text_entry.last_used_frame_number = frame_number;
-			return Some(cached_text_entry.entry);
+		if let Some(entry) = self.find_entry(text_draw_kind, text, font_string, line_width, bake_scale) {
+			return Some(entry);
 		}
 
 		let entry = self.bake_entry(gl, text_draw_kind, text, font_string, line_width, bake_scale)?;
-		if self.entry_table.len() >= MAXIMUM_ENTRY_COUNT {
+		if self.entry_count >= MAXIMUM_ENTRY_COUNT {
 			self.evict_oldest_entry(gl);
 		}
-		self.entry_table.insert(entry_key, CachedTextEntry {
+		let is_antialias = self.is_text_antialias_enabled;
+		let entry_hash = create_entry_hash(text_draw_kind, is_antialias, text, font_string, line_width, bake_scale);
+		self.entry_table.entry(entry_hash).or_default().push(CachedTextEntry {
+			text_draw_kind,
+			is_antialias,
+			text: text.to_string(),
+			font_string: font_string.to_string(),
+			line_width,
+			bake_scale,
 			entry,
-			last_used_frame_number: frame_number,
+			last_used_frame_number: self.frame_number,
 		});
+		self.entry_count += 1;
 		Some(entry)
+	}
+
+	//==============================================================================
+	// 이미 구운 문자열 찾기. (GL 을 건드리지 않는다, 없으면 None)
+	//==============================================================================
+	pub(crate) fn find_entry(&mut self, text_draw_kind: TextDrawKind, text: &str, font_string: &str, line_width: f32, bake_scale: f32) -> Option<TextEntry> {
+		let is_antialias = self.is_text_antialias_enabled;
+		let entry_hash = create_entry_hash(text_draw_kind, is_antialias, text, font_string, line_width, bake_scale);
+		let frame_number = self.frame_number;
+		let cached_text_entry_list = self.entry_table.get_mut(&entry_hash)?;
+		let cached_text_entry = cached_text_entry_list.iter_mut().find(|cached_text_entry| cached_text_entry.is_same_key(text_draw_kind, is_antialias, text, font_string, line_width, bake_scale))?;
+		cached_text_entry.last_used_frame_number = frame_number;
+		Some(cached_text_entry.entry)
 	}
 
 	//==============================================================================
 	// 가장 오래 안 쓴 문자열 하나 버리기.
 	//==============================================================================
 	fn evict_oldest_entry(&mut self, gl: &glow::Context) {
-		let oldest_entry_key = self.entry_table.iter().min_by_key(|(_, cached_text_entry)| cached_text_entry.last_used_frame_number).map(|(entry_key, _)| entry_key.clone());
-		if let Some(oldest_entry_key) = oldest_entry_key {
-			if let Some(cached_text_entry) = self.entry_table.remove(&oldest_entry_key) {
-				unsafe {
-					gl.delete_texture(cached_text_entry.entry.texture);
+		let mut oldest_position: Option<(u64, usize, u64)> = None;
+		for (entry_hash, cached_text_entry_list) in &self.entry_table {
+			for (entry_index, cached_text_entry) in cached_text_entry_list.iter().enumerate() {
+				let is_older = match oldest_position {
+					Some((_, _, oldest_frame_number)) => {
+						cached_text_entry.last_used_frame_number < oldest_frame_number
+					}
+					None => {
+						true
+					}
+				};
+				if is_older {
+					oldest_position = Some((*entry_hash, entry_index, cached_text_entry.last_used_frame_number));
 				}
 			}
+		}
+		let (entry_hash, entry_index, _) = match oldest_position {
+			Some(oldest_position) => {
+				oldest_position
+			}
+			None => {
+				return;
+			}
+		};
+		if let Some(cached_text_entry_list) = self.entry_table.get_mut(&entry_hash) {
+			let cached_text_entry = cached_text_entry_list.swap_remove(entry_index);
+			unsafe {
+				gl.delete_texture(cached_text_entry.entry.texture);
+			}
+			if cached_text_entry_list.is_empty() {
+				self.entry_table.remove(&entry_hash);
+			}
+			self.entry_count -= 1;
 		}
 	}
 
@@ -255,6 +362,9 @@ impl TextStringTextureCache {
 			top_extent = top_extent.max((metrics.ymin + metrics.height as i32) as f32);
 			bottom_extent = bottom_extent.max(-(metrics.ymin as f32));
 		}
+		let italic_shear = calculate_italic_shear(&font_description);
+		minimum_x -= bottom_extent * italic_shear;
+		maximum_x += top_extent * italic_shear;
 		let padding = padding.max(1);
 		let origin_x = padding as f32 - minimum_x.floor();
 		let baseline_y = padding + top_extent.ceil() as i32;
@@ -289,6 +399,9 @@ impl TextStringTextureCache {
 				}
 			}
 		}
+		if italic_shear > 0.0 {
+			coverage = shear_coverage(&coverage, width, height, baseline_y as f32, italic_shear);
+		}
 		Some(TextRaster { coverage, width, height, origin_x, baseline_y: baseline_y as f32, advance_width, font_ascent, font_descent })
 	}
 
@@ -296,7 +409,7 @@ impl TextStringTextureCache {
 	// 구운 문자열 수.
 	//==============================================================================
 	pub fn get_entry_count(&self) -> usize {
-		self.entry_table.len()
+		self.entry_count
 	}
 
 	//==============================================================================
@@ -336,7 +449,7 @@ impl TextStringTextureCache {
 			// 웹: 글꼴 바이트가 없으면 브라우저 시스템 글꼴로 굽는다.
 			#[cfg(target_arch = "wasm32")]
 			{
-				return bake_system_font_entry(gl, text_draw_kind, text, &font_description, line_width, bake_scale);
+				return bake_system_font_entry(gl, text_draw_kind, text, &font_description, line_width, bake_scale, self.is_text_antialias_enabled);
 			}
 			#[cfg(not(target_arch = "wasm32"))]
 			{
@@ -367,6 +480,11 @@ impl TextStringTextureCache {
 			top_extent = top_extent.max((metrics.ymin + metrics.height as i32) as f32);
 			bottom_extent = bottom_extent.max(-(metrics.ymin as f32));
 		}
+
+		// 기울이면 기준선 위는 오른쪽, 아래는 왼쪽으로 밀리므로 그만큼 경계를 넓힌다.
+		let italic_shear = calculate_italic_shear(&font_description);
+		minimum_x -= bottom_extent * italic_shear;
+		maximum_x += top_extent * italic_shear;
 
 		// 비트맵 크기. (외곽선 두께만큼 여백)
 		let stroke_radius = match text_draw_kind {
@@ -414,9 +532,20 @@ impl TextStringTextureCache {
 			}
 		}
 
+		// 기울임 흉내. (외곽선은 기울인 모양에 긋는다)
+		if italic_shear > 0.0 {
+			coverage = shear_coverage(&coverage, bitmap_width, bitmap_height, baseline_y as f32, italic_shear);
+		}
+
 		// 외곽선: 윤곽 바깥으로 반두께 넓힌 것에서 안으로 반두께 좁힌 것을 뺀 띠. (Canvas2D strokeText 는 윤곽선 가운데에 선을 긋는다)
 		if text_draw_kind == TextDrawKind::Stroke {
 			coverage = build_stroke_coverage(&coverage, bitmap_width, bitmap_height, stroke_radius);
+		}
+
+		// 안티앨리어싱을 끈 경우: 문턱값으로 갈라 가장자리의 반투명 픽셀을 없앤다.
+		let is_antialias = self.is_text_antialias_enabled;
+		if !is_antialias {
+			apply_alpha_threshold(&mut coverage);
 		}
 
 		// 흰색 프리멀티플라이드 RGBA 로 올리기.
@@ -427,7 +556,7 @@ impl TextStringTextureCache {
 			pixels.push(*value);
 			pixels.push(*value);
 		}
-		let texture = upload_text_texture(gl, bitmap_width, bitmap_height, &pixels)?;
+		let texture = upload_text_texture(gl, bitmap_width, bitmap_height, &pixels, is_antialias)?;
 
 		Some(TextEntry {
 			texture,
@@ -452,9 +581,13 @@ impl Default for TextStringTextureCache {
 // 브라우저 시스템 글꼴로 굽기. (웹. 글꼴 바이트가 하나도 없을 때)
 //==============================================================================
 #[cfg(target_arch = "wasm32")]
-fn bake_system_font_entry(gl: &glow::Context, text_draw_kind: TextDrawKind, text: &str, font_description: &FontDescription, line_width: f32, bake_scale: f32) -> Option<TextEntry> {
-	let system_font_bitmap = crate::platform::web::systemfont::bake_text(text_draw_kind, text, font_description, line_width, bake_scale)?;
-	let texture = upload_text_texture(gl, system_font_bitmap.bitmap_width, system_font_bitmap.bitmap_height, &system_font_bitmap.pixels)?;
+fn bake_system_font_entry(gl: &glow::Context, text_draw_kind: TextDrawKind, text: &str, font_description: &FontDescription, line_width: f32, bake_scale: f32, is_antialias: bool) -> Option<TextEntry> {
+	let mut system_font_bitmap = crate::platform::web::systemfont::bake_text(text_draw_kind, text, font_description, line_width, bake_scale)?;
+	if !is_antialias {
+		// 흰색 프리멀티플라이드라 네 칸 모두 덮인 정도다.
+		apply_alpha_threshold(&mut system_font_bitmap.pixels);
+	}
+	let texture = upload_text_texture(gl, system_font_bitmap.bitmap_width, system_font_bitmap.bitmap_height, &system_font_bitmap.pixels, is_antialias)?;
 	Some(TextEntry {
 		texture,
 		advance_width: system_font_bitmap.advance_width / bake_scale,
@@ -468,9 +601,29 @@ fn bake_system_font_entry(gl: &glow::Context, text_draw_kind: TextDrawKind, text
 }
 
 //==============================================================================
-// 구운 픽셀을 텍스처로 올리기. (흰색 프리멀티플라이드 RGBA)
+// 문턱값으로 0 과 255 로 가르기. (안티앨리어싱을 끈 글자)
 //==============================================================================
-fn upload_text_texture(gl: &glow::Context, bitmap_width: i32, bitmap_height: i32, pixels: &[u8]) -> Option<crate::core::graphic::GlTexture> {
+fn apply_alpha_threshold(values: &mut [u8]) {
+	for value in values.iter_mut() {
+		*value = if *value >= ALPHA_THRESHOLD {
+			255
+		}
+		else {
+			0
+		};
+	}
+}
+
+//==============================================================================
+// 구운 픽셀을 텍스처로 올리기. (흰색 프리멀티플라이드 RGBA, 안티앨리어싱을 끄면 NEAREST)
+//==============================================================================
+fn upload_text_texture(gl: &glow::Context, bitmap_width: i32, bitmap_height: i32, pixels: &[u8], is_antialias: bool) -> Option<crate::core::graphic::GlTexture> {
+	let texture_filter = if is_antialias {
+		glow::LINEAR
+	}
+	else {
+		glow::NEAREST
+	};
 	unsafe {
 		let texture = gl.create_texture().ok()?;
 		gl.bind_texture(glow::TEXTURE_2D, Some(texture));
@@ -486,12 +639,26 @@ fn upload_text_texture(gl: &glow::Context, bitmap_width: i32, bitmap_height: i32
 			glow::UNSIGNED_BYTE,
 			glow::PixelUnpackData::Slice(Some(pixels)),
 		);
-		gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::LINEAR as i32);
-		gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::LINEAR as i32);
+		gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, texture_filter as i32);
+		gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, texture_filter as i32);
 		gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
 		gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
 		Some(texture)
 	}
+}
+
+//==============================================================================
+// 구운 문자열 키의 해시. (방식, 안티앨리어싱, 폰트 문자열, 선 두께, 배율, 글)
+//==============================================================================
+fn create_entry_hash(text_draw_kind: TextDrawKind, is_antialias: bool, text: &str, font_string: &str, line_width: f32, bake_scale: f32) -> u64 {
+	let mut hasher = DefaultHasher::new();
+	text_draw_kind.hash(&mut hasher);
+	is_antialias.hash(&mut hasher);
+	font_string.hash(&mut hasher);
+	line_width.to_bits().hash(&mut hasher);
+	bake_scale.to_bits().hash(&mut hasher);
+	text.hash(&mut hasher);
+	hasher.finish()
 }
 
 //==============================================================================
@@ -500,6 +667,7 @@ fn upload_text_texture(gl: &glow::Context, bitmap_width: i32, bitmap_height: i32
 pub fn parse_font_string(font_string: &str) -> FontDescription {
 	let mut font_size: f32 = 10.0;
 	let mut is_bold = false;
+	let mut is_italic = false;
 	let mut family_name_parts: Vec<&str> = Vec::new();
 	let mut has_found_size = false;
 	for token in font_string.split_whitespace() {
@@ -510,6 +678,10 @@ pub fn parse_font_string(font_string: &str) -> FontDescription {
 		let lowercase_token = token.to_lowercase();
 		if lowercase_token == "bold" || lowercase_token == "bolder" {
 			is_bold = true;
+			continue;
+		}
+		if lowercase_token == "italic" || lowercase_token == "oblique" {
+			is_italic = true;
 			continue;
 		}
 		if let Ok(font_weight) = lowercase_token.parse::<u32>() {
@@ -530,6 +702,7 @@ pub fn parse_font_string(font_string: &str) -> FontDescription {
 	FontDescription {
 		font_size,
 		is_bold,
+		is_italic,
 		family_name,
 	}
 }
@@ -640,6 +813,44 @@ fn calculate_advance_width(_font_list: &[Rc<fontdue::Font>], glyph_placements: &
 }
 
 //==============================================================================
+// 흉내 낸 기울임의 기울기. (italic 이 아니면 0)
+//==============================================================================
+fn calculate_italic_shear(font_description: &FontDescription) -> f32 {
+	if font_description.is_italic {
+		ITALIC_SHEAR
+	}
+	else {
+		0.0
+	}
+}
+
+//==============================================================================
+// 덮인 정도를 가로로 기울이기. (기준선 위 줄은 오른쪽, 아래 줄은 왼쪽으로 줄 높이 × 기울기만큼 밀고, 두 픽셀 사이는 섞는다)
+//==============================================================================
+fn shear_coverage(coverage: &[u8], bitmap_width: i32, bitmap_height: i32, baseline_y: f32, shear: f32) -> Vec<u8> {
+	let read_coverage = |position_x: i32, position_y: i32| -> f32 {
+		if position_x < 0 || position_x >= bitmap_width {
+			return 0.0;
+		}
+		coverage[(position_y * bitmap_width + position_x) as usize] as f32
+	};
+	let mut sheared_coverage = vec![0u8; coverage.len()];
+	for position_y in 0..bitmap_height {
+		let shift = (baseline_y - (position_y as f32 + 0.5)) * shear;
+		let shift_floor = shift.floor();
+		let fraction = shift - shift_floor;
+		let shift_integer = shift_floor as i32;
+		for position_x in 0..bitmap_width {
+			// 밀린 자리 x 의 값은 원래 자리 x - shift 에서 온다.
+			let source_x = position_x - shift_integer;
+			let value = read_coverage(source_x, position_y) * (1.0 - fraction) + read_coverage(source_x - 1, position_y) * fraction;
+			sheared_coverage[(position_y * bitmap_width + position_x) as usize] = value.round().clamp(0.0, 255.0) as u8;
+		}
+	}
+	sheared_coverage
+}
+
+//==============================================================================
 // 외곽선 띠 만들기. (원 모양으로 넓힌 값 - 원 모양으로 좁힌 값)
 //==============================================================================
 fn build_stroke_coverage(coverage: &[u8], bitmap_width: i32, bitmap_height: i32, stroke_radius: f32) -> Vec<u8> {
@@ -700,6 +911,91 @@ mod tests {
 		let hangul_glyph_index = font.lookup_glyph_index('가');
 		assert!(glyph_count > 0);
 		assert!(hangul_glyph_index != 0);
+	}
+
+	//==============================================================================
+	// 구운 문자열 키: 같은 키는 같은 해시, 하나라도 다르면 맞지 않는다.
+	//==============================================================================
+	#[test]
+	fn entry_key_matches_only_same_key() {
+		let first_hash = create_entry_hash(TextDrawKind::Fill, true, "가나다", "16px default", 0.0, 1.5);
+		let second_hash = create_entry_hash(TextDrawKind::Fill, true, "가나다", "16px default", 0.0, 1.5);
+		assert_eq!(first_hash, second_hash);
+		assert_ne!(first_hash, create_entry_hash(TextDrawKind::Stroke, true, "가나다", "16px default", 0.0, 1.5));
+		assert_ne!(first_hash, create_entry_hash(TextDrawKind::Fill, true, "가나다", "16px default", 0.0, 2.0));
+		assert_ne!(first_hash, create_entry_hash(TextDrawKind::Fill, false, "가나다", "16px default", 0.0, 1.5));
+		let texture_entry = TextEntry {
+			texture: glow::NativeTexture(std::num::NonZeroU32::new(1).expect("one")),
+			advance_width: 0.0,
+			font_ascent: 0.0,
+			font_descent: 0.0,
+			pen_offset_x: 0.0,
+			baseline_offset_y: 0.0,
+			quad_width: 0.0,
+			quad_height: 0.0,
+		};
+		let cached_text_entry = CachedTextEntry {
+			text_draw_kind: TextDrawKind::Fill,
+			is_antialias: true,
+			text: String::from("가나다"),
+			font_string: String::from("16px default"),
+			line_width: 0.0,
+			bake_scale: 1.5,
+			entry: texture_entry,
+			last_used_frame_number: 0,
+		};
+		assert!(cached_text_entry.is_same_key(TextDrawKind::Fill, true, "가나다", "16px default", 0.0, 1.5));
+		assert!(!cached_text_entry.is_same_key(TextDrawKind::Fill, false, "가나다", "16px default", 0.0, 1.5));
+		assert!(!cached_text_entry.is_same_key(TextDrawKind::Fill, true, "가나", "16px default", 0.0, 1.5));
+		assert!(!cached_text_entry.is_same_key(TextDrawKind::Fill, true, "가나다", "bold 16px default", 0.0, 1.5));
+		assert!(!cached_text_entry.is_same_key(TextDrawKind::Fill, true, "가나다", "16px default", 2.0, 1.5));
+	}
+
+	//==============================================================================
+	// 안티앨리어싱을 끄면 문턱값 128 로 0 과 255 로 갈린다. (원본과 같은 문턱)
+	//==============================================================================
+	#[test]
+	fn alpha_threshold_splits_at_128() {
+		let mut values: Vec<u8> = vec![0, 1, 127, 128, 200, 255];
+		apply_alpha_threshold(&mut values);
+		assert_eq!(values, vec![0, 0, 0, 255, 255, 255]);
+		let mut text_string_texture_cache = TextStringTextureCache::new();
+		assert!(text_string_texture_cache.is_text_antialias_on());
+		text_string_texture_cache.set_text_antialias_enabled(false);
+		assert!(!text_string_texture_cache.is_text_antialias_on());
+	}
+
+	//==============================================================================
+	// italic 을 읽고, 기울이면 기준선 위는 오른쪽으로 아래는 왼쪽으로 밀린다.
+	//==============================================================================
+	#[test]
+	fn italic_shears_coverage() {
+		let font_description = parse_font_string("italic bold 20px \"My Font\"");
+		assert!(font_description.is_italic);
+		assert!(font_description.is_bold);
+		assert_eq!(font_description.family_name, "My Font");
+		assert!(!parse_font_string("20px default").is_italic);
+		// 세로 막대 하나. (x = 5, 줄 0 ~ 9, 기준선은 줄 10)
+		let width = 12;
+		let height = 12;
+		let mut coverage = vec![0u8; (width * height) as usize];
+		for position_y in 0..10 {
+			coverage[(position_y * width + 5) as usize] = 255;
+		}
+		let sheared_coverage = shear_coverage(&coverage, width, height, 10.0, 0.5);
+		let find_center_x = |position_y: i32| -> f32 {
+			let mut weighted_sum = 0.0;
+			let mut weight_sum = 0.0;
+			for position_x in 0..width {
+				let value = sheared_coverage[(position_y * width + position_x) as usize] as f32;
+				weighted_sum += value * position_x as f32;
+				weight_sum += value;
+			}
+			weighted_sum / weight_sum
+		};
+		assert!((find_center_x(9) - 5.25).abs() < 0.05);
+		assert!((find_center_x(0) - 9.75).abs() < 0.05);
+		assert!(find_center_x(0) > find_center_x(5));
 	}
 
 	//==============================================================================

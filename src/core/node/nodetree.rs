@@ -48,6 +48,8 @@ pub struct NodeTree {
 	traversal_depth: u32,
 	pending_destroy_ids: Vec<NodeId>,
 	culled_node_count: u32,
+	// 다시 쓰는 빈 자리표. (컴포넌트를 잠깐 꺼낼 때마다 새로 잡지 않는다. 겹쳐 꺼내는 깊이만큼 늘어난다)
+	placeholder_pool: Vec<Box<dyn Component>>,
 }
 
 impl NodeTree {
@@ -65,6 +67,44 @@ impl NodeTree {
 			traversal_depth: 0,
 			pending_destroy_ids: Vec::new(),
 			culled_node_count: 0,
+			placeholder_pool: Vec::new(),
+		}
+	}
+
+	//==============================================================================
+	// 빈 자리표 하나 꺼내기. (남은 것이 없으면 새로 만든다. 꺼진 상태로 돌려준다)
+	//==============================================================================
+	fn take_placeholder(&mut self) -> Box<dyn Component> {
+		match self.placeholder_pool.pop() {
+			Some(mut placeholder) => {
+				placeholder.set_enable(false);
+				placeholder
+			}
+			None => {
+				Box::new(ComponentPlaceholder::new())
+			}
+		}
+	}
+
+	//==============================================================================
+	// 꺼냈던 컴포넌트를 빈 자리표 자리에 되돌리고, 자리표는 다시 쓰게 담아 둔다. (자리표가 없으면 컴포넌트는 버린다)
+	//==============================================================================
+	fn restore_component(&mut self, node_id: NodeId, component: Box<dyn Component>) {
+		let node = match self.nodes.get_mut(node_id) {
+			Some(node) => {
+				node
+			}
+			None => {
+				return;
+			}
+		};
+		let placeholder_index = node.components.iter().position(|candidate| {
+			let candidate_reference: &dyn Component = candidate.as_ref();
+			candidate_reference.as_any().is::<ComponentPlaceholder>()
+		});
+		if let Some(placeholder_index) = placeholder_index {
+			let placeholder = std::mem::replace(&mut node.components[placeholder_index], component);
+			self.placeholder_pool.push(placeholder);
 		}
 	}
 
@@ -460,18 +500,19 @@ impl NodeTree {
 		self.traversal_depth += 1;
 		for component_index in 0..component_count {
 			// 부르는 컴포넌트만 꺼내고 그 자리에 빈 자리표를 둔다. (형제 컴포넌트는 노드에 그대로 남는다)
-			let mut component = match self.nodes.get_mut(node_id) {
+			let is_present = match self.nodes.get(node_id) {
 				Some(node) => {
-					if component_index >= node.components.len() {
-						break;
-					}
-					let placeholder: Box<dyn Component> = Box::new(ComponentPlaceholder::new());
-					std::mem::replace(&mut node.components[component_index], placeholder)
+					component_index < node.components.len()
 				}
 				None => {
-					break;
+					false
 				}
 			};
+			if !is_present {
+				break;
+			}
+			let placeholder = self.take_placeholder();
+			let mut component = std::mem::replace(&mut self.nodes[node_id].components[component_index], placeholder);
 			if component.is_enable() {
 				let mut context = ComponentContext {
 					node_tree: self,
@@ -482,15 +523,7 @@ impl NodeTree {
 			}
 
 			// 빈 자리표가 있는 곳에 되돌린다. (도는 중에 다른 컴포넌트를 지웠으면 자리가 당겨졌을 수 있다)
-			if let Some(node) = self.nodes.get_mut(node_id) {
-				let placeholder_index = node.components.iter().position(|candidate| {
-					let candidate_reference: &dyn Component = candidate.as_ref();
-					candidate_reference.as_any().is::<ComponentPlaceholder>()
-				});
-				if let Some(placeholder_index) = placeholder_index {
-					node.components[placeholder_index] = component;
-				}
-			}
+			self.restore_component(node_id, component);
 		}
 		self.traversal_depth -= 1;
 	}
@@ -534,7 +567,7 @@ impl NodeTree {
 			let candidate_reference: &dyn Component = candidate.as_ref();
 			candidate_reference.as_any().is::<T>()
 		})?;
-		let placeholder: Box<dyn Component> = Box::new(ComponentPlaceholder::new());
+		let placeholder = self.take_placeholder();
 		let mut component = std::mem::replace(&mut self.nodes[node_id].components[component_index], placeholder);
 		self.traversal_depth += 1;
 		let result = {
@@ -543,15 +576,7 @@ impl NodeTree {
 			action(typed_component, self)
 		};
 		self.traversal_depth -= 1;
-		if let Some(node) = self.nodes.get_mut(node_id) {
-			let placeholder_index = node.components.iter().position(|candidate| {
-				let candidate_reference: &dyn Component = candidate.as_ref();
-				candidate_reference.as_any().is::<ComponentPlaceholder>()
-			});
-			if let Some(placeholder_index) = placeholder_index {
-				node.components[placeholder_index] = component;
-			}
-		}
+		self.restore_component(node_id, component);
 		self.flush_pending_destroy();
 		Some(result)
 	}
@@ -1289,5 +1314,32 @@ mod sibling_tests {
 		assert_eq!(paint_color.green, 0.0);
 		assert!(node_tree[node_id].has_component::<SiblingPainter>());
 		assert_eq!(node_tree[node_id].get_all_components().len(), 2);
+	}
+
+	//==============================================================================
+	// tick 이 컴포넌트를 꺼낼 때 쓰는 빈 자리표는 다시 써서, 몇 번을 돌아도 하나만 남는다.
+	//==============================================================================
+	#[test]
+	fn placeholder_is_reused_across_ticks() {
+		let engine = Engine::new(EngineConfiguration::new());
+		let mut node_tree = NodeTree::new();
+		let root_id = node_tree.get_root_id();
+		for node_index in 0..3 {
+			let node_id = node_tree.create_child(root_id, &format!("painted{}", node_index));
+			node_tree[node_id].add_component(Paint::create_with_color(Color::white()));
+			node_tree[node_id].add_component(SiblingPainter {
+				component_base: ComponentBase::new(),
+			});
+		}
+		node_tree.tick(&engine, 0.016);
+		node_tree.tick(&engine, 0.016);
+		assert_eq!(node_tree.placeholder_pool.len(), 1);
+		let is_placeholder_left = node_tree.nodes.values().any(|node| {
+			node.get_all_components().iter().any(|component| {
+				let component_reference: &dyn Component = component.as_ref();
+				component_reference.as_any().is::<ComponentPlaceholder>()
+			})
+		});
+		assert!(!is_placeholder_left);
 	}
 }
