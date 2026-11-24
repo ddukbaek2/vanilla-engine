@@ -43,6 +43,7 @@
 - Graphic: 틴트가 걸린 그리기도 묶는다. 원본처럼 정점마다 색과 틴트를 싣는 묶음 셰이더를 따로 두었다. (지금까지는 틴트가 걸리면 묶지 않고 하나씩 그렸다) 화면은 전과 같다. (uigallery 드로우콜 63 → 61, misctour 24 → 12)
 - Graphic: 마지막으로 건 셰이더 프로그램과 텍스처 유닛 0 의 텍스처를 기억해, 같은 것을 다시 거는 use_program 과 bind_texture 를 건너뛴다. 묶음을 내보낸 뒤 기본 프로그램으로 되돌리는 호출도 다음에 낱장으로 그릴 때로 미뤘다. get_gl 로 GL 을 내줄 때, restore_render_state, 프레임 시작과 끝에는 기억을 잊어 툰, 스키닝, 블룸, SSAO, ScreenEffect, ShaderSprite 처럼 GL 을 직접 만지는 쪽 뒤에도 틀린 그림이 나오지 않는다
 - Graphic: set_image_mipmap_bias, get_image_mipmap_bias. (원본 setImageMipmapBias) 밉맵 단계를 고를 때 더하는 값을 기본, 묶음, 파티클 셰이더의 textureLodBias 로 건다. 바꿔 끼운 셰이더는 그 유니폼이 있으면 받는다. 지금까지는 0 으로 박혀 있었다
+- Text: 나눈 줄을 담아 두고 글, 폰트 문자열(이름, 크기, 굵게, 기울임), 줄바꿈 폭, 등록된 글꼴이 바뀔 때만 다시 센다. (지금까지는 그릴 때마다 셌다) 폰트 문자열도 세터에서만 만든다. TextStringTextureCache: get_font_registration_count. 구운 문자열을 키 문자열 대신 키의 해시로 찾아 그릴 때마다 키를 만들지 않는다. Graphic: push_state 가 폰트 문자열을 복제하지 않고 한 번 쓴 칸의 저장소를 다시 쓴다. set_font_string 은 같으면 그대로 둔다. NodeTree: tick 과 터치가 컴포넌트를 꺼낼 때 두는 빈 자리표를 다시 써 매번 잡지 않는다
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.

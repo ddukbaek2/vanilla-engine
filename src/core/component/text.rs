@@ -28,6 +28,15 @@ pub struct Text {
 	word_wrap_width: f32,
 	line_spacing: f32,
 	visible_character_count: i32,
+	// 폰트 문자열. (폰트 이름, 크기, 굵게, 기울임이 바뀔 때만 다시 만든다)
+	font_string: String,
+	// 줄 나누기를 다시 셀지. (글이나 폰트 문자열이 바뀌면 켠다)
+	is_layout_dirty: bool,
+	// 마지막으로 줄을 나눈 폭과 그때의 글꼴 등록 횟수. (폭이 바뀌거나 글꼴이 새로 들어오면 다시 센다)
+	layout_wrap_width: f32,
+	layout_font_registration_count: u64,
+	// 나눈 줄.
+	line_list: Vec<String>,
 }
 
 impl Text {
@@ -35,7 +44,7 @@ impl Text {
 	// 생성. (기본값은 원본과 같다: 32px, 흰색, 가운데 정렬, 가운데 기준선, 줄 간격 1.25)
 	//==============================================================================
 	pub fn new() -> Text {
-		Text {
+		let mut text = Text {
 			component_base: ComponentBase::new(),
 			font_family: String::from(DEFAULT_FONT_FAMILY),
 			text: String::new(),
@@ -50,7 +59,14 @@ impl Text {
 			word_wrap_width: 0.0,
 			line_spacing: 1.25,
 			visible_character_count: -1,
-		}
+			font_string: String::new(),
+			is_layout_dirty: true,
+			layout_wrap_width: 0.0,
+			layout_font_registration_count: 0,
+			line_list: Vec::new(),
+		};
+		text.font_string = text.build_font_string();
+		text
 	}
 
 	//==============================================================================
@@ -77,6 +93,39 @@ impl Text {
 		style_parts.push(format!("{}px", self.font_size));
 		style_parts.push(self.font_family.clone());
 		style_parts.join(" ")
+	}
+
+	//==============================================================================
+	// 폰트 문자열 다시 만들기. (폰트 이름, 크기, 굵게, 기울임 세터가 부른다. 바뀌었으면 줄을 다시 센다)
+	//==============================================================================
+	fn update_font_string(&mut self) {
+		let font_string = self.build_font_string();
+		if font_string != self.font_string {
+			self.font_string = font_string;
+			self.is_layout_dirty = true;
+		}
+	}
+
+	//==============================================================================
+	// 나눈 줄 갱신. (글, 폰트 문자열, 줄바꿈 폭, 등록된 글꼴이 그대로면 지난번 결과를 쓴다)
+	//==============================================================================
+	fn update_line_list(&mut self, graphic: &mut Graphic, content_width: f32) {
+		let wrap_width = if self.word_wrap_width > 0.0 {
+			self.word_wrap_width
+		}
+		else {
+			content_width
+		};
+		let font_registration_count = graphic.get_text_string_texture_cache().get_font_registration_count();
+		if !self.is_layout_dirty && self.layout_wrap_width == wrap_width && self.layout_font_registration_count == font_registration_count {
+			return;
+		}
+		graphic.set_font_string(&self.font_string);
+		let line_list = self.wrap_text_to_lines(graphic, &self.text, wrap_width);
+		self.line_list = line_list;
+		self.layout_wrap_width = wrap_width;
+		self.layout_font_registration_count = font_registration_count;
+		self.is_layout_dirty = false;
 	}
 
 	//==============================================================================
@@ -167,8 +216,7 @@ impl Text {
 			}
 		};
 
-		let font_string = self.build_font_string();
-		graphic.set_font_string(&font_string);
+		graphic.set_font_string(&self.font_string);
 		graphic.set_text_align(text_align);
 		graphic.set_text_baseline(self.text_baseline);
 
@@ -181,19 +229,12 @@ impl Text {
 	}
 
 	//==============================================================================
-	// 여러 줄 출력.
+	// 여러 줄 출력. (update_line_list 로 나눈 줄을 그린다)
 	//==============================================================================
-	fn draw_wrapped_text(&self, graphic: &mut Graphic, content_width: f32, content_height: f32, full_text: &str) {
-		let font_string = self.build_font_string();
-		graphic.set_font_string(&font_string);
+	fn draw_wrapped_text(&self, graphic: &mut Graphic, content_width: f32, content_height: f32) {
+		graphic.set_font_string(&self.font_string);
 
-		let wrap_width = if self.word_wrap_width > 0.0 {
-			self.word_wrap_width
-		}
-		else {
-			content_width
-		};
-		let line_list = self.wrap_text_to_lines(graphic, full_text, wrap_width);
+		let line_list = &self.line_list;
 		let line_height = self.font_size * self.line_spacing;
 		let block_height = line_list.len() as f32 * line_height;
 		let block_top = match self.text_baseline {
@@ -244,7 +285,10 @@ impl Text {
 	// 폰트 이름 설정. (Graphic 에 등록한 이름, 없으면 기본 폰트)
 	//==============================================================================
 	pub fn set_font_family(&mut self, font_family: &str) {
-		self.font_family = font_family.to_string();
+		if self.font_family != font_family {
+			self.font_family = font_family.to_string();
+			self.update_font_string();
+		}
 	}
 
 	//==============================================================================
@@ -260,6 +304,7 @@ impl Text {
 	pub fn set_text(&mut self, text: &str) {
 		if self.text != text {
 			self.text = text.to_string();
+			self.is_layout_dirty = true;
 		}
 	}
 
@@ -274,7 +319,10 @@ impl Text {
 	// 글자 크기 설정. (픽셀)
 	//==============================================================================
 	pub fn set_font_size(&mut self, font_size: f32) {
-		self.font_size = font_size;
+		if self.font_size != font_size {
+			self.font_size = font_size;
+			self.update_font_string();
+		}
 	}
 
 	//==============================================================================
@@ -330,7 +378,10 @@ impl Text {
 	// 굵게 설정.
 	//==============================================================================
 	pub fn set_bold(&mut self, is_bold: bool) {
-		self.is_bold = is_bold;
+		if self.is_bold != is_bold {
+			self.is_bold = is_bold;
+			self.update_font_string();
+		}
 	}
 
 	//==============================================================================
@@ -344,7 +395,10 @@ impl Text {
 	// 기울임 설정. (값만 든다)
 	//==============================================================================
 	pub fn set_italic(&mut self, is_italic: bool) {
-		self.is_italic = is_italic;
+		if self.is_italic != is_italic {
+			self.is_italic = is_italic;
+			self.update_font_string();
+		}
 	}
 
 	//==============================================================================
@@ -471,7 +525,8 @@ impl Component for Text {
 		}
 		let content_size = transform.get_content_size();
 		if self.word_wrap_width > 0.0 || self.text.contains('\n') {
-			self.draw_wrapped_text(graphic, content_size.x, content_size.y, &self.text);
+			self.update_line_list(graphic, content_size.x);
+			self.draw_wrapped_text(graphic, content_size.x, content_size.y);
 			return;
 		}
 		let visible_text = self.apply_visible_character_count(&self.text);

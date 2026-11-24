@@ -353,7 +353,9 @@ pub struct Graphic {
 	image_texture_cache: ImageTextureCache,
 	text_string_texture_cache: TextStringTextureCache,
 	transform_matrix: TransformMatrix,
+	// 상태 스택. (앞의 state_stack_depth 개가 쓰는 칸, 뒤 칸은 폰트 문자열 저장소를 다시 쓰려고 남겨 둔다)
 	state_stack: Vec<GraphicState>,
+	state_stack_depth: usize,
 	global_alpha: f32,
 	blend_mode: BlendMode,
 	warned_blend_modes: HashSet<BlendMode>,
@@ -480,6 +482,7 @@ impl Graphic {
 			text_string_texture_cache: TextStringTextureCache::new(),
 			transform_matrix: TransformMatrix::identity(),
 			state_stack: Vec::new(),
+			state_stack_depth: 0,
 			global_alpha: 1.0,
 			blend_mode: BlendMode::Normal,
 			warned_blend_modes: HashSet::new(),
@@ -550,7 +553,7 @@ impl Graphic {
 		}
 
 		// 프레임 시작 기준 상태로 리셋.
-		self.state_stack.clear();
+		self.state_stack_depth = 0;
 		self.is_uploaded_uniform_known = false;
 		self.transform_matrix.set_identity();
 		self.global_alpha = 1.0;
@@ -701,45 +704,59 @@ impl Graphic {
 
 	//==============================================================================
 	// 상태 저장. (Canvas2D save 대응)
+	// - 한 번 쓴 칸은 남겨 두고 다시 쓴다. 폰트 문자열은 칸의 저장소에 옮겨 적어 매번 새로 잡지 않는다.
 	//==============================================================================
 	pub fn push_state(&mut self) {
-		let state_snapshot = GraphicState {
-			transform_matrix: self.transform_matrix,
-			global_alpha: self.global_alpha,
-			blend_mode: self.blend_mode,
-			fill_color: self.fill_color,
-			stroke_color: self.stroke_color,
-			image_tint_color: self.image_tint_color,
-			font_string: self.font_string.clone(),
-			text_align: self.text_align,
-			text_baseline: self.text_baseline,
-		};
-		self.state_stack.push(state_snapshot);
+		if self.state_stack_depth < self.state_stack.len() {
+			let state_snapshot = &mut self.state_stack[self.state_stack_depth];
+			state_snapshot.transform_matrix = self.transform_matrix;
+			state_snapshot.global_alpha = self.global_alpha;
+			state_snapshot.blend_mode = self.blend_mode;
+			state_snapshot.fill_color = self.fill_color;
+			state_snapshot.stroke_color = self.stroke_color;
+			state_snapshot.image_tint_color = self.image_tint_color;
+			state_snapshot.font_string.clear();
+			state_snapshot.font_string.push_str(&self.font_string);
+			state_snapshot.text_align = self.text_align;
+			state_snapshot.text_baseline = self.text_baseline;
+		}
+		else {
+			self.state_stack.push(GraphicState {
+				transform_matrix: self.transform_matrix,
+				global_alpha: self.global_alpha,
+				blend_mode: self.blend_mode,
+				fill_color: self.fill_color,
+				stroke_color: self.stroke_color,
+				image_tint_color: self.image_tint_color,
+				font_string: self.font_string.clone(),
+				text_align: self.text_align,
+				text_baseline: self.text_baseline,
+			});
+		}
+		self.state_stack_depth += 1;
 	}
 
 	//==============================================================================
 	// 상태 복원. (Canvas2D restore 대응)
+	// - 폰트 문자열은 칸의 저장소와 맞바꾼다.
 	//==============================================================================
 	pub fn pop_state(&mut self) {
-		let state_snapshot = match self.state_stack.pop() {
-			Some(state_snapshot) => {
-				state_snapshot
-			}
-			None => {
-				return;
-			}
-		};
-
+		if self.state_stack_depth == 0 {
+			return;
+		}
+		self.state_stack_depth -= 1;
+		let state_snapshot = &mut self.state_stack[self.state_stack_depth];
 		self.transform_matrix = state_snapshot.transform_matrix;
 		self.global_alpha = state_snapshot.global_alpha;
 		self.fill_color = state_snapshot.fill_color;
 		self.stroke_color = state_snapshot.stroke_color;
 		self.image_tint_color = state_snapshot.image_tint_color;
-		self.font_string = state_snapshot.font_string;
+		std::mem::swap(&mut self.font_string, &mut state_snapshot.font_string);
 		self.text_align = state_snapshot.text_align;
 		self.text_baseline = state_snapshot.text_baseline;
-		if self.blend_mode != state_snapshot.blend_mode {
-			self.set_blend_mode(state_snapshot.blend_mode);
+		let blend_mode = state_snapshot.blend_mode;
+		if self.blend_mode != blend_mode {
+			self.set_blend_mode(blend_mode);
 		}
 	}
 
@@ -1806,8 +1823,9 @@ impl Graphic {
 	// 폰트 문자열 설정. (Canvas2D font 대응, 예: "16px DOSGothic")
 	//==============================================================================
 	pub fn set_font_string(&mut self, font_string: &str) {
-		if !font_string.is_empty() {
-			self.font_string = font_string.to_string();
+		if !font_string.is_empty() && self.font_string != font_string {
+			self.font_string.clear();
+			self.font_string.push_str(font_string);
 		}
 	}
 

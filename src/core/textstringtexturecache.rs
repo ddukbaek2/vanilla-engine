@@ -1,14 +1,17 @@
 //==============================================================================
 // 문자열 텍스처 캐시.
 // - 원본은 오프스크린 2D 캔버스에 fillText / strokeText 로 문자열을 구워 텍스처로 쓴다. (LRU 상한 512)
-// - 여기서는 fontdue 로 글자를 래스터화해 문자열 한 장으로 굽는다. 상한과 키 구성은 원본과 같다.
+// - 여기서는 fontdue 로 글자를 래스터화해 문자열 한 장으로 굽는다. 상한과 키 구성(방식, 폰트 문자열, 선 두께, 배율, 글)은 원본과 같다.
+//   원본은 키를 문자열로 이어 붙인다. 여기서는 찾을 때마다 문자열을 만들지 않게 키의 해시로 찾고, 같은 해시 안에서 키를 하나씩 맞춰 본다.
 // - 글자는 흰색으로 굽고, 그릴 때 색을 곱한다. (색이 바뀌어도 다시 굽지 않는다)
 // - 폰트 문자열은 Canvas2D font 와 같은 꼴을 읽는다. 예: "16px DOSGothic", "bold 24px default"
 // - 첫 폰트에 없는 글자는 기본 폰트, 대체 폰트 순으로 찾는다. (브라우저의 글꼴 대체와 같은 자리)
 // - 웹에서 글꼴 바이트가 하나도 없으면 원본처럼 브라우저 Canvas2D 로 굽고 잰다. 그래서 시스템 글꼴로 나온다. (platform/web/systemfont.rs)
 //==============================================================================
 use glow::HasContext;
+use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 // 캐시 상한. (원본과 같음)
@@ -17,7 +20,7 @@ const MAXIMUM_ENTRY_COUNT: usize = 512;
 //==============================================================================
 // 굽는 방식.
 //==============================================================================
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TextDrawKind {
 	Fill,
 	Stroke,
@@ -74,8 +77,22 @@ pub struct FontDescription {
 }
 
 struct CachedTextEntry {
+	text_draw_kind: TextDrawKind,
+	text: String,
+	font_string: String,
+	line_width: f32,
+	bake_scale: f32,
 	entry: TextEntry,
 	last_used_frame_number: u64,
+}
+
+impl CachedTextEntry {
+	//==============================================================================
+	// 키가 같은지. (선 두께와 배율은 비트로 맞춘다)
+	//==============================================================================
+	fn is_same_key(&self, text_draw_kind: TextDrawKind, text: &str, font_string: &str, line_width: f32, bake_scale: f32) -> bool {
+		self.text_draw_kind == text_draw_kind && self.line_width.to_bits() == line_width.to_bits() && self.bake_scale.to_bits() == bake_scale.to_bits() && self.font_string == font_string && self.text == text
+	}
 }
 
 struct GlyphPlacement {
@@ -90,8 +107,12 @@ pub struct TextStringTextureCache {
 	default_font: Option<Rc<fontdue::Font>>,
 	default_bold_font: Option<Rc<fontdue::Font>>,
 	fallback_font_list: Vec<Rc<fontdue::Font>>,
-	entry_table: HashMap<String, CachedTextEntry>,
+	// 키의 해시 → 그 해시를 가진 구운 문자열들.
+	entry_table: HashMap<u64, Vec<CachedTextEntry>>,
+	entry_count: usize,
 	frame_number: u64,
+	// 글꼴을 등록한 횟수. (늘면 재 둔 글 폭이 바뀌었을 수 있다)
+	font_registration_count: u64,
 }
 
 impl TextStringTextureCache {
@@ -105,7 +126,9 @@ impl TextStringTextureCache {
 			default_bold_font: None,
 			fallback_font_list: Vec::new(),
 			entry_table: HashMap::new(),
+			entry_count: 0,
 			frame_number: 0,
+			font_registration_count: 0,
 		}
 	}
 
@@ -123,6 +146,7 @@ impl TextStringTextureCache {
 		let font = load_font(font_bytes)?;
 		let font_key = create_font_key(family_name, is_bold);
 		self.font_table.insert(font_key, Rc::new(font));
+		self.font_registration_count += 1;
 		Ok(())
 	}
 
@@ -137,6 +161,7 @@ impl TextStringTextureCache {
 		else {
 			self.default_font = Some(font);
 		}
+		self.font_registration_count += 1;
 		Ok(())
 	}
 
@@ -146,7 +171,15 @@ impl TextStringTextureCache {
 	pub fn add_fallback_font(&mut self, font_bytes: Vec<u8>) -> Result<(), String> {
 		let font = load_font(font_bytes)?;
 		self.fallback_font_list.push(Rc::new(font));
+		self.font_registration_count += 1;
 		Ok(())
+	}
+
+	//==============================================================================
+	// 글꼴을 등록한 횟수. (등록, 기본 글꼴, 대체 글꼴. 재 둔 글 폭을 다시 잴지 가린다)
+	//==============================================================================
+	pub fn get_font_registration_count(&self) -> u64 {
+		self.font_registration_count
 	}
 
 	//==============================================================================
@@ -195,16 +228,21 @@ impl TextStringTextureCache {
 			return Some(entry);
 		}
 
-		let entry_key = format!("{:?}|{}|{}|{}|{}", text_draw_kind, font_string, line_width, bake_scale, text);
-		let frame_number = self.frame_number;
 		let entry = self.bake_entry(gl, text_draw_kind, text, font_string, line_width, bake_scale)?;
-		if self.entry_table.len() >= MAXIMUM_ENTRY_COUNT {
+		if self.entry_count >= MAXIMUM_ENTRY_COUNT {
 			self.evict_oldest_entry(gl);
 		}
-		self.entry_table.insert(entry_key, CachedTextEntry {
+		let entry_hash = create_entry_hash(text_draw_kind, text, font_string, line_width, bake_scale);
+		self.entry_table.entry(entry_hash).or_default().push(CachedTextEntry {
+			text_draw_kind,
+			text: text.to_string(),
+			font_string: font_string.to_string(),
+			line_width,
+			bake_scale,
 			entry,
-			last_used_frame_number: frame_number,
+			last_used_frame_number: self.frame_number,
 		});
+		self.entry_count += 1;
 		Some(entry)
 	}
 
@@ -212,9 +250,10 @@ impl TextStringTextureCache {
 	// 이미 구운 문자열 찾기. (GL 을 건드리지 않는다, 없으면 None)
 	//==============================================================================
 	pub(crate) fn find_entry(&mut self, text_draw_kind: TextDrawKind, text: &str, font_string: &str, line_width: f32, bake_scale: f32) -> Option<TextEntry> {
-		let entry_key = format!("{:?}|{}|{}|{}|{}", text_draw_kind, font_string, line_width, bake_scale, text);
+		let entry_hash = create_entry_hash(text_draw_kind, text, font_string, line_width, bake_scale);
 		let frame_number = self.frame_number;
-		let cached_text_entry = self.entry_table.get_mut(&entry_key)?;
+		let cached_text_entry_list = self.entry_table.get_mut(&entry_hash)?;
+		let cached_text_entry = cached_text_entry_list.iter_mut().find(|cached_text_entry| cached_text_entry.is_same_key(text_draw_kind, text, font_string, line_width, bake_scale))?;
 		cached_text_entry.last_used_frame_number = frame_number;
 		Some(cached_text_entry.entry)
 	}
@@ -223,13 +262,39 @@ impl TextStringTextureCache {
 	// 가장 오래 안 쓴 문자열 하나 버리기.
 	//==============================================================================
 	fn evict_oldest_entry(&mut self, gl: &glow::Context) {
-		let oldest_entry_key = self.entry_table.iter().min_by_key(|(_, cached_text_entry)| cached_text_entry.last_used_frame_number).map(|(entry_key, _)| entry_key.clone());
-		if let Some(oldest_entry_key) = oldest_entry_key {
-			if let Some(cached_text_entry) = self.entry_table.remove(&oldest_entry_key) {
-				unsafe {
-					gl.delete_texture(cached_text_entry.entry.texture);
+		let mut oldest_position: Option<(u64, usize, u64)> = None;
+		for (entry_hash, cached_text_entry_list) in &self.entry_table {
+			for (entry_index, cached_text_entry) in cached_text_entry_list.iter().enumerate() {
+				let is_older = match oldest_position {
+					Some((_, _, oldest_frame_number)) => {
+						cached_text_entry.last_used_frame_number < oldest_frame_number
+					}
+					None => {
+						true
+					}
+				};
+				if is_older {
+					oldest_position = Some((*entry_hash, entry_index, cached_text_entry.last_used_frame_number));
 				}
 			}
+		}
+		let (entry_hash, entry_index, _) = match oldest_position {
+			Some(oldest_position) => {
+				oldest_position
+			}
+			None => {
+				return;
+			}
+		};
+		if let Some(cached_text_entry_list) = self.entry_table.get_mut(&entry_hash) {
+			let cached_text_entry = cached_text_entry_list.swap_remove(entry_index);
+			unsafe {
+				gl.delete_texture(cached_text_entry.entry.texture);
+			}
+			if cached_text_entry_list.is_empty() {
+				self.entry_table.remove(&entry_hash);
+			}
+			self.entry_count -= 1;
 		}
 	}
 
@@ -306,7 +371,7 @@ impl TextStringTextureCache {
 	// 구운 문자열 수.
 	//==============================================================================
 	pub fn get_entry_count(&self) -> usize {
-		self.entry_table.len()
+		self.entry_count
 	}
 
 	//==============================================================================
@@ -502,6 +567,19 @@ fn upload_text_texture(gl: &glow::Context, bitmap_width: i32, bitmap_height: i32
 		gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
 		Some(texture)
 	}
+}
+
+//==============================================================================
+// 구운 문자열 키의 해시. (방식, 폰트 문자열, 선 두께, 배율, 글)
+//==============================================================================
+fn create_entry_hash(text_draw_kind: TextDrawKind, text: &str, font_string: &str, line_width: f32, bake_scale: f32) -> u64 {
+	let mut hasher = DefaultHasher::new();
+	text_draw_kind.hash(&mut hasher);
+	font_string.hash(&mut hasher);
+	line_width.to_bits().hash(&mut hasher);
+	bake_scale.to_bits().hash(&mut hasher);
+	text.hash(&mut hasher);
+	hasher.finish()
 }
 
 //==============================================================================
@@ -710,6 +788,41 @@ mod tests {
 		let hangul_glyph_index = font.lookup_glyph_index('가');
 		assert!(glyph_count > 0);
 		assert!(hangul_glyph_index != 0);
+	}
+
+	//==============================================================================
+	// 구운 문자열 키: 같은 키는 같은 해시, 하나라도 다르면 맞지 않는다.
+	//==============================================================================
+	#[test]
+	fn entry_key_matches_only_same_key() {
+		let first_hash = create_entry_hash(TextDrawKind::Fill, "가나다", "16px default", 0.0, 1.5);
+		let second_hash = create_entry_hash(TextDrawKind::Fill, "가나다", "16px default", 0.0, 1.5);
+		assert_eq!(first_hash, second_hash);
+		assert_ne!(first_hash, create_entry_hash(TextDrawKind::Stroke, "가나다", "16px default", 0.0, 1.5));
+		assert_ne!(first_hash, create_entry_hash(TextDrawKind::Fill, "가나다", "16px default", 0.0, 2.0));
+		let texture_entry = TextEntry {
+			texture: glow::NativeTexture(std::num::NonZeroU32::new(1).expect("one")),
+			advance_width: 0.0,
+			font_ascent: 0.0,
+			font_descent: 0.0,
+			pen_offset_x: 0.0,
+			baseline_offset_y: 0.0,
+			quad_width: 0.0,
+			quad_height: 0.0,
+		};
+		let cached_text_entry = CachedTextEntry {
+			text_draw_kind: TextDrawKind::Fill,
+			text: String::from("가나다"),
+			font_string: String::from("16px default"),
+			line_width: 0.0,
+			bake_scale: 1.5,
+			entry: texture_entry,
+			last_used_frame_number: 0,
+		};
+		assert!(cached_text_entry.is_same_key(TextDrawKind::Fill, "가나다", "16px default", 0.0, 1.5));
+		assert!(!cached_text_entry.is_same_key(TextDrawKind::Fill, "가나", "16px default", 0.0, 1.5));
+		assert!(!cached_text_entry.is_same_key(TextDrawKind::Fill, "가나다", "bold 16px default", 0.0, 1.5));
+		assert!(!cached_text_entry.is_same_key(TextDrawKind::Fill, "가나다", "16px default", 2.0, 1.5));
 	}
 
 	//==============================================================================
