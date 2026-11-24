@@ -4,6 +4,8 @@
 // - 러스트 판은 웹(wasm32)에서는 원본과 같은 규칙으로 user_agent 를 보고, 데스크탑에서는 빌드 대상 OS 를 쓴다.
 //   데스크탑의 브라우저는 unknown 이고, 스팀덱 구분은 아직 하지 않는다(리눅스로 나온다).
 // - 원본의 getOrAddCanvas 는 platform/web.rs 가, getResouceUsage(웹 리소스 전송량)는 옮기지 않았다.
+// - is_desktop_web: 원본은 부를 때마다 플랫폼 정보를 새로 읽는다. 러스트 판은 만들 때 읽은 것을 쓴다. (user_agent 는 바뀌지 않는다)
+//   데스크탑 빌드는 모바일이 아니고 손가락 입력 수(navigator.maxTouchPoints)가 없어 늘 true 다.
 //==============================================================================
 
 // 공통 시스템 폰트 목록. (원본 SYSTEM_FONT_STRING, 웹 CSS 글꼴 목록)
@@ -216,12 +218,49 @@ impl Platform {
 	pub fn is_mobile(&self) -> bool {
 		self.is_mobile
 	}
+
+	//==============================================================================
+	// 데스크탑 웹인지. (마우스 휠, 키보드 안내처럼 데스크탑에서만 보일 것을 가릴 때 쓴다)
+	// - 모바일이면 아니다. 아이패드의 사파리는 데스크탑처럼 맥이라고 알리므로, 맥인데 손가락 입력이 여럿 되면 아이패드로 본다.
+	//==============================================================================
+	pub fn is_desktop_web(&self) -> bool {
+		self.is_desktop_web_with_touch_points(read_max_touch_points())
+	}
+
+	//==============================================================================
+	// 손가락 입력 수를 받아 데스크탑 웹인지. (is_desktop_web 의 몸통)
+	//==============================================================================
+	fn is_desktop_web_with_touch_points(&self, max_touch_points: i32) -> bool {
+		if self.is_mobile {
+			return false;
+		}
+		if self.platform_name == PlatformType::MacOs && max_touch_points > 1 {
+			return false;
+		}
+		true
+	}
 }
 
 impl Default for Platform {
 	fn default() -> Platform {
 		Platform::new()
 	}
+}
+
+//==============================================================================
+// 동시에 닿을 수 있는 손가락 수. (웹은 navigator.maxTouchPoints, 없으면 0)
+//==============================================================================
+#[cfg(target_arch = "wasm32")]
+fn read_max_touch_points() -> i32 {
+	web_sys::window().map(|window| window.navigator().max_touch_points()).unwrap_or(0)
+}
+
+//==============================================================================
+// 동시에 닿을 수 있는 손가락 수. (데스크탑은 navigator 가 없어 0)
+//==============================================================================
+#[cfg(not(target_arch = "wasm32"))]
+fn read_max_touch_points() -> i32 {
+	0
 }
 
 //==============================================================================
@@ -276,5 +315,27 @@ mod tests {
 		platform.apply_user_agent("Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0");
 		assert_eq!(platform.get_platform_name(), PlatformType::Linux);
 		assert_eq!(platform.get_browser_name(), BrowserType::Firefox);
+	}
+
+	//==============================================================================
+	// 데스크탑 웹 판정. (모바일은 아니다, 맥이라고 알리는데 손가락 입력이 여럿이면 아이패드다)
+	//==============================================================================
+	#[test]
+	fn desktop_web_from_user_agent_and_touch_points() {
+		let mut platform = Platform::new();
+		platform.apply_user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36");
+		assert!(platform.is_desktop_web_with_touch_points(0));
+		assert!(platform.is_desktop_web_with_touch_points(10));
+
+		platform.apply_user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15");
+		assert!(platform.is_desktop_web_with_touch_points(0));
+		assert!(platform.is_desktop_web_with_touch_points(1));
+		assert!(!platform.is_desktop_web_with_touch_points(5));
+
+		platform.apply_user_agent("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1");
+		assert!(!platform.is_desktop_web_with_touch_points(0));
+
+		platform.apply_user_agent("Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Mobile Safari/537.36");
+		assert!(!platform.is_desktop_web_with_touch_points(5));
 	}
 }
