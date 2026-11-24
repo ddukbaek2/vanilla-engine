@@ -62,6 +62,58 @@ pub fn is_coarse_pointer() -> bool {
 }
 
 //==============================================================================
+// 페이지 주소의 쿼리 값. (원본처럼 location.search 를 URLSearchParams 로 읽어 처음 값, 없으면 None)
+//==============================================================================
+pub fn read_page_query_value(name: &str) -> Option<String> {
+	let window = web_sys::window()?;
+	let location = js_sys::Reflect::get(&window, &JsValue::from_str("location")).ok()?;
+	let search_text = js_sys::Reflect::get(&location, &JsValue::from_str("search")).ok()?.as_string()?;
+	let constructor: js_sys::Function = js_sys::Reflect::get(&js_sys::global(), &JsValue::from_str("URLSearchParams")).ok()?.dyn_into().ok()?;
+	let search_parameters = js_sys::Reflect::construct(&constructor, &js_sys::Array::of1(&JsValue::from_str(&search_text))).ok()?;
+	let get_function: js_sys::Function = js_sys::Reflect::get(&search_parameters, &JsValue::from_str("get")).ok()?.dyn_into().ok()?;
+	get_function.call1(&search_parameters, &JsValue::from_str(name)).ok()?.as_string()
+}
+
+thread_local! {
+	// env(safe-area-inset-*) 를 재는 숨은 요소. (처음 잴 때 만들어 body 에 붙여 둔다)
+	static SAFE_AREA_PROBE_ELEMENT: RefCell<Option<web_sys::HtmlElement>> = const { RefCell::new(None) };
+}
+
+//==============================================================================
+// CSS env(safe-area-inset-*) 세이프 에어리어 인셋. (원본 view_manager.readSafeAreaFromEnvironment, CSS 픽셀 [위, 오른쪽, 아래, 왼쪽])
+// - 숨은 요소의 padding 에 env() 를 걸고 계산된 값을 parseFloat 로 읽는다. 문서나 body 가 없으면 0.
+//==============================================================================
+pub fn read_safe_area_insets() -> [f32; 4] {
+	let read_insets = || -> Option<[f32; 4]> {
+		let window = web_sys::window()?;
+		let document = window.document()?;
+		let body = document.body()?;
+		let probe_element = SAFE_AREA_PROBE_ELEMENT.with(|probe_element_cell| -> Option<web_sys::HtmlElement> {
+			if let Some(probe_element) = probe_element_cell.borrow().as_ref() {
+				return Some(probe_element.clone());
+			}
+			let probe_element: web_sys::HtmlElement = document.create_element("div").ok()?.dyn_into().ok()?;
+			probe_element.style().set_css_text("position:fixed;left:0;top:0;width:0;height:0;visibility:hidden;pointer-events:none;padding-top:env(safe-area-inset-top);padding-right:env(safe-area-inset-right);padding-bottom:env(safe-area-inset-bottom);padding-left:env(safe-area-inset-left);");
+			body.append_child(&probe_element).ok()?;
+			*probe_element_cell.borrow_mut() = Some(probe_element.clone());
+			Some(probe_element)
+		})?;
+		let computed_style = window.get_computed_style(&probe_element).ok()??;
+		let read_padding = |property_name: &str| -> f32 {
+			let value = crate::core::viewmanager::parse_leading_float(&computed_style.get_property_value(property_name).unwrap_or_default());
+			if value.is_nan() {
+				0.0
+			}
+			else {
+				value as f32
+			}
+		};
+		Some([read_padding("padding-top"), read_padding("padding-right"), read_padding("padding-bottom"), read_padding("padding-left")])
+	};
+	read_insets().unwrap_or([0.0, 0.0, 0.0, 0.0])
+}
+
+//==============================================================================
 // 창 제목 설정. (문서 제목)
 //==============================================================================
 pub fn set_title(_platform_window: Option<&PlatformWindow>, title: &str) {
@@ -98,7 +150,7 @@ async fn fetch_bytes(asset_location: &str) -> Result<Vec<u8>, String> {
 }
 
 //==============================================================================
-// 캔버스 상태. (마지막으로 맞춘 창 크기와 배율)
+// 캔버스 상태. (마지막으로 맞춘 창 크기와 배율, 배율은 렌더 배율 상한을 건 값)
 //==============================================================================
 struct WindowState {
 	canvas: web_sys::HtmlCanvasElement,
@@ -577,6 +629,8 @@ impl WebApplication {
 		else {
 			1.0
 		};
+		// 렌더 배율 상한을 건다. (상한이 바뀌어도 이 값이 달라져 다시 맞춘다)
+		let device_pixel_ratio = self.engine_runner.engine.get_view_manager().limit_render_pixel_ratio(device_pixel_ratio as f32) as f64;
 		let window_state = match self.window_state.as_mut() {
 			Some(window_state) => {
 				window_state
