@@ -13,3 +13,5 @@ pub mod toondrawqueue;
 pub mod toonview3d;
 pub mod toonscreenoutline;
 pub mod toonvfx;
+pub mod toonlightset;
+pub mod toonmaterial;
