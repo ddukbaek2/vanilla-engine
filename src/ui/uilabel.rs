@@ -8,7 +8,8 @@
 // - 원본은 Text 와 RichText 두 벌에 세터를 같이 걸고 use_rich_text 로 어느 쪽을 켤지 고른다. 러스트 판은 한 벌이라 맞출 일이 없다.
 //   use_rich_text(true) 면 RichText 로(마크업 해석), 아니면 품은 Text 로 그린다. append_segment / clear_segments 는 RichText 에 넘긴다.
 // - 원본 setFont(FontFace) 는 set_font_family(등록한 폰트 이름) 로 바꿨다.
-// - 원본에서 옮기지 않은 것: 글자 방향, 표시 글자 수 (원본 UILabel 에 없다), invalidateIntrinsicContentSize (UINode 노선 전용).
+// - 글자 방향(set_text_direction)과 표시 글자 수(set_visible_character_count)는 원본처럼 글자 컴포넌트에 넘긴다.
+// - 원본에서 옮기지 않은 것: invalidateIntrinsicContentSize (UINode 노선 전용).
 // - 배경색(UIView)은 글자보다 먼저 그린다. (원본은 Text 가 먼저 붙어 배경이 글자를 덮는다. 기본 배경이 투명이라 보통은 차이가 없다)
 //==============================================================================
 use crate::base::color::Color;
@@ -16,7 +17,7 @@ use crate::base::rect::Rect;
 use crate::core::component::richtext::{RichText, RichTextAttributes};
 use crate::core::component::text::{Text, TextWrapMode};
 use crate::core::component::{Component, ComponentBase};
-use crate::core::graphic::{Graphic, TextAlign, TextBaseline};
+use crate::core::graphic::{Graphic, TextAlign, TextBaseline, TextDirection};
 use crate::core::node::nodetree::{NodeId, NodeTree};
 use crate::core::node::worldnode::NodeTransform;
 use crate::ui::uiview::UIView;
@@ -363,6 +364,34 @@ impl UILabel {
 	//==============================================================================
 	pub fn get_text_baseline(&self) -> TextBaseline {
 		self.rich_text.get_text_baseline()
+	}
+
+	//==============================================================================
+	// 글자 방향 설정. (Inherit | Ltr | Rtl | Auto, 원본 setTextDirection. Inherit 면 그리는 때의 Graphic 방향)
+	//==============================================================================
+	pub fn set_text_direction(&mut self, text_direction: TextDirection) {
+		self.rich_text.set_text_direction(text_direction);
+	}
+
+	//==============================================================================
+	// 글자 방향 반환.
+	//==============================================================================
+	pub fn get_text_direction(&self) -> TextDirection {
+		self.rich_text.get_text_direction()
+	}
+
+	//==============================================================================
+	// 보일 글자 수 설정. (-1 이면 전체, 타자기 연출용. 원본 setVisibleCharacterCount)
+	//==============================================================================
+	pub fn set_visible_character_count(&mut self, visible_character_count: i32) {
+		self.rich_text.set_visible_character_count(visible_character_count);
+	}
+
+	//==============================================================================
+	// 보일 글자 수 반환.
+	//==============================================================================
+	pub fn get_visible_character_count(&self) -> i32 {
+		self.rich_text.get_visible_character_count()
 	}
 }
 

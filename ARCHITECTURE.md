@@ -125,6 +125,9 @@ EngineRunner (플랫폼이 들고 프레임마다 부른다)
 ## 9. 아직 안 옮긴 것
 
 - UINode, 오토레이아웃(ui/autolayout), UIScene: 게임들이 쓰지 않아 미뤘다.
-- DevTools(F2 하이어라키/인스펙터), DynamicFont, web/Pane(DOM 창), HumanSkinRenderer(게임들이 쓰지 않음).
+- DevTools(F2 하이어라키/인스펙터), web/Pane(DOM 창), HumanSkinRenderer(게임들이 쓰지 않음).
+- 글자, 글꼴 갈래는 원본과 맞췄다. (2026-11-25) 오른쪽에서 왼쪽 글(양방향 정렬과 글자 모양 짓기, core/textshaping.rs), CSS 같은 글꼴 얼굴 고르기와 가짜 기울임, 가짜 굵게(Chromium 과 Skia 의 값),
+  ICU 낱말 나누기와 글자 묶음 줄바꿈, DynamicFont, UIFont, LanguagePack 을 옮겼다. 원본과 같아질 수 없어 남은 것: 래스터 픽셀(fontdue 와 브라우저 Skia, CoreGraphics),
+  일본어와 태국어 낱말 사전(ICU4X 와 크롬의 ICU4C 데이터), 색 이모지 글꼴(fontdue 가 색 글리프를 그리지 못한다), 데스크탑의 시스템 글꼴 대체 목록(브라우저와 운영체제가 고르는 목록 대신 EngineConfiguration.fallback_font_paths).
 - UIDocument 는 옮겼다. 원본의 리플렉션 직렬화 대신 종류 이름마다 짓기, 쓰기, 읽기 함수를 표에 등록하고, 원본이 반사로 저장하는 종류는 원본 반사 결과와 같은 키로 쓴다. (ui/uidocument.rs)
 - 원본 160파일 가운데 121파일을 옮겼고, 20파일은 죽은 코드이거나 러스트 표준으로 대신해서 일부러 옮기지 않았다. (2026-11-17)

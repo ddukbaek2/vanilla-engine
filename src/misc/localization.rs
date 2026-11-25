@@ -293,14 +293,14 @@ impl Localization {
 
 			// 다음이 빈칸, 빗금, 빈칸 뒤 자리면 같은 무리로 잇는다.
 			let mut next = group_end;
-			while next < characters.len() && characters[next] == ' ' {
+			while next < characters.len() && characters[next].is_whitespace() {
 				next += 1;
 			}
 			if next >= characters.len() || characters[next] != '/' {
 				break;
 			}
 			next += 1;
-			while next < characters.len() && characters[next] == ' ' {
+			while next < characters.len() && characters[next].is_whitespace() {
 				next += 1;
 			}
 			if Localization::read_placeholder(characters, next).is_none() {
@@ -459,7 +459,7 @@ impl Localization {
 // 사용자 선호 언어 목록. (웹: navigator.languages, 없으면 navigator.language)
 //==============================================================================
 #[cfg(target_arch = "wasm32")]
-fn read_preferred_language_tags() -> Vec<String> {
+pub(crate) fn read_preferred_language_tags() -> Vec<String> {
 	let mut candidate_list: Vec<String> = Vec::new();
 	let navigator = match web_sys::window() {
 		Some(window) => {
@@ -487,7 +487,7 @@ fn read_preferred_language_tags() -> Vec<String> {
 // 사용자 선호 언어 목록. (데스크탑: LANGUAGE(콜론으로 여럿) → LC_ALL → LC_MESSAGES → LANG, "ko_KR.UTF-8" 은 "ko-KR" 로)
 //==============================================================================
 #[cfg(not(target_arch = "wasm32"))]
-fn read_preferred_language_tags() -> Vec<String> {
+pub(crate) fn read_preferred_language_tags() -> Vec<String> {
 	let mut candidate_list: Vec<String> = Vec::new();
 	for variable_name in ["LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"] {
 		let variable_value = match std::env::var(variable_name) {

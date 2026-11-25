@@ -13,7 +13,7 @@
 // - 마지막으로 건 셰이더 프로그램과 텍스처 유닛 0 의 텍스처를 기억해, 같은 것을 다시 거는 GL 호출을 건너뛴다. (원본은 늘 건다)
 //   GL 을 밖에서 만질 수 있는 때(get_gl 로 컨텍스트를 내줄 때, restore_render_state, 프레임 시작과 끝)에는 잊고 다음에 다시 건다.
 // - 밉맵 단계 보정(set_image_mipmap_bias)은 기본, 묶음, 파티클 셰이더의 textureLodBias 유니폼으로 건다. 바꿔 끼운 셰이더는 그 유니폼이 있으면 받는다. (원본과 같음)
-// - 원본에서 옮기지 않은 것: 오른쪽에서 왼쪽 글자 방향.
+// - 글자 방향(set_text_direction, 원본 setTextDirection)은 상태에 들고, 구운 문자열을 그 문단 방향으로 모양 짓는다. (textshaping.rs 의 양방향 정렬과 모양 짓기)
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::math;
@@ -23,6 +23,7 @@ use crate::base::vector2::Vector2;
 use crate::core::image::Image;
 use crate::core::imagetexturecache::ImageTextureCache;
 use crate::core::shaderprogram::ShaderProgram;
+use crate::core::textshaping::ShapingDirection;
 use crate::core::textstringtexturecache::{TextDrawKind, TextEntry, TextMetrics, TextStringTextureCache};
 use glow::HasContext;
 use std::cell::Cell;
@@ -291,6 +292,101 @@ pub enum TextBaseline {
 }
 
 //==============================================================================
+// 글자 방향. (원본 "inherit" | "ltr" | "rtl" | "auto", Canvas2D direction)
+// - Inherit 는 Graphic 에서는 왼쪽에서 오른쪽으로 본다. 글자 컴포넌트에서는 그리는 때의 Graphic 방향을 따른다는 뜻이다.
+// - Auto 는 문자열마다 처음 나오는 방향이 강한 글자로 정한다. (HTML 의 dir="auto", 없으면 왼쪽에서 오른쪽)
+//==============================================================================
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum TextDirection {
+	Inherit,
+	Ltr,
+	Rtl,
+	Auto,
+}
+
+impl TextDirection {
+	//==============================================================================
+	// 원본 글로 읽기. ("ltr", "rtl", "auto", 그 밖은 Inherit)
+	//==============================================================================
+	pub fn from_name(name: &str) -> TextDirection {
+		match name {
+			"ltr" => {
+				TextDirection::Ltr
+			}
+			"rtl" => {
+				TextDirection::Rtl
+			}
+			"auto" => {
+				TextDirection::Auto
+			}
+			_ => {
+				TextDirection::Inherit
+			}
+		}
+	}
+
+	//==============================================================================
+	// 원본 글. ("inherit", "ltr", "rtl", "auto")
+	//==============================================================================
+	pub fn get_name(&self) -> &'static str {
+		match self {
+			TextDirection::Inherit => {
+				"inherit"
+			}
+			TextDirection::Ltr => {
+				"ltr"
+			}
+			TextDirection::Rtl => {
+				"rtl"
+			}
+			TextDirection::Auto => {
+				"auto"
+			}
+		}
+	}
+
+	//==============================================================================
+	// 모양 짓기 방향. (Rtl 만 오른쪽에서 왼쪽, 실제 방향으로 푼 뒤에 쓴다)
+	//==============================================================================
+	pub fn to_shaping_direction(&self) -> ShapingDirection {
+		if *self == TextDirection::Rtl {
+			ShapingDirection::RightToLeft
+		}
+		else {
+			ShapingDirection::LeftToRight
+		}
+	}
+}
+
+//==============================================================================
+// 오른쪽에서 왼쪽으로 쓰는 글자인지. (원본 RIGHT_TO_LEFT_CHARACTER_PATTERN: 히브리어, 아랍어, 시리아어, 타나, 은코 등과 그 표현형)
+//==============================================================================
+pub fn is_right_to_left_character(character: char) -> bool {
+	let code_point = character as u32;
+	(0x0590..=0x08FF).contains(&code_point) || (0xFB1D..=0xFDFF).contains(&code_point) || (0xFE70..=0xFEFF).contains(&code_point) || (0x10800..=0x10FFF).contains(&code_point) || (0x1E800..=0x1EFFF).contains(&code_point)
+}
+
+//==============================================================================
+// 글의 첫 강한 방향. (원본 resolveTextDirection 의 "auto": 글자 갈래 문자와 LRM, RLM, ALM 가운데 처음 것, 없으면 Ltr)
+//==============================================================================
+pub fn detect_text_direction(text: &str) -> TextDirection {
+	for character in text.chars() {
+		let is_strong = character.is_alphabetic() || character == '\u{200E}' || character == '\u{200F}' || character == '\u{061C}';
+		if !is_strong {
+			continue;
+		}
+		if character == '\u{200E}' {
+			return TextDirection::Ltr;
+		}
+		if is_right_to_left_character(character) || character == '\u{200F}' || character == '\u{061C}' {
+			return TextDirection::Rtl;
+		}
+		return TextDirection::Ltr;
+	}
+	TextDirection::Ltr
+}
+
+//==============================================================================
 // push_state 로 저장하는 상태. (Canvas2D save 대응)
 //==============================================================================
 #[derive(Clone)]
@@ -304,6 +400,7 @@ struct GraphicState {
 	font_string: String,
 	text_align: TextAlign,
 	text_baseline: TextBaseline,
+	text_direction: TextDirection,
 }
 
 //==============================================================================
@@ -366,6 +463,7 @@ pub struct Graphic {
 	font_string: String,
 	text_align: TextAlign,
 	text_baseline: TextBaseline,
+	text_direction: TextDirection,
 	clip_stack: Vec<ClipEntry>,
 	projection_matrix_array: [f32; 9],
 	model_matrix_array: [f32; 9],
@@ -497,6 +595,7 @@ impl Graphic {
 			font_string: String::from("10px sans-serif"),
 			text_align: TextAlign::Start,
 			text_baseline: TextBaseline::Alphabetic,
+			text_direction: TextDirection::Inherit,
 			clip_stack: Vec::new(),
 			projection_matrix_array: [0.0; 9],
 			model_matrix_array: [0.0; 9],
@@ -763,6 +862,7 @@ impl Graphic {
 			state_snapshot.font_string.push_str(&self.font_string);
 			state_snapshot.text_align = self.text_align;
 			state_snapshot.text_baseline = self.text_baseline;
+			state_snapshot.text_direction = self.text_direction;
 		}
 		else {
 			self.state_stack.push(GraphicState {
@@ -775,6 +875,7 @@ impl Graphic {
 				font_string: self.font_string.clone(),
 				text_align: self.text_align,
 				text_baseline: self.text_baseline,
+				text_direction: self.text_direction,
 			});
 		}
 		self.state_stack_depth += 1;
@@ -798,6 +899,7 @@ impl Graphic {
 		std::mem::swap(&mut self.font_string, &mut state_snapshot.font_string);
 		self.text_align = state_snapshot.text_align;
 		self.text_baseline = state_snapshot.text_baseline;
+		self.text_direction = state_snapshot.text_direction;
 		let blend_mode = state_snapshot.blend_mode;
 		if self.blend_mode != blend_mode {
 			self.set_blend_mode(blend_mode);
@@ -2066,15 +2168,59 @@ impl Graphic {
 	}
 
 	//==============================================================================
-	// "start" / "end" 를 실제 방향으로 푼다. (이 판은 왼쪽에서 오른쪽만 다룬다)
+	// 글자 방향 설정. (원본 setTextDirection, Canvas2D direction 대응)
+	// - 문단의 방향이다. 글자 안의 순서(양방향 알고리즘)와 정렬 Start / End 의 왼쪽, 오른쪽이 이것을 따른다.
+	// - Inherit 는 Ltr 로 본다. (기본) Auto 는 문자열마다 처음 나오는 방향이 강한 글자로 정한다. 사용자가 쓴 글(닉네임 등)에 쓴다.
 	//==============================================================================
-	pub fn resolve_text_align(&self, text_align: TextAlign) -> TextAlign {
+	pub fn set_text_direction(&mut self, text_direction: TextDirection) {
+		self.text_direction = text_direction;
+	}
+
+	//==============================================================================
+	// 글자 방향 반환.
+	//==============================================================================
+	pub fn get_text_direction(&self) -> TextDirection {
+		self.text_direction
+	}
+
+	//==============================================================================
+	// 문자열의 실제 방향 계산. (Ltr 또는 Rtl, 원본 resolveTextDirection)
+	//==============================================================================
+	pub fn resolve_text_direction(&self, text: &str) -> TextDirection {
+		match self.text_direction {
+			TextDirection::Rtl => {
+				TextDirection::Rtl
+			}
+			TextDirection::Auto => {
+				detect_text_direction(text)
+			}
+			_ => {
+				TextDirection::Ltr
+			}
+		}
+	}
+
+	//==============================================================================
+	// 실제 가로 정렬 계산. (Start / End 를 방향에 따라 Left / Right 로, 원본 resolveTextAlign)
+	//==============================================================================
+	pub fn resolve_text_align(&self, text_align: TextAlign, text_direction: TextDirection) -> TextAlign {
+		let is_right_to_left = text_direction == TextDirection::Rtl;
 		match text_align {
 			TextAlign::Start => {
-				TextAlign::Left
+				if is_right_to_left {
+					TextAlign::Right
+				}
+				else {
+					TextAlign::Left
+				}
 			}
 			TextAlign::End => {
-				TextAlign::Right
+				if is_right_to_left {
+					TextAlign::Left
+				}
+				else {
+					TextAlign::Right
+				}
 			}
 			_ => {
 				text_align
@@ -2209,10 +2355,11 @@ impl Graphic {
 
 	//==============================================================================
 	// 문자열 텍스처 엔트리를 정렬/베이스라인에 맞춰 쿼드로 출력.
+	// - text_direction 은 정렬 Start / End 를 가를 방향이다. (Ltr 또는 Rtl, 원본 drawTextEntry 의 textDirection)
 	//==============================================================================
-	pub fn draw_text_entry(&mut self, entry: TextEntry, x: f32, y: f32, color: Option<Color>) {
+	pub fn draw_text_entry(&mut self, entry: TextEntry, x: f32, y: f32, color: Option<Color>, text_direction: TextDirection) {
 		// 가로 정렬 오프셋.
-		let text_align = self.resolve_text_align(self.get_text_align());
+		let text_align = self.resolve_text_align(self.get_text_align(), text_direction);
 		let align_offset = match text_align {
 			TextAlign::Center => {
 				-entry.advance_width / 2.0
@@ -2275,9 +2422,10 @@ impl Graphic {
 		// 글자는 흰색으로 굽고 그릴 때 색을 곱한다.
 		let fill_color = self.get_fill_color();
 		let bake_scale = self.calculate_text_bake_scale();
-		let entry = self.get_text_entry(TextDrawKind::Fill, text, 0.0, bake_scale);
+		let text_direction = self.resolve_text_direction(text);
+		let entry = self.get_text_entry(TextDrawKind::Fill, text, 0.0, bake_scale, text_direction);
 		if let Some(entry) = entry {
-			self.draw_text_entry(entry, x, y, Some(fill_color));
+			self.draw_text_entry(entry, x, y, Some(fill_color), text_direction);
 		}
 	}
 
@@ -2292,23 +2440,28 @@ impl Graphic {
 
 		let stroke_color = self.get_stroke_color();
 		let bake_scale = self.calculate_text_bake_scale();
-		let entry = self.get_text_entry(TextDrawKind::Stroke, text, line_width, bake_scale);
+		let text_direction = self.resolve_text_direction(text);
+		let entry = self.get_text_entry(TextDrawKind::Stroke, text, line_width, bake_scale, text_direction);
 		if let Some(entry) = entry {
-			self.draw_text_entry(entry, x, y, Some(stroke_color));
+			self.draw_text_entry(entry, x, y, Some(stroke_color), text_direction);
 		}
 	}
 
 	//==============================================================================
 	// 현재 폰트 문자열로 구운 문자열 반환. (없으면 굽는다)
 	//==============================================================================
-	fn get_text_entry(&mut self, text_draw_kind: TextDrawKind, text: &str, line_width: f32, bake_scale: f32) -> Option<TextEntry> {
-		if let Some(entry) = self.text_string_texture_cache.find_entry(text_draw_kind, text, &self.font_string, line_width, bake_scale) {
-			return Some(entry);
+	fn get_text_entry(&mut self, text_draw_kind: TextDrawKind, text: &str, line_width: f32, bake_scale: f32, text_direction: TextDirection) -> Option<TextEntry> {
+		let shaping_direction = text_direction.to_shaping_direction();
+		if !self.text_string_texture_cache.has_pending_deleted_textures() {
+			if let Some(entry) = self.text_string_texture_cache.find_entry(text_draw_kind, text, &self.font_string, line_width, bake_scale, shaping_direction) {
+				return Some(entry);
+			}
 		}
 
-		// 새로 굽거나 오래된 것을 버리면 텍스처 바인드가 바뀐다.
+		// 새로 굽거나 오래된 것을 버리면 텍스처 바인드가 바뀐다. (지울 텍스처가 묶음에 남아 있을 수 있어 먼저 내보낸다)
+		self.flush_batch();
 		self.bound_texture.set(None);
-		self.text_string_texture_cache.get_entry(&self.gl, text_draw_kind, text, &self.font_string, line_width, bake_scale)
+		self.text_string_texture_cache.get_entry(&self.gl, text_draw_kind, text, &self.font_string, line_width, bake_scale, shaping_direction)
 	}
 
 	//==============================================================================

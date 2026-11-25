@@ -31,3 +31,6 @@ pub mod graphicsqualitygovernor;
 pub mod fixedstepper;
 pub mod loadingprogress;
 pub mod buildinfo;
+pub mod dynamicfont;
+pub mod languagepack;
+pub mod uifont;

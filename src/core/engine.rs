@@ -28,6 +28,7 @@
 // 화면 넘기기는 플랫폼이 update_engine 다음에 한다.
 //==============================================================================
 use crate::base::color::Color;
+use crate::core::textshaping::FontFaceDescriptors;
 use crate::base::platform::Platform;
 use crate::base::rect::Rect;
 use crate::base::vector2::Vector2;
@@ -75,6 +76,8 @@ pub struct EngineConfiguration {
 	pub default_font_paths: Vec<PathBuf>,
 	// 굵은 기본 폰트 후보 경로.
 	pub default_bold_font_paths: Vec<PathBuf>,
+	// 대체 글꼴 후보 경로. (원본은 브라우저가 글꼴에 없는 글자를 시스템 글꼴로 그린다. 데스크탑은 등록된 어느 글꼴에도 없는 글자가 나오면 앞에서부터 읽어 대체 폰트로 쓴다)
+	pub fallback_font_paths: Vec<PathBuf>,
 	// 애셋 폴더 후보. (resolve_asset_path 가 앞에서부터 찾는다)
 	pub asset_directory_paths: Vec<PathBuf>,
 	// 창 아이콘 PNG. (애셋 폴더 기준 상대 경로, 비우면 기본 아이콘)
@@ -122,6 +125,18 @@ impl EngineConfiguration {
 				PathBuf::from("C:/Windows/Fonts/segoeuib.ttf"),
 				PathBuf::from("C:/Windows/Fonts/arialbd.ttf"),
 			],
+			fallback_font_paths: vec![
+				PathBuf::from("C:/Windows/Fonts/msyh.ttc"),
+				PathBuf::from("C:/Windows/Fonts/meiryo.ttc"),
+				PathBuf::from("C:/Windows/Fonts/arial.ttf"),
+				PathBuf::from("C:/Windows/Fonts/LeelawUI.ttf"),
+				PathBuf::from("C:/Windows/Fonts/seguisym.ttf"),
+				PathBuf::from("/System/Library/Fonts/Hiragino Sans GB.ttc"),
+				PathBuf::from("/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc"),
+				PathBuf::from("/System/Library/Fonts/Supplemental/Arial Unicode.ttf"),
+				PathBuf::from("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+				PathBuf::from("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+			],
 			asset_directory_paths: Vec::new(),
 			window_icon_path: String::new(),
 			default_font_bytes: None,
@@ -161,6 +176,17 @@ pub enum PageEvent {
 pub type PageEventListener = Rc<RefCell<dyn FnMut(PageEvent)>>;
 
 //==============================================================================
+// 프레임 시작에 할 글꼴 일. (Graphic 이 있어야 한다)
+//==============================================================================
+enum PendingFontOperation {
+	// 이름, 얼굴 열쇠.
+	Unregister(String, String),
+	// 이름, 얼굴 열쇠의 차례.
+	Order(String, Vec<String>),
+	ClearTextCache,
+}
+
+//==============================================================================
 // 엔진.
 //==============================================================================
 pub struct Engine {
@@ -176,7 +202,9 @@ pub struct Engine {
 	is_exit_requested: bool,
 	pending_scene_list: Vec<Box<dyn Scene>>,
 	is_unload_all_scenes_requested: bool,
-	pending_font_registration_list: Vec<(String, bool, AssetLoadHandle)>,
+	pending_font_registration_list: Vec<(String, FontFaceDescriptors, AssetLoadHandle)>,
+	// 글꼴 얼굴 지우기, 차례 정하기, 구운 글자 비우기 부탁. (Graphic 이 있는 프레임 시작에 한다)
+	pending_font_operation_list: Vec<PendingFontOperation>,
 	pending_default_font_handle: Option<AssetLoadHandle>,
 	platform: Platform,
 	next_scene_number: u64,
@@ -206,6 +234,7 @@ impl Engine {
 			pending_scene_list: Vec::new(),
 			is_unload_all_scenes_requested: false,
 			pending_font_registration_list: Vec::new(),
+			pending_font_operation_list: Vec::new(),
 			pending_default_font_handle: None,
 			platform: Platform::new(),
 			next_scene_number: 0,
@@ -307,7 +336,47 @@ impl Engine {
 	// 글꼴 바이트가 오면 이름으로 등록해 달라고 맡기기. (FontAsset 이 부른다. 등록은 프레임 시작에 한다)
 	//==============================================================================
 	pub fn register_font_when_loaded(&mut self, family: &str, is_bold: bool, load_handle: AssetLoadHandle) {
-		self.pending_font_registration_list.push((family.to_string(), is_bold, load_handle));
+		self.register_font_face_when_loaded(family, FontFaceDescriptors::create_with_bold(is_bold), load_handle);
+	}
+
+	//==============================================================================
+	// 글꼴 얼굴 바이트가 오면 서술자(굵기, 기울기, 글자 범위)대로 이름 아래에 올려 달라고 맡기기. (원본 new FontFace(family, url, descriptors) + document.fonts.add)
+	// - 서술자의 source_key 가 비었으면 읽기 손잡이의 경로를 쓴다.
+	//==============================================================================
+	pub fn register_font_face_when_loaded(&mut self, family: &str, mut font_face_descriptors: FontFaceDescriptors, load_handle: AssetLoadHandle) {
+		if font_face_descriptors.source_key.is_empty() {
+			font_face_descriptors.source_key = load_handle.get_asset_path().to_string();
+		}
+		self.pending_font_registration_list.push((family.to_string(), font_face_descriptors, load_handle));
+	}
+
+	//==============================================================================
+	// 글꼴 얼굴 지우기 맡기기. (원본 document.fonts.delete, 열쇠는 등록할 때의 source_key 또는 경로)
+	//==============================================================================
+	pub fn unregister_font_face(&mut self, family: &str, source_key: &str) {
+		self.pending_font_registration_list.retain(|(pending_family, font_face_descriptors, _)| !(pending_family.eq_ignore_ascii_case(family) && font_face_descriptors.source_key == source_key));
+		self.pending_font_operation_list.push(PendingFontOperation::Unregister(family.to_string(), source_key.to_string()));
+	}
+
+	//==============================================================================
+	// 한 이름의 얼굴 차례 정하기 맡기기. (얼굴 열쇠 목록, 뒤가 먼저 그린다, TextStringTextureCache.set_font_face_order)
+	//==============================================================================
+	pub fn set_font_face_order(&mut self, family: &str, source_key_list: Vec<String>) {
+		self.pending_font_operation_list.push(PendingFontOperation::Order(family.to_string(), source_key_list));
+	}
+
+	//==============================================================================
+	// 구운 글자 모두 버리기 맡기기. (원본 textStringTextureCache.clear, 다음 프레임 시작에)
+	//==============================================================================
+	pub fn clear_text_cache(&mut self) {
+		self.pending_font_operation_list.push(PendingFontOperation::ClearTextCache);
+	}
+
+	//==============================================================================
+	// 아직 바이트가 오지 않은 글꼴 얼굴 수. (UI 글꼴이 기다릴 때 본다)
+	//==============================================================================
+	pub fn get_pending_font_face_count(&self) -> usize {
+		self.pending_font_registration_list.len()
 	}
 
 	//==============================================================================
@@ -675,6 +744,11 @@ impl EngineRunner {
 				}
 			}
 		}
+		for font_path in engine_configuration.fallback_font_paths.iter() {
+			if font_path.exists() {
+				text_string_texture_cache.add_fallback_font_candidate(font_path.clone());
+			}
+		}
 		if !text_string_texture_cache.has_default_font() {
 			eprintln!("Engine: 기본 폰트를 찾지 못했습니다. 글자가 보이지 않습니다.");
 		}
@@ -697,7 +771,7 @@ impl EngineRunner {
 	//==============================================================================
 	fn register_pending_fonts(&mut self) {
 		self.register_pending_default_font();
-		if self.engine.pending_font_registration_list.is_empty() {
+		if self.engine.pending_font_registration_list.is_empty() && self.engine.pending_font_operation_list.is_empty() {
 			return;
 		}
 		let graphic = match self.graphic.as_mut() {
@@ -708,10 +782,25 @@ impl EngineRunner {
 				return;
 			}
 		};
+		let pending_font_operation_list = std::mem::take(&mut self.engine.pending_font_operation_list);
+		for pending_font_operation in pending_font_operation_list {
+			let text_string_texture_cache = graphic.get_text_string_texture_cache();
+			match pending_font_operation {
+				PendingFontOperation::Unregister(family, source_key) => {
+					text_string_texture_cache.unregister_font_face(&family, &source_key);
+				}
+				PendingFontOperation::Order(family, source_key_list) => {
+					text_string_texture_cache.set_font_face_order(&family, &source_key_list);
+				}
+				PendingFontOperation::ClearTextCache => {
+					text_string_texture_cache.clear();
+				}
+			}
+		}
 		let pending_font_registration_list = std::mem::take(&mut self.engine.pending_font_registration_list);
-		for (family, is_bold, load_handle) in pending_font_registration_list {
+		for (family, font_face_descriptors, load_handle) in pending_font_registration_list {
 			if !load_handle.is_finished() {
-				self.engine.pending_font_registration_list.push((family, is_bold, load_handle));
+				self.engine.pending_font_registration_list.push((family, font_face_descriptors, load_handle));
 				continue;
 			}
 			let font_bytes = match load_handle.get_bytes() {
@@ -723,7 +812,7 @@ impl EngineRunner {
 				}
 			};
 			let text_string_texture_cache = graphic.get_text_string_texture_cache();
-			if let Err(error) = text_string_texture_cache.register_font(&family, is_bold, font_bytes.to_vec()) {
+			if let Err(error) = text_string_texture_cache.register_font_face(&family, font_face_descriptors, font_bytes.to_vec()) {
 				eprintln!("Engine: {} ({})", error, load_handle.get_asset_path());
 			}
 		}
@@ -768,11 +857,10 @@ impl EngineRunner {
 				return;
 			}
 		};
+		// 보통 굵기 얼굴로만 올린다. (원본 FontFace 를 서술자 없이 만든 것과 같아, 굵은 글은 가짜 굵게로 그린다)
 		let text_string_texture_cache = graphic.get_text_string_texture_cache();
-		for is_bold in [false, true] {
-			if let Err(error) = text_string_texture_cache.set_default_font(is_bold, font_bytes.to_vec()) {
-				eprintln!("Engine: {} ({})", error, load_handle.get_asset_path());
-			}
+		if let Err(error) = text_string_texture_cache.set_default_font(false, font_bytes.to_vec()) {
+			eprintln!("Engine: {} ({})", error, load_handle.get_asset_path());
 		}
 	}
 
