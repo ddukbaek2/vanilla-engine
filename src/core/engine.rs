@@ -96,7 +96,7 @@ pub struct EngineConfiguration {
 	// 웹 기본 폰트 주소. (원본 default_font_url. 웹에서 default_font_bytes 가 없으면 여기서 받아 기본 폰트로 쓴다. 빈 글이면 받지 않는다)
 	// - 기본값은 빈 글이다. (원본 기본값 DOSGothic 은 넣지 않는다) 아무 글꼴도 주지 않으면 원본처럼 브라우저 시스템 글꼴로 그린다.
 	// - 게임 글꼴을 쓰려면 이 주소나 default_font_bytes, FontAsset 으로 준다.
-	// - 데스크탑은 쓰지 않고 default_font_paths 를 본다.
+	// - 데스크탑은 쓰지 않고 default_font_paths(비면 운영체제가 찾은 시스템 글꼴 사슬)를 본다.
 	pub default_font_url: String,
 	// 웹에서 touchend 와 pointerup 도 user gesture 로 보고 오디오를 재개한다. (원본과 같이 기본은 끔)
 	pub resume_audio_on_touch_end: bool,
