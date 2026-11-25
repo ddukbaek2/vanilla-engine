@@ -242,6 +242,14 @@
 - 웹: 글꼴 바이트가 없을 때 브라우저로 굽는 글(platform/web/systemfont.rs)이 캔버스의 알파만 꺼내 흰색으로 올려 색 이모지가 흰 실루엣으로 나오던 것을 고쳤다. 원본처럼 RGBA 를 프리멀티플라이드로 올린다. 시스템 글꼴 조각(올린 글꼴에 없는 글자)은 흰 픽셀은 덮인 정도, 색 픽셀은 색 몫으로 나눈다. 안티앨리어싱을 끄면 알파로 가르고 곧은 색으로 채운다. (원본은 곧은 알파의 알파 칸을 가른다)
 - 예제 textshaping: 색 이모지 줄(😀👍🏽 ❤️❤ 🇰🇷 👨‍👩‍👧 1️⃣), 그림자 글 이모지, 기울인 이모지, 글자 아틀라스의 ⭐
 - 데스크탑 찍기 모드(VANILLA_CAPTURE_PATH)는 창을 숨기고 돈다. 검증 도구가 예제를 찍을 때 사용자 화면에 창이 뜨지 않는다. 숨긴 창은 다시 그리기 요청과 수직 동기가 없어 about_to_wait 에서 프레임을 바로 돌고, 최대 FPS 가 없으면 모니터 주사율(모르면 60)로 보일 때와 같은 빠르기를 맞춘다. 가려짐 알림은 받지 않는다. 맥은 독 아이콘과 포커스도 가져가지 않는다(활성화 정책 Accessory). 창을 보려면 VANILLA_CAPTURE_SHOW_WINDOW=1. (맥에서 toonshowcase, uigallery, textshaping 을 숨긴 채 찍어 확인)
+- 툰 후처리, 효과, 카메라를 애버런트와 광부 키우기가 엔진 그대로 쓰게 넓힌다. (원본 vanilla.js 와 같은 API 와 같은 셰이더 글, 새 옵션이 기본값이면 지금 화면과 화소까지 같다, 게임의 처방과 색 값은 매개변수로 받는다)
+- RenderTarget: RenderTargetOptions 에 sample_count(2 이상이면 멀티샘플 렌더버퍼에 그리고 resolve() 가 컬러 텍스처마다와 깊이 텍스처로 푼다, MAX_SAMPLES 와 웹은 포맷마다 받는 표본 수 밑으로 줄이고 못 받거나 완성되지 않으면 멀티샘플 없이, 데스크탑 GL 3.3 은 포맷마다 묻는 함수가 없어 MAX_SAMPLES 만) 와 depth_bits(16 이나 24), get_sample_count, get_resolve_framebuffer, read_supported_sample_count. 구조체로 옵션을 짓던 곳은 ..RenderTargetOptions::default() 를 붙인다. 웹 플랫폼 층에 read_renderbuffer_sample_counts(WebGL2 의 SAMPLES 목록)
+- BloomEffect.set_use_float_color(gl, 켜기): 주고받는 판을 RGBA16F 로 (기본 RGBA8 그대로)
+- MultiLevelBloomEffect: 다단 블룸. (원본과 같은 셰이더, 반 크기 뽑기와 부드러운 무릎, 이중 거르개 줄이기, 천막 꼴 키우기, set_level_count, set_threshold)
+- ToonPostProcess: new_with_options(gl, 너비, 높이, ToonPostProcessOptions { sample_count, use_float_color, depth_bits, use_depth_texture }) (new 는 기본 옵션), is_float_color_supported(못 쓰는 기기는 RGBA8 LDR 길), set_sample_count, set_resolution_scale, set_bloom_levels, set_bloom_float_color(이 넷은 gl 을 받고 Result), set_brightness, set_lit_area 와 clear_lit_area, get_sample_count, get_use_float_color, get_resolution_scale, get_bloom_level_count. 머리말에 색 공간 규약(씬 판은 선형, 감마를 건 실수 판 값을 옮기는 셈 c^2.2, 밝기 배 k^2.2)
+- Camera3D.set_matrices(보기, 투영): 게임이 셈한 원 행렬을 그대로 쓴다. 눈, 보는 곳, 위쪽, 직교인지를 행렬에서 뽑고 project_to_view, unproject_to_plane, read_view_depth 와 렌더러가 그 행렬로 돈다. has_raw_matrices, clear_raw_matrices, set_perspective 와 set_orthographic 과 look_at 은 원 행렬을 버린다. 시험 하나
+- ToonVfx: 옵션의 age(늦게 보인 효과를 그 나이부터) 와 key(사건 열쇠, 원본은 수나 글, 러스트 판은 u64, clear 가 잊음, register_event_key)를 파티클, 불덩이, 충격파, 자국, 기둥, 번개, 섬광에, set_look_gain 과 get_look_gain, set_glint_capacity 와 get_glint_capacity(기본 96), ToonVfxDecalMode::Stain, Sheen, Shade 와 자국 flicker, queue_blob_shadow(ToonBlobShadowOptions), 불덩이, 충격파, 리본, 번개의 rim. 옵션 구조체에 필드를 더했으니 ..Default::default() 로 짓는다. 기본값 시험 하나
+- 예제 toonpost: 세 판(ToonPostProcess 기본, 멀티샘플 4 와 깊이 24 와 다단 블룸 5 단, LDR 길의 밝기와 밝힌 자리와 채도)에 같은 장면, 물든 자국, 기름 윤, 깜빡이는 그을음, 발밑 그늘, 덮는 꼴 불덩이와 충격파와 리본, 빛 점 120(상한 160), 불덩이 사건을 열쇠와 나이로. 시간은 프레임 수 / 60 이라 찍을 때마다 같다
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.
