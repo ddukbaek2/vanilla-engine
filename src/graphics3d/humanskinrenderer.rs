@@ -15,7 +15,8 @@
 //     SkinnedModel::load_from_bytes(gl, bytes, &human_skin_renderer) 처럼 기반 렌더러 자리에 그대로 넘길 수 있다. (Deref 강제 변환)
 //   - 그리기 함수는 기반 렌더러처럼 gl 과 &mut SkinnedModel 을 받고, 바뀐 모프 타깃 업로드를 먼저 한다.
 //   - 머티리얼 셰이딩 모드 표는 원본 Map<Material, number> 처럼 머티리얼 인스턴스(Rc 포인터)를 열쇠로 든다.
-//   - set_ambient_colors / set_hair_parameters 는 원본 배열 대신 고정 길이 배열을 받는다.
+//   - set_ambient_colors / set_hair_parameters 는 원본 배열 대신 고정 길이 배열을 받는다. set_shadow_sample_count 는 정수를 받아
+//     원본의 Math.floor 없이 1 ~ 24 로 자른다.
 //   - set_shadow_map 은 기반 렌더러처럼 행렬 16개를 복사해 둔다. 생성은 셰이더 컴파일 실패를 오류(Result)로 돌려준다.
 //==============================================================================
 use crate::core::graphic::GlTexture;
