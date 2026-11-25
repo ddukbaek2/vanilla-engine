@@ -448,6 +448,14 @@
   - 버스로 만든 플레이어와 내보낼 곳을 직접 넘긴 플레이어는 원본 WebAudio 처럼 이어진 동안 버스 노드를 살려 둔다
   - 그래프 다섯(같은 표본율과 다른 표본율의 소스, 빠르기와 루프와 시작 위치, 모노와 스테레오 좌우와 0, 버스, 섞기)을 크롬 158 OfflineAudioContext 결과(tests/assets/mixer/chromemixer.cjs 가 찍은 chrome_mixer.json)와 견주는 시험을 더했다. 1e-6 안에서 같다
   - 줄어든 크레이트 8: kira, atomic-arena, crossbeam-utils, glam, mint, pastey, rtrb, triple_buffer. 직접 의존은 cpal 하나다 (kira 가 쓰던 cpal 0.18 그대로, realtime 기능)
+- 데스크탑이 HE-AAC v1(SBR), v2(PS)와 3 채널 이상 AAC 도 크롬처럼 푼다. (platform/audio/decode/aac.rs)
+  - AAC-LC 2 채널까지는 그대로 symphonia 로 풀고(크롬과 PNS 잡음까지 같다), symphonia 가 받지 않는 것(ASC 에 적힌 SBR, PS, 3 채널 이상)과 몸통에만 SBR 이 실린 것(ADTS 의 HE-AAC 같은, 첫 패킷의 표본율이 두 배가 되는지로 가린다)은 oxideav-aac 로 푼다
+  - oxideav-aac(MIT)는 ISO/IEC 14496-3, 13818-7 명세로 짠 순수 러스트 해석기다. 공개 저장소(OxideAV/oxideav-aac)의 커밋 역사가 명세 조항으로 짠 기록이고 FFmpeg 같은 LGPL 코드를 옮긴 흔적이 없다. 다른 후보 rusty_aac(Apache-2.0)는 해석기 소스의 공개 저장소와 커밋 역사가 없어(크레이트의 저장소 주소는 그것을 쓰는 다른 저장소) 출처를 확인할 수 없어 쓰지 않았다
+  - 정수로 반올림하기 전 실수 출력(set_float_pcm_capture)이 crates.io 판 0.1.7 에 없어 저장소 커밋 eac68f3 으로 묶었다. 다음 판이 나오면 crates.io 로 바꾼다
+  - 시험 소리 6 개(HE-AAC v1 m4a 와 adts, v2 m4a, 5.1 AAC m4a 와 adts, PNS 를 쓴 스테레오 AAC)를 더해 27 파일을 크롬 158 과 견준다. 길이와 채널이 같고 표본은 1.5e-7 안이다
+  - 남은 차이: 3 채널 이상 AAC 에 PNS 가 쓰이면 그 띠의 잡음 표본이 크롬과 다르다. (명세가 난수 생성기를 정하지 않아, 같게 하려면 FFmpeg 의 생성기를 옮겨야 한다)
+  - 늘어난 크레이트 4: oxideav-aac, oxideav-core, thiserror, thiserror-impl
+- 표본율 바꾸기의 x86_64 합 차례(AVX2 와 FMA, SSE)는 크롬과 같게 짰지만, 기대값을 애플 실리콘 맥에서 뽑아 x86 실기에서는 돌려 보지 못했다
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.
