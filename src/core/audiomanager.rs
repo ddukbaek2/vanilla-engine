@@ -126,7 +126,9 @@ impl AudioManager {
 		let mut state = self.state.borrow_mut();
 		let audio_context = state.ensure_audio_context();
 		let audio_player_backend = AudioPlayerBackend::create(audio_context);
-		AudioPlayer::new(audio_player_backend)
+		let mut audio_player = AudioPlayer::new(audio_player_backend);
+		audio_player.set_audio_manager_state(self.state.clone());
+		audio_player
 	}
 
 	//==============================================================================

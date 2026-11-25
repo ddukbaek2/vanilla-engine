@@ -9,9 +9,12 @@
 //   플레이어를 버리면 재생 중인 소리도 멈춘다. (원본은 가비지 수거와 상관없이 소스 노드가 끝까지 운다)
 //   데스크탑의 is_playing() 은 onended 콜백 대신 kira 소리 핸들의 상태를 읽는다. (끝나면 거짓)
 //   데스크탑의 음량은 데시벨로 바꿔 트랙에 건다. 0.001(-60dB) 아래는 kira 가 무음으로 친다.
-//   원본 getAudioContext() 는 옮기지 않았다. (백엔드마다 타입이 다르다)
+//   get_audio_context 는 만든 매니저의 AudioContext 를 빌려 준다. (웹 WebAudio AudioContext, 데스크탑 kira AudioManager, 매니저 없이 만든 플레이어는 None)
+//   set_playback_rate 는 원본에 없던 것을 러스트 판에서 먼저 만들었다. (원본에도 넣었다)
 //==============================================================================
-use crate::platform::audio::AudioPlayerBackend;
+use crate::core::audiomanager::AudioManagerState;
+use crate::platform::audio::{AudioContext, AudioPlayerBackend};
+use std::cell::{Ref, RefCell};
 use crate::resource::audioasset::AudioAsset;
 use std::rc::Rc;
 
@@ -32,6 +35,8 @@ pub(crate) fn clamp_volume(volume: f32) -> f32 {
 //==============================================================================
 pub struct AudioPlayer {
 	audio_player_backend: AudioPlayerBackend,
+	// 만든 매니저가 나눠 든 상태. (get_audio_context)
+	audio_manager_state: Option<Rc<RefCell<AudioManagerState>>>,
 	audio_asset: Option<Rc<AudioAsset>>,
 	is_muted: bool,
 	// 음량. (0 ~ 1, 음소거를 풀면 이 음량으로 돌아간다)
@@ -49,6 +54,7 @@ impl AudioPlayer {
 	pub(crate) fn new(audio_player_backend: AudioPlayerBackend) -> AudioPlayer {
 		AudioPlayer {
 			audio_player_backend,
+			audio_manager_state: None,
 			audio_asset: None,
 			is_muted: false,
 			volume: 1.0,
@@ -194,6 +200,21 @@ impl AudioPlayer {
 	//==============================================================================
 	pub fn get_time(&self) -> f64 {
 		self.time
+	}
+
+	//==============================================================================
+	// 만든 매니저 상태 넣기. (AudioManager::create_audio_player 가 부른다)
+	//==============================================================================
+	pub(crate) fn set_audio_manager_state(&mut self, audio_manager_state: Rc<RefCell<AudioManagerState>>) {
+		self.audio_manager_state = Some(audio_manager_state);
+	}
+
+	//==============================================================================
+	// AudioContext. (원본 getAudioContext, 만든 매니저의 것을 빌려 준다, 없으면 None)
+	//==============================================================================
+	pub fn get_audio_context(&self) -> Option<Ref<'_, AudioContext>> {
+		let audio_manager_state = self.audio_manager_state.as_ref()?;
+		Ref::filter_map(audio_manager_state.borrow(), |state| state.audio_context.as_ref()).ok()
 	}
 
 	//==============================================================================
