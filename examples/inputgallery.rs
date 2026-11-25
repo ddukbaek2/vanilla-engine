@@ -8,14 +8,16 @@
 // - 오른쪽 아래: 입력 동작(InputActions), 손가락 목록, 마지막으로 쓴 장치. 정해 둔 프레임에 키와 손가락, 바깥 입력원을 흉내 낸다.
 //   40 ~ 120: ArrowRight 누름(반복), 50 ~ 110: KeyW 누름(이동 축 대각선), 60: 두 손가락, 70: 둘째 손가락 움직임, 85: 첫째 손가락 뗌,
 //   80 ~ 95: 바깥 입력원이 menu 를 누름(플레이스테이션 패드로 적힘).
-// - 200 프레임이 지나면 스스로 끝난다. (화면 저장: VANILLA_CAPTURE_PATH / VANILLA_CAPTURE_FRAMES / VANILLA_CAPTURE_EXIT)
+// - 패드 진동 시험: 실제 게임패드의 A(크로스)는 무거운 모터 0.5초, B(서클)는 가벼운 모터 0.5초, X(스퀘어)는 둘 다 1초, Y(트라이앵글)는 멈춤.
+// - 200 프레임이 지나면 스스로 끝난다. 실제 게임패드가 붙어 있으면 사람이 시험하는 것으로 보고 창을 닫을 때까지 돈다.
+//   (화면 저장: VANILLA_CAPTURE_PATH / VANILLA_CAPTURE_FRAMES / VANILLA_CAPTURE_EXIT)
 //==============================================================================
 #![allow(clippy::too_many_arguments)]
 
 use std::cell::Cell;
 use std::rc::Rc;
 use vanilla::core::graphic::{TextAlign, TextBaseline};
-use vanilla::{Engine, EngineConfiguration, GamepadKind, Graphic, InputActionSource, NodeId, NodeTree, Paint, Pivot, Scene, SceneBase, TextInputEventKind, UIInputField, UILabel, Vector2, ViewScaleMode};
+use vanilla::{Engine, EngineConfiguration, GamepadButtonCode, GamepadKind, Graphic, InputActionSource, NodeId, NodeTree, Paint, Pivot, Scene, SceneBase, TextInputEventKind, UIInputField, UILabel, Vector2, ViewScaleMode};
 
 //==============================================================================
 // 전역 상수 목록.
@@ -129,6 +131,8 @@ struct InputGalleryScene {
 	touch_label_id: Option<NodeId>,
 	right_just_pressed_count: u32,
 	ended_touch_count: u32,
+	gamepad_label_id: Option<NodeId>,
+	vibration_text: &'static str,
 }
 
 impl InputGalleryScene {
@@ -146,6 +150,8 @@ impl InputGalleryScene {
 			touch_label_id: None,
 			right_just_pressed_count: 0,
 			ended_touch_count: 0,
+			gamepad_label_id: None,
+			vibration_text: "없음",
 		}
 	}
 
@@ -209,6 +215,34 @@ impl InputGalleryScene {
 			if let Some(label) = label_id.and_then(|label_id| node_tree[label_id].get_component_mut::<UILabel>()) {
 				label.set_text(&text);
 			}
+		}
+	}
+
+	//==============================================================================
+	// 패드 진동 시험. (실제 패드의 앞면 단추를 누르면 연결된 패드를 모두 떤다)
+	//==============================================================================
+	fn update_gamepad_vibration(&mut self, engine: &mut Engine) {
+		let gamepad_manager = engine.get_input_manager_mut().get_gamepad_manager_mut();
+		let gamepad_index_list: Vec<usize> = gamepad_manager.get_all_connected_gamepads().iter().map(|gamepad| gamepad.index).collect();
+		let vibration_list = [
+			(GamepadButtonCode::A_CROSS, 1.0, 0.0, 0.5, "무거운 모터 0.5초"),
+			(GamepadButtonCode::B_CIRCLE, 0.0, 1.0, 0.5, "가벼운 모터 0.5초"),
+			(GamepadButtonCode::X_SQUARE, 1.0, 1.0, 1.0, "둘 다 1초"),
+			(GamepadButtonCode::Y_TRIANGLE, 0.0, 0.0, 0.0, "멈춤"),
+		];
+		for gamepad_index in gamepad_index_list.iter() {
+			for (button_index, strong_magnitude, weak_magnitude, seconds, vibration_text) in vibration_list {
+				if gamepad_manager.is_button_just_pressed(*gamepad_index, button_index) {
+					gamepad_manager.vibrate(strong_magnitude, weak_magnitude, seconds);
+					self.vibration_text = vibration_text;
+					println!("[inputgallery] 패드 {} 진동 요청: {}", gamepad_index, vibration_text);
+				}
+			}
+		}
+		let gamepad_text = format!("패드 {}개  진동: A 무거운 모터, B 가벼운 모터, X 둘 다, Y 멈춤  (마지막: {})", gamepad_index_list.len(), self.vibration_text);
+		let node_tree = self.scene_base.get_node_tree_mut();
+		if let Some(label) = self.gamepad_label_id.and_then(|label_id| node_tree[label_id].get_component_mut::<UILabel>()) {
+			label.set_text(&gamepad_text);
 		}
 	}
 
@@ -355,16 +389,19 @@ impl Scene for InputGalleryScene {
 		create_label_node(node_tree, right_panel_id, "actionCaption", Vector2::create(32.0, 456.0), Vector2::create(536.0, 24.0), "InputActions, 손가락, 마지막 장치 (흉내 낸 입력)", 16.0, CAPTION_COLOR);
 		let action_label_id = create_label_node(node_tree, right_panel_id, "actionStatus", Vector2::create(32.0, 486.0), Vector2::create(536.0, 30.0), "", 16.0, TITLE_COLOR);
 		let touch_label_id = create_label_node(node_tree, right_panel_id, "touchStatus", Vector2::create(32.0, 522.0), Vector2::create(536.0, 30.0), "", 16.0, TITLE_COLOR);
+		let gamepad_label_id = create_label_node(node_tree, right_panel_id, "gamepadStatus", Vector2::create(32.0, 552.0), Vector2::create(536.0, 22.0), "", 14.0, CAPTION_COLOR);
 		self.action_label_id = Some(action_label_id);
 		self.touch_label_id = Some(touch_label_id);
+		self.gamepad_label_id = Some(gamepad_label_id);
 	}
 
 	//==============================================================================
-	// 주기적 갱신. (흉내 낸 입력 → 노드 갱신과 터치)
+	// 주기적 갱신. (흉내 낸 입력 → 패드 진동 시험 → 노드 갱신과 터치)
 	//==============================================================================
 	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
 		self.frame_count += 1;
-		if self.frame_count >= EXIT_FRAME_COUNT {
+		let connected_gamepad_count = engine.get_input_manager().get_gamepad_manager().get_connected_gamepad_count();
+		if self.frame_count >= EXIT_FRAME_COUNT && connected_gamepad_count == 0 {
 			engine.exit_application();
 			return;
 		}
@@ -372,6 +409,7 @@ impl Scene for InputGalleryScene {
 		self.simulate_input(engine);
 		self.simulate_action_input(engine);
 		self.update_action_status(engine);
+		self.update_gamepad_vibration(engine);
 		self.scene_base.tick(engine, time_delta);
 	}
 

@@ -4,6 +4,7 @@
 // - 창 이벤트를 입력 관리자 꼴로 바꿔 넣는다. (키는 W3C KeyboardEvent.code 와 같은 이름, 마우스 왼쪽 단추는 터치)
 // - 엔진 본체(EngineRunner)는 창을 모른다. 여기서 프레임을 부르고, 그린 뒤 화면을 넘긴다.
 // - 글 입력(키 글자, 편집 키, IME 조합)과 클립보드는 desktop/textinput.rs 가 맡는다. 오른쪽 단추는 입력 필드 문맥 메뉴 요청이다.
+// - 맥의 게임패드 진동은 desktop/gamepadhaptics.rs 가 맡는다. (GameController 와 CoreHaptics, 다른 OS 는 gilrs 가 떤다)
 // - 마지막으로 쓴 장치를 키, 마우스, 손가락 이벤트마다 적는다. 막을 키(set_prevented_keys)는 창에 막을 브라우저 기본 동작이 없어 쓰지 않는다.
 // - 페이지 이벤트: 창 가림(Occluded, 맥과 X11 만 알린다)은 Hidden / Visible, 포커스는 Focused / Blurred, 마우스 단추와 손가락 누름은 PointerDown.
 //   가림이 풀리면 on_page_visibility_restored, suspended 뒤 resumed 면 on_page_process_restored. (윈도우, 맥, 리눅스는 suspended 가 오지 않는다)
@@ -33,6 +34,8 @@ use winit::window::{Icon, Window, WindowId};
 
 mod textinput;
 pub use textinput::{read_clipboard_text, write_clipboard_text};
+#[cfg(target_os = "macos")]
+pub mod gamepadhaptics;
 
 // 엔진이 들고 있는 창 손잡이. (커서, 제목을 바꿀 때)
 pub type PlatformWindow = Rc<Window>;

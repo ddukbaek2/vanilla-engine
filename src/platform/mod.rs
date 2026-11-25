@@ -5,6 +5,7 @@
 //   run(엔진 실행자), set_cursor_visible, set_cursor(커서 모양), is_coarse_pointer(주된 손이 손가락인지), set_title, request_asset_bytes(애셋 바이트 읽기), PlatformWindow(엔진이 들고 있는 창 손잡이),
 //   write_clipboard_text / read_clipboard_text(시스템 클립보드)
 //   read_page_query_value(페이지 주소의 쿼리 값), read_safe_area_insets(CSS env 세이프 에어리어 인셋)
+// - 맥만 vibrate_gamepads / release_disconnected_gamepad_haptics(게임패드 진동, desktop/gamepadhaptics.rs)를 낸다.
 // - 안드로이드, iOS 는 여기에 모듈을 더한다. (아직 없음)
 //==============================================================================
 // 오디오 백엔드. (데스크탑 kira, 웹 WebAudio. 두 갈래를 안에서 고른다)
@@ -27,3 +28,5 @@ pub use web::{read_page_query_value, read_safe_area_insets};
 pub use desktop::is_text_field_focused;
 #[cfg(target_arch = "wasm32")]
 pub use web::is_text_field_focused;
+#[cfg(target_os = "macos")]
+pub use desktop::gamepadhaptics::{release_disconnected_gamepad_haptics, vibrate_gamepads};

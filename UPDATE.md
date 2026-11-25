@@ -136,6 +136,7 @@
 - Graphic: draw_line_segments(position_values, size). 숫자 배열 하나(선분마다 x0, y0, x1, y1)로 선분 여럿을 한 번에 그린다. 정점 버퍼가 차면 거기까지 그리고 이어 담는다
 - SpriteAtlas: tools/atlas.cjs(vanilla.js)의 JSON 과 { pagePaths, frames } 꼴을 읽는다. load(engine, json_path), load_data, update(웹은 JSON 이 온 뒤 쪽 그림을 청한다), is_loaded, track_json_asset, read_frame, has_frame, apply_frame, get_page_count, get_frame_names, 여러 아틀라스를 차례로 찾는 find_frame_in_order, apply_frame_in_order. 이름은 확장자를 떼고도 찾는다. Sprite.set_frame(frame)
 - 예제: textnodeextras. 글자 칸 맞춤(Text, UILabel), 배율이 움직이는 글, 반투명 고리와 줄어드는 호와 선분 600 개, atlas.cjs 로 구운 아틀라스(examples/assets/atlas), 구운 그림을 나눠 쓰는 그림자 글, 돌아간 판 위의 마우스 자리(convert_view_to_local)
+- GamepadManager.vibrate: macOS 데스크탑에서도 떤다. (gilrs 의 macOS force feedback 이 비어 있어 지금까지 아무것도 하지 않았다) 플랫폼 층 platform/desktop/gamepadhaptics.rs 가 GameController 의 GCController.haptics 로 CoreHaptics 엔진을 지어, 무거운 모터는 왼손잡이, 가벼운 모터는 오른손잡이 엔진에 연속 진동으로 낸다. (둘을 대지 않는 패드는 엔진 하나에 큰 세기로) gilrs 패드와 컨트롤러는 이름(vendorName)이 같은 것을 먼저, 남은 것은 차례로 잇는다. 엔진은 컨트롤러마다 한 번 짓고, 멈춤과 리셋 뒤에는 다시 시작하고, 실패하면 다시 짓는다. macOS 는 길이나 세기가 0 이면 앞 진동을 멈춘다. 예제 inputgallery 에 패드 진동 시험(A, B, X, Y)을 더했고, 실제 패드가 붙어 있으면 스스로 끝나지 않는다. 의존성: objc2-game-controller, objc2-core-haptics, objc2, objc2-foundation, block2 (macOS 만)
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.
