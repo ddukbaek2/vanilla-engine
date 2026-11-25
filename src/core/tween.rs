@@ -28,7 +28,9 @@ use std::borrow::Cow;
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum TweenValue {
+	/// 숫자 하나. (불투명도, 회전 같은 값)
 	Number(f32),
+	/// 2차원 벡터. (위치, 배율, 크기 같은 값, 두 축을 따로 보간한다)
 	Vector2(Vector2),
 }
 
@@ -62,6 +64,22 @@ struct TweenValueEntry {
 //==============================================================================
 /// 트윈 값 묶음. (원본의 { x: 0, y: 0 } 같은 객체 자리, 넣은 순서를 지킨다)
 /// - 이름은 보통 문자열 상수("x")를 쓴다. 상수 이름은 복사할 때 메모리를 새로 잡지 않는다.
+///
+/// # 예제
+/// 숫자와 Vector2 를 담고 꺼내기
+/// ```rust
+/// use vanilla::{TweenValue, TweenValues, Vector2};
+///
+/// let mut values = TweenValues::new()
+/// 	.with("alpha", 0.0)
+/// 	.with("position", Vector2::create(10.0, 20.0));
+/// values.set("alpha", 1.0);
+/// assert_eq!(values.get_count(), 2);
+/// assert_eq!(values.get_number("alpha"), Some(1.0));
+/// assert_eq!(values.get("position"), Some(TweenValue::Vector2(Vector2::create(10.0, 20.0))));
+/// assert_eq!(values.get_number("position"), None);
+/// assert_eq!(values.get_vector2("missing"), None);
+/// ```
 //==============================================================================
 #[derive(Clone, Debug, Default)]
 pub struct TweenValues {
@@ -71,6 +89,9 @@ pub struct TweenValues {
 impl TweenValues {
 	//==============================================================================
 	/// 생성. (비어 있다)
+	///
+	/// # 돌려줌
+	/// 빈 묶음.
 	//==============================================================================
 	pub fn new() -> TweenValues {
 		TweenValues {
@@ -80,6 +101,13 @@ impl TweenValues {
 
 	//==============================================================================
 	/// 값을 넣고 자신을 돌려준다. (이어 쓰기용, 같은 이름이 있으면 바꾼다)
+	///
+	/// # 인자
+	/// - `name`: 값 이름. (보통 문자열 상수, TweenProperty 이름이면 대상 노드의 그 속성에 쓴다)
+	/// - `value`: 값. (f32 또는 Vector2)
+	///
+	/// # 돌려줌
+	/// 값을 넣은 자신.
 	//==============================================================================
 	pub fn with(mut self, name: impl Into<Cow<'static, str>>, value: impl Into<TweenValue>) -> TweenValues {
 		self.set(name, value);
@@ -88,6 +116,10 @@ impl TweenValues {
 
 	//==============================================================================
 	/// 값 설정. (같은 이름이 있으면 바꾸고, 없으면 뒤에 붙인다)
+	///
+	/// # 인자
+	/// - `name`: 값 이름.
+	/// - `value`: 값. (f32 또는 Vector2, 같은 이름의 값을 다른 종류로 바꿀 수도 있다)
 	//==============================================================================
 	pub fn set(&mut self, name: impl Into<Cow<'static, str>>, value: impl Into<TweenValue>) {
 		let name = name.into();
@@ -106,6 +138,12 @@ impl TweenValues {
 
 	//==============================================================================
 	/// 값 반환. (없으면 None)
+	///
+	/// # 인자
+	/// - `name`: 찾을 값 이름.
+	///
+	/// # 돌려줌
+	/// 그 이름의 값. 없으면 None.
 	//==============================================================================
 	pub fn get(&self, name: &str) -> Option<TweenValue> {
 		self.entries.iter().find(|entry| entry.name == name).map(|entry| entry.value)
@@ -113,6 +151,12 @@ impl TweenValues {
 
 	//==============================================================================
 	/// 숫자 값 반환. (없거나 숫자가 아니면 None)
+	///
+	/// # 인자
+	/// - `name`: 찾을 값 이름.
+	///
+	/// # 돌려줌
+	/// 그 이름의 숫자. 없거나 Vector2 면 None.
 	//==============================================================================
 	pub fn get_number(&self, name: &str) -> Option<f32> {
 		match self.get(name) {
@@ -127,6 +171,12 @@ impl TweenValues {
 
 	//==============================================================================
 	/// Vector2 값 반환. (없거나 Vector2 가 아니면 None)
+	///
+	/// # 인자
+	/// - `name`: 찾을 값 이름.
+	///
+	/// # 돌려줌
+	/// 그 이름의 Vector2. 없거나 숫자면 None.
 	//==============================================================================
 	pub fn get_vector2(&self, name: &str) -> Option<Vector2> {
 		match self.get(name) {
@@ -141,6 +191,9 @@ impl TweenValues {
 
 	//==============================================================================
 	/// 값 수.
+	///
+	/// # 돌려줌
+	/// 든 값의 수.
 	//==============================================================================
 	pub fn get_count(&self) -> usize {
 		self.entries.len()
@@ -171,16 +224,24 @@ impl TweenValues {
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TweenProperty {
+	/// 로컬 위치. (이름 "localPosition", Vector2 또는 두 축에 같이 쓸 숫자)
 	LocalPosition,
+	/// 로컬 배율. (이름 "localScale", Vector2 또는 두 축에 같이 쓸 숫자)
 	LocalScale,
+	/// 로컬 회전. (이름 "localRotation", 도, 숫자만)
 	LocalRotation,
+	/// 로컬 불투명도. (이름 "localOpacity", 숫자만, 노드가 0 ~ 1 로 맞춘다)
 	LocalOpacity,
+	/// 내용 크기. (이름 "contentSize", Vector2 또는 두 축에 같이 쓸 숫자)
 	ContentSize,
 }
 
 impl TweenProperty {
 	//==============================================================================
 	/// 값 묶음에서 쓰는 이름. (enum 이름과 같다)
+	///
+	/// # 돌려줌
+	/// 값 묶음에서 쓰는 속성 이름. ("localPosition" 처럼 첫 글자가 소문자)
 	//==============================================================================
 	pub fn get_name(&self) -> &'static str {
 		match self {
@@ -204,6 +265,22 @@ impl TweenProperty {
 
 	//==============================================================================
 	/// 이름으로 찾기. (노드 속성 이름이 아니면 None)
+	///
+	/// # 인자
+	/// - `name`: 값 이름. (get_name 이 돌려주는 이름과 견준다, 대소문자를 가린다)
+	///
+	/// # 돌려줌
+	/// 그 이름의 속성. 노드 속성 이름이 아니면 None.
+	///
+	/// # 예제
+	/// 속성 이름과 아닌 이름
+	/// ```rust
+	/// use vanilla::TweenProperty;
+	///
+	/// assert_eq!(TweenProperty::find_by_name("localScale"), Some(TweenProperty::LocalScale));
+	/// assert_eq!(TweenProperty::find_by_name("scale"), None);
+	/// assert_eq!(TweenProperty::LocalScale.get_name(), "localScale");
+	/// ```
 	//==============================================================================
 	pub fn find_by_name(name: &str) -> Option<TweenProperty> {
 		match name {
@@ -230,6 +307,24 @@ impl TweenProperty {
 
 	//==============================================================================
 	/// 노드에 값 쓰기.
+	/// - Vector2 속성(위치, 배율, 내용 크기)에 숫자를 주면 두 축에 같이 쓴다. 숫자 속성(회전, 불투명도)에 Vector2 를 주면 쓰지 않는다.
+	///
+	/// # 인자
+	/// - `node`: 값을 쓸 노드.
+	/// - `value`: 쓸 값.
+	///
+	/// # 예제
+	/// 숫자 하나로 두 축 배율 쓰기
+	/// ```rust
+	/// use vanilla::{TweenProperty, TweenValue, Vector2, WorldNode};
+	///
+	/// let mut node = WorldNode::new("Node");
+	/// TweenProperty::LocalScale.apply_to_node(&mut node, TweenValue::Number(2.0));
+	/// assert_eq!(node.get_local_scale(), Vector2::create(2.0, 2.0));
+	///
+	/// TweenProperty::LocalRotation.apply_to_node(&mut node, TweenValue::Vector2(Vector2::create(1.0, 1.0)));
+	/// assert_eq!(node.get_local_rotation(), 0.0);
+	/// ```
 	//==============================================================================
 	pub fn apply_to_node(&self, node: &mut WorldNode, value: TweenValue) {
 		let vector = match value {
@@ -266,6 +361,21 @@ impl TweenProperty {
 
 //==============================================================================
 /// 트윈 핸들. (SceneBase::start_tween 이 돌려주고, stop_tween / get_tween 에 넘긴다)
+/// - 트윈을 만들 때 정해지고 트윈마다 다르다. 씬이 트윈을 가져간 뒤에는 이것으로 가리킨다.
+///
+/// # 예제
+/// 씬에 맡긴 트윈을 핸들로 찾고 멈추기
+/// ```rust
+/// use vanilla::{SceneBase, Tween, TweenValues};
+///
+/// let mut scene_base = SceneBase::new();
+/// let tween = Tween::new(TweenValues::new().with("value", 0.0)).to(TweenValues::new().with("value", 1.0), 2.0);
+/// let tween_id = scene_base.start_tween(tween);
+/// assert_eq!(scene_base.get_tween(tween_id).unwrap().get_tween_id(), tween_id);
+///
+/// scene_base.stop_tween(tween_id);
+/// assert!(scene_base.get_tween(tween_id).is_none());
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct TweenId(u64);
@@ -278,6 +388,35 @@ type TweenCompleteCallback = Box<dyn FnMut(&mut NodeTree)>;
 
 //==============================================================================
 /// 트윈.
+/// - 시작값 묶음과 목표값 묶음 사이를 대기 뒤 길이(초) 동안 이징 함수로 보간한다. tick 마다 보간한 값을 갱신 콜백에 넘기고, 다 가면 완료 콜백을 부른다.
+/// - 만든 뒤 to, delay, easing, set_update, set_complete, set_target 을 이어 붙여 정하고, start 한 뒤 tick 을 부른다. (씬은 SceneBase::start_tween 이 start 와 tick 을 맡는다)
+///
+/// # 예제
+/// 대기 뒤 0 에서 10 으로
+/// ```rust
+/// use vanilla::{easing_function, NodeTree, Tween, TweenValues};
+/// use std::cell::Cell;
+/// use std::rc::Rc;
+///
+/// let mut node_tree = NodeTree::new();
+/// let last_value = Rc::new(Cell::new(-1.0f32));
+/// let last_value_in_callback = last_value.clone();
+/// let mut tween = Tween::new(TweenValues::new().with("value", 0.0))
+/// 	.to(TweenValues::new().with("value", 10.0), 1.0)
+/// 	.delay(0.5)
+/// 	.easing(easing_function::linear)
+/// 	.set_update(move |values, _node_tree| {
+/// 		last_value_in_callback.set(values.get_number("value").unwrap());
+/// 	});
+/// tween.start();
+/// tween.tick(&mut node_tree, 0.25);
+/// assert_eq!(last_value.get(), -1.0);
+/// tween.tick(&mut node_tree, 0.75);
+/// assert_eq!(last_value.get(), 5.0);
+/// tween.tick(&mut node_tree, 0.5);
+/// assert_eq!(last_value.get(), 10.0);
+/// assert!(tween.is_finished());
+/// ```
 //==============================================================================
 pub struct Tween {
 	tween_id: TweenId,
@@ -300,6 +439,12 @@ pub struct Tween {
 impl Tween {
 	//==============================================================================
 	/// 생성. (시작값 묶음을 받는다. 길이 1초, 대기 0, linear)
+	///
+	/// # 인자
+	/// - `initial_values`: 시작값 묶음. (목표값에 같은 이름이 있는 값만 보간한다)
+	///
+	/// # 돌려줌
+	/// 목표값이 비고 멈춘 새 트윈. (start 해야 돈다)
 	//==============================================================================
 	pub fn new(initial_values: TweenValues) -> Tween {
 		let instance_id = identifier::create_instance_id();
@@ -324,6 +469,30 @@ impl Tween {
 	//==============================================================================
 	/// 노드 속성 하나를 움직이는 트윈 생성.
 	/// - Tween::new(시작값).to(목표값, duration).set_target(node_id) 와 같다. 값 이름은 속성 이름이다.
+	///
+	/// # 인자
+	/// - `node_id`: 움직일 노드.
+	/// - `tween_property`: 움직일 노드 속성.
+	/// - `start_value`: 시작값. (f32 또는 Vector2, Vector2 속성에 숫자를 주면 두 축에 같이 쓴다)
+	/// - `end_value`: 목표값. (start_value 와 같은 종류)
+	/// - `duration`: 길이. (초, 0 이하면 첫 tick 에 끝난다)
+	///
+	/// # 돌려줌
+	/// 대상 노드가 정해진 멈춘 새 트윈. (start 하거나 SceneBase::start_tween 에 넘긴다)
+	///
+	/// # 예제
+	/// 노드를 1 초 동안 오른쪽 아래로
+	/// ```rust
+	/// use vanilla::{NodeTree, Tween, TweenProperty, Vector2};
+	///
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let node_id = node_tree.create_child(root_id, "Mover");
+	/// let mut tween = Tween::create_node_tween(node_id, TweenProperty::LocalPosition, Vector2::zero(), Vector2::create(100.0, 50.0), 1.0);
+	/// tween.start();
+	/// tween.tick(&mut node_tree, 0.5);
+	/// assert_eq!(node_tree[node_id].get_local_position(), Vector2::create(50.0, 25.0));
+	/// ```
 	//==============================================================================
 	pub fn create_node_tween(node_id: NodeId, tween_property: TweenProperty, start_value: impl Into<TweenValue>, end_value: impl Into<TweenValue>, duration: f32) -> Tween {
 		let property_name = tween_property.get_name();
@@ -334,6 +503,28 @@ impl Tween {
 
 	//==============================================================================
 	/// 노드의 맨 위 노드 반환. (부모를 따라 올라간다, 원본 Tween.findRootNode)
+	///
+	/// # 인자
+	/// - `node_tree`: 노드가 든 트리.
+	/// - `node_id`: 올라가기 시작할 노드.
+	///
+	/// # 돌려줌
+	/// 부모가 없는 맨 위 노드. (node_id 에 부모가 없으면 node_id 그대로)
+	///
+	/// # 예제
+	/// 루트에 붙은 노드와 떨어진 노드
+	/// ```rust
+	/// use vanilla::{NodeTree, Tween};
+	///
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let parent_id = node_tree.create_child(root_id, "Parent");
+	/// let child_id = node_tree.create_child(parent_id, "Child");
+	/// assert_eq!(Tween::find_root_node(&node_tree, child_id), root_id);
+	///
+	/// let loose_id = node_tree.create_node("Loose");
+	/// assert_eq!(Tween::find_root_node(&node_tree, loose_id), loose_id);
+	/// ```
 	//==============================================================================
 	pub fn find_root_node(node_tree: &NodeTree, node_id: NodeId) -> NodeId {
 		let mut current_node_id = node_id;
@@ -349,6 +540,32 @@ impl Tween {
 	///   시작값에 없는 이름, 시작값과 종류(숫자 / Vector2)가 다른 이름은 건너뛴다. (원본과 같음)
 	/// - 대상 노드가 있으면 노드 속성 이름의 값을 그 노드에 쓰고, 갱신 콜백을 부른다.
 	/// - 진행률이 1 이 되면 멈추고 완료 콜백을 부른다.
+	/// - start 전이나 끝난 뒤에는 아무것도 하지 않는다. 대상 노드가 지워졌거나 처음 돈 때의 맨 위 노드에서 떨어졌으면 콜백 없이 끝낸다.
+	///
+	/// # 인자
+	/// - `node_tree`: 대상 노드에 쓰고 콜백에 넘길 노드 트리.
+	/// - `time_delta`: 지난 시간. (초)
+	///
+	/// # 예제
+	/// 노드를 흐리게 하다가 노드가 지워지면 조용히 끝나기
+	/// ```rust
+	/// use vanilla::{NodeTree, Tween, TweenProperty};
+	///
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let node_id = node_tree.create_child(root_id, "Fader");
+	/// let mut tween = Tween::create_node_tween(node_id, TweenProperty::LocalOpacity, 1.0, 0.0, 1.0);
+	/// tween.tick(&mut node_tree, 0.5);
+	/// assert_eq!(node_tree[node_id].get_local_opacity(), 1.0);
+	///
+	/// tween.start();
+	/// tween.tick(&mut node_tree, 0.5);
+	/// assert_eq!(node_tree[node_id].get_local_opacity(), 0.5);
+	///
+	/// node_tree.destroy_node(node_id);
+	/// tween.tick(&mut node_tree, 0.5);
+	/// assert!(tween.is_finished());
+	/// ```
 	//==============================================================================
 	pub fn tick(&mut self, node_tree: &mut NodeTree, time_delta: f32) {
 		if !self.is_playing || self.is_finished {
@@ -443,6 +660,13 @@ impl Tween {
 
 	//==============================================================================
 	/// 목표값 설정. (길이도 함께 정한다)
+	///
+	/// # 인자
+	/// - `properties`: 목표값 묶음. (이 묶음의 순서로 보간해 갱신 콜백에 넘긴다)
+	/// - `duration`: 길이. (초, 대기 시간은 빼고, 0 이하면 첫 tick 에 끝난다)
+	///
+	/// # 돌려줌
+	/// 목표값을 정한 자신.
 	//==============================================================================
 	pub fn to(mut self, properties: TweenValues, duration: f32) -> Tween {
 		self.values_end = properties;
@@ -452,6 +676,12 @@ impl Tween {
 
 	//==============================================================================
 	/// 시작 전 대기 시간 설정. (초)
+	///
+	/// # 인자
+	/// - `amount`: start 한 뒤 보간을 시작하기까지 기다릴 시간. (초, 처음 0)
+	///
+	/// # 돌려줌
+	/// 대기 시간을 정한 자신.
 	//==============================================================================
 	pub fn delay(mut self, amount: f32) -> Tween {
 		self.delay = amount;
@@ -460,6 +690,33 @@ impl Tween {
 
 	//==============================================================================
 	/// 이징 함수 설정. (easing_function 모듈의 함수, 또는 진행률을 받아 비율을 돌려주는 아무 함수)
+	///
+	/// # 인자
+	/// - `easing_function`: 진행률(0 ~ 1)을 받아 보간 비율을 돌려주는 함수. (처음 easing_function::linear)
+	///
+	/// # 돌려줌
+	/// 이징 함수를 정한 자신.
+	///
+	/// # 예제
+	/// 네 계단으로 끊어 움직이기
+	/// ```rust
+	/// use vanilla::{NodeTree, Tween, TweenValues};
+	/// use std::cell::Cell;
+	/// use std::rc::Rc;
+	///
+	/// let mut node_tree = NodeTree::new();
+	/// let last_value = Rc::new(Cell::new(0.0f32));
+	/// let last_value_in_callback = last_value.clone();
+	/// let mut tween = Tween::new(TweenValues::new().with("value", 0.0))
+	/// 	.to(TweenValues::new().with("value", 8.0), 1.0)
+	/// 	.easing(|progress| (progress * 4.0).floor() / 4.0)
+	/// 	.set_update(move |values, _node_tree| {
+	/// 		last_value_in_callback.set(values.get_number("value").unwrap());
+	/// 	});
+	/// tween.start();
+	/// tween.tick(&mut node_tree, 0.3);
+	/// assert_eq!(last_value.get(), 2.0);
+	/// ```
 	//==============================================================================
 	pub fn easing(mut self, easing_function: impl Fn(f32) -> f32 + 'static) -> Tween {
 		self.easing_function = Box::new(easing_function);
@@ -468,6 +725,31 @@ impl Tween {
 
 	//==============================================================================
 	/// 갱신 콜백 설정. (보간한 값 묶음과 노드 트리를 받는다)
+	///
+	/// # 인자
+	/// - `callback`: 보간한 값 묶음과 노드 트리를 받는 함수. (대기가 끝난 뒤 tick 마다, 끝나는 tick 에도 불린다, 대상 노드에 쓴 다음에 불린다)
+	///
+	/// # 돌려줌
+	/// 갱신 콜백을 정한 자신.
+	///
+	/// # 예제
+	/// 보간한 값으로 다른 노드 옮기기
+	/// ```rust
+	/// use vanilla::{NodeTree, Tween, TweenValues, Vector2};
+	///
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let label_id = node_tree.create_child(root_id, "Label");
+	/// let mut tween = Tween::new(TweenValues::new().with("x", 0.0))
+	/// 	.to(TweenValues::new().with("x", 200.0), 2.0)
+	/// 	.set_update(move |values, node_tree| {
+	/// 		let position_x = values.get_number("x").unwrap();
+	/// 		node_tree[label_id].set_local_position(Vector2::create(position_x, 0.0));
+	/// 	});
+	/// tween.start();
+	/// tween.tick(&mut node_tree, 1.0);
+	/// assert_eq!(node_tree[label_id].get_local_position(), Vector2::create(100.0, 0.0));
+	/// ```
 	//==============================================================================
 	pub fn set_update(mut self, callback: impl FnMut(&TweenValues, &mut NodeTree) + 'static) -> Tween {
 		self.tick_callback = Some(Box::new(callback));
@@ -476,6 +758,30 @@ impl Tween {
 
 	//==============================================================================
 	/// 완료 콜백 설정. (노드 트리를 받는다)
+	///
+	/// # 인자
+	/// - `callback`: 노드 트리를 받는 함수. (진행률이 1 이 된 tick 에 갱신 콜백 다음 한 번 불린다, stop 이나 대상 노드가 사라져 끝나면 불리지 않는다)
+	///
+	/// # 돌려줌
+	/// 완료 콜백을 정한 자신.
+	///
+	/// # 예제
+	/// 다 흐려지면 노드 지우기
+	/// ```rust
+	/// use vanilla::{NodeTree, Tween, TweenProperty};
+	///
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let toast_id = node_tree.create_child(root_id, "Toast");
+	/// let mut tween = Tween::create_node_tween(toast_id, TweenProperty::LocalOpacity, 1.0, 0.0, 0.5)
+	/// 	.set_complete(move |node_tree| {
+	/// 		node_tree.destroy_node(toast_id);
+	/// 	});
+	/// tween.start();
+	/// tween.tick(&mut node_tree, 0.5);
+	/// assert!(tween.is_finished());
+	/// assert!(!node_tree.contains(toast_id));
+	/// ```
 	//==============================================================================
 	pub fn set_complete(mut self, callback: impl FnMut(&mut NodeTree) + 'static) -> Tween {
 		self.complete_callback = Some(Box::new(callback));
@@ -484,6 +790,29 @@ impl Tween {
 
 	//==============================================================================
 	/// 대상 노드 설정. (값 이름이 TweenProperty 이름이면 이 노드에 쓴다)
+	///
+	/// # 인자
+	/// - `node_id`: 대상 노드. (지워지거나 처음 돈 때의 맨 위 노드에서 떨어지면 트윈이 조용히 끝난다)
+	///
+	/// # 돌려줌
+	/// 대상 노드를 정한 자신.
+	///
+	/// # 예제
+	/// 배율과 회전을 함께 움직이기
+	/// ```rust
+	/// use vanilla::{NodeTree, Tween, TweenValues, Vector2};
+	///
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let card_id = node_tree.create_child(root_id, "Card");
+	/// let mut tween = Tween::new(TweenValues::new().with("localScale", 0.5).with("localRotation", 0.0))
+	/// 	.to(TweenValues::new().with("localScale", 1.0).with("localRotation", 90.0), 1.0)
+	/// 	.set_target(card_id);
+	/// tween.start();
+	/// tween.tick(&mut node_tree, 1.0);
+	/// assert_eq!(node_tree[card_id].get_local_scale(), Vector2::create(1.0, 1.0));
+	/// assert_eq!(node_tree[card_id].get_local_rotation(), 90.0);
+	/// ```
 	//==============================================================================
 	pub fn set_target(mut self, node_id: NodeId) -> Tween {
 		self.target_node_id = Some(node_id);
@@ -513,6 +842,9 @@ impl Tween {
 
 	//==============================================================================
 	/// 완료 여부 반환.
+	///
+	/// # 돌려줌
+	/// 끝났으면 true. (다 갔거나, stop 했거나, 대상 노드가 사라졌을 때, start 하면 다시 false)
 	//==============================================================================
 	pub fn is_finished(&self) -> bool {
 		self.is_finished
@@ -520,6 +852,9 @@ impl Tween {
 
 	//==============================================================================
 	/// 핸들 반환.
+	///
+	/// # 돌려줌
+	/// 이 트윈의 핸들. (만들 때 정해진다)
 	//==============================================================================
 	pub fn get_tween_id(&self) -> TweenId {
 		self.tween_id
@@ -527,6 +862,9 @@ impl Tween {
 
 	//==============================================================================
 	/// 대상 노드 핸들 반환. (set_target 을 하지 않았으면 None)
+	///
+	/// # 돌려줌
+	/// 대상 노드. set_target 을 하지 않았으면 None.
 	//==============================================================================
 	pub fn get_target_node_id(&self) -> Option<NodeId> {
 		self.target_node_id
@@ -537,12 +875,32 @@ impl Tween {
 /// 이징 함수. (원본 Tween.easing_function)
 /// - 진행률(0 ~ 1)을 받아 보간 비율을 돌려준다. back, elastic 은 0 ~ 1 밖으로 넘친다.
 /// - 원본은 인자 k 를 그 자리에서 바꿔 가며(k *= 2, --k) 쓴다. 여기서는 바뀐 값마다 이름을 붙였다.
+///
+/// # 예제
+/// 이징 값 보기와 트윈에 걸기
+/// ```rust
+/// use vanilla::{easing_function, Tween, TweenValues};
+///
+/// assert_eq!(easing_function::linear(0.25), 0.25);
+/// assert_eq!(easing_function::quadratic::r#in(0.5), 0.25);
+///
+/// let tween = Tween::new(TweenValues::new().with("x", 0.0))
+/// 	.to(TweenValues::new().with("x", 100.0), 0.5)
+/// 	.easing(easing_function::back::out);
+/// assert!(!tween.is_finished());
+/// ```
 //==============================================================================
 pub mod easing_function {
 	use crate::base::math::PI;
 
 	//==============================================================================
 	/// 선형.
+	///
+	/// # 인자
+	/// - `progress`: 진행률. (0 ~ 1)
+	///
+	/// # 돌려줌
+	/// 보간 비율. (progress 그대로)
 	//==============================================================================
 	pub fn linear(progress: f32) -> f32 {
 		progress
@@ -550,10 +908,26 @@ pub mod easing_function {
 
 	//==============================================================================
 	/// 2차 곡선.
+	///
+	/// # 예제
+	/// 가운데와 사분 자리 값
+	/// ```rust
+	/// use vanilla::easing_function::quadratic;
+	///
+	/// assert_eq!(quadratic::r#in(0.5), 0.25);
+	/// assert_eq!(quadratic::out(0.5), 0.75);
+	/// assert_eq!(quadratic::in_out(0.25), 0.125);
+	/// ```
 	//==============================================================================
 	pub mod quadratic {
 		//==============================================================================
 		/// 천천히 시작한다.
+		///
+		/// # 인자
+		/// - `progress`: 진행률. (0 ~ 1)
+		///
+		/// # 돌려줌
+		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
 		pub fn r#in(progress: f32) -> f32 {
 			progress * progress
@@ -561,6 +935,12 @@ pub mod easing_function {
 
 		//==============================================================================
 		/// 천천히 끝난다.
+		///
+		/// # 인자
+		/// - `progress`: 진행률. (0 ~ 1)
+		///
+		/// # 돌려줌
+		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
 		pub fn out(progress: f32) -> f32 {
 			progress * (2.0 - progress)
@@ -568,6 +948,12 @@ pub mod easing_function {
 
 		//==============================================================================
 		/// 천천히 시작하고 천천히 끝난다.
+		///
+		/// # 인자
+		/// - `progress`: 진행률. (0 ~ 1)
+		///
+		/// # 돌려줌
+		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
 		pub fn in_out(progress: f32) -> f32 {
 			let doubled_progress = progress * 2.0;
@@ -581,10 +967,26 @@ pub mod easing_function {
 
 	//==============================================================================
 	/// 3차 곡선.
+	///
+	/// # 예제
+	/// 가운데와 사분 자리 값
+	/// ```rust
+	/// use vanilla::easing_function::cubic;
+	///
+	/// assert_eq!(cubic::r#in(0.5), 0.125);
+	/// assert_eq!(cubic::out(0.5), 0.875);
+	/// assert_eq!(cubic::in_out(0.75), 0.9375);
+	/// ```
 	//==============================================================================
 	pub mod cubic {
 		//==============================================================================
 		/// 천천히 시작한다.
+		///
+		/// # 인자
+		/// - `progress`: 진행률. (0 ~ 1)
+		///
+		/// # 돌려줌
+		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
 		pub fn r#in(progress: f32) -> f32 {
 			progress * progress * progress
@@ -592,6 +994,12 @@ pub mod easing_function {
 
 		//==============================================================================
 		/// 천천히 끝난다.
+		///
+		/// # 인자
+		/// - `progress`: 진행률. (0 ~ 1)
+		///
+		/// # 돌려줌
+		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
 		pub fn out(progress: f32) -> f32 {
 			let shifted_progress = progress - 1.0;
@@ -600,6 +1008,12 @@ pub mod easing_function {
 
 		//==============================================================================
 		/// 천천히 시작하고 천천히 끝난다.
+		///
+		/// # 인자
+		/// - `progress`: 진행률. (0 ~ 1)
+		///
+		/// # 돌려줌
+		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
 		pub fn in_out(progress: f32) -> f32 {
 			let doubled_progress = progress * 2.0;
@@ -613,10 +1027,26 @@ pub mod easing_function {
 
 	//==============================================================================
 	/// 4차 곡선.
+	///
+	/// # 예제
+	/// 가운데와 사분 자리 값
+	/// ```rust
+	/// use vanilla::easing_function::quartic;
+	///
+	/// assert_eq!(quartic::r#in(0.5), 0.0625);
+	/// assert_eq!(quartic::out(0.5), 0.9375);
+	/// assert_eq!(quartic::in_out(0.25), 0.03125);
+	/// ```
 	//==============================================================================
 	pub mod quartic {
 		//==============================================================================
 		/// 천천히 시작한다.
+		///
+		/// # 인자
+		/// - `progress`: 진행률. (0 ~ 1)
+		///
+		/// # 돌려줌
+		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
 		pub fn r#in(progress: f32) -> f32 {
 			progress * progress * progress * progress
@@ -624,6 +1054,12 @@ pub mod easing_function {
 
 		//==============================================================================
 		/// 천천히 끝난다.
+		///
+		/// # 인자
+		/// - `progress`: 진행률. (0 ~ 1)
+		///
+		/// # 돌려줌
+		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
 		pub fn out(progress: f32) -> f32 {
 			let shifted_progress = progress - 1.0;
@@ -632,6 +1068,12 @@ pub mod easing_function {
 
 		//==============================================================================
 		/// 천천히 시작하고 천천히 끝난다.
+		///
+		/// # 인자
+		/// - `progress`: 진행률. (0 ~ 1)
+		///
+		/// # 돌려줌
+		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
 		pub fn in_out(progress: f32) -> f32 {
 			let doubled_progress = progress * 2.0;
@@ -645,10 +1087,26 @@ pub mod easing_function {
 
 	//==============================================================================
 	/// 5차 곡선.
+	///
+	/// # 예제
+	/// 가운데와 사분 자리 값
+	/// ```rust
+	/// use vanilla::easing_function::quintic;
+	///
+	/// assert_eq!(quintic::r#in(0.5), 0.03125);
+	/// assert_eq!(quintic::out(0.5), 0.96875);
+	/// assert_eq!(quintic::in_out(0.75), 0.984375);
+	/// ```
 	//==============================================================================
 	pub mod quintic {
 		//==============================================================================
 		/// 천천히 시작한다.
+		///
+		/// # 인자
+		/// - `progress`: 진행률. (0 ~ 1)
+		///
+		/// # 돌려줌
+		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
 		pub fn r#in(progress: f32) -> f32 {
 			progress * progress * progress * progress * progress
@@ -656,6 +1114,12 @@ pub mod easing_function {
 
 		//==============================================================================
 		/// 천천히 끝난다.
+		///
+		/// # 인자
+		/// - `progress`: 진행률. (0 ~ 1)
+		///
+		/// # 돌려줌
+		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
 		pub fn out(progress: f32) -> f32 {
 			let shifted_progress = progress - 1.0;
@@ -664,6 +1128,12 @@ pub mod easing_function {
 
 		//==============================================================================
 		/// 천천히 시작하고 천천히 끝난다.
+		///
+		/// # 인자
+		/// - `progress`: 진행률. (0 ~ 1)
+		///
+		/// # 돌려줌
+		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
 		pub fn in_out(progress: f32) -> f32 {
 			let doubled_progress = progress * 2.0;
@@ -677,12 +1147,28 @@ pub mod easing_function {
 
 	//==============================================================================
 	/// 사인 곡선.
+	///
+	/// # 예제
+	/// 끝과 가운데 값
+	/// ```rust
+	/// use vanilla::easing_function::sinusoidal;
+	///
+	/// assert_eq!(sinusoidal::r#in(0.0), 0.0);
+	/// assert!((sinusoidal::out(1.0) - 1.0).abs() < 1e-6);
+	/// assert!((sinusoidal::in_out(0.5) - 0.5).abs() < 1e-6);
+	/// ```
 	//==============================================================================
 	pub mod sinusoidal {
 		use super::PI;
 
 		//==============================================================================
 		/// 천천히 시작한다.
+		///
+		/// # 인자
+		/// - `progress`: 진행률. (0 ~ 1)
+		///
+		/// # 돌려줌
+		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
 		pub fn r#in(progress: f32) -> f32 {
 			1.0 - (progress * PI / 2.0).cos()
@@ -690,6 +1176,12 @@ pub mod easing_function {
 
 		//==============================================================================
 		/// 천천히 끝난다.
+		///
+		/// # 인자
+		/// - `progress`: 진행률. (0 ~ 1)
+		///
+		/// # 돌려줌
+		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
 		pub fn out(progress: f32) -> f32 {
 			(progress * PI / 2.0).sin()
@@ -697,6 +1189,12 @@ pub mod easing_function {
 
 		//==============================================================================
 		/// 천천히 시작하고 천천히 끝난다.
+		///
+		/// # 인자
+		/// - `progress`: 진행률. (0 ~ 1)
+		///
+		/// # 돌려줌
+		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
 		pub fn in_out(progress: f32) -> f32 {
 			0.5 * (1.0 - (PI * progress).cos())
@@ -705,10 +1203,27 @@ pub mod easing_function {
 
 	//==============================================================================
 	/// 지수 곡선.
+	///
+	/// # 예제
+	/// 끝과 가운데 값
+	/// ```rust
+	/// use vanilla::easing_function::exponential;
+	///
+	/// assert_eq!(exponential::r#in(0.0), 0.0);
+	/// assert_eq!(exponential::out(1.0), 1.0);
+	/// assert!((exponential::r#in(0.5) - 0.03125).abs() < 1e-6);
+	/// assert!((exponential::out(0.5) - 0.96875).abs() < 1e-6);
+	/// ```
 	//==============================================================================
 	pub mod exponential {
 		//==============================================================================
 		/// 천천히 시작한다.
+		///
+		/// # 인자
+		/// - `progress`: 진행률. (0 ~ 1)
+		///
+		/// # 돌려줌
+		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
 		pub fn r#in(progress: f32) -> f32 {
 			if progress == 0.0 {
@@ -719,6 +1234,12 @@ pub mod easing_function {
 
 		//==============================================================================
 		/// 천천히 끝난다.
+		///
+		/// # 인자
+		/// - `progress`: 진행률. (0 ~ 1)
+		///
+		/// # 돌려줌
+		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
 		pub fn out(progress: f32) -> f32 {
 			if progress == 1.0 {
@@ -729,6 +1250,12 @@ pub mod easing_function {
 
 		//==============================================================================
 		/// 천천히 시작하고 천천히 끝난다.
+		///
+		/// # 인자
+		/// - `progress`: 진행률. (0 ~ 1)
+		///
+		/// # 돌려줌
+		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
 		pub fn in_out(progress: f32) -> f32 {
 			if progress == 0.0 {
@@ -747,10 +1274,26 @@ pub mod easing_function {
 
 	//==============================================================================
 	/// 원 곡선.
+	///
+	/// # 예제
+	/// 원 위의 값
+	/// ```rust
+	/// use vanilla::easing_function::circular;
+	///
+	/// assert!((circular::r#in(0.6) - 0.2).abs() < 1e-6);
+	/// assert!((circular::out(0.4) - 0.8).abs() < 1e-6);
+	/// assert_eq!(circular::in_out(0.5), 0.5);
+	/// ```
 	//==============================================================================
 	pub mod circular {
 		//==============================================================================
 		/// 천천히 시작한다.
+		///
+		/// # 인자
+		/// - `progress`: 진행률. (0 ~ 1)
+		///
+		/// # 돌려줌
+		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
 		pub fn r#in(progress: f32) -> f32 {
 			1.0 - (1.0 - progress * progress).sqrt()
@@ -758,6 +1301,12 @@ pub mod easing_function {
 
 		//==============================================================================
 		/// 천천히 끝난다.
+		///
+		/// # 인자
+		/// - `progress`: 진행률. (0 ~ 1)
+		///
+		/// # 돌려줌
+		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
 		pub fn out(progress: f32) -> f32 {
 			let shifted_progress = progress - 1.0;
@@ -766,6 +1315,12 @@ pub mod easing_function {
 
 		//==============================================================================
 		/// 천천히 시작하고 천천히 끝난다.
+		///
+		/// # 인자
+		/// - `progress`: 진행률. (0 ~ 1)
+		///
+		/// # 돌려줌
+		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
 		pub fn in_out(progress: f32) -> f32 {
 			let doubled_progress = progress * 2.0;
@@ -780,6 +1335,17 @@ pub mod easing_function {
 	//==============================================================================
 	/// 튕기는 고무줄.
 	/// - 원본은 a = 0.1, p = 0.4 로 시작하지만 a < 1 이면 a = 1, s = p / 4 로 바꾸므로 늘 아래 값이다.
+	///
+	/// # 예제
+	/// 끝을 넘고 처음 아래로 내려가는 값
+	/// ```rust
+	/// use vanilla::easing_function::elastic;
+	///
+	/// assert_eq!(elastic::out(0.0), 0.0);
+	/// assert_eq!(elastic::out(1.0), 1.0);
+	/// assert!((elastic::out(0.2) - 1.25).abs() < 1e-5);
+	/// assert!((elastic::r#in(0.8) + 0.25).abs() < 1e-5);
+	/// ```
 	//==============================================================================
 	pub mod elastic {
 		use super::PI;
@@ -790,6 +1356,12 @@ pub mod easing_function {
 
 		//==============================================================================
 		/// 시작에서 떨다가 나아간다.
+		///
+		/// # 인자
+		/// - `progress`: 진행률. (0 ~ 1)
+		///
+		/// # 돌려줌
+		/// 보간 비율. (0 에서 0, 1 에서 1, 사이에서는 0 ~ 1 밖으로 넘치며 떤다)
 		//==============================================================================
 		pub fn r#in(progress: f32) -> f32 {
 			if progress == 0.0 {
@@ -805,6 +1377,12 @@ pub mod easing_function {
 
 		//==============================================================================
 		/// 끝을 넘었다가 떨며 멈춘다.
+		///
+		/// # 인자
+		/// - `progress`: 진행률. (0 ~ 1)
+		///
+		/// # 돌려줌
+		/// 보간 비율. (0 에서 0, 1 에서 1, 사이에서는 0 ~ 1 밖으로 넘치며 떤다)
 		//==============================================================================
 		pub fn out(progress: f32) -> f32 {
 			if progress == 0.0 {
@@ -819,6 +1397,12 @@ pub mod easing_function {
 
 		//==============================================================================
 		/// 시작과 끝에서 떤다.
+		///
+		/// # 인자
+		/// - `progress`: 진행률. (0 ~ 1)
+		///
+		/// # 돌려줌
+		/// 보간 비율. (0 에서 0, 1 에서 1, 사이에서는 0 ~ 1 밖으로 넘치며 떤다)
 		//==============================================================================
 		pub fn in_out(progress: f32) -> f32 {
 			if progress == 0.0 {
@@ -839,6 +1423,17 @@ pub mod easing_function {
 
 	//==============================================================================
 	/// 뒤로 살짝 물러났다가 간다.
+	///
+	/// # 예제
+	/// 0 아래와 1 위로 넘치는 값
+	/// ```rust
+	/// use vanilla::easing_function::back;
+	///
+	/// assert!(back::r#in(0.5) < 0.0);
+	/// assert!(back::out(0.5) > 1.0);
+	/// assert!((back::r#in(1.0) - 1.0).abs() < 1e-6);
+	/// assert!(back::out(0.0).abs() < 1e-6);
+	/// ```
 	//==============================================================================
 	pub mod back {
 		const BACK_OVERSHOOT: f32 = 1.70158;
@@ -846,6 +1441,12 @@ pub mod easing_function {
 
 		//==============================================================================
 		/// 뒤로 물러났다가 출발한다.
+		///
+		/// # 인자
+		/// - `progress`: 진행률. (0 ~ 1)
+		///
+		/// # 돌려줌
+		/// 보간 비율. (0 에서 0, 1 에서 1, 시작 쪽에서 0 아래로 내려간다)
 		//==============================================================================
 		pub fn r#in(progress: f32) -> f32 {
 			progress * progress * ((BACK_OVERSHOOT + 1.0) * progress - BACK_OVERSHOOT)
@@ -853,6 +1454,12 @@ pub mod easing_function {
 
 		//==============================================================================
 		/// 끝을 살짝 넘었다가 돌아온다.
+		///
+		/// # 인자
+		/// - `progress`: 진행률. (0 ~ 1)
+		///
+		/// # 돌려줌
+		/// 보간 비율. (0 에서 0, 1 에서 1, 끝 쪽에서 1 을 넘는다)
 		//==============================================================================
 		pub fn out(progress: f32) -> f32 {
 			let shifted_progress = progress - 1.0;
@@ -861,6 +1468,12 @@ pub mod easing_function {
 
 		//==============================================================================
 		/// 시작에서 물러나고 끝에서 넘친다.
+		///
+		/// # 인자
+		/// - `progress`: 진행률. (0 ~ 1)
+		///
+		/// # 돌려줌
+		/// 보간 비율. (0 에서 0, 1 에서 1, 시작 쪽에서 0 아래로, 끝 쪽에서 1 위로 넘친다)
 		//==============================================================================
 		pub fn in_out(progress: f32) -> f32 {
 			let doubled_progress = progress * 2.0;
@@ -874,10 +1487,27 @@ pub mod easing_function {
 
 	//==============================================================================
 	/// 바닥에 튕긴다.
+	///
+	/// # 예제
+	/// 튕기는 자리의 값
+	/// ```rust
+	/// use vanilla::easing_function::bounce;
+	///
+	/// assert_eq!(bounce::out(0.0), 0.0);
+	/// assert!((bounce::out(0.5) - 0.765625).abs() < 1e-6);
+	/// assert!((bounce::out(1.0) - 1.0).abs() < 1e-6);
+	/// assert_eq!(bounce::in_out(0.5), 0.5);
+	/// ```
 	//==============================================================================
 	pub mod bounce {
 		//==============================================================================
 		/// 시작에서 튕기다 나아간다.
+		///
+		/// # 인자
+		/// - `progress`: 진행률. (0 ~ 1)
+		///
+		/// # 돌려줌
+		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
 		pub fn r#in(progress: f32) -> f32 {
 			1.0 - out(1.0 - progress)
@@ -885,6 +1515,12 @@ pub mod easing_function {
 
 		//==============================================================================
 		/// 끝에 닿아 튕기다 멈춘다.
+		///
+		/// # 인자
+		/// - `progress`: 진행률. (0 ~ 1)
+		///
+		/// # 돌려줌
+		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
 		pub fn out(progress: f32) -> f32 {
 			if progress < 1.0 / 2.75 {
@@ -906,6 +1542,12 @@ pub mod easing_function {
 
 		//==============================================================================
 		/// 시작과 끝에서 튕긴다.
+		///
+		/// # 인자
+		/// - `progress`: 진행률. (0 ~ 1)
+		///
+		/// # 돌려줌
+		/// 보간 비율. (0 ~ 1, 0 에서 0, 1 에서 1)
 		//==============================================================================
 		pub fn in_out(progress: f32) -> f32 {
 			if progress < 0.5 {

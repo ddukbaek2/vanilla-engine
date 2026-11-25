@@ -15,6 +15,27 @@ use std::rc::Rc;
 
 //==============================================================================
 /// 애니메이션 처리기.
+/// - 프레임(Frame) 목록을 초당 프레임 수로 넘긴다. 노드에 붙지 않으므로 들고 있는 쪽이 tick 을 불러 주고 지금 프레임을 Sprite 에 건다.
+/// - 처음은 프레임 없음, 초당 10 프레임, 반복, 정지 상태.
+///
+/// # 예제
+/// 스프라이트 시트 네 칸을 돌려 Sprite 에 걸기
+/// ```rust
+/// use vanilla::{Animation, Image, Rect, Sprite};
+///
+/// let sheet = Image::create_from_pixels(64, 16, vec![255u8; 64 * 16 * 4]);
+/// let rects: Vec<Rect> = (0..4).map(|frame_index| Rect::create(16.0 * frame_index as f32, 0.0, 16.0, 16.0)).collect();
+/// let mut animation = Animation::new();
+/// animation.set_frames_from_rects(sheet, &rects);
+/// animation.set_animation_speed(8.0);
+/// animation.play();
+/// animation.tick(0.25);
+/// assert_eq!(animation.get_current_frame_index(), 2);
+///
+/// let mut sprite = Sprite::new();
+/// sprite.set_frame(animation.get_current_frame());
+/// assert_eq!(sprite.get_image_rect(), Rect::create(32.0, 0.0, 16.0, 16.0));
+/// ```
 //==============================================================================
 pub struct Animation {
 	frames: Vec<Frame>,
@@ -29,6 +50,9 @@ pub struct Animation {
 impl Animation {
 	//==============================================================================
 	/// 생성. (초당 10 프레임, 반복, 정지 상태)
+	///
+	/// # 돌려줌
+	/// 프레임이 없는 새 처리기.
 	//==============================================================================
 	pub fn new() -> Animation {
 		Animation {
@@ -44,6 +68,30 @@ impl Animation {
 
 	//==============================================================================
 	/// 갱신. (쌓인 시간만큼 프레임을 넘긴다. 한 번에 여러 프레임을 넘길 수 있다)
+	/// - 재생 중이 아니거나, 프레임이 없거나, 초당 프레임 수가 0 이하면 아무것도 하지 않는다. 한 프레임에 못 미친 시간은 다음 tick 으로 넘긴다.
+	/// - 끝을 지나면 반복이면 처음으로 돌고, 아니면 마지막 프레임에서 멈추고 완료 콜백을 부른다.
+	///
+	/// # 인자
+	/// - `time_delta`: 지난 시간. (초)
+	///
+	/// # 예제
+	/// 한 번에 두 프레임 넘기고 처음으로 돌기
+	/// ```rust
+	/// use vanilla::{Animation, Image, Rect};
+	///
+	/// let sheet = Image::create_from_pixels(48, 16, vec![255u8; 48 * 16 * 4]);
+	/// let rects = [Rect::create(0.0, 0.0, 16.0, 16.0), Rect::create(16.0, 0.0, 16.0, 16.0), Rect::create(32.0, 0.0, 16.0, 16.0)];
+	/// let mut animation = Animation::new();
+	/// animation.set_frames_from_rects(sheet, &rects);
+	/// animation.set_animation_speed(4.0);
+	/// animation.play();
+	/// animation.tick(0.125);
+	/// assert_eq!(animation.get_current_frame_index(), 0);
+	/// animation.tick(0.375);
+	/// assert_eq!(animation.get_current_frame_index(), 2);
+	/// animation.tick(0.25);
+	/// assert_eq!(animation.get_current_frame_index(), 0);
+	/// ```
 	//==============================================================================
 	pub fn tick(&mut self, time_delta: f32) {
 		if !self.is_playing || self.frames.is_empty() || self.animation_speed <= 0.0 {
@@ -112,6 +160,9 @@ impl Animation {
 
 	//==============================================================================
 	/// 프레임 설정. (설정한 뒤 정지한다)
+	///
+	/// # 인자
+	/// - `frames`: 차례대로 보일 프레임 목록. (빈 목록도 받는다)
 	//==============================================================================
 	pub fn set_frames(&mut self, frames: Vec<Frame>) {
 		self.frames = frames;
@@ -120,6 +171,9 @@ impl Animation {
 
 	//==============================================================================
 	/// 프레임 설정. (낱장의 스프라이트 이미지 목록, 비면 무시한다)
+	///
+	/// # 인자
+	/// - `images`: 프레임마다 쓸 그림 목록. (프레임마다 그 그림 전체가 영역이다)
 	//==============================================================================
 	pub fn set_frames_from_images(&mut self, images: &[Rc<Image>]) {
 		if images.is_empty() {
@@ -131,6 +185,10 @@ impl Animation {
 
 	//==============================================================================
 	/// 프레임 설정. (스프라이트 시트 한 장과 칸 영역 목록, 비면 무시한다)
+	///
+	/// # 인자
+	/// - `image`: 스프라이트 시트 그림.
+	/// - `rects`: 프레임마다 쓸 시트 안의 칸 영역 목록. (픽셀, 시트 왼쪽 위 기준)
 	//==============================================================================
 	pub fn set_frames_from_rects(&mut self, image: Rc<Image>, rects: &[Rect]) {
 		if rects.is_empty() {
@@ -142,6 +200,9 @@ impl Animation {
 
 	//==============================================================================
 	/// 초당 프레임 수 설정. (예: 60 이면 초당 이미지가 60 번 바뀐다. 0 이하면 넘기지 않는다)
+	///
+	/// # 인자
+	/// - `animation_speed`: 초당 프레임 수. (처음 10)
 	//==============================================================================
 	pub fn set_animation_speed(&mut self, animation_speed: f32) {
 		self.animation_speed = animation_speed;
@@ -149,6 +210,9 @@ impl Animation {
 
 	//==============================================================================
 	/// 반복 여부 설정.
+	///
+	/// # 인자
+	/// - `is_loop`: true 면 끝에서 처음으로 돌고, false 면 마지막 프레임에서 멈춘다. (처음 true)
 	//==============================================================================
 	pub fn set_loop(&mut self, is_loop: bool) {
 		self.is_loop = is_loop;
@@ -156,6 +220,33 @@ impl Animation {
 
 	//==============================================================================
 	/// 애니메이션 완료 콜백 설정. (반복하지 않을 때 마지막 프레임에 닿으면 불린다)
+	/// - 다시 부르면 앞의 콜백을 바꾼다. 멈춘 뒤에는 다시 재생해 끝에 닿을 때까지 불리지 않는다.
+	///
+	/// # 인자
+	/// - `callback`: 끝에 닿을 때 부를 함수. (tick 안에서 불린다)
+	///
+	/// # 예제
+	/// 한 번 돌고 끝난 것 알기
+	/// ```rust
+	/// use vanilla::{Animation, Image};
+	/// use std::cell::Cell;
+	/// use std::rc::Rc;
+	///
+	/// let images = [Image::create_from_pixels(8, 8, vec![0u8; 8 * 8 * 4]), Image::create_from_pixels(8, 8, vec![0u8; 8 * 8 * 4])];
+	/// let mut animation = Animation::new();
+	/// animation.set_frames_from_images(&images);
+	/// animation.set_loop(false);
+	/// let complete_count = Rc::new(Cell::new(0));
+	/// let complete_count_in_callback = complete_count.clone();
+	/// animation.set_on_complete(move || {
+	/// 	complete_count_in_callback.set(complete_count_in_callback.get() + 1);
+	/// });
+	/// animation.play();
+	/// animation.tick(1.0);
+	/// assert_eq!(complete_count.get(), 1);
+	/// assert!(!animation.is_playing());
+	/// assert_eq!(animation.get_current_frame_index(), 1);
+	/// ```
 	//==============================================================================
 	pub fn set_on_complete(&mut self, callback: impl FnMut() + 'static) {
 		self.on_complete = Some(Box::new(callback));
@@ -163,6 +254,9 @@ impl Animation {
 
 	//==============================================================================
 	/// 특정 프레임으로 이동하여 재생한다. (번호는 프레임 수 안으로 맞춘다)
+	///
+	/// # 인자
+	/// - `index`: 옮겨 갈 프레임 번호. (0 부터, 프레임 수 - 1 보다 크면 마지막, 프레임이 없으면 0)
 	//==============================================================================
 	pub fn goto_and_play(&mut self, index: usize) {
 		self.current_frame_index = self.clamp_frame_index(index);
@@ -172,6 +266,9 @@ impl Animation {
 
 	//==============================================================================
 	/// 특정 프레임으로 이동하여 정지한다. (번호는 프레임 수 안으로 맞춘다)
+	///
+	/// # 인자
+	/// - `index`: 옮겨 갈 프레임 번호. (0 부터, 프레임 수 - 1 보다 크면 마지막, 프레임이 없으면 0)
 	//==============================================================================
 	pub fn goto_and_stop(&mut self, index: usize) {
 		self.current_frame_index = self.clamp_frame_index(index);
@@ -192,6 +289,9 @@ impl Animation {
 
 	//==============================================================================
 	/// 재생 중인지 여부 반환.
+	///
+	/// # 돌려줌
+	/// 재생 중이면 true.
 	//==============================================================================
 	pub fn is_playing(&self) -> bool {
 		self.is_playing
@@ -199,6 +299,9 @@ impl Animation {
 
 	//==============================================================================
 	/// 현재 프레임 반환. (없으면 None)
+	///
+	/// # 돌려줌
+	/// 지금 프레임. 프레임이 없으면 None.
 	//==============================================================================
 	pub fn get_current_frame(&self) -> Option<&Frame> {
 		self.frames.get(self.current_frame_index)
@@ -206,6 +309,9 @@ impl Animation {
 
 	//==============================================================================
 	/// 현재 이미지 반환.
+	///
+	/// # 돌려줌
+	/// 지금 프레임의 그림. 프레임이 없으면 None.
 	//==============================================================================
 	pub fn get_current_image(&self) -> Option<&Rc<Image>> {
 		let frame = self.get_current_frame();
@@ -214,6 +320,9 @@ impl Animation {
 
 	//==============================================================================
 	/// 현재 영역 반환.
+	///
+	/// # 돌려줌
+	/// 지금 프레임의 그림 안 영역. (픽셀) 프레임이 없으면 None.
 	//==============================================================================
 	pub fn get_current_rect(&self) -> Option<Rect> {
 		let frame = self.get_current_frame();
@@ -222,6 +331,9 @@ impl Animation {
 
 	//==============================================================================
 	/// 현재 프레임 번호 반환.
+	///
+	/// # 돌려줌
+	/// 지금 프레임 번호. (0 부터)
 	//==============================================================================
 	pub fn get_current_frame_index(&self) -> usize {
 		self.current_frame_index
@@ -229,6 +341,9 @@ impl Animation {
 
 	//==============================================================================
 	/// 모든 프레임 수 반환.
+	///
+	/// # 돌려줌
+	/// 프레임 수.
 	//==============================================================================
 	pub fn get_total_frame_count(&self) -> usize {
 		self.frames.len()
