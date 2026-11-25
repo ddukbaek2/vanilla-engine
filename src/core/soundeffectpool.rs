@@ -24,6 +24,34 @@ pub const DEFAULT_VOICE_COUNT: usize = 6;
 
 //==============================================================================
 /// 효과음 풀.
+/// - 플레이어 여럿을 차례로 돌려 같은 효과음이 겹쳐도 앞 소리를 끊지 않는다. (보이스 수보다 많이 겹치면 가장 오래된 것을 끊는다)
+///
+/// # 예제
+/// 보이스 6 개 풀로 효과음 겹쳐 틀기
+/// ```rust,no_run
+/// use vanilla::{Engine, EngineConfiguration, SoundEffectPool};
+///
+/// let engine = Engine::new(EngineConfiguration::new());
+/// let hit_audio_asset = engine.load_audio_asset("tests/assets/audio/wav_s16_stereo.wav").unwrap();
+/// let mut sound_effect_pool = SoundEffectPool::new(engine.get_audio_manager(), 6);
+/// sound_effect_pool.play(&hit_audio_asset, 1.0);
+/// sound_effect_pool.play(&hit_audio_asset, 0.5);
+/// sound_effect_pool.set_volume(0.8);
+/// assert_eq!(sound_effect_pool.get_voice_count(), 6);
+/// ```
+///
+/// 보이스가 없는 풀은 재생하지 않고 음량만 든다
+/// ```rust
+/// use vanilla::{AudioManager, SoundEffectPool};
+///
+/// let audio_manager = AudioManager::new();
+/// let mut sound_effect_pool = SoundEffectPool::new(&audio_manager, 0);
+/// assert_eq!(sound_effect_pool.get_voice_count(), 0);
+/// sound_effect_pool.set_volume(1.5);
+/// assert_eq!(sound_effect_pool.get_volume(), 1.0);
+/// sound_effect_pool.set_muted(true);
+/// assert!(sound_effect_pool.is_muted());
+/// ```
 //==============================================================================
 pub struct SoundEffectPool {
 	player_list: Vec<AudioPlayer>,
@@ -38,6 +66,13 @@ pub struct SoundEffectPool {
 impl SoundEffectPool {
 	//==============================================================================
 	/// 생성. (voice_count: 동시에 겹칠 수 있는 최대 재생 수)
+	///
+	/// # 인자
+	/// - `audio_manager`: 플레이어를 만들 매니저. (보통 engine.get_audio_manager())
+	/// - `voice_count`: 동시에 겹칠 수 있는 최대 재생 수. (원본 기본 6, DEFAULT_VOICE_COUNT) 0 이면 play 가 아무것도 하지 않는다.
+	///
+	/// # 돌려줌
+	/// 플레이어 voice_count 개를 든 새 풀. (음량 1, 음소거 아님)
 	//==============================================================================
 	pub fn new(audio_manager: &AudioManager, voice_count: usize) -> SoundEffectPool {
 		let mut player_list = Vec::with_capacity(voice_count);
@@ -66,6 +101,11 @@ impl SoundEffectPool {
 	/// 효과음 재생.
 	/// - 다음 차례의 플레이어에 애셋을 실어 재생한다. 그 플레이어가 재생 중이었다면 끊고 새로 튼다.
 	/// - 음량은 이 재생의 음량(0 ~ 1)에 풀의 음량을 곱한 것이다.
+	/// - 음소거 중이거나 보이스가 없으면 아무것도 하지 않고 차례도 넘기지 않는다.
+	///
+	/// # 인자
+	/// - `audio_asset`: 틀 효과음 애셋.
+	/// - `volume`: 이 재생의 음량. (0 ~ 1, 풀의 음량을 곱한 뒤 0 ~ 1 로 자른다)
 	//==============================================================================
 	pub fn play(&mut self, audio_asset: &Rc<AudioAsset>, volume: f32) {
 		if self.is_muted || self.player_list.is_empty() {
@@ -97,6 +137,10 @@ impl SoundEffectPool {
 
 	//==============================================================================
 	/// 음소거 설정.
+	/// - 모든 플레이어를 음소거하거나 풀고, 음소거 중에는 play 를 건너뛴다.
+	///
+	/// # 인자
+	/// - `is_muted`: true 면 음소거, false 면 풀기.
 	//==============================================================================
 	pub fn set_muted(&mut self, is_muted: bool) {
 		self.is_muted = is_muted;
@@ -112,6 +156,9 @@ impl SoundEffectPool {
 
 	//==============================================================================
 	/// 풀 전체의 음량 설정. (0 ~ 1, 재생 중인 것에도 바로 곱해진다)
+	///
+	/// # 인자
+	/// - `volume`: 풀 전체의 음량. (0 ~ 1 로 자른다, 유한하지 않으면 1)
 	//==============================================================================
 	pub fn set_volume(&mut self, volume: f32) {
 		self.volume = clamp_volume(volume);
@@ -122,6 +169,9 @@ impl SoundEffectPool {
 
 	//==============================================================================
 	/// 풀 전체의 음량.
+	///
+	/// # 돌려줌
+	/// 풀 전체의 음량. (0 ~ 1, 기본 1)
 	//==============================================================================
 	pub fn get_volume(&self) -> f32 {
 		self.volume
@@ -129,6 +179,9 @@ impl SoundEffectPool {
 
 	//==============================================================================
 	/// 음소거 여부.
+	///
+	/// # 돌려줌
+	/// set_muted(true) 뒤면 true.
 	//==============================================================================
 	pub fn is_muted(&self) -> bool {
 		self.is_muted
@@ -136,6 +189,9 @@ impl SoundEffectPool {
 
 	//==============================================================================
 	/// 보이스 수 반환.
+	///
+	/// # 돌려줌
+	/// 풀이 든 플레이어 수. (만들 때의 voice_count)
 	//==============================================================================
 	pub fn get_voice_count(&self) -> usize {
 		self.player_list.len()

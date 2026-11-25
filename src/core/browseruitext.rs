@@ -10,6 +10,18 @@
 //!   en 과 en-PH, en-LR 은 en-US, en-CA 와 그 밖의 en-* 는 en-GB, 옛 이름 iw, no, tl, in 은 he, nb, fil, id. 맞는 것이 없으면 en-US)
 //!   zh-MO 는 CLDR 의 부모 로케일 zh-Hant-HK 를 따라 zh-HK, zh-SG 는 zh-CN 으로 본다. (크롬의 ICU4X 데이터로 돌려 보지는 않았다)
 //!   웹은 브라우저가 그리므로 이 표를 쓰지 않는다.
+//!
+//! # 예제
+//! 질문 창 단추 글과 고른 로케일 읽기 (데스크탑)
+//! ```rust
+//! use vanilla::core::browseruitext::{read_browser_ui_locale, read_browser_ui_text, BrowserUiText};
+//!
+//! let ok_text = read_browser_ui_text(BrowserUiText::Ok);
+//! let cancel_text = read_browser_ui_text(BrowserUiText::Cancel);
+//! assert!(!ok_text.is_empty());
+//! assert!(!cancel_text.is_empty());
+//! assert!(!read_browser_ui_locale().is_empty());
+//! ```
 //==============================================================================
 use serde_json::{Map, Value};
 use std::cell::RefCell;
@@ -73,6 +85,9 @@ pub enum BrowserUiText {
 impl BrowserUiText {
 	//==============================================================================
 	/// 표의 키.
+	///
+	/// # 돌려줌
+	/// browseruitext.json 의 키. (undo, paste_mac 같은 것)
 	//==============================================================================
 	fn get_key(self) -> &'static str {
 		match self {
@@ -270,6 +285,13 @@ fn match_locale(locale_map: &Map<String, Value>, language_tag: &str) -> Option<S
 
 //==============================================================================
 /// 브라우저 화면 글. (고른 로케일, 그 로케일에 없으면 en-US)
+/// - 표는 스레드마다 처음 부를 때 읽고, 그때 시스템 선호 언어로 로케일을 고른다.
+///
+/// # 인자
+/// - `text`: 읽을 글 종류.
+///
+/// # 돌려줌
+/// 그 로케일의 글. (en-US 에도 없으면 빈 글)
 //==============================================================================
 pub fn read_browser_ui_text(text: BrowserUiText) -> String {
 	with_state(|state| {
@@ -285,6 +307,9 @@ pub fn read_browser_ui_text(text: BrowserUiText) -> String {
 
 //==============================================================================
 /// 고른 로케일.
+///
+/// # 돌려줌
+/// 표에서 고른 로케일 이름. (ko, en-US, zh-TW 같은 것, 맞는 것이 없었으면 en-US)
 //==============================================================================
 pub fn read_browser_ui_locale() -> String {
 	with_state(|state| state.locale.clone())

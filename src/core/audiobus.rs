@@ -9,14 +9,10 @@
 //! - 크기와 음소거는 AudioPlayer 와 같은 규칙이다. (0 ~ 1 로 자르고, 음소거를 풀면 설정한 크기로 돌아간다)
 //! - 원본과 다른 것:
 //!   - 상태를 `Rc<RefCell>` 로 나눠 든다. SoundSystem 이 든 버스를 get_music_bus 로 빌려 준 채 크기를 바꾸고 플레이어를 만들 수 있게
-//!   ```text
 //!     메서드는 모두 &self 다. Clone 하면 같은 버스를 보는 손잡이가 하나 더 생긴다.
-//!   ```
 //!   - 버스로 만든 플레이어는 버스 손잡이를 하나 든다. 손잡이를 모두 버리면 버스가 출력에서 떨어진다. (원본은 이은 노드를 브라우저가 살려 둔다)
 //!   - get_gain_node(원본 getGainNode)는 AudioGainNode 를 돌려준다. 웹은 GainNode, 데스크탑은 믹서의 버스 노드를 나눠 드는 `Rc<MixerGainNode>` 다.
-//!   ```text
 //!     어느 쪽이든 as_deref() 가 AudioPlayer::new 의 내보낼 곳이다. (AudioPlayer::new(&audio_manager, audio_bus.get_gain_node().as_deref()), 두 플랫폼이 같다)
-//!   ```
 //==============================================================================
 use crate::core::audiomanager::{AudioManager, AudioManagerState};
 use crate::core::audioplayer::{clamp_volume, AudioPlayer};
@@ -36,6 +32,37 @@ struct AudioBusState {
 
 //==============================================================================
 /// 오디오 버스.
+/// - 버스로 만든 플레이어의 소리를 모아 크기와 음소거를 한꺼번에 건다. Clone 한 손잡이는 같은 버스를 본다.
+///
+/// # 예제
+/// 효과음 버스 크기를 줄이고 음소거하기
+/// ```rust,no_run
+/// use vanilla::{AudioManager, Engine};
+///
+/// fn play_effect(engine: &Engine) {
+/// 	let audio_manager: &AudioManager = engine.get_audio_manager();
+/// 	let effect_bus = audio_manager.create_audio_bus();
+/// 	effect_bus.set_volume(0.5);
+/// 	let mut effect_player = effect_bus.create_audio_player();
+/// 	let audio_asset = engine.load_audio_asset("tests/assets/audio/wav_s16_stereo.wav").unwrap();
+/// 	effect_player.set_audio_asset(audio_asset);
+/// 	effect_player.play(false);
+/// 	effect_bus.mute();
+/// 	assert_eq!(effect_bus.is_muted(), effect_bus.is_available());
+/// 	effect_bus.unmute();
+/// 	assert_eq!(effect_bus.get_volume(), 0.5);
+/// }
+/// ```
+///
+/// 원본처럼 버스 노드를 내보낼 곳으로 넘겨 플레이어 만들기
+/// ```rust,no_run
+/// use vanilla::{AudioBus, AudioManager, AudioPlayer};
+///
+/// let audio_manager = AudioManager::new();
+/// let audio_bus = AudioBus::new(&audio_manager);
+/// let audio_player = AudioPlayer::new(&audio_manager, audio_bus.get_gain_node().as_deref());
+/// assert!(!audio_player.is_playing());
+/// ```
 //==============================================================================
 #[derive(Clone)]
 pub struct AudioBus {
@@ -47,6 +74,12 @@ pub struct AudioBus {
 impl AudioBus {
 	//==============================================================================
 	/// 생성. (원본 new AudioBus(audioContext), 매니저의 AudioContext 가 없으면 만든다, 만들지 못하면 소리 없는 버스)
+	///
+	/// # 인자
+	/// - `audio_manager`: AudioContext 를 든 매니저. (보통 engine.get_audio_manager())
+	///
+	/// # 돌려줌
+	/// 출력에 이은 새 버스. (크기 1, 음소거 아님)
 	//==============================================================================
 	pub fn new(audio_manager: &AudioManager) -> AudioBus {
 		let audio_manager_state = audio_manager.get_shared_state();
@@ -67,6 +100,9 @@ impl AudioBus {
 
 	//==============================================================================
 	/// 이 버스로 트는 오디오 플레이어 생성. (버스가 소리 없으면 소리 없는 플레이어)
+	///
+	/// # 돌려줌
+	/// 이 버스로 소리를 내는 새 플레이어. (버스 손잡이를 하나 들어 버스를 살려 둔다)
 	//==============================================================================
 	pub fn create_audio_player(&self) -> AudioPlayer {
 		let audio_player_backend = self.state.borrow_mut().audio_bus_backend.create_player_backend();
@@ -101,6 +137,9 @@ impl AudioBus {
 
 	//==============================================================================
 	/// 크기 설정. (0 ~ 1, 음소거 중이면 음소거를 풀 때 적용된다)
+	///
+	/// # 인자
+	/// - `volume`: 버스 크기. (0 ~ 1 로 자른다, 유한하지 않으면 1)
 	//==============================================================================
 	pub fn set_volume(&self, volume: f32) {
 		let clamped_volume = clamp_volume(volume);
@@ -113,6 +152,9 @@ impl AudioBus {
 
 	//==============================================================================
 	/// 크기 반환.
+	///
+	/// # 돌려줌
+	/// 설정한 크기. (0 ~ 1, 음소거해도 바뀌지 않는다)
 	//==============================================================================
 	pub fn get_volume(&self) -> f32 {
 		self.state.borrow().volume
@@ -120,6 +162,9 @@ impl AudioBus {
 
 	//==============================================================================
 	/// 음소거 여부 반환.
+	///
+	/// # 돌려줌
+	/// 음소거 중이면 true. (소리 없는 버스는 mute 를 불러도 false)
 	//==============================================================================
 	pub fn is_muted(&self) -> bool {
 		self.state.borrow().is_muted
@@ -127,6 +172,9 @@ impl AudioBus {
 
 	//==============================================================================
 	/// 소리를 모을 수 있는지. (AudioContext 가 있을 때 만든 버스)
+	///
+	/// # 돌려줌
+	/// 백엔드 노드가 있으면 true. (AudioContext 를 만들지 못했을 때 만든 버스는 false)
 	//==============================================================================
 	pub fn is_available(&self) -> bool {
 		self.state.borrow().audio_bus_backend.is_available()
@@ -143,6 +191,9 @@ impl AudioBus {
 	//==============================================================================
 	/// 버스의 GainNode. (원본 getGainNode, 웹 GainNode, 데스크탑 버스 트랙을 나눠 드는 `Rc<RefCell<TrackHandle>>`, AudioContext 가 없을 때 만든 버스는 None)
 	/// - 노드에 직접 건 크기는 크기 칸과 음소거 칸을 바꾸지 않는다. (원본과 같다) 데스크탑은 트랙을 borrow_mut 로 빌린 동안 이 버스의 함수를 부르지 않는다.
+	///
+	/// # 돌려줌
+	/// 버스 노드를 나눠 드는 손잡이. (as_deref() 가 AudioPlayer::new 의 내보낼 곳이다, 소리 없는 버스는 None)
 	//==============================================================================
 	pub fn get_gain_node(&self) -> Option<AudioGainNode> {
 		self.state.borrow().audio_bus_backend.get_gain_node().cloned()

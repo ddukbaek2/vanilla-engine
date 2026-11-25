@@ -10,9 +10,7 @@
 //!   - prompt 입력 칸은 기본값을 넣고 모두 고른 채로 초점을 받는다. Enter 는 확인, Escape 는 취소.
 //!   - 글(제목, 확인, 취소)은 브라우저 화면 언어 자리인 시스템 언어로 고른다. (core/browseruitext.rs)
 //!   - 떠 있는 동안 원본에서 자바스크립트가 멈추듯 씬과 async 작업을 갱신하지 않고(그리기는 멈춘 화면 그대로), 입력은 창만 받는다. 닫히면 눌린 키와 단추를 비운다.
-//!   ```text
 //!     (원본은 창이 포커스를 가져가 페이지에 키가 오지 않는다)
-//!   ```
 //!   - 입력 칸은 글 입력 줄(core/textinput.rs)에서 IME 와 편집 키를 받는다. 누르고 끌어 커서와 선택을 정한다. 되돌리기와 다시 하기도 된다. (크롬 Textfield 처럼)
 //!   - 여러 개를 한 프레임에 부르면 차례로 띄운다. (원본은 창이 떠 있는 동안 자바스크립트가 멈춰 겹쳐 부를 수 없다)
 //! - 원본 prompt 는 답할 때까지 막고 값을 돌려준다. 러스트 판은 엔진 루프를 막을 수 없어 ModalDialogHandle 을 돌려주고, 답하면 끝난다. (is_finished)
@@ -27,8 +25,11 @@ use std::rc::Rc;
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ModalDialogKind {
+	/// 알림 창. (원본 window.alert, 확인만 있다)
 	Alert,
+	/// 확인 창. (원본 window.confirm, 확인과 취소)
 	Confirm,
+	/// 입력 창. (원본 window.prompt, 입력 칸과 확인과 취소)
 	Prompt,
 }
 
@@ -56,6 +57,44 @@ struct ModalDialogHandleState {
 
 //==============================================================================
 /// 질문 창 손잡이. (clone 은 같은 창을 가리킨다)
+/// - Engine::alert, confirm, prompt 가 돌려준다. 답하면 끝나고(is_finished), 답은 get_result, is_confirmed, get_prompt_text 로 읽는다.
+///
+/// # 예제
+/// 데스크탑에서 확인 창을 띄우고 답 기다리기 (웹은 브라우저 창이 닫힌 뒤 끝난 손잡이를 돌려준다)
+/// ```rust
+/// use vanilla::{Engine, EngineConfiguration, ModalDialogResult};
+///
+/// let mut engine = Engine::new(EngineConfiguration::new());
+/// let modal_dialog_handle = engine.confirm("Delete the save data?");
+/// assert!(!modal_dialog_handle.is_finished());
+/// assert_eq!(modal_dialog_handle.get_result(), None);
+/// assert!(!modal_dialog_handle.is_confirmed());
+/// modal_dialog_handle.set_callback(|result: &ModalDialogResult| {
+/// 	if let ModalDialogResult::Confirmed(_) = result {
+/// 		println!("deleted");
+/// 	}
+/// });
+/// ```
+///
+/// 씬에서 이름 묻기
+/// ```rust,no_run
+/// use vanilla::Engine;
+///
+/// fn ask_player_name(engine: &mut Engine) {
+/// 	let modal_dialog_handle = engine.prompt("Name?", "Player");
+/// 	let callback_handle = modal_dialog_handle.clone();
+/// 	modal_dialog_handle.set_callback(move |_result| {
+/// 		match callback_handle.get_prompt_text() {
+/// 			Some(player_name) => {
+/// 				println!("{}", player_name);
+/// 			}
+/// 			None => {
+/// 				println!("cancelled");
+/// 			}
+/// 		}
+/// 	});
+/// }
+/// ```
 //==============================================================================
 #[derive(Clone)]
 pub struct ModalDialogHandle {
@@ -94,6 +133,9 @@ impl ModalDialogHandle {
 
 	//==============================================================================
 	/// 답했는지.
+	///
+	/// # 돌려줌
+	/// 확인이나 취소로 답했으면 true.
 	//==============================================================================
 	pub fn is_finished(&self) -> bool {
 		self.state.borrow().result.is_some()
@@ -101,6 +143,9 @@ impl ModalDialogHandle {
 
 	//==============================================================================
 	/// 답. (아직이면 None)
+	///
+	/// # 돌려줌
+	/// 답의 복사본. (아직 답하지 않았으면 None)
 	//==============================================================================
 	pub fn get_result(&self) -> Option<ModalDialogResult> {
 		self.state.borrow().result.clone()
@@ -108,6 +153,9 @@ impl ModalDialogHandle {
 
 	//==============================================================================
 	/// 확인했는지. (원본 confirm 이 돌려주는 값, 아직이거나 취소면 거짓)
+	///
+	/// # 돌려줌
+	/// 확인으로 답했으면 true. (아직이거나 취소면 false)
 	//==============================================================================
 	pub fn is_confirmed(&self) -> bool {
 		matches!(self.state.borrow().result, Some(ModalDialogResult::Confirmed(_)))
@@ -115,6 +163,9 @@ impl ModalDialogHandle {
 
 	//==============================================================================
 	/// 입력한 글. (원본 prompt 가 돌려주는 값, 취소면 원본 null 처럼 None. 아직이어도 None)
+	///
+	/// # 돌려줌
+	/// 확인했을 때의 입력 글. (alert 와 confirm 을 확인했으면 빈 글, 아직이거나 취소면 None)
 	//==============================================================================
 	pub fn get_prompt_text(&self) -> Option<String> {
 		match &self.state.borrow().result {
@@ -129,6 +180,10 @@ impl ModalDialogHandle {
 
 	//==============================================================================
 	/// 끝난 뒤 부를 함수 걸기. (이미 끝났으면 바로 부른다)
+	/// - 한 번만 불린다. 다시 걸면 앞의 함수를 바꾼다. (아직 끝나지 않았을 때)
+	///
+	/// # 인자
+	/// - `callback`: 답을 받는 함수. (끝날 때 한 번)
 	//==============================================================================
 	pub fn set_callback(&self, callback: impl FnOnce(&ModalDialogResult) + 'static) {
 		let result = self.state.borrow().result.clone();

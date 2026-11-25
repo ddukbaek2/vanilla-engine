@@ -6,9 +6,7 @@
 //! - 만드는 곳은 AudioManager::create_audio_player() 나 AudioPlayer::new(매니저, 내보낼 곳) 이다. AudioContext 가 없으면 아무 소리도 내지 않는 플레이어가 된다. (원본과 같다)
 //!   new 는 원본 new AudioPlayer(audioContext, outputNode) 자리다. 첫 인자는 AudioContext 를 든 매니저이고(AudioContext 가 없으면 만든다),
 //!   내보낼 곳(AudioOutputNode)은 버스의 get_gain_node()(AudioGainNode)의 as_deref() 다. None 이면 출력이다. 두 플랫폼에서 같은 코드다.
-//!   ```text
 //!     AudioPlayer::new(&audio_manager, audio_bus.get_gain_node().as_deref())
-//!   ```
 //!   (웹은 &AudioNode 라 다른 AudioNode 도 넘길 수 있고, 데스크탑은 믹서 버스의 &MixerGainNode 다)
 //!   데스크탑은 내보낼 곳을 직접 넘겨 만든 플레이어도 원본 WebAudio 처럼 이어진 동안 그 버스 노드를 살려 둔다.
 //! - play 는 원본처럼 AudioContext 가 멈춰 있으면 깨운 뒤 튼다. (웹은 resume() 을 기다렸다가, 데스크탑은 그 자리에서)
@@ -41,6 +39,24 @@ pub(crate) fn clamp_volume(volume: f32) -> f32 {
 
 //==============================================================================
 /// 오디오 플레이어.
+/// - 애셋 하나를 실어 틀고, 음량, 음소거, 루프, 재생 위치를 든다. 만든 쪽이 소유하고 버리면 소리도 멈춘다.
+///
+/// # 예제
+/// 애셋을 읽어 1 초 지점부터 반복 재생
+/// ```rust,no_run
+/// use vanilla::{Engine, EngineConfiguration};
+///
+/// let engine = Engine::new(EngineConfiguration::new());
+/// let audio_asset = engine.load_audio_asset("tests/assets/audio/vorbis_stereo.ogg").unwrap();
+/// let mut audio_player = engine.get_audio_manager().create_audio_player();
+/// audio_player.set_audio_asset(audio_asset);
+/// audio_player.set_volume(0.8);
+/// audio_player.set_time(1.0);
+/// audio_player.play(true);
+/// assert!(audio_player.get_duration() > 1.0);
+/// audio_player.mute();
+/// audio_player.stop();
+/// ```
 //==============================================================================
 pub struct AudioPlayer {
 	audio_player_backend: AudioPlayerBackend,
@@ -61,6 +77,25 @@ pub struct AudioPlayer {
 impl AudioPlayer {
 	//==============================================================================
 	/// 생성. (원본 new AudioPlayer(audioContext, outputNode), 매니저의 AudioContext 가 없으면 만든다, 내보낼 곳이 None 이면 출력)
+	///
+	/// # 인자
+	/// - `audio_manager`: AudioContext 를 든 매니저. (보통 engine.get_audio_manager())
+	/// - `output_node`: 소리를 내보낼 노드. (버스의 get_gain_node().as_deref()) None 이면 출력.
+	///
+	/// # 돌려줌
+	/// 새 플레이어. (음량 1, 애셋 없음, AudioContext 를 만들지 못했으면 소리 없는 플레이어)
+	///
+	/// # 예제
+	/// 버스 노드로 내보내는 플레이어
+	/// ```rust,no_run
+	/// use vanilla::{AudioManager, AudioPlayer};
+	///
+	/// let audio_manager = AudioManager::new();
+	/// let audio_bus = audio_manager.create_audio_bus();
+	/// let mut audio_player = AudioPlayer::new(&audio_manager, audio_bus.get_gain_node().as_deref());
+	/// audio_player.set_volume(0.5);
+	/// assert_eq!(audio_player.get_volume(), 0.5);
+	/// ```
 	//==============================================================================
 	pub fn new(audio_manager: &AudioManager, output_node: Option<AudioOutputNode<'_>>) -> AudioPlayer {
 		let audio_manager_state = audio_manager.get_shared_state();
@@ -93,6 +128,10 @@ impl AudioPlayer {
 	//==============================================================================
 	/// 재생. (재생 중이면 멈추고 재생 위치부터 다시 튼다)
 	/// - 오디오 컨텍스트가 일시 중단돼 있으면 재개한 뒤에 튼다. (웹은 resume() 을 기다렸다가, 데스크탑은 그 자리에서)
+	/// - 소리 없는 플레이어이거나 애셋이 없거나 애셋이 아직 읽히지 않았으면 아무것도 하지 않는다.
+	///
+	/// # 인자
+	/// - `is_loop`: true 면 끝에서 처음으로 돌아가 반복한다.
 	//==============================================================================
 	pub fn play(&mut self, is_loop: bool) {
 		if !self.audio_player_backend.is_available() {
@@ -130,6 +169,9 @@ impl AudioPlayer {
 
 	//==============================================================================
 	/// 재생 빠르기 설정. (1 이면 그대로, 음 높이도 같이 바뀐다, 다음 play 부터, 원본 setPlaybackRate)
+	///
+	/// # 인자
+	/// - `playback_rate`: 재생 빠르기 배율. (2 면 두 배 빠르게, 0 이하이거나 유한하지 않으면 1)
 	//==============================================================================
 	pub fn set_playback_rate(&mut self, playback_rate: f64) {
 		let playback_rate = if playback_rate.is_finite() && playback_rate > 0.0 { playback_rate } else { 1.0 };
@@ -193,6 +235,9 @@ impl AudioPlayer {
 
 	//==============================================================================
 	/// 음량 설정. (0 ~ 1, 음소거 중이면 음소거를 풀 때 적용된다)
+	///
+	/// # 인자
+	/// - `volume`: 음량. (0 ~ 1 로 자른다, 유한하지 않으면 1)
 	//==============================================================================
 	pub fn set_volume(&mut self, volume: f32) {
 		let clamped_volume = clamp_volume(volume);
@@ -204,6 +249,9 @@ impl AudioPlayer {
 
 	//==============================================================================
 	/// 음량 반환.
+	///
+	/// # 돌려줌
+	/// 설정한 음량. (0 ~ 1, 음소거해도 바뀌지 않는다)
 	//==============================================================================
 	pub fn get_volume(&self) -> f32 {
 		self.volume
@@ -211,6 +259,9 @@ impl AudioPlayer {
 
 	//==============================================================================
 	/// 재생 위치 설정. (초, 재생 중이면 그 위치부터 바로 다시 튼다)
+	///
+	/// # 인자
+	/// - `time`: 재생 위치. (초, 애셋 처음부터)
 	//==============================================================================
 	pub fn set_time(&mut self, time: f64) {
 		self.time = time;
@@ -222,6 +273,10 @@ impl AudioPlayer {
 
 	//==============================================================================
 	/// 오디오 애셋 설정.
+	/// - 재생 중인 소리는 바꾸지 않는다. 다음 play 부터 이 애셋을 튼다.
+	///
+	/// # 인자
+	/// - `audio_asset`: 틀 애셋. (engine.load_audio_asset 으로 읽은 것)
 	//==============================================================================
 	pub fn set_audio_asset(&mut self, audio_asset: Rc<AudioAsset>) {
 		self.audio_asset = Some(audio_asset);
@@ -229,6 +284,9 @@ impl AudioPlayer {
 
 	//==============================================================================
 	/// 오디오 애셋 반환.
+	///
+	/// # 돌려줌
+	/// 실은 애셋. (없으면 None)
 	//==============================================================================
 	pub fn get_audio_asset(&self) -> Option<&Rc<AudioAsset>> {
 		self.audio_asset.as_ref()
@@ -236,6 +294,9 @@ impl AudioPlayer {
 
 	//==============================================================================
 	/// 재생 여부 반환.
+	///
+	/// # 돌려줌
+	/// 지금 소리를 내고 있으면 true. (끝났거나 멈췄으면 false)
 	//==============================================================================
 	pub fn is_playing(&self) -> bool {
 		self.audio_player_backend.is_playing()
@@ -243,6 +304,9 @@ impl AudioPlayer {
 
 	//==============================================================================
 	/// 음소거 여부 반환.
+	///
+	/// # 돌려줌
+	/// 음소거 중이면 true. (소리 없는 플레이어는 mute 를 불러도 false)
 	//==============================================================================
 	pub fn is_muted(&self) -> bool {
 		self.is_muted
@@ -250,6 +314,9 @@ impl AudioPlayer {
 
 	//==============================================================================
 	/// 재생 위치 반환. (초, set_time 으로 정한 값. 원본처럼 재생 중에 흐르지 않는다)
+	///
+	/// # 돌려줌
+	/// 재생 위치. (초, 기본 0)
 	//==============================================================================
 	pub fn get_time(&self) -> f64 {
 		self.time
@@ -271,6 +338,9 @@ impl AudioPlayer {
 
 	//==============================================================================
 	/// AudioContext. (원본 getAudioContext, 만든 매니저의 것을 빌려 준다, 없으면 None)
+	///
+	/// # 돌려줌
+	/// 빌린 AudioContext. (매니저에 AudioContext 가 없으면 None)
 	//==============================================================================
 	pub fn get_audio_context(&self) -> Option<Ref<'_, AudioContext>> {
 		let audio_manager_state = self.audio_manager_state.as_ref()?;
@@ -279,6 +349,9 @@ impl AudioPlayer {
 
 	//==============================================================================
 	/// 재생 시간 반환. (초, 애셋이 없으면 0)
+	///
+	/// # 돌려줌
+	/// 실은 애셋의 길이. (초, 애셋이 없거나 아직 읽히지 않았으면 0)
 	//==============================================================================
 	pub fn get_duration(&self) -> f64 {
 		match &self.audio_asset {
