@@ -240,9 +240,10 @@ impl Engine {
 
 	//==============================================================================
 	// 씬 하나 내리기. (이번 프레임이 끝난 뒤 destroy 를 부르고 목록에서 뺀다. 없는 핸들이면 아무것도 하지 않는다)
+	// - 핸들(SceneId)이나 원본처럼 씬(씬 공통 상태 &SceneBase)을 받는다.
 	//==============================================================================
-	pub fn unload_scene(&mut self, scene_id: SceneId) {
-		self.pending_unload_scene_id_list.push(scene_id);
+	pub fn unload_scene(&mut self, scene: impl Into<SceneId>) {
+		self.pending_unload_scene_id_list.push(scene.into());
 	}
 
 	//==============================================================================
@@ -1080,7 +1081,9 @@ mod tests {
 		let first_scene_id = engine_runner.scene_list[0].get_scene_base().get_scene_id().expect("핸들");
 		assert_ne!(first_scene_id, second_scene_id);
 
-		engine_runner.engine.unload_scene(first_scene_id);
+		let first_scene_base_id = SceneId::from(engine_runner.scene_list[0].get_scene_base());
+		assert_eq!(first_scene_base_id, first_scene_id);
+		engine_runner.engine.unload_scene(engine_runner.scene_list[0].get_scene_base());
 		assert_eq!(first_counts[1].get(), 0);
 		engine_runner.apply_pending_scenes();
 		assert_eq!(first_counts[1].get(), 1);
