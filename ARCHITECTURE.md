@@ -108,7 +108,10 @@ EngineRunner (플랫폼이 들고 프레임마다 부른다)
 - 블렌드가 바뀔 때, 클립을 걸거나 풀 때, 파티클을 그릴 때, 프레임 끝에 모은 것을 먼저 내보낸다(`flush_batch`). GL 을 직접 쓰는 코드는 그 전에 flush_batch 를 부른다.
 - 셰이더 바꿔 끼우기: `set_shader_program_override` 가 걸린 동안은 묶지 않고 바꿔 낀 프로그램으로 바로 그린다(ShaderSprite). 바꿔 낄 프로그램은 `resolve_shader_program` 이 이름으로 담아 두고, 어트리뷰트 위치를 기본 프로그램과 같게 고정해 기본 버텍스 어레이를 같이 쓴다.
 - 화면 효과(ScreenEffect)는 엔진을 거치지 않는다. 씬이 pre_draw 첫머리에서 begin, post_draw 끝에서 end 를 부르면, end 가 화면(또는 영역)을 텍스처로 떠 와 FullscreenPass 사슬을 걸고 되돌려 놓은 뒤 `restore_render_state` 로 Graphic 상태를 되살린다.
-- 클립은 원본처럼 스텐실 기반이다. 블렌드는 원본처럼 9종만 실제로 되고 나머지는 source-over 다.
+- 클립은 원본처럼 스텐실 기반이다.
+- 블렌드는 원본처럼 26종을 모두 그린다. 13종(포터 더프 연산자, Lighter, Multiply, Screen)은 고정 블렌딩(`BlendMode::get_blend_function`), 나머지 13종(Overlay, Darken, Lighten, ColorDodge, ColorBurn, HardLight, SoftLight, Difference, Exclusion, Hue, Saturation, Color, Luminosity)은 그리기마다 그릴 영역(정점의 경계 상자)만 지금 프레임버퍼에서 `blit_framebuffer` 로 같은 형식, 같은 자리의 칸에 떠 와 W3C Compositing and Blending Level 1 공식대로 셰이더로 섞는다. 셰이더 글은 원본과 같다. 이 모드에서는 묶지 않고 그리기 하나에 복사 한 번과 드로우 콜 한 번이 든다. 파티클은 서로 겹치지 않는 쿼드끼리 모아 한 번 떠 오고, 바꿔 낀 셰이더는 덧그림 칸(RGBA16F)에 먼저 그린 뒤 섞어 옮긴다. Canvas2D 와 달리 SourceIn, SourceOut, DestinationIn, DestinationAtop, Copy 는 그린 도형 안만 바꾼다(원본과 같음).
+- 기본 프레임버퍼에 그릴 때는 알파를 쓰지 않는다(`apply_color_mask`, 원본에 없음). 원본과 웹은 캔버스가 `alpha: false` 라 화면 알파가 늘 1 이고, 데스크탑 기본 프레임버퍼도 프레임 첫머리에 알파를 1 로 비운 뒤 그대로 두어 DST_ALPHA 를 쓰는 모드와 셰이더 섞기가 웹과 같게 나온다. 렌더 타겟에는 알파도 쓰고, GL 을 밖에 내줄 때는 모두 쓰는 마스크로 되돌린다.
+- Multiply 는 고정 블렌딩이라 바탕 알파가 1 보다 작은 렌더 타겟에서는 W3C 식과 다르다(원본과 같음). 기본 화면에서는 같다.
 - 묶어 그리기와 거르기는 `set_batching_enabled`, `set_culling_enabled` 로 끈다.
 
 ## 7. 애셋

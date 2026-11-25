@@ -296,6 +296,16 @@
 - 컴포넌트에 노드 출력 상태 앞뒤 훅 push_transform, pop_transform 을 더했다. (자기 컴포넌트와 자식, 기즈모를 감싸서 불린다, 원본 노드가 pushTransform, popTransform 을 덮어쓰던 자리) TouchEffect 가 이 훅으로 원본처럼 자식까지 더하기 블렌드로 그린다. (전에는 자기 입자만)
 - 데스크탑 찍기 모드(VANILLA_CAPTURE_PATH)는 창을 숨기고 돈다. 검증 도구가 예제를 찍을 때 사용자 화면에 창이 뜨지 않는다. 숨긴 창은 다시 그리기 요청과 수직 동기가 없어 about_to_wait 에서 프레임을 바로 돌고, 최대 FPS 가 없으면 모니터 주사율(모르면 60)로 보일 때와 같은 빠르기를 맞춘다. 가려짐 알림은 받지 않는다. 맥은 독 아이콘과 포커스도 가져가지 않는다(활성화 정책 Accessory). 창을 보려면 VANILLA_CAPTURE_SHOW_WINDOW=1. (맥에서 toonshowcase, uigallery, textshaping 을 숨긴 채 찍어 확인)
 - vanilla.js 에서도 OBB.overlaps, NodeLayout.arrangeFan, SoundEffectPool 보이스 0 버그를 고치고 AudioAsset.getLoadError 를 넣어, 이 판의 머리 주석에서 그 '원본과 다른 점' 을 뺐다. (obb, nodelayout, soundeffectpool, audioasset)
+- 데스크탑 찍기 모드(VANILLA_CAPTURE_PATH)는 창을 숨기고 돈다. 검증 도구가 예제를 찍을 때 사용자 화면에 창이 뜨지 않는다. 숨긴 창은 다시 그리기 요청과 수직 동기가 없어 about_to_wait 에서 프레임을 바로 돌고, 최대 FPS 가 없으면 모니터 주사율(모르면 60)로 보일 때와 같은 빠르기를 맞춘다. 가려짐 알림은 받지 않는다. 맥은 독 아이콘과 포커스도 가져가지 않는다(활성화 정책 Accessory). 창을 보려면 VANILLA_CAPTURE_SHOW_WINDOW=1. (맥에서 toonshowcase, uigallery, textshaping 을 숨긴 채 찍어 확인)
+- Graphic 블렌드 모드: source-over 로 대신 그리던 17 가지를 제대로 그린다. 이제 BlendMode 26 가지가 모두 된다 (원본과 같은 동작, 같은 셰이더 글)
+  - SourceOut, SourceAtop, DestinationAtop, Xor 는 W3C Compositing and Blending Level 1 의 포터 더프 계수 그대로 blend_func 로 건다
+  - Overlay, Darken, Lighten, ColorDodge, ColorBurn, HardLight, SoftLight, Difference, Exclusion, Hue, Saturation, Color, Luminosity 는 그리기마다 그릴 영역(정점의 경계 상자)만 지금 프레임버퍼에서 blit_framebuffer 로 같은 형식, 같은 자리의 칸에 떠 와 셰이더로 섞는다. 공식은 W3C 그대로(분리 섞기, 비분리 섞기, Cs' = (1 - αb) x Cs + αb x B(Cb, Cs) 뒤 source-over 합성)이고 바탕 알파가 있는 렌더 타겟(RGBA8, RGBA16F)에서도 맞다. 같은 자리로 옮기므로 데스크탑의 멀티샘플 기본 프레임버퍼에서도 된다. Darken, Lighten 은 blend_equation MIN / MAX 가 반투명에서 W3C 식과 달라 셰이더로 섞는다
+  - 셰이더 섞기 모드에서는 묶어 그리지 않는다. 그리기 하나에 영역 복사 한 번과 드로우 콜 한 번 (M2 Pro, 64x64 그림 1000 장에서 그리기 하나에 데스크탑 0.062 ms, 웹 0.061 ms 안팎, 대부분 복사가 렌더 패스를 끊는 값. source-over 를 묶지 않고 그리면 0.002 ~ 0.004 ms)
+  - 이미지, 도형, 글자, 나인슬라이스, 자르기, 파티클, 바꿔 끼운 셰이더(ShaderSprite) 모두 된다. 파티클은 서로 겹치지 않는 쿼드끼리 모아 한 번 떠 와 그려 쿼드마다 앞 쿼드 위에 섞인다. 바꿔 끼운 셰이더는 덧그림 칸(데스크탑은 RGBA16F, 웹은 EXT_color_buffer_float 가 있을 때 RGBA16F, 없으면 RGBA8)에 먼저 그린 뒤 섞어 옮긴다
+  - 모르는 모드로 source-over 를 쓰던 길과 그 경고가 없어졌다. (BlendMode 는 열거형이라 모르는 값이 없다)
+  - 크롬 Canvas2D 와 같은 장면(여러 색 바탕 위에 반투명 그림, 사각형, 다각형)을 26 모드로 견주면 도형 안쪽 차이가 2 단계 안이다. 웹 판은 원본 엔진과 픽셀까지 같고, 데스크탑은 도형 안쪽이 같고 가장자리 안티에일리어싱만 다르다. Canvas2D 는 SourceIn, SourceOut, DestinationIn, DestinationAtop, Copy 가 그린 도형 밖도 지우는데 Graphic 은 원본처럼 도형 안만 바꾼다
+- Graphic: 데스크탑에서 기본 프레임버퍼에 그릴 때는 알파를 쓰지 않는다. 원본과 웹은 캔버스가 alpha: false 라 화면 알파가 늘 1 인데, 데스크탑 기본 프레임버퍼는 알파가 있어 알파를 낮추는 모드(SourceOut, Xor, DestinationOut 같은 것) 뒤에 DST_ALPHA 를 쓰는 모드와 셰이더 섞기가 웹과 다르게 나왔다. (같은 칸에 SourceOut 으로 그림 뒤 사각형을 그리면 데스크탑만 사각형이 보였다) 렌더 타겟에는 알파도 쓰고, GL 을 밖에 내줄 때(get_gl, run_external_pass, 프레임 끝)는 모두 쓰는 마스크로 되돌린다
+- 예제 blendmodes: 블렌드 모드 26 가지를 칸마다. 60 프레임마다 장면이 바뀐다(반투명 그림과 도형, 글자와 나인슬라이스와 자르기, 파티클 묶음과 낱장, 바꿔 끼운 셰이더와 기본 셰이더)
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.
