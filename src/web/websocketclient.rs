@@ -12,7 +12,8 @@
 // - 원본과 다른 점:
 //   - 받은 JSON 은 수신 콜백이 있으면 그것을 부르고(원본과 같음), 없으면 버리지 않고 모아 두었다가 take_received_messages 로 꺼낸다.
 //     (러스트 콜백은 씬을 빌려 들 수 없어서 꺼내 쓰는 길을 더했다. 최대 RECEIVED_MESSAGE_LIMIT 개, 넘치면 오래된 것부터 버린다)
-//   - disconnect 는 원본처럼 onclose 를 기다리지 않고 그 자리에서 끊긴 것으로 친다. (ewebsock 데스크탑은 이쪽에서 닫으면 Closed 사건을 보내지 않는다)
+//   - disconnect 는 원본처럼 그 자리에서는 닫기만 걸고, 끊긴 것은 다음 tick 에 친다. (원본은 onclose 가 뒤에 와서 그때까지 is_connected 가 참이다.
+//     ewebsock 데스크탑은 이쪽에서 닫으면 Closed 사건을 보내지 않아, 그 tick 에 남은 사건을 꺼낸 뒤 끊는다)
 //   - 오류 사건은 원본처럼 알리고, 끊긴 것으로 친다. (브라우저는 onerror 뒤에 늘 onclose 가 오고, ewebsock 데스크탑은 오류 뒤 스레드가 끝난다)
 //   - 원본 get_receive_event 는 실수로 웹소켓을 돌려준다. 러스트 판은 수신 콜백을 돌려준다.
 //   - get_web_socket 은 ewebsock 의 송신기(WsSender)다.
@@ -36,6 +37,8 @@ pub struct WebSocketClient {
 	web_socket: Option<WsSender>,
 	web_socket_receiver: Option<WsReceiver>,
 	is_connected: bool,
+	// 닫기를 걸어 다음 tick 에 끊을 차례인지. (원본 onclose 를 기다리는 동안)
+	is_closing: bool,
 	receive_event: Option<WebSocketReceiveEvent>,
 	received_message_list: VecDeque<Value>,
 }
@@ -49,6 +52,7 @@ impl WebSocketClient {
 			web_socket: None,
 			web_socket_receiver: None,
 			is_connected: false,
+			is_closing: false,
 			receive_event: None,
 			received_message_list: VecDeque::new(),
 		}
@@ -76,13 +80,13 @@ impl WebSocketClient {
 	// 접속 해제. (접속돼 있을 때만)
 	//==============================================================================
 	pub fn disconnect(&mut self) {
-		if !self.is_connected() {
+		if !self.is_connected() || self.is_closing {
 			return;
 		}
 		if let Some(web_socket) = self.web_socket.as_mut() {
 			web_socket.close();
 		}
-		self.close_connection();
+		self.is_closing = true;
 	}
 
 	//==============================================================================
@@ -118,6 +122,9 @@ impl WebSocketClient {
 		}
 		for event in event_list {
 			self.handle_event(event);
+		}
+		if self.is_closing {
+			self.close_connection();
 		}
 	}
 
@@ -187,6 +194,7 @@ impl WebSocketClient {
 	//==============================================================================
 	fn close_connection(&mut self) {
 		self.is_connected = false;
+		self.is_closing = false;
 		self.web_socket = None;
 		self.web_socket_receiver = None;
 	}
@@ -263,6 +271,13 @@ mod tests {
 		web_socket_client.handle_event(WsEvent::Message(WsMessage::Ping(vec![1])));
 		assert_eq!(web_socket_client.take_received_messages(), vec![json!({ "type": "hello", "id": 1 }), json!([1, 2, 3])]);
 		assert!(web_socket_client.take_received_messages().is_empty());
+
+		// disconnect 는 원본처럼 그 자리에서는 아직 접속돼 있고, 다음 tick 에 끊긴다.
+		web_socket_client.disconnect();
+		assert!(web_socket_client.is_connected());
+		web_socket_client.tick();
+		assert!(!web_socket_client.is_connected());
+		web_socket_client.handle_event(WsEvent::Opened);
 		web_socket_client.handle_event(WsEvent::Closed);
 		assert!(!web_socket_client.is_connected());
 		assert!(web_socket_client.get_web_socket().is_none());
