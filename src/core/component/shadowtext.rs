@@ -11,6 +11,7 @@
 // - 기울임, 밑줄, 취소선(set_italic, set_underline, set_strikethrough): 선의 자리, 두께는 Text 의 가운데 기준선과 같고, 선도 글과 함께 구워 그림자가 깔린다.
 //   한 줄을 줄여 맞추는 글이라 줄바꿈 방식은 두지 않는다.
 // - 웹에서 글꼴 바이트가 없으면 브라우저 시스템 글꼴의 모양을 받아 같은 방식으로 굽는다. (글자 캐시 rasterize_text)
+// - 색 글리프(이모지)는 제 색에 글자 색의 알파만 곱해 얹고, 그림자는 이모지 모양까지 드리운다. (원본 fillStyle 과 캔버스 그림자)
 // - 원본과 다른 것: 원본 setFontFace(FontFace) 는 set_font_family(올린 글꼴 이름), 그림자의 색과 불투명도(setShadow 의 색 글과 opacity)는 Color 하나(알파가 불투명도)로 받는다.
 //==============================================================================
 use std::rc::Rc;
@@ -113,6 +114,32 @@ pub fn compose_shadow_image(shape_coverage: &[u8], shape_pixels: Option<&[u8]>, 
 		}
 	}
 	Image::create_from_pixels(width as u32, height as u32, pixels)
+}
+
+//==============================================================================
+// 글자 색 글자와 색 글리프 층을 한 모양으로. (그림자에 쓸 덮인 정도, 곧은 알파 RGBA)
+// - 글자는 글자 색, 색 글리프는 프리멀티플라이드 제 색에 글자 색의 알파만 곱해 그 위에 얹는다. (크롬 fillText 는 색 글리프에 fillStyle 의 알파만 먹인다)
+//==============================================================================
+fn compose_color_text_shape(coverage: &[u8], color_pixels: &[u8], text_color: Color) -> (Vec<u8>, Vec<u8>) {
+	let mut shape_coverage = Vec::with_capacity(coverage.len());
+	let mut shape_pixels = vec![0u8; coverage.len() * 4];
+	for (pixel_index, value) in coverage.iter().enumerate() {
+		let offset = pixel_index * 4;
+		let color_alpha = color_pixels[offset + 3] as f32 / 255.0 * text_color.alpha;
+		let text_alpha = *value as f32 / 255.0 * text_color.alpha * (1.0 - color_alpha);
+		let alpha = color_alpha + text_alpha;
+		shape_coverage.push((*value).max(color_pixels[offset + 3]));
+		if alpha <= 0.0 {
+			continue;
+		}
+		let text_channel_list = [text_color.red, text_color.green, text_color.blue];
+		for channel_index in 0..3 {
+			let premultiplied = color_pixels[offset + channel_index] as f32 / 255.0 * text_color.alpha + text_channel_list[channel_index] * text_alpha;
+			shape_pixels[offset + channel_index] = (premultiplied / alpha * 255.0).round().clamp(0.0, 255.0) as u8;
+		}
+		shape_pixels[offset + 3] = (alpha * 255.0).round().clamp(0.0, 255.0) as u8;
+	}
+	(shape_coverage, shape_pixels)
 }
 
 //==============================================================================
@@ -323,7 +350,16 @@ impl ShadowText {
 		}
 		let mut text_raster = graphic.get_text_string_texture_cache().rasterize_text(&self.text, &font_string, bake_scale, padding, self.resolve_shaping_text_direction().to_shaping_direction())?;
 		self.draw_decoration_lines(&mut text_raster, font_size, bake_scale);
-		let image = compose_shadow_image(&text_raster.coverage, None, text_raster.width, text_raster.height, self.text_color, self.shadow_color, scaled_blur, scaled_offset);
+		let image = match text_raster.color_pixels.as_ref() {
+			Some(color_pixels) => {
+				// 색 글리프(이모지)는 제 색에 글자 색의 알파만 곱하고, 그림자는 이모지 모양까지 드리운다. (원본 fillStyle 과 캔버스 그림자)
+				let (shape_coverage, shape_pixels) = compose_color_text_shape(&text_raster.coverage, color_pixels, self.text_color);
+				compose_shadow_image(&shape_coverage, Some(&shape_pixels), text_raster.width, text_raster.height, self.text_color, self.shadow_color, scaled_blur, scaled_offset)
+			}
+			None => {
+				compose_shadow_image(&text_raster.coverage, None, text_raster.width, text_raster.height, self.text_color, self.shadow_color, scaled_blur, scaled_offset)
+			}
+		};
 		Some(BakedText {
 			image,
 			scale: bake_scale,

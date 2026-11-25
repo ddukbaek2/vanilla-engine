@@ -2735,6 +2735,7 @@ dependencies = [
  "serde_json",
  "slotmap",
  "unicode-bidi",
+ "unicode-properties",
  "unicode-segmentation",
  "wasm-bindgen",
  "wasm-bindgen-futures",

@@ -4,6 +4,7 @@
 // - vanilla.js 예제의 soldier.glb 를 read_glb_arrays 로 읽어 첫 움직임을 write_skin_pose 로 돌린다. (텍스처는 쓰지 않고 재질 색만)
 // - 둘레에 작은 바위 2 천 개를 GPU 인스턴싱 한 번으로 그리고, 화면 밖 바위는 거른다. (그린 수와 거른 수를 표준 출력에)
 // - 엔진 ShadowMap 으로 그림자를 드리우고 받는다. HDR 실수 렌더 타겟에 그려 빛나는 공에 블룸을 걸고 톤매핑한다. (ToonPostProcess)
+//   그림자 패스는 HDR 타겟을 건 뒤에 한다. end_shadow_pass 가 앞의 프레임버퍼(HDR 타겟)와 뷰포트로 돌린다. (데스크탑과 웹 같음)
 // - TOON_MODEL_PATH 에 GLB 경로를 주면 그 모형도 하나 더 놓는다. (데스크탑만)
 // - 실행: cargo run --example toonshowcase
 //==============================================================================
@@ -142,7 +143,7 @@ impl ToonShowcaseScene {
 			let scale = 0.6 + (rock_index % 13) as f32 / 13.0 * 1.4;
 			model_matrix.scale(scale, scale, scale);
 			let shade = 0.7 + (rock_index % 7) as f32 / 7.0 * 0.5;
-			self.rock_instance_list.push(ToonInstance { model_matrix, tint_color: [shade, shade * 0.95, shade * 0.9, 1.0] });
+			self.rock_instance_list.push(ToonInstance { model_matrix, tint_color: [shade, shade * 0.95, shade * 0.9, 1.0], ..ToonInstance::default() });
 		}
 		renderer.set_hdr_output(true);
 		renderer.set_light([-0.5, -1.0, -0.4], [1.6, 1.5, 1.4], [0.35, 0.4, 0.5], [0.15, 0.13, 0.12]);
@@ -231,16 +232,16 @@ impl Scene for ToonShowcaseScene {
 			pose_list.push(pose);
 		}
 
-		// 1. 그림자 깊이, 2. HDR 씬. (같은 그리기를 두 번)
+		// 1. HDR 타겟 걸기, 2. 그림자 깊이(끝나면 HDR 타겟으로 돌아온다), 3. HDR 씬. (같은 그리기를 두 번)
 		let sun_direction = renderer.get_sun_direction();
 		shadow_map.update_light_matrix(Vector3::create(0.0, 0.0, 0.0), Vector3::create(sun_direction[0], sun_direction[1], sun_direction[2]), 9.0, 0.1, 40.0);
+		post_process.begin(gl, [0.006, 0.007, 0.012]);
 		for pass_index in 0..2 {
 			if pass_index == 0 {
 				renderer.begin_shadow_pass(gl, shadow_map);
 			}
 			else {
 				renderer.set_shadow(Some(shadow_map), 0.6);
-				post_process.begin(gl, [0.006, 0.007, 0.012]);
 				renderer.begin_frame(gl, &view_projection_matrix);
 			}
 			for (placed_index, placed) in self.placed_list.iter().enumerate() {
@@ -257,7 +258,7 @@ impl Scene for ToonShowcaseScene {
 		let frame_statistics = renderer.get_frame_statistics();
 		renderer.end_frame(gl);
 
-		// 3. 블룸과 톤매핑을 화면에.
+		// 4. 블룸과 톤매핑을 화면에.
 		post_process.end(gl, None, [0, 0, pixel_width, pixel_height]);
 		self.frame_count += 1;
 		if self.frame_count % 60 == 1 {

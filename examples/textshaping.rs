@@ -6,6 +6,8 @@
 // - 기울임과 굵게는 기본 글꼴에 기울인 얼굴, 굵은 얼굴이 없으면 브라우저와 같은 가짜 기울임(1/4), 가짜 굵게로 그린다.
 // - 줄바꿈은 공백이 없는 한중일 글도 낱말 사이에서 나눈다. 표시 글자 수는 글자 묶음 단위다.
 // - DynamicFont 는 숫자를 아틀라스 한 장에 모아 그린다. (글이 바뀌어도 다시 굽지 않는다)
+// - 색 이모지: 데스크탑은 대체 글꼴의 색 글리프(맥 Apple Color Emoji 의 sbix 등)를, 웹은 브라우저가 그린 것을 제 색으로 굽는다.
+//   ❤️ (FE0F) 는 색, 맨 ❤ 는 글 글꼴로, 국기, 피부색, 이음 문자 가족, 키캡, 그림자 글, 가짜 기울임, 글자 아틀라스의 ⭐ 를 보인다.
 // - 실행: cargo run --example textshaping
 //==============================================================================
 use std::path::PathBuf;
@@ -73,8 +75,8 @@ impl Component for DynamicFontCounter {
 	}
 
 	fn draw(&mut self, _transform: &NodeTransform, graphic: &mut Graphic) {
-		self.dynamic_font.build_atlas(graphic, "0123456789:.");
-		let counter_text = format!("{:08.2}", 1234.5 + self.elapsed_seconds);
+		self.dynamic_font.build_atlas(graphic, "0123456789:.\u{2B50}");
+		let counter_text = format!("\u{2B50}{:08.2}", 1234.5 + self.elapsed_seconds);
 		graphic.set_image_tint_color(None);
 		self.dynamic_font.draw_text(&counter_text, Vector2::create(0.0, 32.0), graphic);
 	}
@@ -174,8 +176,25 @@ impl Scene for MainScene {
 		visible_text.set_word_wrap_width(150.0);
 		visible_text.set_visible_character_count(12);
 
+		// 색 이모지. (글 색은 흰색, 구운 색에 글 색이 곱해진다)
+		create_caption_node(node_tree, root_id, 40.0, 520.0, "color emoji: Text, ShadowText, italic");
+		let emoji_id = create_box_node(node_tree, root_id, "emoji", 40.0, 550.0, 560.0, 40.0);
+		let emoji_text = node_tree[emoji_id].add_component(Text::create_with_text("이모지 \u{1F600}\u{1F44D}\u{1F3FD} \u{2764}\u{FE0F}\u{2764} \u{1F1F0}\u{1F1F7} \u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467} 1\u{FE0F}\u{20E3}", 30.0));
+		emoji_text.set_text_color("#ffffff");
+		emoji_text.set_text_align(TextAlign::Left);
+		let emoji_shadow_id = create_box_node(node_tree, root_id, "emojiShadow", 40.0, 600.0, 560.0, 40.0);
+		let emoji_shadow_text = node_tree[emoji_shadow_id].add_component(ShadowText::create_with_text("그림자 \u{1F389}\u{1F680}\u{1F308}", 30.0));
+		emoji_shadow_text.set_text_style(30.0, false, "#ffffff");
+		emoji_shadow_text.set_text_align(TextAlign::Left);
+		emoji_shadow_text.set_shadow("#000000", 3.0, 2.0);
+		let emoji_italic_id = create_box_node(node_tree, root_id, "emojiItalic", 40.0, 650.0, 560.0, 40.0);
+		let emoji_italic_text = node_tree[emoji_italic_id].add_component(Text::create_with_text("기울임 \u{1F600}\u{1F431}", 30.0));
+		emoji_italic_text.set_text_color("#ffffff");
+		emoji_italic_text.set_text_align(TextAlign::Left);
+		emoji_italic_text.set_italic(true);
+
 		// 글자 아틀라스.
-		create_caption_node(node_tree, root_id, 640.0, 466.0, "DynamicFont (숫자 아틀라스 한 장)");
+		create_caption_node(node_tree, root_id, 640.0, 466.0, "DynamicFont (숫자와 \u{2B50} 아틀라스 한 장)");
 		let counter_id = create_box_node(node_tree, root_id, "counter", 640.0, 496.0, 400.0, 48.0);
 		let mut dynamic_font = DynamicFont::new();
 		dynamic_font.set_font_size(36.0);

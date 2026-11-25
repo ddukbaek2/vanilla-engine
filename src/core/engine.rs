@@ -79,6 +79,7 @@ pub struct EngineConfiguration {
 	// 굵은 기본 폰트 후보 경로.
 	pub default_bold_font_paths: Vec<PathBuf>,
 	// 대체 글꼴 후보 경로. (원본은 브라우저가 글꼴에 없는 글자를 시스템 글꼴로 그린다. 데스크탑은 등록된 어느 글꼴에도 없는 글자가 나오면 앞에서부터 읽어 대체 폰트로 쓴다)
+	// - 색 이모지 글꼴(윈도우 Segoe UI Emoji, 맥 Apple Color Emoji, 리눅스 Noto Color Emoji)은 이모지 표시 글자가 나올 때 먼저 읽고, 다른 글자 때문에는 마지막에 읽는다.
 	pub fallback_font_paths: Vec<PathBuf>,
 	// 애셋 폴더 후보. (resolve_asset_path 가 앞에서부터 찾는다)
 	pub asset_directory_paths: Vec<PathBuf>,
@@ -143,11 +144,14 @@ impl EngineConfiguration {
 				PathBuf::from("C:/Windows/Fonts/arial.ttf"),
 				PathBuf::from("C:/Windows/Fonts/LeelawUI.ttf"),
 				PathBuf::from("C:/Windows/Fonts/seguisym.ttf"),
+				PathBuf::from("C:/Windows/Fonts/seguiemj.ttf"),
 				PathBuf::from("/System/Library/Fonts/Hiragino Sans GB.ttc"),
 				PathBuf::from("/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc"),
 				PathBuf::from("/System/Library/Fonts/Supplemental/Arial Unicode.ttf"),
+				PathBuf::from("/System/Library/Fonts/Apple Color Emoji.ttc"),
 				PathBuf::from("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
 				PathBuf::from("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+				PathBuf::from("/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf"),
 			],
 			asset_directory_paths: Vec::new(),
 			window_icon_path: String::new(),

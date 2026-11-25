@@ -55,7 +55,7 @@ impl PanelDrawer {
 			let angle = pebble_index as f32 / 24.0 * PI * 2.0;
 			let mut model_matrix = Matrix4::create_translation(angle.cos() * 3.3, 0.0, angle.sin() * 2.4);
 			model_matrix.rotate_y(angle * 2.0);
-			pebble_instance_list.push(ToonInstance { model_matrix, tint_color: [1.0, 1.0, 1.0, 1.0] });
+			pebble_instance_list.push(ToonInstance { model_matrix, ..ToonInstance::default() });
 		}
 		PanelDrawer { is_graded, elapsed_seconds, meshes: None, pebble_instance_list, post_process: None, frame_count: 0 }
 	}

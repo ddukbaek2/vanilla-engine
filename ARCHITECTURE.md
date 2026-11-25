@@ -59,7 +59,7 @@ EngineRunner (플랫폼이 들고 프레임마다 부른다)
 │   ├── pending_scene_list, pending_font_registration_list
 ├── Graphic (플랫폼이 GL 컨텍스트를 만든 뒤 attach_graphic 으로 넘김)
 │   ├── ShaderProgram (기본), 파티클/묶음 셰이더
-│   ├── ImageTextureCache, TextStringTextureCache (fontdue, WOFF/WOFF2 는 wuff 로 풀기)
+│   ├── ImageTextureCache, TextStringTextureCache (fontdue, WOFF/WOFF2 는 wuff 로 풀기, 색 이모지는 colorglyph)
 │   └── 묶음 버퍼, 클립 스택
 └── Scene[] (Box<dyn Scene>)
     └── SceneBase
@@ -132,8 +132,10 @@ EngineRunner (플랫폼이 들고 프레임마다 부른다)
 - DevTools 는 옮겼다. 리플렉션이 없어 인스펙터의 컴포넌트 속성은 UIDocument 가 저장하는 키와 값으로 보인다. (misc/devtools.rs)
 - web/Pane(DOM 화면 분할 패널)은 웹(wasm32) 빌드에만 옮겼다. 데스크탑에는 DOM 이 없다. (web/pane.rs)
 - 글자, 글꼴 갈래는 원본과 맞췄다. (2026-11-25) 오른쪽에서 왼쪽 글(양방향 정렬과 글자 모양 짓기, core/textshaping.rs), CSS 같은 글꼴 얼굴 고르기와 가짜 기울임, 가짜 굵게(Chromium 과 Skia 의 값),
-  ICU 낱말 나누기와 글자 묶음 줄바꿈, DynamicFont, UIFont, LanguagePack 을 옮겼다. 원본과 같아질 수 없어 남은 것: 래스터 픽셀(fontdue 와 브라우저 Skia, CoreGraphics),
-  일본어와 태국어 낱말 사전(ICU4X 와 크롬의 ICU4C 데이터), 색 이모지 글꼴(fontdue 가 색 글리프를 그리지 못한다), 데스크탑의 시스템 글꼴 대체 목록(브라우저와 운영체제가 고르는 목록 대신 EngineConfiguration.fallback_font_paths).
+  ICU 낱말 나누기와 글자 묶음 줄바꿈, DynamicFont, UIFont, LanguagePack 을 옮겼다. 색 이모지는 core/colorglyph.rs 가 sbix, CBDT, COLR v0/v1 을 제 색으로 그리고,
+  이모지 표시 묶음(FE0F, Emoji_Presentation)은 크롬처럼 색 글리프를 가진 글꼴을 먼저 고른다. 원본과 같아질 수 없어 남은 것: 래스터 픽셀(fontdue 와 브라우저 Skia, CoreGraphics),
+  일본어와 태국어 낱말 사전(ICU4X 와 크롬의 ICU4C 데이터), 데스크탑의 시스템 글꼴 대체 목록(브라우저와 운영체제가 고르는 목록 대신 EngineConfiguration.fallback_font_paths),
+  맥 크롬이 CoreText 로 Apple Color Emoji 를 그릴 때의 크기와 자리 보정(23px 아래에서 전진폭과 그림을 키우고 기준선 아래로 약 1/8em 내린다. 글꼴 자료에 없는 CoreText 안의 동작이라 러스트 판은 sbix 자료대로 놓는다).
 - 코어, 플랫폼, 기반에서 원본과 다르게 남은 것 (언어와 플랫폼 때문):
   - 원본의 객체 모델 도우미(base/object.js, reflection.js, singleton.js), 비동기 기다리기(base/wait.js), 빈 함수 calculator.js, Enum 흉내(begin, auto, readonly)는 옮기지 않는다. 러스트의 트레이트, Any, enum 과 엔진 루프가 맡는다.
   - 전역 엔진(Engine.getEngine, Scene.getEngine, SceneManager, PointerCursor.readEngineCanvas)이 없어 엔진을 함수로 넘긴다. Component.getNode 자리는 ComponentContext 다.

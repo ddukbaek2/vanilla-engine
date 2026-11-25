@@ -2,7 +2,7 @@
 // 툰 화면 공간 바깥선과 3D 효과 예제. (ToonScreenOutline, ToonVfx)
 // - 바닥판 위의 도형과 인스턴싱한 돌을 ToonRenderer 로 칠하고(껍데기 바깥선 없이), ToonScreenOutline 으로 실루엣, 맞닿은 곳, 꺾인 곳에 선을 긋는다.
 //   카메라는 원근이고 굵기는 월드 길이 0.022 (보는 점까지의 거리에서 셈), 깊이 문턱 0.08, 맞닿음 0.015, 꺾임 60 도.
-//   돌 일곱은 인스턴스마다 번호를 따로, 나머지 일곱은 한 번호로 그려 서로 맞닿은 곳의 선이 다른 것을 본다.
+//   돌 일곱은 인스턴스마다 번호를 따로(ToonInstance 의 line_id), 나머지 일곱은 공통 번호로 그려 서로 맞닿은 곳의 선이 다른 것을 본다.
 // - ToonVfx 로 3 초마다 터짐(충격파, 불덩이, 그을음, 불꽃 줄기, 연기, 흙 알갱이)과 연기 기둥, 흐르는 테 자국을 내고,
 //   프레임마다 빔(겉집과 심), 번개, 리본, 빛 점을 넘긴다. 램프 색은 예제가 정한 넷(불, 푸른 빛, 보라, 연기)이다.
 // - 터질 때 화면 섬광(add_flash)과 카메라 흔들림(add_shake, read_shake 를 카메라 오른쪽과 위쪽으로 더함), 1.2 초 사는 번개(add_lightning, 번짐 색)를 낸다.
@@ -34,7 +34,6 @@ struct ToonFxScene {
 	rock_mesh: Option<ToonMesh>,
 	placed_list: Vec<PlacedToon>,
 	rock_instance_list: Vec<ToonInstance>,
-	rock_line_id_list: Vec<u32>,
 	elapsed_seconds: f32,
 }
 
@@ -50,7 +49,6 @@ impl ToonFxScene {
 			rock_mesh: None,
 			placed_list: Vec::new(),
 			rock_instance_list: Vec::new(),
-			rock_line_id_list: Vec::new(),
 			elapsed_seconds: 0.0,
 		}
 	}
@@ -88,8 +86,8 @@ impl ToonFxScene {
 		for rock_index in 0..14 {
 			let mut model_matrix = Matrix4::create_translation(-3.0 + rock_index as f32 * 0.46, 0.0, 1.3 + (rock_index % 2) as f32 * 0.25);
 			model_matrix.rotate_y(rock_index as f32 * 0.9);
-			self.rock_instance_list.push(ToonInstance { model_matrix, tint_color: [1.0; 4] });
-			self.rock_line_id_list.push(if rock_index < 7 { 100 + rock_index } else { 150 });
+			let line_id = if rock_index < 7 { Some(100 + rock_index) } else { None };
+			self.rock_instance_list.push(ToonInstance { model_matrix, line_id, ..ToonInstance::default() });
 		}
 		let mut screen_outline = ToonScreenOutline::new(gl)?;
 		screen_outline.set_color([0.078, 0.086, 0.11, 1.0]);
@@ -240,14 +238,14 @@ impl Scene for ToonFxScene {
 		}).collect();
 		let identity_matrix = Matrix4::create_identity();
 
-		// 1. 선 번호. (바닥 1, 도형 10 ~, 돌은 인스턴스마다)
+		// 1. 선 번호. (바닥 1, 도형 10 ~, 돌 일곱은 인스턴스마다, 나머지는 공통 99)
 		screen_outline.set_focus_distance(eye_position.subtract(look_position).length());
 		if screen_outline.begin_line_ids(gl, &view_matrix, &projection_matrix) {
 			screen_outline.draw_mesh(gl, ground_mesh, &identity_matrix, 1, ToonLineDrawOptions::default());
 			for (placed_index, placed) in self.placed_list.iter().enumerate() {
 				screen_outline.draw_mesh(gl, &placed.mesh, &model_matrix_list[placed_index], 10 + placed_index as u32, ToonLineDrawOptions::default());
 			}
-			screen_outline.draw_mesh_instanced(gl, rock_mesh, &self.rock_instance_list, Some(&self.rock_line_id_list), 99, ToonLineDrawOptions::default());
+			screen_outline.draw_mesh_instanced(gl, rock_mesh, &self.rock_instance_list, 99, ToonLineDrawOptions::default());
 			screen_outline.end_line_ids(gl);
 		}
 

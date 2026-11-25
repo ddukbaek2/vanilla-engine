@@ -6,6 +6,7 @@ pub mod asset;
 pub mod audiobus;
 pub mod audiomanager;
 pub mod audioplayer;
+pub mod colorglyph;
 pub mod component;
 pub mod engine;
 pub mod frame;

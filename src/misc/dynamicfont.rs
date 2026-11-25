@@ -5,6 +5,7 @@
 //   점수, 피해 숫자, 시계처럼 글자가 자주 바뀌고 같은 글자를 많이 그리는 곳에 쓴다.
 // - 아틀라스는 가로 1024 픽셀 안에 줄 단위로 놓고, 글리프 사이에 2 픽셀 여백을 둔다. (원본과 같음)
 // - 글자는 글자 묶음(받침, 결합 부호, 이모지 묶음) 단위로 센다. 아틀라스에 없는 글자는 글자 크기의 반만큼 비우고 넘어간다. (원본과 같음)
+// - 글자는 흰색으로, 색 글리프(이모지)는 제 색으로 굽는다. (원본은 흰색으로 fillText 해 브라우저가 이모지를 제 색으로 그린다)
 // - 원본과 다른 것:
 //   원본 setFontAsset(FontAsset) 은 set_font_family(올린 글꼴 이름) 다. (FontAsset.get_family 를 넘긴다)
 //   원본 getAtlasCanvas 는 get_atlas_image (Rc<Image>) 다. 글리프는 글자 캐시의 글꼴 얼굴(모양 짓기, 가짜 굵게와 기울임 포함)로 굽는다. 글꼴 바이트가 없으면 굽지 못한다.
@@ -15,6 +16,7 @@ use crate::base::vector2::Vector2;
 use crate::core::component::richtext::build_font_string;
 use crate::core::graphic::Graphic;
 use crate::core::image::Image;
+use crate::core::textstringtexturecache::compose_text_pixels;
 use std::collections::HashMap;
 use std::rc::Rc;
 use unicode_segmentation::UnicodeSegmentation;
@@ -47,6 +49,8 @@ pub struct GlyphInfo {
 struct AtlasGlyph {
 	character: String,
 	coverage: Vec<u8>,
+	// 색 글리프 몫. (프리멀티플라이드 RGBA, 없으면 None)
+	color_pixels: Option<Vec<u8>>,
 	glyph_width: i32,
 	glyph_height: i32,
 	advance_width: f32,
@@ -179,6 +183,7 @@ impl DynamicFont {
 			atlas_glyph_list.push(AtlasGlyph {
 				character: character.clone(),
 				coverage: glyph_raster.coverage,
+				color_pixels: glyph_raster.color_pixels,
 				glyph_width: glyph_raster.width,
 				glyph_height: glyph_raster.height,
 				advance_width,
@@ -208,7 +213,7 @@ impl DynamicFont {
 		}
 		let atlas_height = (cursor_y + row_height).max(1);
 
-		// 흰색 글자로 굽기. (알파가 덮인 정도)
+		// 흰색 글자로 굽기. (알파가 덮인 정도, 색 글리프는 흰 글자 위에 얹은 곧은 색)
 		let mut pixels = vec![0u8; (ATLAS_MAXIMUM_WIDTH * atlas_height * 4) as usize];
 		for pixel in pixels.chunks_exact_mut(4) {
 			pixel[0] = 255;
@@ -219,10 +224,25 @@ impl DynamicFont {
 		for atlas_glyph in &atlas_glyph_list {
 			let left_x = atlas_glyph.atlas_x + ATLAS_PADDING;
 			let top_y = atlas_glyph.atlas_y + ATLAS_PADDING;
+			let composed_pixels = atlas_glyph.color_pixels.as_ref().map(|color_pixels| compose_text_pixels(&atlas_glyph.coverage, Some(color_pixels)));
 			for glyph_y in 0..atlas_glyph.glyph_height {
 				for glyph_x in 0..atlas_glyph.glyph_width {
-					let pixel_index = (((top_y + glyph_y) * ATLAS_MAXIMUM_WIDTH + left_x + glyph_x) * 4 + 3) as usize;
-					pixels[pixel_index] = atlas_glyph.coverage[(glyph_y * atlas_glyph.glyph_width + glyph_x) as usize];
+					let glyph_index = (glyph_y * atlas_glyph.glyph_width + glyph_x) as usize;
+					let pixel_index = (((top_y + glyph_y) * ATLAS_MAXIMUM_WIDTH + left_x + glyph_x) * 4) as usize;
+					match composed_pixels.as_ref() {
+						Some(composed_pixels) => {
+							let alpha = composed_pixels[glyph_index * 4 + 3] as u32;
+							if alpha > 0 {
+								for channel_index in 0..3 {
+									pixels[pixel_index + channel_index] = ((composed_pixels[glyph_index * 4 + channel_index] as u32 * 255 + alpha / 2) / alpha).min(255) as u8;
+								}
+							}
+							pixels[pixel_index + 3] = alpha as u8;
+						}
+						None => {
+							pixels[pixel_index + 3] = atlas_glyph.coverage[glyph_index];
+						}
+					}
 				}
 			}
 			self.glyph_table.insert(atlas_glyph.character.clone(), GlyphInfo {
