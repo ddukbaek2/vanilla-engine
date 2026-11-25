@@ -13,6 +13,7 @@
 //     원본처럼 flip_y 면 위아래를 뒤집고, is_color_data 면 SRGB8_ALPHA8 로 올린다.
 //   - 원본 loadImageDescription(url) 의 Promise 는 ImageAsset 처럼 받기 손잡이(ImageDescriptionLoadHandle)다. load_image_description(엔진, 애셋 경로, 옵션)이
 //     엔진의 애셋 받기(데스크탑은 애셋 폴더 후보, 웹은 asset_base_url 에서 fetch)로 바이트를 부탁하고, 다 받으면 get_image_description 이 서술을 만든다.
+//     손잡이는 그대로 await 할 수 있다. (엔진 작업 안에서 Material::load_image_description(engine, 경로, 옵션).await 가 원본 await 처럼 서술을 낸다)
 //     mime_type 은 원본처럼 응답의 content-type 이다. (웹 fetch 응답 머리, 머리가 없으면 None) 데스크탑에는 응답이 없어 내용으로 고른 형이다.
 //     (Image::sniff_image_mime_type, WHATWG MIME 스니핑의 그림 표와 AVIF, 모르면 None) 바이트를 받는 create_image_description(bytes) 는 원본과 같다.
 //   - 원본 이미지 서술의 source(캔버스/비트맵)는 RGBA 픽셀(ImageSource)로 받는다.
@@ -23,7 +24,10 @@ use crate::core::graphic::GlTexture;
 use crate::core::shaderprogram::ShaderProgram;
 use glow::HasContext;
 use std::cell::{Cell, RefCell};
+use std::future::{Future, IntoFuture};
+use std::pin::Pin;
 use std::rc::Rc;
+use std::task::{Context, Poll};
 
 //==============================================================================
 // 전역 상수 목록.
@@ -114,6 +118,47 @@ impl ImageDescriptionLoadHandle {
 			None => {
 				Some(Err(format!("Material image load failed: {}", asset_path)))
 			}
+		}
+	}
+}
+
+//==============================================================================
+// 이미지 서술 받기를 기다리는 퓨처. (ImageDescriptionLoadHandle 을 await 하면 된다. 원본 loadImageDescription 의 Promise 가 풀린 값)
+//==============================================================================
+#[derive(Clone, Debug)]
+pub struct ImageDescriptionLoadFuture {
+	image_description_load_handle: ImageDescriptionLoadHandle,
+}
+
+impl Future for ImageDescriptionLoadFuture {
+	type Output = Result<ImageDescription, String>;
+
+	//==============================================================================
+	// 끝났는지 보기. (아직이면 다음 프레임에 다시 본다)
+	//==============================================================================
+	fn poll(self: Pin<&mut ImageDescriptionLoadFuture>, context: &mut Context<'_>) -> Poll<Result<ImageDescription, String>> {
+		match self.image_description_load_handle.get_image_description() {
+			Some(image_description_result) => {
+				Poll::Ready(image_description_result)
+			}
+			None => {
+				context.waker().wake_by_ref();
+				Poll::Pending
+			}
+		}
+	}
+}
+
+impl IntoFuture for ImageDescriptionLoadHandle {
+	type Output = Result<ImageDescription, String>;
+	type IntoFuture = ImageDescriptionLoadFuture;
+
+	//==============================================================================
+	// 손잡이를 그대로 await 하기.
+	//==============================================================================
+	fn into_future(self) -> ImageDescriptionLoadFuture {
+		ImageDescriptionLoadFuture {
+			image_description_load_handle: self,
 		}
 	}
 }

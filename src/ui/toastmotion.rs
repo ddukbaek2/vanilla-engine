@@ -46,6 +46,14 @@ pub enum ToastPhase {
 	Exit,
 }
 
+// 알림 단계의 반사 값. (원본 ToastPhase 글)
+crate::core::reflection::impl_reflect_names!(ToastPhase, [
+	(ToastPhase::Hidden, "hidden"),
+	(ToastPhase::Enter, "enter"),
+	(ToastPhase::Stay, "stay"),
+	(ToastPhase::Exit, "exit"),
+]);
+
 //==============================================================================
 // 알림 머무는 시간. (긴 글이면 20 자마다 0.5 초를 더하고 4 초까지)
 //==============================================================================
@@ -72,6 +80,7 @@ pub struct ToastMotion {
 	apply_text_handler: Option<ToastApplyTextHandler>,
 }
 
+#[crate::reflect]
 impl ToastMotion {
 	//==============================================================================
 	// 생성. (들어오는 쪽: -1 이면 위에서, 1 이면 아래에서)
@@ -226,6 +235,7 @@ pub fn attach_toast_motion(node_tree: &mut NodeTree, node_id: NodeId, enter_side
 	node_tree.add_component(node_id, ToastMotion::new(enter_side))
 }
 
+#[crate::reflect]
 impl Component for ToastMotion {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base

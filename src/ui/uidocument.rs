@@ -7,13 +7,24 @@
 //   에디터가 얹는 frameSize 같은 모르는 키는 무시한다. 키 차례와 들여쓰기(탭)는 원본 JSON.stringify 와 같게 쓴다. (serde_json preserve_order)
 // - 원본과 다른 것:
 //   - 원본은 정적 클래스와 모듈 전역 표다. 러스트 판은 표를 든 UIDocument 값을 만들어 쓴다. (엔진처럼 전역 상태를 두지 않는다) new 가 엔진 컴포넌트를 등록해 둔다.
-//   - 러스트엔 리플렉션이 없어 원본의 반사 저장(saveByReflection, loadByReflection, getReflectedProperties)이 없다.
-//     종류 이름마다 짓기, 쓰기, 읽기 함수를 표에 등록한다. (register_component_type, 위젯은 register_widget_type) 게임도 자기 컴포넌트를 같은 길로 등록한다.
-//     원본이 반사로 저장하는 Outline, SoftShade, ShadowText, UIProgressRing 은 원본 반사 결과와 같은 키(머리 대문자: Color, LineWidth, GizmoVisible, Enable, ComponentType 등)로 쓰고 읽는다.
-//     ShadowText 는 원본처럼 Text, TextAlign, TextDirection, Italic, Underline, Strikethrough, FitMinimumRatio 를 쓴다. (원본 FontFace 는 글꼴 객체라 반사 저장이 적지 않는다)
-//   - 등록하지 않은 종류는 원본처럼 읽을 때 건너뛰고 경고를 낸다. 쓸 때 원본은 반사로 적지만, 러스트 판은 경고를 내고 뺀다.
-//   - ShadowImage 는 원본 표에 없다. 러스트 판은 원본이 반사로 적을 꼴(ImageColor, GizmoVisible, Enable, ComponentType)에 Sprite 처럼 imagePath 를 더해 등록한다.
-//   - 노드 종류는 WorldNode 하나뿐이라 노드 종류 표(registerNodeType)가 없다. type 은 늘 "WorldNode" 로 적고, 읽을 때는 보지 않는다.
+//   - 원본처럼 쓰기, 읽기 함수(원본 COMPONENT_PROPERTY_TABLE 의 propertyHandler)가 없는 종류는 반사로 쓰고 읽는다. (saveByReflection, loadByReflection)
+//     원본은 실행 중에 객체의 get, is, set 함수를 훑고, 러스트 판은 #[reflect] 매크로가 컴파일 때 지은 목록을 쓴다. (core/reflection.rs)
+//     반사로 다루는 종류는 #[reflect] 를 붙인 컴포넌트뿐이다. (엔진 컴포넌트는 모두 붙였다) 원본은 모든 객체가 반사된다.
+//     원본 표에서 반사로 저장하는 Outline, SoftShade, ShadowText, UIProgressRing 도 반사로 쓰고 읽는다. 원본 반사 결과와 같은 키(머리 대문자: Color, LineWidth,
+//     GizmoVisible, Enable, ComponentType 등)와 차례다. 원본 ShadowText 의 FontFace 는 글꼴 객체라 적히지 않는다. 러스트 판의 글꼴 이름 글(get_font_family)은
+//     #[reflect(transient)] 로 저장에서 뺐다.
+//   - 종류 등록: register_component_type(이름, 짓는 함수)은 원본 registerComponentType 이다. (반사로 쓰고 읽는다) 쓰기, 읽기 함수가 따로 있는 종류는
+//     register_component_type_with_handler 로, 위젯(content 노드를 만드는 컴포넌트)은 register_widget_type, register_widget_type_with_handler 로 등록한다.
+//   - 등록하지 않은 종류는 원본처럼 읽을 때 건너뛰고 경고를 낸다. 쓸 때는 원본처럼 반사로 적고 type 은 타입 이름이다. (원본 constructor.name)
+//     반사가 없는 컴포넌트(#[reflect] 를 붙이지 않은 게임 컴포넌트)는 적을 수 없어 경고를 내고 뺀다.
+//   - 쓰기, 읽기 함수가 있는 종류도 원본처럼 노드를 가리키는 반사 속성은 따로 { "$nodeRef": 경로 } 로 얹고 읽는다. (saveNodeReferences, loadNodeReferences)
+//   - ShadowImage 는 원본 표에 없다. 러스트 판은 원본이 반사로 적을 꼴(ImageColor, GizmoVisible, Enable, ComponentType)에 Sprite 처럼 imagePath 를 앞에 더해 등록한다.
+//   - 원본 노드 종류(WorldNode 하위 클래스, registerNodeType)는 러스트 판에서 노드에 붙는 컴포넌트다. register_node_type 으로 등록하면 원본 문서와 같은 꼴로 쓰고 읽는다:
+//     그 컴포넌트가 붙은 노드의 type 이 그 이름이고 컴포넌트 목록에는 적지 않는다. 원본 노드 생성자가 스스로 만든 컴포넌트와 자식(원본 문서에 그대로 적힌다)은
+//     UIDocumentNode 트레이트가 적고, 읽을 때는 그 몫을 그 컴포넌트의 설정으로 읽고 다시 만들지 않는다. (원본은 다시 읽으면 생성자가 만든 것과 문서의 것이 겹친다)
+//     원본 에디터(tools/uieditor)는 엔진이 내보내는 모든 종류를 등록해 UIInputField, UIScrollBar(원본 노드 종류), UISnapScrollView 도 문서에 적는다.
+//     원본 런타임처럼 기본 표에는 없고, 게임이 register_editor_types 한 줄(또는 종류마다 한 줄)로 등록한다.
+//   - 러스트 판의 노드는 WorldNode 하나다. 노드 종류로 등록한 컴포넌트가 없는 노드의 type 은 늘 "WorldNode" 로 적고, 등록하지 않은 type 은 WorldNode 로 읽는다.
 //   - 원본 getComponentType(이름 → 생성자)은 생성자를 값으로 돌려줄 수 없어(노드 트리는 구체 타입으로 붙인다) create_component(트리, 노드, 이름)가
 //     그 이름의 컴포넌트를 지어 노드에 붙이고 컴포넌트 차례 번호를 돌려준다. (원본에서 생성자를 받아 addComponent 하는 자리)
 //   - 그림 경로(imagePath)는 원본처럼 이미지 해석기(set_image_resolver)로 찾는다. 해석기를 주지 않으면 문서가 든 애셋 창고에서 찾는다.
@@ -39,17 +50,21 @@ use crate::core::component::sprite::{Sprite, SpriteDrawMode};
 use crate::core::component::text::Text;
 use crate::core::component::Component;
 use crate::core::engine::Engine;
-use crate::core::graphic::{BlendMode, TextAlign, TextBaseline, TextDirection};
+use crate::core::graphic::{BlendMode, TextAlign, TextBaseline};
 use crate::core::image::Image;
 use crate::core::node::nodetree::{NodeId, NodeTree};
+use crate::core::reflection::{collect_reflected_properties, read_reflected_property, read_shortest_number, write_reflected_property, ReflectValue, ReflectedProperty};
 use crate::resource::imageasset::ImageAsset;
 use crate::ui::uibutton::UIButton;
 use crate::ui::uiimageview::UIImageView;
+use crate::ui::uiinputfield::UIInputField;
 use crate::ui::uilabel::UILabel;
 use crate::ui::uiprogressring::UIProgressRing;
 use crate::ui::uiprogressview::UIProgressView;
+use crate::ui::uiscrollbar::UIScrollBar;
 use crate::ui::uiscrollview::{ScrollMode, UIScrollView};
 use crate::ui::uislider::UISlider;
+use crate::ui::uisnapscrollview::UISnapScrollView;
 use crate::ui::uitogglebutton::UIToggleButton;
 use serde_json::{Map, Value};
 use std::any::TypeId;
@@ -65,8 +80,17 @@ pub const UIDOCUMENT_VERSION: u32 = 1;
 // 노드 참조를 문서에 적을 때 쓰는 표시.
 const NODE_REFERENCE_KEY: &str = "$nodeRef";
 
+// 반사 속성에서 빼는 이름. (다른 객체를 가리키거나 문서로 옮길 수 없는 것, 원본 REFLECTED_PROPERTY_EXCLUDE_NAMES)
+const REFLECTED_PROPERTY_EXCLUDE_NAMES: [&str; 13] = [
+	"Parent", "Node", "Owner", "Scene", "Content", "Children", "AllComponents",
+	"Component", "Components", "Root", "Graphic", "Camera", "Target",
+];
+
 // 문서에 적는 노드 종류 이름. (러스트 판의 노드는 WorldNode 하나다)
 const NODE_TYPE_NAME: &str = "WorldNode";
+
+// 원본 UIScrollBar 생성자가 만든 트랙과 썸 Paint 의 둥근 크기.
+const SCROLL_BAR_PART_ROUND_SIZE: f32 = 4.0;
 
 // 정수로 적을 수 있는 가장 큰 크기. (JSON 수를 f64 로 읽어도 정확한 정수 범위, 2 의 53 제곱)
 const MAXIMUM_SAFE_INTEGER: f64 = 9007199254740992.0;
@@ -115,18 +139,90 @@ type ReadContentFunction = Box<dyn Fn(&dyn Component) -> Option<NodeId>>;
 type ApplyImageFunction = Box<dyn Fn(&mut dyn Component, Rc<Image>)>;
 // 찾은 노드를 컴포넌트에 넣는 함수.
 type ApplyNodeFunction = Box<dyn Fn(&mut dyn Component, NodeId)>;
+// 노드 종류 컴포넌트가 원본 노드 생성자의 몫을 쓰는 함수.
+type SaveNodePartsFunction = Box<dyn Fn(&dyn Component, &UIDocumentSaveContext, NodeId) -> UIDocumentNodeParts>;
+// 노드 종류 컴포넌트가 원본 노드 생성자의 몫을 읽는 함수. (읽은 컴포넌트 수와 자식 수)
+type LoadNodePartsFunction = Box<dyn Fn(&mut dyn Component, &[Value], &[Value]) -> (usize, usize)>;
 
 //==============================================================================
 // 컴포넌트 종류 하나. (원본 COMPONENT_TYPE_TABLE 의 생성자와 COMPONENT_PROPERTY_TABLE 의 save, load 를 한데 모은 것)
+// - save_component, load_component 가 None 이면 원본의 propertyHandler 가 없는 종류라 반사로 쓰고 읽는다.
 //==============================================================================
 struct UIDocumentComponentType {
 	type_name: String,
 	type_id: TypeId,
 	add_component: AddComponentFunction,
-	save_component: SaveComponentFunction,
-	load_component: LoadComponentFunction,
+	save_component: Option<SaveComponentFunction>,
+	load_component: Option<LoadComponentFunction>,
 	read_content: Option<ReadContentFunction>,
 	generated_type_names: Vec<String>,
+}
+
+//==============================================================================
+// 노드 종류 하나. (원본 NODE_TYPE_TABLE 의 한 줄. 원본 WorldNode 하위 클래스 자리를 맡은 러스트 컴포넌트)
+//==============================================================================
+struct UIDocumentNodeType {
+	type_name: String,
+	type_id: TypeId,
+	add_component: AddComponentFunction,
+	save_node_parts: SaveNodePartsFunction,
+	load_node_parts: LoadNodePartsFunction,
+	read_content: ReadContentFunction,
+}
+
+//==============================================================================
+// 원본 노드 생성자가 만드는 컴포넌트와 자식의 문서 값. (그 노드의 components, children 앞에 들어간다)
+//==============================================================================
+pub struct UIDocumentNodeParts {
+	pub component_data_list: Vec<Map<String, Value>>,
+	pub child_data_list: Vec<Value>,
+}
+
+impl UIDocumentNodeParts {
+	//==============================================================================
+	// 빈 몫. (생성자가 아무것도 만들지 않는 노드 종류)
+	//==============================================================================
+	pub fn new() -> UIDocumentNodeParts {
+		UIDocumentNodeParts {
+			component_data_list: Vec::new(),
+			child_data_list: Vec::new(),
+		}
+	}
+}
+
+impl Default for UIDocumentNodeParts {
+	fn default() -> UIDocumentNodeParts {
+		UIDocumentNodeParts::new()
+	}
+}
+
+//==============================================================================
+// 원본 노드 종류(WorldNode 하위 클래스)를 맡은 컴포넌트. (register_node_type 으로 등록한다)
+// - 원본은 그 노드의 생성자가 스스로 컴포넌트와 자식을 만들고, 문서에는 그것들이 보통 컴포넌트와 자식으로 적힌다.
+//   러스트 판의 컴포넌트는 그것을 스스로 그리거나 품으므로, 쓸 때는 원본이 적을 꼴로 적고 읽을 때는 그 몫을 설정으로 읽고 다시 짓지 않는다.
+// - 생성자가 아무것도 만들지 않는 종류는 빈 구현(impl UIDocumentNode for 타입 {})으로 된다.
+//==============================================================================
+pub trait UIDocumentNode {
+	//==============================================================================
+	// 원본 노드 생성자가 만드는 컴포넌트와 자식을 문서 꼴로. (node_id 는 이 컴포넌트가 붙은 노드)
+	//==============================================================================
+	fn save_node_parts(&self, _save_context: &UIDocumentSaveContext, _node_id: NodeId) -> UIDocumentNodeParts {
+		UIDocumentNodeParts::new()
+	}
+
+	//==============================================================================
+	// 문서의 컴포넌트와 자식 목록 앞머리에서 원본 노드 생성자가 만든 몫을 읽어 넣는다. (읽은 컴포넌트 수와 자식 수, 그 몫은 짓지 않는다)
+	//==============================================================================
+	fn load_node_parts(&mut self, _component_data_list: &[Value], _child_data_list: &[Value]) -> (usize, usize) {
+		(0, 0)
+	}
+
+	//==============================================================================
+	// 문서에 적지 않는 content 노드. (러스트 판이 위젯처럼 만드는 것, 원본 노드에는 없다. 그 안의 자식은 contentChildren 으로 적는다)
+	//==============================================================================
+	fn get_document_content(&self) -> Option<NodeId> {
+		None
+	}
 }
 
 //==============================================================================
@@ -255,6 +351,21 @@ impl<'a> UIDocumentLoadContext<'a> {
 			}),
 		});
 	}
+
+	//==============================================================================
+	// 반사 속성의 노드 참조 맡기기. (트리를 다 지은 뒤 그 노드를 반사 세터로 넣는다. 원본 pendingNodeReferenceList 에 setterName 을 넣는 자리)
+	//==============================================================================
+	fn bind_reflected_node_reference(&mut self, property_name: &str, reference_path: &str) {
+		let property_name = String::from(property_name);
+		self.pending_node_reference_list.push(PendingNodeReference {
+			node_id: self.node_id,
+			component_index: self.component_index,
+			path: String::from(reference_path),
+			apply_node: Box::new(move |component: &mut dyn Component, node_id: NodeId| {
+				write_reflected_property(component, &property_name, &ReflectValue::Node(node_id));
+			}),
+		});
+	}
 }
 
 //==============================================================================
@@ -262,6 +373,7 @@ impl<'a> UIDocumentLoadContext<'a> {
 //==============================================================================
 pub struct UIDocument {
 	component_type_list: Vec<UIDocumentComponentType>,
+	node_type_list: Vec<UIDocumentNodeType>,
 	image_resolver: Option<Box<dyn FnMut(&str) -> Option<Rc<Image>>>>,
 	image_asset_map: HashMap<String, ImageAsset>,
 	pending_image_list: Vec<PendingImage>,
@@ -274,6 +386,7 @@ impl UIDocument {
 	pub fn new() -> UIDocument {
 		let mut document = UIDocument {
 			component_type_list: Vec::new(),
+			node_type_list: Vec::new(),
 			image_resolver: None,
 			image_asset_map: HashMap::new(),
 			pending_image_list: Vec::new(),
@@ -284,77 +397,170 @@ impl UIDocument {
 
 	//==============================================================================
 	// 엔진 컴포넌트 등록. (원본 COMPONENT_TYPE_TABLE 차례, 끝에 러스트 판이 더한 ShadowImage)
+	// - 원본 COMPONENT_PROPERTY_TABLE 에 쓰기, 읽기 함수가 있는 종류는 그 함수와, 없는 종류(Outline, SoftShade, ShadowText, UIProgressRing)는 반사로 등록한다.
 	//==============================================================================
 	fn register_engine_component_types(&mut self) {
-		self.register_component_type("Paint", Paint::new, save_paint, load_paint);
-		self.register_component_type("Sprite", Sprite::new, save_sprite, load_sprite);
-		self.register_component_type("Text", Text::new, save_text, load_text);
-		self.register_component_type("RichText", RichText::new, save_rich_text, load_rich_text);
-		self.register_component_type("Mask", Mask::new, save_mask, load_mask);
-		self.register_component_type("Outline", Outline::new, save_outline, load_outline);
-		self.register_component_type("SoftShade", SoftShade::new, save_soft_shade, load_soft_shade);
-		self.register_component_type("ShadowText", ShadowText::new, save_shadow_text, load_shadow_text);
-		self.register_component_type("UIProgressRing", UIProgressRing::new, save_progress_ring, load_progress_ring);
-		self.register_widget_type("UILabel", UILabel::new, save_label, load_label, UILabel::get_content, &[]);
-		self.register_widget_type("UIImageView", UIImageView::new, save_image_view, load_image_view, UIImageView::get_content, &[]);
-		self.register_widget_type("UIButton", UIButton::new, save_button, load_button, UIButton::get_content, &[]);
-		self.register_widget_type("UIToggleButton", UIToggleButton::new, save_toggle_button, load_toggle_button, UIToggleButton::get_content, &[]);
-		self.register_widget_type("UIProgressView", UIProgressView::new, save_progress_view, load_progress_view, UIProgressView::get_content, &[]);
-		self.register_widget_type("UISlider", UISlider::new, save_slider, load_slider, UISlider::get_content, &[]);
-		self.register_widget_type("UIScrollView", UIScrollView::new, save_scroll_view, load_scroll_view, UIScrollView::get_content, &["Mask"]);
-		self.register_component_type("ShadowImage", ShadowImage::new, save_shadow_image, load_shadow_image);
+		self.register_component_type_with_handler("Paint", Paint::new, save_paint, load_paint);
+		self.register_component_type_with_handler("Sprite", Sprite::new, save_sprite, load_sprite);
+		self.register_component_type_with_handler("Text", Text::new, save_text, load_text);
+		self.register_component_type_with_handler("RichText", RichText::new, save_rich_text, load_rich_text);
+		self.register_component_type_with_handler("Mask", Mask::new, save_mask, load_mask);
+		self.register_component_type("Outline", Outline::new);
+		self.register_component_type("SoftShade", SoftShade::new);
+		self.register_component_type("ShadowText", ShadowText::new);
+		self.register_component_type("UIProgressRing", UIProgressRing::new);
+		self.register_widget_type_with_handler("UILabel", UILabel::new, save_label, load_label, UILabel::get_content, &[]);
+		self.register_widget_type_with_handler("UIImageView", UIImageView::new, save_image_view, load_image_view, UIImageView::get_content, &[]);
+		self.register_widget_type_with_handler("UIButton", UIButton::new, save_button, load_button, UIButton::get_content, &[]);
+		self.register_widget_type_with_handler("UIToggleButton", UIToggleButton::new, save_toggle_button, load_toggle_button, UIToggleButton::get_content, &[]);
+		self.register_widget_type_with_handler("UIProgressView", UIProgressView::new, save_progress_view, load_progress_view, UIProgressView::get_content, &[]);
+		self.register_widget_type_with_handler("UISlider", UISlider::new, save_slider, load_slider, UISlider::get_content, &[]);
+		self.register_widget_type_with_handler("UIScrollView", UIScrollView::new, save_scroll_view, load_scroll_view, UIScrollView::get_content, &["Mask"]);
+		self.register_component_type_with_handler("ShadowImage", ShadowImage::new, save_shadow_image, load_shadow_image);
 	}
 
 	//==============================================================================
-	// 컴포넌트 종류 등록. (원본 registerComponentType 과 COMPONENT_PROPERTY_TABLE 의 한 줄, 같은 이름이면 바꾼다)
-	// - create_component 로 짓고 node_tree.add_component 로 붙인 뒤 load_component 로 문서 값을 넣는다. (원본처럼 붙인 다음 읽는다)
-	// - save_component 가 돌려준 값 끝에 "type" 을 더해 적는다.
+	// 원본 에디터가 더 등록하는 종류 등록. (원본 tools/uieditor/uieditor.js 는 엔진이 내보내는 모든 Component 와 WorldNode 하위 클래스를 등록한다)
+	// - 에디터 팔레트가 만드는 종류 가운데 기본 표에 없는 셋이다. UIInputField, UIScrollBar 는 원본 노드 종류, UISnapScrollView 는 위젯(반사로 쓰고 읽는다)이다.
+	// - 원본 런타임도 기본 표에는 없어 게임이 등록해야 읽는다. 에디터가 저장한 문서를 읽는 게임은 이것을 한 번 부른다.
 	//==============================================================================
-	pub fn register_component_type<T: Component + 'static>(&mut self, type_name: &str, create_component: fn() -> T, save_component: fn(&T, &UIDocumentSaveContext) -> Map<String, Value>, load_component: fn(&mut T, &Map<String, Value>, &mut UIDocumentLoadContext)) {
-		let component_type = UIDocument::create_component_type(type_name, create_component, save_component, load_component);
+	pub fn register_editor_types(&mut self) {
+		self.register_node_type("UIInputField", UIInputField::new);
+		self.register_node_type("UIScrollBar", UIScrollBar::new);
+		self.register_widget_type("UISnapScrollView", UISnapScrollView::new, UISnapScrollView::get_content, &["Mask"]);
+	}
+
+	//==============================================================================
+	// 컴포넌트 종류 등록. (원본 registerComponentType, 같은 이름이면 바꾼다)
+	// - 쓰기, 읽기 함수가 없어 원본처럼 반사로 쓰고 읽는다. (#[reflect] 를 붙인 컴포넌트, 붙이지 않았으면 Component 공통 속성만)
+	// - create_component 로 짓고 node_tree.add_component 로 붙인 뒤 문서 값을 넣는다. (원본처럼 붙인 다음 읽는다) 쓸 때는 값 끝에 "type" 을 더한다.
+	//==============================================================================
+	pub fn register_component_type<T: Component + 'static>(&mut self, type_name: &str, create_component: fn() -> T) {
+		let component_type = UIDocument::create_component_type(type_name, create_component, None, None);
 		self.insert_component_type(component_type);
 	}
 
 	//==============================================================================
-	// 위젯 종류 등록. (원본의 UIView 계열. 붙을 때 content 노드를 만드는 컴포넌트)
+	// 쓰기, 읽기 함수가 있는 컴포넌트 종류 등록. (원본 COMPONENT_TYPE_TABLE 과 COMPONENT_PROPERTY_TABLE 의 한 줄, 같은 이름이면 바꾼다)
+	// - save_component 가 돌려준 값 끝에 "type" 을 더해 적는다. 노드를 가리키는 반사 속성은 원본처럼 따로 얹고 읽는다.
+	//==============================================================================
+	pub fn register_component_type_with_handler<T: Component + 'static>(&mut self, type_name: &str, create_component: fn() -> T, save_component: fn(&T, &UIDocumentSaveContext) -> Map<String, Value>, load_component: fn(&mut T, &Map<String, Value>, &mut UIDocumentLoadContext)) {
+		let component_type = UIDocument::create_component_type(type_name, create_component, Some(save_component), Some(load_component));
+		self.insert_component_type(component_type);
+	}
+
+	//==============================================================================
+	// 위젯 종류 등록. (원본의 UIView 계열, 붙을 때 content 노드를 만드는 컴포넌트. 반사로 쓰고 읽는다)
 	// - read_content 가 돌려준 content 노드는 문서에 적지 않고, 그 안의 자식만 contentChildren 으로 적는다. 읽을 때 위젯이 다시 만든 content 에 붙인다.
 	// - generated_type_names 는 위젯이 붙을 때 호스트에 스스로 붙이는 컴포넌트 종류다. (원본 require, 문서에 적지 않는다)
 	//==============================================================================
-	pub fn register_widget_type<T: Component + 'static>(&mut self, type_name: &str, create_component: fn() -> T, save_component: fn(&T, &UIDocumentSaveContext) -> Map<String, Value>, load_component: fn(&mut T, &Map<String, Value>, &mut UIDocumentLoadContext), read_content: fn(&T) -> Option<NodeId>, generated_type_names: &[&str]) {
+	pub fn register_widget_type<T: Component + 'static>(&mut self, type_name: &str, create_component: fn() -> T, read_content: fn(&T) -> Option<NodeId>, generated_type_names: &[&str]) {
+		let component_type = UIDocument::create_widget_type(type_name, create_component, None, None, read_content, generated_type_names);
+		self.insert_component_type(component_type);
+	}
+
+	//==============================================================================
+	// 쓰기, 읽기 함수가 있는 위젯 종류 등록.
+	//==============================================================================
+	pub fn register_widget_type_with_handler<T: Component + 'static>(&mut self, type_name: &str, create_component: fn() -> T, save_component: fn(&T, &UIDocumentSaveContext) -> Map<String, Value>, load_component: fn(&mut T, &Map<String, Value>, &mut UIDocumentLoadContext), read_content: fn(&T) -> Option<NodeId>, generated_type_names: &[&str]) {
+		let component_type = UIDocument::create_widget_type(type_name, create_component, Some(save_component), Some(load_component), read_content, generated_type_names);
+		self.insert_component_type(component_type);
+	}
+
+	//==============================================================================
+	// 노드 종류 등록. (원본 registerNodeType, 원본 WorldNode 하위 클래스를 맡은 러스트 컴포넌트, 같은 이름이면 바꾼다)
+	// - 그 컴포넌트가 붙은 노드는 type 을 이 이름으로 적고 컴포넌트 목록에는 그 컴포넌트를 적지 않는다. 읽을 때는 노드를 짓자마자(문서의 노드 값을 넣기 전에) 붙인다.
+	//   (원본은 그 종류의 생성자로 노드를 짓고 노드 값을 넣는다)
+	// - 원본 생성자가 만드는 컴포넌트와 자식은 UIDocumentNode 가 쓰고 읽는다.
+	//==============================================================================
+	pub fn register_node_type<T: Component + UIDocumentNode + 'static>(&mut self, type_name: &str, create_component: fn() -> T) {
+		let node_type = UIDocumentNodeType {
+			type_name: String::from(type_name),
+			type_id: TypeId::of::<T>(),
+			add_component: UIDocument::create_add_component_function(create_component),
+			save_node_parts: Box::new(|component: &dyn Component, save_context: &UIDocumentSaveContext, node_id: NodeId| {
+				match component.as_any().downcast_ref::<T>() {
+					Some(typed_component) => {
+						typed_component.save_node_parts(save_context, node_id)
+					}
+					None => {
+						UIDocumentNodeParts::new()
+					}
+				}
+			}),
+			load_node_parts: Box::new(|component: &mut dyn Component, component_data_list: &[Value], child_data_list: &[Value]| {
+				match component.as_any_mut().downcast_mut::<T>() {
+					Some(typed_component) => {
+						typed_component.load_node_parts(component_data_list, child_data_list)
+					}
+					None => {
+						(0, 0)
+					}
+				}
+			}),
+			read_content: Box::new(|component: &dyn Component| {
+				component.as_any().downcast_ref::<T>().and_then(|typed_component| typed_component.get_document_content())
+			}),
+		};
+		match self.node_type_list.iter().position(|registered_type| registered_type.type_name == node_type.type_name) {
+			Some(registered_index) => {
+				self.node_type_list[registered_index] = node_type;
+			}
+			None => {
+				self.node_type_list.push(node_type);
+			}
+		}
+	}
+
+	//==============================================================================
+	// 짓고 붙이는 함수. (붙인 컴포넌트의 차례 번호를 돌려준다)
+	//==============================================================================
+	fn create_add_component_function<T: Component + 'static>(create_component: fn() -> T) -> AddComponentFunction {
+		Box::new(move |node_tree: &mut NodeTree, node_id: NodeId| {
+			node_tree.add_component(node_id, create_component())?;
+			let component_count = node_tree.get_node(node_id)?.get_all_components().len();
+			Some(component_count - 1)
+		})
+	}
+
+	//==============================================================================
+	// 위젯 종류 하나 만들기.
+	//==============================================================================
+	fn create_widget_type<T: Component + 'static>(type_name: &str, create_component: fn() -> T, save_component: Option<fn(&T, &UIDocumentSaveContext) -> Map<String, Value>>, load_component: Option<fn(&mut T, &Map<String, Value>, &mut UIDocumentLoadContext)>, read_content: fn(&T) -> Option<NodeId>, generated_type_names: &[&str]) -> UIDocumentComponentType {
 		let mut component_type = UIDocument::create_component_type(type_name, create_component, save_component, load_component);
 		component_type.read_content = Some(Box::new(move |component: &dyn Component| {
 			component.as_any().downcast_ref::<T>().and_then(read_content)
 		}));
 		component_type.generated_type_names = generated_type_names.iter().map(|generated_type_name| String::from(*generated_type_name)).collect();
-		self.insert_component_type(component_type);
+		component_type
 	}
 
 	//==============================================================================
 	// 컴포넌트 종류 하나 만들기. (구체 타입 함수를 컴포넌트 트레이트 객체로 다루는 함수로 감싼다)
 	//==============================================================================
-	fn create_component_type<T: Component + 'static>(type_name: &str, create_component: fn() -> T, save_component: fn(&T, &UIDocumentSaveContext) -> Map<String, Value>, load_component: fn(&mut T, &Map<String, Value>, &mut UIDocumentLoadContext)) -> UIDocumentComponentType {
+	fn create_component_type<T: Component + 'static>(type_name: &str, create_component: fn() -> T, save_component: Option<fn(&T, &UIDocumentSaveContext) -> Map<String, Value>>, load_component: Option<fn(&mut T, &Map<String, Value>, &mut UIDocumentLoadContext)>) -> UIDocumentComponentType {
 		UIDocumentComponentType {
 			type_name: String::from(type_name),
 			type_id: TypeId::of::<T>(),
-			add_component: Box::new(move |node_tree: &mut NodeTree, node_id: NodeId| {
-				node_tree.add_component(node_id, create_component())?;
-				let component_count = node_tree.get_node(node_id)?.get_all_components().len();
-				Some(component_count - 1)
-			}),
-			save_component: Box::new(move |component: &dyn Component, save_context: &UIDocumentSaveContext| {
-				match component.as_any().downcast_ref::<T>() {
-					Some(typed_component) => {
-						save_component(typed_component, save_context)
+			add_component: UIDocument::create_add_component_function(create_component),
+			save_component: save_component.map(|save_component| -> SaveComponentFunction {
+				Box::new(move |component: &dyn Component, save_context: &UIDocumentSaveContext| {
+					match component.as_any().downcast_ref::<T>() {
+						Some(typed_component) => {
+							save_component(typed_component, save_context)
+						}
+						None => {
+							Map::new()
+						}
 					}
-					None => {
-						Map::new()
-					}
-				}
+				})
 			}),
-			load_component: Box::new(move |component: &mut dyn Component, component_data: &Map<String, Value>, load_context: &mut UIDocumentLoadContext| {
-				if let Some(typed_component) = component.as_any_mut().downcast_mut::<T>() {
-					load_component(typed_component, component_data, load_context);
-				}
+			load_component: load_component.map(|load_component| -> LoadComponentFunction {
+				Box::new(move |component: &mut dyn Component, component_data: &Map<String, Value>, load_context: &mut UIDocumentLoadContext| {
+					if let Some(typed_component) = component.as_any_mut().downcast_mut::<T>() {
+						load_component(typed_component, component_data, load_context);
+					}
+				})
 			}),
 			read_content: None,
 			generated_type_names: Vec::new(),
@@ -381,6 +587,14 @@ impl UIDocument {
 	fn find_component_type(&self, component: &dyn Component) -> Option<&UIDocumentComponentType> {
 		let component_type_id = component.as_any().type_id();
 		self.component_type_list.iter().rev().find(|registered_type| registered_type.type_id == component_type_id)
+	}
+
+	//==============================================================================
+	// 컴포넌트에 맞는 노드 종류 찾기. (같은 타입을 여러 이름으로 등록했으면 나중 것)
+	//==============================================================================
+	fn find_node_type(&self, component: &dyn Component) -> Option<&UIDocumentNodeType> {
+		let component_type_id = component.as_any().type_id();
+		self.node_type_list.iter().rev().find(|registered_type| registered_type.type_id == component_type_id)
 	}
 
 	//==============================================================================
@@ -531,8 +745,26 @@ impl UIDocument {
 				return Value::Null;
 			}
 		};
+		let save_context = UIDocumentSaveContext {
+			node_tree,
+			root_id,
+		};
+		let component_list = node.get_all_components();
+
+		// 노드 종류. (그 종류로 등록한 컴포넌트가 붙은 노드, 앞에 붙은 것. 원본 constructor.name 자리)
+		let node_type_entry = component_list.iter().enumerate().find_map(|(component_index, component)| {
+			self.find_node_type(component.as_ref()).map(|node_type| (component_index, node_type))
+		});
+		let node_type_name = match node_type_entry {
+			Some((_, node_type)) => {
+				node_type.type_name.as_str()
+			}
+			None => {
+				NODE_TYPE_NAME
+			}
+		};
 		let mut node_data = Map::new();
-		write_value(&mut node_data, "type", Value::from(NODE_TYPE_NAME));
+		write_value(&mut node_data, "type", Value::from(node_type_name));
 		write_value(&mut node_data, "name", Value::from(node.get_name()));
 		write_value(&mut node_data, "active", Value::from(node.is_active()));
 		write_value(&mut node_data, "position", UIDocument::vector2_to_array(node.get_local_position()));
@@ -544,42 +776,75 @@ impl UIDocument {
 		write_value(&mut node_data, "contentSize", UIDocument::vector2_to_array(node.get_content_size()));
 		write_value(&mut node_data, "interactable", Value::from(node.is_interactable()));
 
-		// 위젯이 스스로 붙인 컴포넌트는 적지 않는다. (읽을 때 다시 붙는다)
-		let save_context = UIDocumentSaveContext {
-			node_tree,
-			root_id,
-		};
-		let component_list = node.get_all_components();
-		let generated_type_set = self.collect_generated_component_types(component_list);
-		let mut widget_content_id_set: HashSet<NodeId> = HashSet::new();
+		// 원본 노드 생성자가 만드는 몫은 컴포넌트와 자식 목록 앞에 둔다. (원본 생성자는 사용자가 붙이는 것보다 먼저 만든다)
 		let mut component_data_list: Vec<Value> = Vec::new();
-		for component in component_list.iter() {
-			let component_reference: &dyn Component = component.as_ref();
-			let component_type = match self.find_component_type(component_reference) {
-				Some(component_type) => {
-					component_type
-				}
-				None => {
-					eprintln!("UIDocument: 등록되지 않은 컴포넌트라 적지 않습니다 ({}, 노드 {})", component_reference.get_component_type(), node.get_name());
-					continue;
-				}
-			};
-			if let Some(read_content) = &component_type.read_content {
-				if let Some(content_id) = read_content(component_reference) {
-					widget_content_id_set.insert(content_id);
-				}
+		let mut child_data_list: Vec<Value> = Vec::new();
+		let mut widget_content_id_set: HashSet<NodeId> = HashSet::new();
+		let mut node_type_component_index: Option<usize> = None;
+		if let Some((component_index, node_type)) = node_type_entry {
+			let node_component: &dyn Component = component_list[component_index].as_ref();
+			let node_parts = (node_type.save_node_parts)(node_component, &save_context, node_id);
+			component_data_list.extend(node_parts.component_data_list.into_iter().map(Value::Object));
+			child_data_list.extend(node_parts.child_data_list);
+			if let Some(content_id) = (node_type.read_content)(node_component) {
+				widget_content_id_set.insert(content_id);
 			}
-			if generated_type_set.contains(&component_type.type_name) {
+			node_type_component_index = Some(component_index);
+		}
+
+		// 위젯이 스스로 붙인 컴포넌트는 적지 않는다. (읽을 때 다시 붙는다)
+		let generated_type_set = self.collect_generated_component_types(component_list);
+		for (component_index, component) in component_list.iter().enumerate() {
+			if node_type_component_index == Some(component_index) {
 				continue;
 			}
-			let mut component_data = (component_type.save_component)(component_reference, &save_context);
-			write_value(&mut component_data, "type", Value::from(component_type.type_name.as_str()));
+			let component_reference: &dyn Component = component.as_ref();
+			let (type_name, mut component_data) = match self.find_component_type(component_reference) {
+				Some(component_type) => {
+					if let Some(read_content) = &component_type.read_content {
+						if let Some(content_id) = read_content(component_reference) {
+							widget_content_id_set.insert(content_id);
+						}
+					}
+					if generated_type_set.contains(&component_type.type_name) {
+						continue;
+					}
+					let component_data = match &component_type.save_component {
+						Some(save_component) => {
+							// 쓰기 함수는 노드 참조를 다루지 않으므로 원본처럼 따로 얹는다.
+							let mut component_data = save_component(component_reference, &save_context);
+							UIDocument::save_node_references(component_reference, &mut component_data, &save_context);
+							component_data
+						}
+						None => {
+							UIDocument::save_by_reflection(component_reference, &save_context)
+						}
+					};
+					(component_type.type_name.as_str(), component_data)
+				}
+				None => {
+					// 등록하지 않은 종류도 원본처럼 반사로 적는다. (읽을 때는 등록한 종류만 짓는다)
+					match component_reference.get_reflection() {
+						Some(reflection) => {
+							let reflected_type_name = reflection.get_reflected_type_name();
+							if generated_type_set.contains(reflected_type_name) {
+								continue;
+							}
+							(reflected_type_name, UIDocument::save_by_reflection(component_reference, &save_context))
+						}
+						None => {
+							eprintln!("UIDocument: 반사도 등록도 없는 컴포넌트라 적지 않습니다 ({}, 노드 {})", component_reference.get_component_type(), node.get_name());
+							continue;
+						}
+					}
+				}
+			};
+			write_value(&mut component_data, "type", Value::from(type_name));
 			component_data_list.push(Value::Object(component_data));
 		}
 		write_value(&mut node_data, "components", Value::Array(component_data_list));
 
 		// 위젯의 content 노드는 읽을 때 위젯이 다시 만든다. 그 안의 자식만 남긴다.
-		let mut child_data_list: Vec<Value> = Vec::new();
 		let mut content_child_data_list: Option<Vec<Value>> = None;
 		for child_id in node.get_child_ids().iter() {
 			if widget_content_id_set.contains(child_id) {
@@ -599,16 +864,125 @@ impl UIDocument {
 	}
 
 	//==============================================================================
-	// 컴포넌트 하나 → 문서 데이터. (등록한 종류면 쓰기 함수가 돌려준 값, "type" 은 더하지 않는다. 등록하지 않은 종류면 경고 없이 None)
-	// - 노드 참조는 root_id 기준 경로로 적는다. (DevTools 인스펙터가 컴포넌트 속성을 보일 때 쓴다)
+	// 컴포넌트 하나 → 문서 데이터. ("type" 은 더하지 않는다. 등록한 종류면 그 꼴로, 등록하지 않았어도 반사가 있으면 반사로. 둘 다 없으면 경고 없이 None)
+	// - 노드 참조는 root_id 기준 경로로 적는다.
 	//==============================================================================
 	pub fn serialize_component(&self, node_tree: &NodeTree, root_id: NodeId, component: &dyn Component) -> Option<Map<String, Value>> {
-		let component_type = self.find_component_type(component)?;
 		let save_context = UIDocumentSaveContext {
 			node_tree,
 			root_id,
 		};
-		Some((component_type.save_component)(component, &save_context))
+		match self.find_component_type(component) {
+			Some(component_type) => {
+				match &component_type.save_component {
+					Some(save_component) => {
+						let mut component_data = save_component(component, &save_context);
+						UIDocument::save_node_references(component, &mut component_data, &save_context);
+						Some(component_data)
+					}
+					None => {
+						Some(UIDocument::save_by_reflection(component, &save_context))
+					}
+				}
+			}
+			None => {
+				component.get_reflection()?;
+				Some(UIDocument::save_by_reflection(component, &save_context))
+			}
+		}
+	}
+
+	//==============================================================================
+	// 컴포넌트의 편집할 수 있는 속성 목록. (원본 getReflectedProperties, 짝이 맞는 get 또는 is 와 set. 다른 객체를 가리키는 이름은 뺀다)
+	//==============================================================================
+	pub fn get_reflected_properties(component: &dyn Component) -> Vec<ReflectedProperty> {
+		collect_reflected_properties(component).into_iter().filter(|property| !REFLECTED_PROPERTY_EXCLUDE_NAMES.contains(&property.name)).collect()
+	}
+
+	//==============================================================================
+	// 짝이 맞는 get / set 속성으로 컴포넌트 저장. (원본 saveByReflection, 옮길 수 있는 값만 담는다: 수, 불, 글, Color, Vector2, 노드)
+	//==============================================================================
+	pub fn save_by_reflection(component: &dyn Component, save_context: &UIDocumentSaveContext) -> Map<String, Value> {
+		let mut component_data = Map::new();
+		for property in UIDocument::get_reflected_properties(component) {
+			let current_value = match read_reflected_property(component, property.name) {
+				Some(current_value) => {
+					current_value
+				}
+				None => {
+					continue;
+				}
+			};
+			match current_value {
+				ReflectValue::Boolean(boolean_value) => {
+					write_value(&mut component_data, property.name, Value::from(boolean_value));
+				}
+				ReflectValue::Number(number) => {
+					write_value(&mut component_data, property.name, UIDocument::double_to_value(number));
+				}
+				ReflectValue::String(text) => {
+					write_value(&mut component_data, property.name, Value::from(text));
+				}
+				ReflectValue::Color(color) => {
+					write_value(&mut component_data, property.name, UIDocument::color_to_array(color));
+				}
+				ReflectValue::Vector2(vector) => {
+					write_value(&mut component_data, property.name, UIDocument::vector2_to_array(vector));
+				}
+				ReflectValue::Node(node_id) => {
+					save_context.write_node_reference(&mut component_data, property.name, Some(node_id));
+				}
+				_ => {
+				}
+			}
+		}
+		component_data
+	}
+
+	//==============================================================================
+	// 짝이 맞는 get / set 속성으로 컴포넌트 복원. (원본 loadByReflection, 노드 참조는 트리를 다 지은 뒤 잇는다)
+	// - 원본은 지금 값의 꼴로 받을지 가린다. 러스트 판은 세터의 꼴로 가린다. (core/reflection.rs)
+	//==============================================================================
+	pub fn load_by_reflection(component: &mut dyn Component, component_data: &Map<String, Value>, load_context: &mut UIDocumentLoadContext) {
+		for property in UIDocument::get_reflected_properties(component) {
+			let stored_value = match component_data.get(property.name) {
+				Some(stored_value) => {
+					stored_value
+				}
+				None => {
+					continue;
+				}
+			};
+			if let Some(reference_path) = read_node_reference_path(stored_value) {
+				load_context.bind_reflected_node_reference(property.name, reference_path);
+				continue;
+			}
+			if let Some(value) = json_to_reflect_value(stored_value) {
+				write_reflected_property(component, property.name, &value);
+			}
+		}
+	}
+
+	//==============================================================================
+	// 노드를 가리키는 반사 속성만 따로 적기. (원본 saveNodeReferences, 쓰기 함수가 있는 종류에 쓴다)
+	//==============================================================================
+	fn save_node_references(component: &dyn Component, component_data: &mut Map<String, Value>, save_context: &UIDocumentSaveContext) {
+		for property in UIDocument::get_reflected_properties(component) {
+			if let Some(ReflectValue::Node(node_id)) = read_reflected_property(component, property.name) {
+				save_context.write_node_reference(component_data, property.name, Some(node_id));
+			}
+		}
+	}
+
+	//==============================================================================
+	// 노드를 가리키는 값만 따로 잇기. (원본 loadNodeReferences, 쓰기 함수가 있는 종류에 쓴다. 그 키의 반사 세터가 없으면 잇지 않는다)
+	//==============================================================================
+	fn load_node_references(component_data: &Map<String, Value>, load_context: &mut UIDocumentLoadContext) {
+		for (property_name, stored_value) in component_data.iter() {
+			if let Some(reference_path) = read_node_reference_path(stored_value) {
+				load_context.bind_reflected_node_reference(property_name, reference_path);
+			}
+		}
 	}
 
 	//==============================================================================
@@ -659,6 +1033,18 @@ impl UIDocument {
 		let empty_node_data = Map::new();
 		let node_object = node_data.as_object().unwrap_or(&empty_node_data);
 		let node_id = node_tree.create_node(read_string(node_object, "name").unwrap_or(""));
+
+		// 노드 종류. (원본은 그 종류의 생성자로 짓고 나서 문서의 노드 값을 넣는다. 등록하지 않은 종류는 WorldNode 다)
+		let node_type_name = read_string(node_object, "type").unwrap_or(NODE_TYPE_NAME);
+		let node_type_index = self.node_type_list.iter().position(|registered_type| registered_type.type_name == node_type_name);
+		let node_type_component_index = match node_type_index {
+			Some(node_type_index) => {
+				(self.node_type_list[node_type_index].add_component)(node_tree, node_id)
+			}
+			None => {
+				None
+			}
+		};
 		{
 			let node = &mut node_tree[node_id];
 			if let Some(is_active) = read_bool(node_object, "active") {
@@ -690,58 +1076,74 @@ impl UIDocument {
 			}
 		}
 
-		// 컴포넌트. (붙인 다음 문서 값을 넣는다)
+		// 원본 노드 생성자가 만든 몫은 노드 종류 컴포넌트가 설정으로 읽고, 다시 짓지 않는다.
+		let component_data_list: &[Value] = node_object.get("components").and_then(|value| value.as_array()).map(|values| values.as_slice()).unwrap_or(&[]);
+		let child_data_list: &[Value] = node_object.get("children").and_then(|value| value.as_array()).map(|values| values.as_slice()).unwrap_or(&[]);
+		let mut node_part_component_count = 0;
+		let mut node_part_child_count = 0;
 		let mut widget_content_id: Option<NodeId> = None;
-		if let Some(component_data_list) = node_object.get("components").and_then(|value| value.as_array()) {
-			for component_data in component_data_list.iter() {
-				let component_object = match component_data.as_object() {
-					Some(component_object) => {
-						component_object
-					}
-					None => {
-						continue;
-					}
-				};
-				let type_name = read_string(component_object, "type").unwrap_or("");
-				let component_type = match self.component_type_list.iter().find(|registered_type| registered_type.type_name == type_name) {
-					Some(component_type) => {
-						component_type
-					}
-					None => {
-						eprintln!("UIDocument: 등록되지 않은 컴포넌트 종류를 건너뜁니다 ({})", type_name);
-						continue;
-					}
-				};
-				let component_index = match (component_type.add_component)(node_tree, node_id) {
-					Some(component_index) => {
-						component_index
-					}
-					None => {
-						continue;
-					}
-				};
-				let mut load_context = UIDocumentLoadContext {
-					node_id,
-					component_index,
-					pending_image_list: &mut self.pending_image_list,
-					pending_node_reference_list,
-				};
-				let component: &mut dyn Component = node_tree[node_id].components[component_index].as_mut();
-				(component_type.load_component)(component, component_object, &mut load_context);
-				if let Some(read_content) = &component_type.read_content {
-					if let Some(content_id) = read_content(node_tree[node_id].components[component_index].as_ref()) {
-						widget_content_id = Some(content_id);
-					}
+		if let (Some(node_type_index), Some(component_index)) = (node_type_index, node_type_component_index) {
+			let node_type = &self.node_type_list[node_type_index];
+			let component: &mut dyn Component = node_tree[node_id].components[component_index].as_mut();
+			(node_part_component_count, node_part_child_count) = (node_type.load_node_parts)(component, component_data_list, child_data_list);
+			widget_content_id = (node_type.read_content)(node_tree[node_id].components[component_index].as_ref());
+		}
+
+		// 컴포넌트. (붙인 다음 문서 값을 넣는다)
+		for component_data in component_data_list.iter().skip(node_part_component_count) {
+			let component_object = match component_data.as_object() {
+				Some(component_object) => {
+					component_object
+				}
+				None => {
+					continue;
+				}
+			};
+			let type_name = read_string(component_object, "type").unwrap_or("");
+			let component_type = match self.component_type_list.iter().find(|registered_type| registered_type.type_name == type_name) {
+				Some(component_type) => {
+					component_type
+				}
+				None => {
+					eprintln!("UIDocument: 등록되지 않은 컴포넌트 종류를 건너뜁니다 ({})", type_name);
+					continue;
+				}
+			};
+			let component_index = match (component_type.add_component)(node_tree, node_id) {
+				Some(component_index) => {
+					component_index
+				}
+				None => {
+					continue;
+				}
+			};
+			let mut load_context = UIDocumentLoadContext {
+				node_id,
+				component_index,
+				pending_image_list: &mut self.pending_image_list,
+				pending_node_reference_list,
+			};
+			let component: &mut dyn Component = node_tree[node_id].components[component_index].as_mut();
+			match &component_type.load_component {
+				Some(load_component) => {
+					load_component(component, component_object, &mut load_context);
+					UIDocument::load_node_references(component_object, &mut load_context);
+				}
+				None => {
+					UIDocument::load_by_reflection(component, component_object, &mut load_context);
+				}
+			}
+			if let Some(read_content) = &component_type.read_content {
+				if let Some(content_id) = read_content(node_tree[node_id].components[component_index].as_ref()) {
+					widget_content_id = Some(content_id);
 				}
 			}
 		}
 
 		// 자식.
-		if let Some(child_data_list) = node_object.get("children").and_then(|value| value.as_array()) {
-			for child_data in child_data_list.iter() {
-				let child_id = self.build_node(node_tree, child_data, pending_node_reference_list);
-				node_tree.add_child(node_id, child_id);
-			}
+		for child_data in child_data_list.iter().skip(node_part_child_count) {
+			let child_id = self.build_node(node_tree, child_data, pending_node_reference_list);
+			node_tree.add_child(node_id, child_id);
 		}
 
 		// 위젯 content 안의 자식. (스크롤 뷰의 목록 항목 같은 것)
@@ -826,11 +1228,20 @@ impl UIDocument {
 		if !number.is_finite() {
 			return Value::Null;
 		}
-		let shortest_number = format!("{}", number).parse::<f64>().unwrap_or(number as f64);
-		if shortest_number.fract() == 0.0 && shortest_number.abs() < MAXIMUM_SAFE_INTEGER {
-			return Value::from(shortest_number as i64);
+		UIDocument::double_to_value(read_shortest_number(number))
+	}
+
+	//==============================================================================
+	// f64 수 → 문서 값. (정수면 소수점 없이, 수가 아니면 null. 원본 JSON.stringify 와 같다)
+	//==============================================================================
+	fn double_to_value(number: f64) -> Value {
+		if !number.is_finite() {
+			return Value::Null;
 		}
-		match serde_json::Number::from_f64(shortest_number) {
+		if number.fract() == 0.0 && number.abs() < MAXIMUM_SAFE_INTEGER {
+			return Value::from(number as i64);
+		}
+		match serde_json::Number::from_f64(number) {
 			Some(json_number) => {
 				Value::Number(json_number)
 			}
@@ -946,6 +1357,39 @@ fn find_value<T: Copy>(name_table: &[(T, &'static str)], name: &str) -> Option<T
 }
 
 //==============================================================================
+// 노드 참조의 경로. ({ "$nodeRef": 경로 } 면 그 경로)
+//==============================================================================
+fn read_node_reference_path(value: &Value) -> Option<&str> {
+	value.as_object()?.get(NODE_REFERENCE_KEY)?.as_str()
+}
+
+//==============================================================================
+// 문서 값 → 반사 값. (배열은 List, 노드 참조가 아닌 객체는 옮기지 않는다)
+//==============================================================================
+fn json_to_reflect_value(value: &Value) -> Option<ReflectValue> {
+	match value {
+		Value::Null => {
+			Some(ReflectValue::Null)
+		}
+		Value::Bool(boolean_value) => {
+			Some(ReflectValue::Boolean(*boolean_value))
+		}
+		Value::Number(number) => {
+			number.as_f64().map(ReflectValue::Number)
+		}
+		Value::String(text) => {
+			Some(ReflectValue::String(text.clone()))
+		}
+		Value::Array(item_values) => {
+			Some(ReflectValue::List(item_values.iter().filter_map(json_to_reflect_value).collect()))
+		}
+		Value::Object(_) => {
+			None
+		}
+	}
+}
+
+//==============================================================================
 // 문서 안의 그림 경로 모으기. (imagePath 키의 빈 글이 아닌 값, 같은 경로는 한 번)
 //==============================================================================
 fn collect_image_paths(value: &Value, image_path_list: &mut Vec<String>) {
@@ -990,27 +1434,6 @@ fn indent_with_tabs(pretty_text: &str) -> String {
 		tab_text.push_str(content);
 	}
 	tab_text
-}
-
-//==============================================================================
-// 컴포넌트 공통 상태 적기. (원본 반사 저장 꼴의 끝 세 키)
-//==============================================================================
-fn write_component_base(component_data: &mut Map<String, Value>, component: &dyn Component) {
-	write_value(component_data, "GizmoVisible", Value::from(component.is_gizmo_visible()));
-	write_value(component_data, "Enable", Value::from(component.is_enable()));
-	write_value(component_data, "ComponentType", Value::from(component.get_component_type()));
-}
-
-//==============================================================================
-// 컴포넌트 공통 상태 읽기. (ComponentType 은 러스트 판에서 타입이 정하므로 읽지 않는다)
-//==============================================================================
-fn read_component_base(component: &mut dyn Component, component_data: &Map<String, Value>) {
-	if let Some(is_gizmo_visible) = read_bool(component_data, "GizmoVisible") {
-		component.set_gizmo_visible(is_gizmo_visible);
-	}
-	if let Some(is_enable) = read_bool(component_data, "Enable") {
-		component.set_enable(is_enable);
-	}
 }
 
 //==============================================================================
@@ -1172,143 +1595,14 @@ fn load_mask(_mask: &mut Mask, _component_data: &Map<String, Value>, _load_conte
 }
 
 //==============================================================================
-// Outline 쓰기. (원본 반사 저장 꼴)
+// ShadowImage 쓰기. (그림 경로 뒤에 원본이 반사로 적을 꼴. 그림 색이 없으면 원본처럼 ImageColor 를 적지 않는다)
 //==============================================================================
-fn save_outline(outline: &Outline, _save_context: &UIDocumentSaveContext) -> Map<String, Value> {
-	let mut component_data = Map::new();
-	write_value(&mut component_data, "Color", UIDocument::color_to_array(outline.get_color()));
-	write_value(&mut component_data, "LineWidth", UIDocument::number_to_value(outline.get_line_width()));
-	write_value(&mut component_data, "RoundSize", UIDocument::number_to_value(outline.get_round_size()));
-	write_value(&mut component_data, "Circle", Value::from(outline.is_circle()));
-	write_component_base(&mut component_data, outline);
-	component_data
-}
-
-//==============================================================================
-// Outline 읽기.
-//==============================================================================
-fn load_outline(outline: &mut Outline, component_data: &Map<String, Value>, _load_context: &mut UIDocumentLoadContext) {
-	if let Some(color) = read_color(component_data, "Color") {
-		outline.set_color(color);
-	}
-	if let Some(line_width) = read_number(component_data, "LineWidth") {
-		outline.set_line_width(line_width);
-	}
-	if let Some(round_size) = read_number(component_data, "RoundSize") {
-		outline.set_round_size(round_size);
-	}
-	if let Some(is_circle) = read_bool(component_data, "Circle") {
-		outline.set_circle(is_circle);
-	}
-	read_component_base(outline, component_data);
-}
-
-//==============================================================================
-// SoftShade 쓰기. (원본 반사 저장 꼴. 짝 맞는 get/set 이 없어 공통 상태만 적힌다)
-//==============================================================================
-fn save_soft_shade(soft_shade: &SoftShade, _save_context: &UIDocumentSaveContext) -> Map<String, Value> {
-	let mut component_data = Map::new();
-	write_component_base(&mut component_data, soft_shade);
-	component_data
-}
-
-//==============================================================================
-// SoftShade 읽기.
-//==============================================================================
-fn load_soft_shade(soft_shade: &mut SoftShade, component_data: &Map<String, Value>, _load_context: &mut UIDocumentLoadContext) {
-	read_component_base(soft_shade, component_data);
-}
-
-//==============================================================================
-// ShadowText 쓰기. (원본 반사 저장 꼴. 원본 FontFace 는 글꼴 객체라 반사 저장이 적지 않는다)
-//==============================================================================
-fn save_shadow_text(shadow_text: &ShadowText, _save_context: &UIDocumentSaveContext) -> Map<String, Value> {
-	let mut component_data = Map::new();
-	write_value(&mut component_data, "Text", Value::from(shadow_text.get_text()));
-	write_value(&mut component_data, "TextAlign", Value::from(find_name(&TEXT_ALIGN_NAME_TABLE, shadow_text.get_text_align())));
-	write_value(&mut component_data, "TextDirection", Value::from(shadow_text.get_text_direction().get_name()));
-	write_value(&mut component_data, "Italic", Value::from(shadow_text.is_italic()));
-	write_value(&mut component_data, "Underline", Value::from(shadow_text.is_underline()));
-	write_value(&mut component_data, "Strikethrough", Value::from(shadow_text.is_strikethrough()));
-	write_value(&mut component_data, "FitMinimumRatio", UIDocument::number_to_value(shadow_text.get_fit_minimum_ratio()));
-	write_component_base(&mut component_data, shadow_text);
-	component_data
-}
-
-//==============================================================================
-// ShadowText 읽기.
-//==============================================================================
-fn load_shadow_text(shadow_text: &mut ShadowText, component_data: &Map<String, Value>, _load_context: &mut UIDocumentLoadContext) {
-	if let Some(text_string) = read_string(component_data, "Text") {
-		shadow_text.set_text(text_string);
-	}
-	if let Some(text_align) = read_string(component_data, "TextAlign").and_then(|name| find_value(&TEXT_ALIGN_NAME_TABLE, name)) {
-		shadow_text.set_text_align(text_align);
-	}
-	if let Some(text_direction_name) = read_string(component_data, "TextDirection") {
-		shadow_text.set_text_direction(TextDirection::from_name(text_direction_name));
-	}
-	if let Some(is_italic) = read_bool(component_data, "Italic") {
-		shadow_text.set_italic(is_italic);
-	}
-	if let Some(is_underline) = read_bool(component_data, "Underline") {
-		shadow_text.set_underline(is_underline);
-	}
-	if let Some(is_strikethrough) = read_bool(component_data, "Strikethrough") {
-		shadow_text.set_strikethrough(is_strikethrough);
-	}
-	if let Some(fit_minimum_ratio) = read_number(component_data, "FitMinimumRatio") {
-		shadow_text.set_fit_minimum_ratio(fit_minimum_ratio);
-	}
-	read_component_base(shadow_text, component_data);
-}
-
-//==============================================================================
-// UIProgressRing 쓰기. (원본 반사 저장 꼴)
-//==============================================================================
-fn save_progress_ring(progress_ring: &UIProgressRing, _save_context: &UIDocumentSaveContext) -> Map<String, Value> {
-	let mut component_data = Map::new();
-	write_value(&mut component_data, "Ratio", UIDocument::number_to_value(progress_ring.get_ratio()));
-	write_value(&mut component_data, "RoundSize", UIDocument::number_to_value(progress_ring.get_round_size()));
-	write_value(&mut component_data, "LineWidth", UIDocument::number_to_value(progress_ring.get_line_width()));
-	write_value(&mut component_data, "FillColor", UIDocument::color_to_array(progress_ring.get_fill_color()));
-	write_value(&mut component_data, "TrackColor", UIDocument::color_to_array(progress_ring.get_track_color()));
-	write_component_base(&mut component_data, progress_ring);
-	component_data
-}
-
-//==============================================================================
-// UIProgressRing 읽기.
-//==============================================================================
-fn load_progress_ring(progress_ring: &mut UIProgressRing, component_data: &Map<String, Value>, _load_context: &mut UIDocumentLoadContext) {
-	if let Some(ratio) = read_number(component_data, "Ratio") {
-		progress_ring.set_ratio(ratio);
-	}
-	if let Some(round_size) = read_number(component_data, "RoundSize") {
-		progress_ring.set_round_size(round_size);
-	}
-	if let Some(line_width) = read_number(component_data, "LineWidth") {
-		progress_ring.set_line_width(line_width);
-	}
-	if let Some(fill_color) = read_color(component_data, "FillColor") {
-		progress_ring.set_fill_color(fill_color);
-	}
-	if let Some(track_color) = read_color(component_data, "TrackColor") {
-		progress_ring.set_track_color(track_color);
-	}
-	read_component_base(progress_ring, component_data);
-}
-
-//==============================================================================
-// ShadowImage 쓰기. (원본이 반사로 적을 꼴에 그림 경로를 더한 것. 그림 색이 없으면 원본처럼 ImageColor 를 적지 않는다)
-//==============================================================================
-fn save_shadow_image(shadow_image: &ShadowImage, _save_context: &UIDocumentSaveContext) -> Map<String, Value> {
+fn save_shadow_image(shadow_image: &ShadowImage, save_context: &UIDocumentSaveContext) -> Map<String, Value> {
 	let mut component_data = Map::new();
 	write_value(&mut component_data, "imagePath", Value::from(shadow_image.get_image_path()));
-	if let Some(image_color) = shadow_image.get_image_color() {
-		write_value(&mut component_data, "ImageColor", UIDocument::color_to_array(image_color));
+	for (property_name, property_value) in UIDocument::save_by_reflection(shadow_image, save_context) {
+		component_data.insert(property_name, property_value);
 	}
-	write_component_base(&mut component_data, shadow_image);
 	component_data
 }
 
@@ -1322,10 +1616,7 @@ fn load_shadow_image(shadow_image: &mut ShadowImage, component_data: &Map<String
 			load_context.bind_image::<ShadowImage>(image_path, |shadow_image, image| shadow_image.set_image(Some(image), None));
 		}
 	}
-	if let Some(image_color) = read_color(component_data, "ImageColor") {
-		shadow_image.set_image_color(Some(image_color));
-	}
-	read_component_base(shadow_image, component_data);
+	UIDocument::load_by_reflection(shadow_image, component_data, load_context);
 }
 
 //==============================================================================
@@ -1512,9 +1803,215 @@ fn load_scroll_view(scroll_view: &mut UIScrollView, component_data: &Map<String,
 	}
 }
 
+//==============================================================================
+// 원본 노드 생성자가 만든 자식 노드 하나의 문서 값. (원본 UIScrollBar, UIInputField 의 자식 꼴: WorldNode, 크기 1, 돌림 0, 불투명 1, 피봇과 앵커 왼쪽 위, 누를 수 없음, 자식 없음)
+//==============================================================================
+fn create_part_node_data(name: &str, is_active: bool, position: Vector2, content_size: Vector2, component_data_list: Vec<Map<String, Value>>) -> Value {
+	let mut node_data = Map::new();
+	write_value(&mut node_data, "type", Value::from(NODE_TYPE_NAME));
+	write_value(&mut node_data, "name", Value::from(name));
+	write_value(&mut node_data, "active", Value::from(is_active));
+	write_value(&mut node_data, "position", UIDocument::vector2_to_array(position));
+	write_value(&mut node_data, "scale", UIDocument::vector2_to_array(Vector2::create(1.0, 1.0)));
+	write_value(&mut node_data, "rotation", UIDocument::number_to_value(0.0));
+	write_value(&mut node_data, "opacity", UIDocument::number_to_value(1.0));
+	write_value(&mut node_data, "pivot", UIDocument::vector2_to_array(Vector2::zero()));
+	write_value(&mut node_data, "anchor", UIDocument::vector2_to_array(Vector2::zero()));
+	write_value(&mut node_data, "contentSize", UIDocument::vector2_to_array(content_size));
+	write_value(&mut node_data, "interactable", Value::from(false));
+	write_value(&mut node_data, "components", Value::Array(component_data_list.into_iter().map(Value::Object).collect()));
+	write_value(&mut node_data, "children", Value::Array(Vec::new()));
+	Value::Object(node_data)
+}
+
+//==============================================================================
+// 원본 생성자가 붙인 Paint 의 문서 값.
+//==============================================================================
+fn create_part_paint_data(color: Color, round_size: f32, save_context: &UIDocumentSaveContext) -> Map<String, Value> {
+	let mut paint = Paint::new();
+	paint.set_color(color);
+	paint.set_round_size(round_size);
+	let mut component_data = save_paint(&paint, save_context);
+	write_value(&mut component_data, "type", Value::from("Paint"));
+	component_data
+}
+
+//==============================================================================
+// 원본 UIInputField 가 만든 UILabel 의 문서 값. (바탕 투명, 왼쪽 정렬, 가운데 기준선)
+//==============================================================================
+fn create_part_label_data(text: &str, font_size: f32, text_color: Color, save_context: &UIDocumentSaveContext) -> Map<String, Value> {
+	let mut label = UILabel::new();
+	label.set_background_color(Color::create(0.0, 0.0, 0.0, 0.0));
+	label.set_text(text);
+	label.set_font_size(font_size);
+	label.set_text_align(TextAlign::Left);
+	label.set_text_baseline(TextBaseline::Middle);
+	label.set_text_color(text_color);
+	let mut component_data = save_label(&label, save_context);
+	write_value(&mut component_data, "type", Value::from("UILabel"));
+	component_data
+}
+
+//==============================================================================
+// 원본 UIInputField 의 그리기 층 컴포넌트 문서 값. (원본 BackgroundLayerRenderer, OverlayLayerRenderer 는 반사로 적혀 공통 속성만 남는다)
+//==============================================================================
+fn create_part_layer_data(component_type: &str, type_name: &str) -> Map<String, Value> {
+	let mut component_data = Map::new();
+	write_value(&mut component_data, "GizmoVisible", Value::from(false));
+	write_value(&mut component_data, "Enable", Value::from(true));
+	write_value(&mut component_data, "ComponentType", Value::from(component_type));
+	write_value(&mut component_data, "type", Value::from(type_name));
+	component_data
+}
+
+//==============================================================================
+// 원본 생성자 몫의 컴포넌트 값. (그 종류면 값)
+//==============================================================================
+fn find_part_component<'a>(component_data: Option<&'a Value>, type_name: &str) -> Option<&'a Map<String, Value>> {
+	let component_object = component_data?.as_object()?;
+	if read_string(component_object, "type") != Some(type_name) {
+		return None;
+	}
+	Some(component_object)
+}
+
+//==============================================================================
+// 원본 생성자 몫의 자식 노드의 첫 컴포넌트 값. (그 종류면 값)
+//==============================================================================
+fn find_part_child_component<'a>(child_data: Option<&'a Value>, type_name: &str) -> Option<&'a Map<String, Value>> {
+	let first_component_data = child_data?.as_object()?.get("components")?.as_array()?.first();
+	find_part_component(first_component_data, type_name)
+}
+
+//==============================================================================
+// UIInputField 의 원본 노드 꼴. (원본은 WorldNode 하위 클래스이고 생성자가 바탕 Paint, 선택 영역 층, 안내 글과 값 UILabel 자식, 오버레이 자식을 만든다)
+// - 쓸 때는 원본이 tick 뒤에 적는 꼴이다. (refreshTextPositions: 노드 크기가 있으면 글 라벨은 (여백, 0) 에 (너비 - 여백 * 2, 높이), 오버레이는 노드 크기)
+// - 읽을 때는 바탕 색과 둥근 크기, 안내 글과 그 색과 글 크기, 값 색, 켜진 값 라벨의 글(값)을 설정으로 읽는다. 커서 색과 최대 길이는 원본 문서에도 없다.
+//==============================================================================
+impl UIDocumentNode for UIInputField {
+	fn save_node_parts(&self, save_context: &UIDocumentSaveContext, node_id: NodeId) -> UIDocumentNodeParts {
+		let mut node_parts = UIDocumentNodeParts::new();
+		node_parts.component_data_list.push(create_part_paint_data(self.get_background_color(), self.get_round_size(), save_context));
+		node_parts.component_data_list.push(create_part_layer_data("UIInputFieldBgLayer", "BackgroundLayerRenderer"));
+		let content_size = save_context.get_node_tree().get_node(node_id).map(|node| node.get_content_size()).unwrap_or_default();
+		let mut text_position = Vector2::zero();
+		let mut text_size = Vector2::zero();
+		let mut overlay_size = Vector2::zero();
+		if content_size.x > 0.0 && content_size.y > 0.0 {
+			let padding = self.get_padding();
+			text_position = Vector2::create(padding, 0.0);
+			text_size = Vector2::create((content_size.x - padding * 2.0).max(0.0), content_size.y);
+			overlay_size = content_size;
+		}
+		let has_value = !self.get_text().is_empty() || !self.get_composition().is_empty();
+		let display_text = if has_value {
+			self.get_display_text()
+		}
+		else {
+			String::new()
+		};
+		let placeholder_label_data = create_part_label_data(self.get_placeholder(), self.get_font_size(), self.get_placeholder_color(), save_context);
+		let text_label_data = create_part_label_data(&display_text, self.get_font_size(), self.get_text_color(), save_context);
+		node_parts.child_data_list.push(create_part_node_data("", !has_value, text_position, text_size, vec![placeholder_label_data]));
+		node_parts.child_data_list.push(create_part_node_data("", has_value, text_position, text_size, vec![text_label_data]));
+		node_parts.child_data_list.push(create_part_node_data("", true, Vector2::zero(), overlay_size, vec![create_part_layer_data("UIInputFieldOverlayLayer", "OverlayLayerRenderer")]));
+		node_parts
+	}
+
+	fn load_node_parts(&mut self, component_data_list: &[Value], child_data_list: &[Value]) -> (usize, usize) {
+		let mut component_count = 0;
+		if let Some(background_data) = find_part_component(component_data_list.first(), "Paint") {
+			if let Some(background_color) = read_color(background_data, "color") {
+				self.set_background_color(background_color);
+			}
+			if let Some(round_size) = read_number(background_data, "roundSize") {
+				self.set_round_size(round_size);
+			}
+			component_count = 1;
+			if find_part_component(component_data_list.get(1), "BackgroundLayerRenderer").is_some() {
+				component_count = 2;
+			}
+		}
+		let mut child_count = 0;
+		if let Some(placeholder_data) = find_part_child_component(child_data_list.first(), "UILabel") {
+			if let Some(placeholder) = read_string(placeholder_data, "text") {
+				self.set_placeholder(placeholder);
+			}
+			if let Some(font_size) = read_number(placeholder_data, "fontSize") {
+				self.set_font_size(font_size);
+			}
+			if let Some(placeholder_color) = read_color(placeholder_data, "textColor") {
+				self.set_placeholder_color(placeholder_color);
+			}
+			child_count = 1;
+			if let Some(text_data) = find_part_child_component(child_data_list.get(1), "UILabel") {
+				if let Some(text_color) = read_color(text_data, "textColor") {
+					self.set_text_color(text_color);
+				}
+				// 값 라벨은 값이 있을 때만 켜진다. (원본 refreshTexts) 켜져 있으면 그 글이 값이다.
+				let is_text_active = child_data_list.get(1).and_then(|child_data| child_data.get("active")).and_then(|value| value.as_bool()).unwrap_or(false);
+				if is_text_active {
+					if let Some(text) = read_string(text_data, "text") {
+						self.set_text(text);
+					}
+				}
+				child_count = 2;
+				if find_part_child_component(child_data_list.get(2), "OverlayLayerRenderer").is_some() {
+					child_count = 3;
+				}
+			}
+		}
+		(component_count, child_count)
+	}
+
+	fn get_document_content(&self) -> Option<NodeId> {
+		self.get_content()
+	}
+}
+
+//==============================================================================
+// UIScrollBar 의 원본 노드 꼴. (원본은 WorldNode 하위 클래스이고 생성자가 트랙 Paint 와 썸 자식 노드(Paint)를 만든다)
+// - 쓸 때 썸 노드는 원본 tick 이 맞춘 꼴이다. (썸이 꺼져 있으면 꺼진 노드, 켜져 있으면 썸 사각형의 자리와 크기)
+// - 읽을 때는 트랙 색과 썸 색을 설정으로 읽는다. 둥근 크기는 원본처럼 4 로 정해져 있다. 대상 스크롤 뷰는 원본 문서에도 없다.
+//==============================================================================
+impl UIDocumentNode for UIScrollBar {
+	fn save_node_parts(&self, save_context: &UIDocumentSaveContext, _node_id: NodeId) -> UIDocumentNodeParts {
+		let mut node_parts = UIDocumentNodeParts::new();
+		node_parts.component_data_list.push(create_part_paint_data(self.get_track_color(), SCROLL_BAR_PART_ROUND_SIZE, save_context));
+		let thumb_rect = self.get_thumb_rect();
+		let thumb_position = thumb_rect.map(|thumb_rect| thumb_rect.position).unwrap_or_default();
+		let thumb_size = thumb_rect.map(|thumb_rect| thumb_rect.size).unwrap_or_default();
+		let thumb_paint_data = create_part_paint_data(self.get_thumb_color(), SCROLL_BAR_PART_ROUND_SIZE, save_context);
+		node_parts.child_data_list.push(create_part_node_data("thumb", thumb_rect.is_some(), thumb_position, thumb_size, vec![thumb_paint_data]));
+		node_parts
+	}
+
+	fn load_node_parts(&mut self, component_data_list: &[Value], child_data_list: &[Value]) -> (usize, usize) {
+		let mut component_count = 0;
+		if let Some(track_data) = find_part_component(component_data_list.first(), "Paint") {
+			if let Some(track_color) = read_color(track_data, "color") {
+				self.set_track_color(track_color);
+			}
+			component_count = 1;
+		}
+		let mut child_count = 0;
+		let is_thumb_node = child_data_list.first().and_then(|child_data| child_data.get("name")).and_then(|value| value.as_str()) == Some("thumb");
+		if is_thumb_node {
+			if let Some(thumb_data) = find_part_child_component(child_data_list.first(), "Paint") {
+				if let Some(thumb_color) = read_color(thumb_data, "color") {
+					self.set_thumb_color(thumb_color);
+				}
+				child_count = 1;
+			}
+		}
+		(component_count, child_count)
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::core::graphic::TextDirection;
 
 	// vanilla.js UIDocument.toJsonText(뿌리, true) 가 낸 글. (에디터 처음 씬처럼 Panel 아래 Title 글, 그림 Sprite 하나)
 	const EDITOR_SCENE_TEXT: &str = r#"{
@@ -1701,6 +2198,15 @@ mod tests {
 	// vanilla.js UIDocument.toJsonText(뿌리, false) 가 낸 글. (ShadowText 하나)
 	const SHADOW_TEXT_SCENE_TEXT: &str = r#"{"version":1,"root":{"type":"WorldNode","name":"shadowRoot","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0.5,0.5],"anchor":[0.5,0.5],"contentSize":[0,0],"interactable":false,"components":[],"children":[{"type":"WorldNode","name":"shadowText","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0.5,0.5],"anchor":[0.5,0.5],"contentSize":[0,0],"interactable":false,"components":[{"Text":"그림자","TextAlign":"left","TextDirection":"rtl","Italic":true,"Underline":false,"Strikethrough":true,"FitMinimumRatio":0.5,"GizmoVisible":false,"Enable":true,"ComponentType":"ShadowText","type":"ShadowText"}],"children":[]}]}}"#;
 
+	// vanilla.js 가 처음 값의 Outline, SoftShade, ShadowText, UIProgressRing, ShadowImage 를 반사로 적은 컴포넌트 목록. (UIDocument.serializeNode 의 components)
+	const REFLECTED_DEFAULTS_TEXT: &str = r#"[{"Color":[1,1,1,1],"LineWidth":1,"RoundSize":0,"Circle":false,"GizmoVisible":false,"Enable":true,"ComponentType":"Outline","type":"Outline"},{"GizmoVisible":false,"Enable":true,"ComponentType":"SoftShade","type":"SoftShade"},{"Text":"","TextAlign":"center","TextDirection":"ltr","Italic":false,"Underline":false,"Strikethrough":false,"FitMinimumRatio":0.6,"GizmoVisible":false,"Enable":true,"ComponentType":"ShadowText","type":"ShadowText"},{"Ratio":0,"RoundSize":0,"LineWidth":2,"FillColor":[1,1,1,1],"TrackColor":[0.2,0.2,0.25,1],"GizmoVisible":false,"Enable":true,"ComponentType":"UIProgressRing","type":"UIProgressRing"},{"GizmoVisible":false,"Enable":true,"ComponentType":"ShadowImage","type":"ShadowImage"}]"#;
+
+	// vanilla.js 에디터(tools/uieditor/uieditor.js addWidgetNode)와 같은 단계로 지은 inputField, scrollBar, snapScrollView 를 한 번 tick 하고 toJsonText(뿌리, false) 가 낸 글.
+	const EDITOR_TYPES_SCENE_TEXT: &str = r#"{"version":1,"root":{"type":"WorldNode","name":"editorRoot","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0,0],"anchor":[0,0],"contentSize":[0,0],"interactable":false,"components":[],"children":[{"type":"UIInputField","name":"InputField1","active":true,"position":[60,60],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0,0],"anchor":[0,0],"contentSize":[260,40],"interactable":true,"components":[{"color":[1,1,1,1],"roundSize":8,"type":"Paint"},{"GizmoVisible":false,"Enable":true,"ComponentType":"UIInputFieldBgLayer","type":"BackgroundLayerRenderer"}],"children":[{"type":"WorldNode","name":"","active":true,"position":[16,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0,0],"anchor":[0,0],"contentSize":[228,40],"interactable":false,"components":[{"text":"","fontSize":28,"textColor":[0.6,0.6,0.6,1],"backgroundColor":[0,0,0,0],"textAlign":"left","textBaseline":"middle","type":"UILabel"}],"children":[]},{"type":"WorldNode","name":"","active":false,"position":[16,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0,0],"anchor":[0,0],"contentSize":[228,40],"interactable":false,"components":[{"text":"","fontSize":28,"textColor":[0.13333333333333333,0.13333333333333333,0.13333333333333333,1],"backgroundColor":[0,0,0,0],"textAlign":"left","textBaseline":"middle","type":"UILabel"}],"children":[]},{"type":"WorldNode","name":"","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0,0],"anchor":[0,0],"contentSize":[260,40],"interactable":false,"components":[{"GizmoVisible":false,"Enable":true,"ComponentType":"UIInputFieldOverlayLayer","type":"OverlayLayerRenderer"}],"children":[]}]},{"type":"UIScrollBar","name":"ScrollBar2","active":true,"position":[60,60],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0,0],"anchor":[0,0],"contentSize":[12,220],"interactable":true,"components":[{"color":[0,0,0,0.15],"roundSize":4,"type":"Paint"}],"children":[{"type":"WorldNode","name":"thumb","active":false,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0,0],"anchor":[0,0],"contentSize":[0,0],"interactable":false,"components":[{"color":[1,1,1,0.6],"roundSize":4,"type":"Paint"}],"children":[]}]},{"type":"WorldNode","name":"SnapScrollView3","active":true,"position":[60,60],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0,0],"anchor":[0,0],"contentSize":[320,220],"interactable":true,"components":[{"color":[0.965,0.965,0.965,1],"roundSize":16,"type":"Paint"},{"SnapToNearest":false,"VelocityThreshold":200,"PageChangeThreshold":0.35,"SnapCurrentIndex":0,"ScrollOffset":[0,0],"Horizontal":true,"Vertical":false,"DragSensitivity":1,"ScrollMode":"clamp","ScrollContentSize":[960,220],"BackgroundColor":[1,1,1,0],"GizmoVisible":false,"Enable":true,"ComponentType":"SnapScrollView","type":"UISnapScrollView"}],"children":[],"contentChildren":[{"type":"WorldNode","name":"page","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0.5,0.5],"anchor":[0.5,0.5],"contentSize":[320,220],"interactable":false,"components":[],"children":[]}]}]}}"#;
+
+	// 위와 같되 안내 글, 값, 글 크기, 둥근 크기, 색, 트랙과 썸 색, 스냅 설정을 바꾼 것.
+	const EDITOR_TYPES_CUSTOM_SCENE_TEXT: &str = r#"{"version":1,"root":{"type":"WorldNode","name":"editorRoot","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0,0],"anchor":[0,0],"contentSize":[0,0],"interactable":false,"components":[],"children":[{"type":"UIInputField","name":"InputField1","active":true,"position":[60,60],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0,0],"anchor":[0,0],"contentSize":[260,40],"interactable":true,"components":[{"color":[0.9,0.95,1,1],"roundSize":4,"type":"Paint"},{"GizmoVisible":false,"Enable":true,"ComponentType":"UIInputFieldBgLayer","type":"BackgroundLayerRenderer"}],"children":[{"type":"WorldNode","name":"","active":false,"position":[16,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0,0],"anchor":[0,0],"contentSize":[228,40],"interactable":false,"components":[{"text":"이름을 넣어요","fontSize":20,"textColor":[0.5,0.5,0.5,1],"backgroundColor":[0,0,0,0],"textAlign":"left","textBaseline":"middle","type":"UILabel"}],"children":[]},{"type":"WorldNode","name":"","active":true,"position":[16,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0,0],"anchor":[0,0],"contentSize":[228,40],"interactable":false,"components":[{"text":"뚝백","fontSize":20,"textColor":[0.1,0.2,0.3,1],"backgroundColor":[0,0,0,0],"textAlign":"left","textBaseline":"middle","type":"UILabel"}],"children":[]},{"type":"WorldNode","name":"","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0,0],"anchor":[0,0],"contentSize":[260,40],"interactable":false,"components":[{"GizmoVisible":false,"Enable":true,"ComponentType":"UIInputFieldOverlayLayer","type":"OverlayLayerRenderer"}],"children":[]}]},{"type":"UIScrollBar","name":"ScrollBar2","active":true,"position":[60,60],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0,0],"anchor":[0,0],"contentSize":[12,220],"interactable":true,"components":[{"color":[0.2,0.2,0.2,0.5],"roundSize":4,"type":"Paint"}],"children":[{"type":"WorldNode","name":"thumb","active":false,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0,0],"anchor":[0,0],"contentSize":[0,0],"interactable":false,"components":[{"color":[1,0.5,0,1],"roundSize":4,"type":"Paint"}],"children":[]}]},{"type":"WorldNode","name":"SnapScrollView3","active":true,"position":[60,60],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0,0],"anchor":[0,0],"contentSize":[320,220],"interactable":true,"components":[{"color":[0.965,0.965,0.965,1],"roundSize":16,"type":"Paint"},{"SnapToNearest":true,"VelocityThreshold":300,"PageChangeThreshold":0.5,"SnapCurrentIndex":0,"ScrollOffset":[0,0],"Horizontal":true,"Vertical":false,"DragSensitivity":1.5,"ScrollMode":"clamp","ScrollContentSize":[960,220],"BackgroundColor":[1,1,1,0],"GizmoVisible":false,"Enable":true,"ComponentType":"SnapScrollView","type":"UISnapScrollView"}],"children":[],"contentChildren":[{"type":"WorldNode","name":"page","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0.5,0.5],"anchor":[0.5,0.5],"contentSize":[320,220],"interactable":false,"components":[],"children":[]}]}]}}"#;
+
 	//==============================================================================
 	// 에디터 씬 파일(frameSize 를 얹은 것)을 읽어 다시 쓰면 원본이 낸 글과 한 글자도 다르지 않다.
 	//==============================================================================
@@ -1854,7 +2360,7 @@ mod tests {
 		let unknown_root_id = document.from_json_text(&mut node_tree, document_text).expect("document");
 		assert_eq!(node_tree[unknown_root_id].get_all_components().len(), 0);
 
-		document.register_component_type("Spin", || Spin { component_base: crate::core::component::ComponentBase::new(), degrees_per_second: 0.0 }, |spin, _save_context| {
+		document.register_component_type_with_handler("Spin", || Spin { component_base: crate::core::component::ComponentBase::new(), degrees_per_second: 0.0 }, |spin, _save_context| {
 			let mut component_data = Map::new();
 			component_data.insert(String::from("degreesPerSecond"), UIDocument::number_to_value(spin.degrees_per_second));
 			component_data
@@ -1906,5 +2412,313 @@ mod tests {
 		assert_eq!(UIDocument::find_node_by_path(&node_tree, root_id, "/panel/button"), Some(button_id));
 		assert_eq!(UIDocument::find_node_by_path(&node_tree, root_id, "/"), Some(root_id));
 		assert_eq!(UIDocument::find_node_by_path(&node_tree, root_id, "/panel/missing"), None);
+	}
+
+	//==============================================================================
+	// 시험용 게임 컴포넌트. (#[vanilla::reflect] 를 붙여 등록 한 줄로 쓰고 읽는다)
+	//==============================================================================
+	struct Follower {
+		component_base: crate::core::component::ComponentBase,
+		speed: f32,
+		label: String,
+		tint: Color,
+		offset: Vector2,
+		text_align: TextAlign,
+		leader: Option<NodeId>,
+		secret: i32,
+		cache_count: usize,
+	}
+
+	#[vanilla::reflect]
+	impl Follower {
+		pub fn new() -> Follower {
+			Follower {
+				component_base: crate::core::component::ComponentBase::new(),
+				speed: 1.0,
+				label: String::new(),
+				tint: Color::create(1.0, 1.0, 1.0, 1.0),
+				offset: Vector2::zero(),
+				text_align: TextAlign::Left,
+				leader: None,
+				secret: 0,
+				cache_count: 0,
+			}
+		}
+
+		pub fn set_speed(&mut self, speed: f32) {
+			self.speed = speed;
+		}
+
+		pub fn get_speed(&self) -> f32 {
+			self.speed
+		}
+
+		pub fn set_label(&mut self, label: &str) {
+			self.label = String::from(label);
+		}
+
+		pub fn get_label(&self) -> &str {
+			&self.label
+		}
+
+		pub fn set_tint(&mut self, tint: impl Into<Color>) {
+			self.tint = tint.into();
+		}
+
+		pub fn get_tint(&self) -> Color {
+			self.tint
+		}
+
+		pub fn set_offset(&mut self, offset: Vector2) {
+			self.offset = offset;
+		}
+
+		pub fn get_offset(&self) -> Vector2 {
+			self.offset
+		}
+
+		pub fn set_text_align(&mut self, text_align: TextAlign) {
+			self.text_align = text_align;
+		}
+
+		pub fn get_text_align(&self) -> TextAlign {
+			self.text_align
+		}
+
+		pub fn set_leader(&mut self, leader: Option<NodeId>) {
+			self.leader = leader;
+		}
+
+		pub fn get_leader(&self) -> Option<NodeId> {
+			self.leader
+		}
+
+		#[reflect(skip)]
+		pub fn set_secret(&mut self, secret: i32) {
+			self.secret = secret;
+		}
+
+		#[reflect(skip)]
+		pub fn get_secret(&self) -> i32 {
+			self.secret
+		}
+
+		pub fn set_cache_count(&mut self, cache_count: usize) {
+			self.cache_count = cache_count;
+		}
+
+		#[reflect(transient)]
+		pub fn get_cache_count(&self) -> usize {
+			self.cache_count
+		}
+
+		pub fn is_following(&self) -> bool {
+			self.leader.is_some()
+		}
+	}
+
+	#[vanilla::reflect]
+	impl Component for Follower {
+		fn get_component_base(&self) -> &crate::core::component::ComponentBase {
+			&self.component_base
+		}
+
+		fn get_component_base_mut(&mut self) -> &mut crate::core::component::ComponentBase {
+			&mut self.component_base
+		}
+
+		fn get_component_type(&self) -> &'static str {
+			"Follower"
+		}
+
+		fn is_tick_needed(&self) -> bool {
+			false
+		}
+	}
+
+	//==============================================================================
+	// 두 문서 값이 같은지. (키 차례까지 같고, 수는 f32 로 줄여 비교한다. 원본 f64 의 끝자리는 러스트 판에서 f32 로 줄어든다)
+	//==============================================================================
+	fn assert_same_document_value(left_value: &Value, right_value: &Value, value_path: &str) {
+		match (left_value, right_value) {
+			(Value::Object(left_object), Value::Object(right_object)) => {
+				let left_keys: Vec<&String> = left_object.keys().collect();
+				let right_keys: Vec<&String> = right_object.keys().collect();
+				assert_eq!(left_keys, right_keys, "키가 다르다: {}", value_path);
+				for (key, left_child) in left_object.iter() {
+					assert_same_document_value(left_child, &right_object[key], &format!("{}/{}", value_path, key));
+				}
+			}
+			(Value::Array(left_items), Value::Array(right_items)) => {
+				assert_eq!(left_items.len(), right_items.len(), "배열 길이가 다르다: {}", value_path);
+				for (item_index, (left_item, right_item)) in left_items.iter().zip(right_items.iter()).enumerate() {
+					assert_same_document_value(left_item, right_item, &format!("{}[{}]", value_path, item_index));
+				}
+			}
+			(Value::Number(left_number), Value::Number(right_number)) => {
+				let left_float = left_number.as_f64().unwrap_or(f64::NAN) as f32;
+				let right_float = right_number.as_f64().unwrap_or(f64::NAN) as f32;
+				assert_eq!(left_float, right_float, "수가 다르다: {}", value_path);
+			}
+			_ => {
+				assert_eq!(left_value, right_value, "값이 다르다: {}", value_path);
+			}
+		}
+	}
+
+	//==============================================================================
+	// 원본이 반사로 저장하는 종류는 처음 값을 원본 saveByReflection 과 같은 키, 차례, 값으로 적는다. (ShadowImage 만 imagePath 가 앞에 더 붙는다)
+	//==============================================================================
+	#[test]
+	fn reflected_components_match_original_defaults() {
+		let mut node_tree = NodeTree::new();
+		let root_id = node_tree.create_node("root");
+		node_tree.add_component(root_id, Outline::new());
+		node_tree.add_component(root_id, SoftShade::new());
+		node_tree.add_component(root_id, ShadowText::new());
+		node_tree.add_component(root_id, UIProgressRing::new());
+		node_tree.add_component(root_id, ShadowImage::new());
+		let document = UIDocument::new();
+		let written_data = document.serialize_node(&node_tree, root_id);
+		let mut expected_data: Value = serde_json::from_str(REFLECTED_DEFAULTS_TEXT).expect("defaults json");
+		let shadow_image_data = expected_data[4].as_object().expect("shadow image").clone();
+		let mut extended_shadow_image_data = Map::new();
+		extended_shadow_image_data.insert(String::from("imagePath"), Value::from(""));
+		extended_shadow_image_data.extend(shadow_image_data);
+		expected_data[4] = Value::Object(extended_shadow_image_data);
+		assert_eq!(written_data["components"], expected_data);
+	}
+
+	//==============================================================================
+	// 원본 에디터가 저장한 UIInputField, UIScrollBar(원본 노드 종류)와 UISnapScrollView 를 register_editor_types 한 줄로 읽고, 다시 쓰면 원본 글과 같다.
+	// - 노드 종류는 노드의 type 이고, 원본 생성자가 만든 컴포넌트와 자식은 설정으로 읽어 다시 짓지 않는다.
+	//==============================================================================
+	#[test]
+	fn editor_document_types_round_trip() {
+		for document_text in [EDITOR_TYPES_SCENE_TEXT, EDITOR_TYPES_CUSTOM_SCENE_TEXT] {
+			let mut node_tree = NodeTree::new();
+			let mut document = UIDocument::new();
+			document.register_editor_types();
+			let root_id = document.from_json_text(&mut node_tree, document_text).expect("document");
+			let written_data: Value = serde_json::from_str(&document.to_json_text(&node_tree, root_id, false)).expect("written json");
+			let original_data: Value = serde_json::from_str(document_text).expect("original json");
+			assert_same_document_value(&written_data, &original_data, "");
+
+			// 노드 종류는 그 컴포넌트 하나만 붙고, 원본 생성자의 자식은 짓지 않는다. (UIInputField 는 러스트 판의 content 노드 하나)
+			let field_id = node_tree.find_child_by_name(root_id, "InputField1").expect("field");
+			assert_eq!(node_tree[field_id].get_all_components().len(), 1);
+			assert_eq!(node_tree.get_child_ids(field_id).len(), 1);
+			let scroll_bar_id = node_tree.find_child_by_name(root_id, "ScrollBar2").expect("scroll bar");
+			assert_eq!(node_tree[scroll_bar_id].get_all_components().len(), 1);
+			assert!(node_tree.get_child_ids(scroll_bar_id).is_empty());
+			assert_eq!(node_tree[scroll_bar_id].get_content_size(), Vector2::create(12.0, 220.0));
+			let snap_id = node_tree.find_child_by_name(root_id, "SnapScrollView3").expect("snap");
+			assert!(node_tree[snap_id].has_component::<Mask>());
+			let snap_view = node_tree[snap_id].get_component::<UISnapScrollView>().expect("snap view");
+			assert_eq!(snap_view.get_scroll_content_size(), Vector2::create(960.0, 220.0));
+			let snap_content_id = snap_view.get_content().expect("content");
+			assert!(node_tree.find_child_by_name(snap_content_id, "page").is_some());
+		}
+
+		// 바꾼 값은 컴포넌트 설정으로 들어온다.
+		let mut node_tree = NodeTree::new();
+		let mut document = UIDocument::new();
+		document.register_editor_types();
+		let root_id = document.from_json_text(&mut node_tree, EDITOR_TYPES_CUSTOM_SCENE_TEXT).expect("document");
+		let field_id = node_tree.find_child_by_name(root_id, "InputField1").expect("field");
+		let field = node_tree[field_id].get_component::<UIInputField>().expect("input field");
+		assert_eq!(field.get_placeholder(), "이름을 넣어요");
+		assert_eq!(field.get_text(), "뚝백");
+		assert_eq!(field.get_font_size(), 20.0);
+		assert_eq!(field.get_round_size(), 4.0);
+		assert_eq!(field.get_background_color(), Color::create(0.9, 0.95, 1.0, 1.0));
+		assert_eq!(field.get_text_color(), Color::create(0.1, 0.2, 0.3, 1.0));
+		assert_eq!(field.get_placeholder_color(), Color::create(0.5, 0.5, 0.5, 1.0));
+		let scroll_bar_id = node_tree.find_child_by_name(root_id, "ScrollBar2").expect("scroll bar");
+		let scroll_bar = node_tree[scroll_bar_id].get_component::<UIScrollBar>().expect("scroll bar");
+		assert_eq!(scroll_bar.get_track_color(), Color::create(0.2, 0.2, 0.2, 0.5));
+		assert_eq!(scroll_bar.get_thumb_color(), Color::create(1.0, 0.5, 0.0, 1.0));
+		let snap_id = node_tree.find_child_by_name(root_id, "SnapScrollView3").expect("snap");
+		let snap_view = node_tree[snap_id].get_component::<UISnapScrollView>().expect("snap view");
+		assert!(snap_view.get_snap_to_nearest());
+		assert_eq!(snap_view.get_velocity_threshold(), 300.0);
+		assert_eq!(snap_view.get_page_change_threshold(), 0.5);
+		assert_eq!(snap_view.get_scroll_view().get_drag_sensitivity(), 1.5);
+
+		// 등록하지 않으면 원본 런타임처럼 노드 종류는 WorldNode 로, 모르는 컴포넌트는 건너뛰고 읽는다.
+		let mut plain_tree = NodeTree::new();
+		let mut plain_document = UIDocument::new();
+		let plain_root_id = plain_document.from_json_text(&mut plain_tree, EDITOR_TYPES_SCENE_TEXT).expect("document");
+		let plain_field_id = plain_tree.find_child_by_name(plain_root_id, "InputField1").expect("field");
+		assert!(!plain_tree[plain_field_id].has_component::<UIInputField>());
+		assert!(plain_tree[plain_field_id].has_component::<Paint>());
+		let plain_snap_id = plain_tree.find_child_by_name(plain_root_id, "SnapScrollView3").expect("snap");
+		assert!(!plain_tree[plain_snap_id].has_component::<UISnapScrollView>());
+	}
+
+	//==============================================================================
+	// #[reflect] 를 붙인 게임 컴포넌트는 등록 한 줄로 원본 반사 저장 꼴로 쓰고 읽는다. (노드 참조, impl Into 세터, 원본 글 열거, skip, transient)
+	//==============================================================================
+	#[test]
+	fn reflected_game_component_round_trip() {
+		let mut node_tree = NodeTree::new();
+		let root_id = node_tree.create_node("root");
+		let leader_id = node_tree.create_child(root_id, "leader");
+		let follower_id = node_tree.create_child(root_id, "follower");
+		let mut follower = Follower::new();
+		follower.set_speed(2.5);
+		follower.set_label("앞");
+		follower.set_tint(Color::create(1.0, 0.0, 0.0, 1.0));
+		follower.set_offset(Vector2::create(3.0, 4.0));
+		follower.set_text_align(TextAlign::Right);
+		follower.set_leader(Some(leader_id));
+		follower.set_secret(7);
+		follower.set_cache_count(9);
+		node_tree.add_component(follower_id, follower);
+
+		let expected_data = serde_json::json!([{
+			"Speed": 2.5,
+			"Label": "앞",
+			"Tint": [1, 0, 0, 1],
+			"Offset": [3, 4],
+			"TextAlign": "right",
+			"Leader": { "$nodeRef": "/leader" },
+			"GizmoVisible": false,
+			"Enable": true,
+			"ComponentType": "Follower",
+			"type": "Follower"
+		}]);
+
+		// 등록하지 않아도 원본처럼 반사로 적는다. (type 은 타입 이름) 읽을 때는 건너뛴다.
+		let plain_document = UIDocument::new();
+		let plain_text = plain_document.to_json_text(&node_tree, root_id, false);
+		let plain_data: Value = serde_json::from_str(&plain_text).expect("plain json");
+		assert_eq!(plain_data["root"]["children"][1]["components"], expected_data);
+
+		let mut document = UIDocument::new();
+		document.register_component_type("Follower", Follower::new);
+		let document_text = document.to_json_text(&node_tree, root_id, false);
+		assert_eq!(document_text, plain_text);
+		let mut loaded_tree = NodeTree::new();
+		let loaded_root_id = document.from_json_text(&mut loaded_tree, &document_text).expect("document");
+		let loaded_leader_id = loaded_tree.find_child_by_name(loaded_root_id, "leader").expect("leader");
+		let loaded_follower_id = loaded_tree.find_child_by_name(loaded_root_id, "follower").expect("follower");
+		let loaded_follower = loaded_tree[loaded_follower_id].get_component::<Follower>().expect("follower");
+		assert_eq!(loaded_follower.get_speed(), 2.5);
+		assert_eq!(loaded_follower.get_label(), "앞");
+		assert_eq!(loaded_follower.get_tint(), Color::create(1.0, 0.0, 0.0, 1.0));
+		assert_eq!(loaded_follower.get_offset(), Vector2::create(3.0, 4.0));
+		assert_eq!(loaded_follower.get_text_align(), TextAlign::Right);
+		assert_eq!(loaded_follower.get_leader(), Some(loaded_leader_id));
+		assert_eq!(loaded_follower.get_secret(), 0);
+		assert_eq!(loaded_follower.get_cache_count(), 0);
+		assert_eq!(document.to_json_text(&loaded_tree, loaded_root_id, false), document_text);
+
+		// 편집할 수 있는 속성 목록과 인스펙터 게터. (원본 getReflectedProperties, getComponentProperties)
+		let loaded_component: &dyn Component = loaded_tree[loaded_follower_id].get_all_components()[0].as_ref();
+		let property_names: Vec<&str> = UIDocument::get_reflected_properties(loaded_component).iter().map(|property| property.name).collect();
+		assert_eq!(property_names, ["Speed", "Label", "Tint", "Offset", "TextAlign", "Leader", "GizmoVisible", "Enable", "ComponentType"]);
+		let getter_names: Vec<&str> = crate::core::reflection::collect_reflected_getters(loaded_component).expect("getters").iter().map(|getter| getter.name).collect();
+		assert_eq!(getter_names, ["isTickNeeded", "getSpeed", "getLabel", "getTint", "getOffset", "getTextAlign", "getLeader", "getCacheCount", "isFollowing"]);
 	}
 }

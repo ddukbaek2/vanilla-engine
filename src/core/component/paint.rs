@@ -13,6 +13,7 @@ pub struct Paint {
 	round_size: f32,
 }
 
+#[crate::reflect]
 impl Paint {
 	//==============================================================================
 	// 생성.
@@ -86,6 +87,7 @@ impl Default for Paint {
 	}
 }
 
+#[crate::reflect]
 impl Component for Paint {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base

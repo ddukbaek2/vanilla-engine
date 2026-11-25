@@ -30,7 +30,8 @@
 //   - 원본의 스프라이트 격자 표와 사운드 표(WeakMap)는 노드에 붙는 작은 컴포넌트 TimelineSpriteFrameGrid, TimelineSound 로 바꿨다.
 //   - 원본 Timeline.setAudioManager(정적)와 사운드 노드의 비동기 읽기는 load_sounds(node_tree, engine) 로 바꿨다.
 //     무대를 만든 뒤 한 번 부르면 사운드 노드마다 오디오 애셋을 읽고 플레이어를 만든다. (돌려준 애셋을 씬이 track_audio_asset 으로 맡겨도 된다)
-//   - loadFromUrl(비동기 fetch) 대신 JsonAsset 으로 받은 문서를 create_from_json_asset / load_from_text 로 넘긴다.
+//   - loadFromUrl(비동기 fetch)은 load_from_url(엔진, 애셋 경로)이다. 엔진의 애셋 받기로 바이트를 부탁하고, 엔진 작업 안에서 await 하면 타임라인이 나온다.
+//     (데스크탑은 애셋 폴더 후보, 웹은 asset_base_url 에서 fetch) await 없이는 JsonAsset 으로 받은 문서를 create_from_json_asset / load_from_text 로 넘긴다.
 //   - "data:" 주소 이미지: 웹은 원본처럼 브라우저가 풀어(fetch 와 HTMLImageElement, platform/web.rs) 다 풀리면 스프라이트에 걸고 서술의 칸을 다시 고른다.
 //     (원본 image.onload 의 applySpriteFrame, 그동안 TimelineSpriteFrameGrid 가 기다리며 갱신한다)
 //     데스크탑은 그 자리에서 푼다. 브라우저처럼 본문의 퍼센트 꼴(%XX)을 먼저 풀고, ;base64 면 base64 를 푼다. 주소의 형이 image/svg+xml 이면 resvg 로 그린 SVG,
@@ -63,6 +64,7 @@ use crate::resource::textasset::JsonAsset;
 use serde_json::{json, Value};
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::future::Future;
 use std::rc::Rc;
 use std::sync::LazyLock;
 
@@ -1085,6 +1087,7 @@ pub struct TimelineSpriteFrameGrid {
 	pending_image_load: Option<(AssetLoadHandle, i64)>,
 }
 
+#[crate::reflect]
 impl TimelineSpriteFrameGrid {
 	//==============================================================================
 	// 생성. (칸 수는 1 이상)
@@ -1121,6 +1124,7 @@ impl TimelineSpriteFrameGrid {
 	}
 }
 
+#[crate::reflect]
 impl Component for TimelineSpriteFrameGrid {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base
@@ -1189,6 +1193,7 @@ pub struct TimelineSound {
 	volume: f32,
 }
 
+#[crate::reflect]
 impl TimelineSound {
 	//==============================================================================
 	// 생성. (비어 있음)
@@ -1273,6 +1278,7 @@ impl Default for TimelineSound {
 	}
 }
 
+#[crate::reflect]
 impl Component for TimelineSound {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base
@@ -1328,90 +1334,12 @@ fn read_text_align(text_align_name: &str) -> TextAlign {
 }
 
 //==============================================================================
-// base64 풀기. (표준 알파벳, = 채움과 공백은 건너뛴다. 틀린 글자가 있으면 None)
-//==============================================================================
-#[cfg(not(target_arch = "wasm32"))]
-fn decode_base64(text: &str) -> Option<Vec<u8>> {
-	let mut bytes: Vec<u8> = Vec::with_capacity(text.len() * 3 / 4);
-	let mut accumulator: u32 = 0;
-	let mut bit_count = 0;
-	for character in text.bytes() {
-		let sextet = match character {
-			b'A'..=b'Z' => {
-				character - b'A'
-			}
-			b'a'..=b'z' => {
-				character - b'a' + 26
-			}
-			b'0'..=b'9' => {
-				character - b'0' + 52
-			}
-			b'+' | b'-' => {
-				62
-			}
-			b'/' | b'_' => {
-				63
-			}
-			b'=' | b' ' | b'\n' | b'\r' | b'\t' => {
-				continue;
-			}
-			_ => {
-				return None;
-			}
-		};
-		accumulator = (accumulator << 6) | sextet as u32;
-		bit_count += 6;
-		if bit_count >= 8 {
-			bit_count -= 8;
-			bytes.push(((accumulator >> bit_count) & 0xff) as u8);
-		}
-	}
-	Some(bytes)
-}
-
-//==============================================================================
-// 퍼센트 꼴 풀기. (%XX 를 그 바이트로 바꾸고, 뒤에 16진 두 자리가 없는 % 는 그대로 둔다)
-//==============================================================================
-#[cfg(not(target_arch = "wasm32"))]
-fn decode_percent_encoding(text: &str) -> Vec<u8> {
-	let text_bytes = text.as_bytes();
-	let mut bytes: Vec<u8> = Vec::with_capacity(text_bytes.len());
-	let mut byte_index = 0;
-	while byte_index < text_bytes.len() {
-		let current_byte = text_bytes[byte_index];
-		if current_byte == b'%' && byte_index + 2 < text_bytes.len() {
-			let high_digit = (text_bytes[byte_index + 1] as char).to_digit(16);
-			let low_digit = (text_bytes[byte_index + 2] as char).to_digit(16);
-			if let (Some(high_digit), Some(low_digit)) = (high_digit, low_digit) {
-				bytes.push((high_digit * 16 + low_digit) as u8);
-				byte_index += 3;
-				continue;
-			}
-		}
-		bytes.push(current_byte);
-		byte_index += 1;
-	}
-	bytes
-}
-
-//==============================================================================
-// "data:" 주소 이미지 읽기. (본문의 퍼센트 꼴을 풀고, 머리가 ;base64 로 끝나면 base64 를 푼다. fetch 의 data: 주소 처리와 같은 차례)
-// - 형은 "data:" 와 ;base64 사이다. 비었으면 fetch 처럼 text/plain;charset=US-ASCII 다. 형이 image/svg+xml 일 때만 SVG 로 푼다. (브라우저와 같다)
+// "data:" 주소 이미지 읽기. (base/dataurl.rs 로 풀고, 형이 image/svg+xml 일 때만 SVG 로 푼다. 브라우저와 같다)
 //==============================================================================
 #[cfg(not(target_arch = "wasm32"))]
 fn load_data_url_image(data_url: &str) -> Option<Rc<Image>> {
-	let separator_index = data_url.find(',')?;
-	let header = data_url.get(5..separator_index)?.trim();
-	let lowercase_header = header.to_ascii_lowercase();
-	let body = decode_percent_encoding(&data_url[separator_index + 1..]);
-	let (mime_type, bytes) = if lowercase_header.ends_with(";base64") {
-		(header[..header.len() - ";base64".len()].trim(), decode_base64(std::str::from_utf8(&body).ok()?)?)
-	}
-	else {
-		(header, body)
-	};
-	let mime_type = if mime_type.is_empty() { "text/plain;charset=US-ASCII" } else { mime_type };
-	Image::load_from_memory_with_mime_type(&bytes, mime_type).ok()
+	let data_url = crate::base::dataurl::parse_data_url(data_url)?;
+	Image::load_from_memory_with_mime_type(&data_url.bytes, &data_url.mime_type).ok()
 }
 
 //==============================================================================
@@ -1540,6 +1468,18 @@ impl Timeline {
 	pub fn load_from_text(text: &str) -> Result<Timeline, String> {
 		let description: Value = serde_json::from_str(text).map_err(|error| format!("Timeline: JSON 을 읽지 못했습니다. ({})", error))?;
 		Ok(Timeline::new(Some(description)))
+	}
+
+	//==============================================================================
+	// 주소에서 읽기. (원본 정적 await Timeline.loadFromUrl(url), 애셋 경로를 받기 부탁하고 엔진 작업 안에서 await 한다)
+	// - 받기나 JSON 읽기에 실패하면 까닭이다. (원본은 Promise 가 거부된다)
+	//==============================================================================
+	pub fn load_from_url(engine: &Engine, url: &str) -> impl Future<Output = Result<Timeline, String>> + 'static {
+		let load_handle = engine.request_asset_bytes(url);
+		async move {
+			let bytes = load_handle.await?;
+			Timeline::load_from_text(&String::from_utf8_lossy(&bytes))
+		}
 	}
 
 	//==============================================================================
@@ -2949,9 +2889,6 @@ mod tests {
 		assert!(empty_timeline.is_loop());
 		assert_eq!(TIMELINE_NODE_DEFAULTS.width, 100.0);
 		assert_eq!(TIMELINE_NODE_DEFAULTS.node_type, "group");
-		assert_eq!(decode_base64("SGVsbG8="), Some(b"Hello".to_vec()));
-		assert_eq!(decode_base64("SGk"), Some(b"Hi".to_vec()));
-		assert_eq!(decode_base64("S*"), None);
 	}
 
 	//==============================================================================
@@ -2959,12 +2896,11 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn data_url_image_decodes_percent_encoding() {
-		assert_eq!(decode_percent_encoding("a%20b%zz%4"), b"a b%zz%4".to_vec());
 		let png_base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 		let image = load_data_url_image(&format!("data:image/png;base64,{}", png_base64)).expect("base64");
 		assert_eq!((image.get_width(), image.get_height()), (1, 1));
 		assert!(load_data_url_image(&format!("data:image/png;BASE64,{}", png_base64.replace('=', "%3D"))).is_some());
-		let png_bytes = decode_base64(png_base64).expect("png bytes");
+		let png_bytes = crate::base::dataurl::decode_base64(png_base64).expect("png bytes");
 		let percent_body: String = png_bytes.iter().map(|byte| format!("%{:02X}", byte)).collect();
 		assert!(load_data_url_image(&format!("data:image/png,{}", percent_body)).is_some());
 		assert!(load_data_url_image("data:image/png,not-an-image").is_none());
@@ -2981,7 +2917,7 @@ mod tests {
 		assert_eq!((image.get_width(), image.get_height()), (4, 2));
 		assert_eq!(&image.get_pixels()[0..4], &[255, 0, 0, 255]);
 		let base64_svg = "PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPSc0JyBoZWlnaHQ9JzInPjxyZWN0IHdpZHRoPScyJyBoZWlnaHQ9JzInIGZpbGw9JyNmZjAwMDAnLz48L3N2Zz4=";
-		assert_eq!(decode_base64(base64_svg).expect("svg bytes"), svg_text.as_bytes().to_vec());
+		assert_eq!(crate::base::dataurl::decode_base64(base64_svg).expect("svg bytes"), svg_text.as_bytes().to_vec());
 		assert!(load_data_url_image(&format!("data:IMAGE/SVG+XML;base64,{}", base64_svg)).is_some());
 		assert!(load_data_url_image(&format!("data:text/plain,{}", percent_svg)).is_none());
 		assert!(load_data_url_image(&format!("data:,{}", percent_svg)).is_none());

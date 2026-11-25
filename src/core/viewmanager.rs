@@ -10,7 +10,8 @@
 //   데스크탑은 기본 프레임버퍼의 왼쪽 아래에 줄인 크기로 그린 뒤 창 크기로 늘인다. (platform/desktop/renderscaler.rs)
 // - 세이프 에어리어 인셋(get_safe_area_insets, set_safe_area_override)은 원본 { top, right, bottom, left } 처럼 이름 붙은 칸을 가진 SafeAreaInsets 다.
 //   주소의 ?safeArea=위,오른쪽,아래,왼쪽 자리는 데스크탑에서 환경 변수 VANILLA_SAFE_AREA=위,오른쪽,아래,왼쪽 이다.
-//   CSS env(safe-area-inset-*) 는 웹만 있고 데스크탑은 노치가 없어 0 이다. set_safe_area_override 는 둘 다에서 먹는다.
+//   CSS env(safe-area-inset-*) 는 웹에서 읽고 데스크탑은 0 이다. 크롬 데스크탑도 0 이다. (0 이 아닌 값은 안드로이드에서만 들어온다, platform/desktop.rs read_safe_area_insets)
+//   set_safe_area_override 는 둘 다에서 먹는다.
 // - get_client_native_size: 원본처럼 페이지 전체 크기(window.innerWidth, innerHeight)다. 데스크탑은 페이지가 없어 창 안쪽 논리 크기다.
 // - convert_client_to_view: 화면(client) 좌표를 뷰 좌표로. 웹은 캔버스의 지금 자리를 빼고, 데스크탑은 창의 논리 좌표가 곧 client 좌표다.
 // - 무시할 세이프 에어리어 쪽(set_ignored_safe_area_sides)은 원본의 "top" 같은 글 대신 SafeAreaSide 열거형으로 받는다.

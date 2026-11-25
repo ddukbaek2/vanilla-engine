@@ -13,6 +13,7 @@ pub struct Visual {
 	location: Vector2,
 }
 
+#[crate::reflect]
 impl Visual {
 	//==============================================================================
 	// 생성. (위치 0)
@@ -45,6 +46,7 @@ impl Default for Visual {
 	}
 }
 
+#[crate::reflect]
 impl Component for Visual {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base

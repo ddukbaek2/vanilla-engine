@@ -98,6 +98,7 @@ fn resample_image(image: &Image, source_rect: [f32; 4], target_width: i32, targe
 	pixels
 }
 
+#[crate::reflect]
 impl ShadowImage {
 	//==============================================================================
 	// 생성.
@@ -303,8 +304,9 @@ impl ShadowImage {
 	}
 
 	//==============================================================================
-	// 그림 경로 반환. (정하지 않았으면 빈 글)
+	// 그림 경로 반환. (정하지 않았으면 빈 글. UI 문서는 Sprite 처럼 imagePath 로 따로 적으므로 반사 저장 속성에서 뺀다)
 	//==============================================================================
+	#[reflect(transient)]
 	pub fn get_image_path(&self) -> &str {
 		&self.image_path
 	}
@@ -332,6 +334,7 @@ impl Default for ShadowImage {
 	}
 }
 
+#[crate::reflect]
 impl Component for ShadowImage {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base

@@ -160,6 +160,9 @@ const EFFECT_NAME_TABLE: [(ShaderSpriteEffect, &str); 50] = [
 	(ShaderSpriteEffect::CheckerWipe, "checkerWipe"),
 ];
 
+// 효과의 반사 값. (원본 ShaderSpriteEffect 글)
+crate::core::reflection::impl_reflect_names!(ShaderSpriteEffect, EFFECT_NAME_TABLE);
+
 // 효과별 기본 파라미터.
 const DEFAULT_PARAMETER_TABLE: [(ShaderSpriteEffect, [f32; 4]); 50] = [
 	(ShaderSpriteEffect::None, [0.0, 0.0, 0.0, 0.0]),
@@ -749,6 +752,7 @@ pub struct ShaderSprite {
 	effect_parameters: [f32; 4],
 }
 
+#[crate::reflect(base = sprite)]
 impl ShaderSprite {
 	//==============================================================================
 	// 생성.
@@ -777,6 +781,7 @@ impl ShaderSprite {
 	//==============================================================================
 	// 품은 Sprite 반환.
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn get_sprite(&self) -> &Sprite {
 		&self.sprite
 	}
@@ -910,6 +915,7 @@ impl DerefMut for ShaderSprite {
 	}
 }
 
+#[crate::reflect]
 impl Component for ShaderSprite {
 	fn get_component_base(&self) -> &ComponentBase {
 		self.sprite.get_component_base()

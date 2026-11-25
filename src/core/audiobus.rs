@@ -3,7 +3,7 @@
 // - 여러 플레이어의 소리를 한 길로 모아 크기와 음소거를 한꺼번에 건다. (SoundSystem 의 배경음악 버스와 효과음 버스)
 // - 만드는 곳은 AudioManager::create_audio_bus() 나 AudioBus::new(매니저) 다. (원본 new AudioBus(audioContext)) 그 버스로 트는 플레이어는 create_audio_player() 로 만든다.
 // - 버스 자리는 백엔드가 채운다. (platform/audio 의 AudioBusBackend)
-//   데스크탑: kira 뿌리 트랙(출력 자리) 아래 하위 트랙 하나. 버스로 만든 플레이어의 트랙은 그 아래에 달린다.
+//   데스크탑: 엔진 믹서에서 출력에 이은 GainNode 하나. 버스로 만든 플레이어가 여기로 소리를 낸다. (셈은 크롬 WebAudio 와 같다)
 //   웹: 원본처럼 출력에 이은 GainNode 하나. 버스로 만든 플레이어의 GainNode 가 여기에 이어진다.
 // - AudioContext 가 없을 때 만든 버스는 소리가 없고, 그 버스로 만든 플레이어도 소리를 내지 않는다. (원본과 같다)
 // - 크기와 음소거는 AudioPlayer 와 같은 규칙이다. (0 ~ 1 로 자르고, 음소거를 풀면 설정한 크기로 돌아간다)
@@ -11,7 +11,7 @@
 //   - 상태를 Rc<RefCell> 로 나눠 든다. SoundSystem 이 든 버스를 get_music_bus 로 빌려 준 채 크기를 바꾸고 플레이어를 만들 수 있게
 //     메서드는 모두 &self 다. Clone 하면 같은 버스를 보는 손잡이가 하나 더 생긴다.
 //   - 버스로 만든 플레이어는 버스 손잡이를 하나 든다. 손잡이를 모두 버리면 버스가 출력에서 떨어진다. (원본은 이은 노드를 브라우저가 살려 둔다)
-//   - get_gain_node(원본 getGainNode)는 AudioGainNode 를 돌려준다. 웹은 GainNode, 데스크탑은 그 자리인 버스 트랙을 나눠 드는 Rc<RefCell<kira TrackHandle>> 다.
+//   - get_gain_node(원본 getGainNode)는 AudioGainNode 를 돌려준다. 웹은 GainNode, 데스크탑은 믹서의 버스 노드를 나눠 드는 Rc<MixerGainNode> 다.
 //     어느 쪽이든 as_deref() 가 AudioPlayer::new 의 내보낼 곳이다. (AudioPlayer::new(&audio_manager, audio_bus.get_gain_node().as_deref()), 두 플랫폼이 같다)
 //==============================================================================
 use crate::core::audiomanager::{AudioManager, AudioManagerState};

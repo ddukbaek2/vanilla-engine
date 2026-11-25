@@ -10,12 +10,16 @@
 // - 원본과 다른 것:
 //   원본은 async 함수로 기다린다. 러스트 판은 엔진의 "요청 → 나중에 다 읽힘" 꼴이라 load_language_list, load_language, apply_language_setting 이
 //   읽기를 요청하고, 프레임마다 update(engine) 를 불러야 이어 간다. (데스크탑은 그 자리에서 읽혀 요청한 함수 안에서 끝난다) is_loading 으로 기다린다.
+//   원본 await loadLanguage(코드) 자리는 load_language(engine, 코드) 다음 엔진 작업 안에서 wait_for_load().await 다. (기다리는 동안 프레임마다 update 를 불러 준다)
+//   원본 applyLanguageSetting 은 불러온 뒤 함수가 돌려준 Promise 까지 기다린다. 러스트 판의 그 함수는 동기라, 그 안에서 시작한 일(UI 글꼴 같은)은 따로 await 한다. (uifont::wait_for_load)
 //   전역 상태는 스레드 하나의 thread_local 이다. (원본 모듈 변수) 언어 한 줄은 LanguageEntry 구조체다.
 //   불러온 뒤 부를 함수(set_language_loaded_handler)는 (엔진, 언어 한 줄, 모든 글자) 를 받는다. (원본 (언어, 모든 글자), 엔진은 글꼴 받기에 쓴다)
 //==============================================================================
+use crate::base::wait;
 use crate::core::asset::AssetLoadHandle;
 use crate::core::engine::Engine;
 use crate::core::graphic::TextAlign;
+use crate::core::task;
 use crate::platform::document::Document;
 use std::cell::RefCell;
 
@@ -201,6 +205,20 @@ pub fn load_language_list(engine: &mut Engine) {
 //==============================================================================
 pub fn is_loading() -> bool {
 	with_state(|state| state.language_list_handle.is_some() || state.pending_load.is_some())
+}
+
+//==============================================================================
+// 불러오기를 마치기를 기다리기. (원본 await loadLanguageList(), await loadLanguage(코드), await applyLanguageSetting(코드) 의 await 자리)
+// - 요청 함수를 부른 뒤 엔진 작업 안에서 await 한다. 기다리는 동안 프레임마다 update 를 부른다.
+//==============================================================================
+pub async fn wait_for_load() {
+	loop {
+		task::with_polling_engine(update);
+		if !is_loading() {
+			return;
+		}
+		wait::next_frame().await;
+	}
 }
 
 //==============================================================================

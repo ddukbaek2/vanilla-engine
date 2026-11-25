@@ -32,7 +32,7 @@
 //   - 화면 누름은 원본 window pointerdown 대신 입력 매니저의 is_touch_pressed 로 본다.
 //   - 원본은 TouchRecognizer 를 initialize 에서 만든다. 러스트 판은 생성할 때 만든다. 터치는 원본 touch_press 같은 함수 대신 tick 이 넘긴다.
 //     (SceneBase 의 터치 레이캐스터와 첫 터치 콜백은 쓰지 않는다)
-//   - 세이프 에어리어: 웹은 원본처럼 CSS env(safe-area-inset-*) 를 읽는다. 데스크탑에는 그런 값이 없어서 0 이고,
+//   - 세이프 에어리어: 웹은 원본처럼 CSS env(safe-area-inset-*) 를 읽는다. 데스크탑은 크롬 데스크탑처럼 0 이고,
 //     set_safe_area_insets 로 정해 줄 수 있다. (정하면 웹에서도 그 값을 쓴다)
 //   - set_view_scale_mode 는 엔진을 같이 받는다. (전역 엔진이 없다) 엔진을 주면 원본처럼 바로 뷰 영역을 다시 계산한다.
 //   - 개발자 도구(DevTools)는 EngineConfiguration::use_dev_tools 가 켜져 있으면 initialize 에서 만든다. (원본과 같음) tick 이 F2 와 터치를 넘기고 post_draw 가 그린다.
@@ -46,9 +46,11 @@
 //   - track_asset_loader 로 맡긴 AssetLoader 는 draw_on_load 가 프레임마다 update 를 불러 준다.
 //   - 원본 setLoadingColors 의 넷째 값(바깥 색)은 러스트에 기본값 인자가 없어 set_loading_outside_color 로 따로 정한다.
 // - 화면 틀 (vanilla.js GameScene 의 fadeScreen, isUserInterfaceAt, setPlayInputHandler, setPlayAreaReference 와 같은 기능):
-//   - 화면 페이드 fade_screen(on_dark): 다 어두워지면 on_dark(트리, 엔진)를 부른다. 원본은 onDark 가 Promise 를 돌려주면 끝날 때까지 어둡게 둔다.
-//     러스트 판은 on_dark 가 ScreenFadeHold 를 돌려주면 그 손잡이의 release 가 불릴 때까지 어둡게 둔다. (None 이면 바로 밝힌다)
-//     콜백 꼴은 fade_screen_with_hold(on_dark) 다. on_dark 가 손잡이를 받아 두었다가 일이 끝나면 release 한다. (Promise 의 resolve 자리)
+//   - 화면 페이드: 원본은 onDark 가 Promise 를 돌려주면 끝날 때까지 어둡게 둔다. 러스트 판의 같은 꼴은 fade_screen_async(engine, on_dark) 다.
+//     다 어두워지면 on_dark 가 돌려준 퓨처를 씬 작업으로 돌리고(SceneContext 로 씬과 엔진에 닿는다), 퓨처가 끝나면 밝아진다.
+//     GameScene 을 구현한 씬은 GameScene::fade_screen_async 로, Scene 을 직접 구현한 씬은 GameSceneBase::fade_screen_async::<씬 타입> 으로 부른다.
+//     동기 꼴 fade_screen(on_dark) 은 다 어두워지면 on_dark(트리, 엔진)를 부르고, on_dark 가 ScreenFadeHold 를 돌려주면 그 손잡이의 release 가 불릴 때까지 어둡게 둔다.
+//     (None 이면 바로 밝힌다) 콜백 꼴 fade_screen_with_hold(on_dark) 는 on_dark 가 손잡이를 받아 두었다가 일이 끝나면 release 한다. (Promise 의 resolve 자리)
 //     막은 post_draw 가 그린다. 막이 걸린 동안은 누름과 휠을 받지 않는다.
 //   - UI 가 받지 않은 입력: 원본처럼 처리기(set_play_input_handler)를 부른다. 원본 처리기 객체의 press, move, release, wheel 은 PlayInput 의 갈래다.
 //     처리기는 씬을 빌릴 수 없어서 씬 상태는 Rc<RefCell> 로 나눠 쥔다. 씬이 tick 에서 직접 꺼내 쓰려면 set_play_input_enabled(true) 로 모아 take_play_inputs 로 꺼낸다.
@@ -64,7 +66,8 @@ use crate::core::asset::AssetLoadHandle;
 use crate::core::engine::Engine;
 use crate::core::graphic::Graphic;
 use crate::core::node::nodetree::{NodeId, NodeTree};
-use crate::core::scene::SceneBase;
+use crate::core::scene::{Scene, SceneBase, SceneId};
+use crate::core::task::{self, Promise, SceneContext};
 use crate::core::viewmanager::{SafeAreaInsets, ViewScaleMode};
 use crate::misc::devtools::DevTools;
 use crate::misc::loadingprogress::LoadingProgress;
@@ -73,6 +76,7 @@ use crate::resource::imageasset::ImageAsset;
 use crate::ui::touchrecognizer::TouchRecognizer;
 use crate::ui::uiwindowlayer::UIWindowLayer;
 use std::cell::{Cell, RefCell};
+use std::future::Future;
 use std::rc::Rc;
 
 // 로딩 화면 최소 노출 시간 기본값. (밀리초)
@@ -122,6 +126,22 @@ impl ScreenFadeHold {
 	//==============================================================================
 	pub fn is_released(&self) -> bool {
 		self.is_released.get()
+	}
+}
+
+//==============================================================================
+// 버릴 때 손잡이를 놓는 값. (fade_screen_async 의 작업이 끝나거나 버려지면 막이 밝아지게)
+//==============================================================================
+struct ScreenFadeHoldRelease {
+	screen_fade_hold: ScreenFadeHold,
+}
+
+impl Drop for ScreenFadeHoldRelease {
+	//==============================================================================
+	// 놓기.
+	//==============================================================================
+	fn drop(&mut self) {
+		self.screen_fade_hold.release();
 	}
 }
 
@@ -968,6 +988,41 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
+	// 어두워졌다 밝아지기의 async 꼴. (원본 fadeScreen(async () => { ... }), 이미 페이드 중이면 false)
+	// - 다 어두워지면 on_dark 가 돌려준 퓨처를 이 씬의 작업으로 돌리고, 퓨처가 끝나면 밝아진다. 퓨처 안에서는 SceneContext::with 로 씬(S 타입)과 엔진을 빌린다.
+	// - S 는 이 바탕을 든 씬의 타입이다. (GameScene 을 구현한 씬은 GameScene::fade_screen_async 가 S 를 채운다) 다른 타입이면 with 가 패닉한다.
+	// - 씬을 내려 작업이 버려지면 막도 밝아진다.
+	//==============================================================================
+	pub fn fade_screen_async<S, F, OnDarkFuture>(&mut self, engine: &Engine, on_dark: F) -> bool
+	where
+		S: Scene + 'static,
+		F: FnOnce(SceneContext<S>) -> OnDarkFuture + 'static,
+		OnDarkFuture: Future<Output = ()> + 'static,
+	{
+		if self.is_screen_fading() {
+			return false;
+		}
+		let (dark_promise, dark_resolver) = Promise::create();
+		let screen_fade_hold = ScreenFadeHold::new();
+		let screen_fade_hold_release = ScreenFadeHoldRelease {
+			screen_fade_hold: screen_fade_hold.clone(),
+		};
+		self.fade_screen(Some(Box::new(move |_node_tree: &mut NodeTree, _engine: &Engine| {
+			dark_resolver.resolve(());
+			Some(screen_fade_hold)
+		})));
+		let scene_id = SceneId::from(&self.scene_base);
+		task::spawn_scene_task(&engine.task_executor, scene_id, move |scene_context: SceneContext<S>| {
+			async move {
+				let _screen_fade_hold_release = screen_fade_hold_release;
+				dark_promise.await;
+				on_dark(scene_context).await;
+			}
+		});
+		true
+	}
+
+	//==============================================================================
 	// 페이드 중인지. (어두워지거나, 손잡이를 기다리거나, 밝아지는 중)
 	//==============================================================================
 	pub fn is_screen_fading(&self) -> bool {
@@ -1214,9 +1269,23 @@ pub trait GameScene: 'static {
 	fn get_game_scene_base_mut(&mut self) -> &mut GameSceneBase;
 
 	//==============================================================================
-	// 씬의 애셋 읽기. (원본 load_assets 덮어쓰기, 바탕의 로딩 이미지 요청 뒤)
+	// 씬의 애셋 읽기. (원본 async load_assets 덮어쓰기, 바탕의 로딩 이미지 요청 뒤)
+	// - await 로 읽으려면 engine.spawn_scene_task(self, ...) 로 불러오기 작업을 맡기고 get_game_scene_base_mut().get_scene_base_mut().track_task 로 맡긴다.
 	//==============================================================================
 	fn load_assets(&mut self, _engine: &mut Engine) {
+	}
+
+	//==============================================================================
+	// 어두워졌다 밝아지기의 async 꼴. (원본 fadeScreen(async () => { ... }), 이미 페이드 중이면 false)
+	// - 다 어두워지면 on_dark 가 돌려준 퓨처를 이 씬의 작업으로 돌리고, 끝나면 밝아진다. 퓨처 안에서는 SceneContext::with 로 이 씬과 엔진을 빌린다.
+	//==============================================================================
+	fn fade_screen_async<F, OnDarkFuture>(&mut self, engine: &Engine, on_dark: F) -> bool
+	where
+		Self: Scene + Sized,
+		F: FnOnce(SceneContext<Self>) -> OnDarkFuture + 'static,
+		OnDarkFuture: Future<Output = ()> + 'static,
+	{
+		self.get_game_scene_base_mut().fade_screen_async::<Self, F, OnDarkFuture>(engine, on_dark)
 	}
 
 	//==============================================================================
@@ -1774,5 +1843,63 @@ mod tests {
 			step_frame(&mut engine, &mut game_scene_base, &mut current_seconds, 0.1);
 		}
 		assert!(!game_scene_base.is_screen_fading());
+	}
+
+	//==============================================================================
+	// async 페이드: 다 어두워지면 on_dark 의 퓨처가 씬 작업으로 돌고, 퓨처가 await 하는 동안은 어둡고, 끝나면 밝아진다. 페이드 중 다시 부르면 false.
+	//==============================================================================
+	#[test]
+	fn fade_screen_async_holds_until_future_finishes() {
+		use crate::core::scene::Scene;
+		let mut engine = Engine::new(EngineConfiguration::new());
+		engine.get_view_manager_mut().calculate_view_rect(800, 600, 1.0);
+		let mut scene = LayoutCountScene {
+			game_scene_base: GameSceneBase::new(),
+			layout_count: 0,
+			tick_count: 0,
+		};
+		scene.get_scene_base_mut().set_scene_id(SceneId(5));
+		scene.game_scene_base.set_safe_area_insets(Some(SafeAreaInsets::create(0.0, 0.0, 0.0, 0.0)));
+		Scene::initialize(&mut scene, &mut engine);
+		scene.game_scene_base.set_screen_fade_seconds(0.1);
+		let (finish_promise, finish_resolver) = Promise::create();
+		assert!(scene.fade_screen_async(&engine, move |mut scene_context: SceneContext<LayoutCountScene>| async move {
+			finish_promise.await;
+			scene_context.with(|scene, _engine| {
+				scene.layout_count += 100;
+			});
+		}));
+		assert!(!scene.fade_screen_async(&engine, |_scene_context| async {}));
+		let mut scene_list: Vec<Box<dyn Scene>> = vec![Box::new(scene)];
+		let mut current_seconds = 1.0;
+		engine.get_time_manager_mut().update(current_seconds);
+		let mut step_scene_frame = |engine: &mut Engine, scene_list: &mut Vec<Box<dyn Scene>>| -> (f32, u32) {
+			current_seconds += 0.06;
+			engine.get_time_manager_mut().update(current_seconds);
+			task::poll_tasks(engine, scene_list, None);
+			scene_list[0].tick(engine, 0.06);
+			let scene = scene_list[0].as_scene_any_mut().downcast_mut::<LayoutCountScene>().expect("시험용 씬");
+			(scene.game_scene_base.get_screen_fade_alpha(), scene.layout_count)
+		};
+		step_scene_frame(&mut engine, &mut scene_list);
+		let (alpha, _) = step_scene_frame(&mut engine, &mut scene_list);
+		assert_eq!(alpha, 1.0);
+		for _ in 0..3 {
+			let (alpha, layout_count) = step_scene_frame(&mut engine, &mut scene_list);
+			assert_eq!(alpha, 1.0);
+			assert!(layout_count < 100);
+		}
+		finish_resolver.resolve(());
+		let (alpha, layout_count) = step_scene_frame(&mut engine, &mut scene_list);
+		assert!(layout_count >= 100);
+		assert_eq!(alpha, 1.0);
+		let (alpha, _) = step_scene_frame(&mut engine, &mut scene_list);
+		assert!(alpha < 1.0);
+		for _ in 0..3 {
+			step_scene_frame(&mut engine, &mut scene_list);
+		}
+		let scene = scene_list[0].as_scene_any_mut().downcast_mut::<LayoutCountScene>().expect("시험용 씬");
+		assert!(!scene.game_scene_base.is_screen_fading());
+		assert_eq!(engine.task_executor.get_task_count(), 0);
 	}
 }

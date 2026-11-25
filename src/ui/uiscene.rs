@@ -318,7 +318,8 @@ pub trait UIScene: 'static {
 	fn get_ui_scene_base_mut(&mut self) -> &mut UISceneBase;
 
 	//==============================================================================
-	// 씬의 애셋 읽기. (원본 load_assets 덮어쓰기)
+	// 씬의 애셋 읽기. (원본 async load_assets 덮어쓰기)
+	// - await 로 읽으려면 engine.spawn_scene_task(self, ...) 로 불러오기 작업을 맡기고 씬 공통 상태의 track_task 로 맡긴다.
 	//==============================================================================
 	fn load_assets(&mut self, _engine: &mut Engine) {
 	}

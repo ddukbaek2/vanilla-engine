@@ -9,6 +9,8 @@
 // - 쪽 경로에 빗금(/)이 없으면 JSON 이 있는 폴더를 기준으로, 있으면 적힌 그대로 읽는다. ("./" 로 시작하면 그 "./" 를 떼고 애셋 폴더 기준이다)
 // - 원본과 다른 것:
 //   원본은 load 가 JSON 을 기다린 뒤 쪽 그림을 받는 async 다. 러스트 판은 애셋처럼 요청만 하고, update 가 JSON 이 온 것을 보고 쪽 그림을 청한다.
+//   원본 await load(경로) 자리는 load(engine, 경로) 다음 엔진 작업 안에서 wait_for_load().await 다. (기다리는 동안 프레임마다 update 를 불러 준다)
+//   wait_for_load 는 아틀라스를 빌려 기다리므로 작업의 지역 값으로 불러온 뒤 씬이나 Rc<RefCell> 로 옮긴다. (RefCell 빌림을 await 너머로 쥐지 않게)
 //   데스크탑은 그 자리에서 읽혀 load 가 끝나면 다 읽혔다. 웹은 JSON 과 쪽 그림이 차례로 오므로 is_loaded 가 true 가 될 때까지 tick 에서 update 를 부르고,
 //   그 뒤에 조각을 건다. (씬이 맡아 기다리게 하려면 JSON 은 track_json_asset, 쪽 그림은 온 뒤 update 가 청한다)
 //   원본의 찾을 아틀라스 목록(add_search_atlas, find_frame, apply_search_frame)은 스레드 하나에 하나인 목록이고, 아틀라스를 나눠 들게 Rc<RefCell<SpriteAtlas>> 로 넣는다.
@@ -16,12 +18,14 @@
 //   get_page_images 는 원본 HTMLImageElement 목록 대신 읽힌 쪽 그림(Image) 목록이다.
 //==============================================================================
 use crate::base::rect::Rect;
+use crate::base::wait;
 use crate::core::asset::Asset;
 use crate::core::component::sprite::Sprite;
 use crate::core::engine::Engine;
 use crate::core::frame::Frame;
 use crate::core::image::Image;
 use crate::core::scene::SceneBase;
+use crate::core::task;
 use crate::resource::imageasset::ImageAsset;
 use crate::resource::textasset::JsonAsset;
 use std::cell::RefCell;
@@ -267,6 +271,27 @@ impl SpriteAtlas {
 	//==============================================================================
 	pub fn is_loaded(&self) -> bool {
 		self.is_loaded
+	}
+
+	//==============================================================================
+	// 다 읽히기를 기다리기. (원본 await load(경로) 의 await 자리, load 나 load_data 뒤에 엔진 작업 안에서 await 한다)
+	// - 기다리는 동안 프레임마다 update 를 부른다. 아틀라스를 빌려 기다리므로 작업의 지역 값으로 쓴다.
+	//==============================================================================
+	pub async fn wait_for_load(&mut self) {
+		loop {
+			let is_loaded = match task::with_polling_engine(|engine| self.update(engine)) {
+				Some(is_loaded) => {
+					is_loaded
+				}
+				None => {
+					self.is_loaded
+				}
+			};
+			if is_loaded {
+				return;
+			}
+			wait::next_frame().await;
+		}
 	}
 
 	//==============================================================================

@@ -9,9 +9,10 @@
 //   save_capture_file(검증용 화면 저장, 데스크탑은 파일, 웹은 내려받기)
 // - 웹만 is_gl_binding_present(GL 의 묶인 것이 있는지, glow 웹이 null 을 읽으면 패닉해서)를 낸다. (core::graphic 의 read_*_binding 이 쓴다)
 // - 맥만 vibrate_gamepads / release_disconnected_gamepad_haptics(게임패드 진동, desktop/gamepadhaptics.rs)를 낸다.
+// - 데스크탑만 desktop::read_heap_usage(시스템 할당자의 힙 사용량, 개발자 도구의 메모리 칸)를 낸다. (웹은 원본처럼 performance.memory 를 읽는다)
 // - 안드로이드, iOS 는 여기에 모듈을 더한다. (아직 없음)
 //==============================================================================
-// 오디오 백엔드. (데스크탑 kira, 웹 WebAudio. 두 갈래를 안에서 고른다)
+// 오디오 백엔드. (데스크탑 cpal 위의 엔진 믹서, 웹 WebAudio. 두 갈래를 안에서 고른다)
 pub mod audio;
 // 문서. (html lang 과 head 의 meta, 웹은 브라우저 문서이고 데스크탑은 엔진이 든 값)
 pub mod document;
@@ -50,6 +51,11 @@ pub use web::exit_application;
 pub use desktop::read_clipboard_text_with_callback;
 #[cfg(target_arch = "wasm32")]
 pub use web::read_clipboard_text_with_callback;
+// 시스템 클립보드 글을 읽어 콜백에 넘기기. (못 읽거나 거부되면 None, Engine::read_clipboard_text_async)
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use desktop::read_optional_clipboard_text_with_callback;
+#[cfg(target_arch = "wasm32")]
+pub(crate) use web::read_optional_clipboard_text_with_callback;
 // 웹 클립보드를 비동기로 읽어 그 입력 필드에 붙일 글로 넣기. (UIInputField.paste)
 #[cfg(target_arch = "wasm32")]
 pub(crate) use web::request_clipboard_paste;

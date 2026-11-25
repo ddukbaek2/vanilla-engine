@@ -21,13 +21,19 @@
 //   pageshow 는 resume 과 같은 복구를 한다. (원본이 정의되지 않은 dispatchPageProcessRestored 를 불러 예외가 나던 것은 원본에서도 같게 고쳤다)
 //   데스크탑: 창 가림이 풀리면 on_page_visibility_restored, 앱이 suspended 뒤 resumed 되면 on_page_process_restored.
 //   (윈도우, 맥, 리눅스의 winit 은 suspended 를 보내지 않아 데스크탑에서는 on_page_process_restored 가 불리지 않는다)
+// - async/await: 엔진이 스레드 하나짜리 실행기(core/task.rs)를 품는다. spawn_task, spawn_scene_task 로 맡긴 퓨처를 프레임마다
+//   씬의 tick 앞에서 깨어난 것만 한 번씩 폴링한다. 원본에서 Promise 를 돌려주는 엔진 함수는 await 할 수 있는 꼴을 같이 둔다.
+//   (load_scene_async, unload_scene_async, unload_all_scenes_async, read_clipboard_text_async, request_frame_capture_async,
+//   원본 window 의 alert_async, confirm_async, prompt_async. 질문 창이 떠 있는 동안은 원본 자바스크립트처럼 작업도 폴링하지 않는다)
+//   씬을 내리면 그 씬의 작업도 버린다.
 //
 // 매 프레임 (update_engine):
 // 1. graphic.apply_settings()      # 뷰포트/프로젝션 갱신 + 상태 리셋 + 화면 비우기
 // 2. time_manager.update()         # time_delta 산출
 // 3. input_manager.tick()
-// 4. 씬마다 tick → pre_draw → draw → post_draw (→ draw_gizmos)
-// 5. 통계 출력(옵션) → 1회성 입력 플래그 클리어(글 입력 줄 마무리 포함) → 묶음 내보내기 → (검증용 화면 저장)
+// 4. 깨어난 작업 폴링 (poll_tasks)
+// 5. 씬마다 tick → pre_draw → draw → post_draw (→ draw_gizmos)
+// 6. 통계 출력(옵션) → 1회성 입력 플래그 클리어(글 입력 줄 마무리 포함) → 묶음 내보내기 → (검증용 화면 저장)
 // 화면 넘기기는 플랫폼이 update_engine 다음에 한다.
 //==============================================================================
 use crate::base::color::Color;
@@ -45,11 +51,13 @@ use crate::core::inputmanager::InputManager;
 use crate::core::modaldialog::{ModalDialogHandle, ModalDialogKind};
 use crate::core::pointercursor::PointerCursor;
 use crate::core::scene::{Scene, SceneId};
+use crate::core::task::{self, EngineContext, Promise, PromiseResolver, SceneContext, TaskExecutor, TaskHandle};
 use crate::core::timemanager::TimeManager;
 use crate::core::viewmanager::{ViewManager, ViewScaleMode};
 use crate::platform::{self, PlatformWindow};
 use crate::resource::audioasset::AudioAsset;
 use std::cell::RefCell;
+use std::future::Future;
 use std::path::PathBuf;
 use std::rc::{Rc, Weak};
 use web_time::Instant;
@@ -110,12 +118,14 @@ pub struct EngineConfiguration {
 	pub resume_audio_on_touch_end: bool,
 	// 웹에서 애셋 주소 앞에 붙일 것. (비우면 페이지 기준 상대 주소. 데스크탑은 asset_directory_paths 를 쓴다)
 	pub asset_base_url: String,
-	// 창 크기가 바뀌면 캔버스를 창에 맞춘다. (웹, 끄면 페이지가 정한 캔버스 크기를 읽는다. 원본처럼 기본은 끔,
-	// 데스크탑은 창이 곧 캔버스라 늘 맞춘다)
+	// 창 크기가 바뀌면 캔버스를 창에 맞춘다. (원본처럼 기본은 끔. 켜면 visualViewport 크기에 맞추고 캔버스 비 상한을 건다. 끄면 웹은 페이지가 정한 캔버스 크기를 읽는다)
+	// 데스크탑 창은 캔버스가 창을 가득 채운 페이지와 같아, 끄면 창 크기 그대로이고 화면 키보드에 줄지 않으며 캔버스 비 상한도 걸지 않는다.
 	pub auto_resize_on_window_resize: bool,
-	// 프레임이 끝난 뒤에도 그린 것을 캔버스에 남긴다. (웹 WebGL 컨텍스트 옵션, 캔버스 위에 후처리를 얹는 페이지가 읽는다, 데스크탑은 쓰지 않는다)
+	// 프레임이 끝난 뒤에도 그린 것을 캔버스에 남긴다. (원본 WebGL 컨텍스트 옵션 preserveDrawingBuffer, 켜면 프레임 첫머리에 색을 비우지 않아 지난 프레임 그림 위에 그린다.
+	// 웹은 컨텍스트 옵션으로 넘기고, 데스크탑은 다 그린 프레임을 떠 두었다가 다음 프레임 첫머리에 되그린다. platform/desktop/preserveddrawingbuffer.rs)
 	pub preserve_drawing_buffer: bool,
-	// 화면 키보드: 글자 입력칸이 포커스된 동안 가로가 같고 세로만 줄었으면 크기를 그대로 둔다. (웹, 데스크탑은 화면 키보드가 없다)
+	// 화면 키보드: 글자 입력칸이 포커스된 동안 가로가 같고 세로만 줄었으면 크기를 그대로 둔다. (auto_resize_on_window_resize 일 때,
+	// 데스크탑은 크롬 윈도우처럼 터치 키보드가 visualViewport 를 줄인다. 맥과 리눅스는 크롬처럼 줄지 않는다)
 	pub ignore_virtual_keyboard_resize: bool,
 	// 캔버스의 가로세로 비 상한. (창이 그보다 길쭉하면 캔버스를 줄여 창의 가운데에 둔다, 0 이면 제한 없음)
 	pub max_canvas_aspect_ratio: f32,
@@ -242,6 +252,10 @@ pub struct Engine {
 	modal_dialog_list: std::collections::VecDeque<crate::core::modaldialog::ModalDialog>,
 	// 개발자 도구에서 고를 노드. (크롬 문맥 메뉴의 검사 자리, 그 노드를 가진 씬의 DevTools 가 꺼낸다)
 	dev_tools_inspect_request: std::cell::Cell<Option<crate::core::node::nodetree::NodeId>>,
+	// async 작업의 실행기. (EngineRunner 가 프레임마다 폴링한다)
+	pub(crate) task_executor: TaskExecutor,
+	// 씬을 내린 뒤에 풀 Promise. (unload_scene_async, unload_all_scenes_async)
+	pending_unload_resolver_list: Vec<PromiseResolver<()>>,
 }
 
 impl Engine {
@@ -279,6 +293,8 @@ impl Engine {
 			#[cfg(not(target_arch = "wasm32"))]
 			modal_dialog_list: std::collections::VecDeque::new(),
 			dev_tools_inspect_request: std::cell::Cell::new(None),
+			task_executor: TaskExecutor::new(),
+			pending_unload_resolver_list: Vec::new(),
 		}
 	}
 
@@ -321,6 +337,47 @@ impl Engine {
 	//==============================================================================
 	pub fn prompt(&mut self, message: &str, default_value: &str) -> ModalDialogHandle {
 		self.show_modal_dialog(ModalDialogKind::Prompt, message, default_value)
+	}
+
+	//==============================================================================
+	// 알림 창을 띄우고 닫힐 때 풀리는 Promise. (원본 window.alert 를 await 꼴로)
+	//==============================================================================
+	pub fn alert_async(&mut self, message: &str) -> Promise<()> {
+		let (alert_promise, alert_resolver) = Promise::create();
+		self.alert(message).set_callback(move |_result| {
+			alert_resolver.resolve(());
+		});
+		alert_promise
+	}
+
+	//==============================================================================
+	// 확인 창을 띄우고 답하면 풀리는 Promise. (원본 window.confirm 이 돌려주는 값)
+	//==============================================================================
+	pub fn confirm_async(&mut self, message: &str) -> Promise<bool> {
+		let (confirm_promise, confirm_resolver) = Promise::create();
+		self.confirm(message).set_callback(move |result| {
+			confirm_resolver.resolve(matches!(result, crate::core::modaldialog::ModalDialogResult::Confirmed(_)));
+		});
+		confirm_promise
+	}
+
+	//==============================================================================
+	// 입력 창을 띄우고 답하면 풀리는 Promise. (원본 window.prompt 가 돌려주는 값, 취소는 원본 null 자리의 None)
+	//==============================================================================
+	pub fn prompt_async(&mut self, message: &str, default_value: &str) -> Promise<Option<String>> {
+		let (prompt_promise, prompt_resolver) = Promise::create();
+		self.prompt(message, default_value).set_callback(move |result| {
+			let prompt_text = match result {
+				crate::core::modaldialog::ModalDialogResult::Confirmed(text) => {
+					Some(text.clone())
+				}
+				crate::core::modaldialog::ModalDialogResult::Cancelled => {
+					None
+				}
+			};
+			prompt_resolver.resolve(prompt_text);
+		});
+		prompt_promise
 	}
 
 	//==============================================================================
@@ -413,6 +470,65 @@ impl Engine {
 	}
 
 	//==============================================================================
+	// 씬 불러오기. (원본 await SceneManager.loadScene(scene), initialize 까지 끝나면 그 씬의 핸들로 풀리는 Promise 를 돌려준다)
+	// - 불러오기는 load_scene 과 같다. 다 불러오기 전에 그 씬을 내리면 풀리지 않는다.
+	//==============================================================================
+	pub fn load_scene_async(&mut self, mut scene: Box<dyn Scene>) -> Promise<SceneId> {
+		let (load_promise, load_resolver) = Promise::create();
+		scene.get_scene_base_mut().add_load_resolver(load_resolver);
+		self.load_scene(scene);
+		load_promise
+	}
+
+	//==============================================================================
+	// 씬 하나 내리기. (원본 await SceneManager.unloadScene(scene), 이번 프레임 끝에 내린 뒤 풀리는 Promise 를 돌려준다. 없는 핸들이어도 풀린다)
+	//==============================================================================
+	pub fn unload_scene_async(&mut self, scene: impl Into<SceneId>) -> Promise<()> {
+		let (unload_promise, unload_resolver) = Promise::create();
+		self.unload_scene(scene);
+		self.pending_unload_resolver_list.push(unload_resolver);
+		unload_promise
+	}
+
+	//==============================================================================
+	// 모든 씬 내리기. (원본 await SceneManager.unloadAllScenes(), 이번 프레임 끝에 다 내린 뒤 풀리는 Promise 를 돌려준다)
+	// - 그 씬들의 작업은 버려지므로, 내린 뒤를 기다리는 일은 엔진 작업(spawn_task)에서 await 한다.
+	//==============================================================================
+	pub fn unload_all_scenes_async(&mut self) -> Promise<()> {
+		let (unload_promise, unload_resolver) = Promise::create();
+		self.unload_all_scenes();
+		self.pending_unload_resolver_list.push(unload_resolver);
+		unload_promise
+	}
+
+	//==============================================================================
+	// 엔진 작업 맡기기. (씬과 따로 사는 async 작업, 작업 함수가 받은 EngineContext 의 with 안에서 엔진을 빌린다)
+	// - 다음 프레임의 폴링 차례에 처음 돈다. 돌려준 손잡이로 끝났는지 묻거나 await 한다.
+	//==============================================================================
+	pub fn spawn_task<F, TaskFuture>(&self, task_function: F) -> TaskHandle
+	where
+		F: FnOnce(EngineContext) -> TaskFuture,
+		TaskFuture: Future<Output = ()> + 'static,
+	{
+		task::spawn_engine_task(&self.task_executor, task_function)
+	}
+
+	//==============================================================================
+	// 씬 작업 맡기기. (그 씬과 수명을 같이하는 async 작업, 작업 함수가 받은 SceneContext 의 with 안에서 그 씬(S 타입)과 엔진을 빌린다)
+	// - 원본 async 함수 안에서 this 를 쓰는 자리다. 씬을 내리면 작업도 버린다. load_scene 전의 씬이면 첫 폴링 차례에 버린다.
+	// - 다음 프레임의 폴링 차례에 처음 돈다. 불러오기 작업이면 씬의 track_task 로 맡겨 끝날 때까지 initialize 를 미룬다.
+	//==============================================================================
+	pub fn spawn_scene_task<S, F, TaskFuture>(&self, scene: &S, task_function: F) -> TaskHandle
+	where
+		S: Scene + 'static,
+		F: FnOnce(SceneContext<S>) -> TaskFuture,
+		TaskFuture: Future<Output = ()> + 'static,
+	{
+		let scene_id = SceneId::from(scene.get_scene_base());
+		task::spawn_scene_task(&self.task_executor, scene_id, task_function)
+	}
+
+	//==============================================================================
 	// 불러온 모든 씬의 핸들. (원본 SceneManager.getAllLoadedScenes, 불러온 차례, 로딩 중인 씬도 든다)
 	// - 원본은 씬 객체를 돌려준다. 러스트 판은 씬마다 &mut Engine 을 받아 도는 동안 다른 씬을 빌릴 수 없어서 핸들을 돌려준다.
 	//   load_scene 한 프레임이 끝나 create 가 불린 씬부터 들고, 내린 씬은 빠진다.
@@ -445,6 +561,10 @@ impl Engine {
 	// 이미지 애셋 읽기. (원본 new ImageAsset() + load(path))
 	//==============================================================================
 	pub fn load_image(&self, relative_path: &str) -> Result<Rc<Image>, String> {
+		if crate::base::dataurl::is_data_url(relative_path) {
+			let data_url = crate::base::dataurl::parse_data_url(relative_path).ok_or_else(|| String::from("이미지 읽기 실패 (data: 주소를 풀 수 없습니다)"))?;
+			return Image::load_from_memory_with_mime_type(&data_url.bytes, &data_url.mime_type);
+		}
 		let image_path = self.resolve_asset_path(relative_path);
 		Image::load(&image_path)
 	}
@@ -453,6 +573,7 @@ impl Engine {
 	// 애셋 바이트 부탁. (애셋들의 load 가 부른다)
 	// - 데스크탑: 애셋 폴더 후보에서 파일을 찾아 그 자리에서 읽고 끝낸다.
 	// - 웹: asset_base_url + 상대 경로를 fetch 하고, 받으면 끝낸다. (그 사이 프레임은 계속 돈다)
+	// - "data:" 주소는 원본 fetch 처럼 주소 그대로 푼다. (데스크탑은 그 자리에서 base/dataurl.rs 로 풀고 형을 응답 형으로 둔다, 웹은 기준 주소를 붙이지 않고 fetch)
 	//==============================================================================
 	pub fn request_asset_bytes(&self, relative_path: &str) -> AssetLoadHandle {
 		self.request_asset_bytes_with_cache(relative_path, false)
@@ -463,11 +584,7 @@ impl Engine {
 	//==============================================================================
 	pub fn request_asset_bytes_with_cache(&self, relative_path: &str, is_no_cache: bool) -> AssetLoadHandle {
 		let load_handle = AssetLoadHandle::create_pending(relative_path);
-		#[cfg(not(target_arch = "wasm32"))]
-		let asset_location = self.resolve_asset_path(relative_path).to_string_lossy().into_owned();
-		#[cfg(target_arch = "wasm32")]
-		let asset_location = format!("{}{}", self.engine_configuration.asset_base_url, relative_path);
-		platform::request_asset_bytes(asset_location, load_handle.clone(), is_no_cache);
+		self.request_asset_bytes_into_with_cache(relative_path, &load_handle, is_no_cache);
 		load_handle
 	}
 
@@ -475,11 +592,45 @@ impl Engine {
 	// 애셋 바이트 부탁. (이미 만든 읽기 손잡이를 끝낸다. AssetLoader 가 미리 나눠 준 손잡이를 차례가 오면 채울 때 쓴다)
 	//==============================================================================
 	pub fn request_asset_bytes_into(&self, relative_path: &str, load_handle: &AssetLoadHandle) {
+		self.request_asset_bytes_into_with_cache(relative_path, load_handle, false);
+	}
+
+	//==============================================================================
+	// 애셋 바이트 부탁의 몸통. (data: 주소, 데스크탑 애셋 폴더, 웹 기준 주소)
+	//==============================================================================
+	fn request_asset_bytes_into_with_cache(&self, relative_path: &str, load_handle: &AssetLoadHandle, is_no_cache: bool) {
 		#[cfg(not(target_arch = "wasm32"))]
-		let asset_location = self.resolve_asset_path(relative_path).to_string_lossy().into_owned();
+		{
+			if crate::base::dataurl::is_data_url(relative_path) {
+				match crate::base::dataurl::parse_data_url(relative_path) {
+					Some(data_url) => {
+						load_handle.set_content_type(Some(data_url.mime_type));
+						load_handle.finish(Ok(data_url.bytes));
+					}
+					None => {
+						load_handle.finish(Err(String::from("애셋 읽기 실패 (data: 주소를 풀 수 없습니다)")));
+					}
+				}
+				return;
+			}
+			let asset_location = self.resolve_asset_path(relative_path).to_string_lossy().into_owned();
+			platform::request_asset_bytes(asset_location, load_handle.clone(), is_no_cache);
+		}
 		#[cfg(target_arch = "wasm32")]
-		let asset_location = format!("{}{}", self.engine_configuration.asset_base_url, relative_path);
-		platform::request_asset_bytes(asset_location, load_handle.clone(), false);
+		{
+			platform::request_asset_bytes(self.create_asset_url(relative_path), load_handle.clone(), is_no_cache);
+		}
+	}
+
+	//==============================================================================
+	// 웹 애셋 주소. (asset_base_url + 상대 경로, data: 주소는 그대로)
+	//==============================================================================
+	#[cfg(target_arch = "wasm32")]
+	fn create_asset_url(&self, relative_path: &str) -> String {
+		if crate::base::dataurl::is_data_url(relative_path) {
+			return relative_path.to_string();
+		}
+		format!("{}{}", self.engine_configuration.asset_base_url, relative_path)
 	}
 
 	//==============================================================================
@@ -530,17 +681,25 @@ impl Engine {
 	}
 
 	//==============================================================================
-	// 오디오 애셋 읽기. (원본 new AudioAsset() + load(path), 애셋 폴더 기준 경로)
-	// - 데스크탑: 그 자리에서 읽고 디코딩한다. 실패하면 Err.
+	// 오디오 애셋 읽기. (원본 new AudioAsset() + load(path), 애셋 폴더 기준 경로나 "data:" 주소)
+	// - 데스크탑: 그 자리에서 읽고 디코딩한다. 실패하면 Err. data: 주소는 형을 보지 않고 바이트를 내용으로 가려 푼다. (원본 decodeAudioData 와 같다)
 	// - 웹: fetch 와 디코딩을 걸어 두고 바로 애셋을 돌려준다. 끝나면 is_loaded() 가 참이 된다. (실패는 get_load_error())
 	//==============================================================================
 	pub fn load_audio_asset(&self, relative_path: &str) -> Result<Rc<AudioAsset>, String> {
-		#[cfg(not(target_arch = "wasm32"))]
-		let audio_asset_path = self.resolve_asset_path(relative_path);
-		#[cfg(target_arch = "wasm32")]
-		let audio_asset_path = PathBuf::from(format!("{}{}", self.engine_configuration.asset_base_url, relative_path));
 		let audio_asset = Rc::new(AudioAsset::new());
-		audio_asset.load(&audio_asset_path)?;
+		#[cfg(not(target_arch = "wasm32"))]
+		{
+			if crate::base::dataurl::is_data_url(relative_path) {
+				let data_url = crate::base::dataurl::parse_data_url(relative_path).ok_or_else(|| String::from("Error loading sound (data: 주소를 풀 수 없습니다)"))?;
+				audio_asset.load_from_bytes(data_url.bytes)?;
+				return Ok(audio_asset);
+			}
+			audio_asset.load(&self.resolve_asset_path(relative_path))?;
+		}
+		#[cfg(target_arch = "wasm32")]
+		{
+			audio_asset.load(&PathBuf::from(self.create_asset_url(relative_path)))?;
+		}
 		Ok(audio_asset)
 	}
 
@@ -634,6 +793,18 @@ impl Engine {
 	//==============================================================================
 	pub fn read_clipboard_text_with_callback(&self, callback: impl FnOnce(String) + 'static) {
 		platform::read_clipboard_text_with_callback(Box::new(callback));
+	}
+
+	//==============================================================================
+	// 시스템 클립보드 글 읽기. (원본 await engine.readClipboardText(), 클립보드가 없거나 거부되면 원본 null 자리의 None)
+	// - 웹은 navigator.clipboard.readText 가 끝난 뒤, 데스크탑은 그 자리에서 읽어 풀린다.
+	//==============================================================================
+	pub fn read_clipboard_text_async(&self) -> Promise<Option<String>> {
+		let (clipboard_promise, clipboard_resolver) = Promise::create();
+		platform::read_optional_clipboard_text_with_callback(Box::new(move |clipboard_text: Option<String>| {
+			clipboard_resolver.resolve(clipboard_text);
+		}));
+		clipboard_promise
 	}
 
 	pub fn get_engine_configuration(&self) -> &EngineConfiguration {
@@ -787,6 +958,17 @@ impl Engine {
 	pub fn request_frame_capture(&mut self, frame_number: u64, capture_handler: FrameCaptureHandler) {
 		let target_frame_number = frame_number.max(self.frame_number);
 		self.frame_capture_handler_map.entry(target_frame_number).or_default().push(capture_handler);
+	}
+
+	//==============================================================================
+	// 검증용 화면 저장 요청. (원본 await engine.requestFrameCapture(번호), 그 프레임을 다 그린 화면의 PNG 바이트로 풀리는 Promise. 원본은 PNG data URL)
+	//==============================================================================
+	pub fn request_frame_capture_async(&mut self, frame_number: u64) -> Promise<Vec<u8>> {
+		let (capture_promise, capture_resolver) = Promise::create();
+		self.request_frame_capture(frame_number, Box::new(move |png_bytes: &[u8]| {
+			capture_resolver.resolve(png_bytes.to_vec());
+		}));
+		capture_promise
 	}
 }
 
@@ -1168,6 +1350,14 @@ impl EngineRunner {
 	}
 
 	//==============================================================================
+	// 깨어난 작업 폴링. (그래픽 없이, 시험에서 프레임 하나를 흉내 낼 때)
+	//==============================================================================
+	#[cfg(test)]
+	pub(crate) fn poll_tasks(&mut self) {
+		task::poll_tasks(&mut self.engine, &mut self.scene_list, None);
+	}
+
+	//==============================================================================
 	// 미뤄 둔 씬 내리기 / 불러오기.
 	//==============================================================================
 	pub(crate) fn apply_pending_scenes(&mut self) {
@@ -1190,6 +1380,9 @@ impl EngineRunner {
 					unload_scene_instance(&mut self.engine, scene.as_mut());
 				}
 			}
+		}
+		for unload_resolver in std::mem::take(&mut self.engine.pending_unload_resolver_list) {
+			unload_resolver.resolve(());
 		}
 		while !self.engine.pending_scene_list.is_empty() {
 			let pending_scene_list = std::mem::take(&mut self.engine.pending_scene_list);
@@ -1233,7 +1426,7 @@ impl EngineRunner {
 		// 입력 처리.
 		self.engine.input_manager.tick(time_delta);
 
-		// 질문 창. (데스크탑, 떠 있으면 원본에서 자바스크립트가 멈추듯 씬을 갱신하지 않고 창이 입력을 받는다)
+		// 질문 창. (데스크탑, 떠 있으면 원본에서 자바스크립트가 멈추듯 씬과 async 작업을 갱신하지 않고 창이 입력을 받는다)
 		let is_modal_dialog_open = self.engine.is_modal_dialog_open();
 		#[cfg(not(target_arch = "wasm32"))]
 		{
@@ -1241,6 +1434,11 @@ impl EngineRunner {
 				let measure_graphic: &Graphic = graphic;
 				crate::core::modaldialog::tick_modal_dialog(&mut self.engine, &|text: &str| crate::core::modaldialog::measure_field_text_width(measure_graphic, text), time_delta);
 			}
+		}
+
+		// 깨어난 작업 폴링. (await 다음 줄이 이번 프레임의 시간과 입력을 보고, 바꾼 것이 이번 프레임에 그려진다)
+		if !is_modal_dialog_open {
+			task::poll_tasks(&mut self.engine, &mut self.scene_list, Some(&mut *graphic));
 		}
 
 		// 그리기 통계. (지난 프레임 값을 넘겨 두고 이번 프레임을 새로 센다)
@@ -1369,12 +1567,15 @@ fn encode_png(pixels: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String>
 }
 
 //==============================================================================
-// 씬 하나 내리기. (원본 SceneManager.unloadScene 의 finalize, unload 다음 러스트 판의 destroy)
+// 씬 하나 내리기. (원본 SceneManager.unloadScene 의 finalize, unload 다음 러스트 판의 destroy, 그리고 그 씬의 작업을 버린다)
 //==============================================================================
 fn unload_scene_instance(engine: &mut Engine, scene: &mut dyn Scene) {
 	scene.finalize(engine);
 	scene.unload(engine);
 	scene.destroy(engine);
+	if let Some(scene_id) = scene.get_scene_base().get_scene_id() {
+		engine.task_executor.cancel_scene_tasks(scene_id);
+	}
 }
 
 //==============================================================================
@@ -1418,7 +1619,7 @@ fn apply_scene_root_to_view_size(engine: &Engine, scene: &mut dyn Scene) {
 }
 
 //==============================================================================
-// 씬이 맡긴 애셋이 다 읽혔으면 initialize 하고 불러온 것으로 친다. (원본 load 다음 0.3초 더 기다리고 set_loaded, initialize)
+// 씬이 맡긴 애셋과 작업이 다 끝났으면 initialize 하고 불러온 것으로 친다. (원본 load 다음 0.3초 더 기다리고 set_loaded, initialize, 그리고 loadScene 의 Promise 를 푼다)
 // - current_time 은 엔진 시작 뒤 지금까지의 실제 초다. (첫 프레임 전에도 맞는 시각이어야 해서 시간 관리자의 지난 값을 쓰지 않는다)
 //==============================================================================
 fn initialize_scene_if_ready(engine: &mut Engine, scene: &mut dyn Scene, current_time: f64) {
@@ -1434,6 +1635,7 @@ fn initialize_scene_if_ready(engine: &mut Engine, scene: &mut dyn Scene, current
 	scene.get_scene_base_mut().set_loaded(true);
 	let canvas_native_size = engine.view_manager.get_canvas_native_size();
 	scene.resize(engine, canvas_native_size);
+	scene.get_scene_base_mut().resolve_load_resolvers();
 }
 
 #[cfg(test)]
@@ -1699,5 +1901,190 @@ mod tests {
 		assert_eq!(parse_capture_frame_numbers(""), vec![120]);
 		let png_bytes = encode_png(&[255, 0, 0, 255], 1, 1).expect("png");
 		assert_eq!(&png_bytes[1..4], b"PNG");
+	}
+
+	//==============================================================================
+	// 시험용 씬. (원본 async load 처럼 create 에서 불러오기 작업을 맡기고, initialize 에서 오래 도는 작업을 맡긴다)
+	//==============================================================================
+	struct AsyncLoadScene {
+		scene_base: SceneBase,
+		load_step_count: u32,
+		initialize_count: u32,
+		long_task_handle: Rc<RefCell<Option<TaskHandle>>>,
+		never_promise: Option<Promise<()>>,
+	}
+
+	impl Scene for AsyncLoadScene {
+		fn get_scene_base(&self) -> &SceneBase {
+			&self.scene_base
+		}
+
+		fn get_scene_base_mut(&mut self) -> &mut SceneBase {
+			&mut self.scene_base
+		}
+
+		fn create(&mut self, engine: &mut Engine) {
+			let load_task_handle = engine.spawn_scene_task(self, |mut scene_context| async move {
+				let load_handle = AssetLoadHandle::create_pending("stage.json");
+				let task_load_handle = load_handle.clone();
+				scene_context.with(move |scene: &mut AsyncLoadScene, _engine| {
+					scene.load_step_count += 1;
+					task_load_handle.finish(Ok(b"{}".to_vec()));
+				});
+				load_handle.await.expect("읽힘");
+				crate::base::wait::next_frame().await;
+				scene_context.with(|scene, _engine| {
+					scene.load_step_count += 1;
+				});
+			});
+			self.scene_base.track_task(&load_task_handle);
+		}
+
+		fn initialize(&mut self, engine: &mut Engine) {
+			self.initialize_count += 1;
+			let never_promise = self.never_promise.take().expect("기다릴 Promise");
+			let long_task_handle = engine.spawn_scene_task(self, move |_scene_context| async move {
+				never_promise.await;
+			});
+			*self.long_task_handle.borrow_mut() = Some(long_task_handle);
+		}
+	}
+
+	//==============================================================================
+	// 씬의 async 불러오기: 맡긴 작업이 끝나고 0.3초 뒤에 initialize, 씬을 내리면 그 씬의 작업을 버린다.
+	//==============================================================================
+	#[test]
+	fn scene_load_task_delays_initialize_and_unload_drops_tasks() {
+		let long_task_handle: Rc<RefCell<Option<TaskHandle>>> = Rc::new(RefCell::new(None));
+		let (never_promise, _never_resolver) = Promise::create();
+		let scene = AsyncLoadScene {
+			scene_base: SceneBase::new(),
+			load_step_count: 0,
+			initialize_count: 0,
+			long_task_handle: long_task_handle.clone(),
+			never_promise: Some(never_promise),
+		};
+		let mut engine_runner = EngineRunner::new(Engine::new(EngineConfiguration::new()), Box::new(scene));
+		engine_runner.apply_pending_scenes();
+		assert!(!engine_runner.scene_list[0].get_scene_base().is_loaded());
+		let read_scene = |engine_runner: &mut EngineRunner| -> (u32, u32) {
+			let scene = engine_runner.scene_list[0].as_scene_any_mut().downcast_mut::<AsyncLoadScene>().expect("시험용 씬");
+			(scene.load_step_count, scene.initialize_count)
+		};
+		engine_runner.poll_tasks();
+		assert_eq!(read_scene(&mut engine_runner), (1, 0));
+		initialize_scene_if_ready(&mut engine_runner.engine, engine_runner.scene_list[0].as_mut(), 10.0);
+		assert!(!engine_runner.scene_list[0].get_scene_base().is_loaded());
+		engine_runner.poll_tasks();
+		assert_eq!(read_scene(&mut engine_runner), (2, 0));
+		initialize_scene_if_ready(&mut engine_runner.engine, engine_runner.scene_list[0].as_mut(), 10.0);
+		initialize_scene_if_ready(&mut engine_runner.engine, engine_runner.scene_list[0].as_mut(), 10.2);
+		assert!(!engine_runner.scene_list[0].get_scene_base().is_loaded());
+		initialize_scene_if_ready(&mut engine_runner.engine, engine_runner.scene_list[0].as_mut(), 10.31);
+		assert!(engine_runner.scene_list[0].get_scene_base().is_loaded());
+		assert_eq!(read_scene(&mut engine_runner), (2, 1));
+
+		engine_runner.poll_tasks();
+		let long_task_handle = long_task_handle.borrow().clone().expect("오래 도는 작업");
+		assert!(!long_task_handle.is_finished());
+		assert_eq!(engine_runner.engine.task_executor.get_task_count(), 1);
+		engine_runner.engine.unload_all_scenes();
+		engine_runner.apply_pending_scenes();
+		assert!(long_task_handle.is_finished());
+		assert_eq!(engine_runner.engine.task_executor.get_task_count(), 0);
+	}
+
+	//==============================================================================
+	// 원본 await loadScene, await unloadScene: 엔진 작업에서 initialize 까지 끝나면 핸들로, 내린 뒤에 풀린다.
+	//==============================================================================
+	#[test]
+	fn load_scene_async_and_unload_scene_async_resolve() {
+		let counts = [Rc::new(Cell::new(0)), Rc::new(Cell::new(0)), Rc::new(Cell::new(0))];
+		let mut engine_runner = EngineRunner::new(Engine::new(EngineConfiguration::new()), CountingScene::create_boxed(&counts[0], &counts[1], &counts[2]));
+		engine_runner.apply_pending_scenes();
+		let second_counts = [Rc::new(Cell::new(0)), Rc::new(Cell::new(0)), Rc::new(Cell::new(0))];
+		let second_scene = CountingScene::create_boxed(&second_counts[0], &second_counts[1], &second_counts[2]);
+		let record_list: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+		let task_record_list = record_list.clone();
+		let task_handle = engine_runner.engine.spawn_task(move |mut engine_context| async move {
+			let load_promise = engine_context.with(|engine| engine.load_scene_async(second_scene));
+			let scene_id = load_promise.await;
+			task_record_list.borrow_mut().push(String::from("loaded"));
+			let unload_promise = engine_context.with(|engine| engine.unload_scene_async(scene_id));
+			unload_promise.await;
+			let loaded_count = engine_context.with(|engine| engine.get_all_loaded_scenes().len());
+			task_record_list.borrow_mut().push(format!("unloaded {}", loaded_count));
+		});
+		engine_runner.poll_tasks();
+		engine_runner.apply_pending_scenes();
+		assert_eq!(second_counts[0].get(), 1);
+		initialize_scene_if_ready(&mut engine_runner.engine, engine_runner.scene_list[1].as_mut(), 0.0);
+		engine_runner.poll_tasks();
+		assert!(record_list.borrow().is_empty());
+		initialize_scene_if_ready(&mut engine_runner.engine, engine_runner.scene_list[1].as_mut(), 0.31);
+		engine_runner.poll_tasks();
+		assert_eq!(*record_list.borrow(), vec![String::from("loaded")]);
+		engine_runner.apply_pending_scenes();
+		assert_eq!(second_counts[1].get(), 1);
+		engine_runner.poll_tasks();
+		assert_eq!(*record_list.borrow(), vec![String::from("loaded"), String::from("unloaded 1")]);
+		assert!(task_handle.is_finished());
+	}
+
+	//==============================================================================
+	// 원본 await requestFrameCapture(번호): 그 프레임의 PNG 바이트로 풀린다.
+	//==============================================================================
+	#[test]
+	fn request_frame_capture_async_resolves_with_png_bytes() {
+		let mut engine_runner = EngineRunner::new(Engine::new(EngineConfiguration::new()), Box::new(RecordingScene { scene_base: SceneBase::new(), record_list: Rc::new(RefCell::new(Vec::new())) }));
+		let mut capture_promise = engine_runner.engine.request_frame_capture_async(1);
+		let handler_list = engine_runner.engine.frame_capture_handler_map.remove(&1).expect("요청");
+		for capture_handler in handler_list {
+			capture_handler(&[1, 2, 3]);
+		}
+		let waker = std::task::Waker::noop();
+		let mut context = std::task::Context::from_waker(waker);
+		assert_eq!(std::pin::Pin::new(&mut capture_promise).poll(&mut context), std::task::Poll::Ready(vec![1, 2, 3]));
+	}
+
+	//==============================================================================
+	// "data:" 주소 애셋. (데스크탑은 주소를 풀어 바이트로, 소리는 형을 보지 않고 내용으로 가린다. 원본 fetch, decodeAudioData 와 같다)
+	//==============================================================================
+	#[cfg(not(target_arch = "wasm32"))]
+	#[test]
+	fn data_url_assets_load_on_desktop() {
+		fn encode_base64(bytes: &[u8]) -> String {
+			const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+			let mut text = String::new();
+			for chunk in bytes.chunks(3) {
+				let value = (chunk[0] as u32) << 16 | (*chunk.get(1).unwrap_or(&0) as u32) << 8 | *chunk.get(2).unwrap_or(&0) as u32;
+				for index in 0..4 {
+					if index <= chunk.len() {
+						text.push(ALPHABET[(value >> (18 - 6 * index) & 63) as usize] as char);
+					}
+					else {
+						text.push('=');
+					}
+				}
+			}
+			text
+		}
+		let engine = Engine::new(EngineConfiguration::new());
+		// 타임라인 편집기가 넣는 꼴. (FileReader.readAsDataURL, 형은 파일 확장자에서 오고 틀려도 된다)
+		let webm_bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/assets/audio/opus_stereo.webm")).expect("webm");
+		let audio_asset = engine.load_audio_asset(&format!("data:application/octet-stream;base64,{}", encode_base64(&webm_bytes))).expect("data audio");
+		assert!(audio_asset.is_loaded());
+		assert!((audio_asset.get_duration() - 11002.0 / 44100.0).abs() < 1e-9);
+		assert!(engine.load_audio_asset("data:audio/wav;base64,@@").is_err());
+		// 애셋 바이트 부탁은 그 자리에서 끝나고 형을 응답 형으로 둔다.
+		let load_handle = engine.request_asset_bytes("data:text/plain;charset=utf-8,hello%20world");
+		assert!(load_handle.is_loaded());
+		assert_eq!(load_handle.get_bytes().expect("bytes").as_slice(), b"hello world");
+		assert_eq!(load_handle.get_content_type().as_deref(), Some("text/plain;charset=utf-8"));
+		assert!(engine.request_asset_bytes("data:nocomma").is_failed());
+		// 그림.
+		let png_bytes = encode_png(&[0, 255, 0, 255], 1, 1).expect("png");
+		let image = engine.load_image(&format!("data:image/png;base64,{}", encode_base64(&png_bytes))).expect("data image");
+		assert_eq!((image.get_width(), image.get_height()), (1, 1));
 	}
 }

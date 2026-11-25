@@ -282,22 +282,31 @@ pub fn read_clipboard_text() -> Option<String> {
 // 시스템 클립보드 글을 비동기로 읽어 콜백에 넘기기. (원본 readClipboard 의 navigator.clipboard.readText().then, 못 읽거나 거부되면 빈 글)
 //==============================================================================
 pub fn read_clipboard_text_with_callback(callback: Box<dyn FnOnce(String)>) {
+	read_optional_clipboard_text_with_callback(Box::new(move |text: Option<String>| {
+		callback(text.unwrap_or_default());
+	}));
+}
+
+//==============================================================================
+// 시스템 클립보드 글을 비동기로 읽어 콜백에 넘기기. (원본 engine.readClipboardText, 클립보드가 없거나 거부되면 원본 null 자리의 None)
+//==============================================================================
+pub fn read_optional_clipboard_text_with_callback(callback: Box<dyn FnOnce(Option<String>)>) {
 	let promise = match call_clipboard_function("readText", &js_sys::Array::new()) {
 		Some(promise) => {
 			promise
 		}
 		None => {
-			callback(String::new());
+			callback(None);
 			return;
 		}
 	};
 	wasm_bindgen_futures::spawn_local(async move {
 		let text = match wasm_bindgen_futures::JsFuture::from(promise).await {
 			Ok(value) => {
-				value.as_string().unwrap_or_default()
+				value.as_string()
 			}
 			Err(_) => {
-				String::new()
+				None
 			}
 		};
 		callback(text);

@@ -26,6 +26,8 @@
 //   - 데스크탑 DOM 입력 필드는 원본 DOM 입력 칸처럼 되돌리기와 다시 하기를 한다. (Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y, 맥은 Cmd, 블링크의 묶음 규칙, TextEditBuffer)
 //   - 노드를 끄거나(set_active(false)) 지우면 tick 이 돌지 않아 포커스와 IME, 웹의 숨긴 <input> 이 함께 사라진다. (원본은 detach 해야 사라진다)
 //   - getRenderState 는 옮기지 않았다. (그리는 컴포넌트가 하나라 넘길 일이 없다)
+//   - UI 문서(UIDocument)는 register_node_type 으로 등록하면 원본 노드 꼴로 쓰고 읽는다. (노드 type "UIInputField", 바탕 Paint, 그리기 층, 안내 글과 값 UILabel 자식,
+//     오버레이 자식. uidocument.rs 의 UIDocumentNode) 러스트 판이 만드는 content 노드는 문서에 적지 않는다.
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::pivot::Pivot;
@@ -561,6 +563,7 @@ pub struct UIInputField {
 	writing_direction: UIInputFieldWritingDirection,
 }
 
+#[crate::reflect]
 impl UIInputField {
 	//==============================================================================
 	// 생성. (기본값은 원본과 같다: 28px, 여백 16, 흰 바탕 둥글기 8, 글 #222222, 안내 글 #999999, 커서 #5b8def, 테두리 #f97316 3px)
@@ -687,8 +690,9 @@ impl UIInputField {
 	}
 
 	//==============================================================================
-	// 쓰기 방향 설정. (크롬 문맥 메뉴의 쓰기 방향, 처음은 왼쪽에서 오른쪽)
+	// 쓰기 방향 설정. (크롬 문맥 메뉴의 쓰기 방향, 처음은 왼쪽에서 오른쪽. 원본 필드의 속성이 아니라 반사에서 뺀다)
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn set_writing_direction(&mut self, writing_direction: UIInputFieldWritingDirection) {
 		self.writing_direction = writing_direction;
 	}
@@ -696,6 +700,7 @@ impl UIInputField {
 	//==============================================================================
 	// 쓰기 방향.
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn get_writing_direction(&self) -> UIInputFieldWritingDirection {
 		self.writing_direction
 	}
@@ -1634,6 +1639,7 @@ impl Default for UIInputField {
 	}
 }
 
+#[crate::reflect]
 impl Component for UIInputField {
 	fn get_component_base(&self) -> &ComponentBase {
 		self.ui_control.get_component_base()
@@ -1877,6 +1883,7 @@ struct UIInputFieldContextMenu {
 	is_first_tick: bool,
 }
 
+#[crate::reflect]
 impl UIInputFieldContextMenu {
 	//==============================================================================
 	// 생성. (선택이 없으면 잘라내기와 복사는 흐리게)
@@ -1934,6 +1941,7 @@ impl UIInputFieldContextMenu {
 	}
 }
 
+#[crate::reflect]
 impl Component for UIInputFieldContextMenu {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base

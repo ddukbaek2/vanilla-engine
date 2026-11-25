@@ -9,12 +9,13 @@
 //   - alert 는 확인만, confirm 과 prompt 는 확인과 취소. 기본 단추는 확인이다. 단추 차례는 크롬처럼 윈도우 [확인][취소], 맥과 리눅스 [취소][확인].
 //   - prompt 입력 칸은 기본값을 넣고 모두 고른 채로 초점을 받는다. Enter 는 확인, Escape 는 취소.
 //   - 글(제목, 확인, 취소)은 브라우저 화면 언어 자리인 시스템 언어로 고른다. (core/browseruitext.rs)
-//   - 떠 있는 동안 원본에서 자바스크립트가 멈추듯 씬을 갱신하지 않고(그리기는 멈춘 화면 그대로), 입력은 창만 받는다. 닫히면 눌린 키와 단추를 비운다.
+//   - 떠 있는 동안 원본에서 자바스크립트가 멈추듯 씬과 async 작업을 갱신하지 않고(그리기는 멈춘 화면 그대로), 입력은 창만 받는다. 닫히면 눌린 키와 단추를 비운다.
 //     (원본은 창이 포커스를 가져가 페이지에 키가 오지 않는다)
 //   - 입력 칸은 글 입력 줄(core/textinput.rs)에서 IME 와 편집 키를 받는다. 누르고 끌어 커서와 선택을 정한다. 되돌리기와 다시 하기도 된다. (크롬 Textfield 처럼)
 //   - 여러 개를 한 프레임에 부르면 차례로 띄운다. (원본은 창이 떠 있는 동안 자바스크립트가 멈춰 겹쳐 부를 수 없다)
 // - 원본 prompt 는 답할 때까지 막고 값을 돌려준다. 러스트 판은 엔진 루프를 막을 수 없어 ModalDialogHandle 을 돌려주고, 답하면 끝난다. (is_finished)
-//   끝난 뒤 부를 함수는 set_callback 으로 건다. await 꼴은 async 를 넣는 작업이 맡는다.
+//   끝난 뒤 부를 함수는 set_callback 으로 건다. 엔진 작업 안에서는 Engine::alert_async, confirm_async, prompt_async 의 Promise 를 await 한다.
+//   (떠 있는 동안은 async 작업도 원본 자바스크립트처럼 멈춘다)
 //==============================================================================
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -953,6 +954,27 @@ mod tests {
 		engine.get_input_manager_mut().get_text_input_mut().push_focused_field_event(TextInputEventKind::Key { key: TextInputKey::Enter, is_shift: false });
 		tick_modal_dialog(&mut engine, &measure_fixed_width, 0.016);
 		assert!(alert_handle.is_confirmed());
+	}
+
+	//==============================================================================
+	// await 꼴: 엔진 작업이 prompt_async 를 기다리고, 답하면 다음 폴링에 그 값으로 이어 간다.
+	//==============================================================================
+	#[test]
+	fn prompt_async_resolves_in_task() {
+		let mut engine = Engine::new(EngineConfiguration::new());
+		let mut scene_list: Vec<Box<dyn crate::core::scene::Scene>> = Vec::new();
+		let received_text = Rc::new(std::cell::RefCell::new(None));
+		let task_received_text = received_text.clone();
+		engine.spawn_task(move |mut engine_context| async move {
+			let prompt_promise = engine_context.with(|engine| engine.prompt_async("이름:", "기본"));
+			*task_received_text.borrow_mut() = Some(prompt_promise.await);
+		});
+		crate::core::task::poll_tasks(&mut engine, &mut scene_list, None);
+		assert!(engine.is_modal_dialog_open());
+		engine.get_input_manager_mut().get_text_input_mut().push_focused_field_event(TextInputEventKind::Key { key: TextInputKey::Enter, is_shift: false });
+		tick_modal_dialog(&mut engine, &measure_fixed_width, 0.016);
+		crate::core::task::poll_tasks(&mut engine, &mut scene_list, None);
+		assert_eq!(*received_text.borrow(), Some(Some(String::from("기본"))));
 	}
 
 	//==============================================================================

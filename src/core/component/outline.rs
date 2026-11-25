@@ -19,6 +19,7 @@ pub struct Outline {
 	is_circle: bool,
 }
 
+#[crate::reflect]
 impl Outline {
 	//==============================================================================
 	// 생성.
@@ -126,6 +127,7 @@ impl Default for Outline {
 	}
 }
 
+#[crate::reflect]
 impl Component for Outline {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base

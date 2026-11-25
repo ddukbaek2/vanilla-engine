@@ -38,6 +38,7 @@ pub struct UIToggleButton {
 	clicked_handler: Rc<RefCell<UIToggleButtonEvent>>,
 }
 
+#[crate::reflect(base = ui_button)]
 impl UIToggleButton {
 	//==============================================================================
 	// 생성.
@@ -58,6 +59,7 @@ impl UIToggleButton {
 	//==============================================================================
 	// 품은 버튼 반환.
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn get_uibutton(&self) -> &UIButton {
 		&self.ui_button
 	}
@@ -72,6 +74,7 @@ impl UIToggleButton {
 	//==============================================================================
 	// 컨텐트 노드 핸들.
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn get_content(&self) -> Option<NodeId> {
 		self.ui_button.get_content()
 	}
@@ -90,6 +93,7 @@ impl UIToggleButton {
 	//==============================================================================
 	// 클릭 이벤트 설정. (원본처럼 품은 버튼이 아니라 토글 버튼이 따로 든다)
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn set_clicked_event(&mut self, clicked_event: UIToggleButtonEvent) {
 		self.external_clicked_event = Some(Rc::new(RefCell::new(clicked_event)));
 	}
@@ -97,6 +101,7 @@ impl UIToggleButton {
 	//==============================================================================
 	// 클릭 이벤트 반환. (원본처럼 안쪽의 클릭 처리 함수, 부르면 뒤집고 토글 이벤트와 클릭됨 이벤트를 부른다, 부를 때는 borrow_mut 로 빌린다)
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn get_clicked_event(&self) -> Option<Rc<RefCell<UIToggleButtonEvent>>> {
 		Some(self.clicked_handler.clone())
 	}
@@ -181,6 +186,7 @@ impl Default for UIToggleButton {
 	}
 }
 
+#[crate::reflect]
 impl Component for UIToggleButton {
 	fn get_component_base(&self) -> &ComponentBase {
 		self.ui_button.get_component_base()

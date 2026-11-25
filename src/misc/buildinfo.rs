@@ -10,12 +10,14 @@
 //   3. 둘 다 없으면 set_package_version 으로 넣은 판. (게임 크레이트가 env!("CARGO_PKG_VERSION") 을 넘긴다, 넣지 않았으면 원본처럼 빈 글)
 // - 원본과 다른 점:
 //   원본 생성자의 version.json 주소 기본 인자는 new()(기본 주소)와 set_version_json_path 로 나눴다.
-//   원본 await load() 는 받을 때까지 기다린다. 러스트 판은 load(engine) 가 요청만 하고, 마쳤는지는 is_loaded(), 씬은 get_load_handle() 을 track_load_handle 로 맡긴다.
+//   원본 await load() 는 받을 때까지 기다린다. 러스트 판은 load(engine) 가 요청만 하고, 엔진 작업 안에서 wait_for_load().await 로 기다린다.
+//   await 없이는 마쳤는지를 is_loaded() 로 보고, 씬은 get_load_handle() 을 track_load_handle 로 맡긴다.
 //==============================================================================
 use crate::core::asset::AssetLoadHandle;
 use crate::core::engine::Engine;
 use crate::platform::document::Document;
 use serde_json::Value;
+use std::future::Future;
 
 // 빌드 판을 적는 meta 의 이름.
 const DEFAULT_META_NAME: &str = "build-version";
@@ -97,6 +99,19 @@ impl BuildInfo {
 			}
 			None => {
 				true
+			}
+		}
+	}
+
+	//==============================================================================
+	// 읽기를 마치기를 기다리는 퓨처. (원본 await load() 의 await 자리, load 를 부른 뒤 엔진 작업 안에서 await 한다. 실패해도 마친 것)
+	// - meta 로 읽었으면 바로 끝난다. 손잡이를 나눠 들어 빌리지 않는다.
+	//==============================================================================
+	pub fn wait_for_load(&self) -> impl Future<Output = ()> + 'static {
+		let load_handle = self.load_handle.clone();
+		async move {
+			if let Some(load_handle) = load_handle {
+				let _ = load_handle.await;
 			}
 		}
 	}

@@ -24,6 +24,12 @@ pub enum ProgressDirection {
 	Vertical,
 }
 
+// 채우는 방향의 반사 값. (원본 ProgressDirection 글)
+crate::core::reflection::impl_reflect_names!(ProgressDirection, [
+	(ProgressDirection::Horizontal, "horizontal"),
+	(ProgressDirection::Vertical, "vertical"),
+]);
+
 //==============================================================================
 // 진행률 표시.
 //==============================================================================
@@ -39,6 +45,7 @@ pub struct UIProgressView {
 	direction: ProgressDirection,
 }
 
+#[crate::reflect(base = ui_view)]
 impl UIProgressView {
 	//==============================================================================
 	// 생성. (값 0, 범위 0 ~ 1, 트랙 회색, 채움 파랑)
@@ -62,6 +69,7 @@ impl UIProgressView {
 	//==============================================================================
 	// 품은 뷰 반환.
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn get_uiview(&self) -> &UIView {
 		&self.ui_view
 	}
@@ -76,6 +84,7 @@ impl UIProgressView {
 	//==============================================================================
 	// 컨텐트 노드 핸들.
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn get_content(&self) -> Option<NodeId> {
 		self.ui_view.get_content()
 	}
@@ -83,6 +92,7 @@ impl UIProgressView {
 	//==============================================================================
 	// 배경색 설정. (트랙 색)
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn set_background_color(&mut self, background_color: impl Into<Color>) {
 		self.ui_view.set_background_color(background_color);
 	}
@@ -90,6 +100,7 @@ impl UIProgressView {
 	//==============================================================================
 	// 배경색 반환. (트랙 색)
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn get_background_color(&self) -> Color {
 		self.ui_view.get_background_color()
 	}
@@ -248,6 +259,7 @@ impl Default for UIProgressView {
 	}
 }
 
+#[crate::reflect]
 impl Component for UIProgressView {
 	fn get_component_base(&self) -> &ComponentBase {
 		self.ui_view.get_component_base()

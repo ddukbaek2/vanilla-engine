@@ -7,6 +7,9 @@
 //==============================================================================
 #![allow(clippy::too_many_arguments)]
 
+// 반사 매크로가 지은 코드는 엔진을 ::vanilla 경로로 가리킨다. 엔진 크레이트 안에서도 같은 경로가 통하게 자기 자신을 vanilla 로 부른다.
+extern crate self as vanilla;
+
 pub mod animation;
 pub mod base;
 pub mod core;
@@ -37,11 +40,12 @@ pub use crate::base::transformmatrix::TransformMatrix;
 pub use crate::base::vector2::Vector2;
 pub use crate::base::vector3::Vector3;
 pub use crate::base::version::Version;
+pub use crate::base::wait;
 pub use crate::core::animation::Animation;
 pub use crate::core::audiobus::AudioBus;
 pub use crate::core::audiomanager::AudioManager;
 pub use crate::core::audioplayer::AudioPlayer;
-pub use crate::core::asset::{Asset, AssetBase, AssetLoadHandle, AssetLoadState, AssetType};
+pub use crate::core::asset::{Asset, AssetBase, AssetLoadFuture, AssetLoadHandle, AssetLoadState, AssetType};
 pub use crate::core::component::mask::Mask;
 pub use crate::core::component::outline::Outline;
 pub use crate::core::component::paint::Paint;
@@ -52,6 +56,9 @@ pub use crate::core::component::shadowtext::{blur_coverage, compose_shadow_image
 pub use crate::core::component::softshade::{SoftShade, SoftShadeShape};
 pub use crate::core::component::text::Text;
 pub use crate::core::component::{Component, ComponentBase};
+pub use crate::core::reflection::{FromReflectValue, Reflect, ReflectedGetter, ReflectedProperty, ReflectValue, ToReflectValue};
+// 반사 매크로. (컴포넌트의 impl 블록과 impl Component 블록에 #[vanilla::reflect] 로 붙인다. 원본의 실행 중 반사 자리)
+pub use vanilla_engine_macros::reflect;
 pub use crate::core::engine::{Engine, EngineConfiguration};
 pub use crate::core::engine::{PageEvent, PageEventListener};
 pub use crate::core::modaldialog::{ModalDialogHandle, ModalDialogKind, ModalDialogResult};
@@ -73,6 +80,7 @@ pub use crate::core::scene::{Scene, SceneBase};
 pub use crate::core::scene::SceneId;
 pub use crate::core::soundeffectpool::SoundEffectPool;
 pub use crate::core::soundsystem::{SoundRow, SoundSystem};
+pub use crate::core::task::{EngineContext, Promise, PromiseResolver, SceneContext, TaskHandle};
 pub use crate::core::timemanager::TimeManager;
 pub use crate::core::tween::{easing_function, Tween, TweenId, TweenProperty, TweenValue, TweenValues};
 pub use crate::core::viewmanager::{ViewManager, ViewScaleMode};
@@ -82,7 +90,7 @@ pub use crate::effect::shadersprite::{ShaderSprite, ShaderSpriteEffect};
 pub use crate::effect::trailrenderer::TrailRenderer;
 pub use crate::graphics3d::ambientocclusioneffect::AmbientOcclusionEffect;
 pub use crate::graphics3d::bloomeffect::BloomEffect;
-pub use crate::graphics3d::material::{ImageDescription, ImageDescriptionOptions, ImageSource, Material, MaterialDescription};
+pub use crate::graphics3d::material::{ImageDescription, ImageDescriptionLoadFuture, ImageDescriptionOptions, ImageSource, Material, MaterialDescription};
 pub use crate::graphics3d::rendertarget::{RenderTarget, RenderTargetOptions};
 pub use crate::graphics3d::shadowmap::ShadowMap;
 pub use crate::graphics3d::skinnedmodel::{AnimationClip, AnimationPath, Drawable, MeshDescription, MorphTarget, Skin, SkinnedModel, SkinnedModelNode, MORPH_TARGET_MAXIMUM};
@@ -222,7 +230,7 @@ pub use crate::base::platform::{LoadedFile, ResourceUsage};
 pub use crate::base::identifier::Identifier;
 pub use crate::core::engine::FrameCaptureHandler;
 pub use crate::base::fsm::StateChangeRequester;
-pub use crate::graphics3d::fbxloader::FbxLoadHandle;
+pub use crate::graphics3d::fbxloader::{FbxLoadFuture, FbxLoadHandle};
 pub use crate::graphics3d::material::ImageDescriptionLoadHandle;
 pub use crate::graphics3d::skinnedmodel::SkinnedModelLoadHandle;
 pub use crate::graphics3d::multilevelbloomeffect::MultiLevelBloomEffect;

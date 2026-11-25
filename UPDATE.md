@@ -390,6 +390,64 @@
   - ARCHITECTURE: 배치와 소유 구조, 프레임 루프, 블렌드와 글꼴과 애셋 형식, 9장 원본과의 대응(원본 200 파일 가운데 181 옮김, 일부러 안 옮긴 19 파일과 까닭), 10장 두 엔진의 차이(정말 맞출 수 없는 것과 일부러 정한 꼴)
   - UPDATE.md 이 판 머리의 겹친 줄(찍기 모드 여섯 벌)을 하나로, math 줄의 옛 설명을 고쳤다
   - 머리 주석: 원본에서도 고쳐 이제는 같은 것(묶어 그리기와 거르기 기본 켬, 프로그램과 텍스처 기억, Text 거르기, UIScene 의 use_dev_tools, 웹소켓 바이너리 JSON, Identifier.reset, Vector2 버그, pageshow 복구, DynamicFont 다시 놓기, 길이 0 트윈, set_playback_rate), UIImageView 의 그리는 차례(원본도 배경이 먼저), 그림 형식 목록(Material, GLB 그림, 쓰지 않는 avif-parse), 웹 글자 굽기, Scene 의 initialize 이름, lib.rs 의 웹 모듈 자리
+- async/await 를 원본처럼 쓴다. (지금까지는 받기 손잡이와 콜백으로 대신했다. 손잡이와 콜백 API 는 그대로 둔다)
+  - 엔진이 스레드 하나짜리 실행기를 품는다. (core/task.rs, 외부 런타임 없음, 데스크탑과 웹이 같은 코드) Engine::spawn_task(엔진 작업), spawn_scene_task(씬 작업, 그 씬을 내리면 버린다)로 맡긴 퓨처를 프레임마다 시간과 입력을 갱신한 뒤, 씬의 tick 앞에서 깨어난 것만 한 번씩 폴링한다. 퓨처는 Send 가 아니어도 된다
+  - 작업은 컨텍스트(EngineContext, SceneContext<씬 타입>)의 with(|씬, 엔진| ...) 안에서만 씬과 엔진을 빌린다. 폴링하는 동안만 스레드 지역 칸에 둔 포인터를 꺼내 쓰고 되돌려 두 번째 &mut 가 생기지 않는다. 그래픽은 with_graphic. TaskHandle 로 끝났는지 묻거나 await 한다
+  - Promise, PromiseResolver: 원본 new Promise((resolve) => ...) 자리. Promise::create 가 퓨처와 resolve 손잡이를 짝으로 준다. Promise::resolved
+  - wait::seconds, wait::next_frame (원본 base/wait.js, 그동안 옮기지 않았다). seconds 는 원본 setTimeout 처럼 벽시계 초다. (시간 배율을 곱하지 않는다) 원본 nextFrame 은 만든 Promise 를 await 하지 않아 바로 끝나는 버그가 있다. 러스트 판은 다음 프레임까지 기다린다
+  - 씬: 원본 async load 자리로 create 에서 맡긴 작업을 SceneBase::track_task 로 맡기면 끝날 때까지 initialize 를 미룬다. Engine::load_scene_async, unload_scene_async, unload_all_scenes_async (원본 await SceneManager.loadScene 들)
+  - 애셋: Asset::wait_for_load, AssetLoadHandle 은 IntoFuture. (AssetLoadFuture) AudioAsset, AssetLoader(실패 목록), SpriteAtlas, BuildInfo, SoundSystem 의 wait_for_load, languagepack::wait_for_load, uifont::wait_for_load. 기다리는 동안 update 가 드는 것은 퓨처가 불러 준다
+  - FbxLoadHandle, ImageDescriptionLoadHandle 은 IntoFuture (FbxLoadFuture, ImageDescriptionLoadFuture). SkinnedModel::load_from_url_async, load_from_fbx_url_async (다 받으면 작업을 폴링하는 엔진의 GL 로 짓는다). Timeline::load_from_url (원본 loadFromUrl)
+  - Engine::read_clipboard_text_async (원본 readClipboardText, 없거나 거부되면 None), request_frame_capture_async (원본 requestFrameCapture, PNG 바이트)
+  - 화면 페이드: GameScene::fade_screen_async, GameSceneBase::fade_screen_async (원본 onDark 가 Promise 를 돌려주면 끝날 때까지 어둡게 두는 것)
+  - Scene 트레이트에 SceneAny 바탕 트레이트(as_scene_any_mut, 모든 'static 씬에 저절로 붙는다)를 더했다. SceneContext 가 씬을 제 타입으로 되돌릴 때 쓴다
+  - 예제 asyncawait. 시험 12 개(실행기, 깨우기, 기다리기, 애셋 퓨처, 컨텍스트 접근, 빼돌린 컨텍스트의 패닉, 씬 불러오기와 내리기, 페이드)
+  - README 장점과 사용법(씬 생명주기, 애셋 로딩의 원본과 러스트 표, 예제), 기술 노트, ARCHITECTURE 배치와 소유 구조와 프레임 루프, 9장(원본 182 파일 옮김), 10장(async 를 정말 맞출 수 없는 것에서 빼고 남은 꼴을 일부러 정한 꼴에)
+- 데스크탑을 크롬 위의 원본과 더 맞췄다. (크로미엄 소스로 크롬이 하는 것을 확인해 옮김, ARCHITECTURE 10장)
+  - 웨이랜드 페이지 이벤트 Hidden: 크롬 리눅스 웨이랜드처럼 보낸 wl_surface.frame 콜백이 3 초 동안 오지 않으면 가려짐으로 보고 Hidden, 다시 오면 Visible 과 on_page_visibility_restored 를 낸다. winit 창의 wl_display 에 wayland-client 를 손님 연결로 붙여 제 큐에서 콜백을 보낸다. 메사가 가려진 창에서 eglSwapBuffers 안에 멈추지 않게, 웨이랜드는 SDL 처럼 EGL 스왑 간격을 0 으로 두고 엔진이 지난 프레임 콜백을 1/20 초까지 기다린다. xdg_toplevel suspended 는 winit 이 쥐고 있어 받지 못한다
+  - 윈도우 터치 키보드: 크롬 윈도우처럼 손가락이나 펜으로 플랫폼 입력 필드(use_dominput)에 포커스하거나 누르면 창에 묶은 InputPane 으로 터치 키보드를 띄우고(300 밀리초로 고름), 포커스가 떠나면 내린다. 가린 영역의 세로만큼 visualViewport 를 줄여 auto_resize_on_window_resize 면 캔버스가 줄고, ignore_virtual_keyboard_resize 가 데스크탑에서도 원본처럼 그것을 막는다. 맥과 리눅스는 크롬처럼 뷰포트를 줄이지 않는다
+  - preserve_drawing_buffer: 원본처럼 켜면 프레임 첫머리에 색을 비우지 않는다. (원본 applySettings 는 스텐실만 비운다. 지금까지 러스트 판은 웹과 데스크탑 모두 늘 비워서, 켜도 지난 프레임 그림 위에 쌓아 그려지지 않았다) 데스크탑은 다 그린 프레임을 떠 두었다가 다음 프레임 첫머리에 되그린다. Graphic::new 가 원본 생성자처럼 preserve_drawing_buffer 를 받는다
+  - auto_resize_on_window_resize 를 끄면 데스크탑도 원본처럼 캔버스 비 상한(max_canvas_aspect_ratio)을 걸지 않는다. (원본은 이 설정이 켜졌을 때만 비 상한을 건다. 데스크탑 창은 캔버스가 창을 가득 채운 페이지로 본다)
+  - 데스크탑 Platform 의 브라우저를 Unknown 에서 Chrome 으로: 데스크탑 판이 크롬 위의 원본과 같은 결과를 내므로 게임 코드의 브라우저 분기도 크롬 갈래로 간다
+  - 개발자 도구의 메모리 칸: 데스크탑은 (N/A) 대신 시스템 할당자의 힙(맥 malloc_zone_statistics, 윈도우 프로세스 힙 HeapSummary, 리눅스 glibc mallinfo2)을 usedJSHeapSize, totalJSHeapSize 칸에 적는다. jsHeapSizeLimit 는 그런 상한이 없어 (N/A) 다
+  - 차이 표에서 뺀 것: 세이프 에어리어 인셋 0(크롬 데스크탑도 0, SetDisplayCutoutSafeArea 는 안드로이드에만 있다), set_prevented_keys 와 오른쪽 클릭 메뉴 막기(데스크탑 창에는 막을 브라우저 기본 동작이 없어 막은 것과 같다), 화면 키보드, 웨이랜드 Hidden, preserve_drawing_buffer, auto_resize_on_window_resize, 브라우저 이름
+- 반사(리플렉션): 원본의 실행 중 반사(uidocument.js 의 collectReflectedProperties, getReflectedProperties, saveByReflection, loadByReflection, devtools.js 의 getComponentProperties)와 같은 일을 컴파일 때 짓는 코드로 한다. 언리얼 UHT, Qt moc 처럼 절차 매크로가 한다
+  - 저장소를 워크스페이스로 만들고 절차 매크로 크레이트 macros/(vanilla-engine-macros, syn, quote, proc-macro2)를 더했다. 엔진이 vanilla::reflect 로 다시 내보내 게임은 엔진 하나만 의존한다. 지은 코드는 ::vanilla 로 엔진을 가리키고, 엔진 안에서는 lib.rs 의 extern crate self as vanilla 로 같은 경로가 통한다
+  - #[vanilla::reflect] 를 컴포넌트의 impl 블록과 impl Component 블록에 붙인다. 인자 없는 pub get_*, is_* 게터와 짝 set_* 을 모아 Reflect 구현을 짓는다. 키는 원본 이름(get_line_width → LineWidth), 차례는 정의 차례다. 한쪽만 붙이면 컴파일 에러가 붙일 곳을 알려 준다
+  - 값으로 바꿀 수 없는 꼴의 게터는 자동 참조 특수화로 골라내 저장에서 빼고 인스펙터에는 [종류 이름] 으로 보인다. 함수에 #[reflect(skip)], #[reflect(transient)], #[reflect(name = "...")], 블록에 #[reflect(base = 필드)](원본 상위 클래스 몫을 품은 필드로 잇기)
+  - core/reflection.rs: ReflectValue, Reflect, ToReflectValue, FromReflectValue, ReflectedProperty, ReflectedGetter, collect_reflected_properties, read_reflected_property, write_reflected_property, collect_reflected_getters. Component::get_reflection, get_reflection_mut (기본 None). 원본에서 글인 열거(TextAlign, TextBaseline, TextDirection, TextWrapMode, SpriteDrawMode, BlendMode, ScrollMode, ProgressDirection, ScrollBarAxis, SoftShadeShape, ButtonMotionStyle, ToastPhase, ParticleEmitterShape, ParticleRenderShape, ShaderSpriteEffect)는 같은 글로, ButtonState 는 원본 Enum 수로 바꾼다
+  - 엔진 컴포넌트 51 종에 모두 붙였다. 원본 상위 클래스가 있는 것(UIControl, UIScrollView, UIProgressView, UILabel, UIImageView 는 UIView, UIButton, UISlider, UIDraggable 은 UIControl, UIToggleButton 은 UIButton, UISnapScrollView 는 UIScrollView, Sprite 는 Paint, ShaderSprite 는 Sprite)은 base 로 잇고 위임 함수는 뺐다. ShadowText 의 TextAlign, isBold, UIProgressRing 의 둘레 점, UIListView 의 isHorizontal 은 원본 차례로 옮겼다
+- UIDocument: 원본처럼 쓰기, 읽기 함수(propertyHandler)가 없는 종류는 반사로 쓰고 읽는다. (save_by_reflection, load_by_reflection, get_reflected_properties, 원본 REFLECTED_PROPERTY_EXCLUDE_NAMES) 손으로 짠 Outline, SoftShade, ShadowText, UIProgressRing 직렬화를 지우고 반사로 돌렸다. 결과는 원본 saveByReflection 과 키, 차례, 값까지 같다. (원본을 node 로 돌려 낸 JSON 으로 시험)
+  - 공개 API 를 바꿨다: register_component_type(이름, 짓는 함수)이 원본 registerComponentType 이다. (반사) 쓰기, 읽기 함수가 있으면 register_component_type_with_handler, 위젯은 register_widget_type(이름, 짓는 함수, content, 스스로 붙이는 종류)과 register_widget_type_with_handler
+  - 등록하지 않은 종류도 반사가 있으면 원본처럼 반사로 적는다. (type 은 타입 이름) 쓰기 함수가 있는 종류도 노드를 가리키는 반사 속성은 원본 saveNodeReferences, loadNodeReferences 처럼 따로 얹고 읽는다
+  - 원본 노드 종류(WorldNode 하위 클래스)를 맡은 컴포넌트: register_node_type, UIDocumentNode, UIDocumentNodeParts. 그 컴포넌트가 붙은 노드의 type 이 그 이름이고, 원본 노드 생성자가 만든 컴포넌트와 자식을 원본 문서 꼴로 쓰고, 읽을 때는 설정으로 읽고 다시 짓지 않는다
+  - register_editor_types: 원본 에디터(tools/uieditor)가 저장한 문서의 UIInputField, UIScrollBar(원본 노드 종류)와 UISnapScrollView 를 한 줄로 등록한다. 지금까지는 읽을 때 버려졌다. UIInputField 는 바탕 색, 둥근 크기, 안내 글과 그 색, 글 크기, 값과 그 색을, UIScrollBar 는 트랙과 썸 색을 읽는다
+  - ShadowImage 는 imagePath 뒤에 반사 저장 꼴로 쓴다
+- UIScrollBar: get_track_color, get_thumb_color
+- DevTools: 인스펙터가 원본 getComponentProperties 처럼 컴포넌트의 get*, is* 게터를 모두 불러 보인다. (이름은 원본 formatMethodName, 값은 formatPropertyValue 꼴, 수는 원본 toFixed 와 같은 반올림) 반사가 없는 컴포넌트는 지금처럼 UIDocument 의 저장 키 또는 종류 이름만
+- 예제 devtoolsshowcase: Spin 에 #[vanilla::reflect] 를 붙여 인스펙터에 degreesPerSecond 가 보인다
+- README(노드와 컴포넌트의 반사 매크로 쓰는 법, 기술 노트, 외부 의존성의 매크로 크레이트 표), ARCHITECTURE(배치, 9장, 10장 두 엔진의 차이의 반사 줄)
+- 데스크탑 소리 해석을 원본(크롬 decodeAudioData)과 같게 했다. (platform/audio/decode)
+  - 크롬 158 은 FLAC, MP3, PCM, Vorbis 를 symphonia 0.6 으로, Opus 를 libopus 로, AAC 를 FFmpeg 로 푼다. 엔진도 kira 의 해석 기능을 끄고 symphonia 0.6.1 을 직접 불러 같은 해석기를 쓰고(크롬이 켜는 기능과 같게), Opus 는 libopus 를 러스트로 옮긴 opus-pure 를 symphonia 코덱 등록표에 넣어 푼다. webm.cjs 가 만드는 webm(Opus)을 이제 데스크탑에서 튼다
+  - 컨테이너도 symphonia 의 풀기(wav, ogg, mkv(webm), isomp4(m4a), flac, mp3, adts)로 하고, 꼴은 확장자나 형이 아니라 내용으로 가린다
+  - 크롬이 FFmpeg 의 시각과 다듬기 값으로 버리는 앞뒤를 같게 버린다. (Opus pre-skip, webm 의 CodecDelay 를 FFmpeg 가 ms 로 반올림해 생기는 몫, DiscardPadding, MP3 LAME 지연, Ogg granule 과 쪽 하나짜리 Vorbis, m4a 편집 목록과 iTunSMPB, AAC 마지막 패킷 길이)
+  - 정수 표본은 크롬 식(양수는 최대로, 음수는 최소로 나눔, 16 비트 FLAC 은 16 비트로)으로, MP3 는 -1 ~ 1 로 자른다. Opus 의 출력 게인과 5.1 의 크로미엄 채널 차례도 같다
+  - 크로미엄 SincResampler 를 옮겨 원본 DECODE_SAMPLE_RATE(44100)로 바꾼다. (Blink 와 같은 32 탭 커널과 길이 셈, 합의 차례는 크롬이 고르는 NEON, SSE, AVX2 와 같게)
+  - WebAudio 스피커 규칙으로 1 채널이나 2 채널로 내린다. (쿼드, 5.1 은 명세의 식, 그 밖은 앞 두 채널. 이제 3 채널 이상 파일도 튼다)
+  - 시험 소리 21 파일(tests/assets/audio, 모두 수 KB)을 크롬 158 의 결과(chromedecode.cjs 가 찍은 chrome_decode.json)와 견준다. 길이와 채널은 모두 같고, FLAC, MP3, PCM, Vorbis 는 표본까지 같으며 Opus, AAC 는 1e-7 안팎이다
+  - 남은 차이: HE-AAC(SBR, PS)와 3 채널 이상 AAC 는 symphonia 0.6.1 이 받지 않아 데스크탑에서 풀지 못한다. (크롬은 FFmpeg 로 푼다)
+  - 늘어난 크레이트 7: opus-pure, symphonia-format-mkv, rustfft(크롬처럼 symphonia 의 opt-simd 를 켜 FFT 를 같게)와 그 의존 primal-check, strength_reduce, transpose, num-integer. 줄어든 것은 없다 (kira 가 쓰던 symphonia 를 엔진이 직접 쓴다)
+- "data:" 주소: 데스크탑 Engine::load_audio_asset, request_asset_bytes, request_asset_bytes_into, load_image 가 data: 주소를 풀어 읽는다. (타임라인 편집기가 넣는 data: 소리를 데스크탑에서도 튼다) base64 와 퍼센트 꼴 풀기를 타임라인에서 base/dataurl.rs 로 옮겼다. 웹은 asset_base_url 이 비어 있지 않으면 data: 주소 앞에도 기준 주소를 붙여 못 받던 것을 고쳤다
+- 데스크탑 소리 내기를 kira 에서 cpal 위의 엔진 믹서로 바꿨다. (platform/audio/mixer.rs) 원본 소리 API 와 러스트 API(AudioPlayer, AudioBus, get_gain_node, BeepPlayer)는 그대로다
+  - 원본이 짓는 WebAudio 그래프를 그대로 짓는다. AudioBufferSourceNode → 플레이어 GainNode → (0 이 아닌 좌우를 처음 걸면) StereoPannerNode → 버스 GainNode 또는 출력, 비프 오실레이터 → 출력. 128 프레임 퀀텀으로 그린다
+  - 셈은 크롬과 같다. 소스는 audio_buffer_source_handler.cc 를 옮겼다(시작 위치의 1024 배 오버샘플 반올림, 빠르기 1 이면 그대로 베끼고 아니면 선형 보간, 끝의 선형 외삽, 버퍼 전체 루프, playbackRate 는 AudioParam 처럼 f32). 좌우는 stereo_panner.cc 의 식(모노는 x = (pan + 1) / 2, 스테레오는 pan <= 0 이면 L += R cos, R *= sin), GainNode 는 곱, 모노는 스피커 규칙으로 양쪽에, 출력은 -1 ~ 1 로 자른다. kira 는 4 점 3 차 보간과 sqrt 좌우 법칙으로 크롬과 달랐다
+  - 좌우와 음량은 다음 퀀텀부터 바로 걸린다. (kira 판의 좌우는 다음 재생부터였다) 비프는 컨텍스트(장치) 표본율로 그린다
+  - 컨텍스트 시계는 그린 시간이다. (원본 currentTime, 퀀텀마다 128 / 표본율 초) 멈춘 동안은 그리지 않아 소리와 시계가 그 자리에서 선다
+  - 스트림은 관리 스레드가 들고, 장치가 빠지면(맥이 아니면 기본 장치가 바뀌어도) 같은 믹서로 다시 연다. (kira 가 하던 것과 같다)
+  - AudioContext(데스크탑)는 엔진 믹서의 것이고 sample_rate(), current_time() 을 웹 AudioContext 와 같은 이름으로 낸다. AudioBuffer 는 duration(), length(), number_of_channels(), sample_rate() 을 낸다. (공개 API 를 바꾸는 일이다: 지금까지는 kira 의 AudioManager, StaticSoundData 였다)
+  - 버스로 만든 플레이어와 내보낼 곳을 직접 넘긴 플레이어는 원본 WebAudio 처럼 이어진 동안 버스 노드를 살려 둔다
+  - 그래프 다섯(같은 표본율과 다른 표본율의 소스, 빠르기와 루프와 시작 위치, 모노와 스테레오 좌우와 0, 버스, 섞기)을 크롬 158 OfflineAudioContext 결과(tests/assets/mixer/chromemixer.cjs 가 찍은 chrome_mixer.json)와 견주는 시험을 더했다. 1e-6 안에서 같다
+  - 줄어든 크레이트 8: kira, atomic-arena, crossbeam-utils, glam, mint, pastey, rtrb, triple_buffer. 직접 의존은 cpal 하나다 (kira 가 쓰던 cpal 0.18 그대로, realtime 기능)
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.

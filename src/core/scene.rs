@@ -9,7 +9,11 @@
 //   원본은 트윈 객체로 가리키지만, 러스트 판은 트윈을 넘겨받고 TweenId 를 돌려준다. (stop_tween(tween_id))
 // - 원본 SceneManager.unloadScene(scene) 은 씬 객체로 가리킨다. 러스트 판은 엔진이 씬을 들고 있어 load_scene 이 돌려주는 SceneId 나
 //   씬 공통 상태(&SceneBase, 원본처럼 씬으로)로 가리킨다. 씬 스스로는 get_scene_base().get_scene_id() 로 자기 핸들을 안다.
-// - 내릴 때는 원본처럼 finalize 다음 unload 를 부르고, 러스트 판은 씬을 버리기 직전에 destroy 를 더 부른다. (원본 load 의 비동기 기다림은 맡긴 애셋 기다리기로 옮겼다)
+// - 내릴 때는 원본처럼 finalize 다음 unload 를 부르고, 러스트 판은 씬을 버리기 직전에 destroy 를 더 부른다.
+// - 원본 async load(engine) 자리: create 에서 Engine::spawn_scene_task 로 불러오기 작업을 맡기고 track_task 로 씬에 맡긴다.
+//   작업 안에서는 원본처럼 await 로 애셋을 기다리고, SceneContext::with 안에서 씬과 엔진을 만진다. 맡긴 작업과 애셋이 모두 끝나야 initialize 를 부른다.
+//   애셋 손잡이를 track_asset 으로 맡기는 동기 꼴도 그대로 된다. (둘을 섞어도 된다)
+//   원본 unload(engine) 의 await 는 러스트 판에서 기다리지 않는다. 씬은 그 프레임 끝에 내리고 그 씬의 작업도 버린다. (내린 뒤에 할 비동기 일은 엔진 작업 spawn_task 로 맡긴다)
 // - 원본 Scene.load 가 루트를 뷰 크기로 맞추는 것(자리 0, 왼쪽 위 피벗, 콘텐츠 크기는 뷰 크기)은 엔진이 create 바로 뒤에 한다.
 //   원본 SceneManager.loadScene 처럼 맡긴 애셋이 다 끝난 뒤에도 로딩 화면(draw_on_load)을 최소 0.3초 더 보이고 initialize 를 부른다.
 // - 씬의 터치 훅(touch_press, touch_move, touch_release, touch_cancel, touch_wheel)은 원본 Scene.tickTouch 차례로 엔진이 tick 뒤에 부른다.
@@ -20,6 +24,7 @@ use crate::base::color::Color;
 use crate::base::rect::Rect;
 use crate::base::vector2::Vector2;
 use crate::core::asset::{Asset, AssetLoadHandle};
+use crate::core::task::{PromiseResolver, TaskHandle};
 use crate::resource::audioasset::AudioAsset;
 use std::rc::Rc;
 use crate::core::engine::Engine;
@@ -34,6 +39,7 @@ use crate::core::tween::{Tween, TweenId};
 enum TrackedLoad {
 	AssetLoadHandle(AssetLoadHandle),
 	AudioAsset(Rc<AudioAsset>),
+	Task(TaskHandle),
 }
 
 impl TrackedLoad {
@@ -47,6 +53,9 @@ impl TrackedLoad {
 			}
 			TrackedLoad::AudioAsset(audio_asset) => {
 				audio_asset.is_loaded() || audio_asset.get_load_error().is_some()
+			}
+			TrackedLoad::Task(task_handle) => {
+				task_handle.is_finished()
 			}
 		}
 	}
@@ -86,6 +95,8 @@ pub struct SceneBase {
 	is_wheel_handled: bool,
 	// 맡긴 애셋이 다 끝난 것을 엔진이 처음 본 시각. (엔진 시작 뒤 초, 원본 loadScene 의 0.3초 더 기다림을 잰다)
 	tracked_assets_finished_time: Option<f64>,
+	// initialize 뒤에 풀 Promise. (Engine::load_scene_async, 원본 loadScene 이 돌려주는 Promise)
+	load_resolver_list: Vec<PromiseResolver<SceneId>>,
 }
 
 impl SceneBase {
@@ -106,6 +117,7 @@ impl SceneBase {
 			scene_id: None,
 			is_wheel_handled: false,
 			tracked_assets_finished_time: None,
+			load_resolver_list: Vec::new(),
 		}
 	}
 
@@ -168,6 +180,30 @@ impl SceneBase {
 	}
 
 	//==============================================================================
+	// 작업 맡기기. (원본 async load 자리, create 에서 spawn_scene_task 로 맡긴 불러오기 작업. 끝나야 엔진이 initialize 를 부른다)
+	//==============================================================================
+	pub fn track_task(&mut self, task_handle: &TaskHandle) {
+		self.tracked_load_list.push(TrackedLoad::Task(task_handle.clone()));
+	}
+
+	//==============================================================================
+	// initialize 뒤에 풀 Promise 맡기기. (Engine::load_scene_async 가 부른다)
+	//==============================================================================
+	pub(crate) fn add_load_resolver(&mut self, load_resolver: PromiseResolver<SceneId>) {
+		self.load_resolver_list.push(load_resolver);
+	}
+
+	//==============================================================================
+	// initialize 뒤에 맡긴 Promise 풀기. (엔진이 initialize 바로 뒤에 부른다)
+	//==============================================================================
+	pub(crate) fn resolve_load_resolvers(&mut self) {
+		let scene_id = SceneId::from(&*self);
+		for load_resolver in std::mem::take(&mut self.load_resolver_list) {
+			load_resolver.resolve(scene_id);
+		}
+	}
+
+	//==============================================================================
 	// 맡긴 애셋이 다 끝났는지. (읽혔거나 실패했거나. 실패한 애셋 때문에 씬이 멈추지 않게 한다)
 	//==============================================================================
 	pub fn are_tracked_assets_finished(&self) -> bool {
@@ -183,7 +219,7 @@ impl SceneBase {
 				TrackedLoad::AssetLoadHandle(load_handle) => {
 					load_handle.is_same_load(excluded_load_handle) || load_handle.is_finished()
 				}
-				TrackedLoad::AudioAsset(_) => {
+				TrackedLoad::AudioAsset(_) | TrackedLoad::Task(_) => {
 					tracked_load.is_finished()
 				}
 			}
@@ -463,9 +499,28 @@ impl Default for SceneBase {
 }
 
 //==============================================================================
+// 씬을 그 타입으로 꺼내기. (SceneContext 가 &mut dyn Scene 을 작업을 맡긴 씬의 타입으로 되돌릴 때 쓴다, 모든 씬에 저절로 붙는다)
+//==============================================================================
+pub trait SceneAny {
+	//==============================================================================
+	// Any 로 빌리기.
+	//==============================================================================
+	fn as_scene_any_mut(&mut self) -> &mut dyn std::any::Any;
+}
+
+impl<T: Scene + 'static> SceneAny for T {
+	//==============================================================================
+	// Any 로 빌리기.
+	//==============================================================================
+	fn as_scene_any_mut(&mut self) -> &mut dyn std::any::Any {
+		self
+	}
+}
+
+//==============================================================================
 // 씬 트레이트.
 //==============================================================================
-pub trait Scene {
+pub trait Scene: SceneAny {
 	//==============================================================================
 	// 씬 공통 상태 반환.
 	//==============================================================================
@@ -478,6 +533,7 @@ pub trait Scene {
 
 	//==============================================================================
 	// 생성. (엔진이 씬을 불러올 때 한 번. 노드 트리와 애셋을 여기서 만든다)
+	// - 원본 async load 자리: engine.spawn_scene_task(self, |mut scene_context| async move { ... }) 로 맡긴 작업을 get_scene_base_mut().track_task 로 맡긴다.
 	//==============================================================================
 	fn create(&mut self, _engine: &mut Engine) {
 	}

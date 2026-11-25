@@ -19,7 +19,13 @@ default = ["tls"]
 # 암호 공급자 ring 이 C 를 빌드해서, 그 대상의 C 헤더가 없는 맥에서 윈도우 대상을 검사할 때는 끈다. (cargo check --target x86_64-pc-windows-msvc --no-default-features)
 tls = ["ewebsock/tls", "dep:rustls"]
 
+# 워크스페이스. (엔진과 절차 매크로 크레이트 macros/. 게임은 엔진 하나만 의존하고 매크로는 엔진이 다시 내보낸 vanilla::reflect 로 쓴다)
+[workspace]
+members = ["macros"]
+
 [dependencies]
+# 반사 매크로. (#[reflect], 원본 vanilla.js 의 실행 중 반사를 컴파일 때 지은 코드로 한다)
+vanilla-engine-macros = { version = "0.3.2", path = "macros" }
 glow = "0.18"
 fontdue = "0.9"
 # 웹 글꼴(WOFF, WOFF2)을 TTF 로 푼다. (원본 기본 글꼴 DOSGothic 이 .woff)
@@ -60,8 +66,14 @@ gilrs = "0.11"
 glutin = "0.32"
 glutin-winit = "0.5"
 raw-window-handle = "0.6"
-# 소리. (믹서 트랙, 정적 소리. 기본 기능을 끄고 cpal 출력과 ogg(vorbis), mp3, wav(pcm), flac, m4a(isomp4 와 aac) 해석만 켠다. 웹은 브라우저가 이 꼴들을 푼다)
-kira = { version = "0.12", default-features = false, features = ["cpal", "cpal-realtime", "ogg", "vorbis", "mp3", "wav", "pcm", "flac", "isomp4", "aac"] }
+# 소리 내기. (기본 출력 장치. 그 위의 WebAudio 노드 그래프 믹서는 엔진이 크롬과 같은 셈으로 짓는다(platform/audio/mixer.rs).
+# realtime 은 윈도우, 리눅스에서 소리 스레드의 우선순위를 올린다)
+cpal = { version = "0.18", features = ["realtime"] }
+# 소리 해석. (크롬 decodeAudioData 와 같은 해석기. 크롬은 FLAC, MP3, PCM, Vorbis 를 symphonia 0.6 으로 풀고 이 기능들을 켠다(third_party/rust/chromium_crates_io/Cargo.toml).
+# 크롬이 FFmpeg 로 푸는 AAC 는 symphonia 의 aac 를 더 켠다. 컨테이너도 symphonia 의 풀기(wav, ogg, mkv(webm), isomp4(m4a), 그리고 flac, mp3, adts)를 쓴다)
+symphonia = { version = "0.6", default-features = false, features = ["all-meta", "flac", "mpa", "ogg", "wav", "mkv", "pcm", "isomp4", "vorbis", "aac", "opt-simd"] }
+# Opus 해석. (크롬은 libopus 로 푼다. libopus 를 러스트로 옮긴 것으로 symphonia 코덱 등록표에 엔진 해석기로 넣는다. C 빌드가 없어 맥에서 윈도우 대상 검사가 된다)
+opus-pure = "0.2"
 # SVG 그림. (데스크탑, usvg 로 읽고 tiny-skia 로 그린다. 원본은 브라우저가 SVG 를 그림으로 푼다. 웹은 브라우저가 푼다)
 resvg = "0.50"
 # 2D 그리기 대상 Canvas2D 의 칠하기. (데스크탑, 크롬이 쓰는 Skia 의 CPU 래스터라이저를 옮긴 것. resvg 가 쓰는 같은 판이라 더 받는 크레이트가 없다. 원본과 웹은 브라우저 캔버스)
@@ -84,11 +96,13 @@ sys-locale = "0.3"
 rustls = { version = "0.23", default-features = false, features = ["ring"], optional = true }
 
 # 윈도우: 잠자기에서 깸(WM_POWERBROADCAST)을 받으려 창을 서브클래싱하고, 주된 손이 손가락인지 크로미엄처럼 읽는다. 크롬처럼 system-ui 의 메뉴 글꼴(NONCLIENTMETRICS)과 ClearType 켜짐, 대체 글꼴을 고를 사용자 기본 언어를 읽는다.
-# 편집 칸 문맥 메뉴의 그림 이모티콘은 크롬처럼 SendInput 으로 윈도우 키 + '.' 을 보낸다. (winit 과 같은 판, 쓰는 기능만 켠다)
+# 편집 칸 문맥 메뉴의 그림 이모티콘은 크롬처럼 SendInput 으로 윈도우 키 + '.' 을 보낸다.
+# 터치 키보드 스레드의 메시지 큐(GetCurrentThreadId, PostThreadMessageW)와 개발자 도구의 힙 사용량(HeapSummary)도 읽는다. (winit 과 같은 판, 쓰는 기능만 켠다)
 [target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_Devices_Display", "Win32_Globalization", "Win32_Graphics_Gdi", "Win32_System_Power", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_Devices_Display", "Win32_Globalization", "Win32_Graphics_Gdi", "Win32_System_Memory", "Win32_System_Power", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 # 윈도우: 시스템 글꼴. (DirectWrite 로 글꼴 이름의 파일을 찾고, 글꼴에 없는 글자의 대체 글꼴을 IDWriteFontFallback 으로 고른다. 원본 크롬 윈도우도 DirectWrite 로 고른다. 마이크로소프트의 windows 크레이트로 cpal, gilrs 가 쓰는 같은 판이라 더 받는 크레이트가 없다. windows-core 는 #[implement] 가 지은 코드가 부른다)
-windows = { version = "0.62", features = ["Win32_Graphics_DirectWrite"] }
+# 터치 키보드는 크롬 윈도우처럼 창에 묶은 WinRT InputPane(IInputPaneInterop)으로 띄우고 내리며 가린 영역을 받는다.
+windows = { version = "0.62", features = ["Foundation", "UI_ViewManagement", "Win32_Foundation", "Win32_Graphics_DirectWrite", "Win32_System_WinRT"] }
 windows-core = "0.62"
 
 # 맥: 게임패드 진동. (gilrs 의 macOS force feedback 이 비어 있어, GameController 의 GCController.haptics 로 CoreHaptics 엔진을 지어 떤다. 쓰는 기능만 켠다)
@@ -108,8 +122,9 @@ objc2-core-graphics = { version = "0.3", default-features = false, features = ["
 [target.'cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android"), not(target_arch = "wasm32")))'.dependencies]
 yeslogic-fontconfig-sys = { version = "6", features = ["dlopen"] }
 # 주된 손이 손가락인지 크로미엄처럼 화면 서버의 입력 장치로 읽는다. (X11 XInput 은 x11-dl 로 libX11, libXi 를 실행할 때 열고, 웨이랜드 wl_seat 은 wayland-client. 둘 다 glutin, winit 이 쓰는 같은 판)
+# 웨이랜드 창의 가려짐과 수직 동기는 winit 의 wl_display 에 손님으로 붙어 wl_surface.frame 콜백으로 본다. (libwayland 를 쓰는 system 백엔드, winit 도 켜는 기능)
 x11-dl = "2.21"
-wayland-client = "0.31"
+wayland-client = { version = "0.31", features = ["system"] }
 
 # 웹(wasm): 캔버스와 WebGL2, requestAnimationFrame, WebAudio, fetch.
 [target.'cfg(target_arch = "wasm32")'.dependencies]

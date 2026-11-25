@@ -1,0 +1,19 @@
+[package]
+name = "vanilla-engine-macros"
+version = "0.3.2"
+description = "바닐라엔진(Vanilla Engine)의 절차 매크로. 컴포넌트의 get, is, set 함수를 모아 원본 vanilla.js 의 런타임 반사와 같은 일을 하는 코드를 컴파일 때 짓는다"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/ddukbaek2/vanilla-engine"
+
+# 절차 매크로 크레이트. (게임은 이 크레이트를 직접 의존하지 않고 엔진이 다시 내보낸 vanilla::reflect 를 쓴다)
+[lib]
+proc-macro = true
+
+[dependencies]
+# 러스트 코드 해석. (impl 블록과 함수 꼴을 읽는다. full 은 impl 블록 같은 아이템 해석, visit 과 visit-mut 은 꼴 안의 수명과 impl Trait 찾기에 쓴다)
+syn = { version = "2", features = ["full", "visit", "visit-mut"] }
+# 지을 코드 쓰기.
+quote = "1"
+# 컴파일러 밖에서도 쓰는 토큰 흐름. (syn, quote 가 쓴다)
+proc-macro2 = "1"

@@ -3,6 +3,7 @@
 //==============================================================================
 pub mod color;
 pub mod colors;
+pub mod dataurl;
 pub mod format;
 pub mod fsm;
 pub mod identifier;
@@ -20,3 +21,4 @@ pub mod transformmatrix;
 pub mod vector2;
 pub mod vector3;
 pub mod version;
+pub mod wait;

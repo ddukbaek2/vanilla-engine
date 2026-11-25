@@ -48,6 +48,15 @@ pub enum ButtonState {
 }
 
 //==============================================================================
+// 버튼 상태의 반사 값. (원본 ButtonState 는 Enum.begin() 으로 매긴 수다. Normal 1, Hover 2, Pressed 3, Released 4, Disabled 5)
+//==============================================================================
+impl crate::core::reflection::ToReflectValue for ButtonState {
+	fn to_reflect_value(&self) -> crate::core::reflection::ReflectValue {
+		crate::core::reflection::ReflectValue::Number((*self as usize + 1) as f64)
+	}
+}
+
+//==============================================================================
 // 버튼 이벤트. (버튼과 문맥을 받는다)
 //==============================================================================
 pub type UIButtonEvent = Box<dyn FnMut(&mut UIButton, &mut ComponentContext)>;
@@ -136,6 +145,7 @@ pub struct UIButton {
 	is_color_target_collect_pending: bool,
 }
 
+#[crate::reflect(base = ui_control)]
 impl UIButton {
 	//==============================================================================
 	// 생성.
@@ -172,6 +182,7 @@ impl UIButton {
 	//==============================================================================
 	// 품은 컨트롤 반환.
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn get_uicontrol(&self) -> &UIControl {
 		&self.ui_control
 	}
@@ -186,6 +197,7 @@ impl UIButton {
 	//==============================================================================
 	// 컨텐트 노드 핸들.
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn get_content(&self) -> Option<NodeId> {
 		self.ui_control.get_content()
 	}
@@ -862,6 +874,7 @@ fn set_color_entry_color(node_tree: &mut NodeTree, color_entry: &ColorEntry, col
 	}
 }
 
+#[crate::reflect]
 impl Component for UIButton {
 	fn get_component_base(&self) -> &ComponentBase {
 		self.ui_control.get_component_base()

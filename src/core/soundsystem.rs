@@ -29,6 +29,7 @@
 //   - 만들 때 AudioManager 대신 엔진을 받는다. 원본은 document 와 window 에 리스너를 다는데, 러스트 판은 엔진의 페이지 이벤트(PageEvent)로 받기 때문이다.
 //     이벤트가 온 그 자리에서는 AudioContext 를 멈추거나 깨우고(소리가 바로 멎는다), 효과음 끊기는 다음 update 에서 한다.
 //   - load_sounds, load_sound 는 애셋 폴더 기준 경로를 풀 엔진을 받는다. (원본은 브라우저가 페이지 주소로 푼다) 데스크탑은 그 자리에서 읽는다.
+//     원본 await loadSounds() 자리는 load_sounds(engine) 다음 엔진 작업 안에서 wait_for_load().await 다.
 //   - WebAudio 는 크기 바꾸기와 줄이기를 소리 장치가 맡지만, 러스트 판은 같은 식(선형 줄이기, 지수 따라가기)을 update 마다 셈해
 //     소리마다의 크기는 플레이어에, 음악과 효과음의 크기는 버스에 건다. 그래서 update 를 매 프레임 불러야 한다. (원본도 매 프레임 부른다)
 //     버스 크기는 셈한 값이 바뀔 때만 건다. (원본처럼 버스의 set_volume, mute 로 건 값은 SoundSystem 이 크기를 다시 걸 때까지 간다)
@@ -607,6 +608,19 @@ impl SoundSystem {
 			self.load_sound(engine, sound_row);
 		}
 		self.update();
+	}
+
+	//==============================================================================
+	// 받기를 건 소리가 다 끝나기를 기다리는 퓨처. (원본 await loadSounds() 의 await 자리, load_sounds 뒤에 엔진 작업 안에서 await 한다)
+	// - 부를 때 든 소리 애셋을 나눠 들어 소리 체계를 빌리지 않는다. 못 받은 소리는 건너뛴다. (원본처럼 거부되지 않는다)
+	//==============================================================================
+	pub fn wait_for_load(&self) -> impl std::future::Future<Output = ()> + 'static {
+		let audio_asset_list: Vec<Rc<AudioAsset>> = self.asset_by_id.values().flat_map(|asset_list| asset_list.iter().flatten()).cloned().collect();
+		async move {
+			for audio_asset in audio_asset_list {
+				let _ = audio_asset.wait_for_load().await;
+			}
+		}
 	}
 
 	//==============================================================================

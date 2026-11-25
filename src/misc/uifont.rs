@@ -16,10 +16,13 @@
 //   원본은 FontFace 를 만들어 document.fonts 에 넣고 async 로 기다린다. 러스트 판은 데스크탑과 웹 모두 조각 파일의 바이트를 받아
 //   엔진의 글자 캐시에 같은 이름의 얼굴로 올린다. (Engine.register_font_face_when_loaded, 차례는 Engine.set_font_face_order)
 //   그래서 웹에서도 브라우저 글꼴이 아니라 엔진의 모양 짓기로 그린다. 받는 일은 요청만 하고 update(engine) 를 프레임마다 불러 이어 간다.
+//   원본 await loadUiFont(묶음, 글자) 자리는 load_ui_font(engine, 묶음, 글자) 다음 엔진 작업 안에서 wait_for_load().await 다. (기다리는 동안 update 를 불러 준다)
 //   원본 readUiFontFace(FontFace) 는 read_ui_font_face(올린 이름, 못 불러왔으면 None) 다. options 객체는 UiFontOptions 구조체다.
 //==============================================================================
+use crate::base::wait;
 use crate::core::asset::AssetLoadHandle;
 use crate::core::engine::Engine;
+use crate::core::task;
 use crate::core::textshaping::{parse_unicode_range, FontFaceDescriptors};
 use crate::core::textstringtexturecache;
 use std::cell::RefCell;
@@ -488,6 +491,21 @@ pub fn request_ui_font_text(engine: &mut Engine, text: &str) {
 		return;
 	}
 	load_ui_font_text(engine, &new_text);
+}
+
+//==============================================================================
+// 처음 불러오기를 기다리기. (원본 await loadUiFont(묶음, 글자) 의 await 자리, load_ui_font 뒤에 엔진 작업 안에서 await 한다)
+// - 기다리는 동안 프레임마다 update 를 부른다. 원본처럼 처음 글자를 다 받았거나 wait_milliseconds 가 지나면 끝난다. (is_ui_font_ready)
+// - load_ui_font_text 가 돌려준 읽기 손잡이는 저마다 await 한다. (원본 await loadUiFontText(글자))
+//==============================================================================
+pub async fn wait_for_load() {
+	loop {
+		task::with_polling_engine(update);
+		if is_ui_font_ready() {
+			return;
+		}
+		wait::next_frame().await;
+	}
 }
 
 //==============================================================================

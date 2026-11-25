@@ -49,6 +49,7 @@ pub struct UISlider {
 	is_value_changed_fire_pending: bool,
 }
 
+#[crate::reflect(base = ui_control)]
 impl UISlider {
 	//==============================================================================
 	// 생성. (값 0, 범위 0 ~ 1, 트랙 회색, 채움 파랑, 손잡이 흰 원 반지름 16)
@@ -77,6 +78,7 @@ impl UISlider {
 	//==============================================================================
 	// 품은 컨트롤 반환.
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn get_uicontrol(&self) -> &UIControl {
 		&self.ui_control
 	}
@@ -91,6 +93,7 @@ impl UISlider {
 	//==============================================================================
 	// 컨텐트 노드 핸들.
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn get_content(&self) -> Option<NodeId> {
 		self.ui_control.get_content()
 	}
@@ -398,6 +401,7 @@ impl Default for UISlider {
 	}
 }
 
+#[crate::reflect]
 impl Component for UISlider {
 	fn get_component_base(&self) -> &ComponentBase {
 		self.ui_control.get_component_base()

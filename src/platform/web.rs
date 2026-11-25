@@ -27,7 +27,7 @@ use wasm_bindgen::{JsCast, JsValue};
 // 글자 굽기와 재기. (원본처럼 늘 브라우저 Canvas2D 로, 올린 글꼴 바이트는 document.fonts 의 FontFace 로 올린다)
 pub(crate) mod systemfont;
 mod textinput;
-pub use textinput::{read_clipboard_text, read_clipboard_text_with_callback, write_clipboard_text};
+pub use textinput::{read_clipboard_text, read_clipboard_text_with_callback, read_optional_clipboard_text_with_callback, write_clipboard_text};
 pub(crate) use textinput::request_clipboard_paste;
 
 // 엔진이 들고 있는 창 손잡이. (커서를 바꿀 때)
@@ -1055,7 +1055,7 @@ impl WebApplication {
 			*engine_gl_context.borrow_mut() = Some(context.clone());
 		});
 		let gl = glow::Context::from_webgl2_context(context);
-		let graphic = Graphic::new(gl)?;
+		let graphic = Graphic::new(gl, preserve_drawing_buffer)?;
 
 		self.engine_runner.attach_graphic(graphic);
 		self.engine_runner.engine.platform_window = Some(canvas.clone());

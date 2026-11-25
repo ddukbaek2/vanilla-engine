@@ -42,6 +42,7 @@ pub struct TrailRenderer {
 	is_emitting: bool,
 }
 
+#[crate::reflect]
 impl TrailRenderer {
 	//==============================================================================
 	// 생성.
@@ -126,6 +127,7 @@ impl Default for TrailRenderer {
 	}
 }
 
+#[crate::reflect]
 impl Component for TrailRenderer {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base

@@ -348,6 +348,13 @@ pub fn read_clipboard_text_with_callback(callback: Box<dyn FnOnce(String)>) {
 	callback(text);
 }
 
+//==============================================================================
+// 시스템 클립보드 글을 읽어 콜백에 넘기기. (원본 engine.readClipboardText 자리, 데스크탑은 그 자리에서 읽어 바로 부른다. 못 읽으면 None)
+//==============================================================================
+pub fn read_optional_clipboard_text_with_callback(callback: Box<dyn FnOnce(Option<String>)>) {
+	callback(read_clipboard_text());
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
