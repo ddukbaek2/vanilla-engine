@@ -16,14 +16,18 @@
 //   원본은 FontFace 를 만들어 document.fonts 에 넣고 async 로 기다린다. 러스트 판은 데스크탑과 웹 모두 조각 파일의 바이트를 받아
 //   엔진의 글자 캐시에 같은 이름의 얼굴로 올린다. (Engine.register_font_face_when_loaded, 차례는 Engine.set_font_face_order)
 //   그래서 웹에서도 브라우저 글꼴이 아니라 엔진의 모양 짓기로 그린다. 받는 일은 요청만 하고 update(engine) 를 프레임마다 불러 이어 간다.
-//   원본 await loadUiFont(묶음, 글자) 자리는 load_ui_font(engine, 묶음, 글자) 다음 엔진 작업 안에서 wait_for_load().await 다. (기다리는 동안 update 를 불러 준다)
+//   load_ui_font 는 원본처럼 await 할 수 있는 UiFontLoadHandle 을 돌려준다. (기다리는 동안 update 를 불러 주고, 처음 글자를 다 올렸거나 wait_milliseconds 가 지나면 끝난다)
+//   load_ui_font_text 는 그 글자의 얼굴들을 글꼴 목록에 올리면 끝나는 UiFontTextLoadHandle 을 돌려준다. (원본 await loadUiFontText(글자))
 //   원본 readUiFontFace(FontFace) 는 read_ui_font_face(올린 이름, 못 불러왔으면 None) 다. options 객체는 UiFontOptions 구조체다.
 //==============================================================================
-use crate::base::wait;
 use crate::core::asset::AssetLoadHandle;
 use crate::core::engine::Engine;
 use crate::core::task;
 use crate::core::textshaping::{parse_unicode_range, FontFaceDescriptors};
+use crate::resource::fontasset::FontLoadHandle;
+use std::future::{Future, IntoFuture};
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use crate::core::textstringtexturecache;
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -88,8 +92,8 @@ struct UiFontState {
 	is_remaining_groups_loading: bool,
 	is_loaded: bool,
 	requested_characters: HashSet<char>,
-	// 처음 글자로 받기를 청한 얼굴들. (다 받으면 준비된 것이다)
-	initial_text_handle_list: Vec<AssetLoadHandle>,
+	// 처음 글자로 받기를 청한 얼굴들. (다 올리면 준비된 것이다)
+	initial_text_handle_list: Vec<FontLoadHandle>,
 }
 
 thread_local! {
@@ -148,9 +152,9 @@ pub fn read_target_weights(weight_descriptor: &str, weights: &[u16]) -> Vec<u16>
 
 //==============================================================================
 // UI 글꼴 불러오기. (고른 언어와 라틴의 묶음을 올려 앞세우고, 그 언어의 글자를 미리 받는다. 원본 loadUiFont)
-// - 받는 동안은 update 를 프레임마다 부른다. 처음 글자가 준비됐는지는 is_ui_font_ready 로 본다.
+// - 받는 동안은 update 를 프레임마다 부른다. 처음 글자가 준비됐는지는 is_ui_font_ready 로 본다. (돌려준 손잡이를 await 하면 준비될 때까지 기다린다)
 //==============================================================================
-pub fn load_ui_font(engine: &mut Engine, font_group: &str, text: &str) {
+pub fn load_ui_font(engine: &mut Engine, font_group: &str, text: &str) -> UiFontLoadHandle {
 	let primary_group = with_state(|state| {
 		state.pending_initial_load = Some((font_group.to_string(), text.to_string()));
 		state.initial_load_instant = Some(Instant::now());
@@ -160,6 +164,7 @@ pub fn load_ui_font(engine: &mut Engine, font_group: &str, text: &str) {
 	request_font_group(engine, font_group);
 	request_font_group(engine, &primary_group);
 	update(engine);
+	UiFontLoadHandle
 }
 
 //==============================================================================
@@ -337,9 +342,9 @@ pub fn update(engine: &mut Engine) {
 		let has_groups = with_state(|state| !state.font_groups.is_empty());
 		if has_groups {
 			apply_ui_font_group(engine, &font_group);
-			let handle_list = load_ui_font_text(engine, &text);
+			let text_load_handle = load_ui_font_text(engine, &text);
 			with_state(|state| {
-				state.initial_text_handle_list = handle_list;
+				state.initial_text_handle_list = text_load_handle.font_load_handle_list;
 				state.is_loaded = true;
 				if !state.is_remaining_groups_requested {
 					state.is_remaining_groups_requested = true;
@@ -431,10 +436,10 @@ fn find_drawing_face(state: &UiFontState, code_point: u32, target_weight: u16) -
 }
 
 //==============================================================================
-// 글자의 조각 받기. (그 글자를 그릴 얼굴만, 원본 loadUiFontText. 받기를 청한 얼굴의 읽기 손잡이를 돌려준다)
+// 글자의 조각 받기. (그 글자를 그릴 얼굴만, 원본 loadUiFontText. 청한 얼굴을 모두 올리면 끝나는 손잡이를 돌려준다)
 // - 같은 파일을 여러 굵기로 올리면 바이트는 한 번 받고 굵기마다 올린다.
 //==============================================================================
-pub fn load_ui_font_text(engine: &mut Engine, text: &str) -> Vec<AssetLoadHandle> {
+pub fn load_ui_font_text(engine: &mut Engine, text: &str) -> UiFontTextLoadHandle {
 	let request_list = with_state(|state| {
 		let mut request_list: Vec<(usize, usize)> = Vec::new();
 		if state.font_groups.is_empty() || text.is_empty() {
@@ -452,7 +457,7 @@ pub fn load_ui_font_text(engine: &mut Engine, text: &str) -> Vec<AssetLoadHandle
 		}
 		request_list
 	});
-	let mut handle_list: Vec<AssetLoadHandle> = Vec::new();
+	let mut font_load_handle_list: Vec<FontLoadHandle> = Vec::new();
 	for (group_index, face_index) in request_list {
 		let (family, directory_path, face, shared_handle) = with_state(|state| {
 			let face = state.font_groups[group_index].faces[face_index].clone();
@@ -468,13 +473,15 @@ pub fn load_ui_font_text(engine: &mut Engine, text: &str) -> Vec<AssetLoadHandle
 				engine.request_asset_bytes(&format!("{}{}", directory_path, face.file))
 			}
 		};
-		engine.register_font_face_when_loaded(&family, face.descriptors.clone(), load_handle.clone());
+		let font_load_handle = engine.register_font_face_when_loaded(&family, face.descriptors.clone(), load_handle.clone());
 		with_state(|state| {
-			state.font_groups[group_index].faces[face_index].load_handle = Some(load_handle.clone());
+			state.font_groups[group_index].faces[face_index].load_handle = Some(load_handle);
 		});
-		handle_list.push(load_handle);
+		font_load_handle_list.push(font_load_handle);
 	}
-	handle_list
+	UiFontTextLoadHandle {
+		font_load_handle_list,
+	}
 }
 
 //==============================================================================
@@ -494,17 +501,111 @@ pub fn request_ui_font_text(engine: &mut Engine, text: &str) {
 }
 
 //==============================================================================
-// 처음 불러오기를 기다리기. (원본 await loadUiFont(묶음, 글자) 의 await 자리, load_ui_font 뒤에 엔진 작업 안에서 await 한다)
-// - 기다리는 동안 프레임마다 update 를 부른다. 원본처럼 처음 글자를 다 받았거나 wait_milliseconds 가 지나면 끝난다. (is_ui_font_ready)
-// - load_ui_font_text 가 돌려준 읽기 손잡이는 저마다 await 한다. (원본 await loadUiFontText(글자))
+// 처음 불러오기를 기다리는 퓨처. (원본 await loadUiFont(묶음, 글자) 의 await 자리, load_ui_font 가 돌려준 손잡이를 await 하는 것과 같다)
+// - 기다리는 동안 프레임마다 update 를 부른다. 원본처럼 처음 글자를 다 올렸거나 wait_milliseconds 가 지나면 끝난다. (is_ui_font_ready)
 //==============================================================================
-pub async fn wait_for_load() {
-	loop {
+pub fn wait_for_load() -> UiFontLoadFuture {
+	UiFontLoadFuture
+}
+
+//==============================================================================
+// UI 글꼴 불러오기 손잡이. (load_ui_font 가 돌려준다. 원본 loadUiFont 의 Promise 자리)
+//==============================================================================
+#[derive(Clone, Copy, Debug, Default)]
+pub struct UiFontLoadHandle;
+
+//==============================================================================
+// UI 글꼴 처음 불러오기를 기다리는 퓨처.
+//==============================================================================
+#[derive(Clone, Copy, Debug, Default)]
+pub struct UiFontLoadFuture;
+
+impl Future for UiFontLoadFuture {
+	type Output = ();
+
+	//==============================================================================
+	// update 를 부르고 준비됐는지 보기. (아직이면 다음 프레임에 다시 본다)
+	//==============================================================================
+	fn poll(self: Pin<&mut UiFontLoadFuture>, context: &mut Context<'_>) -> Poll<()> {
 		task::with_polling_engine(update);
 		if is_ui_font_ready() {
-			return;
+			return Poll::Ready(());
 		}
-		wait::next_frame().await;
+		context.waker().wake_by_ref();
+		Poll::Pending
+	}
+}
+
+impl IntoFuture for UiFontLoadHandle {
+	type Output = ();
+	type IntoFuture = UiFontLoadFuture;
+
+	//==============================================================================
+	// 손잡이를 그대로 await 하기.
+	//==============================================================================
+	fn into_future(self) -> UiFontLoadFuture {
+		UiFontLoadFuture
+	}
+}
+
+//==============================================================================
+// 글자 조각 받기 손잡이. (load_ui_font_text 가 돌려준다. 원본 loadUiFontText 의 Promise 자리, 청한 얼굴을 모두 올리면 끝난다)
+//==============================================================================
+#[derive(Clone, Debug, Default)]
+pub struct UiFontTextLoadHandle {
+	font_load_handle_list: Vec<FontLoadHandle>,
+}
+
+impl UiFontTextLoadHandle {
+	//==============================================================================
+	// 청한 얼굴의 글꼴 받기 손잡이 목록. (씬에 맡길 때는 저마다의 get_load_handle)
+	//==============================================================================
+	pub fn get_font_load_handles(&self) -> &[FontLoadHandle] {
+		&self.font_load_handle_list
+	}
+
+	//==============================================================================
+	// 다 끝났는지. (올렸거나 실패했거나, 청한 것이 없으면 참)
+	//==============================================================================
+	pub fn is_finished(&self) -> bool {
+		self.font_load_handle_list.iter().all(|font_load_handle| font_load_handle.is_finished())
+	}
+}
+
+//==============================================================================
+// 글자 조각 받기를 기다리는 퓨처. (원본처럼 받지 못한 조각이 있어도 실패로 끝내지 않는다)
+//==============================================================================
+#[derive(Clone, Debug)]
+pub struct UiFontTextLoadFuture {
+	text_load_handle: UiFontTextLoadHandle,
+}
+
+impl Future for UiFontTextLoadFuture {
+	type Output = ();
+
+	//==============================================================================
+	// 다 끝났는지 보기. (아직이면 다음 프레임에 다시 본다)
+	//==============================================================================
+	fn poll(self: Pin<&mut UiFontTextLoadFuture>, context: &mut Context<'_>) -> Poll<()> {
+		if self.text_load_handle.is_finished() {
+			return Poll::Ready(());
+		}
+		context.waker().wake_by_ref();
+		Poll::Pending
+	}
+}
+
+impl IntoFuture for UiFontTextLoadHandle {
+	type Output = ();
+	type IntoFuture = UiFontTextLoadFuture;
+
+	//==============================================================================
+	// 손잡이를 그대로 await 하기.
+	//==============================================================================
+	fn into_future(self) -> UiFontTextLoadFuture {
+		UiFontTextLoadFuture {
+			text_load_handle: self,
+		}
 	}
 }
 
@@ -528,7 +629,7 @@ pub fn is_ui_font_ready() -> bool {
 		if state.pending_initial_load.is_some() {
 			return false;
 		}
-		state.initial_text_handle_list.iter().all(|load_handle| load_handle.is_finished())
+		state.initial_text_handle_list.iter().all(|font_load_handle| font_load_handle.is_finished())
 	})
 }
 

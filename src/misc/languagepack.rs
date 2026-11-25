@@ -10,17 +10,21 @@
 // - 원본과 다른 것:
 //   원본은 async 함수로 기다린다. 러스트 판은 엔진의 "요청 → 나중에 다 읽힘" 꼴이라 load_language_list, load_language, apply_language_setting 이
 //   읽기를 요청하고, 프레임마다 update(engine) 를 불러야 이어 간다. (데스크탑은 그 자리에서 읽혀 요청한 함수 안에서 끝난다) is_loading 으로 기다린다.
-//   원본 await loadLanguage(코드) 자리는 load_language(engine, 코드) 다음 엔진 작업 안에서 wait_for_load().await 다. (기다리는 동안 프레임마다 update 를 불러 준다)
-//   원본 applyLanguageSetting 은 불러온 뒤 함수가 돌려준 Promise 까지 기다린다. 러스트 판의 그 함수는 동기라, 그 안에서 시작한 일(UI 글꼴 같은)은 따로 await 한다. (uifont::wait_for_load)
+//   load_language_list, load_language, apply_language_setting 은 원본처럼 await 할 수 있는 LanguageLoadHandle 을 돌려준다.
+//   (엔진 작업 안에서 scene_context.with(|_, 엔진| languagepack::load_language(엔진, 코드)).await, 기다리는 동안 프레임마다 update 를 불러 준다)
+//   원본 applyLanguageSetting 은 불러온 뒤 함수가 돌려준 Promise 까지 기다린다. 퓨처를 돌려주는 함수는 set_language_loaded_async_handler 로 걸고,
+//   엔진이 그 퓨처를 엔진 작업으로 돌려 끝날 때까지 불러오는 중으로 친다. (손잡이의 await 도 그때까지 기다린다)
 //   전역 상태는 스레드 하나의 thread_local 이다. (원본 모듈 변수) 언어 한 줄은 LanguageEntry 구조체다.
 //   불러온 뒤 부를 함수(set_language_loaded_handler)는 (엔진, 언어 한 줄, 모든 글자) 를 받는다. (원본 (언어, 모든 글자), 엔진은 글꼴 받기에 쓴다)
 //==============================================================================
-use crate::base::wait;
 use crate::core::asset::AssetLoadHandle;
 use crate::core::engine::Engine;
 use crate::core::graphic::TextAlign;
-use crate::core::task;
+use crate::core::task::{self, TaskHandle};
 use std::cell::RefCell;
+use std::future::{Future, IntoFuture};
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
 // 방향 격리 문자. (처음 나오는 방향이 강한 글자로 방향을 정하는 격리의 시작과 끝, isolate_text)
 const FIRST_STRONG_ISOLATE: char = '\u{2068}';
@@ -76,6 +80,50 @@ impl LanguageEntry {
 // 언어를 불러온 뒤 부르는 함수. (엔진, 언어 한 줄, 그 언어의 모든 글자)
 pub type LanguageLoadedHandler = Box<dyn FnMut(&mut Engine, &LanguageEntry, &str)>;
 
+// 언어를 불러온 뒤 부르는 async 함수. (원본처럼 돌려준 퓨처가 끝날 때까지 apply_language_setting 이 끝나지 않는다)
+pub type LanguageLoadedAsyncHandler = Box<dyn FnMut(&mut Engine, &LanguageEntry, &str) -> Pin<Box<dyn Future<Output = ()>>>>;
+
+//==============================================================================
+// 언어 불러오기 손잡이. (load_language_list, load_language, apply_language_setting 이 돌려준다. 원본 async 함수의 Promise 자리)
+// - await 하면 불러오기(와 async 로 건 불러온 뒤 함수)가 끝날 때까지 기다린다. 기다리는 동안 프레임마다 update 를 불러 준다.
+//==============================================================================
+#[derive(Clone, Copy, Debug, Default)]
+pub struct LanguageLoadHandle;
+
+//==============================================================================
+// 언어 불러오기를 기다리는 퓨처. (LanguageLoadHandle 을 await 하거나 wait_for_load 가 돌려준다)
+//==============================================================================
+#[derive(Clone, Copy, Debug, Default)]
+pub struct LanguageLoadFuture;
+
+impl Future for LanguageLoadFuture {
+	type Output = ();
+
+	//==============================================================================
+	// update 를 부르고 불러오기가 끝났는지 보기. (아직이면 다음 프레임에 다시 본다)
+	//==============================================================================
+	fn poll(self: Pin<&mut LanguageLoadFuture>, context: &mut Context<'_>) -> Poll<()> {
+		task::with_polling_engine(update);
+		if !is_loading() {
+			return Poll::Ready(());
+		}
+		context.waker().wake_by_ref();
+		Poll::Pending
+	}
+}
+
+impl IntoFuture for LanguageLoadHandle {
+	type Output = ();
+	type IntoFuture = LanguageLoadFuture;
+
+	//==============================================================================
+	// 손잡이를 그대로 await 하기.
+	//==============================================================================
+	fn into_future(self) -> LanguageLoadFuture {
+		LanguageLoadFuture
+	}
+}
+
 //==============================================================================
 // 불러오는 중인 언어.
 //==============================================================================
@@ -104,6 +152,9 @@ struct LanguagePackState {
 	fallback_texts: serde_json::Map<String, serde_json::Value>,
 	pending_load: Option<PendingLanguageLoad>,
 	language_loaded_handler: Option<LanguageLoadedHandler>,
+	language_loaded_async_handler: Option<LanguageLoadedAsyncHandler>,
+	// async 로 건 불러온 뒤 함수의 작업. (끝날 때까지 불러오는 중이다)
+	language_loaded_task: Option<TaskHandle>,
 }
 
 thread_local! {
@@ -120,6 +171,8 @@ thread_local! {
 		fallback_texts: serde_json::Map::new(),
 		pending_load: None,
 		language_loaded_handler: None,
+		language_loaded_async_handler: None,
+		language_loaded_task: None,
 	});
 }
 
@@ -183,7 +236,7 @@ fn apply_language_list_object(object: &serde_json::Map<String, serde_json::Value
 //==============================================================================
 // 언어의 목록 불러오기. (한 번만, 원본 loadLanguageList. 받은 뒤 update 가 든다)
 //==============================================================================
-pub fn load_language_list(engine: &mut Engine) {
+pub fn load_language_list(engine: &mut Engine) -> LanguageLoadHandle {
 	let language_list_path = with_state(|state| {
 		if state.language_list.is_some() || state.language_list_handle.is_some() {
 			return None;
@@ -197,27 +250,22 @@ pub fn load_language_list(engine: &mut Engine) {
 		});
 	}
 	update(engine);
+	LanguageLoadHandle
 }
 
 //==============================================================================
-// 언어의 목록을 받는 중이거나 언어를 불러오는 중인지.
+// 언어의 목록을 받는 중이거나 언어를 불러오는 중인지. (async 로 건 불러온 뒤 함수가 도는 중도 든다)
 //==============================================================================
 pub fn is_loading() -> bool {
-	with_state(|state| state.language_list_handle.is_some() || state.pending_load.is_some())
+	with_state(|state| state.language_list_handle.is_some() || state.pending_load.is_some() || state.language_loaded_task.as_ref().map(|task_handle| !task_handle.is_finished()).unwrap_or(false))
 }
 
 //==============================================================================
-// 불러오기를 마치기를 기다리기. (원본 await loadLanguageList(), await loadLanguage(코드), await applyLanguageSetting(코드) 의 await 자리)
-// - 요청 함수를 부른 뒤 엔진 작업 안에서 await 한다. 기다리는 동안 프레임마다 update 를 부른다.
+// 불러오기를 마치기를 기다리는 퓨처. (원본 await loadLanguageList(), await loadLanguage(코드), await applyLanguageSetting(코드) 의 await 자리)
+// - 요청 함수가 돌려준 손잡이를 await 하는 것과 같다. 기다리는 동안 프레임마다 update 를 부른다.
 //==============================================================================
-pub async fn wait_for_load() {
-	loop {
-		task::with_polling_engine(update);
-		if !is_loading() {
-			return;
-		}
-		wait::next_frame().await;
-	}
+pub fn wait_for_load() -> LanguageLoadFuture {
+	LanguageLoadFuture
 }
 
 //==============================================================================
@@ -311,21 +359,21 @@ pub fn resolve_language_code(setting_language_code: &str) -> String {
 //==============================================================================
 // 언어 불러오기. (그 언어의 표와 기본 언어의 표, 목록에 없는 코드면 기본 언어. 원본 loadLanguage)
 //==============================================================================
-pub fn load_language(engine: &mut Engine, language_code: &str) {
-	start_language_load(engine, language_code, false);
+pub fn load_language(engine: &mut Engine, language_code: &str) -> LanguageLoadHandle {
+	start_language_load(engine, language_code, false)
 }
 
 //==============================================================================
 // 설정의 언어 적용하기. (쓸 언어를 정해 그 표를 불러오고, set_language_loaded_handler 로 건 함수를 부른다. "" 이면 기기의 언어. 원본 applyLanguageSetting)
 //==============================================================================
-pub fn apply_language_setting(engine: &mut Engine, setting_language_code: &str) {
-	start_language_load(engine, setting_language_code, true);
+pub fn apply_language_setting(engine: &mut Engine, setting_language_code: &str) -> LanguageLoadHandle {
+	start_language_load(engine, setting_language_code, true)
 }
 
 //==============================================================================
 // 언어 불러오기 시작. (목록을 먼저 받는다)
 //==============================================================================
-fn start_language_load(engine: &mut Engine, language_code: &str, is_setting: bool) {
+fn start_language_load(engine: &mut Engine, language_code: &str, is_setting: bool) -> LanguageLoadHandle {
 	with_state(|state| {
 		state.pending_load = Some(PendingLanguageLoad {
 			setting_language_code: language_code.to_string(),
@@ -335,7 +383,7 @@ fn start_language_load(engine: &mut Engine, language_code: &str, is_setting: boo
 			language_handle: None,
 		});
 	});
-	load_language_list(engine);
+	load_language_list(engine)
 }
 
 //==============================================================================
@@ -491,6 +539,18 @@ pub fn update(engine: &mut Engine) {
 			with_state(|state| {
 				if state.language_loaded_handler.is_none() {
 					state.language_loaded_handler = Some(handler);
+				}
+			});
+		}
+		let async_handler = with_state(|state| state.language_loaded_async_handler.take());
+		if let Some(mut async_handler) = async_handler {
+			let all_texts = read_all_texts();
+			let handler_future = async_handler(engine, &language, &all_texts);
+			let language_loaded_task = engine.spawn_task(move |_engine_context| handler_future);
+			with_state(|state| {
+				state.language_loaded_task = Some(language_loaded_task);
+				if state.language_loaded_async_handler.is_none() {
+					state.language_loaded_async_handler = Some(async_handler);
 				}
 			});
 		}
@@ -773,6 +833,16 @@ pub fn set_language_loaded_handler(handler: Option<LanguageLoadedHandler>) {
 	});
 }
 
+//==============================================================================
+// 언어를 불러온 뒤 부를 async 함수 정하기. (원본 setLanguageLoadedHandler 에 Promise 를 돌려주는 함수를 건 자리, None 이면 없음)
+// - apply_language_setting 이 다 불러온 뒤 부르고, 돌려준 퓨처를 엔진 작업으로 돌려 끝날 때까지 불러오는 중으로 친다.
+//==============================================================================
+pub fn set_language_loaded_async_handler(handler: Option<LanguageLoadedAsyncHandler>) {
+	with_state(|state| {
+		state.language_loaded_async_handler = handler;
+	});
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -804,5 +874,53 @@ mod tests {
 		assert_eq!(formatted, "\u{2068}1/40\u{2069} نقاط");
 		assert_eq!(mirror_layout_x(10.0, 20.0, 100.0), 70.0);
 		assert_eq!(read_layout_text_align(TextAlign::Left), TextAlign::Right);
+	}
+
+	//==============================================================================
+	// 원본 await applyLanguageSetting: 손잡이를 await 하면 표를 불러오고, async 로 건 불러온 뒤 함수가 돌려준 퓨처가 끝날 때까지 기다린다.
+	//==============================================================================
+	#[test]
+	fn apply_language_setting_awaits_async_handler() {
+		use crate::core::engine::EngineConfiguration;
+		use crate::core::task::Promise;
+		use std::cell::Cell;
+		use std::rc::Rc;
+		let asset_directory_path = std::env::temp_dir().join("vanillaLanguagePackAsyncTest");
+		std::fs::create_dir_all(asset_directory_path.join("localization")).expect("asset directory");
+		std::fs::write(asset_directory_path.join("localization").join("languages.json"), LANGUAGE_LIST_JSON).expect("list");
+		std::fs::write(asset_directory_path.join("localization").join("en.json"), r#"{ "greeting": "Hello" }"#).expect("en");
+		let mut engine_configuration = EngineConfiguration::new();
+		engine_configuration.asset_directory_paths = vec![asset_directory_path];
+		let mut engine = Engine::new(engine_configuration);
+		set_language_paths("localization/languages.json", "localization/");
+		let (handler_promise, handler_resolver) = Promise::<()>::create();
+		let handler_promise = Rc::new(std::cell::RefCell::new(Some(handler_promise)));
+		let handler_called_texts = Rc::new(std::cell::RefCell::new(String::new()));
+		let handler_called_texts_inner = handler_called_texts.clone();
+		set_language_loaded_async_handler(Some(Box::new(move |_engine: &mut Engine, language: &LanguageEntry, _all_texts: &str| {
+			*handler_called_texts_inner.borrow_mut() = format!("{} {}", language.code, translate("greeting"));
+			let handler_promise = handler_promise.borrow_mut().take();
+			Box::pin(async move {
+				if let Some(handler_promise) = handler_promise {
+					handler_promise.await;
+				}
+			})
+		})));
+		let is_applied = Rc::new(Cell::new(false));
+		let task_is_applied = is_applied.clone();
+		engine.spawn_task(move |mut engine_context| async move {
+			engine_context.with(|engine| apply_language_setting(engine, "en")).await;
+			task_is_applied.set(true);
+		});
+		let mut scene_list: Vec<Box<dyn crate::core::scene::Scene>> = Vec::new();
+		assert_eq!(*handler_called_texts.borrow(), "en Hello");
+		assert!(is_loading());
+		crate::core::task::poll_tasks(&mut engine, &mut scene_list, &mut Vec::new(), None);
+		assert!(!is_applied.get());
+		handler_resolver.resolve(());
+		crate::core::task::poll_tasks(&mut engine, &mut scene_list, &mut Vec::new(), None);
+		assert!(is_applied.get());
+		assert!(!is_loading());
+		set_language_loaded_async_handler(None);
 	}
 }

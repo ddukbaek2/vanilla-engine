@@ -4,37 +4,58 @@
 //   아직이면 스스로 깨워 다음 프레임에 다시 본다.
 // - seconds 는 원본처럼 벽시계 시간이다. (원본 setTimeout(seconds * 1000), 시간 배율(time_scale)을 곱하지 않고 멈춤에도 흐른다)
 //   부른 때부터 잰다. (원본도 seconds 를 부를 때 setTimeout 을 건다) 웹은 performance.now(), 데스크탑은 std::time 이다. (web_time::Instant)
-//   음수와 NaN, 무한은 원본 setTimeout 처럼 0 초로 친다. 시계로 나타낼 수 없을 만큼 긴 시간은 끝나지 않는다. (원본 setTimeout 은 2^31 밀리초를 넘으면 바로 부른다)
-// - 원본과 다른 점:
-//   원본 nextFrame 은 만든 Promise 를 기다리지 않아(await 가 빠짐) 바로 끝난다. 러스트 판은 이름대로 다음 프레임까지 기다린다.
-//   원본은 await 할 때마다 마이크로태스크 한 번을 쉰다. 러스트 판 seconds(0) 은 쉬지 않고 바로 끝난다.
+//   원본 setTimeout 이 0 초라도 다음 차례에 부르듯, 부른 뒤 엔진의 폴링 차례가 적어도 한 번 지나야 끝난다. (seconds(0) 은 한 번 쉬고 끝난다)
+//   시간이 이미 지난 뒤에 await 하면 원본처럼 바로 끝난다. 시간은 원본 setTimeout 처럼 밀리초를 WebIDL long(ToInt32)으로 바꾸고 음수는 0 이다.
+//   (NaN 과 무한은 0, 2^31 밀리초 이상은 2^32 로 감겨 돈다)
+// - next_frame 은 원본(requestAnimationFrame 의 Promise 를 await)처럼 다음 프레임까지 기다린다. 부른 뒤 엔진의 폴링 차례가 한 번 지나면 끝난다.
+// - 폴링 차례 번호는 스레드 하나에 하나이고, 엔진이 폴링 차례마다 올린다. (core/task.rs 의 poll_tasks)
 //==============================================================================
+use std::cell::Cell;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
 use web_time::Instant;
 
+thread_local! {
+	// 엔진의 폴링 차례 번호. (차례마다 하나 오른다)
+	static POLL_FRAME_NUMBER: Cell<u64> = const { Cell::new(0) };
+}
+
+//==============================================================================
+// 폴링 차례 번호 올리기. (엔진이 폴링 차례 첫머리에 부른다)
+//==============================================================================
+pub(crate) fn advance_poll_frame() {
+	POLL_FRAME_NUMBER.with(|poll_frame_number| poll_frame_number.set(poll_frame_number.get() + 1));
+}
+
+//==============================================================================
+// 지금 폴링 차례 번호.
+//==============================================================================
+fn read_poll_frame_number() -> u64 {
+	POLL_FRAME_NUMBER.with(|poll_frame_number| poll_frame_number.get())
+}
+
 //==============================================================================
 // 시간 기다리기 퓨처. (seconds 가 돌려준다)
 //==============================================================================
 #[derive(Clone, Copy, Debug)]
 pub struct WaitSeconds {
-	// 끝날 시각. (시계로 나타낼 수 없을 만큼 길면 None 이고 끝나지 않는다)
-	deadline_instant: Option<Instant>,
+	// 끝날 시각.
+	deadline_instant: Instant,
+	// 부른 때의 폴링 차례 번호. (원본 setTimeout 처럼 적어도 한 차례 뒤에 끝난다)
+	created_poll_frame_number: u64,
 }
 
 impl Future for WaitSeconds {
 	type Output = ();
 
 	//==============================================================================
-	// 끝날 시각이 지났는지. (아직이면 다음 프레임에 다시 본다)
+	// 끝날 시각이 지났고 부른 뒤 폴링 차례가 지났는지. (아직이면 다음 프레임에 다시 본다)
 	//==============================================================================
 	fn poll(self: Pin<&mut WaitSeconds>, context: &mut Context<'_>) -> Poll<()> {
-		if let Some(deadline_instant) = self.deadline_instant {
-			if Instant::now() >= deadline_instant {
-				return Poll::Ready(());
-			}
+		if read_poll_frame_number() > self.created_poll_frame_number && Instant::now() >= self.deadline_instant {
+			return Poll::Ready(());
 		}
 		context.waker().wake_by_ref();
 		Poll::Pending
@@ -44,40 +65,55 @@ impl Future for WaitSeconds {
 //==============================================================================
 // 한 프레임 기다리기 퓨처. (next_frame 이 돌려준다)
 //==============================================================================
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 pub struct NextFrame {
-	is_polled: bool,
+	// 부른 때의 폴링 차례 번호.
+	created_poll_frame_number: u64,
 }
 
 impl Future for NextFrame {
 	type Output = ();
 
 	//==============================================================================
-	// 처음 폴링은 쉬고 스스로 깨워, 엔진이 다음 프레임에 폴링할 때 끝난다.
+	// 부른 뒤 폴링 차례가 지났는지. (아직이면 스스로 깨워 다음 프레임에 다시 본다)
 	//==============================================================================
-	fn poll(mut self: Pin<&mut NextFrame>, context: &mut Context<'_>) -> Poll<()> {
-		if self.is_polled {
+	fn poll(self: Pin<&mut NextFrame>, context: &mut Context<'_>) -> Poll<()> {
+		if read_poll_frame_number() > self.created_poll_frame_number {
 			return Poll::Ready(());
 		}
-		self.is_polled = true;
 		context.waker().wake_by_ref();
 		Poll::Pending
 	}
 }
 
 //==============================================================================
+// 원본 setTimeout 의 지연 밀리초. (초 x 1000 을 WebIDL long 으로 바꾸듯 ToInt32 로 감고, 음수는 0. NaN 과 무한은 0)
+//==============================================================================
+fn convert_to_timeout_milliseconds(seconds: f32) -> u64 {
+	let milliseconds = seconds as f64 * 1000.0;
+	if !milliseconds.is_finite() {
+		return 0;
+	}
+	let wrapped_milliseconds = milliseconds.trunc().rem_euclid(4294967296.0);
+	let signed_milliseconds = if wrapped_milliseconds >= 2147483648.0 {
+		wrapped_milliseconds - 4294967296.0
+	}
+	else {
+		wrapped_milliseconds
+	};
+	if signed_milliseconds < 0.0 {
+		return 0;
+	}
+	signed_milliseconds as u64
+}
+
+//==============================================================================
 // 일정 시간 동안 비동기 대기. (원본 Wait.seconds, 벽시계 초)
 //==============================================================================
 pub fn seconds(seconds: f32) -> WaitSeconds {
-	let wait_seconds = if seconds.is_finite() {
-		seconds.max(0.0)
-	}
-	else {
-		0.0
-	};
-	let now_instant = Instant::now();
 	WaitSeconds {
-		deadline_instant: Duration::try_from_secs_f32(wait_seconds).ok().and_then(|wait_duration| now_instant.checked_add(wait_duration)),
+		deadline_instant: Instant::now() + Duration::from_millis(convert_to_timeout_milliseconds(seconds)),
+		created_poll_frame_number: read_poll_frame_number(),
 	}
 }
 
@@ -86,6 +122,26 @@ pub fn seconds(seconds: f32) -> WaitSeconds {
 //==============================================================================
 pub fn next_frame() -> NextFrame {
 	NextFrame {
-		is_polled: false,
+		created_poll_frame_number: read_poll_frame_number(),
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	//==============================================================================
+	// 원본 setTimeout 의 지연 바꾸기: 밀리초로 내림, 음수와 NaN 과 무한은 0, 2^31 밀리초 이상은 2^32 로 감긴다.
+	//==============================================================================
+	#[test]
+	fn timeout_milliseconds_follow_set_timeout() {
+		assert_eq!(convert_to_timeout_milliseconds(1.5), 1500);
+		assert_eq!(convert_to_timeout_milliseconds(0.0009), 0);
+		assert_eq!(convert_to_timeout_milliseconds(-1.0), 0);
+		assert_eq!(convert_to_timeout_milliseconds(f32::NAN), 0);
+		assert_eq!(convert_to_timeout_milliseconds(f32::INFINITY), 0);
+		assert_eq!(convert_to_timeout_milliseconds(2147483.5), 2147483500);
+		assert_eq!(convert_to_timeout_milliseconds(2147483.75), 0);
+		assert_eq!(convert_to_timeout_milliseconds(4294968.0), 704);
 	}
 }

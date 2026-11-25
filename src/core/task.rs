@@ -1,9 +1,10 @@
 //==============================================================================
 // 작업. (async/await 로 쓴 게임 코드를 엔진이 프레임마다 이어 돌린다. 러스트 판에만 있는 파일)
 // - 원본은 브라우저가 Promise 를 돌리고, async 함수는 await 에서 멈췄다가 Promise 가 풀리면 이어 간다.
-//   러스트 판은 엔진이 스레드 하나짜리 실행기를 품는다. Engine::spawn_task, spawn_scene_task 로 맡긴 퓨처를
-//   프레임마다 한 번(시간과 입력을 갱신한 뒤, 씬의 tick 앞) 깨어난 것만 폴링한다. 외부 런타임은 쓰지 않고, 데스크탑과 웹이 같은 코드로 돈다.
-//   퓨처는 Send 가 아니어도 된다. (Rc 를 들어도 된다, 웹은 스레드가 없다)
+//   러스트 판은 엔진이 스레드 하나짜리 실행기를 품는다. Engine::spawn_task, spawn_scene_task 는 원본 async 함수를 부를 때처럼
+//   맡기는 그 자리에서 첫 await 까지 한 번 폴링하고, 남은 작업은 프레임마다 한 번(시간과 입력을 갱신한 뒤, 씬의 tick 앞) 깨어난 것만 폴링한다.
+//   (&Engine 만 있는 자리에서는 spawn_deferred_task, spawn_deferred_scene_task 로 맡기고 다음 폴링 차례에 처음 돈다)
+//   외부 런타임은 쓰지 않고, 데스크탑과 웹이 같은 코드로 돈다. 퓨처는 Send 가 아니어도 된다. (Rc 를 들어도 된다, 웹은 스레드가 없다)
 // - 깨우기: 작업마다 깨움 표시(Arc 에 든 AtomicBool)를 std::task::Wake 로 Waker 로 만든다. 깨우면 표시만 세우고,
 //   실행기는 폴링 차례에 목록을 한 번 돌며 표시가 선 작업만 표시를 내리고 폴링한다. 그래서 한 작업은 한 프레임에 많아야 한 번 폴링하고,
 //   폴링하는 동안 스스로 깨운 작업은 다음 프레임에 다시 폴링한다. (앞의 작업이 깨운 뒤쪽 작업은 같은 차례에 폴링한다)
@@ -15,15 +16,19 @@
 //   컨텍스트는 복제할 수 없고 with 가 &mut self 를 받아서, 한 작업 안에서 with 를 겹쳐 부르는 코드는 컴파일되지 않는다.
 // - 건전성: 폴링하는 동안만 스레드 지역 칸(TASK_ACCESS)에 엔진, 그래픽, 그 작업의 씬을 가리키는 포인터를 둔다.
 //   1. 포인터는 실행기가 &mut 로 쥔 엔진, 그래픽, 씬 목록의 한 칸에서 만든다. 폴링이 끝날 때까지 실행기는 그 &mut 를 다시 쓰지 않고,
-//      폴링이 끝나면(패닉으로 풀릴 때도) 칸을 비운다. 그래서 포인터는 쓰는 동안 늘 살아 있고, 실행기 쪽 빌림과 겹치지 않는다.
-//   2. 엔진(EngineRunner.engine), 그래픽(EngineRunner.graphic), 씬(EngineRunner.scene_list 의 한 칸)은 서로 다른 값이라 겹치지 않는다.
+//      폴링이 끝나면(패닉으로 풀릴 때도) 칸을 앞의 값으로 되돌린다. 그래서 포인터는 쓰는 동안 늘 살아 있고, 실행기 쪽 빌림과 겹치지 않는다.
+//      맡기는 자리의 첫 폴링은 spawn 이 받은 &mut Engine 과 &mut 씬에서 만든다. (그래픽은 그 자리에 없어 with_graphic 이 None)
+//      &mut Engine 은 with 안에서만 얻으므로 그때 칸은 비어 있고, 첫 폴링이 끝나면 다시 빈 칸으로 돌린다.
+//   2. 엔진(EngineRunner.engine), 그래픽(EngineRunner.graphic), 씬(EngineRunner 의 씬 목록 한 칸)은 서로 다른 값이라 겹치지 않는다.
+//      (spawn 이 받은 씬과 엔진도 빌림 검사기가 서로 다른 값임을 보장한다)
 //      폴링하는 작업 목록은 엔진에서 꺼내 둔 지역 값이라 엔진을 빌려도 닿지 않는다. (그동안 맡긴 새 작업은 엔진의 따로 둔 목록에 쌓인다)
 //   3. with 는 칸에서 포인터를 꺼내(take) 쓰고 끝나면 되돌린다. 그동안 칸이 비어 있어서, 어떤 길로든 두 번째 &mut 를 만들 수 없다.
 //      (작업 바깥에서 부르거나, 안에서 겹쳐 부르거나, 다른 씬의 컨텍스트를 몰래 넘겨 부르면 이중 빌림 대신 까닭을 적은 패닉이 난다)
 //   4. 씬은 Any 로 그 컨텍스트의 타입인지 확인하고, 씬 핸들이 그 작업의 씬인지도 확인한다.
-// - 씬 작업은 그 씬과 수명을 같이한다. 씬을 내리면 그 씬의 작업도 버린다. (원본은 씬을 내려도 Promise 사슬이 이어 돈다)
-// - Promise: 원본 new Promise((resolve) => ...) 자리다. Promise::create 가 퓨처와 resolve 손잡이를 짝으로 준다.
-//   손잡이를 버리고 resolve 하지 않으면 원본처럼 끝나지 않는다.
+// - 씬을 내려도 원본처럼 그 씬의 작업은 이어 돈다. 엔진은 작업이 남은 씬 값을 작업이 다 끝날 때까지 살려 두고(목록에서는 빠져 tick, draw 를 받지 않는다)
+//   with 는 그 씬을 계속 준다. 작업이 다 끝나면 destroy 를 부르고 버린다.
+// - Promise: 원본 new Promise((resolve, reject) => ...) 자리다. Promise::create 가 퓨처와 resolve 손잡이를 짝으로 준다.
+//   원본 reject 는 Promise<Result<T, E>> 의 reject(까닭)다. (예외 대신 Result) 손잡이를 버리고 풀지 않으면 원본처럼 끝나지 않는다.
 //==============================================================================
 use crate::core::engine::Engine;
 use crate::core::graphic::Graphic;
@@ -115,6 +120,31 @@ struct Task {
 	is_done: bool,
 }
 
+impl Task {
+	//==============================================================================
+	// 생성. (손잡이를 같이 준다. is_woken 이면 다음 폴링 차례에 폴링한다)
+	//==============================================================================
+	fn create(scene_id: Option<SceneId>, future: Pin<Box<dyn Future<Output = ()>>>, is_woken: bool) -> (Task, TaskHandle) {
+		let wake_flag = Arc::new(TaskWakeFlag {
+			is_woken: AtomicBool::new(is_woken),
+		});
+		let waker = Waker::from(wake_flag.clone());
+		let task_state = Rc::new(TaskState::default());
+		let task = Task {
+			scene_id,
+			future,
+			wake_flag,
+			waker,
+			task_state: task_state.clone(),
+			is_done: false,
+		};
+		let task_handle = TaskHandle {
+			task_state,
+		};
+		(task, task_handle)
+	}
+}
+
 impl Drop for Task {
 	//==============================================================================
 	// 버리기. (다 돌았든 버려졌든 손잡이에는 끝난 것으로 알린다)
@@ -148,30 +178,16 @@ impl TaskExecutor {
 	// 작업 맡기기. (깨어난 채로 넣어 다음 폴링 차례에 처음 폴링한다)
 	//==============================================================================
 	pub(crate) fn spawn(&self, scene_id: Option<SceneId>, future: Pin<Box<dyn Future<Output = ()>>>) -> TaskHandle {
-		let wake_flag = Arc::new(TaskWakeFlag {
-			is_woken: AtomicBool::new(true),
-		});
-		let waker = Waker::from(wake_flag.clone());
-		let task_state = Rc::new(TaskState::default());
-		self.spawned_task_list.borrow_mut().push(Task {
-			scene_id,
-			future,
-			wake_flag,
-			waker,
-			task_state: task_state.clone(),
-			is_done: false,
-		});
-		TaskHandle {
-			task_state,
-		}
+		let (task, task_handle) = Task::create(scene_id, future, true);
+		self.spawned_task_list.borrow_mut().push(task);
+		task_handle
 	}
 
 	//==============================================================================
-	// 씬의 작업 버리기. (그 씬을 내릴 때 엔진이 부른다)
+	// 그 씬의 작업이 남았는지. (내린 씬을 살려 둘지 엔진이 본다)
 	//==============================================================================
-	pub(crate) fn cancel_scene_tasks(&mut self, scene_id: SceneId) {
-		self.task_list.retain(|task| task.scene_id != Some(scene_id));
-		self.spawned_task_list.get_mut().retain(|task| task.scene_id != Some(scene_id));
+	pub(crate) fn has_scene_tasks(&self, scene_id: SceneId) -> bool {
+		self.task_list.iter().any(|task| task.scene_id == Some(scene_id)) || self.spawned_task_list.borrow().iter().any(|task| task.scene_id == Some(scene_id))
 	}
 
 	//==============================================================================
@@ -453,9 +469,61 @@ impl<S: Scene + 'static> SceneContext<S> {
 }
 
 //==============================================================================
-// 엔진 작업 맡기기. (Engine::spawn_task 가 부른다)
+// 맡기는 자리에서 처음 폴링하고 남으면 실행기에 넣기. (원본 async 함수처럼 첫 await 까지 그 자리에서 돈다)
+// - 칸은 spawn 이 받은 &mut Engine(과 &mut 씬)에서 만들고, 폴링이 끝나면 앞의 값(with 안이면 빈 칸)으로 되돌린다.
 //==============================================================================
-pub(crate) fn spawn_engine_task<F, TaskFuture>(task_executor: &TaskExecutor, task_function: F) -> TaskHandle
+fn poll_spawned_task(engine: &mut Engine, scene_pointer: Option<NonNull<dyn Scene>>, mut task: Task) {
+	let task_access = TaskAccess {
+		engine: NonNull::from(&mut *engine),
+		graphic: None,
+		scene: scene_pointer,
+		scene_id: task.scene_id,
+	};
+	let poll_result = {
+		let _task_access_scope = TaskAccessScope::install(task_access);
+		let mut context = Context::from_waker(&task.waker);
+		task.future.as_mut().poll(&mut context)
+	};
+	if poll_result.is_pending() {
+		engine.task_executor.spawned_task_list.borrow_mut().push(task);
+	}
+}
+
+//==============================================================================
+// 엔진 작업 맡기기. (Engine::spawn_task 가 부른다. 그 자리에서 첫 await 까지 돈다)
+//==============================================================================
+pub(crate) fn spawn_engine_task<F, TaskFuture>(engine: &mut Engine, task_function: F) -> TaskHandle
+where
+	F: FnOnce(EngineContext) -> TaskFuture,
+	TaskFuture: Future<Output = ()> + 'static,
+{
+	let future = task_function(EngineContext::new());
+	let (task, task_handle) = Task::create(None, Box::pin(future), false);
+	poll_spawned_task(engine, None, task);
+	task_handle
+}
+
+//==============================================================================
+// 씬 작업 맡기기. (Engine::spawn_scene_task 가 부른다. 그 자리에서 첫 await 까지 돈다)
+//==============================================================================
+pub(crate) fn spawn_scene_task<S, F, TaskFuture>(engine: &mut Engine, scene: &mut S, task_function: F) -> TaskHandle
+where
+	S: Scene + 'static,
+	F: FnOnce(SceneContext<S>) -> TaskFuture,
+	TaskFuture: Future<Output = ()> + 'static,
+{
+	let scene_id = SceneId::from(scene.get_scene_base());
+	let future = task_function(SceneContext::<S>::new(scene_id));
+	let (task, task_handle) = Task::create(Some(scene_id), Box::pin(future), false);
+	let scene_object: &mut (dyn Scene + 'static) = scene;
+	poll_spawned_task(engine, Some(NonNull::from(scene_object)), task);
+	task_handle
+}
+
+//==============================================================================
+// 엔진 작업을 다음 폴링 차례로 맡기기. (Engine::spawn_deferred_task 가 부른다)
+//==============================================================================
+pub(crate) fn spawn_deferred_engine_task<F, TaskFuture>(task_executor: &TaskExecutor, task_function: F) -> TaskHandle
 where
 	F: FnOnce(EngineContext) -> TaskFuture,
 	TaskFuture: Future<Output = ()> + 'static,
@@ -465,9 +533,9 @@ where
 }
 
 //==============================================================================
-// 씬 작업 맡기기. (Engine::spawn_scene_task 가 부른다)
+// 씬 작업을 다음 폴링 차례로 맡기기. (Engine::spawn_deferred_scene_task, 화면 페이드가 부른다)
 //==============================================================================
-pub(crate) fn spawn_scene_task<S, F, TaskFuture>(task_executor: &TaskExecutor, scene_id: SceneId, task_function: F) -> TaskHandle
+pub(crate) fn spawn_deferred_scene_task<S, F, TaskFuture>(task_executor: &TaskExecutor, scene_id: SceneId, task_function: F) -> TaskHandle
 where
 	S: Scene + 'static,
 	F: FnOnce(SceneContext<S>) -> TaskFuture,
@@ -480,9 +548,11 @@ where
 //==============================================================================
 // 깨어난 작업 폴링하기. (EngineRunner 가 프레임마다 한 번, 씬의 tick 앞에 부른다)
 // - 작업 목록을 엔진에서 꺼내 돌리고, 그동안 맡긴 새 작업은 뒤에 붙인다. (다음 프레임에 처음 폴링한다)
-// - 씬 작업의 씬이 목록에 없으면(내렸으면) 작업을 버린다.
+// - 씬 작업의 씬은 불러온 씬 목록과 내렸지만 작업이 남아 살려 둔 씬 목록에서 찾는다. 어디에도 없으면(씬을 버렸으면) 작업을 버린다.
+// - 폴링 차례 번호를 하나 올린다. (wait::seconds, wait::next_frame 이 적어도 한 차례 쉬었는지 본다)
 //==============================================================================
-pub(crate) fn poll_tasks(engine: &mut Engine, scene_list: &mut [Box<dyn Scene>], mut graphic: Option<&mut Graphic>) {
+pub(crate) fn poll_tasks(engine: &mut Engine, scene_list: &mut [Box<dyn Scene>], detached_scene_list: &mut [Box<dyn Scene>], mut graphic: Option<&mut Graphic>) {
+	crate::base::wait::advance_poll_frame();
 	let mut task_list = std::mem::take(&mut engine.task_executor.task_list);
 	task_list.append(engine.task_executor.spawned_task_list.get_mut());
 	for task in task_list.iter_mut() {
@@ -491,7 +561,7 @@ pub(crate) fn poll_tasks(engine: &mut Engine, scene_list: &mut [Box<dyn Scene>],
 		}
 		let scene_pointer = match task.scene_id {
 			Some(scene_id) => {
-				match scene_list.iter_mut().find(|scene| scene.get_scene_base().get_scene_id() == Some(scene_id)) {
+				match scene_list.iter_mut().chain(detached_scene_list.iter_mut()).find(|scene| scene.get_scene_base().get_scene_id() == Some(scene_id)) {
 					Some(scene) => {
 						Some(NonNull::from(&mut **scene))
 					}
@@ -517,7 +587,9 @@ pub(crate) fn poll_tasks(engine: &mut Engine, scene_list: &mut [Box<dyn Scene>],
 			task.future.as_mut().poll(&mut context)
 		};
 		if poll_result.is_ready() {
+			// 같은 차례의 뒤쪽 작업이 이 손잡이를 보면 바로 끝난 것이어야 한다. (버리기는 차례가 끝난 뒤)
 			task.is_done = true;
+			task.task_state.is_finished.set(true);
 		}
 	}
 	task_list.retain(|task| !task.is_done);
@@ -534,9 +606,10 @@ struct PromiseState<T> {
 }
 
 //==============================================================================
-// Promise. (원본 new Promise((resolve) => ...) 자리, PromiseResolver::resolve 로 풀리면 그 값으로 끝나는 퓨처)
+// Promise. (원본 new Promise((resolve, reject) => ...) 자리, PromiseResolver::resolve 로 풀리면 그 값으로 끝나는 퓨처)
 // - 콜백으로 끝을 알리는 API 를 await 할 수 있게 바꿀 때 쓴다. (read_clipboard_text_async, request_frame_capture_async 같은 것)
-// - 손잡이를 버리고 resolve 하지 않으면 원본처럼 끝나지 않는다.
+// - 실패할 수 있는 일은 Promise<Result<T, E>> 로 두고 resolve(Ok(값)) 또는 reject(까닭)로 푼다. (원본 reject 와 await 의 예외 자리)
+// - 손잡이를 버리고 풀지 않으면 원본처럼 끝나지 않는다.
 //==============================================================================
 pub struct Promise<T> {
 	promise_state: Rc<RefCell<PromiseState<T>>>,
@@ -590,6 +663,15 @@ impl<T> PromiseResolver<T> {
 		if let Some(waker) = waker {
 			waker.wake();
 		}
+	}
+}
+
+impl<T, E> PromiseResolver<Result<T, E>> {
+	//==============================================================================
+	// 실패로 풀기. (원본 reject(까닭) 자리, Promise<Result<T, E>> 가 Err(까닭)으로 끝난다)
+	//==============================================================================
+	pub fn reject(self, error: E) {
+		self.resolve(Err(error));
 	}
 }
 
@@ -683,10 +765,18 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 실행기: 맡긴 작업은 다음 폴링 차례에 처음 돌고, 깨어난 작업은 한 차례에 한 번만 폴링한다. 끝나면 손잡이가 끝난 것이 된다.
+	// 프레임 하나의 폴링 차례. (살려 둔 씬 없이)
+	//==============================================================================
+	fn poll_frame(engine: &mut Engine, scene_list: &mut [Box<dyn Scene>]) {
+		poll_tasks(engine, scene_list, &mut Vec::new(), None);
+	}
+
+	//==============================================================================
+	// 실행기: spawn_task 는 원본 async 함수처럼 맡기는 자리에서 첫 await 까지 돌고, 남은 것은 깨어난 작업만 한 차례에 한 번 폴링한다.
+	// 다음 차례로 맡긴 작업은 첫 폴링 차례에 처음 돈다. 끝나면 손잡이가 끝난 것이 된다.
 	//==============================================================================
 	#[test]
-	fn executor_polls_woken_tasks_once_per_frame() {
+	fn executor_runs_first_segment_at_spawn_and_polls_once_per_frame() {
 		let mut engine = Engine::new(EngineConfiguration::new());
 		let mut scene_list: Vec<Box<dyn Scene>> = Vec::new();
 		let step_count = Rc::new(Cell::new(0));
@@ -697,20 +787,31 @@ mod tests {
 				wait::next_frame().await;
 			}
 		});
-		assert_eq!(step_count.get(), 0);
+		assert_eq!(step_count.get(), 1);
 		assert_eq!(engine.task_executor.get_task_count(), 1);
-		for expected_step_count in 1..=3 {
-			poll_tasks(&mut engine, &mut scene_list, None);
+		for expected_step_count in 2..=3 {
+			poll_frame(&mut engine, &mut scene_list);
 			assert_eq!(step_count.get(), expected_step_count);
 			assert!(!task_handle.is_finished());
 		}
-		poll_tasks(&mut engine, &mut scene_list, None);
+		poll_frame(&mut engine, &mut scene_list);
 		assert!(task_handle.is_finished());
 		assert_eq!(engine.task_executor.get_task_count(), 0);
+
+		let deferred_step_count = Rc::new(Cell::new(0));
+		let task_deferred_step_count = deferred_step_count.clone();
+		let deferred_task_handle = engine.spawn_deferred_task(move |_engine_context| async move {
+			task_deferred_step_count.set(1);
+		});
+		assert_eq!(deferred_step_count.get(), 0);
+		poll_frame(&mut engine, &mut scene_list);
+		assert_eq!(deferred_step_count.get(), 1);
+		assert!(deferred_task_handle.is_finished());
 	}
 
 	//==============================================================================
-	// 깨우기: Promise 를 기다리는 작업은 풀릴 때까지 폴링하지 않고, resolve 가 깨우면 다음 차례에 그 값으로 이어 간다. 작업은 다른 작업을 await 한다.
+	// 깨우기: Promise 를 기다리는 작업은 풀릴 때까지 폴링하지 않고, resolve 가 깨우면 다음 차례에 그 값으로 이어 간다.
+	// 작업은 다른 작업을 await 하고, Promise<Result<T, E>> 의 reject 는 원본 reject 처럼 Err 로 끝난다.
 	//==============================================================================
 	#[test]
 	fn promise_wakes_task_only_when_resolved() {
@@ -734,120 +835,147 @@ mod tests {
 			joined_waiting_task_handle.await;
 			task_joined.set(true);
 		});
-		poll_tasks(&mut engine, &mut scene_list, None);
 		assert_eq!(poll_count.get(), 1);
 		for _ in 0..3 {
-			poll_tasks(&mut engine, &mut scene_list, None);
+			poll_frame(&mut engine, &mut scene_list);
 		}
 		assert_eq!(poll_count.get(), 1);
 		assert!(!waiting_task_handle.is_finished());
 		value_resolver.resolve(7);
-		poll_tasks(&mut engine, &mut scene_list, None);
+		poll_frame(&mut engine, &mut scene_list);
 		assert_eq!(poll_count.get(), 2);
 		assert_eq!(received_value.get(), 7);
 		assert!(waiting_task_handle.is_finished());
-		poll_tasks(&mut engine, &mut scene_list, None);
+		poll_frame(&mut engine, &mut scene_list);
 		assert!(joined.get());
 		assert!(Promise::resolved(3).promise_state.borrow().value.is_some());
+
+		let (result_promise, result_resolver) = Promise::<Result<u32, String>>::create();
+		let rejected_error = Rc::new(RefCell::new(String::new()));
+		let task_rejected_error = rejected_error.clone();
+		engine.spawn_task(move |_engine_context| async move {
+			if let Err(error_message) = result_promise.await {
+				*task_rejected_error.borrow_mut() = error_message;
+			}
+		});
+		result_resolver.reject(String::from("까닭"));
+		poll_frame(&mut engine, &mut scene_list);
+		assert_eq!(*rejected_error.borrow(), "까닭");
 	}
 
 	//==============================================================================
-	// 기다리기: wait::seconds 는 원본 setTimeout 처럼 벽시계 초라 시간 배율이 0 이어도 흐른다. 음수와 NaN 은 0 초, next_frame 은 다음 차례.
+	// 기다리기: wait::seconds 는 원본 setTimeout 처럼 벽시계 초라 시간 배율이 0 이어도 흐르고, 0 초와 음수와 NaN 도 한 차례 쉰 뒤 끝난다.
 	//==============================================================================
 	#[test]
-	fn wait_seconds_follows_wall_clock() {
+	fn wait_seconds_follows_wall_clock_and_yields_once() {
 		let mut engine = Engine::new(EngineConfiguration::new());
 		engine.get_time_manager_mut().set_time_scale(0.0);
 		let mut scene_list: Vec<Box<dyn Scene>> = Vec::new();
 		let progress = Rc::new(Cell::new(0));
 		let task_progress = progress.clone();
 		let task_handle = engine.spawn_task(move |_engine_context| async move {
+			wait::seconds(0.0).await;
+			task_progress.set(1);
 			wait::seconds(-1.0).await;
 			wait::seconds(f32::NAN).await;
-			task_progress.set(1);
-			wait::seconds(0.03).await;
 			task_progress.set(2);
+			wait::seconds(0.03).await;
+			task_progress.set(3);
 		});
-		poll_tasks(&mut engine, &mut scene_list, None);
+		assert_eq!(progress.get(), 0);
+		poll_frame(&mut engine, &mut scene_list);
 		assert_eq!(progress.get(), 1);
-		poll_tasks(&mut engine, &mut scene_list, None);
+		poll_frame(&mut engine, &mut scene_list);
 		assert_eq!(progress.get(), 1);
-		std::thread::sleep(std::time::Duration::from_millis(45));
-		poll_tasks(&mut engine, &mut scene_list, None);
+		poll_frame(&mut engine, &mut scene_list);
 		assert_eq!(progress.get(), 2);
+		poll_frame(&mut engine, &mut scene_list);
+		assert_eq!(progress.get(), 2);
+		std::thread::sleep(std::time::Duration::from_millis(45));
+		poll_frame(&mut engine, &mut scene_list);
+		assert_eq!(progress.get(), 3);
 		assert!(task_handle.is_finished());
 	}
 
 	//==============================================================================
-	// 애셋 퓨처: 손잡이를 그대로 await 하면 다 읽힌 바이트나 실패 까닭이 나오고, 요청 전인 애셋의 wait_for_load 는 바로 실패다.
+	// 애셋 손잡이: load 가 돌려준 손잡이를 그대로 await 하면 다 읽힌 바이트나 실패 까닭이 나온다. 그림 손잡이는 풀기까지 끝나야 끝나고,
+	// 풀지 못하면 원본 onerror 처럼 실패다. 요청 전인 애셋의 wait_for_load 는 바로 실패다.
 	//==============================================================================
 	#[test]
-	fn asset_futures_finish_with_load_handles() {
+	fn asset_load_handles_are_awaitable() {
 		let mut engine = Engine::new(EngineConfiguration::new());
 		let mut scene_list: Vec<Box<dyn Scene>> = Vec::new();
 		let load_handle = AssetLoadHandle::create_pending("data.bin");
 		let failed_handle = AssetLoadHandle::create_pending("missing.bin");
+		let not_requested_asset = ImageAsset::new();
+		let not_requested_future = not_requested_asset.wait_for_load();
+		let mut png_bytes: Vec<u8> = Vec::new();
+		image::RgbaImage::from_pixel(2, 2, image::Rgba([255, 0, 0, 255])).write_to(&mut std::io::Cursor::new(&mut png_bytes), image::ImageFormat::Png).expect("png");
 		let mut image_asset = ImageAsset::new();
+		let image_load_handle = image_asset.load_from_bytes("red.png", png_bytes);
+		let mut broken_image_asset = ImageAsset::new();
+		let broken_image_load_handle = broken_image_asset.load_from_bytes("broken.png", vec![1, 2]);
 		let result_list: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
 		let task_result_list = result_list.clone();
 		let task_load_handle = load_handle.clone();
 		let task_failed_handle = failed_handle.clone();
-		let not_requested_future = image_asset.wait_for_load();
-		image_asset.load_from_bytes("memory.png", vec![1, 2]);
-		let loaded_future = image_asset.wait_for_load();
 		engine.spawn_task(move |_engine_context| async move {
 			let bytes = task_load_handle.await.expect("읽힘");
 			task_result_list.borrow_mut().push(format!("bytes {}", bytes.len()));
 			let error_message = (&task_failed_handle).await.expect_err("실패");
 			task_result_list.borrow_mut().push(error_message);
 			task_result_list.borrow_mut().push(format!("not requested {}", not_requested_future.await.is_err()));
-			task_result_list.borrow_mut().push(format!("memory {}", loaded_future.await.expect("바이트").len()));
+			task_result_list.borrow_mut().push(format!("image {}", image_load_handle.await.is_ok()));
+			task_result_list.borrow_mut().push(format!("broken {}", broken_image_load_handle.await.is_err()));
 		});
-		poll_tasks(&mut engine, &mut scene_list, None);
 		assert!(result_list.borrow().is_empty());
 		load_handle.finish(Ok(vec![1, 2, 3]));
-		poll_tasks(&mut engine, &mut scene_list, None);
+		poll_frame(&mut engine, &mut scene_list);
 		assert_eq!(*result_list.borrow(), vec![String::from("bytes 3")]);
 		failed_handle.finish(Err(String::from("없음")));
-		poll_tasks(&mut engine, &mut scene_list, None);
-		assert_eq!(*result_list.borrow(), vec![String::from("bytes 3"), String::from("없음"), String::from("not requested true"), String::from("memory 2")]);
+		poll_frame(&mut engine, &mut scene_list);
+		assert_eq!(*result_list.borrow(), vec![String::from("bytes 3"), String::from("없음"), String::from("not requested true"), String::from("image true"), String::from("broken true")]);
+		assert_eq!(image_asset.get_image().map(|image| image.get_width()), Some(2));
+		assert!(broken_image_asset.get_image().is_none());
+		assert!(!broken_image_asset.is_loaded());
 	}
 
 	//==============================================================================
-	// 엔진을 빌려 이어 가는 퓨처: AssetLoader::wait_for_load 는 기다리는 동안 update 를 불러 실패 목록으로 끝나고,
-	// Timeline::load_from_url 은 받지 못하면 까닭으로 끝난다.
+	// 엔진을 빌려 이어 가는 손잡이: AssetLoader::load 의 손잡이는 기다리는 동안 update 를 불러 실패 목록으로 끝나고,
+	// Timeline::load_from_url 은 받지 못하면 까닭으로 끝난다. VisualAsset::load 는 원본처럼 바로 끝난다.
 	//==============================================================================
 	#[test]
-	fn engine_driven_futures_finish() {
+	fn engine_driven_load_handles_finish() {
 		use crate::animation::timeline::Timeline;
 		use crate::resource::assetloader::AssetLoader;
+		use crate::resource::visualasset::VisualAsset;
 		let mut engine = Engine::new(EngineConfiguration::new());
 		let mut scene_list: Vec<Box<dyn Scene>> = Vec::new();
 		let asset_loader = AssetLoader::new();
 		let external_handle = AssetLoadHandle::create_pending("stage");
 		asset_loader.add_load_handle(&external_handle);
-		asset_loader.load(&engine);
-		let timeline_future = Timeline::load_from_url(&engine, "missing-timeline.json");
 		let result_list: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
 		let task_result_list = result_list.clone();
 		let task_asset_loader = asset_loader.clone();
-		engine.spawn_task(move |_engine_context| async move {
-			let failed_list = task_asset_loader.wait_for_load().await;
+		engine.spawn_task(move |mut engine_context| async move {
+			let mut visual_asset = VisualAsset::new();
+			task_result_list.borrow_mut().push(format!("visual {} {}", visual_asset.load("hero.visual").await.is_ok(), visual_asset.is_loaded()));
+			let failed_list = engine_context.with(|engine| task_asset_loader.load(engine)).await;
 			task_result_list.borrow_mut().push(format!("loader {}", failed_list.len()));
-			task_result_list.borrow_mut().push(format!("timeline {}", timeline_future.await.is_err()));
+			let timeline_result = engine_context.with(|engine| Timeline::load_from_url(engine, "missing-timeline.json")).await;
+			task_result_list.borrow_mut().push(format!("timeline {}", timeline_result.is_err()));
 		});
-		poll_tasks(&mut engine, &mut scene_list, None);
-		assert!(result_list.borrow().is_empty());
+		assert_eq!(*result_list.borrow(), vec![String::from("visual true false")]);
 		assert!(!asset_loader.is_finished());
 		external_handle.finish(Ok(Vec::new()));
-		poll_tasks(&mut engine, &mut scene_list, None);
-		assert_eq!(*result_list.borrow(), vec![String::from("loader 0"), String::from("timeline true")]);
+		poll_frame(&mut engine, &mut scene_list);
+		assert_eq!(*result_list.borrow(), vec![String::from("visual true false"), String::from("loader 0"), String::from("timeline true")]);
 		assert_eq!(asset_loader.get_finished_count(), 1);
 	}
 
 	//==============================================================================
-	// 컨텍스트: 씬 작업은 with 안에서 그 씬(제 타입)과 엔진을 빌리고, await 다음 줄에서도 다시 빌린다. 그 안에서 새 작업을 맡겨도 된다.
-	// 씬이 목록에 없으면(내렸으면) 작업을 버리고 손잡이는 끝난 것이 된다.
+	// 컨텍스트: 씬 작업은 맡기는 자리의 첫 구간부터 with 안에서 그 씬(제 타입)과 엔진을 빌리고, await 다음 줄에서도 다시 빌린다.
+	// with 안에서 맡긴 작업도 그 자리에서 첫 구간이 돈다. 씬이 어디에도 없으면 작업을 버리고 손잡이는 끝난 것이 된다.
 	//==============================================================================
 	#[test]
 	fn scene_context_reaches_scene_and_engine_between_awaits() {
@@ -859,12 +987,13 @@ mod tests {
 		scene.scene_base.set_scene_id(SceneId(3));
 		let child_finished = Rc::new(Cell::new(false));
 		let task_child_finished = child_finished.clone();
-		let task_handle = engine.spawn_scene_task(&scene, move |mut scene_context| async move {
+		let task_handle = engine.spawn_scene_task(&mut scene, move |mut scene_context| async move {
 			let frame_number = scene_context.with(|scene, engine| {
 				scene.value += 1;
 				engine.get_frame_number()
 			});
 			assert_eq!(frame_number, 1);
+			assert!(scene_context.with_graphic(|_scene, _engine, _graphic| ()).is_none());
 			wait::next_frame().await;
 			scene_context.with(|scene, engine| {
 				scene.value += 10;
@@ -875,24 +1004,27 @@ mod tests {
 					task_child_finished.set(true);
 				});
 			});
-			assert!(scene_context.with_graphic(|_scene, _engine, _graphic| ()).is_none());
 		});
+		assert_eq!(scene.value, 1);
 		let mut scene_list: Vec<Box<dyn Scene>> = vec![Box::new(scene)];
-		poll_tasks(&mut engine, &mut scene_list, None);
-		assert_eq!(read_counter_value(&mut scene_list), 1);
-		poll_tasks(&mut engine, &mut scene_list, None);
+		poll_frame(&mut engine, &mut scene_list);
 		assert_eq!(read_counter_value(&mut scene_list), 11);
 		assert!(task_handle.is_finished());
-		assert!(!child_finished.get());
-		poll_tasks(&mut engine, &mut scene_list, None);
 		assert!(child_finished.get());
 		assert_eq!(engine.get_time_manager().get_time_scale(), 0.5);
 
-		let orphan_task_handle = engine.spawn_scene_task(&CounterScene {
+		let mut orphan_scene = CounterScene {
 			scene_base: SceneBase::new(),
 			value: 0,
-		}, |_scene_context| async {});
-		poll_tasks(&mut engine, &mut scene_list, None);
+		};
+		let orphan_task_handle = engine.spawn_scene_task(&mut orphan_scene, |mut scene_context| async move {
+			scene_context.with(|scene, _engine| {
+				scene.value = 5;
+			});
+			wait::next_frame().await;
+		});
+		assert_eq!(orphan_scene.value, 5);
+		poll_frame(&mut engine, &mut scene_list);
 		assert!(orphan_task_handle.is_finished());
 		assert_eq!(engine.task_executor.get_task_count(), 0);
 	}
@@ -903,7 +1035,7 @@ mod tests {
 	#[test]
 	#[should_panic(expected = "엔진이 작업을 폴링하는 동안")]
 	fn context_outside_polling_panics() {
-		let engine = Engine::new(EngineConfiguration::new());
+		let mut engine = Engine::new(EngineConfiguration::new());
 		let smuggled_context: Rc<RefCell<Option<EngineContext>>> = Rc::new(RefCell::new(None));
 		let task_smuggled_context = smuggled_context.clone();
 		engine.spawn_task(move |engine_context| {
@@ -921,7 +1053,6 @@ mod tests {
 	#[should_panic(expected = "with 바깥에서만")]
 	fn nested_with_through_other_context_panics() {
 		let mut engine = Engine::new(EngineConfiguration::new());
-		let mut scene_list: Vec<Box<dyn Scene>> = Vec::new();
 		let smuggled_context: Rc<RefCell<Option<EngineContext>>> = Rc::new(RefCell::new(None));
 		let task_smuggled_context = smuggled_context.clone();
 		engine.spawn_task(move |engine_context| {
@@ -935,6 +1066,5 @@ mod tests {
 				other_context.with(|_engine| ());
 			});
 		});
-		poll_tasks(&mut engine, &mut scene_list, None);
 	}
 }

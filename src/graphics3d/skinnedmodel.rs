@@ -12,7 +12,8 @@
 //     바이트를 부탁하고 받기 손잡이(SkinnedModelLoadHandle)를 돌려준다. 다 받으면 손잡이의 create_model(gl, 렌더러)이 모델을 짓는다. (await 없는 꼴)
 //     원본 await SkinnedModel.loadFromUrl(gl, url, renderer) 자리는 엔진 작업 안에서 load_from_url_async(엔진, 경로, 렌더러).await 다. (fbx 는 load_from_fbx_url_async)
 //     다 받으면 작업을 폴링하는 엔진의 GL 로 모델을 짓는다. (렌더러는 부를 때 셰이더 프로그램만 나눠 들어 빌리지 않는다)
-//     add_animations_from_fbx_url 은 받기를 부탁해 두고 다 받으면 다음 update 나 play_animation 에서 클립을 더한다. (돌려준 손잡이를 씬에 맡기면 기다릴 수 있다)
+//     add_animations_from_fbx_url 은 받기를 부탁하고 await 할 수 있는 AnimationLoadHandle 을 돌려준다. 원본처럼 await 가 끝날 때는 클립이 이미 더해져 있다.
+//     (클립 목록을 손잡이와 나눠 들어, 다 받으면 await 하는 퓨처나 다음 update, play_animation 가운데 먼저 닿는 쪽이 더한다. 원본처럼 받은 차례로 더한다)
 //   - GL 을 쓰는 함수는 gl 을 받는다. update(delta_time) 는 GL 을 쓰지 않는다. 원본 update 6단계(바뀐 모프 타깃 업로드)는
 //     렌더러의 draw / draw_depth / draw_wireframe 가 upload_pending_morph_targets 로 대신한다. (그래서 그리기 함수가 &mut 모델을 받는다)
 //     덕분에 씬의 tick 에서 update 를 부를 수 있다.
@@ -36,9 +37,12 @@ use crate::graphics3d::material::{ImageDescription, Material, MaterialDescriptio
 use crate::graphics3d::skinnedmodelrenderer::SkinnedModelRenderer;
 use glow::HasContext;
 use serde_json::Value;
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
-use std::future::Future;
+use std::future::{Future, IntoFuture};
+use std::pin::Pin;
 use std::rc::Rc;
+use std::task::{Context, Poll};
 
 //==============================================================================
 // 전역 상수 목록.
@@ -401,7 +405,8 @@ pub struct SkinnedModel {
 	root_node_indices: Vec<usize>,
 	skin_list: Vec<Skin>,
 	drawable_list: Vec<Drawable>,
-	animation_list: Vec<AnimationClip>,
+	// 애니메이션 클립 목록. (애니메이션 FBX 받기 손잡이와 나눠 들어, await 하는 퓨처가 클립을 더할 수 있다)
+	animation_list: Rc<RefCell<Vec<AnimationClip>>>,
 	current_animation_index: Option<usize>,
 	previous_animation_index: Option<usize>,
 	current_time: f32,
@@ -410,8 +415,146 @@ pub struct SkinnedModel {
 	fade_elapsed: f32,
 	time_scale: f32,
 	joint_rotation_offsets: Vec<(usize, Quaternion)>,
-	// 받는 중인 애니메이션 FBX. (add_animations_from_fbx_url, 받기 손잡이 + 클립 이름 + 이동 무시)
-	pending_animation_load_list: Vec<(FbxLoadHandle, String, bool)>,
+	// 받는 중인 애니메이션 FBX. (add_animations_from_fbx_url)
+	pending_animation_load_list: Vec<AnimationLoadHandle>,
+}
+
+//==============================================================================
+// 애니메이션 FBX 받기의 나눠 든 상태. (받기 손잡이, 클립 이름, 이동 무시, 부탁할 때의 노드 이름 표, 모델의 클립 목록, 더했는지)
+//==============================================================================
+struct AnimationLoad {
+	fbx_load_handle: FbxLoadHandle,
+	clip_name: String,
+	ignore_translation: bool,
+	node_index_by_name: HashMap<String, usize>,
+	animation_list: Rc<RefCell<Vec<AnimationClip>>>,
+	apply_result: RefCell<Option<Result<(), String>>>,
+}
+
+impl AnimationLoad {
+	//==============================================================================
+	// 다 받았으면 클립 더하기. (끝났으면 결과, 받는 중이거나 클립 목록을 빌릴 수 없으면 None)
+	//==============================================================================
+	fn apply(&self) -> Option<Result<(), String>> {
+		if let Some(apply_result) = self.apply_result.borrow().clone() {
+			return Some(apply_result);
+		}
+		let scene_data_result = self.fbx_load_handle.get_scene_data()?;
+		let apply_result = match scene_data_result {
+			Ok(scene_data) => {
+				let mut added_clip_list = convert_fbx_scene_animations(&self.node_index_by_name, &scene_data, &self.clip_name, self.ignore_translation);
+				let mut animation_list = self.animation_list.try_borrow_mut().ok()?;
+				animation_list.append(&mut added_clip_list);
+				Ok(())
+			}
+			Err(error_message) => {
+				eprintln!("{}", error_message);
+				Err(error_message)
+			}
+		};
+		*self.apply_result.borrow_mut() = Some(apply_result.clone());
+		Some(apply_result)
+	}
+}
+
+//==============================================================================
+// 애니메이션 FBX 받기 손잡이. (SkinnedModel::add_animations_from_fbx_url 이 돌려준다. 원본 addAnimationsFromFbxUrl 의 Promise 자리)
+// - await 하면 다 받아 클립을 모델에 더할 때까지 기다린다. 받기나 파싱에 실패하면 까닭으로 끝난다. (원본 reject)
+//==============================================================================
+#[derive(Clone)]
+pub struct AnimationLoadHandle {
+	animation_load: Rc<AnimationLoad>,
+}
+
+impl AnimationLoadHandle {
+	//==============================================================================
+	// 바이트 읽기 손잡이. (씬에 맡길 때)
+	//==============================================================================
+	pub fn get_load_handle(&self) -> &AssetLoadHandle {
+		self.animation_load.fbx_load_handle.get_load_handle()
+	}
+
+	//==============================================================================
+	// 끝났는지. (클립을 더했거나 실패했거나)
+	//==============================================================================
+	pub fn is_finished(&self) -> bool {
+		self.animation_load.apply_result.borrow().is_some()
+	}
+}
+
+impl std::fmt::Debug for AnimationLoadHandle {
+	//==============================================================================
+	// 디버그 출력. (클립 이름과 끝났는지)
+	//==============================================================================
+	fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		formatter.debug_struct("AnimationLoadHandle").field("clip_name", &self.animation_load.clip_name).field("is_finished", &self.is_finished()).finish()
+	}
+}
+
+//==============================================================================
+// 애니메이션 FBX 받기를 기다리는 퓨처. (다 받으면 클립을 더하고 끝난다)
+//==============================================================================
+#[derive(Clone)]
+pub struct AnimationLoadFuture {
+	animation_load: Rc<AnimationLoad>,
+}
+
+impl Future for AnimationLoadFuture {
+	type Output = Result<(), String>;
+
+	//==============================================================================
+	// 다 받았으면 클립을 더하고 끝내기. (아직이면 다음 프레임에 다시 본다)
+	//==============================================================================
+	fn poll(self: Pin<&mut AnimationLoadFuture>, context: &mut Context<'_>) -> Poll<Result<(), String>> {
+		match self.animation_load.apply() {
+			Some(apply_result) => {
+				Poll::Ready(apply_result)
+			}
+			None => {
+				context.waker().wake_by_ref();
+				Poll::Pending
+			}
+		}
+	}
+}
+
+impl IntoFuture for AnimationLoadHandle {
+	type Output = Result<(), String>;
+	type IntoFuture = AnimationLoadFuture;
+
+	//==============================================================================
+	// 손잡이를 그대로 await 하기.
+	//==============================================================================
+	fn into_future(self) -> AnimationLoadFuture {
+		AnimationLoadFuture {
+			animation_load: self.animation_load,
+		}
+	}
+}
+
+//==============================================================================
+// FBX 의 애니메이션들을 모델의 클립으로 바꾸기. (노드는 이름으로 맞추고, 이동 무시면 이동 채널을 뺀다. 채널이 없는 것은 뺀다)
+//==============================================================================
+fn convert_fbx_scene_animations(node_index_by_name: &HashMap<String, usize>, scene_data: &FbxSceneData, clip_name: &str, ignore_translation: bool) -> Vec<AnimationClip> {
+	let mut added_clip_list = Vec::new();
+	for fbx_animation in scene_data.animation_list.iter() {
+		if fbx_animation.channels.is_empty() {
+			continue;
+		}
+		let mut channels = convert_fbx_animation_channels(scene_data, fbx_animation, |node_index| {
+			let source_name = scene_data.node_list.get(node_index)?.name.as_str();
+			node_index_by_name.get(source_name).copied()
+		});
+		if ignore_translation {
+			channels.retain(|channel| channel.path != AnimationPath::Translation);
+		}
+		added_clip_list.push(AnimationClip {
+			name: clip_name.to_string(),
+			duration: fbx_animation.duration,
+			channels,
+		});
+	}
+	added_clip_list
 }
 
 //==============================================================================
@@ -547,7 +690,7 @@ impl SkinnedModel {
 			root_node_indices: Vec::new(),
 			skin_list: Vec::new(),
 			drawable_list: Vec::new(),
-			animation_list: Vec::new(),
+			animation_list: Rc::new(RefCell::new(Vec::new())),
 			current_animation_index: None,
 			previous_animation_index: None,
 			current_time: 0.0,
@@ -960,8 +1103,9 @@ impl SkinnedModel {
 				});
 			}
 		}
-		self.animation_list = animation_list;
-		if !self.animation_list.is_empty() {
+		let has_animation = !animation_list.is_empty();
+		*self.animation_list.borrow_mut() = animation_list;
+		if has_animation {
 			self.current_animation_index = Some(0);
 		}
 		Ok((mesh_description_list, material_description_list))
@@ -1163,7 +1307,7 @@ impl SkinnedModel {
 		}
 
 		// 애니메이션 구성. (회전 채널은 오일러 도 → 사전회전 합성 쿼터니언 4성분으로 변환)
-		self.animation_list = scene_data.animation_list.iter().map(|fbx_animation| {
+		let animation_list: Vec<AnimationClip> = scene_data.animation_list.iter().map(|fbx_animation| {
 			let channels = convert_fbx_animation_channels(scene_data, fbx_animation, Some);
 			AnimationClip {
 				name: fbx_animation.name.clone(),
@@ -1171,7 +1315,9 @@ impl SkinnedModel {
 				channels,
 			}
 		}).collect();
-		if !self.animation_list.is_empty() {
+		let has_animation = !animation_list.is_empty();
+		*self.animation_list.borrow_mut() = animation_list;
+		if has_animation {
 			self.current_animation_index = Some(0);
 		}
 		Ok((mesh_description_list, material_description_list))
@@ -1183,29 +1329,19 @@ impl SkinnedModel {
 	// - ignore_translation: 루트 모션이 박힌 클립에서 이동 채널을 버린다. (게임 로직이 위치를 제어할 때)
 	//==============================================================================
 	pub fn add_animations_from_fbx_scene_data(&mut self, scene_data: &FbxSceneData, clip_name: &str, ignore_translation: bool) {
-		let mut node_index_by_name: HashMap<&str, usize> = HashMap::new();
+		let mut added_clip_list = convert_fbx_scene_animations(&self.create_node_index_by_name(), scene_data, clip_name, ignore_translation);
+		self.animation_list.borrow_mut().append(&mut added_clip_list);
+	}
+
+	//==============================================================================
+	// 노드 이름 → 인덱스 표. (애니메이션 FBX 의 노드를 이름으로 맞출 때)
+	//==============================================================================
+	fn create_node_index_by_name(&self) -> HashMap<String, usize> {
+		let mut node_index_by_name: HashMap<String, usize> = HashMap::new();
 		for (node_index, node) in self.node_list.iter().enumerate() {
-			node_index_by_name.insert(node.name.as_str(), node_index);
+			node_index_by_name.insert(node.name.clone(), node_index);
 		}
-		let mut added_clip_list = Vec::new();
-		for fbx_animation in scene_data.animation_list.iter() {
-			if fbx_animation.channels.is_empty() {
-				continue;
-			}
-			let mut channels = convert_fbx_animation_channels(scene_data, fbx_animation, |node_index| {
-				let source_name = scene_data.node_list.get(node_index)?.name.as_str();
-				node_index_by_name.get(source_name).copied()
-			});
-			if ignore_translation {
-				channels.retain(|channel| channel.path != AnimationPath::Translation);
-			}
-			added_clip_list.push(AnimationClip {
-				name: clip_name.to_string(),
-				duration: fbx_animation.duration,
-				channels,
-			});
-		}
-		self.animation_list.append(&mut added_clip_list);
+		node_index_by_name
 	}
 
 	//==============================================================================
@@ -1218,39 +1354,31 @@ impl SkinnedModel {
 	}
 
 	//==============================================================================
-	// 애니메이션 FBX 추가. (애셋 경로, 원본 addAnimationsFromFbxUrl. 다 받으면 다음 update 나 play_animation 에서 클립을 더한다)
-	// - 돌려준 손잡이를 씬에 맡기거나 엔진 작업 안에서 await 하면 다 받을 때까지 기다릴 수 있다. (await 하면 파싱 결과가 나오고, 클립은 다음 update 나 play_animation 에서 더해진다)
-	//   받기나 파싱에 실패하면 클립을 더하지 않고 오류를 찍는다. (원본은 Promise 가 거부된다)
+	// 애니메이션 FBX 추가. (애셋 경로, 원본 addAnimationsFromFbxUrl, await 할 수 있는 손잡이를 돌려준다)
+	// - await 하면 다 받아 클립을 더할 때까지 기다린다. (원본처럼 await 가 끝날 때는 클립이 이미 더해져 있다)
+	//   await 하지 않아도 다 받은 뒤 다음 update 나 play_animation 에서 더한다. 받은 차례로 더한다. (원본 async 함수가 끝나는 차례)
+	// - 받기나 파싱에 실패하면 클립을 더하지 않고 오류를 찍고, await 는 까닭으로 끝난다. (원본은 Promise 가 거부된다)
 	//==============================================================================
-	pub fn add_animations_from_fbx_url(&mut self, engine: &Engine, url: &str, clip_name: &str, ignore_translation: bool) -> FbxLoadHandle {
-		let fbx_load_handle = FbxLoader::load_from_url(engine, url);
-		self.pending_animation_load_list.push((fbx_load_handle.clone(), String::from(clip_name), ignore_translation));
-		fbx_load_handle
+	pub fn add_animations_from_fbx_url(&mut self, engine: &Engine, url: &str, clip_name: &str, ignore_translation: bool) -> AnimationLoadHandle {
+		let animation_load_handle = AnimationLoadHandle {
+			animation_load: Rc::new(AnimationLoad {
+				fbx_load_handle: FbxLoader::load_from_url(engine, url),
+				clip_name: String::from(clip_name),
+				ignore_translation,
+				node_index_by_name: self.create_node_index_by_name(),
+				animation_list: self.animation_list.clone(),
+				apply_result: RefCell::new(None),
+			}),
+		};
+		self.pending_animation_load_list.push(animation_load_handle.clone());
+		animation_load_handle
 	}
 
 	//==============================================================================
-	// 다 받은 애니메이션 FBX 의 클립 더하기. (부탁한 차례대로, 앞의 것이 받는 중이면 뒤의 것도 기다린다)
+	// 다 받은 애니메이션 FBX 의 클립 더하기. (await 하는 퓨처가 이미 더한 것은 빼기만 한다)
 	//==============================================================================
 	fn apply_finished_animation_loads(&mut self) {
-		while !self.pending_animation_load_list.is_empty() {
-			let scene_data_result = match self.pending_animation_load_list[0].0.get_scene_data() {
-				Some(scene_data_result) => {
-					scene_data_result
-				}
-				None => {
-					return;
-				}
-			};
-			let (_, clip_name, ignore_translation) = self.pending_animation_load_list.remove(0);
-			match scene_data_result {
-				Ok(scene_data) => {
-					self.add_animations_from_fbx_scene_data(&scene_data, &clip_name, ignore_translation);
-				}
-				Err(error_message) => {
-					eprintln!("{}", error_message);
-				}
-			}
-		}
+		self.pending_animation_load_list.retain(|animation_load_handle| animation_load_handle.animation_load.apply().is_none());
 	}
 
 	//==============================================================================
@@ -1674,12 +1802,14 @@ impl SkinnedModel {
 	//==============================================================================
 	pub fn play_animation(&mut self, animation_name: &str, fade_duration: f32) {
 		self.apply_finished_animation_loads();
+		let animation_list = self.animation_list.borrow();
 		if let Some(current_animation_index) = self.current_animation_index {
-			if self.animation_list[current_animation_index].name == animation_name {
+			if animation_list[current_animation_index].name == animation_name {
 				return;
 			}
 		}
-		let found_animation_index = self.animation_list.iter().rposition(|animation| animation.name == animation_name);
+		let found_animation_index = animation_list.iter().rposition(|animation| animation.name == animation_name);
+		drop(animation_list);
 		let found_animation_index = match found_animation_index {
 			Some(found_animation_index) => {
 				found_animation_index
@@ -1700,7 +1830,8 @@ impl SkinnedModel {
 	// 애니메이션 샘플링. (클립 인덱스, 현재 노드 포즈에 가중 블렌딩)
 	//==============================================================================
 	pub fn sample_animation(&mut self, animation_index: usize, time: f32, blend_weight: f32) {
-		let animation = match self.animation_list.get_mut(animation_index) {
+		let mut animation_list = self.animation_list.borrow_mut();
+		let animation = match animation_list.get_mut(animation_index) {
 			Some(animation) => {
 				animation
 			}
@@ -1843,7 +1974,7 @@ impl SkinnedModel {
 	// 애니메이션 이름 목록 반환.
 	//==============================================================================
 	pub fn get_animation_name_list(&self) -> Vec<String> {
-		self.animation_list.iter().map(|animation| animation.name.clone()).collect()
+		self.animation_list.borrow().iter().map(|animation| animation.name.clone()).collect()
 	}
 
 	//==============================================================================
@@ -1903,10 +2034,10 @@ impl SkinnedModel {
 	}
 
 	//==============================================================================
-	// 애니메이션 클립 목록 반환. (길이, 채널 보기)
+	// 애니메이션 클립 목록 반환. (길이, 채널 보기. 애니메이션 FBX 받기 손잡이와 나눠 드는 목록이라 빌린 값으로 준다)
 	//==============================================================================
-	pub fn get_animation_list(&self) -> &[AnimationClip] {
-		&self.animation_list
+	pub fn get_animation_list(&self) -> std::cell::Ref<'_, [AnimationClip]> {
+		std::cell::Ref::map(self.animation_list.borrow(), |animation_list| animation_list.as_slice())
 	}
 
 	//==============================================================================

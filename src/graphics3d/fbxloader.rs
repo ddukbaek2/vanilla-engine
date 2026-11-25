@@ -2190,6 +2190,19 @@ mod tests {
 		assert!(skinned_model.get_animation_list().is_empty());
 		skinned_model.update(0.0);
 		assert!(skinned_model.get_animation_name_list().contains(&String::from("Walk")));
+
+		// 원본 await addAnimationsFromFbxUrl: 손잡이를 await 하면 끝날 때 클립이 이미 더해져 있고, 다음 update 가 다시 더하지 않는다.
+		let walk_clip_count = scene_data.animation_list.iter().filter(|fbx_animation| !fbx_animation.channels.is_empty()).count();
+		let mut awaited_model = SkinnedModel::create_without_shader_program();
+		let animation_load_handle = awaited_model.add_animations_from_fbx_url(&engine, "anims/walk.fbx", "Walk", true);
+		assert!(awaited_model.get_animation_list().is_empty());
+		let mut animation_load_future = std::future::IntoFuture::into_future(animation_load_handle.clone());
+		let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+		assert_eq!(std::pin::Pin::new(&mut animation_load_future).poll(&mut context), std::task::Poll::Ready(Ok(())));
+		assert!(animation_load_handle.is_finished());
+		assert_eq!(awaited_model.get_animation_name_list().iter().filter(|name| name.as_str() == "Walk").count(), walk_clip_count);
+		awaited_model.update(0.0);
+		assert_eq!(awaited_model.get_animation_name_list().iter().filter(|name| name.as_str() == "Walk").count(), walk_clip_count);
 	}
 
 	//==============================================================================
@@ -2228,11 +2241,13 @@ mod tests {
 		skinned_model.interpret_fbx_content(&scene_data).expect("interpret");
 		let original_animation_count = skinned_model.get_animation_list().len();
 		skinned_model.add_animations_from_fbx_scene_data(&scene_data, "WalkInPlace", true);
-		let animation_list = skinned_model.get_animation_list();
-		assert!(animation_list.len() > original_animation_count);
-		let added_clip = &animation_list[animation_list.len() - 1];
-		assert_eq!(added_clip.name, "WalkInPlace");
-		assert!(added_clip.channels.iter().all(|channel| channel.path != AnimationPath::Translation));
+		{
+			let animation_list = skinned_model.get_animation_list();
+			assert!(animation_list.len() > original_animation_count);
+			let added_clip = &animation_list[animation_list.len() - 1];
+			assert_eq!(added_clip.name, "WalkInPlace");
+			assert!(added_clip.channels.iter().all(|channel| channel.path != AnimationPath::Translation));
+		}
 		skinned_model.play_animation("WalkInPlace", 0.0);
 		skinned_model.update(0.4);
 		let hips_world_matrix = skinned_model.get_node_list()[hips_index].world_matrix;

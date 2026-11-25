@@ -3,7 +3,7 @@
 // - 원본은 BlobAsset 을 상속하고 애셋 타입만 bunch 로 바꾼 뼈대다. 읽기는 BlobAsset 과 같다. (묶음을 푸는 일은 아직 없다)
 // - 러스트 판은 상속 대신 같은 함수를 가진 구조체이고, 애셋 타입이 AssetType::Bunch 다.
 //==============================================================================
-use crate::core::asset::{Asset, AssetBase, AssetType};
+use crate::core::asset::{Asset, AssetBase, AssetLoadHandle, AssetType};
 use crate::core::engine::Engine;
 use std::rc::Rc;
 
@@ -25,10 +25,10 @@ impl BunchAsset {
 	}
 
 	//==============================================================================
-	// 읽기 요청. (원본 load = BlobAsset.load)
+	// 읽기 요청. (원본 load = BlobAsset.load, await 할 수 있는 읽기 손잡이를 돌려준다)
 	//==============================================================================
-	pub fn load(&mut self, engine: &Engine, asset_path: &str) {
-		self.asset_base.request_load(engine, asset_path);
+	pub fn load(&mut self, engine: &Engine, asset_path: &str) -> AssetLoadHandle {
+		self.asset_base.request_load(engine, asset_path)
 	}
 
 	//==============================================================================

@@ -2,7 +2,7 @@
 // 바이너리 애셋. (원본 resource/blobasset.js)
 // - 원본은 fetch 로 받은 Blob 을 든다. 러스트 판은 바이트를 그대로 든다.
 //==============================================================================
-use crate::core::asset::{Asset, AssetBase, AssetType};
+use crate::core::asset::{Asset, AssetBase, AssetLoadHandle, AssetType};
 use crate::core::engine::Engine;
 use std::rc::Rc;
 
@@ -24,10 +24,10 @@ impl BlobAsset {
 	}
 
 	//==============================================================================
-	// 읽기 요청. (원본 load)
+	// 읽기 요청. (원본 load, await 할 수 있는 읽기 손잡이를 돌려준다)
 	//==============================================================================
-	pub fn load(&mut self, engine: &Engine, asset_path: &str) {
-		self.asset_base.request_load(engine, asset_path);
+	pub fn load(&mut self, engine: &Engine, asset_path: &str) -> AssetLoadHandle {
+		self.asset_base.request_load(engine, asset_path)
 	}
 
 	//==============================================================================

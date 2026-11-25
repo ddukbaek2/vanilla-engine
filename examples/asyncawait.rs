@@ -1,6 +1,7 @@
 //==============================================================================
 // async/await 예제. (원본 vanilla.js 의 async load, await asset.load, Wait.seconds, fadeScreen(async () => ...) 를 같은 꼴로 쓴다)
-// - 불러오기: load_assets 에서 불러오기 작업을 맡기고 씬에 맡긴다. 작업은 아틀라스 JSON 과 쪽 그림을 await 로 기다리고, 0.5초 쉰 뒤 씬에 넣는다.
+// - 불러오기: load_assets 에서 불러오기 작업을 맡기고 씬에 맡긴다. 작업은 원본 async 함수처럼 맡기는 자리에서 첫 await 까지 돌고,
+//   씬의 아틀라스가 load 가 돌려준 손잡이로 JSON 과 쪽 그림을 await 로 기다린 뒤 0.5초 쉰다.
 //   작업이 끝날 때까지 GameSceneBase 의 로딩 화면이 보인다. (원본 async load 를 기다리는 동안의 drawOnLoad)
 // - 이야기: initialize 에서 맡긴 씬 작업 하나가 원본 async 함수처럼 위에서 아래로 돈다. 글을 바꾸고, 1초 기다리고(wait::seconds),
 //   아이콘을 한 프레임씩 옮기고(wait::next_frame), 화면이 어두운 동안 아이콘을 바꾼다(fade_screen_async). 페이드가 끝나기는 Promise 로 기다린다.
@@ -8,8 +9,7 @@
 // - 원본 JS 와 나란히:
 //     async loadAssets() {                                   fn load_assets(&mut self, engine: &mut Engine) {
 //         await super.loadAssets();                              let load_task_handle = engine.spawn_scene_task(self, |mut scene_context| async move {
-//         await this.atlas.load("atlas/icons.json");                 scene_context.with(|_scene, engine| sprite_atlas.load(engine, "atlas/icons.json"));
-//                                                                     sprite_atlas.wait_for_load().await;
+//         await this.atlas.load("atlas/icons.json");                 scene_context.with(|scene, engine| scene.sprite_atlas.load(engine, "atlas/icons.json")).await;
 //         await Wait.seconds(0.5);                                   wait::seconds(0.5).await;
 //     }                                                          });
 //                                                                self.game_scene_base.get_scene_base_mut().track_task(&load_task_handle);
@@ -38,10 +38,10 @@ const ICON_Y: f32 = 300.0;
 const ICON_MOVE_FRAME_COUNT: u32 = 60;
 // 원본 JS 와 러스트를 나란히 보이는 줄. (원본, 러스트)
 const CODE_PAIR_LIST: [(&str, &str); 4] = [
-	("await this.atlas.load(\"atlas/icons.json\")", "atlas.load(engine, ...); atlas.wait_for_load().await"),
+	("await this.atlas.load(\"atlas/icons.json\")", "context.with(|scene, engine| scene.atlas.load(engine, ...)).await"),
 	("await Wait.seconds(1)", "wait::seconds(1.0).await"),
 	("await Wait.nextFrame()", "wait::next_frame().await"),
-	("this.fadeScreen(async () => { ... })", "scene.fade_screen_async(engine, |context| async move { ... })"),
+	("this.fadeScreen(async () => { ... })", "scene.fade_screen_async(|context| async move { ... })"),
 ];
 
 //==============================================================================
@@ -63,7 +63,7 @@ fn create_text_node(node_tree: &mut NodeTree, parent_id: NodeId, x: f32, y: f32,
 //==============================================================================
 struct AsyncAwaitScene {
 	game_scene_base: GameSceneBase,
-	sprite_atlas: Option<SpriteAtlas>,
+	sprite_atlas: SpriteAtlas,
 	status_node_id: Option<NodeId>,
 	icon_node_id: Option<NodeId>,
 	icon_frame_index: usize,
@@ -80,7 +80,7 @@ impl AsyncAwaitScene {
 		game_scene_base.set_scene_background_color(BACKGROUND_COLOR);
 		AsyncAwaitScene {
 			game_scene_base,
-			sprite_atlas: None,
+			sprite_atlas: SpriteAtlas::new(),
 			status_node_id: None,
 			icon_node_id: None,
 			icon_frame_index: 0,
@@ -126,18 +126,18 @@ impl AsyncAwaitScene {
 	// 아이콘 그림을 다음 조각으로 바꾸기.
 	//==============================================================================
 	fn apply_next_icon_frame(&mut self) {
-		let (sprite_atlas, icon_node_id) = match (&self.sprite_atlas, self.icon_node_id) {
-			(Some(sprite_atlas), Some(icon_node_id)) => {
-				(sprite_atlas, icon_node_id)
+		let icon_node_id = match self.icon_node_id {
+			Some(icon_node_id) => {
+				icon_node_id
 			}
-			_ => {
+			None => {
 				return;
 			}
 		};
 		self.icon_frame_index = (self.icon_frame_index + 1) % ICON_FRAME_NAMES.len();
 		let node_tree = self.game_scene_base.get_scene_base_mut().get_node_tree_mut();
 		if let Some(sprite) = node_tree[icon_node_id].get_component_mut::<Sprite>() {
-			sprite_atlas.apply_frame(sprite, ICON_FRAME_NAMES[self.icon_frame_index]);
+			self.sprite_atlas.apply_frame(sprite, ICON_FRAME_NAMES[self.icon_frame_index]);
 		}
 	}
 
@@ -168,9 +168,7 @@ impl AsyncAwaitScene {
 		icon_node.set_pivot(Pivot::TOP_LEFT);
 		icon_node.set_rect(ICON_START_X, ICON_Y, ICON_SIZE, ICON_SIZE);
 		let sprite = icon_node.add_component(Sprite::new());
-		if let Some(sprite_atlas) = &self.sprite_atlas {
-			sprite_atlas.apply_frame(sprite, ICON_FRAME_NAMES[0]);
-		}
+		self.sprite_atlas.apply_frame(sprite, ICON_FRAME_NAMES[0]);
 		self.status_node_id = Some(status_node_id);
 		self.icon_node_id = Some(icon_node_id);
 	}
@@ -190,13 +188,8 @@ impl GameScene for AsyncAwaitScene {
 	//==============================================================================
 	fn load_assets(&mut self, engine: &mut Engine) {
 		let load_task_handle = engine.spawn_scene_task(self, |mut scene_context| async move {
-			let mut sprite_atlas = SpriteAtlas::new();
-			scene_context.with(|_scene, engine| sprite_atlas.load(engine, "atlas/icons.json"));
-			sprite_atlas.wait_for_load().await;
+			scene_context.with(|scene, engine| scene.sprite_atlas.load(engine, "atlas/icons.json")).await;
 			wait::seconds(0.5).await;
-			scene_context.with(move |scene, _engine| {
-				scene.sprite_atlas = Some(sprite_atlas);
-			});
 		});
 		self.game_scene_base.get_scene_base_mut().track_task(&load_task_handle);
 	}
@@ -223,8 +216,8 @@ impl GameScene for AsyncAwaitScene {
 				// 어두운 동안 아이콘을 바꾸고 0.4초 더 어둡게 둔다. 페이드 작업이 끝나기는 Promise 로 기다린다.
 				scene_context.with(|scene, _engine| scene.set_status("어두운 동안 아이콘을 바꿈 (fade_screen_async)"));
 				let (fade_promise, fade_resolver) = Promise::create();
-				scene_context.with(move |scene, engine| {
-					scene.fade_screen_async(engine, move |mut fade_context| async move {
+				scene_context.with(move |scene, _engine| {
+					scene.fade_screen_async(move |mut fade_context| async move {
 						fade_context.with(|fade_scene, _engine| {
 							fade_scene.move_icon(0.0);
 							fade_scene.apply_next_icon_frame();

@@ -5,8 +5,9 @@
 // - JsonAsset 은 원본처럼 TextAsset 의 글(get_text)도 들고, 풀지 못한 JSON 은 읽히지 않은 것(is_loaded 거짓, get_data None)이다.
 //   AssetLoader 로 받으면 원본처럼 실패 목록에 든다. (푼 자료는 AssetLoader 의 목록 칸과 나눠 들어 한 번만 푼다)
 // - set_no_cache: 참이면 웹 fetch 에 cache: "no-cache" 를 붙여 배포 뒤 옛 자료를 쓰지 않게 한다. (원본과 같다, 데스크탑 파일 읽기에는 캐시가 없다)
+// - load 는 원본처럼 await 할 수 있는 읽기 손잡이를 돌려준다. (원본 JsonAsset.load 처럼 풀지 못한 JSON 도 받기만 끝나면 끝나고 get_data 가 None 이다)
 //==============================================================================
-use crate::core::asset::{Asset, AssetBase, AssetType};
+use crate::core::asset::{Asset, AssetBase, AssetLoadHandle, AssetType};
 use crate::core::engine::Engine;
 use std::cell::OnceCell;
 use std::rc::Rc;
@@ -66,10 +67,10 @@ impl TextAsset {
 	}
 
 	//==============================================================================
-	// 읽기 요청. (원본 load)
+	// 읽기 요청. (원본 load, await 할 수 있는 읽기 손잡이를 돌려준다)
 	//==============================================================================
-	pub fn load(&mut self, engine: &Engine, asset_path: &str) {
-		self.asset_base.request_load_with_cache(engine, asset_path, self.is_no_cache);
+	pub fn load(&mut self, engine: &Engine, asset_path: &str) -> AssetLoadHandle {
+		self.asset_base.request_load_with_cache(engine, asset_path, self.is_no_cache)
 	}
 
 	//==============================================================================
@@ -156,10 +157,10 @@ impl JsonAsset {
 	}
 
 	//==============================================================================
-	// 읽기 요청. (원본 load)
+	// 읽기 요청. (원본 load, await 할 수 있는 읽기 손잡이를 돌려준다. 원본처럼 풀지 못한 JSON 도 받기만 끝나면 끝나고 get_data 가 None 이다)
 	//==============================================================================
-	pub fn load(&mut self, engine: &Engine, asset_path: &str) {
-		self.asset_base.request_load_with_cache(engine, asset_path, self.is_no_cache);
+	pub fn load(&mut self, engine: &Engine, asset_path: &str) -> AssetLoadHandle {
+		self.asset_base.request_load_with_cache(engine, asset_path, self.is_no_cache)
 	}
 
 	//==============================================================================

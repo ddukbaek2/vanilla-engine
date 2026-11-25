@@ -8,18 +8,101 @@
 //   데스크탑은 load / load_from_bytes 가 그 자리에서 파일을 읽고 디코딩한 뒤 돌아온다. 실패하면 Err.
 //   웹은 막을 수 없어서 load 가 fetch 와 디코딩을 걸어 두고 바로 Ok 로 돌아온다. 끝나면 is_loaded() 가 참이 되고,
 //   실패하면 get_load_error() 에 까닭이 남는다. 그 전에 플레이어에 실어 둬도 되고, 버퍼가 없는 동안 play 는 아무것도 하지 않는다.
-//   원본 await audioAsset.load() 자리는 엔진 작업 안에서 wait_for_load().await 다. (디코딩까지 끝나면 Ok, 실패하면 까닭)
+//   load, load_from_bytes, load_from_asset 은 원본처럼 await 할 수 있는 AudioLoadHandle 을 돌려준다. 디코딩까지 끝나면 Ok, 실패하면 까닭(원본 reject)이다.
+//   (그 자리에서 실패를 알 수 있는 데스크탑은 손잡이의 get_load_error 로 바로 본다) 이미 읽기를 건 애셋은 wait_for_load().await 로도 기다린다.
 //   엔진에서는 engine.load_audio_asset("sounds/hit.ogg") 로 애셋 폴더 기준 경로를 읽는다.
 // - 원본과 다른 점:
 //   Asset 기반 클래스(애셋 타입)가 없다. 읽기 실패는 예외 대신 Err 로 알린다. (까닭은 원본 getLoadError 처럼 get_load_error() 에 남는다)
 //   플레이어들이 같이 들 수 있게 Rc<AudioAsset> 로 쓰고, 웹에서 디코딩이 끝난 뒤 채우도록 안쪽을 RefCell 로 둔다.
 //==============================================================================
-use crate::base::wait;
+use crate::core::engine::Engine;
 use crate::platform::audio::{self as audio_backend, AudioBuffer};
 use std::cell::{Cell, RefCell};
-use std::future::Future;
+use std::future::{Future, IntoFuture};
 use std::path::Path;
+use std::pin::Pin;
 use std::rc::Rc;
+use std::task::{Context, Poll};
+
+//==============================================================================
+// 오디오 읽기 손잡이. (AudioAsset 의 load 들이 돌려준다. 원본 load 의 Promise 자리, 애셋을 나눠 든다)
+//==============================================================================
+#[derive(Clone)]
+pub struct AudioLoadHandle {
+	audio_asset: Rc<AudioAsset>,
+}
+
+impl AudioLoadHandle {
+	//==============================================================================
+	// 읽는 애셋.
+	//==============================================================================
+	pub fn get_audio_asset(&self) -> &Rc<AudioAsset> {
+		&self.audio_asset
+	}
+
+	//==============================================================================
+	// 읽기 실패의 까닭. (데스크탑은 그 자리에서, 웹은 디코딩이 끝난 뒤 알 수 있다)
+	//==============================================================================
+	pub fn get_load_error(&self) -> Option<String> {
+		self.audio_asset.get_load_error()
+	}
+
+	//==============================================================================
+	// 끝났는지. (디코딩까지 끝났거나 실패했거나)
+	//==============================================================================
+	pub fn is_finished(&self) -> bool {
+		self.audio_asset.is_loaded() || self.audio_asset.get_load_error().is_some()
+	}
+}
+
+impl std::fmt::Debug for AudioLoadHandle {
+	//==============================================================================
+	// 디버그 출력. (읽혔는지와 실패 까닭)
+	//==============================================================================
+	fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		formatter.debug_struct("AudioLoadHandle").field("is_loaded", &self.audio_asset.is_loaded()).field("load_error", &self.audio_asset.get_load_error()).finish()
+	}
+}
+
+//==============================================================================
+// 오디오 읽기를 기다리는 퓨처. (AudioLoadHandle 을 await 하거나 wait_for_load 가 돌려준다. 읽기를 걸지 않은 애셋이면 끝나지 않는다)
+//==============================================================================
+#[derive(Clone, Debug)]
+pub struct AudioLoadFuture {
+	audio_load_handle: AudioLoadHandle,
+}
+
+impl Future for AudioLoadFuture {
+	type Output = Result<(), String>;
+
+	//==============================================================================
+	// 끝났는지 보기. (아직이면 다음 프레임에 다시 본다)
+	//==============================================================================
+	fn poll(self: Pin<&mut AudioLoadFuture>, context: &mut Context<'_>) -> Poll<Result<(), String>> {
+		if self.audio_load_handle.audio_asset.is_loaded() {
+			return Poll::Ready(Ok(()));
+		}
+		if let Some(load_error) = self.audio_load_handle.audio_asset.get_load_error() {
+			return Poll::Ready(Err(load_error));
+		}
+		context.waker().wake_by_ref();
+		Poll::Pending
+	}
+}
+
+impl IntoFuture for AudioLoadHandle {
+	type Output = Result<(), String>;
+	type IntoFuture = AudioLoadFuture;
+
+	//==============================================================================
+	// 손잡이를 그대로 await 하기.
+	//==============================================================================
+	fn into_future(self) -> AudioLoadFuture {
+		AudioLoadFuture {
+			audio_load_handle: self,
+		}
+	}
+}
 
 //==============================================================================
 // 오디오 애셋.
@@ -43,26 +126,46 @@ impl AudioAsset {
 	}
 
 	//==============================================================================
-	// 파일에서 읽기. (데스크탑: 바로 읽고 디코딩한다. 웹: 경로를 주소로 fetch 하고 디코딩을 걸어 둔다)
+	// 파일에서 읽기. (데스크탑: 바로 읽고 디코딩한다. 웹: 경로를 주소로 fetch 하고 디코딩을 걸어 둔다, await 할 수 있는 손잡이를 돌려준다)
 	// - 이미 로드된 상태라면 아무것도 하지 않는다.
 	//==============================================================================
-	pub fn load(self: &Rc<AudioAsset>, asset_path: &Path) -> Result<(), String> {
-		if self.is_loaded() {
-			return Ok(());
+	pub fn load(self: &Rc<AudioAsset>, asset_path: &Path) -> AudioLoadHandle {
+		if !self.is_loaded() {
+			self.load_error.replace(None);
+			if let Err(load_error) = audio_backend::load_audio_file(self, asset_path) {
+				self.set_load_error(load_error);
+			}
 		}
-		self.load_error.replace(None);
-		audio_backend::load_audio_file(self, asset_path)
+		self.create_load_handle()
 	}
 
 	//==============================================================================
-	// 메모리에서 읽기. (파일 내용 그대로. 데스크탑: 바로 디코딩한다. 웹: 디코딩을 걸어 둔다)
+	// 애셋 경로로 읽기. (데스크탑은 애셋 폴더 후보, 웹은 asset_base_url 기준. 원본 load(경로) 의 상대 경로 자리, await 할 수 있는 손잡이를 돌려준다)
 	//==============================================================================
-	pub fn load_from_bytes(self: &Rc<AudioAsset>, bytes: Vec<u8>) -> Result<(), String> {
-		if self.is_loaded() {
-			return Ok(());
+	pub fn load_from_asset(self: &Rc<AudioAsset>, engine: &Engine, relative_path: &str) -> AudioLoadHandle {
+		self.load(&engine.resolve_audio_asset_path(relative_path))
+	}
+
+	//==============================================================================
+	// 메모리에서 읽기. (파일 내용 그대로. 데스크탑: 바로 디코딩한다. 웹: 디코딩을 걸어 둔다, await 할 수 있는 손잡이를 돌려준다)
+	//==============================================================================
+	pub fn load_from_bytes(self: &Rc<AudioAsset>, bytes: Vec<u8>) -> AudioLoadHandle {
+		if !self.is_loaded() {
+			self.load_error.replace(None);
+			if let Err(load_error) = audio_backend::load_audio_bytes(self, bytes) {
+				self.set_load_error(load_error);
+			}
 		}
-		self.load_error.replace(None);
-		audio_backend::load_audio_bytes(self, bytes)
+		self.create_load_handle()
+	}
+
+	//==============================================================================
+	// 읽기 손잡이 만들기. (애셋을 나눠 든다)
+	//==============================================================================
+	fn create_load_handle(self: &Rc<AudioAsset>) -> AudioLoadHandle {
+		AudioLoadHandle {
+			audio_asset: self.clone(),
+		}
 	}
 
 	//==============================================================================
@@ -83,19 +186,15 @@ impl AudioAsset {
 	// 디코딩까지 끝나기를 기다리는 퓨처. (원본 await audioAsset.load() 의 await 자리, 엔진 작업 안에서 await 한다. 실패하면 까닭)
 	// - 애셋을 나눠 들어 빌리지 않는다. 읽기를 걸지 않은 애셋이면 끝나지 않는다.
 	//==============================================================================
-	pub fn wait_for_load(self: &Rc<AudioAsset>) -> impl Future<Output = Result<(), String>> + 'static {
-		let audio_asset = self.clone();
-		async move {
-			loop {
-				if audio_asset.is_loaded() {
-					return Ok(());
-				}
-				if let Some(load_error) = audio_asset.get_load_error() {
-					return Err(load_error);
-				}
-				wait::next_frame().await;
-			}
-		}
+	pub fn wait_for_load(self: &Rc<AudioAsset>) -> AudioLoadFuture {
+		self.create_load_handle().into_future()
+	}
+
+	//==============================================================================
+	// 읽기 손잡이. (애셋을 나눠 든다, 읽기를 건 뒤의 것을 모아 기다릴 때)
+	//==============================================================================
+	pub fn get_load_handle(self: &Rc<AudioAsset>) -> AudioLoadHandle {
+		self.create_load_handle()
 	}
 
 	//==============================================================================
