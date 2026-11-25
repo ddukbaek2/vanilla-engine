@@ -78,6 +78,7 @@
 - ToonPostProcess: set_color_grade(채도, 대비, 색조 색, 색조 양, 안개빛 색, 안개빛 양), set_vignette(가장자리 어둡게). 톤매핑과 감마 뒤에 건다. 색조 색은 밝기를 1 로 맞춰 곱하고, 안개빛은 어두운 곳일수록 그 색 쪽으로 끌어올린다. 기본 값이면 보정이 없어 지금과 같다. 노드 사각형에 낼 때는 resize(사각형 크기) 뒤 end 의 뷰포트로 사각형을 준다. (종말 생존 SceneEffects3D 의 색 고르기에서)
 - MeshBuilder::combine(&[ToonMeshPiece]) 는 움직이지 않는 조각 여럿을 옮겨 한 배열로 잇는다. 바깥선 껍데기와 껍데기 기준 자리, 안쪽 범위도 옮겨 잇고 뼈대는 잇지 않는다. create_faceted_chunk_geometry(반지름, 꼭짓점 배, 축 배) 는 이십면체의 꼭짓점 열둘을 저마다 늘이고 줄인 각진 돌덩이다. (종말 생존 combineMeshArrays, 외계행성 광부 meshbuilder.js)
 - GraphicsQualityGovernor, GraphicsQuality(Auto, High, Low): 가벼운 길(is_lite)을 덮어쓰기(apply_search_text, 웹은 apply_page_query 로 페이지 주소의 ?light, set_lite_override) → 설정(낮음은 늘, 높음은 아님) → 자동(set_auto_lite_default 이거나 FrameProbe 가 처지는 기기로 잼) 차례로 정한다. update(프레임 초, 최대 프레임) 는 자동일 때만 재고 바뀐 프레임에 true. set_render_pixel_ratio_limits(보통, 가벼운 길) 와 apply_render_pixel_ratio(view_manager). 가벼운 길에서 무엇을 줄일지는 게임이 정한다. (외계행성 광부 readIsLite, aberrant isLight)
+- 예제: toonview. 노드 사각형 안 툰(ToonView3D), Camera3D 로 3D 점 위에 얹은 2D 표시, 비치는 공 셋을 먼 것부터, combine 으로 이은 각진 돌덩이, 오른쪽 판은 ToonPostProcess 색 보정과 가장자리 어둡게
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.

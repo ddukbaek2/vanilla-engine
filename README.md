@@ -240,6 +240,7 @@ init();
 | `modelviewer` | 스키닝 3D(glTF, FBX), 그림자, 블룸 |
 | `engineextras` | 테, 진행 고리, 부드러운 그늘, 마우스 커서, 카메라 손짓, 마우스 단추와 손가락 입력 (직접 눌러 본다) |
 | `toonshowcase` | 툰 3D: 기본 도형과 바깥선, GLB 모형의 뼈대 움직임, 셀 셰이딩 |
+| `toonview` | 노드 사각형 안 툰(ToonView3D), Camera3D 로 3D 점 위에 얹은 2D, 비치는 것 정렬, 툰 색 보정 |
 | `audiotone` | 소리 재생, 효과음 풀, 비프 |
 | `gamepadlist` | 연결된 게임패드 목록 |
 | `scenedocument` | UI 문서: vanilla.js 비주얼 에디터 꼴의 씬 파일(.scene.json)을 읽어 노드 트리를 짓고, 다시 내보내 견준다 |
