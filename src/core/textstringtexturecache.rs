@@ -13,6 +13,8 @@
 //   여기서는 캐시가 들고, 켜짐 여부를 키에 넣어 바꾼 다음 그리는 글자부터 바로 그 방식으로 굽는다. (rasterize_text 는 원본 ShadowText 처럼 받지 않는다)
 // - 글 재기(measure_text)는 폰트 문자열과 글이 같으면 다시 재지 않는다. (원본 measureTextMetrics 의 캐시, 2048 개, 넘으면 오래 안 쓴 반을 버린다)
 //   글꼴을 새로 등록하면 비운다. (원본은 웹 글꼴이 받아지면 비운다) measure_text 가 &self 라 캐시는 RefCell 에 든다.
+// - Graphic 없이 재기(measure_text_without_graphic): 원본은 어디서든 공용 2D 캔버스로 글을 잰다. 러스트 판은 글꼴을 등록할 때마다
+//   글꼴 목록(Rc)을 스레드 하나의 전역에 알려 두고, 그 목록으로 잰다. UI 레이아웃이 그리기 전에 글 줄 수를 알아야 할 때 쓴다. (UIConfirmWindow)
 //==============================================================================
 use glow::HasContext;
 use std::cell::{Cell, RefCell};
@@ -20,6 +22,79 @@ use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
+
+//==============================================================================
+// Graphic 없이 재기에 쓰는 글꼴 목록. (마지막으로 글꼴을 등록한 캐시의 것)
+//==============================================================================
+struct SharedFontSet {
+	font_table: HashMap<String, Rc<fontdue::Font>>,
+	default_font: Option<Rc<fontdue::Font>>,
+	default_bold_font: Option<Rc<fontdue::Font>>,
+	fallback_font_list: Vec<Rc<fontdue::Font>>,
+}
+
+thread_local! {
+	static SHARED_FONT_SET: RefCell<Option<SharedFontSet>> = const { RefCell::new(None) };
+}
+
+//==============================================================================
+// Graphic 없이 글 재기. (폰트 문자열과 글, 원본의 공용 캔버스 measureText 자리)
+// - 글꼴 바이트가 없으면 웹은 브라우저 시스템 글꼴로 재고, 데스크탑은 None 이다. (그릴 때도 글이 나오지 않는 상태)
+//==============================================================================
+pub fn measure_text_without_graphic(font_string: &str, text: &str) -> Option<TextMetrics> {
+	let font_description = parse_font_string(font_string);
+	let font_list: Vec<Rc<fontdue::Font>> = SHARED_FONT_SET.with(|shared_font_set_cell| {
+		let shared_font_set = shared_font_set_cell.borrow();
+		let shared_font_set = match shared_font_set.as_ref() {
+			Some(shared_font_set) => {
+				shared_font_set
+			}
+			None => {
+				return Vec::new();
+			}
+		};
+		let mut font_list: Vec<Rc<fontdue::Font>> = Vec::new();
+		let font_key = create_font_key(&font_description.family_name, font_description.is_bold);
+		let regular_font_key = create_font_key(&font_description.family_name, false);
+		if let Some(font) = shared_font_set.font_table.get(&font_key) {
+			font_list.push(font.clone());
+		}
+		else if let Some(font) = shared_font_set.font_table.get(&regular_font_key) {
+			font_list.push(font.clone());
+		}
+		if font_description.is_bold {
+			if let Some(default_bold_font) = &shared_font_set.default_bold_font {
+				font_list.push(default_bold_font.clone());
+			}
+		}
+		if let Some(default_font) = &shared_font_set.default_font {
+			font_list.push(default_font.clone());
+		}
+		for fallback_font in &shared_font_set.fallback_font_list {
+			font_list.push(fallback_font.clone());
+		}
+		font_list
+	});
+	if font_list.is_empty() {
+		#[cfg(target_arch = "wasm32")]
+		{
+			return Some(crate::platform::web::systemfont::measure_text(&font_description, text));
+		}
+		#[cfg(not(target_arch = "wasm32"))]
+		{
+			return None;
+		}
+	}
+	let font_size = font_description.font_size;
+	let glyph_placements = layout_glyphs(&font_list, text, font_size);
+	let advance_width = calculate_advance_width(&font_list, &glyph_placements, font_size);
+	let (font_ascent, font_descent) = read_line_metrics(&font_list[0], font_size);
+	Some(TextMetrics {
+		width: advance_width,
+		font_ascent,
+		font_descent,
+	})
+}
 
 // 캐시 상한. (원본과 같음)
 const MAXIMUM_ENTRY_COUNT: usize = 512;
@@ -183,6 +258,7 @@ impl TextStringTextureCache {
 		let font_key = create_font_key(family_name, is_bold);
 		self.font_table.insert(font_key, Rc::new(font));
 		self.font_registration_count += 1;
+		self.publish_shared_font_set();
 		Ok(())
 	}
 
@@ -198,6 +274,7 @@ impl TextStringTextureCache {
 			self.default_font = Some(font);
 		}
 		self.font_registration_count += 1;
+		self.publish_shared_font_set();
 		Ok(())
 	}
 
@@ -208,7 +285,23 @@ impl TextStringTextureCache {
 		let font = load_font(font_bytes)?;
 		self.fallback_font_list.push(Rc::new(font));
 		self.font_registration_count += 1;
+		self.publish_shared_font_set();
 		Ok(())
+	}
+
+	//==============================================================================
+	// 글꼴 목록을 Graphic 없이 재기에 알리기. (measure_text_without_graphic)
+	//==============================================================================
+	fn publish_shared_font_set(&self) {
+		let shared_font_set = SharedFontSet {
+			font_table: self.font_table.clone(),
+			default_font: self.default_font.clone(),
+			default_bold_font: self.default_bold_font.clone(),
+			fallback_font_list: self.fallback_font_list.clone(),
+		};
+		SHARED_FONT_SET.with(|shared_font_set_cell| {
+			*shared_font_set_cell.borrow_mut() = Some(shared_font_set);
+		});
 	}
 
 	//==============================================================================

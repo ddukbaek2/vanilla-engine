@@ -8,15 +8,15 @@
 //   층 순서는 원본과 같다: 바탕 → 선택 영역 → 글 → 조합 밑줄 → 커서 → 포커스 테두리. 한 컴포넌트가 한 번에 그려서
 //   씬 코드가 tick 밖에서 set_text 를 불러도 그 프레임에 바로 보인다. (자식 노드로 나누면 상태를 옮기느라 한 프레임 늦는다)
 // - 입력은 엔진의 글 입력 줄(core/textinput.rs)에서 받는다. 포커스를 가진, attach() 한 필드가 tick 에서 꺼내 쓴다.
-//   - 데스크탑: winit 의 KeyboardInput 과 Ime 이벤트. use_dominput(원본 set_use_dominput)이 켜진 필드가 포커스를 가질 때만 IME 가 켜진다.
+//   - 데스크탑: winit 의 KeyboardInput 과 Ime 이벤트. use_dom_input(원본 setUseDOMInput)이 켜진 필드가 포커스를 가질 때만 IME 가 켜진다.
 //   - 웹: 원본처럼 필드마다 숨긴 DOM <input> 을 필드 위에 둔다. (platform/web/textinput.rs) 값과 선택은 DOM 이 주인이고 필드가 따라간다.
-//     use_dominput 이 꺼진 필드는 원본 캔버스 모드처럼 window keydown 으로 받는다.
+//     use_dom_input 이 꺼진 필드는 원본 캔버스 모드처럼 window keydown 으로 받는다.
 // - 원본과 다른 것:
 //   - 이벤트는 Box<dyn FnMut(&mut UIInputField, &mut ComponentContext)> 다. 원본 콜백은 값만 받는다. (값은 field.get_text())
 //   - setFont(FontFace) 는 set_font_family(등록한 폰트 이름) 로 바꿨다. setEngine 은 옮기지 않았다. (엔진은 문맥으로 받는다)
 //   - 글자 자리는 문자(char) 단위다. (원본은 UTF-16 단위. 한글은 같다) max_length 도 문자 수다.
 //   - 누른 자리 → 글자 자리는 draw 때 재 둔 글자 경계로 찾는다. (원본은 오프스크린 2D 캔버스로 그때그때 잰다)
-//   - 데스크탑에서는 use_dominput 이 켜진 필드도 원본 DOM 모드처럼 필드 밖을 누르면 포커스를 잃는다. 포커스는 엔진에 하나뿐이다.
+//   - 데스크탑에서는 use_dom_input 이 켜진 필드도 원본 DOM 모드처럼 필드 밖을 누르면 포커스를 잃는다. 포커스는 엔진에 하나뿐이다.
 //     (원본 캔버스 모드는 다른 필드를 눌러도 앞 필드가 포커스를 쥐고 있다. 러스트 판은 나중에 포커스를 얻은 필드만 남긴다)
 //   - 포커스를 잃을 때 조합 중이던 글은 확정해 값에 넣는다. (브라우저가 DOM 입력에 하는 일과 같다)
 //   - 데스크탑 문맥 메뉴(오른쪽 단추)는 DOM 이 없어 캔버스에 그린다. 루트의 마지막 자식 노드로 만들어 위에 그린다. 웹은 원본처럼 DOM 메뉴다.
@@ -352,7 +352,7 @@ pub struct UIInputField {
 	focus_serial: u64,
 	blink_timer: f32,
 	is_cursor_visible: bool,
-	use_dominput: bool,
+	use_dom_input: bool,
 	use_touch_end_focus: bool,
 	use_direct_touch: bool,
 	is_attached: bool,
@@ -405,7 +405,7 @@ impl UIInputField {
 			focus_serial: 0,
 			blink_timer: 0.0,
 			is_cursor_visible: true,
-			use_dominput: false,
+			use_dom_input: false,
 			use_touch_end_focus: false,
 			use_direct_touch: false,
 			is_attached: false,
@@ -462,17 +462,17 @@ impl UIInputField {
 	}
 
 	//==============================================================================
-	// 플랫폼 글 입력 사용 설정. (원본 set_use_dominput. 켜야 한글 IME, 모바일 키보드, 웹 시스템 붙여넣기가 된다. 기본 꺼짐)
+	// 플랫폼 글 입력 사용 설정. (원본 setUseDOMInput. 켜야 한글 IME, 모바일 키보드, 웹 시스템 붙여넣기가 된다. 기본 꺼짐)
 	//==============================================================================
-	pub fn set_use_dominput(&mut self, use_dominput: bool) {
-		self.use_dominput = use_dominput;
+	pub fn set_use_dom_input(&mut self, use_dom_input: bool) {
+		self.use_dom_input = use_dom_input;
 	}
 
 	//==============================================================================
 	// 플랫폼 글 입력 사용 여부.
 	//==============================================================================
-	pub fn is_using_dominput(&self) -> bool {
-		self.use_dominput
+	pub fn is_using_dom_input(&self) -> bool {
+		self.use_dom_input
 	}
 
 	//==============================================================================
@@ -734,7 +734,7 @@ impl UIInputField {
 	//==============================================================================
 	pub fn detach(&mut self) {
 		self.is_attached = false;
-		if self.use_dominput {
+		if self.use_dom_input {
 			self.is_focused = false;
 			self.focus_serial = 0;
 			self.is_composing = false;
@@ -890,7 +890,7 @@ impl UIInputField {
 	// 값과 선택이 웹 DOM 을 따라가는지. (웹에서 attach 한 DOM 입력 필드)
 	//==============================================================================
 	fn is_dom_synchronized(&self) -> bool {
-		cfg!(target_arch = "wasm32") && self.use_dominput && self.is_attached
+		cfg!(target_arch = "wasm32") && self.use_dom_input && self.is_attached
 	}
 
 	//==============================================================================
@@ -1160,7 +1160,7 @@ impl UIInputField {
 	// 필드 밖을 눌렀으면 포커스를 뺀다. (원본 DOM 모드의 캔버스 누름 처리. 문맥 메뉴 위는 밖으로 치지 않는다)
 	//==============================================================================
 	fn blur_on_outside_press(&mut self, context: &mut ComponentContext) {
-		if !self.is_focused || !self.use_dominput {
+		if !self.is_focused || !self.use_dom_input {
 			return;
 		}
 		let input_manager = context.get_engine().get_input_manager();
@@ -1220,7 +1220,7 @@ impl UIInputField {
 			focus_serial: self.focus_serial,
 			is_focused: self.is_focused,
 			is_attached: self.is_attached,
-			use_dominput: self.use_dominput,
+			use_dominput: self.use_dom_input,
 			use_touch_end_focus: self.use_touch_end_focus,
 			use_direct_touch: self.use_direct_touch,
 			is_visible: is_node_visible_in_hierarchy(node_tree, node_id),
@@ -1707,7 +1707,7 @@ mod tests {
 		node_tree[field_id].set_local_position(Vector2::create(100.0, 100.0));
 		node_tree[field_id].set_content_size(Vector2::create(300.0, 60.0));
 		let field = node_tree.add_component(field_id, UIInputField::new()).expect("field");
-		field.set_use_dominput(true);
+		field.set_use_dom_input(true);
 		field.attach();
 		(node_tree, field_id)
 	}
@@ -1971,7 +1971,7 @@ mod tests {
 		let second_field_id = node_tree.create_child(root_id, "second");
 		node_tree[second_field_id].set_local_position(Vector2::create(100.0, 300.0));
 		node_tree[second_field_id].set_content_size(Vector2::create(300.0, 60.0));
-		node_tree.add_component(second_field_id, UIInputField::new()).expect("field").set_use_dominput(true);
+		node_tree.add_component(second_field_id, UIInputField::new()).expect("field").set_use_dom_input(true);
 
 		get_field(&mut node_tree, first_field_id).focus();
 		run_frame(&mut node_tree, &mut engine);

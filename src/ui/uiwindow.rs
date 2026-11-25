@@ -10,12 +10,13 @@
 //     러스트 판은 창 노드에 붙는 컴포넌트이고, 덮어쓸 자리는 UIWindowBehavior 트레이트다. (기본 구현은 UIWindowDefaultBehavior,
 //     덮어쓴 쪽이 원본 super 처럼 기본을 부르려면 UIWindow::layout_panel_default, apply_motion_default, set_covered_default)
 //     판 모양(그림자, 테, 글로시)은 게임이 build 에서 틀에 꾸밈 노드를 붙이고(판 뒤는 set_sibling_index(0)) layout_panel 에서 놓는다.
-//   - 창 노드는 UIWindow::create(node_tree, layer_id, name, behavior) 로 창 층 노드 밑에 만든다. 닫는 움직임이 끝나면 지워지므로 다시 띄울 때는 새로 만든다.
-//     (원본은 떼어 낸 창 객체를 다시 띄울 수 있다)
+//   - 창 노드는 UIWindow::create(node_tree, layer_id, name, behavior) 로 창 층 노드 밑에 만든다. 닫는 움직임이 끝나면 층에서 떼어 내고 지우지 않으므로
+//     원본처럼 같은 창 노드를 다시 띄울 수 있다. (UIWindowLayer::open_window)
 //   - 닫기는 창 층을 거친다. 씬과 콜백 코드는 UIWindow::close_in_tree(node_tree, window_id) 를 부른다.
 //   - 알림(set_close_event)은 인자 없는 Box<dyn FnMut()> 다. (PopupMotion 알림과 같은 꼴, 노드를 바꿀 일은 씬이 tick 에서 상태를 보고 한다)
-//   - 휠은 원본처럼 맨 위 창이 먼저 받지 않고, 엔진의 휠 전달대로 가리킨 노드부터 부모 쪽으로 간다. 그 자리의 스크롤 뷰가 먼저 받고,
-//     받지 않으면 창(UIWindowBehavior::handle_wheel)이 받는다. 창은 휠을 늘 삼켜 뒤로 넘기지 않는다.
+//   - 휠은 원본처럼 GameSceneBase 가 창 층 안을 가리킨 휠을 UIWindowLayer::scroll_window_at 으로 넘겨 맨 위 창(UIWindowBehavior::handle_wheel)이 먼저 받고,
+//     받지 않으면 그 자리의 스크롤 뷰가 받는다. GameSceneBase 를 거치지 않는 엔진의 휠 전달(가리킨 노드부터 부모 쪽)로 창에 온 휠도 창이 받고 늘 삼킨다.
+//   - 판과 어둠의 Paint 는 노드의 컴포넌트라 get_panel_paint, get_dim_paint 가 트리를 받는다.
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::pivot::Pivot;
@@ -108,7 +109,7 @@ pub trait UIWindowBehavior: Any {
 	//==============================================================================
 	// 그 자리의 스크롤 뷰가 받지 않은 휠. (받았으면 true, 창은 어느 쪽이든 휠을 삼킨다)
 	//==============================================================================
-	fn handle_wheel(&mut self, _node_tree: &mut NodeTree, _parts: &UIWindowParts, _wheel_delta: Vector2) -> bool {
+	fn handle_wheel(&mut self, _node_tree: &mut NodeTree, _parts: &UIWindowParts, _view_input_position: Vector2, _wheel_delta: Vector2) -> bool {
 		false
 	}
 
@@ -297,6 +298,90 @@ impl UIWindow {
 	//==============================================================================
 	pub fn get_dim_node(&self) -> Option<NodeId> {
 		self.dim_id
+	}
+
+	//==============================================================================
+	// 판의 Paint. (기본 판 그림, 바꾸거나 끌 때. 붙기 전이면 None)
+	//==============================================================================
+	pub fn get_panel_paint<'a>(&self, node_tree: &'a NodeTree) -> Option<&'a Paint> {
+		self.panel_id.and_then(|panel_id| node_tree.get_node(panel_id)).and_then(|panel_node| panel_node.get_component::<Paint>())
+	}
+
+	//==============================================================================
+	// 판의 Paint. (변경용)
+	//==============================================================================
+	pub fn get_panel_paint_mut<'a>(&self, node_tree: &'a mut NodeTree) -> Option<&'a mut Paint> {
+		self.panel_id.and_then(move |panel_id| node_tree.get_node_mut(panel_id)).and_then(|panel_node| panel_node.get_component_mut::<Paint>())
+	}
+
+	//==============================================================================
+	// 어둠의 Paint. (붙기 전이면 None)
+	//==============================================================================
+	pub fn get_dim_paint<'a>(&self, node_tree: &'a NodeTree) -> Option<&'a Paint> {
+		self.dim_id.and_then(|dim_id| node_tree.get_node(dim_id)).and_then(|dim_node| dim_node.get_component::<Paint>())
+	}
+
+	//==============================================================================
+	// 어둠의 Paint. (변경용)
+	//==============================================================================
+	pub fn get_dim_paint_mut<'a>(&self, node_tree: &'a mut NodeTree) -> Option<&'a mut Paint> {
+		self.dim_id.and_then(move |dim_id| node_tree.get_node_mut(dim_id)).and_then(|dim_node| dim_node.get_component_mut::<Paint>())
+	}
+
+	//==============================================================================
+	// 마지막으로 받은 영역의 가로. (UI 층 단위)
+	//==============================================================================
+	pub fn get_view_width(&self) -> f32 {
+		self.view_width
+	}
+
+	//==============================================================================
+	// 마지막으로 받은 영역의 세로. (UI 층 단위)
+	//==============================================================================
+	pub fn get_view_height(&self) -> f32 {
+		self.view_height
+	}
+
+	//==============================================================================
+	// 영역 가장자리와 판 사이 거리 반환.
+	//==============================================================================
+	pub fn get_margin(&self) -> f32 {
+		self.margin
+	}
+
+	//==============================================================================
+	// 판의 세로 반환. (set_panel_height 의 값)
+	//==============================================================================
+	pub fn get_panel_height(&self) -> f32 {
+		self.panel_height
+	}
+
+	//==============================================================================
+	// 마지막으로 놓은 판의 자리. (창 좌표, 움직임 전, 줄인 배율을 곱한 크기)
+	//==============================================================================
+	pub fn get_panel_rect(&self) -> Rect {
+		self.panel_rect
+	}
+
+	//==============================================================================
+	// 판이 영역보다 커서 줄인 배율. (1 이하)
+	//==============================================================================
+	pub fn get_panel_scale(&self) -> f32 {
+		self.panel_scale
+	}
+
+	//==============================================================================
+	// 휠 받기. (UIWindowBehavior::handle_wheel, 받았으면 true, 원본 handleWheel)
+	//==============================================================================
+	pub fn handle_wheel(&mut self, node_tree: &mut NodeTree, view_input_position: Vector2, wheel_delta: Vector2) -> bool {
+		match (self.get_parts(), self.behavior.as_mut()) {
+			(Some(parts), Some(behavior)) => {
+				behavior.handle_wheel(node_tree, &parts, view_input_position, wheel_delta)
+			}
+			_ => {
+				false
+			}
+		}
 	}
 
 	//==============================================================================
@@ -681,9 +766,8 @@ impl Component for UIWindow {
 	// 휠. (그 자리의 스크롤 뷰가 받지 않은 휠, 창이 받고 늘 삼킨다)
 	//==============================================================================
 	fn wheel(&mut self, context: &mut ComponentContext, wheel_delta: Vector2) -> bool {
-		if let (Some(parts), Some(behavior)) = (self.get_parts(), self.behavior.as_mut()) {
-			behavior.handle_wheel(context.get_node_tree_mut(), &parts, wheel_delta);
-		}
+		let view_input_position = context.get_engine().get_input_manager().get_view_input_position();
+		self.handle_wheel(context.get_node_tree_mut(), view_input_position, wheel_delta);
 		true
 	}
 }

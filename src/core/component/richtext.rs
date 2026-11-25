@@ -604,6 +604,19 @@ impl Component for RichText {
 		"RichText"
 	}
 
+	//==============================================================================
+	// 자연 크기. (조각을 합친 폭 x 가장 큰 글자 크기, 꺼져 있거나 잴 글꼴이 없으면 -1, -1. 원본 getIntrinsicContentSize)
+	//==============================================================================
+	fn get_intrinsic_content_size(&self) -> Vector2 {
+		if !self.is_enable() {
+			return Vector2::create(-1.0, -1.0);
+		}
+		if crate::core::textstringtexturecache::measure_text_without_graphic(&self.text.build_font_string(), "").is_none() {
+			return Vector2::create(-1.0, -1.0);
+		}
+		self.calculate_intrinsic_content_size(&mut |font_string: &str, text: &str| crate::core::textstringtexturecache::measure_text_without_graphic(font_string, text).map(|text_metrics| text_metrics.width).unwrap_or(0.0))
+	}
+
 	fn is_tick_needed(&self) -> bool {
 		false
 	}

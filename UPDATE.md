@@ -136,6 +136,27 @@
 - Graphic: draw_line_segments(position_values, size). 숫자 배열 하나(선분마다 x0, y0, x1, y1)로 선분 여럿을 한 번에 그린다. 정점 버퍼가 차면 거기까지 그리고 이어 담는다
 - SpriteAtlas: tools/atlas.cjs(vanilla.js)의 JSON 과 { pagePaths, frames } 꼴을 읽는다. load(engine, json_path), load_data, update(웹은 JSON 이 온 뒤 쪽 그림을 청한다), is_loaded, track_json_asset, read_frame, has_frame, apply_frame, get_page_count, get_frame_names, 여러 아틀라스를 차례로 찾는 find_frame_in_order, apply_frame_in_order. 이름은 확장자를 떼고도 찾는다. Sprite.set_frame(frame)
 - 예제: textnodeextras. 글자 칸 맞춤(Text, UILabel), 배율이 움직이는 글, 반투명 고리와 줄어드는 호와 선분 600 개, atlas.cjs 로 구운 아틀라스(examples/assets/atlas), 구운 그림을 나눠 쓰는 그림자 글, 돌아간 판 위의 마우스 자리(convert_view_to_local)
+- Pane, PaneStyle, PaneTheme(원본 web/pane.js): DOM 화면 분할 패널. 웹(wasm32) 빌드에만 있다. 가로나 세로로 자식 패널을 늘어놓고 사이 리사이저를 끌어 크기를 바꾼다. 크기는 PaneSize(Flex, Fixed 픽셀, Ratio 비율), 최소와 최대 크기, 끌 수 있는지와 가장자리(PaneResizableEdges), set_visible(숨기면 자리와 맞닿은 리사이저도 빠진다), reset_layout, refresh, attach_to, set_callback. PaneStyle::create 는 원본 프리셋(toolbar, panel, button, input, textarea, text)을 넣은 요소를 만들고, 스타일 이름은 CSS 이름(background-color)이다. PaneTheme 은 PaneTheme::COLOR_BACKGROUND 꼴 연관 상수다
+- 예제: panelayout. 파티클 에디터 꼴 창 구성(도구 막대, 왼쪽 고정 폭 세로 분할, 오른쪽 flex 패널에 엔진 캔버스). 웹 전용, 데스크탑은 안내만 찍는다
+- DevTools: 원본 F2 개발자 도구를 옮겼다. 창 안쪽 논리 좌표로 오른쪽 아래에 붙는 패널, 끌어 옮기기와 모서리, 꼭짓점, 구분선 크기 바꾸기, 탭 넷(Statistics, Node Hierarchy, Local Storage, Settings), 트리(펼치기, 액티브와 기즈모 칸, 고르기, 스크롤), 인스펙터, 설정 저장("hierarchy.settings"), 화면 비율 가이드, 모든 기즈모 강제 표시. 씬이 tick 에서 tick(engine, node_tree, time_delta), post_draw 에서 draw(engine, node_tree, graphic) 를 부른다. 인스펙터의 컴포넌트 속성은 UIDocument 가 저장하는 키와 값이고, 데스크탑의 로컬 스토리지 입력은 패널 안 입력 창이다. (웹은 원본처럼 window.prompt, window.confirm)
+- UIDocument: serialize_component(node_tree, root_id, component). 등록한 컴포넌트 하나를 문서 데이터로 (등록하지 않은 종류는 경고 없이 None)
+- 예제: devtoolsshowcase. 노드 몇 개를 놓고 개발자 도구를 열어 둔다. (VANILLA_DEVTOOLS_TAB 으로 처음 탭)
+- UI 갈래: vanilla.js 와 UI 기능 차이를 없앤다. (원본에 없던 것은 vanilla.js 에도 넣었다)
+- UINode(원본 ui/uinode.js), 오토레이아웃(ui/autolayout: LayoutSolver, LayoutVariable, LayoutExpression, LayoutConstraint, LayoutStrength, LayoutPriority, LayoutRelation, LayoutConstraintAxis, LayoutError, 원본 Kiwi 기반 솔버 12 파일), UIScene(원본 ui/uiscene.js)을 옮겼다. UINode 는 노드에 붙는 컴포넌트로, 솔버 값을 노드의 자리(부모 UINode 의 왼쪽 위 기준)와 content_size 로 옮긴다. intrinsic content size 는 Component::get_intrinsic_content_size(Text, RichText, UILabel)를 모으고, 바뀌면 스스로 제약을 다시 건다. 솔버가 예외를 던지는 곳은 Result<(), LayoutError> 다
+- UIScene 트레이트와 UISceneBase, ui_scene! 매크로: 솔버, 화면 가이드(screen_node), 세이프 에어리어 가이드(safe_area_layout_guide), tick 마다 트리의 UINode 에 솔버를 붙이고 풀어 노드에 옮긴다. 공통 틀(로딩, 터치, 개발자 도구)은 GameSceneBase 를 품는다
+- GameScene 트레이트와 game_scene! 매크로: 원본 GameScene 을 상속해 덮어쓰는 꼴. 바탕을 먼저 부르고 씬의 같은 이름 함수(load_assets, initialize, layout, tick, pre_draw, draw, post_draw)를 부른다. layout 은 resize 와 뷰 크기 변화 때 바탕이 부르고, post_draw 의 페이드 막과 개발자 도구는 바탕이 그린다. GameSceneBase 함수를 직접 부르는 길도 그대로다
+- GameSceneBase: resize 가 게임 영역 기준(apply_play_area_reference)을 스스로 다시 건다. (씬이 부르지 않아도 된다, resize 는 &mut Engine 을 받는다) tick 은 &mut Engine 을 받는다
+- GameSceneBase: set_play_input_handler(Box<dyn FnMut(PlayInput)>) 로 원본처럼 UI 가 받지 않은 입력을 처리기로 받는다. (모으기 set_play_input_enabled, take_play_inputs 와 함께 쓸 수 있다) fade_screen_with_hold(on_dark) 는 on_dark 가 손잡이를 받아 두었다가 놓는 콜백 꼴이다. (원본 Promise 의 resolve 자리) get_loading_drawer, draw_screen_fade, get_dev_tools, get_dev_tools_mut
+- GameSceneBase: EngineConfiguration::use_dev_tools(기본 true)면 initialize 에서 DevTools 를 만들고 tick 이 넘기고 post_draw 가 그린다. 판 위의 입력은 UI 와 놀이로 넘기지 않는다. (is_dev_tools_capturing_input 은 엔진을 받는다)
+- GameSceneBase: 휠이 창 층(UIWindowLayer) 안을 가리키면 원본처럼 맨 위 창이 먼저 받고, 받지 않으면 그 자리의 스크롤 뷰가 받는다. (UIWindowLayer::scroll_window_at, find_scroll_view_at, find_window_layer_of) TouchRecognizer: tick_wheel, tick_pointer, mark_wheel_handled 로 나눴다. (tick_touch 는 그대로)
+- UIWindowLayer: 닫는 움직임이 끝난 창 노드를 지우지 않고 층에서 떼어 내 원본처럼 같은 창을 open_window 로 다시 띄울 수 있다. (층의 자식이 아니면 붙인다)
+- UIWindow: handle_wheel(node_tree, view_input_position, wheel_delta), UIWindowBehavior::handle_wheel 이 원본처럼 자리를 받는다. get_panel_paint(_mut), get_dim_paint(_mut), get_view_width, get_view_height, get_margin, get_panel_height, get_panel_rect, get_panel_scale
+- UIConfirmWindow: 묻는 글의 줄 수를 Graphic 없이 처음 놓을 때부터 잰다. (등록된 글꼴로 재는 textstringtexturecache::measure_text_without_graphic, Text::wrap_lines_without_graphic, wrap_text_to_lines_by) set_button_texts, refresh_if_open_in_tree, set_title_in_tree, set_message_in_tree
+- Text: 글자 크기, 이름, 굵게, 기울임을 바꾸면 한 줄 글의 그리는 폰트 문자열도 바로 바꾼다. (지금까지는 맞출 너비나 밑줄이 없으면 처음 32px 로 그렸다)
+- UIListView: set_template_node(node_tree, template_id) 가 원본처럼 템플릿을 UIDocument 로 직렬화해 두고 복제한다. 게임 컴포넌트는 set_template_node_with_document 에 등록한 UIDocument 를 넘긴다
+- UILabel: set_visible_character_count, get_visible_character_count. UIProgressRing::get_perimeter_points. attach_button_motion, attach_toast_motion
+- UIInputField: set_use_dominput, is_using_dominput 을 러스트 이름 규칙대로 set_use_dom_input, is_using_dom_input 으로 바꿨다 (원본 setUseDOMInput)
+- 예제: uiscenelayout. UIScene 과 UINode 제약(세이프 에어리어 가이드, 약한 바람 너비와 범위, 여백 가이드, 같은 너비 단추, 자연 크기 글). VANILLA_EXAMPLE_DEVTOOLS=1 이면 개발자 도구를 연다. windowshowcase 는 GameScene 트레이트, 놀이 입력 처리기, fade_screen_with_hold 로 바꿨다
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.

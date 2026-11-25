@@ -13,6 +13,7 @@
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::rect::Rect;
+use crate::base::vector2::Vector2;
 use crate::core::component::richtext::{RichText, RichTextAttributes};
 use crate::core::component::text::{Text, TextWrapMode};
 use crate::core::component::{Component, ComponentBase};
@@ -247,6 +248,20 @@ impl UILabel {
 	}
 
 	//==============================================================================
+	// 표시 글자 수 설정. (-1 이면 전체, 타자기 연출용, 원본 setVisibleCharacterCount)
+	//==============================================================================
+	pub fn set_visible_character_count(&mut self, visible_character_count: i32) {
+		self.rich_text.get_text_component_mut().set_visible_character_count(visible_character_count);
+	}
+
+	//==============================================================================
+	// 표시 글자 수 반환. (-1 이면 전체)
+	//==============================================================================
+	pub fn get_visible_character_count(&self) -> i32 {
+		self.rich_text.get_text_component().get_visible_character_count()
+	}
+
+	//==============================================================================
 	// 줄 간격 배율 설정.
 	//==============================================================================
 	pub fn set_line_spacing(&mut self, line_spacing: f32) {
@@ -383,6 +398,16 @@ impl Component for UILabel {
 
 	fn get_component_type(&self) -> &'static str {
 		"UILabel"
+	}
+
+	//==============================================================================
+	// 자연 크기. (품은 글의 자연 크기, UINode 가 모은다. 원본은 노드에 붙인 Text, RichText 의 값)
+	//==============================================================================
+	fn get_intrinsic_content_size(&self) -> Vector2 {
+		if !self.is_enable() {
+			return Vector2::create(-1.0, -1.0);
+		}
+		self.rich_text.get_intrinsic_content_size()
 	}
 
 	fn attach_to_tree(&mut self, node_tree: &mut NodeTree, node_id: NodeId) {

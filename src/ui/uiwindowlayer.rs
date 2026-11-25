@@ -1,7 +1,9 @@
 //==============================================================================
 // 창 층. (vanilla.js 의 ui/uiwindowlayer.js, UIWindowLayer)
 // - 영역 위에 UIWindow 를 쌓는다. 창을 띄우면 맨 위에 쌓고, 맨 위의 창만 보인다. 위의 창이 닫히면 아래 창이 다시 보인다.
-// - 닫으면 목록에서 바로 빠져 누름과 덮임이 바로 풀리고, 닫는 움직임(PopupMotion)이 끝난 뒤에 창 노드를 지운다. 덮여 있던 창을 닫으면 바로 지운다.
+// - 닫으면 목록에서 바로 빠져 누름과 덮임이 바로 풀리고, 닫는 움직임(PopupMotion)이 끝난 뒤에 창 노드를 층에서 떼어 낸다. 덮여 있던 창을 닫으면 바로 떼어 낸다.
+//   떼어 낸 창 노드는 지우지 않아 open_window 로 다시 띄울 수 있다. (원본과 같음) 다시 쓰지 않을 창은 씬이 destroy_node 로 지운다.
+// - 휠은 맨 위의 창이 먼저 받고(UIWindowBehavior::handle_wheel), 받지 않으면 그 자리의 스크롤 뷰가 받는다. (scroll_window_at, GameSceneBase 가 창 층 안을 가리킨 휠을 넘긴다)
 // - 이 층은 UI 배율(UIScale::read)만큼 커지고, 창에는 그만큼 나눈 영역의 크기와 세이프에어리어 너비를 알린다. (작은 화면에서도 글자가 읽히게)
 //   set_ui_scale_options(None) 이면 키우지 않는다.
 // - 창이 하나라도 떠 있는 동안은 놀이 밖이다. 창이 뜨고 닫힐 때 알린다(set_window_change_event, 떠 있는 창 수를 넘긴다). 씬이 has_open_window 를 보고 놀이를 멈춰도 된다.
@@ -15,15 +17,18 @@
 //     UIWindowLayer::open_window_in_tree(node_tree, layer_id, window_id);
 // - 원본과 다른 것:
 //   - 원본은 WorldNode 를 상속한 노드다. 러스트 판은 층 노드에 붙는 컴포넌트이고 창은 그 노드의 자식 노드다. 바꾸는 함수는 트리를 받는다.
-//   - 원본의 scrollWindowAt 은 없다. 엔진의 휠 전달이 가리킨 노드부터 부모 쪽으로 가므로 창 안의 스크롤 뷰, 그다음 창이 받는다. (UIWindow 머리 주석)
+//   - 원본은 떼어 낸 창 객체를 들고 있으면 다시 띄운다. 러스트 판은 떼어 낸 노드가 트리 저장소에 남아 있으므로 그 핸들로 다시 띄운다.
+//     원본에서 아무도 들지 않은 창은 가비지 컬렉터가 치우지만, 러스트 판에서는 씬이 지우거나 씬이 끝날 때 함께 지워진다.
 //   - 원본은 층이 UIScale 에 엔진의 CSS 배율을 묻는다. 러스트 판은 set_view_size 가 CSS 배율(ViewManager::get_css_pixel_scale)을 받는다.
 //   - 창 알림은 Box<dyn FnMut(usize)> 다. (떠 있는 창 수)
 //==============================================================================
 use crate::base::pivot::Pivot;
 use crate::base::vector2::Vector2;
 use crate::core::component::{Component, ComponentBase};
+use crate::core::engine::Engine;
 use crate::core::node::nodetree::{ComponentContext, NodeId, NodeTree};
 use crate::ui::uiscale::{UIScale, UIScaleOptions};
+use crate::ui::uiview::is_view_position_inside_node;
 use crate::ui::uiwindow::UIWindow;
 
 //==============================================================================
@@ -195,7 +200,7 @@ impl UIWindowLayer {
 	}
 
 	//==============================================================================
-	// 창 띄우기. (맨 위에 쌓는다, 이미 떠 있으면 맨 위로 올린다, 창 노드는 이 층 노드의 자식이어야 한다)
+	// 창 띄우기. (맨 위에 쌓는다, 이미 떠 있으면 맨 위로 올린다, 층 노드의 자식이 아니면 붙인다. 떼어 낸 창도 다시 띄운다)
 	//==============================================================================
 	pub fn open_window(&mut self, node_tree: &mut NodeTree, window_id: NodeId) {
 		let layer_id = match self.node_id {
@@ -206,8 +211,11 @@ impl UIWindowLayer {
 				return;
 			}
 		};
-		if node_tree.get_parent_id(window_id) != Some(layer_id) {
+		if !node_tree.contains(window_id) {
 			return;
+		}
+		if node_tree.get_parent_id(window_id) != Some(layer_id) {
+			node_tree.add_child(layer_id, window_id);
 		}
 		self.window_ids.retain(|candidate_id| *candidate_id != window_id);
 		self.closing_window_ids.retain(|candidate_id| *candidate_id != window_id);
@@ -283,13 +291,80 @@ impl UIWindowLayer {
 	}
 
 	//==============================================================================
-	// 창 노드 지우기. (UIWindowBehavior::dispose 뒤)
+	// 창 노드 떼어 내기. (UIWindowBehavior::dispose 뒤 층에서 뗀다, 노드는 남아 다시 띄울 수 있다)
 	//==============================================================================
 	fn remove_window_node(node_tree: &mut NodeTree, window_id: NodeId) {
 		node_tree.with_component_mut::<UIWindow, _>(window_id, |window, tree| {
+			window.set_window_layer_id(None);
 			window.dispose(tree);
 		});
-		node_tree.destroy_node(window_id);
+		node_tree.remove_from_parent(window_id);
+	}
+
+	//==============================================================================
+	// 마우스 휠을 맨 위의 창에 넘기기. (창이 받지 않으면 그 자리의 스크롤 뷰, 받았으면 true, 원본 scrollWindowAt)
+	//==============================================================================
+	pub fn scroll_window_at(node_tree: &mut NodeTree, engine: &Engine, layer_id: NodeId, view_input_position: Vector2, wheel_delta: Vector2) -> bool {
+		let top_window_id = match node_tree.get_node(layer_id).and_then(|layer_node| layer_node.get_component::<UIWindowLayer>()).and_then(|window_layer| window_layer.get_top_window()) {
+			Some(top_window_id) => {
+				top_window_id
+			}
+			None => {
+				return false;
+			}
+		};
+		let is_handled = node_tree.with_component_mut::<UIWindow, _>(top_window_id, |window, tree| window.handle_wheel(tree, view_input_position, wheel_delta)).unwrap_or(false);
+		if is_handled {
+			return true;
+		}
+		let scroll_view_node_id = match UIWindowLayer::find_scroll_view_at(node_tree, top_window_id, view_input_position) {
+			Some(scroll_view_node_id) => {
+				scroll_view_node_id
+			}
+			None => {
+				return false;
+			}
+		};
+		node_tree.dispatch_wheel(scroll_view_node_id, engine, wheel_delta);
+		true
+	}
+
+	//==============================================================================
+	// 그 자리를 덮는 맨 앞(나중에 그리는) 스크롤 뷰 노드 찾기. (켜진 노드만, 휠을 받는 칸(Component::is_wheel_receiver)이 붙은 노드, 없으면 None)
+	//==============================================================================
+	pub fn find_scroll_view_at(node_tree: &NodeTree, node_id: NodeId, view_input_position: Vector2) -> Option<NodeId> {
+		let node = node_tree.get_node(node_id)?;
+		if !node.is_active() {
+			return None;
+		}
+		for child_id in node_tree.get_child_ids(node_id).iter().rev() {
+			if let Some(scroll_view_node_id) = UIWindowLayer::find_scroll_view_at(node_tree, *child_id, view_input_position) {
+				return Some(scroll_view_node_id);
+			}
+		}
+		if !is_view_position_inside_node(node_tree, node_id, view_input_position) {
+			return None;
+		}
+		let has_scroll_view = node.get_all_components().iter().any(|component| component.is_enable() && component.is_wheel_receiver());
+		if has_scroll_view {
+			return Some(node_id);
+		}
+		None
+	}
+
+	//==============================================================================
+	// 노드가 들어 있는 창 층 노드 찾기. (자기부터 부모 쪽으로, 없으면 None, 원본 findWindowLayerOf)
+	//==============================================================================
+	pub fn find_window_layer_of(node_tree: &NodeTree, node_id: NodeId) -> Option<NodeId> {
+		let mut current_id = Some(node_id);
+		while let Some(candidate_id) = current_id {
+			let is_window_layer = node_tree.get_node(candidate_id).map(|candidate_node| candidate_node.get_component::<UIWindowLayer>().is_some()).unwrap_or(false);
+			if is_window_layer {
+				return Some(candidate_id);
+			}
+			current_id = node_tree.get_parent_id(candidate_id);
+		}
+		None
 	}
 
 	//==============================================================================
@@ -366,7 +441,7 @@ mod tests {
 	use crate::core::engine::{Engine, EngineConfiguration};
 	use crate::core::node::nodetree::TouchKind;
 	use crate::ui::uiconfirmwindow::{UIConfirmWindow, UIConfirmWindowOptions};
-	use crate::ui::uiwindow::UIWindowDefaultBehavior;
+	use crate::ui::uiwindow::{UIWindowBehavior, UIWindowDefaultBehavior};
 	use std::cell::Cell;
 	use std::rc::Rc;
 
@@ -465,7 +540,20 @@ mod tests {
 		assert_eq!(change_counts.get(), 3);
 		node_tree.tick(&engine, 0.3);
 		node_tree.tick(&engine, 0.016);
-		assert!(!node_tree.contains(confirm_window_id));
+		assert!(node_tree.contains(confirm_window_id));
+		assert_eq!(node_tree.get_parent_id(confirm_window_id), None);
+
+		// 떼어 낸 창을 다시 띄운다. (원본처럼 같은 창)
+		UIWindowLayer::open_window_in_tree(&mut node_tree, layer_id, confirm_window_id);
+		assert_eq!(node_tree.get_parent_id(confirm_window_id), Some(layer_id));
+		assert_eq!(get_layer(&mut node_tree, layer_id).get_top_window(), Some(confirm_window_id));
+		assert!(node_tree[confirm_window_id].is_active());
+		assert!(!node_tree[first_window_id].is_active());
+		node_tree.with_component_mut::<UIWindowLayer, _>(layer_id, |window_layer, tree| window_layer.close_window(tree, confirm_window_id));
+		assert_eq!(cancel_count.get(), 2);
+		node_tree.tick(&engine, 0.3);
+		node_tree.tick(&engine, 0.016);
+		assert_eq!(node_tree.get_parent_id(confirm_window_id), None);
 
 		// 바깥 닫기를 끈 창은 뒤로 가기로 닫히지 않는다. 모두 닫기는 닫는다.
 		get_window(&mut node_tree, first_window_id).set_outside_close_enabled(false);
@@ -510,8 +598,8 @@ mod tests {
 		assert_eq!(confirm_count.get(), 1);
 		assert_eq!(cancel_count.get(), 0);
 		assert!(!get_layer(&mut node_tree, layer_id).has_open_window());
-		// 즉시 전환이라 바로 지운다. (트리를 도는 중이 아니면 바로)
-		assert!(!node_tree.contains(window_id));
+		// 즉시 전환이라 바로 떼어 낸다.
+		assert_eq!(node_tree.get_parent_id(window_id), None);
 	}
 
 	//==============================================================================
@@ -532,5 +620,63 @@ mod tests {
 		assert!((parts.view_height - 600.0 / 1.8).abs() < 0.001);
 		node_tree.with_component_mut::<UIWindowLayer, _>(layer_id, |window_layer, tree| window_layer.set_ui_scale_options(tree, None));
 		assert_eq!(get_layer(&mut node_tree, layer_id).get_ui_scale(), 1.0);
+	}
+	//==============================================================================
+	// 확인 창은 Graphic 없이도 처음 놓을 때부터 글 줄 수를 재 판의 세로를 정한다. (글꼴 파일이 없는 PC 는 건너뛴다)
+	//==============================================================================
+	#[test]
+	fn confirm_window_measures_lines_before_first_draw() {
+		let engine_configuration = EngineConfiguration::new();
+		let font_bytes = match engine_configuration.default_font_paths.iter().find_map(|font_path| std::fs::read(font_path).ok()) {
+			Some(font_bytes) => {
+				font_bytes
+			}
+			None => {
+				return;
+			}
+		};
+		let mut text_string_texture_cache = crate::core::textstringtexturecache::TextStringTextureCache::new();
+		text_string_texture_cache.set_default_font(false, font_bytes).expect("default font");
+		let (mut node_tree, layer_id) = create_layer_tree();
+		let short_window_id = UIConfirmWindow::create(&mut node_tree, layer_id, "short", UIConfirmWindowOptions { message: String::from("짧은 글"), ..UIConfirmWindowOptions::default() });
+		UIWindowLayer::open_window_in_tree(&mut node_tree, layer_id, short_window_id);
+		let short_panel_height = get_window(&mut node_tree, short_window_id).get_panel_rect().size.y;
+		let long_window_id = UIConfirmWindow::create(&mut node_tree, layer_id, "long", UIConfirmWindowOptions { message: "줄이 여러 번 바뀌는 긴 글이에요. ".repeat(6), ..UIConfirmWindowOptions::default() });
+		UIWindowLayer::open_window_in_tree(&mut node_tree, layer_id, long_window_id);
+		let long_panel_height = get_window(&mut node_tree, long_window_id).get_panel_rect().size.y;
+		assert!(long_panel_height > short_panel_height + 40.0, "{} {}", long_panel_height, short_panel_height);
+		let is_layout_pending = {
+			let window = node_tree[long_window_id].get_component::<UIWindow>().expect("window");
+			let parts = window.get_parts().expect("parts");
+			let confirm_window = window.get_behavior::<UIConfirmWindow>().expect("confirm");
+			confirm_window.is_layout_pending(&node_tree, &parts)
+		};
+		assert!(!is_layout_pending);
+	}
+
+	//==============================================================================
+	// 휠: 맨 위 창이 받지 않으면 그 자리의 스크롤 뷰가 받는다. 창 층 찾기는 자기부터 부모 쪽으로.
+	//==============================================================================
+	#[test]
+	fn scroll_window_at_goes_to_top_window_scroll_view() {
+		let engine = Engine::new(EngineConfiguration::new());
+		let (mut node_tree, layer_id) = create_layer_tree();
+		let window_id = UIConfirmWindow::create(&mut node_tree, layer_id, "confirm", UIConfirmWindowOptions { message: "아주 긴 글. ".repeat(400), ..UIConfirmWindowOptions::default() });
+		get_window(&mut node_tree, window_id).get_popup_motion_mut().set_instant_enabled(true);
+		UIWindowLayer::open_window_in_tree(&mut node_tree, layer_id, window_id);
+		node_tree.tick(&engine, 0.016);
+		let scroll_id = get_window(&mut node_tree, window_id).get_behavior::<UIConfirmWindow>().expect("confirm").get_message_scroll_node().expect("scroll");
+		let scroll_size = node_tree[scroll_id].get_content_size();
+		let scroll_center = node_tree.convert_node_position_to_view_position(scroll_id, scroll_size.multiply_scalar(0.5));
+		assert_eq!(UIWindowLayer::find_window_layer_of(&node_tree, scroll_id), Some(layer_id));
+		assert_eq!(UIWindowLayer::find_scroll_view_at(&node_tree, window_id, scroll_center), Some(scroll_id));
+		let content_height = node_tree[scroll_id].get_component::<crate::ui::uiscrollview::UIScrollView>().expect("scroll view").get_scroll_content_size().y;
+		if content_height <= scroll_size.y {
+			return;
+		}
+		assert!(UIWindowLayer::scroll_window_at(&mut node_tree, &engine, layer_id, scroll_center, Vector2::create(0.0, 120.0)));
+		node_tree.tick(&engine, 0.5);
+		let scroll_offset = node_tree[scroll_id].get_component::<crate::ui::uiscrollview::UIScrollView>().expect("scroll view").get_scroll_offset();
+		assert!(scroll_offset.y < 0.0, "{:?}", scroll_offset);
 	}
 }

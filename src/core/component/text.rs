@@ -153,6 +153,8 @@ impl Text {
 	fn update_font_string(&mut self) {
 		let font_string = self.build_font_string();
 		if font_string != self.font_string {
+			self.draw_font_string = font_string.clone();
+			self.fitted_font_size = self.font_size;
 			self.font_string = font_string;
 			self.is_layout_dirty = true;
 		}
@@ -304,6 +306,13 @@ impl Text {
 	// - Character: 처음부터 글자 단위로 나눈다.
 	//==============================================================================
 	pub fn wrap_text_to_lines(&self, graphic: &Graphic, text: &str, maximum_width: f32) -> Vec<String> {
+		self.wrap_text_to_lines_by(text, maximum_width, |line_text| graphic.measure_text(line_text).width)
+	}
+
+	//==============================================================================
+	// 폭에 맞춰 줄 나누기. (글 폭을 measure_width 로 잰다, wrap_text_to_lines 와 같은 규칙)
+	//==============================================================================
+	pub fn wrap_text_to_lines_by(&self, text: &str, maximum_width: f32, measure_width: impl Fn(&str) -> f32) -> Vec<String> {
 		let mut line_list: Vec<String> = Vec::new();
 		for paragraph in text.split('\n') {
 			if maximum_width <= 0.0 {
@@ -315,7 +324,7 @@ impl Text {
 				for character in paragraph.chars() {
 					let mut candidate_line = current_line.clone();
 					candidate_line.push(character);
-					if !current_line.is_empty() && graphic.measure_text(&candidate_line).width > maximum_width {
+					if !current_line.is_empty() && measure_width(&candidate_line) > maximum_width {
 						line_list.push(current_line);
 						current_line = character.to_string();
 					}
@@ -334,8 +343,8 @@ impl Text {
 				else {
 					format!("{} {}", current_line, word)
 				};
-				let candidate_metrics = graphic.measure_text(&candidate_line);
-				if candidate_metrics.width <= maximum_width {
+				let candidate_width = measure_width(&candidate_line);
+				if candidate_width <= maximum_width {
 					current_line = candidate_line;
 					continue;
 				}
@@ -345,16 +354,16 @@ impl Text {
 				}
 
 				// 한 단어가 폭을 넘으면 글자 단위로 나눈다.
-				let word_metrics = graphic.measure_text(word);
-				if word_metrics.width <= maximum_width {
+				let word_width = measure_width(word);
+				if word_width <= maximum_width {
 					current_line = word.to_string();
 					continue;
 				}
 				for character in word.chars() {
 					let mut character_candidate_line = current_line.clone();
 					character_candidate_line.push(character);
-					let character_candidate_metrics = graphic.measure_text(&character_candidate_line);
-					if character_candidate_metrics.width > maximum_width && !current_line.is_empty() {
+					let character_candidate_width = measure_width(&character_candidate_line);
+					if character_candidate_width > maximum_width && !current_line.is_empty() {
 						line_list.push(current_line.clone());
 						current_line = character.to_string();
 					}
@@ -366,6 +375,16 @@ impl Text {
 			line_list.push(current_line);
 		}
 		line_list
+	}
+
+	//==============================================================================
+	// Graphic 없이 나눈 줄 목록. (지금 글과 폰트 문자열, 폭으로 나눈다, 글꼴이 없어 잴 수 없으면 None)
+	// - 그리기 전에 줄 수가 필요한 레이아웃(창의 내용 놓기 같은)이 쓴다. (textstringtexturecache::measure_text_without_graphic)
+	//==============================================================================
+	pub fn wrap_lines_without_graphic(&self, maximum_width: f32) -> Option<Vec<String>> {
+		crate::core::textstringtexturecache::measure_text_without_graphic(&self.font_string, "")?;
+		let font_string = self.font_string.clone();
+		Some(self.wrap_text_to_lines_by(&self.text, maximum_width, |line_text| crate::core::textstringtexturecache::measure_text_without_graphic(&font_string, line_text).map(|text_metrics| text_metrics.width).unwrap_or(0.0)))
 	}
 
 	//==============================================================================
@@ -933,6 +952,26 @@ impl Component for Text {
 
 	fn get_component_type(&self) -> &'static str {
 		"Text"
+	}
+
+	//==============================================================================
+	// 자연 크기. (글 폭 x 글자 크기, 꺼져 있거나 잴 글꼴이 없으면 -1, -1. 원본 getIntrinsicContentSize)
+	//==============================================================================
+	fn get_intrinsic_content_size(&self) -> Vector2 {
+		if !self.is_enable() {
+			return Vector2::create(-1.0, -1.0);
+		}
+		if self.text.is_empty() {
+			return Vector2::create(0.0, self.font_size);
+		}
+		match crate::core::textstringtexturecache::measure_text_without_graphic(&self.font_string, &self.text) {
+			Some(text_metrics) => {
+				Vector2::create(text_metrics.width, self.font_size)
+			}
+			None => {
+				Vector2::create(-1.0, -1.0)
+			}
+		}
 	}
 
 	fn is_tick_needed(&self) -> bool {

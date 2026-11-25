@@ -67,6 +67,8 @@ pub struct EngineConfiguration {
 	pub is_resizable: bool,
 	// 화면 왼쪽 위에 FPS / 드로우 콜 출력.
 	pub use_statistics: bool,
+	// 개발자 도구(F2 하이어라키/인스펙터)를 GameSceneBase 가 만드는지. (원본 useDevTools, 기본 true)
+	pub use_dev_tools: bool,
 	// 최대 FPS. 0 이면 제한하지 않는다. (수직 동기를 켜면 화면 주사율을 따른다)
 	pub maximum_frame_per_second: f32,
 	// 수직 동기.
@@ -108,6 +110,7 @@ impl EngineConfiguration {
 			window_size: Vector2::zero(),
 			is_resizable: true,
 			use_statistics: false,
+			use_dev_tools: true,
 			maximum_frame_per_second: 0.0,
 			use_vertical_sync: true,
 			default_font_paths: vec![
