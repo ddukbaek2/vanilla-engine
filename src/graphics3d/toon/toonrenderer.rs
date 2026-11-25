@@ -18,6 +18,8 @@
 //   사각형은 begin_frame 때의 뷰포트(보통 드로잉 버퍼 전체) 안의 픽셀이고 왼쪽 위가 원점이다. 화면 밖 거르기는 옮기기 전의 절두체로 한다. end_frame 이 가위를 푼다.
 // - begin_frame_with_camera(Camera3D) 는 카메라의 보기와 투영으로 begin_frame 을 부른다. 2D 표시(Camera3D::project_to_view)와 같은 카메라를 쓴다.
 // - draw_mesh_outline 은 바깥선 껍데기만 그린다. (ToonDrawQueue 가 불투명한 몸을 다 그린 뒤 바깥선을 몰아 그릴 때, 그린 수는 세지 않는다)
+// - 웹에서는 앞의 프레임버퍼를 읽을 수 없어(graphics3d::read_framebuffer_binding 머리말, glow 제약) end_shadow_pass 가 기본 프레임버퍼로 돌린다.
+//   그림자 패스는 다른 프레임버퍼(ToonPostProcess 의 begin)를 걸기 전에 한다. (원본은 앞의 프레임버퍼로 돌린다)
 // - ToonDrawOptions 의 casts_shadow 는 ToonDrawQueue::draw_shadows 만 읽는다. is_body_drawn 이 false 면 바깥선만 그린다. (원본은 꼴 객체에 이름으로 단다)
 //==============================================================================
 use glow::HasContext;
@@ -488,8 +490,10 @@ impl ToonRenderer {
 			let texture = gl.create_texture()?;
 			gl.active_texture(glow::TEXTURE0 + SHADOW_TEXTURE_UNIT);
 			gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-			let depth_bytes = u32::MAX.to_ne_bytes();
-			gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::DEPTH_COMPONENT24 as i32, 1, 1, 0, glow::DEPTH_COMPONENT, glow::UNSIGNED_INT, glow::PixelUnpackData::Slice(Some(&depth_bytes)));
+			// 웹의 glow 는 UNSIGNED_INT 바이트를 u32 배열로 보므로 4 바이트 맞춘 u32 에서 바이트를 읽는다.
+			let depth_values = [u32::MAX];
+			let depth_bytes = index_slice_to_bytes(&depth_values);
+			gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::DEPTH_COMPONENT24 as i32, 1, 1, 0, glow::DEPTH_COMPONENT, glow::UNSIGNED_INT, glow::PixelUnpackData::Slice(Some(depth_bytes)));
 			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
 			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
 			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
@@ -656,7 +660,7 @@ impl ToonRenderer {
 				blend_source_alpha: gl.get_parameter_i32(glow::BLEND_SRC_ALPHA),
 				blend_destination_alpha: gl.get_parameter_i32(glow::BLEND_DST_ALPHA),
 				viewport,
-				framebuffer: gl.get_parameter_framebuffer(glow::FRAMEBUFFER_BINDING),
+				framebuffer: crate::graphics3d::read_framebuffer_binding(gl),
 			});
 		}
 	}

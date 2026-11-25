@@ -11,6 +11,7 @@
 //   begin_line_ids 는 그때의 뷰포트를 그리는 영역으로 적어 두고, 선의 판을 그 크기에 맞춰 짓는다. end_line_ids 가 프레임버퍼, 뷰포트, 상태를 돌린다.
 //   (엔진 2D 그리기 사이에 끼울 때, 그 전에 Graphic 의 묶음을 내보내고 끝에 restore_render_state)
 // - 원본과 다른 점: 인스턴스마다의 번호는 인스턴스 객체의 lineId 대신 draw_mesh_instanced 의 line_id_list 로 받는다. 상태를 돌릴 때 프로그램과 버텍스 어레이는 ToonRenderer 처럼 풀어 둔다.
+//   웹에서는 앞의 프레임버퍼와 텍스처를 읽을 수 없어(graphics3d::read_framebuffer_binding 머리말, glow 제약) 기본 프레임버퍼와 빈 텍스처로 돌린다.
 //==============================================================================
 use glow::HasContext;
 
@@ -640,8 +641,8 @@ impl ToonScreenOutline {
 	//==============================================================================
 	fn create_line_target(gl: &glow::Context, width: i32, height: i32) -> Option<ToonLineTarget> {
 		unsafe {
-			let previous_framebuffer = gl.get_parameter_framebuffer(glow::FRAMEBUFFER_BINDING);
-			let previous_texture = gl.get_parameter_texture(glow::TEXTURE_BINDING_2D);
+			let previous_framebuffer = crate::graphics3d::read_framebuffer_binding(gl);
+			let previous_texture = crate::graphics3d::read_texture_binding(gl);
 			let create_texture = |internal_format: u32, format: u32, data_type: u32, filter: u32| -> Option<GlTexture> {
 				let texture = gl.create_texture().ok()?;
 				gl.bind_texture(glow::TEXTURE_2D, Some(texture));
@@ -716,7 +717,7 @@ impl ToonScreenOutline {
 				blend_destination_alpha: gl.get_parameter_i32(glow::BLEND_DST_ALPHA),
 				clear_color,
 				viewport,
-				framebuffer: gl.get_parameter_framebuffer(glow::FRAMEBUFFER_BINDING),
+				framebuffer: crate::graphics3d::read_framebuffer_binding(gl),
 			});
 		}
 	}

@@ -343,8 +343,10 @@ impl SkinnedModelRenderer {
 			let texture = gl.create_texture()?;
 			gl.active_texture(glow::TEXTURE0 + TEXTURE_UNIT_SHADOWMAP);
 			gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-			let depth_bytes = u32::MAX.to_ne_bytes();
-			gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::DEPTH_COMPONENT24 as i32, 1, 1, 0, glow::DEPTH_COMPONENT, glow::UNSIGNED_INT, glow::PixelUnpackData::Slice(Some(&depth_bytes)));
+			// 웹의 glow 는 UNSIGNED_INT 바이트를 u32 배열로 보므로 4 바이트 맞춘 u32 에서 바이트를 읽는다.
+			let depth_values = [u32::MAX];
+			let depth_bytes = std::slice::from_raw_parts(depth_values.as_ptr() as *const u8, std::mem::size_of_val(&depth_values));
+			gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::DEPTH_COMPONENT24 as i32, 1, 1, 0, glow::DEPTH_COMPONENT, glow::UNSIGNED_INT, glow::PixelUnpackData::Slice(Some(depth_bytes)));
 			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
 			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
 			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);

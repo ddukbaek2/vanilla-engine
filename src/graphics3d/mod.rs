@@ -25,3 +25,41 @@ pub use crate::core::fullscreenpass;
 pub type GlFramebuffer = <glow::Context as glow::HasContext>::Framebuffer;
 pub type GlRenderbuffer = <glow::Context as glow::HasContext>::Renderbuffer;
 pub mod camera3d;
+
+//==============================================================================
+// 지금 묶인 프레임버퍼 읽기. (앞의 것을 돌려 놓을 때)
+// - 웹의 glow 는 묶인 것이 없을 때(기본 프레임버퍼) 읽으면 "A resource was created externally" 로 패닉한다.
+//   glow 웹 컨텍스트에서는 원래 WebGL2 컨텍스트를 꺼낼 수 없어 null 을 가릴 수 없으므로, 웹에서는 기본 프레임버퍼(None)로 본다.
+//==============================================================================
+pub(crate) fn read_framebuffer_binding(gl: &glow::Context) -> Option<GlFramebuffer> {
+	#[cfg(not(target_arch = "wasm32"))]
+	{
+		use glow::HasContext;
+		unsafe {
+			gl.get_parameter_framebuffer(glow::FRAMEBUFFER_BINDING)
+		}
+	}
+	#[cfg(target_arch = "wasm32")]
+	{
+		let _ = gl;
+		None
+	}
+}
+
+//==============================================================================
+// 지금 유닛에 묶인 2D 텍스처 읽기. (앞의 것을 돌려 놓을 때, 웹은 read_framebuffer_binding 과 같은 까닭으로 None)
+//==============================================================================
+pub(crate) fn read_texture_binding(gl: &glow::Context) -> Option<crate::core::graphic::GlTexture> {
+	#[cfg(not(target_arch = "wasm32"))]
+	{
+		use glow::HasContext;
+		unsafe {
+			gl.get_parameter_texture(glow::TEXTURE_BINDING_2D)
+		}
+	}
+	#[cfg(target_arch = "wasm32")]
+	{
+		let _ = gl;
+		None
+	}
+}
