@@ -23,12 +23,30 @@ use crate::core::node::nodetree::{ComponentContext, NodeId, NodeTree};
 
 //==============================================================================
 /// 스피너 설정. (원본 options = { radius = 9, dot_count = 10, dot_radius = 2, color?, rotation_speed = 1 })
+///
+/// # 예제
+/// 점 넷짜리 스피너
+/// ```rust
+/// use vanilla::{NodeTree, UISpinner, UISpinnerOptions, Vector2};
+///
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.get_root_id();
+/// let options = UISpinnerOptions {
+/// 	dot_count: 4,
+/// 	..UISpinnerOptions::default()
+/// };
+/// let spinner_id = UISpinner::create(&mut node_tree, root_id, options);
+/// assert_eq!(node_tree[spinner_id].get_content_size(), Vector2::create(22.0, 22.0));
+/// assert_eq!(node_tree[spinner_id].get_component::<UISpinner>().expect("spinner").get_dot_nodes().len(), 4);
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UISpinnerOptions {
 	/// 점이 놓이는 원의 반지름.
 	pub radius: f32,
+	/// 점 수. (기본 10)
 	pub dot_count: usize,
+	/// 점 하나의 반지름. (기본 2)
 	pub dot_radius: f32,
 	/// 점 색. (기본 흰색)
 	pub color: Color,
@@ -53,6 +71,23 @@ impl Default for UISpinnerOptions {
 
 //==============================================================================
 /// 회전 로딩 표시.
+///
+/// # 예제
+/// 판 위에 띄운 스피너
+/// ```rust
+/// use vanilla::{Engine, EngineConfiguration, NodeTree, UISpinner, UISpinnerOptions, Vector2};
+///
+/// let engine = Engine::new(EngineConfiguration::new());
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.get_root_id();
+/// let panel_id = node_tree.create_child(root_id, "Panel");
+/// let spinner_id = UISpinner::create(&mut node_tree, panel_id, UISpinnerOptions { radius: 9.0, dot_count: 10, ..UISpinnerOptions::default() });
+/// node_tree[spinner_id].set_local_position(Vector2::create(120.0, 80.0));
+/// node_tree[spinner_id].get_component_mut::<UISpinner>().expect("spinner").set_dot_color("#ffcc00");
+/// node_tree.tick(&engine, 0.1);
+/// let dot_ids = node_tree[spinner_id].get_component::<UISpinner>().expect("spinner").get_dot_nodes().to_vec();
+/// assert!((node_tree[dot_ids[1]].get_local_opacity() - 1.0).abs() < 0.0001);
+/// ```
 //==============================================================================
 pub struct UISpinner {
 	component_base: ComponentBase,
@@ -68,6 +103,9 @@ pub struct UISpinner {
 impl UISpinner {
 	//==============================================================================
 	/// 생성. (기본 설정)
+	///
+	/// # 돌려줌
+	/// 붙기 전의 스피너. (UISpinnerOptions::default)
 	//==============================================================================
 	pub fn new() -> UISpinner {
 		UISpinner::create_with_options(UISpinnerOptions::default())
@@ -75,6 +113,12 @@ impl UISpinner {
 
 	//==============================================================================
 	/// 설정으로 생성. (노드에는 node_tree.add_component 로 붙인다)
+	///
+	/// # 인자
+	/// - `options`: 스피너 설정.
+	///
+	/// # 돌려줌
+	/// 붙기 전의 스피너.
 	//==============================================================================
 	pub fn create_with_options(options: UISpinnerOptions) -> UISpinner {
 		UISpinner {
@@ -90,6 +134,14 @@ impl UISpinner {
 
 	//==============================================================================
 	/// 노드 만들기. (parent_id 밑에 "UISpinner" 노드를 만들어 붙인다. 원본 new UISpinner(options) + add_child)
+	///
+	/// # 인자
+	/// - `node_tree`: 노드 트리.
+	/// - `parent_id`: 부모 노드.
+	/// - `options`: 스피너 설정.
+	///
+	/// # 돌려줌
+	/// 만든 스피너 노드. (가운데 피봇, 크기는 (반지름 + 점 반지름) x 2)
 	//==============================================================================
 	pub fn create(node_tree: &mut NodeTree, parent_id: NodeId, options: UISpinnerOptions) -> NodeId {
 		let spinner_id = node_tree.create_child(parent_id, "UISpinner");
@@ -99,6 +151,22 @@ impl UISpinner {
 
 	//==============================================================================
 	/// 점 투명도 계산. (점 순서 비율에서 위상을 뺀 꼬리 비율이 작을수록 밝다)
+	///
+	/// # 인자
+	/// - `dot_index`: 점 번호. (0 부터, 0 번은 원의 오른쪽이고 번호가 늘수록 시계 방향)
+	///
+	/// # 돌려줌
+	/// 점 투명도. (0.15 ~ 1)
+	///
+	/// # 예제
+	/// 위상 0 에서는 0 번 점이 가장 밝다
+	/// ```rust
+	/// use vanilla::UISpinner;
+	///
+	/// let spinner = UISpinner::new();
+	/// assert!((spinner.calculate_dot_opacity(0) - 1.0).abs() < 0.0001);
+	/// assert!((spinner.calculate_dot_opacity(5) - 0.575).abs() < 0.0001);
+	/// ```
 	//==============================================================================
 	pub fn calculate_dot_opacity(&self, dot_index: usize) -> f32 {
 		let order_ratio = dot_index as f32 / self.options.dot_count as f32;
@@ -111,6 +179,9 @@ impl UISpinner {
 
 	//==============================================================================
 	/// 점 색 설정. (다음 tick 에 점 노드에 건다)
+	///
+	/// # 인자
+	/// - `dot_color`: 점 색. (`"#ff0000"` 같은 글이나 Color)
 	//==============================================================================
 	pub fn set_dot_color(&mut self, dot_color: impl Into<Color>) {
 		self.dot_color = dot_color.into();
@@ -119,6 +190,9 @@ impl UISpinner {
 
 	//==============================================================================
 	/// 점 색 반환.
+	///
+	/// # 돌려줌
+	/// 점 색. (처음은 설정의 color)
 	//==============================================================================
 	pub fn get_dot_color(&self) -> Color {
 		self.dot_color
@@ -126,6 +200,9 @@ impl UISpinner {
 
 	//==============================================================================
 	/// 회전 속도 설정. (초당 바퀴 수)
+	///
+	/// # 인자
+	/// - `rotation_speed`: 초당 바퀴 수. (음수면 반대로 돈다)
 	//==============================================================================
 	pub fn set_rotation_speed(&mut self, rotation_speed: f32) {
 		self.rotation_speed = rotation_speed;
@@ -133,6 +210,9 @@ impl UISpinner {
 
 	//==============================================================================
 	/// 회전 속도 반환.
+	///
+	/// # 돌려줌
+	/// 초당 바퀴 수. (처음은 설정의 rotation_speed, 기본 1)
 	//==============================================================================
 	pub fn get_rotation_speed(&self) -> f32 {
 		self.rotation_speed
@@ -140,6 +220,9 @@ impl UISpinner {
 
 	//==============================================================================
 	/// 점 노드 핸들 목록.
+	///
+	/// # 돌려줌
+	/// 점 노드. (번호 차례, 트리에 붙기 전이면 빈 목록)
 	//==============================================================================
 	pub fn get_dot_nodes(&self) -> &[NodeId] {
 		&self.dot_node_ids
@@ -147,6 +230,9 @@ impl UISpinner {
 }
 
 impl Default for UISpinner {
+	//==============================================================================
+	/// 기본값. (UISpinner::new 와 같다)
+	//==============================================================================
 	fn default() -> UISpinner {
 		UISpinner::new()
 	}
@@ -154,14 +240,23 @@ impl Default for UISpinner {
 
 #[crate::reflect]
 impl Component for UISpinner {
+	//==============================================================================
+	/// 컴포넌트 공통 칸 반환.
+	//==============================================================================
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base
 	}
 
+	//==============================================================================
+	/// 컴포넌트 공통 칸 반환. (변경용)
+	//==============================================================================
 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 		&mut self.component_base
 	}
 
+	//==============================================================================
+	/// 컴포넌트 타입 이름. ("UISpinner")
+	//==============================================================================
 	fn get_component_type(&self) -> &'static str {
 		"UISpinner"
 	}

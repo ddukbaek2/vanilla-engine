@@ -20,9 +20,7 @@
 //! - 원본과 다른 것:
 //!   - 원본은 WorldNode 를 상속한 노드다. 러스트 판은 층 노드에 붙는 컴포넌트이고 창은 그 노드의 자식 노드다. 바꾸는 함수는 트리를 받는다.
 //!   - 원본은 떼어 낸 창 객체를 들고 있으면 다시 띄운다. 러스트 판은 떼어 낸 노드가 트리 저장소에 남아 있으므로 그 핸들로 다시 띄운다.
-//!   ```text
 //!     원본에서 아무도 들지 않은 창은 가비지 컬렉터가 치우지만, 러스트 판에서는 씬이 지우거나 씬이 끝날 때 함께 지워진다.
-//!   ```
 //!   - 원본은 층이 UIScale 에 엔진의 CSS 배율을 묻는다. 러스트 판은 set_view_size 가 CSS 배율(ViewManager::get_css_pixel_scale)을 받는다.
 //!   - 창 알림은 `Box<dyn FnMut(usize)>` 다. (떠 있는 창 수)
 //==============================================================================
@@ -42,6 +40,33 @@ pub type UIWindowChangeEvent = Box<dyn FnMut(usize)>;
 
 //==============================================================================
 /// 창 층.
+///
+/// # 예제
+/// 영역 노드 밑에 층을 두고 확인 창 띄우기
+/// ```rust
+/// use vanilla::{NodeTree, UIConfirmWindow, UIConfirmWindowOptions, UIWindowLayer, Vector2};
+///
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.get_root_id();
+/// let play_area_id = node_tree.create_child(root_id, "PlayArea");
+/// node_tree[play_area_id].set_content_size(Vector2::create(800.0, 600.0));
+/// let layer_id = UIWindowLayer::create(&mut node_tree, play_area_id);
+/// node_tree.with_component_mut::<UIWindowLayer, _>(layer_id, |window_layer, tree| {
+/// 	window_layer.set_view_size(tree, 800.0, 600.0, 1.0);
+/// 	window_layer.set_view_bleed(tree, 40.0, 0.0, 30.0, 0.0);
+/// });
+/// let options = UIConfirmWindowOptions {
+/// 	title: String::from("Quit"),
+/// 	message: String::from("Leave the game?"),
+/// 	..UIConfirmWindowOptions::default()
+/// };
+/// let window_id = UIConfirmWindow::create(&mut node_tree, layer_id, "quit", options);
+/// UIWindowLayer::open_window_in_tree(&mut node_tree, layer_id, window_id);
+/// let window_layer = node_tree[layer_id].get_component::<UIWindowLayer>().expect("layer");
+/// assert!(window_layer.has_open_window());
+/// assert_eq!(window_layer.get_top_window(), Some(window_id));
+/// assert_eq!(window_layer.find_window(&node_tree, "quit"), Some(window_id));
+/// ```
 //==============================================================================
 pub struct UIWindowLayer {
 	component_base: ComponentBase,
@@ -66,6 +91,9 @@ pub struct UIWindowLayer {
 impl UIWindowLayer {
 	//==============================================================================
 	/// 생성. (노드에는 node_tree.add_component 로 붙인다, 보통은 UIWindowLayer::create)
+	///
+	/// # 돌려줌
+	/// 붙기 전의 층. (띄운 창 없음, UI 배율 설정은 UIScaleOptions::default)
 	//==============================================================================
 	pub fn new() -> UIWindowLayer {
 		UIWindowLayer {
@@ -85,6 +113,13 @@ impl UIWindowLayer {
 
 	//==============================================================================
 	/// 층 노드 만들기. (parent_id 밑에 "UIWindowLayer" 노드를 만들어 붙인다, 원본 new UIWindowLayer() + add_child)
+	///
+	/// # 인자
+	/// - `node_tree`: 노드 트리.
+	/// - `parent_id`: 영역 노드. (층은 그 맨 위 자식으로 두고 쓴다)
+	///
+	/// # 돌려줌
+	/// 만든 층 노드.
 	//==============================================================================
 	pub fn create(node_tree: &mut NodeTree, parent_id: NodeId) -> NodeId {
 		let layer_id = node_tree.create_child(parent_id, "UIWindowLayer");
@@ -94,6 +129,11 @@ impl UIWindowLayer {
 
 	//==============================================================================
 	/// 창 띄우기. (씬 코드용, with_component_mut 을 대신 부른다)
+	///
+	/// # 인자
+	/// - `node_tree`: 노드 트리.
+	/// - `layer_id`: 창 층 노드. (UIWindowLayer 가 없으면 아무 일도 없다)
+	/// - `window_id`: 띄울 창 노드. (UIWindow::create 나 UIConfirmWindow::create 가 돌려준 것)
 	//==============================================================================
 	pub fn open_window_in_tree(node_tree: &mut NodeTree, layer_id: NodeId, window_id: NodeId) {
 		node_tree.with_component_mut::<UIWindowLayer, _>(layer_id, |window_layer, tree| {
@@ -103,6 +143,31 @@ impl UIWindowLayer {
 
 	//==============================================================================
 	/// 창이 뜨거나 닫힐 때 알림 설정.
+	///
+	/// # 인자
+	/// - `window_change_event`: 알림. (떠 있는 창 수를 받는다, None 이면 끈다)
+	///
+	/// # 예제
+	/// 창이 떠 있는 동안 놀이 멈추기
+	/// ```rust
+	/// use std::cell::Cell;
+	/// use std::rc::Rc;
+	/// use vanilla::{NodeTree, UIWindow, UIWindowDefaultBehavior, UIWindowLayer};
+	///
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let layer_id = UIWindowLayer::create(&mut node_tree, root_id);
+	/// let is_paused = Rc::new(Cell::new(false));
+	/// let is_paused_event = is_paused.clone();
+	/// node_tree[layer_id].get_component_mut::<UIWindowLayer>().expect("layer").set_window_change_event(Some(Box::new(move |window_count| {
+	/// 	is_paused_event.set(window_count > 0);
+	/// })));
+	/// let window_id = UIWindow::create(&mut node_tree, layer_id, "pause", Box::new(UIWindowDefaultBehavior));
+	/// UIWindowLayer::open_window_in_tree(&mut node_tree, layer_id, window_id);
+	/// assert!(is_paused.get());
+	/// UIWindow::close_in_tree(&mut node_tree, window_id);
+	/// assert!(!is_paused.get());
+	/// ```
 	//==============================================================================
 	pub fn set_window_change_event(&mut self, window_change_event: Option<UIWindowChangeEvent>) {
 		self.window_change_event = window_change_event;
@@ -110,6 +175,10 @@ impl UIWindowLayer {
 
 	//==============================================================================
 	/// UI 배율 설정. (None 이면 키우지 않는다, 기본은 UIScaleOptions::default)
+	///
+	/// # 인자
+	/// - `node_tree`: 층이 든 노드 트리. (마지막 영역의 크기로 다시 놓는다)
+	/// - `ui_scale_options`: UI 배율 설정. (None 이면 배율 1)
 	//==============================================================================
 	pub fn set_ui_scale_options(&mut self, node_tree: &mut NodeTree, ui_scale_options: Option<UIScaleOptions>) {
 		self.ui_scale_options = ui_scale_options;
@@ -119,6 +188,9 @@ impl UIWindowLayer {
 
 	//==============================================================================
 	/// 지금의 UI 배율.
+	///
+	/// # 돌려줌
+	/// 층을 키운 배율. (마지막 set_view_size 에서 읽은 값, 처음은 1)
 	//==============================================================================
 	pub fn get_ui_scale(&self) -> f32 {
 		self.ui_scale
@@ -126,6 +198,9 @@ impl UIWindowLayer {
 
 	//==============================================================================
 	/// 창이 하나라도 떠 있는지. (닫는 움직임 중인 창은 셈하지 않는다)
+	///
+	/// # 돌려줌
+	/// 떠 있는 창이 있으면 true.
 	//==============================================================================
 	pub fn has_open_window(&self) -> bool {
 		!self.window_ids.is_empty()
@@ -133,6 +208,9 @@ impl UIWindowLayer {
 
 	//==============================================================================
 	/// 떠 있는 창의 수.
+	///
+	/// # 돌려줌
+	/// 창 수. (닫는 움직임 중인 창은 빼고)
 	//==============================================================================
 	pub fn get_window_count(&self) -> usize {
 		self.window_ids.len()
@@ -140,6 +218,9 @@ impl UIWindowLayer {
 
 	//==============================================================================
 	/// 맨 위의 창. (없으면 None)
+	///
+	/// # 돌려줌
+	/// 맨 위 창 노드. (떠 있는 창이 없으면 None)
 	//==============================================================================
 	pub fn get_top_window(&self) -> Option<NodeId> {
 		self.window_ids.last().copied()
@@ -147,6 +228,13 @@ impl UIWindowLayer {
 
 	//==============================================================================
 	/// 그 이름의 창. (떠 있는 것 가운데 위에서부터, 없으면 None)
+	///
+	/// # 인자
+	/// - `node_tree`: 층이 든 노드 트리.
+	/// - `window_name`: 찾을 창 노드 이름. (UIWindow::create 의 name)
+	///
+	/// # 돌려줌
+	/// 그 이름의 창 노드 가운데 가장 위의 것. (떠 있는 창에 없으면 None)
 	//==============================================================================
 	pub fn find_window(&self, node_tree: &NodeTree, window_name: &str) -> Option<NodeId> {
 		self.window_ids.iter().rev().copied().find(|window_id| node_tree.get_node(*window_id).map(|window_node| window_node.get_name() == window_name).unwrap_or(false))
@@ -154,6 +242,32 @@ impl UIWindowLayer {
 
 	//==============================================================================
 	/// 영역의 크기 알리기. (UI 배율을 다시 읽고, 띄운 창을 모두 다시 놓는다, css_pixel_scale 은 ViewManager::get_css_pixel_scale)
+	///
+	/// # 인자
+	/// - `node_tree`: 층이 든 노드 트리.
+	/// - `view_width`: 영역의 가로. (부모 단위, 1 보다 작으면 1)
+	/// - `view_height`: 영역의 세로. (부모 단위, 1 보다 작으면 1)
+	/// - `css_pixel_scale`: 뷰 한 단위의 CSS 픽셀. (UIScale::read 가 배율을 정할 때 쓴다)
+	///
+	/// # 예제
+	/// 작은 화면에서는 층이 커지고 창에는 나눈 크기를 알린다
+	/// ```rust
+	/// use vanilla::{NodeTree, UIWindowLayer};
+	///
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let layer_id = UIWindowLayer::create(&mut node_tree, root_id);
+	/// node_tree.with_component_mut::<UIWindowLayer, _>(layer_id, |window_layer, tree| {
+	/// 	window_layer.set_view_size(tree, 800.0, 600.0, 0.4);
+	/// });
+	/// let ui_scale = node_tree[layer_id].get_component::<UIWindowLayer>().expect("layer").get_ui_scale();
+	/// assert!((ui_scale - 1.8).abs() < 0.0001);
+	/// assert!((node_tree[layer_id].get_content_size().x - 800.0 / 1.8).abs() < 0.001);
+	/// node_tree.with_component_mut::<UIWindowLayer, _>(layer_id, |window_layer, tree| {
+	/// 	window_layer.set_ui_scale_options(tree, None);
+	/// });
+	/// assert_eq!(node_tree[layer_id].get_component::<UIWindowLayer>().expect("layer").get_ui_scale(), 1.0);
+	/// ```
 	//==============================================================================
 	pub fn set_view_size(&mut self, node_tree: &mut NodeTree, view_width: f32, view_height: f32, css_pixel_scale: f32) {
 		self.view_width = view_width.max(1.0);
@@ -176,6 +290,14 @@ impl UIWindowLayer {
 
 	//==============================================================================
 	/// 영역 밖으로 더 덮는 너비 알리기. (세이프에어리어, 부모 단위)
+	/// - 창에는 UI 배율로 나눈 너비를 알린다.
+	///
+	/// # 인자
+	/// - `node_tree`: 층이 든 노드 트리.
+	/// - `top`: 위로 더 덮는 너비. (0 보다 작으면 0)
+	/// - `right`: 오른쪽으로 더 덮는 너비. (0 보다 작으면 0)
+	/// - `bottom`: 아래로 더 덮는 너비. (0 보다 작으면 0)
+	/// - `left`: 왼쪽으로 더 덮는 너비. (0 보다 작으면 0)
 	//==============================================================================
 	pub fn set_view_bleed(&mut self, node_tree: &mut NodeTree, top: f32, right: f32, bottom: f32, left: f32) {
 		self.view_bleed = [top.max(0.0), right.max(0.0), bottom.max(0.0), left.max(0.0)];
@@ -206,6 +328,11 @@ impl UIWindowLayer {
 
 	//==============================================================================
 	/// 창 띄우기. (맨 위에 쌓는다, 이미 떠 있으면 맨 위로 올린다, 층 노드의 자식이 아니면 붙인다. 떼어 낸 창도 다시 띄운다)
+	/// - 층이 트리에 붙기 전이거나 창 노드가 트리에 없으면 아무 일도 없다.
+	///
+	/// # 인자
+	/// - `node_tree`: 층이 든 노드 트리.
+	/// - `window_id`: 띄울 창 노드. (UIWindow 가 붙은 노드)
 	//==============================================================================
 	pub fn open_window(&mut self, node_tree: &mut NodeTree, window_id: NodeId) {
 		let layer_id = match self.node_id {
@@ -238,6 +365,11 @@ impl UIWindowLayer {
 
 	//==============================================================================
 	/// 창 닫기. (목록에서 빼고 닫는 움직임을 시작한다, 떠 있지 않으면 아무 일도 없다)
+	/// - 덮여 숨은 창이나 즉시 전환인 창은 바로 떼어 낸다.
+	///
+	/// # 인자
+	/// - `node_tree`: 층이 든 노드 트리.
+	/// - `window_id`: 닫을 창 노드.
 	//==============================================================================
 	pub fn close_window(&mut self, node_tree: &mut NodeTree, window_id: NodeId) {
 		let window_index = match self.window_ids.iter().position(|candidate_id| *candidate_id == window_id) {
@@ -268,6 +400,10 @@ impl UIWindowLayer {
 
 	//==============================================================================
 	/// 창 모두 닫기. (위에서부터)
+	/// - 바깥 닫기를 끈 창도 닫는다.
+	///
+	/// # 인자
+	/// - `node_tree`: 층이 든 노드 트리.
 	//==============================================================================
 	pub fn close_all_windows(&mut self, node_tree: &mut NodeTree) {
 		while let Some(top_window_id) = self.window_ids.last().copied() {
@@ -277,6 +413,34 @@ impl UIWindowLayer {
 
 	//==============================================================================
 	/// 맨 위의 창 닫기. (기기의 뒤로 가기 자리, 바깥 닫기를 끈 창이면 닫지 않는다, 닫았으면 true)
+	///
+	/// # 인자
+	/// - `node_tree`: 층이 든 노드 트리.
+	///
+	/// # 돌려줌
+	/// 닫았으면 true. (떠 있는 창이 없거나 맨 위 창이 바깥 닫기를 껐으면 false)
+	///
+	/// # 예제
+	/// 뒤로 가기를 창이 먼저 받기
+	/// ```rust
+	/// use vanilla::{NodeTree, UIWindow, UIWindowDefaultBehavior, UIWindowLayer};
+	///
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let layer_id = UIWindowLayer::create(&mut node_tree, root_id);
+	/// let window_id = UIWindow::create(&mut node_tree, layer_id, "tutorial", Box::new(UIWindowDefaultBehavior));
+	/// node_tree[window_id].get_component_mut::<UIWindow>().expect("window").set_outside_close_enabled(false);
+	/// UIWindowLayer::open_window_in_tree(&mut node_tree, layer_id, window_id);
+	/// let is_closed = node_tree.with_component_mut::<UIWindowLayer, _>(layer_id, |window_layer, tree| {
+	/// 	window_layer.close_top_window(tree)
+	/// });
+	/// assert_eq!(is_closed, Some(false));
+	/// node_tree[window_id].get_component_mut::<UIWindow>().expect("window").set_outside_close_enabled(true);
+	/// let is_closed = node_tree.with_component_mut::<UIWindowLayer, _>(layer_id, |window_layer, tree| {
+	/// 	window_layer.close_top_window(tree)
+	/// });
+	/// assert_eq!(is_closed, Some(true));
+	/// ```
 	//==============================================================================
 	pub fn close_top_window(&mut self, node_tree: &mut NodeTree) -> bool {
 		let top_window_id = match self.get_top_window() {
@@ -308,6 +472,33 @@ impl UIWindowLayer {
 
 	//==============================================================================
 	/// 마우스 휠을 맨 위의 창에 넘기기. (창이 받지 않으면 그 자리의 스크롤 뷰, 받았으면 true, 원본 scrollWindowAt)
+	///
+	/// # 인자
+	/// - `node_tree`: 층이 든 노드 트리.
+	/// - `engine`: 엔진. (스크롤 뷰에 휠을 넘길 때 쓴다)
+	/// - `layer_id`: 창 층 노드.
+	/// - `view_input_position`: 휠을 굴린 자리. (뷰 좌표)
+	/// - `wheel_delta`: 휠을 굴린 양.
+	///
+	/// # 돌려줌
+	/// 맨 위 창이나 그 자리의 스크롤 뷰가 받았으면 true. (떠 있는 창이 없거나 받을 곳이 없으면 false)
+	///
+	/// # 예제
+	/// 씬의 휠을 창 층에 먼저 넘기기
+	/// ```rust
+	/// use vanilla::{Engine, EngineConfiguration, NodeId, NodeTree, UIWindowLayer, Vector2};
+	///
+	/// fn handle_wheel(node_tree: &mut NodeTree, engine: &Engine, layer_id: NodeId, wheel_delta: Vector2) -> bool {
+	/// 	let view_input_position = engine.get_input_manager().get_view_input_position();
+	/// 	UIWindowLayer::scroll_window_at(node_tree, engine, layer_id, view_input_position, wheel_delta)
+	/// }
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let layer_id = UIWindowLayer::create(&mut node_tree, root_id);
+	/// assert!(!handle_wheel(&mut node_tree, &engine, layer_id, Vector2::create(0.0, 120.0)));
+	/// ```
 	//==============================================================================
 	pub fn scroll_window_at(node_tree: &mut NodeTree, engine: &Engine, layer_id: NodeId, view_input_position: Vector2, wheel_delta: Vector2) -> bool {
 		let top_window_id = match node_tree.get_node(layer_id).and_then(|layer_node| layer_node.get_component::<UIWindowLayer>()).and_then(|window_layer| window_layer.get_top_window()) {
@@ -336,6 +527,14 @@ impl UIWindowLayer {
 
 	//==============================================================================
 	/// 그 자리를 덮는 맨 앞(나중에 그리는) 스크롤 뷰 노드 찾기. (켜진 노드만, 휠을 받는 칸(Component::is_wheel_receiver)이 붙은 노드, 없으면 None)
+	///
+	/// # 인자
+	/// - `node_tree`: 찾을 노드 트리.
+	/// - `node_id`: 찾기 시작할 노드. (그 노드와 자손을 뒤의 자식부터 본다)
+	/// - `view_input_position`: 찾을 자리. (뷰 좌표)
+	///
+	/// # 돌려줌
+	/// 그 자리를 덮는 맨 앞 스크롤 뷰 노드. (시작 노드가 꺼졌거나 그런 노드가 없으면 None)
 	//==============================================================================
 	pub fn find_scroll_view_at(node_tree: &NodeTree, node_id: NodeId, view_input_position: Vector2) -> Option<NodeId> {
 		let node = node_tree.get_node(node_id)?;
@@ -359,6 +558,28 @@ impl UIWindowLayer {
 
 	//==============================================================================
 	/// 노드가 들어 있는 창 층 노드 찾기. (자기부터 부모 쪽으로, 없으면 None, 원본 findWindowLayerOf)
+	///
+	/// # 인자
+	/// - `node_tree`: 찾을 노드 트리.
+	/// - `node_id`: 찾기 시작할 노드. (창 안의 단추 같은)
+	///
+	/// # 돌려줌
+	/// UIWindowLayer 가 붙은 가장 가까운 조상(자기 포함) 노드. (뿌리까지 없으면 None)
+	///
+	/// # 예제
+	/// 판 안의 노드에서 창 층 찾기
+	/// ```rust
+	/// use vanilla::{NodeTree, UIWindow, UIWindowDefaultBehavior, UIWindowLayer};
+	///
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let layer_id = UIWindowLayer::create(&mut node_tree, root_id);
+	/// let window_id = UIWindow::create(&mut node_tree, layer_id, "inventory", Box::new(UIWindowDefaultBehavior));
+	/// let panel_id = node_tree[window_id].get_component::<UIWindow>().expect("window").get_panel_node().expect("panel");
+	/// let item_id = node_tree.create_child(panel_id, "Item");
+	/// assert_eq!(UIWindowLayer::find_window_layer_of(&node_tree, item_id), Some(layer_id));
+	/// assert_eq!(UIWindowLayer::find_window_layer_of(&node_tree, root_id), None);
+	/// ```
 	//==============================================================================
 	pub fn find_window_layer_of(node_tree: &NodeTree, node_id: NodeId) -> Option<NodeId> {
 		let mut current_id = Some(node_id);
@@ -397,6 +618,9 @@ impl UIWindowLayer {
 }
 
 impl Default for UIWindowLayer {
+	//==============================================================================
+	/// 기본값. (UIWindowLayer::new 와 같다)
+	//==============================================================================
 	fn default() -> UIWindowLayer {
 		UIWindowLayer::new()
 	}
@@ -404,14 +628,23 @@ impl Default for UIWindowLayer {
 
 #[crate::reflect]
 impl Component for UIWindowLayer {
+	//==============================================================================
+	/// 컴포넌트 공통 칸 반환.
+	//==============================================================================
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base
 	}
 
+	//==============================================================================
+	/// 컴포넌트 공통 칸 반환. (변경용)
+	//==============================================================================
 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 		&mut self.component_base
 	}
 
+	//==============================================================================
+	/// 컴포넌트 타입 이름. ("UIWindowLayer")
+	//==============================================================================
 	fn get_component_type(&self) -> &'static str {
 		"UIWindowLayer"
 	}

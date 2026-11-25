@@ -35,13 +35,39 @@ const DEFAULT_AREA_HEIGHT: f32 = 640.0;
 
 //==============================================================================
 /// 컨텍스트 메뉴 설정. (원본 options = { menu_width = 168, item_height = 28, font_size = 12, panel_color?, text_color? })
+///
+/// # 예제
+/// 넓은 메뉴, 높은 행
+/// ```rust
+/// use vanilla::{NodeTree, UIContextMenu, UIContextMenuItem, UIContextMenuOptions, Vector2};
+///
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.get_root_id();
+/// node_tree[root_id].set_content_size(Vector2::create(800.0, 600.0));
+/// let options = UIContextMenuOptions {
+/// 	menu_width: 200.0,
+/// 	item_height: 32.0,
+/// 	..UIContextMenuOptions::default()
+/// };
+/// let menu_id = UIContextMenu::create(&mut node_tree, root_id, options);
+/// node_tree.with_component_mut::<UIContextMenu, _>(menu_id, |context_menu, tree| {
+/// 	context_menu.show(tree, Vector2::create(100.0, 100.0), vec![UIContextMenuItem::create_disabled("Paste")]);
+/// });
+/// let panel_id = node_tree[menu_id].get_component::<UIContextMenu>().expect("menu").get_panel_node().expect("panel");
+/// assert_eq!(node_tree[panel_id].get_content_size(), Vector2::create(200.0, 40.0));
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UIContextMenuOptions {
+	/// 메뉴 판 가로. (기본 168)
 	pub menu_width: f32,
+	/// 항목 행 높이. (기본 28, 판 세로는 항목 수 x 행 높이 + 8)
 	pub item_height: f32,
+	/// 항목 글 크기. (기본 12)
 	pub font_size: f32,
+	/// 메뉴 판 색.
 	pub panel_color: Color,
+	/// 누를 수 있는 항목의 글 색. (누를 수 없는 항목은 회색)
 	pub text_color: Color,
 }
 
@@ -67,16 +93,39 @@ pub type UIContextMenuHandler = Box<dyn FnOnce(&mut ComponentContext)>;
 
 //==============================================================================
 /// 메뉴 항목. (원본 { text, handler?, is_disabled? })
+///
+/// # 예제
+/// 누를 수 있는 항목과 누를 수 없는 항목
+/// ```rust
+/// use vanilla::{ComponentContext, UIContextMenuItem};
+///
+/// let copy_item = UIContextMenuItem::create("Copy", Box::new(|_context: &mut ComponentContext| {}));
+/// let delete_item = UIContextMenuItem::create_disabled("Delete");
+/// assert!(copy_item.handler.is_some());
+/// assert!(!copy_item.is_disabled);
+/// assert!(delete_item.is_disabled);
+/// assert_eq!(delete_item.text, "Delete");
+/// ```
 //==============================================================================
 pub struct UIContextMenuItem {
+	/// 항목 글.
 	pub text: String,
+	/// 누르면 메뉴를 닫은 뒤 부르는 처리기. (None 이면 닫기만 한다)
 	pub handler: Option<UIContextMenuHandler>,
+	/// true 면 누를 수 없고 회색 글로 보인다.
 	pub is_disabled: bool,
 }
 
 impl UIContextMenuItem {
 	//==============================================================================
 	/// 처리기가 있는 항목 생성.
+	///
+	/// # 인자
+	/// - `text`: 항목 글.
+	/// - `handler`: 누르면 메뉴를 닫은 뒤 부르는 처리기. (누른 행 노드의 문맥을 받는다)
+	///
+	/// # 돌려줌
+	/// 누를 수 있는 항목.
 	//==============================================================================
 	pub fn create(text: &str, handler: UIContextMenuHandler) -> UIContextMenuItem {
 		UIContextMenuItem {
@@ -88,6 +137,12 @@ impl UIContextMenuItem {
 
 	//==============================================================================
 	/// 누를 수 없는 항목 생성. (회색 글자)
+	///
+	/// # 인자
+	/// - `text`: 항목 글.
+	///
+	/// # 돌려줌
+	/// 처리기 없이 누를 수 없는 항목.
 	//==============================================================================
 	pub fn create_disabled(text: &str) -> UIContextMenuItem {
 		UIContextMenuItem {
@@ -100,6 +155,37 @@ impl UIContextMenuItem {
 
 //==============================================================================
 /// 컨텍스트 메뉴.
+///
+/// # 예제
+/// 항목을 누르면 처리기를 부르고 닫힌다
+/// ```rust
+/// use std::cell::Cell;
+/// use std::rc::Rc;
+/// use vanilla::{ComponentContext, Engine, EngineConfiguration, NodeTree, TouchKind, UIContextMenu, UIContextMenuItem, UIContextMenuOptions, Vector2};
+///
+/// let engine = Engine::new(EngineConfiguration::new());
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.get_root_id();
+/// node_tree[root_id].set_content_size(Vector2::create(800.0, 600.0));
+/// let menu_id = UIContextMenu::create(&mut node_tree, root_id, UIContextMenuOptions::default());
+/// let copy_count = Rc::new(Cell::new(0));
+/// let copy_counter = copy_count.clone();
+/// let item_list = vec![
+/// 	UIContextMenuItem::create("Copy", Box::new(move |_context: &mut ComponentContext| {
+/// 		copy_counter.set(copy_counter.get() + 1);
+/// 	})),
+/// 	UIContextMenuItem::create_disabled("Delete"),
+/// ];
+/// node_tree.with_component_mut::<UIContextMenu, _>(menu_id, |context_menu, tree| {
+/// 	context_menu.show(tree, Vector2::create(100.0, 100.0), item_list);
+/// });
+/// let copy_item_id = node_tree[menu_id].get_component::<UIContextMenu>().expect("menu").get_item_nodes()[0];
+/// let item_center = node_tree.convert_node_position_to_view_position(copy_item_id, Vector2::create(80.0, 14.0));
+/// node_tree.dispatch_touch(copy_item_id, &engine, TouchKind::Press, item_center);
+/// node_tree.dispatch_touch(copy_item_id, &engine, TouchKind::Release, item_center);
+/// assert_eq!(copy_count.get(), 1);
+/// assert!(!node_tree[menu_id].get_component::<UIContextMenu>().expect("menu").is_showing());
+/// ```
 //==============================================================================
 pub struct UIContextMenu {
 	component_base: ComponentBase,
@@ -115,6 +201,9 @@ pub struct UIContextMenu {
 impl UIContextMenu {
 	//==============================================================================
 	/// 생성. (기본 설정)
+	///
+	/// # 돌려줌
+	/// 붙기 전의 메뉴. (UIContextMenuOptions::default)
 	//==============================================================================
 	pub fn new() -> UIContextMenu {
 		UIContextMenu::create_with_options(UIContextMenuOptions::default())
@@ -122,6 +211,12 @@ impl UIContextMenu {
 
 	//==============================================================================
 	/// 설정으로 생성. (노드에는 node_tree.add_component 로 붙인다)
+	///
+	/// # 인자
+	/// - `options`: 메뉴 설정.
+	///
+	/// # 돌려줌
+	/// 붙기 전의 메뉴.
 	//==============================================================================
 	pub fn create_with_options(options: UIContextMenuOptions) -> UIContextMenu {
 		UIContextMenu {
@@ -137,6 +232,14 @@ impl UIContextMenu {
 
 	//==============================================================================
 	/// 노드 만들기. (parent_id 밑에 "UIContextMenu" 노드를 만들어 붙인다. 원본 new UIContextMenu(options) + add_child)
+	///
+	/// # 인자
+	/// - `node_tree`: 노드 트리.
+	/// - `parent_id`: 부모 노드. (보통 씬 뿌리, 그 content_size 가 메뉴를 가두는 영역이다)
+	/// - `options`: 메뉴 설정.
+	///
+	/// # 돌려줌
+	/// 만든 호스트 노드. (열기 전이라 꺼져 있다)
 	//==============================================================================
 	pub fn create(node_tree: &mut NodeTree, parent_id: NodeId, options: UIContextMenuOptions) -> NodeId {
 		let menu_id = node_tree.create_child(parent_id, "UIContextMenu");
@@ -146,6 +249,29 @@ impl UIContextMenu {
 
 	//==============================================================================
 	/// 메뉴 열기. (position 은 메뉴 왼쪽 위의 뷰 좌표. 행을 다시 만들고 영역 안에 붙여 띄운다)
+	/// - 트리에 붙기 전이면 아무 일도 없다.
+	///
+	/// # 인자
+	/// - `node_tree`: 메뉴가 든 노드 트리.
+	/// - `position`: 메뉴 판 왼쪽 위 자리. (판의 로컬 자리로 쓰고, 영역 오른쪽, 아래 끝에서 4 안쪽을 넘지 않게 자른다)
+	/// - `item_list`: 항목 목록. (차례대로 위에서 아래로 놓는다)
+	///
+	/// # 예제
+	/// 오른쪽 아래 끝에서 연 메뉴는 영역 안으로 붙는다
+	/// ```rust
+	/// use vanilla::{NodeTree, UIContextMenu, UIContextMenuItem, UIContextMenuOptions, Vector2};
+	///
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// node_tree[root_id].set_content_size(Vector2::create(800.0, 600.0));
+	/// let menu_id = UIContextMenu::create(&mut node_tree, root_id, UIContextMenuOptions::default());
+	/// let item_list = vec![UIContextMenuItem::create_disabled("Undo"), UIContextMenuItem::create_disabled("Redo")];
+	/// node_tree.with_component_mut::<UIContextMenu, _>(menu_id, |context_menu, tree| {
+	/// 	context_menu.show(tree, Vector2::create(780.0, 590.0), item_list);
+	/// });
+	/// let panel_id = node_tree[menu_id].get_component::<UIContextMenu>().expect("menu").get_panel_node().expect("panel");
+	/// assert_eq!(node_tree[panel_id].get_local_position(), Vector2::create(628.0, 532.0));
+	/// ```
 	//==============================================================================
 	pub fn show(&mut self, node_tree: &mut NodeTree, position: Vector2, item_list: Vec<UIContextMenuItem>) {
 		let (menu_id, overlay_id, panel_id) = match (self.node_id, self.overlay_node_id, self.panel_node_id) {
@@ -235,6 +361,9 @@ impl UIContextMenu {
 
 	//==============================================================================
 	/// 닫기.
+	///
+	/// # 인자
+	/// - `node_tree`: 메뉴가 든 노드 트리. (호스트 노드를 끈다, 행 노드는 다음 show 까지 남는다)
 	//==============================================================================
 	pub fn close(&mut self, node_tree: &mut NodeTree) {
 		if let Some(menu_node) = self.node_id.and_then(|menu_id| node_tree.get_node_mut(menu_id)) {
@@ -245,6 +374,9 @@ impl UIContextMenu {
 
 	//==============================================================================
 	/// 보이는 중인지.
+	///
+	/// # 돌려줌
+	/// show 뒤 close 전이면 true.
 	//==============================================================================
 	pub fn is_showing(&self) -> bool {
 		self.is_showing
@@ -252,6 +384,9 @@ impl UIContextMenu {
 
 	//==============================================================================
 	/// 바깥 누름 막 노드 핸들.
+	///
+	/// # 돌려줌
+	/// 투명한 막 노드. (트리에 붙기 전이면 None)
 	//==============================================================================
 	pub fn get_overlay_node(&self) -> Option<NodeId> {
 		self.overlay_node_id
@@ -259,6 +394,9 @@ impl UIContextMenu {
 
 	//==============================================================================
 	/// 메뉴 판 노드 핸들.
+	///
+	/// # 돌려줌
+	/// 메뉴 판 노드. (트리에 붙기 전이면 None)
 	//==============================================================================
 	pub fn get_panel_node(&self) -> Option<NodeId> {
 		self.panel_node_id
@@ -266,6 +404,9 @@ impl UIContextMenu {
 
 	//==============================================================================
 	/// 항목 행 노드 핸들 목록.
+	///
+	/// # 돌려줌
+	/// 마지막 show 가 만든 행 노드. (항목 차례, show 마다 다시 만든다)
 	//==============================================================================
 	pub fn get_item_nodes(&self) -> &[NodeId] {
 		&self.row_node_ids
@@ -273,6 +414,9 @@ impl UIContextMenu {
 }
 
 impl Default for UIContextMenu {
+	//==============================================================================
+	/// 기본값. (UIContextMenu::new 와 같다)
+	//==============================================================================
 	fn default() -> UIContextMenu {
 		UIContextMenu::new()
 	}
@@ -280,14 +424,23 @@ impl Default for UIContextMenu {
 
 #[crate::reflect]
 impl Component for UIContextMenu {
+	//==============================================================================
+	/// 컴포넌트 공통 칸 반환.
+	//==============================================================================
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base
 	}
 
+	//==============================================================================
+	/// 컴포넌트 공통 칸 반환. (변경용)
+	//==============================================================================
 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 		&mut self.component_base
 	}
 
+	//==============================================================================
+	/// 컴포넌트 타입 이름. ("UIContextMenu")
+	//==============================================================================
 	fn get_component_type(&self) -> &'static str {
 		"UIContextMenu"
 	}
@@ -328,6 +481,9 @@ impl Component for UIContextMenu {
 		self.panel_node_id = Some(panel_id);
 	}
 
+	//==============================================================================
+	/// tick 이 필요한지. (돌 일이 없어 false)
+	//==============================================================================
 	fn is_tick_needed(&self) -> bool {
 		false
 	}

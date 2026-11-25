@@ -12,10 +12,8 @@
 //!   ```
 //! - 원본과 다른 것:
 //!   - show 는 줄에 넣기만 하고, 꺼내서 보이는 것은 다음 tick 이 한다. (같은 tick 에 첫 걸음도 가므로 시간 흐름은 원본과 같다)
-//!   ```text
 //!     그래서 원본은 숨을 때 set_active(false) 하지만 러스트 판은 tick 이 돌아야 해서 set_visible(false) 로 숨긴다.
 //!     UI 문서는 원본처럼 숨은 토스트를 active false 로 쓰고 읽는다. (uidocument.rs 의 UIDocumentNode)
-//!   ```
 //!   - 등장 / 머묾 / 퇴장 시간과 곡선은 원본 그대로 이 안에서 센다. (Tween 은 쓰지 않는다)
 //!   - 가로 자리 rest_x 는 `Option<f32>` 다. (원본 null = 부모 가운데) options 객체는 UIToastOptions 구조체다.
 //==============================================================================
@@ -40,10 +38,30 @@ const DEFAULT_CENTER_X: f32 = 480.0;
 
 //==============================================================================
 /// 토스트 설정. (원본 options = { width = 400, height = 48, rest_y = 560, rest_x = null, hold_seconds = 1.8, font_size = 15, background_color?, text_color? })
+///
+/// # 예제
+/// 위쪽에 오래 머무는 좁은 토스트
+/// ```rust
+/// use vanilla::{NodeTree, UIToast, UIToastOptions, Vector2};
+///
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.get_root_id();
+/// let options = UIToastOptions {
+/// 	width: 320.0,
+/// 	rest_y: 80.0,
+/// 	hold_seconds: 3.0,
+/// 	..UIToastOptions::default()
+/// };
+/// let toast_id = UIToast::create(&mut node_tree, root_id, options);
+/// assert_eq!(node_tree[toast_id].get_content_size(), Vector2::create(320.0, 48.0));
+/// assert!(!node_tree[toast_id].is_visible());
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UIToastOptions {
+	/// 알약 가로. (기본 400)
 	pub width: f32,
+	/// 알약 세로. (기본 48, 둥근 정도는 그 반)
 	pub height: f32,
 	/// 머무는 자리의 가운데 세로 좌표.
 	pub rest_y: f32,
@@ -51,8 +69,11 @@ pub struct UIToastOptions {
 	pub rest_x: Option<f32>,
 	/// 머무는 시간. (초)
 	pub hold_seconds: f32,
+	/// 글 크기. (기본 15)
 	pub font_size: f32,
+	/// 알약 색.
 	pub background_color: Color,
+	/// 글 색.
 	pub text_color: Color,
 }
 
@@ -87,6 +108,23 @@ enum ToastPhase {
 
 //==============================================================================
 /// 토스트.
+///
+/// # 예제
+/// 저장 알림 띄우기
+/// ```rust
+/// use vanilla::{Engine, EngineConfiguration, NodeTree, UILabel, UIToast, UIToastOptions, Vector2};
+///
+/// let engine = Engine::new(EngineConfiguration::new());
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.get_root_id();
+/// node_tree[root_id].set_content_size(Vector2::create(800.0, 600.0));
+/// let toast_id = UIToast::create(&mut node_tree, root_id, UIToastOptions::default());
+/// node_tree[toast_id].get_component_mut::<UIToast>().expect("toast").show("Saved.");
+/// node_tree.tick(&engine, 0.24);
+/// assert!(node_tree[toast_id].is_visible());
+/// assert_eq!(node_tree[toast_id].get_component::<UILabel>().expect("label").get_text(), "Saved.");
+/// assert_eq!(node_tree[toast_id].get_local_position(), Vector2::create(400.0, 560.0));
+/// ```
 //==============================================================================
 pub struct UIToast {
 	component_base: ComponentBase,
@@ -103,6 +141,9 @@ pub struct UIToast {
 impl UIToast {
 	//==============================================================================
 	/// 생성. (기본 설정)
+	///
+	/// # 돌려줌
+	/// 붙기 전의 토스트. (UIToastOptions::default)
 	//==============================================================================
 	pub fn new() -> UIToast {
 		UIToast::create_with_options(UIToastOptions::default())
@@ -110,6 +151,12 @@ impl UIToast {
 
 	//==============================================================================
 	/// 설정으로 생성. (노드에는 node_tree.add_component 로 붙인다)
+	///
+	/// # 인자
+	/// - `options`: 토스트 설정.
+	///
+	/// # 돌려줌
+	/// 붙기 전의 토스트.
 	//==============================================================================
 	pub fn create_with_options(options: UIToastOptions) -> UIToast {
 		UIToast {
@@ -126,6 +173,14 @@ impl UIToast {
 
 	//==============================================================================
 	/// 노드 만들기. (parent_id 밑에 "UIToast" 노드를 만들어 붙인다. 원본 new UIToast(options) + add_child)
+	///
+	/// # 인자
+	/// - `node_tree`: 노드 트리.
+	/// - `parent_id`: 부모 노드. (보통 씬 뿌리, 가로 자리를 정하지 않으면 그 가로 가운데에 선다)
+	/// - `options`: 토스트 설정.
+	///
+	/// # 돌려줌
+	/// 만든 토스트 노드. (보이기 전이라 숨어 있다)
 	//==============================================================================
 	pub fn create(node_tree: &mut NodeTree, parent_id: NodeId, options: UIToastOptions) -> NodeId {
 		let toast_id = node_tree.create_child(parent_id, "UIToast");
@@ -135,6 +190,28 @@ impl UIToast {
 
 	//==============================================================================
 	/// 토스트 표시. (줄에 넣는다. 보이는 중이면 차례를 기다린다)
+	///
+	/// # 인자
+	/// - `message_text`: 보일 글. (다음 tick 부터 보인다)
+	///
+	/// # 예제
+	/// 두 번 부르면 앞의 것이 사라진 뒤 다음 것이 나온다
+	/// ```rust
+	/// use vanilla::{Engine, EngineConfiguration, NodeTree, UILabel, UIToast, UIToastOptions};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let toast_id = UIToast::create(&mut node_tree, root_id, UIToastOptions::default());
+	/// if let Some(toast) = node_tree[toast_id].get_component_mut::<UIToast>() {
+	/// 	toast.show("First");
+	/// 	toast.show("Second");
+	/// }
+	/// node_tree.tick(&engine, 0.24);
+	/// node_tree.tick(&engine, 1.8);
+	/// node_tree.tick(&engine, 0.2);
+	/// assert_eq!(node_tree[toast_id].get_component::<UILabel>().expect("label").get_text(), "Second");
+	/// ```
 	//==============================================================================
 	pub fn show(&mut self, message_text: &str) {
 		self.message_queue.push_back(message_text.to_string());
@@ -191,6 +268,9 @@ impl UIToast {
 
 	//==============================================================================
 	/// 머무는 자리(가운데 세로 좌표) 설정.
+	///
+	/// # 인자
+	/// - `rest_y`: 머무는 자리의 가운데 세로 좌표. (부모 로컬 좌표, 등장할 때는 28 아래에서 떠오른다, 다음 자리 셈부터)
 	//==============================================================================
 	pub fn set_rest_y(&mut self, rest_y: f32) {
 		self.rest_y = rest_y;
@@ -198,6 +278,9 @@ impl UIToast {
 
 	//==============================================================================
 	/// 머무는 자리(가운데 가로 좌표) 설정. (None 이면 부모 가로 가운데)
+	///
+	/// # 인자
+	/// - `rest_x`: 머무는 자리의 가운데 가로 좌표. (부모 로컬 좌표, None 이면 부모 가로 가운데, 부모 크기를 모르면 480)
 	//==============================================================================
 	pub fn set_rest_x(&mut self, rest_x: Option<f32>) {
 		self.rest_x = rest_x;
@@ -205,6 +288,9 @@ impl UIToast {
 
 	//==============================================================================
 	/// 머무는 시간 설정. (초)
+	///
+	/// # 인자
+	/// - `hold_seconds`: 다 떠오른 뒤 머무는 시간. (초, 기본 1.8)
 	//==============================================================================
 	pub fn set_hold_seconds(&mut self, hold_seconds: f32) {
 		self.hold_seconds = hold_seconds;
@@ -212,6 +298,9 @@ impl UIToast {
 
 	//==============================================================================
 	/// 보이는 중인지. (줄에 남은 메시지가 있어도 참)
+	///
+	/// # 돌려줌
+	/// 등장, 머묾, 퇴장 중이거나 줄에 기다리는 메시지가 있으면 true.
 	//==============================================================================
 	pub fn is_showing(&self) -> bool {
 		self.phase != ToastPhase::Hidden || !self.message_queue.is_empty()
@@ -219,6 +308,9 @@ impl UIToast {
 }
 
 impl Default for UIToast {
+	//==============================================================================
+	/// 기본값. (UIToast::new 와 같다)
+	//==============================================================================
 	fn default() -> UIToast {
 		UIToast::new()
 	}
@@ -226,14 +318,23 @@ impl Default for UIToast {
 
 #[crate::reflect]
 impl Component for UIToast {
+	//==============================================================================
+	/// 컴포넌트 공통 칸 반환.
+	//==============================================================================
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base
 	}
 
+	//==============================================================================
+	/// 컴포넌트 공통 칸 반환. (변경용)
+	//==============================================================================
 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 		&mut self.component_base
 	}
 
+	//==============================================================================
+	/// 컴포넌트 타입 이름. ("UIToast")
+	//==============================================================================
 	fn get_component_type(&self) -> &'static str {
 		"UIToast"
 	}
