@@ -4,12 +4,15 @@
 //   MeshBuilder::combine 으로 이은 각진 돌덩이 셋, 인스턴싱한 작은 돌.
 //   노란 점과 이름표는 렌더러와 같은 Camera3D 의 project_to_view 로 3D 점 위에 얹은 2D 다. 판 다음 형제인 노란 띠는 3D 위에 그려진다.
 // - 오른쪽 판: 같은 장면을 ToonPostProcess 에 그려 채도 낮춤, 따뜻한 색조, 안개빛, 대비, 가장자리 어둡게를 건다.
+// - 두 판은 ToonView3D::set_renderer 로 렌더러 하나를 나눠 쓰고, 그릴 것은 set_draw_callback 의 클로저가 들고 있는다.
 // - 실행: cargo run --example toonview
 //==============================================================================
+use std::cell::{Cell, RefCell};
 use std::f32::consts::PI;
+use std::rc::Rc;
 use vanilla::{
 	create_box_geometry, create_faceted_chunk_geometry, create_part_matrix, create_sphere_geometry, Engine, EngineConfiguration, Graphic, Matrix4, MeshBuilder, NodeId, NodeTree, Paint, Pivot, Rect, Scene, SceneBase, Text, TextAlign, ToonDrawOptions, ToonDrawQueue, ToonGeometry, ToonInstance,
-	ToonMesh, ToonMeshArrays, ToonMeshPiece, ToonPartOptions, ToonPostProcess, ToonView3D, ToonViewDrawer, ToonViewPass, Vector2, Vector3,
+	ToonMesh, ToonMeshArrays, ToonMeshPiece, ToonPartOptions, Camera3D, ToonPostProcess, ToonRenderer, ToonView3D, Vector2, Vector3,
 };
 
 //==============================================================================
@@ -25,11 +28,11 @@ struct PanelMeshes {
 }
 
 //==============================================================================
-// 판의 그리개. (오른쪽 판은 ToonPostProcess 로 색 보정)
+// 판 하나의 그리기 상태. (오른쪽 판은 ToonPostProcess 로 색 보정, ToonView3D 의 그리기 함수가 들고 있는다)
 //==============================================================================
 struct PanelDrawer {
 	is_graded: bool,
-	elapsed_seconds: f32,
+	elapsed_seconds: Rc<Cell<f32>>,
 	meshes: Option<PanelMeshes>,
 	pebble_instance_list: Vec<ToonInstance>,
 	post_process: Option<ToonPostProcess>,
@@ -46,7 +49,7 @@ fn build_arrays(geometry: &ToonGeometry, position: [f32; 3], color_text: &str, o
 }
 
 impl PanelDrawer {
-	fn new(is_graded: bool) -> PanelDrawer {
+	fn new(is_graded: bool, elapsed_seconds: Rc<Cell<f32>>) -> PanelDrawer {
 		let mut pebble_instance_list = Vec::new();
 		for pebble_index in 0..24 {
 			let angle = pebble_index as f32 / 24.0 * PI * 2.0;
@@ -54,18 +57,16 @@ impl PanelDrawer {
 			model_matrix.rotate_y(angle * 2.0);
 			pebble_instance_list.push(ToonInstance { model_matrix, tint_color: [1.0, 1.0, 1.0, 1.0] });
 		}
-		PanelDrawer { is_graded, elapsed_seconds: 0.0, meshes: None, pebble_instance_list, post_process: None, frame_count: 0 }
+		PanelDrawer { is_graded, elapsed_seconds, meshes: None, pebble_instance_list, post_process: None, frame_count: 0 }
 	}
 
 	//==============================================================================
 	// 모형 짓기. (처음 그릴 때 한 번)
 	//==============================================================================
-	fn create_meshes(pass: &ToonViewPass) -> Option<PanelMeshes> {
+	fn create_meshes(renderer: &ToonRenderer, gl: &glow::Context) -> Option<PanelMeshes> {
 		let outline_options = ToonPartOptions { outline_width: 0.03, ..ToonPartOptions::default() };
 		let chunk = build_arrays(&create_faceted_chunk_geometry(0.4, &[1.0, 0.85, 1.1, 0.95, 1.05, 0.9], [1.0, 0.8, 1.0]), [0.0, 0.3, 0.0], "#9a8a7a", ToonPartOptions::default());
 		let pile = MeshBuilder::combine(&[ToonMeshPiece { arrays: &chunk, offset: [0.0, 0.0, 0.0] }, ToonMeshPiece { arrays: &chunk, offset: [0.7, 0.0, 0.2] }, ToonMeshPiece { arrays: &chunk, offset: [0.3, 0.45, 0.1] }]);
-		let renderer = &pass.renderer;
-		let gl = pass.gl;
 		Some(PanelMeshes {
 			ground: renderer.create_mesh(gl, &build_arrays(&create_box_geometry(8.0, 0.2, 6.0), [0.0, -0.1, 0.0], "#6b8f5a", ToonPartOptions { has_outline: false, ..ToonPartOptions::default() }))?,
 			box_mesh: renderer.create_mesh(gl, &build_arrays(&create_box_geometry(1.0, 1.0, 1.0), [0.0, 0.5, 0.0], "#ff8844", outline_options))?,
@@ -75,12 +76,13 @@ impl PanelDrawer {
 			pebble: renderer.create_mesh(gl, &build_arrays(&create_faceted_chunk_geometry(0.12, &[1.0, 0.8, 1.2], [1.0, 0.7, 1.0]), [0.0, 0.08, 0.0], "#c9b8a0", ToonPartOptions { outline_width: 0.012, ..ToonPartOptions::default() }))?,
 		})
 	}
-}
 
-impl ToonViewDrawer for PanelDrawer {
-	fn draw_toon(&mut self, pass: &mut ToonViewPass) {
+	//==============================================================================
+	// 판 그리기. (ToonView3D 의 그리기 함수)
+	//==============================================================================
+	fn draw(&mut self, renderer: &mut ToonRenderer, camera: &Camera3D, screen_rect: Rect, gl: &glow::Context, drawing_buffer_height: i32) {
 		if self.meshes.is_none() {
-			self.meshes = PanelDrawer::create_meshes(pass);
+			self.meshes = PanelDrawer::create_meshes(renderer, gl);
 		}
 		let meshes = match self.meshes.as_ref() {
 			Some(meshes) => {
@@ -90,14 +92,14 @@ impl ToonViewDrawer for PanelDrawer {
 				return;
 			}
 		};
-		pass.renderer.set_band_count(3);
-		pass.renderer.set_light([-0.5, -1.0, -0.35], [0.85, 0.8, 0.75], [0.55, 0.6, 0.7], [0.25, 0.22, 0.2]);
+		renderer.set_band_count(3);
+		renderer.set_light([-0.5, -1.0, -0.35], [0.85, 0.8, 0.75], [0.55, 0.6, 0.7], [0.25, 0.22, 0.2]);
 
 		// 담기. (불투명, 인스턴싱, 비치는 공 셋은 앞뒤로 겹쳐 놓아 먼 것부터 섞여야 바르게 보임)
 		let mut queue = ToonDrawQueue::new();
 		queue.add_mesh(&meshes.ground, &Matrix4::create_identity(), ToonDrawOptions::default());
 		let mut box_matrix = Matrix4::create_translation(-1.6, 0.0, 0.0);
-		box_matrix.rotate_y(0.5 + self.elapsed_seconds * 0.5);
+		box_matrix.rotate_y(0.5 + self.elapsed_seconds.get() * 0.5);
 		queue.add_mesh(&meshes.box_mesh, &box_matrix, ToonDrawOptions::default());
 		queue.add_mesh(&meshes.sphere, &Matrix4::create_translation(0.2, 0.0, -0.6), ToonDrawOptions::default());
 		queue.add_mesh(&meshes.pile, &Matrix4::create_translation(1.5, 0.0, 0.3), ToonDrawOptions::default());
@@ -109,15 +111,15 @@ impl ToonViewDrawer for PanelDrawer {
 		}
 
 		if !self.is_graded {
-			queue.draw(pass.gl, pass.renderer, pass.camera);
+			renderer.set_hdr_output(false);
+			queue.draw(gl, renderer, camera);
 		}
 		else {
 			// 실수 렌더 타겟에 그리고 색 보정을 걸어 노드 사각형에 낸다. (렌더러의 화면 사각형은 푼다)
-			let screen_rect = pass.screen_rect;
 			let width = screen_rect.size.x.round().max(1.0) as i32;
 			let height = screen_rect.size.y.round().max(1.0) as i32;
 			if self.post_process.is_none() {
-				match ToonPostProcess::new(pass.gl, width, height) {
+				match ToonPostProcess::new(gl, width, height) {
 					Ok(mut post_process) => {
 						post_process.set_bloom(false, 0.0, 0.9, 1.6);
 						post_process.set_color_grade(0.45, 1.15, [1.0, 0.8, 0.55], 0.6, [0.35, 0.3, 0.45], 0.25);
@@ -138,28 +140,28 @@ impl ToonViewDrawer for PanelDrawer {
 					return;
 				}
 			};
-			let _ = post_process.resize(pass.gl, width, height);
-			pass.renderer.clear_screen_rect();
-			pass.renderer.set_hdr_output(true);
-			post_process.begin(pass.gl, [0.05, 0.06, 0.09]);
-			queue.draw(pass.gl, pass.renderer, pass.camera);
-			let bottom = pass.drawing_buffer_height - screen_rect.position.y.round() as i32 - height;
-			post_process.end(pass.gl, None, [screen_rect.position.x.round() as i32, bottom, width, height]);
+			let _ = post_process.resize(gl, width, height);
+			renderer.clear_screen_rect();
+			renderer.set_hdr_output(true);
+			post_process.begin(gl, [0.05, 0.06, 0.09]);
+			queue.draw(gl, renderer, camera);
+			let bottom = drawing_buffer_height - screen_rect.position.y.round() as i32 - height;
+			post_process.end(gl, None, [screen_rect.position.x.round() as i32, bottom, width, height]);
 		}
 		self.frame_count += 1;
 		if self.frame_count == 30 {
-			let frame_statistics = pass.renderer.get_frame_statistics();
+			let frame_statistics = renderer.get_frame_statistics();
 			println!("toonview: 판 {} 그린 것 {} 거른 것 {} 드로우콜 {}", if self.is_graded { "오른쪽" } else { "왼쪽" }, frame_statistics.drawn_object_count, frame_statistics.culled_object_count, frame_statistics.draw_call_count);
 		}
 	}
+}
 
-	//==============================================================================
-	// 렌더러를 짓지 못한 기기. (판에 글만)
-	//==============================================================================
-	fn draw_fallback(&mut self, graphic: &mut Graphic, content_size: Vector2) {
-		graphic.set_fill_color("#ffffff");
-		graphic.draw_fill_text("3D 를 그릴 수 없는 기기", content_size.x * 0.5, content_size.y * 0.5);
-	}
+//==============================================================================
+// 렌더러를 짓지 못한 기기. (판에 글만, ToonView3D 의 대체 그리기 함수)
+//==============================================================================
+fn draw_fallback(graphic: &mut Graphic, content_size: Vector2) {
+	graphic.set_fill_color("#ffffff");
+	graphic.draw_fill_text("3D 를 그릴 수 없는 기기", content_size.x * 0.5, content_size.y * 0.5);
 }
 
 //==============================================================================
@@ -176,7 +178,8 @@ struct ToonViewScene {
 	left_panel_id: Option<NodeId>,
 	right_panel_id: Option<NodeId>,
 	marker_list: Vec<Marker>,
-	elapsed_seconds: f32,
+	elapsed_seconds: Rc<Cell<f32>>,
+	is_renderer_shared: bool,
 }
 
 //==============================================================================
@@ -223,7 +226,12 @@ impl Scene for ToonViewScene {
 		let left_panel_id = create_panel(node_tree, root_id, Rect::create(40.0, 60.0, 700.0, 460.0), "#2d3a4f");
 		let right_panel_id = create_panel(node_tree, root_id, Rect::create(780.0, 60.0, 460.0, 460.0), "#000000");
 		for (panel_id, is_graded) in [(left_panel_id, false), (right_panel_id, true)] {
-			let toon_view = node_tree[panel_id].add_component(ToonView3D::new(PanelDrawer::new(is_graded)));
+			let mut panel_drawer = PanelDrawer::new(is_graded, self.elapsed_seconds.clone());
+			let toon_view = node_tree[panel_id].add_component(ToonView3D::new());
+			toon_view.set_draw_callback(Some(Box::new(move |renderer, camera, screen_rect, gl, drawing_buffer_height| {
+				panel_drawer.draw(renderer, camera, screen_rect, gl, drawing_buffer_height);
+			})));
+			toon_view.set_fallback_draw_callback(Some(Box::new(draw_fallback)));
 			toon_view.get_camera_mut().set_perspective(0.75, 0.1, 100.0);
 		}
 		let overlay_id = create_panel(node_tree, root_id, Rect::create(60.0, 470.0, 260.0, 36.0), "#ffcc33");
@@ -244,21 +252,20 @@ impl Scene for ToonViewScene {
 	// 카메라를 돌리고, 같은 카메라로 3D 점 위에 2D 표시를 놓는다.
 	//==============================================================================
 	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
-		self.elapsed_seconds += time_delta;
-		let elapsed_seconds = self.elapsed_seconds;
+		let elapsed_seconds = self.elapsed_seconds.get() + time_delta;
+		self.elapsed_seconds.set(elapsed_seconds);
 		let eye_position = Vector3::create((elapsed_seconds * 0.2).sin() * 1.5, 4.2, 6.5);
 		let target_position = Vector3::create(0.0, 0.4, 0.0);
 		let up_direction = Vector3::create(0.0, 1.0, 0.0);
 		let node_tree = self.scene_base.get_node_tree_mut();
 		for panel_id in [self.left_panel_id, self.right_panel_id].into_iter().flatten() {
-			if let Some(toon_view) = node_tree[panel_id].get_component_mut::<ToonView3D<PanelDrawer>>() {
+			if let Some(toon_view) = node_tree[panel_id].get_component_mut::<ToonView3D>() {
 				toon_view.get_camera_mut().look_at(eye_position, target_position, up_direction);
-				toon_view.get_drawer_mut().elapsed_seconds = elapsed_seconds;
 			}
 		}
 		if let Some(left_panel_id) = self.left_panel_id {
 			let panel_rect = Rect { position: node_tree[left_panel_id].get_local_position(), size: node_tree[left_panel_id].get_content_size() };
-			let projected_list: Vec<_> = match node_tree[left_panel_id].get_component_mut::<ToonView3D<PanelDrawer>>() {
+			let projected_list: Vec<_> = match node_tree[left_panel_id].get_component_mut::<ToonView3D>() {
 				Some(toon_view) => {
 					let camera = toon_view.get_camera_mut();
 					camera.set_aspect_ratio(panel_rect.size.x / panel_rect.size.y);
@@ -276,7 +283,28 @@ impl Scene for ToonViewScene {
 		self.scene_base.tick(engine, time_delta);
 	}
 
+	//==============================================================================
+	// 처음 그릴 때 렌더러 하나를 지어 두 판에 나눠 준다. (ToonView3D::set_renderer)
+	//==============================================================================
 	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+		if !self.is_renderer_shared {
+			self.is_renderer_shared = true;
+			match ToonRenderer::new(graphic.get_gl()) {
+				Ok(renderer) => {
+					let shared_renderer = Rc::new(RefCell::new(renderer));
+					let node_tree = self.scene_base.get_node_tree_mut();
+					for panel_id in [self.left_panel_id, self.right_panel_id].into_iter().flatten() {
+						if let Some(toon_view) = node_tree[panel_id].get_component_mut::<ToonView3D>() {
+							toon_view.set_renderer(Some(shared_renderer.clone()));
+						}
+					}
+				}
+				Err(error) => {
+					eprintln!("toonview: {}", error);
+				}
+			}
+			graphic.restore_render_state();
+		}
 		self.scene_base.draw_scene_background(engine, graphic);
 	}
 }
@@ -286,7 +314,7 @@ fn main() {
 	engine_configuration.title = String::from("노드 사각형 안 툰 3D (바닐라엔진)");
 	engine_configuration.reference_resolution_size = Vector2::create(1280.0, 720.0);
 	let engine = Engine::new(engine_configuration);
-	let scene = ToonViewScene { scene_base: SceneBase::new(), left_panel_id: None, right_panel_id: None, marker_list: Vec::new(), elapsed_seconds: 0.0 };
+	let scene = ToonViewScene { scene_base: SceneBase::new(), left_panel_id: None, right_panel_id: None, marker_list: Vec::new(), elapsed_seconds: Rc::new(Cell::new(0.0)), is_renderer_shared: false };
 	if let Err(error) = engine.run(Box::new(scene)) {
 		eprintln!("{}", error);
 		std::process::exit(1);

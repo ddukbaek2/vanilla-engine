@@ -161,7 +161,7 @@ pub use crate::core::inputactions::{InputActionSource, InputActions};
 pub use crate::core::gamepadmanager::{read_gamepad_kind, GamepadKind};
 pub use crate::graphics3d::camera3d::{Camera3D, ProjectedPoint};
 pub use crate::graphics3d::toon::toondrawqueue::ToonDrawQueue;
-pub use crate::graphics3d::toon::toonview3d::{ToonView3D, ToonViewDrawer, ToonViewPass};
+pub use crate::graphics3d::toon::toonview3d::{ToonView3D, ToonViewDrawCallback, ToonViewFallbackDrawCallback};
 pub use crate::graphics3d::toon::meshbuilder::{create_faceted_chunk_geometry, ToonMeshPiece};
 pub use crate::misc::graphicsqualitygovernor::{GraphicsQuality, GraphicsQualityGovernor};
 pub use crate::misc::fixedstepper::FixedStepper;
