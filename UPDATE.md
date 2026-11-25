@@ -498,6 +498,8 @@
   - NodeTree::add_component, WorldNode::add_component 가 원본처럼 컴포넌트 자리를 먼저 잡고 붙을 때 더 붙는 컴포넌트를 그 뒤에 둔다
   - 원본과 같게 고친 것: UIConfirmWindow 의 제목과 글이 UILabel 이다. UIWindow 는 붙을 때가 아니라 create 에서 노드를 끈다. FloatingText 는 붙을 때 피봇과 앵커를 왼쪽 위로 둔다. UIDropdown 화살표는 원본 글자(▴, ▾)와 글 크기다. UIScrollBar 썸은 원본 썸 노드처럼 처음은 켜진 0 크기 사각형이다. UIInputField 는 tick 이 놓은 글 라벨 크기를 문서에 적는다. UIImageView 는 그림 경로를 품은 Sprite 와 따로 든다. UISpinner 점 자리는 원본처럼 f64 로 셈한다
   - DevTools: 반사도 등록도 없는 컴포넌트는 "반사 없음" 줄로 매크로를 빠뜨린 것을 알린다
+- 브라우저가 해 주던 것 2차 (남은 차이 가운데 방법이 있는 것)
+  - LocalStorage: 짝 없는 서로게이트로만 다른 두 키(원본에서 다른 키)를 따로 든다. 전에는 러스트 쪽에서 한 키가 되어, 데스크탑은 원본이 저장한 그런 두 키 가운데 하나를 읽을 때 잃고 다음 쓰기에 파일에서도 지웠다. 키도 원래 단위로 부르는 get_keys_code_units, get_item_by_key_code_units, set_item_by_key_code_units, remove_item_by_key_code_units, contains_key_code_units 를 더했다. 러스트 글 키는 그 글 그대로의 키가 있으면 그것, 없으면 그 글로 보이는 짝 없는 서로게이트 키의 첫째를 가리킨다. get_keys 는 보인 글이 같은 키를 한 번만 낸다
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.

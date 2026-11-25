@@ -230,6 +230,43 @@ pub fn parse_json_code_units(code_units: &[u16]) -> Result<(Value, JsonSurrogate
 }
 
 //==============================================================================
+// JSON 객체의 칸 하나. (키는 원래 UTF-16 단위, 값의 표는 그 값을 바탕(빈 경로)으로 한 자리)
+//==============================================================================
+pub struct JsonObjectEntry {
+	pub key: PreservedText,
+	pub value: Value,
+	pub surrogate_table: JsonSurrogateTable,
+}
+
+//==============================================================================
+// 맨 위가 객체인 JSON 을 칸 목록으로 읽기. (맨 위가 객체가 아니면 빈 목록)
+// - 짝 없는 서로게이트로만 다른 두 키도 따로 담는다. (serde_json 맵에서는 대체 문자로 같은 키가 되어 하나만 남는다)
+// - 차례는 글에 적힌 차례고, 같은 키가 또 나와도 모두 담는다. (JSON.parse 처럼 뒤의 값이 이기게 하려면 담는 쪽이 덮어쓴다)
+//==============================================================================
+pub fn parse_json_object_entries(text: &str) -> Result<Vec<JsonObjectEntry>, String> {
+	let code_units: Vec<u16> = text.encode_utf16().collect();
+	let mut json_reader = JsonReader {
+		code_units: &code_units,
+		position: 0,
+		path: Vec::new(),
+		surrogate_table: JsonSurrogateTable::new(),
+	};
+	json_reader.skip_whitespace();
+	let entry_list = if json_reader.peek() == Some(0x7B) {
+		json_reader.read_object_entries()?
+	}
+	else {
+		json_reader.read_value()?;
+		Vec::new()
+	};
+	json_reader.skip_whitespace();
+	if json_reader.position != code_units.len() {
+		return Err(format!("JSON 끝 뒤에 남은 글 ({})", json_reader.position));
+	}
+	Ok(entry_list)
+}
+
+//==============================================================================
 // JSON 쓰기. (serde_json 의 짧은 꼴과 같고, 표에 남은 글은 원래 단위로)
 //==============================================================================
 pub fn stringify_json(value: &Value, surrogate_table: &JsonSurrogateTable) -> String {
@@ -446,6 +483,51 @@ impl JsonReader<'_> {
 				Some(0x7D) => {
 					self.position += 1;
 					return Ok(Value::Object(object_map));
+				}
+				_ => {
+					return Err(format!("JSON 객체에 ',' 나 '}}' 가 와야 한다 ({})", self.position));
+				}
+			}
+		}
+	}
+
+	//==============================================================================
+	// 맨 위 객체의 칸 목록. (값마다 빈 경로와 새 표로 읽는다)
+	//==============================================================================
+	fn read_object_entries(&mut self) -> Result<Vec<JsonObjectEntry>, String> {
+		self.expect('{')?;
+		let mut entry_list: Vec<JsonObjectEntry> = Vec::new();
+		self.skip_whitespace();
+		if self.peek() == Some(0x7D) {
+			self.position += 1;
+			return Ok(entry_list);
+		}
+		loop {
+			self.skip_whitespace();
+			if self.peek() != Some(0x22) {
+				return Err(format!("JSON 객체 키가 와야 한다 ({})", self.position));
+			}
+			let key = self.read_string()?;
+			self.skip_whitespace();
+			self.expect(':')?;
+			self.skip_whitespace();
+			self.path.clear();
+			self.surrogate_table = JsonSurrogateTable::new();
+			let value = self.read_value()?;
+			let surrogate_table = std::mem::take(&mut self.surrogate_table);
+			entry_list.push(JsonObjectEntry {
+				key,
+				value,
+				surrogate_table,
+			});
+			self.skip_whitespace();
+			match self.peek() {
+				Some(0x2C) => {
+					self.position += 1;
+				}
+				Some(0x7D) => {
+					self.position += 1;
+					return Ok(entry_list);
 				}
 				_ => {
 					return Err(format!("JSON 객체에 ',' 나 '}}' 가 와야 한다 ({})", self.position));

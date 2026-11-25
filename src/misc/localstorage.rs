@@ -24,8 +24,12 @@
 //   그것을 \ud83d 꼴로 쓴 JSON 을 담는다. 러스트 String 은 그런 글을 담지 못해 러스트 쪽에는 대체 문자(U+FFFD)로 보이고,
 //   읽은 값을 고치지 않고 다시 쓰면(set_item, set_string, set_json) 원래 UTF-16 단위 그대로 쓴다. (misc/storagetext.rs)
 //   원래 단위가 필요하면 get_item_code_units, set_item_code_units 로 JS 글 그대로 읽고 쓴다.
+//   키도 같다. 짝 없는 서로게이트로만 다른 두 키(원본에서 다른 키)는 러스트 글로는 같은 글로 보이지만 저장소 안에서는 따로 든다.
+//   get_keys_code_units 로 모든 키를 원래 단위로 받고, get_item_by_key_code_units, set_item_by_key_code_units,
+//   remove_item_by_key_code_units, contains_key_code_units 로 키와 값을 모두 원래 단위로 가려 부른다. (원본 localStorage 함수 그대로)
+//   러스트 글 키는 그 글 그대로의 키가 있으면 그것, 없으면 그 글로 보이는 짝 없는 서로게이트 키의 첫째를 가리킨다. (get_keys 로 받은 키로 부를 수 있다)
 //   웹은 브라우저 localStorage 에 JS 글 그대로 쓰고, 데스크탑 파일은 그런 값과 키를 원본 JSON.stringify 처럼 \udXXX 로 적는다.
-//   바꿔 낀 저장소(LocalStorageBackend)는 러스트 글로 주고받아 그 저장소가 든 글 그대로다.
+//   바꿔 낀 저장소(LocalStorageBackend)는 러스트 글로 주고받아 그 저장소가 든 글 그대로다. (키도 보인 글로 준다)
 //==============================================================================
 use crate::base::format::number_to_string;
 use crate::core::engine::Engine;
@@ -82,7 +86,7 @@ pub trait LocalStorageBackend {
 //==============================================================================
 struct StorageOverrideState {
 	backend: Option<Rc<RefCell<Box<dyn LocalStorageBackend>>>>,
-	memory_item_map: BTreeMap<String, String>,
+	memory_item_map: BTreeMap<StorageKey, String>,
 	is_memory_fallback: bool,
 }
 
@@ -95,13 +99,82 @@ enum StoredText {
 }
 
 //==============================================================================
+// 저장 키. (원본 JS 글 그대로의 키)
+// - 짝 없는 서로게이트가 있으면 원래 UTF-16 단위를 함께 든다. 대체 문자로 보이는 글이 같아도 원래 단위가 다르면 다른 키다. (원본에서 다른 두 키)
+// - 차례는 보인 글 차례, 보인 글이 같으면 러스트 글인 키가 먼저고 그다음은 원래 단위 차례다.
+//==============================================================================
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+struct StorageKey {
+	// 보인 글. (짝 없는 서로게이트는 대체 문자)
+	lossy_text: String,
+	// 짝 없는 서로게이트가 든 키의 원래 단위. (러스트 글로 담기는 키면 None)
+	lone_code_units: Option<Vec<u16>>,
+}
+
+impl StorageKey {
+	//==============================================================================
+	// 러스트 글 키.
+	//==============================================================================
+	fn from_text(text: &str) -> StorageKey {
+		StorageKey {
+			lossy_text: text.to_string(),
+			lone_code_units: None,
+		}
+	}
+
+	//==============================================================================
+	// UTF-16 단위 키. (짝 없는 서로게이트가 없으면 러스트 글 키와 같다)
+	//==============================================================================
+	fn from_code_units(code_units: &[u16]) -> StorageKey {
+		let lone_code_units = if has_lone_surrogate(code_units) {
+			Some(code_units.to_vec())
+		}
+		else {
+			None
+		};
+		StorageKey {
+			lossy_text: String::from_utf16_lossy(code_units),
+			lone_code_units,
+		}
+	}
+
+	//==============================================================================
+	// 보인 글.
+	//==============================================================================
+	fn get_lossy_text(&self) -> &str {
+		&self.lossy_text
+	}
+
+	//==============================================================================
+	// 짝 없는 서로게이트가 든 키의 원래 단위. (러스트 글 키면 None)
+	//==============================================================================
+	fn get_lone_code_units(&self) -> Option<&[u16]> {
+		self.lone_code_units.as_deref()
+	}
+
+	//==============================================================================
+	// 원래 UTF-16 단위.
+	//==============================================================================
+	fn to_code_units(&self) -> Vec<u16> {
+		match &self.lone_code_units {
+			Some(lone_code_units) => {
+				lone_code_units.clone()
+			}
+			None => {
+				self.lossy_text.encode_utf16().collect()
+			}
+		}
+	}
+}
+
+//==============================================================================
 // 짝 없는 서로게이트가 든 값. (읽을 때 남기고, 고치지 않고 다시 쓸 때 원래 단위로 쓴다)
 //==============================================================================
 struct PreservedItemState {
 	// 키 → 그 키에서 마지막으로 읽은 원래 글.
-	value_map: HashMap<String, PreservedText>,
+	value_map: HashMap<StorageKey, PreservedText>,
 	// 키 → get_json 이 읽은 JSON 의 표.
-	json_table_map: HashMap<String, JsonSurrogateTable>,
+	json_table_map: HashMap<StorageKey, JsonSurrogateTable>,
 }
 
 thread_local! {
@@ -128,7 +201,7 @@ fn with_preserved_item_state<R>(worker: impl FnOnce(&mut PreservedItemState) -> 
 //==============================================================================
 // 저장된 글 읽기. (메모리에 대신 둔 값 > 바꿔 낀 저장소 > 기본 저장소, 없거나 못 읽으면 None)
 //==============================================================================
-fn read_stored_text(key: &str) -> Option<StoredText> {
+fn read_stored_text(key: &StorageKey) -> Option<StoredText> {
 	if let Some(memory_value) = with_memory_item_map(|memory_item_map| memory_item_map.get(key).cloned()) {
 		// 원래 단위로 쓰다 메모리에 대신 둔 값은 남긴 원래 글로 돌린다.
 		let preserved_code_units = with_preserved_item_state(|state| state.value_map.get(key).filter(|preserved_text| preserved_text.get_lossy_text() == memory_value).map(|preserved_text| preserved_text.get_code_units().to_vec()));
@@ -141,7 +214,7 @@ fn read_stored_text(key: &str) -> Option<StoredText> {
 			}
 		};
 	}
-	match with_backend(|backend| backend.get_item(key)) {
+	match with_backend(|backend| backend.get_item(key.get_lossy_text())) {
 		Some(Ok(value)) => {
 			value.map(StoredText::Text)
 		}
@@ -157,7 +230,7 @@ fn read_stored_text(key: &str) -> Option<StoredText> {
 //==============================================================================
 // 읽은 글을 러스트 글로. (짝 없는 서로게이트가 있으면 원래 글을 남기고 대체 문자로 보인다)
 //==============================================================================
-fn convert_stored_text(key: &str, stored_text: StoredText) -> String {
+fn convert_stored_text(key: &StorageKey, stored_text: StoredText) -> String {
 	match stored_text {
 		StoredText::Text(text) => {
 			with_preserved_item_state(|state| {
@@ -169,7 +242,7 @@ fn convert_stored_text(key: &str, stored_text: StoredText) -> String {
 			let preserved_text = PreservedText::from_code_units(&code_units);
 			let lossy_text = preserved_text.get_lossy_text().to_string();
 			with_preserved_item_state(|state| {
-				state.value_map.insert(key.to_string(), preserved_text);
+				state.value_map.insert(key.clone(), preserved_text);
 			});
 			lossy_text
 		}
@@ -179,13 +252,13 @@ fn convert_stored_text(key: &str, stored_text: StoredText) -> String {
 //==============================================================================
 // 값 하나 쓰기. (원래 단위가 있으면 기본 저장소에는 그것으로, 바꿔 낀 저장소에는 러스트 글로. 저장소에 썼는지)
 //==============================================================================
-fn write_stored_text(key: &str, value: &str, code_units: Option<&[u16]>) -> bool {
-	let is_written = match with_backend(|backend| backend.set_item(key, value)) {
+fn write_stored_text(key: &StorageKey, value: &str, code_units: Option<&[u16]>) -> bool {
+	let is_written = match with_backend(|backend| backend.set_item(key.get_lossy_text(), value)) {
 		Some(Ok(())) => {
 			true
 		}
 		Some(Err(error_message)) => {
-			eprintln!("LocalStorage: 저장소에 쓰지 못해 메모리에 둡니다 {} ({})", key, error_message);
+			eprintln!("LocalStorage: 저장소에 쓰지 못해 메모리에 둡니다 {} ({})", key.get_lossy_text(), error_message);
 			false
 		}
 		None => {
@@ -205,7 +278,7 @@ fn write_stored_text(key: &str, value: &str, code_units: Option<&[u16]>) -> bool
 			state.memory_item_map.remove(key);
 		}
 		else {
-			state.memory_item_map.insert(key.to_string(), value.to_string());
+			state.memory_item_map.insert(key.clone(), value.to_string());
 			state.is_memory_fallback = true;
 		}
 	});
@@ -215,11 +288,142 @@ fn write_stored_text(key: &str, value: &str, code_units: Option<&[u16]>) -> bool
 //==============================================================================
 // 키의 남긴 원래 글과 JSON 표 지우기.
 //==============================================================================
-fn forget_preserved_item(key: &str) {
+fn forget_preserved_item(key: &StorageKey) {
 	with_preserved_item_state(|state| {
 		state.value_map.remove(key);
 		state.json_table_map.remove(key);
 	});
+}
+
+//==============================================================================
+// 값 하나를 러스트 글로 읽기.
+//==============================================================================
+fn read_item_text(key: &StorageKey) -> Option<String> {
+	let stored_text = read_stored_text(key)?;
+	Some(convert_stored_text(key, stored_text))
+}
+
+//==============================================================================
+// 값 하나를 원래 UTF-16 단위로 읽기.
+//==============================================================================
+fn read_item_code_units(key: &StorageKey) -> Option<Vec<u16>> {
+	match read_stored_text(key)? {
+		StoredText::Text(text) => {
+			Some(text.encode_utf16().collect())
+		}
+		StoredText::CodeUnits(code_units) => {
+			Some(code_units)
+		}
+	}
+}
+
+//==============================================================================
+// 값 하나를 러스트 글로 쓰기. (이 키에서 읽은 짝 없는 서로게이트가 든 값을 고치지 않고 다시 쓰면 원래 단위로)
+//==============================================================================
+fn write_item_text(key: &StorageKey, value: &str) -> bool {
+	let preserved_code_units = with_preserved_item_state(|state| {
+		state.json_table_map.remove(key);
+		let preserved_code_units = state.value_map.get(key).filter(|preserved_text| preserved_text.get_lossy_text() == value).map(|preserved_text| preserved_text.get_code_units().to_vec());
+		if preserved_code_units.is_none() {
+			state.value_map.remove(key);
+		}
+		preserved_code_units
+	});
+	write_stored_text(key, value, preserved_code_units.as_deref())
+}
+
+//==============================================================================
+// 값 하나를 UTF-16 단위로 쓰기.
+//==============================================================================
+fn write_item_code_units(key: &StorageKey, code_units: &[u16]) -> bool {
+	let preserved_text = PreservedText::from_code_units(code_units);
+	let lossy_text = preserved_text.get_lossy_text().to_string();
+	let is_preserved = has_lone_surrogate(code_units);
+	with_preserved_item_state(|state| {
+		state.json_table_map.remove(key);
+		if is_preserved {
+			state.value_map.insert(key.clone(), preserved_text);
+		}
+		else {
+			state.value_map.remove(key);
+		}
+	});
+	if is_preserved {
+		write_stored_text(key, &lossy_text, Some(code_units))
+	}
+	else {
+		write_stored_text(key, &lossy_text, None)
+	}
+}
+
+//==============================================================================
+// 값 하나 지우기. (메모리에 대신 둔 값도 지운다)
+//==============================================================================
+fn remove_stored_item(key: &StorageKey) {
+	forget_preserved_item(key);
+	with_memory_item_map(|memory_item_map| {
+		memory_item_map.remove(key);
+	});
+	match with_backend(|backend| backend.remove_item(key.get_lossy_text())) {
+		Some(Ok(())) => {
+		}
+		Some(Err(error_message)) => {
+			eprintln!("LocalStorage: 저장소에서 지우지 못했습니다 {} ({})", key.get_lossy_text(), error_message);
+		}
+		None => {
+			storage_backend::remove_item(key);
+		}
+	}
+}
+
+//==============================================================================
+// 모든 키. (정렬해서, 메모리에 대신 둔 키도 넣는다. is_reporting_error 면 바꿔 낀 저장소가 목록을 못 줄 때 알린다)
+//==============================================================================
+fn collect_storage_keys(is_reporting_error: bool) -> Vec<StorageKey> {
+	let mut key_list: Vec<StorageKey> = match with_backend(|backend| backend.get_keys()) {
+		Some(Ok(backend_keys)) => {
+			backend_keys.iter().map(|key| StorageKey::from_text(key)).collect()
+		}
+		Some(Err(error_message)) => {
+			if is_reporting_error {
+				eprintln!("LocalStorage: 키 목록을 읽지 못했습니다 ({})", error_message);
+			}
+			Vec::new()
+		}
+		None => {
+			storage_backend::get_all_keys()
+		}
+	};
+	with_memory_item_map(|memory_item_map| {
+		key_list.extend(memory_item_map.keys().cloned());
+	});
+	key_list.sort();
+	key_list.dedup();
+	key_list
+}
+
+//==============================================================================
+// 러스트 글 키가 가리키는 저장 키.
+// - 대체 문자가 든 키는 그 글 그대로의 키가 있으면 그것, 없으면 그 글로 보이는 짝 없는 서로게이트 키(get_keys 가 그렇게 보인 키)의 첫째다.
+//   그래서 get_keys 로 받은 키로 읽고 쓰고 지울 수 있다. 보인 글이 같은 키가 둘 이상이면 코드 단위 함수(get_item_by_key_code_units 같은 것)로 가려 부른다.
+//==============================================================================
+fn resolve_key(key: &str) -> StorageKey {
+	let text_key = StorageKey::from_text(key);
+	if !key.contains(char::REPLACEMENT_CHARACTER) {
+		return text_key;
+	}
+	let key_list = collect_storage_keys(false);
+	if key_list.contains(&text_key) {
+		return text_key;
+	}
+	match key_list.into_iter().find(|storage_key| storage_key.get_lossy_text() == key) {
+		Some(storage_key) => {
+			storage_key
+		}
+		None => {
+			text_key
+		}
+	}
 }
 
 //==============================================================================
@@ -235,7 +439,7 @@ fn with_backend<R>(worker: impl FnOnce(&mut dyn LocalStorageBackend) -> R) -> Op
 //==============================================================================
 // 메모리에 대신 둔 값 만지기.
 //==============================================================================
-fn with_memory_item_map<R>(worker: impl FnOnce(&mut BTreeMap<String, String>) -> R) -> R {
+fn with_memory_item_map<R>(worker: impl FnOnce(&mut BTreeMap<StorageKey, String>) -> R) -> R {
 	STORAGE_OVERRIDE_STATE.with(|state_cell| worker(&mut state_cell.borrow_mut().memory_item_map))
 }
 
@@ -304,22 +508,14 @@ impl LocalStorage {
 	// 값 하나 읽기. (없거나 못 읽으면 None. 메모리에 대신 둔 값이 앞선다. 짝 없는 서로게이트는 대체 문자로 보인다)
 	//==============================================================================
 	pub fn get_item(key: &str) -> Option<String> {
-		let stored_text = read_stored_text(key)?;
-		Some(convert_stored_text(key, stored_text))
+		read_item_text(&resolve_key(key))
 	}
 
 	//==============================================================================
 	// 값 하나를 원래 UTF-16 단위로 읽기. (원본 JS 글 그대로, 짝 없는 서로게이트도 담는다)
 	//==============================================================================
 	pub fn get_item_code_units(key: &str) -> Option<Vec<u16>> {
-		match read_stored_text(key)? {
-			StoredText::Text(text) => {
-				Some(text.encode_utf16().collect())
-			}
-			StoredText::CodeUnits(code_units) => {
-				Some(code_units)
-			}
-		}
+		read_item_code_units(&resolve_key(key))
 	}
 
 	//==============================================================================
@@ -327,59 +523,49 @@ impl LocalStorage {
 	// - 이 키에서 읽은 짝 없는 서로게이트가 든 값을 고치지 않고 다시 쓰면 원래 단위로 쓴다.
 	//==============================================================================
 	pub fn set_item(key: &str, value: &str) -> bool {
-		let preserved_code_units = with_preserved_item_state(|state| {
-			state.json_table_map.remove(key);
-			let preserved_code_units = state.value_map.get(key).filter(|preserved_text| preserved_text.get_lossy_text() == value).map(|preserved_text| preserved_text.get_code_units().to_vec());
-			if preserved_code_units.is_none() {
-				state.value_map.remove(key);
-			}
-			preserved_code_units
-		});
-		write_stored_text(key, value, preserved_code_units.as_deref())
+		write_item_text(&resolve_key(key), value)
 	}
 
 	//==============================================================================
 	// 값 하나를 UTF-16 단위로 쓰기. (원본 JS 글 그대로, 짝 없는 서로게이트도 그대로 쓴다)
 	//==============================================================================
 	pub fn set_item_code_units(key: &str, code_units: &[u16]) -> bool {
-		let preserved_text = PreservedText::from_code_units(code_units);
-		let lossy_text = preserved_text.get_lossy_text().to_string();
-		let is_preserved = has_lone_surrogate(code_units);
-		with_preserved_item_state(|state| {
-			state.json_table_map.remove(key);
-			if is_preserved {
-				state.value_map.insert(key.to_string(), preserved_text);
-			}
-			else {
-				state.value_map.remove(key);
-			}
-		});
-		if is_preserved {
-			write_stored_text(key, &lossy_text, Some(code_units))
-		}
-		else {
-			write_stored_text(key, &lossy_text, None)
-		}
+		write_item_code_units(&resolve_key(key), code_units)
 	}
 
 	//==============================================================================
 	// 값 하나 지우기. (메모리에 대신 둔 값도 지운다)
 	//==============================================================================
 	pub fn remove_item(key: &str) {
-		forget_preserved_item(key);
-		with_memory_item_map(|memory_item_map| {
-			memory_item_map.remove(key);
-		});
-		match with_backend(|backend| backend.remove_item(key)) {
-			Some(Ok(())) => {
-			}
-			Some(Err(error_message)) => {
-				eprintln!("LocalStorage: 저장소에서 지우지 못했습니다 {} ({})", key, error_message);
-			}
-			None => {
-				storage_backend::remove_item(key);
-			}
-		}
+		remove_stored_item(&resolve_key(key));
+	}
+
+	//==============================================================================
+	// 키와 값을 모두 UTF-16 단위로 읽기. (원본 localStorage.getItem 그대로, 짝 없는 서로게이트로만 다른 두 키도 가린다)
+	//==============================================================================
+	pub fn get_item_by_key_code_units(key_code_units: &[u16]) -> Option<Vec<u16>> {
+		read_item_code_units(&StorageKey::from_code_units(key_code_units))
+	}
+
+	//==============================================================================
+	// 키와 값을 모두 UTF-16 단위로 쓰기. (원본 localStorage.setItem 그대로, 저장소에 썼으면 true)
+	//==============================================================================
+	pub fn set_item_by_key_code_units(key_code_units: &[u16], value_code_units: &[u16]) -> bool {
+		write_item_code_units(&StorageKey::from_code_units(key_code_units), value_code_units)
+	}
+
+	//==============================================================================
+	// UTF-16 단위 키로 지우기. (원본 localStorage.removeItem 그대로)
+	//==============================================================================
+	pub fn remove_item_by_key_code_units(key_code_units: &[u16]) {
+		remove_stored_item(&StorageKey::from_code_units(key_code_units));
+	}
+
+	//==============================================================================
+	// UTF-16 단위 키가 있는지.
+	//==============================================================================
+	pub fn contains_key_code_units(key_code_units: &[u16]) -> bool {
+		read_stored_text(&StorageKey::from_code_units(key_code_units)).is_some()
 	}
 
 	//==============================================================================
@@ -482,14 +668,15 @@ impl LocalStorage {
 
 	//==============================================================================
 	// 접두사로 시작하는 키 한꺼번에 지우기. (게임 네임스페이스의 저장을 통째로 지울 때, 지운 키 수)
+	// - 보인 글로 견준다. 짝 없는 서로게이트로만 다른 키도 따로 센다.
 	//==============================================================================
 	pub fn clear_by_prefix(prefix: &str) -> usize {
 		if prefix.is_empty() {
 			return 0;
 		}
-		let remove_key_list: Vec<String> = LocalStorage::get_keys().into_iter().filter(|key| key.starts_with(prefix)).collect();
+		let remove_key_list: Vec<StorageKey> = collect_storage_keys(true).into_iter().filter(|key| key.get_lossy_text().starts_with(prefix)).collect();
 		for key in remove_key_list.iter() {
-			LocalStorage::remove_item(key);
+			remove_stored_item(key);
 		}
 		remove_key_list.len()
 	}
@@ -498,33 +685,24 @@ impl LocalStorage {
 	// 키가 있는지.
 	//==============================================================================
 	pub fn contains_key(key: &str) -> bool {
-		LocalStorage::get_item(key).is_some()
+		read_stored_text(&resolve_key(key)).is_some()
 	}
 
 	//==============================================================================
 	// 모든 키 반환. (정렬해서, 메모리에 대신 둔 키도 넣는다)
+	// - 짝 없는 서로게이트가 든 키는 대체 문자로 보인다. 보인 글이 같은 키는 하나만 나오니, 모두 가려 보려면 get_keys_code_units.
 	//==============================================================================
 	pub fn get_keys() -> Vec<String> {
-		let mut keys = match with_backend(|backend| backend.get_keys()) {
-			Some(Ok(backend_keys)) => {
-				backend_keys
-			}
-			Some(Err(error_message)) => {
-				eprintln!("LocalStorage: 키 목록을 읽지 못했습니다 ({})", error_message);
-				Vec::new()
-			}
-			None => {
-				storage_backend::get_all_keys()
-			}
-		};
-		with_memory_item_map(|memory_item_map| {
-			for key in memory_item_map.keys() {
-				keys.push(key.clone());
-			}
-		});
-		keys.sort();
+		let mut keys: Vec<String> = collect_storage_keys(true).into_iter().map(|key| key.lossy_text).collect();
 		keys.dedup();
 		keys
+	}
+
+	//==============================================================================
+	// 모든 키를 UTF-16 단위로 반환. (원본 localStorage.key(i) 의 글 그대로, 정렬해서)
+	//==============================================================================
+	pub fn get_keys_code_units() -> Vec<Vec<u16>> {
+		collect_storage_keys(true).iter().map(|key| key.to_code_units()).collect()
 	}
 
 	//==============================================================================
@@ -532,7 +710,8 @@ impl LocalStorage {
 	// - 짝 없는 서로게이트가 든 글(원본 JSON.stringify 의 \ud83d 같은 것)은 대체 문자로 읽고, 그 자리를 남겨 set_json 이 원래대로 쓴다.
 	//==============================================================================
 	pub fn get_json(key: &str, default_value: serde_json::Value) -> serde_json::Value {
-		let stored_text = match read_stored_text(key) {
+		let storage_key = resolve_key(key);
+		let stored_text = match read_stored_text(&storage_key) {
 			Some(stored_text) => {
 				stored_text
 			}
@@ -551,15 +730,15 @@ impl LocalStorage {
 				storagetext::parse_json_code_units(code_units)
 			}
 		};
-		convert_stored_text(key, stored_text);
+		convert_stored_text(&storage_key, stored_text);
 		match parse_result {
 			Ok((value, surrogate_table)) => {
 				with_preserved_item_state(|state| {
 					if surrogate_table.is_empty() {
-						state.json_table_map.remove(key);
+						state.json_table_map.remove(&storage_key);
 					}
 					else {
-						state.json_table_map.insert(key.to_string(), surrogate_table);
+						state.json_table_map.insert(storage_key.clone(), surrogate_table);
 					}
 				});
 				value
@@ -575,7 +754,8 @@ impl LocalStorage {
 	// - get_json 으로 읽은 짝 없는 서로게이트가 든 글을 고치지 않았으면 원본 JSON.stringify 처럼 \udXXX 로 쓴다.
 	//==============================================================================
 	pub fn set_json(key: &str, value: &serde_json::Value) -> bool {
-		let surrogate_table = with_preserved_item_state(|state| state.json_table_map.remove(key));
+		let storage_key = resolve_key(key);
+		let surrogate_table = with_preserved_item_state(|state| state.json_table_map.remove(&storage_key));
 		let string_value = match &surrogate_table {
 			Some(surrogate_table) => {
 				storagetext::stringify_json(value, surrogate_table)
@@ -584,10 +764,10 @@ impl LocalStorage {
 				value.to_string()
 			}
 		};
-		let is_written = LocalStorage::set_item(key, &string_value);
+		let is_written = write_item_text(&storage_key, &string_value);
 		if let Some(surrogate_table) = surrogate_table {
 			with_preserved_item_state(|state| {
-				state.json_table_map.insert(key.to_string(), surrogate_table);
+				state.json_table_map.insert(storage_key, surrogate_table);
 			});
 		}
 		is_written
@@ -746,8 +926,8 @@ fn parse_power_of_two_radix_integer(digit_text: &str, radix: u32) -> f64 {
 //==============================================================================
 #[cfg(not(target_arch = "wasm32"))]
 mod storage_backend {
-	use super::StoredText;
-	use crate::misc::storagetext::{self, has_lone_surrogate, quote_json_code_units, JsonPathSegment};
+	use super::{StorageKey, StoredText};
+	use crate::misc::storagetext::{self, has_lone_surrogate, quote_json_code_units};
 	use std::cell::RefCell;
 	use std::collections::BTreeMap;
 	use std::path::{Path, PathBuf};
@@ -756,16 +936,14 @@ mod storage_backend {
 	const STORAGE_FILE_NAME: &str = "localstorage.json";
 
 	//==============================================================================
-	// 저장 내용. (키 → 값, 짝 없는 서로게이트가 든 값과 키는 원래 UTF-16 단위를 함께 든다)
+	// 저장 내용. (키 → 값, 짝 없는 서로게이트가 든 값은 원래 UTF-16 단위를 함께 든다. 키는 StorageKey 라 원래 단위로 가른다)
 	//==============================================================================
 	#[derive(Default)]
 	struct DesktopEntries {
 		// 키 → 값. (러스트 글, 짝 없는 서로게이트는 대체 문자로 보인다)
-		item_map: BTreeMap<String, String>,
+		item_map: BTreeMap<StorageKey, String>,
 		// 짝 없는 서로게이트가 든 값의 원래 단위. (키 → 단위, 값을 러스트 글로 다시 쓰면 지운다)
-		code_unit_map: BTreeMap<String, Vec<u16>>,
-		// 짝 없는 서로게이트가 든 키의 원래 단위. (보인 키 → 단위)
-		key_code_unit_map: BTreeMap<String, Vec<u16>>,
+		code_unit_map: BTreeMap<StorageKey, Vec<u16>>,
 	}
 
 	//==============================================================================
@@ -886,7 +1064,8 @@ mod storage_backend {
 
 	//==============================================================================
 	// 파일에서 읽기. (없거나 깨졌으면 빈 저장소. 문자열이 아닌 값은 JSON 글로 바꿔 둔다)
-	// - 짝 없는 서로게이트를 원본 JSON.stringify 처럼 \udXXX 로 적은 값과 키는 원래 단위를 함께 든다.
+	// - 짝 없는 서로게이트를 원본 JSON.stringify 처럼 \udXXX 로 적은 값은 원래 단위를 함께 들고, 그런 키는 원래 단위로 가른다.
+	// - 같은 키가 또 나오면 JSON.parse 처럼 뒤의 값이 이긴다.
 	//==============================================================================
 	fn read_entries_from_file(storage_file_path: &Path) -> DesktopEntries {
 		let mut entries = DesktopEntries::default();
@@ -898,34 +1077,30 @@ mod storage_backend {
 				return entries;
 			}
 		};
-		let (parsed_value, surrogate_table) = match storagetext::parse_json(&file_text) {
-			Ok(parse_result) => {
-				parse_result
+		let entry_list = match storagetext::parse_json_object_entries(&file_text) {
+			Ok(entry_list) => {
+				entry_list
 			}
 			Err(error) => {
 				eprintln!("LocalStorage: 저장 파일을 읽지 못했습니다 {} ({})", storage_file_path.display(), error);
 				return entries;
 			}
 		};
-		if let serde_json::Value::Object(object_map) = parsed_value {
-			for (key, value) in object_map {
-				if let Some(key_code_units) = surrogate_table.find_text_code_units(&key).filter(|key_code_units| has_lone_surrogate(key_code_units)) {
-					entries.key_code_unit_map.insert(key.clone(), key_code_units.to_vec());
+		for entry in entry_list {
+			let key = StorageKey::from_code_units(entry.key.get_code_units());
+			entries.code_unit_map.remove(&key);
+			let string_value = match entry.value {
+				serde_json::Value::String(string_value) => {
+					if let Some(code_units) = entry.surrogate_table.find_value_code_units(&[], &string_value).filter(|code_units| has_lone_surrogate(code_units)) {
+						entries.code_unit_map.insert(key.clone(), code_units.to_vec());
+					}
+					string_value
 				}
-				let path = [JsonPathSegment::Key(key.clone())];
-				let string_value = match value {
-					serde_json::Value::String(string_value) => {
-						if let Some(code_units) = surrogate_table.find_value_code_units(&path, &string_value).filter(|code_units| has_lone_surrogate(code_units)) {
-							entries.code_unit_map.insert(key.clone(), code_units.to_vec());
-						}
-						string_value
-					}
-					other_value => {
-						storagetext::stringify_json_at(&other_value, &path, &surrogate_table)
-					}
-				};
-				entries.item_map.insert(key, string_value);
-			}
+				other_value => {
+					storagetext::stringify_json_at(&other_value, &[], &entry.surrogate_table)
+				}
+			};
+			entries.item_map.insert(key, string_value);
 		}
 		entries
 	}
@@ -943,12 +1118,12 @@ mod storage_backend {
 				file_text.push(',');
 			}
 			file_text.push_str("\n  ");
-			match entries.key_code_unit_map.get(key) {
+			match key.get_lone_code_units() {
 				Some(key_code_units) => {
 					file_text.push_str(&quote_json_code_units(key_code_units));
 				}
 				None => {
-					file_text.push_str(&serde_json::to_string(key).unwrap_or_default());
+					file_text.push_str(&serde_json::to_string(key.get_lossy_text()).unwrap_or_default());
 				}
 			}
 			file_text.push_str(": ");
@@ -1054,7 +1229,7 @@ mod storage_backend {
 	//==============================================================================
 	// 값 읽기. (짝 없는 서로게이트가 든 값은 원래 단위)
 	//==============================================================================
-	pub fn get_item(key: &str) -> Option<StoredText> {
+	pub fn get_item(key: &StorageKey) -> Option<StoredText> {
 		with_entries(|entries| {
 			if let Some(code_units) = entries.code_unit_map.get(key) {
 				return Some(StoredText::CodeUnits(code_units.clone()));
@@ -1066,10 +1241,10 @@ mod storage_backend {
 	//==============================================================================
 	// 값 쓰기. (파일에 썼는지)
 	//==============================================================================
-	pub fn set_item(key: &str, value: &str) -> bool {
+	pub fn set_item(key: &StorageKey, value: &str) -> bool {
 		modify_entries(|entries| {
 			let previous_code_units = entries.code_unit_map.remove(key);
-			let previous_value = entries.item_map.insert(key.to_string(), value.to_string());
+			let previous_value = entries.item_map.insert(key.clone(), value.to_string());
 			previous_code_units.is_some() || previous_value.as_deref() != Some(value)
 		})
 	}
@@ -1077,13 +1252,13 @@ mod storage_backend {
 	//==============================================================================
 	// 값을 UTF-16 단위로 쓰기. (짝 없는 서로게이트가 있으면 원래 단위를 든다, 파일에 썼는지)
 	//==============================================================================
-	pub fn set_item_code_units(key: &str, code_units: &[u16]) -> bool {
+	pub fn set_item_code_units(key: &StorageKey, code_units: &[u16]) -> bool {
 		if !has_lone_surrogate(code_units) {
 			return set_item(key, &String::from_utf16_lossy(code_units));
 		}
 		modify_entries(|entries| {
-			let previous_code_units = entries.code_unit_map.insert(key.to_string(), code_units.to_vec());
-			entries.item_map.insert(key.to_string(), String::from_utf16_lossy(code_units));
+			let previous_code_units = entries.code_unit_map.insert(key.clone(), code_units.to_vec());
+			entries.item_map.insert(key.clone(), String::from_utf16_lossy(code_units));
 			previous_code_units.as_deref() != Some(code_units)
 		})
 	}
@@ -1091,10 +1266,9 @@ mod storage_backend {
 	//==============================================================================
 	// 값 지우기.
 	//==============================================================================
-	pub fn remove_item(key: &str) {
+	pub fn remove_item(key: &StorageKey) {
 		modify_entries(|entries| {
 			entries.code_unit_map.remove(key);
-			entries.key_code_unit_map.remove(key);
 			entries.item_map.remove(key).is_some()
 		});
 	}
@@ -1112,7 +1286,7 @@ mod storage_backend {
 	//==============================================================================
 	// 모든 키. (저장 순서)
 	//==============================================================================
-	pub fn get_all_keys() -> Vec<String> {
+	pub fn get_all_keys() -> Vec<StorageKey> {
 		with_entries(|entries| entries.item_map.keys().cloned().collect())
 	}
 }
@@ -1122,17 +1296,10 @@ mod storage_backend {
 //==============================================================================
 #[cfg(target_arch = "wasm32")]
 mod storage_backend {
-	use super::StoredText;
+	use super::{StorageKey, StoredText};
 	use js_sys::JsString;
-	use std::cell::RefCell;
-	use std::collections::HashMap;
 	use std::path::PathBuf;
 	use wasm_bindgen::{JsCast, JsValue};
-
-	thread_local! {
-		// 키 목록에서 읽은 짝 없는 서로게이트가 든 키. (보인 키 → 원래 단위)
-		static LONE_SURROGATE_KEY_MAP: RefCell<HashMap<String, Vec<u16>>> = RefCell::new(HashMap::new());
-	}
 
 	//==============================================================================
 	// window.localStorage. (막혀 있으면 None)
@@ -1162,19 +1329,17 @@ mod storage_backend {
 	}
 
 	//==============================================================================
-	// 키를 JS 글로. (키 목록에서 짝 없는 서로게이트가 든 키를 읽었으면 그 원래 단위)
+	// 키를 JS 글로. (짝 없는 서로게이트가 든 키는 그 원래 단위)
 	//==============================================================================
-	fn convert_key(key: &str) -> JsValue {
-		LONE_SURROGATE_KEY_MAP.with(|key_map_cell| {
-			match key_map_cell.borrow().get(key) {
-				Some(key_code_units) => {
-					JsString::from_char_code(key_code_units).into()
-				}
-				None => {
-					JsValue::from_str(key)
-				}
+	fn convert_key(key: &StorageKey) -> JsValue {
+		match key.get_lone_code_units() {
+			Some(key_code_units) => {
+				JsString::from_char_code(key_code_units).into()
 			}
-		})
+			None => {
+				JsValue::from_str(key.get_lossy_text())
+			}
+		}
 	}
 
 	//==============================================================================
@@ -1193,7 +1358,7 @@ mod storage_backend {
 	//==============================================================================
 	// 값 읽기. (짝 없는 서로게이트가 든 값은 원래 단위)
 	//==============================================================================
-	pub fn get_item(key: &str) -> Option<StoredText> {
+	pub fn get_item(key: &StorageKey) -> Option<StoredText> {
 		let storage = get_storage()?;
 		let value = call_storage_function(&storage, "getItem", &[convert_key(key)]).ok()?;
 		let js_string: JsString = value.dyn_into().ok()?;
@@ -1206,7 +1371,7 @@ mod storage_backend {
 	//==============================================================================
 	// 값 쓰기. (썼는지, 막혀 있거나 용량이 넘치면 false)
 	//==============================================================================
-	pub fn set_item(key: &str, value: &str) -> bool {
+	pub fn set_item(key: &StorageKey, value: &str) -> bool {
 		match get_storage() {
 			Some(storage) => {
 				call_storage_function(&storage, "setItem", &[convert_key(key), JsValue::from_str(value)]).is_ok()
@@ -1220,7 +1385,7 @@ mod storage_backend {
 	//==============================================================================
 	// 값을 UTF-16 단위로 쓰기. (JS 글 그대로, 썼는지)
 	//==============================================================================
-	pub fn set_item_code_units(key: &str, code_units: &[u16]) -> bool {
+	pub fn set_item_code_units(key: &StorageKey, code_units: &[u16]) -> bool {
 		match get_storage() {
 			Some(storage) => {
 				call_storage_function(&storage, "setItem", &[convert_key(key), JsString::from_char_code(code_units).into()]).is_ok()
@@ -1234,7 +1399,7 @@ mod storage_backend {
 	//==============================================================================
 	// 값 지우기.
 	//==============================================================================
-	pub fn remove_item(key: &str) {
+	pub fn remove_item(key: &StorageKey) {
 		if let Some(storage) = get_storage() {
 			let _ = call_storage_function(&storage, "removeItem", &[convert_key(key)]);
 		}
@@ -1250,11 +1415,10 @@ mod storage_backend {
 	}
 
 	//==============================================================================
-	// 모든 키. (브라우저가 주는 순서)
-	// - 짝 없는 서로게이트가 든 키는 대체 문자로 보이고, 그 원래 단위를 남겨 그 키로 읽고 쓰고 지울 때 쓴다.
+	// 모든 키. (브라우저가 주는 순서, 짝 없는 서로게이트가 든 키는 원래 단위를 든다)
 	//==============================================================================
-	pub fn get_all_keys() -> Vec<String> {
-		let mut keys: Vec<String> = Vec::new();
+	pub fn get_all_keys() -> Vec<StorageKey> {
+		let mut keys: Vec<StorageKey> = Vec::new();
 		let storage = match get_storage() {
 			Some(storage) => {
 				storage
@@ -1282,15 +1446,11 @@ mod storage_backend {
 				}
 			};
 			if js_key.is_valid_utf16() {
-				keys.push(String::from(js_key));
+				keys.push(StorageKey::from_text(&String::from(js_key)));
 				continue;
 			}
 			let key_code_units: Vec<u16> = js_key.iter().collect();
-			let lossy_key = String::from_utf16_lossy(&key_code_units);
-			LONE_SURROGATE_KEY_MAP.with(|key_map_cell| {
-				key_map_cell.borrow_mut().insert(lossy_key.clone(), key_code_units);
-			});
-			keys.push(lossy_key);
+			keys.push(StorageKey::from_code_units(&key_code_units));
 		}
 		keys
 	}
@@ -1461,6 +1621,45 @@ mod tests {
 		assert_eq!(std::fs::read_to_string(&storage_file_path).expect("file"), serde_json::to_string_pretty(&expected_map).expect("pretty"));
 		LocalStorage::clear();
 		assert_eq!(std::fs::read_to_string(&storage_file_path).expect("file"), serde_json::to_string_pretty(&BTreeMap::<String, String>::new()).expect("pretty"));
+		let _ = std::fs::remove_dir_all(&storage_directory_path);
+	}
+
+	//==============================================================================
+	// 짝 없는 서로게이트로만 다른 두 키: 따로 들고, 파일에서 다시 읽어도 둘 다 남는다. 러스트 글 키는 그 글 그대로의 키가 먼저다.
+	//==============================================================================
+	#[test]
+	fn keeps_keys_that_differ_only_by_lone_surrogate() {
+		let storage_directory_path = use_temporary_storage_directory("surrogatekey");
+		let first_key: Vec<u16> = vec![0x6B, 0xD800];
+		let second_key: Vec<u16> = vec![0x6B, 0xD801];
+		let first_value: Vec<u16> = "one".encode_utf16().collect();
+		let second_value: Vec<u16> = vec![0x74, 0xDC00];
+		assert!(LocalStorage::set_item_by_key_code_units(&first_key, &first_value));
+		assert!(LocalStorage::set_item_by_key_code_units(&second_key, &second_value));
+		assert_eq!(LocalStorage::get_item_by_key_code_units(&first_key), Some(first_value.clone()));
+		assert_eq!(LocalStorage::get_item_by_key_code_units(&second_key), Some(second_value.clone()));
+		assert_eq!(LocalStorage::get_keys_code_units(), vec![first_key.clone(), second_key.clone()]);
+		assert_eq!(LocalStorage::get_keys(), vec!["k\u{fffd}"]);
+		// 러스트 글 키는 그 글로 보이는 첫째 키를 가리킨다.
+		assert_eq!(LocalStorage::get_item("k\u{fffd}"), Some(String::from("one")));
+		let storage_file_path = LocalStorage::get_storage_file_path().expect("storage file path");
+		assert_eq!(std::fs::read_to_string(&storage_file_path).expect("file"), "{\n  \"k\\ud800\": \"one\",\n  \"k\\ud801\": \"t\\udc00\"\n}");
+
+		// 다시 읽어도 두 키가 따로 남는다.
+		LocalStorage::set_storage_directory(Some(storage_directory_path.clone()));
+		assert_eq!(LocalStorage::get_keys_code_units(), vec![first_key.clone(), second_key.clone()]);
+		assert_eq!(LocalStorage::get_item_by_key_code_units(&second_key), Some(second_value.clone()));
+
+		// 대체 문자 그대로의 키가 생기면 러스트 글 키는 그것을 가리킨다.
+		let replacement_key: Vec<u16> = "k\u{fffd}".encode_utf16().collect();
+		assert!(LocalStorage::set_item_by_key_code_units(&replacement_key, &"real".encode_utf16().collect::<Vec<u16>>()));
+		assert_eq!(LocalStorage::get_item("k\u{fffd}"), Some(String::from("real")));
+		assert_eq!(LocalStorage::get_keys_code_units(), vec![replacement_key.clone(), first_key.clone(), second_key.clone()]);
+		assert!(LocalStorage::contains_key_code_units(&first_key));
+		LocalStorage::remove_item_by_key_code_units(&first_key);
+		assert!(!LocalStorage::contains_key_code_units(&first_key));
+		assert_eq!(LocalStorage::clear_by_prefix("k"), 2);
+		assert!(LocalStorage::get_keys_code_units().is_empty());
 		let _ = std::fs::remove_dir_all(&storage_directory_path);
 	}
 
