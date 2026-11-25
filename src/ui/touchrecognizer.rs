@@ -1,19 +1,21 @@
 //==============================================================================
-// 터치 인식기. (원본 ui/touchrecognizer.js 의 TouchRecognizer)
-// - 누른 노드의 부모 쪽에 UIScrollView(또는 UISnapScrollView)가 있으면, 끈 거리가 임계(10px)를 넘을 때 누른 노드의 누름을 취소하고
-//   스크롤 뷰에 처음 누른 자리부터 누름 → 이동을 다시 보내 스크롤을 넘긴다. (스크롤 뷰 안의 버튼을 끌어도 스크롤된다)
-// - 부모에 스크롤 뷰가 있으면 누른 노드에 가는 누름을 150ms 미룬다. 그 사이 드래그가 되면 누름 자체를 보내지 않는다.
-//   짧게 톡 친 것은 뗄 때 미룬 누름을 바로 보낸 뒤 뗌을 잇는다. (UIKit 의 delaysContentTouches)
-// - 스크롤 뷰가 set_passes_cross_axis_drag(true) 면 스크롤하지 않는 축으로 더 많이 끈 손가락은 넘기지 않는다.
-// - 원본과 다른 것:
-//   - 원본은 GameScene 이 늘 쓴다. 러스트 판의 SceneBase::tick_touch 는 원본 TouchRaycaster(맨 위 노드에 그대로 보냄)다.
-//     이 손짓이 필요한 씬은 TouchRecognizer 를 들고, SceneBase::tick 대신 노드 갱신과 이것을 부른다:
-//       self.scene_base.get_node_tree_mut().tick(engine, time_delta);
-//       self.touch_recognizer.tick_touch(self.scene_base.get_node_tree_mut(), engine);
-//     그때 SceneBase 의 첫 터치 콜백과 get_touch_target 은 쓰지 않는다. (이쪽 get_touch_target 을 쓴다)
-//   - 원본 setTimeout(150ms) 은 프레임 간격(배율을 곱하지 않은 시간)을 쌓아 센다.
-//   - 스크롤 뷰에 넘기는 터치는 그 노드의 컴포넌트 모두에게 간다. (NodeTree::dispatch_touch)
-//   - tick_touch 는 휠(tick_wheel)과 누름(tick_pointer)으로 나뉜다. 휠을 다른 길(창 층)로 넘긴 씬은 tick_wheel 대신 mark_wheel_handled 를 부른다. (GameSceneBase)
+//! 터치 인식기. (원본 ui/touchrecognizer.js 의 TouchRecognizer)
+//! - 누른 노드의 부모 쪽에 UIScrollView(또는 UISnapScrollView)가 있으면, 끈 거리가 임계(10px)를 넘을 때 누른 노드의 누름을 취소하고
+//!   스크롤 뷰에 처음 누른 자리부터 누름 → 이동을 다시 보내 스크롤을 넘긴다. (스크롤 뷰 안의 버튼을 끌어도 스크롤된다)
+//! - 부모에 스크롤 뷰가 있으면 누른 노드에 가는 누름을 150ms 미룬다. 그 사이 드래그가 되면 누름 자체를 보내지 않는다.
+//!   짧게 톡 친 것은 뗄 때 미룬 누름을 바로 보낸 뒤 뗌을 잇는다. (UIKit 의 delaysContentTouches)
+//! - 스크롤 뷰가 set_passes_cross_axis_drag(true) 면 스크롤하지 않는 축으로 더 많이 끈 손가락은 넘기지 않는다.
+//! - 원본과 다른 것:
+//!   - 원본은 GameScene 이 늘 쓴다. 러스트 판의 SceneBase::tick_touch 는 원본 TouchRaycaster(맨 위 노드에 그대로 보냄)다.
+//!   ```text
+//!     이 손짓이 필요한 씬은 TouchRecognizer 를 들고, SceneBase::tick 대신 노드 갱신과 이것을 부른다:
+//!       self.scene_base.get_node_tree_mut().tick(engine, time_delta);
+//!       self.touch_recognizer.tick_touch(self.scene_base.get_node_tree_mut(), engine);
+//!     그때 SceneBase 의 첫 터치 콜백과 get_touch_target 은 쓰지 않는다. (이쪽 get_touch_target 을 쓴다)
+//!   ```
+//!   - 원본 setTimeout(150ms) 은 프레임 간격(배율을 곱하지 않은 시간)을 쌓아 센다.
+//!   - 스크롤 뷰에 넘기는 터치는 그 노드의 컴포넌트 모두에게 간다. (NodeTree::dispatch_touch)
+//!   - tick_touch 는 휠(tick_wheel)과 누름(tick_pointer)으로 나뉜다. 휠을 다른 길(창 층)로 넘긴 씬은 tick_wheel 대신 mark_wheel_handled 를 부른다. (GameSceneBase)
 //==============================================================================
 use crate::base::vector2::Vector2;
 use crate::core::engine::Engine;
@@ -21,14 +23,14 @@ use crate::core::node::nodetree::{NodeId, NodeTree, TouchKind};
 use crate::ui::uiscrollbar::UIScrollBar;
 use crate::ui::uisnapscrollview::find_scroll_view;
 
-// 드래그로 바뀌었다고 볼 거리. (px)
+/// 드래그로 바뀌었다고 볼 거리. (px)
 const DRAG_THRESHOLD: f32 = 10.0;
 
-// 부모에 스크롤 뷰가 있을 때 누른 노드에 가는 누름을 미루는 시간. (초, 원본 150ms)
+/// 부모에 스크롤 뷰가 있을 때 누른 노드에 가는 누름을 미루는 시간. (초, 원본 150ms)
 const DELAY_PRESS_SECONDS: f32 = 0.15;
 
 //==============================================================================
-// 터치 인식기.
+/// 터치 인식기.
 //==============================================================================
 pub struct TouchRecognizer {
 	target_id: Option<NodeId>,
@@ -38,13 +40,13 @@ pub struct TouchRecognizer {
 	press_delay_remain_seconds: Option<f32>,
 	is_press_delivered: bool,
 	is_touching: bool,
-	// 이번 프레임의 휠을 받아 쓴 컴포넌트가 있었는지.
+	/// 이번 프레임의 휠을 받아 쓴 컴포넌트가 있었는지.
 	is_wheel_handled: bool,
 }
 
 impl TouchRecognizer {
 	//==============================================================================
-	// 생성.
+	/// 생성.
 	//==============================================================================
 	pub fn new() -> TouchRecognizer {
 		TouchRecognizer {
@@ -60,14 +62,14 @@ impl TouchRecognizer {
 	}
 
 	//==============================================================================
-	// 이번 프레임의 휠을 받아 쓴 컴포넌트(스크롤 칸 등)가 있었는지. (tick_touch 뒤에 읽는다)
+	/// 이번 프레임의 휠을 받아 쓴 컴포넌트(스크롤 칸 등)가 있었는지. (tick_touch 뒤에 읽는다)
 	//==============================================================================
 	pub fn is_wheel_handled(&self) -> bool {
 		self.is_wheel_handled
 	}
 
 	//==============================================================================
-	// 지금 누름을 받는 노드. (드래그를 넘겼으면 스크롤 뷰 노드)
+	/// 지금 누름을 받는 노드. (드래그를 넘겼으면 스크롤 뷰 노드)
 	//==============================================================================
 	pub fn get_touch_target(&self) -> Option<NodeId> {
 		if self.is_dragging {
@@ -77,14 +79,14 @@ impl TouchRecognizer {
 	}
 
 	//==============================================================================
-	// 누르고 있는 중인지. (누름부터 뗌이나 취소까지)
+	/// 누르고 있는 중인지. (누름부터 뗌이나 취소까지)
 	//==============================================================================
 	pub fn is_touching(&self) -> bool {
 		self.is_touching
 	}
 
 	//==============================================================================
-	// 터치 갱신. (SceneBase::tick_touch 자리. 휠 → 미룬 누름 → 누름 / 이동 / 뗌 / 취소)
+	/// 터치 갱신. (SceneBase::tick_touch 자리. 휠 → 미룬 누름 → 누름 / 이동 / 뗌 / 취소)
 	//==============================================================================
 	pub fn tick_touch(&mut self, node_tree: &mut NodeTree, engine: &Engine) {
 		self.tick_wheel(node_tree, engine);
@@ -92,7 +94,7 @@ impl TouchRecognizer {
 	}
 
 	//==============================================================================
-	// 휠 갱신. (누름과 상관없이 그 자리의 가장 앞 스크롤 칸이나 누를 수 있는 노드부터 부모 쪽으로, NodeTree::dispatch_wheel_at, 받아 썼으면 true)
+	/// 휠 갱신. (누름과 상관없이 그 자리의 가장 앞 스크롤 칸이나 누를 수 있는 노드부터 부모 쪽으로, NodeTree::dispatch_wheel_at, 받아 썼으면 true)
 	//==============================================================================
 	pub fn tick_wheel(&mut self, node_tree: &mut NodeTree, engine: &Engine) -> bool {
 		let input_manager = engine.get_input_manager();
@@ -108,14 +110,14 @@ impl TouchRecognizer {
 	}
 
 	//==============================================================================
-	// 이번 프레임의 휠을 다른 길(창 층 같은)이 받아 썼다고 적기. (tick_wheel 대신 부른다)
+	/// 이번 프레임의 휠을 다른 길(창 층 같은)이 받아 썼다고 적기. (tick_wheel 대신 부른다)
 	//==============================================================================
 	pub fn mark_wheel_handled(&mut self) {
 		self.is_wheel_handled = true;
 	}
 
 	//==============================================================================
-	// 누름 갱신. (미룬 누름 → 누름 / 이동 / 뗌 / 취소)
+	/// 누름 갱신. (미룬 누름 → 누름 / 이동 / 뗌 / 취소)
 	//==============================================================================
 	pub fn tick_pointer(&mut self, node_tree: &mut NodeTree, engine: &Engine) {
 		let elapsed_seconds = engine.get_time_manager().get_unscale_delta_time();
@@ -142,7 +144,7 @@ impl TouchRecognizer {
 	}
 
 	//==============================================================================
-	// 미룬 누름의 남은 시간을 줄이고, 다 되면 누른 노드에 누름을 보낸다. (원본 setTimeout 자리)
+	/// 미룬 누름의 남은 시간을 줄이고, 다 되면 누른 노드에 누름을 보낸다. (원본 setTimeout 자리)
 	//==============================================================================
 	pub fn update_press_delay(&mut self, node_tree: &mut NodeTree, engine: &Engine, elapsed_seconds: f32) {
 		let remain_seconds = match self.press_delay_remain_seconds {
@@ -168,7 +170,7 @@ impl TouchRecognizer {
 	}
 
 	//==============================================================================
-	// 터치 누름. (맞은 노드와 그 부모 쪽 스크롤 뷰를 찾아 두고, 스크롤 뷰가 있으면 누름을 미룬다)
+	/// 터치 누름. (맞은 노드와 그 부모 쪽 스크롤 뷰를 찾아 두고, 스크롤 뷰가 있으면 누름을 미룬다)
 	//==============================================================================
 	pub fn touch_press(&mut self, node_tree: &mut NodeTree, engine: &Engine, view_input_position: Vector2) {
 		let target_id = node_tree.find_topmost_interactable_node(view_input_position);
@@ -198,10 +200,10 @@ impl TouchRecognizer {
 	}
 
 	//==============================================================================
-	// 터치 이동.
-	// - 드래그를 넘겼으면 스크롤 뷰에만 보낸다.
-	// - 스크롤 뷰가 있고 임계를 넘으면 넘긴다: 미룬 누름은 버리고(이미 보냈으면 누른 노드에 취소), 스크롤 뷰에 누름(처음 자리) → 이동.
-	// - 그 밖에는 누른 노드에 이동. (누름을 아직 보내지 않았으면 이동도 보내지 않는다)
+	/// 터치 이동.
+	/// - 드래그를 넘겼으면 스크롤 뷰에만 보낸다.
+	/// - 스크롤 뷰가 있고 임계를 넘으면 넘긴다: 미룬 누름은 버리고(이미 보냈으면 누른 노드에 취소), 스크롤 뷰에 누름(처음 자리) → 이동.
+	/// - 그 밖에는 누른 노드에 이동. (누름을 아직 보내지 않았으면 이동도 보내지 않는다)
 	//==============================================================================
 	pub fn touch_move(&mut self, node_tree: &mut NodeTree, engine: &Engine, view_input_position: Vector2) {
 		if self.is_dragging {
@@ -263,7 +265,7 @@ impl TouchRecognizer {
 	}
 
 	//==============================================================================
-	// 터치 뗌. (드래그면 스크롤 뷰에, 아니면 누른 노드에. 미룬 누름이 남았으면 그것을 먼저 보낸다)
+	/// 터치 뗌. (드래그면 스크롤 뷰에, 아니면 누른 노드에. 미룬 누름이 남았으면 그것을 먼저 보낸다)
 	//==============================================================================
 	pub fn touch_release(&mut self, node_tree: &mut NodeTree, engine: &Engine, view_input_position: Vector2) {
 		if self.is_dragging {
@@ -284,7 +286,7 @@ impl TouchRecognizer {
 	}
 
 	//==============================================================================
-	// 터치 취소. (미룬 누름이 남았으면 누른 노드에는 취소를 보내지 않는다)
+	/// 터치 취소. (미룬 누름이 남았으면 누른 노드에는 취소를 보내지 않는다)
 	//==============================================================================
 	pub fn touch_cancel(&mut self, node_tree: &mut NodeTree, engine: &Engine, view_input_position: Vector2) {
 		if self.is_dragging {
@@ -301,7 +303,7 @@ impl TouchRecognizer {
 	}
 
 	//==============================================================================
-	// 추적 상태 비우기.
+	/// 추적 상태 비우기.
 	//==============================================================================
 	pub fn reset(&mut self) {
 		self.press_delay_remain_seconds = None;
@@ -314,8 +316,8 @@ impl TouchRecognizer {
 	}
 
 	//==============================================================================
-	// 노드의 부모 쪽에서 UIScrollView(또는 UISnapScrollView)가 붙은 가장 가까운 노드. (없으면 None)
-	// - 누른 노드가 스크롤바면 자기가 다루는 스크롤 뷰는 빼고 찾는다. (스크롤바 드래그가 그 스크롤 뷰로 넘어가면 안 된다)
+	/// 노드의 부모 쪽에서 UIScrollView(또는 UISnapScrollView)가 붙은 가장 가까운 노드. (없으면 None)
+	/// - 누른 노드가 스크롤바면 자기가 다루는 스크롤 뷰는 빼고 찾는다. (스크롤바 드래그가 그 스크롤 뷰로 넘어가면 안 된다)
 	//==============================================================================
 	pub fn find_ancestor_scroll_view(&self, node_tree: &NodeTree, target_id: Option<NodeId>) -> Option<NodeId> {
 		let target_id = target_id?;
@@ -351,7 +353,7 @@ mod tests {
 	use std::rc::Rc;
 
 	//==============================================================================
-	// 시험 장면. (스크롤 뷰 (0,0 ~ 200,100), 콘텐트 안에 버튼 (0,0 ~ 200,40))
+	/// 시험 장면. (스크롤 뷰 (0,0 ~ 200,100), 콘텐트 안에 버튼 (0,0 ~ 200,40))
 	//==============================================================================
 	fn create_scroll_with_button(click_count: &Rc<Cell<u32>>) -> (NodeTree, NodeId, NodeId) {
 		let mut node_tree = NodeTree::new();
@@ -378,7 +380,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 짧게 톡 치면 미룬 누름을 보낸 뒤 뗌을 이어 버튼이 클릭된다.
+	/// 짧게 톡 치면 미룬 누름을 보낸 뒤 뗌을 이어 버튼이 클릭된다.
 	//==============================================================================
 	#[test]
 	fn short_tap_clicks_button_inside_scroll_view() {
@@ -395,7 +397,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 버튼을 누르고 임계를 넘게 끌면 버튼은 클릭되지 않고 스크롤 뷰가 움직인다.
+	/// 버튼을 누르고 임계를 넘게 끌면 버튼은 클릭되지 않고 스크롤 뷰가 움직인다.
 	//==============================================================================
 	#[test]
 	fn drag_over_button_scrolls() {

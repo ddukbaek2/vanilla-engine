@@ -1,78 +1,78 @@
 //==============================================================================
-// 브라우저 화면 글. (러스트 판에만 있다, 원본은 브라우저가 제 화면 언어로 그린다)
-// - 원본 페이지 위에 브라우저가 그리는 것(자바스크립트 질문 창의 제목과 단추, 편집 칸 문맥 메뉴의 항목)의 글이다.
-//   데스크탑은 엔진이 그것을 그리므로 같은 글이 필요하다. (core/modaldialog.rs, ui/uiinputfield.rs)
-// - 글은 크로미엄의 번역(chrome/app/resources/generated_resources_*.xtb, ui/strings/translations/ui_strings_*.xtb,
-//   components/strings/components_strings_*.xtb)을 grit 의 메시지 번호로 찾아 화면 꼴로 옮긴 표다. (browseruitext.json, 데스크탑 로케일 82 개)
-//   크롬 Views 메뉴는 단축 글자 표시 "(&U)" 와 "&" 를 지워 그리고(gfx RemoveAcceleratorChar), 맥은 FixUpWindowsStyleLabel 로 지운다. 표는 지운 글이다.
-// - 크롬은 제 화면 언어로 그린다. 데스크탑은 그 자리인 시스템 선호 언어(sys-locale) 차례에서 크롬 규칙으로 로케일을 고른다.
-//   (l10n_util 의 GetApplicationLocale 과 language_tag_matcher: 같은 이름이 있으면 그것, es-* 는 es-419, pt 는 pt-BR, zh 는 zh-CN, zh-Hant 는 zh-TW,
-//   en 과 en-PH, en-LR 은 en-US, en-CA 와 그 밖의 en-* 는 en-GB, 옛 이름 iw, no, tl, in 은 he, nb, fil, id. 맞는 것이 없으면 en-US)
-//   zh-MO 는 CLDR 의 부모 로케일 zh-Hant-HK 를 따라 zh-HK, zh-SG 는 zh-CN 으로 본다. (크롬의 ICU4X 데이터로 돌려 보지는 않았다)
-//   웹은 브라우저가 그리므로 이 표를 쓰지 않는다.
+//! 브라우저 화면 글. (러스트 판에만 있다, 원본은 브라우저가 제 화면 언어로 그린다)
+//! - 원본 페이지 위에 브라우저가 그리는 것(자바스크립트 질문 창의 제목과 단추, 편집 칸 문맥 메뉴의 항목)의 글이다.
+//!   데스크탑은 엔진이 그것을 그리므로 같은 글이 필요하다. (core/modaldialog.rs, ui/uiinputfield.rs)
+//! - 글은 크로미엄의 번역(chrome/app/resources/generated_resources_*.xtb, ui/strings/translations/ui_strings_*.xtb,
+//!   components/strings/components_strings_*.xtb)을 grit 의 메시지 번호로 찾아 화면 꼴로 옮긴 표다. (browseruitext.json, 데스크탑 로케일 82 개)
+//!   크롬 Views 메뉴는 단축 글자 표시 "(&U)" 와 "&" 를 지워 그리고(gfx RemoveAcceleratorChar), 맥은 FixUpWindowsStyleLabel 로 지운다. 표는 지운 글이다.
+//! - 크롬은 제 화면 언어로 그린다. 데스크탑은 그 자리인 시스템 선호 언어(sys-locale) 차례에서 크롬 규칙으로 로케일을 고른다.
+//!   (l10n_util 의 GetApplicationLocale 과 language_tag_matcher: 같은 이름이 있으면 그것, es-* 는 es-419, pt 는 pt-BR, zh 는 zh-CN, zh-Hant 는 zh-TW,
+//!   en 과 en-PH, en-LR 은 en-US, en-CA 와 그 밖의 en-* 는 en-GB, 옛 이름 iw, no, tl, in 은 he, nb, fil, id. 맞는 것이 없으면 en-US)
+//!   zh-MO 는 CLDR 의 부모 로케일 zh-Hant-HK 를 따라 zh-HK, zh-SG 는 zh-CN 으로 본다. (크롬의 ICU4X 데이터로 돌려 보지는 않았다)
+//!   웹은 브라우저가 그리므로 이 표를 쓰지 않는다.
 //==============================================================================
 use serde_json::{Map, Value};
 use std::cell::RefCell;
 
-// 번역 표. (로케일 → 키 → 글)
+/// 번역 표. (로케일 → 키 → 글)
 const BROWSER_UI_TEXT_JSON: &str = include_str!("browseruitext.json");
-// 표에 없을 때의 로케일.
+/// 표에 없을 때의 로케일.
 const DEFAULT_LOCALE: &str = "en-US";
 
 //==============================================================================
-// 글 종류. (표의 키)
+/// 글 종류. (표의 키)
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BrowserUiText {
-	// 실행 취소.
+	/// 실행 취소.
 	Undo,
-	// 다시 실행.
+	/// 다시 실행.
 	Redo,
-	// 잘라내기.
+	/// 잘라내기.
 	Cut,
-	// 복사.
+	/// 복사.
 	Copy,
-	// 붙여넣기. (윈도우, 리눅스)
+	/// 붙여넣기. (윈도우, 리눅스)
 	Paste,
-	// 붙여넣기. (맥, 번역이 다를 수 있다)
+	/// 붙여넣기. (맥, 번역이 다를 수 있다)
 	PasteMac,
-	// 일반 텍스트로 붙여넣기. (윈도우, 리눅스)
+	/// 일반 텍스트로 붙여넣기. (윈도우, 리눅스)
 	PastePlainText,
-	// 붙여넣고 스타일 일치시킴. (맥)
+	/// 붙여넣고 스타일 일치시킴. (맥)
 	PasteMatchStyle,
-	// 전체 선택. (윈도우, 리눅스)
+	/// 전체 선택. (윈도우, 리눅스)
 	SelectAll,
-	// 모두 선택. (맥)
+	/// 모두 선택. (맥)
 	SelectAllMac,
-	// 그림 이모티콘. (윈도우)
+	/// 그림 이모티콘. (윈도우)
 	Emoji,
-	// 그림 이모티콘 및 기호. (맥)
+	/// 그림 이모티콘 및 기호. (맥)
 	EmojiMac,
-	// 쓰기 방향 하위 메뉴.
+	/// 쓰기 방향 하위 메뉴.
 	WritingDirection,
-	// 쓰기 방향 기본값.
+	/// 쓰기 방향 기본값.
 	WritingDirectionDefault,
-	// 왼쪽에서 오른쪽으로.
+	/// 왼쪽에서 오른쪽으로.
 	WritingDirectionLeftToRight,
-	// 오른쪽에서 왼쪽으로.
+	/// 오른쪽에서 왼쪽으로.
 	WritingDirectionRightToLeft,
-	// 검사.
+	/// 검사.
 	Inspect,
-	// 질문 창 제목. (출처가 없는 페이지의 "이 페이지 내용:")
+	/// 질문 창 제목. (출처가 없는 페이지의 "이 페이지 내용:")
 	PageSays,
-	// 확인.
+	/// 확인.
 	Ok,
-	// 취소.
+	/// 취소.
 	Cancel,
-	// 단축키 글의 마침표 키 이름.
+	/// 단축키 글의 마침표 키 이름.
 	PeriodKey,
-	// 단축키 글의 윈도우 키 이름.
+	/// 단축키 글의 윈도우 키 이름.
 	WindowsKey,
 }
 
 impl BrowserUiText {
 	//==============================================================================
-	// 표의 키.
+	/// 표의 키.
 	//==============================================================================
 	fn get_key(self) -> &'static str {
 		match self {
@@ -147,7 +147,7 @@ impl BrowserUiText {
 }
 
 //==============================================================================
-// 읽은 표와 고른 로케일. (스레드마다 처음 쓸 때)
+/// 읽은 표와 고른 로케일. (스레드마다 처음 쓸 때)
 //==============================================================================
 struct BrowserUiTextState {
 	locale_map: Map<String, Value>,
@@ -159,7 +159,7 @@ thread_local! {
 }
 
 //==============================================================================
-// 표 다루기. (처음이면 읽고 시스템 언어로 로케일을 고른다)
+/// 표 다루기. (처음이면 읽고 시스템 언어로 로케일을 고른다)
 //==============================================================================
 fn with_state<R>(worker: impl FnOnce(&BrowserUiTextState) -> R) -> R {
 	BROWSER_UI_TEXT_STATE.with(|state_cell| {
@@ -184,7 +184,7 @@ fn with_state<R>(worker: impl FnOnce(&BrowserUiTextState) -> R) -> R {
 }
 
 //==============================================================================
-// 언어 태그 목록에서 표의 로케일 고르기. (차례대로 처음 맞는 것, 없으면 en-US)
+/// 언어 태그 목록에서 표의 로케일 고르기. (차례대로 처음 맞는 것, 없으면 en-US)
 //==============================================================================
 fn select_locale(locale_map: &Map<String, Value>, language_tag_list: &[String]) -> String {
 	for language_tag in language_tag_list {
@@ -196,7 +196,7 @@ fn select_locale(locale_map: &Map<String, Value>, language_tag_list: &[String]) 
 }
 
 //==============================================================================
-// 언어 태그 하나를 표의 로케일로. (크롬 규칙, 맞는 것이 없으면 None)
+/// 언어 태그 하나를 표의 로케일로. (크롬 규칙, 맞는 것이 없으면 None)
 //==============================================================================
 fn match_locale(locale_map: &Map<String, Value>, language_tag: &str) -> Option<String> {
 	let normalized_tag = language_tag.trim().replace('_', "-");
@@ -269,7 +269,7 @@ fn match_locale(locale_map: &Map<String, Value>, language_tag: &str) -> Option<S
 }
 
 //==============================================================================
-// 브라우저 화면 글. (고른 로케일, 그 로케일에 없으면 en-US)
+/// 브라우저 화면 글. (고른 로케일, 그 로케일에 없으면 en-US)
 //==============================================================================
 pub fn read_browser_ui_text(text: BrowserUiText) -> String {
 	with_state(|state| {
@@ -284,21 +284,21 @@ pub fn read_browser_ui_text(text: BrowserUiText) -> String {
 }
 
 //==============================================================================
-// 고른 로케일.
+/// 고른 로케일.
 //==============================================================================
 pub fn read_browser_ui_locale() -> String {
 	with_state(|state| state.locale.clone())
 }
 
 //==============================================================================
-// 시험.
+/// 시험.
 //==============================================================================
 #[cfg(test)]
 mod tests {
 	use super::*;
 
 	//==============================================================================
-	// 로케일 고르기와 모든 키가 en-US 에 있는지.
+	/// 로케일 고르기와 모든 키가 en-US 에 있는지.
 	//==============================================================================
 	#[test]
 	fn selects_locale_and_has_all_texts() {

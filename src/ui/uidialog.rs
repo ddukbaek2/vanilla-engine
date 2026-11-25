@@ -1,22 +1,26 @@
 //==============================================================================
-// 확인 대화 상자. (원본 ui/uidialog.js 의 UIDialog)
-// - 어둡게 가리는 막 + 가운데 카드 + 확인 / 취소 단추를 show 한 번으로 띄운다. 등장 / 퇴장은 PopupMotion(되튕김 확대 / 수축)으로 움직인다.
-// - 막을 누르면 취소로 처리한다. on_cancel 을 넘기지 않으면 취소 단추를 감추고 확인 단추만 넓게 둔 알림이 된다.
-// - 씬 뿌리의 맨 위(마지막 자식)에 두고 쓴다. 부모 content_size 를 막 크기로 쓴다. (없으면 960 x 640)
-// - 원본은 WorldNode 를 상속한 노드다. 러스트 판은 노드(호스트)에 붙는 컴포넌트이고, 붙을 때 원본 생성자처럼 호스트를 꾸미고
-//   (왼쪽 위 피봇, 비활성) 막, 카드, 메시지, 단추 노드를 자식으로 만든다. UIDialog::create(node_tree, parent_id, options) 가 new + add_child 자리다.
-// - 사용:
-//     let dialog_id = UIDialog::create(node_tree, root_id, UIDialogOptions::default());
-//     node_tree.with_component_mut::<UIDialog, _>(dialog_id, |dialog, tree| {
-//         dialog.show(tree, "정말 삭제할까요?", UIDialogShowOptions { on_confirm: Some(Box::new(|dialog, context| { ... })), on_cancel: Some(Box::new(|_, _| {})), ..UIDialogShowOptions::default() });
-//     });
-// - 원본과 다른 것:
-//   - show 는 노드를 바꾸므로 트리를 받는다. 씬 코드는 node_tree.with_component_mut 로, 콜백에서는 context.get_node_tree_mut() 로 부른다.
-//   - 확인 / 취소 처리기는 대화 상자와 그 호스트의 문맥을 받는 한 번짜리 함수(FnOnce)다. dismiss 는 처리기에 문맥을 넘기려고 문맥을 받는다.
-//     문맥이 없는 씬 코드에서는 원본에도 있는 request_dismiss 를 부르면 다음 tick 에 dismiss 한다.
-//   - 원본은 PopupMotion 닫힘 알림에서 set_active(false) 한다. 러스트 판은 tick 에서 보이던 것이 닫힘이 되면(즉시 전환이면 dismiss 에서) 끈다.
-//   - 원본 tick 은 자식 tick 다음에 전환기를 돌린다. 러스트 판은 컴포넌트가 자식보다 먼저 돈다. (보이는 차이는 없다)
-//   - 전환 시간은 PopupMotion 그대로다. (등장 0.32 초, 퇴장 0.22 초. Tween 은 쓰지 않는다)
+//! 확인 대화 상자. (원본 ui/uidialog.js 의 UIDialog)
+//! - 어둡게 가리는 막 + 가운데 카드 + 확인 / 취소 단추를 show 한 번으로 띄운다. 등장 / 퇴장은 PopupMotion(되튕김 확대 / 수축)으로 움직인다.
+//! - 막을 누르면 취소로 처리한다. on_cancel 을 넘기지 않으면 취소 단추를 감추고 확인 단추만 넓게 둔 알림이 된다.
+//! - 씬 뿌리의 맨 위(마지막 자식)에 두고 쓴다. 부모 content_size 를 막 크기로 쓴다. (없으면 960 x 640)
+//! - 원본은 WorldNode 를 상속한 노드다. 러스트 판은 노드(호스트)에 붙는 컴포넌트이고, 붙을 때 원본 생성자처럼 호스트를 꾸미고
+//!   (왼쪽 위 피봇, 비활성) 막, 카드, 메시지, 단추 노드를 자식으로 만든다. UIDialog::create(node_tree, parent_id, options) 가 new + add_child 자리다.
+//! - 사용:
+//!   ```text
+//!     let dialog_id = UIDialog::create(node_tree, root_id, UIDialogOptions::default());
+//!     node_tree.with_component_mut::<UIDialog, _>(dialog_id, |dialog, tree| {
+//!         dialog.show(tree, "정말 삭제할까요?", UIDialogShowOptions { on_confirm: Some(Box::new(|dialog, context| { ... })), on_cancel: Some(Box::new(|_, _| {})), ..UIDialogShowOptions::default() });
+//!     });
+//!   ```
+//! - 원본과 다른 것:
+//!   - show 는 노드를 바꾸므로 트리를 받는다. 씬 코드는 node_tree.with_component_mut 로, 콜백에서는 context.get_node_tree_mut() 로 부른다.
+//!   - 확인 / 취소 처리기는 대화 상자와 그 호스트의 문맥을 받는 한 번짜리 함수(FnOnce)다. dismiss 는 처리기에 문맥을 넘기려고 문맥을 받는다.
+//!   ```text
+//!     문맥이 없는 씬 코드에서는 원본에도 있는 request_dismiss 를 부르면 다음 tick 에 dismiss 한다.
+//!   ```
+//!   - 원본은 PopupMotion 닫힘 알림에서 set_active(false) 한다. 러스트 판은 tick 에서 보이던 것이 닫힘이 되면(즉시 전환이면 dismiss 에서) 끈다.
+//!   - 원본 tick 은 자식 tick 다음에 전환기를 돌린다. 러스트 판은 컴포넌트가 자식보다 먼저 돈다. (보이는 차이는 없다)
+//!   - 전환 시간은 PopupMotion 그대로다. (등장 0.32 초, 퇴장 0.22 초. Tween 은 쓰지 않는다)
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::pivot::Pivot;
@@ -28,18 +32,18 @@ use crate::ui::popupmotion::PopupMotion;
 use crate::ui::uibutton::UIButton;
 use crate::ui::uilabel::UILabel;
 
-// 부모 크기를 모를 때 쓰는 영역. (원본과 같다)
+/// 부모 크기를 모를 때 쓰는 영역. (원본과 같다)
 const DEFAULT_AREA_WIDTH: f32 = 960.0;
 const DEFAULT_AREA_HEIGHT: f32 = 640.0;
 
-// 단추 높이와 카드 안쪽 여백. (원본과 같다)
+/// 단추 높이와 카드 안쪽 여백. (원본과 같다)
 const BUTTON_HEIGHT: f32 = 52.0;
 const PANEL_PADDING: f32 = 28.0;
 const BUTTON_GAP: f32 = 16.0;
 const BUTTON_BOTTOM_OFFSET: f32 = 76.0;
 
 //==============================================================================
-// 대화 상자 설정. (원본 options = { width = 420, height = 240, confirm_text = "확인", cancel_text = "취소", panel_color?, accent_color?, text_color? })
+/// 대화 상자 설정. (원본 options = { width = 420, height = 240, confirm_text = "확인", cancel_text = "취소", panel_color?, accent_color?, text_color? })
 //==============================================================================
 #[derive(Clone, Debug, PartialEq)]
 pub struct UIDialogOptions {
@@ -47,16 +51,16 @@ pub struct UIDialogOptions {
 	pub height: f32,
 	pub confirm_text: String,
 	pub cancel_text: String,
-	// 카드 바탕색.
+	/// 카드 바탕색.
 	pub panel_color: Color,
-	// 확인 단추 색.
+	/// 확인 단추 색.
 	pub accent_color: Color,
 	pub text_color: Color,
 }
 
 impl Default for UIDialogOptions {
 	//==============================================================================
-	// 기본값. (원본과 같다)
+	/// 기본값. (원본과 같다)
 	//==============================================================================
 	fn default() -> UIDialogOptions {
 		UIDialogOptions {
@@ -72,24 +76,24 @@ impl Default for UIDialogOptions {
 }
 
 //==============================================================================
-// 확인 / 취소 처리기. (대화 상자와 그 호스트의 문맥을 받는다. 한 번만 불린다)
+/// 확인 / 취소 처리기. (대화 상자와 그 호스트의 문맥을 받는다. 한 번만 불린다)
 //==============================================================================
 pub type UIDialogHandler = Box<dyn FnOnce(&mut UIDialog, &mut ComponentContext)>;
 
 //==============================================================================
-// 열기 설정. (원본 show 의 options = { on_confirm?, on_cancel?, confirm_text?, cancel_text? })
+/// 열기 설정. (원본 show 의 options = { on_confirm?, on_cancel?, confirm_text?, cancel_text? })
 //==============================================================================
 #[derive(Default)]
 pub struct UIDialogShowOptions {
 	pub on_confirm: Option<UIDialogHandler>,
-	// 없으면 취소 단추를 감춘 알림이 된다.
+	/// 없으면 취소 단추를 감춘 알림이 된다.
 	pub on_cancel: Option<UIDialogHandler>,
 	pub confirm_text: Option<String>,
 	pub cancel_text: Option<String>,
 }
 
 //==============================================================================
-// 확인 대화 상자.
+/// 확인 대화 상자.
 //==============================================================================
 pub struct UIDialog {
 	component_base: ComponentBase,
@@ -109,14 +113,14 @@ pub struct UIDialog {
 #[crate::reflect]
 impl UIDialog {
 	//==============================================================================
-	// 생성. (기본 설정)
+	/// 생성. (기본 설정)
 	//==============================================================================
 	pub fn new() -> UIDialog {
 		UIDialog::create_with_options(UIDialogOptions::default())
 	}
 
 	//==============================================================================
-	// 설정으로 생성. (노드에는 node_tree.add_component 로 붙인다)
+	/// 설정으로 생성. (노드에는 node_tree.add_component 로 붙인다)
 	//==============================================================================
 	pub fn create_with_options(options: UIDialogOptions) -> UIDialog {
 		UIDialog {
@@ -136,7 +140,7 @@ impl UIDialog {
 	}
 
 	//==============================================================================
-	// 노드 만들기. (parent_id 밑에 "UIDialog" 노드를 만들어 붙인다. 원본 new UIDialog(options) + add_child)
+	/// 노드 만들기. (parent_id 밑에 "UIDialog" 노드를 만들어 붙인다. 원본 new UIDialog(options) + add_child)
 	//==============================================================================
 	pub fn create(node_tree: &mut NodeTree, parent_id: NodeId, options: UIDialogOptions) -> NodeId {
 		let dialog_id = node_tree.create_child(parent_id, "UIDialog");
@@ -145,7 +149,7 @@ impl UIDialog {
 	}
 
 	//==============================================================================
-	// 단추 노드 만들기. (둥근 Paint + UIButton + UILabel)
+	/// 단추 노드 만들기. (둥근 Paint + UIButton + UILabel)
 	//==============================================================================
 	fn create_button_node(node_tree: &mut NodeTree, parent_id: NodeId, node_name: &str, label_text: &str, fill_color: Color, text_color: Color, button_width: f32) -> NodeId {
 		let button_id = node_tree.create_child(parent_id, node_name);
@@ -166,7 +170,7 @@ impl UIDialog {
 	}
 
 	//==============================================================================
-	// 단추 클릭이 대화 상자를 닫게 한다. (is_confirmed 에 따라 확인 / 취소)
+	/// 단추 클릭이 대화 상자를 닫게 한다. (is_confirmed 에 따라 확인 / 취소)
 	//==============================================================================
 	fn bind_dismiss_button(node_tree: &mut NodeTree, button_id: NodeId, dialog_id: NodeId, is_confirmed: bool) {
 		if let Some(button) = node_tree[button_id].get_component_mut::<UIButton>() {
@@ -179,7 +183,7 @@ impl UIDialog {
 	}
 
 	//==============================================================================
-	// 노드의 UILabel 글 바꾸기.
+	/// 노드의 UILabel 글 바꾸기.
 	//==============================================================================
 	fn set_node_label_text(node_tree: &mut NodeTree, node_id: Option<NodeId>, text: &str) {
 		if let Some(label) = node_id.and_then(|node_id| node_tree.get_node_mut(node_id)).and_then(|node| node.get_component_mut::<UILabel>()) {
@@ -188,7 +192,7 @@ impl UIDialog {
 	}
 
 	//==============================================================================
-	// 대화 상자 열기. (on_cancel 이 없으면 취소 단추를 감추고 확인 단추를 가운데로 넓힌다)
+	/// 대화 상자 열기. (on_cancel 이 없으면 취소 단추를 감추고 확인 단추를 가운데로 넓힌다)
 	//==============================================================================
 	pub fn show(&mut self, node_tree: &mut NodeTree, message_text: &str, options: UIDialogShowOptions) {
 		let (host_id, panel_id) = match (self.node_id, self.panel_node_id) {
@@ -237,7 +241,7 @@ impl UIDialog {
 	}
 
 	//==============================================================================
-	// 닫기. (다 열린 뒤에만. is_confirmed 에 따라 확인 / 취소 처리기를 부른다. 문맥은 대화 상자 호스트의 것)
+	/// 닫기. (다 열린 뒤에만. is_confirmed 에 따라 확인 / 취소 처리기를 부른다. 문맥은 대화 상자 호스트의 것)
 	//==============================================================================
 	pub fn dismiss(&mut self, context: &mut ComponentContext, is_confirmed: bool) {
 		if !self.popup_motion.is_interactive() {
@@ -264,14 +268,14 @@ impl UIDialog {
 	}
 
 	//==============================================================================
-	// 다음 tick 에 닫기. (문맥이 없는 씬 코드용)
+	/// 다음 tick 에 닫기. (문맥이 없는 씬 코드용)
 	//==============================================================================
 	pub fn request_dismiss(&mut self, is_confirmed: bool) {
 		self.pending_dismiss = Some(is_confirmed);
 	}
 
 	//==============================================================================
-	// 전환기 산출값을 노드에 건다. (막 투명도, 카드 배율)
+	/// 전환기 산출값을 노드에 건다. (막 투명도, 카드 배율)
 	//==============================================================================
 	fn apply_motion(&self, node_tree: &mut NodeTree) {
 		let dim_ratio = self.popup_motion.get_dim_ratio();
@@ -285,7 +289,7 @@ impl UIDialog {
 	}
 
 	//==============================================================================
-	// 부모 크기에 맞춰 막과 카드 자리를 고친다.
+	/// 부모 크기에 맞춰 막과 카드 자리를 고친다.
 	//==============================================================================
 	fn update_layout_to_parent(&self, node_tree: &mut NodeTree) {
 		let host_id = match self.node_id {
@@ -317,49 +321,49 @@ impl UIDialog {
 	}
 
 	//==============================================================================
-	// 보이는 중인지. (등장 / 열림 / 퇴장 중이면 참)
+	/// 보이는 중인지. (등장 / 열림 / 퇴장 중이면 참)
 	//==============================================================================
 	pub fn is_showing(&self) -> bool {
 		self.popup_motion.is_visible()
 	}
 
 	//==============================================================================
-	// 즉시 전환 설정. (연출 없는 UI 톤)
+	/// 즉시 전환 설정. (연출 없는 UI 톤)
 	//==============================================================================
 	pub fn set_instant_enabled(&mut self, is_instant_enabled: bool) {
 		self.popup_motion.set_instant_enabled(is_instant_enabled);
 	}
 
 	//==============================================================================
-	// 전환기 반환.
+	/// 전환기 반환.
 	//==============================================================================
 	pub fn get_popup_motion(&self) -> &PopupMotion {
 		&self.popup_motion
 	}
 
 	//==============================================================================
-	// 막 노드 핸들.
+	/// 막 노드 핸들.
 	//==============================================================================
 	pub fn get_overlay_node(&self) -> Option<NodeId> {
 		self.overlay_node_id
 	}
 
 	//==============================================================================
-	// 카드 노드 핸들.
+	/// 카드 노드 핸들.
 	//==============================================================================
 	pub fn get_panel_node(&self) -> Option<NodeId> {
 		self.panel_node_id
 	}
 
 	//==============================================================================
-	// 확인 단추 노드 핸들.
+	/// 확인 단추 노드 핸들.
 	//==============================================================================
 	pub fn get_confirm_node(&self) -> Option<NodeId> {
 		self.confirm_node_id
 	}
 
 	//==============================================================================
-	// 취소 단추 노드 핸들.
+	/// 취소 단추 노드 핸들.
 	//==============================================================================
 	pub fn get_cancel_node(&self) -> Option<NodeId> {
 		self.cancel_node_id
@@ -387,7 +391,7 @@ impl Component for UIDialog {
 	}
 
 	//==============================================================================
-	// 트리에 붙음. (원본 생성자: 호스트 꾸미기, 막, 카드, 메시지, 단추)
+	/// 트리에 붙음. (원본 생성자: 호스트 꾸미기, 막, 카드, 메시지, 단추)
 	//==============================================================================
 	fn attach_to_tree(&mut self, node_tree: &mut NodeTree, node_id: NodeId) {
 		self.node_id = Some(node_id);
@@ -450,7 +454,7 @@ impl Component for UIDialog {
 	}
 
 	//==============================================================================
-	// 갱신. (미뤄 둔 닫기 → 전환기 → 노드에 반영 → 다 닫혔으면 호스트를 끈다)
+	/// 갱신. (미뤄 둔 닫기 → 전환기 → 노드에 반영 → 다 닫혔으면 호스트를 끈다)
 	//==============================================================================
 	fn tick(&mut self, context: &mut ComponentContext, time_delta: f32) {
 		self.node_id = Some(context.get_node_id());
@@ -476,7 +480,7 @@ mod tests {
 	use std::rc::Rc;
 
 	//==============================================================================
-	// 시험 장면. (800 x 600 뿌리 밑의 대화 상자)
+	/// 시험 장면. (800 x 600 뿌리 밑의 대화 상자)
 	//==============================================================================
 	fn create_dialog_tree() -> (NodeTree, NodeId) {
 		let mut node_tree = NodeTree::new();
@@ -487,7 +491,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 셈하는 처리기.
+	/// 셈하는 처리기.
 	//==============================================================================
 	fn create_counting_handler(counter: &Rc<Cell<u32>>) -> UIDialogHandler {
 		let counter = counter.clone();
@@ -497,7 +501,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 노드 가운데를 누르고 뗀다.
+	/// 노드 가운데를 누르고 뗀다.
 	//==============================================================================
 	fn click_node(node_tree: &mut NodeTree, engine: &Engine, node_id: NodeId) {
 		let content_size = node_tree[node_id].get_content_size();
@@ -507,14 +511,14 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 대화 상자 반환.
+	/// 대화 상자 반환.
 	//==============================================================================
 	fn get_dialog(node_tree: &mut NodeTree, dialog_id: NodeId) -> &mut UIDialog {
 		node_tree[dialog_id].get_component_mut::<UIDialog>().expect("dialog")
 	}
 
 	//==============================================================================
-	// 열기 → 다 열리기 전 누름은 무시 → 확인 → 퇴장 뒤 호스트가 꺼진다.
+	/// 열기 → 다 열리기 전 누름은 무시 → 확인 → 퇴장 뒤 호스트가 꺼진다.
 	//==============================================================================
 	#[test]
 	fn show_confirm_and_close() {
@@ -566,7 +570,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 막을 누르면 취소. 취소 처리기가 없으면 취소 단추를 감추고 확인 단추를 넓힌다.
+	/// 막을 누르면 취소. 취소 처리기가 없으면 취소 단추를 감추고 확인 단추를 넓힌다.
 	//==============================================================================
 	#[test]
 	fn overlay_cancels_and_alert_layout() {
@@ -602,7 +606,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 즉시 전환: 열면 바로 열리고, 닫으면 바로 호스트가 꺼진다. request_dismiss 는 다음 tick 에 닫는다.
+	/// 즉시 전환: 열면 바로 열리고, 닫으면 바로 호스트가 꺼진다. request_dismiss 는 다음 tick 에 닫는다.
 	//==============================================================================
 	#[test]
 	fn instant_mode_and_request_dismiss() {

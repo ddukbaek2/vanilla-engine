@@ -1,39 +1,39 @@
 //==============================================================================
-// 표기 유틸. (원본 base/format.js, 원본 import.js 의 Format)
-// - 재화, 점수 표기처럼 어느 게임에서나 되풀이되는 숫자 글 만들기를 모았다.
-// - 원본은 JS 의 수(f64)를 받는다. 러스트 판도 f64 를 받고, 반올림과 음수, 0, 무한대, NaN 의 글을 원본과 같게 낸다.
-//   toFixed 는 실제 값으로 반올림하고 딱 반이면 올린다. toLocaleString 은 가장 짧은 십진 표기에서 소수 셋째 자리로 반을 올린다.
-//   String(수)는 Number.prototype.toString 꼴이라 1e21 이상과 1e-7 이하는 지수로 쓴다. (1e+21, 1e-7)
-// - 원본의 기본 인자는 러스트에 없어서 늘 넘긴다. (원본 기본값: format_number 의 locale 은 "en-US", format_number_with_unit 은 "ko-KR",
-//   format_compact_number 의 fraction_digits 는 1, format_padded_number 의 범위는 f64::NEG_INFINITY 와 f64::INFINITY)
-// - 로캘: 원본은 브라우저의 Intl(ICU)에 맡긴다. 러스트 std 에는 그런 것이 없어서 소수점, 천 단위 기호, 음수 앞붙이, 숫자 모양,
-//   위 묶음 길이(인도식은 3 다음 2), 최소 묶음 자리(1234 는 묶지 않는 es, pl 등), NaN 글을 node 25(ICU 78.3, CLDR 48)의 Intl 에서 뽑아 표로 넣었다.
-//   무한대는 모든 로캘이 ∞ 다. 언어 태그는 대소문자를 가리지 않고 뒤 조각부터 하나씩 떼며 표에서 찾는다. (zh-Hant-TW → zh-hant)
-//   유니코드 확장(-u-...)은 보지 않고, 밑줄은 하이픈으로 본다. 표에 없는 태그는 원본이 브라우저의 기본 로캘로 쓰듯 시스템 언어로 쓴다.
-//   시스템 언어는 Localization.detect_language 와 같은 공용 함수(localization::read_preferred_language_tags)의 첫째다.
-//   (웹은 navigator.languages, 데스크탑은 sys-locale 이 읽은 시스템 선호 언어 차례: 윈도우 GetUserPreferredUILanguages, 맥 CFLocaleCopyPreferredLanguages,
-//   리눅스 LANGUAGE / LC_ALL / LC_MESSAGES / LANG. 그것도 표에 없으면 en-US)
-//   (원본은 틀린 태그면 RangeError 를 던진다. 러스트 판은 던지지 않고 표에 없는 태그처럼 쓴다)
-// - fraction_digits 는 원본 toFixed 처럼 0 ~ 100 이 맞다. 넘겨도 던지지 않고 그 자릿수로 낸다.
+//! 표기 유틸. (원본 base/format.js, 원본 import.js 의 Format)
+//! - 재화, 점수 표기처럼 어느 게임에서나 되풀이되는 숫자 글 만들기를 모았다.
+//! - 원본은 JS 의 수(f64)를 받는다. 러스트 판도 f64 를 받고, 반올림과 음수, 0, 무한대, NaN 의 글을 원본과 같게 낸다.
+//!   toFixed 는 실제 값으로 반올림하고 딱 반이면 올린다. toLocaleString 은 가장 짧은 십진 표기에서 소수 셋째 자리로 반을 올린다.
+//!   String(수)는 Number.prototype.toString 꼴이라 1e21 이상과 1e-7 이하는 지수로 쓴다. (1e+21, 1e-7)
+//! - 원본의 기본 인자는 러스트에 없어서 늘 넘긴다. (원본 기본값: format_number 의 locale 은 "en-US", format_number_with_unit 은 "ko-KR",
+//!   format_compact_number 의 fraction_digits 는 1, format_padded_number 의 범위는 f64::NEG_INFINITY 와 f64::INFINITY)
+//! - 로캘: 원본은 브라우저의 Intl(ICU)에 맡긴다. 러스트 std 에는 그런 것이 없어서 소수점, 천 단위 기호, 음수 앞붙이, 숫자 모양,
+//!   위 묶음 길이(인도식은 3 다음 2), 최소 묶음 자리(1234 는 묶지 않는 es, pl 등), NaN 글을 node 25(ICU 78.3, CLDR 48)의 Intl 에서 뽑아 표로 넣었다.
+//!   무한대는 모든 로캘이 ∞ 다. 언어 태그는 대소문자를 가리지 않고 뒤 조각부터 하나씩 떼며 표에서 찾는다. (zh-Hant-TW → zh-hant)
+//!   유니코드 확장(-u-...)은 보지 않고, 밑줄은 하이픈으로 본다. 표에 없는 태그는 원본이 브라우저의 기본 로캘로 쓰듯 시스템 언어로 쓴다.
+//!   시스템 언어는 Localization.detect_language 와 같은 공용 함수(localization::read_preferred_language_tags)의 첫째다.
+//!   (웹은 navigator.languages, 데스크탑은 sys-locale 이 읽은 시스템 선호 언어 차례: 윈도우 GetUserPreferredUILanguages, 맥 CFLocaleCopyPreferredLanguages,
+//!   리눅스 LANGUAGE / LC_ALL / LC_MESSAGES / LANG. 그것도 표에 없으면 en-US)
+//!   (원본은 틀린 태그면 RangeError 를 던진다. 러스트 판은 던지지 않고 표에 없는 태그처럼 쓴다)
+//! - fraction_digits 는 원본 toFixed 처럼 0 ~ 100 이 맞다. 넘겨도 던지지 않고 그 자릿수로 낸다.
 //==============================================================================
 
-// 라틴 숫자 모양.
+/// 라틴 숫자 모양.
 const LATIN_DIGITS: &str = "0123456789";
-// 대부분의 로캘이 쓰는 NaN 글.
+/// 대부분의 로캘이 쓰는 NaN 글.
 const NOT_A_NUMBER_TEXT: &str = "NaN";
-// 무한대 글. (모든 로캘이 같다)
+/// 무한대 글. (모든 로캘이 같다)
 const INFINITY_TEXT: &str = "\u{221e}";
-// toLocaleString 기본 옵션의 소수 최대 자릿수.
+/// toLocaleString 기본 옵션의 소수 최대 자릿수.
 const LOCALE_MAXIMUM_FRACTION_DIGITS: usize = 3;
-// 천 단위 묶음의 맨 아래 묶음 길이. (모든 로캘이 3 이다)
+/// 천 단위 묶음의 맨 아래 묶음 길이. (모든 로캘이 3 이다)
 const PRIMARY_GROUP_SIZE: usize = 3;
-// 표에 없는 로캘이 쓰는 태그. (en-US 는 en 과 같다)
+/// 표에 없는 로캘이 쓰는 태그. (en-US 는 en 과 같다)
 const FALLBACK_LOCALE_TAG: &str = "en";
-// 가장 짧은 표기가 딱 가운데일 수 있는 이진 소수 자릿수의 끝. (5^25 가 10^18 보다 작다)
+/// 가장 짧은 표기가 딱 가운데일 수 있는 이진 소수 자릿수의 끝. (5^25 가 10^18 보다 작다)
 const MAXIMUM_TIE_BINARY_FRACTION_DIGITS: u32 = 25;
 
 //==============================================================================
-// 로캘 하나의 숫자 표기. (Intl.NumberFormat 기본 옵션의 결과)
+/// 로캘 하나의 숫자 표기. (Intl.NumberFormat 기본 옵션의 결과)
 //==============================================================================
 struct NumberLocale {
 	tag: &'static str,
@@ -48,7 +48,7 @@ struct NumberLocale {
 
 impl NumberLocale {
 	//==============================================================================
-	// 생성.
+	/// 생성.
 	//==============================================================================
 	const fn create(tag: &'static str, decimal_separator: &'static str, group_separator: &'static str, minus_prefix: &'static str, digits: &'static str, secondary_group_size: usize, minimum_grouping_digits: usize, not_a_number_text: &'static str) -> NumberLocale {
 		NumberLocale {
@@ -64,7 +64,7 @@ impl NumberLocale {
 	}
 }
 
-// 로캘 표. (언어 기본 줄과, 언어 기본과 다른 지역 줄만. 태그는 소문자)
+/// 로캘 표. (언어 기본 줄과, 언어 기본과 다른 지역 줄만. 태그는 소문자)
 const NUMBER_LOCALES: &[NumberLocale] = &[
 	NumberLocale::create("af", ",", "\u{a0}", "-", LATIN_DIGITS, 3, 1, NOT_A_NUMBER_TEXT),
 	NumberLocale::create("am", ".", ",", "-", LATIN_DIGITS, 3, 1, "\u{1260}\u{1241}\u{1325}\u{122d}\u{a0}\u{120a}\u{1308}\u{1208}\u{133d}\u{a0}\u{12e8}\u{121b}\u{12ed}\u{127d}\u{120d}"),
@@ -190,7 +190,7 @@ const NUMBER_LOCALES: &[NumberLocale] = &[
 ];
 
 //==============================================================================
-// 천 단위 구분 기호를 붙여 반환. (12480 -> "12,480", 원본 기본 locale 은 "en-US")
+/// 천 단위 구분 기호를 붙여 반환. (12480 -> "12,480", 원본 기본 locale 은 "en-US")
 //==============================================================================
 pub fn format_number(value: f64, locale: &str) -> String {
 	let number_locale = find_number_locale(locale);
@@ -198,7 +198,7 @@ pub fn format_number(value: f64, locale: &str) -> String {
 }
 
 //==============================================================================
-// 천 단위 구분 + 단위 접미사. (1200000, "원" -> "1,200,000원", 원본 기본 locale 은 "ko-KR")
+/// 천 단위 구분 + 단위 접미사. (1200000, "원" -> "1,200,000원", 원본 기본 locale 은 "ko-KR")
 //==============================================================================
 pub fn format_number_with_unit(value: f64, unit_suffix: &str, locale: &str) -> String {
 	let number_text = format_number(value, locale);
@@ -206,7 +206,7 @@ pub fn format_number_with_unit(value: f64, unit_suffix: &str, locale: &str) -> S
 }
 
 //==============================================================================
-// 큰 수를 짧게 줄여 반환. (1234 -> "1.2K", 5600000 -> "5.6M", 원본 기본 fraction_digits 는 1)
+/// 큰 수를 짧게 줄여 반환. (1234 -> "1.2K", 5600000 -> "5.6M", 원본 기본 fraction_digits 는 1)
 //==============================================================================
 pub fn format_compact_number(value: f64, fraction_digits: usize) -> String {
 	let absolute_value = value.abs();
@@ -229,9 +229,9 @@ pub fn format_compact_number(value: f64, fraction_digits: usize) -> String {
 }
 
 //==============================================================================
-// 값을 범위로 자르고 자릿수를 0 으로 채워 반환. (7세그먼트 카운터 표기 등)
-// - format_padded_number(7.0, 3, ..) -> "007", format_padded_number(-5.0, 3, ..) -> "-05"
-// - 원본 기본 범위는 minimum_value = f64::NEG_INFINITY, maximum_value = f64::INFINITY
+/// 값을 범위로 자르고 자릿수를 0 으로 채워 반환. (7세그먼트 카운터 표기 등)
+/// - format_padded_number(7.0, 3, ..) -> "007", format_padded_number(-5.0, 3, ..) -> "-05"
+/// - 원본 기본 범위는 minimum_value = f64::NEG_INFINITY, maximum_value = f64::INFINITY
 //==============================================================================
 pub fn format_padded_number(value: f64, digit_count: usize, minimum_value: f64, maximum_value: f64) -> String {
 	let clamped_value = minimum_with_nan(maximum_value, maximum_with_nan(minimum_value, value));
@@ -243,7 +243,7 @@ pub fn format_padded_number(value: f64, digit_count: usize, minimum_value: f64, 
 }
 
 //==============================================================================
-// 초를 "분:초" 표기로 반환. (75 -> "1:15")
+/// 초를 "분:초" 표기로 반환. (75 -> "1:15")
 //==============================================================================
 pub fn format_minutes_seconds(total_seconds: f64) -> String {
 	let floored_seconds = maximum_with_nan(0.0, total_seconds.floor());
@@ -253,7 +253,7 @@ pub fn format_minutes_seconds(total_seconds: f64) -> String {
 }
 
 //==============================================================================
-// 소수 표기의 꼬리 0 제거. ("1.0" -> "1")
+/// 소수 표기의 꼬리 0 제거. ("1.0" -> "1")
 //==============================================================================
 fn trim_trailing_zero(number_text: &str) -> String {
 	if !number_text.contains('.') {
@@ -265,7 +265,7 @@ fn trim_trailing_zero(number_text: &str) -> String {
 }
 
 //==============================================================================
-// 언어 태그로 로캘 찾기. (표에 없으면 원본의 브라우저 기본 로캘 자리인 시스템 언어, 그것도 없으면 en-US)
+/// 언어 태그로 로캘 찾기. (표에 없으면 원본의 브라우저 기본 로캘 자리인 시스템 언어, 그것도 없으면 en-US)
 //==============================================================================
 fn find_number_locale(locale: &str) -> &'static NumberLocale {
 	if let Some(number_locale) = find_table_number_locale(locale) {
@@ -286,7 +286,7 @@ fn find_number_locale(locale: &str) -> &'static NumberLocale {
 }
 
 //==============================================================================
-// 언어 태그로 표에서 로캘 찾기. (뒤 조각부터 하나씩 떼며 찾고, 없으면 None)
+/// 언어 태그로 표에서 로캘 찾기. (뒤 조각부터 하나씩 떼며 찾고, 없으면 None)
 //==============================================================================
 fn find_table_number_locale(locale: &str) -> Option<&'static NumberLocale> {
 	let normalized_locale = locale.replace('_', "-").to_lowercase();
@@ -309,8 +309,8 @@ fn find_table_number_locale(locale: &str) -> Option<&'static NumberLocale> {
 }
 
 //==============================================================================
-// 로캘 표기로 수 쓰기. (toLocaleString 기본 옵션: 소수 0 ~ 3 자리, 반 올림, 천 단위 묶음)
-// - 0 의 부호도 원본처럼 쓴다. (-0 과 반올림해 0 이 된 음수는 "-0")
+/// 로캘 표기로 수 쓰기. (toLocaleString 기본 옵션: 소수 0 ~ 3 자리, 반 올림, 천 단위 묶음)
+/// - 0 의 부호도 원본처럼 쓴다. (-0 과 반올림해 0 이 된 음수는 "-0")
 //==============================================================================
 fn format_locale_number(value: f64, number_locale: &NumberLocale) -> String {
 	if value.is_nan() {
@@ -339,7 +339,7 @@ fn format_locale_number(value: f64, number_locale: &NumberLocale) -> String {
 }
 
 //==============================================================================
-// 정수 자리에 천 단위 기호 넣기. (맨 아래 3 자리, 그 위는 로캘의 묶음 길이, 자리가 모자라면 묶지 않는다)
+/// 정수 자리에 천 단위 기호 넣기. (맨 아래 3 자리, 그 위는 로캘의 묶음 길이, 자리가 모자라면 묶지 않는다)
 //==============================================================================
 fn group_integer_digits(integer_text: &str, number_locale: &NumberLocale) -> String {
 	let digit_count = integer_text.len();
@@ -360,7 +360,7 @@ fn group_integer_digits(integer_text: &str, number_locale: &NumberLocale) -> Str
 }
 
 //==============================================================================
-// 라틴 숫자를 로캘의 숫자 모양으로 바꾸기. (숫자가 아닌 글자는 그대로)
+/// 라틴 숫자를 로캘의 숫자 모양으로 바꾸기. (숫자가 아닌 글자는 그대로)
 //==============================================================================
 fn localize_digits(text: &str, digit_list: &[char]) -> String {
 	text.chars().map(|character| {
@@ -376,9 +376,9 @@ fn localize_digits(text: &str, digit_list: &[char]) -> String {
 }
 
 //==============================================================================
-// 가장 짧은 십진 표기의 숫자들과 소수점 자리. (value = 0.숫자들 × 10^소수점 자리, 0 이상의 유한한 값)
-// - 같은 길이의 후보 둘이 값에서 딱 같은 거리면 원본(ECMAScript Number::toString, ICU)처럼 끝자리가 짝수인 쪽을 쓴다.
-//   러스트의 {:e} 는 이때 짝수를 고르지 않아 고쳐 쓴다. (224567413330.078125 → 원본 ...07812, 러스트 ...07813)
+/// 가장 짧은 십진 표기의 숫자들과 소수점 자리. (value = 0.숫자들 × 10^소수점 자리, 0 이상의 유한한 값)
+/// - 같은 길이의 후보 둘이 값에서 딱 같은 거리면 원본(ECMAScript Number::toString, ICU)처럼 끝자리가 짝수인 쪽을 쓴다.
+///   러스트의 {:e} 는 이때 짝수를 고르지 않아 고쳐 쓴다. (224567413330.078125 → 원본 ...07812, 러스트 ...07813)
 //==============================================================================
 fn read_shortest_digits(value: f64) -> (String, i32) {
 	if value == 0.0 {
@@ -393,9 +393,9 @@ fn read_shortest_digits(value: f64) -> (String, i32) {
 }
 
 //==============================================================================
-// 가장 짧은 표기의 끝자리가 홀수이고 값이 딱 그 옆 짝수 후보와의 가운데면 짝수 후보로 바꾼다.
-// - 딱 가운데인 값은 정확한 십진 전개가 숫자들보다 한 자리 길고 5 로 끝난다. 이진 소수 자릿수가 그 십진 소수 자릿수라,
-//   유효 숫자 18 자리 안에 들 수 있는 이진 소수 25 자리 이하만 정확한 전개를 만들어 본다.
+/// 가장 짧은 표기의 끝자리가 홀수이고 값이 딱 그 옆 짝수 후보와의 가운데면 짝수 후보로 바꾼다.
+/// - 딱 가운데인 값은 정확한 십진 전개가 숫자들보다 한 자리 길고 5 로 끝난다. 이진 소수 자릿수가 그 십진 소수 자릿수라,
+///   유효 숫자 18 자리 안에 들 수 있는 이진 소수 25 자리 이하만 정확한 전개를 만들어 본다.
 //==============================================================================
 fn choose_even_tie_digits(value: f64, digit_text: String, exponent: i32) -> String {
 	let binary_fraction_digit_count = count_binary_fraction_digits(value);
@@ -431,8 +431,8 @@ fn choose_even_tie_digits(value: f64, digit_text: String, exponent: i32) -> Stri
 }
 
 //==============================================================================
-// 십진 숫자들을 소수 fraction_digit_count 자리로 반 올림. (정수 숫자들, 소수 숫자들을 돌려준다, 소수는 늘 그 자릿수)
-// - point_position 은 소수점 앞 숫자 수다. (0 이하면 소수점 뒤에 그만큼 0 이 먼저 온다)
+/// 십진 숫자들을 소수 fraction_digit_count 자리로 반 올림. (정수 숫자들, 소수 숫자들을 돌려준다, 소수는 늘 그 자릿수)
+/// - point_position 은 소수점 앞 숫자 수다. (0 이하면 소수점 뒤에 그만큼 0 이 먼저 온다)
 //==============================================================================
 fn round_decimal_digits(digit_text: &str, point_position: i32, fraction_digit_count: usize) -> (String, String) {
 	let digit_bytes = digit_text.as_bytes();
@@ -485,7 +485,7 @@ fn round_decimal_digits(digit_text: &str, point_position: i32, fraction_digit_co
 }
 
 //==============================================================================
-// 원본 Number.prototype.toFixed. (실제 값으로 반올림하고 딱 반이면 크기를 올린다, 1e21 이상과 무한대는 String(수))
+/// 원본 Number.prototype.toFixed. (실제 값으로 반올림하고 딱 반이면 크기를 올린다, 1e21 이상과 무한대는 String(수))
 //==============================================================================
 pub(crate) fn format_fixed(value: f64, fraction_digit_count: usize) -> String {
 	if value.is_nan() {
@@ -516,7 +516,7 @@ pub(crate) fn format_fixed(value: f64, fraction_digit_count: usize) -> String {
 }
 
 //==============================================================================
-// 이진 소수 자릿수. (값 = 홀수 / 2^자릿수, 정수면 0. 정확한 십진 전개의 소수 자릿수와 같고 끝자리는 5 다)
+/// 이진 소수 자릿수. (값 = 홀수 / 2^자릿수, 정수면 0. 정확한 십진 전개의 소수 자릿수와 같고 끝자리는 5 다)
 //==============================================================================
 fn count_binary_fraction_digits(value: f64) -> u32 {
 	if value == 0.0 || !value.is_finite() {
@@ -541,7 +541,7 @@ fn count_binary_fraction_digits(value: f64) -> u32 {
 }
 
 //==============================================================================
-// 원본 String(수). (Number.prototype.toString: 가장 짧은 표기, 1e21 이상과 1e-7 이하는 지수, -0 은 "0")
+/// 원본 String(수). (Number.prototype.toString: 가장 짧은 표기, 1e21 이상과 1e-7 이하는 지수, -0 은 "0")
 //==============================================================================
 pub(crate) fn number_to_string(value: f64) -> String {
 	if value.is_nan() {
@@ -582,7 +582,7 @@ pub(crate) fn number_to_string(value: f64) -> String {
 }
 
 //==============================================================================
-// 앞을 0 으로 채우기. (원본 padStart(길이, "0"))
+/// 앞을 0 으로 채우기. (원본 padStart(길이, "0"))
 //==============================================================================
 fn pad_start_with_zero(text: &str, target_length: usize) -> String {
 	let character_count = text.chars().count();
@@ -593,7 +593,7 @@ fn pad_start_with_zero(text: &str, target_length: usize) -> String {
 }
 
 //==============================================================================
-// 원본 Math.max. (하나라도 NaN 이면 NaN)
+/// 원본 Math.max. (하나라도 NaN 이면 NaN)
 //==============================================================================
 fn maximum_with_nan(first_value: f64, second_value: f64) -> f64 {
 	if first_value.is_nan() || second_value.is_nan() {
@@ -603,7 +603,7 @@ fn maximum_with_nan(first_value: f64, second_value: f64) -> f64 {
 }
 
 //==============================================================================
-// 원본 Math.min. (하나라도 NaN 이면 NaN)
+/// 원본 Math.min. (하나라도 NaN 이면 NaN)
 //==============================================================================
 fn minimum_with_nan(first_value: f64, second_value: f64) -> f64 {
 	if first_value.is_nan() || second_value.is_nan() {
@@ -617,7 +617,7 @@ mod tests {
 	use super::*;
 
 	//==============================================================================
-	// format_number: 반올림, 음수, -0, 큰 수, NaN, 무한대, 로캘마다의 기호와 묶음과 숫자 모양. (기대값은 원본 format.js 를 node 25 로 돌린 것)
+	/// format_number: 반올림, 음수, -0, 큰 수, NaN, 무한대, 로캘마다의 기호와 묶음과 숫자 모양. (기대값은 원본 format.js 를 node 25 로 돌린 것)
 	//==============================================================================
 	#[test]
 	fn format_number_matches_original() {
@@ -672,7 +672,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 표에 없는 태그는 원본의 브라우저 기본 로캘처럼 시스템 언어(첫째)로, 그것도 표에 없으면 en-US 로 쓴다.
+	/// 표에 없는 태그는 원본의 브라우저 기본 로캘처럼 시스템 언어(첫째)로, 그것도 표에 없으면 en-US 로 쓴다.
 	//==============================================================================
 	#[test]
 	fn unknown_locale_uses_system_language() {
@@ -684,7 +684,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// format_number_with_unit: 로캘 표기 뒤에 단위.
+	/// format_number_with_unit: 로캘 표기 뒤에 단위.
 	//==============================================================================
 	#[test]
 	fn format_number_with_unit_matches_original() {
@@ -695,7 +695,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// format_compact_number: 단위 경계, toFixed 의 딱 반 올림(1250 → 1.3K)과 실제 값 반올림(1005 → 1K), 음수, 지수 꼴.
+	/// format_compact_number: 단위 경계, toFixed 의 딱 반 올림(1250 → 1.3K)과 실제 값 반올림(1005 → 1K), 음수, 지수 꼴.
 	//==============================================================================
 	#[test]
 	fn format_compact_number_matches_original() {
@@ -737,7 +737,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// format_padded_number: 범위 자르기, 음수는 부호 몫 한 자리를 뺀다, 소수와 NaN 과 지수 꼴은 String(수) 그대로.
+	/// format_padded_number: 범위 자르기, 음수는 부호 몫 한 자리를 뺀다, 소수와 NaN 과 지수 꼴은 String(수) 그대로.
 	//==============================================================================
 	#[test]
 	fn format_padded_number_matches_original() {
@@ -764,7 +764,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// format_minutes_seconds: 내림, 음수는 0, NaN 과 무한대, 큰 분.
+	/// format_minutes_seconds: 내림, 음수는 0, NaN 과 무한대, 큰 분.
 	//==============================================================================
 	#[test]
 	fn format_minutes_seconds_matches_original() {
@@ -788,7 +788,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 가장 짧은 표기가 딱 가운데면 원본처럼 끝자리가 짝수인 쪽. (224567413330.078125 → ...07812)
+	/// 가장 짧은 표기가 딱 가운데면 원본처럼 끝자리가 짝수인 쪽. (224567413330.078125 → ...07812)
 	//==============================================================================
 	#[test]
 	fn shortest_digits_choose_even_on_tie() {

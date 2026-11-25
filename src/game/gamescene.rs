@@ -1,64 +1,78 @@
 //==============================================================================
-// 게임 공통 베이스 씬. (원본 game/gamescene.js 의 GameScene)
-// - 로딩 화면 (가운데 이미지 + 아래 게이지 + 터치로 건너뛰기, 최소 노출 시간).
-// - 터치 입력은 TouchRecognizer 로 돌린다. (스크롤 뷰 안의 버튼을 끌어도 스크롤되는 손짓)
-// - 세이프 에어리어 노드 "safeArea" + 세이프 에어리어 영역 계산.
-// - 뷰 크기가 바뀌면 다음 tick 에서 layout 을 다시 부른다.
-// - 캔버스 전체를 배경색으로 칠한다. (pre_draw)
-// - 러스트 판은 상속 대신 씬이 GameSceneBase 를 품고 GameScene 트레이트(원본에서 덮어쓰는 자리)를 구현한 뒤 game_scene! 한 줄로 Scene 을 얻는다:
-//     struct TitleScene { game_scene_base: GameSceneBase, logo_asset: ImageAsset }
-//     impl GameScene for TitleScene {
-//         fn get_game_scene_base(&self) -> &GameSceneBase { &self.game_scene_base }
-//         fn get_game_scene_base_mut(&mut self) -> &mut GameSceneBase { &mut self.game_scene_base }
-//         fn load_assets(&mut self, engine: &mut Engine) {                       // 원본 load_assets 재정의 자리 (바탕의 로딩 이미지 요청 뒤)
-//             self.logo_asset.load(engine, "logo.png");
-//             self.game_scene_base.get_scene_base_mut().track_asset(&self.logo_asset);
-//         }
-//         fn initialize(&mut self, engine: &mut Engine) {                          // 바탕 initialize 뒤
-//             let safe_area_id = self.game_scene_base.get_safe_area_node_id().unwrap();   // 콘텐츠는 여기 아래에 붙인다
-//         }
-//         fn layout(&mut self, engine: &mut Engine) { /* game_scene_base.get_safe_area_rect() 를 읽어 콘텐츠를 놓는다 */ }
-//     }
-//     vanilla::game_scene!(TitleScene);
-//   Scene 함수마다 바탕을 먼저 부르고 GameScene 의 같은 이름 함수를 부른다. (원본에서 super 를 먼저 부르는 덮어쓰기)
-//   post_draw 만 씬의 것을 먼저 부르고 바탕(페이드 막, 개발자 도구)을 위에 그린다. layout 은 바탕이 세이프 에어리어를 다시 계산한 뒤 부른다.
-//   (크기 바뀜, 그리고 tick 이 뷰 크기 변화를 볼 때. 첫 tick 에도 한 번)
-//   GameSceneBase 함수를 Scene 함수에서 직접 부르는 길도 그대로 된다. 그때는 tick 이 돌려준 bool 을 보고 씬이 자기 layout 을 부르고, post_draw 도 직접 부른다.
-// - 원본과 다른 점:
-//   - 원본 load(비동기)의 "load_assets 를 기다린 뒤 최소 시간 / 터치까지 기다림"은 러스트 애셋 흐름으로 옮겼다.
-//     create 에서 "로딩 문" 읽기 손잡이 하나를 맡겨 두고, draw_on_load 가 최소 시간이 지나거나 화면을 누르면 문을 연다.
-//     엔진은 맡긴 애셋이 모두(문 포함) 끝나야 initialize 를 부르므로 결과는 원본과 같다. (애셋 다 읽힘 + (최소 시간 또는 터치))
-//   - 시간은 원본 Date.now() 대신 엔진 시작 뒤 실제 경과 시간(get_realtime_since_startup)으로 잰다.
-//   - 화면 누름은 원본 window pointerdown 대신 입력 매니저의 is_touch_pressed 로 본다.
-//   - 원본은 TouchRecognizer 를 initialize 에서 만든다. 러스트 판은 생성할 때 만든다. 터치는 원본 touch_press 같은 함수 대신 tick 이 넘긴다.
-//     (SceneBase 의 터치 레이캐스터와 첫 터치 콜백은 쓰지 않는다)
-//   - 세이프 에어리어: 웹은 원본처럼 CSS env(safe-area-inset-*) 를 읽는다. 데스크탑은 크롬 데스크탑처럼 0 이고,
-//     set_safe_area_insets 로 정해 줄 수 있다. (정하면 웹에서도 그 값을 쓴다)
-//   - set_view_scale_mode 는 엔진을 같이 받는다. (전역 엔진이 없다) 엔진을 주면 원본처럼 바로 뷰 영역을 다시 계산한다.
-//   - 개발자 도구(DevTools)는 EngineConfiguration::use_dev_tools 가 켜져 있으면 initialize 에서 만든다. (원본과 같음) tick 이 F2 와 터치를 넘기고 post_draw 가 그린다.
-// - 로딩 화면 바꾸기: set_loading_colors 로 색만, set_loading_drawer 로 바탕 위 그림 전체를 바꾼다. (원본 setLoadingColors, setLoadingDrawer)
-//   건 함수는 Rc<RefCell> 에 담는다. get_loading_drawer 는 그 Rc 를 돌려주고, 부르는 쪽은 borrow_mut 로 빌려 부른다.
-//   게이지는 기본으로 최소 노출 시간의 경과(get_loading_progress)를 보이고, set_loading_progress 나 track_asset_loader 로 진행률을 알리면
-//   그 진행률을 부드럽게 따라간다. (LoadingProgress, get_loading_progress_state)
-//   - 원본 getLoadingProgress(LoadingProgress 를 돌려줌)는 러스트 판에 이미 같은 이름(경과 시간 비율)이 있어 get_loading_progress_state 다.
-//   - 원본은 load_assets 가 끝나면(알린 적이 있을 때) 진행률을 1 로 채운다. 러스트 판은 씬에 맡긴 애셋 가운데 로딩 문을 뺀 것이 다 끝나면
-//     draw_on_load 가 1 로 채운다. (complete_loading_progress_if_assets_finished, 프레임에 걸쳐 일하는 씬은 읽기 손잡이를 맡겨 두고 끝나면 연다)
-//   - track_asset_loader 로 맡긴 AssetLoader 는 draw_on_load 가 프레임마다 update 를 불러 준다.
-//   - 원본 setLoadingColors 의 넷째 값(바깥 색)은 러스트에 기본값 인자가 없어 set_loading_outside_color 로 따로 정한다.
-// - 화면 틀 (vanilla.js GameScene 의 fadeScreen, isUserInterfaceAt, setPlayInputHandler, setPlayAreaReference 와 같은 기능):
-//   - 화면 페이드: 원본은 onDark 가 Promise 를 돌려주면 끝날 때까지 어둡게 둔다. 러스트 판의 같은 꼴은 fade_screen_async(on_dark) 다.
-//     다 어두워진 그 tick 에서 on_dark 의 퓨처를 씬 작업으로 맡겨 원본처럼 그 자리에서 첫 await 까지 돌리고(SceneContext 로 씬과 엔진에 닿는다),
-//     퓨처가 끝나면 밝아진다. GameScene 을 구현한 씬은 GameScene::fade_screen_async 로 부르고 game_scene! 이 시작을 맡는다.
-//     Scene 을 직접 구현한 씬은 GameSceneBase::fade_screen_async::<씬 타입> 으로 부르고, 바탕 tick 뒤에 take_screen_fade_dark_starter 로 꺼내 start 한다.
-//     (꺼내지 않으면 바탕이 post_draw 나 다음 tick 에서 다음 폴링 차례로 맡긴다)
-//     동기 꼴 fade_screen(on_dark) 은 다 어두워지면 on_dark(트리, 엔진)를 부르고, on_dark 가 ScreenFadeHold 를 돌려주면 그 손잡이의 release 가 불릴 때까지 어둡게 둔다.
-//     (None 이면 바로 밝힌다) 콜백 꼴 fade_screen_with_hold(on_dark) 는 on_dark 가 손잡이를 받아 두었다가 일이 끝나면 release 한다. (Promise 의 resolve 자리)
-//     막은 post_draw 가 그린다. 막이 걸린 동안은 누름과 휠을 받지 않는다.
-//   - UI 가 받지 않은 입력: 원본처럼 처리기(set_play_input_handler)를 부른다. 원본 처리기 객체의 press, move, release, wheel 은 PlayInput 의 갈래다.
-//     처리기는 씬을 빌릴 수 없어서 씬 상태는 Rc<RefCell> 로 나눠 쥔다. 씬이 tick 에서 직접 꺼내 쓰려면 set_play_input_enabled(true) 로 모아 take_play_inputs 로 꺼낸다.
-//     (좌표는 세이프 에어리어 왼쪽 위 기준)
-//   - 휠: 원본처럼 창 층(UIWindowLayer) 안을 가리키면 맨 위의 창이 먼저 받고(UIWindowLayer::scroll_window_at), 아니면 그 자리의 스크롤 칸이 받는다.
-//   - 세이프 에어리어는 set_safe_area_insets 로 정하지 않았으면 ViewManager::get_safe_area_insets 를 읽는다. (강제값, 주소, env, 무시할 쪽을 따른다)
+//! 게임 공통 베이스 씬. (원본 game/gamescene.js 의 GameScene)
+//! - 로딩 화면 (가운데 이미지 + 아래 게이지 + 터치로 건너뛰기, 최소 노출 시간).
+//! - 터치 입력은 TouchRecognizer 로 돌린다. (스크롤 뷰 안의 버튼을 끌어도 스크롤되는 손짓)
+//! - 세이프 에어리어 노드 "safeArea" + 세이프 에어리어 영역 계산.
+//! - 뷰 크기가 바뀌면 다음 tick 에서 layout 을 다시 부른다.
+//! - 캔버스 전체를 배경색으로 칠한다. (pre_draw)
+//! - 러스트 판은 상속 대신 씬이 GameSceneBase 를 품고 GameScene 트레이트(원본에서 덮어쓰는 자리)를 구현한 뒤 game_scene! 한 줄로 Scene 을 얻는다:
+//!   ```text
+//!     struct TitleScene { game_scene_base: GameSceneBase, logo_asset: ImageAsset }
+//!     impl GameScene for TitleScene {
+//!         fn get_game_scene_base(&self) -> &GameSceneBase { &self.game_scene_base }
+//!         fn get_game_scene_base_mut(&mut self) -> &mut GameSceneBase { &mut self.game_scene_base }
+//!         fn load_assets(&mut self, engine: &mut Engine) {                       // 원본 load_assets 재정의 자리 (바탕의 로딩 이미지 요청 뒤)
+//!             self.logo_asset.load(engine, "logo.png");
+//!             self.game_scene_base.get_scene_base_mut().track_asset(&self.logo_asset);
+//!         }
+//!         fn initialize(&mut self, engine: &mut Engine) {                          // 바탕 initialize 뒤
+//!             let safe_area_id = self.game_scene_base.get_safe_area_node_id().unwrap();   // 콘텐츠는 여기 아래에 붙인다
+//!         }
+//!         fn layout(&mut self, engine: &mut Engine) { /* game_scene_base.get_safe_area_rect() 를 읽어 콘텐츠를 놓는다 */ }
+//!     }
+//!     vanilla::game_scene!(TitleScene);
+//!   ```
+//!   Scene 함수마다 바탕을 먼저 부르고 GameScene 의 같은 이름 함수를 부른다. (원본에서 super 를 먼저 부르는 덮어쓰기)
+//!   post_draw 만 씬의 것을 먼저 부르고 바탕(페이드 막, 개발자 도구)을 위에 그린다. layout 은 바탕이 세이프 에어리어를 다시 계산한 뒤 부른다.
+//!   (크기 바뀜, 그리고 tick 이 뷰 크기 변화를 볼 때. 첫 tick 에도 한 번)
+//!   GameSceneBase 함수를 Scene 함수에서 직접 부르는 길도 그대로 된다. 그때는 tick 이 돌려준 bool 을 보고 씬이 자기 layout 을 부르고, post_draw 도 직접 부른다.
+//! - 원본과 다른 점:
+//!   - 원본 load(비동기)의 "load_assets 를 기다린 뒤 최소 시간 / 터치까지 기다림"은 러스트 애셋 흐름으로 옮겼다.
+//!   ```text
+//!     create 에서 "로딩 문" 읽기 손잡이 하나를 맡겨 두고, draw_on_load 가 최소 시간이 지나거나 화면을 누르면 문을 연다.
+//!     엔진은 맡긴 애셋이 모두(문 포함) 끝나야 initialize 를 부르므로 결과는 원본과 같다. (애셋 다 읽힘 + (최소 시간 또는 터치))
+//!   ```
+//!   - 시간은 원본 Date.now() 대신 엔진 시작 뒤 실제 경과 시간(get_realtime_since_startup)으로 잰다.
+//!   - 화면 누름은 원본 window pointerdown 대신 입력 매니저의 is_touch_pressed 로 본다.
+//!   - 원본은 TouchRecognizer 를 initialize 에서 만든다. 러스트 판은 생성할 때 만든다. 터치는 원본 touch_press 같은 함수 대신 tick 이 넘긴다.
+//!   ```text
+//!     (SceneBase 의 터치 레이캐스터와 첫 터치 콜백은 쓰지 않는다)
+//!   ```
+//!   - 세이프 에어리어: 웹은 원본처럼 CSS env(safe-area-inset-*) 를 읽는다. 데스크탑은 크롬 데스크탑처럼 0 이고,
+//!   ```text
+//!     set_safe_area_insets 로 정해 줄 수 있다. (정하면 웹에서도 그 값을 쓴다)
+//!   ```
+//!   - set_view_scale_mode 는 엔진을 같이 받는다. (전역 엔진이 없다) 엔진을 주면 원본처럼 바로 뷰 영역을 다시 계산한다.
+//!   - 개발자 도구(DevTools)는 EngineConfiguration::use_dev_tools 가 켜져 있으면 initialize 에서 만든다. (원본과 같음) tick 이 F2 와 터치를 넘기고 post_draw 가 그린다.
+//! - 로딩 화면 바꾸기: set_loading_colors 로 색만, set_loading_drawer 로 바탕 위 그림 전체를 바꾼다. (원본 setLoadingColors, setLoadingDrawer)
+//!   건 함수는 `Rc<RefCell>` 에 담는다. get_loading_drawer 는 그 Rc 를 돌려주고, 부르는 쪽은 borrow_mut 로 빌려 부른다.
+//!   게이지는 기본으로 최소 노출 시간의 경과(get_loading_progress)를 보이고, set_loading_progress 나 track_asset_loader 로 진행률을 알리면
+//!   그 진행률을 부드럽게 따라간다. (LoadingProgress, get_loading_progress_state)
+//!   - 원본 getLoadingProgress(LoadingProgress 를 돌려줌)는 러스트 판에 이미 같은 이름(경과 시간 비율)이 있어 get_loading_progress_state 다.
+//!   - 원본은 load_assets 가 끝나면(알린 적이 있을 때) 진행률을 1 로 채운다. 러스트 판은 씬에 맡긴 애셋 가운데 로딩 문을 뺀 것이 다 끝나면
+//!   ```text
+//!     draw_on_load 가 1 로 채운다. (complete_loading_progress_if_assets_finished, 프레임에 걸쳐 일하는 씬은 읽기 손잡이를 맡겨 두고 끝나면 연다)
+//!   ```
+//!   - track_asset_loader 로 맡긴 AssetLoader 는 draw_on_load 가 프레임마다 update 를 불러 준다.
+//!   - 원본 setLoadingColors 의 넷째 값(바깥 색)은 러스트에 기본값 인자가 없어 set_loading_outside_color 로 따로 정한다.
+//! - 화면 틀 (vanilla.js GameScene 의 fadeScreen, isUserInterfaceAt, setPlayInputHandler, setPlayAreaReference 와 같은 기능):
+//!   - 화면 페이드: 원본은 onDark 가 Promise 를 돌려주면 끝날 때까지 어둡게 둔다. 러스트 판의 같은 꼴은 fade_screen_async(on_dark) 다.
+//!   ```text
+//!     다 어두워진 그 tick 에서 on_dark 의 퓨처를 씬 작업으로 맡겨 원본처럼 그 자리에서 첫 await 까지 돌리고(SceneContext 로 씬과 엔진에 닿는다),
+//!     퓨처가 끝나면 밝아진다. GameScene 을 구현한 씬은 GameScene::fade_screen_async 로 부르고 game_scene! 이 시작을 맡는다.
+//!     Scene 을 직접 구현한 씬은 GameSceneBase::fade_screen_async::<씬 타입> 으로 부르고, 바탕 tick 뒤에 take_screen_fade_dark_starter 로 꺼내 start 한다.
+//!     (꺼내지 않으면 바탕이 post_draw 나 다음 tick 에서 다음 폴링 차례로 맡긴다)
+//!     동기 꼴 fade_screen(on_dark) 은 다 어두워지면 on_dark(트리, 엔진)를 부르고, on_dark 가 ScreenFadeHold 를 돌려주면 그 손잡이의 release 가 불릴 때까지 어둡게 둔다.
+//!     (None 이면 바로 밝힌다) 콜백 꼴 fade_screen_with_hold(on_dark) 는 on_dark 가 손잡이를 받아 두었다가 일이 끝나면 release 한다. (Promise 의 resolve 자리)
+//!     막은 post_draw 가 그린다. 막이 걸린 동안은 누름과 휠을 받지 않는다.
+//!   ```
+//!   - UI 가 받지 않은 입력: 원본처럼 처리기(set_play_input_handler)를 부른다. 원본 처리기 객체의 press, move, release, wheel 은 PlayInput 의 갈래다.
+//!   ```text
+//!     처리기는 씬을 빌릴 수 없어서 씬 상태는 Rc<RefCell> 로 나눠 쥔다. 씬이 tick 에서 직접 꺼내 쓰려면 set_play_input_enabled(true) 로 모아 take_play_inputs 로 꺼낸다.
+//!     (좌표는 세이프 에어리어 왼쪽 위 기준)
+//!   ```
+//!   - 휠: 원본처럼 창 층(UIWindowLayer) 안을 가리키면 맨 위의 창이 먼저 받고(UIWindowLayer::scroll_window_at), 아니면 그 자리의 스크롤 칸이 받는다.
+//!   - 세이프 에어리어는 set_safe_area_insets 로 정하지 않았으면 ViewManager::get_safe_area_insets 를 읽는다. (강제값, 주소, env, 무시할 쪽을 따른다)
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::pivot::Pivot;
@@ -81,25 +95,25 @@ use std::cell::{Cell, RefCell};
 use std::future::Future;
 use std::rc::Rc;
 
-// 로딩 화면 최소 노출 시간 기본값. (밀리초)
+/// 로딩 화면 최소 노출 시간 기본값. (밀리초)
 const DEFAULT_LOAD_MIN_DURATION_MS: f32 = 3000.0;
 
-// 로딩 게이지 높이. (뷰 좌표)
+/// 로딩 게이지 높이. (뷰 좌표)
 const LOADING_BAR_HEIGHT: f32 = 24.0;
 
-// 로딩 문 손잡이 경로. (애셋이 아닌 대기 표시)
+/// 로딩 문 손잡이 경로. (애셋이 아닌 대기 표시)
 const LOADING_GATE_PATH: &str = "GameSceneBase.loadingGate";
 
-// 로딩 화면 그리기 함수. (graphic, 뷰 크기, 보이는 진행률 0 ~ 1, 로딩을 시작한 뒤의 초. 뷰 좌표계가 걸려 있다)
+/// 로딩 화면 그리기 함수. (graphic, 뷰 크기, 보이는 진행률 0 ~ 1, 로딩을 시작한 뒤의 초. 뷰 좌표계가 걸려 있다)
 pub type LoadingDrawer = Box<dyn FnMut(&mut Graphic, Vector2, f32, f32)>;
-// 화면 페이드의 어두워지는 시간과 밝아지는 시간 기본값. (초)
+/// 화면 페이드의 어두워지는 시간과 밝아지는 시간 기본값. (초)
 const DEFAULT_SCREEN_FADE_SECONDS: f32 = 0.35;
 
-// 화면 페이드가 한 프레임에 쓰는 가장 긴 시간. (초)
+/// 화면 페이드가 한 프레임에 쓰는 가장 긴 시간. (초)
 const SCREEN_FADE_MAXIMUM_STEP_SECONDS: f32 = 0.1;
 
 //==============================================================================
-// 화면 페이드를 어둡게 붙잡는 손잡이. (원본 onDark 가 돌려주는 Promise 자리, 복제한 손잡이 어느 것이든 release 하면 밝아진다)
+/// 화면 페이드를 어둡게 붙잡는 손잡이. (원본 onDark 가 돌려주는 Promise 자리, 복제한 손잡이 어느 것이든 release 하면 밝아진다)
 //==============================================================================
 #[derive(Clone, Debug, Default)]
 pub struct ScreenFadeHold {
@@ -108,7 +122,7 @@ pub struct ScreenFadeHold {
 
 impl ScreenFadeHold {
 	//==============================================================================
-	// 생성. (아직 놓지 않음)
+	/// 생성. (아직 놓지 않음)
 	//==============================================================================
 	pub fn new() -> ScreenFadeHold {
 		ScreenFadeHold {
@@ -117,14 +131,14 @@ impl ScreenFadeHold {
 	}
 
 	//==============================================================================
-	// 놓기. (막이 밝아진다)
+	/// 놓기. (막이 밝아진다)
 	//==============================================================================
 	pub fn release(&self) {
 		self.is_released.set(true);
 	}
 
 	//==============================================================================
-	// 놓았는지.
+	/// 놓았는지.
 	//==============================================================================
 	pub fn is_released(&self) -> bool {
 		self.is_released.get()
@@ -132,7 +146,7 @@ impl ScreenFadeHold {
 }
 
 //==============================================================================
-// 버릴 때 손잡이를 놓는 값. (fade_screen_async 의 작업이 끝나거나 버려지면 막이 밝아지게)
+/// 버릴 때 손잡이를 놓는 값. (fade_screen_async 의 작업이 끝나거나 버려지면 막이 밝아지게)
 //==============================================================================
 struct ScreenFadeHoldRelease {
 	screen_fade_hold: ScreenFadeHold,
@@ -140,7 +154,7 @@ struct ScreenFadeHoldRelease {
 
 impl Drop for ScreenFadeHoldRelease {
 	//==============================================================================
-	// 놓기.
+	/// 놓기.
 	//==============================================================================
 	fn drop(&mut self) {
 		self.screen_fade_hold.release();
@@ -148,7 +162,7 @@ impl Drop for ScreenFadeHoldRelease {
 }
 
 //==============================================================================
-// 화면 페이드 작업을 시작하는 자리. (다 어두워진 tick 의 씬과 엔진에서 바로, 또는 다음 폴링 차례로)
+/// 화면 페이드 작업을 시작하는 자리. (다 어두워진 tick 의 씬과 엔진에서 바로, 또는 다음 폴링 차례로)
 //==============================================================================
 enum ScreenFadeDarkStartPlace<'a> {
 	Now(&'a mut Engine, &'a mut dyn Scene),
@@ -156,7 +170,7 @@ enum ScreenFadeDarkStartPlace<'a> {
 }
 
 //==============================================================================
-// 화면 페이드의 async on_dark 를 시작하는 것. (fade_screen_async 가 만들고, 다 어두워지면 씬이 take_screen_fade_dark_starter 로 꺼내 start 한다)
+/// 화면 페이드의 async on_dark 를 시작하는 것. (fade_screen_async 가 만들고, 다 어두워지면 씬이 take_screen_fade_dark_starter 로 꺼내 start 한다)
 //==============================================================================
 pub struct ScreenFadeDarkStarter {
 	start_function: Box<dyn for<'a> FnOnce(ScreenFadeDarkStartPlace<'a>, ScreenFadeHold)>,
@@ -165,14 +179,14 @@ pub struct ScreenFadeDarkStarter {
 
 impl ScreenFadeDarkStarter {
 	//==============================================================================
-	// 시작. (on_dark 의 퓨처를 이 씬의 작업으로 맡겨 그 자리에서 첫 await 까지 돌린다. 씬이 fade_screen_async 의 타입이 아니면 바로 밝아진다)
+	/// 시작. (on_dark 의 퓨처를 이 씬의 작업으로 맡겨 그 자리에서 첫 await 까지 돌린다. 씬이 fade_screen_async 의 타입이 아니면 바로 밝아진다)
 	//==============================================================================
 	pub fn start(self, scene: &mut dyn Scene, engine: &mut Engine) {
 		(self.start_function)(ScreenFadeDarkStartPlace::Now(engine, scene), self.screen_fade_hold);
 	}
 
 	//==============================================================================
-	// 다음 폴링 차례로 시작. (씬이 꺼내 가지 않았을 때 바탕이 부른다)
+	/// 다음 폴링 차례로 시작. (씬이 꺼내 가지 않았을 때 바탕이 부른다)
 	//==============================================================================
 	fn start_deferred(self, engine: &Engine, scene_id: SceneId) {
 		(self.start_function)(ScreenFadeDarkStartPlace::Deferred(engine, scene_id), self.screen_fade_hold);
@@ -180,37 +194,37 @@ impl ScreenFadeDarkStarter {
 }
 
 //==============================================================================
-// 다 어두워졌을 때 부르는 함수. (트리와 엔진을 받는다. 손잡이를 돌려주면 놓을 때까지 어둡게 둔다)
+/// 다 어두워졌을 때 부르는 함수. (트리와 엔진을 받는다. 손잡이를 돌려주면 놓을 때까지 어둡게 둔다)
 //==============================================================================
 pub type ScreenFadeEvent = Box<dyn FnOnce(&mut NodeTree, &Engine) -> Option<ScreenFadeHold>>;
 
 //==============================================================================
-// 다 어두워졌을 때 부르는 함수의 콜백 꼴. (트리, 엔진, 손잡이를 받는다. 손잡이를 놓을 때까지 어둡게 둔다, fade_screen_with_hold)
+/// 다 어두워졌을 때 부르는 함수의 콜백 꼴. (트리, 엔진, 손잡이를 받는다. 손잡이를 놓을 때까지 어둡게 둔다, fade_screen_with_hold)
 //==============================================================================
 pub type ScreenFadeHoldEvent = Box<dyn FnOnce(&mut NodeTree, &Engine, ScreenFadeHold)>;
 
 //==============================================================================
-// UI 가 받지 않은 입력의 처리기. (원본 setPlayInputHandler 의 처리기 객체, 좌표는 게임 영역 좌표)
+/// UI 가 받지 않은 입력의 처리기. (원본 setPlayInputHandler 의 처리기 객체, 좌표는 게임 영역 좌표)
 //==============================================================================
 pub type PlayInputHandler = Box<dyn FnMut(PlayInput)>;
 
 //==============================================================================
-// UI 가 받지 않은 입력. (게임 영역 좌표: 세이프 에어리어 왼쪽 위 기준, 원본 처리기의 press, move, release, wheel)
+/// UI 가 받지 않은 입력. (게임 영역 좌표: 세이프 에어리어 왼쪽 위 기준, 원본 처리기의 press, move, release, wheel)
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PlayInput {
-	// UI 가 받지 않은 누름.
+	/// UI 가 받지 않은 누름.
 	Press(Vector2),
-	// 놀이로 간 누름의 이동.
+	/// 놀이로 간 누름의 이동.
 	Move(Vector2),
-	// 놀이로 간 누름의 뗌. (취소 포함)
+	/// 놀이로 간 누름의 뗌. (취소 포함)
 	Release(Vector2),
-	// UI 밖의 휠. (자리, 휠 값)
+	/// UI 밖의 휠. (자리, 휠 값)
 	Wheel(Vector2, Vector2),
 }
 
 //==============================================================================
-// 게임 공통 베이스 씬.
+/// 게임 공통 베이스 씬.
 //==============================================================================
 pub struct GameSceneBase {
 	scene_base: SceneBase,
@@ -221,32 +235,32 @@ pub struct GameSceneBase {
 	last_view_size_y: f32,
 	loading_image_asset: Option<ImageAsset>,
 	loading_image_url: String,
-	// 로딩 시작 시각. (엔진 시작 뒤 초)
+	/// 로딩 시작 시각. (엔진 시작 뒤 초)
 	load_start_time: f64,
 	load_min_duration_ms: f32,
 	load_touched_to_skip: bool,
 	load_gate_handle: Option<AssetLoadHandle>,
 	view_scale_mode: ViewScaleMode,
-	// 세이프 에어리어 인셋. (CSS 픽셀, 위 / 오른쪽 / 아래 / 왼쪽. 없으면 뷰 매니저에서 읽는다)
+	/// 세이프 에어리어 인셋. (CSS 픽셀, 위 / 오른쪽 / 아래 / 왼쪽. 없으면 뷰 매니저에서 읽는다)
 	safe_area_insets: Option<SafeAreaInsets>,
 	loading_drawer: Option<Rc<RefCell<LoadingDrawer>>>,
 	loading_background_color: Color,
 	loading_bar_back_color: Color,
 	loading_bar_fill_color: Color,
-	// 뷰 바깥(캔버스 나머지)의 색.
+	/// 뷰 바깥(캔버스 나머지)의 색.
 	loading_outside_color: Color,
 	loading_progress: LoadingProgress,
-	// 진행률을 알린 적이 있는지. (없으면 게이지는 경과 시간)
+	/// 진행률을 알린 적이 있는지. (없으면 게이지는 경과 시간)
 	is_loading_progress_reported: bool,
 	tracked_asset_loader_list: Vec<AssetLoader>,
-	// 어두워지는 막의 진하기. (0 ~ 1)
+	/// 어두워지는 막의 진하기. (0 ~ 1)
 	screen_fade_alpha: f32,
-	// 1 이면 어두워지는 중, -1 이면 밝아지는 중, 0 이면 멈춤.
+	/// 1 이면 어두워지는 중, -1 이면 밝아지는 중, 0 이면 멈춤.
 	screen_fade_direction: i32,
 	screen_fade_event: Option<ScreenFadeEvent>,
-	// 다 어두워진 뒤 붙잡고 있는 손잡이.
+	/// 다 어두워진 뒤 붙잡고 있는 손잡이.
 	screen_fade_hold: Option<ScreenFadeHold>,
-	// fade_screen_async 의 시작. (다 어두워지면 꺼낼 수 있다)
+	/// fade_screen_async 의 시작. (다 어두워지면 꺼낼 수 있다)
 	screen_fade_dark_starter: Option<ScreenFadeDarkStarter>,
 	is_screen_fade_dark_starter_ready: bool,
 	screen_fade_color: Color,
@@ -254,20 +268,20 @@ pub struct GameSceneBase {
 	is_play_input_enabled: bool,
 	play_inputs: Vec<PlayInput>,
 	play_input_handler: Option<PlayInputHandler>,
-	// 지금 누름이 놀이로 갔는지.
+	/// 지금 누름이 놀이로 갔는지.
 	is_play_press_active: bool,
-	// 게임 영역의 고정 쪽 길이. (0 이면 쓰지 않음)
+	/// 게임 영역의 고정 쪽 길이. (0 이면 쓰지 않음)
 	play_area_fixed_length: f32,
 	is_play_area_landscape: bool,
-	// initialize 에서 세이프 에어리어 노드를 만드는지. (UISceneBase 는 노드 대신 가이드 UINode 를 쓴다)
+	/// initialize 에서 세이프 에어리어 노드를 만드는지. (UISceneBase 는 노드 대신 가이드 UINode 를 쓴다)
 	is_safe_area_node_enabled: bool,
-	// 개발자 도구. (EngineConfiguration::use_dev_tools 가 꺼져 있으면 None)
+	/// 개발자 도구. (EngineConfiguration::use_dev_tools 가 꺼져 있으면 None)
 	dev_tools: Option<DevTools>,
 }
 
 impl GameSceneBase {
 	//==============================================================================
-	// 생성. (최소 노출 3 초, 검은 배경, ViewScaleMode::None)
+	/// 생성. (최소 노출 3 초, 검은 배경, ViewScaleMode::None)
 	//==============================================================================
 	pub fn new() -> GameSceneBase {
 		let mut scene_base = SceneBase::new();
@@ -315,56 +329,56 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 개발자 도구 반환. (initialize 전이거나 EngineConfiguration::use_dev_tools 가 꺼져 있으면 None)
+	/// 개발자 도구 반환. (initialize 전이거나 EngineConfiguration::use_dev_tools 가 꺼져 있으면 None)
 	//==============================================================================
 	pub fn get_dev_tools(&self) -> Option<&DevTools> {
 		self.dev_tools.as_ref()
 	}
 
 	//==============================================================================
-	// 개발자 도구 반환. (변경용)
+	/// 개발자 도구 반환. (변경용)
 	//==============================================================================
 	pub fn get_dev_tools_mut(&mut self) -> Option<&mut DevTools> {
 		self.dev_tools.as_mut()
 	}
 
 	//==============================================================================
-	// initialize 에서 세이프 에어리어 노드를 만들지 설정. (UISceneBase 가 끈다)
+	/// initialize 에서 세이프 에어리어 노드를 만들지 설정. (UISceneBase 가 끈다)
 	//==============================================================================
 	pub(crate) fn set_safe_area_node_enabled(&mut self, is_safe_area_node_enabled: bool) {
 		self.is_safe_area_node_enabled = is_safe_area_node_enabled;
 	}
 
 	//==============================================================================
-	// 씬 공통 상태 반환. (Scene::get_scene_base 에서 돌려준다)
+	/// 씬 공통 상태 반환. (Scene::get_scene_base 에서 돌려준다)
 	//==============================================================================
 	pub fn get_scene_base(&self) -> &SceneBase {
 		&self.scene_base
 	}
 
 	//==============================================================================
-	// 씬 공통 상태 반환. (변경용)
+	/// 씬 공통 상태 반환. (변경용)
 	//==============================================================================
 	pub fn get_scene_base_mut(&mut self) -> &mut SceneBase {
 		&mut self.scene_base
 	}
 
 	//==============================================================================
-	// 터치 인식기 반환.
+	/// 터치 인식기 반환.
 	//==============================================================================
 	pub fn get_touch_recognizer(&self) -> &TouchRecognizer {
 		&self.touch_recognizer
 	}
 
 	//==============================================================================
-	// 터치 인식기 반환. (변경용)
+	/// 터치 인식기 반환. (변경용)
 	//==============================================================================
 	pub fn get_touch_recognizer_mut(&mut self) -> &mut TouchRecognizer {
 		&mut self.touch_recognizer
 	}
 
 	//==============================================================================
-	// ViewScaleMode 설정. (기본 none. 엔진을 주면 바로 뷰 영역에 반영하고, 아니면 initialize 에서 적용한다)
+	/// ViewScaleMode 설정. (기본 none. 엔진을 주면 바로 뷰 영역에 반영하고, 아니면 initialize 에서 적용한다)
 	//==============================================================================
 	pub fn set_view_scale_mode(&mut self, view_scale_mode: ViewScaleMode, engine: Option<&mut Engine>) {
 		self.view_scale_mode = view_scale_mode;
@@ -374,14 +388,14 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 지금 ViewScaleMode 반환.
+	/// 지금 ViewScaleMode 반환.
 	//==============================================================================
 	pub fn get_view_scale_mode(&self) -> ViewScaleMode {
 		self.view_scale_mode
 	}
 
 	//==============================================================================
-	// 뷰 매니저에 ViewScaleMode 반영. (바뀌었으면 지금 캔버스 크기로 뷰 영역을 다시 계산한다. 원본 view_manager.set_view_scale_mode)
+	/// 뷰 매니저에 ViewScaleMode 반영. (바뀌었으면 지금 캔버스 크기로 뷰 영역을 다시 계산한다. 원본 view_manager.set_view_scale_mode)
 	//==============================================================================
 	fn apply_view_scale_mode(&self, engine: &mut Engine) {
 		let view_manager = engine.get_view_manager_mut();
@@ -397,44 +411,44 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 로딩 화면 가운데 이미지 경로 설정. (빈 글이면 이미지 없이 게이지만. create 전에 정한다)
+	/// 로딩 화면 가운데 이미지 경로 설정. (빈 글이면 이미지 없이 게이지만. create 전에 정한다)
 	//==============================================================================
 	pub fn set_loading_image_url(&mut self, url: &str) {
 		self.loading_image_url = url.to_string();
 	}
 
 	//==============================================================================
-	// 로딩 화면 최소 노출 시간 설정. (밀리초. create 전에 정한다)
+	/// 로딩 화면 최소 노출 시간 설정. (밀리초. create 전에 정한다)
 	//==============================================================================
 	pub fn set_loading_min_duration_ms(&mut self, milliseconds: f32) {
 		self.load_min_duration_ms = milliseconds;
 	}
 
 	//==============================================================================
-	// 로딩 화면 그리기 함수 설정. (None 이면 기본 그림: 가운데 로딩 이미지 + 아래 게이지)
-	// - 캔버스를 바깥 색으로, 뷰를 바탕색으로 칠하고 뷰 좌표계를 건 뒤 drawer(graphic, 뷰 크기, 보이는 진행률, 경과 초) 를 부른다.
-	// - 그림과 글꼴을 받기 전에도 그려지므로 도형과 기본 글꼴로 그린다. 그릴 것은 함수가 스스로 들고 있는다.
+	/// 로딩 화면 그리기 함수 설정. (None 이면 기본 그림: 가운데 로딩 이미지 + 아래 게이지)
+	/// - 캔버스를 바깥 색으로, 뷰를 바탕색으로 칠하고 뷰 좌표계를 건 뒤 drawer(graphic, 뷰 크기, 보이는 진행률, 경과 초) 를 부른다.
+	/// - 그림과 글꼴을 받기 전에도 그려지므로 도형과 기본 글꼴로 그린다. 그릴 것은 함수가 스스로 들고 있는다.
 	//==============================================================================
 	pub fn set_loading_drawer(&mut self, loading_drawer: Option<LoadingDrawer>) {
 		self.loading_drawer = loading_drawer.map(|loading_drawer| Rc::new(RefCell::new(loading_drawer)));
 	}
 
 	//==============================================================================
-	// 로딩 화면 그리기 함수가 있는지.
+	/// 로딩 화면 그리기 함수가 있는지.
 	//==============================================================================
 	pub fn has_loading_drawer(&self) -> bool {
 		self.loading_drawer.is_some()
 	}
 
 	//==============================================================================
-	// 로딩 화면 그리기 함수 반환. (없으면 None, 부를 때는 borrow_mut 로 빌린다)
+	/// 로딩 화면 그리기 함수 반환. (없으면 None, 부를 때는 borrow_mut 로 빌린다)
 	//==============================================================================
 	pub fn get_loading_drawer(&self) -> Option<Rc<RefCell<LoadingDrawer>>> {
 		self.loading_drawer.clone()
 	}
 
 	//==============================================================================
-	// 로딩 화면 색 설정. (바탕, 게이지 바탕, 게이지. 뷰 바깥도 바탕색이 된다. 기본은 검정, #333333, #ffffff)
+	/// 로딩 화면 색 설정. (바탕, 게이지 바탕, 게이지. 뷰 바깥도 바탕색이 된다. 기본은 검정, #333333, #ffffff)
 	//==============================================================================
 	pub fn set_loading_colors(&mut self, background_color: impl Into<Color>, bar_back_color: impl Into<Color>, bar_fill_color: impl Into<Color>) {
 		let background_color = background_color.into();
@@ -445,14 +459,14 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 로딩 화면 뷰 바깥(캔버스 나머지)의 색 설정. (원본 setLoadingColors 의 넷째 값, set_loading_colors 뒤에 부른다)
+	/// 로딩 화면 뷰 바깥(캔버스 나머지)의 색 설정. (원본 setLoadingColors 의 넷째 값, set_loading_colors 뒤에 부른다)
 	//==============================================================================
 	pub fn set_loading_outside_color(&mut self, outside_color: impl Into<Color>) {
 		self.loading_outside_color = outside_color.into();
 	}
 
 	//==============================================================================
-	// 로딩 진행률 알리기. (0 ~ 1, 줄어들지 않는다. 알린 뒤로 게이지가 경과 시간 대신 이 값을 따라간다)
+	/// 로딩 진행률 알리기. (0 ~ 1, 줄어들지 않는다. 알린 뒤로 게이지가 경과 시간 대신 이 값을 따라간다)
 	//==============================================================================
 	pub fn set_loading_progress(&mut self, progress: f32) {
 		self.is_loading_progress_reported = true;
@@ -460,21 +474,21 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 로딩 진행률 상태. (알린 정도와 부드럽게 따라가는 보이는 정도, 원본 getLoadingProgress)
+	/// 로딩 진행률 상태. (알린 정도와 부드럽게 따라가는 보이는 정도, 원본 getLoadingProgress)
 	//==============================================================================
 	pub fn get_loading_progress_state(&self) -> &LoadingProgress {
 		&self.loading_progress
 	}
 
 	//==============================================================================
-	// 로딩 진행률 상태. (변경용, 따라가는 빠르기를 바꿀 때)
+	/// 로딩 진행률 상태. (변경용, 따라가는 빠르기를 바꿀 때)
 	//==============================================================================
 	pub fn get_loading_progress_state_mut(&mut self) -> &mut LoadingProgress {
 		&mut self.loading_progress
 	}
 
 	//==============================================================================
-	// 애셋 함께 받기 맡기기. (다 받을 때까지 initialize 를 미루고, draw_on_load 가 update 를 부르고 진행률을 알린다)
+	/// 애셋 함께 받기 맡기기. (다 받을 때까지 initialize 를 미루고, draw_on_load 가 update 를 부르고 진행률을 알린다)
 	//==============================================================================
 	pub fn track_asset_loader(&mut self, asset_loader: &AssetLoader) {
 		let completion_handle = asset_loader.get_completion_handle();
@@ -484,7 +498,7 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 맡긴 애셋 함께 받기를 갱신하고 진행률을 알린다. (맡긴 것들의 끝난 수 / 전체 수)
+	/// 맡긴 애셋 함께 받기를 갱신하고 진행률을 알린다. (맡긴 것들의 끝난 수 / 전체 수)
 	//==============================================================================
 	pub fn update_tracked_asset_loaders(&mut self, engine: &Engine) {
 		if self.tracked_asset_loader_list.is_empty() {
@@ -507,7 +521,7 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 로딩 문을 뺀 맡긴 애셋이 다 끝났으면 진행률을 1 로 채운다. (원본 load 가 load_assets 를 기다린 뒤 1 을 알리는 자리, 알린 적이 없으면 하지 않는다)
+	/// 로딩 문을 뺀 맡긴 애셋이 다 끝났으면 진행률을 1 로 채운다. (원본 load 가 load_assets 를 기다린 뒤 1 을 알리는 자리, 알린 적이 없으면 하지 않는다)
 	//==============================================================================
 	pub fn complete_loading_progress_if_assets_finished(&mut self) {
 		if !self.is_loading_progress_reported {
@@ -527,35 +541,35 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 캔버스 배경색 설정. (pre_draw 에서 캔버스 전체에 칠한다)
+	/// 캔버스 배경색 설정. (pre_draw 에서 캔버스 전체에 칠한다)
 	//==============================================================================
 	pub fn set_scene_background_color(&mut self, color: impl Into<Color>) {
 		self.scene_base.set_scene_background_color(color);
 	}
 
 	//==============================================================================
-	// 세이프 에어리어 노드 반환. (씬이 콘텐츠를 여기에 붙인다. initialize 전이면 None)
+	/// 세이프 에어리어 노드 반환. (씬이 콘텐츠를 여기에 붙인다. initialize 전이면 None)
 	//==============================================================================
 	pub fn get_safe_area_node_id(&self) -> Option<NodeId> {
 		self.safe_area_node_id
 	}
 
 	//==============================================================================
-	// 마지막으로 계산한 세이프 에어리어 영역 반환. (뷰 좌표)
+	/// 마지막으로 계산한 세이프 에어리어 영역 반환. (뷰 좌표)
 	//==============================================================================
 	pub fn get_safe_area_rect(&self) -> Rect {
 		self.last_safe_area_rect
 	}
 
 	//==============================================================================
-	// 세이프 에어리어 인셋 직접 설정. (CSS 픽셀, None 이면 뷰 매니저의 get_safe_area_insets 를 읽는다)
+	/// 세이프 에어리어 인셋 직접 설정. (CSS 픽셀, None 이면 뷰 매니저의 get_safe_area_insets 를 읽는다)
 	//==============================================================================
 	pub fn set_safe_area_insets(&mut self, insets: Option<SafeAreaInsets>) {
 		self.safe_area_insets = insets;
 	}
 
 	//==============================================================================
-	// 생성. (씬 create 에서 맨 먼저 부른다. 원본 load 의 앞부분 + load_assets)
+	/// 생성. (씬 create 에서 맨 먼저 부른다. 원본 load 의 앞부분 + load_assets)
 	//==============================================================================
 	pub fn create(&mut self, engine: &mut Engine) {
 		let current_time = engine.get_time_manager().get_realtime_since_startup();
@@ -564,7 +578,7 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 로딩 시작. (시작 시각을 적고, 최소 시간 / 터치를 기다리는 로딩 문을 씬에 맡긴다)
+	/// 로딩 시작. (시작 시각을 적고, 최소 시간 / 터치를 기다리는 로딩 문을 씬에 맡긴다)
 	//==============================================================================
 	pub fn begin_loading(&mut self, current_time: f64) {
 		self.load_start_time = current_time;
@@ -578,7 +592,7 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 자산 읽기. (원본 load_assets 의 기본 부분: 로딩 이미지. 씬의 자체 애셋은 씬 create 에서 요청하고 track_asset 으로 맡긴다)
+	/// 자산 읽기. (원본 load_assets 의 기본 부분: 로딩 이미지. 씬의 자체 애셋은 씬 create 에서 요청하고 track_asset 으로 맡긴다)
 	//==============================================================================
 	pub fn load_assets(&mut self, engine: &Engine) {
 		if self.loading_image_url.is_empty() {
@@ -591,7 +605,7 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 로딩 갱신. (누르면 건너뛰기로 적고, 최소 시간이 지났거나 건너뛰었으면 로딩 문을 연다)
+	/// 로딩 갱신. (누르면 건너뛰기로 적고, 최소 시간이 지났거나 건너뛰었으면 로딩 문을 연다)
 	//==============================================================================
 	pub fn update_loading(&mut self, current_time: f64, is_touch_pressed: bool) {
 		if is_touch_pressed {
@@ -615,7 +629,7 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 로딩 게이지 진행률. (경과 시간 / 최소 노출 시간, 0 ~ 1)
+	/// 로딩 게이지 진행률. (경과 시간 / 최소 노출 시간, 0 ~ 1)
 	//==============================================================================
 	pub fn get_loading_progress(&self, current_time: f64) -> f32 {
 		if self.load_min_duration_ms <= 0.0 {
@@ -626,14 +640,14 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 건너뛰기 눌렸는지.
+	/// 건너뛰기 눌렸는지.
 	//==============================================================================
 	pub fn is_load_touched_to_skip(&self) -> bool {
 		self.load_touched_to_skip
 	}
 
 	//==============================================================================
-	// 로딩 화면 출력. (엔진이 initialize 전까지 매 프레임 부른다. 바깥 색 캔버스 + 바탕색 뷰 + (그리기 함수, 없으면 가운데 로딩 이미지 + 아래 게이지))
+	/// 로딩 화면 출력. (엔진이 initialize 전까지 매 프레임 부른다. 바깥 색 캔버스 + 바탕색 뷰 + (그리기 함수, 없으면 가운데 로딩 이미지 + 아래 게이지))
 	//==============================================================================
 	pub fn draw_on_load(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
 		let current_time = engine.get_time_manager().get_realtime_since_startup();
@@ -704,7 +718,7 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 초기화. (씬 initialize 에서 맨 먼저 부른다. ViewScaleMode 적용, 세이프 에어리어 노드 생성)
+	/// 초기화. (씬 initialize 에서 맨 먼저 부른다. ViewScaleMode 적용, 세이프 에어리어 노드 생성)
 	//==============================================================================
 	pub fn initialize(&mut self, engine: &mut Engine) {
 		self.apply_view_scale_mode(engine);
@@ -727,7 +741,7 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 세이프 에어리어 노드 생성. (루트 아래 "safeArea", 피봇 / 앵커 왼쪽 위)
+	/// 세이프 에어리어 노드 생성. (루트 아래 "safeArea", 피봇 / 앵커 왼쪽 위)
 	//==============================================================================
 	fn create_safe_area_node(&mut self) {
 		let node_tree = self.scene_base.get_node_tree_mut();
@@ -742,7 +756,7 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 화면 크기 변경됨. (게임 영역 기준을 다시 걸고 기본 레이아웃을 다시 한다. 씬의 layout 은 game_scene! 이 이 뒤에 부른다)
+	/// 화면 크기 변경됨. (게임 영역 기준을 다시 걸고 기본 레이아웃을 다시 한다. 씬의 layout 은 game_scene! 이 이 뒤에 부른다)
 	//==============================================================================
 	pub fn resize(&mut self, engine: &mut Engine, _canvas_native_size: Vector2) {
 		self.apply_play_area_reference(engine);
@@ -750,7 +764,7 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 레이아웃. (세이프 에어리어 영역을 다시 계산해 노드에 건다)
+	/// 레이아웃. (세이프 에어리어 영역을 다시 계산해 노드에 건다)
 	//==============================================================================
 	pub fn layout(&mut self, engine: &Engine) {
 		let safe_area_rect = self.compute_safe_area_rect(engine);
@@ -758,7 +772,7 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 세이프 에어리어 영역을 노드에 건다. (노드가 아직 없으면 영역만 적는다)
+	/// 세이프 에어리어 영역을 노드에 건다. (노드가 아직 없으면 영역만 적는다)
 	//==============================================================================
 	fn apply_safe_area_rect(&mut self, safe_area_rect: Rect) {
 		self.last_safe_area_rect = safe_area_rect;
@@ -771,7 +785,7 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 세이프 에어리어 계산. (뷰 좌표)
+	/// 세이프 에어리어 계산. (뷰 좌표)
 	//==============================================================================
 	pub fn compute_safe_area_rect(&self, engine: &Engine) -> Rect {
 		let view_manager = engine.get_view_manager();
@@ -802,7 +816,7 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 세이프 에어리어 계산. (정적. CSS 픽셀 인셋을 뷰 배율로 나눠 뷰 영역에서 뺀다)
+	/// 세이프 에어리어 계산. (정적. CSS 픽셀 인셋을 뷰 배율로 나눠 뷰 영역에서 뺀다)
 	//==============================================================================
 	pub fn calculate_safe_area_rect(view_size: Vector2, target_resolution_scale: f32, insets: SafeAreaInsets) -> Rect {
 		let scale = if target_resolution_scale > 0.0 {
@@ -821,7 +835,7 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 뷰 크기가 바뀌었으면 기본 레이아웃을 다시 한다. (바뀌었으면 true)
+	/// 뷰 크기가 바뀌었으면 기본 레이아웃을 다시 한다. (바뀌었으면 true)
 	//==============================================================================
 	pub fn update_layout_if_view_size_changed(&mut self, engine: &Engine) -> bool {
 		let view_size = engine.get_view_manager().get_view_size();
@@ -835,8 +849,8 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 갱신. (노드 → TouchRecognizer 터치 → 트윈, 그다음 뷰 크기 변화를 보고 레이아웃. 레이아웃을 다시 했으면 true)
-	// - 모바일 주소창이 나타나고 사라질 때처럼 resize 만으로는 놓칠 수 있어 매 tick 확인한다. (원본과 같음)
+	/// 갱신. (노드 → TouchRecognizer 터치 → 트윈, 그다음 뷰 크기 변화를 보고 레이아웃. 레이아웃을 다시 했으면 true)
+	/// - 모바일 주소창이 나타나고 사라질 때처럼 resize 만으로는 놓칠 수 있어 매 tick 확인한다. (원본과 같음)
 	//==============================================================================
 	pub fn tick(&mut self, engine: &mut Engine, time_delta: f32) -> bool {
 		self.start_left_screen_fade_dark_starter(engine);
@@ -853,10 +867,10 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 터치 갱신. (TouchRecognizer 로 UI 에 넘기고, 처리기나 모으기가 켜져 있으면 UI 가 받지 않은 입력을 놀이 입력으로 넘긴다)
-	// - 페이드 막이 걸린 동안은 누름과 휠을 막고, 이미 누르던 손가락의 이동, 뗌, 취소만 넘긴다.
-	// - UI 판정은 넘기기 전에 한다. (누른 단추가 창을 띄워도 이 누름은 놀이로 가지 않게)
-	// - 휠은 창 층 안을 가리키면 맨 위의 창이 먼저 받는다. (원본 touchWheel)
+	/// 터치 갱신. (TouchRecognizer 로 UI 에 넘기고, 처리기나 모으기가 켜져 있으면 UI 가 받지 않은 입력을 놀이 입력으로 넘긴다)
+	/// - 페이드 막이 걸린 동안은 누름과 휠을 막고, 이미 누르던 손가락의 이동, 뗌, 취소만 넘긴다.
+	/// - UI 판정은 넘기기 전에 한다. (누른 단추가 창을 띄워도 이 누름은 놀이로 가지 않게)
+	/// - 휠은 창 층 안을 가리키면 맨 위의 창이 먼저 받는다. (원본 touchWheel)
 	//==============================================================================
 	fn tick_touch(&mut self, engine: &Engine) {
 		let input_manager = engine.get_input_manager();
@@ -936,7 +950,7 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 놀이 입력 넘기기. (처리기가 있으면 부르고, 모으기가 켜져 있으면 모은다, 원본 dispatchPlayInput)
+	/// 놀이 입력 넘기기. (처리기가 있으면 부르고, 모으기가 켜져 있으면 모은다, 원본 dispatchPlayInput)
 	//==============================================================================
 	fn dispatch_play_input(&mut self, play_input: PlayInput) {
 		if let Some(play_input_handler) = self.play_input_handler.as_mut() {
@@ -948,14 +962,14 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 이번 프레임의 휠을 스크롤 칸 등이 받아 썼는지. (tick 뒤에 읽는다, false 일 때만 게임의 지도 확대 등에 쓰면 창의 스크롤과 겹치지 않는다)
+	/// 이번 프레임의 휠을 스크롤 칸 등이 받아 썼는지. (tick 뒤에 읽는다, false 일 때만 게임의 지도 확대 등에 쓰면 창의 스크롤과 겹치지 않는다)
 	//==============================================================================
 	pub fn is_wheel_handled(&self) -> bool {
 		self.touch_recognizer.is_wheel_handled()
 	}
 
 	//==============================================================================
-	// 개발자 도구가 입력을 가져가는 중인지. (보이고, 누른 자리가 판 안)
+	/// 개발자 도구가 입력을 가져가는 중인지. (보이고, 누른 자리가 판 안)
 	//==============================================================================
 	pub fn is_dev_tools_capturing_input(&self, engine: &Engine) -> bool {
 		match self.dev_tools.as_ref() {
@@ -969,14 +983,14 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 이전 출력. (캔버스 전체를 배경색으로 칠하고 뷰 좌표계를 건다. 세이프 에어리어 바깥 포함)
+	/// 이전 출력. (캔버스 전체를 배경색으로 칠하고 뷰 좌표계를 건다. 세이프 에어리어 바깥 포함)
 	//==============================================================================
 	pub fn pre_draw(&self, engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw_scene_background(engine, graphic);
 	}
 
 	//==============================================================================
-	// 이후 출력. (어두워지는 막을 세이프 에어리어까지 캔버스 전체에 그리고, 개발자 도구를 맨 위에 그린다)
+	/// 이후 출력. (어두워지는 막을 세이프 에어리어까지 캔버스 전체에 그리고, 개발자 도구를 맨 위에 그린다)
 	//==============================================================================
 	pub fn post_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
 		self.start_left_screen_fade_dark_starter(engine);
@@ -987,7 +1001,7 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 어두워지는 막 그리기. (세이프 에어리어까지 캔버스 전체, 원본 drawScreenFade)
+	/// 어두워지는 막 그리기. (세이프 에어리어까지 캔버스 전체, 원본 drawScreenFade)
 	//==============================================================================
 	pub fn draw_screen_fade(&self, engine: &Engine, graphic: &mut Graphic) {
 		if self.screen_fade_alpha <= 0.0 {
@@ -1005,7 +1019,7 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 어두워졌다 밝아지기. (다 어두워지면 on_dark 를 부르고, 그것이 손잡이를 돌려주면 놓을 때까지 어둡게 둔다, 이미 페이드 중이면 false)
+	/// 어두워졌다 밝아지기. (다 어두워지면 on_dark 를 부르고, 그것이 손잡이를 돌려주면 놓을 때까지 어둡게 둔다, 이미 페이드 중이면 false)
 	//==============================================================================
 	pub fn fade_screen(&mut self, on_dark: Option<ScreenFadeEvent>) -> bool {
 		if self.is_screen_fading() {
@@ -1017,8 +1031,8 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 어두워졌다 밝아지기의 콜백 꼴. (다 어두워지면 on_dark 에 손잡이를 넘기고, 그 손잡이를 놓을 때까지 어둡게 둔다, 이미 페이드 중이면 false)
-	// - 원본 onDark 가 돌려주는 Promise 의 resolve 자리가 손잡이의 release 다. 다 어두워진 자리에서 바로 놓으면 바로 밝아진다.
+	/// 어두워졌다 밝아지기의 콜백 꼴. (다 어두워지면 on_dark 에 손잡이를 넘기고, 그 손잡이를 놓을 때까지 어둡게 둔다, 이미 페이드 중이면 false)
+	/// - 원본 onDark 가 돌려주는 Promise 의 resolve 자리가 손잡이의 release 다. 다 어두워진 자리에서 바로 놓으면 바로 밝아진다.
 	//==============================================================================
 	pub fn fade_screen_with_hold(&mut self, on_dark: ScreenFadeHoldEvent) -> bool {
 		self.fade_screen(Some(Box::new(move |node_tree: &mut NodeTree, engine: &Engine| {
@@ -1029,12 +1043,12 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 어두워졌다 밝아지기의 async 꼴. (원본 fadeScreen(async () => { ... }), 이미 페이드 중이면 false)
-	// - 다 어두워진 tick 에서 on_dark 가 돌려준 퓨처를 이 씬의 작업으로 맡겨 그 자리에서 첫 await 까지 돌리고, 퓨처가 끝나면 밝아진다.
-	//   퓨처 안에서는 SceneContext::with 로 씬(S 타입)과 엔진을 빌린다.
-	// - S 는 이 바탕을 든 씬의 타입이다. (GameScene 을 구현한 씬은 GameScene::fade_screen_async 가 S 를 채운다) 다른 타입이면 바로 밝아진다.
-	// - 시작은 바탕 tick 뒤에 씬이 take_screen_fade_dark_starter 로 꺼내 start 한다. (game_scene!, ui_scene! 은 저절로 한다)
-	//   꺼내지 않으면 바탕이 post_draw 나 다음 tick 에서 다음 폴링 차례로 맡긴다.
+	/// 어두워졌다 밝아지기의 async 꼴. (원본 fadeScreen(async () => { ... }), 이미 페이드 중이면 false)
+	/// - 다 어두워진 tick 에서 on_dark 가 돌려준 퓨처를 이 씬의 작업으로 맡겨 그 자리에서 첫 await 까지 돌리고, 퓨처가 끝나면 밝아진다.
+	///   퓨처 안에서는 SceneContext::with 로 씬(S 타입)과 엔진을 빌린다.
+	/// - S 는 이 바탕을 든 씬의 타입이다. (GameScene 을 구현한 씬은 GameScene::fade_screen_async 가 S 를 채운다) 다른 타입이면 바로 밝아진다.
+	/// - 시작은 바탕 tick 뒤에 씬이 take_screen_fade_dark_starter 로 꺼내 start 한다. (game_scene!, ui_scene! 은 저절로 한다)
+	///   꺼내지 않으면 바탕이 post_draw 나 다음 tick 에서 다음 폴링 차례로 맡긴다.
 	//==============================================================================
 	pub fn fade_screen_async<S, F, OnDarkFuture>(&mut self, on_dark: F) -> bool
 	where
@@ -1076,7 +1090,7 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 다 어두워진 fade_screen_async 의 시작 꺼내기. (바탕 tick 뒤에 씬이 꺼내 start(씬, 엔진) 한다, 아직이면 None)
+	/// 다 어두워진 fade_screen_async 의 시작 꺼내기. (바탕 tick 뒤에 씬이 꺼내 start(씬, 엔진) 한다, 아직이면 None)
 	//==============================================================================
 	pub fn take_screen_fade_dark_starter(&mut self) -> Option<ScreenFadeDarkStarter> {
 		if !self.is_screen_fade_dark_starter_ready {
@@ -1087,7 +1101,7 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 씬이 꺼내 가지 않은 시작을 다음 폴링 차례로 맡기기.
+	/// 씬이 꺼내 가지 않은 시작을 다음 폴링 차례로 맡기기.
 	//==============================================================================
 	fn start_left_screen_fade_dark_starter(&mut self, engine: &Engine) {
 		if let Some(screen_fade_dark_starter) = self.take_screen_fade_dark_starter() {
@@ -1097,35 +1111,35 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 페이드 중인지. (어두워지거나, 손잡이를 기다리거나, 밝아지는 중)
+	/// 페이드 중인지. (어두워지거나, 손잡이를 기다리거나, 밝아지는 중)
 	//==============================================================================
 	pub fn is_screen_fading(&self) -> bool {
 		self.screen_fade_direction != 0 || self.screen_fade_hold.is_some() || self.screen_fade_alpha > 0.0
 	}
 
 	//==============================================================================
-	// 어두워지는 막의 색 설정. (기본 검정)
+	/// 어두워지는 막의 색 설정. (기본 검정)
 	//==============================================================================
 	pub fn set_screen_fade_color(&mut self, color: impl Into<Color>) {
 		self.screen_fade_color = color.into();
 	}
 
 	//==============================================================================
-	// 어두워지는 시간과 밝아지는 시간 설정. (초, 기본 0.35, 0 이면 바로)
+	/// 어두워지는 시간과 밝아지는 시간 설정. (초, 기본 0.35, 0 이면 바로)
 	//==============================================================================
 	pub fn set_screen_fade_seconds(&mut self, seconds: f32) {
 		self.screen_fade_seconds = seconds.max(0.0);
 	}
 
 	//==============================================================================
-	// 어두워지는 막의 진하기. (0 ~ 1)
+	/// 어두워지는 막의 진하기. (0 ~ 1)
 	//==============================================================================
 	pub fn get_screen_fade_alpha(&self) -> f32 {
 		self.screen_fade_alpha
 	}
 
 	//==============================================================================
-	// 막 갱신. (배율을 곱하지 않은 시간으로 움직여 놀이를 멈춰도 돈다, 한 프레임은 0.1 초까지)
+	/// 막 갱신. (배율을 곱하지 않은 시간으로 움직여 놀이를 멈춰도 돈다, 한 프레임은 0.1 초까지)
 	//==============================================================================
 	fn update_screen_fade(&mut self, engine: &Engine) {
 		if let Some(screen_fade_hold) = self.screen_fade_hold.as_ref() {
@@ -1177,14 +1191,14 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 그 자리에 UI(누를 수 있는 노드: 단추, 창의 어둠과 판, 스크롤 칸)가 있는지. (뷰 좌표)
+	/// 그 자리에 UI(누를 수 있는 노드: 단추, 창의 어둠과 판, 스크롤 칸)가 있는지. (뷰 좌표)
 	//==============================================================================
 	pub fn is_user_interface_at(&self, view_position: Vector2) -> bool {
 		self.scene_base.get_node_tree().find_topmost_interactable_node(view_position).is_some()
 	}
 
 	//==============================================================================
-	// 놀이 입력 모으기 켜기. (끄면 모은 것을 버린다)
+	/// 놀이 입력 모으기 켜기. (끄면 모은 것을 버린다)
 	//==============================================================================
 	pub fn set_play_input_enabled(&mut self, is_play_input_enabled: bool) {
 		self.is_play_input_enabled = is_play_input_enabled;
@@ -1195,7 +1209,7 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// UI 가 받지 않은 입력의 처리기 설정. (원본 setPlayInputHandler, None 이면 끈다, 놀이로 간 누름은 잊는다)
+	/// UI 가 받지 않은 입력의 처리기 설정. (원본 setPlayInputHandler, None 이면 끈다, 놀이로 간 누름은 잊는다)
 	//==============================================================================
 	pub fn set_play_input_handler(&mut self, play_input_handler: Option<PlayInputHandler>) {
 		self.play_input_handler = play_input_handler;
@@ -1203,14 +1217,14 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 모은 놀이 입력 꺼내기. (온 차례대로, 꺼내면 비운다)
+	/// 모은 놀이 입력 꺼내기. (온 차례대로, 꺼내면 비운다)
 	//==============================================================================
 	pub fn take_play_inputs(&mut self) -> Vec<PlayInput> {
 		std::mem::take(&mut self.play_inputs)
 	}
 
 	//==============================================================================
-	// 뷰 좌표 → 게임 영역 좌표. (세이프 에어리어 왼쪽 위가 0, 0)
+	/// 뷰 좌표 → 게임 영역 좌표. (세이프 에어리어 왼쪽 위가 0, 0)
 	//==============================================================================
 	pub fn convert_view_to_play_area(&self, view_position: Vector2) -> Vector2 {
 		let safe_area_position = self.last_safe_area_rect.position;
@@ -1218,11 +1232,11 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 게임 영역 기준 설정. (세이프 에어리어를 뺀 게임 영역의 고정 쪽 길이가 늘 fixed_length 가 되게 기준 해상도를 늘린다)
-	// - 캔버스 길이 : 세이프 에어리어를 뺀 길이 = 기준 해상도 길이 : fixed_length.
-	// - is_landscape 면 가로, 아니면 세로가 고정 쪽이다. 뷰 배율 방식도 그에 맞춰 둔다. (가로 고정 StretchWidthExpandHeight, 세로 고정 StretchHeightExpandWidth)
-	// - 무시할 세이프 에어리어 쪽은 ViewManager::set_ignored_safe_area_sides 로 넘긴다. fixed_length 가 0 이면 끈다.
-	// - 엔진을 주면 바로 건다. 씬은 resize 첫머리에 apply_play_area_reference 를 부른다.
+	/// 게임 영역 기준 설정. (세이프 에어리어를 뺀 게임 영역의 고정 쪽 길이가 늘 fixed_length 가 되게 기준 해상도를 늘린다)
+	/// - 캔버스 길이 : 세이프 에어리어를 뺀 길이 = 기준 해상도 길이 : fixed_length.
+	/// - is_landscape 면 가로, 아니면 세로가 고정 쪽이다. 뷰 배율 방식도 그에 맞춰 둔다. (가로 고정 StretchWidthExpandHeight, 세로 고정 StretchHeightExpandWidth)
+	/// - 무시할 세이프 에어리어 쪽은 ViewManager::set_ignored_safe_area_sides 로 넘긴다. fixed_length 가 0 이면 끈다.
+	/// - 엔진을 주면 바로 건다. 씬은 resize 첫머리에 apply_play_area_reference 를 부른다.
 	//==============================================================================
 	pub fn set_play_area_reference(&mut self, fixed_length: f32, is_landscape: bool, engine: Option<&mut Engine>) {
 		self.play_area_fixed_length = fixed_length.max(0.0);
@@ -1248,14 +1262,14 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 게임 영역의 고정 쪽 길이. (0 이면 쓰지 않음)
+	/// 게임 영역의 고정 쪽 길이. (0 이면 쓰지 않음)
 	//==============================================================================
 	pub fn get_play_area_fixed_length(&self) -> f32 {
 		self.play_area_fixed_length
 	}
 
 	//==============================================================================
-	// 게임 영역 기준을 기준 해상도에 걸기. (캔버스와 인셋 크기에서만 셈해 몇 번을 불러도 같다, 바꿨으면 뷰 영역을 다시 셈하고 true)
+	/// 게임 영역 기준을 기준 해상도에 걸기. (캔버스와 인셋 크기에서만 셈해 몇 번을 불러도 같다, 바꿨으면 뷰 영역을 다시 셈하고 true)
 	//==============================================================================
 	pub fn apply_play_area_reference(&mut self, engine: &mut Engine) -> bool {
 		if self.play_area_fixed_length <= 0.0 {
@@ -1307,7 +1321,7 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 게임 영역 기준의 기준 해상도 길이 셈. (정적, 인셋은 뷰 좌표, inset_scale 은 뷰 좌표 → 캔버스 단위 배율, 못 셈하면 0)
+	/// 게임 영역 기준의 기준 해상도 길이 셈. (정적, 인셋은 뷰 좌표, inset_scale 은 뷰 좌표 → 캔버스 단위 배율, 못 셈하면 0)
 	//==============================================================================
 	pub fn calculate_play_area_reference_length(fixed_length: f32, is_landscape: bool, canvas_native_size: Vector2, safe_area_insets: SafeAreaInsets, inset_scale: f32) -> f32 {
 		let (canvas_length, inset_sum) = if is_landscape {
@@ -1331,35 +1345,35 @@ impl Default for GameSceneBase {
 }
 
 //==============================================================================
-// 게임 씬. (원본 GameScene 을 상속한 씬이 덮어쓰는 자리)
-// - 씬은 GameSceneBase 를 품고 이 트레이트를 구현한 뒤 game_scene!(씬 타입) 으로 Scene 을 얻는다.
-// - game_scene! 이 만든 Scene 함수는 바탕(GameSceneBase)을 먼저 부르고 이 트레이트의 같은 이름 함수를 부른다. (원본에서 super 를 먼저 부르는 덮어쓰기)
-//   post_draw 만 씬의 것을 먼저 부르고 바탕(페이드 막, 개발자 도구)을 위에 그린다.
-// - layout 은 바탕이 세이프 에어리어를 다시 계산한 뒤 부른다. (resize, 그리고 tick 이 뷰 크기 변화를 본 때. 첫 tick 에도 한 번)
-// - load_assets 는 create 에서 바탕의 로딩 이미지 요청 뒤에 부른다. 씬의 애셋을 요청하고 get_scene_base_mut().track_asset 으로 맡긴다.
+/// 게임 씬. (원본 GameScene 을 상속한 씬이 덮어쓰는 자리)
+/// - 씬은 GameSceneBase 를 품고 이 트레이트를 구현한 뒤 game_scene!(씬 타입) 으로 Scene 을 얻는다.
+/// - game_scene! 이 만든 Scene 함수는 바탕(GameSceneBase)을 먼저 부르고 이 트레이트의 같은 이름 함수를 부른다. (원본에서 super 를 먼저 부르는 덮어쓰기)
+///   post_draw 만 씬의 것을 먼저 부르고 바탕(페이드 막, 개발자 도구)을 위에 그린다.
+/// - layout 은 바탕이 세이프 에어리어를 다시 계산한 뒤 부른다. (resize, 그리고 tick 이 뷰 크기 변화를 본 때. 첫 tick 에도 한 번)
+/// - load_assets 는 create 에서 바탕의 로딩 이미지 요청 뒤에 부른다. 씬의 애셋을 요청하고 get_scene_base_mut().track_asset 으로 맡긴다.
 //==============================================================================
 pub trait GameScene: 'static {
 	//==============================================================================
-	// 바탕 반환.
+	/// 바탕 반환.
 	//==============================================================================
 	fn get_game_scene_base(&self) -> &GameSceneBase;
 
 	//==============================================================================
-	// 바탕 반환. (변경용)
+	/// 바탕 반환. (변경용)
 	//==============================================================================
 	fn get_game_scene_base_mut(&mut self) -> &mut GameSceneBase;
 
 	//==============================================================================
-	// 씬의 애셋 읽기. (원본 async load_assets 덮어쓰기, 바탕의 로딩 이미지 요청 뒤)
-	// - await 로 읽으려면 engine.spawn_scene_task(self, ...) 로 불러오기 작업을 맡기고 get_game_scene_base_mut().get_scene_base_mut().track_task 로 맡긴다.
+	/// 씬의 애셋 읽기. (원본 async load_assets 덮어쓰기, 바탕의 로딩 이미지 요청 뒤)
+	/// - await 로 읽으려면 engine.spawn_scene_task(self, ...) 로 불러오기 작업을 맡기고 get_game_scene_base_mut().get_scene_base_mut().track_task 로 맡긴다.
 	//==============================================================================
 	fn load_assets(&mut self, _engine: &mut Engine) {
 	}
 
 	//==============================================================================
-	// 어두워졌다 밝아지기의 async 꼴. (원본 fadeScreen(async () => { ... }), 이미 페이드 중이면 false)
-	// - 다 어두워진 tick 에서 on_dark 가 돌려준 퓨처를 이 씬의 작업으로 맡겨 그 자리에서 첫 await 까지 돌리고, 끝나면 밝아진다.
-	//   퓨처 안에서는 SceneContext::with 로 이 씬과 엔진을 빌린다.
+	/// 어두워졌다 밝아지기의 async 꼴. (원본 fadeScreen(async () => { ... }), 이미 페이드 중이면 false)
+	/// - 다 어두워진 tick 에서 on_dark 가 돌려준 퓨처를 이 씬의 작업으로 맡겨 그 자리에서 첫 await 까지 돌리고, 끝나면 밝아진다.
+	///   퓨처 안에서는 SceneContext::with 로 이 씬과 엔진을 빌린다.
 	//==============================================================================
 	fn fade_screen_async<F, OnDarkFuture>(&mut self, on_dark: F) -> bool
 	where
@@ -1371,67 +1385,67 @@ pub trait GameScene: 'static {
 	}
 
 	//==============================================================================
-	// 로딩 화면 위에 더 그리기. (바탕의 로딩 화면 뒤)
+	/// 로딩 화면 위에 더 그리기. (바탕의 로딩 화면 뒤)
 	//==============================================================================
 	fn draw_on_load(&mut self, _engine: &mut Engine, _graphic: &mut Graphic) {
 	}
 
 	//==============================================================================
-	// 초기화. (바탕 initialize 뒤, 세이프 에어리어 노드가 생긴 다음)
+	/// 초기화. (바탕 initialize 뒤, 세이프 에어리어 노드가 생긴 다음)
 	//==============================================================================
 	fn initialize(&mut self, _engine: &mut Engine) {
 	}
 
 	//==============================================================================
-	// 소멸.
+	/// 소멸.
 	//==============================================================================
 	fn destroy(&mut self, _engine: &mut Engine) {
 	}
 
 	//==============================================================================
-	// 레이아웃. (원본 layout 덮어쓰기, 바탕이 세이프 에어리어를 다시 계산한 뒤)
+	/// 레이아웃. (원본 layout 덮어쓰기, 바탕이 세이프 에어리어를 다시 계산한 뒤)
 	//==============================================================================
 	fn layout(&mut self, _engine: &mut Engine) {
 	}
 
 	//==============================================================================
-	// 갱신. (바탕 tick 뒤: 노드, 터치, 트윈, 레이아웃, 페이드, 개발자 도구)
+	/// 갱신. (바탕 tick 뒤: 노드, 터치, 트윈, 레이아웃, 페이드, 개발자 도구)
 	//==============================================================================
 	fn tick(&mut self, _engine: &mut Engine, _time_delta: f32) {
 	}
 
 	//==============================================================================
-	// 이전 출력. (바탕의 배경 칠하기 뒤)
+	/// 이전 출력. (바탕의 배경 칠하기 뒤)
 	//==============================================================================
 	fn pre_draw(&mut self, _engine: &mut Engine, _graphic: &mut Graphic) {
 	}
 
 	//==============================================================================
-	// 출력. (노드 트리를 그린 뒤)
+	/// 출력. (노드 트리를 그린 뒤)
 	//==============================================================================
 	fn draw(&mut self, _engine: &mut Engine, _graphic: &mut Graphic) {
 	}
 
 	//==============================================================================
-	// 이후 출력. (바탕의 페이드 막과 개발자 도구보다 먼저)
+	/// 이후 출력. (바탕의 페이드 막과 개발자 도구보다 먼저)
 	//==============================================================================
 	fn post_draw(&mut self, _engine: &mut Engine, _graphic: &mut Graphic) {
 	}
 
 	//==============================================================================
-	// 종료처리. (내릴 때 unload 앞, 원본 Scene.finalize 덮어쓰기)
+	/// 종료처리. (내릴 때 unload 앞, 원본 Scene.finalize 덮어쓰기)
 	//==============================================================================
 	fn finalize(&mut self, _engine: &mut Engine) {
 	}
 
 	//==============================================================================
-	// 로딩 해제. (내릴 때 finalize 뒤, 원본 Scene.unload 덮어쓰기)
+	/// 로딩 해제. (내릴 때 finalize 뒤, 원본 Scene.unload 덮어쓰기)
 	//==============================================================================
 	fn unload(&mut self, _engine: &mut Engine) {
 	}
 
 	//==============================================================================
-	// 페이지 프로세스 복원과 가시성 복원. (원본 onPageProcessRestored, onPageVisibilityRestored 덮어쓰기)
+	/// 페이지 프로세스 복원과 가시성 복원. (원본 onPageProcessRestored, onPageVisibilityRestored 덮어쓰기)
 	//==============================================================================
 	fn on_page_process_restored(&mut self, _engine: &mut Engine) {
 	}
@@ -1440,7 +1454,7 @@ pub trait GameScene: 'static {
 	}
 
 	//==============================================================================
-	// 씬의 터치 훅. (원본 touchPress, touchMove, touchRelease, touchCancel, touchWheel 덮어쓰기, 바탕이 UI 와 놀이 입력에 넘긴 뒤 엔진이 부른다)
+	/// 씬의 터치 훅. (원본 touchPress, touchMove, touchRelease, touchCancel, touchWheel 덮어쓰기, 바탕이 UI 와 놀이 입력에 넘긴 뒤 엔진이 부른다)
 	//==============================================================================
 	fn touch_press(&mut self, _engine: &mut Engine, _view_input_position: Vector2) {
 	}
@@ -1459,7 +1473,7 @@ pub trait GameScene: 'static {
 }
 
 //==============================================================================
-// GameScene 을 구현한 씬에 Scene 을 만들어 준다. (vanilla::game_scene!(TitleScene);)
+/// GameScene 을 구현한 씬에 Scene 을 만들어 준다. (vanilla::game_scene!(TitleScene);)
 //==============================================================================
 #[macro_export]
 macro_rules! game_scene {
@@ -1568,7 +1582,7 @@ mod tests {
 	use crate::core::viewmanager::SafeAreaSide;
 
 	//==============================================================================
-	// 로딩 문은 최소 노출 시간이 지나야 열리고, 게이지는 경과 시간 비율이다. 다른 애셋이 남아 있으면 씬은 계속 기다린다.
+	/// 로딩 문은 최소 노출 시간이 지나야 열리고, 게이지는 경과 시간 비율이다. 다른 애셋이 남아 있으면 씬은 계속 기다린다.
 	//==============================================================================
 	#[test]
 	fn loading_gate_waits_for_minimum_duration() {
@@ -1592,7 +1606,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 화면을 누르면 최소 시간 전이라도 로딩 문이 열린다. 최소 시간이 0 이면 처음부터 열려 있다.
+	/// 화면을 누르면 최소 시간 전이라도 로딩 문이 열린다. 최소 시간이 0 이면 처음부터 열려 있다.
 	//==============================================================================
 	#[test]
 	fn touch_skips_loading_and_zero_duration_opens_immediately() {
@@ -1612,7 +1626,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 뷰 크기가 바뀌면 tick 이 세이프 에어리어를 다시 계산해 노드에 걸고 true 를 돌려준다. (인셋은 뷰 배율로 나눈다)
+	/// 뷰 크기가 바뀌면 tick 이 세이프 에어리어를 다시 계산해 노드에 걸고 true 를 돌려준다. (인셋은 뷰 배율로 나눈다)
 	//==============================================================================
 	#[test]
 	fn layout_follows_view_size_changes() {
@@ -1645,7 +1659,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 세이프 에어리어 계산은 뷰 배율로 인셋을 나누고 음수 크기를 0 으로 막는다.
+	/// 세이프 에어리어 계산은 뷰 배율로 인셋을 나누고 음수 크기를 0 으로 막는다.
 	//==============================================================================
 	#[test]
 	fn safe_area_calculation() {
@@ -1656,7 +1670,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 한 프레임 진행. (시간을 seconds 만큼 흘리고 tick)
+	/// 한 프레임 진행. (시간을 seconds 만큼 흘리고 tick)
 	//==============================================================================
 	fn step_frame(engine: &mut Engine, game_scene_base: &mut GameSceneBase, current_seconds: &mut f64, seconds: f64) {
 		*current_seconds += seconds;
@@ -1665,7 +1679,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 누름을 한 프레임 넣고 다음 프레임에 뗀다.
+	/// 누름을 한 프레임 넣고 다음 프레임에 뗀다.
 	//==============================================================================
 	fn press_and_release(engine: &mut Engine, game_scene_base: &mut GameSceneBase, current_seconds: &mut f64, position: Vector2) {
 		engine.get_input_manager_mut().set_view_input_position(position);
@@ -1678,7 +1692,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 페이드: 다 어두워지면 on_dark, 손잡이를 놓을 때까지 어둡고, 그동안 누름은 막히고, 놓으면 밝아진다. 페이드 중 다시 부르면 false.
+	/// 페이드: 다 어두워지면 on_dark, 손잡이를 놓을 때까지 어둡고, 그동안 누름은 막히고, 놓으면 밝아진다. 페이드 중 다시 부르면 false.
 	//==============================================================================
 	#[test]
 	fn screen_fade_holds_until_release_and_blocks_press() {
@@ -1721,7 +1735,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 놀이 입력: UI 가 받지 않은 누름만 게임 영역 좌표로, 그 누름의 뗌까지. UI 위 누름은 넘기지 않는다.
+	/// 놀이 입력: UI 가 받지 않은 누름만 게임 영역 좌표로, 그 누름의 뗌까지. UI 위 누름은 넘기지 않는다.
 	//==============================================================================
 	#[test]
 	fn play_input_skips_user_interface() {
@@ -1761,7 +1775,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 게임 영역 기준: 세이프 에어리어를 뺀 세로가 늘 고정 길이가 되게 기준 해상도를 늘린다. 무시한 쪽은 빼지 않는다.
+	/// 게임 영역 기준: 세이프 에어리어를 뺀 세로가 늘 고정 길이가 되게 기준 해상도를 늘린다. 무시한 쪽은 빼지 않는다.
 	//==============================================================================
 	#[test]
 	fn play_area_reference_keeps_fixed_length() {
@@ -1785,7 +1799,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 맡긴 애셋 함께 받기: 다 받을 때까지 씬이 기다리고, 진행률을 알린다. 알리기 전 게이지는 경과 시간이다.
+	/// 맡긴 애셋 함께 받기: 다 받을 때까지 씬이 기다리고, 진행률을 알린다. 알리기 전 게이지는 경과 시간이다.
 	//==============================================================================
 	#[test]
 	fn tracked_asset_loader_reports_progress() {
@@ -1838,7 +1852,7 @@ mod tests {
 		assert!(!reported_scene_base.get_scene_base().are_tracked_assets_finished());
 	}
 	//==============================================================================
-	// game_scene! 으로 만든 씬: 바탕이 resize 에서 게임 영역 기준과 레이아웃을 하고 씬의 layout 을 부른다. 첫 tick 에도 layout 이 불린다.
+	/// game_scene! 으로 만든 씬: 바탕이 resize 에서 게임 영역 기준과 레이아웃을 하고 씬의 layout 을 부른다. 첫 tick 에도 layout 이 불린다.
 	//==============================================================================
 	struct LayoutCountScene {
 		game_scene_base: GameSceneBase,
@@ -1891,7 +1905,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 놀이 입력 처리기: UI 가 받지 않은 누름과 그 뗌을 처리기로 받는다. 페이드 콜백 꼴: 받은 손잡이를 놓을 때까지 어둡다.
+	/// 놀이 입력 처리기: UI 가 받지 않은 누름과 그 뗌을 처리기로 받는다. 페이드 콜백 꼴: 받은 손잡이를 놓을 때까지 어둡다.
 	//==============================================================================
 	#[test]
 	fn play_input_handler_and_fade_with_hold() {
@@ -1931,8 +1945,8 @@ mod tests {
 	}
 
 	//==============================================================================
-	// async 페이드: 다 어두워진 tick 에서 on_dark 의 퓨처가 씬 작업으로 맡겨져 그 자리에서 첫 await 까지 돌고(game_scene! 이 시작한다),
-	// 퓨처가 await 하는 동안은 어둡고, 끝나면 밝아진다. 페이드 중 다시 부르면 false. 씬이 꺼내지 않으면 바탕이 다음 tick 에 다음 폴링 차례로 맡긴다.
+	/// async 페이드: 다 어두워진 tick 에서 on_dark 의 퓨처가 씬 작업으로 맡겨져 그 자리에서 첫 await 까지 돌고(game_scene! 이 시작한다),
+	/// 퓨처가 await 하는 동안은 어둡고, 끝나면 밝아진다. 페이드 중 다시 부르면 false. 씬이 꺼내지 않으면 바탕이 다음 tick 에 다음 폴링 차례로 맡긴다.
 	//==============================================================================
 	#[test]
 	fn fade_screen_async_starts_on_dark_tick_and_holds_until_future_finishes() {

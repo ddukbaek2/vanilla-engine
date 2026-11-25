@@ -1,8 +1,8 @@
 //==============================================================================
-// 노드.
-// - 원본은 Node → ComponentNode → TransformNode → WorldNode 로 상속한다.
-//   러스트 판은 그 넷을 WorldNode 하나에 담는다. (UINode 노선은 옮기지 않았다)
-// - 노드는 씬의 NodeTree 저장소에 들고, 부모와 자식은 NodeId 핸들로 잇는다.
+/// 노드.
+/// - 원본은 Node → ComponentNode → TransformNode → WorldNode 로 상속한다.
+///   러스트 판은 그 넷을 WorldNode 하나에 담는다. (UINode 노선은 옮기지 않았다)
+/// - 노드는 씬의 NodeTree 저장소에 들고, 부모와 자식은 NodeId 핸들로 잇는다.
 //==============================================================================
 pub mod nodetree;
 pub mod worldnode;

@@ -1,15 +1,17 @@
 //==============================================================================
-// 떠오르는 텍스트 관리 컴포넌트. (데미지 숫자 / +코인 등)
-// - 원본 misc/floatingtext.js 를 옮긴 것이다. spawn 으로 띄우면 위로 떠오르며 사라지고, 끝난 라벨 노드는 다시 쓴다.
-// - 씬 뿌리 밑에 노드 하나를 만들어 두고 월드 좌표로 띄운다.
-// - 사용:
-//     let floating_text_id = FloatingText::create(node_tree, root_id);
-//     FloatingText::spawn(node_tree, floating_text_id, "-120", position, FloatingTextOptions { color: Color::create(1.0, 0.4, 0.4, 1.0), ..FloatingTextOptions::default() });
-// - 원본과 다른 점:
-//   원본은 WorldNode 를 상속한 노드다. 러스트 판은 노드에 붙는 컴포넌트이고, create 가 노드를 만들어 붙여 준다.
-//   spawn / clear 는 라벨 노드를 만들고 바꿔야 해서 트리와 노드 핸들을 받는 연관 함수다. (컴포넌트가 없으면 아무것도 하지 않는다)
-//   라벨은 UILabel 대신 Text 컴포넌트로 그린다. (설정은 같다: 글, 크기, 색, 굵게)
-//   options 객체는 FloatingTextOptions 구조체다.
+//! 떠오르는 텍스트 관리 컴포넌트. (데미지 숫자 / +코인 등)
+//! - 원본 misc/floatingtext.js 를 옮긴 것이다. spawn 으로 띄우면 위로 떠오르며 사라지고, 끝난 라벨 노드는 다시 쓴다.
+//! - 씬 뿌리 밑에 노드 하나를 만들어 두고 월드 좌표로 띄운다.
+//! - 사용:
+//!   ```text
+//!     let floating_text_id = FloatingText::create(node_tree, root_id);
+//!     FloatingText::spawn(node_tree, floating_text_id, "-120", position, FloatingTextOptions { color: Color::create(1.0, 0.4, 0.4, 1.0), ..FloatingTextOptions::default() });
+//!   ```
+//! - 원본과 다른 점:
+//!   원본은 WorldNode 를 상속한 노드다. 러스트 판은 노드에 붙는 컴포넌트이고, create 가 노드를 만들어 붙여 준다.
+//!   spawn / clear 는 라벨 노드를 만들고 바꿔야 해서 트리와 노드 핸들을 받는 연관 함수다. (컴포넌트가 없으면 아무것도 하지 않는다)
+//!   라벨은 UILabel 대신 Text 컴포넌트로 그린다. (설정은 같다: 글, 크기, 색, 굵게)
+//!   options 객체는 FloatingTextOptions 구조체다.
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::math;
@@ -21,25 +23,25 @@ use crate::core::node::nodetree::{ComponentContext, NodeId, NodeTree};
 use crate::core::node::worldnode::NodeTransform;
 
 //==============================================================================
-// 띄우기 설정. (원본 options = { color?, font_size = 22, rise = 46, duration = 0.8, jitter = 10, bold = true })
+/// 띄우기 설정. (원본 options = { color?, font_size = 22, rise = 46, duration = 0.8, jitter = 10, bold = true })
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FloatingTextOptions {
-	// 글자 색. (기본 흰색)
+	/// 글자 색. (기본 흰색)
 	pub color: Color,
 	pub font_size: f32,
-	// 떠오르는 높이. (픽셀)
+	/// 떠오르는 높이. (픽셀)
 	pub rise: f32,
-	// 사라질 때까지 걸리는 시간. (초)
+	/// 사라질 때까지 걸리는 시간. (초)
 	pub duration: f32,
-	// 가로로 흩뿌리는 폭. (±픽셀)
+	/// 가로로 흩뿌리는 폭. (±픽셀)
 	pub jitter: f32,
 	pub is_bold: bool,
 }
 
 impl Default for FloatingTextOptions {
 	//==============================================================================
-	// 기본값. (흰색, 22, 46 픽셀, 0.8 초, ±10, 굵게)
+	/// 기본값. (흰색, 22, 46 픽셀, 0.8 초, ±10, 굵게)
 	//==============================================================================
 	fn default() -> FloatingTextOptions {
 		FloatingTextOptions {
@@ -54,7 +56,7 @@ impl Default for FloatingTextOptions {
 }
 
 //==============================================================================
-// 떠 있는 항목 하나.
+/// 떠 있는 항목 하나.
 //==============================================================================
 #[derive(Clone, Copy, Debug)]
 struct FloatingTextItem {
@@ -66,7 +68,7 @@ struct FloatingTextItem {
 }
 
 //==============================================================================
-// 떠오르는 텍스트 관리 컴포넌트.
+/// 떠오르는 텍스트 관리 컴포넌트.
 //==============================================================================
 pub struct FloatingText {
 	component_base: ComponentBase,
@@ -77,7 +79,7 @@ pub struct FloatingText {
 #[crate::reflect]
 impl FloatingText {
 	//==============================================================================
-	// 생성.
+	/// 생성.
 	//==============================================================================
 	pub fn new() -> FloatingText {
 		FloatingText {
@@ -88,7 +90,7 @@ impl FloatingText {
 	}
 
 	//==============================================================================
-	// 노드 만들기. (parent_id 밑에 "FloatingText" 노드를 만들고 컴포넌트를 붙인다. 원본 new FloatingText() + add_child)
+	/// 노드 만들기. (parent_id 밑에 "FloatingText" 노드를 만들고 컴포넌트를 붙인다. 원본 new FloatingText() + add_child)
 	//==============================================================================
 	pub fn create(node_tree: &mut NodeTree, parent_id: NodeId) -> NodeId {
 		let floating_text_node_id = node_tree.create_child(parent_id, "FloatingText");
@@ -97,7 +99,7 @@ impl FloatingText {
 	}
 
 	//==============================================================================
-	// 텍스트 띄우기. (쉬는 라벨 노드가 있으면 다시 쓰고, 없으면 만든다. 띄운 라벨 노드를 돌려준다)
+	/// 텍스트 띄우기. (쉬는 라벨 노드가 있으면 다시 쓰고, 없으면 만든다. 띄운 라벨 노드를 돌려준다)
 	//==============================================================================
 	pub fn spawn(node_tree: &mut NodeTree, floating_text_node_id: NodeId, text: &str, world_position: Vector2, options: FloatingTextOptions) -> Option<NodeId> {
 		node_tree.get_node(floating_text_node_id)?.get_component::<FloatingText>()?;
@@ -166,14 +168,14 @@ impl FloatingText {
 	}
 
 	//==============================================================================
-	// 떠 있는 항목 수 반환.
+	/// 떠 있는 항목 수 반환.
 	//==============================================================================
 	pub fn get_active_count(&self) -> usize {
 		self.active_list.len()
 	}
 
 	//==============================================================================
-	// 모두 지우기. (떠 있는 라벨을 끄고 쉬는 목록으로 돌린다)
+	/// 모두 지우기. (떠 있는 라벨을 끄고 쉬는 목록으로 돌린다)
 	//==============================================================================
 	pub fn clear(node_tree: &mut NodeTree, floating_text_node_id: NodeId) {
 		let active_list = match node_tree.get_node_mut(floating_text_node_id).and_then(|node| node.get_component_mut::<FloatingText>()) {
@@ -199,7 +201,7 @@ impl FloatingText {
 
 impl Default for FloatingText {
 	//==============================================================================
-	// 기본값. (new 와 같다)
+	/// 기본값. (new 와 같다)
 	//==============================================================================
 	fn default() -> FloatingText {
 		FloatingText::new()
@@ -209,28 +211,28 @@ impl Default for FloatingText {
 #[crate::reflect]
 impl Component for FloatingText {
 	//==============================================================================
-	// 공통 상태 반환.
+	/// 공통 상태 반환.
 	//==============================================================================
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base
 	}
 
 	//==============================================================================
-	// 공통 상태 반환. (변경용)
+	/// 공통 상태 반환. (변경용)
 	//==============================================================================
 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 		&mut self.component_base
 	}
 
 	//==============================================================================
-	// 컴포넌트 이름.
+	/// 컴포넌트 이름.
 	//==============================================================================
 	fn get_component_type(&self) -> &'static str {
 		"FloatingText"
 	}
 
 	//==============================================================================
-	// 노드에 붙음. (원본 생성자처럼 피봇과 앵커를 왼쪽 위로)
+	/// 노드에 붙음. (원본 생성자처럼 피봇과 앵커를 왼쪽 위로)
 	//==============================================================================
 	fn attach(&mut self, transform: &mut NodeTransform) {
 		transform.set_pivot(Pivot::TOP_LEFT);
@@ -238,7 +240,7 @@ impl Component for FloatingText {
 	}
 
 	//==============================================================================
-	// 갱신. (떠오름, 사라짐, 다 끝난 라벨 회수. 뒤에서부터 돈다)
+	/// 갱신. (떠오름, 사라짐, 다 끝난 라벨 회수. 뒤에서부터 돈다)
 	//==============================================================================
 	fn tick(&mut self, context: &mut ComponentContext, time_delta: f32) {
 		let node_tree = context.get_node_tree_mut();
@@ -273,7 +275,7 @@ impl Component for FloatingText {
 }
 
 //==============================================================================
-// 시험.
+/// 시험.
 //==============================================================================
 #[cfg(test)]
 mod tests {
@@ -281,7 +283,7 @@ mod tests {
 	use crate::core::engine::{Engine, EngineConfiguration};
 
 	//==============================================================================
-	// 띄우면 떠오르며 흐려지고, 끝나면 꺼져서 다음 spawn 이 그 노드를 다시 쓴다.
+	/// 띄우면 떠오르며 흐려지고, 끝나면 꺼져서 다음 spawn 이 그 노드를 다시 쓴다.
 	//==============================================================================
 	#[test]
 	fn spawn_rises_fades_and_reuses() {

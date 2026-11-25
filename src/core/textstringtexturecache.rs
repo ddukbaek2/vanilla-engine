@@ -1,38 +1,38 @@
 //==============================================================================
-// 문자열 텍스처 캐시.
-// - 원본은 오프스크린 2D 캔버스에 fillText / strokeText 로 문자열을 구워 텍스처로 쓴다. (LRU 상한 512)
-// - 데스크탑은 글자 모양 짓기(textshaping.rs: 양방향 정렬, rustybuzz 모양 짓기)로 글리프를 놓고 래스터화해(fontdue, 가변 글꼴은 skrifa 윤곽, 맥 색 이모지는 CoreText) 문자열 한 장으로 굽는다.
-//   상한과 키 구성(방식, 문단 방향, 폰트 문자열, 선 두께, 배율, 글)은 원본과 같다.
-//   원본은 키를 문자열로 이어 붙인다. 여기서는 찾을 때마다 문자열을 만들지 않게 키의 해시로 찾고, 같은 해시 안에서 키를 하나씩 맞춰 본다.
-// - 글자는 흰색으로 굽고, 그릴 때 색을 곱한다. (색이 바뀌어도 다시 굽지 않는다)
-//   색 글리프(이모지)는 제 색으로 흰 글자 위에 얹어 굽는다. 원본도 흰색으로 fillText 한 캔버스를 올리므로 이모지는 제 색으로 구워지고 그릴 때 같은 색이 곱해진다.
-//   외곽선(Stroke)으로 구울 때도 색 글리프는 테를 긋지 않고 색 그대로 얹는다. (크롬 strokeText 와 같다)
-// - 폰트 문자열은 Canvas2D font 와 같은 꼴(CSS font 줄임 꼴)을 읽는다. 예: "16px DOSGothic", "bold 24px default", "italic 500 16px default", "12pt 'A B', C, sans-serif"
-//   크기는 px 밖의 CSS 단위(ex, ch, cap, ic, lh, rem, 뷰포트 단위 포함), 이름 크기, calc() 도 크롬 캔버스처럼 읽고 "/줄높이"는 넘긴다.
-//   쉼표로 이은 이름 목록은 글자마다 앞 이름의 얼굴부터 찾는다. (브라우저의 글꼴 목록과 같다, parse_font_string)
-// - 글꼴은 원본 document.fonts 처럼 이름 하나 아래에 얼굴(굵기, 기울기, 글자 범위)을 여럿 올린다. (register_font_face)
-//   고르기는 CSS 의 차례를 따르고, 기울인 얼굴이 없으면 가짜 기울임(기울기 1/4), 굵은 얼굴이 없으면 가짜 굵게를 글리프마다 입힌다. (textshaping.rs)
-// - 이름의 얼굴들에 없는 글자는 기본 폰트, 시스템 글꼴 사슬, 표준 글꼴(데스크탑, 크롬의 -webkit-standard), 대체 폰트 순으로 찾는다. (브라우저의 글꼴 대체와 같은 자리)
-//   데스크탑 시스템 글꼴 사슬(set_system_font_chain)은 원본 SYSTEM_FONT_STRING 의 이름을 운영체제 글꼴에서 찾은 것이고, 켜면 폰트 문자열의 올리지 않은 이름도
-//   운영체제 글꼴에서 찾는다. 얼굴은 그 굵기와 기울기의 글자를 처음 쓸 때 읽는다. (platform/desktop/systemfont.rs)
-//   대체 글꼴은 운영체제가 고른다. (set_system_font_fallback_enabled, 굵게를 청하면 굵은 얼굴을 따로 묻는다) 후보 파일을 주면(add_fallback_font_candidate) 그것을 먼저 쓴다.
-//   후보 파일은 쓸 때 읽는다. 이모지 표시 글자는 색 글리프 표가 있는 후보를, 그 밖의 글자는 색 글리프 표가 없는 후보를 먼저 읽는다. (표 목록만 먼저 엿본다)
-// - 글꼴 얼굴을 새로 올리면 그 이름을 쓰는 폰트 문자열로 구웠고 그 얼굴의 글자 범위에 든 글자가 있는 문자열만 버린다. (원본 invalidateFontFaces)
-//   원본처럼 set_rebake_text_on_font_load 로 켰을 때만 한다. (엔진이 EngineConfiguration.rebake_text_on_font_load 로 켠다, 기본 끔)
-//   끄면 받기 전에 다른 글꼴로 구운 글자는 캐시에서 밀려날 때까지 그대로 남는다. 얼굴 지우기와 차례 바꾸기는 켜짐과 상관없이 버린다.
-//   기본 폰트와 대체 폰트를 바꾸면 모두 버린다.
-// - 웹은 원본처럼 늘 브라우저 Canvas2D 로 굽고 잰다. (platform/web/systemfont.rs) 올린 글꼴 바이트는 document.fonts 에 FontFace 로 올려 브라우저가 고르고 그린다.
-//   올린 글꼴이 받아지면(loadingdone) 프레임 시작에 구운 글을 버린다. 데스크탑은 위의 모양 짓기와 래스터로 굽는다.
-// - 글자 안티앨리어싱(set_text_antialias_enabled, 원본 setTextAntialiasEnabled): 끄면 구운 글자의 알파를 문턱값 128 로 0 과 255 로 가르고 텍스처를 NEAREST 로 뽑는다.
-//   도트 글꼴을 설계 크기의 정수 배로 그리는 프로젝트가 끈다. 원본은 모듈 전역 값이고 이미 구운 글자는 그대로 둔다.
-//   여기서는 캐시가 들고, 켜짐 여부를 키에 넣어 바꾼 다음 그리는 글자부터 바로 그 방식으로 굽는다. (rasterize_text 는 원본 ShadowText 처럼 받지 않는다)
-// - 글 재기(measure_text)는 폰트 문자열과 글이 같으면 다시 재지 않는다. (원본 measureTextMetrics 의 캐시, 2048 개)
-//   원본은 넘칠 때마다 가장 오래 안 쓴 하나를 버린다. 여기서는 넘치면 오래 안 쓴 반을 한 번에 버린다. (하나씩 찾으면 넘친 뒤로 잴 때마다 2048 개를 훑는다)
-//   글꼴을 새로 등록하면 비운다. (원본은 웹 글꼴이 받아지면 비운다) measure_text 가 &self 라 캐시는 RefCell 에 든다.
-// - 얼굴을 그때그때 받기(watch_unresolved_family_characters, take_unresolved_family_characters): 원본 브라우저는 올려 둔 FontFace 의 글자 범위에 든 글자를 그릴 때 그 얼굴을 받는다.
-//   러스트 판은 지켜보는 이름으로 재거나 구운 글에서 올린 얼굴의 범위에 들지 않은 글자를 모으고, UIFont 가 update 에서 꺼내 그 글자의 조각을 받는다.
-// - Graphic 없이 재기(measure_text_without_graphic): 원본은 어디서든 공용 2D 캔버스로 글을 잰다. 러스트 판은 글꼴을 등록할 때마다
-//   글꼴 목록(Rc)을 스레드 하나의 전역에 알려 두고, 그 목록으로 잰다. UI 레이아웃이 그리기 전에 글 줄 수를 알아야 할 때 쓴다. (UIConfirmWindow)
+//! 문자열 텍스처 캐시.
+//! - 원본은 오프스크린 2D 캔버스에 fillText / strokeText 로 문자열을 구워 텍스처로 쓴다. (LRU 상한 512)
+//! - 데스크탑은 글자 모양 짓기(textshaping.rs: 양방향 정렬, rustybuzz 모양 짓기)로 글리프를 놓고 래스터화해(fontdue, 가변 글꼴은 skrifa 윤곽, 맥 색 이모지는 CoreText) 문자열 한 장으로 굽는다.
+//!   상한과 키 구성(방식, 문단 방향, 폰트 문자열, 선 두께, 배율, 글)은 원본과 같다.
+//!   원본은 키를 문자열로 이어 붙인다. 여기서는 찾을 때마다 문자열을 만들지 않게 키의 해시로 찾고, 같은 해시 안에서 키를 하나씩 맞춰 본다.
+//! - 글자는 흰색으로 굽고, 그릴 때 색을 곱한다. (색이 바뀌어도 다시 굽지 않는다)
+//!   색 글리프(이모지)는 제 색으로 흰 글자 위에 얹어 굽는다. 원본도 흰색으로 fillText 한 캔버스를 올리므로 이모지는 제 색으로 구워지고 그릴 때 같은 색이 곱해진다.
+//!   외곽선(Stroke)으로 구울 때도 색 글리프는 테를 긋지 않고 색 그대로 얹는다. (크롬 strokeText 와 같다)
+//! - 폰트 문자열은 Canvas2D font 와 같은 꼴(CSS font 줄임 꼴)을 읽는다. 예: "16px DOSGothic", "bold 24px default", "italic 500 16px default", "12pt 'A B', C, sans-serif"
+//!   크기는 px 밖의 CSS 단위(ex, ch, cap, ic, lh, rem, 뷰포트 단위 포함), 이름 크기, calc() 도 크롬 캔버스처럼 읽고 "/줄높이"는 넘긴다.
+//!   쉼표로 이은 이름 목록은 글자마다 앞 이름의 얼굴부터 찾는다. (브라우저의 글꼴 목록과 같다, parse_font_string)
+//! - 글꼴은 원본 document.fonts 처럼 이름 하나 아래에 얼굴(굵기, 기울기, 글자 범위)을 여럿 올린다. (register_font_face)
+//!   고르기는 CSS 의 차례를 따르고, 기울인 얼굴이 없으면 가짜 기울임(기울기 1/4), 굵은 얼굴이 없으면 가짜 굵게를 글리프마다 입힌다. (textshaping.rs)
+//! - 이름의 얼굴들에 없는 글자는 기본 폰트, 시스템 글꼴 사슬, 표준 글꼴(데스크탑, 크롬의 -webkit-standard), 대체 폰트 순으로 찾는다. (브라우저의 글꼴 대체와 같은 자리)
+//!   데스크탑 시스템 글꼴 사슬(set_system_font_chain)은 원본 SYSTEM_FONT_STRING 의 이름을 운영체제 글꼴에서 찾은 것이고, 켜면 폰트 문자열의 올리지 않은 이름도
+//!   운영체제 글꼴에서 찾는다. 얼굴은 그 굵기와 기울기의 글자를 처음 쓸 때 읽는다. (platform/desktop/systemfont.rs)
+//!   대체 글꼴은 운영체제가 고른다. (set_system_font_fallback_enabled, 굵게를 청하면 굵은 얼굴을 따로 묻는다) 후보 파일을 주면(add_fallback_font_candidate) 그것을 먼저 쓴다.
+//!   후보 파일은 쓸 때 읽는다. 이모지 표시 글자는 색 글리프 표가 있는 후보를, 그 밖의 글자는 색 글리프 표가 없는 후보를 먼저 읽는다. (표 목록만 먼저 엿본다)
+//! - 글꼴 얼굴을 새로 올리면 그 이름을 쓰는 폰트 문자열로 구웠고 그 얼굴의 글자 범위에 든 글자가 있는 문자열만 버린다. (원본 invalidateFontFaces)
+//!   원본처럼 set_rebake_text_on_font_load 로 켰을 때만 한다. (엔진이 EngineConfiguration.rebake_text_on_font_load 로 켠다, 기본 끔)
+//!   끄면 받기 전에 다른 글꼴로 구운 글자는 캐시에서 밀려날 때까지 그대로 남는다. 얼굴 지우기와 차례 바꾸기는 켜짐과 상관없이 버린다.
+//!   기본 폰트와 대체 폰트를 바꾸면 모두 버린다.
+//! - 웹은 원본처럼 늘 브라우저 Canvas2D 로 굽고 잰다. (platform/web/systemfont.rs) 올린 글꼴 바이트는 document.fonts 에 FontFace 로 올려 브라우저가 고르고 그린다.
+//!   올린 글꼴이 받아지면(loadingdone) 프레임 시작에 구운 글을 버린다. 데스크탑은 위의 모양 짓기와 래스터로 굽는다.
+//! - 글자 안티앨리어싱(set_text_antialias_enabled, 원본 setTextAntialiasEnabled): 끄면 구운 글자의 알파를 문턱값 128 로 0 과 255 로 가르고 텍스처를 NEAREST 로 뽑는다.
+//!   도트 글꼴을 설계 크기의 정수 배로 그리는 프로젝트가 끈다. 원본은 모듈 전역 값이고 이미 구운 글자는 그대로 둔다.
+//!   여기서는 캐시가 들고, 켜짐 여부를 키에 넣어 바꾼 다음 그리는 글자부터 바로 그 방식으로 굽는다. (rasterize_text 는 원본 ShadowText 처럼 받지 않는다)
+//! - 글 재기(measure_text)는 폰트 문자열과 글이 같으면 다시 재지 않는다. (원본 measureTextMetrics 의 캐시, 2048 개)
+//!   원본은 넘칠 때마다 가장 오래 안 쓴 하나를 버린다. 여기서는 넘치면 오래 안 쓴 반을 한 번에 버린다. (하나씩 찾으면 넘친 뒤로 잴 때마다 2048 개를 훑는다)
+//!   글꼴을 새로 등록하면 비운다. (원본은 웹 글꼴이 받아지면 비운다) measure_text 가 &self 라 캐시는 RefCell 에 든다.
+//! - 얼굴을 그때그때 받기(watch_unresolved_family_characters, take_unresolved_family_characters): 원본 브라우저는 올려 둔 FontFace 의 글자 범위에 든 글자를 그릴 때 그 얼굴을 받는다.
+//!   러스트 판은 지켜보는 이름으로 재거나 구운 글에서 올린 얼굴의 범위에 들지 않은 글자를 모으고, UIFont 가 update 에서 꺼내 그 글자의 조각을 받는다.
+//! - Graphic 없이 재기(measure_text_without_graphic): 원본은 어디서든 공용 2D 캔버스로 글을 잰다. 러스트 판은 글꼴을 등록할 때마다
+//!   글꼴 목록(Rc)을 스레드 하나의 전역에 알려 두고, 그 목록으로 잰다. UI 레이아웃이 그리기 전에 글 줄 수를 알아야 할 때 쓴다. (UIConfirmWindow)
 //==============================================================================
 use crate::core::textshaping::{self, FontFaceDescriptors, LoadedFont, RegisteredFontFace, ResolvedFontFace, ShapedText, ShapingDirection};
 use unicode_segmentation::UnicodeSegmentation;
@@ -48,13 +48,13 @@ use std::rc::Rc;
 //==============================================================================
 thread_local! {
 	static SHARED_MEASURE_CACHE: RefCell<Option<TextStringTextureCache>> = const { RefCell::new(None) };
-	// 지켜보는 이름(소문자) → 그 이름으로 재거나 구운 글 가운데 그 이름의 어느 얼굴의 글자 범위에도 들지 않은 글자. (UIFont 가 조각을 받는다)
+	/// 지켜보는 이름(소문자) → 그 이름으로 재거나 구운 글 가운데 그 이름의 어느 얼굴의 글자 범위에도 들지 않은 글자. (UIFont 가 조각을 받는다)
 	static UNRESOLVED_FAMILY_CHARACTER_TABLE: RefCell<HashMap<String, std::collections::BTreeSet<char>>> = RefCell::new(HashMap::new());
 }
 
 //==============================================================================
-// 이름의 얼굴이 없는 글자 지켜보기 시작. (원본 브라우저는 FontFace 를 document.fonts 에 올려 두면 캔버스가 그 글꼴로 글을 그릴 때 그 글자의 범위에 든 얼굴을 받기 시작한다)
-// - 러스트 판은 얼굴을 받은 뒤에 올리므로, 지켜보는 이름으로 재거나 구운 글에서 올린 얼굴의 글자 범위에 들지 않은 글자를 모아 받는 쪽(UIFont)이 꺼내 받는다.
+/// 이름의 얼굴이 없는 글자 지켜보기 시작. (원본 브라우저는 FontFace 를 document.fonts 에 올려 두면 캔버스가 그 글꼴로 글을 그릴 때 그 글자의 범위에 든 얼굴을 받기 시작한다)
+/// - 러스트 판은 얼굴을 받은 뒤에 올리므로, 지켜보는 이름으로 재거나 구운 글에서 올린 얼굴의 글자 범위에 들지 않은 글자를 모아 받는 쪽(UIFont)이 꺼내 받는다.
 //==============================================================================
 pub fn watch_unresolved_family_characters(family_name: &str) {
 	let family_key = family_name.trim().to_lowercase();
@@ -64,7 +64,7 @@ pub fn watch_unresolved_family_characters(family_name: &str) {
 }
 
 //==============================================================================
-// 지켜보는 이름에서 얼굴이 없던 글자 꺼내기. (꺼내면 비운다, 지켜보지 않는 이름이면 빈 글)
+/// 지켜보는 이름에서 얼굴이 없던 글자 꺼내기. (꺼내면 비운다, 지켜보지 않는 이름이면 빈 글)
 //==============================================================================
 pub fn take_unresolved_family_characters(family_name: &str) -> String {
 	let family_key = family_name.trim().to_lowercase();
@@ -81,9 +81,9 @@ pub fn take_unresolved_family_characters(family_name: &str) -> String {
 }
 
 //==============================================================================
-// Graphic 없이 글 재기. (폰트 문자열과 글, 원본의 공용 캔버스 measureText 자리)
-// - 그릴 때와 같은 얼굴 고르기와 모양 잇기로 잰다.
-// - 웹은 브라우저 Canvas2D 로 잰다. 데스크탑은 글꼴이 하나도 없으면 None 이다. (그릴 때도 글이 나오지 않는 상태)
+/// Graphic 없이 글 재기. (폰트 문자열과 글, 원본의 공용 캔버스 measureText 자리)
+/// - 그릴 때와 같은 얼굴 고르기와 모양 잇기로 잰다.
+/// - 웹은 브라우저 Canvas2D 로 잰다. 데스크탑은 글꼴이 하나도 없으면 None 이다. (그릴 때도 글이 나오지 않는 상태)
 //==============================================================================
 pub fn measure_text_without_graphic(font_string: &str, text: &str) -> Option<TextMetrics> {
 	SHARED_MEASURE_CACHE.with(|shared_measure_cache_cell| {
@@ -118,8 +118,8 @@ pub fn measure_text_without_graphic(font_string: &str, text: &str) -> Option<Tex
 }
 
 //==============================================================================
-// Graphic 없이 글 래스터 받기. (2D 그리기 대상 Canvas2D 의 fillText 가 쓴다, 그릴 때와 같은 얼굴 고르기와 모양 짓기)
-// - 데스크탑만. 글꼴이 하나도 없거나 아직 등록한 캐시가 없으면 None 이다.
+/// Graphic 없이 글 래스터 받기. (2D 그리기 대상 Canvas2D 의 fillText 가 쓴다, 그릴 때와 같은 얼굴 고르기와 모양 짓기)
+/// - 데스크탑만. 글꼴이 하나도 없거나 아직 등록한 캐시가 없으면 None 이다.
 //==============================================================================
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn rasterize_text_without_graphic(text: &str, font_string: &str, bake_scale: f32, padding: i32, direction: ShapingDirection) -> Option<TextRaster> {
@@ -129,16 +129,16 @@ pub(crate) fn rasterize_text_without_graphic(text: &str, font_string: &str, bake
 	})
 }
 
-// 캐시 상한. (원본과 같음)
+/// 캐시 상한. (원본과 같음)
 const MAXIMUM_ENTRY_COUNT: usize = 512;
-// 글 재기 캐시 상한. (원본과 같음)
+/// 글 재기 캐시 상한. (원본과 같음)
 const MAXIMUM_MEASURE_COUNT: usize = 2048;
 
-// 안티앨리어싱을 끈 글자의 알파 문턱값. (원본과 같음)
+/// 안티앨리어싱을 끈 글자의 알파 문턱값. (원본과 같음)
 const ALPHA_THRESHOLD: u8 = 128;
 
 //==============================================================================
-// 굽는 방식.
+/// 굽는 방식.
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TextDrawKind {
@@ -147,7 +147,7 @@ pub enum TextDrawKind {
 }
 
 //==============================================================================
-// 구운 문자열 하나. (길이 단위는 모두 논리 픽셀, 베이크 배율로 나눈 값)
+/// 구운 문자열 하나. (길이 단위는 모두 논리 픽셀, 베이크 배율로 나눈 값)
 //==============================================================================
 #[derive(Clone, Copy, Debug)]
 pub struct TextEntry {
@@ -162,8 +162,8 @@ pub struct TextEntry {
 }
 
 //==============================================================================
-// 글 모양 래스터. (덮인 정도 0 ~ 255, 길이 단위는 굽는 배율을 곱한 픽셀)
-// - coverage 는 색 글리프를 뺀 글자의 덮인 정도다. 색 글리프(이모지)가 있으면 color_pixels 에 제 색으로 든다. (프리멀티플라이드 RGBA, 같은 크기)
+/// 글 모양 래스터. (덮인 정도 0 ~ 255, 길이 단위는 굽는 배율을 곱한 픽셀)
+/// - coverage 는 색 글리프를 뺀 글자의 덮인 정도다. 색 글리프(이모지)가 있으면 color_pixels 에 제 색으로 든다. (프리멀티플라이드 RGBA, 같은 크기)
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct TextRaster {
@@ -179,8 +179,8 @@ pub struct TextRaster {
 }
 
 //==============================================================================
-// 문자열 측정 결과. (Canvas2D TextMetrics)
-// - actual_bounding_box_* 는 펜 원점(왼쪽 정렬, 알파벳 기준선)에서 글리프가 실제로 닿는 거리다. (왼쪽, 위, 아래는 그쪽으로 양수)
+/// 문자열 측정 결과. (Canvas2D TextMetrics)
+/// - actual_bounding_box_* 는 펜 원점(왼쪽 정렬, 알파벳 기준선)에서 글리프가 실제로 닿는 거리다. (왼쪽, 위, 아래는 그쪽으로 양수)
 //==============================================================================
 #[derive(Clone, Copy, Debug, Default)]
 pub struct TextMetrics {
@@ -194,8 +194,8 @@ pub struct TextMetrics {
 }
 
 //==============================================================================
-// 폰트 문자열 해석 결과.
-// - font_weight 는 CSS 굵기다. ("bold" 700, 숫자, 없으면 400) is_bold 는 굵기가 600 이상인지다.
+/// 폰트 문자열 해석 결과.
+/// - font_weight 는 CSS 굵기다. ("bold" 700, 숫자, 없으면 400) is_bold 는 굵기가 600 이상인지다.
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct FontDescription {
@@ -203,15 +203,15 @@ pub struct FontDescription {
 	pub font_weight: u16,
 	pub is_bold: bool,
 	pub is_italic: bool,
-	// 목록의 첫 이름.
+	/// 목록의 첫 이름.
 	pub family_name: String,
-	// 쉼표로 이은 이름 목록. (앞 이름부터 찾는다)
+	/// 쉼표로 이은 이름 목록. (앞 이름부터 찾는다)
 	pub family_name_list: Vec<String>,
 }
 
 //==============================================================================
-// 글꼴 파일 하나의 얼굴. (데스크탑 시스템 글꼴, platform 이 찾아 준다)
-// - face_index 를 모르면(맥) post_script_name 으로 모음 안의 얼굴을 찾고, 그것도 없으면 굵기와 기울기로 고른다.
+/// 글꼴 파일 하나의 얼굴. (데스크탑 시스템 글꼴, platform 이 찾아 준다)
+/// - face_index 를 모르면(맥) post_script_name 으로 모음 안의 얼굴을 찾고, 그것도 없으면 굵기와 기울기로 고른다.
 //==============================================================================
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FontFileSource {
@@ -221,7 +221,7 @@ pub struct FontFileSource {
 }
 
 //==============================================================================
-// 데스크탑 시스템 글꼴의 얼굴 후보 하나. (청한 굵기와 기울기로 운영체제가 찾아 준 파일, 쓸 때 읽는다)
+/// 데스크탑 시스템 글꼴의 얼굴 후보 하나. (청한 굵기와 기울기로 운영체제가 찾아 준 파일, 쓸 때 읽는다)
 //==============================================================================
 struct SystemFontCandidate {
 	weight: u16,
@@ -231,7 +231,7 @@ struct SystemFontCandidate {
 }
 
 //==============================================================================
-// 데스크탑 시스템 글꼴 이름 하나. (얼굴 후보들과 읽은 얼굴들)
+/// 데스크탑 시스템 글꼴 이름 하나. (얼굴 후보들과 읽은 얼굴들)
 //==============================================================================
 #[derive(Default)]
 struct SystemFontFamily {
@@ -240,24 +240,24 @@ struct SystemFontFamily {
 }
 
 //==============================================================================
-// 데스크탑 시스템 글꼴 상태. (원본 브라우저가 CSS 이름을 운영체제 글꼴로 찾고, 없는 글자를 운영체제의 대체 글꼴로 그리는 자리)
-// - Graphic 없이 재기의 사본과 나눠 들어(Rc) 같은 파일을 두 번 읽지 않는다.
+/// 데스크탑 시스템 글꼴 상태. (원본 브라우저가 CSS 이름을 운영체제 글꼴로 찾고, 없는 글자를 운영체제의 대체 글꼴로 그리는 자리)
+/// - Graphic 없이 재기의 사본과 나눠 들어(Rc) 같은 파일을 두 번 읽지 않는다.
 //==============================================================================
 #[derive(Default)]
 struct SystemFontState {
-	// 올리지 않은 이름을 운영체제 글꼴에서 찾는지. (set_system_font_chain 이 켠다)
+	/// 올리지 않은 이름을 운영체제 글꼴에서 찾는지. (set_system_font_chain 이 켠다)
 	is_lookup_enabled: bool,
-	// 글꼴에 없는 글자를 운영체제가 고른 대체 글꼴로 그리는지.
+	/// 글꼴에 없는 글자를 운영체제가 고른 대체 글꼴로 그리는지.
 	is_fallback_enabled: bool,
-	// 기본 글꼴 사슬. (원본 SYSTEM_FONT_STRING 의 이름 차례, 기본 폰트 뒤에 찾는다)
+	/// 기본 글꼴 사슬. (원본 SYSTEM_FONT_STRING 의 이름 차례, 기본 폰트 뒤에 찾는다)
 	chain_name_list: Vec<String>,
-	// 이름(소문자) → 찾은 글꼴. (None 은 운영체제에 없는 이름)
+	/// 이름(소문자) → 찾은 글꼴. (None 은 운영체제에 없는 이름)
 	family_table: HashMap<String, Option<SystemFontFamily>>,
-	// 이미 물어본 대체 글꼴. (글자, 굵게, 기울임, 색)
+	/// 이미 물어본 대체 글꼴. (글자, 굵게, 기울임, 색)
 	fallback_query_set: std::collections::HashSet<(char, bool, bool, bool)>,
-	// 운영체제가 고른 대체 글꼴 얼굴. (source_key 가 같은 것끼리 한 이름으로 고른다)
+	/// 운영체제가 고른 대체 글꼴 얼굴. (source_key 가 같은 것끼리 한 이름으로 고른다)
 	fallback_face_list: Vec<RegisteredFontFace>,
-	// 읽은 파일 바이트. (같은 파일의 여러 얼굴이 나눠 든다)
+	/// 읽은 파일 바이트. (같은 파일의 여러 얼굴이 나눠 든다)
 	shared_bytes_table: HashMap<std::path::PathBuf, std::rc::Weak<[u8]>>,
 }
 
@@ -275,7 +275,7 @@ struct CachedTextEntry {
 
 impl CachedTextEntry {
 	//==============================================================================
-	// 키가 같은지. (선 두께와 배율은 비트로 맞춘다)
+	/// 키가 같은지. (선 두께와 배율은 비트로 맞춘다)
 	//==============================================================================
 	fn is_same_key(&self, text_draw_kind: TextDrawKind, is_antialias: bool, direction: ShapingDirection, text: &str, font_string: &str, line_width: f32, bake_scale: f32) -> bool {
 		self.text_draw_kind == text_draw_kind && self.is_antialias == is_antialias && self.direction == direction && self.line_width.to_bits() == line_width.to_bits() && self.bake_scale.to_bits() == bake_scale.to_bits() && self.font_string == font_string && self.text == text
@@ -290,8 +290,8 @@ struct CachedTextMetrics {
 }
 
 //==============================================================================
-// 래스터로 놓은 글. (덮인 정도와 자리, 길이 단위는 배율을 곱한 픽셀)
-// - coverage 는 색 글리프를 뺀 글자, color_pixels 는 색 글리프 층이다. (프리멀티플라이드 RGBA, 색 글리프가 없으면 None)
+/// 래스터로 놓은 글. (덮인 정도와 자리, 길이 단위는 배율을 곱한 픽셀)
+/// - coverage 는 색 글리프를 뺀 글자, color_pixels 는 색 글리프 층이다. (프리멀티플라이드 RGBA, 색 글리프가 없으면 None)
 //==============================================================================
 struct LaidOutText {
 	coverage: Vec<u8>,
@@ -306,39 +306,39 @@ struct LaidOutText {
 }
 
 pub struct TextStringTextureCache {
-	// 이름(소문자) → 그 이름의 얼굴들. (원본 document.fonts)
+	/// 이름(소문자) → 그 이름의 얼굴들. (원본 document.fonts)
 	font_family_table: HashMap<String, Vec<RegisteredFontFace>>,
-	// 이름(소문자) → 얼굴 열쇠(source_key)의 차례. (뒤가 먼저 그린다, set_font_face_order)
+	/// 이름(소문자) → 얼굴 열쇠(source_key)의 차례. (뒤가 먼저 그린다, set_font_face_order)
 	font_face_order_table: HashMap<String, Vec<String>>,
-	// 기본 폰트의 얼굴들. (보통, 굵게)
+	/// 기본 폰트의 얼굴들. (보통, 굵게)
 	default_face_list: Vec<RegisteredFontFace>,
-	// 대체 폰트들. (앞의 것이 먼저, 후보 파일을 쓸 때 읽어 더하므로 RefCell)
+	/// 대체 폰트들. (앞의 것이 먼저, 후보 파일을 쓸 때 읽어 더하므로 RefCell)
 	fallback_face_list: RefCell<Vec<RegisteredFontFace>>,
-	// 얼굴을 올린 차례 번호.
+	/// 얼굴을 올린 차례 번호.
 	face_order_number: u64,
-	// 키의 해시 → 그 해시를 가진 구운 문자열들.
+	/// 키의 해시 → 그 해시를 가진 구운 문자열들.
 	entry_table: HashMap<u64, Vec<CachedTextEntry>>,
 	entry_count: usize,
 	frame_number: u64,
-	// 글꼴을 등록한 횟수. (늘면 재 둔 글 폭이 바뀌었을 수 있다)
+	/// 글꼴을 등록한 횟수. (늘면 재 둔 글 폭이 바뀌었을 수 있다)
 	font_registration_count: Cell<u64>,
-	// 글자가 없을 때 차례로 읽어 볼 대체 글꼴 파일. (원본 브라우저의 시스템 글꼴 대체 자리, 데스크탑, 쓸 때 읽는다)
-	// 앞의 경로와 그 파일에 색 글리프 표가 있는지. (더할 때 한 번 엿본다)
+	/// 글자가 없을 때 차례로 읽어 볼 대체 글꼴 파일. (원본 브라우저의 시스템 글꼴 대체 자리, 데스크탑, 쓸 때 읽는다)
+	/// 앞의 경로와 그 파일에 색 글리프 표가 있는지. (더할 때 한 번 엿본다)
 	fallback_font_candidate_list: RefCell<Vec<(std::path::PathBuf, bool)>>,
-	// 데스크탑 시스템 글꼴. (기본 글꼴 사슬, 이름 찾기, 대체 글꼴)
+	/// 데스크탑 시스템 글꼴. (기본 글꼴 사슬, 이름 찾기, 대체 글꼴)
 	system_font_state: Rc<RefCell<SystemFontState>>,
-	// 브라우저 Canvas2D 로 굽고 재는지. (웹, 원본과 같다)
+	/// 브라우저 Canvas2D 로 굽고 재는지. (웹, 원본과 같다)
 	is_browser_raster: bool,
-	// 마지막으로 본 브라우저 글꼴 바뀐 횟수. (웹, 늘었으면 구운 글을 버린다)
+	/// 마지막으로 본 브라우저 글꼴 바뀐 횟수. (웹, 늘었으면 구운 글을 버린다)
 	#[cfg(target_arch = "wasm32")]
 	browser_font_change_count: u64,
-	// 버릴 구운 문자열의 텍스처. (등록할 때는 GL 이 없어서 다음 굽기 때 지운다)
+	/// 버릴 구운 문자열의 텍스처. (등록할 때는 GL 이 없어서 다음 굽기 때 지운다)
 	pending_deleted_texture_list: Vec<crate::core::graphic::GlTexture>,
-	// 글자 안티앨리어싱. (기본 켬)
+	/// 글자 안티앨리어싱. (기본 켬)
 	is_text_antialias_enabled: bool,
-	// 글꼴 얼굴을 새로 올리면 그 얼굴의 글자로 구운 문자열을 버릴지. (원본 rebakeTextOnFontLoad, 기본 끔)
+	/// 글꼴 얼굴을 새로 올리면 그 얼굴의 글자로 구운 문자열을 버릴지. (원본 rebakeTextOnFontLoad, 기본 끔)
 	is_rebake_text_on_font_load: bool,
-	// 글 재기 캐시. (폰트 문자열과 글의 해시 → 잰 것들, 쓸 때마다 센 번호, 그때의 글꼴 등록 횟수)
+	/// 글 재기 캐시. (폰트 문자열과 글의 해시 → 잰 것들, 쓸 때마다 센 번호, 그때의 글꼴 등록 횟수)
 	measure_table: RefCell<HashMap<u64, Vec<CachedTextMetrics>>>,
 	measure_count: Cell<usize>,
 	measure_use_count: Cell<u64>,
@@ -347,7 +347,7 @@ pub struct TextStringTextureCache {
 
 impl TextStringTextureCache {
 	//==============================================================================
-	// 생성.
+	/// 생성.
 	//==============================================================================
 	pub fn new() -> TextStringTextureCache {
 		TextStringTextureCache {
@@ -376,7 +376,7 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	// 프레임 시작. (LRU 순서를 프레임 번호로 센다)
+	/// 프레임 시작. (LRU 순서를 프레임 번호로 센다)
 	//==============================================================================
 	pub fn begin_frame(&mut self) {
 		self.frame_number += 1;
@@ -393,24 +393,24 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	// 브라우저 Canvas2D 로 굽고 재는지. (웹은 원본처럼 늘 참, 데스크탑은 거짓)
+	/// 브라우저 Canvas2D 로 굽고 재는지. (웹은 원본처럼 늘 참, 데스크탑은 거짓)
 	//==============================================================================
 	pub fn is_browser_raster(&self) -> bool {
 		self.is_browser_raster
 	}
 
 	//==============================================================================
-	// 폰트 등록. (폰트 문자열의 이름으로 찾는다. 대소문자 구분 없음, 굵으면 굵기 700 얼굴, 아니면 400)
+	/// 폰트 등록. (폰트 문자열의 이름으로 찾는다. 대소문자 구분 없음, 굵으면 굵기 700 얼굴, 아니면 400)
 	//==============================================================================
 	pub fn register_font(&mut self, family_name: &str, is_bold: bool, font_bytes: Vec<u8>) -> Result<(), String> {
 		self.register_font_face(family_name, FontFaceDescriptors::create_with_bold(is_bold), font_bytes)
 	}
 
 	//==============================================================================
-	// 글꼴 얼굴 등록. (원본 new FontFace(family, url, descriptors) 를 document.fonts 에 더하기)
-	// - 같은 이름에 같은 열쇠(source_key), 굵기, 기울기의 얼굴이 있으면 바꾼다. 없으면 맨 뒤(가장 먼저 그리는 자리)에 둔다.
-	//   set_font_face_order 로 차례를 정한 이름이면 그 차례에 맞춰 놓는다.
-	// - set_rebake_text_on_font_load 로 켰으면 그 이름을 쓰는 폰트 문자열로 구웠고 이 얼굴의 글자 범위에 든 글자가 있는 문자열은 버린다. (다음에 그릴 때 이 얼굴로 다시 굽는다)
+	/// 글꼴 얼굴 등록. (원본 new FontFace(family, url, descriptors) 를 document.fonts 에 더하기)
+	/// - 같은 이름에 같은 열쇠(source_key), 굵기, 기울기의 얼굴이 있으면 바꾼다. 없으면 맨 뒤(가장 먼저 그리는 자리)에 둔다.
+	///   set_font_face_order 로 차례를 정한 이름이면 그 차례에 맞춰 놓는다.
+	/// - set_rebake_text_on_font_load 로 켰으면 그 이름을 쓰는 폰트 문자열로 구웠고 이 얼굴의 글자 범위에 든 글자가 있는 문자열은 버린다. (다음에 그릴 때 이 얼굴로 다시 굽는다)
 	//==============================================================================
 	pub fn register_font_face(&mut self, family_name: &str, font_face_descriptors: FontFaceDescriptors, font_bytes: Vec<u8>) -> Result<(), String> {
 		let font = Rc::new(load_font(font_bytes)?);
@@ -434,7 +434,7 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	// 글꼴 얼굴 지우기. (원본 document.fonts.delete, 열쇠가 같은 얼굴 모두, 지운 것이 있으면 true)
+	/// 글꼴 얼굴 지우기. (원본 document.fonts.delete, 열쇠가 같은 얼굴 모두, 지운 것이 있으면 true)
 	//==============================================================================
 	pub fn unregister_font_face(&mut self, family_name: &str, source_key: &str) -> bool {
 		let family_key = family_name.trim().to_lowercase();
@@ -460,9 +460,9 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	// 한 이름의 얼굴 차례 정하기. (얼굴 열쇠 목록, 뒤가 먼저 그린다. 원본 uifont 가 document.fonts 에서 빼고 차례대로 다시 더하는 것)
-	// - 목록에 없는 얼굴은 목록의 얼굴보다 뒤로(나중에 그리게) 밀리지 않고 앞에 남는다. 아직 받지 않은 얼굴의 열쇠도 넣어 둘 수 있다. (받으면 그 자리에 놓인다)
-	// - 차례가 바뀌면 그 이름으로 구운 문자열을 모두 버린다.
+	/// 한 이름의 얼굴 차례 정하기. (얼굴 열쇠 목록, 뒤가 먼저 그린다. 원본 uifont 가 document.fonts 에서 빼고 차례대로 다시 더하는 것)
+	/// - 목록에 없는 얼굴은 목록의 얼굴보다 뒤로(나중에 그리게) 밀리지 않고 앞에 남는다. 아직 받지 않은 얼굴의 열쇠도 넣어 둘 수 있다. (받으면 그 자리에 놓인다)
+	/// - 차례가 바뀌면 그 이름으로 구운 문자열을 모두 버린다.
 	//==============================================================================
 	pub fn set_font_face_order(&mut self, family_name: &str, source_key_list: &[String]) {
 		let family_key = family_name.trim().to_lowercase();
@@ -475,7 +475,7 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	// 정한 차례대로 얼굴의 차례 번호 다시 매기기.
+	/// 정한 차례대로 얼굴의 차례 번호 다시 매기기.
 	//==============================================================================
 	fn apply_font_face_order(&mut self, family_key: &str) {
 		let source_key_list = match self.font_face_order_table.get(family_key) {
@@ -512,7 +512,7 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	// 얼굴이 바뀐 이름으로 구운 문자열 버리기. (그 얼굴의 글자 범위에 든 글자가 있는 것만, 텍스처는 다음 굽기 때 지운다)
+	/// 얼굴이 바뀐 이름으로 구운 문자열 버리기. (그 얼굴의 글자 범위에 든 글자가 있는 것만, 텍스처는 다음 굽기 때 지운다)
 	//==============================================================================
 	fn invalidate_entries_for_face(&mut self, family_key: &str, font_face_descriptors: &FontFaceDescriptors) {
 		let pending_deleted_texture_list = &mut self.pending_deleted_texture_list;
@@ -533,7 +533,7 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	// 구운 문자열 모두 버리기. (원본 clear, 텍스처는 다음 굽기 때 지운다)
+	/// 구운 문자열 모두 버리기. (원본 clear, 텍스처는 다음 굽기 때 지운다)
 	//==============================================================================
 	pub fn clear(&mut self) {
 		for (_, cached_text_entry_list) in self.entry_table.drain() {
@@ -545,7 +545,7 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	// 기본 폰트 설정. (이름을 찾지 못한 폰트 문자열과 글자 대체에 쓴다, 굵으면 굵기 700 얼굴)
+	/// 기본 폰트 설정. (이름을 찾지 못한 폰트 문자열과 글자 대체에 쓴다, 굵으면 굵기 700 얼굴)
 	//==============================================================================
 	pub fn set_default_font(&mut self, is_bold: bool, font_bytes: Vec<u8>) -> Result<(), String> {
 		let font = Rc::new(load_font(font_bytes)?);
@@ -564,7 +564,7 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	// 대체 폰트 추가. (앞 폰트들에 없는 글자를 찾는다)
+	/// 대체 폰트 추가. (앞 폰트들에 없는 글자를 찾는다)
 	//==============================================================================
 	pub fn add_fallback_font(&mut self, font_bytes: Vec<u8>) -> Result<(), String> {
 		let font = Rc::new(load_font(font_bytes)?);
@@ -581,7 +581,7 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	// 글꼴 목록을 Graphic 없이 재기에 알리기. (measure_text_without_graphic)
+	/// 글꼴 목록을 Graphic 없이 재기에 알리기. (measure_text_without_graphic)
 	//==============================================================================
 	fn publish_shared_font_set(&self) {
 		let mut shared_measure_cache = TextStringTextureCache::new();
@@ -599,7 +599,7 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	// 올린 글꼴 얼굴을 문서의 FontFace 로 맞추기. (웹, 이름의 얼굴은 그 이름으로, 기본 폰트는 VanillaEngineDefault, 대체 폰트는 VanillaEngineFallback1, 2 …)
+	/// 올린 글꼴 얼굴을 문서의 FontFace 로 맞추기. (웹, 이름의 얼굴은 그 이름으로, 기본 폰트는 VanillaEngineDefault, 대체 폰트는 VanillaEngineFallback1, 2 …)
 	//==============================================================================
 	#[cfg(target_arch = "wasm32")]
 	fn sync_browser_font_faces(&self) {
@@ -629,37 +629,37 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	// 글자 안티앨리어싱 켬 / 끔. (원본 setTextAntialiasEnabled, 바꾼 다음 그리는 글자부터 그 방식으로 굽는다)
+	/// 글자 안티앨리어싱 켬 / 끔. (원본 setTextAntialiasEnabled, 바꾼 다음 그리는 글자부터 그 방식으로 굽는다)
 	//==============================================================================
 	pub fn set_text_antialias_enabled(&mut self, value: bool) {
 		self.is_text_antialias_enabled = value;
 	}
 
 	//==============================================================================
-	// 글자 안티앨리어싱이 켜져 있는지. (원본 isTextAntialiasOn)
+	/// 글자 안티앨리어싱이 켜져 있는지. (원본 isTextAntialiasOn)
 	//==============================================================================
 	pub fn is_text_antialias_on(&self) -> bool {
 		self.is_text_antialias_enabled
 	}
 
 	//==============================================================================
-	// 글꼴 얼굴을 새로 올리면 그 얼굴의 글자로 구운 문자열을 버릴지 설정. (원본 EngineConfiguration.rebakeTextOnFontLoad, 엔진이 그래픽을 넘겨받을 때 정한다)
+	/// 글꼴 얼굴을 새로 올리면 그 얼굴의 글자로 구운 문자열을 버릴지 설정. (원본 EngineConfiguration.rebakeTextOnFontLoad, 엔진이 그래픽을 넘겨받을 때 정한다)
 	//==============================================================================
 	pub fn set_rebake_text_on_font_load(&mut self, is_rebake_text_on_font_load: bool) {
 		self.is_rebake_text_on_font_load = is_rebake_text_on_font_load;
 	}
 
 	//==============================================================================
-	// 글꼴을 등록한 횟수. (등록, 지우기, 차례, 기본 글꼴, 대체 글꼴. 재 둔 글 폭을 다시 잴지 가린다)
+	/// 글꼴을 등록한 횟수. (등록, 지우기, 차례, 기본 글꼴, 대체 글꼴. 재 둔 글 폭을 다시 잴지 가린다)
 	//==============================================================================
 	pub fn get_font_registration_count(&self) -> u64 {
 		self.font_registration_count.get()
 	}
 
 	//==============================================================================
-	// 시스템 글꼴 사슬 정하기. (데스크탑, 원본 SYSTEM_FONT_STRING 처럼 기본 폰트 뒤에 이름 차례로 찾는다)
-	// - 켜면 폰트 문자열의 올리지 않은 이름도 운영체제 글꼴에서 찾는다. ("16px Arial" 이 시스템의 Arial 로 그려진다, 브라우저와 같다)
-	// - 얼굴은 그 굵기와 기울기의 글자를 처음 그리거나 잴 때 읽는다.
+	/// 시스템 글꼴 사슬 정하기. (데스크탑, 원본 SYSTEM_FONT_STRING 처럼 기본 폰트 뒤에 이름 차례로 찾는다)
+	/// - 켜면 폰트 문자열의 올리지 않은 이름도 운영체제 글꼴에서 찾는다. ("16px Arial" 이 시스템의 Arial 로 그려진다, 브라우저와 같다)
+	/// - 얼굴은 그 굵기와 기울기의 글자를 처음 그리거나 잴 때 읽는다.
 	//==============================================================================
 	pub fn set_system_font_chain(&mut self, family_name_list: Vec<String>) {
 		{
@@ -673,8 +673,8 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	// 시스템 글꼴 이름에 얼굴 후보 파일 더하기. (데스크탑, 그 이름을 사슬 맨 뒤에 둔다. 운영체제에서 찾지 않고 파일을 주는 경우)
-	// - 얼굴 번호가 없으면 PostScript 이름, 그것도 없으면 청한 굵기와 기울기로 모음 안의 얼굴을 고른다. 가변 글꼴은 굵기를 축 값으로 만든다.
+	/// 시스템 글꼴 이름에 얼굴 후보 파일 더하기. (데스크탑, 그 이름을 사슬 맨 뒤에 둔다. 운영체제에서 찾지 않고 파일을 주는 경우)
+	/// - 얼굴 번호가 없으면 PostScript 이름, 그것도 없으면 청한 굵기와 기울기로 모음 안의 얼굴을 고른다. 가변 글꼴은 굵기를 축 값으로 만든다.
 	//==============================================================================
 	pub fn add_system_font_candidate(&mut self, family_name: &str, weight: u16, is_italic: bool, source: FontFileSource) {
 		{
@@ -699,7 +699,7 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	// 운영체제 대체 글꼴 켬 / 끔. (데스크탑, 켜면 어느 글꼴에도 없는 글자를 운영체제가 고른 글꼴로 그린다. 대체 글꼴 후보 파일이 있으면 그것이 먼저다)
+	/// 운영체제 대체 글꼴 켬 / 끔. (데스크탑, 켜면 어느 글꼴에도 없는 글자를 운영체제가 고른 글꼴로 그린다. 대체 글꼴 후보 파일이 있으면 그것이 먼저다)
 	//==============================================================================
 	pub fn set_system_font_fallback_enabled(&mut self, value: bool) {
 		self.system_font_state.borrow_mut().is_fallback_enabled = value;
@@ -709,7 +709,7 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	// 시스템 글꼴 사슬이나 후보가 있는지. (데스크탑)
+	/// 시스템 글꼴 사슬이나 후보가 있는지. (데스크탑)
 	//==============================================================================
 	pub fn has_system_font(&self) -> bool {
 		let system_font_state = self.system_font_state.borrow();
@@ -717,7 +717,7 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	// 시스템 글꼴 이름의 얼굴들을 고른 목록에 더하기. (처음 보는 이름이면 운영체제에서 찾고, 청한 굵기와 기울기에 맞는 후보를 읽는다, 없으면 false)
+	/// 시스템 글꼴 이름의 얼굴들을 고른 목록에 더하기. (처음 보는 이름이면 운영체제에서 찾고, 청한 굵기와 기울기에 맞는 후보를 읽는다, 없으면 false)
 	//==============================================================================
 	fn append_system_family_faces(&self, family_key: &str, desired_weight: u16, is_italic_desired: bool, output_list: &mut Vec<ResolvedFontFace>) -> bool {
 		let mut system_font_state = self.system_font_state.borrow_mut();
@@ -784,8 +784,8 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	// 글의 글자가 운영체제 대체 글꼴로 그려지게 하기. (어느 얼굴에도 없는 글자를 운영체제에 묻는다, 같은 물음은 한 번)
-	// - 굵게를 청했는데 그 글자를 가진 대체 얼굴이 모두 600 아래면 굵은 대체 얼굴을 따로 묻는다. (크롬도 굵기를 주고 대체 글꼴을 고른다)
+	/// 글의 글자가 운영체제 대체 글꼴로 그려지게 하기. (어느 얼굴에도 없는 글자를 운영체제에 묻는다, 같은 물음은 한 번)
+	/// - 굵게를 청했는데 그 글자를 가진 대체 얼굴이 모두 600 아래면 굵은 대체 얼굴을 따로 묻는다. (크롬도 굵기를 주고 대체 글꼴을 고른다)
 	//==============================================================================
 	fn ensure_system_fallback_coverage(&self, text: &str, font_description: &FontDescription, resolved_face_list: &[ResolvedFontFace]) {
 		if !self.system_font_state.borrow().is_fallback_enabled {
@@ -867,9 +867,9 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	// 대체 글꼴 후보 파일 더하기. (데스크탑, 원본 브라우저가 글꼴에 없는 글자를 시스템 글꼴로 그리는 자리)
-	// - 바로 읽지 않는다. 등록된 어느 글꼴에도 없는 글자를 재거나 구울 때 앞의 후보부터 읽어 대체 폰트로 더한다. (큰 한중일 글꼴을 처음에 읽지 않게)
-	// - 없는 파일, 읽지 못하는 파일은 넘긴다.
+	/// 대체 글꼴 후보 파일 더하기. (데스크탑, 원본 브라우저가 글꼴에 없는 글자를 시스템 글꼴로 그리는 자리)
+	/// - 바로 읽지 않는다. 등록된 어느 글꼴에도 없는 글자를 재거나 구울 때 앞의 후보부터 읽어 대체 폰트로 더한다. (큰 한중일 글꼴을 처음에 읽지 않게)
+	/// - 없는 파일, 읽지 못하는 파일은 넘긴다.
 	//==============================================================================
 	pub fn add_fallback_font_candidate(&mut self, font_path: std::path::PathBuf) {
 		let has_color_tables = peek_color_font_tables(&font_path);
@@ -877,9 +877,9 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	// 글의 글자가 모두 그려지게 대체 글꼴 후보 읽기. (어느 글꼴에도 없는 글자가 있으면 그 글자를 가진 후보가 나올 때까지)
-	// - 이모지 표시 글자 묶음의 첫 글자는 색 글리프로, 그 밖의 글자는 색이 아닌 글리프로 가진 글꼴을 찾는다. (브라우저가 이모지를 색 이모지 글꼴로, 맨 ❤ 는 글 글꼴로 그리는 자리)
-	//   바라는 쪽의 후보가 다 떨어졌으면 다른 쪽이라도 가진 글꼴이 있으면 그것으로 그린다.
+	/// 글의 글자가 모두 그려지게 대체 글꼴 후보 읽기. (어느 글꼴에도 없는 글자가 있으면 그 글자를 가진 후보가 나올 때까지)
+	/// - 이모지 표시 글자 묶음의 첫 글자는 색 글리프로, 그 밖의 글자는 색이 아닌 글리프로 가진 글꼴을 찾는다. (브라우저가 이모지를 색 이모지 글꼴로, 맨 ❤ 는 글 글꼴로 그리는 자리)
+	///   바라는 쪽의 후보가 다 떨어졌으면 다른 쪽이라도 가진 글꼴이 있으면 그것으로 그린다.
 	//==============================================================================
 	fn ensure_fallback_coverage(&self, text: &str) {
 		if self.fallback_font_candidate_list.borrow().is_empty() {
@@ -915,8 +915,8 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	// 대체 글꼴 후보 하나 읽어 대체 폰트로 더하기. (색을 바라면 색 글리프 표가 있는 후보, 아니면 없는 후보부터. 후보가 없으면 false)
-	// - 못 읽는 파일은 버리고 다음 후보를 본다.
+	/// 대체 글꼴 후보 하나 읽어 대체 폰트로 더하기. (색을 바라면 색 글리프 표가 있는 후보, 아니면 없는 후보부터. 후보가 없으면 false)
+	/// - 못 읽는 파일은 버리고 다음 후보를 본다.
 	//==============================================================================
 	fn load_next_fallback_candidate(&self, is_color_wanted: bool) -> bool {
 		loop {
@@ -948,7 +948,7 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	// 등록된 어느 글꼴이 그 글자를 가졌는지.
+	/// 등록된 어느 글꼴이 그 글자를 가졌는지.
 	//==============================================================================
 	fn is_character_covered(&self, character: char) -> bool {
 		let is_in_family = self.font_family_table.values().any(|face_list| face_list.iter().any(|face| face.descriptors.contains_character(character) && face.font.has_character(character)));
@@ -956,7 +956,7 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	// 읽은 시스템 글꼴 얼굴(사슬, 운영체제 대체 글꼴) 가운데 조건에 맞는 것이 있는지.
+	/// 읽은 시스템 글꼴 얼굴(사슬, 운영체제 대체 글꼴) 가운데 조건에 맞는 것이 있는지.
 	//==============================================================================
 	fn is_system_character_covered(&self, is_covered: &dyn Fn(&RegisteredFontFace) -> bool) -> bool {
 		let system_font_state = self.system_font_state.borrow();
@@ -972,7 +972,7 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	// 등록된 어느 글꼴이 그 글자를 색이 아닌 글리프로 가졌는지.
+	/// 등록된 어느 글꼴이 그 글자를 색이 아닌 글리프로 가졌는지.
 	//==============================================================================
 	fn is_text_character_covered(&self, character: char) -> bool {
 		let has_text_character = |face: &RegisteredFontFace| face.font.has_character(character) && !face.font.has_color_character(character);
@@ -981,7 +981,7 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	// 등록된 어느 글꼴이 그 글자를 색 글리프로 가졌는지.
+	/// 등록된 어느 글꼴이 그 글자를 색 글리프로 가졌는지.
 	//==============================================================================
 	fn is_color_character_covered(&self, character: char) -> bool {
 		let is_in_family = self.font_family_table.values().any(|face_list| face_list.iter().any(|face| face.descriptors.contains_character(character) && face.font.has_color_character(character)));
@@ -989,21 +989,21 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	// 기본 폰트가 있는지.
+	/// 기본 폰트가 있는지.
 	//==============================================================================
 	pub fn has_default_font(&self) -> bool {
 		!self.default_face_list.is_empty()
 	}
 
 	//==============================================================================
-	// 이름에 올린 얼굴 수. (그 이름이 없으면 0)
+	/// 이름에 올린 얼굴 수. (그 이름이 없으면 0)
 	//==============================================================================
 	pub fn get_font_face_count(&self, family_name: &str) -> usize {
 		self.font_family_table.get(&family_name.trim().to_lowercase()).map(|face_list| face_list.len()).unwrap_or(0)
 	}
 
 	//==============================================================================
-	// 문자열 측정. (문단 방향은 왼쪽에서 오른쪽, 원본 measureTextMetrics 도 방향을 주지 않는다)
+	/// 문자열 측정. (문단 방향은 왼쪽에서 오른쪽, 원본 measureTextMetrics 도 방향을 주지 않는다)
 	//==============================================================================
 	pub fn measure_text(&self, font_string: &str, text: &str) -> TextMetrics {
 		// 글꼴이 새로 들어왔으면 잰 것을 비운다.
@@ -1041,7 +1041,7 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	// 잰 것 가운데 오래 안 쓴 반 버리기. (쓴 번호가 가운데보다 작은 것)
+	/// 잰 것 가운데 오래 안 쓴 반 버리기. (쓴 번호가 가운데보다 작은 것)
 	//==============================================================================
 	fn evict_old_measures(&self) {
 		let mut measure_table = self.measure_table.borrow_mut();
@@ -1062,14 +1062,14 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	// 잰 글 수. (캐시에 든 것, 시험과 통계용)
+	/// 잰 글 수. (캐시에 든 것, 시험과 통계용)
 	//==============================================================================
 	pub fn get_measure_count(&self) -> usize {
 		self.measure_count.get()
 	}
 
 	//==============================================================================
-	// 문자열 측정. (캐시를 거치지 않는다)
+	/// 문자열 측정. (캐시를 거치지 않는다)
 	//==============================================================================
 	fn measure_text_uncached(&self, font_string: &str, text: &str) -> TextMetrics {
 		let font_description = parse_font_string(font_string);
@@ -1141,7 +1141,7 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	// 구운 문자열 반환. (없으면 굽는다, direction 은 문단 방향. 원본 getEntry 의 textDirection)
+	/// 구운 문자열 반환. (없으면 굽는다, direction 은 문단 방향. 원본 getEntry 의 textDirection)
 	//==============================================================================
 	pub fn get_entry(&mut self, gl: &glow::Context, text_draw_kind: TextDrawKind, text: &str, font_string: &str, line_width: f32, bake_scale: f32, direction: ShapingDirection) -> Option<TextEntry> {
 		if text.is_empty() {
@@ -1174,7 +1174,7 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	// 버리기로 한 텍스처 지우기.
+	/// 버리기로 한 텍스처 지우기.
 	//==============================================================================
 	fn delete_pending_textures(&mut self, gl: &glow::Context) {
 		for texture in self.pending_deleted_texture_list.drain(..) {
@@ -1185,14 +1185,14 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	// 버리기로 한 텍스처가 있는지. (있으면 굽는 길로 가서 지운다)
+	/// 버리기로 한 텍스처가 있는지. (있으면 굽는 길로 가서 지운다)
 	//==============================================================================
 	pub(crate) fn has_pending_deleted_textures(&self) -> bool {
 		!self.pending_deleted_texture_list.is_empty()
 	}
 
 	//==============================================================================
-	// 이미 구운 문자열 찾기. (GL 을 건드리지 않는다, 없으면 None)
+	/// 이미 구운 문자열 찾기. (GL 을 건드리지 않는다, 없으면 None)
 	//==============================================================================
 	pub(crate) fn find_entry(&mut self, text_draw_kind: TextDrawKind, text: &str, font_string: &str, line_width: f32, bake_scale: f32, direction: ShapingDirection) -> Option<TextEntry> {
 		let is_antialias = self.is_text_antialias_enabled;
@@ -1205,7 +1205,7 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	// 가장 오래 안 쓴 문자열 하나 버리기.
+	/// 가장 오래 안 쓴 문자열 하나 버리기.
 	//==============================================================================
 	fn evict_oldest_entry(&mut self, gl: &glow::Context) {
 		let mut oldest_position: Option<(u64, usize, u64)> = None;
@@ -1245,8 +1245,8 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	// 글의 모양만 래스터로 받기. (텍스처로 올리지 않는다, 그림자를 깐 글처럼 따로 굽는 쪽이 쓴다)
-	// - 웹은 원본처럼 브라우저 Canvas2D 로 받는다. 데스크탑에서 글꼴이 하나도 없으면 None.
+	/// 글의 모양만 래스터로 받기. (텍스처로 올리지 않는다, 그림자를 깐 글처럼 따로 굽는 쪽이 쓴다)
+	/// - 웹은 원본처럼 브라우저 Canvas2D 로 받는다. 데스크탑에서 글꼴이 하나도 없으면 None.
 	//==============================================================================
 	pub fn rasterize_text(&self, text: &str, font_string: &str, bake_scale: f32, padding: i32, direction: ShapingDirection) -> Option<TextRaster> {
 		if text.is_empty() {
@@ -1280,8 +1280,8 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	// 글리프 하나 래스터. (글자 아틀라스가 쓴다, 글리프 번호는 글자로 찾는다. 웹은 브라우저 Canvas2D 로, 데스크탑에서 글꼴이 하나도 없으면 None)
-	// - 돌려주는 것: (래스터, 전진폭, 글꼴 위 길이, 글꼴 아래 길이) 길이 단위는 픽셀.
+	/// 글리프 하나 래스터. (글자 아틀라스가 쓴다, 글리프 번호는 글자로 찾는다. 웹은 브라우저 Canvas2D 로, 데스크탑에서 글꼴이 하나도 없으면 None)
+	/// - 돌려주는 것: (래스터, 전진폭, 글꼴 위 길이, 글꼴 아래 길이) 길이 단위는 픽셀.
 	//==============================================================================
 	pub fn rasterize_character(&self, character: &str, font_string: &str) -> Option<(textshaping::GlyphRaster, f32, f32, f32)> {
 		let font_description = parse_font_string(font_string);
@@ -1367,14 +1367,14 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	// 구운 문자열 수.
+	/// 구운 문자열 수.
 	//==============================================================================
 	pub fn get_entry_count(&self) -> usize {
 		self.entry_count
 	}
 
 	//==============================================================================
-	// 폰트 문자열에 맞는 얼굴 목록. (이름 목록의 차례로 이름마다 그 얼굴들, 기본 폰트, 시스템 글꼴 사슬, 표준 글꼴, 대체 폰트 차례. 글자마다 앞에서부터 찾는다, 올리지 않은 이름은 넘긴다)
+	/// 폰트 문자열에 맞는 얼굴 목록. (이름 목록의 차례로 이름마다 그 얼굴들, 기본 폰트, 시스템 글꼴 사슬, 표준 글꼴, 대체 폰트 차례. 글자마다 앞에서부터 찾는다, 올리지 않은 이름은 넘긴다)
 	//==============================================================================
 	fn resolve_face_list(&self, font_description: &FontDescription) -> Vec<ResolvedFontFace> {
 		let mut face_list: Vec<ResolvedFontFace> = Vec::new();
@@ -1436,7 +1436,7 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	// 지켜보는 이름의 얼굴이 없는 글자 모으기. (폰트 문자열의 이름 가운데 지켜보는 것마다, 올린 얼굴의 글자 범위에 들지 않은 글자)
+	/// 지켜보는 이름의 얼굴이 없는 글자 모으기. (폰트 문자열의 이름 가운데 지켜보는 것마다, 올린 얼굴의 글자 범위에 들지 않은 글자)
 	//==============================================================================
 	fn note_unresolved_family_characters(&self, text: &str, font_description: &FontDescription) {
 		UNRESOLVED_FAMILY_CHARACTER_TABLE.with(|table_cell| {
@@ -1469,7 +1469,7 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	// 글자를 그릴 얼굴 목록. (대체 글꼴 후보와 운영체제 대체 글꼴을 먼저 채우고 고른다)
+	/// 글자를 그릴 얼굴 목록. (대체 글꼴 후보와 운영체제 대체 글꼴을 먼저 채우고 고른다)
 	//==============================================================================
 	fn resolve_covering_face_list(&self, text: &str, font_description: &FontDescription) -> Vec<ResolvedFontFace> {
 		self.note_unresolved_family_characters(text, font_description);
@@ -1484,9 +1484,9 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	// 마지막 대체 글꼴의 얼굴을 맨 뒤에 더하기. (데스크탑, 이름 찾기를 켰을 때. 운영체제 대체 글꼴을 물은 뒤라 그 물음에는 끼지 않는다)
-	// - 크롬 FontFallbackIterator 는 시스템 대체로도 다 그리지 못한 글자 묶음을 GetLastResortFallbackFont(맥 Times)로 그린다.
-	//   기본 글꼴에 결합 부호가 없는 "é"(e + U+0301) 가 맥 크롬에서 Times 로 그려지는 자리다.
+	/// 마지막 대체 글꼴의 얼굴을 맨 뒤에 더하기. (데스크탑, 이름 찾기를 켰을 때. 운영체제 대체 글꼴을 물은 뒤라 그 물음에는 끼지 않는다)
+	/// - 크롬 FontFallbackIterator 는 시스템 대체로도 다 그리지 못한 글자 묶음을 GetLastResortFallbackFont(맥 Times)로 그린다.
+	///   기본 글꼴에 결합 부호가 없는 "é"(e + U+0301) 가 맥 크롬에서 Times 로 그려지는 자리다.
 	//==============================================================================
 	fn append_last_resort_faces(&self, font_description: &FontDescription, face_list: &mut Vec<ResolvedFontFace>) {
 		#[cfg(not(target_arch = "wasm32"))]
@@ -1506,7 +1506,7 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	// 문자열 굽기.
+	/// 문자열 굽기.
 	//==============================================================================
 	fn bake_entry(&self, gl: &glow::Context, text_draw_kind: TextDrawKind, text: &str, font_string: &str, line_width: f32, bake_scale: f32, direction: ShapingDirection) -> Option<TextEntry> {
 		let font_description = parse_font_string(font_string);
@@ -1578,7 +1578,7 @@ impl Default for TextStringTextureCache {
 }
 
 //==============================================================================
-// 글을 모양 짓고 글리프를 래스터해 한 장에 놓기. (외곽선, 그림자 몫의 여백 padding)
+/// 글을 모양 짓고 글리프를 래스터해 한 장에 놓기. (외곽선, 그림자 몫의 여백 padding)
 //==============================================================================
 fn lay_out_text(face_list: &[ResolvedFontFace], font_description: &FontDescription, text: &str, pixel_size: f32, direction: ShapingDirection, padding: i32) -> Option<LaidOutText> {
 	let system_font_measure = create_system_font_measure(font_description, pixel_size);
@@ -1659,7 +1659,7 @@ fn lay_out_text(face_list: &[ResolvedFontFace], font_description: &FontDescripti
 }
 
 //==============================================================================
-// 브라우저 시스템 글꼴로 글 모양 래스터 받기. (웹, 글꼴 바이트가 없을 때 rasterize_text 자리)
+/// 브라우저 시스템 글꼴로 글 모양 래스터 받기. (웹, 글꼴 바이트가 없을 때 rasterize_text 자리)
 //==============================================================================
 #[cfg(target_arch = "wasm32")]
 fn rasterize_system_font_text(font_description: &FontDescription, text: &str, bake_scale: f32, padding: i32, direction: ShapingDirection) -> Option<TextRaster> {
@@ -1695,7 +1695,7 @@ fn rasterize_system_font_text(font_description: &FontDescription, text: &str, ba
 }
 
 //==============================================================================
-// 모양 지은 글리프 하나 래스터. (시스템 글꼴 조각은 브라우저 캔버스로, 비었으면 None)
+/// 모양 지은 글리프 하나 래스터. (시스템 글꼴 조각은 브라우저 캔버스로, 비었으면 None)
 //==============================================================================
 fn rasterize_shaped_glyph(face_list: &[ResolvedFontFace], font_description: &FontDescription, text: &str, shaped_glyph: &textshaping::ShapedGlyph, pixel_size: f32) -> Option<textshaping::GlyphRaster> {
 	if shaped_glyph.face_index == textshaping::SYSTEM_FACE_INDEX {
@@ -1717,7 +1717,7 @@ fn rasterize_shaped_glyph(face_list: &[ResolvedFontFace], font_description: &Fon
 }
 
 //==============================================================================
-// 시스템 글꼴 조각 재는 함수. (웹이면 브라우저 캔버스로 재고, 데스크탑은 없다)
+/// 시스템 글꼴 조각 재는 함수. (웹이면 브라우저 캔버스로 재고, 데스크탑은 없다)
 //==============================================================================
 #[allow(clippy::type_complexity)]
 fn create_system_font_measure(font_description: &FontDescription, pixel_size: f32) -> Option<Box<dyn Fn(&str, bool) -> f32>> {
@@ -1734,7 +1734,7 @@ fn create_system_font_measure(font_description: &FontDescription, pixel_size: f3
 }
 
 //==============================================================================
-// 브라우저 시스템 글꼴로 굽기. (웹. 글꼴 바이트가 하나도 없을 때)
+/// 브라우저 시스템 글꼴로 굽기. (웹. 글꼴 바이트가 하나도 없을 때)
 //==============================================================================
 #[cfg(target_arch = "wasm32")]
 fn bake_system_font_entry(gl: &glow::Context, text_draw_kind: TextDrawKind, text: &str, font_description: &FontDescription, line_width: f32, bake_scale: f32, is_antialias: bool, direction: ShapingDirection) -> Option<TextEntry> {
@@ -1757,7 +1757,7 @@ fn bake_system_font_entry(gl: &glow::Context, text_draw_kind: TextDrawKind, text
 }
 
 //==============================================================================
-// 문턱값으로 0 과 255 로 가르기. (안티앨리어싱을 끈 글자)
+/// 문턱값으로 0 과 255 로 가르기. (안티앨리어싱을 끈 글자)
 //==============================================================================
 fn apply_alpha_threshold(values: &mut [u8]) {
 	for value in values.iter_mut() {
@@ -1771,7 +1771,7 @@ fn apply_alpha_threshold(values: &mut [u8]) {
 }
 
 //==============================================================================
-// 프리멀티플라이드 RGBA 를 알파 문턱값으로 가르기. (원본처럼 곧은 알파의 알파 칸만 0 과 255 로, 남는 픽셀은 곧은 색 그대로 불투명)
+/// 프리멀티플라이드 RGBA 를 알파 문턱값으로 가르기. (원본처럼 곧은 알파의 알파 칸만 0 과 255 로, 남는 픽셀은 곧은 색 그대로 불투명)
 //==============================================================================
 fn apply_premultiplied_alpha_threshold(pixels: &mut [u8]) {
 	for pixel in pixels.chunks_exact_mut(4) {
@@ -1789,7 +1789,7 @@ fn apply_premultiplied_alpha_threshold(pixels: &mut [u8]) {
 }
 
 //==============================================================================
-// 색 그림을 색 층에 얹기. (프리멀티플라이드 RGBA, 원본 위에 얹기. 왼쪽 위 자리 offset 부터, 층 밖은 버린다)
+/// 색 그림을 색 층에 얹기. (프리멀티플라이드 RGBA, 원본 위에 얹기. 왼쪽 위 자리 offset 부터, 층 밖은 버린다)
 //==============================================================================
 #[allow(clippy::too_many_arguments)]
 fn draw_color_pixels(layer_pixels: &mut [u8], layer_width: i32, layer_height: i32, source_pixels: &[u8], source_width: i32, source_height: i32, offset_x: i32, offset_y: i32) {
@@ -1818,7 +1818,7 @@ fn draw_color_pixels(layer_pixels: &mut [u8], layer_width: i32, layer_height: i3
 }
 
 //==============================================================================
-// 흰 글자와 색 층을 한 장으로. (흰색 프리멀티플라이드 RGBA 위에 색 층을 얹는다, 색 층이 없으면 흰 글자만)
+/// 흰 글자와 색 층을 한 장으로. (흰색 프리멀티플라이드 RGBA 위에 색 층을 얹는다, 색 층이 없으면 흰 글자만)
 //==============================================================================
 pub(crate) fn compose_text_pixels(coverage: &[u8], color_pixels: Option<&[u8]>) -> Vec<u8> {
 	let mut pixels = Vec::with_capacity(coverage.len() * 4);
@@ -1845,8 +1845,8 @@ pub(crate) fn compose_text_pixels(coverage: &[u8], color_pixels: Option<&[u8]>) 
 }
 
 //==============================================================================
-// 글꼴 파일에 색 글리프 표(sbix, CBDT, COLR)가 있는지 엿보기. (파일 앞머리의 표 목록만 읽는다, 못 읽으면 false)
-// - 대체 글꼴 후보를 고를 때 쓴다. 큰 색 이모지 글꼴(맥 Apple Color Emoji 는 190MB 남짓)을 이모지가 아닌 글자 때문에 읽지 않게 한다.
+/// 글꼴 파일에 색 글리프 표(sbix, CBDT, COLR)가 있는지 엿보기. (파일 앞머리의 표 목록만 읽는다, 못 읽으면 false)
+/// - 대체 글꼴 후보를 고를 때 쓴다. 큰 색 이모지 글꼴(맥 Apple Color Emoji 는 190MB 남짓)을 이모지가 아닌 글자 때문에 읽지 않게 한다.
 //==============================================================================
 fn peek_color_font_tables(font_path: &std::path::Path) -> bool {
 	use std::io::Read;
@@ -1866,7 +1866,7 @@ fn peek_color_font_tables(font_path: &std::path::Path) -> bool {
 }
 
 //==============================================================================
-// 구운 픽셀을 텍스처로 올리기. (흰색 프리멀티플라이드 RGBA, 안티앨리어싱을 끄면 NEAREST)
+/// 구운 픽셀을 텍스처로 올리기. (흰색 프리멀티플라이드 RGBA, 안티앨리어싱을 끄면 NEAREST)
 //==============================================================================
 fn upload_text_texture(gl: &glow::Context, bitmap_width: i32, bitmap_height: i32, pixels: &[u8], is_antialias: bool) -> Option<crate::core::graphic::GlTexture> {
 	let texture_filter = if is_antialias {
@@ -1899,7 +1899,7 @@ fn upload_text_texture(gl: &glow::Context, bitmap_width: i32, bitmap_height: i32
 }
 
 //==============================================================================
-// 구운 문자열 키의 해시. (방식, 안티앨리어싱, 문단 방향, 폰트 문자열, 선 두께, 배율, 글)
+/// 구운 문자열 키의 해시. (방식, 안티앨리어싱, 문단 방향, 폰트 문자열, 선 두께, 배율, 글)
 //==============================================================================
 fn create_entry_hash(text_draw_kind: TextDrawKind, is_antialias: bool, direction: ShapingDirection, text: &str, font_string: &str, line_width: f32, bake_scale: f32) -> u64 {
 	let mut hasher = DefaultHasher::new();
@@ -1914,7 +1914,7 @@ fn create_entry_hash(text_draw_kind: TextDrawKind, is_antialias: bool, direction
 }
 
 //==============================================================================
-// 운영체제 글꼴에서 이름 하나 찾기. (보통, 굵게, 기울임, 굵은 기울임 네 가지를 묻고 같은 얼굴은 하나로, 하나도 없으면 None. 데스크탑만)
+/// 운영체제 글꼴에서 이름 하나 찾기. (보통, 굵게, 기울임, 굵은 기울임 네 가지를 묻고 같은 얼굴은 하나로, 하나도 없으면 None. 데스크탑만)
 //==============================================================================
 fn find_system_font_family(family_key: &str) -> Option<SystemFontFamily> {
 	#[cfg(not(target_arch = "wasm32"))]
@@ -1953,7 +1953,7 @@ fn find_system_font_family(family_key: &str) -> Option<SystemFontFamily> {
 }
 
 //==============================================================================
-// 운영체제가 고른 대체 글꼴 파일. (데스크탑만, 웹은 None)
+/// 운영체제가 고른 대체 글꼴 파일. (데스크탑만, 웹은 None)
 //==============================================================================
 fn find_system_fallback_font(grapheme: &str, weight: u16, is_italic: bool, is_color_wanted: bool) -> Option<FontFileSource> {
 	#[cfg(not(target_arch = "wasm32"))]
@@ -1968,17 +1968,17 @@ fn find_system_fallback_font(grapheme: &str, weight: u16, is_italic: bool, is_co
 }
 
 //==============================================================================
-// 운영체제 대체 글꼴을 한 이름으로 묶는 열쇠. (파일 경로, 같은 파일의 굵기 얼굴들이 함께 고른다)
+/// 운영체제 대체 글꼴을 한 이름으로 묶는 열쇠. (파일 경로, 같은 파일의 굵기 얼굴들이 함께 고른다)
 //==============================================================================
 fn read_fallback_source_key(source: &FontFileSource) -> String {
 	source.path.to_string_lossy().into_owned()
 }
 
 //==============================================================================
-// 시스템 글꼴 파일의 얼굴 하나 읽기. (같은 파일의 바이트는 나눠 든다)
-// - 얼굴 번호: 준 번호, 없으면 PostScript 이름이 같은 얼굴, 그것도 없으면 청한 굵기와 기울기로 고른 얼굴.
-// - 서술자: 가변 글꼴(wght 축)이면 청한 굵기를 축 범위로 자른 값의 인스턴스, 아니면 그 얼굴의 OS/2 굵기와 기울임 표시.
-// - opsz 축은 맥에서만 글자 크기로 건다. (크롬 font_platform_data_mac.mm, 윈도우와 리눅스의 font_cache_skia 는 시스템 글꼴의 축을 바꾸지 않는다)
+/// 시스템 글꼴 파일의 얼굴 하나 읽기. (같은 파일의 바이트는 나눠 든다)
+/// - 얼굴 번호: 준 번호, 없으면 PostScript 이름이 같은 얼굴, 그것도 없으면 청한 굵기와 기울기로 고른 얼굴.
+/// - 서술자: 가변 글꼴(wght 축)이면 청한 굵기를 축 범위로 자른 값의 인스턴스, 아니면 그 얼굴의 OS/2 굵기와 기울임 표시.
+/// - opsz 축은 맥에서만 글자 크기로 건다. (크롬 font_platform_data_mac.mm, 윈도우와 리눅스의 font_cache_skia 는 시스템 글꼴의 축을 바꾸지 않는다)
 //==============================================================================
 fn load_system_font_face(shared_bytes_table: &mut HashMap<std::path::PathBuf, std::rc::Weak<[u8]>>, source: &FontFileSource, weight: u16, is_italic: bool) -> Result<RegisteredFontFace, String> {
 	let font_bytes: Rc<[u8]> = match shared_bytes_table.get(&source.path).and_then(|weak_bytes| weak_bytes.upgrade()) {
@@ -2025,9 +2025,9 @@ fn load_system_font_face(shared_bytes_table: &mut HashMap<std::path::PathBuf, st
 }
 
 //==============================================================================
-// 글꼴 모음에서 PostScript 이름이 같은 얼굴 번호. (없으면 None)
-// - 이름 표의 유니코드, 윈도우 기록과 맥 기록을 본다. 맥 기록(Mac Roman)은 ttf-parser 가 풀지 않아 바이트를 그대로 글자로 읽는다. (PostScript 이름은 ASCII 다)
-//   맥 Papyrus.ttc 처럼 맥 기록만 있는 모음에서 Condensed 얼굴로 잘못 고르지 않는다.
+/// 글꼴 모음에서 PostScript 이름이 같은 얼굴 번호. (없으면 None)
+/// - 이름 표의 유니코드, 윈도우 기록과 맥 기록을 본다. 맥 기록(Mac Roman)은 ttf-parser 가 풀지 않아 바이트를 그대로 글자로 읽는다. (PostScript 이름은 ASCII 다)
+///   맥 Papyrus.ttc 처럼 맥 기록만 있는 모음에서 Condensed 얼굴로 잘못 고르지 않는다.
 //==============================================================================
 fn find_post_script_face_index(font_bytes: &[u8], post_script_name: &str) -> Option<u32> {
 	let face_count = rustybuzz::ttf_parser::fonts_in_collection(font_bytes).unwrap_or(1);
@@ -2052,15 +2052,15 @@ fn find_post_script_face_index(font_bytes: &[u8], post_script_name: &str) -> Opt
 }
 
 //==============================================================================
-// 폰트 문자열 해석. (Canvas2D font 의 CSS font 줄임 꼴, "bold 16px DOSGothic" → 크기 16, 굵기 700, 이름 DOSGothic)
-// - 크기 앞의 낱말: normal, italic / oblique(뒤의 각도는 넘긴다)는 기울임, small-caps, 늘이기 낱말(condensed 등)은 넘긴다.
-//   bold / bolder 는 700, lighter 는 100, 숫자는 굵기(1 ~ 1000). 그 밖의 낱말이 오면 틀린 문자열이다.
-// - 크기: 절대 길이(px, pt, pc, in, cm, mm, q), 글꼴에 대는 길이(em, ex, ch, cap, ic, lh, rem, rex, rch, rcap, ric, rlh), %, 뷰포트 단위, 이름 크기, larger, smaller,
-//   calc() 같은 CSS 수학 함수. 뒤의 "/줄높이"는 읽고 넘긴다. (캔버스는 줄높이를 쓰지 않는다) 셈은 parse_css_font_size 가 크롬과 같게 한다.
-//   원본이 글을 굽고 재는 캔버스는 문서에 붙이지 않아 부모 글꼴이 크롬의 마지막 대체 글꼴(맥 Times) 10px 이고, 뿌리는 문서의 표준 글꼴 16px 이다.
-//   웹은 절대 길이 밖의 크기를 브라우저 캔버스에 넣고 다시 읽어 받는다. (platform/web/systemfont.rs 의 resolve_font_size)
-// - 크기 뒤는 쉼표로 이은 이름 목록이다. 따옴표 이름은 따옴표를 떼고, 따옴표 없는 이름은 낱말을 빈칸 하나로 잇는다. 그리는 쪽이 목록의 앞 이름부터 찾는다.
-// - 틀린 문자열(크기나 이름이 없음, 음수 크기, 모르는 낱말)은 캔버스의 처음 값 "10px sans-serif" 로 본다.
+/// 폰트 문자열 해석. (Canvas2D font 의 CSS font 줄임 꼴, "bold 16px DOSGothic" → 크기 16, 굵기 700, 이름 DOSGothic)
+/// - 크기 앞의 낱말: normal, italic / oblique(뒤의 각도는 넘긴다)는 기울임, small-caps, 늘이기 낱말(condensed 등)은 넘긴다.
+///   bold / bolder 는 700, lighter 는 100, 숫자는 굵기(1 ~ 1000). 그 밖의 낱말이 오면 틀린 문자열이다.
+/// - 크기: 절대 길이(px, pt, pc, in, cm, mm, q), 글꼴에 대는 길이(em, ex, ch, cap, ic, lh, rem, rex, rch, rcap, ric, rlh), %, 뷰포트 단위, 이름 크기, larger, smaller,
+///   calc() 같은 CSS 수학 함수. 뒤의 "/줄높이"는 읽고 넘긴다. (캔버스는 줄높이를 쓰지 않는다) 셈은 parse_css_font_size 가 크롬과 같게 한다.
+///   원본이 글을 굽고 재는 캔버스는 문서에 붙이지 않아 부모 글꼴이 크롬의 마지막 대체 글꼴(맥 Times) 10px 이고, 뿌리는 문서의 표준 글꼴 16px 이다.
+///   웹은 절대 길이 밖의 크기를 브라우저 캔버스에 넣고 다시 읽어 받는다. (platform/web/systemfont.rs 의 resolve_font_size)
+/// - 크기 뒤는 쉼표로 이은 이름 목록이다. 따옴표 이름은 따옴표를 떼고, 따옴표 없는 이름은 낱말을 빈칸 하나로 잇는다. 그리는 쪽이 목록의 앞 이름부터 찾는다.
+/// - 틀린 문자열(크기나 이름이 없음, 음수 크기, 모르는 낱말)은 캔버스의 처음 값 "10px sans-serif" 로 본다.
 //==============================================================================
 pub fn parse_font_string(font_string: &str) -> FontDescription {
 	parse_font_string_strict(font_string).unwrap_or_else(|| FontDescription {
@@ -2074,7 +2074,7 @@ pub fn parse_font_string(font_string: &str) -> FontDescription {
 }
 
 //==============================================================================
-// 폰트 문자열 해석. (틀리면 None)
+/// 폰트 문자열 해석. (틀리면 None)
 //==============================================================================
 fn parse_font_string_strict(font_string: &str) -> Option<FontDescription> {
 	let mut font_weight: u16 = 400;
@@ -2173,7 +2173,7 @@ fn parse_font_string_strict(font_string: &str) -> Option<FontDescription> {
 }
 
 //==============================================================================
-// 폰트 문자열 크기의 단위가 대는 글꼴 치수 하나. (픽셀)
+/// 폰트 문자열 크기의 단위가 대는 글꼴 치수 하나. (픽셀)
 //==============================================================================
 #[derive(Clone, Copy, Debug)]
 struct FontUnitMetrics {
@@ -2187,7 +2187,7 @@ struct FontUnitMetrics {
 
 impl FontUnitMetrics {
 	//==============================================================================
-	// 글꼴을 찾지 못했을 때의 치수. (CSS Values 의 대신 쓰는 값: ex 와 ch 는 0.5em, ic 는 1em. cap 은 0.7em, lh 는 1.2em 으로 둔다)
+	/// 글꼴을 찾지 못했을 때의 치수. (CSS Values 의 대신 쓰는 값: ex 와 ch 는 0.5em, ic 는 1em. cap 은 0.7em, lh 는 1.2em 으로 둔다)
 	//==============================================================================
 	fn create_fallback(font_size: f32) -> FontUnitMetrics {
 		FontUnitMetrics {
@@ -2202,10 +2202,10 @@ impl FontUnitMetrics {
 }
 
 //==============================================================================
-// 폰트 문자열 크기를 셀 때의 기준. (원본이 글을 굽고 재는 캔버스는 문서에 붙이지 않은 HTMLCanvasElement 다. 크롬 158 에서 그 캔버스로 잰 기준)
-// - 부모: 크롬의 마지막 대체 글꼴(맥 Times) 10px. em, %, ex, ch, cap, ic, lh, larger, smaller 가 댄다.
-// - 뿌리: 문서 뿌리의 글꼴, 곧 화면 언어의 표준 글꼴(맥 한국어 Apple SD Gothic Neo, 영어 Times) 16px. rem, rex, rch, rcap, ric, rlh 가 댄다.
-// - 창: 원본 window.innerWidth, innerHeight. vw, vh, vi, vb, vmin, vmax 와 sv, lv, dv 앞붙이, 컨테이너가 없는 cq 단위가 댄다.
+/// 폰트 문자열 크기를 셀 때의 기준. (원본이 글을 굽고 재는 캔버스는 문서에 붙이지 않은 HTMLCanvasElement 다. 크롬 158 에서 그 캔버스로 잰 기준)
+/// - 부모: 크롬의 마지막 대체 글꼴(맥 Times) 10px. em, %, ex, ch, cap, ic, lh, larger, smaller 가 댄다.
+/// - 뿌리: 문서 뿌리의 글꼴, 곧 화면 언어의 표준 글꼴(맥 한국어 Apple SD Gothic Neo, 영어 Times) 16px. rem, rex, rch, rcap, ric, rlh 가 댄다.
+/// - 창: 원본 window.innerWidth, innerHeight. vw, vh, vi, vb, vmin, vmax 와 sv, lv, dv 앞붙이, 컨테이너가 없는 cq 단위가 댄다.
 //==============================================================================
 struct FontSizeContext {
 	parent: FontUnitMetrics,
@@ -2215,14 +2215,14 @@ struct FontSizeContext {
 }
 
 thread_local! {
-	// 뷰포트 단위가 대는 창 크기. (논리 픽셀, 데스크탑이 창 크기가 바뀔 때 알린다)
+	/// 뷰포트 단위가 대는 창 크기. (논리 픽셀, 데스크탑이 창 크기가 바뀔 때 알린다)
 	static FONT_VIEWPORT_SIZE: Cell<(f32, f32)> = const { Cell::new((0.0, 0.0)) };
-	// 부모와 뿌리 글꼴의 치수. (처음 쓸 때 한 번 센다, 데스크탑)
+	/// 부모와 뿌리 글꼴의 치수. (처음 쓸 때 한 번 센다, 데스크탑)
 	static FONT_UNIT_REFERENCE: Cell<Option<(FontUnitMetrics, FontUnitMetrics)>> = const { Cell::new(None) };
 }
 
 //==============================================================================
-// 폰트 문자열의 뷰포트 단위(vw, vh 같은)가 대는 창 크기 정하기. (논리 픽셀, 원본 window.innerWidth / innerHeight 자리. 데스크탑 플랫폼이 창 크기가 바뀔 때 부른다)
+/// 폰트 문자열의 뷰포트 단위(vw, vh 같은)가 대는 창 크기 정하기. (논리 픽셀, 원본 window.innerWidth / innerHeight 자리. 데스크탑 플랫폼이 창 크기가 바뀔 때 부른다)
 //==============================================================================
 pub fn set_font_viewport_size(width: f32, height: f32) {
 	FONT_VIEWPORT_SIZE.with(|viewport_size| viewport_size.set((width, height)));
@@ -2230,7 +2230,7 @@ pub fn set_font_viewport_size(width: f32, height: f32) {
 
 impl FontSizeContext {
 	//==============================================================================
-	// 지금의 기준. (데스크탑은 부모와 뿌리 글꼴을 운영체제에서 찾아 처음 한 번 센다)
+	/// 지금의 기준. (데스크탑은 부모와 뿌리 글꼴을 운영체제에서 찾아 처음 한 번 센다)
 	//==============================================================================
 	#[cfg(not(target_arch = "wasm32"))]
 	fn create() -> FontSizeContext {
@@ -2253,7 +2253,7 @@ impl FontSizeContext {
 	}
 
 	//==============================================================================
-	// 절대 길이만 셀 때의 기준. (웹은 그 밖의 크기를 브라우저에 맡긴다)
+	/// 절대 길이만 셀 때의 기준. (웹은 그 밖의 크기를 브라우저에 맡긴다)
 	//==============================================================================
 	#[cfg(target_arch = "wasm32")]
 	fn create_absolute() -> FontSizeContext {
@@ -2266,7 +2266,7 @@ impl FontSizeContext {
 	}
 
 	//==============================================================================
-	// 단위 1 의 픽셀과 고정폭 배율을 받는지. (모르는 단위면 None. % 는 따로 센다)
+	/// 단위 1 의 픽셀과 고정폭 배율을 받는지. (모르는 단위면 None. % 는 따로 센다)
 	//==============================================================================
 	fn read_unit_pixel(&self, unit: &str) -> Option<(f32, bool)> {
 		let viewport_minimum = self.viewport_width.min(self.viewport_height);
@@ -2349,22 +2349,22 @@ impl FontSizeContext {
 	}
 }
 
-// 문서에 붙이지 않은 캔버스의 부모 글꼴 크기. (캔버스 처음 값 "10px sans-serif")
+/// 문서에 붙이지 않은 캔버스의 부모 글꼴 크기. (캔버스 처음 값 "10px sans-serif")
 const PARENT_FONT_SIZE: f32 = 10.0;
-// 문서 뿌리의 글꼴 크기. (크롬 기본 글꼴 크기 16)
+/// 문서 뿌리의 글꼴 크기. (크롬 기본 글꼴 크기 16)
 const ROOT_FONT_SIZE: f32 = 16.0;
-// 고정폭 일반 이름의 상대 크기 배율. (크롬 기본 고정폭 글꼴 크기 13 / 기본 글꼴 크기 16)
+/// 고정폭 일반 이름의 상대 크기 배율. (크롬 기본 고정폭 글꼴 크기 13 / 기본 글꼴 크기 16)
 const MONOSPACE_SIZE_RATIO: f32 = 13.0 / 16.0;
-// 글자 크기의 상한. (크롬 FontDescription 의 최대 글자 크기 10000)
+/// 글자 크기의 상한. (크롬 FontDescription 의 최대 글자 크기 10000)
 const MAXIMUM_FONT_SIZE: f32 = 10000.0;
 
 //==============================================================================
-// 글꼴 파일의 단위 치수. (크롬 SimpleFontData::PlatformInit 과 같은 셈, 읽지 못하면 None)
-// - ex: 맥은 'x' 글리프 상자의 위 (CTFontGetXHeight 대신 글리프를 잰다), 그 밖은 OS/2 의 x 높이, 없으면 'x' 상자의 위, 그것도 없으면 올라간 길이 x 0.56.
-// - cap: OS/2 의 대문자 높이, 없으면 'H' 상자의 위. ch: '0' 의 전진폭, 없으면 0.5em. ic: '水'(U+6C34) 의 전진폭, 없으면 1em.
-// - lh: 줄높이 normal = 반올림한 올라간 길이 + 내려간 길이 + 줄 사이. 맥은 hhea, 윈도우는 OS/2 USE_TYPO_METRICS 면 typo, 아니면 win 값,
-//   리눅스는 hhea 다. 맥은 Times, Helvetica, Courier 의 올라간 길이에 (올라간 + 내려간) x 0.15 를 반올림해 더한다. (font_metrics.cc 의 AscentDescentWithHacks)
-//   윈도우와 리눅스는 크롬과 견주어 보지 못했다.
+/// 글꼴 파일의 단위 치수. (크롬 SimpleFontData::PlatformInit 과 같은 셈, 읽지 못하면 None)
+/// - ex: 맥은 'x' 글리프 상자의 위 (CTFontGetXHeight 대신 글리프를 잰다), 그 밖은 OS/2 의 x 높이, 없으면 'x' 상자의 위, 그것도 없으면 올라간 길이 x 0.56.
+/// - cap: OS/2 의 대문자 높이, 없으면 'H' 상자의 위. ch: '0' 의 전진폭, 없으면 0.5em. ic: '水'(U+6C34) 의 전진폭, 없으면 1em.
+/// - lh: 줄높이 normal = 반올림한 올라간 길이 + 내려간 길이 + 줄 사이. 맥은 hhea, 윈도우는 OS/2 USE_TYPO_METRICS 면 typo, 아니면 win 값,
+///   리눅스는 hhea 다. 맥은 Times, Helvetica, Courier 의 올라간 길이에 (올라간 + 내려간) x 0.15 를 반올림해 더한다. (font_metrics.cc 의 AscentDescentWithHacks)
+///   윈도우와 리눅스는 크롬과 견주어 보지 못했다.
 //==============================================================================
 #[cfg(not(target_arch = "wasm32"))]
 fn read_font_unit_metrics(source: &FontFileSource, family_name: &str, font_size: f32) -> Option<FontUnitMetrics> {
@@ -2433,7 +2433,7 @@ fn read_font_unit_metrics(source: &FontFileSource, family_name: &str, font_size:
 }
 
 //==============================================================================
-// 글 맨 앞이 CSS 함수면 닫는 괄호 다음 자리. ("calc(1px + 2px) a" → 15, 함수가 아니거나 괄호가 닫히지 않으면 None)
+/// 글 맨 앞이 CSS 함수면 닫는 괄호 다음 자리. ("calc(1px + 2px) a" → 15, 함수가 아니거나 괄호가 닫히지 않으면 None)
 //==============================================================================
 fn find_css_function_end(text: &str) -> Option<usize> {
 	let name_end = text.find('(')?;
@@ -2457,7 +2457,7 @@ fn find_css_function_end(text: &str) -> Option<usize> {
 }
 
 //==============================================================================
-// 글자 크기 자리의 글인지. (이름 크기, 길이 단위나 % 가 붙은 수, CSS 함수. 셈은 parse_css_font_size 가 한다. oblique 뒤의 "10deg" 같은 각도는 크기가 아니다)
+/// 글자 크기 자리의 글인지. (이름 크기, 길이 단위나 % 가 붙은 수, CSS 함수. 셈은 parse_css_font_size 가 한다. oblique 뒤의 "10deg" 같은 각도는 크기가 아니다)
 //==============================================================================
 fn is_css_font_size_text(size_text: &str) -> bool {
 	if matches!(size_text, "xx-small" | "x-small" | "small" | "medium" | "large" | "x-large" | "xx-large" | "xxx-large" | "larger" | "smaller") {
@@ -2478,7 +2478,7 @@ fn is_css_font_size_text(size_text: &str) -> bool {
 }
 
 //==============================================================================
-// 절대 길이인지. (px, pt, pc, in, cm, mm, q 가 붙은 수)
+/// 절대 길이인지. (px, pt, pc, in, cm, mm, q 가 붙은 수)
 //==============================================================================
 #[cfg(target_arch = "wasm32")]
 fn is_absolute_css_length_text(size_text: &str) -> bool {
@@ -2493,8 +2493,8 @@ fn is_absolute_css_length_text(size_text: &str) -> bool {
 }
 
 //==============================================================================
-// 글 맨 앞의 CSS 수와 나머지. ("+1.5e1px" → (15, "px"), 수가 아니면 None)
-// - CSS 수의 꼴: 부호, 숫자(소수점 뒤에 숫자가 있어야 한다, ".5" 는 되고 "2." 는 안 된다), 지수.
+/// 글 맨 앞의 CSS 수와 나머지. ("+1.5e1px" → (15, "px"), 수가 아니면 None)
+/// - CSS 수의 꼴: 부호, 숫자(소수점 뒤에 숫자가 있어야 한다, ".5" 는 되고 "2." 는 안 된다), 지수.
 //==============================================================================
 fn parse_css_number_prefix(text: &str) -> Option<(f64, &str)> {
 	let bytes = text.as_bytes();
@@ -2534,14 +2534,14 @@ fn parse_css_number_prefix(text: &str) -> Option<(f64, &str)> {
 }
 
 //==============================================================================
-// CSS 글자 크기 하나 읽기. (픽셀, 소문자 글. 크기가 아니거나 음수면 None. 크롬 158 의 문서에 붙이지 않은 캔버스와 같은 셈)
-// - 이름 크기: xx-small 9, x-small 10, small 13, medium 16, large 18, x-large 24, xx-large 32, xxx-large 48. 고정폭은 9, 10, 12, 13, 16, 20, 26, 39.
-//   larger 와 smaller 는 부모 10px 의 1.2 배와 1 / 1.2 배.
-// - 단위: px, pt, pc, in, cm, mm, q 와 em, %, ex, ch, cap, ic, lh(부모 글꼴), rem, rex, rch, rcap, ric, rlh(뿌리 글꼴), 뷰포트 단위. (FontSizeContext)
-// - 이름 목록이 따옴표 없는 monospace 하나뿐이면 부모와 뿌리 글꼴에 대는 단위(rem 은 빼고)와 %, larger, smaller 에 13 / 16 을 곱한다.
-// - calc(), min(), max(), clamp(), abs(), sign(), round(), mod(), rem(), hypot(), sqrt(), pow(), exp(), log() 를 셈한다. (evaluate_css_math_function)
-//   함수 안의 길이에는 고정폭 배율을 걸지 않고, 퍼센트만으로 된 값이면 건다. 음수는 0 으로 자르고 수가 아니면(NaN) 0 이다.
-// - 10000 을 넘으면 10000 이다.
+/// CSS 글자 크기 하나 읽기. (픽셀, 소문자 글. 크기가 아니거나 음수면 None. 크롬 158 의 문서에 붙이지 않은 캔버스와 같은 셈)
+/// - 이름 크기: xx-small 9, x-small 10, small 13, medium 16, large 18, x-large 24, xx-large 32, xxx-large 48. 고정폭은 9, 10, 12, 13, 16, 20, 26, 39.
+///   larger 와 smaller 는 부모 10px 의 1.2 배와 1 / 1.2 배.
+/// - 단위: px, pt, pc, in, cm, mm, q 와 em, %, ex, ch, cap, ic, lh(부모 글꼴), rem, rex, rch, rcap, ric, rlh(뿌리 글꼴), 뷰포트 단위. (FontSizeContext)
+/// - 이름 목록이 따옴표 없는 monospace 하나뿐이면 부모와 뿌리 글꼴에 대는 단위(rem 은 빼고)와 %, larger, smaller 에 13 / 16 을 곱한다.
+/// - calc(), min(), max(), clamp(), abs(), sign(), round(), mod(), rem(), hypot(), sqrt(), pow(), exp(), log() 를 셈한다. (evaluate_css_math_function)
+///   함수 안의 길이에는 고정폭 배율을 걸지 않고, 퍼센트만으로 된 값이면 건다. 음수는 0 으로 자르고 수가 아니면(NaN) 0 이다.
+/// - 10000 을 넘으면 10000 이다.
 //==============================================================================
 fn parse_css_font_size(size_text: &str, is_monospace_only: bool, font_size_context: &FontSizeContext) -> Option<f32> {
 	const KEYWORD_LIST: [&str; 8] = ["xx-small", "x-small", "small", "medium", "large", "x-large", "xx-large", "xxx-large"];
@@ -2620,7 +2620,7 @@ fn parse_css_font_size(size_text: &str, is_monospace_only: bool, font_size_conte
 }
 
 //==============================================================================
-// CSS 수학 함수의 값. (수, 또는 길이(픽셀로 푼 값과 퍼센트로만 된 값인지))
+/// CSS 수학 함수의 값. (수, 또는 길이(픽셀로 푼 값과 퍼센트로만 된 값인지))
 //==============================================================================
 #[derive(Clone, Copy, Debug)]
 enum CssMathValue {
@@ -2632,8 +2632,8 @@ enum CssMathValue {
 }
 
 //==============================================================================
-// CSS 수학 함수 해석기. (CSS Values 4 의 calc 문법: 더하기와 빼기는 앞뒤에 빈칸이 있어야 하고, 곱하기와 나누기는 없어도 된다)
-// - 퍼센트는 부모 글자 크기에 댄다. 형이 맞지 않으면(길이 + 수, 길이 x 길이) 틀린 값이다.
+/// CSS 수학 함수 해석기. (CSS Values 4 의 calc 문법: 더하기와 빼기는 앞뒤에 빈칸이 있어야 하고, 곱하기와 나누기는 없어도 된다)
+/// - 퍼센트는 부모 글자 크기에 댄다. 형이 맞지 않으면(길이 + 수, 길이 x 길이) 틀린 값이다.
 //==============================================================================
 struct CssMathParser<'text> {
 	text: &'text str,
@@ -2643,7 +2643,7 @@ struct CssMathParser<'text> {
 
 impl CssMathParser<'_> {
 	//==============================================================================
-	// 빈칸 넘기기. (넘긴 것이 있으면 true)
+	/// 빈칸 넘기기. (넘긴 것이 있으면 true)
 	//==============================================================================
 	fn skip_whitespace(&mut self) -> bool {
 		let start_position = self.position;
@@ -2654,7 +2654,7 @@ impl CssMathParser<'_> {
 	}
 
 	//==============================================================================
-	// 다음 글자가 그것이면 먹기.
+	/// 다음 글자가 그것이면 먹기.
 	//==============================================================================
 	fn consume_byte(&mut self, expected_byte: u8) -> bool {
 		if self.position < self.text.len() && self.text.as_bytes()[self.position] == expected_byte {
@@ -2665,7 +2665,7 @@ impl CssMathParser<'_> {
 	}
 
 	//==============================================================================
-	// 이름 하나 읽기. (영문자와 하이픈, 소문자로)
+	/// 이름 하나 읽기. (영문자와 하이픈, 소문자로)
 	//==============================================================================
 	fn read_identifier(&mut self) -> String {
 		let start_position = self.position;
@@ -2682,7 +2682,7 @@ impl CssMathParser<'_> {
 	}
 
 	//==============================================================================
-	// 함수 하나. ("이름(" 부터 닫는 괄호까지)
+	/// 함수 하나. ("이름(" 부터 닫는 괄호까지)
 	//==============================================================================
 	fn parse_function(&mut self) -> Option<CssMathValue> {
 		let function_name = self.read_identifier();
@@ -2773,7 +2773,7 @@ impl CssMathParser<'_> {
 	}
 
 	//==============================================================================
-	// 쉼표로 이은 인자들과 닫는 괄호.
+	/// 쉼표로 이은 인자들과 닫는 괄호.
 	//==============================================================================
 	fn parse_argument_list(&mut self) -> Option<Vec<CssMathValue>> {
 		let mut argument_list = Vec::new();
@@ -2792,7 +2792,7 @@ impl CssMathParser<'_> {
 	}
 
 	//==============================================================================
-	// round(방식?, 값, 단위?). (방식: nearest(처음, 반은 위로), up, down, to-zero. 단위를 빼면 값이 수여야 하고 1 로 본다)
+	/// round(방식?, 값, 단위?). (방식: nearest(처음, 반은 위로), up, down, to-zero. 단위를 빼면 값이 수여야 하고 1 로 본다)
 	//==============================================================================
 	fn parse_round_function(&mut self) -> Option<CssMathValue> {
 		self.skip_whitespace();
@@ -2848,7 +2848,7 @@ impl CssMathParser<'_> {
 	}
 
 	//==============================================================================
-	// clamp(최소, 값, 최대). (최소나 최대 자리에 none 이 오면 그쪽은 자르지 않는다. 최소가 최대보다 크면 최소)
+	/// clamp(최소, 값, 최대). (최소나 최대 자리에 none 이 오면 그쪽은 자르지 않는다. 최소가 최대보다 크면 최소)
 	//==============================================================================
 	fn parse_clamp_function(&mut self) -> Option<CssMathValue> {
 		let mut bound_list: Vec<Option<CssMathValue>> = Vec::new();
@@ -2885,7 +2885,7 @@ impl CssMathParser<'_> {
 	}
 
 	//==============================================================================
-	// 더하기, 빼기. (연산자 앞뒤에 빈칸이 있어야 한다)
+	/// 더하기, 빼기. (연산자 앞뒤에 빈칸이 있어야 한다)
 	//==============================================================================
 	fn parse_sum(&mut self) -> Option<CssMathValue> {
 		let mut result = self.parse_product()?;
@@ -2920,7 +2920,7 @@ impl CssMathParser<'_> {
 	}
 
 	//==============================================================================
-	// 곱하기, 나누기. (길이 x 수, 수 x 길이, 길이 / 수, 길이 / 길이 = 수)
+	/// 곱하기, 나누기. (길이 x 수, 수 x 길이, 길이 / 수, 길이 / 길이 = 수)
 	//==============================================================================
 	fn parse_product(&mut self) -> Option<CssMathValue> {
 		let mut result = self.parse_value()?;
@@ -2969,7 +2969,7 @@ impl CssMathParser<'_> {
 	}
 
 	//==============================================================================
-	// 값 하나. (단위가 붙은 수, 괄호, 함수, 상수 pi, e, infinity, -infinity, nan)
+	/// 값 하나. (단위가 붙은 수, 괄호, 함수, 상수 pi, e, infinity, -infinity, nan)
 	//==============================================================================
 	fn parse_value(&mut self) -> Option<CssMathValue> {
 		if self.consume_byte(b'(') {
@@ -3035,7 +3035,7 @@ impl CssMathParser<'_> {
 }
 
 //==============================================================================
-// 같은 형의 두 값 합치기. (수와 수, 길이와 길이. 형이 다르면 None, 퍼센트로만 된 값인지는 둘 다 그럴 때만)
+/// 같은 형의 두 값 합치기. (수와 수, 길이와 길이. 형이 다르면 None, 퍼센트로만 된 값인지는 둘 다 그럴 때만)
 //==============================================================================
 fn combine_css_math_values(first_value: CssMathValue, second_value: CssMathValue, combine: impl Fn(f64, f64) -> f64) -> Option<CssMathValue> {
 	match (first_value, second_value) {
@@ -3055,7 +3055,7 @@ fn combine_css_math_values(first_value: CssMathValue, second_value: CssMathValue
 }
 
 //==============================================================================
-// 값의 수에 함수 걸기. (형은 그대로)
+/// 값의 수에 함수 걸기. (형은 그대로)
 //==============================================================================
 fn map_css_math_value(value: CssMathValue, map: impl Fn(f64) -> f64) -> CssMathValue {
 	match value {
@@ -3072,7 +3072,7 @@ fn map_css_math_value(value: CssMathValue, map: impl Fn(f64) -> f64) -> CssMathV
 }
 
 //==============================================================================
-// 값의 수. (길이는 픽셀)
+/// 값의 수. (길이는 픽셀)
 //==============================================================================
 fn read_css_math_number(value: CssMathValue) -> f64 {
 	match value {
@@ -3086,7 +3086,7 @@ fn read_css_math_number(value: CssMathValue) -> f64 {
 }
 
 //==============================================================================
-// CSS 글꼴 이름 목록 읽기. ("'A B', C D, sans-serif" → ["A B", "C D", "sans-serif"], 비었거나 틀리면 None)
+/// CSS 글꼴 이름 목록 읽기. ("'A B', C D, sans-serif" → ["A B", "C D", "sans-serif"], 비었거나 틀리면 None)
 //==============================================================================
 fn parse_css_family_list(family_list_text: &str) -> Option<Vec<String>> {
 	let mut family_name_list: Vec<String> = Vec::new();
@@ -3153,7 +3153,7 @@ fn parse_css_family_list(family_list_text: &str) -> Option<Vec<String>> {
 }
 
 //==============================================================================
-// 폰트 읽기. (웹 글꼴이면 풀고, 래스터와 모양 짓기 얼굴을 만든다)
+/// 폰트 읽기. (웹 글꼴이면 풀고, 래스터와 모양 짓기 얼굴을 만든다)
 //==============================================================================
 fn load_font(font_bytes: Vec<u8>) -> Result<LoadedFont, String> {
 	let font_bytes = decompress_web_font(font_bytes)?;
@@ -3161,8 +3161,8 @@ fn load_font(font_bytes: Vec<u8>) -> Result<LoadedFont, String> {
 }
 
 //==============================================================================
-// 웹 글꼴이면 TTF 로 풀기. (머리 4 바이트가 "wOFF" 면 WOFF, "wOF2" 면 WOFF2. 아니면 그대로)
-// - fontdue 는 ttf, ttc, otf 만 읽는다. 원본 기본 글꼴 DOSGothic 이 .woff 라서 푼다.
+/// 웹 글꼴이면 TTF 로 풀기. (머리 4 바이트가 "wOFF" 면 WOFF, "wOF2" 면 WOFF2. 아니면 그대로)
+/// - fontdue 는 ttf, ttc, otf 만 읽는다. 원본 기본 글꼴 DOSGothic 이 .woff 라서 푼다.
 //==============================================================================
 fn decompress_web_font(font_bytes: Vec<u8>) -> Result<Vec<u8>, String> {
 	let signature = font_bytes.get(0..4).unwrap_or(&[]);
@@ -3176,7 +3176,7 @@ fn decompress_web_font(font_bytes: Vec<u8>) -> Result<Vec<u8>, String> {
 }
 
 //==============================================================================
-// 줄 높이 값. (위로 올라간 길이, 아래로 내려간 길이. 둘 다 양수)
+/// 줄 높이 값. (위로 올라간 길이, 아래로 내려간 길이. 둘 다 양수)
 //==============================================================================
 fn read_line_metrics(font: &LoadedFont, pixel_size: f32) -> (f32, f32) {
 	match font.raster_font.horizontal_line_metrics(pixel_size) {
@@ -3190,7 +3190,7 @@ fn read_line_metrics(font: &LoadedFont, pixel_size: f32) -> (f32, f32) {
 }
 
 //==============================================================================
-// 외곽선 띠 만들기. (원 모양으로 넓힌 값 - 원 모양으로 좁힌 값)
+/// 외곽선 띠 만들기. (원 모양으로 넓힌 값 - 원 모양으로 좁힌 값)
 //==============================================================================
 pub(crate) fn build_stroke_coverage(coverage: &[u8], bitmap_width: i32, bitmap_height: i32, stroke_radius: f32) -> Vec<u8> {
 	let radius_ceiling = stroke_radius.ceil() as i32;
@@ -3232,7 +3232,7 @@ mod tests {
 	use super::*;
 
 	//==============================================================================
-	// WOFF 글꼴이 풀려서 읽히는지. (VANILLA_TEST_WOFF_PATH 에 .woff 경로를 줄 때만 본다)
+	/// WOFF 글꼴이 풀려서 읽히는지. (VANILLA_TEST_WOFF_PATH 에 .woff 경로를 줄 때만 본다)
 	//==============================================================================
 	#[test]
 	fn load_woff_font() {
@@ -3253,8 +3253,8 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 글 재기 캐시: 같은 폰트 문자열과 글은 한 번만 재 두고, 글꼴을 새로 등록하면 비운다.
-	// (엔진 기본 글꼴 후보 가운데 이 PC 에 있는 것으로 본다, 하나도 없으면 건너뛴다)
+	/// 글 재기 캐시: 같은 폰트 문자열과 글은 한 번만 재 두고, 글꼴을 새로 등록하면 비운다.
+	/// (엔진 기본 글꼴 후보 가운데 이 PC 에 있는 것으로 본다, 하나도 없으면 건너뛴다)
 	//==============================================================================
 	#[test]
 	fn measure_cache_reuses_and_clears_on_font_registration() {
@@ -3287,7 +3287,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 구운 문자열 키: 같은 키는 같은 해시, 하나라도 다르면 맞지 않는다.
+	/// 구운 문자열 키: 같은 키는 같은 해시, 하나라도 다르면 맞지 않는다.
 	//==============================================================================
 	#[test]
 	fn entry_key_matches_only_same_key() {
@@ -3326,7 +3326,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 안티앨리어싱을 끄면 문턱값 128 로 0 과 255 로 갈린다. (원본과 같은 문턱)
+	/// 안티앨리어싱을 끄면 문턱값 128 로 0 과 255 로 갈린다. (원본과 같은 문턱)
 	//==============================================================================
 	#[test]
 	fn alpha_threshold_splits_at_128() {
@@ -3340,7 +3340,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 폰트 문자열: italic, 굵기, 따옴표 이름, 이름 목록의 첫 이름을 읽는다.
+	/// 폰트 문자열: italic, 굵기, 따옴표 이름, 이름 목록의 첫 이름을 읽는다.
 	//==============================================================================
 	#[test]
 	fn parse_font_string_reads_style_weight_and_family() {
@@ -3357,7 +3357,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 폰트 문자열: CSS 단위와 이름 크기, 줄높이, 이름 목록, 틀린 문자열. (크롬 Canvas2D 의 font 가 돌려준 값과 대었다)
+	/// 폰트 문자열: CSS 단위와 이름 크기, 줄높이, 이름 목록, 틀린 문자열. (크롬 Canvas2D 의 font 가 돌려준 값과 대었다)
 	//==============================================================================
 	#[test]
 	fn parse_font_string_reads_css_units_and_family_list() {
@@ -3399,8 +3399,8 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 시스템 글꼴 사슬과 운영체제 이름 찾기, 대체 글꼴: 맥 크롬 Canvas2D 의 measureText 값과 같다. (맥만, 같은 글꼴이 있을 때)
-	// - 한글은 사슬의 Apple SD Gothic Neo, "16px Helvetica" 와 "16px Menlo" 는 올리지 않은 이름을 운영체제 글꼴에서 찾은 것, 태국어는 운영체제 대체 글꼴.
+	/// 시스템 글꼴 사슬과 운영체제 이름 찾기, 대체 글꼴: 맥 크롬 Canvas2D 의 measureText 값과 같다. (맥만, 같은 글꼴이 있을 때)
+	/// - 한글은 사슬의 Apple SD Gothic Neo, "16px Helvetica" 와 "16px Menlo" 는 올리지 않은 이름을 운영체제 글꼴에서 찾은 것, 태국어는 운영체제 대체 글꼴.
 	//==============================================================================
 	#[cfg(target_os = "macos")]
 	#[test]
@@ -3424,9 +3424,9 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 맥 시스템 UI 글꼴(SFNS)의 광학 크기와 자간 표, 크롬이 모르는 이름: 맥 크롬 158 Canvas2D 의 measureText 값과 같다. (맥만, SFNS 가 있을 때)
-	// - system-ui 와 BlinkMacSystemFont 는 opsz 축을 글자 크기로 걸고(17 ~ 96 으로 자른다) trak 표의 자간을 더한다. 8 ~ 128px, 굵기 300, 400, 700.
-	// - -apple-system 은 크롬이 모르는 이름이라 다음 이름으로 넘어간다. (사슬에서는 Apple SD Gothic Neo, 표준 글꼴과 같은 값)
+	/// 맥 시스템 UI 글꼴(SFNS)의 광학 크기와 자간 표, 크롬이 모르는 이름: 맥 크롬 158 Canvas2D 의 measureText 값과 같다. (맥만, SFNS 가 있을 때)
+	/// - system-ui 와 BlinkMacSystemFont 는 opsz 축을 글자 크기로 걸고(17 ~ 96 으로 자른다) trak 표의 자간을 더한다. 8 ~ 128px, 굵기 300, 400, 700.
+	/// - -apple-system 은 크롬이 모르는 이름이라 다음 이름으로 넘어간다. (사슬에서는 Apple SD Gothic Neo, 표준 글꼴과 같은 값)
 	//==============================================================================
 	#[cfg(target_os = "macos")]
 	#[test]
@@ -3462,9 +3462,9 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 폰트 문자열 크기의 단위와 calc: 맥 크롬 158 의 문서에 붙이지 않은 캔버스가 font 를 다시 읽은 값과 같다. (창 1000 x 700, 맥만)
-	// - 부모 글꼴은 Times 10px, 뿌리 글꼴은 화면 언어의 표준 글꼴 16px(한국어 Apple SD Gothic Neo, 뿌리 값은 한국어일 때만 본다).
-	// - 이름 목록이 monospace 하나뿐이면 상대 크기에 13 / 16, 이름 크기는 고정폭 표.
+	/// 폰트 문자열 크기의 단위와 calc: 맥 크롬 158 의 문서에 붙이지 않은 캔버스가 font 를 다시 읽은 값과 같다. (창 1000 x 700, 맥만)
+	/// - 부모 글꼴은 Times 10px, 뿌리 글꼴은 화면 언어의 표준 글꼴 16px(한국어 Apple SD Gothic Neo, 뿌리 값은 한국어일 때만 본다).
+	/// - 이름 목록이 monospace 하나뿐이면 상대 크기에 13 / 16, 이름 크기는 고정폭 표.
 	//==============================================================================
 	#[cfg(target_os = "macos")]
 	#[test]
@@ -3501,8 +3501,8 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 일반 이름의 기본 글꼴: 맥 크롬 158 (화면 언어 한국어)의 measureText 값과 같다. (맥만, 화면 언어가 한국어일 때)
-	// - 크롬 맥 한국어 표: 표준 Apple SD Gothic Neo, serif AppleMyungjo, sans-serif Apple SD Gothic Neo, monospace Menlo, cursive Apple Chancery, fantasy Papyrus, math STIX Two Math.
+	/// 일반 이름의 기본 글꼴: 맥 크롬 158 (화면 언어 한국어)의 measureText 값과 같다. (맥만, 화면 언어가 한국어일 때)
+	/// - 크롬 맥 한국어 표: 표준 Apple SD Gothic Neo, serif AppleMyungjo, sans-serif Apple SD Gothic Neo, monospace Menlo, cursive Apple Chancery, fantasy Papyrus, math STIX Two Math.
 	//==============================================================================
 	#[cfg(target_os = "macos")]
 	#[test]
@@ -3526,9 +3526,9 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 맥 색 이모지와 hvgl 글꼴: CoreText 로 그려 맥 크롬과 같다. (맥만, Apple Color Emoji 가 있을 때)
-	// - 이모지 전진폭은 크롬 measureText 값, 16px 이모지의 그림 상자와 알파 합은 크롬 캔버스 getImageData 로 잰 값이다.
-	// - 중국어 간체(PingFangUI, 윤곽이 애플 전용 hvgl 표에 있다)도 그려진다.
+	/// 맥 색 이모지와 hvgl 글꼴: CoreText 로 그려 맥 크롬과 같다. (맥만, Apple Color Emoji 가 있을 때)
+	/// - 이모지 전진폭은 크롬 measureText 값, 16px 이모지의 그림 상자와 알파 합은 크롬 캔버스 getImageData 로 잰 값이다.
+	/// - 중국어 간체(PingFangUI, 윤곽이 애플 전용 hvgl 표에 있다)도 그려진다.
 	//==============================================================================
 	#[cfg(target_os = "macos")]
 	#[test]
@@ -3567,7 +3567,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 지켜보는 이름: 올린 얼굴의 글자 범위에 들지 않은 글자만 모으고, 꺼내면 비운다. (지켜보지 않는 이름은 모으지 않는다)
+	/// 지켜보는 이름: 올린 얼굴의 글자 범위에 들지 않은 글자만 모으고, 꺼내면 비운다. (지켜보지 않는 이름은 모으지 않는다)
 	//==============================================================================
 	#[test]
 	fn unresolved_family_characters_are_collected() {
@@ -3591,7 +3591,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 웹 글꼴이 아닌 바이트는 그대로 둔다.
+	/// 웹 글꼴이 아닌 바이트는 그대로 둔다.
 	//==============================================================================
 	#[test]
 	fn keep_plain_font_bytes() {

@@ -1,21 +1,23 @@
 //==============================================================================
-// 스프라이트 아틀라스. (vanilla.js resource/spriteatlas.js 의 SpriteAtlas)
-// - 쪽 그림 몇 장에 모은 그림을 이름으로 꺼낸다. 같은 쪽 그림을 쓰는 스프라이트는 엔진이 묶어 한 번에 그린다.
-// - 읽는 JSON 꼴은 원본과 같은 둘이다.
-//   1. tools/atlas.cjs 가 만든 것. { images: { "이름.png": { x, y, width, height, page } }, meta: { imageFileName, pages: [{ imageFileName }] } }
-//      page 가 없으면 0 쪽, meta.pages 가 없으면 meta.imageFileName 한 장이다.
-//   2. 쪽 경로와 [쪽, x, y, 가로, 세로] 표. { pagePaths: ["경로"], frames: { "이름": [쪽, x, y, 가로, 세로] } }
-// - 그림 이름은 확장자를 뗀 이름으로도 찾는다. ("icon-close.png" 는 "icon-close" 로도 "icon-close.png" 로도 찾는다)
-// - 쪽 경로에 빗금(/)이 없으면 JSON 이 있는 폴더를 기준으로, 있으면 적힌 그대로 읽는다. ("./" 로 시작하면 그 "./" 를 떼고 애셋 폴더 기준이다)
-// - 원본과 다른 것:
-//   원본은 load 가 JSON 을 기다린 뒤 쪽 그림을 받는 async 다. 러스트 판은 애셋처럼 요청만 하고, update 가 JSON 이 온 것을 보고 쪽 그림을 청한다.
-//   load, load_data 는 원본처럼 await 할 수 있는 SpriteAtlasLoadHandle 을 돌려준다. 손잡이는 불러오기 상태를 나눠 들어 아틀라스를 빌리지 않으므로
-//   씬이 든 아틀라스도 scene_context.with(|씬, 엔진| 씬.아틀라스.load(엔진, 경로)).await 로 기다린다. (기다리는 동안 프레임마다 update 를 불러 준다)
-//   데스크탑은 그 자리에서 읽혀 load 가 끝나면 다 읽혔다. 웹은 JSON 과 쪽 그림이 차례로 오므로 is_loaded 가 true 가 될 때까지 tick 에서 update 를 부르고,
-//   그 뒤에 조각을 건다. (씬이 맡아 기다리게 하려면 JSON 은 track_json_asset, 쪽 그림은 온 뒤 update 가 청한다)
-//   원본의 찾을 아틀라스 목록(add_search_atlas, find_frame, apply_search_frame)은 스레드 하나에 하나인 목록이고, 아틀라스를 나눠 들게 Rc<RefCell<SpriteAtlas>> 로 넣는다.
-//   find_frame 은 빌린 조각 대신 조각의 복사(Frame 은 그림 Rc 와 영역이라 값싸다)를 돌려준다. 넘긴 목록에서 찾는 find_frame_in_order 도 있다.
-//   get_page_images 는 원본 HTMLImageElement 목록 대신 읽힌 쪽 그림(Image) 목록이다.
+//! 스프라이트 아틀라스. (vanilla.js resource/spriteatlas.js 의 SpriteAtlas)
+//! - 쪽 그림 몇 장에 모은 그림을 이름으로 꺼낸다. 같은 쪽 그림을 쓰는 스프라이트는 엔진이 묶어 한 번에 그린다.
+//! - 읽는 JSON 꼴은 원본과 같은 둘이다.
+//!   1. tools/atlas.cjs 가 만든 것. { images: { "이름.png": { x, y, width, height, page } }, meta: { imageFileName, pages: [{ imageFileName }] } }
+//!   ```text
+//!      page 가 없으면 0 쪽, meta.pages 가 없으면 meta.imageFileName 한 장이다.
+//!   ```
+//!   2. 쪽 경로와 [쪽, x, y, 가로, 세로] 표. { pagePaths: `["경로"]`, frames: { "이름": [쪽, x, y, 가로, 세로] } }
+//! - 그림 이름은 확장자를 뗀 이름으로도 찾는다. ("icon-close.png" 는 "icon-close" 로도 "icon-close.png" 로도 찾는다)
+//! - 쪽 경로에 빗금(/)이 없으면 JSON 이 있는 폴더를 기준으로, 있으면 적힌 그대로 읽는다. ("./" 로 시작하면 그 "./" 를 떼고 애셋 폴더 기준이다)
+//! - 원본과 다른 것:
+//!   원본은 load 가 JSON 을 기다린 뒤 쪽 그림을 받는 async 다. 러스트 판은 애셋처럼 요청만 하고, update 가 JSON 이 온 것을 보고 쪽 그림을 청한다.
+//!   load, load_data 는 원본처럼 await 할 수 있는 SpriteAtlasLoadHandle 을 돌려준다. 손잡이는 불러오기 상태를 나눠 들어 아틀라스를 빌리지 않으므로
+//!   씬이 든 아틀라스도 scene_context.with(|씬, 엔진| 씬.아틀라스.load(엔진, 경로)).await 로 기다린다. (기다리는 동안 프레임마다 update 를 불러 준다)
+//!   데스크탑은 그 자리에서 읽혀 load 가 끝나면 다 읽혔다. 웹은 JSON 과 쪽 그림이 차례로 오므로 is_loaded 가 true 가 될 때까지 tick 에서 update 를 부르고,
+//!   그 뒤에 조각을 건다. (씬이 맡아 기다리게 하려면 JSON 은 track_json_asset, 쪽 그림은 온 뒤 update 가 청한다)
+//!   원본의 찾을 아틀라스 목록(add_search_atlas, find_frame, apply_search_frame)은 스레드 하나에 하나인 목록이고, 아틀라스를 나눠 들게 `Rc<RefCell<SpriteAtlas>>` 로 넣는다.
+//!   find_frame 은 빌린 조각 대신 조각의 복사(Frame 은 그림 Rc 와 영역이라 값싸다)를 돌려준다. 넘긴 목록에서 찾는 find_frame_in_order 도 있다.
+//!   get_page_images 는 원본 HTMLImageElement 목록 대신 읽힌 쪽 그림(Image) 목록이다.
 //==============================================================================
 use crate::base::rect::Rect;
 use crate::core::asset::Asset;
@@ -35,12 +37,12 @@ use std::rc::Rc;
 use std::task::{Context, Poll};
 
 thread_local! {
-	// 찾을 아틀라스 목록. (원본 모듈의 searchAtlasList, 넣은 차례로 찾는다)
+	/// 찾을 아틀라스 목록. (원본 모듈의 searchAtlasList, 넣은 차례로 찾는다)
 	static SEARCH_ATLAS_LIST: RefCell<Vec<Rc<RefCell<SpriteAtlas>>>> = const { RefCell::new(Vec::new()) };
 }
 
 //==============================================================================
-// 아틀라스 자료에서 읽은 조각 하나. (이름, 쪽, 영역)
+/// 아틀라스 자료에서 읽은 조각 하나. (이름, 쪽, 영역)
 //==============================================================================
 struct AtlasFrameValue {
 	frame_name: String,
@@ -49,7 +51,7 @@ struct AtlasFrameValue {
 }
 
 //==============================================================================
-// 아틀라스 자료에서 읽은 것. (조각 값과 쪽 그림, 자료를 읽었는지)
+/// 아틀라스 자료에서 읽은 것. (조각 값과 쪽 그림, 자료를 읽었는지)
 //==============================================================================
 #[derive(Default)]
 struct SpriteAtlasData {
@@ -59,21 +61,21 @@ struct SpriteAtlasData {
 }
 
 //==============================================================================
-// 아틀라스 불러오기 하나의 나눠 든 상태. (아틀라스와 받기 손잡이가 나눠 들어, 손잡이의 await 가 아틀라스를 빌리지 않고 이어 간다)
+/// 아틀라스 불러오기 하나의 나눠 든 상태. (아틀라스와 받기 손잡이가 나눠 들어, 손잡이의 await 가 아틀라스를 빌리지 않고 이어 간다)
 //==============================================================================
 struct SpriteAtlasLoad {
 	json_asset: Option<JsonAsset>,
 	base_directory: String,
 	atlas_data: RefCell<SpriteAtlasData>,
-	// 지은 조각. (쪽 그림이 다 오면 한 번 채운다, 채우면 다 읽힌 것이다)
+	/// 지은 조각. (쪽 그림이 다 오면 한 번 채운다, 채우면 다 읽힌 것이다)
 	frame_table: OnceCell<HashMap<String, Frame>>,
-	// 끝났는지. (조각을 지었거나, 원본처럼 자료를 읽지 못해 조각 없이 끝났거나)
+	/// 끝났는지. (조각을 지었거나, 원본처럼 자료를 읽지 못해 조각 없이 끝났거나)
 	is_finished: Cell<bool>,
 }
 
 impl SpriteAtlasLoad {
 	//==============================================================================
-	// 생성.
+	/// 생성.
 	//==============================================================================
 	fn new(json_asset: Option<JsonAsset>, base_directory: &str) -> SpriteAtlasLoad {
 		SpriteAtlasLoad {
@@ -86,8 +88,8 @@ impl SpriteAtlasLoad {
 	}
 
 	//==============================================================================
-	// 진행. (JSON 이 왔으면 쪽 그림을 청하고, 쪽 그림이 다 왔으면 조각을 짓는다. 끝났으면 true)
-	// - 원본처럼 JSON 을 읽지 못했거나 꼴을 모르면 조각을 짓지 않고 끝난다. (원본 loadData 가 알리고 그냥 돌아온다)
+	/// 진행. (JSON 이 왔으면 쪽 그림을 청하고, 쪽 그림이 다 왔으면 조각을 짓는다. 끝났으면 true)
+	/// - 원본처럼 JSON 을 읽지 못했거나 꼴을 모르면 조각을 짓지 않고 끝난다. (원본 loadData 가 알리고 그냥 돌아온다)
 	//==============================================================================
 	fn update(&self, engine: &Engine) -> bool {
 		if self.is_finished.get() {
@@ -130,7 +132,7 @@ impl SpriteAtlasLoad {
 	}
 
 	//==============================================================================
-	// 자료 읽기. (조각 값을 담고 쪽 그림을 청한다, 꼴을 모르면 원본처럼 알리고 false)
+	/// 자료 읽기. (조각 값을 담고 쪽 그림을 청한다, 꼴을 모르면 원본처럼 알리고 false)
 	//==============================================================================
 	fn read_data(&self, engine: &Engine, atlas_data: &serde_json::Value) -> bool {
 		let mut page_path_list: Vec<String> = Vec::new();
@@ -206,7 +208,7 @@ impl SpriteAtlasLoad {
 	}
 
 	//==============================================================================
-	// 조각 짓기. (쪽 그림이 없거나 풀리지 않은 조각은 뺀다)
+	/// 조각 짓기. (쪽 그림이 없거나 풀리지 않은 조각은 뺀다)
 	//==============================================================================
 	fn build_frames(&self) {
 		let mut frame_table: HashMap<String, Frame> = HashMap::new();
@@ -236,8 +238,8 @@ impl SpriteAtlasLoad {
 }
 
 //==============================================================================
-// 아틀라스 받기 손잡이. (SpriteAtlas::load, load_data 가 돌려준다. 원본 load 의 Promise 자리, 아틀라스를 빌리지 않는다)
-// - await 하면 JSON 과 쪽 그림을 다 받아 조각을 지을 때까지 기다린다. (기다리는 동안 프레임마다 update 를 불러 준다)
+/// 아틀라스 받기 손잡이. (SpriteAtlas::load, load_data 가 돌려준다. 원본 load 의 Promise 자리, 아틀라스를 빌리지 않는다)
+/// - await 하면 JSON 과 쪽 그림을 다 받아 조각을 지을 때까지 기다린다. (기다리는 동안 프레임마다 update 를 불러 준다)
 //==============================================================================
 #[derive(Clone)]
 pub struct SpriteAtlasLoadHandle {
@@ -246,7 +248,7 @@ pub struct SpriteAtlasLoadHandle {
 
 impl SpriteAtlasLoadHandle {
 	//==============================================================================
-	// 끝났는지. (조각을 지었거나 자료를 읽지 못해 끝났거나)
+	/// 끝났는지. (조각을 지었거나 자료를 읽지 못해 끝났거나)
 	//==============================================================================
 	pub fn is_finished(&self) -> bool {
 		self.atlas_load.is_finished.get()
@@ -258,7 +260,7 @@ impl IntoFuture for SpriteAtlasLoadHandle {
 	type IntoFuture = SpriteAtlasLoadFuture;
 
 	//==============================================================================
-	// 손잡이를 그대로 await 하기.
+	/// 손잡이를 그대로 await 하기.
 	//==============================================================================
 	fn into_future(self) -> SpriteAtlasLoadFuture {
 		SpriteAtlasLoadFuture {
@@ -268,7 +270,7 @@ impl IntoFuture for SpriteAtlasLoadHandle {
 }
 
 //==============================================================================
-// 아틀라스 받기를 기다리는 퓨처. (손잡이를 await 하거나 wait_for_load 가 돌려준다)
+/// 아틀라스 받기를 기다리는 퓨처. (손잡이를 await 하거나 wait_for_load 가 돌려준다)
 //==============================================================================
 #[derive(Clone)]
 pub struct SpriteAtlasLoadFuture {
@@ -279,7 +281,7 @@ impl Future for SpriteAtlasLoadFuture {
 	type Output = ();
 
 	//==============================================================================
-	// update 를 부르고 끝났는지 보기. (아직이면 다음 프레임에 다시 본다, 원본처럼 자료를 읽지 못해도 끝난다)
+	/// update 를 부르고 끝났는지 보기. (아직이면 다음 프레임에 다시 본다, 원본처럼 자료를 읽지 못해도 끝난다)
 	//==============================================================================
 	fn poll(self: Pin<&mut SpriteAtlasLoadFuture>, context: &mut Context<'_>) -> Poll<()> {
 		task::with_polling_engine(|engine| self.atlas_load.update(engine));
@@ -292,16 +294,16 @@ impl Future for SpriteAtlasLoadFuture {
 }
 
 //==============================================================================
-// 스프라이트 아틀라스.
+/// 스프라이트 아틀라스.
 //==============================================================================
 pub struct SpriteAtlas {
 	atlas_load: Rc<SpriteAtlasLoad>,
-	// 앞서 다 읽힌 불러오기. (다시 불러오는 동안 원본처럼 앞의 조각을 그대로 쓴다)
+	/// 앞서 다 읽힌 불러오기. (다시 불러오는 동안 원본처럼 앞의 조각을 그대로 쓴다)
 	previous_atlas_load: Option<Rc<SpriteAtlasLoad>>,
 }
 
 //==============================================================================
-// 확장자를 뗀 이름. ("icon-close.png" → "icon-close", 확장자가 없으면 그대로)
+/// 확장자를 뗀 이름. ("icon-close.png" → "icon-close", 확장자가 없으면 그대로)
 //==============================================================================
 fn remove_extension(file_name: &str) -> &str {
 	let slash_index = file_name.rfind('/').map(|index| index as i64).unwrap_or(-1);
@@ -317,7 +319,7 @@ fn remove_extension(file_name: &str) -> &str {
 
 impl SpriteAtlas {
 	//==============================================================================
-	// 생성.
+	/// 생성.
 	//==============================================================================
 	pub fn new() -> SpriteAtlas {
 		SpriteAtlas {
@@ -327,8 +329,8 @@ impl SpriteAtlas {
 	}
 
 	//==============================================================================
-	// 아틀라스 JSON 과 쪽 그림 불러오기. (JSON 이 오면 쪽 그림을 청한다, 데스크탑은 이 자리에서 다 읽힌다)
-	// - 원본처럼 await 할 수 있는 손잡이를 돌려준다. (조각을 지을 때까지)
+	/// 아틀라스 JSON 과 쪽 그림 불러오기. (JSON 이 오면 쪽 그림을 청한다, 데스크탑은 이 자리에서 다 읽힌다)
+	/// - 원본처럼 await 할 수 있는 손잡이를 돌려준다. (조각을 지을 때까지)
 	//==============================================================================
 	pub fn load(&mut self, engine: &Engine, json_path: &str) -> SpriteAtlasLoadHandle {
 		let base_directory = match json_path.rfind('/') {
@@ -349,8 +351,8 @@ impl SpriteAtlas {
 	}
 
 	//==============================================================================
-	// 아틀라스 자료로 불러오기. (JSON 을 읽은 값이나 코드에 둔 같은 꼴의 값, 쪽 경로에 빗금이 없으면 base_directory 를 앞에 붙인다)
-	// - 원본 loadData 처럼 await 할 수 있는 손잡이를 돌려준다. (쪽 그림을 다 받아 조각을 지을 때까지)
+	/// 아틀라스 자료로 불러오기. (JSON 을 읽은 값이나 코드에 둔 같은 꼴의 값, 쪽 경로에 빗금이 없으면 base_directory 를 앞에 붙인다)
+	/// - 원본 loadData 처럼 await 할 수 있는 손잡이를 돌려준다. (쪽 그림을 다 받아 조각을 지을 때까지)
 	//==============================================================================
 	pub fn load_data(&mut self, engine: &Engine, atlas_data: &serde_json::Value, base_directory: &str) -> SpriteAtlasLoadHandle {
 		self.replace_atlas_load(SpriteAtlasLoad::new(None, base_directory));
@@ -364,7 +366,7 @@ impl SpriteAtlas {
 	}
 
 	//==============================================================================
-	// 새 불러오기로 바꾸기. (조각을 지은 앞의 불러오기는 새 것이 조각을 지을 때까지 남겨 둔다)
+	/// 새 불러오기로 바꾸기. (조각을 지은 앞의 불러오기는 새 것이 조각을 지을 때까지 남겨 둔다)
 	//==============================================================================
 	fn replace_atlas_load(&mut self, atlas_load: SpriteAtlasLoad) {
 		if self.atlas_load.frame_table.get().is_some() {
@@ -374,7 +376,7 @@ impl SpriteAtlas {
 	}
 
 	//==============================================================================
-	// 지금 보이는 불러오기. (새 것이 조각을 지었으면 새 것, 아니면 앞서 다 읽힌 것, 그것도 없으면 새 것)
+	/// 지금 보이는 불러오기. (새 것이 조각을 지었으면 새 것, 아니면 앞서 다 읽힌 것, 그것도 없으면 새 것)
 	//==============================================================================
 	fn read_shown_atlas_load(&self) -> &Rc<SpriteAtlasLoad> {
 		if self.atlas_load.frame_table.get().is_none() {
@@ -386,21 +388,21 @@ impl SpriteAtlas {
 	}
 
 	//==============================================================================
-	// 지금 보이는 조각 표. (지은 것이 없으면 None)
+	/// 지금 보이는 조각 표. (지은 것이 없으면 None)
 	//==============================================================================
 	fn read_frame_table(&self) -> Option<&HashMap<String, Frame>> {
 		self.read_shown_atlas_load().frame_table.get()
 	}
 
 	//==============================================================================
-	// 진행. (JSON 이 왔으면 쪽 그림을 청하고, 쪽 그림이 다 왔으면 조각을 짓는다. 끝났으면 true, 원본처럼 자료를 읽지 못해도 끝난다)
+	/// 진행. (JSON 이 왔으면 쪽 그림을 청하고, 쪽 그림이 다 왔으면 조각을 짓는다. 끝났으면 true, 원본처럼 자료를 읽지 못해도 끝난다)
 	//==============================================================================
 	pub fn update(&mut self, engine: &Engine) -> bool {
 		self.atlas_load.update(engine)
 	}
 
 	//==============================================================================
-	// 씬이 아틀라스 JSON 을 기다리게 맡기기. (쪽 그림은 JSON 이 온 뒤 update 가 청한다)
+	/// 씬이 아틀라스 JSON 을 기다리게 맡기기. (쪽 그림은 JSON 이 온 뒤 update 가 청한다)
 	//==============================================================================
 	pub fn track_json_asset(&self, scene_base: &mut SceneBase) {
 		if let Some(json_asset) = &self.atlas_load.json_asset {
@@ -409,14 +411,14 @@ impl SpriteAtlas {
 	}
 
 	//==============================================================================
-	// 다 읽혔는지. (조각을 지었는지, 다시 불러오는 동안은 원본처럼 앞의 것으로 본다)
+	/// 다 읽혔는지. (조각을 지었는지, 다시 불러오는 동안은 원본처럼 앞의 것으로 본다)
 	//==============================================================================
 	pub fn is_loaded(&self) -> bool {
 		self.read_frame_table().is_some()
 	}
 
 	//==============================================================================
-	// 다 읽히기를 기다리는 퓨처. (load 나 load_data 가 돌려준 손잡이를 await 하는 것과 같다. 아틀라스를 빌리지 않는다)
+	/// 다 읽히기를 기다리는 퓨처. (load 나 load_data 가 돌려준 손잡이를 await 하는 것과 같다. 아틀라스를 빌리지 않는다)
 	//==============================================================================
 	pub fn wait_for_load(&self) -> SpriteAtlasLoadFuture {
 		SpriteAtlasLoadFuture {
@@ -425,21 +427,21 @@ impl SpriteAtlas {
 	}
 
 	//==============================================================================
-	// 조각 읽기. (없거나 아직 읽히지 않았으면 None)
+	/// 조각 읽기. (없거나 아직 읽히지 않았으면 None)
 	//==============================================================================
 	pub fn read_frame(&self, frame_name: &str) -> Option<&Frame> {
 		self.read_frame_table()?.get(frame_name)
 	}
 
 	//==============================================================================
-	// 조각이 있는지.
+	/// 조각이 있는지.
 	//==============================================================================
 	pub fn has_frame(&self, frame_name: &str) -> bool {
 		self.read_frame(frame_name).is_some()
 	}
 
 	//==============================================================================
-	// 스프라이트에 조각 걸기. (없는 이름이면 그림을 비우고 false)
+	/// 스프라이트에 조각 걸기. (없는 이름이면 그림을 비우고 false)
 	//==============================================================================
 	pub fn apply_frame(&self, sprite: &mut Sprite, frame_name: &str) -> bool {
 		let frame = self.read_frame(frame_name);
@@ -448,35 +450,35 @@ impl SpriteAtlas {
 	}
 
 	//==============================================================================
-	// 쪽 그림 목록. (읽힌 쪽만, 쪽 차례, 다시 불러오는 동안은 원본처럼 앞의 것)
+	/// 쪽 그림 목록. (읽힌 쪽만, 쪽 차례, 다시 불러오는 동안은 원본처럼 앞의 것)
 	//==============================================================================
 	pub fn get_page_images(&mut self) -> Vec<Rc<Image>> {
 		self.read_shown_atlas_load().atlas_data.borrow_mut().page_asset_list.iter_mut().filter_map(|page_asset| page_asset.get_image()).collect()
 	}
 
 	//==============================================================================
-	// 쪽 수.
+	/// 쪽 수.
 	//==============================================================================
 	pub fn get_page_count(&self) -> usize {
 		self.read_shown_atlas_load().atlas_data.borrow().page_asset_list.len()
 	}
 
 	//==============================================================================
-	// 조각 이름 목록.
+	/// 조각 이름 목록.
 	//==============================================================================
 	pub fn get_frame_names(&self) -> Vec<String> {
 		self.read_frame_table().map(|frame_table| frame_table.keys().cloned().collect()).unwrap_or_default()
 	}
 
 	//==============================================================================
-	// 여러 아틀라스에서 차례로 조각 찾기. (앞의 것이 이긴다, 원본 SpriteAtlas.findFrame 의 찾을 목록 자리)
+	/// 여러 아틀라스에서 차례로 조각 찾기. (앞의 것이 이긴다, 원본 SpriteAtlas.findFrame 의 찾을 목록 자리)
 	//==============================================================================
 	pub fn find_frame_in_order<'a>(atlas_list: &[&'a SpriteAtlas], frame_name: &str) -> Option<&'a Frame> {
 		atlas_list.iter().find_map(|sprite_atlas| sprite_atlas.read_frame(frame_name))
 	}
 
 	//==============================================================================
-	// 여러 아틀라스에서 차례로 찾은 조각을 스프라이트에 걸기. (없으면 그림을 비우고 false, 원본 applySearchFrame)
+	/// 여러 아틀라스에서 차례로 찾은 조각을 스프라이트에 걸기. (없으면 그림을 비우고 false, 원본 applySearchFrame)
 	//==============================================================================
 	pub fn apply_frame_in_order(atlas_list: &[&SpriteAtlas], sprite: &mut Sprite, frame_name: &str) -> bool {
 		let frame = SpriteAtlas::find_frame_in_order(atlas_list, frame_name);
@@ -485,7 +487,7 @@ impl SpriteAtlas {
 	}
 
 	//==============================================================================
-	// 찾을 아틀라스 넣기. (맨 뒤에 넣는다, 이미 들었으면 그대로)
+	/// 찾을 아틀라스 넣기. (맨 뒤에 넣는다, 이미 들었으면 그대로)
 	//==============================================================================
 	pub fn add_search_atlas(sprite_atlas: &Rc<RefCell<SpriteAtlas>>) {
 		SEARCH_ATLAS_LIST.with(|search_atlas_list| {
@@ -498,7 +500,7 @@ impl SpriteAtlas {
 	}
 
 	//==============================================================================
-	// 찾을 아틀라스 빼기.
+	/// 찾을 아틀라스 빼기.
 	//==============================================================================
 	pub fn remove_search_atlas(sprite_atlas: &Rc<RefCell<SpriteAtlas>>) {
 		SEARCH_ATLAS_LIST.with(|search_atlas_list| {
@@ -507,7 +509,7 @@ impl SpriteAtlas {
 	}
 
 	//==============================================================================
-	// 찾을 아틀라스 모두 빼기.
+	/// 찾을 아틀라스 모두 빼기.
 	//==============================================================================
 	pub fn clear_search_atlases() {
 		SEARCH_ATLAS_LIST.with(|search_atlas_list| {
@@ -516,7 +518,7 @@ impl SpriteAtlas {
 	}
 
 	//==============================================================================
-	// 찾을 아틀라스들에서 조각 찾기. (넣은 차례로, 없으면 None, 다른 곳에서 고치는 중인 아틀라스는 건너뛴다)
+	/// 찾을 아틀라스들에서 조각 찾기. (넣은 차례로, 없으면 None, 다른 곳에서 고치는 중인 아틀라스는 건너뛴다)
 	//==============================================================================
 	pub fn find_frame(frame_name: &str) -> Option<Frame> {
 		SEARCH_ATLAS_LIST.with(|search_atlas_list| {
@@ -532,7 +534,7 @@ impl SpriteAtlas {
 	}
 
 	//==============================================================================
-	// 찾을 아틀라스들에서 찾은 조각을 스프라이트에 걸기. (없으면 그림을 비우고 false)
+	/// 찾을 아틀라스들에서 찾은 조각을 스프라이트에 걸기. (없으면 그림을 비우고 false)
 	//==============================================================================
 	pub fn apply_search_frame(sprite: &mut Sprite, frame_name: &str) -> bool {
 		let frame = SpriteAtlas::find_frame(frame_name);
@@ -553,7 +555,7 @@ mod tests {
 	use crate::core::engine::EngineConfiguration;
 
 	//==============================================================================
-	// 시험용 엔진과 쪽 그림 둘. (애셋 폴더를 임시 폴더 하나로)
+	/// 시험용 엔진과 쪽 그림 둘. (애셋 폴더를 임시 폴더 하나로)
 	//==============================================================================
 	fn create_test_engine(asset_directory_name: &str) -> (Engine, std::path::PathBuf) {
 		let asset_directory_path = std::env::temp_dir().join(asset_directory_name);
@@ -568,7 +570,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// atlas.cjs 꼴: 쪽 여럿, 확장자를 뗀 이름, 없는 이름.
+	/// atlas.cjs 꼴: 쪽 여럿, 확장자를 뗀 이름, 없는 이름.
 	//==============================================================================
 	#[test]
 	fn load_atlas_cjs_json() {
@@ -594,7 +596,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 쪽 경로와 표 꼴, 여러 아틀라스를 찾는 차례. (앞의 것이 이긴다)
+	/// 쪽 경로와 표 꼴, 여러 아틀라스를 찾는 차례. (앞의 것이 이긴다)
 	//==============================================================================
 	#[test]
 	fn load_frames_table_and_search_order() {

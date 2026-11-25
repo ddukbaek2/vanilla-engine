@@ -1,24 +1,30 @@
 //==============================================================================
-// 스프라이트 애니메이터 컴포넌트.
-// - 원본 misc/spriteanimator.js 를 옮긴 것이다. 이름을 붙인 클립(프레임 시퀀스)을 등록해 두고 play("run") 으로 바꾼다.
-// - 같은 클립을 다시 play 해도 처음부터 하지 않는다. (restart_if_same 으로 바꿀 수 있다)
-// - 클립이 끝나면 on_complete 콜백으로 다음 상태를 이어 간다. (FSM 과 묶어 쓴다)
-// - 같은 노드의 Sprite 컴포넌트에 지금 프레임(이미지 + 영역)을 넣는다. tick 때 context.get_node_mut().get_component_mut::<Sprite>() 로 찾는다.
-// - 사용:
-//     let animator = node_tree[hero_id].add_component(SpriteAnimator::new());
-//     animator.add_clip("idle", image.clone(), &idleRects, 10.0, true);
-//     animator.add_clip("attack", image.clone(), &attackRects, 12.0, false);
-//     SpriteAnimator::play_on_node(&mut node_tree[hero_id], "attack", SpriteAnimatorPlayOptions::create_with_on_complete(|animator| {
-//         animator.play("idle", SpriteAnimatorPlayOptions::default());
-//     }));
-// - 원본과 다른 점:
-//   play 는 원본처럼 그 자리에서 Sprite 에 프레임을 넣지 못한다. 러스트 컴포넌트는 자기 노드를 가리키지 않고(노드는 NodeTree 가 들고,
-//     컴포넌트에게 노드를 넘겨주는 것은 tick 의 ComponentContext 뿐이다), 노드에서 애니메이터를 &mut 로 빌린 동안 같은 노드의 Sprite 를 함께 빌릴 수 없다.
-//     그래서 다음 tick 에 넣는다. 그 자리에서 넣으려면 노드를 받는 play_on_node 를 쓴다.
-//   on_complete 는 애니메이터를 받는 한 번짜리 콜백(FnOnce(&mut SpriteAnimator))이다. 원본은 클로저가 애니메이터를 붙잡아 썼다.
-//   fps 는 이름을 줄이지 않아 frame_per_second 다. 기본값(10, 반복)은 DEFAULT_FRAME_PER_SECOND 와 true 를 넘긴다.
-//   아틀라스 JSON 은 serde_json::Value 로 받는다. 원본 findSprite(찾아서 들고 있기)는 형제 컴포넌트의 참조를 들고 있을 수 없어(빌림이 tick 을 넘어 살 수 없다)
-//     옮기지 않았다. 대신 tick 마다 context.get_node_mut().get_component_mut::<Sprite>() 로 찾고, 밖에서는 apply_current_frame(sprite) 에 Sprite 를 넘긴다.
+//! 스프라이트 애니메이터 컴포넌트.
+//! - 원본 misc/spriteanimator.js 를 옮긴 것이다. 이름을 붙인 클립(프레임 시퀀스)을 등록해 두고 play("run") 으로 바꾼다.
+//! - 같은 클립을 다시 play 해도 처음부터 하지 않는다. (restart_if_same 으로 바꿀 수 있다)
+//! - 클립이 끝나면 on_complete 콜백으로 다음 상태를 이어 간다. (FSM 과 묶어 쓴다)
+//! - 같은 노드의 Sprite 컴포넌트에 지금 프레임(이미지 + 영역)을 넣는다. tick 때 context.get_node_mut().`get_component_mut::<Sprite>()` 로 찾는다.
+//! - 사용:
+//!   ```text
+//!     let animator = node_tree[hero_id].add_component(SpriteAnimator::new());
+//!     animator.add_clip("idle", image.clone(), &idleRects, 10.0, true);
+//!     animator.add_clip("attack", image.clone(), &attackRects, 12.0, false);
+//!     SpriteAnimator::play_on_node(&mut node_tree[hero_id], "attack", SpriteAnimatorPlayOptions::create_with_on_complete(|animator| {
+//!         animator.play("idle", SpriteAnimatorPlayOptions::default());
+//!     }));
+//!   ```
+//! - 원본과 다른 점:
+//!   play 는 원본처럼 그 자리에서 Sprite 에 프레임을 넣지 못한다. 러스트 컴포넌트는 자기 노드를 가리키지 않고(노드는 NodeTree 가 들고,
+//!   ```text
+//!     컴포넌트에게 노드를 넘겨주는 것은 tick 의 ComponentContext 뿐이다), 노드에서 애니메이터를 &mut 로 빌린 동안 같은 노드의 Sprite 를 함께 빌릴 수 없다.
+//!     그래서 다음 tick 에 넣는다. 그 자리에서 넣으려면 노드를 받는 play_on_node 를 쓴다.
+//!   ```
+//!   on_complete 는 애니메이터를 받는 한 번짜리 콜백(FnOnce(&mut SpriteAnimator))이다. 원본은 클로저가 애니메이터를 붙잡아 썼다.
+//!   fps 는 이름을 줄이지 않아 frame_per_second 다. 기본값(10, 반복)은 DEFAULT_FRAME_PER_SECOND 와 true 를 넘긴다.
+//!   아틀라스 JSON 은 serde_json::Value 로 받는다. 원본 findSprite(찾아서 들고 있기)는 형제 컴포넌트의 참조를 들고 있을 수 없어(빌림이 tick 을 넘어 살 수 없다)
+//!   ```text
+//!     옮기지 않았다. 대신 tick 마다 context.get_node_mut().get_component_mut::<Sprite>() 로 찾고, 밖에서는 apply_current_frame(sprite) 에 Sprite 를 넘긴다.
+//!   ```
 //==============================================================================
 use crate::base::rect::Rect;
 use crate::core::animation::Animation;
@@ -30,11 +36,11 @@ use crate::core::node::worldnode::WorldNode;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-// 클립이 끝났을 때 한 번 불린다. (애니메이터를 받아 다음 클립을 틀 수 있다)
+/// 클립이 끝났을 때 한 번 불린다. (애니메이터를 받아 다음 클립을 틀 수 있다)
 type SpriteAnimatorCompleteEvent = Box<dyn FnOnce(&mut SpriteAnimator)>;
 
 //==============================================================================
-// 클립. (시트 한 장, 칸 영역 목록, 초당 프레임 수, 반복)
+/// 클립. (시트 한 장, 칸 영역 목록, 초당 프레임 수, 반복)
 //==============================================================================
 #[derive(Clone)]
 struct SpriteAnimatorClip {
@@ -45,19 +51,19 @@ struct SpriteAnimatorClip {
 }
 
 //==============================================================================
-// 재생 설정. (원본 options = { on_complete?, restart_if_same = false })
+/// 재생 설정. (원본 options = { on_complete?, restart_if_same = false })
 //==============================================================================
 #[derive(Default)]
 pub struct SpriteAnimatorPlayOptions {
-	// 클립이 끝났을 때 한 번 불린다. (반복하지 않는 클립만 끝난다)
+	/// 클립이 끝났을 때 한 번 불린다. (반복하지 않는 클립만 끝난다)
 	pub on_complete: Option<SpriteAnimatorCompleteEvent>,
-	// 같은 클립이 도는 중이어도 처음부터 다시 틀지.
+	/// 같은 클립이 도는 중이어도 처음부터 다시 틀지.
 	pub restart_if_same: bool,
 }
 
 impl SpriteAnimatorPlayOptions {
 	//==============================================================================
-	// 완료 콜백만 정한 설정.
+	/// 완료 콜백만 정한 설정.
 	//==============================================================================
 	pub fn create_with_on_complete(on_complete: impl FnOnce(&mut SpriteAnimator) + 'static) -> SpriteAnimatorPlayOptions {
 		SpriteAnimatorPlayOptions {
@@ -68,7 +74,7 @@ impl SpriteAnimatorPlayOptions {
 }
 
 //==============================================================================
-// 스프라이트 애니메이터 컴포넌트.
+/// 스프라이트 애니메이터 컴포넌트.
 //==============================================================================
 pub struct SpriteAnimator {
 	component_base: ComponentBase,
@@ -80,11 +86,11 @@ pub struct SpriteAnimator {
 
 #[crate::reflect]
 impl SpriteAnimator {
-	// 클립의 기본 초당 프레임 수. (원본 fps = 10)
+	/// 클립의 기본 초당 프레임 수. (원본 fps = 10)
 	pub const DEFAULT_FRAME_PER_SECOND: f32 = 10.0;
 
 	//==============================================================================
-	// 생성.
+	/// 생성.
 	//==============================================================================
 	pub fn new() -> SpriteAnimator {
 		SpriteAnimator {
@@ -97,7 +103,7 @@ impl SpriteAnimator {
 	}
 
 	//==============================================================================
-	// 클립 등록. (같은 이름이 있으면 바꾼다)
+	/// 클립 등록. (같은 이름이 있으면 바꾼다)
 	//==============================================================================
 	pub fn add_clip(&mut self, clip_name: &str, image: Rc<Image>, frame_rects: &[Rect], frame_per_second: f32, is_loop: bool) {
 		let clip = SpriteAnimatorClip {
@@ -110,7 +116,7 @@ impl SpriteAnimator {
 	}
 
 	//==============================================================================
-	// 아틀라스 JSON 으로 클립 등록. (TexturePacker 꼴 { frames: { 이름: { frame: { x, y, w, h } } } }, 없는 칸 이름은 건너뛴다)
+	/// 아틀라스 JSON 으로 클립 등록. (TexturePacker 꼴 { frames: { 이름: { frame: { x, y, w, h } } } }, 없는 칸 이름은 건너뛴다)
 	//==============================================================================
 	pub fn add_clip_from_atlas(&mut self, clip_name: &str, image: Rc<Image>, atlas_json: &serde_json::Value, frame_ids: &[&str], frame_per_second: f32, is_loop: bool) {
 		let mut frame_rects: Vec<Rect> = Vec::new();
@@ -142,9 +148,9 @@ impl SpriteAnimator {
 	}
 
 	//==============================================================================
-	// 재생. (처음부터 틀었으면 true)
-	// - 같은 클립이 이미 도는 중이면 다시 틀지 않고 완료 콜백만 바꾼다. (restart_if_same 이면 처음부터)
-	// - Sprite 에는 다음 tick 에 들어간다. 그 자리에서 넣으려면 play_on_node.
+	/// 재생. (처음부터 틀었으면 true)
+	/// - 같은 클립이 이미 도는 중이면 다시 틀지 않고 완료 콜백만 바꾼다. (restart_if_same 이면 처음부터)
+	/// - Sprite 에는 다음 tick 에 들어간다. 그 자리에서 넣으려면 play_on_node.
 	//==============================================================================
 	pub fn play(&mut self, clip_name: &str, options: SpriteAnimatorPlayOptions) -> bool {
 		let clip = match self.clip_table.get(clip_name) {
@@ -172,8 +178,8 @@ impl SpriteAnimator {
 	}
 
 	//==============================================================================
-	// 노드의 애니메이터로 재생하고 같은 노드의 Sprite 에 그 자리에서 첫 프레임을 넣는다. (원본 play 와 같은 효과)
-	// - 애니메이터가 없으면 false.
+	/// 노드의 애니메이터로 재생하고 같은 노드의 Sprite 에 그 자리에서 첫 프레임을 넣는다. (원본 play 와 같은 효과)
+	/// - 애니메이터가 없으면 false.
 	//==============================================================================
 	pub fn play_on_node(node: &mut WorldNode, clip_name: &str, options: SpriteAnimatorPlayOptions) -> bool {
 		let (is_started, current_frame) = match node.get_component_mut::<SpriteAnimator>() {
@@ -196,14 +202,14 @@ impl SpriteAnimator {
 	}
 
 	//==============================================================================
-	// 정지. (첫 프레임으로 되돌리고, 완료 콜백은 부르지 않는다)
+	/// 정지. (첫 프레임으로 되돌리고, 완료 콜백은 부르지 않는다)
 	//==============================================================================
 	pub fn stop(&mut self) {
 		self.animation.stop();
 	}
 
 	//==============================================================================
-	// 지금 프레임을 스프라이트에 넣기. (프레임이 없으면 아무것도 하지 않는다)
+	/// 지금 프레임을 스프라이트에 넣기. (프레임이 없으면 아무것도 하지 않는다)
 	//==============================================================================
 	pub fn apply_current_frame(&self, sprite: &mut Sprite) {
 		let current_frame = match self.animation.get_current_frame() {
@@ -221,28 +227,28 @@ impl SpriteAnimator {
 	}
 
 	//==============================================================================
-	// 지금 클립 이름 반환. (아직 틀지 않았으면 None)
+	/// 지금 클립 이름 반환. (아직 틀지 않았으면 None)
 	//==============================================================================
 	pub fn get_clip_name(&self) -> Option<&str> {
 		self.clip_name.as_deref()
 	}
 
 	//==============================================================================
-	// 재생 중인지.
+	/// 재생 중인지.
 	//==============================================================================
 	pub fn is_playing(&self) -> bool {
 		self.animation.is_playing()
 	}
 
 	//==============================================================================
-	// 클립이 있는지.
+	/// 클립이 있는지.
 	//==============================================================================
 	pub fn has_clip(&self, clip_name: &str) -> bool {
 		self.clip_table.contains_key(clip_name)
 	}
 
 	//==============================================================================
-	// 지금 프레임 번호.
+	/// 지금 프레임 번호.
 	//==============================================================================
 	pub fn get_current_frame_index(&self) -> usize {
 		self.animation.get_current_frame_index()
@@ -251,7 +257,7 @@ impl SpriteAnimator {
 
 impl Default for SpriteAnimator {
 	//==============================================================================
-	// 기본값. (new 와 같다)
+	/// 기본값. (new 와 같다)
 	//==============================================================================
 	fn default() -> SpriteAnimator {
 		SpriteAnimator::new()
@@ -261,28 +267,28 @@ impl Default for SpriteAnimator {
 #[crate::reflect]
 impl Component for SpriteAnimator {
 	//==============================================================================
-	// 공통 상태 반환.
+	/// 공통 상태 반환.
 	//==============================================================================
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base
 	}
 
 	//==============================================================================
-	// 공통 상태 반환. (변경용)
+	/// 공통 상태 반환. (변경용)
 	//==============================================================================
 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 		&mut self.component_base
 	}
 
 	//==============================================================================
-	// 컴포넌트 이름.
+	/// 컴포넌트 이름.
 	//==============================================================================
 	fn get_component_type(&self) -> &'static str {
 		"SpriteAnimator"
 	}
 
 	//==============================================================================
-	// 갱신. (프레임을 넘기고, 반복하지 않는 클립이 끝났으면 완료 콜백, 그다음 같은 노드의 Sprite 에 지금 프레임을 넣는다)
+	/// 갱신. (프레임을 넘기고, 반복하지 않는 클립이 끝났으면 완료 콜백, 그다음 같은 노드의 Sprite 에 지금 프레임을 넣는다)
 	//==============================================================================
 	fn tick(&mut self, context: &mut ComponentContext, time_delta: f32) {
 		let was_playing = self.animation.is_playing();
@@ -300,7 +306,7 @@ impl Component for SpriteAnimator {
 }
 
 //==============================================================================
-// 시험.
+/// 시험.
 //==============================================================================
 #[cfg(test)]
 mod tests {
@@ -310,14 +316,14 @@ mod tests {
 	use std::cell::Cell;
 
 	//==============================================================================
-	// 가로로 16x16 칸이 frame_count 개 있는 시트 영역.
+	/// 가로로 16x16 칸이 frame_count 개 있는 시트 영역.
 	//==============================================================================
 	fn create_sheet_rects(first_column: usize, frame_count: usize) -> Vec<Rect> {
 		(first_column..first_column + frame_count).map(|column| Rect::create(column as f32 * 16.0, 0.0, 16.0, 16.0)).collect()
 	}
 
 	//==============================================================================
-	// 그 자리 반영, 프레임 넘김, 같은 클립 다시 틀기, 끝나면 콜백으로 다음 클립.
+	/// 그 자리 반영, 프레임 넘김, 같은 클립 다시 틀기, 끝나면 콜백으로 다음 클립.
 	//==============================================================================
 	#[test]
 	fn play_advance_and_chain_on_complete() {
@@ -367,7 +373,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 아틀라스 JSON 으로 클립 만들기. (frame 아래, 또는 바로, w/h 또는 width/height)
+	/// 아틀라스 JSON 으로 클립 만들기. (frame 아래, 또는 바로, w/h 또는 width/height)
 	//==============================================================================
 	#[test]
 	fn add_clip_from_atlas_reads_rects() {

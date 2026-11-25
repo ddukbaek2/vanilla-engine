@@ -3348,6 +3348,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "vanilla-engine-apidoc"
+version = "0.3.2"
+dependencies = [
+ "proc-macro2",
+ "serde_json",
+ "syn 2.0.119",
+ "vanilla-engine",
+]
+
+[[package]]
 name = "vanilla-engine-macros"
 version = "0.3.2"
 dependencies = [

@@ -1,42 +1,44 @@
 //==============================================================================
-// 리눅스와 그 밖의 유닉스(X11, 웨이랜드) 전용 데스크탑 일. (platform/desktop.rs 가 부른다)
-// - 주된 손이 손가락인지: 크로미엄 데스크탑 리눅스가 CSS (pointer: coarse) 를 정하는 방법을 옮겼다. (ui/base/pointer/pointer_device_linux.cc)
-//   터치스크린이 있고, 켜진 마우스와 터치패드와 포인팅 스틱이 하나도 없으면 손가락이다. (마우스가 있으면 마우스가 주된 손이다)
-//   장치 목록은 크로미엄처럼 화면 서버에서 읽는다. (크로미엄의 evdev 장치 분류 InputDeviceFactoryEvdev 는 크롬OS 와 화면 서버 없이 도는 판의 것이다)
-//   - 웨이랜드(ui/ozone/platform/wayland/host/wayland_connection.cc): wl_seat 에 pointer 능력이 있으면 마우스 하나, touch 능력이 있으면 터치스크린 하나다.
-//   - X11(ui/events/platform/x11/x11_hotplug_event_handler.cc): XListInputDevices 의 장치 형(MOUSE, TOUCHPAD, TOUCHSCREEN 과 XWayland 의 xwayland-pointer, xwayland-touch)과
-//     XIQueryDevice 의 쓰임과 켜짐으로 가른다. 터치스크린은 직접 터치이고 Abs MT Position X, Y 값 축(0 번과 1 번, 절대, 최소 0, 최대 0 초과)이 있어야 한다.
-//     XTEST 장치는 뺀다. 실제 포인터가 하나도 없으면 "Virtual core pointer" 를 마우스로 친다. X11 에는 포인팅 스틱 목록이 없다. (크로미엄도 같다)
-// - 어느 서버에서 읽을지는 winit 처럼 WAYLAND_DISPLAY 가 있으면 웨이랜드, 아니면 X11(DISPLAY) 이다. 못 읽으면 거짓이다.
-//   WAYLAND_SOCKET(넘겨받은 소켓)만 있으면 그 소켓은 winit 의 것이라 따로 열지 않고 X11 로 간다.
-// - 크로미엄은 장치를 꽂고 뺄 때마다 다시 읽는다. 엔진은 이것을 매 프레임 불러서, 읽은 값을 들고 있다가 2 초가 지나면 다시 읽는다.
-// - 라이브러리(libX11, libXi)는 빌드할 때 잇지 않고 실행할 때 연다. (x11-dl, glutin 이 쓰는 같은 판) 웨이랜드는 wayland-client(winit 과 같은 판)다.
-// - 가르는 함수(classify_x11_input_devices, PointerDevicePresence)는 다른 OS 에서도 시험으로 돈다.
+//! 리눅스와 그 밖의 유닉스(X11, 웨이랜드) 전용 데스크탑 일. (platform/desktop.rs 가 부른다)
+//! - 주된 손이 손가락인지: 크로미엄 데스크탑 리눅스가 CSS (pointer: coarse) 를 정하는 방법을 옮겼다. (ui/base/pointer/pointer_device_linux.cc)
+//!   터치스크린이 있고, 켜진 마우스와 터치패드와 포인팅 스틱이 하나도 없으면 손가락이다. (마우스가 있으면 마우스가 주된 손이다)
+//!   장치 목록은 크로미엄처럼 화면 서버에서 읽는다. (크로미엄의 evdev 장치 분류 InputDeviceFactoryEvdev 는 크롬OS 와 화면 서버 없이 도는 판의 것이다)
+//!   - 웨이랜드(ui/ozone/platform/wayland/host/wayland_connection.cc): wl_seat 에 pointer 능력이 있으면 마우스 하나, touch 능력이 있으면 터치스크린 하나다.
+//!   - X11(ui/events/platform/x11/x11_hotplug_event_handler.cc): XListInputDevices 의 장치 형(MOUSE, TOUCHPAD, TOUCHSCREEN 과 XWayland 의 xwayland-pointer, xwayland-touch)과
+//!   ```text
+//!     XIQueryDevice 의 쓰임과 켜짐으로 가른다. 터치스크린은 직접 터치이고 Abs MT Position X, Y 값 축(0 번과 1 번, 절대, 최소 0, 최대 0 초과)이 있어야 한다.
+//!     XTEST 장치는 뺀다. 실제 포인터가 하나도 없으면 "Virtual core pointer" 를 마우스로 친다. X11 에는 포인팅 스틱 목록이 없다. (크로미엄도 같다)
+//!   ```
+//! - 어느 서버에서 읽을지는 winit 처럼 WAYLAND_DISPLAY 가 있으면 웨이랜드, 아니면 X11(DISPLAY) 이다. 못 읽으면 거짓이다.
+//!   WAYLAND_SOCKET(넘겨받은 소켓)만 있으면 그 소켓은 winit 의 것이라 따로 열지 않고 X11 로 간다.
+//! - 크로미엄은 장치를 꽂고 뺄 때마다 다시 읽는다. 엔진은 이것을 매 프레임 불러서, 읽은 값을 들고 있다가 2 초가 지나면 다시 읽는다.
+//! - 라이브러리(libX11, libXi)는 빌드할 때 잇지 않고 실행할 때 연다. (x11-dl, glutin 이 쓰는 같은 판) 웨이랜드는 wayland-client(winit 과 같은 판)다.
+//! - 가르는 함수(classify_x11_input_devices, PointerDevicePresence)는 다른 OS 에서도 시험으로 돈다.
 //==============================================================================
 #[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
 use std::cell::Cell;
 #[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
 use web_time::Instant;
 
-// 읽은 장치 목록을 다시 읽기까지의 시간. (초)
+/// 읽은 장치 목록을 다시 읽기까지의 시간. (초)
 #[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
 const DEVICE_LIST_REFRESH_SECONDS: f32 = 2.0;
-// X11 장치 형을 볼 장치 번호의 끝. (크로미엄 kMaxDeviceNum)
+/// X11 장치 형을 볼 장치 번호의 끝. (크로미엄 kMaxDeviceNum)
 #[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
 const X11_MAX_DEVICE_COUNT: u64 = 128;
-// 실제 포인터가 없을 때 마우스로 치는 X11 의 주 포인터 이름.
+/// 실제 포인터가 없을 때 마우스로 치는 X11 의 주 포인터 이름.
 const X11_VIRTUAL_CORE_POINTER_NAME: &str = "Virtual core pointer";
-// 빼는 X11 시험 장치 이름의 조각. (크로미엄 IsTestDevice)
+/// 빼는 X11 시험 장치 이름의 조각. (크로미엄 IsTestDevice)
 const X11_TEST_DEVICE_NAME_PART: &str = "XTEST";
 
 #[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
 thread_local! {
-	// 마지막으로 읽은 손가락 여부와 읽은 때.
+	/// 마지막으로 읽은 손가락 여부와 읽은 때.
 	static COARSE_POINTER_CACHE: Cell<Option<(bool, Instant)>> = const { Cell::new(None) };
 }
 
 //==============================================================================
-// 화면 서버에 있는 포인터 장치. (크로미엄 DeviceDataManager 의 터치스크린 목록과 마우스, 터치패드, 포인팅 스틱 목록)
+/// 화면 서버에 있는 포인터 장치. (크로미엄 DeviceDataManager 의 터치스크린 목록과 마우스, 터치패드, 포인팅 스틱 목록)
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct PointerDevicePresence {
@@ -46,7 +48,7 @@ pub(super) struct PointerDevicePresence {
 
 impl PointerDevicePresence {
 	//==============================================================================
-	// 주된 손이 손가락인지. (크로미엄 GetPrimaryPointerType: 정밀한 손이 있으면 그것, 없고 터치스크린만 있으면 손가락)
+	/// 주된 손이 손가락인지. (크로미엄 GetPrimaryPointerType: 정밀한 손이 있으면 그것, 없고 터치스크린만 있으면 손가락)
 	//==============================================================================
 	pub fn is_coarse_pointer(&self) -> bool {
 		self.has_touchscreen && !self.has_mouse_or_touchpad
@@ -54,7 +56,7 @@ impl PointerDevicePresence {
 }
 
 //==============================================================================
-// X11 장치 형. (XListInputDevices 의 형 아톰, 크로미엄 DeviceType)
+/// X11 장치 형. (XListInputDevices 의 형 아톰, 크로미엄 DeviceType)
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum X11DeviceType {
@@ -66,7 +68,7 @@ pub(super) enum X11DeviceType {
 }
 
 //==============================================================================
-// X11 XI2 장치의 쓰임. (XIMasterPointer, XIMasterKeyboard, XISlavePointer, XISlaveKeyboard, XIFloatingSlave)
+/// X11 XI2 장치의 쓰임. (XIMasterPointer, XIMasterKeyboard, XISlavePointer, XISlaveKeyboard, XIFloatingSlave)
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum X11DeviceUse {
@@ -78,7 +80,7 @@ pub(super) enum X11DeviceUse {
 }
 
 //==============================================================================
-// X11 값 축의 이름. (크로미엄이 보는 두 아톰, 그 밖은 Other)
+/// X11 값 축의 이름. (크로미엄이 보는 두 아톰, 그 밖은 Other)
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum X11ValuatorLabel {
@@ -88,7 +90,7 @@ pub(super) enum X11ValuatorLabel {
 }
 
 //==============================================================================
-// X11 값 축 하나. (XIValuatorClassInfo)
+/// X11 값 축 하나. (XIValuatorClassInfo)
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct X11ValuatorRecord {
@@ -100,7 +102,7 @@ pub(super) struct X11ValuatorRecord {
 }
 
 //==============================================================================
-// X11 입력 장치 하나. (XIQueryDevice 의 장치에 XListInputDevices 의 형을 붙인 것)
+/// X11 입력 장치 하나. (XIQueryDevice 의 장치에 XListInputDevices 의 형을 붙인 것)
 //==============================================================================
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct X11InputDeviceRecord {
@@ -108,13 +110,13 @@ pub(super) struct X11InputDeviceRecord {
 	pub device_type: X11DeviceType,
 	pub device_use: X11DeviceUse,
 	pub is_enabled: bool,
-	// 터치 갈래가 직접 터치(XIDirectTouch)인지.
+	/// 터치 갈래가 직접 터치(XIDirectTouch)인지.
 	pub is_direct_touch: bool,
 	pub valuator_list: Vec<X11ValuatorRecord>,
 }
 
 //==============================================================================
-// X11 장치 목록 가르기. (크로미엄 X11HotplugEventHandler 의 HandleMouseDevicesInWorker, HandleTouchpadDevicesInWorker, HandleTouchscreenDevicesInWorker)
+/// X11 장치 목록 가르기. (크로미엄 X11HotplugEventHandler 의 HandleMouseDevicesInWorker, HandleTouchpadDevicesInWorker, HandleTouchscreenDevicesInWorker)
 //==============================================================================
 pub(super) fn classify_x11_input_devices(device_list: &[X11InputDeviceRecord]) -> PointerDevicePresence {
 	let mut has_touchscreen = false;
@@ -150,7 +152,7 @@ pub(super) fn classify_x11_input_devices(device_list: &[X11InputDeviceRecord]) -
 }
 
 //==============================================================================
-// 터치스크린의 절대 X, Y 축이 있는지. (Abs MT Position X 는 0 번, Y 는 1 번이고 절대 축, 최소 0, 최대가 0 보다 커야 한다)
+/// 터치스크린의 절대 X, Y 축이 있는지. (Abs MT Position X 는 0 번, Y 는 1 번이고 절대 축, 최소 0, 최대가 0 보다 커야 한다)
 //==============================================================================
 fn has_touchscreen_axes(valuator_list: &[X11ValuatorRecord]) -> bool {
 	let mut maximum_x = -1.0;
@@ -171,7 +173,7 @@ fn has_touchscreen_axes(valuator_list: &[X11ValuatorRecord]) -> bool {
 }
 
 //==============================================================================
-// 주된 손이 손가락인지. (읽은 값을 2 초 동안 쓰고, 지나면 화면 서버에서 다시 읽는다)
+/// 주된 손이 손가락인지. (읽은 값을 2 초 동안 쓰고, 지나면 화면 서버에서 다시 읽는다)
 //==============================================================================
 #[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
 pub(super) fn is_coarse_pointer() -> bool {
@@ -188,7 +190,7 @@ pub(super) fn is_coarse_pointer() -> bool {
 }
 
 //==============================================================================
-// 화면 서버의 포인터 장치 읽기. (WAYLAND_DISPLAY 가 있으면 웨이랜드, 못 읽거나 없으면 X11)
+/// 화면 서버의 포인터 장치 읽기. (WAYLAND_DISPLAY 가 있으면 웨이랜드, 못 읽거나 없으면 X11)
 //==============================================================================
 #[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
 fn read_pointer_device_presence() -> Option<PointerDevicePresence> {
@@ -201,7 +203,7 @@ fn read_pointer_device_presence() -> Option<PointerDevicePresence> {
 }
 
 //==============================================================================
-// 웨이랜드 wl_seat 의 능력을 읽는 동안의 상태.
+/// 웨이랜드 wl_seat 의 능력을 읽는 동안의 상태.
 //==============================================================================
 #[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
 struct WaylandSeatState {
@@ -212,7 +214,7 @@ struct WaylandSeatState {
 #[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
 impl wayland_client::Dispatch<wayland_client::protocol::wl_registry::WlRegistry, ()> for WaylandSeatState {
 	//==============================================================================
-	// 전역 목록 사건. (첫 wl_seat 를 묶는다, 능력 사건은 판 1 부터 있다)
+	/// 전역 목록 사건. (첫 wl_seat 를 묶는다, 능력 사건은 판 1 부터 있다)
 	//==============================================================================
 	fn event(state: &mut WaylandSeatState, registry: &wayland_client::protocol::wl_registry::WlRegistry, event: wayland_client::protocol::wl_registry::Event, _data: &(), _connection: &wayland_client::Connection, queue_handle: &wayland_client::QueueHandle<WaylandSeatState>) {
 		if let wayland_client::protocol::wl_registry::Event::Global { name, interface, .. } = event {
@@ -226,7 +228,7 @@ impl wayland_client::Dispatch<wayland_client::protocol::wl_registry::WlRegistry,
 #[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
 impl wayland_client::Dispatch<wayland_client::protocol::wl_seat::WlSeat, ()> for WaylandSeatState {
 	//==============================================================================
-	// 자리 사건. (능력을 적는다)
+	/// 자리 사건. (능력을 적는다)
 	//==============================================================================
 	fn event(state: &mut WaylandSeatState, _seat: &wayland_client::protocol::wl_seat::WlSeat, event: wayland_client::protocol::wl_seat::Event, _data: &(), _connection: &wayland_client::Connection, _queue_handle: &wayland_client::QueueHandle<WaylandSeatState>) {
 		if let wayland_client::protocol::wl_seat::Event::Capabilities { capabilities: wayland_client::WEnum::Value(capabilities) } = event {
@@ -236,8 +238,8 @@ impl wayland_client::Dispatch<wayland_client::protocol::wl_seat::WlSeat, ()> for
 }
 
 //==============================================================================
-// 웨이랜드 wl_seat 의 pointer, touch 능력 읽기. (WAYLAND_DISPLAY 의 소켓에 따로 붙어 두 번 왕복하고 닫는다, 못 읽으면 None)
-// - WAYLAND_DISPLAY 가 절대 경로면 그대로, 아니면 XDG_RUNTIME_DIR 아래의 이름이다. (wayland-client connect_to_env 와 같은 규칙)
+/// 웨이랜드 wl_seat 의 pointer, touch 능력 읽기. (WAYLAND_DISPLAY 의 소켓에 따로 붙어 두 번 왕복하고 닫는다, 못 읽으면 None)
+/// - WAYLAND_DISPLAY 가 절대 경로면 그대로, 아니면 XDG_RUNTIME_DIR 아래의 이름이다. (wayland-client connect_to_env 와 같은 규칙)
 //==============================================================================
 #[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
 fn read_wayland_seat_capabilities(wayland_display: &std::ffi::OsStr) -> Option<PointerDevicePresence> {
@@ -268,7 +270,7 @@ fn read_wayland_seat_capabilities(wayland_display: &std::ffi::OsStr) -> Option<P
 }
 
 //==============================================================================
-// X11 입력 장치 목록 읽기. (DISPLAY 에 따로 붙어 읽고 닫는다, libX11, libXi 가 없거나 XI 2.2 가 안 되면 None)
+/// X11 입력 장치 목록 읽기. (DISPLAY 에 따로 붙어 읽고 닫는다, libX11, libXi 가 없거나 XI 2.2 가 안 되면 None)
 //==============================================================================
 #[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
 fn read_x11_input_devices() -> Option<Vec<X11InputDeviceRecord>> {
@@ -287,9 +289,9 @@ fn read_x11_input_devices() -> Option<Vec<X11InputDeviceRecord>> {
 }
 
 //==============================================================================
-// 열린 X11 연결에서 입력 장치 목록 읽기.
-// - 터치 갈래는 XI 2.2 를 알린 클라이언트에만 오므로 XIQueryVersion(2, 2) 를 먼저 부른다. (크로미엄도 2.2 이상을 알린다)
-// - 형 아톰과 값 축 이름 아톰은 크로미엄 GetAtom 처럼 만들어서라도 받아 비교한다. (한 번의 XInternAtoms)
+/// 열린 X11 연결에서 입력 장치 목록 읽기.
+/// - 터치 갈래는 XI 2.2 를 알린 클라이언트에만 오므로 XIQueryVersion(2, 2) 를 먼저 부른다. (크로미엄도 2.2 이상을 알린다)
+/// - 형 아톰과 값 축 이름 아톰은 크로미엄 GetAtom 처럼 만들어서라도 받아 비교한다. (한 번의 XInternAtoms)
 //==============================================================================
 #[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
 unsafe fn read_x11_input_devices_from_display(xlib_library: &x11_dl::xlib::Xlib, xinput_library: &x11_dl::xinput::XInput, xinput2_library: &x11_dl::xinput2::XInput2, display: *mut x11_dl::xlib::Display) -> Option<Vec<X11InputDeviceRecord>> {
@@ -428,7 +430,7 @@ mod tests {
 	use super::*;
 
 	//==============================================================================
-	// 시험용 장치. (켜짐, 직접 터치 아님, 값 축 없음)
+	/// 시험용 장치. (켜짐, 직접 터치 아님, 값 축 없음)
 	//==============================================================================
 	fn create_device(name: &str, device_type: X11DeviceType, device_use: X11DeviceUse) -> X11InputDeviceRecord {
 		X11InputDeviceRecord {
@@ -442,7 +444,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 시험용 터치스크린. (직접 터치, Abs MT Position X 0 번, Y 1 번 절대 축)
+	/// 시험용 터치스크린. (직접 터치, Abs MT Position X 0 번, Y 1 번 절대 축)
 	//==============================================================================
 	fn create_touchscreen(name: &str) -> X11InputDeviceRecord {
 		let mut device = create_device(name, X11DeviceType::Touchscreen, X11DeviceUse::SlavePointer);
@@ -456,7 +458,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 크로미엄 X11 판정: 터치스크린만 있으면 손가락, 마우스나 터치패드가 있으면 마우스. 터치스크린의 조건과 XTEST, 꺼진 장치, 주 포인터 갈래.
+	/// 크로미엄 X11 판정: 터치스크린만 있으면 손가락, 마우스나 터치패드가 있으면 마우스. 터치스크린의 조건과 XTEST, 꺼진 장치, 주 포인터 갈래.
 	//==============================================================================
 	#[test]
 	fn x11_pointer_classification() {

@@ -1,32 +1,36 @@
 //==============================================================================
-// 데스크탑 시스템 글꼴 찾기. (글꼴 이름의 파일, 글꼴에 없는 글자를 그릴 대체 글꼴)
-// - 원본에 없는 파일이다. 원본은 브라우저가 CSS 글꼴 이름을 운영체제 글꼴로 찾고, 글꼴 목록에 없는 글자는 운영체제의 대체 글꼴로 그린다.
-//   크롬은 맥에서 CoreText, 윈도우에서 DirectWrite, 리눅스에서 fontconfig 로 찾는다. 러스트 판 데스크탑도 같은 API 로 파일을 찾아 글자 캐시에 올린다.
-// - find_family_font_file: 글꼴 이름, 굵기, 기울기로 파일과 얼굴을 찾는다. 그 이름의 글꼴이 없으면 None 이다. (CSS 처럼 다른 글꼴로 바꿔 주지 않는다)
-//   - 맥: system-ui, BlinkMacSystemFont 는 시스템 UI 글꼴(CTFontCreateUIFontForLanguage, 크롬 font_matcher_mac.mm 의 MatchSystemUIFont),
-//     그 밖은 이름과 굵기 특성으로 지은 글꼴 서술자. -apple-system 과 ui-serif, ui-sans-serif, ui-monospace, ui-rounded 는 크롬이 모르는 이름이라 None 이다.
-//     (사파리만 안다. 맥 크롬 158 의 Canvas2D 에서 "16px -apple-system" 은 기본 글꼴로 그려진다)
-//   - 윈도우: system-ui 는 크롬처럼 메뉴 글꼴(NONCLIENTMETRICS 의 lfMenuFont, 읽지 못하면 Segoe UI), 그 밖은 시스템 글꼴 모음의 이름(FindFamilyName)과 GetFirstMatchingFont.
-//   - 리눅스: fontconfig 의 FcFontMatch. 크롬(Skia SkFontConfigInterface_direct.cpp 의 isAcceptableMatch)처럼 찾은 글꼴의 이름이 청한 이름이나 설정을 거친 이름과 같거나,
-//     치수가 같은 대체 글꼴(Arial 과 Liberation Sans 같은 표)이거나, 청한 이름이 sans, serif, monospace 일 때만 받는다.
-// - 일반 이름(serif, sans-serif, monospace, cursive, fantasy, math)은 크롬의 기본 글꼴 표대로 글꼴 이름으로 바꾼 뒤 찾는다. (resolve_generic_family_name)
-//   표는 크로미엄 chrome/app/resources/locale_settings_<운영체제>.grd 의 IDS_*_FONT_FAMILY 와 그 언어 번역(platform_locale_settings/*.xtb)이다.
-//   크롬은 브라우저 언어(화면 언어)로 Common(Zyyy) 스크립트 값을 정하고, 문서 lang 이 없는 캔버스는 기본 로캘(브라우저 언어)의 스크립트로 글꼴을 고른다.
-//   그 스크립트의 따로 정한 값은 브라우저 언어의 스크립트라 등록하지 않으므로(prefs_tab_helper.cc 의 RegisterProfilePrefs) 결국 Common 값을 쓴다.
-//   원본이 글을 굽는 캔버스는 문서에 붙이지 않아 문서의 lang 을 바꿔도 그대로다. (맥 크롬 158 로 확인)
-//   러스트 판은 시스템 선호 언어에서 크롬이 고르는 화면 언어를 찾아(read_browser_locale) 같은 표를 쓴다.
-//   예: 맥 한국어는 serif AppleMyungjo, sans-serif Apple SD Gothic Neo, monospace Menlo, 영어는 Times, Helvetica, Menlo. 윈도우 한국어는 serif Batang, sans-serif Malgun Gothic.
-// - find_fallback_font_file: 글(글자 묶음 하나)을 그릴 대체 글꼴을 운영체제가 고르게 한다.
-//   - 맥: 시스템 UI 글꼴에서 CTFontCreateForString. (크롬 맥의 글꼴 대체와 같은 API) 색 이모지를 바라면 Apple Color Emoji 를 먼저 본다.
-//   - 윈도우: IDWriteFontFallback.MapCharacters (기본 이름 Segoe UI, 사용자 언어)
-//   - 리눅스: 글자를 담은 charset 으로 FcFontSort 해 그 글자를 가진 첫 글꼴. 색 이모지를 바라면 color 속성을 건다.
-// - 돌려주는 FontFileSource 의 얼굴 번호는 운영체제가 알려 주면(윈도우, 리눅스) 넣고, 맥은 PostScript 이름을 넣어 글꼴을 읽을 때 맞는 얼굴을 찾는다.
-//   가변 글꼴(맥 시스템 UI 글꼴 SFNS 같은)의 굵기는 글자 캐시가 축 값으로 만든다.
+//! 데스크탑 시스템 글꼴 찾기. (글꼴 이름의 파일, 글꼴에 없는 글자를 그릴 대체 글꼴)
+//! - 원본에 없는 파일이다. 원본은 브라우저가 CSS 글꼴 이름을 운영체제 글꼴로 찾고, 글꼴 목록에 없는 글자는 운영체제의 대체 글꼴로 그린다.
+//!   크롬은 맥에서 CoreText, 윈도우에서 DirectWrite, 리눅스에서 fontconfig 로 찾는다. 러스트 판 데스크탑도 같은 API 로 파일을 찾아 글자 캐시에 올린다.
+//! - find_family_font_file: 글꼴 이름, 굵기, 기울기로 파일과 얼굴을 찾는다. 그 이름의 글꼴이 없으면 None 이다. (CSS 처럼 다른 글꼴로 바꿔 주지 않는다)
+//!   - 맥: system-ui, BlinkMacSystemFont 는 시스템 UI 글꼴(CTFontCreateUIFontForLanguage, 크롬 font_matcher_mac.mm 의 MatchSystemUIFont),
+//!   ```text
+//!     그 밖은 이름과 굵기 특성으로 지은 글꼴 서술자. -apple-system 과 ui-serif, ui-sans-serif, ui-monospace, ui-rounded 는 크롬이 모르는 이름이라 None 이다.
+//!     (사파리만 안다. 맥 크롬 158 의 Canvas2D 에서 "16px -apple-system" 은 기본 글꼴로 그려진다)
+//!   ```
+//!   - 윈도우: system-ui 는 크롬처럼 메뉴 글꼴(NONCLIENTMETRICS 의 lfMenuFont, 읽지 못하면 Segoe UI), 그 밖은 시스템 글꼴 모음의 이름(FindFamilyName)과 GetFirstMatchingFont.
+//!   - 리눅스: fontconfig 의 FcFontMatch. 크롬(Skia SkFontConfigInterface_direct.cpp 의 isAcceptableMatch)처럼 찾은 글꼴의 이름이 청한 이름이나 설정을 거친 이름과 같거나,
+//!   ```text
+//!     치수가 같은 대체 글꼴(Arial 과 Liberation Sans 같은 표)이거나, 청한 이름이 sans, serif, monospace 일 때만 받는다.
+//!   ```
+//! - 일반 이름(serif, sans-serif, monospace, cursive, fantasy, math)은 크롬의 기본 글꼴 표대로 글꼴 이름으로 바꾼 뒤 찾는다. (resolve_generic_family_name)
+//!   표는 크로미엄 chrome/app/resources/`locale_settings_<운영체제>`.grd 의 IDS_*_FONT_FAMILY 와 그 언어 번역(platform_locale_settings/*.xtb)이다.
+//!   크롬은 브라우저 언어(화면 언어)로 Common(Zyyy) 스크립트 값을 정하고, 문서 lang 이 없는 캔버스는 기본 로캘(브라우저 언어)의 스크립트로 글꼴을 고른다.
+//!   그 스크립트의 따로 정한 값은 브라우저 언어의 스크립트라 등록하지 않으므로(prefs_tab_helper.cc 의 RegisterProfilePrefs) 결국 Common 값을 쓴다.
+//!   원본이 글을 굽는 캔버스는 문서에 붙이지 않아 문서의 lang 을 바꿔도 그대로다. (맥 크롬 158 로 확인)
+//!   러스트 판은 시스템 선호 언어에서 크롬이 고르는 화면 언어를 찾아(read_browser_locale) 같은 표를 쓴다.
+//!   예: 맥 한국어는 serif AppleMyungjo, sans-serif Apple SD Gothic Neo, monospace Menlo, 영어는 Times, Helvetica, Menlo. 윈도우 한국어는 serif Batang, sans-serif Malgun Gothic.
+//! - find_fallback_font_file: 글(글자 묶음 하나)을 그릴 대체 글꼴을 운영체제가 고르게 한다.
+//!   - 맥: 시스템 UI 글꼴에서 CTFontCreateForString. (크롬 맥의 글꼴 대체와 같은 API) 색 이모지를 바라면 Apple Color Emoji 를 먼저 본다.
+//!   - 윈도우: IDWriteFontFallback.MapCharacters (기본 이름 Segoe UI, 사용자 언어)
+//!   - 리눅스: 글자를 담은 charset 으로 FcFontSort 해 그 글자를 가진 첫 글꼴. 색 이모지를 바라면 color 속성을 건다.
+//! - 돌려주는 FontFileSource 의 얼굴 번호는 운영체제가 알려 주면(윈도우, 리눅스) 넣고, 맥은 PostScript 이름을 넣어 글꼴을 읽을 때 맞는 얼굴을 찾는다.
+//!   가변 글꼴(맥 시스템 UI 글꼴 SFNS 같은)의 굵기는 글자 캐시가 축 값으로 만든다.
 //==============================================================================
 use crate::core::textstringtexturecache::FontFileSource;
 
 //==============================================================================
-// 글꼴 이름으로 파일 찾기. (CSS 글꼴 이름 하나, 일반 이름은 크롬 기본 글꼴 표의 이름으로 바꿔 찾는다. 없으면 None)
+/// 글꼴 이름으로 파일 찾기. (CSS 글꼴 이름 하나, 일반 이름은 크롬 기본 글꼴 표의 이름으로 바꿔 찾는다. 없으면 None)
 //==============================================================================
 pub fn find_family_font_file(family_name: &str, weight: u16, is_italic: bool) -> Option<FontFileSource> {
 	let family_name = family_name.trim();
@@ -41,7 +45,7 @@ pub fn find_family_font_file(family_name: &str, weight: u16, is_italic: bool) ->
 }
 
 //==============================================================================
-// 글을 그릴 대체 글꼴 파일 찾기. (운영체제가 고른다, is_color_wanted 면 색 이모지 글꼴을 먼저)
+/// 글을 그릴 대체 글꼴 파일 찾기. (운영체제가 고른다, is_color_wanted 면 색 이모지 글꼴을 먼저)
 //==============================================================================
 pub fn find_fallback_font_file(text: &str, weight: u16, is_italic: bool, is_color_wanted: bool) -> Option<FontFileSource> {
 	if text.is_empty() {
@@ -51,10 +55,10 @@ pub fn find_fallback_font_file(text: &str, weight: u16, is_italic: bool, is_colo
 }
 
 //==============================================================================
-// 마지막 대체 글꼴 파일. (크롬 FontCache::GetLastResortFallbackFont, 글꼴 이름도 돌려준다. 없으면 None)
-// - 문서에 붙이지 않은 캔버스의 폰트 문자열에서 글꼴에 대는 단위(em 밖의 ex, ch, cap, ic, lh)를 셀 때 부모 글꼴이 된다. (맥 크롬 158 에서 Times 의 치수로 확인)
-// - 맥: Times, 없으면 Lucida Grande. (font_cache_mac.mm)
-// - 윈도우, 리눅스: 이름 없음(운영체제 기본), Sans, Arial, 윈도우는 그 뒤 MS UI Gothic, Microsoft Sans Serif, Segoe UI, Calibri, Times New Roman, Courier New. (font_cache_skia.cc)
+/// 마지막 대체 글꼴 파일. (크롬 FontCache::GetLastResortFallbackFont, 글꼴 이름도 돌려준다. 없으면 None)
+/// - 문서에 붙이지 않은 캔버스의 폰트 문자열에서 글꼴에 대는 단위(em 밖의 ex, ch, cap, ic, lh)를 셀 때 부모 글꼴이 된다. (맥 크롬 158 에서 Times 의 치수로 확인)
+/// - 맥: Times, 없으면 Lucida Grande. (font_cache_mac.mm)
+/// - 윈도우, 리눅스: 이름 없음(운영체제 기본), Sans, Arial, 윈도우는 그 뒤 MS UI Gothic, Microsoft Sans Serif, Segoe UI, Calibri, Times New Roman, Courier New. (font_cache_skia.cc)
 //==============================================================================
 pub fn find_last_resort_font_file() -> Option<(FontFileSource, String)> {
 	for family_name in platform_font::LAST_RESORT_FAMILY_LIST {
@@ -66,8 +70,8 @@ pub fn find_last_resort_font_file() -> Option<(FontFileSource, String)> {
 }
 
 //==============================================================================
-// 마지막 대체 글꼴의 이름. (깔린 첫 이름, 이름 없음(운영체제 기본)은 넘긴다. 처음 한 번 찾는다, 없으면 None)
-// - 글자 캐시가 시스템 대체 글꼴 뒤에 이 글꼴을 둔다. (크롬 FontFallbackIterator 의 마지막 단계)
+/// 마지막 대체 글꼴의 이름. (깔린 첫 이름, 이름 없음(운영체제 기본)은 넘긴다. 처음 한 번 찾는다, 없으면 None)
+/// - 글자 캐시가 시스템 대체 글꼴 뒤에 이 글꼴을 둔다. (크롬 FontFallbackIterator 의 마지막 단계)
 //==============================================================================
 pub fn read_last_resort_family_name() -> Option<String> {
 	thread_local! {
@@ -79,7 +83,7 @@ pub fn read_last_resort_family_name() -> Option<String> {
 }
 
 //==============================================================================
-// CSS 일반 글꼴 이름의 종류. (크롬 GenericFontFamilySettings 의 종류, 표의 칸 차례와 같다)
+/// CSS 일반 글꼴 이름의 종류. (크롬 GenericFontFamilySettings 의 종류, 표의 칸 차례와 같다)
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GenericFamily {
@@ -94,7 +98,7 @@ pub enum GenericFamily {
 
 impl GenericFamily {
 	//==============================================================================
-	// 일반 이름 → 종류. (serif, sans-serif, monospace, cursive, fantasy, math, 대소문자를 가리지 않는다. 크롬 font_selector.cc 가 아는 이름만, 아니면 None)
+	/// 일반 이름 → 종류. (serif, sans-serif, monospace, cursive, fantasy, math, 대소문자를 가리지 않는다. 크롬 font_selector.cc 가 아는 이름만, 아니면 None)
 	//==============================================================================
 	pub fn from_family_name(family_name: &str) -> Option<GenericFamily> {
 		match family_name.trim().to_ascii_lowercase().as_str() {
@@ -123,7 +127,7 @@ impl GenericFamily {
 	}
 
 	//==============================================================================
-	// 표의 칸 번호.
+	/// 표의 칸 번호.
 	//==============================================================================
 	fn read_table_index(self) -> usize {
 		match self {
@@ -152,13 +156,13 @@ impl GenericFamily {
 	}
 }
 
-// 크롬 화면 언어. (locale_settings_mac.grd 의 번역 목록, 의사 언어 ar-XB, en-XA 를 뺀다. 언어 부분만, zh 는 따로 zh-CN, zh-TW)
+/// 크롬 화면 언어. (locale_settings_mac.grd 의 번역 목록, 의사 언어 ar-XB, en-XA 를 뺀다. 언어 부분만, zh 는 따로 zh-CN, zh-TW)
 const CHROME_LOCALE_LANGUAGE_LIST: [&str; 55] = ["af", "am", "ar", "bg", "bn", "ca", "cs", "da", "de", "el", "en", "es", "et", "fa", "fi", "fil", "fr", "gu", "he", "hi", "hr", "hu", "id", "it", "ja", "kn", "ko", "lt", "lv", "ml", "mr", "ms", "nl", "no", "pl", "pt", "ro", "ru", "sk", "sl", "sr", "sv", "sw", "ta", "te", "th", "tr", "uk", "ur", "vi", "zh", "nb", "iw", "tl", "in"];
 
 //==============================================================================
-// 크롬이 고르는 화면 언어. (시스템 선호 언어 차례에서 크롬에 번역이 있는 첫 언어, 없으면 "en")
-// - 언어 부분으로 맞춘다. 중국어는 번체(Hant)나 대만, 홍콩, 마카오면 zh-TW, 아니면 zh-CN. 옛 이름 iw 는 he, tl 은 fil, in 은 id, nb 는 no 다. (l10n_util 의 별칭)
-// - 글꼴 표가 언어마다 다른 것은 맥 ar, fa, he, ja, ko, zh-CN, zh-TW, 윈도우 bn, ja, ko, th, zh-CN, zh-TW, 리눅스 bn, ja, ko, th 뿐이다.
+/// 크롬이 고르는 화면 언어. (시스템 선호 언어 차례에서 크롬에 번역이 있는 첫 언어, 없으면 "en")
+/// - 언어 부분으로 맞춘다. 중국어는 번체(Hant)나 대만, 홍콩, 마카오면 zh-TW, 아니면 zh-CN. 옛 이름 iw 는 he, tl 은 fil, in 은 id, nb 는 no 다. (l10n_util 의 별칭)
+/// - 글꼴 표가 언어마다 다른 것은 맥 ar, fa, he, ja, ko, zh-CN, zh-TW, 윈도우 bn, ja, ko, th, zh-CN, zh-TW, 리눅스 bn, ja, ko, th 뿐이다.
 //==============================================================================
 pub fn read_browser_locale() -> String {
 	for language_tag in crate::misc::localization::read_preferred_language_tags() {
@@ -170,7 +174,7 @@ pub fn read_browser_locale() -> String {
 }
 
 //==============================================================================
-// 언어 태그 → 크롬 화면 언어. (번역이 없는 언어면 None)
+/// 언어 태그 → 크롬 화면 언어. (번역이 없는 언어면 None)
 //==============================================================================
 fn convert_to_browser_locale(language_tag: &str) -> Option<String> {
 	let lowercase_tag = language_tag.trim().replace('_', "-").to_ascii_lowercase();
@@ -210,7 +214,7 @@ fn convert_to_browser_locale(language_tag: &str) -> Option<String> {
 }
 
 //==============================================================================
-// 크롬 기본 글꼴 표의 값. (화면 언어의 번역이 있으면 그것, 없으면 기본 값. 쉼표로 시작하면 이름 목록)
+/// 크롬 기본 글꼴 표의 값. (화면 언어의 번역이 있으면 그것, 없으면 기본 값. 쉼표로 시작하면 이름 목록)
 //==============================================================================
 fn read_default_family_value(browser_locale: &str, generic_family: GenericFamily) -> &'static str {
 	let table_index = generic_family.read_table_index();
@@ -225,15 +229,15 @@ fn read_default_family_value(browser_locale: &str, generic_family: GenericFamily
 }
 
 thread_local! {
-	// 일반 이름 → 고른 글꼴 이름. (화면 언어와 깔린 글꼴은 도는 동안 바뀌지 않는다고 보고 한 번 고른다)
+	/// 일반 이름 → 고른 글꼴 이름. (화면 언어와 깔린 글꼴은 도는 동안 바뀌지 않는다고 보고 한 번 고른다)
 	static GENERIC_FAMILY_NAME_TABLE: std::cell::RefCell<Vec<(GenericFamily, Option<String>)>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
 //==============================================================================
-// 일반 이름 → 글꼴 이름. (크롬 GenericFontFamilySettings::Get 과 같은 값, 표가 없는 운영체제는 None)
-// - 쉼표로 시작하는 목록은 깔린 첫 글꼴, 하나도 없으면 첫 이름이다. (gfx::FontList::FirstAvailableOrFirst)
-// - 맥: monospace 가 Osaka 면 Osaka-Mono. (generic_font_family_settings.cc)
-// - 윈도우: monospace 가 Courier 로 시작하고 ClearType 이 켜져 있으면 Consolas. (prefs_tab_helper.cc 의 ShouldUseAlternateDefaultFixedFont)
+/// 일반 이름 → 글꼴 이름. (크롬 GenericFontFamilySettings::Get 과 같은 값, 표가 없는 운영체제는 None)
+/// - 쉼표로 시작하는 목록은 깔린 첫 글꼴, 하나도 없으면 첫 이름이다. (gfx::FontList::FirstAvailableOrFirst)
+/// - 맥: monospace 가 Osaka 면 Osaka-Mono. (generic_font_family_settings.cc)
+/// - 윈도우: monospace 가 Courier 로 시작하고 ClearType 이 켜져 있으면 Consolas. (prefs_tab_helper.cc 의 ShouldUseAlternateDefaultFixedFont)
 //==============================================================================
 pub fn resolve_generic_family_name(generic_family: GenericFamily) -> Option<String> {
 	let cached_name = GENERIC_FAMILY_NAME_TABLE.with(|table_cell| table_cell.borrow().iter().find(|(cached_family, _)| *cached_family == generic_family).map(|(_, family_name)| family_name.clone()));
@@ -259,7 +263,7 @@ pub fn resolve_generic_family_name(generic_family: GenericFamily) -> Option<Stri
 }
 
 //==============================================================================
-// 맥: CoreText.
+/// 맥: CoreText.
 //==============================================================================
 #[cfg(target_os = "macos")]
 mod platform_font {
@@ -267,12 +271,12 @@ mod platform_font {
 	use objc2_core_foundation::{CFDictionary, CFNumber, CFRange, CFRetained, CFString, CFType, CFURL};
 	use objc2_core_text::{kCTFontFamilyNameAttribute, kCTFontSymbolicTrait, kCTFontTraitsAttribute, kCTFontURLAttribute, kCTFontWeightTrait, kCTFontWidthTrait, CTFont, CTFontDescriptor, CTFontSymbolicTraits, CTFontUIFontType};
 
-	// 글꼴을 지을 때의 크기. (파일만 읽으므로 아무 크기나 된다)
+	/// 글꼴을 지을 때의 크기. (파일만 읽으므로 아무 크기나 된다)
 	const LOOKUP_FONT_SIZE: f64 = 16.0;
 
-	// 크롬 맥 기본 글꼴. (locale_settings_mac.grd, 칸 차례: 표준, serif, sans-serif, monospace, cursive, fantasy, math)
+	/// 크롬 맥 기본 글꼴. (locale_settings_mac.grd, 칸 차례: 표준, serif, sans-serif, monospace, cursive, fantasy, math)
 	pub const BASE_FAMILY_TABLE: [&str; 7] = ["Times", "Times", "Helvetica", "Menlo", "Apple Chancery", "Papyrus", "STIX Two Math"];
-	// 화면 언어의 번역. (platform_locale_settings/locale_settings_mac_<언어>.xtb, None 은 기본 값)
+	/// 화면 언어의 번역. (platform_locale_settings/`locale_settings_mac_<언어>`.xtb, None 은 기본 값)
 	pub const LOCALE_FAMILY_TABLE: [(&str, [Option<&str>; 7]); 7] = [
 		("ar", [None, Some("Times New Roman"), Some("Arial"), Some("Courier New"), None, None, None]),
 		("fa", [None, Some("Times New Roman"), Some("Arial"), Some("Courier New"), None, None, None]),
@@ -282,11 +286,11 @@ mod platform_font {
 		("zh-CN", [Some(",PingFang SC,STHeiti"), Some("Songti SC"), Some(",PingFang SC,STHeiti"), None, Some("Kaiti SC"), None, None]),
 		("zh-TW", [Some(",PingFang TC,Heiti TC"), Some("Songti TC"), Some(",PingFang TC,Heiti TC"), None, Some("Kaiti TC"), None, None]),
 	];
-	// 마지막 대체 글꼴 차례. (font_cache_mac.mm 의 GetLastResortFallbackFont)
+	/// 마지막 대체 글꼴 차례. (font_cache_mac.mm 의 GetLastResortFallbackFont)
 	pub const LAST_RESORT_FAMILY_LIST: [&str; 2] = ["Times", "Lucida Grande"];
 
 	//==============================================================================
-	// CSS 굵기 → CoreText 굵기 특성. (AppKit NSFontWeight 값, 사이는 곧게 잇는다)
+	/// CSS 굵기 → CoreText 굵기 특성. (AppKit NSFontWeight 값, 사이는 곧게 잇는다)
 	//==============================================================================
 	fn convert_weight_trait(weight: u16) -> f64 {
 		const WEIGHT_TABLE: [(f64, f64); 9] = [(100.0, -0.8), (200.0, -0.6), (300.0, -0.4), (400.0, 0.0), (500.0, 0.23), (600.0, 0.3), (700.0, 0.4), (800.0, 0.56), (900.0, 0.62)];
@@ -302,7 +306,7 @@ mod platform_font {
 	}
 
 	//==============================================================================
-	// 글꼴의 파일과 PostScript 이름.
+	/// 글꼴의 파일과 PostScript 이름.
 	//==============================================================================
 	fn read_font_file(font: &CTFont) -> Option<FontFileSource> {
 		let url_value = unsafe { font.attribute(kCTFontURLAttribute) }?;
@@ -317,7 +321,7 @@ mod platform_font {
 	}
 
 	//==============================================================================
-	// 시스템 UI 글꼴. (굵기가 600 이상이면 굵은 시스템 글꼴)
+	/// 시스템 UI 글꼴. (굵기가 600 이상이면 굵은 시스템 글꼴)
 	//==============================================================================
 	fn create_system_ui_font(weight: u16) -> Option<CFRetained<CTFont>> {
 		let ui_font_type = if weight >= 600 {
@@ -330,8 +334,8 @@ mod platform_font {
 	}
 
 	//==============================================================================
-	// 이름, 굵기, 기울기로 글꼴 짓기. (그 이름의 글꼴이 없으면 None)
-	// - 너비는 보통(0)을 청한다. (크롬 MatchFontFamily 도 font-stretch normal 로 고른다. 주지 않으면 Papyrus 가 Condensed 로 나온다)
+	/// 이름, 굵기, 기울기로 글꼴 짓기. (그 이름의 글꼴이 없으면 None)
+	/// - 너비는 보통(0)을 청한다. (크롬 MatchFontFamily 도 font-stretch normal 로 고른다. 주지 않으면 Papyrus 가 Condensed 로 나온다)
 	//==============================================================================
 	fn create_family_font(family_name: &str, weight: u16, is_italic: bool) -> Option<CFRetained<CTFont>> {
 		let family_text = CFString::from_str(family_name);
@@ -360,7 +364,7 @@ mod platform_font {
 	}
 
 	//==============================================================================
-	// 글꼴 이름으로 파일 찾기. (system-ui 와 BlinkMacSystemFont 는 시스템 UI 글꼴, 그 밖은 그 이름의 글꼴. 일반 이름은 위에서 글꼴 이름으로 바꿔 온다)
+	/// 글꼴 이름으로 파일 찾기. (system-ui 와 BlinkMacSystemFont 는 시스템 UI 글꼴, 그 밖은 그 이름의 글꼴. 일반 이름은 위에서 글꼴 이름으로 바꿔 온다)
 	//==============================================================================
 	pub fn find_family_font_file(family_name: &str, weight: u16, is_italic: bool) -> Option<FontFileSource> {
 		let lowercase_family_name = family_name.to_lowercase();
@@ -376,14 +380,14 @@ mod platform_font {
 	}
 
 	//==============================================================================
-	// 그 이름의 글꼴이 깔렸는지. (기본 글꼴 표의 이름 목록에서 깔린 첫 글꼴을 고를 때)
+	/// 그 이름의 글꼴이 깔렸는지. (기본 글꼴 표의 이름 목록에서 깔린 첫 글꼴을 고를 때)
 	//==============================================================================
 	pub fn is_family_available(family_name: &str) -> bool {
 		create_family_font(family_name, 400, false).is_some()
 	}
 
 	//==============================================================================
-	// 고른 일반 글꼴 이름 고치기. (monospace 가 Osaka 면 Osaka-Mono, generic_font_family_settings.cc)
+	/// 고른 일반 글꼴 이름 고치기. (monospace 가 Osaka 면 Osaka-Mono, generic_font_family_settings.cc)
 	//==============================================================================
 	pub fn adjust_generic_family_name(generic_family: super::GenericFamily, family_name: String) -> String {
 		if generic_family == super::GenericFamily::Monospace && family_name == "Osaka" {
@@ -393,7 +397,7 @@ mod platform_font {
 	}
 
 	//==============================================================================
-	// 대체 글꼴 파일 찾기. (시스템 UI 글꼴에서 CTFontCreateForString)
+	/// 대체 글꼴 파일 찾기. (시스템 UI 글꼴에서 CTFontCreateForString)
 	//==============================================================================
 	pub fn find_fallback_font_file(text: &str, weight: u16, is_italic: bool, is_color_wanted: bool) -> Option<FontFileSource> {
 		if is_color_wanted {
@@ -419,7 +423,7 @@ mod platform_font {
 }
 
 //==============================================================================
-// 윈도우: DirectWrite.
+/// 윈도우: DirectWrite.
 //==============================================================================
 #[cfg(target_os = "windows")]
 mod platform_font {
@@ -433,12 +437,12 @@ mod platform_font {
 		DWriteCreateFactory, IDWriteFactory, IDWriteFactory2, IDWriteFont, IDWriteFontCollection, IDWriteFontFamily, IDWriteFontFile, IDWriteLocalFontFileLoader, IDWriteNumberSubstitution, IDWriteTextAnalysisSource, IDWriteTextAnalysisSource_Impl, DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE, DWRITE_FONT_STYLE_ITALIC, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT, DWRITE_READING_DIRECTION, DWRITE_READING_DIRECTION_LEFT_TO_RIGHT,
 	};
 
-	// 대체 글꼴을 고를 때의 기본 이름. (크롬 윈도우의 시스템 글꼴)
+	/// 대체 글꼴을 고를 때의 기본 이름. (크롬 윈도우의 시스템 글꼴)
 	const FALLBACK_BASE_FAMILY: &str = "Segoe UI";
 
-	// 크롬 윈도우 기본 글꼴. (locale_settings_win.grd, 칸 차례: 표준, serif, sans-serif, monospace, cursive, fantasy, math)
+	/// 크롬 윈도우 기본 글꼴. (locale_settings_win.grd, 칸 차례: 표준, serif, sans-serif, monospace, cursive, fantasy, math)
 	pub const BASE_FAMILY_TABLE: [&str; 7] = ["Times New Roman", "Times New Roman", "Arial", "Courier New", "Comic Sans MS", "Impact", "Cambria Math"];
-	// 화면 언어의 번역. (platform_locale_settings/locale_settings_win_<언어>.xtb, None 은 기본 값)
+	/// 화면 언어의 번역. (platform_locale_settings/`locale_settings_win_<언어>`.xtb, None 은 기본 값)
 	pub const LOCALE_FAMILY_TABLE: [(&str, [Option<&str>; 7]); 6] = [
 		("bn", [None, None, Some("Vrinda"), None, None, None, None]),
 		("ja", [Some(",Noto Sans JP,Noto Sans CJK JP,Meiryo,Yu Gothic"), Some(",Noto Serif JP,Noto Serif CJK JP,Yu Mincho,MS PMincho"), Some(",Noto Sans JP,Noto Sans CJK JP,Meiryo,Yu Gothic"), Some(",BIZ UDGothic,MS Gothic"), None, None, None]),
@@ -447,23 +451,23 @@ mod platform_font {
 		("zh-CN", [Some(",Noto Sans SC,Noto Sans CJK SC,Microsoft YaHei"), Some(",Noto Serif SC,Noto Serif CJK SC,Simsun"), Some(",Noto Sans SC,Noto Sans CJK SC,Microsoft YaHei"), Some("NSimsun"), Some("KaiTi"), None, None]),
 		("zh-TW", [None, None, None, None, Some("DFKai-SB"), None, None]),
 	];
-	// 마지막 대체 글꼴 차례. (font_cache_skia.cc 의 GetLastResortFallbackFont, 이름 없는 것은 DirectWrite 가 찾지 못해 넘긴다)
+	/// 마지막 대체 글꼴 차례. (font_cache_skia.cc 의 GetLastResortFallbackFont, 이름 없는 것은 DirectWrite 가 찾지 못해 넘긴다)
 	pub const LAST_RESORT_FAMILY_LIST: [&str; 8] = ["Sans", "Arial", "MS UI Gothic", "Microsoft Sans Serif", "Segoe UI", "Calibri", "Times New Roman", "Courier New"];
 
 	thread_local! {
-		// DirectWrite 공유 공장. (스레드마다 처음 쓸 때 한 번 짓는다, 짓지 못하면 None 이라 아무 글꼴도 찾지 않는다)
+		/// DirectWrite 공유 공장. (스레드마다 처음 쓸 때 한 번 짓는다, 짓지 못하면 None 이라 아무 글꼴도 찾지 않는다)
 		static DIRECT_WRITE_FACTORY: Option<IDWriteFactory> = unsafe { DWriteCreateFactory::<IDWriteFactory>(DWRITE_FACTORY_TYPE_SHARED) }.ok();
 	}
 
 	//==============================================================================
-	// DirectWrite 공장 반환.
+	/// DirectWrite 공장 반환.
 	//==============================================================================
 	fn get_direct_write_factory() -> Option<IDWriteFactory> {
 		DIRECT_WRITE_FACTORY.with(|direct_write_factory| direct_write_factory.clone())
 	}
 
 	//==============================================================================
-	// 시스템 글꼴 모음 반환. (새 글꼴이 깔렸는지는 다시 살피지 않는다)
+	/// 시스템 글꼴 모음 반환. (새 글꼴이 깔렸는지는 다시 살피지 않는다)
 	//==============================================================================
 	fn get_system_font_collection() -> Option<IDWriteFontCollection> {
 		let direct_write_factory = get_direct_write_factory()?;
@@ -473,14 +477,14 @@ mod platform_font {
 	}
 
 	//==============================================================================
-	// 글을 끝에 0 을 붙인 UTF-16 으로. (DirectWrite 에 넘기는 이름)
+	/// 글을 끝에 0 을 붙인 UTF-16 으로. (DirectWrite 에 넘기는 이름)
 	//==============================================================================
 	fn encode_wide_null(text: &str) -> Vec<u16> {
 		text.encode_utf16().chain(std::iter::once(0)).collect()
 	}
 
 	//==============================================================================
-	// 글꼴 모음에서 이름으로 글꼴 무리 찾기.
+	/// 글꼴 모음에서 이름으로 글꼴 무리 찾기.
 	//==============================================================================
 	fn find_font_family(font_collection: &IDWriteFontCollection, family_name: &str) -> Option<IDWriteFontFamily> {
 		let wide_family_name = encode_wide_null(family_name);
@@ -494,7 +498,7 @@ mod platform_font {
 	}
 
 	//==============================================================================
-	// 그 이름의 글꼴이 깔렸는지. (시스템 글꼴 모음의 이름)
+	/// 그 이름의 글꼴이 깔렸는지. (시스템 글꼴 모음의 이름)
 	//==============================================================================
 	pub fn is_family_available(family_name: &str) -> bool {
 		match get_system_font_collection() {
@@ -508,7 +512,7 @@ mod platform_font {
 	}
 
 	//==============================================================================
-	// 고른 일반 글꼴 이름 고치기. (monospace 가 Courier 로 시작하고 ClearType 이 켜져 있으면 Consolas, prefs_tab_helper.cc 의 ShouldUseAlternateDefaultFixedFont)
+	/// 고른 일반 글꼴 이름 고치기. (monospace 가 Courier 로 시작하고 ClearType 이 켜져 있으면 Consolas, prefs_tab_helper.cc 의 ShouldUseAlternateDefaultFixedFont)
 	//==============================================================================
 	pub fn adjust_generic_family_name(generic_family: super::GenericFamily, family_name: String) -> String {
 		if generic_family == super::GenericFamily::Monospace && family_name.to_ascii_lowercase().starts_with("courier") {
@@ -522,7 +526,7 @@ mod platform_font {
 	}
 
 	//==============================================================================
-	// 메뉴 글꼴 이름. (크롬 윈도우의 system-ui, font_cache_skia_win.cc 의 SystemFontFamily 는 MenuFontFamily 다. 읽지 못하면 Segoe UI)
+	/// 메뉴 글꼴 이름. (크롬 윈도우의 system-ui, font_cache_skia_win.cc 의 SystemFontFamily 는 MenuFontFamily 다. 읽지 못하면 Segoe UI)
 	//==============================================================================
 	fn read_menu_font_family_name() -> String {
 		let mut non_client_metrics: windows_sys::Win32::UI::WindowsAndMessaging::NONCLIENTMETRICSW = unsafe { std::mem::zeroed() };
@@ -543,8 +547,8 @@ mod platform_font {
 	}
 
 	//==============================================================================
-	// 대체 글꼴 고르기에 줄 글과 언어와 방향. (IDWriteTextAnalysisSource 를 구현한 COM 객체)
-	// - 돌려주는 글과 언어 이름의 포인터는 이 객체가 든 Vec 을 가리킨다. DirectWrite 는 객체를 쥔 동안에만 읽는다.
+	/// 대체 글꼴 고르기에 줄 글과 언어와 방향. (IDWriteTextAnalysisSource 를 구현한 COM 객체)
+	/// - 돌려주는 글과 언어 이름의 포인터는 이 객체가 든 Vec 을 가리킨다. DirectWrite 는 객체를 쥔 동안에만 읽는다.
 	//==============================================================================
 	#[implement(IDWriteTextAnalysisSource)]
 	struct FallbackTextSource {
@@ -554,7 +558,7 @@ mod platform_font {
 
 	impl IDWriteTextAnalysisSource_Impl for FallbackTextSource_Impl {
 		//==============================================================================
-		// 그 자리부터 끝까지의 글. (끝이거나 넘으면 빈 글)
+		/// 그 자리부터 끝까지의 글. (끝이거나 넘으면 빈 글)
 		//==============================================================================
 		fn GetTextAtPosition(&self, text_position: u32, text_string: *mut *mut u16, text_length: *mut u32) -> windows::core::Result<()> {
 			let total_length = self.text_unit_list.len() as u32;
@@ -572,7 +576,7 @@ mod platform_font {
 		}
 
 		//==============================================================================
-		// 그 자리 앞의 글. (처음이거나 넘으면 빈 글)
+		/// 그 자리 앞의 글. (처음이거나 넘으면 빈 글)
 		//==============================================================================
 		fn GetTextBeforePosition(&self, text_position: u32, text_string: *mut *mut u16, text_length: *mut u32) -> windows::core::Result<()> {
 			let total_length = self.text_unit_list.len() as u32;
@@ -590,14 +594,14 @@ mod platform_font {
 		}
 
 		//==============================================================================
-		// 문단 방향. (왼쪽에서 오른쪽, 글자 고르기에는 쓰이지 않는다)
+		/// 문단 방향. (왼쪽에서 오른쪽, 글자 고르기에는 쓰이지 않는다)
 		//==============================================================================
 		fn GetParagraphReadingDirection(&self) -> DWRITE_READING_DIRECTION {
 			DWRITE_READING_DIRECTION_LEFT_TO_RIGHT
 		}
 
 		//==============================================================================
-		// 그 자리부터 끝까지의 언어. (글 전체가 사용자 기본 언어)
+		/// 그 자리부터 끝까지의 언어. (글 전체가 사용자 기본 언어)
 		//==============================================================================
 		fn GetLocaleName(&self, text_position: u32, text_length: *mut u32, locale_name: *mut *mut u16) -> windows::core::Result<()> {
 			let total_length = self.text_unit_list.len() as u32;
@@ -609,7 +613,7 @@ mod platform_font {
 		}
 
 		//==============================================================================
-		// 숫자 바꾸기. (쓰지 않는다)
+		/// 숫자 바꾸기. (쓰지 않는다)
 		//==============================================================================
 		fn GetNumberSubstitution(&self, text_position: u32, text_length: *mut u32, number_substitution: OutRef<IDWriteNumberSubstitution>) -> windows::core::Result<()> {
 			let total_length = self.text_unit_list.len() as u32;
@@ -624,7 +628,7 @@ mod platform_font {
 	}
 
 	//==============================================================================
-	// 사용자 기본 언어 이름. ("ko-KR" 같은, 읽지 못하면 "en-US")
+	/// 사용자 기본 언어 이름. ("ko-KR" 같은, 읽지 못하면 "en-US")
 	//==============================================================================
 	fn read_user_locale_name() -> String {
 		let mut locale_buffer = [0u16; 85];
@@ -636,7 +640,7 @@ mod platform_font {
 	}
 
 	//==============================================================================
-	// 글꼴 파일의 경로. (디스크에 있는 파일만, 메모리에서 읽은 글꼴이면 None)
+	/// 글꼴 파일의 경로. (디스크에 있는 파일만, 메모리에서 읽은 글꼴이면 None)
 	//==============================================================================
 	fn read_font_file_path(font_file: &IDWriteFontFile) -> Option<PathBuf> {
 		let mut reference_key: *mut c_void = std::ptr::null_mut();
@@ -651,7 +655,7 @@ mod platform_font {
 	}
 
 	//==============================================================================
-	// 글꼴의 파일과 얼굴 번호.
+	/// 글꼴의 파일과 얼굴 번호.
 	//==============================================================================
 	fn read_font_file(font: &IDWriteFont) -> Option<FontFileSource> {
 		let font_face = unsafe { font.CreateFontFace() }.ok()?;
@@ -671,7 +675,7 @@ mod platform_font {
 	}
 
 	//==============================================================================
-	// 굵기와 기울기를 DirectWrite 값으로.
+	/// 굵기와 기울기를 DirectWrite 값으로.
 	//==============================================================================
 	fn convert_font_style(weight: u16, is_italic: bool) -> (DWRITE_FONT_WEIGHT, DWRITE_FONT_STYLE) {
 		let font_style = if is_italic {
@@ -684,7 +688,7 @@ mod platform_font {
 	}
 
 	//==============================================================================
-	// 글꼴 이름으로 파일 찾기.
+	/// 글꼴 이름으로 파일 찾기.
 	//==============================================================================
 	pub fn find_family_font_file(family_name: &str, weight: u16, is_italic: bool) -> Option<FontFileSource> {
 		let lowercase_family_name = family_name.to_lowercase();
@@ -704,7 +708,7 @@ mod platform_font {
 	}
 
 	//==============================================================================
-	// 대체 글꼴 파일 찾기. (IDWriteFontFallback.MapCharacters, 윈도우 8.1 보다 옛 판이라 대체 글꼴 기능이 없으면 None)
+	/// 대체 글꼴 파일 찾기. (IDWriteFontFallback.MapCharacters, 윈도우 8.1 보다 옛 판이라 대체 글꼴 기능이 없으면 None)
 	//==============================================================================
 	pub fn find_fallback_font_file(text: &str, weight: u16, is_italic: bool, is_color_wanted: bool) -> Option<FontFileSource> {
 		if is_color_wanted {
@@ -734,7 +738,7 @@ mod platform_font {
 }
 
 //==============================================================================
-// 리눅스와 그 밖의 유닉스: fontconfig. (라이브러리를 실행할 때 열고, 없으면 아무것도 찾지 않는다)
+/// 리눅스와 그 밖의 유닉스: fontconfig. (라이브러리를 실행할 때 열고, 없으면 아무것도 찾지 않는다)
 //==============================================================================
 #[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
 mod platform_font {
@@ -743,19 +747,19 @@ mod platform_font {
 	use fontconfig_sys::{Fc, FcMatchPattern, FcPattern, FcResultMatch};
 	use std::ffi::{CStr, CString};
 
-	// 크롬 리눅스 기본 글꼴. (locale_settings_linux.grd, 칸 차례: 표준, serif, sans-serif, monospace, cursive, fantasy, math)
+	/// 크롬 리눅스 기본 글꼴. (locale_settings_linux.grd, 칸 차례: 표준, serif, sans-serif, monospace, cursive, fantasy, math)
 	pub const BASE_FAMILY_TABLE: [&str; 7] = ["Times New Roman", "Times New Roman", "Arial", "Monospace", "Comic Sans MS", "Impact", "Latin Modern Math"];
-	// 화면 언어의 번역. (platform_locale_settings/locale_settings_linux_<언어>.xtb, None 은 기본 값)
+	/// 화면 언어의 번역. (platform_locale_settings/`locale_settings_linux_<언어>`.xtb, None 은 기본 값)
 	pub const LOCALE_FAMILY_TABLE: [(&str, [Option<&str>; 7]); 4] = [
 		("bn", [None, None, Some("Vrinda"), None, None, None, None]),
 		("ja", [Some(",Noto Sans JP,Noto Sans CJK JP,VL PGothic"), Some(",Noto Serif JP,Noto Serif CJK JP,Sazanami Mincho"), Some(",Noto Sans JP,Noto Sans CJK JP,VL PGothic"), Some("VL Gothic"), Some("Sazanami Mincho"), Some("Sazanami Mincho"), None]),
 		("ko", [Some(",Noto Sans KR,Noto Sans CJK KR"), Some(",Noto Serif KR,Noto Serif CJK KR,NanumMyeongjo"), Some(",Noto Sans KR,Noto Sans CJK KR"), Some("UnDotum"), Some("UnGungsuh"), Some("UnYetGul"), None]),
 		("th", [None, Some("Norasi"), Some("Norasi"), Some("TlwgMono"), None, None, None]),
 	];
-	// 마지막 대체 글꼴 차례. (font_cache_skia.cc 의 GetLastResortFallbackFont, 이름 없음은 fontconfig 기본 글꼴)
+	/// 마지막 대체 글꼴 차례. (font_cache_skia.cc 의 GetLastResortFallbackFont, 이름 없음은 fontconfig 기본 글꼴)
 	pub const LAST_RESORT_FAMILY_LIST: [&str; 3] = ["", "Sans", "Arial"];
 
-	// 치수가 같은 대체 글꼴 무리. (Skia SkFontConfigInterface_direct.cpp 의 kFontEquivMap, 무리 번호와 이름)
+	/// 치수가 같은 대체 글꼴 무리. (Skia SkFontConfigInterface_direct.cpp 의 kFontEquivMap, 무리 번호와 이름)
 	const METRIC_COMPATIBLE_FAMILY_TABLE: [(u8, &str); 66] = [
 		(1, "Arial"), (1, "Arimo"), (1, "Liberation Sans"),
 		(2, "Times New Roman"), (2, "Tinos"), (2, "Liberation Serif"),
@@ -777,14 +781,14 @@ mod platform_font {
 	];
 
 	//==============================================================================
-	// fontconfig 라이브러리. (처음 쓸 때 연다, 없으면 None)
+	/// fontconfig 라이브러리. (처음 쓸 때 연다, 없으면 None)
 	//==============================================================================
 	fn read_library() -> Option<&'static Fc> {
 		fontconfig_sys::statics::LIB_RESULT.as_ref().ok()
 	}
 
 	//==============================================================================
-	// 치수가 같은 대체 글꼴인지. (같은 무리에 든 두 이름, 대소문자를 가리지 않는다. Skia IsMetricCompatibleReplacement)
+	/// 치수가 같은 대체 글꼴인지. (같은 무리에 든 두 이름, 대소문자를 가리지 않는다. Skia IsMetricCompatibleReplacement)
 	//==============================================================================
 	fn is_metric_compatible_replacement(first_family_name: &str, second_family_name: &str) -> bool {
 		let find_group = |family_name: &str| -> Option<u8> {
@@ -801,21 +805,21 @@ mod platform_font {
 	}
 
 	//==============================================================================
-	// 그 이름의 글꼴이 깔렸는지. (fontconfig 가 찾은 글꼴을 크롬처럼 받을 때)
+	/// 그 이름의 글꼴이 깔렸는지. (fontconfig 가 찾은 글꼴을 크롬처럼 받을 때)
 	//==============================================================================
 	pub fn is_family_available(family_name: &str) -> bool {
 		find_family_font_file(family_name, 400, false).is_some()
 	}
 
 	//==============================================================================
-	// 고른 일반 글꼴 이름 고치기. (리눅스는 고치지 않는다)
+	/// 고른 일반 글꼴 이름 고치기. (리눅스는 고치지 않는다)
 	//==============================================================================
 	pub fn adjust_generic_family_name(_generic_family: super::GenericFamily, family_name: String) -> String {
 		family_name
 	}
 
 	//==============================================================================
-	// CSS 굵기 → fontconfig 굵기. (OpenType 굵기 표와 같은 점들, 사이는 곧게 잇는다)
+	/// CSS 굵기 → fontconfig 굵기. (OpenType 굵기 표와 같은 점들, 사이는 곧게 잇는다)
 	//==============================================================================
 	fn convert_weight(weight: u16) -> i32 {
 		const WEIGHT_TABLE: [(f32, f32); 10] = [(100.0, 0.0), (200.0, 40.0), (300.0, 50.0), (350.0, 75.0), (400.0, 80.0), (500.0, 100.0), (600.0, 180.0), (700.0, 200.0), (800.0, 205.0), (900.0, 210.0)];
@@ -831,7 +835,7 @@ mod platform_font {
 	}
 
 	//==============================================================================
-	// 패턴의 파일과 얼굴 번호.
+	/// 패턴의 파일과 얼굴 번호.
 	//==============================================================================
 	fn read_pattern_file(library: &Fc, pattern: *mut FcPattern) -> Option<FontFileSource> {
 		let mut file_text: *mut u8 = std::ptr::null_mut();
@@ -855,7 +859,7 @@ mod platform_font {
 	}
 
 	//==============================================================================
-	// 굵기와 기울기를 담은 패턴. (찾고 나면 FcPatternDestroy)
+	/// 굵기와 기울기를 담은 패턴. (찾고 나면 FcPatternDestroy)
 	//==============================================================================
 	fn create_pattern(library: &Fc, family_name: &str, weight: u16, is_italic: bool) -> Option<*mut FcPattern> {
 		let family_text = CString::new(family_name).ok()?;
@@ -880,7 +884,7 @@ mod platform_font {
 	}
 
 	//==============================================================================
-	// 패턴에 설정과 기본값 채우기.
+	/// 패턴에 설정과 기본값 채우기.
 	//==============================================================================
 	fn substitute_pattern(library: &Fc, pattern: *mut FcPattern) {
 		unsafe {
@@ -890,7 +894,7 @@ mod platform_font {
 	}
 
 	//==============================================================================
-	// 패턴의 몇째 이름. (없으면 None)
+	/// 패턴의 몇째 이름. (없으면 None)
 	//==============================================================================
 	fn read_pattern_family_name(library: &Fc, pattern: *mut FcPattern, family_index: i32) -> Option<String> {
 		let mut family_text: *mut u8 = std::ptr::null_mut();
@@ -902,10 +906,10 @@ mod platform_font {
 	}
 
 	//==============================================================================
-	// 글꼴 이름으로 파일 찾기. (크롬처럼 받을 만한 글꼴만, Skia SkFontConfigInterfaceDirect::matchFamilyName 과 isAcceptableMatch)
-	// - 청한 이름이 비었거나 sans, serif, monospace 면 fontconfig 가 고른 대로 받는다.
-	// - 그 밖은 찾은 글꼴의 이름 가운데 설정을 거친 첫 이름이나 청한 이름과 같은 것, 또는 치수가 같은 대체 글꼴이 있어야 받는다.
-	// - system-ui 는 fontconfig 의 sans 로 찾는다. (크롬 리눅스는 데스크탑 설정의 UI 글꼴 이름을 쓴다, 그 이름을 읽지 않으므로 기본 sans 로 갈음한다)
+	/// 글꼴 이름으로 파일 찾기. (크롬처럼 받을 만한 글꼴만, Skia SkFontConfigInterfaceDirect::matchFamilyName 과 isAcceptableMatch)
+	/// - 청한 이름이 비었거나 sans, serif, monospace 면 fontconfig 가 고른 대로 받는다.
+	/// - 그 밖은 찾은 글꼴의 이름 가운데 설정을 거친 첫 이름이나 청한 이름과 같은 것, 또는 치수가 같은 대체 글꼴이 있어야 받는다.
+	/// - system-ui 는 fontconfig 의 sans 로 찾는다. (크롬 리눅스는 데스크탑 설정의 UI 글꼴 이름을 쓴다, 그 이름을 읽지 않으므로 기본 sans 로 갈음한다)
 	//==============================================================================
 	pub fn find_family_font_file(family_name: &str, weight: u16, is_italic: bool) -> Option<FontFileSource> {
 		let library = read_library()?;
@@ -950,7 +954,7 @@ mod platform_font {
 	}
 
 	//==============================================================================
-	// 대체 글꼴 파일 찾기. (글의 첫 글자를 담은 charset 으로 FcFontSort, 그 글자를 가진 첫 글꼴)
+	/// 대체 글꼴 파일 찾기. (글의 첫 글자를 담은 charset 으로 FcFontSort, 그 글자를 가진 첫 글꼴)
 	//==============================================================================
 	pub fn find_fallback_font_file(text: &str, weight: u16, is_italic: bool, is_color_wanted: bool) -> Option<FontFileSource> {
 		let library = read_library()?;
@@ -994,40 +998,40 @@ mod platform_font {
 }
 
 //==============================================================================
-// 그 밖의 운영체제: 찾지 않는다.
+/// 그 밖의 운영체제: 찾지 않는다.
 //==============================================================================
 #[cfg(not(any(target_os = "macos", target_os = "windows", all(unix, not(target_os = "ios"), not(target_os = "android")))))]
 mod platform_font {
 	use crate::core::textstringtexturecache::FontFileSource;
 
-	// 기본 글꼴 표가 없다.
+	/// 기본 글꼴 표가 없다.
 	pub const BASE_FAMILY_TABLE: [&str; 7] = [""; 7];
 	pub const LOCALE_FAMILY_TABLE: [(&str, [Option<&str>; 7]); 0] = [];
 	pub const LAST_RESORT_FAMILY_LIST: [&str; 0] = [];
 
 	//==============================================================================
-	// 그 이름의 글꼴이 깔렸는지. (찾지 않는다)
+	/// 그 이름의 글꼴이 깔렸는지. (찾지 않는다)
 	//==============================================================================
 	pub fn is_family_available(_family_name: &str) -> bool {
 		false
 	}
 
 	//==============================================================================
-	// 고른 일반 글꼴 이름 고치기. (고치지 않는다)
+	/// 고른 일반 글꼴 이름 고치기. (고치지 않는다)
 	//==============================================================================
 	pub fn adjust_generic_family_name(_generic_family: super::GenericFamily, family_name: String) -> String {
 		family_name
 	}
 
 	//==============================================================================
-	// 글꼴 이름으로 파일 찾기. (찾지 않는다)
+	/// 글꼴 이름으로 파일 찾기. (찾지 않는다)
 	//==============================================================================
 	pub fn find_family_font_file(_family_name: &str, _weight: u16, _is_italic: bool) -> Option<FontFileSource> {
 		None
 	}
 
 	//==============================================================================
-	// 대체 글꼴 파일 찾기. (찾지 않는다)
+	/// 대체 글꼴 파일 찾기. (찾지 않는다)
 	//==============================================================================
 	pub fn find_fallback_font_file(_text: &str, _weight: u16, _is_italic: bool, _is_color_wanted: bool) -> Option<FontFileSource> {
 		None
@@ -1039,7 +1043,7 @@ mod tests {
 	use super::*;
 
 	//==============================================================================
-	// 한글 대체 글꼴과 일반 이름 sans-serif 는 찾고, 없는 이름은 None. (맥, 윈도우, fontconfig 가 있는 리눅스)
+	/// 한글 대체 글꼴과 일반 이름 sans-serif 는 찾고, 없는 이름은 None. (맥, 윈도우, fontconfig 가 있는 리눅스)
 	//==============================================================================
 	#[test]
 	fn finds_system_fonts_and_rejects_unknown_family() {

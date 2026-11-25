@@ -1,39 +1,39 @@
 //==============================================================================
-// 데스크탑 플랫폼. (윈도우, 맥, 리눅스)
-// - 창(winit)과 GL 3.3 코어 컨텍스트(glutin)를 만들고, 창의 다시 그리기 요청마다 엔진 프레임을 하나 돈다.
-// - 창 이벤트를 입력 관리자 꼴로 바꿔 넣는다. (키는 W3C KeyboardEvent.code 와 같은 이름, 마우스 단추는 원본처럼 어느 것이든 터치, 왼쪽만으로 바꿀 수 있다)
-// - 엔진 본체(EngineRunner)는 창을 모른다. 여기서 프레임을 부르고, 그린 뒤 화면을 넘긴다.
-// - 글 입력(키 글자, 편집 키, IME 조합)과 클립보드는 desktop/textinput.rs 가 맡는다. 오른쪽 단추는 입력 필드 문맥 메뉴 요청이다.
-// - 맥의 게임패드 진동은 desktop/gamepadhaptics.rs 가 맡는다. (GameController 와 CoreHaptics, 다른 OS 는 gilrs 가 떤다)
-// - 마지막으로 쓴 장치를 키, 마우스, 손가락 이벤트마다 적는다. 막을 키(set_prevented_keys)와 오른쪽 클릭 메뉴 막기는 창에 막을 브라우저 기본 동작이 없어 쓰지 않는다.
-//   (크롬에서 막은 것과 같은 결과다. winit 은 윈도우에서 메뉴가 없는 창의 WM_SYSKEYUP 을 DefWindowProc 에 넘기지 않아 Alt, F10 도 시스템 메뉴로 들어가지 않는다)
-// - 페이지 이벤트: 창이 가려짐(Occluded, 맥과 X11 이 알린다), 최소화(크기 0 이나 is_minimized, 윈도우가 이것으로 알린다), 앱 멈춤(suspended, 모바일),
-//   웨이랜드 프레임 콜백이 3 초 넘게 오지 않음(크롬 리눅스 웨이랜드의 가려짐, desktop/waylandframecallback.rs)
-//   가운데 하나라도 맞으면 Hidden, 모두 풀리면 Visible 과 on_page_visibility_restored. 포커스는 Focused / Blurred, 마우스 단추와 손가락 누름은 PointerDown.
-//   웨이랜드의 xdg_toplevel suspended 상태는 winit 이 쥐고 알리지 않아 받지 못한다.
-// - 웨이랜드 수직 동기: EGL 스왑 간격을 0 으로 두고 넘기기 전에 지난 프레임 콜백을 1/20 초까지 기다린다. (메사는 간격 1 이면 가려진 창에서 스왑 안에 멈춘다)
-// - 캔버스 크기(auto_resize_on_window_resize): 창은 캔버스가 창을 가득 채운 페이지와 같다. 켜면 원본처럼 visualViewport(창에서 화면 키보드가 가린 아래를 뺀 것)에
-//   맞추고 ignore_virtual_keyboard_resize 와 캔버스 비 상한을 건다. 끄면 창 크기 그대로다.
-// - 화면 키보드: 윈도우는 크롬처럼 손가락으로 플랫폼 입력 필드에 포커스하면 터치 키보드(InputPane)를 띄우고 가린 영역을 visualViewport 에서 뺀다. (desktop/windowsinputpane.rs)
-//   맥과 리눅스는 크롬처럼 뷰포트를 줄이지 않는다.
-// - 드로잉 버퍼 남기기(preserve_drawing_buffer): 다 그린 프레임을 떠 두고 다음 프레임 첫머리에 되그린다. (desktop/preserveddrawingbuffer.rs)
-// - 페이지 프로세스 복원(on_page_process_restored, 원본 Chromium freeze 뒤 resume 과 bfcache): suspended 뒤 resumed, 그리고 시스템 잠자기에서 깬 것.
-//   윈도우는 창을 서브클래싱해 WM_POWERBROADCAST 의 PBT_APMRESUMEAUTOMATIC 을 받는다. (desktop/windowsplatform.rs, 윈도우의 단조 시계는 잠든 동안에도 흘러 시계로는 못 가린다)
-//   맥과 리눅스는 두 프레임 사이에 벽시계(SystemTime)가 단조 시계(Instant)보다 SYSTEM_SLEEP_GAP_SECONDS 넘게 더 흘렀으면 깬 것으로 본다.
-//   (러스트 Instant 는 맥에서 CLOCK_UPTIME_RAW, 리눅스에서 CLOCK_MONOTONIC 이라 잠든 동안 멈춘다. 러스트는 이것을 보장하지 않는다고 적어 두었다)
-// - 주된 손이 손가락인지(is_coarse_pointer): 윈도우는 크로미엄의 (pointer: coarse) 판정을 옮겨 태블릿 모드나 마우스 없는 터치 기기면 참이다.
-//   맥은 크로미엄도 늘 마우스로 보아 거짓이다. 리눅스와 그 밖의 유닉스는 크로미엄처럼 화면 서버(웨이랜드 wl_seat 능력, X11 XInput 장치 목록)에서 터치스크린과
-//   마우스, 터치패드를 읽어 터치스크린만 있으면 참이다. (desktop/linuxplatform.rs, 읽은 값은 2 초 동안 쓴다)
-// - 키 이름: winit 의 SuperLeft, SuperRight 는 W3C 의 MetaLeft, MetaRight, winit 의 Meta 는 W3C 의 Super 로 바꿔 넣는다.
-// - 그림 커서(PointerCursor.register_image_cursor): 그림 파일을 읽어 winit 의 CustomCursor 로 만든다. 맥은 그림 크기가 그대로 포인트 크기라 1 배 그림을,
-//   윈도우와 리눅스는 물리 픽셀이라 창 배율에 맞춰(2 배 그림이 있으면 그것을) 늘인 그림과 핫스팟을 쓴다. 만드는 동안과 못 만들면 함께 준 CSS 커서다.
-// - 렌더 배율 상한(ViewManager.set_max_render_pixel_ratio): 그 배율로 줄인 크기로 그리고 프레임 끝에 창 크기로 늘인다. (desktop/renderscaler.rs)
-//   입력 좌표는 창의 배율로 논리 좌표로 바꾸므로 렌더 크기와 상관없다.
-// - 캔버스 비 상한(EngineConfiguration.max_canvas_aspect_ratio): 창이 그보다 길쭉하면 캔버스(그리는 영역)를 원본처럼 줄여 창 가운데에 두고 나머지는 검다.
-//   입력 좌표에서 캔버스의 왼쪽 위를 빼고, read_canvas_client_position 이 그 자리를 돌려준다.
-// - 페이지 주소의 쿼리 값(read_page_query_value)은 환경 변수 VANILLA_ 뒤에 이름을 대문자 뱀꼴로 붙인 것으로 읽는다. (safeArea → VANILLA_SAFE_AREA)
-// - 찍기 모드(VANILLA_CAPTURE_PATH)는 창을 숨기고 돈다. 숨긴 창은 다시 그리기 요청과 수직 동기가 없어 about_to_wait 에서 프레임을 바로 돌고 주사율로 빠르기를 맞춘다.
-//   가려짐 알림은 받지 않는다. 맥은 독 아이콘과 포커스도 가져가지 않는다. 창을 보려면 VANILLA_CAPTURE_SHOW_WINDOW=1.
+//! 데스크탑 플랫폼. (윈도우, 맥, 리눅스)
+//! - 창(winit)과 GL 3.3 코어 컨텍스트(glutin)를 만들고, 창의 다시 그리기 요청마다 엔진 프레임을 하나 돈다.
+//! - 창 이벤트를 입력 관리자 꼴로 바꿔 넣는다. (키는 W3C KeyboardEvent.code 와 같은 이름, 마우스 단추는 원본처럼 어느 것이든 터치, 왼쪽만으로 바꿀 수 있다)
+//! - 엔진 본체(EngineRunner)는 창을 모른다. 여기서 프레임을 부르고, 그린 뒤 화면을 넘긴다.
+//! - 글 입력(키 글자, 편집 키, IME 조합)과 클립보드는 desktop/textinput.rs 가 맡는다. 오른쪽 단추는 입력 필드 문맥 메뉴 요청이다.
+//! - 맥의 게임패드 진동은 desktop/gamepadhaptics.rs 가 맡는다. (GameController 와 CoreHaptics, 다른 OS 는 gilrs 가 떤다)
+//! - 마지막으로 쓴 장치를 키, 마우스, 손가락 이벤트마다 적는다. 막을 키(set_prevented_keys)와 오른쪽 클릭 메뉴 막기는 창에 막을 브라우저 기본 동작이 없어 쓰지 않는다.
+//!   (크롬에서 막은 것과 같은 결과다. winit 은 윈도우에서 메뉴가 없는 창의 WM_SYSKEYUP 을 DefWindowProc 에 넘기지 않아 Alt, F10 도 시스템 메뉴로 들어가지 않는다)
+//! - 페이지 이벤트: 창이 가려짐(Occluded, 맥과 X11 이 알린다), 최소화(크기 0 이나 is_minimized, 윈도우가 이것으로 알린다), 앱 멈춤(suspended, 모바일),
+//!   웨이랜드 프레임 콜백이 3 초 넘게 오지 않음(크롬 리눅스 웨이랜드의 가려짐, desktop/waylandframecallback.rs)
+//!   가운데 하나라도 맞으면 Hidden, 모두 풀리면 Visible 과 on_page_visibility_restored. 포커스는 Focused / Blurred, 마우스 단추와 손가락 누름은 PointerDown.
+//!   웨이랜드의 xdg_toplevel suspended 상태는 winit 이 쥐고 알리지 않아 받지 못한다.
+//! - 웨이랜드 수직 동기: EGL 스왑 간격을 0 으로 두고 넘기기 전에 지난 프레임 콜백을 1/20 초까지 기다린다. (메사는 간격 1 이면 가려진 창에서 스왑 안에 멈춘다)
+//! - 캔버스 크기(auto_resize_on_window_resize): 창은 캔버스가 창을 가득 채운 페이지와 같다. 켜면 원본처럼 visualViewport(창에서 화면 키보드가 가린 아래를 뺀 것)에
+//!   맞추고 ignore_virtual_keyboard_resize 와 캔버스 비 상한을 건다. 끄면 창 크기 그대로다.
+//! - 화면 키보드: 윈도우는 크롬처럼 손가락으로 플랫폼 입력 필드에 포커스하면 터치 키보드(InputPane)를 띄우고 가린 영역을 visualViewport 에서 뺀다. (desktop/windowsinputpane.rs)
+//!   맥과 리눅스는 크롬처럼 뷰포트를 줄이지 않는다.
+//! - 드로잉 버퍼 남기기(preserve_drawing_buffer): 다 그린 프레임을 떠 두고 다음 프레임 첫머리에 되그린다. (desktop/preserveddrawingbuffer.rs)
+//! - 페이지 프로세스 복원(on_page_process_restored, 원본 Chromium freeze 뒤 resume 과 bfcache): suspended 뒤 resumed, 그리고 시스템 잠자기에서 깬 것.
+//!   윈도우는 창을 서브클래싱해 WM_POWERBROADCAST 의 PBT_APMRESUMEAUTOMATIC 을 받는다. (desktop/windowsplatform.rs, 윈도우의 단조 시계는 잠든 동안에도 흘러 시계로는 못 가린다)
+//!   맥과 리눅스는 두 프레임 사이에 벽시계(SystemTime)가 단조 시계(Instant)보다 SYSTEM_SLEEP_GAP_SECONDS 넘게 더 흘렀으면 깬 것으로 본다.
+//!   (러스트 Instant 는 맥에서 CLOCK_UPTIME_RAW, 리눅스에서 CLOCK_MONOTONIC 이라 잠든 동안 멈춘다. 러스트는 이것을 보장하지 않는다고 적어 두었다)
+//! - 주된 손이 손가락인지(is_coarse_pointer): 윈도우는 크로미엄의 (pointer: coarse) 판정을 옮겨 태블릿 모드나 마우스 없는 터치 기기면 참이다.
+//!   맥은 크로미엄도 늘 마우스로 보아 거짓이다. 리눅스와 그 밖의 유닉스는 크로미엄처럼 화면 서버(웨이랜드 wl_seat 능력, X11 XInput 장치 목록)에서 터치스크린과
+//!   마우스, 터치패드를 읽어 터치스크린만 있으면 참이다. (desktop/linuxplatform.rs, 읽은 값은 2 초 동안 쓴다)
+//! - 키 이름: winit 의 SuperLeft, SuperRight 는 W3C 의 MetaLeft, MetaRight, winit 의 Meta 는 W3C 의 Super 로 바꿔 넣는다.
+//! - 그림 커서(PointerCursor.register_image_cursor): 그림 파일을 읽어 winit 의 CustomCursor 로 만든다. 맥은 그림 크기가 그대로 포인트 크기라 1 배 그림을,
+//!   윈도우와 리눅스는 물리 픽셀이라 창 배율에 맞춰(2 배 그림이 있으면 그것을) 늘인 그림과 핫스팟을 쓴다. 만드는 동안과 못 만들면 함께 준 CSS 커서다.
+//! - 렌더 배율 상한(ViewManager.set_max_render_pixel_ratio): 그 배율로 줄인 크기로 그리고 프레임 끝에 창 크기로 늘인다. (desktop/renderscaler.rs)
+//!   입력 좌표는 창의 배율로 논리 좌표로 바꾸므로 렌더 크기와 상관없다.
+//! - 캔버스 비 상한(EngineConfiguration.max_canvas_aspect_ratio): 창이 그보다 길쭉하면 캔버스(그리는 영역)를 원본처럼 줄여 창 가운데에 두고 나머지는 검다.
+//!   입력 좌표에서 캔버스의 왼쪽 위를 빼고, read_canvas_client_position 이 그 자리를 돌려준다.
+//! - 페이지 주소의 쿼리 값(read_page_query_value)은 환경 변수 VANILLA_ 뒤에 이름을 대문자 뱀꼴로 붙인 것으로 읽는다. (safeArea → VANILLA_SAFE_AREA)
+//! - 찍기 모드(VANILLA_CAPTURE_PATH)는 창을 숨기고 돈다. 숨긴 창은 다시 그리기 요청과 수직 동기가 없어 about_to_wait 에서 프레임을 바로 돌고 주사율로 빠르기를 맞춘다.
+//!   가려짐 알림은 받지 않는다. 맥은 독 아이콘과 포커스도 가져가지 않는다. 창을 보려면 VANILLA_CAPTURE_SHOW_WINDOW=1.
 //==============================================================================
 use crate::base::vector2::Vector2;
 use crate::core::asset::AssetLoadHandle;
@@ -82,26 +82,26 @@ pub mod systemfont;
 pub mod coretextglyph;
 pub mod emojipanel;
 
-// 엔진이 들고 있는 창 손잡이. (커서, 제목을 바꿀 때)
+/// 엔진이 들고 있는 창 손잡이. (커서, 제목을 바꿀 때)
 pub type PlatformWindow = Rc<Window>;
 
-// 휠 한 줄을 픽셀로 볼 때의 값. (브라우저 deltaMode 줄 단위 환산과 같은 자리)
+/// 휠 한 줄을 픽셀로 볼 때의 값. (브라우저 deltaMode 줄 단위 환산과 같은 자리)
 const WHEEL_LINE_PIXEL_SIZE: f32 = 40.0;
-// 두 프레임 사이에 벽시계가 단조 시계보다 이만큼 넘게 더 흐르면 시스템이 잠들었다 깬 것으로 본다. (초, 맥과 리눅스)
+/// 두 프레임 사이에 벽시계가 단조 시계보다 이만큼 넘게 더 흐르면 시스템이 잠들었다 깬 것으로 본다. (초, 맥과 리눅스)
 #[cfg(not(target_os = "windows"))]
 const SYSTEM_SLEEP_GAP_SECONDS: f64 = 2.0;
 
 thread_local! {
-	// 창 안에서 캔버스의 왼쪽 위. (논리 좌표, 캔버스 비 상한으로 가운데에 둘 때만 0 이 아니다)
+	/// 창 안에서 캔버스의 왼쪽 위. (논리 좌표, 캔버스 비 상한으로 가운데에 둘 때만 0 이 아니다)
 	static CANVAS_CLIENT_POSITION: std::cell::Cell<Vector2> = const { std::cell::Cell::new(Vector2::create(0.0, 0.0)) };
-	// 만든 그림 커서. (열쇠는 그림 주소, 2 배 그림 주소, 핫스팟, 창 배율. 못 만든 것은 None 으로 두어 다시 읽지 않는다)
+	/// 만든 그림 커서. (열쇠는 그림 주소, 2 배 그림 주소, 핫스팟, 창 배율. 못 만든 것은 None 으로 두어 다시 읽지 않는다)
 	static CUSTOM_CURSOR_TABLE: RefCell<HashMap<String, Option<CustomCursor>>> = RefCell::new(HashMap::new());
-	// 아직 만들지 않은 그림 커서. (set_cursor 가 넣고, 이벤트 루프가 프레임 뒤에 만들어 건다)
+	/// 아직 만들지 않은 그림 커서. (set_cursor 가 넣고, 이벤트 루프가 프레임 뒤에 만들어 건다)
 	static PENDING_CUSTOM_CURSOR: RefCell<Option<CursorValue>> = const { RefCell::new(None) };
 }
 
 //==============================================================================
-// 시작. (창을 닫거나 exit_application 을 부를 때까지 돌아오지 않는다)
+/// 시작. (창을 닫거나 exit_application 을 부를 때까지 돌아오지 않는다)
 //==============================================================================
 pub fn run(engine_runner: EngineRunner) -> Result<(), String> {
 	let is_window_hidden = is_capture_window_hidden();
@@ -151,7 +151,7 @@ pub fn run(engine_runner: EngineRunner) -> Result<(), String> {
 }
 
 //==============================================================================
-// 커서 보이기 설정.
+/// 커서 보이기 설정.
 //==============================================================================
 pub fn set_cursor_visible(platform_window: Option<&PlatformWindow>, is_visible: bool) {
 	if let Some(window) = platform_window {
@@ -160,8 +160,8 @@ pub fn set_cursor_visible(platform_window: Option<&PlatformWindow>, is_visible: 
 }
 
 //==============================================================================
-// 커서 모양 설정. (CSS 커서 이름을 winit 커서 아이콘으로, none 이면 감춤, 모르는 이름은 기본 화살표)
-// - 그림 커서는 만들어 둔 것이 있으면 그것을 건다. 아직 없으면 이벤트 루프가 만들도록 부탁해 두고 그동안은 함께 준 CSS 커서를 쓴다.
+/// 커서 모양 설정. (CSS 커서 이름을 winit 커서 아이콘으로, none 이면 감춤, 모르는 이름은 기본 화살표)
+/// - 그림 커서는 만들어 둔 것이 있으면 그것을 건다. 아직 없으면 이벤트 루프가 만들도록 부탁해 두고 그동안은 함께 준 CSS 커서를 쓴다.
 //==============================================================================
 pub fn set_cursor(platform_window: Option<&PlatformWindow>, cursor_value: &CursorValue) {
 	let window = match platform_window {
@@ -246,7 +246,7 @@ pub fn set_cursor(platform_window: Option<&PlatformWindow>, cursor_value: &Curso
 }
 
 //==============================================================================
-// 주된 손이 손가락인지. (윈도우는 크로미엄처럼 태블릿 모드나 마우스 없는 터치 기기면 참, 리눅스는 크로미엄처럼 마우스, 터치패드 없이 터치스크린만 있으면 참, 맥은 마우스가 주된 손으로 본다)
+/// 주된 손이 손가락인지. (윈도우는 크로미엄처럼 태블릿 모드나 마우스 없는 터치 기기면 참, 리눅스는 크로미엄처럼 마우스, 터치패드 없이 터치스크린만 있으면 참, 맥은 마우스가 주된 손으로 본다)
 //==============================================================================
 pub fn is_coarse_pointer() -> bool {
 	#[cfg(target_os = "windows")]
@@ -264,22 +264,22 @@ pub fn is_coarse_pointer() -> bool {
 }
 
 //==============================================================================
-// 문서의 초점이 글자 입력칸에 있는지. (데스크탑에는 문서가 없어 늘 false, 엔진 입력 필드는 입력 매니저가 따로 본다)
+/// 문서의 초점이 글자 입력칸에 있는지. (데스크탑에는 문서가 없어 늘 false, 엔진 입력 필드는 입력 매니저가 따로 본다)
 //==============================================================================
 pub fn is_text_field_focused() -> bool {
 	false
 }
 
 //==============================================================================
-// 페이지 주소의 쿼리 값. (데스크탑에는 주소가 없어 환경 변수 VANILLA_ 뒤에 이름을 대문자 뱀꼴로 붙인 것을 읽는다, 없으면 None)
-// - safeArea → VANILLA_SAFE_AREA, quality → VANILLA_QUALITY
+/// 페이지 주소의 쿼리 값. (데스크탑에는 주소가 없어 환경 변수 VANILLA_ 뒤에 이름을 대문자 뱀꼴로 붙인 것을 읽는다, 없으면 None)
+/// - safeArea → VANILLA_SAFE_AREA, quality → VANILLA_QUALITY
 //==============================================================================
 pub fn read_page_query_value(name: &str) -> Option<String> {
 	std::env::var(convert_query_name_to_variable_name(name)).ok()
 }
 
 //==============================================================================
-// 쿼리 이름을 환경 변수 이름으로. (첫 글자가 아닌 대문자 앞에 밑줄, 모두 대문자, 앞에 VANILLA_)
+/// 쿼리 이름을 환경 변수 이름으로. (첫 글자가 아닌 대문자 앞에 밑줄, 모두 대문자, 앞에 VANILLA_)
 //==============================================================================
 fn convert_query_name_to_variable_name(name: &str) -> String {
 	let mut variable_name = String::from("VANILLA_");
@@ -293,32 +293,32 @@ fn convert_query_name_to_variable_name(name: &str) -> String {
 }
 
 //==============================================================================
-// 화면(client) 좌표에서 캔버스의 왼쪽 위. (데스크탑은 창의 논리 좌표가 client 좌표다, 캔버스 비 상한으로 가운데에 둘 때만 0 이 아니다)
+/// 화면(client) 좌표에서 캔버스의 왼쪽 위. (데스크탑은 창의 논리 좌표가 client 좌표다, 캔버스 비 상한으로 가운데에 둘 때만 0 이 아니다)
 //==============================================================================
 pub fn read_canvas_client_position() -> Vector2 {
 	CANVAS_CLIENT_POSITION.with(|canvas_client_position| canvas_client_position.get())
 }
 
 //==============================================================================
-// 검증용 화면 저장. (파일로 쓴다)
+/// 검증용 화면 저장. (파일로 쓴다)
 //==============================================================================
 pub fn save_capture_file(output_path: &str, png_bytes: &[u8]) -> Result<(), String> {
 	std::fs::write(output_path, png_bytes).map_err(|error| error.to_string())
 }
 
 //==============================================================================
-// 페이지 전체 크기. (원본 window.innerWidth, innerHeight, 데스크탑에는 페이지가 없어 None 이고 ViewManager 가 창 안쪽 크기를 쓴다)
+/// 페이지 전체 크기. (원본 window.innerWidth, innerHeight, 데스크탑에는 페이지가 없어 None 이고 ViewManager 가 창 안쪽 크기를 쓴다)
 //==============================================================================
 pub fn read_client_native_size() -> Option<Vector2> {
 	None
 }
 
 //==============================================================================
-// 화면 키보드가 가린 창 아래. (논리 좌표, visualViewport 아래 인셋)
-// - 윈도우는 크롬처럼 터치 키보드(InputPane)가 가린 영역의 세로다. (desktop/windowsinputpane.rs)
-// - 맥과 리눅스는 0 이다. 크롬 맥은 화면 키보드를 띄우지 않고 보이는 뷰포트가 늘 창 크기다. (render_widget_host_view_base.cc GetVisibleViewportSize)
-//   크롬 리눅스 웨이랜드는 text-input 으로 입력판을 띄우기만 하고 그 영역을 받지 않아 뷰포트를 줄이지 않는다. (wayland_input_method_context.cc OnInputPanelState)
-//   엔진도 winit 의 IME 켜기(웨이랜드 text-input-v3 enable)로 같은 신호를 낸다.
+/// 화면 키보드가 가린 창 아래. (논리 좌표, visualViewport 아래 인셋)
+/// - 윈도우는 크롬처럼 터치 키보드(InputPane)가 가린 영역의 세로다. (desktop/windowsinputpane.rs)
+/// - 맥과 리눅스는 0 이다. 크롬 맥은 화면 키보드를 띄우지 않고 보이는 뷰포트가 늘 창 크기다. (render_widget_host_view_base.cc GetVisibleViewportSize)
+///   크롬 리눅스 웨이랜드는 text-input 으로 입력판을 띄우기만 하고 그 영역을 받지 않아 뷰포트를 줄이지 않는다. (wayland_input_method_context.cc OnInputPanelState)
+///   엔진도 winit 의 IME 켜기(웨이랜드 text-input-v3 enable)로 같은 신호를 낸다.
 //==============================================================================
 fn read_virtual_keyboard_inset() -> f32 {
 	#[cfg(target_os = "windows")]
@@ -332,21 +332,21 @@ fn read_virtual_keyboard_inset() -> f32 {
 }
 
 //==============================================================================
-// CSS env(safe-area-inset-*) 세이프 에어리어 인셋. (데스크탑은 0)
-// - 크롬 데스크탑도 0 이다. 0 이 아닌 인셋은 WebContentsImpl::SetDisplayCutoutSafeArea 로만 들어오는데, 이 함수는 #if BUILDFLAG(IS_ANDROID) 안에 있고
-//   안드로이드(web_contents_android.cc)만 부른다. 그 밖에는 블링크 기본값 "0px" 이다. (style_environment_variables.cc, 노치가 있는 맥북의 전체 화면도 같다)
+/// CSS env(safe-area-inset-*) 세이프 에어리어 인셋. (데스크탑은 0)
+/// - 크롬 데스크탑도 0 이다. 0 이 아닌 인셋은 WebContentsImpl::SetDisplayCutoutSafeArea 로만 들어오는데, 이 함수는 #if BUILDFLAG(IS_ANDROID) 안에 있고
+///   안드로이드(web_contents_android.cc)만 부른다. 그 밖에는 블링크 기본값 "0px" 이다. (style_environment_variables.cc, 노치가 있는 맥북의 전체 화면도 같다)
 //==============================================================================
 pub fn read_safe_area_insets() -> [f32; 4] {
 	[0.0, 0.0, 0.0, 0.0]
 }
 
 //==============================================================================
-// 힙 사용량. (바이트, (쓰는 중, 잡아 둔 것), 못 읽으면 None. 개발자 도구의 메모리 칸, 원본 performance.memory 의 usedJSHeapSize, totalJSHeapSize 자리)
-// - 데스크탑에는 자바스크립트 힙이 없어 러스트가 쓰는 시스템 할당자의 힙을 읽는다. (러스트 System 할당자는 맥과 리눅스는 malloc, 윈도우는 프로세스 힙의 HeapAlloc)
-// - 맥: malloc_zone_statistics(모든 영역)의 size_in_use, size_allocated.
-// - 윈도우: 프로세스 힙의 HeapSummary 의 cbAllocated, cbCommitted.
-// - 리눅스(glibc): mallinfo2 의 uordblks + hblkhd(쓰는 중, mmap 으로 잡은 큰 덩어리 포함), arena + hblkhd(잡아 둔 것). glibc 2.33 부터라 실행할 때 찾고, 없으면 None.
-// - 그 밖의 OS 는 None 이다.
+/// 힙 사용량. (바이트, (쓰는 중, 잡아 둔 것), 못 읽으면 None. 개발자 도구의 메모리 칸, 원본 performance.memory 의 usedJSHeapSize, totalJSHeapSize 자리)
+/// - 데스크탑에는 자바스크립트 힙이 없어 러스트가 쓰는 시스템 할당자의 힙을 읽는다. (러스트 System 할당자는 맥과 리눅스는 malloc, 윈도우는 프로세스 힙의 HeapAlloc)
+/// - 맥: malloc_zone_statistics(모든 영역)의 size_in_use, size_allocated.
+/// - 윈도우: 프로세스 힙의 HeapSummary 의 cbAllocated, cbCommitted.
+/// - 리눅스(glibc): mallinfo2 의 uordblks + hblkhd(쓰는 중, mmap 으로 잡은 큰 덩어리 포함), arena + hblkhd(잡아 둔 것). glibc 2.33 부터라 실행할 때 찾고, 없으면 None.
+/// - 그 밖의 OS 는 None 이다.
 //==============================================================================
 pub fn read_heap_usage() -> Option<(f64, f64)> {
 	#[cfg(target_os = "macos")]
@@ -428,13 +428,13 @@ pub fn read_heap_usage() -> Option<(f64, f64)> {
 }
 
 //==============================================================================
-// 응용 프로그램 종료. (데스크탑은 엔진의 종료 요청을 보고 이벤트 루프가 끝나므로 따로 할 일이 없다)
+/// 응용 프로그램 종료. (데스크탑은 엔진의 종료 요청을 보고 이벤트 루프가 끝나므로 따로 할 일이 없다)
 //==============================================================================
 pub fn exit_application() {
 }
 
 //==============================================================================
-// 창 제목 설정.
+/// 창 제목 설정.
 //==============================================================================
 pub fn set_title(platform_window: Option<&PlatformWindow>, title: &str) {
 	if let Some(window) = platform_window {
@@ -443,7 +443,7 @@ pub fn set_title(platform_window: Option<&PlatformWindow>, title: &str) {
 }
 
 //==============================================================================
-// 애셋 바이트 읽기. (파일을 그 자리에서 읽고 끝낸다, 파일에는 캐시가 없어 is_no_cache 는 쓰지 않는다. 읽은 파일은 리소스 사용량에 적는다)
+/// 애셋 바이트 읽기. (파일을 그 자리에서 읽고 끝낸다, 파일에는 캐시가 없어 is_no_cache 는 쓰지 않는다. 읽은 파일은 리소스 사용량에 적는다)
 //==============================================================================
 pub fn request_asset_bytes(asset_location: String, load_handle: AssetLoadHandle, _is_no_cache: bool) {
 	let result = std::fs::read(&asset_location).map_err(|error| format!("애셋 읽기 실패 ({}): {}", asset_location, error));
@@ -454,11 +454,11 @@ pub fn request_asset_bytes(asset_location: String, load_handle: AssetLoadHandle,
 }
 
 //==============================================================================
-// 창과 GL 상태.
-// - 필드 차례대로 버린다. 웨이랜드 프레임 콜백 맞추개는 winit 창의 표면과 wl_display 를 빌려 쓰므로 창보다 먼저 버린다.
+/// 창과 GL 상태.
+/// - 필드 차례대로 버린다. 웨이랜드 프레임 콜백 맞추개는 winit 창의 표면과 wl_display 를 빌려 쓰므로 창보다 먼저 버린다.
 //==============================================================================
 struct WindowState {
-	// 웨이랜드 창이면 프레임 콜백 맞추개. (가려짐과 수직 동기, desktop/waylandframecallback.rs)
+	/// 웨이랜드 창이면 프레임 콜백 맞추개. (가려짐과 수직 동기, desktop/waylandframecallback.rs)
 	#[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
 	wayland_frame_pacer: Option<waylandframecallback::WaylandFramePacer>,
 	window: Rc<Window>,
@@ -467,7 +467,7 @@ struct WindowState {
 }
 
 //==============================================================================
-// 이벤트 루프에 물리는 데스크탑 실행자.
+/// 이벤트 루프에 물리는 데스크탑 실행자.
 //==============================================================================
 struct DesktopApplication {
 	engine_runner: EngineRunner,
@@ -475,46 +475,46 @@ struct DesktopApplication {
 	next_frame_instant: Instant,
 	fatal_error: Option<String>,
 	text_input_state: textinput::DesktopTextInputState,
-	// 앱이 suspended 되었는지. (다시 resumed 되면 페이지 프로세스 복원으로 알린다)
+	/// 앱이 suspended 되었는지. (다시 resumed 되면 페이지 프로세스 복원으로 알린다)
 	is_suspended: bool,
-	// 창이 가려졌는지. (Occluded)
+	/// 창이 가려졌는지. (Occluded)
 	is_occluded: bool,
-	// 창이 최소화되었는지.
+	/// 창이 최소화되었는지.
 	is_minimized: bool,
-	// 웨이랜드 프레임 콜백이 3 초 넘게 오지 않아 가려진 것으로 보는지. (크롬 리눅스 웨이랜드의 가려짐)
+	/// 웨이랜드 프레임 콜백이 3 초 넘게 오지 않아 가려진 것으로 보는지. (크롬 리눅스 웨이랜드의 가려짐)
 	is_frame_callback_occluded: bool,
-	// 엔진에 알린 페이지 가려짐. (가려짐, 최소화, 앱 멈춤, 웨이랜드 프레임 콜백 가려짐 가운데 하나)
+	/// 엔진에 알린 페이지 가려짐. (가려짐, 최소화, 앱 멈춤, 웨이랜드 프레임 콜백 가려짐 가운데 하나)
 	is_page_hidden: bool,
-	// 창의 배율. (입력 좌표를 논리 좌표로 바꿀 때, 렌더 배율 상한과 상관없다)
+	/// 창의 배율. (입력 좌표를 논리 좌표로 바꿀 때, 렌더 배율 상한과 상관없다)
 	window_scale_factor: f32,
-	// 지금 렌더 크기에 건 배율 상한. (바뀌면 다시 맞춘다)
+	/// 지금 렌더 크기에 건 배율 상한. (바뀌면 다시 맞춘다)
 	applied_max_render_pixel_ratio: f32,
-	// 줄인 렌더 영역을 창 크기로 늘이개. (처음 쓸 때 만든다)
+	/// 줄인 렌더 영역을 창 크기로 늘이개. (처음 쓸 때 만든다)
 	render_scaler: Option<renderscaler::RenderScaler>,
-	// 드로잉 버퍼 남기개. (preserve_drawing_buffer 일 때 처음 쓸 때 만든다)
+	/// 드로잉 버퍼 남기개. (preserve_drawing_buffer 일 때 처음 쓸 때 만든다)
 	preserved_drawing_buffer: Option<preserveddrawingbuffer::PreservedDrawingBuffer>,
-	// 화면 키보드가 가린 창 아래. (논리 좌표, visualViewport 아래 인셋, 윈도우 터치 키보드만 0 이 아니다)
+	/// 화면 키보드가 가린 창 아래. (논리 좌표, visualViewport 아래 인셋, 윈도우 터치 키보드만 0 이 아니다)
 	virtual_keyboard_inset: f32,
-	// 마지막으로 맞춘 visualViewport 크기. (ignore_virtual_keyboard_resize 가 견준다, 원본 appliedClientNativeSize)
+	/// 마지막으로 맞춘 visualViewport 크기. (ignore_virtual_keyboard_resize 가 견준다, 원본 appliedClientNativeSize)
 	applied_client_size: Option<(f32, f32)>,
-	// 윈도우 터치 키보드 제어. (창을 만들 때 만든다)
+	/// 윈도우 터치 키보드 제어. (창을 만들 때 만든다)
 	#[cfg(target_os = "windows")]
 	virtual_keyboard_controller: Option<windowsinputpane::VirtualKeyboardController>,
-	// 지난 프레임 뒤에 손가락을 댄 자리. (창 안쪽 논리 좌표, 윈도우 터치 키보드 띄우기)
+	/// 지난 프레임 뒤에 손가락을 댄 자리. (창 안쪽 논리 좌표, 윈도우 터치 키보드 띄우기)
 	#[cfg(target_os = "windows")]
 	touch_started_position: Option<Vector2>,
-	// 창을 숨기고 도는지. (찍기 모드, is_capture_window_hidden)
+	/// 창을 숨기고 도는지. (찍기 모드, is_capture_window_hidden)
 	is_window_hidden: bool,
-	// 지난 프레임의 단조 시계와 벽시계. (맥과 리눅스의 잠자기 판정)
+	/// 지난 프레임의 단조 시계와 벽시계. (맥과 리눅스의 잠자기 판정)
 	#[cfg(not(target_os = "windows"))]
 	last_frame_clock: Option<(Instant, SystemTime)>,
-	// 창 안의 캔버스 자리. (물리 픽셀 [왼쪽, 위, 가로, 세로], 위 왼쪽 원점)
+	/// 창 안의 캔버스 자리. (물리 픽셀 [왼쪽, 위, 가로, 세로], 위 왼쪽 원점)
 	canvas_physical_rect: [i32; 4],
 }
 
 impl DesktopApplication {
 	//==============================================================================
-	// 창과 GL 컨텍스트, 그래픽 만들기.
+	/// 창과 GL 컨텍스트, 그래픽 만들기.
 	//==============================================================================
 	fn create_window(&mut self, event_loop: &ActiveEventLoop) -> Result<(), String> {
 		let engine = &self.engine_runner.engine;
@@ -614,7 +614,7 @@ impl DesktopApplication {
 	}
 
 	//==============================================================================
-	// 해상도 변경됨. (서피스 크기를 맞추고 뷰 영역을 다시 계산한 뒤 씬에 알린다)
+	/// 해상도 변경됨. (서피스 크기를 맞추고 뷰 영역을 다시 계산한 뒤 씬에 알린다)
 	//==============================================================================
 	fn resize(&mut self) {
 		let window_state = match &self.window_state {
@@ -681,7 +681,7 @@ impl DesktopApplication {
 	}
 
 	//==============================================================================
-	// 페이지 가려짐 알리기. (가려짐, 최소화, 앱 멈춤, 웨이랜드 프레임 콜백 가려짐 가운데 하나라도 맞으면 Hidden, 모두 풀리면 Visible 과 on_page_visibility_restored, 바뀔 때만)
+	/// 페이지 가려짐 알리기. (가려짐, 최소화, 앱 멈춤, 웨이랜드 프레임 콜백 가려짐 가운데 하나라도 맞으면 Hidden, 모두 풀리면 Visible 과 on_page_visibility_restored, 바뀔 때만)
 	//==============================================================================
 	fn update_page_visibility(&mut self) {
 		let is_page_hidden = self.is_occluded || self.is_minimized || self.is_suspended || self.is_frame_callback_occluded;
@@ -699,7 +699,7 @@ impl DesktopApplication {
 	}
 
 	//==============================================================================
-	// 웨이랜드 프레임 콜백으로 본 가려짐 알리기. (크롬 리눅스 웨이랜드처럼 보낸 콜백이 3 초 넘게 오지 않으면 가려짐, 찍기 모드는 받지 않는다)
+	/// 웨이랜드 프레임 콜백으로 본 가려짐 알리기. (크롬 리눅스 웨이랜드처럼 보낸 콜백이 3 초 넘게 오지 않으면 가려짐, 찍기 모드는 받지 않는다)
 	//==============================================================================
 	#[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
 	fn update_frame_callback_occlusion(&mut self) {
@@ -721,7 +721,7 @@ impl DesktopApplication {
 	}
 
 	//==============================================================================
-	// 윈도우 터치 키보드 띄우고 내리기. (크롬 윈도우처럼 손가락으로 글자 입력칸에 포커스하거나 그 입력칸을 누르면 띄우고, 포커스가 떠나면 내린다. desktop/windowsinputpane.rs)
+	/// 윈도우 터치 키보드 띄우고 내리기. (크롬 윈도우처럼 손가락으로 글자 입력칸에 포커스하거나 그 입력칸을 누르면 띄우고, 포커스가 떠나면 내린다. desktop/windowsinputpane.rs)
 	//==============================================================================
 	#[cfg(target_os = "windows")]
 	fn update_virtual_keyboard(&mut self) {
@@ -742,7 +742,7 @@ impl DesktopApplication {
 	}
 
 	//==============================================================================
-	// 시스템 잠자기에서 깼는지 보고 알리기. (윈도우는 WM_POWERBROADCAST 의 깸 알림을 받았으면)
+	/// 시스템 잠자기에서 깼는지 보고 알리기. (윈도우는 WM_POWERBROADCAST 의 깸 알림을 받았으면)
 	//==============================================================================
 	#[cfg(target_os = "windows")]
 	fn check_system_sleep(&mut self) {
@@ -752,7 +752,7 @@ impl DesktopApplication {
 	}
 
 	//==============================================================================
-	// 시스템 잠자기에서 깼는지 보고 알리기. (맥과 리눅스는 두 프레임 사이에 벽시계가 단조 시계보다 SYSTEM_SLEEP_GAP_SECONDS 넘게 더 흘렀으면)
+	/// 시스템 잠자기에서 깼는지 보고 알리기. (맥과 리눅스는 두 프레임 사이에 벽시계가 단조 시계보다 SYSTEM_SLEEP_GAP_SECONDS 넘게 더 흘렀으면)
 	//==============================================================================
 	#[cfg(not(target_os = "windows"))]
 	fn check_system_sleep(&mut self) {
@@ -769,7 +769,7 @@ impl DesktopApplication {
 	}
 
 	//==============================================================================
-	// 창 안쪽 물리 좌표 → 입력 위치 갱신.
+	/// 창 안쪽 물리 좌표 → 입력 위치 갱신.
 	//==============================================================================
 	fn update_input_position(&mut self, physical_x: f64, physical_y: f64) {
 		let window_scale_factor = self.window_scale_factor;
@@ -783,7 +783,7 @@ impl DesktopApplication {
 	}
 
 	//==============================================================================
-	// 손가락. (손가락마다 닿음, 움직임, 뗌을 적고, 첫 손가락은 마우스 왼쪽 단추처럼 터치로 넘긴다)
+	/// 손가락. (손가락마다 닿음, 움직임, 뗌을 적고, 첫 손가락은 마우스 왼쪽 단추처럼 터치로 넘긴다)
 	//==============================================================================
 	fn handle_touch(&mut self, touch: winit::event::Touch) {
 		let window_scale_factor = self.window_scale_factor;
@@ -842,7 +842,7 @@ impl DesktopApplication {
 	}
 
 	//==============================================================================
-	// 한 프레임 돌고 화면 넘기기.
+	/// 한 프레임 돌고 화면 넘기기.
 	//==============================================================================
 	fn update_frame(&mut self) {
 		if self.window_state.is_none() {
@@ -889,7 +889,7 @@ impl DesktopApplication {
 
 impl DesktopApplication {
 	//==============================================================================
-	// 부탁받은 그림 커서를 만들어 걸기. (그림 파일을 애셋 폴더에서 읽어 winit 커서로 만든다, 못 만들면 CSS 커서를 그대로 둔다)
+	/// 부탁받은 그림 커서를 만들어 걸기. (그림 파일을 애셋 폴더에서 읽어 winit 커서로 만든다, 못 만들면 CSS 커서를 그대로 둔다)
 	//==============================================================================
 	fn apply_pending_custom_cursor(&mut self, event_loop: &ActiveEventLoop) {
 		let cursor_value = match PENDING_CUSTOM_CURSOR.with(|pending_custom_cursor| pending_custom_cursor.borrow_mut().take()) {
@@ -937,7 +937,7 @@ impl DesktopApplication {
 	}
 
 	//==============================================================================
-	// 지난 프레임 그림 되살리기. (preserve_drawing_buffer 일 때 엔진 프레임 첫머리, desktop/preserveddrawingbuffer.rs)
+	/// 지난 프레임 그림 되살리기. (preserve_drawing_buffer 일 때 엔진 프레임 첫머리, desktop/preserveddrawingbuffer.rs)
 	//==============================================================================
 	fn restore_preserved_drawing_buffer(&mut self) {
 		let graphic = match self.engine_runner.get_graphic() {
@@ -970,7 +970,7 @@ impl DesktopApplication {
 	}
 
 	//==============================================================================
-	// 다 그린 프레임 떠 두기. (preserve_drawing_buffer 일 때 엔진 프레임 뒤, 늘이개가 늘이기 전)
+	/// 다 그린 프레임 떠 두기. (preserve_drawing_buffer 일 때 엔진 프레임 뒤, 늘이개가 늘이기 전)
 	//==============================================================================
 	fn save_preserved_drawing_buffer(&mut self) {
 		let canvas_pixel_size = self.engine_runner.engine.get_view_manager().get_canvas_pixel_size();
@@ -988,7 +988,7 @@ impl DesktopApplication {
 	}
 
 	//==============================================================================
-	// 줄인 렌더 크기로 그렸거나 캔버스를 가운데에 두었으면 창의 캔버스 자리로 늘여 그리기. (렌더 크기가 창 크기와 같으면 하지 않는다)
+	/// 줄인 렌더 크기로 그렸거나 캔버스를 가운데에 두었으면 창의 캔버스 자리로 늘여 그리기. (렌더 크기가 창 크기와 같으면 하지 않는다)
 	//==============================================================================
 	fn present_render_scaled(&mut self) {
 		let window_size = match &self.window_state {
@@ -1038,7 +1038,7 @@ impl DesktopApplication {
 
 impl ApplicationHandler for DesktopApplication {
 	//==============================================================================
-	// 창 만들 차례. (데스크탑에서는 시작할 때 한 번)
+	/// 창 만들 차례. (데스크탑에서는 시작할 때 한 번)
 	//==============================================================================
 	fn resumed(&mut self, event_loop: &ActiveEventLoop) {
 		if self.window_state.is_some() {
@@ -1059,7 +1059,7 @@ impl ApplicationHandler for DesktopApplication {
 	}
 
 	//==============================================================================
-	// 앱이 멈춤. (모바일의 앱 전환, 윈도우, 맥, 리눅스에서는 오지 않는다)
+	/// 앱이 멈춤. (모바일의 앱 전환, 윈도우, 맥, 리눅스에서는 오지 않는다)
 	//==============================================================================
 	fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
 		self.is_suspended = true;
@@ -1067,7 +1067,7 @@ impl ApplicationHandler for DesktopApplication {
 	}
 
 	//==============================================================================
-	// 창 이벤트.
+	/// 창 이벤트.
 	//==============================================================================
 	fn window_event(&mut self, event_loop: &ActiveEventLoop, _window_id: WindowId, window_event: WindowEvent) {
 		// 마우스 단추와 손가락 누름은 페이지 이벤트로도 알린다. (원본 window 의 pointerdown)
@@ -1211,7 +1211,7 @@ impl ApplicationHandler for DesktopApplication {
 	}
 
 	//==============================================================================
-	// 이벤트를 다 처리한 뒤. (다음 프레임 요청, 최대 FPS 제한)
+	/// 이벤트를 다 처리한 뒤. (다음 프레임 요청, 최대 FPS 제한)
 	//==============================================================================
 	fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
 		if self.engine_runner.engine.is_exit_requested() {
@@ -1263,17 +1263,17 @@ impl ApplicationHandler for DesktopApplication {
 }
 
 //==============================================================================
-// 그림 커서 열쇠. (그림 주소, 2 배 그림 주소, 핫스팟, 창 배율이 같으면 같은 커서)
+/// 그림 커서 열쇠. (그림 주소, 2 배 그림 주소, 핫스팟, 창 배율이 같으면 같은 커서)
 //==============================================================================
 fn create_custom_cursor_key(cursor_value: &CursorValue, scale_factor: f64) -> String {
 	format!("{}|{}|{}|{}|{}", cursor_value.image_url, cursor_value.image_url_2x, cursor_value.hotspot_x, cursor_value.hotspot_y, scale_factor)
 }
 
 //==============================================================================
-// 그림 파일로 winit 커서 원본 만들기. (1 배 그림 기준 핫스팟)
-// - 맥: winit 이 그림의 픽셀 수를 그대로 포인트 크기로 쓰므로 1 배 그림 그대로.
-// - 윈도우, 리눅스: 그림의 픽셀 수가 화면 픽셀 수라 창 배율만큼 늘인다. 배율이 1 보다 크고 2 배 그림이 있으면 그것을 맞춰 쓰고 핫스팟도 배율만큼 옮긴다.
-//   (브라우저가 그림 커서를 기기 배율로 늘이는 것과 같은 크기)
+/// 그림 파일로 winit 커서 원본 만들기. (1 배 그림 기준 핫스팟)
+/// - 맥: winit 이 그림의 픽셀 수를 그대로 포인트 크기로 쓰므로 1 배 그림 그대로.
+/// - 윈도우, 리눅스: 그림의 픽셀 수가 화면 픽셀 수라 창 배율만큼 늘인다. 배율이 1 보다 크고 2 배 그림이 있으면 그것을 맞춰 쓰고 핫스팟도 배율만큼 옮긴다.
+///   (브라우저가 그림 커서를 기기 배율로 늘이는 것과 같은 크기)
 //==============================================================================
 fn create_custom_cursor_source(image_path: &std::path::Path, image_path_2x: Option<&std::path::Path>, hotspot_x: f32, hotspot_y: f32, scale_factor: f64) -> Result<winit::window::CustomCursorSource, String> {
 	let cursor_scale = if cfg!(target_os = "macos") {
@@ -1309,9 +1309,9 @@ fn create_custom_cursor_source(image_path: &std::path::Path, image_path_2x: Opti
 }
 
 //==============================================================================
-// winit 키를 원본 KeyboardEvent.code 이름으로. (winit 이름이 W3C 와 같아 그대로 쓰고, 다른 셋만 바꾼다)
-// - 윈도우 키(커맨드 키): winit SuperLeft, SuperRight → W3C MetaLeft, MetaRight
-// - W3C 의 옛 Super 키: winit Meta → Super
+/// winit 키를 원본 KeyboardEvent.code 이름으로. (winit 이름이 W3C 와 같아 그대로 쓰고, 다른 셋만 바꾼다)
+/// - 윈도우 키(커맨드 키): winit SuperLeft, SuperRight → W3C MetaLeft, MetaRight
+/// - W3C 의 옛 Super 키: winit Meta → Super
 //==============================================================================
 fn convert_key_code_to_code_name(key_code: winit::keyboard::KeyCode) -> String {
 	match key_code {
@@ -1331,8 +1331,8 @@ fn convert_key_code_to_code_name(key_code: winit::keyboard::KeyCode) -> String {
 }
 
 //==============================================================================
-// 창을 숨기고 돌지. (찍기 모드 VANILLA_CAPTURE_PATH 면 숨긴다. VANILLA_CAPTURE_SHOW_WINDOW=1 이면 보인다)
-// - 검증 도구가 예제를 찍을 때 사용자 화면에 창이 뜨지 않게 한다. 맥은 독 아이콘과 포커스도 가져가지 않는다.
+/// 창을 숨기고 돌지. (찍기 모드 VANILLA_CAPTURE_PATH 면 숨긴다. VANILLA_CAPTURE_SHOW_WINDOW=1 이면 보인다)
+/// - 검증 도구가 예제를 찍을 때 사용자 화면에 창이 뜨지 않게 한다. 맥은 독 아이콘과 포커스도 가져가지 않는다.
 //==============================================================================
 fn is_capture_window_hidden() -> bool {
 	if std::env::var("VANILLA_CAPTURE_PATH").is_err() {
@@ -1342,7 +1342,7 @@ fn is_capture_window_hidden() -> bool {
 }
 
 //==============================================================================
-// GL 설정 고르기. (스텐실 8 비트 이상, 멀티샘플은 4 에 가까운 것)
+/// GL 설정 고르기. (스텐실 8 비트 이상, 멀티샘플은 4 에 가까운 것)
 //==============================================================================
 fn pick_config(configs: Box<dyn Iterator<Item = Config> + '_>) -> Config {
 	let config_list: Vec<Config> = configs.collect();
@@ -1381,7 +1381,7 @@ fn pick_config(configs: Box<dyn Iterator<Item = Config> + '_>) -> Config {
 }
 
 //==============================================================================
-// 창 아이콘 읽기. (PNG, 스트레이트 알파)
+/// 창 아이콘 읽기. (PNG, 스트레이트 알파)
 //==============================================================================
 fn load_window_icon(icon_path: &std::path::Path) -> Result<Icon, String> {
 	let icon_bytes = std::fs::read(icon_path).map_err(|error| format!("창 아이콘 읽기 실패 ({}): {}", icon_path.display(), error))?;
@@ -1396,7 +1396,7 @@ mod tests {
 	use super::*;
 
 	//==============================================================================
-	// 그림 커서 원본은 그림 파일로 만들고(창 배율과 2 배 그림, 핫스팟은 그림 안으로), 없는 파일은 오류다.
+	/// 그림 커서 원본은 그림 파일로 만들고(창 배율과 2 배 그림, 핫스팟은 그림 안으로), 없는 파일은 오류다.
 	//==============================================================================
 	#[test]
 	fn custom_cursor_source_from_image_file() {
@@ -1417,7 +1417,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// winit 키는 W3C code 이름으로 넣는다. (윈도우 키는 MetaLeft, MetaRight)
+	/// winit 키는 W3C code 이름으로 넣는다. (윈도우 키는 MetaLeft, MetaRight)
 	//==============================================================================
 	#[test]
 	fn key_code_becomes_code_name() {
@@ -1431,7 +1431,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 힙 사용량은 맥, 윈도우, 리눅스(glibc)에서 읽히고, 쓰는 중인 것이 잡아 둔 것보다 크지 않다.
+	/// 힙 사용량은 맥, 윈도우, 리눅스(glibc)에서 읽히고, 쓰는 중인 것이 잡아 둔 것보다 크지 않다.
 	//==============================================================================
 	#[test]
 	#[cfg(any(target_os = "macos", target_os = "windows", all(target_os = "linux", target_env = "gnu")))]
@@ -1443,7 +1443,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 쿼리 이름은 VANILLA_ 뒤 대문자 뱀꼴 환경 변수로 읽는다.
+	/// 쿼리 이름은 VANILLA_ 뒤 대문자 뱀꼴 환경 변수로 읽는다.
 	//==============================================================================
 	#[test]
 	fn query_name_becomes_variable_name() {

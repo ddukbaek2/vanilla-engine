@@ -1,26 +1,28 @@
 //==============================================================================
-// 노드 레이아웃.
-// - 원본 misc/nodelayout.js 를 옮긴 것이다. 지역 변수 없이 노드 계층을 선언하듯 짜는 플루언트 빌더다.
-// - Vector2 없이 숫자쌍(x, y)으로 위치와 크기를 정한다.
-// - 사용:
-//     let panel_id = NodeLayout::create()
-//         .pivot(Pivot::MIDDLE_CENTER)
-//         .content_size(680.0, 900.0)
-//         .component_with(Paint::new(), |paint| { paint.set_color(Color::create(0.1, 0.1, 0.1, 1.0)); })
-//         .children([
-//             NodeLayout::create()
-//                 .content_size(120.0, 70.0)
-//                 .component_with(Text::new(), |text| { text.set_text("확인"); }),
-//         ])
-//         .build(node_tree, Some(parent_id));
-// - 원본과 다른 점:
-//   러스트 판은 노드가 트리(NodeTree) 안에만 있어서, 빌더는 설정을 차례대로 모아 두었다가 build(node_tree, parent_id) 때 노드를 만들고 그 순서대로 건다.
-//   그래서 컴포넌트도 build 때 node_tree.add_component 로 붙는다. (attach_to_tree 가 불려 자식 노드를 만드는 컴포넌트도 된다)
-//   노드 클래스가 없으므로 create(nodeClass) 대신 create() 다.
-//   component(type, callback) 은 component(값) 과 component_with(값, 콜백) 둘로 나눴다. (러스트는 생략 인자가 없다)
-//   children(...layouts) 의 가변 인자는 배열이나 Vec 하나로 받는다.
-//   anchored_position 은 build 때 부모 content_size 기준으로 건다. 원본은 부모가 붙기 전에 불려서 사실상 local_position 과 같았다.
-//   mask_enabled(false) 는 원본처럼 첫 마스크만이 아니라 그 노드의 Mask 를 모두 뗀다.
+//! 노드 레이아웃.
+//! - 원본 misc/nodelayout.js 를 옮긴 것이다. 지역 변수 없이 노드 계층을 선언하듯 짜는 플루언트 빌더다.
+//! - Vector2 없이 숫자쌍(x, y)으로 위치와 크기를 정한다.
+//! - 사용:
+//!   ```text
+//!     let panel_id = NodeLayout::create()
+//!         .pivot(Pivot::MIDDLE_CENTER)
+//!         .content_size(680.0, 900.0)
+//!         .component_with(Paint::new(), |paint| { paint.set_color(Color::create(0.1, 0.1, 0.1, 1.0)); })
+//!         .children([
+//!             NodeLayout::create()
+//!                 .content_size(120.0, 70.0)
+//!                 .component_with(Text::new(), |text| { text.set_text("확인"); }),
+//!         ])
+//!         .build(node_tree, Some(parent_id));
+//!   ```
+//! - 원본과 다른 점:
+//!   러스트 판은 노드가 트리(NodeTree) 안에만 있어서, 빌더는 설정을 차례대로 모아 두었다가 build(node_tree, parent_id) 때 노드를 만들고 그 순서대로 건다.
+//!   그래서 컴포넌트도 build 때 node_tree.add_component 로 붙는다. (attach_to_tree 가 불려 자식 노드를 만드는 컴포넌트도 된다)
+//!   노드 클래스가 없으므로 create(nodeClass) 대신 create() 다.
+//!   component(type, callback) 은 component(값) 과 component_with(값, 콜백) 둘로 나눴다. (러스트는 생략 인자가 없다)
+//!   children(...layouts) 의 가변 인자는 배열이나 Vec 하나로 받는다.
+//!   anchored_position 은 build 때 부모 content_size 기준으로 건다. 원본은 부모가 붙기 전에 불려서 사실상 local_position 과 같았다.
+//!   mask_enabled(false) 는 원본처럼 첫 마스크만이 아니라 그 노드의 Mask 를 모두 뗀다.
 //==============================================================================
 use crate::base::math;
 use crate::base::vector2::Vector2;
@@ -29,30 +31,30 @@ use crate::core::component::Component;
 use crate::core::node::nodetree::{NodeId, NodeTree};
 use crate::core::node::worldnode::WorldNode;
 
-// build 때 노드에 차례대로 걸 설정 하나.
+/// build 때 노드에 차례대로 걸 설정 하나.
 type NodeLayoutAction = Box<dyn FnOnce(&mut NodeTree, NodeId)>;
 
 //==============================================================================
-// 부채꼴 배치 설정. (원본 options = { center_x, center_y, radius, angle_step_radian = 0.12, base_angle_radian = -PI/2, rotate_nodes = true })
+/// 부채꼴 배치 설정. (원본 options = { center_x, center_y, radius, angle_step_radian = 0.12, base_angle_radian = -PI/2, rotate_nodes = true })
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct NodeLayoutFanOptions {
-	// 호의 중심.
+	/// 호의 중심.
 	pub center_x: f32,
 	pub center_y: f32,
-	// 호의 반지름.
+	/// 호의 반지름.
 	pub radius: f32,
-	// 이웃한 항목 사이 각도. (라디안)
+	/// 이웃한 항목 사이 각도. (라디안)
 	pub angle_step_radian: f32,
-	// 가운데 항목이 바라보는 방향. (라디안, 기본 위쪽)
+	/// 가운데 항목이 바라보는 방향. (라디안, 기본 위쪽)
 	pub base_angle_radian: f32,
-	// 항목 회전도 호의 접선에 맞출지.
+	/// 항목 회전도 호의 접선에 맞출지.
 	pub rotate_nodes: bool,
 }
 
 impl Default for NodeLayoutFanOptions {
 	//==============================================================================
-	// 기본값. (중심 0, 반지름 0, 간격 0.12 라디안, 위쪽, 회전함)
+	/// 기본값. (중심 0, 반지름 0, 간격 0.12 라디안, 위쪽, 회전함)
 	//==============================================================================
 	fn default() -> NodeLayoutFanOptions {
 		NodeLayoutFanOptions {
@@ -67,7 +69,7 @@ impl Default for NodeLayoutFanOptions {
 }
 
 //==============================================================================
-// 노드 레이아웃.
+/// 노드 레이아웃.
 //==============================================================================
 pub struct NodeLayout {
 	actions: Vec<NodeLayoutAction>,
@@ -77,7 +79,7 @@ pub struct NodeLayout {
 
 impl NodeLayout {
 	//==============================================================================
-	// 생성. (빈 설정)
+	/// 생성. (빈 설정)
 	//==============================================================================
 	pub fn new() -> NodeLayout {
 		NodeLayout {
@@ -88,16 +90,16 @@ impl NodeLayout {
 	}
 
 	//==============================================================================
-	// 레이아웃 만들기. (원본 NodeLayout.create(WorldNode))
+	/// 레이아웃 만들기. (원본 NodeLayout.create(WorldNode))
 	//==============================================================================
 	pub fn create() -> NodeLayout {
 		NodeLayout::new()
 	}
 
 	//==============================================================================
-	// 부채꼴 배치. (손패 카드처럼 노드들을 호 위에 펼친다)
-	// - 가운데 항목이 base_angle_radian 방향을 보도록 좌우 대칭으로 벌린다.
-	// - rotate_nodes 면 각 노드의 회전(도)도 호의 접선에 맞춘다.
+	/// 부채꼴 배치. (손패 카드처럼 노드들을 호 위에 펼친다)
+	/// - 가운데 항목이 base_angle_radian 방향을 보도록 좌우 대칭으로 벌린다.
+	/// - rotate_nodes 면 각 노드의 회전(도)도 호의 접선에 맞춘다.
 	//==============================================================================
 	pub fn arrange_fan(node_tree: &mut NodeTree, node_ids: &[NodeId], options: NodeLayoutFanOptions) {
 		let count = node_ids.len();
@@ -126,7 +128,7 @@ impl NodeLayout {
 	}
 
 	//==============================================================================
-	// 설정 하나를 뒤에 붙인다. (build 때 붙인 순서대로 걸린다)
+	/// 설정 하나를 뒤에 붙인다. (build 때 붙인 순서대로 걸린다)
 	//==============================================================================
 	fn push_action(mut self, action: NodeLayoutAction) -> NodeLayout {
 		self.actions.push(action);
@@ -134,7 +136,7 @@ impl NodeLayout {
 	}
 
 	//==============================================================================
-	// 노드 직접 접근. (빌더에 없는 속성을 정할 때)
+	/// 노드 직접 접근. (빌더에 없는 속성을 정할 때)
 	//==============================================================================
 	pub fn apply(self, callback: impl FnOnce(&mut WorldNode) + 'static) -> NodeLayout {
 		self.push_action(Box::new(move |node_tree, node_id| {
@@ -143,7 +145,7 @@ impl NodeLayout {
 	}
 
 	//==============================================================================
-	// 활성화 설정.
+	/// 활성화 설정.
 	//==============================================================================
 	pub fn active(self, is_active: bool) -> NodeLayout {
 		self.push_action(Box::new(move |node_tree, node_id| {
@@ -152,7 +154,7 @@ impl NodeLayout {
 	}
 
 	//==============================================================================
-	// 이름 설정.
+	/// 이름 설정.
 	//==============================================================================
 	pub fn name(self, name: &str) -> NodeLayout {
 		let name = name.to_string();
@@ -162,7 +164,7 @@ impl NodeLayout {
 	}
 
 	//==============================================================================
-	// 컴포넌트 추가. (설정은 넘기기 전에 값에 해 둔다)
+	/// 컴포넌트 추가. (설정은 넘기기 전에 값에 해 둔다)
 	//==============================================================================
 	pub fn component<T: Component + 'static>(self, component: T) -> NodeLayout {
 		self.push_action(Box::new(move |node_tree, node_id| {
@@ -171,7 +173,7 @@ impl NodeLayout {
 	}
 
 	//==============================================================================
-	// 컴포넌트 추가 후 콜백으로 설정. (원본 component(type, callback))
+	/// 컴포넌트 추가 후 콜백으로 설정. (원본 component(type, callback))
 	//==============================================================================
 	pub fn component_with<T: Component + 'static>(self, component: T, callback: impl FnOnce(&mut T) + 'static) -> NodeLayout {
 		self.push_action(Box::new(move |node_tree, node_id| {
@@ -182,7 +184,7 @@ impl NodeLayout {
 	}
 
 	//==============================================================================
-	// 자식 레이아웃 추가. (여러 개를 한 번에, 붙인 순서대로 그려진다)
+	/// 자식 레이아웃 추가. (여러 개를 한 번에, 붙인 순서대로 그려진다)
 	//==============================================================================
 	pub fn children(mut self, layouts: impl IntoIterator<Item = NodeLayout>) -> NodeLayout {
 		for layout in layouts {
@@ -192,7 +194,7 @@ impl NodeLayout {
 	}
 
 	//==============================================================================
-	// 로컬 위치 설정.
+	/// 로컬 위치 설정.
 	//==============================================================================
 	pub fn local_position(self, x: f32, y: f32) -> NodeLayout {
 		self.push_action(Box::new(move |node_tree, node_id| {
@@ -201,7 +203,7 @@ impl NodeLayout {
 	}
 
 	//==============================================================================
-	// 피봇 설정.
+	/// 피봇 설정.
 	//==============================================================================
 	pub fn pivot(self, pivot: Vector2) -> NodeLayout {
 		self.push_action(Box::new(move |node_tree, node_id| {
@@ -210,7 +212,7 @@ impl NodeLayout {
 	}
 
 	//==============================================================================
-	// 컨텐츠 크기 설정.
+	/// 컨텐츠 크기 설정.
 	//==============================================================================
 	pub fn content_size(self, x: f32, y: f32) -> NodeLayout {
 		self.push_action(Box::new(move |node_tree, node_id| {
@@ -219,7 +221,7 @@ impl NodeLayout {
 	}
 
 	//==============================================================================
-	// 로컬 크기 설정.
+	/// 로컬 크기 설정.
 	//==============================================================================
 	pub fn local_scale(self, x: f32, y: f32) -> NodeLayout {
 		self.push_action(Box::new(move |node_tree, node_id| {
@@ -228,7 +230,7 @@ impl NodeLayout {
 	}
 
 	//==============================================================================
-	// 부모 노드 설정. (build 에 부모를 넘기지 않으면 이 부모의 자식으로 붙는다)
+	/// 부모 노드 설정. (build 에 부모를 넘기지 않으면 이 부모의 자식으로 붙는다)
 	//==============================================================================
 	pub fn parent(mut self, parent_id: NodeId) -> NodeLayout {
 		self.parent_id = Some(parent_id);
@@ -236,7 +238,7 @@ impl NodeLayout {
 	}
 
 	//==============================================================================
-	// 앵커 설정.
+	/// 앵커 설정.
 	//==============================================================================
 	pub fn anchor(self, x: f32, y: f32) -> NodeLayout {
 		self.push_action(Box::new(move |node_tree, node_id| {
@@ -245,7 +247,7 @@ impl NodeLayout {
 	}
 
 	//==============================================================================
-	// 앵커 기준 위치 설정. (부모가 있으면 부모 content_size 의 앵커 점 기준, 없으면 로컬 위치 그대로)
+	/// 앵커 기준 위치 설정. (부모가 있으면 부모 content_size 의 앵커 점 기준, 없으면 로컬 위치 그대로)
 	//==============================================================================
 	pub fn anchored_position(self, x: f32, y: f32) -> NodeLayout {
 		self.push_action(Box::new(move |node_tree, node_id| {
@@ -263,7 +265,7 @@ impl NodeLayout {
 	}
 
 	//==============================================================================
-	// 마스크 켜기 / 끄기. (켜면 Mask 가 없을 때만 붙이고, 끄면 뗀다)
+	/// 마스크 켜기 / 끄기. (켜면 Mask 가 없을 때만 붙이고, 끄면 뗀다)
 	//==============================================================================
 	pub fn mask_enabled(self, is_enabled: bool) -> NodeLayout {
 		self.push_action(Box::new(move |node_tree, node_id| {
@@ -280,9 +282,9 @@ impl NodeLayout {
 	}
 
 	//==============================================================================
-	// 빌드. (노드를 만들어 부모에 붙이고, 모은 설정을 차례대로 건 뒤, 자식 레이아웃을 재귀로 빌드한다)
-	// - parent_id 를 넘기면 그 부모에, 없으면 parent() 로 정한 부모에 붙인다. 둘 다 없으면 어디에도 붙지 않는다.
-	// - 만든 노드의 핸들을 돌려준다.
+	/// 빌드. (노드를 만들어 부모에 붙이고, 모은 설정을 차례대로 건 뒤, 자식 레이아웃을 재귀로 빌드한다)
+	/// - parent_id 를 넘기면 그 부모에, 없으면 parent() 로 정한 부모에 붙인다. 둘 다 없으면 어디에도 붙지 않는다.
+	/// - 만든 노드의 핸들을 돌려준다.
 	//==============================================================================
 	pub fn build(self, node_tree: &mut NodeTree, parent_id: Option<NodeId>) -> NodeId {
 		let node_id = node_tree.create_node("");
@@ -302,7 +304,7 @@ impl NodeLayout {
 
 impl Default for NodeLayout {
 	//==============================================================================
-	// 기본값. (빈 설정)
+	/// 기본값. (빈 설정)
 	//==============================================================================
 	fn default() -> NodeLayout {
 		NodeLayout::new()
@@ -310,7 +312,7 @@ impl Default for NodeLayout {
 }
 
 //==============================================================================
-// 시험.
+/// 시험.
 //==============================================================================
 #[cfg(test)]
 mod tests {
@@ -321,7 +323,7 @@ mod tests {
 	use crate::core::component::text::Text;
 
 	//==============================================================================
-	// 중첩 레이아웃이 이름, 크기, 위치, 컴포넌트, 부모 관계를 그대로 만든다.
+	/// 중첩 레이아웃이 이름, 크기, 위치, 컴포넌트, 부모 관계를 그대로 만든다.
 	//==============================================================================
 	#[test]
 	fn build_creates_nested_nodes() {
@@ -364,7 +366,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// parent() 로 정한 부모, 마스크 켜고 끄기.
+	/// parent() 로 정한 부모, 마스크 켜고 끄기.
 	//==============================================================================
 	#[test]
 	fn parent_and_mask_toggle() {
@@ -380,7 +382,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 부채꼴 배치. (가운데는 위쪽, 좌우 대칭, 회전은 도)
+	/// 부채꼴 배치. (가운데는 위쪽, 좌우 대칭, 회전은 도)
 	//==============================================================================
 	#[test]
 	fn arrange_fan_spreads_symmetrically() {

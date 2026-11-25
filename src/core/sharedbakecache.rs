@@ -1,17 +1,17 @@
 //==============================================================================
-// 구운 그림 나눠 쓰기. (vanilla.js core/graphic/sharedbakecache.js, ShadowText, ShadowImage, SoftShade 가 쓴다)
-// - 같은 모양(열쇠)이면 한 번만 굽고 여러 컴포넌트가 같은 그림(Rc)을 그린다. GPU 텍스처도 그림마다 하나라 함께 준다.
-// - 원본은 열쇠마다 쓰는 컴포넌트 수를 세고 놓기(release)를 부른다. 러스트 판은 컴포넌트가 Rc 를 쥐는 것이 곧 참조 수다.
-//   열쇠가 바뀌어 다른 것을 쥐거나 컴포넌트가 사라지면 Rc 가 놓인다. 캐시만 쥔 것(Rc::strong_count 가 1)이 아무도 쓰지 않는 것이다.
-// - 아무도 쓰지 않는 것은 바로 버리지 않고 남겨 둔다. (같은 모양이 곧 다시 오면 굽지 않는다) 새로 담을 때 MAXIMUM_IDLE_BAKE_COUNT 를 넘었으면 오래 안 쓴 것부터 버린다.
-// - 굽지 못한 것(None)은 담지 않는다. 엔진은 한 스레드에서 돌아 캐시는 스레드 하나의 전역이다.
+//! 구운 그림 나눠 쓰기. (vanilla.js core/graphic/sharedbakecache.js, ShadowText, ShadowImage, SoftShade 가 쓴다)
+//! - 같은 모양(열쇠)이면 한 번만 굽고 여러 컴포넌트가 같은 그림(Rc)을 그린다. GPU 텍스처도 그림마다 하나라 함께 준다.
+//! - 원본은 열쇠마다 쓰는 컴포넌트 수를 세고 놓기(release)를 부른다. 러스트 판은 컴포넌트가 Rc 를 쥐는 것이 곧 참조 수다.
+//!   열쇠가 바뀌어 다른 것을 쥐거나 컴포넌트가 사라지면 Rc 가 놓인다. 캐시만 쥔 것(Rc::strong_count 가 1)이 아무도 쓰지 않는 것이다.
+//! - 아무도 쓰지 않는 것은 바로 버리지 않고 남겨 둔다. (같은 모양이 곧 다시 오면 굽지 않는다) 새로 담을 때 MAXIMUM_IDLE_BAKE_COUNT 를 넘었으면 오래 안 쓴 것부터 버린다.
+//! - 굽지 못한 것(None)은 담지 않는다. 엔진은 한 스레드에서 돌아 캐시는 스레드 하나의 전역이다.
 //==============================================================================
 use std::any::Any;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-// 아무도 쓰지 않는 구운 그림을 남겨 두는 수. (원본과 같음)
+/// 아무도 쓰지 않는 구운 그림을 남겨 두는 수. (원본과 같음)
 const MAXIMUM_IDLE_BAKE_COUNT: usize = 128;
 
 struct SharedBakeEntry {
@@ -32,8 +32,8 @@ thread_local! {
 }
 
 //==============================================================================
-// 구운 그림 쥐기. (열쇠에 구운 것이 있으면 그것을, 없으면 create_bake 로 구워 담고 준다, 원본 acquireSharedBake)
-// - 돌려준 Rc 를 쥐고 있는 동안은 버리지 않는다. 열쇠가 같으면 종류(T)도 같아야 한다. (종류가 다르면 새로 굽고 바꿔 담는다)
+/// 구운 그림 쥐기. (열쇠에 구운 것이 있으면 그것을, 없으면 create_bake 로 구워 담고 준다, 원본 acquireSharedBake)
+/// - 돌려준 Rc 를 쥐고 있는 동안은 버리지 않는다. 열쇠가 같으면 종류(T)도 같아야 한다. (종류가 다르면 새로 굽고 바꿔 담는다)
 //==============================================================================
 pub fn acquire_shared_bake<T: 'static>(bake_key: &str, create_bake: impl FnOnce() -> Option<Rc<T>>) -> Option<Rc<T>> {
 	let cached_bake = SHARED_BAKE_STATE.with(|shared_bake_state| {
@@ -62,7 +62,7 @@ pub fn acquire_shared_bake<T: 'static>(bake_key: &str, create_bake: impl FnOnce(
 }
 
 //==============================================================================
-// 아무도 쓰지 않는 것이 넘치면 오래 안 쓴 것부터 버리기.
+/// 아무도 쓰지 않는 것이 넘치면 오래 안 쓴 것부터 버리기.
 //==============================================================================
 fn evict_idle_bakes(shared_bake_state: &mut SharedBakeState) {
 	let mut idle_list: Vec<(u64, String)> = shared_bake_state.entry_table.iter().filter(|(_, entry)| Rc::strong_count(&entry.bake) <= 1).map(|(bake_key, entry)| (entry.last_used_count, bake_key.clone())).collect();
@@ -77,7 +77,7 @@ fn evict_idle_bakes(shared_bake_state: &mut SharedBakeState) {
 }
 
 //==============================================================================
-// 지금 들고 있는 구운 그림 수와 그 가운데 아무도 쓰지 않는 수. (시험과 통계용, 원본 readSharedBakeCount)
+/// 지금 들고 있는 구운 그림 수와 그 가운데 아무도 쓰지 않는 수. (시험과 통계용, 원본 readSharedBakeCount)
 //==============================================================================
 pub fn read_shared_bake_count() -> (usize, usize) {
 	SHARED_BAKE_STATE.with(|shared_bake_state| {
@@ -92,7 +92,7 @@ mod tests {
 	use super::*;
 
 	//==============================================================================
-	// 같은 열쇠는 한 번만 굽고 같은 Rc 를 준다. 쥔 것이 없으면 아무도 쓰지 않는 것으로 센다.
+	/// 같은 열쇠는 한 번만 굽고 같은 Rc 를 준다. 쥔 것이 없으면 아무도 쓰지 않는 것으로 센다.
 	//==============================================================================
 	#[test]
 	fn same_key_bakes_once_and_counts_idle() {
@@ -117,7 +117,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 아무도 쓰지 않는 것이 상한을 넘으면 오래 안 쓴 것부터 버리고, 쥔 것은 남긴다.
+	/// 아무도 쓰지 않는 것이 상한을 넘으면 오래 안 쓴 것부터 버리고, 쥔 것은 남긴다.
 	//==============================================================================
 	#[test]
 	fn evicts_oldest_idle_only() {

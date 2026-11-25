@@ -1,12 +1,14 @@
 //==============================================================================
-// 데스크탑 글 입력. (winit 0.30 창 이벤트 → 엔진 글 입력 줄, 시스템 클립보드)
-// - 원본 UIInputField 의 DOM <input>(set_use_dominput(true)) 자리와 document keydown(캔버스 모드) 자리를 함께 맡는다.
-//   - KeyboardInput: 편집 키(Backspace, Delete, 화살표, Home, End, Enter, Tab), Ctrl/Cmd + A/C/V/X, KeyEvent.text 의 글자 → 글 입력 줄.
-//   - Ime: Preedit 는 조합 시작 / 조합 글 / 조합 끝으로, Commit 은 확정 글로 바꾼다. (Preedit 커서는 바이트 자리라 문자 자리로 바꾼다)
-//   - 프레임마다 지난 프레임 필드 상태를 읽어, 포커스를 가진 필드가 플랫폼 입력(use_dominput)을 쓸 때만 IME 를 켜고 후보 창 자리를 맞춘다.
-//     포커스가 다른 필드로 옮겨 가거나 조합 중에 필드 안을 눌러 필드가 조합 글을 확정하면 IME 를 껐다 켜서 조합을 끊는다.
-//     (끊긴 조합 글은 필드가 이미 확정했으므로 OS 가 다시 보낸 같은 Commit 은 버린다)
-// - 클립보드는 arboard 로 읽고 쓴다. (winit 에 클립보드가 없다. 리눅스는 Clipboard 객체가 살아 있어야 내용이 남아서 스레드에 하나 들고 있는다)
+//! 데스크탑 글 입력. (winit 0.30 창 이벤트 → 엔진 글 입력 줄, 시스템 클립보드)
+//! - 원본 UIInputField 의 DOM <input>(set_use_dominput(true)) 자리와 document keydown(캔버스 모드) 자리를 함께 맡는다.
+//!   - KeyboardInput: 편집 키(Backspace, Delete, 화살표, Home, End, Enter, Tab), Ctrl/Cmd + A/C/V/X, KeyEvent.text 의 글자 → 글 입력 줄.
+//!   - Ime: Preedit 는 조합 시작 / 조합 글 / 조합 끝으로, Commit 은 확정 글로 바꾼다. (Preedit 커서는 바이트 자리라 문자 자리로 바꾼다)
+//!   - 프레임마다 지난 프레임 필드 상태를 읽어, 포커스를 가진 필드가 플랫폼 입력(use_dominput)을 쓸 때만 IME 를 켜고 후보 창 자리를 맞춘다.
+//!   ```text
+//!     포커스가 다른 필드로 옮겨 가거나 조합 중에 필드 안을 눌러 필드가 조합 글을 확정하면 IME 를 껐다 켜서 조합을 끊는다.
+//!     (끊긴 조합 글은 필드가 이미 확정했으므로 OS 가 다시 보낸 같은 Commit 은 버린다)
+//!   ```
+//! - 클립보드는 arboard 로 읽고 쓴다. (winit 에 클립보드가 없다. 리눅스는 Clipboard 객체가 살아 있어야 내용이 남아서 스레드에 하나 들고 있는다)
 //==============================================================================
 use crate::base::rect::Rect;
 use crate::core::textinput::{convert_byte_index_to_character_index, TextInput, TextInputEventKind, TextInputKey};
@@ -17,12 +19,12 @@ use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey, PhysicalKey};
 use winit::window::Window;
 
 thread_local! {
-	// 시스템 클립보드. (처음 쓸 때 연다)
+	/// 시스템 클립보드. (처음 쓸 때 연다)
 	static CLIPBOARD: RefCell<Option<arboard::Clipboard>> = const { RefCell::new(None) };
 }
 
 //==============================================================================
-// 데스크탑 글 입력 상태.
+/// 데스크탑 글 입력 상태.
 //==============================================================================
 pub(super) struct DesktopTextInputState {
 	modifiers_state: ModifiersState,
@@ -34,7 +36,7 @@ pub(super) struct DesktopTextInputState {
 
 impl DesktopTextInputState {
 	//==============================================================================
-	// 생성. (IME 는 winit 기본처럼 꺼진 채로 시작한다)
+	/// 생성. (IME 는 winit 기본처럼 꺼진 채로 시작한다)
 	//==============================================================================
 	pub(super) fn new() -> DesktopTextInputState {
 		DesktopTextInputState {
@@ -47,14 +49,14 @@ impl DesktopTextInputState {
 	}
 
 	//==============================================================================
-	// 수정 키 상태 갱신. (WindowEvent::ModifiersChanged)
+	/// 수정 키 상태 갱신. (WindowEvent::ModifiersChanged)
 	//==============================================================================
 	pub(super) fn set_modifiers(&mut self, modifiers_state: ModifiersState) {
 		self.modifiers_state = modifiers_state;
 	}
 
 	//==============================================================================
-	// 키 이벤트 → 글 입력 줄. (눌림과 반복만)
+	/// 키 이벤트 → 글 입력 줄. (눌림과 반복만)
 	//==============================================================================
 	pub(super) fn handle_key_event(&mut self, key_event: &KeyEvent, text_input: &mut TextInput) {
 		if key_event.state != ElementState::Pressed {
@@ -67,7 +69,7 @@ impl DesktopTextInputState {
 	}
 
 	//==============================================================================
-	// IME 이벤트 → 글 입력 줄.
+	/// IME 이벤트 → 글 입력 줄.
 	//==============================================================================
 	pub(super) fn handle_ime_event(&mut self, ime: Ime, text_input: &mut TextInput) {
 		match ime {
@@ -102,7 +104,7 @@ impl DesktopTextInputState {
 	}
 
 	//==============================================================================
-	// 조합 끝내기. (조합 중이었으면 빈 조합 글과 조합 끝을 넣는다)
+	/// 조합 끝내기. (조합 중이었으면 빈 조합 글과 조합 끝을 넣는다)
 	//==============================================================================
 	fn finish_composition(&mut self, text_input: &mut TextInput) {
 		if !self.is_ime_composing {
@@ -117,7 +119,7 @@ impl DesktopTextInputState {
 	}
 
 	//==============================================================================
-	// 지난 프레임 필드 상태를 창에 적용. (IME 켜고 끄기, 후보 창 자리. 프레임마다 화면을 넘기기 전에)
+	/// 지난 프레임 필드 상태를 창에 적용. (IME 켜고 끄기, 후보 창 자리. 프레임마다 화면을 넘기기 전에)
 	//==============================================================================
 	pub(super) fn apply_active_field(&mut self, window: &Window, text_input: &TextInput) {
 		let active_field_state = text_input.get_active_field_state();
@@ -161,11 +163,11 @@ impl DesktopTextInputState {
 }
 
 //==============================================================================
-// 키 하나를 글 입력 이벤트로. (없으면 None)
-// - Ctrl(맥은 Cmd)만 눌렸으면 A/C/V/X 단축키(원본 handleCanvasKeydown)와 되돌리기, 다시 하기를 본다.
-//   되돌리기와 다시 하기는 블링크 editing_behavior.cc 의 키 표다: Z 와 Shift + Z, 맥이 아니면 Y, 윈도우는 Alt + Backspace 와 Alt + Shift + Backspace.
-// - Ctrl 과 Alt 가 같이 눌린 것(AltGr)은 글자로 본다. Alt 만 눌린 글자는 버린다. (원본 !event.altKey)
-// - 글자는 제어 문자가 없을 때만. (Enter 의 "\r", Backspace 의 "\u{8}" 같은 것은 이름 있는 키로 먼저 걸러진다)
+/// 키 하나를 글 입력 이벤트로. (없으면 None)
+/// - Ctrl(맥은 Cmd)만 눌렸으면 A/C/V/X 단축키(원본 handleCanvasKeydown)와 되돌리기, 다시 하기를 본다.
+///   되돌리기와 다시 하기는 블링크 editing_behavior.cc 의 키 표다: Z 와 Shift + Z, 맥이 아니면 Y, 윈도우는 Alt + Backspace 와 Alt + Shift + Backspace.
+/// - Ctrl 과 Alt 가 같이 눌린 것(AltGr)은 글자로 본다. Alt 만 눌린 글자는 버린다. (원본 !event.altKey)
+/// - 글자는 제어 문자가 없을 때만. (Enter 의 "\r", Backspace 의 "\u{8}" 같은 것은 이름 있는 키로 먼저 걸러진다)
 //==============================================================================
 fn translate_key(logical_key: &Key, physical_key: PhysicalKey, text: Option<&str>, modifiers_state: ModifiersState) -> Option<TextInputEventKind> {
 	let is_shift = modifiers_state.shift_key();
@@ -238,7 +240,7 @@ fn translate_key(logical_key: &Key, physical_key: PhysicalKey, text: Option<&str
 }
 
 //==============================================================================
-// Ctrl/Cmd 단축키. (논리 키 글자를 먼저 보고, 글자가 아니면 물리 키 자리로)
+/// Ctrl/Cmd 단축키. (논리 키 글자를 먼저 보고, 글자가 아니면 물리 키 자리로)
 //==============================================================================
 fn translate_shortcut_key(logical_key: &Key, physical_key: PhysicalKey, is_shift: bool) -> Option<TextInputKey> {
 	let undo_or_redo = if is_shift {
@@ -303,7 +305,7 @@ fn translate_shortcut_key(logical_key: &Key, physical_key: PhysicalKey, is_shift
 }
 
 //==============================================================================
-// 클립보드를 열어 일 하기. (열 수 없으면 None)
+/// 클립보드를 열어 일 하기. (열 수 없으면 None)
 //==============================================================================
 fn with_clipboard<R>(action: impl FnOnce(&mut arboard::Clipboard) -> R) -> Option<R> {
 	CLIPBOARD.with(|clipboard_cell| {
@@ -324,7 +326,7 @@ fn with_clipboard<R>(action: impl FnOnce(&mut arboard::Clipboard) -> R) -> Optio
 }
 
 //==============================================================================
-// 시스템 클립보드에 글 쓰기.
+/// 시스템 클립보드에 글 쓰기.
 //==============================================================================
 pub fn write_clipboard_text(text: &str) {
 	let result = with_clipboard(|clipboard| clipboard.set_text(text.to_string()));
@@ -334,14 +336,14 @@ pub fn write_clipboard_text(text: &str) {
 }
 
 //==============================================================================
-// 시스템 클립보드 글 읽기. (글이 없거나 읽을 수 없으면 None)
+/// 시스템 클립보드 글 읽기. (글이 없거나 읽을 수 없으면 None)
 //==============================================================================
 pub fn read_clipboard_text() -> Option<String> {
 	with_clipboard(|clipboard| clipboard.get_text().ok()).flatten()
 }
 
 //==============================================================================
-// 시스템 클립보드 글을 읽어 콜백에 넘기기. (원본 readClipboard 자리, 데스크탑은 그 자리에서 읽어 바로 부른다. 못 읽으면 빈 글)
+/// 시스템 클립보드 글을 읽어 콜백에 넘기기. (원본 readClipboard 자리, 데스크탑은 그 자리에서 읽어 바로 부른다. 못 읽으면 빈 글)
 //==============================================================================
 pub fn read_clipboard_text_with_callback(callback: Box<dyn FnOnce(String)>) {
 	let text = read_clipboard_text().unwrap_or_default();
@@ -349,7 +351,7 @@ pub fn read_clipboard_text_with_callback(callback: Box<dyn FnOnce(String)>) {
 }
 
 //==============================================================================
-// 시스템 클립보드 글을 읽어 콜백에 넘기기. (원본 engine.readClipboardText 자리, 데스크탑은 그 자리에서 읽어 바로 부른다. 못 읽으면 None)
+/// 시스템 클립보드 글을 읽어 콜백에 넘기기. (원본 engine.readClipboardText 자리, 데스크탑은 그 자리에서 읽어 바로 부른다. 못 읽으면 None)
 //==============================================================================
 pub fn read_optional_clipboard_text_with_callback(callback: Box<dyn FnOnce(Option<String>)>) {
 	callback(read_clipboard_text());
@@ -360,7 +362,7 @@ mod tests {
 	use super::*;
 
 	//==============================================================================
-	// 이름 있는 키, 단축키, 글자, 걸러지는 것.
+	/// 이름 있는 키, 단축키, 글자, 걸러지는 것.
 	//==============================================================================
 	#[test]
 	fn translate_undo_keys() {
@@ -420,7 +422,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// IME 조합 → 조합 시작, 조합 글(문자 자리 커서), 조합 끝, 확정. 가드에 걸린 확정은 버린다.
+	/// IME 조합 → 조합 시작, 조합 글(문자 자리 커서), 조합 끝, 확정. 가드에 걸린 확정은 버린다.
 	//==============================================================================
 	#[test]
 	fn ime_events_become_composition() {

@@ -1,15 +1,17 @@
 //==============================================================================
-// 맥 CoreText 글리프 그리기. (macOS 만)
-// - 원본에 없는 파일이다. 원본 크롬 맥은 글리프를 CoreText(CoreGraphics)로 그린다. 러스트 판은 대부분의 글리프를 fontdue 와 skrifa 로 직접 그리고,
-//   CoreText 가 다르게 그리는 것과 열린 해석기가 읽지 못하는 것만 여기서 그린다. (textshaping.rs 가 부른다)
-//   - 색 이모지(sbix, Apple Color Emoji): CoreText 는 작은 글자 크기에서 이모지를 키워 그리고 아래로 내린다. (16px 에서 20px 판, 24px 부터 글자 크기 그대로)
-//     맥 크롬 Canvas2D 의 measureText 로 잰 이모지 전진폭은 CoreText 가 그린 이모지 상자의 높이와 같다. (8px 10, 12px 15, 16px 20, 20px 22, 24px 24, 32px 32, 64px 64)
-//     크롬의 전진폭은 그 상자 높이를 정수로 반올림한 값이다. (13px 의 16.25 는 16, 10px 의 12.5 는 13. 8 ~ 128px 의 23 가지 크기에서 크롬과 같다, 반올림은 textshaping.rs 가 한다)
-//     CoreText 의 전진폭(CTFontGetAdvancesForGlyphs)은 글꼴의 자간 표(trak)가 더해져 크롬과 다르므로 쓰지 않는다.
-//   - 글리프 윤곽이 glyf, CFF, CFF2 어디에도 없는 글꼴: 맥 26 의 PingFangUI.ttc(중국어 대체 글꼴)는 애플 전용 hvgl 표에 윤곽이 있다.
-// - 글꼴은 그 얼굴의 PostScript 이름으로 짓는다. (시스템에 올린 글꼴만 CoreText 가 이모지를 키워 그린다) 이름이 점으로 시작하는 숨은 글꼴이거나 축 값을 걸면
-//   파일 경로의 CTFontManagerCreateFontDescriptorsFromURL 서술자를 PostScript 이름(없으면 모음 안의 차례)으로 골라 짓는다. 글자 크기마다 지은 CTFont 는 담아 둔다. (스레드 하나, 넘치면 비운다)
-// - 그림은 프리멀티플라이드 RGBA(sRGB) 비트맵 컨텍스트에 흰색으로 그린다. 크롬 캔버스처럼 회색 안티앨리어싱이고 LCD 글자 다듬기는 끈다.
+//! 맥 CoreText 글리프 그리기. (macOS 만)
+//! - 원본에 없는 파일이다. 원본 크롬 맥은 글리프를 CoreText(CoreGraphics)로 그린다. 러스트 판은 대부분의 글리프를 fontdue 와 skrifa 로 직접 그리고,
+//!   CoreText 가 다르게 그리는 것과 열린 해석기가 읽지 못하는 것만 여기서 그린다. (textshaping.rs 가 부른다)
+//!   - 색 이모지(sbix, Apple Color Emoji): CoreText 는 작은 글자 크기에서 이모지를 키워 그리고 아래로 내린다. (16px 에서 20px 판, 24px 부터 글자 크기 그대로)
+//!   ```text
+//!     맥 크롬 Canvas2D 의 measureText 로 잰 이모지 전진폭은 CoreText 가 그린 이모지 상자의 높이와 같다. (8px 10, 12px 15, 16px 20, 20px 22, 24px 24, 32px 32, 64px 64)
+//!     크롬의 전진폭은 그 상자 높이를 정수로 반올림한 값이다. (13px 의 16.25 는 16, 10px 의 12.5 는 13. 8 ~ 128px 의 23 가지 크기에서 크롬과 같다, 반올림은 textshaping.rs 가 한다)
+//!     CoreText 의 전진폭(CTFontGetAdvancesForGlyphs)은 글꼴의 자간 표(trak)가 더해져 크롬과 다르므로 쓰지 않는다.
+//!   ```
+//!   - 글리프 윤곽이 glyf, CFF, CFF2 어디에도 없는 글꼴: 맥 26 의 PingFangUI.ttc(중국어 대체 글꼴)는 애플 전용 hvgl 표에 윤곽이 있다.
+//! - 글꼴은 그 얼굴의 PostScript 이름으로 짓는다. (시스템에 올린 글꼴만 CoreText 가 이모지를 키워 그린다) 이름이 점으로 시작하는 숨은 글꼴이거나 축 값을 걸면
+//!   파일 경로의 CTFontManagerCreateFontDescriptorsFromURL 서술자를 PostScript 이름(없으면 모음 안의 차례)으로 골라 짓는다. 글자 크기마다 지은 CTFont 는 담아 둔다. (스레드 하나, 넘치면 비운다)
+//! - 그림은 프리멀티플라이드 RGBA(sRGB) 비트맵 컨텍스트에 흰색으로 그린다. 크롬 캔버스처럼 회색 안티앨리어싱이고 LCD 글자 다듬기는 끈다.
 //==============================================================================
 use objc2_core_foundation::{CFArray, CFDictionary, CFNumber, CFRetained, CFString, CFType, CFURL, CGPoint, CGRect};
 use objc2_core_graphics::{kCGColorSpaceSRGB, CGBitmapContextCreate, CGColorSpace, CGContext, CGImageAlphaInfo, CGImageByteOrderInfo};
@@ -18,22 +20,22 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-// 담아 두는 CTFont 의 수 상한. (넘치면 모두 비운다)
+/// 담아 두는 CTFont 의 수 상한. (넘치면 모두 비운다)
 const MAXIMUM_FONT_COUNT: usize = 64;
-// 그릴 수 있는 그림의 가로세로 상한. (픽셀)
+/// 그릴 수 있는 그림의 가로세로 상한. (픽셀)
 const MAXIMUM_RASTER_SIZE: i32 = 4096;
-// 이모지 크기를 재는 글자. (웃는 얼굴, 애플 컬러 이모지의 그림은 모두 정사각형이다)
+/// 이모지 크기를 재는 글자. (웃는 얼굴, 애플 컬러 이모지의 그림은 모두 정사각형이다)
 const REFERENCE_EMOJI: char = '\u{1F600}';
 
 thread_local! {
-	// (경로, 얼굴 번호) → 글꼴 서술자. (None 은 CoreText 가 읽지 못한 파일)
+	/// (경로, 얼굴 번호) → 글꼴 서술자. (None 은 CoreText 가 읽지 못한 파일)
 	static FONT_DESCRIPTOR_TABLE: RefCell<HashMap<(PathBuf, u32), Option<CFRetained<CTFontDescriptor>>>> = RefCell::new(HashMap::new());
-	// (경로, 얼굴 번호, 크기 비트, 축 값 글) → 지은 CTFont.
+	/// (경로, 얼굴 번호, 크기 비트, 축 값 글) → 지은 CTFont.
 	static FONT_TABLE: RefCell<HashMap<(PathBuf, u32, u32, String), CFRetained<CTFont>>> = RefCell::new(HashMap::new());
 }
 
 //==============================================================================
-// CoreText 로 그린 글리프. (프리멀티플라이드 RGBA, 왼쪽 위 자리는 펜 원점에서 오른쪽 left_x, 기준선에서 위로 top_y)
+/// CoreText 로 그린 글리프. (프리멀티플라이드 RGBA, 왼쪽 위 자리는 펜 원점에서 오른쪽 left_x, 기준선에서 위로 top_y)
 //==============================================================================
 pub struct CoreTextGlyphRaster {
 	pub pixels: Vec<u8>,
@@ -44,7 +46,7 @@ pub struct CoreTextGlyphRaster {
 }
 
 //==============================================================================
-// 파일의 얼굴 서술자. (처음 쓸 때 짓고 담아 둔다)
+/// 파일의 얼굴 서술자. (처음 쓸 때 짓고 담아 둔다)
 //==============================================================================
 fn read_font_descriptor(path: &Path, face_index: u32) -> Option<CFRetained<CTFontDescriptor>> {
 	FONT_DESCRIPTOR_TABLE.with(|font_descriptor_table_cell| {
@@ -72,7 +74,7 @@ fn read_font_descriptor(path: &Path, face_index: u32) -> Option<CFRetained<CTFon
 }
 
 //==============================================================================
-// 모음 안 얼굴의 PostScript 이름. (파일 앞머리의 표 목록과 name 표만 읽는다, 못 읽으면 None)
+/// 모음 안 얼굴의 PostScript 이름. (파일 앞머리의 표 목록과 name 표만 읽는다, 못 읽으면 None)
 //==============================================================================
 fn read_face_post_script_name(path: &Path, face_index: u32) -> Option<String> {
 	let font_bytes = std::fs::read(path).ok()?;
@@ -96,7 +98,7 @@ fn read_face_post_script_name(path: &Path, face_index: u32) -> Option<String> {
 }
 
 //==============================================================================
-// 글자 크기와 축 값의 CTFont. (축 값은 (4 글자 태그의 수, 값) 목록, 처음 쓸 때 짓고 담아 둔다)
+/// 글자 크기와 축 값의 CTFont. (축 값은 (4 글자 태그의 수, 값) 목록, 처음 쓸 때 짓고 담아 둔다)
 //==============================================================================
 fn read_font(path: &Path, face_index: u32, pixel_size: f32, variation_list: &[(u32, f32)]) -> Option<CFRetained<CTFont>> {
 	let variation_key: String = variation_list.iter().map(|(tag, value)| format!("{}={};", tag, value)).collect();
@@ -152,7 +154,7 @@ fn read_font(path: &Path, face_index: u32, pixel_size: f32, variation_list: &[(u
 }
 
 //==============================================================================
-// 글리프가 그려지는 상자. (CTFontGetBoundingRectsForGlyphs, 펜 원점 기준 픽셀, y 는 위가 양수. 그릴 것이 없으면 None)
+/// 글리프가 그려지는 상자. (CTFontGetBoundingRectsForGlyphs, 펜 원점 기준 픽셀, y 는 위가 양수. 그릴 것이 없으면 None)
 //==============================================================================
 pub fn read_glyph_bounds(path: &Path, face_index: u32, glyph_index: u16, pixel_size: f32, variation_list: &[(u32, f32)]) -> Option<CGRect> {
 	let font = read_font(path, face_index, pixel_size, variation_list)?;
@@ -166,7 +168,7 @@ pub fn read_glyph_bounds(path: &Path, face_index: u32, glyph_index: u16, pixel_s
 }
 
 //==============================================================================
-// 색 이모지 글꼴을 CoreText 가 키워 그리는 비. (웃는 얼굴 이모지 상자의 높이 / 글자 크기, 재지 못하면 1)
+/// 색 이모지 글꼴을 CoreText 가 키워 그리는 비. (웃는 얼굴 이모지 상자의 높이 / 글자 크기, 재지 못하면 1)
 //==============================================================================
 pub fn read_emoji_scale(path: &Path, face_index: u32, pixel_size: f32) -> f32 {
 	if pixel_size <= 0.0 {
@@ -187,7 +189,7 @@ pub fn read_emoji_scale(path: &Path, face_index: u32, pixel_size: f32) -> f32 {
 }
 
 //==============================================================================
-// 글리프 하나 그리기. (흰색, 색 글리프는 제 색. 그릴 것이 없거나 CoreText 가 읽지 못하면 None)
+/// 글리프 하나 그리기. (흰색, 색 글리프는 제 색. 그릴 것이 없거나 CoreText 가 읽지 못하면 None)
 //==============================================================================
 pub fn rasterize_glyph(path: &Path, face_index: u32, glyph_index: u16, pixel_size: f32, variation_list: &[(u32, f32)]) -> Option<CoreTextGlyphRaster> {
 	let font = read_font(path, face_index, pixel_size, variation_list)?;
