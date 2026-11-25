@@ -9,6 +9,7 @@ use crate::base::rect::Rect;
 use crate::base::vector2::Vector2;
 use crate::core::component::paint::Paint;
 use crate::core::component::{Component, ComponentBase};
+use crate::core::frame::Frame;
 use crate::core::graphic::{BlendMode, Graphic};
 use crate::core::image::Image;
 use crate::core::node::worldnode::NodeTransform;
@@ -115,6 +116,23 @@ impl Sprite {
 	//==============================================================================
 	pub fn set_image(&mut self, image: Option<Rc<Image>>) {
 		self.image = image;
+	}
+
+	//==============================================================================
+	// 조각 걸기. (Frame 의 그림과 그 안의 영역을 함께 건다, None 이면 그림을 비운다, 원본 setFrame, SpriteAtlas.read_frame)
+	//==============================================================================
+	pub fn set_frame(&mut self, frame: Option<&Frame>) {
+		match frame {
+			Some(frame) => {
+				let image = frame.get_image().clone();
+				let image_rect = frame.get_image_rect();
+				self.set_image(Some(image));
+				self.set_image_rect(image_rect);
+			}
+			None => {
+				self.set_image(None);
+			}
+		}
 	}
 
 	//==============================================================================
