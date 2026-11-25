@@ -25,6 +25,7 @@ pub struct UIView {
 	background_color: Color,
 }
 
+#[crate::reflect]
 impl UIView {
 	//==============================================================================
 	// 생성. (배경은 투명한 흰색)
@@ -96,6 +97,7 @@ impl Default for UIView {
 	}
 }
 
+#[crate::reflect]
 impl Component for UIView {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base

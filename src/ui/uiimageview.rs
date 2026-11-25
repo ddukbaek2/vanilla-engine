@@ -26,6 +26,7 @@ pub struct UIImageView {
 	sprite: Sprite,
 }
 
+#[crate::reflect(base = ui_view)]
 impl UIImageView {
 	//==============================================================================
 	// 생성.
@@ -49,6 +50,7 @@ impl UIImageView {
 	//==============================================================================
 	// 품은 뷰 반환.
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn get_uiview(&self) -> &UIView {
 		&self.ui_view
 	}
@@ -63,6 +65,7 @@ impl UIImageView {
 	//==============================================================================
 	// 컨텐트 노드 핸들.
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn get_content(&self) -> Option<NodeId> {
 		self.ui_view.get_content()
 	}
@@ -70,6 +73,7 @@ impl UIImageView {
 	//==============================================================================
 	// 배경색 설정.
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn set_background_color(&mut self, background_color: impl Into<Color>) {
 		self.ui_view.set_background_color(background_color);
 	}
@@ -77,6 +81,7 @@ impl UIImageView {
 	//==============================================================================
 	// 배경색 반환.
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn get_background_color(&self) -> Color {
 		self.ui_view.get_background_color()
 	}
@@ -183,6 +188,7 @@ impl UIImageView {
 	//==============================================================================
 	// 그림 경로 반환.
 	//==============================================================================
+	#[reflect(transient)]
 	pub fn get_image_path(&self) -> &str {
 		self.sprite.get_image_path()
 	}
@@ -194,6 +200,7 @@ impl Default for UIImageView {
 	}
 }
 
+#[crate::reflect]
 impl Component for UIImageView {
 	fn get_component_base(&self) -> &ComponentBase {
 		self.ui_view.get_component_base()

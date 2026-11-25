@@ -411,6 +411,22 @@
   - 데스크탑 Platform 의 브라우저를 Unknown 에서 Chrome 으로: 데스크탑 판이 크롬 위의 원본과 같은 결과를 내므로 게임 코드의 브라우저 분기도 크롬 갈래로 간다
   - 개발자 도구의 메모리 칸: 데스크탑은 (N/A) 대신 시스템 할당자의 힙(맥 malloc_zone_statistics, 윈도우 프로세스 힙 HeapSummary, 리눅스 glibc mallinfo2)을 usedJSHeapSize, totalJSHeapSize 칸에 적는다. jsHeapSizeLimit 는 그런 상한이 없어 (N/A) 다
   - 차이 표에서 뺀 것: 세이프 에어리어 인셋 0(크롬 데스크탑도 0, SetDisplayCutoutSafeArea 는 안드로이드에만 있다), set_prevented_keys 와 오른쪽 클릭 메뉴 막기(데스크탑 창에는 막을 브라우저 기본 동작이 없어 막은 것과 같다), 화면 키보드, 웨이랜드 Hidden, preserve_drawing_buffer, auto_resize_on_window_resize, 브라우저 이름
+- 반사(리플렉션): 원본의 실행 중 반사(uidocument.js 의 collectReflectedProperties, getReflectedProperties, saveByReflection, loadByReflection, devtools.js 의 getComponentProperties)와 같은 일을 컴파일 때 짓는 코드로 한다. 언리얼 UHT, Qt moc 처럼 절차 매크로가 한다
+  - 저장소를 워크스페이스로 만들고 절차 매크로 크레이트 macros/(vanilla-engine-macros, syn, quote, proc-macro2)를 더했다. 엔진이 vanilla::reflect 로 다시 내보내 게임은 엔진 하나만 의존한다. 지은 코드는 ::vanilla 로 엔진을 가리키고, 엔진 안에서는 lib.rs 의 extern crate self as vanilla 로 같은 경로가 통한다
+  - #[vanilla::reflect] 를 컴포넌트의 impl 블록과 impl Component 블록에 붙인다. 인자 없는 pub get_*, is_* 게터와 짝 set_* 을 모아 Reflect 구현을 짓는다. 키는 원본 이름(get_line_width → LineWidth), 차례는 정의 차례다. 한쪽만 붙이면 컴파일 에러가 붙일 곳을 알려 준다
+  - 값으로 바꿀 수 없는 꼴의 게터는 자동 참조 특수화로 골라내 저장에서 빼고 인스펙터에는 [종류 이름] 으로 보인다. 함수에 #[reflect(skip)], #[reflect(transient)], #[reflect(name = "...")], 블록에 #[reflect(base = 필드)](원본 상위 클래스 몫을 품은 필드로 잇기)
+  - core/reflection.rs: ReflectValue, Reflect, ToReflectValue, FromReflectValue, ReflectedProperty, ReflectedGetter, collect_reflected_properties, read_reflected_property, write_reflected_property, collect_reflected_getters. Component::get_reflection, get_reflection_mut (기본 None). 원본에서 글인 열거(TextAlign, TextBaseline, TextDirection, TextWrapMode, SpriteDrawMode, BlendMode, ScrollMode, ProgressDirection, ScrollBarAxis, SoftShadeShape, ButtonMotionStyle, ToastPhase, ParticleEmitterShape, ParticleRenderShape, ShaderSpriteEffect)는 같은 글로, ButtonState 는 원본 Enum 수로 바꾼다
+  - 엔진 컴포넌트 51 종에 모두 붙였다. 원본 상위 클래스가 있는 것(UIControl, UIScrollView, UIProgressView, UILabel, UIImageView 는 UIView, UIButton, UISlider, UIDraggable 은 UIControl, UIToggleButton 은 UIButton, UISnapScrollView 는 UIScrollView, Sprite 는 Paint, ShaderSprite 는 Sprite)은 base 로 잇고 위임 함수는 뺐다. ShadowText 의 TextAlign, isBold, UIProgressRing 의 둘레 점, UIListView 의 isHorizontal 은 원본 차례로 옮겼다
+- UIDocument: 원본처럼 쓰기, 읽기 함수(propertyHandler)가 없는 종류는 반사로 쓰고 읽는다. (save_by_reflection, load_by_reflection, get_reflected_properties, 원본 REFLECTED_PROPERTY_EXCLUDE_NAMES) 손으로 짠 Outline, SoftShade, ShadowText, UIProgressRing 직렬화를 지우고 반사로 돌렸다. 결과는 원본 saveByReflection 과 키, 차례, 값까지 같다. (원본을 node 로 돌려 낸 JSON 으로 시험)
+  - 공개 API 를 바꿨다: register_component_type(이름, 짓는 함수)이 원본 registerComponentType 이다. (반사) 쓰기, 읽기 함수가 있으면 register_component_type_with_handler, 위젯은 register_widget_type(이름, 짓는 함수, content, 스스로 붙이는 종류)과 register_widget_type_with_handler
+  - 등록하지 않은 종류도 반사가 있으면 원본처럼 반사로 적는다. (type 은 타입 이름) 쓰기 함수가 있는 종류도 노드를 가리키는 반사 속성은 원본 saveNodeReferences, loadNodeReferences 처럼 따로 얹고 읽는다
+  - 원본 노드 종류(WorldNode 하위 클래스)를 맡은 컴포넌트: register_node_type, UIDocumentNode, UIDocumentNodeParts. 그 컴포넌트가 붙은 노드의 type 이 그 이름이고, 원본 노드 생성자가 만든 컴포넌트와 자식을 원본 문서 꼴로 쓰고, 읽을 때는 설정으로 읽고 다시 짓지 않는다
+  - register_editor_types: 원본 에디터(tools/uieditor)가 저장한 문서의 UIInputField, UIScrollBar(원본 노드 종류)와 UISnapScrollView 를 한 줄로 등록한다. 지금까지는 읽을 때 버려졌다. UIInputField 는 바탕 색, 둥근 크기, 안내 글과 그 색, 글 크기, 값과 그 색을, UIScrollBar 는 트랙과 썸 색을 읽는다
+  - ShadowImage 는 imagePath 뒤에 반사 저장 꼴로 쓴다
+- UIScrollBar: get_track_color, get_thumb_color
+- DevTools: 인스펙터가 원본 getComponentProperties 처럼 컴포넌트의 get*, is* 게터를 모두 불러 보인다. (이름은 원본 formatMethodName, 값은 formatPropertyValue 꼴, 수는 원본 toFixed 와 같은 반올림) 반사가 없는 컴포넌트는 지금처럼 UIDocument 의 저장 키 또는 종류 이름만
+- 예제 devtoolsshowcase: Spin 에 #[vanilla::reflect] 를 붙여 인스펙터에 degreesPerSecond 가 보인다
+- README(노드와 컴포넌트의 반사 매크로 쓰는 법, 기술 노트, 외부 의존성의 매크로 크레이트 표), ARCHITECTURE(배치, 9장, 10장 두 엔진의 차이의 반사 줄)
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.

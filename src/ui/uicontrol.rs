@@ -18,6 +18,7 @@ pub struct UIControl {
 	ui_view: UIView,
 }
 
+#[crate::reflect(base = ui_view)]
 impl UIControl {
 	//==============================================================================
 	// 생성.
@@ -31,6 +32,7 @@ impl UIControl {
 	//==============================================================================
 	// 품은 뷰 반환.
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn get_uiview(&self) -> &UIView {
 		&self.ui_view
 	}
@@ -45,6 +47,7 @@ impl UIControl {
 	//==============================================================================
 	// 컨텐트 노드 핸들.
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn get_content(&self) -> Option<NodeId> {
 		self.ui_view.get_content()
 	}
@@ -52,6 +55,7 @@ impl UIControl {
 	//==============================================================================
 	// 배경색 설정.
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn set_background_color(&mut self, background_color: impl Into<Color>) {
 		self.ui_view.set_background_color(background_color);
 	}
@@ -59,6 +63,7 @@ impl UIControl {
 	//==============================================================================
 	// 배경색 반환.
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn get_background_color(&self) -> Color {
 		self.ui_view.get_background_color()
 	}
@@ -70,6 +75,7 @@ impl Default for UIControl {
 	}
 }
 
+#[crate::reflect]
 impl Component for UIControl {
 	fn get_component_base(&self) -> &ComponentBase {
 		self.ui_view.get_component_base()

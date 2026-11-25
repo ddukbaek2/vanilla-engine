@@ -31,6 +31,7 @@ pub struct PlatformerBody {
 	landed_event: Option<LandedEvent>,
 }
 
+#[crate::reflect]
 impl PlatformerBody {
 	//==============================================================================
 	// 생성. (중력 초당 2000, 바닥 0, 경계 없음, 공중)
@@ -181,6 +182,7 @@ impl Default for PlatformerBody {
 	}
 }
 
+#[crate::reflect]
 impl Component for PlatformerBody {
 	//==============================================================================
 	// 공통 상태 반환.

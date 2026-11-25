@@ -434,6 +434,12 @@ pub enum TextWrapMode {
 	Character,
 }
 
+// 줄바꿈 방식의 반사 값. (원본 wrapMode 글)
+crate::core::reflection::impl_reflect_names!(TextWrapMode, [
+	(TextWrapMode::Word, "word"),
+	(TextWrapMode::Character, "char"),
+]);
+
 pub struct Text {
 	component_base: ComponentBase,
 	font_family: String,
@@ -473,6 +479,7 @@ pub struct Text {
 	draw_font_string: String,
 }
 
+#[crate::reflect]
 impl Text {
 	//==============================================================================
 	// 생성. (기본값은 원본과 같다: 32px, 흰색, 가운데 정렬, 가운데 기준선, 줄 간격 1.25)
@@ -1105,6 +1112,7 @@ impl Text {
 	//==============================================================================
 	// 폰트 이름 반환.
 	//==============================================================================
+	#[reflect(transient)]
 	pub fn get_font_family(&self) -> &str {
 		&self.font_family
 	}
@@ -1456,6 +1464,7 @@ impl Default for Text {
 	}
 }
 
+#[crate::reflect]
 impl Component for Text {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base

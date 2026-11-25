@@ -63,6 +63,7 @@ pub struct UISpinner {
 	is_dot_color_pending: bool,
 }
 
+#[crate::reflect]
 impl UISpinner {
 	//==============================================================================
 	// 생성. (기본 설정)
@@ -150,6 +151,7 @@ impl Default for UISpinner {
 	}
 }
 
+#[crate::reflect]
 impl Component for UISpinner {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base

@@ -38,6 +38,7 @@ pub struct HeatHazeEffect {
 	capture_texture_height: i32,
 }
 
+#[crate::reflect]
 impl HeatHazeEffect {
 	//==============================================================================
 	// 생성. (속도 2, 폭 3, 빈도 0.05)
@@ -169,6 +170,7 @@ impl Default for HeatHazeEffect {
 	}
 }
 
+#[crate::reflect]
 impl Component for HeatHazeEffect {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base

@@ -95,6 +95,7 @@ pub struct UINode {
 	intrinsic_content_size: Vector2,
 }
 
+#[crate::reflect]
 impl UINode {
 	//==============================================================================
 	// 생성. (본질 제약 4 개를 만든다, hug 250, 압축 저항 750, 여백 8)
@@ -680,6 +681,7 @@ impl Default for UINode {
 	}
 }
 
+#[crate::reflect]
 impl Component for UINode {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base
