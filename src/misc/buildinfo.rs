@@ -5,10 +5,10 @@
 //   2. 없으면 version.json. { version, date, time, hash, ... } 꼴이고, 글은 "날짜 시각 (해시)" 이다. 해시가 없으면 version.
 //      웹은 페이지 기준 주소를 캐시 없이(fetch 의 cache: "no-cache") 받는다. 새 판을 올려도 옛 판 표시가 남지 않게 한다.
 //      데스크탑은 애셋 폴더에서 읽는다. (그 자리에서 끝난다)
-//   3. 둘 다 없으면 빌드 때 넣은 판. 게임 크레이트가 new(env!("CARGO_PKG_VERSION")) 로 넘긴다. (엔진 안에서 env! 를 쓰면 엔진의 판이 된다)
+//   3. 둘 다 없으면 set_package_version 으로 넣은 판. (게임 크레이트가 env!("CARGO_PKG_VERSION") 을 넘긴다, 넣지 않았으면 원본처럼 빈 글)
 // - 원본과 다른 점:
-//   원본 await load() 는 받을 때까지 기다린다. 러스트 판은 load(engine) 가 요청만 하고, 끝났는지는 is_finished(), 씬은 get_load_handle() 을 track_load_handle 로 맡긴다.
-//   원본은 못 읽으면 빈 글이다. 러스트 판은 빌드 때 넣은 판으로 물러선다. (빈 글로 넘겼으면 빈 글)
+//   원본 생성자의 version.json 주소 기본 인자는 new()(기본 주소)와 set_version_json_path 로 나눴다.
+//   원본 await load() 는 받을 때까지 기다린다. 러스트 판은 load(engine) 가 요청만 하고, 마쳤는지는 is_loaded(), 씬은 get_load_handle() 을 track_load_handle 로 맡긴다.
 //   meta 는 브라우저에만 있어서 데스크탑은 읽지 않는다. 캐시 끄기도 브라우저 fetch 만의 일이다.
 //==============================================================================
 use crate::core::asset::AssetLoadHandle;
@@ -26,6 +26,7 @@ const DEFAULT_VERSION_JSON_PATH: &str = "version.json";
 //==============================================================================
 pub struct BuildInfo {
 	package_version: String,
+	is_load_requested: bool,
 	meta_name: String,
 	version_json_path: String,
 	meta_text: String,
@@ -36,11 +37,12 @@ pub struct BuildInfo {
 
 impl BuildInfo {
 	//==============================================================================
-	// 생성. (빌드 때 넣은 판, 보통 env!("CARGO_PKG_VERSION"))
+	// 생성. (version.json 주소는 기본 "version.json")
 	//==============================================================================
-	pub fn new(package_version: &str) -> BuildInfo {
+	pub fn new() -> BuildInfo {
 		BuildInfo {
-			package_version: package_version.to_string(),
+			package_version: String::new(),
+			is_load_requested: false,
 			meta_name: String::from(DEFAULT_META_NAME),
 			version_json_path: String::from(DEFAULT_VERSION_JSON_PATH),
 			meta_text: String::new(),
@@ -68,7 +70,8 @@ impl BuildInfo {
 	// 읽기 요청. (웹은 meta 를 바로 읽고, 없으면 version.json 을 캐시 없이 요청한다. 데스크탑은 애셋 폴더의 version.json 을 읽는다)
 	//==============================================================================
 	pub fn load(&mut self, engine: &Engine) {
-		self.meta_text = platform_build_info::read_meta_text(&self.meta_name);
+		self.is_load_requested = true;
+		self.meta_text = self.read_meta_text();
 		self.load_handle = None;
 		self.version_data = None;
 		self.is_version_data_read = false;
@@ -80,9 +83,12 @@ impl BuildInfo {
 	}
 
 	//==============================================================================
-	// 읽기를 마쳤는지. (요청하지 않았거나 실패해도 마친 것)
+	// 읽기를 마쳤는지. (원본 isLoaded, load 전이면 거짓, 실패해도 마친 것)
 	//==============================================================================
-	pub fn is_finished(&self) -> bool {
+	pub fn is_loaded(&self) -> bool {
+		if !self.is_load_requested {
+			return false;
+		}
 		match &self.load_handle {
 			Some(load_handle) => {
 				load_handle.is_finished()
@@ -138,6 +144,20 @@ impl BuildInfo {
 	}
 
 	//==============================================================================
+	// 페이지의 meta 에 적힌 판. (원본 readMetaText, 데스크탑과 없으면 빈 글)
+	//==============================================================================
+	pub fn read_meta_text(&self) -> String {
+		platform_build_info::read_meta_text(&self.meta_name)
+	}
+
+	//==============================================================================
+	// 빌드 때 넣은 판 설정. (meta 도 version.json 도 없을 때의 글, 보통 env!("CARGO_PKG_VERSION"))
+	//==============================================================================
+	pub fn set_package_version(&mut self, package_version: &str) {
+		self.package_version = package_version.to_string();
+	}
+
+	//==============================================================================
 	// 빌드 때 넣은 판.
 	//==============================================================================
 	pub fn get_package_version(&self) -> &str {
@@ -166,6 +186,12 @@ impl BuildInfo {
 		}
 		part_list.push(format!("({})", hash));
 		part_list.join(" ")
+	}
+}
+
+impl Default for BuildInfo {
+	fn default() -> BuildInfo {
+		BuildInfo::new()
 	}
 }
 
@@ -280,23 +306,27 @@ mod tests {
 		engine_configuration.asset_directory_paths = vec![asset_directory_path.clone()];
 		let engine = Engine::new(engine_configuration);
 
-		let mut build_info = BuildInfo::new("0.9.0");
+		let mut build_info = BuildInfo::new();
+		build_info.set_package_version("0.9.0");
 		assert_eq!(build_info.read_text(), "0.9.0");
+		assert!(!build_info.is_loaded());
 		build_info.load(&engine);
-		assert!(build_info.is_finished());
+		assert!(build_info.is_loaded());
 		assert_eq!(build_info.read_text(), "2026-11-25 04:00 (abc1234)");
 		assert_eq!(build_info.read_version_data().expect("version data")["version"], serde_json::json!("1.2.3"));
 
-		let mut missing_build_info = BuildInfo::new("0.9.0");
+		let mut missing_build_info = BuildInfo::new();
+		missing_build_info.set_package_version("0.9.0");
 		missing_build_info.set_version_json_path("missing-version.json");
 		missing_build_info.load(&engine);
-		assert!(missing_build_info.is_finished());
+		assert!(missing_build_info.is_loaded());
 		assert!(missing_build_info.read_version_data().is_none());
 		assert_eq!(missing_build_info.read_text(), "0.9.0");
 		assert_eq!(missing_build_info.get_package_version(), "0.9.0");
 
 		assert_eq!(BuildInfo::compose_text(&serde_json::json!({ "version": " 2.0.0 " })), "2.0.0");
 		assert_eq!(BuildInfo::compose_text(&serde_json::json!({ "hash": "def5678" })), "(def5678)");
+		assert_eq!(BuildInfo::default().read_text(), "");
 		let _ = std::fs::remove_dir_all(&asset_directory_path);
 	}
 }

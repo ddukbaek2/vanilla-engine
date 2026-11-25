@@ -62,7 +62,7 @@ impl LoadingShowcaseScene {
 			previous_ball_position_x: 200.0,
 			ball_velocity_x: 360.0,
 			last_alpha: 0.0,
-			build_info: BuildInfo::new(env!("CARGO_PKG_VERSION")),
+			build_info: create_build_info(),
 		}
 	}
 
@@ -259,6 +259,15 @@ impl Scene for LoadingShowcaseScene {
 		graphic.set_fill_color(Color::white());
 		graphic.draw_fill_text(&format!("FixedStepper: 1/30 초 걸음, 지난 프레임 {} 걸음, 남은 몫 {:.2}", self.fixed_stepper.get_last_step_count(), self.last_alpha), 180.0, 570.0);
 	}
+}
+
+//==============================================================================
+// 빌드 정보. (meta 도 version.json 도 없으면 이 크레이트의 판)
+//==============================================================================
+fn create_build_info() -> BuildInfo {
+	let mut build_info = BuildInfo::new();
+	build_info.set_package_version(env!("CARGO_PKG_VERSION"));
+	build_info
 }
 
 //==============================================================================
