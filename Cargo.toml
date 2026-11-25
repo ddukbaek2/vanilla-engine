@@ -28,7 +28,10 @@ self_cell = "1"
 # 글자 묶음 나누기. (UAX #29, 받침, 결합 부호, 이모지 묶음. 원본 Intl.Segmenter granularity "grapheme")
 unicode-segmentation = "1"
 # 이모지 성질. (Emoji_Presentation 같은 UTS #51 성질, 글자 묶음이 색 이모지로 그려질지 가린다. rustybuzz 가 이미 쓰는 크레이트에 emoji 기능만 켠다)
-unicode-properties = { version = "0.1", default-features = false, features = ["emoji"] }
+# 일반 범주(general-category)는 크롬 캔버스처럼 낱말마다 모양 지을 때 결합 부호와 수식 글자를 앞 글자에 붙이는 데 쓴다.
+unicode-properties = { version = "0.1", default-features = false, features = ["emoji", "general-category"] }
+# 글자의 문자(Script). (크롬 캔버스의 낱말 나누기가 한중일 기호 가운데 Common, Inherited 를 따로 끊지 않는다. rustybuzz 와 usvg 가 이미 쓰는 판)
+unicode-script = "0.5"
 # JsonAsset 이 JSON 을 푼다. (원본 JSON.parse 자리) 객체 키는 적힌 차례를 지킨다. (UIDocument 가 원본 JSON.stringify 와 같은 차례로 쓴다)
 serde_json = { version = "1", features = ["preserve_order"] }
 # FBX 압축 배열(zlib deflate)을 푼다. (원본 DecompressionStream 자리, 순수 러스트 miniz_oxide 기본 백엔드라 wasm32 에서도 돈다)
@@ -70,9 +73,9 @@ sys-locale = "0.3"
 # rustls 의 암호 공급자. (tungstenite 가 rustls 를 기본 기능 없이 쓰므로 ring 을 켜고, WebSocketClient 가 붙을 때 정한다)
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 
-# 윈도우: 잠자기에서 깸(WM_POWERBROADCAST)을 받으려 창을 서브클래싱하고, 주된 손이 손가락인지 크로미엄처럼 읽는다. (winit 과 같은 판, 쓰는 기능만 켠다)
+# 윈도우: 잠자기에서 깸(WM_POWERBROADCAST)을 받으려 창을 서브클래싱하고, 주된 손이 손가락인지 크로미엄처럼 읽는다. 크롬처럼 system-ui 의 메뉴 글꼴(NONCLIENTMETRICS)과 ClearType 켜짐을 읽는다. (winit 과 같은 판, 쓰는 기능만 켠다)
 [target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_Devices_Display", "Win32_System_Power", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_Devices_Display", "Win32_Graphics_Gdi", "Win32_System_Power", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 # 윈도우: 시스템 글꼴. (DirectWrite 로 글꼴 이름의 파일을 찾고, 글꼴에 없는 글자의 대체 글꼴을 IDWriteFontFallback 으로 고른다. 원본 크롬 윈도우도 DirectWrite 로 고른다)
 dwrote = { version = "0.11", default-features = false }
 winapi = { version = "0.3", features = ["dwrite", "winnls"] }

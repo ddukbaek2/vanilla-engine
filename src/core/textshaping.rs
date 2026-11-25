@@ -20,13 +20,24 @@
 // - 가변 글꼴(fvar 의 wght 축)은 굵기 인스턴스를 축 값으로 만든다. (create_from_shared_bytes 의 variation_list) 모양 짓기는 rustybuzz 가 축 값을 읽고,
 //   래스터는 fontdue 가 축 값을 읽지 못하고 맥 SFNS 같은 가변 글꼴의 윤곽을 그리지 못해, 가변 글꼴은 skrifa 로 축 값을 건 윤곽을 받아 colorglyph 의 넓이 누적 래스터로 그린다.
 //   (크롬도 가변 글꼴의 굵기를 축 값으로 그린다)
+// - 광학 크기(opsz 축)와 자간 표(trak): 크롬은 글꼴의 opsz 축을 글자 크기로 건다. (font-optical-sizing 의 처음 값 auto, 맥 font_platform_data_mac.mm 의
+//   FontPlatformDataFromCTFont, 모든 운영체제의 웹 글꼴 font_custom_platform_data.cc. 윈도우, 리눅스 시스템 글꼴에는 걸지 않는다)
+//   모양 짓기는 HarfBuzz 에 ptem 으로 글자 크기를 주어 AAT trak 표의 자간을 더한다. (harfbuzz_face.cc 의 GetScaledFont, 맥은 trak 이 있고 sbix 가 없는
+//   글꼴의 전진폭을 CoreText 대신 HarfBuzz 로 셈한다) 러스트 판도 굽는 크기(원본은 폰트 문자열의 px 를 굽는 배율로 키운다)로 opsz 를 걸고 trak 을 더한다.
+//   trak 은 rustybuzz 가 아니라 여기서 HarfBuzz 15 (hb-aat-layout-trak-table.hh) 처럼 더한다. 크기 사이는 반올림하지 않고 곧게 잇고, 표의 처음과 끝 밖은
+//   끝 값이며, 글자 묶음의 첫 글리프 전진폭에만 더한다. STAT 표가 없는 글꼴에는 걸지 않는다.
+//   (rustybuzz 0.20 은 글꼴 단위 정수로 반올림하고 표 밖을 늘여 잇고 x_offset 에도 반을 더하고 STAT 을 보지 않는다)
+//   맥 시스템 UI 글꼴(SFNS, opsz 17 ~ 96, 처음 28)이 16px 에서 opsz 17 과 trak -40 단위로 크롬과 같아진다. (색 이모지는 CoreText 의 전진폭 그대로 둔다)
+// - 낱말마다 모양 짓기: 크롬 캔버스(platform/fonts/plain_text_node.cc 의 SegmentWord)는 글을 낱말로 나눠 따로 모양 짓는다. 빈칸을 낀 커닝과 합자가 없다.
+//   빈칸(U+0020), 탭, ZWSP 는 하나씩, 한중일 글자와 이모지는 글자마다 따로다. (find_chrome_word_end) 캔버스의 탭, 줄바꿈, 폼 피드, 캐리지 리턴은 빈칸으로 바꾼다.
 // - 맥: 파일에서 읽은 색 이모지 글꼴(sbix)과 윤곽 표가 없는 글꼴(PingFang 의 hvgl)은 CoreText 로 그린다. (platform/desktop/coretextglyph.rs, 원본 크롬 맥도 CoreText 로 그린다)
 //   색 이모지의 전진폭은 CoreText 가 작은 크기에서 키워 그리는 비를 곱하고 정수 픽셀로 반올림한다. (16px 에서 20, 13px 에서 16, 크롬 measureText 와 같다)
 //==============================================================================
 use crate::core::colorglyph;
 use std::rc::Rc;
 use unicode_bidi::{BidiInfo, Level};
-use unicode_properties::{EmojiStatus, UnicodeEmoji};
+use unicode_properties::{EmojiStatus, GeneralCategory, UnicodeEmoji, UnicodeGeneralCategory};
+use unicode_script::{Script, UnicodeScript};
 use unicode_segmentation::UnicodeSegmentation;
 
 // 가짜 기울임의 기울기. (기준선에서 1 픽셀 올라갈 때 오른쪽으로 밀리는 픽셀, Chromium setSkewX(-1/4))
@@ -245,6 +256,12 @@ pub struct LoadedFont {
 	source_path: Option<std::path::PathBuf>,
 	// 맥 CoreText 로 그리는지. (파일 경로가 있고 색 이모지(sbix)이거나 윤곽 표(glyf, CFF, CFF2)가 없는 글꼴)
 	is_core_text_raster: bool,
+	// opsz 축의 처음과 끝. (축이 없으면 None)
+	optical_size_range: Option<(f32, f32)>,
+	// opsz 축을 글자 크기로 거는지. (크롬 font-optical-sizing auto, 윈도우와 리눅스의 시스템 글꼴은 끈다)
+	is_optical_sizing_auto: bool,
+	// trak 표의 가로 자간. (크기 목록과 자간 값(track) → 크기마다의 값(글꼴 단위), 표가 없으면 None)
+	horizontal_track_table: Option<(Vec<f32>, Vec<(f32, Vec<i16>)>)>,
 }
 
 impl LoadedFont {
@@ -273,6 +290,15 @@ impl LoadedFont {
 		let units_per_em = shaping_face.units_per_em() as f32;
 		let has_color_tables = colorglyph::has_color_tables(shaping_face);
 		let is_variable_font = shaping_face.tables().fvar.is_some();
+		let optical_size_tag = rustybuzz::ttf_parser::Tag::from_bytes(b"opsz");
+		let optical_size_range = shaping_face.variation_axes().into_iter().find(|variation_axis| variation_axis.tag == optical_size_tag).map(|variation_axis| (variation_axis.min_value, variation_axis.max_value));
+		// HarfBuzz 15 는 STAT 표가 있는 글꼴(새 글꼴)에만 trak 을 건다. (hb-ot-shape.cc 의 apply_trak, Apple Chancery 처럼 STAT 이 없으면 자간 표가 있어도 걸지 않는다)
+		let has_style_attribute_table = shaping_face.raw_face().table(rustybuzz::ttf_parser::Tag::from_bytes(b"STAT")).is_some();
+		let horizontal_track_table = shaping_face.tables().trak.filter(|_| has_style_attribute_table).map(|track_table| {
+			let size_list: Vec<f32> = track_table.horizontal.sizes.into_iter().map(|size| size.0).collect();
+			let track_list: Vec<(f32, Vec<i16>)> = track_table.horizontal.tracks.into_iter().map(|track| (track.value, track.values.into_iter().collect())).collect();
+			(size_list, track_list)
+		}).filter(|(size_list, track_list)| !size_list.is_empty() && !track_list.is_empty());
 		Ok(LoadedFont {
 			raster_font,
 			shaping_face_cell,
@@ -283,7 +309,136 @@ impl LoadedFont {
 			is_variable_font,
 			source_path: None,
 			is_core_text_raster: false,
+			optical_size_range,
+			is_optical_sizing_auto: true,
+			horizontal_track_table,
 		})
+	}
+
+	//==============================================================================
+	// trak 표의 가로 자간. (글꼴 단위, ptem 은 글자 크기 픽셀. 표나 STAT 표가 없거나 맥 색 이모지면 0. HarfBuzz 15 의 TrackData::get_tracking 에서 track 0)
+	// - 크기: 표의 크기 사이는 곧게 잇고, 처음보다 작으면 첫 값, 끝보다 크면 끝 값.
+	// - track: 0 과 같은 줄이 있으면 그 줄, 없으면 0 을 사이에 둔 두 줄을 곧게 잇는다.
+	//==============================================================================
+	pub fn read_horizontal_tracking(&self, ptem: f32) -> f32 {
+		if self.is_integer_advance() {
+			return 0.0;
+		}
+		let (size_list, track_list) = match self.horizontal_track_table.as_ref() {
+			Some(horizontal_track_table) => {
+				horizontal_track_table
+			}
+			None => {
+				return 0.0;
+			}
+		};
+		let read_track_value = |value_list: &Vec<i16>| -> f32 {
+			let read_value = |value_index: usize| -> f32 {
+				value_list.get(value_index).copied().unwrap_or(0) as f32
+			};
+			if size_list.len() == 1 {
+				return read_value(0);
+			}
+			let size_index = match size_list.iter().position(|size| *size >= ptem) {
+				Some(size_index) => {
+					size_index
+				}
+				None => {
+					return read_value(size_list.len() - 1);
+				}
+			};
+			if size_index == 0 {
+				return read_value(0);
+			}
+			if size_list[size_index] == ptem {
+				return read_value(size_index);
+			}
+			let (mut first_size, mut second_size) = (size_list[size_index - 1], size_list[size_index]);
+			let (mut first_value, mut second_value) = (read_value(size_index - 1), read_value(size_index));
+			if second_size < first_size {
+				std::mem::swap(&mut first_size, &mut second_size);
+				std::mem::swap(&mut first_value, &mut second_value);
+			}
+			if ptem < first_size {
+				return first_value;
+			}
+			if ptem > second_size {
+				return second_value;
+			}
+			if first_size == second_size {
+				return (first_value + second_value) * 0.5;
+			}
+			let interpolation = (ptem - first_size) / (second_size - first_size);
+			first_value + interpolation * (second_value - first_value)
+		};
+		if track_list.len() == 1 {
+			return read_track_value(&track_list[0].1);
+		}
+		let mut lower_index = 0;
+		let mut upper_index = track_list.len() - 1;
+		while lower_index + 1 < track_list.len() && track_list[lower_index + 1].0 <= 0.0 {
+			lower_index += 1;
+		}
+		while upper_index > 0 && track_list[upper_index - 1].0 >= 0.0 {
+			upper_index -= 1;
+		}
+		if lower_index == upper_index {
+			return read_track_value(&track_list[lower_index].1);
+		}
+		let (lower_track, upper_track) = (track_list[lower_index].0, track_list[upper_index].0);
+		let lower_value = read_track_value(&track_list[lower_index].1);
+		let upper_value = read_track_value(&track_list[upper_index].1);
+		if lower_track == upper_track {
+			return (lower_value + upper_value) * 0.5;
+		}
+		let interpolation = (0.0 - lower_track) / (upper_track - lower_track);
+		lower_value + interpolation * (upper_value - lower_value)
+	}
+
+	//==============================================================================
+	// opsz 축을 글자 크기로 걸지 정하기. (처음은 건다. 크롬은 윈도우와 리눅스의 시스템 글꼴에는 걸지 않는다)
+	//==============================================================================
+	pub fn with_optical_sizing_auto(mut self, is_optical_sizing_auto: bool) -> LoadedFont {
+		self.is_optical_sizing_auto = is_optical_sizing_auto;
+		self
+	}
+
+	//==============================================================================
+	// 글자 크기에 거는 opsz 축 값. (축이 있고 거는 글꼴이면 크기를 축 범위로 자른 값, 아니면 None)
+	//==============================================================================
+	pub fn read_optical_size(&self, pixel_size: f32) -> Option<f32> {
+		if !self.is_optical_sizing_auto {
+			return None;
+		}
+		let (minimum_value, maximum_value) = self.optical_size_range?;
+		Some(pixel_size.clamp(minimum_value, maximum_value))
+	}
+
+	//==============================================================================
+	// 글자 크기의 축 값 목록. (건 축 값에 opsz 를 더한 것)
+	//==============================================================================
+	fn read_sized_variation_list(&self, pixel_size: f32) -> Vec<rustybuzz::Variation> {
+		let mut variation_list = self.variation_list.clone();
+		if let Some(optical_size) = self.read_optical_size(pixel_size) {
+			let optical_size_tag = rustybuzz::ttf_parser::Tag::from_bytes(b"opsz");
+			variation_list.retain(|variation| variation.tag != optical_size_tag);
+			variation_list.push(rustybuzz::Variation {
+				tag: optical_size_tag,
+				value: optical_size,
+			});
+		}
+		variation_list
+	}
+
+	//==============================================================================
+	// 글자 크기의 모양 짓기 얼굴. (opsz 축을 건다. trak 자간은 shape_text 가 따로 더하므로 rustybuzz 의 ptem 은 두지 않는다)
+	//==============================================================================
+	pub fn create_sized_shaping_face(&self, pixel_size: f32) -> rustybuzz::Face<'_> {
+		let mut shaping_face = self.get_shaping_face().clone();
+		if let Some(optical_size) = self.read_optical_size(pixel_size) {
+			shaping_face.set_variation(rustybuzz::ttf_parser::Tag::from_bytes(b"opsz"), optical_size);
+		}
+		shaping_face
 	}
 
 	//==============================================================================
@@ -334,8 +489,8 @@ impl LoadedFont {
 	// 맥 CoreText 에 줄 축 값. ((4 글자 태그의 수, 값) 목록)
 	//==============================================================================
 	#[cfg(target_os = "macos")]
-	fn read_core_text_variation_list(&self) -> Vec<(u32, f32)> {
-		self.variation_list.iter().map(|variation| (variation.tag.0, variation.value)).collect()
+	fn read_core_text_variation_list(&self, pixel_size: f32) -> Vec<(u32, f32)> {
+		self.read_sized_variation_list(pixel_size).iter().map(|variation| (variation.tag.0, variation.value)).collect()
 	}
 
 	//==============================================================================
@@ -381,7 +536,7 @@ impl LoadedFont {
 		{
 			if self.is_core_text_raster {
 				if let Some(source_path) = self.source_path.as_ref() {
-					return match crate::platform::desktop::coretextglyph::read_glyph_bounds(source_path, self.face_index, glyph_index, pixel_size, &self.read_core_text_variation_list()) {
+					return match crate::platform::desktop::coretextglyph::read_glyph_bounds(source_path, self.face_index, glyph_index, pixel_size, &self.read_core_text_variation_list(pixel_size)) {
 						Some(glyph_rect) => {
 							let left_x = glyph_rect.origin.x.floor() as i32;
 							let bottom_y = glyph_rect.origin.y.floor() as i32;
@@ -398,7 +553,7 @@ impl LoadedFont {
 		}
 		if self.is_outline_raster() {
 			let scale = pixel_size / self.units_per_em;
-			return match colorglyph::read_outline_bounds(&|outline_builder| self.draw_glyph_outline(glyph_index, outline_builder), scale) {
+			return match colorglyph::read_outline_bounds(&|outline_builder| self.draw_glyph_outline(glyph_index, pixel_size, outline_builder), scale) {
 				Some((left_x, top_y, width, height)) => {
 					(left_x, top_y - height, width, height)
 				}
@@ -412,10 +567,10 @@ impl LoadedFont {
 	}
 
 	//==============================================================================
-	// 글리프 윤곽 그리기. (글꼴 단위, 축 값을 건 윤곽. 가변 글꼴은 skrifa 로, 아니면 ttf-parser 로. 윤곽이 없으면 false)
+	// 글리프 윤곽 그리기. (글꼴 단위, 그 글자 크기의 축 값(opsz 포함)을 건 윤곽. 가변 글꼴은 skrifa 로, 아니면 ttf-parser 로. 윤곽이 없으면 false)
 	// - ttf-parser 는 글리프마다 변형이 32 개를 넘는 가변 글꼴(맥 SFNS 같은)의 윤곽을 읽지 못한다.
 	//==============================================================================
-	pub fn draw_glyph_outline(&self, glyph_index: u16, outline_builder: &mut dyn rustybuzz::ttf_parser::OutlineBuilder) -> bool {
+	pub fn draw_glyph_outline(&self, glyph_index: u16, pixel_size: f32, outline_builder: &mut dyn rustybuzz::ttf_parser::OutlineBuilder) -> bool {
 		if !self.is_variable_font {
 			return self.get_shaping_face().outline_glyph(rustybuzz::ttf_parser::GlyphId(glyph_index), outline_builder).is_some();
 		}
@@ -428,7 +583,7 @@ impl LoadedFont {
 				return false;
 			}
 		};
-		let location = font_ref.axes().location(self.variation_list.iter().map(|variation| (skrifa::Tag::new(&variation.tag.to_bytes()), variation.value)));
+		let location = font_ref.axes().location(self.read_sized_variation_list(pixel_size).iter().map(|variation| (skrifa::Tag::new(&variation.tag.to_bytes()), variation.value)));
 		let outline_glyph_collection = font_ref.outline_glyphs();
 		let outline_glyph = match outline_glyph_collection.get(skrifa::GlyphId::new(glyph_index as u32)) {
 			Some(outline_glyph) => {
@@ -778,6 +933,116 @@ fn select_face_index(face_list: &[ResolvedFontFace], grapheme: &str) -> Option<u
 	None
 }
 
+// 크롬 IsCjkIdeographOrSymbol 의 범위. (platform/text/character_property_data.h 의 kIsCjkIdeographOrSymbolRanges, 처음과 끝)
+const CJK_IDEOGRAPH_OR_SYMBOL_RANGE_LIST: [(u32, u32); 67] = [
+	(0x2E80, 0x2FDF), (0x31C0, 0x31EF), (0x3400, 0x4DBF), (0x4E00, 0x9FFF), (0xF900, 0xFAFF), (0x20000, 0x2FFFF),
+	(0x2156, 0x215A), (0x2160, 0x216B), (0x2170, 0x217B), (0x23BE, 0x23CC), (0x2460, 0x2492), (0x249C, 0x24FF), (0x25CE, 0x25D3), (0x25E2, 0x25E6),
+	(0x2600, 0x2603), (0x2660, 0x266F), (0x2672, 0x267D), (0x2776, 0x277F), (0x2FF0, 0x302D), (0x3031, 0x312F), (0x3190, 0x31BF), (0x3200, 0x33FF),
+	(0x4DC0, 0x4DFF), (0xF860, 0xF862), (0xFE30, 0xFE6F), (0xFF00, 0xFF0C), (0xFF0E, 0xFF1A), (0xFF1F, 0xFFEF), (0x16FE0, 0x16FFF), (0x17000, 0x187FF),
+	(0x18800, 0x18AFF), (0x1B000, 0x1B0FF), (0x1B100, 0x1B12F), (0x1B170, 0x1B2FF),
+	(0x1F110, 0x1F129), (0x1F130, 0x1F149), (0x1F150, 0x1F169), (0x1F170, 0x1F189), (0x1F202, 0x1F219), (0x1F21B, 0x1F22E), (0x1F230, 0x1F231), (0x1F23B, 0x1F24F),
+	(0x1F252, 0x1F2FF), (0x1F321, 0x1F32A), (0x1F394, 0x1F39F), (0x1F3CD, 0x1F3CE), (0x1F3D4, 0x1F3DF), (0x1F3F1, 0x1F3F2), (0x1F3F5, 0x1F3F7), (0x1F4FD, 0x1F4FE),
+	(0x1F53E, 0x1F54A), (0x1F568, 0x1F573), (0x1F576, 0x1F579), (0x1F57B, 0x1F58F), (0x1F591, 0x1F594), (0x1F597, 0x1F5A3), (0x1F5A5, 0x1F5E7), (0x1F5E9, 0x1F5FA),
+	(0x1F650, 0x1F67F), (0x1F6C6, 0x1F6CB), (0x1F6CD, 0x1F6CF), (0x1F6D3, 0x1F6D4), (0x1F6D9, 0x1F6DB), (0x1F6E0, 0x1F6EA), (0x1F6ED, 0x1F6F3), (0x1F6FD, 0x1F6FF),
+	(0x1F900, 0x1F90B),
+];
+// 크롬 IsCjkIdeographOrSymbol 의 낱글자. (kIsCjkIdeographOrSymbolArray 와 범위 (0x1FAC9, 0x1FACC))
+const CJK_IDEOGRAPH_OR_SYMBOL_LIST: [u32; 85] = [
+	0x2C7, 0x2CA, 0x2CB, 0x2D9, 0x2020, 0x2021, 0x2030, 0x203B, 0x203C, 0x2042, 0x2047, 0x2048, 0x2049, 0x2051, 0x20DD, 0x20DE, 0x2100, 0x2103, 0x2105, 0x2109,
+	0x210A, 0x2113, 0x2116, 0x2121, 0x212B, 0x213B, 0x2150, 0x2151, 0x2152, 0x217F, 0x2189, 0x2307, 0x2312, 0x23CE, 0x2423, 0x25A0, 0x25A1, 0x25A2, 0x25AA, 0x25AB,
+	0x25B1, 0x25B2, 0x25B3, 0x25B6, 0x25B7, 0x25BC, 0x25BD, 0x25C0, 0x25C1, 0x25C6, 0x25C7, 0x25C9, 0x25CB, 0x25CC, 0x25EF, 0x2605, 0x2606, 0x260E, 0x2616, 0x2617,
+	0x26A0, 0x2713, 0x271A, 0x273F, 0x2740, 0x2756, 0x2763, 0x2B1A, 0xFE10, 0xFE11, 0xFE12, 0xFE19, 0xFF1D, 0x1F100, 0x1F200, 0x1F237, 0x1F32C, 0x1F336, 0x1F37D, 0x1F43F,
+	0x1F54F, 0x1F93B, 0x1F946, 0x1FAC9, 0x1FACA,
+];
+// 이모지 ZWJ 묶음에 드는 글 표시 그림 문자. (크롬은 RGI 이모지 ZWJ, 수식 묶음의 Extended_Pictographic 을 한중일 기호로 본다. Emoji_Presentation 과 Emoji_Modifier_Base 밖의 것)
+const EMOJI_SEQUENCE_PICTOGRAPH_LIST: [u32; 15] = [0x2620, 0x2640, 0x2642, 0x2695, 0x2696, 0x26A7, 0x2708, 0x2744, 0x2764, 0x27A1, 0x1F32B, 0x1F3F3, 0x1F441, 0x1F5E8, 0x1FACB];
+
+//==============================================================================
+// 한중일 글자나 기호인지. (크롬 unicode::IsCjkIdeographOrSymbol: 위 표, Emoji_Presentation 글자, 이모지 묶음에 드는 그림 문자)
+// - 크롬은 RGI 이모지 묶음에서 그림 문자를 뽑는다. 여기서는 Emoji_Modifier_Base 와 ZWJ 묶음의 글 표시 그림 문자 표로 갈음한다. (짐작에 가까운 몫이다)
+//==============================================================================
+fn is_cjk_ideograph_or_symbol(character: char) -> bool {
+	let code_point = character as u32;
+	if code_point < 0x2C7 {
+		return false;
+	}
+	if CJK_IDEOGRAPH_OR_SYMBOL_RANGE_LIST.iter().any(|(first, last)| (*first..=*last).contains(&code_point)) || CJK_IDEOGRAPH_OR_SYMBOL_LIST.contains(&code_point) || code_point == 0x1FACB || code_point == 0x1FACC {
+		return true;
+	}
+	let is_emoji_listed = matches!(character.emoji_status(), EmojiStatus::EmojiPresentation | EmojiStatus::EmojiPresentationAndModifierBase | EmojiStatus::EmojiPresentationAndEmojiComponent | EmojiStatus::EmojiPresentationAndModifierAndEmojiComponent | EmojiStatus::EmojiModifierBase);
+	is_emoji_listed || EMOJI_SEQUENCE_PICTOGRAPH_LIST.contains(&code_point)
+}
+
+//==============================================================================
+// 결합 부호, 수식 글자, 수식 기호인지. (일반 범주 M, Lm, Sk)
+//==============================================================================
+fn is_mark_or_modifier(character: char) -> bool {
+	matches!(character.general_category(), GeneralCategory::NonspacingMark | GeneralCategory::SpacingMark | GeneralCategory::EnclosingMark | GeneralCategory::ModifierLetter | GeneralCategory::ModifierSymbol)
+}
+
+//==============================================================================
+// 크롬 캔버스의 낱말 끝. (platform/fonts/plain_text_node.cc 의 NextWordEndIndex. text 의 바이트 자리 start 에서 시작하는 낱말의 끝 바이트 자리)
+// - 빈칸(U+0020), 탭, ZWSP 는 하나씩 따로 낱말이다. is_latin1 (크롬의 8 비트 글, 모든 글자가 U+00FF 이하)이면 빈칸과 탭에서만 끊는다.
+// - 그 밖: 한중일 글자나 기호가 아닌 글자로 시작하면 빈칸이나 한중일 글자(결합 부호 따위가 아닌 것) 앞에서 끊는다.
+//   한중일이나 이모지로 시작하면 글자마다 끊되 결합 부호, 수식 글자, ZWJ, 이모지 성분, 그림 문자는 붙이고, 문자가 Common, Inherited 인 한중일 기호와
+//   첫 글자가 Common 일 때 다음 한 글자도 붙인다.
+//==============================================================================
+pub fn find_chrome_word_end(text: &str, start: usize, is_latin1: bool) -> usize {
+	let is_word_delimiter = |character: char, is_zero_width_space_delimiter: bool| -> bool {
+		character == ' ' || character == '\t' || (is_zero_width_space_delimiter && character == '\u{200B}')
+	};
+	let mut character_iterator = text[start..].char_indices().map(|(byte_index, character)| (start + byte_index, character));
+	let (_, first_character) = match character_iterator.next() {
+		Some(first_entry) => {
+			first_entry
+		}
+		None => {
+			return start;
+		}
+	};
+	let first_end = start + first_character.len_utf8();
+	if first_end == text.len() || is_word_delimiter(first_character, true) {
+		return first_end;
+	}
+	if is_latin1 {
+		for (byte_index, character) in character_iterator {
+			if is_word_delimiter(character, false) {
+				return byte_index;
+			}
+		}
+		return text.len();
+	}
+	if !is_cjk_ideograph_or_symbol(first_character) {
+		for (byte_index, character) in character_iterator {
+			if is_word_delimiter(character, true) || (is_cjk_ideograph_or_symbol(character) && !is_mark_or_modifier(character)) {
+				return byte_index;
+			}
+		}
+		return text.len();
+	}
+	let is_common_or_inherited = |character: char| -> bool {
+		matches!(character.script(), Script::Common | Script::Inherited)
+	};
+	let mut has_any_script = !is_common_or_inherited(first_character);
+	for (byte_index, character) in character_iterator {
+		let is_attached = is_mark_or_modifier(character) || character == '\u{200D}' || character.is_emoji_component() || (character.is_emoji_char() && !character.is_ascii());
+		if is_attached {
+			continue;
+		}
+		if is_cjk_ideograph_or_symbol(character) {
+			if is_common_or_inherited(character) {
+				continue;
+			}
+			if !has_any_script {
+				has_any_script = true;
+				continue;
+			}
+		}
+		return byte_index;
+	}
+	text.len()
+}
+
 //==============================================================================
 // 글 모양 짓기. (양방향 정렬 → 얼굴마다 나눈 조각을 rustybuzz 로 모양 짓기 → 왼쪽부터 놓기)
 // - direction 은 문단의 방향이다. (원본 canvas.direction) 문단 안의 글자 순서는 양방향 알고리즘이 정한다.
@@ -836,6 +1101,16 @@ pub fn shape_text(face_list: &[ResolvedFontFace], text: &str, pixel_size: f32, d
 		}
 	};
 
+	// 캔버스의 빈칸 글자(탭, 줄바꿈, 세로 탭, 폼 피드, 캐리지 리턴)는 빈칸으로 바꿔 모양 짓는다. (크롬 IsNormalizedCanvasSpaceCharacter, 바이트 길이는 같다)
+	let shaping_text: String = text.chars().map(|character| {
+		if matches!(character, '\t' | '\n' | '\u{0B}' | '\u{0C}' | '\r') {
+			' '
+		}
+		else {
+			character
+		}
+	}).collect();
+	let is_latin1 = shaping_text.chars().all(|character| (character as u32) <= 0xFF);
 	let bidi_info = BidiInfo::new(text, Some(paragraph_level));
 	let mut pen_x: f32 = 0.0;
 	for paragraph in &bidi_info.paragraphs {
@@ -843,14 +1118,26 @@ pub fn shape_text(face_list: &[ResolvedFontFace], text: &str, pixel_size: f32, d
 		for run in run_list {
 			let level = level_list[run.start];
 			let is_right_to_left_run = level.is_rtl();
-			// 얼굴이 같은 글자 묶음끼리 조각으로 나눈다. (논리 차례)
+			// 크롬처럼 낱말의 시작 자리. (조각을 낱말마다 따로 모양 짓는다)
+			let mut word_start_list: Vec<usize> = Vec::new();
+			let mut word_start = run.start;
+			while word_start < run.end {
+				word_start_list.push(word_start);
+				let word_end = run.start + find_chrome_word_end(&shaping_text[run.start..run.end], word_start - run.start, is_latin1);
+				if word_end <= word_start {
+					break;
+				}
+				word_start = word_end;
+			}
+			// 얼굴이 같은 글자 묶음끼리, 낱말마다 조각으로 나눈다. (논리 차례)
 			let mut piece_list: Vec<(usize, usize, usize)> = Vec::new();
 			for (start_index, face_index) in grapheme_face_list.iter().copied() {
 				if start_index < run.start || start_index >= run.end {
 					continue;
 				}
+				let is_word_start = word_start_list.binary_search(&start_index).is_ok();
 				match piece_list.last_mut() {
-					Some(last_piece) if last_piece.2 == face_index => {}
+					Some(last_piece) if last_piece.2 == face_index && !is_word_start => {}
 					_ => {
 						piece_list.push((start_index, run.end, face_index));
 					}
@@ -897,7 +1184,7 @@ pub fn shape_text(face_list: &[ResolvedFontFace], text: &str, pixel_size: f32, d
 				}
 				let face = &face_list[face_index];
 				let mut unicode_buffer = rustybuzz::UnicodeBuffer::new();
-				unicode_buffer.push_str(&text[piece_start..piece_end]);
+				unicode_buffer.push_str(&shaping_text[piece_start..piece_end]);
 				unicode_buffer.set_direction(if is_right_to_left_run {
 					rustybuzz::Direction::RightToLeft
 				}
@@ -905,9 +1192,13 @@ pub fn shape_text(face_list: &[ResolvedFontFace], text: &str, pixel_size: f32, d
 					rustybuzz::Direction::LeftToRight
 				});
 				unicode_buffer.guess_segment_properties();
-				let glyph_buffer = rustybuzz::shape(face.font.get_shaping_face(), &[], unicode_buffer);
+				let sized_shaping_face = face.font.create_sized_shaping_face(pixel_size);
+				let glyph_buffer = rustybuzz::shape(&sized_shaping_face, &[], unicode_buffer);
 				let scale = pixel_size / face.font.units_per_em * face.font.read_advance_scale(pixel_size);
 				let is_integer_advance = face.font.is_integer_advance();
+				// trak 자간. (글자 묶음의 첫 글리프에 더한다, HarfBuzz 의 foreach_grapheme 자리를 묶음 번호(cluster)가 바뀌는 글리프로 본다)
+				let tracking = face.font.read_horizontal_tracking(pixel_size) * scale;
+				let mut previous_cluster: Option<u32> = None;
 				for (glyph_info, glyph_position) in glyph_buffer.glyph_infos().iter().zip(glyph_buffer.glyph_positions().iter()) {
 					shaped_text.glyph_list.push(ShapedGlyph {
 						face_index,
@@ -919,12 +1210,16 @@ pub fn shape_text(face_list: &[ResolvedFontFace], text: &str, pixel_size: f32, d
 						is_right_to_left: is_right_to_left_run,
 					});
 					// 맥 색 이모지는 정수 픽셀로 반올림한다. (곱셈 오차로 0.5 가 조금 모자라 내려가지 않게 작은 값을 더한다)
-					let advance = if is_integer_advance {
+					let mut advance = if is_integer_advance {
 						(glyph_position.x_advance as f32 * scale + 0.001).round()
 					}
 					else {
 						glyph_position.x_advance as f32 * scale
 					};
+					if previous_cluster != Some(glyph_info.cluster) {
+						advance += tracking;
+						previous_cluster = Some(glyph_info.cluster);
+					}
 					pen_x += advance;
 				}
 			}
@@ -993,7 +1288,7 @@ pub fn rasterize_glyph(face: &ResolvedFontFace, glyph_index: u16, pixel_size: f3
 	let mut glyph_raster = if face.font.is_outline_raster() {
 		// 가변 글꼴: 축 값을 건 윤곽으로. (fontdue 는 기본 인스턴스만 그리고 SFNS 같은 글꼴은 그리지 못한다)
 		let scale = pixel_size / face.font.units_per_em;
-		match colorglyph::rasterize_outline(&|outline_builder| face.font.draw_glyph_outline(glyph_index, outline_builder), scale) {
+		match colorglyph::rasterize_outline(&|outline_builder| face.font.draw_glyph_outline(glyph_index, pixel_size, outline_builder), scale) {
 			Some((coverage, width, height, left_x, top_y)) => {
 				GlyphRaster {
 					coverage,
@@ -1064,7 +1359,7 @@ fn rasterize_core_text_glyph(face: &ResolvedFontFace, glyph_index: u16, pixel_si
 	}
 	let source_path = face.font.source_path.as_ref()?;
 	let is_color_glyph = face.font.has_color_tables && colorglyph::has_color_glyph(face.font.get_shaping_face(), glyph_index);
-	let core_text_raster = match crate::platform::desktop::coretextglyph::rasterize_glyph(source_path, face.font.face_index, glyph_index, pixel_size, &face.font.read_core_text_variation_list()) {
+	let core_text_raster = match crate::platform::desktop::coretextglyph::rasterize_glyph(source_path, face.font.face_index, glyph_index, pixel_size, &face.font.read_core_text_variation_list(pixel_size)) {
 		Some(core_text_raster) => {
 			core_text_raster
 		}

@@ -463,6 +463,8 @@ impl DesktopApplication {
 		// 캔버스 비 상한이 있으면 원본처럼 캔버스를 줄여 창 가운데에 둔다. (논리 좌표, 내림)
 		let client_width = physical_size.width as f32 / scale_factor;
 		let client_height = physical_size.height as f32 / scale_factor;
+		// 폰트 문자열의 뷰포트 단위(vw, vh)는 원본 window.innerWidth / innerHeight 처럼 창의 논리 크기에 댄다.
+		crate::core::textstringtexturecache::set_font_viewport_size(client_width, client_height);
 		let max_canvas_aspect_ratio = self.engine_runner.engine.get_engine_configuration().max_canvas_aspect_ratio;
 		let (canvas_left, canvas_top, canvas_width, canvas_height) = if max_canvas_aspect_ratio > 0.0 {
 			let canvas_width = client_width.min(client_height * max_canvas_aspect_ratio).floor();

@@ -368,6 +368,43 @@ pub fn measure_text(font_description: &FontDescription, text: &str) -> TextMetri
 	measured.unwrap_or_default()
 }
 
+thread_local! {
+	// 브라우저로 푼 글자 크기. (폰트 문자열과 창 크기 → px, 틀린 문자열이면 None)
+	static RESOLVED_FONT_SIZE_TABLE: RefCell<std::collections::HashMap<String, Option<f32>>> = RefCell::new(std::collections::HashMap::new());
+}
+
+// 틀린 문자열을 가리려고 먼저 넣어 두는 폰트. (브라우저는 틀린 font 를 받지 않고 앞의 값을 둔다)
+const FONT_SIZE_SENTINEL: &str = "7.25px vanilla-font-size-sentinel";
+
+//==============================================================================
+// 폰트 문자열의 글자 크기를 브라우저로 풀기. (px, 틀린 문자열이면 None)
+// - 원본은 글꼴에 대는 단위(ex, ch, cap, ic, lh, rem 같은), 뷰포트 단위, calc() 를 브라우저 캔버스의 font 가 셈한다.
+//   원본처럼 문서에 붙이지 않은 캔버스의 font 에 넣고 다시 읽어 같은 값을 받는다. 한 번 푼 문자열은 창 크기와 함께 기억한다.
+//==============================================================================
+pub fn resolve_font_size(font_string: &str) -> Option<f32> {
+	let window = web_sys::window()?;
+	let viewport_width = window.inner_width().ok().and_then(|value| value.as_f64()).unwrap_or(0.0);
+	let viewport_height = window.inner_height().ok().and_then(|value| value.as_f64()).unwrap_or(0.0);
+	let cache_key = format!("{}|{}x{}", font_string, viewport_width, viewport_height);
+	if let Some(font_size) = RESOLVED_FONT_SIZE_TABLE.with(|table_cell| table_cell.borrow().get(&cache_key).copied()) {
+		return font_size;
+	}
+	let font_size = with_canvas(|system_font_canvas| {
+		system_font_canvas.context.set_font(FONT_SIZE_SENTINEL);
+		system_font_canvas.context.set_font(font_string);
+		let serialized_font = system_font_canvas.context.font();
+		if serialized_font == FONT_SIZE_SENTINEL {
+			return Some(None);
+		}
+		let font_size = serialized_font.split_whitespace().find_map(|token| token.strip_suffix("px").and_then(|number_text| number_text.parse::<f32>().ok()));
+		Some(font_size)
+	}).flatten();
+	RESOLVED_FONT_SIZE_TABLE.with(|table_cell| {
+		table_cell.borrow_mut().insert(cache_key, font_size);
+	});
+	font_size
+}
+
 //==============================================================================
 // 문자열 굽기. (원본 bake_entry. 크기와 펜 자리 계산이 원본과 같다, direction 은 캔버스의 direction)
 //==============================================================================

@@ -8,10 +8,11 @@
 //   색 글리프(이모지)는 제 색으로 흰 글자 위에 얹어 굽는다. 원본도 흰색으로 fillText 한 캔버스를 올리므로 이모지는 제 색으로 구워지고 그릴 때 같은 색이 곱해진다.
 //   외곽선(Stroke)으로 구울 때도 색 글리프는 테를 긋지 않고 색 그대로 얹는다. (크롬 strokeText 와 같다)
 // - 폰트 문자열은 Canvas2D font 와 같은 꼴(CSS font 줄임 꼴)을 읽는다. 예: "16px DOSGothic", "bold 24px default", "italic 500 16px default", "12pt 'A B', C, sans-serif"
-//   크기는 px 밖의 CSS 단위와 이름 크기도 읽고 "/줄높이"는 넘긴다. 쉼표로 이은 이름 목록은 글자마다 앞 이름의 얼굴부터 찾는다. (브라우저의 글꼴 목록과 같다, parse_font_string)
+//   크기는 px 밖의 CSS 단위(ex, ch, cap, ic, lh, rem, 뷰포트 단위 포함), 이름 크기, calc() 도 크롬 캔버스처럼 읽고 "/줄높이"는 넘긴다.
+//   쉼표로 이은 이름 목록은 글자마다 앞 이름의 얼굴부터 찾는다. (브라우저의 글꼴 목록과 같다, parse_font_string)
 // - 글꼴은 원본 document.fonts 처럼 이름 하나 아래에 얼굴(굵기, 기울기, 글자 범위)을 여럿 올린다. (register_font_face)
 //   고르기는 CSS 의 차례를 따르고, 기울인 얼굴이 없으면 가짜 기울임(기울기 1/4), 굵은 얼굴이 없으면 가짜 굵게를 글리프마다 입힌다. (textshaping.rs)
-// - 이름의 얼굴들에 없는 글자는 기본 폰트, 시스템 글꼴 사슬, 대체 폰트 순으로 찾는다. (브라우저의 글꼴 대체와 같은 자리)
+// - 이름의 얼굴들에 없는 글자는 기본 폰트, 시스템 글꼴 사슬, 표준 글꼴(데스크탑, 크롬의 -webkit-standard), 대체 폰트 순으로 찾는다. (브라우저의 글꼴 대체와 같은 자리)
 //   데스크탑 시스템 글꼴 사슬(set_system_font_chain)은 원본 SYSTEM_FONT_STRING 의 이름을 운영체제 글꼴에서 찾은 것이고, 켜면 폰트 문자열의 올리지 않은 이름도
 //   운영체제 글꼴에서 찾는다. 얼굴은 그 굵기와 기울기의 글자를 처음 쓸 때 읽는다. (platform/desktop/systemfont.rs)
 //   대체 글꼴은 운영체제가 고른다. (set_system_font_fallback_enabled, 굵게를 청하면 굵은 얼굴을 따로 묻는다) 후보 파일을 주면(add_fallback_font_candidate) 그것을 먼저 쓴다.
@@ -746,6 +747,22 @@ impl TextStringTextureCache {
 				}
 			}
 		}
+		// 맥 시스템 UI 글꼴은 청한 굵기를 그대로 wght 축 값으로 건 인스턴스를 따로 읽는다. (크롬 font_matcher_mac.mm 의 MatchSystemUIFont, 400 과 700 후보만으로는 300 이 400 으로 그려진다)
+		if cfg!(target_os = "macos") && matches!(family_key, "system-ui" | "blinkmacsystemfont") {
+			if let Some(candidate_index) = best_candidate_index {
+				let candidate = &system_font_family.candidate_list[candidate_index];
+				let weight_axis_range = system_font_family.face_list.iter().find(|face| face.descriptors.is_italic == candidate.is_italic).and_then(|face| textshaping::read_weight_axis_range(face.font.get_font_bytes(), face.font.get_face_index()));
+				if let Some((minimum_weight, maximum_weight)) = weight_axis_range {
+					let instance_weight = desired_weight.clamp(minimum_weight, maximum_weight);
+					let has_instance = system_font_family.face_list.iter().any(|face| face.descriptors.is_italic == candidate.is_italic && face.descriptors.minimum_weight == instance_weight);
+					if !has_instance {
+						if let Ok(registered_font_face) = load_system_font_face(&mut state.shared_bytes_table, &candidate.source, instance_weight, candidate.is_italic) {
+							system_font_family.face_list.push(registered_font_face);
+						}
+					}
+				}
+			}
+		}
 		if system_font_family.face_list.is_empty() {
 			return false;
 		}
@@ -1345,7 +1362,7 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	// 폰트 문자열에 맞는 얼굴 목록. (이름 목록의 차례로 이름마다 그 얼굴들, 기본 폰트, 대체 폰트 차례. 글자마다 앞에서부터 찾는다, 올리지 않은 이름은 넘긴다)
+	// 폰트 문자열에 맞는 얼굴 목록. (이름 목록의 차례로 이름마다 그 얼굴들, 기본 폰트, 시스템 글꼴 사슬, 표준 글꼴, 대체 폰트 차례. 글자마다 앞에서부터 찾는다, 올리지 않은 이름은 넘긴다)
 	//==============================================================================
 	fn resolve_face_list(&self, font_description: &FontDescription) -> Vec<ResolvedFontFace> {
 		let mut face_list: Vec<ResolvedFontFace> = Vec::new();
@@ -1372,6 +1389,19 @@ impl TextStringTextureCache {
 			}
 			if self.append_system_family_faces(&family_key, font_description.font_weight, font_description.is_italic, &mut face_list) {
 				used_system_family_list.push(family_key);
+			}
+		}
+		// 표준 글꼴. (크롬 FontFallbackList 는 이름 목록이 다 떨어지면 화면 언어의 표준 글꼴(-webkit-standard)을 쓴다. 데스크탑, 이름 찾기를 켰을 때)
+		#[cfg(not(target_arch = "wasm32"))]
+		{
+			let is_lookup_enabled = self.system_font_state.borrow().is_lookup_enabled;
+			if is_lookup_enabled {
+				if let Some(standard_family_name) = crate::platform::desktop::systemfont::resolve_generic_family_name(crate::platform::desktop::systemfont::GenericFamily::Standard) {
+					let standard_family_key = standard_family_name.to_lowercase();
+					if !used_system_family_list.contains(&standard_family_key) && self.append_system_family_faces(&standard_family_key, font_description.font_weight, font_description.is_italic, &mut face_list) {
+						used_system_family_list.push(standard_family_key);
+					}
+				}
 			}
 		}
 		for fallback_face in self.fallback_face_list.borrow().iter() {
@@ -1432,12 +1462,35 @@ impl TextStringTextureCache {
 	fn resolve_covering_face_list(&self, text: &str, font_description: &FontDescription) -> Vec<ResolvedFontFace> {
 		self.note_unresolved_family_characters(text, font_description);
 		self.ensure_fallback_coverage(text);
-		let face_list = self.resolve_face_list(font_description);
-		if !self.system_font_state.borrow().is_fallback_enabled {
-			return face_list;
+		let mut face_list = self.resolve_face_list(font_description);
+		if self.system_font_state.borrow().is_fallback_enabled {
+			self.ensure_system_fallback_coverage(text, font_description, &face_list);
+			face_list = self.resolve_face_list(font_description);
 		}
-		self.ensure_system_fallback_coverage(text, font_description, &face_list);
-		self.resolve_face_list(font_description)
+		self.append_last_resort_faces(font_description, &mut face_list);
+		face_list
+	}
+
+	//==============================================================================
+	// 마지막 대체 글꼴의 얼굴을 맨 뒤에 더하기. (데스크탑, 이름 찾기를 켰을 때. 운영체제 대체 글꼴을 물은 뒤라 그 물음에는 끼지 않는다)
+	// - 크롬 FontFallbackIterator 는 시스템 대체로도 다 그리지 못한 글자 묶음을 GetLastResortFallbackFont(맥 Times)로 그린다.
+	//   기본 글꼴에 결합 부호가 없는 "é"(e + U+0301) 가 맥 크롬에서 Times 로 그려지는 자리다.
+	//==============================================================================
+	fn append_last_resort_faces(&self, font_description: &FontDescription, face_list: &mut Vec<ResolvedFontFace>) {
+		#[cfg(not(target_arch = "wasm32"))]
+		{
+			if !self.system_font_state.borrow().is_lookup_enabled {
+				return;
+			}
+			if let Some(last_resort_family_name) = crate::platform::desktop::systemfont::read_last_resort_family_name() {
+				let family_key = last_resort_family_name.to_lowercase();
+				self.append_system_family_faces(&family_key, font_description.font_weight, font_description.is_italic, face_list);
+			}
+		}
+		#[cfg(target_arch = "wasm32")]
+		{
+			let _ = (font_description, face_list);
+		}
 	}
 
 	//==============================================================================
@@ -1913,6 +1966,7 @@ fn read_fallback_source_key(source: &FontFileSource) -> String {
 // 시스템 글꼴 파일의 얼굴 하나 읽기. (같은 파일의 바이트는 나눠 든다)
 // - 얼굴 번호: 준 번호, 없으면 PostScript 이름이 같은 얼굴, 그것도 없으면 청한 굵기와 기울기로 고른 얼굴.
 // - 서술자: 가변 글꼴(wght 축)이면 청한 굵기를 축 범위로 자른 값의 인스턴스, 아니면 그 얼굴의 OS/2 굵기와 기울임 표시.
+// - opsz 축은 맥에서만 글자 크기로 건다. (크롬 font_platform_data_mac.mm, 윈도우와 리눅스의 font_cache_skia 는 시스템 글꼴의 축을 바꾸지 않는다)
 //==============================================================================
 fn load_system_font_face(shared_bytes_table: &mut HashMap<std::path::PathBuf, std::rc::Weak<[u8]>>, source: &FontFileSource, weight: u16, is_italic: bool) -> Result<RegisteredFontFace, String> {
 	let font_bytes: Rc<[u8]> = match shared_bytes_table.get(&source.path).and_then(|weak_bytes| weak_bytes.upgrade()) {
@@ -1930,12 +1984,7 @@ fn load_system_font_face(shared_bytes_table: &mut HashMap<std::path::PathBuf, st
 			face_index
 		}
 		None => {
-			let face_count = rustybuzz::ttf_parser::fonts_in_collection(&font_bytes).unwrap_or(1);
-			let post_script_index = source.post_script_name.as_ref().and_then(|post_script_name| {
-				(0..face_count).find(|face_index| {
-					rustybuzz::ttf_parser::Face::parse(&font_bytes, *face_index).map(|face| face.names().into_iter().any(|name| name.name_id == rustybuzz::ttf_parser::name_id::POST_SCRIPT_NAME && name.to_string().as_deref() == Some(post_script_name.as_str()))).unwrap_or(false)
-				})
-			});
+			let post_script_index = source.post_script_name.as_ref().and_then(|post_script_name| find_post_script_face_index(&font_bytes, post_script_name));
 			post_script_index.unwrap_or_else(|| textshaping::find_collection_face_index(&font_bytes, weight, is_italic))
 		}
 	};
@@ -1949,7 +1998,8 @@ fn load_system_font_face(shared_bytes_table: &mut HashMap<std::path::PathBuf, st
 			Vec::new()
 		}
 	};
-	let font = LoadedFont::create_from_shared_bytes(font_bytes, face_index, &variation_list)?.with_source_path(source.path.clone());
+	// 크롬은 맥의 시스템 글꼴에만 opsz 축을 글자 크기로 건다. (윈도우, 리눅스 시스템 글꼴은 축 값을 바꾸지 않는다)
+	let font = LoadedFont::create_from_shared_bytes(font_bytes, face_index, &variation_list)?.with_source_path(source.path.clone()).with_optical_sizing_auto(cfg!(target_os = "macos"));
 	if variation_list.is_empty() && textshaping::read_weight_axis_range(font.get_font_bytes(), face_index).is_none() {
 		let shaping_face = font.get_shaping_face();
 		font_face_descriptors.set_weight(shaping_face.weight().to_number());
@@ -1963,11 +2013,40 @@ fn load_system_font_face(shared_bytes_table: &mut HashMap<std::path::PathBuf, st
 }
 
 //==============================================================================
+// 글꼴 모음에서 PostScript 이름이 같은 얼굴 번호. (없으면 None)
+// - 이름 표의 유니코드, 윈도우 기록과 맥 기록을 본다. 맥 기록(Mac Roman)은 ttf-parser 가 풀지 않아 바이트를 그대로 글자로 읽는다. (PostScript 이름은 ASCII 다)
+//   맥 Papyrus.ttc 처럼 맥 기록만 있는 모음에서 Condensed 얼굴로 잘못 고르지 않는다.
+//==============================================================================
+fn find_post_script_face_index(font_bytes: &[u8], post_script_name: &str) -> Option<u32> {
+	let face_count = rustybuzz::ttf_parser::fonts_in_collection(font_bytes).unwrap_or(1);
+	(0..face_count).find(|face_index| {
+		rustybuzz::ttf_parser::Face::parse(font_bytes, *face_index).map(|face| {
+			face.names().into_iter().any(|name| {
+				if name.name_id != rustybuzz::ttf_parser::name_id::POST_SCRIPT_NAME {
+					return false;
+				}
+				let name_text = name.to_string().or_else(|| {
+					if name.platform_id == rustybuzz::ttf_parser::PlatformId::Macintosh {
+						Some(name.name.iter().map(|byte| *byte as char).collect())
+					}
+					else {
+						None
+					}
+				});
+				name_text.as_deref() == Some(post_script_name)
+			})
+		}).unwrap_or(false)
+	})
+}
+
+//==============================================================================
 // 폰트 문자열 해석. (Canvas2D font 의 CSS font 줄임 꼴, "bold 16px DOSGothic" → 크기 16, 굵기 700, 이름 DOSGothic)
 // - 크기 앞의 낱말: normal, italic / oblique(뒤의 각도는 넘긴다)는 기울임, small-caps, 늘이기 낱말(condensed 등)은 넘긴다.
 //   bold / bolder 는 700, lighter 는 100, 숫자는 굵기(1 ~ 1000). 그 밖의 낱말이 오면 틀린 문자열이다.
-// - 크기: px, pt, pc, in, cm, mm, q 와 em, rem, %, larger, smaller, 이름 크기(xx-small ~ xxx-large). 뒤의 "/줄높이"는 읽고 넘긴다. (캔버스는 줄높이를 쓰지 않는다)
-//   em, rem, %, larger, smaller 는 10px 에 대어 셈한다. (원본이 글을 굽고 재는 캔버스는 문서에 붙이지 않아 브라우저가 기본 글꼴 10px 에 댄다, 크롬으로 확인)
+// - 크기: 절대 길이(px, pt, pc, in, cm, mm, q), 글꼴에 대는 길이(em, ex, ch, cap, ic, lh, rem, rex, rch, rcap, ric, rlh), %, 뷰포트 단위, 이름 크기, larger, smaller,
+//   calc() 같은 CSS 수학 함수. 뒤의 "/줄높이"는 읽고 넘긴다. (캔버스는 줄높이를 쓰지 않는다) 셈은 parse_css_font_size 가 크롬과 같게 한다.
+//   원본이 글을 굽고 재는 캔버스는 문서에 붙이지 않아 부모 글꼴이 크롬의 마지막 대체 글꼴(맥 Times) 10px 이고, 뿌리는 문서의 표준 글꼴 16px 이다.
+//   웹은 절대 길이 밖의 크기를 브라우저 캔버스에 넣고 다시 읽어 받는다. (platform/web/systemfont.rs 의 resolve_font_size)
 // - 크기 뒤는 쉼표로 이은 이름 목록이다. 따옴표 이름은 따옴표를 떼고, 따옴표 없는 이름은 낱말을 빈칸 하나로 잇는다. 그리는 쪽이 목록의 앞 이름부터 찾는다.
 // - 틀린 문자열(크기나 이름이 없음, 음수 크기, 모르는 낱말)은 캔버스의 처음 값 "10px sans-serif" 로 본다.
 //==============================================================================
@@ -1989,21 +2068,29 @@ fn parse_font_string_strict(font_string: &str) -> Option<FontDescription> {
 	let mut font_weight: u16 = 400;
 	let mut is_italic = false;
 	let mut remainder = font_string.trim_start();
-	let mut font_size: Option<f32> = None;
 	let mut is_after_oblique = false;
+	let mut size_text = String::new();
 	while !remainder.is_empty() {
 		let token_end = remainder.find(char::is_whitespace).unwrap_or(remainder.len());
 		let token = &remainder[..token_end];
 		let lowercase_token = token.to_lowercase();
-		// 크기. ("16px", "16px/1.5" 처럼 줄높이가 붙어 와도 된다)
-		let size_text = lowercase_token.split('/').next().unwrap_or("");
-		if let Some(parsed_font_size) = parse_css_font_size(size_text) {
-			font_size = Some(parsed_font_size);
-			remainder = remainder[size_text.len()..].trim_start();
-			// 줄높이. ("/1.5", "/ 20px")
+		// 크기. ("16px", "16px/1.5" 처럼 줄높이가 붙어 와도 된다. "calc(1em + 2px)" 처럼 함수면 닫는 괄호까지)
+		let size_end = match find_css_function_end(remainder) {
+			Some(function_end) => {
+				function_end
+			}
+			None => {
+				lowercase_token.find('/').unwrap_or(lowercase_token.len())
+			}
+		};
+		let size_candidate = remainder[..size_end].to_lowercase();
+		if is_css_font_size_text(&size_candidate) {
+			size_text = size_candidate;
+			remainder = remainder[size_end..].trim_start();
+			// 줄높이. ("/1.5", "/ 20px", "/calc(1em + 2px)")
 			if let Some(line_height_text) = remainder.strip_prefix('/') {
 				let line_height_text = line_height_text.trim_start();
-				let line_height_end = line_height_text.find(char::is_whitespace).unwrap_or(line_height_text.len());
+				let line_height_end = find_css_function_end(line_height_text).unwrap_or_else(|| line_height_text.find(char::is_whitespace).unwrap_or(line_height_text.len()));
 				if line_height_end == 0 {
 					return None;
 				}
@@ -2047,8 +2134,22 @@ fn parse_font_string_strict(font_string: &str) -> Option<FontDescription> {
 		}
 		remainder = remainder[token_end..].trim_start();
 	}
-	let font_size = font_size?;
+	if size_text.is_empty() {
+		return None;
+	}
 	let family_name_list = parse_css_family_list(remainder)?;
+	// 이름 목록이 따옴표 없는 monospace 하나뿐이면 상대 크기를 고정폭 기본 크기로 줄인다. (크롬 FontBuilder 의 일반 이름 바뀜)
+	let is_monospace_only = remainder.trim().eq_ignore_ascii_case("monospace");
+	#[cfg(target_arch = "wasm32")]
+	let font_size = if is_absolute_css_length_text(&size_text) {
+		parse_css_font_size(&size_text, is_monospace_only, &FontSizeContext::create_absolute())
+	}
+	else {
+		crate::platform::web::systemfont::resolve_font_size(font_string)
+	};
+	#[cfg(not(target_arch = "wasm32"))]
+	let font_size = parse_css_font_size(&size_text, is_monospace_only, &FontSizeContext::create());
+	let font_size = font_size?;
 	Some(FontDescription {
 		font_size,
 		font_weight,
@@ -2060,39 +2161,916 @@ fn parse_font_string_strict(font_string: &str) -> Option<FontDescription> {
 }
 
 //==============================================================================
-// CSS 글자 크기 하나 읽기. (픽셀, 크기가 아니거나 음수면 None. 상대 크기는 10px 에 댄다)
+// 폰트 문자열 크기의 단위가 대는 글꼴 치수 하나. (픽셀)
 //==============================================================================
-fn parse_css_font_size(size_text: &str) -> Option<f32> {
-	const BASE_FONT_SIZE: f32 = 10.0;
-	let named_size = match size_text {
-		"xx-small" => Some(9.0),
-		"x-small" => Some(10.0),
-		"small" => Some(13.0),
-		"medium" => Some(16.0),
-		"large" => Some(18.0),
-		"x-large" => Some(24.0),
-		"xx-large" => Some(32.0),
-		"xxx-large" => Some(48.0),
-		"larger" => Some(BASE_FONT_SIZE * 1.2),
-		"smaller" => Some(BASE_FONT_SIZE / 1.2),
-		_ => None,
-	};
-	if named_size.is_some() {
-		return named_size;
+#[derive(Clone, Copy, Debug)]
+struct FontUnitMetrics {
+	font_size: f32,
+	x_height: f32,
+	cap_height: f32,
+	zero_advance: f32,
+	ideographic_advance: f32,
+	line_spacing: f32,
+}
+
+impl FontUnitMetrics {
+	//==============================================================================
+	// 글꼴을 찾지 못했을 때의 치수. (CSS Values 의 대신 쓰는 값: ex 와 ch 는 0.5em, ic 는 1em. cap 은 0.7em, lh 는 1.2em 으로 둔다)
+	//==============================================================================
+	fn create_fallback(font_size: f32) -> FontUnitMetrics {
+		FontUnitMetrics {
+			font_size,
+			x_height: font_size * 0.5,
+			cap_height: font_size * 0.7,
+			zero_advance: font_size * 0.5,
+			ideographic_advance: font_size,
+			line_spacing: (font_size * 1.2).round(),
+		}
 	}
-	// 단위와 1 단위의 픽셀. (CSS 절대 길이: 1in = 96px = 2.54cm = 72pt = 6pc, 1q = 0.25mm)
-	let unit_list: [(&str, f32); 10] = [("px", 1.0), ("pt", 96.0 / 72.0), ("pc", 16.0), ("in", 96.0), ("cm", 96.0 / 2.54), ("mm", 96.0 / 25.4), ("q", 96.0 / 101.6), ("rem", BASE_FONT_SIZE), ("em", BASE_FONT_SIZE), ("%", BASE_FONT_SIZE / 100.0)];
-	for (unit, pixel_per_unit) in unit_list {
-		if let Some(number_text) = size_text.strip_suffix(unit) {
-			// "rem" 이 "em" 보다 먼저라 "2rem" 을 "2r" + "em" 으로 읽지 않는다.
-			let number = number_text.parse::<f32>().ok()?;
-			if !number.is_finite() || number < 0.0 || number_text.starts_with('+') {
+}
+
+//==============================================================================
+// 폰트 문자열 크기를 셀 때의 기준. (원본이 글을 굽고 재는 캔버스는 문서에 붙이지 않은 HTMLCanvasElement 다. 크롬 158 에서 그 캔버스로 잰 기준)
+// - 부모: 크롬의 마지막 대체 글꼴(맥 Times) 10px. em, %, ex, ch, cap, ic, lh, larger, smaller 가 댄다.
+// - 뿌리: 문서 뿌리의 글꼴, 곧 화면 언어의 표준 글꼴(맥 한국어 Apple SD Gothic Neo, 영어 Times) 16px. rem, rex, rch, rcap, ric, rlh 가 댄다.
+// - 창: 원본 window.innerWidth, innerHeight. vw, vh, vi, vb, vmin, vmax 와 sv, lv, dv 앞붙이, 컨테이너가 없는 cq 단위가 댄다.
+//==============================================================================
+struct FontSizeContext {
+	parent: FontUnitMetrics,
+	root: FontUnitMetrics,
+	viewport_width: f32,
+	viewport_height: f32,
+}
+
+thread_local! {
+	// 뷰포트 단위가 대는 창 크기. (논리 픽셀, 데스크탑이 창 크기가 바뀔 때 알린다)
+	static FONT_VIEWPORT_SIZE: Cell<(f32, f32)> = const { Cell::new((0.0, 0.0)) };
+	// 부모와 뿌리 글꼴의 치수. (처음 쓸 때 한 번 센다, 데스크탑)
+	static FONT_UNIT_REFERENCE: Cell<Option<(FontUnitMetrics, FontUnitMetrics)>> = const { Cell::new(None) };
+}
+
+//==============================================================================
+// 폰트 문자열의 뷰포트 단위(vw, vh 같은)가 대는 창 크기 정하기. (논리 픽셀, 원본 window.innerWidth / innerHeight 자리. 데스크탑 플랫폼이 창 크기가 바뀔 때 부른다)
+//==============================================================================
+pub fn set_font_viewport_size(width: f32, height: f32) {
+	FONT_VIEWPORT_SIZE.with(|viewport_size| viewport_size.set((width, height)));
+}
+
+impl FontSizeContext {
+	//==============================================================================
+	// 지금의 기준. (데스크탑은 부모와 뿌리 글꼴을 운영체제에서 찾아 처음 한 번 센다)
+	//==============================================================================
+	#[cfg(not(target_arch = "wasm32"))]
+	fn create() -> FontSizeContext {
+		let (parent, root) = FONT_UNIT_REFERENCE.with(|reference_cell| {
+			if let Some(reference) = reference_cell.get() {
+				return reference;
+			}
+			let parent = crate::platform::desktop::systemfont::find_last_resort_font_file().and_then(|(source, family_name)| read_font_unit_metrics(&source, &family_name, PARENT_FONT_SIZE)).unwrap_or_else(|| FontUnitMetrics::create_fallback(PARENT_FONT_SIZE));
+			let root = crate::platform::desktop::systemfont::resolve_generic_family_name(crate::platform::desktop::systemfont::GenericFamily::Standard).and_then(|family_name| crate::platform::find_family_font_file(&family_name, 400, false).and_then(|source| read_font_unit_metrics(&source, &family_name, ROOT_FONT_SIZE))).unwrap_or_else(|| FontUnitMetrics::create_fallback(ROOT_FONT_SIZE));
+			reference_cell.set(Some((parent, root)));
+			(parent, root)
+		});
+		let (viewport_width, viewport_height) = FONT_VIEWPORT_SIZE.with(|viewport_size| viewport_size.get());
+		FontSizeContext {
+			parent,
+			root,
+			viewport_width,
+			viewport_height,
+		}
+	}
+
+	//==============================================================================
+	// 절대 길이만 셀 때의 기준. (웹은 그 밖의 크기를 브라우저에 맡긴다)
+	//==============================================================================
+	#[cfg(target_arch = "wasm32")]
+	fn create_absolute() -> FontSizeContext {
+		FontSizeContext {
+			parent: FontUnitMetrics::create_fallback(PARENT_FONT_SIZE),
+			root: FontUnitMetrics::create_fallback(ROOT_FONT_SIZE),
+			viewport_width: 0.0,
+			viewport_height: 0.0,
+		}
+	}
+
+	//==============================================================================
+	// 단위 1 의 픽셀과 고정폭 배율을 받는지. (모르는 단위면 None. % 는 따로 센다)
+	//==============================================================================
+	fn read_unit_pixel(&self, unit: &str) -> Option<(f32, bool)> {
+		let viewport_minimum = self.viewport_width.min(self.viewport_height);
+		let viewport_maximum = self.viewport_width.max(self.viewport_height);
+		let unit_pixel = match unit {
+			"px" => {
+				(1.0, false)
+			}
+			"pt" => {
+				(96.0 / 72.0, false)
+			}
+			"pc" => {
+				(16.0, false)
+			}
+			"in" => {
+				(96.0, false)
+			}
+			"cm" => {
+				(96.0 / 2.54, false)
+			}
+			"mm" => {
+				(96.0 / 25.4, false)
+			}
+			"q" => {
+				(96.0 / 101.6, false)
+			}
+			"em" => {
+				(self.parent.font_size, true)
+			}
+			"ex" => {
+				(self.parent.x_height, true)
+			}
+			"ch" => {
+				(self.parent.zero_advance, true)
+			}
+			"cap" => {
+				(self.parent.cap_height, true)
+			}
+			"ic" => {
+				(self.parent.ideographic_advance, true)
+			}
+			"lh" => {
+				(self.parent.line_spacing, true)
+			}
+			"rem" => {
+				(self.root.font_size, false)
+			}
+			"rex" => {
+				(self.root.x_height, true)
+			}
+			"rch" => {
+				(self.root.zero_advance, true)
+			}
+			"rcap" => {
+				(self.root.cap_height, true)
+			}
+			"ric" => {
+				(self.root.ideographic_advance, true)
+			}
+			"rlh" => {
+				(self.root.line_spacing, true)
+			}
+			"vw" | "svw" | "lvw" | "dvw" | "vi" | "svi" | "lvi" | "dvi" | "cqw" | "cqi" => {
+				(self.viewport_width / 100.0, false)
+			}
+			"vh" | "svh" | "lvh" | "dvh" | "vb" | "svb" | "lvb" | "dvb" | "cqh" | "cqb" => {
+				(self.viewport_height / 100.0, false)
+			}
+			"vmin" | "svmin" | "lvmin" | "dvmin" | "cqmin" => {
+				(viewport_minimum / 100.0, false)
+			}
+			"vmax" | "svmax" | "lvmax" | "dvmax" | "cqmax" => {
+				(viewport_maximum / 100.0, false)
+			}
+			_ => {
 				return None;
 			}
-			return Some(number * pixel_per_unit);
+		};
+		Some(unit_pixel)
+	}
+}
+
+// 문서에 붙이지 않은 캔버스의 부모 글꼴 크기. (캔버스 처음 값 "10px sans-serif")
+const PARENT_FONT_SIZE: f32 = 10.0;
+// 문서 뿌리의 글꼴 크기. (크롬 기본 글꼴 크기 16)
+const ROOT_FONT_SIZE: f32 = 16.0;
+// 고정폭 일반 이름의 상대 크기 배율. (크롬 기본 고정폭 글꼴 크기 13 / 기본 글꼴 크기 16)
+const MONOSPACE_SIZE_RATIO: f32 = 13.0 / 16.0;
+// 글자 크기의 상한. (크롬 FontDescription 의 최대 글자 크기 10000)
+const MAXIMUM_FONT_SIZE: f32 = 10000.0;
+
+//==============================================================================
+// 글꼴 파일의 단위 치수. (크롬 SimpleFontData::PlatformInit 과 같은 셈, 읽지 못하면 None)
+// - ex: 맥은 'x' 글리프 상자의 위 (CTFontGetXHeight 대신 글리프를 잰다), 그 밖은 OS/2 의 x 높이, 없으면 'x' 상자의 위, 그것도 없으면 올라간 길이 x 0.56.
+// - cap: OS/2 의 대문자 높이, 없으면 'H' 상자의 위. ch: '0' 의 전진폭, 없으면 0.5em. ic: '水'(U+6C34) 의 전진폭, 없으면 1em.
+// - lh: 줄높이 normal = 반올림한 올라간 길이 + 내려간 길이 + 줄 사이. 맥은 hhea, 윈도우는 OS/2 USE_TYPO_METRICS 면 typo, 아니면 win 값,
+//   리눅스는 hhea 다. 맥은 Times, Helvetica, Courier 의 올라간 길이에 (올라간 + 내려간) x 0.15 를 반올림해 더한다. (font_metrics.cc 의 AscentDescentWithHacks)
+//   윈도우와 리눅스는 크롬과 견주어 보지 못했다.
+//==============================================================================
+#[cfg(not(target_arch = "wasm32"))]
+fn read_font_unit_metrics(source: &FontFileSource, family_name: &str, font_size: f32) -> Option<FontUnitMetrics> {
+	let font_bytes = std::fs::read(&source.path).ok()?;
+	let face_index = match source.face_index {
+		Some(face_index) => {
+			face_index
+		}
+		None => {
+			source.post_script_name.as_ref().and_then(|post_script_name| find_post_script_face_index(&font_bytes, post_script_name)).unwrap_or(0)
+		}
+	};
+	let face = rustybuzz::ttf_parser::Face::parse(&font_bytes, face_index).ok()?;
+	let scale = font_size / face.units_per_em() as f32;
+	let read_glyph_top = |character: char| -> Option<f32> {
+		let glyph_id = face.glyph_index(character)?;
+		face.glyph_bounding_box(glyph_id).map(|glyph_rect| glyph_rect.y_max as f32 * scale)
+	};
+	let read_glyph_advance = |character: char| -> Option<f32> {
+		let glyph_id = face.glyph_index(character)?;
+		face.glyph_hor_advance(glyph_id).map(|advance| advance as f32 * scale)
+	};
+	let hhea_table = face.tables().hhea;
+	let os2_table = face.tables().os2;
+	let (ascent_units, descent_units, line_gap_units) = if cfg!(target_os = "windows") {
+		match os2_table {
+			Some(os2_table) if os2_table.use_typographic_metrics() => {
+				(os2_table.typographic_ascender() as f32, -(os2_table.typographic_descender() as f32), os2_table.typographic_line_gap() as f32)
+			}
+			Some(os2_table) => {
+				let windows_ascent = os2_table.windows_ascender() as f32;
+				let windows_descent = os2_table.windows_descender().unsigned_abs() as f32;
+				let hhea_height = hhea_table.ascender as f32 - hhea_table.descender as f32 + hhea_table.line_gap as f32;
+				(windows_ascent, windows_descent, (hhea_height - windows_ascent - windows_descent).max(0.0))
+			}
+			None => {
+				(hhea_table.ascender as f32, -(hhea_table.descender as f32), hhea_table.line_gap as f32)
+			}
+		}
+	}
+	else {
+		(hhea_table.ascender as f32, -(hhea_table.descender as f32), hhea_table.line_gap as f32)
+	};
+	let mut ascent = (ascent_units * scale + 0.5).floor();
+	let descent = (descent_units * scale + 0.5).floor();
+	if cfg!(target_os = "macos") && matches!(family_name, "Times" | "Helvetica" | "Courier") {
+		ascent += ((ascent + descent) * 0.15 + 0.5).floor();
+	}
+	let line_gap = line_gap_units * scale;
+	let os2_x_height = os2_table.and_then(|os2_table| os2_table.x_height()).filter(|x_height| *x_height > 0).map(|x_height| x_height as f32 * scale);
+	let x_height = if cfg!(target_os = "macos") {
+		read_glyph_top('x').or(os2_x_height)
+	}
+	else {
+		os2_x_height.or_else(|| read_glyph_top('x'))
+	}.unwrap_or(ascent * 0.56);
+	let cap_height = os2_table.and_then(|os2_table| os2_table.capital_height()).filter(|cap_height| *cap_height > 0).map(|cap_height| cap_height as f32 * scale).or_else(|| read_glyph_top('H')).unwrap_or(ascent);
+	Some(FontUnitMetrics {
+		font_size,
+		x_height,
+		cap_height,
+		zero_advance: read_glyph_advance('0').unwrap_or(font_size * 0.5),
+		ideographic_advance: read_glyph_advance('\u{6C34}').unwrap_or(font_size),
+		line_spacing: ascent.round() + descent.round() + line_gap.round(),
+	})
+}
+
+//==============================================================================
+// 글 맨 앞이 CSS 함수면 닫는 괄호 다음 자리. ("calc(1px + 2px) a" → 15, 함수가 아니거나 괄호가 닫히지 않으면 None)
+//==============================================================================
+fn find_css_function_end(text: &str) -> Option<usize> {
+	let name_end = text.find('(')?;
+	let function_name = &text[..name_end];
+	if function_name.is_empty() || !function_name.chars().all(|character| character.is_ascii_alphabetic() || character == '-') {
+		return None;
+	}
+	let mut depth = 0;
+	for (byte_index, character) in text.char_indices().skip(name_end) {
+		if character == '(' {
+			depth += 1;
+		}
+		else if character == ')' {
+			depth -= 1;
+			if depth == 0 {
+				return Some(byte_index + 1);
+			}
 		}
 	}
 	None
+}
+
+//==============================================================================
+// 글자 크기 자리의 글인지. (이름 크기, 길이 단위나 % 가 붙은 수, CSS 함수. 셈은 parse_css_font_size 가 한다. oblique 뒤의 "10deg" 같은 각도는 크기가 아니다)
+//==============================================================================
+fn is_css_font_size_text(size_text: &str) -> bool {
+	if matches!(size_text, "xx-small" | "x-small" | "small" | "medium" | "large" | "x-large" | "xx-large" | "xxx-large" | "larger" | "smaller") {
+		return true;
+	}
+	if find_css_function_end(size_text) == Some(size_text.len()) {
+		return true;
+	}
+	const UNIT_LIST: [&str; 50] = ["px", "pt", "pc", "in", "cm", "mm", "q", "%", "em", "ex", "ch", "cap", "ic", "lh", "rem", "rex", "rch", "rcap", "ric", "rlh", "vw", "vh", "vi", "vb", "vmin", "vmax", "svw", "svh", "svi", "svb", "svmin", "svmax", "lvw", "lvh", "lvi", "lvb", "lvmin", "lvmax", "dvw", "dvh", "dvi", "dvb", "dvmin", "dvmax", "cqw", "cqh", "cqi", "cqb", "cqmin", "cqmax"];
+	match parse_css_number_prefix(size_text) {
+		Some((_, unit_text)) => {
+			UNIT_LIST.contains(&unit_text)
+		}
+		None => {
+			false
+		}
+	}
+}
+
+//==============================================================================
+// 절대 길이인지. (px, pt, pc, in, cm, mm, q 가 붙은 수)
+//==============================================================================
+#[cfg(target_arch = "wasm32")]
+fn is_absolute_css_length_text(size_text: &str) -> bool {
+	match parse_css_number_prefix(size_text) {
+		Some((_, unit_text)) => {
+			matches!(unit_text, "px" | "pt" | "pc" | "in" | "cm" | "mm" | "q")
+		}
+		None => {
+			false
+		}
+	}
+}
+
+//==============================================================================
+// 글 맨 앞의 CSS 수와 나머지. ("+1.5e1px" → (15, "px"), 수가 아니면 None)
+// - CSS 수의 꼴: 부호, 숫자(소수점 뒤에 숫자가 있어야 한다, ".5" 는 되고 "2." 는 안 된다), 지수.
+//==============================================================================
+fn parse_css_number_prefix(text: &str) -> Option<(f64, &str)> {
+	let bytes = text.as_bytes();
+	let mut position = 0;
+	if position < bytes.len() && (bytes[position] == b'+' || bytes[position] == b'-') {
+		position += 1;
+	}
+	let integer_start = position;
+	while position < bytes.len() && bytes[position].is_ascii_digit() {
+		position += 1;
+	}
+	let mut has_digit = position > integer_start;
+	if position + 1 < bytes.len() && bytes[position] == b'.' && bytes[position + 1].is_ascii_digit() {
+		position += 1;
+		while position < bytes.len() && bytes[position].is_ascii_digit() {
+			position += 1;
+		}
+		has_digit = true;
+	}
+	if !has_digit {
+		return None;
+	}
+	if position < bytes.len() && (bytes[position] == b'e' || bytes[position] == b'E') {
+		let mut exponent_position = position + 1;
+		if exponent_position < bytes.len() && (bytes[exponent_position] == b'+' || bytes[exponent_position] == b'-') {
+			exponent_position += 1;
+		}
+		if exponent_position < bytes.len() && bytes[exponent_position].is_ascii_digit() {
+			while exponent_position < bytes.len() && bytes[exponent_position].is_ascii_digit() {
+				exponent_position += 1;
+			}
+			position = exponent_position;
+		}
+	}
+	let number = text[..position].parse::<f64>().ok()?;
+	Some((number, &text[position..]))
+}
+
+//==============================================================================
+// CSS 글자 크기 하나 읽기. (픽셀, 소문자 글. 크기가 아니거나 음수면 None. 크롬 158 의 문서에 붙이지 않은 캔버스와 같은 셈)
+// - 이름 크기: xx-small 9, x-small 10, small 13, medium 16, large 18, x-large 24, xx-large 32, xxx-large 48. 고정폭은 9, 10, 12, 13, 16, 20, 26, 39.
+//   larger 와 smaller 는 부모 10px 의 1.2 배와 1 / 1.2 배.
+// - 단위: px, pt, pc, in, cm, mm, q 와 em, %, ex, ch, cap, ic, lh(부모 글꼴), rem, rex, rch, rcap, ric, rlh(뿌리 글꼴), 뷰포트 단위. (FontSizeContext)
+// - 이름 목록이 따옴표 없는 monospace 하나뿐이면 부모와 뿌리 글꼴에 대는 단위(rem 은 빼고)와 %, larger, smaller 에 13 / 16 을 곱한다.
+// - calc(), min(), max(), clamp(), abs(), sign(), round(), mod(), rem(), hypot(), sqrt(), pow(), exp(), log() 를 셈한다. (evaluate_css_math_function)
+//   함수 안의 길이에는 고정폭 배율을 걸지 않고, 퍼센트만으로 된 값이면 건다. 음수는 0 으로 자르고 수가 아니면(NaN) 0 이다.
+// - 10000 을 넘으면 10000 이다.
+//==============================================================================
+fn parse_css_font_size(size_text: &str, is_monospace_only: bool, font_size_context: &FontSizeContext) -> Option<f32> {
+	const KEYWORD_LIST: [&str; 8] = ["xx-small", "x-small", "small", "medium", "large", "x-large", "xx-large", "xxx-large"];
+	const KEYWORD_SIZE_TABLE: [f32; 8] = [9.0, 10.0, 13.0, 16.0, 18.0, 24.0, 32.0, 48.0];
+	const MONOSPACE_KEYWORD_SIZE_TABLE: [f32; 8] = [9.0, 10.0, 12.0, 13.0, 16.0, 20.0, 26.0, 39.0];
+	let relative_scale = if is_monospace_only {
+		MONOSPACE_SIZE_RATIO
+	}
+	else {
+		1.0
+	};
+	if let Some(keyword_index) = KEYWORD_LIST.iter().position(|keyword| *keyword == size_text) {
+		return Some(if is_monospace_only {
+			MONOSPACE_KEYWORD_SIZE_TABLE[keyword_index]
+		}
+		else {
+			KEYWORD_SIZE_TABLE[keyword_index]
+		});
+	}
+	match size_text {
+		"larger" => {
+			return Some(font_size_context.parent.font_size * 1.2 * relative_scale);
+		}
+		"smaller" => {
+			return Some(font_size_context.parent.font_size / 1.2 * relative_scale);
+		}
+		_ => {}
+	}
+	if find_css_function_end(size_text) == Some(size_text.len()) {
+		let mut math_parser = CssMathParser {
+			text: size_text,
+			position: 0,
+			font_size_context,
+		};
+		let math_value = math_parser.parse_function()?;
+		if math_parser.position != size_text.len() {
+			return None;
+		}
+		let (pixels, is_pure_percent) = match math_value {
+			CssMathValue::Length { pixels, is_pure_percent } => {
+				(pixels, is_pure_percent)
+			}
+			CssMathValue::Number(_) => {
+				return None;
+			}
+		};
+		let scaled_pixels = if is_pure_percent {
+			pixels * relative_scale as f64
+		}
+		else {
+			pixels
+		};
+		if scaled_pixels.is_nan() {
+			return Some(0.0);
+		}
+		return Some(scaled_pixels.clamp(0.0, MAXIMUM_FONT_SIZE as f64) as f32);
+	}
+	let (number, unit_text) = parse_css_number_prefix(size_text)?;
+	if number < 0.0 {
+		return None;
+	}
+	let pixels = if unit_text == "%" {
+		number as f32 * font_size_context.parent.font_size / 100.0 * relative_scale
+	}
+	else {
+		let (unit_pixel, is_relative) = font_size_context.read_unit_pixel(unit_text)?;
+		let scale = if is_relative {
+			relative_scale
+		}
+		else {
+			1.0
+		};
+		number as f32 * unit_pixel * scale
+	};
+	Some(pixels.min(MAXIMUM_FONT_SIZE))
+}
+
+//==============================================================================
+// CSS 수학 함수의 값. (수, 또는 길이(픽셀로 푼 값과 퍼센트로만 된 값인지))
+//==============================================================================
+#[derive(Clone, Copy, Debug)]
+enum CssMathValue {
+	Number(f64),
+	Length {
+		pixels: f64,
+		is_pure_percent: bool,
+	},
+}
+
+//==============================================================================
+// CSS 수학 함수 해석기. (CSS Values 4 의 calc 문법: 더하기와 빼기는 앞뒤에 빈칸이 있어야 하고, 곱하기와 나누기는 없어도 된다)
+// - 퍼센트는 부모 글자 크기에 댄다. 형이 맞지 않으면(길이 + 수, 길이 x 길이) 틀린 값이다.
+//==============================================================================
+struct CssMathParser<'text> {
+	text: &'text str,
+	position: usize,
+	font_size_context: &'text FontSizeContext,
+}
+
+impl CssMathParser<'_> {
+	//==============================================================================
+	// 빈칸 넘기기. (넘긴 것이 있으면 true)
+	//==============================================================================
+	fn skip_whitespace(&mut self) -> bool {
+		let start_position = self.position;
+		while self.position < self.text.len() && self.text.as_bytes()[self.position].is_ascii_whitespace() {
+			self.position += 1;
+		}
+		self.position > start_position
+	}
+
+	//==============================================================================
+	// 다음 글자가 그것이면 먹기.
+	//==============================================================================
+	fn consume_byte(&mut self, expected_byte: u8) -> bool {
+		if self.position < self.text.len() && self.text.as_bytes()[self.position] == expected_byte {
+			self.position += 1;
+			return true;
+		}
+		false
+	}
+
+	//==============================================================================
+	// 이름 하나 읽기. (영문자와 하이픈, 소문자로)
+	//==============================================================================
+	fn read_identifier(&mut self) -> String {
+		let start_position = self.position;
+		while self.position < self.text.len() {
+			let byte = self.text.as_bytes()[self.position];
+			if byte.is_ascii_alphabetic() || (byte == b'-' && self.position > start_position) {
+				self.position += 1;
+			}
+			else {
+				break;
+			}
+		}
+		self.text[start_position..self.position].to_ascii_lowercase()
+	}
+
+	//==============================================================================
+	// 함수 하나. ("이름(" 부터 닫는 괄호까지)
+	//==============================================================================
+	fn parse_function(&mut self) -> Option<CssMathValue> {
+		let function_name = self.read_identifier();
+		if !self.consume_byte(b'(') {
+			return None;
+		}
+		let argument_list = match function_name.as_str() {
+			"round" => {
+				return self.parse_round_function();
+			}
+			"clamp" => {
+				return self.parse_clamp_function();
+			}
+			_ => {
+				self.parse_argument_list()?
+			}
+		};
+		match (function_name.as_str(), argument_list.as_slice()) {
+			("calc", [value]) => {
+				Some(*value)
+			}
+			("min", _) | ("max", _) if !argument_list.is_empty() => {
+				let is_minimum = function_name == "min";
+				let mut result = argument_list[0];
+				for value in &argument_list[1..] {
+					result = combine_css_math_values(result, *value, |first, second| {
+						if is_minimum {
+							first.min(second)
+						}
+						else {
+							first.max(second)
+						}
+					})?;
+				}
+				Some(result)
+			}
+			("abs", [value]) => {
+				Some(map_css_math_value(*value, f64::abs))
+			}
+			("sign", [value]) => {
+				let number = read_css_math_number(*value);
+				Some(CssMathValue::Number(if number.is_nan() || number == 0.0 {
+					number
+				}
+				else {
+					number.signum()
+				}))
+			}
+			("mod", [dividend, divisor]) | ("rem", [dividend, divisor]) => {
+				let is_modulo = function_name == "mod";
+				combine_css_math_values(*dividend, *divisor, |first, second| {
+					let quotient = first / second;
+					let rounded_quotient = if is_modulo {
+						quotient.floor()
+					}
+					else {
+						quotient.trunc()
+					};
+					first - second * rounded_quotient
+				})
+			}
+			("hypot", _) if !argument_list.is_empty() => {
+				let mut result = map_css_math_value(argument_list[0], |number| number * number);
+				for value in &argument_list[1..] {
+					result = combine_css_math_values(result, map_css_math_value(*value, |number| number * number), |first, second| first + second)?;
+				}
+				Some(map_css_math_value(result, f64::sqrt))
+			}
+			("sqrt", [CssMathValue::Number(number)]) => {
+				Some(CssMathValue::Number(number.sqrt()))
+			}
+			("exp", [CssMathValue::Number(number)]) => {
+				Some(CssMathValue::Number(number.exp()))
+			}
+			("pow", [CssMathValue::Number(base), CssMathValue::Number(exponent)]) => {
+				Some(CssMathValue::Number(base.powf(*exponent)))
+			}
+			("log", [CssMathValue::Number(number)]) => {
+				Some(CssMathValue::Number(number.ln()))
+			}
+			("log", [CssMathValue::Number(number), CssMathValue::Number(base)]) => {
+				Some(CssMathValue::Number(number.ln() / base.ln()))
+			}
+			_ => {
+				None
+			}
+		}
+	}
+
+	//==============================================================================
+	// 쉼표로 이은 인자들과 닫는 괄호.
+	//==============================================================================
+	fn parse_argument_list(&mut self) -> Option<Vec<CssMathValue>> {
+		let mut argument_list = Vec::new();
+		loop {
+			self.skip_whitespace();
+			argument_list.push(self.parse_sum()?);
+			self.skip_whitespace();
+			if self.consume_byte(b',') {
+				continue;
+			}
+			if self.consume_byte(b')') {
+				return Some(argument_list);
+			}
+			return None;
+		}
+	}
+
+	//==============================================================================
+	// round(방식?, 값, 단위?). (방식: nearest(처음, 반은 위로), up, down, to-zero. 단위를 빼면 값이 수여야 하고 1 로 본다)
+	//==============================================================================
+	fn parse_round_function(&mut self) -> Option<CssMathValue> {
+		self.skip_whitespace();
+		let saved_position = self.position;
+		let strategy = self.read_identifier();
+		let strategy = if matches!(strategy.as_str(), "nearest" | "up" | "down" | "to-zero") && {
+			self.skip_whitespace();
+			self.consume_byte(b',')
+		} {
+			strategy
+		}
+		else {
+			self.position = saved_position;
+			String::from("nearest")
+		};
+		let argument_list = self.parse_argument_list()?;
+		let (value, step) = match argument_list.as_slice() {
+			[value] => {
+				match value {
+					CssMathValue::Number(_) => {
+						(*value, CssMathValue::Number(1.0))
+					}
+					_ => {
+						return None;
+					}
+				}
+			}
+			[value, step] => {
+				(*value, *step)
+			}
+			_ => {
+				return None;
+			}
+		};
+		combine_css_math_values(value, step, |number, step_number| {
+			let quotient = number / step_number;
+			let rounded_quotient = match strategy.as_str() {
+				"up" => {
+					quotient.ceil()
+				}
+				"down" => {
+					quotient.floor()
+				}
+				"to-zero" => {
+					quotient.trunc()
+				}
+				_ => {
+					(quotient + 0.5).floor()
+				}
+			};
+			rounded_quotient * step_number
+		})
+	}
+
+	//==============================================================================
+	// clamp(최소, 값, 최대). (최소나 최대 자리에 none 이 오면 그쪽은 자르지 않는다. 최소가 최대보다 크면 최소)
+	//==============================================================================
+	fn parse_clamp_function(&mut self) -> Option<CssMathValue> {
+		let mut bound_list: Vec<Option<CssMathValue>> = Vec::new();
+		for argument_index in 0..3 {
+			self.skip_whitespace();
+			let saved_position = self.position;
+			let is_none = self.read_identifier() == "none" && argument_index != 1;
+			if is_none {
+				bound_list.push(None);
+			}
+			else {
+				self.position = saved_position;
+				bound_list.push(Some(self.parse_sum()?));
+			}
+			self.skip_whitespace();
+			let separator = if argument_index < 2 {
+				b','
+			}
+			else {
+				b')'
+			};
+			if !self.consume_byte(separator) {
+				return None;
+			}
+		}
+		let mut result = bound_list[1]?;
+		if let Some(maximum_value) = bound_list[2] {
+			result = combine_css_math_values(result, maximum_value, f64::min)?;
+		}
+		if let Some(minimum_value) = bound_list[0] {
+			result = combine_css_math_values(result, minimum_value, f64::max)?;
+		}
+		Some(result)
+	}
+
+	//==============================================================================
+	// 더하기, 빼기. (연산자 앞뒤에 빈칸이 있어야 한다)
+	//==============================================================================
+	fn parse_sum(&mut self) -> Option<CssMathValue> {
+		let mut result = self.parse_product()?;
+		loop {
+			let saved_position = self.position;
+			if !self.skip_whitespace() {
+				return Some(result);
+			}
+			let operator = if self.consume_byte(b'+') {
+				b'+'
+			}
+			else if self.consume_byte(b'-') {
+				b'-'
+			}
+			else {
+				self.position = saved_position;
+				return Some(result);
+			};
+			if !self.skip_whitespace() {
+				return None;
+			}
+			let operand = self.parse_product()?;
+			result = combine_css_math_values(result, operand, |first, second| {
+				if operator == b'+' {
+					first + second
+				}
+				else {
+					first - second
+				}
+			})?;
+		}
+	}
+
+	//==============================================================================
+	// 곱하기, 나누기. (길이 x 수, 수 x 길이, 길이 / 수, 길이 / 길이 = 수)
+	//==============================================================================
+	fn parse_product(&mut self) -> Option<CssMathValue> {
+		let mut result = self.parse_value()?;
+		loop {
+			let saved_position = self.position;
+			self.skip_whitespace();
+			let is_multiply = if self.consume_byte(b'*') {
+				true
+			}
+			else if self.consume_byte(b'/') {
+				false
+			}
+			else {
+				self.position = saved_position;
+				return Some(result);
+			};
+			self.skip_whitespace();
+			let operand = self.parse_value()?;
+			result = match (result, operand, is_multiply) {
+				(CssMathValue::Number(first), CssMathValue::Number(second), true) => {
+					CssMathValue::Number(first * second)
+				}
+				(CssMathValue::Number(first), CssMathValue::Number(second), false) => {
+					CssMathValue::Number(first / second)
+				}
+				(CssMathValue::Length { pixels, is_pure_percent }, CssMathValue::Number(number), true) | (CssMathValue::Number(number), CssMathValue::Length { pixels, is_pure_percent }, true) => {
+					CssMathValue::Length {
+						pixels: pixels * number,
+						is_pure_percent,
+					}
+				}
+				(CssMathValue::Length { pixels, is_pure_percent }, CssMathValue::Number(number), false) => {
+					CssMathValue::Length {
+						pixels: pixels / number,
+						is_pure_percent,
+					}
+				}
+				(CssMathValue::Length { pixels: first_pixels, .. }, CssMathValue::Length { pixels: second_pixels, .. }, false) => {
+					CssMathValue::Number(first_pixels / second_pixels)
+				}
+				_ => {
+					return None;
+				}
+			};
+		}
+	}
+
+	//==============================================================================
+	// 값 하나. (단위가 붙은 수, 괄호, 함수, 상수 pi, e, infinity, -infinity, nan)
+	//==============================================================================
+	fn parse_value(&mut self) -> Option<CssMathValue> {
+		if self.consume_byte(b'(') {
+			self.skip_whitespace();
+			let value = self.parse_sum()?;
+			self.skip_whitespace();
+			if !self.consume_byte(b')') {
+				return None;
+			}
+			return Some(value);
+		}
+		let remainder = &self.text[self.position..];
+		if let Some((number, unit_remainder)) = parse_css_number_prefix(remainder) {
+			let unit_length = unit_remainder.bytes().take_while(|byte| byte.is_ascii_alphabetic() || *byte == b'%').count();
+			let unit_text = &unit_remainder[..unit_length];
+			self.position += remainder.len() - unit_remainder.len() + unit_length;
+			if unit_text.is_empty() {
+				return Some(CssMathValue::Number(number));
+			}
+			if unit_text == "%" {
+				return Some(CssMathValue::Length {
+					pixels: number * self.font_size_context.parent.font_size as f64 / 100.0,
+					is_pure_percent: true,
+				});
+			}
+			let (unit_pixel, _) = self.font_size_context.read_unit_pixel(&unit_text.to_ascii_lowercase())?;
+			return Some(CssMathValue::Length {
+				pixels: number * unit_pixel as f64,
+				is_pure_percent: false,
+			});
+		}
+		let saved_position = self.position;
+		let is_negative = self.consume_byte(b'-');
+		let identifier = self.read_identifier();
+		if self.position < self.text.len() && self.text.as_bytes()[self.position] == b'(' && !is_negative {
+			self.position = saved_position;
+			return self.parse_function();
+		}
+		let constant = match identifier.as_str() {
+			"pi" if !is_negative => {
+				std::f64::consts::PI
+			}
+			"e" if !is_negative => {
+				std::f64::consts::E
+			}
+			"infinity" => {
+				f64::INFINITY
+			}
+			"nan" if !is_negative => {
+				f64::NAN
+			}
+			_ => {
+				return None;
+			}
+		};
+		Some(CssMathValue::Number(if is_negative {
+			-constant
+		}
+		else {
+			constant
+		}))
+	}
+}
+
+//==============================================================================
+// 같은 형의 두 값 합치기. (수와 수, 길이와 길이. 형이 다르면 None, 퍼센트로만 된 값인지는 둘 다 그럴 때만)
+//==============================================================================
+fn combine_css_math_values(first_value: CssMathValue, second_value: CssMathValue, combine: impl Fn(f64, f64) -> f64) -> Option<CssMathValue> {
+	match (first_value, second_value) {
+		(CssMathValue::Number(first), CssMathValue::Number(second)) => {
+			Some(CssMathValue::Number(combine(first, second)))
+		}
+		(CssMathValue::Length { pixels: first_pixels, is_pure_percent: is_first_pure_percent }, CssMathValue::Length { pixels: second_pixels, is_pure_percent: is_second_pure_percent }) => {
+			Some(CssMathValue::Length {
+				pixels: combine(first_pixels, second_pixels),
+				is_pure_percent: is_first_pure_percent && is_second_pure_percent,
+			})
+		}
+		_ => {
+			None
+		}
+	}
+}
+
+//==============================================================================
+// 값의 수에 함수 걸기. (형은 그대로)
+//==============================================================================
+fn map_css_math_value(value: CssMathValue, map: impl Fn(f64) -> f64) -> CssMathValue {
+	match value {
+		CssMathValue::Number(number) => {
+			CssMathValue::Number(map(number))
+		}
+		CssMathValue::Length { pixels, is_pure_percent } => {
+			CssMathValue::Length {
+				pixels: map(pixels),
+				is_pure_percent,
+			}
+		}
+	}
+}
+
+//==============================================================================
+// 값의 수. (길이는 픽셀)
+//==============================================================================
+fn read_css_math_number(value: CssMathValue) -> f64 {
+	match value {
+		CssMathValue::Number(number) => {
+			number
+		}
+		CssMathValue::Length { pixels, .. } => {
+			pixels
+		}
+	}
 }
 
 //==============================================================================
@@ -2376,7 +3354,7 @@ mod tests {
 		};
 		assert_eq!(read_size("12pt a"), 16.0);
 		assert_eq!(read_size("2em a"), 20.0);
-		assert_eq!(read_size("2rem a"), 20.0);
+		assert_eq!(read_size("2rem a"), 32.0);
 		assert_eq!(read_size("150% a"), 15.0);
 		assert_eq!(read_size("medium a"), 16.0);
 		assert_eq!(read_size("x-large a"), 24.0);
@@ -2401,7 +3379,7 @@ mod tests {
 		assert!(keyword_description.is_italic && keyword_description.font_weight == 700);
 		assert!(parse_font_string("oblique 10deg 16px a").is_italic);
 		assert_eq!(parse_font_string("lighter 16px a").font_weight, 100);
-		for invalid_font_string in ["16px", "-5px a", "bold a 16px", "x 16px a", "16px 'a"] {
+		for invalid_font_string in ["16px", "-5px a", "bold a 16px", "x 16px a", "16px 'a", "2.px a", "2x a", "calc(1px -2px) a", "calc(1px+2px) a", "round(1.5px) a", "sqrt(4) a", "sign(1px) a", "progress(1px from 0px to 2px) a"] {
 			let invalid_description = parse_font_string(invalid_font_string);
 			assert_eq!(invalid_description.font_size, 10.0, "{}", invalid_font_string);
 			assert_eq!(invalid_description.family_name, "sans-serif", "{}", invalid_font_string);
@@ -2431,6 +3409,108 @@ mod tests {
 		assert!((measure_width("16px Menlo", "Hello World Wifi") - 154.125).abs() < 0.01);
 		assert!(measure_width("16px default", "ภาษาไทย") > 50.0);
 		assert!(measure_width("bold 16px default", "Hello World Wifi") > measure_width("16px default", "Hello World Wifi"));
+	}
+
+	//==============================================================================
+	// 맥 시스템 UI 글꼴(SFNS)의 광학 크기와 자간 표, 크롬이 모르는 이름: 맥 크롬 158 Canvas2D 의 measureText 값과 같다. (맥만, SFNS 가 있을 때)
+	// - system-ui 와 BlinkMacSystemFont 는 opsz 축을 글자 크기로 걸고(17 ~ 96 으로 자른다) trak 표의 자간을 더한다. 8 ~ 128px, 굵기 300, 400, 700.
+	// - -apple-system 은 크롬이 모르는 이름이라 다음 이름으로 넘어간다. (사슬에서는 Apple SD Gothic Neo, 표준 글꼴과 같은 값)
+	//==============================================================================
+	#[cfg(target_os = "macos")]
+	#[test]
+	fn system_ui_font_matches_chrome_on_macos() {
+		if !std::path::Path::new("/System/Library/Fonts/SFNS.ttf").exists() {
+			return;
+		}
+		let mut text_string_texture_cache = TextStringTextureCache::new();
+		let system_font_description = parse_font_string(&format!("10px {}", crate::base::platform::SYSTEM_FONT_STRING));
+		text_string_texture_cache.set_system_font_chain(system_font_description.family_name_list);
+		text_string_texture_cache.set_system_font_fallback_enabled(true);
+		let size_list = [8.0, 10.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 20.0, 21.0, 24.0, 28.0, 32.0, 40.0, 48.0, 64.0, 96.0, 128.0];
+		let chrome_width_table: [(&str, [f32; 19]); 3] = [
+			("", [63.7253, 77.417, 90.6504, 96.9858, 103.3525, 109.563, 115.8672, 121.5151, 128.1933, 139.6937, 145.7919, 164.9744, 192.8008, 219.8438, 272.6172, 325.6406, 430.1875, 640.0313, 853.375]),
+			("bold ", [67.7136, 82.4023, 96.6328, 103.4668, 110.332, 117.041, 123.8438, 129.9902, 137.2324, 149.9121, 156.7002, 178.0313, 208.3184, 237.5781, 294.7852, 352.2422, 465.6563, 693.2344, 924.3125]),
+			("300 ", [62.7253, 76.1669, 89.1503, 95.3608, 101.6025, 107.6879, 113.8671, 119.39, 125.9276, 137.0099, 142.8173, 161.0497, 187.9336, 214.2813, 265.6641, 317.2969, 419.0625, 623.3438, 831.125]),
+		];
+		for (weight_prefix, chrome_width_list) in chrome_width_table {
+			for (size_index, font_size) in size_list.iter().enumerate() {
+				let font_string = format!("{}{}px system-ui", weight_prefix, font_size);
+				let width = text_string_texture_cache.measure_text(&font_string, "Hello World Wifi").width;
+				assert!((width - chrome_width_list[size_index]).abs() < 0.02, "{} {} {}", font_string, width, chrome_width_list[size_index]);
+			}
+		}
+		let measure_width = |font_string: &str| -> f32 {
+			text_string_texture_cache.measure_text(font_string, "Hello World Wifi").width
+		};
+		assert!((measure_width("16px BlinkMacSystemFont") - 115.867).abs() < 0.01);
+		if crate::platform::find_family_font_file("Apple SD Gothic Neo", 400, false).is_some() {
+			assert!((measure_width("16px -apple-system") - measure_width("16px 'Apple SD Gothic Neo'")).abs() < 0.001);
+			assert!((measure_width("16px default") - 109.072).abs() < 0.01);
+		}
+	}
+
+	//==============================================================================
+	// 폰트 문자열 크기의 단위와 calc: 맥 크롬 158 의 문서에 붙이지 않은 캔버스가 font 를 다시 읽은 값과 같다. (창 1000 x 700, 맥만)
+	// - 부모 글꼴은 Times 10px, 뿌리 글꼴은 화면 언어의 표준 글꼴 16px(한국어 Apple SD Gothic Neo, 뿌리 값은 한국어일 때만 본다).
+	// - 이름 목록이 monospace 하나뿐이면 상대 크기에 13 / 16, 이름 크기는 고정폭 표.
+	//==============================================================================
+	#[cfg(target_os = "macos")]
+	#[test]
+	fn font_size_units_match_chrome_on_macos() {
+		if crate::platform::find_family_font_file("Times", 400, false).is_none() {
+			return;
+		}
+		set_font_viewport_size(1000.0, 700.0);
+		let chrome_size_list: [(&str, f32); 75] = [
+			("2ex serif", 8.97461), ("2ch serif", 10.0), ("2cap serif", 13.2324), ("2ic serif", 20.0), ("2lh serif", 26.0), ("0.5ex serif", 2.24365), ("2EX serif", 8.97461), ("bold 2ex serif", 8.97461),
+			("2em monospace", 16.25), ("2em MONOSPACE", 16.25), ("2em monospace, serif", 20.0), ("2em \"monospace\"", 20.0), ("20px monospace", 20.0), ("medium monospace", 13.0), ("large monospace", 16.0), ("small monospace", 12.0),
+			("x-small monospace", 10.0), ("x-large monospace", 20.0), ("xx-large monospace", 26.0), ("xxx-large monospace", 39.0), ("larger monospace", 9.75), ("smaller monospace", 6.77083), ("150% monospace", 12.1875), ("2ex monospace", 7.29187),
+			("2rem monospace", 32.0), ("2vw monospace", 20.0), ("2lh monospace", 21.125), ("2ic monospace", 16.25), ("2ch monospace", 8.125),
+			("2vw serif", 20.0), ("2vh serif", 14.0), ("2vmin serif", 14.0), ("2vmax serif", 20.0), ("2vi serif", 20.0), ("2vb serif", 14.0), ("2svw serif", 20.0), ("2lvh serif", 14.0), ("2dvmax serif", 20.0),
+			("2cqw serif", 20.0), ("2cqi serif", 20.0), ("2cqb serif", 14.0), ("2cqmin serif", 14.0), ("2cqmax serif", 20.0),
+			("calc(2px + 1em) serif", 12.0), ("min(2em, 30px) serif", 20.0), ("max(1em, 3px) serif", 10.0), ("clamp(1px, 2em, 50px) serif", 20.0), ("calc((1em + 2px) / 2) serif", 6.0), ("calc(2em) monospace", 20.0), ("calc(1em + 1px) monospace", 11.0),
+			("calc(-1px) serif", 0.0), ("calc( 1px + 2px ) serif", 3.0), ("abs(-2px) serif", 2.0), ("calc(3px / 2) serif", 1.5), ("calc(infinity * 1px) serif", 10000.0), ("CALC(1px + 2px) serif", 3.0), ("calc(1ex + 1ch) serif", 9.4873),
+			("calc(100%) monospace", 8.125), ("calc(50% + 1px) monospace", 6.0), ("calc(2 * 50%) monospace", 8.125), ("max(100%, 1px) monospace", 10.0), ("calc(1em + 10%) monospace", 11.0), ("calc(pi * 1px) serif", 3.14159),
+			("clamp(5px, 1px, 3px) serif", 5.0), ("clamp(none, 1px, 3px) serif", 1.0), ("mod(5px, 2px) serif", 1.0), ("round(1.5px, 1px) serif", 2.0), ("hypot(3px, 4px) serif", 5.0), ("calc(sign(-1px) * 1px) serif", 0.0), ("calc(0px / 0) serif", 0.0),
+			("20000px serif", 10000.0), ("+2px serif", 2.0), (".5px serif", 0.5), ("1Q serif", 0.944882), ("0px serif", 0.0),
+		];
+		for (font_string, chrome_size) in chrome_size_list {
+			let font_description = parse_font_string(font_string);
+			assert!((font_description.font_size - chrome_size).abs() < 0.0005, "{} {} {}", font_string, font_description.font_size, chrome_size);
+			assert!(font_description.family_name != "sans-serif" || font_string.contains("sans-serif"), "{}", font_string);
+		}
+		if crate::platform::desktop::systemfont::read_browser_locale() == "ko" && crate::platform::find_family_font_file("Apple SD Gothic Neo", 400, false).is_some() {
+			let chrome_root_size_list: [(&str, f32); 12] = [("2rem serif", 32.0), ("2rex serif", 17.216), ("2rch serif", 20.16), ("2rcap serif", 22.4), ("2ric serif", 27.68), ("2rlh serif", 38.0), ("2rex monospace", 13.988), ("1rlh monospace", 15.4375), ("calc(1rem) serif", 16.0), ("calc(1rex) serif", 8.608), ("calc(1rlh) serif", 19.0), ("calc(1rem + 1%) serif", 16.1)];
+			for (font_string, chrome_size) in chrome_root_size_list {
+				let font_size = parse_font_string(font_string).font_size;
+				assert!((font_size - chrome_size).abs() < 0.0005, "{} {} {}", font_string, font_size, chrome_size);
+			}
+		}
+	}
+
+	//==============================================================================
+	// 일반 이름의 기본 글꼴: 맥 크롬 158 (화면 언어 한국어)의 measureText 값과 같다. (맥만, 화면 언어가 한국어일 때)
+	// - 크롬 맥 한국어 표: 표준 Apple SD Gothic Neo, serif AppleMyungjo, sans-serif Apple SD Gothic Neo, monospace Menlo, cursive Apple Chancery, fantasy Papyrus, math STIX Two Math.
+	//==============================================================================
+	#[cfg(target_os = "macos")]
+	#[test]
+	fn generic_families_match_chrome_korean_defaults_on_macos() {
+		if crate::platform::desktop::systemfont::read_browser_locale() != "ko" || crate::platform::find_family_font_file("AppleMyungjo", 400, false).is_none() {
+			return;
+		}
+		let mut text_string_texture_cache = TextStringTextureCache::new();
+		let system_font_description = parse_font_string(&format!("10px {}", crate::base::platform::SYSTEM_FONT_STRING));
+		text_string_texture_cache.set_system_font_chain(system_font_description.family_name_list);
+		text_string_texture_cache.set_system_font_fallback_enabled(true);
+		let measure_width = |font_string: &str, text: &str| -> f32 {
+			text_string_texture_cache.measure_text(font_string, text).width
+		};
+		let chrome_width_list: [(&str, f32, f32); 9] = [("serif", 124.097, 63.938), ("sans-serif", 109.072, 55.36), ("monospace", 154.125, 55.36), ("cursive", 111.352, 55.36), ("fantasy", 109.156, 55.36), ("math", 115.472, 55.36), ("Times", 110.961, 55.36), ("Courier", 153.625, 55.36), ("NoSuchFamily", 109.072, 55.36)];
+		for (family_name, latin_width, korean_width) in chrome_width_list {
+			let font_string = format!("16px {}", family_name);
+			assert!((measure_width(&font_string, "Hello World Wifi") - latin_width).abs() < 0.01, "{} {}", font_string, measure_width(&font_string, "Hello World Wifi"));
+			assert!((measure_width(&font_string, "가나다라") - korean_width).abs() < 0.01, "{} {}", font_string, measure_width(&font_string, "가나다라"));
+		}
 	}
 
 	//==============================================================================
