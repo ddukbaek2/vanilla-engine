@@ -10,8 +10,14 @@
 //   가운데 하나라도 맞으면 Hidden, 모두 풀리면 Visible 과 on_page_visibility_restored. 포커스는 Focused / Blurred, 마우스 단추와 손가락 누름은 PointerDown.
 //   웨이랜드는 가림도 최소화도 알리지 않아 Hidden 이 오지 않는다.
 // - 페이지 프로세스 복원(on_page_process_restored, 원본 Chromium freeze 뒤 resume 과 bfcache): suspended 뒤 resumed, 그리고 시스템 잠자기에서 깬 것.
-//   잠자기는 두 프레임 사이에 벽시계(SystemTime)가 단조 시계(Instant)보다 SYSTEM_SLEEP_GAP_SECONDS 넘게 더 흘렀으면 깬 것으로 본다.
-//   (맥과 리눅스의 단조 시계는 잠든 동안 멈춘다. 윈도우의 단조 시계는 잠든 동안에도 흐르는 것으로 알려져 있어 이 판정이 맞지 않을 수 있다, 짐작)
+//   윈도우는 창을 서브클래싱해 WM_POWERBROADCAST 의 PBT_APMRESUMEAUTOMATIC 을 받는다. (desktop/windowsplatform.rs, 윈도우의 단조 시계는 잠든 동안에도 흘러 시계로는 못 가린다)
+//   맥과 리눅스는 두 프레임 사이에 벽시계(SystemTime)가 단조 시계(Instant)보다 SYSTEM_SLEEP_GAP_SECONDS 넘게 더 흘렀으면 깬 것으로 본다.
+//   (러스트 Instant 는 맥에서 CLOCK_UPTIME_RAW, 리눅스에서 CLOCK_MONOTONIC 이라 잠든 동안 멈춘다. 러스트는 이것을 보장하지 않는다고 적어 두었다)
+// - 주된 손이 손가락인지(is_coarse_pointer): 윈도우는 크로미엄의 (pointer: coarse) 판정을 옮겨 태블릿 모드나 마우스 없는 터치 기기면 참이다.
+//   맥은 크로미엄도 늘 마우스로 보아 거짓이다. 리눅스는 크로미엄이 터치스크린과 마우스 장치 목록(evdev)을 보는데, winit 이 장치 목록을 주지 않아 거짓으로 둔다.
+// - 키 이름: winit 의 SuperLeft, SuperRight 는 W3C 의 MetaLeft, MetaRight, winit 의 Meta 는 W3C 의 Super 로 바꿔 넣는다.
+// - 그림 커서(PointerCursor.register_image_cursor): 그림 파일을 읽어 winit 의 CustomCursor 로 만든다. 맥은 그림 크기가 그대로 포인트 크기라 1 배 그림을,
+//   윈도우와 리눅스는 물리 픽셀이라 창 배율에 맞춰(2 배 그림이 있으면 그것을) 늘인 그림과 핫스팟을 쓴다. 만드는 동안과 못 만들면 함께 준 CSS 커서다.
 // - 렌더 배율 상한(ViewManager.set_max_render_pixel_ratio): 그 배율로 줄인 크기로 그리고 프레임 끝에 창 크기로 늘인다. (desktop/renderscaler.rs)
 //   입력 좌표는 창의 배율로 논리 좌표로 바꾸므로 렌더 크기와 상관없다.
 // - 캔버스 비 상한(EngineConfiguration.max_canvas_aspect_ratio): 창이 그보다 길쭉하면 캔버스(그리는 영역)를 원본처럼 줄여 창 가운데에 두고 나머지는 검다.
@@ -33,19 +39,26 @@ use raw_window_handle::HasWindowHandle;
 use std::num::NonZeroU32;
 use std::rc::Rc;
 use std::time::Duration;
-use web_time::{Instant, SystemTime};
+use web_time::Instant;
+#[cfg(not(target_os = "windows"))]
+use web_time::SystemTime;
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent};
 use crate::core::inputmanager::{InputDevice, MouseButton as EngineMouseButton};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
-use winit::window::CursorIcon;
+use winit::window::{CursorIcon, CustomCursor};
+use crate::core::pointercursor::CursorValue;
+use std::cell::RefCell;
+use std::collections::HashMap;
 use winit::keyboard::PhysicalKey;
 use winit::window::{Icon, Window, WindowId};
 
 mod renderscaler;
 mod textinput;
-pub use textinput::{read_clipboard_text, write_clipboard_text};
+#[cfg(target_os = "windows")]
+mod windowsplatform;
+pub use textinput::{read_clipboard_text, read_clipboard_text_with_callback, write_clipboard_text};
 #[cfg(target_os = "macos")]
 pub mod gamepadhaptics;
 
@@ -54,12 +67,17 @@ pub type PlatformWindow = Rc<Window>;
 
 // 휠 한 줄을 픽셀로 볼 때의 값. (브라우저 deltaMode 줄 단위 환산과 같은 자리)
 const WHEEL_LINE_PIXEL_SIZE: f32 = 40.0;
-// 두 프레임 사이에 벽시계가 단조 시계보다 이만큼 넘게 더 흐르면 시스템이 잠들었다 깬 것으로 본다. (초)
+// 두 프레임 사이에 벽시계가 단조 시계보다 이만큼 넘게 더 흐르면 시스템이 잠들었다 깬 것으로 본다. (초, 맥과 리눅스)
+#[cfg(not(target_os = "windows"))]
 const SYSTEM_SLEEP_GAP_SECONDS: f64 = 2.0;
 
 thread_local! {
 	// 창 안에서 캔버스의 왼쪽 위. (논리 좌표, 캔버스 비 상한으로 가운데에 둘 때만 0 이 아니다)
 	static CANVAS_CLIENT_POSITION: std::cell::Cell<Vector2> = const { std::cell::Cell::new(Vector2::create(0.0, 0.0)) };
+	// 만든 그림 커서. (열쇠는 그림 주소, 2 배 그림 주소, 핫스팟, 창 배율. 못 만든 것은 None 으로 두어 다시 읽지 않는다)
+	static CUSTOM_CURSOR_TABLE: RefCell<HashMap<String, Option<CustomCursor>>> = RefCell::new(HashMap::new());
+	// 아직 만들지 않은 그림 커서. (set_cursor 가 넣고, 이벤트 루프가 프레임 뒤에 만들어 건다)
+	static PENDING_CUSTOM_CURSOR: RefCell<Option<CursorValue>> = const { RefCell::new(None) };
 }
 
 //==============================================================================
@@ -89,6 +107,7 @@ pub fn run(engine_runner: EngineRunner) -> Result<(), String> {
 		window_scale_factor: 1.0,
 		applied_max_render_pixel_ratio: 0.0,
 		render_scaler: None,
+		#[cfg(not(target_os = "windows"))]
 		last_frame_clock: None,
 		canvas_physical_rect: [0, 0, 0, 0],
 	};
@@ -114,8 +133,9 @@ pub fn set_cursor_visible(platform_window: Option<&PlatformWindow>, is_visible: 
 
 //==============================================================================
 // 커서 모양 설정. (CSS 커서 이름을 winit 커서 아이콘으로, none 이면 감춤, 모르는 이름은 기본 화살표)
+// - 그림 커서는 만들어 둔 것이 있으면 그것을 건다. 아직 없으면 이벤트 루프가 만들도록 부탁해 두고 그동안은 함께 준 CSS 커서를 쓴다.
 //==============================================================================
-pub fn set_cursor(platform_window: Option<&PlatformWindow>, _css_value: &str, cursor_name: &str) {
+pub fn set_cursor(platform_window: Option<&PlatformWindow>, cursor_value: &CursorValue) {
 	let window = match platform_window {
 		Some(window) => {
 			window
@@ -124,6 +144,30 @@ pub fn set_cursor(platform_window: Option<&PlatformWindow>, _css_value: &str, cu
 			return;
 		}
 	};
+	if !cursor_value.image_url.is_empty() {
+		let custom_cursor_key = create_custom_cursor_key(cursor_value, window.scale_factor());
+		let custom_cursor = CUSTOM_CURSOR_TABLE.with(|custom_cursor_table| custom_cursor_table.borrow().get(&custom_cursor_key).cloned());
+		match custom_cursor {
+			Some(Some(custom_cursor)) => {
+				window.set_cursor_visible(true);
+				window.set_cursor(custom_cursor);
+				return;
+			}
+			Some(None) => {
+			}
+			None => {
+				PENDING_CUSTOM_CURSOR.with(|pending_custom_cursor| {
+					*pending_custom_cursor.borrow_mut() = Some(cursor_value.clone());
+				});
+			}
+		}
+	}
+	else {
+		PENDING_CUSTOM_CURSOR.with(|pending_custom_cursor| {
+			*pending_custom_cursor.borrow_mut() = None;
+		});
+	}
+	let cursor_name = cursor_value.fallback_name.as_str();
 	if cursor_name == "none" {
 		window.set_cursor_visible(false);
 		return;
@@ -168,10 +212,17 @@ pub fn set_cursor(platform_window: Option<&PlatformWindow>, _css_value: &str, cu
 }
 
 //==============================================================================
-// 주된 손이 손가락인지. (데스크탑은 마우스가 주된 손이다)
+// 주된 손이 손가락인지. (윈도우는 크로미엄처럼 태블릿 모드나 마우스 없는 터치 기기면 참, 맥과 리눅스는 마우스가 주된 손으로 본다)
 //==============================================================================
 pub fn is_coarse_pointer() -> bool {
-	false
+	#[cfg(target_os = "windows")]
+	{
+		windowsplatform::is_coarse_pointer()
+	}
+	#[cfg(not(target_os = "windows"))]
+	{
+		false
+	}
 }
 
 //==============================================================================
@@ -232,6 +283,12 @@ pub fn read_safe_area_insets() -> [f32; 4] {
 }
 
 //==============================================================================
+// 응용 프로그램 종료. (데스크탑은 엔진의 종료 요청을 보고 이벤트 루프가 끝나므로 따로 할 일이 없다)
+//==============================================================================
+pub fn exit_application() {
+}
+
+//==============================================================================
 // 창 제목 설정.
 //==============================================================================
 pub fn set_title(platform_window: Option<&PlatformWindow>, title: &str) {
@@ -241,10 +298,13 @@ pub fn set_title(platform_window: Option<&PlatformWindow>, title: &str) {
 }
 
 //==============================================================================
-// 애셋 바이트 읽기. (파일을 그 자리에서 읽고 끝낸다, 파일에는 캐시가 없어 is_no_cache 는 쓰지 않는다)
+// 애셋 바이트 읽기. (파일을 그 자리에서 읽고 끝낸다, 파일에는 캐시가 없어 is_no_cache 는 쓰지 않는다. 읽은 파일은 리소스 사용량에 적는다)
 //==============================================================================
 pub fn request_asset_bytes(asset_location: String, load_handle: AssetLoadHandle, _is_no_cache: bool) {
 	let result = std::fs::read(&asset_location).map_err(|error| format!("애셋 읽기 실패 ({}): {}", asset_location, error));
+	if let Ok(bytes) = &result {
+		crate::base::platform::record_loaded_file(&asset_location, bytes.len() as u64);
+	}
 	load_handle.finish(result);
 }
 
@@ -282,7 +342,8 @@ struct DesktopApplication {
 	render_scaler: Option<renderscaler::RenderScaler>,
 	// 창을 숨기고 도는지. (찍기 모드, is_capture_window_hidden)
 	is_window_hidden: bool,
-	// 지난 프레임의 단조 시계와 벽시계. (잠자기 판정)
+	// 지난 프레임의 단조 시계와 벽시계. (맥과 리눅스의 잠자기 판정)
+	#[cfg(not(target_os = "windows"))]
 	last_frame_clock: Option<(Instant, SystemTime)>,
 	// 창 안의 캔버스 자리. (물리 픽셀 [왼쪽, 위, 가로, 세로], 위 왼쪽 원점)
 	canvas_physical_rect: [i32; 4],
@@ -363,6 +424,10 @@ impl DesktopApplication {
 		};
 		let graphic = Graphic::new(gl)?;
 
+		#[cfg(target_os = "windows")]
+		{
+			windowsplatform::install_power_broadcast_hook(&window);
+		}
 		let window = Rc::new(window);
 		self.engine_runner.attach_graphic(graphic);
 		self.engine_runner.engine.platform_window = Some(window.clone());
@@ -436,8 +501,19 @@ impl DesktopApplication {
 	}
 
 	//==============================================================================
-	// 시스템 잠자기에서 깼는지 보고 알리기. (두 프레임 사이에 벽시계가 단조 시계보다 SYSTEM_SLEEP_GAP_SECONDS 넘게 더 흘렀으면)
+	// 시스템 잠자기에서 깼는지 보고 알리기. (윈도우는 WM_POWERBROADCAST 의 깸 알림을 받았으면)
 	//==============================================================================
+	#[cfg(target_os = "windows")]
+	fn check_system_sleep(&mut self) {
+		if windowsplatform::take_system_resumed() {
+			self.engine_runner.notify_page_process_restored();
+		}
+	}
+
+	//==============================================================================
+	// 시스템 잠자기에서 깼는지 보고 알리기. (맥과 리눅스는 두 프레임 사이에 벽시계가 단조 시계보다 SYSTEM_SLEEP_GAP_SECONDS 넘게 더 흘렀으면)
+	//==============================================================================
+	#[cfg(not(target_os = "windows"))]
 	fn check_system_sleep(&mut self) {
 		let now_instant = Instant::now();
 		let now_system_time = SystemTime::now();
@@ -545,6 +621,54 @@ impl DesktopApplication {
 }
 
 impl DesktopApplication {
+	//==============================================================================
+	// 부탁받은 그림 커서를 만들어 걸기. (그림 파일을 애셋 폴더에서 읽어 winit 커서로 만든다, 못 만들면 CSS 커서를 그대로 둔다)
+	//==============================================================================
+	fn apply_pending_custom_cursor(&mut self, event_loop: &ActiveEventLoop) {
+		let cursor_value = match PENDING_CUSTOM_CURSOR.with(|pending_custom_cursor| pending_custom_cursor.borrow_mut().take()) {
+			Some(cursor_value) => {
+				cursor_value
+			}
+			None => {
+				return;
+			}
+		};
+		let window = match &self.window_state {
+			Some(window_state) => {
+				window_state.window.clone()
+			}
+			None => {
+				return;
+			}
+		};
+		let scale_factor = window.scale_factor();
+		let custom_cursor_key = create_custom_cursor_key(&cursor_value, scale_factor);
+		let engine = &self.engine_runner.engine;
+		let image_path = engine.resolve_asset_path(&cursor_value.image_url);
+		let image_path_2x = if cursor_value.image_url_2x.is_empty() {
+			None
+		}
+		else {
+			Some(engine.resolve_asset_path(&cursor_value.image_url_2x))
+		};
+		let custom_cursor = match create_custom_cursor_source(&image_path, image_path_2x.as_deref(), cursor_value.hotspot_x, cursor_value.hotspot_y, scale_factor) {
+			Ok(custom_cursor_source) => {
+				Some(event_loop.create_custom_cursor(custom_cursor_source))
+			}
+			Err(error) => {
+				eprintln!("Engine: 그림 커서를 만들지 못했습니다: {}", error);
+				None
+			}
+		};
+		CUSTOM_CURSOR_TABLE.with(|custom_cursor_table| {
+			custom_cursor_table.borrow_mut().insert(custom_cursor_key, custom_cursor.clone());
+		});
+		if let Some(custom_cursor) = custom_cursor {
+			window.set_cursor_visible(true);
+			window.set_cursor(custom_cursor);
+		}
+	}
+
 	//==============================================================================
 	// 줄인 렌더 크기로 그렸거나 캔버스를 가운데에 두었으면 창의 캔버스 자리로 늘여 그리기. (렌더 크기가 창 크기와 같으면 하지 않는다)
 	//==============================================================================
@@ -671,7 +795,7 @@ impl ApplicationHandler for DesktopApplication {
 
 			WindowEvent::KeyboardInput { event: key_event, .. } => {
 				if let PhysicalKey::Code(key_code) = key_event.physical_key {
-					let key = format!("{:?}", key_code);
+					let key = convert_key_code_to_code_name(key_code);
 					let input_manager = self.engine_runner.engine.get_input_manager_mut();
 					match key_event.state {
 						ElementState::Pressed => {
@@ -758,6 +882,7 @@ impl ApplicationHandler for DesktopApplication {
 			}
 			WindowEvent::RedrawRequested => {
 				self.update_frame();
+				self.apply_pending_custom_cursor(event_loop);
 				if self.engine_runner.engine.is_exit_requested() {
 					event_loop.exit();
 				}
@@ -816,6 +941,74 @@ impl ApplicationHandler for DesktopApplication {
 			}
 		}
 		event_loop.set_control_flow(ControlFlow::WaitUntil(self.next_frame_instant));
+	}
+}
+
+//==============================================================================
+// 그림 커서 열쇠. (그림 주소, 2 배 그림 주소, 핫스팟, 창 배율이 같으면 같은 커서)
+//==============================================================================
+fn create_custom_cursor_key(cursor_value: &CursorValue, scale_factor: f64) -> String {
+	format!("{}|{}|{}|{}|{}", cursor_value.image_url, cursor_value.image_url_2x, cursor_value.hotspot_x, cursor_value.hotspot_y, scale_factor)
+}
+
+//==============================================================================
+// 그림 파일로 winit 커서 원본 만들기. (1 배 그림 기준 핫스팟)
+// - 맥: winit 이 그림의 픽셀 수를 그대로 포인트 크기로 쓰므로 1 배 그림 그대로.
+// - 윈도우, 리눅스: 그림의 픽셀 수가 화면 픽셀 수라 창 배율만큼 늘인다. 배율이 1 보다 크고 2 배 그림이 있으면 그것을 맞춰 쓰고 핫스팟도 배율만큼 옮긴다.
+//   (브라우저가 그림 커서를 기기 배율로 늘이는 것과 같은 크기)
+//==============================================================================
+fn create_custom_cursor_source(image_path: &std::path::Path, image_path_2x: Option<&std::path::Path>, hotspot_x: f32, hotspot_y: f32, scale_factor: f64) -> Result<winit::window::CustomCursorSource, String> {
+	let cursor_scale = if cfg!(target_os = "macos") {
+		1.0
+	}
+	else {
+		scale_factor.max(1.0)
+	};
+	let (source_path, source_scale) = match image_path_2x {
+		Some(image_path_2x) if cursor_scale > 1.0 => {
+			(image_path_2x, 2.0)
+		}
+		_ => {
+			(image_path, 1.0)
+		}
+	};
+	let image_bytes = std::fs::read(source_path).map_err(|error| format!("{} ({})", error, source_path.display()))?;
+	crate::base::platform::record_loaded_file(&source_path.to_string_lossy(), image_bytes.len() as u64);
+	let source_image = image::load_from_memory(&image_bytes).map_err(|error| format!("{} ({})", error, source_path.display()))?.to_rgba8();
+	let base_width = source_image.width() as f64 / source_scale;
+	let base_height = source_image.height() as f64 / source_scale;
+	let cursor_width = ((base_width * cursor_scale).round() as u32).max(1);
+	let cursor_height = ((base_height * cursor_scale).round() as u32).max(1);
+	let cursor_image = if cursor_width == source_image.width() && cursor_height == source_image.height() {
+		source_image
+	}
+	else {
+		image::imageops::resize(&source_image, cursor_width, cursor_height, image::imageops::FilterType::Triangle)
+	};
+	let cursor_hotspot_x = ((hotspot_x as f64 * cursor_scale).round().max(0.0) as u32).min(cursor_width - 1);
+	let cursor_hotspot_y = ((hotspot_y as f64 * cursor_scale).round().max(0.0) as u32).min(cursor_height - 1);
+	CustomCursor::from_rgba(cursor_image.into_raw(), cursor_width as u16, cursor_height as u16, cursor_hotspot_x as u16, cursor_hotspot_y as u16).map_err(|error| error.to_string())
+}
+
+//==============================================================================
+// winit 키를 원본 KeyboardEvent.code 이름으로. (winit 이름이 W3C 와 같아 그대로 쓰고, 다른 셋만 바꾼다)
+// - 윈도우 키(커맨드 키): winit SuperLeft, SuperRight → W3C MetaLeft, MetaRight
+// - W3C 의 옛 Super 키: winit Meta → Super
+//==============================================================================
+fn convert_key_code_to_code_name(key_code: winit::keyboard::KeyCode) -> String {
+	match key_code {
+		winit::keyboard::KeyCode::SuperLeft => {
+			String::from("MetaLeft")
+		}
+		winit::keyboard::KeyCode::SuperRight => {
+			String::from("MetaRight")
+		}
+		winit::keyboard::KeyCode::Meta => {
+			String::from("Super")
+		}
+		_ => {
+			format!("{:?}", key_code)
+		}
 	}
 }
 
@@ -883,6 +1076,39 @@ fn load_window_icon(icon_path: &std::path::Path) -> Result<Icon, String> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	//==============================================================================
+	// 그림 커서 원본은 그림 파일로 만들고(창 배율과 2 배 그림, 핫스팟은 그림 안으로), 없는 파일은 오류다.
+	//==============================================================================
+	#[test]
+	fn custom_cursor_source_from_image_file() {
+		let image_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/assets/atlas/icons.png");
+		assert!(create_custom_cursor_source(&image_path, None, 4.0, 4.0, 1.0).is_ok());
+		assert!(create_custom_cursor_source(&image_path, Some(&image_path), 4000.0, 4.0, 1.5).is_ok());
+		let missing_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/assets/missing_cursor.png");
+		assert!(create_custom_cursor_source(&missing_path, None, 0.0, 0.0, 1.0).is_err());
+		let cursor_value = CursorValue {
+			css_value: String::new(),
+			fallback_name: String::from("pointer"),
+			image_url: String::from("cursor.png"),
+			image_url_2x: String::new(),
+			hotspot_x: 1.0,
+			hotspot_y: 2.0,
+		};
+		assert_ne!(create_custom_cursor_key(&cursor_value, 1.0), create_custom_cursor_key(&cursor_value, 2.0));
+	}
+
+	//==============================================================================
+	// winit 키는 W3C code 이름으로 넣는다. (윈도우 키는 MetaLeft, MetaRight)
+	//==============================================================================
+	#[test]
+	fn key_code_becomes_code_name() {
+		assert_eq!(convert_key_code_to_code_name(winit::keyboard::KeyCode::SuperLeft), crate::core::inputmanager::KeyCode::META);
+		assert_eq!(convert_key_code_to_code_name(winit::keyboard::KeyCode::SuperRight), "MetaRight");
+		assert_eq!(convert_key_code_to_code_name(winit::keyboard::KeyCode::NumpadAdd), crate::core::inputmanager::KeyCode::NUMPAD_ADD);
+		assert_eq!(convert_key_code_to_code_name(winit::keyboard::KeyCode::Backquote), crate::core::inputmanager::KeyCode::BACKQUOTE);
+		assert_eq!(convert_key_code_to_code_name(winit::keyboard::KeyCode::AudioVolumeUp), crate::core::inputmanager::KeyCode::AUDIOVOLUMEUP);
+	}
 
 	//==============================================================================
 	// 쿼리 이름은 VANILLA_ 뒤 대문자 뱀꼴 환경 변수로 읽는다.

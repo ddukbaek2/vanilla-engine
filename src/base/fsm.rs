@@ -7,11 +7,15 @@
 //   원본의 null 상태(아직 아무 상태도 아님)는 None 이다.
 // - 원본 handlers 객체 { enter?, tick?, exit? } 는 StateHandlers 구조체다. 콜백은 Box<dyn FnMut> 라서
 //   게임 상태를 바꾸려면 Rc<Cell> / Rc<RefCell> 을 잡아 넣는다.
-// - 원본은 처리 함수 안에서 같은 기계의 change_state 를 다시 부를 수 있다. 러스트 판은 처리 함수가 기계를 빌릴 수 없어서
-//   그렇게 못 한다. 처리 함수가 다음 상태를 표시해 두고, 바깥에서 tick 뒤에 change_state 를 부른다.
+// - 원본은 처리 함수 안에서 같은 기계의 change_state 를 그 자리에서 부른다. 러스트 판은 처리 함수가 기계를 빌릴 수 없어서
+//   get_state_change_requester 로 받은 손잡이(StateChangeRequester)를 처리 함수에 잡아 넣고 그것의 change_state 로 부탁한다.
+//   기계는 그 처리 함수가 끝난 뒤 부탁받은 차례대로 전이한다. (원본에서 처리 함수가 change_state 를 맨 끝에 부른 것과 같다)
+//   부탁의 성공 여부는 그 자리에서 돌려주지 않는다. 처리 함수 밖에서 부탁하면 다음 tick 이나 change_state 때 전이한다.
 //==============================================================================
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::Hash;
+use std::rc::Rc;
 
 // 상태에 들어갈 때 부른다. (이전 상태 이름, 처음이면 None)
 pub type StateEnterHandler<StateName> = Box<dyn FnMut(Option<&StateName>)>;
@@ -43,6 +47,34 @@ impl<StateName> Default for StateHandlers<StateName> {
 }
 
 //==============================================================================
+// 처리 함수 안에서 전이를 부탁하는 손잡이. (FiniteStateMachine::get_state_change_requester 가 주고, 복제해 처리 함수에 잡아 넣는다)
+//==============================================================================
+pub struct StateChangeRequester<StateName> {
+	// 부탁받은 전이. (다음 상태 이름, is_forced)
+	pending_change_list: Rc<RefCell<Vec<(StateName, bool)>>>,
+}
+
+impl<StateName> Clone for StateChangeRequester<StateName> {
+	//==============================================================================
+	// 같은 기계를 가리키는 손잡이 복제.
+	//==============================================================================
+	fn clone(&self) -> StateChangeRequester<StateName> {
+		StateChangeRequester {
+			pending_change_list: self.pending_change_list.clone(),
+		}
+	}
+}
+
+impl<StateName> StateChangeRequester<StateName> {
+	//==============================================================================
+	// 상태 전이 부탁. (원본 처리 함수 안의 change_state, 기계가 지금 처리 함수가 끝난 뒤 차례대로 전이한다)
+	//==============================================================================
+	pub fn change_state(&self, next_state_name: StateName, is_forced: bool) {
+		self.pending_change_list.borrow_mut().push((next_state_name, is_forced));
+	}
+}
+
+//==============================================================================
 // 유한 상태 기계.
 //==============================================================================
 pub struct FiniteStateMachine<StateName = String> {
@@ -51,6 +83,8 @@ pub struct FiniteStateMachine<StateName = String> {
 	state_seconds: f32,
 	transition_guard: Option<TransitionGuard<StateName>>,
 	transition_event: Option<TransitionEvent<StateName>>,
+	// 처리 함수가 부탁한 전이. (StateChangeRequester 와 나눠 든다)
+	pending_change_list: Rc<RefCell<Vec<(StateName, bool)>>>,
 }
 
 impl<StateName: Clone + Eq + Hash> Default for FiniteStateMachine<StateName> {
@@ -73,6 +107,16 @@ impl<StateName: Clone + Eq + Hash> FiniteStateMachine<StateName> {
 			state_seconds: 0.0,
 			transition_guard: None,
 			transition_event: None,
+			pending_change_list: Rc::new(RefCell::new(Vec::new())),
+		}
+	}
+
+	//==============================================================================
+	// 처리 함수 안에서 전이를 부탁하는 손잡이. (복제해 처리 함수에 잡아 넣는다)
+	//==============================================================================
+	pub fn get_state_change_requester(&self) -> StateChangeRequester<StateName> {
+		StateChangeRequester {
+			pending_change_list: self.pending_change_list.clone(),
 		}
 	}
 
@@ -89,8 +133,18 @@ impl<StateName: Clone + Eq + Hash> FiniteStateMachine<StateName> {
 	// - 같은 상태로의 전이는 기본적으로 무시한다. (is_forced 가 참이면 exit / enter 를 다시 부른다)
 	// - 전이 가드가 거짓을 돌려주면 전이하지 않는다.
 	// - 순서: 이전 상태 exit → 상태 바꾸고 머문 시간 0 → 전이 알림 → 다음 상태 enter.
+	// - 처리 함수가 그 사이에 부탁한 전이는 이 전이가 끝난 뒤 차례대로 한다.
 	//==============================================================================
 	pub fn change_state(&mut self, next_state_name: StateName, is_forced: bool) -> bool {
+		let is_changed = self.change_state_now(next_state_name, is_forced);
+		self.apply_pending_state_changes();
+		is_changed
+	}
+
+	//==============================================================================
+	// 상태 전이 몸통. (부탁받은 전이는 하지 않는다)
+	//==============================================================================
+	fn change_state_now(&mut self, next_state_name: StateName, is_forced: bool) -> bool {
 		if !self.state_table.contains_key(&next_state_name) {
 			return false;
 		}
@@ -128,9 +182,35 @@ impl<StateName: Clone + Eq + Hash> FiniteStateMachine<StateName> {
 	}
 
 	//==============================================================================
-	// 갱신. (머문 시간을 늘리고 현재 상태의 tick 을 부른다)
+	// 부탁받은 전이를 차례대로 하기. (전이 중에 새로 부탁한 것도 이어서 한다)
+	//==============================================================================
+	fn apply_pending_state_changes(&mut self) {
+		loop {
+			let pending_change = {
+				let mut pending_change_list = self.pending_change_list.borrow_mut();
+				if pending_change_list.is_empty() {
+					break;
+				}
+				pending_change_list.remove(0)
+			};
+			let (next_state_name, is_forced) = pending_change;
+			self.change_state_now(next_state_name, is_forced);
+		}
+	}
+
+	//==============================================================================
+	// 갱신. (부탁받은 전이를 먼저 하고, 머문 시간을 늘리고 현재 상태의 tick 을 부른다. tick 이 부탁한 전이는 그 뒤에 한다)
 	//==============================================================================
 	pub fn tick(&mut self, time_delta: f32) {
+		self.apply_pending_state_changes();
+		self.tick_current_state(time_delta);
+		self.apply_pending_state_changes();
+	}
+
+	//==============================================================================
+	// 현재 상태의 tick 부르기. (머문 시간을 늘린다)
+	//==============================================================================
+	fn tick_current_state(&mut self, time_delta: f32) {
 		let state_name = match self.state_name.as_ref() {
 			Some(state_name) => {
 				state_name
@@ -274,6 +354,57 @@ mod tests {
 		assert_eq!(state_machine.get_state_name(), Some(&TestState::Dead));
 		state_machine.set_transition_guard(None);
 		assert!(state_machine.change_state(TestState::Idle, false));
+	}
+
+	//==============================================================================
+	// 처리 함수 안에서 부탁한 전이는 그 처리 함수가 끝난 뒤 차례대로 한다. (tick 이 부탁, 그 enter 가 또 부탁)
+	//==============================================================================
+	#[test]
+	fn handlers_request_state_changes() {
+		let records = Rc::new(RefCell::new(Vec::<String>::new()));
+		let mut state_machine = FiniteStateMachine::<TestState>::new();
+		let state_change_requester = state_machine.get_state_change_requester();
+		let mut idle_handlers = create_recording_handlers("idle", &records);
+		let idle_tick_records = records.clone();
+		let idle_requester = state_change_requester.clone();
+		idle_handlers.tick = Some(Box::new(move |_time_delta: f32, state_seconds: f32| {
+			idle_tick_records.borrow_mut().push(format!("idle.tick({})", state_seconds));
+			if state_seconds >= 1.0 {
+				idle_requester.change_state(TestState::Run, false);
+			}
+		}));
+		let mut run_handlers = create_recording_handlers("run", &records);
+		let run_enter_records = records.clone();
+		let run_requester = state_change_requester.clone();
+		run_handlers.enter = Some(Box::new(move |previous_state_name: Option<&TestState>| {
+			run_enter_records.borrow_mut().push(format!("run.enter({:?})", previous_state_name));
+			run_requester.change_state(TestState::Dead, false);
+			run_requester.change_state(TestState::Unknown, false);
+		}));
+		state_machine.add_state(TestState::Idle, idle_handlers);
+		state_machine.add_state(TestState::Run, run_handlers);
+		state_machine.add_state(TestState::Dead, StateHandlers::default());
+
+		assert!(state_machine.change_state(TestState::Idle, false));
+		state_machine.tick(0.5);
+		assert_eq!(state_machine.get_state_name(), Some(&TestState::Idle));
+		state_machine.tick(0.5);
+		assert_eq!(state_machine.get_state_name(), Some(&TestState::Dead));
+		let expected = vec![
+			"idle.enter(None)",
+			"idle.tick(0.5)",
+			"idle.tick(1)",
+			"idle.exit(Run)",
+			"run.enter(Some(Idle))",
+			"run.exit(Dead)",
+		];
+		assert_eq!(*records.borrow(), expected);
+
+		// 처리 함수 밖에서 부탁하면 다음 tick 때 전이한다.
+		state_change_requester.change_state(TestState::Idle, false);
+		assert_eq!(state_machine.get_state_name(), Some(&TestState::Dead));
+		state_machine.tick(0.25);
+		assert_eq!(state_machine.get_state_name(), Some(&TestState::Idle));
 	}
 
 	//==============================================================================

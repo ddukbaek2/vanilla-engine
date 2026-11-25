@@ -35,14 +35,14 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 slotmap = "1"
 # performance.now() 를 쓰는 Instant. (네이티브에서는 std::time 그대로)
 web-time = "1"
-# 게임패드. (데스크탑은 OS 입력, 웹은 navigator.getGamepads() 를 읽는다. 원본 GamepadManager 의 입력원)
-gilrs = "0.11"
 # 웹소켓. (데스크탑은 tungstenite 스레드, 웹은 브라우저 WebSocket. 원본 web/websocketclient.js 의 WebSocket 자리)
 ewebsock = "0.8"
 
 # 데스크탑: 창(winit)과 GL 3.3 코어 컨텍스트(glutin).
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 winit = "0.30"
+# 게임패드. (데스크탑 OS 입력, 원본 GamepadManager 의 입력원. 웹은 원본처럼 navigator.getGamepads() 를 직접 읽는다)
+gilrs = "0.11"
 glutin = "0.32"
 glutin-winit = "0.5"
 raw-window-handle = "0.6"
@@ -52,6 +52,10 @@ kira = { version = "0.12", default-features = false, features = ["cpal", "cpal-r
 icu_segmenter = "2"
 # 시스템 클립보드. (입력 필드의 복사, 잘라내기, 붙여넣기. winit 에 클립보드가 없다. 그림 기능은 끈다)
 arboard = { version = "3", default-features = false }
+
+# 윈도우: 잠자기에서 깸(WM_POWERBROADCAST)을 받으려 창을 서브클래싱하고, 주된 손이 손가락인지 크로미엄처럼 읽는다. (winit 과 같은 판, 쓰는 기능만 켠다)
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_Devices_Display", "Win32_System_Power", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 # 맥: 게임패드 진동. (gilrs 의 macOS force feedback 이 비어 있어, GameController 의 GCController.haptics 로 CoreHaptics 엔진을 지어 떤다. 쓰는 기능만 켠다)
 [target.'cfg(target_os = "macos")'.dependencies]

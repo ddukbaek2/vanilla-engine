@@ -35,3 +35,19 @@ pub use web::is_text_field_focused;
 pub(crate) use web::is_gl_binding_present;
 #[cfg(target_os = "macos")]
 pub use desktop::gamepadhaptics::{release_disconnected_gamepad_haptics, vibrate_gamepads};
+// 최대 FPS 제한의 프레임 세기. (웹이 쓴다, 원본 engine.js 의 프레임 세기)
+#[cfg(any(target_arch = "wasm32", test))]
+pub(crate) mod framelimiter;
+// 응용 프로그램 종료. (원본 exitApplication, 웹은 Capacitor App.exitApp 이나 window.close, 데스크탑은 이벤트 루프가 끝난다)
+#[cfg(not(target_arch = "wasm32"))]
+pub use desktop::exit_application;
+#[cfg(target_arch = "wasm32")]
+pub use web::exit_application;
+// 시스템 클립보드 글을 읽어 콜백에 넘기기. (웹은 navigator.clipboard.readText 가 끝난 뒤, 데스크탑은 그 자리에서)
+#[cfg(not(target_arch = "wasm32"))]
+pub use desktop::read_clipboard_text_with_callback;
+#[cfg(target_arch = "wasm32")]
+pub use web::read_clipboard_text_with_callback;
+// 웹 클립보드를 비동기로 읽어 그 입력 필드에 붙일 글로 넣기. (UIInputField.paste)
+#[cfg(target_arch = "wasm32")]
+pub(crate) use web::request_clipboard_paste;

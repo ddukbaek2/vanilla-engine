@@ -9,8 +9,9 @@
 // - 로캘: 원본은 브라우저의 Intl(ICU)에 맡긴다. 러스트 std 에는 그런 것이 없어서 소수점, 천 단위 기호, 음수 앞붙이, 숫자 모양,
 //   위 묶음 길이(인도식은 3 다음 2), 최소 묶음 자리(1234 는 묶지 않는 es, pl 등), NaN 글을 node 25(ICU 78.3, CLDR 48)의 Intl 에서 뽑아 표로 넣었다.
 //   무한대는 모든 로캘이 ∞ 다. 언어 태그는 대소문자를 가리지 않고 뒤 조각부터 하나씩 떼며 표에서 찾는다. (zh-Hant-TW → zh-hant)
-//   유니코드 확장(-u-...)은 보지 않고, 밑줄은 하이픈으로 본다. 표에 없는 태그는 en-US 로 쓴다.
-//   (원본은 표에 없는 태그를 브라우저의 기본 로캘로 쓰고, 틀린 태그면 RangeError 를 던진다)
+//   유니코드 확장(-u-...)은 보지 않고, 밑줄은 하이픈으로 본다. 표에 없는 태그는 원본이 브라우저의 기본 로캘로 쓰듯 시스템 언어로 쓴다.
+//   (웹은 navigator.languages 의 첫째, 데스크탑은 LANGUAGE / LC_ALL / LC_MESSAGES / LANG 의 첫째. 그것도 표에 없으면 en-US)
+//   (원본은 틀린 태그면 RangeError 를 던진다. 러스트 판은 던지지 않고 표에 없는 태그처럼 쓴다)
 // - fraction_digits 는 원본 toFixed 처럼 0 ~ 100 이 맞다. 넘겨도 던지지 않고 그 자릿수로 낸다.
 //==============================================================================
 
@@ -262,9 +263,30 @@ fn trim_trailing_zero(number_text: &str) -> String {
 }
 
 //==============================================================================
-// 언어 태그로 로캘 찾기. (뒤 조각부터 하나씩 떼며 찾고, 없으면 en-US)
+// 언어 태그로 로캘 찾기. (표에 없으면 원본의 브라우저 기본 로캘 자리인 시스템 언어, 그것도 없으면 en-US)
 //==============================================================================
 fn find_number_locale(locale: &str) -> &'static NumberLocale {
+	if let Some(number_locale) = find_table_number_locale(locale) {
+		return number_locale;
+	}
+	let system_language_tag_list = crate::misc::localization::read_preferred_language_tags();
+	if let Some(number_locale) = system_language_tag_list.first().and_then(|system_language_tag| find_table_number_locale(system_language_tag)) {
+		return number_locale;
+	}
+	match NUMBER_LOCALES.iter().find(|number_locale| number_locale.tag == FALLBACK_LOCALE_TAG) {
+		Some(number_locale) => {
+			number_locale
+		}
+		None => {
+			&NUMBER_LOCALES[0]
+		}
+	}
+}
+
+//==============================================================================
+// 언어 태그로 표에서 로캘 찾기. (뒤 조각부터 하나씩 떼며 찾고, 없으면 None)
+//==============================================================================
+fn find_table_number_locale(locale: &str) -> Option<&'static NumberLocale> {
 	let normalized_locale = locale.replace('_', "-").to_lowercase();
 	let mut subtag_list: Vec<&str> = Vec::new();
 	for subtag in normalized_locale.split('-') {
@@ -277,18 +299,11 @@ fn find_number_locale(locale: &str) -> &'static NumberLocale {
 	while !subtag_list.is_empty() {
 		let candidate_tag = subtag_list.join("-");
 		if let Some(number_locale) = NUMBER_LOCALES.iter().find(|number_locale| number_locale.tag == candidate_tag) {
-			return number_locale;
+			return Some(number_locale);
 		}
 		subtag_list.pop();
 	}
-	match NUMBER_LOCALES.iter().find(|number_locale| number_locale.tag == FALLBACK_LOCALE_TAG) {
-		Some(number_locale) => {
-			number_locale
-		}
-		None => {
-			&NUMBER_LOCALES[0]
-		}
-	}
+	None
 }
 
 //==============================================================================
@@ -604,7 +619,7 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn format_number_matches_original() {
-		let case_list: [(&str, f64, &str); 44] = [
+		let case_list: [(&str, f64, &str); 43] = [
 			("en-US", 12480.0, "12,480"),
 			("en-US", 1234.5678, "1,234.568"),
 			("en-US", -1234.5678, "-1,234.568"),
@@ -643,7 +658,6 @@ mod tests {
 			("pt-BR", 1234.5, "1.234,5"),
 			("zh-Hant-TW", 1234567.891, "1,234,567.891"),
 			("ja-JP", 1234567.891, "1,234,567.891"),
-			("xx-YY", 1234567.891, "1,234,567.891"),
 			("ps", -1234567.891, "\u{200e}-\u{200e}\u{6f1}\u{66c}\u{6f2}\u{6f3}\u{6f4}\u{66c}\u{6f5}\u{6f6}\u{6f7}\u{66b}\u{6f8}\u{6f9}\u{6f1}"),
 			("it-CH", 1234567.891, "1'234'567.891"),
 			("et-EE", -1234.5, "\u{2212}1234,5"),
@@ -653,6 +667,18 @@ mod tests {
 		for (locale, value, expected_text) in case_list {
 			assert_eq!(format_number(value, locale), expected_text, "{} {}", locale, value);
 		}
+	}
+
+	//==============================================================================
+	// 표에 없는 태그는 원본의 브라우저 기본 로캘처럼 시스템 언어(첫째)로, 그것도 표에 없으면 en-US 로 쓴다.
+	//==============================================================================
+	#[test]
+	fn unknown_locale_uses_system_language() {
+		assert!(find_table_number_locale("xx-YY").is_none());
+		let system_language_tag_list = crate::misc::localization::read_preferred_language_tags();
+		let expected_locale = system_language_tag_list.first().and_then(|system_language_tag| find_table_number_locale(system_language_tag)).map(|number_locale| number_locale.tag).unwrap_or(FALLBACK_LOCALE_TAG);
+		assert_eq!(find_number_locale("xx-YY").tag, expected_locale);
+		assert_eq!(format_number(1234567.891, "xx-YY"), format_number(1234567.891, expected_locale));
 	}
 
 	//==============================================================================

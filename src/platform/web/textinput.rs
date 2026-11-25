@@ -272,16 +272,42 @@ pub fn write_clipboard_text(text: &str) {
 }
 
 //==============================================================================
-// 시스템 클립보드 글 읽기. (웹은 비동기라 그 자리에서 읽지 못한다. 붙여넣기는 request_clipboard_paste 가 한다)
+// 시스템 클립보드 글 읽기. (웹은 비동기라 그 자리에서 읽지 못한다. read_clipboard_text_with_callback 이나 request_clipboard_paste 로 읽는다)
 //==============================================================================
 pub fn read_clipboard_text() -> Option<String> {
 	None
 }
 
 //==============================================================================
-// 클립보드를 비동기로 읽어 그 필드에 붙여 넣을 글로 넣기. (원본 paste 의 readClipboard().then)
+// 시스템 클립보드 글을 비동기로 읽어 콜백에 넘기기. (원본 readClipboard 의 navigator.clipboard.readText().then, 못 읽거나 거부되면 빈 글)
 //==============================================================================
-fn request_clipboard_paste(target_field_id: u64) {
+pub fn read_clipboard_text_with_callback(callback: Box<dyn FnOnce(String)>) {
+	let promise = match call_clipboard_function("readText", &js_sys::Array::new()) {
+		Some(promise) => {
+			promise
+		}
+		None => {
+			callback(String::new());
+			return;
+		}
+	};
+	wasm_bindgen_futures::spawn_local(async move {
+		let text = match wasm_bindgen_futures::JsFuture::from(promise).await {
+			Ok(value) => {
+				value.as_string().unwrap_or_default()
+			}
+			Err(_) => {
+				String::new()
+			}
+		};
+		callback(text);
+	});
+}
+
+//==============================================================================
+// 클립보드를 비동기로 읽어 그 필드에 붙여 넣을 글로 넣기. (원본 paste 의 readClipboard().then, UIInputField.paste 와 문맥 메뉴, 단축키가 부른다)
+//==============================================================================
+pub(crate) fn request_clipboard_paste(target_field_id: u64) {
 	let promise = match call_clipboard_function("readText", &js_sys::Array::new()) {
 		Some(promise) => {
 			promise

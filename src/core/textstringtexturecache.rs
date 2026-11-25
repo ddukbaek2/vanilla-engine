@@ -13,6 +13,8 @@
 // - 이름의 얼굴들에 없는 글자는 기본 폰트, 대체 폰트 순으로 찾는다. (브라우저의 글꼴 대체와 같은 자리)
 //   대체 글꼴 후보 파일은 쓸 때 읽는다. 이모지 표시 글자는 색 글리프 표가 있는 후보를, 그 밖의 글자는 색 글리프 표가 없는 후보를 먼저 읽는다. (표 목록만 먼저 엿본다)
 // - 글꼴 얼굴을 새로 올리면 그 이름을 쓰는 폰트 문자열로 구웠고 그 얼굴의 글자 범위에 든 글자가 있는 문자열만 버린다. (원본 invalidateFontFaces)
+//   원본처럼 set_rebake_text_on_font_load 로 켰을 때만 한다. (엔진이 EngineConfiguration.rebake_text_on_font_load 로 켠다, 기본 끔)
+//   끄면 받기 전에 다른 글꼴로 구운 글자는 캐시에서 밀려날 때까지 그대로 남는다. 얼굴 지우기와 차례 바꾸기는 켜짐과 상관없이 버린다.
 //   기본 폰트와 대체 폰트를 바꾸면 모두 버린다.
 // - 웹에서 글꼴 바이트가 하나도 없으면 원본처럼 브라우저 Canvas2D 로 굽고 잰다. 그래서 시스템 글꼴로 나온다. (platform/web/systemfont.rs)
 // - 글자 안티앨리어싱(set_text_antialias_enabled, 원본 setTextAntialiasEnabled): 끄면 구운 글자의 알파를 문턱값 128 로 0 과 255 로 가르고 텍스처를 NEAREST 로 뽑는다.
@@ -222,6 +224,8 @@ pub struct TextStringTextureCache {
 	pending_deleted_texture_list: Vec<crate::core::graphic::GlTexture>,
 	// 글자 안티앨리어싱. (기본 켬)
 	is_text_antialias_enabled: bool,
+	// 글꼴 얼굴을 새로 올리면 그 얼굴의 글자로 구운 문자열을 버릴지. (원본 rebakeTextOnFontLoad, 기본 끔)
+	is_rebake_text_on_font_load: bool,
 	// 글 재기 캐시. (폰트 문자열과 글의 해시 → 잰 것들, 쓸 때마다 센 번호, 그때의 글꼴 등록 횟수)
 	measure_table: RefCell<HashMap<u64, Vec<CachedTextMetrics>>>,
 	measure_count: Cell<usize>,
@@ -247,6 +251,7 @@ impl TextStringTextureCache {
 			fallback_font_candidate_list: RefCell::new(Vec::new()),
 			pending_deleted_texture_list: Vec::new(),
 			is_text_antialias_enabled: true,
+			is_rebake_text_on_font_load: false,
 			measure_table: RefCell::new(HashMap::new()),
 			measure_count: Cell::new(0),
 			measure_use_count: Cell::new(0),
@@ -272,7 +277,7 @@ impl TextStringTextureCache {
 	// 글꼴 얼굴 등록. (원본 new FontFace(family, url, descriptors) 를 document.fonts 에 더하기)
 	// - 같은 이름에 같은 열쇠(source_key), 굵기, 기울기의 얼굴이 있으면 바꾼다. 없으면 맨 뒤(가장 먼저 그리는 자리)에 둔다.
 	//   set_font_face_order 로 차례를 정한 이름이면 그 차례에 맞춰 놓는다.
-	// - 그 이름을 쓰는 폰트 문자열로 구웠고 이 얼굴의 글자 범위에 든 글자가 있는 문자열은 버린다. (다음에 그릴 때 이 얼굴로 다시 굽는다)
+	// - set_rebake_text_on_font_load 로 켰으면 그 이름을 쓰는 폰트 문자열로 구웠고 이 얼굴의 글자 범위에 든 글자가 있는 문자열은 버린다. (다음에 그릴 때 이 얼굴로 다시 굽는다)
 	//==============================================================================
 	pub fn register_font_face(&mut self, family_name: &str, font_face_descriptors: FontFaceDescriptors, font_bytes: Vec<u8>) -> Result<(), String> {
 		let font = Rc::new(load_font(font_bytes)?);
@@ -287,7 +292,9 @@ impl TextStringTextureCache {
 			order_number,
 		});
 		self.apply_font_face_order(&family_key);
-		self.invalidate_entries_for_face(&family_key, &font_face_descriptors);
+		if self.is_rebake_text_on_font_load {
+			self.invalidate_entries_for_face(&family_key, &font_face_descriptors);
+		}
 		self.font_registration_count.set(self.font_registration_count.get() + 1);
 		self.publish_shared_font_set();
 		Ok(())
@@ -467,6 +474,13 @@ impl TextStringTextureCache {
 	//==============================================================================
 	pub fn is_text_antialias_on(&self) -> bool {
 		self.is_text_antialias_enabled
+	}
+
+	//==============================================================================
+	// 글꼴 얼굴을 새로 올리면 그 얼굴의 글자로 구운 문자열을 버릴지 설정. (원본 EngineConfiguration.rebakeTextOnFontLoad, 엔진이 그래픽을 넘겨받을 때 정한다)
+	//==============================================================================
+	pub fn set_rebake_text_on_font_load(&mut self, is_rebake_text_on_font_load: bool) {
+		self.is_rebake_text_on_font_load = is_rebake_text_on_font_load;
 	}
 
 	//==============================================================================

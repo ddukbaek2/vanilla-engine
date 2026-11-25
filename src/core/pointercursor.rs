@@ -5,7 +5,8 @@
 // - UIButton 위(누르는 중 포함)면 단추의 커서(처음은 손가락 pointer), 아니면 화면이 set_screen_cursor 로 정한 커서다.
 // - 이름은 CSS cursor 이름이다. (pointer, crosshair, not-allowed, grab, grabbing, text, move, help, wait, progress, none, default)
 //   데스크탑은 winit 의 커서 아이콘으로 바꿔 쓰고, 웹은 캔버스의 cursor 스타일에 쓴다.
-// - register_image_cursor 로 그림 커서를 더하면 웹은 그 그림(1 배와 2 배)을, 데스크탑은 함께 준 CSS 커서를 쓴다.
+// - register_image_cursor 로 그림 커서를 더하면 웹은 그 그림(1 배와 2 배)을 CSS 값으로, 데스크탑은 그 그림 파일(애셋 폴더 기준)로 만든 창의 커서를 쓴다.
+//   (데스크탑은 만드는 동안과 그림을 못 읽으면 함께 준 CSS 커서)
 // - 손가락 기기(pointer: coarse)에서는 건드리지 않는다. 바뀔 때만 플랫폼에 넘긴다.
 // - 원본 apply 는 전역 엔진의 캔버스(readEngineCanvas)에 바로 쓴다. 러스트 판은 전역 엔진이 없어 엔진이 take_cursor_change 로 바뀐 값을 받아 플랫폼에 넘긴다.
 //==============================================================================
@@ -16,12 +17,19 @@ use std::collections::HashMap;
 const SHOWN_CURSOR_NAMES: [&str; 11] = ["pointer", "crosshair", "not-allowed", "grab", "grabbing", "text", "move", "help", "wait", "progress", "none"];
 
 //==============================================================================
-// 플랫폼에 넘길 커서. (웹의 CSS 값, 데스크탑이 쓸 CSS 이름)
+// 플랫폼에 넘길 커서. (웹의 CSS 값, 데스크탑이 쓸 CSS 이름, 그림 커서면 그림 주소와 핫스팟)
 //==============================================================================
 #[derive(Clone, PartialEq, Debug)]
 pub struct CursorValue {
 	pub css_value: String,
 	pub fallback_name: String,
+	// 그림 커서의 1 배 그림 주소. (그림 커서가 아니면 빈 글)
+	pub image_url: String,
+	// 그림 커서의 2 배 그림 주소. (없으면 빈 글)
+	pub image_url_2x: String,
+	// 1 배 그림 기준 핫스팟. (원본처럼 반올림한 값)
+	pub hotspot_x: f32,
+	pub hotspot_y: f32,
 }
 
 pub struct PointerCursor {
@@ -127,7 +135,15 @@ impl PointerCursor {
 		else {
 			format!("-webkit-image-set(url(\"{}\") 1x, url(\"{}\") 2x){}", url, url_2x, hotspot_text)
 		};
-		self.image_cursor_values.insert(String::from(name), CursorValue { css_value, fallback_name: String::from(fallback_cursor_name) });
+		let cursor_value = CursorValue {
+			css_value,
+			fallback_name: String::from(fallback_cursor_name),
+			image_url: String::from(url),
+			image_url_2x: String::from(url_2x),
+			hotspot_x: hotspot_x.round(),
+			hotspot_y: hotspot_y.round(),
+		};
+		self.image_cursor_values.insert(String::from(name), cursor_value);
 	}
 
 	//==============================================================================
@@ -138,7 +154,14 @@ impl PointerCursor {
 			return image_cursor_value.clone();
 		}
 		let shown_name = if SHOWN_CURSOR_NAMES.contains(&cursor_name) { cursor_name } else { "" };
-		CursorValue { css_value: String::from(shown_name), fallback_name: String::from(shown_name) }
+		CursorValue {
+			css_value: String::from(shown_name),
+			fallback_name: String::from(shown_name),
+			image_url: String::new(),
+			image_url_2x: String::new(),
+			hotspot_x: 0.0,
+			hotspot_y: 0.0,
+		}
 	}
 
 	//==============================================================================

@@ -9,7 +9,7 @@
 //   갱신 콜백과 완료 콜백이 &mut NodeTree 를 함께 받는다. (붙잡아 둔 NodeId 로 노드를 꺼내 쓴다)
 // - set_target(node_id): 값 이름이 노드 속성 이름(TweenProperty, 예: "localPosition")이면 tick 마다 그 노드에 바로 쓴다.
 //   대상 노드가 지워지면 콜백 없이 조용히 끝난다. create_node_tween 은 그것의 줄임이다. (원본 setTarget(node), createNodeTween)
-//   원본은 노드를 지우는 대신 떼어 내므로, 처음 돈 때의 노드 트리에서 떨어지면 끝난다. 러스트 판은 destroy_node 로 지워지면 끝난다.
+//   원본처럼 처음 돈 때의 노드 트리에서 떨어지면(맨 위 노드가 달라지면) 끝난다. 러스트 판은 destroy_node 로 지워져도 끝난다.
 // - 이징은 원본과 같은 공식이다. (원본 base/math.js 의 pow 도 내장 거듭제곱이라 exponential, elastic 값이 같다)
 // - duration 이 0 이하이면 바로 끝(진행률 1)으로 친다. (원본도 같다)
 // - 씬은 SceneBase::start_tween 으로 트윈을 넘겨받아 들고, 노드 tick → 터치 다음에 돌리며 끝난 트윈을 뺀다.
@@ -291,6 +291,8 @@ pub struct Tween {
 	tick_callback: Option<TweenUpdateCallback>,
 	complete_callback: Option<TweenCompleteCallback>,
 	target_node_id: Option<NodeId>,
+	// 처음 돈 때 대상 노드의 맨 위 노드. (달라지면 트리에서 떨어진 것으로 보고 끝낸다)
+	target_root_node_id: Option<NodeId>,
 	is_playing: bool,
 	is_finished: bool,
 }
@@ -313,6 +315,7 @@ impl Tween {
 			tick_callback: None,
 			complete_callback: None,
 			target_node_id: None,
+			target_root_node_id: None,
 			is_playing: false,
 			is_finished: false,
 		}
@@ -330,6 +333,17 @@ impl Tween {
 	}
 
 	//==============================================================================
+	// 노드의 맨 위 노드 반환. (부모를 따라 올라간다, 원본 Tween.findRootNode)
+	//==============================================================================
+	pub fn find_root_node(node_tree: &NodeTree, node_id: NodeId) -> NodeId {
+		let mut current_node_id = node_id;
+		while let Some(parent_node_id) = node_tree.get_parent_id(current_node_id) {
+			current_node_id = parent_node_id;
+		}
+		current_node_id
+	}
+
+	//==============================================================================
 	// 갱신.
 	// - 대기 시간이 지나면 진행률(0 ~ 1)에 이징을 걸어 목표값 이름 순서로 보간한다.
 	//   시작값에 없는 이름, 시작값과 종류(숫자 / Vector2)가 다른 이름은 건너뛴다. (원본과 같음)
@@ -341,11 +355,23 @@ impl Tween {
 			return;
 		}
 
-		// 대상 노드가 지워졌으면 콜백 없이 끝낸다.
+		// 대상 노드가 지워졌거나 처음 돈 때의 노드 트리에서 떨어졌으면 콜백 없이 끝낸다.
 		if let Some(target_node_id) = self.target_node_id {
 			if !node_tree.contains(target_node_id) {
 				self.stop();
 				return;
+			}
+			let target_root_node_id = Tween::find_root_node(node_tree, target_node_id);
+			match self.target_root_node_id {
+				None => {
+					self.target_root_node_id = Some(target_root_node_id);
+				}
+				Some(first_root_node_id) => {
+					if first_root_node_id != target_root_node_id {
+						self.stop();
+						return;
+					}
+				}
 			}
 		}
 
@@ -1239,6 +1265,34 @@ mod tests {
 		tween.tick(&mut node_tree, 1.0);
 		assert_eq!(update_counter.get(), 1);
 		assert_eq!(complete_counter.get(), 0);
+	}
+
+	//==============================================================================
+	// 대상 노드가 처음 돈 때의 트리에서 떨어지면(부모에서 떼면) 원본처럼 콜백 없이 끝난다. 맨 위 노드는 부모를 따라 올라간 끝이다.
+	//==============================================================================
+	#[test]
+	fn node_tween_finishes_quietly_when_node_detached() {
+		let mut node_tree = NodeTree::new();
+		let root_id = node_tree.get_root_id();
+		let parent_id = node_tree.create_child(root_id, "parent");
+		let node_id = node_tree.create_child(parent_id, "detached");
+		assert_eq!(Tween::find_root_node(&node_tree, node_id), root_id);
+		let complete_counter = create_counter();
+		let complete_counter_in_callback = complete_counter.clone();
+		let mut tween = Tween::create_node_tween(node_id, TweenProperty::LocalPosition, Vector2::zero(), Vector2::create(10.0, 0.0), 1.0)
+			.set_complete(move |_node_tree| {
+				increase_counter(&complete_counter_in_callback);
+			});
+		tween.start();
+		tween.tick(&mut node_tree, 0.25);
+		assert!(!tween.is_finished());
+
+		node_tree.remove_child(root_id, parent_id);
+		assert_eq!(Tween::find_root_node(&node_tree, node_id), parent_id);
+		tween.tick(&mut node_tree, 0.25);
+		assert!(tween.is_finished());
+		assert_eq!(complete_counter.get(), 0);
+		assert_near(node_tree[node_id].get_local_position().x, 2.5);
 	}
 
 	//==============================================================================

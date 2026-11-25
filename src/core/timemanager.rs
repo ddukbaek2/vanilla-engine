@@ -100,10 +100,10 @@ impl TimeManager {
 	}
 
 	//==============================================================================
-	// 시간 배율 설정.
+	// 시간 배율 설정. (원본처럼 받은 값 그대로, 음수면 get_time_delta 도 음수다)
 	//==============================================================================
 	pub fn set_time_scale(&mut self, time_scale: f32) {
-		self.time_scale = time_scale.max(0.0);
+		self.time_scale = time_scale;
 	}
 
 	//==============================================================================
@@ -162,5 +162,8 @@ mod tests {
 		assert!((time_manager.get_unscale_delta_time() - 0.01).abs() < 1e-6);
 		time_manager.set_maximum_time_delta(f32::NAN);
 		assert_eq!(time_manager.get_maximum_time_delta(), 0.25);
+		time_manager.set_time_scale(-2.0);
+		assert_eq!(time_manager.get_time_scale(), -2.0);
+		assert!((time_manager.get_time_delta() + 0.02).abs() < 1e-6);
 	}
 }

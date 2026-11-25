@@ -1,7 +1,7 @@
 //==============================================================================
 // 쿨다운과 반복 타이머. (원본 base/timer.js 의 Cooldown, RepeatTimer)
 // - 시간은 초 단위 f32 다. (엔진 TimeManager::get_time_delta 와 같은 타입)
-// - 원본 Cooldown.use() 는 러스트 예약어(use)와 겹쳐서 activate() 로 옮겼다. 뜻(준비되어 있으면 쿨다운을 시작하고 참)은 같다.
+// - 원본 Cooldown.use() 는 러스트 예약어(use)라 r#use() 로 부른다. (이름은 원본 그대로, r#loop, r#move 와 같다) 원본처럼 activate() 도 같은 일을 한다.
 // - 원본 기본 인자(duration = 1, interval = 1, elapsed_event = null)는 Default 와 new 의 인자로 옮겼다.
 // - RepeatTimer 의 콜백은 Box<dyn FnMut()> 다. (씬의 set_first_touch_callback 과 같은 꼴) 게임 상태를 바꾸려면
 //   Rc<Cell> / Rc<RefCell> 을 잡아 넣는다.
@@ -13,7 +13,7 @@ const MINIMUM_INTERVAL: f32 = 0.000001;
 //==============================================================================
 // 쿨다운.
 // - "timer -= dt; if (timer <= 0) ..." 를 매번 손으로 쓰던 것을 표준화했다.
-// - activate() 로 발동하면 지정한 시간 동안 is_ready() 가 거짓이 된다.
+// - r#use() 로 발동하면 지정한 시간 동안 is_ready() 가 거짓이 된다.
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Cooldown {
@@ -57,12 +57,19 @@ impl Cooldown {
 	//==============================================================================
 	// 발동한다. (원본 use, 준비되어 있으면 쿨다운을 시작하고 참을 돌려준다)
 	//==============================================================================
-	pub fn activate(&mut self) -> bool {
+	pub fn r#use(&mut self) -> bool {
 		if !self.is_ready() {
 			return false;
 		}
 		self.remain_seconds = self.duration;
 		true
+	}
+
+	//==============================================================================
+	// 발동한다. (원본 activate, r#use 와 같다)
+	//==============================================================================
+	pub fn activate(&mut self) -> bool {
+		self.r#use()
 	}
 
 	//==============================================================================
@@ -219,7 +226,7 @@ mod tests {
 		let mut cooldown = Cooldown::new(0.5);
 		assert!(cooldown.is_ready());
 		assert_eq!(cooldown.get_progress(), 1.0);
-		assert!(cooldown.activate());
+		assert!(cooldown.r#use());
 		assert!(!cooldown.is_ready());
 		assert!(!cooldown.activate());
 		assert_eq!(cooldown.get_remain_seconds(), 0.5);

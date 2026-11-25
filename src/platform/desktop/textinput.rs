@@ -308,6 +308,14 @@ pub fn read_clipboard_text() -> Option<String> {
 	with_clipboard(|clipboard| clipboard.get_text().ok()).flatten()
 }
 
+//==============================================================================
+// 시스템 클립보드 글을 읽어 콜백에 넘기기. (원본 readClipboard 자리, 데스크탑은 그 자리에서 읽어 바로 부른다. 못 읽으면 빈 글)
+//==============================================================================
+pub fn read_clipboard_text_with_callback(callback: Box<dyn FnOnce(String)>) {
+	let text = read_clipboard_text().unwrap_or_default();
+	callback(text);
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;

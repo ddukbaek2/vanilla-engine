@@ -2,9 +2,13 @@
 // 플랫폼 정보. (원본 base/platform.js)
 // - 원본은 navigator.user_agent 를 보고 플랫폼과 브라우저를 고른다.
 // - 러스트 판은 웹(wasm32)에서는 원본과 같은 규칙으로 user_agent 를 보고, 데스크탑에서는 빌드 대상 OS 를 쓴다.
-//   데스크탑의 브라우저는 unknown 이고, 스팀덱 구분은 아직 하지 않는다(리눅스로 나온다).
+//   데스크탑의 브라우저는 unknown 이다. 리눅스는 스팀덱이면 SteamDeck 이다. 스팀이 스팀덱에서 띄울 때 넣는 환경 변수 SteamDeck=1
+//   (밸브 Proton 실행 스크립트가 이것으로 스팀덱을 가린다), 또는 밸브 SteamOS 의 jupiter-hw-support 처럼
+//   /sys/class/dmi/id/board_vendor 가 Valve 이고 board_name 이 Jupiter(LCD) 나 Galileo(OLED) 이면 스팀덱으로 본다.
 // - 원본의 getOrAddCanvas 는 platform/web.rs 가 엔진 설정의 캔버스 id 로 한다.
-// - get_resource_usage: 웹은 원본처럼 performance 의 resource 항목을 더하고, 데스크탑은 네트워크로 받은 것이 없어 비어 있다.
+// - get_resource_usage: 웹은 원본처럼 performance 의 resource 항목을 더한다. 데스크탑은 네트워크로 받은 것이 없어,
+//   엔진이 애셋으로 읽은 파일(애셋 바이트 읽기, Engine::load_image, 오디오 파일)을 읽은 차례로 든다. 종류는 "file", 전송량과 푼 크기는 둘 다 파일 바이트 수다.
+//   (기본 글꼴과 대체 글꼴처럼 시스템에서 읽는 글꼴은 원본의 시스템 글꼴처럼 들지 않는다)
 //   옛 이름의 오타 get_resouce_usage 는 같은 함수를 부르는 별칭으로 남긴다. (원본도 같다)
 // - get_safe_area_rect: 원본은 캔버스(없으면 창)의 크기를 읽는다. 러스트 판은 문서 객체가 없어 그 크기를 받는다. 데스크탑의 인셋은 0 이다.
 // - is_coarse_pointer: 원본처럼 CSS pointer: coarse, 데스크탑은 마우스가 주된 손이라 거짓이다.
@@ -362,12 +366,43 @@ fn read_resource_usage() -> ResourceUsage {
 	resource_usage
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+thread_local! {
+	// 엔진이 애셋으로 읽은 파일. (데스크탑, 읽은 차례)
+	static LOADED_FILE_LIST: std::cell::RefCell<Vec<LoadedFile>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
 //==============================================================================
-// 리소스 사용량 읽기. (데스크탑: 네트워크로 받은 것이 없어 비어 있다)
+// 애셋으로 읽은 파일 적기. (데스크탑, 원본 performance 의 resource 항목 자리. 엔진이 파일을 읽은 뒤 부른다)
+//==============================================================================
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn record_loaded_file(path: &str, byte_count: u64) {
+	let name = path.rsplit(['/', '\\']).next().unwrap_or_default().to_string();
+	LOADED_FILE_LIST.with(|loaded_file_list| {
+		loaded_file_list.borrow_mut().push(LoadedFile {
+			path: String::from(path),
+			name,
+			resource_type: String::from("file"),
+			transfer_size: byte_count as f64,
+			decoded_size: byte_count as f64,
+		});
+	});
+}
+
+//==============================================================================
+// 리소스 사용량 읽기. (데스크탑: 엔진이 애셋으로 읽은 파일)
 //==============================================================================
 #[cfg(not(target_arch = "wasm32"))]
 fn read_resource_usage() -> ResourceUsage {
-	ResourceUsage::default()
+	let mut resource_usage = ResourceUsage::default();
+	LOADED_FILE_LIST.with(|loaded_file_list| {
+		for loaded_file in loaded_file_list.borrow().iter() {
+			resource_usage.total_transfer_size += loaded_file.transfer_size;
+			resource_usage.total_decoded_size += loaded_file.decoded_size;
+			resource_usage.loaded_files.push(loaded_file.clone());
+		}
+	});
+	resource_usage
 }
 
 //==============================================================================
@@ -404,11 +439,41 @@ fn detect_native_platform_type() -> PlatformType {
 		PlatformType::Android
 	}
 	else if cfg!(target_os = "linux") {
-		PlatformType::Linux
+		if is_steam_deck() {
+			PlatformType::SteamDeck
+		}
+		else {
+			PlatformType::Linux
+		}
 	}
 	else {
 		PlatformType::Unknown
 	}
+}
+
+//==============================================================================
+// 스팀덱인지. (환경 변수 SteamDeck=1, 또는 DMI 의 보드 제조사 Valve 와 보드 이름 Jupiter, Galileo)
+//==============================================================================
+#[cfg(not(target_arch = "wasm32"))]
+fn is_steam_deck() -> bool {
+	let steam_deck_variable = std::env::var("SteamDeck").unwrap_or_default();
+	let read_dmi_text = |dmi_path: &str| -> String {
+		std::fs::read_to_string(dmi_path).map(|dmi_text| dmi_text.trim().to_string()).unwrap_or_default()
+	};
+	let board_vendor = read_dmi_text("/sys/class/dmi/id/board_vendor");
+	let board_name = read_dmi_text("/sys/class/dmi/id/board_name");
+	is_steam_deck_from_values(&steam_deck_variable, &board_vendor, &board_name)
+}
+
+//==============================================================================
+// 환경 변수 SteamDeck 값과 DMI 의 보드 제조사, 보드 이름으로 스팀덱인지. (is_steam_deck 의 몸통)
+//==============================================================================
+#[cfg(not(target_arch = "wasm32"))]
+fn is_steam_deck_from_values(steam_deck_variable: &str, board_vendor: &str, board_name: &str) -> bool {
+	if steam_deck_variable == "1" {
+		return true;
+	}
+	board_vendor == "Valve" && (board_name == "Jupiter" || board_name == "Galileo")
 }
 
 #[cfg(test)]
@@ -463,7 +528,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 세이프 에어리어 사각형은 받은 크기에서 인셋을 뺀 것이다. (데스크탑 인셋 0) 데스크탑 리소스 사용량은 비어 있다.
+	// 세이프 에어리어 사각형은 받은 크기에서 인셋을 뺀 것이다. (데스크탑 인셋 0) 데스크탑 리소스 사용량은 엔진이 읽은 파일이다.
 	//==============================================================================
 	#[test]
 	fn safe_area_rect_and_resource_usage() {
@@ -471,6 +536,26 @@ mod tests {
 		assert_eq!(platform.get_safe_area_rect(Vector2::create(800.0, 600.0)), Rect::create(0.0, 0.0, 800.0, 600.0));
 		assert!(!platform.is_coarse_pointer());
 		assert_eq!(platform.get_resource_usage(), ResourceUsage::default());
-		assert_eq!(platform.get_resouce_usage(), ResourceUsage::default());
+		record_loaded_file("assets/images/logo.png", 1200);
+		record_loaded_file("assets\\sounds\\hit.ogg", 300);
+		let resource_usage = platform.get_resource_usage();
+		assert_eq!(resource_usage.total_transfer_size, 1500.0);
+		assert_eq!(resource_usage.total_decoded_size, 1500.0);
+		assert_eq!(resource_usage.loaded_files[0].name, "logo.png");
+		assert_eq!(resource_usage.loaded_files[1].name, "hit.ogg");
+		assert_eq!(resource_usage.loaded_files[1].resource_type, "file");
+		assert_eq!(platform.get_resouce_usage(), resource_usage);
+	}
+
+	//==============================================================================
+	// 스팀덱 판별: SteamDeck=1, 또는 보드 제조사 Valve 와 보드 이름 Jupiter, Galileo.
+	//==============================================================================
+	#[test]
+	fn steam_deck_from_environment_and_board() {
+		assert!(is_steam_deck_from_values("1", "", ""));
+		assert!(is_steam_deck_from_values("", "Valve", "Jupiter"));
+		assert!(is_steam_deck_from_values("", "Valve", "Galileo"));
+		assert!(!is_steam_deck_from_values("0", "Valve", "Other"));
+		assert!(!is_steam_deck_from_values("", "ASUSTeK COMPUTER INC.", "Jupiter"));
 	}
 }

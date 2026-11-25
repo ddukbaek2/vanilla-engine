@@ -241,6 +241,31 @@
   - GlyphRaster.color_pixels, TextRaster.color_pixels (색 글리프 몫, 프리멀티플라이드 RGBA). coverage 는 색 글리프를 뺀 글자의 덮인 정도다. 구조체에 필드가 늘어 직접 짓는 코드는 고쳐야 한다
 - 웹: 글꼴 바이트가 없을 때 브라우저로 굽는 글(platform/web/systemfont.rs)이 캔버스의 알파만 꺼내 흰색으로 올려 색 이모지가 흰 실루엣으로 나오던 것을 고쳤다. 원본처럼 RGBA 를 프리멀티플라이드로 올린다. 시스템 글꼴 조각(올린 글꼴에 없는 글자)은 흰 픽셀은 덮인 정도, 색 픽셀은 색 몫으로 나눈다. 안티앨리어싱을 끄면 알파로 가르고 곧은 색으로 채운다. (원본은 곧은 알파의 알파 칸을 가른다)
 - 예제 textshaping: 색 이모지 줄(😀👍🏽 ❤️❤ 🇰🇷 👨‍👩‍👧 1️⃣), 그림자 글 이모지, 기울인 이모지, 글자 아틀라스의 ⭐
+- 최종 대조의 코어, 플랫폼 몫을 원본과 같게 맞췄다.
+  - 씬: 불러오면 create 바로 뒤에 루트를 원본 Scene.load 처럼 뷰 크기로 맞춘다. (자리 0, 왼쪽 위 피벗, 콘텐츠 크기는 뷰 크기) 맡긴 애셋이 다 끝난 뒤에도 원본 SceneManager.loadScene 처럼 로딩 화면(draw_on_load)을 0.3초 더 보이고 initialize 를 부른다.
+  - Engine.get_all_loaded_scenes (원본 SceneManager.getAllLoadedScenes, 씬 대신 SceneId 핸들), SceneBase.has_ever_touched (원본 Scene.hasEverTouched), Engine.dispatch_page_event 를 공개했다.
+  - 트윈: 대상 노드가 처음 돈 때의 노드 트리에서 떨어지면(맨 위 노드가 달라지면) 원본처럼 콜백 없이 끝난다. (지울 때만 끝나던 것) Tween::find_root_node (원본 Tween.findRootNode)
+  - 웹 최대 FPS: 원본처럼 세기 시작한 뒤의 프레임 수로 차례를 정한다. (platform/framelimiter.rs, 90 Hz 에서 60 FPS 가 45 가 되지 않는다)
+  - 웹 exit_application: 원본처럼 Capacitor 의 App.exitApp, 없으면 window.close 를 시도한다. (platform::exit_application)
+  - 웹 GL 컨텍스트: 캔버스의 webglcontextlost, webglcontextrestored 에서 원본 Graphic 처럼 묶음 기억을 잊는다. (invalidate_render_state_cache)
+  - 데스크탑 Engine.is_text_input_focused: 늘 false 이던 것을 엔진 입력 필드의 포커스로 본다. (InputManager.is_typing_in_text_field 와 같다)
+  - 클립보드: Engine.read_clipboard_text_with_callback (원본 readClipboard 의 then 자리, 웹은 navigator.clipboard.readText 뒤, 데스크탑은 그 자리에서). 웹 UIInputField.paste 를 코드로 불러도 원본처럼 비동기로 읽어 붙인다. (예전에는 웹에서 아무것도 하지 않았다)
+  - 데스크탑 그림 커서: PointerCursor.register_image_cursor 의 그림을 winit CustomCursor 로 만든다. (맥은 1 배 그림, 윈도우와 리눅스는 창 배율로 늘이고 2 배 그림이 있으면 그것) CursorValue 에 image_url, image_url_2x, hotspot_x, hotspot_y 가 늘었고 platform::set_cursor 는 CursorValue 를 받는다.
+  - 데스크탑 키: winit 의 SuperLeft, SuperRight 를 W3C 의 MetaLeft, MetaRight 로, winit 의 Meta 를 Super 로 넣는다.
+  - KeyCode: 원본의 구두점(SEMICOLON 들), SCROLLLOCK, META, COMMAND, PAUSE, 오디오 7(AUDIOVOLUMEUP 들), NUM_LOCK, 텐키 16(NUMPAD_DIVIDE 들, NUMPAD0 ~ NUMPAD9)과 원본 이름 ARROWLEFT, ARROWUP, ARROWRIGHT, ARROWDOWN 을 더했다. (LEFT 들은 남긴다)
+  - 원본 버그를 같이 고쳤다: 음소거 키 값 "AudioMute" 는 W3C code 표에 없는 이름이라 눌러도 맞지 않았다. "AudioVolumeMute" 로 고쳤다.
+  - 게임패드: 웹은 gilrs 대신 원본처럼 navigator.getGamepads() 를 직접 읽어 브라우저가 주는 버튼과 축을 모두 받고(17, 4 개로 자르던 것), 연결과 해제는 gamepadconnected / gamepaddisconnected 로 받는다. 데스크탑은 표준 17 버튼, 4 축 뒤에 gilrs 가 표준으로 잇지 못한 단추와 축을 처음 움직인 차례로 붙인다. (gilrs 는 장치의 단추 목록을 주지 않아 처음 움직인 뒤에야 생긴다) 버튼, 축 수가 늘면 상태 칸을 늘린다. gilrs 는 데스크탑 의존만 된다.
+  - 스팀덱: 데스크탑 리눅스에서 환경 변수 SteamDeck=1, 또는 DMI 의 board_vendor Valve 와 board_name Jupiter, Galileo 면 PlatformType::SteamDeck 이다.
+  - 데스크탑 Platform.get_resource_usage: 비어 있던 것을 엔진이 애셋으로 읽은 파일(애셋 바이트 읽기, Engine::load_image, 오디오 파일, 그림 커서)로 채운다. (종류 "file", 전송량과 푼 크기는 파일 바이트 수)
+  - 윈도우 잠자기 깸: 시계 차이 판정(윈도우는 단조 시계가 잠든 동안에도 흘러 맞지 않았다) 대신 창을 서브클래싱해 WM_POWERBROADCAST 의 PBT_APMRESUMEAUTOMATIC 을 받아 on_page_process_restored 를 부른다. (platform/desktop/windowsplatform.rs, 윈도우만 windows-sys 0.52 의존) 맥과 리눅스는 시계 차이 판정 그대로다.
+  - 데스크탑 is_coarse_pointer: 윈도우는 크로미엄의 (pointer: coarse) 판정을 옮겼다. (태블릿으로 쓰는 중이거나 마우스 없이 터치만 있으면 참) 맥은 크로미엄도 늘 거짓, 리눅스는 장치 목록을 못 읽어 거짓이다.
+  - FiniteStateMachine: 처리 함수 안에서 get_state_change_requester 로 받은 StateChangeRequester.change_state 로 전이를 부탁하면 그 처리 함수가 끝난 뒤 차례대로 전이한다. (예전에는 처리 함수 안에서 전이할 수 없었다)
+  - format: 표에 없는 로캘은 원본이 브라우저 기본 로캘로 쓰듯 시스템 언어(웹 navigator.languages, 데스크탑 LANGUAGE / LC_ALL / LC_MESSAGES / LANG 의 첫째)로, 그것도 표에 없으면 en-US 로 쓴다.
+  - Color: create_from_hex 를 원본 createFromHEX 처럼 # 이 있어야 하고 #rgba 를 읽고 두 자리씩 parseInt 꼴로 읽는다. to_hex_string, to_rgba_string 은 원본처럼 0 ~ 1 밖의 성분을 자르지 않는다.
+  - TimeManager.set_time_scale: 원본처럼 음수도 그대로 받는다. (0 으로 자르던 것)
+  - EngineConfiguration.rebake_text_on_font_load (원본 rebakeTextOnFontLoad, 기본 끔): 켰을 때만 글꼴 얼굴을 올리면 그 얼굴의 글자로 구운 문자열을 버린다. (예전에는 늘 버렸다)
+  - NodeTree.get_world_corners, get_world_bounds (원본 WorldNode.getWorldCorners, getWorldBounds)
+  - Cooldown.r#use, FullscreenPass.r#use, ShaderProgram.r#use: 원본 이름 use 를 r# 로 그대로 쓴다. activate, use_program 은 같은 일을 하는 이름으로 남긴다.
 - 데스크탑 찍기 모드(VANILLA_CAPTURE_PATH)는 창을 숨기고 돈다. 검증 도구가 예제를 찍을 때 사용자 화면에 창이 뜨지 않는다. 숨긴 창은 다시 그리기 요청과 수직 동기가 없어 about_to_wait 에서 프레임을 바로 돌고, 최대 FPS 가 없으면 모니터 주사율(모르면 60)로 보일 때와 같은 빠르기를 맞춘다. 가려짐 알림은 받지 않는다. 맥은 독 아이콘과 포커스도 가져가지 않는다(활성화 정책 Accessory). 창을 보려면 VANILLA_CAPTURE_SHOW_WINDOW=1. (맥에서 toonshowcase, uigallery, textshaping 을 숨긴 채 찍어 확인)
 
 # 0.3.2 (2026-11-18)
