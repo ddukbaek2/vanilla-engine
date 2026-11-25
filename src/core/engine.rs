@@ -293,6 +293,17 @@ impl Engine {
 	}
 
 	//==============================================================================
+	// 애셋 바이트 부탁. (이미 만든 읽기 손잡이를 끝낸다. AssetLoader 가 미리 나눠 준 손잡이를 차례가 오면 채울 때 쓴다)
+	//==============================================================================
+	pub fn request_asset_bytes_into(&self, relative_path: &str, load_handle: &AssetLoadHandle) {
+		#[cfg(not(target_arch = "wasm32"))]
+		let asset_location = self.resolve_asset_path(relative_path).to_string_lossy().into_owned();
+		#[cfg(target_arch = "wasm32")]
+		let asset_location = format!("{}{}", self.engine_configuration.asset_base_url, relative_path);
+		platform::request_asset_bytes(asset_location, load_handle.clone());
+	}
+
+	//==============================================================================
 	// 글꼴 바이트가 오면 이름으로 등록해 달라고 맡기기. (FontAsset 이 부른다. 등록은 프레임 시작에 한다)
 	//==============================================================================
 	pub fn register_font_when_loaded(&mut self, family: &str, is_bold: bool, load_handle: AssetLoadHandle) {

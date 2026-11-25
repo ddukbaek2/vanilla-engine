@@ -28,3 +28,4 @@ pub mod typewriter;
 pub mod virtualpad;
 pub mod visual;
 pub mod fixedstepper;
+pub mod loadingprogress;

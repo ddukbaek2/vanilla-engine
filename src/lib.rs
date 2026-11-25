@@ -158,3 +158,6 @@ pub use crate::effect::particlesystem::{EmitterShape, ParticleRenderShape};
 pub use crate::core::component::text::TextWrapMode;
 pub use crate::misc::fixedstepper::FixedStepper;
 pub use crate::misc::localstorage::LocalStorageBackend;
+pub use crate::resource::assetloader::{AssetLoadFailure, AssetLoader, AssetLoaderCompleteHandler, AssetLoaderProgressHandler};
+pub use crate::misc::loadingprogress::LoadingProgress;
+pub use crate::game::gamescene::LoadingDrawer;
