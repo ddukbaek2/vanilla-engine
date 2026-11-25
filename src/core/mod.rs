@@ -3,6 +3,7 @@
 //==============================================================================
 pub mod animation;
 pub mod asset;
+pub mod audiobus;
 pub mod audiomanager;
 pub mod audioplayer;
 pub mod component;

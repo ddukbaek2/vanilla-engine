@@ -9,10 +9,12 @@
 // - 원본과 다른 것:
 //   - 이벤트는 Box<dyn FnMut(&mut UIButton, &mut ComponentContext)> 다. 원본 콜백은 버튼만 받는다.
 //     문맥을 함께 넘겨 콜백에서 다른 노드를 바꾸거나 만들고 지울 수 있게 했다. (클릭 이벤트의 bool 반환은 원본에서도 쓰지 않아 뺐다)
+//     받은 이벤트는 Rc<RefCell> 에 담는다. 이벤트 getter 는 그 Rc 를 돌려주고, 부르는 쪽은 borrow_mut 로 빌려 버튼과 문맥을 넘겨 부른다.
+//     부르는 동안 같은 이벤트를 다시 부르면(콜백 안에서 fire_click_events 같은) 이미 빌려 있어 건너뛴다.
 //   - 원본 set_interactable / UIToggleButton.set_is_on 은 그 자리에서 색 대상을 모으고 틴트를 건다. 러스트 판은 노드에 닿을 수 없는 자리라
 //     다음 tick 에 모으고 건다. (tick 이 매 프레임 틴트를 다시 거므로 보이는 결과는 같다)
 //   - 제외 컴포넌트는 인스턴스 대신 (노드, 컴포넌트 타입) 으로 정한다: exclude_component_from_tint::<Paint>(node_id).
-//   - setStateEvent(원본도 빈 함수)와 이벤트 getter 는 옮기지 않았다.
+//   - setStateEvent(원본도 빈 함수)는 옮기지 않았다.
 // - attach_to_tree 에서 호스트 노드를 interactable 로 켠다. node_tree.add_component(node_id, UIButton::new()) 로 붙인다.
 //==============================================================================
 use crate::base::color::Color;
@@ -30,6 +32,8 @@ use crate::ui::uiimageview::UIImageView;
 use crate::ui::uilabel::UILabel;
 use crate::ui::uiview::is_view_position_inside_node;
 use std::any::{Any, TypeId};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 //==============================================================================
 // 버튼 상태.
@@ -108,12 +112,12 @@ struct PendingRelease {
 pub struct UIButton {
 	ui_control: UIControl,
 	button_state: ButtonState,
-	click_event: Option<UIButtonEvent>,
-	pressed_event: Option<UIButtonEvent>,
-	released_event: Option<UIButtonEvent>,
-	clicked_event: Option<UIButtonEvent>,
-	long_pressed_event: Option<UIButtonEvent>,
-	hover_event: Option<UIButtonEvent>,
+	click_event: Option<Rc<RefCell<UIButtonEvent>>>,
+	pressed_event: Option<Rc<RefCell<UIButtonEvent>>>,
+	released_event: Option<Rc<RefCell<UIButtonEvent>>>,
+	clicked_event: Option<Rc<RefCell<UIButtonEvent>>>,
+	long_pressed_event: Option<Rc<RefCell<UIButtonEvent>>>,
+	hover_event: Option<Rc<RefCell<UIButtonEvent>>>,
 	is_press_tracking: bool,
 	minimum_pressed_seconds: f32,
 	pressed_elapsed_seconds: f32,
@@ -216,7 +220,7 @@ impl UIButton {
 	//==============================================================================
 	// 이벤트 칸 고르기.
 	//==============================================================================
-	fn get_event_slot(&mut self, event_kind: ButtonEventKind) -> &mut Option<UIButtonEvent> {
+	fn get_event_slot(&mut self, event_kind: ButtonEventKind) -> &mut Option<Rc<RefCell<UIButtonEvent>>> {
 		match event_kind {
 			ButtonEventKind::Click => {
 				&mut self.click_event
@@ -240,10 +244,10 @@ impl UIButton {
 	}
 
 	//==============================================================================
-	// 이벤트 부르기. (부르는 동안 칸에서 꺼냈다가, 콜백이 새로 정하지 않았으면 되돌린다)
+	// 이벤트 부르기. (칸의 Rc 를 하나 더 쥐고 부르므로 콜백이 이벤트를 새로 정해도 된다. 이미 부르는 중이면 건너뛴다)
 	//==============================================================================
 	fn fire_event(&mut self, context: &mut ComponentContext, event_kind: ButtonEventKind) {
-		let mut event = match self.get_event_slot(event_kind).take() {
+		let event = match self.get_event_slot(event_kind).clone() {
 			Some(event) => {
 				event
 			}
@@ -251,11 +255,15 @@ impl UIButton {
 				return;
 			}
 		};
-		event(self, context);
-		let event_slot = self.get_event_slot(event_kind);
-		if event_slot.is_none() {
-			*event_slot = Some(event);
-		}
+		let mut event_function = match event.try_borrow_mut() {
+			Ok(event_function) => {
+				event_function
+			}
+			Err(_) => {
+				return;
+			}
+		};
+		(*event_function)(self, context);
 	}
 
 	//==============================================================================
@@ -609,7 +617,7 @@ impl UIButton {
 	// 길게 누름 이벤트 설정. (임계 시간을 넘기면 한 번 알리고, 그 누름의 클릭은 삼킨다)
 	//==============================================================================
 	pub fn set_long_pressed_event(&mut self, long_pressed_event: UIButtonEvent) {
-		self.long_pressed_event = Some(long_pressed_event);
+		self.long_pressed_event = Some(Rc::new(RefCell::new(long_pressed_event)));
 	}
 
 	//==============================================================================
@@ -656,35 +664,70 @@ impl UIButton {
 	// 클릭 이벤트 설정. (클릭됨 이벤트 다음에 불린다)
 	//==============================================================================
 	pub fn set_click_event(&mut self, click_event: UIButtonEvent) {
-		self.click_event = Some(click_event);
+		self.click_event = Some(Rc::new(RefCell::new(click_event)));
+	}
+
+	//==============================================================================
+	// 클릭 이벤트 반환. (부를 때는 borrow_mut 로 빌린다)
+	//==============================================================================
+	pub fn get_click_event(&self) -> Option<Rc<RefCell<UIButtonEvent>>> {
+		self.click_event.clone()
 	}
 
 	//==============================================================================
 	// 누름 이벤트 설정.
 	//==============================================================================
 	pub fn set_pressed_event(&mut self, pressed_event: UIButtonEvent) {
-		self.pressed_event = Some(pressed_event);
+		self.pressed_event = Some(Rc::new(RefCell::new(pressed_event)));
+	}
+
+	//==============================================================================
+	// 누름 이벤트 반환. (부를 때는 borrow_mut 로 빌린다)
+	//==============================================================================
+	pub fn get_pressed_event(&self) -> Option<Rc<RefCell<UIButtonEvent>>> {
+		self.pressed_event.clone()
 	}
 
 	//==============================================================================
 	// 뗌 이벤트 설정. (영역 밖에서 떼도 불린다)
 	//==============================================================================
 	pub fn set_released_event(&mut self, released_event: UIButtonEvent) {
-		self.released_event = Some(released_event);
+		self.released_event = Some(Rc::new(RefCell::new(released_event)));
+	}
+
+	//==============================================================================
+	// 뗌 이벤트 반환. (부를 때는 borrow_mut 로 빌린다)
+	//==============================================================================
+	pub fn get_released_event(&self) -> Option<Rc<RefCell<UIButtonEvent>>> {
+		self.released_event.clone()
 	}
 
 	//==============================================================================
 	// 클릭됨 이벤트 설정.
 	//==============================================================================
 	pub fn set_clicked_event(&mut self, clicked_event: UIButtonEvent) {
-		self.clicked_event = Some(clicked_event);
+		self.clicked_event = Some(Rc::new(RefCell::new(clicked_event)));
+	}
+
+	//==============================================================================
+	// 클릭됨 이벤트 반환. (부를 때는 borrow_mut 로 빌린다)
+	//==============================================================================
+	pub fn get_clicked_event(&self) -> Option<Rc<RefCell<UIButtonEvent>>> {
+		self.clicked_event.clone()
 	}
 
 	//==============================================================================
 	// 오버 진입 이벤트 설정.
 	//==============================================================================
 	pub fn set_hover_event(&mut self, hover_event: UIButtonEvent) {
-		self.hover_event = Some(hover_event);
+		self.hover_event = Some(Rc::new(RefCell::new(hover_event)));
+	}
+
+	//==============================================================================
+	// 오버 진입 이벤트 반환. (부를 때는 borrow_mut 로 빌린다)
+	//==============================================================================
+	pub fn get_hover_event(&self) -> Option<Rc<RefCell<UIButtonEvent>>> {
+		self.hover_event.clone()
 	}
 
 	//==============================================================================
@@ -1073,5 +1116,45 @@ mod tests {
 		node_tree.tick(&engine, 0.3);
 		let paint_color = node_tree[button_id].get_component::<Paint>().expect("paint").get_color();
 		assert_eq!(paint_color, Color::white());
+	}
+
+	//==============================================================================
+	// 이벤트 getter 로 꺼낸 함수를 부를 수 있다. (누름 이벤트 안에서 클릭 이벤트를 꺼내 부른다)
+	// - 클릭됨 이벤트 안에서 fire_click_events 를 부르면 부르는 중인 클릭됨은 건너뛰고 클릭만 한 번 더 불린다.
+	//==============================================================================
+	#[test]
+	fn event_getter_returns_callable_event() {
+		let engine = Engine::new(EngineConfiguration::new());
+		let (mut node_tree, button_id) = create_button_tree();
+		let click_count = Rc::new(Cell::new(0));
+		let clicked_count = Rc::new(Cell::new(0));
+		let hover_count = Rc::new(Cell::new(0));
+		{
+			let button = get_button(&mut node_tree, button_id);
+			assert!(button.get_click_event().is_none());
+			button.set_click_event(create_counting_event(&click_count));
+			button.set_hover_event(create_counting_event(&hover_count));
+			button.set_pressed_event(Box::new(|button: &mut UIButton, context: &mut ComponentContext| {
+				if let Some(click_event) = button.get_click_event() {
+					(*click_event.borrow_mut())(button, context);
+				}
+			}));
+			let clicked_count_for_event = clicked_count.clone();
+			button.set_clicked_event(Box::new(move |button: &mut UIButton, context: &mut ComponentContext| {
+				clicked_count_for_event.set(clicked_count_for_event.get() + 1);
+				button.fire_click_events(context);
+			}));
+			assert!(button.get_pressed_event().is_some());
+			assert!(button.get_released_event().is_none());
+			assert!(button.get_clicked_event().is_some());
+			assert!(button.get_hover_event().is_some());
+		}
+		let inside = Vector2::create(210.0, 105.0);
+		node_tree.dispatch_touch(button_id, &engine, TouchKind::Press, inside);
+		assert_eq!(click_count.get(), 1);
+		node_tree.dispatch_touch(button_id, &engine, TouchKind::Release, inside);
+		assert_eq!(clicked_count.get(), 1);
+		assert_eq!(click_count.get(), 3);
+		assert_eq!(hover_count.get(), 0);
 	}
 }

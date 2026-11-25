@@ -6,6 +6,7 @@
 //   - 원본은 draw 안에서 손잡이 노드를 옮긴다. 러스트 판은 그리는 동안 트리를 바꿀 수 없어 tick 에서 옮긴다. (손잡이 노드는 호스트의 자식으로 둔다)
 //   - 입력 좌표는 원본처럼 호스트 왼쪽 위 모서리 기준이되, 노드 행렬의 역으로 바꿔 크기와 회전까지 따른다. (원본은 모서리 위치만 뺀다)
 //   - 값 바뀜 이벤트는 슬라이더와 문맥을 받는다. 씬 코드에서 부르는 fire_value_changed 는 다음 tick 에 이벤트를 부른다.
+//     받은 이벤트는 Rc<RefCell> 에 담는다. get_value_changed_event 는 그 Rc 를 돌려주고, 부르는 쪽은 borrow_mut 로 빌려 부른다.
 // - attach_to_tree 에서 호스트 노드를 interactable 로 켠다. node_tree.add_component(node_id, UISlider::new()) 로 붙인다.
 //==============================================================================
 use crate::base::color::Color;
@@ -18,6 +19,8 @@ use crate::core::node::nodetree::{ComponentContext, NodeId, NodeTree};
 use crate::core::node::worldnode::NodeTransform;
 use crate::ui::uicontrol::UIControl;
 use crate::ui::uiprogressview::ProgressDirection;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 //==============================================================================
 // 슬라이더 이벤트. (슬라이더와 문맥을 받는다)
@@ -42,7 +45,7 @@ pub struct UISlider {
 	direction: ProgressDirection,
 	is_dragging: bool,
 	is_interactable: bool,
-	value_changed_event: Option<UISliderEvent>,
+	value_changed_event: Option<Rc<RefCell<UISliderEvent>>>,
 	is_value_changed_fire_pending: bool,
 }
 
@@ -121,15 +124,26 @@ impl UISlider {
 	}
 
 	//==============================================================================
-	// 값 바뀜 이벤트 부르기.
+	// 값 바뀜 이벤트 부르기. (Rc 를 하나 더 쥐고 부르므로 콜백이 이벤트를 새로 정해도 된다. 이미 부르는 중이면 건너뛴다)
 	//==============================================================================
 	fn fire_value_changed_event(&mut self, context: &mut ComponentContext) {
-		if let Some(mut value_changed_event) = self.value_changed_event.take() {
-			value_changed_event(self, context);
-			if self.value_changed_event.is_none() {
-				self.value_changed_event = Some(value_changed_event);
+		let value_changed_event = match self.get_value_changed_event() {
+			Some(value_changed_event) => {
+				value_changed_event
 			}
-		}
+			None => {
+				return;
+			}
+		};
+		let mut event_function = match value_changed_event.try_borrow_mut() {
+			Ok(event_function) => {
+				event_function
+			}
+			Err(_) => {
+				return;
+			}
+		};
+		(*event_function)(self, context);
 	}
 
 	//==============================================================================
@@ -346,7 +360,14 @@ impl UISlider {
 	// 값 바뀜 이벤트 설정.
 	//==============================================================================
 	pub fn set_value_changed_event(&mut self, value_changed_event: UISliderEvent) {
-		self.value_changed_event = Some(value_changed_event);
+		self.value_changed_event = Some(Rc::new(RefCell::new(value_changed_event)));
+	}
+
+	//==============================================================================
+	// 값 바뀜 이벤트 반환. (부를 때는 borrow_mut 로 빌린다)
+	//==============================================================================
+	pub fn get_value_changed_event(&self) -> Option<Rc<RefCell<UISliderEvent>>> {
+		self.value_changed_event.clone()
 	}
 
 	//==============================================================================
@@ -552,6 +573,7 @@ mod tests {
 			slider.set_value_changed_event(Box::new(move |_slider: &mut UISlider, _context: &mut ComponentContext| {
 				changed_count_for_event.set(changed_count_for_event.get() + 1);
 			}));
+			assert!(slider.get_value_changed_event().is_some());
 		}
 		assert!(node_tree[slider_id].is_interactable());
 

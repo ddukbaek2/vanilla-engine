@@ -217,6 +217,15 @@
 - PointerCursor: get_button_cursor_name, get_default_cursor_name, is_coarse_pointer. FrameProbe: 설정 반환 함수들. Platform: is_coarse_pointer, get_safe_area_rect, get_resouce_usage(원본 이름 그대로). Identifier(원본 차례 번호, reset 은 처음 번호로, 원본은 아무것도 하지 않던 버그)
 - Localization.text_named: 빗금 앞뒤 빈칸을 원본 정규식 \s 처럼 탭과 줄바꿈까지 받는다. WebSocketClient.disconnect: 원본처럼 닫기만 걸고 다음 tick 에 끊긴 것으로 친다
 - GameScene, UIScene 트레이트에 finalize, unload, on_page_process_restored, on_page_visibility_restored, 씬의 터치 훅(touch_press, touch_move, touch_release, touch_cancel, touch_wheel)을 더하고 game_scene!, ui_scene! 이 Scene 의 같은 함수로 넘긴다. (원본 GameScene, UIScene 하위 클래스가 덮어쓰던 것)
+- 콜백 게터(원본 이름): UIButton.get_click_event, get_pressed_event, get_released_event, get_clicked_event, get_hover_event, UISlider.get_value_changed_event, UIToggleButton.get_toggled_event, ButtonMotion.get_lit_handler. 받은 콜백을 Rc<RefCell> 에 담고 게터는 그 Rc 를 돌려준다. 부르는 쪽은 borrow_mut 로 빌려 부른다. (set 쪽은 그대로 Box 를 받는다) 엔진도 그 Rc 를 하나 더 쥐고 부르므로 콜백이 이벤트를 새로 정해도 되고, 부르는 동안 같은 이벤트를 다시 부르면 건너뛴다. GameSceneBase.get_loading_drawer(전에는 부를 수 없는 &Box)와 WebSocketClient.get_receive_event(전에는 &mut self 의 &mut)도 같은 꼴로 바꿨다
+- AudioBus(원본에도 같은 꼴로 넣었다): AudioManager.create_audio_bus, AudioBus.create_audio_player(그 버스로 트는 플레이어), set_volume, get_volume, mute, unmute, is_muted, is_available, get_gain_node(웹만). 데스크탑은 kira 메인 트랙 아래 하위 트랙(버스로 만든 플레이어의 트랙은 그 아래), 웹은 출력에 이은 GainNode 다. 크기와 음소거는 AudioPlayer 와 같은 규칙이다
+- SoundSystem.get_music_bus, get_effect_bus(원본 getMusicBus, getEffectBus, 첫 누름 전에는 None): 음악과 효과음 크기를 플레이어마다 곱하던 것을 이 버스에 건다. 버스로 만든 플레이어도 설정 크기와 음소거를 따른다. 버스 크기는 셈한 값이 바뀔 때만 걸어, 버스의 set_volume, mute 로 건 값은 SoundSystem 이 크기를 다시 걸 때까지 간다 (원본도 같은 노드에 건다)
+- LocalStorage.get_backend, PersistedStore.get_storage_backend(원본 getBackend, getStorageBackend): 갈아 끼운 저장소를 Rc<RefCell<Box<dyn LocalStorageBackend>>> 로 돌려준다. 그 대신 위의 has_backend, has_storage_backend 는 뺐다. (get_backend().is_some() 으로 본다) 꺼낸 저장소를 빌린 채로 LocalStorage 를 부르면 기본 저장소를 쓴다
+- SafeAreaInsets { top, right, bottom, left }(원본의 인셋 객체): ViewManager.set_safe_area_override, get_safe_area_insets, GameSceneBase.set_safe_area_insets, calculate_safe_area_rect 가 [위, 오른쪽, 아래, 왼쪽] 배열 대신 이것을 받고 돌려준다. GameSceneBase.calculate_play_area_reference_length(fixed_length, is_landscape, canvas_native_size, safe_area_insets, inset_scale) 는 원본처럼 뷰 좌표 인셋과 캔버스 단위 배율을 받는다. (전에는 배율을 곱해 둔 인셋 배열)
+- EngineConfiguration.auto_resize_on_window_resize 의 기본을 원본처럼 끔으로 바꿨다. 웹에서 캔버스를 창에 맞추려면 켠다. (예제와 README 에 켬을 적었다, 데스크탑은 늘 맞춘다)
+- Platform.get_resource_usage: 바른 이름을 더했다. 옛 이름 get_resouce_usage 는 같은 함수를 부르는 별칭으로 남긴다. (원본에도 getResourceUsage 를 더했다)
+- Color: From<&str> 이 원본 Graphic 의 parseColorValue 처럼 from_cache 를 거친다. from_hex_cached 도 from_cache 처럼 1024 개를 넘으면 가장 오래 안 쓴 것부터 버린다. (전에는 1024 개에서 통째로 비웠다, 원본 fromHEXCached 에도 같은 규칙을 넣었다) 두 캐시 모두 가장 오래 안 쓴 것을 훑지 않고 바로 찾는다
+- UIToggleButton.get_clicked_event: 원본(UIButton 에서 물려받은 getClickedEvent)처럼 토글 버튼 안쪽의 클릭 처리 함수를 돌려준다. 부르면 켜짐을 뒤집고 토글 이벤트와 클릭됨 이벤트를 부른다
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.

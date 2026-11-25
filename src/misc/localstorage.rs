@@ -16,6 +16,7 @@
 //   데스크탑 저장은 스레드마다 따로 들고 있다가 파일에 쓴다. (엔진은 한 스레드에서 돈다)
 // - 저장소 갈아 끼우기: set_backend 에 LocalStorageBackend 를 넘기면 위 기본 저장소 대신 그것을 쓴다. (플랫폼 SDK 의 저장소 같은 것)
 //   원본 setBackend 의 객체({ getItem, setItem, removeItem, getKeys, clear }) 자리가 트레이트다. 원본의 예외는 Err 로 알린다.
+//   넘긴 저장소는 Rc<RefCell> 에 담는다. get_backend 는 그 Rc 를 돌려주고, 부르는 쪽은 borrow / borrow_mut 로 빌려 쓴다.
 // - 막혀도 죽지 않는다: 저장소가 없거나(웹의 막힌 localStorage) 쓰기가 실패하면(가득 참, 폴더를 못 만듦, 바꿔 낀 저장소의 Err)
 //   이 실행이 살아 있는 동안 메모리에 대신 둔다. (is_memory_fallback, 다시 켜면 없다)
 // - 읽기(get_string, get_boolean, get_number, get_json)는 없는 키에 기본값을 써 넣지 않는다. (원본과 같다)
@@ -24,12 +25,14 @@ use crate::core::engine::Engine;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::rc::Rc;
 
 //==============================================================================
 // 바꿔 끼우는 저장소. (원본 setBackend 에 넘기는 객체)
 // - get_keys 와 clear 는 없어도 된다. get_keys 가 없으면 키 목록(get_keys, clear_by_prefix)은 메모리에 대신 둔 것만 보이고,
 //   clear 가 없으면 get_keys 의 키를 하나씩 지운다.
-// - 이 함수들 안에서 LocalStorage 를 다시 부르면 기본 저장소를 쓴다. (바꿔 낀 저장소는 부르는 동안 잠시 빠져 있다)
+// - 이 함수들 안에서 LocalStorage 를 다시 부르면 기본 저장소를 쓴다. (바꿔 낀 저장소는 부르는 동안 빌려 있다)
+//   get_backend 로 꺼낸 저장소를 빌린 채로 LocalStorage 를 불러도 기본 저장소를 쓴다.
 //==============================================================================
 pub trait LocalStorageBackend {
 	//==============================================================================
@@ -70,7 +73,7 @@ pub trait LocalStorageBackend {
 // 바꿔 낀 저장소와 메모리 대신 둔 값.
 //==============================================================================
 struct StorageOverrideState {
-	backend: Option<Box<dyn LocalStorageBackend>>,
+	backend: Option<Rc<RefCell<Box<dyn LocalStorageBackend>>>>,
 	memory_item_map: BTreeMap<String, String>,
 	is_memory_fallback: bool,
 }
@@ -86,17 +89,12 @@ thread_local! {
 }
 
 //==============================================================================
-// 바꿔 낀 저장소로 일하기. (바꿔 낀 것이 없으면 None. 부르는 동안 꺼내 두어 안에서 LocalStorage 를 불러도 겹쳐 빌리지 않는다)
+// 바꿔 낀 저장소로 일하기. (바꿔 낀 것이 없거나 이미 빌려 있으면 None. 안에서 LocalStorage 를 다시 부르면 빌려 있어 기본 저장소를 쓴다)
 //==============================================================================
 fn with_backend<R>(worker: impl FnOnce(&mut dyn LocalStorageBackend) -> R) -> Option<R> {
-	let mut backend = STORAGE_OVERRIDE_STATE.with(|state_cell| state_cell.borrow_mut().backend.take())?;
-	let result = worker(backend.as_mut());
-	STORAGE_OVERRIDE_STATE.with(|state_cell| {
-		let mut state = state_cell.borrow_mut();
-		if state.backend.is_none() {
-			state.backend = Some(backend);
-		}
-	});
+	let backend = STORAGE_OVERRIDE_STATE.with(|state_cell| state_cell.borrow().backend.clone())?;
+	let mut backend_reference = backend.try_borrow_mut().ok()?;
+	let result = worker(backend_reference.as_mut());
 	Some(result)
 }
 
@@ -148,17 +146,17 @@ impl LocalStorage {
 	pub fn set_backend(backend: Option<Box<dyn LocalStorageBackend>>) {
 		STORAGE_OVERRIDE_STATE.with(|state_cell| {
 			let mut state = state_cell.borrow_mut();
-			state.backend = backend;
+			state.backend = backend.map(|backend| Rc::new(RefCell::new(backend)));
 			state.memory_item_map.clear();
 			state.is_memory_fallback = false;
 		});
 	}
 
 	//==============================================================================
-	// 저장소를 갈아 끼웠는지.
+	// 갈아 끼운 저장소 반환. (없으면 None, 빌릴 때는 borrow / borrow_mut)
 	//==============================================================================
-	pub fn has_backend() -> bool {
-		STORAGE_OVERRIDE_STATE.with(|state_cell| state_cell.borrow().backend.is_some())
+	pub fn get_backend() -> Option<Rc<RefCell<Box<dyn LocalStorageBackend>>>> {
+		STORAGE_OVERRIDE_STATE.with(|state_cell| state_cell.borrow().backend.clone())
 	}
 
 	//==============================================================================
@@ -986,7 +984,18 @@ mod tests {
 		let storage_directory_path = use_temporary_storage_directory("backend");
 		let item_map = std::rc::Rc::new(RefCell::new(BTreeMap::new()));
 		LocalStorage::set_backend(Some(Box::new(TestBackend { item_map: item_map.clone(), is_blocked: false })));
-		assert!(LocalStorage::has_backend());
+		let backend = LocalStorage::get_backend().expect("backend");
+		assert!(backend.borrow_mut().set_item("direct", "0").is_ok());
+		assert_eq!(item_map.borrow().get("direct").map(|value| value.as_str()), Some("0"));
+		// 꺼낸 저장소를 빌린 동안에는 기본 저장소를 쓴다.
+		{
+			let _backend_reference = backend.borrow();
+			assert!(LocalStorage::set_item("while.borrowed", "1"));
+			assert!(!item_map.borrow().contains_key("while.borrowed"));
+			LocalStorage::remove("while.borrowed");
+		}
+		assert!(backend.borrow_mut().remove_item("direct").is_ok());
+		drop(backend);
 		LocalStorage::set_string("game.a", "1");
 		LocalStorage::set_number("game.b", 2.0);
 		LocalStorage::set_string("other", "x");
@@ -1006,7 +1015,7 @@ mod tests {
 
 		// 되돌리면 기본 저장소(파일)를 쓰고, 메모리에 대신 둔 것은 버린다.
 		LocalStorage::set_backend(None);
-		assert!(!LocalStorage::has_backend());
+		assert!(LocalStorage::get_backend().is_none());
 		assert!(!LocalStorage::is_memory_fallback());
 		assert!(LocalStorage::set_item("file.key", "1"));
 		assert!(LocalStorage::get_storage_file_path().expect("storage file path").exists());

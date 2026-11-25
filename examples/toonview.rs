@@ -312,6 +312,7 @@ impl Scene for ToonViewScene {
 fn main() {
 	let mut engine_configuration = EngineConfiguration::new();
 	engine_configuration.title = String::from("노드 사각형 안 툰 3D (바닐라엔진)");
+	engine_configuration.auto_resize_on_window_resize = true;
 	engine_configuration.reference_resolution_size = Vector2::create(1280.0, 720.0);
 	let engine = Engine::new(engine_configuration);
 	let scene = ToonViewScene { scene_base: SceneBase::new(), left_panel_id: None, right_panel_id: None, marker_list: Vec::new(), elapsed_seconds: Rc::new(Cell::new(0.0)), is_renderer_shared: false };

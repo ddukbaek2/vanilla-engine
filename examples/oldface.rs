@@ -1069,6 +1069,7 @@ fn update_wrinkle_weights(resources: &mut FaceResources) {
 fn main() {
 	let mut engine_configuration = EngineConfiguration::new();
 	engine_configuration.title = String::from("바닐라엔진 graphics3d oldface");
+	engine_configuration.auto_resize_on_window_resize = true;
 	engine_configuration.window_size = Vector2::create(1280.0, 720.0);
 	engine_configuration.maximum_frame_per_second = FRAME_RATE;
 	engine_configuration.asset_directory_paths = vec![PathBuf::from(EXAMPLE_ASSET_DIRECTORY)];

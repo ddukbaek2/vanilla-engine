@@ -187,6 +187,7 @@ fn main() {
 	build_layout();
 	let mut engine_configuration = EngineConfiguration::new();
 	engine_configuration.title = String::from("바닐라엔진 패널 배치");
+	engine_configuration.auto_resize_on_window_resize = true;
 	engine_configuration.reference_resolution_size = Vector2::create(1280.0, 720.0);
 	let engine = Engine::new(engine_configuration);
 	let preview_scene = PreviewScene {

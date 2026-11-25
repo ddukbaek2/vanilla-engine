@@ -3,7 +3,8 @@
 // - AudioManager, AudioPlayer, AudioAsset, BeepPlayer 가 소리를 낼 때 부르는 아래층이다. 공통 코드는 core, resource, misc 에 있다.
 // - 백엔드마다 아래 이름을 같은 꼴로 낸다.
 //   AudioContext(공유 컨텍스트), AudioBuffer(디코딩한 소리), AudioPlatformState(매니저가 드는 백엔드 상태),
-//   AudioPlayerBackend(플레이어 하나의 소리 내는 부분), HAS_USER_GESTURE_AT_START,
+//   AudioPlayerBackend(플레이어 하나의 소리 내는 부분), AudioBusBackend(버스 하나의 소리 모으는 부분, create_player_backend 로 그 버스로 트는 플레이어),
+//   HAS_USER_GESTURE_AT_START,
 //   create_audio_platform_state, create_audio_context, resume_audio_context, is_audio_context_running,
 //   load_audio_file, load_audio_bytes, get_audio_buffer_duration, play_beep_tone
 //   suspend_audio_context(컨텍스트 멈춤), get_audio_context_time(컨텍스트 시계), AudioPlayerBackend::set_pan(좌우)

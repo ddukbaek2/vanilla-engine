@@ -4,6 +4,8 @@
 // - 판 번호(version)가 다르거나 해석에 실패하면 기본값으로 돌아간다.
 // - 저장은 LocalStorage 를 쓴다. 저장 꼴({"version":1,"state":{...}})이 원본과 같아서 웹에서는 원본 게임의 저장을 그대로 읽는다.
 //   set_storage_backend 로 이 저장소만 다른 곳(LocalStorageBackend, 플랫폼의 저장소 같은 것)에 둘 수 있다.
+//   넘긴 저장소는 Rc<RefCell> 에 담는다. get_storage_backend 는 그 Rc 를 돌려주고, 부르는 쪽은 borrow / borrow_mut 로 빌려 쓴다.
+//   (빌린 채로 이 저장소를 읽거나 쓰면 읽기는 빈 글, 쓰기는 알리고 넘어간다)
 // - 사용:
 //     let mut store = PersistedStore::new("game.settings", serde_json::json!({ "volume": 0.8, "is_muted": false }), 1);
 //     store.set(serde_json::json!({ "volume": 0.5 }));
@@ -16,6 +18,7 @@
 use crate::misc::localstorage::{LocalStorage, LocalStorageBackend};
 use serde_json::{Map, Value};
 use std::cell::RefCell;
+use std::rc::Rc;
 
 //==============================================================================
 // 구독 번호. (unsubscribe 에 넘긴다)
@@ -36,8 +39,8 @@ pub struct PersistedStore {
 	state: Value,
 	subscriber_list: Vec<(PersistedStoreSubscription, PersistedStoreSubscriber)>,
 	next_subscription_number: u64,
-	// 이 저장소만 쓰는 곳. (None 이면 LocalStorage. 쓰기가 &self 라 RefCell 에 둔다)
-	storage_backend: RefCell<Option<Box<dyn LocalStorageBackend>>>,
+	// 이 저장소만 쓰는 곳. (None 이면 LocalStorage. 쓰기가 &self 라 RefCell 에 두고, get_storage_backend 로 나눠 주려고 Rc 에 담는다)
+	storage_backend: Option<Rc<RefCell<Box<dyn LocalStorageBackend>>>>,
 }
 
 //==============================================================================
@@ -66,7 +69,7 @@ impl PersistedStore {
 			state: Value::Object(Map::new()),
 			subscriber_list: Vec::new(),
 			next_subscription_number: 1,
-			storage_backend: RefCell::new(None),
+			storage_backend: None,
 		};
 		persisted_store.state = persisted_store.read_from_storage();
 		persisted_store
@@ -179,10 +182,17 @@ impl PersistedStore {
 		payload.insert(String::from("version"), Value::from(self.version));
 		payload.insert(String::from("state"), self.state.clone());
 		let payload_text = Value::Object(payload).to_string();
-		let mut storage_backend = self.storage_backend.borrow_mut();
-		match storage_backend.as_mut() {
+		match &self.storage_backend {
 			Some(storage_backend) => {
-				if let Err(error_message) = storage_backend.set_item(&self.storage_key, &payload_text) {
+				let write_result = match storage_backend.try_borrow_mut() {
+					Ok(mut storage_backend) => {
+						storage_backend.set_item(&self.storage_key, &payload_text)
+					}
+					Err(_) => {
+						Err(String::from("저장소를 빌려 쓰는 중"))
+					}
+				};
+				if let Err(error_message) = write_result {
 					eprintln!("PersistedStore: 저장소에 쓰지 못했습니다 {} ({})", self.storage_key, error_message);
 				}
 			}
@@ -196,10 +206,17 @@ impl PersistedStore {
 	// 저장된 글 읽기. (없거나 못 읽으면 빈 글)
 	//==============================================================================
 	fn read_stored_text(&self) -> String {
-		let storage_backend = self.storage_backend.borrow();
-		match storage_backend.as_ref() {
+		match &self.storage_backend {
 			Some(storage_backend) => {
-				match storage_backend.get_item(&self.storage_key) {
+				let read_result = match storage_backend.try_borrow() {
+					Ok(storage_backend) => {
+						storage_backend.get_item(&self.storage_key)
+					}
+					Err(_) => {
+						Ok(None)
+					}
+				};
+				match read_result {
 					Ok(Some(stored_text)) => {
 						stored_text
 					}
@@ -218,16 +235,16 @@ impl PersistedStore {
 	// 이 저장소만 쓰는 곳 갈아 끼우기. (None 이면 LocalStorage. 그곳에서 상태를 다시 읽고 구독자에게 알린다)
 	//==============================================================================
 	pub fn set_storage_backend(&mut self, storage_backend: Option<Box<dyn LocalStorageBackend>>) {
-		self.storage_backend.replace(storage_backend);
+		self.storage_backend = storage_backend.map(|storage_backend| Rc::new(RefCell::new(storage_backend)));
 		self.state = self.read_from_storage();
 		self.notify();
 	}
 
 	//==============================================================================
-	// 이 저장소만 쓰는 곳이 있는지.
+	// 이 저장소만 쓰는 곳 반환. (없으면 None, 빌릴 때는 borrow / borrow_mut)
 	//==============================================================================
-	pub fn has_storage_backend(&self) -> bool {
-		self.storage_backend.borrow().is_some()
+	pub fn get_storage_backend(&self) -> Option<Rc<RefCell<Box<dyn LocalStorageBackend>>>> {
+		self.storage_backend.clone()
 	}
 
 	//==============================================================================
@@ -341,7 +358,8 @@ mod tests {
 		});
 		let item_map = Rc::new(std::cell::RefCell::new(std::collections::BTreeMap::new()));
 		store.set_storage_backend(Some(Box::new(MapBackend { item_map: item_map.clone() })));
-		assert!(store.has_storage_backend());
+		let storage_backend = store.get_storage_backend().expect("storage backend");
+		assert_eq!(storage_backend.borrow().get_item("settings"), Ok(None));
 		assert_eq!(store.get()["volume"], json!(1));
 		assert_eq!(*notified_volume.borrow(), json!(1));
 		store.set(json!({ "volume": 0.25 }));

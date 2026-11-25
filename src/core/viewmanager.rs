@@ -8,7 +8,7 @@
 // - 렌더 배율 상한(set_max_render_pixel_ratio): 원본은 바로 뷰 영역을 다시 셈해 캔버스 크기를 줄인다.
 //   러스트 판은 캔버스를 플랫폼이 맞추므로 다음 프레임 첫머리에 상한을 건 배율로 다시 맞춘다. 웹은 캔버스 드로잉 버퍼를 줄이고,
 //   데스크탑은 기본 프레임버퍼의 왼쪽 아래에 줄인 크기로 그린 뒤 창 크기로 늘인다. (platform/desktop/renderscaler.rs)
-// - 세이프 에어리어 인셋(get_safe_area_insets)은 [위, 오른쪽, 아래, 왼쪽] 이다. (원본 { top, right, bottom, left }, GameSceneBase 와 같은 차례)
+// - 세이프 에어리어 인셋(get_safe_area_insets, set_safe_area_override)은 원본 { top, right, bottom, left } 처럼 이름 붙은 칸을 가진 SafeAreaInsets 다.
 //   주소의 ?safeArea=위,오른쪽,아래,왼쪽 자리는 데스크탑에서 환경 변수 VANILLA_SAFE_AREA=위,오른쪽,아래,왼쪽 이다.
 //   CSS env(safe-area-inset-*) 는 웹만 있고 데스크탑은 노치가 없어 0 이다. set_safe_area_override 는 둘 다에서 먹는다.
 // - get_client_native_size: 원본처럼 페이지 전체 크기(window.innerWidth, innerHeight)다. 데스크탑은 페이지가 없어 창 안쪽 논리 크기다.
@@ -22,6 +22,31 @@ use crate::base::rect::Rect;
 use crate::base::vector2::Vector2;
 use crate::core::graphic::Graphic;
 use crate::platform;
+
+//==============================================================================
+// 세이프 에어리어 인셋. (원본 { top, right, bottom, left })
+//==============================================================================
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct SafeAreaInsets {
+	pub top: f32,
+	pub right: f32,
+	pub bottom: f32,
+	pub left: f32,
+}
+
+impl SafeAreaInsets {
+	//==============================================================================
+	// 생성. (원본 { top, right, bottom, left } 의 차례)
+	//==============================================================================
+	pub const fn create(top: f32, right: f32, bottom: f32, left: f32) -> SafeAreaInsets {
+		SafeAreaInsets {
+			top,
+			right,
+			bottom,
+			left,
+		}
+	}
+}
 
 //==============================================================================
 // 세이프 에어리어의 쪽. (원본 "top", "right", "bottom", "left")
@@ -70,7 +95,7 @@ pub struct ViewManager {
 	// 렌더에 쓸 배율 상한. (0 이면 제한 없음)
 	max_render_pixel_ratio: f32,
 	// 세이프 에어리어 강제값. (CSS 픽셀, 위 / 오른쪽 / 아래 / 왼쪽)
-	safe_area_override: Option<[f32; 4]>,
+	safe_area_override: Option<SafeAreaInsets>,
 	// 무시할 세이프 에어리어 쪽. (get_safe_area_insets 가 0 으로 돌려준다)
 	ignored_safe_area_sides: Vec<SafeAreaSide>,
 }
@@ -365,18 +390,18 @@ impl ViewManager {
 	}
 
 	//==============================================================================
-	// 세이프 에어리어 강제값 설정. (CSS 픽셀 [위, 오른쪽, 아래, 왼쪽], 데스크탑에서 노치를 흉내 낼 때, None 이면 풀기)
+	// 세이프 에어리어 강제값 설정. (CSS 픽셀, 데스크탑에서 노치를 흉내 낼 때, None 이면 풀기)
 	//==============================================================================
-	pub fn set_safe_area_override(&mut self, insets: Option<[f32; 4]>) {
+	pub fn set_safe_area_override(&mut self, insets: Option<SafeAreaInsets>) {
 		self.safe_area_override = insets;
 	}
 
 	//==============================================================================
-	// 세이프 에어리어 인셋. (뷰 좌표 [위, 오른쪽, 아래, 왼쪽])
+	// 세이프 에어리어 인셋. (뷰 좌표)
 	// - 우선순위: set_safe_area_override > 주소 ?safeArea=위,오른쪽,아래,왼쪽 > CSS env(safe-area-inset-*) 실측.
 	// - CSS 픽셀을 기준 해상도 배율로 나눠 뷰 좌표로 바꾼다.
 	//==============================================================================
-	pub fn get_safe_area_insets(&self) -> [f32; 4] {
+	pub fn get_safe_area_insets(&self) -> SafeAreaInsets {
 		let css_insets = match self.safe_area_override {
 			Some(safe_area_override) => {
 				safe_area_override
@@ -387,7 +412,8 @@ impl ViewManager {
 						query_insets
 					}
 					None => {
-						platform::read_safe_area_insets()
+						let [top, right, bottom, left] = platform::read_safe_area_insets();
+						SafeAreaInsets::create(top, right, bottom, left)
 					}
 				}
 			}
@@ -399,23 +425,22 @@ impl ViewManager {
 		else {
 			1.0
 		};
-		let mut insets = [css_insets[0] * scale, css_insets[1] * scale, css_insets[2] * scale, css_insets[3] * scale];
+		let mut insets = SafeAreaInsets::create(css_insets.top * scale, css_insets.right * scale, css_insets.bottom * scale, css_insets.left * scale);
 		for ignored_side in &self.ignored_safe_area_sides {
-			let side_index = match ignored_side {
+			match ignored_side {
 				SafeAreaSide::Top => {
-					0
+					insets.top = 0.0;
 				}
 				SafeAreaSide::Right => {
-					1
+					insets.right = 0.0;
 				}
 				SafeAreaSide::Bottom => {
-					2
+					insets.bottom = 0.0;
 				}
 				SafeAreaSide::Left => {
-					3
+					insets.left = 0.0;
 				}
-			};
-			insets[side_index] = 0.0;
+			}
 		}
 		insets
 	}
@@ -463,10 +488,10 @@ impl ViewManager {
 }
 
 //==============================================================================
-// 주소의 safeArea 값 읽기. ("44,0,34,0" → [44, 0, 34, 0], 빈 글이면 None)
+// 주소의 safeArea 값 읽기. ("44,0,34,0" → 위 44, 오른쪽 0, 아래 34, 왼쪽 0, 빈 글이면 None)
 // - 원본처럼 쉼표로 나눈 조각마다 parseFloat 하고, 읽지 못한 조각과 모자란 조각은 0 이다.
 //==============================================================================
-fn parse_safe_area_text(safe_area_text: &str) -> Option<[f32; 4]> {
+fn parse_safe_area_text(safe_area_text: &str) -> Option<SafeAreaInsets> {
 	if safe_area_text.is_empty() {
 		return None;
 	}
@@ -477,7 +502,7 @@ fn parse_safe_area_text(safe_area_text: &str) -> Option<[f32; 4]> {
 			insets[part_index] = value as f32;
 		}
 	}
-	Some(insets)
+	Some(SafeAreaInsets::create(insets[0], insets[1], insets[2], insets[3]))
 }
 
 //==============================================================================
@@ -592,10 +617,10 @@ mod tests {
 	fn safe_area_override_scales_to_view() {
 		let mut view_manager = create_view_manager(1280, 720, ViewScaleMode::StretchShort);
 		assert_eq!(view_manager.get_target_resolution_scale(), 0.5);
-		view_manager.set_safe_area_override(Some([44.0, 0.0, 34.0, 10.0]));
-		assert_eq!(view_manager.get_safe_area_insets(), [88.0, 0.0, 68.0, 20.0]);
+		view_manager.set_safe_area_override(Some(SafeAreaInsets::create(44.0, 0.0, 34.0, 10.0)));
+		assert_eq!(view_manager.get_safe_area_insets(), SafeAreaInsets::create(88.0, 0.0, 68.0, 20.0));
 		view_manager.set_safe_area_override(None);
-		assert_eq!(view_manager.get_safe_area_insets(), [0.0, 0.0, 0.0, 0.0]);
+		assert_eq!(view_manager.get_safe_area_insets(), SafeAreaInsets::create(0.0, 0.0, 0.0, 0.0));
 	}
 
 	//==============================================================================
@@ -603,8 +628,8 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn safe_area_text_and_leading_float() {
-		assert_eq!(parse_safe_area_text("44,0,34,0"), Some([44.0, 0.0, 34.0, 0.0]));
-		assert_eq!(parse_safe_area_text("44px, abc ,12.5"), Some([44.0, 0.0, 12.5, 0.0]));
+		assert_eq!(parse_safe_area_text("44,0,34,0"), Some(SafeAreaInsets::create(44.0, 0.0, 34.0, 0.0)));
+		assert_eq!(parse_safe_area_text("44px, abc ,12.5"), Some(SafeAreaInsets::create(44.0, 0.0, 12.5, 0.0)));
 		assert_eq!(parse_safe_area_text(""), None);
 		assert_eq!(parse_leading_float("  -12.5e1px"), -125.0);
 		assert_eq!(parse_leading_float(".5"), 0.5);
@@ -623,12 +648,12 @@ mod tests {
 	#[test]
 	fn ignored_safe_area_sides_are_zero() {
 		let mut view_manager = create_view_manager(2560, 1440, ViewScaleMode::None);
-		view_manager.set_safe_area_override(Some([40.0, 10.0, 30.0, 20.0]));
+		view_manager.set_safe_area_override(Some(SafeAreaInsets::create(40.0, 10.0, 30.0, 20.0)));
 		view_manager.set_ignored_safe_area_sides(&[SafeAreaSide::Top, SafeAreaSide::Left]);
 		assert_eq!(view_manager.get_ignored_safe_area_sides(), &[SafeAreaSide::Top, SafeAreaSide::Left]);
-		assert_eq!(view_manager.get_safe_area_insets(), [0.0, 10.0, 30.0, 0.0]);
+		assert_eq!(view_manager.get_safe_area_insets(), SafeAreaInsets::create(0.0, 10.0, 30.0, 0.0));
 		view_manager.set_ignored_safe_area_sides(&[]);
-		assert_eq!(view_manager.get_safe_area_insets(), [40.0, 10.0, 30.0, 20.0]);
+		assert_eq!(view_manager.get_safe_area_insets(), SafeAreaInsets::create(40.0, 10.0, 30.0, 20.0));
 	}
 
 	//==============================================================================

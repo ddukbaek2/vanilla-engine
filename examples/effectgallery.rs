@@ -797,6 +797,7 @@ impl Scene for EffectGalleryScene {
 fn main() {
 	let mut engine_configuration = EngineConfiguration::new();
 	engine_configuration.title = String::from("효과 갤러리 (바닐라엔진)");
+	engine_configuration.auto_resize_on_window_resize = true;
 	engine_configuration.reference_resolution_size = Vector2::create(VIEW_WIDTH, VIEW_HEIGHT);
 	engine_configuration.view_scale_mode = ViewScaleMode::StretchShort;
 	engine_configuration.use_statistics = true;

@@ -8,10 +8,13 @@
 // - 꼴은 set_style 로 단추마다 정하거나, 비워 두면 위 노드 가운데 ButtonMotionArea 를 건 가장 가까운 것을 따르고, 없으면 Normal 이다.
 // - Inset 꼴에서 올린 동안은 단추 바탕 Paint 의 색을 밝히고 안쪽에 흰 테를 그린다. (바탕 Paint 가 없거나 보이지 않는 단추는 밝히지 않는다)
 //   단추에 얹은 꾸밈이 제 모양으로 밝히게 하려면 set_lit_handler 로 함수를 건다. (그때 단추의 눌림 색은 투명으로 둔다)
+//   건 함수는 Rc<RefCell> 에 담는다. get_lit_handler 는 그 Rc 를 돌려주고, 부르는 쪽은 borrow_mut 로 빌려 부른다.
 // - 원본과 다른 것: 가운데를 두는 셈이 피봇을 읽는다. (원본은 왼쪽 위 피봇만), 꼴을 거는 표시는 ButtonMotionArea 컴포넌트다. (원본은 WeakMap)
 //   밝힌 바탕과 흰 테를 자식 노드로 두지 않는다. (원본은 맨 밑 자식 둘, 러스트 예제처럼 글이 같은 노드의 컴포넌트면 자식이 글을 덮는다)
 //==============================================================================
+use std::cell::RefCell;
 use std::f32::consts::PI;
+use std::rc::Rc;
 
 use crate::base::color::Color;
 use crate::base::rect::Rect;
@@ -143,7 +146,7 @@ pub struct ButtonMotion {
 	is_press_tint_muted: bool,
 	was_input_held: bool,
 	scroll_hold: Option<Vector2>,
-	lit_handler: Option<ButtonLitHandler>,
+	lit_handler: Option<Rc<RefCell<ButtonLitHandler>>>,
 }
 
 impl ButtonMotion {
@@ -191,7 +194,14 @@ impl ButtonMotion {
 	// 밝힘을 맡는 함수 설정. (None 이면 이 부품이 흰 테 판과 밝힌 바탕 판을 둔다)
 	//==============================================================================
 	pub fn set_lit_handler(&mut self, lit_handler: Option<ButtonLitHandler>) {
-		self.lit_handler = lit_handler;
+		self.lit_handler = lit_handler.map(|lit_handler| Rc::new(RefCell::new(lit_handler)));
+	}
+
+	//==============================================================================
+	// 밝힘을 맡는 함수 반환. (부를 때는 borrow_mut 로 빌린다)
+	//==============================================================================
+	pub fn get_lit_handler(&self) -> Option<Rc<RefCell<ButtonLitHandler>>> {
+		self.lit_handler.clone()
 	}
 
 	//==============================================================================
@@ -297,8 +307,10 @@ impl ButtonMotion {
 	fn place_lit_parts(&mut self, context: &mut ComponentContext, is_lit: bool, is_pressed: bool) {
 		let has_lit_handler = self.lit_handler.is_some();
 		self.mute_press_tint(context, has_lit_handler);
-		if let Some(lit_handler) = self.lit_handler.as_mut() {
-			lit_handler(context, is_lit, is_pressed);
+		if let Some(lit_handler) = self.get_lit_handler() {
+			if let Ok(mut lit_function) = lit_handler.try_borrow_mut() {
+				(*lit_function)(context, is_lit, is_pressed);
+			}
 			return;
 		}
 		let paint = match context.get_node_mut().get_component_mut::<Paint>() {
@@ -467,5 +479,23 @@ pub fn attach_button_motion(node_tree: &mut NodeTree, node_id: NodeId) -> Option
 pub fn shake_button(node_tree: &mut NodeTree, node_id: NodeId) {
 	if let Some(button_motion) = node_tree.get_node_mut(node_id).and_then(|node| node.get_component_mut::<ButtonMotion>()) {
 		button_motion.shake();
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	//==============================================================================
+	// 건 밝힘 함수를 get_lit_handler 로 돌려받고, None 을 걸면 비운다.
+	//==============================================================================
+	#[test]
+	fn lit_handler_getter() {
+		let mut button_motion = ButtonMotion::new();
+		assert!(button_motion.get_lit_handler().is_none());
+		button_motion.set_lit_handler(Some(Box::new(|_context: &mut ComponentContext, _is_lit: bool, _is_pressed: bool| {})));
+		assert!(button_motion.get_lit_handler().is_some());
+		button_motion.set_lit_handler(None);
+		assert!(button_motion.get_lit_handler().is_none());
 	}
 }

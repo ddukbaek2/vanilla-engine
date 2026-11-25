@@ -37,6 +37,7 @@
 //   - set_view_scale_mode 는 엔진을 같이 받는다. (전역 엔진이 없다) 엔진을 주면 원본처럼 바로 뷰 영역을 다시 계산한다.
 //   - 개발자 도구(DevTools)는 EngineConfiguration::use_dev_tools 가 켜져 있으면 initialize 에서 만든다. (원본과 같음) tick 이 F2 와 터치를 넘기고 post_draw 가 그린다.
 // - 로딩 화면 바꾸기: set_loading_colors 로 색만, set_loading_drawer 로 바탕 위 그림 전체를 바꾼다. (원본 setLoadingColors, setLoadingDrawer)
+//   건 함수는 Rc<RefCell> 에 담는다. get_loading_drawer 는 그 Rc 를 돌려주고, 부르는 쪽은 borrow_mut 로 빌려 부른다.
 //   게이지는 기본으로 최소 노출 시간의 경과(get_loading_progress)를 보이고, set_loading_progress 나 track_asset_loader 로 진행률을 알리면
 //   그 진행률을 부드럽게 따라간다. (LoadingProgress, get_loading_progress_state)
 //   - 원본 getLoadingProgress(LoadingProgress 를 돌려줌)는 러스트 판에 이미 같은 이름(경과 시간 비율)이 있어 get_loading_progress_state 다.
@@ -64,14 +65,14 @@ use crate::core::engine::Engine;
 use crate::core::graphic::Graphic;
 use crate::core::node::nodetree::{NodeId, NodeTree};
 use crate::core::scene::SceneBase;
-use crate::core::viewmanager::ViewScaleMode;
+use crate::core::viewmanager::{SafeAreaInsets, ViewScaleMode};
 use crate::misc::devtools::DevTools;
 use crate::misc::loadingprogress::LoadingProgress;
 use crate::resource::assetloader::AssetLoader;
 use crate::resource::imageasset::ImageAsset;
 use crate::ui::touchrecognizer::TouchRecognizer;
 use crate::ui::uiwindowlayer::UIWindowLayer;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 // 로딩 화면 최소 노출 시간 기본값. (밀리초)
@@ -173,8 +174,8 @@ pub struct GameSceneBase {
 	load_gate_handle: Option<AssetLoadHandle>,
 	view_scale_mode: ViewScaleMode,
 	// 세이프 에어리어 인셋. (CSS 픽셀, 위 / 오른쪽 / 아래 / 왼쪽. 없으면 뷰 매니저에서 읽는다)
-	safe_area_insets: Option<[f32; 4]>,
-	loading_drawer: Option<LoadingDrawer>,
+	safe_area_insets: Option<SafeAreaInsets>,
+	loading_drawer: Option<Rc<RefCell<LoadingDrawer>>>,
 	loading_background_color: Color,
 	loading_bar_back_color: Color,
 	loading_bar_fill_color: Color,
@@ -356,7 +357,7 @@ impl GameSceneBase {
 	// - 그림과 글꼴을 받기 전에도 그려지므로 도형과 기본 글꼴로 그린다. 그릴 것은 함수가 스스로 들고 있는다.
 	//==============================================================================
 	pub fn set_loading_drawer(&mut self, loading_drawer: Option<LoadingDrawer>) {
-		self.loading_drawer = loading_drawer;
+		self.loading_drawer = loading_drawer.map(|loading_drawer| Rc::new(RefCell::new(loading_drawer)));
 	}
 
 	//==============================================================================
@@ -367,10 +368,10 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 로딩 화면 그리기 함수 반환. (없으면 None)
+	// 로딩 화면 그리기 함수 반환. (없으면 None, 부를 때는 borrow_mut 로 빌린다)
 	//==============================================================================
-	pub fn get_loading_drawer(&self) -> Option<&LoadingDrawer> {
-		self.loading_drawer.as_ref()
+	pub fn get_loading_drawer(&self) -> Option<Rc<RefCell<LoadingDrawer>>> {
+		self.loading_drawer.clone()
 	}
 
 	//==============================================================================
@@ -468,9 +469,9 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 세이프 에어리어 인셋 직접 설정. (CSS 픽셀: 위, 오른쪽, 아래, 왼쪽. None 이면 뷰 매니저의 get_safe_area_insets 를 읽는다)
+	// 세이프 에어리어 인셋 직접 설정. (CSS 픽셀, None 이면 뷰 매니저의 get_safe_area_insets 를 읽는다)
 	//==============================================================================
-	pub fn set_safe_area_insets(&mut self, insets: Option<[f32; 4]>) {
+	pub fn set_safe_area_insets(&mut self, insets: Option<SafeAreaInsets>) {
 		self.safe_area_insets = insets;
 	}
 
@@ -587,8 +588,10 @@ impl GameSceneBase {
 		graphic.draw_rect(Rect::create(0.0, 0.0, view_size.x, view_size.y));
 
 		// 그리기 함수.
-		if let Some(loading_drawer) = self.loading_drawer.as_mut() {
-			loading_drawer(graphic, view_size, progress, elapsed_seconds);
+		if let Some(loading_drawer) = self.get_loading_drawer() {
+			if let Ok(mut drawer_function) = loading_drawer.try_borrow_mut() {
+				(*drawer_function)(graphic, view_size, progress, elapsed_seconds);
+			}
 			return;
 		}
 
@@ -710,28 +713,28 @@ impl GameSceneBase {
 				GameSceneBase::calculate_safe_area_rect(view_size, target_resolution_scale, insets)
 			}
 			None => {
-				let [inset_top, inset_right, inset_bottom, inset_left] = view_manager.get_safe_area_insets();
-				let width = (view_size.x - inset_left - inset_right).max(0.0);
-				let height = (view_size.y - inset_top - inset_bottom).max(0.0);
-				Rect::create(inset_left, inset_top, width, height)
+				let insets = view_manager.get_safe_area_insets();
+				let width = (view_size.x - insets.left - insets.right).max(0.0);
+				let height = (view_size.y - insets.top - insets.bottom).max(0.0);
+				Rect::create(insets.left, insets.top, width, height)
 			}
 		}
 	}
 
 	//==============================================================================
-	// 세이프 에어리어 계산. (정적. CSS 픽셀 인셋 [위, 오른쪽, 아래, 왼쪽] 을 뷰 배율로 나눠 뷰 영역에서 뺀다)
+	// 세이프 에어리어 계산. (정적. CSS 픽셀 인셋을 뷰 배율로 나눠 뷰 영역에서 뺀다)
 	//==============================================================================
-	pub fn calculate_safe_area_rect(view_size: Vector2, target_resolution_scale: f32, insets: [f32; 4]) -> Rect {
+	pub fn calculate_safe_area_rect(view_size: Vector2, target_resolution_scale: f32, insets: SafeAreaInsets) -> Rect {
 		let scale = if target_resolution_scale > 0.0 {
 			target_resolution_scale
 		}
 		else {
 			1.0
 		};
-		let inset_top = insets[0] / scale;
-		let inset_right = insets[1] / scale;
-		let inset_bottom = insets[2] / scale;
-		let inset_left = insets[3] / scale;
+		let inset_top = insets.top / scale;
+		let inset_right = insets.right / scale;
+		let inset_bottom = insets.bottom / scale;
+		let inset_left = insets.left / scale;
 		let width = (view_size.x - inset_left - inset_right).max(0.0);
 		let height = (view_size.y - inset_top - inset_bottom).max(0.0);
 		Rect::create(inset_left, inset_top, width, height)
@@ -1106,10 +1109,10 @@ impl GameSceneBase {
 		if canvas_native_size.x <= 0.0 || canvas_native_size.y <= 0.0 {
 			return false;
 		}
-		// 인셋을 캔버스 단위로. (직접 정한 인셋은 CSS 픽셀 그대로, 뷰 매니저의 것은 지금 배율을 곱한다)
-		let canvas_insets = match self.safe_area_insets {
+		// 인셋은 지금 배율로 나눈 뷰 좌표로 나온다. 배율을 곱해 캔버스 단위로 되돌린다. (직접 정한 인셋은 CSS 픽셀 그대로라 배율 1)
+		let (safe_area_insets, inset_scale) = match self.safe_area_insets {
 			Some(insets) => {
-				insets
+				(insets, 1.0)
 			}
 			None => {
 				let target_resolution_scale = view_manager.get_target_resolution_scale();
@@ -1119,11 +1122,10 @@ impl GameSceneBase {
 				else {
 					1.0
 				};
-				let view_insets = view_manager.get_safe_area_insets();
-				[view_insets[0] * inset_scale, view_insets[1] * inset_scale, view_insets[2] * inset_scale, view_insets[3] * inset_scale]
+				(view_manager.get_safe_area_insets(), inset_scale)
 			}
 		};
-		let reference_length = GameSceneBase::calculate_play_area_reference_length(self.play_area_fixed_length, self.is_play_area_landscape, canvas_native_size, canvas_insets);
+		let reference_length = GameSceneBase::calculate_play_area_reference_length(self.play_area_fixed_length, self.is_play_area_landscape, canvas_native_size, safe_area_insets, inset_scale);
 		if reference_length <= 0.0 {
 			return false;
 		}
@@ -1148,16 +1150,16 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 게임 영역 기준의 기준 해상도 길이 셈. (정적, 인셋은 캔버스 단위 [위, 오른쪽, 아래, 왼쪽], 못 셈하면 0)
+	// 게임 영역 기준의 기준 해상도 길이 셈. (정적, 인셋은 뷰 좌표, inset_scale 은 뷰 좌표 → 캔버스 단위 배율, 못 셈하면 0)
 	//==============================================================================
-	pub fn calculate_play_area_reference_length(fixed_length: f32, is_landscape: bool, canvas_native_size: Vector2, canvas_insets: [f32; 4]) -> f32 {
+	pub fn calculate_play_area_reference_length(fixed_length: f32, is_landscape: bool, canvas_native_size: Vector2, safe_area_insets: SafeAreaInsets, inset_scale: f32) -> f32 {
 		let (canvas_length, inset_sum) = if is_landscape {
-			(canvas_native_size.x, canvas_insets[3] + canvas_insets[1])
+			(canvas_native_size.x, safe_area_insets.left + safe_area_insets.right)
 		}
 		else {
-			(canvas_native_size.y, canvas_insets[0] + canvas_insets[2])
+			(canvas_native_size.y, safe_area_insets.top + safe_area_insets.bottom)
 		};
-		let safe_area_length = canvas_length - inset_sum;
+		let safe_area_length = canvas_length - inset_sum * inset_scale;
 		if safe_area_length <= 0.0 || canvas_length <= 0.0 {
 			return 0.0;
 		}
@@ -1442,7 +1444,7 @@ mod tests {
 		let mut engine = Engine::new(EngineConfiguration::new());
 		engine.get_view_manager_mut().calculate_view_rect(800, 600, 1.0);
 		let mut game_scene_base = GameSceneBase::new();
-		game_scene_base.set_safe_area_insets(Some([10.0, 0.0, 20.0, 5.0]));
+		game_scene_base.set_safe_area_insets(Some(SafeAreaInsets::create(10.0, 0.0, 20.0, 5.0)));
 		game_scene_base.initialize(&mut engine);
 		assert_eq!(engine.get_view_manager().get_view_scale_mode(), ViewScaleMode::None);
 		assert_eq!(engine.get_view_manager().get_view_size(), Vector2::create(800.0, 600.0));
@@ -1472,9 +1474,9 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn safe_area_calculation() {
-		let safe_area_rect = GameSceneBase::calculate_safe_area_rect(Vector2::create(400.0, 300.0), 2.0, [40.0, 10.0, 20.0, 30.0]);
+		let safe_area_rect = GameSceneBase::calculate_safe_area_rect(Vector2::create(400.0, 300.0), 2.0, SafeAreaInsets::create(40.0, 10.0, 20.0, 30.0));
 		assert_eq!(safe_area_rect, Rect::create(15.0, 20.0, 380.0, 270.0));
-		let collapsed_rect = GameSceneBase::calculate_safe_area_rect(Vector2::create(10.0, 10.0), 0.0, [20.0, 20.0, 20.0, 20.0]);
+		let collapsed_rect = GameSceneBase::calculate_safe_area_rect(Vector2::create(10.0, 10.0), 0.0, SafeAreaInsets::create(20.0, 20.0, 20.0, 20.0));
 		assert_eq!(collapsed_rect, Rect::create(20.0, 20.0, 0.0, 0.0));
 	}
 
@@ -1508,7 +1510,7 @@ mod tests {
 		let mut engine = Engine::new(EngineConfiguration::new());
 		engine.get_view_manager_mut().calculate_view_rect(800, 600, 1.0);
 		let mut game_scene_base = GameSceneBase::new();
-		game_scene_base.set_safe_area_insets(Some([0.0, 0.0, 0.0, 0.0]));
+		game_scene_base.set_safe_area_insets(Some(SafeAreaInsets::create(0.0, 0.0, 0.0, 0.0)));
 		game_scene_base.initialize(&mut engine);
 		game_scene_base.set_play_input_enabled(true);
 		game_scene_base.set_screen_fade_seconds(0.2);
@@ -1551,7 +1553,7 @@ mod tests {
 		let mut engine = Engine::new(EngineConfiguration::new());
 		engine.get_view_manager_mut().calculate_view_rect(800, 600, 1.0);
 		let mut game_scene_base = GameSceneBase::new();
-		game_scene_base.set_safe_area_insets(Some([10.0, 0.0, 0.0, 20.0]));
+		game_scene_base.set_safe_area_insets(Some(SafeAreaInsets::create(10.0, 0.0, 0.0, 20.0)));
 		game_scene_base.initialize(&mut engine);
 		let mut current_seconds = 1.0;
 		step_frame(&mut engine, &mut game_scene_base, &mut current_seconds, 0.016);
@@ -1591,7 +1593,7 @@ mod tests {
 		let mut engine = Engine::new(EngineConfiguration::new());
 		engine.get_view_manager_mut().calculate_view_rect(800, 600, 1.0);
 		let mut game_scene_base = GameSceneBase::new();
-		engine.get_view_manager_mut().set_safe_area_override(Some([40.0, 0.0, 30.0, 0.0]));
+		engine.get_view_manager_mut().set_safe_area_override(Some(SafeAreaInsets::create(40.0, 0.0, 30.0, 0.0)));
 		game_scene_base.set_play_area_reference(720.0, false, Some(&mut engine));
 		assert_eq!(engine.get_view_manager().get_view_scale_mode(), ViewScaleMode::StretchHeightExpandWidth);
 		game_scene_base.initialize(&mut engine);
@@ -1604,7 +1606,7 @@ mod tests {
 		assert!((game_scene_base.get_safe_area_rect().size.y - 720.0).abs() < 0.01);
 		assert_eq!(game_scene_base.get_safe_area_rect().position.y, 0.0);
 		assert!(!game_scene_base.apply_play_area_reference(&mut engine));
-		assert!((GameSceneBase::calculate_play_area_reference_length(1920.0, true, Vector2::create(1000.0, 500.0), [0.0, 50.0, 0.0, 50.0]) - 1920.0 * 1000.0 / 900.0).abs() < 0.01);
+		assert!((GameSceneBase::calculate_play_area_reference_length(1920.0, true, Vector2::create(1000.0, 500.0), SafeAreaInsets::create(0.0, 25.0, 0.0, 25.0), 2.0) - 1920.0 * 1000.0 / 900.0).abs() < 0.01);
 	}
 
 	//==============================================================================
@@ -1643,6 +1645,7 @@ mod tests {
 		assert_eq!(colored_scene_base.loading_outside_color, Color::create_from_hex("#05090d"));
 		colored_scene_base.set_loading_drawer(Some(Box::new(|_graphic, _view_size, _progress, _elapsed_seconds| {})));
 		assert!(colored_scene_base.has_loading_drawer());
+		assert!(colored_scene_base.get_loading_drawer().is_some());
 		colored_scene_base.set_loading_progress(0.25);
 		assert_eq!(colored_scene_base.get_loading_progress_state().get_progress(), 0.25);
 	}
@@ -1680,7 +1683,7 @@ mod tests {
 		use crate::core::scene::Scene;
 		let mut engine = Engine::new(EngineConfiguration::new());
 		engine.get_view_manager_mut().calculate_view_rect(800, 600, 1.0);
-		engine.get_view_manager_mut().set_safe_area_override(Some([40.0, 0.0, 30.0, 0.0]));
+		engine.get_view_manager_mut().set_safe_area_override(Some(SafeAreaInsets::create(40.0, 0.0, 30.0, 0.0)));
 		let mut scene = LayoutCountScene {
 			game_scene_base: GameSceneBase::new(),
 			layout_count: 0,
@@ -1707,7 +1710,7 @@ mod tests {
 		let mut engine = Engine::new(EngineConfiguration::new());
 		engine.get_view_manager_mut().calculate_view_rect(800, 600, 1.0);
 		let mut game_scene_base = GameSceneBase::new();
-		game_scene_base.set_safe_area_insets(Some([0.0, 0.0, 0.0, 0.0]));
+		game_scene_base.set_safe_area_insets(Some(SafeAreaInsets::create(0.0, 0.0, 0.0, 0.0)));
 		game_scene_base.initialize(&mut engine);
 		let received_inputs: Rc<std::cell::RefCell<Vec<PlayInput>>> = Rc::new(std::cell::RefCell::new(Vec::new()));
 		let received_inputs_handler = received_inputs.clone();

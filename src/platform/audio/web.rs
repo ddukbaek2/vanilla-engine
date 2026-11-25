@@ -11,6 +11,7 @@
 // - 디코딩: 원본처럼 OfflineAudioContext(1, 1, 44100) 로 한다. 없으면 잠시 쓰는 AudioContext 로 하고 닫는다.
 // - 컨텍스트 멈춤: 원본 SoundSystem.applyContextPause 처럼 "running" 일 때만 suspend() 하고, 거부되면 알리고 넘긴다.
 // - 좌우(pan): 원본 SoundSystem.playEffect 처럼 0 이 아니면 StereoPannerNode 를 GainNode 와 출력 사이에 끼운다. (createStereoPanner 가 없으면 끼우지 않는다)
+// - 버스: 원본 AudioBus 처럼 출력에 이은 GainNode 하나다. 버스로 만든 플레이어는 GainNode 를 출력 대신 버스의 GainNode 에 잇는다.
 // - 비동기: 프로미스는 wasm-bindgen-futures 의 spawn_local 과 JsFuture 로 기다린다. (원본 then / await 자리)
 //   콜백은 매니저나 플레이어의 상태를 Weak 로 들어, 그 사이 버려졌으면 아무것도 하지 않는다.
 // - 원본과 다른 점:
@@ -384,6 +385,8 @@ impl PlaybackState {
 pub struct AudioPlayerBackend {
 	audio_context: Option<AudioContext>,
 	gain_node: Option<web_sys::GainNode>,
+	// 소리를 내보내는 곳. (출력이나 버스의 GainNode, 좌우 노드를 끼울 때 그 뒤에 잇는다)
+	output_node: Option<web_sys::AudioNode>,
 	// 좌우 노드. (StereoPannerNode, 0 이 아닌 좌우를 처음 걸 때 만든다)
 	panner_node: Option<web_sys::AudioNode>,
 	playback_state: Rc<RefCell<PlaybackState>>,
@@ -396,17 +399,28 @@ impl AudioPlayerBackend {
 	//==============================================================================
 	pub fn create(audio_context: Option<&mut AudioContext>) -> AudioPlayerBackend {
 		let audio_context = audio_context.cloned();
+		let output_node = audio_context.as_ref().map(|audio_context| {
+			let destination: web_sys::AudioNode = audio_context.destination().into();
+			destination
+		});
+		AudioPlayerBackend::create_with_output(audio_context, output_node)
+	}
+
+	//==============================================================================
+	// 내보낼 곳을 정해 생성. (컨텍스트와 내보낼 곳이 있으면 GainNode 를 만들어 거기에 잇는다)
+	//==============================================================================
+	fn create_with_output(audio_context: Option<AudioContext>, output_node: Option<web_sys::AudioNode>) -> AudioPlayerBackend {
 		let mut gain_node = None;
-		if let Some(audio_context) = &audio_context {
+		if let (Some(audio_context), Some(output_node)) = (&audio_context, &output_node) {
 			if let Ok(created_gain_node) = audio_context.create_gain() {
-				let destination = audio_context.destination();
-				let _ = created_gain_node.connect_with_audio_node(&destination);
+				let _ = created_gain_node.connect_with_audio_node(output_node);
 				gain_node = Some(created_gain_node);
 			}
 		}
 		AudioPlayerBackend {
 			audio_context,
 			gain_node,
+			output_node,
 			panner_node: None,
 			playback_state: Rc::new(RefCell::new(PlaybackState {
 				audio_source: None,
@@ -500,17 +514,17 @@ impl AudioPlayerBackend {
 	}
 
 	//==============================================================================
-	// StereoPannerNode 를 만들어 GainNode 와 출력 사이에 끼운다. (createStereoPanner 가 없으면 None)
+	// StereoPannerNode 를 만들어 GainNode 와 내보낼 곳(출력이나 버스) 사이에 끼운다. (createStereoPanner 가 없으면 None)
 	//==============================================================================
 	fn create_panner_node(&self) -> Option<web_sys::AudioNode> {
 		let audio_context = self.audio_context.as_ref()?;
 		let gain_node = self.gain_node.as_ref()?;
+		let output_node = self.output_node.as_ref()?;
 		let create_function: js_sys::Function = js_sys::Reflect::get(audio_context, &JsValue::from_str("createStereoPanner")).ok()?.dyn_into().ok()?;
 		let panner_node: web_sys::AudioNode = create_function.call0(audio_context).ok()?.dyn_into().ok()?;
-		let destination = audio_context.destination();
 		let _ = gain_node.disconnect();
 		let _ = gain_node.connect_with_audio_node(&panner_node);
-		let _ = panner_node.connect_with_audio_node(&destination);
+		let _ = panner_node.connect_with_audio_node(output_node);
 		Some(panner_node)
 	}
 
@@ -543,6 +557,81 @@ impl Drop for AudioPlayerBackend {
 		}
 		if let Some(panner_node) = &self.panner_node {
 			let _ = panner_node.disconnect();
+		}
+	}
+}
+
+//==============================================================================
+// 버스 하나의 소리 모으는 부분. (원본 AudioBus 의 audio_context, gain_node. 출력에 이은 GainNode 하나)
+//==============================================================================
+pub struct AudioBusBackend {
+	audio_context: Option<AudioContext>,
+	gain_node: Option<web_sys::GainNode>,
+}
+
+impl AudioBusBackend {
+	//==============================================================================
+	// 생성. (컨텍스트가 있으면 GainNode 를 만들어 출력에 잇는다)
+	//==============================================================================
+	pub fn create(audio_context: Option<&mut AudioContext>) -> AudioBusBackend {
+		let audio_context = audio_context.cloned();
+		let mut gain_node = None;
+		if let Some(audio_context) = &audio_context {
+			if let Ok(created_gain_node) = audio_context.create_gain() {
+				let destination = audio_context.destination();
+				let _ = created_gain_node.connect_with_audio_node(&destination);
+				gain_node = Some(created_gain_node);
+			}
+		}
+		AudioBusBackend {
+			audio_context,
+			gain_node,
+		}
+	}
+
+	//==============================================================================
+	// 소리를 모을 수 있는지. (원본 audio_context && gain_node)
+	//==============================================================================
+	pub fn is_available(&self) -> bool {
+		self.audio_context.is_some() && self.gain_node.is_some()
+	}
+
+	//==============================================================================
+	// 음량 설정. (gain_node.gain.value)
+	//==============================================================================
+	pub fn set_gain(&mut self, gain: f32) {
+		if let Some(gain_node) = &self.gain_node {
+			let gain_parameter = gain_node.gain();
+			gain_parameter.set_value(gain);
+		}
+	}
+
+	//==============================================================================
+	// 이 버스로 트는 플레이어 백엔드 생성. (플레이어의 GainNode 를 버스의 GainNode 에 잇는다, 버스가 소리 없으면 소리 없는 플레이어)
+	//==============================================================================
+	pub fn create_player_backend(&mut self) -> AudioPlayerBackend {
+		let output_node = self.gain_node.clone().map(|gain_node| {
+			let output_node: web_sys::AudioNode = gain_node.into();
+			output_node
+		});
+		AudioPlayerBackend::create_with_output(self.audio_context.clone(), output_node)
+	}
+
+	//==============================================================================
+	// 버스의 GainNode. (원본 getGainNode, 컨텍스트가 없을 때 만든 버스는 None)
+	//==============================================================================
+	pub fn get_gain_node(&self) -> Option<&web_sys::GainNode> {
+		self.gain_node.as_ref()
+	}
+}
+
+impl Drop for AudioBusBackend {
+	//==============================================================================
+	// 버릴 때 GainNode 를 출력에서 뗀다.
+	//==============================================================================
+	fn drop(&mut self) {
+		if let Some(gain_node) = &self.gain_node {
+			let _ = gain_node.disconnect();
 		}
 	}
 }

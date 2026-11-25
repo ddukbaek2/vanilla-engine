@@ -15,12 +15,15 @@
 //     ewebsock 데스크탑은 이쪽에서 닫으면 Closed 사건을 보내지 않아, 그 tick 에 남은 사건을 꺼낸 뒤 끊는다)
 //   - 오류 사건은 원본처럼 알리고, 끊긴 것으로 친다. (브라우저는 onerror 뒤에 늘 onclose 가 오고, ewebsock 데스크탑은 오류 뒤 스레드가 끝난다)
 //   - get_web_socket 은 ewebsock 의 송신기(WsSender)다.
+//   - 수신 콜백은 Rc<RefCell> 에 담는다. get_receive_event 는 그 Rc 를 돌려주고, 부르는 쪽은 borrow_mut 로 빌려 부른다.
 //   - 데스크탑에서 wss:// 주소는 ewebsock 의 "tls" 기능을 켜야 열린다. (기본은 꺼 두었다)
 //   - 바이너리 메시지도 UTF-8 JSON 이면 받는다. (원본은 Blob 을 JSON.parse 하다 실패한다)
 //==============================================================================
 use ewebsock::{WsEvent, WsMessage, WsReceiver, WsSender};
 use serde_json::Value;
+use std::cell::RefCell;
 use std::collections::VecDeque;
+use std::rc::Rc;
 
 // 수신 콜백이 없을 때 모아 두는 메시지 수 한도.
 pub const RECEIVED_MESSAGE_LIMIT: usize = 1024;
@@ -37,7 +40,7 @@ pub struct WebSocketClient {
 	is_connected: bool,
 	// 닫기를 걸어 다음 tick 에 끊을 차례인지. (원본 onclose 를 기다리는 동안)
 	is_closing: bool,
-	receive_event: Option<WebSocketReceiveEvent>,
+	receive_event: Option<Rc<RefCell<WebSocketReceiveEvent>>>,
 	received_message_list: VecDeque<Value>,
 }
 
@@ -177,8 +180,10 @@ impl WebSocketClient {
 				return;
 			}
 		};
-		if let Some(receive_event) = self.receive_event.as_mut() {
-			receive_event(&value);
+		if let Some(receive_event) = self.get_receive_event() {
+			if let Ok(mut receive_function) = receive_event.try_borrow_mut() {
+				(*receive_function)(&value);
+			}
 			return;
 		}
 		if self.received_message_list.len() >= RECEIVED_MESSAGE_LIMIT {
@@ -229,14 +234,14 @@ impl WebSocketClient {
 	// 수신 콜백 설정. (None 이면 받은 메시지를 모아 둔다)
 	//==============================================================================
 	pub fn set_receive_event(&mut self, receive_event: Option<WebSocketReceiveEvent>) {
-		self.receive_event = receive_event;
+		self.receive_event = receive_event.map(|receive_event| Rc::new(RefCell::new(receive_event)));
 	}
 
 	//==============================================================================
-	// 수신 콜백 반환.
+	// 수신 콜백 반환. (부를 때는 borrow_mut 로 빌린다)
 	//==============================================================================
-	pub fn get_receive_event(&mut self) -> Option<&mut WebSocketReceiveEvent> {
-		self.receive_event.as_mut()
+	pub fn get_receive_event(&self) -> Option<Rc<RefCell<WebSocketReceiveEvent>>> {
+		self.receive_event.clone()
 	}
 }
 

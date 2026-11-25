@@ -11,7 +11,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use vanilla::{Color, ComponentContext, Engine, EngineConfiguration, GameScene, GameSceneBase, NodeId, NodeTree, Paint, Pivot, PlayInput, ScreenFadeHold, Text, TextAlign, UIButton, UIConfirmWindow, UIConfirmWindowOptions, UILabel, UIWindow, UIWindowDefaultBehavior, UIWindowLayer, Vector2};
+use vanilla::{Color, ComponentContext, Engine, EngineConfiguration, GameScene, GameSceneBase, NodeId, NodeTree, Paint, Pivot, PlayInput, SafeAreaInsets, ScreenFadeHold, Text, TextAlign, UIButton, UIConfirmWindow, UIConfirmWindowOptions, UILabel, UIWindow, UIWindowDefaultBehavior, UIWindowLayer, Vector2};
 
 // 저절로 둘러보는 때. (초)
 const TOUR_CLOSE_CONFIRM_SECONDS: f32 = 2.5;
@@ -128,12 +128,12 @@ impl MainScene {
 		let safe_area_rect = self.game_scene_base.get_safe_area_rect();
 		let view_manager = engine.get_view_manager();
 		let css_pixel_scale = view_manager.get_css_pixel_scale();
-		let [inset_top, inset_right, inset_bottom, inset_left] = view_manager.get_safe_area_insets();
+		let safe_area_insets = view_manager.get_safe_area_insets();
 		let node_tree = self.game_scene_base.get_scene_base_mut().get_node_tree_mut();
 		node_tree[play_area_id].set_content_size(safe_area_rect.size);
 		node_tree.with_component_mut::<UIWindowLayer, _>(layer_id, |window_layer, tree| {
 			window_layer.set_view_size(tree, safe_area_rect.size.x, safe_area_rect.size.y, css_pixel_scale);
-			window_layer.set_view_bleed(tree, inset_top, inset_right, inset_bottom, inset_left);
+			window_layer.set_view_bleed(tree, safe_area_insets.top, safe_area_insets.right, safe_area_insets.bottom, safe_area_insets.left);
 		});
 	}
 
@@ -233,7 +233,7 @@ impl GameScene for MainScene {
 	// 애셋 읽기 자리. (세이프 에어리어를 흉내 내고 게임 영역 기준과 놀이 입력 처리기를 정한다)
 	//==============================================================================
 	fn load_assets(&mut self, engine: &mut Engine) {
-		engine.get_view_manager_mut().set_safe_area_override(Some([40.0, 0.0, 30.0, 0.0]));
+		engine.get_view_manager_mut().set_safe_area_override(Some(SafeAreaInsets::create(40.0, 0.0, 30.0, 0.0)));
 		self.game_scene_base.set_scene_background_color(Color::create_from_hex("#4a1f1f"));
 		self.game_scene_base.set_play_area_reference(720.0, false, Some(engine));
 		let press_count = self.press_count.clone();
@@ -332,6 +332,7 @@ vanilla::game_scene!(MainScene);
 fn main() {
 	let mut engine_configuration = EngineConfiguration::new();
 	engine_configuration.title = String::from("창 쌓기와 화면 틀 (바닐라엔진)");
+	engine_configuration.auto_resize_on_window_resize = true;
 	engine_configuration.reference_resolution_size = Vector2::create(1280.0, 720.0);
 	let engine = Engine::new(engine_configuration);
 	// 로딩 화면 설정은 create 전에. (원본 생성자 자리)

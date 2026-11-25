@@ -276,6 +276,7 @@ fn create_build_info() -> BuildInfo {
 fn main() {
 	let mut engine_configuration = EngineConfiguration::new();
 	engine_configuration.title = String::from("로딩 쇼케이스 (바닐라엔진)");
+	engine_configuration.auto_resize_on_window_resize = true;
 	engine_configuration.reference_resolution_size = Vector2::create(VIEW_WIDTH, VIEW_HEIGHT);
 	engine_configuration.asset_directory_paths = vec![PathBuf::from(EXAMPLE_ASSET_DIRECTORY)];
 	let engine = Engine::new(engine_configuration);

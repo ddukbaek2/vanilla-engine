@@ -516,6 +516,7 @@ macro_rules! ui_scene {
 mod tests {
 	use super::*;
 	use crate::core::engine::EngineConfiguration;
+	use crate::core::viewmanager::SafeAreaInsets;
 
 	//==============================================================================
 	// 트리에 붙인 UINode 는 tick 에 솔버가 붙고, 세이프 에어리어 가이드에 맞춰 놓인다. 뷰 크기가 바뀌면 다시 놓인다.
@@ -524,7 +525,7 @@ mod tests {
 	fn ui_nodes_follow_safe_area_guide() {
 		let mut engine = Engine::new(EngineConfiguration::new());
 		engine.get_view_manager_mut().calculate_view_rect(800, 600, 1.0);
-		engine.get_view_manager_mut().set_safe_area_override(Some([40.0, 0.0, 20.0, 10.0]));
+		engine.get_view_manager_mut().set_safe_area_override(Some(SafeAreaInsets::create(40.0, 0.0, 20.0, 10.0)));
 		let mut ui_scene_base = UISceneBase::new();
 		ui_scene_base.initialize(&mut engine);
 		let guide_left = ui_scene_base.get_safe_area_layout_guide().left_anchor();

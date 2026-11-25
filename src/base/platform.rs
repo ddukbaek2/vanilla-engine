@@ -4,7 +4,8 @@
 // - 러스트 판은 웹(wasm32)에서는 원본과 같은 규칙으로 user_agent 를 보고, 데스크탑에서는 빌드 대상 OS 를 쓴다.
 //   데스크탑의 브라우저는 unknown 이고, 스팀덱 구분은 아직 하지 않는다(리눅스로 나온다).
 // - 원본의 getOrAddCanvas 는 platform/web.rs 가 엔진 설정의 캔버스 id 로 한다.
-// - get_resouce_usage(원본 이름의 오타를 그대로 둔다): 웹은 원본처럼 performance 의 resource 항목을 더하고, 데스크탑은 네트워크로 받은 것이 없어 비어 있다.
+// - get_resource_usage: 웹은 원본처럼 performance 의 resource 항목을 더하고, 데스크탑은 네트워크로 받은 것이 없어 비어 있다.
+//   옛 이름의 오타 get_resouce_usage 는 같은 함수를 부르는 별칭으로 남긴다. (원본도 같다)
 // - get_safe_area_rect: 원본은 캔버스(없으면 창)의 크기를 읽는다. 러스트 판은 문서 객체가 없어 그 크기를 받는다. 데스크탑의 인셋은 0 이다.
 // - is_coarse_pointer: 원본처럼 CSS pointer: coarse, 데스크탑은 마우스가 주된 손이라 거짓이다.
 // - is_desktop_web: 원본은 부를 때마다 플랫폼 정보를 새로 읽는다. 러스트 판은 만들 때 읽은 것을 쓴다. (user_agent 는 바뀌지 않는다)
@@ -240,10 +241,17 @@ impl Platform {
 	}
 
 	//==============================================================================
-	// 리소스 사용량. (웹이 받은 파일마다 전송량과 푼 크기, 원본 이름 그대로)
+	// 리소스 사용량. (웹이 받은 파일마다 전송량과 푼 크기)
+	//==============================================================================
+	pub fn get_resource_usage(&self) -> ResourceUsage {
+		read_resource_usage()
+	}
+
+	//==============================================================================
+	// 리소스 사용량. (옛 이름의 오타를 그대로 둔 별칭, get_resource_usage 와 같다)
 	//==============================================================================
 	pub fn get_resouce_usage(&self) -> ResourceUsage {
-		read_resource_usage()
+		self.get_resource_usage()
 	}
 
 	//==============================================================================
@@ -462,6 +470,7 @@ mod tests {
 		let platform = Platform::new();
 		assert_eq!(platform.get_safe_area_rect(Vector2::create(800.0, 600.0)), Rect::create(0.0, 0.0, 800.0, 600.0));
 		assert!(!platform.is_coarse_pointer());
+		assert_eq!(platform.get_resource_usage(), ResourceUsage::default());
 		assert_eq!(platform.get_resouce_usage(), ResourceUsage::default());
 	}
 }

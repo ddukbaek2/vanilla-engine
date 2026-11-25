@@ -14,9 +14,11 @@
 //   원본 getAudioContext() 는 빌린 AudioContext(웹 WebAudio AudioContext, 데스크탑 kira AudioManager)를 돌려준다. 없으면 None, has_audio_context() 도 있다.
 //   AudioManager 는 나눠 든 상태의 손잡이라 Clone 하면 같은 AudioContext 를 보는 손잡이가 하나 더 생긴다. (SoundSystem 이 원본처럼 매니저를 들 때)
 //   생성자는 엔진을 받지 않는다. (원본은 iOS 판별에 엔진의 플랫폼 정보를 쓰고, 여기서는 웹 백엔드가 같은 규칙으로 직접 판별한다)
+//   create_audio_bus(원본 createAudioBus)는 AudioBus 를 만든다. 버스도 플레이어처럼 부른 쪽이 소유한다.
 //==============================================================================
+use crate::core::audiobus::AudioBus;
 use crate::core::audioplayer::AudioPlayer;
-use crate::platform::audio::{self as audio_backend, AudioContext, AudioPlatformState, AudioPlayerBackend};
+use crate::platform::audio::{self as audio_backend, AudioBusBackend, AudioContext, AudioPlatformState, AudioPlayerBackend};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -129,6 +131,16 @@ impl AudioManager {
 		let mut audio_player = AudioPlayer::new(audio_player_backend);
 		audio_player.set_audio_manager_state(self.state.clone());
 		audio_player
+	}
+
+	//==============================================================================
+	// 오디오 버스 생성. (AudioContext 가 없으면 만든다. 만들지 못하면 소리 없는 버스)
+	//==============================================================================
+	pub fn create_audio_bus(&self) -> AudioBus {
+		let mut state = self.state.borrow_mut();
+		let audio_context = state.ensure_audio_context();
+		let audio_bus_backend = AudioBusBackend::create(audio_context);
+		AudioBus::new(audio_bus_backend, self.state.clone())
 	}
 
 	//==============================================================================

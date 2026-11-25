@@ -10,7 +10,7 @@
 //==============================================================================
 
 use vanilla::{
-	Color, Engine, EngineConfiguration, LayoutConstraint, LayoutConstraintAxis, LayoutMargins, LayoutPriority, LayoutStrength, NodeId, NodeTree, Paint, UILabel, UINode, UIScene, UISceneBase, Vector2,
+	Color, Engine, EngineConfiguration, LayoutConstraint, LayoutConstraintAxis, LayoutMargins, LayoutPriority, LayoutStrength, NodeId, NodeTree, Paint, SafeAreaInsets, UILabel, UINode, UIScene, UISceneBase, Vector2,
 };
 
 //==============================================================================
@@ -69,7 +69,7 @@ impl UIScene for LayoutScene {
 	// 애셋 읽기 자리. (세이프 에어리어를 흉내 낸다)
 	//==============================================================================
 	fn load_assets(&mut self, engine: &mut Engine) {
-		engine.get_view_manager_mut().set_safe_area_override(Some([40.0, 0.0, 30.0, 0.0]));
+		engine.get_view_manager_mut().set_safe_area_override(Some(SafeAreaInsets::create(40.0, 0.0, 30.0, 0.0)));
 	}
 
 	//==============================================================================
@@ -206,6 +206,7 @@ vanilla::ui_scene!(LayoutScene);
 fn main() {
 	let mut engine_configuration = EngineConfiguration::new();
 	engine_configuration.title = String::from("UI 씬과 오토레이아웃 (바닐라엔진)");
+	engine_configuration.auto_resize_on_window_resize = true;
 	engine_configuration.reference_resolution_size = Vector2::create(1280.0, 720.0);
 	let engine = Engine::new(engine_configuration);
 	let mut ui_scene_base = UISceneBase::new();

@@ -5,6 +5,9 @@
 //   품은 버튼이 클릭을 알려 주면(뗌 처리의 반환값) 켜짐을 뒤집는다.
 //   그래서 순서가 조금 다르다: 원본은 뗌 → [뒤집기, 토글 이벤트, 클릭됨 이벤트] → 클릭 이벤트, 러스트 판은 뗌 → 클릭 이벤트 → [뒤집기, 토글 이벤트, 클릭됨 이벤트].
 // - 토글 / 클릭됨 이벤트는 토글 버튼과 문맥을 받는다. 그 밖의 버튼 이벤트와 설정은 get_uibutton_mut 로 품은 버튼에 한다.
+//   받은 이벤트는 Rc<RefCell> 에 담는다. get_toggled_event 는 그 Rc 를 돌려주고, 부르는 쪽은 borrow_mut 로 빌려 부른다.
+//   get_clicked_event 는 원본(UIButton 에서 물려받은 getClickedEvent)처럼 토글 버튼 안쪽의 클릭 처리 함수를 돌려준다.
+//   부르면 켜짐을 뒤집고 토글 이벤트, 클릭됨 이벤트를 부른다. (set_clicked_event 로 건 함수가 아니다)
 // - set_is_on 의 틴트는 다음 tick 에 걸린다. (UIButton.set_interactable 과 같은 까닭)
 //==============================================================================
 use crate::base::color::Color;
@@ -14,6 +17,8 @@ use crate::core::graphic::Graphic;
 use crate::core::node::nodetree::{ComponentContext, NodeId, NodeTree};
 use crate::core::node::worldnode::NodeTransform;
 use crate::ui::uibutton::UIButton;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 //==============================================================================
 // 토글 버튼 이벤트. (토글 버튼과 문맥을 받는다)
@@ -27,8 +32,10 @@ pub struct UIToggleButton {
 	ui_button: UIButton,
 	is_on: bool,
 	on_tint_color: Color,
-	toggled_event: Option<UIToggleButtonEvent>,
-	external_clicked_event: Option<UIToggleButtonEvent>,
+	toggled_event: Option<Rc<RefCell<UIToggleButtonEvent>>>,
+	external_clicked_event: Option<Rc<RefCell<UIToggleButtonEvent>>>,
+	// 안쪽의 클릭 처리 함수. (원본 super.setClickedEvent 에 건 #onClicked, get_clicked_event 가 돌려준다)
+	clicked_handler: Rc<RefCell<UIToggleButtonEvent>>,
 }
 
 impl UIToggleButton {
@@ -42,6 +49,9 @@ impl UIToggleButton {
 			on_tint_color: Color::create(0.0, 0.0, 0.0, 0.3),
 			toggled_event: None,
 			external_clicked_event: None,
+			clicked_handler: Rc::new(RefCell::new(Box::new(|toggle_button: &mut UIToggleButton, context: &mut ComponentContext| {
+				toggle_button.on_clicked(context);
+			}))),
 		}
 	}
 
@@ -81,7 +91,14 @@ impl UIToggleButton {
 	// 클릭 이벤트 설정. (원본처럼 품은 버튼이 아니라 토글 버튼이 따로 든다)
 	//==============================================================================
 	pub fn set_clicked_event(&mut self, clicked_event: UIToggleButtonEvent) {
-		self.external_clicked_event = Some(clicked_event);
+		self.external_clicked_event = Some(Rc::new(RefCell::new(clicked_event)));
+	}
+
+	//==============================================================================
+	// 클릭 이벤트 반환. (원본처럼 안쪽의 클릭 처리 함수, 부르면 뒤집고 토글 이벤트와 클릭됨 이벤트를 부른다, 부를 때는 borrow_mut 로 빌린다)
+	//==============================================================================
+	pub fn get_clicked_event(&self) -> Option<Rc<RefCell<UIToggleButtonEvent>>> {
+		Some(self.clicked_handler.clone())
 	}
 
 	//==============================================================================
@@ -97,16 +114,14 @@ impl UIToggleButton {
 			0.0
 		};
 		self.ui_button.apply_tint_progress(context, tint_progress);
-		if let Some(mut toggled_event) = self.toggled_event.take() {
-			toggled_event(self, context);
-			if self.toggled_event.is_none() {
-				self.toggled_event = Some(toggled_event);
+		if let Some(toggled_event) = self.get_toggled_event() {
+			if let Ok(mut event_function) = toggled_event.try_borrow_mut() {
+				(*event_function)(self, context);
 			}
 		}
-		if let Some(mut external_clicked_event) = self.external_clicked_event.take() {
-			external_clicked_event(self, context);
-			if self.external_clicked_event.is_none() {
-				self.external_clicked_event = Some(external_clicked_event);
+		if let Some(external_clicked_event) = self.external_clicked_event.clone() {
+			if let Ok(mut event_function) = external_clicked_event.try_borrow_mut() {
+				(*event_function)(self, context);
 			}
 		}
 	}
@@ -149,7 +164,14 @@ impl UIToggleButton {
 	// 토글 이벤트 설정.
 	//==============================================================================
 	pub fn set_toggled_event(&mut self, toggled_event: UIToggleButtonEvent) {
-		self.toggled_event = Some(toggled_event);
+		self.toggled_event = Some(Rc::new(RefCell::new(toggled_event)));
+	}
+
+	//==============================================================================
+	// 토글 이벤트 반환. (부를 때는 borrow_mut 로 빌린다)
+	//==============================================================================
+	pub fn get_toggled_event(&self) -> Option<Rc<RefCell<UIToggleButtonEvent>>> {
+		self.toggled_event.clone()
 	}
 }
 
@@ -256,6 +278,7 @@ mod tests {
 				toggled_count_for_event.set(toggled_count_for_event.get() + 1);
 				last_is_on_for_event.set(toggle_button.get_is_on());
 			}));
+			assert!(toggle_button.get_toggled_event().is_some());
 		}
 		let inside = Vector2::create(100.0, 100.0);
 		node_tree.dispatch_touch(toggle_id, &engine, TouchKind::Press, inside);
@@ -298,5 +321,39 @@ mod tests {
 		let on_color = get_paint_color(&node_tree, toggle_id);
 		assert!((on_color.red - 0.7).abs() < 0.001);
 		assert_eq!(toggled_count.get(), 0);
+	}
+
+	//==============================================================================
+	// get_clicked_event 로 꺼낸 안쪽 클릭 처리 함수를 다른 버튼의 클릭에서 부르면 원본처럼 뒤집고 토글 이벤트를 부른다.
+	//==============================================================================
+	#[test]
+	fn clicked_event_getter_toggles() {
+		let engine = Engine::new(EngineConfiguration::new());
+		let (mut node_tree, toggle_id) = create_toggle_tree();
+		let toggled_count = Rc::new(Cell::new(0));
+		{
+			let toggle_button = node_tree[toggle_id].get_component_mut::<UIToggleButton>().expect("toggle");
+			let toggled_count_for_event = toggled_count.clone();
+			toggle_button.set_toggled_event(Box::new(move |_toggle_button: &mut UIToggleButton, _context: &mut ComponentContext| {
+				toggled_count_for_event.set(toggled_count_for_event.get() + 1);
+			}));
+		}
+		let root_id = node_tree.get_root_id();
+		let relay_id = node_tree.create_child(root_id, "relay");
+		node_tree[relay_id].set_local_position(Vector2::create(300.0, 100.0));
+		node_tree[relay_id].set_content_size(Vector2::create(60.0, 60.0));
+		let relay_button = node_tree.add_component(relay_id, UIButton::new()).expect("relay");
+		relay_button.set_click_event(Box::new(move |_button: &mut UIButton, context: &mut ComponentContext| {
+			context.with_component_mut::<UIToggleButton, _>(toggle_id, |toggle_button, toggle_context| {
+				if let Some(clicked_event) = toggle_button.get_clicked_event() {
+					(*clicked_event.borrow_mut())(toggle_button, toggle_context);
+				}
+			});
+		}));
+		let inside = Vector2::create(300.0, 100.0);
+		node_tree.dispatch_touch(relay_id, &engine, TouchKind::Press, inside);
+		node_tree.dispatch_touch(relay_id, &engine, TouchKind::Release, inside);
+		assert!(node_tree[toggle_id].get_component::<UIToggleButton>().expect("toggle").get_is_on());
+		assert_eq!(toggled_count.get(), 1);
 	}
 }

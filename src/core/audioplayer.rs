@@ -11,7 +11,9 @@
 //   데스크탑의 음량은 데시벨로 바꿔 트랙에 건다. 0.001(-60dB) 아래는 kira 가 무음으로 친다.
 //   get_audio_context 는 만든 매니저의 AudioContext 를 빌려 준다. (웹 WebAudio AudioContext, 데스크탑 kira AudioManager, 매니저 없이 만든 플레이어는 None)
 //   set_playback_rate 는 원본에 없던 것을 러스트 판에서 먼저 만들었다. (원본에도 넣었다)
+//   AudioBus::create_audio_player 로 만든 플레이어는 출력 대신 그 버스로 소리를 낸다. (원본 AudioPlayer 의 출력 노드 인자) 버스 손잡이를 하나 들어 버스를 살려 둔다.
 //==============================================================================
+use crate::core::audiobus::AudioBus;
 use crate::core::audiomanager::AudioManagerState;
 use crate::platform::audio::{AudioContext, AudioPlayerBackend};
 use std::cell::{Ref, RefCell};
@@ -37,6 +39,8 @@ pub struct AudioPlayer {
 	audio_player_backend: AudioPlayerBackend,
 	// 만든 매니저가 나눠 든 상태. (get_audio_context)
 	audio_manager_state: Option<Rc<RefCell<AudioManagerState>>>,
+	// 소리를 내보내는 버스. (버스로 만든 플레이어만, 버스를 살려 둔다)
+	_audio_bus: Option<AudioBus>,
 	audio_asset: Option<Rc<AudioAsset>>,
 	is_muted: bool,
 	// 음량. (0 ~ 1, 음소거를 풀면 이 음량으로 돌아간다)
@@ -55,6 +59,7 @@ impl AudioPlayer {
 		AudioPlayer {
 			audio_player_backend,
 			audio_manager_state: None,
+			_audio_bus: None,
 			audio_asset: None,
 			is_muted: false,
 			volume: 1.0,
@@ -207,6 +212,13 @@ impl AudioPlayer {
 	//==============================================================================
 	pub(crate) fn set_audio_manager_state(&mut self, audio_manager_state: Rc<RefCell<AudioManagerState>>) {
 		self.audio_manager_state = Some(audio_manager_state);
+	}
+
+	//==============================================================================
+	// 소리를 내보내는 버스 넣기. (AudioBus::create_audio_player 가 부른다)
+	//==============================================================================
+	pub(crate) fn set_audio_bus(&mut self, audio_bus: AudioBus) {
+		self._audio_bus = Some(audio_bus);
 	}
 
 	//==============================================================================

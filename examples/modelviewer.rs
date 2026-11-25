@@ -476,6 +476,7 @@ fn build_ground_glb(half_size: f32, base_color: [f32; 3]) -> Vec<u8> {
 fn main() {
 	let mut engine_configuration = EngineConfiguration::new();
 	engine_configuration.title = String::from("바닐라엔진 graphics3d modelviewer");
+	engine_configuration.auto_resize_on_window_resize = true;
 	engine_configuration.window_size = vanilla::Vector2::create(1280.0, 720.0);
 	engine_configuration.asset_directory_paths = vec![PathBuf::from(EXAMPLE_ASSET_DIRECTORY)];
 	let engine = Engine::new(engine_configuration);

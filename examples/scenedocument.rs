@@ -177,6 +177,7 @@ impl Scene for SceneDocumentScene {
 fn main() {
 	let mut engine_configuration = EngineConfiguration::new();
 	engine_configuration.title = String::from("UI 문서 (바닐라엔진)");
+	engine_configuration.auto_resize_on_window_resize = true;
 	engine_configuration.reference_resolution_size = Vector2::create(VIEW_WIDTH, VIEW_HEIGHT);
 	engine_configuration.window_size = Vector2::create(VIEW_WIDTH, VIEW_HEIGHT);
 	engine_configuration.asset_directory_paths = vec![PathBuf::from(EXAMPLE_ASSET_DIRECTORY), PathBuf::from(IMAGE_ASSET_DIRECTORY)];

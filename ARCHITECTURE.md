@@ -137,10 +137,11 @@ EngineRunner (플랫폼이 들고 프레임마다 부른다)
 - 코어, 플랫폼, 기반에서 원본과 다르게 남은 것 (언어와 플랫폼 때문):
   - 원본의 객체 모델 도우미(base/object.js, reflection.js, singleton.js), 비동기 기다리기(base/wait.js), 빈 함수 calculator.js, Enum 흉내(begin, auto, readonly)는 옮기지 않는다. 러스트의 트레이트, Any, enum 과 엔진 루프가 맡는다.
   - 전역 엔진(Engine.getEngine, Scene.getEngine, SceneManager, PointerCursor.readEngineCanvas)이 없어 엔진을 함수로 넘긴다. Component.getNode 자리는 ComponentContext 다.
-  - SoundSystem.getMusicBus, getEffectBus(GainNode)는 데스크탑에 그 노드가 없어 두지 않고, 버스 크기는 플레이어마다 곱한다.
+  - SoundSystem 의 음악과 효과음 버스는 AudioBus 다. (원본에도 같은 꼴로 넣었다) 데스크탑은 kira 하위 트랙, 웹은 GainNode 이고, 그 노드를 꺼내는 get_gain_node 는 웹에만 있다.
   - Timer.use 는 러스트 예약어라 activate 다. (원본에도 activate 를 넣었다)
   - 노드 객체를 돌려주는 getParent, getChildren, getSiblings 는 핸들을 돌려주는 get_parent_id, get_child_ids, get_sibling_ids 다.
-  - LocalStorage.getBackend, PersistedStore.getStorageBackend(갈아 끼운 저장소 객체)는 Box 를 빌려줄 수 없어 has_backend 류만 있고, SpriteAnimator.findSprite(형제를 쥐기)와 SharedBakeCache 의 놓기(release)는 빌림 규칙과 Rc 참조 수로 갈음한다.
+  - 갈아 끼운 저장소(LocalStorage.get_backend, PersistedStore.get_storage_backend)와 콜백 게터(UIButton.get_click_event 같은 것)는 Rc<RefCell> 에 담아 돌려주고, 부르는 쪽이 빌려 쓴다.
+    SpriteAnimator.findSprite(형제를 쥐기)와 SharedBakeCache 의 놓기(release)는 빌림 규칙과 Rc 참조 수로 갈음한다.
   - 데스크탑에는 문서와 화면 키보드와 브라우저 캐시가 없어 auto_resize_on_window_resize, ignore_virtual_keyboard_resize, preserve_drawing_buffer, set_no_cache, 오른쪽 클릭 메뉴 막기는 웹에서만 뜻이 있다. 웨이랜드는 창 가림과 최소화를 알리지 않아 Hidden 이 오지 않는다.
 - UIDocument 는 옮겼다. 원본의 리플렉션 직렬화 대신 종류 이름마다 짓기, 쓰기, 읽기 함수를 표에 등록하고, 원본이 반사로 저장하는 종류는 원본 반사 결과와 같은 키로 쓴다. (ui/uidocument.rs)
 - 원본 160파일 가운데 122파일을 옮겼고, 20파일은 죽은 코드이거나 러스트 표준으로 대신해서 일부러 옮기지 않았다. (2026-11-25, HumanSkinRenderer 를 옮김)

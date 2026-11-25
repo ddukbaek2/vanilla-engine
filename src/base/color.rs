@@ -4,30 +4,71 @@
 // - to_rgba_string, to_hex_string 은 원본처럼 알파가 1 보다 작을 때만 알파를 붙인다. 원본은 0 ~ 1 밖의 값을 자르지 않아
 //   두 자리가 넘는 16진수가 나올 수 있는데, 러스트 판은 0 ~ 1 로 잘라 늘 두 자리다.
 // - from_hex_cached, from_cache 는 Color 가 Copy 라 나눠 쓰는 인스턴스 대신 캐시에 든 값을 복사해 준다.
+//   두 캐시 모두 1024 개를 넘으면 가장 오래 안 쓴 것부터 버린다. (원본 fromCache 의 규칙, 원본 fromHEXCached 에도 같은 규칙을 넣었다)
+// - 문자열에서 색을 짓는 From<&str> 은 원본 Graphic 의 parseColorValue 처럼 from_cache 를 거친다.
 //==============================================================================
 use crate::base::math;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
+use std::rc::Rc;
 
 // 색 문자열 캐시가 드는 상한. (넘으면 가장 오래 안 쓴 것부터 버린다, 원본과 같음)
 const MAXIMUM_CACHED_COLOR_COUNT: usize = 1024;
 
 //==============================================================================
-// 색 문자열 캐시. (문자열 → 풀어 둔 색과 마지막으로 쓴 번호)
+// 색 문자열 캐시. (키 → 풀어 둔 색과 마지막으로 쓴 번호, 쓴 번호 → 키. 원본 Map 의 넣은 차례처럼 가장 오래 안 쓴 것을 바로 찾는다)
 //==============================================================================
 struct ColorStringCache {
-	color_table: HashMap<String, (Color, u64)>,
+	color_table: HashMap<Rc<str>, (Color, u64)>,
+	use_order_table: BTreeMap<u64, Rc<str>>,
 	use_count: u64,
+}
+
+impl ColorStringCache {
+	//==============================================================================
+	// 키로 캐시한 색 읽기. (없으면 make_color 로 지어 넣고, MAXIMUM_CACHED_COLOR_COUNT 를 넘으면 가장 오래 안 쓴 것부터 버린다)
+	//==============================================================================
+	fn read_or_insert(&mut self, cache_key: &str, make_color: impl FnOnce() -> Color) -> Color {
+		self.use_count += 1;
+		let use_count = self.use_count;
+		if let Some((color, last_used_count)) = self.color_table.get_mut(cache_key) {
+			if let Some(cached_key) = self.use_order_table.remove(last_used_count) {
+				self.use_order_table.insert(use_count, cached_key);
+			}
+			*last_used_count = use_count;
+			return *color;
+		}
+		let color = make_color();
+		let cached_key: Rc<str> = Rc::from(cache_key);
+		self.color_table.insert(cached_key.clone(), (color, use_count));
+		self.use_order_table.insert(use_count, cached_key);
+		while self.color_table.len() > MAXIMUM_CACHED_COLOR_COUNT {
+			match self.use_order_table.pop_first() {
+				Some((_, oldest_cache_key)) => {
+					self.color_table.remove(&oldest_cache_key);
+				}
+				None => {
+					break;
+				}
+			}
+		}
+		color
+	}
 }
 
 thread_local! {
 	// 색 문자열 → 풀어 둔 색. (Color::from_cache)
 	static COLOR_STRING_CACHE: RefCell<ColorStringCache> = RefCell::new(ColorStringCache {
 		color_table: HashMap::new(),
+		use_order_table: BTreeMap::new(),
 		use_count: 0,
 	});
 	// "색 문자열@알파" → 풀어 둔 색. (Color::from_hex_cached)
-	static COLOR_HEX_CACHE: RefCell<HashMap<String, Color>> = RefCell::new(HashMap::new());
+	static COLOR_HEX_CACHE: RefCell<ColorStringCache> = RefCell::new(ColorStringCache {
+		color_table: HashMap::new(),
+		use_order_table: BTreeMap::new(),
+		use_count: 0,
+	});
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -210,34 +251,12 @@ impl Color {
 //==============================================================================
 impl Color {
 	//==============================================================================
-	// 색 문자열로 캐시한 색 반환. (원본 Color.fromCache, 풀기는 From<&str> 과 같다: "#...", "rgb(...)", 그 밖은 흰색)
-	// - 같은 문자열이면 다시 풀지 않는다. (From<&str> 은 부를 때마다 소문자 글을 새로 만든다) 매 프레임 같은 문자열로 색을 정할 때 쓴다.
+	// 색 문자열로 캐시한 색 반환. (원본 Color.fromCache, "#...", "rgb(...)", 그 밖은 흰색)
+	// - 같은 문자열이면 다시 풀지 않는다. (풀 때마다 소문자 글을 새로 만든다) 매 프레임 같은 문자열로 색을 정할 때 쓴다. From<&str> 도 이것을 거친다.
 	// - 원본처럼 1024 개를 넘으면 가장 오래 안 쓴 것부터 버린다. Color 는 Copy 라 나눠 쓰는 인스턴스가 없다.
 	//==============================================================================
 	pub fn from_cache(color_string: &str) -> Color {
-		COLOR_STRING_CACHE.with(|color_cache| {
-			let mut color_cache = color_cache.borrow_mut();
-			color_cache.use_count += 1;
-			let use_count = color_cache.use_count;
-			if let Some((color, last_used_count)) = color_cache.color_table.get_mut(color_string) {
-				*last_used_count = use_count;
-				return *color;
-			}
-			let color = Color::from(color_string);
-			color_cache.color_table.insert(color_string.to_string(), (color, use_count));
-			while color_cache.color_table.len() > MAXIMUM_CACHED_COLOR_COUNT {
-				let oldest_color_string = color_cache.color_table.iter().min_by_key(|(_, (_, last_used_count))| *last_used_count).map(|(cached_color_string, _)| cached_color_string.clone());
-				match oldest_color_string {
-					Some(oldest_color_string) => {
-						color_cache.color_table.remove(&oldest_color_string);
-					}
-					None => {
-						break;
-					}
-				}
-			}
-			color
-		})
+		COLOR_STRING_CACHE.with(|color_cache| color_cache.borrow_mut().read_or_insert(color_string, || parse_color_string(color_string)))
 	}
 
 	//==============================================================================
@@ -251,24 +270,33 @@ impl Color {
 impl Color {
 	//==============================================================================
 	// HEX 문자열과 알파로 캐시한 색 반환. (원본 Color.fromHEXCached, 알파는 0.01 단위로 다듬어 키에 넣는다)
+	// - from_cache 처럼 1024 개를 넘으면 가장 오래 안 쓴 것부터 버린다.
 	//==============================================================================
 	pub fn from_hex_cached(color_string: &str, alpha: f32) -> Color {
 		let quantized_alpha = (alpha * 100.0).round() / 100.0;
 		let cache_key = format!("{}@{}", color_string, quantized_alpha);
 		COLOR_HEX_CACHE.with(|color_cache| {
-			if let Some(color) = color_cache.borrow().get(&cache_key) {
-				return *color;
-			}
-			let mut color = Color::create_from_hex(color_string);
-			color.alpha = quantized_alpha;
-			let mut color_cache = color_cache.borrow_mut();
-			if color_cache.len() >= MAXIMUM_CACHED_COLOR_COUNT {
-				color_cache.clear();
-			}
-			color_cache.insert(cache_key, color);
-			color
+			color_cache.borrow_mut().read_or_insert(&cache_key, || {
+				let mut color = Color::create_from_hex(color_string);
+				color.alpha = quantized_alpha;
+				color
+			})
 		})
 	}
+}
+
+//==============================================================================
+// 색 문자열 풀기. ("#..." 또는 "rgb(...)", 그 밖은 흰색. 원본 fromCache 가 캐시에 없을 때 푸는 것과 같다)
+//==============================================================================
+fn parse_color_string(color_string: &str) -> Color {
+	let trimmed_color_string = color_string.trim().to_lowercase();
+	if trimmed_color_string.starts_with('#') {
+		return Color::create_from_hex(&trimmed_color_string);
+	}
+	if trimmed_color_string.starts_with("rgb") {
+		return Color::create_from_rgba(&trimmed_color_string);
+	}
+	Color::white()
 }
 
 //==============================================================================
@@ -280,14 +308,7 @@ fn convert_component_to_byte(value: f32) -> u8 {
 
 impl From<&str> for Color {
 	fn from(color_string: &str) -> Color {
-		let trimmed_color_string = color_string.trim().to_lowercase();
-		if trimmed_color_string.starts_with('#') {
-			return Color::create_from_hex(&trimmed_color_string);
-		}
-		if trimmed_color_string.starts_with("rgb") {
-			return Color::create_from_rgba(&trimmed_color_string);
-		}
-		Color::white()
+		Color::from_cache(color_string)
 	}
 }
 
@@ -324,6 +345,13 @@ mod tests {
 		assert_eq!(color.alpha, 0.5);
 		assert_eq!(Color::from_hex_cached("#ff0000", 0.504), color);
 		assert_eq!(Color::from_cache("rgb(0, 255, 0)").green, 1.0);
+		assert_eq!(Color::from(" #00FF00 "), Color::create(0.0, 1.0, 0.0, 1.0));
+		assert_eq!(Color::from("hsl(0, 0%, 0%)"), Color::white());
+		for color_index in 0..=MAXIMUM_CACHED_COLOR_COUNT {
+			Color::from_hex_cached(&format!("#{:06x}", color_index), 1.0);
+		}
+		let hex_cache_count = COLOR_HEX_CACHE.with(|color_cache| color_cache.borrow().color_table.len());
+		assert_eq!(hex_cache_count, MAXIMUM_CACHED_COLOR_COUNT);
 	}
 
 	//==============================================================================

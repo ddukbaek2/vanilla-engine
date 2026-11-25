@@ -485,6 +485,7 @@ impl Scene for UIGalleryScene {
 fn main() {
 	let mut engine_configuration = EngineConfiguration::new();
 	engine_configuration.title = String::from("UI 위젯 갤러리 (바닐라엔진)");
+	engine_configuration.auto_resize_on_window_resize = true;
 	engine_configuration.reference_resolution_size = Vector2::create(VIEW_WIDTH, VIEW_HEIGHT);
 	engine_configuration.view_scale_mode = ViewScaleMode::StretchShort;
 	// 화면 저장 때도 프레임 간격이 일정하도록 60 FPS 로 묶는다. (틴트 트랜지션이 프레임 수와 맞게)

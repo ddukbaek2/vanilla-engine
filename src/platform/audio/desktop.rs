@@ -8,6 +8,8 @@
 // - AudioBuffer 자리: kira 의 StaticSoundData. 파일 전체를 디코딩해 들고, 복제는 Arc 하나라 값싸다.
 // - AudioPlayer 하나 = 믹서 하위 트랙 하나. (원본 GainNode 자리, 트랙 음량이 플레이어 음량이다)
 //   재생할 때마다 버퍼를 복제해 그 트랙에 튼다. 트랙 핸들을 버리면 트랙과 그 위의 소리가 같이 없어진다.
+// - AudioBus 하나 = 메인 트랙 아래 하위 트랙 하나. (원본 출력에 이은 GainNode 자리) 버스로 만든 플레이어의 트랙은 그 아래에 달려
+//   버스 트랙의 음량이 함께 곱해진다. 버스 트랙 핸들을 버리면 그 아래 플레이어 트랙도 같이 없어진다.
 // - 음량(0 ~ 1)은 데시벨로 바꿔 건다. kira 는 -60dB 이하를 무음으로 친다.
 // - 원본 WebAudio 처럼 음량 바꾸기와 정지는 바로 한다. (트윈 0초)
 // - 컨텍스트 시계(get_audio_context_time)는 컨텍스트를 만든 뒤 흐른 시간이다.
@@ -192,6 +194,13 @@ impl AudioPlayerBackend {
 				None
 			}
 		};
+		AudioPlayerBackend::create_with_track(track_handle)
+	}
+
+	//==============================================================================
+	// 만든 트랙으로 생성. (트랙이 없으면 소리 없는 플레이어)
+	//==============================================================================
+	fn create_with_track(track_handle: Option<TrackHandle>) -> AudioPlayerBackend {
 		AudioPlayerBackend {
 			track_handle,
 			sound_handle: None,
@@ -288,6 +297,82 @@ impl AudioPlayerBackend {
 				false
 			}
 		}
+	}
+}
+
+//==============================================================================
+// 버스 하나의 소리 모으는 부분. (메인 트랙 아래 하위 트랙 하나, 버스로 만든 플레이어의 트랙이 그 아래에 달린다)
+//==============================================================================
+pub struct AudioBusBackend {
+	track_handle: Option<TrackHandle>,
+}
+
+impl AudioBusBackend {
+	//==============================================================================
+	// 생성. (컨텍스트가 있으면 메인 트랙 아래 하위 트랙을 하나 만든다. 없거나 트랙이 모자라면 소리 없는 버스)
+	//==============================================================================
+	pub fn create(audio_context: Option<&mut AudioContext>) -> AudioBusBackend {
+		let track_handle = match audio_context {
+			Some(audio_context) => {
+				let track_builder = TrackBuilder::new().sub_track_capacity(SUB_TRACK_CAPACITY);
+				match audio_context.add_sub_track(track_builder) {
+					Ok(track_handle) => {
+						Some(track_handle)
+					}
+					Err(error) => {
+						eprintln!("AudioBus: 믹서 트랙을 만들지 못했습니다. ({})", error);
+						None
+					}
+				}
+			}
+			None => {
+				None
+			}
+		};
+		AudioBusBackend {
+			track_handle,
+		}
+	}
+
+	//==============================================================================
+	// 소리를 모을 수 있는지. (원본 audio_context && gain_node)
+	//==============================================================================
+	pub fn is_available(&self) -> bool {
+		self.track_handle.is_some()
+	}
+
+	//==============================================================================
+	// 음량 설정. (버스 트랙 음량, 0 ~ 1)
+	//==============================================================================
+	pub fn set_gain(&mut self, gain: f32) {
+		if let Some(track_handle) = self.track_handle.as_mut() {
+			let decibels = amplitude_to_decibels(gain);
+			track_handle.set_volume(decibels, create_immediate_tween());
+		}
+	}
+
+	//==============================================================================
+	// 이 버스로 트는 플레이어 백엔드 생성. (버스 트랙 아래 하위 트랙 하나, 버스가 소리 없으면 소리 없는 플레이어)
+	//==============================================================================
+	pub fn create_player_backend(&mut self) -> AudioPlayerBackend {
+		let track_handle = match self.track_handle.as_mut() {
+			Some(bus_track_handle) => {
+				let track_builder = TrackBuilder::new().sound_capacity(PLAYER_SOUND_CAPACITY);
+				match bus_track_handle.add_sub_track(track_builder) {
+					Ok(track_handle) => {
+						Some(track_handle)
+					}
+					Err(error) => {
+						eprintln!("AudioPlayer: 버스 아래 믹서 트랙을 만들지 못했습니다. ({})", error);
+						None
+					}
+				}
+			}
+			None => {
+				None
+			}
+		};
+		AudioPlayerBackend::create_with_track(track_handle)
 	}
 }
 
