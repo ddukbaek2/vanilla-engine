@@ -15,7 +15,6 @@
 // - 그리기: draw(gl, 보기, 투영) 를 툰 모형을 그린 뒤 부른다. 깊이 시험은 켜고 깊이는 쓰지 않으며 미리 곱한 알파로 섞는다. 앞의 상태를 적어 두었다 돌린다.
 // - 원본과 다른 점: 효과마다의 options 객체 대신 기본값을 가진 구조체(ToonParticleOptions 등)를 받는다. 범위가 되는 값은 ToonVfxRange 다.
 //   원본에서 주지 않아도 되는 값(undefined)은 Option 이다. add_lightning 의 life, age 는 ToonLightningOptions 에 함께 든다.
-//   램프 색은 "#rrggbb" 대신 0 ~ 1 의 [r, g, b] 로 받는다. (read_color_values 로 바꿔 넘긴다)
 //==============================================================================
 use glow::HasContext;
 
@@ -25,6 +24,7 @@ use crate::base::vector2::Vector2;
 use crate::misc::shaker::{Shaker, ShakerOptions};
 use crate::core::graphic::{GlBuffer, GlTexture, GlVertexArray};
 use crate::core::shaderprogram::ShaderProgram;
+use crate::graphics3d::toon::meshbuilder::read_color_values;
 
 // 아틀라스. (픽셀, 왼쪽 반은 연기 플립북 4 x 4 칸, 오른쪽 반은 128 픽셀 칸 열여섯)
 const ATLAS_WIDTH: usize = 1024;
@@ -581,6 +581,34 @@ pub struct ToonFlashOptions {
 impl Default for ToonFlashOptions {
 	fn default() -> Self {
 		ToonFlashOptions { color: [1.0; 3], strength: 0.8, life: 0.08, age: 0.0 }
+	}
+}
+
+//==============================================================================
+// 램프 한 칸의 색. ("#rrggbb" 글이나 0 ~ 1 의 [r, g, b], 원본 setRamps 가 둘 다 받는다)
+//==============================================================================
+pub trait ToonRampColor {
+	//==============================================================================
+	// 0 ~ 1 의 [r, g, b] 읽기.
+	//==============================================================================
+	fn read_ramp_color(&self) -> [f32; 3];
+}
+
+impl ToonRampColor for [f32; 3] {
+	fn read_ramp_color(&self) -> [f32; 3] {
+		*self
+	}
+}
+
+impl ToonRampColor for &str {
+	fn read_ramp_color(&self) -> [f32; 3] {
+		read_color_values(self)
+	}
+}
+
+impl ToonRampColor for String {
+	fn read_ramp_color(&self) -> [f32; 3] {
+		read_color_values(self)
 	}
 }
 
@@ -1211,10 +1239,10 @@ impl ToonVfx {
 	}
 
 	//==============================================================================
-	// 색 램프 설정. (줄마다 흰 심에서 어둠으로 가는 0 ~ 1 의 [r, g, b], 여덟 줄까지, 효과의 ramp 는 이 차례, 비면 기본 한 줄)
+	// 색 램프 설정. (줄마다 흰 심에서 어둠으로 가는 "#rrggbb" 나 0 ~ 1 의 [r, g, b], 여덟 줄까지, 효과의 ramp 는 이 차례, 비면 기본 한 줄)
 	//==============================================================================
-	pub fn set_ramps(&mut self, ramp_list: &[Vec<[f32; 3]>]) {
-		let valid_list: Vec<Vec<[f32; 3]>> = ramp_list.iter().filter(|stops| !stops.is_empty()).take(TOON_VFX_MAXIMUM_RAMPS).cloned().collect();
+	pub fn set_ramps<C: ToonRampColor>(&mut self, ramp_list: &[Vec<C>]) {
+		let valid_list: Vec<Vec<[f32; 3]>> = ramp_list.iter().filter(|stops| !stops.is_empty()).take(TOON_VFX_MAXIMUM_RAMPS).map(|stops| stops.iter().map(|stop| stop.read_ramp_color()).collect()).collect();
 		self.ramp_list = if valid_list.is_empty() { ToonVfx::read_default_ramps() } else { valid_list };
 		self.is_ramp_dirty = true;
 	}

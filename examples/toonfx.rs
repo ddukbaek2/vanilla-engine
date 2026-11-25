@@ -12,7 +12,7 @@
 use glow::HasContext;
 use std::f32::consts::PI;
 use vanilla::{
-	create_box_geometry, create_cylinder_geometry, read_color_values, create_octahedron_geometry, create_part_matrix, create_rounded_box_geometry, create_sphere_geometry, create_torus_geometry, Engine, EngineConfiguration, Graphic, Matrix4, MeshBuilder, Scene, SceneBase, ToonDrawOptions, ToonGeometry, ToonInstance, ToonLineDrawOptions, ToonMesh, ToonOutlineWidthUnit, ToonPartOptions, ToonRenderer, ToonScreenOutline, ToonBeamOptions, ToonDecalOptions, ToonFireballOptions, ToonGlintOptions, ToonLightningOptions, ToonParticleOptions, ToonPlumeOptions, ToonRibbonOptions, ToonShockwaveOptions, ToonFlashOptions, ToonVfx, ToonVfxDecalMode, ToonVfxLook, ToonVfxRange, ToonVfxShape, ToonVfxSlot, Vector2, Vector3, TOON_VFX_DEFAULT_PARTICLE_CAPACITY,
+	create_box_geometry, create_cylinder_geometry, create_octahedron_geometry, create_part_matrix, create_rounded_box_geometry, create_sphere_geometry, create_torus_geometry, Engine, EngineConfiguration, Graphic, Matrix4, MeshBuilder, Scene, SceneBase, ToonDrawOptions, ToonGeometry, ToonInstance, ToonLineDrawOptions, ToonMesh, ToonOutlineWidthUnit, ToonPartOptions, ToonRenderer, ToonScreenOutline, ToonBeamOptions, ToonDecalOptions, ToonFireballOptions, ToonGlintOptions, ToonLightningOptions, ToonParticleOptions, ToonPlumeOptions, ToonRibbonOptions, ToonShockwaveOptions, ToonFlashOptions, ToonVfx, ToonVfxDecalMode, ToonVfxLook, ToonVfxRange, ToonVfxShape, ToonVfxSlot, Vector2, Vector3, TOON_VFX_DEFAULT_PARTICLE_CAPACITY,
 };
 
 //==============================================================================
@@ -105,7 +105,7 @@ impl ToonFxScene {
 			["#ffffff", "#f0d0ff", "#b070ff", "#6030c0", "#281050", "#100818"],
 			["#e8e4de", "#b8b0a8", "#888078", "#5a544e", "#36322e", "#1a1816"],
 		];
-		let ramp_list: Vec<Vec<[f32; 3]>> = ramp_text_list.iter().map(|ramp_texts| ramp_texts.iter().map(|color_text| read_color_values(color_text)).collect()).collect();
+		let ramp_list: Vec<Vec<&str>> = ramp_text_list.iter().map(|ramp_texts| ramp_texts.to_vec()).collect();
 		vfx.set_ramps(&ramp_list);
 		vfx.set_floor_height_reader(Some(Box::new(|x: f32, z: f32| if x.abs() <= 4.0 && z.abs() <= 2.5 { 0.0 } else { -1.0 })));
 		vfx.prepare(gl);

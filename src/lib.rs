@@ -182,3 +182,4 @@ pub use crate::resource::spriteatlas::SpriteAtlas;
 pub use crate::graphics3d::toon::toonrenderer::extract_frustum_planes;
 pub use crate::graphics3d::toon::toonscreenoutline::ToonLineTarget;
 pub use crate::graphics3d::toon::toonvfx::ToonFlashOptions;
+pub use crate::graphics3d::toon::toonvfx::ToonRampColor;
