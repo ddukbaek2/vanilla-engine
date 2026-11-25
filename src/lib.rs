@@ -156,3 +156,5 @@ pub use crate::web::websocketclient::{WebSocketClient, WebSocketReceiveEvent};
 pub use crate::ui::uidocument::{UIDocument, UIDocumentLoadContext, UIDocumentSaveContext, UIDOCUMENT_VERSION};
 pub use crate::effect::particlesystem::{EmitterShape, ParticleRenderShape};
 pub use crate::core::component::text::TextWrapMode;
+pub use crate::graphics3d::camera3d::{Camera3D, ProjectedPoint};
+pub use crate::graphics3d::toon::toondrawqueue::ToonDrawQueue;

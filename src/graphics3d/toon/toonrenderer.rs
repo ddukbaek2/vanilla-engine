@@ -13,8 +13,16 @@
 //   begin_frame 이 앞의 그리기 상태(섞기, 깊이, 면 가리기)를 적어 두고 깊이 시험과 면 가리기를 켜며, end_frame 이 적어 둔 상태로 돌린다.
 //   (엔진 2D 그리기 사이에 끼울 때, 그 전에 Graphic 의 묶음을 내보낸다)
 // - read_program_sources 로 ShaderWarmer 에 넘길 소스를 준다.
+// - 노드 사각형 안에 그리기: set_screen_rect(x, y, 너비, 높이) 를 주면 begin_frame 이 보기와 투영의 클립 공간을 그 사각형으로 옮기고 가위로 밖을 자른다.
+//   사각형은 begin_frame 때의 뷰포트(보통 드로잉 버퍼 전체) 안의 픽셀이고 왼쪽 위가 원점이다. 화면 밖 거르기는 옮기기 전의 절두체로 한다. end_frame 이 가위를 푼다.
+// - begin_frame_with_camera(Camera3D) 는 카메라의 보기와 투영으로 begin_frame 을 부른다. 2D 표시(Camera3D::project_to_view)와 같은 카메라를 쓴다.
+// - draw_mesh_outline 은 바깥선 껍데기만 그린다. (ToonDrawQueue 가 불투명한 몸을 다 그린 뒤 바깥선을 몰아 그릴 때, 그린 수는 세지 않는다)
+// - ToonDrawOptions 의 casts_shadow 는 ToonDrawQueue::draw_shadows 만 읽는다. is_body_drawn 이 false 면 바깥선만 그린다. (원본은 꼴 객체에 이름으로 단다)
 //==============================================================================
 use glow::HasContext;
+
+use crate::base::rect::Rect;
+use crate::graphics3d::camera3d::Camera3D;
 
 use crate::base::matrix4::Matrix4;
 use crate::core::graphic::{GlBuffer, GlTexture, GlVertexArray};
@@ -253,11 +261,13 @@ pub struct ToonDrawOptions<'a> {
 	pub joint_matrices: Option<&'a [f32]>,
 	pub has_outline: bool,
 	pub is_culled: bool,
+	pub casts_shadow: bool,
+	pub is_body_drawn: bool,
 }
 
 impl Default for ToonDrawOptions<'_> {
 	fn default() -> Self {
-		ToonDrawOptions { tint_color: [1.0; 4], alpha: 1.0, joint_matrices: None, has_outline: true, is_culled: true }
+		ToonDrawOptions { tint_color: [1.0; 4], alpha: 1.0, joint_matrices: None, has_outline: true, is_culled: true, casts_shadow: true, is_body_drawn: true }
 	}
 }
 
@@ -334,6 +344,8 @@ pub struct ToonRenderer {
 	saved_state: Option<SavedState>,
 	instance_data: Vec<f32>,
 	frame_statistics: ToonFrameStatistics,
+	screen_rect: Option<Rect>,
+	is_scissor_applied: bool,
 }
 
 //==============================================================================
@@ -453,6 +465,8 @@ impl ToonRenderer {
 			saved_state: None,
 			instance_data: Vec::new(),
 			frame_statistics: ToonFrameStatistics::default(),
+			screen_rect: None,
+			is_scissor_applied: false,
 		})
 	}
 
@@ -645,6 +659,7 @@ impl ToonRenderer {
 		self.frame_statistics = ToonFrameStatistics::default();
 		self.is_shadow_pass = false;
 		self.save_state(gl);
+		self.apply_screen_rect(gl);
 		unsafe {
 			gl.disable(glow::BLEND);
 			gl.enable(glow::DEPTH_TEST);
@@ -659,7 +674,85 @@ impl ToonRenderer {
 	// 프레임 끝. (적어 둔 상태로 돌린다)
 	//==============================================================================
 	pub fn end_frame(&mut self, gl: &glow::Context) {
+		self.release_screen_rect(gl);
 		self.restore_state(gl, false);
+	}
+
+	//==============================================================================
+	// 카메라로 프레임 시작. (Camera3D 의 보기와 투영으로 begin_frame)
+	//==============================================================================
+	pub fn begin_frame_with_camera(&mut self, gl: &glow::Context, camera: &Camera3D) {
+		let view_projection_matrix = camera.get_view_projection_matrix();
+		self.begin_frame(gl, &view_projection_matrix);
+	}
+
+	//==============================================================================
+	// 그릴 화면 사각형 설정. (뷰포트 픽셀, 왼쪽 위 원점, 다음 begin_frame 부터)
+	//==============================================================================
+	pub fn set_screen_rect(&mut self, x: f32, y: f32, width: f32, height: f32) {
+		self.screen_rect = Some(Rect::create(x, y, width.max(0.0), height.max(0.0)));
+	}
+
+	//==============================================================================
+	// 그릴 화면 사각형 풀기. (뷰포트 전체에 그림)
+	//==============================================================================
+	pub fn clear_screen_rect(&mut self) {
+		self.screen_rect = None;
+	}
+
+	//==============================================================================
+	// 그릴 화면 사각형 반환. (없으면 None)
+	//==============================================================================
+	pub fn get_screen_rect(&self) -> Option<Rect> {
+		self.screen_rect
+	}
+
+	//==============================================================================
+	// 화면 사각형 걸기. (begin_frame 이 상태를 적은 뒤, 클립 x, y 에 사각형의 비를 곱하고 자리를 더한 뒤 가위를 켠다)
+	//==============================================================================
+	fn apply_screen_rect(&mut self, gl: &glow::Context) {
+		let (screen_rect, viewport) = match (self.screen_rect, self.saved_state.as_ref()) {
+			(Some(screen_rect), Some(saved_state)) => {
+				(screen_rect, saved_state.viewport)
+			}
+			_ => {
+				return;
+			}
+		};
+		let viewport_width = viewport[2].max(1) as f32;
+		let viewport_height = viewport[3].max(1) as f32;
+		let scale_x = screen_rect.size.x / viewport_width;
+		let scale_y = screen_rect.size.y / viewport_height;
+		let offset_x = (screen_rect.position.x * 2.0 + screen_rect.size.x) / viewport_width - 1.0;
+		let offset_y = 1.0 - (screen_rect.position.y * 2.0 + screen_rect.size.y) / viewport_height;
+		let elements = &mut self.view_projection_matrix.elements;
+		for column_index in 0..4 {
+			let clip_w = elements[column_index * 4 + 3];
+			elements[column_index * 4] = elements[column_index * 4] * scale_x + clip_w * offset_x;
+			elements[column_index * 4 + 1] = elements[column_index * 4 + 1] * scale_y + clip_w * offset_y;
+		}
+		let scissor_left = screen_rect.position.x.floor() as i32;
+		let scissor_bottom = (viewport_height - screen_rect.position.y - screen_rect.size.y).floor() as i32;
+		let scissor_right = (screen_rect.position.x + screen_rect.size.x).ceil() as i32;
+		let scissor_top = (viewport_height - screen_rect.position.y).ceil() as i32;
+		unsafe {
+			gl.enable(glow::SCISSOR_TEST);
+			gl.scissor(viewport[0] + scissor_left, viewport[1] + scissor_bottom, scissor_right - scissor_left, scissor_top - scissor_bottom);
+		}
+		self.is_scissor_applied = true;
+	}
+
+	//==============================================================================
+	// 화면 사각형의 가위 풀기. (apply_screen_rect 가 켰을 때만)
+	//==============================================================================
+	fn release_screen_rect(&mut self, gl: &glow::Context) {
+		if !self.is_scissor_applied {
+			return;
+		}
+		unsafe {
+			gl.disable(glow::SCISSOR_TEST);
+		}
+		self.is_scissor_applied = false;
 	}
 
 	//==============================================================================
@@ -738,6 +831,16 @@ impl ToonRenderer {
 	}
 
 	//==============================================================================
+	// 모형 하나의 바깥선만 그리기. (거르지도 세지도 않는다, 껍데기가 없거나 has_outline 이 false 거나 그림자 패스면 그리지 않는다)
+	//==============================================================================
+	pub fn draw_mesh_outline(&mut self, gl: &glow::Context, mesh: &ToonMesh, model_matrix: &Matrix4, options: ToonDrawOptions) {
+		if mesh.outline_vertex_array.is_none() || !options.has_outline || self.is_shadow_pass {
+			return;
+		}
+		self.draw_with_count(gl, mesh, Some(model_matrix), 0, ToonDrawOptions { is_body_drawn: false, ..options });
+	}
+
+	//==============================================================================
 	// 그리기 본체. (model_matrix 가 없으면 instance_count 만큼 인스턴스로)
 	//==============================================================================
 	fn draw_with_count(&mut self, gl: &glow::Context, mesh: &ToonMesh, model_matrix: Option<&Matrix4>, instance_count: i32, options: ToonDrawOptions) {
@@ -788,6 +891,12 @@ impl ToonRenderer {
 				gl.bind_vertex_array(Some(outline_vertex_array));
 				draw_elements(gl, mesh.outline_index_count);
 				self.frame_statistics.draw_call_count += 1;
+			}
+			if !options.is_body_drawn {
+				if is_transparent {
+					gl.disable(glow::BLEND);
+				}
+				return;
 			}
 
 			// 몸.

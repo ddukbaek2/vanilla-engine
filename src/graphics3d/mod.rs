@@ -24,3 +24,4 @@ pub use crate::core::fullscreenpass;
 // GL 객체 타입. (core::graphic 에 없는 프레임버퍼와 렌더버퍼)
 pub type GlFramebuffer = <glow::Context as glow::HasContext>::Framebuffer;
 pub type GlRenderbuffer = <glow::Context as glow::HasContext>::Renderbuffer;
+pub mod camera3d;
