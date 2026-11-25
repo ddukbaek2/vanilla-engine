@@ -6,7 +6,12 @@
 //   상한(set_particle_capacity)을 넘으면 가장 오래 전에 낸 것부터 덮고, set_count_ratio 로 내는 수에 몫을 곱한다. (폰과 가벼운 길)
 // - 효과 메쉬: 불덩이(add_fireball), 충격파 띠와 바닥 빛(add_shockwave), 바닥 자국(add_decal, queue_decal), 연기 기둥(add_plume),
 //   회전체 빔(queue_beam), 카메라 쪽으로 편 리본(queue_ribbon)과 그것을 감아 내린 번개(queue_lightning), 사는 동안 다시 꺾이는 번개(add_lightning), 그 자리의 빛 점(queue_glint).
-// - 테: 빛 파티클의 rim 과 리본의 glow 는 가장자리를 테 색(set_rim_color)으로 덮어 밝은 바탕에서도 보이게 한다. (기본은 더하는 빛만)
+// - 테: 빛 파티클의 rim, 리본의 glow 와 rim, 불덩이와 충격파의 rim 은 가장자리를 테 색(set_rim_color)으로 덮어 밝은 바탕에서도 보이게 한다. (기본은 더하는 빛만)
+// - 밝기 배: set_look_gain(꼴, 배) 로 파티클과 빛 점의 꼴마다 밝기를 곱한다. (기본 1, HDR 판에서 불꽃 줄기, 빛살, 불씨를 선형 몇 배로 할 때)
+// - 나이와 열쇠: emit_particles, add_fireball, add_shockwave, add_decal, add_plume, add_lightning, add_flash 는 options 의 age(이미 지난 초, 음수면 그만큼 늦게)와
+//   key(사건 열쇠, 이미 낸 열쇠면 다시 내지 않음, clear 가 잊음)를 받는다. 장면이 매 프레임 상태에서 사건을 다시 내도 한 번만, 늦게 보인 효과는 그 나이부터 튼다.
+//   흔들림(add_shake)은 Shaker 의 지수 감쇠(초당 9)라 늦게 보인 사건은 세기 x exp(-9 x 나이) 로 넘기면 같다.
+// - 발밑 그늘: queue_blob_shadow 는 그 프레임의 둥근 그늘 자국(ToonVfxDecalMode::Shade)이다.
 // - 화면: 섬광(add_flash)은 draw 끝에 지금 뷰포트(가위가 걸려 있으면 그 안)를 그 색으로 덮고 걷힌다.
 //   카메라 흔들림(add_shake)은 엔진 Shaker 로 셈하고, read_shake 가 준 오프셋을 게임이 카메라의 오른쪽과 위쪽으로 더한다.
 // - 어느 사건에 어느 효과를 어떤 값으로 낼지(처방)는 게임 몫이다. 엔진은 매개변수만 받는다.
@@ -15,7 +20,10 @@
 // - 그리기: draw(gl, 보기, 투영) 를 툰 모형을 그린 뒤 부른다. 깊이 시험은 켜고 깊이는 쓰지 않으며 미리 곱한 알파로 섞는다. 앞의 상태(프로그램과 버텍스 어레이 포함)를 적어 두었다 돌린다.
 // - 원본과 다른 점: 효과마다의 options 객체 대신 기본값을 가진 구조체(ToonParticleOptions 등)를 받는다. 범위가 되는 값은 ToonVfxRange 다.
 //   원본에서 주지 않아도 되는 값(undefined)은 Option 이다. add_lightning 의 life, age 는 ToonLightningOptions 에 함께 든다.
+//   사건 열쇠는 원본이 수나 글을 받지만 러스트 판은 u64 다. (글 열쇠는 게임이 수로 바꿔 넘긴다)
 //==============================================================================
+use std::collections::HashSet;
+
 use glow::HasContext;
 
 use crate::base::matrix4::Matrix4;
@@ -51,8 +59,12 @@ const RIBBON_FLOAT_COUNT: usize = 5;
 // 번개가 다시 꺾이는 초와 번개 하나의 마디 수.
 const LIGHTNING_KINK_SECONDS: f32 = 0.08;
 const LIGHTNING_POINT_COUNT: usize = 22;
-// 프레임마다 넘기는 빛 점의 수 상한.
-const MAXIMUM_GLINTS: usize = 96;
+// 프레임마다 넘기는 빛 점의 수 기본 상한. (set_glint_capacity)
+const DEFAULT_GLINT_CAPACITY: usize = 96;
+// 파티클 꼴의 수. (꼴마다 밝기 배)
+const LOOK_COUNT: usize = 7;
+// 발밑 그늘의 기본 짙기. (가운데)
+const DEFAULT_BLOB_SHADOW_ALPHA: f32 = 0.45;
 // 바닥 자국과 충격파 바닥 빛을 바닥 위로 띄우는 높이.
 const DECAL_LIFT: f32 = 0.014;
 const GROUND_GLOW_LIFT: f32 = 0.02;
@@ -215,6 +227,12 @@ pub enum ToonVfxDecalMode {
 	Glow,
 	// 둘레로 흐르는 잡음 테. (ring 이 (테 반지름, 테 너비, 잡음 잘기, 흐르는 빠르기) 의 반지름 몫)
 	Ring,
+	// 칸의 알파만큼 tint 색으로 덮고, 칸의 가운데 짙기(테 둘레)는 테 색(set_rim_color) 쪽으로 물든다. (밝은 바닥의 얼룩, 서리)
+	Stain,
+	// 칸의 알파 몸을 tint 로 덮고 몸 가장자리에 흰 윤을 두른다. (기름 윤)
+	Sheen,
+	// 가운데에서 바깥으로 둥글게 엷어지는 그늘. (알파만큼 어둡게 덮음, 칸은 보지 않음, 발밑 그늘 queue_blob_shadow)
+	Shade,
 }
 
 impl ToonVfxDecalMode {
@@ -228,6 +246,15 @@ impl ToonVfxDecalMode {
 			}
 			ToonVfxDecalMode::Ring => {
 				2.0
+			}
+			ToonVfxDecalMode::Stain => {
+				3.0
+			}
+			ToonVfxDecalMode::Sheen => {
+				4.0
+			}
+			ToonVfxDecalMode::Shade => {
+				5.0
 			}
 		}
 	}
@@ -311,6 +338,10 @@ pub struct ToonParticleOptions {
 	pub fade_in: f32,
 	// 빛의 꼴의 테. (0 이면 더하는 빛만, 1 이면 테 색으로 덮음, 음수면 엷게 덮는 빛무리)
 	pub rim: f32,
+	// 이미 지난 초. (음수면 그만큼 늦게)
+	pub age: f32,
+	// 사건 열쇠. (이미 낸 열쇠면 내지 않음)
+	pub key: Option<u64>,
 }
 
 impl Default for ToonParticleOptions {
@@ -345,6 +376,8 @@ impl Default for ToonParticleOptions {
 			alpha: 1.0,
 			fade_in: 0.0,
 			rim: 0.0,
+			age: 0.0,
+			key: None,
 		}
 	}
 }
@@ -364,11 +397,17 @@ pub struct ToonFireballOptions {
 	pub grow_seconds: f32,
 	// 겉이 끓는 정도.
 	pub boil: f32,
+	// 덮는 꼴의 몫. (0 이면 더하는 빛만, 1 이면 몸을 덮고 가장자리를 테 색으로)
+	pub rim: f32,
+	// 이미 지난 초. (음수면 그만큼 늦게)
+	pub age: f32,
+	// 사건 열쇠. (이미 낸 열쇠면 내지 않음)
+	pub key: Option<u64>,
 }
 
 impl Default for ToonFireballOptions {
 	fn default() -> Self {
-		ToonFireballOptions { position: [0.0; 3], radius: 0.5, life: 1.0, ramp: 0, smoke_color: [0.16, 0.14, 0.13], rise: 0.6, grow_seconds: 0.3, boil: 0.32 }
+		ToonFireballOptions { position: [0.0; 3], radius: 0.5, life: 1.0, ramp: 0, smoke_color: [0.16, 0.14, 0.13], rise: 0.6, grow_seconds: 0.3, boil: 0.32, rim: 0.0, age: 0.0, key: None }
 	}
 }
 
@@ -390,11 +429,17 @@ pub struct ToonShockwaveOptions {
 	// 바닥 위로 띄우는 높이.
 	pub height: f32,
 	pub delay: f32,
+	// 덮는 꼴의 몫. (0 이면 더하는 빛만, 1 이면 띠의 몸을 테 색으로 덮고 심은 색)
+	pub rim: f32,
+	// 이미 지난 초. (음수면 그만큼 늦게)
+	pub age: f32,
+	// 사건 열쇠. (이미 낸 열쇠면 내지 않음)
+	pub key: Option<u64>,
 }
 
 impl Default for ToonShockwaveOptions {
 	fn default() -> Self {
-		ToonShockwaveOptions { x: 0.0, z: 0.0, start_radius: 0.3, end_radius: 2.0, width: 0.6, life: 1.0, ramp: 0, color: [1.0; 3], lift: 0.22, height: 0.03, delay: 0.0 }
+		ToonShockwaveOptions { x: 0.0, z: 0.0, start_radius: 0.3, end_radius: 2.0, width: 0.6, life: 1.0, ramp: 0, color: [1.0; 3], lift: 0.22, height: 0.03, delay: 0.0, rim: 0.0, age: 0.0, key: None }
 	}
 }
 
@@ -423,11 +468,34 @@ pub struct ToonDecalOptions {
 	pub heat: f32,
 	// 잡음 씨앗. (None 이면 add_decal 은 무작위, queue_decal 은 0)
 	pub seed: Option<f32>,
+	// 깜빡이는 반주기 초. (0 이면 없음, 반주기마다 걸러 엷게)
+	pub flicker: f32,
+	// 이미 지난 초. (add_decal 만 읽음, 음수면 그만큼 늦게)
+	pub age: f32,
+	// 사건 열쇠. (add_decal 만 읽음, 이미 낸 열쇠면 내지 않음)
+	pub key: Option<u64>,
 }
 
 impl Default for ToonDecalOptions {
 	fn default() -> Self {
-		ToonDecalOptions { x: 0.0, z: 0.0, radius: 1.0, start_radius: None, grow_seconds: 0.0, life: 1.0, heat_seconds: 0.0, slot: ToonVfxSlot::Scorch, mode: ToonVfxDecalMode::Scorch, ramp: 0, tint: [1.0; 3], alpha: 0.85, angle: None, ring: [0.9, 0.05, 3.0, 0.3], heat: 0.0, seed: None }
+		ToonDecalOptions { x: 0.0, z: 0.0, radius: 1.0, start_radius: None, grow_seconds: 0.0, life: 1.0, heat_seconds: 0.0, slot: ToonVfxSlot::Scorch, mode: ToonVfxDecalMode::Scorch, ramp: 0, tint: [1.0; 3], alpha: 0.85, angle: None, ring: [0.9, 0.05, 3.0, 0.3], heat: 0.0, seed: None, flicker: 0.0, age: 0.0, key: None }
+	}
+}
+
+//==============================================================================
+// 발밑 그늘의 값. (가운데 alpha 에서 바깥으로 둥글게 엷어지는 그늘)
+//==============================================================================
+#[derive(Clone, Copy, Debug)]
+pub struct ToonBlobShadowOptions {
+	pub x: f32,
+	pub z: f32,
+	pub radius: f32,
+	pub alpha: f32,
+}
+
+impl Default for ToonBlobShadowOptions {
+	fn default() -> Self {
+		ToonBlobShadowOptions { x: 0.0, z: 0.0, radius: 0.5, alpha: DEFAULT_BLOB_SHADOW_ALPHA }
 	}
 }
 
@@ -446,11 +514,15 @@ pub struct ToonPlumeOptions {
 	pub life: f32,
 	pub ramp: i32,
 	pub smoke_color: [f32; 3],
+	// 이미 지난 초. (음수면 그만큼 늦게)
+	pub age: f32,
+	// 사건 열쇠. (이미 낸 열쇠면 내지 않음)
+	pub key: Option<u64>,
 }
 
 impl Default for ToonPlumeOptions {
 	fn default() -> Self {
-		ToonPlumeOptions { x: 0.0, z: 0.0, height: 2.0, cap_radius: None, stem_radius: None, life: 3.0, ramp: 0, smoke_color: [0.34, 0.31, 0.29] }
+		ToonPlumeOptions { x: 0.0, z: 0.0, height: 2.0, cap_radius: None, stem_radius: None, life: 3.0, ramp: 0, smoke_color: [0.34, 0.31, 0.29], age: 0.0, key: None }
 	}
 }
 
@@ -500,11 +572,13 @@ pub struct ToonRibbonOptions {
 	pub flow: Option<f32>,
 	// 번짐 색. (주면 흰 심과 그 색 둘레와 테 색 가장자리로 덮는다, None 이면 더하는 빛)
 	pub glow: Option<[f32; 3]>,
+	// 덮는 꼴의 몫. (번짐 색이 없을 때 몸을 테 색으로 덮고 심은 색, 0 이면 더하는 빛만)
+	pub rim: f32,
 }
 
 impl Default for ToonRibbonOptions {
 	fn default() -> Self {
-		ToonRibbonOptions { points: Vec::new(), width: 0.1, taper: 0.0, color: [1.0; 3], ramp: -1, alpha: 1.0, brightness: 1.0, grain_repeat: 1.0, flow: None, glow: None }
+		ToonRibbonOptions { points: Vec::new(), width: 0.1, taper: 0.0, color: [1.0; 3], ramp: -1, alpha: 1.0, brightness: 1.0, grain_repeat: 1.0, flow: None, glow: None, rim: 0.0 }
 	}
 }
 
@@ -534,11 +608,15 @@ pub struct ToonLightningOptions {
 	// 사는 초와 나이. (add_lightning 만 읽는다, 나이가 음수면 그만큼 늦게 나타남)
 	pub life: f32,
 	pub age: f32,
+	// 리본의 덮는 꼴의 몫.
+	pub rim: f32,
+	// 사건 열쇠. (add_lightning 만 읽는다, 이미 낸 열쇠면 내지 않음)
+	pub key: Option<u64>,
 }
 
 impl Default for ToonLightningOptions {
 	fn default() -> Self {
-		ToonLightningOptions { start: [0.0; 3], end: [0.0, 1.0, 0.0], radius: 0.05, count: 1, width: 0.05, turns: 1.0, color: [1.0; 3], ramp: -1, alpha: 1.0, brightness: 1.0, time: None, seed: None, glow: None, life: 0.5, age: 0.0 }
+		ToonLightningOptions { start: [0.0; 3], end: [0.0, 1.0, 0.0], radius: 0.05, count: 1, width: 0.05, turns: 1.0, color: [1.0; 3], ramp: -1, alpha: 1.0, brightness: 1.0, time: None, seed: None, glow: None, life: 0.5, age: 0.0, rim: 0.0, key: None }
 	}
 }
 
@@ -576,11 +654,13 @@ pub struct ToonFlashOptions {
 	pub life: f32,
 	// 나이. (음수면 그만큼 늦게 나타남)
 	pub age: f32,
+	// 사건 열쇠. (이미 낸 열쇠면 내지 않음)
+	pub key: Option<u64>,
 }
 
 impl Default for ToonFlashOptions {
 	fn default() -> Self {
-		ToonFlashOptions { color: [1.0; 3], strength: 0.8, life: 0.08, age: 0.0 }
+		ToonFlashOptions { color: [1.0; 3], strength: 0.8, life: 0.08, age: 0.0, key: None }
 	}
 }
 
@@ -720,6 +800,12 @@ pub struct ToonVfx {
 	glint_vertex_array: GlVertexArray,
 	glint_buffer: GlBuffer,
 	glint_data: Vec<f32>,
+	// 프레임마다 넘기는 빛 점의 상한.
+	glint_capacity: usize,
+	// 파티클 꼴마다의 밝기 배.
+	look_gain_list: [f32; LOOK_COUNT],
+	// 이미 낸 사건 열쇠.
+	used_event_key_set: HashSet<u64>,
 	fireball_list: Vec<LiveFireball>,
 	shockwave_list: Vec<LiveShockwave>,
 	decal_list: Vec<LiveDecal>,
@@ -1161,7 +1247,10 @@ impl ToonVfx {
 				ribbon_data: Vec::new(),
 				glint_vertex_array,
 				glint_buffer,
-				glint_data: vec![0.0; MAXIMUM_GLINTS * PARTICLE_FLOAT_COUNT],
+				glint_data: vec![0.0; DEFAULT_GLINT_CAPACITY * PARTICLE_FLOAT_COUNT],
+				glint_capacity: DEFAULT_GLINT_CAPACITY,
+				look_gain_list: [1.0; LOOK_COUNT],
+				used_event_key_set: HashSet::new(),
 				fireball_list: Vec::new(),
 				shockwave_list: Vec::new(),
 				decal_list: Vec::new(),
@@ -1326,6 +1415,50 @@ impl ToonVfx {
 	}
 
 	//==============================================================================
+	// 빛 점 상한 설정. (프레임마다 queue_glint 로 넘기는 수, 기본 96, 이번 프레임에 넘긴 빛 점은 지운다)
+	//==============================================================================
+	pub fn set_glint_capacity(&mut self, glint_capacity: usize) {
+		self.glint_capacity = glint_capacity.max(1);
+		self.glint_data = vec![0.0; self.glint_capacity * PARTICLE_FLOAT_COUNT];
+		self.queued_glint_count = 0;
+	}
+
+	//==============================================================================
+	// 빛 점 상한 반환.
+	//==============================================================================
+	pub fn get_glint_capacity(&self) -> usize {
+		self.glint_capacity
+	}
+
+	//==============================================================================
+	// 꼴마다 밝기 배 설정. (파티클과 빛 점의 밝기에 곱함, 기본 1)
+	//==============================================================================
+	pub fn set_look_gain(&mut self, look: ToonVfxLook, gain: f32) {
+		self.look_gain_list[look.get_index() as usize] = gain.max(0.0);
+	}
+
+	//==============================================================================
+	// 꼴마다 밝기 배 반환.
+	//==============================================================================
+	pub fn get_look_gain(&self, look: ToonVfxLook) -> f32 {
+		self.look_gain_list[look.get_index() as usize]
+	}
+
+	//==============================================================================
+	// 사건 열쇠 적기. (열쇠가 없으면 늘 true, 처음 보는 열쇠면 적고 true, 이미 낸 열쇠면 false, clear 가 잊는다)
+	//==============================================================================
+	pub fn register_event_key(&mut self, key: Option<u64>) -> bool {
+		match key {
+			Some(event_key) => {
+				self.used_event_key_set.insert(event_key)
+			}
+			None => {
+				true
+			}
+		}
+	}
+
+	//==============================================================================
 	// 효과 테의 색 설정. ([r, g, b] 0 ~ 1, 테를 두른 파티클과 번짐 리본의 가장자리, 기본은 ToonRenderer 의 기본 바깥선 색)
 	//==============================================================================
 	pub fn set_rim_color(&mut self, rim_color: [f32; 3]) {
@@ -1383,7 +1516,7 @@ impl ToonVfx {
 	}
 
 	//==============================================================================
-	// 다 지우기. (판이 바뀔 때)
+	// 다 지우기. (판이 바뀔 때, 사건 열쇠도 잊는다)
 	//==============================================================================
 	pub fn clear(&mut self) {
 		self.fireball_list.clear();
@@ -1394,6 +1527,7 @@ impl ToonVfx {
 		self.flash_list.clear();
 		self.shaker.stop();
 		self.particle_live_until = self.time;
+		self.used_event_key_set.clear();
 		self.clear_queue();
 	}
 
@@ -1456,6 +1590,9 @@ impl ToonVfx {
 	// 파티클 내기. (floor 를 주면 그 높이에서, is_grounded 면 낸 자리의 바닥 높이에서 멈춘다)
 	//==============================================================================
 	pub fn emit_particles(&mut self, options: &ToonParticleOptions) {
+		if !self.register_event_key(options.key) {
+			return;
+		}
 		let count = self.read_count(options.count);
 		let [x, y, z] = options.position;
 		let floor = match options.floor {
@@ -1534,7 +1671,7 @@ impl ToonVfx {
 			if options.is_inward {
 				velocity = [-offset[0] / life, -offset[1] / life, -offset[2] / life];
 			}
-			let start_time = self.time + delay;
+			let start_time = self.time + delay - options.age;
 			self.write_particle([
 				[x + offset[0], y + offset[1], z + offset[2], start_time],
 				[velocity[0], velocity[1], velocity[2], life],
@@ -1565,29 +1702,38 @@ impl ToonVfx {
 	// 불덩이 더하기. (잡음으로 끓는 구가 부풀며 식어 연기가 되고 위로 떠오름)
 	//==============================================================================
 	pub fn add_fireball(&mut self, options: &ToonFireballOptions) {
+		if !self.register_event_key(options.key) || (options.age > 0.0 && options.age >= options.life) {
+			return;
+		}
 		let seed = self.seeded_random.next_value() as f32 * 40.0;
 		let mut options = *options;
 		options.grow_seconds = options.grow_seconds.max(0.001);
-		self.fireball_list.push(LiveFireball { options, seed, age: 0.0 });
+		self.fireball_list.push(LiveFireball { options, seed, age: options.age });
 	}
 
 	//==============================================================================
 	// 충격파 띠 더하기. (빠르게 퍼지다 천천히, 바깥 끝이 말려 오르고 찢기며 엷어짐, 밑의 바닥이 잠깐 밝아짐, 바닥 높이에 놓임)
 	//==============================================================================
 	pub fn add_shockwave(&mut self, options: &ToonShockwaveOptions) {
+		if !self.register_event_key(options.key) || (options.age > 0.0 && options.age >= options.life + options.delay) {
+			return;
+		}
 		let floor_height = self.read_floor_height(options.x, options.z);
 		let seed = self.seeded_random.next_value() as f32 * 40.0;
-		self.shockwave_list.push(LiveShockwave { options: *options, floor_height, seed, age: 0.0 });
+		self.shockwave_list.push(LiveShockwave { options: *options, floor_height, seed, age: options.age });
 	}
 
 	//==============================================================================
 	// 바닥 자국 더하기. (그을음은 열기에서 식고 끝 1 초에 엷어짐, 바닥 높이에 놓임)
 	//==============================================================================
 	pub fn add_decal(&mut self, options: &ToonDecalOptions) {
+		if !self.register_event_key(options.key) || (options.age > 0.0 && options.age >= options.life) {
+			return;
+		}
 		let floor_height = self.read_floor_height(options.x, options.z);
 		let random_angle = self.seeded_random.next_value() as f32 * std::f32::consts::PI * 2.0;
 		let random_seed = self.seeded_random.next_value() as f32 * 40.0;
-		self.decal_list.push(LiveDecal { options: *options, floor_height, angle: options.angle.unwrap_or(random_angle), seed: options.seed.unwrap_or(random_seed), age: 0.0 });
+		self.decal_list.push(LiveDecal { options: *options, floor_height, angle: options.angle.unwrap_or(random_angle), seed: options.seed.unwrap_or(random_seed), age: options.age });
 	}
 
 	//==============================================================================
@@ -1599,12 +1745,22 @@ impl ToonVfx {
 	}
 
 	//==============================================================================
+	// 이번 프레임에만 그리는 발밑 그늘 넘기기. (가운데 alpha 에서 바깥으로 둥글게 엷어지는 그늘, 바닥 높이에 놓임)
+	//==============================================================================
+	pub fn queue_blob_shadow(&mut self, options: &ToonBlobShadowOptions) {
+		self.queue_decal(&ToonDecalOptions { x: options.x, z: options.z, radius: options.radius, mode: ToonVfxDecalMode::Shade, alpha: options.alpha, ..ToonDecalOptions::default() });
+	}
+
+	//==============================================================================
 	// 연기 기둥 더하기. (기둥이 솟고 갓이 말려 오르며 커지고, 갓 밑이 달아올랐다 식으며 엷어짐, 바닥 높이에 섬)
 	//==============================================================================
 	pub fn add_plume(&mut self, options: &ToonPlumeOptions) {
+		if !self.register_event_key(options.key) || (options.age > 0.0 && options.age >= options.life) {
+			return;
+		}
 		let floor_height = self.read_floor_height(options.x, options.z);
 		let seed = self.seeded_random.next_value() as f32 * 40.0;
-		self.plume_list.push(LivePlume { options: *options, floor_height, cap_radius: options.cap_radius.unwrap_or(options.height * 0.4), stem_radius: options.stem_radius.unwrap_or(options.height * 0.1), seed, age: 0.0 });
+		self.plume_list.push(LivePlume { options: *options, floor_height, cap_radius: options.cap_radius.unwrap_or(options.height * 0.4), stem_radius: options.stem_radius.unwrap_or(options.height * 0.1), seed, age: options.age });
 	}
 
 	//==============================================================================
@@ -1659,15 +1815,15 @@ impl ToonVfx {
 				]);
 			}
 			let width = options.width * (0.7 + random() * 0.6);
-			self.queue_ribbon(ToonRibbonOptions { points, width, taper: 0.6, color: options.color, ramp: options.ramp, alpha: options.alpha, brightness: options.brightness, grain_repeat: 1.5, flow: Some(time * 6.0 + bolt_index as f32), glow: options.glow });
+			self.queue_ribbon(ToonRibbonOptions { points, width, taper: 0.6, color: options.color, ramp: options.ramp, alpha: options.alpha, brightness: options.brightness, grain_repeat: 1.5, flow: Some(time * 6.0 + bolt_index as f32), glow: options.glow, rim: options.rim });
 		}
 	}
 
 	//==============================================================================
-	// 이번 프레임에만 그리는 빛 점 넘기기. (96 개까지)
+	// 이번 프레임에만 그리는 빛 점 넘기기. (set_glint_capacity 까지, 기본 96)
 	//==============================================================================
 	pub fn queue_glint(&mut self, options: &ToonGlintOptions) {
-		if self.queued_glint_count >= MAXIMUM_GLINTS {
+		if self.queued_glint_count >= self.glint_capacity {
 			return;
 		}
 		let [x, y, z] = options.position;
@@ -1691,6 +1847,9 @@ impl ToonVfx {
 	// 사는 동안 다시 꺾이는 번개 더하기. (그릴 때마다 queue_lightning 으로 넘긴다, 끝 0.1 초에 엷어짐, 나이가 음수면 그만큼 늦게 나타남)
 	//==============================================================================
 	pub fn add_lightning(&mut self, options: &ToonLightningOptions) {
+		if !self.register_event_key(options.key) {
+			return;
+		}
 		let mut lightning = *options;
 		if lightning.seed.is_none() {
 			lightning.seed = Some(self.seeded_random.next_value() as f32 * 1000.0);
@@ -1702,6 +1861,9 @@ impl ToonVfx {
 	// 화면 섬광 더하기. (뷰포트를 그 색으로 잠깐 덮고 빠르게 걷힘)
 	//==============================================================================
 	pub fn add_flash(&mut self, options: &ToonFlashOptions) {
+		if !self.register_event_key(options.key) {
+			return;
+		}
 		self.flash_list.push(*options);
 	}
 
@@ -1842,7 +2004,7 @@ impl ToonVfx {
 	}
 
 	//==============================================================================
-	// 바닥 자국 그리기. (나이 먹는 자국, 이번 프레임에 넘긴 자국 차례)
+	// 바닥 자국 그리기. (나이 먹는 자국, 이번 프레임에 넘긴 자국 차례, 아직 나타나지 않은 것은 건너뜀, 깜빡이면 걸러 엷게)
 	//==============================================================================
 	fn draw_decals(&self, gl: &glow::Context, frame: &VfxFrame) {
 		if self.decal_list.is_empty() && self.queued_decal_list.is_empty() {
@@ -1851,13 +2013,20 @@ impl ToonVfx {
 		let decal_program = &self.decal_program;
 		ToonVfx::use_program(gl, decal_program, frame);
 		set_uniform_float(gl, decal_program, "decalTime", self.time);
+		set_uniform_vector3(gl, decal_program, "rimColor", self.rim_color);
 		unsafe {
 			gl.bind_vertex_array(Some(self.decal_vertex_array));
 		}
 		for decal in self.decal_list.iter() {
+			if decal.age < 0.0 {
+				continue;
+			}
 			let options = &decal.options;
 			let heat = if options.heat_seconds > 0.0 { (1.0 - decal.age / options.heat_seconds).max(0.0) } else { 0.0 };
-			let fade = (options.life - decal.age).min(1.0) * options.alpha;
+			let mut fade = (options.life - decal.age).min(1.0) * options.alpha;
+			if options.flicker > 0.0 && (decal.age / options.flicker).floor() as i64 % 2 == 1 {
+				fade *= 0.3;
+			}
 			self.draw_decal(gl, decal, fade, heat * heat);
 		}
 		for decal in self.queued_decal_list.iter() {
@@ -1898,6 +2067,7 @@ impl ToonVfx {
 		}
 		let band_program = &self.band_program;
 		ToonVfx::use_program(gl, band_program, frame);
+		set_uniform_vector3(gl, band_program, "rimColor", self.rim_color);
 		unsafe {
 			gl.bind_vertex_array(Some(self.band_mesh.vertex_array));
 		}
@@ -1918,6 +2088,7 @@ impl ToonVfx {
 			set_uniform_vector3(gl, band_program, "bandColor", options.color);
 			set_uniform_float(gl, band_program, "bandSeed", shockwave.seed);
 			set_uniform_float(gl, band_program, "bandAlpha", alpha);
+			set_uniform_float(gl, band_program, "bandRim", options.rim);
 			// 바닥 빛. (띠보다 넓게, 납작하게)
 			set_uniform_float(gl, band_program, "bandFlat", 1.0);
 			set_uniform_vector4(gl, band_program, "bandShape", [options.x, options.z, radius, radius.min(width * 2.6)]);
@@ -1946,6 +2117,9 @@ impl ToonVfx {
 			gl.bind_vertex_array(Some(self.lathe_mesh.vertex_array));
 		}
 		for plume in self.plume_list.iter() {
+			if plume.age < 0.0 {
+				continue;
+			}
 			let options = &plume.options;
 			let progress = (plume.age / options.life).min(1.0);
 			let alpha = smooth_step(0.0, 0.08, progress) * (1.0 - smooth_step(0.6, 1.0, progress));
@@ -1969,10 +2143,14 @@ impl ToonVfx {
 		let fireball_program = &self.fireball_program;
 		ToonVfx::use_program(gl, fireball_program, frame);
 		set_uniform_vector3(gl, fireball_program, "viewDirection", frame.view_direction);
+		set_uniform_vector3(gl, fireball_program, "rimColor", self.rim_color);
 		unsafe {
 			gl.bind_vertex_array(Some(self.sphere_mesh.vertex_array));
 		}
 		for fireball in self.fireball_list.iter() {
+			if fireball.age < 0.0 {
+				continue;
+			}
 			let options = &fireball.options;
 			let progress = (fireball.age / options.life).min(1.0);
 			let grow = 1.0 - (1.0 - (fireball.age / options.grow_seconds).min(1.0)).powi(3);
@@ -1987,6 +2165,7 @@ impl ToonVfx {
 			set_uniform_float(gl, fireball_program, "ballAlpha", alpha);
 			set_uniform_float(gl, fireball_program, "ballRamp", options.ramp as f32);
 			set_uniform_vector3(gl, fireball_program, "smokeColor", options.smoke_color);
+			set_uniform_float(gl, fireball_program, "ballRim", options.rim);
 			ToonVfx::draw_indexed_mesh(gl, &self.sphere_mesh);
 		}
 	}
@@ -2074,7 +2253,7 @@ impl ToonVfx {
 			let vertex_count = (ribbon.points.len() * 2) as i32;
 			set_uniform_vector3(gl, ribbon_program, "ribbonColor", ribbon.color);
 			set_uniform_vector4(gl, ribbon_program, "ribbonLook", [ribbon.ramp as f32, ribbon.alpha, ribbon.brightness, ribbon.flow.unwrap_or(self.time)]);
-			set_uniform_vector2(gl, ribbon_program, "ribbonGrain", ribbon_length * ribbon.grain_repeat, 0.0);
+			set_uniform_vector2(gl, ribbon_program, "ribbonGrain", ribbon_length * ribbon.grain_repeat, ribbon.rim);
 			let glow_value = match ribbon.glow {
 				Some(glow) => {
 					[glow[0], glow[1], glow[2], 1.0]
@@ -2108,6 +2287,7 @@ impl ToonVfx {
 		set_uniform_float(gl, particle_program, "time", self.time);
 		set_uniform_vector3(gl, particle_program, "rimColor", self.rim_color);
 		unsafe {
+			gl.uniform_1_f32_slice(particle_program.get_uniform_location(gl, "lookGains").as_ref(), &self.look_gain_list);
 			if is_particle_live {
 				gl.bind_vertex_array(Some(self.particle_vertex_array));
 				let used_count = self.particle_used_count;
@@ -2179,6 +2359,19 @@ impl ToonVfx {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn options_default_keep_previous_behavior() {
+		let particle_options = ToonParticleOptions::default();
+		assert_eq!(particle_options.age, 0.0);
+		assert!(particle_options.key.is_none());
+		assert_eq!(ToonFireballOptions::default().rim, 0.0);
+		assert_eq!(ToonShockwaveOptions::default().rim, 0.0);
+		assert_eq!(ToonRibbonOptions::default().rim, 0.0);
+		assert_eq!(ToonDecalOptions::default().flicker, 0.0);
+		assert_eq!(ToonBlobShadowOptions::default().alpha, DEFAULT_BLOB_SHADOW_ALPHA);
+		assert_eq!(ToonVfxDecalMode::Shade.get_index(), 5.0);
+	}
 
 	#[test]
 	fn grid_noise_tiles_at_period() {
@@ -2336,6 +2529,7 @@ in vec4 lookValue;
 in vec4 extraValue;
 in float rimValue;
 uniform vec3 rimColor;
+uniform float lookGains[7];
 out vec4 fragmentColor;
 //#include atlas
 vec4 shadeRimmed(vec3 color, float shapeAlpha, float fade, float brightness) {
@@ -2361,7 +2555,7 @@ void main() {
 	}
 	float fadeIn = extraValue.w > 0.0 ? clamp(progress / extraValue.w, 0.0, 1.0) : 1.0;
 	float alpha = extraValue.y * fadeIn;
-	float brightness = extraValue.x;
+	float brightness = extraValue.x * lookGains[int(clamp(look, 0.0, 6.0) + 0.5)];
 	if (look < 0.5) {
 		fragmentColor = shadeRimmed(color, readSlot(0.0, cornerCoordinate).a, alpha * (1.0 - progress), brightness);
 	}
@@ -2425,6 +2619,8 @@ uniform float ballHeat;
 uniform float ballAlpha;
 uniform float ballRamp;
 uniform vec3 smokeColor;
+uniform float ballRim;
+uniform vec3 rimColor;
 out vec4 fragmentColor;
 //#include noise
 //#include atlas
@@ -2443,6 +2639,13 @@ void main() {
 	vec3 emitted = fireColor * hot * (0.8 + temperature * 0.9);
 	float smoke = (1.0 - hot) * cover * 0.8;
 	fragmentColor = vec4(emitted * cover + smokeColor * smoke * (0.6 + detail * 0.4), smoke);
+	if (ballRim > 0.0) {
+		float fireCover = hot * cover * 0.9;
+		float rimDark = 1.0 - smoothstep(0.06, 0.38, facing);
+		vec3 fireBody = mix(min(fireColor * (0.85 + temperature * 0.4), vec3(1.0)), rimColor, rimDark * 0.85);
+		vec4 covered = vec4(fireBody * fireCover + emitted * cover * 0.3 + smokeColor * smoke * (0.6 + detail * 0.4), max(fireCover, smoke));
+		fragmentColor = mix(fragmentColor, covered, min(ballRim, 1.0));
+	}
 }
 ";
 
@@ -2474,6 +2677,8 @@ uniform vec3 bandColor;
 uniform float bandAlpha;
 uniform float bandFlat;
 uniform float bandSeed;
+uniform float bandRim;
+uniform vec3 rimColor;
 out vec4 fragmentColor;
 //#include noise
 //#include atlas
@@ -2492,6 +2697,11 @@ void main() {
 	float rampPosition = clamp(0.12 + bandProgress * 0.65 + (1.0 - strength) * 0.3, 0.0, 0.95);
 	vec3 color = bandColor * readRamp(bandRamp, rampPosition);
 	fragmentColor = vec4(color * alpha * 1.5, alpha * 0.12);
+	if (bandRim > 0.0) {
+		float core = smoothstep(0.35, 0.8, strength);
+		vec3 covered = mix(rimColor, min(color * 1.2, vec3(1.0)), core);
+		fragmentColor = mix(fragmentColor, vec4(covered * alpha * 0.85 + color * core * alpha * 0.4, alpha * 0.85), min(bandRim, 1.0));
+	}
 }
 ";
 
@@ -2523,6 +2733,7 @@ uniform float decalMode;
 uniform vec4 decalRing;
 uniform float decalTime;
 uniform float decalSeed;
+uniform vec3 rimColor;
 out vec4 fragmentColor;
 //#include noise
 //#include atlas
@@ -2538,7 +2749,7 @@ void main() {
 		float alpha = texel.a * decalAlpha;
 		fragmentColor = vec4(decalTint * readRamp(decalRamp, 1.0 - decalHeat) * alpha, 0.0);
 	}
-	else {
+	else if (decalMode < 2.5) {
 		vec2 centered = decalCoordinate * 2.0 - 1.0;
 		float distance = length(centered);
 		float offset = (distance - decalRing.x) / decalRing.y;
@@ -2552,6 +2763,25 @@ void main() {
 		float strength = clamp(0.2 + (flow * 0.7 + drift * 0.5 - 0.35) * 1.6, 0.0, 1.4);
 		float alpha = ring * strength * decalAlpha;
 		fragmentColor = vec4(decalTint * readRamp(decalRamp, 1.0 - decalHeat) * alpha, 0.0);
+	}
+	else if (decalMode < 3.5) {
+		vec4 texel = readSlot(decalSlot, decalCoordinate);
+		float alpha = texel.a * decalAlpha;
+		float edge = smoothstep(0.15, 0.55, texel.a) * (1.0 - smoothstep(0.55, 0.95, texel.a));
+		vec3 color = mix(decalTint, rimColor, edge * 0.35);
+		fragmentColor = vec4(color * alpha, alpha);
+	}
+	else if (decalMode < 4.5) {
+		vec4 texel = readSlot(decalSlot, decalCoordinate);
+		float body = smoothstep(0.1, 0.28, texel.a) * decalAlpha;
+		float sheen = (smoothstep(0.1, 0.15, texel.a) - smoothstep(0.17, 0.24, texel.a)) * 0.85;
+		vec3 color = mix(decalTint, vec3(1.0), sheen);
+		float alpha = max(body, sheen * decalAlpha);
+		fragmentColor = vec4(color * alpha, alpha);
+	}
+	else {
+		float alpha = decalAlpha * (1.0 - smoothstep(0.25, 1.0, length(decalCoordinate * 2.0 - 1.0)));
+		fragmentColor = vec4(0.0, 0.0, 0.0, alpha);
 	}
 }
 ";
@@ -2740,6 +2970,13 @@ void main() {
 	}
 	float alpha = body * (0.45 + 0.75 * grain) * ribbonLook.y;
 	fragmentColor = vec4(color * alpha * ribbonLook.z, 0.0);
+	if (ribbonGrain.y > 0.0) {
+		float coverBody = exp(-across * across * 7.0);
+		float core = exp(-across * across * 50.0);
+		float cover = clamp(coverBody * (0.55 + 0.6 * grain) * ribbonLook.y, 0.0, 1.0);
+		vec3 covered = mix(rimColor, min(color * ribbonLook.z, vec3(1.0)), smoothstep(0.15, 0.6, core));
+		fragmentColor = mix(fragmentColor, vec4(covered * cover + color * core * cover * 0.35 * ribbonLook.z, cover), min(ribbonGrain.y, 1.0));
+	}
 }
 ";
 

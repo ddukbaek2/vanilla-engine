@@ -219,3 +219,4 @@ pub use crate::base::identifier::Identifier;
 pub use crate::core::engine::FrameCaptureHandler;
 pub use crate::graphics3d::multilevelbloomeffect::MultiLevelBloomEffect;
 pub use crate::graphics3d::toon::toonpostprocess::ToonPostProcessOptions;
+pub use crate::graphics3d::toon::toonvfx::ToonBlobShadowOptions;
