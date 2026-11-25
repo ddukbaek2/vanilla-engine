@@ -180,3 +180,4 @@ pub use crate::game::gamescene::{PlayInput, ScreenFadeEvent, ScreenFadeHold};
 pub use crate::core::viewmanager::SafeAreaSide;
 pub use crate::resource::spriteatlas::SpriteAtlas;
 pub use crate::graphics3d::toon::toonrenderer::extract_frustum_planes;
+pub use crate::graphics3d::toon::toonscreenoutline::ToonLineTarget;

@@ -62,14 +62,14 @@ impl Default for ToonLineDrawOptions<'_> {
 //==============================================================================
 // 선의 판. (노멀과 번호 RGBA8 과 깊이 24, 가면 R8)
 //==============================================================================
-struct LineTarget {
-	framebuffer: GlFramebuffer,
-	line_texture: GlTexture,
-	depth_texture: GlTexture,
-	mask_framebuffer: GlFramebuffer,
-	mask_texture: GlTexture,
-	width: i32,
-	height: i32,
+pub struct ToonLineTarget {
+	pub framebuffer: GlFramebuffer,
+	pub line_texture: GlTexture,
+	pub depth_texture: GlTexture,
+	pub mask_framebuffer: GlFramebuffer,
+	pub mask_texture: GlTexture,
+	pub width: i32,
+	pub height: i32,
 }
 
 //==============================================================================
@@ -110,7 +110,7 @@ pub struct ToonScreenOutline {
 	mask_program: ShaderProgram,
 	composite_program: ShaderProgram,
 	empty_vertex_array: crate::core::graphic::GlVertexArray,
-	line_target: Option<LineTarget>,
+	line_target: Option<ToonLineTarget>,
 	color: [f32; 4],
 	width: f32,
 	width_unit: ToonOutlineWidthUnit,
@@ -311,10 +311,37 @@ impl ToonScreenOutline {
 	}
 
 	//==============================================================================
-	// 선의 판 크기. (없으면 None)
+	// 선의 판 반환. (없으면 None, 번호와 깊이와 가면 텍스처, 크기)
 	//==============================================================================
-	pub fn get_line_target_size(&self) -> Option<(i32, i32)> {
-		self.line_target.as_ref().map(|line_target| (line_target.width, line_target.height))
+	pub fn get_line_target(&self) -> Option<&ToonLineTarget> {
+		self.line_target.as_ref()
+	}
+
+	//==============================================================================
+	// 바깥선 반지름 셈. (선의 판 픽셀, 한 픽셀 밑으로 내리지 않음, 번호를 그리는 프레임이나 선의 판이 없으면 1)
+	//==============================================================================
+	pub fn read_outline_radius(&self) -> f32 {
+		let (frame, line_target) = match (self.frame.as_ref(), self.line_target.as_ref()) {
+			(Some(frame), Some(line_target)) => {
+				(frame, line_target)
+			}
+			_ => {
+				return 1.0;
+			}
+		};
+		let average_distance = if self.drawn_distance_count > 0 {
+			self.drawn_distance_sum / self.drawn_distance_count as f32
+		}
+		else {
+			1.0
+		};
+		let focus_distance = if self.focus_distance > 0.0 {
+			self.focus_distance
+		}
+		else {
+			average_distance
+		};
+		compute_outline_radius(self.width, self.width_unit, frame.viewport[3], line_target.height, frame.projection_scale, frame.is_perspective, focus_distance)
 	}
 
 	//==============================================================================
@@ -469,9 +496,7 @@ impl ToonScreenOutline {
 				return;
 			}
 		};
-		let average_distance = if self.drawn_distance_count > 0 { self.drawn_distance_sum / self.drawn_distance_count as f32 } else { 1.0 };
-		let focus_distance = if self.focus_distance > 0.0 { self.focus_distance } else { average_distance };
-		let outline_radius = compute_outline_radius(self.width, self.width_unit, frame.viewport[3], line_target.height, frame.projection_scale, frame.is_perspective, focus_distance);
+		let outline_radius = self.read_outline_radius();
 		let mask_program = &self.mask_program;
 		unsafe {
 			gl.bind_vertex_array(None);
@@ -601,7 +626,7 @@ impl ToonScreenOutline {
 	//==============================================================================
 	// 선의 판 읽기. (크기가 바뀌면 다시 지음, 짓지 못하면 None)
 	//==============================================================================
-	fn read_line_target(&mut self, gl: &glow::Context, width: i32, height: i32) -> Option<&LineTarget> {
+	fn read_line_target(&mut self, gl: &glow::Context, width: i32, height: i32) -> Option<&ToonLineTarget> {
 		let is_same_size = matches!(self.line_target.as_ref(), Some(line_target) if line_target.width == width && line_target.height == height);
 		if !is_same_size {
 			self.delete_line_target(gl);
@@ -613,7 +638,7 @@ impl ToonScreenOutline {
 	//==============================================================================
 	// 선의 판 짓기. (노멀과 번호 RGBA8 과 깊이 24, 가면 R8, 앞의 프레임버퍼와 텍스처는 돌린다)
 	//==============================================================================
-	fn create_line_target(gl: &glow::Context, width: i32, height: i32) -> Option<LineTarget> {
+	fn create_line_target(gl: &glow::Context, width: i32, height: i32) -> Option<ToonLineTarget> {
 		unsafe {
 			let previous_framebuffer = gl.get_parameter_framebuffer(glow::FRAMEBUFFER_BINDING);
 			let previous_texture = gl.get_parameter_texture(glow::TEXTURE_BINDING_2D);
@@ -641,7 +666,7 @@ impl ToonScreenOutline {
 			gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(mask_texture), 0);
 			let mask_status = gl.check_framebuffer_status(glow::FRAMEBUFFER);
 			gl.bind_framebuffer(glow::FRAMEBUFFER, previous_framebuffer);
-			let line_target = LineTarget { framebuffer, line_texture, depth_texture, mask_framebuffer, mask_texture, width, height };
+			let line_target = ToonLineTarget { framebuffer, line_texture, depth_texture, mask_framebuffer, mask_texture, width, height };
 			if status != glow::FRAMEBUFFER_COMPLETE || mask_status != glow::FRAMEBUFFER_COMPLETE {
 				ToonScreenOutline::delete_target_objects(gl, &line_target);
 				return None;
@@ -659,7 +684,7 @@ impl ToonScreenOutline {
 		}
 	}
 
-	fn delete_target_objects(gl: &glow::Context, line_target: &LineTarget) {
+	fn delete_target_objects(gl: &glow::Context, line_target: &ToonLineTarget) {
 		unsafe {
 			gl.delete_framebuffer(line_target.framebuffer);
 			gl.delete_framebuffer(line_target.mask_framebuffer);
