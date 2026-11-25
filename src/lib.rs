@@ -154,7 +154,7 @@ pub use crate::resource::bunchasset::BunchAsset;
 pub use crate::resource::visualasset::VisualAsset;
 pub use crate::web::websocketclient::{WebSocketClient, WebSocketReceiveEvent};
 pub use crate::ui::uidocument::{UIDocument, UIDocumentLoadContext, UIDocumentSaveContext, UIDOCUMENT_VERSION};
-pub use crate::effect::particlesystem::{EmitterShape, ParticleRenderShape};
+pub use crate::effect::particlesystem::{ParticleEmitterShape, ParticleRenderShape};
 pub use crate::core::component::text::TextWrapMode;
 pub use crate::core::inputmanager::{InputDevice, TouchPhase};
 pub use crate::core::inputactions::{InputActionSource, InputActions};

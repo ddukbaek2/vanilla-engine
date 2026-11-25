@@ -1581,18 +1581,15 @@ impl Timeline {
 	}
 
 	//==============================================================================
-	// 파티클 시간 진행. (재생 중 매 프레임. 방출점은 노드 content_size 가운데)
+	// 파티클 시간 진행. (재생 중 매 프레임)
 	//==============================================================================
 	pub fn simulate_particles(&mut self, node_tree: &mut NodeTree, time_delta: f32) {
 		if time_delta <= 0.0 {
 			return;
 		}
 		for node_id in self.particle_node_ids.iter() {
-			if let Some(node) = node_tree.get_node_mut(*node_id) {
-				let emitter_center = node.get_content_size().multiply_scalar(0.5);
-				if let Some(particle_system) = node.get_component_mut::<ParticleSystem>() {
-					particle_system.simulate(time_delta, emitter_center);
-				}
+			if let Some(particle_system) = node_tree.get_node_mut(*node_id).and_then(|node| node.get_component_mut::<ParticleSystem>()) {
+				particle_system.simulate(time_delta);
 			}
 		}
 	}
@@ -2042,7 +2039,6 @@ impl Timeline {
 						sound.handle_event(&event_name);
 					}
 				}
-				let emitter_center = node.get_content_size().multiply_scalar(0.5);
 				if let Some(particle_system) = node.get_component_mut::<ParticleSystem>() {
 					if event_name == "play" {
 						particle_system.play();
@@ -2068,7 +2064,7 @@ impl Timeline {
 						else {
 							DEFAULT_EMIT_COUNT
 						};
-						particle_system.emit(emit_count.max(0.0).ceil() as usize, emitter_center);
+						particle_system.emit(emit_count.max(0.0).ceil() as usize, None);
 					}
 				}
 			}
