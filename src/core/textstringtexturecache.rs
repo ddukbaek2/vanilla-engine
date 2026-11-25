@@ -7,7 +7,8 @@
 // - 글자는 흰색으로 굽고, 그릴 때 색을 곱한다. (색이 바뀌어도 다시 굽지 않는다)
 //   색 글리프(이모지)는 제 색으로 흰 글자 위에 얹어 굽는다. 원본도 흰색으로 fillText 한 캔버스를 올리므로 이모지는 제 색으로 구워지고 그릴 때 같은 색이 곱해진다.
 //   외곽선(Stroke)으로 구울 때도 색 글리프는 테를 긋지 않고 색 그대로 얹는다. (크롬 strokeText 와 같다)
-// - 폰트 문자열은 Canvas2D font 와 같은 꼴을 읽는다. 예: "16px DOSGothic", "bold 24px default", "italic 500 16px default"
+// - 폰트 문자열은 Canvas2D font 와 같은 꼴(CSS font 줄임 꼴)을 읽는다. 예: "16px DOSGothic", "bold 24px default", "italic 500 16px default", "12pt 'A B', C, sans-serif"
+//   크기는 px 밖의 CSS 단위와 이름 크기도 읽고 "/줄높이"는 넘긴다. 쉼표로 이은 이름 목록은 글자마다 앞 이름의 얼굴부터 찾는다. (브라우저의 글꼴 목록과 같다, parse_font_string)
 // - 글꼴은 원본 document.fonts 처럼 이름 하나 아래에 얼굴(굵기, 기울기, 글자 범위)을 여럿 올린다. (register_font_face)
 //   고르기는 CSS 의 차례를 따르고, 기울인 얼굴이 없으면 가짜 기울임(기울기 1/4), 굵은 얼굴이 없으면 가짜 굵게를 글리프마다 입힌다. (textshaping.rs)
 // - 이름의 얼굴들에 없는 글자는 기본 폰트, 대체 폰트 순으로 찾는다. (브라우저의 글꼴 대체와 같은 자리)
@@ -151,7 +152,10 @@ pub struct FontDescription {
 	pub font_weight: u16,
 	pub is_bold: bool,
 	pub is_italic: bool,
+	// 목록의 첫 이름.
 	pub family_name: String,
+	// 쉼표로 이은 이름 목록. (앞 이름부터 찾는다)
+	pub family_name_list: Vec<String>,
 }
 
 struct CachedTextEntry {
@@ -380,7 +384,7 @@ impl TextStringTextureCache {
 		self.entry_table.retain(|_, cached_text_entry_list| {
 			cached_text_entry_list.retain(|cached_text_entry| {
 				let font_description = parse_font_string(&cached_text_entry.font_string);
-				let is_affected = font_description.family_name.to_lowercase() == family_key && font_face_descriptors.contains_any_character(&cached_text_entry.text);
+				let is_affected = font_description.family_name_list.iter().any(|family_name| family_name.to_lowercase() == family_key) && font_face_descriptors.contains_any_character(&cached_text_entry.text);
 				if is_affected {
 					pending_deleted_texture_list.push(cached_text_entry.entry.texture);
 					removed_count += 1;
@@ -971,14 +975,15 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	// 폰트 문자열에 맞는 얼굴 목록. (이름의 얼굴들, 기본 폰트, 대체 폰트 차례. 글자마다 앞에서부터 찾는다)
+	// 폰트 문자열에 맞는 얼굴 목록. (이름 목록의 차례로 이름마다 그 얼굴들, 기본 폰트, 대체 폰트 차례. 글자마다 앞에서부터 찾는다, 올리지 않은 이름은 넘긴다)
 	//==============================================================================
 	fn resolve_face_list(&self, font_description: &FontDescription) -> Vec<ResolvedFontFace> {
 		let mut face_list: Vec<ResolvedFontFace> = Vec::new();
-		let family_key = font_description.family_name.to_lowercase();
-		if let Some(family_face_list) = self.font_family_table.get(&family_key) {
-			let family_face_reference_list: Vec<&RegisteredFontFace> = family_face_list.iter().collect();
-			textshaping::select_font_faces(&family_face_reference_list, font_description.font_weight, font_description.is_italic, &mut face_list);
+		for family_name in &font_description.family_name_list {
+			if let Some(family_face_list) = self.font_family_table.get(&family_name.to_lowercase()) {
+				let family_face_reference_list: Vec<&RegisteredFontFace> = family_face_list.iter().collect();
+				textshaping::select_font_faces(&family_face_reference_list, font_description.font_weight, font_description.is_italic, &mut face_list);
+			}
 		}
 		let default_face_reference_list: Vec<&RegisteredFontFace> = self.default_face_list.iter().collect();
 		textshaping::select_font_faces(&default_face_reference_list, font_description.font_weight, font_description.is_italic, &mut face_list);
@@ -1399,58 +1404,203 @@ fn create_entry_hash(text_draw_kind: TextDrawKind, is_antialias: bool, direction
 }
 
 //==============================================================================
-// 폰트 문자열 해석. ("bold 16px DOSGothic" → 크기 16, 굵기 700, 이름 DOSGothic)
-// - 크기 앞의 낱말: italic / oblique 는 기울임, bold / bolder 는 700, lighter 는 100, 숫자는 굵기(1 ~ 1000), normal 과 그 밖은 넘긴다.
-// - 크기 뒤는 모두 이름이다. 따옴표는 뗀다. 쉼표로 이은 목록이면 첫 이름을 쓴다.
+// 폰트 문자열 해석. (Canvas2D font 의 CSS font 줄임 꼴, "bold 16px DOSGothic" → 크기 16, 굵기 700, 이름 DOSGothic)
+// - 크기 앞의 낱말: normal, italic / oblique(뒤의 각도는 넘긴다)는 기울임, small-caps, 늘이기 낱말(condensed 등)은 넘긴다.
+//   bold / bolder 는 700, lighter 는 100, 숫자는 굵기(1 ~ 1000). 그 밖의 낱말이 오면 틀린 문자열이다.
+// - 크기: px, pt, pc, in, cm, mm, q 와 em, rem, %, larger, smaller, 이름 크기(xx-small ~ xxx-large). 뒤의 "/줄높이"는 읽고 넘긴다. (캔버스는 줄높이를 쓰지 않는다)
+//   em, rem, %, larger, smaller 는 10px 에 대어 셈한다. (원본이 글을 굽고 재는 캔버스는 문서에 붙이지 않아 브라우저가 기본 글꼴 10px 에 댄다, 크롬으로 확인)
+// - 크기 뒤는 쉼표로 이은 이름 목록이다. 따옴표 이름은 따옴표를 떼고, 따옴표 없는 이름은 낱말을 빈칸 하나로 잇는다. 그리는 쪽이 목록의 앞 이름부터 찾는다.
+// - 틀린 문자열(크기나 이름이 없음, 음수 크기, 모르는 낱말)은 캔버스의 처음 값 "10px sans-serif" 로 본다.
 //==============================================================================
 pub fn parse_font_string(font_string: &str) -> FontDescription {
-	let mut font_size: f32 = 10.0;
+	parse_font_string_strict(font_string).unwrap_or_else(|| FontDescription {
+		font_size: 10.0,
+		font_weight: 400,
+		is_bold: false,
+		is_italic: false,
+		family_name: String::from("sans-serif"),
+		family_name_list: vec![String::from("sans-serif")],
+	})
+}
+
+//==============================================================================
+// 폰트 문자열 해석. (틀리면 None)
+//==============================================================================
+fn parse_font_string_strict(font_string: &str) -> Option<FontDescription> {
 	let mut font_weight: u16 = 400;
 	let mut is_italic = false;
-	let mut family_name_parts: Vec<&str> = Vec::new();
-	let mut has_found_size = false;
-	for token in font_string.split_whitespace() {
-		if has_found_size {
-			family_name_parts.push(token);
-			continue;
-		}
+	let mut remainder = font_string.trim_start();
+	let mut font_size: Option<f32> = None;
+	let mut is_after_oblique = false;
+	while !remainder.is_empty() {
+		let token_end = remainder.find(char::is_whitespace).unwrap_or(remainder.len());
+		let token = &remainder[..token_end];
 		let lowercase_token = token.to_lowercase();
-		if lowercase_token == "bold" || lowercase_token == "bolder" {
-			font_weight = 700;
-			continue;
-		}
-		if lowercase_token == "lighter" {
-			font_weight = 100;
-			continue;
-		}
-		if lowercase_token == "italic" || lowercase_token == "oblique" {
-			is_italic = true;
-			continue;
-		}
-		if let Ok(parsed_weight) = lowercase_token.parse::<u32>() {
-			if (1..=1000).contains(&parsed_weight) {
-				font_weight = parsed_weight as u16;
+		// 크기. ("16px", "16px/1.5" 처럼 줄높이가 붙어 와도 된다)
+		let size_text = lowercase_token.split('/').next().unwrap_or("");
+		if let Some(parsed_font_size) = parse_css_font_size(size_text) {
+			font_size = Some(parsed_font_size);
+			remainder = remainder[size_text.len()..].trim_start();
+			// 줄높이. ("/1.5", "/ 20px")
+			if let Some(line_height_text) = remainder.strip_prefix('/') {
+				let line_height_text = line_height_text.trim_start();
+				let line_height_end = line_height_text.find(char::is_whitespace).unwrap_or(line_height_text.len());
+				if line_height_end == 0 {
+					return None;
+				}
+				remainder = line_height_text[line_height_end..].trim_start();
 			}
+			break;
+		}
+		// oblique 뒤의 각도. ("oblique 10deg")
+		let is_angle = is_after_oblique && ["deg", "grad", "rad", "turn"].iter().any(|unit| lowercase_token.strip_suffix(unit).map(|number_text| number_text.parse::<f32>().is_ok()).unwrap_or(false));
+		is_after_oblique = false;
+		if is_angle {
+			remainder = remainder[token_end..].trim_start();
 			continue;
 		}
-		if let Some(size_text) = lowercase_token.strip_suffix("px") {
-			if let Ok(parsed_font_size) = size_text.parse::<f32>() {
-				font_size = parsed_font_size;
-				has_found_size = true;
+		match lowercase_token.as_str() {
+			"normal" | "small-caps" | "ultra-condensed" | "extra-condensed" | "condensed" | "semi-condensed" | "semi-expanded" | "expanded" | "extra-expanded" | "ultra-expanded" => {}
+			"italic" => {
+				is_italic = true;
 			}
-			continue;
+			"oblique" => {
+				is_italic = true;
+				is_after_oblique = true;
+			}
+			"bold" | "bolder" => {
+				font_weight = 700;
+			}
+			"lighter" => {
+				font_weight = 100;
+			}
+			_ => {
+				if let Ok(parsed_weight) = lowercase_token.parse::<f32>() {
+					if !(1.0..=1000.0).contains(&parsed_weight) {
+						return None;
+					}
+					font_weight = parsed_weight.round() as u16;
+				}
+				else {
+					return None;
+				}
+			}
 		}
+		remainder = remainder[token_end..].trim_start();
 	}
-	let family_list_text = family_name_parts.join(" ");
-	let first_family_text = family_list_text.split(',').next().unwrap_or("");
-	let family_name = first_family_text.trim().trim_matches(|character| character == '"' || character == '\'').to_string();
-	FontDescription {
+	let font_size = font_size?;
+	let family_name_list = parse_css_family_list(remainder)?;
+	Some(FontDescription {
 		font_size,
 		font_weight,
 		is_bold: font_weight >= textshaping::BOLD_WEIGHT_THRESHOLD,
 		is_italic,
-		family_name,
+		family_name: family_name_list[0].clone(),
+		family_name_list,
+	})
+}
+
+//==============================================================================
+// CSS 글자 크기 하나 읽기. (픽셀, 크기가 아니거나 음수면 None. 상대 크기는 10px 에 댄다)
+//==============================================================================
+fn parse_css_font_size(size_text: &str) -> Option<f32> {
+	const BASE_FONT_SIZE: f32 = 10.0;
+	let named_size = match size_text {
+		"xx-small" => Some(9.0),
+		"x-small" => Some(10.0),
+		"small" => Some(13.0),
+		"medium" => Some(16.0),
+		"large" => Some(18.0),
+		"x-large" => Some(24.0),
+		"xx-large" => Some(32.0),
+		"xxx-large" => Some(48.0),
+		"larger" => Some(BASE_FONT_SIZE * 1.2),
+		"smaller" => Some(BASE_FONT_SIZE / 1.2),
+		_ => None,
+	};
+	if named_size.is_some() {
+		return named_size;
 	}
+	// 단위와 1 단위의 픽셀. (CSS 절대 길이: 1in = 96px = 2.54cm = 72pt = 6pc, 1q = 0.25mm)
+	let unit_list: [(&str, f32); 10] = [("px", 1.0), ("pt", 96.0 / 72.0), ("pc", 16.0), ("in", 96.0), ("cm", 96.0 / 2.54), ("mm", 96.0 / 25.4), ("q", 96.0 / 101.6), ("rem", BASE_FONT_SIZE), ("em", BASE_FONT_SIZE), ("%", BASE_FONT_SIZE / 100.0)];
+	for (unit, pixel_per_unit) in unit_list {
+		if let Some(number_text) = size_text.strip_suffix(unit) {
+			// "rem" 이 "em" 보다 먼저라 "2rem" 을 "2r" + "em" 으로 읽지 않는다.
+			let number = number_text.parse::<f32>().ok()?;
+			if !number.is_finite() || number < 0.0 || number_text.starts_with('+') {
+				return None;
+			}
+			return Some(number * pixel_per_unit);
+		}
+	}
+	None
+}
+
+//==============================================================================
+// CSS 글꼴 이름 목록 읽기. ("'A B', C D, sans-serif" → ["A B", "C D", "sans-serif"], 비었거나 틀리면 None)
+//==============================================================================
+fn parse_css_family_list(family_list_text: &str) -> Option<Vec<String>> {
+	let mut family_name_list: Vec<String> = Vec::new();
+	let mut characters = family_list_text.chars().peekable();
+	loop {
+		while characters.peek().map(|character| character.is_whitespace()).unwrap_or(false) {
+			characters.next();
+		}
+		let family_name = match characters.peek().copied() {
+			Some(quote) if quote == '"' || quote == '\'' => {
+				characters.next();
+				let mut quoted_name = String::new();
+				loop {
+					match characters.next() {
+						Some(character) if character == quote => {
+							break;
+						}
+						Some(character) => {
+							quoted_name.push(character);
+						}
+						None => {
+							return None;
+						}
+					}
+				}
+				while characters.peek().map(|character| character.is_whitespace()).unwrap_or(false) {
+					characters.next();
+				}
+				if !matches!(characters.peek(), None | Some(',')) {
+					return None;
+				}
+				quoted_name
+			}
+			_ => {
+				let mut unquoted_text = String::new();
+				while let Some(character) = characters.peek().copied() {
+					if character == ',' {
+						break;
+					}
+					if character == '"' || character == '\'' {
+						return None;
+					}
+					unquoted_text.push(character);
+					characters.next();
+				}
+				let word_list: Vec<&str> = unquoted_text.split_whitespace().collect();
+				if word_list.is_empty() {
+					return None;
+				}
+				word_list.join(" ")
+			}
+		};
+		family_name_list.push(family_name);
+		match characters.next() {
+			Some(',') => {
+				continue;
+			}
+			_ => {
+				break;
+			}
+		}
+	}
+	Some(family_name_list)
 }
 
 //==============================================================================
@@ -1656,6 +1806,48 @@ mod tests {
 		assert!(!weighted_description.is_bold);
 		assert_eq!(weighted_description.family_name, "GameUI");
 		assert!(!parse_font_string("20px default").is_italic);
+	}
+
+	//==============================================================================
+	// 폰트 문자열: CSS 단위와 이름 크기, 줄높이, 이름 목록, 틀린 문자열. (크롬 Canvas2D 의 font 가 돌려준 값과 대었다)
+	//==============================================================================
+	#[test]
+	fn parse_font_string_reads_css_units_and_family_list() {
+		let read_size = |font_string: &str| -> f32 {
+			parse_font_string(font_string).font_size
+		};
+		assert_eq!(read_size("12pt a"), 16.0);
+		assert_eq!(read_size("2em a"), 20.0);
+		assert_eq!(read_size("2rem a"), 20.0);
+		assert_eq!(read_size("150% a"), 15.0);
+		assert_eq!(read_size("medium a"), 16.0);
+		assert_eq!(read_size("x-large a"), 24.0);
+		assert_eq!(read_size("xx-small a"), 9.0);
+		assert_eq!(read_size("larger a"), 12.0);
+		assert!((read_size("smaller a") - 8.33333).abs() < 0.001);
+		assert_eq!(read_size("1in a"), 96.0);
+		assert!((read_size("1cm a") - 37.7953).abs() < 0.001);
+		assert!((read_size("10q a") - 9.44882).abs() < 0.001);
+		assert_eq!(read_size("1pc a"), 16.0);
+		assert_eq!(read_size("16.5px a"), 16.5);
+		assert_eq!(read_size("16PX A"), 16.0);
+		let line_height_description = parse_font_string("bold 16px/20px a, b");
+		assert_eq!(line_height_description.font_size, 16.0);
+		assert_eq!(line_height_description.font_weight, 700);
+		assert_eq!(line_height_description.family_name_list, vec!["a", "b"]);
+		assert_eq!(parse_font_string("16px / 1.5 a").family_name, "a");
+		let list_description = parse_font_string("500 16px 'A B', \"C\", sans-serif");
+		assert_eq!(list_description.family_name_list, vec!["A B", "C", "sans-serif"]);
+		assert_eq!(parse_font_string("italic 16px a  b c").family_name, "a b c");
+		let keyword_description = parse_font_string("italic small-caps bold condensed 16px a");
+		assert!(keyword_description.is_italic && keyword_description.font_weight == 700);
+		assert!(parse_font_string("oblique 10deg 16px a").is_italic);
+		assert_eq!(parse_font_string("lighter 16px a").font_weight, 100);
+		for invalid_font_string in ["16px", "-5px a", "bold a 16px", "x 16px a", "16px 'a"] {
+			let invalid_description = parse_font_string(invalid_font_string);
+			assert_eq!(invalid_description.font_size, 10.0, "{}", invalid_font_string);
+			assert_eq!(invalid_description.family_name, "sans-serif", "{}", invalid_font_string);
+		}
 	}
 
 	//==============================================================================

@@ -220,7 +220,7 @@ pub fn rasterize_piece(font_description: &FontDescription, pixel_size: f32, text
 
 //==============================================================================
 // CSS 폰트 문자열 만들기. ("italic bold 32px "이름", 시스템 글꼴 목록")
-// - 이름이 비었거나 "default" 면 시스템 글꼴 목록만 쓴다. 이름에 쉼표가 있으면 이미 목록이라 그대로 앞에 둔다.
+// - 이름 목록을 차례로 앞에 두고 시스템 글꼴 목록을 뒤에 붙인다. 비었거나 "default" 인 이름은 빼고, 일반 글꼴 이름(sans-serif 등)은 따옴표 없이 둔다.
 //==============================================================================
 fn build_css_font_string(font_description: &FontDescription, bake_scale: f32) -> String {
 	let style_text = if font_description.is_italic {
@@ -236,17 +236,29 @@ fn build_css_font_string(font_description: &FontDescription, bake_scale: f32) ->
 		String::new()
 	};
 	let pixel_size = font_description.font_size * bake_scale;
-	let family_name = font_description.family_name.trim();
-	let family_list = if family_name.is_empty() || family_name.eq_ignore_ascii_case("default") {
-		SYSTEM_FONT_STRING.to_string()
+	let mut family_text_list: Vec<String> = Vec::new();
+	for family_name in &font_description.family_name_list {
+		let family_name = family_name.trim();
+		if family_name.is_empty() || family_name.eq_ignore_ascii_case("default") {
+			continue;
+		}
+		if is_generic_family_name(family_name) {
+			family_text_list.push(family_name.to_string());
+		}
+		else {
+			family_text_list.push(format!("\"{}\"", family_name.replace('"', "")));
+		}
 	}
-	else if family_name.contains(',') {
-		format!("{}, {}", family_name, SYSTEM_FONT_STRING)
-	}
-	else {
-		format!("\"{}\", {}", family_name.replace('"', ""), SYSTEM_FONT_STRING)
-	};
-	format!("{}{}{}px {}", style_text, weight_text, pixel_size, family_list)
+	family_text_list.push(SYSTEM_FONT_STRING.to_string());
+	format!("{}{}{}px {}", style_text, weight_text, pixel_size, family_text_list.join(", "))
+}
+
+//==============================================================================
+// CSS 일반 글꼴 이름인지. (따옴표로 싸면 그 이름의 글꼴을 찾으므로 그대로 둔다)
+//==============================================================================
+fn is_generic_family_name(family_name: &str) -> bool {
+	let lowercase_family_name = family_name.to_lowercase();
+	matches!(lowercase_family_name.as_str(), "serif" | "sans-serif" | "monospace" | "cursive" | "fantasy" | "system-ui" | "ui-serif" | "ui-sans-serif" | "ui-monospace" | "ui-rounded" | "math" | "emoji" | "fangsong" | "-apple-system" | "blinkmacsystemfont")
 }
 
 //==============================================================================
