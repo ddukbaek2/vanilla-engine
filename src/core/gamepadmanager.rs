@@ -19,7 +19,13 @@
 //   - gilrs 는 처음 갱신할 때 만든다. (갱신하지 않는 엔진과 시험에서는 장치를 열지 않는다)
 //   - 더한 것: is_button_just_pressed / is_button_just_released (갱신 사이의 눌림 변화), set_log_enabled (로그 켜고 끄기),
 //     update_all_gamepads_with_list (gilrs 없이 목록을 넣는 길. 시험이나 다른 입력원)
-//   - 진동, 배터리 정보는 원본에 없어 옮기지 않는다.
+//   - 배터리 정보는 원본에 없어 옮기지 않는다.
+//   - 단추와 축이 바뀔 때마다 찍는 로그는 원본처럼 set_input_log_enabled 로 켜고, 기본은 끔이다. set_log_enabled 는 연결과 해제를 포함한 모든 로그의 큰 스위치다.
+//   - GamepadKind, read_gamepad_kind: 패드 이름으로 종류(엑스박스, 플레이스테이션, 닌텐도, 그 밖)를 가른다. get_active_gamepad_id 는 마지막 갱신에 단추를 누르거나 축을 크게 기울인 패드다.
+//   - vibrate(strong_magnitude, weak_magnitude, seconds): 연결된 패드를 모두 떤다.
+//     데스크탑은 gilrs force feedback(리눅스 evdev, 윈도우 XInput 과 Windows.Gaming.Input)으로 떨고, gilrs 가 진동을 대지 않는 macOS 는 아무것도 하지 않는다.
+//     그래서 gilrs 를 진동을 켠 채 만든다. (데스크탑에서 gilrs 의 진동 스레드 하나가 돈다) 웹은 원본처럼 navigator.getGamepads() 의 vibrationActuator 에 dual-rumble 을 건다.
+//     첫 갱신(tick) 전에 부르면 gilrs 가 아직 없어 데스크탑에서는 떨지 않는다.
 //==============================================================================
 use gilrs::{Axis, Button, GilrsBuilder};
 use std::collections::HashMap;
@@ -126,6 +132,44 @@ impl GamepadButtonCode {
 }
 
 //==============================================================================
+// 게임패드 종류. (단추 안내를 그 패드의 표기로 보일 때 쓴다)
+//==============================================================================
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum GamepadKind {
+	Xbox,
+	PlayStation,
+	Nintendo,
+	Other,
+}
+
+// 패드 이름(Gamepad.id)에 이것이 있으면 그 종류다. (소문자, 브라우저와 데스크탑 id 의 USB 제조사 번호와 흔한 이름)
+const PLAYSTATION_GAMEPAD_ID_PARTS: [&str; 5] = ["054c", "playstation", "dualshock", "dualsense", "sony"];
+const NINTENDO_GAMEPAD_ID_PARTS: [&str; 4] = ["057e", "nintendo", "joy-con", "pro controller"];
+const XBOX_GAMEPAD_ID_PARTS: [&str; 4] = ["045e", "xbox", "xinput", "microsoft"];
+// 축이 이만큼 넘게 기울면 그 패드를 쓴 것으로 본다. (가운데의 떨림으로 마지막 장치가 바뀌지 않게)
+const GAMEPAD_ACTIVE_AXIS_THRESHOLD: f64 = 0.5;
+
+//==============================================================================
+// 패드 이름으로 종류 가르기. (플레이스테이션 054c, 닌텐도 057e, 엑스박스 045e 와 이름, 모르면 Other)
+//==============================================================================
+pub fn read_gamepad_kind(gamepad_id: &str) -> GamepadKind {
+	let lower_case_id = gamepad_id.to_lowercase();
+	let kind_part_list: [(GamepadKind, &[&str]); 3] = [
+		(GamepadKind::PlayStation, &PLAYSTATION_GAMEPAD_ID_PARTS),
+		(GamepadKind::Nintendo, &NINTENDO_GAMEPAD_ID_PARTS),
+		(GamepadKind::Xbox, &XBOX_GAMEPAD_ID_PARTS),
+	];
+	for (gamepad_kind, id_parts) in kind_part_list.iter() {
+		for id_part in id_parts.iter() {
+			if lower_case_id.contains(id_part) {
+				return *gamepad_kind;
+			}
+		}
+	}
+	GamepadKind::Other
+}
+
+//==============================================================================
 // 입력 종류. (원본 콜백의 input_type 문자열 "button" / "value" / "axis")
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -221,6 +265,10 @@ pub struct GamepadManager {
 	is_gamepad_reader_creation_tried: bool,
 	// 로그를 내는지.
 	is_log_enabled: bool,
+	// 단추와 축이 바뀔 때마다 로그를 내는지.
+	is_input_log_enabled: bool,
+	// 마지막 갱신에 단추를 누르거나 축을 크게 기울인 패드의 이름.
+	active_gamepad_id: Option<String>,
 }
 
 impl GamepadManager {
@@ -236,6 +284,8 @@ impl GamepadManager {
 			gamepad_reader: None,
 			is_gamepad_reader_creation_tried: false,
 			is_log_enabled: true,
+			is_input_log_enabled: false,
+			active_gamepad_id: None,
 		}
 	}
 
@@ -303,6 +353,62 @@ impl GamepadManager {
 	//==============================================================================
 	pub fn set_log_enabled(&mut self, is_enabled: bool) {
 		self.is_log_enabled = is_enabled;
+	}
+
+	//==============================================================================
+	// 단추와 축이 바뀔 때마다 로그를 낼지. (기본은 끔, set_log_enabled 가 꺼져 있으면 켜도 내지 않는다)
+	//==============================================================================
+	pub fn set_input_log_enabled(&mut self, is_enabled: bool) {
+		self.is_input_log_enabled = is_enabled;
+	}
+
+	//==============================================================================
+	// 단추와 축이 바뀔 때마다 로그를 내는지.
+	//==============================================================================
+	pub fn is_input_log_enabled(&self) -> bool {
+		self.is_input_log_enabled
+	}
+
+	//==============================================================================
+	// 마지막 갱신에 단추를 누르거나 축을 0.5 넘게 기울인 패드의 이름. (없으면 None, 마지막으로 쓴 장치를 가릴 때)
+	//==============================================================================
+	pub fn get_active_gamepad_id(&self) -> Option<&str> {
+		self.active_gamepad_id.as_deref()
+	}
+
+	//==============================================================================
+	// 연결된 패드를 모두 떨기. (세기는 0 ~ 1, 무거운 모터와 가벼운 모터, 초)
+	// - 데스크탑은 gilrs force feedback, 웹은 Gamepad.vibrationActuator 의 dual-rumble. 진동을 대지 않는 패드와 플랫폼(macOS)은 건너뛴다.
+	//==============================================================================
+	pub fn vibrate(&mut self, strong_magnitude: f32, weak_magnitude: f32, seconds: f32) {
+		let clamped_strong_magnitude = if strong_magnitude.is_finite() {
+			strong_magnitude.clamp(0.0, 1.0)
+		}
+		else {
+			0.0
+		};
+		let clamped_weak_magnitude = if weak_magnitude.is_finite() {
+			weak_magnitude.clamp(0.0, 1.0)
+		}
+		else {
+			0.0
+		};
+		let duration_milliseconds = if seconds.is_finite() {
+			(seconds.max(0.0) * 1000.0).round() as u32
+		}
+		else {
+			0
+		};
+		#[cfg(target_arch = "wasm32")]
+		{
+			vibrate_browser_gamepads(clamped_strong_magnitude, clamped_weak_magnitude, duration_milliseconds);
+		}
+		#[cfg(not(target_arch = "wasm32"))]
+		{
+			if let Some(gamepad_reader) = self.gamepad_reader.as_mut() {
+				gamepad_reader.vibrate(clamped_strong_magnitude, clamped_weak_magnitude, duration_milliseconds);
+			}
+		}
 	}
 
 	//==============================================================================
@@ -377,7 +483,8 @@ impl GamepadManager {
 			self.connected_gamepad_states.remove(&hardware_index);
 		}
 
-		let is_log_enabled = self.is_log_enabled;
+		let is_input_log_enabled = self.is_log_enabled && self.is_input_log_enabled;
+		let mut active_gamepad_id: Option<String> = None;
 		for hardware_index in self.connected_gamepad_indices.iter() {
 			let hardware_index = *hardware_index;
 			let gamepad = match gamepad_list.get(hardware_index) {
@@ -414,9 +521,12 @@ impl GamepadManager {
 				if last_button_state.pressed != current_button.pressed {
 					last_button_state.pressed = current_button.pressed;
 					let input_text = get_button_input_text(button_index);
+					if current_button.pressed {
+						active_gamepad_id = Some(gamepad.id.clone());
+					}
 
 					// 로그 출력.
-					if is_log_enabled {
+					if is_input_log_enabled {
 						let pressed_text = if current_button.pressed {
 							"Pressed"
 						}
@@ -448,7 +558,7 @@ impl GamepadManager {
 						let input_text = get_button_input_text(button_index);
 
 						// 로그 출력.
-						if is_log_enabled {
+						if is_input_log_enabled {
 							write_log(&format!("[GamepadManager] Pad {} {} {} Value: {}", hardware_index, input_text, button_index, current_value));
 						}
 
@@ -474,10 +584,15 @@ impl GamepadManager {
 
 				// 미세한 떨림(Deadzone) 고려하여 0.01 넘는 변화만 감지.
 				if (*last_axis_value - current_axis_value).abs() > AXIS_CHANGE_THRESHOLD {
+					let is_last_axis_beyond = last_axis_value.abs() >= GAMEPAD_ACTIVE_AXIS_THRESHOLD;
+					let is_current_axis_beyond = current_axis_value.abs() >= GAMEPAD_ACTIVE_AXIS_THRESHOLD;
+					if is_current_axis_beyond && !is_last_axis_beyond {
+						active_gamepad_id = Some(gamepad.id.clone());
+					}
 					*last_axis_value = current_axis_value;
 
 					// 로그 출력.
-					if is_log_enabled {
+					if is_input_log_enabled {
 						write_log(&format!("[GamepadManager] Pad {} Axis {} Value: {}", hardware_index, axis_index, current_axis_value));
 					}
 
@@ -490,6 +605,7 @@ impl GamepadManager {
 		}
 
 		self.gamepad_list = gamepad_list;
+		self.active_gamepad_id = active_gamepad_id;
 	}
 
 	//==============================================================================
@@ -667,6 +783,76 @@ fn write_log(message: &str) {
 }
 
 //==============================================================================
+// 브라우저 패드 떨기. (원본처럼 navigator.getGamepads() 의 vibrationActuator.playEffect("dual-rumble"), 없으면 건너뛴다)
+//==============================================================================
+#[cfg(target_arch = "wasm32")]
+fn vibrate_browser_gamepads(strong_magnitude: f32, weak_magnitude: f32, duration_milliseconds: u32) {
+	use wasm_bindgen::{JsCast, JsValue};
+	let window = match web_sys::window() {
+		Some(window) => {
+			window
+		}
+		None => {
+			return;
+		}
+	};
+	let navigator = window.navigator();
+	let get_gamepads_function: js_sys::Function = match js_sys::Reflect::get(&navigator, &JsValue::from_str("getGamepads")).ok().and_then(|value| value.dyn_into().ok()) {
+		Some(get_gamepads_function) => {
+			get_gamepads_function
+		}
+		None => {
+			return;
+		}
+	};
+	let gamepad_array: js_sys::Array = match get_gamepads_function.call0(&navigator).ok().and_then(|value| js_sys::Array::try_from(value).ok()) {
+		Some(gamepad_array) => {
+			gamepad_array
+		}
+		None => {
+			return;
+		}
+	};
+	let effect_parameters = js_sys::Object::new();
+	let _ = js_sys::Reflect::set(&effect_parameters, &JsValue::from_str("duration"), &JsValue::from_f64(duration_milliseconds as f64));
+	let _ = js_sys::Reflect::set(&effect_parameters, &JsValue::from_str("strongMagnitude"), &JsValue::from_f64(strong_magnitude as f64));
+	let _ = js_sys::Reflect::set(&effect_parameters, &JsValue::from_str("weakMagnitude"), &JsValue::from_f64(weak_magnitude as f64));
+	for gamepad in gamepad_array.iter() {
+		if gamepad.is_null() || gamepad.is_undefined() {
+			continue;
+		}
+		let vibration_actuator = match js_sys::Reflect::get(&gamepad, &JsValue::from_str("vibrationActuator")) {
+			Ok(vibration_actuator) => {
+				vibration_actuator
+			}
+			Err(_) => {
+				continue;
+			}
+		};
+		if vibration_actuator.is_null() || vibration_actuator.is_undefined() {
+			continue;
+		}
+		let play_effect_function: js_sys::Function = match js_sys::Reflect::get(&vibration_actuator, &JsValue::from_str("playEffect")).ok().and_then(|value| value.dyn_into().ok()) {
+			Some(play_effect_function) => {
+				play_effect_function
+			}
+			None => {
+				continue;
+			}
+		};
+		// 앞 진동이 끝나기 전에 부르면 앞 약속이 거절된다. 이어서 떠는 것이라 흘린다.
+		if let Ok(effect_promise) = play_effect_function.call2(&vibration_actuator, &JsValue::from_str("dual-rumble"), &effect_parameters) {
+			if let Ok(effect_promise) = effect_promise.dyn_into::<js_sys::Promise>() {
+				let ignore_rejection: wasm_bindgen::closure::Closure<dyn FnMut(JsValue)> = wasm_bindgen::closure::Closure::new(|_: JsValue| {
+				});
+				let _ = effect_promise.catch(&ignore_rejection);
+				ignore_rejection.forget();
+			}
+		}
+	}
+}
+
+//==============================================================================
 // 패드 하나에서 버튼과 축을 읽는 것. (gilrs 패드, 시험용 가짜 패드)
 //==============================================================================
 trait GamepadElementReader {
@@ -812,21 +998,24 @@ struct GamepadReadResult {
 //==============================================================================
 struct GamepadReader {
 	gilrs: gilrs::Gilrs,
+	// 떨고 있는 진동과 끝나는 때. (gilrs 는 효과 손잡이를 놓으면 바로 멈추므로 끝날 때까지 든다)
+	#[cfg(not(target_arch = "wasm32"))]
+	vibration_effect_list: Vec<(gilrs::ff::Effect, web_time::Instant)>,
 }
 
 impl GamepadReader {
 	//==============================================================================
-	// 생성. (기본 필터와 진동은 끈다. 게임패드를 모르는 플랫폼이면 패드가 없는 것처럼 돈다)
+	// 생성. (기본 필터는 끄고 진동은 켠다. 게임패드를 모르는 플랫폼이면 패드가 없는 것처럼 돈다)
 	//==============================================================================
 	fn create() -> Option<GamepadReader> {
-		let gilrs_builder = GilrsBuilder::new().with_default_filters(false).with_force_feedback(false);
+		let gilrs_builder = GilrsBuilder::new().with_default_filters(false).with_force_feedback(true);
 		match gilrs_builder.build() {
 			Ok(gilrs) => {
-				Some(GamepadReader { gilrs })
+				Some(GamepadReader::from_gilrs(gilrs))
 			}
 			Err(gilrs::Error::NotImplemented(gilrs)) => {
 				write_log("[GamepadManager] 이 플랫폼은 게임패드를 지원하지 않습니다.");
-				Some(GamepadReader { gilrs })
+				Some(GamepadReader::from_gilrs(gilrs))
 			}
 			Err(error) => {
 				write_log(&format!("[GamepadManager] gilrs 를 만들지 못했습니다: {}", error));
@@ -836,9 +1025,64 @@ impl GamepadReader {
 	}
 
 	//==============================================================================
-	// 읽기. (이벤트를 비워야 gilrs 의 상태가 갱신된다. 웹은 이때 navigator.getGamepads() 를 읽는다)
+	// gilrs 로 만들기.
+	//==============================================================================
+	fn from_gilrs(gilrs: gilrs::Gilrs) -> GamepadReader {
+		GamepadReader {
+			gilrs,
+			#[cfg(not(target_arch = "wasm32"))]
+			vibration_effect_list: Vec::new(),
+		}
+	}
+
+	//==============================================================================
+	// 진동을 대는 연결된 패드를 모두 떨기. (gilrs force feedback, 무거운 모터 Strong 과 가벼운 모터 Weak)
+	//==============================================================================
+	#[cfg(not(target_arch = "wasm32"))]
+	fn vibrate(&mut self, strong_magnitude: f32, weak_magnitude: f32, duration_milliseconds: u32) {
+		use gilrs::ff::{BaseEffect, BaseEffectType, EffectBuilder, Repeat, Replay, Ticks};
+		let gamepad_id_list: Vec<gilrs::GamepadId> = self.gilrs.gamepads().filter(|(_, gilrs_gamepad)| gilrs_gamepad.is_ff_supported()).map(|(gamepad_id, _)| gamepad_id).collect();
+		if gamepad_id_list.is_empty() || duration_milliseconds == 0 {
+			return;
+		}
+		let play_ticks = Ticks::from_ms(duration_milliseconds);
+		let scheduling = Replay {
+			play_for: play_ticks,
+			..Default::default()
+		};
+		let strong_effect = BaseEffect {
+			kind: BaseEffectType::Strong { magnitude: (strong_magnitude * u16::MAX as f32) as u16 },
+			scheduling,
+			..Default::default()
+		};
+		let weak_effect = BaseEffect {
+			kind: BaseEffectType::Weak { magnitude: (weak_magnitude * u16::MAX as f32) as u16 },
+			scheduling,
+			..Default::default()
+		};
+		let effect_result = EffectBuilder::new().add_effect(strong_effect).add_effect(weak_effect).gamepads(&gamepad_id_list).repeat(Repeat::For(play_ticks)).finish(&mut self.gilrs);
+		match effect_result {
+			Ok(effect) => {
+				if effect.play().is_ok() {
+					let end_instant = web_time::Instant::now() + std::time::Duration::from_millis(duration_milliseconds as u64);
+					self.vibration_effect_list.push((effect, end_instant));
+				}
+			}
+			Err(error) => {
+				write_log(&format!("[GamepadManager] 진동을 만들지 못했습니다: {}", error));
+			}
+		}
+	}
+
+	//==============================================================================
+	// 읽기. (이벤트를 비워야 gilrs 의 상태가 갱신된다. 웹은 이때 navigator.getGamepads() 를 읽는다, 끝난 진동은 놓는다)
 	//==============================================================================
 	fn read_gamepads(&mut self) -> GamepadReadResult {
+		#[cfg(not(target_arch = "wasm32"))]
+		{
+			let now = web_time::Instant::now();
+			self.vibration_effect_list.retain(|(_, end_instant)| *end_instant > now);
+		}
 		let mut read_result = GamepadReadResult::default();
 		while let Some(event) = self.gilrs.next_event() {
 			let hardware_index = usize::from(event.id);
@@ -1193,6 +1437,41 @@ mod tests {
 		assert_eq!(gamepad_manager.get_connected_gamepad_count(), 1);
 		gamepad_manager.disconnect(&gamepad);
 		assert_eq!(gamepad_manager.get_connected_gamepad_count(), 0);
+	}
+
+	//==============================================================================
+	// 패드 이름으로 종류를 가른다.
+	//==============================================================================
+	#[test]
+	fn gamepad_kind_from_identifier() {
+		assert_eq!(read_gamepad_kind("DualSense Wireless Controller (STANDARD GAMEPAD Vendor: 054c Product: 0ce6)"), GamepadKind::PlayStation);
+		assert_eq!(read_gamepad_kind("Xbox 360 Controller (XInput STANDARD GAMEPAD)"), GamepadKind::Xbox);
+		assert_eq!(read_gamepad_kind("045e-02fd-Xbox Wireless Controller"), GamepadKind::Xbox);
+		assert_eq!(read_gamepad_kind("Pro Controller (STANDARD GAMEPAD Vendor: 057e Product: 2009)"), GamepadKind::Nintendo);
+		assert_eq!(read_gamepad_kind("Steam Virtual Gamepad"), GamepadKind::Other);
+	}
+
+	//==============================================================================
+	// 단추를 누르거나 축을 0.5 넘게 기울인 갱신에만 그 패드가 활동한 패드다.
+	//==============================================================================
+	#[test]
+	fn active_gamepad_identifier() {
+		let mut gamepad_manager = create_test_manager();
+		let mut gamepad = Gamepad::create(0, "Wireless Controller 054c");
+		gamepad_manager.update_all_gamepads_with_list(vec![Some(gamepad.clone())]);
+		assert_eq!(gamepad_manager.get_active_gamepad_id(), None);
+		gamepad.axes[GamepadAnalogStickCode::LEFT_X] = 0.3;
+		gamepad_manager.update_all_gamepads_with_list(vec![Some(gamepad.clone())]);
+		assert_eq!(gamepad_manager.get_active_gamepad_id(), None);
+		gamepad.axes[GamepadAnalogStickCode::LEFT_X] = 0.7;
+		gamepad_manager.update_all_gamepads_with_list(vec![Some(gamepad.clone())]);
+		assert_eq!(gamepad_manager.get_active_gamepad_id(), Some("Wireless Controller 054c"));
+		gamepad_manager.update_all_gamepads_with_list(vec![Some(gamepad.clone())]);
+		assert_eq!(gamepad_manager.get_active_gamepad_id(), None);
+		gamepad.buttons[GamepadButtonCode::A_CROSS] = GamepadButton { pressed: true, value: 1.0 };
+		gamepad_manager.update_all_gamepads_with_list(vec![Some(gamepad.clone())]);
+		assert_eq!(gamepad_manager.get_active_gamepad_id(), Some("Wireless Controller 054c"));
+		assert!(!gamepad_manager.is_input_log_enabled());
 	}
 
 	//==============================================================================
