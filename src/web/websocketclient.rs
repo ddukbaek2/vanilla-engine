@@ -18,6 +18,7 @@
 //   - get_web_socket 은 ewebsock 의 송신기(WsSender)다.
 //   - 수신 콜백은 Rc<RefCell> 에 담는다. get_receive_event 는 그 Rc 를 돌려주고, 부르는 쪽은 borrow_mut 로 빌려 부른다.
 //   - 데스크탑의 wss:// 는 ewebsock 의 "tls" 기능(tungstenite 의 rustls 와 webpki 뿌리 인증서)으로 연다. rustls 의 암호 공급자는 ring 이고 처음 붙을 때 정한다.
+//     엔진의 tls 기능(기본으로 켜짐)일 때만이다. 끄면 데스크탑은 ws:// 만 열린다.
 //   - 바이너리 메시지도 UTF-8 JSON 이면 받는다. (원본은 Blob 을 JSON.parse 하다 실패한다)
 //==============================================================================
 use ewebsock::{WsEvent, WsMessage, WsReceiver, WsSender};
@@ -68,7 +69,7 @@ impl WebSocketClient {
 			return;
 		}
 		// 데스크탑 wss:// 의 암호 공급자. (이미 정해져 있으면 그대로 둔다)
-		#[cfg(not(target_arch = "wasm32"))]
+		#[cfg(all(not(target_arch = "wasm32"), feature = "tls"))]
 		let _ = rustls::crypto::ring::default_provider().install_default();
 		match ewebsock::connect(url, ewebsock::Options::default()) {
 			Ok((web_socket, web_socket_receiver)) => {
