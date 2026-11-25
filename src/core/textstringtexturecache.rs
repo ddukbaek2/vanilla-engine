@@ -15,7 +15,8 @@
 //   대체 글꼴 후보 파일은 쓸 때 읽는다. 이모지 표시 글자는 색 글리프 표가 있는 후보를, 그 밖의 글자는 색 글리프 표가 없는 후보를 먼저 읽는다. (표 목록만 먼저 엿본다)
 // - 글꼴 얼굴을 새로 올리면 그 이름을 쓰는 폰트 문자열로 구웠고 그 얼굴의 글자 범위에 든 글자가 있는 문자열만 버린다. (원본 invalidateFontFaces)
 //   기본 폰트와 대체 폰트를 바꾸면 모두 버린다.
-// - 웹에서 글꼴 바이트가 하나도 없으면 원본처럼 브라우저 Canvas2D 로 굽고 잰다. 그래서 시스템 글꼴로 나온다. (platform/web/systemfont.rs)
+// - 웹은 원본처럼 늘 브라우저 Canvas2D 로 굽고 잰다. (platform/web/systemfont.rs) 올린 글꼴 바이트는 document.fonts 에 FontFace 로 올려 브라우저가 고르고 그린다.
+//   올린 글꼴이 받아지면(loadingdone) 프레임 시작에 구운 글을 버린다. 데스크탑은 위의 모양 짓기와 래스터로 굽는다.
 // - 글자 안티앨리어싱(set_text_antialias_enabled, 원본 setTextAntialiasEnabled): 끄면 구운 글자의 알파를 문턱값 128 로 0 과 255 로 가르고 텍스처를 NEAREST 로 뽑는다.
 //   도트 글꼴을 설계 크기의 정수 배로 그리는 프로젝트가 끈다. 원본은 모듈 전역 값이고 이미 구운 글자는 그대로 둔다.
 //   여기서는 캐시가 들고, 켜짐 여부를 키에 넣어 바꾼 다음 그리는 글자부터 바로 그 방식으로 굽는다. (rasterize_text 는 원본 ShadowText 처럼 받지 않는다)
@@ -76,7 +77,7 @@ pub fn take_unresolved_family_characters(family_name: &str) -> String {
 //==============================================================================
 // Graphic 없이 글 재기. (폰트 문자열과 글, 원본의 공용 캔버스 measureText 자리)
 // - 그릴 때와 같은 얼굴 고르기와 모양 잇기로 잰다.
-// - 글꼴 바이트가 없으면 웹은 브라우저 시스템 글꼴로 재고, 데스크탑은 None 이다. (그릴 때도 글이 나오지 않는 상태)
+// - 웹은 브라우저 Canvas2D 로 잰다. 데스크탑은 글꼴이 하나도 없으면 None 이다. (그릴 때도 글이 나오지 않는 상태)
 //==============================================================================
 pub fn measure_text_without_graphic(font_string: &str, text: &str) -> Option<TextMetrics> {
 	SHARED_MEASURE_CACHE.with(|shared_measure_cache_cell| {
@@ -308,6 +309,11 @@ pub struct TextStringTextureCache {
 	fallback_font_candidate_list: RefCell<Vec<(std::path::PathBuf, bool)>>,
 	// 데스크탑 시스템 글꼴. (기본 글꼴 사슬, 이름 찾기, 대체 글꼴)
 	system_font_state: Rc<RefCell<SystemFontState>>,
+	// 브라우저 Canvas2D 로 굽고 재는지. (웹, 원본과 같다)
+	is_browser_raster: bool,
+	// 마지막으로 본 브라우저 글꼴 바뀐 횟수. (웹, 늘었으면 구운 글을 버린다)
+	#[cfg(target_arch = "wasm32")]
+	browser_font_change_count: u64,
 	// 버릴 구운 문자열의 텍스처. (등록할 때는 GL 이 없어서 다음 굽기 때 지운다)
 	pending_deleted_texture_list: Vec<crate::core::graphic::GlTexture>,
 	// 글자 안티앨리어싱. (기본 켬)
@@ -336,6 +342,9 @@ impl TextStringTextureCache {
 			font_registration_count: Cell::new(0),
 			fallback_font_candidate_list: RefCell::new(Vec::new()),
 			system_font_state: Rc::new(RefCell::new(SystemFontState::default())),
+			is_browser_raster: cfg!(target_arch = "wasm32"),
+			#[cfg(target_arch = "wasm32")]
+			browser_font_change_count: 0,
 			pending_deleted_texture_list: Vec::new(),
 			is_text_antialias_enabled: true,
 			measure_table: RefCell::new(HashMap::new()),
@@ -350,6 +359,23 @@ impl TextStringTextureCache {
 	//==============================================================================
 	pub fn begin_frame(&mut self) {
 		self.frame_number += 1;
+		// 웹: 올린 글꼴이 바뀌거나 받아졌으면 구운 글과 잰 글을 버린다. (원본 loadingdone)
+		#[cfg(target_arch = "wasm32")]
+		{
+			let browser_font_change_count = crate::platform::web::systemfont::read_font_change_count();
+			if browser_font_change_count != self.browser_font_change_count {
+				self.browser_font_change_count = browser_font_change_count;
+				self.clear();
+				self.font_registration_count.set(self.font_registration_count.get() + 1);
+			}
+		}
+	}
+
+	//==============================================================================
+	// 브라우저 Canvas2D 로 굽고 재는지. (웹은 원본처럼 늘 참, 데스크탑은 거짓)
+	//==============================================================================
+	pub fn is_browser_raster(&self) -> bool {
+		self.is_browser_raster
 	}
 
 	//==============================================================================
@@ -545,6 +571,38 @@ impl TextStringTextureCache {
 		SHARED_MEASURE_CACHE.with(|shared_measure_cache_cell| {
 			*shared_measure_cache_cell.borrow_mut() = Some(shared_measure_cache);
 		});
+		#[cfg(target_arch = "wasm32")]
+		self.sync_browser_font_faces();
+	}
+
+	//==============================================================================
+	// 올린 글꼴 얼굴을 문서의 FontFace 로 맞추기. (웹, 이름의 얼굴은 그 이름으로, 기본 폰트는 VanillaEngineDefault, 대체 폰트는 VanillaEngineFallback1, 2 …)
+	//==============================================================================
+	#[cfg(target_arch = "wasm32")]
+	fn sync_browser_font_faces(&self) {
+		let mut request_list: Vec<(String, FontFaceDescriptors, Rc<LoadedFont>)> = Vec::new();
+		let mut family_key_list: Vec<&String> = self.font_family_table.keys().collect();
+		family_key_list.sort();
+		for family_key in family_key_list {
+			let mut face_list: Vec<&RegisteredFontFace> = self.font_family_table[family_key].iter().collect();
+			face_list.sort_by_key(|face| face.order_number);
+			for face in face_list {
+				request_list.push((family_key.clone(), face.descriptors.clone(), face.font.clone()));
+			}
+		}
+		let mut extra_family_list: Vec<String> = Vec::new();
+		if !self.default_face_list.is_empty() {
+			extra_family_list.push(String::from("VanillaEngineDefault"));
+			for face in self.default_face_list.iter() {
+				request_list.push((String::from("VanillaEngineDefault"), face.descriptors.clone(), face.font.clone()));
+			}
+		}
+		for (fallback_index, face) in self.fallback_face_list.borrow().iter().enumerate() {
+			let family_name = format!("VanillaEngineFallback{}", fallback_index + 1);
+			request_list.push((family_name.clone(), face.descriptors.clone(), face.font.clone()));
+			extra_family_list.push(family_name);
+		}
+		crate::platform::web::systemfont::sync_font_faces(&request_list, extra_family_list);
 	}
 
 	//==============================================================================
@@ -970,8 +1028,8 @@ impl TextStringTextureCache {
 	fn measure_text_uncached(&self, font_string: &str, text: &str) -> TextMetrics {
 		let font_description = parse_font_string(font_string);
 		let face_list = self.resolve_covering_face_list(text, &font_description);
-		if face_list.is_empty() {
-			// 웹: 글꼴 바이트가 없으면 브라우저 시스템 글꼴로 잰다.
+		if face_list.is_empty() || self.is_browser_raster {
+			// 웹: 원본처럼 브라우저 Canvas2D 로 잰다. (올린 글꼴은 document.fonts 의 FontFace, 없으면 시스템 글꼴)
 			#[cfg(target_arch = "wasm32")]
 			{
 				return crate::platform::web::systemfont::measure_text(&font_description, text);
@@ -1142,7 +1200,7 @@ impl TextStringTextureCache {
 
 	//==============================================================================
 	// 글의 모양만 래스터로 받기. (텍스처로 올리지 않는다, 그림자를 깐 글처럼 따로 굽는 쪽이 쓴다)
-	// - 웹에서 글꼴 바이트가 없으면 브라우저 시스템 글꼴로 받는다. 데스크탑에서 글꼴이 하나도 없으면 None.
+	// - 웹은 원본처럼 브라우저 Canvas2D 로 받는다. 데스크탑에서 글꼴이 하나도 없으면 None.
 	//==============================================================================
 	pub fn rasterize_text(&self, text: &str, font_string: &str, bake_scale: f32, padding: i32, direction: ShapingDirection) -> Option<TextRaster> {
 		if text.is_empty() {
@@ -1150,8 +1208,8 @@ impl TextStringTextureCache {
 		}
 		let font_description = parse_font_string(font_string);
 		let face_list = self.resolve_covering_face_list(text, &font_description);
-		if face_list.is_empty() {
-			// 웹: 글꼴 바이트가 없으면 브라우저 시스템 글꼴의 덮인 정도를 받는다.
+		if face_list.is_empty() || self.is_browser_raster {
+			// 웹: 원본처럼 브라우저 Canvas2D 로 그린 덮인 정도를 받는다.
 			#[cfg(target_arch = "wasm32")]
 			{
 				return rasterize_system_font_text(&font_description, text, bake_scale, padding.max(1), direction);
@@ -1176,15 +1234,15 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	// 글리프 하나 래스터. (글자 아틀라스가 쓴다, 글리프 번호는 글자로 찾는다. 웹에서 글꼴 바이트가 없으면 브라우저 시스템 글꼴로, 데스크탑에서 글꼴이 하나도 없으면 None)
+	// 글리프 하나 래스터. (글자 아틀라스가 쓴다, 글리프 번호는 글자로 찾는다. 웹은 브라우저 Canvas2D 로, 데스크탑에서 글꼴이 하나도 없으면 None)
 	// - 돌려주는 것: (래스터, 전진폭, 글꼴 위 길이, 글꼴 아래 길이) 길이 단위는 픽셀.
 	//==============================================================================
 	pub fn rasterize_character(&self, character: &str, font_string: &str) -> Option<(textshaping::GlyphRaster, f32, f32, f32)> {
 		let font_description = parse_font_string(font_string);
 		let face_list = self.resolve_covering_face_list(character, &font_description);
 		let font_size = font_description.font_size;
-		if face_list.is_empty() {
-			// 웹: 글꼴 바이트가 없으면 브라우저 시스템 글꼴로 굽는다.
+		if face_list.is_empty() || self.is_browser_raster {
+			// 웹: 원본처럼 브라우저 Canvas2D 로 굽는다.
 			#[cfg(target_arch = "wasm32")]
 			{
 				let glyph_raster = crate::platform::web::systemfont::rasterize_piece(&font_description, font_size, character, false)?;
@@ -1371,8 +1429,8 @@ impl TextStringTextureCache {
 	fn bake_entry(&self, gl: &glow::Context, text_draw_kind: TextDrawKind, text: &str, font_string: &str, line_width: f32, bake_scale: f32, direction: ShapingDirection) -> Option<TextEntry> {
 		let font_description = parse_font_string(font_string);
 		let face_list = self.resolve_covering_face_list(text, &font_description);
-		if face_list.is_empty() {
-			// 웹: 글꼴 바이트가 없으면 브라우저 시스템 글꼴로 굽는다.
+		if face_list.is_empty() || self.is_browser_raster {
+			// 웹: 원본처럼 브라우저 Canvas2D 로 굽는다.
 			#[cfg(target_arch = "wasm32")]
 			{
 				return bake_system_font_entry(gl, text_draw_kind, text, &font_description, line_width, bake_scale, self.is_text_antialias_enabled, direction);

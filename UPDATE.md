@@ -263,6 +263,8 @@
 - UIFont: 미리 받지 않은 글자도 그 글꼴로 재거나 그리면 update 가 그 글자의 조각을 받는다. (원본 브라우저는 document.fonts 에 올려 둔 FontFace 의 글자 범위에 든 글자를 캔버스가 그릴 때 그 얼굴을 받기 시작한다. 전에는 load_ui_font_text, request_ui_font_text 로 청한 글자만 받았다) 받기 전에는 원본처럼 다른 글꼴로 그리고 받으면 다시 굽는다. 글자 캐시가 지켜보는 이름으로 재거나 구운 글에서 올린 얼굴의 글자 범위에 들지 않은 글자를 모은다. (textstringtexturecache::watch_unresolved_family_characters, take_unresolved_family_characters)
 - 그림 형식: 원본 Image 는 브라우저가 푸는 형식을 모두 받는다. 데스크탑은 image 크레이트의 GIF(첫 장), BMP, ICO 를 더하고, SVG 는 resvg 로 그림 크기(width, height, 없으면 viewBox)에 그린다. (글이 있는 SVG 는 시스템 글꼴을 처음 한 번 읽는다) 웹은 애셋을 받을 때 그림 확장자(png, jpg, gif, webp, bmp, ico, svg, avif)면 원본처럼 브라우저(HTMLImageElement 의 decode)로 풀어 손잡이에 둔다. ImageAsset 과 AssetLoader 는 그 그림을 그대로 쓴다. Image::create_from_premultiplied_pixels 를 더했다
 - 새 크레이트: resvg 0.50 (데스크탑)
+- 웹 래스터를 원본처럼 브라우저 Canvas2D 로: 글꼴 바이트가 있어도 fontdue 로 굽지 않고 늘 캔버스의 fillText, strokeText, measureText 로 굽고 잰다. 올린 글꼴 바이트(FontAsset, default_font_bytes, default_font_url, UIFont 조각)는 원본 new FontFace(이름, 바이트, 서술자) 처럼 document.fonts 에 올려 브라우저가 고르고 그린다. (같은 이름 안에서 나중 얼굴이 먼저, 기본 폰트는 VanillaEngineDefault, 대체 폰트는 VanillaEngineFallback1, 2 … 이름으로 폰트 문자열 이름 뒤, 시스템 글꼴 앞에 둔다) 올린 글꼴이 받아지면(loadingdone) 프레임 시작에 구운 글을 버린다. (TextStringTextureCache.is_browser_raster)
+- 웹 ShadowText: 원본 bakeText 처럼 캔버스에 그림자(shadowColor, shadowBlur, shadowOffsetY)를 걸고 글자 색으로 fillText, 밑줄과 취소선은 fillRect 로 굽는다. 여백(2 + 번짐 올림)과 자리 셈이 원본과 같다. 웹 ShadowImage: 원본 readScaledImage, bakeImage 처럼 drawImage(imageSmoothingQuality high)로 줄이고 색은 source-in 으로 칠한 뒤 캔버스 그림자를 깐다. (데스크탑은 그대로 직접 셈한다)
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.
