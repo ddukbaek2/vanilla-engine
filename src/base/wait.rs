@@ -38,6 +38,21 @@ fn read_poll_frame_number() -> u64 {
 
 //==============================================================================
 /// 시간 기다리기 퓨처. (seconds 가 돌려준다)
+///
+/// # 예제
+/// 먼저 불러 두고 다른 일을 한 뒤 기다리기 (부른 때부터 잰다)
+/// ```rust,no_run
+/// use vanilla::{wait, Engine};
+///
+/// fn show_loading(engine: &mut Engine) {
+/// 	engine.spawn_task(move |mut engine_context| async move {
+/// 		let minimum_wait: wait::WaitSeconds = wait::seconds(2.0);
+/// 		engine_context.with(|engine| engine.set_title("Loading"));
+/// 		minimum_wait.await;
+/// 		engine_context.with(|engine| engine.set_title("Ready"));
+/// 	});
+/// }
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug)]
 pub struct WaitSeconds {
@@ -64,6 +79,21 @@ impl Future for WaitSeconds {
 
 //==============================================================================
 /// 한 프레임 기다리기 퓨처. (next_frame 이 돌려준다)
+///
+/// # 예제
+/// 다음 프레임까지 기다리고 프레임 번호 읽기
+/// ```rust,no_run
+/// use vanilla::{wait, Engine};
+///
+/// fn read_next_frame_number(engine: &mut Engine) {
+/// 	engine.spawn_task(move |mut engine_context| async move {
+/// 		let start_frame_number = engine_context.with(|engine| engine.get_frame_number());
+/// 		wait::next_frame().await;
+/// 		let next_frame_number = engine_context.with(|engine| engine.get_frame_number());
+/// 		println!("{} {}", start_frame_number, next_frame_number);
+/// 	});
+/// }
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug)]
 pub struct NextFrame {
@@ -109,6 +139,28 @@ fn convert_to_timeout_milliseconds(seconds: f32) -> u64 {
 
 //==============================================================================
 /// 일정 시간 동안 비동기 대기. (원본 Wait.seconds, 벽시계 초)
+///
+/// # 인자
+/// - `seconds`: 기다릴 시간. (벽시계 초, 시간 배율과 멈춤에 상관없다. 밀리초로 내린 뒤 음수, NaN, 무한은 0)
+///
+/// # 돌려줌
+/// 부른 때부터 그 시간이 지나고 엔진의 폴링 차례가 한 번 이상 지나야 끝나는 퓨처. (엔진 작업 안에서 await 한다)
+///
+/// # 예제
+/// 1 초마다 창 제목을 바꾸는 카운트다운
+/// ```rust,no_run
+/// use vanilla::{wait, Engine};
+///
+/// fn start_countdown(engine: &mut Engine) {
+/// 	engine.spawn_task(move |mut engine_context| async move {
+/// 		for count in (1..=3).rev() {
+/// 			engine_context.with(|engine| engine.set_title(&format!("{}", count)));
+/// 			wait::seconds(1.0).await;
+/// 		}
+/// 		engine_context.with(|engine| engine.set_title("Go"));
+/// 	});
+/// }
+/// ```
 //==============================================================================
 pub fn seconds(seconds: f32) -> WaitSeconds {
 	WaitSeconds {
@@ -119,6 +171,9 @@ pub fn seconds(seconds: f32) -> WaitSeconds {
 
 //==============================================================================
 /// 한 프레임 비동기 대기. (원본 Wait.nextFrame)
+///
+/// # 돌려줌
+/// 부른 뒤 엔진의 폴링 차례가 한 번 지나면 끝나는 퓨처. (엔진 작업 안에서 await 한다)
 //==============================================================================
 pub fn next_frame() -> NextFrame {
 	NextFrame {

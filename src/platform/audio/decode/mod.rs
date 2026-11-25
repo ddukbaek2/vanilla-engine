@@ -1,13 +1,13 @@
 //==============================================================================
-/// 소리 해석. (데스크탑, 원본이 쓰는 크롬 decodeAudioData 와 같게)
-/// - 크롬(158)은 FFmpeg 로 디먹스하고 FLAC, MP3, PCM, Vorbis 를 symphonia 로, Opus 를 libopus 로, AAC 를 FFmpeg 로 푼다. (media/filters/audio_file_reader.cc)
-///   여기서는 디먹스도 symphonia 0.6 의 풀기(wav, ogg, mkv(webm), isomp4(m4a), flac, mp3, adts)로 하고,
-///   FLAC, MP3, PCM, Vorbis 는 크롬과 같은 symphonia 해석기, Opus 는 opus.rs(opus-pure),
-///   AAC 는 aac.rs 가 AAC-LC 2 채널까지 symphonia, HE-AAC 와 3 채널 이상은 oxideav-aac 로 푼다.
-/// - 꼴은 내용으로 가린다. (decodeAudioData 처럼 형(MIME)이나 확장자를 보지 않는다. symphonia 의 탐지)
-/// - 차례: 패킷마다 풀기 → 크롬처럼 앞뒤 다듬기(trim.rs) → 정수 표본을 크롬 식으로 실수로 → 채널마다 원본 DECODE_SAMPLE_RATE(44100)로 바꾸기(resample.rs)
-///   → WebAudio 스피커 규칙으로 1 채널이나 2 채널로 내리기. (크롬은 AudioBuffer 를 채널 그대로 두고 그릴 때 내린다. 뒤 노드가 모두 선형이라 미리 내려도 같다.
-///   모노는 StereoPanner 식이 달라 모노로 둔다)
+//! 소리 해석. (데스크탑, 원본이 쓰는 크롬 decodeAudioData 와 같게)
+//! - 크롬(158)은 FFmpeg 로 디먹스하고 FLAC, MP3, PCM, Vorbis 를 symphonia 로, Opus 를 libopus 로, AAC 를 FFmpeg 로 푼다. (media/filters/audio_file_reader.cc)
+//!   여기서는 디먹스도 symphonia 0.6 의 풀기(wav, ogg, mkv(webm), isomp4(m4a), flac, mp3, adts)로 하고,
+//!   FLAC, MP3, PCM, Vorbis 는 크롬과 같은 symphonia 해석기, Opus 는 opus.rs(opus-pure),
+//!   AAC 는 aac.rs 가 AAC-LC 2 채널까지 symphonia, HE-AAC 와 3 채널 이상은 oxideav-aac 로 푼다.
+//! - 꼴은 내용으로 가린다. (decodeAudioData 처럼 형(MIME)이나 확장자를 보지 않는다. symphonia 의 탐지)
+//! - 차례: 패킷마다 풀기 → 크롬처럼 앞뒤 다듬기(trim.rs) → 정수 표본을 크롬 식으로 실수로 → 채널마다 원본 DECODE_SAMPLE_RATE(44100)로 바꾸기(resample.rs)
+//!   → WebAudio 스피커 규칙으로 1 채널이나 2 채널로 내리기. (크롬은 AudioBuffer 를 채널 그대로 두고 그릴 때 내린다. 뒤 노드가 모두 선형이라 미리 내려도 같다.
+//!   모노는 StereoPanner 식이 달라 모노로 둔다)
 //==============================================================================
 mod aac;
 mod opus;

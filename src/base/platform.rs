@@ -29,19 +29,30 @@ pub const SYSTEM_FONT_STRING: &str = "-apple-system, \"Segoe UI\", Roboto, \"App
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PlatformType {
+	/// 윈도우.
 	Windows,
+	/// 맥OS. (웹은 user_agent 의 macintosh 나 mac os x)
 	MacOs,
+	/// 안드로이드.
 	Android,
+	/// 스팀덱. (웹은 user_agent 의 valve steam gameoverlay, 데스크탑은 리눅스 가운데 스팀덱으로 가린 것)
 	SteamDeck,
+	/// 아이패드OS. (웹은 user_agent 의 ipad)
 	IPadOs,
+	/// iOS. (웹은 user_agent 의 iphone 이나 ipod)
 	IOs,
+	/// 리눅스. (스팀덱이 아닌 것)
 	Linux,
+	/// 위 어느 것도 아닌 것.
 	Unknown,
 }
 
 impl PlatformType {
 	//==============================================================================
 	/// 원본과 같은 이름 글. ("Windows", "macOS" ...)
+	///
+	/// # 돌려줌
+	/// 이름 글. ("Windows", "macOS", "Android", "SteamDeck", "iPadOS", "iOS", "Linux", "Unknown")
 	//==============================================================================
 	pub fn get_name(&self) -> &'static str {
 		match self {
@@ -78,17 +89,26 @@ impl PlatformType {
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BrowserType {
+	/// 크롬. (데스크탑 빌드는 늘 이것)
 	Chrome,
+	/// 엣지. (웹은 user_agent 의 edg, 크롬보다 먼저 본다)
 	Edge,
+	/// 파이어폭스.
 	Firefox,
+	/// 인터넷 익스플로러. (웹은 user_agent 의 msie 나 trident)
 	InternetExplorer,
+	/// 사파리. (웹은 user_agent 에 edg 와 chrome 이 없고 safari 가 든 것)
 	Safari,
+	/// 위 어느 것도 아닌 것.
 	Unknown,
 }
 
 impl BrowserType {
 	//==============================================================================
 	/// 원본과 같은 이름 글. ("Chrome", "Edge" ...)
+	///
+	/// # 돌려줌
+	/// 이름 글. ("Chrome", "Edge", "Firefox", "Internet Explorer", "Safari", "Unknown")
 	//==============================================================================
 	pub fn get_name(&self) -> &'static str {
 		match self {
@@ -116,6 +136,30 @@ impl BrowserType {
 
 //==============================================================================
 /// 플랫폼 정보.
+///
+/// # 예제
+/// user_agent 로 플랫폼과 브라우저 고르기
+/// ```rust
+/// use vanilla::{BrowserType, Platform, PlatformType};
+///
+/// let mut platform = Platform::new();
+/// platform.apply_user_agent("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1");
+/// assert_eq!(platform.get_platform_name(), PlatformType::IOs);
+/// assert_eq!(platform.get_platform_name().get_name(), "iOS");
+/// assert_eq!(platform.get_browser_name(), BrowserType::Safari);
+/// assert!(platform.is_mobile());
+/// assert!(!platform.is_desktop_web());
+/// ```
+///
+/// 엔진의 플랫폼 정보로 단축키 안내를 보일지 가리기
+/// ```rust
+/// use vanilla::Engine;
+///
+/// fn is_shortcut_hint_visible(engine: &Engine) -> bool {
+/// 	let platform = engine.get_platform();
+/// 	platform.is_desktop_web() && !platform.is_coarse_pointer()
+/// }
+/// ```
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct Platform {
@@ -127,6 +171,9 @@ pub struct Platform {
 impl Platform {
 	//==============================================================================
 	/// 생성. (탐지까지 한다. 원본은 생성 뒤 get_platform_info 를 부른다)
+	///
+	/// # 돌려줌
+	/// 탐지를 마친 플랫폼 정보. (웹은 navigator 의 user_agent, 데스크탑은 빌드 대상 OS 로 고른 것)
 	//==============================================================================
 	pub fn new() -> Platform {
 		let mut platform = Platform {
@@ -140,6 +187,9 @@ impl Platform {
 
 	//==============================================================================
 	/// 플랫폼 정보 탐지 및 적용. (플랫폼, 브라우저)
+	///
+	/// # 돌려줌
+	/// 다시 탐지해 넣은 (플랫폼, 브라우저). (모바일 여부도 다시 넣는다)
 	//==============================================================================
 	pub fn get_platform_info(&mut self) -> (PlatformType, BrowserType) {
 		#[cfg(target_arch = "wasm32")]
@@ -158,6 +208,10 @@ impl Platform {
 
 	//==============================================================================
 	/// user_agent 로 플랫폼과 브라우저 고르기. (원본 get_platform_info 의 정규식과 같은 순서, 대소문자 무시)
+	/// - 모바일 여부도 같이 넣는다. (mobi, android, iphone, ipad 가 들면 모바일)
+	///
+	/// # 인자
+	/// - `user_agent`: 브라우저의 user_agent 글.
 	//==============================================================================
 	pub fn apply_user_agent(&mut self, user_agent: &str) {
 		let lower_user_agent = user_agent.to_lowercase();
@@ -213,6 +267,9 @@ impl Platform {
 
 	//==============================================================================
 	/// 플랫폼.
+	///
+	/// # 돌려줌
+	/// 탐지한 플랫폼.
 	//==============================================================================
 	pub fn get_platform_name(&self) -> PlatformType {
 		self.platform_name
@@ -220,6 +277,9 @@ impl Platform {
 
 	//==============================================================================
 	/// 브라우저.
+	///
+	/// # 돌려줌
+	/// 탐지한 브라우저. (데스크탑 빌드는 Chrome)
 	//==============================================================================
 	pub fn get_browser_name(&self) -> BrowserType {
 		self.browser_name
@@ -227,6 +287,9 @@ impl Platform {
 
 	//==============================================================================
 	/// 모바일인지.
+	///
+	/// # 돌려줌
+	/// 모바일이면 true. (웹은 user_agent 로, 데스크탑 빌드는 안드로이드, iOS, 아이패드OS 대상일 때)
 	//==============================================================================
 	pub fn is_mobile(&self) -> bool {
 		self.is_mobile
@@ -235,6 +298,9 @@ impl Platform {
 	//==============================================================================
 	/// 데스크탑 웹인지. (마우스 휠, 키보드 안내처럼 데스크탑에서만 보일 것을 가릴 때 쓴다)
 	/// - 모바일이면 아니다. 아이패드의 사파리는 데스크탑처럼 맥이라고 알리므로, 맥인데 손가락 입력이 여럿 되면 아이패드로 본다.
+	///
+	/// # 돌려줌
+	/// 데스크탑 웹이면 true. (모바일이거나, 맥인데 navigator.maxTouchPoints 가 2 이상이면 false, 데스크탑 빌드는 늘 true)
 	//==============================================================================
 	pub fn is_desktop_web(&self) -> bool {
 		self.is_desktop_web_with_touch_points(read_max_touch_points())
@@ -242,6 +308,9 @@ impl Platform {
 
 	//==============================================================================
 	/// 주된 손이 손가락인지. (CSS 의 pointer: coarse, 단축키 안내처럼 마우스로 하는 화면에만 보일 것을 가릴 때 쓴다)
+	///
+	/// # 돌려줌
+	/// 주된 손이 손가락이면 true. (부를 때마다 새로 읽는다, 맥 데스크탑은 늘 false)
 	//==============================================================================
 	pub fn is_coarse_pointer(&self) -> bool {
 		crate::platform::is_coarse_pointer()
@@ -249,6 +318,9 @@ impl Platform {
 
 	//==============================================================================
 	/// 리소스 사용량. (웹이 받은 파일마다 전송량과 푼 크기)
+	///
+	/// # 돌려줌
+	/// 지금까지 받은 파일 목록과 그 합. (부를 때마다 새로 모은다, 데스크탑은 엔진이 애셋으로 읽은 파일)
 	//==============================================================================
 	pub fn get_resource_usage(&self) -> ResourceUsage {
 		read_resource_usage()
@@ -256,6 +328,9 @@ impl Platform {
 
 	//==============================================================================
 	/// 리소스 사용량. (옛 이름의 오타를 그대로 둔 별칭, get_resource_usage 와 같다)
+	///
+	/// # 돌려줌
+	/// get_resource_usage 와 같은 값.
 	//==============================================================================
 	pub fn get_resouce_usage(&self) -> ResourceUsage {
 		self.get_resource_usage()
@@ -263,6 +338,22 @@ impl Platform {
 
 	//==============================================================================
 	/// 세이프 에어리어. (area_size 크기에서 env(safe-area-inset-*) 를 뺀 사각형, 인셋은 원본 parseInt 처럼 정수로 자른다)
+	///
+	/// # 인자
+	/// - `area_size`: 인셋을 뺄 바탕 크기. (픽셀, 원본의 캔버스 크기 자리)
+	///
+	/// # 돌려줌
+	/// (왼쪽 인셋, 위 인셋) 에서 시작하고, 너비는 좌우 인셋을, 높이는 위아래 인셋을 뺀 사각형.
+	///
+	/// # 예제
+	/// 데스크탑은 인셋이 0 이라 받은 크기 그대로다
+	/// ```rust
+	/// use vanilla::{Platform, Rect, Vector2};
+	///
+	/// let platform = Platform::new();
+	/// let safe_area_rect = platform.get_safe_area_rect(Vector2::create(800.0, 600.0));
+	/// assert_eq!(safe_area_rect, Rect::create(0.0, 0.0, 800.0, 600.0));
+	/// ```
 	//==============================================================================
 	pub fn get_safe_area_rect(&self, area_size: Vector2) -> Rect {
 		let insets = crate::platform::read_safe_area_insets();
@@ -288,6 +379,9 @@ impl Platform {
 }
 
 impl Default for Platform {
+	//==============================================================================
+	/// 탐지까지 마친 플랫폼 정보. (Platform::new 와 같다)
+	//==============================================================================
 	fn default() -> Platform {
 		Platform::new()
 	}
@@ -295,23 +389,57 @@ impl Default for Platform {
 
 //==============================================================================
 /// 받은 파일 하나. (원본 loadedFiles 의 { path, name, type, transferSize, decodedSize })
+///
+/// # 예제
+/// 가장 큰 파일 찾기
+/// ```rust
+/// use vanilla::base::platform::LoadedFile;
+/// use vanilla::Platform;
+///
+/// let platform = Platform::new();
+/// let resource_usage = platform.get_resource_usage();
+/// let largest_file: Option<&LoadedFile> = resource_usage.loaded_files.iter().max_by(|first, second| first.decoded_size.total_cmp(&second.decoded_size));
+/// if let Some(loaded_file) = largest_file {
+/// 	println!("{} {}", loaded_file.path, loaded_file.decoded_size);
+/// }
+/// ```
 //==============================================================================
 #[derive(Clone, Debug, PartialEq)]
 pub struct LoadedFile {
+	/// 경로. (웹은 performance 항목의 name 인 주소, 데스크탑은 엔진이 읽은 애셋 경로)
 	pub path: String,
+	/// 경로의 마지막 조각인 파일 이름. (웹은 / 로, 데스크탑은 / 와 \ 로 가른다)
 	pub name: String,
+	/// 종류. (웹은 initiatorType, 데스크탑은 "file")
 	pub resource_type: String,
+	/// 전송량. (바이트, 웹은 transferSize, 데스크탑은 파일 바이트 수)
 	pub transfer_size: f64,
+	/// 푼 크기. (바이트, 웹은 decodedBodySize, 데스크탑은 파일 바이트 수)
 	pub decoded_size: f64,
 }
 
 //==============================================================================
 /// 리소스 사용량. (원본 { totalTransferSize, totalDecodedSize, loadedFiles })
+///
+/// # 예제
+/// 합은 파일마다의 값을 더한 것이다
+/// ```rust
+/// use vanilla::Platform;
+///
+/// let platform = Platform::new();
+/// let resource_usage = platform.get_resource_usage();
+/// let total_transfer_size: f64 = resource_usage.loaded_files.iter().map(|loaded_file| loaded_file.transfer_size).sum();
+/// assert_eq!(total_transfer_size, resource_usage.total_transfer_size);
+/// println!("{} {}", resource_usage.loaded_files.len(), resource_usage.total_decoded_size);
+/// ```
 //==============================================================================
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ResourceUsage {
+	/// 전송량 합. (바이트)
 	pub total_transfer_size: f64,
+	/// 푼 크기 합. (바이트)
 	pub total_decoded_size: f64,
+	/// 받은 파일 목록. (데스크탑은 읽은 차례)
 	pub loaded_files: Vec<LoadedFile>,
 }
 

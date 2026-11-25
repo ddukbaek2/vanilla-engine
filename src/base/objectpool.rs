@@ -12,6 +12,34 @@ pub type ObjectCreateHandler<T> = Box<dyn FnMut() -> T>;
 /// 되돌릴 때 상태를 비우는 함수. (객체를 인자로 받는다)
 pub type ObjectResetHandler<T> = Box<dyn FnMut(&mut T)>;
 
+//==============================================================================
+/// 오브젝트 풀. (T 객체를 빌려주고 되돌려 받아 다시 쓴다)
+///
+/// # 예제
+/// 탄환을 미리 만들어 두고 빌렸다 되돌리기
+/// ```rust
+/// use vanilla::ObjectPool;
+///
+/// struct Bullet {
+/// 	travel_distance: f32,
+/// }
+///
+/// let mut object_pool = ObjectPool::new(
+/// 	Box::new(|| Bullet { travel_distance: 0.0 }),
+/// 	Some(Box::new(|bullet: &mut Bullet| {
+/// 		bullet.travel_distance = 0.0;
+/// 	})),
+/// 	2,
+/// );
+/// assert_eq!(object_pool.get_free_count(), 2);
+/// let mut bullet = object_pool.acquire();
+/// bullet.travel_distance = 120.0;
+/// object_pool.release(bullet);
+/// let reused_bullet = object_pool.acquire();
+/// assert_eq!(reused_bullet.travel_distance, 0.0);
+/// assert_eq!(object_pool.get_total_count(), 2);
+/// ```
+//==============================================================================
 pub struct ObjectPool<T> {
 	create_handler: ObjectCreateHandler<T>,
 	reset_handler: Option<ObjectResetHandler<T>>,
@@ -22,6 +50,14 @@ pub struct ObjectPool<T> {
 impl<T> ObjectPool<T> {
 	//==============================================================================
 	/// 생성. (create_handler 는 새 객체를 만들고, reset_handler 는 되돌릴 때 상태를 비우고, preload_count 만큼 미리 만든다)
+	///
+	/// # 인자
+	/// - `create_handler`: 새 객체를 만드는 함수. (미리 만들 때와 빌릴 때 놀고 있는 것이 없으면 부른다)
+	/// - `reset_handler`: 되돌릴 때 상태를 비우는 함수. None 이면 비우지 않고 그대로 넣는다.
+	/// - `preload_count`: 만들 때 미리 만들어 둘 객체 수.
+	///
+	/// # 돌려줌
+	/// 놀고 있는 객체 preload_count 개를 든 풀. (전체 수도 preload_count)
 	//==============================================================================
 	pub fn new(create_handler: ObjectCreateHandler<T>, reset_handler: Option<ObjectResetHandler<T>>, preload_count: usize) -> ObjectPool<T> {
 		let mut object_pool = ObjectPool {
@@ -40,6 +76,9 @@ impl<T> ObjectPool<T> {
 
 	//==============================================================================
 	/// 빌린다. (놀고 있는 것이 없으면 새로 만든다, 가장 나중에 되돌린 것부터 나간다)
+	///
+	/// # 돌려줌
+	/// 빌린 객체. (소유권이 넘어온다, 다 쓰면 release 로 되돌린다)
 	//==============================================================================
 	pub fn acquire(&mut self) -> T {
 		if let Some(instance) = self.free_list.pop() {
@@ -51,6 +90,9 @@ impl<T> ObjectPool<T> {
 
 	//==============================================================================
 	/// 되돌린다. (reset_handler 로 상태를 비운 뒤 놀고 있는 목록에 넣는다)
+	///
+	/// # 인자
+	/// - `instance`: 되돌릴 객체. (이 풀에서 빌린 것인지 보지 않는다, 전체 수는 바꾸지 않는다)
 	//==============================================================================
 	pub fn release(&mut self, mut instance: T) {
 		if let Some(reset_handler) = self.reset_handler.as_mut() {
@@ -61,6 +103,9 @@ impl<T> ObjectPool<T> {
 
 	//==============================================================================
 	/// 놀고 있는 객체 수 반환.
+	///
+	/// # 돌려줌
+	/// 놀고 있는 목록의 객체 수.
 	//==============================================================================
 	pub fn get_free_count(&self) -> usize {
 		self.free_list.len()
@@ -68,6 +113,9 @@ impl<T> ObjectPool<T> {
 
 	//==============================================================================
 	/// 지금까지 만든 전체 객체 수 반환.
+	///
+	/// # 돌려줌
+	/// create_handler 로 만든 객체 수. (clear 해도 줄지 않는다)
 	//==============================================================================
 	pub fn get_total_count(&self) -> usize {
 		self.total_count

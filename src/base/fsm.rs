@@ -30,10 +30,35 @@ pub type TransitionEvent<StateName> = Box<dyn FnMut(Option<&StateName>, &StateNa
 
 //==============================================================================
 /// 상태 처리 함수 묶음. (원본 add_state 의 handlers: { enter?, tick?, exit? })
+///
+/// # 예제
+/// tick 처리 함수만 두고 나머지는 기본값
+/// ```rust
+/// use std::cell::Cell;
+/// use std::rc::Rc;
+/// use vanilla::{FiniteStateMachine, StateHandlers};
+///
+/// let total_seconds = Rc::new(Cell::new(0.0f32));
+/// let total_seconds_in_tick = total_seconds.clone();
+/// let mut state_machine: FiniteStateMachine<&'static str> = FiniteStateMachine::new();
+/// state_machine.add_state("play", StateHandlers {
+/// 	tick: Some(Box::new(move |time_delta: f32, _state_seconds: f32| {
+/// 		total_seconds_in_tick.set(total_seconds_in_tick.get() + time_delta);
+/// 	})),
+/// 	..StateHandlers::default()
+/// });
+/// state_machine.change_state("play", false);
+/// state_machine.tick(0.25);
+/// state_machine.tick(0.25);
+/// assert_eq!(total_seconds.get(), 0.5);
+/// ```
 //==============================================================================
 pub struct StateHandlers<StateName> {
+	/// 상태에 들어갈 때 부르는 함수. (이전 상태 이름을 받는다, 처음이면 None) None 이면 부르지 않는다.
 	pub enter: Option<StateEnterHandler<StateName>>,
+	/// 상태에 머무는 동안 tick 마다 부르는 함수. (time_delta 초, 이 상태에 머문 초) None 이면 부르지 않는다.
 	pub tick: Option<StateTickHandler>,
+	/// 상태에서 나갈 때 부르는 함수. (다음 상태 이름을 받는다) None 이면 부르지 않는다.
 	pub exit: Option<StateExitHandler<StateName>>,
 }
 
@@ -48,6 +73,29 @@ impl<StateName> Default for StateHandlers<StateName> {
 
 //==============================================================================
 /// 처리 함수 안에서 전이를 부탁하는 손잡이. (FiniteStateMachine::get_state_change_requester 가 주고, 복제해 처리 함수에 잡아 넣는다)
+///
+/// # 예제
+/// 1 초 머문 뒤 tick 처리 함수에서 다음 상태 부탁하기
+/// ```rust
+/// use vanilla::{FiniteStateMachine, StateHandlers};
+///
+/// let mut state_machine: FiniteStateMachine<&'static str> = FiniteStateMachine::new();
+/// let state_change_requester = state_machine.get_state_change_requester();
+/// state_machine.add_state("countdown", StateHandlers {
+/// 	tick: Some(Box::new(move |_time_delta: f32, state_seconds: f32| {
+/// 		if state_seconds >= 1.0 {
+/// 			state_change_requester.change_state("play", false);
+/// 		}
+/// 	})),
+/// 	..StateHandlers::default()
+/// });
+/// state_machine.add_state("play", StateHandlers::default());
+/// state_machine.change_state("countdown", false);
+/// state_machine.tick(0.5);
+/// assert_eq!(state_machine.get_state_name(), Some(&"countdown"));
+/// state_machine.tick(0.5);
+/// assert_eq!(state_machine.get_state_name(), Some(&"play"));
+/// ```
 //==============================================================================
 pub struct StateChangeRequester<StateName> {
 	/// 부탁받은 전이. (다음 상태 이름, is_forced)
@@ -68,6 +116,10 @@ impl<StateName> Clone for StateChangeRequester<StateName> {
 impl<StateName> StateChangeRequester<StateName> {
 	//==============================================================================
 	/// 상태 전이 부탁. (원본 처리 함수 안의 change_state, 기계가 지금 처리 함수가 끝난 뒤 차례대로 전이한다)
+	///
+	/// # 인자
+	/// - `next_state_name`: 옮겨 갈 상태 이름. (등록하지 않은 이름이면 기계가 전이하지 않는다)
+	/// - `is_forced`: 참이면 같은 상태로도 다시 전이한다. (전이 가드는 그대로 본다)
 	//==============================================================================
 	pub fn change_state(&self, next_state_name: StateName, is_forced: bool) {
 		self.pending_change_list.borrow_mut().push((next_state_name, is_forced));
@@ -76,6 +128,45 @@ impl<StateName> StateChangeRequester<StateName> {
 
 //==============================================================================
 /// 유한 상태 기계.
+///
+/// # 예제
+/// 열거형 상태를 등록하고 갱신하며 전이하기
+/// ```rust
+/// use std::cell::RefCell;
+/// use std::rc::Rc;
+/// use vanilla::{FiniteStateMachine, StateHandlers};
+///
+/// #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+/// enum PlayerState {
+/// 	Idle,
+/// 	Run,
+/// }
+///
+/// let record_list = Rc::new(RefCell::new(Vec::<String>::new()));
+/// let enter_record_list = record_list.clone();
+/// let exit_record_list = record_list.clone();
+/// let mut state_machine = FiniteStateMachine::<PlayerState>::new();
+/// state_machine.add_state(PlayerState::Idle, StateHandlers {
+/// 	exit: Some(Box::new(move |next_state_name: &PlayerState| {
+/// 		exit_record_list.borrow_mut().push(format!("idle exit to {:?}", next_state_name));
+/// 	})),
+/// 	..StateHandlers::default()
+/// });
+/// state_machine.add_state(PlayerState::Run, StateHandlers {
+/// 	enter: Some(Box::new(move |previous_state_name: Option<&PlayerState>| {
+/// 		enter_record_list.borrow_mut().push(format!("run enter from {:?}", previous_state_name));
+/// 	})),
+/// 	..StateHandlers::default()
+/// });
+/// assert_eq!(state_machine.get_state_name(), None);
+/// assert!(state_machine.change_state(PlayerState::Idle, false));
+/// state_machine.tick(0.5);
+/// assert_eq!(state_machine.get_state_seconds(), 0.5);
+/// assert!(state_machine.change_state(PlayerState::Run, false));
+/// assert_eq!(state_machine.get_state_name(), Some(&PlayerState::Run));
+/// assert_eq!(state_machine.get_state_seconds(), 0.0);
+/// assert_eq!(*record_list.borrow(), vec!["idle exit to Run", "run enter from Some(Idle)"]);
+/// ```
 //==============================================================================
 pub struct FiniteStateMachine<StateName = String> {
 	state_table: HashMap<StateName, StateHandlers<StateName>>,
@@ -99,6 +190,9 @@ impl<StateName: Clone + Eq + Hash> Default for FiniteStateMachine<StateName> {
 impl<StateName: Clone + Eq + Hash> FiniteStateMachine<StateName> {
 	//==============================================================================
 	/// 생성. (등록된 상태 없음, 현재 상태 없음)
+	///
+	/// # 돌려줌
+	/// 빈 상태 기계. (현재 상태 None, 머문 시간 0, 가드와 전이 알림 없음)
 	//==============================================================================
 	pub fn new() -> FiniteStateMachine<StateName> {
 		FiniteStateMachine {
@@ -113,6 +207,25 @@ impl<StateName: Clone + Eq + Hash> FiniteStateMachine<StateName> {
 
 	//==============================================================================
 	/// 처리 함수 안에서 전이를 부탁하는 손잡이. (복제해 처리 함수에 잡아 넣는다)
+	///
+	/// # 돌려줌
+	/// 이 기계의 부탁 목록을 나눠 든 손잡이. (몇 번 받아도 같은 기계를 가리킨다)
+	///
+	/// # 예제
+	/// 처리 함수 밖에서 부탁하면 다음 tick 에 전이한다
+	/// ```rust
+	/// use vanilla::{FiniteStateMachine, StateHandlers};
+	///
+	/// let mut state_machine: FiniteStateMachine<&'static str> = FiniteStateMachine::new();
+	/// state_machine.add_state("title", StateHandlers::default());
+	/// state_machine.add_state("play", StateHandlers::default());
+	/// state_machine.change_state("title", false);
+	/// let state_change_requester = state_machine.get_state_change_requester();
+	/// state_change_requester.change_state("play", false);
+	/// assert_eq!(state_machine.get_state_name(), Some(&"title"));
+	/// state_machine.tick(0.0);
+	/// assert_eq!(state_machine.get_state_name(), Some(&"play"));
+	/// ```
 	//==============================================================================
 	pub fn get_state_change_requester(&self) -> StateChangeRequester<StateName> {
 		StateChangeRequester {
@@ -122,6 +235,10 @@ impl<StateName: Clone + Eq + Hash> FiniteStateMachine<StateName> {
 
 	//==============================================================================
 	/// 상태 등록. (같은 이름이 있으면 처리 함수를 바꾼다)
+	///
+	/// # 인자
+	/// - `state_name`: 상태 이름.
+	/// - `handlers`: 그 상태의 처리 함수 묶음. (모두 None 이어도 된다, StateHandlers::default())
 	//==============================================================================
 	pub fn add_state(&mut self, state_name: StateName, handlers: StateHandlers<StateName>) {
 		self.state_table.insert(state_name, handlers);
@@ -134,6 +251,26 @@ impl<StateName: Clone + Eq + Hash> FiniteStateMachine<StateName> {
 	/// - 전이 가드가 거짓을 돌려주면 전이하지 않는다.
 	/// - 순서: 이전 상태 exit → 상태 바꾸고 머문 시간 0 → 전이 알림 → 다음 상태 enter.
 	/// - 처리 함수가 그 사이에 부탁한 전이는 이 전이가 끝난 뒤 차례대로 한다.
+	///
+	/// # 인자
+	/// - `next_state_name`: 옮겨 갈 상태 이름.
+	/// - `is_forced`: 참이면 같은 상태로도 다시 전이한다. (전이 가드는 그대로 본다)
+	///
+	/// # 돌려줌
+	/// 이 전이를 했으면 true. 등록하지 않은 상태, 같은 상태(is_forced 거짓), 가드가 막은 때는 false. (뒤이어 한 부탁받은 전이의 성공 여부는 들지 않는다)
+	///
+	/// # 예제
+	/// 없는 상태, 같은 상태, 강제 전이
+	/// ```rust
+	/// use vanilla::{FiniteStateMachine, StateHandlers};
+	///
+	/// let mut state_machine: FiniteStateMachine<&'static str> = FiniteStateMachine::new();
+	/// state_machine.add_state("idle", StateHandlers::default());
+	/// assert!(!state_machine.change_state("missing", false));
+	/// assert!(state_machine.change_state("idle", false));
+	/// assert!(!state_machine.change_state("idle", false));
+	/// assert!(state_machine.change_state("idle", true));
+	/// ```
 	//==============================================================================
 	pub fn change_state(&mut self, next_state_name: StateName, is_forced: bool) -> bool {
 		let is_changed = self.change_state_now(next_state_name, is_forced);
@@ -200,6 +337,9 @@ impl<StateName: Clone + Eq + Hash> FiniteStateMachine<StateName> {
 
 	//==============================================================================
 	/// 갱신. (부탁받은 전이를 먼저 하고, 머문 시간을 늘리고 현재 상태의 tick 을 부른다. tick 이 부탁한 전이는 그 뒤에 한다)
+	///
+	/// # 인자
+	/// - `time_delta`: 지난 프레임과의 간격. (초, 머문 시간에 더하고 현재 상태의 tick 에 넘긴다. 현재 상태가 없으면 더하지 않는다)
 	//==============================================================================
 	pub fn tick(&mut self, time_delta: f32) {
 		self.apply_pending_state_changes();
@@ -229,6 +369,9 @@ impl<StateName: Clone + Eq + Hash> FiniteStateMachine<StateName> {
 
 	//==============================================================================
 	/// 현재 상태 이름 반환. (아직 아무 상태도 아니면 None)
+	///
+	/// # 돌려줌
+	/// 현재 상태 이름. (아직 전이하지 않았으면 None)
 	//==============================================================================
 	pub fn get_state_name(&self) -> Option<&StateName> {
 		self.state_name.as_ref()
@@ -236,6 +379,9 @@ impl<StateName: Clone + Eq + Hash> FiniteStateMachine<StateName> {
 
 	//==============================================================================
 	/// 현재 상태에 머문 시간 반환. (초)
+	///
+	/// # 돌려줌
+	/// 머문 시간. (초, 전이할 때 0 으로 돌아간다)
 	//==============================================================================
 	pub fn get_state_seconds(&self) -> f32 {
 		self.state_seconds
@@ -243,6 +389,12 @@ impl<StateName: Clone + Eq + Hash> FiniteStateMachine<StateName> {
 
 	//==============================================================================
 	/// 상태 존재 여부.
+	///
+	/// # 인자
+	/// - `state_name`: 찾을 상태 이름.
+	///
+	/// # 돌려줌
+	/// 등록한 상태면 true.
 	//==============================================================================
 	pub fn has_state(&self, state_name: &StateName) -> bool {
 		self.state_table.contains_key(state_name)
@@ -250,6 +402,32 @@ impl<StateName: Clone + Eq + Hash> FiniteStateMachine<StateName> {
 
 	//==============================================================================
 	/// 전이 가드 설정. (previous, next) → bool, None 이면 가드 없음
+	///
+	/// # 인자
+	/// - `transition_guard`: (이전 상태 이름, 다음 상태 이름) 을 받아 허용 여부를 돌려주는 함수. (거짓이면 전이하지 않는다, is_forced 전이도 막는다) None 이면 가드 없음.
+	///
+	/// # 예제
+	/// 쓰러진 뒤로는 전이 막기
+	/// ```rust
+	/// use vanilla::{FiniteStateMachine, StateHandlers};
+	///
+	/// #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+	/// enum PlayerState {
+	/// 	Idle,
+	/// 	Dead,
+	/// }
+	///
+	/// let mut state_machine = FiniteStateMachine::<PlayerState>::new();
+	/// state_machine.add_state(PlayerState::Idle, StateHandlers::default());
+	/// state_machine.add_state(PlayerState::Dead, StateHandlers::default());
+	/// state_machine.set_transition_guard(Some(Box::new(|previous_state_name: Option<&PlayerState>, _next_state_name: &PlayerState| {
+	/// 	previous_state_name != Some(&PlayerState::Dead)
+	/// })));
+	/// assert!(state_machine.change_state(PlayerState::Dead, false));
+	/// assert!(!state_machine.change_state(PlayerState::Idle, true));
+	/// state_machine.set_transition_guard(None);
+	/// assert!(state_machine.change_state(PlayerState::Idle, false));
+	/// ```
 	//==============================================================================
 	pub fn set_transition_guard(&mut self, transition_guard: Option<TransitionGuard<StateName>>) {
 		self.transition_guard = transition_guard;
@@ -257,6 +435,29 @@ impl<StateName: Clone + Eq + Hash> FiniteStateMachine<StateName> {
 
 	//==============================================================================
 	/// 전이 알림 설정. (previous, next), exit 뒤, enter 앞에 불린다. None 이면 알림 없음
+	///
+	/// # 인자
+	/// - `transition_event`: (이전 상태 이름, 다음 상태 이름) 을 받는 함수. (이전 상태가 없으면 None) None 이면 부르지 않는다.
+	///
+	/// # 예제
+	/// 문자열 상태 이름(기본 타입 String)으로 전이 기록하기
+	/// ```rust
+	/// use std::cell::RefCell;
+	/// use std::rc::Rc;
+	/// use vanilla::{FiniteStateMachine, StateHandlers};
+	///
+	/// let transition_list = Rc::new(RefCell::new(Vec::<String>::new()));
+	/// let transition_list_in_event = transition_list.clone();
+	/// let mut state_machine: FiniteStateMachine = FiniteStateMachine::new();
+	/// state_machine.add_state(String::from("title"), StateHandlers::default());
+	/// state_machine.add_state(String::from("play"), StateHandlers::default());
+	/// state_machine.set_transition_event(Some(Box::new(move |previous_state_name: Option<&String>, next_state_name: &String| {
+	/// 	transition_list_in_event.borrow_mut().push(format!("{:?} -> {}", previous_state_name, next_state_name));
+	/// })));
+	/// state_machine.change_state(String::from("title"), false);
+	/// state_machine.change_state(String::from("play"), false);
+	/// assert_eq!(*transition_list.borrow(), vec!["None -> title", "Some(\"title\") -> play"]);
+	/// ```
 	//==============================================================================
 	pub fn set_transition_event(&mut self, transition_event: Option<TransitionEvent<StateName>>) {
 		self.transition_event = transition_event;
