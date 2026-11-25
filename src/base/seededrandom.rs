@@ -144,7 +144,7 @@ fn normalize_seed(seed: u32) -> u32 {
 mod tests {
 	use super::*;
 
-	// 아래 기대값은 원본 D:\Github\vanilla.js\src\base\seededrandom.js 를 node v24.14.0 으로 그대로 불러 돌려 찍은 값이다.
+	// 아래 기대값은 원본 vanilla.js 의 src/base/seededrandom.js 를 node v24.14.0 으로 그대로 불러 돌려 찍은 값이다.
 	// (손 계산이 아니다. 같은 수열인지 f64 비트까지 같음 비교를 한다)
 
 	//==============================================================================
