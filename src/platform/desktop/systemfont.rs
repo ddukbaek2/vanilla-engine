@@ -424,9 +424,14 @@ mod platform_font {
 #[cfg(target_os = "windows")]
 mod platform_font {
 	use crate::core::textstringtexturecache::FontFileSource;
-	use dwrote::{FontCollection, FontFallback, FontStretch, FontStyle, FontWeight, TextAnalysisSource, TextAnalysisSourceMethods};
-	use std::borrow::Cow;
-	use winapi::um::dwrite::{DWRITE_READING_DIRECTION, DWRITE_READING_DIRECTION_LEFT_TO_RIGHT};
+	use std::ffi::{c_void, OsString};
+	use std::os::windows::ffi::OsStringExt;
+	use std::path::PathBuf;
+	use windows::core::{implement, Interface, OutRef, BOOL, PCWSTR};
+	use windows::Win32::Foundation::E_INVALIDARG;
+	use windows::Win32::Graphics::DirectWrite::{
+		DWriteCreateFactory, IDWriteFactory, IDWriteFactory2, IDWriteFont, IDWriteFontCollection, IDWriteFontFamily, IDWriteFontFile, IDWriteLocalFontFileLoader, IDWriteNumberSubstitution, IDWriteTextAnalysisSource, IDWriteTextAnalysisSource_Impl, DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE, DWRITE_FONT_STYLE_ITALIC, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT, DWRITE_READING_DIRECTION, DWRITE_READING_DIRECTION_LEFT_TO_RIGHT,
+	};
 
 	// 대체 글꼴을 고를 때의 기본 이름. (크롬 윈도우의 시스템 글꼴)
 	const FALLBACK_BASE_FAMILY: &str = "Segoe UI";
@@ -445,11 +450,61 @@ mod platform_font {
 	// 마지막 대체 글꼴 차례. (font_cache_skia.cc 의 GetLastResortFallbackFont, 이름 없는 것은 DirectWrite 가 찾지 못해 넘긴다)
 	pub const LAST_RESORT_FAMILY_LIST: [&str; 8] = ["Sans", "Arial", "MS UI Gothic", "Microsoft Sans Serif", "Segoe UI", "Calibri", "Times New Roman", "Courier New"];
 
+	thread_local! {
+		// DirectWrite 공유 공장. (스레드마다 처음 쓸 때 한 번 짓는다, 짓지 못하면 None 이라 아무 글꼴도 찾지 않는다)
+		static DIRECT_WRITE_FACTORY: Option<IDWriteFactory> = unsafe { DWriteCreateFactory::<IDWriteFactory>(DWRITE_FACTORY_TYPE_SHARED) }.ok();
+	}
+
+	//==============================================================================
+	// DirectWrite 공장 반환.
+	//==============================================================================
+	fn get_direct_write_factory() -> Option<IDWriteFactory> {
+		DIRECT_WRITE_FACTORY.with(|direct_write_factory| direct_write_factory.clone())
+	}
+
+	//==============================================================================
+	// 시스템 글꼴 모음 반환. (새 글꼴이 깔렸는지는 다시 살피지 않는다)
+	//==============================================================================
+	fn get_system_font_collection() -> Option<IDWriteFontCollection> {
+		let direct_write_factory = get_direct_write_factory()?;
+		let mut font_collection: Option<IDWriteFontCollection> = None;
+		unsafe { direct_write_factory.GetSystemFontCollection(&mut font_collection, false) }.ok()?;
+		font_collection
+	}
+
+	//==============================================================================
+	// 글을 끝에 0 을 붙인 UTF-16 으로. (DirectWrite 에 넘기는 이름)
+	//==============================================================================
+	fn encode_wide_null(text: &str) -> Vec<u16> {
+		text.encode_utf16().chain(std::iter::once(0)).collect()
+	}
+
+	//==============================================================================
+	// 글꼴 모음에서 이름으로 글꼴 무리 찾기.
+	//==============================================================================
+	fn find_font_family(font_collection: &IDWriteFontCollection, family_name: &str) -> Option<IDWriteFontFamily> {
+		let wide_family_name = encode_wide_null(family_name);
+		let mut family_index: u32 = 0;
+		let mut is_found = BOOL::default();
+		unsafe { font_collection.FindFamilyName(PCWSTR(wide_family_name.as_ptr()), &mut family_index, &mut is_found) }.ok()?;
+		if !is_found.as_bool() {
+			return None;
+		}
+		unsafe { font_collection.GetFontFamily(family_index) }.ok()
+	}
+
 	//==============================================================================
 	// 그 이름의 글꼴이 깔렸는지. (시스템 글꼴 모음의 이름)
 	//==============================================================================
 	pub fn is_family_available(family_name: &str) -> bool {
-		matches!(FontCollection::system().font_family_by_name(family_name), Ok(Some(_)))
+		match get_system_font_collection() {
+			Some(font_collection) => {
+				find_font_family(&font_collection, family_name).is_some()
+			}
+			None => {
+				false
+			}
+		}
 	}
 
 	//==============================================================================
@@ -488,25 +543,83 @@ mod platform_font {
 	}
 
 	//==============================================================================
-	// 대체 글꼴 고르기에 줄 글의 언어와 방향.
+	// 대체 글꼴 고르기에 줄 글과 언어와 방향. (IDWriteTextAnalysisSource 를 구현한 COM 객체)
+	// - 돌려주는 글과 언어 이름의 포인터는 이 객체가 든 Vec 을 가리킨다. DirectWrite 는 객체를 쥔 동안에만 읽는다.
 	//==============================================================================
+	#[implement(IDWriteTextAnalysisSource)]
 	struct FallbackTextSource {
-		locale_name: String,
+		text_unit_list: Vec<u16>,
+		wide_locale_name: Vec<u16>,
 	}
 
-	impl TextAnalysisSourceMethods for FallbackTextSource {
+	impl IDWriteTextAnalysisSource_Impl for FallbackTextSource_Impl {
 		//==============================================================================
-		// 글 전체의 언어. (사용자 기본 언어)
+		// 그 자리부터 끝까지의 글. (끝이거나 넘으면 빈 글)
 		//==============================================================================
-		fn get_locale_name(&self, _text_position: u32) -> (Cow<'_, str>, u32) {
-			(Cow::Borrowed(self.locale_name.as_str()), u32::MAX)
+		fn GetTextAtPosition(&self, text_position: u32, text_string: *mut *mut u16, text_length: *mut u32) -> windows::core::Result<()> {
+			let total_length = self.text_unit_list.len() as u32;
+			unsafe {
+				if text_position >= total_length {
+					*text_string = std::ptr::null_mut();
+					*text_length = 0;
+				}
+				else {
+					*text_string = self.text_unit_list.as_ptr().add(text_position as usize) as *mut u16;
+					*text_length = total_length - text_position;
+				}
+			}
+			Ok(())
+		}
+
+		//==============================================================================
+		// 그 자리 앞의 글. (처음이거나 넘으면 빈 글)
+		//==============================================================================
+		fn GetTextBeforePosition(&self, text_position: u32, text_string: *mut *mut u16, text_length: *mut u32) -> windows::core::Result<()> {
+			let total_length = self.text_unit_list.len() as u32;
+			unsafe {
+				if text_position == 0 || text_position > total_length {
+					*text_string = std::ptr::null_mut();
+					*text_length = 0;
+				}
+				else {
+					*text_string = self.text_unit_list.as_ptr() as *mut u16;
+					*text_length = text_position;
+				}
+			}
+			Ok(())
 		}
 
 		//==============================================================================
 		// 문단 방향. (왼쪽에서 오른쪽, 글자 고르기에는 쓰이지 않는다)
 		//==============================================================================
-		fn get_paragraph_reading_direction(&self) -> DWRITE_READING_DIRECTION {
+		fn GetParagraphReadingDirection(&self) -> DWRITE_READING_DIRECTION {
 			DWRITE_READING_DIRECTION_LEFT_TO_RIGHT
+		}
+
+		//==============================================================================
+		// 그 자리부터 끝까지의 언어. (글 전체가 사용자 기본 언어)
+		//==============================================================================
+		fn GetLocaleName(&self, text_position: u32, text_length: *mut u32, locale_name: *mut *mut u16) -> windows::core::Result<()> {
+			let total_length = self.text_unit_list.len() as u32;
+			unsafe {
+				*text_length = total_length.saturating_sub(text_position);
+				*locale_name = self.wide_locale_name.as_ptr() as *mut u16;
+			}
+			Ok(())
+		}
+
+		//==============================================================================
+		// 숫자 바꾸기. (쓰지 않는다)
+		//==============================================================================
+		fn GetNumberSubstitution(&self, text_position: u32, text_length: *mut u32, number_substitution: OutRef<IDWriteNumberSubstitution>) -> windows::core::Result<()> {
+			let total_length = self.text_unit_list.len() as u32;
+			if text_position >= total_length {
+				return Err(E_INVALIDARG.into());
+			}
+			unsafe {
+				*text_length = total_length - text_position;
+			}
+			number_substitution.write(None)
 		}
 	}
 
@@ -515,7 +628,7 @@ mod platform_font {
 	//==============================================================================
 	fn read_user_locale_name() -> String {
 		let mut locale_buffer = [0u16; 85];
-		let length = unsafe { winapi::um::winnls::GetUserDefaultLocaleName(locale_buffer.as_mut_ptr(), locale_buffer.len() as i32) };
+		let length = unsafe { windows_sys::Win32::Globalization::GetUserDefaultLocaleName(locale_buffer.as_mut_ptr(), locale_buffer.len() as i32) };
 		if length <= 1 {
 			return String::from("en-US");
 		}
@@ -523,15 +636,36 @@ mod platform_font {
 	}
 
 	//==============================================================================
+	// 글꼴 파일의 경로. (디스크에 있는 파일만, 메모리에서 읽은 글꼴이면 None)
+	//==============================================================================
+	fn read_font_file_path(font_file: &IDWriteFontFile) -> Option<PathBuf> {
+		let mut reference_key: *mut c_void = std::ptr::null_mut();
+		let mut reference_key_size: u32 = 0;
+		unsafe { font_file.GetReferenceKey(&mut reference_key, &mut reference_key_size) }.ok()?;
+		let font_file_loader = unsafe { font_file.GetLoader() }.ok()?;
+		let local_font_file_loader = font_file_loader.cast::<IDWriteLocalFontFileLoader>().ok()?;
+		let path_length = unsafe { local_font_file_loader.GetFilePathLengthFromKey(reference_key, reference_key_size) }.ok()?;
+		let mut path_buffer = vec![0u16; path_length as usize + 1];
+		unsafe { local_font_file_loader.GetFilePathFromKey(reference_key, reference_key_size, &mut path_buffer) }.ok()?;
+		Some(PathBuf::from(OsString::from_wide(&path_buffer[..path_length as usize])))
+	}
+
+	//==============================================================================
 	// 글꼴의 파일과 얼굴 번호.
 	//==============================================================================
-	fn read_font_file(font: &dwrote::Font) -> Option<FontFileSource> {
-		let font_face = font.create_font_face();
-		let font_file = font_face.files().ok()?.into_iter().next()?;
-		let path = font_file.font_file_path().ok()?;
+	fn read_font_file(font: &IDWriteFont) -> Option<FontFileSource> {
+		let font_face = unsafe { font.CreateFontFace() }.ok()?;
+		let mut file_count: u32 = 0;
+		unsafe { font_face.GetFiles(&mut file_count, None) }.ok()?;
+		if file_count == 0 {
+			return None;
+		}
+		let mut font_file_list: Vec<Option<IDWriteFontFile>> = vec![None; file_count as usize];
+		unsafe { font_face.GetFiles(&mut file_count, Some(font_file_list.as_mut_ptr())) }.ok()?;
+		let font_file = font_file_list.into_iter().next()??;
 		Some(FontFileSource {
-			path,
-			face_index: Some(font_face.get_index()),
+			path: read_font_file_path(&font_file)?,
+			face_index: Some(unsafe { font_face.GetIndex() }),
 			post_script_name: None,
 		})
 	}
@@ -539,14 +673,14 @@ mod platform_font {
 	//==============================================================================
 	// 굵기와 기울기를 DirectWrite 값으로.
 	//==============================================================================
-	fn convert_font_style(weight: u16, is_italic: bool) -> (FontWeight, FontStyle) {
+	fn convert_font_style(weight: u16, is_italic: bool) -> (DWRITE_FONT_WEIGHT, DWRITE_FONT_STYLE) {
 		let font_style = if is_italic {
-			FontStyle::Italic
+			DWRITE_FONT_STYLE_ITALIC
 		}
 		else {
-			FontStyle::Normal
+			DWRITE_FONT_STYLE_NORMAL
 		};
-		(FontWeight::from_u32(weight as u32), font_style)
+		(DWRITE_FONT_WEIGHT(weight as i32), font_style)
 	}
 
 	//==============================================================================
@@ -562,15 +696,15 @@ mod platform_font {
 				family_name.to_string()
 			}
 		};
-		let font_collection = FontCollection::system();
-		let font_family = font_collection.font_family_by_name(&system_family_name).ok()??;
+		let font_collection = get_system_font_collection()?;
+		let font_family = find_font_family(&font_collection, &system_family_name)?;
 		let (font_weight, font_style) = convert_font_style(weight, is_italic);
-		let font = font_family.first_matching_font(font_weight, FontStretch::Normal, font_style).ok()?;
+		let font = unsafe { font_family.GetFirstMatchingFont(font_weight, DWRITE_FONT_STRETCH_NORMAL, font_style) }.ok()?;
 		read_font_file(&font)
 	}
 
 	//==============================================================================
-	// 대체 글꼴 파일 찾기. (IDWriteFontFallback.MapCharacters)
+	// 대체 글꼴 파일 찾기. (IDWriteFontFallback.MapCharacters, 윈도우 8.1 보다 옛 판이라 대체 글꼴 기능이 없으면 None)
 	//==============================================================================
 	pub fn find_fallback_font_file(text: &str, weight: u16, is_italic: bool, is_color_wanted: bool) -> Option<FontFileSource> {
 		if is_color_wanted {
@@ -578,17 +712,24 @@ mod platform_font {
 				return Some(font_file_source);
 			}
 		}
-		let font_fallback = FontFallback::get_system_fallback()?;
-		let text_units: Vec<u16> = text.encode_utf16().collect();
-		let text_length = text_units.len() as u32;
-		let fallback_text_source = FallbackTextSource {
-			locale_name: read_user_locale_name(),
-		};
-		let text_analysis_source = TextAnalysisSource::from_text(Box::new(fallback_text_source), Cow::Owned(text_units));
-		let font_collection = FontCollection::system();
+		let direct_write_factory = get_direct_write_factory()?;
+		let direct_write_factory_2 = direct_write_factory.cast::<IDWriteFactory2>().ok()?;
+		let font_fallback = unsafe { direct_write_factory_2.GetSystemFontFallback() }.ok()?;
+		let text_unit_list: Vec<u16> = text.encode_utf16().collect();
+		let text_length = text_unit_list.len() as u32;
+		let text_analysis_source: IDWriteTextAnalysisSource = FallbackTextSource {
+			text_unit_list,
+			wide_locale_name: encode_wide_null(&read_user_locale_name()),
+		}
+		.into();
+		let font_collection = get_system_font_collection()?;
 		let (font_weight, font_style) = convert_font_style(weight, is_italic);
-		let fallback_result = font_fallback.map_characters(&text_analysis_source, 0, text_length, &font_collection, Some(FALLBACK_BASE_FAMILY), font_weight, font_style, FontStretch::Normal);
-		read_font_file(fallback_result.mapped_font.as_ref()?)
+		let wide_base_family_name = encode_wide_null(FALLBACK_BASE_FAMILY);
+		let mut mapped_length: u32 = 0;
+		let mut mapped_font: Option<IDWriteFont> = None;
+		let mut scale: f32 = 1.0;
+		unsafe { font_fallback.MapCharacters(&text_analysis_source, 0, text_length, &font_collection, PCWSTR(wide_base_family_name.as_ptr()), font_weight, font_style, DWRITE_FONT_STRETCH_NORMAL, &mut mapped_length, &mut mapped_font, &mut scale) }.ok()?;
+		read_font_file(mapped_font.as_ref()?)
 	}
 }
 

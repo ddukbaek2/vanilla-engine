@@ -336,7 +336,7 @@ cargo run --release --example modelviewer
 
 ## 외부 의존성
 
-엔진이 직접 쓰는 크레이트입니다. 버전은 `Cargo.lock` 기준이고, 라이선스는 각 크레이트의 `Cargo.toml` 에 적힌 것입니다. 직접 의존성은 dwrote(MPL-2.0, 윈도우만)를 빼면 모두 MIT, Apache-2.0, Zlib, BSD, ISC, Unicode-3.0 같은 허용적 라이선스입니다. (self_cell 은 Apache-2.0 과 GPL-2.0 가운데 하나를 고르는 이중 라이선스입니다. kira 가 데스크탑 소리 해석에 쓰는 symphonia 는 MPL-2.0 입니다)
+엔진이 직접 쓰는 크레이트입니다. 버전은 `Cargo.lock` 기준이고, 라이선스는 각 크레이트의 `Cargo.toml` 에 적힌 것입니다. 직접 의존성은 모두 MIT, Apache-2.0, Zlib, BSD, ISC, Unicode-3.0 같은 허용적 라이선스입니다. (self_cell 은 Apache-2.0 과 GPL-2.0 가운데 하나를 고르는 이중 라이선스입니다. kira 가 데스크탑 소리 해석에 쓰는 symphonia 는 MPL-2.0 입니다)
 
 **데스크탑, 웹 공통**
 
@@ -380,8 +380,8 @@ cargo run --release --example modelviewer
 
 | 크레이트 | 버전 | 쓰는 곳 | 하는 일 | 라이선스 |
 | --- | --- | --- | --- | --- |
-| [windows-sys](https://crates.io/crates/windows-sys) | 0.52.0 | `platform/desktop/windowsplatform.rs`, `platform/desktop/systemfont.rs` | 잠자기에서 깸(WM_POWERBROADCAST)을 받는 창 서브클래싱, 주된 손이 손가락인지, system-ui 의 메뉴 글꼴과 ClearType 켜짐. 켜는 기능은 Win32_Foundation, Win32_Devices_Display, Win32_Graphics_Gdi, Win32_System_Power, Win32_UI_Shell, Win32_UI_WindowsAndMessaging 뿐입니다 | MIT / Apache-2.0 |
-| [dwrote](https://crates.io/crates/dwrote), [winapi](https://crates.io/crates/winapi) | 0.11.5, 0.3.9 | `platform/desktop/systemfont.rs` | DirectWrite 로 글꼴 이름의 파일을 찾고, 글꼴에 없는 글자의 대체 글꼴을 IDWriteFontFallback 으로 고릅니다 | MPL-2.0, MIT / Apache-2.0 |
+| [windows-sys](https://crates.io/crates/windows-sys) | 0.52.0 | `platform/desktop/windowsplatform.rs`, `platform/desktop/systemfont.rs` | 잠자기에서 깸(WM_POWERBROADCAST)을 받는 창 서브클래싱, 주된 손이 손가락인지, system-ui 의 메뉴 글꼴과 ClearType 켜짐, 대체 글꼴을 고를 사용자 기본 언어. 켜는 기능은 Win32_Foundation, Win32_Devices_Display, Win32_Globalization, Win32_Graphics_Gdi, Win32_System_Power, Win32_UI_Shell, Win32_UI_WindowsAndMessaging 뿐입니다 | MIT / Apache-2.0 |
+| [windows](https://crates.io/crates/windows), [windows-core](https://crates.io/crates/windows-core) | 0.62.2 | `platform/desktop/systemfont.rs` | DirectWrite 로 글꼴 이름의 파일을 찾고, 글꼴에 없는 글자의 대체 글꼴을 IDWriteFontFallback 으로 고릅니다 (cpal, gilrs 가 쓰는 같은 판) | MIT / Apache-2.0 |
 
 **macOS 만**
 

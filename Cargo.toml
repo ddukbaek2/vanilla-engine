@@ -81,12 +81,12 @@ sys-locale = "0.3"
 # rustls 의 암호 공급자. (tungstenite 가 rustls 를 기본 기능 없이 쓰므로 ring 을 켜고, WebSocketClient 가 붙을 때 정한다. tls 기능일 때만)
 rustls = { version = "0.23", default-features = false, features = ["ring"], optional = true }
 
-# 윈도우: 잠자기에서 깸(WM_POWERBROADCAST)을 받으려 창을 서브클래싱하고, 주된 손이 손가락인지 크로미엄처럼 읽는다. 크롬처럼 system-ui 의 메뉴 글꼴(NONCLIENTMETRICS)과 ClearType 켜짐을 읽는다. (winit 과 같은 판, 쓰는 기능만 켠다)
+# 윈도우: 잠자기에서 깸(WM_POWERBROADCAST)을 받으려 창을 서브클래싱하고, 주된 손이 손가락인지 크로미엄처럼 읽는다. 크롬처럼 system-ui 의 메뉴 글꼴(NONCLIENTMETRICS)과 ClearType 켜짐, 대체 글꼴을 고를 사용자 기본 언어를 읽는다. (winit 과 같은 판, 쓰는 기능만 켠다)
 [target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_Devices_Display", "Win32_Graphics_Gdi", "Win32_System_Power", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
-# 윈도우: 시스템 글꼴. (DirectWrite 로 글꼴 이름의 파일을 찾고, 글꼴에 없는 글자의 대체 글꼴을 IDWriteFontFallback 으로 고른다. 원본 크롬 윈도우도 DirectWrite 로 고른다)
-dwrote = { version = "0.11", default-features = false }
-winapi = { version = "0.3", features = ["dwrite", "winnls"] }
+windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_Devices_Display", "Win32_Globalization", "Win32_Graphics_Gdi", "Win32_System_Power", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+# 윈도우: 시스템 글꼴. (DirectWrite 로 글꼴 이름의 파일을 찾고, 글꼴에 없는 글자의 대체 글꼴을 IDWriteFontFallback 으로 고른다. 원본 크롬 윈도우도 DirectWrite 로 고른다. 마이크로소프트의 windows 크레이트로 cpal, gilrs 가 쓰는 같은 판이라 더 받는 크레이트가 없다. windows-core 는 #[implement] 가 지은 코드가 부른다)
+windows = { version = "0.62", features = ["Win32_Graphics_DirectWrite"] }
+windows-core = "0.62"
 
 # 맥: 게임패드 진동. (gilrs 의 macOS force feedback 이 비어 있어, GameController 의 GCController.haptics 로 CoreHaptics 엔진을 지어 떤다. 쓰는 기능만 켠다)
 [target.'cfg(target_os = "macos")'.dependencies]
