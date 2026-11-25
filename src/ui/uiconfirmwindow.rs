@@ -12,8 +12,8 @@
 //     UIWindowLayer::open_window_in_tree(node_tree, layer_id, window_id);
 // - 원본과 다른 것:
 //   - 원본은 UIWindow 를 상속한다. 러스트 판은 UIWindow 의 덮어쓸 자리(UIWindowBehavior)를 구현한 값이다. (UIWindow::get_behavior_mut 으로 꺼낸다)
-//   - 글 줄 수는 Graphic 의 글꼴로 재야 해서 레이아웃 때 바로 알 수 없다. 처음에는 한 줄로 놓고, 글이 한 번 그려져 줄을 나누면
-//     (Text::get_measured_line_count) 다음 tick 에 다시 놓는다. 여는 움직임의 첫 프레임이라 보이는 차이는 거의 없다.
+//   - 글 줄 수는 원본처럼 레이아웃 때 바로 잰다. Graphic 이 없는 자리라 등록된 글꼴로 잰다. (Text::wrap_lines_without_graphic)
+//     글꼴이 하나도 없어 잴 수 없을 때만(데스크탑에 글꼴 파일이 없는 경우) 한 줄로 놓고, 글이 한 번 그려져 줄을 나누면 다음 tick 에 다시 놓는다.
 //   - 제목과 묻는 글은 UILabel 대신 Text 를 바로 붙인다. (줄 수를 읽으려고) 글의 오른쪽에서 왼쪽 방향은 러스트 Text 에 없어 단추 차례만 뒤집는다.
 //   - 알림은 인자 없는 Box<dyn FnMut()> 다.
 //==============================================================================
@@ -134,6 +134,53 @@ impl UIConfirmWindow {
 		}).unwrap_or(false);
 		if is_confirmed {
 			UIWindow::close_in_tree(node_tree, window_id);
+		}
+	}
+
+	//==============================================================================
+	// 떠 있으면 다시 놓기. (원본 refreshIfOpen, 글이나 차례를 바꾼 뒤)
+	//==============================================================================
+	pub fn refresh_if_open_in_tree(node_tree: &mut NodeTree, window_id: NodeId) {
+		let is_open = node_tree.get_node(window_id).and_then(|window_node| window_node.get_component::<UIWindow>()).map(|window| window.get_window_layer_id().is_some()).unwrap_or(false);
+		if is_open {
+			UIWindow::refresh_layout_in_tree(node_tree, window_id);
+		}
+	}
+
+	//==============================================================================
+	// 제목 바꾸기. (떠 있으면 다시 놓는다, 원본 setTitle)
+	//==============================================================================
+	pub fn set_title_in_tree(node_tree: &mut NodeTree, window_id: NodeId, title: &str) {
+		node_tree.with_component_mut::<UIWindow, _>(window_id, |window, tree| {
+			if let Some(confirm_window) = window.get_behavior_mut::<UIConfirmWindow>() {
+				confirm_window.set_title(tree, title);
+			}
+		});
+		UIConfirmWindow::refresh_if_open_in_tree(node_tree, window_id);
+	}
+
+	//==============================================================================
+	// 묻는 글 바꾸기. (떠 있으면 다시 놓는다, 원본 setMessage)
+	//==============================================================================
+	pub fn set_message_in_tree(node_tree: &mut NodeTree, window_id: NodeId, message: &str) {
+		node_tree.with_component_mut::<UIWindow, _>(window_id, |window, tree| {
+			if let Some(confirm_window) = window.get_behavior_mut::<UIConfirmWindow>() {
+				confirm_window.set_message(tree, message);
+			}
+		});
+		UIConfirmWindow::refresh_if_open_in_tree(node_tree, window_id);
+	}
+
+	//==============================================================================
+	// 단추 글 설정. (원본 setButtonTexts)
+	//==============================================================================
+	pub fn set_button_texts(&mut self, node_tree: &mut NodeTree, cancel_text: &str, confirm_text: &str) {
+		self.options.cancel_text = cancel_text.to_string();
+		self.options.confirm_text = confirm_text.to_string();
+		for (button_id, button_text) in [(self.cancel_button_id, cancel_text), (self.confirm_button_id, confirm_text)] {
+			if let Some(label) = button_id.and_then(|button_id| node_tree.get_node_mut(button_id)).and_then(|button_node| button_node.get_component_mut::<UILabel>()) {
+				label.set_text(button_text);
+			}
 		}
 	}
 
@@ -293,7 +340,7 @@ impl UIConfirmWindow {
 	}
 
 	//==============================================================================
-	// 그 너비로 줄을 바꾼 묻는 글의 세로. (아직 줄을 못 쟀으면 한 줄과 false)
+	// 그 너비로 줄을 바꾼 묻는 글의 세로. (글꼴로 재고, 잴 수 없으면 그린 결과를, 그것도 없으면 한 줄과 false)
 	//==============================================================================
 	fn measure_message_height(&self, node_tree: &mut NodeTree, text_width: f32) -> (f32, bool) {
 		let message_text = match self.message_id.and_then(|message_id| node_tree.get_node_mut(message_id)).and_then(|message_node| message_node.get_component_mut::<Text>()) {
@@ -306,6 +353,9 @@ impl UIConfirmWindow {
 		};
 		message_text.set_word_wrap_width(text_width);
 		let line_height = message_text.get_font_size() * message_text.get_line_spacing();
+		if let Some(line_list) = message_text.wrap_lines_without_graphic(text_width) {
+			return ((line_list.len().max(1) as f32 * line_height).ceil(), true);
+		}
 		match message_text.get_measured_line_count() {
 			Some(line_count) => {
 				((line_count as f32 * line_height).ceil(), true)

@@ -23,7 +23,8 @@
 //   - 단추와 축이 바뀔 때마다 찍는 로그는 원본처럼 set_input_log_enabled 로 켜고, 기본은 끔이다. set_log_enabled 는 연결과 해제를 포함한 모든 로그의 큰 스위치다.
 //   - GamepadKind, read_gamepad_kind: 패드 이름으로 종류(엑스박스, 플레이스테이션, 닌텐도, 그 밖)를 가른다. get_active_gamepad_id 는 마지막 갱신에 단추를 누르거나 축을 크게 기울인 패드다.
 //   - vibrate(strong_magnitude, weak_magnitude, seconds): 연결된 패드를 모두 떤다.
-//     데스크탑은 gilrs force feedback(리눅스 evdev, 윈도우 XInput 과 Windows.Gaming.Input)으로 떨고, gilrs 가 진동을 대지 않는 macOS 는 아무것도 하지 않는다.
+//     데스크탑은 gilrs force feedback(리눅스 evdev, 윈도우 XInput 과 Windows.Gaming.Input)으로 떨고, gilrs 가 진동을 대지 않는 macOS 는
+//     플랫폼 층(platform/desktop/gamepadhaptics.rs)이 GameController 와 CoreHaptics 로 gilrs 패드와 짝인 컨트롤러를 떤다. (macOS 는 길이나 세기가 0 이면 앞 진동을 멈춘다)
 //     그래서 gilrs 를 진동을 켠 채 만든다. (데스크탑에서 gilrs 의 진동 스레드 하나가 돈다) 웹은 원본처럼 navigator.getGamepads() 의 vibrationActuator 에 dual-rumble 을 건다.
 //     첫 갱신(tick) 전에 부르면 gilrs 가 아직 없어 데스크탑에서는 떨지 않는다.
 //==============================================================================
@@ -378,7 +379,7 @@ impl GamepadManager {
 
 	//==============================================================================
 	// 연결된 패드를 모두 떨기. (세기는 0 ~ 1, 무거운 모터와 가벼운 모터, 초)
-	// - 데스크탑은 gilrs force feedback, 웹은 Gamepad.vibrationActuator 의 dual-rumble. 진동을 대지 않는 패드와 플랫폼(macOS)은 건너뛴다.
+	// - 데스크탑은 gilrs force feedback(macOS 는 GameController 와 CoreHaptics), 웹은 Gamepad.vibrationActuator 의 dual-rumble. 진동을 대지 않는 패드는 건너뛴다.
 	//==============================================================================
 	pub fn vibrate(&mut self, strong_magnitude: f32, weak_magnitude: f32, seconds: f32) {
 		let clamped_strong_magnitude = if strong_magnitude.is_finite() {
@@ -1036,9 +1037,18 @@ impl GamepadReader {
 	}
 
 	//==============================================================================
+	// 연결된 패드를 모두 떨기. (macOS: gilrs 패드의 OS 이름을 연결 차례로 넘겨 플랫폼 층이 짝인 GCController 를 떤다)
+	//==============================================================================
+	#[cfg(target_os = "macos")]
+	fn vibrate(&mut self, strong_magnitude: f32, weak_magnitude: f32, duration_milliseconds: u32) {
+		let gamepad_name_list: Vec<String> = self.gilrs.gamepads().map(|(_, gilrs_gamepad)| gilrs_gamepad.os_name().to_string()).collect();
+		crate::platform::vibrate_gamepads(&gamepad_name_list, strong_magnitude, weak_magnitude, duration_milliseconds);
+	}
+
+	//==============================================================================
 	// 진동을 대는 연결된 패드를 모두 떨기. (gilrs force feedback, 무거운 모터 Strong 과 가벼운 모터 Weak)
 	//==============================================================================
-	#[cfg(not(target_arch = "wasm32"))]
+	#[cfg(all(not(target_arch = "wasm32"), not(target_os = "macos")))]
 	fn vibrate(&mut self, strong_magnitude: f32, weak_magnitude: f32, duration_milliseconds: u32) {
 		use gilrs::ff::{BaseEffect, BaseEffectType, EffectBuilder, Repeat, Replay, Ticks};
 		let gamepad_id_list: Vec<gilrs::GamepadId> = self.gilrs.gamepads().filter(|(_, gilrs_gamepad)| gilrs_gamepad.is_ff_supported()).map(|(gamepad_id, _)| gamepad_id).collect();
@@ -1092,6 +1102,10 @@ impl GamepadReader {
 				}
 				gilrs::EventType::Disconnected => {
 					read_result.disconnected_gamepad_index_list.push(hardware_index);
+					#[cfg(target_os = "macos")]
+					{
+						crate::platform::release_disconnected_gamepad_haptics();
+					}
 				}
 				_ => {
 				}

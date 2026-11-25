@@ -7,6 +7,7 @@
 //   read_page_query_value(페이지 주소의 쿼리 값), read_safe_area_insets(CSS env 세이프 에어리어 인셋)
 //   read_canvas_client_position(화면 좌표에서 캔버스의 왼쪽 위), read_client_native_size(페이지 전체 크기, 데스크탑은 None)
 //   save_capture_file(검증용 화면 저장, 데스크탑은 파일, 웹은 내려받기)
+// - 맥만 vibrate_gamepads / release_disconnected_gamepad_haptics(게임패드 진동, desktop/gamepadhaptics.rs)를 낸다.
 // - 안드로이드, iOS 는 여기에 모듈을 더한다. (아직 없음)
 //==============================================================================
 // 오디오 백엔드. (데스크탑 kira, 웹 WebAudio. 두 갈래를 안에서 고른다)
@@ -29,3 +30,5 @@ pub use web::{read_canvas_client_position, read_client_native_size, read_page_qu
 pub use desktop::is_text_field_focused;
 #[cfg(target_arch = "wasm32")]
 pub use web::is_text_field_focused;
+#[cfg(target_os = "macos")]
+pub use desktop::gamepadhaptics::{release_disconnected_gamepad_haptics, vibrate_gamepads};

@@ -17,6 +17,12 @@ glow = "0.18"
 fontdue = "0.9"
 # 웹 글꼴(WOFF, WOFF2)을 TTF 로 푼다. (원본 기본 글꼴 DOSGothic 이 .woff)
 wuff = "0.2"
+# 글자 모양 짓기. (HarfBuzz 를 옮긴 것. 아랍어 글자 잇기, 합자, 커닝, 결합 부호 자리. 원본은 브라우저 Canvas2D 가 HarfBuzz 로 한다)
+rustybuzz = "0.20"
+# 양방향 정렬. (UAX #9, 오른쪽에서 왼쪽 글자와 섞인 글의 그리는 차례. 원본은 Canvas2D direction)
+unicode-bidi = "0.3"
+# 글자 묶음 나누기. (UAX #29, 받침, 결합 부호, 이모지 묶음. 원본 Intl.Segmenter granularity "grapheme")
+unicode-segmentation = "1"
 # JsonAsset 이 JSON 을 푼다. (원본 JSON.parse 자리) 객체 키는 적힌 차례를 지킨다. (UIDocument 가 원본 JSON.stringify 와 같은 차례로 쓴다)
 serde_json = { version = "1", features = ["preserve_order"] }
 # FBX 압축 배열(zlib deflate)을 푼다. (원본 DecompressionStream 자리, 순수 러스트 miniz_oxide 기본 백엔드라 wasm32 에서도 돈다)
@@ -40,8 +46,18 @@ glutin-winit = "0.5"
 raw-window-handle = "0.6"
 # 소리. (믹서 트랙, 정적 소리. 기본 기능을 끄고 cpal 출력과 ogg(vorbis), mp3, wav(pcm) 해석만 켠다)
 kira = { version = "0.12", default-features = false, features = ["cpal", "cpal-realtime", "ogg", "vorbis", "mp3", "wav", "pcm"] }
+# 낱말 나누기. (공백 없이 쓰는 한중일은 사전, 태국어 같은 동남아 글자는 LSTM 으로 낱말 사이를 찾는다. 웹은 원본처럼 브라우저 Intl.Segmenter 를 쓴다)
+icu_segmenter = "2"
 # 시스템 클립보드. (입력 필드의 복사, 잘라내기, 붙여넣기. winit 에 클립보드가 없다. 그림 기능은 끈다)
 arboard = { version = "3", default-features = false }
+
+# 맥: 게임패드 진동. (gilrs 의 macOS force feedback 이 비어 있어, GameController 의 GCController.haptics 로 CoreHaptics 엔진을 지어 떤다. 쓰는 기능만 켠다)
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSError", "NSSet", "NSString"] }
+objc2-game-controller = { version = "0.3", default-features = false, features = ["std", "GCController", "GCDevice", "GCDeviceHaptics"] }
+objc2-core-haptics = { version = "0.3", default-features = false, features = ["std", "block2", "CHHapticEngine", "CHHapticEvent", "CHHapticParameter", "CHHapticPattern", "CHHapticPatternPlayer"] }
+block2 = "0.6"
 
 # 웹(wasm): 캔버스와 WebGL2, requestAnimationFrame, WebAudio, fetch.
 [target.'cfg(target_arch = "wasm32")'.dependencies]

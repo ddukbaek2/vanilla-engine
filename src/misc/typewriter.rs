@@ -11,10 +11,11 @@
 // - 원본과 다른 점:
 //   원본은 대상을 생성자에서 받아 들고 있는다. 러스트 판은 노드 안의 컴포넌트를 들고 있을 수 없어서
 //   start / tick / skip_to_end 때마다 대상(&mut dyn TypewriterTarget)을 넘긴다. Text 는 TypewriterTarget 을 구현한다.
-//   글자 수는 원본(UTF-16 단위)과 달리 글자(char) 단위로 센다. 글자 공개 알림은 (char, 번호) 를 받는다.
+//   글자 수는 원본처럼 글자 묶음(받침, 결합 부호, 이모지 묶음을 한 자로) 단위로 센다. 글자 공개 알림은 (글자 묶음, 번호) 를 받는다.
 //   options 객체는 TypewriterOptions 구조체다.
 //==============================================================================
 use crate::core::component::text::Text;
+use unicode_segmentation::UnicodeSegmentation;
 
 //==============================================================================
 // 타자기 대상. (글 설정, 글 반환, 보일 글자 수 설정. -1 이면 전체)
@@ -83,7 +84,7 @@ impl Default for TypewriterOptions {
 }
 
 // 글자 공개 알림. (글자, 번호)
-type CharacterRevealedEvent = Box<dyn FnMut(char, usize)>;
+type CharacterRevealedEvent = Box<dyn FnMut(&str, usize)>;
 // 완료 알림.
 type CompleteEvent = Box<dyn FnMut()>;
 
@@ -91,7 +92,7 @@ type CompleteEvent = Box<dyn FnMut()>;
 // 타자기 연출기.
 //==============================================================================
 pub struct Typewriter {
-	full_characters: Vec<char>,
+	full_characters: Vec<String>,
 	revealed_count: f64,
 	characters_per_second: f32,
 	fast_forward_multiplier: f32,
@@ -125,7 +126,7 @@ impl Typewriter {
 		if let Some(text) = text {
 			target.set_text(text);
 		}
-		self.full_characters = target.get_text().chars().collect();
+		self.full_characters = target.get_text().graphemes(true).map(|grapheme| grapheme.to_string()).collect();
 		self.revealed_count = 0.0;
 		self.is_finished = self.full_characters.is_empty();
 		self.is_fast_forward = false;
@@ -157,7 +158,7 @@ impl Typewriter {
 			target.set_visible_character_count(current_whole_count as i32);
 			if let Some(character_revealed_event) = self.character_revealed_event.as_mut() {
 				for character_index in previous_whole_count..current_whole_count {
-					character_revealed_event(self.full_characters[character_index], character_index);
+					character_revealed_event(&self.full_characters[character_index], character_index);
 				}
 			}
 		}
@@ -212,7 +213,7 @@ impl Typewriter {
 	//==============================================================================
 	// 글자 공개 알림 설정. (글자, 번호)
 	//==============================================================================
-	pub fn set_character_revealed_event(&mut self, character_revealed_event: impl FnMut(char, usize) + 'static) {
+	pub fn set_character_revealed_event(&mut self, character_revealed_event: impl FnMut(&str, usize) + 'static) {
 		self.character_revealed_event = Some(Box::new(character_revealed_event));
 	}
 
@@ -247,7 +248,7 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn reveals_characters_over_time() {
-		let revealed_list: Rc<RefCell<Vec<(char, usize)>>> = Rc::new(RefCell::new(Vec::new()));
+		let revealed_list: Rc<RefCell<Vec<(String, usize)>>> = Rc::new(RefCell::new(Vec::new()));
 		let revealed_list_for_event = revealed_list.clone();
 		let complete_count = Rc::new(RefCell::new(0));
 		let complete_count_for_event = complete_count.clone();
@@ -257,7 +258,7 @@ mod tests {
 			..TypewriterOptions::default()
 		});
 		typewriter.set_character_revealed_event(move |character, character_index| {
-			revealed_list_for_event.borrow_mut().push((character, character_index));
+			revealed_list_for_event.borrow_mut().push((character.to_string(), character_index));
 		});
 		typewriter.set_complete_event(move || {
 			*complete_count_for_event.borrow_mut() += 1;
@@ -270,7 +271,7 @@ mod tests {
 
 		typewriter.tick(&mut label, 0.25);
 		assert_eq!(label.get_visible_character_count(), 2);
-		assert_eq!(*revealed_list.borrow(), vec![('안', 0), ('녕', 1)]);
+		assert_eq!(*revealed_list.borrow(), vec![(String::from("안"), 0), (String::from("녕"), 1)]);
 
 		typewriter.set_fast_forward(true);
 		typewriter.tick(&mut label, 0.1);
@@ -302,5 +303,14 @@ mod tests {
 		typewriter.start(&mut label, Some(""));
 		assert!(typewriter.is_finished());
 		assert_eq!(label.get_visible_character_count(), -1);
+
+		// 이모지 묶음과 결합 부호는 한 자다.
+		typewriter.start(&mut label, Some("👨‍👩‍👧e\u{301}x"));
+		typewriter.tick(&mut label, 0.05);
+		assert_eq!(label.get_visible_character_count(), 1);
+		typewriter.skip_to_end(&mut label);
+		typewriter.start(&mut label, Some("👨‍👩‍👧e\u{301}xy"));
+		typewriter.tick(&mut label, 0.1);
+		assert_eq!(label.get_visible_character_count(), 3);
 	}
 }

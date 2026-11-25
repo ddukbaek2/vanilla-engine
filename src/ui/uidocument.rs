@@ -590,6 +590,19 @@ impl UIDocument {
 	}
 
 	//==============================================================================
+	// 컴포넌트 하나 → 문서 데이터. (등록한 종류면 쓰기 함수가 돌려준 값, "type" 은 더하지 않는다. 등록하지 않은 종류면 경고 없이 None)
+	// - 노드 참조는 root_id 기준 경로로 적는다. (DevTools 인스펙터가 컴포넌트 속성을 보일 때 쓴다)
+	//==============================================================================
+	pub fn serialize_component(&self, node_tree: &NodeTree, root_id: NodeId, component: &dyn Component) -> Option<Map<String, Value>> {
+		let component_type = self.find_component_type(component)?;
+		let save_context = UIDocumentSaveContext {
+			node_tree,
+			root_id,
+		};
+		Some((component_type.save_component)(component, &save_context))
+	}
+
+	//==============================================================================
 	// 위젯이 붙인 컴포넌트 종류 이름 모으기. (원본 collectGeneratedComponentTypes, 원본 require 자리는 등록할 때 준 목록)
 	//==============================================================================
 	pub fn collect_generated_component_types(&self, component_list: &[Box<dyn Component>]) -> HashSet<String> {

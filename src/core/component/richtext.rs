@@ -10,12 +10,14 @@
 //   - 조각의 밑줄, 취소선, 기울임은 원본처럼 조각 속성이 없으면 Text 의 값(set_underline, set_strikethrough, set_italic)을 쓴다.
 //   - 잘못된 #색(16진수가 아닌 글자)은 흰색이다. (원본은 NaN 색)
 //   - getIntrinsicContentSize 는 재는 함수를 받는 calculate_intrinsic_content_size 다.
+// - 글자 방향: 조각을 이은 글로 문단 방향을 정하고(품은 Text 의 방향, Inherit 면 Graphic 의 방향), 오른쪽에서 왼쪽이면 조각을 오른쪽부터 놓는다.
+//   조각마다 그 방향으로 모양 짓고, 정렬 Start / End 도 그 방향으로 푼다. (원본도 같다)
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::vector2::Vector2;
 use crate::core::component::text::{Text, TextWrapMode};
 use crate::core::component::{Component, ComponentBase};
-use crate::core::graphic::{Graphic, TextAlign, TextBaseline};
+use crate::core::graphic::{detect_text_direction, Graphic, TextAlign, TextBaseline, TextDirection};
 use crate::core::node::worldnode::NodeTransform;
 
 //==============================================================================
@@ -434,7 +436,8 @@ impl RichText {
 	// 조각 배치. (합친 폭과 가장 큰 글자 크기로 정렬, 기준선은 Text 와 같은 규칙. 원본 draw_segments 의 자리 계산)
 	// - measure_width(폰트 문자열, 글) 은 글 폭을 돌려준다.
 	//==============================================================================
-	pub fn layout_segments(&self, content_size: Vector2, measure_width: &mut dyn FnMut(&str, &str) -> f32) -> RichTextLayout {
+	// - text_direction 은 실제 문단 방향이다. (Ltr 또는 Rtl, Rtl 이면 조각을 오른쪽부터 놓고 Start 는 오른쪽 정렬)
+	pub fn layout_segments(&self, content_size: Vector2, text_direction: TextDirection, measure_width: &mut dyn FnMut(&str, &str) -> f32) -> RichTextLayout {
 		let mut run_list: Vec<RichTextRun> = Vec::new();
 		let mut total_width = 0.0;
 		let mut maximum_font_size: f32 = 0.0;
@@ -461,19 +464,40 @@ impl RichText {
 			maximum_font_size = maximum_font_size.max(font_size);
 		}
 
-		// 시작 x.
+		// 시작 x. (Start / End 는 문단 방향으로 푼다)
+		let is_right_to_left = text_direction == TextDirection::Rtl;
 		let start_x = match self.text.get_text_align() {
-			TextAlign::Left | TextAlign::Start => {
+			TextAlign::Left => {
 				0.0
 			}
-			TextAlign::Right | TextAlign::End => {
+			TextAlign::Right => {
 				content_size.x - total_width
+			}
+			TextAlign::Start => {
+				if is_right_to_left {
+					content_size.x - total_width
+				}
+				else {
+					0.0
+				}
+			}
+			TextAlign::End => {
+				if is_right_to_left {
+					0.0
+				}
+				else {
+					content_size.x - total_width
+				}
 			}
 			TextAlign::Center => {
 				(content_size.x - total_width) * 0.5
 			}
 		};
 		for run in run_list.iter_mut() {
+			// 오른쪽에서 왼쪽이면 앞 조각이 오른쪽에 온다.
+			if is_right_to_left {
+				run.x = total_width - run.x - run.width;
+			}
 			run.x += start_x;
 		}
 
@@ -506,7 +530,7 @@ impl RichText {
 			let width = measure_width(&font_string, self.text.get_text());
 			return Vector2::create(width, self.text.get_font_size());
 		}
-		let layout = self.layout_segments(Vector2::zero(), measure_width);
+		let layout = self.layout_segments(Vector2::zero(), TextDirection::Ltr, measure_width);
 		let maximum_font_size = if layout.maximum_font_size > 0.0 {
 			layout.maximum_font_size
 		}
@@ -514,6 +538,58 @@ impl RichText {
 			self.text.get_font_size()
 		};
 		Vector2::create(layout.total_width, maximum_font_size)
+	}
+
+	//==============================================================================
+	// 조각을 이은 글의 실제 방향. (품은 Text 의 방향, Inherit 면 Graphic 의 방향. Auto 는 이은 글의 첫 강한 글자로)
+	//==============================================================================
+	pub fn resolve_segment_text_direction(&self, graphic: &Graphic) -> TextDirection {
+		let base_direction = if self.text.get_text_direction() != TextDirection::Inherit {
+			self.text.get_text_direction()
+		}
+		else {
+			graphic.get_text_direction()
+		};
+		match base_direction {
+			TextDirection::Rtl => {
+				TextDirection::Rtl
+			}
+			TextDirection::Auto => {
+				let joined_text: String = self.segments.iter().map(|segment| segment.text.as_str()).collect();
+				detect_text_direction(&joined_text)
+			}
+			_ => {
+				TextDirection::Ltr
+			}
+		}
+	}
+
+	//==============================================================================
+	// 글자 방향 설정. (품은 Text 에 넘긴다, 원본 setTextDirection)
+	//==============================================================================
+	pub fn set_text_direction(&mut self, text_direction: TextDirection) {
+		self.text.set_text_direction(text_direction);
+	}
+
+	//==============================================================================
+	// 글자 방향 반환.
+	//==============================================================================
+	pub fn get_text_direction(&self) -> TextDirection {
+		self.text.get_text_direction()
+	}
+
+	//==============================================================================
+	// 보일 글자 수 설정. (품은 Text 에 넘긴다, -1 이면 전체. 마크업이 있는 글은 원본처럼 자르지 않는다)
+	//==============================================================================
+	pub fn set_visible_character_count(&mut self, visible_character_count: i32) {
+		self.text.set_visible_character_count(visible_character_count);
+	}
+
+	//==============================================================================
+	// 보일 글자 수 반환.
+	//==============================================================================
+	pub fn get_visible_character_count(&self) -> i32 {
+		self.text.get_visible_character_count()
 	}
 
 	//==============================================================================
@@ -554,9 +630,11 @@ impl RichText {
 	// 조각 그리기. (원본 draw_segments)
 	//==============================================================================
 	pub fn draw_segments(&self, graphic: &mut Graphic, content_size: Vector2) {
+		let text_direction = self.resolve_segment_text_direction(graphic);
+		graphic.set_text_direction(text_direction);
 		let layout = {
 			let text_string_texture_cache = graphic.get_text_string_texture_cache();
-			self.layout_segments(content_size, &mut |font_string: &str, text: &str| text_string_texture_cache.measure_text(font_string, text).width)
+			self.layout_segments(content_size, text_direction, &mut |font_string: &str, text: &str| text_string_texture_cache.measure_text(font_string, text).width)
 		};
 		let baseline_y = layout.baseline_y;
 		graphic.set_text_align(TextAlign::Left);
@@ -602,6 +680,19 @@ impl Component for RichText {
 
 	fn get_component_type(&self) -> &'static str {
 		"RichText"
+	}
+
+	//==============================================================================
+	// 자연 크기. (조각을 합친 폭 x 가장 큰 글자 크기, 꺼져 있거나 잴 글꼴이 없으면 -1, -1. 원본 getIntrinsicContentSize)
+	//==============================================================================
+	fn get_intrinsic_content_size(&self) -> Vector2 {
+		if !self.is_enable() {
+			return Vector2::create(-1.0, -1.0);
+		}
+		if crate::core::textstringtexturecache::measure_text_without_graphic(&self.text.build_font_string(), "").is_none() {
+			return Vector2::create(-1.0, -1.0);
+		}
+		self.calculate_intrinsic_content_size(&mut |font_string: &str, text: &str| crate::core::textstringtexturecache::measure_text_without_graphic(font_string, text).map(|text_metrics| text_metrics.width).unwrap_or(0.0))
 	}
 
 	fn is_tick_needed(&self) -> bool {
@@ -886,7 +977,7 @@ mod tests {
 		rich_text.set_text_color("#00ff00");
 		rich_text.set_text_align(TextAlign::Center);
 		rich_text.set_text_baseline(TextBaseline::Middle);
-		let layout = rich_text.layout_segments(Vector2::create(200.0, 60.0), &mut measure_by_font_size);
+		let layout = rich_text.layout_segments(Vector2::create(200.0, 60.0), TextDirection::Ltr, &mut measure_by_font_size);
 		assert_eq!(layout.run_list.len(), 3);
 		assert_eq!(layout.total_width, 20.0 + 40.0 + 10.0);
 		assert_eq!(layout.maximum_font_size, 40.0);
@@ -903,7 +994,7 @@ mod tests {
 
 		rich_text.set_text_align(TextAlign::Right);
 		rich_text.set_text_baseline(TextBaseline::Top);
-		let right_layout = rich_text.layout_segments(Vector2::create(200.0, 60.0), &mut measure_by_font_size);
+		let right_layout = rich_text.layout_segments(Vector2::create(200.0, 60.0), TextDirection::Ltr, &mut measure_by_font_size);
 		assert_eq!(right_layout.run_list[0].x, 130.0);
 		assert_eq!(right_layout.baseline_y, 0.0);
 		assert_eq!(rich_text.calculate_intrinsic_content_size(&mut measure_by_font_size), Vector2::create(70.0, 40.0));
@@ -917,10 +1008,28 @@ mod tests {
 		underline_attributes.font_family = Some(String::from("DOSGothic"));
 		rich_text.append_segment("x", underline_attributes);
 		assert!(rich_text.has_segments());
-		let appended_layout = rich_text.layout_segments(Vector2::create(100.0, 20.0), &mut measure_by_font_size);
+		let appended_layout = rich_text.layout_segments(Vector2::create(100.0, 20.0), TextDirection::Ltr, &mut measure_by_font_size);
 		assert_eq!(appended_layout.run_list[0].font_string, "20px DOSGothic");
 		assert!(appended_layout.run_list[0].is_underline);
 		rich_text.clear_segments();
 		assert!(rich_text.get_segments().is_empty());
+	}
+
+	//==============================================================================
+	// 오른쪽에서 왼쪽 문단: 앞 조각이 오른쪽에 오고, Start 정렬은 오른쪽이다.
+	//==============================================================================
+	#[test]
+	fn layout_runs_right_to_left() {
+		let mut rich_text = RichText::new();
+		rich_text.set_font_size(10.0);
+		rich_text.set_text_align(TextAlign::Start);
+		rich_text.set_text("ab<b>cd</b>");
+		let layout = rich_text.layout_segments(Vector2::create(100.0, 20.0), TextDirection::Rtl, &mut measure_by_font_size);
+		assert_eq!(layout.run_list.len(), 2);
+		assert_eq!(layout.run_list[0].x, 90.0);
+		assert_eq!(layout.run_list[1].x, 80.0);
+		let left_to_right_layout = rich_text.layout_segments(Vector2::create(100.0, 20.0), TextDirection::Ltr, &mut measure_by_font_size);
+		assert_eq!(left_to_right_layout.run_list[0].x, 0.0);
+		assert_eq!(left_to_right_layout.run_list[1].x, 10.0);
 	}
 }

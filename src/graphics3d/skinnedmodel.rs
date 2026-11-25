@@ -6,20 +6,19 @@
 // - 스킨 없는 정적 메시는 합성 스킨(조인트 1개)으로, 모프 타깃은 실수 텍스처로 올려 같은 스키닝 경로로 그린다.
 // - 애니메이션 크로스페이드와 조인트 회전 오프셋(절차 포즈 가공), 모프 가중치(glTF weights / 프로그램)를 원본처럼 지원한다.
 // - 원본과 다른 것:
-//   - 원본은 async 이고 URL 을 fetch 한다. 러스트 판은 바이트를 받는 load_from_bytes / load_from_fbx_bytes / add_animations_from_fbx_bytes 와
-//     데스크탑 경로를 읽는 load_from_path / load_from_fbx_path / add_animations_from_fbx_path 를 둔다. (웹은 BlobAsset 의 바이트를 넘긴다)
+//   - 원본은 async 이고 URL 을 fetch 한다(loadFromUrl, 바이트는 loadFromBytes). 러스트 판은 그 자리에서 끝나고, 같은 바이트 함수
+//     load_from_bytes / load_from_fbx_bytes / add_animations_from_fbx_bytes 와 URL 대신 데스크탑 경로를 읽는
+//     load_from_path / load_from_fbx_path / add_animations_from_fbx_path 를 둔다. (웹은 BlobAsset 의 바이트를 넘긴다)
 //   - GL 을 쓰는 함수는 gl 을 받는다. update(delta_time) 는 GL 을 쓰지 않는다. 원본 update 6단계(바뀐 모프 타깃 업로드)는
 //     렌더러의 draw / draw_depth / draw_wireframe 가 upload_pending_morph_targets 로 대신한다. (그래서 그리기 함수가 &mut 모델을 받는다)
 //     덕분에 씬의 tick 에서 update 를 부를 수 있다.
-//   - 해석과 업로드를 나눠 부를 수 있다: interpret_content / interpret_fbx_content 는 노드, 스킨, 애니메이션을 채우고 중립 서술을 돌려준다.
-//     셰이더 없이 만든 모델(create_without_shader_program)은 포즈 계산만 한다. (애니메이션 원본 모델, 단위 시험)
 //   - 원본 노드 / 드로어블 / 스킨 / 클립 객체는 SkinnedModelNode / Drawable / Skin / AnimationClip 구조체다.
 //     드로어블의 머티리얼은 Rc<Material> 이다. 클립은 인덱스로 가리키고, sample_animation 도 클립 인덱스를 받는다.
+//     upload_wireframe_indices / upload_morph_targets 는 원본의 드로어블 객체 대신 드로어블 인덱스를 받는다. (모델을 &mut 로 빌린 채 드로어블을 넘길 수 없어서다)
 //   - 드로어블의 mesh_description 은 모프 타깃을 morph_target_list 로 옮긴 뒤라 morph_targets 가 비어 있다. (큰 델타 배열을 두 벌 들지 않는다)
-//   - 원본이 TypeError 로 멈추는 자리 가운데 몇 곳은 건너뛴다: glTF 바깥(uri) 이미지는 텍스처 없음, inverse_bind_matrices 가 없는 스킨은
-//     단위 행렬, 본이 없는 클러스터는 단위 조인트, 노드가 없거나 알 수 없는 경로의 채널은 버린다. 원본처럼 노드 matrix 와
-//     CUBICSPLINE 보간, 프리미티브 mode, glTF 노드의 weights 는 보지 않는다. FBX 는 원본처럼 스킨이 붙은 메시만 그린다.
-//   - 원본에 없는 destroy 를 더했다. (버텍스 어레이, 버퍼, 모프 텍스처, 이 모델만 쓰는 머티리얼 텍스처를 지운다)
+//   - 원본처럼 노드 matrix 와 CUBICSPLINE 보간, 프리미티브 mode 는 보지 않는다. FBX 는 원본처럼 스킨이 붙은 메시만 그린다.
+//   - destroy 가 지우는 머티리얼: 원본은 이 모델이 업로드에서 지은 것을 지운다. 러스트 판은 그 가운데 다른 곳에서 Rc 로 쥐지 않은 것만 지운다.
+//     (참조 수를 셀 수 있어서다, 자바스크립트에는 참조 수가 없다)
 //==============================================================================
 use crate::base::matrix4::Matrix4;
 use crate::base::quaternion::Quaternion;
@@ -416,7 +415,7 @@ impl SkinnedModel {
 	}
 
 	//==============================================================================
-	// 셰이더 없이 생성. (원본에 없는 것, 해석과 포즈 계산만 하는 모델, upload_meshes_and_materials 는 오류)
+	// 셰이더 없이 생성. (해석과 포즈 계산만 하는 모델, upload_meshes_and_materials 는 오류)
 	//==============================================================================
 	pub fn create_without_shader_program() -> SkinnedModel {
 		SkinnedModel {
@@ -654,8 +653,8 @@ impl SkinnedModel {
 					Vec::new()
 				}
 			};
-			// 기본 모프 가중치. (원본은 내부 노드 객체에서 weights 를 찾아 늘 비어 있으므로 메시 weights 만 쓴다)
-			let base_morph_weights = read_float_array(&mesh_value["weights"]).unwrap_or_default();
+			// 기본 모프 가중치. (glTF 노드의 weights 가 있으면 그것, 없으면 메시 weights)
+			let base_morph_weights = read_float_array(&json["nodes"][node_index]["weights"]).or_else(|| read_float_array(&mesh_value["weights"])).unwrap_or_default();
 			let primitive_value_list = mesh_value["primitives"].as_array().map(|primitive_values| primitive_values.as_slice()).unwrap_or(&[]);
 			for primitive_value in primitive_value_list.iter() {
 				let attributes = &primitive_value["attributes"];
@@ -1723,14 +1722,14 @@ impl SkinnedModel {
 	}
 
 	//==============================================================================
-	// 애니메이션 클립 목록 반환. (원본에 없는 것, 길이, 채널 보기)
+	// 애니메이션 클립 목록 반환. (길이, 채널 보기)
 	//==============================================================================
 	pub fn get_animation_list(&self) -> &[AnimationClip] {
 		&self.animation_list
 	}
 
 	//==============================================================================
-	// 파괴. (GL 리소스 해제, 원본에 없는 것, 다른 곳에서도 쓰는 머티리얼은 남긴다)
+	// 파괴. (GL 리소스 해제, 다른 곳에서도 쓰는 머티리얼은 남긴다)
 	//==============================================================================
 	pub fn destroy(&mut self, gl: &glow::Context) {
 		let mut destroyed_material_list: Vec<*const Material> = Vec::new();

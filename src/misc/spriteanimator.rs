@@ -12,11 +12,13 @@
 //         animator.play("idle", SpriteAnimatorPlayOptions::default());
 //     }));
 // - 원본과 다른 점:
-//   play 는 원본처럼 그 자리에서 Sprite 에 프레임을 넣지 못한다. (러스트는 컴포넌트 하나를 빌린 동안 형제 컴포넌트를 함께 빌릴 수 없다)
+//   play 는 원본처럼 그 자리에서 Sprite 에 프레임을 넣지 못한다. 러스트 컴포넌트는 자기 노드를 가리키지 않고(노드는 NodeTree 가 들고,
+//     컴포넌트에게 노드를 넘겨주는 것은 tick 의 ComponentContext 뿐이다), 노드에서 애니메이터를 &mut 로 빌린 동안 같은 노드의 Sprite 를 함께 빌릴 수 없다.
 //     그래서 다음 tick 에 넣는다. 그 자리에서 넣으려면 노드를 받는 play_on_node 를 쓴다.
 //   on_complete 는 애니메이터를 받는 한 번짜리 콜백(FnOnce(&mut SpriteAnimator))이다. 원본은 클로저가 애니메이터를 붙잡아 썼다.
 //   fps 는 이름을 줄이지 않아 frame_per_second 다. 기본값(10, 반복)은 DEFAULT_FRAME_PER_SECOND 와 true 를 넘긴다.
-//   아틀라스 JSON 은 serde_json::Value 로 받는다. 원본 findSprite(찾아서 들고 있기)는 형제를 들고 있을 수 없어 옮기지 않았다.
+//   아틀라스 JSON 은 serde_json::Value 로 받는다. 원본 findSprite(찾아서 들고 있기)는 형제 컴포넌트의 참조를 들고 있을 수 없어(빌림이 tick 을 넘어 살 수 없다)
+//     옮기지 않았다. 대신 tick 마다 context.get_node_mut().get_component_mut::<Sprite>() 로 찾고, 밖에서는 apply_current_frame(sprite) 에 Sprite 를 넘긴다.
 //==============================================================================
 use crate::base::rect::Rect;
 use crate::core::animation::Animation;
@@ -239,7 +241,7 @@ impl SpriteAnimator {
 	}
 
 	//==============================================================================
-	// 지금 프레임 번호. (러스트 판에서 더한 것, 시험과 디버그용)
+	// 지금 프레임 번호.
 	//==============================================================================
 	pub fn get_current_frame_index(&self) -> usize {
 		self.animation.get_current_frame_index()

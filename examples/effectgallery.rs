@@ -13,7 +13,7 @@
 
 use std::rc::Rc;
 use vanilla::core::graphic::TextAlign;
-use vanilla::{math, Color, Component, ComponentBase, ComponentContext, EmitterShape, Engine, EngineConfiguration, Graphic, Image, Mask, NodeId, Paint, ParticleRenderShape, ParticleSystem, Pivot, Rect, Scene, SceneBase, ScreenEffect, ScreenEffectType, ShaderSprite, ShaderSpriteEffect, Sprite, Text, TrailRenderer, Vector2, ViewScaleMode};
+use vanilla::{math, Color, Component, ComponentBase, ComponentContext, Engine, EngineConfiguration, Graphic, Image, Mask, NodeId, Paint, ParticleEmitterShape, ParticleRenderShape, ParticleSystem, Pivot, Rect, Scene, SceneBase, ScreenEffect, ScreenEffectType, ShaderSprite, ShaderSpriteEffect, Sprite, Text, TrailRenderer, Vector2, ViewScaleMode};
 
 //==============================================================================
 // 전역 상수 목록.
@@ -460,7 +460,7 @@ impl EffectGalleryScene {
 		particle_system.set_random_seed(100 + self.particle_node_ids.len() as u32);
 		let mut warm_up_seconds = 0.0;
 		while warm_up_seconds < PARTICLE_WARM_UP_SECONDS {
-			particle_system.simulate(MOVER_FRAME_STEP, Vector2::zero());
+			particle_system.simulate(MOVER_FRAME_STEP);
 			warm_up_seconds += MOVER_FRAME_STEP;
 		}
 		self.scene_base.get_node_tree_mut()[particle_id].add_component(particle_system);
@@ -476,8 +476,8 @@ impl EffectGalleryScene {
 
 		// circle: 위로 뿜었다 떨어지는 분수.
 		let mut fountain = ParticleSystem::new();
-		fountain.set_emitter_shape(EmitterShape::Cone);
-		fountain.set_cone_angle(math::degree_to_radian(30.0));
+		fountain.set_emitter_shape(ParticleEmitterShape::Cone);
+		fountain.set_cone_angle(math::degree_to_radian(15.0));
 		fountain.set_emission_rate(70.0);
 		fountain.set_start_speed(150.0, 190.0);
 		fountain.set_gravity(0.0, 260.0);
@@ -490,7 +490,7 @@ impl EffectGalleryScene {
 
 		// rect: 돌며 떨어지는 색종이.
 		let mut confetti = ParticleSystem::new();
-		confetti.set_emitter_shape(EmitterShape::Edge);
+		confetti.set_emitter_shape(ParticleEmitterShape::Edge);
 		confetti.set_edge_width(90.0);
 		confetti.set_emission_rate(24.0);
 		confetti.set_start_speed(15.0, 35.0);
@@ -523,7 +523,7 @@ impl EffectGalleryScene {
 
 		// image: 돌며 퍼지는 별 그림.
 		let mut stars = ParticleSystem::new();
-		stars.set_emitter_shape(EmitterShape::Circle);
+		stars.set_emitter_shape(ParticleEmitterShape::Circle);
 		stars.set_shape_radius(10.0);
 		stars.set_emission_rate(8.0);
 		stars.set_start_speed(20.0, 40.0);
@@ -539,7 +539,7 @@ impl EffectGalleryScene {
 
 		// 끌개: 가운데로 빨려 들며 도는 소용돌이. (더하기 합성)
 		let mut vortex = ParticleSystem::new();
-		vortex.set_emitter_shape(EmitterShape::Circle);
+		vortex.set_emitter_shape(ParticleEmitterShape::Circle);
 		vortex.set_shape_radius(46.0);
 		vortex.set_emission_rate(140.0);
 		vortex.set_start_speed(0.0, 6.0);
@@ -556,9 +556,8 @@ impl EffectGalleryScene {
 
 		// 흔들림: 살랑이며 오르는 물방울.
 		let mut bubbles = ParticleSystem::new();
-		bubbles.set_emitter_shape(EmitterShape::Rectangle);
+		bubbles.set_emitter_shape(ParticleEmitterShape::Box);
 		bubbles.set_box_size(70.0, 0.0);
-		bubbles.set_cone_angle(math::degree_to_radian(20.0));
 		bubbles.set_emission_rate(12.0);
 		bubbles.set_start_speed(25.0, 40.0);
 		bubbles.set_wobble(10.0, 3.0);
@@ -571,7 +570,7 @@ impl EffectGalleryScene {
 
 		// edge: 위 가로 선분에서 내리는 눈.
 		let mut snow = ParticleSystem::new();
-		snow.set_emitter_shape(EmitterShape::Edge);
+		snow.set_emitter_shape(ParticleEmitterShape::Edge);
 		snow.set_edge_width(110.0);
 		snow.set_emission_rate(20.0);
 		snow.set_start_speed(15.0, 30.0);
@@ -615,7 +614,7 @@ impl EffectGalleryScene {
 		let node_tree = self.scene_base.get_node_tree_mut();
 		for particle_id in self.particle_node_ids.iter() {
 			if let Some(particle_system) = node_tree[*particle_id].get_component_mut::<ParticleSystem>() {
-				particle_system.simulate(MOVER_FRAME_STEP, Vector2::zero());
+				particle_system.simulate(MOVER_FRAME_STEP);
 			}
 		}
 	}

@@ -1,6 +1,6 @@
 //==============================================================================
 // misc 도구 둘러보기 예제. (데스크탑 창, 화면 확인용)
-// - ImageScroller(흐르는 배경), Camera2D + Shaker(월드 격자와 PathFinder 경로), NodeLayout(패널), Typewriter + Localization(대사),
+// - ImageScroller(흐르는 배경), Camera2D(천천히 좌우로 도는 회전) + Shaker(월드 격자와 PathFinder 경로), NodeLayout(패널), Typewriter + Localization(대사),
 //   FloatingText(떠오르는 숫자), TouchEffect(빛 입자), SpriteAnimator(시트 애니메이션), VirtualPad(조이스틱)를 한 화면에 그린다.
 // - 실행: cargo run --example misctour
 //   검증용으로 스스로 끝내려면 VANILLA_CAPTURE_PATH=<폴더>/shot_{frame}.png VANILLA_CAPTURE_FRAMES=90 VANILLA_CAPTURE_EXIT=1 을 준다.
@@ -256,6 +256,9 @@ impl Scene for MiscTourScene {
 		self.spawn_seconds += time_delta;
 
 		self.image_scroller.tick(time_delta);
+		// 천천히 좌우로 돈다. (JS 예제 cameratour 와 같은 흔들기)
+		let rotation = (self.elapsed_seconds * 0.6).sin() * 12.0;
+		self.camera.set_rotation(rotation);
 		let follow_target = Grid::to_world_center(11, 3, TILE_SIZE);
 		self.camera.follow(&[follow_target], 1.5, time_delta);
 		self.camera.tick(time_delta);
@@ -309,8 +312,9 @@ impl Scene for MiscTourScene {
 		graphic.push_state();
 		let shake_offset = self.shaker.get_offset();
 		graphic.translate(shake_offset.x, shake_offset.y);
-		self.camera.apply_transform(graphic);
+		self.camera.begin(graphic);
 		self.draw_world(graphic);
+		self.camera.end(graphic);
 		graphic.pop_state();
 		self.scene_base.draw(graphic);
 	}

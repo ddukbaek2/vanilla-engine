@@ -10,10 +10,9 @@
 //     원본이 인스턴스를 고치는 set_texture / set_use_alpha_cutout / set_subsurface_factor 는 &self 로 부를 수 있게 안에서 Cell 로 든다.
 //   - 이미지 해석은 원본 createImageBitmap(비동기) 대신 image 크레이트(png, jpeg, webp)로 그 자리에서 한다. 그래서 async 가 없다.
 //     원본처럼 flip_y 면 위아래를 뒤집고, is_color_data 면 SRGB8_ALPHA8 로 올린다.
-//   - 원본 load_image_description(url) 은 데스크탑 경로를 읽는 load_image_description(path) 와 바이트를 받는
-//     create_image_description(bytes) 로 나눴다. (웹은 BlobAsset 으로 받은 바이트를 넘긴다)
+//   - 원본 load_image_description(url) 은 URL 대신 데스크탑 경로를 읽는다. 바이트를 받는 create_image_description(bytes) 는 원본과 같다.
+//     (웹은 BlobAsset 으로 받은 바이트를 넘긴다)
 //   - 원본 이미지 서술의 source(캔버스/비트맵)는 RGBA 픽셀(ImageSource)로 받는다.
-//   - 원본에 없는 destroy 를 더했다. (텍스처를 지운다)
 //==============================================================================
 use crate::core::graphic::GlTexture;
 use crate::core::shaderprogram::ShaderProgram;
@@ -428,7 +427,7 @@ impl Material {
 	}
 
 	//==============================================================================
-	// 파괴. (기본 슬롯 텍스처 해제, 원본에 없는 것, 추가 슬롯 텍스처는 건 쪽이 지운다)
+	// 파괴. (기본 슬롯 텍스처 해제, 추가 슬롯 텍스처는 건 쪽이 지운다)
 	//==============================================================================
 	pub fn destroy(&self, gl: &glow::Context) {
 		let owned_texture_list = [self.base_color_texture, self.normal_texture, self.metallic_roughness_texture, self.glossiness_texture, self.occlusion_texture, self.emissive_texture, self.specular_texture, self.opacity_texture];

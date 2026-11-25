@@ -9,6 +9,7 @@
 // - 캔버스는 처음 쓸 때 하나 만들어 굽기와 재기에 같이 쓴다. 문서에는 붙이지 않는다.
 //==============================================================================
 use crate::base::platform::SYSTEM_FONT_STRING;
+use crate::core::textshaping::ShapingDirection;
 use crate::core::textstringtexturecache::{FontDescription, TextDrawKind, TextMetrics};
 use std::cell::RefCell;
 use wasm_bindgen::{JsCast, JsValue};
@@ -51,22 +52,35 @@ pub fn measure_text(font_description: &FontDescription, text: &str) -> TextMetri
 			width: text_metrics.width() as f32,
 			font_ascent,
 			font_descent,
+			actual_bounding_box_left: read_finite_value(text_metrics.actual_bounding_box_left(), 0.0),
+			actual_bounding_box_right: read_finite_value(text_metrics.actual_bounding_box_right(), text_metrics.width() as f32),
+			actual_bounding_box_ascent: read_finite_value(text_metrics.actual_bounding_box_ascent(), font_ascent),
+			actual_bounding_box_descent: read_finite_value(text_metrics.actual_bounding_box_descent(), font_descent),
 		})
 	});
 	measured.unwrap_or_default()
 }
 
 //==============================================================================
-// 문자열 굽기. (원본 bake_entry. 크기와 펜 자리 계산이 원본과 같다)
+// 문자열 굽기. (원본 bake_entry. 크기와 펜 자리 계산이 원본과 같다, direction 은 캔버스의 direction)
 //==============================================================================
-pub fn bake_text(text_draw_kind: TextDrawKind, text: &str, font_description: &FontDescription, line_width: f32, bake_scale: f32) -> Option<SystemFontBitmap> {
+pub fn bake_text(text_draw_kind: TextDrawKind, text: &str, font_description: &FontDescription, line_width: f32, bake_scale: f32, direction: ShapingDirection) -> Option<SystemFontBitmap> {
 	let font_string = build_css_font_string(font_description, bake_scale);
+	let direction_name = match direction {
+		ShapingDirection::LeftToRight => {
+			"ltr"
+		}
+		ShapingDirection::RightToLeft => {
+			"rtl"
+		}
+	};
 	with_canvas(|system_font_canvas| {
 		let canvas = &system_font_canvas.canvas;
 		let context = &system_font_canvas.context;
 
 		// 배율을 곱한 폰트로 잰다. (경계는 왼쪽 기준)
 		context.set_font(&font_string);
+		set_canvas_direction(context, direction_name);
 		context.set_text_align("left");
 		let text_metrics = context.measure_text(text).ok()?;
 
@@ -101,6 +115,7 @@ pub fn bake_text(text_draw_kind: TextDrawKind, text: &str, font_description: &Fo
 		canvas.set_height(bitmap_height as u32);
 		context.clear_rect(0.0, 0.0, bitmap_width as f64, bitmap_height as f64);
 		context.set_font(&font_string);
+		set_canvas_direction(context, direction_name);
 		context.set_text_align("left");
 		context.set_text_baseline("alphabetic");
 		match text_draw_kind {
@@ -139,6 +154,50 @@ pub fn bake_text(text_draw_kind: TextDrawKind, text: &str, font_description: &Fo
 }
 
 //==============================================================================
+// 시스템 글꼴 조각 재기. (올린 글꼴에 없는 글자 묶음, 크기는 픽셀. 원본 브라우저의 글꼴 대체 자리)
+//==============================================================================
+pub fn measure_piece(font_description: &FontDescription, pixel_size: f32, text: &str, is_right_to_left: bool) -> f32 {
+	let mut piece_description = font_description.clone();
+	piece_description.font_size = pixel_size;
+	let font_string = build_css_font_string(&piece_description, 1.0);
+	let measured = with_canvas(|system_font_canvas| {
+		system_font_canvas.context.set_font(&font_string);
+		set_canvas_direction(&system_font_canvas.context, if is_right_to_left {
+			"rtl"
+		}
+		else {
+			"ltr"
+		});
+		let text_metrics = system_font_canvas.context.measure_text(text).ok()?;
+		Some(text_metrics.width() as f32)
+	});
+	measured.unwrap_or(0.0)
+}
+
+//==============================================================================
+// 시스템 글꼴 조각 래스터. (덮인 정도, 왼쪽은 펜 자리에서, 위는 기준선에서. 크기는 픽셀)
+//==============================================================================
+pub fn rasterize_piece(font_description: &FontDescription, pixel_size: f32, text: &str, is_right_to_left: bool) -> Option<crate::core::textshaping::GlyphRaster> {
+	let mut piece_description = font_description.clone();
+	piece_description.font_size = pixel_size;
+	let direction = if is_right_to_left {
+		ShapingDirection::RightToLeft
+	}
+	else {
+		ShapingDirection::LeftToRight
+	};
+	let bitmap = bake_text(TextDrawKind::Fill, text, &piece_description, 0.0, 1.0, direction)?;
+	let coverage: Vec<u8> = bitmap.pixels.chunks_exact(4).map(|pixel| pixel[3]).collect();
+	Some(crate::core::textshaping::GlyphRaster {
+		coverage,
+		width: bitmap.bitmap_width,
+		height: bitmap.bitmap_height,
+		left_x: -(bitmap.pen_x.round() as i32),
+		top_y: bitmap.baseline_y.round() as i32,
+	})
+}
+
+//==============================================================================
 // CSS 폰트 문자열 만들기. ("italic bold 32px "이름", 시스템 글꼴 목록")
 // - 이름이 비었거나 "default" 면 시스템 글꼴 목록만 쓴다. 이름에 쉼표가 있으면 이미 목록이라 그대로 앞에 둔다.
 //==============================================================================
@@ -149,11 +208,11 @@ fn build_css_font_string(font_description: &FontDescription, bake_scale: f32) ->
 	else {
 		""
 	};
-	let weight_text = if font_description.is_bold {
-		"bold "
+	let weight_text = if font_description.font_weight != 400 {
+		format!("{} ", font_description.font_weight)
 	}
 	else {
-		""
+		String::new()
 	};
 	let pixel_size = font_description.font_size * bake_scale;
 	let family_name = font_description.family_name.trim();
@@ -167,6 +226,13 @@ fn build_css_font_string(font_description: &FontDescription, bake_scale: f32) ->
 		format!("\"{}\", {}", family_name.replace('"', ""), SYSTEM_FONT_STRING)
 	};
 	format!("{}{}{}px {}", style_text, weight_text, pixel_size, family_list)
+}
+
+//==============================================================================
+// 캔버스의 글 방향 넣기. (web-sys 에 direction 세터가 없는 판도 있어 속성으로 넣는다)
+//==============================================================================
+fn set_canvas_direction(context: &web_sys::CanvasRenderingContext2d, direction_name: &str) {
+	let _ = js_sys::Reflect::set(context, &JsValue::from_str("direction"), &JsValue::from_str(direction_name));
 }
 
 //==============================================================================

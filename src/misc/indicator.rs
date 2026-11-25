@@ -2,12 +2,8 @@
 // 인디케이터. (돌아가는 톱니바퀴 모양 로딩 표시)
 // - 원본 experimental/indicator.js 를 옮긴 것이다. 노드가 아닌 그냥 객체라서, 들고 있는 쪽이 tick 과 draw 를 불러 준다.
 //   중심에서 바깥으로 뻗는 톱니 8 개와 두꺼운 안쪽 링을 회전시켜 그린다.
-// - 원본과 다른 점:
-//   - 원본 tick / draw 는 this.is_visible() 를 부르지만 그런 함수가 없어(get_visible 만 있다) 실제로는 예외가 난다.
-//     러스트 판은 출력 여부를 그대로 읽는다. 이름은 원본처럼 set_visible / get_visible 이다.
-//   - 색은 문자열 대신 Color 다. (원본 "#ffffff", "rgba(...)" 는 Color::create_from_hex / create_from_rgba 로 만든다)
-//   - 원본 선 끝(lineCap round)은 둥글다. 러스트 Graphic 의 선은 끝이 각지다.
-//   - 원본 import 경로("./graphic.js")는 깨져 있다. 러스트 판은 core::graphic 을 쓴다.
+// - 원본과 같이 선 끝은 각지다. set_color 는 Color 와 글("#ffffff" 등, Color 의 From<&str>)을 받는다.
+//   build_teeth_segments, get_radius, get_rotation 은 원본에도 있다.
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::math;

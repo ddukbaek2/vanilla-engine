@@ -12,8 +12,9 @@
 //     list_view.set_bind_item_event(Box::new(|tree: &mut NodeTree, item_id: NodeId, item_index: usize| { ... }));
 //     list_view.set_item_count(500);
 // - 원본과 다른 것:
-//   - 원본 setTemplateNode 는 템플릿 노드를 UIDocument 로 직렬화해 두고 복제한다. 러스트 판은 컴포넌트를 복제할 수 없어(Clone 이 아니다)
-//     항목 노드를 만드는 함수(set_create_item_event)를 받는다. 만든 노드는 content 노드의 자식으로 옮겨 붙인다.
+//   - set_template_node 는 원본처럼 템플릿 노드를 UIDocument 로 직렬화해 두고 항목마다 복제한다. 원본은 반사로 모든 컴포넌트를 적지만,
+//     러스트 판은 UIDocument 에 등록한 종류만 복제한다. (게임 컴포넌트는 set_template_node_with_document 에 등록을 마친 UIDocument 를 넘긴다)
+//   - 항목 노드를 만드는 함수(set_create_item_event)도 받는다. (러스트 판에서 먼저 생긴 범용 기능, 원본에도 넣었다) 만든 노드는 content 노드의 자식으로 옮겨 붙인다.
 //     항목 크기를 정하지 않았으면(0) 원본이 템플릿 크기를 읽듯 처음 만든 항목 노드의 진행 축 content_size 를 읽는다.
 //   - 바인드 이벤트는 (트리, 항목 노드, 항목 번호) 를 받는다. 끝 알림은 리스트 뷰와 문맥을 받는다.
 //   - set_item_count, set_item_size, set_spacing, refresh 는 값을 정해 두고 다음 tick 에 스크롤 영역 갱신과 다시 바인딩을 한다.
@@ -23,6 +24,7 @@
 use crate::base::vector2::Vector2;
 use crate::core::component::{Component, ComponentBase};
 use crate::core::node::nodetree::{ComponentContext, NodeId, NodeTree};
+use crate::ui::uidocument::UIDocument;
 use crate::ui::uiscrollview::UIScrollView;
 use crate::ui::uisnapscrollview::{find_scroll_view, find_scroll_view_mut, UISnapScrollView};
 
@@ -91,6 +93,38 @@ impl UIListView {
 	//==============================================================================
 	pub fn set_create_item_event(&mut self, create_item_event: UIListViewCreateItemEvent) {
 		self.create_item_event = Some(create_item_event);
+	}
+
+	//==============================================================================
+	// 템플릿 노드 설정. (UIDocument 로 직렬화해 두고 항목마다 복제한다, 템플릿은 끈다. 항목 크기가 0 이면 템플릿 크기로, 원본 setTemplateNode)
+	//==============================================================================
+	pub fn set_template_node(&mut self, node_tree: &mut NodeTree, template_node_id: NodeId) {
+		self.set_template_node_with_document(node_tree, template_node_id, UIDocument::new());
+	}
+
+	//==============================================================================
+	// 템플릿 노드 설정. (게임 컴포넌트를 등록한 UIDocument 로 직렬화하고 복제한다)
+	//==============================================================================
+	pub fn set_template_node_with_document(&mut self, node_tree: &mut NodeTree, template_node_id: NodeId, ui_document: UIDocument) {
+		let mut template_data = ui_document.serialize_node(node_tree, template_node_id);
+		if let Some(template_object) = template_data.as_object_mut() {
+			template_object.insert(String::from("active"), serde_json::Value::Bool(true));
+		}
+		let template_size = match node_tree.get_node_mut(template_node_id) {
+			Some(template_node) => {
+				template_node.set_active(false);
+				template_node.get_content_size()
+			}
+			None => {
+				return;
+			}
+		};
+		if self.item_size <= 0.0 {
+			self.item_size = self.select_axis(template_size);
+		}
+		let mut ui_document = ui_document;
+		self.create_item_event = Some(Box::new(move |tree: &mut NodeTree| ui_document.deserialize_node(tree, &template_data)));
+		self.is_scroll_content_size_pending = true;
 	}
 
 	//==============================================================================

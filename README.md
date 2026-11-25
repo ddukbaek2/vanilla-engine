@@ -233,16 +233,20 @@ init();
 | `quickstart` | 빠른 시작과 같은 코드 |
 | `nodebasics` | 노드, Paint, Text, 직접 만든 컴포넌트 |
 | `uigallery`, `uigallery2` | UI 위젯 전부 |
-| `inputgallery` | 입력 필드, 한글 IME 조합, 선택 영역, 리치텍스트 |
+| `inputgallery` | 입력 필드, 한글 IME 조합, 선택 영역, 리치텍스트, 게임패드 진동 시험 (패드의 A, B, X, Y) |
 | `effectgallery` | 셰이더 스프라이트 50종, 화면 효과, 트레일, 파티클(렌더 모양 넷, 끌개, 흔들림, edge, 월드 공간) |
 | `misctour` | 카메라, 길찾기, 대화 시스템, 화면 흔들림, 플로팅 텍스트 |
 | `timelineshowcase` | 타임라인 문서 재생 |
 | `modelviewer` | 스키닝 3D(glTF, FBX), 그림자, 블룸 |
 | `engineextras` | 테, 진행 고리, 부드러운 그늘, 마우스 커서, 카메라 손짓, 마우스 단추와 손가락 입력 (직접 눌러 본다) |
+| `devtoolsshowcase` | 개발자 도구(F2): 하이어라키, 인스펙터, 통계, 로컬 스토리지, 설정 |
 | `toonshowcase` | 툰 3D: 기본 도형과 바깥선, GLB 모형의 뼈대 움직임, 셀 셰이딩 |
 | `toonview` | 노드 사각형 안 툰(ToonView3D), Camera3D 로 3D 점 위에 얹은 2D, 비치는 것 정렬, 툰 색 보정 |
 | `audiotone` | 소리 재생, 효과음 풀, 비프 |
 | `gamepadlist` | 연결된 게임패드 목록 |
+| `uiscenelayout` | UIScene 과 UINode 오토레이아웃(세이프 에어리어 가이드, 여백 가이드, 같은 너비 단추, 글의 자연 크기) |
+| `panelayout` | DOM 화면 분할 패널(Pane): 도구 막대, 끌어서 크기를 바꾸는 패널, 오른쪽 패널의 엔진 캔버스 (웹 전용) |
+| `textshaping` | 글자 모양 짓기: 오른쪽에서 왼쪽 글(아랍어 글자 잇기), 가짜 기울임과 굵게, 한중일 낱말 줄바꿈, 글자 묶음 표시 수, 그림자 글의 기울임과 밑줄, DynamicFont 글자 아틀라스 |
 | `scenedocument` | UI 문서: vanilla.js 비주얼 에디터 꼴의 씬 파일(.scene.json)을 읽어 노드 트리를 짓고, 다시 내보내 견준다 |
 
 ```bash
@@ -298,6 +302,10 @@ cargo run --release --example modelviewer
 | [glow](https://crates.io/crates/glow) | 0.18.0 | `core/graphic.rs`, `graphics3d/`, `effect/` | OpenGL 3.3 과 WebGL2 를 같은 API 로 감싼 GL 바인딩. 모든 렌더링이 이 위에서 돕니다 | MIT / Apache-2.0 / Zlib |
 | [fontdue](https://crates.io/crates/fontdue) | 0.9.5 | `core/textstringtexturecache.rs` | 폰트 래스터라이즈. 문자열을 텍스처로 베이크합니다 | MIT / Apache-2.0 / Zlib |
 | [wuff](https://crates.io/crates/wuff) | 0.2.10 | `core/textstringtexturecache.rs` | WOFF, WOFF2 웹 폰트 디코딩 | MIT |
+| [rustybuzz](https://crates.io/crates/rustybuzz) | 0.20.1 | `core/textshaping.rs` | 글자 모양 짓기(HarfBuzz 를 옮긴 것). 아랍어 글자 잇기, 합자, 커닝, 결합 부호 자리를 브라우저처럼 잡습니다 | MIT |
+| [unicode-bidi](https://crates.io/crates/unicode-bidi) | 0.3.18 | `core/textshaping.rs` | 양방향 정렬(UAX #9). 오른쪽에서 왼쪽 글과 섞인 글의 그리는 차례 | MIT / Apache-2.0 |
+| [unicode-segmentation](https://crates.io/crates/unicode-segmentation) | 1.13.3 | `core/component/text.rs`, `core/textshaping.rs`, `misc/typewriter.rs`, `misc/dynamicfont.rs` | 글자 묶음 나누기(UAX #29). 줄바꿈과 표시 글자 수가 받침, 결합 부호, 이모지 묶음을 쪼개지 않습니다 | MIT / Apache-2.0 |
+| [icu_segmenter](https://crates.io/crates/icu_segmenter) | 2.4.0 | `core/component/text.rs` (데스크탑) | 낱말 나누기. 공백 없이 쓰는 한중일(사전), 태국어 같은 동남아 글자(LSTM)의 낱말 사이에서 줄을 바꿉니다. 웹은 원본처럼 브라우저 Intl.Segmenter 를 써서 넣지 않습니다 | Unicode-3.0 |
 | [image](https://crates.io/crates/image) | 0.25.10 | `core/image.rs`, `graphics3d/material.rs`, 창 아이콘, 화면 저장 | png, jpeg, webp 디코딩과 PNG 저장 (이 세 형식만 켭니다) | MIT / Apache-2.0 |
 | [slotmap](https://crates.io/crates/slotmap) | 1.1.1 | `core/node/nodetree.rs` | 노드 저장소. 제너레이셔널 핸들 `NodeId` 를 만듭니다 | Zlib |
 | [serde_json](https://crates.io/crates/serde_json) | 1.0.154 | JSON 애셋, 타임라인, 애니메이터, 파티클 설정, 다국어, 로컬 저장소, 애니메이션 클립, 웹소켓 메시지, UI 문서(씬 파일) | JSON 파싱과 저장. 객체 키는 적힌 차례를 지킵니다 (preserve_order) | MIT / Apache-2.0 |
@@ -316,6 +324,13 @@ cargo run --release --example modelviewer
 | [kira](https://crates.io/crates/kira) | 0.12.6 | `platform/audio/desktop.rs` | 오디오 재생과 믹서 트랙. ogg, mp3, wav 디코딩만 켭니다 | MIT / Apache-2.0 |
 | [arboard](https://crates.io/crates/arboard) | 3.7.0 | `platform/desktop/textinput.rs` | 시스템 클립보드. 입력 필드의 복사, 잘라내기, 붙여넣기 | MIT / Apache-2.0 |
 
+**macOS 만**
+
+| 크레이트 | 버전 | 쓰는 곳 | 하는 일 | 라이선스 |
+| --- | --- | --- | --- | --- |
+| [objc2-game-controller](https://crates.io/crates/objc2-game-controller), [objc2-core-haptics](https://crates.io/crates/objc2-core-haptics) | 0.3.2, 0.3.2 | `platform/desktop/gamepadhaptics.rs` | 게임패드 진동. gilrs 가 맥에서 진동을 대지 않아 GameController 의 컨트롤러 햅틱으로 CoreHaptics 엔진을 지어 떱니다 (쓰는 기능만 켭니다) | Zlib / Apache-2.0 / MIT |
+| [objc2](https://crates.io/crates/objc2), [objc2-foundation](https://crates.io/crates/objc2-foundation), [block2](https://crates.io/crates/block2) | 0.6.5, 0.3.2, 0.6.2 | `platform/desktop/gamepadhaptics.rs` | 오브젝티브 C 메시지, NSArray 같은 기본 타입, 햅틱 엔진의 멈춤과 리셋 처리기(블록) | MIT |
+
 **웹(wasm)만**
 
 | 크레이트 | 버전 | 쓰는 곳 | 하는 일 | 라이선스 |
@@ -327,8 +342,8 @@ cargo run --release --example modelviewer
 ## 진행 상황
 
 - 버전 0.3.2. 버전 번호는 vanilla.js 0.3.2 에서 이어 받았습니다.
-- vanilla.js 의 원본 160 파일 가운데 121 파일을 옮겼습니다. 20 파일은 러스트에 필요 없어서(컬렉션, 죽은 코드 같은 것) 옮기지 않았습니다.
-- 다음에 옮길 것: UINode, UIScene, UIDocument, 오토레이아웃, DevTools, DynamicFont, web/Pane, HumanSkinRenderer
+- vanilla.js 의 원본 160 파일 가운데 122 파일을 옮겼습니다. 20 파일은 러스트에 필요 없어서(컬렉션, 죽은 코드 같은 것) 옮기지 않았습니다.
+- 다음에 옮길 것: DynamicFont
 - 윈도우 11 데스크탑, macOS(애플 실리콘) 데스크탑, 크롬에서 확인했습니다. 리눅스와 실제 모바일 기기는 아직 돌려 보지 않았습니다.
 
 ## 코드 스타일
