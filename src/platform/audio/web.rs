@@ -34,7 +34,9 @@ use wasm_bindgen_futures::{spawn_local, JsFuture};
 pub type AudioContext = web_sys::AudioContext;
 // 디코딩한 소리.
 pub type AudioBuffer = web_sys::AudioBuffer;
-// 플레이어가 소리를 내보낼 곳. (원본 AudioPlayer 생성자의 outputNode, 플레이어의 GainNode 를 거기에 잇는다)
+// 버스의 GainNode. (원본 AudioBus.getGainNode)
+pub type AudioGainNode = web_sys::GainNode;
+// 플레이어가 소리를 내보낼 곳. (원본 AudioPlayer 생성자의 outputNode, 플레이어의 GainNode 를 거기에 잇는다. AudioGainNode 의 as_deref 나 다른 AudioNode)
 pub type AudioOutputNode<'a> = &'a web_sys::AudioNode;
 
 // 브라우저는 첫 user gesture 전에 AudioContext 를 만들면 경고를 띄운다.
@@ -658,7 +660,7 @@ impl AudioBusBackend {
 	//==============================================================================
 	// 버스의 GainNode. (원본 getGainNode, 컨텍스트가 없을 때 만든 버스는 None)
 	//==============================================================================
-	pub fn get_gain_node(&self) -> Option<&web_sys::GainNode> {
+	pub fn get_gain_node(&self) -> Option<&AudioGainNode> {
 		self.gain_node.as_ref()
 	}
 }

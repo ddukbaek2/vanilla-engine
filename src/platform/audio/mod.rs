@@ -26,8 +26,10 @@ pub(crate) use web::*;
 #[cfg(target_arch = "wasm32")]
 pub use web::{AudioBuffer, AudioContext};
 
-// 플레이어가 소리를 내보낼 곳. (AudioPlayer::new 의 둘째 인자, 원본 outputNode 자리. 데스크탑 kira 의 &mut TrackHandle, 웹 &AudioNode)
+// 플레이어가 소리를 내보낼 곳과 버스의 GainNode. (AudioPlayer::new 의 둘째 인자, 원본 outputNode 자리와 AudioBus.getGainNode)
+// - AudioGainNode 는 데스크탑이 버스 트랙을 나눠 드는 Rc<RefCell<TrackHandle>>, 웹이 GainNode 다. 그 as_deref 가 AudioOutputNode 라서
+//   AudioPlayer::new(&audio_manager, audio_bus.get_gain_node().as_deref()) 가 두 플랫폼에서 같다. (웹은 다른 &AudioNode 도 넘길 수 있다)
 #[cfg(not(target_arch = "wasm32"))]
-pub use desktop::AudioOutputNode;
+pub use desktop::{AudioGainNode, AudioOutputNode};
 #[cfg(target_arch = "wasm32")]
-pub use web::AudioOutputNode;
+pub use web::{AudioGainNode, AudioOutputNode};

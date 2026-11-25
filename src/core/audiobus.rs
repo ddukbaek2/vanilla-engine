@@ -11,12 +11,12 @@
 //   - 상태를 Rc<RefCell> 로 나눠 든다. SoundSystem 이 든 버스를 get_music_bus 로 빌려 준 채 크기를 바꾸고 플레이어를 만들 수 있게
 //     메서드는 모두 &self 다. Clone 하면 같은 버스를 보는 손잡이가 하나 더 생긴다.
 //   - 버스로 만든 플레이어는 버스 손잡이를 하나 든다. 손잡이를 모두 버리면 버스가 출력에서 떨어진다. (원본은 이은 노드를 브라우저가 살려 둔다)
-//   - get_gain_node(원본 getGainNode)는 웹이 GainNode 를, 데스크탑이 그 자리인 버스 트랙(kira TrackHandle)을 빌려 준다. (빌린 동안 이 버스의 다른 함수를 부르지 않는다)
-//     어느 쪽이든 AudioPlayer::new 의 내보낼 곳으로 넘길 수 있다.
+//   - get_gain_node(원본 getGainNode)는 AudioGainNode 를 돌려준다. 웹은 GainNode, 데스크탑은 그 자리인 버스 트랙을 나눠 드는 Rc<RefCell<kira TrackHandle>> 다.
+//     어느 쪽이든 as_deref() 가 AudioPlayer::new 의 내보낼 곳이다. (AudioPlayer::new(&audio_manager, audio_bus.get_gain_node().as_deref()), 두 플랫폼이 같다)
 //==============================================================================
 use crate::core::audiomanager::{AudioManager, AudioManagerState};
 use crate::core::audioplayer::{clamp_volume, AudioPlayer};
-use crate::platform::audio::AudioBusBackend;
+use crate::platform::audio::{AudioBusBackend, AudioGainNode};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -137,20 +137,11 @@ impl AudioBus {
 	}
 
 	//==============================================================================
-	// 버스의 GainNode. (원본 getGainNode, 웹, AudioContext 가 없을 때 만든 버스는 None)
+	// 버스의 GainNode. (원본 getGainNode, 웹 GainNode, 데스크탑 버스 트랙을 나눠 드는 Rc<RefCell<TrackHandle>>, AudioContext 가 없을 때 만든 버스는 None)
+	// - 노드에 직접 건 크기는 크기 칸과 음소거 칸을 바꾸지 않는다. (원본과 같다) 데스크탑은 트랙을 borrow_mut 로 빌린 동안 이 버스의 함수를 부르지 않는다.
 	//==============================================================================
-	#[cfg(target_arch = "wasm32")]
-	pub fn get_gain_node(&self) -> Option<web_sys::GainNode> {
+	pub fn get_gain_node(&self) -> Option<AudioGainNode> {
 		self.state.borrow().audio_bus_backend.get_gain_node().cloned()
-	}
-
-	//==============================================================================
-	// 버스의 GainNode 자리인 버스 트랙. (원본 getGainNode, 데스크탑 kira TrackHandle, AudioContext 가 없을 때 만든 버스는 None)
-	// - 빌린 동안 이 버스의 다른 함수를 부르지 않는다. 트랙에 직접 건 크기는 크기 칸과 음소거 칸을 바꾸지 않는다. (원본과 같다)
-	//==============================================================================
-	#[cfg(not(target_arch = "wasm32"))]
-	pub fn get_gain_node(&self) -> Option<std::cell::RefMut<'_, kira::track::TrackHandle>> {
-		std::cell::RefMut::filter_map(self.state.borrow_mut(), |state| state.audio_bus_backend.get_gain_node_mut()).ok()
 	}
 }
 
@@ -191,7 +182,7 @@ mod tests {
 		assert_eq!(is_bus_available, audio_manager.has_audio_context());
 		let has_gain_node = other_audio_bus.get_gain_node().is_some();
 		assert_eq!(has_gain_node, is_bus_available);
-		let mut bus_audio_player = AudioPlayer::new(&audio_manager, other_audio_bus.get_gain_node().as_deref_mut());
+		let mut bus_audio_player = AudioPlayer::new(&audio_manager, other_audio_bus.get_gain_node().as_deref());
 		bus_audio_player.set_volume(0.5);
 		assert_eq!(bus_audio_player.get_volume(), 0.5);
 		bus_audio_player.mute();
