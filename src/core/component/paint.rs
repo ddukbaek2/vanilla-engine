@@ -101,6 +101,7 @@ impl Component for Paint {
 		"Paint"
 	}
 
+	#[reflect(skip)]
 	fn is_tick_needed(&self) -> bool {
 		false
 	}

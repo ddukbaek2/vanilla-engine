@@ -233,6 +233,7 @@ impl UISnapScrollView {
 	//==============================================================================
 	// 미끄러지는 중인지.
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn is_snapping(&self) -> bool {
 		self.snap_tween.is_some()
 	}
@@ -475,6 +476,7 @@ impl Component for UISnapScrollView {
 		"SnapScrollView"
 	}
 
+	#[reflect(skip)]
 	fn is_wheel_receiver(&self) -> bool {
 		true
 	}
@@ -535,6 +537,7 @@ impl Component for UISnapScrollView {
 		self.scroll_view.draw(transform, graphic);
 	}
 
+	#[reflect(skip)]
 	fn is_drawn_inside_content(&self) -> bool {
 		true
 	}

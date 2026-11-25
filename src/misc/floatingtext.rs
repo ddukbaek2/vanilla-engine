@@ -18,6 +18,7 @@ use crate::base::vector2::Vector2;
 use crate::core::component::text::Text;
 use crate::core::component::{Component, ComponentBase};
 use crate::core::node::nodetree::{ComponentContext, NodeId, NodeTree};
+use crate::core::node::worldnode::NodeTransform;
 
 //==============================================================================
 // 띄우기 설정. (원본 options = { color?, font_size = 22, rise = 46, duration = 0.8, jitter = 10, bold = true })
@@ -91,9 +92,6 @@ impl FloatingText {
 	//==============================================================================
 	pub fn create(node_tree: &mut NodeTree, parent_id: NodeId) -> NodeId {
 		let floating_text_node_id = node_tree.create_child(parent_id, "FloatingText");
-		let floating_text_node = &mut node_tree[floating_text_node_id];
-		floating_text_node.set_pivot(Pivot::TOP_LEFT);
-		floating_text_node.set_anchor(Pivot::TOP_LEFT);
 		node_tree.add_component(floating_text_node_id, FloatingText::new());
 		floating_text_node_id
 	}
@@ -229,6 +227,14 @@ impl Component for FloatingText {
 	//==============================================================================
 	fn get_component_type(&self) -> &'static str {
 		"FloatingText"
+	}
+
+	//==============================================================================
+	// 노드에 붙음. (원본 생성자처럼 피봇과 앵커를 왼쪽 위로)
+	//==============================================================================
+	fn attach(&mut self, transform: &mut NodeTransform) {
+		transform.set_pivot(Pivot::TOP_LEFT);
+		transform.set_anchor(Pivot::TOP_LEFT);
 	}
 
 	//==============================================================================

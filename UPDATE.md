@@ -489,6 +489,15 @@
   - Pane, PaneStyle: 데스크탑에서 엔진 노드로 짓는 분할 패널(같은 크기 셈과 끌기 셈, 테마 색, 리사이저 커서), PaneStyle 프리셋 노드(PaneElement, set_on_click). PointerCursor::request_element_cursor
   - 입력 필드: 데스크탑 DOM 입력 필드의 되돌리기와 다시 하기(블링크 묶음 규칙, Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y, 윈도우 Alt+Backspace), 직접 누르는 필드의 크롬 편집 칸 문맥 메뉴(그림 이모티콘, 실행 취소, 다시 실행, 잘라내기, 복사, 붙여넣기, 일반 텍스트로 붙여넣기, 전체 선택, 쓰기 방향, 검사). 검사는 Engine::request_dev_tools_inspect 로 개발자 도구가 그 노드를 고른다
   - LocalStorage, PersistedStore: 원본이 저장한 짝 없는 서로게이트(잘린 이모지, JSON.stringify 의 \ud83d)를 원래 UTF-16 단위로 지킨다. 전에는 그런 JSON 을 읽지 못해 PersistedStore 가 기본값으로 돌아가고 다음 쓰기에 원본 저장을 덮었다. get_item_code_units, set_item_code_units
+- 반사를 원본과 끝까지 맞췄다. (원본을 node 로 돌려 뽑은 기대값과 견주는 시험, src/ui/testdata/uidocument 의 generate.mjs 가 다시 뽑는다)
+  - 반사가 &mut self 게터(get_reflected_value_mut, collect_reflected_getters_mut), 트리를 받는 게터(collect_reflected_getters_in_tree), 트리와 값을 받는 세터(set_reflected_value_in_tree)를 부른다. UIDocument 는 읽을 때 컴포넌트를 트리에서 잠깐 꺼내(NodeTree::with_component_at_mut) 트리를 받는 세터를 원본처럼 그 자리에서 부르고, to_json_text_mut, serialize_node_mut 가 &mut self 게터까지 적는다. DevTools 인스펙터는 tick 에서 &mut self 게터를 읽어 두고 그릴 때 트리를 받는 게터를 부른다
+  - 매크로: 짝은 원본처럼 키(baseName)로 짓고, 읽기와 넣기는 따로 가장 아래 타입부터 찾는다. #[reflect(unsaved)](목록에는 두고 저장에서 빼기), #[reflect(after = "...")](impl Component 블록의 게터를 원본 클래스 몸통의 자리에 두기)를 더했다
+  - 인스펙터 게터 목록과 반사 속성 목록이 원본과 같다. 원본 클래스에 없는 러스트 판의 다시 정의(isTickNeeded 같은 것)를 빼고, Text, RichText, UILabel, UIButton 은 원본 정의 차례로 옮겼다. UIHitArea 의 getTargetButton(트리), ShadowText 의 FontFace, SoftShade, ShadowText, ShadowImage 의 BakeCanvas 처럼 원본 이름으로 보인다
+  - register_editor_types 가 원본 에디터처럼 엔진 컴포넌트 35 종과 노드 종류 12 종(FloatingText, TouchEffect, UIConfirmWindow, UIContextMenu, UIDialog, UIDropdown, UIInputField, UIScrollBar, UISpinner, UIToast, UIWindow, UIWindowLayer)을 등록한다. register_node_type_with_match 로 같은 컴포넌트를 쓰는 노드 종류(UIConfirmWindow 는 UIWindow 와 행동)를 가린다
+  - UIDocument 읽기: 노드 종류나 위젯이 붙을 때 지은 컴포넌트와 자식, require 로 함께 붙은 컴포넌트에 문서 값을 넣고 다시 짓지 않는다. UIImageView 의 품은 Sprite 를 원본처럼 뒤따르는 Sprite 로 쓰고 읽는다. 숨은 UIToast 는 원본처럼 active false 로 쓰고 읽는다
+  - NodeTree::add_component, WorldNode::add_component 가 원본처럼 컴포넌트 자리를 먼저 잡고 붙을 때 더 붙는 컴포넌트를 그 뒤에 둔다
+  - 원본과 같게 고친 것: UIConfirmWindow 의 제목과 글이 UILabel 이다. UIWindow 는 붙을 때가 아니라 create 에서 노드를 끈다. FloatingText 는 붙을 때 피봇과 앵커를 왼쪽 위로 둔다. UIDropdown 화살표는 원본 글자(▴, ▾)와 글 크기다. UIScrollBar 썸은 원본 썸 노드처럼 처음은 켜진 0 크기 사각형이다. UIInputField 는 tick 이 놓은 글 라벨 크기를 문서에 적는다. UIImageView 는 그림 경로를 품은 Sprite 와 따로 든다. UISpinner 점 자리는 원본처럼 f64 로 셈한다
+  - DevTools: 반사도 등록도 없는 컴포넌트는 "반사 없음" 줄로 매크로를 빠뜨린 것을 알린다
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.

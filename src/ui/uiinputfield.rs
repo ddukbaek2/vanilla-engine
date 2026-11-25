@@ -28,6 +28,7 @@
 //   - getRenderState 는 옮기지 않았다. (그리는 컴포넌트가 하나라 넘길 일이 없다)
 //   - UI 문서(UIDocument)는 register_node_type 으로 등록하면 원본 노드 꼴로 쓰고 읽는다. (노드 type "UIInputField", 바탕 Paint, 그리기 층, 안내 글과 값 UILabel 자식,
 //     오버레이 자식. uidocument.rs 의 UIDocumentNode) 러스트 판이 만드는 content 노드는 문서에 적지 않는다.
+//     글 라벨과 오버레이의 자리와 크기는 원본 refreshTextPositions 처럼 tick 이 마지막으로 놓은 노드 크기(text_layout_size)로 적는다.
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::pivot::Pivot;
@@ -561,6 +562,8 @@ pub struct UIInputField {
 	context_menu_node_id: Option<NodeId>,
 	pending_menu_action: Option<UIInputFieldMenuAction>,
 	writing_direction: UIInputFieldWritingDirection,
+	// 글 라벨을 마지막으로 놓은 노드 크기. (원본 refreshTextPositions 가 tick 에서 크기가 있을 때만 놓는다. 처음은 0, UI 문서가 원본 자식 꼴로 적는다)
+	text_layout_size: Vector2,
 }
 
 #[crate::reflect]
@@ -616,7 +619,22 @@ impl UIInputField {
 			context_menu_node_id: None,
 			pending_menu_action: None,
 			writing_direction: UIInputFieldWritingDirection::LeftToRight,
+			text_layout_size: Vector2::zero(),
 		}
+	}
+
+	//==============================================================================
+	// 글 라벨을 마지막으로 놓은 노드 크기. (UI 문서가 원본 글 라벨과 오버레이 자식의 자리와 크기로 적는다, 아직 놓지 않았으면 0)
+	//==============================================================================
+	pub(crate) fn get_text_layout_size(&self) -> Vector2 {
+		self.text_layout_size
+	}
+
+	//==============================================================================
+	// 글 라벨을 마지막으로 놓은 노드 크기 정하기. (UI 문서를 읽을 때)
+	//==============================================================================
+	pub(crate) fn set_text_layout_size(&mut self, text_layout_size: Vector2) {
+		self.text_layout_size = text_layout_size;
 	}
 
 	//==============================================================================
@@ -1667,6 +1685,12 @@ impl Component for UIInputField {
 		// 문맥 메뉴에서 고른 항목.
 		if let Some(menu_action) = self.pending_menu_action.take() {
 			self.perform_menu_action(context, menu_action);
+		}
+
+		// 글 라벨을 놓은 크기. (원본 refreshTextPositions, 크기가 있을 때만)
+		let content_size = context.get_transform().get_content_size();
+		if content_size.x > 0.0 && content_size.y > 0.0 {
+			self.text_layout_size = content_size;
 		}
 		if let Some(context_menu_node_id) = self.context_menu_node_id {
 			if !context.get_node_tree().contains(context_menu_node_id) {

@@ -12,9 +12,9 @@
 //     UIWindowLayer::open_window_in_tree(node_tree, layer_id, window_id);
 // - 원본과 다른 것:
 //   - 원본은 UIWindow 를 상속한다. 러스트 판은 UIWindow 의 덮어쓸 자리(UIWindowBehavior)를 구현한 값이다. (UIWindow::get_behavior_mut 으로 꺼낸다)
-//   - 글 줄 수는 원본처럼 레이아웃 때 바로 잰다. Graphic 이 없는 자리라 등록된 글꼴로 잰다. (Text::wrap_lines_without_graphic)
+//   - 글 줄 수는 원본처럼 레이아웃 때 바로 잰다. Graphic 이 없는 자리라 등록된 글꼴로 잰다. (UILabel 이 품은 Text 의 wrap_lines_without_graphic)
 //     글꼴이 하나도 없어 잴 수 없을 때만(데스크탑에 글꼴 파일이 없는 경우) 한 줄로 놓고, 글이 한 번 그려져 줄을 나누면 다음 tick 에 다시 놓는다.
-//   - 제목과 묻는 글은 UILabel 대신 Text 를 바로 붙인다. (줄 수를 읽으려고) 오른쪽에서 왼쪽 언어면 원본처럼 두 글에 Rtl 방향을 걸고(아니면 Inherit) 단추 차례를 뒤집는다.
+//   - 제목과 묻는 글은 원본처럼 UILabel 이다. 오른쪽에서 왼쪽 언어면 원본처럼 두 글에 Rtl 방향을 걸고(아니면 Inherit) 단추 차례를 뒤집는다.
 //     set_right_to_left 는 창 노드를 받지 않아 글 방향을 다음 놓을 때 건다. 원본처럼 글 방향을 바로 걸려면 set_right_to_left_in_tree 를 부른다. (단추 차례는 원본도 다음 놓을 때)
 //   - 알림은 인자 없는 Box<dyn FnMut()> 다.
 //==============================================================================
@@ -22,7 +22,6 @@ use crate::base::color::Color;
 use crate::base::pivot::Pivot;
 use crate::base::vector2::Vector2;
 use crate::core::component::paint::Paint;
-use crate::core::component::text::Text;
 use crate::core::graphic::{TextBaseline, TextDirection};
 use crate::core::node::nodetree::{ComponentContext, NodeId, NodeTree};
 use crate::ui::uibutton::UIButton;
@@ -246,8 +245,8 @@ impl UIConfirmWindow {
 		self.options.title = title.to_string();
 		if let Some(title_node) = self.title_id.and_then(|title_id| node_tree.get_node_mut(title_id)) {
 			title_node.set_active(!title.is_empty());
-			if let Some(title_text) = title_node.get_component_mut::<Text>() {
-				title_text.set_text(title);
+			if let Some(title_label) = title_node.get_component_mut::<UILabel>() {
+				title_label.set_text(title);
 			}
 		}
 	}
@@ -257,8 +256,8 @@ impl UIConfirmWindow {
 	//==============================================================================
 	pub fn set_message(&mut self, node_tree: &mut NodeTree, message: &str) {
 		self.options.message = message.to_string();
-		if let Some(message_text) = self.message_id.and_then(|message_id| node_tree.get_node_mut(message_id)).and_then(|message_node| message_node.get_component_mut::<Text>()) {
-			message_text.set_text(message);
+		if let Some(message_label) = self.message_id.and_then(|message_id| node_tree.get_node_mut(message_id)).and_then(|message_node| message_node.get_component_mut::<UILabel>()) {
+			message_label.set_text(message);
 		}
 	}
 
@@ -273,23 +272,23 @@ impl UIConfirmWindow {
 			TextDirection::Inherit
 		};
 		for text_id in [self.title_id, self.message_id] {
-			if let Some(text) = text_id.and_then(|text_id| node_tree.get_node_mut(text_id)).and_then(|text_node| text_node.get_component_mut::<Text>()) {
-				if text.get_text_direction() != text_direction {
-					text.set_text_direction(text_direction);
+			if let Some(label) = text_id.and_then(|text_id| node_tree.get_node_mut(text_id)).and_then(|text_node| text_node.get_component_mut::<UILabel>()) {
+				if label.get_text_direction() != text_direction {
+					label.set_text_direction(text_direction);
 				}
 			}
 		}
 	}
 
 	//==============================================================================
-	// 제목 노드. (Text)
+	// 제목 노드. (UILabel)
 	//==============================================================================
 	pub fn get_title_node(&self) -> Option<NodeId> {
 		self.title_id
 	}
 
 	//==============================================================================
-	// 묻는 글 노드. (Text)
+	// 묻는 글 노드. (UILabel)
 	//==============================================================================
 	pub fn get_message_node(&self) -> Option<NodeId> {
 		self.message_id
@@ -327,12 +326,15 @@ impl UIConfirmWindow {
 	}
 
 	//==============================================================================
-	// 글 노드 만들기. (Text, 흰 글)
+	// 글 노드 만들기. (UILabel, 흰 글)
 	//==============================================================================
 	fn create_text_node(node_tree: &mut NodeTree, parent_id: NodeId, node_name: &str, text: &str, font_size: f32) -> NodeId {
 		let text_id = UIConfirmWindow::create_box_node(node_tree, parent_id, node_name);
-		let text_component = node_tree[text_id].add_component(Text::create_with_text(text, font_size));
-		text_component.set_text_color(Color::create(0.96, 0.97, 1.0, 1.0));
+		if let Some(label) = node_tree.add_component(text_id, UILabel::new()) {
+			label.set_text(text);
+			label.set_font_size(font_size);
+			label.set_text_color(Color::create(0.96, 0.97, 1.0, 1.0));
+		}
 		text_id
 	}
 
@@ -375,15 +377,16 @@ impl UIConfirmWindow {
 	// 그 너비로 줄을 바꾼 묻는 글의 세로. (글꼴로 재고, 잴 수 없으면 그린 결과를, 그것도 없으면 한 줄과 false)
 	//==============================================================================
 	fn measure_message_height(&self, node_tree: &mut NodeTree, text_width: f32) -> (f32, bool) {
-		let message_text = match self.message_id.and_then(|message_id| node_tree.get_node_mut(message_id)).and_then(|message_node| message_node.get_component_mut::<Text>()) {
-			Some(message_text) => {
-				message_text
+		let message_label = match self.message_id.and_then(|message_id| node_tree.get_node_mut(message_id)).and_then(|message_node| message_node.get_component_mut::<UILabel>()) {
+			Some(message_label) => {
+				message_label
 			}
 			None => {
 				return (1.0, true);
 			}
 		};
-		message_text.set_word_wrap_width(text_width);
+		message_label.set_word_wrap_width(text_width);
+		let message_text = message_label.get_text_component_mut();
 		let line_height = message_text.get_font_size() * message_text.get_line_spacing();
 		if let Some(line_list) = message_text.wrap_lines_without_graphic(text_width) {
 			return ((line_list.len().max(1) as f32 * line_height).ceil(), true);
@@ -415,8 +418,8 @@ impl UIWindowBehavior for UIConfirmWindow {
 		let window_name = node_tree[parts.window_id].get_name().to_string();
 		let panel_id = parts.panel_id;
 		let title_id = UIConfirmWindow::create_text_node(node_tree, panel_id, &format!("{}Title", window_name), &self.options.title, CONFIRM_TITLE_FONT_SIZE);
-		if let Some(title_text) = node_tree[title_id].get_component_mut::<Text>() {
-			title_text.set_bold(true);
+		if let Some(title_label) = node_tree[title_id].get_component_mut::<UILabel>() {
+			title_label.set_bold(true);
 		}
 		node_tree[title_id].set_active(!self.options.title.is_empty());
 		self.title_id = Some(title_id);
@@ -431,9 +434,9 @@ impl UIWindowBehavior for UIConfirmWindow {
 		}
 		self.message_scroll_id = Some(message_scroll_id);
 		let message_id = UIConfirmWindow::create_text_node(node_tree, message_parent_id, &format!("{}Message", window_name), &self.options.message, CONFIRM_MESSAGE_FONT_SIZE);
-		if let Some(message_text) = node_tree[message_id].get_component_mut::<Text>() {
-			message_text.set_text_baseline(TextBaseline::Top);
-			message_text.set_line_spacing(CONFIRM_LINE_SPACING);
+		if let Some(message_label) = node_tree[message_id].get_component_mut::<UILabel>() {
+			message_label.set_text_baseline(TextBaseline::Top);
+			message_label.set_line_spacing(CONFIRM_LINE_SPACING);
 		}
 		self.message_id = Some(message_id);
 		self.apply_text_direction(node_tree);
@@ -521,6 +524,6 @@ impl UIWindowBehavior for UIConfirmWindow {
 		if !self.is_measure_pending {
 			return false;
 		}
-		self.message_id.and_then(|message_id| node_tree.get_node(message_id)).and_then(|message_node| message_node.get_component::<Text>()).and_then(|message_text| message_text.get_measured_line_count()).is_some()
+		self.message_id.and_then(|message_id| node_tree.get_node(message_id)).and_then(|message_node| message_node.get_component::<UILabel>()).and_then(|message_label| message_label.get_text_component().get_measured_line_count()).is_some()
 	}
 }

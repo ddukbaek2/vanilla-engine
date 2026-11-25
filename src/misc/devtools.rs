@@ -17,10 +17,12 @@
 //   - 노드 종류는 WorldNode 하나뿐이라 트리의 Type 칸과 인스펙터의 type 은 늘 "WorldNode" 다.
 //   - 인스펙터의 컴포넌트 속성은 원본 getComponentProperties 처럼 그 컴포넌트의 get*, is* 게터를 모두 불러 보인다.
 //     원본은 실행 중에 프로토타입을 훑고, 러스트 판은 #[reflect] 매크로가 컴파일 때 지은 목록을 쓴다. (core/reflection.rs, 엔진 컴포넌트는 모두 붙였다)
+//     트리를 받는 게터(원본은 이웃 컴포넌트를 바로 쥐는 것)는 그리기에서 트리를 넘겨 부르고, &mut self 게터가 있는 컴포넌트는 tick 이 트리를 쥐고 읽어 둔 값을 보인다.
 //     이름은 원본 formatMethodName(getTextColor → textColor, is 로 시작하면 그대로), 값은 원본 formatPropertyValue 꼴이다.
 //     (수는 toFixed(2), Vector2 는 (x, y), Rect 는 (x, y, 너비, 높이) toFixed(1), Color 는 rgba, null, 노드는 [WorldNode], 배열은 [Array], 그 밖은 [종류 이름])
-//     러스트 판이 impl Component 에서 다시 정의한 게터(isTickNeeded 같은 것)도 그 타입의 함수라 보인다. 그래서 목록이 원본과 조금 다른 컴포넌트가 있다.
-//   - 반사가 없는 컴포넌트(#[reflect] 를 붙이지 않은 게임 컴포넌트)는 UIDocument 에 쓰기 함수로 등록했으면 그 저장 키와 값을 보이고, 아니면 종류 이름만 보인다.
+//     목록과 차례는 원본과 같다. (원본 클래스에 없는 러스트 판의 다시 정의는 빼고, 원본과 이름이 다른 게터는 원본 이름으로 보인다) 원본 getEngine 은 전역 엔진이 없어 없다.
+//   - 반사가 없는 컴포넌트(#[reflect] 를 붙이지 않은 게임 컴포넌트)는 UIDocument 에 쓰기 함수로 등록했으면 그 저장 키와 값을 보이고,
+//     아니면 종류 이름 아래에 매크로를 붙이라는 "반사 없음" 줄을 보인다. (빠뜨린 것을 알 수 있게)
 //     게임이 자기 컴포넌트를 등록한 문서는 set_ui_document 로 건다. (또는 get_ui_document_mut 로 등록한다) 이 때 수 넷 배열은 이름에 color 가 들면 rgba, 아니면 사각형으로 본다.
 //   - Local Storage 탭의 키 입력, 값 고치기, 지울지 묻기는 원본 window.prompt, window.confirm 자리인 Engine::prompt, Engine::confirm 이다. (core/modaldialog.rs)
 //     웹은 원본처럼 브라우저 창이 그 자리에서 답한다. 데스크탑은 엔진이 그린 같은 질문 창이 떠서 답할 때까지 씬이 멈추고, 답은 다음 tick 에 받는다.
@@ -41,7 +43,7 @@ use crate::core::graphic::{Graphic, TextAlign, TextBaseline};
 use crate::core::inputmanager::KeyCode;
 use crate::base::format::format_fixed;
 use crate::core::node::nodetree::{NodeId, NodeTree};
-use crate::core::reflection::{collect_reflected_getters, ReflectValue};
+use crate::core::reflection::{collect_reflected_getters_in_tree, collect_reflected_getters_mut, has_mutable_getters, ReflectValue, ReflectedGetter};
 use crate::core::viewmanager::ViewScaleMode;
 use crate::misc::localstorage::LocalStorage;
 use crate::ui::uidocument::UIDocument;
@@ -49,6 +51,9 @@ use serde_json::Value;
 use std::collections::HashSet;
 
 use crate::core::modaldialog::{ModalDialogHandle, ModalDialogKind};
+
+// 반사도 UIDocument 등록도 없는 컴포넌트의 속성 자리 글. (원본은 모든 객체가 반사되어 이런 컴포넌트가 없다)
+const MISSING_REFLECTION_TEXT: &str = "(반사 없음: #[vanilla::reflect] 를 붙이면 보임)";
 
 //==============================================================================
 // 고정 레이아웃 상수.
@@ -314,6 +319,8 @@ pub struct DevTools {
 	// 접은 컴포넌트. (노드, 컴포넌트 차례. 없으면 펼친 것)
 	collapsed_components: HashSet<(NodeId, usize)>,
 	cached_inspector_lines: Vec<InspectorLine>,
+	// &mut self 게터가 있는 컴포넌트의 게터 값. (고른 노드, 컴포넌트 차례 → 게터 목록. tick 이 트리를 쥐고 &mut 갈래로 읽어 둔다)
+	mutable_getter_cache: Vec<(NodeId, usize, Vec<ReflectedGetter>)>,
 	is_tree_scroll_dragging: bool,
 	tree_scroll_drag_start_mouse_y: f32,
 	tree_scroll_drag_start_scroll_y: f32,
@@ -381,6 +388,7 @@ impl DevTools {
 			expanded_node_ids: HashSet::new(),
 			collapsed_components: HashSet::new(),
 			cached_inspector_lines: Vec::new(),
+			mutable_getter_cache: Vec::new(),
 			is_tree_scroll_dragging: false,
 			tree_scroll_drag_start_mouse_y: 0.0,
 			tree_scroll_drag_start_scroll_y: 0.0,
@@ -562,6 +570,9 @@ impl DevTools {
 
 		// 트리 목록 갱신.
 		self.rebuild_flat_list(node_tree);
+
+		// &mut self 게터가 있는 컴포넌트의 게터 값. (그리기에서는 트리를 빌려 읽기만 하므로 여기서 읽어 둔다)
+		self.collect_mutable_getters(node_tree);
 
 		// 데스크탑 질문 창의 답. (답할 때까지 씬이 멈춰 있다가 답한 다음 프레임에 받는다)
 		self.process_local_storage_dialog(engine);
@@ -1189,6 +1200,31 @@ impl DevTools {
 	}
 
 	//==============================================================================
+	// &mut self 게터가 있는 고른 노드 컴포넌트의 게터 값 읽기. (컴포넌트를 트리에서 잠깐 꺼내 &mut 갈래로 읽는다)
+	//==============================================================================
+	fn collect_mutable_getters(&mut self, node_tree: &mut NodeTree) {
+		self.mutable_getter_cache.clear();
+		let selected_node_id = match self.selected_node_id {
+			Some(selected_node_id) => {
+				selected_node_id
+			}
+			None => {
+				return;
+			}
+		};
+		let component_count = node_tree.get_node(selected_node_id).map(|node| node.get_all_components().len()).unwrap_or(0);
+		for component_index in 0..component_count {
+			if !has_mutable_getters(node_tree[selected_node_id].get_all_components()[component_index].as_ref()) {
+				continue;
+			}
+			let getter_list = node_tree.with_component_at_mut(selected_node_id, component_index, |component, tree| collect_reflected_getters_mut(component, tree)).flatten();
+			if let Some(getter_list) = getter_list {
+				self.mutable_getter_cache.push((selected_node_id, component_index, getter_list));
+			}
+		}
+	}
+
+	//==============================================================================
 	// 인스펙터 라인 목록 구성. (cached_inspector_lines 에 담는다)
 	//==============================================================================
 	fn build_inspector_lines(&mut self, node_tree: &NodeTree, node_id: NodeId) {
@@ -1262,7 +1298,9 @@ impl DevTools {
 				if !is_expanded {
 					continue;
 				}
-				if let Some(getter_list) = collect_reflected_getters(component.as_ref()) {
+				// &mut self 게터가 있으면 tick 이 읽어 둔 값, 아니면 트리를 받는 게터까지 지금 읽는다.
+				let cached_getter_list = self.mutable_getter_cache.iter().find(|(cached_node_id, cached_component_index, _)| *cached_node_id == node_id && *cached_component_index == component_index).map(|(_, _, getter_list)| getter_list.clone());
+				if let Some(getter_list) = cached_getter_list.or_else(|| collect_reflected_getters_in_tree(component.as_ref(), node_tree)) {
 					if getter_list.is_empty() {
 						lines.push(InspectorLine::new(None, "(프로퍼티 없음)", COLOR_TEXT_DIM, false, false, false, None, true));
 					}
@@ -1278,6 +1316,8 @@ impl DevTools {
 						component_properties
 					}
 					None => {
+						// 반사도 등록도 없으면 속성을 알 길이 없다. 매크로를 빠뜨린 것을 알 수 있게 적는다.
+						lines.push(InspectorLine::new(None, MISSING_REFLECTION_TEXT, COLOR_TEXT_DIM, false, false, false, None, true));
 						continue;
 					}
 				};
@@ -2767,19 +2807,87 @@ mod tests {
 		assert!(line_texts.contains(&(Some(String::from("color")), String::from("rgba(255, 128, 0, 1.00)"))));
 		assert!(line_texts.contains(&(Some(String::from("roundSize")), String::from("0.00"))));
 		assert!(line_texts.contains(&(Some(String::from("isDrawnInsideContent")), String::from("true"))));
-		let paint_property_count = dev_tools.cached_inspector_lines.iter().filter(|line| line.is_component_property).count();
+		let paint_header_index = dev_tools.cached_inspector_lines.iter().position(|line| line.is_component_header).expect("paint header");
+		let paint_property_count = dev_tools.cached_inspector_lines.iter().skip(paint_header_index + 1).take_while(|line| line.is_component_property).count();
 		let header_lines: Vec<&InspectorLine> = dev_tools.cached_inspector_lines.iter().filter(|line| line.is_component_header).collect();
 		assert_eq!(header_lines.len(), 2);
 		assert_eq!(header_lines[0].value, "Paint");
 		assert_eq!(header_lines[1].value, "UnregisteredComponent");
-		// 등록하지 않은 컴포넌트는 머리가 마지막 줄이다.
-		assert!(dev_tools.cached_inspector_lines.last().map(|line| line.is_component_header).unwrap_or(false));
+		// 반사도 등록도 없는 컴포넌트는 머리 다음에 매크로를 붙이라는 줄 하나다.
+		let last_lines: Vec<&InspectorLine> = dev_tools.cached_inspector_lines.iter().rev().take(2).collect();
+		assert_eq!(last_lines[0].value, MISSING_REFLECTION_TEXT);
+		assert!(last_lines[1].is_component_header);
 
 		// Paint 를 접으면 속성 줄이 빠진다.
 		let line_count = dev_tools.cached_inspector_lines.len();
 		dev_tools.collapsed_components.insert((node_id, 0));
 		dev_tools.build_inspector_lines(&node_tree, node_id);
 		assert_eq!(dev_tools.cached_inspector_lines.len(), line_count - paint_property_count);
+		let _ = std::fs::remove_dir_all(&storage_directory_path);
+	}
+
+	//==============================================================================
+	// 시험용 컴포넌트. (&mut self 게터와 트리를 받는 게터)
+	//==============================================================================
+	struct Probe {
+		component_base: ComponentBase,
+		reading_count: usize,
+		target_id: Option<NodeId>,
+	}
+
+	#[crate::reflect]
+	impl Probe {
+		pub fn get_reading(&mut self) -> usize {
+			self.reading_count += 1;
+			self.reading_count
+		}
+
+		pub fn get_target_name<'a>(&self, node_tree: &'a NodeTree) -> &'a str {
+			self.target_id.and_then(|target_id| node_tree.get_node(target_id)).map(|target_node| target_node.get_name()).unwrap_or("")
+		}
+	}
+
+	#[crate::reflect]
+	impl Component for Probe {
+		fn get_component_base(&self) -> &ComponentBase {
+			&self.component_base
+		}
+
+		fn get_component_base_mut(&mut self) -> &mut ComponentBase {
+			&mut self.component_base
+		}
+
+		fn get_component_type(&self) -> &'static str {
+			"Probe"
+		}
+	}
+
+	//==============================================================================
+	// 인스펙터는 &mut self 게터를 tick 에서 트리를 쥐고 읽어 두었다가 보이고, 트리를 받는 게터는 그리기에서 트리를 넘겨 부른다.
+	//==============================================================================
+	#[test]
+	fn inspector_reads_mutable_and_tree_getters() {
+		let storage_directory_path = use_temporary_storage_directory("probe");
+		let engine = create_test_engine();
+		let mut tick_engine = create_test_engine();
+		let mut node_tree = NodeTree::new();
+		let root_id = node_tree.get_root_id();
+		let target_id = node_tree.create_child(root_id, "target");
+		let probe_id = node_tree.create_child(root_id, "probe");
+		node_tree[probe_id].add_component(Probe {
+			component_base: ComponentBase::new(),
+			reading_count: 0,
+			target_id: Some(target_id),
+		});
+		let mut dev_tools = DevTools::new();
+		dev_tools.set_root_nodes(vec![root_id]);
+		dev_tools.set_visible(&engine, true);
+		dev_tools.set_selected_node(Some(probe_id));
+		dev_tools.tick(&mut tick_engine, &mut node_tree, 0.016);
+		dev_tools.build_inspector_lines(&node_tree, probe_id);
+		let line_texts: Vec<(Option<String>, String)> = dev_tools.cached_inspector_lines.iter().map(|line| (line.text.clone(), line.value.clone())).collect();
+		assert!(line_texts.contains(&(Some(String::from("reading")), String::from("1.00"))));
+		assert!(line_texts.contains(&(Some(String::from("targetName")), String::from("\"target\""))));
 		let _ = std::fs::remove_dir_all(&storage_directory_path);
 	}
 

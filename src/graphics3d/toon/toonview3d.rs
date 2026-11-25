@@ -208,6 +208,7 @@ impl Component for ToonView3D {
 		"ToonView3D"
 	}
 
+	#[reflect(skip)]
 	fn is_tick_needed(&self) -> bool {
 		false
 	}
@@ -215,6 +216,7 @@ impl Component for ToonView3D {
 	//==============================================================================
 	// 내용 영역 안에서만 그리는지 반환. (가위로 자른다)
 	//==============================================================================
+	#[reflect(after = "getScreenRect")]
 	fn is_drawn_inside_content(&self) -> bool {
 		true
 	}

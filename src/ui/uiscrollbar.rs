@@ -4,7 +4,8 @@
 // - 매 tick 대상의 오프셋 / 콘텐트 크기 / 보이는 영역을 읽어 썸 위치와 크기를 맞춘다.
 // - 원본과 다른 것:
 //   - 원본 UIScrollBar 는 WorldNode 를 상속한 노드이고, 트랙 Paint 와 썸 노드(Paint)를 자기 아래에 만든다.
-//     러스트 판은 노드에 붙는 컴포넌트이고, 트랙과 썸을 직접 그린다. (썸 노드 없이 썸 사각형만 든다)
+//     러스트 판은 노드에 붙는 컴포넌트이고, 트랙과 썸을 직접 그린다. (썸 노드 없이 썸 사각형과 켜짐만 든다)
+//     썸 상태는 원본 썸 노드처럼 처음은 켜진 0 크기이고, 끌 때 사각형을 그대로 둔다. (get_thumb_rect 도 원본 getThumbRect 처럼 처음은 0 크기 사각형)
 //   - 대상은 스크롤 뷰 컴포넌트 대신 UIScrollView 가 붙은 노드의 핸들이다. (set_scroll_view / get_scroll_view)
 //   - 트랙 누름 자리와 썸 안 판정은 노드 행렬의 역으로 바꾼 로컬 좌표로 한다. (원본은 월드 위치를 뺀다. 회전 / 크기가 없으면 같다)
 //   - 썸 색은 원본이 0 ~ 255 를 섞어 쓴 Color(255, 255, 255, 0.6) 이다. 러스트 판은 같은 뜻의 (1, 1, 1, 0.6) 으로 둔다.
@@ -69,7 +70,9 @@ pub struct UIScrollBar {
 	axis: ScrollBarAxis,
 	track_color: Color,
 	thumb_color: Color,
-	thumb_rect: Option<Rect>,
+	// 썸 사각형과 켜짐. (원본 썸 노드의 자리와 크기, active. 처음은 켜진 0 크기이고, 끌 때는 사각형을 그대로 둔다)
+	thumb_rect: Rect,
+	is_thumb_active: bool,
 	is_dragging_thumb: bool,
 	drag_start_view_position: Vector2,
 	drag_start_scroll_offset: Vector2,
@@ -89,7 +92,8 @@ impl UIScrollBar {
 			axis: ScrollBarAxis::Vertical,
 			track_color: Color::create(0.0, 0.0, 0.0, 0.15),
 			thumb_color: Color::create(1.0, 1.0, 1.0, 0.6),
-			thumb_rect: None,
+			thumb_rect: Rect::create(0.0, 0.0, 0.0, 0.0),
+			is_thumb_active: true,
 			is_dragging_thumb: false,
 			drag_start_view_position: Vector2::zero(),
 			drag_start_scroll_offset: Vector2::zero(),
@@ -155,6 +159,21 @@ impl UIScrollBar {
 	}
 
 	//==============================================================================
+	// 원본 썸 노드의 사각형과 켜짐. (UI 문서가 원본 썸 노드 꼴로 적는다. 꺼져 있어도 마지막 사각형이다)
+	//==============================================================================
+	pub(crate) fn read_thumb_node_state(&self) -> (Rect, bool) {
+		(self.thumb_rect, self.is_thumb_active)
+	}
+
+	//==============================================================================
+	// 원본 썸 노드의 사각형과 켜짐 정하기. (UI 문서를 읽을 때)
+	//==============================================================================
+	pub(crate) fn apply_thumb_node_state(&mut self, thumb_rect: Rect, is_thumb_active: bool) {
+		self.thumb_rect = thumb_rect;
+		self.is_thumb_active = is_thumb_active;
+	}
+
+	//==============================================================================
 	// 썸 최소 길이 설정.
 	//==============================================================================
 	pub fn set_min_thumb_size(&mut self, min_thumb_size: f32) {
@@ -172,7 +191,10 @@ impl UIScrollBar {
 	// 지금 썸 사각형. (스크롤바 노드 영역 안, 썸이 꺼져 있으면 None)
 	//==============================================================================
 	pub fn get_thumb_rect(&self) -> Option<Rect> {
-		self.thumb_rect
+		if !self.is_thumb_active {
+			return None;
+		}
+		Some(self.thumb_rect)
 	}
 
 	//==============================================================================
@@ -232,7 +254,7 @@ impl UIScrollBar {
 				scroll_state
 			}
 			None => {
-				self.thumb_rect = None;
+				self.is_thumb_active = false;
 				return;
 			}
 		};
@@ -243,7 +265,7 @@ impl UIScrollBar {
 			}
 			None => {
 				// 콘텐트가 보이는 영역 안이면 스크롤할 것이 없다.
-				self.thumb_rect = None;
+				self.is_thumb_active = false;
 				if self.auto_hide {
 					context.get_node_mut().set_active(false);
 				}
@@ -268,7 +290,8 @@ impl UIScrollBar {
 				Rect::create(thumb_position_along_axis, 0.0, thumb_metrics.thumb_length, track_size.y)
 			}
 		};
-		self.thumb_rect = Some(thumb_rect);
+		self.thumb_rect = thumb_rect;
+		self.is_thumb_active = true;
 	}
 
 	//==============================================================================
@@ -341,7 +364,7 @@ impl UIScrollBar {
 	// 뷰 좌표가 썸 안인지.
 	//==============================================================================
 	fn is_inside_thumb(&self, context: &ComponentContext, view_input_position: Vector2) -> bool {
-		let thumb_rect = match self.thumb_rect {
+		let thumb_rect = match self.get_thumb_rect() {
 			Some(thumb_rect) => {
 				thumb_rect
 			}
@@ -406,7 +429,7 @@ impl Component for UIScrollBar {
 		let track_rect = Rect::create(0.0, 0.0, track_size.x, track_size.y);
 		graphic.set_fill_color(self.track_color);
 		graphic.draw_round_rect(track_rect, SCROLLBAR_ROUND_SIZE);
-		if let Some(thumb_rect) = self.thumb_rect {
+		if let Some(thumb_rect) = self.get_thumb_rect() {
 			graphic.set_fill_color(self.thumb_color);
 			graphic.draw_round_rect(thumb_rect, SCROLLBAR_ROUND_SIZE);
 		}

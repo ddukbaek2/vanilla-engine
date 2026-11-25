@@ -203,8 +203,8 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
 - 옮기며 바꾼 쓰임새:
   - GameScene, UIScene 의 덮어쓰기는 GameScene, UIScene 트레이트와 game_scene!, ui_scene! 매크로다. 바탕이 resize, layout, post_draw 를 스스로 부른다. (game/gamescene.rs)
   - UINode 는 노드에 붙는 컴포넌트이고, 솔버 값을 노드의 자리와 content_size 로 옮긴다. (ui/uinode.rs, ui/uiscene.rs)
-  - 원본의 실행 중 반사(uidocument.js 의 collectReflectedProperties, saveByReflection, loadByReflection, devtools.js 의 getComponentProperties)는 절차 매크로 #[reflect](macros/ 크레이트, 엔진이 vanilla::reflect 로 다시 내보낸다)가 컴파일 때 지은 코드로 한다. 저장소는 엔진과 매크로 두 크레이트의 워크스페이스다. 엔진 컴포넌트는 모두 붙였고, 원본 상위 클래스는 품은 필드를 #[reflect(base = 필드)] 로 잇는다. (core/reflection.rs)
-  - UIDocument 는 원본처럼 쓰기, 읽기 함수가 없는 종류를 반사로 쓰고 읽는다. 원본 노드 종류(WorldNode 하위 클래스, UIInputField, UIScrollBar 같은 것)는 러스트 판의 컴포넌트를 register_node_type 으로 등록해 원본 문서의 노드 type 과 생성자가 만든 컴포넌트, 자식 꼴 그대로 쓰고 읽는다. 원본 에디터가 더 등록하는 종류는 register_editor_types 한 줄이다. DevTools 인스펙터는 원본처럼 게터를 모두 불러 보인다. (ui/uidocument.rs, misc/devtools.rs)
+  - 원본의 실행 중 반사(uidocument.js 의 collectReflectedProperties, saveByReflection, loadByReflection, devtools.js 의 getComponentProperties)는 절차 매크로 #[reflect](macros/ 크레이트, 엔진이 vanilla::reflect 로 다시 내보낸다)가 컴파일 때 지은 코드로 한다. 저장소는 엔진과 매크로 두 크레이트의 워크스페이스다. 엔진 컴포넌트는 모두 붙였고, 원본 상위 클래스는 품은 필드를 #[reflect(base = 필드)] 로 잇는다. &self 게터, 트리를 받는 게터, &mut self 게터, 값 하나를 받는 세터, 트리와 값을 받는 세터를 모두 반사로 부른다. (core/reflection.rs)
+  - UIDocument 는 원본처럼 쓰기, 읽기 함수가 없는 종류를 반사로 쓰고 읽는다. 원본 노드 종류(WorldNode 하위 클래스, UIInputField, UIScrollBar 같은 것)는 러스트 판의 컴포넌트를 register_node_type 으로 등록해 원본 문서의 노드 type 과 생성자가 만든 컴포넌트, 자식 꼴 그대로 쓰고 읽는다. 원본 에디터(tools/uieditor)가 등록하는 종류(컴포넌트 35, 노드 종류 12)는 register_editor_types 한 줄이다. DevTools 인스펙터는 원본처럼 게터를 모두 불러 보인다. 컴포넌트마다의 문서, 노드 종류마다의 문서, 에디터 팔레트 15 종으로 지은 문서(tick 전후), 인스펙터 게터 목록, 반사 속성 목록과 반사 저장이 원본을 node 로 돌려 뽑은 기대값(src/ui/testdata/uidocument)과 같은지 시험한다. (ui/uidocument.rs, misc/devtools.rs)
   - web/Pane(화면 분할 패널)은 웹에서 원본처럼 DOM 요소로, 데스크탑에서 엔진 노드로 짓는다. 크기 셈과 끌기 셈은 두 플랫폼이 같은 함수다. 데스크탑은 컨테이너가 노드이고 노드를 고치는 함수가 NodeTree 를 받는다. (web/pane.rs)
   - 브라우저가 해 주던 것은 엔진이 같은 API 로 한다. 원본과 게임의 캔버스와 2D 컨텍스트는 Canvas2D(웹은 브라우저 캔버스, 데스크탑은 tiny-skia), window.alert, confirm, prompt 는 Engine::alert, confirm, prompt(웹은 브라우저 창, 데스크탑은 엔진이 그린 크롬 탭 모달 같은 창, await 꼴도 있다), html lang 과 meta 는 Document, 직접 누르는 입력 필드의 크롬 편집 칸 메뉴와 DOM 입력 칸의 되돌리기는 데스크탑에서 엔진이 그린다. LocalStorage 와 PersistedStore 는 원본 JS 글의 짝 없는 서로게이트를 원래 단위 그대로 지킨다. (misc/storagetext.rs)
   - SoundSystem 의 음악과 효과음 버스는 AudioBus 다. (원본에도 같은 꼴로 넣었다) 데스크탑은 엔진 믹서의 버스 노드, 웹은 GainNode 이고, get_gain_node 는 두 플랫폼 모두 AudioGainNode(웹 GainNode, 데스크탑은 버스 노드를 나눠 드는 Rc<MixerGainNode>)를 돌려준다.
@@ -229,8 +229,7 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
 
 | 차이 | 까닭 |
 | --- | --- |
-| 반사(UIDocument 의 반사 저장과 읽기, DevTools 인스펙터의 게터 목록)는 #[vanilla::reflect] 를 붙인 타입만 된다. 엔진 컴포넌트는 모두 붙였고, 게임 컴포넌트는 impl 블록과 impl Component 블록에 붙인다 (원본은 모든 객체) | 러스트에는 실행 중에 필드와 메서드를 훑는 길이 없다. C++ 엔진(언리얼 UHT, Qt moc)처럼 컴파일 때 절차 매크로가 함수 목록과 부르는 코드를 짓는다 |
-| 반사로 부를 수 없는 함수가 있다. &mut self 게터와 인자를 둘 이상 받는 세터(UISnapScrollView::set_snap_current_index(트리, 칸) 같은 것)는 반사로 읽거나 넣지 않는다 (속성 목록과 저장에는 원본처럼 든다) | 실행 중에 인자를 만들어 넣을 수 없고, 반사는 &self 로 읽는다 |
+| 반사(UIDocument 의 반사 저장과 읽기, DevTools 인스펙터의 게터 목록)는 #[vanilla::reflect] 를 붙인 타입만 된다. 엔진 컴포넌트는 모두 붙였고, 게임 컴포넌트는 impl 블록과 impl Component 블록에 붙인다 (원본은 모든 객체). 빠뜨린 것은 알 수 있다: 한쪽만 붙이면 컴파일 에러가 붙일 곳을 알려 주고, 둘 다 빠뜨리면 UIDocument 가 쓸 때 경고를 내고 인스펙터가 "반사 없음" 줄을 보인다 | 러스트에는 실행 중에 필드와 메서드를 훑는 길이 없다. C++ 엔진(언리얼 UCLASS 와 UHT, Qt moc)처럼 컴파일 때 절차 매크로가 함수 목록과 부르는 코드를 짓는다 |
 | 직접 누르는 입력 필드의 크롬 편집 칸 메뉴에 크롬 자체 기능 항목(읽기 모드로 열기, 맞춤법 검사와 언어 설정, 선택이 있을 때의 검색, 인쇄, 번역, 맥의 찾기와 음성, 비밀번호와 Gemini 항목)이 없다. 그 밖의 항목(그림 이모티콘, 실행 취소, 다시 실행, 잘라내기, 복사, 붙여넣기, 일반 텍스트로 붙여넣기, 전체 선택, 쓰기 방향, 검사)은 같은 차례와 단축키 글로 같은 일을 한다 | 그 항목들은 페이지가 아니라 크롬 브라우저(옆 패널, 맞춤법 사전 설정, 검색 엔진, 인쇄 대화 상자, 번역, 계정)와 맥 서비스를 부른다. 데스크탑 앱에는 그 브라우저가 없다. (입력 필드는 spellcheck=false 라 맞춤법 설정이 페이지에 보이는 것도 없다) |
 | 데스크탑에서 뜻이 없는 set_no_cache | 데스크탑에는 브라우저 캐시가 없다 (파일을 늘 그 자리에서 읽는다) |
 | 웨이랜드에서 xdg_toplevel 의 suspended 상태는 받지 못한다. 가려짐(페이지 이벤트 Hidden)은 크롬의 다른 갈래인 프레임 콜백 3 초 규칙으로만 본다 | xdg_toplevel 은 winit(sctk)이 리스너를 달아 쥐고 있고 libwayland 는 프록시 하나에 리스너 하나만 단다. winit 0.30.13 은 configure 의 suspended 를 받아 두기만 하고 알리지 않는다 (0.31 베타 4 와 본줄기도 같다). suspended 를 보내면서 프레임 콜백도 계속 보내는 컴포지터에서만 크롬과 달라진다 |
@@ -255,11 +254,11 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
 
 | 차이 | 까닭 |
 | --- | --- |
-| 전역 엔진이 없다 (Engine.getEngine, Scene.getEngine 대신 씬 함수와 ComponentContext 로 넘긴다) | 전역 가변 상태는 빌림 검사를 비켜 가서, 엔진을 쓰는 곳이 인자로 드러나게 했다 |
+| 전역 엔진이 없다 (Engine.getEngine, Scene.getEngine 대신 씬 함수와 ComponentContext 로 넘긴다. 그래서 인스펙터 게터 목록에 원본 Component.getEngine 이, 반사 속성 목록에 Engine 이 없다) | 전역 가변 상태는 빌림 검사를 비켜 가서, 엔진을 쓰는 곳이 인자로 드러나게 했다 |
 | 노드는 NodeTree 안에 있고 NodeId 핸들로 가리킨다 | 부모와 자식을 Rc<RefCell> 로 서로 가리키면 순환 참조와 실행 중 빌림 검사가 생긴다. 지운 노드의 핸들은 None 이 된다 |
 | 노드 종류는 WorldNode 하나다 (원본 Node, ComponentNode, TransformNode, WorldNode 를 합침, 원본에서 노드인 위젯과 UINode 는 컴포넌트) | 러스트에 클래스 상속이 없어 노드 꼴을 하나로 두고 기능을 컴포넌트로 붙였다 |
 | 상속 대신 트레이트와 품기 (Scene + SceneBase, Component + ComponentBase, ShaderSprite 는 Sprite 를 품고 Deref) | 러스트에 클래스 상속이 없어 공통 상태는 구조체로, 덮어쓰기는 트레이트 함수로 둔다 |
-| 반사는 원본 상위 클래스 몫을 품은 필드로 잇고(#[reflect(base = 필드)]), 러스트 판이 impl Component 에서 다시 정의한 게터(isTickNeeded 같은 것)도 그 타입의 게터로 보인다. 읽을 때 꼴은 지금 값이 아니라 세터의 꼴로 가린다. 원본이 setComponentType 을 부르지 않아 ComponentType 이 "Component" 로 적히는 종류(Visual, UIListView)는 러스트 판의 종류 이름으로 적는다 | 상속이 없고 꼴을 컴파일 때 안다. 원본의 빠뜨린 setComponentType 은 옮기지 않았다 |
+| 반사는 원본 상위 클래스 몫을 품은 필드로 잇는다 (#[reflect(base = 필드)], 결과 목록과 차례는 원본과 같다). &mut self 게터는 &mut 로 트리를 받는 갈래(UIDocument::to_json_text_mut, serialize_node_mut, 인스펙터는 tick 에서 읽어 둔다)로 읽는다. &NodeTree 만 받는 to_json_text 는 &mut self 게터를 읽지 못한다 | 상속이 없다. &self 로 &mut self 함수를 부를 수 없다 (엔진 컴포넌트의 저장 속성에는 &mut self 게터가 없어 두 갈래 결과가 같다) |
 | 수는 f32 다 (Format, LocalStorage 처럼 JS 수의 글을 그대로 내야 하는 곳은 f64) | GL 에 올리는 값과 같은 정밀도로 들고 메모리를 아낀다. 원본 Matrix4 는 f32 로 담고 f64 로 셈해 끝자리가 조금 다를 수 있다 |
 | GL 을 쓰는 객체는 컨텍스트를 들지 않고 함수마다 gl 을 받는다 (FullscreenPass, RenderTarget, 툰 렌더러 같은 것) | 컨텍스트는 Graphic 이 들고, 객체마다 나눠 쥐면 수명과 빌림이 엮인다 |
 | 트리를 받는 `*_in_tree` 함수를 따로 둔 곳 15 개 (UIScrollView::set_shows_vertical_scroll_bar_in_tree, UIWindow::close_in_tree, ParticleSystem::emit_in_tree 같은 것) | 씬 코드가 컴포넌트를 쥔 동안 같은 트리의 다른 노드를 함께 빌릴 수 없다 |

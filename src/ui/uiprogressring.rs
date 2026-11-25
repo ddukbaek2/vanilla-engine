@@ -231,6 +231,7 @@ impl Component for UIProgressRing {
 		"UIProgressRing"
 	}
 
+	#[reflect(skip)]
 	fn is_tick_needed(&self) -> bool {
 		false
 	}

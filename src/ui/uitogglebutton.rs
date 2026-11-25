@@ -213,6 +213,7 @@ impl Component for UIToggleButton {
 		self.update_tint_transition(context, time_delta);
 	}
 
+	#[reflect(skip)]
 	fn is_drawn_inside_content(&self) -> bool {
 		true
 	}

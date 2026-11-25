@@ -114,6 +114,22 @@ impl NodeTree {
 	}
 
 	//==============================================================================
+	// 꺼냈던 컴포넌트를 그 차례 번호의 빈 자리표 자리에 되돌린다. (붙는 동안 같은 노드에 또 붙여 자리표가 여럿일 때. 그 자리가 자리표가 아니면 첫 자리표 자리)
+	//==============================================================================
+	fn restore_component_at(&mut self, node_id: NodeId, component_index: usize, component: Box<dyn Component>) {
+		let is_placeholder_slot = self.nodes.get(node_id).and_then(|node| node.components.get(component_index)).map(|candidate| {
+			let candidate_reference: &dyn Component = candidate.as_ref();
+			candidate_reference.as_any().is::<ComponentPlaceholder>()
+		}).unwrap_or(false);
+		if !is_placeholder_slot {
+			self.restore_component(node_id, component);
+			return;
+		}
+		let placeholder = std::mem::replace(&mut self.nodes[node_id].components[component_index], component);
+		self.placeholder_pool.push(placeholder);
+	}
+
+	//==============================================================================
 	// 루트 노드 핸들.
 	//==============================================================================
 	pub fn get_root_id(&self) -> NodeId {
@@ -834,18 +850,21 @@ impl NodeTree {
 	//==============================================================================
 	// 컴포넌트 붙이기. (attach 다음 attach_to_tree 를 불러, 컴포넌트가 자식 노드를 만들 수 있게 한다)
 	// - UIView 처럼 자식 노드를 만드는 컴포넌트는 이것으로 붙인다. 붙인 컴포넌트를 돌려준다.
+	// - 원본 addComponent 처럼 자기 자리를 먼저 잡고 붙는다. 붙는 동안 함께 붙인 컴포넌트(UIScrollView 의 Mask 같은 것)는 그 뒤에 온다.
 	//==============================================================================
 	pub fn add_component<T: Component + 'static>(&mut self, node_id: NodeId, component: T) -> Option<&mut T> {
 		if !self.nodes.contains_key(node_id) {
 			return None;
 		}
-		let mut component = component;
-		component.attach(self.nodes[node_id].get_transform_mut());
-		component.attach_to_tree(self, node_id);
-		let node = self.nodes.get_mut(node_id)?;
-		node.components.push(Box::new(component));
-		let last_component = node.components.last_mut()?;
-		let component_reference: &mut dyn Component = last_component.as_mut();
+		let component_index = self.nodes[node_id].components.len();
+		let placeholder = self.take_placeholder();
+		self.nodes[node_id].components.push(placeholder);
+		let mut boxed_component: Box<dyn Component> = Box::new(component);
+		boxed_component.attach(self.nodes[node_id].get_transform_mut());
+		boxed_component.attach_to_tree(self, node_id);
+		self.restore_component_at(node_id, component_index, boxed_component);
+		let added_component = self.nodes.get_mut(node_id)?.components.get_mut(component_index)?;
+		let component_reference: &mut dyn Component = added_component.as_mut();
 		component_reference.as_any_mut().downcast_mut::<T>()
 	}
 
@@ -869,6 +888,24 @@ impl NodeTree {
 		};
 		self.traversal_depth -= 1;
 		self.restore_component(node_id, component);
+		self.flush_pending_destroy();
+		Some(result)
+	}
+
+	//==============================================================================
+	// 차례 번호로 컴포넌트 하나를 트리와 함께 쥐고 부르기. (종류를 모르는 자리, UIDocument 가 트리를 받는 반사 세터를 부를 때)
+	// - node_id 노드의 component_index 번째 컴포넌트를 잠깐 빼고, 그 컴포넌트와 트리를 action 에 넘긴다. 없으면 None.
+	//==============================================================================
+	pub fn with_component_at_mut<R>(&mut self, node_id: NodeId, component_index: usize, action: impl FnOnce(&mut dyn Component, &mut NodeTree) -> R) -> Option<R> {
+		if component_index >= self.nodes.get(node_id)?.components.len() {
+			return None;
+		}
+		let placeholder = self.take_placeholder();
+		let mut component = std::mem::replace(&mut self.nodes[node_id].components[component_index], placeholder);
+		self.traversal_depth += 1;
+		let result = action(component.as_mut(), self);
+		self.traversal_depth -= 1;
+		self.restore_component_at(node_id, component_index, component);
 		self.flush_pending_destroy();
 		Some(result)
 	}

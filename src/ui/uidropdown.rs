@@ -16,8 +16,8 @@
 //     select_index 는 바뀜 이벤트에 문맥을 넘기려고 문맥을 받는다. (행 단추가 ComponentContext::with_component_mut 로 부른다)
 //   - 바뀜 이벤트는 드롭다운과 문맥을 받는다. options 객체는 UIDropdownOptions 구조체다.
 //   - 행 강조는 펼침 목록의 자식 순서 대신 만든 행 노드 목록으로 고친다. (tick 중에 다시 만들면 지운 행이 잠깐 자식으로 남는다)
-//   - 화살표 글자는 원본의 작은 삼각형(▾ ▴, U+25BE / U+25B4)이 기본 글꼴(맑은 고딕, Segoe UI, Arial)에 없어
-//     WGL4 에 든 ▼ ▲ 를 글자 크기 0.75 배로 쓴다.
+//   - 화살표 글자는 원본처럼 작은 삼각형(▾ ▴, U+25BE / U+25B4)이다. 기본 글꼴(맑은 고딕, Segoe UI, Arial)에 없는 글자는
+//     크롬처럼 시스템 대체 글꼴로 그린다. (core/textshaping.rs)
 //   - 노드 이름은 원본처럼 "DropdownArrow", "DropdownPopup", "DropdownOption{번호}" 다. 호스트 이름은 만든 쪽이 정한다. (create 는 "UIDropdown")
 //==============================================================================
 use crate::base::color::Color;
@@ -29,10 +29,9 @@ use crate::core::node::nodetree::{ComponentContext, NodeId, NodeTree};
 use crate::ui::uibutton::UIButton;
 use crate::ui::uilabel::UILabel;
 
-// 펼친 화살표 / 접힌 화살표. (원본 ▴ ▾ 는 기본 글꼴에 없어 ▲ ▼ 를 작게 쓴다)
-const ARROW_OPEN_TEXT: &str = "▲";
-const ARROW_CLOSED_TEXT: &str = "▼";
-const ARROW_FONT_SCALE: f32 = 0.75;
+// 펼친 화살표 / 접힌 화살표. (원본 ▴ ▾)
+const ARROW_OPEN_TEXT: &str = "▴";
+const ARROW_CLOSED_TEXT: &str = "▾";
 
 //==============================================================================
 // 드롭다운 설정. (원본 options = { width = 180, height = 30, option_height = 28, font_size = 12, base_color?, popup_color?, highlight_color?, text_color? })
@@ -456,7 +455,7 @@ impl Component for UIDropdown {
 		arrow_node.set_local_position(Vector2::create(options.width - 22.0, 0.0));
 		if let Some(arrow_label) = node_tree.add_component(arrow_id, UILabel::new()) {
 			arrow_label.set_text(ARROW_CLOSED_TEXT);
-			arrow_label.set_font_size(options.font_size * ARROW_FONT_SCALE);
+			arrow_label.set_font_size(options.font_size);
 			arrow_label.set_text_color(options.text_color);
 		}
 		self.arrow_node_id = Some(arrow_id);

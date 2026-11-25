@@ -75,6 +75,7 @@ impl Component for Mask {
 		"Mask"
 	}
 
+	#[reflect(skip)]
 	fn is_tick_needed(&self) -> bool {
 		false
 	}
@@ -83,6 +84,7 @@ impl Component for Mask {
 		true
 	}
 
+	#[reflect(skip)]
 	fn get_clip_round_size(&self) -> Option<f32> {
 		Some(self.round_size)
 	}

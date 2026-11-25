@@ -13,7 +13,6 @@
 //   - 점 노드 이름은 원본처럼 "SpinnerDot{번호}" 다. options 객체는 UISpinnerOptions 구조체다.
 //==============================================================================
 use crate::base::color::Color;
-use crate::base::math;
 use crate::base::pivot::Pivot;
 use crate::base::vector2::Vector2;
 use crate::core::component::paint::Paint;
@@ -176,14 +175,17 @@ impl Component for UISpinner {
 		spinner_node.set_anchor(Pivot::TOP_LEFT);
 		spinner_node.set_content_size(Vector2::create(center * 2.0, center * 2.0));
 		for dot_index in 0..options.dot_count {
-			let angle = (dot_index as f32 / options.dot_count as f32) * math::PI * 2.0;
+			// 원본처럼 f64 로 셈하고 자리만 f32 로 담는다. (f32 삼각함수로 셈하면 끝자리가 원본과 다르다)
+			let angle = (dot_index as f64 / options.dot_count as f64) * std::f64::consts::PI * 2.0;
 			let dot_name = format!("SpinnerDot{}", dot_index);
 			let dot_id = node_tree.create_child(node_id, &dot_name);
 			let dot_node = &mut node_tree[dot_id];
 			dot_node.set_pivot(Pivot::MIDDLE_CENTER);
 			dot_node.set_anchor(Pivot::TOP_LEFT);
 			dot_node.set_content_size(Vector2::create(options.dot_radius * 2.0, options.dot_radius * 2.0));
-			dot_node.set_local_position(Vector2::create(center + angle.cos() * options.radius, center + angle.sin() * options.radius));
+			let dot_x = center as f64 + angle.cos() * options.radius as f64;
+			let dot_y = center as f64 + angle.sin() * options.radius as f64;
+			dot_node.set_local_position(Vector2::create(dot_x as f32, dot_y as f32));
 			let paint = dot_node.add_component(Paint::create_with_color(self.dot_color));
 			paint.set_round_size(options.dot_radius);
 			self.dot_node_ids.push(dot_id);

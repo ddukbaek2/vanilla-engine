@@ -445,15 +445,16 @@ impl ShadowText {
 	//==============================================================================
 	// 글꼴 이름 설정. (엔진에 올린 글꼴 이름, 처음은 default. 원본 setFontFace)
 	//==============================================================================
+	#[reflect(name = "FontFace")]
 	pub fn set_font_family(&mut self, font_family: &str) {
 		self.font_family = String::from(font_family);
 		self.is_bake_dirty = true;
 	}
 
 	//==============================================================================
-	// 글꼴 이름 반환. (원본 getFontFace, 원본은 FontFace 객체라 반사 저장이 적지 않아 이것도 저장 속성에서 뺀다)
+	// 글꼴 이름 반환. (원본 getFontFace, 원본은 FontFace 객체라 반사 저장이 적지 않아 이것도 저장에서 뺀다)
 	//==============================================================================
-	#[reflect(transient)]
+	#[reflect(unsaved, name = "FontFace")]
 	pub fn get_font_family(&self) -> &str {
 		&self.font_family
 	}
@@ -601,6 +602,7 @@ impl ShadowText {
 	//==============================================================================
 	// 구운 그림 반환. (아직 굽지 않았거나 그림자 없이 엔진의 글로 그렸으면 None, 원본 getBakeCanvas)
 	//==============================================================================
+	#[reflect(name = "BakeCanvas")]
 	pub fn get_bake_image(&self) -> Option<&Rc<Image>> {
 		self.baked_text.as_ref().map(|baked_text| &baked_text.image)
 	}
@@ -626,10 +628,12 @@ impl Component for ShadowText {
 		"ShadowText"
 	}
 
+	#[reflect(skip)]
 	fn is_tick_needed(&self) -> bool {
 		false
 	}
 
+	#[reflect(skip)]
 	fn is_drawn_inside_content(&self) -> bool {
 		true
 	}
