@@ -5,7 +5,7 @@
 //!   언리얼의 UHT(UPROPERTY), Qt 의 moc 처럼 컴파일 때 코드를 지어 같은 일을 한다. 러스트에서는 절차 매크로 `#[reflect]` 가 그 일을 한다.
 //!   (macros/ 크레이트, 엔진이 vanilla::reflect 로 다시 내보낸다) C++ RTTI 의 typeid, dynamic_cast 자리는 이미 AsAny(std::any::Any)다.
 //! - 이 모듈은 매크로가 지은 코드가 쓰는 값 꼴(ReflectValue)과 트레이트(Reflect), 원본 Component 기반 클래스의 공통 속성을 둔다.
-//! - 쓰는 법: 컴포넌트의 impl 블록과 impl Component 블록 둘 다에 #`[vanilla::reflect]` 를 붙인다.
+//! - 쓰는 법: 컴포넌트의 impl 블록과 impl Component 블록 둘 다에 `#[vanilla::reflect]` 를 붙인다.
 //!   ```text
 //!     #[vanilla::reflect]
 //!     impl Spin {
@@ -23,11 +23,11 @@
 //!   - 저장하는 값은 원본 saveByReflection 이 가리는 꼴(수, 불, 글, Color, Vector2, 노드)이다. 원본에서 글인 열거(TextAlign 같은 것)는 같은 글로 바꾼다.
 //! - 원본처럼 하는 것:
 //!   - 원본 상위 클래스의 게터는 프로토타입 사슬로 따라온다. 러스트 판은 상속이 없어 품은 값을 #[reflect(base = 필드)] 로 잇는다.
-//!     원본에서 상위 클래스 몫인 함수를 러스트 판이 편의로 다시 둔 것은 #`[reflect(skip)]` 로 빼서 차례를 원본처럼 둔다.
+//!     원본에서 상위 클래스 몫인 함수를 러스트 판이 편의로 다시 둔 것은 `#[reflect(skip)]` 로 빼서 차례를 원본처럼 둔다.
 //!     읽기와 넣기는 원본 `component[getterName]`, `component[setterName]` 처럼 따로 가장 아래 타입의 것부터 찾는다. (RichText 는 게터를 Text 에서 받고 세터는 제 것)
 //!   - 짝은 원본처럼 키(baseName)로 짓는다. (get_target 의 키를 TargetNode 로 정하면 set_target(키 Target)과 짝이 아니다)
-//!   - impl Component 블록에서 다시 정의한 게터는 원본 클래스에도 있는 것만 보이고(#`[reflect(skip)]` 으로 빼고), 원본 클래스 몸통의 자리는 #[reflect(after = "...")] 로 맞춘다.
-//!   - 원본에서 값이 객체라 저장에서 빠지는 속성은 #`[reflect(unsaved)]` 로 목록에는 두고 저장에서 뺀다. (ShadowText 의 FontFace)
+//!   - impl Component 블록에서 다시 정의한 게터는 원본 클래스에도 있는 것만 보이고(`#[reflect(skip)]` 으로 빼고), 원본 클래스 몸통의 자리는 #[reflect(after = "...")] 로 맞춘다.
+//!   - 원본에서 값이 객체라 저장에서 빠지는 속성은 `#[reflect(unsaved)]` 로 목록에는 두고 저장에서 뺀다. (ShadowText 의 FontFace)
 //!   - 읽을 때 꼴은 세터의 꼴로 가린다. 원본은 지금 값의 꼴로 가리고 지금 값이 없으면(null) 저장한 꼴로 받는다. (원본 saveByReflection 은 Color 만 수 넷,
 //!     Vector2 만 수 둘로 적는다) 그래서 두 엔진이 같은 문서를 같게 읽는다.
 //! - 원본과 다른 것:
@@ -276,7 +276,7 @@ pub trait FromReflectValue<'a>: Sized {
 //==============================================================================
 /// 저장 속성 하나. (원본 getReflectedProperties 가 돌려주는 { name, getterName, setterName })
 /// - name 은 원본 키(접두어를 뗀 원본 이름), getter_name 과 setter_name 은 러스트 함수 이름이다. setter_name 이 None 이면 러스트에 세터가 없다.
-/// - is_saved 가 false 면 원본에서 값이 객체라 반사 저장이 적지 않는 속성이다. (#`[reflect(unsaved)]`, ShadowText 의 FontFace)
+/// - is_saved 가 false 면 원본에서 값이 객체라 반사 저장이 적지 않는 속성이다. (`#[reflect(unsaved)]`, ShadowText 의 FontFace)
 ///
 /// # 예제
 /// Component 공통 속성 하나 보기

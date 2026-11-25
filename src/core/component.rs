@@ -10,7 +10,7 @@
 //! - 의존 컴포넌트(원본 require): 원본은 클래스 목록을 돌려준다. 러스트 판은 RequiredComponent(타입과 기본값으로 만드는 함수) 목록을 돌려주고,
 //!   WorldNode::add_component 가 붙이기 전에 그 타입이 없으면 만들어 붙인다. 떼어질 때는 원본처럼 detach 를 부른다.
 //! - 원본 setNode, getNode, setComponentType 은 옮기지 않았다. 러스트 판은 노드를 문맥으로 넘기고(전역 객체 참조가 없다) 이름은 타입이 정한다.
-//! - 반사(원본이 실행 중에 프로토타입을 훑어 get, is, set 함수를 찾는 것): impl 블록과 impl Component 블록에 #`[vanilla::reflect]` 를 붙이면
+//! - 반사(원본이 실행 중에 프로토타입을 훑어 get, is, set 함수를 찾는 것): impl 블록과 impl Component 블록에 `#[vanilla::reflect]` 를 붙이면
 //!   매크로가 컴파일 때 그 목록과 부르는 코드를 짓고, get_reflection 이 그것을 돌려준다. (core/reflection.rs) 붙이지 않은 컴포넌트는 None 이다.
 //!   러스트에는 실행 중에 메서드 목록을 읽는 길이 없어 붙인 타입만 반사된다. (원본은 모든 객체, 언리얼 UCLASS 와 같은 꼴)
 //!   구체 타입으로 꺼내기(C++ RTTI 의 dynamic_cast 자리)는 AsAny 다.
@@ -263,7 +263,7 @@ impl Default for ComponentBase {
 
 //==============================================================================
 /// 컴포넌트 트레이트.
-/// - 구현할 때 impl 블록과 이 트레이트의 impl 블록 둘 다에 #`[vanilla::reflect]` 를 붙이면 UI 문서와 DevTools 인스펙터가 원본처럼 속성을 다룬다.
+/// - 구현할 때 impl 블록과 이 트레이트의 impl 블록 둘 다에 `#[vanilla::reflect]` 를 붙이면 UI 문서와 DevTools 인스펙터가 원본처럼 속성을 다룬다.
 ///   빠뜨리면: 한쪽만 붙이면 컴파일 에러, 둘 다 빠뜨리면 UIDocument 쓰기 경고와 인스펙터의 "반사 없음" 줄로 알 수 있다.
 ///
 /// # 예제

@@ -12,7 +12,7 @@
 //!     반사로 다루는 종류는 `#[reflect]` 를 붙인 컴포넌트뿐이다. (엔진 컴포넌트는 모두 붙였다) 원본은 모든 객체가 반사된다.
 //!     원본 표에서 반사로 저장하는 Outline, SoftShade, ShadowText, UIProgressRing 도 반사로 쓰고 읽는다. 원본 반사 결과와 같은 키(머리 대문자: Color, LineWidth,
 //!     GizmoVisible, Enable, ComponentType 등)와 차례다. 원본 ShadowText 의 FontFace 는 글꼴 객체라 적히지 않는다. 러스트 판의 글꼴 이름 글(get_font_family)은
-//!     #`[reflect(unsaved)]` 로 속성 목록에는 두고 저장에서 뺐다.
+//!     `#[reflect(unsaved)]` 로 속성 목록에는 두고 저장에서 뺐다.
 //!   - 트리를 받는 반사 세터(UISnapScrollView 의 SnapCurrentIndex 같은 것)도 원본처럼 읽는 그 자리에서 부른다. 읽는 컴포넌트를 트리에서 잠깐 꺼내 읽기 문맥에 트리를 쥐여 준다.
 //!   - &mut self 게터가 있는 컴포넌트는 to_json_text_mut, serialize_node_mut 가 &mut 갈래로 읽어 적는다. (원본 게터에는 &self, &mut self 구별이 없다)
 //!   - 종류 등록: register_component_type(이름, 짓는 함수)은 원본 registerComponentType 이다. (반사로 쓰고 읽는다) 쓰기, 읽기 함수가 따로 있는 종류는
@@ -3758,7 +3758,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	/// 시험용 게임 컴포넌트. (#`[vanilla::reflect]` 를 붙여 등록 한 줄로 쓰고 읽는다)
+	/// 시험용 게임 컴포넌트. (`#[vanilla::reflect]` 를 붙여 등록 한 줄로 쓰고 읽는다)
 	//==============================================================================
 	struct Follower {
 		component_base: crate::core::component::ComponentBase,
