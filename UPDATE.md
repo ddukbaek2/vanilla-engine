@@ -246,6 +246,7 @@
 - Graphic.set_image_smoothing_quality, get_image_smoothing_quality, ImageSmoothingQuality(Low, Medium, High, 처음 High. 원본처럼 보관만 한다), get_vertex_array, get_vertex_buffer, get_vertex_data (기본 그리기의 버텍스 어레이, 버퍼, 스크래치 배열)
 - create_guid() (원본 base/reflection.js 의 createGUID, 앞 12 자리는 밀리초 시각이고 나머지는 난수인 UUID 꼴 글, 크레이트 맨 위에서 낸다)
 - 폰트 문자열을 브라우저 Canvas2D 의 font 처럼 CSS font 줄임 꼴로 읽는다. (parse_font_string) 크기는 px 밖에 pt, pc, in, cm, mm, q, em, rem, %, larger, smaller, 이름 크기(xx-small ~ xxx-large)를 읽고(상대 크기는 원본 캔버스처럼 10px 에 댄다), "16px/1.5" 의 줄높이는 넘기고, small-caps, 늘이기 낱말, oblique 각도를 받는다. 쉼표로 이은 이름 목록은 글자마다 앞 이름의 얼굴부터 찾는다. (전에는 첫 이름만 썼다) 틀린 문자열은 캔버스 처음 값 "10px sans-serif" 로 본다. FontDescription.family_name_list 를 더했다. (구조체를 직접 짓는 코드는 고쳐야 한다) 크롬의 해석 값과 시험으로 대었다
+- 데스크탑 찍기 모드(VANILLA_CAPTURE_PATH)는 창을 숨기고 돈다. 검증 도구가 예제를 찍을 때 사용자 화면에 창이 뜨지 않는다. 숨긴 창은 다시 그리기 요청과 수직 동기가 없어 about_to_wait 에서 프레임을 바로 돌고, 최대 FPS 가 없으면 모니터 주사율(모르면 60)로 보일 때와 같은 빠르기를 맞춘다. 가려짐 알림은 받지 않는다. 맥은 독 아이콘과 포커스도 가져가지 않는다(활성화 정책 Accessory). 창을 보려면 VANILLA_CAPTURE_SHOW_WINDOW=1. (맥에서 toonshowcase, uigallery, textshaping 을 숨긴 채 찍어 확인)
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.
