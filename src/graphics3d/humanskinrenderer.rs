@@ -1026,6 +1026,9 @@ impl HumanSkinRenderer {
 			_ => {
 				unsafe {
 					gl.uniform_1_f32(shadow_strength_location.as_ref(), 0.0);
+					gl.active_texture(glow::TEXTURE0 + TEXTURE_UNIT_SHADOWMAP);
+					gl.bind_texture(glow::TEXTURE_2D, Some(self.skinned_model_renderer.get_empty_shadow_texture()));
+					gl.active_texture(glow::TEXTURE0);
 				}
 			}
 		}
