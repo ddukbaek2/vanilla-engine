@@ -20,6 +20,8 @@
 // - 가변 글꼴(fvar 의 wght 축)은 굵기 인스턴스를 축 값으로 만든다. (create_from_shared_bytes 의 variation_list) 모양 짓기는 rustybuzz 가 축 값을 읽고,
 //   래스터는 fontdue 가 축 값을 읽지 못하고 맥 SFNS 같은 가변 글꼴의 윤곽을 그리지 못해, 가변 글꼴은 skrifa 로 축 값을 건 윤곽을 받아 colorglyph 의 넓이 누적 래스터로 그린다.
 //   (크롬도 가변 글꼴의 굵기를 축 값으로 그린다)
+// - 맥: 파일에서 읽은 색 이모지 글꼴(sbix)과 윤곽 표가 없는 글꼴(PingFang 의 hvgl)은 CoreText 로 그린다. (platform/desktop/coretextglyph.rs, 원본 크롬 맥도 CoreText 로 그린다)
+//   색 이모지의 전진폭은 CoreText 가 작은 크기에서 키워 그리는 비를 곱하고 정수 픽셀로 반올림한다. (16px 에서 20, 13px 에서 16, 크롬 measureText 와 같다)
 //==============================================================================
 use crate::core::colorglyph;
 use std::rc::Rc;
@@ -239,6 +241,10 @@ pub struct LoadedFont {
 	variation_list: Vec<rustybuzz::Variation>,
 	// 가변 글꼴인지. (fvar 표가 있다, 래스터와 글리프 상자를 윤곽에서 직접 셈한다)
 	is_variable_font: bool,
+	// 글꼴 파일 경로. (시스템 글꼴처럼 파일에서 읽었으면, 맥 CoreText 가 같은 파일로 그린다)
+	source_path: Option<std::path::PathBuf>,
+	// 맥 CoreText 로 그리는지. (파일 경로가 있고 색 이모지(sbix)이거나 윤곽 표(glyf, CFF, CFF2)가 없는 글꼴)
+	is_core_text_raster: bool,
 }
 
 impl LoadedFont {
@@ -275,7 +281,61 @@ impl LoadedFont {
 			face_index,
 			variation_list: variation_list.to_vec(),
 			is_variable_font,
+			source_path: None,
+			is_core_text_raster: false,
 		})
+	}
+
+	//==============================================================================
+	// 글꼴 파일 경로 적기. (파일에서 읽은 글꼴. 맥은 색 이모지와 윤곽 표가 없는 글꼴을 CoreText 로 그리게 한다)
+	//==============================================================================
+	pub fn with_source_path(mut self, source_path: std::path::PathBuf) -> LoadedFont {
+		#[cfg(target_os = "macos")]
+		{
+			let tables = self.get_shaping_face().tables();
+			let has_outline_table = tables.glyf.is_some() || tables.cff.is_some() || tables.cff2.is_some();
+			self.is_core_text_raster = tables.sbix.is_some() || !has_outline_table;
+		}
+		self.source_path = Some(source_path);
+		self
+	}
+
+	//==============================================================================
+	// 맥 CoreText 로 그리는지.
+	//==============================================================================
+	pub fn is_core_text_raster(&self) -> bool {
+		self.is_core_text_raster
+	}
+
+	//==============================================================================
+	// 모양 짓기 전진폭에 곱할 비. (맥 색 이모지는 CoreText 가 작은 크기에서 키워 그리는 비, 그 밖은 1)
+	//==============================================================================
+	pub fn read_advance_scale(&self, pixel_size: f32) -> f32 {
+		#[cfg(target_os = "macos")]
+		{
+			if self.is_core_text_raster && self.get_shaping_face().tables().sbix.is_some() {
+				if let Some(source_path) = self.source_path.as_ref() {
+					return crate::platform::desktop::coretextglyph::read_emoji_scale(source_path, self.face_index, pixel_size);
+				}
+			}
+		}
+		let _ = pixel_size;
+		1.0
+	}
+
+	//==============================================================================
+	// 전진폭을 정수 픽셀로 반올림하는지. (맥 색 이모지, 크롬 measureText 가 13px 에서 16, 17px 에서 21 처럼 정수를 준다)
+	//==============================================================================
+	pub fn is_integer_advance(&self) -> bool {
+		self.is_core_text_raster && self.get_shaping_face().tables().sbix.is_some()
+	}
+
+	//==============================================================================
+	// 맥 CoreText 에 줄 축 값. ((4 글자 태그의 수, 값) 목록)
+	//==============================================================================
+	#[cfg(target_os = "macos")]
+	fn read_core_text_variation_list(&self) -> Vec<(u32, f32)> {
+		self.variation_list.iter().map(|variation| (variation.tag.0, variation.value)).collect()
 	}
 
 	//==============================================================================
@@ -317,6 +377,25 @@ impl LoadedFont {
 	// 글리프가 덮는 픽셀 상자. (펜 원점에서 왼쪽, 아래, 너비, 높이. fontdue Metrics 의 xmin, ymin, width, height 와 같은 뜻, 비었으면 너비와 높이가 0)
 	//==============================================================================
 	pub fn read_glyph_metrics(&self, glyph_index: u16, pixel_size: f32) -> (i32, i32, i32, i32) {
+		#[cfg(target_os = "macos")]
+		{
+			if self.is_core_text_raster {
+				if let Some(source_path) = self.source_path.as_ref() {
+					return match crate::platform::desktop::coretextglyph::read_glyph_bounds(source_path, self.face_index, glyph_index, pixel_size, &self.read_core_text_variation_list()) {
+						Some(glyph_rect) => {
+							let left_x = glyph_rect.origin.x.floor() as i32;
+							let bottom_y = glyph_rect.origin.y.floor() as i32;
+							let right_x = (glyph_rect.origin.x + glyph_rect.size.width).ceil() as i32;
+							let top_y = (glyph_rect.origin.y + glyph_rect.size.height).ceil() as i32;
+							(left_x, bottom_y, right_x - left_x, top_y - bottom_y)
+						}
+						None => {
+							(0, 0, 0, 0)
+						}
+					};
+				}
+			}
+		}
 		if self.is_outline_raster() {
 			let scale = pixel_size / self.units_per_em;
 			return match colorglyph::read_outline_bounds(&|outline_builder| self.draw_glyph_outline(glyph_index, outline_builder), scale) {
@@ -827,7 +906,8 @@ pub fn shape_text(face_list: &[ResolvedFontFace], text: &str, pixel_size: f32, d
 				});
 				unicode_buffer.guess_segment_properties();
 				let glyph_buffer = rustybuzz::shape(face.font.get_shaping_face(), &[], unicode_buffer);
-				let scale = pixel_size / face.font.units_per_em;
+				let scale = pixel_size / face.font.units_per_em * face.font.read_advance_scale(pixel_size);
+				let is_integer_advance = face.font.is_integer_advance();
 				for (glyph_info, glyph_position) in glyph_buffer.glyph_infos().iter().zip(glyph_buffer.glyph_positions().iter()) {
 					shaped_text.glyph_list.push(ShapedGlyph {
 						face_index,
@@ -838,7 +918,14 @@ pub fn shape_text(face_list: &[ResolvedFontFace], text: &str, pixel_size: f32, d
 						text_end: 0,
 						is_right_to_left: is_right_to_left_run,
 					});
-					pen_x += glyph_position.x_advance as f32 * scale;
+					// 맥 색 이모지는 정수 픽셀로 반올림한다. (곱셈 오차로 0.5 가 조금 모자라 내려가지 않게 작은 값을 더한다)
+					let advance = if is_integer_advance {
+						(glyph_position.x_advance as f32 * scale + 0.001).round()
+					}
+					else {
+						glyph_position.x_advance as f32 * scale
+					};
+					pen_x += advance;
 				}
 			}
 		}
@@ -881,6 +968,12 @@ pub struct GlyphRaster {
 // 글리프 래스터. (가짜 굵게는 넓히고, 가짜 기울임은 기준선 기준으로 민다. 색 글리프는 제 색으로, 가짜 굵게 없이)
 //==============================================================================
 pub fn rasterize_glyph(face: &ResolvedFontFace, glyph_index: u16, pixel_size: f32) -> GlyphRaster {
+	#[cfg(target_os = "macos")]
+	{
+		if let Some(glyph_raster) = rasterize_core_text_glyph(face, glyph_index, pixel_size) {
+			return glyph_raster;
+		}
+	}
 	if face.font.has_color_tables {
 		if let Some(color_glyph_raster) = colorglyph::rasterize_color_glyph(face.font.get_shaping_face(), glyph_index, pixel_size) {
 			let mut glyph_raster = GlyphRaster {
@@ -958,6 +1051,76 @@ pub fn rasterize_glyph(face: &ResolvedFontFace, glyph_index: u16, pixel_size: f3
 		apply_synthetic_italic(&mut glyph_raster);
 	}
 	glyph_raster
+}
+
+//==============================================================================
+// 맥 CoreText 로 글리프 그리기. (CoreText 로 그리는 글꼴이 아니면 None. 색 글리프는 제 색, 그 밖은 흰색의 알파를 덮인 정도로)
+// - 가짜 기울임은 색 글리프에도 입히고, 가짜 굵게는 색이 아닌 글리프에만 입힌다. (rasterize_glyph 와 같다)
+//==============================================================================
+#[cfg(target_os = "macos")]
+fn rasterize_core_text_glyph(face: &ResolvedFontFace, glyph_index: u16, pixel_size: f32) -> Option<GlyphRaster> {
+	if !face.font.is_core_text_raster() {
+		return None;
+	}
+	let source_path = face.font.source_path.as_ref()?;
+	let is_color_glyph = face.font.has_color_tables && colorglyph::has_color_glyph(face.font.get_shaping_face(), glyph_index);
+	let core_text_raster = match crate::platform::desktop::coretextglyph::rasterize_glyph(source_path, face.font.face_index, glyph_index, pixel_size, &face.font.read_core_text_variation_list()) {
+		Some(core_text_raster) => {
+			core_text_raster
+		}
+		None => {
+			return Some(GlyphRaster {
+				coverage: Vec::new(),
+				width: 0,
+				height: 0,
+				left_x: 0,
+				top_y: 0,
+				color_pixels: None,
+			});
+		}
+	};
+	let pixel_count = (core_text_raster.width * core_text_raster.height) as usize;
+	let mut glyph_raster = if is_color_glyph {
+		GlyphRaster {
+			coverage: vec![0u8; pixel_count],
+			width: core_text_raster.width,
+			height: core_text_raster.height,
+			left_x: core_text_raster.left_x,
+			top_y: core_text_raster.top_y,
+			color_pixels: Some(core_text_raster.pixels),
+		}
+	}
+	else {
+		GlyphRaster {
+			coverage: core_text_raster.pixels.chunks_exact(4).map(|pixel| pixel[3]).collect(),
+			width: core_text_raster.width,
+			height: core_text_raster.height,
+			left_x: core_text_raster.left_x,
+			top_y: core_text_raster.top_y,
+			color_pixels: None,
+		}
+	};
+	if face.is_synthetic_bold && !is_color_glyph {
+		let radius = calculate_synthetic_bold_radius(pixel_size);
+		let margin = radius.ceil() as i32 + 1;
+		let width = glyph_raster.width + margin * 2;
+		let height = glyph_raster.height + margin * 2;
+		let mut padded = vec![0u8; (width * height) as usize];
+		for position_y in 0..glyph_raster.height {
+			for position_x in 0..glyph_raster.width {
+				padded[((position_y + margin) * width + position_x + margin) as usize] = glyph_raster.coverage[(position_y * glyph_raster.width + position_x) as usize];
+			}
+		}
+		glyph_raster.coverage = dilate_coverage(&padded, width, height, radius);
+		glyph_raster.width = width;
+		glyph_raster.height = height;
+		glyph_raster.left_x -= margin;
+		glyph_raster.top_y += margin;
+	}
+	if face.is_synthetic_italic {
+		apply_synthetic_italic(&mut glyph_raster);
+	}
+	Some(glyph_raster)
 }
 
 //==============================================================================

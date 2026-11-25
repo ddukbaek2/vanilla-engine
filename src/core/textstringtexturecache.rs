@@ -794,7 +794,7 @@ impl TextStringTextureCache {
 			};
 			let font = match std::fs::read(&font_path).map_err(|error| error.to_string()).and_then(load_font) {
 				Ok(font) => {
-					Rc::new(font)
+					Rc::new(font.with_source_path(font_path.clone()))
 				}
 				Err(_) => {
 					continue;
@@ -1808,7 +1808,7 @@ fn load_system_font_face(shared_bytes_table: &mut HashMap<std::path::PathBuf, st
 			Vec::new()
 		}
 	};
-	let font = LoadedFont::create_from_shared_bytes(font_bytes, face_index, &variation_list)?;
+	let font = LoadedFont::create_from_shared_bytes(font_bytes, face_index, &variation_list)?.with_source_path(source.path.clone());
 	if variation_list.is_empty() && textshaping::read_weight_axis_range(font.get_font_bytes(), face_index).is_none() {
 		let shaping_face = font.get_shaping_face();
 		font_face_descriptors.set_weight(shaping_face.weight().to_number());
@@ -2290,6 +2290,47 @@ mod tests {
 		assert!((measure_width("16px Menlo", "Hello World Wifi") - 154.125).abs() < 0.01);
 		assert!(measure_width("16px default", "ภาษาไทย") > 50.0);
 		assert!(measure_width("bold 16px default", "Hello World Wifi") > measure_width("16px default", "Hello World Wifi"));
+	}
+
+	//==============================================================================
+	// 맥 색 이모지와 hvgl 글꼴: CoreText 로 그려 맥 크롬과 같다. (맥만, Apple Color Emoji 가 있을 때)
+	// - 이모지 전진폭은 크롬 measureText 값, 16px 이모지의 그림 상자와 알파 합은 크롬 캔버스 getImageData 로 잰 값이다.
+	// - 중국어 간체(PingFangUI, 윤곽이 애플 전용 hvgl 표에 있다)도 그려진다.
+	//==============================================================================
+	#[cfg(target_os = "macos")]
+	#[test]
+	fn color_emoji_matches_chrome_on_macos() {
+		if crate::platform::find_family_font_file("Apple Color Emoji", 400, false).is_none() {
+			return;
+		}
+		let mut text_string_texture_cache = TextStringTextureCache::new();
+		let system_font_description = parse_font_string(&format!("10px {}", crate::base::platform::SYSTEM_FONT_STRING));
+		text_string_texture_cache.set_system_font_chain(system_font_description.family_name_list);
+		text_string_texture_cache.set_system_font_fallback_enabled(true);
+		for (font_size, chrome_advance) in [(8.0, 10.0), (10.0, 13.0), (13.0, 16.0), (16.0, 20.0), (17.0, 21.0), (21.0, 23.0), (24.0, 24.0), (32.0, 32.0), (64.0, 64.0)] {
+			let text_metrics = text_string_texture_cache.measure_text(&format!("{}px default", font_size), "\u{1F600}");
+			assert_eq!(text_metrics.width, chrome_advance, "{}px", font_size);
+		}
+		let text_raster = text_string_texture_cache.rasterize_text("\u{1F600}", "16px default", 1.0, 2, ShapingDirection::LeftToRight).expect("emoji raster");
+		let color_pixels = text_raster.color_pixels.expect("color pixels");
+		let mut bounds = [i32::MAX, i32::MAX, -1, -1];
+		let mut alpha_sum: u64 = 0;
+		for position_y in 0..text_raster.height {
+			for position_x in 0..text_raster.width {
+				let alpha = color_pixels[((position_y * text_raster.width + position_x) * 4 + 3) as usize];
+				if alpha > 0 {
+					bounds = [bounds[0].min(position_x), bounds[1].min(position_y), bounds[2].max(position_x), bounds[3].max(position_y)];
+					alpha_sum += alpha as u64;
+				}
+			}
+		}
+		assert_eq!(bounds[0] as f32 - text_raster.origin_x, 0.0);
+		assert_eq!(bounds[2] as f32 + 1.0 - text_raster.origin_x, 20.0);
+		assert_eq!(text_raster.baseline_y - bounds[1] as f32, 16.0);
+		assert_eq!(bounds[3] as f32 + 1.0 - text_raster.baseline_y, 4.0);
+		assert_eq!(alpha_sum, 66360);
+		let chinese_raster = text_string_texture_cache.rasterize_text("\u{4EEC}", "32px default", 1.0, 2, ShapingDirection::LeftToRight).expect("chinese raster");
+		assert!(chinese_raster.coverage.iter().any(|value| *value > 0));
 	}
 
 	//==============================================================================

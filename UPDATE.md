@@ -255,6 +255,9 @@
 - 글꼴 언로드: LoadedFont 가 글꼴 바이트를 rustybuzz 얼굴과 함께 든다. (self_cell, 전에는 Box::leak 으로 붙잡아 등록을 지워도 돌려주지 않았다) 같은 파일의 여러 얼굴은 바이트(Rc)를 나눠 든다
 - 맥 크롬 Canvas2D measureText 와 견준 값: 한글 "가나다라" 16px 55.360, "16px Helvetica" 113.508, "16px Menlo" 154.125 가 같다. (시험으로 넣었다) SF 라틴은 106.672 로 크롬 109.072 보다 2.2% 좁다. (크롬이 시스템 UI 글꼴에 거는 광학 크기와 자간을 다 맞추지 못했다)
 - 새 크레이트: self_cell 1, skrifa 0.50, 맥 objc2-core-text 0.3 과 objc2-core-foundation 0.3, 윈도우 dwrote 0.11 과 winapi 0.3, 리눅스 yeslogic-fontconfig-sys 6 (dlopen, 빌드할 때 잇지 않는다)
+- 맥 색 이모지를 CoreText 로 그린다. (platform/desktop/coretextglyph.rs) 크롬 맥처럼 작은 글자 크기에서 이모지를 키워 그리고 아래로 내린다. (16px 에서 20px 그림, 24px 부터 글자 크기 그대로) 전진폭은 CoreText 가 그린 그림 상자의 높이를 정수로 반올림한 값이다. 크롬 measureText 와 8 ~ 128px 의 23 가지 크기에서 같고(8px 10, 13px 16, 16px 20, 21px 23), 12, 16, 20, 32, 64px 의 그림 상자와 알파 합이 크롬 캔버스 getImageData 와 같다. (색 합은 0.01% 안) 시스템에 올린 글꼴만 CoreText 가 이모지를 키우므로 PostScript 이름으로 글꼴을 짓는다
+- 맥: 윤곽이 glyf, CFF, CFF2 에 없는 글꼴도 CoreText 로 그린다. 맥 26 의 중국어 대체 글꼴 PingFangUI.ttc 는 윤곽이 애플 전용 hvgl 표에 있어 열린 해석기로 그릴 수 없다. (전에는 간체 글자가 빈칸이었다) LoadedFont.with_source_path, is_core_text_raster, read_advance_scale, is_integer_advance
+- 새 크레이트: 맥 objc2-core-graphics 0.3
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.
