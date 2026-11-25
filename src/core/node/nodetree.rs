@@ -38,14 +38,35 @@ new_key_type! {
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TouchKind {
+	/// 눌림. (Component::touch_press)
 	Press,
+	/// 이동. (Component::touch_move)
 	Moved,
+	/// 뗌. (Component::touch_release)
 	Release,
+	/// 취소. (Component::touch_cancel)
 	Cancel,
 }
 
 //==============================================================================
 /// 노드 트리.
+/// - 씬마다 하나 든다. (SceneBase::get_node_tree_mut) 노드는 NodeId 로 꺼내고, `node_tree[node_id]` 는 지운 노드면 멈춘다.
+///
+/// # 예제
+/// 층 노드 밑에 노드를 만들고 찾고 지우기
+/// ```rust
+/// use vanilla::NodeTree;
+///
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.get_root_id();
+/// let layer_id = node_tree.create_child(root_id, "layer");
+/// let player_id = node_tree.create_child(layer_id, "player");
+/// assert_eq!(node_tree.find_descendant_by_name(root_id, "player"), Some(player_id));
+/// assert_eq!(node_tree[player_id].get_parent_id(), Some(layer_id));
+/// node_tree.destroy_node(layer_id);
+/// assert!(node_tree.get_node(player_id).is_none());
+/// assert_eq!(node_tree.get_node_count(), 1);
+/// ```
 //==============================================================================
 pub struct NodeTree {
 	nodes: SlotMap<NodeId, WorldNode>,
@@ -60,6 +81,9 @@ pub struct NodeTree {
 impl NodeTree {
 	//==============================================================================
 	/// 생성. (루트 노드 "root" 를 함께 만든다. 루트의 피봇은 왼쪽 위)
+	///
+	/// # 돌려줌
+	/// 루트 노드 하나만 든 트리.
 	//==============================================================================
 	pub fn new() -> NodeTree {
 		let mut nodes: SlotMap<NodeId, WorldNode> = SlotMap::with_key();
@@ -131,6 +155,9 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 루트 노드 핸들.
+	///
+	/// # 돌려줌
+	/// 루트 노드 핸들. (루트는 지울 수 없다)
 	//==============================================================================
 	pub fn get_root_id(&self) -> NodeId {
 		self.root_id
@@ -138,6 +165,9 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 노드 수. (루트와 아직 트리에 붙지 않은 노드까지)
+	///
+	/// # 돌려줌
+	/// 든 노드 수. (루트와 아직 붙지 않은 노드까지)
 	//==============================================================================
 	pub fn get_node_count(&self) -> usize {
 		self.nodes.len()
@@ -145,6 +175,12 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 노드가 살아 있는지.
+	///
+	/// # 인자
+	/// - `node_id`: 볼 노드.
+	///
+	/// # 돌려줌
+	/// 지우지 않은 노드면 true.
 	//==============================================================================
 	pub fn contains(&self, node_id: NodeId) -> bool {
 		self.nodes.contains_key(node_id)
@@ -152,6 +188,12 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 노드 반환.
+	///
+	/// # 인자
+	/// - `node_id`: 꺼낼 노드.
+	///
+	/// # 돌려줌
+	/// 노드. 지웠거나 모르는 핸들이면 None.
 	//==============================================================================
 	pub fn get_node(&self, node_id: NodeId) -> Option<&WorldNode> {
 		self.nodes.get(node_id)
@@ -159,6 +201,12 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 노드 반환. (변경용)
+	///
+	/// # 인자
+	/// - `node_id`: 꺼낼 노드.
+	///
+	/// # 돌려줌
+	/// 노드. (변경용) 지웠거나 모르는 핸들이면 None.
 	//==============================================================================
 	pub fn get_node_mut(&mut self, node_id: NodeId) -> Option<&mut WorldNode> {
 		self.nodes.get_mut(node_id)
@@ -166,6 +214,12 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 노드 만들기. (아직 어느 부모에도 붙지 않는다. add_child 로 붙여야 그려진다)
+	///
+	/// # 인자
+	/// - `name`: 노드 이름.
+	///
+	/// # 돌려줌
+	/// 새 노드 핸들.
 	//==============================================================================
 	pub fn create_node(&mut self, name: &str) -> NodeId {
 		self.nodes.insert(WorldNode::new(name))
@@ -173,6 +227,13 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 자식 노드 만들기. (만들어서 parent_id 의 맨 뒤 자식으로 붙인다)
+	///
+	/// # 인자
+	/// - `parent_id`: 붙일 부모.
+	/// - `name`: 노드 이름.
+	///
+	/// # 돌려줌
+	/// 새 노드 핸들. (parent_id 가 없는 노드면 붙지 않은 채로 남는다)
 	//==============================================================================
 	pub fn create_child(&mut self, parent_id: NodeId, name: &str) -> NodeId {
 		let child_id = self.create_node(name);
@@ -183,6 +244,13 @@ impl NodeTree {
 	//==============================================================================
 	/// 자식 붙이기. (맨 뒤. 다른 부모에 붙어 있으면 떼어서 옮긴다)
 	/// - 자기 자신이나 자기 조상 밑으로는 붙이지 않는다. (false)
+	///
+	/// # 인자
+	/// - `parent_id`: 부모가 될 노드.
+	/// - `child_id`: 붙일 노드.
+	///
+	/// # 돌려줌
+	/// 붙였으면 true. 둘 가운데 하나가 없거나, child_id 가 루트거나, child_id 가 parent_id 자신이나 조상이면 false.
 	//==============================================================================
 	pub fn add_child(&mut self, parent_id: NodeId, child_id: NodeId) -> bool {
 		let child_count = self.get_child_count(parent_id);
@@ -191,6 +259,28 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 자식 끼워 넣기. (child_index 자리, 자식 수보다 크면 맨 뒤)
+	///
+	/// # 인자
+	/// - `parent_id`: 부모가 될 노드.
+	/// - `child_id`: 끼울 노드.
+	/// - `child_index`: 끼울 자리. (0 부터, 앞일수록 먼저 그려진다)
+	///
+	/// # 돌려줌
+	/// 끼웠으면 true. 막히는 경우는 add_child 와 같다.
+	///
+	/// # 예제
+	/// 맨 앞에 끼워 가장 먼저(뒤에 깔리게) 그리기
+	/// ```rust
+	/// use vanilla::NodeTree;
+	///
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let player_id = node_tree.create_child(root_id, "player");
+	/// let background_id = node_tree.create_node("background");
+	/// assert!(node_tree.insert_child(root_id, background_id, 0));
+	/// assert_eq!(node_tree.get_child_ids(root_id), &[background_id, player_id]);
+	/// assert!(!node_tree.insert_child(player_id, root_id, 0));
+	/// ```
 	//==============================================================================
 	pub fn insert_child(&mut self, parent_id: NodeId, child_id: NodeId, child_index: usize) -> bool {
 		if !self.nodes.contains_key(parent_id) || !self.nodes.contains_key(child_id) {
@@ -209,6 +299,9 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 부모에서 떼기. (노드는 지우지 않는다. 다시 add_child 할 수 있다)
+	///
+	/// # 인자
+	/// - `child_id`: 뗄 노드. (부모가 없거나 없는 노드면 아무것도 하지 않는다)
 	//==============================================================================
 	pub fn remove_from_parent(&mut self, child_id: NodeId) {
 		let parent_id = match self.nodes.get(child_id).and_then(|child_node| child_node.parent_id) {
@@ -227,6 +320,13 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 부모 설정. (None 이면 부모에서 뗀다, 자기 자신이나 자손 밑으로는 붙이지 않는다, 원본 setParent)
+	///
+	/// # 인자
+	/// - `child_id`: 옮길 노드.
+	/// - `parent_id`: 새 부모. None 이면 부모에서 뗀다.
+	///
+	/// # 돌려줌
+	/// 붙였거나, 이미 그 부모의 자식이거나(자리는 그대로), 뗐으면 true. add_child 가 막는 경우는 false.
 	//==============================================================================
 	pub fn set_parent(&mut self, child_id: NodeId, parent_id: Option<NodeId>) -> bool {
 		match parent_id {
@@ -245,6 +345,10 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 자식 떼기. (그 부모의 자식일 때만, 노드는 지우지 않는다, 원본 removeChild)
+	///
+	/// # 인자
+	/// - `parent_id`: 부모.
+	/// - `child_id`: 뗄 자식. (parent_id 의 자식이 아니면 아무것도 하지 않는다)
 	//==============================================================================
 	pub fn remove_child(&mut self, parent_id: NodeId, child_id: NodeId) {
 		if self.get_parent_id(child_id) == Some(parent_id) {
@@ -254,6 +358,10 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 그 자리의 자식 떼기. (원본 removeChildAt)
+	///
+	/// # 인자
+	/// - `parent_id`: 부모.
+	/// - `child_index`: 뗄 자식의 자리. (0 부터, 범위 밖이면 아무것도 하지 않는다)
 	//==============================================================================
 	pub fn remove_child_at(&mut self, parent_id: NodeId, child_index: usize) {
 		if let Some(child_id) = self.get_child_ids(parent_id).get(child_index).copied() {
@@ -263,6 +371,9 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 모든 자식 떼기. (바로 아래만 떼고 자식들의 계층은 그대로, 원본 removeChildren)
+	///
+	/// # 인자
+	/// - `parent_id`: 자식을 뗄 부모.
 	//==============================================================================
 	pub fn remove_children(&mut self, parent_id: NodeId) {
 		let child_ids: Vec<NodeId> = self.get_child_ids(parent_id).to_vec();
@@ -273,6 +384,10 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 이름으로 자식 떼기. (바로 아래 처음 하나, 원본 removeChildByName)
+	///
+	/// # 인자
+	/// - `parent_id`: 부모.
+	/// - `name`: 뗄 자식 이름.
 	//==============================================================================
 	pub fn remove_child_by_name(&mut self, parent_id: NodeId, name: &str) {
 		if let Some(child_id) = self.find_child_by_name(parent_id, name) {
@@ -283,6 +398,9 @@ impl NodeTree {
 	//==============================================================================
 	/// 노드 지우기. (자손까지. 루트는 지우지 않는다)
 	/// - tick / 터치를 도는 중이면 비활성으로 두고 다 돈 뒤에 지운다.
+	///
+	/// # 인자
+	/// - `node_id`: 지울 노드. (루트이거나 없는 노드면 아무것도 하지 않는다)
 	//==============================================================================
 	pub fn destroy_node(&mut self, node_id: NodeId) {
 		if node_id == self.root_id || !self.nodes.contains_key(node_id) {
@@ -304,6 +422,10 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 자식 모두 지우기.
+	/// - 바로 아래 자식마다 destroy_node 를 부른다. (자손까지 지운다)
+	///
+	/// # 인자
+	/// - `parent_id`: 자식을 지울 부모.
 	//==============================================================================
 	pub fn destroy_children(&mut self, parent_id: NodeId) {
 		let child_ids: Vec<NodeId> = self.get_child_ids(parent_id).to_vec();
@@ -314,6 +436,28 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 조건에 맞는 자식 지우기. (지운 수)
+	///
+	/// # 인자
+	/// - `parent_id`: 자식을 지울 부모.
+	/// - `predicate`: 바로 아래 자식마다 불러 지울 것이면 true 를 돌려주는 조건.
+	///
+	/// # 돌려줌
+	/// 지운 자식 수.
+	///
+	/// # 예제
+	/// 이름이 enemy 인 자식만 지우기
+	/// ```rust
+	/// use vanilla::NodeTree;
+	///
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// for name in ["enemy", "item", "enemy"] {
+	/// 	node_tree.create_child(root_id, name);
+	/// }
+	/// let destroyed_count = node_tree.destroy_children_where(root_id, |node| node.get_name() == "enemy");
+	/// assert_eq!(destroyed_count, 2);
+	/// assert_eq!(node_tree.get_child_count(root_id), 1);
+	/// ```
 	//==============================================================================
 	pub fn destroy_children_where(&mut self, parent_id: NodeId, predicate: impl Fn(&WorldNode) -> bool) -> usize {
 		let child_ids: Vec<NodeId> = self.get_child_ids(parent_id).to_vec();
@@ -350,6 +494,12 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 부모 핸들.
+	///
+	/// # 인자
+	/// - `node_id`: 볼 노드.
+	///
+	/// # 돌려줌
+	/// 부모 핸들. 루트, 붙지 않은 노드, 없는 노드면 None.
 	//==============================================================================
 	pub fn get_parent_id(&self, node_id: NodeId) -> Option<NodeId> {
 		self.nodes.get(node_id).and_then(|node| node.parent_id)
@@ -357,6 +507,12 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 자식 핸들 목록. (그리는 순서)
+	///
+	/// # 인자
+	/// - `node_id`: 볼 노드.
+	///
+	/// # 돌려줌
+	/// 자식 핸들 목록. (앞이 먼저 그려진다) 없는 노드면 빈 목록.
 	//==============================================================================
 	pub fn get_child_ids(&self, node_id: NodeId) -> &[NodeId] {
 		match self.nodes.get(node_id) {
@@ -371,6 +527,12 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 자식 수.
+	///
+	/// # 인자
+	/// - `node_id`: 볼 노드.
+	///
+	/// # 돌려줌
+	/// 바로 아래 자식 수. 없는 노드면 0.
 	//==============================================================================
 	pub fn get_child_count(&self, node_id: NodeId) -> usize {
 		self.get_child_ids(node_id).len()
@@ -378,6 +540,13 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 자식의 자리. (그리는 순서의 번호, parent_id 의 자식이 아니면 None)
+	///
+	/// # 인자
+	/// - `parent_id`: 부모.
+	/// - `child_id`: 찾을 자식.
+	///
+	/// # 돌려줌
+	/// 그리는 순서의 번호. (0 부터) parent_id 의 자식이 아니면 None.
 	//==============================================================================
 	pub fn get_child_index(&self, parent_id: NodeId, child_id: NodeId) -> Option<usize> {
 		self.nodes.get(parent_id).and_then(|parent_node| parent_node.get_child_index(child_id))
@@ -385,6 +554,12 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 형제 목록. (자기 자신을 포함한 부모의 자식 핸들, 부모가 없으면 None)
+	///
+	/// # 인자
+	/// - `node_id`: 볼 노드.
+	///
+	/// # 돌려줌
+	/// 자기를 포함한 형제 핸들 목록. (그리는 순서) 부모가 없으면 None.
 	//==============================================================================
 	pub fn get_sibling_ids(&self, node_id: NodeId) -> Option<&[NodeId]> {
 		let parent_id = self.get_parent_id(node_id)?;
@@ -393,6 +568,12 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 형제 사이의 자리. (부모가 없으면 None)
+	///
+	/// # 인자
+	/// - `node_id`: 볼 노드.
+	///
+	/// # 돌려줌
+	/// 형제 사이의 번호. (0 부터) 부모가 없으면 None.
 	//==============================================================================
 	pub fn get_sibling_index(&self, node_id: NodeId) -> Option<usize> {
 		let parent_id = self.get_parent_id(node_id)?;
@@ -402,6 +583,25 @@ impl NodeTree {
 	//==============================================================================
 	/// 형제 사이의 자리 설정. (자식 수 - 1 까지로 자르고, 그 자리로 옮긴다. 부모가 없으면 아무것도 하지 않는다)
 	/// - 앞일수록 먼저 그려져 뒤에 깔린다.
+	///
+	/// # 인자
+	/// - `node_id`: 옮길 노드.
+	/// - `child_index`: 새 자리. (0 부터, 자식 수 - 1 을 넘으면 맨 뒤)
+	///
+	/// # 예제
+	/// 앞으로 옮겼다가 맨 뒤(맨 위에 그려지게)로 보내기
+	/// ```rust
+	/// use vanilla::NodeTree;
+	///
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let back_id = node_tree.create_child(root_id, "back");
+	/// let front_id = node_tree.create_child(root_id, "front");
+	/// node_tree.set_sibling_index(front_id, 0);
+	/// assert_eq!(node_tree.get_child_ids(root_id), &[front_id, back_id]);
+	/// node_tree.set_sibling_index(front_id, 100);
+	/// assert_eq!(node_tree.get_sibling_index(front_id), Some(1));
+	/// ```
 	//==============================================================================
 	pub fn set_sibling_index(&mut self, node_id: NodeId, child_index: usize) {
 		let parent_id = match self.get_parent_id(node_id) {
@@ -438,6 +638,12 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 자기부터 루트까지 모두 활성인지. (하나라도 꺼져 있으면 false, 없는 노드도 false)
+	///
+	/// # 인자
+	/// - `node_id`: 볼 노드.
+	///
+	/// # 돌려줌
+	/// 자기와 조상이 모두 활성이면 true.
 	//==============================================================================
 	pub fn is_active_in_hierarchy(&self, node_id: NodeId) -> bool {
 		if !self.nodes.contains_key(node_id) {
@@ -463,6 +669,12 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 자기부터 루트까지 모두 보이는지. (활성, 보이기 플래그, 불투명도 > 0 가운데 하나라도 아니면 false, 없는 노드도 false)
+	///
+	/// # 인자
+	/// - `node_id`: 볼 노드.
+	///
+	/// # 돌려줌
+	/// 자기와 조상이 모두 활성이고 보이기가 켜져 있고 불투명도가 0 보다 크면 true.
 	//==============================================================================
 	pub fn is_visible_in_hierarchy(&self, node_id: NodeId) -> bool {
 		if !self.nodes.contains_key(node_id) {
@@ -489,6 +701,13 @@ impl NodeTree {
 
 	//==============================================================================
 	/// ancestor_id 가 node_id 자신이거나 조상인지.
+	///
+	/// # 인자
+	/// - `ancestor_id`: 조상인지 볼 노드.
+	/// - `node_id`: 기준 노드.
+	///
+	/// # 돌려줌
+	/// ancestor_id 가 node_id 자신이거나 그 조상이면 true.
 	//==============================================================================
 	pub fn is_ancestor_or_self(&self, ancestor_id: NodeId, node_id: NodeId) -> bool {
 		let mut current_id = Some(node_id);
@@ -503,6 +722,13 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 조건으로 자식 찾기. (바로 아래만, 처음 하나, 원본 findChild)
+	///
+	/// # 인자
+	/// - `parent_id`: 찾을 부모.
+	/// - `predicate`: 찾는 노드면 true 를 돌려주는 조건.
+	///
+	/// # 돌려줌
+	/// 처음 맞는 바로 아래 자식. 없으면 None.
 	//==============================================================================
 	pub fn find_child(&self, parent_id: NodeId, predicate: impl Fn(&WorldNode) -> bool) -> Option<NodeId> {
 		self.get_child_ids(parent_id).iter().copied().find(|child_id| predicate(&self.nodes[*child_id]))
@@ -510,6 +736,27 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 조건으로 자손 찾기. (깊이 우선, 그리는 순서로 처음 하나, 원본 findChildRecursive)
+	///
+	/// # 인자
+	/// - `parent_id`: 찾을 조상. (자신은 보지 않는다)
+	/// - `predicate`: 찾는 노드면 true 를 돌려주는 조건. (`&|node| ...` 꼴로 넘긴다)
+	///
+	/// # 돌려줌
+	/// 처음 맞는 자손. 없으면 None.
+	///
+	/// # 예제
+	/// 터치를 받는 자손 찾기
+	/// ```rust
+	/// use vanilla::NodeTree;
+	///
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let panel_id = node_tree.create_child(root_id, "panel");
+	/// let button_id = node_tree.create_child(panel_id, "button");
+	/// node_tree[button_id].set_interactable(true);
+	/// assert_eq!(node_tree.find_child_recursive(root_id, &|node| node.is_interactable()), Some(button_id));
+	/// assert_eq!(node_tree.find_child(root_id, |node| node.is_interactable()), None);
+	/// ```
 	//==============================================================================
 	pub fn find_child_recursive(&self, parent_id: NodeId, predicate: &dyn Fn(&WorldNode) -> bool) -> Option<NodeId> {
 		for child_id in self.get_child_ids(parent_id).iter().copied() {
@@ -525,6 +772,13 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 이름으로 자손 찾기. (원본 findChildRecursiveByName, find_descendant_by_name 과 같다)
+	///
+	/// # 인자
+	/// - `parent_id`: 찾을 조상. (자신은 보지 않는다)
+	/// - `name`: 찾을 이름.
+	///
+	/// # 돌려줌
+	/// 처음 맞는 자손. (깊이 우선, 그리는 순서) 없으면 None.
 	//==============================================================================
 	pub fn find_child_recursive_by_name(&self, parent_id: NodeId, name: &str) -> Option<NodeId> {
 		self.find_descendant_by_name(parent_id, name)
@@ -532,6 +786,13 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 이름으로 자식 찾기. (바로 아래만, 처음 하나)
+	///
+	/// # 인자
+	/// - `parent_id`: 찾을 부모.
+	/// - `name`: 찾을 이름.
+	///
+	/// # 돌려줌
+	/// 처음 맞는 바로 아래 자식. 없으면 None.
 	//==============================================================================
 	pub fn find_child_by_name(&self, parent_id: NodeId, name: &str) -> Option<NodeId> {
 		self.get_child_ids(parent_id).iter().copied().find(|child_id| self.nodes[*child_id].get_name() == name)
@@ -539,6 +800,13 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 이름으로 자손 찾기. (깊이 우선, 그리는 순서로 처음 하나)
+	///
+	/// # 인자
+	/// - `parent_id`: 찾을 조상. (자신은 보지 않는다)
+	/// - `name`: 찾을 이름.
+	///
+	/// # 돌려줌
+	/// 처음 맞는 자손. (깊이 우선, 그리는 순서) 없으면 None.
 	//==============================================================================
 	pub fn find_descendant_by_name(&self, parent_id: NodeId, name: &str) -> Option<NodeId> {
 		for child_id in self.get_child_ids(parent_id).iter().copied() {
@@ -556,6 +824,28 @@ impl NodeTree {
 	/// 전역 위치. (피벗 점의 전역 위치, 원본 WorldNode.getPosition)
 	/// - 로컬 위치는 부모 내용 영역의 왼쪽 위에서 본 자리라, 부모 피벗 점(부모 내용 크기 x 부모 피벗) 기준으로 옮긴 뒤 부모의 전역 회전과 크기를 걸고
 	///   부모 피벗 점의 전역 위치에 더한다. (앵커는 넣지 않는다) 그리는 변환(calculate_world_matrix)이 피벗 점을 놓는 자리와 같다.
+	///
+	/// # 인자
+	/// - `node_id`: 볼 노드. (없는 노드면 멈춘다)
+	///
+	/// # 돌려줌
+	/// 피벗 점의 전역 위치. (루트 아래 노드면 뷰 좌표)
+	///
+	/// # 예제
+	/// 전역 위치를 읽고 전역 위치로 옮기기
+	/// ```rust
+	/// use vanilla::{NodeTree, Vector2};
+	///
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let parent_id = node_tree.create_child(root_id, "parent");
+	/// let child_id = node_tree.create_child(parent_id, "child");
+	/// node_tree[parent_id].set_local_position(Vector2::create(100.0, 50.0));
+	/// node_tree[child_id].set_local_position(Vector2::create(10.0, 20.0));
+	/// assert_eq!(node_tree.get_position(child_id), Vector2::create(110.0, 70.0));
+	/// node_tree.set_position(child_id, Vector2::create(200.0, 100.0));
+	/// assert_eq!(node_tree[child_id].get_local_position(), Vector2::create(100.0, 50.0));
+	/// ```
 	//==============================================================================
 	pub fn get_position(&self, node_id: NodeId) -> Vector2 {
 		let local_position = self.nodes[node_id].get_local_position();
@@ -589,6 +879,10 @@ impl NodeTree {
 	/// 전역 위치 설정. (부모가 없으면 로컬 위치, get_position 의 거꾸로. 원본 WorldNode.setPosition)
 	/// - 부모 피벗 점의 전역 위치에서 본 차이를 부모의 전역 회전과 크기를 풀어 부모 피벗 점 기준으로 되돌리고, 부모 내용 영역의 왼쪽 위 기준(로컬 위치)으로 옮긴다.
 	/// - 부모의 전역 크기가 0 인 축은 부모 피벗 점에 놓는다.
+	///
+	/// # 인자
+	/// - `node_id`: 옮길 노드. (없는 노드면 멈춘다)
+	/// - `position`: 피벗 점이 갈 전역 위치.
 	//==============================================================================
 	pub fn set_position(&mut self, node_id: NodeId, position: Vector2) {
 		let parent_id = match self.get_parent_id(node_id) {
@@ -622,6 +916,12 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 전역 크기. (부모들의 크기를 곱한다, 원본 TransformNode.getScale)
+	///
+	/// # 인자
+	/// - `node_id`: 볼 노드. (없는 노드면 멈춘다)
+	///
+	/// # 돌려줌
+	/// 전역 배율. (자기와 조상의 로컬 배율을 곱한 것)
 	//==============================================================================
 	pub fn get_scale(&self, node_id: NodeId) -> Vector2 {
 		let local_scale = self.nodes[node_id].get_local_scale();
@@ -638,6 +938,10 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 전역 크기 설정. (부모의 전역 크기로 나눈다, 0 이면 0, 원본 TransformNode.setScale)
+	///
+	/// # 인자
+	/// - `node_id`: 바꿀 노드. (없는 노드면 멈춘다)
+	/// - `scale`: 전역 배율.
 	//==============================================================================
 	pub fn set_scale(&mut self, node_id: NodeId, scale: Vector2) {
 		let local_scale = match self.get_parent_id(node_id) {
@@ -656,6 +960,12 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 전역 회전. (도, 부모들의 회전을 더한다, 원본 TransformNode.getRotation)
+	///
+	/// # 인자
+	/// - `node_id`: 볼 노드. (없는 노드면 멈춘다)
+	///
+	/// # 돌려줌
+	/// 전역 회전. (도, 자기와 조상의 로컬 회전을 더한 것)
 	//==============================================================================
 	pub fn get_rotation(&self, node_id: NodeId) -> f32 {
 		let local_rotation = self.nodes[node_id].get_local_rotation();
@@ -671,6 +981,10 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 전역 회전 설정. (도, 원본 TransformNode.setRotation)
+	///
+	/// # 인자
+	/// - `node_id`: 바꿀 노드. (없는 노드면 멈춘다)
+	/// - `rotation`: 전역 회전. (도)
 	//==============================================================================
 	pub fn set_rotation(&mut self, node_id: NodeId, rotation: f32) {
 		let local_rotation = match self.get_parent_id(node_id) {
@@ -686,6 +1000,12 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 전역 투명도. (부모들의 투명도를 곱한다, 원본 TransformNode.getOpacity)
+	///
+	/// # 인자
+	/// - `node_id`: 볼 노드. (없는 노드면 멈춘다)
+	///
+	/// # 돌려줌
+	/// 전역 불투명도. (0 ~ 1, 자기와 조상의 로컬 불투명도를 곱한 것)
 	//==============================================================================
 	pub fn get_opacity(&self, node_id: NodeId) -> f32 {
 		let mut opacity = self.nodes[node_id].get_local_opacity();
@@ -700,6 +1020,28 @@ impl NodeTree {
 	//==============================================================================
 	/// 실제 화면에 그려지는 영역의 네 모서리. (원본 WorldNode.getWorldCorners, OBB. 왼쪽 위, 오른쪽 위, 오른쪽 아래, 왼쪽 아래)
 	/// - 크기는 전역 크기의 절댓값을 곱하고, 피벗 점의 전역 위치를 중심으로 전역 회전만큼 돌린다.
+	///
+	/// # 인자
+	/// - `node_id`: 볼 노드. (없는 노드면 멈춘다)
+	///
+	/// # 돌려줌
+	/// 네 모서리. (뷰 좌표, 왼쪽 위, 오른쪽 위, 오른쪽 아래, 왼쪽 아래 차례)
+	///
+	/// # 예제
+	/// 가운데 피봇 노드의 모서리와 감싸는 사각형
+	/// ```rust
+	/// use vanilla::{NodeTree, Rect, Vector2};
+	///
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let node_id = node_tree.create_child(root_id, "box");
+	/// node_tree[node_id].set_local_position(Vector2::create(100.0, 100.0));
+	/// node_tree[node_id].set_content_size(Vector2::create(40.0, 20.0));
+	/// let world_corners = node_tree.get_world_corners(node_id);
+	/// assert_eq!(world_corners[0], Vector2::create(80.0, 90.0));
+	/// assert_eq!(world_corners[2], Vector2::create(120.0, 110.0));
+	/// assert_eq!(node_tree.get_world_bounds(node_id), Rect::create(80.0, 90.0, 40.0, 20.0));
+	/// ```
 	//==============================================================================
 	pub fn get_world_corners(&self, node_id: NodeId) -> [Vector2; 4] {
 		let position = self.get_position(node_id);
@@ -725,6 +1067,12 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 네 모서리를 감싸는 사각형. (원본 WorldNode.getWorldBounds)
+	///
+	/// # 인자
+	/// - `node_id`: 볼 노드. (없는 노드면 멈춘다)
+	///
+	/// # 돌려줌
+	/// 네 모서리를 감싸는 축 정렬 사각형. (뷰 좌표)
 	//==============================================================================
 	pub fn get_world_bounds(&self, node_id: NodeId) -> Rect {
 		let world_corners = self.get_world_corners(node_id);
@@ -749,6 +1097,12 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 월드 행렬. (루트부터 이 노드까지 로컬 행렬을 곱한 것. 루트의 부모 좌표계 = 뷰 좌표계)
+	///
+	/// # 인자
+	/// - `node_id`: 볼 노드.
+	///
+	/// # 돌려줌
+	/// 이 노드 내용 좌표의 점을 뷰 좌표로 옮기는 행렬. 없는 노드면 단위 행렬.
 	//==============================================================================
 	pub fn calculate_world_matrix(&self, node_id: NodeId) -> TransformMatrix {
 		let mut chain_ids: Vec<NodeId> = Vec::new();
@@ -770,6 +1124,13 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 노드 영역 안의 점 → 뷰 좌표.
+	///
+	/// # 인자
+	/// - `node_id`: 기준 노드.
+	/// - `node_position`: 노드 내용 좌표의 점. (내용 영역의 왼쪽 위가 원점)
+	///
+	/// # 돌려줌
+	/// 뷰 좌표의 점.
 	//==============================================================================
 	pub fn convert_node_position_to_view_position(&self, node_id: NodeId, node_position: Vector2) -> Vector2 {
 		let world_matrix = self.calculate_world_matrix(node_id);
@@ -778,6 +1139,13 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 뷰 좌표 → 노드 영역 안의 점. (행렬이 뒤집히지 않으면 None)
+	///
+	/// # 인자
+	/// - `node_id`: 기준 노드.
+	/// - `view_position`: 뷰 좌표의 점.
+	///
+	/// # 돌려줌
+	/// 노드 내용 좌표의 점. 행렬을 뒤집을 수 없으면(배율 0) None.
 	//==============================================================================
 	pub fn convert_view_position_to_node_position(&self, node_id: NodeId, view_position: Vector2) -> Option<Vector2> {
 		let world_matrix = self.calculate_world_matrix(node_id);
@@ -788,6 +1156,28 @@ impl NodeTree {
 	//==============================================================================
 	/// 뷰 좌표 → 노드의 로컬 좌표. (내용 영역의 왼쪽 위가 원점, 부모들의 변환을 모두 거친다, 원본 WorldNode.convertViewToLocal)
 	/// - convert_view_position_to_node_position 과 같다. 행렬이 뒤집히지 않으면(배율 0) None.
+	///
+	/// # 인자
+	/// - `node_id`: 기준 노드.
+	/// - `view_position`: 뷰 좌표의 점.
+	///
+	/// # 돌려줌
+	/// 노드 내용 좌표의 점. 행렬을 뒤집을 수 없으면(배율 0) None.
+	///
+	/// # 예제
+	/// 터치 자리를 패널 안의 자리로 바꾸기
+	/// ```rust
+	/// use vanilla::{NodeTree, Pivot, Vector2};
+	///
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let panel_id = node_tree.create_child(root_id, "panel");
+	/// node_tree[panel_id].set_pivot(Pivot::TOP_LEFT);
+	/// node_tree[panel_id].set_rect(100.0, 50.0, 200.0, 100.0);
+	/// assert_eq!(node_tree.convert_view_to_local(panel_id, Vector2::create(110.0, 60.0)), Some(Vector2::create(10.0, 10.0)));
+	/// node_tree[panel_id].set_local_scale(Vector2::zero());
+	/// assert_eq!(node_tree.convert_view_to_local(panel_id, Vector2::create(110.0, 60.0)), None);
+	/// ```
 	//==============================================================================
 	pub fn convert_view_to_local(&self, node_id: NodeId, view_position: Vector2) -> Option<Vector2> {
 		self.convert_view_position_to_node_position(node_id, view_position)
@@ -838,6 +1228,11 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 주기적 갱신. (루트부터 깊이 우선: 컴포넌트 → 자식 순, 원본 ComponentNode.tick)
+	/// - 도는 중에 지운 노드는 다 돈 뒤에 지운다.
+	///
+	/// # 인자
+	/// - `engine`: 컴포넌트 문맥에 넘길 엔진.
+	/// - `time_delta`: 지난 tick 뒤로 흐른 시간. (초)
 	//==============================================================================
 	pub fn tick(&mut self, engine: &Engine, time_delta: f32) {
 		let root_id = self.root_id;
@@ -851,6 +1246,29 @@ impl NodeTree {
 	/// 컴포넌트 붙이기. (attach 다음 attach_to_tree 를 불러, 컴포넌트가 자식 노드를 만들 수 있게 한다)
 	/// - UIView 처럼 자식 노드를 만드는 컴포넌트는 이것으로 붙인다. 붙인 컴포넌트를 돌려준다.
 	/// - 원본 addComponent 처럼 자기 자리를 먼저 잡고 붙는다. 붙는 동안 함께 붙인 컴포넌트(UIScrollView 의 Mask 같은 것)는 그 뒤에 온다.
+	/// - 의존 컴포넌트(Component::require)는 붙이지 않는다. (WorldNode::add_component 만 붙인다)
+	///
+	/// # 인자
+	/// - `node_id`: 붙일 노드.
+	/// - `component`: 붙일 컴포넌트.
+	///
+	/// # 돌려줌
+	/// 붙인 컴포넌트. (변경용) 노드가 없으면 None.
+	///
+	/// # 예제
+	/// 붙인 컴포넌트를 돌려받고, 지운 노드에는 붙지 않는다
+	/// ```rust
+	/// use vanilla::{NodeTree, Paint};
+	///
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let node_id = node_tree.create_child(root_id, "panel");
+	/// let paint = node_tree.add_component(node_id, Paint::new()).expect("node");
+	/// paint.set_round_size(12.0);
+	/// assert_eq!(node_tree[node_id].get_component::<Paint>().expect("paint").get_round_size(), 12.0);
+	/// node_tree.destroy_node(node_id);
+	/// assert!(node_tree.add_component(node_id, Paint::new()).is_none());
+	/// ```
 	//==============================================================================
 	pub fn add_component<T: Component + 'static>(&mut self, node_id: NodeId, component: T) -> Option<&mut T> {
 		if !self.nodes.contains_key(node_id) {
@@ -872,6 +1290,31 @@ impl NodeTree {
 	/// 컴포넌트 하나를 트리와 함께 쥐고 부르기. (씬 코드에서 위젯처럼 다른 노드도 만지는 컴포넌트를 바로 바꿀 때)
 	/// - node_id 노드의 첫 번째 T 컴포넌트만 잠깐 빼고, 그 컴포넌트와 트리를 action 에 넘긴다. 없으면 None.
 	/// - 예: node_tree.`with_component_mut::<UIScrollView, _>`(scroll_id, |scroll_view, tree| scroll_view.set_scroll_offset_in_tree(tree, scroll_id, offset))
+	/// - action 안에서 지운 노드는 action 이 끝난 뒤에 지운다.
+	///
+	/// # 인자
+	/// - `node_id`: 컴포넌트가 붙은 노드.
+	/// - `action`: 꺼낸 컴포넌트와 트리를 받아 부를 함수. (그동안 그 컴포넌트는 노드에서 빠져 있다)
+	///
+	/// # 돌려줌
+	/// action 이 돌려준 값. 노드가 없거나 T 컴포넌트가 없으면 None.
+	///
+	/// # 예제
+	/// 컴포넌트를 바꾸면서 트리에 노드 만들기
+	/// ```rust
+	/// use vanilla::{NodeTree, Paint};
+	///
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let node_id = node_tree.create_child(root_id, "panel");
+	/// node_tree[node_id].add_component(Paint::new());
+	/// let shadow_id = node_tree.with_component_mut::<Paint, _>(node_id, |paint, tree| {
+	/// 	paint.set_round_size(4.0);
+	/// 	tree.create_child(node_id, "shadow")
+	/// }).expect("paint");
+	/// assert_eq!(node_tree.get_parent_id(shadow_id), Some(node_id));
+	/// assert_eq!(node_tree[node_id].get_component::<Paint>().expect("paint").get_round_size(), 4.0);
+	/// ```
 	//==============================================================================
 	pub fn with_component_mut<T: Component + 'static, R>(&mut self, node_id: NodeId, action: impl FnOnce(&mut T, &mut NodeTree) -> R) -> Option<R> {
 		let component_index = self.nodes.get(node_id)?.components.iter().position(|candidate| {
@@ -895,6 +1338,28 @@ impl NodeTree {
 	//==============================================================================
 	/// 차례 번호로 컴포넌트 하나를 트리와 함께 쥐고 부르기. (종류를 모르는 자리, UIDocument 가 트리를 받는 반사 세터를 부를 때)
 	/// - node_id 노드의 component_index 번째 컴포넌트를 잠깐 빼고, 그 컴포넌트와 트리를 action 에 넘긴다. 없으면 None.
+	///
+	/// # 인자
+	/// - `node_id`: 컴포넌트가 붙은 노드.
+	/// - `component_index`: 컴포넌트 자리. (붙인 차례, 0 부터)
+	/// - `action`: 꺼낸 컴포넌트와 트리를 받아 부를 함수.
+	///
+	/// # 돌려줌
+	/// action 이 돌려준 값. 노드가 없거나 자리가 범위 밖이면 None.
+	///
+	/// # 예제
+	/// 종류를 모르는 첫 컴포넌트의 이름 읽기
+	/// ```rust
+	/// use vanilla::{NodeTree, Paint};
+	///
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let node_id = node_tree.create_child(root_id, "panel");
+	/// node_tree[node_id].add_component(Paint::new());
+	/// let component_type = node_tree.with_component_at_mut(node_id, 0, |component, _tree| component.get_component_type());
+	/// assert_eq!(component_type, Some("Paint"));
+	/// assert!(node_tree.with_component_at_mut(node_id, 1, |_component, _tree| ()).is_none());
+	/// ```
 	//==============================================================================
 	pub fn with_component_at_mut<R>(&mut self, node_id: NodeId, component_index: usize, action: impl FnOnce(&mut dyn Component, &mut NodeTree) -> R) -> Option<R> {
 		if component_index >= self.nodes.get(node_id)?.components.len() {
@@ -946,6 +1411,9 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 출력. (루트부터 재귀, 원본 Graphic.draw_node)
+	///
+	/// # 인자
+	/// - `graphic`: 그릴 Graphic. (화면 밖이라 건너뛴 노드 수를 더해 둔다)
 	//==============================================================================
 	pub fn draw(&mut self, graphic: &mut Graphic) {
 		self.culled_node_count = 0;
@@ -957,6 +1425,10 @@ impl NodeTree {
 	//==============================================================================
 	/// 노드 하나와 그 자손 출력.
 	/// - push_transform → 컴포넌트의 push_transform → 컴포넌트 → (Mask 면 클립 시작) → 자식 → (클립 끝) → 기즈모 → 컴포넌트의 pop_transform → pop_transform
+	///
+	/// # 인자
+	/// - `node_id`: 그릴 노드. (없거나 비활성이면 그리지 않는다)
+	/// - `graphic`: 그릴 Graphic. (부모의 트랜스폼이 걸린 상태)
 	//==============================================================================
 	pub fn draw_node(&mut self, node_id: NodeId, graphic: &mut Graphic) {
 		let node = match self.nodes.get_mut(node_id) {
@@ -1016,6 +1488,31 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 그리는 순서로 돌며 점 아래 맨 위의 interactable 노드 찾기. (원본 TouchRecognizer 의 대상 고르기)
+	/// - 비활성이거나 안 보이는 노드와 그 자손, 자르는(Mask) 노드 밖의 자손은 맞지 않는다.
+	///
+	/// # 인자
+	/// - `view_position`: 볼 점. (뷰 좌표)
+	///
+	/// # 돌려줌
+	/// 점 아래에서 가장 나중에 그리는 터치 받는 노드. 없으면 None.
+	///
+	/// # 예제
+	/// 겹친 두 노드 가운데 뒤에 그리는 것이 맞는다
+	/// ```rust
+	/// use vanilla::{NodeTree, Pivot, Vector2};
+	///
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// for name in ["back", "front"] {
+	/// 	let node_id = node_tree.create_child(root_id, name);
+	/// 	node_tree[node_id].set_pivot(Pivot::TOP_LEFT);
+	/// 	node_tree[node_id].set_rect(0.0, 0.0, 100.0, 100.0);
+	/// 	node_tree[node_id].set_interactable(true);
+	/// }
+	/// let found_id = node_tree.find_topmost_interactable_node(Vector2::create(50.0, 50.0)).expect("node");
+	/// assert_eq!(node_tree[found_id].get_name(), "front");
+	/// assert_eq!(node_tree.find_topmost_interactable_node(Vector2::create(150.0, 50.0)), None);
+	/// ```
 	//==============================================================================
 	pub fn find_topmost_interactable_node(&self, view_position: Vector2) -> Option<NodeId> {
 		let mut found_id: Option<NodeId> = None;
@@ -1024,6 +1521,9 @@ impl NodeTree {
 		found_id
 	}
 
+	//==============================================================================
+	/// 노드 하나와 그 자손에서 점 아래 터치 받는 노드 찾기. (그리는 순서로 돌며 맞을 때마다 found_id 를 덮어써 마지막 것이 맨 위다)
+	//==============================================================================
 	fn find_topmost_interactable_node_recursive(&self, node_id: NodeId, parent_matrix: &TransformMatrix, view_position: Vector2, found_id: &mut Option<NodeId>) {
 		let node = match self.nodes.get(node_id) {
 			Some(node) => {
@@ -1054,6 +1554,13 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 터치 전달. (노드의 컴포넌트들에게)
+	/// - 켜진 컴포넌트에게 붙인 차례로 부르고, 도는 중에 지운 노드는 다 돈 뒤에 지운다.
+	///
+	/// # 인자
+	/// - `node_id`: 터치를 받을 노드.
+	/// - `engine`: 컴포넌트 문맥에 넘길 엔진.
+	/// - `touch_kind`: 부를 터치 함수의 종류.
+	/// - `view_input_position`: 터치 자리. (뷰 좌표)
 	//==============================================================================
 	pub fn dispatch_touch(&mut self, node_id: NodeId, engine: &Engine, touch_kind: TouchKind, view_input_position: Vector2) {
 		self.traversal_depth += 1;
@@ -1082,6 +1589,12 @@ impl NodeTree {
 	/// - 그 자리를 품은 노드 가운데 누를 수 있는 노드와 휠을 받는 칸(Component::is_wheel_receiver)의 노드를 보고 가장 앞(나중에 그리는 것)을 고른다.
 	///   스크롤 칸이 가장 앞이면 그 칸의 노드다. (칸 안의 글이나 그림처럼 누를 수 없는 것 위에서 굴려도 칸이 받는다)
 	/// - 누를 수 있는 노드가 가장 앞이면 그 노드다. (dispatch_wheel 이 부모 쪽으로 올라가며 묻는다, 스크롤 칸을 덮은 막이나 창이 휠을 가린다)
+	///
+	/// # 인자
+	/// - `view_position`: 볼 점. (뷰 좌표)
+	///
+	/// # 돌려줌
+	/// 휠을 받을 노드. 없으면 None.
 	//==============================================================================
 	pub fn find_wheel_target_node(&self, view_position: Vector2) -> Option<NodeId> {
 		let mut found_id: Option<NodeId> = None;
@@ -1090,6 +1603,9 @@ impl NodeTree {
 		found_id
 	}
 
+	//==============================================================================
+	/// 노드 하나와 그 자손에서 점 아래 휠 받을 노드 찾기. (누를 수 있는 노드와 휠을 받는 칸, 그리는 순서로 마지막 것)
+	//==============================================================================
 	fn find_wheel_target_node_recursive(&self, node_id: NodeId, parent_matrix: &TransformMatrix, view_position: Vector2, found_id: &mut Option<NodeId>) {
 		let node = match self.nodes.get(node_id) {
 			Some(node) => {
@@ -1119,6 +1635,14 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 그 자리에 휠 전달. (find_wheel_target_node 로 찾은 노드부터 부모 쪽으로, 받아 쓴 컴포넌트가 있으면 true)
+	///
+	/// # 인자
+	/// - `view_position`: 휠을 굴린 자리. (뷰 좌표)
+	/// - `engine`: 컴포넌트 문맥에 넘길 엔진.
+	/// - `wheel_delta`: 휠 이동량. (픽셀, 내용을 아래로 넘기면 y 가 양수)
+	///
+	/// # 돌려줌
+	/// 받아 쓴 컴포넌트가 있으면 true. 받을 노드가 없으면 false.
 	//==============================================================================
 	pub fn dispatch_wheel_at(&mut self, view_position: Vector2, engine: &Engine, wheel_delta: Vector2) -> bool {
 		match self.find_wheel_target_node(view_position) {
@@ -1133,6 +1657,54 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 휠 전달. (node_id 자신부터 부모 쪽으로 올라가며 처음 받아 쓴 컴포넌트에서 멈춘다. 원본 touchWheel)
+	///
+	/// # 인자
+	/// - `node_id`: 처음 물을 노드.
+	/// - `engine`: 컴포넌트 문맥에 넘길 엔진.
+	/// - `wheel_delta`: 휠 이동량. (픽셀, 내용을 아래로 넘기면 y 가 양수)
+	///
+	/// # 돌려줌
+	/// 받아 쓴 컴포넌트가 있으면 true.
+	///
+	/// # 예제
+	/// 항목 위에서 굴린 휠을 목록 노드의 컴포넌트가 받는다
+	/// ```rust
+	/// use vanilla::{Component, ComponentBase, ComponentContext, Engine, EngineConfiguration, NodeTree, Vector2};
+	///
+	/// struct Scroller {
+	/// 	component_base: ComponentBase,
+	/// 	scroll_offset: f32,
+	/// }
+	///
+	/// impl Component for Scroller {
+	/// # 	fn get_component_base(&self) -> &ComponentBase {
+	/// # 		&self.component_base
+	/// # 	}
+	/// # 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
+	/// # 		&mut self.component_base
+	/// # 	}
+	/// # 	fn get_component_type(&self) -> &'static str {
+	/// # 		"Scroller"
+	/// # 	}
+	/// 	fn wheel(&mut self, _context: &mut ComponentContext, wheel_delta: Vector2) -> bool {
+	/// 		self.scroll_offset += wheel_delta.y;
+	/// 		true
+	/// 	}
+	/// }
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let list_id = node_tree.create_child(root_id, "list");
+	/// node_tree[list_id].add_component(Scroller {
+	/// 	component_base: ComponentBase::new(),
+	/// 	scroll_offset: 0.0,
+	/// });
+	/// let item_id = node_tree.create_child(list_id, "item");
+	/// assert!(node_tree.dispatch_wheel(item_id, &engine, Vector2::create(0.0, 40.0)));
+	/// assert_eq!(node_tree[list_id].get_component::<Scroller>().expect("scroller").scroll_offset, 40.0);
+	/// assert!(!node_tree.dispatch_wheel(root_id, &engine, Vector2::create(0.0, 40.0)));
+	/// ```
 	//==============================================================================
 	pub fn dispatch_wheel(&mut self, node_id: NodeId, engine: &Engine, wheel_delta: Vector2) -> bool {
 		let mut current_id = Some(node_id);
@@ -1157,6 +1729,12 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 노드 경계 사각형을 부모 영역 기준으로. (회전 없을 때 정확, 충돌 검사 등)
+	///
+	/// # 인자
+	/// - `node_id`: 볼 노드.
+	///
+	/// # 돌려줌
+	/// 부모 내용 좌표의 경계 사각형. (NodeTransform::get_local_bounds) 없는 노드면 None.
 	//==============================================================================
 	pub fn get_local_bounds(&self, node_id: NodeId) -> Option<Rect> {
 		self.nodes.get(node_id).map(|node| node.get_transform().get_local_bounds())
@@ -1164,6 +1742,9 @@ impl NodeTree {
 }
 
 impl Default for NodeTree {
+	//==============================================================================
+	/// 기본값. (NodeTree::new 와 같다)
+	//==============================================================================
 	fn default() -> NodeTree {
 		NodeTree::new()
 	}
@@ -1181,6 +1762,9 @@ impl Index<NodeId> for NodeTree {
 }
 
 impl IndexMut<NodeId> for NodeTree {
+	//==============================================================================
+	/// `tree[node_id]` 변경용. (지운 노드면 멈춘다. 있을지 모르면 get_node_mut)
+	//==============================================================================
 	fn index_mut(&mut self, node_id: NodeId) -> &mut WorldNode {
 		self.nodes.get_mut(node_id).expect("NodeTree: destroyed or unknown node id")
 	}
@@ -1194,6 +1778,9 @@ struct ComponentPlaceholder {
 }
 
 impl ComponentPlaceholder {
+	//==============================================================================
+	/// 생성. (꺼진 상태)
+	//==============================================================================
 	fn new() -> ComponentPlaceholder {
 		let mut component_base = ComponentBase::new();
 		component_base.set_enable(false);
@@ -1204,18 +1791,30 @@ impl ComponentPlaceholder {
 }
 
 impl Component for ComponentPlaceholder {
+	//==============================================================================
+	/// 공통 상태 반환.
+	//==============================================================================
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base
 	}
 
+	//==============================================================================
+	/// 공통 상태 반환. (변경용)
+	//==============================================================================
 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 		&mut self.component_base
 	}
 
+	//==============================================================================
+	/// 컴포넌트 이름.
+	//==============================================================================
 	fn get_component_type(&self) -> &'static str {
 		"ComponentPlaceholder"
 	}
 
+	//==============================================================================
+	/// tick 할 일이 없다. (false)
+	//==============================================================================
 	fn is_tick_needed(&self) -> bool {
 		false
 	}
@@ -1224,6 +1823,48 @@ impl Component for ComponentPlaceholder {
 //==============================================================================
 /// 컴포넌트 문맥. (tick / 터치 때 컴포넌트가 받는 것: 자기 노드, 트리 전체, 엔진)
 /// - 원본 컴포넌트의 get_node(), get_node().getParent(), Engine.get_engine() 자리.
+///
+/// # 예제
+/// tick 에서 트리의 다른 노드를 찾아 그 자리로 따라가기
+/// ```rust
+/// use vanilla::{Component, ComponentBase, ComponentContext, Engine, EngineConfiguration, NodeTree, Vector2};
+///
+/// struct Follower {
+/// 	component_base: ComponentBase,
+/// }
+///
+/// impl Component for Follower {
+/// # 	fn get_component_base(&self) -> &ComponentBase {
+/// # 		&self.component_base
+/// # 	}
+/// # 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
+/// # 		&mut self.component_base
+/// # 	}
+/// # 	fn get_component_type(&self) -> &'static str {
+/// # 		"Follower"
+/// # 	}
+/// 	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f32) {
+/// 		let node_tree = context.get_node_tree();
+/// 		let root_id = node_tree.get_root_id();
+/// 		if let Some(target_id) = node_tree.find_descendant_by_name(root_id, "target") {
+/// 			let target_position = node_tree[target_id].get_local_position();
+/// 			context.get_transform_mut().set_local_position(target_position);
+/// 		}
+/// 	}
+/// }
+///
+/// let engine = Engine::new(EngineConfiguration::new());
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.get_root_id();
+/// let target_id = node_tree.create_child(root_id, "target");
+/// node_tree[target_id].set_local_position(Vector2::create(30.0, 40.0));
+/// let follower_id = node_tree.create_child(root_id, "follower");
+/// node_tree[follower_id].add_component(Follower {
+/// 	component_base: ComponentBase::new(),
+/// });
+/// node_tree.tick(&engine, 0.016);
+/// assert_eq!(node_tree[follower_id].get_local_position(), Vector2::create(30.0, 40.0));
+/// ```
 //==============================================================================
 pub struct ComponentContext<'a> {
 	node_tree: &'a mut NodeTree,
@@ -1234,6 +1875,9 @@ pub struct ComponentContext<'a> {
 impl<'a> ComponentContext<'a> {
 	//==============================================================================
 	/// 자기 노드 핸들.
+	///
+	/// # 돌려줌
+	/// 자기 노드 핸들.
 	//==============================================================================
 	pub fn get_node_id(&self) -> NodeId {
 		self.node_id
@@ -1241,6 +1885,9 @@ impl<'a> ComponentContext<'a> {
 
 	//==============================================================================
 	/// 자기 노드. (지금 불리는 컴포넌트만 빠져 있고, 같은 노드의 다른 컴포넌트는 get_component 로 찾는다)
+	///
+	/// # 돌려줌
+	/// 자기 노드. (지금 불리는 컴포넌트는 빠져 있다)
 	//==============================================================================
 	pub fn get_node(&self) -> &WorldNode {
 		&self.node_tree[self.node_id]
@@ -1248,6 +1895,9 @@ impl<'a> ComponentContext<'a> {
 
 	//==============================================================================
 	/// 자기 노드. (변경용)
+	///
+	/// # 돌려줌
+	/// 자기 노드. (변경용, 지금 불리는 컴포넌트는 빠져 있다)
 	//==============================================================================
 	pub fn get_node_mut(&mut self) -> &mut WorldNode {
 		let node_id = self.node_id;
@@ -1256,6 +1906,9 @@ impl<'a> ComponentContext<'a> {
 
 	//==============================================================================
 	/// 자기 노드 트랜스폼.
+	///
+	/// # 돌려줌
+	/// 자기 노드의 트랜스폼.
 	//==============================================================================
 	pub fn get_transform(&self) -> &NodeTransform {
 		self.node_tree[self.node_id].get_transform()
@@ -1263,6 +1916,9 @@ impl<'a> ComponentContext<'a> {
 
 	//==============================================================================
 	/// 자기 노드 트랜스폼. (변경용)
+	///
+	/// # 돌려줌
+	/// 자기 노드의 트랜스폼. (변경용)
 	//==============================================================================
 	pub fn get_transform_mut(&mut self) -> &mut NodeTransform {
 		let node_id = self.node_id;
@@ -1271,6 +1927,9 @@ impl<'a> ComponentContext<'a> {
 
 	//==============================================================================
 	/// 트리 전체.
+	///
+	/// # 돌려줌
+	/// 트리 전체.
 	//==============================================================================
 	pub fn get_node_tree(&self) -> &NodeTree {
 		self.node_tree
@@ -1278,6 +1937,9 @@ impl<'a> ComponentContext<'a> {
 
 	//==============================================================================
 	/// 트리 전체. (변경용. 다른 노드를 바꾸거나 만들고 지울 때)
+	///
+	/// # 돌려줌
+	/// 트리 전체. (변경용, 도는 중에 지운 노드는 다 돈 뒤에 지워진다)
 	//==============================================================================
 	pub fn get_node_tree_mut(&mut self) -> &mut NodeTree {
 		self.node_tree
@@ -1285,6 +1947,9 @@ impl<'a> ComponentContext<'a> {
 
 	//==============================================================================
 	/// 엔진. (입력, 시간, 뷰)
+	///
+	/// # 돌려줌
+	/// 엔진.
 	//==============================================================================
 	pub fn get_engine(&self) -> &Engine {
 		self.engine
@@ -1293,6 +1958,74 @@ impl<'a> ComponentContext<'a> {
 	//==============================================================================
 	/// 다른 노드(또는 자기 노드)의 T 컴포넌트를 그 노드의 문맥과 함께 부르기. (없거나 지금 꺼내져 있으면 None)
 	/// - 위젯 안의 행 버튼이 위젯 본체를 부를 때 쓴다: context.`with_component_mut::<UIDropdown, _>`(dropdown_id, |dropdown, dropdown_context| ...)
+	///
+	/// # 인자
+	/// - `node_id`: T 컴포넌트가 붙은 노드.
+	/// - `action`: 꺼낸 컴포넌트와 그 노드의 문맥을 받아 부를 함수.
+	///
+	/// # 돌려줌
+	/// action 이 돌려준 값. 노드가 없거나, T 컴포넌트가 없거나, 지금 꺼내져 있으면 None.
+	///
+	/// # 예제
+	/// 버튼 노드의 컴포넌트가 다른 노드의 셈 컴포넌트를 부르기
+	/// ```rust
+	/// use vanilla::{Component, ComponentBase, ComponentContext, Engine, EngineConfiguration, NodeId, NodeTree};
+	///
+	/// struct Counter {
+	/// 	component_base: ComponentBase,
+	/// 	count: u32,
+	/// }
+	///
+	/// impl Component for Counter {
+	/// # 	fn get_component_base(&self) -> &ComponentBase {
+	/// # 		&self.component_base
+	/// # 	}
+	/// # 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
+	/// # 		&mut self.component_base
+	/// # 	}
+	/// # 	fn get_component_type(&self) -> &'static str {
+	/// # 		"Counter"
+	/// # 	}
+	/// }
+	///
+	/// struct Clicker {
+	/// 	component_base: ComponentBase,
+	/// 	counter_id: NodeId,
+	/// }
+	///
+	/// impl Component for Clicker {
+	/// # 	fn get_component_base(&self) -> &ComponentBase {
+	/// # 		&self.component_base
+	/// # 	}
+	/// # 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
+	/// # 		&mut self.component_base
+	/// # 	}
+	/// # 	fn get_component_type(&self) -> &'static str {
+	/// # 		"Clicker"
+	/// # 	}
+	/// 	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f32) {
+	/// 		context.with_component_mut::<Counter, _>(self.counter_id, |counter, _counter_context| {
+	/// 			counter.count += 1;
+	/// 		});
+	/// 	}
+	/// }
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let counter_id = node_tree.create_child(root_id, "counter");
+	/// node_tree[counter_id].add_component(Counter {
+	/// 	component_base: ComponentBase::new(),
+	/// 	count: 0,
+	/// });
+	/// let clicker_id = node_tree.create_child(root_id, "clicker");
+	/// node_tree[clicker_id].add_component(Clicker {
+	/// 	component_base: ComponentBase::new(),
+	/// 	counter_id,
+	/// });
+	/// node_tree.tick(&engine, 0.016);
+	/// assert_eq!(node_tree[counter_id].get_component::<Counter>().expect("counter").count, 1);
+	/// ```
 	//==============================================================================
 	pub fn with_component_mut<T: Component + 'static, R>(&mut self, node_id: NodeId, action: impl FnOnce(&mut T, &mut ComponentContext) -> R) -> Option<R> {
 		let engine = self.engine;
@@ -1323,18 +2056,30 @@ mod tests {
 	}
 
 	impl Component for SelfDestroyer {
+		//==============================================================================
+		/// 공통 상태 반환.
+		//==============================================================================
 		fn get_component_base(&self) -> &ComponentBase {
 			&self.component_base
 		}
 
+		//==============================================================================
+		/// 공통 상태 반환. (변경용)
+		//==============================================================================
 		fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 			&mut self.component_base
 		}
 
+		//==============================================================================
+		/// 컴포넌트 이름.
+		//==============================================================================
 		fn get_component_type(&self) -> &'static str {
 			"SelfDestroyer"
 		}
 
+		//==============================================================================
+		/// 자기 노드를 지운다.
+		//==============================================================================
 		fn tick(&mut self, context: &mut ComponentContext, _time_delta: f32) {
 			let node_id = context.get_node_id();
 			context.get_node_tree_mut().destroy_node(node_id);
@@ -1350,18 +2095,30 @@ mod tests {
 	}
 
 	impl Component for Mover {
+		//==============================================================================
+		/// 공통 상태 반환.
+		//==============================================================================
 		fn get_component_base(&self) -> &ComponentBase {
 			&self.component_base
 		}
 
+		//==============================================================================
+		/// 공통 상태 반환. (변경용)
+		//==============================================================================
 		fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 			&mut self.component_base
 		}
 
+		//==============================================================================
+		/// 컴포넌트 이름.
+		//==============================================================================
 		fn get_component_type(&self) -> &'static str {
 			"Mover"
 		}
 
+		//==============================================================================
+		/// 오른쪽으로 1 옮기고, 처음 한 번 형제 노드를 만든다.
+		//==============================================================================
 		fn tick(&mut self, context: &mut ComponentContext, _time_delta: f32) {
 			let local_position = context.get_transform().get_local_position();
 			context.get_transform_mut().set_local_position(Vector2::create(local_position.x + 1.0, local_position.y));
@@ -1382,18 +2139,30 @@ mod tests {
 	}
 
 	impl Component for WheelCatcher {
+		//==============================================================================
+		/// 공통 상태 반환.
+		//==============================================================================
 		fn get_component_base(&self) -> &ComponentBase {
 			&self.component_base
 		}
 
+		//==============================================================================
+		/// 공통 상태 반환. (변경용)
+		//==============================================================================
 		fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 			&mut self.component_base
 		}
 
+		//==============================================================================
+		/// 컴포넌트 이름.
+		//==============================================================================
 		fn get_component_type(&self) -> &'static str {
 			"WheelCatcher"
 		}
 
+		//==============================================================================
+		/// 휠 세로 이동량을 더하고 받아 쓴다.
+		//==============================================================================
 		fn wheel(&mut self, _context: &mut ComponentContext, wheel_delta: Vector2) -> bool {
 			self.wheel_total += wheel_delta.y;
 			true
@@ -1669,18 +2438,30 @@ mod sibling_tests {
 	}
 
 	impl Component for SiblingPainter {
+		//==============================================================================
+		/// 공통 상태 반환.
+		//==============================================================================
 		fn get_component_base(&self) -> &ComponentBase {
 			&self.component_base
 		}
 
+		//==============================================================================
+		/// 공통 상태 반환. (변경용)
+		//==============================================================================
 		fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 			&mut self.component_base
 		}
 
+		//==============================================================================
+		/// 컴포넌트 이름.
+		//==============================================================================
 		fn get_component_type(&self) -> &'static str {
 			"SiblingPainter"
 		}
 
+		//==============================================================================
+		/// 같은 노드의 Paint 빨강을 바꾼다. (자기가 노드에 보이면 0.5, 빠져 있으면 1)
+		//==============================================================================
 		fn tick(&mut self, context: &mut ComponentContext, _time_delta: f32) {
 			let node = context.get_node_mut();
 			let is_self_visible = node.has_component::<SiblingPainter>();
@@ -1814,18 +2595,30 @@ mod sibling_tests {
 	}
 
 	impl Component for RequiredMarker {
+		//==============================================================================
+		/// 공통 상태 반환.
+		//==============================================================================
 		fn get_component_base(&self) -> &ComponentBase {
 			&self.component_base
 		}
 
+		//==============================================================================
+		/// 공통 상태 반환. (변경용)
+		//==============================================================================
 		fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 			&mut self.component_base
 		}
 
+		//==============================================================================
+		/// 컴포넌트 이름.
+		//==============================================================================
 		fn get_component_type(&self) -> &'static str {
 			"RequiredMarker"
 		}
 
+		//==============================================================================
+		/// 떨어질 때 노드 불투명도를 0.25 로 둔다.
+		//==============================================================================
 		fn detach(&mut self, transform: &mut NodeTransform) {
 			transform.set_local_opacity(0.25);
 		}
@@ -1837,23 +2630,38 @@ mod sibling_tests {
 	}
 
 	impl Component for NeedsMarker {
+		//==============================================================================
+		/// 공통 상태 반환.
+		//==============================================================================
 		fn get_component_base(&self) -> &ComponentBase {
 			&self.component_base
 		}
 
+		//==============================================================================
+		/// 공통 상태 반환. (변경용)
+		//==============================================================================
 		fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 			&mut self.component_base
 		}
 
+		//==============================================================================
+		/// 컴포넌트 이름.
+		//==============================================================================
 		fn get_component_type(&self) -> &'static str {
 			"NeedsMarker"
 		}
 
+		//==============================================================================
+		/// RequiredMarker 를 의존 컴포넌트로 돌려준다.
+		//==============================================================================
 		fn require(&self) -> Vec<crate::core::component::RequiredComponent> {
 			vec![crate::core::component::RequiredComponent::of::<RequiredMarker>()]
 		}
 	}
 
+	//==============================================================================
+	/// 의존 컴포넌트는 없을 때만 붙고, 떼면 detach 가 불린다.
+	//==============================================================================
 	#[test]
 	fn required_components_detach_and_get_components() {
 		let mut node = WorldNode::new("node");

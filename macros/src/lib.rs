@@ -1,30 +1,78 @@
 //==============================================================================
-// 바닐라엔진 절차 매크로. (원본 vanilla.js 의 실행 중 반사 자리)
-// - 원본은 자바스크립트라 실행 중에 객체의 프로토타입을 훑어 get, is, set 함수를 찾는다.
-//   (ui/uidocument.js 의 collectReflectedProperties, misc/devtools.js 의 getComponentProperties)
-//   러스트에는 실행 중 반사가 없어, 언리얼의 UHT(UPROPERTY), Qt 의 moc 처럼 컴파일 때 코드를 지어 같은 일을 한다.
-// - #[reflect] 를 컴포넌트의 impl 블록에 붙이면 블록 안의 pub fn get_*(&self) -> T, pub fn is_*(&self) -> T 와
-//   그 짝 pub fn set_*(&mut self, value) 를 모아 vanilla::core::reflection::Reflect 구현을 짓는다.
-// - #[reflect] 를 impl Component 블록에 붙이면 get_reflection, get_reflection_mut 을 넣고,
-//   그 블록에서 다시 정의한 게터(원본 하위 클래스가 덮어쓴 isTickNeeded 같은 것)를 인스펙터용으로 모은다. 두 블록 모두 붙여야 한다.
-// - 원본 규칙을 그대로 따른다:
-//   - 게터는 인자 없는 get*, is* 함수다. (원본 getterFunction.length === 0) 저장 속성은 같은 키의 set* 이 있는 게터만이다. (원본 "set" + baseName)
-//     &mut self 게터도 게터다. (원본 함수에는 &self, &mut self 구별이 없다) 반사가 &mut 를 받는 갈래(get_reflected_value_mut, collect_reflected_getters_mut)로 부른다.
-//     러스트의 _mut 접근자(get_uiview_mut 같은 것)와 &mut 를 돌려주는 함수는 원본 게터가 아니라 뺀다.
-//   - 세터는 값 하나를 받는 set* 이다. 트리를 받고 값을 받는 세터(set_snap_current_index(트리, 칸) 같은 것)도 알아보고,
-//     트리를 쥔 쪽(UIDocument 읽기)이 set_reflected_value_in_tree 로 원본처럼 부른다.
-//   - 트리만 받는 게터(get_target_button(&self, 트리) 같은 것)도 원본 게터다. 원본은 이웃 컴포넌트를 바로 쥐지만 러스트 판은 트리에서 꺼낸다.
-//     트리를 쥔 쪽(DevTools 인스펙터)이 collect_reflected_getters_in_tree 로 부른다. 저장 속성은 아니다.
-//   - 키는 접두어(get, is)를 뗀 원본 이름이다. 러스트 snake_case 를 원본 camelCase 로 되돌린다. (get_line_width → getLineWidth → LineWidth)
-//   - 차례는 정의 차례, 같은 키는 먼저 나온 것이다.
-// - 값으로 바꿀 수 없는 꼴의 게터도 컴파일 에러를 내지 않는다. 자동 참조 특수화(autoref specialization)로 바꿀 수 있는 꼴만 값으로 읽고,
-//   나머지는 원본처럼 저장에서 건너뛰고 인스펙터에는 [종류 이름] 으로 보인다.
-// - 함수에 붙이는 것: #[reflect(skip)] 반사에서 뺀다. #[reflect(transient)] 인스펙터에는 보이되 속성 목록에서 뺀다.
-//   #[reflect(unsaved)] 속성 목록에는 두되 반사 저장과 읽기에서 뺀다. (원본에서 값이 객체라 saveByReflection 이 적지 않는 속성, ShadowText 의 FontFace)
-//   #[reflect(name = "UIScale")] 원본 키 이름을 정한다. (원본 이름의 머리글자 낱말처럼 snake_case 에서 되돌릴 수 없는 이름, 원본과 이름이 다른 게터)
-//   #[reflect(after = "getFittedFontSize")] impl Component 블록의 게터를 인스펙터 목록에서 그 원본 게터 뒤에 둔다. (원본 클래스 몸통의 차례, 없으면 맨 앞)
-// - 블록에 붙이는 것: #[reflect(base = 필드)] 품은 값의 반사를 원본 상위 클래스처럼 뒤에 잇는다.
-//   #[reflect(crate = 경로)] 엔진 경로. (기본 ::vanilla, 엔진 크레이트 안에서는 lib.rs 의 extern crate self as vanilla 로 같은 경로가 통한다)
+//! 바닐라엔진 절차 매크로. (원본 vanilla.js 의 실행 중 반사 자리)
+//! - 원본은 자바스크립트라 실행 중에 객체의 프로토타입을 훑어 get, is, set 함수를 찾는다.
+//!   (ui/uidocument.js 의 collectReflectedProperties, misc/devtools.js 의 getComponentProperties)
+//!   러스트에는 실행 중 반사가 없어, 언리얼의 UHT(UPROPERTY), Qt 의 moc 처럼 컴파일 때 코드를 지어 같은 일을 한다.
+//! - `#[reflect]` 를 컴포넌트의 impl 블록에 붙이면 블록 안의 `pub fn get_*(&self) -> T`, `pub fn is_*(&self) -> T` 와
+//!   그 짝 `pub fn set_*(&mut self, value)` 를 모아 vanilla::core::reflection::Reflect 구현을 짓는다.
+//! - `#[reflect]` 를 impl Component 블록에 붙이면 get_reflection, get_reflection_mut 을 넣고,
+//!   그 블록에서 다시 정의한 게터(원본 하위 클래스가 덮어쓴 isTickNeeded 같은 것)를 인스펙터용으로 모은다. 두 블록 모두 붙여야 한다.
+//! - 원본 규칙을 그대로 따른다:
+//!   - 게터는 인자 없는 `get*`, `is*` 함수다. (원본 `getterFunction.length === 0`) 저장 속성은 같은 키의 `set*` 이 있는 게터만이다. (원본 `"set" + baseName`)
+//!     &mut self 게터도 게터다. (원본 함수에는 &self, &mut self 구별이 없다) 반사가 &mut 를 받는 갈래(get_reflected_value_mut, collect_reflected_getters_mut)로 부른다.
+//!     러스트의 _mut 접근자(get_uiview_mut 같은 것)와 &mut 를 돌려주는 함수는 원본 게터가 아니라 뺀다.
+//!   - 세터는 값 하나를 받는 `set*` 이다. 트리를 받고 값을 받는 세터(set_snap_current_index(트리, 칸) 같은 것)도 알아보고,
+//!     트리를 쥔 쪽(UIDocument 읽기)이 set_reflected_value_in_tree 로 원본처럼 부른다.
+//!   - 트리만 받는 게터(get_target_button(&self, 트리) 같은 것)도 원본 게터다. 원본은 이웃 컴포넌트를 바로 쥐지만 러스트 판은 트리에서 꺼낸다.
+//!     트리를 쥔 쪽(DevTools 인스펙터)이 collect_reflected_getters_in_tree 로 부른다. 저장 속성은 아니다.
+//!   - 키는 접두어(get, is)를 뗀 원본 이름이다. 러스트 snake_case 를 원본 camelCase 로 되돌린다. (get_line_width → getLineWidth → LineWidth)
+//!   - 차례는 정의 차례, 같은 키는 먼저 나온 것이다.
+//! - 값으로 바꿀 수 없는 꼴의 게터도 컴파일 에러를 내지 않는다. 자동 참조 특수화(autoref specialization)로 바꿀 수 있는 꼴만 값으로 읽고,
+//!   나머지는 원본처럼 저장에서 건너뛰고 인스펙터에는 `[종류 이름]` 으로 보인다.
+//! - 함수에 붙이는 것: `#[reflect(skip)]` 반사에서 뺀다. `#[reflect(transient)]` 인스펙터에는 보이되 속성 목록에서 뺀다.
+//!   `#[reflect(unsaved)]` 속성 목록에는 두되 반사 저장과 읽기에서 뺀다. (원본에서 값이 객체라 saveByReflection 이 적지 않는 속성, ShadowText 의 FontFace)
+//!   `#[reflect(name = "UIScale")]` 원본 키 이름을 정한다. (원본 이름의 머리글자 낱말처럼 snake_case 에서 되돌릴 수 없는 이름, 원본과 이름이 다른 게터)
+//!   `#[reflect(after = "getFittedFontSize")]` impl Component 블록의 게터를 인스펙터 목록에서 그 원본 게터 뒤에 둔다. (원본 클래스 몸통의 차례, 없으면 맨 앞)
+//! - 블록에 붙이는 것: `#[reflect(base = 필드)]` 품은 값의 반사를 원본 상위 클래스처럼 뒤에 잇는다.
+//!   `#[reflect(crate = 경로)]` 엔진 경로. (기본 ::vanilla, 엔진 크레이트 안에서는 lib.rs 의 extern crate self as vanilla 로 같은 경로가 통한다)
+//!
+//! # 예제
+//! impl 블록과 impl Component 블록에 붙이기 (ignore: 절차 매크로 크레이트의 doctest 는 엔진을 의존하지 못한다. 같은 예제를 엔진의 core::reflection 모듈 예제가 돌린다)
+//! ```rust,ignore
+//! use vanilla::core::reflection::{collect_reflected_properties, read_reflected_property, write_reflected_property};
+//! use vanilla::{reflect, Component, ComponentBase, ReflectValue};
+//!
+//! struct Spin {
+//! 	component_base: ComponentBase,
+//! 	speed: f32,
+//! }
+//!
+//! #[reflect]
+//! impl Spin {
+//! 	pub fn get_speed(&self) -> f32 {
+//! 		self.speed
+//! 	}
+//!
+//! 	pub fn set_speed(&mut self, speed: f32) {
+//! 		self.speed = speed;
+//! 	}
+//! }
+//!
+//! #[reflect]
+//! impl Component for Spin {
+//! 	fn get_component_base(&self) -> &ComponentBase {
+//! 		&self.component_base
+//! 	}
+//!
+//! 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
+//! 		&mut self.component_base
+//! 	}
+//!
+//! 	fn get_component_type(&self) -> &'static str {
+//! 		"Spin"
+//! 	}
+//! }
+//!
+//! let mut spin = Spin {
+//! 	component_base: ComponentBase::new(),
+//! 	speed: 1.5,
+//! };
+//! let property_names: Vec<&str> = collect_reflected_properties(&spin).iter().map(|property| property.name).collect();
+//! assert_eq!(property_names, ["Speed", "GizmoVisible", "Enable", "ComponentType"]);
+//! assert_eq!(read_reflected_property(&spin, "Speed"), Some(ReflectValue::Number(1.5)));
+//! assert!(write_reflected_property(&mut spin, "Speed", &ReflectValue::Number(3.0)));
+//! assert_eq!(spin.get_speed(), 3.0);
+//! ```
 //==============================================================================
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
@@ -34,11 +82,11 @@ use syn::spanned::Spanned;
 use syn::visit_mut::VisitMut;
 use syn::{Attribute, FnArg, GenericParam, Ident, ImplItem, ImplItemFn, ItemImpl, Lifetime, LitStr, Path, ReturnType, Type};
 
-// 인스펙터에도 보이지 않는 Component 트레이트의 게터. (공통 상태와 종류 이름은 원본 Component 기반 클래스 몫이다)
+/// 인스펙터에도 보이지 않는 Component 트레이트의 게터. (공통 상태와 종류 이름은 원본 Component 기반 클래스 몫이다)
 const COMPONENT_BASE_GETTER_NAMES: [&str; 2] = ["get_component_base", "get_component_type"];
 
 //==============================================================================
-// 블록 옵션. (#[reflect(base = 필드, crate = 경로)])
+/// 블록 옵션. (#[reflect(base = 필드, crate = 경로)])
 //==============================================================================
 struct BlockOptions {
 	base_field: Option<Ident>,
@@ -46,7 +94,7 @@ struct BlockOptions {
 }
 
 //==============================================================================
-// 함수 옵션. (#[reflect(skip)], #[reflect(transient)], #[reflect(name = "...")])
+/// 함수 옵션. (#[reflect(skip)], #[reflect(transient)], #[reflect(name = "...")])
 //==============================================================================
 #[derive(Default)]
 struct MethodOptions {
@@ -58,7 +106,7 @@ struct MethodOptions {
 }
 
 //==============================================================================
-// 모은 게터 하나.
+/// 모은 게터 하나.
 //==============================================================================
 struct GetterMethod {
 	method_name: Ident,
@@ -74,8 +122,8 @@ struct GetterMethod {
 }
 
 //==============================================================================
-// 모은 세터 하나. (value_type 이 None 이면 값 하나로 부를 수 없는 세터다. 트리 말고도 인자가 더 있거나 제네릭)
-// - takes_tree 면 트리를 먼저 받고 값을 받는 세터다. (set_x(&mut self, node_tree: &mut NodeTree, value))
+/// 모은 세터 하나. (value_type 이 None 이면 값 하나로 부를 수 없는 세터다. 트리 말고도 인자가 더 있거나 제네릭)
+/// - takes_tree 면 트리를 먼저 받고 값을 받는 세터다. (set_x(&mut self, node_tree: &mut NodeTree, value))
 //==============================================================================
 struct SetterMethod {
 	method_name: Ident,
@@ -87,7 +135,105 @@ struct SetterMethod {
 }
 
 //==============================================================================
-// 반사 매크로. (impl 블록에 붙인다. 트레이트 impl 이면 impl Component 블록으로 본다)
+/// 반사 매크로. (impl 블록에 붙인다. 트레이트 impl 이면 impl Component 블록으로 본다)
+/// - 게임은 엔진이 다시 내보낸 vanilla::reflect 로 쓴다. (`use vanilla::reflect;` 뒤 `#[reflect]`, 또는 `#[vanilla::reflect]`)
+/// - 컴포넌트의 impl 블록과 impl Component 블록 둘 다에 붙인다. 한쪽만 붙이면 컴파일 에러가 붙일 곳을 알려 준다.
+/// - 블록 옵션은 `base = 필드`, `crate = 경로` 이고, 함수 옵션은 `skip`, `transient`, `unsaved`, `name = "..."`, `after = "..."` 이다. (impl Component 블록에는 base 를 쓰지 않는다)
+///
+/// # 예제
+/// 함수 옵션과 품은 값 (ignore: 절차 매크로 크레이트의 doctest 는 엔진을 의존하지 못한다. 같은 예제를 엔진의 core::reflection 모듈 예제가 돌린다)
+/// ```rust,ignore
+/// use vanilla::core::reflection::{collect_reflected_getters, collect_reflected_properties};
+/// use vanilla::{reflect, Component, ComponentBase};
+///
+/// struct Meter {
+/// 	component_base: ComponentBase,
+/// 	value: f32,
+/// }
+///
+/// #[reflect]
+/// impl Meter {
+/// 	pub fn get_value(&self) -> f32 {
+/// 		self.value
+/// 	}
+///
+/// 	pub fn set_value(&mut self, value: f32) {
+/// 		self.value = value;
+/// 	}
+/// }
+///
+/// #[reflect]
+/// impl Component for Meter {
+/// 	fn get_component_base(&self) -> &ComponentBase {
+/// 		&self.component_base
+/// 	}
+///
+/// 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
+/// 		&mut self.component_base
+/// 	}
+///
+/// 	fn get_component_type(&self) -> &'static str {
+/// 		"Meter"
+/// 	}
+/// }
+///
+/// struct LabeledMeter {
+/// 	component_base: ComponentBase,
+/// 	meter: Meter,
+/// 	label: String,
+/// }
+///
+/// #[reflect(base = meter)]
+/// impl LabeledMeter {
+/// 	#[reflect(name = "Caption")]
+/// 	pub fn get_label(&self) -> &str {
+/// 		&self.label
+/// 	}
+///
+/// 	#[reflect(name = "Caption")]
+/// 	pub fn set_label(&mut self, label: &str) {
+/// 		self.label = String::from(label);
+/// 	}
+///
+/// 	#[reflect(transient)]
+/// 	pub fn get_label_length(&self) -> usize {
+/// 		self.label.len()
+/// 	}
+///
+/// 	#[reflect(skip)]
+/// 	pub fn get_meter(&self) -> &Meter {
+/// 		&self.meter
+/// 	}
+/// }
+///
+/// #[reflect]
+/// impl Component for LabeledMeter {
+/// 	fn get_component_base(&self) -> &ComponentBase {
+/// 		&self.component_base
+/// 	}
+///
+/// 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
+/// 		&mut self.component_base
+/// 	}
+///
+/// 	fn get_component_type(&self) -> &'static str {
+/// 		"LabeledMeter"
+/// 	}
+/// }
+///
+/// let labeled_meter = LabeledMeter {
+/// 	component_base: ComponentBase::new(),
+/// 	meter: Meter {
+/// 		component_base: ComponentBase::new(),
+/// 		value: 0.5,
+/// 	},
+/// 	label: String::from("hp"),
+/// };
+/// let property_names: Vec<&str> = collect_reflected_properties(&labeled_meter).iter().map(|property| property.name).collect();
+/// assert_eq!(property_names, ["Caption", "Value", "GizmoVisible", "Enable", "ComponentType"]);
+/// let getter_names: Vec<&str> = collect_reflected_getters(&labeled_meter).expect("reflection").iter().map(|getter| getter.name).collect();
+/// assert_eq!(getter_names, ["getCaption", "getLabelLength", "getValue"]);
+/// ```
 //==============================================================================
 #[proc_macro_attribute]
 pub fn reflect(attribute: TokenStream, item: TokenStream) -> TokenStream {
@@ -124,7 +270,7 @@ pub fn reflect(attribute: TokenStream, item: TokenStream) -> TokenStream {
 }
 
 //==============================================================================
-// 블록 옵션 읽기.
+/// 블록 옵션 읽기.
 //==============================================================================
 fn parse_block_options(attribute: TokenStream2) -> syn::Result<BlockOptions> {
 	let mut base_field: Option<Ident> = None;
@@ -150,7 +296,7 @@ fn parse_block_options(attribute: TokenStream2) -> syn::Result<BlockOptions> {
 }
 
 //==============================================================================
-// 함수의 #[reflect(...)] 를 읽고 지운다. (지우지 않으면 컴파일러가 함수에 붙은 매크로로 다시 부른다)
+/// 함수의 #[reflect(...)] 를 읽고 지운다. (지우지 않으면 컴파일러가 함수에 붙은 매크로로 다시 부른다)
 //==============================================================================
 fn take_method_options(attributes: &mut Vec<Attribute>) -> syn::Result<MethodOptions> {
 	let mut method_options = MethodOptions::default();
@@ -194,21 +340,21 @@ fn take_method_options(attributes: &mut Vec<Attribute>) -> syn::Result<MethodOpt
 }
 
 //==============================================================================
-// cfg 속성 모으기. (지은 코드도 함수와 같은 조건에서만 들어가야 한다)
+/// cfg 속성 모으기. (지은 코드도 함수와 같은 조건에서만 들어가야 한다)
 //==============================================================================
 fn collect_cfg_attributes(attributes: &[Attribute]) -> Vec<Attribute> {
 	attributes.iter().filter(|attribute| attribute.path().is_ident("cfg")).cloned().collect()
 }
 
 //==============================================================================
-// cfg 속성의 비교용 글. (같은 이름이 다른 조건으로 둘 있으면 둘 다 짓는다)
+/// cfg 속성의 비교용 글. (같은 이름이 다른 조건으로 둘 있으면 둘 다 짓는다)
 //==============================================================================
 fn read_cfg_text(cfg_attributes: &[Attribute]) -> String {
 	cfg_attributes.iter().map(|attribute| attribute.to_token_stream().to_string()).collect::<Vec<String>>().join(" ")
 }
 
 //==============================================================================
-// snake_case 접미어 → 원본 이름. (낱말마다 머리를 대문자로 이어 붙인다. line_width → LineWidth)
+/// snake_case 접미어 → 원본 이름. (낱말마다 머리를 대문자로 이어 붙인다. line_width → LineWidth)
 //==============================================================================
 fn convert_suffix_to_reflected_name(suffix: &str) -> String {
 	let mut reflected_name = String::new();
@@ -223,7 +369,7 @@ fn convert_suffix_to_reflected_name(suffix: &str) -> String {
 }
 
 //==============================================================================
-// 함수 이름을 접두어와 접미어로 나누기. (get_, is_, set_ 가운데 하나, 접미어가 비면 None)
+/// 함수 이름을 접두어와 접미어로 나누기. (get_, is_, set_ 가운데 하나, 접미어가 비면 None)
 //==============================================================================
 fn split_method_name<'a>(method_name: &'a str, prefixes: &[&'static str]) -> Option<(&'static str, &'a str)> {
 	for prefix in prefixes.iter() {
@@ -237,7 +383,7 @@ fn split_method_name<'a>(method_name: &'a str, prefixes: &[&'static str]) -> Opt
 }
 
 //==============================================================================
-// 부를 수 있는 꼴의 함수인지. (unsafe, async, extern, 타입이나 상수 제네릭이 없다)
+/// 부를 수 있는 꼴의 함수인지. (unsafe, async, extern, 타입이나 상수 제네릭이 없다)
 //==============================================================================
 fn is_plain_signature(signature: &syn::Signature) -> bool {
 	if signature.unsafety.is_some() || signature.asyncness.is_some() || signature.abi.is_some() || signature.variadic.is_some() {
@@ -247,7 +393,7 @@ fn is_plain_signature(signature: &syn::Signature) -> bool {
 }
 
 //==============================================================================
-// 받는 꼴. (&self 면 Some(false), &mut self 면 Some(true), 그 밖은 None)
+/// 받는 꼴. (&self 면 Some(false), &mut self 면 Some(true), 그 밖은 None)
 //==============================================================================
 fn read_receiver_mutability(signature: &syn::Signature) -> Option<bool> {
 	match signature.inputs.first() {
@@ -261,7 +407,7 @@ fn read_receiver_mutability(signature: &syn::Signature) -> Option<bool> {
 }
 
 //==============================================================================
-// 돌려주는 꼴. (없거나 () 나 ! 면 None)
+/// 돌려주는 꼴. (없거나 () 나 ! 면 None)
 //==============================================================================
 fn read_return_type(signature: &syn::Signature) -> Option<Type> {
 	match &signature.output {
@@ -285,11 +431,14 @@ fn read_return_type(signature: &syn::Signature) -> Option<Type> {
 }
 
 //==============================================================================
-// 꼴 안의 수명을 '_ 로. (함수의 수명 매개변수는 지은 코드에서 보이지 않는다. 'static 은 둔다)
+/// 꼴 안의 수명을 '_ 로. (함수의 수명 매개변수는 지은 코드에서 보이지 않는다. 'static 은 둔다)
 //==============================================================================
 struct LifetimeEraser;
 
 impl VisitMut for LifetimeEraser {
+	//==============================================================================
+	/// 수명 하나 바꾸기. ('static 이 아니면 '_ 로)
+	//==============================================================================
 	fn visit_lifetime_mut(&mut self, lifetime: &mut Lifetime) {
 		if lifetime.ident != "static" {
 			*lifetime = Lifetime::new("'_", lifetime.span());
@@ -298,7 +447,7 @@ impl VisitMut for LifetimeEraser {
 }
 
 //==============================================================================
-// 수명을 지운 꼴.
+/// 수명을 지운 꼴.
 //==============================================================================
 fn erase_lifetimes(type_value: &Type) -> Type {
 	let mut erased_type = type_value.clone();
@@ -307,20 +456,23 @@ fn erase_lifetimes(type_value: &Type) -> Type {
 }
 
 //==============================================================================
-// impl Trait 이 든 꼴인지. (이름을 쓸 수 없어 지은 코드에 옮길 수 없다)
+/// impl Trait 이 든 꼴인지. (이름을 쓸 수 없어 지은 코드에 옮길 수 없다)
 //==============================================================================
 struct ImplTraitFinder {
 	is_found: bool,
 }
 
 impl<'a> syn::visit::Visit<'a> for ImplTraitFinder {
+	//==============================================================================
+	/// impl Trait 꼴을 만나면 찾았다고 적는다.
+	//==============================================================================
 	fn visit_type_impl_trait(&mut self, _type_impl_trait: &'a syn::TypeImplTrait) {
 		self.is_found = true;
 	}
 }
 
 //==============================================================================
-// impl Trait 이 든 꼴인지 보기.
+/// impl Trait 이 든 꼴인지 보기.
 //==============================================================================
 fn contains_impl_trait(type_value: &Type) -> bool {
 	let mut impl_trait_finder = ImplTraitFinder {
@@ -331,7 +483,7 @@ fn contains_impl_trait(type_value: &Type) -> bool {
 }
 
 //==============================================================================
-// 게터 읽기. (인자 없는 get_*, is_* 이고 &self 를 받고 무언가 돌려주는 함수)
+/// 게터 읽기. (인자 없는 get_*, is_* 이고 &self 를 받고 무언가 돌려주는 함수)
 //==============================================================================
 fn read_getter(method: &ImplItemFn, method_options: &MethodOptions) -> Option<GetterMethod> {
 	let signature = &method.sig;
@@ -390,7 +542,7 @@ fn read_getter(method: &ImplItemFn, method_options: &MethodOptions) -> Option<Ge
 }
 
 //==============================================================================
-// &NodeTree 꼴인지. (트리를 받는 게터의 인자)
+/// &NodeTree 꼴인지. (트리를 받는 게터의 인자)
 //==============================================================================
 fn is_node_tree_shared_reference(type_value: &Type) -> bool {
 	match type_value {
@@ -411,7 +563,7 @@ fn is_node_tree_shared_reference(type_value: &Type) -> bool {
 }
 
 //==============================================================================
-// &mut NodeTree 꼴인지. (트리를 받는 세터의 첫 인자)
+/// &mut NodeTree 꼴인지. (트리를 받는 세터의 첫 인자)
 //==============================================================================
 fn is_node_tree_reference(type_value: &Type) -> bool {
 	match type_value {
@@ -432,7 +584,7 @@ fn is_node_tree_reference(type_value: &Type) -> bool {
 }
 
 //==============================================================================
-// 세터 읽기. (set_* 이고 &mut self 를 받는 함수. 값 하나를 받으면 그 꼴을 든다)
+/// 세터 읽기. (set_* 이고 &mut self 를 받는 함수. 값 하나를 받으면 그 꼴을 든다)
 //==============================================================================
 fn read_setter(method: &ImplItemFn, method_options: &MethodOptions) -> Option<SetterMethod> {
 	let signature = &method.sig;
@@ -496,7 +648,7 @@ fn read_setter(method: &ImplItemFn, method_options: &MethodOptions) -> Option<Se
 }
 
 //==============================================================================
-// impl 대상 타입의 이름. (원본 constructor.name 자리, 경로의 끝 이름)
+/// impl 대상 타입의 이름. (원본 constructor.name 자리, 경로의 끝 이름)
 //==============================================================================
 fn read_type_name(self_type: &Type) -> syn::Result<String> {
 	match self_type {
@@ -517,7 +669,7 @@ fn read_type_name(self_type: &Type) -> syn::Result<String> {
 }
 
 //==============================================================================
-// 게터 값을 반사 값으로 읽는 식. (바꿀 수 있는 꼴 → 품은 꼴(Option, 배열) → 종류 이름 차례로 고른다)
+/// 게터 값을 반사 값으로 읽는 식. (바꿀 수 있는 꼴 → 품은 꼴(Option, 배열) → 종류 이름 차례로 고른다)
 //==============================================================================
 fn create_read_expression(reflect_path: &TokenStream2, call_expression: TokenStream2) -> TokenStream2 {
 	quote! {
@@ -531,7 +683,7 @@ fn create_read_expression(reflect_path: &TokenStream2, call_expression: TokenStr
 }
 
 //==============================================================================
-// impl 블록 펼치기. (블록은 그대로 두고 Reflect 구현을 덧붙인다)
+/// impl 블록 펼치기. (블록은 그대로 두고 Reflect 구현을 덧붙인다)
 //==============================================================================
 fn expand_inherent_impl(block_options: &BlockOptions, mut item_impl: ItemImpl) -> syn::Result<TokenStream2> {
 	let crate_path = &block_options.crate_path;
@@ -891,9 +1043,9 @@ fn expand_inherent_impl(block_options: &BlockOptions, mut item_impl: ItemImpl) -
 }
 
 //==============================================================================
-// impl Component 블록 펼치기. (반사를 꺼내는 함수를 넣고, 이 블록에서 다시 정의한 게터를 모으는 구현을 덧붙인다)
-// - 원본 클래스에 없는 덮어쓰기(러스트 판의 is_tick_needed 같은 것)는 #[reflect(skip)] 으로 빼고,
-//   원본 클래스 몸통에서 다른 게터 뒤에 있던 것은 #[reflect(after = "원본 게터 이름")] 로 그 자리에 둔다.
+/// impl Component 블록 펼치기. (반사를 꺼내는 함수를 넣고, 이 블록에서 다시 정의한 게터를 모으는 구현을 덧붙인다)
+/// - 원본 클래스에 없는 덮어쓰기(러스트 판의 is_tick_needed 같은 것)는 #[reflect(skip)] 으로 빼고,
+///   원본 클래스 몸통에서 다른 게터 뒤에 있던 것은 #[reflect(after = "원본 게터 이름")] 로 그 자리에 둔다.
 //==============================================================================
 fn expand_component_impl(block_options: &BlockOptions, mut item_impl: ItemImpl) -> syn::Result<TokenStream2> {
 	let crate_path = &block_options.crate_path;
@@ -991,14 +1143,14 @@ fn expand_component_impl(block_options: &BlockOptions, mut item_impl: ItemImpl) 
 }
 
 //==============================================================================
-// 시험.
+/// 시험.
 //==============================================================================
 #[cfg(test)]
 mod tests {
 	use super::*;
 
 	//==============================================================================
-	// snake_case 접미어는 원본 camelCase 의 머리 대문자 이름으로 돌아간다.
+	/// snake_case 접미어는 원본 camelCase 의 머리 대문자 이름으로 돌아간다.
 	//==============================================================================
 	#[test]
 	fn suffix_becomes_original_name() {
@@ -1010,7 +1162,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 블록 옵션은 base = 필드, crate = 경로 이고, 모르는 옵션은 에러다.
+	/// 블록 옵션은 base = 필드, crate = 경로 이고, 모르는 옵션은 에러다.
 	//==============================================================================
 	#[test]
 	fn block_options_read_base_and_crate() {
@@ -1024,7 +1176,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 접두어는 get_, is_, set_ 이고 접미어가 비면 게터가 아니다.
+	/// 접두어는 get_, is_, set_ 이고 접미어가 비면 게터가 아니다.
 	//==============================================================================
 	#[test]
 	fn method_name_splits_prefix() {
@@ -1035,7 +1187,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 게터는 &self 하나만 받고 무언가 돌려주는 pub get_, is_ 함수다.
+	/// 게터는 &self 하나만 받고 무언가 돌려주는 pub get_, is_ 함수다.
 	//==============================================================================
 	#[test]
 	fn getter_rules_follow_original() {
@@ -1083,7 +1235,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 세터는 값 하나를 받으면 그 꼴을, impl Trait 이면 표시만, 트리와 값을 받으면 트리 세터로, 그 밖은 꼴 없이 든다.
+	/// 세터는 값 하나를 받으면 그 꼴을, impl Trait 이면 표시만, 트리와 값을 받으면 트리 세터로, 그 밖은 꼴 없이 든다.
 	//==============================================================================
 	#[test]
 	fn setter_rules_keep_value_type() {
