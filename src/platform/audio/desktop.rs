@@ -7,7 +7,9 @@
 //   다시 돌리면 멈춘 자리부터 운다), 컨텍스트 시계도 서며, is_audio_context_running 은 거짓이다. resume 이 다시 돌린다.
 //   (게임 코드가 get_audio_context 로 받은 kira 매니저에 직접 단 트랙은 뿌리 트랙 밖이라 멈추지 않는다)
 // - 좌우(pan): 재생할 때 소리 설정의 panning 으로 건다. (-1 왼쪽 ~ 1 오른쪽, 원본 StereoPannerNode 자리, 다음 재생부터)
-// - AudioBuffer 자리: kira 의 StaticSoundData. 파일 전체를 디코딩해 들고, 복제는 Arc 하나라 값싸다. (ogg vorbis, mp3, wav, flac, m4a(aac))
+// - AudioBuffer 자리: kira 의 StaticSoundData. 파일 전체를 디코딩해 들고, 복제는 Arc 하나라 값싸다.
+//   해석은 decode 가 원본의 크롬 decodeAudioData 와 같게 한다. (webm, ogg 의 Opus 와 Vorbis, mp3, wav, flac, m4a 와 aac 의 AAC.
+//   앞뒤 다듬기, 44100Hz, WebAudio 스피커 규칙으로 내린 1 채널이나 2 채널. 모노는 양쪽에 같게 싣는다)
 // - AudioPlayer 하나 = 믹서 하위 트랙 하나. (원본 GainNode 자리, 트랙 음량이 플레이어 음량이다)
 //   내보낼 곳(AudioOutputNode, 원본 outputNode, &RefCell<TrackHandle>)을 주면 그 트랙 아래, 없으면 뿌리 트랙 아래에 단다.
 //   재생할 때마다 버퍼를 복제해 그 트랙에 튼다. 트랙 핸들을 버리면 트랙과 그 위의 소리가 같이 없어진다.
@@ -30,7 +32,6 @@ use kira::sound::{PlaybackState, Region};
 use kira::track::{TrackBuilder, TrackHandle};
 use kira::{AudioManagerSettings, Capacities, Decibels, DefaultBackend, Frame, StartTime, Tween};
 use std::cell::RefCell;
-use std::io::Cursor;
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -452,10 +453,12 @@ impl AudioBusBackend {
 // 파일 읽기. (그 자리에서 읽고 디코딩한다, 읽은 파일은 리소스 사용량에 적는다)
 //==============================================================================
 pub fn load_audio_file(audio_asset: &Rc<AudioAsset>, asset_path: &Path) -> Result<(), String> {
-	match StaticSoundData::from_file(asset_path) {
+	let decode_result = std::fs::read(asset_path).map_err(|error| format!("{}", error)).and_then(|bytes| {
+		crate::base::platform::record_loaded_file(&asset_path.to_string_lossy(), bytes.len() as u64);
+		create_audio_buffer(&bytes)
+	});
+	match decode_result {
 		Ok(audio_buffer) => {
-			let file_byte_count = std::fs::metadata(asset_path).map(|metadata| metadata.len()).unwrap_or(0);
-			crate::base::platform::record_loaded_file(&asset_path.to_string_lossy(), file_byte_count);
 			audio_asset.set_audio_buffer(audio_buffer);
 			Ok(())
 		}
@@ -471,7 +474,7 @@ pub fn load_audio_file(audio_asset: &Rc<AudioAsset>, asset_path: &Path) -> Resul
 // 메모리에서 읽기. (그 자리에서 디코딩한다)
 //==============================================================================
 pub fn load_audio_bytes(audio_asset: &Rc<AudioAsset>, bytes: Vec<u8>) -> Result<(), String> {
-	match StaticSoundData::from_cursor(Cursor::new(bytes)) {
+	match create_audio_buffer(&bytes) {
 		Ok(audio_buffer) => {
 			audio_asset.set_audio_buffer(audio_buffer);
 			Ok(())
@@ -482,6 +485,31 @@ pub fn load_audio_bytes(audio_asset: &Rc<AudioAsset>, bytes: Vec<u8>) -> Result<
 			Err(load_error)
 		}
 	}
+}
+
+//==============================================================================
+// 소리 파일 바이트를 버퍼로. (decode 가 크롬 decodeAudioData 처럼 푼 채널을 kira 프레임으로, 모노는 양쪽에 같게)
+//==============================================================================
+fn create_audio_buffer(bytes: &[u8]) -> Result<AudioBuffer, String> {
+	let decoded_audio = super::decode::decode_audio_data(bytes)?;
+	let frame_count = decoded_audio.get_frame_count();
+	let frame_list: Vec<Frame> = match decoded_audio.channel_data.as_slice() {
+		[mono] => {
+			mono.iter().map(|sample| Frame::from_mono(*sample)).collect()
+		}
+		[left, right] => {
+			(0..frame_count).map(|frame_index| Frame::new(left[frame_index], right[frame_index])).collect()
+		}
+		_ => {
+			return Err(String::from("no channel"));
+		}
+	};
+	Ok(StaticSoundData {
+		sample_rate: decoded_audio.sample_rate,
+		frames: Arc::from(frame_list),
+		settings: StaticSoundSettings::new(),
+		slice: None,
+	})
 }
 
 //==============================================================================

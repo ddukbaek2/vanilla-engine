@@ -390,6 +390,17 @@
   - ARCHITECTURE: 배치와 소유 구조, 프레임 루프, 블렌드와 글꼴과 애셋 형식, 9장 원본과의 대응(원본 200 파일 가운데 181 옮김, 일부러 안 옮긴 19 파일과 까닭), 10장 두 엔진의 차이(정말 맞출 수 없는 것과 일부러 정한 꼴)
   - UPDATE.md 이 판 머리의 겹친 줄(찍기 모드 여섯 벌)을 하나로, math 줄의 옛 설명을 고쳤다
   - 머리 주석: 원본에서도 고쳐 이제는 같은 것(묶어 그리기와 거르기 기본 켬, 프로그램과 텍스처 기억, Text 거르기, UIScene 의 use_dev_tools, 웹소켓 바이너리 JSON, Identifier.reset, Vector2 버그, pageshow 복구, DynamicFont 다시 놓기, 길이 0 트윈, set_playback_rate), UIImageView 의 그리는 차례(원본도 배경이 먼저), 그림 형식 목록(Material, GLB 그림, 쓰지 않는 avif-parse), 웹 글자 굽기, Scene 의 initialize 이름, lib.rs 의 웹 모듈 자리
+- 데스크탑 소리 해석을 원본(크롬 decodeAudioData)과 같게 했다. (platform/audio/decode)
+  - 크롬 158 은 FLAC, MP3, PCM, Vorbis 를 symphonia 0.6 으로, Opus 를 libopus 로, AAC 를 FFmpeg 로 푼다. 엔진도 kira 의 해석 기능을 끄고 symphonia 0.6.1 을 직접 불러 같은 해석기를 쓰고(크롬이 켜는 기능과 같게), Opus 는 libopus 를 러스트로 옮긴 opus-pure 를 symphonia 코덱 등록표에 넣어 푼다. webm.cjs 가 만드는 webm(Opus)을 이제 데스크탑에서 튼다
+  - 컨테이너도 symphonia 의 풀기(wav, ogg, mkv(webm), isomp4(m4a), flac, mp3, adts)로 하고, 꼴은 확장자나 형이 아니라 내용으로 가린다
+  - 크롬이 FFmpeg 의 시각과 다듬기 값으로 버리는 앞뒤를 같게 버린다. (Opus pre-skip, webm 의 CodecDelay 를 FFmpeg 가 ms 로 반올림해 생기는 몫, DiscardPadding, MP3 LAME 지연, Ogg granule 과 쪽 하나짜리 Vorbis, m4a 편집 목록과 iTunSMPB, AAC 마지막 패킷 길이)
+  - 정수 표본은 크롬 식(양수는 최대로, 음수는 최소로 나눔, 16 비트 FLAC 은 16 비트로)으로, MP3 는 -1 ~ 1 로 자른다. Opus 의 출력 게인과 5.1 의 크로미엄 채널 차례도 같다
+  - 크로미엄 SincResampler 를 옮겨 원본 DECODE_SAMPLE_RATE(44100)로 바꾼다. (Blink 와 같은 32 탭 커널과 길이 셈, 합의 차례는 크롬이 고르는 NEON, SSE, AVX2 와 같게)
+  - WebAudio 스피커 규칙으로 1 채널이나 2 채널로 내린다. (쿼드, 5.1 은 명세의 식, 그 밖은 앞 두 채널. 이제 3 채널 이상 파일도 튼다)
+  - 시험 소리 21 파일(tests/assets/audio, 모두 수 KB)을 크롬 158 의 결과(chromedecode.cjs 가 찍은 chrome_decode.json)와 견준다. 길이와 채널은 모두 같고, FLAC, MP3, PCM, Vorbis 는 표본까지 같으며 Opus, AAC 는 1e-7 안팎이다
+  - 남은 차이: HE-AAC(SBR, PS)와 3 채널 이상 AAC 는 symphonia 0.6.1 이 받지 않아 데스크탑에서 풀지 못한다. (크롬은 FFmpeg 로 푼다)
+  - 늘어난 크레이트 7: opus-pure, symphonia-format-mkv, rustfft(크롬처럼 symphonia 의 opt-simd 를 켜 FFT 를 같게)와 그 의존 primal-check, strength_reduce, transpose, num-integer. 줄어든 것은 없다 (kira 가 쓰던 symphonia 를 엔진이 직접 쓴다)
+- "data:" 주소: 데스크탑 Engine::load_audio_asset, request_asset_bytes, request_asset_bytes_into, load_image 가 data: 주소를 풀어 읽는다. (타임라인 편집기가 넣는 data: 소리를 데스크탑에서도 튼다) base64 와 퍼센트 꼴 풀기를 타임라인에서 base/dataurl.rs 로 옮겼다. 웹은 asset_base_url 이 비어 있지 않으면 data: 주소 앞에도 기준 주소를 붙여 못 받던 것을 고쳤다
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.
