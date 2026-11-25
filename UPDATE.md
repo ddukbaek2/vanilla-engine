@@ -73,6 +73,8 @@
 - ToonScreenOutline, ToonOutlineWidthUnit, ToonLineDrawOptions: 툰 화면 공간 바깥선. (vanilla.js ToonScreenOutline 과 같은 기능, 외계행성 광부 키우기와 애버런트가 따로 쓰던 셰이더 바깥선) ToonRenderer 의 모형을 같은 행렬로 한 번 더 그려 노멀, 선 번호, 깊이를 선의 판에 쓰고(begin_line_ids, draw_mesh, draw_mesh_instanced, end_line_ids), 가면을 쓴 뒤 draw_outline 으로 섞는다. 부품의 번호는 index_start, index_count 로, 인스턴스마다의 번호는 draw_mesh_instanced 의 line_id_list 로 준다. 굵기는 월드 길이나 픽셀(set_width, set_focus_distance), 직교와 원근은 투영 행렬로 가리고 원근은 깊이를 미터로 푼다. set_depth_threshold, set_crease, set_resolution_scale, set_sample_count, set_color, set_hdr_output
 - ToonMesh: 크레이트 안에서 몸 버텍스 어레이와 인스턴스 버퍼를 읽는 get_body, get_instance_buffer. (화면 공간 바깥선이 같은 모형을 그릴 때)
 - 예제: toonfx. 원근 카메라로 도형과 인스턴싱한 돌에 화면 공간 바깥선을 긋는다
+- ToonVfx 와 ToonParticleOptions, ToonFireballOptions, ToonShockwaveOptions, ToonDecalOptions, ToonPlumeOptions, ToonBeamOptions, ToonRibbonOptions, ToonLightningOptions, ToonGlintOptions, ToonVfxRange, ToonVfxSlot, ToonVfxLook, ToonVfxShape, ToonVfxDecalMode, ToonVfxCounts: 툰 3D GPU 효과의 바탕. (vanilla.js ToonVfx 와 같은 기능과 셰이더, 외계행성 광부 키우기와 애버런트의 범용 부분, 처방과 램프 색은 게임 몫) 코드로 짓는 아틀라스, 인스턴스 GPU 파티클(emit_particles), 불덩이(add_fireball), 충격파(add_shockwave), 바닥 자국(add_decal, queue_decal), 연기 기둥(add_plume), 회전체 빔(queue_beam), 리본(queue_ribbon)과 번개(queue_lightning), 빛 점(queue_glint), update 로 나아가는 자체 시계, 파티클 상한(new, set_particle_capacity)과 내는 수의 몫(set_count_ratio), 램프 색(set_ramps, 0 ~ 1 의 [r, g, b] 줄), 바닥 높이 콜백(set_floor_height_reader). 효과마다 기본값을 가진 구조체로 값을 받는다
+- 예제 toonfx: 3 초마다 터짐(충격파, 불덩이, 그을음, 불꽃 줄기, 연기, 흙 알갱이), 연기 기둥, 흐르는 테 자국, 프레임마다 빔, 번개, 리본, 빛 점을 화면 공간 바깥선과 함께 그린다
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.

@@ -10,3 +10,4 @@ pub mod meshbuilder;
 pub mod toonpostprocess;
 pub mod toonrenderer;
 pub mod toonscreenoutline;
+pub mod toonvfx;

@@ -3,12 +3,14 @@
 // - 바닥판 위의 도형과 인스턴싱한 돌을 ToonRenderer 로 칠하고(껍데기 바깥선 없이), ToonScreenOutline 으로 실루엣, 맞닿은 곳, 꺾인 곳에 선을 긋는다.
 //   카메라는 원근이고 굵기는 월드 길이 0.022 (보는 점까지의 거리에서 셈), 깊이 문턱 0.08, 맞닿음 0.015, 꺾임 60 도.
 //   돌 일곱은 인스턴스마다 번호를 따로, 나머지 일곱은 한 번호로 그려 서로 맞닿은 곳의 선이 다른 것을 본다.
+// - ToonVfx 로 3 초마다 터짐(충격파, 불덩이, 그을음, 불꽃 줄기, 연기, 흙 알갱이)과 연기 기둥, 흐르는 테 자국을 내고,
+//   프레임마다 빔(겉집과 심), 번개, 리본, 빛 점을 넘긴다. 램프 색은 예제가 정한 넷(불, 푸른 빛, 보라, 연기)이다.
 // - 실행: cargo run --example toonfx
 //==============================================================================
 use glow::HasContext;
 use std::f32::consts::PI;
 use vanilla::{
-	create_box_geometry, create_cylinder_geometry, create_octahedron_geometry, create_part_matrix, create_rounded_box_geometry, create_sphere_geometry, create_torus_geometry, Engine, EngineConfiguration, Graphic, Matrix4, MeshBuilder, Scene, SceneBase, ToonDrawOptions, ToonGeometry, ToonInstance, ToonLineDrawOptions, ToonMesh, ToonOutlineWidthUnit, ToonPartOptions, ToonRenderer, ToonScreenOutline, Vector2, Vector3,
+	create_box_geometry, create_cylinder_geometry, read_color_values, create_octahedron_geometry, create_part_matrix, create_rounded_box_geometry, create_sphere_geometry, create_torus_geometry, Engine, EngineConfiguration, Graphic, Matrix4, MeshBuilder, Scene, SceneBase, ToonDrawOptions, ToonGeometry, ToonInstance, ToonLineDrawOptions, ToonMesh, ToonOutlineWidthUnit, ToonPartOptions, ToonRenderer, ToonScreenOutline, ToonBeamOptions, ToonDecalOptions, ToonFireballOptions, ToonGlintOptions, ToonLightningOptions, ToonParticleOptions, ToonPlumeOptions, ToonRibbonOptions, ToonShockwaveOptions, ToonVfx, ToonVfxDecalMode, ToonVfxLook, ToonVfxRange, ToonVfxShape, ToonVfxSlot, Vector2, Vector3, TOON_VFX_DEFAULT_PARTICLE_CAPACITY,
 };
 
 //==============================================================================
@@ -24,6 +26,8 @@ struct ToonFxScene {
 	scene_base: SceneBase,
 	renderer: Option<ToonRenderer>,
 	screen_outline: Option<ToonScreenOutline>,
+	vfx: Option<ToonVfx>,
+	next_burst_seconds: f32,
 	ground_mesh: Option<ToonMesh>,
 	rock_mesh: Option<ToonMesh>,
 	placed_list: Vec<PlacedToon>,
@@ -38,6 +42,8 @@ impl ToonFxScene {
 			scene_base: SceneBase::new(),
 			renderer: None,
 			screen_outline: None,
+			vfx: None,
+			next_burst_seconds: 0.0,
 			ground_mesh: None,
 			rock_mesh: None,
 			placed_list: Vec::new(),
@@ -89,8 +95,57 @@ impl ToonFxScene {
 		screen_outline.set_depth_threshold(0.08, 0.015);
 		screen_outline.set_crease(60.0, 0.5, 2.0);
 		self.screen_outline = Some(screen_outline);
+		// 효과. (예제의 램프 넷, 바닥은 판 윗면 0 이고 판 밖은 -1)
+		let mut vfx = ToonVfx::new(gl, TOON_VFX_DEFAULT_PARTICLE_CAPACITY)?;
+		let ramp_text_list: [[&str; 6]; 4] = [
+			["#ffffff", "#fff0b0", "#ffb040", "#e05020", "#601810", "#180808"],
+			["#ffffff", "#c0fff8", "#40e0d0", "#108890", "#083038", "#041014"],
+			["#ffffff", "#f0d0ff", "#b070ff", "#6030c0", "#281050", "#100818"],
+			["#e8e4de", "#b8b0a8", "#888078", "#5a544e", "#36322e", "#1a1816"],
+		];
+		let ramp_list: Vec<Vec<[f32; 3]>> = ramp_text_list.iter().map(|ramp_texts| ramp_texts.iter().map(|color_text| read_color_values(color_text)).collect()).collect();
+		vfx.set_ramps(&ramp_list);
+		vfx.set_floor_height_reader(Some(Box::new(|x: f32, z: f32| if x.abs() <= 4.0 && z.abs() <= 2.5 { 0.0 } else { -1.0 })));
+		vfx.prepare(gl);
+		self.vfx = Some(vfx);
 		self.renderer = Some(renderer);
 		Ok(())
+	}
+}
+
+impl ToonFxScene {
+	//==============================================================================
+	// 터짐 한 번. (충격파, 불덩이, 그을음, 불꽃 줄기, 연기, 흙 알갱이, 연기 기둥, 흐르는 테)
+	//==============================================================================
+	fn emit_burst(vfx: &mut ToonVfx) {
+		let blast = [-0.4, 0.0, 0.45];
+		vfx.add_shockwave(&ToonShockwaveOptions { x: blast[0], z: blast[2], start_radius: 0.2, end_radius: 2.0, width: 0.7, life: 1.1, ramp: 0, ..ToonShockwaveOptions::default() });
+		vfx.add_fireball(&ToonFireballOptions { position: [blast[0], 0.45, blast[2]], radius: 0.7, life: 1.5, ramp: 0, ..ToonFireballOptions::default() });
+		vfx.add_decal(&ToonDecalOptions { x: blast[0], z: blast[2], radius: 1.1, life: 3.0, heat_seconds: 1.5, slot: ToonVfxSlot::Scorch, mode: ToonVfxDecalMode::Scorch, ramp: 0, alpha: 0.9, ..ToonDecalOptions::default() });
+		vfx.emit_particles(&ToonParticleOptions { count: 70, position: [blast[0], 0.3, blast[2]], shape: ToonVfxShape::Sphere, radius: 0.2, is_upward: true, speed: ToonVfxRange::new(3.0, 6.0), gravity: 6.0, drag: 1.2, size: ToonVfxRange::new(0.05, 0.09), life: ToonVfxRange::new(0.5, 1.0), ramp: 0, look: ToonVfxLook::Streak, stretch: 0.05, brightness: 1.6, is_grounded: true, ..ToonParticleOptions::default() });
+		vfx.emit_particles(&ToonParticleOptions { count: 24, position: [blast[0], 0.3, blast[2]], shape: ToonVfxShape::Disc, radius: 0.5, speed: ToonVfxRange::new(0.4, 1.0), rise: ToonVfxRange::new(0.6, 1.2), drag: 0.8, size: ToonVfxRange::new(0.5, 0.8), size_end: ToonVfxRange::from(2.2), life: ToonVfxRange::new(1.4, 2.2), color: [0.32, 0.3, 0.29], look: ToonVfxLook::Smoke, alpha: 0.8, fade_in: 0.1, ..ToonParticleOptions::default() });
+		vfx.emit_particles(&ToonParticleOptions { count: 30, position: [blast[0], 0.2, blast[2]], shape: ToonVfxShape::Ring, radius: 0.4, speed: ToonVfxRange::new(1.5, 2.5), rise: ToonVfxRange::new(0.2, 0.6), gravity: 2.0, drag: 1.5, size: ToonVfxRange::new(0.06, 0.12), life: ToonVfxRange::new(0.6, 1.2), color: [0.45, 0.4, 0.36], look: ToonVfxLook::Grit, is_grounded: true, ..ToonParticleOptions::default() });
+		vfx.add_plume(&ToonPlumeOptions { x: 3.3, z: 0.4, height: 2.4, cap_radius: Some(0.9), stem_radius: Some(0.22), life: 3.0, ramp: 0, ..ToonPlumeOptions::default() });
+		vfx.add_decal(&ToonDecalOptions { x: 1.4, z: 0.5, radius: 0.7, life: 3.0, slot: ToonVfxSlot::Glow, mode: ToonVfxDecalMode::Ring, ramp: 1, tint: [0.6, 1.4, 1.4], alpha: 1.0, ring: [0.75, 0.08, 3.0, 0.6], ..ToonDecalOptions::default() });
+	}
+
+	//==============================================================================
+	// 이번 프레임에만 그리는 효과. (빔 겉집과 심, 번개, 리본, 빛 점)
+	//==============================================================================
+	fn queue_frame_effects(vfx: &mut ToonVfx, elapsed_seconds: f32) {
+		vfx.queue_beam(&ToonBeamOptions { start: [1.4, 5.0, 0.5], end: [1.4, 0.0, 0.5], radius: 0.28, is_core: false, alpha: 1.0, brightness: 1.3, ramp: 1, wobble: 0.14, flow_speed: 8.0, grain_repeat: 1.4, ..ToonBeamOptions::default() });
+		vfx.queue_beam(&ToonBeamOptions { start: [1.4, 5.0, 0.5], end: [1.4, 0.0, 0.5], radius: 0.1, is_core: true, alpha: 1.0, brightness: 1.5, ramp: 1, wobble: 0.05, flow_speed: 14.0, grain_repeat: 2.0, ..ToonBeamOptions::default() });
+		vfx.queue_lightning(&ToonLightningOptions { start: [-2.4, 1.1, -0.8], end: [0.2, 1.2, -0.9], radius: 0.12, count: 2, width: 0.07, turns: 1.5, ramp: 2, brightness: 1.4, seed: 3.0, ..ToonLightningOptions::default() });
+		let arc_points: Vec<[f32; 3]> = (0..=24).map(|index| {
+			let ratio = index as f32 / 24.0;
+			[2.7 - ratio * 3.0, 0.3 + (ratio * PI).sin() * 1.4, -0.4 + ratio * 1.8]
+		}).collect();
+		vfx.queue_ribbon(ToonRibbonOptions { points: arc_points, width: 0.14, taper: 0.5, ramp: 2, brightness: 1.2, ..ToonRibbonOptions::default() });
+		for glint_index in 0..12 {
+			let angle = glint_index as f32 / 12.0 * PI * 2.0 + elapsed_seconds;
+			let look = if glint_index % 2 == 0 { ToonVfxLook::Star } else { ToonVfxLook::Soft };
+			vfx.queue_glint(&ToonGlintOptions { position: [0.2 + angle.cos() * 0.75, 0.55 + (angle * 2.0).sin() * 0.1, -0.9 + angle.sin() * 0.75], size: 0.22, color: [0.6, 1.0, 1.0], look, brightness: 1.3, ..ToonGlintOptions::default() });
+		}
 	}
 }
 
@@ -109,6 +164,23 @@ impl Scene for ToonFxScene {
 
 	fn tick(&mut self, _engine: &mut Engine, time_delta: f32) {
 		self.elapsed_seconds += time_delta;
+		let vfx = match self.vfx.as_mut() {
+			Some(vfx) => {
+				vfx
+			}
+			None => {
+				return;
+			}
+		};
+		vfx.update(time_delta.min(0.1));
+		if self.elapsed_seconds >= self.next_burst_seconds {
+			self.next_burst_seconds = self.elapsed_seconds + 3.0;
+			ToonFxScene::emit_burst(vfx);
+		}
+		// 기둥 밑에서 오르는 불씨.
+		if (self.elapsed_seconds * 10.0) as i32 != ((self.elapsed_seconds - time_delta) * 10.0) as i32 {
+			vfx.emit_particles(&ToonParticleOptions { count: 6, position: [3.3, 0.2, 0.4], shape: ToonVfxShape::Disc, radius: 0.3, speed: ToonVfxRange::from(0.3), rise: ToonVfxRange::new(1.0, 1.8), size: ToonVfxRange::new(0.04, 0.07), life: ToonVfxRange::new(0.8, 1.4), ramp: 0, look: ToonVfxLook::Ember, brightness: 1.4, ..ToonParticleOptions::default() });
+		}
 	}
 
 	//==============================================================================
@@ -174,6 +246,12 @@ impl Scene for ToonFxScene {
 
 		// 3. 바깥선.
 		screen_outline.draw_outline(gl);
+
+		// 4. 효과. (프레임마다 넘기는 빔, 번개, 리본, 빛 점)
+		if let Some(vfx) = self.vfx.as_mut() {
+			ToonFxScene::queue_frame_effects(vfx, self.elapsed_seconds);
+			vfx.draw(gl, &view_matrix, &projection_matrix);
+		}
 		graphic.restore_render_state();
 	}
 }
