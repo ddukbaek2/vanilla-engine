@@ -190,8 +190,9 @@ pub use crate::graphics3d::toon::toonrenderer::extract_frustum_planes;
 pub use crate::graphics3d::toon::toonscreenoutline::ToonLineTarget;
 pub use crate::graphics3d::toon::toonvfx::ToonFlashOptions;
 pub use crate::graphics3d::toon::toonvfx::ToonRampColor;
-#[cfg(target_arch = "wasm32")]
 pub use crate::web::pane::{Pane, PaneDirection, PaneOptions, PaneResizableEdges, PaneResizeCallback, PaneSize, PaneStyle, PaneStyleOptions, PaneTheme};
+#[cfg(not(target_arch = "wasm32"))]
+pub use crate::web::pane::{PaneClickCallback, PaneElement};
 pub use crate::game::gamescene::{GameScene, PlayInputHandler, ScreenFadeHoldEvent};
 pub use crate::ui::autolayout::layoutconstraint::LayoutConstraint;
 pub use crate::ui::autolayout::layoutconstraintaxis::LayoutConstraintAxis;

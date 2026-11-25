@@ -211,6 +211,12 @@ pub fn set_cursor(platform_window: Option<&PlatformWindow>, cursor_value: &Curso
 		"progress" => {
 			CursorIcon::Progress
 		}
+		"col-resize" => {
+			CursorIcon::ColResize
+		}
+		"row-resize" => {
+			CursorIcon::RowResize
+		}
 		_ => {
 			CursorIcon::Default
 		}
