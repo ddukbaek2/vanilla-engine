@@ -2,7 +2,7 @@
 // 비주얼 애셋. (원본 experimental/visual/visualasset.js 의 VisualAsset)
 // - 원본은 뼈대다. load 는 경로만 적고(기본 Asset.load) 아무것도 읽지 않으며, 읽힌 것으로 바꾸지도 않는다. Visual 도 만들지 않는다.
 //   러스트 판도 그대로다: load 는 경로만 적고 is_loaded 는 늘 false 다. 그래서 track_asset 에 맡겨도 씬을 붙잡지 않는다. (읽기 손잡이가 없다)
-// - 원본 private 필드 visual 은 읽는 곳이 없어서, 러스트 판은 set_visual / get_visual 을 더했다.
+// - set_visual / get_visual 은 원본에도 있다.
 //==============================================================================
 use crate::core::asset::{Asset, AssetBase, AssetType};
 use crate::misc::visual::Visual;
