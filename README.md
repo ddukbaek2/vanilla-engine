@@ -30,7 +30,7 @@
 - **연출 도구가 엔진 안에.** 파티클, 셰이더 스프라이트 효과 49종, 화면 효과 58종, 트레일, 아지랑이, 이징 31종을 갖춘 타임라인과 애니메이터, 트윈. 블렌드 모드는 Canvas2D 합성 26 가지를 모두 그립니다.
 - **3D 도 같은 화면에서.** glTF/GLB 와 FBX(순수 러스트 로더) 스키닝 모델, PBR 머티리얼, 사람 피부 렌더러, 그림자, 블룸과 다단 블룸, 멀티샘플 렌더 타겟, 앰비언트 오클루전, 서브서피스 스캐터링. 툰 3D 는 셀 셰이딩과 바깥선(껍데기, 화면 공간), 빛 묶음(점광, 림, 정반사, 띠 램프), 셰이더 조각을 끼우는 머티리얼, 인스턴스 꼴과 영구 인스턴스 버퍼, 그리기 단계 콜백, HDR 마무리(MSAA, 다단 블룸, 색 보정), GPU 효과(파티클, 불덩이, 충격파, 자국, 빔, 번개)를 갖췄습니다. 3D 장면 위에 2D UI 를 바로 얹고, 노드 사각형 안에도 3D 를 그립니다.
 - **게임 제작에 필요한 기능까지.** 길찾기, 2D 충돌, 스티어링, 플랫포머 캐릭터 물리, 상태 머신(FSM), 오브젝트 풀, 고정 걸음, 시드 기반 난수(vanilla.js 와 비트까지 같은 수열), 다국어와 언어 묶음, 대화 시스템, 타자기 효과, 로컬 저장소, 입력 동작(키, 패드 단추, 축 묶기), 게임패드와 진동, 카메라 손짓, 애셋 함께 받기와 로딩 진행률, 스프라이트 아틀라스, 소리 표와 음악, 효과음 버스, 화질 자동 조절, 웹소켓(wss 포함).
-- **async 없는 게임 코드.** 애셋을 요청해 두면 엔진이 로딩이 끝날 때까지 로딩 화면을 그리고, 끝나면 씬을 초기화합니다. 게임 코드에 `async` 와 `await` 가 필요 없습니다.
+- **원본처럼 쓰는 async/await.** 엔진이 스레드 하나짜리 실행기를 품고 매 프레임 작업을 폴링합니다. 씬 작업 안에서 `asset.wait_for_load().await`, `wait::seconds(1.0).await` 처럼 vanilla.js 의 async 함수를 위에서 아래로 그대로 옮겨 쓰고, await 다음 줄에서는 `scene_context.with(|scene, engine| ...)` 로 씬과 엔진을 만집니다. tokio 같은 외부 런타임 없이 데스크탑과 웹이 같은 코드로 돌고, await 없이 손잡이를 맡겨 두는 꼴도 그대로 됩니다.
 
 | UI 위젯 | 한글 입력 필드와 리치텍스트 |
 | --- | --- |
@@ -109,12 +109,12 @@ cargo run --example quickstart
 
 | 단계 | 하는 일 |
 | --- | --- |
-| `create` | 애셋 로딩을 요청하고 `scene_base.track_asset` 으로 등록합니다 |
-| `draw_on_load` | 등록한 애셋의 로딩이 끝날 때까지 매 프레임 호출됩니다. 로딩 화면을 그립니다 |
+| `create` | 애셋 로딩을 요청하고 `scene_base.track_asset` 으로 등록합니다. 원본 `async load` 처럼 await 로 불러오려면 `engine.spawn_scene_task` 로 작업을 맡기고 `scene_base.track_task` 로 등록합니다 |
+| `draw_on_load` | 등록한 애셋과 작업이 끝날 때까지 매 프레임 호출됩니다. 로딩 화면을 그립니다 |
 | `initialize` | 로딩이 끝난 뒤 한 번 호출됩니다. 노드 트리를 만듭니다 |
 | `tick` | 매 프레임 업데이트. 기본 구현이 노드와 컴포넌트, 터치, 트윈을 업데이트합니다 |
 | `pre_draw`, `draw`, `post_draw` | 매 프레임 렌더링. 기본 `draw` 가 노드 트리를 그립니다 |
-| `destroy` | 씬이 언로드될 때 |
+| `destroy` | 씬이 언로드될 때. 그 씬의 작업도 함께 버려집니다 |
 
 ### 노드와 컴포넌트
 
@@ -196,6 +196,41 @@ impl Scene for GameScene {
 }
 ```
 
+vanilla.js 의 `async load(engine) { await this.logoAsset.load("images/logo.png"); }` 를 await 로 그대로 옮기면 이렇습니다. 작업은 매 프레임 엔진이 폴링하고, `with` 클로저 안에서만 씬과 엔진을 빌립니다.
+
+```rust
+impl Scene for TitleScene {
+	// ...
+
+	fn create(&mut self, engine: &mut Engine) {
+		let load_task = engine.spawn_scene_task(self, |mut scene_context| async move {
+			// 원본: await this.logoAsset.load("images/logo.png");
+			let logo_load = scene_context.with(|scene, engine| {
+				scene.logo_asset.load(engine, "images/logo.png");
+				scene.logo_asset.wait_for_load()
+			});
+			logo_load.await.ok();
+			// 원본: await Wait.seconds(0.5);
+			wait::seconds(0.5).await;
+			scene_context.with(|scene, _engine| scene.is_intro_ready = true);
+		});
+		// 원본 SceneManager 가 await scene.load() 를 기다린 뒤 initialize 를 부르는 자리
+		self.scene_base.track_task(&load_task);
+	}
+}
+```
+
+| 원본 (vanilla.js) | 바닐라엔진 |
+| --- | --- |
+| `await asset.load(경로)` | `asset.load(engine, 경로); asset.wait_for_load().await` (AssetLoader, SpriteAtlas, BuildInfo, AudioAsset, SoundSystem, LanguagePack, UIFont 도 같은 꼴) |
+| `await FbxLoader.loadFromUrl(url)`, `await Material.loadImageDescription(url)` | 돌려준 손잡이를 그대로 `.await` |
+| `await Timeline.loadFromUrl(url)`, `await SkinnedModel.loadFromUrl(gl, url, renderer)` | `Timeline::load_from_url(engine, 경로).await`, `SkinnedModel::load_from_url_async(engine, 경로, &renderer).await` |
+| `await Wait.seconds(1)`, `await Wait.nextFrame()` | `wait::seconds(1.0).await`, `wait::next_frame().await` |
+| `await engine.readClipboardText()`, `await engine.requestFrameCapture(n)` | `engine.read_clipboard_text_async().await`, `engine.request_frame_capture_async(n).await` |
+| `await sceneManager.loadScene(scene)` | `engine.load_scene_async(scene).await` (`unload_scene_async`, `unload_all_scenes_async`) |
+| `this.fadeScreen(async () => { ... })` | `scene.fade_screen_async(engine, \|scene_context\| async move { ... })` |
+| `new Promise((resolve) => ...)` | `let (promise, resolver) = Promise::create();` |
+
 - 데스크탑은 `EngineConfiguration.asset_directory_paths` 폴더에서 바로 읽고, 웹은 `asset_base_url + 경로` 를 fetch 합니다. 게임 코드는 같습니다.
 - 이미지(png, jpg, webp, gif 첫 장, bmp, ico, svg, avif), 텍스트, JSON, 바이너리, 폰트(ttf, otf, woff, woff2), 오디오(ogg, mp3, wav, flac, m4a)를 지원합니다. 데스크탑은 엔진이 풀고, 웹은 원본처럼 브라우저가 풉니다.
 - 여러 애셋을 함께 받을 때는 `AssetLoader` 가 동시 수만큼 요청하고 진행률과 실패 목록을 셉니다.
@@ -248,7 +283,7 @@ init();
 
 ### 검증용 화면 저장
 
-데스크탑은 환경 변수, 웹은 주소 쿼리로 정한 프레임을 PNG 로 저장합니다. (게임 코드에서는 `engine.request_frame_capture`)
+데스크탑은 환경 변수, 웹은 주소 쿼리로 정한 프레임을 PNG 로 저장합니다. (게임 코드에서는 `engine.request_frame_capture`, 작업 안에서는 `engine.request_frame_capture_async(번호).await`)
 
 | 데스크탑 | 웹 | 하는 일 |
 | --- | --- | --- |
@@ -286,6 +321,7 @@ VANILLA_CAPTURE_PATH=shots/uigallery_{frame}.png VANILLA_CAPTURE_FRAMES=60 VANIL
 | `uiscenelayout` | UIScene 과 UINode 오토레이아웃(세이프 에어리어 가이드, 여백 가이드, 같은 너비 단추, 글의 자연 크기) |
 | `windowshowcase` | 창 쌓기와 긴 글 확인 창, 바깥 누르기와 모두 닫기, 화면 페이드, UI 가 받지 않은 누름만 놀이 입력으로 |
 | `loadingshowcase` | AssetLoader 로 함께 받기(없는 파일은 실패 목록), 바꾼 로딩 화면, 빌드 판, FixedStepper 로 움직이는 공 |
+| `asyncawait` | 원본처럼 async/await: 불러오기 작업이 아틀라스를 await 로 받는 동안 로딩 화면, 이야기 작업이 wait::seconds, wait::next_frame, fade_screen_async, Promise 로 차례로 돈다 |
 | `textnodeextras` | 글자 칸 맞춤, 배율이 움직이는 글, 반투명 고리와 호와 선분, 스프라이트 아틀라스, 구운 그림을 나눠 쓰는 그림자 글 |
 | `panelayout` | DOM 화면 분할 패널(Pane): 도구 막대, 끌어서 크기를 바꾸는 패널, 오른쪽 패널의 엔진 캔버스 (웹 전용) |
 | `blendmodes` | 블렌드 모드 26 가지를 칸마다: 반투명 그림과 도형, 글자, 나인슬라이스, 자르기, 파티클, 바꿔 끼운 셰이더, 반투명 렌더 타겟 |
@@ -311,7 +347,7 @@ cargo run --release --example modelviewer
 
 **컬링과 업데이트 생략.** 영역 안에만 그리는 컴포넌트(Paint, Sprite, Mask)와 글(Text, UILabel, ShadowText), 그림자 그림(ShadowImage)만 붙은 노드는 화면 밖이면 그리지 않습니다. 글은 정렬, 넘침, 줄바꿈 결과로 실제로 그리는 사각형을 셈해 판정합니다. 그리기만 하는 컴포넌트만 붙은 노드는 업데이트에서 아예 건너뜁니다.
 
-**async 없는 애셋 로딩.** 애셋을 요청하면 로딩 핸들을 받고, 데이터가 도착하면 상태가 완료로 바뀝니다. 데스크탑은 파일을 바로 읽고, 웹은 fetch 가 끝나는 프레임까지 `draw_on_load` 로 로딩 화면을 그립니다. 다 읽힌 뒤에는 원본처럼 0.3초 더 로딩 화면을 보이고 `initialize` 를 부릅니다. 같은 게임 코드가 두 플랫폼에서 그대로 돌아갑니다.
+**프레임 루프 안의 async/await.** 엔진이 스레드 하나짜리 실행기를 품습니다. `spawn_task`, `spawn_scene_task` 로 맡긴 퓨처를 매 프레임 시간과 입력을 갱신한 뒤, 씬의 `tick` 앞에서 깨어난 것만 한 번씩 폴링합니다. 깨우기는 작업마다 `Arc` 에 든 원자 표시를 `std::task::Wake` 로 만든 Waker 이고, 엔진 상태를 보는 퓨처(애셋 손잡이, `wait::seconds`)는 아직이면 스스로 깨워 다음 프레임에 다시 봅니다. 퓨처는 `&mut` 를 await 너머로 쥘 수 없으므로, 작업은 컨텍스트의 `with(|scene, engine| ...)` 클로저 안에서만 씬과 엔진을 빌립니다. 폴링하는 동안만 스레드 지역 칸에 둔 포인터를 `with` 가 꺼내 쓰고 되돌리므로 두 번째 `&mut` 가 생기는 길이 없고, 클로저 인자의 수명이 클로저마다 새로 매겨져 참조가 밖으로 새지 않습니다. 퓨처는 `Send` 가 아니어도 되고, 웹 Promise 는 wasm-bindgen-futures 의 `JsFuture` 가 깨웁니다. await 없이 손잡이를 `track_asset` 으로 맡기는 꼴도 그대로 되어, 데스크탑은 파일을 바로 읽고 웹은 fetch 가 끝나는 프레임까지 `draw_on_load` 로 로딩 화면을 그립니다. 다 읽힌 뒤에는 원본처럼 0.3초 더 로딩 화면을 보이고 `initialize` 를 부릅니다.
 
 **텍스트 렌더링.** 문자열 하나를 텍스처 한 장으로 베이크하고, 최근에 쓴 512 개를 LRU 캐시에 둡니다. 데스크탑은 [rustybuzz](https://crates.io/crates/rustybuzz) 로 글자 모양을 짓고(양방향 정렬, 아랍어 글자 잇기, 합자, 커닝) [fontdue](https://crates.io/crates/fontdue) 로, 가변 글꼴은 [skrifa](https://crates.io/crates/skrifa) 윤곽으로 래스터라이즈합니다. 기본 글꼴은 원본의 시스템 글꼴 목록을 운영체제 글꼴에서 찾아 잇고, 글꼴에 없는 글자는 운영체제가 고른 대체 글꼴(맥 CoreText, 윈도우 DirectWrite, 리눅스 fontconfig)로 그립니다. 일반 이름(serif, monospace 같은 것)의 기본 글꼴, 폰트 문자열의 CSS 단위와 `calc()`, 맥 시스템 UI 글꼴의 광학 크기와 자간, 가짜 기울임과 굵게까지 크롬 Canvas2D 와 맞췄습니다. 웹은 원본처럼 브라우저 Canvas2D 로 굽고, 받은 글꼴(WOFF, WOFF2 포함)은 FontFace 로 올립니다. 밑줄, 취소선, 낱말 단위와 글자 단위 줄바꿈(공백 없는 한중일과 태국어는 사전으로 낱말을 나눕니다)을 지원하고, 도트 폰트용으로 글자 안티앨리어싱을 끌 수 있습니다(`set_text_antialias_enabled`). 색 이모지는 글꼴의 색 글리프(sbix, CBDT, COLR v0/v1)를 직접 그려 브라우저처럼 제 색으로 나옵니다.
 
@@ -405,12 +441,12 @@ cargo run --release --example modelviewer
 | --- | --- | --- | --- | --- |
 | [wasm-bindgen](https://crates.io/crates/wasm-bindgen), [js-sys](https://crates.io/crates/js-sys) | 0.2.130, 0.3.107 | `platform/web.rs` 외 | 러스트와 자바스크립트 연결 | MIT / Apache-2.0 |
 | [web-sys](https://crates.io/crates/web-sys) | 0.3.107 | `platform/web.rs`, `platform/web/`, `platform/audio/web.rs`, 입력 필드, 로컬 저장소 | 캔버스, WebGL2, DOM 이벤트, WebAudio, fetch, localStorage, Canvas2D 글자 굽기, HTMLImageElement 그림 풀기 | MIT / Apache-2.0 |
-| [wasm-bindgen-futures](https://crates.io/crates/wasm-bindgen-futures) | 0.4.80 | `platform/web.rs`, `platform/audio/web.rs` | fetch, 오디오 디코딩, 그림 풀기 같은 브라우저 비동기 API 를 엔진 안에서 기다립니다. 게임 코드는 async 를 쓰지 않습니다 | MIT / Apache-2.0 |
+| [wasm-bindgen-futures](https://crates.io/crates/wasm-bindgen-futures) | 0.4.80 | `platform/web.rs`, `platform/audio/web.rs` | fetch, 오디오 디코딩, 그림 풀기, 클립보드 같은 브라우저 Promise 를 러스트 퓨처(`JsFuture`)로 바꿔 기다립니다. 게임 코드의 async 작업은 이 크레이트가 아니라 엔진의 실행기(`core/task.rs`)가 돌립니다 | MIT / Apache-2.0 |
 
 ## 진행 상황
 
 - 버전 0.3.2. 버전 번호는 vanilla.js 0.3.2 에서 이어 받았습니다.
-- vanilla.js 의 원본 200 파일 가운데 181 파일을 옮겼습니다. (같은 이름 175, 다른 파일에 합친 것 6) 19 파일은 빈 파일, 죽은 코드, 러스트 표준이 맡는 것(컬렉션, 객체 모델 도우미)이라 일부러 옮기지 않았습니다. 목록과 까닭은 [ARCHITECTURE.md](ARCHITECTURE.md) 9장에 있습니다.
+- vanilla.js 의 원본 200 파일 가운데 182 파일을 옮겼습니다. (같은 이름 176, 다른 파일에 합친 것 6) 18 파일은 빈 파일, 죽은 코드, 러스트 표준이 맡는 것(컬렉션, 객체 모델 도우미)이라 일부러 옮기지 않았습니다. 목록과 까닭은 [ARCHITECTURE.md](ARCHITECTURE.md) 9장에 있습니다.
 - 두 엔진은 기능 차이를 두지 않습니다. 언어나 플랫폼 때문에 정말 맞출 수 없는 것과 러스트에 맞게 정한 꼴은 [ARCHITECTURE.md](ARCHITECTURE.md) 10장에 모았습니다.
 - 윈도우 11 데스크탑, macOS(애플 실리콘) 데스크탑, 크롬에서 돌려 확인했습니다. 윈도우와 리눅스의 시스템 글꼴 갈래(DirectWrite, fontconfig)와 리눅스 손가락 판정은 그 대상으로 컴파일해 본 것까지입니다. 리눅스와 실제 모바일 기기는 아직 돌려 보지 않았습니다.
 

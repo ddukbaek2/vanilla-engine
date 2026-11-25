@@ -10,8 +10,9 @@ vanilla.js 를 러스트로 옮긴 엔진의 구성과 소유 구조를 정리�
 ```
 src/lib.rs           공개 API 를 다시 내보낸다 (원본 import.js 자리)
 src/animation/       Timeline, Animator, Action (원본 experimental/animation, experimental/action)
-src/base/            엔진을 모르는 기반 타입 (수학, 색, 식별자, 플랫폼 정보, Format, FiniteStateMachine, ObjectPool, SeededRandom, Timer, Version)
+src/base/            엔진을 모르는 기반 타입 (수학, 색, 식별자, 플랫폼 정보, Format, FiniteStateMachine, ObjectPool, SeededRandom, Timer, Version, wait(Wait.seconds, nextFrame))
 src/core/            엔진 본체 (Engine, 매니저, Scene, 노드 트리, Graphic, Component, 애셋 꼴, 트윈, Animation, Frame)
+                     async: task(스레드 하나짜리 실행기, EngineContext, SceneContext, TaskHandle, Promise)
                      입력: InputManager, InputActions, GamepadManager, PointerCursor, textinput(글 입력 줄)
                      소리: AudioManager, AudioPlayer, AudioBus, SoundSystem, SoundEffectPool
                      그리기: Graphic, ShaderProgram, ShaderWarmer, FullscreenPass, ImageTextureCache, TextStringTextureCache, sharedbakecache
@@ -48,7 +49,7 @@ src/platform/        창, GL 컨텍스트, 입력 이벤트, 프레임 루프, �
 ## 2. 설계 원칙 (원본과 다른 것)
 
 1. **노드는 핸들로 가리킨다.** 원본은 부모가 children[] 으로 자식 객체를 들고 자식이 parent 로 거꾸로 가리킨다. 러스트 판은 씬의 NodeTree 가 노드를 slotmap 저장소 하나에 담고, 부모와 자식을 NodeId 로 잇는다. NodeId 는 칸 번호와 세대 번호라서 지운 노드의 핸들은 get_node 가 None 을 돌려준다(원본 isDestroyed 의 공백을 메움). Rc<RefCell> 은 쓰지 않는다.
-2. **전역 엔진이 없다.** 원본의 Engine.getEngine() 대신 씬 함수와 컴포넌트 문맥으로 Engine 을 넘긴다.
+2. **전역 엔진이 없다.** 원본의 Engine.getEngine() 대신 씬 함수와 컴포넌트 문맥으로 Engine 을 넘긴다. async 작업도 폴링하는 동안 컨텍스트의 with 로 받는다.
 3. **상속 대신 트레이트와 공통 상태 구조체.** Scene 트레이트 + SceneBase, Component 트레이트 + ComponentBase, Asset 트레이트 + AssetBase. 원본의 Node, ComponentNode, TransformNode, WorldNode 상속 넷은 WorldNode 하나로 합쳤다.
 4. **플랫폼 층을 뗐다.** 창, GL, 입력, 루프, 애셋 바이트, 오디오는 platform 아래에만 있다. 안드로이드, iOS 는 여기에 모듈을 더하면 된다.
 5. **성능 기능은 엔진 기본.** 묶어 그리기와 화면 밖 거르기를 기본으로 켠다. (원본도 같이 기본 켬으로 바꿨다)
@@ -69,6 +70,7 @@ EngineRunner (플랫폼이 들고 프레임마다 부른다)
 │   ├── PointerCursor (켜져 있으면 프레임 끝에 커서를 플랫폼에 넘긴다)
 │   ├── AudioManager (소리 장치는 처음 쓸 때 연다)
 │   ├── Platform (플랫폼, 브라우저 정보)
+│   ├── TaskExecutor (async 작업, 씬 작업은 씬 핸들로 묶여 그 씬을 내리면 버린다)
 │   ├── platform_window (창 손잡이: 데스크탑 winit Window, 웹 캔버스)
 │   ├── pending_scene_list, pending_font_registration_list, 페이지 이벤트 리스너
 ├── Graphic (플랫폼이 GL 컨텍스트를 만든 뒤 attach_graphic 으로 넘김)
@@ -107,18 +109,24 @@ EngineRunner (플랫폼이 들고 프레임마다 부른다)
 1. 바이트가 온 글꼴을 글자 캐시에 등록
 2. graphic.apply_settings()          뷰포트, 프로젝션, 상태 리셋, 화면 비우기
 3. time_manager.update(), input_manager.tick() (게임패드 폴링, 입력 동작 갱신 포함)
-4. 씬마다:
-   - 맡긴 애셋을 기다리는 씬: 다 읽히고 0.3초가 지났으면 initialize 와 resize, 아니면 draw_on_load 만
+4. 깨어난 작업 폴링 (task::poll_tasks, 작업마다 많아야 한 번. 씬 작업은 그 씬과 엔진을, 엔진 작업은 엔진을 with 안에서 빌린다)
+5. 씬마다:
+   - 맡긴 애셋과 작업을 기다리는 씬: 다 끝나고 0.3초가 지났으면 initialize 와 resize(그리고 load_scene_async 의 Promise 를 푼다), 아니면 draw_on_load 만
    - scene.tick → SceneBase.tick: 노드 tick(컴포넌트 → 자식) → 휠, 터치 전달 → 트윈
    - 씬의 터치 훅(touch_press, 뗌 또는 누르고 있음 또는 취소, touch_wheel, 원본 Scene.tickTouch 차례)
    - pre_draw → draw(NodeTree.draw 재귀) → post_draw → (기즈모)
-5. 통계 출력(옵션: FPS, DrawCall, Vertex, Culled) → 마우스 커서(PointerCursor) → 1회성 입력 플래그 지우기
-6. graphic.end_frame() (묶음 내보내기) → 검증용 화면 저장(request_frame_capture, 데스크탑 VANILLA_CAPTURE_*, 웹 ?capture=) → 프레임 번호 증가 (첫 프레임 1)
-7. 씬 목록 바꾸기 (apply_pending_scenes: 불러온 씬 create, 내린 씬 finalize, unload, destroy)
+6. 통계 출력(옵션: FPS, DrawCall, Vertex, Culled) → 마우스 커서(PointerCursor) → 1회성 입력 플래그 지우기
+7. graphic.end_frame() (묶음 내보내기) → 검증용 화면 저장(request_frame_capture, 데스크탑 VANILLA_CAPTURE_*, 웹 ?capture=) → 프레임 번호 증가 (첫 프레임 1)
+8. 씬 목록 바꾸기 (apply_pending_scenes: 불러온 씬 create, 내린 씬 finalize, unload, destroy 와 그 씬의 작업 버리기, unload_scene_async 의 Promise 풀기)
 플랫폼: 데스크탑은 렌더 배율 상한이나 캔버스 비 상한으로 줄여 그렸으면 창의 캔버스 자리로 늘이고(desktop/renderscaler.rs), 화면 넘기기 (데스크탑 swap_buffers, 웹은 콜백이 끝나면 브라우저가)
 ```
 
-씬 불러오기는 원본의 create → load(비동기) → set_loaded → initialize 를 create → (맡긴 애셋을 기다림) → initialize 로 옮겼다. create 바로 뒤에 루트를 원본 Scene.load 처럼 뷰 크기로 맞추고, 맡긴 애셋이 다 끝난 뒤에도 원본 SceneManager.loadScene 처럼 0.3초 더 로딩 화면을 보인다. 데스크탑은 애셋이 그 자리에서 읽혀서 create 뒤 0.3초에 initialize 가 불린다.
+씬 불러오기는 원본의 create → load(비동기) → set_loaded → initialize 를 create → (맡긴 애셋과 작업을 기다림) → initialize 로 옮겼다. 원본 async load 의 몸은 create 에서 spawn_scene_task 로 맡긴 불러오기 작업이고, track_task 로 씬에 맡기면 엔진이 그 작업이 끝나기를 기다린다. (애셋 손잡이를 track_asset 으로 맡기는 동기 꼴도 그대로 된다) create 바로 뒤에 루트를 원본 Scene.load 처럼 뷰 크기로 맞추고, 맡긴 것이 다 끝난 뒤에도 원본 SceneManager.loadScene 처럼 0.3초 더 로딩 화면을 보인다. 데스크탑은 애셋이 그 자리에서 읽혀서 작업이 없으면 create 뒤 0.3초에 initialize 가 불린다.
+
+async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(core/task.rs)를 품는다. 퓨처는 Send 가 아니어도 되고 데스크탑과 웹이 같은 코드로 돈다.
+- 깨우기: 작업마다 Arc 에 든 원자 표시를 std::task::Wake 로 만든 Waker 다. 깨우면 표시만 서고, 폴링 차례에 목록을 한 번 돌며 표시가 선 작업만 표시를 내리고 폴링한다. 한 작업은 한 프레임에 많아야 한 번이고, 스스로 깨운 작업은 다음 프레임이다. 엔진 상태를 보는 퓨처(애셋 손잡이, wait::seconds, wait::next_frame)는 아직이면 스스로 깨워 다음 프레임에 다시 보고, Promise 는 resolve 가, 웹 Promise 는 JsFuture 가 깨운다.
+- 엔진과 씬에 닿기: 퓨처는 &mut 를 await 너머로 쥘 수 없어서, 작업은 컨텍스트의 with(|씬, 엔진| ...) 클로저 안에서만 빌린다. 폴링하는 동안만 스레드 지역 칸에 엔진, 그래픽, 그 작업의 씬을 가리키는 포인터를 두고, with 는 그것을 꺼내 쓰고 되돌린다. 포인터는 실행기가 &mut 로 쥔 서로 다른 값(EngineRunner 의 엔진, 그래픽, 씬 목록의 한 칸)에서 만들고 폴링이 끝날 때까지 실행기는 그 &mut 를 쓰지 않는다. 폴링하는 작업 목록은 엔진에서 꺼내 둔 지역 값이다. with 가 쓰는 동안 칸이 비어 있어 두 번째 &mut 가 생길 길이 없고, 컨텍스트는 복제할 수 없고 with 가 &mut self 를 받아 겹친 with 는 컴파일되지 않는다. 클로저 인자의 수명은 클로저마다 새로 매겨져 참조가 밖으로 새지 않는다. 씬은 Any 로 컨텍스트의 타입인지 보고, 씬 핸들로 그 작업의 씬인지 본다. (빼돌린 컨텍스트를 작업 바깥이나 다른 씬에서 쓰면 이중 빌림 대신 까닭을 적은 패닉)
+- 엔진을 빌려 이어 가는 퓨처(AssetLoader, SpriteAtlas, LanguagePack, UIFont 의 wait_for_load, 모델 짓기)는 같은 칸을 crate 안에서 잠깐 꺼내 update 를 부르거나 GL 을 쓴다.
 
 데스크탑 찍기 모드(VANILLA_CAPTURE_PATH)는 창을 숨기고 돈다. 숨긴 창은 다시 그리기 요청과 수직 동기가 없어 about_to_wait 에서 프레임을 바로 돌고, 최대 FPS 가 없으면 모니터 주사율(모르면 60)로 빠르기를 맞춘다. 창을 보려면 VANILLA_CAPTURE_SHOW_WINDOW=1 이다.
 
@@ -138,7 +146,7 @@ EngineRunner (플랫폼이 들고 프레임마다 부른다)
 
 ## 7. 애셋
 
-- `ImageAsset`, `TextAsset`, `JsonAsset`, `BlobAsset`, `FontAsset`: `load(engine, 경로)` 로 요청하고 `scene_base.track_asset(&asset)` 으로 맡긴다. 데스크탑은 애셋 폴더 후보에서 파일을 읽고, 웹은 `asset_base_url + 경로` 를 fetch 한다.
+- `ImageAsset`, `TextAsset`, `JsonAsset`, `BlobAsset`, `FontAsset`: `load(engine, 경로)` 로 요청하고 `scene_base.track_asset(&asset)` 으로 맡긴다. 엔진 작업 안에서는 `wait_for_load().await` 로 기다린다. (원본 await asset.load(경로), 읽기 손잡이 AssetLoadHandle 도 그대로 await 한다) 데스크탑은 애셋 폴더 후보에서 파일을 읽고, 웹은 `asset_base_url + 경로` 를 fetch 한다.
 - 실패한 애셋도 "끝난 것"으로 쳐서 씬이 멈추지 않는다. 풀지 못한 JSON 은 원본처럼 읽히지 않은 것이다.
 - AssetLoader 는 여러 애셋을 동시 수(기본 6)만큼 받고 진행률과 실패 목록을 센다. 다 받은 그림은 원본 img.onload 처럼 풀어 보고, 깨진 것은 실패로 친다. 푼 그림은 읽기 손잡이에 담겨 ImageAsset 이 다시 풀지 않는다.
 - `AudioAsset` 은 오디오 백엔드와 붙어 있어 `engine.load_audio_asset` 으로 읽고 `track_audio_asset` 으로 맡긴다.
@@ -157,20 +165,20 @@ EngineRunner (플랫폼이 들고 프레임마다 부른다)
 
 ## 9. 원본과의 대응
 
-2026-11-26 dev 기준으로 원본 `src/` 의 .js 200 파일 가운데 181 파일을 옮겼고, 19 파일은 일부러 옮기지 않았다. (원본 파일마다 같은 이름의 .rs 가 있는지 보고, 없는 것은 러스트 파일 머리 주석의 원본 경로로 찾아 셌다)
+2026-11-26 dev 기준으로 원본 `src/` 의 .js 200 파일 가운데 182 파일을 옮겼고, 18 파일은 일부러 옮기지 않았다. (원본 파일마다 같은 이름의 .rs 가 있는지 보고, 없는 것은 러스트 파일 머리 주석의 원본 경로로 찾아 셌다)
 
-- 같은 이름으로 옮긴 것 175 파일. 폴더는 러스트 판에 맞게 바꾼 곳이 있다. (core/graphic/* 는 core/, experimental/graphics 는 graphics3d/, experimental/animation 과 action.js 는 animation/, experimental/indicator.js 와 visual/visual.js 는 misc/, experimental/bunchasset.js 와 visual/visualasset.js 는 resource/, experimental/graphics/fullscreenpass.js 는 core/)
+- 같은 이름으로 옮긴 것 176 파일. 폴더는 러스트 판에 맞게 바꾼 곳이 있다. (core/graphic/* 는 core/, experimental/graphics 는 graphics3d/, experimental/animation 과 action.js 는 animation/, experimental/indicator.js 와 visual/visual.js 는 misc/, experimental/bunchasset.js 와 visual/visualasset.js 는 resource/, experimental/graphics/fullscreenpass.js 는 core/)
 - 다른 파일에 합친 것 6 파일:
   - base/node.js, core/node/componentnode.js, core/node/transformnode.js: 노드 종류가 하나라 core/node/worldnode.rs 와 nodetree.rs 에 합쳤다.
   - core/scenemanager.js: 엔진이 씬을 들고 있어 core/engine.rs 와 core/scene.rs 에 합쳤다. (load_scene, unload_scene, get_all_loaded_scenes)
   - core/touchraycaster.js: core/scene.rs 의 SceneBase::tick_touch 와 core/node/nodetree.rs 의 누름 판정, ui/touchrecognizer.rs 에 합쳤다.
   - resource/jsonasset.js: resource/textasset.rs 에 TextAsset 과 함께 둔다.
-- 일부러 옮기지 않은 것 19 파일:
+- 일부러 옮기지 않은 것 18 파일:
   - 빈 파일이거나 아무 일도 하지 않는 것 4: base/calculator.js(0 을 돌려주는 빈 함수), core/layer.js(빈 스텁), core/resources.js(0 바이트), misc/uibuilder.js(NodeLayout 으로 대체됐다는 주석 한 줄)
   - 죽은 코드 5: experimental/aabb.js, experimental/transform2d.js(파일 전체가 주석), experimental/graphics/gl2d.js(내보내는 것 없음), experimental/graphics/webgl2.js(import 경로가 깨져 쓰이지 않음), deprecated/anchoredworldmnode.js(폐기, import.js 에서도 막아 둠)
-  - 러스트 언어와 표준이 맡는 것 9: base/object.js, base/reflection.js(createGUID 만 base/identifier.rs 의 create_guid 로 옮겼다), base/singleton.js, base/wait.js, experimental/collection 의 dictionary.js, list.js, queue.js, set.js, stack.js. 트레이트, Any, enum, Vec, HashMap 과 엔진 루프가 같은 일을 한다.
+  - 러스트 언어와 표준이 맡는 것 8: base/object.js, base/reflection.js(createGUID 만 base/identifier.rs 의 create_guid 로 옮겼다), base/singleton.js, experimental/collection 의 dictionary.js, list.js, queue.js, set.js, stack.js. 트레이트, Any, enum, Vec, HashMap 이 같은 일을 한다.
   - 다른 기능이 덮는 것 1: experimental/camera.js. 회전과 begin/end 를 Camera2D(misc/camera2d.rs)에 넣어 그 기능을 모두 덮는다.
-- 러스트에만 있는 파일은 플랫폼 층(platform/ 아래 14 파일, mod.rs 빼고), 글자 모양 짓기와 색 글리프(core/textshaping.rs, core/colorglyph.rs), 그림 풀기(core/image.rs, core/avifimage.rs), 글 입력 줄(core/textinput.rs), 노드 저장소(core/node/nodetree.rs)다. 원본에서는 브라우저가 하는 일이다.
+- 러스트에만 있는 파일은 플랫폼 층(platform/ 아래 14 파일, mod.rs 빼고), 글자 모양 짓기와 색 글리프(core/textshaping.rs, core/colorglyph.rs), 그림 풀기(core/image.rs, core/avifimage.rs), 글 입력 줄(core/textinput.rs), 노드 저장소(core/node/nodetree.rs), async 실행기(core/task.rs)다. 원본에서는 브라우저가 하는 일이다.
 - 옮기며 바꾼 쓰임새:
   - GameScene, UIScene 의 덮어쓰기는 GameScene, UIScene 트레이트와 game_scene!, ui_scene! 매크로다. 바탕이 resize, layout, post_draw 를 스스로 부른다. (game/gamescene.rs)
   - UINode 는 노드에 붙는 컴포넌트이고, 솔버 값을 노드의 자리와 content_size 로 옮긴다. (ui/uinode.rs, ui/uiscene.rs)
@@ -194,7 +202,6 @@ EngineRunner (플랫폼이 들고 프레임마다 부른다)
 
 | 차이 | 까닭 |
 | --- | --- |
-| async/Promise 대신 받기 손잡이와 콜백 (AssetLoadHandle, ScreenFadeHold, read_clipboard_text_with_callback 같은 것) | 엔진이 프레임마다 씬과 컴포넌트를 &mut 로 빌려 부르는 동기 루프라, 그 함수 안에서 await 로 멈춰 기다릴 수 없다 |
 | 런타임 리플렉션이 없다 (UIDocument 와 DevTools 는 종류마다 등록한 표) | 러스트는 실행 중에 필드와 메서드를 훑는 길이 없다 |
 | 데스크탑에 DOM 이 없다 (Pane 은 웹만, 데스크탑 입력 필드는 winit IME, 저장소 입력은 패널 안 입력 창) | 데스크탑 창에는 HTML 문서가 없다 |
 | 데스크탑에서 뜻이 없는 브라우저 설정 (auto_resize_on_window_resize, preserve_drawing_buffer, set_no_cache, 오른쪽 클릭 메뉴 막기, set_prevented_keys) | 데스크탑에는 페이지, 브라우저 캐시, 브라우저 기본 동작이 없고 창은 늘 창 크기에 맞춘다 |
@@ -220,3 +227,8 @@ EngineRunner (플랫폼이 들고 프레임마다 부른다)
 | 콜백은 Box<dyn FnMut> 로 받고, 콜백 게터와 갈아 끼운 저장소는 Rc<RefCell> 로 돌려준다 | 엔진과 부르는 쪽이 같은 함수를 나눠 쥐고 부르는 동안 다시 부르는 것을 막는다 |
 | 예외 대신 Result 와 Option, 셰이더를 짓지 못하면 한 번 알리고 건너뛴다 | 러스트는 예외를 던지지 않는다. 한 효과가 실패해도 프레임이 멈추지 않게 했다 |
 | 이름은 러스트 규칙(snake_case, UpperCamelCase, SCREAMING_SNAKE_CASE)이다 | Rust API Guidelines C-CASE 를 따른다 |
+| async 작업은 컨텍스트의 with(\|씬, 엔진\| ...) 안에서만 씬과 엔진을 만진다 (원본은 await 다음 줄에서 this 와 엔진을 바로 쓴다) | 러스트 퓨처는 &mut 를 await 너머로 쥘 수 없다. 폴링하는 동안만 빌려 주어 이중 빌림이 생기지 않게 했다 |
+| 작업은 spawn_task, spawn_scene_task 로 맡기고 다음 프레임의 폴링 차례에 처음 돈다 (원본 async 함수는 부르는 자리에서 첫 await 까지 바로 돈다) | 러스트 퓨처는 폴링해야 돈다. 맡기는 자리(create, tick 같은)는 씬과 엔진을 빌린 중이라 거기서 폴링하면 겹쳐 빌리게 된다 |
+| await 하는 꼴은 load(engine, ...) 다음 wait_for_load().await 다 (원본 load 는 Promise 를 돌려준다) | 요청만 하는 지금 load 와 손잡이를 맡기는 동기 꼴을 그대로 두고 기다리기를 더했다 |
+| 씬을 내리면 그 씬의 작업을 버린다, unload 는 기다리지 않는다 (원본은 Promise 사슬이 이어 돌고, SceneManager 가 await unload 뒤에 목록에서 뺀다) | 작업이 빌릴 씬이 없어진다. 내린 뒤에 할 비동기 일은 엔진 작업(spawn_task)으로 맡긴다 |
+| Promise 는 resolve 만 있다 (실패는 Result 를 담아 푼다) | 예외 대신 Result 를 쓰는 것과 같다 |

@@ -61,7 +61,7 @@ mod textinput;
 mod windowsplatform;
 #[cfg(any(test, all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android"))))]
 mod linuxplatform;
-pub use textinput::{read_clipboard_text, read_clipboard_text_with_callback, write_clipboard_text};
+pub use textinput::{read_clipboard_text, read_clipboard_text_with_callback, read_optional_clipboard_text_with_callback, write_clipboard_text};
 #[cfg(target_os = "macos")]
 pub mod gamepadhaptics;
 pub mod systemfont;

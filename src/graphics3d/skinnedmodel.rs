@@ -9,7 +9,9 @@
 //   - 원본은 async 이고 URL 을 fetch 한다(loadFromUrl, 바이트는 loadFromBytes). 러스트 판의 바이트 함수
 //     load_from_bytes / load_from_fbx_bytes / add_animations_from_fbx_bytes 는 그 자리에서 끝난다.
 //     URL 함수 load_from_url / load_from_fbx_url 은 ImageAsset 처럼 엔진의 애셋 받기(데스크탑은 애셋 폴더 후보, 웹은 asset_base_url 에서 fetch)로
-//     바이트를 부탁하고 받기 손잡이(SkinnedModelLoadHandle)를 돌려준다. 다 받으면 손잡이의 create_model(gl, 렌더러)이 모델을 짓는다. (원본 Promise 자리)
+//     바이트를 부탁하고 받기 손잡이(SkinnedModelLoadHandle)를 돌려준다. 다 받으면 손잡이의 create_model(gl, 렌더러)이 모델을 짓는다. (await 없는 꼴)
+//     원본 await SkinnedModel.loadFromUrl(gl, url, renderer) 자리는 엔진 작업 안에서 load_from_url_async(엔진, 경로, 렌더러).await 다. (fbx 는 load_from_fbx_url_async)
+//     다 받으면 작업을 폴링하는 엔진의 GL 로 모델을 짓는다. (렌더러는 부를 때 셰이더 프로그램만 나눠 들어 빌리지 않는다)
 //     add_animations_from_fbx_url 은 받기를 부탁해 두고 다 받으면 다음 update 나 play_animation 에서 클립을 더한다. (돌려준 손잡이를 씬에 맡기면 기다릴 수 있다)
 //   - GL 을 쓰는 함수는 gl 을 받는다. update(delta_time) 는 GL 을 쓰지 않는다. 원본 update 6단계(바뀐 모프 타깃 업로드)는
 //     렌더러의 draw / draw_depth / draw_wireframe 가 upload_pending_morph_targets 로 대신한다. (그래서 그리기 함수가 &mut 모델을 받는다)
@@ -28,12 +30,14 @@ use crate::core::asset::AssetLoadHandle;
 use crate::core::engine::Engine;
 use crate::core::graphic::{GlBuffer, GlTexture, GlVertexArray};
 use crate::core::shaderprogram::ShaderProgram;
+use crate::core::task;
 use crate::graphics3d::fbxloader::{FbxAnimation, FbxLoadHandle, FbxLoader, FbxSceneData};
 use crate::graphics3d::material::{ImageDescription, Material, MaterialDescription};
 use crate::graphics3d::skinnedmodelrenderer::SkinnedModelRenderer;
 use glow::HasContext;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
 use std::rc::Rc;
 
 //==============================================================================
@@ -477,6 +481,50 @@ impl SkinnedModelLoadHandle {
 			}
 		}
 	}
+
+	//==============================================================================
+	// 다 받으면 모델을 짓는 퓨처. (load_from_url_async, load_from_fbx_url_async 가 돌려준다. GL 은 작업을 폴링하는 엔진의 것을 쓴다)
+	//==============================================================================
+	fn create_model_when_loaded(self, shader_program: Rc<ShaderProgram>) -> impl Future<Output = Result<SkinnedModel, String>> + 'static {
+		async move {
+			let bytes = match (&self.load_handle).await {
+				Ok(bytes) => {
+					bytes
+				}
+				Err(_) => {
+					let error_label = match self.file_format {
+						SkinnedModelFileFormat::Glb => {
+							"SkinnedModel"
+						}
+						SkinnedModelFileFormat::Fbx => {
+							"FbxLoader"
+						}
+					};
+					return Err(format!("{} load failed: {}", error_label, self.load_handle.get_asset_path()));
+				}
+			};
+			let file_format = self.file_format;
+			let model_result = task::with_polling_graphic(|graphic| {
+				let gl = graphic.get_gl();
+				match file_format {
+					SkinnedModelFileFormat::Glb => {
+						SkinnedModel::load_from_bytes_with_shader_program(gl, &bytes, shader_program)
+					}
+					SkinnedModelFileFormat::Fbx => {
+						SkinnedModel::load_from_fbx_bytes_with_shader_program(gl, &bytes, shader_program)
+					}
+				}
+			});
+			match model_result {
+				Some(model_result) => {
+					model_result
+				}
+				None => {
+					Err(String::from("SkinnedModel: 그래픽을 붙인 엔진의 작업 안에서만 모델을 지을 수 있습니다"))
+				}
+			}
+		}
+	}
 }
 
 impl SkinnedModel {
@@ -516,17 +564,31 @@ impl SkinnedModel {
 	// 바이트로부터 로드. (GLB 바이너리 glTF, 원본 정적 loadFromUrl 의 fetch 뒤 부분)
 	//==============================================================================
 	pub fn load_from_bytes(gl: &glow::Context, bytes: &[u8], skinned_model_renderer: &SkinnedModelRenderer) -> Result<SkinnedModel, String> {
-		let mut skinned_model = SkinnedModel::new(skinned_model_renderer.get_shader_program());
-		skinned_model.parse_binary(gl, bytes)?;
-		Ok(skinned_model)
+		SkinnedModel::load_from_bytes_with_shader_program(gl, bytes, skinned_model_renderer.get_shader_program())
 	}
 
 	//==============================================================================
 	// 바이트로부터 로드. (바이너리 FBX, 원본 정적 loadFromFbxUrl 의 fetch 뒤 부분)
 	//==============================================================================
 	pub fn load_from_fbx_bytes(gl: &glow::Context, bytes: &[u8], skinned_model_renderer: &SkinnedModelRenderer) -> Result<SkinnedModel, String> {
+		SkinnedModel::load_from_fbx_bytes_with_shader_program(gl, bytes, skinned_model_renderer.get_shader_program())
+	}
+
+	//==============================================================================
+	// 바이트로부터 로드. (GLB, 렌더러 대신 그 셰이더 프로그램을 받는다)
+	//==============================================================================
+	fn load_from_bytes_with_shader_program(gl: &glow::Context, bytes: &[u8], shader_program: Rc<ShaderProgram>) -> Result<SkinnedModel, String> {
+		let mut skinned_model = SkinnedModel::new(shader_program);
+		skinned_model.parse_binary(gl, bytes)?;
+		Ok(skinned_model)
+	}
+
+	//==============================================================================
+	// 바이트로부터 로드. (바이너리 FBX, 렌더러 대신 그 셰이더 프로그램을 받는다)
+	//==============================================================================
+	fn load_from_fbx_bytes_with_shader_program(gl: &glow::Context, bytes: &[u8], shader_program: Rc<ShaderProgram>) -> Result<SkinnedModel, String> {
 		let scene_data = FbxLoader::new().parse(bytes)?;
-		let mut skinned_model = SkinnedModel::new(skinned_model_renderer.get_shader_program());
+		let mut skinned_model = SkinnedModel::new(shader_program);
 		skinned_model.parse_fbx_content(gl, &scene_data)?;
 		Ok(skinned_model)
 	}
@@ -549,6 +611,21 @@ impl SkinnedModel {
 			load_handle: engine.request_asset_bytes(url),
 			file_format: SkinnedModelFileFormat::Fbx,
 		}
+	}
+
+	//==============================================================================
+	// 애셋 경로(웹은 URL)로부터 모델 받기. (GLB, 원본 await SkinnedModel.loadFromUrl(gl, url, renderer), 엔진 작업 안에서 await 한다)
+	// - 다 받으면 작업을 폴링하는 엔진의 GL 로 짓는다. 렌더러는 지금 셰이더 프로그램만 나눠 들어, 퓨처가 렌더러를 빌리지 않는다.
+	//==============================================================================
+	pub fn load_from_url_async(engine: &Engine, url: &str, skinned_model_renderer: &SkinnedModelRenderer) -> impl Future<Output = Result<SkinnedModel, String>> + 'static {
+		SkinnedModel::load_from_url(engine, url).create_model_when_loaded(skinned_model_renderer.get_shader_program())
+	}
+
+	//==============================================================================
+	// 애셋 경로(웹은 URL)로부터 모델 받기. (바이너리 FBX, 원본 await SkinnedModel.loadFromFbxUrl(gl, url, renderer))
+	//==============================================================================
+	pub fn load_from_fbx_url_async(engine: &Engine, url: &str, skinned_model_renderer: &SkinnedModelRenderer) -> impl Future<Output = Result<SkinnedModel, String>> + 'static {
+		SkinnedModel::load_from_fbx_url(engine, url).create_model_when_loaded(skinned_model_renderer.get_shader_program())
 	}
 
 	//==============================================================================
@@ -1142,7 +1219,8 @@ impl SkinnedModel {
 
 	//==============================================================================
 	// 애니메이션 FBX 추가. (애셋 경로, 원본 addAnimationsFromFbxUrl. 다 받으면 다음 update 나 play_animation 에서 클립을 더한다)
-	// - 돌려준 손잡이를 씬에 맡기면 다 받을 때까지 기다릴 수 있다. 받기나 파싱에 실패하면 클립을 더하지 않고 오류를 찍는다. (원본은 Promise 가 거부된다)
+	// - 돌려준 손잡이를 씬에 맡기거나 엔진 작업 안에서 await 하면 다 받을 때까지 기다릴 수 있다. (await 하면 파싱 결과가 나오고, 클립은 다음 update 나 play_animation 에서 더해진다)
+	//   받기나 파싱에 실패하면 클립을 더하지 않고 오류를 찍는다. (원본은 Promise 가 거부된다)
 	//==============================================================================
 	pub fn add_animations_from_fbx_url(&mut self, engine: &Engine, url: &str, clip_name: &str, ignore_translation: bool) -> FbxLoadHandle {
 		let fbx_load_handle = FbxLoader::load_from_url(engine, url);

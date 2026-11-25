@@ -390,6 +390,19 @@
   - ARCHITECTURE: 배치와 소유 구조, 프레임 루프, 블렌드와 글꼴과 애셋 형식, 9장 원본과의 대응(원본 200 파일 가운데 181 옮김, 일부러 안 옮긴 19 파일과 까닭), 10장 두 엔진의 차이(정말 맞출 수 없는 것과 일부러 정한 꼴)
   - UPDATE.md 이 판 머리의 겹친 줄(찍기 모드 여섯 벌)을 하나로, math 줄의 옛 설명을 고쳤다
   - 머리 주석: 원본에서도 고쳐 이제는 같은 것(묶어 그리기와 거르기 기본 켬, 프로그램과 텍스처 기억, Text 거르기, UIScene 의 use_dev_tools, 웹소켓 바이너리 JSON, Identifier.reset, Vector2 버그, pageshow 복구, DynamicFont 다시 놓기, 길이 0 트윈, set_playback_rate), UIImageView 의 그리는 차례(원본도 배경이 먼저), 그림 형식 목록(Material, GLB 그림, 쓰지 않는 avif-parse), 웹 글자 굽기, Scene 의 initialize 이름, lib.rs 의 웹 모듈 자리
+- async/await 를 원본처럼 쓴다. (지금까지는 받기 손잡이와 콜백으로 대신했다. 손잡이와 콜백 API 는 그대로 둔다)
+  - 엔진이 스레드 하나짜리 실행기를 품는다. (core/task.rs, 외부 런타임 없음, 데스크탑과 웹이 같은 코드) Engine::spawn_task(엔진 작업), spawn_scene_task(씬 작업, 그 씬을 내리면 버린다)로 맡긴 퓨처를 프레임마다 시간과 입력을 갱신한 뒤, 씬의 tick 앞에서 깨어난 것만 한 번씩 폴링한다. 퓨처는 Send 가 아니어도 된다
+  - 작업은 컨텍스트(EngineContext, SceneContext<씬 타입>)의 with(|씬, 엔진| ...) 안에서만 씬과 엔진을 빌린다. 폴링하는 동안만 스레드 지역 칸에 둔 포인터를 꺼내 쓰고 되돌려 두 번째 &mut 가 생기지 않는다. 그래픽은 with_graphic. TaskHandle 로 끝났는지 묻거나 await 한다
+  - Promise, PromiseResolver: 원본 new Promise((resolve) => ...) 자리. Promise::create 가 퓨처와 resolve 손잡이를 짝으로 준다. Promise::resolved
+  - wait::seconds, wait::next_frame (원본 base/wait.js, 그동안 옮기지 않았다). seconds 는 원본 setTimeout 처럼 벽시계 초다. (시간 배율을 곱하지 않는다) 원본 nextFrame 은 만든 Promise 를 await 하지 않아 바로 끝나는 버그가 있다. 러스트 판은 다음 프레임까지 기다린다
+  - 씬: 원본 async load 자리로 create 에서 맡긴 작업을 SceneBase::track_task 로 맡기면 끝날 때까지 initialize 를 미룬다. Engine::load_scene_async, unload_scene_async, unload_all_scenes_async (원본 await SceneManager.loadScene 들)
+  - 애셋: Asset::wait_for_load, AssetLoadHandle 은 IntoFuture. (AssetLoadFuture) AudioAsset, AssetLoader(실패 목록), SpriteAtlas, BuildInfo, SoundSystem 의 wait_for_load, languagepack::wait_for_load, uifont::wait_for_load. 기다리는 동안 update 가 드는 것은 퓨처가 불러 준다
+  - FbxLoadHandle, ImageDescriptionLoadHandle 은 IntoFuture (FbxLoadFuture, ImageDescriptionLoadFuture). SkinnedModel::load_from_url_async, load_from_fbx_url_async (다 받으면 작업을 폴링하는 엔진의 GL 로 짓는다). Timeline::load_from_url (원본 loadFromUrl)
+  - Engine::read_clipboard_text_async (원본 readClipboardText, 없거나 거부되면 None), request_frame_capture_async (원본 requestFrameCapture, PNG 바이트)
+  - 화면 페이드: GameScene::fade_screen_async, GameSceneBase::fade_screen_async (원본 onDark 가 Promise 를 돌려주면 끝날 때까지 어둡게 두는 것)
+  - Scene 트레이트에 SceneAny 바탕 트레이트(as_scene_any_mut, 모든 'static 씬에 저절로 붙는다)를 더했다. SceneContext 가 씬을 제 타입으로 되돌릴 때 쓴다
+  - 예제 asyncawait. 시험 12 개(실행기, 깨우기, 기다리기, 애셋 퓨처, 컨텍스트 접근, 빼돌린 컨텍스트의 패닉, 씬 불러오기와 내리기, 페이드)
+  - README 장점과 사용법(씬 생명주기, 애셋 로딩의 원본과 러스트 표, 예제), 기술 노트, ARCHITECTURE 배치와 소유 구조와 프레임 루프, 9장(원본 182 파일 옮김), 10장(async 를 정말 맞출 수 없는 것에서 빼고 남은 꼴을 일부러 정한 꼴에)
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.
