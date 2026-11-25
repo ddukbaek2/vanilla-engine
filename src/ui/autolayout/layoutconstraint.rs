@@ -29,6 +29,23 @@ struct LayoutConstraintData {
 
 //==============================================================================
 /// 레이아웃 제약. (복제해도 같은 제약을 가리킨다)
+///
+/// # 예제
+/// 식으로 제약을 만들어 솔버에 걸기
+/// ```rust
+/// use vanilla::{LayoutExpression, LayoutRelation, LayoutSolver, LayoutStrength, LayoutVariable};
+///
+/// let solver = LayoutSolver::new();
+/// let width = LayoutVariable::new("width");
+/// let minimum_width = LayoutExpression::from_variable(&width).greater_than_or_equal_to(120);
+/// assert_eq!(minimum_width.get_relation(), LayoutRelation::GreaterThanOrEqual);
+/// assert_eq!(minimum_width.get_strength(), LayoutStrength::REQUIRED);
+/// solver.add_constraint(&minimum_width).unwrap();
+/// solver.add_constraint(&LayoutExpression::from_variable(&width).equal_to(80).with_strength(LayoutStrength::STRONG)).unwrap();
+/// solver.update_variables();
+/// assert!((width.get_value() - 120.0).abs() < 1e-6);
+/// assert!(solver.has_constraint(&minimum_width.clone()));
+/// ```
 //==============================================================================
 #[derive(Clone)]
 pub struct LayoutConstraint {
@@ -38,6 +55,29 @@ pub struct LayoutConstraint {
 impl LayoutConstraint {
 	//==============================================================================
 	/// 생성. (강도는 0 ~ REQUIRED 로 자른다)
+	///
+	/// # 인자
+	/// - `expression`: 제약 식. (식 관계 0 꼴의 왼쪽)
+	/// - `relation`: 식과 0 의 관계.
+	/// - `strength`: 강도. (0 ~ LayoutStrength::REQUIRED 로 자른다)
+	///
+	/// # 돌려줌
+	/// 새 제약 핸들.
+	///
+	/// # 예제
+	/// width - 100 >= 0 을 strong 강도로
+	/// ```rust
+	/// use vanilla::{LayoutConstraint, LayoutExpression, LayoutRelation, LayoutStrength, LayoutVariable};
+	///
+	/// let width = LayoutVariable::new("width");
+	/// let expression = LayoutExpression::from_variable(&width).subtract(100);
+	/// let constraint = LayoutConstraint::new(expression, LayoutRelation::GreaterThanOrEqual, LayoutStrength::STRONG);
+	/// assert_eq!(constraint.get_strength(), LayoutStrength::STRONG);
+	/// assert_eq!(constraint.get_expression().get_constant(), -100.0);
+	///
+	/// let clipped = LayoutConstraint::new(LayoutExpression::from_variable(&width), LayoutRelation::Equal, 5e9);
+	/// assert_eq!(clipped.get_strength(), LayoutStrength::REQUIRED);
+	/// ```
 	//==============================================================================
 	pub fn new(expression: LayoutExpression, relation: LayoutRelation, strength: f64) -> LayoutConstraint {
 		LayoutConstraint {
@@ -51,6 +91,9 @@ impl LayoutConstraint {
 
 	//==============================================================================
 	/// 식 반환.
+	///
+	/// # 돌려줌
+	/// 제약 식의 참조. (비교 함수로 만들었으면 self - 상대 식)
 	//==============================================================================
 	pub fn get_expression(&self) -> &LayoutExpression {
 		&self.data.expression
@@ -58,6 +101,9 @@ impl LayoutConstraint {
 
 	//==============================================================================
 	/// 관계 반환.
+	///
+	/// # 돌려줌
+	/// 식과 0 의 관계.
 	//==============================================================================
 	pub fn get_relation(&self) -> LayoutRelation {
 		self.data.relation
@@ -65,6 +111,9 @@ impl LayoutConstraint {
 
 	//==============================================================================
 	/// 강도 반환.
+	///
+	/// # 돌려줌
+	/// 강도. (만들 때 0 ~ REQUIRED 로 자른 값)
 	//==============================================================================
 	pub fn get_strength(&self) -> f64 {
 		self.data.strength
@@ -72,6 +121,29 @@ impl LayoutConstraint {
 
 	//==============================================================================
 	/// 강도만 다른 새 제약 반환. (우선순위만 바꿔 다시 등록할 때)
+	///
+	/// # 인자
+	/// - `new_strength`: 새 강도. (0 ~ LayoutStrength::REQUIRED 로 자른다)
+	///
+	/// # 돌려줌
+	/// 식과 관계가 같고 강도만 다른 새 제약. (따로 만든 제약이라 self 와 같지 않다)
+	///
+	/// # 예제
+	/// 약하게 건 제약을 강하게 바꿔 다시 걸기
+	/// ```rust
+	/// use vanilla::{LayoutExpression, LayoutSolver, LayoutStrength, LayoutVariable};
+	///
+	/// let solver = LayoutSolver::new();
+	/// let x = LayoutVariable::new("x");
+	/// let preferred = LayoutExpression::from_variable(&x).equal_to(100).with_strength(LayoutStrength::WEAK);
+	/// solver.add_constraint(&preferred).unwrap();
+	/// let stronger = preferred.with_strength(LayoutStrength::STRONG);
+	/// assert_ne!(stronger, preferred);
+	/// solver.remove_constraint(&preferred).unwrap();
+	/// solver.add_constraint(&stronger).unwrap();
+	/// assert!(solver.has_constraint(&stronger));
+	/// assert!(!solver.has_constraint(&preferred));
+	/// ```
 	//==============================================================================
 	pub fn with_strength(&self, new_strength: f64) -> LayoutConstraint {
 		let expression = self.get_expression().clone();

@@ -18,6 +18,23 @@ use crate::core::node::worldnode::NodeTransform;
 
 //==============================================================================
 /// 뷰 컴포넌트.
+/// - 노드에 붙이면 호스트 아래 content 자식 노드를 만들고, 배경색으로 호스트 content_size 영역을 칠한다.
+///
+/// # 예제
+/// 반투명 배경 판과 그 content 노드
+/// ```rust
+/// use vanilla::{Color, NodeTree, UIView, Vector2};
+///
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.get_root_id();
+/// let panel_id = node_tree.create_child(root_id, "panel");
+/// node_tree[panel_id].set_content_size(Vector2::create(200.0, 100.0));
+/// let panel_view = node_tree.add_component(panel_id, UIView::new()).unwrap();
+/// panel_view.set_background_color(Color::create(0.1, 0.1, 0.2, 0.8));
+/// let content_id = panel_view.get_content().unwrap();
+/// assert_eq!(node_tree.get_parent_id(content_id), Some(panel_id));
+/// assert_eq!(node_tree[content_id].get_name(), "content");
+/// ```
 //==============================================================================
 pub struct UIView {
 	component_base: ComponentBase,
@@ -29,6 +46,9 @@ pub struct UIView {
 impl UIView {
 	//==============================================================================
 	/// 생성. (배경은 투명한 흰색)
+	///
+	/// # 돌려줌
+	/// 새 뷰. (content 노드는 트리에 붙일 때 만든다)
 	//==============================================================================
 	pub fn new() -> UIView {
 		UIView {
@@ -40,6 +60,10 @@ impl UIView {
 
 	//==============================================================================
 	/// 컨텐트 노드 만들기. (호스트의 자식, 왼쪽 위 정렬. 이미 있으면 그대로 둔다)
+	///
+	/// # 인자
+	/// - `node_tree`: 호스트가 든 트리.
+	/// - `node_id`: 호스트 노드. (content 노드가 이 노드의 자식이 된다)
 	//==============================================================================
 	pub fn create_content_node(&mut self, node_tree: &mut NodeTree, node_id: NodeId) {
 		if let Some(content_id) = self.content_id {
@@ -57,6 +81,9 @@ impl UIView {
 
 	//==============================================================================
 	/// 컨텐트 노드 핸들. (자식 노드를 여기에 붙이면 스크롤 대상이 된다. 트리에 붙기 전이면 None)
+	///
+	/// # 돌려줌
+	/// content 노드. 트리에 붙기 전이면 None.
 	//==============================================================================
 	pub fn get_content(&self) -> Option<NodeId> {
 		self.content_id
@@ -64,6 +91,9 @@ impl UIView {
 
 	//==============================================================================
 	/// 배경색 설정.
+	///
+	/// # 인자
+	/// - `background_color`: 배경색. (Color 나 "#rrggbb" 같은 글, 알파가 0 이면 칠하지 않는다)
 	//==============================================================================
 	pub fn set_background_color(&mut self, background_color: impl Into<Color>) {
 		self.background_color = background_color.into();
@@ -71,6 +101,9 @@ impl UIView {
 
 	//==============================================================================
 	/// 배경색 반환.
+	///
+	/// # 돌려줌
+	/// 배경색. (기본은 알파 0 인 흰색)
 	//==============================================================================
 	pub fn get_background_color(&self) -> Color {
 		self.background_color
@@ -78,6 +111,10 @@ impl UIView {
 
 	//==============================================================================
 	/// 배경 출력. (투명한 바탕은 그리지 않는다. 보이지 않는 드로우가 묶어 그리기를 끊지 않게)
+	///
+	/// # 인자
+	/// - `transform`: 호스트 노드의 변환. (content_size 영역 (0, 0) ~ (너비, 높이) 를 칠한다)
+	/// - `graphic`: 그릴 그래픽.
 	//==============================================================================
 	pub fn draw_background(&self, transform: &NodeTransform, graphic: &mut Graphic) {
 		let background_color = self.get_background_color();
@@ -92,6 +129,9 @@ impl UIView {
 }
 
 impl Default for UIView {
+	//==============================================================================
+	/// 생성. (UIView::new 와 같다)
+	//==============================================================================
 	fn default() -> UIView {
 		UIView::new()
 	}
@@ -99,32 +139,53 @@ impl Default for UIView {
 
 #[crate::reflect]
 impl Component for UIView {
+	//==============================================================================
+	/// 컴포넌트 공통 상태 반환.
+	//==============================================================================
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base
 	}
 
+	//==============================================================================
+	/// 컴포넌트 공통 상태 반환. (변경용)
+	//==============================================================================
 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 		&mut self.component_base
 	}
 
+	//==============================================================================
+	/// 컴포넌트 종류 이름 반환. ("View")
+	//==============================================================================
 	fn get_component_type(&self) -> &'static str {
 		"View"
 	}
 
+	//==============================================================================
+	/// 트리에 붙음. (호스트 아래 content 노드를 만든다)
+	//==============================================================================
 	fn attach_to_tree(&mut self, node_tree: &mut NodeTree, node_id: NodeId) {
 		self.create_content_node(node_tree, node_id);
 	}
 
+	//==============================================================================
+	/// tick 이 필요 없다. (false)
+	//==============================================================================
 	#[reflect(skip)]
 	fn is_tick_needed(&self) -> bool {
 		false
 	}
 
+	//==============================================================================
+	/// 노드 content_size 영역 안에만 그린다. (true)
+	//==============================================================================
 	#[reflect(skip)]
 	fn is_drawn_inside_content(&self) -> bool {
 		true
 	}
 
+	//==============================================================================
+	/// 출력. (배경색)
+	//==============================================================================
 	fn draw(&mut self, transform: &NodeTransform, graphic: &mut Graphic) {
 		self.draw_background(transform, graphic);
 	}
@@ -132,6 +193,30 @@ impl Component for UIView {
 
 //==============================================================================
 /// 뷰 좌표의 점이 노드 content_size 영역 안에 있는지. (원본 WorldNode.contains)
+///
+/// # 인자
+/// - `node_tree`: 노드가 든 트리.
+/// - `node_id`: 볼 노드.
+/// - `view_position`: 뷰 좌표의 점. (픽셀)
+///
+/// # 돌려줌
+/// 노드까지 누적한 월드 행렬로 본 노드 content_size 영역 안이면 true. 노드가 없으면 false.
+///
+/// # 예제
+/// 가운데 피봇(기본)인 40 x 20 노드의 안과 밖
+/// ```rust
+/// use vanilla::ui::uiview::is_view_position_inside_node;
+/// use vanilla::{NodeTree, Vector2};
+///
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.get_root_id();
+/// let button_id = node_tree.create_child(root_id, "button");
+/// node_tree[button_id].set_local_position(Vector2::create(100.0, 100.0));
+/// node_tree[button_id].set_content_size(Vector2::create(40.0, 20.0));
+/// assert!(is_view_position_inside_node(&node_tree, button_id, Vector2::create(100.0, 100.0)));
+/// assert!(is_view_position_inside_node(&node_tree, button_id, Vector2::create(81.0, 91.0)));
+/// assert!(!is_view_position_inside_node(&node_tree, button_id, Vector2::create(79.0, 100.0)));
+/// ```
 //==============================================================================
 pub fn is_view_position_inside_node(node_tree: &NodeTree, node_id: NodeId, view_position: Vector2) -> bool {
 	let node = match node_tree.get_node(node_id) {

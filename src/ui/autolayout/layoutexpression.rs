@@ -17,6 +17,25 @@ use crate::ui::autolayout::layoutvariable::LayoutVariable;
 
 //==============================================================================
 /// 선형 식.
+/// - 항(계수 * 변수) 목록과 상수항의 합이다. 같은 변수의 항도 합치지 않고 넣은 차례대로 둔다.
+///
+/// # 예제
+/// 왼쪽과 너비로 가운데 식 만들기
+/// ```rust
+/// use vanilla::{LayoutExpression, LayoutVariable};
+///
+/// let left = LayoutVariable::new("left");
+/// let width = LayoutVariable::new("width");
+/// left.set_value(20.0);
+/// width.set_value(100.0);
+/// let center_x = LayoutExpression::from_variable(&left).add(LayoutExpression::from_variable(&width).divide(2.0));
+/// assert_eq!(center_x.get_terms().len(), 2);
+/// assert_eq!(center_x.get_value(), 70.0);
+///
+/// let shifted = center_x.subtract(10).multiply(2.0);
+/// assert_eq!(shifted.get_constant(), -20.0);
+/// assert_eq!(shifted.get_value(), 120.0);
+/// ```
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct LayoutExpression {
@@ -27,6 +46,13 @@ pub struct LayoutExpression {
 impl LayoutExpression {
 	//==============================================================================
 	/// 생성. (항 목록과 상수항)
+	///
+	/// # 인자
+	/// - `terms`: 항 목록.
+	/// - `constant`: 상수항.
+	///
+	/// # 돌려줌
+	/// 새 식.
 	//==============================================================================
 	pub fn new(terms: Vec<LayoutTerm>, constant: f64) -> LayoutExpression {
 		LayoutExpression {
@@ -37,6 +63,12 @@ impl LayoutExpression {
 
 	//==============================================================================
 	/// 변수 하나로 식 만들기. (1 * variable + 0)
+	///
+	/// # 인자
+	/// - `variable`: 식에 넣을 변수. (핸들을 복제해 쥔다)
+	///
+	/// # 돌려줌
+	/// 항 하나(1 * variable)와 상수항 0 의 식.
 	//==============================================================================
 	pub fn from_variable(variable: &LayoutVariable) -> LayoutExpression {
 		let term = LayoutTerm::new(variable.clone(), 1.0);
@@ -45,6 +77,12 @@ impl LayoutExpression {
 
 	//==============================================================================
 	/// 상수만 가진 식 만들기.
+	///
+	/// # 인자
+	/// - `value`: 상수항.
+	///
+	/// # 돌려줌
+	/// 항이 없고 상수항이 value 인 식.
 	//==============================================================================
 	pub fn from_constant(value: f64) -> LayoutExpression {
 		LayoutExpression::new(Vec::new(), value)
@@ -52,6 +90,24 @@ impl LayoutExpression {
 
 	//==============================================================================
 	/// 받을 수 있는 입력을 식으로 바꾼다.
+	///
+	/// # 인자
+	/// - `input`: 바꿀 것. (숫자 f64, f32, i32, LayoutVariable, LayoutTerm, LayoutExpression 과 그 참조)
+	///
+	/// # 돌려줌
+	/// 바꾼 식. (숫자는 상수 식, 변수는 1 * variable, 항은 그 항 하나, 식은 사본)
+	///
+	/// # 예제
+	/// 여러 꼴의 입력을 식으로
+	/// ```rust
+	/// use vanilla::{LayoutExpression, LayoutTerm, LayoutVariable};
+	///
+	/// let x = LayoutVariable::new("x");
+	/// assert!(LayoutExpression::to_expression(12).is_constant());
+	/// assert_eq!(LayoutExpression::to_expression(2.5f32).get_constant(), 2.5);
+	/// assert_eq!(LayoutExpression::to_expression(&x).get_terms()[0].get_coefficient(), 1.0);
+	/// assert_eq!(LayoutExpression::to_expression(LayoutTerm::new(x.clone(), 3.0)).get_terms()[0].get_coefficient(), 3.0);
+	/// ```
 	//==============================================================================
 	pub fn to_expression(input: impl Into<LayoutExpression>) -> LayoutExpression {
 		input.into()
@@ -59,6 +115,9 @@ impl LayoutExpression {
 
 	//==============================================================================
 	/// 항 목록 반환.
+	///
+	/// # 돌려줌
+	/// 항 목록 조각. (넣은 차례)
 	//==============================================================================
 	pub fn get_terms(&self) -> &[LayoutTerm] {
 		&self.terms
@@ -66,6 +125,9 @@ impl LayoutExpression {
 
 	//==============================================================================
 	/// 상수항 반환.
+	///
+	/// # 돌려줌
+	/// 상수항.
 	//==============================================================================
 	pub fn get_constant(&self) -> f64 {
 		self.constant
@@ -73,6 +135,9 @@ impl LayoutExpression {
 
 	//==============================================================================
 	/// 항이 없는지. (상수항만 있는지)
+	///
+	/// # 돌려줌
+	/// 항이 없으면 true.
 	//==============================================================================
 	pub fn is_constant(&self) -> bool {
 		self.terms.is_empty()
@@ -80,6 +145,9 @@ impl LayoutExpression {
 
 	//==============================================================================
 	/// 평가 값 반환. (항 값의 합 + 상수항)
+	///
+	/// # 돌려줌
+	/// 항마다 계수 * 변수의 지금 값을 더하고 상수항을 더한 값.
 	//==============================================================================
 	pub fn get_value(&self) -> f64 {
 		let mut result = self.get_constant();
@@ -91,6 +159,12 @@ impl LayoutExpression {
 
 	//==============================================================================
 	/// 덧셈.
+	///
+	/// # 인자
+	/// - `input`: 더할 것. (숫자, 변수, 항, 식)
+	///
+	/// # 돌려줌
+	/// self + input 인 새 식. (self 의 항 뒤에 input 의 항을 붙이고 상수항을 더한다)
 	//==============================================================================
 	pub fn add(&self, input: impl Into<LayoutExpression>) -> LayoutExpression {
 		let other_expression: LayoutExpression = input.into();
@@ -104,6 +178,12 @@ impl LayoutExpression {
 
 	//==============================================================================
 	/// 뺄셈.
+	///
+	/// # 인자
+	/// - `input`: 뺄 것. (숫자, 변수, 항, 식)
+	///
+	/// # 돌려줌
+	/// self - input 인 새 식. (input 에 -1 을 곱해 더한다)
 	//==============================================================================
 	pub fn subtract(&self, input: impl Into<LayoutExpression>) -> LayoutExpression {
 		let other_expression: LayoutExpression = input.into();
@@ -113,6 +193,12 @@ impl LayoutExpression {
 
 	//==============================================================================
 	/// 스칼라 곱셈. (변수끼리의 곱 같은 비선형 곱은 받지 않는다)
+	///
+	/// # 인자
+	/// - `coefficient`: 곱할 수.
+	///
+	/// # 돌려줌
+	/// 모든 계수와 상수항에 coefficient 를 곱한 새 식.
 	//==============================================================================
 	pub fn multiply(&self, coefficient: f64) -> LayoutExpression {
 		let mut new_terms = Vec::with_capacity(self.terms.len());
@@ -127,6 +213,12 @@ impl LayoutExpression {
 
 	//==============================================================================
 	/// 스칼라 나눗셈. (0 으로 나누면 panic 한다)
+	///
+	/// # 인자
+	/// - `denominator`: 나눌 수. (0 이면 panic)
+	///
+	/// # 돌려줌
+	/// self * (1 / denominator) 인 새 식.
 	//==============================================================================
 	pub fn divide(&self, denominator: f64) -> LayoutExpression {
 		if denominator == 0.0 {
@@ -137,6 +229,27 @@ impl LayoutExpression {
 
 	//==============================================================================
 	/// 같음 제약 만들기. (self == input)
+	///
+	/// # 인자
+	/// - `input`: 맞출 것. (숫자, 변수, 항, 식)
+	///
+	/// # 돌려줌
+	/// 식이 self - input 이고 관계가 Equal 인 required 제약. (솔버에는 걸지 않는다)
+	///
+	/// # 예제
+	/// 오른쪽 == 왼쪽 + 너비를 걸어 풀기
+	/// ```rust
+	/// use vanilla::{LayoutExpression, LayoutSolver, LayoutVariable};
+	///
+	/// let solver = LayoutSolver::new();
+	/// let left = LayoutVariable::new("left");
+	/// let right = LayoutVariable::new("right");
+	/// solver.add_constraint(&LayoutExpression::from_variable(&left).equal_to(30)).unwrap();
+	/// let right_constraint = LayoutExpression::from_variable(&right).equal_to(LayoutExpression::from_variable(&left).add(200));
+	/// solver.add_constraint(&right_constraint).unwrap();
+	/// solver.update_variables();
+	/// assert!((right.get_value() - 230.0).abs() < 1e-9);
+	/// ```
 	//==============================================================================
 	pub fn equal_to(&self, input: impl Into<LayoutExpression>) -> LayoutConstraint {
 		let difference = self.subtract(input);
@@ -145,6 +258,12 @@ impl LayoutExpression {
 
 	//==============================================================================
 	/// 작거나 같음 제약 만들기. (self <= input)
+	///
+	/// # 인자
+	/// - `input`: 넘지 않을 것. (숫자, 변수, 항, 식)
+	///
+	/// # 돌려줌
+	/// 식이 self - input 이고 관계가 LessThanOrEqual 인 required 제약.
 	//==============================================================================
 	pub fn less_than_or_equal_to(&self, input: impl Into<LayoutExpression>) -> LayoutConstraint {
 		let difference = self.subtract(input);
@@ -153,6 +272,12 @@ impl LayoutExpression {
 
 	//==============================================================================
 	/// 크거나 같음 제약 만들기. (self >= input)
+	///
+	/// # 인자
+	/// - `input`: 밑돌지 않을 것. (숫자, 변수, 항, 식)
+	///
+	/// # 돌려줌
+	/// 식이 self - input 이고 관계가 GreaterThanOrEqual 인 required 제약.
 	//==============================================================================
 	pub fn greater_than_or_equal_to(&self, input: impl Into<LayoutExpression>) -> LayoutConstraint {
 		let difference = self.subtract(input);
