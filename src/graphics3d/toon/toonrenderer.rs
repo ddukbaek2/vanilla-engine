@@ -725,6 +725,12 @@ pub struct ToonDrawOptions<'a> {
 	pub light_set: Option<&'a ToonLightSet>,
 	pub group: Option<u32>,
 	pub is_depth_prepassed: bool,
+	// 화면 공간 바깥선의 선 번호. (ToonDrawQueue 가 선의 판에 그릴 때, None 이면 담은 차례 + 1)
+	pub line_id: Option<u32>,
+	// 화면 공간 바깥선을 낼지. (false 면 선은 내지 않고 뒤의 선만 가린다)
+	pub has_screen_outline: bool,
+	// 화면 공간 꺾임 선을 낼지.
+	pub has_crease_line: bool,
 }
 
 impl Default for ToonDrawOptions<'_> {
@@ -763,6 +769,9 @@ impl Default for ToonDrawOptions<'_> {
 			light_set: None,
 			group: None,
 			is_depth_prepassed: false,
+			line_id: None,
+			has_screen_outline: true,
+			has_crease_line: true,
 		}
 	}
 }

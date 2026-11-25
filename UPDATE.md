@@ -427,6 +427,26 @@
 - DevTools: 인스펙터가 원본 getComponentProperties 처럼 컴포넌트의 get*, is* 게터를 모두 불러 보인다. (이름은 원본 formatMethodName, 값은 formatPropertyValue 꼴, 수는 원본 toFixed 와 같은 반올림) 반사가 없는 컴포넌트는 지금처럼 UIDocument 의 저장 키 또는 종류 이름만
 - 예제 devtoolsshowcase: Spin 에 #[vanilla::reflect] 를 붙여 인스펙터에 degreesPerSecond 가 보인다
 - README(노드와 컴포넌트의 반사 매크로 쓰는 법, 기술 노트, 외부 의존성의 매크로 크레이트 표), ARCHITECTURE(배치, 9장, 10장 두 엔진의 차이의 반사 줄)
+- ToonScreenOutline: 화면 공간 바깥선을 실시간 툰 렌더링의 정석 꼴로 다시 지었다. (vanilla.js 와 같은 셰이더, 같은 값)
+  - 잡기: 선의 판(노멀, 선 번호, 깊이)에서 화소와 바로 이웃 넷 사이의 경계마다 한 번 보고, 선은 그 경계 가운데에 세운다. 지금까지는 꺾임 선을 creaseRadius 떨어진 한 점의 노멀로 보아 꺾임 양쪽이 띠로 서고, 반 크기 판에서 점선과 평행한 둘째 선, 둥근 면의 실루엣 안쪽 띠가 섰다
+  - 깊이: 이웃 두 화소를 보기 공간 자리로 풀어 서로의 접평면에서 떨어진 거리로 가려진 실루엣을 본다. 문턱에 그 깊이의 화소 크기 두 배를 더한다
+  - 넓히기: 경계 토막까지의 거리를 점프 플러딩으로 퍼뜨린다. (걸음 log2 번, 바깥 선과 꺾임 선을 따로) 3 픽셀 반지름 한도가 없어졌다
+  - 섞기: 그리는 영역의 화소마다 가장 가까운 경계까지의 거리로 clamp(굵기 / 2 - 거리 + 0.5, 0, 1) 만큼 덮는다. 줄인 선의 판에서도 선이 끊기지 않는다
+  - 모형마다: ToonLineDrawOptions 의 has_screen_outline (false 면 가리기만), has_crease_line, is_mirrored (None 이면 행렬식으로)
+  - 옮기는 법 (공개 API 를 바꿨다)
+    - set_crease(각, 진하기, 이어짐 픽셀) → set_crease(각, 굵기, 진하기). 굵기는 set_width 의 단위, 진하기는 0 ~ 1. 이어짐 픽셀은 없어졌다. 옛 set_crease(60.0, 0.5, 2.0) 과 비슷한 모습은 set_crease(60.0, 1.0, 0.8)
+    - set_depth_threshold(깊이 문턱, 맞닿음 문턱) → set_depth_threshold(깊이 문턱). 뜻이 접평면 거리로 바뀌었다. 맞닿음 문턱은 없어졌다
+    - set_width 의 뜻: 선 하나의 굵기를 경계 양쪽에 반씩. 기본 1.5 → 2 픽셀
+    - set_sample_count, TOON_SCREEN_OUTLINE_MAXIMUM_SAMPLES, TOON_SCREEN_OUTLINE_MAXIMUM_CREASE_SAMPLES 는 없어졌다. 가벼운 길은 set_resolution_scale 만 낮춘다
+    - get_outline_radius(), read_outline_radius() → get_line_widths(), read_line_widths() ([바깥 선, 꺾임 선] 의 그리는 영역 픽셀)
+    - 선 번호 상한 65535 → TOON_SCREEN_OUTLINE_MAXIMUM_LINE_ID (16383)
+    - ToonLineTarget 의 mask_framebuffer, mask_texture 는 없어졌다. 대신 seed_framebuffers, seed_textures (RGBA16UI 둘), seed_index
+    - draw_outline 이 뷰포트를 begin_line_ids 때의 그리는 영역으로 스스로 건다
+  - read_jump_flood_steps(거리): 점프 플러딩 걸음 목록
+- ToonDrawOptions: line_id (None 이면 그리기 줄이 담은 차례 + 1), has_screen_outline, has_crease_line. (화면 공간 바깥선의 모형마다 꼴, ToonRenderer 는 읽지 않는다)
+- ToonDrawQueue: set_screen_outline(Option<&'a mut ToonScreenOutline>), has_screen_outline(). 맡기면 draw 와 draw_with_matrices 가 몸 앞에 불투명한 것을 선의 판에 그리고 바깥선 껍데기 뒤 AfterOutline 단계 앞에 섞는다. 화면 사각형이 있으면 그 사각형을 그리는 영역으로 쓴다
+- 예제 toonstyle: 툰 셰이딩과 바깥선 견주기 장면. (TOON_STYLE_SCALE 로 선의 판 몫, TOON_STYLE_TOGGLES=1 로 모형마다의 꼴) vanilla.js examples/toonstyle 과 같은 장면이다. 숨긴 창으로 찍어 원본(헤드리스 크롬)과 견주면 2560x1440 에서 화소 차이 평균 0.005, 8 넘게 다른 화소 0.024% 다. (꺾임 각 문턱에 걸친 엷은 꺾임 선 몇 군데)
+- 예제 toonfx: 새 set_crease, set_depth_threshold 로 바꿨다
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.
