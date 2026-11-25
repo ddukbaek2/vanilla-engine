@@ -520,7 +520,9 @@ fn add_keyboard_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) ->
 //==============================================================================
 // 마우스와 손가락 입력. (원본 engine.js 의 mousedown, mousemove, mouseup, wheel, touchstart, touchmove, touchend, touchcancel)
 // - 마우스 단추(원본처럼 어느 것이든, set_touch_from_left_button_only 면 왼쪽만)와 첫 손가락을 엔진의 터치로 넘기고, 단추 셋과 손가락 목록, 휠의 Ctrl 을 입력 매니저에 적는다.
-// - 손가락을 뗀 바로 뒤에 브라우저가 흉내 내 보내는 마우스 사건은 무시한다. (터치로 한 번, 마우스로 또 한 번 눌리지 않게)
+// - 손가락을 뗀 바로 뒤(800 밀리초)에 브라우저가 흉내 내 보내는 마우스 사건은 원본 engine.js 처럼 마지막 장치와 마지막 손에만 적지 않는다.
+//   단추와 자리, 터치는 원본처럼 그대로 넘긴다. (손가락 사건의 기본 동작을 막아 브라우저는 흉내 낸 마우스 사건을 보내지 않는다)
+//   CameraGestures 처럼 자기 문턱(set_thresholds 의 넷째 인자)으로 거르는 쪽이 원본처럼 사건을 모두 보고 거르게 하려는 것이다.
 // - 캔버스 위의 손가락은 기본 동작(스크롤, 확대)을 막는다. 오른쪽 클릭 메뉴는 set_context_menu_prevented 가 참(처음)이면 막는다.
 // - 프레임 안에서 사건이 바로 불려도 겹쳐 빌리지 않게 try_borrow_mut 로 본다. (못 빌리면 그 사건은 버린다)
 //==============================================================================
@@ -537,14 +539,14 @@ fn add_pointer_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> 
 	let web_application_cell_for_mouse_down = web_application_cell.clone();
 	let last_touch_time_for_mouse_down = last_touch_time.clone();
 	let mouse_down_callback: Closure<dyn FnMut(web_sys::MouseEvent)> = Closure::new(move |mouse_event: web_sys::MouseEvent| {
-		if is_compatibility_mouse(last_touch_time_for_mouse_down.get()) {
-			return;
-		}
+		let is_compatibility_mouse_event = is_compatibility_mouse(last_touch_time_for_mouse_down.get());
 		if let Ok(mut web_application) = web_application_cell_for_mouse_down.try_borrow_mut() {
 			web_application.update_pointer_position(mouse_event.client_x() as f64, mouse_event.client_y() as f64);
 			let input_manager = web_application.engine_runner.engine.get_input_manager_mut();
-			input_manager.set_touch_input(false);
-			input_manager.set_last_input_device(InputDevice::Mouse);
+			if !is_compatibility_mouse_event {
+				input_manager.set_touch_input(false);
+				input_manager.set_last_input_device(InputDevice::Mouse);
+			}
 			let mouse_button = read_mouse_button(mouse_event.button());
 			if let Some(mouse_button) = mouse_button {
 				input_manager.set_mouse_button_down(mouse_button, true);
@@ -564,11 +566,12 @@ fn add_pointer_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> 
 	let web_application_cell_for_mouse_move = web_application_cell.clone();
 	let last_touch_time_for_mouse_move = last_touch_time.clone();
 	let mouse_move_callback: Closure<dyn FnMut(web_sys::MouseEvent)> = Closure::new(move |mouse_event: web_sys::MouseEvent| {
-		if is_compatibility_mouse(last_touch_time_for_mouse_move.get()) {
-			return;
-		}
+		let is_compatibility_mouse_event = is_compatibility_mouse(last_touch_time_for_mouse_move.get());
 		if let Ok(mut web_application) = web_application_cell_for_mouse_move.try_borrow_mut() {
 			web_application.update_pointer_position(mouse_event.client_x() as f64, mouse_event.client_y() as f64);
+			if is_compatibility_mouse_event {
+				return;
+			}
 			let input_manager = web_application.engine_runner.engine.get_input_manager_mut();
 			input_manager.set_touch_input(false);
 			// 창이 흔들릴 때 나는 작은 움직임은 마우스를 쓴 것으로 보지 않는다.
@@ -579,11 +582,7 @@ fn add_pointer_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> 
 		}
 	});
 	let web_application_cell_for_mouse_up = web_application_cell.clone();
-	let last_touch_time_for_mouse_up = last_touch_time.clone();
 	let mouse_up_callback: Closure<dyn FnMut(web_sys::MouseEvent)> = Closure::new(move |mouse_event: web_sys::MouseEvent| {
-		if is_compatibility_mouse(last_touch_time_for_mouse_up.get()) {
-			return;
-		}
 		if let Ok(mut web_application) = web_application_cell_for_mouse_up.try_borrow_mut() {
 			web_application.update_pointer_position(mouse_event.client_x() as f64, mouse_event.client_y() as f64);
 			let input_manager = web_application.engine_runner.engine.get_input_manager_mut();
