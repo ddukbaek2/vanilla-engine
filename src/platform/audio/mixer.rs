@@ -5,13 +5,16 @@
 // - 128 프레임 렌더 퀀텀마다 그린다. (크롬 kRenderQuantumFrames) 명령은 퀀텀을 그리기 전에 받아, 값 바꾸기와 시작, 정지가 퀀텀 경계에서 걸린다.
 // - 소스: 크롬 audio_buffer_source_handler.cc 를 옮겼다. 시작 위치(TimeToSampleFrame 의 1024 배 오버샘플 반올림), 재생 빠르기(버퍼 표본율 / 컨텍스트 표본율 x playbackRate),
 //   빠르기 1 이고 위치가 정수면 그대로 베끼고(ProcessFastPath), 아니면 선형 보간(ProcessInterpolatedPath, 끝에서는 선형 외삽), 루프는 버퍼 전체를 되풀이한다.
-// - GainNode: 값을 곱한다. (gain.value 대입은 크롬처럼 바로, 매끄럽게 하지 않는다)
+// - GainNode: gain 은 AudioParam 이다. (audioparam.rs, 크로미엄과 같은 자동화 셈) 자동화가 있는 퀀텀은 표본마다, 없으면 퀀텀마다 하나로 곱하고,
+//   0 이면 소리를 낸다고 치지 않는다. 소스가 없는 동안에도 자동화는 흐른다. (GainHandler::Process, ProcessOnlyAudioParams)
+// - 소스의 stop(when): 그 시각을 올림한 프레임에서 끊고 끝낸다. (AudioScheduledSourceHandler::UpdateSchedulingInfo)
 // - StereoPannerNode: 크롬 stereo_panner.cc 의 PanToTargetValue. 모노는 x = (pan + 1) / 2 로 L = in cos(x π/2), R = in sin(x π/2),
 //   스테레오는 pan <= 0 이면 L = L + R cos((pan + 1) π/2), R = R sin((pan + 1) π/2), 아니면 L = L cos(pan π/2), R = R + L sin(pan π/2). 이득은 f64 로 셈해 f32 로 곱한다.
 // - 섞기: 모노를 스테레오 입력에 섞을 때는 스피커 규칙으로 양쪽에 같게 올린다. 출력에 내보낼 때 크롬처럼 -1 ~ 1 로 자른다.
 // - 컨텍스트 멈춤(suspend) 동안은 그리지 않고 시계도 서며, 장치에는 0 을 낸다.
 //==============================================================================
-use std::sync::atomic::{AtomicU64, Ordering};
+use super::audioparam::{AudioParam, ParamAutomation};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 
@@ -44,21 +47,22 @@ pub(crate) enum MixerCommand {
 	RemoveBus {
 		bus_id: u64,
 	},
-	SetBusGain {
+	BusGainAutomation {
 		bus_id: u64,
-		gain: f32,
+		automation: ParamAutomation,
 	},
 	AddPlayer {
 		player_id: u64,
 		output_bus_id: Option<u64>,
 		ended_generation: Arc<AtomicU64>,
+		gain_value: Arc<AtomicU32>,
 	},
 	RemovePlayer {
 		player_id: u64,
 	},
-	SetPlayerGain {
+	PlayerGainAutomation {
 		player_id: u64,
-		gain: f32,
+		automation: ParamAutomation,
 	},
 	SetPlayerPan {
 		player_id: u64,
@@ -74,6 +78,7 @@ pub(crate) enum MixerCommand {
 	},
 	StopSource {
 		player_id: u64,
+		time: f64,
 	},
 	PlayBeep {
 		sample_list: Vec<f32>,
@@ -85,7 +90,7 @@ pub(crate) enum MixerCommand {
 
 //==============================================================================
 // 소리 스레드와 나누는 값. (컨텍스트 시계와 표본율)
-// - 시계는 퀀텀마다 128 / 표본율 초씩 더한 f64 의 비트다. (장치가 바뀌어 표본율이 달라져도 이어진다)
+// - 시계는 그린 프레임 수 / 표본율의 f64 비트다. (원본 currentTime, 장치가 바뀌어 표본율이 달라지면 프레임 수를 그 비로 옮겨 잇는다)
 //==============================================================================
 pub(crate) struct MixerShared {
 	rendered_seconds_bits: AtomicU64,
@@ -114,8 +119,7 @@ impl MixerShared {
 		f64::from_bits(self.sample_rate_bits.load(Ordering::Acquire))
 	}
 
-	fn add_rendered_seconds(&self, seconds: f64) {
-		let rendered_seconds = self.get_rendered_seconds() + seconds;
+	fn set_rendered_seconds(&self, rendered_seconds: f64) {
 		self.rendered_seconds_bits.store(rendered_seconds.to_bits(), Ordering::Release);
 	}
 }
@@ -130,6 +134,15 @@ fn time_to_sample_frame(time: f64, sample_rate: f64) -> f64 {
 }
 
 //==============================================================================
+// 시간을 표본 자리로 올림. (TimeToSampleFrame 의 kRoundUp, 예약 정지)
+//==============================================================================
+fn time_to_sample_frame_rounded_up(time: f64, sample_rate: f64) -> u64 {
+	const OVERSAMPLE_FACTOR: f64 = 1024.0;
+	let frame = (time * sample_rate * OVERSAMPLE_FACTOR).round() / OVERSAMPLE_FACTOR;
+	frame.ceil().max(0.0) as u64
+}
+
+//==============================================================================
 // AudioBufferSourceNode. (크롬 AudioBufferSourceHandler, 루프는 버퍼 전체, 빠르기는 0 보다 크다)
 //==============================================================================
 struct BufferSource {
@@ -138,6 +151,8 @@ struct BufferSource {
 	computed_playback_rate: f64,
 	is_looping: bool,
 	is_finished: bool,
+	// stop(when) 의 시각. (없으면 끝까지)
+	end_time: Option<f64>,
 }
 
 impl BufferSource {
@@ -158,13 +173,14 @@ impl BufferSource {
 			computed_playback_rate,
 			is_looping: is_loop,
 			is_finished: false,
+			end_time: None,
 		}
 	}
 
 	//==============================================================================
 	// 퀀텀 하나 그리기. (RenderFromBuffer, 채널 수를 돌려준다. 끝나면 is_finished)
 	//==============================================================================
-	fn render(&mut self, destination: &mut [[f32; RENDER_QUANTUM_FRAMES]; 2]) -> usize {
+	fn render(&mut self, destination: &mut [[f32; RENDER_QUANTUM_FRAMES]; 2], frame_count: usize) -> usize {
 		let channel_count = self.audio_buffer.channel_list.len().min(2);
 		for channel in destination.iter_mut().take(channel_count) {
 			channel.fill(0.0);
@@ -178,7 +194,7 @@ impl BufferSource {
 			return channel_count;
 		}
 		let mut virtual_read_index = self.virtual_read_index;
-		let mut frames_to_process = RENDER_QUANTUM_FRAMES;
+		let mut frames_to_process = frame_count;
 		if self.is_looping && virtual_read_index >= virtual_end_frame {
 			virtual_read_index = virtual_start_frame.min((buffer_length - 1) as f64);
 			self.virtual_read_index = virtual_read_index;
@@ -203,7 +219,7 @@ impl BufferSource {
 		}
 		if is_stopping_this_quantum {
 			for channel in destination.iter_mut().take(channel_count) {
-				channel[write_index..].fill(0.0);
+				channel[write_index..frame_count].fill(0.0);
 			}
 			self.is_finished = true;
 		}
@@ -343,7 +359,9 @@ fn get_pan_gains(pan: f32, channel_count: usize) -> (f32, f32) {
 //==============================================================================
 struct PlayerNode {
 	player_id: u64,
-	gain: f32,
+	gain: AudioParam,
+	// 원본 gain.value 가 읽는 내재 값을 플레이어 손잡이에 나눠 준다.
+	gain_value: Arc<AtomicU32>,
 	// StereoPannerNode 의 값. (0 이 아닌 좌우를 처음 걸 때 생기고 그 뒤로 남는다)
 	pan: Option<f32>,
 	output_bus_id: Option<u64>,
@@ -356,8 +374,43 @@ struct PlayerNode {
 //==============================================================================
 struct BusNode {
 	bus_id: u64,
-	gain: f32,
+	gain: AudioParam,
 	input: [[f32; RENDER_QUANTUM_FRAMES]; 2],
+	// 이 퀀텀에 소리 나는 입력이 있었는지. (없으면 크롬처럼 자동화만 흘린다)
+	has_sound_input: bool,
+}
+
+//==============================================================================
+// GainNode 의 gain 을 퀀텀에 걸기. (GainHandler::Process: 자동화가 있으면 표본마다, 없으면 하나, 0 이면 소리 없음. 소리가 나면 참)
+//==============================================================================
+fn apply_gain_param(gain: &mut AudioParam, quantum: &mut [[f32; RENDER_QUANTUM_FRAMES]; 2], channel_count: usize, gain_value_list: &mut [f32; RENDER_QUANTUM_FRAMES], current_frame: u64, sample_rate: f64) -> bool {
+	if gain.has_sample_accurate_values(current_frame, sample_rate, RENDER_QUANTUM_FRAMES) {
+		gain.calculate_sample_accurate_values(gain_value_list, current_frame, sample_rate);
+		for channel in quantum.iter_mut().take(channel_count) {
+			for (sample, gain_value) in channel.iter_mut().zip(gain_value_list.iter()) {
+				*sample *= *gain_value;
+			}
+		}
+		return true;
+	}
+	let gain_value = gain.calculate_quantum_value(current_frame, sample_rate, RENDER_QUANTUM_FRAMES);
+	if gain_value == 0.0 {
+		for channel in quantum.iter_mut().take(channel_count) {
+			channel.fill(0.0);
+		}
+		return false;
+	}
+	for channel in quantum.iter_mut().take(channel_count) {
+		for sample in channel.iter_mut() {
+			*sample *= gain_value;
+		}
+	}
+	true
+}
+
+// GainNode 의 gain 기본값과 범위. (1, f32 전체)
+fn create_gain_param() -> AudioParam {
+	AudioParam::new(1.0, f32::MIN, f32::MAX)
 }
 
 //==============================================================================
@@ -376,6 +429,8 @@ pub(crate) struct MixerRenderer {
 	command_receiver: Receiver<MixerCommand>,
 	shared: Arc<MixerShared>,
 	sample_rate: f64,
+	// 그린 프레임 수. (원본 currentSampleFrame, 다음 퀀텀의 첫 프레임)
+	current_frame: u64,
 	is_suspended: bool,
 	player_list: Vec<PlayerNode>,
 	bus_list: Vec<BusNode>,
@@ -384,6 +439,7 @@ pub(crate) struct MixerRenderer {
 	output_quantum: [[f32; RENDER_QUANTUM_FRAMES]; 2],
 	output_position: usize,
 	source_quantum: [[f32; RENDER_QUANTUM_FRAMES]; 2],
+	gain_value_list: [f32; RENDER_QUANTUM_FRAMES],
 }
 
 impl MixerRenderer {
@@ -395,6 +451,7 @@ impl MixerRenderer {
 			command_receiver,
 			shared,
 			sample_rate,
+			current_frame: 0,
 			is_suspended: false,
 			player_list: Vec::with_capacity(256),
 			bus_list: Vec::with_capacity(16),
@@ -402,6 +459,7 @@ impl MixerRenderer {
 			output_quantum: [[0.0; RENDER_QUANTUM_FRAMES]; 2],
 			output_position: RENDER_QUANTUM_FRAMES,
 			source_quantum: [[0.0; RENDER_QUANTUM_FRAMES]; 2],
+			gain_value_list: [0.0; RENDER_QUANTUM_FRAMES],
 		}
 	}
 
@@ -412,25 +470,28 @@ impl MixerRenderer {
 		while let Ok(command) = self.command_receiver.try_recv() {
 			match command {
 				MixerCommand::AddBus { bus_id } => {
-					self.bus_list.push(BusNode { bus_id, gain: 1.0, input: [[0.0; RENDER_QUANTUM_FRAMES]; 2] });
+					self.bus_list.push(BusNode { bus_id, gain: create_gain_param(), input: [[0.0; RENDER_QUANTUM_FRAMES]; 2], has_sound_input: false });
 				}
 				MixerCommand::RemoveBus { bus_id } => {
 					self.bus_list.retain(|bus| bus.bus_id != bus_id);
 				}
-				MixerCommand::SetBusGain { bus_id, gain } => {
+				MixerCommand::BusGainAutomation { bus_id, automation } => {
+					let (current_frame, sample_rate) = (self.current_frame, self.sample_rate);
 					if let Some(bus) = self.bus_list.iter_mut().find(|bus| bus.bus_id == bus_id) {
-						bus.gain = gain;
+						bus.gain.apply_automation(automation, current_frame, sample_rate);
 					}
 				}
-				MixerCommand::AddPlayer { player_id, output_bus_id, ended_generation } => {
-					self.player_list.push(PlayerNode { player_id, gain: 1.0, pan: None, output_bus_id, source: None, ended_generation });
+				MixerCommand::AddPlayer { player_id, output_bus_id, ended_generation, gain_value } => {
+					self.player_list.push(PlayerNode { player_id, gain: create_gain_param(), gain_value, pan: None, output_bus_id, source: None, ended_generation });
 				}
 				MixerCommand::RemovePlayer { player_id } => {
 					self.player_list.retain(|player| player.player_id != player_id);
 				}
-				MixerCommand::SetPlayerGain { player_id, gain } => {
+				MixerCommand::PlayerGainAutomation { player_id, automation } => {
+					let (current_frame, sample_rate) = (self.current_frame, self.sample_rate);
 					if let Some(player) = self.find_player(player_id) {
-						player.gain = gain;
+						player.gain.apply_automation(automation, current_frame, sample_rate);
+						player.gain_value.store(player.gain.get_intrinsic_value().to_bits(), Ordering::Release);
 					}
 				}
 				MixerCommand::SetPlayerPan { player_id, pan } => {
@@ -454,10 +515,10 @@ impl MixerRenderer {
 						}
 					}
 				}
-				MixerCommand::StopSource { player_id } => {
+				MixerCommand::StopSource { player_id, time } => {
 					if let Some(player) = self.find_player(player_id) {
-						if let Some((_, generation)) = player.source.take() {
-							player.ended_generation.fetch_max(generation, Ordering::Release);
+						if let Some((source, _)) = player.source.as_mut() {
+							source.end_time = Some(time.max(0.0));
 						}
 					}
 				}
@@ -490,24 +551,44 @@ impl MixerRenderer {
 				channel.fill(0.0);
 			}
 		}
+		for bus in self.bus_list.iter_mut() {
+			bus.has_sound_input = false;
+		}
+		let (current_frame, sample_rate) = (self.current_frame, self.sample_rate);
+		let quantum_end_frame = current_frame + RENDER_QUANTUM_FRAMES as u64;
 		for player in self.player_list.iter_mut() {
-			let Some((source, generation)) = player.source.as_mut() else {
-				continue;
-			};
-			let channel_count = source.render(&mut self.source_quantum);
-			if source.is_finished {
-				player.ended_generation.fetch_max(*generation, Ordering::Release);
-				player.source = None;
-			}
-			if channel_count == 0 {
-				continue;
-			}
-			// GainNode.
-			let gain = player.gain;
-			for channel in self.source_quantum.iter_mut().take(channel_count) {
-				for sample in channel.iter_mut() {
-					*sample *= gain;
+			// 소스: 예약 정지 시각까지 그리고, 그 퀀텀에 끝낸다.
+			let mut channel_count = 0;
+			if let Some((source, generation)) = player.source.as_mut() {
+				let end_frame = source.end_time.map(|end_time| time_to_sample_frame_rounded_up(end_time, sample_rate));
+				let is_stopped_before = end_frame.map(|end_frame| end_frame <= current_frame).unwrap_or(false);
+				if !is_stopped_before {
+					let frame_count = match end_frame {
+						Some(end_frame) if end_frame < quantum_end_frame => {
+							(end_frame - current_frame) as usize
+						}
+						_ => {
+							RENDER_QUANTUM_FRAMES
+						}
+					};
+					channel_count = source.render(&mut self.source_quantum, frame_count);
 				}
+				let is_end_reached = end_frame.map(|end_frame| end_frame <= quantum_end_frame).unwrap_or(false);
+				if source.is_finished || is_end_reached {
+					player.ended_generation.fetch_max(*generation, Ordering::Release);
+					player.source = None;
+				}
+			}
+			// GainNode. (소스가 없으면 자동화만 흘린다)
+			if channel_count == 0 {
+				player.gain.calculate_sample_accurate_values(&mut self.gain_value_list, current_frame, sample_rate);
+				player.gain_value.store(player.gain.get_intrinsic_value().to_bits(), Ordering::Release);
+				continue;
+			}
+			let has_sound = apply_gain_param(&mut player.gain, &mut self.source_quantum, channel_count, &mut self.gain_value_list, current_frame, sample_rate);
+			player.gain_value.store(player.gain.get_intrinsic_value().to_bits(), Ordering::Release);
+			if !has_sound {
+				continue;
 			}
 			// StereoPannerNode. (모노도 두 채널이 된다)
 			let output_channel_count = match player.pan {
@@ -546,6 +627,7 @@ impl MixerRenderer {
 				Some(bus_id) => {
 					match self.bus_list.iter_mut().find(|bus| bus.bus_id == bus_id) {
 						Some(bus) => {
+							bus.has_sound_input = true;
 							&mut bus.input
 						}
 						None => {
@@ -559,12 +641,13 @@ impl MixerRenderer {
 			};
 			mix_into(target, &self.source_quantum, output_channel_count);
 		}
-		for bus in self.bus_list.iter() {
-			let gain = bus.gain;
-			for channel_index in 0..2 {
-				for frame_index in 0..RENDER_QUANTUM_FRAMES {
-					self.output_quantum[channel_index][frame_index] += bus.input[channel_index][frame_index] * gain;
-				}
+		for bus in self.bus_list.iter_mut() {
+			if !bus.has_sound_input {
+				bus.gain.calculate_sample_accurate_values(&mut self.gain_value_list, current_frame, sample_rate);
+				continue;
+			}
+			if apply_gain_param(&mut bus.gain, &mut bus.input, 2, &mut self.gain_value_list, current_frame, sample_rate) {
+				mix_into(&mut self.output_quantum, &bus.input, 2);
 			}
 		}
 		for beep in self.beep_list.iter_mut() {
@@ -582,13 +665,17 @@ impl MixerRenderer {
 			}
 		}
 		self.beep_list.retain(|beep| beep.position < beep.sample_list.len());
-		self.shared.add_rendered_seconds(RENDER_QUANTUM_FRAMES as f64 / self.sample_rate);
+		self.current_frame += RENDER_QUANTUM_FRAMES as u64;
+		self.shared.set_rendered_seconds(self.current_frame as f64 / self.sample_rate);
 	}
 
 	//==============================================================================
 	// 장치가 바뀌어 표본율이 달라졌을 때. (새로 트는 소스부터 그 표본율로 빠르기를 셈한다)
 	//==============================================================================
 	pub(crate) fn set_sample_rate(&mut self, sample_rate: f64) {
+		if self.sample_rate > 0.0 && sample_rate != self.sample_rate {
+			self.current_frame = (self.current_frame as f64 * sample_rate / self.sample_rate).round() as u64;
+		}
 		self.sample_rate = sample_rate;
 		self.shared.sample_rate_bits.store(sample_rate.to_bits(), Ordering::Release);
 	}
@@ -665,10 +752,10 @@ mod tests {
 		let buffer = create_buffer(vec![(0..200).map(|index| index as f32 / 200.0).collect()], 48000.0);
 		let mut source = BufferSource::new(buffer, false, 0.0, 1.0, 48000.0);
 		let mut quantum = [[0.0; RENDER_QUANTUM_FRAMES]; 2];
-		assert_eq!(source.render(&mut quantum), 1);
+		assert_eq!(source.render(&mut quantum, RENDER_QUANTUM_FRAMES), 1);
 		assert_eq!(quantum[0][5], 5.0 / 200.0);
 		assert!(!source.is_finished);
-		source.render(&mut quantum);
+		source.render(&mut quantum, RENDER_QUANTUM_FRAMES);
 		assert_eq!(quantum[0][71], 199.0 / 200.0);
 		assert_eq!(quantum[0][72], 0.0);
 		assert!(source.is_finished);
@@ -682,7 +769,7 @@ mod tests {
 		let buffer = create_buffer(vec![vec![0.0, 1.0, 2.0, 3.0]], 44100.0);
 		let mut source = BufferSource::new(buffer, false, 0.0, 1.0, 88200.0);
 		let mut quantum = [[0.0; RENDER_QUANTUM_FRAMES]; 2];
-		source.render(&mut quantum);
+		source.render(&mut quantum, RENDER_QUANTUM_FRAMES);
 		assert_eq!(&quantum[0][0..8], &[0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5]);
 		assert_eq!(quantum[0][8], 0.0);
 		assert!(source.is_finished);
@@ -696,7 +783,7 @@ mod tests {
 		let buffer = create_buffer(vec![vec![0.0, 1.0, 2.0, 3.0]], 44100.0);
 		let mut source = BufferSource::new(buffer, true, 2.0 / 44100.0, 1.0, 44100.0);
 		let mut quantum = [[0.0; RENDER_QUANTUM_FRAMES]; 2];
-		source.render(&mut quantum);
+		source.render(&mut quantum, RENDER_QUANTUM_FRAMES);
 		assert_eq!(&quantum[0][0..7], &[2.0, 3.0, 0.0, 1.0, 2.0, 3.0, 0.0]);
 		assert!(!source.is_finished);
 		assert_eq!(time_to_sample_frame(1.0 / 3.0, 44100.0), 14700.0);
@@ -727,9 +814,9 @@ mod tests {
 		let (command_sender, mut renderer, shared) = create_renderer(44100.0);
 		let ended_generation = Arc::new(AtomicU64::new(0));
 		command_sender.send(MixerCommand::AddBus { bus_id: 1 }).unwrap();
-		command_sender.send(MixerCommand::SetBusGain { bus_id: 1, gain: 0.5 }).unwrap();
-		command_sender.send(MixerCommand::AddPlayer { player_id: 2, output_bus_id: Some(1), ended_generation: ended_generation.clone() }).unwrap();
-		command_sender.send(MixerCommand::SetPlayerGain { player_id: 2, gain: 0.8 }).unwrap();
+		command_sender.send(MixerCommand::BusGainAutomation { bus_id: 1, automation: ParamAutomation::SetValue { value: 0.5 } }).unwrap();
+		command_sender.send(MixerCommand::AddPlayer { player_id: 2, output_bus_id: Some(1), ended_generation: ended_generation.clone(), gain_value: Arc::new(AtomicU32::new(0)) }).unwrap();
+		command_sender.send(MixerCommand::PlayerGainAutomation { player_id: 2, automation: ParamAutomation::SetValue { value: 0.8 } }).unwrap();
 		command_sender.send(MixerCommand::StartSource { player_id: 2, audio_buffer: create_buffer(vec![vec![0.5; 300]], 44100.0), is_loop: false, offset_seconds: 0.0, playback_rate: 1.0, generation: 1 }).unwrap();
 		let mut output = vec![0.0f32; 2 * 4];
 		renderer.render_interleaved(&mut output, 2);
@@ -761,7 +848,8 @@ mod tests {
 
 	//==============================================================================
 	// 크롬(158) OfflineAudioContext 와 같은 그래프를 그려 견준다. (tests/assets/mixer/chromemixer.cjs 가 찍은 chrome_mixer.json)
-	// - 소스(같은 표본율과 다른 표본율, 빠르기, 루프, 시작 위치), 플레이어 GainNode, StereoPannerNode(모노와 스테레오, 0 포함), 버스 GainNode, 섞기.
+	// - 소스(같은 표본율과 다른 표본율, 빠르기, 루프, 시작 위치, stop(when)), 플레이어 GainNode, StereoPannerNode(모노와 스테레오, 0 포함), 버스 GainNode, 섞기.
+	// - AudioParam 자동화(value 대입, setValueAtTime, linearRamp, exponentialRamp, setTarget, cancel)와 그리는 도중 지금 gain.value 에서 줄여 끄기, 새 음악 올리기.
 	//==============================================================================
 	#[test]
 	fn mixer_matches_chrome_offline_rendering() {
@@ -775,34 +863,91 @@ mod tests {
 		};
 		let stereo_buffer = create_buffer(vec![create_channel(37, 200, 100.0, 250.0), create_channel(53, 160, 80.0, 200.0)], buffer_sample_rate);
 		let mono_buffer = create_buffer(vec![create_channel(29, 180, 90.0, 225.0)], buffer_sample_rate);
+		let read_automation_list = |automation_list: &serde_json::Value| -> Vec<ParamAutomation> {
+			automation_list.as_array().unwrap().iter().map(|automation| {
+				let value = automation["value"].as_f64().unwrap_or(0.0) as f32;
+				let time = automation["time"].as_f64().unwrap();
+				match automation["type"].as_str().unwrap() {
+					"setValueAtTime" => ParamAutomation::SetValueAtTime { value, time },
+					"linearRamp" => ParamAutomation::LinearRampToValueAtTime { value, time },
+					"exponentialRamp" => ParamAutomation::ExponentialRampToValueAtTime { value, time },
+					"setTarget" => ParamAutomation::SetTargetAtTime { target: value, time, time_constant: automation["timeConstant"].as_f64().unwrap() },
+					_ => ParamAutomation::CancelScheduledValues { time },
+				}
+			}).collect()
+		};
 		let case_list = json["cases"].as_array().unwrap();
-		assert_eq!(case_list.len(), 5);
+		assert_eq!(case_list.len(), 9);
 		for test_case in case_list {
 			let name = test_case["name"].as_str().unwrap();
-			let (command_sender, mut renderer, _) = create_renderer(test_case["contextRate"].as_f64().unwrap());
-			let mut next_id = 100u64;
+			let context_rate = test_case["contextRate"].as_f64().unwrap();
+			let (command_sender, mut renderer, _) = create_renderer(context_rate);
 			let mut bus_id_list: Vec<u64> = Vec::new();
-			for bus_gain in test_case["busGainList"].as_array().unwrap() {
-				next_id += 1;
-				command_sender.send(MixerCommand::AddBus { bus_id: next_id }).unwrap();
-				command_sender.send(MixerCommand::SetBusGain { bus_id: next_id, gain: bus_gain.as_f64().unwrap() as f32 }).unwrap();
-				bus_id_list.push(next_id);
+			for (bus_index, bus) in test_case["busList"].as_array().unwrap().iter().enumerate() {
+				let bus_id = 100 + bus_index as u64;
+				command_sender.send(MixerCommand::AddBus { bus_id }).unwrap();
+				if let Some(gain) = bus["gain"].as_f64() {
+					command_sender.send(MixerCommand::BusGainAutomation { bus_id, automation: ParamAutomation::SetValue { value: gain as f32 } }).unwrap();
+				}
+				for automation in read_automation_list(&bus["automation"]) {
+					command_sender.send(MixerCommand::BusGainAutomation { bus_id, automation }).unwrap();
+				}
+				bus_id_list.push(bus_id);
 			}
-			for player in test_case["playerList"].as_array().unwrap() {
-				next_id += 1;
+			let player_list = test_case["playerList"].as_array().unwrap();
+			let gain_value_list: Vec<Arc<AtomicU32>> = player_list.iter().map(|_| Arc::new(AtomicU32::new(0))).collect();
+			let start_player = |player_index: usize| {
+				let player = &player_list[player_index];
+				let player_id = 200 + player_index as u64;
 				let output_bus_id = player["bus"].as_u64().map(|bus_index| bus_id_list[bus_index as usize]);
-				command_sender.send(MixerCommand::AddPlayer { player_id: next_id, output_bus_id, ended_generation: Arc::new(AtomicU64::new(0)) }).unwrap();
-				command_sender.send(MixerCommand::SetPlayerGain { player_id: next_id, gain: player["gain"].as_f64().unwrap() as f32 }).unwrap();
+				command_sender.send(MixerCommand::AddPlayer { player_id, output_bus_id, ended_generation: Arc::new(AtomicU64::new(0)), gain_value: gain_value_list[player_index].clone() }).unwrap();
+				if let Some(gain) = player["gain"].as_f64() {
+					command_sender.send(MixerCommand::PlayerGainAutomation { player_id, automation: ParamAutomation::SetValue { value: gain as f32 } }).unwrap();
+				}
+				for automation in read_automation_list(&player["automation"]) {
+					command_sender.send(MixerCommand::PlayerGainAutomation { player_id, automation }).unwrap();
+				}
 				if let Some(pan) = player["pan"].as_f64() {
 					// 원본처럼 0 이 아닌 좌우로 노드를 만든 뒤 값을 건다. (0 도 노드가 있는 꼴)
-					command_sender.send(MixerCommand::SetPlayerPan { player_id: next_id, pan: 1.0 }).unwrap();
-					command_sender.send(MixerCommand::SetPlayerPan { player_id: next_id, pan: pan as f32 }).unwrap();
+					command_sender.send(MixerCommand::SetPlayerPan { player_id, pan: 1.0 }).unwrap();
+					command_sender.send(MixerCommand::SetPlayerPan { player_id, pan: pan as f32 }).unwrap();
 				}
 				let audio_buffer = if player["channels"].as_str().unwrap() == "stereo" { stereo_buffer.clone() } else { mono_buffer.clone() };
-				command_sender.send(MixerCommand::StartSource { player_id: next_id, audio_buffer, is_loop: player["loop"].as_bool().unwrap(), offset_seconds: player["offset"].as_f64().unwrap(), playback_rate: player["rate"].as_f64().unwrap(), generation: 1 }).unwrap();
+				command_sender.send(MixerCommand::StartSource { player_id, audio_buffer, is_loop: player["loop"].as_bool().unwrap(), offset_seconds: player["offset"].as_f64().unwrap(), playback_rate: player["rate"].as_f64().unwrap(), generation: 1 }).unwrap();
+				if let Some(stop_time) = player["stop"].as_f64() {
+					command_sender.send(MixerCommand::StopSource { player_id, time: stop_time }).unwrap();
+				}
+			};
+			for (player_index, player) in player_list.iter().enumerate() {
+				if player["startTime"].as_f64().unwrap() == 0.0 {
+					start_player(player_index);
+				}
 			}
 			let mut output = vec![0.0f32; render_length * 2];
-			renderer.render_interleaved(&mut output, 2);
+			let mut rendered_frame_count = 0usize;
+			for suspend in test_case["suspendList"].as_array().unwrap() {
+				let suspend_time = suspend["time"].as_f64().unwrap();
+				let suspend_frame = (suspend_time * context_rate).round() as usize;
+				renderer.render_interleaved(&mut output[rendered_frame_count * 2..suspend_frame * 2], 2);
+				rendered_frame_count = suspend_frame;
+				for action in suspend["actions"].as_array().unwrap() {
+					let player_index = action["player"].as_u64().unwrap() as usize;
+					let player_id = 200 + player_index as u64;
+					if action["kind"].as_str().unwrap() == "fadeOut" {
+						// 원본 fadeOutEffects, fadeOutMusic: 지금 gain.value 에서 0 으로, 끝나고 조금 뒤 stop.
+						let current_gain = f32::from_bits(gain_value_list[player_index].load(Ordering::Acquire));
+						let fade = action["fade"].as_f64().unwrap();
+						for automation in [ParamAutomation::CancelScheduledValues { time: suspend_time }, ParamAutomation::SetValueAtTime { value: current_gain, time: suspend_time }, ParamAutomation::LinearRampToValueAtTime { value: 0.0, time: suspend_time + fade }] {
+							command_sender.send(MixerCommand::PlayerGainAutomation { player_id, automation }).unwrap();
+						}
+						command_sender.send(MixerCommand::StopSource { player_id, time: suspend_time + fade + action["margin"].as_f64().unwrap() }).unwrap();
+					}
+					else {
+						start_player(player_index);
+					}
+				}
+			}
+			renderer.render_interleaved(&mut output[rendered_frame_count * 2..], 2);
 			for channel_index in 0..2 {
 				let value_list = test_case["values"][channel_index].as_array().unwrap();
 				for (index, value) in index_list.iter().zip(value_list.iter()) {

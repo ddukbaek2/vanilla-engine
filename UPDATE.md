@@ -456,6 +456,13 @@
   - 남은 차이: 3 채널 이상 AAC 에 PNS 가 쓰이면 그 띠의 잡음 표본이 크롬과 다르다. (명세가 난수 생성기를 정하지 않아, 같게 하려면 FFmpeg 의 생성기를 옮겨야 한다)
   - 늘어난 크레이트 4: oxideav-aac, oxideav-core, thiserror, thiserror-impl
 - 표본율 바꾸기의 x86_64 합 차례(AVX2 와 FMA, SSE)는 크롬과 같게 짰지만, 기대값을 애플 실리콘 맥에서 뽑아 x86 실기에서는 돌려 보지 못했다
+- SoundSystem 의 효과음 줄여 끄기, 앞만 틀기, 배경음악 겹쳐 바꾸기와 버스 크기 따라가기를 원본처럼 AudioParam 자동화로 한다. 지금까지는 웹과 데스크탑 모두 update 마다 같은 식을 셈해 음량을 걸었다
+  - 원본 soundsystem.js 와 같은 호출: 효과음은 gain.value 대입 뒤 setValueAtTime, linearRampToValueAtTime(0), source.stop(when), 줄여 끄기는 지금 gain.value 에서 cancelScheduledValues, setValueAtTime, linearRampToValueAtTime(0), stop(when), 음악은 setValueAtTime(0), linearRampToValueAtTime(크기) 와 지금 값에서 줄여 stop(when), 버스는 setTargetAtTime(크기, 지금, 0.05). 끝난 소리는 원본 onended 자리처럼 update 가 목록에서 뺀다
+  - 웹은 WebAudio AudioParam 과 AudioBufferSourceNode.stop(when)에 그대로 건다. (컨텍스트를 깨우는 동안 받은 stop 은 시작할 때 건다)
+  - 데스크탑 믹서의 GainNode gain 을 AudioParam 으로 바꿨다. (platform/audio/audioparam.rs, 크로미엄 audio_param_handler.cc 의 사건 넣기, 지난 사건 치우기, 새 사건 당기기, 선형과 지수 램프, 목표 따라가기, 목표 뒤 램프, 지우기를 옮겼다. x86_64 는 크롬의 SSE 4 줄 묶음과 같게) 자동화가 있는 퀀텀은 표본마다, 없으면 퀀텀마다 하나로 곱하고, 소스가 없어도 자동화는 흐른다. 소스의 stop(when)은 그 시각을 올림한 프레임에서 끊는다. 시계는 그린 프레임 수 / 표본율이다
+  - AudioPlayer, AudioBus 에 엔진 안에서 쓰는 apply_gain_automation, get_gain_value(원본 gain.value 읽기), stop_at_time 을 더했다. (공개 API 는 그대로다)
+  - 믹서 시험의 크롬 158 OfflineAudioContext 그래프를 다섯에서 아홉으로 늘렸다. (앞만 틀기와 버스 setTargetAtTime, 그리는 도중 suspend 로 멈춰 지금 gain.value 에서 줄여 끄기, 음악 겹쳐 바꾸기, 지수 램프와 목표 뒤 램프와 지우기) 모두 1e-6 안에서 같다
+  - BeepPlayer 의 데스크탑 톤은 그대로 엔벨로프를 식으로 그린다. (원본 자동화와 같은 식이지만 표본마다의 셈 차례는 다르다)
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.

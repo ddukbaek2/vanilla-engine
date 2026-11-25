@@ -13,6 +13,8 @@
 // - 게임 코드가 이름을 부를 수 있게 AudioContext, AudioBuffer 두 타입만 밖으로 낸다. 나머지는 엔진 안에서만 쓴다.
 //==============================================================================
 #[cfg(not(target_arch = "wasm32"))]
+mod audioparam;
+#[cfg(not(target_arch = "wasm32"))]
 mod decode;
 #[cfg(not(target_arch = "wasm32"))]
 mod desktop;
@@ -29,6 +31,33 @@ mod web;
 pub(crate) use web::*;
 #[cfg(target_arch = "wasm32")]
 pub use web::{AudioBuffer, AudioContext};
+
+// GainNode 의 gain 자동화. (원본 AudioParam 의 setValueAtTime, linearRampToValueAtTime, exponentialRampToValueAtTime, setTargetAtTime, cancelScheduledValues.
+// 웹은 WebAudio AudioParam 에, 데스크탑은 믹서의 AudioParam(크로미엄과 같은 셈)에 건다. SoundSystem 이 원본처럼 쓴다)
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum GainAutomation {
+	SetValueAtTime {
+		value: f32,
+		time: f64,
+	},
+	LinearRampToValueAtTime {
+		value: f32,
+		time: f64,
+	},
+	#[allow(dead_code)]
+	ExponentialRampToValueAtTime {
+		value: f32,
+		time: f64,
+	},
+	SetTargetAtTime {
+		target: f32,
+		time: f64,
+		time_constant: f64,
+	},
+	CancelScheduledValues {
+		time: f64,
+	},
+}
 
 // 플레이어가 소리를 내보낼 곳과 버스의 GainNode. (AudioPlayer::new 의 둘째 인자, 원본 outputNode 자리와 AudioBus.getGainNode)
 // - AudioGainNode 는 데스크탑이 믹서의 버스 노드를 나눠 드는 Rc<MixerGainNode>, 웹이 GainNode 다. 그 as_deref 가 AudioOutputNode 라서
