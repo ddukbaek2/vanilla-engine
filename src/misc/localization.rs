@@ -13,9 +13,11 @@
 // - 외계행성 광부 키우기에서 엔진으로 옮긴 것: 언어 태그를 뒤 조각부터 하나씩 떼며 맞추기와 별칭(set_language_aliases),
 //   오른쪽에서 왼쪽으로 쓰는 언어(is_right_to_left, set_right_to_left)와 넣는 값을 방향 격리 문자로 묶기(isolate_text),
 //   이름 자리 채우기(text_named, "{seconds}" 꼴, 빗금으로만 이은 값들은 통째로 한 번 묶는다).
+//   배치 뒤집기(mirror_layout_x, read_layout_text_align, 원본 LanguagePack 의 mirrorLayoutX, readLayoutTextAlign).
 //   detect_language 는 웹에서 원본처럼 navigator.languages 를 읽고, 데스크탑에서는 LANGUAGE / LC_ALL / LC_MESSAGES / LANG 환경 변수를 읽는다.
 //     (윈도우는 보통 이 변수가 없어서 기본 언어가 된다)
 //==============================================================================
+use crate::core::graphic::TextAlign;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
@@ -181,6 +183,37 @@ impl Localization {
 			let primary_code = state.language_code.split('-').next().unwrap_or("");
 			state.right_to_left_languages.contains(primary_code)
 		})
+	}
+
+	//==============================================================================
+	// 배치의 가로 자리. (오른쪽에서 왼쪽 언어면 부모 너비 안에서 좌우를 뒤집은 왼쪽, 아니면 그대로)
+	// - 창과 표의 왼쪽, 오른쪽 배치를 언어 방향에 맞춰 뒤집을 때 쓴다. 화면 구석의 자리나 슬라이더의 방향처럼 뒤집지 않을 것은 부르지 않는다.
+	//==============================================================================
+	pub fn mirror_layout_x(x: f32, width: f32, parent_width: f32) -> f32 {
+		if !Localization::is_right_to_left() {
+			return x;
+		}
+		parent_width - x - width
+	}
+
+	//==============================================================================
+	// 배치의 글자 정렬. (오른쪽에서 왼쪽 언어면 Left 와 Right 를 바꾸고, 나머지는 그대로)
+	//==============================================================================
+	pub fn read_layout_text_align(text_align: TextAlign) -> TextAlign {
+		if !Localization::is_right_to_left() {
+			return text_align;
+		}
+		match text_align {
+			TextAlign::Left => {
+				TextAlign::Right
+			}
+			TextAlign::Right => {
+				TextAlign::Left
+			}
+			_ => {
+				text_align
+			}
+		}
 	}
 
 	//==============================================================================
@@ -494,6 +527,24 @@ fn convert_locale_to_language_tag(locale_name: &str) -> String {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	//==============================================================================
+	// 오른쪽에서 왼쪽 언어면 배치의 가로 자리와 정렬을 뒤집고, 아니면 그대로 둔다.
+	//==============================================================================
+	#[test]
+	fn mirror_layout_for_right_to_left() {
+		Localization::clear();
+		Localization::set_language("en");
+		assert!(!Localization::is_right_to_left());
+		assert_eq!(Localization::mirror_layout_x(10.0, 20.0, 100.0), 10.0);
+		assert_eq!(Localization::read_layout_text_align(TextAlign::Left), TextAlign::Left);
+		Localization::set_language("ar");
+		assert!(Localization::is_right_to_left());
+		assert_eq!(Localization::mirror_layout_x(10.0, 20.0, 100.0), 70.0);
+		assert_eq!(Localization::read_layout_text_align(TextAlign::Left), TextAlign::Right);
+		assert_eq!(Localization::read_layout_text_align(TextAlign::Right), TextAlign::Left);
+		assert_eq!(Localization::read_layout_text_align(TextAlign::Center), TextAlign::Center);
+	}
 
 	//==============================================================================
 	// 지금 언어 → 폴백 → 키, 자리 표시자, 목록.

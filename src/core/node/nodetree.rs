@@ -486,6 +486,14 @@ impl NodeTree {
 	}
 
 	//==============================================================================
+	// 뷰 좌표 → 노드의 로컬 좌표. (내용 영역의 왼쪽 위가 원점, 부모들의 변환을 모두 거친다, 원본 WorldNode.convertViewToLocal)
+	// - convert_view_position_to_node_position 과 같다. 행렬이 뒤집히지 않으면(배율 0) None.
+	//==============================================================================
+	pub fn convert_view_to_local(&self, node_id: NodeId, view_position: Vector2) -> Option<Vector2> {
+		self.convert_view_position_to_node_position(node_id, view_position)
+	}
+
+	//==============================================================================
 	// 노드의 컴포넌트를 잠깐 꺼내 하나씩 부른다. (꺼낸 동안 붙인 컴포넌트는 뒤에 이어 붙인다)
 	//==============================================================================
 	fn visit_components(&mut self, node_id: NodeId, engine: &Engine, visitor: &mut dyn FnMut(&mut dyn Component, &mut ComponentContext)) {
@@ -644,8 +652,14 @@ impl NodeTree {
 		node.push_transform(graphic);
 
 		if node.is_visible() {
+			// 배율이 움직이는 노드의 글은 묶은 배율로 굽는다. (컴포넌트를 다 그리면 푼다, 자식은 저마다 다시 정한다)
+			let last_drawn_maximum_scale = node.get_last_drawn_maximum_scale();
+			let drawn_maximum_scale = graphic.update_text_bake_scale_moving(last_drawn_maximum_scale);
+			node.set_last_drawn_maximum_scale(drawn_maximum_scale);
+
 			// 컴포넌트. (화면 밖이면 건너뛴다)
 			let (clip_round_size, is_culled) = node.draw_components(graphic);
+			graphic.set_text_bake_scale_moving(false);
 			if is_culled {
 				self.culled_node_count += 1;
 			}
@@ -738,6 +752,60 @@ impl NodeTree {
 		});
 		self.traversal_depth -= 1;
 		self.flush_pending_destroy();
+	}
+
+	//==============================================================================
+	// 그 자리에서 휠을 받을 노드 찾기. (find_topmost_interactable_node 와 같은 그리는 순서, 없으면 None)
+	// - 그 자리를 품은 노드 가운데 누를 수 있는 노드와 휠을 받는 칸(Component::is_wheel_receiver)의 노드를 보고 가장 앞(나중에 그리는 것)을 고른다.
+	//   스크롤 칸이 가장 앞이면 그 칸의 노드다. (칸 안의 글이나 그림처럼 누를 수 없는 것 위에서 굴려도 칸이 받는다)
+	// - 누를 수 있는 노드가 가장 앞이면 그 노드다. (dispatch_wheel 이 부모 쪽으로 올라가며 묻는다, 스크롤 칸을 덮은 막이나 창이 휠을 가린다)
+	//==============================================================================
+	pub fn find_wheel_target_node(&self, view_position: Vector2) -> Option<NodeId> {
+		let mut found_id: Option<NodeId> = None;
+		let identity_matrix = TransformMatrix::identity();
+		self.find_wheel_target_node_recursive(self.root_id, &identity_matrix, view_position, &mut found_id);
+		found_id
+	}
+
+	fn find_wheel_target_node_recursive(&self, node_id: NodeId, parent_matrix: &TransformMatrix, view_position: Vector2, found_id: &mut Option<NodeId>) {
+		let node = match self.nodes.get(node_id) {
+			Some(node) => {
+				node
+			}
+			None => {
+				return;
+			}
+		};
+		if !node.is_active() || !node.is_visible() {
+			return;
+		}
+		let local_matrix = node.get_transform().calculate_local_matrix();
+		let world_matrix = parent_matrix.multiply(&local_matrix);
+		let is_wheel_receiver = node.components.iter().any(|component| component.is_enable() && component.is_wheel_receiver());
+		if (node.is_interactable() || is_wheel_receiver) && node.contains_point(&world_matrix, view_position) {
+			*found_id = Some(node_id);
+		}
+		let is_clipping = node.components.iter().any(|component| component.is_enable() && component.get_clip_round_size().is_some());
+		if is_clipping && !node.contains_point(&world_matrix, view_position) {
+			return;
+		}
+		for child_id in node.child_ids.iter().copied() {
+			self.find_wheel_target_node_recursive(child_id, &world_matrix, view_position, found_id);
+		}
+	}
+
+	//==============================================================================
+	// 그 자리에 휠 전달. (find_wheel_target_node 로 찾은 노드부터 부모 쪽으로, 받아 쓴 컴포넌트가 있으면 true)
+	//==============================================================================
+	pub fn dispatch_wheel_at(&mut self, view_position: Vector2, engine: &Engine, wheel_delta: Vector2) -> bool {
+		match self.find_wheel_target_node(view_position) {
+			Some(target_id) => {
+				self.dispatch_wheel(target_id, engine, wheel_delta)
+			}
+			None => {
+				false
+			}
+		}
 	}
 
 	//==============================================================================

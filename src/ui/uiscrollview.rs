@@ -679,6 +679,10 @@ impl Component for UIScrollView {
 		"ScrollView"
 	}
 
+	fn is_wheel_receiver(&self) -> bool {
+		true
+	}
+
 	fn attach(&mut self, transform: &mut NodeTransform) {
 		self.viewport_size = transform.get_content_size();
 	}
@@ -852,6 +856,34 @@ mod tests {
 		get_scroll_view(&mut node_tree, scroll_id).set_vertical(true);
 		assert!(UIScrollView::set_scroll_offset_in_tree(&mut node_tree, scroll_id, Vector2::create(0.0, -80.0)));
 		assert_eq!(node_tree[content_id].get_local_position(), Vector2::create(0.0, -80.0));
+	}
+
+	//==============================================================================
+	// 그 자리의 휠은 가장 앞 스크롤 칸이 받는다. (칸을 누를 수 없게 해 두어도, 칸 안의 누를 수 없는 글 위에서도) 칸을 덮은 누를 수 있는 막은 휠을 가린다.
+	//==============================================================================
+	#[test]
+	fn wheel_goes_to_frontmost_scroll_view() {
+		let engine = Engine::new(EngineConfiguration::new());
+		let (mut node_tree, scroll_id) = create_scroll_tree();
+		node_tree[scroll_id].set_interactable(false);
+		let content_id = get_scroll_view(&mut node_tree, scroll_id).get_content().expect("content");
+		node_tree.tick(&engine, 0.016);
+		let label_id = node_tree.create_child(content_id, "label");
+		node_tree[label_id].set_pivot(Pivot::TOP_LEFT);
+		node_tree[label_id].set_rect(10.0, 10.0, 50.0, 20.0);
+		let view_position = Vector2::create(120.0, 120.0);
+		assert_eq!(node_tree.find_topmost_interactable_node(view_position), None);
+		assert_eq!(node_tree.find_wheel_target_node(view_position), Some(scroll_id));
+		assert!(node_tree.dispatch_wheel_at(view_position, &engine, Vector2::create(0.0, 40.0)));
+		assert_eq!(get_scroll_view(&mut node_tree, scroll_id).get_scroll_offset(), Vector2::create(0.0, -40.0));
+
+		let root_id = node_tree.get_root_id();
+		let cover_id = node_tree.create_child(root_id, "cover");
+		node_tree[cover_id].set_pivot(Pivot::TOP_LEFT);
+		node_tree[cover_id].set_rect(0.0, 0.0, 800.0, 600.0);
+		node_tree[cover_id].set_interactable(true);
+		assert!(!node_tree.dispatch_wheel_at(view_position, &engine, Vector2::create(0.0, 40.0)));
+		assert_eq!(get_scroll_view(&mut node_tree, scroll_id).get_scroll_offset(), Vector2::create(0.0, -40.0));
 	}
 
 	//==============================================================================

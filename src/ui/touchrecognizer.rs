@@ -37,6 +37,8 @@ pub struct TouchRecognizer {
 	press_delay_remain_seconds: Option<f32>,
 	is_press_delivered: bool,
 	is_touching: bool,
+	// 이번 프레임의 휠을 받아 쓴 컴포넌트가 있었는지.
+	is_wheel_handled: bool,
 }
 
 impl TouchRecognizer {
@@ -52,7 +54,15 @@ impl TouchRecognizer {
 			press_delay_remain_seconds: None,
 			is_press_delivered: false,
 			is_touching: false,
+			is_wheel_handled: false,
 		}
+	}
+
+	//==============================================================================
+	// 이번 프레임의 휠을 받아 쓴 컴포넌트(스크롤 칸 등)가 있었는지. (tick_touch 뒤에 읽는다)
+	//==============================================================================
+	pub fn is_wheel_handled(&self) -> bool {
+		self.is_wheel_handled
 	}
 
 	//==============================================================================
@@ -75,14 +85,13 @@ impl TouchRecognizer {
 		let input_manager = engine.get_input_manager();
 		let view_input_position = input_manager.get_view_input_position();
 
-		// 휠. (누름과 상관없이 그 자리 아래 노드부터 부모 쪽으로)
+		// 휠. (누름과 상관없이 그 자리의 가장 앞 스크롤 칸이나 누를 수 있는 노드부터 부모 쪽으로, NodeTree::dispatch_wheel_at)
 		let wheel_delta_x = input_manager.get_wheel_delta_x();
 		let wheel_delta_y = input_manager.get_wheel_delta_y();
 		let wheel_delta = Vector2::create(wheel_delta_x, wheel_delta_y);
+		self.is_wheel_handled = false;
 		if wheel_delta.x != 0.0 || wheel_delta.y != 0.0 {
-			if let Some(hit_id) = node_tree.find_topmost_interactable_node(view_input_position) {
-				node_tree.dispatch_wheel(hit_id, engine, wheel_delta);
-			}
+			self.is_wheel_handled = node_tree.dispatch_wheel_at(view_input_position, engine, wheel_delta);
 		}
 
 		if input_manager.is_touch_pressed() {
