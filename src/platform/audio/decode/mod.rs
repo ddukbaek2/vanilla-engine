@@ -48,6 +48,7 @@ pub(crate) struct DecodedAudio {
 }
 
 impl DecodedAudio {
+	#[cfg(test)]
 	pub(crate) fn get_frame_count(&self) -> usize {
 		self.channel_data.first().map(|channel| channel.len()).unwrap_or(0)
 	}

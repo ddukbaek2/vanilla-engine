@@ -1,64 +1,149 @@
 //==============================================================================
-// 데스크탑 오디오 백엔드. (윈도우, 맥, 리눅스, kira 0.12)
-// - AudioContext 자리: kira::AudioManager. 만들 때 cpal 로 기본 출력 장치를 연다. 장치가 없으면 한 번 알리고 다시 열지 않는다.
-//   브라우저 자동재생 정책이 없어서 user gesture 는 처음부터 있는 것으로 둔다.
-// - 출력 자리(원본 audio_context.destination): 컨텍스트를 만들 때 메인 트랙 아래에 뿌리 트랙 하나를 만들고, 플레이어, 버스, 비프는 모두 그 아래에 단다.
-// - 컨텍스트 멈춤(SoundSystem 이 음소거 동안 부른다): 뿌리 트랙을 kira pause 로 멈춘다. 그 아래 트랙과 소리가 그 자리에서 서고(원본 AudioContext.suspend 처럼
-//   다시 돌리면 멈춘 자리부터 운다), 컨텍스트 시계도 서며, is_audio_context_running 은 거짓이다. resume 이 다시 돌린다.
-//   (게임 코드가 get_audio_context 로 받은 kira 매니저에 직접 단 트랙은 뿌리 트랙 밖이라 멈추지 않는다)
-// - 좌우(pan): 재생할 때 소리 설정의 panning 으로 건다. (-1 왼쪽 ~ 1 오른쪽, 원본 StereoPannerNode 자리, 다음 재생부터)
-// - AudioBuffer 자리: kira 의 StaticSoundData. 파일 전체를 디코딩해 들고, 복제는 Arc 하나라 값싸다.
-//   해석은 decode 가 원본의 크롬 decodeAudioData 와 같게 한다. (webm, ogg 의 Opus 와 Vorbis, mp3, wav, flac, m4a 와 aac 의 AAC.
-//   앞뒤 다듬기, 44100Hz, WebAudio 스피커 규칙으로 내린 1 채널이나 2 채널. 모노는 양쪽에 같게 싣는다)
-// - AudioPlayer 하나 = 믹서 하위 트랙 하나. (원본 GainNode 자리, 트랙 음량이 플레이어 음량이다)
-//   내보낼 곳(AudioOutputNode, 원본 outputNode, &RefCell<TrackHandle>)을 주면 그 트랙 아래, 없으면 뿌리 트랙 아래에 단다.
-//   재생할 때마다 버퍼를 복제해 그 트랙에 튼다. 트랙 핸들을 버리면 트랙과 그 위의 소리가 같이 없어진다.
-// - AudioBus 하나 = 뿌리 트랙 아래 하위 트랙 하나. (원본 출력에 이은 GainNode 자리) 버스로 만든 플레이어의 트랙은 그 아래에 달려
-//   버스 트랙의 음량이 함께 곱해진다. 버스 트랙 핸들을 버리면 그 아래 플레이어 트랙도 같이 없어진다.
-//   버스 트랙은 Rc<RefCell<TrackHandle>>(AudioGainNode, 원본 GainNode 자리)로 들어, get_gain_node 로 받은 손잡이가 있으면 버스를 버려도 살아 있다.
-//   (원본 GainNode 를 들고 있으면 버스가 버려져도 노드가 사는 것과 같다)
-// - 음량(0 ~ 1)은 데시벨로 바꿔 건다. kira 는 -60dB 이하를 무음으로 친다.
-// - 원본 WebAudio 처럼 음량 바꾸기와 정지는 바로 한다. (트윈 0초)
-// - 컨텍스트 시계(get_audio_context_time)는 컨텍스트를 만든 뒤 돌고 있던 시간이다. (멈춘 동안은 세지 않는다)
-// - BeepPlayer 의 톤은 엔벨로프를 곱한 파형을 샘플로 그려 뿌리 트랙에 튼다.
+// 데스크탑 오디오 백엔드. (윈도우, 맥, 리눅스, cpal 출력 위의 엔진 믹서)
+// - AudioContext 자리: cpal 로 기본 출력 장치를 열고 그 표본율로 도는 믹서(mixer.rs). 장치가 없으면 한 번 알리고 다시 열지 않는다.
+//   브라우저 자동재생 정책이 없어서 user gesture 는 처음부터 있는 것으로 둔다. sample_rate(), current_time() 은 웹 AudioContext 와 같은 이름이다.
+// - 노드 그래프는 원본 WebAudio 와 같고 셈도 크롬과 같다. (mixer.rs 머리 주석)
+//   AudioPlayer 하나 = 소스 + GainNode (+ 0 이 아닌 좌우를 처음 걸면 StereoPannerNode), 내보낼 곳(AudioOutputNode)을 주면 그 버스로, 없으면 출력으로.
+//   AudioBus 하나 = 출력에 이은 GainNode. (AudioGainNode, 원본 getGainNode) 버스로 만든 플레이어는 버스 손잡이를 들고 있어,
+//   원본 WebAudio 처럼 이어진 플레이어가 있는 동안 버스가 살아 있다. 손잡이가 모두 없어지면 노드를 뺀다.
+// - 컨텍스트 멈춤(SoundSystem 이 음소거 동안 부른다): 믹서가 그리기를 멈춰 소리와 시계가 그 자리에서 선다. (원본 AudioContext.suspend) resume 이 다시 돌린다.
+// - 컨텍스트 시계(get_audio_context_time)는 그린 프레임 수 / 표본율이다. (원본 currentTime, 128 프레임 퀀텀마다 오른다)
+// - AudioBuffer 자리: 푼 소리를 Arc 로 든다. 복제는 값싸다. 해석은 decode 가 원본의 크롬 decodeAudioData 와 같게 한다.
+//   (webm, ogg 의 Opus 와 Vorbis, mp3, wav, flac, m4a 와 aac 의 AAC. 앞뒤 다듬기, 44100Hz, WebAudio 스피커 규칙으로 내린 1 채널이나 2 채널)
+// - 음량, 좌우, 정지는 다음 렌더 퀀텀부터 바로 바뀐다. 재생 빠르기는 다음 재생부터다. (원본과 같다)
+// - BeepPlayer 의 톤은 엔벨로프를 곱한 파형을 컨텍스트 표본율로 그려 출력에 섞는다. (원본 OscillatorNode 가 컨텍스트 표본율로 도는 것과 같다)
 //   파형은 크롬 WebAudio 오실레이터(PeriodicWave)와 같은 셈이다. 푸리에 계수를 표 크기의 반 아래까지 두고 주파수에 따라 1/3 옥타브마다 높은 배음을 덜어 낸
 //   두 표 사이를 섞으며(대역 제한), 배음을 다 둔 첫 표의 가장 큰 값이 1 이 되게 크기를 맞춘다.
 //==============================================================================
+use super::mixer::{AudioBufferData, MixerCommand, MixerRenderer, MixerShared};
 use crate::core::audiomanager::AudioManagerState;
 use crate::misc::beepplayer::{BeepEnvelope, BeepWaveform, BEEP_FLOOR_VOLUME, BEEP_STOP_MARGIN_SECONDS};
 use crate::resource::audioasset::AudioAsset;
-use kira::sound::static_sound::{StaticSoundData, StaticSoundHandle, StaticSoundSettings};
-use kira::sound::{PlaybackState, Region};
-use kira::track::{TrackBuilder, TrackHandle};
-use kira::{AudioManagerSettings, Capacities, Decibels, DefaultBackend, Frame, StartTime, Tween};
-use std::cell::RefCell;
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use std::cell::{Cell, RefCell};
 use std::path::Path;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc::{channel, Sender};
 use std::sync::Arc;
-use std::time::Duration;
-use web_time::Instant;
 
-// 공유 오디오 컨텍스트. (원본 AudioContext 자리)
-pub type AudioContext = kira::AudioManager<DefaultBackend>;
-// 디코딩한 소리. (원본 AudioBuffer 자리)
-pub type AudioBuffer = StaticSoundData;
-// 버스의 GainNode 자리. (원본 AudioBus.getGainNode, 버스 트랙을 나눠 든다)
-pub type AudioGainNode = Rc<RefCell<TrackHandle>>;
-// 플레이어가 소리를 내보낼 곳. (원본 AudioPlayer 생성자의 outputNode 자리, 그 트랙 아래에 플레이어 트랙을 단다. AudioGainNode 의 as_deref)
-pub type AudioOutputNode<'a> = &'a RefCell<TrackHandle>;
+//==============================================================================
+// 공유 오디오 컨텍스트. (원본 AudioContext 자리, 장치 스트림과 믹서로 가는 길)
+//==============================================================================
+pub struct AudioContext {
+	_stream: cpal::Stream,
+	mixer_link: Rc<MixerLink>,
+}
+
+impl AudioContext {
+	//==============================================================================
+	// 표본율. (원본 audioContext.sampleRate, 장치의 표본율)
+	//==============================================================================
+	pub fn sample_rate(&self) -> f32 {
+		self.mixer_link.sample_rate as f32
+	}
+
+	//==============================================================================
+	// 시계. (초, 원본 audioContext.currentTime)
+	//==============================================================================
+	pub fn current_time(&self) -> f64 {
+		self.mixer_link.get_current_time()
+	}
+}
+
+//==============================================================================
+// 푼 소리. (원본 AudioBuffer 자리, 복제는 Arc 하나라 값싸다)
+//==============================================================================
+#[derive(Clone)]
+pub struct AudioBuffer {
+	data: Arc<AudioBufferData>,
+}
+
+impl AudioBuffer {
+	//==============================================================================
+	// 재생 시간. (초, 원본 duration)
+	//==============================================================================
+	pub fn duration(&self) -> f64 {
+		self.data.get_length() as f64 / self.data.sample_rate
+	}
+
+	//==============================================================================
+	// 프레임 수. (원본 length)
+	//==============================================================================
+	pub fn length(&self) -> usize {
+		self.data.get_length()
+	}
+
+	//==============================================================================
+	// 채널 수. (원본 numberOfChannels, 데스크탑은 스피커 규칙으로 내린 1 이나 2)
+	//==============================================================================
+	pub fn number_of_channels(&self) -> usize {
+		self.data.channel_list.len()
+	}
+
+	//==============================================================================
+	// 표본율. (원본 sampleRate, 44100)
+	//==============================================================================
+	pub fn sample_rate(&self) -> f32 {
+		self.data.sample_rate as f32
+	}
+}
+
+//==============================================================================
+// 버스의 GainNode. (원본 AudioBus.getGainNode, 마지막 손잡이가 없어지면 믹서에서 뺀다)
+//==============================================================================
+pub struct MixerGainNode {
+	inner: Rc<MixerGainNodeInner>,
+}
+
+struct MixerGainNodeInner {
+	mixer_link: Rc<MixerLink>,
+	bus_id: u64,
+}
+
+impl Drop for MixerGainNodeInner {
+	fn drop(&mut self) {
+		self.mixer_link.send(MixerCommand::RemoveBus { bus_id: self.bus_id });
+	}
+}
+
+// 버스의 GainNode 자리. (원본 AudioBus.getGainNode, 버스를 나눠 든다)
+pub type AudioGainNode = Rc<MixerGainNode>;
+// 플레이어가 소리를 내보낼 곳. (원본 AudioPlayer 생성자의 outputNode 자리, 그 버스로 낸다. AudioGainNode 의 as_deref)
+pub type AudioOutputNode<'a> = &'a MixerGainNode;
 
 // 데스크탑에는 자동재생 정책이 없다.
 pub const HAS_USER_GESTURE_AT_START: bool = true;
-// 하위 트랙 최대 수. (플레이어 하나가 하나씩 쓴다. kira 기본은 128)
-const SUB_TRACK_CAPACITY: usize = 1024;
-// 플레이어 트랙 하나에 동시에 있을 수 있는 소리 수. (다시 틀 때 앞 소리가 아직 빠지지 않았을 때를 위해 여유를 둔다)
-const PLAYER_SOUND_CAPACITY: usize = 8;
-// 비프 톤을 그리는 샘플레이트.
-const BEEP_SAMPLE_RATE: u32 = 44100;
 // 대역 제한 표의 한 옥타브를 나누는 구간 수. (크롬 PeriodicWave 의 kNumberOfOctaveBands)
 const PERIODIC_WAVE_OCTAVE_BAND_COUNT: f64 = 3.0;
 // 한 옥타브의 센트.
 const CENTS_PER_OCTAVE: f64 = 1200.0;
+
+//==============================================================================
+// 믹서로 가는 길. (명령을 보내고 시계를 읽는다, 노드 번호를 매긴다)
+//==============================================================================
+struct MixerLink {
+	command_sender: Sender<MixerCommand>,
+	shared: Arc<MixerShared>,
+	sample_rate: f64,
+	next_node_id: Cell<u64>,
+}
+
+impl MixerLink {
+	fn send(&self, command: MixerCommand) {
+		let _ = self.command_sender.send(command);
+	}
+
+	fn create_node_id(&self) -> u64 {
+		let node_id = self.next_node_id.get() + 1;
+		self.next_node_id.set(node_id);
+		node_id
+	}
+
+	fn get_current_time(&self) -> f64 {
+		self.shared.rendered_frame_count.load(Ordering::Acquire) as f64 / self.sample_rate
+	}
+}
 
 //==============================================================================
 // 매니저가 드는 백엔드 상태.
@@ -66,14 +151,10 @@ const CENTS_PER_OCTAVE: f64 = 1200.0;
 pub struct AudioPlatformState {
 	// 소리 장치를 열지 못했는지. (한 번 실패하면 다시 열지 않는다)
 	is_audio_context_failed: bool,
-	// 컨텍스트를 멈춰 두었는지. (뿌리 트랙을 멈춘 동안)
+	// 컨텍스트를 멈춰 두었는지.
 	is_audio_context_suspended: bool,
-	// 뿌리 트랙. (원본 audio_context.destination 자리, 플레이어, 버스, 비프가 그 아래에 달린다)
-	root_track_handle: Option<TrackHandle>,
-	// 컨텍스트가 마지막으로 돌기 시작한 때. (멈춰 있으면 None)
-	audio_context_running_instant: Option<Instant>,
-	// 그 전까지 돈 시간. (초, 멈출 때 더한다)
-	audio_context_elapsed_seconds: f64,
+	// 믹서로 가는 길. (컨텍스트가 있을 때)
+	mixer_link: Option<Rc<MixerLink>>,
 }
 
 //==============================================================================
@@ -83,55 +164,101 @@ pub fn create_audio_platform_state() -> AudioPlatformState {
 	AudioPlatformState {
 		is_audio_context_failed: false,
 		is_audio_context_suspended: false,
-		root_track_handle: None,
-		audio_context_running_instant: None,
-		audio_context_elapsed_seconds: 0.0,
+		mixer_link: None,
 	}
 }
 
 //==============================================================================
-// 오디오 컨텍스트 생성. (kira 매니저와 기본 출력 장치, 메인 트랙 아래 뿌리 트랙)
+// 오디오 컨텍스트 생성. (cpal 기본 출력 장치를 그 기본 설정으로 열고 믹서를 소리 스레드에 넘긴다)
 //==============================================================================
 pub fn create_audio_context(audio_platform_state: &mut AudioPlatformState) -> Option<AudioContext> {
 	if audio_platform_state.is_audio_context_failed {
 		return None;
 	}
-	let audio_manager_settings = AudioManagerSettings::<DefaultBackend> {
-		capacities: Capacities {
-			sub_track_capacity: SUB_TRACK_CAPACITY,
-			..Capacities::default()
-		},
-		..AudioManagerSettings::default()
-	};
-	let mut audio_context = match AudioContext::new(audio_manager_settings) {
-		Ok(audio_context) => {
-			audio_context
+	match open_output_stream() {
+		Ok((stream, mixer_link)) => {
+			audio_platform_state.is_audio_context_suspended = false;
+			audio_platform_state.mixer_link = Some(mixer_link.clone());
+			Some(AudioContext {
+				_stream: stream,
+				mixer_link,
+			})
 		}
 		Err(error) => {
 			eprintln!("AudioManager: 소리 장치를 열지 못했습니다. 소리 없이 계속합니다. ({})", error);
 			audio_platform_state.is_audio_context_failed = true;
-			return None;
-		}
-	};
-	let root_track_builder = TrackBuilder::new().sub_track_capacity(SUB_TRACK_CAPACITY);
-	match audio_context.add_sub_track(root_track_builder) {
-		Ok(root_track_handle) => {
-			audio_platform_state.root_track_handle = Some(root_track_handle);
-		}
-		Err(error) => {
-			eprintln!("AudioManager: 뿌리 믹서 트랙을 만들지 못했습니다. 소리 없이 계속합니다. ({})", error);
-			audio_platform_state.is_audio_context_failed = true;
-			return None;
+			None
 		}
 	}
-	audio_platform_state.is_audio_context_suspended = false;
-	audio_platform_state.audio_context_running_instant = Some(Instant::now());
-	audio_platform_state.audio_context_elapsed_seconds = 0.0;
-	Some(audio_context)
 }
 
 //==============================================================================
-// 오디오 컨텍스트 재개. (suspend_audio_context 로 멈춰 둔 것만 뿌리 트랙을 다시 돌린다)
+// 출력 스트림 열기. (장치의 표본 꼴마다 실수 믹서 출력을 그 꼴로 바꿔 낸다)
+//==============================================================================
+fn open_output_stream() -> Result<(cpal::Stream, Rc<MixerLink>), String> {
+	let host = cpal::default_host();
+	let device = host.default_output_device().ok_or_else(|| String::from("기본 출력 장치가 없습니다"))?;
+	let supported_config = device.default_output_config().map_err(|error| format!("{}", error))?;
+	let sample_format = supported_config.sample_format();
+	let stream_config = supported_config.config();
+	let sample_rate = stream_config.sample_rate as f64;
+	let (command_sender, command_receiver) = channel();
+	let shared = Arc::new(MixerShared { rendered_frame_count: AtomicU64::new(0) });
+	let renderer = MixerRenderer::new(command_receiver, shared.clone(), sample_rate);
+	let stream = match sample_format {
+		cpal::SampleFormat::F32 => build_output_stream::<f32>(&device, stream_config, renderer),
+		cpal::SampleFormat::F64 => build_output_stream::<f64>(&device, stream_config, renderer),
+		cpal::SampleFormat::I16 => build_output_stream::<i16>(&device, stream_config, renderer),
+		cpal::SampleFormat::I32 => build_output_stream::<i32>(&device, stream_config, renderer),
+		cpal::SampleFormat::U16 => build_output_stream::<u16>(&device, stream_config, renderer),
+		cpal::SampleFormat::U8 => build_output_stream::<u8>(&device, stream_config, renderer),
+		cpal::SampleFormat::I8 => build_output_stream::<i8>(&device, stream_config, renderer),
+		other => {
+			return Err(format!("표본 꼴 {} 은 받지 않습니다", other));
+		}
+	}?;
+	stream.play().map_err(|error| format!("{}", error))?;
+	Ok((stream, Rc::new(MixerLink {
+		command_sender,
+		shared,
+		sample_rate,
+		next_node_id: Cell::new(0),
+	})))
+}
+
+//==============================================================================
+// 꼴 하나로 스트림 짓기. (믹서가 실수로 채운 것을 장치 꼴로 바꾼다, 오류는 한 번만 알린다)
+//==============================================================================
+fn build_output_stream<T>(device: &cpal::Device, stream_config: cpal::StreamConfig, mut renderer: MixerRenderer) -> Result<cpal::Stream, String>
+where
+	T: cpal::SizedSample + cpal::FromSample<f32>,
+{
+	let channel_count = stream_config.channels as usize;
+	let mut float_output: Vec<f32> = Vec::new();
+	let is_error_reported = Arc::new(AtomicBool::new(false));
+	device.build_output_stream::<T, _, _>(
+		stream_config,
+		move |output: &mut [T], _: &cpal::OutputCallbackInfo| {
+			if float_output.len() < output.len() {
+				float_output.resize(output.len(), 0.0);
+			}
+			let float_slice = &mut float_output[..output.len()];
+			renderer.render_interleaved(float_slice, channel_count);
+			for (sample, value) in output.iter_mut().zip(float_slice.iter()) {
+				*sample = T::from_sample(*value);
+			}
+		},
+		move |error| {
+			if !is_error_reported.swap(true, Ordering::Relaxed) {
+				eprintln!("AudioManager: 소리 장치 오류. ({})", error);
+			}
+		},
+		None,
+	).map_err(|error| format!("{}", error))
+}
+
+//==============================================================================
+// 오디오 컨텍스트 재개. (suspend_audio_context 로 멈춰 둔 것만 다시 돌린다)
 //==============================================================================
 pub fn resume_audio_context(state_cell: &Rc<RefCell<AudioManagerState>>) {
 	let state = &mut *state_cell.borrow_mut();
@@ -139,15 +266,14 @@ pub fn resume_audio_context(state_cell: &Rc<RefCell<AudioManagerState>>) {
 	if state.audio_context.is_none() || !platform_state.is_audio_context_suspended {
 		return;
 	}
-	if let Some(root_track_handle) = platform_state.root_track_handle.as_mut() {
-		root_track_handle.resume(create_immediate_tween());
+	if let Some(mixer_link) = &platform_state.mixer_link {
+		mixer_link.send(MixerCommand::Resume);
 	}
 	platform_state.is_audio_context_suspended = false;
-	platform_state.audio_context_running_instant = Some(Instant::now());
 }
 
 //==============================================================================
-// 오디오 컨텍스트 멈춤. (돌고 있을 때만 뿌리 트랙을 멈추고 시계를 세운다, 원본 audio_context.suspend() 자리)
+// 오디오 컨텍스트 멈춤. (돌고 있을 때만 그리기와 시계를 세운다, 원본 audio_context.suspend() 자리)
 //==============================================================================
 pub fn suspend_audio_context(state_cell: &Rc<RefCell<AudioManagerState>>) {
 	let state = &mut *state_cell.borrow_mut();
@@ -155,11 +281,8 @@ pub fn suspend_audio_context(state_cell: &Rc<RefCell<AudioManagerState>>) {
 	if state.audio_context.is_none() || platform_state.is_audio_context_suspended {
 		return;
 	}
-	if let Some(root_track_handle) = platform_state.root_track_handle.as_mut() {
-		root_track_handle.pause(create_immediate_tween());
-	}
-	if let Some(audio_context_running_instant) = platform_state.audio_context_running_instant.take() {
-		platform_state.audio_context_elapsed_seconds += audio_context_running_instant.elapsed().as_secs_f64();
+	if let Some(mixer_link) = &platform_state.mixer_link {
+		mixer_link.send(MixerCommand::Suspend);
 	}
 	platform_state.is_audio_context_suspended = true;
 }
@@ -179,89 +302,42 @@ pub fn is_audio_context_running(state: &AudioManagerState) -> bool {
 }
 
 //==============================================================================
-// 오디오 컨텍스트 시계. (초, 원본 audio_context.currentTime 자리, 컨텍스트를 만든 뒤 돌고 있던 시간, 없으면 0)
+// 오디오 컨텍스트 시계. (초, 원본 audio_context.currentTime 자리, 그린 프레임 수 / 표본율, 없으면 0)
 //==============================================================================
 pub fn get_audio_context_time(state: &AudioManagerState) -> f64 {
-	let platform_state = &state.platform_state;
-	let running_seconds = match platform_state.audio_context_running_instant {
-		Some(audio_context_running_instant) => {
-			audio_context_running_instant.elapsed().as_secs_f64()
-		}
-		None => {
-			0.0
-		}
-	};
-	platform_state.audio_context_elapsed_seconds + running_seconds
+	state.platform_state.mixer_link.as_ref().map(|mixer_link| mixer_link.get_current_time()).unwrap_or(0.0)
 }
 
 //==============================================================================
-// 바로 끝나는 트윈. (원본 gain.value 대입, source.stop() 처럼 바로 바꾼다)
-//==============================================================================
-fn create_immediate_tween() -> Tween {
-	Tween {
-		duration: Duration::ZERO,
-		..Tween::default()
-	}
-}
-
-//==============================================================================
-// 선형 음량(0 ~ 1)을 데시벨로. (0 이하는 무음)
-//==============================================================================
-pub(crate) fn amplitude_to_decibels(amplitude: f32) -> Decibels {
-	if amplitude <= 0.0 {
-		return Decibels::SILENCE;
-	}
-	let decibels = 20.0 * amplitude.log10();
-	Decibels(decibels.max(Decibels::SILENCE.0))
-}
-
-//==============================================================================
-// 부모 트랙 아래에 플레이어 트랙 하나 만들기. (트랙이 모자라면 알리고 None)
-//==============================================================================
-fn create_player_track(parent_track_handle: &mut TrackHandle) -> Option<TrackHandle> {
-	let track_builder = TrackBuilder::new().sound_capacity(PLAYER_SOUND_CAPACITY);
-	match parent_track_handle.add_sub_track(track_builder) {
-		Ok(track_handle) => {
-			Some(track_handle)
-		}
-		Err(error) => {
-			eprintln!("AudioPlayer: 믹서 트랙을 만들지 못했습니다. ({})", error);
-			None
-		}
-	}
-}
-
-//==============================================================================
-// 플레이어 하나의 소리 내는 부분. (하위 트랙 하나와 지금 재생 중인 소리 핸들)
+// 플레이어 하나의 소리 내는 부분. (믹서의 플레이어 노드, 지금 소스의 세대)
 //==============================================================================
 pub struct AudioPlayerBackend {
-	track_handle: Option<TrackHandle>,
-	sound_handle: Option<StaticSoundHandle>,
+	mixer_link: Option<Rc<MixerLink>>,
+	player_id: u64,
+	// 내보내는 버스. (원본처럼 이어진 동안 버스를 살려 둔다)
+	_output_gain_node: Option<Rc<MixerGainNodeInner>>,
+	// 시작한 소스의 세대와 믹서가 끝냈다고 알린 세대.
+	started_generation: u64,
+	ended_generation: Arc<AtomicU64>,
+	is_source_active: bool,
 	playback_rate: f64,
-	panning: f32,
 }
 
 impl AudioPlayerBackend {
 	//==============================================================================
-	// 생성. (내보낼 트랙을 주면 그 아래, 없으면 컨텍스트의 뿌리 트랙 아래에 하위 트랙을 하나 만든다. 컨텍스트가 없거나 트랙이 모자라면 소리 없는 플레이어)
+	// 생성. (내보낼 버스를 주면 그 버스로, 없으면 출력으로. 컨텍스트가 없으면 소리 없는 플레이어)
 	//==============================================================================
 	pub fn create(state: &mut AudioManagerState, output_node: Option<AudioOutputNode<'_>>) -> AudioPlayerBackend {
-		let track_handle = match output_node {
-			Some(output_track_handle) => {
-				create_player_track(&mut output_track_handle.borrow_mut())
+		let output_gain_node = output_node.map(|output_node| output_node.inner.clone());
+		let mixer_link = match &output_gain_node {
+			Some(output_gain_node) => {
+				Some(output_gain_node.mixer_link.clone())
 			}
 			None => {
-				match state.platform_state.root_track_handle.as_mut() {
-					Some(root_track_handle) => {
-						create_player_track(root_track_handle)
-					}
-					None => {
-						None
-					}
-				}
+				state.platform_state.mixer_link.clone()
 			}
 		};
-		AudioPlayerBackend::create_with_track(track_handle)
+		AudioPlayerBackend::create_with_output(mixer_link, output_gain_node)
 	}
 
 	//==============================================================================
@@ -269,18 +345,42 @@ impl AudioPlayerBackend {
 	//==============================================================================
 	#[cfg(test)]
 	pub fn create_silent() -> AudioPlayerBackend {
-		AudioPlayerBackend::create_with_track(None)
+		AudioPlayerBackend::create_with_output(None, None)
 	}
 
 	//==============================================================================
-	// 만든 트랙으로 생성. (트랙이 없으면 소리 없는 플레이어)
+	// 믹서에 플레이어 노드를 더하고 생성. (믹서가 없으면 소리 없는 플레이어)
 	//==============================================================================
-	fn create_with_track(track_handle: Option<TrackHandle>) -> AudioPlayerBackend {
+	fn create_with_output(mixer_link: Option<Rc<MixerLink>>, output_gain_node: Option<Rc<MixerGainNodeInner>>) -> AudioPlayerBackend {
+		let ended_generation = Arc::new(AtomicU64::new(0));
+		let player_id = match &mixer_link {
+			Some(mixer_link) => {
+				let player_id = mixer_link.create_node_id();
+				mixer_link.send(MixerCommand::AddPlayer {
+					player_id,
+					output_bus_id: output_gain_node.as_ref().map(|output_gain_node| output_gain_node.bus_id),
+					ended_generation: ended_generation.clone(),
+				});
+				player_id
+			}
+			None => {
+				0
+			}
+		};
 		AudioPlayerBackend {
-			track_handle,
-			sound_handle: None,
+			mixer_link,
+			player_id,
+			_output_gain_node: output_gain_node,
+			started_generation: 0,
+			ended_generation,
+			is_source_active: false,
 			playback_rate: 1.0,
-			panning: 0.0,
+		}
+	}
+
+	fn send(&self, command: MixerCommand) {
+		if let Some(mixer_link) = &self.mixer_link {
+			mixer_link.send(command);
 		}
 	}
 
@@ -288,15 +388,16 @@ impl AudioPlayerBackend {
 	// 소리를 낼 수 있는지. (원본 audio_context && gain_node)
 	//==============================================================================
 	pub fn is_available(&self) -> bool {
-		self.track_handle.is_some()
+		self.mixer_link.is_some()
 	}
 
 	//==============================================================================
-	// 재생 중인 소리를 멈춘다.
+	// 재생 중인 소스를 멈춘다. (원본 source.stop())
 	//==============================================================================
 	pub fn stop_source(&mut self) {
-		if let Some(mut sound_handle) = self.sound_handle.take() {
-			sound_handle.stop(create_immediate_tween());
+		if self.is_source_active {
+			self.send(MixerCommand::StopSource { player_id: self.player_id });
+			self.is_source_active = false;
 		}
 	}
 
@@ -308,32 +409,22 @@ impl AudioPlayerBackend {
 	}
 
 	//==============================================================================
-	// 재생 시작. (버퍼를 복제해 time 초부터, 루프면 처음부터 끝까지 되풀이)
+	// 재생 시작. (버퍼를 time 초부터, 루프면 버퍼 전체를 되풀이. 원본 createBufferSource + start(0, time))
 	//==============================================================================
 	pub fn start_playback(&mut self, audio_buffer: &AudioBuffer, is_loop: bool, time: f64) {
-		let track_handle = match self.track_handle.as_mut() {
-			Some(track_handle) => {
-				track_handle
-			}
-			None => {
-				return;
-			}
-		};
-		let loop_region: Option<Region> = if is_loop {
-			Some(Region::from(..))
+		if self.mixer_link.is_none() {
+			return;
 		}
-		else {
-			None
-		};
-		let sound_data = audio_buffer.start_position(time).loop_region(loop_region).playback_rate(self.playback_rate).panning(self.panning);
-		match track_handle.play(sound_data) {
-			Ok(sound_handle) => {
-				self.sound_handle = Some(sound_handle);
-			}
-			Err(error) => {
-				eprintln!("AudioPlayer: 재생하지 못했습니다. ({})", error);
-			}
-		}
+		self.started_generation += 1;
+		self.send(MixerCommand::StartSource {
+			player_id: self.player_id,
+			audio_buffer: audio_buffer.data.clone(),
+			is_loop,
+			offset_seconds: time,
+			playback_rate: self.playback_rate,
+			generation: self.started_generation,
+		});
+		self.is_source_active = true;
 	}
 
 	//==============================================================================
@@ -344,68 +435,57 @@ impl AudioPlayerBackend {
 	}
 
 	//==============================================================================
-	// 좌우 설정. (-1 왼쪽 ~ 1 오른쪽, 다음 재생부터)
+	// 좌우 설정. (-1 왼쪽 ~ 1 오른쪽, 0 이 아니면 GainNode 와 내보낼 곳 사이에 StereoPannerNode 를 끼운다. 원본 SoundSystem.playEffect, 웹 백엔드와 같다)
 	//==============================================================================
 	pub fn set_pan(&mut self, pan: f32) {
-		self.panning = pan;
+		self.send(MixerCommand::SetPlayerPan { player_id: self.player_id, pan });
 	}
 
 	//==============================================================================
-	// 음량 설정. (트랙 음량, 0 ~ 1)
+	// 음량 설정. (GainNode 의 값, 0 ~ 1)
 	//==============================================================================
 	pub fn set_gain(&mut self, gain: f32) {
-		if let Some(track_handle) = self.track_handle.as_mut() {
-			let decibels = amplitude_to_decibels(gain);
-			track_handle.set_volume(decibels, create_immediate_tween());
-		}
+		self.send(MixerCommand::SetPlayerGain { player_id: self.player_id, gain });
 	}
 
 	//==============================================================================
-	// 재생 중인지. (소리 핸들이 있고 아직 멈추지 않았으면 참)
+	// 재생 중인지. (시작한 소스를 믹서가 아직 끝내지 않았으면 참, 원본 onended 전)
 	//==============================================================================
 	pub fn is_playing(&self) -> bool {
-		match &self.sound_handle {
-			Some(sound_handle) => {
-				sound_handle.state() != PlaybackState::Stopped
-			}
-			None => {
-				false
-			}
-		}
+		self.is_source_active && self.ended_generation.load(Ordering::Acquire) < self.started_generation
+	}
+}
+
+impl Drop for AudioPlayerBackend {
+	fn drop(&mut self) {
+		self.send(MixerCommand::RemovePlayer { player_id: self.player_id });
 	}
 }
 
 //==============================================================================
-// 버스 하나의 소리 모으는 부분. (뿌리 트랙 아래 하위 트랙 하나, 버스로 만든 플레이어의 트랙이 그 아래에 달린다)
+// 버스 하나의 소리 모으는 부분. (출력에 이은 GainNode)
 //==============================================================================
 pub struct AudioBusBackend {
-	track_handle: Option<AudioGainNode>,
+	gain_node: Option<AudioGainNode>,
 }
 
 impl AudioBusBackend {
 	//==============================================================================
-	// 생성. (컨텍스트가 있으면 뿌리 트랙 아래 하위 트랙을 하나 만든다. 없거나 트랙이 모자라면 소리 없는 버스)
+	// 생성. (컨텍스트가 있으면 믹서에 버스 노드를 더한다. 없으면 소리 없는 버스)
 	//==============================================================================
 	pub fn create(state: &mut AudioManagerState) -> AudioBusBackend {
-		let track_handle = match state.platform_state.root_track_handle.as_mut() {
-			Some(root_track_handle) => {
-				let track_builder = TrackBuilder::new().sub_track_capacity(SUB_TRACK_CAPACITY);
-				match root_track_handle.add_sub_track(track_builder) {
-					Ok(track_handle) => {
-						Some(Rc::new(RefCell::new(track_handle)))
-					}
-					Err(error) => {
-						eprintln!("AudioBus: 믹서 트랙을 만들지 못했습니다. ({})", error);
-						None
-					}
-				}
-			}
-			None => {
-				None
-			}
-		};
+		let gain_node = state.platform_state.mixer_link.as_ref().map(|mixer_link| {
+			let bus_id = mixer_link.create_node_id();
+			mixer_link.send(MixerCommand::AddBus { bus_id });
+			Rc::new(MixerGainNode {
+				inner: Rc::new(MixerGainNodeInner {
+					mixer_link: mixer_link.clone(),
+					bus_id,
+				}),
+			})
+		});
 		AudioBusBackend {
-			track_handle,
+			gain_node,
 		}
 	}
 
@@ -413,39 +493,37 @@ impl AudioBusBackend {
 	// 소리를 모을 수 있는지. (원본 audio_context && gain_node)
 	//==============================================================================
 	pub fn is_available(&self) -> bool {
-		self.track_handle.is_some()
+		self.gain_node.is_some()
 	}
 
 	//==============================================================================
-	// 음량 설정. (버스 트랙 음량, 0 ~ 1)
+	// 음량 설정. (버스 GainNode 의 값, 0 ~ 1)
 	//==============================================================================
 	pub fn set_gain(&mut self, gain: f32) {
-		if let Some(track_handle) = self.track_handle.as_ref() {
-			let decibels = amplitude_to_decibels(gain);
-			track_handle.borrow_mut().set_volume(decibels, create_immediate_tween());
+		if let Some(gain_node) = &self.gain_node {
+			gain_node.inner.mixer_link.send(MixerCommand::SetBusGain { bus_id: gain_node.inner.bus_id, gain });
 		}
 	}
 
 	//==============================================================================
-	// 이 버스로 트는 플레이어 백엔드 생성. (버스 트랙 아래 하위 트랙 하나, 버스가 소리 없으면 소리 없는 플레이어)
+	// 이 버스로 트는 플레이어 백엔드 생성. (버스가 소리 없으면 소리 없는 플레이어)
 	//==============================================================================
 	pub fn create_player_backend(&mut self) -> AudioPlayerBackend {
-		let track_handle = match self.track_handle.as_ref() {
-			Some(bus_track_handle) => {
-				create_player_track(&mut bus_track_handle.borrow_mut())
+		match &self.gain_node {
+			Some(gain_node) => {
+				AudioPlayerBackend::create_with_output(Some(gain_node.inner.mixer_link.clone()), Some(gain_node.inner.clone()))
 			}
 			None => {
-				None
+				AudioPlayerBackend::create_with_output(None, None)
 			}
-		};
-		AudioPlayerBackend::create_with_track(track_handle)
+		}
 	}
 
 	//==============================================================================
-	// 버스 트랙. (원본 getGainNode 자리, 소리 없는 버스는 None)
+	// 버스 GainNode. (원본 getGainNode 자리, 소리 없는 버스는 None)
 	//==============================================================================
 	pub fn get_gain_node(&self) -> Option<&AudioGainNode> {
-		self.track_handle.as_ref()
+		self.gain_node.as_ref()
 	}
 }
 
@@ -488,27 +566,15 @@ pub fn load_audio_bytes(audio_asset: &Rc<AudioAsset>, bytes: Vec<u8>) -> Result<
 }
 
 //==============================================================================
-// 소리 파일 바이트를 버퍼로. (decode 가 크롬 decodeAudioData 처럼 푼 채널을 kira 프레임으로, 모노는 양쪽에 같게)
+// 소리 파일 바이트를 버퍼로. (decode 가 크롬 decodeAudioData 처럼 푼 1 채널이나 2 채널)
 //==============================================================================
 fn create_audio_buffer(bytes: &[u8]) -> Result<AudioBuffer, String> {
 	let decoded_audio = super::decode::decode_audio_data(bytes)?;
-	let frame_count = decoded_audio.get_frame_count();
-	let frame_list: Vec<Frame> = match decoded_audio.channel_data.as_slice() {
-		[mono] => {
-			mono.iter().map(|sample| Frame::from_mono(*sample)).collect()
-		}
-		[left, right] => {
-			(0..frame_count).map(|frame_index| Frame::new(left[frame_index], right[frame_index])).collect()
-		}
-		_ => {
-			return Err(String::from("no channel"));
-		}
-	};
-	Ok(StaticSoundData {
-		sample_rate: decoded_audio.sample_rate,
-		frames: Arc::from(frame_list),
-		settings: StaticSoundSettings::new(),
-		slice: None,
+	Ok(AudioBuffer {
+		data: Arc::new(AudioBufferData {
+			sample_rate: decoded_audio.sample_rate as f64,
+			channel_list: decoded_audio.channel_data,
+		}),
 	})
 }
 
@@ -516,59 +582,39 @@ fn create_audio_buffer(bytes: &[u8]) -> Result<AudioBuffer, String> {
 // 버퍼의 재생 시간. (초)
 //==============================================================================
 pub fn get_audio_buffer_duration(audio_buffer: &AudioBuffer) -> f64 {
-	audio_buffer.duration().as_secs_f64()
+	audio_buffer.duration()
 }
 
 //==============================================================================
-// 비프 톤 하나 재생. (그린 샘플을 뿌리 트랙에, 지연이 있으면 kira 의 지연 시작으로)
+// 비프 톤 하나 재생. (컨텍스트 표본율로 그린 표본을 출력에, 지연은 프레임으로. 원본 osc.start(now + delay))
 //==============================================================================
 pub fn play_beep_tone(state: &mut AudioManagerState, beep_envelope: &BeepEnvelope) {
-	let root_track_handle = match state.platform_state.root_track_handle.as_mut() {
-		Some(root_track_handle) => {
-			root_track_handle
-		}
-		None => {
-			return;
-		}
+	let Some(mixer_link) = &state.platform_state.mixer_link else {
+		return;
 	};
-	let frame_list = render_beep_frames(beep_envelope, BEEP_SAMPLE_RATE);
-	let start_time = if beep_envelope.delay_seconds > 0.0 {
-		StartTime::Delayed(Duration::from_secs_f64(beep_envelope.delay_seconds))
-	}
-	else {
-		StartTime::Immediate
-	};
-	let beep_sound_data = StaticSoundData {
-		sample_rate: BEEP_SAMPLE_RATE,
-		frames: Arc::from(frame_list),
-		settings: StaticSoundSettings::new().start_time(start_time),
-		slice: None,
-	};
-	if let Err(error) = root_track_handle.play(beep_sound_data) {
-		eprintln!("BeepPlayer: 재생하지 못했습니다. ({})", error);
-	}
+	let sample_list = render_beep_samples(beep_envelope, mixer_link.sample_rate);
+	let delay_frame_count = (beep_envelope.delay_seconds.max(0.0) * mixer_link.sample_rate).round() as u64;
+	mixer_link.send(MixerCommand::PlayBeep { sample_list, delay_frame_count });
 }
 
 //==============================================================================
-// 비프 톤을 샘플로 그린다. (원본 오실레이터가 도는 길이 = 엔벨로프 길이 + 0.01초)
+// 비프 톤을 표본으로 그린다. (원본 오실레이터가 도는 길이 = 엔벨로프 길이 + 0.01초, 모노)
 //==============================================================================
-fn render_beep_frames(beep_envelope: &BeepEnvelope, sample_rate: u32) -> Vec<Frame> {
-	let sample_rate_value = sample_rate as f64;
+fn render_beep_samples(beep_envelope: &BeepEnvelope, sample_rate: f64) -> Vec<f32> {
 	let total_seconds = beep_envelope.duration_seconds + BEEP_STOP_MARGIN_SECONDS;
-	let frame_count = (total_seconds * sample_rate_value).ceil() as usize;
-	let phase_step = beep_envelope.frequency as f64 / sample_rate_value;
-	let band_limited_waveform = BandLimitedWaveform::create(beep_envelope.waveform, beep_envelope.frequency as f64, sample_rate_value);
+	let frame_count = (total_seconds * sample_rate).ceil() as usize;
+	let phase_step = beep_envelope.frequency as f64 / sample_rate;
+	let band_limited_waveform = BandLimitedWaveform::create(beep_envelope.waveform, beep_envelope.frequency as f64, sample_rate);
 	let mut phase = 0.0f64;
-	let mut frame_list = Vec::with_capacity(frame_count);
+	let mut sample_list = Vec::with_capacity(frame_count);
 	for frame_index in 0..frame_count {
-		let elapsed_seconds = frame_index as f64 / sample_rate_value;
+		let elapsed_seconds = frame_index as f64 / sample_rate;
 		let gain = get_beep_envelope_gain(beep_envelope, elapsed_seconds);
-		let sample = band_limited_waveform.read_sample(phase) * gain;
-		frame_list.push(Frame::from_mono(sample));
+		sample_list.push(band_limited_waveform.read_sample(phase) * gain);
 		phase += phase_step;
 		phase -= phase.floor();
 	}
-	frame_list
+	sample_list
 }
 
 //==============================================================================
@@ -785,18 +831,6 @@ mod tests {
 	use super::*;
 
 	//==============================================================================
-	// 음량을 데시벨로 바꾸면 1 은 0dB, 0.5 는 약 -6dB, 0 과 아주 작은 값은 무음이다.
-	//==============================================================================
-	#[test]
-	fn amplitude_to_decibels_maps_volume() {
-		assert_eq!(amplitude_to_decibels(1.0), Decibels::IDENTITY);
-		assert!((amplitude_to_decibels(0.5).0 - (-6.0206)).abs() < 1e-3);
-		assert_eq!(amplitude_to_decibels(0.0), Decibels::SILENCE);
-		assert_eq!(amplitude_to_decibels(0.00001), Decibels::SILENCE);
-		assert!((amplitude_to_decibels(0.5).as_amplitude() - 0.5).abs() < 1e-5);
-	}
-
-	//==============================================================================
 	// 엔벨로프는 바닥에서 올라 최고를 지키다 바닥으로 내려간다.
 	//==============================================================================
 	#[test]
@@ -817,7 +851,7 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn band_limited_waveform_matches_periodic_wave() {
-		let sample_rate = BEEP_SAMPLE_RATE as f64;
+		let sample_rate = 44100.0;
 		for beep_waveform in [BeepWaveform::Sine, BeepWaveform::Square, BeepWaveform::Sawtooth, BeepWaveform::Triangle] {
 			let band_limited_waveform = BandLimitedWaveform::create(beep_waveform, 440.0, sample_rate);
 			assert!(band_limited_waveform.read_sample(0.0).abs() < 1e-6);
@@ -845,7 +879,7 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn band_limited_waveform_culls_partials() {
-		let sample_rate = BEEP_SAMPLE_RATE as f64;
+		let sample_rate = 44100.0;
 		let waveform_440 = BandLimitedWaveform::create(BeepWaveform::Sawtooth, 440.0, sample_rate);
 		assert_eq!(waveform_440.get_higher_partial_count(), 40);
 		assert_eq!(waveform_440.lower_partial_count, 32);
@@ -864,12 +898,12 @@ mod tests {
 	#[test]
 	fn render_beep_frames_length() {
 		let beep_envelope = BeepEnvelope::create(440.0, 0.09, BeepWaveform::Square, 0.06, 0.35, 0.7);
-		let frame_list = render_beep_frames(&beep_envelope, 44100);
+		let frame_list = render_beep_samples(&beep_envelope, 44100.0);
 		// (0.09 + 0.01 의 부동소수 오차로 마지막 한 샘플은 올림에 따라 달라진다)
 		let expected_frame_count = (0.1f64 * 44100.0) as i64;
 		assert!((frame_list.len() as i64 - expected_frame_count).abs() <= 1);
 		// 대역을 제한한 사각파는 깁스 너울 꼭대기가 1 근처다.
-		let peak_sample = frame_list.iter().map(|frame| frame.left.abs()).fold(0.0f32, f32::max);
+		let peak_sample = frame_list.iter().map(|sample| sample.abs()).fold(0.0f32, f32::max);
 		assert!((peak_sample - 0.35 * 0.7).abs() < 0.35 * 0.7 * 0.05);
 	}
 }

@@ -40,7 +40,7 @@ src/platform/        창, GL 컨텍스트, 입력 이벤트, 프레임 루프, �
   web.rs             캔버스 + WebGL2 + request_animation_frame + fetch
   web/               systemfont(브라우저 Canvas2D 로 글자 굽기와 재기), textinput(숨긴 DOM input, 클립보드)
   framelimiter.rs    웹 최대 FPS 의 프레임 세기
-  audio/             데스크탑 kira 0.12, 웹 WebAudio
+  audio/             데스크탑 cpal 위의 엔진 믹서(mixer.rs, 크롬 WebAudio 와 같은 노드 그래프와 셈), 웹 WebAudio
     decode/          데스크탑 소리 해석 (크롬 decodeAudioData 와 같게: symphonia 0.6, Opus 는 opus-pure, 앞뒤 다듬기, SincResampler, 내리기)
 ```
 
@@ -145,6 +145,7 @@ EngineRunner (플랫폼이 들고 프레임마다 부른다)
 - `AudioAsset` 은 오디오 백엔드와 붙어 있어 `engine.load_audio_asset` 으로 읽고 `track_audio_asset` 으로 맡긴다.
 - 그림: 데스크탑은 png, jpeg, webp, gif(첫 장), bmp, ico 를 image 크레이트로, SVG 를 resvg 로, AVIF 를 엔진의 HEIF 상자 읽기와 rav1d 로 푼다. 웹은 원본처럼 브라우저(HTMLImageElement 의 decode)가 푼다. 그림의 형은 원본처럼 응답의 content-type 이다. (SVG 는 형으로, 래스터는 내용으로 가린다. 응답이 없는 데스크탑은 내용으로 고른다)
 - 소리: 웹은 원본처럼 브라우저 decodeAudioData 가 풀고, 데스크탑은 같은 결과가 나오게 platform/audio/decode 가 푼다. 꼴은 내용으로 가리고, symphonia 0.6 으로 디먹스해 FLAC, MP3, PCM, Vorbis 는 크롬과 같은 symphonia 해석기, Opus 는 opus-pure(libopus 를 옮긴 것), AAC 는 symphonia 의 AAC 로 푼다. 크롬이 FFmpeg 디먹스 값으로 버리는 앞뒤(Opus pre-skip 과 webm CodecDelay, DiscardPadding, MP3 LAME 지연, Vorbis granule, m4a 편집 목록과 iTunSMPB)를 같게 버리고, 정수 표본을 크롬 식으로 실수로 바꾸고, 원본 DECODE_SAMPLE_RATE(44100)로 크로미엄 SincResampler 를 옮겨 바꾸고, WebAudio 스피커 규칙으로 1 채널이나 2 채널로 내린다. `tests/assets/audio` 의 21 파일이 크롬 158 과 길이, 채널, 표본까지 같다. (Opus, AAC 는 1e-7 안팎)
+- 소리 내기: 데스크탑은 cpal 로 기본 출력 장치를 열고 그 표본율(원본 AudioContext 의 하드웨어 표본율)로 엔진 믹서를 돌린다. 원본이 짓는 그래프(AudioBufferSourceNode → 플레이어 GainNode → [StereoPannerNode] → 버스 GainNode 또는 출력, 비프 오실레이터 → 출력)를 128 프레임 퀀텀으로 그리고, 소스(시작 위치, 선형 보간과 끝의 외삽, 루프, playbackRate 는 f32), StereoPanner(모노와 스테레오 식), GainNode, 모노를 양쪽에 올리는 섞기, 출력의 -1 ~ 1 자르기를 크로미엄 audio_buffer_source_handler.cc, stereo_panner.cc 와 같게 셈한다. `tests/assets/mixer` 의 그래프 다섯이 크롬 158 OfflineAudioContext 와 1e-6 안에서 같다.
 - "data:" 주소: 데스크탑 애셋 읽기(request_asset_bytes, load_image, load_audio_asset)와 타임라인이 base/dataurl.rs 로 푼다. 웹은 기준 주소를 붙이지 않고 브라우저 fetch 에 맡긴다.
 - 글꼴: ttf, otf, woff, woff2 를 읽는다. 데스크탑은 woff, woff2 를 wuff 로 풀고, 운영체제 글꼴은 글꼴 모음(TTC)에서 이름이나 굵기로 얼굴을 고른다. 웹은 원본처럼 글꼴 바이트를 document.fonts 의 FontFace 로 올린다.
 - 이미지는 GPU 에 올린 뒤 CPU 픽셀을 놓는다. 픽셀을 다시 읽을 그림은 `Image.set_pixels_retained(true)` 로 남긴다. (ShadowImage 는 받은 그림을 스스로 남기고, 이미 놓였으면 텍스처를 프레임버퍼에 붙여 되읽는다) GL 컨텍스트를 잃었다 되살리는 길은 아직 없다.
@@ -178,7 +179,7 @@ EngineRunner (플랫폼이 들고 프레임마다 부른다)
   - UINode 는 노드에 붙는 컴포넌트이고, 솔버 값을 노드의 자리와 content_size 로 옮긴다. (ui/uinode.rs, ui/uiscene.rs)
   - UIDocument 는 원본의 리플렉션 직렬화 대신 종류 이름마다 짓기, 쓰기, 읽기 함수를 표에 등록하고, 원본이 반사로 저장하는 종류는 원본 반사 결과와 같은 키로 쓴다. DevTools 인스펙터의 컴포넌트 속성도 UIDocument 가 저장하는 키와 값으로 보인다. (ui/uidocument.rs, misc/devtools.rs)
   - web/Pane(DOM 화면 분할 패널)은 웹(wasm32) 빌드에만 있다. (web/pane.rs)
-  - SoundSystem 의 음악과 효과음 버스는 AudioBus 다. (원본에도 같은 꼴로 넣었다) 데스크탑은 kira 하위 트랙, 웹은 GainNode 이고, get_gain_node 는 두 플랫폼 모두 AudioGainNode(웹 GainNode, 데스크탑은 버스 트랙을 나눠 드는 Rc<RefCell<TrackHandle>>)를 돌려준다.
+  - SoundSystem 의 음악과 효과음 버스는 AudioBus 다. (원본에도 같은 꼴로 넣었다) 데스크탑은 엔진 믹서의 버스 노드, 웹은 GainNode 이고, get_gain_node 는 두 플랫폼 모두 AudioGainNode(웹 GainNode, 데스크탑은 버스 노드를 나눠 드는 Rc<MixerGainNode>)를 돌려준다.
   - Cooldown.use(원본 base/timer.js), FullscreenPass.use, ShaderProgram.use 는 use 가 러스트 예약어라 r#use 로 부른다. activate, use_program 은 같은 일을 하는 이름으로 남긴다.
   - 노드 객체를 돌려주는 getParent, getChildren, getSiblings 는 핸들을 돌려주는 get_parent_id, get_child_ids, get_sibling_ids 다.
   - 갈아 끼운 저장소(LocalStorage.get_backend, PersistedStore.get_storage_backend)와 콜백 게터(UIButton.get_click_event 같은 것)는 Rc<RefCell> 에 담아 돌려주고, 부르는 쪽이 빌려 쓴다. SpriteAnimator.findSprite(형제를 쥐기)와 SharedBakeCache 의 놓기(release)는 빌림 규칙과 Rc 참조 수로 갈음한다.

@@ -60,8 +60,9 @@ gilrs = "0.11"
 glutin = "0.32"
 glutin-winit = "0.5"
 raw-window-handle = "0.6"
-# 소리 내기. (믹서 트랙과 정적 소리, cpal 출력만 켠다. 해석은 아래 symphonia 와 opus-pure 로 엔진이 한다)
-kira = { version = "0.12", default-features = false, features = ["cpal", "cpal-realtime"] }
+# 소리 내기. (기본 출력 장치. 그 위의 WebAudio 노드 그래프 믹서는 엔진이 크롬과 같은 셈으로 짓는다(platform/audio/mixer.rs).
+# realtime 은 윈도우, 리눅스에서 소리 스레드의 우선순위를 올린다)
+cpal = { version = "0.18", features = ["realtime"] }
 # 소리 해석. (크롬 decodeAudioData 와 같은 해석기. 크롬은 FLAC, MP3, PCM, Vorbis 를 symphonia 0.6 으로 풀고 이 기능들을 켠다(third_party/rust/chromium_crates_io/Cargo.toml).
 # 크롬이 FFmpeg 로 푸는 AAC 는 symphonia 의 aac 를 더 켠다. 컨테이너도 symphonia 의 풀기(wav, ogg, mkv(webm), isomp4(m4a), 그리고 flac, mp3, adts)를 쓴다)
 symphonia = { version = "0.6", default-features = false, features = ["all-meta", "flac", "mpa", "ogg", "wav", "mkv", "pcm", "isomp4", "vorbis", "aac", "opt-simd"] }

@@ -11,7 +11,7 @@
 // - 맥만 vibrate_gamepads / release_disconnected_gamepad_haptics(게임패드 진동, desktop/gamepadhaptics.rs)를 낸다.
 // - 안드로이드, iOS 는 여기에 모듈을 더한다. (아직 없음)
 //==============================================================================
-// 오디오 백엔드. (데스크탑 kira, 웹 WebAudio. 두 갈래를 안에서 고른다)
+// 오디오 백엔드. (데스크탑 cpal 위의 엔진 믹서, 웹 WebAudio. 두 갈래를 안에서 고른다)
 pub mod audio;
 
 #[cfg(not(target_arch = "wasm32"))]

@@ -367,7 +367,7 @@ cargo run --release --example modelviewer
 | [glutin](https://crates.io/crates/glutin), [glutin-winit](https://crates.io/crates/glutin-winit) | 0.32.3, 0.5.0 | `platform/desktop.rs` | OpenGL 3.3 코어 컨텍스트 생성 (깊이 24, 스텐실 8) | Apache-2.0, MIT |
 | [raw-window-handle](https://crates.io/crates/raw-window-handle) | 0.6.2 | `platform/desktop.rs`, `platform/desktop/windowsplatform.rs` | winit 창을 glutin 과 윈도우 창 서브클래싱에 넘깁니다 | MIT / Apache-2.0 / Zlib |
 | [gilrs](https://crates.io/crates/gilrs) | 0.11.2 | `core/gamepadmanager.rs` | 게임패드 입력과 진동(리눅스, 윈도우). OS 입력을 W3C Standard Gamepad 꼴로 바꿉니다. 웹은 원본처럼 `navigator.getGamepads()` 를 직접 읽습니다 | MIT / Apache-2.0 |
-| [kira](https://crates.io/crates/kira) | 0.12.6 | `platform/audio/desktop.rs` | 오디오 재생과 믹서 트랙. cpal 출력만 켭니다 (해석 기능은 끕니다) | MIT / Apache-2.0 |
+| [cpal](https://crates.io/crates/cpal) | 0.18.2 | `platform/audio/desktop.rs` | 기본 출력 장치. 그 위의 믹서(소스, GainNode, StereoPannerNode, 버스)는 엔진이 크롬 WebAudio 와 같은 셈으로 짓습니다 (`platform/audio/mixer.rs`). realtime 기능으로 윈도우, 리눅스의 소리 스레드 우선순위를 올립니다 | Apache-2.0 |
 | [symphonia](https://crates.io/crates/symphonia) | 0.6.1 | `platform/audio/decode/` | 소리 해석. 크롬 decodeAudioData 와 같은 해석기로 FLAC, MP3, PCM, Vorbis 를 풀고(크롬이 켜는 기능과 같게), AAC 와 컨테이너(wav, ogg, mkv(webm), isomp4(m4a), flac, mp3, adts)도 풉니다 | MPL-2.0 |
 | [opus-pure](https://crates.io/crates/opus-pure) | 0.2.5 | `platform/audio/decode/opus.rs` | Opus 해석. libopus 를 러스트로 옮긴 것으로 symphonia 코덱 등록표에 엔진 해석기로 넣습니다 (크롬은 libopus 로 풉니다). C 빌드가 없어 맥에서 윈도우 대상 검사가 됩니다 | BSD-3-Clause |
 | [resvg](https://crates.io/crates/resvg) | 0.50.0 | `core/image.rs`, `animation/timeline.rs` | SVG 그림을 usvg 로 읽고 tiny-skia 로 그립니다 | MIT / Apache-2.0 |

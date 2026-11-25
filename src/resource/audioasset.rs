@@ -2,7 +2,7 @@
 // 오디오 애셋.
 // - 원본 resource/audioasset.js. 소리 파일을 디코딩한 오디오 버퍼를 들고 있다.
 // - 오디오 버퍼 자리는 백엔드가 채운다. (platform/audio 의 AudioBuffer)
-//   데스크탑: kira 의 StaticSoundData. (platform/audio/decode 가 원본의 크롬 decodeAudioData 와 같은 길이, 표본율(44100), 표본으로 푼다.
+//   데스크탑: 푼 소리를 Arc 로 든 AudioBuffer. (platform/audio/decode 가 원본의 크롬 decodeAudioData 와 같은 길이, 표본율(44100), 표본으로 푼다.
 //   webm, ogg 의 Opus 와 Vorbis, mp3, wav, flac, m4a 와 aac 의 AAC. 꼴은 확장자가 아니라 내용으로 가린다)
 //   웹: 원본과 같은 WebAudio AudioBuffer. (OfflineAudioContext 로 디코딩한다, 없으면 잠시 쓰는 AudioContext)
 // - 읽기:
