@@ -201,6 +201,34 @@ pub(crate) fn is_gl_binding_present(parameter: u32) -> bool {
 }
 
 //==============================================================================
+// 렌더버퍼 포맷이 받는 멀티샘플 표본 수. (원본 getInternalformatParameter(RENDERBUFFER, 포맷, SAMPLES), 큰 것부터, 못 읽으면 빈 목록)
+// - WebGL2 는 NUM_SAMPLE_COUNTS 를 받지 않고 SAMPLES 로 Int32Array 를 돌려준다. glow 는 길이를 먼저 알아야 해서 여기서 바로 읽는다.
+//==============================================================================
+pub(crate) fn read_renderbuffer_sample_counts(internal_format: u32) -> Vec<i32> {
+	ENGINE_GL_CONTEXT.with(|engine_gl_context| {
+		let engine_gl_context = engine_gl_context.borrow();
+		let Some(context) = engine_gl_context.as_ref() else {
+			return Vec::new();
+		};
+		match context.get_internalformat_parameter(web_sys::WebGl2RenderingContext::RENDERBUFFER, internal_format, web_sys::WebGl2RenderingContext::SAMPLES) {
+			Ok(value) => {
+				match value.dyn_ref::<js_sys::Int32Array>() {
+					Some(sample_count_array) => {
+						sample_count_array.to_vec()
+					}
+					None => {
+						Vec::new()
+					}
+				}
+			}
+			Err(_) => {
+				Vec::new()
+			}
+		}
+	})
+}
+
+//==============================================================================
 // CSS env(safe-area-inset-*) 세이프 에어리어 인셋. (원본 view_manager.readSafeAreaFromEnvironment, CSS 픽셀 [위, 오른쪽, 아래, 왼쪽])
 // - 숨은 요소의 padding 에 env() 를 걸고 계산된 값을 parseFloat 로 읽는다. 문서나 body 가 없으면 0.
 //==============================================================================

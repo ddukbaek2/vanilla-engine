@@ -70,22 +70,13 @@ pub struct RenderTarget {
 }
 
 //==============================================================================
-// 포맷마다 받는 표본 수로 줄이기. (웹, 포맷마다 받는 표본 수 가운데 sample_count 밑의 가장 큰 수)
+// 포맷마다 받는 표본 수로 줄이기. (웹, 포맷마다 받는 표본 수 가운데 sample_count 밑의 가장 큰 수, 플랫폼 층이 SAMPLES 목록을 읽는다)
 //==============================================================================
 #[cfg(target_arch = "wasm32")]
-fn clamp_sample_count_to_formats(gl: &glow::Context, sample_count: i32, internal_format_list: &[u32]) -> i32 {
+fn clamp_sample_count_to_formats(_gl: &glow::Context, sample_count: i32, internal_format_list: &[u32]) -> i32 {
 	let mut clamped_sample_count = sample_count;
 	for internal_format in internal_format_list {
-		let mut supported_count = [0i32; 1];
-		unsafe {
-			gl.get_internal_format_i32_slice(glow::RENDERBUFFER, *internal_format, glow::NUM_SAMPLE_COUNTS, &mut supported_count);
-		}
-		let mut supported_sample_count_list = vec![0i32; supported_count[0].max(0) as usize];
-		if !supported_sample_count_list.is_empty() {
-			unsafe {
-				gl.get_internal_format_i32_slice(glow::RENDERBUFFER, *internal_format, glow::SAMPLES, &mut supported_sample_count_list);
-			}
-		}
+		let supported_sample_count_list = crate::platform::read_renderbuffer_sample_counts(*internal_format);
 		clamped_sample_count = supported_sample_count_list.iter().copied().filter(|supported_sample_count| *supported_sample_count <= clamped_sample_count).max().unwrap_or(0);
 	}
 	clamped_sample_count

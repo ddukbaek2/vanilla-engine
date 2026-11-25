@@ -370,8 +370,9 @@ impl ToonPostProcess {
 			gl.active_texture(glow::TEXTURE1);
 			gl.bind_texture(glow::TEXTURE_2D, bloom_texture);
 			gl.uniform_1_i32(composite_pass.get_uniform_location(gl, "bloomTexture").as_ref(), 1);
+			// 깊이 칸. (밝힌 자리를 쓰지 않으면 읽지 않지만 빈 칸이면 드라이버가 알리므로 씬 텍스처를 묶어 둔다)
 			gl.active_texture(glow::TEXTURE2);
-			gl.bind_texture(glow::TEXTURE_2D, if applied_lit_area.is_some() { depth_texture } else { None });
+			gl.bind_texture(glow::TEXTURE_2D, if applied_lit_area.is_some() { depth_texture } else { scene_texture });
 			gl.uniform_1_i32(composite_pass.get_uniform_location(gl, "depthTexture").as_ref(), 2);
 			gl.uniform_1_f32(composite_pass.get_uniform_location(gl, "bloomStrength").as_ref(), if self.is_bloom_enabled { self.bloom_strength } else { 0.0 });
 			gl.uniform_1_f32(composite_pass.get_uniform_location(gl, "exposure").as_ref(), self.exposure);

@@ -35,3 +35,5 @@ pub use web::is_text_field_focused;
 pub(crate) use web::is_gl_binding_present;
 #[cfg(target_os = "macos")]
 pub use desktop::gamepadhaptics::{release_disconnected_gamepad_haptics, vibrate_gamepads};
+#[cfg(target_arch = "wasm32")]
+pub(crate) use web::read_renderbuffer_sample_counts;
