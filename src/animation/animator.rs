@@ -4,13 +4,13 @@
 //   Animator 는 Animation 처리기에 tick 을 넘기고 프로퍼티 사전(이름 → 값)을 든다.
 //   AnimationState(클립 하나)와 AnimationTransition(from / to)은 필드만 있고 쓰는 곳이 없으며, 전환을 고르는 논리도 없다.
 //   러스트 판도 그 범위만 옮기고 전환 논리를 지어내지 않았다.
+// - 읽고 쓰는 함수(AnimationState.set_clip / get_clip, AnimationTransition.set_from / get_from / set_to / get_to,
+//   Animator.get_animation / add_state / get_states / add_transition / get_transitions)는 원본과 같다.
+//   전환의 from / to 는 원본처럼 Animator 상태 목록의 번호다.
 // - 원본과 다른 점:
-//   - 원본 private 필드는 읽는 곳이 없어 러스트에서는 쓰이지 않는 필드가 된다. 그래서 읽고 쓰는 함수를 더했다:
-//     AnimationState.set_clip / get_clip, AnimationTransition.set_from / get_from / set_to / get_to,
-//     Animator.get_animation(Mut) / add_state / get_states / add_transition / get_transitions.
-//   - 전환의 from / to 는 상태 객체 참조 대신 Animator 상태 목록의 번호다.
-//   - 프로퍼티 값은 원본 아무 값 대신 serde_json::Value 다. (숫자, 참거짓, 글 모두 담는다)
+//   - 프로퍼티 값은 원본 아무 값 대신 serde_json::Value 다. (숫자, 참거짓, 글 모두 담는다. 러스트는 값의 타입을 정해야 한다)
 //   - get_property 는 없으면 None 이다. (원본 undefined)
+//   - 원본 get_states / get_transitions 는 List 를, 러스트 판은 조각(&[..])을 돌려준다. get_animation_mut 은 빌림 규칙 때문에 따로 있다.
 //==============================================================================
 use crate::core::animation::Animation;
 use crate::resource::animationclip::AnimationClip;
