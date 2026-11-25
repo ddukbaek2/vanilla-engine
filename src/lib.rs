@@ -61,6 +61,7 @@ pub use crate::core::reflection::{FromReflectValue, Reflect, ReflectedGetter, Re
 pub use vanilla_engine_macros::reflect;
 pub use crate::core::engine::{Engine, EngineConfiguration};
 pub use crate::core::engine::{PageEvent, PageEventListener};
+pub use crate::core::modaldialog::{ModalDialogHandle, ModalDialogKind, ModalDialogResult};
 pub use crate::core::frame::Frame;
 pub use crate::core::shaderprogram::ShaderProgram;
 pub use crate::core::shaderwarmer::{ShaderWarmer, ShaderWarmerSource};
@@ -68,6 +69,7 @@ pub use crate::core::fullscreenpass::FullscreenPass;
 pub use crate::core::gamepadmanager::{Gamepad, GamepadAnalogStickCode, GamepadButton, GamepadButtonCode, GamepadInputCallback, GamepadInputType, GamepadManager, GamepadTriggerCode};
 pub use crate::core::graphic::{BlendMode, Graphic, TextAlign, TextBaseline};
 pub use crate::core::image::Image;
+pub use crate::core::canvas2d::{Canvas2D, CanvasFillRule, CanvasGradient, CanvasGradientKind, CanvasImageSource, CanvasLineCap, CanvasLineJoin, CanvasMatrix, CanvasPattern, CanvasPatternRepetition, CanvasStyle, CanvasTextAlign, CanvasTextBaseline, ImageData, Path2D};
 pub use crate::core::inputmanager::{InputManager, KeyCode, MouseButton, TouchPoint};
 pub use crate::core::pointercursor::{CursorValue, PointerCursor};
 pub use crate::core::textstringtexturecache::TextRaster;
@@ -139,7 +141,7 @@ pub use crate::ui::uidraggable::{UIDraggable, UIDraggableEvent, UIDraggablePosit
 pub use crate::ui::uidropdown::{UIDropdown, UIDropdownEvent, UIDropdownOptions};
 pub use crate::ui::uihitarea::UIHitArea;
 pub use crate::ui::uiimageview::UIImageView;
-pub use crate::ui::uiinputfield::{TextEditBuffer, UIInputField, UIInputFieldEvent, UIInputFieldMenuAction};
+pub use crate::ui::uiinputfield::{TextEditBuffer, TextEditKind, UIInputField, UIInputFieldEvent, UIInputFieldMenuAction, UIInputFieldWritingDirection};
 pub use crate::ui::uilabel::UILabel;
 pub use crate::ui::uilistview::{UIListView, UIListViewBindItemEvent, UIListViewCreateItemEvent, UIListViewReachEndEvent};
 pub use crate::ui::uiprogressview::{ProgressDirection, UIProgressView};
@@ -179,6 +181,7 @@ pub use crate::resource::assetloader::{AssetLoadFailure, AssetLoader, AssetLoade
 pub use crate::misc::loadingprogress::LoadingProgress;
 pub use crate::game::gamescene::LoadingDrawer;
 pub use crate::misc::buildinfo::{BuildInfo, BuildInfoLoadFuture, BuildInfoLoadHandle};
+pub use crate::platform::document::Document;
 pub use crate::graphics3d::toon::toonscreenoutline::{read_jump_flood_steps, ToonLineDrawOptions, ToonOutlineWidthUnit, ToonScreenOutline, TOON_SCREEN_OUTLINE_MAXIMUM_LINE_ID};
 pub use crate::graphics3d::toon::toonvfx::{ToonBeamOptions, ToonDecalOptions, ToonFireballOptions, ToonGlintOptions, ToonLightningOptions, ToonParticleOptions, ToonPlumeOptions, ToonRibbonOptions, ToonShockwaveOptions, ToonVfx, ToonVfxCounts, ToonVfxDecalMode, ToonVfxLook, ToonVfxRange, ToonVfxShape, ToonVfxSlot, TOON_VFX_DEFAULT_PARTICLE_CAPACITY, TOON_VFX_MAXIMUM_RAMPS};
 pub use crate::ui::uiscale::{UIScale, UIScaleOptions};
@@ -195,8 +198,9 @@ pub use crate::graphics3d::toon::toonrenderer::extract_frustum_planes;
 pub use crate::graphics3d::toon::toonscreenoutline::ToonLineTarget;
 pub use crate::graphics3d::toon::toonvfx::ToonFlashOptions;
 pub use crate::graphics3d::toon::toonvfx::ToonRampColor;
-#[cfg(target_arch = "wasm32")]
 pub use crate::web::pane::{Pane, PaneDirection, PaneOptions, PaneResizableEdges, PaneResizeCallback, PaneSize, PaneStyle, PaneStyleOptions, PaneTheme};
+#[cfg(not(target_arch = "wasm32"))]
+pub use crate::web::pane::{PaneClickCallback, PaneElement};
 pub use crate::game::gamescene::{GameScene, PlayInputHandler, ScreenFadeHoldEvent};
 pub use crate::ui::autolayout::layoutconstraint::LayoutConstraint;
 pub use crate::ui::autolayout::layoutconstraintaxis::LayoutConstraintAxis;

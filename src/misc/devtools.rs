@@ -22,8 +22,8 @@
 //     러스트 판이 impl Component 에서 다시 정의한 게터(isTickNeeded 같은 것)도 그 타입의 함수라 보인다. 그래서 목록이 원본과 조금 다른 컴포넌트가 있다.
 //   - 반사가 없는 컴포넌트(#[reflect] 를 붙이지 않은 게임 컴포넌트)는 UIDocument 에 쓰기 함수로 등록했으면 그 저장 키와 값을 보이고, 아니면 종류 이름만 보인다.
 //     게임이 자기 컴포넌트를 등록한 문서는 set_ui_document 로 건다. (또는 get_ui_document_mut 로 등록한다) 이 때 수 넷 배열은 이름에 color 가 들면 rgba, 아니면 사각형으로 본다.
-//   - Local Storage 탭의 키 입력, 값 고치기, 지울지 묻기: 웹은 원본처럼 window.prompt, window.confirm 을 부른다.
-//     데스크탑에는 그런 창이 없어 패널 안에 작은 입력 창을 띄운다. (글은 TextInput 줄에서 받아 IME 도 된다. Enter 나 OK 는 확인, Escape 나 Cancel 은 취소)
+//   - Local Storage 탭의 키 입력, 값 고치기, 지울지 묻기는 원본 window.prompt, window.confirm 자리인 Engine::prompt, Engine::confirm 이다. (core/modaldialog.rs)
+//     웹은 원본처럼 브라우저 창이 그 자리에서 답한다. 데스크탑은 엔진이 그린 같은 질문 창이 떠서 답할 때까지 씬이 멈추고, 답은 다음 tick 에 받는다.
 //   - Statistics 의 clientNativeSize 는 ViewManager::get_client_native_size(웹은 페이지 전체 크기, 데스크탑은 창 안쪽 논리 크기)다.
 //     메모리는 웹에서 원본처럼 Chrome 의 performance.memory 를 읽고, 없는 브라우저는 "(N/A)" 다.
 //     데스크탑은 자바스크립트 힙이 없어 같은 칸에 러스트가 쓰는 시스템 할당자의 힙(쓰는 중, 잡아 둔 것)을 적는다. (platform/desktop.rs read_heap_usage)
@@ -48,8 +48,7 @@ use crate::ui::uidocument::UIDocument;
 use serde_json::Value;
 use std::collections::HashSet;
 
-#[cfg(not(target_arch = "wasm32"))]
-use crate::core::textinput::{count_characters, TextInputEventKind, TextInputFieldState, TextInputKey};
+use crate::core::modaldialog::{ModalDialogHandle, ModalDialogKind};
 
 //==============================================================================
 // 고정 레이아웃 상수.
@@ -99,14 +98,6 @@ const NODE_TYPE_NAME: &str = "WorldNode";
 
 // UIDocument 가 노드 참조를 적는 키.
 const NODE_REFERENCE_KEY: &str = "$nodeRef";
-
-// 데스크탑 입력 창. (TextInput 줄의 필드 id 와 포커스 차례. 게임 필드보다 늘 나중이라 글을 가져온다)
-#[cfg(not(target_arch = "wasm32"))]
-const DIALOG_FIELD_ID: u64 = u64::MAX;
-#[cfg(not(target_arch = "wasm32"))]
-const DIALOG_WIDTH: f32 = 360.0;
-#[cfg(not(target_arch = "wasm32"))]
-const DIALOG_BUTTON_WIDTH: f32 = 56.0;
 
 //==============================================================================
 // 색상 상수. (원본 CSS 색, 0 ~ 255)
@@ -281,20 +272,13 @@ enum LocalStorageDialogAction {
 }
 
 //==============================================================================
-// 데스크탑 입력 창. (원본 window.prompt, window.confirm 자리)
+// 로컬 스토리지 질문 부탁. (원본이 그 자리에서 부르는 window.prompt, window.confirm. 엔진을 받는 tick 에서 띄운다)
 //==============================================================================
-#[cfg(not(target_arch = "wasm32"))]
-struct LocalStorageDialog {
+struct LocalStorageDialogRequest {
+	kind: ModalDialogKind,
 	message: String,
-	value: String,
-	// IME 조합 중인 글.
-	preedit_text: String,
-	// 글을 받는 창인지. (아니면 확인만 묻는다)
-	is_prompt: bool,
+	default_value: String,
 	action: LocalStorageDialogAction,
-	value_revision: u64,
-	// 마지막으로 그린 커서의 x. (창 안쪽 논리 좌표, IME 후보 창 자리)
-	caret_x: f32,
 }
 
 //==============================================================================
@@ -358,8 +342,9 @@ pub struct DevTools {
 	ui_document: UIDocument,
 	// 다음 draw 에 Graphic 에 걸 모든 기즈모 강제 표시 값.
 	pending_force_gizmos_visible: Option<bool>,
-	#[cfg(not(target_arch = "wasm32"))]
-	local_storage_dialog: Option<LocalStorageDialog>,
+	// 띄울 질문과 답을 기다리는 질문.
+	local_storage_dialog_request: Option<LocalStorageDialogRequest>,
+	local_storage_dialog_wait: Option<(ModalDialogHandle, LocalStorageDialogAction)>,
 }
 
 impl DevTools {
@@ -421,8 +406,8 @@ impl DevTools {
 			statistics_scroll_drag_start_scroll_y: 0.0,
 			ui_document: UIDocument::new(),
 			pending_force_gizmos_visible: Some(false),
-			#[cfg(not(target_arch = "wasm32"))]
-			local_storage_dialog: None,
+			local_storage_dialog_request: None,
+			local_storage_dialog_wait: None,
 		};
 		dev_tools.load_settings();
 		dev_tools
@@ -550,6 +535,11 @@ impl DevTools {
 	// 갱신. (F2 토글, 트리 목록, 터치)
 	//==============================================================================
 	pub fn tick(&mut self, engine: &mut Engine, node_tree: &mut NodeTree, _time_delta: f32) {
+		// 검사 부탁. (입력 필드 문맥 메뉴의 검사, 크롬이 개발자 도구를 열어 그 요소를 고르는 자리)
+		if let Some(inspect_node_id) = engine.take_dev_tools_inspect_request(node_tree) {
+			self.inspect_node(engine, node_tree, inspect_node_id);
+		}
+
 		let is_key_f2 = engine.get_input_manager().is_key_pressed(KeyCode::F2);
 
 		// F2 를 막 누름.
@@ -573,13 +563,8 @@ impl DevTools {
 		// 트리 목록 갱신.
 		self.rebuild_flat_list(node_tree);
 
-		// 데스크탑 입력 창의 글.
-		#[cfg(not(target_arch = "wasm32"))]
-		{
-			if self.local_storage_dialog.is_some() {
-				self.tick_local_storage_dialog(engine);
-			}
-		}
+		// 데스크탑 질문 창의 답. (답할 때까지 씬이 멈춰 있다가 답한 다음 프레임에 받는다)
+		self.process_local_storage_dialog(engine);
 
 		let input_manager = engine.get_input_manager();
 		let is_touch_pressed = input_manager.is_touch_pressed();
@@ -598,6 +583,78 @@ impl DevTools {
 		}
 		else if is_touch_released {
 			self.handle_release(touch_x, touch_y);
+		}
+
+		// 누름이 부탁한 질문은 원본처럼 같은 프레임에 띄운다.
+		self.process_local_storage_dialog(engine);
+	}
+
+	//==============================================================================
+	// 노드 검사. (보이고, Node Hierarchy 탭으로, 조상을 펼치고 그 노드를 고른다)
+	//==============================================================================
+	pub fn inspect_node(&mut self, engine: &Engine, node_tree: &NodeTree, node_id: NodeId) {
+		if !self.is_visible {
+			self.set_visible(engine, true);
+		}
+		self.set_active_tab(1);
+		let mut ancestor_id = node_tree.get_parent_id(node_id);
+		while let Some(current_id) = ancestor_id {
+			self.expanded_node_ids.insert(current_id);
+			ancestor_id = node_tree.get_parent_id(current_id);
+		}
+		self.set_selected_node(Some(node_id));
+	}
+
+	//==============================================================================
+	// 로컬 스토리지 질문 이어 가기. (답이 왔으면 할 일을 하고, 부탁이 있으면 띄운다. 웹은 그 자리에서 답해 이어서 다음 질문을 띄운다)
+	//==============================================================================
+	fn process_local_storage_dialog(&mut self, engine: &mut Engine) {
+		loop {
+			let is_answered = match &self.local_storage_dialog_wait {
+				Some((handle, _)) => {
+					handle.is_finished()
+				}
+				None => {
+					false
+				}
+			};
+			if is_answered {
+				if let Some((handle, action)) = self.local_storage_dialog_wait.take() {
+					let result = match handle.get_result() {
+						Some(crate::core::modaldialog::ModalDialogResult::Confirmed(text)) => {
+							Some(text)
+						}
+						_ => {
+							None
+						}
+					};
+					self.complete_local_storage_dialog(action, result);
+				}
+				continue;
+			}
+			if self.local_storage_dialog_wait.is_some() {
+				return;
+			}
+			let request = match self.local_storage_dialog_request.take() {
+				Some(request) => {
+					request
+				}
+				None => {
+					return;
+				}
+			};
+			let handle = match request.kind {
+				ModalDialogKind::Prompt => {
+					engine.prompt(&request.message, &request.default_value)
+				}
+				ModalDialogKind::Confirm => {
+					engine.confirm(&request.message)
+				}
+				ModalDialogKind::Alert => {
+					engine.alert(&request.message)
+				}
+			};
+			self.local_storage_dialog_wait = Some((handle, request.action));
 		}
 	}
 
@@ -630,15 +687,6 @@ impl DevTools {
 		let is_inside_y = touch_y >= panel_y && touch_y <= panel_y + panel_height;
 		if !is_inside_x || !is_inside_y {
 			return;
-		}
-
-		// 데스크탑 입력 창이 떠 있으면 창의 단추만 받는다. (원본 prompt 처럼 다른 것을 막는다)
-		#[cfg(not(target_arch = "wasm32"))]
-		{
-			if self.local_storage_dialog.is_some() {
-				self.handle_local_storage_dialog_press(touch_x, touch_y);
-				return;
-			}
 		}
 
 		// 엣지/코너 근접 여부.
@@ -1020,55 +1068,27 @@ impl DevTools {
 	}
 
 	//==============================================================================
-	// 글을 묻는다. (웹은 원본처럼 window.prompt, 데스크탑은 패널 안 입력 창)
+	// 글을 묻는다. (원본 window.prompt, 엔진을 받는 tick 에서 Engine::prompt 로 띄운다)
 	//==============================================================================
 	fn open_local_storage_prompt(&mut self, message: &str, default_value: &str, action: LocalStorageDialogAction) {
-		#[cfg(target_arch = "wasm32")]
-		{
-			let result = web_sys::window().and_then(|window| window.prompt_with_message_and_default(message, default_value).ok().flatten());
-			self.complete_local_storage_dialog(action, result);
-		}
-		#[cfg(not(target_arch = "wasm32"))]
-		{
-			self.local_storage_dialog = Some(LocalStorageDialog {
-				message: String::from(message),
-				value: String::from(default_value),
-				preedit_text: String::new(),
-				is_prompt: true,
-				action,
-				value_revision: 0,
-				caret_x: 0.0,
-			});
-		}
+		self.local_storage_dialog_request = Some(LocalStorageDialogRequest {
+			kind: ModalDialogKind::Prompt,
+			message: String::from(message),
+			default_value: String::from(default_value),
+			action,
+		});
 	}
 
 	//==============================================================================
-	// 확인을 묻는다. (웹은 원본처럼 window.confirm, 데스크탑은 패널 안 입력 창)
+	// 확인을 묻는다. (원본 window.confirm, 엔진을 받는 tick 에서 Engine::confirm 으로 띄운다)
 	//==============================================================================
 	fn open_local_storage_confirm(&mut self, message: &str, action: LocalStorageDialogAction) {
-		#[cfg(target_arch = "wasm32")]
-		{
-			let is_confirmed = web_sys::window().map(|window| window.confirm_with_message(message).unwrap_or(false)).unwrap_or(false);
-			let result = if is_confirmed {
-				Some(String::new())
-			}
-			else {
-				None
-			};
-			self.complete_local_storage_dialog(action, result);
-		}
-		#[cfg(not(target_arch = "wasm32"))]
-		{
-			self.local_storage_dialog = Some(LocalStorageDialog {
-				message: String::from(message),
-				value: String::new(),
-				preedit_text: String::new(),
-				is_prompt: false,
-				action,
-				value_revision: 0,
-				caret_x: 0.0,
-			});
-		}
+		self.local_storage_dialog_request = Some(LocalStorageDialogRequest {
+			kind: ModalDialogKind::Confirm,
+			message: String::from(message),
+			default_value: String::new(),
+			action,
+		});
 	}
 
 	//==============================================================================
@@ -1123,13 +1143,10 @@ impl DevTools {
 	}
 
 	//==============================================================================
-	// 떠 있는 입력 창을 할 일 없이 닫는다. (패널을 숨길 때. 웹은 창이 막고 있어 남는 일이 없다)
+	// 띄우지 않은 질문을 버린다. (패널을 숨길 때. 떠 있는 질문은 답할 때까지 씬이 멈춰 있어 숨길 수 없다)
 	//==============================================================================
 	fn close_local_storage_dialog(&mut self) {
-		#[cfg(not(target_arch = "wasm32"))]
-		{
-			self.local_storage_dialog = None;
-		}
+		self.local_storage_dialog_request = None;
 	}
 
 	//==============================================================================
@@ -1406,14 +1423,6 @@ impl DevTools {
 		else {
 			// 세팅 패널 출력.
 			self.draw_settings_panel(graphic, panel_x, content_y, panel_width, content_height);
-		}
-
-		// 데스크탑 입력 창.
-		#[cfg(not(target_arch = "wasm32"))]
-		{
-			if self.local_storage_dialog.is_some() {
-				self.draw_local_storage_dialog(graphic, panel_x, content_y, panel_width, content_height);
-			}
 		}
 
 		// 테두리. (리사이즈 중이면 강조, 늘 맨 위에 그린다)
@@ -2230,238 +2239,6 @@ impl DevTools {
 	}
 }
 
-//==============================================================================
-// 데스크탑 입력 창. (원본 window.prompt, window.confirm 자리)
-//==============================================================================
-#[cfg(not(target_arch = "wasm32"))]
-impl DevTools {
-	//==============================================================================
-	// 입력 창 갱신. (TextInput 줄의 글과 키를 받고, IME 가 켜지도록 필드 상태를 올린다)
-	//==============================================================================
-	fn tick_local_storage_dialog(&mut self, engine: &mut Engine) {
-		let event_kind_list = engine.get_input_manager().get_text_input().take_events_for_field(DIALOG_FIELD_ID, true);
-		let mut is_confirmed = false;
-		let is_cancelled = engine.get_input_manager().is_key_just_pressed(KeyCode::ESCAPE);
-		let dialog_layout = self.calculate_local_storage_dialog_layout(true);
-		let dialog = match self.local_storage_dialog.as_mut() {
-			Some(dialog) => {
-				dialog
-			}
-			None => {
-				return;
-			}
-		};
-		for event_kind in event_kind_list {
-			match event_kind {
-				TextInputEventKind::Commit(text) | TextInputEventKind::Paste(text) => {
-					let printable_text: String = text.chars().filter(|character| !character.is_control()).collect();
-					if dialog.is_prompt && !printable_text.is_empty() {
-						dialog.value.push_str(&printable_text);
-						dialog.value_revision += 1;
-					}
-				}
-				TextInputEventKind::Preedit { text, .. } => {
-					dialog.preedit_text = text;
-				}
-				TextInputEventKind::CompositionEnd => {
-					dialog.preedit_text.clear();
-				}
-				TextInputEventKind::Key { key: TextInputKey::Backspace, .. } => {
-					if dialog.is_prompt && dialog.value.pop().is_some() {
-						dialog.value_revision += 1;
-					}
-				}
-				TextInputEventKind::Key { key: TextInputKey::Paste, .. } => {
-					if dialog.is_prompt {
-						if let Some(clipboard_text) = engine.read_clipboard_text() {
-							let printable_text: String = clipboard_text.chars().filter(|character| !character.is_control()).collect();
-							dialog.value.push_str(&printable_text);
-							dialog.value_revision += 1;
-						}
-					}
-				}
-				TextInputEventKind::Key { key: TextInputKey::Enter, .. } => {
-					is_confirmed = true;
-				}
-				_ => {
-				}
-			}
-		}
-
-		// 글을 받는 창이면 필드 상태를 올려 데스크탑 IME 를 켠다. (후보 창은 커서 자리)
-		if dialog.is_prompt {
-			let field_rect = dialog_layout[1];
-			let value_length = count_characters(&dialog.value);
-			engine.get_input_manager().get_text_input().register_field_state(TextInputFieldState {
-				field_id: DIALOG_FIELD_ID,
-				focus_serial: u64::MAX,
-				is_focused: true,
-				is_attached: true,
-				use_dominput: true,
-				use_touch_end_focus: false,
-				use_direct_touch: false,
-				is_visible: true,
-				field_rect,
-				caret_rect: Rect::create(dialog.caret_x, field_rect.position.y, 1.0, field_rect.size.y),
-				value: dialog.value.clone(),
-				selection_start: value_length,
-				cursor_index: value_length,
-				max_length: 0,
-				value_revision: dialog.value_revision,
-			});
-		}
-
-		if is_confirmed {
-			self.finish_local_storage_dialog(true);
-		}
-		else if is_cancelled {
-			self.finish_local_storage_dialog(false);
-		}
-	}
-
-	//==============================================================================
-	// 입력 창 끝내기. (확인이면 입력한 글, 취소면 None 으로 할 일을 마친다)
-	//==============================================================================
-	fn finish_local_storage_dialog(&mut self, is_confirmed: bool) {
-		let dialog = match self.local_storage_dialog.take() {
-			Some(dialog) => {
-				dialog
-			}
-			None => {
-				return;
-			}
-		};
-		let result = if is_confirmed {
-			Some(dialog.value)
-		}
-		else {
-			None
-		};
-		self.complete_local_storage_dialog(dialog.action, result);
-	}
-
-	//==============================================================================
-	// 입력 창 자리. ([창, 글 칸, OK, Cancel], 패널 내용 영역 가운데)
-	//==============================================================================
-	fn calculate_local_storage_dialog_layout(&self, is_prompt: bool) -> [Rect; 4] {
-		let content_y = self.panel_y + TITLE_HEIGHT + TAB_HEIGHT + 1.0;
-		let content_height = self.panel_height - TITLE_HEIGHT - TAB_HEIGHT - 1.0;
-		let box_width = (self.panel_width - PADDING * 2.0).min(DIALOG_WIDTH);
-		let row_count = if is_prompt {
-			3.0
-		}
-		else {
-			2.0
-		};
-		let box_height = ITEM_HEIGHT * row_count + PADDING * (row_count + 1.0);
-		let box_x = self.panel_x + (self.panel_width - box_width) * 0.5;
-		let box_y = content_y + (content_height - box_height) * 0.5;
-		let value_rect = Rect::create(box_x + PADDING, box_y + PADDING * 2.0 + ITEM_HEIGHT, box_width - PADDING * 2.0, ITEM_HEIGHT);
-		let button_y = box_y + box_height - PADDING - ITEM_HEIGHT;
-		let cancel_rect = Rect::create(box_x + box_width - PADDING - DIALOG_BUTTON_WIDTH, button_y, DIALOG_BUTTON_WIDTH, ITEM_HEIGHT);
-		let ok_rect = Rect::create(cancel_rect.position.x - PADDING - DIALOG_BUTTON_WIDTH, button_y, DIALOG_BUTTON_WIDTH, ITEM_HEIGHT);
-		[Rect::create(box_x, box_y, box_width, box_height), value_rect, ok_rect, cancel_rect]
-	}
-
-	//==============================================================================
-	// 입력 창 눌림. (OK 는 확인, Cancel 은 취소, 다른 곳은 무시)
-	//==============================================================================
-	fn handle_local_storage_dialog_press(&mut self, touch_x: f32, touch_y: f32) {
-		let is_prompt = match &self.local_storage_dialog {
-			Some(dialog) => {
-				dialog.is_prompt
-			}
-			None => {
-				return;
-			}
-		};
-		let dialog_layout = self.calculate_local_storage_dialog_layout(is_prompt);
-		if is_point_in_rect(touch_x, touch_y, dialog_layout[2]) {
-			self.finish_local_storage_dialog(true);
-		}
-		else if is_point_in_rect(touch_x, touch_y, dialog_layout[3]) {
-			self.finish_local_storage_dialog(false);
-		}
-	}
-
-	//==============================================================================
-	// 입력 창 출력. (패널 내용을 어둡게 덮고 가운데에 창)
-	//==============================================================================
-	fn draw_local_storage_dialog(&mut self, graphic: &mut Graphic, panel_x: f32, content_y: f32, panel_width: f32, content_height: f32) {
-		let is_prompt = match &self.local_storage_dialog {
-			Some(dialog) => {
-				dialog.is_prompt
-			}
-			None => {
-				return;
-			}
-		};
-		let dialog_layout = self.calculate_local_storage_dialog_layout(is_prompt);
-		let box_rect = dialog_layout[0];
-		let value_rect = dialog_layout[1];
-		let dialog = match self.local_storage_dialog.as_mut() {
-			Some(dialog) => {
-				dialog
-			}
-			None => {
-				return;
-			}
-		};
-
-		// 패널 내용 덮기.
-		graphic.set_fill_color(COLOR_DIM);
-		graphic.draw_rect(Rect::create(panel_x, content_y, panel_width, content_height));
-
-		// 창.
-		graphic.set_fill_color(COLOR_TITLE_BACKGROUND);
-		graphic.draw_rect(box_rect);
-		graphic.set_stroke_color(COLOR_BORDER_ACTIVE);
-		graphic.draw_stroke_rect(Rect::create(box_rect.position.x + 0.5, box_rect.position.y + 0.5, box_rect.size.x - 1.0, box_rect.size.y - 1.0), 1.0);
-
-		// 묻는 글.
-		graphic.set_fill_color(COLOR_TEXT);
-		graphic.set_font_string(FONT_STRING);
-		graphic.set_text_align(TextAlign::Left);
-		graphic.set_text_baseline(TextBaseline::Middle);
-		graphic.draw_fill_text(&dialog.message, box_rect.position.x + PADDING, box_rect.position.y + PADDING + ITEM_HEIGHT * 0.5);
-
-		// 글 칸. (값, 조합 중인 글, 커서)
-		if dialog.is_prompt {
-			graphic.set_fill_color(COLOR_BACKGROUND);
-			graphic.draw_rect(value_rect);
-			graphic.set_stroke_color(COLOR_BORDER_NORMAL);
-			graphic.draw_stroke_rect(Rect::create(value_rect.position.x + 0.5, value_rect.position.y + 0.5, value_rect.size.x - 1.0, value_rect.size.y - 1.0), 1.0);
-			graphic.begin_clip_rect(value_rect, 0.0);
-			let text_x = value_rect.position.x + 4.0;
-			let value_middle_y = value_rect.position.y + ITEM_HEIGHT * 0.5;
-			graphic.set_fill_color(COLOR_PROPERTY_VALUE);
-			graphic.draw_fill_text(&dialog.value, text_x, value_middle_y);
-			let value_width = graphic.measure_text(&dialog.value).width;
-			graphic.set_fill_color(COLOR_TEXT_DIM);
-			graphic.draw_fill_text(&dialog.preedit_text, text_x + value_width, value_middle_y);
-			let preedit_width = graphic.measure_text(&dialog.preedit_text).width;
-			dialog.caret_x = text_x + value_width + preedit_width;
-			graphic.set_fill_color(COLOR_ACCENT);
-			graphic.draw_rect(Rect::create(dialog.caret_x, value_rect.position.y + 3.0, 1.0, ITEM_HEIGHT - 6.0));
-			graphic.end_clip_rect();
-		}
-
-		// 단추.
-		let button_texts = ["OK", "Cancel"];
-		let button_colors = [COLOR_ADD_BUTTON, COLOR_CLEAR_BUTTON];
-		let button_text_colors = [COLOR_TRUE, COLOR_FALSE];
-		graphic.set_font_string(SMALL_FONT_STRING);
-		graphic.set_text_align(TextAlign::Center);
-		for button_index in 0..2 {
-			let button_rect = dialog_layout[2 + button_index];
-			graphic.set_fill_color(button_colors[button_index]);
-			graphic.draw_rect(button_rect);
-			graphic.set_fill_color(button_text_colors[button_index]);
-			graphic.draw_fill_text(button_texts[button_index], button_rect.position.x + button_rect.size.x * 0.5, button_rect.position.y + button_rect.size.y * 0.5);
-		}
-	}
-}
-
 impl Default for DevTools {
 	fn default() -> DevTools {
 		DevTools::new()
@@ -3010,6 +2787,24 @@ mod tests {
 	// F2 로 오른쪽 아래에 보이고, 트리 줄을 눌러 고르고 펼치고, A, G 칸으로 액티브와 기즈모를 바꾼다.
 	//==============================================================================
 	#[test]
+	fn inspect_request_opens_and_selects_node() {
+		let storage_directory_path = use_temporary_storage_directory("inspect");
+		let mut engine = create_test_engine();
+		let (mut node_tree, [root_id, _a_id, _b_id, _c_id, d_id, _e_id]) = create_test_tree();
+		let mut dev_tools = DevTools::new();
+		dev_tools.set_root_nodes(vec![root_id]);
+		dev_tools.set_active_tab(3);
+		engine.request_dev_tools_inspect(d_id);
+		dev_tools.tick(&mut engine, &mut node_tree, 0.016);
+		assert!(dev_tools.is_visible());
+		assert_eq!(dev_tools.get_active_tab(), 1);
+		assert_eq!(dev_tools.get_selected_node(), Some(d_id));
+		let parent_id = node_tree.get_parent_id(d_id).expect("parent");
+		assert!(dev_tools.is_node_expanded(parent_id));
+		let _ = std::fs::remove_dir_all(&storage_directory_path);
+	}
+
+	#[test]
 	fn tick_toggles_with_f2_and_tree_press_changes_nodes() {
 		let storage_directory_path = use_temporary_storage_directory("tick");
 		let mut engine = create_test_engine();
@@ -3069,17 +2864,23 @@ mod tests {
 	fn local_storage_dialog_actions() {
 		let storage_directory_path = use_temporary_storage_directory("dialog");
 		let mut dev_tools = DevTools::new();
+		let mut engine = Engine::new(crate::core::engine::EngineConfiguration::new());
 		dev_tools.complete_local_storage_dialog(LocalStorageDialogAction::AddKey, Some(String::from("  game.name ")));
-		let dialog_action = dev_tools.local_storage_dialog.as_ref().map(|dialog| dialog.action.clone());
+		let dialog_action = dev_tools.local_storage_dialog_request.as_ref().map(|request| request.action.clone());
 		assert_eq!(dialog_action, Some(LocalStorageDialogAction::AddValue(String::from("game.name"))));
-		dev_tools.local_storage_dialog.as_mut().expect("dialog").value = String::from("바닐라");
-		dev_tools.finish_local_storage_dialog(true);
+		// 엔진 질문 창으로 띄우고, 답하면 다음 tick 에 받는다.
+		dev_tools.process_local_storage_dialog(&mut engine);
+		assert!(engine.is_modal_dialog_open());
+		let handle = dev_tools.local_storage_dialog_wait.as_ref().map(|(handle, _)| handle.clone()).expect("handle");
+		handle.finish(crate::core::modaldialog::ModalDialogResult::Confirmed(String::from("바닐라")));
+		dev_tools.process_local_storage_dialog(&mut engine);
 		assert_eq!(LocalStorage::get_string("game.name", ""), "바닐라");
-		assert!(dev_tools.local_storage_dialog.is_none());
+		assert!(dev_tools.local_storage_dialog_wait.is_none());
+		assert!(dev_tools.local_storage_dialog_request.is_none());
 
 		// 빈 키는 묻지 않는다.
 		dev_tools.complete_local_storage_dialog(LocalStorageDialogAction::AddKey, Some(String::from("   ")));
-		assert!(dev_tools.local_storage_dialog.is_none());
+		assert!(dev_tools.local_storage_dialog_request.is_none());
 
 		dev_tools.selected_local_storage_key = Some(String::from("game.name"));
 		dev_tools.complete_local_storage_dialog(LocalStorageDialogAction::EditKey(String::from("game.name")), Some(String::from("game.title")));

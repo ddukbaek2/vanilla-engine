@@ -23,7 +23,8 @@
 //   (윈도우, 맥, 리눅스의 winit 은 suspended 를 보내지 않아 데스크탑에서는 on_page_process_restored 가 불리지 않는다)
 // - async/await: 엔진이 스레드 하나짜리 실행기(core/task.rs)를 품는다. spawn_task, spawn_scene_task 는 원본 async 함수처럼 맡기는 자리에서
 //   첫 await 까지 돌리고, 남은 작업은 프레임마다 씬의 tick 앞에서 깨어난 것만 한 번씩 폴링한다. 원본에서 Promise 를 돌려주는 엔진 함수는
-//   await 할 수 있는 꼴을 같이 둔다. (load_scene_async, unload_scene_async, unload_all_scenes_async, read_clipboard_text_async, request_frame_capture_async)
+//   await 할 수 있는 꼴을 같이 둔다. (load_scene_async, unload_scene_async, unload_all_scenes_async, read_clipboard_text_async, request_frame_capture_async,
+//   원본 window 의 alert_async, confirm_async, prompt_async. 질문 창이 떠 있는 동안은 원본 자바스크립트처럼 작업도 폴링하지 않는다)
 // - 씬 내리기는 원본 SceneManager.unloadScene 처럼 finalize, unload 를 부르고, unload 가 track_task 로 맡긴 작업이 끝나기를 기다린다.
 //   (그동안은 원본처럼 목록에 남아 tick 과 draw 를 받는다) 끝나면 목록에서 빼고, 그 씬의 작업이 남았으면 원본의 Promise 사슬처럼
 //   다 끝날 때까지 씬 값을 살려 둔다. (tick, draw 는 받지 않고 SceneContext::with 는 그 씬을 준다) 불러오는 도중에 내린 씬은 원본 loadScene 처럼
@@ -50,6 +51,7 @@ use crate::core::audiomanager::AudioManager;
 use crate::core::graphic::{Graphic, TextAlign, TextBaseline};
 use crate::core::image::Image;
 use crate::core::inputmanager::InputManager;
+use crate::core::modaldialog::{ModalDialogHandle, ModalDialogKind};
 use crate::core::pointercursor::PointerCursor;
 use crate::core::scene::{Scene, SceneId};
 use crate::core::task::{self, EngineContext, Promise, PromiseResolver, SceneContext, TaskExecutor, TaskHandle};
@@ -134,6 +136,11 @@ pub struct EngineConfiguration {
 	// 글꼴이 늦게 받아지면 그 글꼴로 구운 글자 가운데 그 글꼴의 글자 범위에 든 것만 버려 다시 굽게 할지. (원본 rebakeTextOnFontLoad, 원본처럼 기본 끔)
 	// 끄면 받기 전에 다른 글꼴로 구운 글자는 캐시에서 밀려날 때까지 그대로 남는다. (글자 범위로 나눈 글꼴 조각을 그때그때 받는 프로젝트가 켠다)
 	pub rebake_text_on_font_load: bool,
+	// 문서 언어. (웹 판 index.html 의 html lang 자리, Document::get_language. 비우면 데스크탑은 빈 글이고 웹은 페이지가 적어 둔 그대로)
+	pub document_language: String,
+	// 문서의 meta. ((이름, content) 목록, 웹 판 index.html 의 head 의 meta 자리. Document::get_meta_content, BuildInfo 가 build-version 을 읽는다)
+	// - 데스크탑 배포 빌드는 웹 판이 index.html 에 적는 판을 여기에 넣는다. (build.rs 의 rustc-env 를 env! 로 읽는 것 같은 것) 웹에서도 비어 있지 않으면 문서에 쓴다.
+	pub document_meta_list: Vec<(String, String)>,
 }
 
 impl EngineConfiguration {
@@ -167,6 +174,8 @@ impl EngineConfiguration {
 			ignore_virtual_keyboard_resize: false,
 			max_canvas_aspect_ratio: 0.0,
 			rebake_text_on_font_load: false,
+			document_language: String::new(),
+			document_meta_list: Vec::new(),
 		}
 	}
 }
@@ -242,6 +251,11 @@ pub struct Engine {
 	loaded_scene_id_list: Vec<SceneId>,
 	is_page_hidden: bool,
 	page_event_listener_list: RefCell<Vec<Weak<RefCell<dyn FnMut(PageEvent)>>>>,
+	// 떠 있거나 기다리는 질문 창. (데스크탑, 맨 앞 것이 떠 있다. 웹은 브라우저가 띄운다)
+	#[cfg(not(target_arch = "wasm32"))]
+	modal_dialog_list: std::collections::VecDeque<crate::core::modaldialog::ModalDialog>,
+	// 개발자 도구에서 고를 노드. (크롬 문맥 메뉴의 검사 자리, 그 노드를 가진 씬의 DevTools 가 꺼낸다)
+	dev_tools_inspect_request: std::cell::Cell<Option<crate::core::node::nodetree::NodeId>>,
 	// async 작업의 실행기. (EngineRunner 가 프레임마다 폴링한다)
 	pub(crate) task_executor: TaskExecutor,
 	// 씬 내리기가 끝나면 풀 Promise. (unload_scene_async 는 그 씬, unload_all_scenes_async 는 그때의 모든 씬)
@@ -255,6 +269,7 @@ impl Engine {
 	pub fn new(engine_configuration: EngineConfiguration) -> Engine {
 		let reference_resolution_size = engine_configuration.reference_resolution_size;
 		let view_scale_mode = engine_configuration.view_scale_mode;
+		crate::platform::document::apply_engine_configuration(&engine_configuration.document_language, &engine_configuration.document_meta_list);
 		Engine {
 			engine_configuration,
 			time_manager: TimeManager::new(),
@@ -279,9 +294,148 @@ impl Engine {
 			loaded_scene_id_list: Vec::new(),
 			is_page_hidden: false,
 			page_event_listener_list: RefCell::new(Vec::new()),
+			#[cfg(not(target_arch = "wasm32"))]
+			modal_dialog_list: std::collections::VecDeque::new(),
+			dev_tools_inspect_request: std::cell::Cell::new(None),
 			task_executor: TaskExecutor::new(),
 			pending_unload_resolver_list: Vec::new(),
 		}
+	}
+
+	//==============================================================================
+	// 개발자 도구로 노드 검사하기 부탁. (크롬 문맥 메뉴의 검사 자리. 그 노드를 가진 씬의 DevTools 가 다음 tick 에 열고 고른다)
+	//==============================================================================
+	pub fn request_dev_tools_inspect(&self, node_id: crate::core::node::nodetree::NodeId) {
+		self.dev_tools_inspect_request.set(Some(node_id));
+	}
+
+	//==============================================================================
+	// 검사 부탁 꺼내기. (그 노드가 node_tree 에 있을 때만 꺼낸다)
+	//==============================================================================
+	pub(crate) fn take_dev_tools_inspect_request(&self, node_tree: &crate::core::node::nodetree::NodeTree) -> Option<crate::core::node::nodetree::NodeId> {
+		let node_id = self.dev_tools_inspect_request.get()?;
+		if !node_tree.contains(node_id) {
+			return None;
+		}
+		self.dev_tools_inspect_request.set(None);
+		Some(node_id)
+	}
+
+	//==============================================================================
+	// 알림 창. (원본 window.alert, 확인만 있다. 손잡이는 확인하면 끝난다)
+	// - 웹은 브라우저 창이 닫힐 때까지 막고 끝난 손잡이를 돌려준다. 데스크탑은 엔진이 그린 창을 띄우고, 닫힐 때까지 씬을 갱신하지 않는다. (core/modaldialog.rs)
+	//==============================================================================
+	pub fn alert(&mut self, message: &str) -> ModalDialogHandle {
+		self.show_modal_dialog(ModalDialogKind::Alert, message, "")
+	}
+
+	//==============================================================================
+	// 확인 창. (원본 window.confirm, 손잡이의 is_confirmed 가 원본이 돌려주는 값)
+	//==============================================================================
+	pub fn confirm(&mut self, message: &str) -> ModalDialogHandle {
+		self.show_modal_dialog(ModalDialogKind::Confirm, message, "")
+	}
+
+	//==============================================================================
+	// 입력 창. (원본 window.prompt(message, default), 손잡이의 get_prompt_text 가 원본이 돌려주는 값, 취소는 None)
+	//==============================================================================
+	pub fn prompt(&mut self, message: &str, default_value: &str) -> ModalDialogHandle {
+		self.show_modal_dialog(ModalDialogKind::Prompt, message, default_value)
+	}
+
+	//==============================================================================
+	// 알림 창을 띄우고 닫힐 때 풀리는 Promise. (원본 window.alert 를 await 꼴로)
+	//==============================================================================
+	pub fn alert_async(&mut self, message: &str) -> Promise<()> {
+		let (alert_promise, alert_resolver) = Promise::create();
+		self.alert(message).set_callback(move |_result| {
+			alert_resolver.resolve(());
+		});
+		alert_promise
+	}
+
+	//==============================================================================
+	// 확인 창을 띄우고 답하면 풀리는 Promise. (원본 window.confirm 이 돌려주는 값)
+	//==============================================================================
+	pub fn confirm_async(&mut self, message: &str) -> Promise<bool> {
+		let (confirm_promise, confirm_resolver) = Promise::create();
+		self.confirm(message).set_callback(move |result| {
+			confirm_resolver.resolve(matches!(result, crate::core::modaldialog::ModalDialogResult::Confirmed(_)));
+		});
+		confirm_promise
+	}
+
+	//==============================================================================
+	// 입력 창을 띄우고 답하면 풀리는 Promise. (원본 window.prompt 가 돌려주는 값, 취소는 원본 null 자리의 None)
+	//==============================================================================
+	pub fn prompt_async(&mut self, message: &str, default_value: &str) -> Promise<Option<String>> {
+		let (prompt_promise, prompt_resolver) = Promise::create();
+		self.prompt(message, default_value).set_callback(move |result| {
+			let prompt_text = match result {
+				crate::core::modaldialog::ModalDialogResult::Confirmed(text) => {
+					Some(text.clone())
+				}
+				crate::core::modaldialog::ModalDialogResult::Cancelled => {
+					None
+				}
+			};
+			prompt_resolver.resolve(prompt_text);
+		});
+		prompt_promise
+	}
+
+	//==============================================================================
+	// 질문 창 띄우기. (웹은 브라우저 함수, 데스크탑은 목록 끝에 더한다)
+	//==============================================================================
+	fn show_modal_dialog(&mut self, kind: ModalDialogKind, message: &str, default_value: &str) -> ModalDialogHandle {
+		#[cfg(target_arch = "wasm32")]
+		{
+			crate::core::modaldialog::show_browser_dialog(kind, message, default_value)
+		}
+		#[cfg(not(target_arch = "wasm32"))]
+		{
+			let handle = ModalDialogHandle::create_pending();
+			self.modal_dialog_list.push_back(crate::core::modaldialog::ModalDialog::new(kind, message, default_value, handle.clone()));
+			handle
+		}
+	}
+
+	//==============================================================================
+	// 질문 창이 떠 있는지. (데스크탑만 참이 될 수 있다. 떠 있는 동안 엔진은 씬을 갱신하지 않는다)
+	//==============================================================================
+	pub fn is_modal_dialog_open(&self) -> bool {
+		#[cfg(target_arch = "wasm32")]
+		{
+			false
+		}
+		#[cfg(not(target_arch = "wasm32"))]
+		{
+			!self.modal_dialog_list.is_empty()
+		}
+	}
+
+	//==============================================================================
+	// 맨 앞 질문 창 꺼내기. (갱신하는 동안 엔진을 함께 빌리려고 꺼냈다가 put_back_front_modal_dialog 로 돌려놓는다)
+	//==============================================================================
+	#[cfg(not(target_arch = "wasm32"))]
+	pub(crate) fn take_front_modal_dialog(&mut self) -> Option<crate::core::modaldialog::ModalDialog> {
+		self.modal_dialog_list.pop_front()
+	}
+
+	//==============================================================================
+	// 맨 앞 질문 창 돌려놓기.
+	//==============================================================================
+	#[cfg(not(target_arch = "wasm32"))]
+	pub(crate) fn put_back_front_modal_dialog(&mut self, modal_dialog: crate::core::modaldialog::ModalDialog) {
+		self.modal_dialog_list.push_front(modal_dialog);
+	}
+
+	//==============================================================================
+	// 맨 앞 질문 창.
+	//==============================================================================
+	#[cfg(not(target_arch = "wasm32"))]
+	pub(crate) fn get_front_modal_dialog_mut(&mut self) -> Option<&mut crate::core::modaldialog::ModalDialog> {
+		self.modal_dialog_list.front_mut()
 	}
 
 	//==============================================================================
@@ -1367,14 +1521,26 @@ impl EngineRunner {
 		// 입력 처리.
 		self.engine.input_manager.tick(time_delta);
 
+		// 질문 창. (데스크탑, 떠 있으면 원본에서 자바스크립트가 멈추듯 씬과 async 작업을 갱신하지 않고 창이 입력을 받는다)
+		let is_modal_dialog_open = self.engine.is_modal_dialog_open();
+		#[cfg(not(target_arch = "wasm32"))]
+		{
+			if is_modal_dialog_open {
+				let measure_graphic: &Graphic = graphic;
+				crate::core::modaldialog::tick_modal_dialog(&mut self.engine, &|text: &str| crate::core::modaldialog::measure_field_text_width(measure_graphic, text), time_delta);
+			}
+		}
+
 		// 깨어난 작업 폴링. (await 다음 줄이 이번 프레임의 시간과 입력을 보고, 바꾼 것이 이번 프레임에 그려진다)
-		// unload 가 맡긴 작업이 끝난 씬은 원본처럼 이번 프레임부터 목록에서 빠지고, 내리기를 기다리던 작업도 원본 마이크로태스크처럼 같은 차례에 이어 간다.
-		task::begin_poll_frame(&mut self.engine);
-		loop {
-			task::poll_woken_tasks(&mut self.engine, &mut self.scene_list, &mut self.detached_scene_list, Some(&mut *graphic));
-			finish_scene_unloads(&mut self.engine, &mut self.scene_list, &mut self.unloading_scene_id_list, &mut self.detached_scene_list, &mut self.unload_waiting_list, seconds_since_startup);
-			if !self.engine.task_executor.has_woken_tasks() {
-				break;
+		if !is_modal_dialog_open {
+			// unload 가 맡긴 작업이 끝난 씬은 원본처럼 이번 프레임부터 목록에서 빠지고, 내리기를 기다리던 작업도 원본 마이크로태스크처럼 같은 차례에 이어 간다.
+			task::begin_poll_frame(&mut self.engine);
+			loop {
+				task::poll_woken_tasks(&mut self.engine, &mut self.scene_list, &mut self.detached_scene_list, Some(&mut *graphic));
+				finish_scene_unloads(&mut self.engine, &mut self.scene_list, &mut self.unloading_scene_id_list, &mut self.detached_scene_list, &mut self.unload_waiting_list, seconds_since_startup);
+				if !self.engine.task_executor.has_woken_tasks() {
+					break;
+				}
 			}
 		}
 
@@ -1393,9 +1559,11 @@ impl EngineRunner {
 				continue;
 			}
 
-			// 갱신. (씬의 터치 훅은 원본 Scene.tickTouch 처럼 tick 안의 터치 다음)
-			scene.tick(&mut self.engine, time_delta);
-			dispatch_scene_touch(&mut self.engine, scene.as_mut());
+			// 갱신. (씬의 터치 훅은 원본 Scene.tickTouch 처럼 tick 안의 터치 다음, 질문 창이 떠 있던 프레임은 건너뛴다)
+			if !is_modal_dialog_open {
+				scene.tick(&mut self.engine, time_delta);
+				dispatch_scene_touch(&mut self.engine, scene.as_mut());
+			}
 
 			// 출력.
 			scene.pre_draw(&mut self.engine, graphic);
@@ -1413,6 +1581,15 @@ impl EngineRunner {
 		// 개발 정보 출력.
 		if self.engine.engine_configuration.use_statistics {
 			draw_statistics(&self.engine, graphic);
+		}
+
+		// 질문 창. (모든 것 위에, 창 안쪽 논리 좌표)
+		#[cfg(not(target_arch = "wasm32"))]
+		{
+			if self.engine.is_modal_dialog_open() {
+				self.engine.view_manager.apply_canvas_native_rect(graphic);
+				crate::core::modaldialog::draw_modal_dialog(&mut self.engine, graphic);
+			}
 		}
 
 		// 마우스 커서. (켜져 있고 바뀌었을 때만 플랫폼에 넘긴다)

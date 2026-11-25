@@ -14,6 +14,8 @@
 //==============================================================================
 // 오디오 백엔드. (데스크탑 cpal 위의 엔진 믹서, 웹 WebAudio. 두 갈래를 안에서 고른다)
 pub mod audio;
+// 문서. (html lang 과 head 의 meta, 웹은 브라우저 문서이고 데스크탑은 엔진이 든 값)
+pub mod document;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod desktop;

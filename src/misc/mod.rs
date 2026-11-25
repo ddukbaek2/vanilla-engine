@@ -16,6 +16,7 @@ pub mod imagescroller;
 pub mod indicator;
 pub mod localization;
 pub mod localstorage;
+pub mod storagetext;
 pub mod nodelayout;
 pub mod pathfinder;
 pub mod persistedstore;

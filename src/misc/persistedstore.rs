@@ -14,8 +14,11 @@
 // - 원본과 다른 점:
 //   상태 객체는 serde_json::Value(객체)다. 객체도 배열도 아닌 값을 넘기면 빈 객체로 친다. (원본 Object.assign 은 글을 글자마다 번호 키로 섞는다)
 //   subscribe 는 해지 함수 대신 구독 번호(PersistedStoreSubscription)를 돌려주고, unsubscribe(번호) 로 푼다.
+//   러스트 String 은 짝 없는 서로게이트를 담지 못해, 원본이 저장한 그런 글(JSON.stringify 의 \ud83d 같은 것)은 상태에서 대체 문자(U+FFFD)로 보인다.
+//   읽을 때 그 글의 자리를 남겨 두고, 고치지 않고 다시 쓰면 원본처럼 \udXXX 로 쓴다. (misc/storagetext.rs, 원본 판의 저장을 읽고 다시 써도 잃지 않는다)
 //==============================================================================
 use crate::misc::localstorage::{LocalStorage, LocalStorageBackend};
+use crate::misc::storagetext::{self, JsonSurrogateTable};
 use serde_json::{Map, Value};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -41,6 +44,8 @@ pub struct PersistedStore {
 	next_subscription_number: u64,
 	// 이 저장소만 쓰는 곳. (None 이면 LocalStorage. 쓰기가 &self 라 RefCell 에 두고, get_storage_backend 로 나눠 주려고 Rc 에 담는다)
 	storage_backend: Option<Rc<RefCell<Box<dyn LocalStorageBackend>>>>,
+	// 마지막으로 읽은 저장 글의 짝 없는 서로게이트 표. (읽기가 &self 라 RefCell)
+	surrogate_table: RefCell<JsonSurrogateTable>,
 }
 
 //==============================================================================
@@ -134,6 +139,7 @@ impl PersistedStore {
 			subscriber_list: Vec::new(),
 			next_subscription_number: 1,
 			storage_backend: None,
+			surrogate_table: RefCell::new(JsonSurrogateTable::new()),
 		};
 		persisted_store.state = persisted_store.read_from_storage();
 		persisted_store
@@ -206,12 +212,14 @@ impl PersistedStore {
 	//==============================================================================
 	pub fn read_from_storage(&self) -> Value {
 		let default_state = Value::Object(self.default_state.clone());
-		let stored_text = self.read_stored_text();
-		if stored_text.is_empty() {
+		*self.surrogate_table.borrow_mut() = JsonSurrogateTable::new();
+		let stored_code_units = self.read_stored_code_units();
+		if stored_code_units.is_empty() {
 			return default_state;
 		}
-		let parsed_value: Value = match serde_json::from_str(&stored_text) {
-			Ok(parsed_value) => {
+		let parsed_value: Value = match storagetext::parse_json_code_units(&stored_code_units) {
+			Ok((parsed_value, surrogate_table)) => {
+				*self.surrogate_table.borrow_mut() = surrogate_table;
 				parsed_value
 			}
 			Err(_) => {
@@ -242,7 +250,7 @@ impl PersistedStore {
 		let mut payload = Map::new();
 		payload.insert(String::from("version"), Value::from(self.version));
 		payload.insert(String::from("state"), self.state.clone());
-		let payload_text = Value::Object(payload).to_string();
+		let payload_text = storagetext::stringify_json(&Value::Object(payload), &self.surrogate_table.borrow());
 		match &self.storage_backend {
 			Some(storage_backend) => {
 				let write_result = match storage_backend.try_borrow_mut() {
@@ -288,6 +296,20 @@ impl PersistedStore {
 			}
 			None => {
 				LocalStorage::get_string(&self.storage_key, "")
+			}
+		}
+	}
+
+	//==============================================================================
+	// 저장된 글을 UTF-16 단위로 읽기. (LocalStorage 는 원래 단위 그대로, 갈아 끼운 저장소는 그 글. 없거나 못 읽으면 빈 것)
+	//==============================================================================
+	fn read_stored_code_units(&self) -> Vec<u16> {
+		match &self.storage_backend {
+			Some(_) => {
+				self.read_stored_text().encode_utf16().collect()
+			}
+			None => {
+				LocalStorage::get_item_code_units(&self.storage_key).unwrap_or_default()
 			}
 		}
 	}
@@ -448,6 +470,24 @@ mod tests {
 		assert_eq!(store.get().to_string(), "{\"0\":\"w\",\"1\":\"y\",\"2\":false,\"10\":true,\"b\":1,\"z\":0,\"a\":null}");
 		store.replace(json!(7));
 		assert_eq!(store.get(), &json!({}));
+		let _ = std::fs::remove_dir_all(&storage_directory_path);
+	}
+
+	//==============================================================================
+	// 원본이 저장한 짝 없는 서로게이트가 든 글. (상태에서는 대체 문자로 보이고, 다른 칸을 고쳐 다시 써도 그 글은 원본 꼴 그대로)
+	// - 저장 글은 node 에서 JSON.stringify({ version: 1, state: { name: "a" + "\ud83d", best: 3 } }) 로 찍은 것과 같다.
+	//==============================================================================
+	#[test]
+	fn keeps_lone_surrogate_written_by_original() {
+		let storage_directory_path = use_temporary_storage_directory("surrogate");
+		LocalStorage::set_string("game.profile", "{\"version\":1,\"state\":{\"name\":\"a\\ud83d\",\"best\":3}}");
+		let mut store = PersistedStore::new("game.profile", json!({ "name": "", "best": 0 }), 1);
+		assert_eq!(store.get()["name"], json!("a\u{fffd}"));
+		assert_eq!(store.get()["best"], json!(3));
+		store.set(json!({ "best": 4 }));
+		assert_eq!(store.read_stored_text(), "{\"version\":1,\"state\":{\"name\":\"a\\ud83d\",\"best\":4}}");
+		store.set(json!({ "name": "b" }));
+		assert_eq!(store.read_stored_text(), "{\"version\":1,\"state\":{\"name\":\"b\",\"best\":4}}");
 		let _ = std::fs::remove_dir_all(&storage_directory_path);
 	}
 }

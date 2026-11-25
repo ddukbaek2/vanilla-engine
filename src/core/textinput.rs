@@ -39,6 +39,10 @@ pub enum TextInputKey {
 	Cut,
 	// Ctrl(맥은 Cmd) + V
 	Paste,
+	// 되돌리기. (Ctrl(맥은 Cmd) + Z, 윈도우는 Alt + Backspace 도. 원본 DOM 입력 칸의 브라우저 실행 취소)
+	Undo,
+	// 다시 하기. (Ctrl(맥은 Cmd) + Shift + Z, 윈도우와 리눅스는 Ctrl + Y, 윈도우는 Alt + Shift + Backspace 도)
+	Redo,
 }
 
 //==============================================================================

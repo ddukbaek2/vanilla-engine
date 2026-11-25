@@ -1,19 +1,21 @@
 //==============================================================================
 // 빌드 정보. (원본 misc/buildinfo.js)
 // - 배포 빌드가 적어 둔 판을 앱이 켜질 때 한 번 읽는다. 읽는 차례:
-//   1. 웹: 페이지 머리의 <meta name="build-version" content="..."> 의 content. (있으면 그 글 그대로)
+//   1. 문서 머리의 <meta name="build-version" content="..."> 의 content. (있으면 그 글 그대로, platform/document.rs 의 Document::get_meta_content)
+//      웹은 원본처럼 페이지의 meta 다. 데스크탑은 엔진이 든 문서의 meta 이고, 배포 빌드가 EngineConfiguration.document_meta_list 에 넣는다.
+//      (웹 판 index.html 의 meta 자리, build.rs 의 rustc-env 를 env! 로 읽어 넣는 것 같은 것)
 //   2. 없으면 version.json. { version, date, time, hash, ... } 꼴이고, 글은 "날짜 시각 (해시)" 이다. 해시가 없으면 version.
 //      웹은 페이지 기준 주소를 캐시 없이(fetch 의 cache: "no-cache") 받는다. 새 판을 올려도 옛 판 표시가 남지 않게 한다.
-//      데스크탑은 애셋 폴더에서 읽는다. (그 자리에서 끝난다)
+//      데스크탑은 애셋 폴더에서 읽는다. (그 자리에서 끝난다, 파일이라 옛 판이 남는 캐시가 없다)
 //   3. 둘 다 없으면 set_package_version 으로 넣은 판. (게임 크레이트가 env!("CARGO_PKG_VERSION") 을 넘긴다, 넣지 않았으면 원본처럼 빈 글)
 // - 원본과 다른 점:
 //   원본 생성자의 version.json 주소 기본 인자는 new()(기본 주소)와 set_version_json_path 로 나눴다.
 //   원본 await load() 는 받을 때까지 기다린다. 러스트 판도 load(engine) 가 await 할 수 있는 BuildInfoLoadHandle 을 돌려준다. (wait_for_load().await 도 같다)
 //   await 없이는 마쳤는지를 is_loaded() 로 보고, 씬은 get_load_handle() 을 track_load_handle 로 맡긴다.
-//   meta 는 브라우저에만 있어서 데스크탑은 읽지 않는다. 캐시 끄기도 브라우저 fetch 만의 일이다.
 //==============================================================================
 use crate::core::asset::AssetLoadHandle;
 use crate::core::engine::Engine;
+use crate::platform::document::Document;
 use serde_json::Value;
 use std::future::{Future, IntoFuture};
 use std::pin::Pin;
@@ -117,7 +119,7 @@ impl BuildInfo {
 	}
 
 	//==============================================================================
-	// 읽기 요청. (웹은 meta 를 바로 읽고, 없으면 version.json 을 캐시 없이 요청한다. 데스크탑은 애셋 폴더의 version.json 을 읽는다. await 할 수 있는 손잡이를 돌려준다)
+	// 읽기 요청. (문서의 meta 를 바로 읽고, 없으면 웹은 version.json 을 캐시 없이 요청한다. 데스크탑은 애셋 폴더의 version.json 을 읽는다. await 할 수 있는 손잡이를 돌려준다)
 	//==============================================================================
 	pub fn load(&mut self, engine: &Engine) -> BuildInfoLoadHandle {
 		self.is_load_requested = true;
@@ -206,10 +208,10 @@ impl BuildInfo {
 	}
 
 	//==============================================================================
-	// 페이지의 meta 에 적힌 판. (원본 readMetaText, 데스크탑과 없으면 빈 글)
+	// 문서의 meta 에 적힌 판. (원본 readMetaText, 없으면 빈 글. 데스크탑은 엔진이 든 문서의 meta)
 	//==============================================================================
 	pub fn read_meta_text(&self) -> String {
-		platform_build_info::read_meta_text(&self.meta_name)
+		Document::get_meta_content(&self.meta_name).map(|content| content.trim().to_string()).unwrap_or_default()
 	}
 
 	//==============================================================================
@@ -258,19 +260,12 @@ impl Default for BuildInfo {
 }
 
 //==============================================================================
-// 데스크탑. (meta 가 없고, version.json 은 애셋 폴더에서 읽는다)
+// 데스크탑. (version.json 은 애셋 폴더에서 읽는다)
 //==============================================================================
 #[cfg(not(target_arch = "wasm32"))]
 mod platform_build_info {
 	use crate::core::asset::AssetLoadHandle;
 	use crate::core::engine::Engine;
-
-	//==============================================================================
-	// meta 의 판. (데스크탑은 없다)
-	//==============================================================================
-	pub fn read_meta_text(_meta_name: &str) -> String {
-		String::new()
-	}
 
 	//==============================================================================
 	// version.json 요청. (애셋 폴더에서 그 자리에서 읽는다)
@@ -281,36 +276,13 @@ mod platform_build_info {
 }
 
 //==============================================================================
-// 웹. (페이지의 meta 와, 페이지 기준 version.json 을 캐시 없이)
+// 웹. (페이지 기준 version.json 을 캐시 없이)
 //==============================================================================
 #[cfg(target_arch = "wasm32")]
 mod platform_build_info {
 	use crate::core::asset::AssetLoadHandle;
 	use crate::core::engine::Engine;
 	use wasm_bindgen::{JsCast, JsValue};
-
-	//==============================================================================
-	// meta 의 판. (없으면 빈 글)
-	//==============================================================================
-	pub fn read_meta_text(meta_name: &str) -> String {
-		let document = match web_sys::window().and_then(|window| window.document()) {
-			Some(document) => {
-				document
-			}
-			None => {
-				return String::new();
-			}
-		};
-		let selector = format!("meta[name=\"{}\"]", meta_name);
-		match document.query_selector(&selector) {
-			Ok(Some(meta_element)) => {
-				meta_element.get_attribute("content").map(|content| content.trim().to_string()).unwrap_or_default()
-			}
-			_ => {
-				String::new()
-			}
-		}
-	}
 
 	//==============================================================================
 	// version.json 요청. (fetch 를 cache: "no-cache" 로 부른다. 받으면 손잡이를 끝낸다)
@@ -389,6 +361,21 @@ mod tests {
 		assert_eq!(BuildInfo::compose_text(&serde_json::json!({ "version": " 2.0.0 " })), "2.0.0");
 		assert_eq!(BuildInfo::compose_text(&serde_json::json!({ "hash": "def5678" })), "(def5678)");
 		assert_eq!(BuildInfo::default().read_text(), "");
+
+		// 문서의 meta 가 있으면 그것이 먼저다. (웹 판 index.html 의 meta 자리를 데스크탑은 엔진 설정이 채운다)
+		let mut meta_engine_configuration = EngineConfiguration::new();
+		meta_engine_configuration.asset_directory_paths = vec![asset_directory_path.clone()];
+		meta_engine_configuration.document_meta_list = vec![(String::from("build-version"), String::from(" 2026-11-26 def5678 "))];
+		let meta_engine = Engine::new(meta_engine_configuration);
+		let mut meta_build_info = BuildInfo::new();
+		assert_eq!(meta_build_info.read_meta_text(), "2026-11-26 def5678");
+		meta_build_info.load(&meta_engine);
+		assert!(meta_build_info.is_loaded());
+		assert!(meta_build_info.get_load_handle().is_none());
+		assert!(meta_build_info.read_version_data().is_none());
+		assert_eq!(meta_build_info.read_text(), "2026-11-26 def5678");
+		meta_build_info.set_meta_name("other-version");
+		assert_eq!(meta_build_info.read_meta_text(), "");
 		let _ = std::fs::remove_dir_all(&asset_directory_path);
 	}
 }

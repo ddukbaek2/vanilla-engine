@@ -80,6 +80,7 @@ pub mod gamepadhaptics;
 pub mod systemfont;
 #[cfg(target_os = "macos")]
 pub mod coretextglyph;
+pub mod emojipanel;
 
 // 엔진이 들고 있는 창 손잡이. (커서, 제목을 바꿀 때)
 pub type PlatformWindow = Rc<Window>;
@@ -230,6 +231,12 @@ pub fn set_cursor(platform_window: Option<&PlatformWindow>, cursor_value: &Curso
 		}
 		"progress" => {
 			CursorIcon::Progress
+		}
+		"col-resize" => {
+			CursorIcon::ColResize
+		}
+		"row-resize" => {
+			CursorIcon::RowResize
 		}
 		_ => {
 			CursorIcon::Default

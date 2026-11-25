@@ -352,7 +352,7 @@ VANILLA_CAPTURE_PATH=shots/uigallery_{frame}.png VANILLA_CAPTURE_FRAMES=60 VANIL
 | `loadingshowcase` | AssetLoader 로 함께 받기(없는 파일은 실패 목록), 바꾼 로딩 화면, 빌드 판, FixedStepper 로 움직이는 공 |
 | `asyncawait` | 원본처럼 async/await: 불러오기 작업이 아틀라스를 await 로 받는 동안 로딩 화면, 이야기 작업이 wait::seconds, wait::next_frame, fade_screen_async, Promise 로 차례로 돈다 |
 | `textnodeextras` | 글자 칸 맞춤, 배율이 움직이는 글, 반투명 고리와 호와 선분, 스프라이트 아틀라스, 구운 그림을 나눠 쓰는 그림자 글 |
-| `panelayout` | DOM 화면 분할 패널(Pane): 도구 막대, 끌어서 크기를 바꾸는 패널, 오른쪽 패널의 엔진 캔버스 (웹 전용) |
+| `panelayout` | 화면 분할 패널(Pane): 도구 막대, 끌어서 크기를 바꾸는 패널, 오른쪽 패널의 엔진 화면 (웹은 DOM 요소, 데스크탑은 엔진 노드) |
 | `blendmodes` | 블렌드 모드 26 가지를 칸마다: 반투명 그림과 도형, 글자, 나인슬라이스, 자르기, 파티클, 바꿔 끼운 셰이더, 반투명 렌더 타겟 |
 | `textshaping` | 글자 모양 짓기: 오른쪽에서 왼쪽 글(아랍어 글자 잇기), 가짜 기울임과 굵게, 한중일 낱말 줄바꿈, 글자 묶음 표시 수, 그림자 글의 기울임과 밑줄, DynamicFont 글자 아틀라스 |
 | `scenedocument` | UI 문서: vanilla.js 비주얼 에디터 꼴의 씬 파일(.scene.json)을 읽어 노드 트리를 짓고, 다시 내보내 견준다 |
@@ -382,7 +382,9 @@ cargo run --release --example modelviewer
 
 **GL 컨텍스트 하나에 2D 와 3D.** 씬의 `pre_draw` 에서 그림자, 3D 장면, 블룸 패스를 그리고 `graphic.restore_render_state()` 로 2D 상태를 되살린 뒤 UI 를 그립니다. 2D 그리기 사이에 끼우는 3D 는 `graphic.run_external_pass` 로 감싸고, `ToonView3D` 는 이 길로 노드 사각형 안에 툰 3D 를 그립니다. 화면 효과는 화면(또는 영역)을 텍스처로 캡처해 풀스크린 패스를 체인으로 연결합니다.
 
-**웹에서도 제대로 되는 한글 입력.** 웹에서는 입력 필드마다 숨겨진 DOM `<input>` 을 두고 IME 조합 이벤트를 받아 캔버스에 그립니다. iOS 처럼 사용자 입력 안에서만 키보드가 뜨는 브라우저를 위해 터치 핸들러 안에서 포커스를 줍니다. 데스크탑은 winit 의 IME 이벤트를 씁니다.
+**웹에서도 제대로 되는 한글 입력.** 웹에서는 입력 필드마다 숨겨진 DOM `<input>` 을 두고 IME 조합 이벤트를 받아 캔버스에 그립니다. iOS 처럼 사용자 입력 안에서만 키보드가 뜨는 브라우저를 위해 터치 핸들러 안에서 포커스를 줍니다. 데스크탑은 winit 의 IME 이벤트를 쓰고, 브라우저 DOM 입력 칸이 해 주던 되돌리기(블링크와 같은 묶음)와 직접 누르는 칸의 크롬 편집 칸 메뉴(크로미엄 번역 82 로케일, 같은 차례와 단축키 글)를 엔진이 합니다.
+
+**브라우저가 해 주던 것을 데스크탑에서도.** 원본은 크롬 위에서 돌아 브라우저 기능을 그대로 씁니다. 러스트 웹판은 같은 브라우저 기능을 쓰고, 데스크탑은 엔진이 같은 API 로 같은 일을 합니다. 게임이 그리는 2D 캔버스는 `Canvas2D`(데스크탑은 크롬 Skia 의 CPU 래스터라이저를 옮긴 [tiny-skia](https://crates.io/crates/tiny-skia)), `window.prompt`, `confirm`, `alert` 는 `Engine::prompt`, `confirm`, `alert`(데스크탑은 엔진이 그린 크롬 탭 모달 같은 창, await 꼴도 있습니다), html lang 과 meta 는 `Document`, 도구 창의 DOM 분할 패널은 엔진 노드 `Pane` 입니다. `LocalStorage` 와 `PersistedStore` 는 원본이 저장한 JS 글의 짝 없는 서로게이트를 원래 단위 그대로 지킵니다.
 
 **컴파일 때 짓는 반사(리플렉션).** vanilla.js 는 실행 중에 객체의 프로토타입을 훑어 get, is, set 함수를 찾아 UI 문서 저장과 인스펙터에 씁니다. 러스트에는 실행 중 반사가 없어, 언리얼의 UHT 나 Qt 의 moc 처럼 컴파일 때 코드를 짓습니다. 절차 매크로 `#[vanilla::reflect]` 가 impl 블록의 함수 목록과 그 함수를 부르는 코드를 만들고, 값으로 바꿀 수 없는 꼴의 게터는 자동 참조 특수화(autoref specialization)로 골라내 건너뜁니다. 저장 결과는 vanilla.js 가 쓰는 JSON 과 키, 차례, 값까지 같습니다.
 
@@ -446,6 +448,7 @@ cargo run --release --example modelviewer
 | [symphonia](https://crates.io/crates/symphonia) | 0.6.1 | `platform/audio/decode/` | 소리 해석. 크롬 decodeAudioData 와 같은 해석기로 FLAC, MP3, PCM, Vorbis 를 풀고(크롬이 켜는 기능과 같게), AAC 와 컨테이너(wav, ogg, mkv(webm), isomp4(m4a), flac, mp3, adts)도 풉니다 | MPL-2.0 |
 | [opus-pure](https://crates.io/crates/opus-pure) | 0.2.5 | `platform/audio/decode/opus.rs` | Opus 해석. libopus 를 러스트로 옮긴 것으로 symphonia 코덱 등록표에 엔진 해석기로 넣습니다 (크롬은 libopus 로 풉니다). C 빌드가 없어 맥에서 윈도우 대상 검사가 됩니다 | BSD-3-Clause |
 | [resvg](https://crates.io/crates/resvg) | 0.50.0 | `core/image.rs`, `animation/timeline.rs` | SVG 그림을 usvg 로 읽고 tiny-skia 로 그립니다 | MIT / Apache-2.0 |
+| [tiny-skia](https://crates.io/crates/tiny-skia) | 0.12.0 | `core/canvas2d/desktop_canvas.rs` | 데스크탑 Canvas2D 의 경로, 선, 그라데이션, 패턴, 자르기, 합치기를 칠합니다. 크롬이 쓰는 Skia 의 CPU 래스터라이저를 옮긴 것이고 resvg 가 쓰는 같은 판이라 더 받는 크레이트가 없습니다 | BSD-3-Clause |
 | [rav1d](https://crates.io/crates/rav1d) | 1.1.0 | `core/avifimage.rs` | AVIF 의 AV1 해석(dav1d 를 러스트로 옮긴 것). asm 을 꺼 nasm 이나 C 컴파일러 없이 빌드합니다. HEIF 상자는 엔진이 읽습니다 | BSD-2-Clause |
 | [icu_segmenter](https://crates.io/crates/icu_segmenter), [icu_provider](https://crates.io/crates/icu_provider), [icu_collections](https://crates.io/crates/icu_collections) | 2.4.0 | `core/component/text.rs` | 낱말 나누기. 공백 없이 쓰는 한중일과 태국어 같은 동남아 글자를 사전으로 나누고, 한중일은 사전(cjdict)의 낱말 값으로 크롬 ICU4C 처럼 값의 합이 가장 작은 나누기를 고릅니다. 웹은 원본처럼 브라우저 Intl.Segmenter 를 씁니다 | Unicode-3.0 |
 | [unicode-normalization](https://crates.io/crates/unicode-normalization) | 0.1.26 | `core/component/text.rs` | 한중일 사전을 찾기 전에 NFKC 로 바꿉니다 (ICU4C CjkBreakEngine 과 같게) | MIT / Apache-2.0, Unicode-3.0 |
@@ -457,7 +460,7 @@ cargo run --release --example modelviewer
 
 | 크레이트 | 버전 | 쓰는 곳 | 하는 일 | 라이선스 |
 | --- | --- | --- | --- | --- |
-| [windows-sys](https://crates.io/crates/windows-sys) | 0.52.0 | `platform/desktop/windowsplatform.rs`, `platform/desktop/systemfont.rs`, `platform/desktop/windowsinputpane.rs`, `platform/desktop.rs` | 잠자기에서 깸(WM_POWERBROADCAST)을 받는 창 서브클래싱, 주된 손이 손가락인지, system-ui 의 메뉴 글꼴과 ClearType 켜짐, 대체 글꼴을 고를 사용자 기본 언어, 터치 키보드 스레드의 메시지 큐, 개발자 도구의 힙 사용량(HeapSummary). 켜는 기능은 Win32_Foundation, Win32_Devices_Display, Win32_Globalization, Win32_Graphics_Gdi, Win32_System_Memory, Win32_System_Power, Win32_System_Threading, Win32_UI_Shell, Win32_UI_WindowsAndMessaging 뿐입니다 | MIT / Apache-2.0 |
+| [windows-sys](https://crates.io/crates/windows-sys) | 0.52.0 | `platform/desktop/windowsplatform.rs`, `platform/desktop/systemfont.rs`, `platform/desktop/windowsinputpane.rs`, `platform/desktop.rs` | 잠자기에서 깸(WM_POWERBROADCAST)을 받는 창 서브클래싱, 주된 손이 손가락인지, system-ui 의 메뉴 글꼴과 ClearType 켜짐, 대체 글꼴을 고를 사용자 기본 언어, 터치 키보드 스레드의 메시지 큐, 개발자 도구의 힙 사용량(HeapSummary), 크롬처럼 SendInput 으로 윈도우 키 + '.' 을 보내 이모티콘 창 띄우기. 켜는 기능은 Win32_Foundation, Win32_Devices_Display, Win32_Globalization, Win32_Graphics_Gdi, Win32_System_Memory, Win32_System_Power, Win32_System_Threading, Win32_UI_Input_KeyboardAndMouse, Win32_UI_Shell, Win32_UI_WindowsAndMessaging 뿐입니다 | MIT / Apache-2.0 |
 | [windows](https://crates.io/crates/windows), [windows-core](https://crates.io/crates/windows-core) | 0.62.2 | `platform/desktop/systemfont.rs`, `platform/desktop/windowsinputpane.rs` | DirectWrite 로 글꼴 이름의 파일을 찾고, 글꼴에 없는 글자의 대체 글꼴을 IDWriteFontFallback 으로 고릅니다. 크롬 윈도우처럼 창에 묶은 WinRT InputPane 으로 터치 키보드를 띄우고 내리며 가린 영역을 받습니다 (cpal, gilrs 가 쓰는 같은 판) | MIT / Apache-2.0 |
 
 **macOS 만**
@@ -467,7 +470,7 @@ cargo run --release --example modelviewer
 | [objc2-core-text](https://crates.io/crates/objc2-core-text), [objc2-core-foundation](https://crates.io/crates/objc2-core-foundation) | 0.3.2, 0.3.2 | `platform/desktop/systemfont.rs`, `platform/desktop/coretextglyph.rs` | CoreText 로 글꼴 이름과 시스템 UI 글꼴의 파일을 찾고, 글꼴에 없는 글자의 대체 글꼴을 CTFontCreateForString 으로 고릅니다 | Zlib / Apache-2.0 / MIT |
 | [objc2-core-graphics](https://crates.io/crates/objc2-core-graphics) | 0.3.2 | `platform/desktop/coretextglyph.rs` | 색 이모지와 열린 해석기가 없는 글꼴(PingFang 의 hvgl)의 글리프를 CoreText 로 그립니다 | Zlib / Apache-2.0 / MIT |
 | [objc2-game-controller](https://crates.io/crates/objc2-game-controller), [objc2-core-haptics](https://crates.io/crates/objc2-core-haptics) | 0.3.2, 0.3.2 | `platform/desktop/gamepadhaptics.rs` | 게임패드 진동. gilrs 가 맥에서 진동을 대지 않아 GameController 의 컨트롤러 햅틱으로 CoreHaptics 엔진을 지어 떱니다 (쓰는 기능만 켭니다) | Zlib / Apache-2.0 / MIT |
-| [objc2](https://crates.io/crates/objc2), [objc2-foundation](https://crates.io/crates/objc2-foundation), [block2](https://crates.io/crates/block2) | 0.6.5, 0.3.2, 0.6.2 | `platform/desktop/gamepadhaptics.rs` | 오브젝티브 C 메시지, NSArray 같은 기본 타입, 햅틱 엔진의 멈춤과 리셋 처리기(블록) | MIT |
+| [objc2](https://crates.io/crates/objc2), [objc2-foundation](https://crates.io/crates/objc2-foundation), [block2](https://crates.io/crates/block2) | 0.6.5, 0.3.2, 0.6.2 | `platform/desktop/gamepadhaptics.rs`, `platform/desktop/emojipanel.rs` | 오브젝티브 C 메시지, NSArray 같은 기본 타입, 햅틱 엔진의 멈춤과 리셋 처리기(블록), 크롬처럼 NSApp 의 orderFrontCharacterPalette 로 문자 팔레트 띄우기 | MIT |
 
 **리눅스와 그 밖의 유닉스만**
 
@@ -481,7 +484,7 @@ cargo run --release --example modelviewer
 | 크레이트 | 버전 | 쓰는 곳 | 하는 일 | 라이선스 |
 | --- | --- | --- | --- | --- |
 | [wasm-bindgen](https://crates.io/crates/wasm-bindgen), [js-sys](https://crates.io/crates/js-sys) | 0.2.130, 0.3.107 | `platform/web.rs` 외 | 러스트와 자바스크립트 연결 | MIT / Apache-2.0 |
-| [web-sys](https://crates.io/crates/web-sys) | 0.3.107 | `platform/web.rs`, `platform/web/`, `platform/audio/web.rs`, 입력 필드, 로컬 저장소 | 캔버스, WebGL2, DOM 이벤트, WebAudio, fetch, localStorage, Canvas2D 글자 굽기, HTMLImageElement 그림 풀기 | MIT / Apache-2.0 |
+| [web-sys](https://crates.io/crates/web-sys) | 0.3.107 | `platform/web.rs`, `platform/web/`, `platform/audio/web.rs`, `platform/document.rs`, `core/canvas2d/web_canvas.rs`, `web/pane/dompane.rs`, 입력 필드, 로컬 저장소 | 캔버스, WebGL2, DOM 이벤트, WebAudio, fetch, localStorage, Canvas2D 글자 굽기와 Canvas2D(Path2D, CanvasGradient, CanvasPattern), html lang 과 meta, window.alert, confirm, prompt, HTMLImageElement 그림 풀기 | MIT / Apache-2.0 |
 | [wasm-bindgen-futures](https://crates.io/crates/wasm-bindgen-futures) | 0.4.80 | `platform/web.rs`, `platform/audio/web.rs` | fetch, 오디오 디코딩, 그림 풀기, 클립보드 같은 브라우저 Promise 를 러스트 퓨처(`JsFuture`)로 바꿔 기다립니다. 게임 코드의 async 작업은 이 크레이트가 아니라 엔진의 실행기(`core/task.rs`)가 돌립니다 | MIT / Apache-2.0 |
 
 ## 진행 상황

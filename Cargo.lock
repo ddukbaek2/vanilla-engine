@@ -3306,6 +3306,7 @@ dependencies = [
  "slotmap",
  "symphonia",
  "sys-locale",
+ "tiny-skia 0.12.0",
  "unicode-bidi",
  "unicode-normalization",
  "unicode-properties",

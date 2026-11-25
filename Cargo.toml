@@ -76,6 +76,8 @@ symphonia = { version = "0.6", default-features = false, features = ["all-meta",
 opus-pure = "0.2"
 # SVG 그림. (데스크탑, usvg 로 읽고 tiny-skia 로 그린다. 원본은 브라우저가 SVG 를 그림으로 푼다. 웹은 브라우저가 푼다)
 resvg = "0.50"
+# 2D 그리기 대상 Canvas2D 의 칠하기. (데스크탑, 크롬이 쓰는 Skia 의 CPU 래스터라이저를 옮긴 것. resvg 가 쓰는 같은 판이라 더 받는 크레이트가 없다. 원본과 웹은 브라우저 캔버스)
+tiny-skia = "0.12"
 # AVIF 그림. (데스크탑, HEIF 상자는 엔진이 읽고 dav1d 를 러스트로 옮긴 rav1d 로 AV1 을 푼다. 원본은 브라우저가 AVIF 를 푼다. 웹은 브라우저가 푼다)
 # rav1d 의 asm 은 끈다. (켜면 x86 에서 nasm, arm 에서 C 어셈블러가 있어야 빌드된다. 그림 한 장 푸는 데는 순수 러스트로 넉넉하다)
 rav1d = { version = "1.1", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
@@ -94,9 +96,10 @@ sys-locale = "0.3"
 rustls = { version = "0.23", default-features = false, features = ["ring"], optional = true }
 
 # 윈도우: 잠자기에서 깸(WM_POWERBROADCAST)을 받으려 창을 서브클래싱하고, 주된 손이 손가락인지 크로미엄처럼 읽는다. 크롬처럼 system-ui 의 메뉴 글꼴(NONCLIENTMETRICS)과 ClearType 켜짐, 대체 글꼴을 고를 사용자 기본 언어를 읽는다.
+# 편집 칸 문맥 메뉴의 그림 이모티콘은 크롬처럼 SendInput 으로 윈도우 키 + '.' 을 보낸다.
 # 터치 키보드 스레드의 메시지 큐(GetCurrentThreadId, PostThreadMessageW)와 개발자 도구의 힙 사용량(HeapSummary)도 읽는다. (winit 과 같은 판, 쓰는 기능만 켠다)
 [target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_Devices_Display", "Win32_Globalization", "Win32_Graphics_Gdi", "Win32_System_Memory", "Win32_System_Power", "Win32_System_Threading", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_Devices_Display", "Win32_Globalization", "Win32_Graphics_Gdi", "Win32_System_Memory", "Win32_System_Power", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 # 윈도우: 시스템 글꼴. (DirectWrite 로 글꼴 이름의 파일을 찾고, 글꼴에 없는 글자의 대체 글꼴을 IDWriteFontFallback 으로 고른다. 원본 크롬 윈도우도 DirectWrite 로 고른다. 마이크로소프트의 windows 크레이트로 cpal, gilrs 가 쓰는 같은 판이라 더 받는 크레이트가 없다. windows-core 는 #[implement] 가 지은 코드가 부른다)
 # 터치 키보드는 크롬 윈도우처럼 창에 묶은 WinRT InputPane(IInputPaneInterop)으로 띄우고 내리며 가린 영역을 받는다.
 windows = { version = "0.62", features = ["Foundation", "UI_ViewManagement", "Win32_Foundation", "Win32_Graphics_DirectWrite", "Win32_System_WinRT"] }
@@ -128,7 +131,7 @@ wayland-client = { version = "0.31", features = ["system"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
-web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlCanvasElement", "WebGl2RenderingContext", "CssStyleDeclaration", "HtmlElement", "KeyboardEvent", "console", "AudioContext", "BaseAudioContext", "OfflineAudioContext", "AudioBuffer", "AudioBufferSourceNode", "AudioScheduledSourceNode", "AudioNode", "AudioDestinationNode", "AudioParam", "GainNode", "OscillatorNode", "OscillatorType", "Response", "Performance", "Navigator", "VisibilityState", "Storage", "HtmlInputElement", "HtmlHeadElement", "Event", "CompositionEvent", "MouseEvent", "WheelEvent", "MediaQueryList", "TouchEvent", "TouchList", "Touch", "DomRect", "Node", "AddEventListenerOptions", "CanvasRenderingContext2d", "TextMetrics", "ImageData", "Blob", "BlobPropertyBag", "Url", "HtmlImageElement"] }
+web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlCanvasElement", "WebGl2RenderingContext", "CssStyleDeclaration", "HtmlElement", "KeyboardEvent", "console", "AudioContext", "BaseAudioContext", "OfflineAudioContext", "AudioBuffer", "AudioBufferSourceNode", "AudioScheduledSourceNode", "AudioNode", "AudioDestinationNode", "AudioParam", "GainNode", "OscillatorNode", "OscillatorType", "Response", "Performance", "Navigator", "VisibilityState", "Storage", "HtmlInputElement", "HtmlHeadElement", "Event", "CompositionEvent", "MouseEvent", "WheelEvent", "MediaQueryList", "TouchEvent", "TouchList", "Touch", "DomRect", "Node", "AddEventListenerOptions", "CanvasRenderingContext2d", "CanvasWindingRule", "CanvasGradient", "CanvasPattern", "Path2d", "TextMetrics", "ImageData", "Blob", "BlobPropertyBag", "Url", "HtmlImageElement"] }
 
 # 출시 빌드. (한 덩어리로 묶어 최적화하고 디버그 기호를 뺀다. 이 저장소를 맨 위로 빌드할 때만 쓰인다)
 [profile.release]

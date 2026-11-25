@@ -40,6 +40,9 @@ pub struct PointerCursor {
 	screen_cursor_name: String,
 	is_over_button: Cell<bool>,
 	applied_cursor_value: Option<CursorValue>,
+	// 이번 프레임에 문서 요소가 바란 CSS 커서. (Pane 리사이저의 col-resize 같은 것, 원본은 브라우저가 요소의 cursor 를 보인다)
+	element_cursor_name: std::cell::RefCell<Option<String>>,
+	is_element_cursor_applied: bool,
 }
 
 impl PointerCursor {
@@ -55,7 +58,16 @@ impl PointerCursor {
 			screen_cursor_name: String::from("default"),
 			is_over_button: Cell::new(false),
 			applied_cursor_value: None,
+			element_cursor_name: std::cell::RefCell::new(None),
+			is_element_cursor_applied: false,
 		}
+	}
+
+	//==============================================================================
+	// 문서 요소의 커서 바라기. (이번 프레임만. 원본은 브라우저가 DOM 요소의 CSS cursor 를 보인다. 켜기 설정과 상관없이 보인다)
+	//==============================================================================
+	pub fn request_element_cursor(&self, cursor_name: &str) {
+		*self.element_cursor_name.borrow_mut() = Some(String::from(cursor_name));
 	}
 
 	//==============================================================================
@@ -169,9 +181,37 @@ impl PointerCursor {
 	//==============================================================================
 	pub fn take_cursor_change(&mut self, is_coarse_pointer: bool) -> Option<CursorValue> {
 		let is_over_button = self.is_over_button.replace(false);
-		if !self.is_enabled || is_coarse_pointer {
+		let element_cursor_name = self.element_cursor_name.borrow_mut().take();
+		if is_coarse_pointer {
 			return None;
 		}
+		if let Some(element_cursor_name) = element_cursor_name {
+			self.is_element_cursor_applied = true;
+			let cursor_value = CursorValue {
+				css_value: element_cursor_name.clone(),
+				fallback_name: element_cursor_name,
+				image_url: String::new(),
+				image_url_2x: String::new(),
+				hotspot_x: 0.0,
+				hotspot_y: 0.0,
+			};
+			if self.applied_cursor_value.as_ref() == Some(&cursor_value) {
+				return None;
+			}
+			self.applied_cursor_value = Some(cursor_value.clone());
+			return Some(cursor_value);
+		}
+		if !self.is_enabled {
+			// 켜지 않았으면 문서 요소가 바꾼 커서만 기본으로 돌려놓는다.
+			if !self.is_element_cursor_applied {
+				return None;
+			}
+			self.is_element_cursor_applied = false;
+			let cursor_value = self.read_cursor_value("default");
+			self.applied_cursor_value = Some(cursor_value.clone());
+			return Some(cursor_value);
+		}
+		self.is_element_cursor_applied = false;
 		let mut wanted_cursor_name = if is_over_button { self.button_cursor_name.clone() } else { self.screen_cursor_name.clone() };
 		if wanted_cursor_name == "default" {
 			wanted_cursor_name = self.default_cursor_name.clone();

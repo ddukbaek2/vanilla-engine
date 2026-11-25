@@ -15,6 +15,8 @@ src/animation/       Timeline, Animator, Action (원본 experimental/animation, 
 src/base/            엔진을 모르는 기반 타입 (수학, 색, 식별자, 플랫폼 정보, Format, FiniteStateMachine, ObjectPool, SeededRandom, Timer, Version, wait(Wait.seconds, nextFrame))
 src/core/            엔진 본체 (Engine, 매니저, Scene, 노드 트리, Graphic, Component, reflection(반사 값과 트레이트), 애셋 꼴, 트윈, Animation, Frame)
                      async: task(스레드 하나짜리 실행기, EngineContext, SceneContext, TaskHandle, Promise)
+                     브라우저 자리: canvas2d(Canvas2D, Path2D, 그라데이션과 패턴, 데스크탑은 tiny-skia), modaldialog(alert, confirm, prompt 질문 창),
+                     browseruitext(브라우저가 그리는 글의 크로미엄 번역 82 로케일)
                      입력: InputManager, InputActions, GamepadManager, PointerCursor, textinput(글 입력 줄)
                      소리: AudioManager, AudioPlayer, AudioBus, SoundSystem, SoundEffectPool
                      그리기: Graphic, ShaderProgram, ShaderWarmer, FullscreenPass, ImageTextureCache, TextStringTextureCache, sharedbakecache
@@ -31,14 +33,15 @@ src/graphics3d/      Material, SkinnedModel(glTF/GLB), FbxLoader, SkinnedModelRe
                      BloomEffect, MultiLevelBloomEffect, AmbientOcclusionEffect, SubsurfaceScatteringEffect, Camera3D (FullscreenPass 는 core)
 src/graphics3d/toon/ 툰 3D: MeshBuilder, glbmeshreader, ToonRenderer, ToonLightSet, ToonMaterial, ToonDrawQueue, ToonScreenOutline, ToonVfx, ToonPostProcess, ToonView3D
 src/ui/              UIView, UIControl, UILabel, UIButton, UIToggleButton, UISlider, UIProgressView, UIProgressRing, UIImageView, UIScrollView, UIScrollBar,
-                     TouchRecognizer, UIInputField(데스크탑 winit IME, 웹 숨긴 DOM input, 클립보드 arboard), UIListView, UISnapScrollView, UIDropdown,
+                     TouchRecognizer, UIInputField(데스크탑 winit IME, 웹 숨긴 DOM input, 클립보드 arboard, 데스크탑 크롬 편집 칸 메뉴 uiinputfieldmenu), UIListView, UISnapScrollView, UIDropdown,
                      UIDialog, UIToast, UISpinner, UIContextMenu, UIChart, UIDraggable, UIHitArea, PopupMotion, ButtonMotion, ToastMotion, UIScale,
                      UIWindow, UIWindowLayer, UIConfirmWindow, UIDocument, UINode, UIScene(UISceneBase), autolayout(LayoutSolver 등)
 src/game/            GameSceneBase, GameScene 트레이트와 game_scene! (원본 GameScene: 로딩 화면, 터치 라우팅, 세이프 에어리어, 크기 바뀌면 다시 놓기, 페이드, 놀이 입력, 개발자 도구)
-src/web/             WebSocketClient (ewebsock, 데스크탑과 웹), Pane (DOM 화면 분할 패널, 웹 전용)
+src/web/             WebSocketClient (ewebsock, 데스크탑과 웹), Pane (화면 분할 패널, 웹은 DOM 요소 pane/dompane, 데스크탑은 엔진 노드 pane/nodepane)
 src/platform/        창, GL 컨텍스트, 입력 이벤트, 프레임 루프, 화면 넘기기, 애셋 바이트 읽기, 오디오 백엔드
   desktop.rs         winit 0.30 + glutin 0.32 (OpenGL 3.3 코어)
-  desktop/           renderscaler(렌더 배율 상한), preserveddrawingbuffer(드로잉 버퍼 남기기), textinput(IME, 클립보드), systemfont(운영체제 글꼴과 대체 글꼴),
+  document.rs        문서(html lang, head 의 meta): 웹은 브라우저 문서, 데스크탑은 엔진이 든 값 (Document, EngineConfiguration.document_language, document_meta_list)
+  desktop/           renderscaler(렌더 배율 상한), preserveddrawingbuffer(드로잉 버퍼 남기기), textinput(IME, 클립보드), systemfont(운영체제 글꼴과 대체 글꼴), emojipanel(운영체제 이모티콘 창),
                      coretextglyph(맥 CoreText 글리프), gamepadhaptics(맥 패드 진동), windowsplatform(윈도우 잠자기 깸, 손가락 판정),
                      windowsinputpane(윈도우 터치 키보드), linuxplatform(리눅스 손가락 판정), waylandframecallback(웨이랜드 가려짐과 수직 동기)
   web.rs             캔버스 + WebGL2 + request_animation_frame + fetch
@@ -196,13 +199,14 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
   - 죽은 코드 5: experimental/aabb.js, experimental/transform2d.js(파일 전체가 주석), experimental/graphics/gl2d.js(내보내는 것 없음), experimental/graphics/webgl2.js(import 경로가 깨져 쓰이지 않음), deprecated/anchoredworldmnode.js(폐기, import.js 에서도 막아 둠)
   - 러스트 언어와 표준이 맡는 것 8: base/object.js, base/reflection.js(createGUID 만 base/identifier.rs 의 create_guid 로 옮겼다), base/singleton.js, experimental/collection 의 dictionary.js, list.js, queue.js, set.js, stack.js. 트레이트, Any, enum, Vec, HashMap 이 같은 일을 한다.
   - 다른 기능이 덮는 것 1: experimental/camera.js. 회전과 begin/end 를 Camera2D(misc/camera2d.rs)에 넣어 그 기능을 모두 덮는다.
-- 러스트에만 있는 파일은 플랫폼 층(platform/ 아래 14 파일, mod.rs 빼고), 글자 모양 짓기와 색 글리프(core/textshaping.rs, core/colorglyph.rs), 그림 풀기(core/image.rs, core/avifimage.rs), 글 입력 줄(core/textinput.rs), 노드 저장소(core/node/nodetree.rs), async 실행기(core/task.rs)다. 원본에서는 브라우저가 하는 일이다.
+- 러스트에만 있는 파일은 플랫폼 층(platform/ 아래 23 파일, mod.rs 빼고), 글자 모양 짓기와 색 글리프(core/textshaping.rs, core/colorglyph.rs), 그림 풀기(core/image.rs, core/avifimage.rs), 글 입력 줄(core/textinput.rs), 노드 저장소(core/node/nodetree.rs), async 실행기(core/task.rs), 브라우저 자리(core/canvas2d.rs 와 그 아래 둘, core/modaldialog.rs, core/browseruitext.rs, misc/storagetext.rs, ui/uiinputfieldmenu.rs)다. 원본에서는 브라우저가 하는 일이다. (web/pane.js 는 web/pane.rs 와 그 아래 dompane.rs, nodepane.rs 로 나눴다)
 - 옮기며 바꾼 쓰임새:
   - GameScene, UIScene 의 덮어쓰기는 GameScene, UIScene 트레이트와 game_scene!, ui_scene! 매크로다. 바탕이 resize, layout, post_draw 를 스스로 부른다. (game/gamescene.rs)
   - UINode 는 노드에 붙는 컴포넌트이고, 솔버 값을 노드의 자리와 content_size 로 옮긴다. (ui/uinode.rs, ui/uiscene.rs)
   - 원본의 실행 중 반사(uidocument.js 의 collectReflectedProperties, saveByReflection, loadByReflection, devtools.js 의 getComponentProperties)는 절차 매크로 #[reflect](macros/ 크레이트, 엔진이 vanilla::reflect 로 다시 내보낸다)가 컴파일 때 지은 코드로 한다. 저장소는 엔진과 매크로 두 크레이트의 워크스페이스다. 엔진 컴포넌트는 모두 붙였고, 원본 상위 클래스는 품은 필드를 #[reflect(base = 필드)] 로 잇는다. (core/reflection.rs)
   - UIDocument 는 원본처럼 쓰기, 읽기 함수가 없는 종류를 반사로 쓰고 읽는다. 원본 노드 종류(WorldNode 하위 클래스, UIInputField, UIScrollBar 같은 것)는 러스트 판의 컴포넌트를 register_node_type 으로 등록해 원본 문서의 노드 type 과 생성자가 만든 컴포넌트, 자식 꼴 그대로 쓰고 읽는다. 원본 에디터가 더 등록하는 종류는 register_editor_types 한 줄이다. DevTools 인스펙터는 원본처럼 게터를 모두 불러 보인다. (ui/uidocument.rs, misc/devtools.rs)
-  - web/Pane(DOM 화면 분할 패널)은 웹(wasm32) 빌드에만 있다. (web/pane.rs)
+  - web/Pane(화면 분할 패널)은 웹에서 원본처럼 DOM 요소로, 데스크탑에서 엔진 노드로 짓는다. 크기 셈과 끌기 셈은 두 플랫폼이 같은 함수다. 데스크탑은 컨테이너가 노드이고 노드를 고치는 함수가 NodeTree 를 받는다. (web/pane.rs)
+  - 브라우저가 해 주던 것은 엔진이 같은 API 로 한다. 원본과 게임의 캔버스와 2D 컨텍스트는 Canvas2D(웹은 브라우저 캔버스, 데스크탑은 tiny-skia), window.alert, confirm, prompt 는 Engine::alert, confirm, prompt(웹은 브라우저 창, 데스크탑은 엔진이 그린 크롬 탭 모달 같은 창, await 꼴도 있다), html lang 과 meta 는 Document, 직접 누르는 입력 필드의 크롬 편집 칸 메뉴와 DOM 입력 칸의 되돌리기는 데스크탑에서 엔진이 그린다. LocalStorage 와 PersistedStore 는 원본 JS 글의 짝 없는 서로게이트를 원래 단위 그대로 지킨다. (misc/storagetext.rs)
   - SoundSystem 의 음악과 효과음 버스는 AudioBus 다. (원본에도 같은 꼴로 넣었다) 데스크탑은 엔진 믹서의 버스 노드, 웹은 GainNode 이고, get_gain_node 는 두 플랫폼 모두 AudioGainNode(웹 GainNode, 데스크탑은 버스 노드를 나눠 드는 Rc<MixerGainNode>)를 돌려준다.
   - Cooldown.use(원본 base/timer.js), FullscreenPass.use, ShaderProgram.use 는 use 가 러스트 예약어라 r#use 로 부른다. activate, use_program 은 같은 일을 하는 이름으로 남긴다.
   - 노드 객체를 돌려주는 getParent, getChildren, getSiblings 는 핸들을 돌려주는 get_parent_id, get_child_ids, get_sibling_ids 다.
@@ -212,6 +216,10 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
   - rustybuzz 는 글리프 위치를 글꼴 단위 정수로 들어 GPOS 가변 델타를 반올림한다. HarfBuzz 15 는 소수로 든다. 맥 SFNS 18, 20, 21, 24px 의 "Hello World Wifi" 너비가 크롬과 0.002 ~ 0.004px 다르다.
   - 윈도우와 리눅스의 글꼴 갈래(DirectWrite, 메뉴 글꼴, fontconfig, 부모 글꼴 치수)는 그 대상으로 컴파일해 보았고 실행해 크롬과 견주지는 못했다.
   - 데스크탑 AVIF 는 색 프로필 변환과 움직이는 AVIF 를 하지 않는다.
+  - 데스크탑 Canvas2D 는 arc, ellipse, arcTo, roundRect 를 3 차 베지어로 잇는다(크롬 Skia 는 원뿔 곡선, 반지름의 0.03% 안쪽), roundRect 모서리는 수 반지름만 받는다(DOMPointInit 타원 모서리는 받지 않는다), 그림자 흐림은 상자 흐림 세 번이다. 엔진 Image 를 그리려면 CPU 픽셀이 남아 있어야 한다. (GPU 에 올린 뒤 놓은 그림은 알리고 건너뛴다)
+  - 데스크탑 PaneStyle 은 프리셋과 그 둘레의 CSS 만 읽는다. (flex 비율, 세로 flex, 스크롤 overflow 같은 것은 읽지 않는다) textarea 프리셋은 글을 보이기만 한다. (엔진에 여러 줄 입력 필드가 없다)
+  - 데스크탑 질문 창과 브라우저 문맥 메뉴의 치수와 색은 크롬 main 의 값(MessageBoxView 폭 400, 여백 20, 제목 16px, 기본 밝은 팔레트 같은 것)이고, 흐린 그림자는 겹친 둥근 사각형으로 갈음한다. 단추와 입력 칸 높이는 크롬 셈을 기본 글꼴로 갈음한 값이다.
+  - 직접 누르는 입력 필드의 크롬 편집 칸 메뉴는 데스크탑에서 오른쪽 단추로 연다. 손가락 길게 누르기로는 열지 않는다.
 
 ## 10. 두 엔진의 차이
 
@@ -223,17 +231,18 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
 | --- | --- |
 | 반사(UIDocument 의 반사 저장과 읽기, DevTools 인스펙터의 게터 목록)는 #[vanilla::reflect] 를 붙인 타입만 된다. 엔진 컴포넌트는 모두 붙였고, 게임 컴포넌트는 impl 블록과 impl Component 블록에 붙인다 (원본은 모든 객체) | 러스트에는 실행 중에 필드와 메서드를 훑는 길이 없다. C++ 엔진(언리얼 UHT, Qt moc)처럼 컴파일 때 절차 매크로가 함수 목록과 부르는 코드를 짓는다 |
 | 반사로 부를 수 없는 함수가 있다. &mut self 게터와 인자를 둘 이상 받는 세터(UISnapScrollView::set_snap_current_index(트리, 칸) 같은 것)는 반사로 읽거나 넣지 않는다 (속성 목록과 저장에는 원본처럼 든다) | 실행 중에 인자를 만들어 넣을 수 없고, 반사는 &self 로 읽는다 |
-| 데스크탑에 DOM 이 없다 (Pane 은 웹만, 데스크탑 입력 필드는 winit IME, 저장소 입력은 패널 안 입력 창) | 데스크탑 창에는 HTML 문서가 없다 |
+| 직접 누르는 입력 필드의 크롬 편집 칸 메뉴에 크롬 자체 기능 항목(읽기 모드로 열기, 맞춤법 검사와 언어 설정, 선택이 있을 때의 검색, 인쇄, 번역, 맥의 찾기와 음성, 비밀번호와 Gemini 항목)이 없다. 그 밖의 항목(그림 이모티콘, 실행 취소, 다시 실행, 잘라내기, 복사, 붙여넣기, 일반 텍스트로 붙여넣기, 전체 선택, 쓰기 방향, 검사)은 같은 차례와 단축키 글로 같은 일을 한다 | 그 항목들은 페이지가 아니라 크롬 브라우저(옆 패널, 맞춤법 사전 설정, 검색 엔진, 인쇄 대화 상자, 번역, 계정)와 맥 서비스를 부른다. 데스크탑 앱에는 그 브라우저가 없다. (입력 필드는 spellcheck=false 라 맞춤법 설정이 페이지에 보이는 것도 없다) |
 | 데스크탑에서 뜻이 없는 set_no_cache | 데스크탑에는 브라우저 캐시가 없다 (파일을 늘 그 자리에서 읽는다) |
 | 웨이랜드에서 xdg_toplevel 의 suspended 상태는 받지 못한다. 가려짐(페이지 이벤트 Hidden)은 크롬의 다른 갈래인 프레임 콜백 3 초 규칙으로만 본다 | xdg_toplevel 은 winit(sctk)이 리스너를 달아 쥐고 있고 libwayland 는 프록시 하나에 리스너 하나만 단다. winit 0.30.13 은 configure 의 suspended 를 받아 두기만 하고 알리지 않는다 (0.31 베타 4 와 본줄기도 같다). suspended 를 보내면서 프레임 콜백도 계속 보내는 컴포지터에서만 크롬과 달라진다 |
 | DevTools 메모리 칸은 자바스크립트 힙 대신 시스템 할당자의 힙이고, jsHeapSizeLimit 는 (N/A) 다 | 데스크탑에는 V8 힙이 없다. 시스템 할당자에는 V8 처럼 정한 힙 상한이 없다 |
 | 데스크탑의 글자 래스터 픽셀과 도형 가장자리 안티에일리어싱이 크롬과 다르다 (글자 너비는 크롬 measureText 와 맞췄고, 도형 안쪽 색은 같다) | 크롬의 Skia, CoreGraphics 래스터라이저 대신 fontdue, skrifa(맥의 색 이모지와 일부 글꼴은 CoreText)와 GL 이 칠한다 |
-| PersistedStore 와 LocalStorage 의 글은 짝 없는 서로게이트를 담지 못한다 | 러스트 String 은 UTF-8 이라 짝 없는 서로게이트를 담을 수 없다 (JS 글은 UTF-16 이라 담는다) |
+| LocalStorage 의 키 가운데 짝 없는 서로게이트로만 다른 둘은 러스트 쪽에서 한 키로 보인다 (값과 키의 원래 UTF-16 단위는 지키고, 러스트 쪽에는 대체 문자로 보인다) | 러스트 &str 키로는 대체 문자로 같아지는 서로 다른 JS 키를 가려 부를 길이 없다. 원래 단위로 읽고 쓰는 get_item_code_units, set_item_code_units 도 키는 &str 이다 |
 | 데스크탑 Opus 와 AAC 의 표본 끝자리가 크롬과 1e-7 안팎으로 다르다 (길이와 다듬기는 같다) | 크롬은 Opus 를 libopus(C), AAC 를 FFmpeg(LGPL)로 푼다. 데스크탑은 C 빌드 없이 맥에서 윈도우 대상 검사가 되도록 libopus 를 러스트로 옮긴 opus-pure 로, AAC 는 LGPL 코드를 옮기지 않고 symphonia 로 푼다 |
 | 데스크탑은 HE-AAC(SBR, PS)와 3 채널 이상 AAC 를 풀지 못한다 | symphonia 0.6.1 의 AAC 는 AAC-LC 2 채널까지만 받는다 ("aac too complex"). 크롬은 FFmpeg 로 푼다 |
 
 **크롬과 결과가 같아 차이가 아닌 것** (크로미엄 소스로 확인한 것)
 
+- html lang: 원본은 LanguagePack 이 documentElement.lang 을 바꾸지만, 글을 굽고 재는 캔버스는 모두 문서에 붙이지 않은 canvas 요소라 그 글꼴 locale 은 html lang 이 아니라 크롬 화면 언어다. (Canvas2D 의 lang 기본값 "inherit" 는 캔버스 요소의 ComputeInheritedLanguage 를 쓰는데 떨어진 요소는 조상이 없어 LayoutLocale::GetDefault, 곧 크롬 화면 언어다. canvas_rendering_context_2d.cc, html_canvas_element.cc) 데스크탑도 화면 언어로 글꼴을 고르고, html lang 자리는 Document::get_language, set_language 로 읽고 쓴다. 화면 읽기 프로그램과 번역 제안은 브라우저의 일이다.
 - 세이프 에어리어 인셋 0: 크롬 데스크탑도 env(safe-area-inset-*) 가 0 이다. 0 이 아닌 값은 WebContentsImpl::SetDisplayCutoutSafeArea 로만 들어오는데 이 함수는 `#if BUILDFLAG(IS_ANDROID)` 안에만 있고 부르는 곳도 안드로이드(web_contents_android.cc)뿐이다. 그 밖에는 블링크 기본값 "0px" 이다 (style_environment_variables.cc kSafeAreaInsetDefault). 노치가 있는 맥북의 전체 화면도 같다.
 - 화면 키보드: 크롬 윈도우는 손가락이나 펜으로 글자 입력칸에 포커스하면 InputPane 으로 터치 키보드를 띄우고, 가린 영역의 세로만큼 visualViewport 를 줄인다 (virtual_keyboard_controller_win.cc, on_screen_keyboard_display_manager_input_pane.cc). 데스크탑 윈도우도 같은 InputPane 으로 띄우고 같은 인셋을 쓴다 (desktop/windowsinputpane.rs). auto_resize_on_window_resize 면 캔버스가 줄고 ignore_virtual_keyboard_resize 가 원본처럼 그것을 막는다. 크롬 맥은 화면 키보드를 띄우지 않고 보이는 뷰포트가 창 크기 그대로다 (render_widget_host_view_base.cc). 크롬 리눅스 웨이랜드는 text-input 으로 입력판을 띄우기만 하고 영역을 받지 않아 뷰포트를 줄이지 않는다 (wayland_input_method_context.cc OnInputPanelState). 데스크탑도 winit 의 IME 켜기(text-input-v3 enable)로 같은 신호를 낸다.
 - 웨이랜드 가려짐: 크롬은 suspended 이거나 보낸 wl_surface.frame 콜백이 3 초 동안 오지 않으면 창을 가려짐으로 보고 페이지를 hidden 으로 만든다 (wayland_toplevel_window.cc MaybeUpdateOcclusionState, wayland_frame_manager.cc kFrameCallbackOcclusionTimeout, kWaylandWindowOcclusion 기본 켬). 데스크탑도 winit 창의 표면에 손님 연결로 프레임 콜백을 보내 같은 3 초 규칙으로 Hidden 과 Visible 을 낸다 (위 표의 suspended 만 빼고).

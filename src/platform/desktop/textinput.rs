@@ -162,7 +162,8 @@ impl DesktopTextInputState {
 
 //==============================================================================
 // 키 하나를 글 입력 이벤트로. (없으면 None)
-// - Ctrl(맥은 Cmd)만 눌렸으면 A/C/V/X 단축키만 본다. (원본 handleCanvasKeydown)
+// - Ctrl(맥은 Cmd)만 눌렸으면 A/C/V/X 단축키(원본 handleCanvasKeydown)와 되돌리기, 다시 하기를 본다.
+//   되돌리기와 다시 하기는 블링크 editing_behavior.cc 의 키 표다: Z 와 Shift + Z, 맥이 아니면 Y, 윈도우는 Alt + Backspace 와 Alt + Shift + Backspace.
 // - Ctrl 과 Alt 가 같이 눌린 것(AltGr)은 글자로 본다. Alt 만 눌린 글자는 버린다. (원본 !event.altKey)
 // - 글자는 제어 문자가 없을 때만. (Enter 의 "\r", Backspace 의 "\u{8}" 같은 것은 이름 있는 키로 먼저 걸러진다)
 //==============================================================================
@@ -171,9 +172,21 @@ fn translate_key(logical_key: &Key, physical_key: PhysicalKey, text: Option<&str
 	let is_control = modifiers_state.control_key() || modifiers_state.super_key();
 	let is_alt = modifiers_state.alt_key();
 	if is_control && !is_alt {
-		let shortcut_key = translate_shortcut_key(logical_key, physical_key)?;
+		let shortcut_key = translate_shortcut_key(logical_key, physical_key, is_shift)?;
 		return Some(TextInputEventKind::Key {
 			key: shortcut_key,
+			is_shift,
+		});
+	}
+	if cfg!(target_os = "windows") && is_alt && !is_control && *logical_key == Key::Named(NamedKey::Backspace) {
+		let history_key = if is_shift {
+			TextInputKey::Redo
+		}
+		else {
+			TextInputKey::Undo
+		};
+		return Some(TextInputEventKind::Key {
+			key: history_key,
 			is_shift,
 		});
 	}
@@ -227,7 +240,14 @@ fn translate_key(logical_key: &Key, physical_key: PhysicalKey, text: Option<&str
 //==============================================================================
 // Ctrl/Cmd 단축키. (논리 키 글자를 먼저 보고, 글자가 아니면 물리 키 자리로)
 //==============================================================================
-fn translate_shortcut_key(logical_key: &Key, physical_key: PhysicalKey) -> Option<TextInputKey> {
+fn translate_shortcut_key(logical_key: &Key, physical_key: PhysicalKey, is_shift: bool) -> Option<TextInputKey> {
+	let undo_or_redo = if is_shift {
+		TextInputKey::Redo
+	}
+	else {
+		TextInputKey::Undo
+	};
+	let is_redo_y_enabled = !cfg!(target_os = "macos") && !is_shift;
 	if let Key::Character(character_text) = logical_key {
 		let lowercase_text = character_text.to_lowercase();
 		let shortcut_key = match lowercase_text.as_str() {
@@ -242,6 +262,12 @@ fn translate_shortcut_key(logical_key: &Key, physical_key: PhysicalKey) -> Optio
 			}
 			"v" => {
 				Some(TextInputKey::Paste)
+			}
+			"z" => {
+				Some(undo_or_redo)
+			}
+			"y" if is_redo_y_enabled => {
+				Some(TextInputKey::Redo)
 			}
 			_ => {
 				None
@@ -263,6 +289,12 @@ fn translate_shortcut_key(logical_key: &Key, physical_key: PhysicalKey) -> Optio
 		}
 		PhysicalKey::Code(KeyCode::KeyV) => {
 			Some(TextInputKey::Paste)
+		}
+		PhysicalKey::Code(KeyCode::KeyZ) => {
+			Some(undo_or_redo)
+		}
+		PhysicalKey::Code(KeyCode::KeyY) if is_redo_y_enabled => {
+			Some(TextInputKey::Redo)
 		}
 		_ => {
 			None
@@ -331,6 +363,30 @@ mod tests {
 	// 이름 있는 키, 단축키, 글자, 걸러지는 것.
 	//==============================================================================
 	#[test]
+	fn translate_undo_keys() {
+		let control = if cfg!(target_os = "macos") {
+			ModifiersState::SUPER
+		}
+		else {
+			ModifiersState::CONTROL
+		};
+		let undo = translate_key(&Key::Character("z".into()), PhysicalKey::Code(KeyCode::KeyZ), None, control);
+		assert_eq!(undo, Some(TextInputEventKind::Key { key: TextInputKey::Undo, is_shift: false }));
+		let redo = translate_key(&Key::Character("Z".into()), PhysicalKey::Code(KeyCode::KeyZ), None, control | ModifiersState::SHIFT);
+		assert_eq!(redo, Some(TextInputEventKind::Key { key: TextInputKey::Redo, is_shift: true }));
+		let redo_y = translate_key(&Key::Character("y".into()), PhysicalKey::Code(KeyCode::KeyY), None, control);
+		if cfg!(target_os = "macos") {
+			assert_eq!(redo_y, None);
+		}
+		else {
+			assert_eq!(redo_y, Some(TextInputEventKind::Key { key: TextInputKey::Redo, is_shift: false }));
+		}
+		// 한글 자판에서도 물리 자리로 본다.
+		let undo_by_position = translate_key(&Key::Character("ㅋ".into()), PhysicalKey::Code(KeyCode::KeyZ), None, control);
+		assert_eq!(undo_by_position, Some(TextInputEventKind::Key { key: TextInputKey::Undo, is_shift: false }));
+	}
+
+	#[test]
 	fn translate_keys() {
 		let no_modifiers = ModifiersState::empty();
 		let backspace = translate_key(&Key::Named(NamedKey::Backspace), PhysicalKey::Code(KeyCode::Backspace), Some("\u{8}"), no_modifiers);
@@ -359,7 +415,7 @@ mod tests {
 		assert_eq!(alt_character, None);
 		let escape = translate_key(&Key::Named(NamedKey::Escape), PhysicalKey::Code(KeyCode::Escape), Some("\u{1b}"), no_modifiers);
 		assert_eq!(escape, None);
-		let other_shortcut = translate_key(&Key::Character("z".into()), PhysicalKey::Code(KeyCode::KeyZ), None, ModifiersState::CONTROL);
+		let other_shortcut = translate_key(&Key::Character("q".into()), PhysicalKey::Code(KeyCode::KeyQ), None, ModifiersState::CONTROL);
 		assert_eq!(other_shortcut, None);
 	}
 
