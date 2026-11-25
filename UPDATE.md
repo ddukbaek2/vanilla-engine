@@ -512,7 +512,12 @@
   - 데스크탑 믹서의 GainNode gain 을 AudioParam 으로 바꿨다. (platform/audio/audioparam.rs, 크로미엄 audio_param_handler.cc 의 사건 넣기, 지난 사건 치우기, 새 사건 당기기, 선형과 지수 램프, 목표 따라가기, 목표 뒤 램프, 지우기를 옮겼다. x86_64 는 크롬의 SSE 4 줄 묶음과 같게) 자동화가 있는 퀀텀은 표본마다, 없으면 퀀텀마다 하나로 곱하고, 소스가 없어도 자동화는 흐른다. 소스의 stop(when)은 그 시각을 올림한 프레임에서 끊는다. 시계는 그린 프레임 수 / 표본율이다
   - AudioPlayer, AudioBus 에 엔진 안에서 쓰는 apply_gain_automation, get_gain_value(원본 gain.value 읽기), stop_at_time 을 더했다. (공개 API 는 그대로다)
   - 믹서 시험의 크롬 158 OfflineAudioContext 그래프를 다섯에서 아홉으로 늘렸다. (앞만 틀기와 버스 setTargetAtTime, 그리는 도중 suspend 로 멈춰 지금 gain.value 에서 줄여 끄기, 음악 겹쳐 바꾸기, 지수 램프와 목표 뒤 램프와 지우기) 모두 1e-6 안에서 같다
-  - BeepPlayer 의 데스크탑 톤은 그대로 엔벨로프를 식으로 그린다. (원본 자동화와 같은 식이지만 표본마다의 셈 차례는 다르다)
+- BeepPlayer 의 데스크탑 톤을 원본 playTone 의 그래프 그대로 믹서에서 셈한다. 지금까지는 같은 엔벨로프와 파형을 식으로 그려 표본을 섞었다
+  - 그래프: OscillatorNode(type, frequency.setValueAtTime(주파수, 시작)) → GainNode(setValueAtTime(0.0001, 시작), linearRampToValueAtTime(최고, attack 끝), setValueAtTime(최고, release 시작), exponentialRampToValueAtTime(0.0001, 끝)) → 출력, start(시작), stop(끝 + 0.01). 시각은 부른 때의 컨텍스트 시계 + 지연이다 (원본과 같은 차례로 더한다, 웹판도 같은 BeepSchedule 을 쓴다)
+  - OscillatorNode 는 크로미엄 oscillator_handler.cc, periodic_wave_handler.cc 와 CPU 별 커널을 옮겼다. (platform/audio/oscillator.rs) 대역 제한 표(표본율에 따라 2048, 4096, 16384 칸, 1/3 옥타브마다 하나, 첫 표 꼭대기로 정규화), 시작과 정지 프레임(올림, 표본 사이 시작), frequency 가 자동화 중인 퀀텀의 표본마다 걸음(a-rate)과 그 밖의 퀀텀에 하나(k-rate), 두 점, 세 점, 다섯 점 보간을 크롬과 같은 차례, 같은 f32, f64 정밀도로 셈한다. 4 표본 묶음은 aarch64 는 NEON 판, x86 은 SSE2 판, 그 밖은 스칼라 판이다
+  - 자동화 시각은 원본 메인 스레드처럼 부른 때의 시계로 당기고, 그리기 전에 지금 퀀텀으로 한 번 더 당긴다. (AudioParam::apply_automation_at_call_time) 표는 컨텍스트처럼 표본율마다 한 번 지어 둔다
+  - 크롬 158 OfflineAudioContext 의 원본 playTone 그래프 아홉 경우(네 파형, 프리셋 시퀀스, 표본 사이 시작, 그리는 도중 부르기, 표본율 22050, 96000, 3 점과 5 점 보간, 나이퀴스트 가까이)와 표본마다 견주는 시험을 더했다. (tests/assets/mixer/chromebeep.cjs 가 찍은 chrome_beep.json) 모두 1.2e-7 안이다
+  - x86 의 SSE2 판은 크롬과 같게 짰지만 기대값을 애플 실리콘 맥(arm64 크롬)에서 뽑아 x86 크롬과는 견주지 못했다. (시험은 CPU 가 다르면 1e-4 로 본다)
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.

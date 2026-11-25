@@ -9,8 +9,7 @@
 //     beep_player.play_preset("confirm");
 // - 소리를 내는 곳:
 //   웹: 원본처럼 OscillatorNode + GainNode 를 만들어 오디오 컨텍스트의 출력에 바로 잇는다.
-//   데스크탑: 같은 엔벨로프로 파형을 컨텍스트 표본율로 그려 믹서의 출력에 바로 섞는다. (지연은 그 프레임 수만큼 늦춰 시작)
-//     파형은 크롬 WebAudio 오실레이터처럼 대역을 제한한 푸리에 급수다. (square, sawtooth, triangle 의 높은 배음을 주파수에 따라 덜어 내고 크기를 맞춘다)
+//   데스크탑: 믹서에 같은 그래프(크롬과 같은 셈의 OscillatorNode → GainNode AudioParam 자동화 → 출력)를 짓는다. (platform/audio/oscillator.rs, mixer.rs)
 // - 원본과 다른 점:
 //   파형 이름은 문자열 대신 BeepWaveform, 시퀀스의 톤은 BeepTone 이다. 프리셋 이름은 원본처럼 문자열이다.
 //==============================================================================
@@ -106,11 +105,35 @@ impl BeepEnvelope {
 	}
 
 	//==============================================================================
-	// 최고 음량을 유지하다가 줄어들기 시작하는 시각. (원본 max(start_time + attack, end_time - release))
+	// 컨텍스트 시계로 본 자동화 시각들. (current_time: 부른 때의 currentTime. 원본 play_tone 과 같은 차례로 더한다)
 	//==============================================================================
-	pub(crate) fn get_release_start_seconds(&self) -> f64 {
-		self.attack_seconds.max(self.duration_seconds - self.release_seconds)
+	pub(crate) fn get_schedule(&self, current_time: f64) -> BeepSchedule {
+		let start_time = current_time + self.delay_seconds;
+		let end_time = start_time + self.duration_seconds;
+		BeepSchedule {
+			start_time,
+			attack_end_time: start_time + self.attack_seconds,
+			release_start_time: (start_time + self.attack_seconds).max(end_time - self.release_seconds),
+			end_time,
+			stop_time: end_time + BEEP_STOP_MARGIN_SECONDS,
+		}
 	}
+}
+
+//==============================================================================
+// 톤 하나의 자동화 시각. (컨텍스트 시계, 초)
+// - 오실레이터 start(start_time), stop(stop_time) 과 GainNode 의 setValueAtTime(바닥, start_time), linearRamp(최고, attack_end_time),
+//   setValueAtTime(최고, release_start_time), exponentialRamp(바닥, end_time).
+//==============================================================================
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct BeepSchedule {
+	pub(crate) start_time: f64,
+	pub(crate) attack_end_time: f64,
+	// 최고 음량을 유지하다가 줄어들기 시작하는 시각. (원본 max(start_time + attack, end_time - release))
+	pub(crate) release_start_time: f64,
+	pub(crate) end_time: f64,
+	// 오실레이터를 멈추는 시각. (원본 end_time + 0.01)
+	pub(crate) stop_time: f64,
 }
 
 //==============================================================================
@@ -245,7 +268,12 @@ mod tests {
 		assert!((click_envelope.attack_seconds - 0.005).abs() < 1e-9);
 		assert!((click_envelope.release_seconds - 0.02).abs() < 1e-9);
 		assert!((click_envelope.peak_volume - 0.35).abs() < 1e-6);
-		assert!((click_envelope.get_release_start_seconds() - 0.025).abs() < 1e-9);
+		let click_schedule = click_envelope.get_schedule(1.5);
+		assert_eq!(click_schedule.start_time, 1.5);
+		assert_eq!(click_schedule.attack_end_time, 1.5 + 0.005);
+		assert_eq!(click_schedule.release_start_time, (1.5 + 0.045) - 0.02);
+		assert_eq!(click_schedule.end_time, 1.5 + 0.045);
+		assert_eq!(click_schedule.stop_time, (1.5 + 0.045) + 0.01);
 
 		// 아주 짧은 톤은 attack 이 길이의 1/4, release 가 1/2 로 줄어든다.
 		let short_envelope = BeepEnvelope::create(440.0, 0.01, BeepWaveform::Square, 0.2, 0.0, 1.0);
@@ -253,5 +281,8 @@ mod tests {
 		assert!((short_envelope.release_seconds - 0.005).abs() < 1e-9);
 		assert_eq!(short_envelope.peak_volume, BEEP_FLOOR_VOLUME);
 		assert!((short_envelope.delay_seconds - 0.2).abs() < 1e-9);
+		// attack 끝이 release 시작보다 늦으면 attack 끝에서 줄어들기 시작한다.
+		let short_schedule = short_envelope.get_schedule(0.0);
+		assert_eq!(short_schedule.release_start_time, short_schedule.attack_end_time.max(short_schedule.end_time - 0.005));
 	}
 }
