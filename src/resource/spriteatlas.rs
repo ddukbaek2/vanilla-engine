@@ -11,17 +11,27 @@
 //   원본은 load 가 JSON 을 기다린 뒤 쪽 그림을 받는 async 다. 러스트 판은 애셋처럼 요청만 하고, update 가 JSON 이 온 것을 보고 쪽 그림을 청한다.
 //   데스크탑은 그 자리에서 읽혀 load 가 끝나면 다 읽혔다. 웹은 JSON 과 쪽 그림이 차례로 오므로 is_loaded 가 true 가 될 때까지 tick 에서 update 를 부르고,
 //   그 뒤에 조각을 건다. (씬이 맡아 기다리게 하려면 JSON 은 track_json_asset, 쪽 그림은 온 뒤 update 가 청한다)
-//   원본의 찾을 아틀라스 목록(addSearchAtlas, findFrame)은 전역 목록 대신 아틀라스 조각 목록을 받는 함수(find_frame_in_order, apply_frame_in_order)로 옮겼다.
+//   원본의 찾을 아틀라스 목록(add_search_atlas, find_frame, apply_search_frame)은 스레드 하나에 하나인 목록이고, 아틀라스를 나눠 들게 Rc<RefCell<SpriteAtlas>> 로 넣는다.
+//   find_frame 은 빌린 조각 대신 조각의 복사(Frame 은 그림 Rc 와 영역이라 값싸다)를 돌려준다. 넘긴 목록에서 찾는 find_frame_in_order 도 있다.
+//   get_page_images 는 원본 HTMLImageElement 목록 대신 읽힌 쪽 그림(Image) 목록이다.
 //==============================================================================
 use crate::base::rect::Rect;
 use crate::core::asset::Asset;
 use crate::core::component::sprite::Sprite;
 use crate::core::engine::Engine;
 use crate::core::frame::Frame;
+use crate::core::image::Image;
 use crate::core::scene::SceneBase;
 use crate::resource::imageasset::ImageAsset;
 use crate::resource::textasset::JsonAsset;
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
+
+thread_local! {
+	// 찾을 아틀라스 목록. (원본 모듈의 searchAtlasList, 넣은 차례로 찾는다)
+	static SEARCH_ATLAS_LIST: RefCell<Vec<Rc<RefCell<SpriteAtlas>>>> = const { RefCell::new(Vec::new()) };
+}
 
 //==============================================================================
 // 아틀라스 자료에서 읽은 조각 하나. (이름, 쪽, 영역)
@@ -283,6 +293,13 @@ impl SpriteAtlas {
 	}
 
 	//==============================================================================
+	// 쪽 그림 목록. (읽힌 쪽만, 쪽 차례)
+	//==============================================================================
+	pub fn get_page_images(&mut self) -> Vec<Rc<Image>> {
+		self.page_asset_list.iter_mut().filter_map(|page_asset| page_asset.get_image()).collect()
+	}
+
+	//==============================================================================
 	// 쪽 수.
 	//==============================================================================
 	pub fn get_page_count(&self) -> usize {
@@ -309,6 +326,62 @@ impl SpriteAtlas {
 	pub fn apply_frame_in_order(atlas_list: &[&SpriteAtlas], sprite: &mut Sprite, frame_name: &str) -> bool {
 		let frame = SpriteAtlas::find_frame_in_order(atlas_list, frame_name);
 		sprite.set_frame(frame);
+		frame.is_some()
+	}
+
+	//==============================================================================
+	// 찾을 아틀라스 넣기. (맨 뒤에 넣는다, 이미 들었으면 그대로)
+	//==============================================================================
+	pub fn add_search_atlas(sprite_atlas: &Rc<RefCell<SpriteAtlas>>) {
+		SEARCH_ATLAS_LIST.with(|search_atlas_list| {
+			let mut search_atlas_list = search_atlas_list.borrow_mut();
+			if search_atlas_list.iter().any(|search_atlas| Rc::ptr_eq(search_atlas, sprite_atlas)) {
+				return;
+			}
+			search_atlas_list.push(sprite_atlas.clone());
+		});
+	}
+
+	//==============================================================================
+	// 찾을 아틀라스 빼기.
+	//==============================================================================
+	pub fn remove_search_atlas(sprite_atlas: &Rc<RefCell<SpriteAtlas>>) {
+		SEARCH_ATLAS_LIST.with(|search_atlas_list| {
+			search_atlas_list.borrow_mut().retain(|search_atlas| !Rc::ptr_eq(search_atlas, sprite_atlas));
+		});
+	}
+
+	//==============================================================================
+	// 찾을 아틀라스 모두 빼기.
+	//==============================================================================
+	pub fn clear_search_atlases() {
+		SEARCH_ATLAS_LIST.with(|search_atlas_list| {
+			search_atlas_list.borrow_mut().clear();
+		});
+	}
+
+	//==============================================================================
+	// 찾을 아틀라스들에서 조각 찾기. (넣은 차례로, 없으면 None, 다른 곳에서 고치는 중인 아틀라스는 건너뛴다)
+	//==============================================================================
+	pub fn find_frame(frame_name: &str) -> Option<Frame> {
+		SEARCH_ATLAS_LIST.with(|search_atlas_list| {
+			for search_atlas in search_atlas_list.borrow().iter() {
+				if let Ok(sprite_atlas) = search_atlas.try_borrow() {
+					if let Some(frame) = sprite_atlas.read_frame(frame_name) {
+						return Some(frame.clone());
+					}
+				}
+			}
+			None
+		})
+	}
+
+	//==============================================================================
+	// 찾을 아틀라스들에서 찾은 조각을 스프라이트에 걸기. (없으면 그림을 비우고 false)
+	//==============================================================================
+	pub fn apply_search_frame(sprite: &mut Sprite, frame_name: &str) -> bool {
+		let frame = SpriteAtlas::find_frame(frame_name);
+		sprite.set_frame(frame.as_ref());
 		frame.is_some()
 	}
 }
@@ -384,5 +457,20 @@ mod tests {
 		let mut sprite = Sprite::new();
 		assert!(SpriteAtlas::apply_frame_in_order(&atlas_list, &mut sprite, "gem"));
 		assert!(!SpriteAtlas::apply_frame_in_order(&atlas_list, &mut sprite, "nothing"));
+		assert_eq!(second_atlas.get_page_images().len(), 1);
+
+		// 찾을 아틀라스 목록. (넣은 차례로, 같은 것은 한 번)
+		let first_atlas = Rc::new(RefCell::new(first_atlas));
+		let second_atlas = Rc::new(RefCell::new(second_atlas));
+		SpriteAtlas::add_search_atlas(&second_atlas);
+		SpriteAtlas::add_search_atlas(&first_atlas);
+		SpriteAtlas::add_search_atlas(&second_atlas);
+		assert_eq!(SpriteAtlas::find_frame("star").expect("star").get_image_rect().size.x, 20.0);
+		SpriteAtlas::remove_search_atlas(&second_atlas);
+		assert_eq!(SpriteAtlas::find_frame("star").expect("star").get_image_rect().size.x, 8.0);
+		assert!(SpriteAtlas::apply_search_frame(&mut sprite, "star"));
+		assert!(!SpriteAtlas::apply_search_frame(&mut sprite, "gem"));
+		SpriteAtlas::clear_search_atlases();
+		assert!(SpriteAtlas::find_frame("star").is_none());
 	}
 }
