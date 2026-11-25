@@ -2,11 +2,12 @@
 // 블룸 이펙트. (원본 experimental/graphics/bloomeffect.js)
 // - 밝은 영역 추출 → 하프 해상도 가우시안 블러 핑퐁. render() 결과 텍스처를 최종 합성 패스에서 가산하는 방식으로 쓴다.
 // - 셰이더와 패스 순서, 기본값(임계 0.5 ~ 0.95, 반복 2)은 원본과 같다.
+// - 주고받는 판은 기본 RGBA8 이라 1 을 넘는 밝은 값이 잘린다. set_use_float_color(true) 면 RGBA16F 로 지어 HDR 값을 그대로 흐린다.
 // - GL 을 쓰는 함수는 gl 을 받고, 생성과 크기 변경은 GL 객체를 못 만들면 오류(Result)를 돌려준다.
 //==============================================================================
 use crate::core::graphic::GlTexture;
 use crate::graphics3d::fullscreenpass::FullscreenPass;
-use crate::graphics3d::rendertarget::RenderTarget;
+use crate::graphics3d::rendertarget::{RenderTarget, RenderTargetOptions};
 use glow::HasContext;
 
 //==============================================================================
@@ -159,6 +160,32 @@ impl BloomEffect {
 	//==============================================================================
 	pub fn set_iteration_count(&mut self, iteration_count: u32) {
 		self.iteration_count = iteration_count;
+	}
+
+	//==============================================================================
+	// 실수 컬러 설정. (true 면 주고받는 판을 RGBA16F 로 다시 지어 1 을 넘는 밝은 값이 잘리지 않는다, 기본 false 는 RGBA8, 같으면 그대로)
+	//==============================================================================
+	pub fn set_use_float_color(&mut self, gl: &glow::Context, use_float_color: bool) -> Result<(), String> {
+		if self.get_use_float_color() == use_float_color {
+			return Ok(());
+		}
+		let width = self.ping_render_target.get_width().max(1);
+		let height = self.ping_render_target.get_height().max(1);
+		let options = RenderTargetOptions { use_float_color, ..RenderTargetOptions::default() };
+		let ping_render_target = RenderTarget::new(gl, width, height, false, Some(options))?;
+		let pong_render_target = RenderTarget::new(gl, width, height, false, Some(options))?;
+		self.ping_render_target.destroy(gl);
+		self.pong_render_target.destroy(gl);
+		self.ping_render_target = ping_render_target;
+		self.pong_render_target = pong_render_target;
+		Ok(())
+	}
+
+	//==============================================================================
+	// 실수 컬러 사용 여부 반환.
+	//==============================================================================
+	pub fn get_use_float_color(&self) -> bool {
+		self.ping_render_target.get_use_float_color()
 	}
 
 	//==============================================================================

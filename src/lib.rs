@@ -221,3 +221,6 @@ pub use crate::base::fsm::StateChangeRequester;
 pub use crate::graphics3d::fbxloader::FbxLoadHandle;
 pub use crate::graphics3d::material::ImageDescriptionLoadHandle;
 pub use crate::graphics3d::skinnedmodel::SkinnedModelLoadHandle;
+pub use crate::graphics3d::multilevelbloomeffect::MultiLevelBloomEffect;
+pub use crate::graphics3d::toon::toonpostprocess::ToonPostProcessOptions;
+pub use crate::graphics3d::toon::toonvfx::ToonBlobShadowOptions;

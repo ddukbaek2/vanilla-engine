@@ -9,6 +9,9 @@
 // - project_to_view(x, y, z, view_rect): 월드 점을 view_rect 안의 자리로. view_rect 는 3D 를 그리는 사각형을 부르는 쪽의 좌표(보통 뷰 좌표)로 준 것이다.
 //   원본의 { x, y, depth, isInFront } 는 ProjectedPoint 로 돌려준다.
 // - unproject_to_plane(view_position, plane_height, view_rect): view_rect 안의 자리에서 나간 시선이 수평면(y = plane_height)과 만나는 점. 없으면 None.
+// - 원 행렬: set_matrices(보기, 투영) 로 게임이 셈한 행렬을 그대로 쓴다. (기울인 직교, 화면 변환을 곱한 투영 같은 것) 위 함수들이 모두 그 행렬로 돈다.
+//   보기 행렬은 월드 → 카메라의 강체 변환(카메라는 -Z 를 봄)으로 준다. 눈, 보는 곳(눈 앞 1), 위쪽과 is_orthographic 은 그 행렬에서 뽑는다.
+//   시야각, 보이는 높이, 가까운 거리, 먼 거리, 가로 세로 비는 마지막으로 준 값 그대로다. set_perspective, set_orthographic, look_at 을 부르면 원 행렬을 버리고 셈하는 길로 돌아간다.
 //==============================================================================
 use std::cell::Cell;
 
@@ -55,6 +58,8 @@ pub struct Camera3D {
 	up_direction: Vector3,
 	matrices: Cell<CameraMatrices>,
 	is_matrix_dirty: Cell<bool>,
+	// set_matrices 로 받은 보기와 투영. (None 이면 셈하는 길)
+	raw_matrices: Option<[Matrix4; 2]>,
 }
 
 impl Default for Camera3D {
@@ -81,6 +86,7 @@ impl Camera3D {
 			up_direction: Vector3::create(0.0, 1.0, 0.0),
 			matrices: Cell::new(CameraMatrices { view_matrix: identity_matrix, projection_matrix: identity_matrix, view_projection_matrix: identity_matrix, inverse_view_projection_matrix: identity_matrix }),
 			is_matrix_dirty: Cell::new(true),
+			raw_matrices: None,
 		}
 	}
 
@@ -88,6 +94,7 @@ impl Camera3D {
 	// 원근 투영 설정. (세로 시야각)
 	//==============================================================================
 	pub fn set_perspective(&mut self, field_of_view_radian: f32, near_distance: f32, far_distance: f32) {
+		self.clear_raw_matrices();
 		self.is_orthographic = false;
 		self.field_of_view_radian = field_of_view_radian;
 		self.near_distance = near_distance;
@@ -99,6 +106,7 @@ impl Camera3D {
 	// 직교 투영 설정. (보이는 높이, 너비는 높이 x 가로 세로 비)
 	//==============================================================================
 	pub fn set_orthographic(&mut self, orthographic_height: f32, near_distance: f32, far_distance: f32) {
+		self.clear_raw_matrices();
 		self.is_orthographic = true;
 		self.orthographic_height = orthographic_height;
 		self.near_distance = near_distance;
@@ -163,6 +171,7 @@ impl Camera3D {
 	// 보는 자리 설정.
 	//==============================================================================
 	pub fn look_at(&mut self, eye_position: Vector3, target_position: Vector3, up_direction: Vector3) {
+		self.clear_raw_matrices();
 		self.eye_position = eye_position;
 		self.target_position = target_position;
 		self.up_direction = up_direction;
@@ -191,20 +200,56 @@ impl Camera3D {
 	}
 
 	//==============================================================================
-	// 행렬 넷 읽기. (바뀐 값이 있으면 다시 셈해 담는다)
+	// 원 행렬 설정. (게임이 셈한 보기와 투영을 그대로 쓴다, 머리말)
+	//==============================================================================
+	pub fn set_matrices(&mut self, view_matrix: &Matrix4, projection_matrix: &Matrix4) {
+		let view_elements = view_matrix.elements;
+		let translation_x = view_elements[12];
+		let translation_y = view_elements[13];
+		let translation_z = view_elements[14];
+		let eye_x = -(view_elements[0] * translation_x + view_elements[1] * translation_y + view_elements[2] * translation_z);
+		let eye_y = -(view_elements[4] * translation_x + view_elements[5] * translation_y + view_elements[6] * translation_z);
+		let eye_z = -(view_elements[8] * translation_x + view_elements[9] * translation_y + view_elements[10] * translation_z);
+		self.raw_matrices = Some([*view_matrix, *projection_matrix]);
+		self.is_orthographic = projection_matrix.elements[11].abs() < 0.5;
+		self.eye_position = Vector3::create(eye_x, eye_y, eye_z);
+		self.target_position = Vector3::create(eye_x - view_elements[2], eye_y - view_elements[6], eye_z - view_elements[10]);
+		self.up_direction = Vector3::create(view_elements[1], view_elements[5], view_elements[9]);
+		self.is_matrix_dirty.set(true);
+	}
+
+	//==============================================================================
+	// 원 행렬을 쓰는지.
+	//==============================================================================
+	pub fn has_raw_matrices(&self) -> bool {
+		self.raw_matrices.is_some()
+	}
+
+	//==============================================================================
+	// 원 행렬 버리기. (셈하는 길로)
+	//==============================================================================
+	pub fn clear_raw_matrices(&mut self) {
+		if self.raw_matrices.is_none() {
+			return;
+		}
+		self.raw_matrices = None;
+		self.is_matrix_dirty.set(true);
+	}
+
+	//==============================================================================
+	// 행렬 넷 읽기. (바뀐 값이 있으면 다시 셈해 담는다, 원 행렬이 있으면 그것으로)
 	//==============================================================================
 	fn read_matrices(&self) -> CameraMatrices {
 		if !self.is_matrix_dirty.get() {
 			return self.matrices.get();
 		}
-		let view_matrix = Matrix4::create_look_at(self.eye_position, self.target_position, self.up_direction);
-		let projection_matrix = if self.is_orthographic {
-			let half_height = self.orthographic_height * 0.5;
-			let half_width = half_height * self.aspect_ratio;
-			Matrix4::create_orthographic(-half_width, half_width, -half_height, half_height, self.near_distance, self.far_distance)
-		}
-		else {
-			Matrix4::create_perspective(self.field_of_view_radian, self.aspect_ratio, self.near_distance, self.far_distance)
+		let (view_matrix, projection_matrix) = match self.raw_matrices {
+			Some([raw_view_matrix, raw_projection_matrix]) => {
+				(raw_view_matrix, raw_projection_matrix)
+			}
+			None => {
+				(Matrix4::create_look_at(self.eye_position, self.target_position, self.up_direction), self.create_projection_matrix())
+			}
 		};
 		let mut view_projection_matrix = projection_matrix;
 		view_projection_matrix.multiply(&view_matrix);
@@ -212,6 +257,20 @@ impl Camera3D {
 		self.matrices.set(matrices);
 		self.is_matrix_dirty.set(false);
 		matrices
+	}
+
+	//==============================================================================
+	// 셈하는 길의 투영 행렬. (직교나 원근)
+	//==============================================================================
+	fn create_projection_matrix(&self) -> Matrix4 {
+		if self.is_orthographic {
+			let half_height = self.orthographic_height * 0.5;
+			let half_width = half_height * self.aspect_ratio;
+			Matrix4::create_orthographic(-half_width, half_width, -half_height, half_height, self.near_distance, self.far_distance)
+		}
+		else {
+			Matrix4::create_perspective(self.field_of_view_radian, self.aspect_ratio, self.near_distance, self.far_distance)
+		}
 	}
 
 	//==============================================================================
@@ -358,5 +417,31 @@ mod tests {
 		let projected = camera.project_to_view(10.0, 5.0, 0.0, Rect::create(0.0, 0.0, 200.0, 100.0));
 		assert!((projected.x - 200.0).abs() < 0.01);
 		assert!(projected.y.abs() < 0.01);
+	}
+
+	#[test]
+	fn raw_matrices_drive_projection_until_cleared() {
+		let computed_camera = create_test_camera();
+		let view_rect = Rect::create(100.0, 50.0, 400.0, 200.0);
+		let mut raw_camera = Camera3D::new();
+		raw_camera.set_matrices(&computed_camera.get_view_matrix(), &computed_camera.get_projection_matrix());
+		assert!(raw_camera.has_raw_matrices());
+		assert!(!raw_camera.is_orthographic());
+		let computed_point = computed_camera.project_to_view(1.5, 0.7, -2.0, view_rect);
+		let raw_point = raw_camera.project_to_view(1.5, 0.7, -2.0, view_rect);
+		assert!((computed_point.x - raw_point.x).abs() < 0.001 && (computed_point.y - raw_point.y).abs() < 0.001);
+		assert!((computed_point.depth - raw_point.depth).abs() < 0.001);
+		let eye_position = raw_camera.get_eye_position();
+		assert!(eye_position.x.abs() < 0.001 && (eye_position.y - 5.0).abs() < 0.001 && (eye_position.z - 10.0).abs() < 0.001);
+		let mut orthographic_projection = Matrix4::create_orthographic(-4.0, 4.0, -2.0, 2.0, 0.1, 50.0);
+		orthographic_projection.elements[8] = 0.3;
+		raw_camera.set_matrices(&computed_camera.get_view_matrix(), &orthographic_projection);
+		assert!(raw_camera.is_orthographic());
+		let mut expected_matrix = orthographic_projection;
+		expected_matrix.multiply(&computed_camera.get_view_matrix());
+		assert_eq!(raw_camera.get_view_projection_matrix(), expected_matrix);
+		raw_camera.set_perspective(0.8, 0.1, 100.0);
+		assert!(!raw_camera.has_raw_matrices());
+		assert!(!raw_camera.is_orthographic());
 	}
 }

@@ -51,3 +51,5 @@ pub use web::read_clipboard_text_with_callback;
 // 웹 클립보드를 비동기로 읽어 그 입력 필드에 붙일 글로 넣기. (UIInputField.paste)
 #[cfg(target_arch = "wasm32")]
 pub(crate) use web::request_clipboard_paste;
+#[cfg(target_arch = "wasm32")]
+pub(crate) use web::read_renderbuffer_sample_counts;

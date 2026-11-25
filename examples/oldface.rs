@@ -409,8 +409,8 @@ impl OldFaceScene {
 		let maximum_render_target_size = unsafe {
 			gl.get_parameter_i32(glow::MAX_TEXTURE_SIZE).min(gl.get_parameter_i32(glow::MAX_RENDERBUFFER_SIZE))
 		};
-		let scene_render_target = RenderTarget::new(gl, 2, 2, true, Some(RenderTargetOptions { color_attachment_count: 4, use_float_color: true, use_depth_texture: true }))?;
-		let hdr_render_target = RenderTarget::new(gl, 2, 2, false, Some(RenderTargetOptions { color_attachment_count: 1, use_float_color: true, use_depth_texture: false }))?;
+		let scene_render_target = RenderTarget::new(gl, 2, 2, true, Some(RenderTargetOptions { color_attachment_count: 4, use_float_color: true, use_depth_texture: true, ..RenderTargetOptions::default() }))?;
+		let hdr_render_target = RenderTarget::new(gl, 2, 2, false, Some(RenderTargetOptions { color_attachment_count: 1, use_float_color: true, use_depth_texture: false, ..RenderTargetOptions::default() }))?;
 		let ldr_render_target = RenderTarget::new(gl, 2, 2, false, None)?;
 		let combine_pass = FullscreenPass::new(gl, COMBINE_FRAGMENTSHADER_SOURCE)?;
 		let background_pass = FullscreenPass::new(gl, BACKGROUND_FRAGMENTSHADER_SOURCE)?;
