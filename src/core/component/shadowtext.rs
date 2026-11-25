@@ -5,7 +5,7 @@
 // - 가로 정렬은 노드 안에서 왼쪽, 가운데, 오른쪽이고, 세로는 노드의 가운데다.
 // - 글이 노드 너비를 넘으면 처음 크기에서 최소 비율(set_fit_minimum_ratio)까지 줄여 맞춘다.
 // - 그림자는 상자 흐림 세 번(가우시안에 가까움)으로 번지게 할 수 있다. 번지는 만큼 구운 그림의 가장자리를 넓힌다.
-// - 굽는 배율, 글, 꼴, 노드 너비가 바뀌면 다시 굽는다.
+// - 굽는 배율, 글, 꼴, 노드 너비가 바뀌면 다시 굽는다. 같은 모양을 구운 것이 있으면 나눠 쓴다. (sharedbakecache.rs)
 // - 화면 밖 거르기는 마지막으로 구운 한 장이 놓이는 사각형(넘친 글, 그림자 여백 포함)으로 판정한다. 세터로 바꾼 뒤 아직 굽지 않았거나 노드 너비나 굽는 배율이 달라졌으면 거르지 않는다.
 // - 원본과 다른 것: 웹에서 글꼴 바이트 없이 시스템 글꼴로 굽는 경우는 모양을 받을 수 없어 그림자 없이 Graphic 의 글로 그린다.
 //   기울임, 밑줄, 취소선(set_italic, set_underline, set_strikethrough)을 더했다. (원본에는 없다) 이름과 선의 자리, 두께는 Text 의 가운데 기준선과 같고,
@@ -21,6 +21,7 @@ use crate::core::component::{Component, ComponentBase};
 use crate::core::graphic::{Graphic, TextAlign, TextBaseline};
 use crate::core::image::Image;
 use crate::core::node::worldnode::NodeTransform;
+use crate::core::sharedbakecache;
 use crate::core::textstringtexturecache::TextRaster;
 
 // 구운 그림의 가장자리 여유. (안티앨리어싱, 픽셀)
@@ -141,7 +142,7 @@ pub struct ShadowText {
 	shadow_offset: f32,
 	shadow_blur: f32,
 	fit_minimum_ratio: f32,
-	baked_text: Option<BakedText>,
+	baked_text: Option<Rc<BakedText>>,
 	bake_key: String,
 	// 세터로 바꾼 뒤 아직 굽지 않았는지. (화면 밖 거르기가 지난 한 장을 믿을지 가린다)
 	is_bake_dirty: bool,
@@ -206,10 +207,11 @@ impl ShadowText {
 		}
 		let content_size = transform.get_content_size();
 		let bake_scale = graphic.calculate_text_bake_scale();
-		let bake_key = format!("{}|{}|{}|{}|{}|{}|{}|{:?}|{:?}|{}|{}|{}|{}|{}", self.text, self.font_family, self.font_size, self.is_bold, self.is_italic, self.is_underline, self.is_strikethrough, self.text_color, self.shadow_color, self.shadow_offset, self.shadow_blur, self.fit_minimum_ratio, content_size.x, bake_scale);
+		let bake_key = format!("ShadowText|{}|{}|{}|{}|{}|{}|{}|{:?}|{:?}|{}|{}|{}|{}|{}", self.text, self.font_family, self.font_size, self.is_bold, self.is_italic, self.is_underline, self.is_strikethrough, self.text_color, self.shadow_color, self.shadow_offset, self.shadow_blur, self.fit_minimum_ratio, content_size.x, bake_scale);
 		if bake_key != self.bake_key {
+			// 같은 모양을 구운 것이 있으면 나눠 쓰고, 없으면 굽는다.
+			self.baked_text = sharedbakecache::acquire_shared_bake(&bake_key, || self.bake(graphic, content_size.x, bake_scale).map(Rc::new));
 			self.bake_key = bake_key;
-			self.baked_text = self.bake(graphic, content_size.x, bake_scale);
 		}
 		self.is_bake_dirty = false;
 		let baked_text = match &self.baked_text {
