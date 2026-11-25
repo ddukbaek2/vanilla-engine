@@ -92,10 +92,11 @@ EngineRunner (플랫폼이 들고 프레임마다 부른다)
 4. 씬마다:
    - 맡긴 애셋을 기다리는 씬: 다 읽혔으면 initialize, 아니면 draw_on_load 만
    - scene.tick → SceneBase.tick: 노드 tick(컴포넌트 → 자식) → 휠, 터치 전달 → 트윈
+   - 씬의 터치 훅(touch_press, 뗌 또는 누르고 있음 또는 취소, touch_wheel, 원본 Scene.tickTouch 차례)
    - pre_draw → draw(NodeTree.draw 재귀) → post_draw → (기즈모)
 5. 통계 출력(옵션: FPS, DrawCall, Vertex, Culled) → 1회성 입력 플래그 지우기
-6. graphic.end_frame() (묶음 내보내기) → 검증용 화면 저장 → 프레임 번호 증가
-플랫폼: 화면 넘기기 (데스크탑 swap_buffers, 웹은 콜백이 끝나면 브라우저가)
+6. graphic.end_frame() (묶음 내보내기) → 검증용 화면 저장(request_frame_capture, 데스크탑 VANILLA_CAPTURE_*, 웹 ?capture=) → 프레임 번호 증가 (첫 프레임 1)
+플랫폼: 데스크탑은 렌더 배율 상한이나 캔버스 비 상한으로 줄여 그렸으면 창의 캔버스 자리로 늘이고(desktop/renderscaler.rs), 화면 넘기기 (데스크탑 swap_buffers, 웹은 콜백이 끝나면 브라우저가)
 ```
 
 씬 불러오기는 원본의 create → load(비동기) → set_loaded → initialize 를 create → (맡긴 애셋을 기다림) → initialize 로 옮겼다. 데스크탑은 애셋이 그 자리에서 읽혀서 create 바로 뒤에 initialize 가 불린다.
@@ -113,6 +114,7 @@ EngineRunner (플랫폼이 들고 프레임마다 부른다)
 
 - `ImageAsset`, `TextAsset`, `JsonAsset`, `BlobAsset`, `FontAsset`: `load(engine, 경로)` 로 요청하고 `scene_base.track_asset(&asset)` 으로 맡긴다. 데스크탑은 애셋 폴더 후보에서 파일을 읽고, 웹은 `asset_base_url + 경로` 를 fetch 한다.
 - 실패한 애셋도 "끝난 것"으로 쳐서 씬이 멈추지 않는다.
+- AssetLoader 는 다 받은 그림을 원본 img.onload 처럼 풀어 보고, 깨진 것은 실패로 친다. 푼 그림은 읽기 손잡이에 담겨 ImageAsset 이 다시 풀지 않는다.
 - `AudioAsset` 은 오디오 백엔드와 붙어 있어 `engine.load_audio_asset` 으로 읽고 `track_audio_asset` 으로 맡긴다.
 - 이미지는 png, jpeg, webp 를 푼다. 글꼴은 ttf, otf, woff, woff2 를 읽는다.
 - 이미지는 GPU 에 올린 뒤 CPU 픽셀을 놓는다. 픽셀을 다시 읽을 그림은 `Image.set_pixels_retained(true)` 로 남긴다. (ShadowImage 는 받은 그림을 스스로 남기고, 이미 놓였으면 텍스처를 프레임버퍼에 붙여 되읽는다) GL 컨텍스트를 잃었다 되살리는 길은 아직 없다.
@@ -126,5 +128,13 @@ EngineRunner (플랫폼이 들고 프레임마다 부른다)
 
 - UINode, 오토레이아웃(ui/autolayout), UIScene: 게임들이 쓰지 않아 미뤘다.
 - DevTools(F2 하이어라키/인스펙터), DynamicFont, web/Pane(DOM 창), HumanSkinRenderer(게임들이 쓰지 않음).
+- 코어, 플랫폼, 기반에서 원본과 다르게 남은 것 (언어와 플랫폼 때문):
+  - 원본의 객체 모델 도우미(base/object.js, reflection.js, singleton.js), 비동기 기다리기(base/wait.js), 빈 함수 calculator.js, Enum 흉내(begin, auto, readonly)는 옮기지 않는다. 러스트의 트레이트, Any, enum 과 엔진 루프가 맡는다.
+  - 전역 엔진(Engine.getEngine, Scene.getEngine, SceneManager, PointerCursor.readEngineCanvas)이 없어 엔진을 함수로 넘긴다. Component.getNode 자리는 ComponentContext 다.
+  - SoundSystem.getMusicBus, getEffectBus(GainNode)는 데스크탑에 그 노드가 없어 두지 않고, 버스 크기는 플레이어마다 곱한다.
+  - Timer.use 는 러스트 예약어라 activate 다. (원본에도 activate 를 넣었다)
+  - 노드 객체를 돌려주는 getParent, getChildren, getSiblings 는 핸들을 돌려주는 get_parent_id, get_child_ids, get_sibling_ids 다.
+  - LocalStorage.getBackend, PersistedStore.getStorageBackend(갈아 끼운 저장소 객체)는 Box 를 빌려줄 수 없어 has_backend 류만 있고, SpriteAnimator.findSprite(형제를 쥐기)와 SharedBakeCache 의 놓기(release)는 빌림 규칙과 Rc 참조 수로 갈음한다.
+  - 데스크탑에는 문서와 화면 키보드와 브라우저 캐시가 없어 auto_resize_on_window_resize, ignore_virtual_keyboard_resize, preserve_drawing_buffer, set_no_cache, 오른쪽 클릭 메뉴 막기는 웹에서만 뜻이 있다. 웨이랜드는 창 가림과 최소화를 알리지 않아 Hidden 이 오지 않는다.
 - UIDocument 는 옮겼다. 원본의 리플렉션 직렬화 대신 종류 이름마다 짓기, 쓰기, 읽기 함수를 표에 등록하고, 원본이 반사로 저장하는 종류는 원본 반사 결과와 같은 키로 쓴다. (ui/uidocument.rs)
 - 원본 160파일 가운데 121파일을 옮겼고, 20파일은 죽은 코드이거나 러스트 표준으로 대신해서 일부러 옮기지 않았다. (2026-11-17)

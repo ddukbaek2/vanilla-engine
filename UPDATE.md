@@ -136,6 +136,26 @@
 - Graphic: draw_line_segments(position_values, size). 숫자 배열 하나(선분마다 x0, y0, x1, y1)로 선분 여럿을 한 번에 그린다. 정점 버퍼가 차면 거기까지 그리고 이어 담는다
 - SpriteAtlas: tools/atlas.cjs(vanilla.js)의 JSON 과 { pagePaths, frames } 꼴을 읽는다. load(engine, json_path), load_data, update(웹은 JSON 이 온 뒤 쪽 그림을 청한다), is_loaded, track_json_asset, read_frame, has_frame, apply_frame, get_page_count, get_frame_names, 여러 아틀라스를 차례로 찾는 find_frame_in_order, apply_frame_in_order. 이름은 확장자를 떼고도 찾는다. Sprite.set_frame(frame)
 - 예제: textnodeextras. 글자 칸 맞춤(Text, UILabel), 배율이 움직이는 글, 반투명 고리와 줄어드는 호와 선분 600 개, atlas.cjs 로 구운 아틀라스(examples/assets/atlas), 구운 그림을 나눠 쓰는 그림자 글, 돌아간 판 위의 마우스 자리(convert_view_to_local)
+- 코어, 플랫폼, 기반을 vanilla.js 와 맞췄다. (원본에 있는데 러스트 판에 없던 것과 다르게 옮긴 것, 러스트 판에만 있던 범용 기능은 vanilla.js 에도 넣었다)
+- SoundSystem 을 원본 쓰임으로 바꿨다. (공개 API 를 바꾸는 일이다) SoundSystem::new(engine, sound_table), update(), play_effect(sound_id, volume, pan), play_music(sound_id, fade_seconds, is_resumed) 가 엔진과 시간을 받지 않는다. 음악과 효과음 크기는 원본처럼 0.05 초를 시간 상수로 따라가고, 같은 소리 간격과 다시 깨우기는 벽시계로, 줄이기와 음악의 멈춘 자리는 AudioContext 시계로 센다. 줄여 끄는 효과음에 fade_out_effects 를 다시 걸면 지금 크기에서 새로 줄이고 목록에서 뺀다. (stop_effects 와 수 제한에 들지 않는다) 배경음악 첫 파일을 받지 못했으면 틀지 않는다. load_sound, get_external_mute_provider, get_autoplay_allowed_provider(공급 함수는 Rc<dyn Fn() -> bool>), get_audio_manager, 함께 쓰는 소리 set_sound_system, read_sound_system 을 더했다. 러스트 판에만 있던 set_page_hidden 과 fade_out_music 은 뺐다. (엔진 페이지 이벤트와 play_music("", 초)로 같다)
+- AudioManager: Clone(같은 AudioContext 를 보는 손잡이), get_context_time, get_audio_context, is_context_running 공개. AudioPlayer: get_audio_context. 오디오 백엔드에 get_audio_context_time
+- math: 원본 이름 floor, ceil, sqrt, abs, sin, cos, tan, asin, acos, pow. round 는 원본처럼 무한대를 그대로 둔다. (전에는 NaN)
+- Color: to_rgba_string, to_hex_string(원본처럼 알파가 1 미만일 때만 붙인다, 러스트 판의 to_hexstring 을 원본 이름으로 바꿨다), from_hex_cached. Version: get/set 접근자, get_version_string. TransformMatrix: copy_from, write_to_array 를 원본 이름 write_to_float32_array 로 바꿨다
+- 데스크탑 렌더 배율 상한이 실제로 먹는다. 기본 프레임버퍼의 왼쪽 아래에 줄인 크기로 그리고 프레임 끝에 창 크기로 늘인다. (platform/desktop/renderscaler.rs) 상한을 바꾸면 다음 프레임에 다시 맞춘다
+- EngineConfiguration: auto_resize_on_window_resize(웹, 끄면 페이지의 캔버스 크기, 러스트 판 기본은 켬), preserve_drawing_buffer(웹 컨텍스트), ignore_virtual_keyboard_resize(웹 화면 키보드), max_canvas_aspect_ratio(웹은 원본처럼 캔버스를 줄여 가운데, 데스크탑은 창 가운데에 그리고 나머지는 검게). 웹은 visualViewport 크기를 쓴다
+- 데스크탑 페이지 이벤트: 창이 가려짐, 최소화(크기 0, is_minimized), 앱 멈춤을 합쳐 Hidden 과 Visible(+ on_page_visibility_restored)을 낸다. (윈도우는 최소화로 알린다) 시스템 잠자기에서 깨면(벽시계가 단조 시계보다 2 초 넘게 더 흐름) on_page_process_restored
+- 데스크탑의 페이지 쿼리 값은 환경 변수 VANILLA_ 뒤 대문자 뱀꼴이다. (VANILLA_SAFE_AREA=44,0,34,0, VANILLA_QUALITY=lite) 입력 좌표는 창의 배율로 바꾼다. (렌더 크기와 상관없다)
+- ViewManager: convert_client_to_view, get_client_native_size. 플랫폼 층에 read_canvas_client_position, read_client_native_size, save_capture_file
+- 입력: 원본처럼 처음에는 어느 마우스 단추든 터치이고 set_touch_from_left_button_only 로 왼쪽만, set_context_menu_prevented(웹 오른쪽 클릭 메뉴), find_touch_point, is_touch_button. touch_moved 는 원본처럼 누를 때 켜고 뗄 때 끈다. (전에는 프레임마다 지웠다) Scene 과 TouchRecognizer 는 원본 tickTouch 차례로 뗌을 먼저 보고, 누른 프레임에는 Moved 를 넘기지 않는다. 창이 포커스를 잃으면 뗌으로 넘긴다. 데스크탑에서 창 밖으로 나가도 끌기를 끊지 않는다
+- Scene: finalize, unload 훅(내릴 때 finalize, unload, destroy 차례), 씬의 터치 훅 touch_press, touch_move, touch_release, touch_cancel, touch_wheel(엔진이 tick 뒤 원본 차례로 부른다). Engine.unload_scene 은 &SceneBase 도 받는다
+- Engine: 첫 프레임 번호를 원본처럼 1 로, request_frame_capture(PNG 바이트를 넘김, FrameCaptureHandler), 웹 화면 저장을 원본처럼 주소 쿼리 capture, captureName, captureExit 로 걸고 내려받기로 저장, remove_page_event_listener, resize, get_canvas, is_text_input_focused, request_asset_bytes_with_cache
+- 노드: 원본 Node 의 set_parent, remove_child, remove_child_at, remove_children, remove_child_by_name(떼기만 하고 지우지 않는다), find_child, find_child_recursive, find_child_recursive_by_name, is_root, is_leaf, has_parent, has_child, get_child. 원본 TransformNode 의 전역 get/set_position, get/set_scale, get/set_rotation, get_opacity(NodeTree). get_or_add_component, get_components. Component.require(RequiredComponent, 붙기 전에 없으면 기본값으로 붙인다), detach(remove_component 가 부른다)
+- AssetLoader: 다 받은 그림을 원본처럼 풀어 보고 깨진 것은 실패 목록에 넣는다. 푼 그림은 손잡이(AssetLoadHandle.get_decoded_image)에 담아 ImageAsset 이 다시 풀지 않는다
+- TextAsset, JsonAsset: set_no_cache, is_no_cache(웹 fetch 의 cache: no-cache). FontAsset: load_font_from_bytes, unload(등록한 이름을 뺀다). TextStringTextureCache.unregister_font
+- SpriteAtlas: 찾을 아틀라스 목록 add_search_atlas, remove_search_atlas, clear_search_atlases, find_frame, apply_search_frame(Rc<RefCell<SpriteAtlas>>), get_page_images
+- BuildInfo: new() 와 set_version_json_path, is_loaded(load 전 거짓), read_meta_text 는 인스턴스 함수, 빌드 때 판은 set_package_version 으로. (BuildInfo::new(판) 을 바꾸는 일이다)
+- PointerCursor: get_button_cursor_name, get_default_cursor_name, is_coarse_pointer. FrameProbe: 설정 반환 함수들. Platform: is_coarse_pointer, get_safe_area_rect, get_resouce_usage(원본 이름 그대로). Identifier(원본 차례 번호, reset 은 처음 번호로, 원본은 아무것도 하지 않던 버그)
+- Localization.text_named: 빗금 앞뒤 빈칸을 원본 정규식 \s 처럼 탭과 줄바꿈까지 받는다. WebSocketClient.disconnect: 원본처럼 닫기만 걸고 다음 tick 에 끊긴 것으로 친다
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.
