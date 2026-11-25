@@ -252,7 +252,7 @@ pub fn set_preferred_language_tag(language_tag: &str) {
 
 //==============================================================================
 // 기기의 언어. (앞세울 태그, 기기가 앞세우는 언어 차례대로 목록에 있는 첫 언어, 없으면 기본 언어. 원본 resolveDeviceLanguageCode)
-// - 웹은 navigator.languages, 데스크탑은 LANGUAGE / LC_ALL / LC_MESSAGES / LANG 환경 변수를 읽는다. (Localization.detect_language 와 같다)
+// - 웹은 navigator.languages, 데스크탑은 sys-locale 로 시스템의 선호 언어 차례를 읽는다. (Localization.detect_language 와 같다)
 //==============================================================================
 pub fn resolve_device_language_code() -> String {
 	let mut language_tag_list: Vec<String> = Vec::new();

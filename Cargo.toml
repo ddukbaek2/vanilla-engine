@@ -52,6 +52,12 @@ kira = { version = "0.12", default-features = false, features = ["cpal", "cpal-r
 icu_segmenter = "2"
 # 시스템 클립보드. (입력 필드의 복사, 잘라내기, 붙여넣기. winit 에 클립보드가 없다. 그림 기능은 끈다)
 arboard = { version = "3", default-features = false }
+# 데스크탑 wss://. (ewebsock 의 tls 기능, tungstenite 가 rustls 와 webpki 뿌리 인증서로 연다)
+ewebsock = { version = "0.8", features = ["tls"] }
+# 시스템 언어 목록. (윈도우 GetUserPreferredUILanguages, 맥 CFLocaleCopyPreferredLanguages, 리눅스 LANGUAGE / LC_ALL / LC_MESSAGES / LANG. 원본 navigator.languages 자리)
+sys-locale = "0.3"
+# rustls 의 암호 공급자. (tungstenite 가 rustls 를 기본 기능 없이 쓰므로 ring 을 켜고, WebSocketClient 가 붙을 때 정한다)
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 
 # 맥: 게임패드 진동. (gilrs 의 macOS force feedback 이 비어 있어, GameController 의 GCController.haptics 로 CoreHaptics 엔진을 지어 떤다. 쓰는 기능만 켠다)
 [target.'cfg(target_os = "macos")'.dependencies]

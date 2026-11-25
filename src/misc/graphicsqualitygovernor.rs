@@ -6,7 +6,8 @@
 // - 매 프레임 update(프레임 초, 최대 프레임) 를 부르면 자동일 때만 FrameProbe 로 잰다. 가벼운 길이 바뀐 프레임에 true 를 돌려준다.
 // - 렌더 배율 상한: set_render_pixel_ratio_limits(보통, 가벼운 길) 로 주고 apply_render_pixel_ratio(view_manager) 가 바뀔 때만 건다. (0 이면 제한 없음)
 // - 가벼운 길에서 무엇을 줄일지(그림자, 바깥선, 효과, 그리는 수)는 게임이 is_lite 를 읽어 정한다.
-// - 주소: apply_search_text 는 쿼리 글("?light", "?a=1&light=0")을 받는다. 원본은 URLSearchParams 로 읽고, 러스트 판은 & 와 = 로 나눠 읽는다. (퍼센트 풀기는 하지 않는다)
+// - 주소: apply_search_text 는 쿼리 글("?light", "?a=1&light=0")을 받는다. 원본 URLSearchParams 처럼 읽는다.
+//   (앞의 ? 하나를 떼고 & 로 나누며 빈 조각은 건너뛰고, 처음 = 에서 이름과 값을 가르고, + 는 빈칸, %XX 는 바이트로 풀어 UTF-8 로 읽는다. 같은 이름이 여럿이면 첫 값)
 //   apply_page_query 는 웹에서 페이지 주소의 쿼리를 읽는다. 데스크탑은 페이지 주소가 없어 아무것도 하지 않는다. (브라우저 전용)
 //==============================================================================
 use crate::core::viewmanager::ViewManager;
@@ -90,15 +91,19 @@ impl GraphicsQualityGovernor {
 	pub fn apply_search_text(&mut self, search_text: &str, lite_key: &str) {
 		let query_text = search_text.strip_prefix('?').unwrap_or(search_text);
 		for pair_text in query_text.split('&') {
-			let (key, value) = match pair_text.split_once('=') {
-				Some((key, value)) => {
-					(key, value)
+			if pair_text.is_empty() {
+				continue;
+			}
+			let (key_text, value_text) = match pair_text.split_once('=') {
+				Some((key_text, value_text)) => {
+					(key_text, value_text)
 				}
 				None => {
 					(pair_text, "")
 				}
 			};
-			if key == lite_key {
+			if decode_form_component(key_text) == lite_key {
+				let value = decode_form_component(value_text);
 				self.lite_override = Some(value != "0" && value != "false");
 				return;
 			}
@@ -209,6 +214,35 @@ impl GraphicsQualityGovernor {
 	}
 }
 
+//==============================================================================
+// 쿼리 조각 하나 풀기. (application/x-www-form-urlencoded, 원본 URLSearchParams: + 는 빈칸, %XX 는 바이트, 맞지 않는 % 는 그대로, 바이트는 UTF-8 로 읽고 깨진 것은 U+FFFD)
+//==============================================================================
+fn decode_form_component(text: &str) -> String {
+	let source_bytes = text.as_bytes();
+	let mut decoded_bytes: Vec<u8> = Vec::with_capacity(source_bytes.len());
+	let mut byte_index = 0;
+	while byte_index < source_bytes.len() {
+		let source_byte = source_bytes[byte_index];
+		if source_byte == b'+' {
+			decoded_bytes.push(b' ');
+			byte_index += 1;
+			continue;
+		}
+		if source_byte == b'%' && byte_index + 2 < source_bytes.len() {
+			let high_digit = (source_bytes[byte_index + 1] as char).to_digit(16);
+			let low_digit = (source_bytes[byte_index + 2] as char).to_digit(16);
+			if let (Some(high_digit), Some(low_digit)) = (high_digit, low_digit) {
+				decoded_bytes.push((high_digit * 16 + low_digit) as u8);
+				byte_index += 3;
+				continue;
+			}
+		}
+		decoded_bytes.push(source_byte);
+		byte_index += 1;
+	}
+	String::from_utf8_lossy(&decoded_bytes).into_owned()
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -243,6 +277,17 @@ mod tests {
 		assert!(!governor.is_lite());
 		governor.apply_search_text("?other=1", "light");
 		assert_eq!(governor.get_lite_override(), Some(false));
+
+		// 원본 URLSearchParams 처럼 %XX 와 + 를 풀고, 빈 조각은 건너뛰며, 같은 이름은 첫 값이다.
+		governor.apply_search_text("?%6Cight=%31", "light");
+		assert_eq!(governor.get_lite_override(), Some(true));
+		governor.apply_search_text("?&&light=fals%65&light=1", "light");
+		assert_eq!(governor.get_lite_override(), Some(false));
+		governor.apply_search_text("lite+mode=%30", "lite mode");
+		assert_eq!(governor.get_lite_override(), Some(false));
+		assert_eq!(decode_form_component("a%2"), "a%2");
+		assert_eq!(decode_form_component("%zz%41"), "%zzA");
+		assert_eq!(decode_form_component("%EA%B0%80%FF"), "가\u{fffd}");
 		governor.set_lite_override(None);
 		governor.set_quality(GraphicsQuality::Low);
 		assert!(governor.is_lite());

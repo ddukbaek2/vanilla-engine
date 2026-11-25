@@ -10,6 +10,8 @@
 // - 진행률은 끝난 수 / 전체 수. 실패는 get_failed_list() 에 AssetLoadFailure 로 남는다. 바뀌면 set_progress_handler, 다 끝나면 set_complete_handler 의 함수를 부른다.
 // - 원본과 다른 점:
 //   글꼴은 FontAsset 대신 읽기 손잡이를 돌려준다. (러스트 판 글꼴은 엔진이 이름으로 등록하고, FontAsset 은 손잡이를 든 껍데기라서)
+//     원본 descriptors(굵기, 기울기, 글자 범위)는 FontFaceDescriptors 로 받아 엔진의 register_font_face_when_loaded 에 넘긴다. (없으면 FontFaceDescriptors::new())
+//   JSON 은 원본처럼 받은 뒤 풀지 못하면 실패다. (원본 isLoaded() 가 거짓이면 실패)
 //   소리는 Rc<AudioAsset> 을 돌려주고, 바이트를 받은 뒤 디코딩까지 끝나야 끝난 것으로 친다.
 //   원본 addTask(직접 만든 받기) 자리는 add_load_handle 이다. 직접 요청한 읽기 손잡이를 넣으면 진행률에 같이 센다. (동시 수에는 넣지 않는다)
 //   그림은 원본 img.onload 처럼 다 받았을 때 풀어 본다. 풀지 못하는 것(깨진 PNG)은 실패 목록에 들고, 푼 그림은 손잡이에 담아 ImageAsset 이 다시 풀지 않는다.
@@ -18,10 +20,11 @@
 use crate::core::asset::{Asset, AssetLoadHandle};
 use crate::core::engine::Engine;
 use crate::core::image::Image;
+use crate::core::textshaping::FontFaceDescriptors;
 use crate::resource::audioasset::AudioAsset;
 use crate::resource::blobasset::BlobAsset;
 use crate::resource::imageasset::ImageAsset;
-use crate::resource::textasset::{JsonAsset, TextAsset};
+use crate::resource::textasset::{parse_json_bytes, JsonAsset, ParsedJsonCell, TextAsset};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -50,8 +53,12 @@ pub type AssetLoaderCompleteHandler = Box<dyn FnMut(&[AssetLoadFailure])>;
 // 목록 한 칸의 종류.
 //==============================================================================
 enum AssetLoaderEntryKind {
-	// 바이트를 받으면 끝나는 것. (글, JSON, 바이너리, 글꼴)
+	// 바이트를 받으면 끝나는 것. (글, 바이너리, 글꼴)
 	Bytes,
+	// 바이트를 받으면 끝나고 JSON 으로 풀려야 받은 것. (푼 자료는 JsonAsset 과 나눠 든다)
+	Json {
+		parsed_data: ParsedJsonCell,
+	},
 	// 바이트를 받은 뒤 풀어 보기까지. (is_decode_checked: 풀어 보았는지)
 	Image {
 		is_decode_checked: bool,
@@ -117,6 +124,10 @@ impl AssetLoaderEntry {
 		match &self.kind {
 			AssetLoaderEntryKind::Audio { audio_asset, .. } => {
 				audio_asset.get_load_error()
+			}
+			AssetLoaderEntryKind::Json { parsed_data } => {
+				let bytes = self.load_handle.get_bytes()?;
+				parsed_data.get_or_init(|| parse_json_bytes(&bytes, &self.path)).as_ref().err().cloned()
 			}
 			_ => {
 				None
@@ -211,8 +222,10 @@ impl AssetLoader {
 	// JSON 넣기.
 	//==============================================================================
 	pub fn add_json(&self, path: &str) -> JsonAsset {
-		let load_handle = self.add_entry(path, AssetLoaderEntryKind::Bytes);
 		let mut json_asset = JsonAsset::new();
+		let load_handle = self.add_entry(path, AssetLoaderEntryKind::Json {
+			parsed_data: json_asset.get_parsed_data_cell(),
+		});
 		json_asset.get_asset_base_mut().load_from_handle(load_handle);
 		json_asset
 	}
@@ -238,11 +251,12 @@ impl AssetLoader {
 	}
 
 	//==============================================================================
-	// 글꼴 넣기. (받으면 엔진이 다음 프레임 시작에 family 이름으로 등록한다. 읽기 손잡이를 돌려준다)
+	// 글꼴 넣기. (받으면 엔진이 다음 프레임 시작에 family 이름 아래 서술자(굵기, 기울기, 글자 범위)대로 올린다. 읽기 손잡이를 돌려준다)
+	// - 원본 addFont(family, path, descriptors). 서술자를 주지 않던 원본 쓰임은 FontFaceDescriptors::new() 다.
 	//==============================================================================
-	pub fn add_font(&self, engine: &mut Engine, family: &str, path: &str, is_bold: bool) -> AssetLoadHandle {
+	pub fn add_font(&self, engine: &mut Engine, family: &str, path: &str, font_face_descriptors: FontFaceDescriptors) -> AssetLoadHandle {
 		let load_handle = self.add_entry(path, AssetLoaderEntryKind::Bytes);
-		engine.register_font_when_loaded(family, is_bold, load_handle.clone());
+		engine.register_font_face_when_loaded(family, font_face_descriptors, load_handle.clone());
 		load_handle
 	}
 
@@ -575,13 +589,15 @@ mod tests {
 		std::fs::write(asset_directory_path.join("hello.txt"), "안녕 vanilla").expect("text file");
 		std::fs::write(asset_directory_path.join("data.json"), "{\"count\": 3}").expect("json file");
 		std::fs::write(asset_directory_path.join("data.bin"), [1u8, 2, 3]).expect("blob file");
+		std::fs::write(asset_directory_path.join("broken.json"), "{\"count\": ").expect("broken json file");
 		let asset_loader = AssetLoader::new();
 		asset_loader.set_concurrency(2);
 		let mut text_asset = asset_loader.add_text("hello.txt");
-		let mut json_asset = asset_loader.add_json("data.json");
+		let json_asset = asset_loader.add_json("data.json");
+		let mut broken_json_asset = asset_loader.add_json("broken.json");
 		let blob_asset = asset_loader.add_blob("data.bin");
 		let missing_image_asset = asset_loader.add_image("missing.png");
-		let font_handle = asset_loader.add_font(&mut engine, "MissingFont", "missing.ttf", false);
+		let font_handle = asset_loader.add_font(&mut engine, "MissingFont", "missing.ttf", FontFaceDescriptors::create_with_bold(true));
 		let external_handle = AssetLoadHandle::create_pending("external");
 		asset_loader.add_load_handle(&external_handle);
 		let progress_call_count = Rc::new(Cell::new(0));
@@ -602,17 +618,20 @@ mod tests {
 		assert!(!text_asset.is_loaded());
 
 		asset_loader.load(&engine);
-		assert_eq!(asset_loader.get_finished_count(), 5);
+		assert_eq!(asset_loader.get_finished_count(), 6);
 		assert_eq!(asset_loader.get_loaded_count(), 3);
 		assert!(!asset_loader.is_finished());
 		assert!(!asset_loader.get_completion_handle().is_finished());
 		assert_eq!(text_asset.get_text(), Some("안녕 vanilla"));
 		assert_eq!(json_asset.get_data().expect("json")["count"], serde_json::json!(3));
+		assert!(json_asset.is_loaded());
+		assert!(!broken_json_asset.is_loaded());
+		assert_eq!(broken_json_asset.get_text(), Some("{\"count\": "));
 		assert_eq!(blob_asset.get_blob().expect("blob").as_slice(), &[1u8, 2, 3]);
 		assert!(!missing_image_asset.is_loaded());
 		assert!(font_handle.is_failed());
 		let failed_path_list: Vec<String> = asset_loader.get_failed_list().into_iter().map(|failure| failure.path).collect();
-		assert_eq!(failed_path_list, vec![String::from("missing.png"), String::from("missing.ttf")]);
+		assert_eq!(failed_path_list, vec![String::from("broken.json"), String::from("missing.png"), String::from("missing.ttf")]);
 
 		// 바깥 손잡이가 끝나면 다 받음.
 		external_handle.finish(Ok(Vec::new()));
@@ -620,7 +639,7 @@ mod tests {
 		assert!(asset_loader.is_finished());
 		assert_eq!(asset_loader.get_progress(), 1.0);
 		assert!(asset_loader.get_completion_handle().is_finished());
-		assert_eq!(complete_failure_count.get(), 2);
+		assert_eq!(complete_failure_count.get(), 3);
 		assert_eq!(progress_call_count.get(), 2);
 		asset_loader.update(&engine);
 		assert_eq!(progress_call_count.get(), 2);

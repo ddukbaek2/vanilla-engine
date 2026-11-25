@@ -11,8 +11,8 @@
 //   앱 이름은 기본으로 실행 파일 이름이다. set_application_name 이나 set_application_name_from_engine(EngineConfiguration.title)로 바꾼다.
 //   set_storage_directory 로 폴더를 직접 정할 수도 있다. (시험, 들고 다니는 게임)
 // - 원본과 다른 점:
-//   숫자는 원본(JS number)처럼 f64 다. 글로 바꿀 때 원본 String(number) 와 맞춰 NaN, Infinity, -0 → "0" 을 따른다.
-//     아주 크거나 작은 수는 지수 표기(1e+21) 대신 자리를 다 쓴다. 읽을 때 "0x10" 같은 16진 표기는 받지 않는다.
+//   숫자는 원본(JS number)처럼 f64 다. 글로 바꾸기는 원본 String(number) 그대로다. (가장 짧은 표기, 1e21 이상과 1e-7 이하는 1e+21 같은 지수, NaN, Infinity, -0 → "0")
+//     읽기는 원본 Number(text) 그대로다. (JS 빈칸을 떼고, 빈 글은 0, 0x, 0o, 0b 표기, "1.", ".5", 지수, Infinity, 그 밖은 NaN)
 //   데스크탑 저장은 스레드마다 따로 들고 있다가 파일에 쓴다. (엔진은 한 스레드에서 돈다)
 // - 저장소 갈아 끼우기: set_backend 에 LocalStorageBackend 를 넘기면 위 기본 저장소 대신 그것을 쓴다. (플랫폼 SDK 의 저장소 같은 것)
 //   원본 setBackend 의 객체({ getItem, setItem, removeItem, getKeys, clear }) 자리가 트레이트다. 원본의 예외는 Err 로 알린다.
@@ -21,6 +21,7 @@
 //   이 실행이 살아 있는 동안 메모리에 대신 둔다. (is_memory_fallback, 다시 켜면 없다)
 // - 읽기(get_string, get_boolean, get_number, get_json)는 없는 키에 기본값을 써 넣지 않는다. (원본과 같다)
 //==============================================================================
+use crate::base::format::number_to_string;
 use crate::core::engine::Engine;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -403,48 +404,150 @@ impl LocalStorage {
 }
 
 //==============================================================================
-// 숫자 → 글. (원본 String(number): NaN, Infinity, -Infinity, -0 은 "0")
+// 숫자 → 글. (원본 String(number), Number.prototype.toString 꼴)
 //==============================================================================
 fn format_number(number_value: f64) -> String {
-	if number_value.is_nan() {
-		return String::from("NaN");
-	}
-	if number_value.is_infinite() {
-		if number_value > 0.0 {
-			return String::from("Infinity");
-		}
-		return String::from("-Infinity");
-	}
-	if number_value == 0.0 {
-		return String::from("0");
-	}
-	format!("{}", number_value)
+	number_to_string(number_value)
 }
 
 //==============================================================================
-// 글 → 숫자. (원본 Number(text): 앞뒤 공백을 무시하고, 빈 글은 0, 숫자가 아니면 NaN)
+// JS 빈칸인지. (원본 Number(text) 가 앞뒤에서 떼는 WhiteSpace 와 LineTerminator: 탭, VT, FF, BOM, Zs 빈칸, LF, CR, LS, PS)
+//==============================================================================
+fn is_java_script_whitespace(character: char) -> bool {
+	matches!(character, '\u{9}' | '\u{a}' | '\u{b}' | '\u{c}' | '\u{d}' | '\u{20}' | '\u{a0}' | '\u{1680}' | '\u{2000}'..='\u{200a}' | '\u{2028}' | '\u{2029}' | '\u{202f}' | '\u{205f}' | '\u{3000}' | '\u{feff}')
+}
+
+//==============================================================================
+// 글 → 숫자. (원본 Number(text): 앞뒤 JS 빈칸을 떼고, 빈 글은 0, 0x / 0o / 0b 정수, 부호 붙은 십진 표기와 Infinity, 그 밖은 NaN)
 //==============================================================================
 fn parse_number(text: &str) -> f64 {
-	let trimmed_text = text.trim();
+	let trimmed_text = text.trim_matches(is_java_script_whitespace);
 	if trimmed_text.is_empty() {
 		return 0.0;
 	}
-	match trimmed_text {
-		"Infinity" | "+Infinity" => {
-			return f64::INFINITY;
-		}
-		"-Infinity" => {
-			return f64::NEG_INFINITY;
-		}
-		_ => {
+	let text_bytes = trimmed_text.as_bytes();
+	if text_bytes.len() > 2 && text_bytes[0] == b'0' {
+		let radix = match text_bytes[1] {
+			b'x' | b'X' => {
+				16
+			}
+			b'o' | b'O' => {
+				8
+			}
+			b'b' | b'B' => {
+				2
+			}
+			_ => {
+				0
+			}
+		};
+		if radix != 0 {
+			return parse_power_of_two_radix_integer(&trimmed_text[2..], radix);
 		}
 	}
-	// 러스트는 "inf", "nan" 도 받지만 원본 Number 는 NaN 이다.
-	let lowered_text = trimmed_text.to_ascii_lowercase();
-	if lowered_text.contains("inf") || lowered_text.contains("nan") {
+	let (sign, unsigned_text) = match text_bytes[0] {
+		b'+' => {
+			(1.0, &trimmed_text[1..])
+		}
+		b'-' => {
+			(-1.0, &trimmed_text[1..])
+		}
+		_ => {
+			(1.0, trimmed_text)
+		}
+	};
+	if unsigned_text == "Infinity" {
+		return sign * f64::INFINITY;
+	}
+	if !is_unsigned_decimal_literal(unsigned_text) {
 		return f64::NAN;
 	}
 	trimmed_text.parse::<f64>().unwrap_or(f64::NAN)
+}
+
+//==============================================================================
+// 부호 없는 십진 표기인지. (원본 StrUnsignedDecimalLiteral: 숫자들 [. 숫자들] [지수] 또는 . 숫자들 [지수], 지수는 e 나 E 뒤 [+ -] 숫자들)
+//==============================================================================
+fn is_unsigned_decimal_literal(text: &str) -> bool {
+	let text_bytes = text.as_bytes();
+	let mut byte_index = 0;
+	let mut digit_count = 0;
+	while byte_index < text_bytes.len() && text_bytes[byte_index].is_ascii_digit() {
+		byte_index += 1;
+		digit_count += 1;
+	}
+	if byte_index < text_bytes.len() && text_bytes[byte_index] == b'.' {
+		byte_index += 1;
+		while byte_index < text_bytes.len() && text_bytes[byte_index].is_ascii_digit() {
+			byte_index += 1;
+			digit_count += 1;
+		}
+	}
+	if digit_count == 0 {
+		return false;
+	}
+	if byte_index < text_bytes.len() && (text_bytes[byte_index] == b'e' || text_bytes[byte_index] == b'E') {
+		byte_index += 1;
+		if byte_index < text_bytes.len() && (text_bytes[byte_index] == b'+' || text_bytes[byte_index] == b'-') {
+			byte_index += 1;
+		}
+		let exponent_start_index = byte_index;
+		while byte_index < text_bytes.len() && text_bytes[byte_index].is_ascii_digit() {
+			byte_index += 1;
+		}
+		if byte_index == exponent_start_index {
+			return false;
+		}
+	}
+	byte_index == text_bytes.len()
+}
+
+//==============================================================================
+// 2, 8, 16 진 정수 글 → 숫자. (원본처럼 정확한 값을 가장 가까운 f64 로, 딱 가운데면 짝수 쪽, 숫자가 아닌 글자가 있거나 비었으면 NaN)
+//==============================================================================
+fn parse_power_of_two_radix_integer(digit_text: &str, radix: u32) -> f64 {
+	if digit_text.is_empty() {
+		return f64::NAN;
+	}
+	let bits_per_digit = radix.trailing_zeros();
+	let mut bit_list: Vec<u8> = Vec::with_capacity(digit_text.len() * bits_per_digit as usize);
+	for digit_character in digit_text.chars() {
+		let digit_value = match digit_character.to_digit(radix) {
+			Some(digit_value) => {
+				digit_value
+			}
+			None => {
+				return f64::NAN;
+			}
+		};
+		for bit_index in (0..bits_per_digit).rev() {
+			bit_list.push(((digit_value >> bit_index) & 1) as u8);
+		}
+	}
+	let first_one_index = match bit_list.iter().position(|bit| *bit == 1) {
+		Some(first_one_index) => {
+			first_one_index
+		}
+		None => {
+			return 0.0;
+		}
+	};
+	let significant_bit_list = &bit_list[first_one_index..];
+	let mantissa_bit_count = 53usize.min(significant_bit_list.len());
+	let mut mantissa: u64 = 0;
+	for bit in significant_bit_list[..mantissa_bit_count].iter() {
+		mantissa = (mantissa << 1) | *bit as u64;
+	}
+	let dropped_bit_count = significant_bit_list.len() - mantissa_bit_count;
+	if dropped_bit_count > 0 {
+		let is_round_bit_set = significant_bit_list[mantissa_bit_count] == 1;
+		let is_sticky_bit_set = significant_bit_list[mantissa_bit_count + 1..].contains(&1);
+		if is_round_bit_set && (is_sticky_bit_set || mantissa & 1 == 1) {
+			mantissa += 1;
+		}
+	}
+	let scale_exponent = dropped_bit_count.min(2000) as i32;
+	mantissa as f64 * 2.0f64.powi(scale_exponent)
 }
 
 //==============================================================================
@@ -877,6 +980,39 @@ mod tests {
 		assert_eq!(parse_number("Infinity"), f64::INFINITY);
 		assert!(parse_number("abc").is_nan());
 		assert!(parse_number("inf").is_nan());
+
+		// 아래 기대값은 node 의 String(수), Number(글)로 찍은 것이다.
+		assert_eq!(format_number(1e21), "1e+21");
+		assert_eq!(format_number(1.5e21), "1.5e+21");
+		assert_eq!(format_number(123456789012345680000.0), "123456789012345680000");
+		assert_eq!(format_number(1e-7), "1e-7");
+		assert_eq!(format_number(0.000001), "0.000001");
+		assert_eq!(format_number(-2.5e-8), "-2.5e-8");
+		assert_eq!(format_number(0.1 + 0.2), "0.30000000000000004");
+		assert_eq!(parse_number("0x10"), 16.0);
+		assert_eq!(parse_number("0X1f"), 31.0);
+		assert_eq!(parse_number("0o17"), 15.0);
+		assert_eq!(parse_number("0b101"), 5.0);
+		assert!(parse_number("-0x10").is_nan());
+		assert!(parse_number("0x").is_nan());
+		assert!(parse_number("0x1g").is_nan());
+		assert_eq!(parse_number("0x20000000000001"), 9007199254740992.0);
+		assert_eq!(parse_number("0x20000000000003"), 9007199254740996.0);
+		assert_eq!(parse_number("1."), 1.0);
+		assert_eq!(parse_number(".5"), 0.5);
+		assert_eq!(parse_number("+.5e1"), 5.0);
+		assert_eq!(parse_number("1E+2"), 100.0);
+		assert_eq!(parse_number("00012"), 12.0);
+		assert_eq!(parse_number("-0").to_bits(), (-0.0f64).to_bits());
+		assert_eq!(parse_number("-Infinity"), f64::NEG_INFINITY);
+		assert!(parse_number("1e").is_nan());
+		assert!(parse_number(".").is_nan());
+		assert!(parse_number("1_000").is_nan());
+		assert!(parse_number("12px").is_nan());
+		assert!(parse_number("infinity").is_nan());
+		assert_eq!(parse_number("\u{feff}\u{3000}7\u{2028}"), 7.0);
+		assert!(parse_number("\u{85}7").is_nan());
+		assert_eq!(parse_number("1e400"), f64::INFINITY);
 	}
 
 	//==============================================================================

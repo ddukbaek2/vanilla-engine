@@ -246,6 +246,15 @@
 - SoundSystem: 무리에서 고르기와 음 높이 흔들기가 고정 씨앗(SeededRandom 0x50f7) 대신 원본 Math.random 자리인 math::random(시각으로 씨앗)을 쓴다. SoundRow.maximum_voices 를 Option<usize> 로 바꿨다. (공개 API 를 바꾸는 일이다) None 이면 효과음 전체의 수까지, Some(0) 이면 원본처럼 하나만 난다. (전에는 0 이 12 였다)
 - 데스크탑 소리 파일: kira 의 flac, isomp4, aac 기능을 켜 FLAC 와 M4A(AAC)도 읽는다. (새로 받는 크레이트: symphonia-bundle-flac, symphonia-format-isomp4, symphonia-codec-aac 0.6.1)
 - BeepPlayer 데스크탑 파형을 크롬 WebAudio OscillatorNode(PeriodicWave)와 같은 셈으로 그린다. 푸리에 계수를 1/3 옥타브마다 덜어 낸 두 표 사이를 섞어 대역을 제한하고, 배음을 다 둔 표의 꼭대기로 크기를 맞춘다. 헤드리스 크롬 OfflineAudioContext 로 그린 오실레이터(사각, 톱니, 삼각, 사인, 150 / 440 / 1000 Hz, 2048 샘플)와 가장 큰 차이가 0.0003 이다. (전에는 대역 제한 없는 사각파, 톱니파였다)
+- WebSocketClient: 데스크탑 wss:// 를 연다. (ewebsock 의 tls 기능, rustls 0.23 과 ring 0.17 을 새로 받는다. 붙을 때 rustls 암호 공급자를 ring 으로 정한다) receive_message(원본 receiveMessage) 를 공개했다
+- CameraGestures 를 원본 규칙대로: 두 손가락에서 하나가 되어도 모두 뗄 때까지 손짓이 이어지고(움직임은 쓰지 않음), 손가락 수가 바뀌면 기준을 다시 잡는다. set_thresholds 가 넷째 인자(흉내 낸 마우스를 무시하는 밀리초, 처음 800)를 받는다. (공개 API 를 바꾸는 일이다) is_touch_input(처음에는 기기가 손가락이 주된 입력인지), is_coarse_pointer, is_last_wheel_ctrl 을 더했다. InputManager.is_touch_input 의 처음 값도 기기가 손가락이 주된 입력인지다
+- AssetLoader.add_font 가 굵기 대신 FontFaceDescriptors(굵기, 기울기, 글자 범위)를 받아 register_font_face_when_loaded 로 넘긴다. (원본 addFont descriptors, 공개 API 를 바꾸는 일이다)
+- JsonAsset: 풀지 못한 JSON 은 원본처럼 읽히지 않은 것이다. (is_loaded 거짓, AssetLoader 의 실패 목록에 든다) get_text(원본 TextAsset 의 text) 를 더했고 get_data 는 &self 로 부른다
+- PersistedStore: read_stored_text 공개. 섞기를 원본 Object.assign 처럼: 배열(저장된 state 가 배열이어도)은 번호 키로 섞고, 키 차례는 JS 객체처럼 번호 꼴 키를 작은 수부터 앞에 둔다. (전에는 배열 state 면 기본값이었다)
+- LocalStorage: 수를 글로 바꾸기와 글을 수로 읽기를 원본 String(number), Number(text) 그대로 한다. 1e21 이상과 1e-7 이하는 1e+21 같은 지수로 쓰고, 0x, 0o, 0b 표기와 "1.", ".5", JS 빈칸을 원본처럼 읽는다. (node 로 찍은 값과 견줬다)
+- Localization.detect_language, languagepack 의 기기 언어: 데스크탑은 sys-locale 0.3 으로 시스템 선호 언어 차례를 읽는다. (윈도우, 맥도 원본 navigator.languages 처럼, 전에는 LANG 같은 환경 변수만 읽어 윈도우는 늘 기본 언어였다)
+- GraphicsQualityGovernor.apply_search_text 가 원본 URLSearchParams 처럼 + 와 %XX 를 풀고 빈 조각을 건너뛴다
+- 컴포넌트에 노드 출력 상태 앞뒤 훅 push_transform, pop_transform 을 더했다. (자기 컴포넌트와 자식, 기즈모를 감싸서 불린다, 원본 노드가 pushTransform, popTransform 을 덮어쓰던 자리) TouchEffect 가 이 훅으로 원본처럼 자식까지 더하기 블렌드로 그린다. (전에는 자기 입자만)
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.

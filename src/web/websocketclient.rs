@@ -3,6 +3,7 @@
 // - 원본 web/websocketclient.js 를 옮긴 것이다. connect / disconnect / send(JSON) / is_connected / set_receive_event 를 따른다.
 // - 소켓은 ewebsock 0.8 이다. 데스크탑은 tungstenite 를 도는 스레드, 웹(wasm)은 브라우저 WebSocket 을 쓴다.
 // - 원본은 브라우저가 onopen / onmessage / onclose 를 불러 준다. 러스트 판은 씬이 매 프레임 tick 을 불러 쌓인 사건을 꺼낸다.
+//   읽은 JSON 은 원본처럼 receive_message 로 넘긴다. (부르는 쪽이 직접 넣을 수도 있다)
 //     // 씬 create
 //     self.web_socket_client.connect("ws://localhost:8080");
 //     // 씬 tick
@@ -16,7 +17,7 @@
 //   - 오류 사건은 원본처럼 알리고, 끊긴 것으로 친다. (브라우저는 onerror 뒤에 늘 onclose 가 오고, ewebsock 데스크탑은 오류 뒤 스레드가 끝난다)
 //   - get_web_socket 은 ewebsock 의 송신기(WsSender)다.
 //   - 수신 콜백은 Rc<RefCell> 에 담는다. get_receive_event 는 그 Rc 를 돌려주고, 부르는 쪽은 borrow_mut 로 빌려 부른다.
-//   - 데스크탑에서 wss:// 주소는 ewebsock 의 "tls" 기능을 켜야 열린다. (기본은 꺼 두었다)
+//   - 데스크탑의 wss:// 는 ewebsock 의 "tls" 기능(tungstenite 의 rustls 와 webpki 뿌리 인증서)으로 연다. rustls 의 암호 공급자는 ring 이고 처음 붙을 때 정한다.
 //   - 바이너리 메시지도 UTF-8 JSON 이면 받는다. (원본은 Blob 을 JSON.parse 하다 실패한다)
 //==============================================================================
 use ewebsock::{WsEvent, WsMessage, WsReceiver, WsSender};
@@ -66,6 +67,9 @@ impl WebSocketClient {
 		if self.is_connected {
 			return;
 		}
+		// 데스크탑 wss:// 의 암호 공급자. (이미 정해져 있으면 그대로 둔다)
+		#[cfg(not(target_arch = "wasm32"))]
+		let _ = rustls::crypto::ring::default_provider().install_default();
 		match ewebsock::connect(url, ewebsock::Options::default()) {
 			Ok((web_socket, web_socket_receiver)) => {
 				self.web_socket = Some(web_socket);
@@ -168,18 +172,23 @@ impl WebSocketClient {
 	}
 
 	//==============================================================================
-	// 받은 글을 JSON 으로 읽어 넘긴다. (콜백이 있으면 콜백, 없으면 모아 둔다. 못 읽으면 알리고 버린다)
+	// 받은 글을 JSON 으로 읽어 넘긴다. (못 읽으면 알리고 버린다, 원본 onmessage 의 JSON.parse)
 	//==============================================================================
 	fn receive_text(&mut self, text: &str) {
-		let value: Value = match serde_json::from_str(text) {
+		match serde_json::from_str::<Value>(text) {
 			Ok(value) => {
-				value
+				self.receive_message(value);
 			}
 			Err(error) => {
 				eprintln!("WebSocketClient: {}", error);
-				return;
 			}
-		};
+		}
+	}
+
+	//==============================================================================
+	// 받은 JSON 넘기기. (수신 콜백이 있으면 콜백, 없으면 모아 두었다가 take_received_messages 로 꺼낸다, 원본 receiveMessage)
+	//==============================================================================
+	pub fn receive_message(&mut self, value: Value) {
 		if let Some(receive_event) = self.get_receive_event() {
 			if let Ok(mut receive_function) = receive_event.try_borrow_mut() {
 				(*receive_function)(&value);
@@ -310,6 +319,10 @@ mod tests {
 		let queued_messages = web_socket_client.take_received_messages();
 		assert_eq!(queued_messages.len(), RECEIVED_MESSAGE_LIMIT);
 		assert_eq!(queued_messages[0], json!(5));
+
+		// 원본 receiveMessage 처럼 직접 넣어도 같은 길을 지난다.
+		web_socket_client.receive_message(json!({ "local": true }));
+		assert_eq!(web_socket_client.take_received_messages(), vec![json!({ "local": true })]);
 	}
 
 	//==============================================================================
