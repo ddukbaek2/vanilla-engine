@@ -7,6 +7,7 @@
 // - GLSL 은 원본과 같다. (쿡-토런스 GGX, 화면공간 미분 코탄젠트 노멀맵, 3x3 PCF 섀도우, 반구 앰비언트, 거리 안개)
 //   원본 템플릿 문자열의 ${MORPH_GLSL} / ${MORPH_TARGET_MAXIMUM} 은 concat! 과 숫자 96 으로 옮겼다. (시험이 둘이 같은지 본다)
 // - 텍스처 유닛: 0 = base_color, 1 = 섀도우 맵, 2 ~ 8 = 머티리얼 슬롯, 15 = 모프 타깃 텍스처.
+//   섀도우 맵이 없으면 섀도우 유닛에 1x1 비교 깊이 텍스처를 묶는다. (원본과 같다)
 // - 원본과 다른 것:
 //   - 그리기 함수는 gl 과 &mut SkinnedModel 을 받는다. 바뀐 모프 타깃 업로드(원본 update 6단계)와 와이어프레임 인덱스 업로드를
 //     여기서 먼저 한다. 행렬 인자는 원본 get_elements() 처럼 &[f32; 16] 이다. (matrix.get_elements())
@@ -296,6 +297,8 @@ pub struct SkinnedModelRenderer {
 	depth_shader_program: ShaderProgram,
 	wireframe_shader_program: ShaderProgram,
 	shadow_map_texture: Option<GlTexture>,
+	// 그림자를 받지 않을 때 섀도우 유닛에 묶는 1x1 비교 깊이 텍스처.
+	empty_shadow_texture: GlTexture,
 	light_view_projection_elements: Option<[f32; 16]>,
 	shadow_strength: f32,
 	shadow_texel_size: f32,
@@ -315,11 +318,13 @@ impl SkinnedModelRenderer {
 		let shader_program = ShaderProgram::new(gl, resolved_vertex_shader_source.trim(), resolved_fragment_shader_source.trim())?;
 		let depth_shader_program = ShaderProgram::new(gl, SKINNED_DEPTH_VERTEXSHADER_SOURCE.trim(), SKINNED_DEPTH_FRAGMENTSHADER_SOURCE.trim())?;
 		let wireframe_shader_program = ShaderProgram::new(gl, SKINNED_WIREFRAME_VERTEXSHADER_SOURCE.trim(), SKINNED_WIREFRAME_FRAGMENTSHADER_SOURCE.trim())?;
+		let empty_shadow_texture = SkinnedModelRenderer::create_empty_shadow_texture(gl)?;
 		Ok(SkinnedModelRenderer {
 			shader_program: Rc::new(shader_program),
 			depth_shader_program,
 			wireframe_shader_program,
 			shadow_map_texture: None,
+			empty_shadow_texture,
 			light_view_projection_elements: None,
 			shadow_strength: 0.0,
 			shadow_texel_size: 1.0 / 2048.0,
@@ -327,6 +332,31 @@ impl SkinnedModelRenderer {
 			fog_color: [0.8, 0.85, 0.92],
 			fog_range: [55.0, 250.0],
 		})
+	}
+
+	//==============================================================================
+	// 빈 그림자 텍스처 짓기. (1x1 깊이 1, 비교 샘플링)
+	// - sampler2DShadow 유닛에 비교 모드가 없는 텍스처가 묶이면 WebGL 이 그리기를 거부하고, 깊이 텍스처가 없으면 맥 드라이버가 알린다.
+	//==============================================================================
+	fn create_empty_shadow_texture(gl: &glow::Context) -> Result<GlTexture, String> {
+		unsafe {
+			let texture = gl.create_texture()?;
+			gl.active_texture(glow::TEXTURE0 + TEXTURE_UNIT_SHADOWMAP);
+			gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+			// 웹의 glow 는 UNSIGNED_INT 바이트를 u32 배열로 보므로 4 바이트 맞춘 u32 에서 바이트를 읽는다.
+			let depth_values = [u32::MAX];
+			let depth_bytes = std::slice::from_raw_parts(depth_values.as_ptr() as *const u8, std::mem::size_of_val(&depth_values));
+			gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::DEPTH_COMPONENT24 as i32, 1, 1, 0, glow::DEPTH_COMPONENT, glow::UNSIGNED_INT, glow::PixelUnpackData::Slice(Some(depth_bytes)));
+			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
+			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
+			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
+			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
+			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_COMPARE_MODE, glow::COMPARE_REF_TO_TEXTURE as i32);
+			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_COMPARE_FUNC, glow::LEQUAL as i32);
+			gl.bind_texture(glow::TEXTURE_2D, None);
+			gl.active_texture(glow::TEXTURE0);
+			Ok(texture)
+		}
 	}
 
 	//==============================================================================
@@ -373,6 +403,9 @@ impl SkinnedModelRenderer {
 				unsafe {
 					gl.uniform_1_i32(shadow_map_texture_location.as_ref(), TEXTURE_UNIT_SHADOWMAP as i32);
 					gl.uniform_1_f32(shadow_strength_location.as_ref(), 0.0);
+					gl.active_texture(glow::TEXTURE0 + TEXTURE_UNIT_SHADOWMAP);
+					gl.bind_texture(glow::TEXTURE_2D, Some(self.empty_shadow_texture));
+					gl.active_texture(glow::TEXTURE0);
 				}
 			}
 		}

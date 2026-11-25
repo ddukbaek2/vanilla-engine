@@ -317,6 +317,7 @@ impl SubsurfaceScatteringEffect {
 	pub fn destroy(&mut self, gl: &glow::Context) {
 		self.ping_render_target.destroy(gl);
 		self.pong_render_target.destroy(gl);
+		self.scatter_pass.destroy(gl);
 	}
 
 	//==============================================================================

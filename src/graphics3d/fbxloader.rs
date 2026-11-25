@@ -4,13 +4,11 @@
 //   노드 계층 / 스키닝 메시 / 머티리얼 / 임베디드 텍스처 / 골격 애니메이션을 뽑는다. 결과는 SkinnedModel 이 GL 리소스로 소비한다.
 // - 원본처럼 순수 파서다. GL 이나 셰이딩을 모르고, wasm32 에서도 돈다. 압축 배열(deflate, zlib 머리)은 flate2(순수 러스트)로 푼다.
 // - 원본과 다른 것:
-//   - 원본은 async 지만 러스트 판은 그 자리에서 끝난다. 원본 loadFromUrl(url) 은 데스크탑 경로를 읽는 load_from_path 로 옮겼다.
-//     웹은 BlobAsset 으로 받은 바이트를 parse 에 넘긴다.
-//   - 원본은 64비트 정수(오브젝트 id, 키 시간)를 Number 로 바꿔 2^53 을 넘으면 끝자리를 잃는다. 러스트 판은 i64 그대로 든다.
+//   - 원본은 async 다. (압축 배열을 브라우저 DecompressionStream 으로 풀어서다) 러스트 판은 flate2 로 그 자리에서 끝난다.
+//     원본 loadFromUrl(url) 은 URL 대신 데스크탑 경로를 읽는 load_from_path 로 옮겼다. 웹은 BlobAsset 으로 받은 바이트를 parse 에 넘긴다.
+//   - 64비트 정수: 원본은 오브젝트 id 처럼 하나로 든 값이 2^53 을 넘으면 BigInt 로 든다. 러스트 판은 i64 다. 배열(키 시간)은 원본이 Number 다.
 //   - 원본은 순서 있는 Map 을 쓴다. 러스트 판은 넣은 순서를 지키는 FbxObjectMap 으로 같은 순회 순서를 낸다.
-//   - 원본은 빠진 노드나 짧은 레코드에서 TypeError 로 멈춘다. 러스트 판은 Objects / Connections 가 없거나 파일이 잘렸으면 오류를 돌려주고,
-//     정점 / 폴리곤 배열이 없는 지오메트리(블렌드셰이프 Shape 같은)와 값이 모자란 Properties70 레코드는 건너뛴다.
-//     레이어 인덱스가 배열 밖이면 원본은 NaN, 러스트 판은 0 을 넣는다.
+//   - 원본은 읽는 자리(커서)를 객체에 들고 레코드를 읽는다. 러스트 판은 커서를 들지 않고 parse_node_records, read_version 과 FbxNodeRecord 의 읽기 함수로 바이트 조각을 읽는다.
 //   - 원본에서 만들고 쓰지 않는 objectById 와 getDataView / getFileBytes / getTextDecoder 는 옮기지 않았다.
 //==============================================================================
 use crate::graphics3d::skinnedmodel::AnimationPath;
