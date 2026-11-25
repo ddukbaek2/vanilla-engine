@@ -90,6 +90,15 @@ pub struct ToonMeshArrays {
 }
 
 //==============================================================================
+// 잇는 조각 하나. (MeshBuilder::combine 에 넘기는 배열과 옮김, 원본 { arrays, offset })
+//==============================================================================
+#[derive(Clone, Copy, Debug)]
+pub struct ToonMeshPiece<'a> {
+	pub arrays: &'a ToonMeshArrays,
+	pub offset: [f32; 3],
+}
+
+//==============================================================================
 // 색 글자를 sRGB 세 수로. ("#rrggbb" → [r, g, b], 0 ~ 1)
 //==============================================================================
 pub fn read_color_values(color_text: &str) -> [f32; 3] {
@@ -355,6 +364,46 @@ pub fn create_octahedron_geometry(radius: f32) -> ToonGeometry {
 				geometry.indices.extend_from_slice(&[start_index, start_index + 1, start_index + 2]);
 			}
 		}
+	}
+	geometry
+}
+
+//==============================================================================
+// 각진 돌덩이. (이십면체의 꼭짓점 열둘을 저마다 늘이고 줄여, 면마다 꼭짓점을 따로 둔 깎은 돌, 원본 createFacetedChunkGeometry)
+// - vertex_scales 는 꼭짓점 열둘의 반지름 배다. 모자라면 처음부터 되풀이하고, 비면 1 이다. axis_scale 은 [x, y, z] 배.
+//==============================================================================
+pub fn create_faceted_chunk_geometry(radius: f32, vertex_scales: &[f32], axis_scale: [f32; 3]) -> ToonGeometry {
+	let mut geometry = ToonGeometry::default();
+	let golden = (1.0 + 5.0f32.sqrt()) / 2.0;
+	let base_corners: [[f32; 3]; 12] = [[-1.0, golden, 0.0], [1.0, golden, 0.0], [-1.0, -golden, 0.0], [1.0, -golden, 0.0], [0.0, -1.0, golden], [0.0, 1.0, golden], [0.0, -1.0, -golden], [0.0, 1.0, -golden], [golden, 0.0, -1.0], [golden, 0.0, 1.0], [-golden, 0.0, -1.0], [-golden, 0.0, 1.0]];
+	let faces: [[usize; 3]; 20] = [[0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11], [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8], [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9], [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1]];
+	let mut corners = [[0.0f32; 3]; 12];
+	for (corner_index, corner) in base_corners.iter().enumerate() {
+		let length = (corner[0] * corner[0] + corner[1] * corner[1] + corner[2] * corner[2]).sqrt();
+		let vertex_scale = if vertex_scales.is_empty() { 1.0 } else { vertex_scales[corner_index % vertex_scales.len()] };
+		let scale = radius * vertex_scale / length;
+		corners[corner_index] = [corner[0] * scale * axis_scale[0], corner[1] * scale * axis_scale[1], corner[2] * scale * axis_scale[2]];
+	}
+	for face in faces {
+		let first = corners[face[0]];
+		let mut second = corners[face[1]];
+		let mut third = corners[face[2]];
+		let edge_a = [second[0] - first[0], second[1] - first[1], second[2] - first[2]];
+		let edge_b = [third[0] - first[0], third[1] - first[1], third[2] - first[2]];
+		let mut normal = [edge_a[1] * edge_b[2] - edge_a[2] * edge_b[1], edge_a[2] * edge_b[0] - edge_a[0] * edge_b[2], edge_a[0] * edge_b[1] - edge_a[1] * edge_b[0]];
+		let centroid = [first[0] + second[0] + third[0], first[1] + second[1] + third[1], first[2] + second[2] + third[2]];
+		// 바깥을 보게 차례를 맞춘다.
+		if normal[0] * centroid[0] + normal[1] * centroid[1] + normal[2] * centroid[2] < 0.0 {
+			std::mem::swap(&mut second, &mut third);
+			normal = [-normal[0], -normal[1], -normal[2]];
+		}
+		let normal_length = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt().max(0.000001);
+		let unit_normal = [normal[0] / normal_length, normal[1] / normal_length, normal[2] / normal_length];
+		let start_index = geometry.get_point_count();
+		for corner in [first, second, third] {
+			geometry.push_point(corner, unit_normal);
+		}
+		geometry.indices.extend_from_slice(&[start_index, start_index + 1, start_index + 2]);
 	}
 	geometry
 }
@@ -778,6 +827,42 @@ impl MeshBuilder {
 		}
 		offsets
 	}
+
+	//==============================================================================
+	// 지어 둔 배열 여럿을 옮겨 한 배열로 잇기. (움직이지 않는 조각을 한 메시로, 돌리거나 키우지 않음, 원본 MeshBuilder.combine)
+	// - 조각마다 배열과 옮김. 자리에 옮김을 더하고 번호에 앞 조각의 꼭짓점 수를 더한다. 바깥선 껍데기와 껍데기 기준 자리, 안쪽 범위도 같이 옮겨 잇는다.
+	// - 뼈대는 잇지 않는다. 뼈대가 있는 조각도 쉬는 자세 그대로 움직이지 않는 몸이 된다.
+	//==============================================================================
+	pub fn combine(piece_list: &[ToonMeshPiece]) -> ToonMeshArrays {
+		let mut combined = ToonMeshArrays::default();
+		for piece in piece_list {
+			let arrays = piece.arrays;
+			let offset = piece.offset;
+			let start_vertex = (combined.vertex_data.len() / VERTEX_FLOAT_COUNT) as u32;
+			let index_offset = combined.index_data.len();
+			let outline_index_offset = combined.outline_index_data.len();
+			let start_outline_vertex = (combined.outline_vertex_data.len() / 3) as u32;
+			for vertex in arrays.vertex_data.chunks(VERTEX_FLOAT_COUNT) {
+				let start = combined.vertex_data.len();
+				combined.vertex_data.extend_from_slice(vertex);
+				for axis in 0..3.min(vertex.len()) {
+					combined.vertex_data[start + axis] += offset[axis];
+				}
+			}
+			combined.index_data.extend(arrays.index_data.iter().map(|index| index + start_vertex));
+			let outline_base_data = if arrays.outline_base_data.len() == arrays.outline_vertex_data.len() { &arrays.outline_base_data } else { &arrays.outline_vertex_data };
+			for (point_index, point) in arrays.outline_vertex_data.chunks(3).enumerate() {
+				for axis in 0..point.len() {
+					combined.outline_vertex_data.push(point[axis] + offset[axis]);
+					combined.outline_base_data.push(outline_base_data[point_index * 3 + axis] + offset[axis]);
+				}
+			}
+			combined.outline_index_data.extend(arrays.outline_index_data.iter().map(|index| index + start_outline_vertex));
+			combined.inner_outline_ranges.extend(arrays.inner_outline_ranges.iter().map(|(start, count)| (start + outline_index_offset, *count)));
+			combined.inner_body_ranges.extend(arrays.inner_body_ranges.iter().map(|(start, count)| (start + index_offset, *count)));
+		}
+		combined
+	}
 }
 
 #[cfg(test)]
@@ -797,5 +882,21 @@ mod tests {
 		for point in arrays.outline_vertex_data.chunks(3) {
 			assert!(point[0].abs() > 0.5 && point[1].abs() > 0.5 && point[2].abs() > 0.5);
 		}
+	}
+
+	#[test]
+	fn faceted_chunk_and_combine() {
+		let mut mesh_builder = MeshBuilder::new();
+		mesh_builder.add_part(&create_faceted_chunk_geometry(0.5, &[1.0, 0.9, 1.1], [1.0, 0.8, 1.0]), &Matrix4::default(), "#a08c78", ToonPartOptions::default());
+		let arrays = mesh_builder.read_arrays();
+		assert_eq!(arrays.index_data.len(), 60);
+		let combined = MeshBuilder::combine(&[ToonMeshPiece { arrays: &arrays, offset: [0.0; 3] }, ToonMeshPiece { arrays: &arrays, offset: [2.0, 0.0, 0.0] }]);
+		let vertex_count = (arrays.vertex_data.len() / VERTEX_FLOAT_COUNT) as u32;
+		assert_eq!(combined.vertex_data.len(), arrays.vertex_data.len() * 2);
+		assert_eq!(combined.outline_index_data.len(), arrays.outline_index_data.len() * 2);
+		assert_eq!(combined.index_data[arrays.index_data.len()], arrays.index_data[0] + vertex_count);
+		assert!((combined.vertex_data[arrays.vertex_data.len()] - (arrays.vertex_data[0] + 2.0)).abs() < 0.0001);
+		assert!((combined.outline_base_data[arrays.outline_base_data.len()] - (arrays.outline_base_data[0] + 2.0)).abs() < 0.0001);
+		assert!(combined.skin_data.is_empty());
 	}
 }
