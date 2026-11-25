@@ -10,6 +10,8 @@
 // - 원본 SceneManager.unloadScene(scene) 은 씬 객체로 가리킨다. 러스트 판은 엔진이 씬을 들고 있어 load_scene 이 돌려주는 SceneId 나
 //   씬 공통 상태(&SceneBase, 원본처럼 씬으로)로 가리킨다. 씬 스스로는 get_scene_base().get_scene_id() 로 자기 핸들을 안다.
 // - 내릴 때는 원본처럼 finalize 다음 unload 를 부르고, 러스트 판은 씬을 버리기 직전에 destroy 를 더 부른다. (원본 load 의 비동기 기다림은 맡긴 애셋 기다리기로 옮겼다)
+// - 원본 Scene.load 가 루트를 뷰 크기로 맞추는 것(자리 0, 왼쪽 위 피벗, 콘텐츠 크기는 뷰 크기)은 엔진이 create 바로 뒤에 한다.
+//   원본 SceneManager.loadScene 처럼 맡긴 애셋이 다 끝난 뒤에도 로딩 화면(draw_on_load)을 최소 0.3초 더 보이고 initialize 를 부른다.
 // - 씬의 터치 훅(touch_press, touch_move, touch_release, touch_cancel, touch_wheel)은 원본 Scene.tickTouch 차례로 엔진이 tick 뒤에 부른다.
 //   원본 기본 씬은 훅만 부르고 노드에 넘기지 않지만, 러스트 판 SceneBase.tick 은 가장 앞의 누를 수 있는 노드에도 넘긴다. (원본은 UIScene, GameScene 이 넘긴다)
 // - 페이지 복원 훅과 터치 훅은 원본과 달리 엔진을 받는다. (전역 엔진이 없다)
@@ -82,6 +84,8 @@ pub struct SceneBase {
 	scene_id: Option<SceneId>,
 	// 이번 프레임의 휠을 받아 쓴 컴포넌트가 있었는지.
 	is_wheel_handled: bool,
+	// 맡긴 애셋이 다 끝난 것을 엔진이 처음 본 시각. (엔진 시작 뒤 초, 원본 loadScene 의 0.3초 더 기다림을 잰다)
+	tracked_assets_finished_time: Option<f64>,
 }
 
 impl SceneBase {
@@ -101,6 +105,7 @@ impl SceneBase {
 			first_touch_callback: None,
 			scene_id: None,
 			is_wheel_handled: false,
+			tracked_assets_finished_time: None,
 		}
 	}
 
@@ -185,6 +190,21 @@ impl SceneBase {
 	//==============================================================================
 	pub fn clear_tracked_assets(&mut self) {
 		self.tracked_load_list.clear();
+		self.tracked_assets_finished_time = None;
+	}
+
+	//==============================================================================
+	// 맡긴 애셋이 다 끝난 시각 적기. (처음 부를 때의 시각을 적고, 그 뒤로는 적힌 시각을 돌려준다. 엔진이 부른다)
+	//==============================================================================
+	pub(crate) fn mark_tracked_assets_finished(&mut self, current_time: f64) -> f64 {
+		*self.tracked_assets_finished_time.get_or_insert(current_time)
+	}
+
+	//==============================================================================
+	// 한 번이라도 눌린 적이 있는지. (원본 Scene.hasEverTouched, 처음 누를 때 참이 된다)
+	//==============================================================================
+	pub fn has_ever_touched(&self) -> bool {
+		self.has_ever_touched
 	}
 
 	//==============================================================================

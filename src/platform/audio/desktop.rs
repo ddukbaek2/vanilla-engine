@@ -377,11 +377,13 @@ impl AudioBusBackend {
 }
 
 //==============================================================================
-// 파일 읽기. (그 자리에서 읽고 디코딩한다)
+// 파일 읽기. (그 자리에서 읽고 디코딩한다, 읽은 파일은 리소스 사용량에 적는다)
 //==============================================================================
 pub fn load_audio_file(audio_asset: &Rc<AudioAsset>, asset_path: &Path) -> Result<(), String> {
 	match StaticSoundData::from_file(asset_path) {
 		Ok(audio_buffer) => {
+			let file_byte_count = std::fs::metadata(asset_path).map(|metadata| metadata.len()).unwrap_or(0);
+			crate::base::platform::record_loaded_file(&asset_path.to_string_lossy(), file_byte_count);
 			audio_asset.set_audio_buffer(audio_buffer);
 			Ok(())
 		}

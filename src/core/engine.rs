@@ -7,6 +7,9 @@
 // - Graphic 은 플랫폼이 GL 컨텍스트를 만든 뒤 attach_graphic 으로 넘겨받고, 씬의 draw 계열에 따로 넘긴다.
 // - 오디오 매니저를 원본처럼 생성할 때 만들어 든다. AudioContext(소리 장치)는 처음 쓸 때 만든다. 프레임마다 하는 오디오 일은 없다.
 //   웹은 플랫폼이 click / touchstart / keydown 에서 resume_on_user_gesture, focus / visibilitychange 에서 resume 을 부른다.
+// - 원본 SceneManager.getAllLoadedScenes 는 get_all_loaded_scenes 로, 씬 객체 대신 핸들(SceneId)을 돌려준다. (씬마다 &mut Engine 을 받아 도는 동안 다른 씬을 빌릴 수 없다)
+// - 원본처럼 씬을 불러오면 루트를 뷰 크기로 맞추고(create 바로 뒤), 맡긴 애셋이 다 끝난 뒤에도 로딩 화면을 0.3초 더 보이고 initialize 를 부른다.
+// - 글자 입력칸 포커스(is_text_input_focused)는 원본처럼 문서의 초점을 보고, 문서가 없는 데스크탑은 엔진 입력 필드의 포커스를 본다.
 // - 씬 하나만 내리기(unload_scene)는 원본 SceneManager.unloadScene 자리다. 원본은 씬 객체로, 러스트 판은 load_scene 이 돌려준 SceneId 로 가리키고,
 //   unload_all_scenes 처럼 이번 프레임이 끝난 뒤 내린다. 아직 create 전인(같은 프레임에 불러온) 씬이면 create 도 destroy 도 부르지 않고 뺀다.
 // - 페이지 이벤트(PageEvent): 원본은 모듈마다 document / window 에 리스너를 단다. 러스트 판은 플랫폼이 엔진에 알리고
@@ -29,6 +32,7 @@
 //==============================================================================
 use crate::base::color::Color;
 use crate::core::textshaping::FontFaceDescriptors;
+use crate::base::pivot::Pivot;
 use crate::base::platform::Platform;
 use crate::base::rect::Rect;
 use crate::base::vector2::Vector2;
@@ -51,6 +55,9 @@ use web_time::Instant;
 
 // 엔진 판. (원본 vanilla.js 0.3.2 를 옮긴 첫 판)
 const ENGINE_VERSION: Version = Version::create(0, 3, 2);
+
+// 씬이 맡긴 애셋이 다 끝난 뒤에도 로딩 화면을 더 보이는 시간. (초, 원본 SceneManager.loadScene 의 setTimeout 300)
+const SCENE_LOAD_EXTRA_WAIT_SECONDS: f64 = 0.3;
 
 //==============================================================================
 // 엔진 설정.
@@ -109,6 +116,9 @@ pub struct EngineConfiguration {
 	pub ignore_virtual_keyboard_resize: bool,
 	// 캔버스의 가로세로 비 상한. (창이 그보다 길쭉하면 캔버스를 줄여 창의 가운데에 둔다, 0 이면 제한 없음)
 	pub max_canvas_aspect_ratio: f32,
+	// 글꼴이 늦게 받아지면 그 글꼴로 구운 글자 가운데 그 글꼴의 글자 범위에 든 것만 버려 다시 굽게 할지. (원본 rebakeTextOnFontLoad, 원본처럼 기본 끔)
+	// 끄면 받기 전에 다른 글꼴로 구운 글자는 캐시에서 밀려날 때까지 그대로 남는다. (글자 범위로 나눈 글꼴 조각을 그때그때 받는 프로젝트가 켠다)
+	pub rebake_text_on_font_load: bool,
 }
 
 impl EngineConfiguration {
@@ -165,6 +175,7 @@ impl EngineConfiguration {
 			preserve_drawing_buffer: false,
 			ignore_virtual_keyboard_resize: false,
 			max_canvas_aspect_ratio: 0.0,
+			rebake_text_on_font_load: false,
 		}
 	}
 }
@@ -236,6 +247,8 @@ pub struct Engine {
 	platform: Platform,
 	next_scene_number: u64,
 	pending_unload_scene_id_list: Vec<SceneId>,
+	// 불러온(create 를 부른) 씬의 핸들. (불러온 차례, get_all_loaded_scenes)
+	loaded_scene_id_list: Vec<SceneId>,
 	is_page_hidden: bool,
 	page_event_listener_list: RefCell<Vec<Weak<RefCell<dyn FnMut(PageEvent)>>>>,
 }
@@ -268,6 +281,7 @@ impl Engine {
 			platform: Platform::new(),
 			next_scene_number: 0,
 			pending_unload_scene_id_list: Vec::new(),
+			loaded_scene_id_list: Vec::new(),
 			is_page_hidden: false,
 			page_event_listener_list: RefCell::new(Vec::new()),
 		}
@@ -306,6 +320,15 @@ impl Engine {
 	//==============================================================================
 	pub fn unload_all_scenes(&mut self) {
 		self.is_unload_all_scenes_requested = true;
+	}
+
+	//==============================================================================
+	// 불러온 모든 씬의 핸들. (원본 SceneManager.getAllLoadedScenes, 불러온 차례, 로딩 중인 씬도 든다)
+	// - 원본은 씬 객체를 돌려준다. 러스트 판은 씬마다 &mut Engine 을 받아 도는 동안 다른 씬을 빌릴 수 없어서 핸들을 돌려준다.
+	//   load_scene 한 프레임이 끝나 create 가 불린 씬부터 들고, 내린 씬은 빠진다.
+	//==============================================================================
+	pub fn get_all_loaded_scenes(&self) -> &[SceneId] {
+		&self.loaded_scene_id_list
 	}
 
 	//==============================================================================
@@ -450,10 +473,11 @@ impl Engine {
 	}
 
 	//==============================================================================
-	// 종료 요청.
+	// 종료 요청. (원본 exitApplication, 데스크탑은 이번 프레임 뒤 창을 닫고, 웹은 원본처럼 Capacitor App.exitApp 이나 window.close 를 시도하고 프레임을 멈춘다)
 	//==============================================================================
 	pub fn exit_application(&mut self) {
 		self.is_exit_requested = true;
+		platform::exit_application();
 	}
 
 	//==============================================================================
@@ -485,10 +509,12 @@ impl Engine {
 	}
 
 	//==============================================================================
-	// 글자 입력칸이 포커스되어 있는지. (원본 isTextInputFocused, 웹은 문서의 초점이 글자 input, textarea, contenteditable 이면 참, 데스크탑은 문서가 없어 거짓)
+	// 글자 입력칸이 포커스되어 있는지. (원본 isTextInputFocused, 웹은 문서의 초점이 글자 input, textarea, contenteditable 이면 참)
+	// - 원본의 엔진 입력 필드는 숨긴 DOM input 에 초점을 두어 여기서 참이 된다. 데스크탑에는 문서가 없어 엔진 입력 필드의 포커스를 본다.
+	//   (입력 매니저의 is_typing_in_text_field 와 같다)
 	//==============================================================================
 	pub fn is_text_input_focused(&self) -> bool {
-		platform::is_text_field_focused()
+		self.input_manager.is_typing_in_text_field()
 	}
 
 	//==============================================================================
@@ -506,10 +532,18 @@ impl Engine {
 	}
 
 	//==============================================================================
-	// 시스템 클립보드 글 읽기. (데스크탑만 그 자리에서 읽는다. 웹은 비동기라 None, 웹 붙여넣기는 플랫폼이 읽어 글 입력 줄에 넣는다)
+	// 시스템 클립보드 글 읽기. (데스크탑만 그 자리에서 읽는다. 웹은 비동기라 None 이고 read_clipboard_text_with_callback 으로 읽는다)
 	//==============================================================================
 	pub fn read_clipboard_text(&self) -> Option<String> {
 		platform::read_clipboard_text()
+	}
+
+	//==============================================================================
+	// 시스템 클립보드 글을 읽어 콜백에 넘기기. (원본 UIInputField.readClipboard 가 돌려주는 Promise 의 then 자리, 못 읽거나 거부되면 빈 글)
+	// - 웹은 navigator.clipboard.readText 가 끝난 뒤 부르고, 데스크탑은 그 자리에서 읽어 바로 부른다.
+	//==============================================================================
+	pub fn read_clipboard_text_with_callback(&self, callback: impl FnOnce(String) + 'static) {
+		platform::read_clipboard_text_with_callback(Box::new(callback));
 	}
 
 	pub fn get_engine_configuration(&self) -> &EngineConfiguration {
@@ -618,10 +652,10 @@ impl Engine {
 	}
 
 	//==============================================================================
-	// 페이지 이벤트 알리기. (플랫폼이 부른다. 가려짐을 적고 살아 있는 리스너에 그 자리에서 넘긴다)
+	// 페이지 이벤트 알리기. (플랫폼이 부르고, 원본처럼 게임이 불러도 된다. 가려짐을 적고 살아 있는 리스너에 그 자리에서 넘긴다)
 	// - 리스너가 다른 일로 빌려져 있으면 그 리스너는 이번 이벤트를 건너뛴다.
 	//==============================================================================
-	pub(crate) fn dispatch_page_event(&mut self, page_event: PageEvent) {
+	pub fn dispatch_page_event(&mut self, page_event: PageEvent) {
 		match page_event {
 			PageEvent::Hidden => {
 				self.is_page_hidden = true;
@@ -743,6 +777,8 @@ impl EngineRunner {
 	// 그래픽 넘겨받기. (플랫폼이 GL 컨텍스트를 만든 뒤 한 번. 기본 폰트도 이때 읽는다)
 	//==============================================================================
 	pub(crate) fn attach_graphic(&mut self, mut graphic: Graphic) {
+		let is_rebake_text_on_font_load = self.engine.engine_configuration.rebake_text_on_font_load;
+		graphic.get_text_string_texture_cache().set_rebake_text_on_font_load(is_rebake_text_on_font_load);
 		self.load_default_fonts(&mut graphic);
 
 		// 웹: 기본 폰트가 아직 없고 default_font_url 이 있으면 거기서 받는다. (받는 동안은 시스템 글꼴로 그린다)
@@ -757,6 +793,16 @@ impl EngineRunner {
 			}
 		}
 		self.graphic = Some(graphic);
+	}
+
+	//==============================================================================
+	// 그래픽의 묶음 기억 잊기. (웹 플랫폼이 GL 컨텍스트를 잃거나 되살릴 때, 원본 Graphic 의 webglcontextlost / webglcontextrestored)
+	//==============================================================================
+	#[cfg(target_arch = "wasm32")]
+	pub(crate) fn invalidate_render_state_cache(&self) {
+		if let Some(graphic) = &self.graphic {
+			graphic.invalidate_render_state_cache();
+		}
 	}
 
 	//==============================================================================
@@ -1026,6 +1072,7 @@ impl EngineRunner {
 		if self.engine.is_unload_all_scenes_requested {
 			self.engine.is_unload_all_scenes_requested = false;
 			let mut scene_list = std::mem::take(&mut self.scene_list);
+			self.engine.loaded_scene_id_list.clear();
 			for scene in scene_list.iter_mut() {
 				unload_scene_instance(&mut self.engine, scene.as_mut());
 			}
@@ -1037,6 +1084,7 @@ impl EngineRunner {
 				let scene_index = self.scene_list.iter().position(|scene| scene.get_scene_base().get_scene_id() == Some(scene_id));
 				if let Some(scene_index) = scene_index {
 					let mut scene = self.scene_list.remove(scene_index);
+					self.engine.loaded_scene_id_list.retain(|loaded_scene_id| *loaded_scene_id != scene_id);
 					unload_scene_instance(&mut self.engine, scene.as_mut());
 				}
 			}
@@ -1044,8 +1092,13 @@ impl EngineRunner {
 		while !self.engine.pending_scene_list.is_empty() {
 			let pending_scene_list = std::mem::take(&mut self.engine.pending_scene_list);
 			for mut scene in pending_scene_list {
+				if let Some(scene_id) = scene.get_scene_base().get_scene_id() {
+					self.engine.loaded_scene_id_list.push(scene_id);
+				}
 				scene.create(&mut self.engine);
-				initialize_scene_if_ready(&mut self.engine, scene.as_mut());
+				apply_scene_root_to_view_size(&self.engine, scene.as_mut());
+				let current_time = self.start_instant.elapsed().as_secs_f64();
+				initialize_scene_if_ready(&mut self.engine, scene.as_mut(), current_time);
 				self.scene_list.push(scene);
 			}
 		}
@@ -1086,7 +1139,7 @@ impl EngineRunner {
 		for scene in scene_list.iter_mut() {
 			// 맡긴 애셋을 기다리는 씬은 로딩 화면만. (다 읽혔으면 이번 프레임부터 돈다)
 			if !scene.get_scene_base().is_loaded() {
-				initialize_scene_if_ready(&mut self.engine, scene.as_mut());
+				initialize_scene_if_ready(&mut self.engine, scene.as_mut(), seconds_since_startup);
 			}
 			if !scene.get_scene_base().is_loaded() {
 				scene.draw_on_load(&mut self.engine, graphic);
@@ -1118,7 +1171,7 @@ impl EngineRunner {
 		// 마우스 커서. (켜져 있고 바뀌었을 때만 플랫폼에 넘긴다)
 		let is_coarse_pointer = platform::is_coarse_pointer();
 		if let Some(cursor_value) = self.engine.pointer_cursor.take_cursor_change(is_coarse_pointer) {
-			platform::set_cursor(self.engine.platform_window.as_ref(), &cursor_value.css_value, &cursor_value.fallback_name);
+			platform::set_cursor(self.engine.platform_window.as_ref(), &cursor_value);
 		}
 
 		// 입력 관련해서 상태 유지가 아닌, 현재 프레임이 끝난 후에는 다음 프레임에서는 상태를 유지하지 않음. (1회성)
@@ -1231,10 +1284,26 @@ fn dispatch_scene_touch(engine: &mut Engine, scene: &mut dyn Scene) {
 }
 
 //==============================================================================
-// 씬이 맡긴 애셋이 다 읽혔으면 initialize 하고 불러온 것으로 친다. (원본 load 다음 set_loaded, initialize)
+// 씬의 루트를 뷰 크기로 맞추기. (원본 Scene.load: 자리 0, 왼쪽 위 피벗, 콘텐츠 크기는 뷰 크기. create 바로 뒤에 부른다)
 //==============================================================================
-fn initialize_scene_if_ready(engine: &mut Engine, scene: &mut dyn Scene) {
+fn apply_scene_root_to_view_size(engine: &Engine, scene: &mut dyn Scene) {
+	let view_size = engine.view_manager.get_view_size();
+	let root = scene.get_scene_base_mut().get_root_mut();
+	root.set_local_position(Vector2::zero());
+	root.set_pivot(Pivot::TOP_LEFT);
+	root.set_content_size(view_size);
+}
+
+//==============================================================================
+// 씬이 맡긴 애셋이 다 읽혔으면 initialize 하고 불러온 것으로 친다. (원본 load 다음 0.3초 더 기다리고 set_loaded, initialize)
+// - current_time 은 엔진 시작 뒤 지금까지의 실제 초다. (첫 프레임 전에도 맞는 시각이어야 해서 시간 관리자의 지난 값을 쓰지 않는다)
+//==============================================================================
+fn initialize_scene_if_ready(engine: &mut Engine, scene: &mut dyn Scene, current_time: f64) {
 	if scene.get_scene_base().is_loaded() || !scene.get_scene_base().are_tracked_assets_finished() {
+		return;
+	}
+	let tracked_assets_finished_time = scene.get_scene_base_mut().mark_tracked_assets_finished(current_time);
+	if current_time - tracked_assets_finished_time < SCENE_LOAD_EXTRA_WAIT_SECONDS {
 		return;
 	}
 	scene.get_scene_base_mut().clear_tracked_assets();
@@ -1335,6 +1404,34 @@ mod tests {
 		assert_eq!(third_counts[1].get(), 0);
 		assert_eq!(first_counts[1].get(), 1);
 		assert_eq!(engine_runner.scene_list.len(), 1);
+	}
+
+	//==============================================================================
+	// 불러온 씬은 create 뒤 루트가 뷰 크기(자리 0, 왼쪽 위 피벗)가 되고, 맡긴 애셋이 끝난 뒤 0.3초 더 지나야 initialize 된다. 핸들 목록에 든다.
+	//==============================================================================
+	#[test]
+	fn scene_root_fits_view_and_initialize_waits_extra_load_time() {
+		let counts = [Rc::new(Cell::new(0)), Rc::new(Cell::new(0)), Rc::new(Cell::new(0))];
+		let mut engine_runner = EngineRunner::new(Engine::new(EngineConfiguration::new()), CountingScene::create_boxed(&counts[0], &counts[1], &counts[2]));
+		engine_runner.engine.get_view_manager_mut().calculate_view_rect(640, 360, 1.0);
+		engine_runner.apply_pending_scenes();
+		let view_size = engine_runner.engine.get_view_manager().get_view_size();
+		let root = engine_runner.scene_list[0].get_scene_base().get_root();
+		assert_eq!(root.get_content_size(), view_size);
+		assert_eq!(root.get_pivot(), Pivot::TOP_LEFT);
+		assert_eq!(root.get_local_position(), Vector2::zero());
+		assert_eq!(engine_runner.engine.get_all_loaded_scenes().len(), 1);
+		assert!(!engine_runner.scene_list[0].get_scene_base().is_loaded());
+
+		let created_time = engine_runner.scene_list[0].get_scene_base_mut().mark_tracked_assets_finished(0.0);
+		initialize_scene_if_ready(&mut engine_runner.engine, engine_runner.scene_list[0].as_mut(), created_time + 0.25);
+		assert!(!engine_runner.scene_list[0].get_scene_base().is_loaded());
+		initialize_scene_if_ready(&mut engine_runner.engine, engine_runner.scene_list[0].as_mut(), created_time + 0.31);
+		assert!(engine_runner.scene_list[0].get_scene_base().is_loaded());
+
+		engine_runner.engine.unload_all_scenes();
+		engine_runner.apply_pending_scenes();
+		assert!(engine_runner.engine.get_all_loaded_scenes().is_empty());
 	}
 
 	//==============================================================================

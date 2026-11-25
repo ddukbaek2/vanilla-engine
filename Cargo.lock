@@ -2741,6 +2741,7 @@ dependencies = [
  "wasm-bindgen-futures",
  "web-sys",
  "web-time",
+ "windows-sys 0.52.0",
  "winit",
  "wuff",
 ]

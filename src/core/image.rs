@@ -23,10 +23,14 @@ pub struct Image {
 
 impl Image {
 	//==============================================================================
-	// 파일에서 읽기. (PNG)
+	// 파일에서 읽기. (PNG, 데스크탑은 읽은 파일을 리소스 사용량에 적는다)
 	//==============================================================================
 	pub fn load(path: &Path) -> Result<Rc<Image>, String> {
 		let bytes = std::fs::read(path).map_err(|error| format!("이미지 읽기 실패 ({}): {}", path.display(), error))?;
+		#[cfg(not(target_arch = "wasm32"))]
+		{
+			crate::base::platform::record_loaded_file(&path.to_string_lossy(), bytes.len() as u64);
+		}
 		Image::load_from_memory(&bytes)
 	}
 

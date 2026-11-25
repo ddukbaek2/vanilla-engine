@@ -13,6 +13,8 @@
 //   원본 isVisible 은 활성이고 불투명도가 0 보다 큰 것이다. 러스트 판은 그리기를 끄는 보이기 플래그(set_visible)가 따로 있어 그것까지 본다.
 // - 원본 Node 의 계층 함수는 같은 이름으로 둔다. 노드 객체를 주고받는 자리는 NodeId 이고, 이름 끝에 _id(_ids)가 붙은 것은 핸들을 돌려주는 짝이다.
 //   (getParent → get_parent_id, getChildren → get_child_ids, getSiblings → get_sibling_ids) 부모에서 떼는 것(remove_child)은 노드를 지우지 않는다.
+// - 원본 WorldNode.getWorldCorners, getWorldBounds 도 노드 핸들을 받아 한다. 원본처럼 WorldNode.getPosition(부모 피벗 기준) 의 전역 위치와
+//   전역 크기, 전역 회전으로 셈한다.
 //==============================================================================
 use crate::base::math;
 use crate::base::rect::Rect;
@@ -663,6 +665,87 @@ impl NodeTree {
 			current_id = self.get_parent_id(parent_id);
 		}
 		opacity
+	}
+
+	//==============================================================================
+	// 피벗 점의 전역 위치. (원본 WorldNode.getPosition: 로컬 위치를 부모 피벗 점 기준으로 옮긴 뒤 부모의 전역 회전과 크기를 건다)
+	//==============================================================================
+	fn calculate_world_pivot_position(&self, node_id: NodeId) -> Vector2 {
+		let local_position = self.nodes[node_id].get_local_position();
+		let parent_id = match self.get_parent_id(node_id) {
+			Some(parent_id) => {
+				parent_id
+			}
+			None => {
+				return local_position;
+			}
+		};
+		let parent_position = self.calculate_world_pivot_position(parent_id);
+		let parent_node = &self.nodes[parent_id];
+		let parent_content_size = parent_node.get_content_size();
+		let parent_pivot = parent_node.get_pivot();
+		let parent_rotation = self.get_rotation(parent_id);
+		let parent_scale = self.get_scale(parent_id);
+		let total_local_x = local_position.x - parent_content_size.x * parent_pivot.x;
+		let total_local_y = local_position.y - parent_content_size.y * parent_pivot.y;
+		let radian = math::degree_to_radian(parent_rotation);
+		let cosine = math::cos(radian);
+		let sine = math::sin(radian);
+		let scaled_x = total_local_x * parent_scale.x;
+		let scaled_y = total_local_y * parent_scale.y;
+		let rotated_x = scaled_x * cosine - scaled_y * sine;
+		let rotated_y = scaled_x * sine + scaled_y * cosine;
+		Vector2::create(parent_position.x + rotated_x, parent_position.y + rotated_y)
+	}
+
+	//==============================================================================
+	// 실제 화면에 그려지는 영역의 네 모서리. (원본 WorldNode.getWorldCorners, OBB. 왼쪽 위, 오른쪽 위, 오른쪽 아래, 왼쪽 아래)
+	// - 크기는 전역 크기의 절댓값을 곱하고, 피벗 점의 전역 위치를 중심으로 전역 회전만큼 돌린다.
+	//==============================================================================
+	pub fn get_world_corners(&self, node_id: NodeId) -> [Vector2; 4] {
+		let position = self.calculate_world_pivot_position(node_id);
+		let scale = self.get_scale(node_id);
+		let rotation = self.get_rotation(node_id);
+		let node = &self.nodes[node_id];
+		let content_size = node.get_content_size();
+		let pivot = node.get_pivot();
+		let width = content_size.x * scale.x.abs();
+		let height = content_size.y * scale.y.abs();
+		let left = -(width * pivot.x);
+		let right = width * (1.0 - pivot.x);
+		let top = -(height * pivot.y);
+		let bottom = height * (1.0 - pivot.y);
+		let radian = math::degree_to_radian(rotation);
+		let cosine = math::cos(radian);
+		let sine = math::sin(radian);
+		let rotate_corner = |corner_x: f32, corner_y: f32| -> Vector2 {
+			Vector2::create(corner_x * cosine - corner_y * sine + position.x, corner_x * sine + corner_y * cosine + position.y)
+		};
+		[rotate_corner(left, top), rotate_corner(right, top), rotate_corner(right, bottom), rotate_corner(left, bottom)]
+	}
+
+	//==============================================================================
+	// 네 모서리를 감싸는 사각형. (원본 WorldNode.getWorldBounds)
+	//==============================================================================
+	pub fn get_world_bounds(&self, node_id: NodeId) -> Rect {
+		let world_corners = self.get_world_corners(node_id);
+		let mut minimum = Vector2::create(f32::INFINITY, f32::INFINITY);
+		let mut maximum = Vector2::create(f32::NEG_INFINITY, f32::NEG_INFINITY);
+		for world_corner in world_corners.iter() {
+			if minimum.x > world_corner.x {
+				minimum.x = world_corner.x;
+			}
+			if minimum.y > world_corner.y {
+				minimum.y = world_corner.y;
+			}
+			if maximum.x < world_corner.x {
+				maximum.x = world_corner.x;
+			}
+			if maximum.y < world_corner.y {
+				maximum.y = world_corner.y;
+			}
+		}
+		Rect::create(minimum.x, minimum.y, maximum.x - minimum.x, maximum.y - minimum.y)
 	}
 
 	//==============================================================================
@@ -1511,6 +1594,39 @@ mod tests {
 		assert_eq!(wheel_total, 40.0);
 		let is_root_handled = node_tree.dispatch_wheel(root_id, &engine, Vector2::create(0.0, 40.0));
 		assert!(!is_root_handled);
+	}
+}
+
+#[cfg(test)]
+mod world_corner_tests {
+	use super::*;
+
+	//==============================================================================
+	// 네 모서리와 감싸는 사각형: 부모 피벗 기준 위치, 전역 크기의 절댓값, 전역 회전. (원본 WorldNode.getWorldCorners, getWorldBounds)
+	//==============================================================================
+	#[test]
+	fn world_corners_and_bounds_match_original() {
+		let mut node_tree = NodeTree::new();
+		let root_id = node_tree.get_root_id();
+		node_tree[root_id].set_content_size(Vector2::create(200.0, 100.0));
+		node_tree[root_id].set_pivot(Vector2::create(0.5, 0.5));
+		let node_id = node_tree.create_child(root_id, "box");
+		let node = &mut node_tree[node_id];
+		node.set_local_position(Vector2::create(150.0, 50.0));
+		node.set_content_size(Vector2::create(20.0, 10.0));
+		node.set_pivot(Vector2::create(0.5, 0.5));
+		node.set_local_scale(Vector2::create(-2.0, 1.0));
+		let world_corners = node_tree.get_world_corners(node_id);
+		assert_eq!(world_corners[0], Vector2::create(30.0, -5.0));
+		assert_eq!(world_corners[2], Vector2::create(70.0, 5.0));
+		assert_eq!(node_tree.get_world_bounds(node_id), Rect::create(30.0, -5.0, 40.0, 10.0));
+
+		node_tree[node_id].set_local_rotation(90.0);
+		let rotated_bounds = node_tree.get_world_bounds(node_id);
+		assert!((rotated_bounds.position.x - 45.0).abs() < 1e-4);
+		assert!((rotated_bounds.position.y + 20.0).abs() < 1e-4);
+		assert!((rotated_bounds.size.x - 10.0).abs() < 1e-4);
+		assert!((rotated_bounds.size.y - 40.0).abs() < 1e-4);
 	}
 }
 

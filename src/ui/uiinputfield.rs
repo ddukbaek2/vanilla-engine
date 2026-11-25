@@ -853,9 +853,25 @@ impl UIInputField {
 	}
 
 	//==============================================================================
-	// 붙여넣기. (데스크탑은 클립보드를 그 자리에서 읽는다. 웹은 플랫폼이 비동기로 읽어 글 입력 줄로 넣는다)
+	// 붙여넣기. (데스크탑은 클립보드를 그 자리에서 읽는다. 웹은 원본처럼 비동기로 읽고, 다 읽으면 이 필드의 글 입력 줄로 넣어 다음 tick 에 붙인다)
 	//==============================================================================
 	pub fn paste(&mut self, context: &mut ComponentContext) {
+		#[cfg(target_arch = "wasm32")]
+		{
+			let _ = context;
+			crate::platform::request_clipboard_paste(self.field_id);
+		}
+		#[cfg(not(target_arch = "wasm32"))]
+		{
+			self.paste_now(context);
+		}
+	}
+
+	//==============================================================================
+	// 클립보드를 그 자리에서 읽어 붙여넣기. (데스크탑)
+	//==============================================================================
+	#[cfg(not(target_arch = "wasm32"))]
+	fn paste_now(&mut self, context: &mut ComponentContext) {
 		let clipboard_text = context.get_engine().read_clipboard_text();
 		if let Some(clipboard_text) = clipboard_text {
 			if !clipboard_text.is_empty() {

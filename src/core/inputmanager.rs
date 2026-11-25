@@ -1,7 +1,10 @@
 //==============================================================================
 // 입력 관리자.
 // - 키 이름은 원본과 같이 KeyboardEvent.code 꼴이다. ("KeyA", "ArrowLeft", "Space" ...)
-//   winit 의 KeyCode 이름이 같은 W3C 규약을 따르므로 그대로 문자열로 바꿔 쓴다.
+//   winit 의 KeyCode 이름이 같은 W3C 규약을 따르므로 그대로 문자열로 바꿔 쓴다. 윈도우 키(커맨드 키)만 winit 이 SuperLeft, SuperRight 라 부르고
+//   W3C 의 옛 Super 키를 Meta 라 불러서, 데스크탑 플랫폼이 MetaLeft, MetaRight, Super 로 바꿔 넣는다.
+// - KeyCode 의 상수 이름은 원본 KeyCode 의 키 이름을 러스트 상수 꼴로 바꾼 것이다. ("0" 처럼 이름이 될 수 없는 것은 DIGIT0)
+//   원본에 없던 LEFT, UP, RIGHT, DOWN 은 ARROWLEFT 들과 같은 값으로 남긴다.
 // - 마우스 단추(또는 첫 손가락)를 터치로 다룬다. (원본은 마우스와 터치를 하나로 모은다) 원본처럼 처음에는 어느 단추든 터치이고,
 //   set_touch_from_left_button_only(true) 면 왼쪽 단추만 터치다. 캔버스의 오른쪽 클릭 메뉴를 막을지(set_context_menu_prevented, 처음은 참)는 웹만 뜻이 있다.
 // - 그 밖에 마우스 단추 셋(왼쪽, 가운데, 오른쪽)의 눌림, 닿아 있는 손가락 목록, 마지막 입력이 손가락인지, 휠을 Ctrl 과 함께 굴렸는지를 둔다.
@@ -93,6 +96,57 @@ impl KeyCode {
 	pub const F10: &'static str = "F10";
 	pub const F11: &'static str = "F11";
 	pub const F12: &'static str = "F12";
+	pub const ARROWLEFT: &'static str = "ArrowLeft";
+	pub const ARROWUP: &'static str = "ArrowUp";
+	pub const ARROWRIGHT: &'static str = "ArrowRight";
+	pub const ARROWDOWN: &'static str = "ArrowDown";
+	pub const SCROLLLOCK: &'static str = "ScrollLock";
+	pub const SEMICOLON: &'static str = "Semicolon";
+	pub const EQUAL: &'static str = "Equal";
+	pub const COMMA: &'static str = "Comma";
+	pub const MINUS: &'static str = "Minus";
+	pub const PERIOD: &'static str = "Period";
+	pub const SLASH: &'static str = "Slash";
+	pub const BACKQUOTE: &'static str = "Backquote";
+	pub const BRACKETLEFT: &'static str = "BracketLeft";
+	pub const BACKSLASH: &'static str = "Backslash";
+	pub const BRACKETRIGHT: &'static str = "BracketRight";
+	pub const QUOTE: &'static str = "Quote";
+	pub const META: &'static str = "MetaLeft";
+	pub const COMMAND: &'static str = "MetaLeft";
+	pub const PAUSE: &'static str = "Pause";
+	pub const AUDIOVOLUMEUP: &'static str = "AudioVolumeUp";
+	pub const AUDIOVOLUMEDOWN: &'static str = "AudioVolumeDown";
+	// 음소거. (W3C code 표의 이름 AudioVolumeMute)
+	pub const AUDIOMUTE: &'static str = "AudioVolumeMute";
+	// 재생. (크롬은 리눅스와 크롬OS 에서만 MediaPlay 를 낸다. 흔한 재생/멈춤 키는 MediaPlayPause, winit 에는 MediaPlay 가 없다)
+	pub const AUDIOPLAY: &'static str = "MediaPlay";
+	pub const AUDIOSTOP: &'static str = "MediaStop";
+	pub const AUDIOPREV: &'static str = "MediaTrackPrevious";
+	pub const AUDIONEXT: &'static str = "MediaTrackNext";
+	pub const NUM_LOCK: &'static str = "NumLock";
+	// 텐키 나누기.
+	pub const NUMPAD_DIVIDE: &'static str = "NumpadDivide";
+	// 텐키 곱하기.
+	pub const NUMPAD_MULTIPLY: &'static str = "NumpadMultiply";
+	// 텐키 빼기.
+	pub const NUMPAD_SUBTRACT: &'static str = "NumpadSubtract";
+	// 텐키 점.
+	pub const NUMPAD_DECIMAL: &'static str = "NumpadDecimal";
+	// 텐키 더하기.
+	pub const NUMPAD_ADD: &'static str = "NumpadAdd";
+	// 텐키 엔터.
+	pub const NUMPAD_ENTER: &'static str = "NumpadEnter";
+	pub const NUMPAD0: &'static str = "Numpad0";
+	pub const NUMPAD1: &'static str = "Numpad1";
+	pub const NUMPAD2: &'static str = "Numpad2";
+	pub const NUMPAD3: &'static str = "Numpad3";
+	pub const NUMPAD4: &'static str = "Numpad4";
+	pub const NUMPAD5: &'static str = "Numpad5";
+	pub const NUMPAD6: &'static str = "Numpad6";
+	pub const NUMPAD7: &'static str = "Numpad7";
+	pub const NUMPAD8: &'static str = "Numpad8";
+	pub const NUMPAD9: &'static str = "Numpad9";
 }
 
 //==============================================================================

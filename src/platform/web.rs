@@ -8,11 +8,16 @@
 //   engine.resume_on_user_gesture(), focus 와 페이지가 다시 보일 때는 engine.resume() 을 부른다.
 // - 페이지: visibilitychange, blur, focus, pointerdown 을 엔진의 페이지 이벤트로 넘기고, 다시 보이면 on_page_visibility_restored,
 //   문서 resume 과 pageshow(persisted) 면 on_page_process_restored 를 부른다. (원본 setupAllDocumentEvents)
+// - 최대 FPS 는 원본처럼 세기 시작한 뒤 처리한 프레임 수로 차례를 정한다. (platform/framelimiter.rs, 90 Hz 에서 60 FPS 도 평균 60)
+// - 캔버스의 webglcontextlost, webglcontextrestored 에서 원본 Graphic 처럼 묶음 기억을 잊는다.
+// - exit_application: 원본처럼 Capacitor 의 App.exitApp, 없으면 window.close 를 시도한다.
 //==============================================================================
 use crate::core::asset::AssetLoadHandle;
 use crate::core::engine::{EngineRunner, PageEvent};
+use crate::platform::framelimiter::FrameLimiter;
 use crate::core::graphic::Graphic;
 use crate::core::inputmanager::{InputDevice, MouseButton};
+use crate::core::pointercursor::CursorValue;
 use crate::base::vector2::Vector2;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -22,7 +27,8 @@ use wasm_bindgen::{JsCast, JsValue};
 // 글꼴 바이트가 없을 때 브라우저 시스템 글꼴로 글자 굽기. (원본처럼 Canvas2D)
 pub(crate) mod systemfont;
 mod textinput;
-pub use textinput::{read_clipboard_text, write_clipboard_text};
+pub use textinput::{read_clipboard_text, read_clipboard_text_with_callback, write_clipboard_text};
+pub(crate) use textinput::request_clipboard_paste;
 
 // 엔진이 들고 있는 창 손잡이. (커서를 바꿀 때)
 pub type PlatformWindow = web_sys::HtmlCanvasElement;
@@ -46,11 +52,11 @@ pub fn set_cursor_visible(platform_window: Option<&PlatformWindow>, is_visible: 
 }
 
 //==============================================================================
-// 커서 모양 설정. (캔버스의 cursor 스타일에 CSS 값을 쓴다, 빈 값이면 브라우저의 기본)
+// 커서 모양 설정. (캔버스의 cursor 스타일에 CSS 값을 쓴다, 빈 값이면 브라우저의 기본, 그림 커서는 CSS 값에 그림이 든다)
 //==============================================================================
-pub fn set_cursor(platform_window: Option<&PlatformWindow>, css_value: &str, _cursor_name: &str) {
+pub fn set_cursor(platform_window: Option<&PlatformWindow>, cursor_value: &CursorValue) {
 	if let Some(canvas) = platform_window {
-		let _ = canvas.style().set_property("cursor", css_value);
+		let _ = canvas.style().set_property("cursor", &cursor_value.css_value);
 	}
 }
 
@@ -316,6 +322,7 @@ pub fn run(engine_runner: EngineRunner) -> Result<(), String> {
 	add_pointer_listeners(&web_application_cell)?;
 	add_audio_listeners(&web_application_cell)?;
 	add_page_listeners(&web_application_cell)?;
+	add_context_listeners(&web_application_cell)?;
 	let canvas = web_application_cell.borrow().engine_runner.engine.platform_window.clone();
 	if let Some(canvas) = canvas {
 		textinput::add_text_input_listeners(&canvas)?;
@@ -325,17 +332,16 @@ pub fn run(engine_runner: EngineRunner) -> Result<(), String> {
 	let frame_callback_cell: FrameCallbackCell = Rc::new(RefCell::new(None));
 	let frame_callback_cell_for_loop = frame_callback_cell.clone();
 	let web_application_cell_for_loop = web_application_cell.clone();
-	let mut last_frame_timestamp = 0.0f64;
+	let mut frame_limiter = FrameLimiter::new();
 	*frame_callback_cell.borrow_mut() = Some(Closure::new(move |timestamp: f64| {
 		let mut web_application = web_application_cell_for_loop.borrow_mut();
 		if web_application.engine_runner.engine.is_exit_requested() {
 			return;
 		}
-		// 최대 FPS 제한. (0 이면 화면 주사율 그대로)
+		// 최대 FPS 제한. (0 이면 화면 주사율 그대로, 원본처럼 세기 시작한 뒤의 프레임 수로 차례를 정한다)
 		let maximum_frame_per_second = web_application.engine_runner.engine.get_engine_configuration().maximum_frame_per_second as f64;
-		let is_frame_turn = maximum_frame_per_second <= 0.0 || timestamp - last_frame_timestamp >= 1000.0 / maximum_frame_per_second - 1.0;
+		let is_frame_turn = frame_limiter.is_frame_turn(timestamp, maximum_frame_per_second);
 		if is_frame_turn {
-			last_frame_timestamp = timestamp;
 			web_application.resize_if_changed();
 			textinput::begin_frame(&mut web_application.engine_runner.engine);
 			web_application.engine_runner.update_engine();
@@ -704,6 +710,56 @@ fn add_page_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> Res
 	resume_callback.forget();
 	page_show_callback.forget();
 	Ok(())
+}
+
+//==============================================================================
+// GL 컨텍스트를 잃거나 되살림. (원본 Graphic 생성자처럼 캔버스의 webglcontextlost, webglcontextrestored 에서 그래픽의 묶음 기억을 잊는다)
+// - 컨텍스트를 잃거나 되살리면 GL 의 묶음이 처음으로 돌아가므로 기억을 잊는다. 프레임 콜백 안에서 겹쳐 불리지 않게 try_borrow 로 본다.
+//==============================================================================
+fn add_context_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> Result<(), String> {
+	let canvas = web_application_cell.borrow().engine_runner.engine.platform_window.clone().ok_or_else(|| String::from("캔버스 없음"))?;
+	let web_application_cell_for_context = web_application_cell.clone();
+	let context_change_callback: Closure<dyn FnMut()> = Closure::new(move || {
+		if let Ok(web_application) = web_application_cell_for_context.try_borrow() {
+			web_application.engine_runner.invalidate_render_state_cache();
+		}
+	});
+	canvas.add_event_listener_with_callback("webglcontextlost", context_change_callback.as_ref().unchecked_ref()).map_err(describe_js_error)?;
+	canvas.add_event_listener_with_callback("webglcontextrestored", context_change_callback.as_ref().unchecked_ref()).map_err(describe_js_error)?;
+	context_change_callback.forget();
+	Ok(())
+}
+
+//==============================================================================
+// 응용 프로그램 종료. (원본 exitApplication: Capacitor 네이티브면 App 플러그인으로 끝내고, 아니면 창 닫기를 시도한다)
+// - 둘 다 환경에 따라 거부될 수 있으며 실패해도 오류를 내지 않는다. 엔진은 종료 요청을 적어 다음 프레임부터 돌지 않는다.
+//==============================================================================
+pub fn exit_application() {
+	let window = match web_sys::window() {
+		Some(window) => {
+			window
+		}
+		None => {
+			return;
+		}
+	};
+	let exit_app_function = js_sys::Reflect::get(&window, &JsValue::from_str("Capacitor"))
+		.ok()
+		.filter(|capacitor| capacitor.is_object())
+		.and_then(|capacitor| js_sys::Reflect::get(&capacitor, &JsValue::from_str("Plugins")).ok())
+		.filter(|plugins| plugins.is_object())
+		.and_then(|plugins| js_sys::Reflect::get(&plugins, &JsValue::from_str("App")).ok())
+		.filter(|app_plugin| app_plugin.is_object())
+		.and_then(|app_plugin| {
+			let exit_app_function = js_sys::Reflect::get(&app_plugin, &JsValue::from_str("exitApp")).ok()?.dyn_into::<js_sys::Function>().ok()?;
+			Some((app_plugin, exit_app_function))
+		});
+	if let Some((app_plugin, exit_app_function)) = exit_app_function {
+		if exit_app_function.call0(&app_plugin).is_ok() {
+			return;
+		}
+	}
+	let _ = window.close();
 }
 
 //==============================================================================
