@@ -9,10 +9,12 @@
 // - 좌우(pan): 재생할 때 소리 설정의 panning 으로 건다. (-1 왼쪽 ~ 1 오른쪽, 원본 StereoPannerNode 자리, 다음 재생부터)
 // - AudioBuffer 자리: kira 의 StaticSoundData. 파일 전체를 디코딩해 들고, 복제는 Arc 하나라 값싸다. (ogg vorbis, mp3, wav, flac, m4a(aac))
 // - AudioPlayer 하나 = 믹서 하위 트랙 하나. (원본 GainNode 자리, 트랙 음량이 플레이어 음량이다)
-//   내보낼 곳(AudioOutputNode, 원본 outputNode)을 주면 그 트랙 아래, 없으면 뿌리 트랙 아래에 단다.
+//   내보낼 곳(AudioOutputNode, 원본 outputNode, &RefCell<TrackHandle>)을 주면 그 트랙 아래, 없으면 뿌리 트랙 아래에 단다.
 //   재생할 때마다 버퍼를 복제해 그 트랙에 튼다. 트랙 핸들을 버리면 트랙과 그 위의 소리가 같이 없어진다.
 // - AudioBus 하나 = 뿌리 트랙 아래 하위 트랙 하나. (원본 출력에 이은 GainNode 자리) 버스로 만든 플레이어의 트랙은 그 아래에 달려
 //   버스 트랙의 음량이 함께 곱해진다. 버스 트랙 핸들을 버리면 그 아래 플레이어 트랙도 같이 없어진다.
+//   버스 트랙은 Rc<RefCell<TrackHandle>>(AudioGainNode, 원본 GainNode 자리)로 들어, get_gain_node 로 받은 손잡이가 있으면 버스를 버려도 살아 있다.
+//   (원본 GainNode 를 들고 있으면 버스가 버려져도 노드가 사는 것과 같다)
 // - 음량(0 ~ 1)은 데시벨로 바꿔 건다. kira 는 -60dB 이하를 무음으로 친다.
 // - 원본 WebAudio 처럼 음량 바꾸기와 정지는 바로 한다. (트윈 0초)
 // - 컨텍스트 시계(get_audio_context_time)는 컨텍스트를 만든 뒤 돌고 있던 시간이다. (멈춘 동안은 세지 않는다)
@@ -39,8 +41,10 @@ use web_time::Instant;
 pub type AudioContext = kira::AudioManager<DefaultBackend>;
 // 디코딩한 소리. (원본 AudioBuffer 자리)
 pub type AudioBuffer = StaticSoundData;
-// 플레이어가 소리를 내보낼 곳. (원본 AudioPlayer 생성자의 outputNode 자리, 그 트랙 아래에 플레이어 트랙을 단다)
-pub type AudioOutputNode<'a> = &'a mut TrackHandle;
+// 버스의 GainNode 자리. (원본 AudioBus.getGainNode, 버스 트랙을 나눠 든다)
+pub type AudioGainNode = Rc<RefCell<TrackHandle>>;
+// 플레이어가 소리를 내보낼 곳. (원본 AudioPlayer 생성자의 outputNode 자리, 그 트랙 아래에 플레이어 트랙을 단다. AudioGainNode 의 as_deref)
+pub type AudioOutputNode<'a> = &'a RefCell<TrackHandle>;
 
 // 데스크탑에는 자동재생 정책이 없다.
 pub const HAS_USER_GESTURE_AT_START: bool = true;
@@ -243,7 +247,7 @@ impl AudioPlayerBackend {
 	pub fn create(state: &mut AudioManagerState, output_node: Option<AudioOutputNode<'_>>) -> AudioPlayerBackend {
 		let track_handle = match output_node {
 			Some(output_track_handle) => {
-				create_player_track(output_track_handle)
+				create_player_track(&mut output_track_handle.borrow_mut())
 			}
 			None => {
 				match state.platform_state.root_track_handle.as_mut() {
@@ -374,7 +378,7 @@ impl AudioPlayerBackend {
 // 버스 하나의 소리 모으는 부분. (뿌리 트랙 아래 하위 트랙 하나, 버스로 만든 플레이어의 트랙이 그 아래에 달린다)
 //==============================================================================
 pub struct AudioBusBackend {
-	track_handle: Option<TrackHandle>,
+	track_handle: Option<AudioGainNode>,
 }
 
 impl AudioBusBackend {
@@ -387,7 +391,7 @@ impl AudioBusBackend {
 				let track_builder = TrackBuilder::new().sub_track_capacity(SUB_TRACK_CAPACITY);
 				match root_track_handle.add_sub_track(track_builder) {
 					Ok(track_handle) => {
-						Some(track_handle)
+						Some(Rc::new(RefCell::new(track_handle)))
 					}
 					Err(error) => {
 						eprintln!("AudioBus: 믹서 트랙을 만들지 못했습니다. ({})", error);
@@ -415,9 +419,9 @@ impl AudioBusBackend {
 	// 음량 설정. (버스 트랙 음량, 0 ~ 1)
 	//==============================================================================
 	pub fn set_gain(&mut self, gain: f32) {
-		if let Some(track_handle) = self.track_handle.as_mut() {
+		if let Some(track_handle) = self.track_handle.as_ref() {
 			let decibels = amplitude_to_decibels(gain);
-			track_handle.set_volume(decibels, create_immediate_tween());
+			track_handle.borrow_mut().set_volume(decibels, create_immediate_tween());
 		}
 	}
 
@@ -425,9 +429,9 @@ impl AudioBusBackend {
 	// 이 버스로 트는 플레이어 백엔드 생성. (버스 트랙 아래 하위 트랙 하나, 버스가 소리 없으면 소리 없는 플레이어)
 	//==============================================================================
 	pub fn create_player_backend(&mut self) -> AudioPlayerBackend {
-		let track_handle = match self.track_handle.as_mut() {
+		let track_handle = match self.track_handle.as_ref() {
 			Some(bus_track_handle) => {
-				create_player_track(bus_track_handle)
+				create_player_track(&mut bus_track_handle.borrow_mut())
 			}
 			None => {
 				None
@@ -439,8 +443,8 @@ impl AudioBusBackend {
 	//==============================================================================
 	// 버스 트랙. (원본 getGainNode 자리, 소리 없는 버스는 None)
 	//==============================================================================
-	pub fn get_gain_node_mut(&mut self) -> Option<&mut TrackHandle> {
-		self.track_handle.as_mut()
+	pub fn get_gain_node(&self) -> Option<&AudioGainNode> {
+		self.track_handle.as_ref()
 	}
 }
 

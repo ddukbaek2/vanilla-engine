@@ -14,8 +14,14 @@
 //   - 축(햇 스위치)으로 오는 십자키는 버튼 12~15 로 바꾼다. (브라우저가 하는 일)
 //   - 데스크탑의 버튼은 표준 17개 뒤에 gilrs 가 표준 버튼으로 잇지 못한 단추(매핑에 없는 단추, gilrs 의 C, Z)를, 축은 표준 4개 뒤에
 //     매핑에 없는 축을 처음 움직인 차례로 붙인다. gilrs 가 장치의 단추 목록을 내주지 않고 한 번이라도 움직인 단추만 알려서, 그 단추를 처음 누른 뒤에야 생긴다.
-//     그래서 플레이스테이션 패드의 터치패드 단추는 매핑에 없는 단추 가운데 처음 누른 것일 때 TOUCHPAD(17) 가 된다. (크롬처럼 늘 17 이라는 보장은 없다)
 //     버튼이나 축 수가 늘면 그 패드의 상태 칸도 늘린다.
+//   - 플레이스테이션 패드(소니 054c 의 듀얼쇼크4 05c4, 09cc, 0ba0 와 듀얼센스 0ce6, 0df2, 0e5f)는 크롬(device/gamepad 의 MapperDualshock4, MapperDualSense)처럼
+//     버튼 18개이고 원시 단추 13번(HID 단추 14)이 TOUCHPAD(17)다. 누르기 전에도 늘 있고, 그 밖의 단추(듀얼센스 마이크 단추)와 축은 붙이지 않는다.
+//     gilrs 가 SDL 매핑의 touchpad:b13 을 이름 없는 단추(Button::Unknown, misc1 과 같은 이름)로 잇기만 해서, 그 단추의 원시 코드를 플랫폼마다 정해 찾는다.
+//     (맥 IOKit 단추 쪽의 쓰임 14, 윈도우 Windows.Gaming.Input 의 단추 13번, 리눅스 hid-generic 의 BTN_GAMEPAD + 13)
+//     리눅스의 hid-sony(커널 4.10 부터), hid-playstation(5.12 부터) 드라이버는 터치패드를 따로 장치로 내고 bcdHID 에 0x8000 을 붙인다.
+//     그때는 크롬(MapperPs4Ps5)처럼 버튼 17개다. (gilrs 의 uuid 13, 14번째 바이트가 그 판 번호다)
+//     맥 GameController 의 GCDualSenseGamepad.touchpadButton 도 있지만, GameController 는 패드의 제조사, 제품 번호를 내주지 않아 gilrs 패드와 짝짓지 못해 쓰지 않는다.
 //   - Gamepad.index 는 데스크탑에서는 gilrs 의 GamepadId 번호다. (처음 붙은 순서로 0 부터, 브라우저 index 와 같은 쓰임) 웹은 브라우저 index 다.
 //   - Gamepad.id 는 웹에서는 브라우저 id 그대로, 데스크탑에서는 크롬 꼴 "이름 (STANDARD GAMEPAD Vendor: 054c Product: 0ce6)" 로 만든다.
 //   - get_all_connected_gamepads / get_connected_gamepad 는 마지막 갱신(tick)에 읽은 사본을 돌려준다. (원본은 부를 때마다 새로 읽는다)
@@ -48,6 +54,26 @@ const BUTTON_PRESSED_THRESHOLD: f32 = 30.0 / 255.0;
 const DIRECTIONAL_PAD_AXIS_THRESHOLD: f32 = 0.5;
 // 축 변화를 받는 최소 폭. (원본: 미세한 떨림을 거르려 0.01 넘는 변화만 받는다)
 const AXIS_CHANGE_THRESHOLD: f64 = 0.01;
+// 플레이스테이션 패드의 USB 제조사 번호. (소니)
+#[cfg(not(target_arch = "wasm32"))]
+const PLAYSTATION_VENDOR_ID: u16 = 0x054c;
+// 터치패드 단추를 TOUCHPAD(17) 에 두는 플레이스테이션 패드의 제품 번호. (크롬 gamepad_standard_mappings 가 MapperDualshock4, MapperDualSense 로 잇는 것)
+#[cfg(not(target_arch = "wasm32"))]
+const PLAYSTATION_TOUCHPAD_PRODUCT_ID_LIST: [u16; 6] = [0x05c4, 0x09cc, 0x0ba0, 0x0ce6, 0x0df2, 0x0e5f];
+// 패드의 원시 단추 목록에서 터치패드의 자리. (크롬 input.buttons[13], SDL 매핑 touchpad:b13)
+#[cfg(not(target_arch = "wasm32"))]
+const PLAYSTATION_TOUCHPAD_RAW_BUTTON_INDEX: u32 = 13;
+// 맥 IOKit 의 단추 쪽 번호. (kHIDPage_Button, gilrs 의 맥 원시 코드는 쪽 << 16 | 쓰임)
+#[cfg(not(target_arch = "wasm32"))]
+const HID_BUTTON_USAGE_PAGE: u32 = 0x09;
+// 리눅스 evdev 의 키 사건 종류와 첫 게임패드 단추. (EV_KEY, BTN_GAMEPAD. gilrs 의 리눅스 원시 코드는 종류 << 16 | 코드)
+#[cfg(not(target_arch = "wasm32"))]
+const LINUX_EVENT_KEY_TYPE: u32 = 0x01;
+#[cfg(not(target_arch = "wasm32"))]
+const LINUX_FIRST_GAMEPAD_BUTTON_CODE: u32 = 0x130;
+// 리눅스 드라이버가 플레이스테이션 패드를 고쳐 잡았다는 표시. (hid-sony, hid-playstation 이 bcdHID 에 붙이는 것, 크롬 kDualshockPatchedBcdHidMask)
+#[cfg(not(target_arch = "wasm32"))]
+const LINUX_PATCHED_HID_VERSION_MASK: u16 = 0x8000;
 
 // W3C Standard Gamepad 버튼 순서의 gilrs 버튼. (배열 번호가 GamepadButtonCode)
 #[cfg(not(target_arch = "wasm32"))]
@@ -1182,34 +1208,94 @@ impl GamepadReader {
 }
 
 //==============================================================================
+// 플레이스테이션 패드의 터치패드 단추 자리. (크롬 MapperDualshock4, MapperDualSense, MapperPs4Ps5)
+// - 플레이스테이션 패드가 아니면 None. 맞으면 Some 이고, 안의 값은 터치패드 단추의 gilrs 원시 코드(Code::into_u32)다. 터치패드 단추가 없는 장치면 Some(None).
+// - operating_system 은 std::env::consts::OS 꼴이다. (시험이 플랫폼마다 부른다) hid_version 은 gilrs uuid 의 판 번호(리눅스 input_id.version, bcdHID)다.
+//==============================================================================
+#[cfg(not(target_arch = "wasm32"))]
+fn find_playstation_touchpad_code(operating_system: &str, vendor_id: Option<u16>, product_id: Option<u16>, hid_version: u16) -> Option<Option<u32>> {
+	if vendor_id != Some(PLAYSTATION_VENDOR_ID) {
+		return None;
+	}
+	if !product_id.map(|product_id| PLAYSTATION_TOUCHPAD_PRODUCT_ID_LIST.contains(&product_id)).unwrap_or(false) {
+		return None;
+	}
+	match operating_system {
+		"macos" => {
+			// IOKit 단추 쪽의 쓰임은 1 부터다. (gilrs 가 쓰임 차례로 단추 목록을 지어 b13 이 쓰임 14)
+			Some(Some((HID_BUTTON_USAGE_PAGE << 16) | (PLAYSTATION_TOUCHPAD_RAW_BUTTON_INDEX + 1)))
+		}
+		"windows" => {
+			// Windows.Gaming.Input RawGameController 의 단추 번호. (gilrs 의 단추 종류는 0)
+			Some(Some(PLAYSTATION_TOUCHPAD_RAW_BUTTON_INDEX))
+		}
+		"linux" => {
+			if (hid_version & LINUX_PATCHED_HID_VERSION_MASK) != 0 {
+				return Some(None);
+			}
+			// hid-generic 은 게임패드 HID 단추 n 을 BTN_GAMEPAD + n - 1 로 낸다. (gilrs 와 joydev 가 코드 차례로 단추 목록을 지어 b13 이 BTN_GAMEPAD + 13)
+			Some(Some((LINUX_EVENT_KEY_TYPE << 16) | (LINUX_FIRST_GAMEPAD_BUTTON_CODE + PLAYSTATION_TOUCHPAD_RAW_BUTTON_INDEX)))
+		}
+		_ => {
+			None
+		}
+	}
+}
+
+//==============================================================================
+// gilrs uuid 의 판 번호. (SDL GUID 꼴, 13, 14번째 바이트가 작은 쪽부터의 판 번호)
+//==============================================================================
+#[cfg(not(target_arch = "wasm32"))]
+fn read_uuid_version(uuid: &[u8; 16]) -> u16 {
+	u16::from_le_bytes([uuid[12], uuid[13]])
+}
+
+//==============================================================================
+// gilrs 단추 상태를 W3C 버튼으로. (표준 버튼처럼 값이 30/255 를 넘으면 눌림, 눌린 디지털 단추의 값은 1)
+//==============================================================================
+#[cfg(not(target_arch = "wasm32"))]
+fn convert_button_data(button_data: Option<&gilrs::ev::state::ButtonData>) -> GamepadButton {
+	let (raw_pressed, raw_value) = match button_data {
+		Some(button_data) => {
+			(button_data.is_pressed(), button_data.value())
+		}
+		None => {
+			(false, 0.0)
+		}
+	};
+	let is_pressed = raw_pressed || raw_value > BUTTON_PRESSED_THRESHOLD;
+	let mut button_value = raw_value.clamp(0.0, 1.0);
+	if is_pressed && button_value <= 0.0 {
+		button_value = 1.0;
+	}
+	GamepadButton {
+		pressed: is_pressed,
+		value: button_value,
+	}
+}
+
+//==============================================================================
 // 표준 버튼과 축 뒤에 gilrs 가 알린 나머지 단추와 축 붙이기. (처음 움직인 차례로 번호를 매겨 그 뒤로는 번호가 바뀌지 않는다)
 // - 단추는 표준 버튼처럼 값이 30/255 를 넘으면 눌림, 눌린 디지털 단추의 값은 1 이다.
+// - 플레이스테이션 패드는 크롬처럼 터치패드 단추 하나만 TOUCHPAD(17) 에 붙인다. (누른 적이 없으면 뗀 상태, 터치패드가 없는 장치면 붙이지 않는다)
 //==============================================================================
 #[cfg(not(target_arch = "wasm32"))]
 fn append_extra_elements(extra_button_code_table: &mut HashMap<usize, Vec<gilrs::ev::Code>>, extra_axis_code_table: &mut HashMap<usize, Vec<gilrs::ev::Code>>, gamepad: &mut Gamepad, gilrs_gamepad: &gilrs::Gamepad) {
 	let gamepad_state = gilrs_gamepad.state();
+	let hid_version = read_uuid_version(&gilrs_gamepad.uuid());
+	if let Some(touchpad_code_value) = find_playstation_touchpad_code(std::env::consts::OS, gilrs_gamepad.vendor_id(), gilrs_gamepad.product_id(), hid_version) {
+		if let Some(touchpad_code_value) = touchpad_code_value {
+			let touchpad_button_data = gamepad_state.buttons().find(|(code, _)| code.into_u32() == touchpad_code_value).map(|(_, button_data)| button_data);
+			gamepad.buttons.push(convert_button_data(touchpad_button_data));
+		}
+		return;
+	}
 	let extra_button_code_list = extra_button_code_table.entry(gamepad.index).or_default();
 	let mut new_button_code_list: Vec<gilrs::ev::Code> = gamepad_state.buttons().map(|(code, _)| code).filter(|code| is_extra_button_code(gilrs_gamepad, *code) && !extra_button_code_list.contains(code)).collect();
 	new_button_code_list.sort_by_key(|code| code.into_u32());
 	extra_button_code_list.extend(new_button_code_list);
 	for code in extra_button_code_list.iter() {
-		let (raw_pressed, raw_value) = match gamepad_state.button_data(*code) {
-			Some(button_data) => {
-				(button_data.is_pressed(), button_data.value())
-			}
-			None => {
-				(false, 0.0)
-			}
-		};
-		let is_pressed = raw_pressed || raw_value > BUTTON_PRESSED_THRESHOLD;
-		let mut button_value = raw_value.clamp(0.0, 1.0);
-		if is_pressed && button_value <= 0.0 {
-			button_value = 1.0;
-		}
-		gamepad.buttons.push(GamepadButton {
-			pressed: is_pressed,
-			value: button_value,
-		});
+		gamepad.buttons.push(convert_button_data(gamepad_state.button_data(*code)));
 	}
 	let extra_axis_code_list = extra_axis_code_table.entry(gamepad.index).or_default();
 	let mut new_axis_code_list: Vec<gilrs::ev::Code> = gamepad_state.axes().map(|(code, _)| code).filter(|code| is_extra_axis_code(gilrs_gamepad, *code) && !extra_axis_code_list.contains(code)).collect();
@@ -1614,6 +1700,27 @@ mod tests {
 		assert!(gamepad_manager.is_button_pressed(0, GamepadButtonCode::TOUCHPAD));
 		assert!(gamepad_manager.is_button_just_pressed(0, GamepadButtonCode::TOUCHPAD));
 		assert_eq!(gamepad_manager.get_axis_value(0, 4), 0.5);
+	}
+
+	//==============================================================================
+	// 플레이스테이션 패드의 터치패드 단추 자리. (크롬 MapperDualshock4, MapperDualSense 의 input.buttons[13], 리눅스 고친 드라이버는 MapperPs4Ps5 라 없음)
+	//==============================================================================
+	#[test]
+	fn playstation_touchpad_code() {
+		let dual_sense_product_id = Some(0x0ce6);
+		let sony_vendor_id = Some(0x054c);
+		assert_eq!(find_playstation_touchpad_code("macos", sony_vendor_id, dual_sense_product_id, 0), Some(Some(0x0009_000e)));
+		assert_eq!(find_playstation_touchpad_code("windows", sony_vendor_id, Some(0x09cc), 0), Some(Some(13)));
+		assert_eq!(find_playstation_touchpad_code("linux", sony_vendor_id, Some(0x05c4), 0x0111), Some(Some(0x0001_013d)));
+		assert_eq!(find_playstation_touchpad_code("linux", sony_vendor_id, dual_sense_product_id, 0x8111), Some(None));
+		// 듀얼쇼크3, 다른 제조사, 번호를 모르는 패드, 다른 OS 는 그대로 둔다.
+		assert_eq!(find_playstation_touchpad_code("macos", sony_vendor_id, Some(0x0268), 0), None);
+		assert_eq!(find_playstation_touchpad_code("windows", Some(0x045e), Some(0x0ce6), 0), None);
+		assert_eq!(find_playstation_touchpad_code("macos", None, None, 0), None);
+		assert_eq!(find_playstation_touchpad_code("freebsd", sony_vendor_id, dual_sense_product_id, 0), None);
+		// SDL GUID 꼴 uuid 의 판 번호. (리눅스 PS5 고친 드라이버 030000004c050000e60c000011810000)
+		let uuid: [u8; 16] = [0x03, 0x00, 0x00, 0x00, 0x4c, 0x05, 0x00, 0x00, 0xe6, 0x0c, 0x00, 0x00, 0x11, 0x81, 0x00, 0x00];
+		assert_eq!(read_uuid_version(&uuid), 0x8111);
 	}
 
 	//==============================================================================

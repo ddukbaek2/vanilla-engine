@@ -14,7 +14,8 @@
 //   맥과 리눅스는 두 프레임 사이에 벽시계(SystemTime)가 단조 시계(Instant)보다 SYSTEM_SLEEP_GAP_SECONDS 넘게 더 흘렀으면 깬 것으로 본다.
 //   (러스트 Instant 는 맥에서 CLOCK_UPTIME_RAW, 리눅스에서 CLOCK_MONOTONIC 이라 잠든 동안 멈춘다. 러스트는 이것을 보장하지 않는다고 적어 두었다)
 // - 주된 손이 손가락인지(is_coarse_pointer): 윈도우는 크로미엄의 (pointer: coarse) 판정을 옮겨 태블릿 모드나 마우스 없는 터치 기기면 참이다.
-//   맥은 크로미엄도 늘 마우스로 보아 거짓이다. 리눅스는 크로미엄이 터치스크린과 마우스 장치 목록(evdev)을 보는데, winit 이 장치 목록을 주지 않아 거짓으로 둔다.
+//   맥은 크로미엄도 늘 마우스로 보아 거짓이다. 리눅스와 그 밖의 유닉스는 크로미엄처럼 화면 서버(웨이랜드 wl_seat 능력, X11 XInput 장치 목록)에서 터치스크린과
+//   마우스, 터치패드를 읽어 터치스크린만 있으면 참이다. (desktop/linuxplatform.rs, 읽은 값은 2 초 동안 쓴다)
 // - 키 이름: winit 의 SuperLeft, SuperRight 는 W3C 의 MetaLeft, MetaRight, winit 의 Meta 는 W3C 의 Super 로 바꿔 넣는다.
 // - 그림 커서(PointerCursor.register_image_cursor): 그림 파일을 읽어 winit 의 CustomCursor 로 만든다. 맥은 그림 크기가 그대로 포인트 크기라 1 배 그림을,
 //   윈도우와 리눅스는 물리 픽셀이라 창 배율에 맞춰(2 배 그림이 있으면 그것을) 늘인 그림과 핫스팟을 쓴다. 만드는 동안과 못 만들면 함께 준 CSS 커서다.
@@ -58,6 +59,8 @@ mod renderscaler;
 mod textinput;
 #[cfg(target_os = "windows")]
 mod windowsplatform;
+#[cfg(any(test, all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android"))))]
+mod linuxplatform;
 pub use textinput::{read_clipboard_text, read_clipboard_text_with_callback, write_clipboard_text};
 #[cfg(target_os = "macos")]
 pub mod gamepadhaptics;
@@ -215,14 +218,18 @@ pub fn set_cursor(platform_window: Option<&PlatformWindow>, cursor_value: &Curso
 }
 
 //==============================================================================
-// 주된 손이 손가락인지. (윈도우는 크로미엄처럼 태블릿 모드나 마우스 없는 터치 기기면 참, 맥과 리눅스는 마우스가 주된 손으로 본다)
+// 주된 손이 손가락인지. (윈도우는 크로미엄처럼 태블릿 모드나 마우스 없는 터치 기기면 참, 리눅스는 크로미엄처럼 마우스, 터치패드 없이 터치스크린만 있으면 참, 맥은 마우스가 주된 손으로 본다)
 //==============================================================================
 pub fn is_coarse_pointer() -> bool {
 	#[cfg(target_os = "windows")]
 	{
 		windowsplatform::is_coarse_pointer()
 	}
-	#[cfg(not(target_os = "windows"))]
+	#[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
+	{
+		linuxplatform::is_coarse_pointer()
+	}
+	#[cfg(not(any(target_os = "windows", all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))))]
 	{
 		false
 	}

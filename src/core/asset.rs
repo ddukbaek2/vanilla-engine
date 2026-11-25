@@ -47,6 +47,8 @@ pub struct AssetLoadHandle {
 	load_state: Rc<RefCell<AssetLoadState>>,
 	// 받은 바이트를 미리 풀어 둔 그림. (AssetLoader 가 다 받았을 때 풀어 보고 ImageAsset 이 그대로 쓴다)
 	decoded_image: Rc<RefCell<Option<Rc<Image>>>>,
+	// 응답의 content-type. (웹 fetch 응답 머리, 데스크탑 파일과 머리가 없는 응답은 None)
+	content_type: Rc<RefCell<Option<String>>>,
 }
 
 impl std::fmt::Debug for AssetLoadHandle {
@@ -67,6 +69,7 @@ impl AssetLoadHandle {
 			asset_path: asset_path.to_string(),
 			load_state: Rc::new(RefCell::new(AssetLoadState::Pending)),
 			decoded_image: Rc::new(RefCell::new(None)),
+			content_type: Rc::new(RefCell::new(None)),
 		}
 	}
 
@@ -78,6 +81,7 @@ impl AssetLoadHandle {
 			asset_path: asset_path.to_string(),
 			load_state: Rc::new(RefCell::new(AssetLoadState::Loaded(Rc::new(bytes)))),
 			decoded_image: Rc::new(RefCell::new(None)),
+			content_type: Rc::new(RefCell::new(None)),
 		}
 	}
 
@@ -153,6 +157,17 @@ impl AssetLoadHandle {
 
 	pub fn get_decoded_image(&self) -> Option<Rc<Image>> {
 		self.decoded_image.borrow().clone()
+	}
+
+	//==============================================================================
+	// 응답의 content-type 설정과 반환. (웹 플랫폼이 fetch 응답 머리를 적는다, 원본 response.headers.get("content-type") 자리)
+	//==============================================================================
+	pub fn set_content_type(&self, content_type: Option<String>) {
+		*self.content_type.borrow_mut() = content_type;
+	}
+
+	pub fn get_content_type(&self) -> Option<String> {
+		self.content_type.borrow().clone()
 	}
 
 	//==============================================================================

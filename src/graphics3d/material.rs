@@ -9,10 +9,12 @@
 //   - 셰이더 프로그램은 Rc<ShaderProgram> 으로 렌더러와 나눠 든다. 모델의 드로어블은 Rc<Material> 로 가리킨다. (원본 참조 의미)
 //     원본이 인스턴스를 고치는 set_texture / set_use_alpha_cutout / set_subsurface_factor 는 &self 로 부를 수 있게 안에서 Cell 로 든다.
 //   - 이미지 해석은 원본 createImageBitmap(비동기) 대신 image 크레이트(png, jpeg, webp)로 그 자리에서 한다. 그래서 async 가 없다.
+//     형은 원본 크롬처럼 해석에 쓰지 않고 내용으로 가린다. (크롬 createImageBitmap(Blob) 도 Blob 의 형이 아니라 내용으로 해독기를 고른다)
 //     원본처럼 flip_y 면 위아래를 뒤집고, is_color_data 면 SRGB8_ALPHA8 로 올린다.
 //   - 원본 loadImageDescription(url) 의 Promise 는 ImageAsset 처럼 받기 손잡이(ImageDescriptionLoadHandle)다. load_image_description(엔진, 애셋 경로, 옵션)이
 //     엔진의 애셋 받기(데스크탑은 애셋 폴더 후보, 웹은 asset_base_url 에서 fetch)로 바이트를 부탁하고, 다 받으면 get_image_description 이 서술을 만든다.
-//     mime_type 은 원본의 응답 content-type 대신 경로의 확장자로 정한다. (find_image_mime_type) 바이트를 받는 create_image_description(bytes) 는 원본과 같다.
+//     mime_type 은 원본처럼 응답의 content-type 이다. (웹 fetch 응답 머리, 머리가 없으면 None) 데스크탑에는 응답이 없어 내용으로 고른 형이다.
+//     (Image::sniff_image_mime_type, WHATWG MIME 스니핑의 그림 표와 AVIF, 모르면 None) 바이트를 받는 create_image_description(bytes) 는 원본과 같다.
 //   - 원본 이미지 서술의 source(캔버스/비트맵)는 RGBA 픽셀(ImageSource)로 받는다.
 //==============================================================================
 use crate::core::asset::AssetLoadHandle;
@@ -106,7 +108,7 @@ impl ImageDescriptionLoadHandle {
 		let asset_path = self.load_handle.get_asset_path();
 		match self.load_handle.get_bytes() {
 			Some(bytes) => {
-				let mime_type = Material::find_image_mime_type(asset_path);
+				let mime_type = Material::read_response_mime_type(&self.load_handle, &bytes);
 				Some(Ok(Material::create_image_description(bytes.as_ref().clone(), mime_type, self.options)))
 			}
 			None => {
@@ -317,32 +319,20 @@ impl Material {
 	}
 
 	//==============================================================================
-	// 경로의 확장자로 이미지 mime_type 정하기. (png, jpg / jpeg, webp, 그 밖은 None. 주소의 ? 뒤는 보지 않는다)
+	// 받은 이미지의 mime_type. (원본 response.headers.get("content-type"), 웹은 응답 머리, 데스크탑은 응답이 없어 내용으로 고른 형)
 	//==============================================================================
-	pub fn find_image_mime_type(url: &str) -> Option<String> {
-		let path_text = url.split(['?', '#']).next().unwrap_or("");
-		let file_name = path_text.rsplit('/').next().unwrap_or("");
-		let extension = match file_name.rsplit_once('.') {
-			Some((_, extension)) => {
-				extension.to_lowercase()
-			}
-			None => {
-				return None;
-			}
-		};
-		match extension.as_str() {
-			"png" => {
-				Some(String::from("image/png"))
-			}
-			"jpg" | "jpeg" => {
-				Some(String::from("image/jpeg"))
-			}
-			"webp" => {
-				Some(String::from("image/webp"))
-			}
-			_ => {
-				None
-			}
+	fn read_response_mime_type(load_handle: &AssetLoadHandle, bytes: &[u8]) -> Option<String> {
+		if let Some(content_type) = load_handle.get_content_type() {
+			return Some(content_type);
+		}
+		#[cfg(not(target_arch = "wasm32"))]
+		{
+			crate::core::image::sniff_image_mime_type(bytes).map(String::from)
+		}
+		#[cfg(target_arch = "wasm32")]
+		{
+			let _ = bytes;
+			None
 		}
 	}
 
@@ -531,14 +521,31 @@ mod tests {
 	use super::*;
 
 	//==============================================================================
-	// 이미지 서술 받기: 확장자로 mime_type, 없는 파일은 원본 문구의 Err.
+	// 이미지 서술 받기: mime_type 은 응답의 content-type, 없으면(데스크탑) 내용으로 고른 형. 없는 파일은 원본 문구의 Err.
 	//==============================================================================
 	#[test]
 	fn image_description_load_handle() {
-		assert_eq!(Material::find_image_mime_type("textures/skin.PNG"), Some(String::from("image/png")));
-		assert_eq!(Material::find_image_mime_type("a.b/face.jpeg?v=3"), Some(String::from("image/jpeg")));
-		assert_eq!(Material::find_image_mime_type("detail.webp#top"), Some(String::from("image/webp")));
-		assert_eq!(Material::find_image_mime_type("folder.v2/noextension"), None);
+		let png_signature = vec![0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0];
+		let file_load_handle = AssetLoadHandle::create_loaded("textures/skin.dat", png_signature.clone());
+		let file_description_handle = ImageDescriptionLoadHandle {
+			load_handle: file_load_handle,
+			options: None,
+		};
+		let file_description = file_description_handle.get_image_description().expect("끝남").expect("서술");
+		assert_eq!(file_description.mime_type.as_deref(), Some("image/png"));
+		let response_load_handle = AssetLoadHandle::create_loaded("textures/skin.png", png_signature);
+		response_load_handle.set_content_type(Some(String::from("application/octet-stream")));
+		let response_description_handle = ImageDescriptionLoadHandle {
+			load_handle: response_load_handle,
+			options: None,
+		};
+		let response_description = response_description_handle.get_image_description().expect("끝남").expect("서술");
+		assert_eq!(response_description.mime_type.as_deref(), Some("application/octet-stream"));
+		let unknown_description_handle = ImageDescriptionLoadHandle {
+			load_handle: AssetLoadHandle::create_loaded("unknown.bin", vec![1, 2, 3]),
+			options: None,
+		};
+		assert_eq!(unknown_description_handle.get_image_description().expect("끝남").expect("서술").mime_type, None);
 		let engine = Engine::new(crate::core::engine::EngineConfiguration::new());
 		let missing_load_handle = Material::load_image_description(&engine, "missing_texture.png", None);
 		assert!(missing_load_handle.is_finished());

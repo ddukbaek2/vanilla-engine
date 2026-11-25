@@ -12,6 +12,13 @@ categories = ["game-engines"]
 [lib]
 name = "vanilla"
 
+# 기능. (기본으로 모두 켠다)
+[features]
+default = ["tls"]
+# 데스크탑 wss://. (ewebsock 의 tls 기능, tungstenite 가 rustls 와 webpki 뿌리 인증서로 연다. 웹은 브라우저 WebSocket 이라 상관없다)
+# 암호 공급자 ring 이 C 를 빌드해서, 그 대상의 C 헤더가 없는 맥에서 윈도우 대상을 검사할 때는 끈다. (cargo check --target x86_64-pc-windows-msvc --no-default-features)
+tls = ["ewebsock/tls", "dep:rustls"]
+
 [dependencies]
 glow = "0.18"
 fontdue = "0.9"
@@ -57,6 +64,9 @@ raw-window-handle = "0.6"
 kira = { version = "0.12", default-features = false, features = ["cpal", "cpal-realtime", "ogg", "vorbis", "mp3", "wav", "pcm", "flac", "isomp4", "aac"] }
 # SVG 그림. (데스크탑, usvg 로 읽고 tiny-skia 로 그린다. 원본은 브라우저가 SVG 를 그림으로 푼다. 웹은 브라우저가 푼다)
 resvg = "0.50"
+# AVIF 그림. (데스크탑, HEIF 상자는 엔진이 읽고 dav1d 를 러스트로 옮긴 rav1d 로 AV1 을 푼다. 원본은 브라우저가 AVIF 를 푼다. 웹은 브라우저가 푼다)
+# rav1d 의 asm 은 끈다. (켜면 x86 에서 nasm, arm 에서 C 어셈블러가 있어야 빌드된다. 그림 한 장 푸는 데는 순수 러스트로 넉넉하다)
+rav1d = { version = "1.1", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
 # 낱말 나누기. (공백 없이 쓰는 한중일과 태국어 같은 동남아 글자를 사전으로 나눈다. 크롬의 ICU4C 도 사전이다. 웹은 원본처럼 브라우저 Intl.Segmenter 를 쓴다)
 icu_segmenter = "2"
 # 한중일 사전(cjdict)의 낱말 값을 읽는다. (icu_segmenter 가 쓰는 같은 판, 크롬의 ICU4C 처럼 낱말 값의 합이 가장 작은 나누기를 고른다)
@@ -66,12 +76,10 @@ icu_collections = "2"
 unicode-normalization = "0.1"
 # 시스템 클립보드. (입력 필드의 복사, 잘라내기, 붙여넣기. winit 에 클립보드가 없다. 그림 기능은 끈다)
 arboard = { version = "3", default-features = false }
-# 데스크탑 wss://. (ewebsock 의 tls 기능, tungstenite 가 rustls 와 webpki 뿌리 인증서로 연다)
-ewebsock = { version = "0.8", features = ["tls"] }
 # 시스템 언어 목록. (윈도우 GetUserPreferredUILanguages, 맥 CFLocaleCopyPreferredLanguages, 리눅스 LANGUAGE / LC_ALL / LC_MESSAGES / LANG. 원본 navigator.languages 자리)
 sys-locale = "0.3"
-# rustls 의 암호 공급자. (tungstenite 가 rustls 를 기본 기능 없이 쓰므로 ring 을 켜고, WebSocketClient 가 붙을 때 정한다)
-rustls = { version = "0.23", default-features = false, features = ["ring"] }
+# rustls 의 암호 공급자. (tungstenite 가 rustls 를 기본 기능 없이 쓰므로 ring 을 켜고, WebSocketClient 가 붙을 때 정한다. tls 기능일 때만)
+rustls = { version = "0.23", default-features = false, features = ["ring"], optional = true }
 
 # 윈도우: 잠자기에서 깸(WM_POWERBROADCAST)을 받으려 창을 서브클래싱하고, 주된 손이 손가락인지 크로미엄처럼 읽는다. 크롬처럼 system-ui 의 메뉴 글꼴(NONCLIENTMETRICS)과 ClearType 켜짐을 읽는다. (winit 과 같은 판, 쓰는 기능만 켠다)
 [target.'cfg(target_os = "windows")'.dependencies]
@@ -96,6 +104,9 @@ objc2-core-graphics = { version = "0.3", default-features = false, features = ["
 # 리눅스와 그 밖의 유닉스: 시스템 글꼴. (fontconfig 로 글꼴 이름과 대체 글꼴을 고른다. 원본 크롬 리눅스도 fontconfig 로 고른다. 라이브러리는 빌드할 때 잇지 않고 실행할 때 연다)
 [target.'cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android"), not(target_arch = "wasm32")))'.dependencies]
 yeslogic-fontconfig-sys = { version = "6", features = ["dlopen"] }
+# 주된 손이 손가락인지 크로미엄처럼 화면 서버의 입력 장치로 읽는다. (X11 XInput 은 x11-dl 로 libX11, libXi 를 실행할 때 열고, 웨이랜드 wl_seat 은 wayland-client. 둘 다 glutin, winit 이 쓰는 같은 판)
+x11-dl = "2.21"
+wayland-client = "0.31"
 
 # 웹(wasm): 캔버스와 WebGL2, requestAnimationFrame, WebAudio, fetch.
 [target.'cfg(target_arch = "wasm32")'.dependencies]

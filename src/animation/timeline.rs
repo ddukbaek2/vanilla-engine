@@ -31,8 +31,10 @@
 //   - 원본 Timeline.setAudioManager(정적)와 사운드 노드의 비동기 읽기는 load_sounds(node_tree, engine) 로 바꿨다.
 //     무대를 만든 뒤 한 번 부르면 사운드 노드마다 오디오 애셋을 읽고 플레이어를 만든다. (돌려준 애셋을 씬이 track_audio_asset 으로 맡겨도 된다)
 //   - loadFromUrl(비동기 fetch) 대신 JsonAsset 으로 받은 문서를 create_from_json_asset / load_from_text 로 넘긴다.
-//   - "data:" 주소 이미지는 원본처럼 나중에 읽히지 않고 그 자리에서 풀어 만든다. 브라우저처럼 본문의 퍼센트 꼴(%XX)을 먼저 풀고, ;base64 면 base64 를 푼다.
-//     (그림 꼴은 image 크레이트가 푸는 png, jpeg, webp 다)
+//   - "data:" 주소 이미지: 웹은 원본처럼 브라우저가 풀어(fetch 와 HTMLImageElement, platform/web.rs) 다 풀리면 스프라이트에 걸고 서술의 칸을 다시 고른다.
+//     (원본 image.onload 의 applySpriteFrame, 그동안 TimelineSpriteFrameGrid 가 기다리며 갱신한다)
+//     데스크탑은 그 자리에서 푼다. 브라우저처럼 본문의 퍼센트 꼴(%XX)을 먼저 풀고, ;base64 면 base64 를 푼다. 주소의 형이 image/svg+xml 이면 resvg 로 그린 SVG,
+//     그 밖은 내용으로 가린 래스터(png, jpeg, webp, gif, bmp, ico, avif)다. (Image::load_from_memory_with_mime_type)
 // - 이징 곡선 값은 원본과 같다. 같은 이름의 무대 노드가 둘이면 모두 붙이고 이름 표에는 뒤의 것이 남는다(원본과 같다).
 //   부모가 자기 자신이거나 고리가 되면 무대 부모에 붙인다. load_from_text, create_from_json_asset 은 원본에도 있다.
 //==============================================================================
@@ -40,6 +42,7 @@ use crate::base::color::Color;
 use crate::base::pivot::Pivot;
 use crate::base::rect::Rect;
 use crate::base::vector2::Vector2;
+use crate::core::asset::AssetLoadHandle;
 use crate::core::audioplayer::AudioPlayer;
 use crate::core::component::paint::Paint;
 use crate::core::component::richtext::RichText;
@@ -49,7 +52,7 @@ use crate::core::component::{Component, ComponentBase};
 use crate::core::engine::Engine;
 use crate::core::graphic::{BlendMode, TextAlign, TextBaseline};
 use crate::core::image::Image;
-use crate::core::node::nodetree::{NodeId, NodeTree};
+use crate::core::node::nodetree::{ComponentContext, NodeId, NodeTree};
 use crate::core::node::worldnode::WorldNode;
 use crate::core::tween::easing_function;
 use crate::effect::particlesystem::ParticleSystem;
@@ -734,6 +737,13 @@ fn apply_sprite_frame(node: &mut WorldNode, frame_index: i64) {
 			(1, 1)
 		}
 	};
+	apply_sprite_frame_with_grid(node, grid_columns, grid_rows, frame_index);
+}
+
+//==============================================================================
+// 격자를 주고 스프라이트 시트 프레임 적용. (격자 컴포넌트가 자기 tick 에서 부를 때, 그때는 노드에서 빠져 있다)
+//==============================================================================
+fn apply_sprite_frame_with_grid(node: &mut WorldNode, grid_columns: usize, grid_rows: usize, frame_index: i64) {
 	let shader_sprite = match node.get_component_mut::<ShaderSprite>() {
 		Some(shader_sprite) => {
 			shader_sprite
@@ -1064,12 +1074,15 @@ pub static TIMELINE_NODE_DEFAULTS: LazyLock<TimelineNodeDescription> = LazyLock:
 
 //==============================================================================
 // 스프라이트 시트 격자. (노드 서술의 frame_columns / frame_rows. 원본 spriteFrameGridTable 자리)
-// - 그리지도 갱신하지도 않는 표시용 컴포넌트다. frame 속성이 이것을 읽어 칸을 고른다.
+// - 그리지 않는 표시용 컴포넌트다. frame 속성이 이것을 읽어 칸을 고른다.
+// - 웹에서 "data:" 주소 그림을 브라우저가 푸는 동안만 갱신한다. 다 풀리면 스프라이트에 걸고 서술의 칸을 고른다. (원본 image.onload 의 applySpriteFrame)
 //==============================================================================
 pub struct TimelineSpriteFrameGrid {
 	component_base: ComponentBase,
 	columns: usize,
 	rows: usize,
+	// 브라우저가 푸는 중인 "data:" 주소 그림과 다 풀리면 고를 서술의 칸. (데스크탑은 그 자리에서 풀어 늘 None)
+	pending_image_load: Option<(AssetLoadHandle, i64)>,
 }
 
 impl TimelineSpriteFrameGrid {
@@ -1081,6 +1094,7 @@ impl TimelineSpriteFrameGrid {
 			component_base: ComponentBase::new(),
 			columns: columns.max(1),
 			rows: rows.max(1),
+			pending_image_load: None,
 		}
 	}
 
@@ -1121,10 +1135,38 @@ impl Component for TimelineSpriteFrameGrid {
 	}
 
 	//==============================================================================
-	// 갱신할 것이 없다.
+	// 브라우저가 푸는 "data:" 주소 그림 기다리기. (다 풀리면 스프라이트에 걸고 칸을 고른다, 못 풀었으면 그림 없이 둔다)
+	//==============================================================================
+	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f32) {
+		let (load_handle, frame_index) = match self.pending_image_load.take_if(|(load_handle, _)| load_handle.is_finished()) {
+			Some(pending_image_load) => {
+				pending_image_load
+			}
+			None => {
+				return;
+			}
+		};
+		let image = match load_handle.get_decoded_image() {
+			Some(image) => {
+				image
+			}
+			None => {
+				return;
+			}
+		};
+		let node = context.get_node_mut();
+		if let Some(shader_sprite) = node.get_component_mut::<ShaderSprite>() {
+			shader_sprite.get_sprite_mut().set_image(Some(image));
+			shader_sprite.get_sprite_mut().set_image_rect(Rect::zero());
+		}
+		apply_sprite_frame_with_grid(node, self.columns, self.rows, frame_index);
+	}
+
+	//==============================================================================
+	// 웹에서 "data:" 주소 그림을 기다릴 때만 갱신한다.
 	//==============================================================================
 	fn is_tick_needed(&self) -> bool {
-		false
+		self.pending_image_load.is_some()
 	}
 
 	//==============================================================================
@@ -1288,6 +1330,7 @@ fn read_text_align(text_align_name: &str) -> TextAlign {
 //==============================================================================
 // base64 풀기. (표준 알파벳, = 채움과 공백은 건너뛴다. 틀린 글자가 있으면 None)
 //==============================================================================
+#[cfg(not(target_arch = "wasm32"))]
 fn decode_base64(text: &str) -> Option<Vec<u8>> {
 	let mut bytes: Vec<u8> = Vec::with_capacity(text.len() * 3 / 4);
 	let mut accumulator: u32 = 0;
@@ -1329,6 +1372,7 @@ fn decode_base64(text: &str) -> Option<Vec<u8>> {
 //==============================================================================
 // 퍼센트 꼴 풀기. (%XX 를 그 바이트로 바꾸고, 뒤에 16진 두 자리가 없는 % 는 그대로 둔다)
 //==============================================================================
+#[cfg(not(target_arch = "wasm32"))]
 fn decode_percent_encoding(text: &str) -> Vec<u8> {
 	let text_bytes = text.as_bytes();
 	let mut bytes: Vec<u8> = Vec::with_capacity(text_bytes.len());
@@ -1352,18 +1396,32 @@ fn decode_percent_encoding(text: &str) -> Vec<u8> {
 
 //==============================================================================
 // "data:" 주소 이미지 읽기. (본문의 퍼센트 꼴을 풀고, 머리가 ;base64 로 끝나면 base64 를 푼다. fetch 의 data: 주소 처리와 같은 차례)
+// - 형은 "data:" 와 ;base64 사이다. 비었으면 fetch 처럼 text/plain;charset=US-ASCII 다. 형이 image/svg+xml 일 때만 SVG 로 푼다. (브라우저와 같다)
 //==============================================================================
+#[cfg(not(target_arch = "wasm32"))]
 fn load_data_url_image(data_url: &str) -> Option<Rc<Image>> {
 	let separator_index = data_url.find(',')?;
-	let header = data_url[..separator_index].trim_end().to_ascii_lowercase();
+	let header = data_url.get(5..separator_index)?.trim();
+	let lowercase_header = header.to_ascii_lowercase();
 	let body = decode_percent_encoding(&data_url[separator_index + 1..]);
-	let bytes = if header.ends_with(";base64") {
-		decode_base64(std::str::from_utf8(&body).ok()?)?
+	let (mime_type, bytes) = if lowercase_header.ends_with(";base64") {
+		(header[..header.len() - ";base64".len()].trim(), decode_base64(std::str::from_utf8(&body).ok()?)?)
 	}
 	else {
-		body
+		(header, body)
 	};
-	Image::load_from_memory(&bytes).ok()
+	let mime_type = if mime_type.is_empty() { "text/plain;charset=US-ASCII" } else { mime_type };
+	Image::load_from_memory_with_mime_type(&bytes, mime_type).ok()
+}
+
+//==============================================================================
+// "data:" 주소 이미지를 브라우저에 풀어 달라고 부탁하기. (웹, fetch 가 주소의 형을 content-type 으로 주고 브라우저가 그 형으로 푼다. 다 풀리면 손잡이의 그림)
+//==============================================================================
+#[cfg(target_arch = "wasm32")]
+fn request_data_url_image(data_url: &str) -> AssetLoadHandle {
+	let load_handle = AssetLoadHandle::create_pending(data_url);
+	crate::platform::request_asset_bytes(data_url.to_string(), load_handle.clone(), false);
+	load_handle
 }
 
 //==============================================================================
@@ -1883,9 +1941,22 @@ impl Timeline {
 					image = image_resolver(&description.image);
 				}
 			}
-			if image.is_none() && description.image.starts_with("data:") {
-				image = load_data_url_image(&description.image);
+			#[cfg(not(target_arch = "wasm32"))]
+			let pending_image_load: Option<(AssetLoadHandle, i64)> = None;
+			#[cfg(not(target_arch = "wasm32"))]
+			{
+				if image.is_none() && description.image.starts_with("data:") {
+					image = load_data_url_image(&description.image);
+				}
 			}
+			#[cfg(target_arch = "wasm32")]
+			let pending_image_load = if image.is_none() && description.image.starts_with("data:") {
+				Some((request_data_url_image(&description.image), round_half_up(description.frame) as i64))
+			}
+			else {
+				None
+			};
+			get_or_add_component(node, || TimelineSpriteFrameGrid::new(grid_columns, grid_rows)).pending_image_load = pending_image_load;
 			{
 				let shader_sprite = get_or_add_component(node, ShaderSprite::new);
 				shader_sprite.get_sprite_mut().set_image(image);
@@ -2897,6 +2968,29 @@ mod tests {
 		let percent_body: String = png_bytes.iter().map(|byte| format!("%{:02X}", byte)).collect();
 		assert!(load_data_url_image(&format!("data:image/png,{}", percent_body)).is_some());
 		assert!(load_data_url_image("data:image/png,not-an-image").is_none());
+	}
+
+	//==============================================================================
+	// "data:" 주소의 SVG: 브라우저처럼 형이 image/svg+xml 일 때만 SVG 로 그린다. (퍼센트 꼴과 base64, 다른 형이면 못 푼다) 스프라이트 노드에도 걸린다.
+	//==============================================================================
+	#[test]
+	fn data_url_svg_image_follows_mime_type() {
+		let svg_text = "<svg xmlns='http://www.w3.org/2000/svg' width='4' height='2'><rect width='2' height='2' fill='#ff0000'/></svg>";
+		let percent_svg: String = svg_text.bytes().map(|byte| format!("%{:02X}", byte)).collect();
+		let image = load_data_url_image(&format!("data:image/svg+xml;charset=utf-8,{}", percent_svg)).expect("svg");
+		assert_eq!((image.get_width(), image.get_height()), (4, 2));
+		assert_eq!(&image.get_pixels()[0..4], &[255, 0, 0, 255]);
+		let base64_svg = "PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPSc0JyBoZWlnaHQ9JzInPjxyZWN0IHdpZHRoPScyJyBoZWlnaHQ9JzInIGZpbGw9JyNmZjAwMDAnLz48L3N2Zz4=";
+		assert_eq!(decode_base64(base64_svg).expect("svg bytes"), svg_text.as_bytes().to_vec());
+		assert!(load_data_url_image(&format!("data:IMAGE/SVG+XML;base64,{}", base64_svg)).is_some());
+		assert!(load_data_url_image(&format!("data:text/plain,{}", percent_svg)).is_none());
+		assert!(load_data_url_image(&format!("data:,{}", percent_svg)).is_none());
+		assert!(load_data_url_image(&format!("data:image/png;base64,{}", base64_svg)).is_none());
+		let mut node_tree = NodeTree::new();
+		let node_id = Timeline::create_stage_node(&mut node_tree, &json!({ "name": "logo", "type": "sprite", "image": format!("data:image/svg+xml;base64,{}", base64_svg) }), None);
+		let sprite_image = node_tree[node_id].get_component::<ShaderSprite>().and_then(|shader_sprite| shader_sprite.get_sprite().get_image().cloned()).expect("sprite image");
+		assert_eq!((sprite_image.get_width(), sprite_image.get_height()), (4, 2));
+		assert!(!node_tree[node_id].get_component::<TimelineSpriteFrameGrid>().expect("grid").is_tick_needed());
 	}
 
 	//==============================================================================

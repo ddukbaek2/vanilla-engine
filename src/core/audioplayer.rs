@@ -5,9 +5,9 @@
 //   원본의 GainNode 자리: 데스크탑은 플레이어마다 kira 믹서 하위 트랙 하나, 웹은 원본처럼 GainNode 하나.
 // - 만드는 곳은 AudioManager::create_audio_player() 나 AudioPlayer::new(매니저, 내보낼 곳) 이다. AudioContext 가 없으면 아무 소리도 내지 않는 플레이어가 된다. (원본과 같다)
 //   new 는 원본 new AudioPlayer(audioContext, outputNode) 자리다. 첫 인자는 AudioContext 를 든 매니저이고(AudioContext 가 없으면 만든다),
-//   내보낼 곳(AudioOutputNode)은 웹이 &AudioNode(버스의 get_gain_node() 같은 것), 데스크탑이 kira 의 &mut TrackHandle(버스의 get_gain_node() 같은 것)이다. None 이면 출력이다.
-//     웹: AudioPlayer::new(&audio_manager, audio_bus.get_gain_node().as_deref())
-//     데스크탑: AudioPlayer::new(&audio_manager, audio_bus.get_gain_node().as_deref_mut())
+//   내보낼 곳(AudioOutputNode)은 버스의 get_gain_node()(AudioGainNode)의 as_deref() 다. None 이면 출력이다. 두 플랫폼에서 같은 코드다.
+//     AudioPlayer::new(&audio_manager, audio_bus.get_gain_node().as_deref())
+//   (웹은 &AudioNode 라 다른 AudioNode 도 넘길 수 있고, 데스크탑은 kira 트랙의 &RefCell<TrackHandle> 이다)
 //   내보낼 곳을 직접 넘겨 만든 플레이어는 버스 손잡이를 들지 않는다. (버스가 버려지면 데스크탑은 그 아래 트랙도 같이 없어진다)
 // - play 는 원본처럼 AudioContext 가 멈춰 있으면 깨운 뒤 튼다. (웹은 resume() 을 기다렸다가, 데스크탑은 그 자리에서)
 // - 원본과 다른 점:

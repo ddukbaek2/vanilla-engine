@@ -643,7 +643,7 @@ mod storage_backend {
 	//==============================================================================
 	fn get_application_data_directory() -> PathBuf {
 		#[cfg(target_os = "windows")]
-		let data_directory_path = read_directory_variable("APPDATA").or_else(|| read_directory_variable("USERPROFILE").map(|userProfilePath| userProfilePath.join("AppData").join("Roaming")));
+		let data_directory_path = read_directory_variable("APPDATA").or_else(|| read_directory_variable("USERPROFILE").map(|user_profile_path| user_profile_path.join("AppData").join("Roaming")));
 		#[cfg(target_os = "macos")]
 		let data_directory_path = read_directory_variable("HOME").map(|home_path| home_path.join("Library").join("Application Support"));
 		#[cfg(not(any(target_os = "windows", target_os = "macos")))]

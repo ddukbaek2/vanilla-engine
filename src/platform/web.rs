@@ -279,18 +279,41 @@ pub fn set_title(_platform_window: Option<&PlatformWindow>, title: &str) {
 
 //==============================================================================
 // 애셋 바이트 읽기. (fetch 로 받고, 받으면 끝낸다. 그 사이 프레임은 계속 돈다)
-// - 그림 확장자(png, jpg, gif, webp, bmp, ico, svg, avif 등)면 끝내기 전에 원본처럼 브라우저가 풀게 해 손잡이에 둔다. (ImageAsset, AssetLoader 가 그대로 쓴다)
+// - 응답의 content-type 을 손잡이에 적는다. (원본 Material.loadImageDescription 의 response.headers.get("content-type"))
+// - 응답이 그림 형(image/...)이거나 주소가 그림 확장자(png, jpg, gif, webp, bmp, ico, svg, avif 등)면 끝내기 전에 원본처럼 브라우저가 풀게 해 손잡이에 둔다.
+//   (ImageAsset, AssetLoader 가 그대로 쓴다) 원본 HTMLImageElement 처럼 응답의 content-type 을 그대로 형으로 넘겨, 브라우저가 SVG 는 그 형(image/svg+xml)으로,
+//   그 밖의 그림은 내용으로 가린다. 머리가 없는 응답만 확장자의 형을 쓴다. data: 주소는 fetch 가 주소의 형을 content-type 으로 준다.
 //==============================================================================
 pub fn request_asset_bytes(asset_location: String, load_handle: AssetLoadHandle, is_no_cache: bool) {
 	wasm_bindgen_futures::spawn_local(async move {
-		let result = fetch_bytes(&asset_location, is_no_cache).await;
-		if let (Ok(bytes), Some(mime_type)) = (&result, read_image_mime_type(&asset_location)) {
-			if let Some(image) = decode_browser_image(bytes, mime_type).await {
-				load_handle.set_decoded_image(image);
+		let result = match fetch_bytes(&asset_location, is_no_cache).await {
+			Ok((bytes, content_type)) => {
+				if let Some(mime_type) = read_browser_image_mime_type(&asset_location, content_type.as_deref()) {
+					if let Some(image) = decode_browser_image(&bytes, &mime_type).await {
+						load_handle.set_decoded_image(image);
+					}
+				}
+				load_handle.set_content_type(content_type);
+				Ok(bytes)
 			}
-		}
+			Err(error_message) => {
+				Err(error_message)
+			}
+		};
 		load_handle.finish(result);
 	});
+}
+
+//==============================================================================
+// 브라우저가 풀 그림의 형. (응답이 그림 형이거나 주소가 그림 확장자일 때, 형은 응답의 content-type 이고 머리가 없으면 확장자의 형. 그림이 아니면 None)
+//==============================================================================
+fn read_browser_image_mime_type(asset_location: &str, content_type: Option<&str>) -> Option<String> {
+	let extension_mime_type = read_image_mime_type(asset_location);
+	let is_image_content_type = content_type.map(|content_type| content_type.trim_start().to_ascii_lowercase().starts_with("image/")).unwrap_or(false);
+	if !is_image_content_type && extension_mime_type.is_none() {
+		return None;
+	}
+	content_type.map(String::from).or(extension_mime_type.map(String::from))
 }
 
 //==============================================================================
@@ -366,9 +389,9 @@ async fn decode_browser_image(bytes: &[u8], mime_type: &str) -> Option<std::rc::
 }
 
 //==============================================================================
-// 주소에서 바이트 받기. (is_no_cache 면 원본 TextAsset 처럼 fetch 에 cache: "no-cache" 를 붙인다)
+// 주소에서 바이트와 응답의 content-type 받기. (is_no_cache 면 원본 TextAsset 처럼 fetch 에 cache: "no-cache" 를 붙인다, 머리가 없으면 content-type 은 None)
 //==============================================================================
-async fn fetch_bytes(asset_location: &str, is_no_cache: bool) -> Result<Vec<u8>, String> {
+async fn fetch_bytes(asset_location: &str, is_no_cache: bool) -> Result<(Vec<u8>, Option<String>), String> {
 	let window = web_sys::window().ok_or_else(|| String::from("window 없음"))?;
 	let response_promise = if is_no_cache {
 		let request_init = js_sys::Object::new();
@@ -385,10 +408,20 @@ async fn fetch_bytes(asset_location: &str, is_no_cache: bool) -> Result<Vec<u8>,
 	if !response.ok() {
 		return Err(format!("애셋 받기 실패 ({}): HTTP {}", asset_location, response.status()));
 	}
+	let content_type = read_response_content_type(&response);
 	let array_buffer_promise = response.array_buffer().map_err(|error| format!("애셋 본문 읽기 실패 ({}): {}", asset_location, describe_js_error(error)))?;
 	let array_buffer = wasm_bindgen_futures::JsFuture::from(array_buffer_promise).await.map_err(|error| format!("애셋 본문 읽기 실패 ({}): {}", asset_location, describe_js_error(error)))?;
 	let bytes = js_sys::Uint8Array::new(&array_buffer).to_vec();
-	Ok(bytes)
+	Ok((bytes, content_type))
+}
+
+//==============================================================================
+// 응답의 content-type 머리. (response.headers.get("content-type"), 없으면 None)
+//==============================================================================
+fn read_response_content_type(response: &web_sys::Response) -> Option<String> {
+	let headers = js_sys::Reflect::get(response, &JsValue::from_str("headers")).ok()?;
+	let get_function: js_sys::Function = js_sys::Reflect::get(&headers, &JsValue::from_str("get")).ok()?.dyn_into().ok()?;
+	get_function.call1(&headers, &JsValue::from_str("content-type")).ok()?.as_string()
 }
 
 //==============================================================================
@@ -520,7 +553,9 @@ fn add_keyboard_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) ->
 //==============================================================================
 // 마우스와 손가락 입력. (원본 engine.js 의 mousedown, mousemove, mouseup, wheel, touchstart, touchmove, touchend, touchcancel)
 // - 마우스 단추(원본처럼 어느 것이든, set_touch_from_left_button_only 면 왼쪽만)와 첫 손가락을 엔진의 터치로 넘기고, 단추 셋과 손가락 목록, 휠의 Ctrl 을 입력 매니저에 적는다.
-// - 손가락을 뗀 바로 뒤에 브라우저가 흉내 내 보내는 마우스 사건은 무시한다. (터치로 한 번, 마우스로 또 한 번 눌리지 않게)
+// - 손가락을 뗀 바로 뒤(800 밀리초)에 브라우저가 흉내 내 보내는 마우스 사건은 원본 engine.js 처럼 마지막 장치와 마지막 손에만 적지 않는다.
+//   단추와 자리, 터치는 원본처럼 그대로 넘긴다. (손가락 사건의 기본 동작을 막아 브라우저는 흉내 낸 마우스 사건을 보내지 않는다)
+//   CameraGestures 처럼 자기 문턱(set_thresholds 의 넷째 인자)으로 거르는 쪽이 원본처럼 사건을 모두 보고 거르게 하려는 것이다.
 // - 캔버스 위의 손가락은 기본 동작(스크롤, 확대)을 막는다. 오른쪽 클릭 메뉴는 set_context_menu_prevented 가 참(처음)이면 막는다.
 // - 프레임 안에서 사건이 바로 불려도 겹쳐 빌리지 않게 try_borrow_mut 로 본다. (못 빌리면 그 사건은 버린다)
 //==============================================================================
@@ -537,14 +572,14 @@ fn add_pointer_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> 
 	let web_application_cell_for_mouse_down = web_application_cell.clone();
 	let last_touch_time_for_mouse_down = last_touch_time.clone();
 	let mouse_down_callback: Closure<dyn FnMut(web_sys::MouseEvent)> = Closure::new(move |mouse_event: web_sys::MouseEvent| {
-		if is_compatibility_mouse(last_touch_time_for_mouse_down.get()) {
-			return;
-		}
+		let is_compatibility_mouse_event = is_compatibility_mouse(last_touch_time_for_mouse_down.get());
 		if let Ok(mut web_application) = web_application_cell_for_mouse_down.try_borrow_mut() {
 			web_application.update_pointer_position(mouse_event.client_x() as f64, mouse_event.client_y() as f64);
 			let input_manager = web_application.engine_runner.engine.get_input_manager_mut();
-			input_manager.set_touch_input(false);
-			input_manager.set_last_input_device(InputDevice::Mouse);
+			if !is_compatibility_mouse_event {
+				input_manager.set_touch_input(false);
+				input_manager.set_last_input_device(InputDevice::Mouse);
+			}
 			let mouse_button = read_mouse_button(mouse_event.button());
 			if let Some(mouse_button) = mouse_button {
 				input_manager.set_mouse_button_down(mouse_button, true);
@@ -564,11 +599,12 @@ fn add_pointer_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> 
 	let web_application_cell_for_mouse_move = web_application_cell.clone();
 	let last_touch_time_for_mouse_move = last_touch_time.clone();
 	let mouse_move_callback: Closure<dyn FnMut(web_sys::MouseEvent)> = Closure::new(move |mouse_event: web_sys::MouseEvent| {
-		if is_compatibility_mouse(last_touch_time_for_mouse_move.get()) {
-			return;
-		}
+		let is_compatibility_mouse_event = is_compatibility_mouse(last_touch_time_for_mouse_move.get());
 		if let Ok(mut web_application) = web_application_cell_for_mouse_move.try_borrow_mut() {
 			web_application.update_pointer_position(mouse_event.client_x() as f64, mouse_event.client_y() as f64);
+			if is_compatibility_mouse_event {
+				return;
+			}
 			let input_manager = web_application.engine_runner.engine.get_input_manager_mut();
 			input_manager.set_touch_input(false);
 			// 창이 흔들릴 때 나는 작은 움직임은 마우스를 쓴 것으로 보지 않는다.
@@ -579,11 +615,7 @@ fn add_pointer_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> 
 		}
 	});
 	let web_application_cell_for_mouse_up = web_application_cell.clone();
-	let last_touch_time_for_mouse_up = last_touch_time.clone();
 	let mouse_up_callback: Closure<dyn FnMut(web_sys::MouseEvent)> = Closure::new(move |mouse_event: web_sys::MouseEvent| {
-		if is_compatibility_mouse(last_touch_time_for_mouse_up.get()) {
-			return;
-		}
 		if let Ok(mut web_application) = web_application_cell_for_mouse_up.try_borrow_mut() {
 			web_application.update_pointer_position(mouse_event.client_x() as f64, mouse_event.client_y() as f64);
 			let input_manager = web_application.engine_runner.engine.get_input_manager_mut();
