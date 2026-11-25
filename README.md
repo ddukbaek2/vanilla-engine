@@ -263,7 +263,7 @@ impl Scene for TitleScene {
 | `new Promise((resolve, reject) => ...)` | `let (promise, resolver) = Promise::create();` (실패는 `Promise<Result<T, E>>` 와 `resolver.reject(까닭)`) |
 
 - 데스크탑은 `EngineConfiguration.asset_directory_paths` 폴더에서 바로 읽고, 웹은 `asset_base_url + 경로` 를 fetch 합니다. 게임 코드는 같습니다.
-- 이미지(png, jpg, webp, gif 첫 장, bmp, ico, svg, avif), 텍스트, JSON, 바이너리, 폰트(ttf, otf, woff, woff2), 오디오(webm, ogg 의 Opus 와 Vorbis, mp3, wav, flac, m4a 와 aac 의 AAC)를 지원합니다. 데스크탑은 엔진이 풀고, 웹은 원본처럼 브라우저가 풉니다. 데스크탑 소리는 크롬 decodeAudioData 와 같은 해석기(FLAC, MP3, PCM, Vorbis 는 크롬이 쓰는 symphonia)로 풀고 앞뒤 다듬기, 44100Hz 로 바꾸기(크로미엄 SincResampler 를 옮긴 것)까지 같게 해 길이와 표본이 크롬과 같습니다. (`tests/assets/audio` 의 21 파일을 크롬 158 의 결과와 견줍니다)
+- 이미지(png, jpg, webp, gif 첫 장, bmp, ico, svg, avif), 텍스트, JSON, 바이너리, 폰트(ttf, otf, woff, woff2), 오디오(webm, ogg 의 Opus 와 Vorbis, mp3, wav, flac, m4a 와 aac 의 AAC)를 지원합니다. 데스크탑은 엔진이 풀고, 웹은 원본처럼 브라우저가 풉니다. 데스크탑 소리는 크롬 decodeAudioData 와 같은 해석기(FLAC, MP3, PCM, Vorbis 는 크롬이 쓰는 symphonia)로 풀고 앞뒤 다듬기, 44100Hz 로 바꾸기(크로미엄 SincResampler 를 옮긴 것)까지 같게 해 길이와 표본이 크롬과 같습니다. (`tests/assets/audio` 의 27 파일을 크롬 158 의 결과와 견줍니다. HE-AAC v1, v2 와 5.1 AAC 도 풉니다)
 - 여러 애셋을 함께 받을 때는 `AssetLoader` 가 동시 수만큼 요청하고 진행률과 실패 목록을 셉니다.
 - 로딩에 실패한 애셋도 완료로 처리해서 씬이 멈추지 않습니다.
 
@@ -449,6 +449,7 @@ cargo run --release --example modelviewer
 | [gilrs](https://crates.io/crates/gilrs) | 0.11.2 | `core/gamepadmanager.rs` | 게임패드 입력과 진동(리눅스, 윈도우). OS 입력을 W3C Standard Gamepad 꼴로 바꿉니다. 웹은 원본처럼 `navigator.getGamepads()` 를 직접 읽습니다 | MIT / Apache-2.0 |
 | [cpal](https://crates.io/crates/cpal) | 0.18.2 | `platform/audio/desktop.rs` | 기본 출력 장치. 그 위의 믹서(소스, GainNode, StereoPannerNode, 버스)는 엔진이 크롬 WebAudio 와 같은 셈으로 짓습니다 (`platform/audio/mixer.rs`). realtime 기능으로 윈도우, 리눅스의 소리 스레드 우선순위를 올립니다 | Apache-2.0 |
 | [symphonia](https://crates.io/crates/symphonia) | 0.6.1 | `platform/audio/decode/` | 소리 해석. 크롬 decodeAudioData 와 같은 해석기로 FLAC, MP3, PCM, Vorbis 를 풀고(크롬이 켜는 기능과 같게), AAC 와 컨테이너(wav, ogg, mkv(webm), isomp4(m4a), flac, mp3, adts)도 풉니다 | MPL-2.0 |
+| [oxideav-aac](https://github.com/OxideAV/oxideav-aac) | 0.1.7 (저장소 eac68f3) | `platform/audio/decode/aac.rs` | HE-AAC(SBR, PS)와 3 채널 이상 AAC 해석. ISO/IEC 14496-3 명세로 짠 순수 러스트 해석기로, symphonia 의 AAC 가 받지 않는 것을 크롬처럼 풉니다. 정수로 반올림하기 전 실수 출력이 아직 crates.io 판에 없어 저장소 커밋으로 묶습니다 (oxideav-core 0.1.43 을 함께 받습니다) | MIT |
 | [opus-pure](https://crates.io/crates/opus-pure) | 0.2.5 | `platform/audio/decode/opus.rs` | Opus 해석. libopus 를 러스트로 옮긴 것으로 symphonia 코덱 등록표에 엔진 해석기로 넣습니다 (크롬은 libopus 로 풉니다). C 빌드가 없어 맥에서 윈도우 대상 검사가 됩니다 | BSD-3-Clause |
 | [resvg](https://crates.io/crates/resvg) | 0.50.0 | `core/image.rs`, `animation/timeline.rs` | SVG 그림을 usvg 로 읽고 tiny-skia 로 그립니다 | MIT / Apache-2.0 |
 | [tiny-skia](https://crates.io/crates/tiny-skia) | 0.12.0 | `core/canvas2d/desktop_canvas.rs` | 데스크탑 Canvas2D 의 경로, 선, 그라데이션, 패턴, 자르기, 합치기를 칠합니다. 크롬이 쓰는 Skia 의 CPU 래스터라이저를 옮긴 것이고 resvg 가 쓰는 같은 판이라 더 받는 크레이트가 없습니다 | BSD-3-Clause |

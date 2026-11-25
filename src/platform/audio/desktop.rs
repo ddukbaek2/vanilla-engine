@@ -12,11 +12,15 @@
 // - AudioBuffer 자리: 푼 소리를 Arc 로 든다. 복제는 값싸다. 해석은 decode 가 원본의 크롬 decodeAudioData 와 같게 한다.
 //   (webm, ogg 의 Opus 와 Vorbis, mp3, wav, flac, m4a 와 aac 의 AAC. 앞뒤 다듬기, 44100Hz, WebAudio 스피커 규칙으로 내린 1 채널이나 2 채널)
 // - 음량, 좌우, 정지는 다음 렌더 퀀텀부터 바로 바뀐다. 재생 빠르기는 다음 재생부터다. (원본과 같다)
+// - 음량은 GainNode 의 AudioParam 이다. 음량 설정은 원본 gain.value 대입, SoundSystem 은 원본처럼 자동화(setValueAtTime 들)와 stop(when)을 건다.
+//   지금 gain.value(get_gain_value)는 소리 스레드가 퀀텀마다 셈한 내재 값이다.
 // - BeepPlayer 의 톤은 엔벨로프를 곱한 파형을 컨텍스트 표본율로 그려 출력에 섞는다. (원본 OscillatorNode 가 컨텍스트 표본율로 도는 것과 같다)
 //   파형은 크롬 WebAudio 오실레이터(PeriodicWave)와 같은 셈이다. 푸리에 계수를 표 크기의 반 아래까지 두고 주파수에 따라 1/3 옥타브마다 높은 배음을 덜어 낸
 //   두 표 사이를 섞으며(대역 제한), 배음을 다 둔 첫 표의 가장 큰 값이 1 이 되게 크기를 맞춘다.
 //==============================================================================
+use super::audioparam::ParamAutomation;
 use super::mixer::{AudioBufferData, MixerCommand, MixerRenderer, MixerShared};
+use super::GainAutomation;
 use crate::core::audiomanager::AudioManagerState;
 use crate::misc::beepplayer::{BeepEnvelope, BeepWaveform, BEEP_FLOOR_VOLUME, BEEP_STOP_MARGIN_SECONDS};
 use crate::resource::audioasset::AudioAsset;
@@ -24,7 +28,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::cell::{Cell, RefCell};
 use std::path::Path;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::channel;
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
@@ -454,8 +458,33 @@ pub struct AudioPlayerBackend {
 	// 시작한 소스의 세대와 믹서가 끝냈다고 알린 세대.
 	started_generation: u64,
 	ended_generation: Arc<AtomicU64>,
+	// GainNode 의 gain 내재 값. (원본 gain.value 가 읽는 값, 소리 스레드가 퀀텀마다 쓴다)
+	gain_value: Arc<AtomicU32>,
 	is_source_active: bool,
 	playback_rate: f64,
+}
+
+//==============================================================================
+// 자동화를 믹서의 AudioParam 호출로.
+//==============================================================================
+fn to_param_automation(automation: GainAutomation) -> ParamAutomation {
+	match automation {
+		GainAutomation::SetValueAtTime { value, time } => {
+			ParamAutomation::SetValueAtTime { value, time }
+		}
+		GainAutomation::LinearRampToValueAtTime { value, time } => {
+			ParamAutomation::LinearRampToValueAtTime { value, time }
+		}
+		GainAutomation::ExponentialRampToValueAtTime { value, time } => {
+			ParamAutomation::ExponentialRampToValueAtTime { value, time }
+		}
+		GainAutomation::SetTargetAtTime { target, time, time_constant } => {
+			ParamAutomation::SetTargetAtTime { target, time, time_constant }
+		}
+		GainAutomation::CancelScheduledValues { time } => {
+			ParamAutomation::CancelScheduledValues { time }
+		}
+	}
 }
 
 impl AudioPlayerBackend {
@@ -488,6 +517,7 @@ impl AudioPlayerBackend {
 	//==============================================================================
 	fn create_with_output(mixer_link: Option<Rc<MixerLink>>, output_gain_node: Option<Rc<MixerGainNodeInner>>) -> AudioPlayerBackend {
 		let ended_generation = Arc::new(AtomicU64::new(0));
+		let gain_value = Arc::new(AtomicU32::new(1.0f32.to_bits()));
 		let player_id = match &mixer_link {
 			Some(mixer_link) => {
 				let player_id = mixer_link.create_node_id();
@@ -495,6 +525,7 @@ impl AudioPlayerBackend {
 					player_id,
 					output_bus_id: output_gain_node.as_ref().map(|output_gain_node| output_gain_node.bus_id),
 					ended_generation: ended_generation.clone(),
+					gain_value: gain_value.clone(),
 				});
 				player_id
 			}
@@ -508,6 +539,7 @@ impl AudioPlayerBackend {
 			_output_gain_node: output_gain_node,
 			started_generation: 0,
 			ended_generation,
+			gain_value,
 			is_source_active: false,
 			playback_rate: 1.0,
 		}
@@ -531,8 +563,17 @@ impl AudioPlayerBackend {
 	//==============================================================================
 	pub fn stop_source(&mut self) {
 		if self.is_source_active {
-			self.send(MixerCommand::StopSource { player_id: self.player_id });
+			self.send(MixerCommand::StopSource { player_id: self.player_id, time: 0.0 });
 			self.is_source_active = false;
+		}
+	}
+
+	//==============================================================================
+	// 그 시각에 소스를 멈춘다. (원본 source.stop(when), 끝나면 is_playing 이 거짓이 된다)
+	//==============================================================================
+	pub fn stop_source_at_time(&mut self, time: f64) {
+		if self.is_source_active {
+			self.send(MixerCommand::StopSource { player_id: self.player_id, time });
 		}
 	}
 
@@ -580,7 +621,23 @@ impl AudioPlayerBackend {
 	// 음량 설정. (GainNode 의 값, 0 ~ 1)
 	//==============================================================================
 	pub fn set_gain(&mut self, gain: f32) {
-		self.send(MixerCommand::SetPlayerGain { player_id: self.player_id, gain });
+		// 원본 gain.value 대입: 읽는 값은 바로 바뀌고 믹서에는 setValueAtTime(값, 지금)이 들어간다.
+		self.gain_value.store(gain.to_bits(), Ordering::Release);
+		self.send(MixerCommand::PlayerGainAutomation { player_id: self.player_id, automation: ParamAutomation::SetValue { value: gain } });
+	}
+
+	//==============================================================================
+	// 음량 자동화. (원본 gain.setValueAtTime 들)
+	//==============================================================================
+	pub fn apply_gain_automation(&mut self, automation: GainAutomation) {
+		self.send(MixerCommand::PlayerGainAutomation { player_id: self.player_id, automation: to_param_automation(automation) });
+	}
+
+	//==============================================================================
+	// 지금 음량. (원본 gain.value 읽기)
+	//==============================================================================
+	pub fn get_gain_value(&self) -> f32 {
+		f32::from_bits(self.gain_value.load(Ordering::Acquire))
 	}
 
 	//==============================================================================
@@ -636,7 +693,16 @@ impl AudioBusBackend {
 	//==============================================================================
 	pub fn set_gain(&mut self, gain: f32) {
 		if let Some(gain_node) = &self.gain_node {
-			gain_node.inner.mixer_link.send(MixerCommand::SetBusGain { bus_id: gain_node.inner.bus_id, gain });
+			gain_node.inner.mixer_link.send(MixerCommand::BusGainAutomation { bus_id: gain_node.inner.bus_id, automation: ParamAutomation::SetValue { value: gain } });
+		}
+	}
+
+	//==============================================================================
+	// 음량 자동화. (원본 SoundSystem 이 버스 gain 에 거는 setTargetAtTime 들)
+	//==============================================================================
+	pub fn apply_gain_automation(&mut self, automation: GainAutomation) {
+		if let Some(gain_node) = &self.gain_node {
+			gain_node.inner.mixer_link.send(MixerCommand::BusGainAutomation { bus_id: gain_node.inner.bus_id, automation: to_param_automation(automation) });
 		}
 	}
 

@@ -20,7 +20,7 @@
 //==============================================================================
 use crate::core::audiobus::AudioBus;
 use crate::core::audiomanager::{AudioManager, AudioManagerState};
-use crate::platform::audio::{self as audio_backend, AudioContext, AudioOutputNode, AudioPlayerBackend};
+use crate::platform::audio::{self as audio_backend, AudioContext, AudioOutputNode, AudioPlayerBackend, GainAutomation};
 use std::cell::{Ref, RefCell};
 use crate::resource::audioasset::AudioAsset;
 use std::rc::Rc;
@@ -146,6 +146,27 @@ impl AudioPlayer {
 	//==============================================================================
 	pub fn stop(&mut self) {
 		self.audio_player_backend.stop();
+	}
+
+	//==============================================================================
+	// 그 시각에 멈추기. (원본 SoundSystem 이 소스에 거는 source.stop(when), 끝나면 is_playing 이 거짓이 된다)
+	//==============================================================================
+	pub(crate) fn stop_at_time(&mut self, time: f64) {
+		self.audio_player_backend.stop_source_at_time(time);
+	}
+
+	//==============================================================================
+	// GainNode 의 gain 에 자동화 걸기. (원본 SoundSystem 이 gainNode.gain 에 거는 setValueAtTime 들, 음량과 음소거 칸은 건드리지 않는다)
+	//==============================================================================
+	pub(crate) fn apply_gain_automation(&mut self, automation: GainAutomation) {
+		self.audio_player_backend.apply_gain_automation(automation);
+	}
+
+	//==============================================================================
+	// GainNode 의 지금 gain. (원본 gainNode.gain.value 읽기, 자동화로 바뀌는 중이면 그 순간의 값)
+	//==============================================================================
+	pub(crate) fn get_gain_value(&self) -> f32 {
+		self.audio_player_backend.get_gain_value()
 	}
 
 	//==============================================================================

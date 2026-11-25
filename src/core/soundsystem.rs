@@ -30,9 +30,10 @@
 //     이벤트가 온 그 자리에서는 AudioContext 를 멈추거나 깨우고(소리가 바로 멎는다), 효과음 끊기는 다음 update 에서 한다.
 //   - load_sounds, load_sound 는 애셋 폴더 기준 경로를 풀 엔진을 받는다. (원본은 브라우저가 페이지 주소로 푼다) 데스크탑은 그 자리에서 읽는다.
 //     load_sounds 는 원본처럼 await 할 수 있는 SoundLoadHandle 을 돌려준다. (걸어 둔 소리를 다 받거나 실패할 때까지 기다린다, wait_for_load().await 도 같다)
-//   - WebAudio 는 크기 바꾸기와 줄이기를 소리 장치가 맡지만, 러스트 판은 같은 식(선형 줄이기, 지수 따라가기)을 update 마다 셈해
-//     소리마다의 크기는 플레이어에, 음악과 효과음의 크기는 버스에 건다. 그래서 update 를 매 프레임 불러야 한다. (원본도 매 프레임 부른다)
-//     버스 크기는 셈한 값이 바뀔 때만 건다. (원본처럼 버스의 set_volume, mute 로 건 값은 SoundSystem 이 크기를 다시 걸 때까지 간다)
+//   - 크기 바꾸기와 줄이기는 원본처럼 GainNode 의 AudioParam 자동화(value 대입, setValueAtTime, linearRampToValueAtTime, setTargetAtTime,
+//     cancelScheduledValues)와 source.stop(when)으로 소리 장치에 맡긴다. 웹은 WebAudio 에, 데스크탑은 믹서(크로미엄과 같은 셈)에 건다.
+//     원본 { source, gainNode } 자리는 버스로 만든 AudioPlayer 하나이고, 끝난 소리(원본 onended)는 update 에서 목록에서 뺀다.
+//     원본처럼 버스의 set_volume, mute 로 건 값은 SoundSystem 이 크기를 다시 걸 때까지 간다.
 //   - 무리에서 고르기와 음 높이 흔들기는 원본 Math.random 자리인 엔진 math::random(처음 쓸 때 시각으로 씨앗을 정한다)을 쓴다.
 //   - add_sound_asset(파일로 받지 않는 소리 더하기)과 get_effect_voice_count 는 러스트 판에서 먼저 만들었다. (원본에도 같은 이름으로 넣었다)
 //==============================================================================
@@ -47,7 +48,7 @@ use crate::core::audiomanager::{resume_audio_manager_state, AudioManager, AudioM
 use crate::core::audioplayer::AudioPlayer;
 use crate::core::engine::{Engine, PageEvent, PageEventListener};
 use crate::platform;
-use crate::platform::audio as audio_backend;
+use crate::platform::audio::{self as audio_backend, GainAutomation};
 use crate::resource::audioasset::{AudioAsset, AudioLoadHandle};
 
 //==============================================================================
@@ -107,8 +108,6 @@ const MAXIMUM_PAN: f32 = 1.0;
 const MINIMUM_EFFECT_VOLUME: f32 = 0.001;
 // 줄여 끈 효과음을 다 줄어든 뒤 멈추기까지 남기는 틈. (초)
 const EFFECT_STOP_MARGIN_SECONDS: f64 = 0.02;
-// 버스 크기를 다시 거는 가장 작은 차이. (따라가기가 거의 끝나면 더 걸지 않는다)
-const BUS_GAIN_EPSILON: f32 = 0.0001;
 
 thread_local! {
 	// 함께 쓰는 소리. (set_sound_system 으로 정한다)
@@ -160,110 +159,11 @@ impl SoundRow {
 }
 
 //==============================================================================
-// 시각에 따라 선형으로 바뀌는 크기. (WebAudio 의 setValueAtTime 뒤 linearRampToValueAtTime 한 번)
-// - start_time 전에는 start_value, end_time 뒤에는 end_value, 그 사이는 선형이다.
-//==============================================================================
-#[derive(Clone, Copy, Debug)]
-struct GainRamp {
-	start_time: f64,
-	start_value: f32,
-	end_time: f64,
-	end_value: f32,
-}
-
-impl GainRamp {
-	//==============================================================================
-	// 늘 같은 크기.
-	//==============================================================================
-	fn create_constant(value: f32) -> GainRamp {
-		GainRamp {
-			start_time: 0.0,
-			start_value: value,
-			end_time: 0.0,
-			end_value: value,
-		}
-	}
-
-	//==============================================================================
-	// start_time 에 start_value 에서 end_time 에 end_value 로.
-	//==============================================================================
-	fn create_ramp(start_time: f64, start_value: f32, end_time: f64, end_value: f32) -> GainRamp {
-		GainRamp {
-			start_time,
-			start_value,
-			end_time,
-			end_value,
-		}
-	}
-
-	//==============================================================================
-	// 그 시각의 크기.
-	//==============================================================================
-	fn read_value(&self, time: f64) -> f32 {
-		if time <= self.start_time {
-			return self.start_value;
-		}
-		if time >= self.end_time {
-			return self.end_value;
-		}
-		let ratio = ((time - self.start_time) / (self.end_time - self.start_time)) as f32;
-		self.start_value + (self.end_value - self.start_value) * ratio
-	}
-}
-
-//==============================================================================
-// 목표로 지수처럼 따라가는 크기. (WebAudio 의 setTargetAtTime, 시간 상수 VOLUME_SMOOTHING_SECONDS)
-// - GainNode 처럼 처음 크기는 1 이다.
-//==============================================================================
-#[derive(Clone, Copy, Debug)]
-struct SmoothedGain {
-	start_time: f64,
-	start_value: f32,
-	target_value: f32,
-}
-
-impl SmoothedGain {
-	//==============================================================================
-	// 그 시각의 크기.
-	//==============================================================================
-	fn read_value(&self, time: f64) -> f32 {
-		if time <= self.start_time {
-			return self.start_value;
-		}
-		let decay = (-(time - self.start_time) / VOLUME_SMOOTHING_SECONDS).exp() as f32;
-		self.target_value + (self.start_value - self.target_value) * decay
-	}
-
-	//==============================================================================
-	// 그 시각의 크기. (목표에 BUS_GAIN_EPSILON 안으로 다가왔으면 목표, 버스에 걸 때)
-	//==============================================================================
-	fn read_settled_value(&self, time: f64) -> f32 {
-		let value = self.read_value(time);
-		if (value - self.target_value).abs() <= BUS_GAIN_EPSILON {
-			return self.target_value;
-		}
-		value
-	}
-
-	//==============================================================================
-	// 그 시각부터 새 목표로 따라가기.
-	//==============================================================================
-	fn set_target(&mut self, time: f64, target_value: f32) {
-		self.start_value = self.read_value(time);
-		self.start_time = time;
-		self.target_value = target_value;
-	}
-}
-
-//==============================================================================
 // 나고 있는 효과음 하나. (원본 { soundId, source, gainNode, startTime }, 원본도 startTime 은 읽지 않아 뺐다)
 //==============================================================================
 struct EffectVoice {
 	sound_id: String,
 	audio_player: AudioPlayer,
-	gain: GainRamp,
-	// 멈출 때. (컨텍스트 시계 초, 없으면 끝까지)
-	stop_time: Option<f64>,
 }
 
 //==============================================================================
@@ -272,14 +172,11 @@ struct EffectVoice {
 struct MusicVoice {
 	sound_id: String,
 	audio_player: AudioPlayer,
-	gain: GainRamp,
 	// 튼 때. (컨텍스트 시계 초)
 	start_time: f64,
 	// 튼 자리와 소리 길이. (초)
 	offset: f64,
 	duration: f64,
-	// 멈출 때. (컨텍스트 시계 초, 줄여 끄기 전에는 없음)
-	stop_time: Option<f64>,
 }
 
 
@@ -379,21 +276,16 @@ pub struct SoundSystem {
 	// 배경음악과 효과음의 버스. (원본 #musicBus, #effectBus, 첫 누름 전에는 None)
 	music_bus: Option<AudioBus>,
 	effect_bus: Option<AudioBus>,
-	music_bus_gain: SmoothedGain,
-	effect_bus_gain: SmoothedGain,
-	// 버스에 마지막으로 건 크기.
-	applied_music_bus_gain: f32,
-	applied_effect_bus_gain: f32,
 	// 나고 있는 효과음. (원본 #voices)
 	voice_list: Vec<EffectVoice>,
-	// 줄여 끄는 중인 효과음. (원본은 목록에서 빼고 소리 장치가 끝까지 줄인다, 러스트 판은 다 줄어들 때까지 크기를 셈해 걸어야 해서 따로 든다)
+	// 줄여 끄는 중인 효과음. (원본은 목록에서 빼고 소리 장치가 끝까지 줄인 뒤 멈춘다. 러스트 판은 플레이어를 버리면 소리가 멎어 끝날 때까지 든다)
 	releasing_voice_list: Vec<EffectVoice>,
 	// 틀어 달라고 한 배경음악. (없으면 "")
 	music_id: String,
 	music_fade_seconds: f32,
 	is_music_resumed: bool,
 	playing_music: Option<MusicVoice>,
-	// 줄여 끄는 중인 배경음악.
+	// 줄여 끄는 중인 배경음악. (끝날 때까지 든다)
 	fading_music_list: Vec<MusicVoice>,
 	music_position_by_id: HashMap<String, f64>,
 	music_volume: f32,
@@ -445,10 +337,6 @@ impl SoundSystem {
 			last_variant_by_id: HashMap::new(),
 			music_bus: None,
 			effect_bus: None,
-			music_bus_gain: SmoothedGain { start_time: 0.0, start_value: 1.0, target_value: 1.0 },
-			effect_bus_gain: SmoothedGain { start_time: 0.0, start_value: 1.0, target_value: 1.0 },
-			applied_music_bus_gain: 1.0,
-			applied_effect_bus_gain: 1.0,
 			voice_list: Vec::new(),
 			releasing_voice_list: Vec::new(),
 			music_id: String::new(),
@@ -487,10 +375,7 @@ impl SoundSystem {
 	// AudioContext 시계. (초, 원본 audioContext.currentTime)
 	//==============================================================================
 	fn read_context_time(&self) -> f64 {
-		let context_time = self.audio_manager.get_context_time();
-		#[cfg(test)]
-		let context_time = context_time + self.test_time_offset;
-		context_time
+		self.audio_manager.get_context_time()
 	}
 
 	//==============================================================================
@@ -818,23 +703,20 @@ impl SoundSystem {
 		if clamped_pan != 0.0 {
 			audio_player.set_pan(clamped_pan);
 		}
-		// 앞만 틀고 줄여 끄는 소리.
-		let context_time = self.read_context_time();
-		let mut gain = GainRamp::create_constant(effect_volume);
-		let mut stop_time = None;
+		// 원본 gainNode.gain.value = effectVolume, source.start(0).
+		audio_player.set_volume(effect_volume);
+		audio_player.play(false);
+		// 앞만 틀고 줄여 끄는 소리. (원본 setValueAtTime, linearRampToValueAtTime, source.stop(when))
 		if sound_row.play_seconds > 0.0 {
 			let fade_out_seconds = sound_row.fade_out_seconds.max(0.0) as f64;
-			let fade_start_time = context_time + sound_row.play_seconds as f64;
-			gain = GainRamp::create_ramp(fade_start_time, effect_volume, fade_start_time + fade_out_seconds, 0.0);
-			stop_time = Some(fade_start_time + fade_out_seconds + EFFECT_STOP_MARGIN_SECONDS);
+			let fade_start_time = self.read_context_time() + sound_row.play_seconds as f64;
+			audio_player.apply_gain_automation(GainAutomation::SetValueAtTime { value: effect_volume, time: fade_start_time });
+			audio_player.apply_gain_automation(GainAutomation::LinearRampToValueAtTime { value: 0.0, time: fade_start_time + fade_out_seconds });
+			audio_player.stop_at_time(fade_start_time + fade_out_seconds + EFFECT_STOP_MARGIN_SECONDS);
 		}
-		audio_player.set_volume(gain.read_value(context_time));
-		audio_player.play(false);
 		self.voice_list.push(EffectVoice {
 			sound_id: String::from(sound_id),
 			audio_player,
-			gain,
-			stop_time,
 		});
 	}
 
@@ -900,9 +782,12 @@ impl SoundSystem {
 				voice.audio_player.stop();
 				continue;
 			}
-			let current_gain = voice.gain.read_value(context_time);
-			voice.gain = GainRamp::create_ramp(context_time, current_gain, context_time + clamped_fade_seconds, 0.0);
-			voice.stop_time = Some(context_time + clamped_fade_seconds + EFFECT_STOP_MARGIN_SECONDS);
+			// 원본: 지금 gain.value 에서 cancelScheduledValues, setValueAtTime, linearRampToValueAtTime(0), source.stop(when).
+			let current_gain = voice.audio_player.get_gain_value();
+			voice.audio_player.apply_gain_automation(GainAutomation::CancelScheduledValues { time: context_time });
+			voice.audio_player.apply_gain_automation(GainAutomation::SetValueAtTime { value: current_gain, time: context_time });
+			voice.audio_player.apply_gain_automation(GainAutomation::LinearRampToValueAtTime { value: 0.0, time: context_time + clamped_fade_seconds });
+			voice.audio_player.stop_at_time(context_time + clamped_fade_seconds + EFFECT_STOP_MARGIN_SECONDS);
 			self.releasing_voice_list.push(voice);
 		}
 	}
@@ -989,11 +874,6 @@ impl SoundSystem {
 		if !self.audio_manager.has_audio_context() {
 			return;
 		}
-		let context_time = self.read_context_time();
-		self.music_bus_gain = SmoothedGain { start_time: context_time, start_value: 1.0, target_value: 1.0 };
-		self.effect_bus_gain = SmoothedGain { start_time: context_time, start_value: 1.0, target_value: 1.0 };
-		self.applied_music_bus_gain = 1.0;
-		self.applied_effect_bus_gain = 1.0;
 		self.music_bus = Some(music_bus);
 		self.effect_bus = Some(self.audio_manager.create_audio_bus());
 		self.is_muted = false;
@@ -1001,16 +881,16 @@ impl SoundSystem {
 	}
 
 	//==============================================================================
-	// 크기 적용. (음소거면 0, 원본처럼 0.05 초를 시간 상수로 따라간다)
+	// 크기 적용. (음소거면 0, 원본처럼 버스 gain 에 setTargetAtTime(크기, 지금, 0.05))
 	//==============================================================================
 	fn apply_volumes(&mut self) {
-		if self.effect_bus.is_none() {
+		let (Some(music_bus), Some(effect_bus)) = (&self.music_bus, &self.effect_bus) else {
 			return;
-		}
+		};
 		let mute_scale = if self.is_muted { 0.0 } else { 1.0 };
 		let context_time = self.read_context_time();
-		self.music_bus_gain.set_target(context_time, self.music_volume * self.music_scale * mute_scale);
-		self.effect_bus_gain.set_target(context_time, self.sound_effect_volume * mute_scale);
+		music_bus.apply_gain_automation(GainAutomation::SetTargetAtTime { target: self.music_volume * self.music_scale * mute_scale, time: context_time, time_constant: VOLUME_SMOOTHING_SECONDS });
+		effect_bus.apply_gain_automation(GainAutomation::SetTargetAtTime { target: self.sound_effect_volume * mute_scale, time: context_time, time_constant: VOLUME_SMOOTHING_SECONDS });
 	}
 
 	//==============================================================================
@@ -1093,25 +973,24 @@ impl SoundSystem {
 			0.0
 		};
 		let row_volume = clamp_sound_volume(sound_row.volume);
-		let gain = if fade_seconds > 0.0 {
-			GainRamp::create_ramp(context_time, 0.0, context_time + fade_seconds, row_volume)
-		}
-		else {
-			GainRamp::create_constant(row_volume)
-		};
 		let mut audio_player = music_bus.create_audio_player();
 		audio_player.set_audio_asset(audio_asset);
 		audio_player.set_time(offset);
-		audio_player.set_volume(gain.read_value(context_time));
+		// 원본: 겹쳐 바꾸면 setValueAtTime(0, 지금), linearRampToValueAtTime(크기, 지금 + 초), 아니면 gain.value = 크기.
+		if fade_seconds > 0.0 {
+			audio_player.apply_gain_automation(GainAutomation::SetValueAtTime { value: 0.0, time: context_time });
+			audio_player.apply_gain_automation(GainAutomation::LinearRampToValueAtTime { value: row_volume, time: context_time + fade_seconds });
+		}
+		else {
+			audio_player.set_volume(row_volume);
+		}
 		audio_player.play(true);
 		self.playing_music = Some(MusicVoice {
 			sound_id: self.music_id.clone(),
 			audio_player,
-			gain,
 			start_time: context_time,
 			offset,
 			duration,
-			stop_time: None,
 		});
 	}
 
@@ -1125,66 +1004,28 @@ impl SoundSystem {
 			let stop_position = (playing_music.offset + stop_time - playing_music.start_time) % playing_music.duration;
 			self.music_position_by_id.insert(playing_music.sound_id.clone(), stop_position);
 		}
-		let current_gain = playing_music.gain.read_value(context_time);
-		playing_music.gain = if fade_seconds > 0.0 {
-			GainRamp::create_ramp(context_time, current_gain, stop_time, 0.0)
+		// 원본: 지금 gain.value 에서 cancelScheduledValues, setValueAtTime, 줄이면 linearRampToValueAtTime(0) 아니면 setValueAtTime(0), source.stop(when).
+		let audio_player = &mut playing_music.audio_player;
+		let current_gain = audio_player.get_gain_value();
+		audio_player.apply_gain_automation(GainAutomation::CancelScheduledValues { time: context_time });
+		audio_player.apply_gain_automation(GainAutomation::SetValueAtTime { value: current_gain, time: context_time });
+		if fade_seconds > 0.0 {
+			audio_player.apply_gain_automation(GainAutomation::LinearRampToValueAtTime { value: 0.0, time: stop_time });
 		}
 		else {
-			GainRamp::create_constant(0.0)
-		};
-		playing_music.stop_time = Some(stop_time + VOLUME_SMOOTHING_SECONDS);
+			audio_player.apply_gain_automation(GainAutomation::SetValueAtTime { value: 0.0, time: context_time });
+		}
+		audio_player.stop_at_time(stop_time + VOLUME_SMOOTHING_SECONDS);
 		self.fading_music_list.push(playing_music);
 	}
 
 	//==============================================================================
-	// 버스와 플레이어마다 지금 크기 걸기와 끝난 소리 치우기. (원본은 소리 장치가 크기를 바꾸고 onended 로 목록에서 뺀다)
+	// 끝난 소리 치우기. (원본 onended 가 목록에서 빼는 자리, 크기와 멈춤은 소리 장치가 자동화대로 한다)
 	//==============================================================================
 	fn update_voices(&mut self) {
-		let context_time = self.read_context_time();
-		self.apply_bus_gains(context_time);
-		let update_effect_voice = |voice: &mut EffectVoice| -> bool {
-			let is_stop_time = voice.stop_time.map(|stop_time| context_time >= stop_time).unwrap_or(false);
-			if is_stop_time || !voice.audio_player.is_playing() {
-				voice.audio_player.stop();
-				return false;
-			}
-			voice.audio_player.set_volume(voice.gain.read_value(context_time));
-			true
-		};
-		self.voice_list.retain_mut(update_effect_voice);
-		self.releasing_voice_list.retain_mut(update_effect_voice);
-		if let Some(playing_music) = self.playing_music.as_mut() {
-			playing_music.audio_player.set_volume(playing_music.gain.read_value(context_time));
-		}
-		self.fading_music_list.retain_mut(|music_voice| {
-			let is_stop_time = music_voice.stop_time.map(|stop_time| context_time >= stop_time).unwrap_or(false);
-			if is_stop_time {
-				music_voice.audio_player.stop();
-				return false;
-			}
-			music_voice.audio_player.set_volume(music_voice.gain.read_value(context_time));
-			true
-		});
-	}
-
-	//==============================================================================
-	// 버스에 지금 크기 걸기. (따라가는 크기가 마지막으로 건 것과 달라졌을 때만, 다 따라가면 목표 그대로)
-	//==============================================================================
-	fn apply_bus_gains(&mut self, context_time: f64) {
-		if let Some(music_bus) = &self.music_bus {
-			let music_bus_gain = self.music_bus_gain.read_settled_value(context_time);
-			if (music_bus_gain - self.applied_music_bus_gain).abs() > BUS_GAIN_EPSILON {
-				music_bus.apply_gain(music_bus_gain);
-				self.applied_music_bus_gain = music_bus_gain;
-			}
-		}
-		if let Some(effect_bus) = &self.effect_bus {
-			let effect_bus_gain = self.effect_bus_gain.read_settled_value(context_time);
-			if (effect_bus_gain - self.applied_effect_bus_gain).abs() > BUS_GAIN_EPSILON {
-				effect_bus.apply_gain(effect_bus_gain);
-				self.applied_effect_bus_gain = effect_bus_gain;
-			}
-		}
+		self.voice_list.retain(|voice| voice.audio_player.is_playing());
+		self.releasing_voice_list.retain(|voice| voice.audio_player.is_playing());
+		self.fading_music_list.retain(|music_voice| music_voice.audio_player.is_playing());
 	}
 }
 
@@ -1293,13 +1134,14 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 줄여 끄기: 목록에서 빠지고 지금 크기에서 0 으로, 앞만 트는 소리가 줄어드는 중이어도 지금 크기에서 새로 줄인다.
+	// 줄여 끄기: 목록에서 빠지고 지금 gain.value 에서 0 으로 줄인 뒤 멈춘다. (자동화와 stop(when)은 소리 장치가 한다, 셈은 platform/audio 시험이 크롬과 견준다)
+	// - 줄여 끄는 소리는 stop_effects 로도 끊기지 않고, 멈춘 뒤 update 가 치운다.
 	//==============================================================================
 	#[test]
-	fn fade_out_restarts_from_current_gain() {
+	fn fade_out_moves_voice_to_release_until_stopped() {
 		let engine = Engine::new(EngineConfiguration::new());
 		let mut short_row = SoundRow::create_effect("short", &[], 1.0);
-		short_row.play_seconds = 0.1;
+		short_row.play_seconds = 1.0;
 		short_row.fade_out_seconds = 1.0;
 		let mut sound_system = SoundSystem::new(&engine, vec![short_row]);
 		sound_system.add_sound_asset("short", create_silent_asset(5.0));
@@ -1309,41 +1151,15 @@ mod tests {
 			return;
 		}
 		sound_system.play_effect("short", 0.8, 0.0);
-		let context_time = sound_system.read_context_time();
-		let voice_gain = sound_system.voice_list[0].gain;
-		assert_eq!(voice_gain.read_value(context_time), 0.8);
-		assert!((voice_gain.read_value(context_time + 0.6) - 0.4).abs() < 1e-3);
-
-		// 줄어드는 한가운데(0.4)에서 2 초 줄이기를 걸면 0.4 에서 새로 줄인다.
-		sound_system.test_time_offset += 0.6;
-		sound_system.fade_out_effects("short", 2.0);
+		assert_eq!(sound_system.voice_list[0].audio_player.get_gain_value(), 0.8);
+		sound_system.fade_out_effects("short", 0.05);
 		assert_eq!(sound_system.get_effect_voice_count(), 0);
 		assert_eq!(sound_system.releasing_voice_list.len(), 1);
-		let context_time = sound_system.read_context_time();
-		let release_gain = sound_system.releasing_voice_list[0].gain;
-		assert!((release_gain.read_value(context_time) - 0.4).abs() < 1e-2);
-		assert!((release_gain.read_value(context_time + 1.0) - 0.2).abs() < 1e-2);
-
-		// 줄여 끄는 소리는 stop_effects 로도 끊기지 않고, 다 줄어든 뒤 치운다.
 		sound_system.stop_effects();
 		assert_eq!(sound_system.releasing_voice_list.len(), 1);
-		sound_system.test_time_offset += 2.1;
+		std::thread::sleep(std::time::Duration::from_millis(300));
 		sound_system.update();
 		assert!(sound_system.releasing_voice_list.is_empty());
-	}
-
-	//==============================================================================
-	// 크기는 0.05 초 시간 상수로 따라간다. (원본 setTargetAtTime)
-	//==============================================================================
-	#[test]
-	fn volume_follows_with_time_constant() {
-		let mut smoothed_gain = SmoothedGain { start_time: 0.0, start_value: 1.0, target_value: 1.0 };
-		smoothed_gain.set_target(1.0, 0.0);
-		assert_eq!(smoothed_gain.read_value(1.0), 1.0);
-		assert!((smoothed_gain.read_value(1.05) - (-1.0f32).exp()).abs() < 1e-5);
-		assert!(smoothed_gain.read_value(1.5) < 1e-4);
-		smoothed_gain.set_target(1.05, 1.0);
-		assert!((smoothed_gain.read_value(1.05) - (-1.0f32).exp()).abs() < 1e-5);
 	}
 
 	//==============================================================================
@@ -1459,15 +1275,15 @@ mod tests {
 		sound_system.update();
 		assert_eq!(sound_system.playing_music.as_ref().map(|music_voice| music_voice.sound_id.as_str()), Some("field"));
 
-		// 1 초 겹쳐 바꾸면, 앞 음악은 다 줄어든 때의 자리를 기억한다. (튼 뒤 흐른 시간 + 1 초, 실제 시계도 흘러 오차를 둔다)
+		// 0.1 초 겹쳐 바꾸면, 앞 음악은 다 줄어든 때의 자리를 기억한다. (튼 뒤 흐른 시간 + 0.1 초) 다 줄어 멈추면 치운다.
 		let start_time = sound_system.playing_music.as_ref().map(|music_voice| music_voice.start_time).unwrap_or(0.0);
-		sound_system.test_time_offset += 0.5;
-		sound_system.play_music("battle", 1.0, false);
+		std::thread::sleep(std::time::Duration::from_millis(50));
+		sound_system.play_music("battle", 0.1, false);
 		let elapsed_seconds = sound_system.read_context_time() - start_time;
 		let stored_position = sound_system.music_position_by_id.get("field").copied().unwrap_or(-1.0);
-		assert!((stored_position - (elapsed_seconds + 1.0)).abs() < 0.05);
+		assert!((stored_position - (elapsed_seconds + 0.1)).abs() < 0.02);
 		assert_eq!(sound_system.fading_music_list.len(), 1);
-		sound_system.test_time_offset += 1.1;
+		std::thread::sleep(std::time::Duration::from_millis(400));
 		sound_system.update();
 		assert!(sound_system.fading_music_list.is_empty());
 		assert_eq!(sound_system.playing_music.as_ref().map(|music_voice| music_voice.sound_id.as_str()), Some("battle"));
@@ -1485,9 +1301,10 @@ mod tests {
 		// "" 면 끈다.
 		sound_system.play_music("", 0.0, false);
 		assert_eq!(sound_system.get_music_id(), "");
-		sound_system.test_time_offset += 0.1;
 		sound_system.update();
 		assert!(sound_system.playing_music.is_none());
+		std::thread::sleep(std::time::Duration::from_millis(300));
+		sound_system.update();
 		assert!(sound_system.fading_music_list.is_empty());
 	}
 
@@ -1514,7 +1331,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 버스는 첫 update 뒤에 생기고, 설정 크기를 따라가 다 따라가면 목표 그대로 걸린다. 버스의 크기 칸은 SoundSystem 이 건드리지 않는다.
+	// 버스는 첫 update 뒤에 생긴다. 버스의 크기 칸은 SoundSystem 이 건드리지 않는다. (설정 크기는 버스 gain 의 setTargetAtTime 으로 소리 장치가 따라간다)
 	//==============================================================================
 	#[test]
 	fn buses_follow_volume_settings() {
@@ -1531,13 +1348,7 @@ mod tests {
 		assert!(sound_system.get_effect_bus().is_some());
 		sound_system.set_music_volume(0.5);
 		sound_system.set_sound_effect_volume(0.25);
-		sound_system.test_time_offset += 0.05;
 		sound_system.update();
-		assert!(sound_system.applied_music_bus_gain < 1.0 && sound_system.applied_music_bus_gain > 0.5);
-		sound_system.test_time_offset += 1.0;
-		sound_system.update();
-		assert_eq!(sound_system.applied_music_bus_gain, 0.5);
-		assert_eq!(sound_system.applied_effect_bus_gain, 0.25);
 		let effect_bus = sound_system.get_effect_bus().expect("effect bus");
 		assert_eq!(effect_bus.get_volume(), 1.0);
 		let mut audio_player = effect_bus.create_audio_player();

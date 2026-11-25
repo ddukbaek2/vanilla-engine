@@ -498,6 +498,21 @@
   - NodeTree::add_component, WorldNode::add_component 가 원본처럼 컴포넌트 자리를 먼저 잡고 붙을 때 더 붙는 컴포넌트를 그 뒤에 둔다
   - 원본과 같게 고친 것: UIConfirmWindow 의 제목과 글이 UILabel 이다. UIWindow 는 붙을 때가 아니라 create 에서 노드를 끈다. FloatingText 는 붙을 때 피봇과 앵커를 왼쪽 위로 둔다. UIDropdown 화살표는 원본 글자(▴, ▾)와 글 크기다. UIScrollBar 썸은 원본 썸 노드처럼 처음은 켜진 0 크기 사각형이다. UIInputField 는 tick 이 놓은 글 라벨 크기를 문서에 적는다. UIImageView 는 그림 경로를 품은 Sprite 와 따로 든다. UISpinner 점 자리는 원본처럼 f64 로 셈한다
   - DevTools: 반사도 등록도 없는 컴포넌트는 "반사 없음" 줄로 매크로를 빠뜨린 것을 알린다
+- 데스크탑이 HE-AAC v1(SBR), v2(PS)와 3 채널 이상 AAC 도 크롬처럼 푼다. (platform/audio/decode/aac.rs)
+  - AAC-LC 2 채널까지는 그대로 symphonia 로 풀고(크롬과 PNS 잡음까지 같다), symphonia 가 받지 않는 것(ASC 에 적힌 SBR, PS, 3 채널 이상)과 몸통에만 SBR 이 실린 것(ADTS 의 HE-AAC 같은, 첫 패킷의 표본율이 두 배가 되는지로 가린다)은 oxideav-aac 로 푼다
+  - oxideav-aac(MIT)는 ISO/IEC 14496-3, 13818-7 명세로 짠 순수 러스트 해석기다. 공개 저장소(OxideAV/oxideav-aac)의 커밋 역사가 명세 조항으로 짠 기록이고 FFmpeg 같은 LGPL 코드를 옮긴 흔적이 없다. 다른 후보 rusty_aac(Apache-2.0)는 해석기 소스의 공개 저장소와 커밋 역사가 없어(크레이트의 저장소 주소는 그것을 쓰는 다른 저장소) 출처를 확인할 수 없어 쓰지 않았다
+  - 정수로 반올림하기 전 실수 출력(set_float_pcm_capture)이 crates.io 판 0.1.7 에 없어 저장소 커밋 eac68f3 으로 묶었다. 다음 판이 나오면 crates.io 로 바꾼다
+  - 시험 소리 6 개(HE-AAC v1 m4a 와 adts, v2 m4a, 5.1 AAC m4a 와 adts, PNS 를 쓴 스테레오 AAC)를 더해 27 파일을 크롬 158 과 견준다. 길이와 채널이 같고 표본은 1.5e-7 안이다
+  - 남은 차이: 3 채널 이상 AAC 에 PNS 가 쓰이면 그 띠의 잡음 표본이 크롬과 다르다. (명세가 난수 생성기를 정하지 않아, 같게 하려면 FFmpeg 의 생성기를 옮겨야 한다)
+  - 늘어난 크레이트 4: oxideav-aac, oxideav-core, thiserror, thiserror-impl
+- 표본율 바꾸기의 x86_64 합 차례(AVX2 와 FMA, SSE)는 크롬과 같게 짰지만, 기대값을 애플 실리콘 맥에서 뽑아 x86 실기에서는 돌려 보지 못했다
+- SoundSystem 의 효과음 줄여 끄기, 앞만 틀기, 배경음악 겹쳐 바꾸기와 버스 크기 따라가기를 원본처럼 AudioParam 자동화로 한다. 지금까지는 웹과 데스크탑 모두 update 마다 같은 식을 셈해 음량을 걸었다
+  - 원본 soundsystem.js 와 같은 호출: 효과음은 gain.value 대입 뒤 setValueAtTime, linearRampToValueAtTime(0), source.stop(when), 줄여 끄기는 지금 gain.value 에서 cancelScheduledValues, setValueAtTime, linearRampToValueAtTime(0), stop(when), 음악은 setValueAtTime(0), linearRampToValueAtTime(크기) 와 지금 값에서 줄여 stop(when), 버스는 setTargetAtTime(크기, 지금, 0.05). 끝난 소리는 원본 onended 자리처럼 update 가 목록에서 뺀다
+  - 웹은 WebAudio AudioParam 과 AudioBufferSourceNode.stop(when)에 그대로 건다. (컨텍스트를 깨우는 동안 받은 stop 은 시작할 때 건다)
+  - 데스크탑 믹서의 GainNode gain 을 AudioParam 으로 바꿨다. (platform/audio/audioparam.rs, 크로미엄 audio_param_handler.cc 의 사건 넣기, 지난 사건 치우기, 새 사건 당기기, 선형과 지수 램프, 목표 따라가기, 목표 뒤 램프, 지우기를 옮겼다. x86_64 는 크롬의 SSE 4 줄 묶음과 같게) 자동화가 있는 퀀텀은 표본마다, 없으면 퀀텀마다 하나로 곱하고, 소스가 없어도 자동화는 흐른다. 소스의 stop(when)은 그 시각을 올림한 프레임에서 끊는다. 시계는 그린 프레임 수 / 표본율이다
+  - AudioPlayer, AudioBus 에 엔진 안에서 쓰는 apply_gain_automation, get_gain_value(원본 gain.value 읽기), stop_at_time 을 더했다. (공개 API 는 그대로다)
+  - 믹서 시험의 크롬 158 OfflineAudioContext 그래프를 다섯에서 아홉으로 늘렸다. (앞만 틀기와 버스 setTargetAtTime, 그리는 도중 suspend 로 멈춰 지금 gain.value 에서 줄여 끄기, 음악 겹쳐 바꾸기, 지수 램프와 목표 뒤 램프와 지우기) 모두 1e-6 안에서 같다
+  - BeepPlayer 의 데스크탑 톤은 그대로 엔벨로프를 식으로 그린다. (원본 자동화와 같은 식이지만 표본마다의 셈 차례는 다르다)
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.

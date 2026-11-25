@@ -74,6 +74,9 @@ cpal = { version = "0.18", features = ["realtime"] }
 symphonia = { version = "0.6", default-features = false, features = ["all-meta", "flac", "mpa", "ogg", "wav", "mkv", "pcm", "isomp4", "vorbis", "aac", "opt-simd"] }
 # Opus 해석. (크롬은 libopus 로 푼다. libopus 를 러스트로 옮긴 것으로 symphonia 코덱 등록표에 엔진 해석기로 넣는다. C 빌드가 없어 맥에서 윈도우 대상 검사가 된다)
 opus-pure = "0.2"
+# AAC 의 HE-AAC(SBR, PS)와 3 채널 이상. (ISO/IEC 14496-3 명세로 짠 순수 러스트 해석기, symphonia 의 AAC 가 받지 않는 것을 크롬처럼 푼다. AAC-LC 2 채널까지는 symphonia)
+# 정수로 반올림하기 전의 실수 출력(set_float_pcm_capture)이 아직 crates.io 판(0.1.7)에 없어 저장소의 커밋으로 묶는다. 다음 판이 나오면 crates.io 로 바꾼다
+oxideav-aac = { git = "https://github.com/OxideAV/oxideav-aac", rev = "eac68f31d7a7310bb8ac298c6591a0177b846340" }
 # SVG 그림. (데스크탑, usvg 로 읽고 tiny-skia 로 그린다. 원본은 브라우저가 SVG 를 그림으로 푼다. 웹은 브라우저가 푼다)
 resvg = "0.50"
 # 2D 그리기 대상 Canvas2D 의 칠하기. (데스크탑, 크롬이 쓰는 Skia 의 CPU 래스터라이저를 옮긴 것. resvg 가 쓰는 같은 판이라 더 받는 크레이트가 없다. 원본과 웹은 브라우저 캔버스)

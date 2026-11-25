@@ -16,7 +16,7 @@
 //==============================================================================
 use crate::core::audiomanager::{AudioManager, AudioManagerState};
 use crate::core::audioplayer::{clamp_volume, AudioPlayer};
-use crate::platform::audio::{AudioBusBackend, AudioGainNode};
+use crate::platform::audio::{AudioBusBackend, AudioGainNode, GainAutomation};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -129,11 +129,11 @@ impl AudioBus {
 	}
 
 	//==============================================================================
-	// 버스 노드에 크기를 바로 걸기. (SoundSystem 이 설정 크기와 음소거를 걸 때, 원본 gainNode.gain.setTargetAtTime 자리)
-	// - 크기 칸과 음소거 칸은 건드리지 않는다. 그래서 set_volume, mute 로 건 값은 다음에 이 함수가 불릴 때까지만 간다. (원본도 같은 노드에 건다)
+	// 버스 노드의 gain 에 자동화 걸기. (SoundSystem 이 설정 크기와 음소거를 걸 때, 원본 gainNode.gain.setTargetAtTime)
+	// - 크기 칸과 음소거 칸은 건드리지 않는다. 그래서 set_volume, mute 로 건 값은 다음 자동화가 덮을 때까지만 간다. (원본도 같은 노드에 건다)
 	//==============================================================================
-	pub(crate) fn apply_gain(&self, gain: f32) {
-		self.state.borrow_mut().audio_bus_backend.set_gain(gain);
+	pub(crate) fn apply_gain_automation(&self, automation: GainAutomation) {
+		self.state.borrow_mut().audio_bus_backend.apply_gain_automation(automation);
 	}
 
 	//==============================================================================
