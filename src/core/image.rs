@@ -1,7 +1,11 @@
 //==============================================================================
 // 이미지. (원본 HTMLImageElement / ImageAsset 자리)
-// - 형식: 원본은 브라우저가 푸는 형식을 모두 받는다. 데스크탑은 image 크레이트로 PNG, JPEG, WebP, GIF(첫 장), BMP, ICO, resvg 로 SVG 를 푼다.
+// - 형식: 원본은 브라우저가 푸는 형식을 모두 받는다. 데스크탑은 image 크레이트로 PNG, JPEG, WebP, GIF(첫 장), BMP, ICO, resvg 로 SVG,
+//   avif-parse 와 rav1d 로 AVIF 를 푼다. (core/avifimage.rs)
 //   웹은 애셋을 받을 때 브라우저(HTMLImageElement)가 먼저 풀어 손잡이에 둔다. (platform/web.rs, AVIF 와 애니메이션 PNG 의 첫 장 포함)
+// - 형(MIME)을 아는 바이트(data: 주소)는 load_from_memory_with_mime_type 으로 푼다. 브라우저처럼 형이 image/svg+xml 일 때만 SVG 이고, 그 밖은 내용으로 가린다.
+//   형을 모르는 바이트(파일)는 load_from_memory 가 내용으로 SVG 까지 가린다. (데스크탑에는 응답의 형이 없다)
+// - sniff_image_mime_type: WHATWG MIME 스니핑의 그림 표(ICO, CUR, BMP, GIF, WebP, PNG, JPEG)에 AVIF 를 더해 내용으로 형을 고른다. (데스크탑 Material 이 응답의 형 대신 쓴다)
 // - 픽셀은 프리멀티플라이드 알파 RGBA 로 들고 있다. (원본은 텍스처에 올릴 때 UNPACK_PREMULTIPLY_ALPHA 로 같은 일을 한다)
 // - Rc 로 나눠 쓰고, GPU 텍스처는 Graphic 의 ImageTextureCache 가 처음 그릴 때 만든다.
 // - GPU 에 올린 뒤에는 CPU 픽셀을 놓아 메모리를 돌려준다. (원본은 브라우저가 HTMLImageElement 를 들고 있다)
@@ -37,7 +41,7 @@ impl Image {
 	}
 
 	//==============================================================================
-	// 메모리에서 읽기. (PNG, JPEG, WebP, GIF 의 첫 장, BMP, ICO. 데스크탑은 SVG 도)
+	// 메모리에서 읽기. (PNG, JPEG, WebP, GIF 의 첫 장, BMP, ICO. 데스크탑은 SVG 와 AVIF 도)
 	// - 웹은 애셋을 받을 때 브라우저가 먼저 풀어 손잡이에 둔다. (platform/web.rs, 브라우저가 푸는 형식 모두) 여기는 그 밖의 바이트를 푼다.
 	//==============================================================================
 	pub fn load_from_memory(bytes: &[u8]) -> Result<Rc<Image>, String> {
@@ -45,6 +49,38 @@ impl Image {
 		{
 			if is_svg_bytes(bytes) {
 				return decode_svg(bytes);
+			}
+		}
+		Image::load_raster_from_memory(bytes)
+	}
+
+	//==============================================================================
+	// 형을 아는 바이트 읽기. (브라우저처럼 형이 image/svg+xml 이면 SVG, 그 밖은 내용으로 가린 래스터. data: 주소의 그림)
+	// - 웹은 SVG 를 브라우저가 푼다. (여기서는 Err)
+	//==============================================================================
+	pub fn load_from_memory_with_mime_type(bytes: &[u8], mime_type: &str) -> Result<Rc<Image>, String> {
+		let mime_essence = mime_type.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
+		if mime_essence == "image/svg+xml" {
+			#[cfg(not(target_arch = "wasm32"))]
+			{
+				return decode_svg(bytes);
+			}
+			#[cfg(target_arch = "wasm32")]
+			{
+				return Err(String::from("웹의 SVG 는 브라우저가 푼다."));
+			}
+		}
+		Image::load_raster_from_memory(bytes)
+	}
+
+	//==============================================================================
+	// 래스터 그림 읽기. (데스크탑 AVIF 와 image 크레이트의 형식, 내용으로 가린다)
+	//==============================================================================
+	fn load_raster_from_memory(bytes: &[u8]) -> Result<Rc<Image>, String> {
+		#[cfg(not(target_arch = "wasm32"))]
+		{
+			if is_avif_bytes(bytes) {
+				return crate::core::avifimage::decode_avif(bytes);
 			}
 		}
 		let dynamic_image = image::load_from_memory(bytes).map_err(|error| format!("이미지 해석 실패: {}", error))?;
@@ -157,6 +193,55 @@ impl Image {
 }
 
 //==============================================================================
+// 내용으로 그림 형 고르기. (WHATWG MIME 스니핑 6.1 의 그림 표에 AVIF 를 더한 것, 모르면 None)
+//==============================================================================
+pub fn sniff_image_mime_type(bytes: &[u8]) -> Option<&'static str> {
+	if bytes.starts_with(&[0x00, 0x00, 0x01, 0x00]) || bytes.starts_with(&[0x00, 0x00, 0x02, 0x00]) {
+		return Some("image/x-icon");
+	}
+	if bytes.starts_with(b"BM") {
+		return Some("image/bmp");
+	}
+	if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+		return Some("image/gif");
+	}
+	if bytes.len() >= 14 && bytes.starts_with(b"RIFF") && &bytes[8..14] == b"WEBPVP" {
+		return Some("image/webp");
+	}
+	if bytes.starts_with(&[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]) {
+		return Some("image/png");
+	}
+	if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
+		return Some("image/jpeg");
+	}
+	if is_avif_bytes(bytes) {
+		return Some("image/avif");
+	}
+	None
+}
+
+//==============================================================================
+// AVIF 바이트인지. (ISO BMFF 의 첫 상자가 ftyp 이고 주 상표나 호환 상표에 avif 나 avis 가 있다)
+//==============================================================================
+fn is_avif_bytes(bytes: &[u8]) -> bool {
+	if bytes.len() < 16 || &bytes[4..8] != b"ftyp" {
+		return false;
+	}
+	let box_size = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize;
+	let box_end = box_size.min(bytes.len());
+	if box_end < 16 {
+		return false;
+	}
+	let is_avif_brand = |brand: &[u8]| -> bool {
+		brand == b"avif" || brand == b"avis"
+	};
+	if is_avif_brand(&bytes[8..12]) {
+		return true;
+	}
+	bytes[16..box_end].chunks_exact(4).any(is_avif_brand)
+}
+
+//==============================================================================
 // SVG 바이트인지. (앞의 빈칸과 BOM 뒤가 '<' 로 시작하고 앞 4096 바이트 안에 "<svg" 가 있다)
 //==============================================================================
 #[cfg(not(target_arch = "wasm32"))]
@@ -236,6 +321,33 @@ mod tests {
 			assert_eq!((svg_image.get_width(), svg_image.get_height()), (4, 2));
 			assert_eq!(&svg_image.get_pixels()[0..4], &[255, 0, 0, 255]);
 			assert_eq!(svg_image.get_pixels()[3 * 4 + 3], 0);
+		}
+	}
+
+	//==============================================================================
+	// 내용으로 형 고르기(WHATWG 그림 표와 AVIF), 형을 아는 바이트는 image/svg+xml 일 때만 SVG 다.
+	//==============================================================================
+	#[test]
+	fn sniff_and_load_with_mime_type() {
+		assert_eq!(sniff_image_mime_type(&[0x00, 0x00, 0x01, 0x00, 1]), Some("image/x-icon"));
+		assert_eq!(sniff_image_mime_type(&[0x00, 0x00, 0x02, 0x00, 1]), Some("image/x-icon"));
+		assert_eq!(sniff_image_mime_type(b"BM\x00\x00"), Some("image/bmp"));
+		assert_eq!(sniff_image_mime_type(b"GIF89a\x01"), Some("image/gif"));
+		assert_eq!(sniff_image_mime_type(b"RIFF\x00\x00\x00\x00WEBPVP8 "), Some("image/webp"));
+		assert_eq!(sniff_image_mime_type(&[0xff, 0xd8, 0xff, 0xe0]), Some("image/jpeg"));
+		assert_eq!(sniff_image_mime_type(b"\x00\x00\x00\x18ftypmif1\x00\x00\x00\x00mif1avif"), Some("image/avif"));
+		assert_eq!(sniff_image_mime_type(b"\x00\x00\x00\x18ftypmif1\x00\x00\x00\x00mif1heic"), None);
+		assert_eq!(sniff_image_mime_type(b"<svg xmlns='http://www.w3.org/2000/svg'/>"), None);
+		let mut png_bytes: Vec<u8> = Vec::new();
+		::image::DynamicImage::ImageRgba8(::image::RgbaImage::new(1, 1)).write_to(&mut std::io::Cursor::new(&mut png_bytes), ::image::ImageFormat::Png).expect("png");
+		assert_eq!(sniff_image_mime_type(&png_bytes), Some("image/png"));
+		// 형이 틀려도 래스터는 내용으로 푼다. (브라우저와 같다)
+		assert!(Image::load_from_memory_with_mime_type(&png_bytes, "text/plain").is_ok());
+		#[cfg(not(target_arch = "wasm32"))]
+		{
+			let svg_bytes = b"<svg xmlns='http://www.w3.org/2000/svg' width='3' height='1'/>";
+			assert_eq!(Image::load_from_memory_with_mime_type(svg_bytes, "Image/SVG+XML; charset=utf-8").expect("svg").get_width(), 3);
+			assert!(Image::load_from_memory_with_mime_type(svg_bytes, "image/png").is_err());
 		}
 	}
 }

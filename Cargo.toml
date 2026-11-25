@@ -61,6 +61,9 @@ raw-window-handle = "0.6"
 kira = { version = "0.12", default-features = false, features = ["cpal", "cpal-realtime", "ogg", "vorbis", "mp3", "wav", "pcm", "flac", "isomp4", "aac"] }
 # SVG 그림. (데스크탑, usvg 로 읽고 tiny-skia 로 그린다. 원본은 브라우저가 SVG 를 그림으로 푼다. 웹은 브라우저가 푼다)
 resvg = "0.50"
+# AVIF 그림. (데스크탑, HEIF 상자는 엔진이 읽고 dav1d 를 러스트로 옮긴 rav1d 로 AV1 을 푼다. 원본은 브라우저가 AVIF 를 푼다. 웹은 브라우저가 푼다)
+# rav1d 의 asm 은 끈다. (켜면 x86 에서 nasm, arm 에서 C 어셈블러가 있어야 빌드된다. 그림 한 장 푸는 데는 순수 러스트로 넉넉하다)
+rav1d = { version = "1.1", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
 # 낱말 나누기. (공백 없이 쓰는 한중일과 태국어 같은 동남아 글자를 사전으로 나눈다. 크롬의 ICU4C 도 사전이다. 웹은 원본처럼 브라우저 Intl.Segmenter 를 쓴다)
 icu_segmenter = "2"
 # 한중일 사전(cjdict)의 낱말 값을 읽는다. (icu_segmenter 가 쓰는 같은 판, 크롬의 ICU4C 처럼 낱말 값의 합이 가장 작은 나누기를 고른다)

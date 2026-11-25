@@ -31,3 +31,5 @@ pub mod viewmanager;
 pub mod inputactions;
 pub mod sharedbakecache;
 pub mod textshaping;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod avifimage;
