@@ -6,9 +6,11 @@
 // - 스킨 없는 정적 메시는 합성 스킨(조인트 1개)으로, 모프 타깃은 실수 텍스처로 올려 같은 스키닝 경로로 그린다.
 // - 애니메이션 크로스페이드와 조인트 회전 오프셋(절차 포즈 가공), 모프 가중치(glTF weights / 프로그램)를 원본처럼 지원한다.
 // - 원본과 다른 것:
-//   - 원본은 async 이고 URL 을 fetch 한다(loadFromUrl, 바이트는 loadFromBytes). 러스트 판은 그 자리에서 끝나고, 같은 바이트 함수
-//     load_from_bytes / load_from_fbx_bytes / add_animations_from_fbx_bytes 와 URL 대신 데스크탑 경로를 읽는
-//     load_from_path / load_from_fbx_path / add_animations_from_fbx_path 를 둔다. (웹은 BlobAsset 의 바이트를 넘긴다)
+//   - 원본은 async 이고 URL 을 fetch 한다(loadFromUrl, 바이트는 loadFromBytes). 러스트 판의 바이트 함수
+//     load_from_bytes / load_from_fbx_bytes / add_animations_from_fbx_bytes 는 그 자리에서 끝난다.
+//     URL 함수 load_from_url / load_from_fbx_url 은 ImageAsset 처럼 엔진의 애셋 받기(데스크탑은 애셋 폴더 후보, 웹은 asset_base_url 에서 fetch)로
+//     바이트를 부탁하고 받기 손잡이(SkinnedModelLoadHandle)를 돌려준다. 다 받으면 손잡이의 create_model(gl, 렌더러)이 모델을 짓는다. (원본 Promise 자리)
+//     add_animations_from_fbx_url 은 받기를 부탁해 두고 다 받으면 다음 update 나 play_animation 에서 클립을 더한다. (돌려준 손잡이를 씬에 맡기면 기다릴 수 있다)
 //   - GL 을 쓰는 함수는 gl 을 받는다. update(delta_time) 는 GL 을 쓰지 않는다. 원본 update 6단계(바뀐 모프 타깃 업로드)는
 //     렌더러의 draw / draw_depth / draw_wireframe 가 upload_pending_morph_targets 로 대신한다. (그래서 그리기 함수가 &mut 모델을 받는다)
 //     덕분에 씬의 tick 에서 update 를 부를 수 있다.
@@ -22,9 +24,11 @@
 //==============================================================================
 use crate::base::matrix4::Matrix4;
 use crate::base::quaternion::Quaternion;
+use crate::core::asset::AssetLoadHandle;
+use crate::core::engine::Engine;
 use crate::core::graphic::{GlBuffer, GlTexture, GlVertexArray};
 use crate::core::shaderprogram::ShaderProgram;
-use crate::graphics3d::fbxloader::{FbxAnimation, FbxLoader, FbxSceneData};
+use crate::graphics3d::fbxloader::{FbxAnimation, FbxLoadHandle, FbxLoader, FbxSceneData};
 use crate::graphics3d::material::{ImageDescription, Material, MaterialDescription};
 use crate::graphics3d::skinnedmodelrenderer::SkinnedModelRenderer;
 use glow::HasContext;
@@ -402,6 +406,77 @@ pub struct SkinnedModel {
 	fade_elapsed: f32,
 	time_scale: f32,
 	joint_rotation_offsets: Vec<(usize, Quaternion)>,
+	// 받는 중인 애니메이션 FBX. (add_animations_from_fbx_url, 받기 손잡이 + 클립 이름 + 이동 무시)
+	pending_animation_load_list: Vec<(FbxLoadHandle, String, bool)>,
+}
+
+//==============================================================================
+// 모델 파일 꼴. (받기 손잡이가 어느 해석기로 지을지)
+//==============================================================================
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SkinnedModelFileFormat {
+	Glb,
+	Fbx,
+}
+
+//==============================================================================
+// 모델 받기 손잡이. (SkinnedModel::load_from_url, load_from_fbx_url 이 돌려준다. 원본 loadFromUrl, loadFromFbxUrl 의 Promise 자리)
+// - 씬은 get_load_handle 을 SceneBase::track_load_handle 로 맡겨 다 받을 때까지 initialize 를 미룰 수 있다.
+// - 모델은 GL 이 있는 자리에서 create_model(gl, 렌더러)로 짓는다.
+//==============================================================================
+#[derive(Clone, Debug)]
+pub struct SkinnedModelLoadHandle {
+	load_handle: AssetLoadHandle,
+	file_format: SkinnedModelFileFormat,
+}
+
+impl SkinnedModelLoadHandle {
+	//==============================================================================
+	// 바이트 읽기 손잡이. (씬에 맡길 때)
+	//==============================================================================
+	pub fn get_load_handle(&self) -> &AssetLoadHandle {
+		&self.load_handle
+	}
+
+	//==============================================================================
+	// 끝났는지. (받았거나 실패했거나)
+	//==============================================================================
+	pub fn is_finished(&self) -> bool {
+		self.load_handle.is_finished()
+	}
+
+	//==============================================================================
+	// 받은 바이트로 모델 짓기. (받는 중이면 None, 받기나 해석에 실패하면 Err. 원본 문구 "SkinnedModel load failed: url")
+	//==============================================================================
+	pub fn create_model(&self, gl: &glow::Context, skinned_model_renderer: &SkinnedModelRenderer) -> Option<Result<SkinnedModel, String>> {
+		if !self.load_handle.is_finished() {
+			return None;
+		}
+		let bytes = match self.load_handle.get_bytes() {
+			Some(bytes) => {
+				bytes
+			}
+			None => {
+				let error_label = match self.file_format {
+					SkinnedModelFileFormat::Glb => {
+						"SkinnedModel"
+					}
+					SkinnedModelFileFormat::Fbx => {
+						"FbxLoader"
+					}
+				};
+				return Some(Err(format!("{} load failed: {}", error_label, self.load_handle.get_asset_path())));
+			}
+		};
+		match self.file_format {
+			SkinnedModelFileFormat::Glb => {
+				Some(SkinnedModel::load_from_bytes(gl, &bytes, skinned_model_renderer))
+			}
+			SkinnedModelFileFormat::Fbx => {
+				Some(SkinnedModel::load_from_fbx_bytes(gl, &bytes, skinned_model_renderer))
+			}
+		}
+	}
 }
 
 impl SkinnedModel {
@@ -433,6 +508,7 @@ impl SkinnedModel {
 			fade_elapsed: 0.0,
 			time_scale: 1.0,
 			joint_rotation_offsets: Vec::new(),
+			pending_animation_load_list: Vec::new(),
 		}
 	}
 
@@ -456,23 +532,23 @@ impl SkinnedModel {
 	}
 
 	//==============================================================================
-	// 파일로부터 로드. (GLB, 원본 정적 loadFromUrl 의 데스크탑 판)
+	// 애셋 경로(웹은 URL)로부터 받기 부탁. (GLB, 원본 정적 loadFromUrl, 다 받으면 손잡이의 create_model 이 짓는다)
 	//==============================================================================
-	#[cfg(not(target_arch = "wasm32"))]
-	pub fn load_from_path(gl: &glow::Context, path: &std::path::Path, skinned_model_renderer: &SkinnedModelRenderer) -> Result<SkinnedModel, String> {
-		let bytes = std::fs::read(path).map_err(|error| format!("SkinnedModel load failed: {} ({})", path.display(), error))?;
-		SkinnedModel::load_from_bytes(gl, &bytes, skinned_model_renderer)
+	pub fn load_from_url(engine: &Engine, url: &str) -> SkinnedModelLoadHandle {
+		SkinnedModelLoadHandle {
+			load_handle: engine.request_asset_bytes(url),
+			file_format: SkinnedModelFileFormat::Glb,
+		}
 	}
 
 	//==============================================================================
-	// 파일로부터 로드. (바이너리 FBX, 원본 정적 loadFromFbxUrl 의 데스크탑 판)
+	// 애셋 경로(웹은 URL)로부터 받기 부탁. (바이너리 FBX, 원본 정적 loadFromFbxUrl)
 	//==============================================================================
-	#[cfg(not(target_arch = "wasm32"))]
-	pub fn load_from_fbx_path(gl: &glow::Context, path: &std::path::Path, skinned_model_renderer: &SkinnedModelRenderer) -> Result<SkinnedModel, String> {
-		let scene_data = FbxLoader::load_from_path(path)?;
-		let mut skinned_model = SkinnedModel::new(skinned_model_renderer.get_shader_program());
-		skinned_model.parse_fbx_content(gl, &scene_data)?;
-		Ok(skinned_model)
+	pub fn load_from_fbx_url(engine: &Engine, url: &str) -> SkinnedModelLoadHandle {
+		SkinnedModelLoadHandle {
+			load_handle: engine.request_asset_bytes(url),
+			file_format: SkinnedModelFileFormat::Fbx,
+		}
 	}
 
 	//==============================================================================
@@ -1065,13 +1141,38 @@ impl SkinnedModel {
 	}
 
 	//==============================================================================
-	// 애니메이션 FBX 추가. (파일, 원본 addAnimationsFromFbxUrl 의 데스크탑 판)
+	// 애니메이션 FBX 추가. (애셋 경로, 원본 addAnimationsFromFbxUrl. 다 받으면 다음 update 나 play_animation 에서 클립을 더한다)
+	// - 돌려준 손잡이를 씬에 맡기면 다 받을 때까지 기다릴 수 있다. 받기나 파싱에 실패하면 클립을 더하지 않고 오류를 찍는다. (원본은 Promise 가 거부된다)
 	//==============================================================================
-	#[cfg(not(target_arch = "wasm32"))]
-	pub fn add_animations_from_fbx_path(&mut self, path: &std::path::Path, clip_name: &str, ignore_translation: bool) -> Result<(), String> {
-		let scene_data = FbxLoader::load_from_path(path)?;
-		self.add_animations_from_fbx_scene_data(&scene_data, clip_name, ignore_translation);
-		Ok(())
+	pub fn add_animations_from_fbx_url(&mut self, engine: &Engine, url: &str, clip_name: &str, ignore_translation: bool) -> FbxLoadHandle {
+		let fbx_load_handle = FbxLoader::load_from_url(engine, url);
+		self.pending_animation_load_list.push((fbx_load_handle.clone(), String::from(clip_name), ignore_translation));
+		fbx_load_handle
+	}
+
+	//==============================================================================
+	// 다 받은 애니메이션 FBX 의 클립 더하기. (부탁한 차례대로, 앞의 것이 받는 중이면 뒤의 것도 기다린다)
+	//==============================================================================
+	fn apply_finished_animation_loads(&mut self) {
+		while !self.pending_animation_load_list.is_empty() {
+			let scene_data_result = match self.pending_animation_load_list[0].0.get_scene_data() {
+				Some(scene_data_result) => {
+					scene_data_result
+				}
+				None => {
+					return;
+				}
+			};
+			let (_, clip_name, ignore_translation) = self.pending_animation_load_list.remove(0);
+			match scene_data_result {
+				Ok(scene_data) => {
+					self.add_animations_from_fbx_scene_data(&scene_data, &clip_name, ignore_translation);
+				}
+				Err(error_message) => {
+					eprintln!("{}", error_message);
+				}
+			}
+		}
 	}
 
 	//==============================================================================
@@ -1491,9 +1592,10 @@ impl SkinnedModel {
 	}
 
 	//==============================================================================
-	// 애니메이션 재생. (크로스페이드, 같은 이름이 여럿이면 원본처럼 마지막 것, 원본 fade_duration 기본값 0.25)
+	// 애니메이션 재생. (크로스페이드, 같은 이름이 여럿이면 원본처럼 마지막 것, 원본 fade_duration 기본값 0.25. 다 받은 애니메이션 FBX 의 클립을 먼저 더한다)
 	//==============================================================================
 	pub fn play_animation(&mut self, animation_name: &str, fade_duration: f32) {
+		self.apply_finished_animation_loads();
 		if let Some(current_animation_index) = self.current_animation_index {
 			if self.animation_list[current_animation_index].name == animation_name {
 				return;
@@ -1532,9 +1634,10 @@ impl SkinnedModel {
 	}
 
 	//==============================================================================
-	// 갱신. (시간 전진 → 포즈 샘플링 → 월드/조인트 행렬 계산, GL 무관)
+	// 갱신. (다 받은 애니메이션 FBX 의 클립 더하기 → 시간 전진 → 포즈 샘플링 → 월드/조인트 행렬 계산, GL 무관)
 	//==============================================================================
 	pub fn update(&mut self, delta_time: f32) {
+		self.apply_finished_animation_loads();
 		// 애니메이션이 없어도 기본 포즈로 월드/조인트 행렬은 계산한다. (정적 모델 지원)
 		let current_animation_index = self.current_animation_index;
 		if current_animation_index.is_some() {

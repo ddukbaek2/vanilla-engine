@@ -14,7 +14,8 @@
 //   - 원본은 UIWindow 를 상속한다. 러스트 판은 UIWindow 의 덮어쓸 자리(UIWindowBehavior)를 구현한 값이다. (UIWindow::get_behavior_mut 으로 꺼낸다)
 //   - 글 줄 수는 원본처럼 레이아웃 때 바로 잰다. Graphic 이 없는 자리라 등록된 글꼴로 잰다. (Text::wrap_lines_without_graphic)
 //     글꼴이 하나도 없어 잴 수 없을 때만(데스크탑에 글꼴 파일이 없는 경우) 한 줄로 놓고, 글이 한 번 그려져 줄을 나누면 다음 tick 에 다시 놓는다.
-//   - 제목과 묻는 글은 UILabel 대신 Text 를 바로 붙인다. (줄 수를 읽으려고) 글의 오른쪽에서 왼쪽 방향은 러스트 Text 에 없어 단추 차례만 뒤집는다.
+//   - 제목과 묻는 글은 UILabel 대신 Text 를 바로 붙인다. (줄 수를 읽으려고) 오른쪽에서 왼쪽 언어면 원본처럼 두 글에 Rtl 방향을 걸고(아니면 Inherit) 단추 차례를 뒤집는다.
+//     set_right_to_left 는 창 노드를 받지 않아 글 방향을 다음 놓을 때 건다. 원본처럼 글 방향을 바로 걸려면 set_right_to_left_in_tree 를 부른다. (단추 차례는 원본도 다음 놓을 때)
 //   - 알림은 인자 없는 Box<dyn FnMut()> 다.
 //==============================================================================
 use crate::base::color::Color;
@@ -22,7 +23,7 @@ use crate::base::pivot::Pivot;
 use crate::base::vector2::Vector2;
 use crate::core::component::paint::Paint;
 use crate::core::component::text::Text;
-use crate::core::graphic::TextBaseline;
+use crate::core::graphic::{TextBaseline, TextDirection};
 use crate::core::node::nodetree::{ComponentContext, NodeId, NodeTree};
 use crate::ui::uibutton::UIButton;
 use crate::ui::uilabel::UILabel;
@@ -172,6 +173,18 @@ impl UIConfirmWindow {
 	}
 
 	//==============================================================================
+	// 오른쪽에서 왼쪽 언어인지 설정하고 글 방향을 바로 건다. (원본 setRightToLeft, 단추 차례는 다음 놓을 때부터)
+	//==============================================================================
+	pub fn set_right_to_left_in_tree(node_tree: &mut NodeTree, window_id: NodeId, is_right_to_left: bool) {
+		node_tree.with_component_mut::<UIWindow, _>(window_id, |window, tree| {
+			if let Some(confirm_window) = window.get_behavior_mut::<UIConfirmWindow>() {
+				confirm_window.set_right_to_left(is_right_to_left);
+				confirm_window.apply_text_direction(tree);
+			}
+		});
+	}
+
+	//==============================================================================
 	// 단추 글 설정. (원본 setButtonTexts)
 	//==============================================================================
 	pub fn set_button_texts(&mut self, node_tree: &mut NodeTree, cancel_text: &str, confirm_text: &str) {
@@ -213,7 +226,7 @@ impl UIConfirmWindow {
 	}
 
 	//==============================================================================
-	// 오른쪽에서 왼쪽 언어인지 설정. (참이면 취소가 오른쪽, 확인이 왼쪽, 다음 놓을 때부터)
+	// 오른쪽에서 왼쪽 언어인지 설정. (참이면 제목과 묻는 글이 Rtl 방향, 취소가 오른쪽, 확인이 왼쪽, 다음 놓을 때부터)
 	//==============================================================================
 	pub fn set_right_to_left(&mut self, is_right_to_left: bool) {
 		self.is_right_to_left = is_right_to_left;
@@ -246,6 +259,25 @@ impl UIConfirmWindow {
 		self.options.message = message.to_string();
 		if let Some(message_text) = self.message_id.and_then(|message_id| node_tree.get_node_mut(message_id)).and_then(|message_node| message_node.get_component_mut::<Text>()) {
 			message_text.set_text(message);
+		}
+	}
+
+	//==============================================================================
+	// 제목과 묻는 글에 글 방향 걸기. (오른쪽에서 왼쪽 언어면 Rtl, 아니면 Inherit. 원본 setRightToLeft 의 "rtl" / "inherit")
+	//==============================================================================
+	fn apply_text_direction(&self, node_tree: &mut NodeTree) {
+		let text_direction = if self.is_right_to_left {
+			TextDirection::Rtl
+		}
+		else {
+			TextDirection::Inherit
+		};
+		for text_id in [self.title_id, self.message_id] {
+			if let Some(text) = text_id.and_then(|text_id| node_tree.get_node_mut(text_id)).and_then(|text_node| text_node.get_component_mut::<Text>()) {
+				if text.get_text_direction() != text_direction {
+					text.set_text_direction(text_direction);
+				}
+			}
 		}
 	}
 
@@ -404,6 +436,7 @@ impl UIWindowBehavior for UIConfirmWindow {
 			message_text.set_line_spacing(CONFIRM_LINE_SPACING);
 		}
 		self.message_id = Some(message_id);
+		self.apply_text_direction(node_tree);
 
 		let cancel_button_id = UIConfirmWindow::create_button_node(node_tree, panel_id, &format!("{}Cancel", window_name), &self.options.cancel_text, Color::create(0.22, 0.25, 0.32, 1.0));
 		UIConfirmWindow::bind_button(node_tree, cancel_button_id, parts.window_id, false);
@@ -418,6 +451,7 @@ impl UIWindowBehavior for UIConfirmWindow {
 	//==============================================================================
 	fn layout_content(&mut self, node_tree: &mut NodeTree, parts: &UIWindowParts, panel_width: f32) -> f32 {
 		let inner_width = (panel_width - CONFIRM_PADDING * 2.0).max(1.0);
+		self.apply_text_direction(node_tree);
 		let mut top = CONFIRM_PADDING;
 		if let Some(title_node) = self.title_id.and_then(|title_id| node_tree.get_node_mut(title_id)) {
 			if title_node.is_active() {

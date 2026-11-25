@@ -14,13 +14,14 @@
 // - 원본과 다른 것:
 //   - 이벤트는 Box<dyn FnMut(&mut UIInputField, &mut ComponentContext)> 다. 원본 콜백은 값만 받는다. (값은 field.get_text())
 //   - setFont(FontFace) 는 set_font_family(등록한 폰트 이름) 로 바꿨다. setEngine 은 옮기지 않았다. (엔진은 문맥으로 받는다)
-//   - 글자 자리는 문자(char) 단위다. (원본은 UTF-16 단위. 한글은 같다) max_length 도 문자 수다.
+//   - 공개 함수의 글자 자리(get_cursor_index, get_selection_start, get_selection_range, move_cursor, measure_index_at_local_x)와 max_length 는
+//     원본처럼 UTF-16 단위로 센다. 안에서는 문자(char) 단위로 들어 서로게이트 쌍(이모지 같은 글자)을 쪼개지 않는다.
+//     그래서 UTF-16 자리가 서로게이트 쌍 가운데면 그 글자 뒤로 본다. max_length 로 자를 때도 글자를 쪼개지 않는 데까지 자른다. (원본은 쌍을 쪼갤 수 있다)
 //   - 누른 자리 → 글자 자리는 draw 때 재 둔 글자 경계로 찾는다. (원본은 오프스크린 2D 캔버스로 그때그때 잰다)
 //   - 데스크탑에서는 use_dom_input 이 켜진 필드도 원본 DOM 모드처럼 필드 밖을 누르면 포커스를 잃는다. 포커스는 엔진에 하나뿐이다.
 //     (원본 캔버스 모드는 다른 필드를 눌러도 앞 필드가 포커스를 쥐고 있다. 러스트 판은 나중에 포커스를 얻은 필드만 남긴다)
 //   - 포커스를 잃을 때 조합 중이던 글은 확정해 값에 넣는다. (브라우저가 DOM 입력에 하는 일과 같다)
 //   - 데스크탑 문맥 메뉴(오른쪽 단추)는 DOM 이 없어 캔버스에 그린다. 루트의 마지막 자식 노드로 만들어 위에 그린다. 웹은 원본처럼 DOM 메뉴다.
-//   - max_length 로 잘린 붙여넣기에서 원본은 커서가 글 끝을 넘을 수 있다. 러스트 판은 글 끝으로 자른다.
 //   - 노드를 끄거나(set_active(false)) 지우면 tick 이 돌지 않아 포커스와 IME, 웹의 숨긴 <input> 이 함께 사라진다. (원본은 detach 해야 사라진다)
 //   - getRenderState 는 옮기지 않았다. (그리는 컴포넌트가 하나라 넘길 일이 없다)
 //==============================================================================
@@ -35,7 +36,7 @@ use crate::core::engine::Engine;
 use crate::core::graphic::{Graphic, TextAlign, TextBaseline};
 use crate::core::node::nodetree::{ComponentContext, NodeId, NodeTree};
 use crate::core::node::worldnode::NodeTransform;
-use crate::core::textinput::{convert_character_index_to_byte_index, count_characters, TextInputEventKind, TextInputFieldState, TextInputKey};
+use crate::core::textinput::{convert_character_index_to_byte_index, convert_character_index_to_utf16_index, convert_utf16_index_to_character_index, count_characters, TextInputEventKind, TextInputFieldState, TextInputKey};
 use crate::ui::uicontrol::UIControl;
 use crate::ui::uiview::is_view_position_inside_node;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -77,6 +78,7 @@ pub enum UIInputFieldMenuAction {
 //==============================================================================
 // 편집 버퍼. (값, 조합 글, 커서, 선택 시작. 원본 UIInputField 의 #value / #composition / #cursor_index / #selection_start 와 편집 함수)
 // - 자리는 문자 단위다. 커서와 선택 시작이 다르면 그 사이가 선택 영역이다. (커서가 앞일 수도 있다)
+// - max_length 는 원본 maxLength 처럼 UTF-16 단위다. (웹 DOM <input> 의 maxlength 와 같은 셈)
 //==============================================================================
 #[derive(Clone, Debug, Default)]
 pub struct TextEditBuffer {
@@ -122,7 +124,7 @@ impl TextEditBuffer {
 	}
 
 	//==============================================================================
-	// 최대 길이 설정. (0 이면 제한 없음. 원본처럼 지금 값은 자르지 않는다)
+	// 최대 길이 설정. (UTF-16 단위, 0 이면 제한 없음. 원본처럼 지금 값은 자르지 않는다)
 	//==============================================================================
 	pub fn set_max_length(&mut self, max_length: usize) {
 		self.max_length = max_length;
@@ -136,12 +138,19 @@ impl TextEditBuffer {
 	}
 
 	//==============================================================================
-	// 값을 최대 길이로 자르기.
+	// 값을 최대 길이로 자르기. (UTF-16 길이가 max_length 를 넘지 않는 마지막 글자 경계까지)
 	//==============================================================================
 	fn truncate_to_max_length(&mut self) {
-		if self.max_length > 0 && count_characters(&self.value) > self.max_length {
-			let byte_index = convert_character_index_to_byte_index(&self.value, self.max_length);
-			self.value.truncate(byte_index);
+		if self.max_length == 0 {
+			return;
+		}
+		let mut utf16_count = 0;
+		for (byte_index, character) in self.value.char_indices() {
+			utf16_count += character.len_utf16();
+			if utf16_count > self.max_length {
+				self.value.truncate(byte_index);
+				return;
+			}
 		}
 	}
 
@@ -554,7 +563,7 @@ impl UIInputField {
 	}
 
 	//==============================================================================
-	// 최대 글자 수 설정. (0 이면 제한 없음)
+	// 최대 글자 수 설정. (원본처럼 UTF-16 단위, 0 이면 제한 없음)
 	//==============================================================================
 	pub fn set_max_length(&mut self, max_length: usize) {
 		self.edit_buffer.set_max_length(max_length);
@@ -786,10 +795,11 @@ impl UIInputField {
 	}
 
 	//==============================================================================
-	// 선택 범위. (앞, 뒤. 없으면 None)
+	// 선택 범위. (앞, 뒤. 원본처럼 UTF-16 단위, 없으면 None)
 	//==============================================================================
 	pub fn get_selection_range(&self) -> Option<(usize, usize)> {
-		self.edit_buffer.get_selection_range()
+		let (start_index, end_index) = self.edit_buffer.get_selection_range()?;
+		Some((self.convert_to_utf16_index(start_index), self.convert_to_utf16_index(end_index)))
 	}
 
 	//==============================================================================
@@ -800,25 +810,40 @@ impl UIInputField {
 	}
 
 	//==============================================================================
-	// 커서 자리. (문자 단위)
+	// 커서 자리. (원본처럼 UTF-16 단위)
 	//==============================================================================
 	pub fn get_cursor_index(&self) -> usize {
-		self.edit_buffer.get_cursor_index()
+		self.convert_to_utf16_index(self.edit_buffer.get_cursor_index())
 	}
 
 	//==============================================================================
-	// 선택 시작 자리. (문자 단위)
+	// 선택 시작 자리. (원본처럼 UTF-16 단위)
 	//==============================================================================
 	pub fn get_selection_start(&self) -> usize {
-		self.edit_buffer.get_selection_start()
+		self.convert_to_utf16_index(self.edit_buffer.get_selection_start())
 	}
 
 	//==============================================================================
-	// 커서 옮기기. (원본 move_cursor)
+	// 커서 옮기기. (원본 move_cursor, 자리는 UTF-16 단위)
 	//==============================================================================
 	pub fn move_cursor(&mut self, new_index: usize, is_selection_extended: bool) {
-		self.edit_buffer.move_cursor(new_index, is_selection_extended);
+		let character_index = convert_utf16_index_to_character_index(self.edit_buffer.get_text(), new_index);
+		self.move_cursor_to_character(character_index, is_selection_extended);
+	}
+
+	//==============================================================================
+	// 커서를 문자 자리로 옮기기. (편집 키와 누르기가 쓴다)
+	//==============================================================================
+	fn move_cursor_to_character(&mut self, character_index: usize, is_selection_extended: bool) {
+		self.edit_buffer.move_cursor(character_index, is_selection_extended);
 		self.bump_value_revision();
+	}
+
+	//==============================================================================
+	// 값의 문자 자리 → UTF-16 자리. (공개 함수가 원본처럼 UTF-16 단위로 돌려줄 때)
+	//==============================================================================
+	fn convert_to_utf16_index(&self, character_index: usize) -> usize {
+		convert_character_index_to_utf16_index(self.edit_buffer.get_text(), character_index)
 	}
 
 	//==============================================================================
@@ -970,9 +995,17 @@ impl UIInputField {
 	}
 
 	//==============================================================================
-	// 노드 x(content 영역 기준) → 글자 자리. (draw 때 재 둔 글자 경계로 찾는다. 아직 재지 않았으면 글 끝)
+	// 노드 x(content 영역 기준) → 글자 자리. (원본처럼 UTF-16 단위)
 	//==============================================================================
 	pub fn measure_index_at_local_x(&self, local_x: f32) -> usize {
+		let character_index = self.measure_character_index_at_local_x(local_x);
+		self.convert_to_utf16_index(character_index)
+	}
+
+	//==============================================================================
+	// 노드 x(content 영역 기준) → 문자 자리. (draw 때 재 둔 글자 경계로 찾는다. 아직 재지 않았으면 글 끝)
+	//==============================================================================
+	fn measure_character_index_at_local_x(&self, local_x: f32) -> usize {
 		let value = self.edit_buffer.get_text();
 		if value.is_empty() {
 			return 0;
@@ -1089,17 +1122,17 @@ impl UIInputField {
 				}
 			}
 			TextInputKey::Left => {
-				self.move_cursor(cursor_index.saturating_sub(1), is_shift);
+				self.move_cursor_to_character(cursor_index.saturating_sub(1), is_shift);
 			}
 			TextInputKey::Right => {
-				self.move_cursor(cursor_index + 1, is_shift);
+				self.move_cursor_to_character(cursor_index + 1, is_shift);
 			}
 			TextInputKey::Home => {
-				self.move_cursor(0, is_shift);
+				self.move_cursor_to_character(0, is_shift);
 			}
 			TextInputKey::End => {
 				let character_count = count_characters(self.edit_buffer.get_text());
-				self.move_cursor(character_count, is_shift);
+				self.move_cursor_to_character(character_count, is_shift);
 			}
 			TextInputKey::Enter => {
 				self.fire_submit_event(context);
@@ -1373,7 +1406,7 @@ impl Component for UIInputField {
 		self.focus();
 		self.hide_context_menu(context);
 		let local_x = self.convert_view_position_to_local_x(context, view_input_position);
-		let character_index = self.measure_index_at_local_x(local_x);
+		let character_index = self.measure_character_index_at_local_x(local_x);
 		self.drag_start_index = Some(character_index);
 		self.edit_buffer.set_selection(character_index, character_index);
 		self.bump_value_revision();
@@ -1390,7 +1423,7 @@ impl Component for UIInputField {
 			}
 		};
 		let local_x = self.convert_view_position_to_local_x(context, view_input_position);
-		let character_index = self.measure_index_at_local_x(local_x);
+		let character_index = self.measure_character_index_at_local_x(local_x);
 		self.edit_buffer.set_selection(drag_start_index, character_index);
 		self.bump_value_revision();
 		self.reset_cursor_blink();
@@ -1790,6 +1823,30 @@ mod tests {
 		edit_buffer.set_composition("한");
 		assert_eq!(edit_buffer.build_display_text(), "가한나XY");
 		assert_eq!(edit_buffer.get_text_before_cursor(), "가");
+	}
+
+	//==============================================================================
+	// 공개 함수의 글자 자리와 최대 길이는 원본처럼 UTF-16 단위다. (서로게이트 쌍은 쪼개지 않는다)
+	//==============================================================================
+	#[test]
+	fn public_indices_count_utf16_units() {
+		let (mut node_tree, field_id) = create_field_tree();
+		let field = get_field(&mut node_tree, field_id);
+		field.set_text("a😀b");
+		assert_eq!(field.get_cursor_index(), 4);
+		field.move_cursor(1, false);
+		assert_eq!(field.get_cursor_index(), 1);
+		field.move_cursor(3, true);
+		assert_eq!(field.get_selection_range(), Some((1, 3)));
+		assert_eq!(field.get_selection_text(), "😀");
+		field.move_cursor(2, false);
+		assert_eq!(field.get_cursor_index(), 3);
+		assert_eq!(field.get_selection_start(), 3);
+		field.set_max_length(3);
+		field.set_text("😀😀");
+		assert_eq!(field.get_text(), "😀");
+		assert_eq!(field.get_cursor_index(), 2);
+		assert_eq!(field.get_max_length(), 3);
 	}
 
 	//==============================================================================

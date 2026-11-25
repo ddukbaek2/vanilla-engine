@@ -5,12 +5,14 @@
 // - 원본처럼 순수 파서다. GL 이나 셰이딩을 모르고, wasm32 에서도 돈다. 압축 배열(deflate, zlib 머리)은 flate2(순수 러스트)로 푼다.
 // - 원본과 다른 것:
 //   - 원본은 async 다. (압축 배열을 브라우저 DecompressionStream 으로 풀어서다) 러스트 판은 flate2 로 그 자리에서 끝난다.
-//     원본 loadFromUrl(url) 은 URL 대신 데스크탑 경로를 읽는 load_from_path 로 옮겼다. 웹은 BlobAsset 으로 받은 바이트를 parse 에 넘긴다.
+//     원본 loadFromUrl(url) 의 Promise 는 ImageAsset 처럼 받기 손잡이(FbxLoadHandle)다. load_from_url(엔진, 애셋 경로)이 엔진의 애셋 받기
+//     (데스크탑은 애셋 폴더 후보에서 읽고, 웹은 asset_base_url 에서 fetch)로 바이트를 부탁하고, 다 받으면 get_scene_data 가 파싱한 결과를 돌려준다.
 //   - 64비트 정수: 원본은 오브젝트 id 처럼 하나로 든 값이 2^53 을 넘으면 BigInt 로 든다. 러스트 판은 i64 다. 배열(키 시간)은 원본이 Number 다.
 //   - 원본은 순서 있는 Map 을 쓴다. 러스트 판은 넣은 순서를 지키는 FbxObjectMap 으로 같은 순회 순서를 낸다.
-//   - 원본은 읽는 자리(커서)를 객체에 들고 레코드를 읽는다. 러스트 판은 커서를 들지 않고 parse_node_records, read_version 과 FbxNodeRecord 의 읽기 함수로 바이트 조각을 읽는다.
 //   - 원본에서 만들고 쓰지 않는 objectById 와 getDataView / getFileBytes / getTextDecoder 는 옮기지 않았다.
 //==============================================================================
+use crate::core::asset::AssetLoadHandle;
+use crate::core::engine::Engine;
 use crate::graphics3d::skinnedmodel::AnimationPath;
 use std::collections::{HashMap, HashSet};
 use std::io::Read;
@@ -651,6 +653,49 @@ impl LayerReader<'_> {
 }
 
 //==============================================================================
+// FBX 받기 손잡이. (FbxLoader::load_from_url 이 돌려준다. 원본 loadFromUrl 의 Promise 자리)
+// - 씬은 get_load_handle 을 SceneBase::track_load_handle 로 맡겨 다 받을 때까지 initialize 를 미룰 수 있다.
+//==============================================================================
+#[derive(Clone, Debug)]
+pub struct FbxLoadHandle {
+	load_handle: AssetLoadHandle,
+}
+
+impl FbxLoadHandle {
+	//==============================================================================
+	// 바이트 읽기 손잡이. (씬에 맡길 때)
+	//==============================================================================
+	pub fn get_load_handle(&self) -> &AssetLoadHandle {
+		&self.load_handle
+	}
+
+	//==============================================================================
+	// 끝났는지. (받았거나 실패했거나)
+	//==============================================================================
+	pub fn is_finished(&self) -> bool {
+		self.load_handle.is_finished()
+	}
+
+	//==============================================================================
+	// 파싱한 중간 표현. (받는 중이면 None, 받기나 파싱에 실패하면 Err. 원본 문구 "FbxLoader load failed: url")
+	//==============================================================================
+	pub fn get_scene_data(&self) -> Option<Result<FbxSceneData, String>> {
+		if !self.load_handle.is_finished() {
+			return None;
+		}
+		let file_bytes = match self.load_handle.get_bytes() {
+			Some(file_bytes) => {
+				file_bytes
+			}
+			None => {
+				return Some(Err(format!("FbxLoader load failed: {}", self.load_handle.get_asset_path())));
+			}
+		};
+		Some(FbxLoader::new().parse(&file_bytes))
+	}
+}
+
+//==============================================================================
 // FBX 로더.
 //==============================================================================
 pub struct FbxLoader {
@@ -679,13 +724,12 @@ impl FbxLoader {
 	}
 
 	//==============================================================================
-	// 파일로부터 파싱. (원본 정적 loadFromUrl 의 데스크탑 판)
+	// 애셋 경로(웹은 URL)로부터 받기 부탁. (원본 정적 loadFromUrl, 다 받으면 손잡이의 get_scene_data 가 파싱한다)
 	//==============================================================================
-	#[cfg(not(target_arch = "wasm32"))]
-	pub fn load_from_path(path: &std::path::Path) -> Result<FbxSceneData, String> {
-		let file_bytes = std::fs::read(path).map_err(|error| format!("FbxLoader load failed: {} ({})", path.display(), error))?;
-		let mut fbx_loader = FbxLoader::new();
-		fbx_loader.parse(&file_bytes)
+	pub fn load_from_url(engine: &Engine, url: &str) -> FbxLoadHandle {
+		FbxLoadHandle {
+			load_handle: engine.request_asset_bytes(url),
+		}
 	}
 
 	//==============================================================================
@@ -2076,6 +2120,31 @@ mod tests {
 		let compressed_bytes = zlib_encoder.finish().expect("deflate finish");
 		assert_eq!(FbxLoader::inflate(&compressed_bytes, original_bytes.len()), Ok(original_bytes));
 		assert!(FbxLoader::inflate(&[1, 2, 3], 3).is_err());
+	}
+
+	//==============================================================================
+	// URL 받기 손잡이. (엔진 애셋 폴더 기준. 없는 파일은 Err, 예제 walk.fbx 가 있으면 파싱 결과)
+	//==============================================================================
+	#[test]
+	fn load_from_url_uses_engine_assets() {
+		let mut engine_configuration = crate::core::engine::EngineConfiguration::new();
+		engine_configuration.asset_directory_paths = vec![std::path::PathBuf::from(EXAMPLE_ASSET_DIRECTORY)];
+		let engine = Engine::new(engine_configuration);
+		let missing_load_handle = FbxLoader::load_from_url(&engine, "missing_model.fbx");
+		assert!(missing_load_handle.is_finished());
+		assert_eq!(missing_load_handle.get_scene_data().map(|scene_data_result| scene_data_result.err()), Some(Some(String::from("FbxLoader load failed: missing_model.fbx"))));
+		if !std::path::Path::new(EXAMPLE_ASSET_DIRECTORY).join("anims").join("walk.fbx").exists() {
+			eprintln!("walk.fbx 없음, 건너뜀");
+			return;
+		}
+		let walk_load_handle = FbxLoader::load_from_url(&engine, "anims/walk.fbx");
+		let scene_data = walk_load_handle.get_scene_data().expect("finished").expect("scene");
+		assert!(!scene_data.animation_list.is_empty());
+		let mut skinned_model = SkinnedModel::create_without_shader_program();
+		skinned_model.add_animations_from_fbx_url(&engine, "anims/walk.fbx", "Walk", true);
+		assert!(skinned_model.get_animation_list().is_empty());
+		skinned_model.update(0.0);
+		assert!(skinned_model.get_animation_name_list().contains(&String::from("Walk")));
 	}
 
 	//==============================================================================

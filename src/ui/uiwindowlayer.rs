@@ -440,6 +440,8 @@ mod tests {
 	use crate::base::rect::Rect;
 	use crate::core::engine::{Engine, EngineConfiguration};
 	use crate::core::node::nodetree::TouchKind;
+	use crate::core::component::text::Text;
+	use crate::core::graphic::TextDirection;
 	use crate::ui::uiconfirmwindow::{UIConfirmWindow, UIConfirmWindowOptions};
 	use crate::ui::uiwindow::{UIWindowBehavior, UIWindowDefaultBehavior};
 	use std::cell::Cell;
@@ -594,6 +596,10 @@ mod tests {
 		};
 		assert!(!node_tree[title_id].is_active());
 		assert!(node_tree[confirm_id].get_local_position().x < node_tree[cancel_id].get_local_position().x);
+		assert_eq!(node_tree[title_id].get_component::<Text>().expect("title").get_text_direction(), TextDirection::Rtl);
+		UIConfirmWindow::set_right_to_left_in_tree(&mut node_tree, window_id, false);
+		assert_eq!(node_tree[title_id].get_component::<Text>().expect("title").get_text_direction(), TextDirection::Inherit);
+		UIConfirmWindow::set_right_to_left_in_tree(&mut node_tree, window_id, true);
 		click_node(&mut node_tree, &engine, confirm_id);
 		assert_eq!(confirm_count.get(), 1);
 		assert_eq!(cancel_count.get(), 0);

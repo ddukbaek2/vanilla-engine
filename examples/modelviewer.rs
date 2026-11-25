@@ -1,6 +1,7 @@
 //==============================================================================
 // 3D 모델 보기 예제. (데스크탑, 원본 examples/ancientmountain 의 3D 경로를 엔진 루프 안에서 돌린다)
-// - 원본 예제의 soldier.glb, fox.glb(노멀 없음), Remy.fbx + anims/idle.fbx, walk.fbx 를 BlobAsset 으로 읽는다.
+// - 원본 예제의 soldier.glb, fox.glb(노멀 없음), Remy.fbx + anims/idle.fbx, walk.fbx 를 원본처럼 URL 함수로 받는다.
+//   (SkinnedModel::load_from_url, load_from_fbx_url 의 받기 손잡이를 씬에 맡기고, 애니메이션은 add_animations_from_fbx_url)
 //   애셋 폴더 후보에 원본 저장소의 절대 경로를 넣는다. (읽기만 한다)
 // - 땅은 코드로 만든 GLB 다. (정적 메시 → 합성 스킨 경로)
 // - 원본 3D 씬은 자체 rAF 를 돌리지만, 여기서는 씬의 pre_draw 에서 그린다:
@@ -12,7 +13,7 @@
 
 use std::path::PathBuf;
 use vanilla::{
-	AmbientOcclusionEffect, BlobAsset, BloomEffect, Color, Engine, EngineConfiguration, FullscreenPass, Graphic, Matrix4, Rect, RenderTarget, Scene, SceneBase, ShadowMap, SkinnedModel, SkinnedModelRenderer, SubsurfaceScatteringEffect, TextAlign, TextBaseline, Vector3,
+	AmbientOcclusionEffect, BloomEffect, Color, Engine, EngineConfiguration, FullscreenPass, Graphic, Matrix4, Rect, RenderTarget, Scene, SceneBase, ShadowMap, SkinnedModel, SkinnedModelLoadHandle, SkinnedModelRenderer, SubsurfaceScatteringEffect, TextAlign, TextBaseline, Vector3,
 };
 use glow::HasContext;
 
@@ -96,11 +97,9 @@ struct ViewerResources {
 //==============================================================================
 struct ModelViewerScene {
 	scene_base: SceneBase,
-	soldier_asset: BlobAsset,
-	fox_asset: BlobAsset,
-	remy_asset: BlobAsset,
-	idle_animation_asset: BlobAsset,
-	walk_animation_asset: BlobAsset,
+	soldier_load_handle: Option<SkinnedModelLoadHandle>,
+	fox_load_handle: Option<SkinnedModelLoadHandle>,
+	remy_load_handle: Option<SkinnedModelLoadHandle>,
 	resources: Option<ViewerResources>,
 	load_error_message: Option<String>,
 	elapsed_time: f32,
@@ -116,11 +115,9 @@ impl ModelViewerScene {
 	fn new() -> ModelViewerScene {
 		ModelViewerScene {
 			scene_base: SceneBase::new(),
-			soldier_asset: BlobAsset::new(),
-			fox_asset: BlobAsset::new(),
-			remy_asset: BlobAsset::new(),
-			idle_animation_asset: BlobAsset::new(),
-			walk_animation_asset: BlobAsset::new(),
+			soldier_load_handle: None,
+			fox_load_handle: None,
+			remy_load_handle: None,
 			resources: None,
 			load_error_message: None,
 			elapsed_time: 0.0,
@@ -131,35 +128,41 @@ impl ModelViewerScene {
 	}
 
 	//==============================================================================
-	// GL 리소스와 모델 만들기. (BlobAsset 바이트 → 렌더러, 모델, 그림자, 렌더 타겟, 이펙트)
+	// GL 리소스와 모델 만들기. (받은 모델 → 렌더러, 모델, 그림자, 렌더 타겟, 이펙트)
 	//==============================================================================
-	fn create_resources(&self, gl: &glow::Context) -> Result<ViewerResources, String> {
+	fn create_resources(&self, engine: &Engine, gl: &glow::Context) -> Result<ViewerResources, String> {
 		let mut skinned_model_renderer = SkinnedModelRenderer::new(gl, None, None)?;
 		let sun_direction = Vector3::create(0.5, 0.8, 0.35).normalize();
 		skinned_model_renderer.set_sun_direction(sun_direction.x, sun_direction.y, sun_direction.z);
 		skinned_model_renderer.set_fog_color(0.62, 0.72, 0.86);
 		skinned_model_renderer.set_fog_range(25.0, 80.0);
 
-		let read_bytes = |blob_asset: &BlobAsset, label: &str| blob_asset.get_blob().ok_or_else(|| format!("{} 읽기 실패", label));
+		let create_model = |load_handle: &Option<SkinnedModelLoadHandle>, label: &str| -> Result<SkinnedModel, String> {
+			match load_handle.as_ref().and_then(|load_handle| load_handle.create_model(gl, &skinned_model_renderer)) {
+				Some(model_result) => {
+					model_result
+				}
+				None => {
+					Err(format!("{} 아직 받는 중", label))
+				}
+			}
+		};
 		let mut placed_model_list = Vec::new();
 
 		// 병사. (GLB, 인덱스 + 노멀맵)
-		let soldier_bytes = read_bytes(&self.soldier_asset, "soldier.glb")?;
-		let mut soldier_model = SkinnedModel::load_from_bytes(gl, &soldier_bytes, &skinned_model_renderer)?;
+		let mut soldier_model = create_model(&self.soldier_load_handle, "soldier.glb")?;
 		soldier_model.play_animation(SOLDIER_CLIP_NAMES[0], 0.0);
 		placed_model_list.push(PlacedModel { scale: measure_model_scale(&mut soldier_model, 1.8), skinned_model: soldier_model, position_x: -1.0, position_z: 0.0, rotation_y: std::f32::consts::PI + 0.4, label: String::from("soldier.glb") });
 
 		// 여우. (GLB, 노멀 없음 → 스무스 노멀, 인덱스 없음)
-		let fox_bytes = read_bytes(&self.fox_asset, "fox.glb")?;
-		let mut fox_model = SkinnedModel::load_from_bytes(gl, &fox_bytes, &skinned_model_renderer)?;
+		let mut fox_model = create_model(&self.fox_load_handle, "fox.glb")?;
 		fox_model.play_animation("Walk", 0.0);
 		placed_model_list.push(PlacedModel { scale: measure_model_scale(&mut fox_model, 0.7), skinned_model: fox_model, position_x: 0.1, position_z: 1.1, rotation_y: 1.2, label: String::from("fox.glb") });
 
 		// 레미. (FBX + 애니메이션 FBX 두 개를 본 이름으로 붙인다)
-		let remy_bytes = read_bytes(&self.remy_asset, "Remy.fbx")?;
-		let mut remy_model = SkinnedModel::load_from_fbx_bytes(gl, &remy_bytes, &skinned_model_renderer)?;
-		remy_model.add_animations_from_fbx_bytes(&read_bytes(&self.idle_animation_asset, "idle.fbx")?, "Idle", false)?;
-		remy_model.add_animations_from_fbx_bytes(&read_bytes(&self.walk_animation_asset, "walk.fbx")?, "Walk", true)?;
+		let mut remy_model = create_model(&self.remy_load_handle, "Remy.fbx")?;
+		remy_model.add_animations_from_fbx_url(engine, "anims/idle.fbx", "Idle", false);
+		remy_model.add_animations_from_fbx_url(engine, "anims/walk.fbx", "Walk", true);
 		remy_model.play_animation("Idle", 0.0);
 		placed_model_list.push(PlacedModel { scale: measure_model_scale(&mut remy_model, 1.75), skinned_model: remy_model, position_x: 1.0, position_z: -0.2, rotation_y: -0.4, label: String::from("Remy.fbx") });
 
@@ -296,19 +299,18 @@ impl Scene for ModelViewerScene {
 	}
 
 	//==============================================================================
-	// 생성. (모델 바이트 요청, 데스크탑은 그 자리에서 읽힌다)
+	// 생성. (모델 받기 부탁, 데스크탑은 그 자리에서 읽힌다. 받기 손잡이를 맡겨 다 받은 뒤 initialize)
 	//==============================================================================
 	fn create(&mut self, engine: &mut Engine) {
-		self.soldier_asset.load(engine, "soldier.glb");
-		self.fox_asset.load(engine, "fox.glb");
-		self.remy_asset.load(engine, "Remy.fbx");
-		self.idle_animation_asset.load(engine, "anims/idle.fbx");
-		self.walk_animation_asset.load(engine, "anims/walk.fbx");
-		self.scene_base.track_asset(&self.soldier_asset);
-		self.scene_base.track_asset(&self.fox_asset);
-		self.scene_base.track_asset(&self.remy_asset);
-		self.scene_base.track_asset(&self.idle_animation_asset);
-		self.scene_base.track_asset(&self.walk_animation_asset);
+		let soldier_load_handle = SkinnedModel::load_from_url(engine, "soldier.glb");
+		let fox_load_handle = SkinnedModel::load_from_url(engine, "fox.glb");
+		let remy_load_handle = SkinnedModel::load_from_fbx_url(engine, "Remy.fbx");
+		for load_handle in [&soldier_load_handle, &fox_load_handle, &remy_load_handle] {
+			self.scene_base.track_load_handle(load_handle.get_load_handle());
+		}
+		self.soldier_load_handle = Some(soldier_load_handle);
+		self.fox_load_handle = Some(fox_load_handle);
+		self.remy_load_handle = Some(remy_load_handle);
 	}
 
 	//==============================================================================
@@ -355,7 +357,7 @@ impl Scene for ModelViewerScene {
 		graphic.flush_batch();
 		if self.resources.is_none() && self.load_error_message.is_none() {
 			let load_start_instant = std::time::Instant::now();
-			match self.create_resources(graphic.get_gl()) {
+			match self.create_resources(engine, graphic.get_gl()) {
 				Ok(resources) => {
 					self.load_seconds = load_start_instant.elapsed().as_secs_f32();
 					println!("modelviewer: 모델 준비 {:.2}초", self.load_seconds);

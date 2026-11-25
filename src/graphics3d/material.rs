@@ -10,10 +10,13 @@
 //     원본이 인스턴스를 고치는 set_texture / set_use_alpha_cutout / set_subsurface_factor 는 &self 로 부를 수 있게 안에서 Cell 로 든다.
 //   - 이미지 해석은 원본 createImageBitmap(비동기) 대신 image 크레이트(png, jpeg, webp)로 그 자리에서 한다. 그래서 async 가 없다.
 //     원본처럼 flip_y 면 위아래를 뒤집고, is_color_data 면 SRGB8_ALPHA8 로 올린다.
-//   - 원본 load_image_description(url) 은 URL 대신 데스크탑 경로를 읽는다. 바이트를 받는 create_image_description(bytes) 는 원본과 같다.
-//     (웹은 BlobAsset 으로 받은 바이트를 넘긴다)
+//   - 원본 loadImageDescription(url) 의 Promise 는 ImageAsset 처럼 받기 손잡이(ImageDescriptionLoadHandle)다. load_image_description(엔진, 애셋 경로, 옵션)이
+//     엔진의 애셋 받기(데스크탑은 애셋 폴더 후보, 웹은 asset_base_url 에서 fetch)로 바이트를 부탁하고, 다 받으면 get_image_description 이 서술을 만든다.
+//     mime_type 은 원본의 응답 content-type 대신 경로의 확장자로 정한다. (find_image_mime_type) 바이트를 받는 create_image_description(bytes) 는 원본과 같다.
 //   - 원본 이미지 서술의 source(캔버스/비트맵)는 RGBA 픽셀(ImageSource)로 받는다.
 //==============================================================================
+use crate::core::asset::AssetLoadHandle;
+use crate::core::engine::Engine;
 use crate::core::graphic::GlTexture;
 use crate::core::shaderprogram::ShaderProgram;
 use glow::HasContext;
@@ -66,6 +69,51 @@ pub struct ImageDescriptionOptions {
 	pub flip_y: bool,
 	pub is_color_data: bool,
 	pub anisotropy: f32,
+}
+
+//==============================================================================
+// 이미지 서술 받기 손잡이. (Material::load_image_description 이 돌려준다. 원본 loadImageDescription 의 Promise 자리)
+// - 씬은 get_load_handle 을 SceneBase::track_load_handle 로 맡겨 다 받을 때까지 initialize 를 미룰 수 있다.
+//==============================================================================
+#[derive(Clone, Debug)]
+pub struct ImageDescriptionLoadHandle {
+	load_handle: AssetLoadHandle,
+	options: Option<ImageDescriptionOptions>,
+}
+
+impl ImageDescriptionLoadHandle {
+	//==============================================================================
+	// 바이트 읽기 손잡이. (씬에 맡길 때)
+	//==============================================================================
+	pub fn get_load_handle(&self) -> &AssetLoadHandle {
+		&self.load_handle
+	}
+
+	//==============================================================================
+	// 끝났는지. (받았거나 실패했거나)
+	//==============================================================================
+	pub fn is_finished(&self) -> bool {
+		self.load_handle.is_finished()
+	}
+
+	//==============================================================================
+	// 받은 바이트로 이미지 서술 만들기. (받는 중이면 None, 받기에 실패하면 Err. 원본 문구 "Material image load failed: url")
+	//==============================================================================
+	pub fn get_image_description(&self) -> Option<Result<ImageDescription, String>> {
+		if !self.load_handle.is_finished() {
+			return None;
+		}
+		let asset_path = self.load_handle.get_asset_path();
+		match self.load_handle.get_bytes() {
+			Some(bytes) => {
+				let mime_type = Material::find_image_mime_type(asset_path);
+				Some(Ok(Material::create_image_description(bytes.as_ref().clone(), mime_type, self.options)))
+			}
+			None => {
+				Some(Err(format!("Material image load failed: {}", asset_path)))
+			}
+		}
+	}
 }
 
 //==============================================================================
@@ -259,13 +307,30 @@ impl Material {
 	}
 
 	//==============================================================================
-	// 파일로부터 이미지 서술 로드. (원본 load_image_description(url) 의 데스크탑 판, mime_type 은 확장자로 정한다)
+	// 애셋 경로(웹은 URL)로부터 이미지 서술 받기 부탁. (원본 정적 loadImageDescription, 다 받으면 손잡이의 get_image_description 이 만든다)
 	//==============================================================================
-	#[cfg(not(target_arch = "wasm32"))]
-	pub fn load_image_description(path: &std::path::Path, options: Option<ImageDescriptionOptions>) -> Result<ImageDescription, String> {
-		let bytes = std::fs::read(path).map_err(|error| format!("Material image load failed: {} ({})", path.display(), error))?;
-		let extension = path.extension().map(|extension| extension.to_string_lossy().to_lowercase()).unwrap_or_default();
-		let mime_type = match extension.as_str() {
+	pub fn load_image_description(engine: &Engine, url: &str, options: Option<ImageDescriptionOptions>) -> ImageDescriptionLoadHandle {
+		ImageDescriptionLoadHandle {
+			load_handle: engine.request_asset_bytes(url),
+			options,
+		}
+	}
+
+	//==============================================================================
+	// 경로의 확장자로 이미지 mime_type 정하기. (png, jpg / jpeg, webp, 그 밖은 None. 주소의 ? 뒤는 보지 않는다)
+	//==============================================================================
+	pub fn find_image_mime_type(url: &str) -> Option<String> {
+		let path_text = url.split(['?', '#']).next().unwrap_or("");
+		let file_name = path_text.rsplit('/').next().unwrap_or("");
+		let extension = match file_name.rsplit_once('.') {
+			Some((_, extension)) => {
+				extension.to_lowercase()
+			}
+			None => {
+				return None;
+			}
+		};
+		match extension.as_str() {
 			"png" => {
 				Some(String::from("image/png"))
 			}
@@ -278,8 +343,7 @@ impl Material {
 			_ => {
 				None
 			}
-		};
-		Ok(Material::create_image_description(bytes, mime_type, options))
+		}
 	}
 
 	//==============================================================================
@@ -465,6 +529,21 @@ pub fn flip_pixel_rows(pixels: &mut [u8], width: usize, height: usize) {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	//==============================================================================
+	// 이미지 서술 받기: 확장자로 mime_type, 없는 파일은 원본 문구의 Err.
+	//==============================================================================
+	#[test]
+	fn image_description_load_handle() {
+		assert_eq!(Material::find_image_mime_type("textures/skin.PNG"), Some(String::from("image/png")));
+		assert_eq!(Material::find_image_mime_type("a.b/face.jpeg?v=3"), Some(String::from("image/jpeg")));
+		assert_eq!(Material::find_image_mime_type("detail.webp#top"), Some(String::from("image/webp")));
+		assert_eq!(Material::find_image_mime_type("folder.v2/noextension"), None);
+		let engine = Engine::new(crate::core::engine::EngineConfiguration::new());
+		let missing_load_handle = Material::load_image_description(&engine, "missing_texture.png", None);
+		assert!(missing_load_handle.is_finished());
+		assert_eq!(missing_load_handle.get_image_description().map(|description_result| description_result.err()), Some(Some(String::from("Material image load failed: missing_texture.png"))));
+	}
 
 	//==============================================================================
 	// 위아래 뒤집기. (2x3 이미지의 행 순서가 거꾸로 된다)

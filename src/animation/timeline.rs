@@ -14,16 +14,16 @@
 //     timeline.play();
 //     // 매 프레임 (tick):
 //     timeline.tick(self.scene_base.get_node_tree_mut(), time_delta);
-//     timeline.apply_external_properties("screen", &mut self.screen_effect);
 // - 원본과 다른 점:
-//   - 대상은 객체 참조 대신 TimelineTarget 이다. 노드는 NodeId(node), 노드가 아닌 것(화면 효과 같은)은 external 이다.
+//   - 대상은 객체 참조 대신 TimelineTarget 이다. 노드는 Node(NodeId), 노드가 아닌 것(화면 효과 같은)은 External(Rc<RefCell<dyn TimelinePropertyTarget>>) 이다.
 //     노드에 거는 함수(tick, seek, stop, evaluate, compile, build_stage, bind)는 NodeTree 를 같이 받는다.
-//   - external 대상의 값은 원본처럼 그 자리에서 set_timeline_property 를 부르지 못해서(대상을 빌려 들 수 없다) 모아 두었다가,
-//     씬이 apply_external_properties(대상 이름, 대상) 로 넘긴다. 모은 값은 evaluate 를 할 때마다 새로 채운다.
+//   - External 대상에는 원본처럼 evaluate 가 그 자리에서 set_timeline_property 를 부른다. (씬은 대상을 Rc<RefCell> 로 나눠 쥔다)
 //     넘겨받는 쪽은 TimelinePropertyTarget 트레이트를 구현한다. ScreenEffect 는 이 파일에서 구현했다.
+//     마지막 evaluate 가 External 대상에 건 값은 get_external_properties 로 읽을 수 있다. (편집기와 시험용)
 //   - 값은 원본의 숫자 / 문자열 / 참거짓을 TimelineValue 열거형으로 든다. 숫자는 f32 다.
-//   - 핸들러는 원본 마지막 인자(타임라인 자신) 대신 NodeTree 를 받는다. (타임라인은 도는 중이라 빌려 줄 수 없다)
-//     씬 상태를 바꾸려면 Rc<RefCell<...>> 를 잡아 두거나 NodeTree 로 노드를 바꾼다.
+//   - 핸들러는 원본처럼 마지막 인자로 타임라인 자신(&mut Timeline)을 받고, 노드에 거는 함수에 넘길 NodeTree 를 그 뒤에 같이 받는다.
+//     부르는 동안 핸들러를 칸에서 꺼내 두므로 핸들러 안에서 pause, seek, set_*_handler 를 부를 수 있다. (새로 건 핸들러가 이긴다)
+//   - 글 속성(text, number, fontSize, visibleCharacters, color)은 원본 get_component(Text) 가 Text 를 상속한 RichText 도 찾듯 RichText 노드에도 건다.
 //   - resolve_timeline_easing 은 함수 대신 TimelineEasing 값을 돌려준다. (evaluate(progress) 로 부른다)
 //   - TIMELINE_PROPERTY_DEFINITIONS 는 이름 → 정의 객체 대신 정의 배열이고 find_timeline_property_definition 으로 찾는다.
 //     TIMELINE_NODE_DEFAULTS 는 기본값을 채운 TimelineNodeDescription 이다. (원본 키 type 은 node_type)
@@ -31,7 +31,8 @@
 //   - 원본 Timeline.setAudioManager(정적)와 사운드 노드의 비동기 읽기는 load_sounds(node_tree, engine) 로 바꿨다.
 //     무대를 만든 뒤 한 번 부르면 사운드 노드마다 오디오 애셋을 읽고 플레이어를 만든다. (돌려준 애셋을 씬이 track_audio_asset 으로 맡겨도 된다)
 //   - loadFromUrl(비동기 fetch) 대신 JsonAsset 으로 받은 문서를 create_from_json_asset / load_from_text 로 넘긴다.
-//   - "data:" 주소 이미지는 원본처럼 나중에 읽히지 않고 그 자리에서 base64 를 풀어 만든다.
+//   - "data:" 주소 이미지는 원본처럼 나중에 읽히지 않고 그 자리에서 풀어 만든다. 브라우저처럼 본문의 퍼센트 꼴(%XX)을 먼저 풀고, ;base64 면 base64 를 푼다.
+//     (그림 꼴은 image 크레이트가 푸는 png, jpeg, webp 다)
 // - 이징 곡선 값은 원본과 같다. 같은 이름의 무대 노드가 둘이면 모두 붙이고 이름 표에는 뒤의 것이 남는다(원본과 같다).
 //   부모가 자기 자신이거나 고리가 되면 무대 부모에 붙인다. load_from_text, create_from_json_asset 은 원본에도 있다.
 //==============================================================================
@@ -41,6 +42,7 @@ use crate::base::rect::Rect;
 use crate::base::vector2::Vector2;
 use crate::core::audioplayer::AudioPlayer;
 use crate::core::component::paint::Paint;
+use crate::core::component::richtext::RichText;
 use crate::core::component::sprite::Sprite;
 use crate::core::component::text::Text;
 use crate::core::component::{Component, ComponentBase};
@@ -56,6 +58,7 @@ use crate::effect::shadersprite::{ShaderSprite, ShaderSpriteEffect};
 use crate::resource::audioasset::AudioAsset;
 use crate::resource::textasset::JsonAsset;
 use serde_json::{json, Value};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::LazyLock;
@@ -601,14 +604,21 @@ fn apply_text(node: &mut WorldNode, value: &TimelineValue) {
 	if let Some(text_component) = node.get_component_mut::<Text>() {
 		text_component.set_text(&value.to_text());
 	}
+	else if let Some(rich_text) = node.get_component_mut::<RichText>() {
+		rich_text.set_text(&value.to_text());
+	}
 }
 
 //==============================================================================
 // number 적용. (반올림한 수를 글자로)
 //==============================================================================
 fn apply_number(node: &mut WorldNode, value: &TimelineValue) {
+	let number_text = format_number(round_half_up(value.as_number()));
 	if let Some(text_component) = node.get_component_mut::<Text>() {
-		text_component.set_text(&format_number(round_half_up(value.as_number())));
+		text_component.set_text(&number_text);
+	}
+	else if let Some(rich_text) = node.get_component_mut::<RichText>() {
+		rich_text.set_text(&number_text);
 	}
 }
 
@@ -617,8 +627,12 @@ fn apply_number(node: &mut WorldNode, value: &TimelineValue) {
 // - 글자 텍스처는 (문자열, 폰트) 조합마다 굽히므로 정수 픽셀로 맞춰 매 프레임 재굽기를 막는다.
 //==============================================================================
 fn apply_font_size(node: &mut WorldNode, value: &TimelineValue) {
+	let font_size = round_half_up(value.as_number());
 	if let Some(text_component) = node.get_component_mut::<Text>() {
-		text_component.set_font_size(round_half_up(value.as_number()));
+		text_component.set_font_size(font_size);
+	}
+	else if let Some(rich_text) = node.get_component_mut::<RichText>() {
+		rich_text.set_font_size(font_size);
 	}
 }
 
@@ -626,8 +640,12 @@ fn apply_font_size(node: &mut WorldNode, value: &TimelineValue) {
 // visibleCharacters 적용.
 //==============================================================================
 fn apply_visible_characters(node: &mut WorldNode, value: &TimelineValue) {
+	let visible_character_count = round_half_up(value.as_number()) as i32;
 	if let Some(text_component) = node.get_component_mut::<Text>() {
-		text_component.set_visible_character_count(round_half_up(value.as_number()) as i32);
+		text_component.set_visible_character_count(visible_character_count);
+	}
+	else if let Some(rich_text) = node.get_component_mut::<RichText>() {
+		rich_text.set_visible_character_count(visible_character_count);
 	}
 }
 
@@ -678,13 +696,17 @@ pub fn find_timeline_property_definition(property_name: &str) -> Option<&'static
 }
 
 //==============================================================================
-// 노드에서 색을 받는 컴포넌트에 색 걸기. (Text → 글자색, 그 밖에 Paint / Sprite / ShaderSprite → 색)
-// - 원본은 Sprite, ShaderSprite 가 Paint 를 상속해서 get_component(Paint) 하나로 찾는다.
+// 노드에서 색을 받는 컴포넌트에 색 걸기. (Text 나 RichText → 글자색, 그 밖에 Paint / Sprite / ShaderSprite → 색)
+// - 원본은 Sprite, ShaderSprite 가 Paint 를, RichText 가 Text 를 상속해서 get_component(Paint), get_component(Text) 하나로 찾는다.
 //==============================================================================
 fn apply_node_color(node: &mut WorldNode, hex_text: &str) {
 	let color = create_color_from_text(hex_text);
 	if let Some(text_component) = node.get_component_mut::<Text>() {
 		text_component.set_text_color(color);
+		return;
+	}
+	if let Some(rich_text) = node.get_component_mut::<RichText>() {
+		rich_text.set_text_color(color);
 		return;
 	}
 	if let Some(paint_component) = node.get_component_mut::<Paint>() {
@@ -838,12 +860,47 @@ pub struct TimelineMarker {
 //==============================================================================
 // 트랙 대상. (노드, 또는 노드가 아닌 것)
 //==============================================================================
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone)]
 pub enum TimelineTarget {
 	// 노드. (정의된 속성은 노드에 바로 건다)
 	Node(NodeId),
-	// 노드가 아닌 것. (값을 모아 두었다가 apply_external_properties 로 넘긴다. 원본 set_timeline_property 를 가진 객체)
-	External,
+	// 노드가 아닌 것. (원본 set_timeline_property 를 가진 객체, evaluate 가 그 자리에서 값을 넘긴다)
+	External(Rc<RefCell<dyn TimelinePropertyTarget>>),
+}
+
+impl PartialEq for TimelineTarget {
+	//==============================================================================
+	// 같은 대상인지. (노드는 핸들, External 은 같은 객체를 가리키는지)
+	//==============================================================================
+	fn eq(&self, other: &TimelineTarget) -> bool {
+		match (self, other) {
+			(TimelineTarget::Node(node_id), TimelineTarget::Node(other_node_id)) => {
+				node_id == other_node_id
+			}
+			(TimelineTarget::External(target), TimelineTarget::External(other_target)) => {
+				std::ptr::addr_eq(Rc::as_ptr(target), Rc::as_ptr(other_target))
+			}
+			_ => {
+				false
+			}
+		}
+	}
+}
+
+impl std::fmt::Debug for TimelineTarget {
+	//==============================================================================
+	// 디버그 출력. (External 은 객체 주소만)
+	//==============================================================================
+	fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self {
+			TimelineTarget::Node(node_id) => {
+				formatter.debug_tuple("Node").field(node_id).finish()
+			}
+			TimelineTarget::External(target) => {
+				formatter.debug_tuple("External").field(&Rc::as_ptr(target)).finish()
+			}
+		}
+	}
 }
 
 //==============================================================================
@@ -866,7 +923,7 @@ impl TimelinePropertyTarget for ScreenEffect {
 }
 
 //==============================================================================
-// 모아 둔 external 값 하나.
+// External 대상에 건 값 하나. (get_external_properties)
 //==============================================================================
 #[derive(Clone, Debug, PartialEq)]
 pub struct TimelineExternalProperty {
@@ -1270,15 +1327,42 @@ fn decode_base64(text: &str) -> Option<Vec<u8>> {
 }
 
 //==============================================================================
-// "data:" 주소 이미지 읽기. (";base64," 꼴만)
+// 퍼센트 꼴 풀기. (%XX 를 그 바이트로 바꾸고, 뒤에 16진 두 자리가 없는 % 는 그대로 둔다)
+//==============================================================================
+fn decode_percent_encoding(text: &str) -> Vec<u8> {
+	let text_bytes = text.as_bytes();
+	let mut bytes: Vec<u8> = Vec::with_capacity(text_bytes.len());
+	let mut byte_index = 0;
+	while byte_index < text_bytes.len() {
+		let current_byte = text_bytes[byte_index];
+		if current_byte == b'%' && byte_index + 2 < text_bytes.len() {
+			let high_digit = (text_bytes[byte_index + 1] as char).to_digit(16);
+			let low_digit = (text_bytes[byte_index + 2] as char).to_digit(16);
+			if let (Some(high_digit), Some(low_digit)) = (high_digit, low_digit) {
+				bytes.push((high_digit * 16 + low_digit) as u8);
+				byte_index += 3;
+				continue;
+			}
+		}
+		bytes.push(current_byte);
+		byte_index += 1;
+	}
+	bytes
+}
+
+//==============================================================================
+// "data:" 주소 이미지 읽기. (본문의 퍼센트 꼴을 풀고, 머리가 ;base64 로 끝나면 base64 를 푼다. fetch 의 data: 주소 처리와 같은 차례)
 //==============================================================================
 fn load_data_url_image(data_url: &str) -> Option<Rc<Image>> {
 	let separator_index = data_url.find(',')?;
-	let header = &data_url[..separator_index];
-	if !header.ends_with(";base64") {
-		return None;
+	let header = data_url[..separator_index].trim_end().to_ascii_lowercase();
+	let body = decode_percent_encoding(&data_url[separator_index + 1..]);
+	let bytes = if header.ends_with(";base64") {
+		decode_base64(std::str::from_utf8(&body).ok()?)?
 	}
-	let bytes = decode_base64(&data_url[separator_index + 1..])?;
+	else {
+		body
+	};
 	Image::load_from_memory(&bytes).ok()
 }
 
@@ -1316,12 +1400,12 @@ fn read_track_keys(track: &Value) -> Vec<TimelineKey> {
 	}
 }
 
-// 이벤트 핸들러. ((대상 이름, 이벤트 이름, 키, 노드 트리))
-type TimelineEventHandler = Box<dyn FnMut(&str, &str, &TimelineKey, &mut NodeTree)>;
-// 마커 핸들러. ((마커 이름, 마커, 노드 트리))
-type TimelineMarkerHandler = Box<dyn FnMut(&str, &TimelineMarker, &mut NodeTree)>;
-// 완료 핸들러. ((노드 트리))
-type TimelineCompleteHandler = Box<dyn FnMut(&mut NodeTree)>;
+// 이벤트 핸들러. ((대상 이름, 이벤트 이름, 키, 타임라인, 노드 트리))
+type TimelineEventHandler = Box<dyn FnMut(&str, &str, &TimelineKey, &mut Timeline, &mut NodeTree)>;
+// 마커 핸들러. ((마커 이름, 마커, 타임라인, 노드 트리))
+type TimelineMarkerHandler = Box<dyn FnMut(&str, &TimelineMarker, &mut Timeline, &mut NodeTree)>;
+// 완료 핸들러. ((타임라인, 노드 트리))
+type TimelineCompleteHandler = Box<dyn FnMut(&mut Timeline, &mut NodeTree)>;
 // 대상 해석기. (이름 → 대상)
 type TimelineTargetResolver = Box<dyn Fn(&str) -> Option<TimelineTarget>>;
 // 이미지 해석기. (이미지 이름 → 이미지)
@@ -1347,7 +1431,7 @@ pub struct Timeline {
 	particle_node_ids: Vec<NodeId>,
 	// 이벤트 트랙이 없는 파티클 노드. (타임라인이 시작하면 바로 도는 것으로 본다)
 	particle_free_run_node_ids: Vec<NodeId>,
-	// external 대상에 넘길 값. (evaluate 마다 새로 채운다)
+	// 마지막 evaluate 가 External 대상에 건 값. (evaluate 마다 새로 채운다)
 	external_property_list: Vec<TimelineExternalProperty>,
 }
 
@@ -1552,7 +1636,7 @@ impl Timeline {
 				TimelineTarget::Node(node_id) => {
 					*node_id
 				}
-				TimelineTarget::External => {
+				TimelineTarget::External(_) => {
 					continue;
 				}
 			};
@@ -1673,7 +1757,7 @@ impl Timeline {
 	}
 
 	//==============================================================================
-	// 대상 해석기 설정. (이름 → 대상. 노드가 아닌 것은 TimelineTarget::External)
+	// 대상 해석기 설정. (이름 → 대상. 노드가 아닌 것은 TimelineTarget::External(객체))
 	//==============================================================================
 	pub fn set_target_resolver(&mut self, target_resolver: Option<TimelineTargetResolver>) {
 		self.target_resolver = target_resolver;
@@ -1699,7 +1783,7 @@ impl Timeline {
 	// 대상 반환. (대상 표에 있는 것만)
 	//==============================================================================
 	pub fn get_target(&self, target_name: &str) -> Option<TimelineTarget> {
-		self.target_table.iter().find(|(name, _)| name == target_name).map(|(_, target)| *target)
+		self.target_table.iter().find(|(name, _)| name == target_name).map(|(_, target)| target.clone())
 	}
 
 	//==============================================================================
@@ -1859,7 +1943,7 @@ impl Timeline {
 				TimelineTarget::Node(node_id) => {
 					*node_id
 				}
-				TimelineTarget::External => {
+				TimelineTarget::External(_) => {
 					continue;
 				}
 			};
@@ -1973,8 +2057,11 @@ impl Timeline {
 				self.time = duration;
 				self.is_playing = false;
 				self.evaluate(node_tree, duration);
-				if let Some(complete_handler) = self.complete_handler.as_mut() {
-					complete_handler(node_tree);
+				if let Some(mut complete_handler) = self.complete_handler.take() {
+					complete_handler(self, node_tree);
+					if self.complete_handler.is_none() {
+						self.complete_handler = Some(complete_handler);
+					}
 				}
 				return;
 			}
@@ -2016,10 +2103,20 @@ impl Timeline {
 		for (track_index, key_index) in event_list {
 			self.dispatch_event(node_tree, track_index, key_index, false);
 		}
-		if let Some(marker_handler) = self.marker_handler.as_mut() {
-			for marker in self.compiled_markers.iter() {
-				if is_inside(marker.time) {
-					marker_handler(&marker.name, marker, node_tree);
+		if self.marker_handler.is_some() {
+			let passed_markers: Vec<TimelineMarker> = self.compiled_markers.iter().filter(|marker| is_inside(marker.time)).cloned().collect();
+			for marker in passed_markers.iter() {
+				let mut marker_handler = match self.marker_handler.take() {
+					Some(marker_handler) => {
+						marker_handler
+					}
+					None => {
+						break;
+					}
+				};
+				marker_handler(&marker.name, marker, self, node_tree);
+				if self.marker_handler.is_none() {
+					self.marker_handler = Some(marker_handler);
 				}
 			}
 		}
@@ -2030,13 +2127,19 @@ impl Timeline {
 	// - is_silent 는 재시뮬레이션용이다. (사운드 / 사용자 핸들러는 부르지 않고 파티클만)
 	//==============================================================================
 	fn dispatch_event(&mut self, node_tree: &mut NodeTree, track_index: usize, key_index: usize, is_silent: bool) {
-		let (target, target_name, key) = {
-			let compiled_track = &self.compiled_tracks[track_index];
-			(compiled_track.target, compiled_track.target_name.clone(), compiled_track.keys[key_index].clone())
+		// 앞의 핸들러가 서술을 바꿔 다시 컴파일했으면 없는 트랙일 수 있다.
+		let (target, target_name, key) = match self.compiled_tracks.get(track_index).and_then(|compiled_track| compiled_track.keys.get(key_index).map(|key| (compiled_track, key))) {
+			Some((compiled_track, key)) => {
+				(compiled_track.target.clone(), compiled_track.target_name.clone(), key.clone())
+			}
+			None => {
+				return;
+			}
 		};
 		let event_name = key.value.to_text();
 		if let Some(TimelineTarget::Node(node_id)) = target {
 			if let Some(node) = node_tree.get_node_mut(node_id) {
+				let node_position = node.get_local_position();
 				if !is_silent {
 					if let Some(sound) = node.get_component_mut::<TimelineSound>() {
 						sound.handle_event(&event_name);
@@ -2067,20 +2170,25 @@ impl Timeline {
 						else {
 							DEFAULT_EMIT_COUNT
 						};
+						// 원본처럼 낼 때의 노드 위치로 낸다. (월드 공간)
+						particle_system.set_node_position(node_position);
 						particle_system.emit(emit_count.max(0.0).ceil() as usize, None);
 					}
 				}
 			}
 		}
 		if !is_silent {
-			if let Some(event_handler) = self.event_handler.as_mut() {
-				event_handler(&target_name, &event_name, &key, node_tree);
+			if let Some(mut event_handler) = self.event_handler.take() {
+				event_handler(&target_name, &event_name, &key, self, node_tree);
+				if self.event_handler.is_none() {
+					self.event_handler = Some(event_handler);
+				}
 			}
 		}
 	}
 
 	//==============================================================================
-	// 시간의 값 적용. (연속 속성만, 이벤트는 tick 에서만 발생. external 대상 값은 모아 둔다)
+	// 시간의 값 적용. (연속 속성만, 이벤트는 tick 에서만 발생. External 대상에는 set_timeline_property 로 넘기고 건 값을 적어 둔다)
 	//==============================================================================
 	pub fn evaluate(&mut self, node_tree: &mut NodeTree, time: f32) {
 		self.compile_if_dirty(node_tree);
@@ -2089,7 +2197,7 @@ impl Timeline {
 			if !compiled_track.is_enabled || compiled_track.keys.is_empty() || compiled_track.property_name == "event" {
 				continue;
 			}
-			let target = match compiled_track.target {
+			let target = match compiled_track.target.as_ref() {
 				Some(target) => {
 					target
 				}
@@ -2101,11 +2209,12 @@ impl Timeline {
 			match target {
 				TimelineTarget::Node(node_id) => {
 					let apply = compiled_track.definition.and_then(|definition| definition.apply);
-					if let (Some(apply), Some(node)) = (apply, node_tree.get_node_mut(node_id)) {
+					if let (Some(apply), Some(node)) = (apply, node_tree.get_node_mut(*node_id)) {
 						apply(node, &value);
 					}
 				}
-				TimelineTarget::External => {
+				TimelineTarget::External(external_target) => {
+					external_target.borrow_mut().set_timeline_property(&compiled_track.property_name, &value);
 					self.external_property_list.push(TimelineExternalProperty {
 						target_name: compiled_track.target_name.clone(),
 						property_name: compiled_track.property_name.clone(),
@@ -2117,20 +2226,7 @@ impl Timeline {
 	}
 
 	//==============================================================================
-	// 모아 둔 external 값 넘기기. (그 이름의 대상 값을 set_timeline_property 로 넘기고 목록에서 뺀다. 원본 evaluate 의 set_timeline_property 자리)
-	//==============================================================================
-	pub fn apply_external_properties(&mut self, target_name: &str, target: &mut dyn TimelinePropertyTarget) {
-		self.external_property_list.retain(|external_property| {
-			if external_property.target_name != target_name {
-				return true;
-			}
-			target.set_timeline_property(&external_property.property_name, &external_property.value);
-			false
-		});
-	}
-
-	//==============================================================================
-	// 모아 둔 external 값 반환. (넘기지 않은 것)
+	// 마지막 evaluate 가 External 대상에 건 값 반환. (트랙 차례)
 	//==============================================================================
 	pub fn get_external_properties(&self) -> &[TimelineExternalProperty] {
 		&self.external_property_list
@@ -2261,21 +2357,21 @@ impl Timeline {
 	}
 
 	//==============================================================================
-	// 이벤트 핸들러 설정. ((대상 이름, 이벤트 이름, 키, 노드 트리))
+	// 이벤트 핸들러 설정. ((대상 이름, 이벤트 이름, 키, 타임라인, 노드 트리))
 	//==============================================================================
 	pub fn set_event_handler(&mut self, event_handler: Option<TimelineEventHandler>) {
 		self.event_handler = event_handler;
 	}
 
 	//==============================================================================
-	// 마커 핸들러 설정. ((마커 이름, 마커, 노드 트리))
+	// 마커 핸들러 설정. ((마커 이름, 마커, 타임라인, 노드 트리))
 	//==============================================================================
 	pub fn set_marker_handler(&mut self, marker_handler: Option<TimelineMarkerHandler>) {
 		self.marker_handler = marker_handler;
 	}
 
 	//==============================================================================
-	// 완료 핸들러 설정. (반복이 아닐 때 끝에 닿으면)
+	// 완료 핸들러 설정. (반복이 아닐 때 끝에 닿으면, (타임라인, 노드 트리))
 	//==============================================================================
 	pub fn set_complete_handler(&mut self, complete_handler: Option<TimelineCompleteHandler>) {
 		self.complete_handler = complete_handler;
@@ -2483,56 +2579,52 @@ mod tests {
 		let log: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
 		let mut node_tree = NodeTree::new();
 		let mut timeline = Timeline::new(Some(description));
-		timeline.set_target_resolver(Some(Box::new(|target_name: &str| {
+		let screen: Rc<RefCell<dyn TimelinePropertyTarget>> = Rc::new(RefCell::new(RecordingTarget { log: log.clone() }));
+		let resolved_screen = screen.clone();
+		timeline.set_target_resolver(Some(Box::new(move |target_name: &str| {
 			if target_name == "screen" {
-				Some(TimelineTarget::External)
+				Some(TimelineTarget::External(resolved_screen.clone()))
 			}
 			else {
 				None
 			}
 		})));
 		let event_log = log.clone();
-		timeline.set_event_handler(Some(Box::new(move |target_name: &str, event_name: &str, _key: &TimelineKey, _node_tree: &mut NodeTree| {
+		timeline.set_event_handler(Some(Box::new(move |target_name: &str, event_name: &str, _key: &TimelineKey, _timeline: &mut Timeline, _node_tree: &mut NodeTree| {
 			event_log.borrow_mut().push(format!("event {}:{}", target_name, event_name));
 		})));
 		let marker_log = log.clone();
-		timeline.set_marker_handler(Some(Box::new(move |marker_name: &str, _marker: &TimelineMarker, _node_tree: &mut NodeTree| {
+		timeline.set_marker_handler(Some(Box::new(move |marker_name: &str, _marker: &TimelineMarker, _timeline: &mut Timeline, _node_tree: &mut NodeTree| {
 			marker_log.borrow_mut().push(format!("marker {}", marker_name));
 		})));
 		let complete_log = log.clone();
-		timeline.set_complete_handler(Some(Box::new(move |_node_tree: &mut NodeTree| {
+		timeline.set_complete_handler(Some(Box::new(move |_timeline: &mut Timeline, _node_tree: &mut NodeTree| {
 			complete_log.borrow_mut().push(String::from("complete"));
 		})));
-		let mut screen = RecordingTarget { log: log.clone() };
-		//==============================================================================
-		// 한 번 갱신하고 모인 external 값을 넘긴다.
-		//==============================================================================
-		fn tick_and_record(timeline: &mut Timeline, node_tree: &mut NodeTree, screen: &mut RecordingTarget, time_delta: f32) {
-			timeline.tick(node_tree, time_delta);
-			timeline.apply_external_properties("screen", screen);
-		}
 
 		timeline.play();
 		for time_delta in [0.25f32, 0.25, 0.6, 0.6, 0.6, 0.6] {
-			tick_and_record(&mut timeline, &mut node_tree, &mut screen, time_delta);
+			timeline.tick(&mut node_tree, time_delta);
 			log.borrow_mut().push(format!("time {:.4}", timeline.get_time()));
 		}
 		timeline.set_loop(false);
-		tick_and_record(&mut timeline, &mut node_tree, &mut screen, 0.7);
+		timeline.tick(&mut node_tree, 0.7);
 		log.borrow_mut().push(format!("time {:.4} playing {}", timeline.get_time(), timeline.is_playing()));
-		tick_and_record(&mut timeline, &mut node_tree, &mut screen, 0.3);
+		timeline.tick(&mut node_tree, 0.3);
 		log.borrow_mut().push(format!("time {:.4} playing {}", timeline.get_time(), timeline.is_playing()));
 		timeline.play();
 		log.borrow_mut().push(format!("replay time {:.4}", timeline.get_time()));
 		timeline.seek(&mut node_tree, 1.25);
-		timeline.apply_external_properties("screen", &mut screen);
 		log.borrow_mut().push(format!("seek time {:.4}", timeline.get_time()));
-		tick_and_record(&mut timeline, &mut node_tree, &mut screen, 1.0);
+		timeline.tick(&mut node_tree, 1.0);
 		log.borrow_mut().push(format!("time {:.4} playing {}", timeline.get_time(), timeline.is_playing()));
 		timeline.play();
 		log.borrow_mut().push(format!("replay time {:.4} playing {}", timeline.get_time(), timeline.is_playing()));
-		tick_and_record(&mut timeline, &mut node_tree, &mut screen, 0.1);
+		timeline.tick(&mut node_tree, 0.1);
 		log.borrow_mut().push(format!("time {:.4}", timeline.get_time()));
+		assert_eq!(timeline.get_external_properties().len(), 1);
+		assert_eq!(timeline.get_target("screen"), None);
+		assert_eq!(timeline.resolve_target("screen"), Some(TimelineTarget::External(screen.clone())));
 
 		// 원본 기록. (숫자는 소수 넷째 자리로 맞췄다)
 		let expected_log = [
@@ -2546,12 +2638,39 @@ mod tests {
 			"set vignette=0.9500", "time 1.9000 playing true",
 			"replay time 1.9000",
 			"set vignette=0.6250", "seek time 1.2500",
-			// 원본은 끝에 닿은 tick 에서 값을 건 뒤 완료 핸들러를 부른다. 러스트 판은 external 값을 tick 이 끝난 뒤 넘겨서 완료가 먼저 적힌다.
-			"event screen:end", "complete", "set vignette=1.0000", "time 2.0000 playing false",
+			"event screen:end", "set vignette=1.0000", "complete", "time 2.0000 playing false",
 			"replay time 0.0000 playing true",
 			"set vignette=0.0500", "time 0.1000",
 		];
 		assert_eq!(*log.borrow(), expected_log.iter().map(|line| line.to_string()).collect::<Vec<String>>());
+	}
+
+	//==============================================================================
+	// 핸들러 안에서 타임라인을 멈추고 옮길 수 있다. (원본 핸들러의 마지막 인자, 타임라인 자신)
+	//==============================================================================
+	#[test]
+	fn handlers_can_control_timeline() {
+		let description = json!({
+			"duration": 2, "loop": true,
+			"tracks": [{ "target": "screen", "property": "event", "keys": [{ "time": 0.5, "value": "stop" }] }],
+			"markers": [{ "time": 1.0, "name": "jump" }],
+		});
+		let mut node_tree = NodeTree::new();
+		let mut timeline = Timeline::new(Some(description));
+		timeline.set_event_handler(Some(Box::new(|_target_name: &str, event_name: &str, _key: &TimelineKey, timeline: &mut Timeline, _node_tree: &mut NodeTree| {
+			if event_name == "stop" {
+				timeline.pause();
+			}
+		})));
+		timeline.set_marker_handler(Some(Box::new(|_marker_name: &str, _marker: &TimelineMarker, timeline: &mut Timeline, _node_tree: &mut NodeTree| {
+			timeline.set_speed(2.0);
+		})));
+		timeline.play();
+		timeline.tick(&mut node_tree, 0.6);
+		assert!(!timeline.is_playing());
+		timeline.play();
+		timeline.tick(&mut node_tree, 0.6);
+		assert_eq!(timeline.get_speed(), 2.0);
 	}
 
 	//==============================================================================
@@ -2762,5 +2881,49 @@ mod tests {
 		assert_eq!(decode_base64("SGVsbG8="), Some(b"Hello".to_vec()));
 		assert_eq!(decode_base64("SGk"), Some(b"Hi".to_vec()));
 		assert_eq!(decode_base64("S*"), None);
+	}
+
+	//==============================================================================
+	// "data:" 주소: 퍼센트 꼴을 먼저 푼다. (base64 본문의 %3D, base64 가 아닌 본문의 %XX 바이트)
+	//==============================================================================
+	#[test]
+	fn data_url_image_decodes_percent_encoding() {
+		assert_eq!(decode_percent_encoding("a%20b%zz%4"), b"a b%zz%4".to_vec());
+		let png_base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+		let image = load_data_url_image(&format!("data:image/png;base64,{}", png_base64)).expect("base64");
+		assert_eq!((image.get_width(), image.get_height()), (1, 1));
+		assert!(load_data_url_image(&format!("data:image/png;BASE64,{}", png_base64.replace('=', "%3D"))).is_some());
+		let png_bytes = decode_base64(png_base64).expect("png bytes");
+		let percent_body: String = png_bytes.iter().map(|byte| format!("%{:02X}", byte)).collect();
+		assert!(load_data_url_image(&format!("data:image/png,{}", percent_body)).is_some());
+		assert!(load_data_url_image("data:image/png,not-an-image").is_none());
+	}
+
+	//==============================================================================
+	// 글 속성은 원본처럼 RichText 노드에도 건다. (원본 get_component(Text) 가 RichText 도 찾는다)
+	//==============================================================================
+	#[test]
+	fn text_properties_apply_to_rich_text() {
+		let mut node_tree = NodeTree::new();
+		let root_id = node_tree.get_root_id();
+		let rich_id = node_tree.create_child(root_id, "rich");
+		node_tree.add_component(rich_id, RichText::new());
+		let description = json!({
+			"duration": 1,
+			"tracks": [
+				{ "target": "rich", "property": "text", "keys": [{ "time": 0, "value": "<b>hi</b>" }] },
+				{ "target": "rich", "property": "fontSize", "keys": [{ "time": 0, "value": 30.4 }] },
+				{ "target": "rich", "property": "color", "keys": [{ "time": 0, "value": "#ff0000ff" }] },
+				{ "target": "rich", "property": "visibleCharacters", "keys": [{ "time": 0, "value": 1 }] },
+			],
+		});
+		let mut timeline = Timeline::new(Some(description));
+		timeline.bind(&node_tree, root_id);
+		timeline.evaluate(&mut node_tree, 0.0);
+		let rich_text = node_tree[rich_id].get_component::<RichText>().expect("rich text");
+		assert_eq!(rich_text.get_text(), "<b>hi</b>");
+		assert_eq!(rich_text.get_font_size(), 30.0);
+		assert_eq!(rich_text.get_text_color(), Color::create(1.0, 0.0, 0.0, 1.0));
+		assert_eq!(rich_text.get_visible_character_count(), 1);
 	}
 }

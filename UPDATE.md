@@ -241,6 +241,19 @@
   - GlyphRaster.color_pixels, TextRaster.color_pixels (색 글리프 몫, 프리멀티플라이드 RGBA). coverage 는 색 글리프를 뺀 글자의 덮인 정도다. 구조체에 필드가 늘어 직접 짓는 코드는 고쳐야 한다
 - 웹: 글꼴 바이트가 없을 때 브라우저로 굽는 글(platform/web/systemfont.rs)이 캔버스의 알파만 꺼내 흰색으로 올려 색 이모지가 흰 실루엣으로 나오던 것을 고쳤다. 원본처럼 RGBA 를 프리멀티플라이드로 올린다. 시스템 글꼴 조각(올린 글꼴에 없는 글자)은 흰 픽셀은 덮인 정도, 색 픽셀은 색 몫으로 나눈다. 안티앨리어싱을 끄면 알파로 가르고 곧은 색으로 채운다. (원본은 곧은 알파의 알파 칸을 가른다)
 - 예제 textshaping: 색 이모지 줄(😀👍🏽 ❤️❤ 🇰🇷 👨‍👩‍👧 1️⃣), 그림자 글 이모지, 기울인 이모지, 글자 아틀라스의 ⭐
+- 최종 대조의 UI, 효과, 애니메이션, 3D 몫을 원본과 같게:
+  - GameSceneBase: 원본처럼 로딩 문을 뺀 맡긴 애셋이 다 끝나면(진행률을 알린 적이 있을 때) 진행률을 1 로 채운다. (complete_loading_progress_if_assets_finished, 전에는 맡긴 AssetLoader 가 끝나야 1) SceneBase::are_tracked_assets_finished_except, AssetLoadHandle::is_same_load
+  - DevTools: Statistics 의 clientNativeSize 를 ViewManager::get_client_native_size 로, 웹 메모리를 원본처럼 Chrome 의 performance.memory 로 적는다. (데스크탑과 없는 브라우저는 (N/A)) set_ui_document, get_ui_document_mut 로 게임이 컴포넌트를 등록한 UIDocument 를 인스펙터에 건다
+  - UIDocument: ShadowText 를 원본 반사 저장처럼 TextDirection, Italic, Underline, Strikethrough 까지 쓰고 읽는다. create_component(트리, 노드, 이름) 가 원본 getComponentType 자리로 그 이름의 컴포넌트를 지어 붙인다
+  - UIConfirmWindow: 오른쪽에서 왼쪽 언어면 원본처럼 제목과 묻는 글에 Rtl 방향을 건다. (아니면 Inherit, 다음 놓을 때) set_right_to_left_in_tree 는 원본처럼 글 방향을 바로 건다
+  - UIScrollView::set_shows_vertical_scroll_bar_in_tree, set_shows_horizontal_scroll_bar_in_tree: 원본처럼 그 자리에서 스크롤바 노드를 만들고 켜거나 끄고 핸들을 돌려준다
+  - UIInputField: 공개 함수의 글자 자리(get_cursor_index, get_selection_start, get_selection_range, move_cursor, measure_index_at_local_x)와 max_length 를 원본처럼 UTF-16 단위로 센다. (공개 API 의 셈이 바뀐다. 한글은 같고 이모지 같은 글자에서만 다르다) 안에서는 문자 단위로 들어 서로게이트 쌍을 쪼개지 않는다. 웹 DOM 의 maxlength 와 같은 셈이 되었다
+  - Timeline: 핸들러가 원본처럼 타임라인 자신을 받는다. 이벤트 (대상 이름, 이벤트 이름, 키, &mut Timeline, &mut NodeTree), 마커 (마커 이름, 마커, &mut Timeline, &mut NodeTree), 완료 (&mut Timeline, &mut NodeTree). 핸들러 안에서 pause, seek 를 부를 수 있다. (공개 API 를 바꾸는 일이다)
+  - Timeline: TimelineTarget::External 이 Rc<RefCell<dyn TimelinePropertyTarget>> 를 들고, evaluate 가 원본처럼 그 자리에서 set_timeline_property 를 부른다. apply_external_properties 는 뺐다. get_external_properties 는 마지막 evaluate 가 건 값이다. TimelineTarget 은 Copy, Eq 가 아니다. (공개 API 를 바꾸는 일이다, 끝 tick 의 값 걸기와 완료 핸들러 차례도 원본과 같아졌다) 예제 timelineshowcase 는 ScreenEffect 를 Rc<RefCell> 로 쥔다
+  - Timeline: 글 속성(text, number, fontSize, visibleCharacters, color)을 원본처럼 RichText 노드에도 건다. 무대 스프라이트의 data: 주소는 브라우저처럼 본문의 퍼센트 꼴을 먼저 풀고, ;base64 가 아니어도 읽는다. emit 이벤트는 그 자리의 노드 위치로 낸다
+  - ParticleSystem::emit_in_tree(트리, 노드, 수, 보정), set_node_position: 월드 공간에서 원본처럼 낼 때의 노드 위치로 낸다. (emit 만 부르면 지난 tick 에 읽어 둔 위치)
+  - 3D URL 함수를 원본처럼 데스크탑과 웹 둘 다: FbxLoader::load_from_url(엔진, 애셋 경로) → FbxLoadHandle (get_scene_data), SkinnedModel::load_from_url, load_from_fbx_url → SkinnedModelLoadHandle (create_model(gl, 렌더러)), SkinnedModel::add_animations_from_fbx_url(엔진, 경로, 클립 이름, 이동 무시) → FbxLoadHandle (다 받으면 다음 update 나 play_animation 에서 클립을 더한다), Material::load_image_description(엔진, 경로, 옵션) → ImageDescriptionLoadHandle (get_image_description, mime_type 은 Material::find_image_mime_type 으로 확장자에서). 엔진의 애셋 받기를 써서 데스크탑은 애셋 폴더 후보에서, 웹은 asset_base_url 에서 받는다. 받기 손잡이는 SceneBase::track_load_handle 로 맡길 수 있다. 데스크탑에서 현재 폴더 기준으로 읽던 load_from_path, load_from_fbx_path, add_animations_from_fbx_path, 경로를 받던 load_image_description 은 뺐다. (공개 API 를 바꾸는 일이다) 예제 modelviewer 는 URL 함수로 받는다
+- 러스트 판에서 먼저 고쳤던 원본 버그(UIDocument 의 nineSlice 읽기, UIDropdown 의 머리 단추 틴트, UIInputField 의 붙여넣기 커서, LayoutSolver 의 인공 행)를 vanilla.js 에서도 고쳐 같아졌으므로 머리 주석의 "원본과 다른 것" 에서 뺐다. UILabel 배경 차례는 원본도 같았다
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.
