@@ -859,7 +859,7 @@ impl EngineRunner {
 			self.engine.is_unload_all_scenes_requested = false;
 			let mut scene_list = std::mem::take(&mut self.scene_list);
 			for scene in scene_list.iter_mut() {
-				scene.destroy(&mut self.engine);
+				unload_scene_instance(&mut self.engine, scene.as_mut());
 			}
 		}
 		while !self.engine.pending_unload_scene_id_list.is_empty() {
@@ -869,7 +869,7 @@ impl EngineRunner {
 				let scene_index = self.scene_list.iter().position(|scene| scene.get_scene_base().get_scene_id() == Some(scene_id));
 				if let Some(scene_index) = scene_index {
 					let mut scene = self.scene_list.remove(scene_index);
-					scene.destroy(&mut self.engine);
+					unload_scene_instance(&mut self.engine, scene.as_mut());
 				}
 			}
 		}
@@ -925,8 +925,9 @@ impl EngineRunner {
 				continue;
 			}
 
-			// 갱신.
+			// 갱신. (씬의 터치 훅은 원본 Scene.tickTouch 처럼 tick 안의 터치 다음)
 			scene.tick(&mut self.engine, time_delta);
+			dispatch_scene_touch(&mut self.engine, scene.as_mut());
 
 			// 출력.
 			scene.pre_draw(&mut self.engine, graphic);
@@ -993,6 +994,44 @@ fn draw_statistics(engine: &Engine, graphic: &mut Graphic) {
 	graphic.set_text_baseline(TextBaseline::Middle);
 	graphic.set_fill_color(Color::white());
 	graphic.draw_fill_text(&statistics_text, 10.0, 15.0);
+}
+
+//==============================================================================
+// 씬 하나 내리기. (원본 SceneManager.unloadScene 의 finalize, unload 다음 러스트 판의 destroy)
+//==============================================================================
+fn unload_scene_instance(engine: &mut Engine, scene: &mut dyn Scene) {
+	scene.finalize(engine);
+	scene.unload(engine);
+	scene.destroy(engine);
+}
+
+//==============================================================================
+// 씬의 터치 훅 부르기. (원본 Scene.tickTouch: 누름, 그다음 뗌 또는 누르고 있음(누른 프레임 빼고) 또는 취소, 그리고 휠)
+//==============================================================================
+fn dispatch_scene_touch(engine: &mut Engine, scene: &mut dyn Scene) {
+	let input_manager = engine.get_input_manager();
+	let view_input_position = input_manager.get_view_input_position();
+	let is_touch_pressed = input_manager.is_touch_pressed();
+	let is_touch_released = input_manager.is_touch_released();
+	let is_touch_moved = input_manager.is_touch_moved();
+	let is_touch_cancelled = input_manager.is_touch_cancelled();
+	let wheel_delta = Vector2::create(input_manager.get_wheel_delta_x(), input_manager.get_wheel_delta_y());
+	let has_wheel_delta = input_manager.has_wheel_delta();
+	if is_touch_pressed {
+		scene.touch_press(engine, view_input_position);
+	}
+	if is_touch_released {
+		scene.touch_release(engine, view_input_position);
+	}
+	else if is_touch_moved && !is_touch_pressed {
+		scene.touch_move(engine, view_input_position);
+	}
+	else if is_touch_cancelled {
+		scene.touch_cancel(engine, view_input_position);
+	}
+	if has_wheel_delta {
+		scene.touch_wheel(engine, view_input_position, wheel_delta);
+	}
 }
 
 //==============================================================================
@@ -1157,5 +1196,74 @@ mod tests {
 		assert_eq!(engine.get_maximum_frame_per_second(), 0.0);
 		engine.set_maximum_frame_per_second(f32::INFINITY);
 		assert_eq!(engine.get_maximum_frame_per_second(), 0.0);
+	}
+
+	//==============================================================================
+	// 차례를 적는 시험 씬. (내리기와 터치 훅)
+	//==============================================================================
+	struct RecordingScene {
+		scene_base: SceneBase,
+		record_list: Rc<RefCell<Vec<&'static str>>>,
+	}
+
+	impl Scene for RecordingScene {
+		fn get_scene_base(&self) -> &SceneBase {
+			&self.scene_base
+		}
+
+		fn get_scene_base_mut(&mut self) -> &mut SceneBase {
+			&mut self.scene_base
+		}
+
+		fn finalize(&mut self, _engine: &mut Engine) {
+			self.record_list.borrow_mut().push("finalize");
+		}
+
+		fn unload(&mut self, _engine: &mut Engine) {
+			self.record_list.borrow_mut().push("unload");
+		}
+
+		fn destroy(&mut self, _engine: &mut Engine) {
+			self.record_list.borrow_mut().push("destroy");
+		}
+
+		fn touch_press(&mut self, _engine: &mut Engine, _view_input_position: Vector2) {
+			self.record_list.borrow_mut().push("press");
+		}
+
+		fn touch_move(&mut self, _engine: &mut Engine, _view_input_position: Vector2) {
+			self.record_list.borrow_mut().push("move");
+		}
+
+		fn touch_release(&mut self, _engine: &mut Engine, _view_input_position: Vector2) {
+			self.record_list.borrow_mut().push("release");
+		}
+
+		fn touch_wheel(&mut self, _engine: &mut Engine, _view_input_position: Vector2, _wheel_delta: Vector2) {
+			self.record_list.borrow_mut().push("wheel");
+		}
+	}
+
+	//==============================================================================
+	// 씬 터치 훅은 원본 차례(누름, 같은 프레임 뗌, 누른 프레임 빼고 누르고 있음, 휠), 내리기는 finalize, unload, destroy.
+	//==============================================================================
+	#[test]
+	fn scene_touch_hooks_and_unload_order() {
+		let mut engine = Engine::new(EngineConfiguration::new());
+		let record_list: Rc<RefCell<Vec<&'static str>>> = Rc::new(RefCell::new(Vec::new()));
+		let mut scene = RecordingScene { scene_base: SceneBase::new(), record_list: record_list.clone() };
+		let input_manager = engine.get_input_manager_mut();
+		input_manager.set_touch_pressed(true);
+		input_manager.set_touch_moved(true);
+		dispatch_scene_touch(&mut engine, &mut scene);
+		engine.get_input_manager_mut().set_touch_pressed(false);
+		dispatch_scene_touch(&mut engine, &mut scene);
+		let input_manager = engine.get_input_manager_mut();
+		input_manager.set_touch_moved(false);
+		input_manager.set_touch_released(true);
+		input_manager.add_wheel_delta(0.0, 10.0);
+		dispatch_scene_touch(&mut engine, &mut scene);
+		unload_scene_instance(&mut engine, &mut scene);
+		assert_eq!(*record_list.borrow(), vec!["press", "move", "release", "wheel", "finalize", "unload", "destroy"]);
 	}
 }
