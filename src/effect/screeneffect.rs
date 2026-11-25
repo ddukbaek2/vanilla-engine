@@ -18,8 +18,8 @@
 //     그래서 destroy 도 Graphic 을 받는다. 씬을 내리기 전에 destroy 를 부르지 않으면 GL 자원은 컨텍스트가 없어질 때까지 남는다.
 //   - 효과는 문자열 대신 ScreenEffectType 열거형이다. (원본 문자열 이름은 get_name / from_name)
 //   - set_timeline_property 의 값은 문자열로 받는다. (원본은 숫자, 문자열, 참거짓을 받는다. "0.5", "#ff0000", "true")
+//     숫자로 읽을 때 "true" 는 1, "false" 는 0 이다. (원본 Number(true), Number(false))
 //   - 패스 셰이더 만들기에 실패하면 원본은 예외를 던지고, 러스트 판은 한 번 알리고 그 단계를 건너뛴다.
-//   - destroy 는 렌더 대상과 함께 패스 프로그램도 지운다. (원본은 렌더 대상만 지운다)
 //==============================================================================
 use crate::base::color::Color;
 use crate::core::fullscreenpass::FullscreenPass;
@@ -1559,12 +1559,15 @@ impl Default for ScreenEffect {
 }
 
 //==============================================================================
-// 타임라인 값을 숫자로 읽기. (원본 Number(): 빈 문자열은 0, 못 읽으면 NaN)
+// 타임라인 값을 숫자로 읽기. (원본 Number(): 빈 문자열과 false 는 0, true 는 1, 못 읽으면 NaN)
 //==============================================================================
 fn parse_timeline_number(value: &str) -> f32 {
 	let trimmed_value = value.trim();
-	if trimmed_value.is_empty() {
+	if trimmed_value.is_empty() || trimmed_value == "false" {
 		return 0.0;
+	}
+	if trimmed_value == "true" {
+		return 1.0;
 	}
 	trimmed_value.parse::<f32>().unwrap_or(f32::NAN)
 }
@@ -1604,7 +1607,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 타임라인 속성: 세기, 파라미터 이름, 색, 켜기.
+	// 타임라인 속성: 세기(참거짓은 1 과 0), 파라미터 이름, 색, 켜기.
 	//==============================================================================
 	#[test]
 	fn timeline_property_updates_state() {
@@ -1615,6 +1618,10 @@ mod tests {
 		assert_eq!(screen_effect.get_strength(ScreenEffectType::Vignette), 0.5);
 		assert!(screen_effect.has_active_effect());
 		screen_effect.set_timeline_property("vignette", "0");
+		assert!(!screen_effect.is_enabled(ScreenEffectType::Vignette));
+		screen_effect.set_timeline_property("vignette", "true");
+		assert_eq!(screen_effect.get_strength(ScreenEffectType::Vignette), 1.0);
+		screen_effect.set_timeline_property("vignette", "false");
 		assert!(!screen_effect.is_enabled(ScreenEffectType::Vignette));
 		screen_effect.set_timeline_property("shockwave.radius", "0.75");
 		assert_eq!(screen_effect.get_parameters(ScreenEffectType::Shockwave), [0.5, 0.5, 0.75, 0.1]);
