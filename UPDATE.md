@@ -136,6 +136,24 @@
 - Graphic: draw_line_segments(position_values, size). 숫자 배열 하나(선분마다 x0, y0, x1, y1)로 선분 여럿을 한 번에 그린다. 정점 버퍼가 차면 거기까지 그리고 이어 담는다
 - SpriteAtlas: tools/atlas.cjs(vanilla.js)의 JSON 과 { pagePaths, frames } 꼴을 읽는다. load(engine, json_path), load_data, update(웹은 JSON 이 온 뒤 쪽 그림을 청한다), is_loaded, track_json_asset, read_frame, has_frame, apply_frame, get_page_count, get_frame_names, 여러 아틀라스를 차례로 찾는 find_frame_in_order, apply_frame_in_order. 이름은 확장자를 떼고도 찾는다. Sprite.set_frame(frame)
 - 예제: textnodeextras. 글자 칸 맞춤(Text, UILabel), 배율이 움직이는 글, 반투명 고리와 줄어드는 호와 선분 600 개, atlas.cjs 로 구운 아틀라스(examples/assets/atlas), 구운 그림을 나눠 쓰는 그림자 글, 돌아간 판 위의 마우스 자리(convert_view_to_local)
+- 효과, 3D, 애니메이션에서 원본 vanilla.js 와 다르던 것을 맞췄다. (꼴을 다르게 두었던 것을 원본 쓰임새로 되돌리고, 원본에만 있던 것을 옮기고, 두 엔진에 같이 있던 버그를 같이 고쳤다)
+- ParticleSystem 을 원본과 같게 했다. 기본값(최대 512 개, 속도 60, 크기 6, 원뿔 반각 0.5 라디안, set_cone_angle 은 원본처럼 반각), cone 은 반지름 안에서, box 는 위로만 낸다. 난수 차례와 셈이 원본과 같아 같은 씨앗이면 원본과 같은 입자 자리가 나온다. (모양 다섯에서 차이 0.0002 px 아래) 방출 원점은 원본처럼 컴포넌트 좌표 원점(내용 영역 왼쪽 위), simulate(time_delta), emit(count, Option 원점 보정). EmitterShape 는 ParticleEmitterShape, Rectangle 은 Box 로 이름을 바꿨다. duration 이 지나도 원본처럼 재생 중으로 남고 is_finished 가 끝남을 알려 준다. get_particle_position_list. 정점 한도를 넘는 입자도 나눠 다 그린다. (공개 API 가 바뀐다)
+- HeatHazeEffect: 줄 수 한도(1365) 없이 나눠 그린다. (원본도 이제 같은 effect 컴포넌트다)
+- ScreenEffect.set_timeline_property 가 &TimelineValue 를 받는다. (원본처럼 숫자, 문자열, 참거짓, 참거짓은 숫자로 1 과 0) TimelinePropertyTarget 도 값을 글로 바꾸지 않고 넘긴다. (공개 API 가 바뀐다)
+- HumanSkinRenderer: 원본 humanskinrenderer.js 를 옮겼다. 피부(주름 맵, 마이크로 노멀, 높이 디테일, 이중 로브 GGX, 잔털), 눈(각막 굴절 시차, 홍채, 림버스), 머리카락(Kajiya-Kay 이방성, 흔들림, 컷아웃과 프린지 2 패스), 차폐, 유체를 셰이딩 모드로 나눈 한 셰이더다. GLSL 은 원본과 같다. 조도, 알베도, 스펙큘러, 노멀을 MRT 4 장으로 내고 컷아웃 깊이 패스가 있다. SkinnedModelRenderer 를 품고 Deref 로 기반 함수를 그대로 부른다
+- 예제 oldface: 원본 OLD FACE 장면(그림자, 피부 MRT, 블렌드, AO, SSS, 블룸, ACES, FXAA, 표정 모프와 주름 맵, 깜빡임). 원본과 같은 시각에 찍어 평균 차이 0.8/255. 표정은 4 초마다 바뀌고 숫자 키로 고른다
+- ToonView3D: 원본처럼 그리기 함수와 대체 그리기 함수(set_draw_callback, set_fallback_draw_callback, 클로저)를 받고 set_renderer, get_renderer 로 여러 노드가 렌더러 하나를 나눠 쓴다. (Rc<RefCell<ToonRenderer>>) 타입 인자 없이 get_component_mut::<ToonView3D>() 로 꺼낸다. ToonViewDrawer, ToonViewPass 는 없앴다. (공개 API 가 바뀐다)
+- Graphic::run_external_pass: pass 가 패닉해도 드롭 가드가 2D 상태를 되돌린다
+- ToonRenderer, SkinnedModelRenderer, HumanSkinRenderer: 그림자를 받지 않을 때 섀도우 유닛에 1x1 비교 깊이 텍스처를 묶는다. (맥 드라이버의 "UNSUPPORTED (log once) ... sampler type (Depth)" 알림이 나던 까닭, 유니폼을 채우는 차례는 까닭이 아니었다) SkinnedModelRenderer::get_empty_shadow_texture
+- ToonRenderer: set_shadow 가 원본처럼 (ShadowMap 이나 None, 세기) 를 받는다. destroy, get_solid_program, get_outline_program, get_depth_program, extract_frustum_planes
+- ToonVfx: 빛 파티클과 빛 점의 rim, 리본과 번개의 번짐 색 glow, set_rim_color, 사는 동안 다시 꺾이는 번개 add_lightning, 화면 섬광 add_flash(ToonFlashOptions), 엔진 Shaker 로 셈하는 카메라 흔들림 add_shake, read_shake, is_shaking. set_ramps 가 "#rrggbb" 글과 [r, g, b] 를 둘 다 받는다(ToonRampColor). queue_lightning 이 count 0 이면 그리지 않는다. seed 는 Option. 예제 toonfx 에 보인다
+- 웹에서 툰 예제(toonview, toonfx)가 바로 멈추던 것을 고쳤다. glow 웹은 묶인 것이 없는 프레임버퍼나 텍스처를 읽으면 패닉해서 graphics3d::read_framebuffer_binding, read_texture_binding 으로 읽고(웹은 기본 것으로 본다), 빈 깊이 텍스처 바이트는 4 바이트로 맞춘 u32 에서 읽는다
+- SkinnedModel: 기본 모프 가중치를 glTF 노드 weights 에서 읽는다. 화면 공간 효과의 destroy 가 풀스크린 패스도 지운다. ToonScreenOutline: get_line_target(ToonLineTarget), read_outline_radius
+- Camera2D: 회전(set_rotation, get_rotation, 도). apply_transform, screen_to_world, world_to_screen, pan_by_screen, fling, zoom_at 이 회전을 따르고, 경계 클램프는 돌아간 뷰를 감싸는 상자(get_visible_half_extent)로 잰다. convert_screen_delta_to_world, begin, end
+- Animation: pause, resume 을 채웠다. (goto_and_stop 이 멈춘다) stop 은 멈춰 있어도 첫 프레임으로. (원본 버그를 같이 고침)
+- Action: condition 스텝의 콜백은 ActionConditionCallbacks 다. (updated 가 원본처럼 대상만 받는다) repeat 0 번은 돌지 않는다
+- Timeline: 무대 부모가 자기 자신이거나 고리면 무대 부모에 붙인다. 원본 이징이 틀린다던 머리 주석을 고쳤다. (원본 pow 는 이미 고쳐져 있어 두 엔진 이징 값이 같다)
+- 예제 misctour: Camera2D 가 천천히 좌우로 돌고 begin, end 로 그린다
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.
