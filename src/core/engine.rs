@@ -407,6 +407,10 @@ impl Engine {
 	// 이미지 애셋 읽기. (원본 new ImageAsset() + load(path))
 	//==============================================================================
 	pub fn load_image(&self, relative_path: &str) -> Result<Rc<Image>, String> {
+		if crate::base::dataurl::is_data_url(relative_path) {
+			let data_url = crate::base::dataurl::parse_data_url(relative_path).ok_or_else(|| String::from("이미지 읽기 실패 (data: 주소를 풀 수 없습니다)"))?;
+			return Image::load_from_memory_with_mime_type(&data_url.bytes, &data_url.mime_type);
+		}
 		let image_path = self.resolve_asset_path(relative_path);
 		Image::load(&image_path)
 	}
@@ -415,6 +419,7 @@ impl Engine {
 	// 애셋 바이트 부탁. (애셋들의 load 가 부른다)
 	// - 데스크탑: 애셋 폴더 후보에서 파일을 찾아 그 자리에서 읽고 끝낸다.
 	// - 웹: asset_base_url + 상대 경로를 fetch 하고, 받으면 끝낸다. (그 사이 프레임은 계속 돈다)
+	// - "data:" 주소는 원본 fetch 처럼 주소 그대로 푼다. (데스크탑은 그 자리에서 base/dataurl.rs 로 풀고 형을 응답 형으로 둔다, 웹은 기준 주소를 붙이지 않고 fetch)
 	//==============================================================================
 	pub fn request_asset_bytes(&self, relative_path: &str) -> AssetLoadHandle {
 		self.request_asset_bytes_with_cache(relative_path, false)
@@ -425,11 +430,7 @@ impl Engine {
 	//==============================================================================
 	pub fn request_asset_bytes_with_cache(&self, relative_path: &str, is_no_cache: bool) -> AssetLoadHandle {
 		let load_handle = AssetLoadHandle::create_pending(relative_path);
-		#[cfg(not(target_arch = "wasm32"))]
-		let asset_location = self.resolve_asset_path(relative_path).to_string_lossy().into_owned();
-		#[cfg(target_arch = "wasm32")]
-		let asset_location = format!("{}{}", self.engine_configuration.asset_base_url, relative_path);
-		platform::request_asset_bytes(asset_location, load_handle.clone(), is_no_cache);
+		self.request_asset_bytes_into_with_cache(relative_path, &load_handle, is_no_cache);
 		load_handle
 	}
 
@@ -437,11 +438,45 @@ impl Engine {
 	// 애셋 바이트 부탁. (이미 만든 읽기 손잡이를 끝낸다. AssetLoader 가 미리 나눠 준 손잡이를 차례가 오면 채울 때 쓴다)
 	//==============================================================================
 	pub fn request_asset_bytes_into(&self, relative_path: &str, load_handle: &AssetLoadHandle) {
+		self.request_asset_bytes_into_with_cache(relative_path, load_handle, false);
+	}
+
+	//==============================================================================
+	// 애셋 바이트 부탁의 몸통. (data: 주소, 데스크탑 애셋 폴더, 웹 기준 주소)
+	//==============================================================================
+	fn request_asset_bytes_into_with_cache(&self, relative_path: &str, load_handle: &AssetLoadHandle, is_no_cache: bool) {
 		#[cfg(not(target_arch = "wasm32"))]
-		let asset_location = self.resolve_asset_path(relative_path).to_string_lossy().into_owned();
+		{
+			if crate::base::dataurl::is_data_url(relative_path) {
+				match crate::base::dataurl::parse_data_url(relative_path) {
+					Some(data_url) => {
+						load_handle.set_content_type(Some(data_url.mime_type));
+						load_handle.finish(Ok(data_url.bytes));
+					}
+					None => {
+						load_handle.finish(Err(String::from("애셋 읽기 실패 (data: 주소를 풀 수 없습니다)")));
+					}
+				}
+				return;
+			}
+			let asset_location = self.resolve_asset_path(relative_path).to_string_lossy().into_owned();
+			platform::request_asset_bytes(asset_location, load_handle.clone(), is_no_cache);
+		}
 		#[cfg(target_arch = "wasm32")]
-		let asset_location = format!("{}{}", self.engine_configuration.asset_base_url, relative_path);
-		platform::request_asset_bytes(asset_location, load_handle.clone(), false);
+		{
+			platform::request_asset_bytes(self.create_asset_url(relative_path), load_handle.clone(), is_no_cache);
+		}
+	}
+
+	//==============================================================================
+	// 웹 애셋 주소. (asset_base_url + 상대 경로, data: 주소는 그대로)
+	//==============================================================================
+	#[cfg(target_arch = "wasm32")]
+	fn create_asset_url(&self, relative_path: &str) -> String {
+		if crate::base::dataurl::is_data_url(relative_path) {
+			return relative_path.to_string();
+		}
+		format!("{}{}", self.engine_configuration.asset_base_url, relative_path)
 	}
 
 	//==============================================================================
@@ -492,17 +527,25 @@ impl Engine {
 	}
 
 	//==============================================================================
-	// 오디오 애셋 읽기. (원본 new AudioAsset() + load(path), 애셋 폴더 기준 경로)
-	// - 데스크탑: 그 자리에서 읽고 디코딩한다. 실패하면 Err.
+	// 오디오 애셋 읽기. (원본 new AudioAsset() + load(path), 애셋 폴더 기준 경로나 "data:" 주소)
+	// - 데스크탑: 그 자리에서 읽고 디코딩한다. 실패하면 Err. data: 주소는 형을 보지 않고 바이트를 내용으로 가려 푼다. (원본 decodeAudioData 와 같다)
 	// - 웹: fetch 와 디코딩을 걸어 두고 바로 애셋을 돌려준다. 끝나면 is_loaded() 가 참이 된다. (실패는 get_load_error())
 	//==============================================================================
 	pub fn load_audio_asset(&self, relative_path: &str) -> Result<Rc<AudioAsset>, String> {
-		#[cfg(not(target_arch = "wasm32"))]
-		let audio_asset_path = self.resolve_asset_path(relative_path);
-		#[cfg(target_arch = "wasm32")]
-		let audio_asset_path = PathBuf::from(format!("{}{}", self.engine_configuration.asset_base_url, relative_path));
 		let audio_asset = Rc::new(AudioAsset::new());
-		audio_asset.load(&audio_asset_path)?;
+		#[cfg(not(target_arch = "wasm32"))]
+		{
+			if crate::base::dataurl::is_data_url(relative_path) {
+				let data_url = crate::base::dataurl::parse_data_url(relative_path).ok_or_else(|| String::from("Error loading sound (data: 주소를 풀 수 없습니다)"))?;
+				audio_asset.load_from_bytes(data_url.bytes)?;
+				return Ok(audio_asset);
+			}
+			audio_asset.load(&self.resolve_asset_path(relative_path))?;
+		}
+		#[cfg(target_arch = "wasm32")]
+		{
+			audio_asset.load(&PathBuf::from(self.create_asset_url(relative_path)))?;
+		}
 		Ok(audio_asset)
 	}
 
@@ -1825,5 +1868,46 @@ mod tests {
 		let waker = std::task::Waker::noop();
 		let mut context = std::task::Context::from_waker(waker);
 		assert_eq!(std::pin::Pin::new(&mut capture_promise).poll(&mut context), std::task::Poll::Ready(vec![1, 2, 3]));
+	}
+
+	//==============================================================================
+	// "data:" 주소 애셋. (데스크탑은 주소를 풀어 바이트로, 소리는 형을 보지 않고 내용으로 가린다. 원본 fetch, decodeAudioData 와 같다)
+	//==============================================================================
+	#[cfg(not(target_arch = "wasm32"))]
+	#[test]
+	fn data_url_assets_load_on_desktop() {
+		fn encode_base64(bytes: &[u8]) -> String {
+			const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+			let mut text = String::new();
+			for chunk in bytes.chunks(3) {
+				let value = (chunk[0] as u32) << 16 | (*chunk.get(1).unwrap_or(&0) as u32) << 8 | *chunk.get(2).unwrap_or(&0) as u32;
+				for index in 0..4 {
+					if index <= chunk.len() {
+						text.push(ALPHABET[(value >> (18 - 6 * index) & 63) as usize] as char);
+					}
+					else {
+						text.push('=');
+					}
+				}
+			}
+			text
+		}
+		let engine = Engine::new(EngineConfiguration::new());
+		// 타임라인 편집기가 넣는 꼴. (FileReader.readAsDataURL, 형은 파일 확장자에서 오고 틀려도 된다)
+		let webm_bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/assets/audio/opus_stereo.webm")).expect("webm");
+		let audio_asset = engine.load_audio_asset(&format!("data:application/octet-stream;base64,{}", encode_base64(&webm_bytes))).expect("data audio");
+		assert!(audio_asset.is_loaded());
+		assert!((audio_asset.get_duration() - 11002.0 / 44100.0).abs() < 1e-9);
+		assert!(engine.load_audio_asset("data:audio/wav;base64,@@").is_err());
+		// 애셋 바이트 부탁은 그 자리에서 끝나고 형을 응답 형으로 둔다.
+		let load_handle = engine.request_asset_bytes("data:text/plain;charset=utf-8,hello%20world");
+		assert!(load_handle.is_loaded());
+		assert_eq!(load_handle.get_bytes().expect("bytes").as_slice(), b"hello world");
+		assert_eq!(load_handle.get_content_type().as_deref(), Some("text/plain;charset=utf-8"));
+		assert!(engine.request_asset_bytes("data:nocomma").is_failed());
+		// 그림.
+		let png_bytes = encode_png(&[0, 255, 0, 255], 1, 1).expect("png");
+		let image = engine.load_image(&format!("data:image/png;base64,{}", encode_base64(&png_bytes))).expect("data image");
+		assert_eq!((image.get_width(), image.get_height()), (1, 1));
 	}
 }

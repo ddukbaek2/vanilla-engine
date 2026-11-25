@@ -427,6 +427,27 @@
 - DevTools: 인스펙터가 원본 getComponentProperties 처럼 컴포넌트의 get*, is* 게터를 모두 불러 보인다. (이름은 원본 formatMethodName, 값은 formatPropertyValue 꼴, 수는 원본 toFixed 와 같은 반올림) 반사가 없는 컴포넌트는 지금처럼 UIDocument 의 저장 키 또는 종류 이름만
 - 예제 devtoolsshowcase: Spin 에 #[vanilla::reflect] 를 붙여 인스펙터에 degreesPerSecond 가 보인다
 - README(노드와 컴포넌트의 반사 매크로 쓰는 법, 기술 노트, 외부 의존성의 매크로 크레이트 표), ARCHITECTURE(배치, 9장, 10장 두 엔진의 차이의 반사 줄)
+- 데스크탑 소리 해석을 원본(크롬 decodeAudioData)과 같게 했다. (platform/audio/decode)
+  - 크롬 158 은 FLAC, MP3, PCM, Vorbis 를 symphonia 0.6 으로, Opus 를 libopus 로, AAC 를 FFmpeg 로 푼다. 엔진도 kira 의 해석 기능을 끄고 symphonia 0.6.1 을 직접 불러 같은 해석기를 쓰고(크롬이 켜는 기능과 같게), Opus 는 libopus 를 러스트로 옮긴 opus-pure 를 symphonia 코덱 등록표에 넣어 푼다. webm.cjs 가 만드는 webm(Opus)을 이제 데스크탑에서 튼다
+  - 컨테이너도 symphonia 의 풀기(wav, ogg, mkv(webm), isomp4(m4a), flac, mp3, adts)로 하고, 꼴은 확장자나 형이 아니라 내용으로 가린다
+  - 크롬이 FFmpeg 의 시각과 다듬기 값으로 버리는 앞뒤를 같게 버린다. (Opus pre-skip, webm 의 CodecDelay 를 FFmpeg 가 ms 로 반올림해 생기는 몫, DiscardPadding, MP3 LAME 지연, Ogg granule 과 쪽 하나짜리 Vorbis, m4a 편집 목록과 iTunSMPB, AAC 마지막 패킷 길이)
+  - 정수 표본은 크롬 식(양수는 최대로, 음수는 최소로 나눔, 16 비트 FLAC 은 16 비트로)으로, MP3 는 -1 ~ 1 로 자른다. Opus 의 출력 게인과 5.1 의 크로미엄 채널 차례도 같다
+  - 크로미엄 SincResampler 를 옮겨 원본 DECODE_SAMPLE_RATE(44100)로 바꾼다. (Blink 와 같은 32 탭 커널과 길이 셈, 합의 차례는 크롬이 고르는 NEON, SSE, AVX2 와 같게)
+  - WebAudio 스피커 규칙으로 1 채널이나 2 채널로 내린다. (쿼드, 5.1 은 명세의 식, 그 밖은 앞 두 채널. 이제 3 채널 이상 파일도 튼다)
+  - 시험 소리 21 파일(tests/assets/audio, 모두 수 KB)을 크롬 158 의 결과(chromedecode.cjs 가 찍은 chrome_decode.json)와 견준다. 길이와 채널은 모두 같고, FLAC, MP3, PCM, Vorbis 는 표본까지 같으며 Opus, AAC 는 1e-7 안팎이다
+  - 남은 차이: HE-AAC(SBR, PS)와 3 채널 이상 AAC 는 symphonia 0.6.1 이 받지 않아 데스크탑에서 풀지 못한다. (크롬은 FFmpeg 로 푼다)
+  - 늘어난 크레이트 7: opus-pure, symphonia-format-mkv, rustfft(크롬처럼 symphonia 의 opt-simd 를 켜 FFT 를 같게)와 그 의존 primal-check, strength_reduce, transpose, num-integer. 줄어든 것은 없다 (kira 가 쓰던 symphonia 를 엔진이 직접 쓴다)
+- "data:" 주소: 데스크탑 Engine::load_audio_asset, request_asset_bytes, request_asset_bytes_into, load_image 가 data: 주소를 풀어 읽는다. (타임라인 편집기가 넣는 data: 소리를 데스크탑에서도 튼다) base64 와 퍼센트 꼴 풀기를 타임라인에서 base/dataurl.rs 로 옮겼다. 웹은 asset_base_url 이 비어 있지 않으면 data: 주소 앞에도 기준 주소를 붙여 못 받던 것을 고쳤다
+- 데스크탑 소리 내기를 kira 에서 cpal 위의 엔진 믹서로 바꿨다. (platform/audio/mixer.rs) 원본 소리 API 와 러스트 API(AudioPlayer, AudioBus, get_gain_node, BeepPlayer)는 그대로다
+  - 원본이 짓는 WebAudio 그래프를 그대로 짓는다. AudioBufferSourceNode → 플레이어 GainNode → (0 이 아닌 좌우를 처음 걸면) StereoPannerNode → 버스 GainNode 또는 출력, 비프 오실레이터 → 출력. 128 프레임 퀀텀으로 그린다
+  - 셈은 크롬과 같다. 소스는 audio_buffer_source_handler.cc 를 옮겼다(시작 위치의 1024 배 오버샘플 반올림, 빠르기 1 이면 그대로 베끼고 아니면 선형 보간, 끝의 선형 외삽, 버퍼 전체 루프, playbackRate 는 AudioParam 처럼 f32). 좌우는 stereo_panner.cc 의 식(모노는 x = (pan + 1) / 2, 스테레오는 pan <= 0 이면 L += R cos, R *= sin), GainNode 는 곱, 모노는 스피커 규칙으로 양쪽에, 출력은 -1 ~ 1 로 자른다. kira 는 4 점 3 차 보간과 sqrt 좌우 법칙으로 크롬과 달랐다
+  - 좌우와 음량은 다음 퀀텀부터 바로 걸린다. (kira 판의 좌우는 다음 재생부터였다) 비프는 컨텍스트(장치) 표본율로 그린다
+  - 컨텍스트 시계는 그린 시간이다. (원본 currentTime, 퀀텀마다 128 / 표본율 초) 멈춘 동안은 그리지 않아 소리와 시계가 그 자리에서 선다
+  - 스트림은 관리 스레드가 들고, 장치가 빠지면(맥이 아니면 기본 장치가 바뀌어도) 같은 믹서로 다시 연다. (kira 가 하던 것과 같다)
+  - AudioContext(데스크탑)는 엔진 믹서의 것이고 sample_rate(), current_time() 을 웹 AudioContext 와 같은 이름으로 낸다. AudioBuffer 는 duration(), length(), number_of_channels(), sample_rate() 을 낸다. (공개 API 를 바꾸는 일이다: 지금까지는 kira 의 AudioManager, StaticSoundData 였다)
+  - 버스로 만든 플레이어와 내보낼 곳을 직접 넘긴 플레이어는 원본 WebAudio 처럼 이어진 동안 버스 노드를 살려 둔다
+  - 그래프 다섯(같은 표본율과 다른 표본율의 소스, 빠르기와 루프와 시작 위치, 모노와 스테레오 좌우와 0, 버스, 섞기)을 크롬 158 OfflineAudioContext 결과(tests/assets/mixer/chromemixer.cjs 가 찍은 chrome_mixer.json)와 견주는 시험을 더했다. 1e-6 안에서 같다
+  - 줄어든 크레이트 8: kira, atomic-arena, crossbeam-utils, glam, mint, pastey, rtrb, triple_buffer. 직접 의존은 cpal 하나다 (kira 가 쓰던 cpal 0.18 그대로, realtime 기능)
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.

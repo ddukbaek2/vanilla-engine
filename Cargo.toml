@@ -66,8 +66,14 @@ gilrs = "0.11"
 glutin = "0.32"
 glutin-winit = "0.5"
 raw-window-handle = "0.6"
-# 소리. (믹서 트랙, 정적 소리. 기본 기능을 끄고 cpal 출력과 ogg(vorbis), mp3, wav(pcm), flac, m4a(isomp4 와 aac) 해석만 켠다. 웹은 브라우저가 이 꼴들을 푼다)
-kira = { version = "0.12", default-features = false, features = ["cpal", "cpal-realtime", "ogg", "vorbis", "mp3", "wav", "pcm", "flac", "isomp4", "aac"] }
+# 소리 내기. (기본 출력 장치. 그 위의 WebAudio 노드 그래프 믹서는 엔진이 크롬과 같은 셈으로 짓는다(platform/audio/mixer.rs).
+# realtime 은 윈도우, 리눅스에서 소리 스레드의 우선순위를 올린다)
+cpal = { version = "0.18", features = ["realtime"] }
+# 소리 해석. (크롬 decodeAudioData 와 같은 해석기. 크롬은 FLAC, MP3, PCM, Vorbis 를 symphonia 0.6 으로 풀고 이 기능들을 켠다(third_party/rust/chromium_crates_io/Cargo.toml).
+# 크롬이 FFmpeg 로 푸는 AAC 는 symphonia 의 aac 를 더 켠다. 컨테이너도 symphonia 의 풀기(wav, ogg, mkv(webm), isomp4(m4a), 그리고 flac, mp3, adts)를 쓴다)
+symphonia = { version = "0.6", default-features = false, features = ["all-meta", "flac", "mpa", "ogg", "wav", "mkv", "pcm", "isomp4", "vorbis", "aac", "opt-simd"] }
+# Opus 해석. (크롬은 libopus 로 푼다. libopus 를 러스트로 옮긴 것으로 symphonia 코덱 등록표에 엔진 해석기로 넣는다. C 빌드가 없어 맥에서 윈도우 대상 검사가 된다)
+opus-pure = "0.2"
 # SVG 그림. (데스크탑, usvg 로 읽고 tiny-skia 로 그린다. 원본은 브라우저가 SVG 를 그림으로 푼다. 웹은 브라우저가 푼다)
 resvg = "0.50"
 # AVIF 그림. (데스크탑, HEIF 상자는 엔진이 읽고 dav1d 를 러스트로 옮긴 rav1d 로 AV1 을 푼다. 원본은 브라우저가 AVIF 를 푼다. 웹은 브라우저가 푼다)

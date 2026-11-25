@@ -262,7 +262,7 @@ impl Scene for TitleScene {
 | `new Promise((resolve) => ...)` | `let (promise, resolver) = Promise::create();` |
 
 - 데스크탑은 `EngineConfiguration.asset_directory_paths` 폴더에서 바로 읽고, 웹은 `asset_base_url + 경로` 를 fetch 합니다. 게임 코드는 같습니다.
-- 이미지(png, jpg, webp, gif 첫 장, bmp, ico, svg, avif), 텍스트, JSON, 바이너리, 폰트(ttf, otf, woff, woff2), 오디오(ogg, mp3, wav, flac, m4a)를 지원합니다. 데스크탑은 엔진이 풀고, 웹은 원본처럼 브라우저가 풉니다.
+- 이미지(png, jpg, webp, gif 첫 장, bmp, ico, svg, avif), 텍스트, JSON, 바이너리, 폰트(ttf, otf, woff, woff2), 오디오(webm, ogg 의 Opus 와 Vorbis, mp3, wav, flac, m4a 와 aac 의 AAC)를 지원합니다. 데스크탑은 엔진이 풀고, 웹은 원본처럼 브라우저가 풉니다. 데스크탑 소리는 크롬 decodeAudioData 와 같은 해석기(FLAC, MP3, PCM, Vorbis 는 크롬이 쓰는 symphonia)로 풀고 앞뒤 다듬기, 44100Hz 로 바꾸기(크로미엄 SincResampler 를 옮긴 것)까지 같게 해 길이와 표본이 크롬과 같습니다. (`tests/assets/audio` 의 21 파일을 크롬 158 의 결과와 견줍니다)
 - 여러 애셋을 함께 받을 때는 `AssetLoader` 가 동시 수만큼 요청하고 진행률과 실패 목록을 셉니다.
 - 로딩에 실패한 애셋도 완료로 처리해서 씬이 멈추지 않습니다.
 
@@ -404,7 +404,7 @@ cargo run --release --example modelviewer
 
 ## 외부 의존성
 
-엔진이 직접 쓰는 크레이트입니다. (반사 매크로 크레이트 `macros/` 가 쓰는 것 포함) 버전은 `Cargo.lock` 기준이고, 라이선스는 각 크레이트의 `Cargo.toml` 에 적힌 것입니다. 직접 의존성은 모두 MIT, Apache-2.0, Zlib, BSD, ISC, Unicode-3.0 같은 허용적 라이선스입니다. (self_cell 은 Apache-2.0 과 GPL-2.0 가운데 하나를 고르는 이중 라이선스입니다. kira 가 데스크탑 소리 해석에 쓰는 symphonia 는 MPL-2.0 입니다)
+엔진이 직접 쓰는 크레이트입니다. (반사 매크로 크레이트 `macros/` 가 쓰는 것 포함) 버전은 `Cargo.lock` 기준이고, 라이선스는 각 크레이트의 `Cargo.toml` 에 적힌 것입니다. 직접 의존성은 symphonia 를 빼고 모두 MIT, Apache-2.0, Zlib, BSD, ISC, Unicode-3.0 같은 허용적 라이선스입니다. (self_cell 은 Apache-2.0 과 GPL-2.0 가운데 하나를 고르는 이중 라이선스입니다) 데스크탑 소리 해석의 symphonia 는 파일 단위 약한 카피레프트인 MPL-2.0 입니다. 원본이 쓰는 크롬도 decodeAudioData 의 FLAC, MP3, PCM, Vorbis 를 같은 symphonia 0.6 으로 풀어 MPL-2.0 그대로 싣고, 엔진은 크롬과 같은 해석기를 쓰려고 이것을 골랐습니다.
 
 **데스크탑, 웹 공통**
 
@@ -443,7 +443,9 @@ cargo run --release --example modelviewer
 | [glutin](https://crates.io/crates/glutin), [glutin-winit](https://crates.io/crates/glutin-winit) | 0.32.3, 0.5.0 | `platform/desktop.rs` | OpenGL 3.3 코어 컨텍스트 생성 (깊이 24, 스텐실 8) | Apache-2.0, MIT |
 | [raw-window-handle](https://crates.io/crates/raw-window-handle) | 0.6.2 | `platform/desktop.rs`, `platform/desktop/windowsplatform.rs` | winit 창을 glutin 과 윈도우 창 서브클래싱에 넘깁니다 | MIT / Apache-2.0 / Zlib |
 | [gilrs](https://crates.io/crates/gilrs) | 0.11.2 | `core/gamepadmanager.rs` | 게임패드 입력과 진동(리눅스, 윈도우). OS 입력을 W3C Standard Gamepad 꼴로 바꿉니다. 웹은 원본처럼 `navigator.getGamepads()` 를 직접 읽습니다 | MIT / Apache-2.0 |
-| [kira](https://crates.io/crates/kira) | 0.12.6 | `platform/audio/desktop.rs` | 오디오 재생과 믹서 트랙. ogg, mp3, wav, flac, m4a(isomp4 와 aac) 해석만 켭니다 (symphonia) | MIT / Apache-2.0 |
+| [cpal](https://crates.io/crates/cpal) | 0.18.2 | `platform/audio/desktop.rs` | 기본 출력 장치. 그 위의 믹서(소스, GainNode, StereoPannerNode, 버스)는 엔진이 크롬 WebAudio 와 같은 셈으로 짓습니다 (`platform/audio/mixer.rs`). realtime 기능으로 윈도우, 리눅스의 소리 스레드 우선순위를 올립니다 | Apache-2.0 |
+| [symphonia](https://crates.io/crates/symphonia) | 0.6.1 | `platform/audio/decode/` | 소리 해석. 크롬 decodeAudioData 와 같은 해석기로 FLAC, MP3, PCM, Vorbis 를 풀고(크롬이 켜는 기능과 같게), AAC 와 컨테이너(wav, ogg, mkv(webm), isomp4(m4a), flac, mp3, adts)도 풉니다 | MPL-2.0 |
+| [opus-pure](https://crates.io/crates/opus-pure) | 0.2.5 | `platform/audio/decode/opus.rs` | Opus 해석. libopus 를 러스트로 옮긴 것으로 symphonia 코덱 등록표에 엔진 해석기로 넣습니다 (크롬은 libopus 로 풉니다). C 빌드가 없어 맥에서 윈도우 대상 검사가 됩니다 | BSD-3-Clause |
 | [resvg](https://crates.io/crates/resvg) | 0.50.0 | `core/image.rs`, `animation/timeline.rs` | SVG 그림을 usvg 로 읽고 tiny-skia 로 그립니다 | MIT / Apache-2.0 |
 | [rav1d](https://crates.io/crates/rav1d) | 1.1.0 | `core/avifimage.rs` | AVIF 의 AV1 해석(dav1d 를 러스트로 옮긴 것). asm 을 꺼 nasm 이나 C 컴파일러 없이 빌드합니다. HEIF 상자는 엔진이 읽습니다 | BSD-2-Clause |
 | [icu_segmenter](https://crates.io/crates/icu_segmenter), [icu_provider](https://crates.io/crates/icu_provider), [icu_collections](https://crates.io/crates/icu_collections) | 2.4.0 | `core/component/text.rs` | 낱말 나누기. 공백 없이 쓰는 한중일과 태국어 같은 동남아 글자를 사전으로 나누고, 한중일은 사전(cjdict)의 낱말 값으로 크롬 ICU4C 처럼 값의 합이 가장 작은 나누기를 고릅니다. 웹은 원본처럼 브라우저 Intl.Segmenter 를 씁니다 | Unicode-3.0 |

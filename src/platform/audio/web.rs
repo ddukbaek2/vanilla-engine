@@ -1,7 +1,6 @@
 //==============================================================================
 // 웹 오디오 백엔드. (wasm32, WebAudio 를 web-sys 로 직접 부른다)
 // - 원본 audiomanager.js, audioplayer.js, audioasset.js, beepplayer.js 의 WebAudio 호출을 그대로 옮겼다.
-//   (kira 는 wasm 에서 정적 소리를 파일에서 못 읽고 스트리밍 소리가 안 된다)
 // - AudioContext: 원본처럼 AudioContext, 없으면 webkitAudioContext. user gesture 뒤에 만든다. (create_audio_player 는 그 전에도 만든다)
 // - resume: "suspended" 나 "interrupted"(iOS WebKit 의 비표준 상태) 일 때만 resume() 하고 거부는 넘긴다.
 //   상태는 문자열로 읽는다. (web-sys 의 AudioContextState 에 "interrupted" 가 없다)
