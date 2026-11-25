@@ -19,6 +19,43 @@ const COMPLETION_STATUS: u32 = 0x91B1;
 /// 미리 링크할 소스 하나. (정점 셰이더, 조각 셰이더, 어트리뷰트 위치 목록)
 pub type ShaderWarmerSource<'a> = (&'a str, &'a str, &'a [(&'a str, u32)]);
 
+//==============================================================================
+/// 셰이더 미리 링크기. (KHR_parallel_shader_compile 로 뒤에서 링크해 드라이버의 프로그램 캐시에 남긴다)
+/// - 켤 때(로고, 로딩 동안) 만들고 매 프레임 update 를 부른다. 확장이 없으면 아무것도 하지 않는다.
+///
+/// # 예제
+/// 로딩 동안 미리 링크하고 다 됐는지 보기
+/// ```rust,no_run
+/// use vanilla::{Graphic, ShaderWarmer, ShaderWarmerSource};
+///
+/// const VERTEX_SHADER_SOURCE: &str = "#version 300 es
+/// in vec2 vertexPosition;
+/// void main() {
+/// 	gl_Position = vec4(vertexPosition, 0.0, 1.0);
+/// }
+/// ";
+///
+/// const FRAGMENT_SHADER_SOURCE: &str = "#version 300 es
+/// precision highp float;
+/// out vec4 outputColor;
+/// void main() {
+/// 	outputColor = vec4(1.0);
+/// }
+/// ";
+///
+/// const ATTRIBUTE_LOCATION_LIST: [(&str, u32); 1] = [("vertexPosition", 0)];
+///
+/// fn start_warming(graphic: &Graphic) -> ShaderWarmer {
+/// 	let program_source_list: [ShaderWarmerSource; 1] = [(VERTEX_SHADER_SOURCE, FRAGMENT_SHADER_SOURCE, &ATTRIBUTE_LOCATION_LIST)];
+/// 	ShaderWarmer::new(graphic.get_gl(), &program_source_list)
+/// }
+///
+/// fn update_loading(graphic: &Graphic, shader_warmer: &mut ShaderWarmer) -> bool {
+/// 	shader_warmer.update(graphic.get_gl());
+/// 	shader_warmer.is_finished()
+/// }
+/// ```
+//==============================================================================
 pub struct ShaderWarmer {
 	is_supported: bool,
 	pending_program_list: Vec<(GlProgram, GlShader, GlShader)>,
@@ -27,6 +64,13 @@ pub struct ShaderWarmer {
 impl ShaderWarmer {
 	//==============================================================================
 	/// 생성. (확장이 있으면 소스를 모두 컴파일하고 링크를 걸어 둔다)
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트. (Graphic 의 get_gl)
+	/// - `program_source_list`: 미리 링크할 (버텍스 소스, 프래그먼트 소스, 어트리뷰트 위치 목록) 목록. (나중에 ShaderProgram 에 줄 것과 같게)
+	///
+	/// # 돌려줌
+	/// 만든 워머. 확장이 없으면 아무것도 걸지 않아 is_finished 가 바로 true 다. (컴파일이나 링크가 틀려도 오류를 내지 않는다)
 	//==============================================================================
 	pub fn new(gl: &glow::Context, program_source_list: &[ShaderWarmerSource]) -> ShaderWarmer {
 		let is_supported = gl.supported_extensions().iter().any(|extension_name| extension_name.contains("parallel_shader_compile"));
@@ -68,6 +112,9 @@ impl ShaderWarmer {
 
 	//==============================================================================
 	/// 매 프레임. (링크가 끝난 것을 지운다, 끝났는지 묻는 것은 기다리지 않는다)
+	///
+	/// # 인자
+	/// - `gl`: new 에 준 것과 같은 GL 컨텍스트.
 	//==============================================================================
 	pub fn update(&mut self, gl: &glow::Context) {
 		if self.pending_program_list.is_empty() {
@@ -89,6 +136,9 @@ impl ShaderWarmer {
 
 	//==============================================================================
 	/// 다 링크했는지. (확장이 없어 하지 않았으면 처음부터 true)
+	///
+	/// # 돌려줌
+	/// 링크를 기다리는 프로그램이 없으면 true.
 	//==============================================================================
 	pub fn is_finished(&self) -> bool {
 		self.pending_program_list.is_empty()
@@ -96,6 +146,9 @@ impl ShaderWarmer {
 
 	//==============================================================================
 	/// 확장을 쓸 수 있는지. (false 면 미리 링크를 하지 않는다)
+	///
+	/// # 돌려줌
+	/// 확장 이름에 parallel_shader_compile 이 든 확장이 있으면 true.
 	//==============================================================================
 	pub fn is_supported(&self) -> bool {
 		self.is_supported

@@ -37,11 +37,17 @@ use std::rc::Rc;
 
 /// GL 객체 타입. (데스크탑은 glow::Native*, 웹은 WebGL 객체. glow 컨텍스트가 정한 것을 그대로 쓴다)
 pub type GlTexture = <glow::Context as glow::HasContext>::Texture;
+/// GL 버퍼 객체. (버텍스 버퍼 같은 것)
 pub type GlBuffer = <glow::Context as glow::HasContext>::Buffer;
+/// GL 버텍스 어레이 객체.
 pub type GlVertexArray = <glow::Context as glow::HasContext>::VertexArray;
+/// GL 셰이더 프로그램 객체.
 pub type GlProgram = <glow::Context as glow::HasContext>::Program;
+/// GL 셰이더 객체. (버텍스나 프래그먼트 셰이더 하나)
 pub type GlShader = <glow::Context as glow::HasContext>::Shader;
+/// GL 유니폼 위치. (데스크탑은 정수 하나를 감싼 값, 웹은 WebGL 위치 객체)
 pub type GlUniformLocation = <glow::Context as glow::HasContext>::UniformLocation;
+/// GL 프레임버퍼 객체. (렌더 타겟)
 pub type GlFramebuffer = <glow::Context as glow::HasContext>::Framebuffer;
 
 //==============================================================================
@@ -407,31 +413,57 @@ const IMAGE_TEXTURE_SWEEP_INTERVAL: u64 = 600;
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum BlendMode {
+	/// 기본 알파 합성. ("source-over", 고정 블렌딩)
 	Normal,
+	/// 바탕과 겹친 곳만 그린다. ("source-in", 바탕 알파를 마스크로, 고정 블렌딩)
 	SourceIn,
+	/// 바탕과 겹치지 않은 곳만 그린다. ("source-out", 고정 블렌딩)
 	SourceOut,
+	/// 바탕 위의 겹친 곳에만 합성한다. ("source-atop", 고정 블렌딩)
 	SourceAtop,
+	/// 바탕 아래에 합성한다. ("destination-over", 고정 블렌딩)
 	DestinationOver,
+	/// 바탕에서 겹친 곳만 남긴다. ("destination-in", 고정 블렌딩)
 	DestinationIn,
+	/// 바탕에서 겹치지 않은 곳만 남긴다. ("destination-out", 고정 블렌딩)
 	DestinationOut,
+	/// 겹친 곳은 바탕을 남기고, 바탕이 없는 곳은 그린 것을 둔다. ("destination-atop", 고정 블렌딩)
 	DestinationAtop,
+	/// 색을 더한다. ("lighter", 고정 블렌딩)
 	Lighter,
+	/// 바탕을 보지 않고 그린 것만 둔다. ("copy", 고정 블렌딩)
 	Copy,
+	/// 겹친 곳을 빼고 둘 다 둔다. ("xor", 고정 블렌딩)
 	Xor,
+	/// 곱하기 합성. ("multiply", 어두워진다, 기본 프레임버퍼는 고정 블렌딩, 렌더 타겟은 셰이더 섞기)
 	Multiply,
+	/// 스크린 합성. ("screen", 밝아진다, 고정 블렌딩)
 	Screen,
+	/// 오버레이. ("overlay", 명암을 키운다, 셰이더 섞기)
 	Overlay,
+	/// 어두운 쪽을 고른다. ("darken", 셰이더 섞기)
 	Darken,
+	/// 밝은 쪽을 고른다. ("lighten", 셰이더 섞기)
 	Lighten,
+	/// 컬러 닷지. ("color-dodge", 밝아진다, 셰이더 섞기)
 	ColorDodge,
+	/// 컬러 번. ("color-burn", 어두워진다, 셰이더 섞기)
 	ColorBurn,
+	/// 하드 라이트. ("hard-light", 셰이더 섞기)
 	HardLight,
+	/// 소프트 라이트. ("soft-light", 셰이더 섞기)
 	SoftLight,
+	/// 차이 합성. ("difference", 셰이더 섞기)
 	Difference,
+	/// 대비가 낮은 차이 합성. ("exclusion", 셰이더 섞기)
 	Exclusion,
+	/// 그린 것의 색조에 바탕의 채도와 밝기. ("hue", 셰이더 섞기)
 	Hue,
+	/// 그린 것의 채도에 바탕의 색조와 밝기. ("saturation", 셰이더 섞기)
 	Saturation,
+	/// 그린 것의 색조와 채도에 바탕의 밝기. ("color", 셰이더 섞기)
 	Color,
+	/// 그린 것의 밝기에 바탕의 색조와 채도. ("luminosity", 셰이더 섞기)
 	Luminosity,
 }
 
@@ -471,6 +503,9 @@ crate::core::reflection::impl_reflect_names!(BlendMode, BLEND_MODE_NAME_TABLE);
 impl BlendMode {
 	//==============================================================================
 	/// 원본 이름 반환. ("source-over" 같은 문자열)
+	///
+	/// # 돌려줌
+	/// 원본 globalCompositeOperation 이름. (Normal 은 "source-over")
 	//==============================================================================
 	pub fn get_name(&self) -> &'static str {
 		BLEND_MODE_NAME_TABLE[*self as usize].1
@@ -478,6 +513,23 @@ impl BlendMode {
 
 	//==============================================================================
 	/// 원본 이름으로 찾기. (모르는 이름이면 None. 타임라인, 파티클 서술처럼 JSON 에서 읽을 때 쓴다)
+	///
+	/// # 인자
+	/// - `name`: 원본 globalCompositeOperation 이름. ("multiply" 처럼 소문자와 하이픈, 대소문자를 가린다)
+	///
+	/// # 돌려줌
+	/// 이름에 맞는 블렌드 모드. 모르는 이름이면 None.
+	///
+	/// # 예제
+	/// JSON 의 이름 글을 블렌드 모드로
+	/// ```rust
+	/// use vanilla::BlendMode;
+	///
+	/// assert_eq!(BlendMode::from_name("multiply"), Some(BlendMode::Multiply));
+	/// assert_eq!(BlendMode::from_name("source-over"), Some(BlendMode::Normal));
+	/// assert_eq!(BlendMode::from_name("unknown"), None);
+	/// assert_eq!(BlendMode::ColorDodge.get_name(), "color-dodge");
+	/// ```
 	//==============================================================================
 	pub fn from_name(name: &str) -> Option<BlendMode> {
 		BLEND_MODE_NAME_TABLE.iter().find(|(_, blend_mode_name)| *blend_mode_name == name).map(|(blend_mode, _)| *blend_mode)
@@ -674,10 +726,15 @@ impl BackdropRect {
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TextAlign {
+	/// 왼쪽 맞춤. (x 가 글의 왼쪽 끝)
 	Left,
+	/// 가운데 맞춤. (x 가 글의 가로 가운데)
 	Center,
+	/// 오른쪽 맞춤. (x 가 글의 오른쪽 끝)
 	Right,
+	/// 글 방향의 시작 쪽 맞춤. (Ltr 은 왼쪽, Rtl 은 오른쪽, Graphic 의 처음 값)
 	Start,
+	/// 글 방향의 끝 쪽 맞춤. (Ltr 은 오른쪽, Rtl 은 왼쪽)
 	End,
 }
 
@@ -695,11 +752,17 @@ crate::core::reflection::impl_reflect_names!(TextAlign, [
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TextBaseline {
+	/// 위 끝 기준. (y 가 글꼴 어센트의 위 끝)
 	Top,
+	/// 가운데 기준. (y 가 어센트 위 끝과 디센트 아래 끝의 가운데)
 	Middle,
+	/// 아래 끝 기준. (y 가 글꼴 디센트의 아래 끝)
 	Bottom,
+	/// 표의 문자 기준선. (Bottom 과 같이 y 가 디센트의 아래 끝)
 	Ideographic,
+	/// 매달린 기준선. (y 가 기준선에서 어센트의 0.8 배 위)
 	Hanging,
+	/// 알파벳 기준선. (y 가 기준선, Graphic 의 처음 값)
 	Alphabetic,
 }
 
@@ -720,9 +783,13 @@ crate::core::reflection::impl_reflect_names!(TextBaseline, [
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TextDirection {
+	/// 물려받기. (Graphic 의 처음 값, Graphic 에서는 Ltr 로 본다)
 	Inherit,
+	/// 왼쪽에서 오른쪽.
 	Ltr,
+	/// 오른쪽에서 왼쪽.
 	Rtl,
+	/// 문자열마다 처음 나오는 방향이 강한 글자로 정한다. (없으면 Ltr)
 	Auto,
 }
 
@@ -737,6 +804,12 @@ crate::core::reflection::impl_reflect_names!(TextDirection, [
 impl TextDirection {
 	//==============================================================================
 	/// 원본 글로 읽기. ("ltr", "rtl", "auto", 그 밖은 Inherit)
+	///
+	/// # 인자
+	/// - `name`: 원본 글. ("inherit", "ltr", "rtl", "auto", 대소문자를 가린다)
+	///
+	/// # 돌려줌
+	/// 읽은 방향. 모르는 글이면 Inherit.
 	//==============================================================================
 	pub fn from_name(name: &str) -> TextDirection {
 		match name {
@@ -757,6 +830,9 @@ impl TextDirection {
 
 	//==============================================================================
 	/// 원본 글. ("inherit", "ltr", "rtl", "auto")
+	///
+	/// # 돌려줌
+	/// 원본 글. ("inherit", "ltr", "rtl", "auto" 가운데 하나)
 	//==============================================================================
 	pub fn get_name(&self) -> &'static str {
 		match self {
@@ -777,6 +853,9 @@ impl TextDirection {
 
 	//==============================================================================
 	/// 모양 짓기 방향. (Rtl 만 오른쪽에서 왼쪽, 실제 방향으로 푼 뒤에 쓴다)
+	///
+	/// # 돌려줌
+	/// Rtl 이면 `ShapingDirection::RightToLeft`, 그 밖(Inherit, Auto 포함)은 `ShapingDirection::LeftToRight`.
 	//==============================================================================
 	pub fn to_shaping_direction(&self) -> ShapingDirection {
 		if *self == TextDirection::Rtl {
@@ -790,6 +869,12 @@ impl TextDirection {
 
 //==============================================================================
 /// 오른쪽에서 왼쪽으로 쓰는 글자인지. (원본 RIGHT_TO_LEFT_CHARACTER_PATTERN: 히브리어, 아랍어, 시리아어, 타나, 은코 등과 그 표현형)
+///
+/// # 인자
+/// - `character`: 볼 글자.
+///
+/// # 돌려줌
+/// 코드 포인트가 U+0590 ~ U+08FF, U+FB1D ~ U+FDFF, U+FE70 ~ U+FEFF, U+10800 ~ U+10FFF, U+1E800 ~ U+1EFFF 안이면 true.
 //==============================================================================
 pub fn is_right_to_left_character(character: char) -> bool {
 	let code_point = character as u32;
@@ -798,6 +883,23 @@ pub fn is_right_to_left_character(character: char) -> bool {
 
 //==============================================================================
 /// 글의 첫 강한 방향. (원본 resolveTextDirection 의 "auto": 글자 갈래 문자와 LRM, RLM, ALM 가운데 처음 것, 없으면 Ltr)
+///
+/// # 인자
+/// - `text`: 볼 문자열.
+///
+/// # 돌려줌
+/// 처음 나오는 강한 글자(글자 갈래 문자와 LRM, RLM, ALM)가 오른쪽에서 왼쪽 글자나 RLM(U+200F), ALM(U+061C)이면 Rtl, 그 밖이면 Ltr. 강한 글자가 없으면 Ltr.
+///
+/// # 예제
+/// 숫자와 기호는 건너뛰고 첫 글자로 정한다
+/// ```rust
+/// use vanilla::{detect_text_direction, TextDirection};
+///
+/// assert_eq!(detect_text_direction("Hello"), TextDirection::Ltr);
+/// assert_eq!(detect_text_direction("123 \u{05E9}\u{05DC}\u{05D5}\u{05DD}"), TextDirection::Rtl);
+/// assert_eq!(detect_text_direction("\u{200F}abc"), TextDirection::Rtl);
+/// assert_eq!(detect_text_direction("2024!"), TextDirection::Ltr);
+/// ```
 //==============================================================================
 pub fn detect_text_direction(text: &str) -> TextDirection {
 	for character in text.chars() {
@@ -848,11 +950,67 @@ struct ClipEntry {
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ImageSmoothingQuality {
+	/// 낮음. ("low")
 	Low,
+	/// 중간. ("medium")
 	Medium,
+	/// 높음. ("high", Graphic 의 처음 값)
 	High,
 }
 
+//==============================================================================
+/// 그래픽. (원본 Graphic, GL 컨텍스트에 Canvas2D 처럼 그리는 2D 렌더러)
+/// - 엔진이 하나 만들어 씬과 노드의 그리기 함수에 `&mut Graphic` 으로 넘긴다. 좌표는 좌상 원점, 픽셀 단위다.
+/// - 상태(변환, 전역 투명도, 블렌드 모드, 색, 글꼴, 정렬, 글자 방향)는 push_state, pop_state 로 쌓고 되돌린다. 프레임 첫머리(apply_settings)에 변환, 전역 투명도, 틴트, 블렌드 모드가 처음 값으로 돌아간다.
+///
+/// # 예제
+/// 씬의 draw 에서 도형과 글자 그리기
+/// ```rust,no_run
+/// use vanilla::{Colors, Engine, EngineConfiguration, Graphic, Rect, Scene, SceneBase, TextAlign, TextBaseline, Vector2};
+///
+/// struct MainScene {
+/// 	scene_base: SceneBase,
+/// }
+///
+/// impl Scene for MainScene {
+/// 	fn get_scene_base(&self) -> &SceneBase {
+/// 		&self.scene_base
+/// 	}
+///
+/// 	fn get_scene_base_mut(&mut self) -> &mut SceneBase {
+/// 		&mut self.scene_base
+/// 	}
+///
+/// 	fn draw(&mut self, _engine: &mut Engine, graphic: &mut Graphic) {
+/// 		graphic.push_state();
+/// 		graphic.translate(640.0, 360.0);
+/// 		graphic.rotate(0.25);
+/// 		graphic.set_fill_color(Colors::WHITE);
+/// 		graphic.draw_rect(Rect::create(-100.0, -60.0, 200.0, 120.0));
+/// 		graphic.pop_state();
+/// 		graphic.set_stroke_color("#ff8800");
+/// 		graphic.draw_stroke_circle(Vector2::create(200.0, 200.0), 50.0, 4.0);
+/// 		graphic.set_font_string("24px sans-serif");
+/// 		graphic.set_text_align(TextAlign::Center);
+/// 		graphic.set_text_baseline(TextBaseline::Middle);
+/// 		graphic.set_fill_color(Colors::VANILLA);
+/// 		graphic.draw_fill_text("Hello", 640.0, 620.0);
+/// 	}
+/// }
+///
+/// fn main() {
+/// 	let mut engine_configuration = EngineConfiguration::new();
+/// 	engine_configuration.reference_resolution_size = Vector2::create(1280.0, 720.0);
+/// 	let engine = Engine::new(engine_configuration);
+/// 	let main_scene = MainScene {
+/// 		scene_base: SceneBase::new(),
+/// 	};
+/// 	if let Err(error) = engine.run(Box::new(main_scene)) {
+/// 		eprintln!("{}", error);
+/// 	}
+/// }
+/// ```
+//==============================================================================
 pub struct Graphic {
 	gl: glow::Context,
 	is_force_gizmos_visible: bool,
@@ -974,6 +1132,13 @@ impl Drop for ExternalPassGuard<'_> {
 impl Graphic {
 	//==============================================================================
 	/// 생성. (preserve_drawing_buffer 는 원본 생성 인자 preserveDrawingBuffer, 엔진 설정의 같은 이름 값을 넘긴다)
+	///
+	/// # 인자
+	/// - `gl`: 그릴 GL 컨텍스트. (Graphic 이 가진다)
+	/// - `preserve_drawing_buffer`: 프레임이 끝난 뒤에도 그린 것을 남길지. (켜면 프레임 첫머리에 색을 비우지 않는다)
+	///
+	/// # 돌려줌
+	/// 만든 그래픽. 기본 셰이더의 컴파일이나 링크, GL 객체(버텍스 어레이, 버퍼, 텍스처) 만들기에 실패하면 그 오류 글을 담은 Err.
 	//==============================================================================
 	pub fn new(gl: glow::Context, preserve_drawing_buffer: bool) -> Result<Graphic, String> {
 		// 셰이더 프로그램.
@@ -1112,6 +1277,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 프레임이 끝난 뒤에도 그린 것을 남기는지. (원본 preserveDrawingBuffer)
+	///
+	/// # 돌려줌
+	/// 생성 인자 preserve_drawing_buffer 의 값.
 	//==============================================================================
 	pub fn is_drawing_buffer_preserved(&self) -> bool {
 		self.is_drawing_buffer_preserved
@@ -1123,6 +1291,10 @@ impl Graphic {
 	/// - 프레임 시작 기준 상태로 리셋.
 	/// - 브라우저는 preserveDrawingBuffer 가 꺼져 있으면 화면에 낸 뒤 드로잉 버퍼를 비워 준다. 창은 화면을 넘긴 뒤의 뒷 버퍼가 정해져 있지 않아 여기서 직접 비운다.
 	///   켜져 있으면 원본처럼 색을 비우지 않는다. (원본 applySettings 는 스텐실만 비운다. 지난 프레임 그림 위에 그리고, 데스크탑은 플랫폼이 지난 프레임 그림을 되살려 둔다)
+	///
+	/// # 인자
+	/// - `drawing_buffer_width`: 드로잉 버퍼 너비. (픽셀, 뷰포트와 프로젝션에 쓴다)
+	/// - `drawing_buffer_height`: 드로잉 버퍼 높이. (픽셀)
 	//==============================================================================
 	pub fn apply_settings(&mut self, drawing_buffer_width: i32, drawing_buffer_height: i32) {
 		self.frame_number += 1;
@@ -1278,6 +1450,30 @@ impl Graphic {
 	/// - 앞의 2D 묶음을 내보내고, 기억한 프로그램과 텍스처를 잊고, is_depth_cleared 면 깊이를 비운 뒤 pass 를 부르고, 끝나면 restore_render_state 를 부른다.
 	/// - pass 는 GL 컨텍스트를 받아 프로그램, 버텍스 어레이, 뷰포트, 섞기, 깊이, 면 가리기를 바꿔도 된다. (클립 중이면 스텐실 테스트는 restore_render_state 가 다시 켠다)
 	/// - pass 가 돌려준 값을 그대로 돌려준다. pass 가 패닉해도 풀리는 동안 가드가 restore_render_state 를 부른다. (원본은 던져도 되돌린다)
+	///
+	/// # 인자
+	/// - `is_depth_cleared`: pass 앞에서 깊이 버퍼를 비울지. (자르기 안에 3D 를 그릴 때는 false 로 주고 begin_clip_rect 앞에서 clear_depth_buffer 를 부른다)
+	/// - `pass`: GL 컨텍스트를 받아 그리는 함수.
+	///
+	/// # 돌려줌
+	/// pass 가 돌려준 값.
+	///
+	/// # 예제
+	/// GL 로 직접 그리고 값 돌려받기
+	/// ```rust,no_run
+	/// use glow::HasContext;
+	/// use vanilla::Graphic;
+	///
+	/// fn draw(graphic: &mut Graphic) {
+	/// 	let maximum_texture_size = graphic.run_external_pass(true, |gl| {
+	/// 		unsafe {
+	/// 			gl.enable(glow::DEPTH_TEST);
+	/// 			gl.get_parameter_i32(glow::MAX_TEXTURE_SIZE)
+	/// 		}
+	/// 	});
+	/// 	assert!(maximum_texture_size > 0);
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn run_external_pass<R>(&mut self, is_depth_cleared: bool, pass: impl FnOnce(&glow::Context) -> R) -> R {
 		self.flush_batch();
@@ -1292,6 +1488,9 @@ impl Graphic {
 	//==============================================================================
 	/// 이미지 스무딩 활성화 여부 설정.
 	/// - 도트(픽셀) 스프라이트 게임은 false 로 설정해 선명하게 렌더링.
+	///
+	/// # 인자
+	/// - `value`: true 면 LINEAR 로 부드럽게, false 면 NEAREST 로 픽셀 그대로. (처음 true)
 	//==============================================================================
 	pub fn set_image_smoothing_enabled(&mut self, value: bool) {
 		self.is_image_smoothing_enabled = value;
@@ -1299,6 +1498,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 이미지 스무딩 활성화 여부 반환.
+	///
+	/// # 돌려줌
+	/// 스무딩이 켜져 있으면 true.
 	//==============================================================================
 	pub fn is_image_smoothing_enabled(&self) -> bool {
 		self.is_image_smoothing_enabled
@@ -1306,6 +1508,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 이미지 스무딩 퀄리티 설정. (GL 은 LINEAR / NEAREST 이분법이라 보관만 한다, 처음은 High)
+	///
+	/// # 인자
+	/// - `value`: 스무딩 퀄리티. (보관만 하고 그리기에는 쓰지 않는다)
 	//==============================================================================
 	pub fn set_image_smoothing_quality(&mut self, value: ImageSmoothingQuality) {
 		self.image_smoothing_quality = value;
@@ -1313,6 +1518,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 이미지 스무딩 퀄리티 반환.
+	///
+	/// # 돌려줌
+	/// 설정한 퀄리티. (처음 High)
 	//==============================================================================
 	pub fn get_image_smoothing_quality(&self) -> ImageSmoothingQuality {
 		self.image_smoothing_quality
@@ -1320,6 +1528,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 이미지 밉맵 사용 여부 설정. (크게 줄여 그리는 이미지의 자글거림을 줄인다)
+	///
+	/// # 인자
+	/// - `value`: true 면 이미지 텍스처를 줄일 때 밉맵 필터를 쓴다. (처음 false)
 	//==============================================================================
 	pub fn set_image_mipmap_enabled(&mut self, value: bool) {
 		self.is_image_mipmap_enabled = value;
@@ -1327,6 +1538,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 이미지 밉맵 사용 여부 반환.
+	///
+	/// # 돌려줌
+	/// 밉맵을 쓰면 true.
 	//==============================================================================
 	pub fn is_image_mipmap_enabled(&self) -> bool {
 		self.is_image_mipmap_enabled
@@ -1336,6 +1550,9 @@ impl Graphic {
 	/// 이미지 밉맵 단계 보정 설정. (기본 0, 원본 setImageMipmapBias)
 	/// - 밉맵 단계를 고를 때 더하는 값. 음수면 한 단계 큰 그림 쪽을 골라 또렷해지고, 너무 작으면 다시 자글거린다. (-0.5 안팎)
 	/// - 기본 셰이더(낱장, 묶어 그리기, 파티클)에 적용한다. 바꿔 끼운 셰이더는 textureLodBias 유니폼이 있으면 받는다.
+	///
+	/// # 인자
+	/// - `value`: 밉맵 단계에 더할 값. (음수면 또렷하게, 0 이면 보정 없음)
 	//==============================================================================
 	pub fn set_image_mipmap_bias(&mut self, value: f32) {
 		self.flush_batch();
@@ -1350,6 +1567,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 이미지 밉맵 단계 보정 반환.
+	///
+	/// # 돌려줌
+	/// 설정한 보정 값. (처음 0)
 	//==============================================================================
 	pub fn get_image_mipmap_bias(&self) -> f32 {
 		self.image_mipmap_bias
@@ -1374,6 +1594,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 모든 노드의 기즈모를 강제로 보일지 설정.
+	///
+	/// # 인자
+	/// - `is_force_gizmos_visible`: true 면 노드마다 기즈모 보이기 설정과 상관없이 그린다. (처음 false)
 	//==============================================================================
 	pub fn set_force_gizmos_visible(&mut self, is_force_gizmos_visible: bool) {
 		self.is_force_gizmos_visible = is_force_gizmos_visible;
@@ -1381,6 +1604,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 모든 노드의 기즈모를 강제로 보일지 반환.
+	///
+	/// # 돌려줌
+	/// 강제로 보이게 했으면 true.
 	//==============================================================================
 	pub fn is_force_gizmos_visible(&self) -> bool {
 		self.is_force_gizmos_visible
@@ -1449,6 +1675,10 @@ impl Graphic {
 
 	//==============================================================================
 	/// 이동 변환 누적.
+	///
+	/// # 인자
+	/// - `x`: 가로 이동. (지금 좌표계 단위, 픽셀)
+	/// - `y`: 세로 이동. (아래가 +)
 	//==============================================================================
 	pub fn translate(&mut self, x: f32, y: f32) {
 		self.transform_matrix.translate(x, y);
@@ -1456,6 +1686,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 회전 변환 누적.
+	///
+	/// # 인자
+	/// - `radian`: 회전 각도. (라디안, 화면에서 시계 방향이 +)
 	//==============================================================================
 	pub fn rotate(&mut self, radian: f32) {
 		self.transform_matrix.rotate(radian);
@@ -1463,6 +1696,10 @@ impl Graphic {
 
 	//==============================================================================
 	/// 크기 변환 누적.
+	///
+	/// # 인자
+	/// - `x`: 가로 배율. (1 이면 그대로, 음수면 뒤집힌다)
+	/// - `y`: 세로 배율.
 	//==============================================================================
 	pub fn scale(&mut self, x: f32, y: f32) {
 		self.transform_matrix.scale(x, y);
@@ -1470,6 +1707,15 @@ impl Graphic {
 
 	//==============================================================================
 	/// 변환 행렬 직접 설정. (Canvas2D set_transform(a, b, c, d, e, f) 대응)
+	/// - 지금 행렬에 곱하지 않고 바꿔 넣는다. 점 (x, y) 는 (a x + c y + e, b x + d y + f) 로 옮겨진다.
+	///
+	/// # 인자
+	/// - `a`: 가로 배율. (x 에 곱해 새 x 에 더한다)
+	/// - `b`: 세로 기울임. (x 에 곱해 새 y 에 더한다)
+	/// - `c`: 가로 기울임. (y 에 곱해 새 x 에 더한다)
+	/// - `d`: 세로 배율. (y 에 곱해 새 y 에 더한다)
+	/// - `e`: 가로 이동. (픽셀)
+	/// - `f`: 세로 이동. (픽셀)
 	//==============================================================================
 	pub fn set_transform(&mut self, a: f32, b: f32, c: f32, d: f32, e: f32, f: f32) {
 		self.transform_matrix.set_transform(a, b, c, d, e, f);
@@ -1484,6 +1730,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 현재 변환 행렬 반환.
+	///
+	/// # 돌려줌
+	/// 지금 변환 행렬의 복사본.
 	//==============================================================================
 	pub fn get_transform_matrix(&self) -> TransformMatrix {
 		self.transform_matrix
@@ -1491,6 +1740,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 전역 투명도 설정.
+	///
+	/// # 인자
+	/// - `value`: 전역 투명도. (0 ~ 1 로 자른다, 처음 1)
 	//==============================================================================
 	pub fn set_global_alpha(&mut self, value: f32) {
 		self.global_alpha = math::clamp01(value);
@@ -1498,6 +1750,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 전역 투명도 반환.
+	///
+	/// # 돌려줌
+	/// 지금 전역 투명도. (0 ~ 1)
 	//==============================================================================
 	pub fn get_global_alpha(&self) -> f32 {
 		self.global_alpha
@@ -1505,6 +1760,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 전역 투명도 곱셈 누적. (노드 트리의 투명도 상속용)
+	///
+	/// # 인자
+	/// - `value`: 지금 전역 투명도에 곱할 값. (곱한 결과를 0 ~ 1 로 자른다)
 	//==============================================================================
 	pub fn multiply_global_alpha(&mut self, value: f32) {
 		self.global_alpha = math::clamp01(self.global_alpha * value);
@@ -1517,6 +1775,9 @@ impl Graphic {
 	///   그리기마다 그릴 영역 아래를 떠 와 셰이더로 섞는다. 이 모드에서는 묶어 그리지 않고, 그리기 하나에 영역 복사 한 번과 드로우 콜 한 번이 든다.
 	///   (바꿔 끼운 셰이더로 그릴 때는 덧그림 칸에 먼저 그리고 옮기므로 드로우 콜이 두 번)
 	/// - Multiply 는 렌더 타겟(기본 프레임버퍼가 아닌 것)에 그릴 때만 셰이더로 섞는다. (get_draw_shader_blend_mode_index)
+	///
+	/// # 인자
+	/// - `blend_mode`: 다음 그리기부터 쓸 블렌드 모드. (지금과 같으면 아무것도 하지 않는다, 바뀌면 모아 둔 묶음을 먼저 내보낸다)
 	//==============================================================================
 	pub fn set_blend_mode(&mut self, blend_mode: BlendMode) {
 		if blend_mode == self.blend_mode {
@@ -1541,6 +1802,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 블렌드 모드 반환.
+	///
+	/// # 돌려줌
+	/// 지금 블렌드 모드. (프레임 첫머리에 Normal)
 	//==============================================================================
 	pub fn get_blend_mode(&self) -> BlendMode {
 		self.blend_mode
@@ -1585,6 +1849,9 @@ impl Graphic {
 	//==============================================================================
 	/// 이미지 틴트 색상 설정. (None 이면 해제)
 	/// - 이미지 실루엣(알파) 안쪽에만 tint.alpha 비율로 색을 덮는다.
+	///
+	/// # 인자
+	/// - `color`: 덮을 색. (알파가 덮는 비율, None 이면 틴트를 끈다, 프레임 첫머리에 None)
 	//==============================================================================
 	pub fn set_image_tint_color(&mut self, color: Option<Color>) {
 		self.image_tint_color = color;
@@ -1592,6 +1859,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 이미지 틴트 색상 반환.
+	///
+	/// # 돌려줌
+	/// 지금 틴트 색. 걸려 있지 않으면 None.
 	//==============================================================================
 	pub fn get_image_tint_color(&self) -> Option<Color> {
 		self.image_tint_color
@@ -1599,6 +1869,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 채우기 색상 설정. (Color 또는 "#rrggbb" 같은 문자열)
+	///
+	/// # 인자
+	/// - `color`: 채우기 색. (Color 나 "#rrggbb" 같은 글, 처음 검정)
 	//==============================================================================
 	pub fn set_fill_color(&mut self, color: impl Into<Color>) {
 		self.fill_color = color.into();
@@ -1606,6 +1879,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 채우기 색상 반환.
+	///
+	/// # 돌려줌
+	/// 지금 채우기 색.
 	//==============================================================================
 	pub fn get_fill_color(&self) -> Color {
 		self.fill_color
@@ -1613,6 +1889,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 선 색상 설정. (Color 또는 "#rrggbb" 같은 문자열)
+	///
+	/// # 인자
+	/// - `color`: 선 색. (Color 나 "#rrggbb" 같은 글, 처음 검정)
 	//==============================================================================
 	pub fn set_stroke_color(&mut self, color: impl Into<Color>) {
 		self.stroke_color = color.into();
@@ -1620,6 +1899,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 선 색상 반환.
+	///
+	/// # 돌려줌
+	/// 지금 선 색.
 	//==============================================================================
 	pub fn get_stroke_color(&self) -> Color {
 		self.stroke_color
@@ -1628,6 +1910,21 @@ impl Graphic {
 	//==============================================================================
 	/// 버텍스 데이터에 쿼드(삼각형 2개, 버텍스 6개) 기록.
 	/// - 기록 후의 오프셋(플로트 단위)을 반환.
+	/// - 스크래치 배열(get_vertex_data, 정점 4096 개, 플로트 16384 개)을 넘게 쓰면 패닉한다.
+	///
+	/// # 인자
+	/// - `offset`: 기록을 시작할 자리. (스크래치 배열의 플로트 번호, 정점 하나에 x, y, u, v 플로트 4 개)
+	/// - `left_x`: 왼쪽 x. (지금 변환 전의 좌표, 픽셀)
+	/// - `top_y`: 위쪽 y. (픽셀)
+	/// - `right_x`: 오른쪽 x. (픽셀)
+	/// - `bottom_y`: 아래쪽 y. (픽셀)
+	/// - `left_u`: 왼쪽 텍스처 좌표. (0 ~ 1)
+	/// - `top_v`: 위쪽 텍스처 좌표. (0 ~ 1, 0 이 그림의 위)
+	/// - `right_u`: 오른쪽 텍스처 좌표. (0 ~ 1)
+	/// - `bottom_v`: 아래쪽 텍스처 좌표. (0 ~ 1)
+	///
+	/// # 돌려줌
+	/// 기록한 뒤의 오프셋. (offset + 24, 4 로 나누면 그때까지의 정점 수)
 	//==============================================================================
 	pub fn write_quad(&mut self, offset: usize, left_x: f32, top_y: f32, right_x: f32, bottom_y: f32, left_u: f32, top_v: f32, right_u: f32, bottom_v: f32) -> usize {
 		let quad_values: [f32; 24] = [
@@ -1644,6 +1941,25 @@ impl Graphic {
 
 	//==============================================================================
 	/// 기록된 버텍스 출력. (모든 드로우가 수렴하는 단일 지점)
+	///
+	/// # 인자
+	/// - `vertex_count`: 그릴 정점 수. (스크래치 배열 앞에서부터, 삼각형마다 3 개, 0 이면 아무것도 하지 않는다)
+	/// - `texture`: 입힐 텍스처. (단색은 get_white_texture)
+	/// - `color`: 텍스처 색에 곱할 색. (그림 그대로는 get_white_color)
+	///
+	/// # 예제
+	/// 쿼드 두 개를 써서 한 번에 그리기
+	/// ```rust,no_run
+	/// use vanilla::core::graphic::FLOATS_PER_VERTEX;
+	/// use vanilla::{Color, Graphic};
+	///
+	/// fn draw(graphic: &mut Graphic) {
+	/// 	let mut offset = graphic.write_quad(0, 10.0, 10.0, 110.0, 60.0, 0.0, 0.0, 1.0, 1.0);
+	/// 	offset = graphic.write_quad(offset, 10.0, 80.0, 110.0, 130.0, 0.0, 0.0, 1.0, 1.0);
+	/// 	let white_texture = graphic.get_white_texture();
+	/// 	graphic.draw_vertices(offset / FLOATS_PER_VERTEX, white_texture, Color::create(1.0, 0.5, 0.0, 1.0));
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn draw_vertices(&mut self, vertex_count: usize, texture: GlTexture, color: Color) {
 		if vertex_count == 0 {
@@ -2185,6 +2501,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 묶어 그리기 켜고 끄기. (기본 켬. 끄면 원본처럼 그리기 하나에 드로우 콜 하나)
+	///
+	/// # 인자
+	/// - `is_batching_enabled`: true 면 같은 텍스처의 그리기를 모아 한 번에 그린다. (끌 때 모아 둔 것을 먼저 내보낸다)
 	//==============================================================================
 	pub fn set_batching_enabled(&mut self, is_batching_enabled: bool) {
 		if !is_batching_enabled {
@@ -2195,6 +2514,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 묶어 그리기 여부.
+	///
+	/// # 돌려줌
+	/// 묶어 그리기가 켜져 있으면 true. (처음 true)
 	//==============================================================================
 	pub fn is_batching_enabled(&self) -> bool {
 		self.is_batching_enabled
@@ -2202,6 +2524,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 화면 밖 거르기 켜고 끄기. (기본 켬)
+	///
+	/// # 인자
+	/// - `is_culling_enabled`: true 면 화면 밖 노드의 그리기를 건너뛴다.
 	//==============================================================================
 	pub fn set_culling_enabled(&mut self, is_culling_enabled: bool) {
 		self.is_culling_enabled = is_culling_enabled;
@@ -2209,6 +2534,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 화면 밖 거르기 여부.
+	///
+	/// # 돌려줌
+	/// 화면 밖 거르기가 켜져 있으면 true. (처음 true)
 	//==============================================================================
 	pub fn is_culling_enabled(&self) -> bool {
 		self.is_culling_enabled
@@ -2216,6 +2544,12 @@ impl Graphic {
 
 	//==============================================================================
 	/// 현재 변환 기준의 사각형이 화면(드로잉 버퍼)에 걸치는지. (네 꼭짓점을 변환한 경계 상자로 본다)
+	///
+	/// # 인자
+	/// - `rect`: 지금 변환 기준의 사각형. (로컬 좌표, 픽셀)
+	///
+	/// # 돌려줌
+	/// 변환한 네 꼭짓점의 경계 상자가 드로잉 버퍼(0, 0 에서 너비, 높이까지)와 걸치면 true. (경계에 닿기만 해도 true)
 	//==============================================================================
 	pub fn is_local_rect_visible(&self, rect: Rect) -> bool {
 		let matrix = self.transform_matrix;
@@ -2243,6 +2577,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 이번 프레임에 거른 노드 수 더하기. (NodeTree 가 부른다)
+	///
+	/// # 인자
+	/// - `culled_node_count`: 더할 노드 수.
 	//==============================================================================
 	pub fn add_culled_node_count(&mut self, culled_node_count: u32) {
 		self.culled_node_count += culled_node_count;
@@ -2250,6 +2587,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 지난 프레임에 화면 밖이라 거른 노드 수.
+	///
+	/// # 돌려줌
+	/// 지난 프레임에 거른 노드 수. (begin_frame_statistics 가 넘겨 둔 값)
 	//==============================================================================
 	pub fn get_last_frame_culled_node_count(&self) -> u32 {
 		self.last_frame_culled_node_count
@@ -2271,12 +2611,18 @@ impl Graphic {
 
 	//==============================================================================
 	/// 지난 프레임의 드로우 콜 수.
+	///
+	/// # 돌려줌
+	/// 지난 프레임의 드로우 콜 수. (begin_frame_statistics 가 넘겨 둔 값)
 	//==============================================================================
 	pub fn get_last_frame_draw_call_count(&self) -> u32 {
 		self.last_frame_draw_call_count
 	}
 
 	//==============================================================================
+	/// 지난 프레임에 그린 정점 수.
+	///
+	/// # 돌려줌
 	/// 지난 프레임에 그린 정점 수.
 	//==============================================================================
 	pub fn get_last_frame_vertex_count(&self) -> u32 {
@@ -2285,6 +2631,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 지난 프레임에 그린 삼각형 수.
+	///
+	/// # 돌려줌
+	/// 지난 프레임의 정점 수를 3 으로 나눈 값.
 	//==============================================================================
 	pub fn get_last_frame_triangle_count(&self) -> u32 {
 		self.last_frame_draw_vertex_count / 3
@@ -2367,6 +2716,12 @@ impl Graphic {
 
 	//==============================================================================
 	/// 파티클 버텍스 기록용 배열 반환. (minimum_float_count 이상, 용량을 넘으면 용량까지)
+	///
+	/// # 인자
+	/// - `minimum_float_count`: 쓸 플로트 수. (정점 하나에 PARTICLE_FLOATS_PER_VERTEX 개: x, y, u, v, r, g, b, a)
+	///
+	/// # 돌려줌
+	/// 앞에서부터 minimum_float_count 개의 배열. (용량 정점 8192 개를 넘게 달라면 용량까지, 지난번 값이 남아 있을 수 있다)
 	//==============================================================================
 	pub fn get_particle_vertex_data(&mut self, minimum_float_count: usize) -> &mut [f32] {
 		let capacity_float_count = PARTICLE_VERTEX_CAPACITY * PARTICLE_FLOATS_PER_VERTEX;
@@ -2379,6 +2734,34 @@ impl Graphic {
 
 	//==============================================================================
 	/// 정점마다 색을 실은 쿼드 출력. (get_particle_vertex_data 에 기록한 것)
+	///
+	/// # 인자
+	/// - `vertex_count`: 그릴 정점 수. (쿼드마다 6 개, 용량과 get_particle_vertex_data 로 받은 길이까지만 그린다, 0 이면 아무것도 하지 않는다)
+	/// - `texture`: 입힐 텍스처. (get_soft_disc_texture, get_image_texture 같은 것)
+	///
+	/// # 예제
+	/// 정점마다 색을 실은 부드러운 원 두 개
+	/// ```rust,no_run
+	/// use vanilla::core::graphic::PARTICLE_FLOATS_PER_VERTEX;
+	/// use vanilla::Graphic;
+	///
+	/// fn draw(graphic: &mut Graphic) {
+	/// 	let soft_disc_texture = graphic.get_soft_disc_texture();
+	/// 	let particle_list: [(f32, f32, [f32; 4]); 2] = [(100.0, 100.0, [1.0, 0.5, 0.0, 1.0]), (140.0, 120.0, [0.2, 0.6, 1.0, 0.5])];
+	/// 	let half_size = 24.0;
+	/// 	let corner_list: [[f32; 4]; 6] = [[-half_size, -half_size, 0.0, 0.0], [half_size, -half_size, 1.0, 0.0], [half_size, half_size, 1.0, 1.0], [-half_size, -half_size, 0.0, 0.0], [half_size, half_size, 1.0, 1.0], [-half_size, half_size, 0.0, 1.0]];
+	/// 	let vertex_data = graphic.get_particle_vertex_data(particle_list.len() * 6 * PARTICLE_FLOATS_PER_VERTEX);
+	/// 	let mut offset = 0;
+	/// 	for (center_x, center_y, color) in particle_list {
+	/// 		for corner in corner_list {
+	/// 			let vertex = [center_x + corner[0], center_y + corner[1], corner[2], corner[3], color[0], color[1], color[2], color[3]];
+	/// 			vertex_data[offset..offset + PARTICLE_FLOATS_PER_VERTEX].copy_from_slice(&vertex);
+	/// 			offset += PARTICLE_FLOATS_PER_VERTEX;
+	/// 		}
+	/// 	}
+	/// 	graphic.draw_colored_quads(offset / PARTICLE_FLOATS_PER_VERTEX, soft_disc_texture);
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn draw_colored_quads(&mut self, vertex_count: usize, texture: GlTexture) {
 		if vertex_count == 0 {
@@ -2530,6 +2913,10 @@ impl Graphic {
 
 	//==============================================================================
 	/// 부드러운 원 텍스처 반환. (가운데가 불투명하고 가장자리로 갈수록 투명. 지연 생성)
+	/// - GL 텍스처를 만들지 못하면 패닉한다.
+	///
+	/// # 돌려줌
+	/// 64 x 64 픽셀 텍스처. (가운데에서 가장자리로 (1 - 거리)^2 로 흐려지는 흰 원, 프리멀티플라이드)
 	//==============================================================================
 	pub fn get_soft_disc_texture(&mut self) -> GlTexture {
 		if let Some(soft_disc_texture) = self.soft_disc_texture {
@@ -2578,6 +2965,12 @@ impl Graphic {
 
 	//==============================================================================
 	/// 이미지의 텍스처 반환. (파티클처럼 직접 쿼드를 쓰는 곳에서)
+	///
+	/// # 인자
+	/// - `image`: 텍스처를 받을 이미지. (처음이면 올리고 CPU 픽셀을 놓는다)
+	///
+	/// # 돌려줌
+	/// 지금 스무딩과 밉맵 설정을 건 텍스처. GL 텍스처를 만들지 못하면 None.
 	//==============================================================================
 	pub fn get_image_texture(&mut self, image: &Rc<Image>) -> Option<GlTexture> {
 		let is_image_smoothing_enabled = self.is_image_smoothing_enabled();
@@ -2643,6 +3036,10 @@ impl Graphic {
 	//==============================================================================
 	/// 선 출력.
 	/// - set_stroke_color()
+	///
+	/// # 인자
+	/// - `positions`: 이을 점들. (2 개 미만이면 그리지 않는다)
+	/// - `size`: 선 두께. (픽셀)
 	//==============================================================================
 	pub fn draw_line(&mut self, positions: &[Vector2], size: f32) {
 		self.draw_polyline(positions, size, false);
@@ -2651,6 +3048,10 @@ impl Graphic {
 	//==============================================================================
 	/// 닫힌 선 출력. (마지막 점과 첫 점을 잇는 루프)
 	/// - set_stroke_color()
+	///
+	/// # 인자
+	/// - `positions`: 이을 점들. (2 개 미만이면 그리지 않는다)
+	/// - `size`: 선 두께. (픽셀)
 	//==============================================================================
 	pub fn draw_line_loop(&mut self, positions: &[Vector2], size: f32) {
 		self.draw_polyline(positions, size, true);
@@ -2659,6 +3060,11 @@ impl Graphic {
 	//==============================================================================
 	/// 폴리라인 출력. (세그먼트별 두께 확장 쿼드)
 	/// - 내부 조인트는 반두께 연장으로 이음새를 메운다.
+	///
+	/// # 인자
+	/// - `positions`: 이을 점들. (2 개 미만이면 그리지 않는다, 스크래치 배열에 들어가는 선분 682 개까지만 그린다)
+	/// - `size`: 선 두께. (픽셀)
+	/// - `is_closed`: true 면 마지막 점과 첫 점도 잇는다.
 	//==============================================================================
 	pub fn draw_polyline(&mut self, positions: &[Vector2], size: f32, is_closed: bool) {
 		if positions.len() < 2 {
@@ -2734,6 +3140,9 @@ impl Graphic {
 	//==============================================================================
 	/// 사각형 출력.
 	/// - set_fill_color()
+	///
+	/// # 인자
+	/// - `rect`: 칠할 사각형. (지금 변환 전의 좌표, 픽셀)
 	//==============================================================================
 	pub fn draw_rect(&mut self, rect: Rect) {
 		let left_x = rect.position.x;
@@ -2749,6 +3158,10 @@ impl Graphic {
 	//==============================================================================
 	/// 사각형 외곽선 출력. (Canvas2D strokeRect 대응, 선 중심이 경계선 위)
 	/// - set_stroke_color()
+	///
+	/// # 인자
+	/// - `rect`: 외곽선을 그을 사각형. (픽셀)
+	/// - `line_width`: 선 두께. (픽셀, 경계선 양쪽으로 절반씩)
 	//==============================================================================
 	pub fn draw_stroke_rect(&mut self, rect: Rect, line_width: f32) {
 		let left_x = rect.position.x;
@@ -2766,6 +3179,13 @@ impl Graphic {
 
 	//==============================================================================
 	/// 라운드 사각형 경로 좌표 목록 생성. (시계 방향, 볼록 다각형)
+	///
+	/// # 인자
+	/// - `rect`: 사각형. (픽셀)
+	/// - `round_size`: 모서리 반지름. (가로세로 가운데 짧은 쪽의 절반을 넘으면 그 값으로 줄인다)
+	///
+	/// # 돌려줌
+	/// 모서리마다 9 개씩 36 개의 점. (우상, 우하, 좌하, 좌상 모서리 차례)
 	//==============================================================================
 	pub fn build_round_rect_positions(&self, rect: Rect, round_size: f32) -> [Vector2; ROUND_RECT_POSITION_COUNT] {
 		let left_x = rect.position.x;
@@ -2796,6 +3216,10 @@ impl Graphic {
 
 	//==============================================================================
 	/// 볼록 다각형 채움 출력. (첫 점 기준 팬 분할)
+	///
+	/// # 인자
+	/// - `positions`: 볼록 다각형의 꼭짓점. (3 개 미만이면 그리지 않는다)
+	/// - `color`: 칠할 색. (채우기 색은 쓰지 않는다)
 	//==============================================================================
 	pub fn draw_convex_polygon(&mut self, positions: &[Vector2], color: Color) {
 		if positions.len() < 3 {
@@ -2828,6 +3252,10 @@ impl Graphic {
 	//==============================================================================
 	/// 라운드 사각형 출력.
 	/// - set_fill_color()
+	///
+	/// # 인자
+	/// - `rect`: 칠할 사각형. (픽셀)
+	/// - `round_size`: 모서리 반지름. (0 이하면 draw_rect 와 같다)
 	//==============================================================================
 	pub fn draw_round_rect(&mut self, rect: Rect, round_size: f32) {
 		if round_size > 0.0 {
@@ -2843,6 +3271,11 @@ impl Graphic {
 	//==============================================================================
 	/// 라운드 사각형 외곽선 출력.
 	/// - set_stroke_color()
+	///
+	/// # 인자
+	/// - `rect`: 외곽선을 그을 사각형. (픽셀)
+	/// - `round_size`: 모서리 반지름. (0 이하면 draw_stroke_rect 와 같다)
+	/// - `line_width`: 선 두께. (픽셀)
 	//==============================================================================
 	pub fn draw_stroke_round_rect(&mut self, rect: Rect, round_size: f32, line_width: f32) {
 		if round_size > 0.0 {
@@ -2873,6 +3306,10 @@ impl Graphic {
 	//==============================================================================
 	/// 원 출력.
 	/// - set_fill_color()
+	///
+	/// # 인자
+	/// - `center`: 가운데. (픽셀)
+	/// - `radius`: 반지름. (픽셀, 0 이하면 그리지 않는다)
 	//==============================================================================
 	pub fn draw_circle(&mut self, center: Vector2, radius: f32) {
 		if radius <= 0.0 {
@@ -2886,6 +3323,11 @@ impl Graphic {
 	//==============================================================================
 	/// 원 외곽선 출력.
 	/// - set_stroke_color()
+	///
+	/// # 인자
+	/// - `center`: 가운데. (픽셀)
+	/// - `radius`: 반지름. (픽셀, 0 이하면 그리지 않는다)
+	/// - `line_width`: 선 두께. (픽셀, 반지름 양쪽으로 절반씩)
 	//==============================================================================
 	pub fn draw_stroke_circle(&mut self, center: Vector2, radius: f32, line_width: f32) {
 		if radius <= 0.0 {
@@ -2901,6 +3343,25 @@ impl Graphic {
 	/// - 각도는 라디안, 0 이 오른쪽이고 화면에서 시계 방향으로 는다. (12 시에서 시작하려면 -PI / 2, 한 바퀴는 0 에서 PI * 2)
 	/// - 조각마다 네모 하나를 겹치지 않게 이어 붙여 한 번에 그리므로, 반투명 색이어도 조각의 이음매가 짙어지지 않는다.
 	/// - 조각 수는 draw_circle 처럼 화면에서의 바깥 반지름을 따라 정하고(한 바퀴 16 ~ 64), 그리는 각도만큼만 쓴다.
+	///
+	/// # 인자
+	/// - `center`: 가운데. (픽셀)
+	/// - `inner_radius`: 안쪽 반지름. (픽셀, 0 이면 부채꼴)
+	/// - `outer_radius`: 바깥 반지름. (픽셀, 0 이하거나 inner_radius 이하면 그리지 않는다)
+	/// - `start_radian`: 시작 각도. (라디안)
+	/// - `end_radian`: 끝 각도. (라디안, 시작과 같으면 그리지 않는다, 차이는 한 바퀴까지만 쓴다)
+	///
+	/// # 예제
+	/// 12 시부터 시계 방향으로 차오르는 진행 고리
+	/// ```rust,no_run
+	/// use vanilla::{math, Graphic, Vector2};
+	///
+	/// fn draw_progress(graphic: &mut Graphic, progress: f32) {
+	/// 	let start_radian = -math::PI / 2.0;
+	/// 	graphic.set_fill_color("#40c057");
+	/// 	graphic.draw_ring(Vector2::create(200.0, 200.0), 40.0, 50.0, start_radian, start_radian + math::PI * 2.0 * progress);
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn draw_ring(&mut self, center: Vector2, inner_radius: f32, outer_radius: f32, start_radian: f32, end_radian: f32) {
 		let fill_color = self.get_fill_color();
@@ -2911,6 +3372,13 @@ impl Graphic {
 	/// 호 출력. (반지름을 따라 line_width 두께의 선으로 start_radian 부터 end_radian 까지)
 	/// - set_stroke_color()
 	/// - 각도와 조각 수는 draw_ring 과 같다. 선의 두께 가운데가 반지름에 온다.
+	///
+	/// # 인자
+	/// - `center`: 가운데. (픽셀)
+	/// - `radius`: 반지름. (픽셀, 선 두께의 가운데)
+	/// - `start_radian`: 시작 각도. (라디안)
+	/// - `end_radian`: 끝 각도. (라디안)
+	/// - `line_width`: 선 두께. (픽셀)
 	//==============================================================================
 	pub fn draw_arc(&mut self, center: Vector2, radius: f32, start_radian: f32, end_radian: f32, line_width: f32) {
 		let half_width = line_width * 0.5;
@@ -2920,6 +3388,14 @@ impl Graphic {
 
 	//==============================================================================
 	/// 고리 출력의 셈. (draw_ring, draw_arc 가 부른다)
+	///
+	/// # 인자
+	/// - `center`: 가운데. (픽셀)
+	/// - `inner_radius`: 안쪽 반지름. (픽셀)
+	/// - `outer_radius`: 바깥 반지름. (픽셀, 0 이하거나 inner_radius 이하면 그리지 않는다)
+	/// - `start_radian`: 시작 각도. (라디안, 0 이 오른쪽)
+	/// - `end_radian`: 끝 각도. (라디안, 시작과 같으면 그리지 않는다, 차이는 한 바퀴까지만 쓴다)
+	/// - `color`: 칠할 색.
 	//==============================================================================
 	pub fn draw_ring_with_color(&mut self, center: Vector2, inner_radius: f32, outer_radius: f32, start_radian: f32, end_radian: f32, color: Color) {
 		let span_radian = end_radian - start_radian;
@@ -2974,6 +3450,27 @@ impl Graphic {
 	/// - 선분마다 두께만큼 넓힌 네모 하나다. (draw_line 과 달리 이음새를 메우지 않는다, 따로 떨어진 선분 용)
 	/// - Vector2 배열을 만들지 않고 숫자 배열을 그대로 읽는다. 길이가 0 인 선분은 건너뛴다.
 	/// - 정점 버퍼가 차면 거기까지 그리고 이어서 담는다. (묶어 그리기가 켜져 있으면 같은 텍스처라 한 번의 드로우 콜로 이어진다)
+	///
+	/// # 인자
+	/// - `position_values`: 선분마다 x0, y0, x1, y1 넷씩 놓인 숫자 배열. (픽셀, 넷이 안 되는 끝은 버린다, 4 개 미만이면 그리지 않는다)
+	/// - `size`: 선 두께. (픽셀)
+	///
+	/// # 예제
+	/// 격자 선을 한 번에 그리기
+	/// ```rust,no_run
+	/// use vanilla::{Colors, Graphic};
+	///
+	/// fn draw_grid(graphic: &mut Graphic) {
+	/// 	let mut position_values: Vec<f32> = Vec::new();
+	/// 	for line_index in 0..=10 {
+	/// 		let offset = line_index as f32 * 32.0;
+	/// 		position_values.extend_from_slice(&[offset, 0.0, offset, 320.0]);
+	/// 		position_values.extend_from_slice(&[0.0, offset, 320.0, offset]);
+	/// 	}
+	/// 	graphic.set_stroke_color(Colors::WHITE);
+	/// 	graphic.draw_line_segments(&position_values, 1.0);
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn draw_line_segments(&mut self, position_values: &[f32], size: f32) {
 		if position_values.len() < 4 {
@@ -3019,6 +3516,11 @@ impl Graphic {
 
 	//==============================================================================
 	/// 이미지 출력.
+	///
+	/// # 인자
+	/// - `image`: 그릴 이미지. (채우기 색은 쓰지 않고 틴트와 전역 투명도만 먹는다)
+	/// - `position`: 왼쪽 위. (픽셀)
+	/// - `content_size`: 그릴 크기. (픽셀, 이미지 전체를 이 크기로 늘린다)
 	//==============================================================================
 	pub fn draw_image(&mut self, image: &Rc<Image>, position: Vector2, content_size: Vector2) {
 		let image_width = image.get_width() as f32;
@@ -3028,6 +3530,12 @@ impl Graphic {
 
 	//==============================================================================
 	/// 이미지의 일부만 출력. (image_rect 가 비었으면 전체)
+	///
+	/// # 인자
+	/// - `image`: 그릴 이미지.
+	/// - `position`: 왼쪽 위. (픽셀)
+	/// - `content_size`: 그릴 크기. (픽셀)
+	/// - `image_rect`: 그릴 이미지 영역. (이미지 픽셀, 네 값이 모두 0 이면 전체)
 	//==============================================================================
 	pub fn draw_image_with_image_rect(&mut self, image: &Rc<Image>, position: Vector2, content_size: Vector2, image_rect: Rect) {
 		let source_rect = if image_rect.is_zero() {
@@ -3041,6 +3549,18 @@ impl Graphic {
 
 	//==============================================================================
 	/// 이미지의 소스 영역을 지정 영역에 출력. (Canvas2D draw_image 9인자 대응)
+	/// - 이미지의 텍스처를 얻지 못하면 그리지 않는다.
+	///
+	/// # 인자
+	/// - `image`: 그릴 이미지.
+	/// - `source_x`: 소스 영역 왼쪽. (이미지 픽셀)
+	/// - `source_y`: 소스 영역 위. (이미지 픽셀)
+	/// - `source_width`: 소스 영역 너비. (이미지 픽셀)
+	/// - `source_height`: 소스 영역 높이. (이미지 픽셀)
+	/// - `destination_x`: 그릴 자리 왼쪽. (픽셀)
+	/// - `destination_y`: 그릴 자리 위. (픽셀)
+	/// - `destination_width`: 그릴 너비. (픽셀)
+	/// - `destination_height`: 그릴 높이. (픽셀)
 	//==============================================================================
 	pub fn draw_image_with_source_and_destination(&mut self, image: &Rc<Image>, source_x: f32, source_y: f32, source_width: f32, source_height: f32, destination_x: f32, destination_y: f32, destination_width: f32, destination_height: f32) {
 		let texture = match self.get_image_texture(image) {
@@ -3066,6 +3586,23 @@ impl Graphic {
 	//==============================================================================
 	/// 이미지 나인패치 출력.
 	/// - nine_slice 의 position.x / position.y / size.x / size.y 가 각각 왼쪽 / 위 / 오른쪽 / 아래 두께.
+	///
+	/// # 인자
+	/// - `image`: 그릴 이미지.
+	/// - `position`: 왼쪽 위. (픽셀, 내림한다)
+	/// - `size`: 그릴 크기. (픽셀, 올림하고, 양쪽 두께의 합보다 작으면 그 합)
+	/// - `nine_slice`: 네 테두리 두께. (이미지 픽셀이자 그릴 픽셀, 두께가 모두 0 이면 그냥 늘려 그린다)
+	///
+	/// # 예제
+	/// 테두리 16 픽셀은 그대로 두고 가운데만 늘린 판
+	/// ```rust,no_run
+	/// use std::rc::Rc;
+	/// use vanilla::{Graphic, Image, Rect, Vector2};
+	///
+	/// fn draw_panel(graphic: &mut Graphic, panel_image: &Rc<Image>) {
+	/// 	graphic.draw_image_with_nine_slice(panel_image, Vector2::create(20.0, 20.0), Vector2::create(300.0, 120.0), Rect::create(16.0, 16.0, 16.0, 16.0));
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn draw_image_with_nine_slice(&mut self, image: &Rc<Image>, position: Vector2, size: Vector2, nine_slice: Rect) {
 		let source_width = image.get_width() as f32;
@@ -3132,6 +3669,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 폰트 문자열 설정. (Canvas2D font 대응, 예: "16px DOSGothic")
+	///
+	/// # 인자
+	/// - `font_string`: Canvas2D font 꼴 글. ("bold 16px sans-serif" 처럼, 빈 글이면 바꾸지 않는다)
 	//==============================================================================
 	pub fn set_font_string(&mut self, font_string: &str) {
 		if !font_string.is_empty() && self.font_string != font_string {
@@ -3142,6 +3682,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 폰트 문자열 반환.
+	///
+	/// # 돌려줌
+	/// 지금 폰트 문자열. (처음 "10px sans-serif")
 	//==============================================================================
 	pub fn get_font_string(&self) -> &str {
 		&self.font_string
@@ -3149,6 +3692,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 가로 정렬 설정.
+	///
+	/// # 인자
+	/// - `text_align`: 가로 정렬. (처음 Start)
 	//==============================================================================
 	pub fn set_text_align(&mut self, text_align: TextAlign) {
 		self.text_align = text_align;
@@ -3156,6 +3702,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 가로 정렬 반환.
+	///
+	/// # 돌려줌
+	/// 지금 가로 정렬.
 	//==============================================================================
 	pub fn get_text_align(&self) -> TextAlign {
 		self.text_align
@@ -3165,6 +3714,9 @@ impl Graphic {
 	/// 글자 방향 설정. (원본 setTextDirection, Canvas2D direction 대응)
 	/// - 문단의 방향이다. 글자 안의 순서(양방향 알고리즘)와 정렬 Start / End 의 왼쪽, 오른쪽이 이것을 따른다.
 	/// - Inherit 는 Ltr 로 본다. (기본) Auto 는 문자열마다 처음 나오는 방향이 강한 글자로 정한다. 사용자가 쓴 글(닉네임 등)에 쓴다.
+	///
+	/// # 인자
+	/// - `text_direction`: 글자 방향. (처음 Inherit)
 	//==============================================================================
 	pub fn set_text_direction(&mut self, text_direction: TextDirection) {
 		self.text_direction = text_direction;
@@ -3172,6 +3724,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 글자 방향 반환.
+	///
+	/// # 돌려줌
+	/// 설정한 글자 방향. (Inherit, Auto 를 풀지 않은 그대로, 실제 방향은 resolve_text_direction)
 	//==============================================================================
 	pub fn get_text_direction(&self) -> TextDirection {
 		self.text_direction
@@ -3179,6 +3734,12 @@ impl Graphic {
 
 	//==============================================================================
 	/// 문자열의 실제 방향 계산. (Ltr 또는 Rtl, 원본 resolveTextDirection)
+	///
+	/// # 인자
+	/// - `text`: Auto 일 때 방향을 볼 문자열.
+	///
+	/// # 돌려줌
+	/// 설정이 Rtl 이면 Rtl, Auto 면 detect_text_direction(text), 그 밖(Inherit, Ltr)은 Ltr.
 	//==============================================================================
 	pub fn resolve_text_direction(&self, text: &str) -> TextDirection {
 		match self.text_direction {
@@ -3196,6 +3757,13 @@ impl Graphic {
 
 	//==============================================================================
 	/// 실제 가로 정렬 계산. (Start / End 를 방향에 따라 Left / Right 로, 원본 resolveTextAlign)
+	///
+	/// # 인자
+	/// - `text_align`: 풀 정렬.
+	/// - `text_direction`: 글자 방향. (Rtl 만 오른쪽에서 왼쪽으로 본다)
+	///
+	/// # 돌려줌
+	/// Start 는 Rtl 이면 Right, 아니면 Left. End 는 그 반대. 그 밖은 그대로.
 	//==============================================================================
 	pub fn resolve_text_align(&self, text_align: TextAlign, text_direction: TextDirection) -> TextAlign {
 		let is_right_to_left = text_direction == TextDirection::Rtl;
@@ -3224,6 +3792,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 세로 기준선 설정.
+	///
+	/// # 인자
+	/// - `text_baseline`: 세로 기준선. (처음 Alphabetic)
 	//==============================================================================
 	pub fn set_text_baseline(&mut self, text_baseline: TextBaseline) {
 		self.text_baseline = text_baseline;
@@ -3231,6 +3802,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 세로 기준선 반환.
+	///
+	/// # 돌려줌
+	/// 지금 세로 기준선.
 	//==============================================================================
 	pub fn get_text_baseline(&self) -> TextBaseline {
 		self.text_baseline
@@ -3238,6 +3812,32 @@ impl Graphic {
 
 	//==============================================================================
 	/// 문자열 측정. (현재 폰트 문자열 기준)
+	///
+	/// # 인자
+	/// - `text`: 잴 문자열.
+	///
+	/// # 돌려줌
+	/// 잰 값. (픽셀, 지금 변환은 보지 않는다) 데스크탑에서 그릴 얼굴이 하나도 없으면 모두 0 이다.
+	///
+	/// # 예제
+	/// 글 너비에 맞춘 이름표
+	/// ```rust,no_run
+	/// use vanilla::{Colors, Graphic, Rect, TextAlign, TextBaseline};
+	///
+	/// fn draw_label(graphic: &mut Graphic, text: &str) {
+	/// 	graphic.set_font_string("20px sans-serif");
+	/// 	let text_metrics = graphic.measure_text(text);
+	/// 	let padding = 8.0;
+	/// 	let box_width = text_metrics.width + padding * 2.0;
+	/// 	let box_height = text_metrics.font_ascent + text_metrics.font_descent + padding * 2.0;
+	/// 	graphic.set_fill_color(Colors::BLACK);
+	/// 	graphic.draw_rect(Rect::create(20.0, 20.0, box_width, box_height));
+	/// 	graphic.set_text_align(TextAlign::Left);
+	/// 	graphic.set_text_baseline(TextBaseline::Top);
+	/// 	graphic.set_fill_color(Colors::WHITE);
+	/// 	graphic.draw_fill_text(text, 20.0 + padding, 20.0 + padding);
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn measure_text(&self, text: &str) -> TextMetrics {
 		let font_string = self.get_font_string();
@@ -3246,6 +3846,13 @@ impl Graphic {
 
 	//==============================================================================
 	/// 문자열 측정. (주어진 폰트 문자열 기준, 현재 폰트 문자열은 바꾸지 않는다)
+	///
+	/// # 인자
+	/// - `font_string`: 잴 때 쓸 폰트 문자열. (Canvas2D font 꼴)
+	/// - `text`: 잴 문자열.
+	///
+	/// # 돌려줌
+	/// 잰 값. (픽셀, 지금 변환은 보지 않는다) 데스크탑에서 그릴 얼굴이 하나도 없으면 모두 0 이다.
 	//==============================================================================
 	pub fn measure_text_with_font_string(&self, font_string: &str, text: &str) -> TextMetrics {
 		self.text_string_texture_cache.measure_text(font_string, text)
@@ -3255,6 +3862,9 @@ impl Graphic {
 	/// 텍스트 베이크 스케일 양자화 단위 설정.
 	/// - 기본 0.25. 확대 축소가 잦은 글자가 스케일마다 새로 구워지지 않게 묶는다.
 	/// - 0 이면 양자화하지 않고 실제 스케일 그대로 굽는다.
+	///
+	/// # 인자
+	/// - `text_bake_scale_step`: 양자화 단위. (0 미만은 0)
 	//==============================================================================
 	pub fn set_text_bake_scale_step(&mut self, text_bake_scale_step: f32) {
 		self.text_bake_scale_step = text_bake_scale_step.max(0.0);
@@ -3262,6 +3872,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 텍스트 베이크 스케일 양자화 단위 반환.
+	///
+	/// # 돌려줌
+	/// 양자화 단위. (처음 0.25)
 	//==============================================================================
 	pub fn get_text_bake_scale_step(&self) -> f32 {
 		self.text_bake_scale_step
@@ -3273,6 +3886,9 @@ impl Graphic {
 	///   이 단위로 묶은 배율로 굽는다. 프레임마다 다른 배율로 새로 굽지 않는다.
 	/// - 배율이 멈추면(지난 프레임과 같으면) 정확한 배율로 다시 구워 1:1 로 또렷하다.
 	/// - 0 이면 움직이는 동안에도 묶지 않는다. (지금까지와 같다)
+	///
+	/// # 인자
+	/// - `text_bake_motion_scale_step`: 배율이 움직이는 동안의 양자화 단위. (0 미만은 0)
 	//==============================================================================
 	pub fn set_text_bake_motion_scale_step(&mut self, text_bake_motion_scale_step: f32) {
 		self.text_bake_motion_scale_step = text_bake_motion_scale_step.max(0.0);
@@ -3280,6 +3896,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 배율이 움직이는 노드의 텍스트 베이크 스케일 양자화 단위 반환.
+	///
+	/// # 돌려줌
+	/// 배율이 움직이는 동안의 양자화 단위. (처음 0.25)
 	//==============================================================================
 	pub fn get_text_bake_motion_scale_step(&self) -> f32 {
 		self.text_bake_motion_scale_step
@@ -3287,6 +3906,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 지금 그리는 노드의 배율이 움직이는 중인지 설정. (NodeTree 가 정한다, 노드 밖에서 직접 그릴 때 부르는 쪽이 정할 수 있다)
+	///
+	/// # 인자
+	/// - `is_text_bake_scale_moving`: 배율이 움직이는 중이면 true.
 	//==============================================================================
 	pub fn set_text_bake_scale_moving(&mut self, is_text_bake_scale_moving: bool) {
 		self.is_text_bake_scale_moving = is_text_bake_scale_moving;
@@ -3294,6 +3916,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 지금 그리는 노드의 배율이 움직이는 중인지 반환.
+	///
+	/// # 돌려줌
+	/// 움직이는 중으로 정해져 있으면 true.
 	//==============================================================================
 	pub fn is_text_bake_scale_moving(&self) -> bool {
 		self.is_text_bake_scale_moving
@@ -3303,6 +3928,12 @@ impl Graphic {
 	/// 노드의 변환 배율이 지난 프레임과 달라 움직이는 중인지 셈해 정하고, 노드에 기억할 배율을 돌려준다. (NodeTree 가 push_transform 뒤에 부른다)
 	/// - last_drawn_maximum_scale 은 그 노드를 지난번 그릴 때의 값이다. (0 이면 아직 모른다, 처음 그리는 노드는 움직이지 않는 것으로 본다)
 	/// - 양자화 단위가 0 이 아니면 늘 묶어 굽으므로 셈하지 않고 받은 값을 그대로 돌려준다.
+	///
+	/// # 인자
+	/// - `last_drawn_maximum_scale`: 그 노드를 지난번 그릴 때 돌려받은 배율. (0 이면 처음)
+	///
+	/// # 돌려줌
+	/// 노드에 기억할 배율. (지금 변환의 가장 큰 배율, 양자화 단위가 0 이 아니거나 움직임 단위가 0 이면 받은 값 그대로)
 	//==============================================================================
 	pub fn update_text_bake_scale_moving(&mut self, last_drawn_maximum_scale: f32) -> f32 {
 		if self.text_bake_scale_step > 0.0 || self.text_bake_motion_scale_step <= 0.0 {
@@ -3317,6 +3948,9 @@ impl Graphic {
 	//==============================================================================
 	/// 텍스트 픽셀 스냅 설정.
 	/// - 켜면 회전 / 기울임이 없는 변환에서 글자 쿼드의 왼쪽 위를 디바이스 픽셀 격자에 맞춘다.
+	///
+	/// # 인자
+	/// - `is_text_pixel_snap_enabled`: true 면 글자를 디바이스 픽셀에 맞춘다. (처음 false)
 	//==============================================================================
 	pub fn set_text_pixel_snap_enabled(&mut self, is_text_pixel_snap_enabled: bool) {
 		self.is_text_pixel_snap_enabled = is_text_pixel_snap_enabled;
@@ -3324,6 +3958,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 텍스트 픽셀 스냅 여부 반환.
+	///
+	/// # 돌려줌
+	/// 픽셀 스냅이 켜져 있으면 true.
 	//==============================================================================
 	pub fn is_text_pixel_snap_enabled(&self) -> bool {
 		self.is_text_pixel_snap_enabled
@@ -3331,6 +3968,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 텍스트 베이크 스케일 계산. (현재 변환 행렬 기반, 양자화 단위는 set_text_bake_scale_step)
+	///
+	/// # 돌려줌
+	/// 지금 변환의 가장 큰 배율을 양자화 단위로 반올림한 값. (0.25 ~ 8 로 자른다, 단위가 0 이고 움직이는 중이면 움직임 단위로, 둘 다 0 이면 반올림하지 않는다)
 	//==============================================================================
 	pub fn calculate_text_bake_scale(&self) -> f32 {
 		let maximum_scale = self.transform_matrix.get_maximum_scale();
@@ -3350,6 +3990,13 @@ impl Graphic {
 	//==============================================================================
 	/// 문자열 텍스처 엔트리를 정렬/베이스라인에 맞춰 쿼드로 출력.
 	/// - text_direction 은 정렬 Start / End 를 가를 방향이다. (Ltr 또는 Rtl, 원본 drawTextEntry 의 textDirection)
+	///
+	/// # 인자
+	/// - `entry`: 구운 문자열 텍스처. (TextStringTextureCache 의 항목)
+	/// - `x`: 기준 x. (가로 정렬의 기준점, 픽셀)
+	/// - `y`: 기준 y. (세로 기준선의 기준점, 픽셀)
+	/// - `color`: 곱할 색. (None 이면 흰색, 구운 그대로)
+	/// - `text_direction`: 정렬 Start, End 를 가를 방향.
 	//==============================================================================
 	pub fn draw_text_entry(&mut self, entry: TextEntry, x: f32, y: f32, color: Option<Color>, text_direction: TextDirection) {
 		// 가로 정렬 오프셋.
@@ -3407,6 +4054,11 @@ impl Graphic {
 	//==============================================================================
 	/// 텍스트 채움 출력. (Canvas2D fillText 대응)
 	/// - set_fill_color() / set_font_string() / set_text_align() / set_text_baseline()
+	///
+	/// # 인자
+	/// - `text`: 그릴 문자열. (빈 글이면 그리지 않는다)
+	/// - `x`: 기준 x. (set_text_align 의 기준점, 픽셀)
+	/// - `y`: 기준 y. (set_text_baseline 의 기준점, 픽셀)
 	//==============================================================================
 	pub fn draw_fill_text(&mut self, text: &str, x: f32, y: f32) {
 		if text.is_empty() {
@@ -3426,6 +4078,12 @@ impl Graphic {
 	//==============================================================================
 	/// 텍스트 외곽선 출력. (Canvas2D strokeText 대응)
 	/// - set_stroke_color() / set_font_string() / set_text_align() / set_text_baseline()
+	///
+	/// # 인자
+	/// - `text`: 그릴 문자열. (빈 글이면 그리지 않는다)
+	/// - `x`: 기준 x. (set_text_align 의 기준점, 픽셀)
+	/// - `y`: 기준 y. (set_text_baseline 의 기준점, 픽셀)
+	/// - `line_width`: 외곽선 두께. (픽셀)
 	//==============================================================================
 	pub fn draw_stroke_text(&mut self, text: &str, x: f32, y: f32, line_width: f32) {
 		if text.is_empty() {
@@ -3462,6 +4120,24 @@ impl Graphic {
 	/// 출력 영역 제한 시작.
 	/// - 스텐실 버퍼 기반이라 회전/스케일이 걸린 영역도 정확히 잘린다.
 	/// - round_size 를 주면 둥근 사각형으로 잘린다.
+	/// - 상태를 push_state 로 쌓으므로 end_clip_rect 와 짝을 맞춰 부른다. (end_clip_rect 가 pop_state 로 되돌린다) 겹쳐 걸면 교집합으로 잘린다.
+	///
+	/// # 인자
+	/// - `rect`: 자를 사각형. (지금 변환 기준, 픽셀)
+	/// - `round_size`: 모서리 반지름. (0 이하면 네모)
+	///
+	/// # 예제
+	/// 둥근 칸 안에만 원 그리기
+	/// ```rust,no_run
+	/// use vanilla::{Colors, Graphic, Rect, Vector2};
+	///
+	/// fn draw(graphic: &mut Graphic) {
+	/// 	graphic.begin_clip_rect(Rect::create(100.0, 100.0, 200.0, 100.0), 12.0);
+	/// 	graphic.set_fill_color(Colors::WHITE);
+	/// 	graphic.draw_circle(Vector2::create(100.0, 100.0), 80.0);
+	/// 	graphic.end_clip_rect();
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn begin_clip_rect(&mut self, rect: Rect, round_size: f32) {
 		// 모아 둔 것은 지금 스텐실 상태로 먼저 내보낸다.
@@ -3555,6 +4231,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 셰이더 프로그램 반환. (바꿔 끼운 것이 있으면 그것, 없으면 기본 프로그램)
+	///
+	/// # 돌려줌
+	/// 바꿔 끼운 프로그램이 있으면 그것, 없으면 기본 프로그램.
 	//==============================================================================
 	pub fn get_shader_program(&self) -> &ShaderProgram {
 		match &self.shader_program_override {
@@ -3571,6 +4250,9 @@ impl Graphic {
 	/// 셰이더 프로그램 바꿔 끼우기. (None 이면 기본 프로그램으로 복귀)
 	/// - 기본 프로그램과 같은 어트리뷰트 위치 / 유니폼 이름(projectionMatrix, model_matrix, mainColor, tint_color, global_alpha, mainTexture)을 갖춰야 한다.
 	/// - 바꿔 끼운 프로그램이 쓰이는 동안 그 프로그램이 사용 중이다. 효과 유니폼은 바꿔 끼운 바로 뒤에 GL 로 직접 올린다.
+	///
+	/// # 인자
+	/// - `shader_program`: 바꿔 끼울 프로그램. (resolve_shader_program 으로 받는다, None 이면 기본 프로그램)
 	//==============================================================================
 	pub fn set_shader_program_override(&mut self, shader_program: Option<Rc<ShaderProgram>>) {
 		self.flush_batch();
@@ -3591,6 +4273,56 @@ impl Graphic {
 	/// - 원본 ShaderSprite 의 컨텍스트별 프로그램 캐시 자리. 러스트 판은 GL 컨텍스트를 든 Graphic 이 담는다.
 	/// - 어트리뷰트 위치를 기본 프로그램과 같게 고정해 링크하므로 기본 버텍스 어레이를 그대로 쓴다.
 	/// - 만들기에 실패하면 한 번만 알리고 None 을 담아 두어 다시 만들지 않는다.
+	///
+	/// # 인자
+	/// - `program_group_name`: 묶음 이름. (효과 종류 같은 것, 열쇠의 앞)
+	/// - `program_name`: 프로그램 이름. (열쇠의 뒤)
+	/// - `create_shader_source`: 담긴 것이 없을 때만 부르는 함수. ((버텍스 소스, 프래그먼트 소스), GLSL ES 3.00)
+	///
+	/// # 돌려줌
+	/// 담아 둔 프로그램. 만들기에 실패했으면 None. (그 뒤로도 None)
+	///
+	/// # 예제
+	/// 흑백 셰이더로 바꿔 끼워 그림 그리기
+	/// ```rust,no_run
+	/// use std::rc::Rc;
+	/// use vanilla::{Graphic, Image, Vector2};
+	///
+	/// const GRAY_VERTEXSHADER_SOURCE: &str = "#version 300 es
+	/// in vec2 vertexPosition;
+	/// in vec2 vertexTextureCoordinate;
+	/// uniform mat3 projectionMatrix;
+	/// uniform mat3 modelMatrix;
+	/// out vec2 fragmentTextureCoordinate;
+	/// void main() {
+	/// 	vec3 transformedPosition = projectionMatrix * (modelMatrix * vec3(vertexPosition, 1.0));
+	/// 	gl_Position = vec4(transformedPosition.xy, 0.0, 1.0);
+	/// 	fragmentTextureCoordinate = vertexTextureCoordinate;
+	/// }
+	/// ";
+	///
+	/// const GRAY_FRAGMENTSHADER_SOURCE: &str = "#version 300 es
+	/// precision highp float;
+	/// in vec2 fragmentTextureCoordinate;
+	/// uniform sampler2D mainTexture;
+	/// uniform vec4 mainColor;
+	/// uniform float globalAlpha;
+	/// out vec4 outputColor;
+	/// void main() {
+	/// 	vec4 textureColor = texture(mainTexture, fragmentTextureCoordinate);
+	/// 	float gray = dot(textureColor.rgb, vec3(0.299, 0.587, 0.114));
+	/// 	float alpha = textureColor.a * mainColor.a * globalAlpha;
+	/// 	outputColor = vec4(vec3(gray) * mainColor.a * globalAlpha, alpha);
+	/// }
+	/// ";
+	///
+	/// fn draw_gray(graphic: &mut Graphic, image: &Rc<Image>) {
+	/// 	let shader_program = graphic.resolve_shader_program("example", "gray", || (GRAY_VERTEXSHADER_SOURCE.to_string(), GRAY_FRAGMENTSHADER_SOURCE.to_string()));
+	/// 	graphic.set_shader_program_override(shader_program);
+	/// 	graphic.draw_image(image, Vector2::create(0.0, 0.0), Vector2::create(128.0, 128.0));
+	/// 	graphic.set_shader_program_override(None);
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn resolve_shader_program(&mut self, program_group_name: &'static str, program_name: &'static str, create_shader_source: impl FnOnce() -> (String, String)) -> Option<Rc<ShaderProgram>> {
 		let cache_key = (program_group_name, program_name);
@@ -3648,6 +4380,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 드로잉 버퍼 너비 반환. (픽셀, 원본 webGL2RenderingContext.drawing_buffer_width)
+	///
+	/// # 돌려줌
+	/// 마지막 apply_settings 의 드로잉 버퍼 너비. (픽셀)
 	//==============================================================================
 	pub fn get_drawing_buffer_width(&self) -> i32 {
 		self.applied_viewport_width
@@ -3655,6 +4390,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 드로잉 버퍼 높이 반환. (픽셀, 원본 webGL2RenderingContext.drawing_buffer_height)
+	///
+	/// # 돌려줌
+	/// 마지막 apply_settings 의 드로잉 버퍼 높이. (픽셀)
 	//==============================================================================
 	pub fn get_drawing_buffer_height(&self) -> i32 {
 		self.applied_viewport_height
@@ -3663,6 +4401,9 @@ impl Graphic {
 	//==============================================================================
 	/// 지금 그린 화면 읽기. (너비, 높이, 위에서 아래로 놓인 RGBA. 화면을 넘기기 전에 부른다)
 	/// - 원본 캔버스처럼 불투명으로 본다. (알파 255)
+	///
+	/// # 돌려줌
+	/// (너비, 높이, 픽셀). 픽셀은 위 줄부터 놓인 RGBA 바이트(너비 x 높이 x 4)이고 알파는 모두 255 다. (지금 읽기 프레임버퍼에서 읽는다)
 	//==============================================================================
 	pub fn read_framebuffer_pixels(&self) -> (u32, u32, Vec<u8>) {
 		let width = self.applied_viewport_width.max(0) as usize;
@@ -3688,6 +4429,9 @@ impl Graphic {
 	//==============================================================================
 	/// GL 컨텍스트 반환.
 	/// - 받은 쪽이 프로그램이나 텍스처를 바꿀 수 있어, 기억한 프로그램과 텍스처를 잊는다. (다음 그리기에서 다시 건다)
+	///
+	/// # 돌려줌
+	/// Graphic 이 든 GL 컨텍스트.
 	//==============================================================================
 	pub fn get_gl(&self) -> &glow::Context {
 		self.forget_bound_render_state();
@@ -3696,6 +4440,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 버텍스 어레이 반환. (기본 그리기의 것, GL 을 만지려면 get_gl 로 컨텍스트를 받는다)
+	///
+	/// # 돌려줌
+	/// 기본 버텍스 어레이.
 	//==============================================================================
 	pub fn get_vertex_array(&self) -> GlVertexArray {
 		self.vertex_array
@@ -3703,6 +4450,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 버텍스 버퍼 반환.
+	///
+	/// # 돌려줌
+	/// 기본 버텍스 버퍼.
 	//==============================================================================
 	pub fn get_vertex_buffer(&self) -> GlBuffer {
 		self.vertex_buffer
@@ -3710,6 +4460,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 스크래치 버텍스 데이터 반환. (write_quad 와 draw_vertices 가 쓰는 배열)
+	///
+	/// # 돌려줌
+	/// 스크래치 버텍스 배열. (정점 4096 개, 정점마다 x, y, u, v 플로트 4 개)
 	//==============================================================================
 	pub fn get_vertex_data(&mut self) -> &mut [f32] {
 		&mut self.vertex_data
@@ -3717,6 +4470,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 흰색 텍스처 반환.
+	///
+	/// # 돌려줌
+	/// 1 x 1 흰색 텍스처. (단색 그리기에 쓴다)
 	//==============================================================================
 	pub fn get_white_texture(&self) -> GlTexture {
 		self.white_texture
@@ -3724,6 +4480,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 흰색 반환.
+	///
+	/// # 돌려줌
+	/// 흰색. (draw_vertices 에 텍스처 색 그대로 그릴 때 넘긴다)
 	//==============================================================================
 	pub fn get_white_color(&self) -> Color {
 		self.white_color
@@ -3731,6 +4490,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 이미지 텍스처 캐시 반환.
+	///
+	/// # 돌려줌
+	/// 이미지 텍스처 캐시.
 	//==============================================================================
 	pub fn get_image_texture_cache(&self) -> &ImageTextureCache {
 		&self.image_texture_cache
@@ -3738,6 +4500,9 @@ impl Graphic {
 
 	//==============================================================================
 	/// 문자열 텍스처 캐시 반환. (폰트 등록)
+	///
+	/// # 돌려줌
+	/// 문자열 텍스처 캐시.
 	//==============================================================================
 	pub fn get_text_string_texture_cache(&mut self) -> &mut TextStringTextureCache {
 		&mut self.text_string_texture_cache

@@ -11,6 +11,26 @@
 //!   합성은 COLR 의 28 가지(Porter-Duff 와 W3C 섞기)를 프리멀티플라이드 색으로 한다. 팔레트는 0 번, 글자 색(팔레트 번호 0xFFFF)은 흰색이다. (글자는 흰색으로 굽고 그릴 때 색을 곱한다)
 //!   v1 의 칠(paint)은 지금 자르기 영역을 칠한다. 자르기가 없으면(v0) 마지막으로 받은 윤곽을 칠한다.
 //! - ttf-parser 는 rustybuzz 가 다시 내보내는 것을 쓴다. (모양 짓기 얼굴과 같은 얼굴)
+//!
+//! # 예제
+//! 네모 윤곽의 덮인 정도 셈하기 (글꼴 단위 100 이 10 픽셀)
+//! ```rust
+//! use vanilla::core::colorglyph::{rasterize_outline, read_outline_bounds};
+//! use rustybuzz::ttf_parser::OutlineBuilder;
+//!
+//! let draw_square = |outline_builder: &mut dyn OutlineBuilder| -> bool {
+//! 	outline_builder.move_to(0.0, 0.0);
+//! 	outline_builder.line_to(100.0, 0.0);
+//! 	outline_builder.line_to(100.0, 100.0);
+//! 	outline_builder.line_to(0.0, 100.0);
+//! 	outline_builder.close();
+//! 	true
+//! };
+//! assert_eq!(read_outline_bounds(&draw_square, 0.1), Some((0, 10, 10, 10)));
+//! let (coverage, width, height, left_x, top_y) = rasterize_outline(&draw_square, 0.1).unwrap();
+//! assert_eq!((width, height, left_x, top_y), (10, 10, 0, 10));
+//! assert!(coverage.iter().all(|value| *value == 255));
+//! ```
 //==============================================================================
 use rustybuzz::ttf_parser::colr::{ClipBox, CompositeMode, GradientExtend, Paint, Painter};
 use rustybuzz::ttf_parser::{Face, GlyphId, OutlineBuilder, RasterGlyphImage, RasterImageFormat, RgbaColor, Transform};
@@ -23,17 +43,44 @@ const FOREGROUND_COLOR: RgbaColor = RgbaColor { red: 255, green: 255, blue: 255,
 
 //==============================================================================
 /// 색 글리프 래스터 하나. (프리멀티플라이드 RGBA, 왼쪽 위 자리는 펜 원점에서 오른쪽 left_x, 기준선에서 위로 top_y)
+///
+/// # 예제
+/// 색 글리프면 래스터로 굽기
+/// ```rust
+/// use vanilla::core::colorglyph::{has_color_glyph, rasterize_color_glyph, ColorGlyphRaster};
+/// use rustybuzz::ttf_parser::Face;
+///
+/// fn bake_color_glyph(face: &Face, glyph_index: u16) -> Option<ColorGlyphRaster> {
+/// 	if !has_color_glyph(face, glyph_index) {
+/// 		return None;
+/// 	}
+/// 	let color_glyph_raster = rasterize_color_glyph(face, glyph_index, 48.0)?;
+/// 	assert_eq!(color_glyph_raster.pixels.len(), (color_glyph_raster.width * color_glyph_raster.height * 4) as usize);
+/// 	Some(color_glyph_raster)
+/// }
+/// ```
 //==============================================================================
 pub struct ColorGlyphRaster {
+	/// 프리멀티플라이드 RGBA 픽셀. (위 줄부터 width x height x 4 바이트)
 	pub pixels: Vec<u8>,
+	/// 너비. (픽셀)
 	pub width: i32,
+	/// 높이. (픽셀)
 	pub height: i32,
+	/// 펜 원점에서 그림 왼쪽까지. (픽셀, 오른쪽이 +)
 	pub left_x: i32,
+	/// 기준선에서 그림 위쪽까지. (픽셀, 위가 +)
 	pub top_y: i32,
 }
 
 //==============================================================================
 /// 글꼴에 색 글리프 표가 있는지. (sbix, CBDT, COLR)
+///
+/// # 인자
+/// - `face`: 볼 글꼴 얼굴. (rustybuzz 가 다시 내보내는 ttf-parser 의 Face)
+///
+/// # 돌려줌
+/// sbix, CBDT, COLR 표 가운데 하나라도 있으면 true.
 //==============================================================================
 pub fn has_color_tables(face: &Face) -> bool {
 	let tables = face.tables();
@@ -42,6 +89,13 @@ pub fn has_color_tables(face: &Face) -> bool {
 
 //==============================================================================
 /// 글리프가 색 글리프인지. (COLR 에 있거나, PNG / BGRA 비트맵이 있다)
+///
+/// # 인자
+/// - `face`: 볼 글꼴 얼굴.
+/// - `glyph_index`: 글리프 번호.
+///
+/// # 돌려줌
+/// COLR 색 글리프이거나, 글자 크기 64 로 고른 판의 비트맵이 PNG 나 프리멀티플라이드 BGRA 면 true.
 //==============================================================================
 pub fn has_color_glyph(face: &Face, glyph_index: u16) -> bool {
 	if face.is_color_glyph(GlyphId(glyph_index)) {
@@ -59,6 +113,14 @@ pub fn has_color_glyph(face: &Face, glyph_index: u16) -> bool {
 
 //==============================================================================
 /// 색 글리프 래스터. (COLR 이 먼저, 없으면 비트맵, 색 글리프가 아니면 None)
+///
+/// # 인자
+/// - `face`: 그릴 글꼴 얼굴.
+/// - `glyph_index`: 글리프 번호.
+/// - `pixel_size`: 글자 크기. (픽셀, em 크기, 0 이하면 None)
+///
+/// # 돌려줌
+/// 그린 래스터. 색 글리프가 아니거나, 그림을 풀지 못하거나, 크기가 0 이거나 가로세로 4096 픽셀을 넘으면 None.
 //==============================================================================
 pub fn rasterize_color_glyph(face: &Face<'_>, glyph_index: u16, pixel_size: f32) -> Option<ColorGlyphRaster> {
 	if pixel_size <= 0.0 {
@@ -304,6 +366,13 @@ fn rasterize_outline_color_glyph(face: &Face<'_>, glyph_index: u16, pixel_size: 
 
 //==============================================================================
 /// 윤곽이 덮는 픽셀 상자. (윤곽을 그리는 함수와 글꼴 단위 → 픽셀 배율. 펜 원점에서 왼쪽, 기준선에서 위, 너비, 높이. 비었으면 None)
+///
+/// # 인자
+/// - `draw_outline`: 받은 OutlineBuilder 에 윤곽을 그리는 함수. (글꼴 단위, 위가 +, 그렸으면 true)
+/// - `scale`: 글꼴 단위에서 픽셀로의 배율.
+///
+/// # 돌려줌
+/// (펜 원점에서 왼쪽, 기준선에서 위, 너비, 높이). 픽셀 단위로 내림, 올림한 상자다. 함수가 false 를 돌려주거나, 선분이 없거나, 너비나 높이가 0 이하거나 4096 을 넘으면 None.
 //==============================================================================
 pub fn read_outline_bounds(draw_outline: &dyn Fn(&mut dyn OutlineBuilder) -> bool, scale: f32) -> Option<(i32, i32, i32, i32)> {
 	let mut bounds_collector = SegmentCollector::new(Transform::new(scale, 0.0, 0.0, scale, 0.0, 0.0));
@@ -332,6 +401,13 @@ pub fn read_outline_bounds(draw_outline: &dyn Fn(&mut dyn OutlineBuilder) -> boo
 //==============================================================================
 /// 윤곽의 덮인 정도. (가변 글꼴의 글리프, fontdue 가 축 값을 읽지 못하고 맥 SFNS 같은 가변 글꼴의 윤곽을 그리지 못해 여기서 그린다. 비었으면 None)
 /// - 돌려주는 것: (덮인 정도, 너비, 높이, 펜 원점에서 왼쪽, 기준선에서 위). 색 글리프와 같은 넓이 누적 래스터다.
+///
+/// # 인자
+/// - `draw_outline`: 받은 OutlineBuilder 에 윤곽을 그리는 함수. (글꼴 단위, 위가 +, 그렸으면 true, 경계를 잴 때와 칠할 때 두 번 부른다)
+/// - `scale`: 글꼴 단위에서 픽셀로의 배율.
+///
+/// # 돌려줌
+/// (덮인 정도, 너비, 높이, 펜 원점에서 왼쪽, 기준선에서 위). 덮인 정도는 위 줄부터 픽셀마다 0 ~ 255 한 바이트다. read_outline_bounds 가 None 이면 None.
 //==============================================================================
 pub fn rasterize_outline(draw_outline: &dyn Fn(&mut dyn OutlineBuilder) -> bool, scale: f32) -> Option<(Vec<u8>, i32, i32, i32, i32)> {
 	let (left_x, top_y, width, height) = read_outline_bounds(draw_outline, scale)?;
