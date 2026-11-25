@@ -620,6 +620,44 @@ impl Graphic {
 	}
 
 	//==============================================================================
+	// 묶음 기억 잊기. (원본 invalidateRenderStateCache, Graphic 을 거치지 않고 GL 로 프로그램이나 텍스처를 바꾼 뒤 2D 를 이어 그릴 때)
+	// - get_gl, restore_render_state, 프레임 시작과 끝은 스스로 잊는다.
+	//==============================================================================
+	pub fn invalidate_render_state_cache(&self) {
+		self.forget_bound_render_state();
+	}
+
+	//==============================================================================
+	// 깊이 버퍼 비우기. (원본 clearDepthBuffer, 2D 그리기 사이에 3D 를 끼우기 전에)
+	// - 자르기(begin_clip_rect, 스텐실)를 건 뒤 그리는 도중에 깊이를 비우면 갤럭시 폴드3(Adreno 660)의 드라이버가 3D 를 하나도 그리지 못한 일이 있다. (원본 게임)
+	//   자르기 안에 3D 를 그릴 노드는 begin_clip_rect 앞에서 이것을 부르고, run_external_pass 에는 is_depth_cleared 를 false 로 준다.
+	//==============================================================================
+	pub fn clear_depth_buffer(&mut self) {
+		self.flush_batch();
+		unsafe {
+			self.gl.depth_mask(true);
+			self.gl.clear(glow::DEPTH_BUFFER_BIT);
+		}
+	}
+
+	//==============================================================================
+	// 2D 그리기 사이에 GL 패스 끼우기. (원본 runExternalPass)
+	// - 앞의 2D 묶음을 내보내고, 기억한 프로그램과 텍스처를 잊고, is_depth_cleared 면 깊이를 비운 뒤 pass 를 부르고, 끝나면 restore_render_state 를 부른다.
+	// - pass 는 GL 컨텍스트를 받아 프로그램, 버텍스 어레이, 뷰포트, 섞기, 깊이, 면 가리기를 바꿔도 된다. (클립 중이면 스텐실 테스트는 restore_render_state 가 다시 켠다)
+	// - 원본은 callback 이 던져도 되돌린다. 러스트 판은 pass 가 돌려준 값을 그대로 돌려준다. (패닉은 되돌리지 않는다)
+	//==============================================================================
+	pub fn run_external_pass<R>(&mut self, is_depth_cleared: bool, pass: impl FnOnce(&glow::Context) -> R) -> R {
+		self.flush_batch();
+		if is_depth_cleared {
+			self.clear_depth_buffer();
+		}
+		self.forget_bound_render_state();
+		let result = pass(&self.gl);
+		self.restore_render_state();
+		result
+	}
+
+	//==============================================================================
 	// 이미지 스무딩 활성화 여부 설정.
 	// - 도트(픽셀) 스프라이트 게임은 false 로 설정해 선명하게 렌더링.
 	//==============================================================================

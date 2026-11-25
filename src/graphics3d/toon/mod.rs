@@ -9,3 +9,5 @@ pub mod glbmeshreader;
 pub mod meshbuilder;
 pub mod toonpostprocess;
 pub mod toonrenderer;
+pub mod toondrawqueue;
+pub mod toonview3d;
