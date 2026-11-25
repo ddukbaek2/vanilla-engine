@@ -378,6 +378,25 @@ impl Engine {
 		&self.engine_configuration
 	}
 
+	//==============================================================================
+	// 최대 FPS 설정. (실행 중에 바꿀 수 있다, 0 이면 제한하지 않는다. 0 보다 작거나 유한하지 않으면 0)
+	// - EngineConfiguration.maximum_frame_per_second 에 적는다. 플랫폼이 프레임마다 그 값을 읽어 다음 프레임부터 따른다.
+	//==============================================================================
+	pub fn set_maximum_frame_per_second(&mut self, maximum_frame_per_second: f32) {
+		if !maximum_frame_per_second.is_finite() || maximum_frame_per_second < 0.0 {
+			self.engine_configuration.maximum_frame_per_second = 0.0;
+			return;
+		}
+		self.engine_configuration.maximum_frame_per_second = maximum_frame_per_second;
+	}
+
+	//==============================================================================
+	// 최대 FPS 반환. (0 이면 제한하지 않음)
+	//==============================================================================
+	pub fn get_maximum_frame_per_second(&self) -> f32 {
+		self.engine_configuration.maximum_frame_per_second
+	}
+
 	pub fn get_time_manager(&self) -> &TimeManager {
 		&self.time_manager
 	}
@@ -1070,5 +1089,20 @@ mod tests {
 		drop(page_event_listener);
 		engine.dispatch_page_event(PageEvent::Focused);
 		assert_eq!(received_list.borrow().len(), 3);
+	}
+
+	//==============================================================================
+	// 최대 FPS 는 실행 중에 바꾸고, 잘못된 값은 0(제한 없음)이다.
+	//==============================================================================
+	#[test]
+	fn maximum_frame_per_second_changes_at_runtime() {
+		let mut engine = Engine::new(EngineConfiguration::new());
+		assert_eq!(engine.get_maximum_frame_per_second(), 0.0);
+		engine.set_maximum_frame_per_second(30.0);
+		assert_eq!(engine.get_engine_configuration().maximum_frame_per_second, 30.0);
+		engine.set_maximum_frame_per_second(-5.0);
+		assert_eq!(engine.get_maximum_frame_per_second(), 0.0);
+		engine.set_maximum_frame_per_second(f32::INFINITY);
+		assert_eq!(engine.get_maximum_frame_per_second(), 0.0);
 	}
 }
