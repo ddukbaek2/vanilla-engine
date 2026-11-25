@@ -457,16 +457,18 @@ impl DesktopApplication {
 		match touch.phase {
 			TouchPhase::Started => {
 				input_manager.set_touch_pressed(true);
+				input_manager.set_touch_moved(true);
 				input_manager.set_touch_down(true);
 			}
 			TouchPhase::Moved => {
-				input_manager.set_touch_moved(true);
 			}
 			TouchPhase::Ended => {
+				input_manager.set_touch_moved(false);
 				input_manager.set_touch_released(true);
 				input_manager.set_touch_down(false);
 			}
 			TouchPhase::Cancelled => {
+				input_manager.set_touch_moved(false);
 				input_manager.set_touch_cancelled(true);
 				input_manager.set_touch_down(false);
 			}
@@ -596,8 +598,11 @@ impl ApplicationHandler for DesktopApplication {
 				self.resize();
 			}
 			WindowEvent::Focused(is_focused) => {
+				// 원본처럼 창이 포커스를 잃으면 누르던 것을 뗀 것으로 넘긴다.
 				if !is_focused {
-					self.engine_runner.engine.get_input_manager_mut().clear();
+					let input_manager = self.engine_runner.engine.get_input_manager_mut();
+					input_manager.clear();
+					input_manager.set_touch_released(true);
 				}
 				let page_event = if is_focused {
 					PageEvent::Focused
@@ -637,16 +642,8 @@ impl ApplicationHandler for DesktopApplication {
 			WindowEvent::CursorMoved { position, .. } => {
 				self.update_input_position(position.x, position.y);
 				let input_manager = self.engine_runner.engine.get_input_manager_mut();
-				input_manager.set_touch_moved(true);
 				input_manager.set_touch_input(false);
 				input_manager.set_last_input_device(InputDevice::Mouse);
-			}
-			WindowEvent::CursorLeft { .. } => {
-				let input_manager = self.engine_runner.engine.get_input_manager_mut();
-				if input_manager.is_touch_down() {
-					input_manager.set_touch_down(false);
-					input_manager.set_touch_cancelled(true);
-				}
 			}
 			WindowEvent::MouseInput { state, button, .. } => {
 				let engine_mouse_button = match button {

@@ -107,11 +107,12 @@ impl TouchRecognizer {
 		if !self.is_touching {
 			return;
 		}
-		if input_manager.is_touch_moved() {
-			self.touch_move(node_tree, engine, view_input_position);
-		}
+		// 원본 Scene.tickTouch 처럼 뗌이 먼저, 누르고 있음은 누른 프레임에는 넘기지 않는다.
 		if input_manager.is_touch_released() {
 			self.touch_release(node_tree, engine, view_input_position);
+		}
+		else if input_manager.is_touch_moved() && !input_manager.is_touch_pressed() {
+			self.touch_move(node_tree, engine, view_input_position);
 		}
 		else if input_manager.is_touch_cancelled() {
 			self.touch_cancel(node_tree, engine, view_input_position);

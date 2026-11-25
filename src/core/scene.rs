@@ -371,12 +371,13 @@ impl SceneBase {
 				return;
 			}
 		};
-		if input_manager.is_touch_moved() {
-			self.node_tree.dispatch_touch(pressed_node_id, engine, TouchKind::Moved, view_input_position);
-		}
+		// 원본처럼 뗌이 먼저, 누르고 있음은 누른 프레임에는 넘기지 않는다. (한 프레임 안에 눌렀다 떼면 누름 뒤에 바로 뗌)
 		if input_manager.is_touch_released() {
 			self.node_tree.dispatch_touch(pressed_node_id, engine, TouchKind::Release, view_input_position);
 			self.pressed_node_id = None;
+		}
+		else if input_manager.is_touch_moved() && !input_manager.is_touch_pressed() {
+			self.node_tree.dispatch_touch(pressed_node_id, engine, TouchKind::Moved, view_input_position);
 		}
 		else if input_manager.is_touch_cancelled() {
 			self.node_tree.dispatch_touch(pressed_node_id, engine, TouchKind::Cancel, view_input_position);

@@ -200,7 +200,7 @@ impl Engine {
 			pointer_cursor: PointerCursor::new(),
 			audio_manager: AudioManager::new(),
 			platform_window: None,
-			frame_number: 0,
+			frame_number: 1,
 			version: ENGINE_VERSION,
 			is_exit_requested: false,
 			pending_scene_list: Vec::new(),
@@ -490,6 +490,14 @@ impl Engine {
 	}
 
 	//==============================================================================
+	// 페이지 이벤트 리스너 빼기. (같은 리스너를 더 부르지 않는다, 버린 리스너도 빠진다)
+	//==============================================================================
+	pub fn remove_page_event_listener(&self, page_event_listener: &PageEventListener) {
+		let target_listener = Rc::downgrade(page_event_listener);
+		self.page_event_listener_list.borrow_mut().retain(|weak_listener| weak_listener.strong_count() > 0 && !weak_listener.ptr_eq(&target_listener));
+	}
+
+	//==============================================================================
 	// 페이지 이벤트 알리기. (플랫폼이 부른다. 가려짐을 적고 살아 있는 리스너에 그 자리에서 넘긴다)
 	// - 리스너가 다른 일로 빌려져 있으면 그 리스너는 이번 이벤트를 건너뛴다.
 	//==============================================================================
@@ -516,6 +524,9 @@ impl Engine {
 		}
 	}
 
+	//==============================================================================
+	// 지금 프레임의 번호. (원본처럼 첫 프레임이 1, 검증용 화면 저장의 프레임 번호도 이것)
+	//==============================================================================
 	pub fn get_frame_number(&self) -> u64 {
 		self.frame_number
 	}
@@ -931,7 +942,6 @@ impl EngineRunner {
 		input_manager.set_touch_pressed(false);
 		input_manager.set_touch_released(false);
 		input_manager.set_touch_cancelled(false);
-		input_manager.set_touch_moved(false);
 		input_manager.clear_wheel_delta();
 		input_manager.update_frame_snapshot();
 		input_manager.get_text_input_mut().finish_frame();
@@ -1112,7 +1122,7 @@ mod tests {
 		engine.dispatch_page_event(PageEvent::Visible);
 		assert!(!engine.is_page_hidden());
 		assert_eq!(*received_list.borrow(), vec![PageEvent::Hidden, PageEvent::Blurred, PageEvent::Visible]);
-		drop(page_event_listener);
+		engine.remove_page_event_listener(&page_event_listener);
 		engine.dispatch_page_event(PageEvent::Focused);
 		assert_eq!(received_list.borrow().len(), 3);
 	}

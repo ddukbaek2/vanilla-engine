@@ -334,7 +334,11 @@ fn add_keyboard_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) ->
 	});
 	let web_application_cell_for_blur = web_application_cell.clone();
 	let blur_callback: Closure<dyn FnMut()> = Closure::new(move || {
-		web_application_cell_for_blur.borrow_mut().engine_runner.engine.get_input_manager_mut().clear();
+		// 원본처럼 창이 포커스를 잃으면 누르던 것을 뗀 것으로 넘긴다.
+		let mut web_application = web_application_cell_for_blur.borrow_mut();
+		let input_manager = web_application.engine_runner.engine.get_input_manager_mut();
+		input_manager.clear();
+		input_manager.set_touch_released(true);
 	});
 	window.add_event_listener_with_callback("keydown", key_down_callback.as_ref().unchecked_ref()).map_err(describe_js_error)?;
 	window.add_event_listener_with_callback("keyup", key_up_callback.as_ref().unchecked_ref()).map_err(describe_js_error)?;
@@ -399,7 +403,6 @@ fn add_pointer_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> 
 			web_application.update_pointer_position(mouse_event.client_x() as f64, mouse_event.client_y() as f64);
 			let input_manager = web_application.engine_runner.engine.get_input_manager_mut();
 			input_manager.set_touch_input(false);
-			input_manager.set_touch_moved(true);
 			// 창이 흔들릴 때 나는 작은 움직임은 마우스를 쓴 것으로 보지 않는다.
 			let movement = mouse_event.movement_x().abs() + mouse_event.movement_y().abs();
 			if movement >= MOUSE_DEVICE_MOVE_THRESHOLD {
@@ -747,7 +750,6 @@ impl WebApplication {
 				}
 			}
 			"touchmove" => {
-				input_manager.set_touch_moved(true);
 			}
 			"touchend" => {
 				if was_down && touch_list.length() == 0 {
