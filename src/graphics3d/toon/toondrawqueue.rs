@@ -1,18 +1,23 @@
 //==============================================================================
 // 툰 그리기 줄. (vanilla.js experimental/graphics/toon/toondrawqueue.js 의 ToonDrawQueue)
 // - 한 프레임에 그릴 모형을 담아 두었다가 ToonRenderer 로 차례를 맞춰 그린다.
-// - 차례: 단계 BeforeOpaque → 불투명한 몸 → AfterOpaque → 불투명한 것의 바깥선 → AfterOutline → 비치는 것(카메라에서 먼 것부터, 깊이는 쓰지 않음) → AfterTransparent.
+// - 차례: (화면 공간 바깥선의 선의 판) → 단계 BeforeOpaque → 불투명한 몸 → AfterOpaque → 불투명한 것의 바깥선 껍데기 → 화면 공간 바깥선 → AfterOutline
+//   → 비치는 것(카메라에서 먼 것부터, 깊이는 쓰지 않음) → AfterTransparent.
 //   몸을 다 그린 뒤 바깥선을 몰아 그려 프로그램을 덜 바꾸고, 비치는 것은 뒤의 것이 비쳐 보이게 맨 끝에 먼 것부터 섞는다.
 // - 비치는 것: 꼴의 alpha 나 tint_color 의 알파가 1 보다 작거나 blend_mode 가 Alpha 가 아닌 것. 바깥선도 함께(has_outline) 그린다.
 // - 묶음: 꼴의 group 이 같은 비치는 것은 한 덩어리로 가운데 깊이(담긴 것의 평균)로 정렬하고 담은 차례로 그린다.
 //   is_depth_prepassed 가 묶음 안에 하나라도 있으면 그 덩어리는 깊이만 먼저 그린 뒤 같은 깊이(LEQUAL)인 화소에만 색을 칠한다.
 //   여러 부품이 겹친 홀로그램이 두 겹으로 밝지 않고 한 덩어리로 비친다. 덩어리끼리는 먼 것부터라 서로 비친다.
+// - 화면 공간 바깥선: set_screen_outline(ToonScreenOutline) 을 주면 draw 가 몸 앞에 불투명한 것을 선의 판에 그리고, 바깥선 껍데기 뒤에 섞는다.
+//   번호는 꼴의 line_id (None 이면 담은 차례 + 1, 인스턴스는 ToonInstance 의 line_id 가 먼저), 모형마다 has_screen_outline, has_crease_line 으로 끄고 켠다.
+//   비치는 것은 선의 판에 그리지 않는다. 화면 사각형(ToonRenderer::set_screen_rect)이 있으면 그 사각형을 선의 판의 그리는 영역으로 쓴다.
+//   러스트 판은 바깥선을 &'a mut 로 빌려 RefCell 에 담는다. (draw(&self) 에서 고쳐 쓴다)
 // - 단계 콜백: add_pass(stage, callback) 의 callback(gl, renderer) 를 그 자리에서 부른다. 부른 뒤 렌더러가 프레임의 그리기 상태를 다시 건다.
 // - 인스턴스 묶음(add_mesh_instanced)은 불투명이면 몸과 바깥선을 한 번에 그리고, 비치면 인스턴스 자리의 가운데로 한 덩어리로 정렬한다.
 // - 그림자: draw_shadows(gl, renderer, shadow_map) 가 casts_shadow 가 true 인 불투명한 것만 그림자 깊이로 그린다. draw 보다 먼저 부른다.
 // - 사용: 매 프레임 clear() → add_mesh / add_mesh_instanced / add_pass → (draw_shadows) → draw(gl, renderer, camera) 나 draw_with_matrices(gl, renderer, 보기 행렬, 투영 행렬)
 //   draw 는 renderer.begin_frame_with_camera 와 end_frame 을 스스로 부른다. draw_with_matrices 는 begin_frame_with_matrices 를 부른다. (직교 원 행렬 카메라)
-//   화면 사각형(ToonRenderer::set_screen_rect)은 그 전에 건다. clear 는 담은 모형과 단계 콜백을 모두 비운다.
+//   화면 사각형(ToonRenderer::set_screen_rect)은 그 전에 건다. clear 는 담은 모형과 단계 콜백을 모두 비운다. (화면 공간 바깥선은 그대로 둔다)
 // - 원본은 담은 것을 객체 참조로 든다. 러스트 판은 모형과 인스턴스 목록, 단계 콜백을 빌려 담으므로 줄이 그 수명 'a 를 갖는다. (프레임마다 새로 짓거나 clear 뒤 다시 담는다)
 //   단계 콜백은 FnMut 이라 RefCell 에 담아 draw(&self) 에서 부른다.
 //==============================================================================
@@ -26,12 +31,13 @@ use crate::graphics3d::camera3d::Camera3D;
 use crate::graphics3d::shadowmap::ShadowMap;
 use crate::graphics3d::toon::toonmaterial::ToonBlendMode;
 use crate::graphics3d::toon::toonrenderer::{ToonDrawOptions, ToonInstance, ToonMesh, ToonRenderer};
+use crate::graphics3d::toon::toonscreenoutline::{ToonLineDrawOptions, ToonScreenOutline, TOON_SCREEN_OUTLINE_MAXIMUM_LINE_ID};
 
 //==============================================================================
 // 그리기 줄의 단계. (add_pass 의 콜백을 부를 자리)
 // - BeforeOpaque: 불투명한 몸 앞. (평면 거울에 비친 모습, 하늘)
 // - AfterOpaque: 불투명한 몸 뒤, 바깥선 껍데기 앞.
-// - AfterOutline: 바깥선 껍데기 뒤, 비치는 것 앞. (화면 공간 바깥선 ToonScreenOutline::draw_outline 을 섞을 자리)
+// - AfterOutline: 바깥선 껍데기와 화면 공간 바깥선 뒤, 비치는 것 앞.
 // - AfterTransparent: 비치는 것 뒤. (효과)
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -68,10 +74,14 @@ struct ToonTransparentEntry {
 	is_depth_prepassed: bool,
 }
 
+//==============================================================================
+// 툰 그리기 줄. (머리말 참고)
+//==============================================================================
 #[derive(Default)]
 pub struct ToonDrawQueue<'a> {
 	item_list: Vec<ToonDrawItem<'a>>,
 	pass_list: RefCell<Vec<(ToonDrawStage, ToonPassCallback<'a>)>>,
+	screen_outline: RefCell<Option<&'a mut ToonScreenOutline>>,
 }
 
 //==============================================================================
@@ -86,11 +96,11 @@ impl<'a> ToonDrawQueue<'a> {
 	// 생성.
 	//==============================================================================
 	pub fn new() -> ToonDrawQueue<'a> {
-		ToonDrawQueue { item_list: Vec::new(), pass_list: RefCell::new(Vec::new()) }
+		ToonDrawQueue { item_list: Vec::new(), pass_list: RefCell::new(Vec::new()), screen_outline: RefCell::new(None) }
 	}
 
 	//==============================================================================
-	// 비우기. (단계 콜백도 비운다)
+	// 비우기. (단계 콜백도 비운다, 화면 공간 바깥선은 그대로)
 	//==============================================================================
 	pub fn clear(&mut self) {
 		self.item_list.clear();
@@ -102,6 +112,20 @@ impl<'a> ToonDrawQueue<'a> {
 	//==============================================================================
 	pub fn get_item_count(&self) -> usize {
 		self.item_list.len()
+	}
+
+	//==============================================================================
+	// 화면 공간 바깥선 맡기기. (draw 가 선의 판을 그리고 바깥선 껍데기 뒤에 섞는다, None 이면 맡기지 않음)
+	//==============================================================================
+	pub fn set_screen_outline(&mut self, screen_outline: Option<&'a mut ToonScreenOutline>) {
+		self.screen_outline = RefCell::new(screen_outline);
+	}
+
+	//==============================================================================
+	// 화면 공간 바깥선을 맡겼는지.
+	//==============================================================================
+	pub fn has_screen_outline(&self) -> bool {
+		self.screen_outline.borrow().is_some()
 	}
 
 	//==============================================================================
@@ -154,9 +178,10 @@ impl<'a> ToonDrawQueue<'a> {
 	}
 
 	//==============================================================================
-	// 담은 것 그리기. (begin_frame_with_camera 와 end_frame 을 스스로 부른다)
+	// 담은 것 그리기. (화면 공간 바깥선이 있으면 선의 판부터, begin_frame_with_camera 와 end_frame 을 스스로 부른다)
 	//==============================================================================
 	pub fn draw(&self, gl: &glow::Context, renderer: &mut ToonRenderer, camera: &Camera3D) {
+		self.draw_line_ids(gl, renderer, &camera.get_view_matrix(), &camera.get_projection_matrix());
 		renderer.begin_frame_with_camera(gl, camera);
 		self.draw_stages(gl, renderer, &|position: [f32; 3]| camera.read_view_depth(position[0], position[1], position[2]));
 		renderer.end_frame(gl);
@@ -166,10 +191,64 @@ impl<'a> ToonDrawQueue<'a> {
 	// 보기와 투영 행렬로 담은 것 그리기. (Camera3D 없이, begin_frame_with_matrices 와 end_frame 을 스스로 부른다)
 	//==============================================================================
 	pub fn draw_with_matrices(&self, gl: &glow::Context, renderer: &mut ToonRenderer, view_matrix: &Matrix4, projection_matrix: &Matrix4) {
+		self.draw_line_ids(gl, renderer, view_matrix, projection_matrix);
 		renderer.begin_frame_with_matrices(gl, view_matrix, projection_matrix);
 		let elements = view_matrix.elements;
 		self.draw_stages(gl, renderer, &|position: [f32; 3]| -(elements[2] * position[0] + elements[6] * position[1] + elements[10] * position[2] + elements[14]));
 		renderer.end_frame(gl);
+	}
+
+	//==============================================================================
+	// 화면 공간 바깥선의 선의 판 그리기. (맡긴 것이 없으면 아무것도 하지 않음, 불투명한 것만, 화면 사각형이 있으면 그 사각형을 그리는 영역으로)
+	//==============================================================================
+	fn draw_line_ids(&self, gl: &glow::Context, renderer: &ToonRenderer, view_matrix: &Matrix4, projection_matrix: &Matrix4) {
+		let mut screen_outline_slot = self.screen_outline.borrow_mut();
+		let screen_outline = match screen_outline_slot.as_mut() {
+			Some(screen_outline) => {
+				screen_outline
+			}
+			None => {
+				return;
+			}
+		};
+		let mut viewport = [0i32; 4];
+		unsafe {
+			gl.get_parameter_i32_slice(glow::VIEWPORT, &mut viewport);
+			if let Some(screen_rect) = renderer.get_screen_rect() {
+				let left = screen_rect.position.x.floor() as i32;
+				let bottom = (viewport[3] as f32 - screen_rect.position.y - screen_rect.size.y).floor() as i32;
+				gl.viewport(viewport[0] + left, viewport[1] + bottom, (screen_rect.size.x.round() as i32).max(1), (screen_rect.size.y.round() as i32).max(1));
+			}
+		}
+		if screen_outline.begin_line_ids(gl, view_matrix, projection_matrix) {
+			for (item_index, item) in self.item_list.iter().enumerate() {
+				if item.is_transparent {
+					continue;
+				}
+				let line_id = item.options.line_id.unwrap_or(item_index as u32 % TOON_SCREEN_OUTLINE_MAXIMUM_LINE_ID + 1);
+				let line_options = ToonLineDrawOptions {
+					joint_matrices: item.options.joint_matrices,
+					is_culled: item.options.is_culled,
+					index_start: item.options.index_start,
+					index_count: if item.options.index_count > 0 { Some(item.options.index_count) } else { None },
+					is_mirrored: item.options.is_mirrored,
+					has_screen_outline: item.options.has_screen_outline,
+					has_crease_line: item.options.has_crease_line,
+				};
+				match item.instance_list {
+					Some(instance_list) => {
+						screen_outline.draw_mesh_instanced(gl, item.mesh, instance_list, line_id, line_options);
+					}
+					None => {
+						screen_outline.draw_mesh(gl, item.mesh, &item.model_matrix, line_id, line_options);
+					}
+				}
+			}
+			screen_outline.end_line_ids(gl);
+		}
+		unsafe {
+			gl.viewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+		}
 	}
 
 	//==============================================================================
@@ -212,10 +291,14 @@ impl<'a> ToonDrawQueue<'a> {
 		}
 		self.run_passes(gl, renderer, ToonDrawStage::AfterOpaque);
 
-		// 2. 불투명한 것의 바깥선.
+		// 2. 불투명한 것의 바깥선 껍데기와 화면 공간 바깥선.
 		for item_index in outline_index_list {
 			let item = &self.item_list[item_index];
 			renderer.draw_mesh_outline(gl, item.mesh, &item.model_matrix, item.options);
+		}
+		if let Some(screen_outline) = self.screen_outline.borrow_mut().as_mut() {
+			screen_outline.draw_outline(gl);
+			renderer.apply_frame_state(gl);
 		}
 		self.run_passes(gl, renderer, ToonDrawStage::AfterOutline);
 

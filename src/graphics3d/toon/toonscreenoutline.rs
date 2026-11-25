@@ -1,15 +1,20 @@
 //==============================================================================
 // 툰 화면 공간 바깥선. (vanilla.js experimental/graphics/toon/toonscreenoutline.js 의 ToonScreenOutline)
-// - 노멀, 선 번호, 깊이를 선의 판에 그리고 한 번 훑어 가면을 쓴 뒤 화면에 섞는다.
-// - ToonRenderer 의 create_mesh 결과를 같은 행렬로 한 번 더 그려 번호를 쓴다. 껍데기 바깥선(ToonRenderer)과 함께 써도 된다.
-// - 선이 서는 곳: 앞에 있는 것의 실루엣 바깥, 다른 번호와 맞닿은 곳(먼 쪽, 깊이가 거의 같으면 번호가 큰 쪽), 한 번호 안에서 면이 꺾임 각보다 더 꺾이는 곳.
-//   같은 번호끼리 맞닿은 곳은 긋지 않는다. 어느 모형, 어느 부품(index_start, index_count 범위)에 어떤 번호를 줄지는 부르는 쪽이 정한다.
-// - 굵기: set_width 로 월드 길이나 픽셀. 선의 판 픽셀로 셈해 한 픽셀 밑으로 내리지 않는다.
-// - 깊이: 투영 행렬로 직교와 원근을 가린다. 원근은 깊이를 가까운 면과 먼 면으로 풀어 거리(미터)로 견준다.
-// - 값: set_resolution_scale 로 선의 판을 그리는 영역의 몫으로 줄이고(가면은 섞을 때 부드럽게 늘임), set_sample_count 로 볼 이웃 수를 줄인다(가벼운 길 4, 2).
-// - 사용: 매 프레임 begin_line_ids(gl, 보기, 투영) → draw_mesh / draw_mesh_instanced → end_line_ids(gl) (가면까지 셈) → 툰 몸 그리기 → draw_outline(gl).
-//   begin_line_ids 는 그때의 뷰포트를 그리는 영역으로 적어 두고, 선의 판을 그 크기에 맞춰 짓는다. end_line_ids 가 프레임버퍼, 뷰포트, 상태를 돌린다.
-//   (엔진 2D 그리기 사이에 끼울 때, 그 전에 Graphic 의 묶음을 내보내고 끝에 restore_render_state)
+// - 노멀, 선 번호, 깊이를 선의 판에 그리고, 바로 이웃 사이의 경계에서 선을 잡아 점프 플러딩으로 넓힌 뒤 거리로 덮는 몫을 셈해 섞는다.
+// - 선의 판: ToonRenderer 의 create_mesh 결과를 같은 행렬로 한 번 더 그려 노멀(팔면체 접기), 선 번호(14 비트), 꼴(바깥 선, 꺾임 선을 켤지)과 깊이를 쓴다.
+// - 잡기: 화소와 바로 이웃 넷 사이의 경계마다 한 번 본다. 선은 화소가 아니라 화소 사이의 경계 가운데에 선다. (같은 경계를 두 번 긋지 않는다)
+//   바깥 선은 빈 곳과 맞닿은 실루엣, 다른 번호와 맞닿은 곳, 같은 번호라도 서로의 접평면에서 깊이 문턱보다 떨어진 곳(가려진 실루엣)이다.
+//   꺾임 선은 같은 번호 안에서 이웃한 두 노멀이 꺾임 각보다 더 벌어진 곳이다. 화소 하나 사이의 노멀만 보므로 둥근 면의 실루엣 둘레나 비스듬한 면에 띠가 서지 않는다.
+//   깊이를 접평면 거리로 견주므로 비스듬히 보는 바닥에 가짜 선이 서지 않는다. 문턱에 그 깊이의 화소 크기 두 배를 더해 먼 것도 같은 뜻이 된다.
+// - 넓히기: 경계 토막까지의 거리를 점프 플러딩으로 퍼뜨린다. 굵기에 상관없이 걸음 수는 log2 이고, 바깥 선과 꺾임 선은 따로 퍼뜨려 굵기를 따로 준다.
+// - 섞기: 그리는 영역의 화소마다 가장 가까운 경계까지의 거리로 clamp(굵기 / 2 - 거리 + 0.5, 0, 1) 만큼 덮는다. (가장자리가 부드럽고, 선의 판을 줄여도 늘인 선이 점선이 되지 않는다)
+// - 모형마다: ToonLineDrawOptions 의 has_screen_outline 이 false 면 그 모형은 선을 내지 않고 뒤의 선만 가린다. has_crease_line 이 false 면 꺾임 선만 끈다.
+// - 굵기: set_width 와 set_crease 의 굵기는 선 하나의 굵기다. (경계를 가운데로 양쪽에 반씩) 단위는 ToonOutlineWidthUnit, 한 픽셀 밑으로 내리지 않는다.
+// - 깊이: 투영 행렬로 직교와 원근을 가리고, 깊이를 보기 공간 자리로 풀어 견준다. (화면 사각형처럼 클립 x, y 를 옮긴 투영도 된다)
+// - 값: set_resolution_scale 로 선의 판을 그리는 영역의 몫으로 줄인다. (폰의 가벼운 길)
+// - 사용: 매 프레임 begin_line_ids(gl, 보기, 투영) → draw_mesh / draw_mesh_instanced → end_line_ids(gl) (씨앗과 넓히기까지 셈) → 툰 몸 그리기 → draw_outline(gl).
+//   begin_line_ids 는 그때의 뷰포트를 그리는 영역으로 적어 두고, 선의 판을 그 크기에 맞춰 짓는다. end_line_ids 와 draw_outline 이 프레임버퍼, 뷰포트, 상태를 돌린다.
+//   ToonDrawQueue::set_screen_outline 으로 맡기면 그리기 줄이 이 차례를 스스로 한다. (엔진 2D 그리기 사이에 끼울 때, 그 전에 Graphic 의 묶음을 내보내고 끝에 restore_render_state)
 // - 인스턴스마다의 번호는 ToonInstance 의 line_id 다. (원본 인스턴스 객체의 lineId, None 이면 공통 번호)
 //==============================================================================
 use glow::HasContext;
@@ -17,16 +22,13 @@ use glow::HasContext;
 use crate::base::matrix4::Matrix4;
 use crate::core::graphic::{GlProgram, GlTexture, GlVertexArray};
 use crate::core::shaderprogram::ShaderProgram;
-use crate::graphics3d::toon::toonrenderer::{ToonInstance, ToonMesh, TOON_ATTRIBUTE_LOCATIONS, TOON_INSTANCE_FLOAT_COUNT, TOON_MAXIMUM_JOINTS};
+use crate::graphics3d::toon::toonrenderer::{read_matrix_determinant, ToonInstance, ToonMesh, TOON_ATTRIBUTE_LOCATIONS, TOON_INSTANCE_FLOAT_COUNT, TOON_MAXIMUM_JOINTS};
 use crate::graphics3d::GlFramebuffer;
 
-// 볼 이웃의 수 상한. (셰이더의 OFFSETS 를 가까운 차례로, 3 픽셀 안)
-pub const TOON_SCREEN_OUTLINE_MAXIMUM_SAMPLES: u32 = 28;
+// 선 번호의 상한. (선의 판에 14 비트로 쓴다, 0 은 빈 곳)
+pub const TOON_SCREEN_OUTLINE_MAXIMUM_LINE_ID: u32 = 16383;
 
-// 꺾임 선을 볼 곧은 쪽의 수 상한.
-pub const TOON_SCREEN_OUTLINE_MAXIMUM_CREASE_SAMPLES: u32 = 4;
-
-// 선의 판과 가면을 묶는 텍스처 유닛. (툰 렌더러의 그림자 유닛 3 과 겹치지 않게)
+// 선의 판과 씨앗 판을 묶는 텍스처 유닛. (툰 렌더러의 그림자 유닛 3 과 겹치지 않게)
 const LINE_TEXTURE_UNIT: u32 = 5;
 const DEPTH_TEXTURE_UNIT: u32 = 6;
 
@@ -35,14 +37,14 @@ const DEPTH_TEXTURE_UNIT: u32 = 6;
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ToonOutlineWidthUnit {
-	// 월드 길이. (직교는 투영의 세로 배율로, 원근은 초점 거리에서 화면 픽셀로 셈)
+	// 월드 길이. (직교는 투영의 세로 배율로, 원근은 초점 거리에서 화면 픽셀로 셈해 멀수록 가늘어진다)
 	World,
-	// 그리는 버퍼의 픽셀.
+	// 그리는 영역의 픽셀. (거리와 상관없이 같은 굵기)
 	Pixel,
 }
 
 //==============================================================================
-// 번호를 그릴 때의 꼴.
+// 번호를 그릴 때의 꼴. (원본 drawMesh 의 options)
 //==============================================================================
 #[derive(Clone, Copy, Debug)]
 pub struct ToonLineDrawOptions<'a> {
@@ -51,23 +53,30 @@ pub struct ToonLineDrawOptions<'a> {
 	// 몸 번호 버퍼의 일부만. (부품에 다른 번호를 줄 때, 시작 번호와 수, 수가 None 이면 끝까지)
 	pub index_start: usize,
 	pub index_count: Option<usize>,
+	// 감기를 뒤집어 그릴지. (None 이면 모형 행렬의 행렬식이 음수일 때, 인스턴스는 None 이면 뒤집지 않음)
+	pub is_mirrored: Option<bool>,
+	// 바깥 선을 낼지. (false 면 선은 내지 않고 뒤의 선만 가린다)
+	pub has_screen_outline: bool,
+	// 꺾임 선을 낼지.
+	pub has_crease_line: bool,
 }
 
 impl Default for ToonLineDrawOptions<'_> {
 	fn default() -> Self {
-		ToonLineDrawOptions { joint_matrices: None, is_culled: true, index_start: 0, index_count: None }
+		ToonLineDrawOptions { joint_matrices: None, is_culled: true, index_start: 0, index_count: None, is_mirrored: None, has_screen_outline: true, has_crease_line: true }
 	}
 }
 
 //==============================================================================
-// 선의 판. (노멀과 번호 RGBA8 과 깊이 24, 가면 R8)
+// 선의 판. (노멀과 번호 RGBA8 과 깊이 24, 씨앗 RGBA16UI 둘, seed_index 는 넓히기를 마친 쪽)
 //==============================================================================
 pub struct ToonLineTarget {
 	pub framebuffer: GlFramebuffer,
 	pub line_texture: GlTexture,
 	pub depth_texture: GlTexture,
-	pub mask_framebuffer: GlFramebuffer,
-	pub mask_texture: GlTexture,
+	pub seed_framebuffers: [GlFramebuffer; 2],
+	pub seed_textures: [GlTexture; 2],
+	pub seed_index: usize,
 	pub width: i32,
 	pub height: i32,
 }
@@ -78,11 +87,9 @@ pub struct ToonLineTarget {
 #[derive(Clone, Copy)]
 struct LineFrame {
 	view_matrix: Matrix4,
+	projection_matrix: Matrix4,
 	frustum_planes: [[f32; 4]; 6],
-	view_direction: [f32; 3],
 	is_perspective: bool,
-	depth_range: [f32; 2],
-	projection_scale: f32,
 	viewport: [i32; 4],
 }
 
@@ -96,6 +103,7 @@ struct SavedState {
 	is_scissor_test_enabled: bool,
 	depth_mask: bool,
 	depth_function: i32,
+	front_face: i32,
 	blend_source_rgb: i32,
 	blend_destination_rgb: i32,
 	blend_source_alpha: i32,
@@ -107,9 +115,13 @@ struct SavedState {
 	framebuffer: Option<GlFramebuffer>,
 }
 
+//==============================================================================
+// 툰 화면 공간 바깥선. (머리말 참고)
+//==============================================================================
 pub struct ToonScreenOutline {
 	line_program: ShaderProgram,
-	mask_program: ShaderProgram,
+	seed_program: ShaderProgram,
+	jump_flood_program: ShaderProgram,
 	composite_program: ShaderProgram,
 	empty_vertex_array: GlVertexArray,
 	line_target: Option<ToonLineTarget>,
@@ -118,13 +130,10 @@ pub struct ToonScreenOutline {
 	width_unit: ToonOutlineWidthUnit,
 	focus_distance: f32,
 	depth_threshold: f32,
-	contact_tolerance: f32,
 	crease_cosine: f32,
-	crease_strength: f32,
-	crease_extent: f32,
+	crease_width: f32,
+	crease_opacity: f32,
 	resolution_scale: f32,
-	sample_count: u32,
-	crease_sample_count: u32,
 	is_hdr_output: bool,
 	frame: Option<LineFrame>,
 	saved_state: Option<SavedState>,
@@ -132,7 +141,7 @@ pub struct ToonScreenOutline {
 	instance_data: Vec<f32>,
 	drawn_distance_sum: f32,
 	drawn_distance_count: u32,
-	outline_radius: f32,
+	line_widths: [f32; 2],
 }
 
 //==============================================================================
@@ -168,71 +177,71 @@ fn extract_frustum_planes(matrix: &Matrix4) -> [[f32; 4]; 6] {
 }
 
 //==============================================================================
-// 투영 행렬에서 원근인지, 깊이 범위(가까운 면, 먼 면), 세로 배율. (Matrix4 의 create_perspective, create_orthographic 꼴)
+// 점프 플러딩의 걸음 목록. (씨앗을 reach 화소까지 넓히는 데 드는 걸음, 큰 것부터 반씩 줄여 1 까지)
+// - 걸음 k, k/2, ..., 1 은 씨앗을 2k - 1 화소까지 옮긴다. (Rong, Tan 2006)
 //==============================================================================
-fn read_projection(projection_matrix: &Matrix4) -> (bool, [f32; 2], f32) {
-	let elements = &projection_matrix.elements;
-	let is_perspective = elements[11].abs() > 0.5;
-	let depth_range = if is_perspective {
-		[elements[14] / (elements[10] - 1.0), elements[14] / (elements[10] + 1.0)]
+pub fn read_jump_flood_steps(reach: f32) -> Vec<i32> {
+	let distance = (reach.ceil() as i32).max(1);
+	let mut step = 1;
+	while step * 2 - 1 < distance {
+		step *= 2;
 	}
-	else {
-		let depth_span = -2.0 / elements[10];
-		let depth_center = elements[14] / elements[10];
-		[depth_center - depth_span * 0.5, depth_center + depth_span * 0.5]
-	};
-	(is_perspective, depth_range, elements[5].abs())
+	let mut steps = Vec::new();
+	while step >= 1 {
+		steps.push(step);
+		step /= 2;
+	}
+	steps
 }
 
 //==============================================================================
-// 바깥선 반지름. (선의 판 픽셀, 한 픽셀 밑으로 내리지 않음, 원근의 월드 굵기는 초점 거리에서)
+// 선 굵기 셈. ([바깥 선, 꺾임 선] 의 그리는 영역 픽셀, 0 이 아니면 한 픽셀 밑으로 내리지 않음, 원근의 월드 굵기는 초점 거리에서)
 //==============================================================================
-fn compute_outline_radius(width: f32, width_unit: ToonOutlineWidthUnit, viewport_height: i32, line_height: i32, projection_scale: f32, is_perspective: bool, focus_distance: f32) -> f32 {
-	let scale = line_height as f32 / viewport_height.max(1) as f32;
-	if width_unit == ToonOutlineWidthUnit::Pixel {
-		return (width * scale).max(1.0);
+fn compute_line_widths(widths: [f32; 2], width_unit: ToonOutlineWidthUnit, viewport_height: i32, projection_scale: f32, is_perspective: bool, focus_distance: f32) -> [f32; 2] {
+	let mut pixels_per_unit = 1.0;
+	if width_unit == ToonOutlineWidthUnit::World {
+		pixels_per_unit = viewport_height as f32 * 0.5 * projection_scale;
+		if is_perspective {
+			pixels_per_unit /= focus_distance.max(0.001);
+		}
 	}
-	let mut pixels_per_unit = viewport_height as f32 * 0.5 * projection_scale;
-	if is_perspective {
-		pixels_per_unit /= focus_distance.max(0.001);
-	}
-	(width * pixels_per_unit * scale).max(1.0)
+	let to_pixels = |width: f32| if width > 0.0 { (width * pixels_per_unit).max(1.0) } else { 0.0 };
+	[to_pixels(widths[0]), to_pixels(widths[1])]
 }
 
 impl ToonScreenOutline {
 	//==============================================================================
-	// 셰이더 소스. ((정점, 조각) 세 벌: 번호, 선 찾기, 섞기)
+	// 셰이더 소스. ((정점, 조각) 네 벌: 번호, 씨앗, 넓히기, 섞기)
 	//==============================================================================
-	pub fn read_program_sources() -> [(&'static str, &'static str); 3] {
-		[(LINE_VERTEX_SHADER, LINE_FRAGMENT_SHADER), (SCREEN_TRIANGLE_VERTEX_SHADER, LINE_MASK_FRAGMENT_SHADER), (SCREEN_TRIANGLE_VERTEX_SHADER, COMPOSITE_FRAGMENT_SHADER)]
+	pub fn read_program_sources() -> [(&'static str, &'static str); 4] {
+		[(LINE_VERTEX_SHADER, LINE_FRAGMENT_SHADER), (SCREEN_TRIANGLE_VERTEX_SHADER, SEED_FRAGMENT_SHADER), (SCREEN_TRIANGLE_VERTEX_SHADER, JUMP_FLOOD_FRAGMENT_SHADER), (SCREEN_TRIANGLE_VERTEX_SHADER, COMPOSITE_FRAGMENT_SHADER)]
 	}
 
 	//==============================================================================
-	// 생성. (세 프로그램과 빈 버텍스 어레이를 짓는다)
+	// 생성. (네 프로그램과 빈 버텍스 어레이를 짓는다, 선의 판은 첫 begin_line_ids 에서)
 	//==============================================================================
 	pub fn new(gl: &glow::Context) -> Result<ToonScreenOutline, String> {
 		let line_program = ShaderProgram::create_with_attribute_locations(gl, LINE_VERTEX_SHADER, LINE_FRAGMENT_SHADER, &TOON_ATTRIBUTE_LOCATIONS)?;
-		let mask_program = ShaderProgram::new(gl, SCREEN_TRIANGLE_VERTEX_SHADER, LINE_MASK_FRAGMENT_SHADER)?;
+		let seed_program = ShaderProgram::new(gl, SCREEN_TRIANGLE_VERTEX_SHADER, SEED_FRAGMENT_SHADER)?;
+		let jump_flood_program = ShaderProgram::new(gl, SCREEN_TRIANGLE_VERTEX_SHADER, JUMP_FLOOD_FRAGMENT_SHADER)?;
 		let composite_program = ShaderProgram::new(gl, SCREEN_TRIANGLE_VERTEX_SHADER, COMPOSITE_FRAGMENT_SHADER)?;
 		let empty_vertex_array = unsafe { gl.create_vertex_array()? };
 		Ok(ToonScreenOutline {
 			line_program,
-			mask_program,
+			seed_program,
+			jump_flood_program,
 			composite_program,
 			empty_vertex_array,
 			line_target: None,
 			color: [0.08, 0.07, 0.1, 1.0],
-			width: 1.5,
+			width: 2.0,
 			width_unit: ToonOutlineWidthUnit::Pixel,
 			focus_distance: 0.0,
 			depth_threshold: 0.05,
-			contact_tolerance: 0.01,
 			crease_cosine: (std::f32::consts::PI / 3.0).cos(),
-			crease_strength: 0.5,
-			crease_extent: 2.0,
+			crease_width: 1.0,
+			crease_opacity: 1.0,
 			resolution_scale: 1.0,
-			sample_count: TOON_SCREEN_OUTLINE_MAXIMUM_SAMPLES,
-			crease_sample_count: TOON_SCREEN_OUTLINE_MAXIMUM_CREASE_SAMPLES,
 			is_hdr_output: false,
 			frame: None,
 			saved_state: None,
@@ -240,23 +249,32 @@ impl ToonScreenOutline {
 			instance_data: Vec::new(),
 			drawn_distance_sum: 0.0,
 			drawn_distance_count: 0,
-			outline_radius: 1.0,
+			line_widths: [2.0, 1.0],
 		})
 	}
 
 	//==============================================================================
-	// 선 색 설정. (sRGB 0 ~ 1 과 알파)
+	// 선 색 설정. (sRGB 0 ~ 1 과 알파, 바깥 선과 꺾임 선이 같이 쓴다)
 	//==============================================================================
 	pub fn set_color(&mut self, color: [f32; 4]) {
 		self.color = color;
 	}
 
 	//==============================================================================
-	// 굵기 설정. (월드 길이나 픽셀, 반지름이 아니라 선 하나의 굵기)
+	// 바깥 선 굵기 설정. (실루엣과 다른 번호와 맞닿은 곳의 선, 반지름이 아니라 선 하나의 굵기, 0 이면 긋지 않음, 꺾임 선 굵기도 이 단위로 센다)
 	//==============================================================================
 	pub fn set_width(&mut self, width: f32, unit: ToonOutlineWidthUnit) {
 		self.width = width.max(0.0);
 		self.width_unit = unit;
+	}
+
+	//==============================================================================
+	// 꺾임 선 설정. (같은 번호 안에서 이웃한 면이 이 각(도)보다 더 꺾이면 선, 굵기는 set_width 의 단위, 진하기 0 ~ 1, 180 도나 굵기 0 이면 긋지 않음)
+	//==============================================================================
+	pub fn set_crease(&mut self, angle_degrees: f32, width: f32, opacity: f32) {
+		self.crease_cosine = angle_degrees.clamp(0.0, 180.0).to_radians().cos();
+		self.crease_width = width.max(0.0);
+		self.crease_opacity = opacity.clamp(0.0, 1.0);
 	}
 
 	//==============================================================================
@@ -267,35 +285,17 @@ impl ToonScreenOutline {
 	}
 
 	//==============================================================================
-	// 깊이 문턱 설정. (실루엣 깊이 차이와, 다른 번호와 맞닿은 두 면을 번호가 큰 쪽에만 긋는 깊이 차이, 월드 길이)
+	// 깊이 문턱 설정. (같은 번호의 이웃 화소가 서로의 접평면에서 이만큼 넘게 떨어지면 가려진 실루엣으로 긋는다, 월드 길이, 그 깊이의 화소 크기 두 배를 더해 쓴다)
 	//==============================================================================
-	pub fn set_depth_threshold(&mut self, depth_threshold: f32, contact_tolerance: f32) {
+	pub fn set_depth_threshold(&mut self, depth_threshold: f32) {
 		self.depth_threshold = depth_threshold.max(0.0);
-		self.contact_tolerance = contact_tolerance.max(0.0);
 	}
 
 	//==============================================================================
-	// 꺾임 선 설정. (면이 이 각(도)보다 더 꺾이면 선, 걸린 곳 하나의 진하기, 꺾인 면이 더 이어져야 할 픽셀, 180 도면 긋지 않음)
-	//==============================================================================
-	pub fn set_crease(&mut self, angle_degrees: f32, strength: f32, extent_pixels: f32) {
-		self.crease_cosine = angle_degrees.clamp(0.0, 180.0).to_radians().cos();
-		self.crease_strength = strength.max(0.0);
-		self.crease_extent = extent_pixels.max(0.0);
-	}
-
-	//==============================================================================
-	// 선의 판 해상도 몫 설정. (그리는 영역에 대한 몫 0.25 ~ 1)
+	// 선의 판 해상도 몫 설정. (그리는 영역에 대한 몫 0.25 ~ 1, 선은 그리는 영역에서 거리로 섞어 끊기지 않는다)
 	//==============================================================================
 	pub fn set_resolution_scale(&mut self, resolution_scale: f32) {
 		self.resolution_scale = resolution_scale.clamp(0.25, 1.0);
-	}
-
-	//==============================================================================
-	// 볼 이웃 수 설정. (바깥선 4 ~ 28, 꺾임 선 0 ~ 4, 가벼운 길은 4 와 2)
-	//==============================================================================
-	pub fn set_sample_count(&mut self, sample_count: u32, crease_sample_count: u32) {
-		self.sample_count = sample_count.clamp(4, TOON_SCREEN_OUTLINE_MAXIMUM_SAMPLES);
-		self.crease_sample_count = crease_sample_count.min(TOON_SCREEN_OUTLINE_MAXIMUM_CREASE_SAMPLES);
 	}
 
 	//==============================================================================
@@ -306,29 +306,29 @@ impl ToonScreenOutline {
 	}
 
 	//==============================================================================
-	// 이번 프레임의 바깥선 반지름. (선의 판 픽셀, end_line_ids 뒤에 정해짐)
+	// 이번 프레임의 선 굵기. ([바깥 선, 꺾임 선] 의 그리는 영역 픽셀, end_line_ids 뒤에 정해짐, 긋지 않으면 0)
 	//==============================================================================
-	pub fn get_outline_radius(&self) -> f32 {
-		self.outline_radius
+	pub fn get_line_widths(&self) -> [f32; 2] {
+		self.line_widths
 	}
 
 	//==============================================================================
-	// 선의 판 반환. (없으면 None, 번호와 깊이와 가면 텍스처, 크기)
+	// 선의 판 반환. (없으면 None, 번호와 깊이와 씨앗 텍스처, 크기)
 	//==============================================================================
 	pub fn get_line_target(&self) -> Option<&ToonLineTarget> {
 		self.line_target.as_ref()
 	}
 
 	//==============================================================================
-	// 바깥선 반지름 셈. (선의 판 픽셀, 한 픽셀 밑으로 내리지 않음, 번호를 그리는 프레임이나 선의 판이 없으면 1)
+	// 선 굵기 셈. ([바깥 선, 꺾임 선] 의 그리는 영역 픽셀, 번호를 그리는 프레임이 없으면 지금 값)
 	//==============================================================================
-	pub fn read_outline_radius(&self) -> f32 {
-		let (frame, line_target) = match (self.frame.as_ref(), self.line_target.as_ref()) {
-			(Some(frame), Some(line_target)) => {
-				(frame, line_target)
+	pub fn read_line_widths(&self) -> [f32; 2] {
+		let frame = match self.frame.as_ref() {
+			Some(frame) => {
+				frame
 			}
-			_ => {
-				return 1.0;
+			None => {
+				return self.line_widths;
 			}
 		};
 		let average_distance = if self.drawn_distance_count > 0 {
@@ -343,7 +343,7 @@ impl ToonScreenOutline {
 		else {
 			average_distance
 		};
-		compute_outline_radius(self.width, self.width_unit, frame.viewport[3], line_target.height, frame.projection_scale, frame.is_perspective, focus_distance)
+		compute_line_widths([self.width, self.crease_width], self.width_unit, frame.viewport[3], frame.projection_matrix.elements[5].abs(), frame.is_perspective, focus_distance)
 	}
 
 	//==============================================================================
@@ -356,17 +356,11 @@ impl ToonScreenOutline {
 		}
 		let mut view_projection_matrix = *projection_matrix;
 		view_projection_matrix.multiply(view_matrix);
-		let (is_perspective, depth_range, projection_scale) = read_projection(projection_matrix);
-		let view_elements = &view_matrix.elements;
-		let view_direction = [-view_elements[2], -view_elements[6], -view_elements[10]];
-		let view_direction_length = (view_direction[0] * view_direction[0] + view_direction[1] * view_direction[1] + view_direction[2] * view_direction[2]).sqrt().max(0.000001);
 		self.frame = Some(LineFrame {
 			view_matrix: *view_matrix,
+			projection_matrix: *projection_matrix,
 			frustum_planes: extract_frustum_planes(&view_projection_matrix),
-			view_direction: [view_direction[0] / view_direction_length, view_direction[1] / view_direction_length, view_direction[2] / view_direction_length],
-			is_perspective,
-			depth_range,
-			projection_scale,
+			is_perspective: projection_matrix.elements[11].abs() > 0.5,
 			viewport,
 		});
 		self.drawn_distance_sum = 0.0;
@@ -403,7 +397,7 @@ impl ToonScreenOutline {
 	}
 
 	//==============================================================================
-	// 모형 하나의 번호 그리기. (ToonRenderer::draw_mesh 와 같은 행렬과 자세, 번호 1 ~ 65535, 화면 밖이면 건너뛴다)
+	// 모형 하나의 번호 그리기. (ToonRenderer::draw_mesh 와 같은 행렬과 자세, 번호 1 ~ TOON_SCREEN_OUTLINE_MAXIMUM_LINE_ID, 같은 번호끼리 맞닿은 곳은 긋지 않음, 화면 밖이면 건너뛴다)
 	//==============================================================================
 	pub fn draw_mesh(&mut self, gl: &glow::Context, mesh: &ToonMesh, model_matrix: &Matrix4, line_id: u32, options: ToonLineDrawOptions) {
 		if !self.is_drawing_line_ids {
@@ -413,11 +407,12 @@ impl ToonScreenOutline {
 			return;
 		}
 		self.add_drawn_distance(mesh, model_matrix);
-		self.draw_with_count(gl, mesh, model_matrix, 0, line_id, false, options);
+		let is_mirrored = options.is_mirrored.unwrap_or_else(|| read_matrix_determinant(model_matrix) < 0.0);
+		self.draw_with_count(gl, mesh, model_matrix, 0, line_id, false, is_mirrored, options);
 	}
 
 	//==============================================================================
-	// 같은 모형 여럿의 번호를 한 번에 그리기. (인스턴스에 line_id 가 있으면 그 번호, 없으면 공통 번호)
+	// 같은 모형 여럿의 번호를 한 번에 그리기. (인스턴스에 line_id 가 있으면 그 번호, 없으면 공통 번호, 꼴은 모든 인스턴스에 같다)
 	//==============================================================================
 	pub fn draw_mesh_instanced(&mut self, gl: &glow::Context, mesh: &ToonMesh, instance_list: &[ToonInstance], line_id: u32, options: ToonLineDrawOptions) {
 		if !self.is_drawing_line_ids {
@@ -442,7 +437,7 @@ impl ToonScreenOutline {
 				gl.bind_buffer(glow::ARRAY_BUFFER, Some(mesh.get_instance_buffer()));
 				gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, float_slice_to_bytes(&instance_data), glow::DYNAMIC_DRAW);
 			}
-			self.draw_with_count(gl, mesh, &Matrix4::create_identity(), instance_count as i32, line_id, true, options);
+			self.draw_with_count(gl, mesh, &Matrix4::create_identity(), instance_count as i32, line_id, true, options.is_mirrored == Some(true), options);
 		}
 		self.instance_data = instance_data;
 	}
@@ -450,25 +445,31 @@ impl ToonScreenOutline {
 	//==============================================================================
 	// 번호 그리기 본체. (instance_count 가 0 이면 보통 그리기)
 	//==============================================================================
-	fn draw_with_count(&self, gl: &glow::Context, mesh: &ToonMesh, model_matrix: &Matrix4, instance_count: i32, line_id: u32, is_instance_line_id: bool, options: ToonLineDrawOptions) {
+	#[allow(clippy::too_many_arguments)]
+	fn draw_with_count(&self, gl: &glow::Context, mesh: &ToonMesh, model_matrix: &Matrix4, instance_count: i32, line_id: u32, is_instance_line_id: bool, is_mirrored: bool, options: ToonLineDrawOptions) {
 		let line_program = &self.line_program;
 		let is_skinned = mesh.is_skinned() && options.joint_matrices.is_some();
 		let (body_vertex_array, body_index_count) = mesh.get_body();
 		let index_start = options.index_start.min(body_index_count as usize);
 		let remaining_count = body_index_count as usize - index_start;
 		let index_count = options.index_count.unwrap_or(remaining_count).min(remaining_count);
-		if index_count == 0 {
-			return;
-		}
+		let line_flags = if options.has_crease_line { 1.0 } else { 0.0 } + if options.has_screen_outline { 2.0 } else { 0.0 };
 		unsafe {
 			gl.uniform_matrix_4_f32_slice(line_program.get_uniform_location(gl, "modelMatrix").as_ref(), false, &model_matrix.elements);
 			gl.uniform_1_f32(line_program.get_uniform_location(gl, "instanced").as_ref(), if instance_count > 0 { 1.0 } else { 0.0 });
 			gl.uniform_1_f32(line_program.get_uniform_location(gl, "instanceLineIds").as_ref(), if is_instance_line_id { 1.0 } else { 0.0 });
 			gl.uniform_1_f32(line_program.get_uniform_location(gl, "skinned").as_ref(), if is_skinned { 1.0 } else { 0.0 });
-			gl.uniform_1_f32(line_program.get_uniform_location(gl, "lineId").as_ref(), line_id as f32);
+			gl.uniform_1_f32(line_program.get_uniform_location(gl, "lineId").as_ref(), line_id.min(TOON_SCREEN_OUTLINE_MAXIMUM_LINE_ID) as f32);
+			gl.uniform_1_f32(line_program.get_uniform_location(gl, "lineFlags").as_ref(), line_flags);
 			if let (true, Some(joint_matrices)) = (is_skinned, options.joint_matrices) {
 				let joint_float_count = joint_matrices.len().min(TOON_MAXIMUM_JOINTS * 16) / 16 * 16;
 				gl.uniform_matrix_4_f32_slice(line_program.get_uniform_location(gl, "jointMatrices").as_ref(), false, &joint_matrices[..joint_float_count]);
+			}
+			if index_count == 0 {
+				return;
+			}
+			if is_mirrored {
+				gl.front_face(glow::CW);
 			}
 			gl.bind_vertex_array(Some(body_vertex_array));
 			let byte_offset = (index_start * 4) as i32;
@@ -478,18 +479,23 @@ impl ToonScreenOutline {
 			else {
 				gl.draw_elements(glow::TRIANGLES, index_count as i32, glow::UNSIGNED_INT, byte_offset);
 			}
+			if is_mirrored {
+				gl.front_face(glow::CCW);
+			}
 		}
 	}
 
 	//==============================================================================
-	// 번호 그리기 끝. (선 찾기로 가면을 쓰고, 프레임버퍼와 뷰포트와 상태를 돌린다)
+	// 번호 그리기 끝. (씨앗을 고르고 점프 플러딩으로 넓힌 뒤, 프레임버퍼와 뷰포트와 상태를 돌린다)
 	//==============================================================================
 	pub fn end_line_ids(&mut self, gl: &glow::Context) {
 		if !self.is_drawing_line_ids {
 			return;
 		}
 		self.is_drawing_line_ids = false;
-		let (frame, line_target) = match (self.frame, self.line_target.as_ref()) {
+		let line_widths = self.read_line_widths();
+		self.line_widths = line_widths;
+		let (frame, line_target) = match (self.frame, self.line_target.as_mut()) {
 			(Some(frame), Some(line_target)) => {
 				(frame, line_target)
 			}
@@ -498,57 +504,68 @@ impl ToonScreenOutline {
 				return;
 			}
 		};
-		let outline_radius = self.read_outline_radius();
-		let mask_program = &self.mask_program;
+		let seed_program = &self.seed_program;
+		let jump_flood_program = &self.jump_flood_program;
+		let projection = &frame.projection_matrix.elements;
+		let view = &frame.view_matrix.elements;
+		let mut seed_index = 0usize;
 		unsafe {
-			gl.bind_vertex_array(None);
-			gl.bind_framebuffer(glow::FRAMEBUFFER, Some(line_target.mask_framebuffer));
+			gl.bind_vertex_array(Some(self.empty_vertex_array));
 			gl.viewport(0, 0, line_target.width, line_target.height);
 			gl.disable(glow::DEPTH_TEST);
 			gl.depth_mask(false);
 			gl.disable(glow::CULL_FACE);
 			gl.disable(glow::BLEND);
-			mask_program.use_program(gl);
+
+			// 1. 씨앗 고르기.
+			gl.bind_framebuffer(glow::FRAMEBUFFER, Some(line_target.seed_framebuffers[0]));
+			seed_program.use_program(gl);
 			gl.active_texture(glow::TEXTURE0 + LINE_TEXTURE_UNIT);
 			gl.bind_texture(glow::TEXTURE_2D, Some(line_target.line_texture));
 			gl.active_texture(glow::TEXTURE0 + DEPTH_TEXTURE_UNIT);
 			gl.bind_texture(glow::TEXTURE_2D, Some(line_target.depth_texture));
-			gl.active_texture(glow::TEXTURE0);
-			let location = |name: &str| mask_program.get_uniform_location(gl, name);
+			let location = |name: &str| seed_program.get_uniform_location(gl, name);
 			gl.uniform_1_i32(location("lineTexture").as_ref(), LINE_TEXTURE_UNIT as i32);
 			gl.uniform_1_i32(location("depthTexture").as_ref(), DEPTH_TEXTURE_UNIT as i32);
-			gl.uniform_1_f32(location("outlineRadius").as_ref(), outline_radius);
-			gl.uniform_1_f32(location("creaseRadius").as_ref(), (outline_radius * 0.5).max(1.0));
-			gl.uniform_1_f32(location("creaseStrength").as_ref(), self.crease_strength);
-			gl.uniform_1_f32(location("creaseCosine").as_ref(), self.crease_cosine);
-			gl.uniform_1_f32(location("creaseExtent").as_ref(), self.crease_extent);
-			gl.uniform_1_f32(location("depthThreshold").as_ref(), self.depth_threshold);
-			gl.uniform_1_f32(location("contactTolerance").as_ref(), self.contact_tolerance);
+			gl.uniform_matrix_3_f32_slice(location("viewRotation").as_ref(), false, &[view[0], view[1], view[2], view[4], view[5], view[6], view[8], view[9], view[10]]);
+			gl.uniform_4_f32(location("projectionScale").as_ref(), projection[0], projection[5], projection[8], projection[9]);
+			gl.uniform_4_f32(location("projectionDepth").as_ref(), projection[10], projection[14], projection[12], projection[13]);
 			gl.uniform_1_f32(location("isPerspective").as_ref(), if frame.is_perspective { 1.0 } else { 0.0 });
-			gl.uniform_2_f32(location("depthRange").as_ref(), frame.depth_range[0], frame.depth_range[1]);
-			gl.uniform_1_i32(location("sampleCount").as_ref(), self.sample_count as i32);
-			gl.uniform_1_i32(location("creaseCount").as_ref(), self.crease_sample_count as i32);
-			gl.uniform_3_f32(location("viewDirection").as_ref(), frame.view_direction[0], frame.view_direction[1], frame.view_direction[2]);
-			gl.bind_vertex_array(Some(self.empty_vertex_array));
+			gl.uniform_1_f32(location("depthThreshold").as_ref(), self.depth_threshold);
+			gl.uniform_1_f32(location("creaseCosine").as_ref(), if line_widths[1] > 0.0 { self.crease_cosine } else { -2.0 });
 			gl.draw_arrays(glow::TRIANGLES, 0, 3);
-			gl.bind_vertex_array(None);
-			gl.active_texture(glow::TEXTURE0 + LINE_TEXTURE_UNIT);
-			gl.bind_texture(glow::TEXTURE_2D, None);
 			gl.active_texture(glow::TEXTURE0 + DEPTH_TEXTURE_UNIT);
 			gl.bind_texture(glow::TEXTURE_2D, None);
+
+			// 2. 점프 플러딩. (그리는 영역 굵기의 반과 덮는 몫의 반 픽셀, 섞을 때 보는 2x2 칸만큼)
+			jump_flood_program.use_program(gl);
+			gl.uniform_1_i32(jump_flood_program.get_uniform_location(gl, "seedTexture").as_ref(), LINE_TEXTURE_UNIT as i32);
+			let line_scale = line_target.height as f32 / frame.viewport[3].max(1) as f32;
+			let reach = (line_widths[0].max(line_widths[1]) * 0.5 + 0.5) * line_scale + 1.0;
+			for step_size in read_jump_flood_steps(reach) {
+				gl.bind_framebuffer(glow::FRAMEBUFFER, Some(line_target.seed_framebuffers[1 - seed_index]));
+				gl.active_texture(glow::TEXTURE0 + LINE_TEXTURE_UNIT);
+				gl.bind_texture(glow::TEXTURE_2D, Some(line_target.seed_textures[seed_index]));
+				gl.uniform_1_i32(jump_flood_program.get_uniform_location(gl, "stepSize").as_ref(), step_size);
+				gl.draw_arrays(glow::TRIANGLES, 0, 3);
+				seed_index = 1 - seed_index;
+			}
+			gl.active_texture(glow::TEXTURE0 + LINE_TEXTURE_UNIT);
+			gl.bind_texture(glow::TEXTURE_2D, None);
 			gl.active_texture(glow::TEXTURE0);
+			gl.bind_vertex_array(None);
 		}
-		self.outline_radius = outline_radius;
+		line_target.seed_index = seed_index;
 		self.restore_state(gl);
 	}
 
 	//==============================================================================
-	// 바깥선 긋기. (가면을 begin_line_ids 때의 그리는 영역에 섞는다, 깊이는 보지도 쓰지도 않는다, 스텐실은 그대로)
+	// 바깥선 긋기. (넓힌 씨앗 판으로 begin_line_ids 때의 그리는 영역에 섞는다, 깊이는 보지도 쓰지도 않는다, 스텐실은 그대로)
 	//==============================================================================
 	pub fn draw_outline(&mut self, gl: &glow::Context) {
-		let (frame, mask_texture) = match (self.frame, self.line_target.as_ref()) {
+		let (frame, seed_texture) = match (self.frame, self.line_target.as_ref()) {
 			(Some(frame), Some(line_target)) => {
-				(frame, line_target.mask_texture)
+				(frame, line_target.seed_textures[line_target.seed_index])
 			}
 			_ => {
 				return;
@@ -558,7 +575,9 @@ impl ToonScreenOutline {
 		let composite_program = &self.composite_program;
 		let viewport = frame.viewport;
 		let color = self.color;
+		let line_widths = self.line_widths;
 		unsafe {
+			gl.viewport(viewport[0], viewport[1], viewport[2], viewport[3]);
 			gl.disable(glow::DEPTH_TEST);
 			gl.depth_mask(false);
 			gl.disable(glow::CULL_FACE);
@@ -566,12 +585,15 @@ impl ToonScreenOutline {
 			gl.blend_func(glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
 			composite_program.use_program(gl);
 			gl.active_texture(glow::TEXTURE0 + LINE_TEXTURE_UNIT);
-			gl.bind_texture(glow::TEXTURE_2D, Some(mask_texture));
+			gl.bind_texture(glow::TEXTURE_2D, Some(seed_texture));
 			gl.active_texture(glow::TEXTURE0);
-			gl.uniform_1_i32(composite_program.get_uniform_location(gl, "maskTexture").as_ref(), LINE_TEXTURE_UNIT as i32);
-			gl.uniform_4_f32(composite_program.get_uniform_location(gl, "viewportRect").as_ref(), viewport[0] as f32, viewport[1] as f32, viewport[2].max(1) as f32, viewport[3].max(1) as f32);
-			gl.uniform_4_f32(composite_program.get_uniform_location(gl, "outlineColor").as_ref(), color[0], color[1], color[2], color[3]);
-			gl.uniform_1_f32(composite_program.get_uniform_location(gl, "hdrOutput").as_ref(), if self.is_hdr_output { 1.0 } else { 0.0 });
+			let location = |name: &str| composite_program.get_uniform_location(gl, name);
+			gl.uniform_1_i32(location("seedTexture").as_ref(), LINE_TEXTURE_UNIT as i32);
+			gl.uniform_4_f32(location("viewportRect").as_ref(), viewport[0] as f32, viewport[1] as f32, viewport[2].max(1) as f32, viewport[3].max(1) as f32);
+			gl.uniform_2_f32(location("lineWidths").as_ref(), line_widths[0], line_widths[1]);
+			gl.uniform_1_f32(location("creaseOpacity").as_ref(), self.crease_opacity);
+			gl.uniform_4_f32(location("outlineColor").as_ref(), color[0], color[1], color[2], color[3]);
+			gl.uniform_1_f32(location("hdrOutput").as_ref(), if self.is_hdr_output { 1.0 } else { 0.0 });
 			gl.bind_vertex_array(Some(self.empty_vertex_array));
 			gl.draw_arrays(glow::TRIANGLES, 0, 3);
 			gl.bind_vertex_array(None);
@@ -638,38 +660,41 @@ impl ToonScreenOutline {
 	}
 
 	//==============================================================================
-	// 선의 판 짓기. (노멀과 번호 RGBA8 과 깊이 24, 가면 R8, 앞의 프레임버퍼와 텍스처는 돌린다)
+	// 선의 판 짓기. (노멀과 번호 RGBA8 과 깊이 24, 씨앗 RGBA16UI 둘, 앞의 프레임버퍼와 텍스처는 돌린다)
 	//==============================================================================
 	fn create_line_target(gl: &glow::Context, width: i32, height: i32) -> Option<ToonLineTarget> {
 		unsafe {
 			let previous_framebuffer = crate::graphics3d::read_framebuffer_binding(gl);
 			let previous_texture = crate::graphics3d::read_texture_binding(gl);
-			let create_texture = |internal_format: u32, format: u32, data_type: u32, filter: u32| -> Option<GlTexture> {
+			let create_texture = |internal_format: u32, format: u32, data_type: u32| -> Option<GlTexture> {
 				let texture = gl.create_texture().ok()?;
 				gl.bind_texture(glow::TEXTURE_2D, Some(texture));
 				gl.tex_image_2d(glow::TEXTURE_2D, 0, internal_format as i32, width, height, 0, format, data_type, glow::PixelUnpackData::Slice(None));
-				gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, filter as i32);
-				gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, filter as i32);
+				gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
+				gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
 				gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
 				gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
 				Some(texture)
 			};
-			let line_texture = create_texture(glow::RGBA8, glow::RGBA, glow::UNSIGNED_BYTE, glow::NEAREST)?;
-			let depth_texture = create_texture(glow::DEPTH_COMPONENT24, glow::DEPTH_COMPONENT, glow::UNSIGNED_INT, glow::NEAREST)?;
-			let mask_texture = create_texture(glow::R8, glow::RED, glow::UNSIGNED_BYTE, glow::LINEAR)?;
+			let line_texture = create_texture(glow::RGBA8, glow::RGBA, glow::UNSIGNED_BYTE)?;
+			let depth_texture = create_texture(glow::DEPTH_COMPONENT24, glow::DEPTH_COMPONENT, glow::UNSIGNED_INT)?;
+			let seed_textures = [create_texture(glow::RGBA16UI, glow::RGBA_INTEGER, glow::UNSIGNED_SHORT)?, create_texture(glow::RGBA16UI, glow::RGBA_INTEGER, glow::UNSIGNED_SHORT)?];
 			gl.bind_texture(glow::TEXTURE_2D, previous_texture);
-			let framebuffer = gl.create_framebuffer().ok()?;
-			gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
-			gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(line_texture), 0);
-			gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::DEPTH_ATTACHMENT, glow::TEXTURE_2D, Some(depth_texture), 0);
-			let status = gl.check_framebuffer_status(glow::FRAMEBUFFER);
-			let mask_framebuffer = gl.create_framebuffer().ok()?;
-			gl.bind_framebuffer(glow::FRAMEBUFFER, Some(mask_framebuffer));
-			gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(mask_texture), 0);
-			let mask_status = gl.check_framebuffer_status(glow::FRAMEBUFFER);
+			let create_framebuffer = |color_texture: GlTexture, depth_texture: Option<GlTexture>| -> Option<(GlFramebuffer, bool)> {
+				let framebuffer = gl.create_framebuffer().ok()?;
+				gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
+				gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(color_texture), 0);
+				if depth_texture.is_some() {
+					gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::DEPTH_ATTACHMENT, glow::TEXTURE_2D, depth_texture, 0);
+				}
+				Some((framebuffer, gl.check_framebuffer_status(glow::FRAMEBUFFER) == glow::FRAMEBUFFER_COMPLETE))
+			};
+			let (framebuffer, is_line_complete) = create_framebuffer(line_texture, Some(depth_texture))?;
+			let (first_seed_framebuffer, is_first_complete) = create_framebuffer(seed_textures[0], None)?;
+			let (second_seed_framebuffer, is_second_complete) = create_framebuffer(seed_textures[1], None)?;
 			gl.bind_framebuffer(glow::FRAMEBUFFER, previous_framebuffer);
-			let line_target = ToonLineTarget { framebuffer, line_texture, depth_texture, mask_framebuffer, mask_texture, width, height };
-			if status != glow::FRAMEBUFFER_COMPLETE || mask_status != glow::FRAMEBUFFER_COMPLETE {
+			let line_target = ToonLineTarget { framebuffer, line_texture, depth_texture, seed_framebuffers: [first_seed_framebuffer, second_seed_framebuffer], seed_textures, seed_index: 0, width, height };
+			if !is_line_complete || !is_first_complete || !is_second_complete {
 				ToonScreenOutline::delete_target_objects(gl, &line_target);
 				return None;
 			}
@@ -686,13 +711,20 @@ impl ToonScreenOutline {
 		}
 	}
 
+	//==============================================================================
+	// 선의 판의 GL 객체 지우기.
+	//==============================================================================
 	fn delete_target_objects(gl: &glow::Context, line_target: &ToonLineTarget) {
 		unsafe {
 			gl.delete_framebuffer(line_target.framebuffer);
-			gl.delete_framebuffer(line_target.mask_framebuffer);
+			for seed_framebuffer in line_target.seed_framebuffers {
+				gl.delete_framebuffer(seed_framebuffer);
+			}
 			gl.delete_texture(line_target.line_texture);
 			gl.delete_texture(line_target.depth_texture);
-			gl.delete_texture(line_target.mask_texture);
+			for seed_texture in line_target.seed_textures {
+				gl.delete_texture(seed_texture);
+			}
 		}
 	}
 
@@ -712,6 +744,7 @@ impl ToonScreenOutline {
 				is_scissor_test_enabled: gl.is_enabled(glow::SCISSOR_TEST),
 				depth_mask: gl.get_parameter_bool(glow::DEPTH_WRITEMASK),
 				depth_function: gl.get_parameter_i32(glow::DEPTH_FUNC),
+				front_face: gl.get_parameter_i32(glow::FRONT_FACE),
 				blend_source_rgb: gl.get_parameter_i32(glow::BLEND_SRC_RGB),
 				blend_destination_rgb: gl.get_parameter_i32(glow::BLEND_DST_RGB),
 				blend_source_alpha: gl.get_parameter_i32(glow::BLEND_SRC_ALPHA),
@@ -745,6 +778,7 @@ impl ToonScreenOutline {
 			gl.use_program(saved_state.program);
 			gl.depth_mask(saved_state.depth_mask);
 			gl.depth_func(saved_state.depth_function as u32);
+			gl.front_face(saved_state.front_face as u32);
 			gl.cull_face(glow::BACK);
 			gl.blend_func_separate(saved_state.blend_source_rgb as u32, saved_state.blend_destination_rgb as u32, saved_state.blend_source_alpha as u32, saved_state.blend_destination_alpha as u32);
 			for (capability, is_enabled) in [(glow::BLEND, saved_state.is_blend_enabled), (glow::DEPTH_TEST, saved_state.is_depth_test_enabled), (glow::CULL_FACE, saved_state.is_cull_face_enabled), (glow::SCISSOR_TEST, saved_state.is_scissor_test_enabled)] {
@@ -759,14 +793,15 @@ impl ToonScreenOutline {
 	}
 
 	//==============================================================================
-	// 다 쓴 뒤 지우기.
+	// 다 쓴 뒤 지우기. (선의 판, 버텍스 어레이, 프로그램 넷)
 	//==============================================================================
 	pub fn destroy(&mut self, gl: &glow::Context) {
 		self.delete_line_target(gl);
 		unsafe {
 			gl.delete_vertex_array(self.empty_vertex_array);
 			gl.delete_program(self.line_program.get_program());
-			gl.delete_program(self.mask_program.get_program());
+			gl.delete_program(self.seed_program.get_program());
+			gl.delete_program(self.jump_flood_program.get_program());
 			gl.delete_program(self.composite_program.get_program());
 		}
 	}
@@ -777,31 +812,40 @@ mod tests {
 	use super::*;
 
 	#[test]
-	fn projection_reads_depth_range_for_both_kinds() {
-		let (is_perspective, depth_range, projection_scale) = read_projection(&Matrix4::create_perspective(0.8, 1.5, 0.1, 3000.0));
-		assert!(is_perspective);
-		assert!((depth_range[0] - 0.1).abs() < 0.001);
-		assert!((depth_range[1] / 3000.0 - 1.0).abs() < 0.01);
-		assert!((projection_scale - 1.0 / 0.4f32.tan()).abs() < 0.0001);
-		let (is_perspective, depth_range, projection_scale) = read_projection(&Matrix4::create_orthographic(-4.0, 4.0, -2.0, 2.0, -400.0, 400.0));
-		assert!(!is_perspective);
-		assert!((depth_range[0] + 400.0).abs() < 0.01);
-		assert!((depth_range[1] - 400.0).abs() < 0.01);
-		assert!((projection_scale - 0.5).abs() < 0.0001);
+	fn jump_flood_steps_cover_reach() {
+		assert_eq!(read_jump_flood_steps(0.5), vec![1]);
+		assert_eq!(read_jump_flood_steps(1.0), vec![1]);
+		assert_eq!(read_jump_flood_steps(2.0), vec![2, 1]);
+		assert_eq!(read_jump_flood_steps(4.0), vec![4, 2, 1]);
+		assert_eq!(read_jump_flood_steps(10.0), vec![8, 4, 2, 1]);
+		for reach in 1..200 {
+			let steps = read_jump_flood_steps(reach as f32);
+			let covered: i32 = steps.iter().sum();
+			assert!(covered >= reach);
+		}
 	}
 
 	#[test]
-	fn outline_radius_follows_unit_and_minimum() {
-		assert_eq!(compute_outline_radius(3.0, ToonOutlineWidthUnit::Pixel, 720, 360, 1.0, false, 0.0), 1.5);
-		assert_eq!(compute_outline_radius(0.5, ToonOutlineWidthUnit::Pixel, 720, 360, 1.0, false, 0.0), 1.0);
-		let orthographic_radius = compute_outline_radius(0.03, ToonOutlineWidthUnit::World, 720, 720, 2.0 / 8.1, false, 0.0);
-		assert!((orthographic_radius - 0.03 * 360.0 * 2.0 / 8.1).abs() < 0.001);
-		let near_radius = compute_outline_radius(0.022, ToonOutlineWidthUnit::World, 720, 720, 2.0, true, 2.0);
-		let far_radius = compute_outline_radius(0.022, ToonOutlineWidthUnit::World, 720, 720, 2.0, true, 4.0);
-		assert!((near_radius - far_radius * 2.0).abs() < 0.001);
+	fn line_widths_follow_unit_and_minimum() {
+		assert_eq!(compute_line_widths([3.0, 1.0], ToonOutlineWidthUnit::Pixel, 720, 1.0, false, 0.0), [3.0, 1.0]);
+		assert_eq!(compute_line_widths([0.5, 0.0], ToonOutlineWidthUnit::Pixel, 720, 1.0, false, 0.0), [1.0, 0.0]);
+		let orthographic_widths = compute_line_widths([0.03, 0.01], ToonOutlineWidthUnit::World, 720, 2.0 / 8.1, false, 0.0);
+		assert!((orthographic_widths[0] - 0.03 * 360.0 * 2.0 / 8.1).abs() < 0.001);
+		let near_widths = compute_line_widths([0.022, 0.0], ToonOutlineWidthUnit::World, 720, 2.0, true, 2.0);
+		let far_widths = compute_line_widths([0.022, 0.0], ToonOutlineWidthUnit::World, 720, 2.0, true, 4.0);
+		assert!((near_widths[0] - far_widths[0] * 2.0).abs() < 0.001);
+	}
+
+	#[test]
+	fn shaders_match_original_layout() {
+		assert!(LINE_FRAGMENT_SHADER.contains("lineFlags * 64.0"));
+		assert!(SEED_FRAGMENT_SHADER.contains("out uvec4 fragmentSeed"));
+		assert!(JUMP_FLOOD_FRAGMENT_SHADER.contains("uniform int stepSize"));
+		assert!(COMPOSITE_FRAGMENT_SHADER.contains("lineWidths.x * 0.5 - contourDistance + 0.5"));
 	}
 }
 
+// @shaders-begin
 const LINE_VERTEX_SHADER: &str = "#version 300 es
 in vec3 vertexPosition;
 in vec3 vertexNormal;
@@ -840,6 +884,7 @@ const LINE_FRAGMENT_SHADER: &str = "#version 300 es
 precision highp float;
 in vec3 worldNormal;
 flat in float surfaceLineId;
+uniform float lineFlags;
 out vec4 fragmentLine;
 vec2 wrapOctahedron(vec2 value) {
 	return (1.0 - abs(value.yx)) * vec2(value.x >= 0.0 ? 1.0 : -1.0, value.y >= 0.0 ? 1.0 : -1.0);
@@ -849,8 +894,8 @@ void main() {
 	normal /= abs(normal.x) + abs(normal.y) + abs(normal.z);
 	vec2 folded = normal.y >= 0.0 ? normal.xz : wrapOctahedron(normal.xz);
 	float lowPart = mod(surfaceLineId, 256.0);
-	float highPart = floor(surfaceLineId / 256.0);
-	fragmentLine = vec4(folded * 0.5 + 0.5, lowPart / 255.0, highPart / 255.0);
+	float highPart = mod(floor(surfaceLineId / 256.0), 64.0);
+	fragmentLine = vec4(folded * 0.5 + 0.5, lowPart / 255.0, (highPart + lineFlags * 64.0) / 255.0);
 }
 ";
 
@@ -861,140 +906,209 @@ void main() {
 }
 ";
 
-const LINE_MASK_FRAGMENT_SHADER: &str = "#version 300 es
+const SEED_FRAGMENT_SHADER: &str = "#version 300 es
 precision highp float;
+precision highp int;
 uniform highp sampler2D lineTexture;
 uniform highp sampler2D depthTexture;
-uniform float outlineRadius;
-uniform float creaseRadius;
-uniform float creaseStrength;
-uniform float creaseCosine;
-uniform float creaseExtent;
-uniform float depthThreshold;
-uniform float contactTolerance;
+uniform mat3 viewRotation;
+uniform vec4 projectionScale;
+uniform vec4 projectionDepth;
 uniform float isPerspective;
-uniform vec2 depthRange;
-uniform int sampleCount;
-uniform int creaseCount;
-uniform vec3 viewDirection;
-out vec4 fragmentMask;
-const float FACING_MINIMUM = 0.25;
-const float INNER_STRENGTH = 0.5;
-const vec2 DIRECTIONS[4] = vec2[4](vec2(1.0, 0.0), vec2(-1.0, 0.0), vec2(0.0, 1.0), vec2(0.0, -1.0));
-const ivec2 OFFSETS[28] = ivec2[28](ivec2(1, 0), ivec2(-1, 0), ivec2(0, 1), ivec2(0, -1), ivec2(1, 1), ivec2(-1, 1), ivec2(1, -1), ivec2(-1, -1), ivec2(2, 0), ivec2(-2, 0), ivec2(0, 2), ivec2(0, -2), ivec2(2, 1), ivec2(-2, 1), ivec2(2, -1), ivec2(-2, -1), ivec2(1, 2), ivec2(-1, 2), ivec2(1, -2), ivec2(-1, -2), ivec2(2, 2), ivec2(-2, 2), ivec2(2, -2), ivec2(-2, -2), ivec2(3, 0), ivec2(-3, 0), ivec2(0, 3), ivec2(0, -3));
-const float OFFSET_DISTANCES[28] = float[28](1.0000, 1.0000, 1.0000, 1.0000, 1.4142, 1.4142, 1.4142, 1.4142, 2.0000, 2.0000, 2.0000, 2.0000, 2.2361, 2.2361, 2.2361, 2.2361, 2.2361, 2.2361, 2.2361, 2.2361, 2.8284, 2.8284, 2.8284, 2.8284, 3.0000, 3.0000, 3.0000, 3.0000);
-float readLineId(vec4 value) {
-	return floor(value.b * 255.0 + 0.5) + floor(value.a * 255.0 + 0.5) * 256.0;
-}
-vec3 readNormal(vec4 value) {
-	vec2 folded = value.rg * 2.0 - 1.0;
+uniform float depthThreshold;
+uniform float creaseCosine;
+out uvec4 fragmentSeed;
+const uint NO_SEED = 65535u;
+const ivec2 SIDES[4] = ivec2[4](ivec2(1, 0), ivec2(-1, 0), ivec2(0, 1), ivec2(0, -1));
+struct LinePixel {
+	float id;
+	float flags;
+	vec3 normal;
+	vec3 position;
+	float footprint;
+};
+vec3 readNormal(vec2 encoded) {
+	vec2 folded = encoded * 2.0 - 1.0;
 	vec3 normal = vec3(folded.x, 1.0 - abs(folded.x) - abs(folded.y), folded.y);
 	float fold = max(-normal.y, 0.0);
 	normal.x += normal.x >= 0.0 ? -fold : fold;
 	normal.z += normal.z >= 0.0 ? -fold : fold;
 	return normalize(normal);
 }
-float readDistance(ivec2 pixel) {
-	float depth = texelFetch(depthTexture, pixel, 0).r;
-	if (isPerspective < 0.5) {
-		return depth * (depthRange.y - depthRange.x);
+LinePixel readPixel(ivec2 pixel, vec2 size) {
+	vec4 value = texelFetch(lineTexture, pixel, 0);
+	float highPart = floor(value.a * 255.0 + 0.5);
+	LinePixel result;
+	result.id = floor(value.b * 255.0 + 0.5) + mod(highPart, 64.0) * 256.0;
+	result.flags = floor(highPart / 64.0);
+	result.normal = normalize(viewRotation * readNormal(value.rg));
+	float clipDepth = texelFetch(depthTexture, pixel, 0).r * 2.0 - 1.0;
+	vec2 clipPoint = (vec2(pixel) + 0.5) / size * 2.0 - 1.0;
+	if (isPerspective > 0.5) {
+		float viewZ = -projectionDepth.y / (clipDepth + projectionDepth.x);
+		result.position = vec3(-viewZ * (clipPoint.x + projectionScale.z) / projectionScale.x, -viewZ * (clipPoint.y + projectionScale.w) / projectionScale.y, viewZ);
+		result.footprint = -viewZ * 2.0 / (projectionScale.y * size.y);
 	}
-	float clipDepth = depth * 2.0 - 1.0;
-	return 2.0 * depthRange.x * depthRange.y / (depthRange.y + depthRange.x - clipDepth * (depthRange.y - depthRange.x));
+	else {
+		float viewZ = (clipDepth - projectionDepth.y) / projectionDepth.x;
+		result.position = vec3((clipPoint.x - projectionDepth.z) / projectionScale.x, (clipPoint.y - projectionDepth.w) / projectionScale.y, viewZ);
+		result.footprint = 2.0 / (projectionScale.y * size.y);
+	}
+	return result;
 }
-bool readOutlineHit(vec4 sampleValue, float sampleDistance, float centerId, float centerDistance, float threshold) {
-	float id = readLineId(sampleValue);
-	if (id < 0.5) {
-		return false;
-	}
-	if (centerId < 0.5) {
-		return true;
-	}
-	float nearer = centerDistance - sampleDistance;
-	if (nearer > threshold) {
-		return true;
-	}
-	return abs(id - centerId) > 0.5 && nearer > -contactTolerance && (nearer > contactTolerance || centerId > id);
+bool hasContour(float flags) {
+	return flags >= 1.5;
 }
-float readThreshold(vec4 value, float id) {
-	float facing = id > 0.5 ? max(abs(dot(readNormal(value), viewDirection)), FACING_MINIMUM) : 1.0;
-	return depthThreshold / facing;
+bool hasCrease(float flags) {
+	return mod(flags, 2.0) > 0.5;
+}
+int readEdge(LinePixel first, LinePixel second) {
+	if (first.id < 0.5 && second.id < 0.5) {
+		return 0;
+	}
+	bool isFirstNearer = second.id < 0.5 || (first.id > 0.5 && first.position.z >= second.position.z);
+	float nearFlags = isFirstNearer ? first.flags : second.flags;
+	float farId = isFirstNearer ? second.id : first.id;
+	if (farId < 0.5) {
+		return hasContour(nearFlags) ? 2 : 0;
+	}
+	vec3 offset = second.position - first.position;
+	float planeDistance = min(abs(dot(offset, first.normal)), abs(dot(offset, second.normal)));
+	bool isSeparated = planeDistance > depthThreshold + 2.0 * max(first.footprint, second.footprint);
+	if (isSeparated) {
+		return hasContour(nearFlags) ? 2 : 0;
+	}
+	if (abs(first.id - second.id) > 0.5) {
+		return hasContour(first.flags) || hasContour(second.flags) ? 2 : 0;
+	}
+	if (hasCrease(nearFlags) && dot(first.normal, second.normal) < creaseCosine) {
+		return 1;
+	}
+	return 0;
 }
 void main() {
-	ivec2 lastPixel = textureSize(depthTexture, 0) - 1;
-	ivec2 center = ivec2(gl_FragCoord.xy);
-	vec4 centerValue = texelFetch(lineTexture, center, 0);
-	float centerId = readLineId(centerValue);
-	float centerDistance = readDistance(center);
-	vec3 centerNormal = readNormal(centerValue);
-	float threshold = readThreshold(centerValue, centerId);
-	float reach = outlineRadius + 1.0;
-	float outerStrength = 0.0;
-	float innerStrength = 0.0;
+	ivec2 size = textureSize(lineTexture, 0);
+	vec2 sizeValue = vec2(size);
+	ivec2 pixel = ivec2(gl_FragCoord.xy);
+	LinePixel center = readPixel(pixel, sizeValue);
+	uvec2 contourSeed = uvec2(NO_SEED);
+	uvec2 creaseSeed = uvec2(NO_SEED);
 	for (int index = 0; index < 4; ++index) {
-		ivec2 pixel = clamp(center + OFFSETS[index], ivec2(0), lastPixel);
-		vec4 value = texelFetch(lineTexture, pixel, 0);
-		float sampleDistance = readDistance(pixel);
-		if (outerStrength <= 0.0 && readOutlineHit(value, sampleDistance, centerId, centerDistance, threshold)) {
-			outerStrength = clamp(reach - OFFSET_DISTANCES[index], 0.0, 1.0);
+		ivec2 neighborPixel = pixel + SIDES[index];
+		if (neighborPixel.x < 0 || neighborPixel.y < 0 || neighborPixel.x >= size.x || neighborPixel.y >= size.y) {
+			continue;
 		}
-		float sampleId = readLineId(value);
-		if (centerId > 0.5 && readOutlineHit(centerValue, centerDistance, sampleId, sampleDistance, readThreshold(value, sampleId))) {
-			innerStrength = INNER_STRENGTH;
+		int edge = readEdge(center, readPixel(neighborPixel, sizeValue));
+		uvec2 seed = uvec2(pixel * 2 + SIDES[index]);
+		if (edge == 2 && contourSeed.x == NO_SEED) {
+			contourSeed = seed;
 		}
-	}
-	for (int index = 4; index < 28; ++index) {
-		if (outerStrength > 0.0 || index >= sampleCount || OFFSET_DISTANCES[index] >= reach) {
-			break;
-		}
-		ivec2 pixel = clamp(center + OFFSETS[index], ivec2(0), lastPixel);
-		vec4 value = texelFetch(lineTexture, pixel, 0);
-		if (readOutlineHit(value, readDistance(pixel), centerId, centerDistance, threshold)) {
-			outerStrength = clamp(reach - OFFSET_DISTANCES[index], 0.0, 1.0);
+		if (edge == 1 && creaseSeed.x == NO_SEED) {
+			creaseSeed = seed;
 		}
 	}
-	float creaseHitCount = 0.0;
-	if (outerStrength < 1.0 && centerId > 0.5) {
-		for (int index = 0; index < 4; ++index) {
-			if (index >= creaseCount) {
-				break;
-			}
-			ivec2 pixel = clamp(center + ivec2(round(DIRECTIONS[index] * creaseRadius)), ivec2(0), lastPixel);
-			vec4 value = texelFetch(lineTexture, pixel, 0);
-			if (abs(readLineId(value) - centerId) > 0.5) {
+	fragmentSeed = uvec4(contourSeed, creaseSeed);
+}
+";
+
+const JUMP_FLOOD_FRAGMENT_SHADER: &str = "#version 300 es
+precision highp float;
+precision highp int;
+uniform highp usampler2D seedTexture;
+uniform int stepSize;
+out uvec4 fragmentSeed;
+const uint NO_SEED = 65535u;
+float readSeedDistance(vec2 point, uvec2 seed) {
+	if (seed.x == NO_SEED) {
+		return 1.0e9;
+	}
+	vec2 offset = abs(point - vec2(seed) * 0.5);
+	if ((seed.x & 1u) == 1u) {
+		offset.y = max(offset.y - 0.5, 0.0);
+	}
+	else {
+		offset.x = max(offset.x - 0.5, 0.0);
+	}
+	return length(offset);
+}
+void main() {
+	ivec2 size = textureSize(seedTexture, 0);
+	ivec2 pixel = ivec2(gl_FragCoord.xy);
+	vec2 point = vec2(pixel);
+	uvec4 best = uvec4(NO_SEED);
+	float bestContour = 1.0e9;
+	float bestCrease = 1.0e9;
+	for (int offsetY = -1; offsetY <= 1; ++offsetY) {
+		for (int offsetX = -1; offsetX <= 1; ++offsetX) {
+			ivec2 samplePixel = pixel + ivec2(offsetX, offsetY) * stepSize;
+			if (samplePixel.x < 0 || samplePixel.y < 0 || samplePixel.x >= size.x || samplePixel.y >= size.y) {
 				continue;
 			}
-			float nearer = centerDistance - readDistance(pixel);
-			if (abs(nearer) < threshold * 2.0 && dot(readNormal(value), centerNormal) < creaseCosine) {
-				if (creaseExtent <= 0.0) {
-					creaseHitCount += 1.0;
-					continue;
-				}
-				ivec2 farPixel = clamp(center + ivec2(round(DIRECTIONS[index] * (creaseRadius + creaseExtent))), ivec2(0), lastPixel);
-				vec4 farValue = texelFetch(lineTexture, farPixel, 0);
-				if (abs(readLineId(farValue) - centerId) < 0.5 && dot(readNormal(farValue), centerNormal) < creaseCosine) {
-					creaseHitCount += 1.0;
-				}
+			uvec4 seed = texelFetch(seedTexture, samplePixel, 0);
+			float contourDistance = readSeedDistance(point, seed.xy);
+			if (contourDistance < bestContour) {
+				bestContour = contourDistance;
+				best.xy = seed.xy;
+			}
+			float creaseDistance = readSeedDistance(point, seed.zw);
+			if (creaseDistance < bestCrease) {
+				bestCrease = creaseDistance;
+				best.zw = seed.zw;
 			}
 		}
 	}
-	fragmentMask = vec4(min(1.0, max(outerStrength, innerStrength) + creaseHitCount * creaseStrength), 0.0, 0.0, 1.0);
+	fragmentSeed = best;
 }
 ";
 
 const COMPOSITE_FRAGMENT_SHADER: &str = "#version 300 es
-precision mediump float;
-uniform sampler2D maskTexture;
+precision highp float;
+precision highp int;
+uniform highp usampler2D seedTexture;
 uniform vec4 viewportRect;
+uniform vec2 lineWidths;
+uniform float creaseOpacity;
 uniform vec4 outlineColor;
 uniform float hdrOutput;
 out vec4 fragmentColor;
+const uint NO_SEED = 65535u;
+float readSeedDistance(vec2 point, uvec2 seed, vec2 toOutput) {
+	if (seed.x == NO_SEED) {
+		return 1.0e9;
+	}
+	vec2 offset = abs(point - vec2(seed) * 0.5);
+	if ((seed.x & 1u) == 1u) {
+		offset.y = max(offset.y - 0.5, 0.0);
+	}
+	else {
+		offset.x = max(offset.x - 0.5, 0.0);
+	}
+	return length(offset * toOutput);
+}
 void main() {
-	float strength = texture(maskTexture, (gl_FragCoord.xy - viewportRect.xy) / viewportRect.zw).r * outlineColor.a;
-	if (strength < 0.02) {
+	ivec2 size = textureSize(seedTexture, 0);
+	vec2 toLine = vec2(size) / viewportRect.zw;
+	vec2 toOutput = viewportRect.zw / vec2(size);
+	vec2 point = (gl_FragCoord.xy - viewportRect.xy) * toLine - 0.5;
+	ivec2 basePixel = ivec2(floor(point));
+	float contourDistance = 1.0e9;
+	float creaseDistance = 1.0e9;
+	for (int offsetY = 0; offsetY <= 1; ++offsetY) {
+		for (int offsetX = 0; offsetX <= 1; ++offsetX) {
+			ivec2 samplePixel = clamp(basePixel + ivec2(offsetX, offsetY), ivec2(0), size - 1);
+			uvec4 seed = texelFetch(seedTexture, samplePixel, 0);
+			contourDistance = min(contourDistance, readSeedDistance(point, seed.xy, toOutput));
+			creaseDistance = min(creaseDistance, readSeedDistance(point, seed.zw, toOutput));
+		}
+	}
+	float contour = lineWidths.x > 0.0 ? clamp(lineWidths.x * 0.5 - contourDistance + 0.5, 0.0, 1.0) : 0.0;
+	float crease = lineWidths.y > 0.0 ? clamp(lineWidths.y * 0.5 - creaseDistance + 0.5, 0.0, 1.0) * creaseOpacity : 0.0;
+	float strength = max(contour, crease) * outlineColor.a;
+	if (strength < 0.004) {
 		discard;
 	}
 	vec3 color = hdrOutput > 0.5 ? pow(outlineColor.rgb, vec3(2.2)) : outlineColor.rgb;
 	fragmentColor = vec4(color * strength, strength);
 }
 ";
+// @shaders-end

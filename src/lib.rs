@@ -179,7 +179,7 @@ pub use crate::resource::assetloader::{AssetLoadFailure, AssetLoader, AssetLoade
 pub use crate::misc::loadingprogress::LoadingProgress;
 pub use crate::game::gamescene::LoadingDrawer;
 pub use crate::misc::buildinfo::{BuildInfo, BuildInfoLoadFuture, BuildInfoLoadHandle};
-pub use crate::graphics3d::toon::toonscreenoutline::{ToonLineDrawOptions, ToonOutlineWidthUnit, ToonScreenOutline, TOON_SCREEN_OUTLINE_MAXIMUM_CREASE_SAMPLES, TOON_SCREEN_OUTLINE_MAXIMUM_SAMPLES};
+pub use crate::graphics3d::toon::toonscreenoutline::{read_jump_flood_steps, ToonLineDrawOptions, ToonOutlineWidthUnit, ToonScreenOutline, TOON_SCREEN_OUTLINE_MAXIMUM_LINE_ID};
 pub use crate::graphics3d::toon::toonvfx::{ToonBeamOptions, ToonDecalOptions, ToonFireballOptions, ToonGlintOptions, ToonLightningOptions, ToonParticleOptions, ToonPlumeOptions, ToonRibbonOptions, ToonShockwaveOptions, ToonVfx, ToonVfxCounts, ToonVfxDecalMode, ToonVfxLook, ToonVfxRange, ToonVfxShape, ToonVfxSlot, TOON_VFX_DEFAULT_PARTICLE_CAPACITY, TOON_VFX_MAXIMUM_RAMPS};
 pub use crate::ui::uiscale::{UIScale, UIScaleOptions};
 pub use crate::ui::uiwindow::{UIWindow, UIWindowBehavior, UIWindowDefaultBehavior, UIWindowEvent, UIWindowParts};
