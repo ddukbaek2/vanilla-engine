@@ -889,7 +889,8 @@ impl WebApplication {
 			let canvas_rect = window_state.canvas.get_bounding_client_rect();
 			(canvas_rect.width().round(), canvas_rect.height().round(), None, None)
 		};
-		if window_state.canvas_width == canvas_width && window_state.canvas_height == canvas_height && window_state.device_pixel_ratio == device_pixel_ratio {
+		let is_resize_requested = std::mem::take(&mut self.engine_runner.engine.is_resize_requested);
+		if !is_resize_requested && window_state.canvas_width == canvas_width && window_state.canvas_height == canvas_height && window_state.device_pixel_ratio == device_pixel_ratio {
 			return;
 		}
 		window_state.canvas_width = canvas_width;

@@ -505,7 +505,8 @@ impl DesktopApplication {
 		}
 		self.check_system_sleep();
 		let max_render_pixel_ratio = self.engine_runner.engine.get_view_manager().get_max_render_pixel_ratio();
-		if max_render_pixel_ratio != self.applied_max_render_pixel_ratio {
+		if max_render_pixel_ratio != self.applied_max_render_pixel_ratio || self.engine_runner.engine.is_resize_requested {
+			self.engine_runner.engine.is_resize_requested = false;
 			self.resize();
 		}
 		self.engine_runner.update_engine();

@@ -187,6 +187,8 @@ pub struct Engine {
 	frame_number: u64,
 	version: Version,
 	is_exit_requested: bool,
+	// 다음 프레임 첫머리에 캔버스와 뷰 영역을 다시 맞춰 달라고 했는지. (resize)
+	pub(crate) is_resize_requested: bool,
 	pending_scene_list: Vec<Box<dyn Scene>>,
 	is_unload_all_scenes_requested: bool,
 	pending_font_registration_list: Vec<(String, bool, AssetLoadHandle)>,
@@ -218,6 +220,7 @@ impl Engine {
 			frame_number: 1,
 			version: ENGINE_VERSION,
 			is_exit_requested: false,
+			is_resize_requested: false,
 			pending_scene_list: Vec::new(),
 			is_unload_all_scenes_requested: false,
 			pending_font_registration_list: Vec::new(),
@@ -394,6 +397,13 @@ impl Engine {
 	//==============================================================================
 	pub fn set_visible_cursor(&self, is_visible: bool) {
 		platform::set_cursor_visible(self.platform_window.as_ref(), is_visible);
+	}
+
+	//==============================================================================
+	// 해상도 다시 맞추기. (원본 resize, 설정을 바꾼 뒤 부르면 플랫폼이 다음 프레임 첫머리에 캔버스와 뷰 영역을 다시 셈하고 씬마다 resize 를 부른다)
+	//==============================================================================
+	pub fn resize(&mut self) {
+		self.is_resize_requested = true;
 	}
 
 	//==============================================================================

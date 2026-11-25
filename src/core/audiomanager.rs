@@ -11,7 +11,7 @@
 //   상태를 Rc<RefCell> 로 나눠 든다. 웹의 시계 확인 타이머와 프로미스 콜백이 원본처럼 매니저를 다시 부르고,
 //   BeepPlayer 가 원본처럼 매니저를 참조로 들기 때문이다. 그래서 메서드는 모두 &self 로 부른다. (컴포넌트는 &Engine 만 받는다)
 //   AudioPlayer 는 원본처럼 만든 뒤 부른 쪽이 소유한다. 매니저는 만든 플레이어를 들고 있지 않는다.
-//   원본 getAudioContext() 는 백엔드마다 타입이 달라 has_audio_context() 로 바꿨다.
+//   원본 getAudioContext() 는 빌린 AudioContext(웹 WebAudio AudioContext, 데스크탑 kira AudioManager)를 돌려준다. 없으면 None, has_audio_context() 도 있다.
 //   AudioManager 는 나눠 든 상태의 손잡이라 Clone 하면 같은 AudioContext 를 보는 손잡이가 하나 더 생긴다. (SoundSystem 이 원본처럼 매니저를 들 때)
 //   생성자는 엔진을 받지 않는다. (원본은 iOS 판별에 엔진의 플랫폼 정보를 쓰고, 여기서는 웹 백엔드가 같은 규칙으로 직접 판별한다)
 //==============================================================================
@@ -141,6 +141,13 @@ impl AudioManager {
 	//==============================================================================
 	pub fn get_context_time(&self) -> f64 {
 		audio_backend::get_audio_context_time(&self.state.borrow())
+	}
+
+	//==============================================================================
+	// AudioContext. (원본 getAudioContext, 아직 만들지 않았으면 None, 빌린 동안 매니저의 다른 함수를 부르지 않는다)
+	//==============================================================================
+	pub fn get_audio_context(&self) -> Option<std::cell::Ref<'_, AudioContext>> {
+		std::cell::Ref::filter_map(self.state.borrow(), |state| state.audio_context.as_ref()).ok()
 	}
 
 	//==============================================================================
