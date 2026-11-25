@@ -17,6 +17,8 @@
 // - 캔버스 비 상한(EngineConfiguration.max_canvas_aspect_ratio): 창이 그보다 길쭉하면 캔버스(그리는 영역)를 원본처럼 줄여 창 가운데에 두고 나머지는 검다.
 //   입력 좌표에서 캔버스의 왼쪽 위를 빼고, read_canvas_client_position 이 그 자리를 돌려준다.
 // - 페이지 주소의 쿼리 값(read_page_query_value)은 환경 변수 VANILLA_ 뒤에 이름을 대문자 뱀꼴로 붙인 것으로 읽는다. (safeArea → VANILLA_SAFE_AREA)
+// - 찍기 모드(VANILLA_CAPTURE_PATH)는 창을 숨기고 돈다. 숨긴 창은 다시 그리기 요청과 수직 동기가 없어 about_to_wait 에서 프레임을 바로 돌고 주사율로 빠르기를 맞춘다.
+//   가려짐 알림은 받지 않는다. 맥은 독 아이콘과 포커스도 가져가지 않는다. 창을 보려면 VANILLA_CAPTURE_SHOW_WINDOW=1.
 //==============================================================================
 use crate::base::vector2::Vector2;
 use crate::core::asset::AssetLoadHandle;
@@ -64,7 +66,14 @@ thread_local! {
 // 시작. (창을 닫거나 exit_application 을 부를 때까지 돌아오지 않는다)
 //==============================================================================
 pub fn run(engine_runner: EngineRunner) -> Result<(), String> {
-	let event_loop = EventLoop::new().map_err(|error| format!("이벤트 루프 생성 실패: {}", error))?;
+	let is_window_hidden = is_capture_window_hidden();
+	let mut event_loop_builder = EventLoop::builder();
+	#[cfg(target_os = "macos")]
+	if is_window_hidden {
+		use winit::platform::macos::{ActivationPolicy, EventLoopBuilderExtMacOS};
+		event_loop_builder.with_activation_policy(ActivationPolicy::Accessory).with_activate_ignoring_other_apps(false);
+	}
+	let event_loop = event_loop_builder.build().map_err(|error| format!("이벤트 루프 생성 실패: {}", error))?;
 	event_loop.set_control_flow(ControlFlow::Poll);
 	let mut desktop_application = DesktopApplication {
 		engine_runner,
@@ -76,6 +85,7 @@ pub fn run(engine_runner: EngineRunner) -> Result<(), String> {
 		is_occluded: false,
 		is_minimized: false,
 		is_page_hidden: false,
+		is_window_hidden,
 		window_scale_factor: 1.0,
 		applied_max_render_pixel_ratio: 0.0,
 		render_scaler: None,
@@ -270,6 +280,8 @@ struct DesktopApplication {
 	applied_max_render_pixel_ratio: f32,
 	// 줄인 렌더 영역을 창 크기로 늘이개. (처음 쓸 때 만든다)
 	render_scaler: Option<renderscaler::RenderScaler>,
+	// 창을 숨기고 도는지. (찍기 모드, is_capture_window_hidden)
+	is_window_hidden: bool,
 	// 지난 프레임의 단조 시계와 벽시계. (잠자기 판정)
 	last_frame_clock: Option<(Instant, SystemTime)>,
 	// 창 안의 캔버스 자리. (물리 픽셀 [왼쪽, 위, 가로, 세로], 위 왼쪽 원점)
@@ -292,7 +304,9 @@ impl DesktopApplication {
 		let mut window_attributes = Window::default_attributes()
 			.with_title(engine_configuration.title.clone())
 			.with_inner_size(LogicalSize::new(window_size.x as f64, window_size.y as f64))
-			.with_resizable(engine_configuration.is_resizable);
+			.with_resizable(engine_configuration.is_resizable)
+			.with_visible(!self.is_window_hidden)
+			.with_active(!self.is_window_hidden);
 		// 검증용: VANILLA_WINDOW_POSITION=x,y 면 창을 그 자리(물리 픽셀)에 띄운다. (화면 밖에 두고 잴 때)
 		if let Ok(window_position_text) = std::env::var("VANILLA_WINDOW_POSITION") {
 			let position_list: Vec<i32> = window_position_text.split(',').filter_map(|part| part.trim().parse::<i32>().ok()).collect();
@@ -648,6 +662,9 @@ impl ApplicationHandler for DesktopApplication {
 				self.engine_runner.engine.dispatch_page_event(page_event);
 			}
 			WindowEvent::Occluded(is_occluded) => {
+				if self.is_window_hidden {
+					return;
+				}
 				self.is_occluded = is_occluded;
 				self.update_page_visibility();
 			}
@@ -766,25 +783,51 @@ impl ApplicationHandler for DesktopApplication {
 				return;
 			}
 		};
-		let maximum_frame_per_second = self.engine_runner.engine.get_engine_configuration().maximum_frame_per_second;
+		// 숨긴 창은 다시 그리기 요청이 오지 않고 수직 동기로 기다리지도 않는다.
+		// 그래서 여기서 바로 프레임을 돌고, 최대 FPS 가 없으면 모니터 주사율(모르면 60)로 보일 때와 같은 빠르기를 맞춘다.
+		let mut maximum_frame_per_second = self.engine_runner.engine.get_engine_configuration().maximum_frame_per_second;
 		if maximum_frame_per_second <= 0.0 {
-			event_loop.set_control_flow(ControlFlow::Poll);
-			window_state.window.request_redraw();
-			return;
+			if !self.is_window_hidden {
+				event_loop.set_control_flow(ControlFlow::Poll);
+				window_state.window.request_redraw();
+				return;
+			}
+			let refresh_rate_millihertz = window_state.window.current_monitor().and_then(|monitor| monitor.refresh_rate_millihertz()).unwrap_or(60000);
+			maximum_frame_per_second = refresh_rate_millihertz as f32 / 1000.0;
 		}
 
 		// 차례가 된 프레임만 그린다. (한 프레임 넘게 밀렸으면 지금부터 다시 센다)
 		let frame_interval = Duration::from_secs_f64(1.0 / maximum_frame_per_second as f64);
 		let now = Instant::now();
 		if now >= self.next_frame_instant {
-			window_state.window.request_redraw();
 			self.next_frame_instant += frame_interval;
 			if self.next_frame_instant + frame_interval < now {
 				self.next_frame_instant = now + frame_interval;
 			}
+			if self.is_window_hidden {
+				self.update_frame();
+				if self.engine_runner.engine.is_exit_requested() {
+					event_loop.exit();
+					return;
+				}
+			}
+			else {
+				window_state.window.request_redraw();
+			}
 		}
 		event_loop.set_control_flow(ControlFlow::WaitUntil(self.next_frame_instant));
 	}
+}
+
+//==============================================================================
+// 창을 숨기고 돌지. (찍기 모드 VANILLA_CAPTURE_PATH 면 숨긴다. VANILLA_CAPTURE_SHOW_WINDOW=1 이면 보인다)
+// - 검증 도구가 예제를 찍을 때 사용자 화면에 창이 뜨지 않게 한다. 맥은 독 아이콘과 포커스도 가져가지 않는다.
+//==============================================================================
+fn is_capture_window_hidden() -> bool {
+	if std::env::var("VANILLA_CAPTURE_PATH").is_err() {
+		return false;
+	}
+	std::env::var("VANILLA_CAPTURE_SHOW_WINDOW").map(|value| value != "1").unwrap_or(true)
 }
 
 //==============================================================================
