@@ -11,8 +11,11 @@
 // - 글자 안티앨리어싱(set_text_antialias_enabled, 원본 setTextAntialiasEnabled): 끄면 구운 글자의 알파를 문턱값 128 로 0 과 255 로 가르고 텍스처를 NEAREST 로 뽑는다.
 //   도트 글꼴을 설계 크기의 정수 배로 그리는 프로젝트가 끈다. 원본은 모듈 전역 값이고 이미 구운 글자는 그대로 둔다.
 //   여기서는 캐시가 들고, 켜짐 여부를 키에 넣어 바꾼 다음 그리는 글자부터 바로 그 방식으로 굽는다. (rasterize_text 는 원본 ShadowText 처럼 받지 않는다)
+// - 글 재기(measure_text)는 폰트 문자열과 글이 같으면 다시 재지 않는다. (원본 measureTextMetrics 의 캐시, 2048 개, 넘으면 오래 안 쓴 반을 버린다)
+//   글꼴을 새로 등록하면 비운다. (원본은 웹 글꼴이 받아지면 비운다) measure_text 가 &self 라 캐시는 RefCell 에 든다.
 //==============================================================================
 use glow::HasContext;
+use std::cell::{Cell, RefCell};
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -20,6 +23,8 @@ use std::rc::Rc;
 
 // 캐시 상한. (원본과 같음)
 const MAXIMUM_ENTRY_COUNT: usize = 512;
+// 글 재기 캐시 상한. (원본과 같음)
+const MAXIMUM_MEASURE_COUNT: usize = 2048;
 
 // 안티앨리어싱을 끈 글자의 알파 문턱값. (원본과 같음)
 const ALPHA_THRESHOLD: u8 = 128;
@@ -107,6 +112,13 @@ impl CachedTextEntry {
 	}
 }
 
+struct CachedTextMetrics {
+	font_string: String,
+	text: String,
+	text_metrics: TextMetrics,
+	last_used_count: u64,
+}
+
 struct GlyphPlacement {
 	font_index: usize,
 	glyph_index: u16,
@@ -127,6 +139,11 @@ pub struct TextStringTextureCache {
 	font_registration_count: u64,
 	// 글자 안티앨리어싱. (기본 켬)
 	is_text_antialias_enabled: bool,
+	// 글 재기 캐시. (폰트 문자열과 글의 해시 → 잰 것들, 쓸 때마다 센 번호, 그때의 글꼴 등록 횟수)
+	measure_table: RefCell<HashMap<u64, Vec<CachedTextMetrics>>>,
+	measure_count: Cell<usize>,
+	measure_use_count: Cell<u64>,
+	measured_font_registration_count: Cell<u64>,
 }
 
 impl TextStringTextureCache {
@@ -144,6 +161,10 @@ impl TextStringTextureCache {
 			frame_number: 0,
 			font_registration_count: 0,
 			is_text_antialias_enabled: true,
+			measure_table: RefCell::new(HashMap::new()),
+			measure_count: Cell::new(0),
+			measure_use_count: Cell::new(0),
+			measured_font_registration_count: Cell::new(0),
 		}
 	}
 
@@ -222,6 +243,72 @@ impl TextStringTextureCache {
 	// 문자열 측정.
 	//==============================================================================
 	pub fn measure_text(&self, font_string: &str, text: &str) -> TextMetrics {
+		// 글꼴이 새로 들어왔으면 잰 것을 비운다.
+		if self.measured_font_registration_count.get() != self.font_registration_count {
+			self.measure_table.borrow_mut().clear();
+			self.measure_count.set(0);
+			self.measured_font_registration_count.set(self.font_registration_count);
+		}
+		let use_count = self.measure_use_count.get() + 1;
+		self.measure_use_count.set(use_count);
+		let mut hasher = DefaultHasher::new();
+		font_string.hash(&mut hasher);
+		text.hash(&mut hasher);
+		let measure_key = hasher.finish();
+		if let Some(cached_list) = self.measure_table.borrow_mut().get_mut(&measure_key) {
+			for cached in cached_list.iter_mut() {
+				if cached.font_string == font_string && cached.text == text {
+					cached.last_used_count = use_count;
+					return cached.text_metrics;
+				}
+			}
+		}
+		let text_metrics = self.measure_text_uncached(font_string, text);
+		if self.measure_count.get() >= MAXIMUM_MEASURE_COUNT {
+			self.evict_old_measures();
+		}
+		self.measure_table.borrow_mut().entry(measure_key).or_default().push(CachedTextMetrics {
+			font_string: font_string.to_string(),
+			text: text.to_string(),
+			text_metrics,
+			last_used_count: use_count,
+		});
+		self.measure_count.set(self.measure_count.get() + 1);
+		text_metrics
+	}
+
+	//==============================================================================
+	// 잰 것 가운데 오래 안 쓴 반 버리기. (쓴 번호가 가운데보다 작은 것)
+	//==============================================================================
+	fn evict_old_measures(&self) {
+		let mut measure_table = self.measure_table.borrow_mut();
+		let mut last_used_list: Vec<u64> = measure_table.values().flat_map(|cached_list| cached_list.iter().map(|cached| cached.last_used_count)).collect();
+		if last_used_list.is_empty() {
+			return;
+		}
+		let middle_index = last_used_list.len() / 2;
+		let (_, middle_count, _) = last_used_list.select_nth_unstable(middle_index);
+		let threshold_count = *middle_count;
+		let mut remain_count = 0;
+		measure_table.retain(|_, cached_list| {
+			cached_list.retain(|cached| cached.last_used_count >= threshold_count);
+			remain_count += cached_list.len();
+			!cached_list.is_empty()
+		});
+		self.measure_count.set(remain_count);
+	}
+
+	//==============================================================================
+	// 잰 글 수. (캐시에 든 것, 시험과 통계용)
+	//==============================================================================
+	pub fn get_measure_count(&self) -> usize {
+		self.measure_count.get()
+	}
+
+	//==============================================================================
+	// 문자열 측정. (캐시를 거치지 않는다)
+	//==============================================================================
+	fn measure_text_uncached(&self, font_string: &str, text: &str) -> TextMetrics {
 		let font_description = parse_font_string(font_string);
 		let font_list = self.resolve_font_list(&font_description);
 		if font_list.is_empty() {
@@ -911,6 +998,41 @@ mod tests {
 		let hangul_glyph_index = font.lookup_glyph_index('가');
 		assert!(glyph_count > 0);
 		assert!(hangul_glyph_index != 0);
+	}
+
+	//==============================================================================
+	// 글 재기 캐시: 같은 폰트 문자열과 글은 한 번만 재 두고, 글꼴을 새로 등록하면 비운다.
+	// (엔진 기본 글꼴 후보 가운데 이 PC 에 있는 것으로 본다, 하나도 없으면 건너뛴다)
+	//==============================================================================
+	#[test]
+	fn measure_cache_reuses_and_clears_on_font_registration() {
+		let engine_configuration = crate::core::engine::EngineConfiguration::new();
+		let font_bytes = match engine_configuration.default_font_paths.iter().find_map(|font_path| std::fs::read(font_path).ok()) {
+			Some(font_bytes) => {
+				font_bytes
+			}
+			None => {
+				return;
+			}
+		};
+		let mut text_string_texture_cache = TextStringTextureCache::new();
+		text_string_texture_cache.set_default_font(false, font_bytes.clone()).expect("default font");
+		let first_metrics = text_string_texture_cache.measure_text("20px default", "가나다 abc");
+		assert!(first_metrics.width > 0.0);
+		assert_eq!(text_string_texture_cache.get_measure_count(), 1);
+		let second_metrics = text_string_texture_cache.measure_text("20px default", "가나다 abc");
+		assert_eq!(first_metrics.width, second_metrics.width);
+		assert_eq!(text_string_texture_cache.get_measure_count(), 1);
+		let bold_metrics = text_string_texture_cache.measure_text("40px default", "가나다 abc");
+		assert!(bold_metrics.width > first_metrics.width);
+		assert_eq!(text_string_texture_cache.get_measure_count(), 2);
+		text_string_texture_cache.add_fallback_font(font_bytes).expect("fallback font");
+		text_string_texture_cache.measure_text("20px default", "가나다 abc");
+		assert_eq!(text_string_texture_cache.get_measure_count(), 1);
+		for text_index in 0..(MAXIMUM_MEASURE_COUNT + 10) {
+			text_string_texture_cache.measure_text("20px default", &text_index.to_string());
+		}
+		assert!(text_string_texture_cache.get_measure_count() <= MAXIMUM_MEASURE_COUNT);
 	}
 
 	//==============================================================================

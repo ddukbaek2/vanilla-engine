@@ -103,3 +103,4 @@ mod tests {
 	}
 }
 pub mod assetloader;
+pub mod spriteatlas;

@@ -2,7 +2,7 @@
 // 부드러운 그늘. (vanilla.js core/component/softshade.js 의 SoftShade, SoftShadeShape)
 // - 글 뒤를 어둡게 눌러 밝은 바탕 위에서도 읽히게 할 때 쓴다. 모양을 작은 그림 한 장에 구워 노드의 내용 크기로 늘려 그린다.
 // - 부드러운 그라데이션이라 낮은 해상도로 구워 늘려도 자국이 보이지 않는다. (구운 한 픽셀이 굽기 단위만큼을 덮고, 가로세로 상한이 있다)
-// - 노드 크기, 모양, 색, 짙기, 양옆 흐림이 바뀌면 다시 굽는다. 노드의 불투명도는 한 장째로 먹는다.
+// - 노드 크기, 모양, 색, 짙기, 양옆 흐림이 바뀌면 다시 굽는다. 같은 모양을 구운 것이 있으면 나눠 쓴다. (sharedbakecache.rs) 노드의 불투명도는 한 장째로 먹는다.
 //==============================================================================
 use std::rc::Rc;
 
@@ -11,6 +11,7 @@ use crate::core::component::{Component, ComponentBase};
 use crate::core::graphic::Graphic;
 use crate::core::image::Image;
 use crate::core::node::worldnode::NodeTransform;
+use crate::core::sharedbakecache;
 
 //==============================================================================
 // 부드러운 그늘의 모양.
@@ -81,7 +82,9 @@ impl SoftShade {
 		let bake_key = (self.shape, color_key, (self.opacity * 1000.0).round() as u32, (fade_ratio * 1000.0).round() as u32, bake_width, bake_height);
 		if self.bake_key != Some(bake_key) {
 			self.bake_key = Some(bake_key);
-			self.bake_image = Some(self.bake_shade(bake_width, bake_height, fade_ratio));
+			// 같은 모양을 구운 것이 있으면 나눠 쓰고, 없으면 굽는다. (sharedbakecache.rs)
+			let shared_key = format!("SoftShade|{:?}|{:?}|{}|{}|{}|{}", bake_key.0, bake_key.1, bake_key.2, bake_key.3, bake_key.4, bake_key.5);
+			self.bake_image = sharedbakecache::acquire_shared_bake(&shared_key, || Some(self.bake_shade(bake_width, bake_height, fade_ratio)));
 		}
 		let bake_image = match &self.bake_image {
 			Some(bake_image) => bake_image.clone(),

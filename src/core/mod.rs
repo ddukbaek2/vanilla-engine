@@ -27,3 +27,4 @@ pub mod timemanager;
 pub mod tween;
 pub mod viewmanager;
 pub mod inputactions;
+pub mod sharedbakecache;

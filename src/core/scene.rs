@@ -67,6 +67,8 @@ pub struct SceneBase {
 	has_ever_touched: bool,
 	first_touch_callback: Option<Box<dyn FnMut()>>,
 	scene_id: Option<SceneId>,
+	// 이번 프레임의 휠을 받아 쓴 컴포넌트가 있었는지.
+	is_wheel_handled: bool,
 }
 
 impl SceneBase {
@@ -85,7 +87,15 @@ impl SceneBase {
 			has_ever_touched: false,
 			first_touch_callback: None,
 			scene_id: None,
+			is_wheel_handled: false,
 		}
+	}
+
+	//==============================================================================
+	// 이번 프레임의 휠을 받아 쓴 컴포넌트(스크롤 칸 등)가 있었는지. (tick_touch 뒤에 읽는다, 없으면 게임이 지도 확대 등에 쓴다)
+	//==============================================================================
+	pub fn is_wheel_handled(&self) -> bool {
+		self.is_wheel_handled
 	}
 
 	//==============================================================================
@@ -332,12 +342,11 @@ impl SceneBase {
 		let input_manager = engine.get_input_manager();
 		let view_input_position = input_manager.get_view_input_position();
 
-		// 휠. (누름과 상관없이 그 자리 아래 노드부터 부모 쪽으로)
+		// 휠. (누름과 상관없이 그 자리의 가장 앞 스크롤 칸이나 누를 수 있는 노드부터 부모 쪽으로)
 		let wheel_delta = Vector2::create(input_manager.get_wheel_delta_x(), input_manager.get_wheel_delta_y());
+		self.is_wheel_handled = false;
 		if wheel_delta.x != 0.0 || wheel_delta.y != 0.0 {
-			if let Some(hit_id) = self.node_tree.find_topmost_interactable_node(view_input_position) {
-				self.node_tree.dispatch_wheel(hit_id, engine, wheel_delta);
-			}
+			self.is_wheel_handled = self.node_tree.dispatch_wheel_at(view_input_position, engine, wheel_delta);
 		}
 
 		if input_manager.is_touch_pressed() {

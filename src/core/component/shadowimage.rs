@@ -5,6 +5,7 @@
 //   노드의 불투명도가 그림과 그림자에 한 장째로 먹는다.
 // - 그림 색을 주면 그림을 그 색 한 빛의 모양으로 칠한다. (같은 자리 위에 원래 그림을 얹어 그림자만 남기는 감쌈 등)
 // - 굽는 배율, 그림, 색, 그림자, 노드 크기가 바뀌면 다시 굽는다. 줄이기는 겹친 넓이로 고르게 섞는다.
+//   같은 그림(Image 의 인스턴스 식별자와 조각)과 모양을 구운 것이 있으면 나눠 쓴다. (sharedbakecache.rs, 원본은 그림마다 번호를 붙여 열쇠로 쓴다)
 // - 그림 경로(image_path)는 Sprite 의 것과 같이 UI 문서(UIDocument)가 그림 대신 적고 읽는 값이다. 그리기에는 쓰지 않는다.
 // - 다시 구울 때 그림의 CPU 픽셀을 읽으므로 받은 그림은 GPU 에 올린 뒤에도 픽셀을 남기게 한다. 이미 놓였으면 텍스처에서 되읽는다.
 //==============================================================================
@@ -17,6 +18,7 @@ use crate::core::component::{Component, ComponentBase};
 use crate::core::graphic::Graphic;
 use crate::core::image::Image;
 use crate::core::node::worldnode::NodeTransform;
+use crate::core::sharedbakecache;
 
 // 구운 그림의 가장자리 여유. (안티앨리어싱, 픽셀)
 const BAKE_PADDING: i32 = 2;
@@ -145,14 +147,23 @@ impl ShadowImage {
 		let image_width = source_rect[2] * fit_scale;
 		let image_height = source_rect[3] * fit_scale;
 		let bake_scale = graphic.calculate_text_bake_scale();
-		let bake_key = format!("{}|{:?}|{:?}|{}|{}|{}|{}|{}", self.image_version, self.image_color, self.shadow_color, self.shadow_offset, self.shadow_blur, image_width, image_height, bake_scale);
+		let bake_key = format!("ShadowImage|{}|{:?}|{:?}|{:?}|{}|{}|{}|{}|{}", image.get_instance_id(), source_rect, self.image_color, self.shadow_color, self.shadow_offset, self.shadow_blur, image_width, image_height, bake_scale);
 		if bake_key != self.bake_key {
-			// 그림이 다른 곳에서 먼저 그려져 CPU 픽셀을 놓았으면 텍스처에서 되읽는다.
-			if !graphic.restore_image_pixels(&image) {
+			// 같은 모양을 구운 것이 있으면 나눠 쓰고, 없으면 굽는다.
+			// 구울 때 그림이 다른 곳에서 먼저 그려져 CPU 픽셀을 놓았으면 텍스처에서 되읽는다. (못 읽으면 다음 프레임에 다시)
+			let bake_image = sharedbakecache::acquire_shared_bake(&bake_key, || {
+				if !graphic.restore_image_pixels(&image) {
+					return None;
+				}
+				Some(self.bake(&image, source_rect, image_width, image_height, bake_scale))
+			});
+			if bake_image.is_none() {
 				return;
 			}
+			self.bake_image = bake_image;
+			self.bake_scale = bake_scale;
+			self.bake_padding = ShadowImage::calculate_bake_padding(self.shadow_blur, bake_scale) as f32 / bake_scale;
 			self.bake_key = bake_key;
-			self.bake(&image, source_rect, image_width, image_height, bake_scale);
 		}
 		let bake_image = match &self.bake_image {
 			Some(bake_image) => {
@@ -172,12 +183,12 @@ impl ShadowImage {
 	//==============================================================================
 	// 굽기. (그릴 크기로 바꾼 그림을 가장자리를 둘러 놓고, 그 모양으로 그림자를 깐다)
 	//==============================================================================
-	fn bake(&mut self, image: &Image, source_rect: [f32; 4], image_width: f32, image_height: f32, bake_scale: f32) {
+	fn bake(&self, image: &Image, source_rect: [f32; 4], image_width: f32, image_height: f32, bake_scale: f32) -> Rc<Image> {
 		let scaled_width = ((image_width * bake_scale).round() as i32).max(1);
 		let scaled_height = ((image_height * bake_scale).round() as i32).max(1);
 		let scaled_blur = self.shadow_blur * bake_scale;
 		let scaled_offset = (self.shadow_offset * bake_scale).round() as i32;
-		let padding = BAKE_PADDING + scaled_blur.ceil() as i32 * 2;
+		let padding = ShadowImage::calculate_bake_padding(self.shadow_blur, bake_scale);
 		let bake_width = scaled_width + padding * 2;
 		let bake_height = scaled_height + padding * 2 + scaled_offset.max(0);
 		let scaled_pixels = resample_image(image, source_rect, scaled_width, scaled_height);
@@ -203,9 +214,15 @@ impl ShadowImage {
 				shape_coverage[target_index] = alpha;
 			}
 		}
-		self.bake_image = Some(compose_shadow_image(&shape_coverage, Some(&shape_pixels), bake_width, bake_height, Color::white(), self.shadow_color, scaled_blur, scaled_offset));
-		self.bake_scale = bake_scale;
-		self.bake_padding = padding as f32 / bake_scale;
+		compose_shadow_image(&shape_coverage, Some(&shape_pixels), bake_width, bake_height, Color::white(), self.shadow_color, scaled_blur, scaled_offset)
+	}
+
+	//==============================================================================
+	// 구운 그림의 가장자리 여유. (픽셀, 번지는 그림자가 잘리지 않게 번지는 만큼 넓힌다)
+	//==============================================================================
+	fn calculate_bake_padding(shadow_blur: f32, bake_scale: f32) -> i32 {
+		let scaled_blur = shadow_blur * bake_scale;
+		BAKE_PADDING + scaled_blur.ceil() as i32 * 2
 	}
 
 	//==============================================================================

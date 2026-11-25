@@ -372,6 +372,10 @@ pub struct Graphic {
 	applied_viewport_width: i32,
 	applied_viewport_height: i32,
 	text_bake_scale_step: f32,
+	// 배율이 움직이는 노드의 텍스트 베이크 스케일 양자화 단위. (text_bake_scale_step 이 0 일 때만 쓴다)
+	text_bake_motion_scale_step: f32,
+	// 지금 그리는 노드의 배율이 지난 프레임과 달라 움직이는 중인지.
+	is_text_bake_scale_moving: bool,
 	is_text_pixel_snap_enabled: bool,
 	draw_call_count: u32,
 	draw_vertex_count: u32,
@@ -499,6 +503,8 @@ impl Graphic {
 			applied_viewport_width: 0,
 			applied_viewport_height: 0,
 			text_bake_scale_step: DEFAULT_TEXT_BAKE_SCALE_STEP,
+			text_bake_motion_scale_step: DEFAULT_TEXT_BAKE_SCALE_STEP,
+			is_text_bake_scale_moving: false,
 			is_text_pixel_snap_enabled: false,
 			draw_call_count: 0,
 			draw_vertex_count: 0,
@@ -1794,6 +1800,128 @@ impl Graphic {
 	}
 
 	//==============================================================================
+	// 고리(띠) 출력. (안쪽 반지름과 바깥 반지름 사이를 start_radian 부터 end_radian 까지 칠한다)
+	// - set_fill_color()
+	// - 각도는 라디안, 0 이 오른쪽이고 화면에서 시계 방향으로 는다. (12 시에서 시작하려면 -PI / 2, 한 바퀴는 0 에서 PI * 2)
+	// - 조각마다 네모 하나를 겹치지 않게 이어 붙여 한 번에 그리므로, 반투명 색이어도 조각의 이음매가 짙어지지 않는다.
+	// - 조각 수는 draw_circle 처럼 화면에서의 바깥 반지름을 따라 정하고(한 바퀴 16 ~ 64), 그리는 각도만큼만 쓴다.
+	//==============================================================================
+	pub fn draw_ring(&mut self, center: Vector2, inner_radius: f32, outer_radius: f32, start_radian: f32, end_radian: f32) {
+		let fill_color = self.get_fill_color();
+		self.draw_ring_with_color(center, inner_radius, outer_radius, start_radian, end_radian, fill_color);
+	}
+
+	//==============================================================================
+	// 호 출력. (반지름을 따라 line_width 두께의 선으로 start_radian 부터 end_radian 까지)
+	// - set_stroke_color()
+	// - 각도와 조각 수는 draw_ring 과 같다. 선의 두께 가운데가 반지름에 온다.
+	//==============================================================================
+	pub fn draw_arc(&mut self, center: Vector2, radius: f32, start_radian: f32, end_radian: f32, line_width: f32) {
+		let half_width = line_width * 0.5;
+		let stroke_color = self.get_stroke_color();
+		self.draw_ring_with_color(center, (radius - half_width).max(0.0), radius + half_width, start_radian, end_radian, stroke_color);
+	}
+
+	//==============================================================================
+	// 고리 출력의 셈. (draw_ring, draw_arc 가 부른다)
+	//==============================================================================
+	pub fn draw_ring_with_color(&mut self, center: Vector2, inner_radius: f32, outer_radius: f32, start_radian: f32, end_radian: f32, color: Color) {
+		let span_radian = end_radian - start_radian;
+		if outer_radius <= 0.0 || outer_radius <= inner_radius || span_radian == 0.0 {
+			return;
+		}
+		let full_radian = math::PI * 2.0;
+		let clamped_span_radian = math::clamp(span_radian, -full_radian, full_radian);
+		let maximum_scale = self.transform_matrix.get_maximum_scale();
+		let full_segment_count = math::clamp((outer_radius * maximum_scale * 0.5).ceil(), 16.0, 64.0);
+		let segment_count = ((full_segment_count * clamped_span_radian.abs() / full_radian).ceil() as usize).max(1);
+		let mut offset = 0;
+		let mut vertex_count = 0;
+		let mut previous_cosine = start_radian.cos();
+		let mut previous_sine = start_radian.sin();
+		for segment_index in 1..=segment_count {
+			if (vertex_count + 6) * FLOATS_PER_VERTEX > self.vertex_data.len() {
+				break;
+			}
+			let radian = start_radian + clamped_span_radian * (segment_index as f32 / segment_count as f32);
+			let cosine = radian.cos();
+			let sine = radian.sin();
+			let previous_inner_x = center.x + previous_cosine * inner_radius;
+			let previous_inner_y = center.y + previous_sine * inner_radius;
+			let previous_outer_x = center.x + previous_cosine * outer_radius;
+			let previous_outer_y = center.y + previous_sine * outer_radius;
+			let inner_x = center.x + cosine * inner_radius;
+			let inner_y = center.y + sine * inner_radius;
+			let outer_x = center.x + cosine * outer_radius;
+			let outer_y = center.y + sine * outer_radius;
+			let segment_values: [f32; 24] = [
+				previous_inner_x, previous_inner_y, 0.5, 0.5,
+				previous_outer_x, previous_outer_y, 0.5, 0.5,
+				outer_x, outer_y, 0.5, 0.5,
+				previous_inner_x, previous_inner_y, 0.5, 0.5,
+				outer_x, outer_y, 0.5, 0.5,
+				inner_x, inner_y, 0.5, 0.5,
+			];
+			self.vertex_data[offset..offset + 24].copy_from_slice(&segment_values);
+			offset += 24;
+			vertex_count += 6;
+			previous_cosine = cosine;
+			previous_sine = sine;
+		}
+		let white_texture = self.get_white_texture();
+		self.draw_vertices(vertex_count, white_texture, color);
+	}
+
+	//==============================================================================
+	// 선분 여럿 출력. (위치 배열 하나에 선분마다 x0, y0, x1, y1 넷씩, 한 번에 그린다)
+	// - set_stroke_color()
+	// - 선분마다 두께만큼 넓힌 네모 하나다. (draw_line 과 달리 이음새를 메우지 않는다, 따로 떨어진 선분 용)
+	// - Vector2 배열을 만들지 않고 숫자 배열을 그대로 읽는다. 길이가 0 인 선분은 건너뛴다.
+	// - 정점 버퍼가 차면 거기까지 그리고 이어서 담는다. (묶어 그리기가 켜져 있으면 같은 텍스처라 한 번의 드로우 콜로 이어진다)
+	//==============================================================================
+	pub fn draw_line_segments(&mut self, position_values: &[f32], size: f32) {
+		if position_values.len() < 4 {
+			return;
+		}
+		let half_size = size / 2.0;
+		let stroke_color = self.get_stroke_color();
+		let white_texture = self.get_white_texture();
+		let mut offset = 0;
+		let mut vertex_count = 0;
+		for segment_values in position_values.chunks_exact(4) {
+			let start_x = segment_values[0];
+			let start_y = segment_values[1];
+			let end_x = segment_values[2];
+			let end_y = segment_values[3];
+			let delta_x = end_x - start_x;
+			let delta_y = end_y - start_y;
+			let length = (delta_x * delta_x + delta_y * delta_y).sqrt();
+			if !(length > 0.0) {
+				continue;
+			}
+			if (vertex_count + 6) * FLOATS_PER_VERTEX > self.vertex_data.len() {
+				self.draw_vertices(vertex_count, white_texture, stroke_color);
+				offset = 0;
+				vertex_count = 0;
+			}
+			let normal_x = -delta_y / length * half_size;
+			let normal_y = delta_x / length * half_size;
+			let quad_values: [f32; 24] = [
+				start_x + normal_x, start_y + normal_y, 0.5, 0.5,
+				end_x + normal_x, end_y + normal_y, 0.5, 0.5,
+				start_x - normal_x, start_y - normal_y, 0.5, 0.5,
+				start_x - normal_x, start_y - normal_y, 0.5, 0.5,
+				end_x + normal_x, end_y + normal_y, 0.5, 0.5,
+				end_x - normal_x, end_y - normal_y, 0.5, 0.5,
+			];
+			self.vertex_data[offset..offset + 24].copy_from_slice(&quad_values);
+			offset += 24;
+			vertex_count += 6;
+		}
+		self.draw_vertices(vertex_count, white_texture, stroke_color);
+	}
+
+	//==============================================================================
 	// 이미지 출력.
 	//==============================================================================
 	pub fn draw_image(&mut self, image: &Rc<Image>, position: Vector2, content_size: Vector2) {
@@ -1977,6 +2105,13 @@ impl Graphic {
 	}
 
 	//==============================================================================
+	// 문자열 측정. (주어진 폰트 문자열 기준, 현재 폰트 문자열은 바꾸지 않는다)
+	//==============================================================================
+	pub fn measure_text_with_font_string(&self, font_string: &str, text: &str) -> TextMetrics {
+		self.text_string_texture_cache.measure_text(font_string, text)
+	}
+
+	//==============================================================================
 	// 텍스트 베이크 스케일 양자화 단위 설정.
 	// - 기본 0.25. 확대 축소가 잦은 글자가 스케일마다 새로 구워지지 않게 묶는다.
 	// - 0 이면 양자화하지 않고 실제 스케일 그대로 굽는다.
@@ -1990,6 +2125,53 @@ impl Graphic {
 	//==============================================================================
 	pub fn get_text_bake_scale_step(&self) -> f32 {
 		self.text_bake_scale_step
+	}
+
+	//==============================================================================
+	// 배율이 움직이는 노드의 텍스트 베이크 스케일 양자화 단위 설정. (기본 0.25)
+	// - 양자화 단위(set_text_bake_scale_step)가 0 일 때, 그리는 노드의 변환 배율이 지난 프레임과 다르면(확대 움직임, 팝업, 트윈, 카메라 확대)
+	//   이 단위로 묶은 배율로 굽는다. 프레임마다 다른 배율로 새로 굽지 않는다.
+	// - 배율이 멈추면(지난 프레임과 같으면) 정확한 배율로 다시 구워 1:1 로 또렷하다.
+	// - 0 이면 움직이는 동안에도 묶지 않는다. (지금까지와 같다)
+	//==============================================================================
+	pub fn set_text_bake_motion_scale_step(&mut self, text_bake_motion_scale_step: f32) {
+		self.text_bake_motion_scale_step = text_bake_motion_scale_step.max(0.0);
+	}
+
+	//==============================================================================
+	// 배율이 움직이는 노드의 텍스트 베이크 스케일 양자화 단위 반환.
+	//==============================================================================
+	pub fn get_text_bake_motion_scale_step(&self) -> f32 {
+		self.text_bake_motion_scale_step
+	}
+
+	//==============================================================================
+	// 지금 그리는 노드의 배율이 움직이는 중인지 설정. (NodeTree 가 정한다, 노드 밖에서 직접 그릴 때 부르는 쪽이 정할 수 있다)
+	//==============================================================================
+	pub fn set_text_bake_scale_moving(&mut self, is_text_bake_scale_moving: bool) {
+		self.is_text_bake_scale_moving = is_text_bake_scale_moving;
+	}
+
+	//==============================================================================
+	// 지금 그리는 노드의 배율이 움직이는 중인지 반환.
+	//==============================================================================
+	pub fn is_text_bake_scale_moving(&self) -> bool {
+		self.is_text_bake_scale_moving
+	}
+
+	//==============================================================================
+	// 노드의 변환 배율이 지난 프레임과 달라 움직이는 중인지 셈해 정하고, 노드에 기억할 배율을 돌려준다. (NodeTree 가 push_transform 뒤에 부른다)
+	// - last_drawn_maximum_scale 은 그 노드를 지난번 그릴 때의 값이다. (0 이면 아직 모른다, 처음 그리는 노드는 움직이지 않는 것으로 본다)
+	// - 양자화 단위가 0 이 아니면 늘 묶어 굽으므로 셈하지 않고 받은 값을 그대로 돌려준다.
+	//==============================================================================
+	pub fn update_text_bake_scale_moving(&mut self, last_drawn_maximum_scale: f32) -> f32 {
+		if self.text_bake_scale_step > 0.0 || self.text_bake_motion_scale_step <= 0.0 {
+			self.is_text_bake_scale_moving = false;
+			return last_drawn_maximum_scale;
+		}
+		let maximum_scale = self.transform_matrix.get_maximum_scale();
+		self.is_text_bake_scale_moving = last_drawn_maximum_scale > 0.0 && last_drawn_maximum_scale != maximum_scale;
+		maximum_scale
 	}
 
 	//==============================================================================
@@ -2012,7 +2194,10 @@ impl Graphic {
 	//==============================================================================
 	pub fn calculate_text_bake_scale(&self) -> f32 {
 		let maximum_scale = self.transform_matrix.get_maximum_scale();
-		let text_bake_scale_step = self.get_text_bake_scale_step();
+		let mut text_bake_scale_step = self.get_text_bake_scale_step();
+		if text_bake_scale_step <= 0.0 && self.is_text_bake_scale_moving() {
+			text_bake_scale_step = self.get_text_bake_motion_scale_step();
+		}
 		let quantized_scale = if text_bake_scale_step > 0.0 {
 			(maximum_scale / text_bake_scale_step).round() * text_bake_scale_step
 		}

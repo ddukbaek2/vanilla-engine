@@ -137,6 +137,38 @@ impl NodeTransform {
 	}
 
 	//==============================================================================
+	// 로컬 위치 설정. (x, y 를 바로 받는다, 원본 setLocalPositionXY)
+	//==============================================================================
+	pub fn set_local_position_xy(&mut self, x: f32, y: f32) {
+		self.local_position = Vector2::create(x, y);
+	}
+
+	//==============================================================================
+	// 로컬 크기 설정. (x, y 를 바로 받는다, 원본 setLocalScaleXY)
+	//==============================================================================
+	pub fn set_local_scale_xy(&mut self, x: f32, y: f32) {
+		self.local_scale = Vector2::create(x, y);
+	}
+
+	//==============================================================================
+	// 컨텐츠 크기 설정. (너비, 높이를 바로 받는다, 원본 setContentSizeXY)
+	//==============================================================================
+	pub fn set_content_size_xy(&mut self, width: f32, height: f32) {
+		self.content_size = Vector2::create(width, height);
+	}
+
+	//==============================================================================
+	// 부모 영역 안의 사각형에 놓기. (x, y 는 이 노드의 왼쪽 위, 부모 내용 영역의 왼쪽 위가 원점, 원본 setRect)
+	// - 내용 크기를 width, height 로 두고, 피봇이 어디든 왼쪽 위가 (x, y) 에 오게 로컬 위치를 정한다. (x + width * pivot.x, y + height * pivot.y)
+	// - 앵커는 바꾸지 않는다. 로컬 위치는 앵커와 무관하게 부모 왼쪽 위 기준이라 앵커가 어디든 같은 자리다.
+	// - 로컬 배율과 회전은 보지 않는다. (배율 1, 회전 0 일 때 화면에서도 그 사각형이다)
+	//==============================================================================
+	pub fn set_rect(&mut self, x: f32, y: f32, width: f32, height: f32) {
+		self.content_size = Vector2::create(width, height);
+		self.local_position = Vector2::create(x + width * self.pivot.x, y + height * self.pivot.y);
+	}
+
+	//==============================================================================
 	// 앵커 설정. (부모 content_size 안의 비율)
 	//==============================================================================
 	pub fn set_anchor(&mut self, anchor: Vector2) {
@@ -222,6 +254,8 @@ pub struct WorldNode {
 	pub(crate) components: Vec<Box<dyn Component>>,
 	pub(crate) parent_id: Option<NodeId>,
 	pub(crate) child_ids: Vec<NodeId>,
+	// 지난번 그릴 때 변환의 가장 큰 배율. (0 이면 아직 모른다, 글 굽기 배율을 움직이는 동안 묶는 데 쓴다)
+	last_drawn_maximum_scale: f32,
 }
 
 impl WorldNode {
@@ -239,6 +273,7 @@ impl WorldNode {
 			components: Vec::new(),
 			parent_id: None,
 			child_ids: Vec::new(),
+			last_drawn_maximum_scale: 0.0,
 		}
 	}
 
@@ -396,6 +431,33 @@ impl WorldNode {
 
 	pub fn get_content_size(&self) -> Vector2 {
 		self.transform.get_content_size()
+	}
+
+	pub fn set_local_position_xy(&mut self, x: f32, y: f32) {
+		self.transform.set_local_position_xy(x, y);
+	}
+
+	pub fn set_local_scale_xy(&mut self, x: f32, y: f32) {
+		self.transform.set_local_scale_xy(x, y);
+	}
+
+	pub fn set_content_size_xy(&mut self, width: f32, height: f32) {
+		self.transform.set_content_size_xy(width, height);
+	}
+
+	pub fn set_rect(&mut self, x: f32, y: f32, width: f32, height: f32) {
+		self.transform.set_rect(x, y, width, height);
+	}
+
+	//==============================================================================
+	// 지난번 그릴 때 변환의 가장 큰 배율. (NodeTree 가 그릴 때 Graphic.update_text_bake_scale_moving 으로 쓴다)
+	//==============================================================================
+	pub fn set_last_drawn_maximum_scale(&mut self, last_drawn_maximum_scale: f32) {
+		self.last_drawn_maximum_scale = last_drawn_maximum_scale;
+	}
+
+	pub fn get_last_drawn_maximum_scale(&self) -> f32 {
+		self.last_drawn_maximum_scale
 	}
 
 	pub fn set_anchor(&mut self, anchor: Vector2) {
