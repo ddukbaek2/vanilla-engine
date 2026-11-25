@@ -102,3 +102,4 @@ mod tests {
 		assert_eq!(scene_base.get_tracked_asset_progress(), 1.0);
 	}
 }
+pub mod assetloader;

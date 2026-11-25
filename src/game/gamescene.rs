@@ -39,6 +39,13 @@
 //     set_safe_area_insets 로 정해 줄 수 있다. (정하면 웹에서도 그 값을 쓴다)
 //   - set_view_scale_mode 는 엔진을 같이 받는다. (전역 엔진이 없다) 엔진을 주면 원본처럼 바로 뷰 영역을 다시 계산한다.
 //   - 개발자 도구(DEVTools)는 옮기지 않았다. is_dev_tools_capturing_input 은 늘 false 이고, post_draw 의 도구 그리기는 없다.
+// - 로딩 화면 바꾸기: set_loading_colors 로 색만, set_loading_drawer 로 바탕 위 그림 전체를 바꾼다. (원본 setLoadingColors, setLoadingDrawer)
+//   게이지는 기본으로 최소 노출 시간의 경과(get_loading_progress)를 보이고, set_loading_progress 나 track_asset_loader 로 진행률을 알리면
+//   그 진행률을 부드럽게 따라간다. (LoadingProgress, get_loading_progress_state)
+//   - 원본 getLoadingProgress(LoadingProgress 를 돌려줌)는 러스트 판에 이미 같은 이름(경과 시간 비율)이 있어 get_loading_progress_state 다.
+//   - 원본은 load_assets 가 끝나면 진행률을 1 로 채운다. 러스트 판은 씬이 기다리는 애셋 목록을 따로 셀 수 없어서, 맡긴 AssetLoader 가 다 끝나면 1 이 된다.
+//     (set_loading_progress 로 직접 알리는 씬은 끝에 1 을 알린다)
+//   - track_asset_loader 로 맡긴 AssetLoader 는 draw_on_load 가 프레임마다 update 를 불러 준다.
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::pivot::Pivot;
@@ -50,6 +57,8 @@ use crate::core::graphic::Graphic;
 use crate::core::node::nodetree::NodeId;
 use crate::core::scene::SceneBase;
 use crate::core::viewmanager::ViewScaleMode;
+use crate::misc::loadingprogress::LoadingProgress;
+use crate::resource::assetloader::AssetLoader;
 use crate::resource::imageasset::ImageAsset;
 use crate::ui::touchrecognizer::TouchRecognizer;
 
@@ -61,6 +70,9 @@ const LOADING_BAR_HEIGHT: f32 = 24.0;
 
 // 로딩 문 손잡이 경로. (애셋이 아닌 대기 표시)
 const LOADING_GATE_PATH: &str = "GameSceneBase.loadingGate";
+
+// 로딩 화면 그리기 함수. (graphic, 뷰 크기, 보이는 진행률 0 ~ 1, 로딩을 시작한 뒤의 초. 뷰 좌표계가 걸려 있다)
+pub type LoadingDrawer = Box<dyn FnMut(&mut Graphic, Vector2, f32, f32)>;
 
 //==============================================================================
 // 게임 공통 베이스 씬.
@@ -82,6 +94,16 @@ pub struct GameSceneBase {
 	view_scale_mode: ViewScaleMode,
 	// 세이프 에어리어 인셋. (CSS 픽셀, 위 / 오른쪽 / 아래 / 왼쪽. 없으면 플랫폼에서 읽는다)
 	safe_area_insets: Option<[f32; 4]>,
+	loading_drawer: Option<LoadingDrawer>,
+	loading_background_color: Color,
+	loading_bar_back_color: Color,
+	loading_bar_fill_color: Color,
+	// 뷰 바깥(캔버스 나머지)의 색.
+	loading_outside_color: Color,
+	loading_progress: LoadingProgress,
+	// 진행률을 알린 적이 있는지. (없으면 게이지는 경과 시간)
+	is_loading_progress_reported: bool,
+	tracked_asset_loader_list: Vec<AssetLoader>,
 }
 
 impl GameSceneBase {
@@ -106,6 +128,14 @@ impl GameSceneBase {
 			load_gate_handle: None,
 			view_scale_mode: ViewScaleMode::None,
 			safe_area_insets: None,
+			loading_drawer: None,
+			loading_background_color: Color::black(),
+			loading_bar_back_color: Color::create_from_hex("#333333"),
+			loading_bar_fill_color: Color::create_from_hex("#ffffff"),
+			loading_outside_color: Color::black(),
+			loading_progress: LoadingProgress::new(),
+			is_loading_progress_reported: false,
+			tracked_asset_loader_list: Vec::new(),
 		}
 	}
 
@@ -182,6 +212,95 @@ impl GameSceneBase {
 	//==============================================================================
 	pub fn set_loading_min_duration_ms(&mut self, milliseconds: f32) {
 		self.load_min_duration_ms = milliseconds;
+	}
+
+	//==============================================================================
+	// 로딩 화면 그리기 함수 설정. (None 이면 기본 그림: 가운데 로딩 이미지 + 아래 게이지)
+	// - 캔버스를 바깥 색으로, 뷰를 바탕색으로 칠하고 뷰 좌표계를 건 뒤 drawer(graphic, 뷰 크기, 보이는 진행률, 경과 초) 를 부른다.
+	// - 그림과 글꼴을 받기 전에도 그려지므로 도형과 기본 글꼴로 그린다. 그릴 것은 함수가 스스로 들고 있는다.
+	//==============================================================================
+	pub fn set_loading_drawer(&mut self, loading_drawer: Option<LoadingDrawer>) {
+		self.loading_drawer = loading_drawer;
+	}
+
+	//==============================================================================
+	// 로딩 화면 그리기 함수가 있는지.
+	//==============================================================================
+	pub fn has_loading_drawer(&self) -> bool {
+		self.loading_drawer.is_some()
+	}
+
+	//==============================================================================
+	// 로딩 화면 색 설정. (바탕, 게이지 바탕, 게이지. 뷰 바깥도 바탕색이 된다. 기본은 검정, #333333, #ffffff)
+	//==============================================================================
+	pub fn set_loading_colors(&mut self, background_color: impl Into<Color>, bar_back_color: impl Into<Color>, bar_fill_color: impl Into<Color>) {
+		let background_color = background_color.into();
+		self.loading_background_color = background_color;
+		self.loading_bar_back_color = bar_back_color.into();
+		self.loading_bar_fill_color = bar_fill_color.into();
+		self.loading_outside_color = background_color;
+	}
+
+	//==============================================================================
+	// 로딩 화면 뷰 바깥(캔버스 나머지)의 색 설정. (원본 setLoadingColors 의 넷째 값, set_loading_colors 뒤에 부른다)
+	//==============================================================================
+	pub fn set_loading_outside_color(&mut self, outside_color: impl Into<Color>) {
+		self.loading_outside_color = outside_color.into();
+	}
+
+	//==============================================================================
+	// 로딩 진행률 알리기. (0 ~ 1, 줄어들지 않는다. 알린 뒤로 게이지가 경과 시간 대신 이 값을 따라간다)
+	//==============================================================================
+	pub fn set_loading_progress(&mut self, progress: f32) {
+		self.is_loading_progress_reported = true;
+		self.loading_progress.set_progress(progress);
+	}
+
+	//==============================================================================
+	// 로딩 진행률 상태. (알린 정도와 부드럽게 따라가는 보이는 정도, 원본 getLoadingProgress)
+	//==============================================================================
+	pub fn get_loading_progress_state(&self) -> &LoadingProgress {
+		&self.loading_progress
+	}
+
+	//==============================================================================
+	// 로딩 진행률 상태. (변경용, 따라가는 빠르기를 바꿀 때)
+	//==============================================================================
+	pub fn get_loading_progress_state_mut(&mut self) -> &mut LoadingProgress {
+		&mut self.loading_progress
+	}
+
+	//==============================================================================
+	// 애셋 함께 받기 맡기기. (다 받을 때까지 initialize 를 미루고, draw_on_load 가 update 를 부르고 진행률을 알린다)
+	//==============================================================================
+	pub fn track_asset_loader(&mut self, asset_loader: &AssetLoader) {
+		let completion_handle = asset_loader.get_completion_handle();
+		self.scene_base.track_load_handle(&completion_handle);
+		self.tracked_asset_loader_list.push(asset_loader.clone());
+		self.is_loading_progress_reported = true;
+	}
+
+	//==============================================================================
+	// 맡긴 애셋 함께 받기를 갱신하고 진행률을 알린다. (맡긴 것들의 끝난 수 / 전체 수)
+	//==============================================================================
+	pub fn update_tracked_asset_loaders(&mut self, engine: &Engine) {
+		if self.tracked_asset_loader_list.is_empty() {
+			return;
+		}
+		let mut finished_count = 0;
+		let mut total_count = 0;
+		for asset_loader in self.tracked_asset_loader_list.iter() {
+			asset_loader.update(engine);
+			finished_count += asset_loader.get_finished_count();
+			total_count += asset_loader.get_total_count();
+		}
+		let progress = if total_count == 0 {
+			1.0
+		}
+		else {
+			finished_count as f32 / total_count as f32
+		};
+		self.loading_progress.set_progress(progress);
 	}
 
 	//==============================================================================
@@ -291,26 +410,44 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 로딩 화면 출력. (엔진이 initialize 전까지 매 프레임 부른다. 검은 배경 + 가운데 로딩 이미지 + 아래 게이지)
+	// 로딩 화면 출력. (엔진이 initialize 전까지 매 프레임 부른다. 바깥 색 캔버스 + 바탕색 뷰 + (그리기 함수, 없으면 가운데 로딩 이미지 + 아래 게이지))
 	//==============================================================================
 	pub fn draw_on_load(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
 		let current_time = engine.get_time_manager().get_realtime_since_startup();
 		let is_touch_pressed = engine.get_input_manager().is_touch_pressed();
 		self.update_loading(current_time, is_touch_pressed);
 
+		// 진행률. (맡긴 애셋 함께 받기를 갱신해 읽고, 보이는 정도를 따라가게 한다)
+		self.update_tracked_asset_loaders(engine);
+		let unscaled_time_delta = engine.get_time_manager().get_unscale_delta_time();
+		self.loading_progress.update(unscaled_time_delta);
+		let progress = if self.is_loading_progress_reported {
+			self.loading_progress.get_shown_progress()
+		}
+		else {
+			self.get_loading_progress(current_time)
+		};
+		let elapsed_seconds = (current_time - self.load_start_time).max(0.0) as f32;
+
 		let view_manager = engine.get_view_manager();
 		let canvas_native_size = view_manager.get_canvas_native_size();
 		let view_size = view_manager.get_view_size();
 
-		// 캔버스 전체 검은색.
+		// 캔버스 전체 바깥 색. (기본 검은색)
 		view_manager.apply_canvas_native_rect(graphic);
-		graphic.set_fill_color(Color::black());
+		graphic.set_fill_color(self.loading_outside_color);
 		graphic.draw_rect(Rect::create(0.0, 0.0, canvas_native_size.x, canvas_native_size.y));
 
 		// 뷰 좌표계 적용.
 		view_manager.apply_view_rect(graphic);
-		graphic.set_fill_color(Color::black());
+		graphic.set_fill_color(self.loading_background_color);
 		graphic.draw_rect(Rect::create(0.0, 0.0, view_size.x, view_size.y));
+
+		// 그리기 함수.
+		if let Some(loading_drawer) = self.loading_drawer.as_mut() {
+			loading_drawer(graphic, view_size, progress, elapsed_seconds);
+			return;
+		}
 
 		// 가운데 로딩 이미지. (가로 70%, 비율 유지)
 		let loading_image = match self.loading_image_asset.as_mut() {
@@ -331,13 +468,12 @@ impl GameSceneBase {
 		}
 
 		// 아래 로딩 게이지.
-		let progress = self.get_loading_progress(current_time);
 		let bar_width = view_size.x * 0.6;
 		let bar_x = (view_size.x - bar_width) * 0.5;
 		let bar_y = view_size.y * 0.78;
-		graphic.set_fill_color(Color::create_from_hex("#333333"));
+		graphic.set_fill_color(self.loading_bar_back_color);
 		graphic.draw_rect(Rect::create(bar_x, bar_y, bar_width, LOADING_BAR_HEIGHT));
-		graphic.set_fill_color(Color::create_from_hex("#ffffff"));
+		graphic.set_fill_color(self.loading_bar_fill_color);
 		graphic.draw_rect(Rect::create(bar_x, bar_y, bar_width * progress, LOADING_BAR_HEIGHT));
 	}
 
@@ -636,5 +772,45 @@ mod tests {
 		assert_eq!(parse_leading_integer("12.7px"), 12.0);
 		assert_eq!(parse_leading_integer(""), 0.0);
 		assert_eq!(parse_leading_integer("-3px"), -3.0);
+	}
+
+	//==============================================================================
+	// 맡긴 애셋 함께 받기: 다 받을 때까지 씬이 기다리고, 진행률을 알린다. 알리기 전 게이지는 경과 시간이다.
+	//==============================================================================
+	#[test]
+	fn tracked_asset_loader_reports_progress() {
+		let engine = Engine::new(EngineConfiguration::new());
+		let mut game_scene_base = GameSceneBase::new();
+		game_scene_base.set_loading_min_duration_ms(0.0);
+		game_scene_base.begin_loading(0.0);
+		assert!(!game_scene_base.is_loading_progress_reported);
+		let asset_loader = AssetLoader::new();
+		let first_handle = AssetLoadHandle::create_pending("first");
+		let second_handle = AssetLoadHandle::create_pending("second");
+		asset_loader.add_load_handle(&first_handle);
+		asset_loader.add_load_handle(&second_handle);
+		game_scene_base.track_asset_loader(&asset_loader);
+		asset_loader.load(&engine);
+		assert!(game_scene_base.is_loading_progress_reported);
+		assert!(!game_scene_base.get_scene_base().are_tracked_assets_finished());
+
+		first_handle.finish(Ok(Vec::new()));
+		game_scene_base.update_tracked_asset_loaders(&engine);
+		assert_eq!(game_scene_base.get_loading_progress_state().get_progress(), 0.5);
+		assert!(!game_scene_base.get_scene_base().are_tracked_assets_finished());
+		second_handle.finish(Err(String::from("fail")));
+		game_scene_base.update_tracked_asset_loaders(&engine);
+		assert_eq!(game_scene_base.get_loading_progress_state().get_progress(), 1.0);
+		assert!(game_scene_base.get_scene_base().are_tracked_assets_finished());
+
+		let mut colored_scene_base = GameSceneBase::new();
+		colored_scene_base.set_loading_colors("#16324a", "#0b1a27", "#ffcc33");
+		assert_eq!(colored_scene_base.loading_outside_color, Color::create_from_hex("#16324a"));
+		colored_scene_base.set_loading_outside_color("#05090d");
+		assert_eq!(colored_scene_base.loading_outside_color, Color::create_from_hex("#05090d"));
+		colored_scene_base.set_loading_drawer(Some(Box::new(|_graphic, _view_size, _progress, _elapsed_seconds| {})));
+		assert!(colored_scene_base.has_loading_drawer());
+		colored_scene_base.set_loading_progress(0.25);
+		assert_eq!(colored_scene_base.get_loading_progress_state().get_progress(), 0.25);
 	}
 }

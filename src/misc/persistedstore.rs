@@ -3,6 +3,7 @@
 // - 원본 misc/persistedstore.js 를 옮긴 것이다. 키 하나에 상태 객체를 JSON 으로 저장하고, 바뀔 때 구독자에게 알린다.
 // - 판 번호(version)가 다르거나 해석에 실패하면 기본값으로 돌아간다.
 // - 저장은 LocalStorage 를 쓴다. 저장 꼴({"version":1,"state":{...}})이 원본과 같아서 웹에서는 원본 게임의 저장을 그대로 읽는다.
+//   set_storage_backend 로 이 저장소만 다른 곳(LocalStorageBackend, 플랫폼의 저장소 같은 것)에 둘 수 있다.
 // - 사용:
 //     let mut store = PersistedStore::new("game.settings", serde_json::json!({ "volume": 0.8, "is_muted": false }), 1);
 //     store.set(serde_json::json!({ "volume": 0.5 }));
@@ -12,8 +13,9 @@
 //   subscribe 는 해지 함수 대신 구독 번호(PersistedStoreSubscription)를 돌려주고, unsubscribe(번호) 로 푼다.
 //   저장된 state 가 배열이면 원본은 번호 키로 섞지만, 러스트 판은 기본값으로 돌아간다.
 //==============================================================================
-use crate::misc::localstorage::LocalStorage;
+use crate::misc::localstorage::{LocalStorage, LocalStorageBackend};
 use serde_json::{Map, Value};
+use std::cell::RefCell;
 
 //==============================================================================
 // 구독 번호. (unsubscribe 에 넘긴다)
@@ -34,6 +36,8 @@ pub struct PersistedStore {
 	state: Value,
 	subscriber_list: Vec<(PersistedStoreSubscription, PersistedStoreSubscriber)>,
 	next_subscription_number: u64,
+	// 이 저장소만 쓰는 곳. (None 이면 LocalStorage. 쓰기가 &self 라 RefCell 에 둔다)
+	storage_backend: RefCell<Option<Box<dyn LocalStorageBackend>>>,
 }
 
 //==============================================================================
@@ -62,6 +66,7 @@ impl PersistedStore {
 			state: Value::Object(Map::new()),
 			subscriber_list: Vec::new(),
 			next_subscription_number: 1,
+			storage_backend: RefCell::new(None),
 		};
 		persisted_store.state = persisted_store.read_from_storage();
 		persisted_store
@@ -135,7 +140,7 @@ impl PersistedStore {
 	//==============================================================================
 	pub fn read_from_storage(&self) -> Value {
 		let default_state = Value::Object(self.default_state.clone());
-		let stored_text = LocalStorage::get_string(&self.storage_key, "");
+		let stored_text = self.read_stored_text();
 		if stored_text.is_empty() {
 			return default_state;
 		}
@@ -174,7 +179,55 @@ impl PersistedStore {
 		payload.insert(String::from("version"), Value::from(self.version));
 		payload.insert(String::from("state"), self.state.clone());
 		let payload_text = Value::Object(payload).to_string();
-		LocalStorage::set_string(&self.storage_key, &payload_text);
+		let mut storage_backend = self.storage_backend.borrow_mut();
+		match storage_backend.as_mut() {
+			Some(storage_backend) => {
+				if let Err(error_message) = storage_backend.set_item(&self.storage_key, &payload_text) {
+					eprintln!("PersistedStore: 저장소에 쓰지 못했습니다 {} ({})", self.storage_key, error_message);
+				}
+			}
+			None => {
+				LocalStorage::set_string(&self.storage_key, &payload_text);
+			}
+		}
+	}
+
+	//==============================================================================
+	// 저장된 글 읽기. (없거나 못 읽으면 빈 글)
+	//==============================================================================
+	fn read_stored_text(&self) -> String {
+		let storage_backend = self.storage_backend.borrow();
+		match storage_backend.as_ref() {
+			Some(storage_backend) => {
+				match storage_backend.get_item(&self.storage_key) {
+					Ok(Some(stored_text)) => {
+						stored_text
+					}
+					_ => {
+						String::new()
+					}
+				}
+			}
+			None => {
+				LocalStorage::get_string(&self.storage_key, "")
+			}
+		}
+	}
+
+	//==============================================================================
+	// 이 저장소만 쓰는 곳 갈아 끼우기. (None 이면 LocalStorage. 그곳에서 상태를 다시 읽고 구독자에게 알린다)
+	//==============================================================================
+	pub fn set_storage_backend(&mut self, storage_backend: Option<Box<dyn LocalStorageBackend>>) {
+		self.storage_backend.replace(storage_backend);
+		self.state = self.read_from_storage();
+		self.notify();
+	}
+
+	//==============================================================================
+	// 이 저장소만 쓰는 곳이 있는지.
+	//==============================================================================
+	pub fn has_storage_backend(&self) -> bool {
+		self.storage_backend.borrow().is_some()
 	}
 
 	//==============================================================================
@@ -247,6 +300,54 @@ mod tests {
 		assert_eq!(store.get(), &json!({ "volume": 0.8, "isMuted": false }));
 		assert_eq!(store.get_storage_key(), "game.settings");
 
+		let _ = std::fs::remove_dir_all(&storage_directory_path);
+	}
+
+	//==============================================================================
+	// 시험용 바꿔 끼우는 저장소. (값은 나눠 든 맵)
+	//==============================================================================
+	struct MapBackend {
+		item_map: Rc<std::cell::RefCell<std::collections::BTreeMap<String, String>>>,
+	}
+
+	impl LocalStorageBackend for MapBackend {
+		fn get_item(&self, key: &str) -> Result<Option<String>, String> {
+			Ok(self.item_map.borrow().get(key).cloned())
+		}
+
+		fn set_item(&mut self, key: &str, value: &str) -> Result<(), String> {
+			self.item_map.borrow_mut().insert(key.to_string(), value.to_string());
+			Ok(())
+		}
+
+		fn remove_item(&mut self, key: &str) -> Result<(), String> {
+			self.item_map.borrow_mut().remove(key);
+			Ok(())
+		}
+	}
+
+	//==============================================================================
+	// 저장소 하나만 다른 곳에 두기. (갈아 끼우면 다시 읽고 알린다)
+	//==============================================================================
+	#[test]
+	fn store_storage_backend() {
+		let storage_directory_path = use_temporary_storage_directory("backend");
+		let mut store = PersistedStore::new("settings", json!({ "volume": 1 }), 1);
+		store.set(json!({ "volume": 0.5 }));
+		let notified_volume = Rc::new(std::cell::RefCell::new(Value::Null));
+		let notified_volume_for_subscriber = notified_volume.clone();
+		store.subscribe(move |state| {
+			*notified_volume_for_subscriber.borrow_mut() = state["volume"].clone();
+		});
+		let item_map = Rc::new(std::cell::RefCell::new(std::collections::BTreeMap::new()));
+		store.set_storage_backend(Some(Box::new(MapBackend { item_map: item_map.clone() })));
+		assert!(store.has_storage_backend());
+		assert_eq!(store.get()["volume"], json!(1));
+		assert_eq!(*notified_volume.borrow(), json!(1));
+		store.set(json!({ "volume": 0.25 }));
+		assert_eq!(item_map.borrow().get("settings").map(|text| text.as_str()), Some("{\"version\":1,\"state\":{\"volume\":0.25}}"));
+		store.set_storage_backend(None);
+		assert_eq!(store.get()["volume"], json!(0.5));
 		let _ = std::fs::remove_dir_all(&storage_directory_path);
 	}
 }
