@@ -6,13 +6,14 @@
 //   데스크탑은 파일이 그 자리에서 읽혀 로딩 화면이 바로 지나가므로, 이 단계가 진행률이 차오르는 모습을 보여 준다.
 // - 로딩 화면은 set_loading_colors 로 색을, set_loading_drawer 로 그림(도는 점 셋, 둥근 막대, 받은 수)을 바꿨다. 막대는 LoadingProgress 가 부드럽게 따라간다.
 // - 다 받으면 받은 그림, 실패 목록, FixedStepper(1/30 초 걸음)로 움직이고 남은 몫으로 섞어 그리는 공을 보인다.
+// - BuildInfo 의 판도 보인다. (웹은 페이지의 meta build-version, 없으면 version.json, 둘 다 없으면 이 크레이트의 판. 읽기 손잡이도 AssetLoader 에 넣어 같이 기다린다)
 // - 실행: cargo run --example loadingshowcase
 //   화면 저장: VANILLA_CAPTURE_PATH=shots/loading_{frame}.png VANILLA_CAPTURE_FRAMES=45,160 VANILLA_CAPTURE_EXIT=1
 //==============================================================================
 
 use std::path::PathBuf;
 use vanilla::core::graphic::{TextAlign, TextBaseline};
-use vanilla::{AssetLoadHandle, AssetLoader, Color, Engine, EngineConfiguration, FixedStepper, GameSceneBase, Graphic, ImageAsset, JsonAsset, Rect, Scene, SceneBase, Vector2, ViewScaleMode};
+use vanilla::{AssetLoadHandle, AssetLoader, BuildInfo, Color, Engine, EngineConfiguration, FixedStepper, GameSceneBase, Graphic, ImageAsset, JsonAsset, Rect, Scene, SceneBase, Vector2, ViewScaleMode};
 
 //==============================================================================
 // 전역 상수 목록.
@@ -41,6 +42,7 @@ struct LoadingShowcaseScene {
 	previous_ball_position_x: f32,
 	ball_velocity_x: f32,
 	last_alpha: f32,
+	build_info: BuildInfo,
 }
 
 impl LoadingShowcaseScene {
@@ -60,6 +62,7 @@ impl LoadingShowcaseScene {
 			previous_ball_position_x: 200.0,
 			ball_velocity_x: 360.0,
 			last_alpha: 0.0,
+			build_info: BuildInfo::new(env!("CARGO_PKG_VERSION")),
 		}
 	}
 
@@ -132,6 +135,10 @@ impl Scene for LoadingShowcaseScene {
 			let stage_handle = AssetLoadHandle::create_pending(&format!("stage{}", stage_index));
 			self.asset_loader.add_load_handle(&stage_handle);
 			self.stage_handle_list.push(stage_handle);
+		}
+		self.build_info.load(engine);
+		if let Some(build_info_handle) = self.build_info.get_load_handle() {
+			self.asset_loader.add_load_handle(build_info_handle);
 		}
 		self.game_scene_base.track_asset_loader(&self.asset_loader);
 		self.asset_loader.load(engine);
@@ -235,6 +242,8 @@ impl Scene for LoadingShowcaseScene {
 			}
 		};
 		graphic.draw_fill_text(&format!("title.timeline.json: 맨 위 키 {} 개", json_key_count), 60.0, 270.0);
+		let build_text = self.build_info.read_text();
+		graphic.draw_fill_text(&format!("BuildInfo: {}", build_text), 700.0, 270.0);
 		let mut failure_top = 310.0;
 		for failure in self.asset_loader.get_failed_list().iter() {
 			graphic.set_fill_color("#ff8a80");

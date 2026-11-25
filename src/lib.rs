@@ -161,3 +161,4 @@ pub use crate::misc::localstorage::LocalStorageBackend;
 pub use crate::resource::assetloader::{AssetLoadFailure, AssetLoader, AssetLoaderCompleteHandler, AssetLoaderProgressHandler};
 pub use crate::misc::loadingprogress::LoadingProgress;
 pub use crate::game::gamescene::LoadingDrawer;
+pub use crate::misc::buildinfo::BuildInfo;

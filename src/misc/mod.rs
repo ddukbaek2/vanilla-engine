@@ -29,3 +29,4 @@ pub mod virtualpad;
 pub mod visual;
 pub mod fixedstepper;
 pub mod loadingprogress;
+pub mod buildinfo;

@@ -82,6 +82,7 @@
 - LoadingProgress: 알려 준 진행률(set_progress, 0 ~ 1, 줄지 않음)을 보이는 값(get_shown_progress)이 부드럽게 따라간다. 매 프레임 update(time_delta), set_follow_rate(기본 초당 남은 거리의 6 배), is_finished, reset
 - GameSceneBase: 로딩 화면 바꾸기. set_loading_colors(바탕, 게이지 바탕, 게이지), set_loading_outside_color(뷰 바깥), set_loading_drawer(Some(LoadingDrawer)) 로 바탕 위의 그림 전체를 바꾼다. (LoadingDrawer 는 graphic, 뷰 크기, 보이는 진행률, 경과 초를 받는 함수) set_loading_progress 나 track_asset_loader 로 진행률을 알리면 게이지가 경과 시간 대신 그 진행률을 부드럽게 따라간다. (get_loading_progress_state, 원본 getLoadingProgress 는 러스트 판에 같은 이름의 경과 시간 비율이 있어 이 이름이다) track_asset_loader 로 맡긴 것은 draw_on_load 가 update 를 불러 준다. 아무것도 정하지 않으면 지금과 같다
 - 예제 loadingshowcase: AssetLoader 로 그림 일곱 장과 문서 하나를 셋씩 받고(없는 파일 하나는 실패 목록), 받은 뒤의 단계 열 개를 흉내 내 진행률이 차오르는 바꾼 로딩 화면(도는 점, 둥근 막대, 받은 수), 다 받은 뒤 FixedStepper 로 움직이는 공
+- BuildInfo: 빌드 판 읽기. BuildInfo::new(env!("CARGO_PKG_VERSION")) 의 load(engine) 가 웹에서는 페이지의 <meta name="build-version"> 을 먼저 읽고, 없으면 페이지 기준 version.json 을 캐시 없이(fetch 의 cache: "no-cache") 요청한다. 데스크탑은 애셋 폴더의 version.json 을 읽는다. read_text() 는 meta 의 글, version.json 의 "날짜 시각 (해시)" (해시가 없으면 version), 둘 다 없으면 빌드 때 넣은 판. is_finished, get_load_handle(씬이나 AssetLoader 에 맡긴다), read_version_data, set_meta_name, set_version_json_path, BuildInfo::compose_text. meta 와 캐시 끄기는 브라우저에만 있는 것이라 데스크탑은 하지 않는다. 예제 loadingshowcase 에 판을 보인다
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.
