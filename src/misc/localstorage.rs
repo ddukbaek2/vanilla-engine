@@ -14,9 +14,98 @@
 //   숫자는 원본(JS number)처럼 f64 다. 글로 바꿀 때 원본 String(number) 와 맞춰 NaN, Infinity, -0 → "0" 을 따른다.
 //     아주 크거나 작은 수는 지수 표기(1e+21) 대신 자리를 다 쓴다. 읽을 때 "0x10" 같은 16진 표기는 받지 않는다.
 //   데스크탑 저장은 스레드마다 따로 들고 있다가 파일에 쓴다. (엔진은 한 스레드에서 돈다)
+// - 저장소 갈아 끼우기: set_backend 에 LocalStorageBackend 를 넘기면 위 기본 저장소 대신 그것을 쓴다. (플랫폼 SDK 의 저장소 같은 것)
+//   원본 setBackend 의 객체({ getItem, setItem, removeItem, getKeys, clear }) 자리가 트레이트다. 원본의 예외는 Err 로 알린다.
+// - 막혀도 죽지 않는다: 저장소가 없거나(웹의 막힌 localStorage) 쓰기가 실패하면(가득 참, 폴더를 못 만듦, 바꿔 낀 저장소의 Err)
+//   이 실행이 살아 있는 동안 메모리에 대신 둔다. (is_memory_fallback, 다시 켜면 없다)
+// - 읽기(get_string, get_boolean, get_number, get_json)는 없는 키에 기본값을 써 넣지 않는다. (원본과 같다)
 //==============================================================================
 use crate::core::engine::Engine;
+use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
+
+//==============================================================================
+// 바꿔 끼우는 저장소. (원본 setBackend 에 넘기는 객체)
+// - get_keys 와 clear 는 없어도 된다. get_keys 가 없으면 키 목록(get_keys, clear_by_prefix)은 메모리에 대신 둔 것만 보이고,
+//   clear 가 없으면 get_keys 의 키를 하나씩 지운다.
+// - 이 함수들 안에서 LocalStorage 를 다시 부르면 기본 저장소를 쓴다. (바꿔 낀 저장소는 부르는 동안 잠시 빠져 있다)
+//==============================================================================
+pub trait LocalStorageBackend {
+	//==============================================================================
+	// 값 읽기. (없으면 Ok(None))
+	//==============================================================================
+	fn get_item(&self, key: &str) -> Result<Option<String>, String>;
+
+	//==============================================================================
+	// 값 쓰기.
+	//==============================================================================
+	fn set_item(&mut self, key: &str, value: &str) -> Result<(), String>;
+
+	//==============================================================================
+	// 값 지우기.
+	//==============================================================================
+	fn remove_item(&mut self, key: &str) -> Result<(), String>;
+
+	//==============================================================================
+	// 모든 키. (기본은 빈 목록)
+	//==============================================================================
+	fn get_keys(&self) -> Result<Vec<String>, String> {
+		Ok(Vec::new())
+	}
+
+	//==============================================================================
+	// 전부 지우기. (기본은 get_keys 의 키를 하나씩 지운다)
+	//==============================================================================
+	fn clear(&mut self) -> Result<(), String> {
+		let keys = self.get_keys()?;
+		for key in keys.iter() {
+			self.remove_item(key)?;
+		}
+		Ok(())
+	}
+}
+
+//==============================================================================
+// 바꿔 낀 저장소와 메모리 대신 둔 값.
+//==============================================================================
+struct StorageOverrideState {
+	backend: Option<Box<dyn LocalStorageBackend>>,
+	memory_item_map: BTreeMap<String, String>,
+	is_memory_fallback: bool,
+}
+
+thread_local! {
+	static STORAGE_OVERRIDE_STATE: RefCell<StorageOverrideState> = const {
+		RefCell::new(StorageOverrideState {
+			backend: None,
+			memory_item_map: BTreeMap::new(),
+			is_memory_fallback: false,
+		})
+	};
+}
+
+//==============================================================================
+// 바꿔 낀 저장소로 일하기. (바꿔 낀 것이 없으면 None. 부르는 동안 꺼내 두어 안에서 LocalStorage 를 불러도 겹쳐 빌리지 않는다)
+//==============================================================================
+fn with_backend<R>(worker: impl FnOnce(&mut dyn LocalStorageBackend) -> R) -> Option<R> {
+	let mut backend = STORAGE_OVERRIDE_STATE.with(|state_cell| state_cell.borrow_mut().backend.take())?;
+	let result = worker(backend.as_mut());
+	STORAGE_OVERRIDE_STATE.with(|state_cell| {
+		let mut state = state_cell.borrow_mut();
+		if state.backend.is_none() {
+			state.backend = Some(backend);
+		}
+	});
+	Some(result)
+}
+
+//==============================================================================
+// 메모리에 대신 둔 값 만지기.
+//==============================================================================
+fn with_memory_item_map<R>(worker: impl FnOnce(&mut BTreeMap<String, String>) -> R) -> R {
+	STORAGE_OVERRIDE_STATE.with(|state_cell| worker(&mut state_cell.borrow_mut().memory_item_map))
+}
 
 //==============================================================================
 // 로컬 스토리지. (정적 함수 묶음)
@@ -54,17 +143,123 @@ impl LocalStorage {
 	}
 
 	//==============================================================================
+	// 저장소 갈아 끼우기. (None 이면 기본 저장소로 돌아간다. 메모리에 대신 둔 값은 버린다)
+	//==============================================================================
+	pub fn set_backend(backend: Option<Box<dyn LocalStorageBackend>>) {
+		STORAGE_OVERRIDE_STATE.with(|state_cell| {
+			let mut state = state_cell.borrow_mut();
+			state.backend = backend;
+			state.memory_item_map.clear();
+			state.is_memory_fallback = false;
+		});
+	}
+
+	//==============================================================================
+	// 저장소를 갈아 끼웠는지.
+	//==============================================================================
+	pub fn has_backend() -> bool {
+		STORAGE_OVERRIDE_STATE.with(|state_cell| state_cell.borrow().backend.is_some())
+	}
+
+	//==============================================================================
+	// 저장소를 못 써서 메모리에 대신 둔 적이 있는지.
+	//==============================================================================
+	pub fn is_memory_fallback() -> bool {
+		STORAGE_OVERRIDE_STATE.with(|state_cell| state_cell.borrow().is_memory_fallback)
+	}
+
+	//==============================================================================
+	// 값 하나 읽기. (없거나 못 읽으면 None. 메모리에 대신 둔 값이 앞선다)
+	//==============================================================================
+	pub fn get_item(key: &str) -> Option<String> {
+		if let Some(memory_value) = with_memory_item_map(|memory_item_map| memory_item_map.get(key).cloned()) {
+			return Some(memory_value);
+		}
+		match with_backend(|backend| backend.get_item(key)) {
+			Some(Ok(value)) => {
+				value
+			}
+			Some(Err(_)) => {
+				None
+			}
+			None => {
+				storage_backend::get_item(key)
+			}
+		}
+	}
+
+	//==============================================================================
+	// 값 하나 쓰기. (저장소에 썼으면 true, 못 써서 메모리에 대신 뒀으면 false)
+	//==============================================================================
+	pub fn set_item(key: &str, value: &str) -> bool {
+		let is_written = match with_backend(|backend| backend.set_item(key, value)) {
+			Some(Ok(())) => {
+				true
+			}
+			Some(Err(error_message)) => {
+				eprintln!("LocalStorage: 저장소에 쓰지 못해 메모리에 둡니다 {} ({})", key, error_message);
+				false
+			}
+			None => {
+				storage_backend::set_item(key, value)
+			}
+		};
+		STORAGE_OVERRIDE_STATE.with(|state_cell| {
+			let mut state = state_cell.borrow_mut();
+			if is_written {
+				state.memory_item_map.remove(key);
+			}
+			else {
+				state.memory_item_map.insert(key.to_string(), value.to_string());
+				state.is_memory_fallback = true;
+			}
+		});
+		is_written
+	}
+
+	//==============================================================================
+	// 값 하나 지우기. (메모리에 대신 둔 값도 지운다)
+	//==============================================================================
+	pub fn remove_item(key: &str) {
+		with_memory_item_map(|memory_item_map| {
+			memory_item_map.remove(key);
+		});
+		match with_backend(|backend| backend.remove_item(key)) {
+			Some(Ok(())) => {
+			}
+			Some(Err(error_message)) => {
+				eprintln!("LocalStorage: 저장소에서 지우지 못했습니다 {} ({})", key, error_message);
+			}
+			None => {
+				storage_backend::remove_item(key);
+			}
+		}
+	}
+
+	//==============================================================================
 	// 전체 제거.
 	//==============================================================================
 	pub fn clear() {
-		storage_backend::clear_all();
+		with_memory_item_map(|memory_item_map| {
+			memory_item_map.clear();
+		});
+		match with_backend(|backend| backend.clear()) {
+			Some(Ok(())) => {
+			}
+			Some(Err(error_message)) => {
+				eprintln!("LocalStorage: 저장소를 비우지 못했습니다 ({})", error_message);
+			}
+			None => {
+				storage_backend::clear_all();
+			}
+		}
 	}
 
 	//==============================================================================
 	// 문자열 값 설정.
 	//==============================================================================
 	pub fn set_string(key: &str, string_value: &str) {
-		storage_backend::set_item(key, string_value);
+		LocalStorage::set_item(key, string_value);
 	}
 
 	//==============================================================================
@@ -92,31 +287,29 @@ impl LocalStorage {
 	// 값 제거.
 	//==============================================================================
 	pub fn remove(key: &str) {
-		storage_backend::remove_item(key);
+		LocalStorage::remove_item(key);
 	}
 
 	//==============================================================================
-	// 문자열 값 반환. (없으면 기본값을 저장하고 기본값을 돌려준다. 원본과 같음)
+	// 문자열 값 반환. (없으면 기본값. 저장소에는 쓰지 않는다)
 	//==============================================================================
 	pub fn get_string(key: &str, default_string_value: &str) -> String {
-		match storage_backend::get_item(key) {
+		match LocalStorage::get_item(key) {
 			Some(string_value) => {
 				string_value
 			}
 			None => {
-				LocalStorage::set_string(key, default_string_value);
 				default_string_value.to_string()
 			}
 		}
 	}
 
 	//==============================================================================
-	// 논리 값 반환. (없거나 빈 글이면 기본값을 저장하고 돌려준다. "true" 만 참)
+	// 논리 값 반환. (없거나 빈 글이면 기본값, 저장소에는 쓰지 않는다. "true" 만 참)
 	//==============================================================================
 	pub fn get_boolean(key: &str, default_boolean_value: bool) -> bool {
 		let string_value = LocalStorage::get_string(key, "");
 		if string_value.is_empty() {
-			LocalStorage::set_boolean(key, default_boolean_value);
 			default_boolean_value
 		}
 		else {
@@ -125,12 +318,11 @@ impl LocalStorage {
 	}
 
 	//==============================================================================
-	// 숫자 값 반환. (없거나 빈 글이면 기본값을 저장하고 돌려준다. 숫자가 아니면 NaN, 원본 Number(text))
+	// 숫자 값 반환. (없거나 빈 글이면 기본값, 저장소에는 쓰지 않는다. 숫자가 아니면 NaN, 원본 Number(text))
 	//==============================================================================
 	pub fn get_number(key: &str, default_number_value: f64) -> f64 {
 		let string_value = LocalStorage::get_string(key, "");
 		if string_value.is_empty() {
-			LocalStorage::set_number(key, default_number_value);
 			default_number_value
 		}
 		else {
@@ -145,9 +337,9 @@ impl LocalStorage {
 		if prefix.is_empty() {
 			return 0;
 		}
-		let remove_key_list: Vec<String> = storage_backend::get_all_keys().into_iter().filter(|key| key.starts_with(prefix)).collect();
+		let remove_key_list: Vec<String> = LocalStorage::get_keys().into_iter().filter(|key| key.starts_with(prefix)).collect();
 		for key in remove_key_list.iter() {
-			storage_backend::remove_item(key);
+			LocalStorage::remove_item(key);
 		}
 		remove_key_list.len()
 	}
@@ -156,16 +348,59 @@ impl LocalStorage {
 	// 키가 있는지.
 	//==============================================================================
 	pub fn contains_key(key: &str) -> bool {
-		storage_backend::get_item(key).is_some()
+		LocalStorage::get_item(key).is_some()
 	}
 
 	//==============================================================================
-	// 모든 키 반환. (정렬해서)
+	// 모든 키 반환. (정렬해서, 메모리에 대신 둔 키도 넣는다)
 	//==============================================================================
 	pub fn get_keys() -> Vec<String> {
-		let mut keys = storage_backend::get_all_keys();
+		let mut keys = match with_backend(|backend| backend.get_keys()) {
+			Some(Ok(backend_keys)) => {
+				backend_keys
+			}
+			Some(Err(error_message)) => {
+				eprintln!("LocalStorage: 키 목록을 읽지 못했습니다 ({})", error_message);
+				Vec::new()
+			}
+			None => {
+				storage_backend::get_all_keys()
+			}
+		};
+		with_memory_item_map(|memory_item_map| {
+			for key in memory_item_map.keys() {
+				keys.push(key.clone());
+			}
+		});
 		keys.sort();
+		keys.dedup();
 		keys
+	}
+
+	//==============================================================================
+	// JSON 값 반환. (없거나 풀 수 없으면 기본값, 저장소에는 쓰지 않는다)
+	//==============================================================================
+	pub fn get_json(key: &str, default_value: serde_json::Value) -> serde_json::Value {
+		let string_value = match LocalStorage::get_item(key) {
+			Some(string_value) => {
+				string_value
+			}
+			None => {
+				return default_value;
+			}
+		};
+		if string_value.is_empty() {
+			return default_value;
+		}
+		serde_json::from_str(&string_value).unwrap_or(default_value)
+	}
+
+	//==============================================================================
+	// JSON 값 설정. (JSON 글로 바꿔 쓴다. 저장소에 썼으면 true)
+	//==============================================================================
+	pub fn set_json(key: &str, value: &serde_json::Value) -> bool {
+		let string_value = value.to_string();
+		LocalStorage::set_item(key, &string_value)
 	}
 }
 
@@ -383,11 +618,11 @@ mod storage_backend {
 	//==============================================================================
 	// 파일에 쓰기. (임시 파일에 쓰고 바꿔치기해서 중간에 꺼져도 깨지지 않게 한다)
 	//==============================================================================
-	fn write_entries_to_file(storage_file_path: &Path, entries: &BTreeMap<String, String>) {
+	fn write_entries_to_file(storage_file_path: &Path, entries: &BTreeMap<String, String>) -> bool {
 		if let Some(parent_directory_path) = storage_file_path.parent() {
 			if let Err(error) = std::fs::create_dir_all(parent_directory_path) {
 				eprintln!("LocalStorage: 저장 폴더를 만들지 못했습니다 {} ({})", parent_directory_path.display(), error);
-				return;
+				return false;
 			}
 		}
 		let file_text = match serde_json::to_string_pretty(entries) {
@@ -396,14 +631,16 @@ mod storage_backend {
 			}
 			Err(error) => {
 				eprintln!("LocalStorage: 저장 내용을 만들지 못했습니다 ({})", error);
-				return;
+				return false;
 			}
 		};
 		let temporary_file_path = storage_file_path.with_extension("json.tmp");
 		let write_result = std::fs::write(&temporary_file_path, file_text).and_then(|_| std::fs::rename(&temporary_file_path, storage_file_path));
 		if let Err(error) = write_result {
 			eprintln!("LocalStorage: 저장하지 못했습니다 {} ({})", storage_file_path.display(), error);
+			return false;
 		}
+		true
 	}
 
 	//==============================================================================
@@ -422,9 +659,9 @@ mod storage_backend {
 	}
 
 	//==============================================================================
-	// 저장 내용을 바꾸고, 바뀌었으면 파일에 쓴다. (writer 가 바뀌었는지를 돌려준다)
+	// 저장 내용을 바꾸고, 바뀌었으면 파일에 쓴다. (writer 가 바뀌었는지를 돌려준다. 파일에 못 썼으면 false)
 	//==============================================================================
-	fn modify_entries(writer: impl FnOnce(&mut BTreeMap<String, String>) -> bool) {
+	fn modify_entries(writer: impl FnOnce(&mut BTreeMap<String, String>) -> bool) -> bool {
 		DESKTOP_STORAGE_STATE.with(|state_cell| {
 			let mut state = state_cell.borrow_mut();
 			let storage_file_path = resolve_storage_file_path(&state);
@@ -434,9 +671,10 @@ mod storage_backend {
 			let entries = state.entries.get_or_insert_with(BTreeMap::new);
 			let is_changed = writer(entries);
 			if is_changed {
-				write_entries_to_file(&storage_file_path, entries);
+				return write_entries_to_file(&storage_file_path, entries);
 			}
-		});
+			true
+		})
 	}
 
 	//==============================================================================
@@ -479,13 +717,13 @@ mod storage_backend {
 	}
 
 	//==============================================================================
-	// 값 쓰기.
+	// 값 쓰기. (파일에 썼는지)
 	//==============================================================================
-	pub fn set_item(key: &str, value: &str) {
+	pub fn set_item(key: &str, value: &str) -> bool {
 		modify_entries(|entries| {
 			let previous_value = entries.insert(key.to_string(), value.to_string());
 			previous_value.as_deref() != Some(value)
-		});
+		})
 	}
 
 	//==============================================================================
@@ -556,11 +794,16 @@ mod storage_backend {
 	}
 
 	//==============================================================================
-	// 값 쓰기. (용량이 넘치면 조용히 실패한다)
+	// 값 쓰기. (썼는지, 막혀 있거나 용량이 넘치면 false)
 	//==============================================================================
-	pub fn set_item(key: &str, value: &str) {
-		if let Some(storage) = get_storage() {
-			let _ = storage.set_item(key, value);
+	pub fn set_item(key: &str, value: &str) -> bool {
+		match get_storage() {
+			Some(storage) => {
+				storage.set_item(key, value).is_ok()
+			}
+			None => {
+				false
+			}
 		}
 	}
 
@@ -659,11 +902,13 @@ mod tests {
 		assert_eq!(LocalStorage::get_number("game.best", 0.0), 1234.5);
 		assert!(LocalStorage::contains_key("other"));
 
-		// 없는 키는 기본값을 저장하고 돌려준다.
+		// 없는 키는 기본값을 돌려주고 저장하지 않는다.
 		assert_eq!(LocalStorage::get_number("game.level", 3.0), 3.0);
-		assert_eq!(LocalStorage::get_string("game.level", "9"), "3");
+		assert_eq!(LocalStorage::get_string("game.level", "9"), "9");
 		assert!(LocalStorage::get_boolean("game.vibration", true));
-		assert_eq!(LocalStorage::get_string("game.vibration", ""), "true");
+		assert!(!LocalStorage::contains_key("game.vibration"));
+		LocalStorage::set_number("game.level", 3.0);
+		LocalStorage::set_boolean("game.vibration", true);
 
 		assert_eq!(LocalStorage::get_keys(), vec!["game.best", "game.level", "game.name", "game.sound", "game.vibration", "other"]);
 		assert_eq!(LocalStorage::clear_by_prefix("game."), 5);
@@ -676,6 +921,104 @@ mod tests {
 		LocalStorage::set_storage_directory(Some(storage_directory_path.clone()));
 		assert!(LocalStorage::get_keys().is_empty());
 
+		let _ = std::fs::remove_dir_all(&storage_directory_path);
+	}
+
+	//==============================================================================
+	// JSON 읽기와 쓰기. (깨진 글은 기본값)
+	//==============================================================================
+	#[test]
+	fn json_round_trip() {
+		let storage_directory_path = use_temporary_storage_directory("json");
+		assert!(LocalStorage::set_json("table", &serde_json::json!({ "a": 1, "b": [2, 3] })));
+		assert_eq!(LocalStorage::get_json("table", serde_json::Value::Null)["b"][1], serde_json::json!(3));
+		LocalStorage::set_string("broken", "{not json");
+		assert_eq!(LocalStorage::get_json("broken", serde_json::json!("default")), serde_json::json!("default"));
+		assert_eq!(LocalStorage::get_json("missing", serde_json::json!(7)), serde_json::json!(7));
+		let _ = std::fs::remove_dir_all(&storage_directory_path);
+	}
+
+	//==============================================================================
+	// 시험용 바꿔 끼우는 저장소. (값은 나눠 든 맵, is_blocked 면 모두 Err)
+	//==============================================================================
+	struct TestBackend {
+		item_map: std::rc::Rc<RefCell<BTreeMap<String, String>>>,
+		is_blocked: bool,
+	}
+
+	impl LocalStorageBackend for TestBackend {
+		fn get_item(&self, key: &str) -> Result<Option<String>, String> {
+			if self.is_blocked {
+				return Err(String::from("blocked"));
+			}
+			Ok(self.item_map.borrow().get(key).cloned())
+		}
+
+		fn set_item(&mut self, key: &str, value: &str) -> Result<(), String> {
+			if self.is_blocked {
+				return Err(String::from("quota"));
+			}
+			self.item_map.borrow_mut().insert(key.to_string(), value.to_string());
+			Ok(())
+		}
+
+		fn remove_item(&mut self, key: &str) -> Result<(), String> {
+			if self.is_blocked {
+				return Err(String::from("blocked"));
+			}
+			self.item_map.borrow_mut().remove(key);
+			Ok(())
+		}
+
+		fn get_keys(&self) -> Result<Vec<String>, String> {
+			if self.is_blocked {
+				return Err(String::from("blocked"));
+			}
+			Ok(self.item_map.borrow().keys().cloned().collect())
+		}
+	}
+
+	//==============================================================================
+	// 저장소 갈아 끼우기와 막혔을 때 메모리로 대신하기.
+	//==============================================================================
+	#[test]
+	fn backend_and_memory_fallback() {
+		let storage_directory_path = use_temporary_storage_directory("backend");
+		let item_map = std::rc::Rc::new(RefCell::new(BTreeMap::new()));
+		LocalStorage::set_backend(Some(Box::new(TestBackend { item_map: item_map.clone(), is_blocked: false })));
+		assert!(LocalStorage::has_backend());
+		LocalStorage::set_string("game.a", "1");
+		LocalStorage::set_number("game.b", 2.0);
+		LocalStorage::set_string("other", "x");
+		assert_eq!(item_map.borrow().get("game.a").map(|value| value.as_str()), Some("1"));
+		assert_eq!(LocalStorage::get_keys(), vec!["game.a", "game.b", "other"]);
+		assert_eq!(LocalStorage::clear_by_prefix("game."), 2);
+		LocalStorage::clear();
+		assert!(item_map.borrow().is_empty());
+
+		LocalStorage::set_backend(Some(Box::new(TestBackend { item_map: item_map.clone(), is_blocked: true })));
+		assert!(!LocalStorage::set_item("save", "slot1"));
+		assert!(LocalStorage::is_memory_fallback());
+		assert_eq!(LocalStorage::get_string("save", ""), "slot1");
+		assert_eq!(LocalStorage::get_keys(), vec!["save"]);
+		LocalStorage::remove("save");
+		assert!(!LocalStorage::contains_key("save"));
+
+		// 되돌리면 기본 저장소(파일)를 쓰고, 메모리에 대신 둔 것은 버린다.
+		LocalStorage::set_backend(None);
+		assert!(!LocalStorage::has_backend());
+		assert!(!LocalStorage::is_memory_fallback());
+		assert!(LocalStorage::set_item("file.key", "1"));
+		assert!(LocalStorage::get_storage_file_path().expect("storage file path").exists());
+
+		// 파일을 못 쓰면(폴더 자리에 파일이 있음) 메모리에 대신 둔다.
+		let blocked_directory_path = storage_directory_path.join("blocked");
+		std::fs::write(&blocked_directory_path, "file").expect("blocking file");
+		LocalStorage::set_storage_directory(Some(blocked_directory_path.join("inner")));
+		assert!(!LocalStorage::set_item("desktop.key", "2"));
+		assert!(LocalStorage::is_memory_fallback());
+		assert_eq!(LocalStorage::get_string("desktop.key", ""), "2");
+		LocalStorage::set_backend(None);
 		let _ = std::fs::remove_dir_all(&storage_directory_path);
 	}
 }

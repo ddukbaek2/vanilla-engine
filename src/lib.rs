@@ -157,3 +157,4 @@ pub use crate::ui::uidocument::{UIDocument, UIDocumentLoadContext, UIDocumentSav
 pub use crate::effect::particlesystem::{EmitterShape, ParticleRenderShape};
 pub use crate::core::component::text::TextWrapMode;
 pub use crate::misc::fixedstepper::FixedStepper;
+pub use crate::misc::localstorage::LocalStorageBackend;

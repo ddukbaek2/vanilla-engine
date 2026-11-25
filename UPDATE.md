@@ -74,6 +74,9 @@
 - TimeManager: set_maximum_time_delta(seconds), get_maximum_time_delta(). 한 프레임 간격의 상한을 바꾼다. (지금까지 0.25 초로 박혀 있었고 기본값은 그대로다) 0 보다 작거나 유한하지 않으면 0.25
 - Engine: set_maximum_frame_per_second(n), get_maximum_frame_per_second(). 실행 중에 최대 FPS 를 바꾼다. (지금까지는 EngineConfiguration 으로 처음에만 정할 수 있었다) 설정에 적고 데스크탑과 웹 플랫폼이 프레임마다 그 값을 읽는다. 0 보다 작거나 유한하지 않으면 0(제한 없음)
 - FixedStepper: 고정 걸음. FixedStepper::new(step_seconds, maximum_steps_per_frame) 의 advance(time_delta, step_function) 가 쌓인 시간만큼 step_function(step_seconds) 을 부르고 남은 몫(0 ~ 1)을 돌려준다. 한 프레임 상한만큼 돌고도 걸음이 남으면 남은 시간을 버리고, step_function 이 false 를 돌려주면 그 프레임은 거기서 멈추고 시간을 쌓아 둔다. (원본은 false 일 때만 멈추고 돌려주지 않아도 되지만 러스트 판은 늘 bool 을 돌려준다) get_alpha, get_last_step_count, reset
+- LocalStorage: 저장소 갈아 끼우기 set_backend(Some(Box<dyn LocalStorageBackend>)), has_backend. LocalStorageBackend 는 get_item, set_item, remove_item 과 (없어도 되는) get_keys, clear 를 가진 트레이트이고, 원본의 예외 자리는 Err 다. 저장소가 없거나(웹의 막힌 localStorage) 쓰기가 실패하면(용량, 데스크탑 폴더를 못 만듦, 바꿔 낀 저장소의 Err) 이 실행 동안 메모리에 대신 둔다. (is_memory_fallback) get_item, set_item(저장소에 썼는지), remove_item, get_json(key, default_value), set_json(key, &value)
+- LocalStorage: 읽기(get_string, get_boolean, get_number)가 없는 키에 기본값을 써 넣지 않는다. (기본 동작을 바꾼 것이다, 원본과 같이 바꿨다) 읽기만 해도 키가 생겨서 새 판에서 기본값을 바꿔도 옛 기본값이 저장된 값처럼 남고 contains_key 가 늘 참이 됐다. 원본을 쓰는 출시 게임 가운데 이 동작에 기대는 곳이 없다. (2026-11-25 게임 코드 grep, vanilla.js UPDATE.md 에 자세히)
+- PersistedStore: set_storage_backend(Option<Box<dyn LocalStorageBackend>>), has_storage_backend. 저장소 하나만 다른 곳에 둔다. 갈아 끼우면 그곳에서 다시 읽고 구독자에게 알린다
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.
