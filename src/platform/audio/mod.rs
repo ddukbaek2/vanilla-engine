@@ -21,6 +21,8 @@ mod desktop;
 #[cfg(not(target_arch = "wasm32"))]
 mod mixer;
 #[cfg(not(target_arch = "wasm32"))]
+mod oscillator;
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) use desktop::*;
 #[cfg(not(target_arch = "wasm32"))]
 pub use desktop::{AudioBuffer, AudioContext};
