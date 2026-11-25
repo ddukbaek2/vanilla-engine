@@ -1,10 +1,10 @@
 //==============================================================================
-// Opus 해석기. (symphonia 코덱 등록표에 넣는 엔진 해석기, 속은 opus-pure)
-// - 크롬 media/filters/opus_audio_decoder.cc 와 같게 한다.
-//   48kHz 로 풀고(kOpusDefaultSampleRate), OpusHead 의 출력 게인을 디코더에 건다(OPUS_SET_GAIN).
-//   채널 매핑 패밀리 1 은 Vorbis 채널 순서를 크로미엄 순서로 바꿔 내보낸다. (GetVorbisToChromiumChannelLayoutOffsets, 5.1 은 L R C LFE SL SR)
-//   pre-skip 과 끝 버리기는 여기서 하지 않고 크롬처럼 바깥(trim.rs 의 AudioDiscardHelper 자리)이 한다.
-// - OpusHead 는 symphonia 의 ogg, mkv 풀기가 extra_data 로 준다. (ogg 는 첫 패킷, mkv 는 CodecPrivate)
+//! Opus 해석기. (symphonia 코덱 등록표에 넣는 엔진 해석기, 속은 opus-pure)
+//! - 크롬 media/filters/opus_audio_decoder.cc 와 같게 한다.
+//!   48kHz 로 풀고(kOpusDefaultSampleRate), OpusHead 의 출력 게인을 디코더에 건다(OPUS_SET_GAIN).
+//!   채널 매핑 패밀리 1 은 Vorbis 채널 순서를 크로미엄 순서로 바꿔 내보낸다. (GetVorbisToChromiumChannelLayoutOffsets, 5.1 은 L R C LFE SL SR)
+//!   pre-skip 과 끝 버리기는 여기서 하지 않고 크롬처럼 바깥(trim.rs 의 AudioDiscardHelper 자리)이 한다.
+//! - OpusHead 는 symphonia 의 ogg, mkv 풀기가 extra_data 로 준다. (ogg 는 첫 패킷, mkv 는 CodecPrivate)
 //==============================================================================
 use opus_pure::{OpusDecoder, OpusMSDecoder, MAX_PACKET_SAMPLES};
 use symphonia::core::audio::{AsGenericAudioBufferRef, AudioBuffer, AudioMut, AudioSpec, Channels, GenericAudioBufferRef, Position};
@@ -15,10 +15,10 @@ use symphonia::core::codecs::CodecInfo;
 use symphonia::core::errors::{decode_error, unsupported_error, Result};
 use symphonia::core::packet::PacketRef;
 
-// 크롬 Opus 해석 표본율. (kOpusDefaultSampleRate)
+/// 크롬 Opus 해석 표본율. (kOpusDefaultSampleRate)
 pub(crate) const OPUS_SAMPLE_RATE: u32 = 48000;
 
-// Vorbis 채널 순서 → 크로미엄 채널 순서. (media/formats/common/opus_constants.h, 크로미엄 채널 i 는 Vorbis 채널 표[i])
+/// Vorbis 채널 순서 → 크로미엄 채널 순서. (media/formats/common/opus_constants.h, 크로미엄 채널 i 는 Vorbis 채널 표[i])
 const VORBIS_TO_CHROMIUM_CHANNEL_OFFSET_TABLE: [&[usize]; 8] = [
 	&[0],
 	&[0, 1],
@@ -31,7 +31,7 @@ const VORBIS_TO_CHROMIUM_CHANNEL_OFFSET_TABLE: [&[usize]; 8] = [
 ];
 
 //==============================================================================
-// OpusHead. (RFC 7845 5.1, 크롬 ParseOpusExtraData 가 읽는 칸)
+/// OpusHead. (RFC 7845 5.1, 크롬 ParseOpusExtraData 가 읽는 칸)
 //==============================================================================
 #[derive(Clone, Debug)]
 pub(crate) struct OpusHeader {
@@ -46,7 +46,7 @@ pub(crate) struct OpusHeader {
 
 impl OpusHeader {
 	//==============================================================================
-	// 바이트에서 읽기. (OpusHead 로 시작하는 19 바이트 이상)
+	/// 바이트에서 읽기. (OpusHead 로 시작하는 19 바이트 이상)
 	//==============================================================================
 	pub(crate) fn parse(bytes: &[u8]) -> Option<OpusHeader> {
 		if bytes.len() < 19 || &bytes[0..8] != b"OpusHead" {
@@ -89,7 +89,7 @@ impl OpusHeader {
 }
 
 //==============================================================================
-// 스트림을 푸는 쪽. (모노와 스테레오 한 스트림, 또는 여러 스트림)
+/// 스트림을 푸는 쪽. (모노와 스테레오 한 스트림, 또는 여러 스트림)
 //==============================================================================
 enum OpusStreamDecoder {
 	Single(OpusDecoder),
@@ -97,13 +97,13 @@ enum OpusStreamDecoder {
 }
 
 //==============================================================================
-// symphonia 에 넣는 Opus 해석기.
+/// symphonia 에 넣는 Opus 해석기.
 //==============================================================================
 pub(crate) struct OpusPacketDecoder {
 	codec_params: AudioCodecParameters,
 	stream_decoder: OpusStreamDecoder,
 	channel_count: usize,
-	// 내보낼 채널 i 가 디코더 출력의 몇째 채널인지. (None 이면 무음, 크롬 순서로 바꾼 것)
+	/// 내보낼 채널 i 가 디코더 출력의 몇째 채널인지. (None 이면 무음, 크롬 순서로 바꾼 것)
 	output_channel_source_list: Vec<Option<usize>>,
 	interleaved_samples: Vec<f32>,
 	buffer: AudioBuffer<f32>,
@@ -111,7 +111,7 @@ pub(crate) struct OpusPacketDecoder {
 
 impl OpusPacketDecoder {
 	//==============================================================================
-	// 생성. (OpusHead 로)
+	/// 생성. (OpusHead 로)
 	//==============================================================================
 	pub(crate) fn create(codec_params: &AudioCodecParameters) -> Result<OpusPacketDecoder> {
 		let header = match codec_params.extra_data.as_deref().and_then(OpusHeader::parse) {
@@ -186,7 +186,7 @@ impl OpusPacketDecoder {
 	}
 
 	//==============================================================================
-	// 머리에 적힌 pre-skip. (크롬 codec_delay_)
+	/// 머리에 적힌 pre-skip. (크롬 codec_delay_)
 	//==============================================================================
 	pub(crate) fn read_pre_skip(codec_params: &AudioCodecParameters) -> u32 {
 		codec_params.extra_data.as_deref().and_then(OpusHeader::parse).map(|header| header.pre_skip).unwrap_or(0)
@@ -194,7 +194,7 @@ impl OpusPacketDecoder {
 }
 
 //==============================================================================
-// 크로미엄 순서의 채널 자리. (1: 모노, 2: L R, 그 밖은 크로미엄 배치, 패밀리 255 는 자리 없는 채널)
+/// 크로미엄 순서의 채널 자리. (1: 모노, 2: L R, 그 밖은 크로미엄 배치, 패밀리 255 는 자리 없는 채널)
 //==============================================================================
 fn create_chromium_channels(channel_count: usize, mapping_family: u8) -> Channels {
 	if mapping_family > 1 {

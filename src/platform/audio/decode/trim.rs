@@ -1,21 +1,21 @@
 //==============================================================================
-// 앞뒤 다듬기. (크롬 decodeAudioData 가 버리는 프레임과 같게)
-// - 크롬은 FFmpeg 로 디먹스해 패킷의 시각과 AV_PKT_DATA_SKIP_SAMPLES 를 받고, AudioDiscardHelper 가 버리며,
-//   AudioFileReader 가 0 보다 앞선 시각의 프레임과 AAC 의 끝을 자른다. (media/filters/audio_file_reader.cc, media/base/audio_discard_helper.cc)
-//   symphonia 의 풀기는 시각과 다듬기 값을 FFmpeg 와 조금 다르게 매기므로, 꼴마다 FFmpeg 가 매길 값을 셈해 같은 프레임을 남긴다.
-// - WAV(PCM), FLAC, ADTS(AAC): 버리지 않는다.
-// - MP3: LAME 머리의 지연 + 529 를 앞에서, 채움 - 529 를 뒤에서. (FFmpeg mp3dec start_skip_samples, first_discard_sample. symphonia 의 값과 같다)
-// - Ogg Opus: OpusHead 의 pre-skip 을 앞에서, 마지막 쪽 granule 로 남는 것을 뒤에서. (oggparseopus)
-// - Ogg Vorbis: 앞은 버리지 않고, 마지막 쪽 패킷 길이의 합 - (마지막 granule - 앞 쪽 granule)을 뒤에서. (oggparsevorbis)
-//   FFmpeg 는 첫 패킷 길이를 블록 크기의 반으로 세므로, 첫 패킷이 마지막 쪽에 있으면(쪽 하나짜리 짧은 소리) 그만큼 더 버린다.
-// - WebM(Matroska) Opus: pre-skip 을 앞에서 버린 뒤, 첫 블록 시각(트랙 시간 단위로 반올림한 CodecDelay 를 뺀 것)이 0 보다 앞서면 그만큼 더,
-//   블록의 DiscardPadding 을 그 패킷 뒤에서. (matroskadec, OpusAudioDecoder 의 discard_helper_, FinalizeDecodedBuffer)
-// - MP4(AAC): 편집 목록(elst)의 media_time 을 앞에서, 마지막 패킷 길이나 컨테이너 길이로 끝을. (mov.c, MaybeTrimAacFinalBuffer)
+//! 앞뒤 다듬기. (크롬 decodeAudioData 가 버리는 프레임과 같게)
+//! - 크롬은 FFmpeg 로 디먹스해 패킷의 시각과 AV_PKT_DATA_SKIP_SAMPLES 를 받고, AudioDiscardHelper 가 버리며,
+//!   AudioFileReader 가 0 보다 앞선 시각의 프레임과 AAC 의 끝을 자른다. (media/filters/audio_file_reader.cc, media/base/audio_discard_helper.cc)
+//!   symphonia 의 풀기는 시각과 다듬기 값을 FFmpeg 와 조금 다르게 매기므로, 꼴마다 FFmpeg 가 매길 값을 셈해 같은 프레임을 남긴다.
+//! - WAV(PCM), FLAC, ADTS(AAC): 버리지 않는다.
+//! - MP3: LAME 머리의 지연 + 529 를 앞에서, 채움 - 529 를 뒤에서. (FFmpeg mp3dec start_skip_samples, first_discard_sample. symphonia 의 값과 같다)
+//! - Ogg Opus: OpusHead 의 pre-skip 을 앞에서, 마지막 쪽 granule 로 남는 것을 뒤에서. (oggparseopus)
+//! - Ogg Vorbis: 앞은 버리지 않고, 마지막 쪽 패킷 길이의 합 - (마지막 granule - 앞 쪽 granule)을 뒤에서. (oggparsevorbis)
+//!   FFmpeg 는 첫 패킷 길이를 블록 크기의 반으로 세므로, 첫 패킷이 마지막 쪽에 있으면(쪽 하나짜리 짧은 소리) 그만큼 더 버린다.
+//! - WebM(Matroska) Opus: pre-skip 을 앞에서 버린 뒤, 첫 블록 시각(트랙 시간 단위로 반올림한 CodecDelay 를 뺀 것)이 0 보다 앞서면 그만큼 더,
+//!   블록의 DiscardPadding 을 그 패킷 뒤에서. (matroskadec, OpusAudioDecoder 의 discard_helper_, FinalizeDecodedBuffer)
+//! - MP4(AAC): 편집 목록(elst)의 media_time 을 앞에서, 마지막 패킷 길이나 컨테이너 길이로 끝을. (mov.c, MaybeTrimAacFinalBuffer)
 //==============================================================================
 use super::RawDecode;
 
 //==============================================================================
-// 크롬처럼 다듬어 채널마다 이어 붙이기.
+/// 크롬처럼 다듬어 채널마다 이어 붙이기.
 //==============================================================================
 pub(crate) fn trim_like_chrome(raw: &RawDecode, bytes: &[u8]) -> Vec<Vec<f32>> {
 	let frame_count_list: Vec<usize> = raw.packet_list.iter().map(|packet| packet.planes.first().map(|plane| plane.len()).unwrap_or(0)).collect();
@@ -137,7 +137,7 @@ pub(crate) fn trim_like_chrome(raw: &RawDecode, bytes: &[u8]) -> Vec<Vec<f32>> {
 }
 
 //==============================================================================
-// 끝에서 버릴 수를 마지막 패킷들에 나눠 두기. (뒤 패킷부터, 한 패킷보다 많으면 앞 패킷으로 넘긴다)
+/// 끝에서 버릴 수를 마지막 패킷들에 나눠 두기. (뒤 패킷부터, 한 패킷보다 많으면 앞 패킷으로 넘긴다)
 //==============================================================================
 fn create_last_end_discard(frame_count_list: &[usize], end_discard: usize) -> Vec<usize> {
 	let mut end_discard_list = vec![0usize; frame_count_list.len()];
@@ -154,14 +154,14 @@ fn create_last_end_discard(frame_count_list: &[usize], end_discard: usize) -> Ve
 }
 
 //==============================================================================
-// 0.5 는 0 에서 먼 쪽으로 반올림. (FFmpeg av_rescale_q 의 AV_ROUND_NEAR_INF)
+/// 0.5 는 0 에서 먼 쪽으로 반올림. (FFmpeg av_rescale_q 의 AV_ROUND_NEAR_INF)
 //==============================================================================
 fn round_half_away_from_zero(value: f64) -> i64 {
 	value.round() as i64
 }
 
 //==============================================================================
-// Ogg: 첫 소리 패킷이 들어 있는 쪽이 마지막 쪽인지. (머리 패킷 셋 뒤의 첫 패킷, 쪽 머리의 EOS 깃발)
+/// Ogg: 첫 소리 패킷이 들어 있는 쪽이 마지막 쪽인지. (머리 패킷 셋 뒤의 첫 패킷, 쪽 머리의 EOS 깃발)
 //==============================================================================
 fn is_first_ogg_data_page_last(bytes: &[u8]) -> bool {
 	let mut position = 0;
@@ -192,7 +192,7 @@ fn is_first_ogg_data_page_last(bytes: &[u8]) -> bool {
 }
 
 //==============================================================================
-// Matroska 시간 정보. (TimecodeScale, 소리 트랙의 CodecDelay, 첫 블록 시각, 블록 차례별 DiscardPadding)
+/// Matroska 시간 정보. (TimecodeScale, 소리 트랙의 CodecDelay, 첫 블록 시각, 블록 차례별 DiscardPadding)
 //==============================================================================
 struct MatroskaTiming {
 	timecode_scale: u64,
@@ -202,7 +202,7 @@ struct MatroskaTiming {
 }
 
 //==============================================================================
-// EBML 가변 정수 읽기. (id 는 표시 비트를 남기고, 크기는 지운다. 모르는 크기(모두 1)는 None)
+/// EBML 가변 정수 읽기. (id 는 표시 비트를 남기고, 크기는 지운다. 모르는 크기(모두 1)는 None)
 //==============================================================================
 fn read_ebml_variable_integer(bytes: &[u8], position: usize, is_id: bool) -> Option<(u64, usize, bool)> {
 	let first = *bytes.get(position)?;
@@ -237,8 +237,8 @@ fn read_matroska_timing(bytes: &[u8]) -> MatroskaTiming {
 	let mut block_index = 0usize;
 	let mut cluster_timecode: i64 = 0;
 	let mut is_first_block_found = false;
-	// 마스터 요소(EBML 머리, Segment, Info, Tracks, Cluster)는 몸통으로 들어가고, 나머지는 몸통을 넘긴다.
-	// 여기서 보는 요소의 번호는 수준마다 겹치지 않아 평평하게 걸어도 되고, 크기를 모르는 Segment, Cluster 도 그대로 걷는다.
+	/// 마스터 요소(EBML 머리, Segment, Info, Tracks, Cluster)는 몸통으로 들어가고, 나머지는 몸통을 넘긴다.
+	/// 여기서 보는 요소의 번호는 수준마다 겹치지 않아 평평하게 걸어도 되고, 크기를 모르는 Segment, Cluster 도 그대로 걷는다.
 	const MASTER_ID_LIST: [u64; 5] = [0x1A45DFA3, 0x18538067, 0x1549A966, 0x1654AE6B, 0x1F43B675];
 	let mut position = 0;
 	while let Some((element_id, body_start, body_end)) = read_ebml_element(bytes, position) {
@@ -323,7 +323,7 @@ fn read_matroska_timing(bytes: &[u8]) -> MatroskaTiming {
 }
 
 //==============================================================================
-// EBML 요소 하나 읽기. (번호, 몸통 시작, 몸통 끝. 크기를 모르면 끝까지)
+/// EBML 요소 하나 읽기. (번호, 몸통 시작, 몸통 끝. 크기를 모르면 끝까지)
 //==============================================================================
 fn read_ebml_element(bytes: &[u8], position: usize) -> Option<(u64, usize, usize)> {
 	let (element_id, id_length, _) = read_ebml_variable_integer(bytes, position, true)?;
@@ -334,7 +334,7 @@ fn read_ebml_element(bytes: &[u8], position: usize) -> Option<(u64, usize, usize
 }
 
 //==============================================================================
-// MP4 시간 정보. (소리 트랙의 편집 목록 media_time 과 mdhd 시간 단위, 컨테이너 길이(초))
+/// MP4 시간 정보. (소리 트랙의 편집 목록 media_time 과 mdhd 시간 단위, 컨테이너 길이(초))
 //==============================================================================
 struct Mp4Timing {
 	edit_media_time: i64,
@@ -342,7 +342,7 @@ struct Mp4Timing {
 	media_timescale: u32,
 	media_duration: u64,
 	duration_seconds: f64,
-	// iTunSMPB 의 priming, remainder. (편집 목록이 없을 때 FFmpeg 가 쓴다)
+	/// iTunSMPB 의 priming, remainder. (편집 목록이 없을 때 FFmpeg 가 쓴다)
 	itunes_priming: i64,
 	itunes_remainder: i64,
 }
@@ -424,7 +424,7 @@ fn read_mp4_timing(bytes: &[u8]) -> Mp4Timing {
 }
 
 //==============================================================================
-// MP4 상자 하나 읽기. (종류, 몸통, 다음 자리)
+/// MP4 상자 하나 읽기. (종류, 몸통, 다음 자리)
 //==============================================================================
 fn read_mp4_box(bytes: &[u8], position: usize) -> Option<([u8; 4], &[u8], usize)> {
 	if position + 8 > bytes.len() {
@@ -465,7 +465,7 @@ fn find_mp4_box<'a>(bytes: &'a [u8], wanted_type: &[u8; 4]) -> Option<&'a [u8]> 
 }
 
 //==============================================================================
-// mvhd, mdhd 의 시간 단위와 길이. (판 1 은 64 비트 시각)
+/// mvhd, mdhd 의 시간 단위와 길이. (판 1 은 64 비트 시각)
 //==============================================================================
 fn read_mp4_header_timescale_and_duration(body: &[u8]) -> (u32, u64) {
 	if body.is_empty() {

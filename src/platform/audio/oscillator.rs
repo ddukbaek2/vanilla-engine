@@ -1,35 +1,35 @@
 //==============================================================================
-// OscillatorNode 와 PeriodicWave. (데스크탑 믹서의 비프. 크로미엄 oscillator_handler.cc, periodic_wave_handler.cc,
-// cpu/arm/oscillator_kernel_neon.cc, cpu/x86/oscillator_kernel_sse2.cc, audio_scheduled_source_handler.cc 를 옮긴 것, Chromium Authors BSD-3-Clause)
-// - 표(PeriodicWaveHandler::CreateBasicWaveform): 기본 파형의 사인 계수(GenerateBasicWaveform, f32 셈)로 대역 제한 표를 round(3 log2(표 크기)) 개 짓는다.
-//   표 크기는 표본율 24000 이하 2048, 88200 이하 4096, 그 위 16384 칸이다. 표 r 은 배음을 (표 크기 / 2) x 2^(-r/3) 개까지 두고(CreateBandLimitedTables),
-//   배음을 다 둔 첫 표의 가장 큰 크기의 역수를 모든 표에 곱한다. 크롬은 f32 역 FFT 로 짓고, 여기는 f64 역 FFT 로 지어 f32 로 내린다. (표 값 차이는 f32 끝자리)
-// - 주파수로 두 표와 섞는 비를 고른다. (WaveDataForFundamentalFrequency, 1/3 옥타브마다 표 하나)
-// - 퀀텀 처리(Process): 시작, 정지 프레임(UpdateSchedulingInfo, 올림), frequency AudioParam 이 자동화 중인 퀀텀은 표본마다 읽기 걸음을 셈하고(ProcessARate),
-//   아니면 퀀텀에 하나다(ProcessKRate). 읽기 자리(virtual_read_index)와 보간은 크롬과 같은 차례, 같은 정밀도(f32, f64)로 셈한다.
-//   걸음이 0.3 이상이면 두 점 선형 보간, 0.16 이상이면 세 점, 그 아래는 다섯 점 라그랑주 보간이다.
-//   크롬처럼 표본마다의 걸음은 퀀텀 첫 표본부터 읽는다. (시작 퀀텀에서 시작 앞 표본 자리의 걸음을 쓴다)
-// - 4 표본 묶음 셈은 크롬처럼 CPU 마다 다르다. aarch64 는 NEON 커널(묶음 읽기 자리를 f32 로 쌓는다), x86, x86_64 는 SSE2 커널, 그 밖은 크롬의 스칼라 셈이다.
-// - detune 은 원본이 건드리지 않아 0 이다. (배율 2^(0/1200) = 1)
+//! OscillatorNode 와 PeriodicWave. (데스크탑 믹서의 비프. 크로미엄 oscillator_handler.cc, periodic_wave_handler.cc,
+//! cpu/arm/oscillator_kernel_neon.cc, cpu/x86/oscillator_kernel_sse2.cc, audio_scheduled_source_handler.cc 를 옮긴 것, Chromium Authors BSD-3-Clause)
+//! - 표(PeriodicWaveHandler::CreateBasicWaveform): 기본 파형의 사인 계수(GenerateBasicWaveform, f32 셈)로 대역 제한 표를 round(3 log2(표 크기)) 개 짓는다.
+//!   표 크기는 표본율 24000 이하 2048, 88200 이하 4096, 그 위 16384 칸이다. 표 r 은 배음을 (표 크기 / 2) x 2^(-r/3) 개까지 두고(CreateBandLimitedTables),
+//!   배음을 다 둔 첫 표의 가장 큰 크기의 역수를 모든 표에 곱한다. 크롬은 f32 역 FFT 로 짓고, 여기는 f64 역 FFT 로 지어 f32 로 내린다. (표 값 차이는 f32 끝자리)
+//! - 주파수로 두 표와 섞는 비를 고른다. (WaveDataForFundamentalFrequency, 1/3 옥타브마다 표 하나)
+//! - 퀀텀 처리(Process): 시작, 정지 프레임(UpdateSchedulingInfo, 올림), frequency AudioParam 이 자동화 중인 퀀텀은 표본마다 읽기 걸음을 셈하고(ProcessARate),
+//!   아니면 퀀텀에 하나다(ProcessKRate). 읽기 자리(virtual_read_index)와 보간은 크롬과 같은 차례, 같은 정밀도(f32, f64)로 셈한다.
+//!   걸음이 0.3 이상이면 두 점 선형 보간, 0.16 이상이면 세 점, 그 아래는 다섯 점 라그랑주 보간이다.
+//!   크롬처럼 표본마다의 걸음은 퀀텀 첫 표본부터 읽는다. (시작 퀀텀에서 시작 앞 표본 자리의 걸음을 쓴다)
+//! - 4 표본 묶음 셈은 크롬처럼 CPU 마다 다르다. aarch64 는 NEON 커널(묶음 읽기 자리를 f32 로 쌓는다), x86, x86_64 는 SSE2 커널, 그 밖은 크롬의 스칼라 셈이다.
+//! - detune 은 원본이 건드리지 않아 0 이다. (배율 2^(0/1200) = 1)
 //==============================================================================
 use super::audioparam::AudioParam;
 use super::mixer::{time_to_sample_frame_rounded_up, RENDER_QUANTUM_FRAMES};
 use std::sync::Arc;
 
-// 한 옥타브를 나누는 표 수. (kNumberOfOctaveBands)
+/// 한 옥타브를 나누는 표 수. (kNumberOfOctaveBands)
 const NUMBER_OF_OCTAVE_BANDS: u32 = 3;
-// 한 옥타브의 센트. (kCentsPerOctave)
+/// 한 옥타브의 센트. (kCentsPerOctave)
 const CENTS_PER_OCTAVE: f32 = 1200.0;
-// 표 하나가 맡는 센트. (kCentsPerRange)
+/// 표 하나가 맡는 센트. (kCentsPerRange)
 const CENTS_PER_RANGE: f32 = CENTS_PER_OCTAVE / NUMBER_OF_OCTAVE_BANDS as f32;
-// 보간 점 수를 가르는 읽기 걸음. (kInterpolate2Point, kInterpolate3Point)
+/// 보간 점 수를 가르는 읽기 걸음. (kInterpolate2Point, kInterpolate3Point)
 const INTERPOLATE_2_POINT: f32 = 0.3;
 const INTERPOLATE_3_POINT: f32 = 0.16;
-// frequency 의 기본값. (Hz)
+/// frequency 의 기본값. (Hz)
 const DEFAULT_FREQUENCY: f32 = 440.0;
 
 //==============================================================================
-// 파형. (원본 OscillatorNode.type)
+/// 파형. (원본 OscillatorNode.type)
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum OscillatorType {
@@ -40,7 +40,7 @@ pub(crate) enum OscillatorType {
 }
 
 //==============================================================================
-// 대역 제한 표 묶음. (크롬 PeriodicWaveHandler, 컨텍스트 표본율마다 파형 하나)
+/// 대역 제한 표 묶음. (크롬 PeriodicWaveHandler, 컨텍스트 표본율마다 파형 하나)
 //==============================================================================
 pub(crate) struct PeriodicWave {
 	oscillator_type: OscillatorType,
@@ -53,7 +53,7 @@ pub(crate) struct PeriodicWave {
 }
 
 //==============================================================================
-// 주파수 하나가 읽을 두 표와 섞는 비. (lower 는 배음을 덜 둔 표, higher 는 더 둔 표)
+/// 주파수 하나가 읽을 두 표와 섞는 비. (lower 는 배음을 덜 둔 표, higher 는 더 둔 표)
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct WaveData {
@@ -63,7 +63,7 @@ struct WaveData {
 }
 
 //==============================================================================
-// 표 크기. (GetPeriodicWaveSize)
+/// 표 크기. (GetPeriodicWaveSize)
 //==============================================================================
 fn get_periodic_wave_size(sample_rate: f32) -> u32 {
 	if sample_rate <= 24000.0 {
@@ -77,8 +77,8 @@ fn get_periodic_wave_size(sample_rate: f32) -> u32 {
 
 impl PeriodicWave {
 	//==============================================================================
-	// 기본 파형의 표 짓기. (CreateBasicWaveform, GenerateBasicWaveform)
-	// - 사인 계수 b[n]: 사인 n = 1 만 1, 사각 홀수 4/(nπ), 톱니 ±2/(nπ), 삼각 홀수 ±8/(nπ)^2. 셈은 크롬처럼 f32 다.
+	/// 기본 파형의 표 짓기. (CreateBasicWaveform, GenerateBasicWaveform)
+	/// - 사인 계수 `b[n]`: 사인 n = 1 만 1, 사각 홀수 4/(nπ), 톱니 ±2/(nπ), 삼각 홀수 ±8/(nπ)^2. 셈은 크롬처럼 f32 다.
 	//==============================================================================
 	pub(crate) fn create_basic_waveform(sample_rate: f32, oscillator_type: OscillatorType) -> PeriodicWave {
 		let periodic_wave_size = get_periodic_wave_size(sample_rate);
@@ -140,7 +140,7 @@ impl PeriodicWave {
 	}
 
 	//==============================================================================
-	// 대역 제한 표들. (CreateBandLimitedTables, 정규화는 첫 표의 가장 큰 크기로)
+	/// 대역 제한 표들. (CreateBandLimitedTables, 정규화는 첫 표의 가장 큰 크기로)
 	//==============================================================================
 	fn create_band_limited_tables(&mut self, coefficient_list: &[f32]) {
 		let periodic_wave_size = self.periodic_wave_size as usize;
@@ -170,7 +170,7 @@ impl PeriodicWave {
 	}
 
 	//==============================================================================
-	// 주파수의 두 표와 섞는 비. (WaveDataForFundamentalFrequency, 스칼라)
+	/// 주파수의 두 표와 섞는 비. (WaveDataForFundamentalFrequency, 스칼라)
 	//==============================================================================
 	fn get_wave_data(&self, fundamental_frequency: f32) -> WaveData {
 		let fundamental_frequency = fundamental_frequency.abs();
@@ -197,7 +197,7 @@ impl PeriodicWave {
 	}
 
 	//==============================================================================
-	// 주파수 넷의 두 표와 섞는 비. (NEON 판: 나누기 대신 역수 곱하기)
+	/// 주파수 넷의 두 표와 섞는 비. (NEON 판: 나누기 대신 역수 곱하기)
 	//==============================================================================
 	#[cfg(target_arch = "aarch64")]
 	fn get_wave_data_vector(&self, frequency_list: [f32; 4]) -> [WaveData; 4] {
@@ -224,7 +224,7 @@ impl PeriodicWave {
 	}
 
 	//==============================================================================
-	// 주파수 넷의 두 표와 섞는 비. (SSE2 판은 스칼라와 같은 셈, 그 밖은 스칼라)
+	/// 주파수 넷의 두 표와 섞는 비. (SSE2 판은 스칼라와 같은 셈, 그 밖은 스칼라)
 	//==============================================================================
 	#[cfg(not(target_arch = "aarch64"))]
 	fn get_wave_data_vector(&self, frequency_list: [f32; 4]) -> [WaveData; 4] {
@@ -237,11 +237,11 @@ impl PeriodicWave {
 }
 
 //==============================================================================
-// 사인 급수 합. (f64 역 FFT 로 표 칸마다 Σ b[k] sin(2πkn/N), 크롬 FFTFrame::DoInverseFFT 자리)
+/// 사인 급수 합. (f64 역 FFT 로 표 칸마다 Σ `b[k]` sin(2πkn/N), 크롬 FFTFrame::DoInverseFFT 자리)
 //==============================================================================
 struct SineSeries {
 	size: usize,
-	// e^(+i 2πj/N) 의 (cos, sin). (j = 0 ~ N/2 - 1)
+	/// e^(+i 2πj/N) 의 (cos, sin). (j = 0 ~ N/2 - 1)
 	twiddle_list: Vec<(f64, f64)>,
 	bit_reversed_index_list: Vec<usize>,
 }
@@ -260,7 +260,7 @@ impl SineSeries {
 	}
 
 	//==============================================================================
-	// 표 하나. (coefficient_list[k] 가 k 번 배음의 사인 계수, 0 번은 쓰지 않는다)
+	/// 표 하나. (`coefficient_list[k]` 가 k 번 배음의 사인 계수, 0 번은 쓰지 않는다)
 	//==============================================================================
 	fn synthesize(&self, coefficient_list: &[f32]) -> Vec<f32> {
 		let size = self.size;
@@ -293,7 +293,7 @@ impl SineSeries {
 }
 
 //==============================================================================
-// 재생 상태. (AudioScheduledSourceHandler, start 를 부른 뒤부터)
+/// 재생 상태. (AudioScheduledSourceHandler, start 를 부른 뒤부터)
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PlaybackState {
@@ -303,23 +303,23 @@ enum PlaybackState {
 }
 
 //==============================================================================
-// OscillatorNode. (크롬 OscillatorHandler, 출력은 모노)
+/// OscillatorNode. (크롬 OscillatorHandler, 출력은 모노)
 //==============================================================================
 pub(crate) struct OscillatorNode {
 	periodic_wave: Arc<PeriodicWave>,
-	// 주파수. (Hz, a-rate, 범위는 ± 나이퀴스트)
+	/// 주파수. (Hz, a-rate, 범위는 ± 나이퀴스트)
 	pub(crate) frequency: AudioParam,
 	start_time: f64,
 	end_time: Option<f64>,
 	playback_state: PlaybackState,
-	// 표 읽기 자리. (표 칸 단위)
+	/// 표 읽기 자리. (표 칸 단위)
 	virtual_read_index: f64,
 	phase_increment_list: [f32; RENDER_QUANTUM_FRAMES],
 }
 
 impl OscillatorNode {
 	//==============================================================================
-	// 생성하고 시작, 정지 예약. (start_time 은 부른 때의 시계보다 앞이 아니다, 크롬 Start 의 max(when, currentTime))
+	/// 생성하고 시작, 정지 예약. (start_time 은 부른 때의 시계보다 앞이 아니다, 크롬 Start 의 max(when, currentTime))
 	//==============================================================================
 	pub(crate) fn new(periodic_wave: Arc<PeriodicWave>, sample_rate: f64, start_time: f64, end_time: f64) -> OscillatorNode {
 		let nyquist = sample_rate as f32 / 2.0;
@@ -339,7 +339,7 @@ impl OscillatorNode {
 	}
 
 	//==============================================================================
-	// 퀀텀 하나 그리기. (Process, 소리를 낸 표본이 있으면 참)
+	/// 퀀텀 하나 그리기. (Process, 소리를 낸 표본이 있으면 참)
 	//==============================================================================
 	pub(crate) fn process(&mut self, output: &mut [f32; RENDER_QUANTUM_FRAMES], current_frame: u64, sample_rate: f64) -> bool {
 		output.fill(0.0);
@@ -377,7 +377,7 @@ impl OscillatorNode {
 	}
 
 	//==============================================================================
-	// 시작, 정지 프레임. (UpdateSchedulingInfo: (퀀텀 안 시작 자리, 그릴 표본 수, 시작의 표본 사이 어긋남))
+	/// 시작, 정지 프레임. (UpdateSchedulingInfo: (퀀텀 안 시작 자리, 그릴 표본 수, 시작의 표본 사이 어긋남))
 	//==============================================================================
 	fn update_scheduling_info(&mut self, output: &mut [f32; RENDER_QUANTUM_FRAMES], current_frame: u64, sample_rate: f64) -> (usize, usize, f64) {
 		let quantum_start_frame = current_frame;
@@ -415,7 +415,7 @@ impl OscillatorNode {
 	}
 
 	//==============================================================================
-	// 표본마다의 읽기 걸음. (CalculateSampleAccuratePhaseIncrements: frequency 가 자동화 중이면 퀀텀 표본마다 주파수 x 표 크기 / 표본율)
+	/// 표본마다의 읽기 걸음. (CalculateSampleAccuratePhaseIncrements: frequency 가 자동화 중이면 퀀텀 표본마다 주파수 x 표 크기 / 표본율)
 	//==============================================================================
 	fn calculate_sample_accurate_phase_increments(&mut self, current_frame: u64, sample_rate: f64) -> bool {
 		if !self.frequency.has_sample_accurate_values(current_frame, sample_rate, RENDER_QUANTUM_FRAMES) {
@@ -432,7 +432,7 @@ impl OscillatorNode {
 }
 
 //==============================================================================
-// 주파수를 ± 나이퀴스트로. (ClampFrequency, NaN 은 나이퀴스트)
+/// 주파수를 ± 나이퀴스트로. (ClampFrequency, NaN 은 나이퀴스트)
 //==============================================================================
 fn clamp_frequency(frequency: f32, nyquist: f32) -> f32 {
 	if frequency.is_nan() {
@@ -442,7 +442,7 @@ fn clamp_frequency(frequency: f32, nyquist: f32) -> f32 {
 }
 
 //==============================================================================
-// 읽기 자리를 0 ~ 표 크기로. (f64)
+/// 읽기 자리를 0 ~ 표 크기로. (f64)
 //==============================================================================
 fn wrap_virtual_index(virtual_index: f64, periodic_wave_size: u32) -> f64 {
 	let periodic_wave_size = periodic_wave_size as f64;
@@ -450,7 +450,7 @@ fn wrap_virtual_index(virtual_index: f64, periodic_wave_size: u32) -> f64 {
 }
 
 //==============================================================================
-// 읽기 자리를 0 ~ 표 크기로. (f32, 크롬 WrapVirtualIndexVector: 0 쪽으로 자른 뒤 넘쳤으면 하나 빼기)
+/// 읽기 자리를 0 ~ 표 크기로. (f32, 크롬 WrapVirtualIndexVector: 0 쪽으로 자른 뒤 넘쳤으면 하나 빼기)
 //==============================================================================
 #[cfg(any(target_arch = "aarch64", target_arch = "x86", target_arch = "x86_64"))]
 fn wrap_virtual_index_f32(virtual_index: f32, wave_size: f32, inverse_wave_size: f32) -> f32 {
@@ -463,7 +463,7 @@ fn wrap_virtual_index_f32(virtual_index: f32, wave_size: f32, inverse_wave_size:
 }
 
 //==============================================================================
-// 보간. (DoInterpolation: 걸음 0.3 이상 두 점 선형, 0.16 이상 세 점, 그 아래 다섯 점 라그랑주. f64 로 셈한다)
+/// 보간. (DoInterpolation: 걸음 0.3 이상 두 점 선형, 0.16 이상 세 점, 그 아래 다섯 점 라그랑주. f64 로 셈한다)
 //==============================================================================
 fn do_interpolation(periodic_wave: &PeriodicWave, virtual_read_index: f64, increment: f32, read_index_mask: u32, wave_data: &WaveData) -> f32 {
 	let (lower_wave_data, higher_wave_data) = periodic_wave.get_table_pair(wave_data);
@@ -507,7 +507,7 @@ fn do_interpolation(periodic_wave: &PeriodicWave, virtual_read_index: f64, incre
 }
 
 //==============================================================================
-// 두 점 선형 보간 하나. (f32, x0 + f (x1 - x0) 로 표 안, 표 사이)
+/// 두 점 선형 보간 하나. (f32, x0 + f (x1 - x0) 로 표 안, 표 사이)
 //==============================================================================
 fn interpolate_linear(lower_wave_data: &[f32], higher_wave_data: &[f32], read_index_0: usize, read_index_1: usize, interpolation_factor: f32, table_interpolation_factor: f32) -> f32 {
 	let sample_higher = higher_wave_data[read_index_0] + interpolation_factor * (higher_wave_data[read_index_1] - higher_wave_data[read_index_0]);
@@ -516,7 +516,7 @@ fn interpolate_linear(lower_wave_data: &[f32], higher_wave_data: &[f32], read_in
 }
 
 //==============================================================================
-// 표본마다 걸음이 다른 퀀텀. (ProcessARate: 4 표본 묶음 뒤 남은 표본은 스칼라)
+/// 표본마다 걸음이 다른 퀀텀. (ProcessARate: 4 표본 묶음 뒤 남은 표본은 스칼라)
 //==============================================================================
 fn process_a_rate(periodic_wave: &PeriodicWave, destination: &mut [f32], virtual_read_index: f64, phase_increment_list: &[f32]) -> f64 {
 	let (processed_frame_count, virtual_read_index) = process_a_rate_vector(periodic_wave, destination, virtual_read_index, phase_increment_list);
@@ -524,7 +524,7 @@ fn process_a_rate(periodic_wave: &PeriodicWave, destination: &mut [f32], virtual
 }
 
 //==============================================================================
-// 4 표본 묶음. (ProcessARateVector: 넷이 모두 걸음 0.3 이상이면 커널, 아니면 표본마다 DoInterpolation)
+/// 4 표본 묶음. (ProcessARateVector: 넷이 모두 걸음 0.3 이상이면 커널, 아니면 표본마다 DoInterpolation)
 //==============================================================================
 fn process_a_rate_vector(periodic_wave: &PeriodicWave, destination: &mut [f32], mut virtual_read_index: f64, phase_increment_list: &[f32]) -> (usize, f64) {
 	let inverse_rate_scale = 1.0 / periodic_wave.rate_scale;
@@ -556,7 +556,7 @@ fn process_a_rate_vector(periodic_wave: &PeriodicWave, destination: &mut [f32], 
 }
 
 //==============================================================================
-// 남은 표본. (ProcessARateScalar)
+/// 남은 표본. (ProcessARateScalar)
 //==============================================================================
 fn process_a_rate_scalar(periodic_wave: &PeriodicWave, start_index: usize, destination: &mut [f32], mut virtual_read_index: f64, phase_increment_list: &[f32]) -> f64 {
 	let inverse_rate_scale = 1.0 / periodic_wave.rate_scale;
@@ -572,7 +572,7 @@ fn process_a_rate_scalar(periodic_wave: &PeriodicWave, start_index: usize, desti
 }
 
 //==============================================================================
-// a-rate 4 표본 커널. (NEON 판: 걸음 합은 f64, 읽기 자리는 f32 로 내려 다시 감싼다)
+/// a-rate 4 표본 커널. (NEON 판: 걸음 합은 f64, 읽기 자리는 f32 로 내려 다시 감싼다)
 //==============================================================================
 #[cfg(target_arch = "aarch64")]
 fn process_a_rate_vector_kernel(periodic_wave: &PeriodicWave, destination: &mut [f32], virtual_read_index: f64, phase_increment_list: &[f32], wave_data_list: &[WaveData; 4]) -> f64 {
@@ -599,7 +599,7 @@ fn process_a_rate_vector_kernel(periodic_wave: &PeriodicWave, destination: &mut 
 }
 
 //==============================================================================
-// a-rate 4 표본 커널. (SSE2 판: 읽기 자리는 f64 로 감싸고 자른 뒤, 보간 비만 f32)
+/// a-rate 4 표본 커널. (SSE2 판: 읽기 자리는 f64 로 감싸고 자른 뒤, 보간 비만 f32)
 //==============================================================================
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 fn process_a_rate_vector_kernel(periodic_wave: &PeriodicWave, destination: &mut [f32], virtual_read_index: f64, phase_increment_list: &[f32], wave_data_list: &[WaveData; 4]) -> f64 {
@@ -629,7 +629,7 @@ fn process_a_rate_vector_kernel(periodic_wave: &PeriodicWave, destination: &mut 
 }
 
 //==============================================================================
-// a-rate 4 표본 커널. (벡터가 없는 CPU 의 크롬 스칼라 판: 표 안 보간 비는 f64)
+/// a-rate 4 표본 커널. (벡터가 없는 CPU 의 크롬 스칼라 판: 표 안 보간 비는 f64)
 //==============================================================================
 #[cfg(not(any(target_arch = "aarch64", target_arch = "x86", target_arch = "x86_64")))]
 fn process_a_rate_vector_kernel(periodic_wave: &PeriodicWave, destination: &mut [f32], mut virtual_read_index: f64, phase_increment_list: &[f32], wave_data_list: &[WaveData; 4]) -> f64 {
@@ -650,7 +650,7 @@ fn process_a_rate_vector_kernel(periodic_wave: &PeriodicWave, destination: &mut 
 }
 
 //==============================================================================
-// 걸음 누적 합. (f64)
+/// 걸음 누적 합. (f64)
 //==============================================================================
 #[cfg(any(target_arch = "aarch64", target_arch = "x86", target_arch = "x86_64"))]
 fn get_increment_sum_list(phase_increment_list: &[f32]) -> [f64; 4] {
@@ -663,7 +663,7 @@ fn get_increment_sum_list(phase_increment_list: &[f32]) -> [f64; 4] {
 }
 
 //==============================================================================
-// 퀀텀에 걸음 하나. (ProcessKRate: 걸음 0.3 이상이면 4 표본 묶음과 남은 표본, 읽기 자리는 처음 + n x 걸음. 아니면 표본마다 DoInterpolation)
+/// 퀀텀에 걸음 하나. (ProcessKRate: 걸음 0.3 이상이면 4 표본 묶음과 남은 표본, 읽기 자리는 처음 + n x 걸음. 아니면 표본마다 DoInterpolation)
 //==============================================================================
 fn process_k_rate(periodic_wave: &PeriodicWave, destination: &mut [f32], mut virtual_read_index: f64, frequency: f32) -> f64 {
 	let periodic_wave_size = periodic_wave.periodic_wave_size;
@@ -688,7 +688,7 @@ fn process_k_rate(periodic_wave: &PeriodicWave, destination: &mut [f32], mut vir
 }
 
 //==============================================================================
-// k-rate 남은 표본. (ProcessKRateScalar: 표 안 보간 비는 f32)
+/// k-rate 남은 표본. (ProcessKRateScalar: 표 안 보간 비는 f32)
 //==============================================================================
 fn process_k_rate_scalar(periodic_wave: &PeriodicWave, start_index: usize, destination: &mut [f32], mut virtual_read_index: f64, frequency: f32, rate_scale: f32) -> f64 {
 	let periodic_wave_size = periodic_wave.periodic_wave_size;
@@ -708,8 +708,8 @@ fn process_k_rate_scalar(periodic_wave: &PeriodicWave, start_index: usize, desti
 }
 
 //==============================================================================
-// k-rate 4 표본 묶음. (NEON 판은 처음 읽기 자리를 f32 로 내린 뒤 걸음을 f32 로 더하고, SSE2 판은 f64 로 더한 뒤 f32 로 내린다.
-// 묶음마다 4 x 걸음을 f32 로 더해 감싼다. 돌려주는 읽기 자리는 처음 + 그린 수 x 걸음)
+/// k-rate 4 표본 묶음. (NEON 판은 처음 읽기 자리를 f32 로 내린 뒤 걸음을 f32 로 더하고, SSE2 판은 f64 로 더한 뒤 f32 로 내린다.
+/// 묶음마다 4 x 걸음을 f32 로 더해 감싼다. 돌려주는 읽기 자리는 처음 + 그린 수 x 걸음)
 //==============================================================================
 #[cfg(any(target_arch = "aarch64", target_arch = "x86", target_arch = "x86_64"))]
 fn process_k_rate_vector(periodic_wave: &PeriodicWave, destination: &mut [f32], virtual_read_index: f64, frequency: f32, rate_scale: f32) -> (usize, f64) {
@@ -747,7 +747,7 @@ fn process_k_rate_vector(periodic_wave: &PeriodicWave, destination: &mut [f32], 
 }
 
 //==============================================================================
-// k-rate 4 표본 묶음. (벡터가 없는 CPU 의 크롬은 묶음 없이 모두 스칼라로)
+/// k-rate 4 표본 묶음. (벡터가 없는 CPU 의 크롬은 묶음 없이 모두 스칼라로)
 //==============================================================================
 #[cfg(not(any(target_arch = "aarch64", target_arch = "x86", target_arch = "x86_64")))]
 fn process_k_rate_vector(_periodic_wave: &PeriodicWave, _destination: &mut [f32], virtual_read_index: f64, _frequency: f32, _rate_scale: f32) -> (usize, f64) {
@@ -759,7 +759,7 @@ mod tests {
 	use super::*;
 
 	//==============================================================================
-	// 표 크기와 수는 표본율을 따르고, 첫 표의 가장 큰 크기는 1, 사인 표는 사인이다.
+	/// 표 크기와 수는 표본율을 따르고, 첫 표의 가장 큰 크기는 1, 사인 표는 사인이다.
 	//==============================================================================
 	#[test]
 	fn periodic_wave_tables_follow_chromium() {
@@ -783,7 +783,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 440 Hz 는 배음 40 개(표 17)와 32 개(표 18) 사이, 880 Hz 는 20 개와 16 개 사이다.
+	/// 440 Hz 는 배음 40 개(표 17)와 32 개(표 18) 사이, 880 Hz 는 20 개와 16 개 사이다.
 	//==============================================================================
 	#[test]
 	fn periodic_wave_culls_partials_by_frequency() {
@@ -813,7 +813,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 시작 앞은 0, 정지 프레임(올림)부터 0 이고 그 퀀텀에 끝난다.
+	/// 시작 앞은 0, 정지 프레임(올림)부터 0 이고 그 퀀텀에 끝난다.
 	//==============================================================================
 	#[test]
 	fn oscillator_follows_start_and_stop_frames() {

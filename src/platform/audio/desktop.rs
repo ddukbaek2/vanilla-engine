@@ -1,21 +1,21 @@
 //==============================================================================
-// 데스크탑 오디오 백엔드. (윈도우, 맥, 리눅스, cpal 출력 위의 엔진 믹서)
-// - AudioContext 자리: cpal 로 기본 출력 장치를 열고 그 표본율로 도는 믹서(mixer.rs). 장치가 없으면 한 번 알리고 다시 열지 않는다.
-//   브라우저 자동재생 정책이 없어서 user gesture 는 처음부터 있는 것으로 둔다. sample_rate(), current_time() 은 웹 AudioContext 와 같은 이름이다.
-// - 노드 그래프는 원본 WebAudio 와 같고 셈도 크롬과 같다. (mixer.rs 머리 주석)
-//   AudioPlayer 하나 = 소스 + GainNode (+ 0 이 아닌 좌우를 처음 걸면 StereoPannerNode), 내보낼 곳(AudioOutputNode)을 주면 그 버스로, 없으면 출력으로.
-//   AudioBus 하나 = 출력에 이은 GainNode. (AudioGainNode, 원본 getGainNode) 버스로 만든 플레이어는 버스 손잡이를 들고 있어,
-//   원본 WebAudio 처럼 이어진 플레이어가 있는 동안 버스가 살아 있다. 손잡이가 모두 없어지면 노드를 뺀다.
-// - 컨텍스트 멈춤(SoundSystem 이 음소거 동안 부른다): 믹서가 그리기를 멈춰 소리와 시계가 그 자리에서 선다. (원본 AudioContext.suspend) resume 이 다시 돌린다.
-// - 컨텍스트 시계(get_audio_context_time)는 그린 시간이다. (원본 currentTime, 128 프레임 퀀텀마다 128 / 표본율 초씩 오른다)
-// - 스트림은 관리 스레드가 든다. 장치가 빠지면(맥이 아니면 기본 장치가 바뀌어도) 같은 믹서로 기본 장치를 다시 연다. (원본 크롬도 기본 장치를 따라간다)
-// - AudioBuffer 자리: 푼 소리를 Arc 로 든다. 복제는 값싸다. 해석은 decode 가 원본의 크롬 decodeAudioData 와 같게 한다.
-//   (webm, ogg 의 Opus 와 Vorbis, mp3, wav, flac, m4a 와 aac 의 AAC. 앞뒤 다듬기, 44100Hz, WebAudio 스피커 규칙으로 내린 1 채널이나 2 채널)
-// - 음량, 좌우, 정지는 다음 렌더 퀀텀부터 바로 바뀐다. 재생 빠르기는 다음 재생부터다. (원본과 같다)
-// - 음량은 GainNode 의 AudioParam 이다. 음량 설정은 원본 gain.value 대입, SoundSystem 은 원본처럼 자동화(setValueAtTime 들)와 stop(when)을 건다.
-//   지금 gain.value(get_gain_value)는 소리 스레드가 퀀텀마다 셈한 내재 값이다.
-// - BeepPlayer 의 톤은 원본 playTone 처럼 믹서에 OscillatorNode → GainNode(엔벨로프 자동화) → 출력을 짓는다. (셈은 크롬과 같다, oscillator.rs)
-//   파형의 대역 제한 표(PeriodicWave)는 원본 컨텍스트처럼 표본율마다 한 번 지어 둔다.
+//! 데스크탑 오디오 백엔드. (윈도우, 맥, 리눅스, cpal 출력 위의 엔진 믹서)
+//! - AudioContext 자리: cpal 로 기본 출력 장치를 열고 그 표본율로 도는 믹서(mixer.rs). 장치가 없으면 한 번 알리고 다시 열지 않는다.
+//!   브라우저 자동재생 정책이 없어서 user gesture 는 처음부터 있는 것으로 둔다. sample_rate(), current_time() 은 웹 AudioContext 와 같은 이름이다.
+//! - 노드 그래프는 원본 WebAudio 와 같고 셈도 크롬과 같다. (mixer.rs 머리 주석)
+//!   AudioPlayer 하나 = 소스 + GainNode (+ 0 이 아닌 좌우를 처음 걸면 StereoPannerNode), 내보낼 곳(AudioOutputNode)을 주면 그 버스로, 없으면 출력으로.
+//!   AudioBus 하나 = 출력에 이은 GainNode. (AudioGainNode, 원본 getGainNode) 버스로 만든 플레이어는 버스 손잡이를 들고 있어,
+//!   원본 WebAudio 처럼 이어진 플레이어가 있는 동안 버스가 살아 있다. 손잡이가 모두 없어지면 노드를 뺀다.
+//! - 컨텍스트 멈춤(SoundSystem 이 음소거 동안 부른다): 믹서가 그리기를 멈춰 소리와 시계가 그 자리에서 선다. (원본 AudioContext.suspend) resume 이 다시 돌린다.
+//! - 컨텍스트 시계(get_audio_context_time)는 그린 시간이다. (원본 currentTime, 128 프레임 퀀텀마다 128 / 표본율 초씩 오른다)
+//! - 스트림은 관리 스레드가 든다. 장치가 빠지면(맥이 아니면 기본 장치가 바뀌어도) 같은 믹서로 기본 장치를 다시 연다. (원본 크롬도 기본 장치를 따라간다)
+//! - AudioBuffer 자리: 푼 소리를 Arc 로 든다. 복제는 값싸다. 해석은 decode 가 원본의 크롬 decodeAudioData 와 같게 한다.
+//!   (webm, ogg 의 Opus 와 Vorbis, mp3, wav, flac, m4a 와 aac 의 AAC. 앞뒤 다듬기, 44100Hz, WebAudio 스피커 규칙으로 내린 1 채널이나 2 채널)
+//! - 음량, 좌우, 정지는 다음 렌더 퀀텀부터 바로 바뀐다. 재생 빠르기는 다음 재생부터다. (원본과 같다)
+//! - 음량은 GainNode 의 AudioParam 이다. 음량 설정은 원본 gain.value 대입, SoundSystem 은 원본처럼 자동화(setValueAtTime 들)와 stop(when)을 건다.
+//!   지금 gain.value(get_gain_value)는 소리 스레드가 퀀텀마다 셈한 내재 값이다.
+//! - BeepPlayer 의 톤은 원본 playTone 처럼 믹서에 OscillatorNode → GainNode(엔벨로프 자동화) → 출력을 짓는다. (셈은 크롬과 같다, oscillator.rs)
+//!   파형의 대역 제한 표(PeriodicWave)는 원본 컨텍스트처럼 표본율마다 한 번 지어 둔다.
 //==============================================================================
 use super::audioparam::ParamAutomation;
 use super::mixer::{AudioBufferData, MixerCommand, MixerRenderer, MixerShared};
@@ -34,7 +34,7 @@ use std::sync::mpsc::Sender;
 use std::sync::Arc;
 
 //==============================================================================
-// 공유 오디오 컨텍스트. (원본 AudioContext 자리, 장치 스트림과 믹서로 가는 길)
+/// 공유 오디오 컨텍스트. (원본 AudioContext 자리, 장치 스트림과 믹서로 가는 길)
 //==============================================================================
 pub struct AudioContext {
 	_stream_manager: StreamManager,
@@ -43,14 +43,14 @@ pub struct AudioContext {
 
 impl AudioContext {
 	//==============================================================================
-	// 표본율. (원본 audioContext.sampleRate, 장치의 표본율)
+	/// 표본율. (원본 audioContext.sampleRate, 장치의 표본율)
 	//==============================================================================
 	pub fn sample_rate(&self) -> f32 {
 		self.mixer_link.shared.get_sample_rate() as f32
 	}
 
 	//==============================================================================
-	// 시계. (초, 원본 audioContext.currentTime)
+	/// 시계. (초, 원본 audioContext.currentTime)
 	//==============================================================================
 	pub fn current_time(&self) -> f64 {
 		self.mixer_link.get_current_time()
@@ -58,7 +58,7 @@ impl AudioContext {
 }
 
 //==============================================================================
-// 푼 소리. (원본 AudioBuffer 자리, 복제는 Arc 하나라 값싸다)
+/// 푼 소리. (원본 AudioBuffer 자리, 복제는 Arc 하나라 값싸다)
 //==============================================================================
 #[derive(Clone)]
 pub struct AudioBuffer {
@@ -67,28 +67,28 @@ pub struct AudioBuffer {
 
 impl AudioBuffer {
 	//==============================================================================
-	// 재생 시간. (초, 원본 duration)
+	/// 재생 시간. (초, 원본 duration)
 	//==============================================================================
 	pub fn duration(&self) -> f64 {
 		self.data.get_length() as f64 / self.data.sample_rate
 	}
 
 	//==============================================================================
-	// 프레임 수. (원본 length)
+	/// 프레임 수. (원본 length)
 	//==============================================================================
 	pub fn length(&self) -> usize {
 		self.data.get_length()
 	}
 
 	//==============================================================================
-	// 채널 수. (원본 numberOfChannels, 데스크탑은 스피커 규칙으로 내린 1 이나 2)
+	/// 채널 수. (원본 numberOfChannels, 데스크탑은 스피커 규칙으로 내린 1 이나 2)
 	//==============================================================================
 	pub fn number_of_channels(&self) -> usize {
 		self.data.channel_list.len()
 	}
 
 	//==============================================================================
-	// 표본율. (원본 sampleRate, 44100)
+	/// 표본율. (원본 sampleRate, 44100)
 	//==============================================================================
 	pub fn sample_rate(&self) -> f32 {
 		self.data.sample_rate as f32
@@ -96,7 +96,7 @@ impl AudioBuffer {
 }
 
 //==============================================================================
-// 버스의 GainNode. (원본 AudioBus.getGainNode, 마지막 손잡이가 없어지면 믹서에서 뺀다)
+/// 버스의 GainNode. (원본 AudioBus.getGainNode, 마지막 손잡이가 없어지면 믹서에서 뺀다)
 //==============================================================================
 pub struct MixerGainNode {
 	inner: Rc<MixerGainNodeInner>,
@@ -113,16 +113,16 @@ impl Drop for MixerGainNodeInner {
 	}
 }
 
-// 버스의 GainNode 자리. (원본 AudioBus.getGainNode, 버스를 나눠 든다)
+/// 버스의 GainNode 자리. (원본 AudioBus.getGainNode, 버스를 나눠 든다)
 pub type AudioGainNode = Rc<MixerGainNode>;
-// 플레이어가 소리를 내보낼 곳. (원본 AudioPlayer 생성자의 outputNode 자리, 그 버스로 낸다. AudioGainNode 의 as_deref)
+/// 플레이어가 소리를 내보낼 곳. (원본 AudioPlayer 생성자의 outputNode 자리, 그 버스로 낸다. AudioGainNode 의 as_deref)
 pub type AudioOutputNode<'a> = &'a MixerGainNode;
 
-// 데스크탑에는 자동재생 정책이 없다.
+/// 데스크탑에는 자동재생 정책이 없다.
 pub const HAS_USER_GESTURE_AT_START: bool = true;
 
 //==============================================================================
-// 믹서로 가는 길. (명령을 보내고 시계를 읽는다, 노드 번호를 매긴다)
+/// 믹서로 가는 길. (명령을 보내고 시계를 읽는다, 노드 번호를 매긴다)
 //==============================================================================
 struct MixerLink {
 	command_sender: Sender<MixerCommand>,
@@ -147,21 +147,21 @@ impl MixerLink {
 }
 
 //==============================================================================
-// 매니저가 드는 백엔드 상태.
+/// 매니저가 드는 백엔드 상태.
 //==============================================================================
 pub struct AudioPlatformState {
-	// 소리 장치를 열지 못했는지. (한 번 실패하면 다시 열지 않는다)
+	/// 소리 장치를 열지 못했는지. (한 번 실패하면 다시 열지 않는다)
 	is_audio_context_failed: bool,
-	// 컨텍스트를 멈춰 두었는지.
+	/// 컨텍스트를 멈춰 두었는지.
 	is_audio_context_suspended: bool,
-	// 믹서로 가는 길. (컨텍스트가 있을 때)
+	/// 믹서로 가는 길. (컨텍스트가 있을 때)
 	mixer_link: Option<Rc<MixerLink>>,
-	// 비프 파형의 대역 제한 표. (컨텍스트 표본율의 것)
+	/// 비프 파형의 대역 제한 표. (컨텍스트 표본율의 것)
 	periodic_wave_list: Vec<Arc<PeriodicWave>>,
 }
 
 //==============================================================================
-// 백엔드 상태 생성.
+/// 백엔드 상태 생성.
 //==============================================================================
 pub fn create_audio_platform_state() -> AudioPlatformState {
 	AudioPlatformState {
@@ -173,7 +173,7 @@ pub fn create_audio_platform_state() -> AudioPlatformState {
 }
 
 //==============================================================================
-// 오디오 컨텍스트 생성. (cpal 기본 출력 장치를 그 기본 설정으로 열고 믹서를 소리 스레드에 넘긴다)
+/// 오디오 컨텍스트 생성. (cpal 기본 출력 장치를 그 기본 설정으로 열고 믹서를 소리 스레드에 넘긴다)
 //==============================================================================
 pub fn create_audio_context(audio_platform_state: &mut AudioPlatformState) -> Option<AudioContext> {
 	if audio_platform_state.is_audio_context_failed {
@@ -203,12 +203,12 @@ pub fn create_audio_context(audio_platform_state: &mut AudioPlatformState) -> Op
 	}
 }
 
-// 장치를 살피는 간격. (빠지거나 바뀐 장치로 스트림을 다시 연다)
+/// 장치를 살피는 간격. (빠지거나 바뀐 장치로 스트림을 다시 연다)
 const STREAM_CHECK_INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
 
 //==============================================================================
-// 출력 스트림 관리자. (스트림을 든 스레드, 장치가 빠지면(그리고 맥이 아니면 기본 장치가 바뀌면) 같은 믹서로 스트림을 다시 연다)
-// - 원본 크롬도 기본 장치를 따라간다. 컨텍스트를 버리면 스레드가 스트림을 닫고 끝난다.
+/// 출력 스트림 관리자. (스트림을 든 스레드, 장치가 빠지면(그리고 맥이 아니면 기본 장치가 바뀌면) 같은 믹서로 스트림을 다시 연다)
+/// - 원본 크롬도 기본 장치를 따라간다. 컨텍스트를 버리면 스레드가 스트림을 닫고 끝난다.
 //==============================================================================
 struct StreamManager {
 	should_stop: Arc<AtomicBool>,
@@ -216,7 +216,7 @@ struct StreamManager {
 
 impl StreamManager {
 	//==============================================================================
-	// 시작. (스레드에서 첫 스트림을 열고 그 결과를 기다린다)
+	/// 시작. (스레드에서 첫 스트림을 열고 그 결과를 기다린다)
 	//==============================================================================
 	fn start(command_receiver: std::sync::mpsc::Receiver<MixerCommand>, shared: Arc<MixerShared>) -> Result<StreamManager, String> {
 		let should_stop = Arc::new(AtomicBool::new(false));
@@ -271,7 +271,7 @@ impl Drop for StreamManager {
 }
 
 //==============================================================================
-// 열린 스트림. (장치 이름표와 표본율, 스트림을 버리면 닫힌다)
+/// 열린 스트림. (장치 이름표와 표본율, 스트림을 버리면 닫힌다)
 //==============================================================================
 struct RunningStream {
 	_stream: Option<cpal::Stream>,
@@ -292,7 +292,7 @@ impl RunningStream {
 }
 
 //==============================================================================
-// 기본 출력 장치가 바뀌었는지. (이름표나 표본율, 맥은 재생 중에 장치를 물으면 소리가 튀어 묻지 않고 빠짐 오류로만 다시 연다)
+/// 기본 출력 장치가 바뀌었는지. (이름표나 표본율, 맥은 재생 중에 장치를 물으면 소리가 튀어 묻지 않고 빠짐 오류로만 다시 연다)
 //==============================================================================
 #[cfg(not(target_os = "macos"))]
 fn has_default_device_changed(running_stream: &RunningStream) -> bool {
@@ -315,7 +315,7 @@ fn read_device_id(device: &cpal::Device) -> String {
 }
 
 //==============================================================================
-// 기본 출력 장치를 열어 스트림 짓기. (장치의 표본 꼴마다 실수 믹서 출력을 그 꼴로 바꿔 낸다, 표본율이 바뀌었으면 믹서에 알린다)
+/// 기본 출력 장치를 열어 스트림 짓기. (장치의 표본 꼴마다 실수 믹서 출력을 그 꼴로 바꿔 낸다, 표본율이 바뀌었으면 믹서에 알린다)
 //==============================================================================
 fn open_output_stream(renderer: &Arc<std::sync::Mutex<MixerRenderer>>, needs_restart: &Arc<AtomicBool>) -> Result<RunningStream, String> {
 	let host = cpal::default_host();
@@ -348,8 +348,8 @@ fn open_output_stream(renderer: &Arc<std::sync::Mutex<MixerRenderer>>, needs_res
 }
 
 //==============================================================================
-// 꼴 하나로 스트림 짓기. (믹서가 실수로 채운 것을 장치 꼴로 바꾼다. 장치가 빠지면 다시 열라고 알리고, 그 밖의 오류는 한 번만 알린다)
-// - 믹서는 스트림을 다시 열 때만 잠깐 잠긴다. 소리 스레드는 기다리지 않고 그 동안 0 을 낸다.
+/// 꼴 하나로 스트림 짓기. (믹서가 실수로 채운 것을 장치 꼴로 바꾼다. 장치가 빠지면 다시 열라고 알리고, 그 밖의 오류는 한 번만 알린다)
+/// - 믹서는 스트림을 다시 열 때만 잠깐 잠긴다. 소리 스레드는 기다리지 않고 그 동안 0 을 낸다.
 //==============================================================================
 fn build_output_stream<T>(device: &cpal::Device, stream_config: cpal::StreamConfig, renderer: &Arc<std::sync::Mutex<MixerRenderer>>, needs_restart: &Arc<AtomicBool>) -> Result<cpal::Stream, String>
 where
@@ -396,7 +396,7 @@ where
 }
 
 //==============================================================================
-// 오디오 컨텍스트 재개. (suspend_audio_context 로 멈춰 둔 것만 다시 돌린다)
+/// 오디오 컨텍스트 재개. (suspend_audio_context 로 멈춰 둔 것만 다시 돌린다)
 //==============================================================================
 pub fn resume_audio_context(state_cell: &Rc<RefCell<AudioManagerState>>) {
 	let state = &mut *state_cell.borrow_mut();
@@ -411,7 +411,7 @@ pub fn resume_audio_context(state_cell: &Rc<RefCell<AudioManagerState>>) {
 }
 
 //==============================================================================
-// 오디오 컨텍스트 멈춤. (돌고 있을 때만 그리기와 시계를 세운다, 원본 audio_context.suspend() 자리)
+/// 오디오 컨텍스트 멈춤. (돌고 있을 때만 그리기와 시계를 세운다, 원본 audio_context.suspend() 자리)
 //==============================================================================
 pub fn suspend_audio_context(state_cell: &Rc<RefCell<AudioManagerState>>) {
 	let state = &mut *state_cell.borrow_mut();
@@ -426,45 +426,45 @@ pub fn suspend_audio_context(state_cell: &Rc<RefCell<AudioManagerState>>) {
 }
 
 //==============================================================================
-// 재생하기 전에 멈춘 컨텍스트 깨우기. (원본 AudioPlayer.play 가 "suspended" 면 resume() 뒤에 트는 자리, 데스크탑은 그 자리에서 돈다)
+/// 재생하기 전에 멈춘 컨텍스트 깨우기. (원본 AudioPlayer.play 가 "suspended" 면 resume() 뒤에 트는 자리, 데스크탑은 그 자리에서 돈다)
 //==============================================================================
 pub fn resume_audio_context_before_playback(state_cell: &Rc<RefCell<AudioManagerState>>) {
 	resume_audio_context(state_cell);
 }
 
 //==============================================================================
-// 오디오 컨텍스트가 있고 돌고 있는지. (멈춰 둔 동안은 거짓)
+/// 오디오 컨텍스트가 있고 돌고 있는지. (멈춰 둔 동안은 거짓)
 //==============================================================================
 pub fn is_audio_context_running(state: &AudioManagerState) -> bool {
 	state.audio_context.is_some() && !state.platform_state.is_audio_context_suspended
 }
 
 //==============================================================================
-// 오디오 컨텍스트 시계. (초, 원본 audio_context.currentTime 자리, 그린 프레임 수 / 표본율, 없으면 0)
+/// 오디오 컨텍스트 시계. (초, 원본 audio_context.currentTime 자리, 그린 프레임 수 / 표본율, 없으면 0)
 //==============================================================================
 pub fn get_audio_context_time(state: &AudioManagerState) -> f64 {
 	state.platform_state.mixer_link.as_ref().map(|mixer_link| mixer_link.get_current_time()).unwrap_or(0.0)
 }
 
 //==============================================================================
-// 플레이어 하나의 소리 내는 부분. (믹서의 플레이어 노드, 지금 소스의 세대)
+/// 플레이어 하나의 소리 내는 부분. (믹서의 플레이어 노드, 지금 소스의 세대)
 //==============================================================================
 pub struct AudioPlayerBackend {
 	mixer_link: Option<Rc<MixerLink>>,
 	player_id: u64,
-	// 내보내는 버스. (원본처럼 이어진 동안 버스를 살려 둔다)
+	/// 내보내는 버스. (원본처럼 이어진 동안 버스를 살려 둔다)
 	_output_gain_node: Option<Rc<MixerGainNodeInner>>,
-	// 시작한 소스의 세대와 믹서가 끝냈다고 알린 세대.
+	/// 시작한 소스의 세대와 믹서가 끝냈다고 알린 세대.
 	started_generation: u64,
 	ended_generation: Arc<AtomicU64>,
-	// GainNode 의 gain 내재 값. (원본 gain.value 가 읽는 값, 소리 스레드가 퀀텀마다 쓴다)
+	/// GainNode 의 gain 내재 값. (원본 gain.value 가 읽는 값, 소리 스레드가 퀀텀마다 쓴다)
 	gain_value: Arc<AtomicU32>,
 	is_source_active: bool,
 	playback_rate: f64,
 }
 
 //==============================================================================
-// 자동화를 믹서의 AudioParam 호출로.
+/// 자동화를 믹서의 AudioParam 호출로.
 //==============================================================================
 fn to_param_automation(automation: GainAutomation) -> ParamAutomation {
 	match automation {
@@ -488,7 +488,7 @@ fn to_param_automation(automation: GainAutomation) -> ParamAutomation {
 
 impl AudioPlayerBackend {
 	//==============================================================================
-	// 생성. (내보낼 버스를 주면 그 버스로, 없으면 출력으로. 컨텍스트가 없으면 소리 없는 플레이어)
+	/// 생성. (내보낼 버스를 주면 그 버스로, 없으면 출력으로. 컨텍스트가 없으면 소리 없는 플레이어)
 	//==============================================================================
 	pub fn create(state: &mut AudioManagerState, output_node: Option<AudioOutputNode<'_>>) -> AudioPlayerBackend {
 		let output_gain_node = output_node.map(|output_node| output_node.inner.clone());
@@ -504,7 +504,7 @@ impl AudioPlayerBackend {
 	}
 
 	//==============================================================================
-	// 소리 없는 플레이어 생성. (시험)
+	/// 소리 없는 플레이어 생성. (시험)
 	//==============================================================================
 	#[cfg(test)]
 	pub fn create_silent() -> AudioPlayerBackend {
@@ -512,7 +512,7 @@ impl AudioPlayerBackend {
 	}
 
 	//==============================================================================
-	// 믹서에 플레이어 노드를 더하고 생성. (믹서가 없으면 소리 없는 플레이어)
+	/// 믹서에 플레이어 노드를 더하고 생성. (믹서가 없으면 소리 없는 플레이어)
 	//==============================================================================
 	fn create_with_output(mixer_link: Option<Rc<MixerLink>>, output_gain_node: Option<Rc<MixerGainNodeInner>>) -> AudioPlayerBackend {
 		let ended_generation = Arc::new(AtomicU64::new(0));
@@ -551,14 +551,14 @@ impl AudioPlayerBackend {
 	}
 
 	//==============================================================================
-	// 소리를 낼 수 있는지. (원본 audio_context && gain_node)
+	/// 소리를 낼 수 있는지. (원본 audio_context && gain_node)
 	//==============================================================================
 	pub fn is_available(&self) -> bool {
 		self.mixer_link.is_some()
 	}
 
 	//==============================================================================
-	// 재생 중인 소스를 멈춘다. (원본 source.stop())
+	/// 재생 중인 소스를 멈춘다. (원본 source.stop())
 	//==============================================================================
 	pub fn stop_source(&mut self) {
 		if self.is_source_active {
@@ -568,7 +568,7 @@ impl AudioPlayerBackend {
 	}
 
 	//==============================================================================
-	// 그 시각에 소스를 멈춘다. (원본 source.stop(when), 끝나면 is_playing 이 거짓이 된다)
+	/// 그 시각에 소스를 멈춘다. (원본 source.stop(when), 끝나면 is_playing 이 거짓이 된다)
 	//==============================================================================
 	pub fn stop_source_at_time(&mut self, time: f64) {
 		if self.is_source_active {
@@ -577,14 +577,14 @@ impl AudioPlayerBackend {
 	}
 
 	//==============================================================================
-	// 정지.
+	/// 정지.
 	//==============================================================================
 	pub fn stop(&mut self) {
 		self.stop_source();
 	}
 
 	//==============================================================================
-	// 재생 시작. (버퍼를 time 초부터, 루프면 버퍼 전체를 되풀이. 원본 createBufferSource + start(0, time))
+	/// 재생 시작. (버퍼를 time 초부터, 루프면 버퍼 전체를 되풀이. 원본 createBufferSource + start(0, time))
 	//==============================================================================
 	pub fn start_playback(&mut self, audio_buffer: &AudioBuffer, is_loop: bool, time: f64) {
 		if self.mixer_link.is_none() {
@@ -603,21 +603,21 @@ impl AudioPlayerBackend {
 	}
 
 	//==============================================================================
-	// 재생 빠르기 설정. (1 이면 그대로, 음 높이도 같이 바뀐다, 다음 재생부터)
+	/// 재생 빠르기 설정. (1 이면 그대로, 음 높이도 같이 바뀐다, 다음 재생부터)
 	//==============================================================================
 	pub fn set_playback_rate(&mut self, playback_rate: f64) {
 		self.playback_rate = playback_rate;
 	}
 
 	//==============================================================================
-	// 좌우 설정. (-1 왼쪽 ~ 1 오른쪽, 0 이 아니면 GainNode 와 내보낼 곳 사이에 StereoPannerNode 를 끼운다. 원본 SoundSystem.playEffect, 웹 백엔드와 같다)
+	/// 좌우 설정. (-1 왼쪽 ~ 1 오른쪽, 0 이 아니면 GainNode 와 내보낼 곳 사이에 StereoPannerNode 를 끼운다. 원본 SoundSystem.playEffect, 웹 백엔드와 같다)
 	//==============================================================================
 	pub fn set_pan(&mut self, pan: f32) {
 		self.send(MixerCommand::SetPlayerPan { player_id: self.player_id, pan });
 	}
 
 	//==============================================================================
-	// 음량 설정. (GainNode 의 값, 0 ~ 1)
+	/// 음량 설정. (GainNode 의 값, 0 ~ 1)
 	//==============================================================================
 	pub fn set_gain(&mut self, gain: f32) {
 		// 원본 gain.value 대입: 읽는 값은 바로 바뀌고 믹서에는 setValueAtTime(값, 지금)이 들어간다.
@@ -626,21 +626,21 @@ impl AudioPlayerBackend {
 	}
 
 	//==============================================================================
-	// 음량 자동화. (원본 gain.setValueAtTime 들)
+	/// 음량 자동화. (원본 gain.setValueAtTime 들)
 	//==============================================================================
 	pub fn apply_gain_automation(&mut self, automation: GainAutomation) {
 		self.send(MixerCommand::PlayerGainAutomation { player_id: self.player_id, automation: to_param_automation(automation) });
 	}
 
 	//==============================================================================
-	// 지금 음량. (원본 gain.value 읽기)
+	/// 지금 음량. (원본 gain.value 읽기)
 	//==============================================================================
 	pub fn get_gain_value(&self) -> f32 {
 		f32::from_bits(self.gain_value.load(Ordering::Acquire))
 	}
 
 	//==============================================================================
-	// 재생 중인지. (시작한 소스를 믹서가 아직 끝내지 않았으면 참, 원본 onended 전)
+	/// 재생 중인지. (시작한 소스를 믹서가 아직 끝내지 않았으면 참, 원본 onended 전)
 	//==============================================================================
 	pub fn is_playing(&self) -> bool {
 		self.is_source_active && self.ended_generation.load(Ordering::Acquire) < self.started_generation
@@ -654,7 +654,7 @@ impl Drop for AudioPlayerBackend {
 }
 
 //==============================================================================
-// 버스 하나의 소리 모으는 부분. (출력에 이은 GainNode)
+/// 버스 하나의 소리 모으는 부분. (출력에 이은 GainNode)
 //==============================================================================
 pub struct AudioBusBackend {
 	gain_node: Option<AudioGainNode>,
@@ -662,7 +662,7 @@ pub struct AudioBusBackend {
 
 impl AudioBusBackend {
 	//==============================================================================
-	// 생성. (컨텍스트가 있으면 믹서에 버스 노드를 더한다. 없으면 소리 없는 버스)
+	/// 생성. (컨텍스트가 있으면 믹서에 버스 노드를 더한다. 없으면 소리 없는 버스)
 	//==============================================================================
 	pub fn create(state: &mut AudioManagerState) -> AudioBusBackend {
 		let gain_node = state.platform_state.mixer_link.as_ref().map(|mixer_link| {
@@ -681,14 +681,14 @@ impl AudioBusBackend {
 	}
 
 	//==============================================================================
-	// 소리를 모을 수 있는지. (원본 audio_context && gain_node)
+	/// 소리를 모을 수 있는지. (원본 audio_context && gain_node)
 	//==============================================================================
 	pub fn is_available(&self) -> bool {
 		self.gain_node.is_some()
 	}
 
 	//==============================================================================
-	// 음량 설정. (버스 GainNode 의 값, 0 ~ 1)
+	/// 음량 설정. (버스 GainNode 의 값, 0 ~ 1)
 	//==============================================================================
 	pub fn set_gain(&mut self, gain: f32) {
 		if let Some(gain_node) = &self.gain_node {
@@ -697,7 +697,7 @@ impl AudioBusBackend {
 	}
 
 	//==============================================================================
-	// 음량 자동화. (원본 SoundSystem 이 버스 gain 에 거는 setTargetAtTime 들)
+	/// 음량 자동화. (원본 SoundSystem 이 버스 gain 에 거는 setTargetAtTime 들)
 	//==============================================================================
 	pub fn apply_gain_automation(&mut self, automation: GainAutomation) {
 		if let Some(gain_node) = &self.gain_node {
@@ -706,7 +706,7 @@ impl AudioBusBackend {
 	}
 
 	//==============================================================================
-	// 이 버스로 트는 플레이어 백엔드 생성. (버스가 소리 없으면 소리 없는 플레이어)
+	/// 이 버스로 트는 플레이어 백엔드 생성. (버스가 소리 없으면 소리 없는 플레이어)
 	//==============================================================================
 	pub fn create_player_backend(&mut self) -> AudioPlayerBackend {
 		match &self.gain_node {
@@ -720,7 +720,7 @@ impl AudioBusBackend {
 	}
 
 	//==============================================================================
-	// 버스 GainNode. (원본 getGainNode 자리, 소리 없는 버스는 None)
+	/// 버스 GainNode. (원본 getGainNode 자리, 소리 없는 버스는 None)
 	//==============================================================================
 	pub fn get_gain_node(&self) -> Option<&AudioGainNode> {
 		self.gain_node.as_ref()
@@ -728,7 +728,7 @@ impl AudioBusBackend {
 }
 
 //==============================================================================
-// 파일 읽기. (그 자리에서 읽고 디코딩한다, 읽은 파일은 리소스 사용량에 적는다)
+/// 파일 읽기. (그 자리에서 읽고 디코딩한다, 읽은 파일은 리소스 사용량에 적는다)
 //==============================================================================
 pub fn load_audio_file(audio_asset: &Rc<AudioAsset>, asset_path: &Path) -> Result<(), String> {
 	let decode_result = std::fs::read(asset_path).map_err(|error| format!("{}", error)).and_then(|bytes| {
@@ -749,7 +749,7 @@ pub fn load_audio_file(audio_asset: &Rc<AudioAsset>, asset_path: &Path) -> Resul
 }
 
 //==============================================================================
-// 메모리에서 읽기. (그 자리에서 디코딩한다)
+/// 메모리에서 읽기. (그 자리에서 디코딩한다)
 //==============================================================================
 pub fn load_audio_bytes(audio_asset: &Rc<AudioAsset>, bytes: Vec<u8>) -> Result<(), String> {
 	match create_audio_buffer(&bytes) {
@@ -766,7 +766,7 @@ pub fn load_audio_bytes(audio_asset: &Rc<AudioAsset>, bytes: Vec<u8>) -> Result<
 }
 
 //==============================================================================
-// 소리 파일 바이트를 버퍼로. (decode 가 크롬 decodeAudioData 처럼 푼 1 채널이나 2 채널)
+/// 소리 파일 바이트를 버퍼로. (decode 가 크롬 decodeAudioData 처럼 푼 1 채널이나 2 채널)
 //==============================================================================
 fn create_audio_buffer(bytes: &[u8]) -> Result<AudioBuffer, String> {
 	let decoded_audio = super::decode::decode_audio_data(bytes)?;
@@ -779,14 +779,14 @@ fn create_audio_buffer(bytes: &[u8]) -> Result<AudioBuffer, String> {
 }
 
 //==============================================================================
-// 버퍼의 재생 시간. (초)
+/// 버퍼의 재생 시간. (초)
 //==============================================================================
 pub fn get_audio_buffer_duration(audio_buffer: &AudioBuffer) -> f64 {
 	audio_buffer.duration()
 }
 
 //==============================================================================
-// 비프 톤 하나 재생. (원본 playTone 의 그래프를 믹서에: OscillatorNode → GainNode → 출력, 시각은 지금 컨텍스트 시계 + 지연)
+/// 비프 톤 하나 재생. (원본 playTone 의 그래프를 믹서에: OscillatorNode → GainNode → 출력, 시각은 지금 컨텍스트 시계 + 지연)
 //==============================================================================
 pub fn play_beep_tone(state: &mut AudioManagerState, beep_envelope: &BeepEnvelope) {
 	let platform_state = &mut state.platform_state;
@@ -801,11 +801,11 @@ pub fn play_beep_tone(state: &mut AudioManagerState, beep_envelope: &BeepEnvelop
 }
 
 //==============================================================================
-// 비프 명령. (current_time: 부른 때의 컨텍스트 시계)
-// - 원본처럼 frequency.setValueAtTime(frequency, start), gain 의 setValueAtTime(바닥, start), linearRamp(최고, attack 끝),
-//   setValueAtTime(최고, release 시작), exponentialRamp(바닥, 끝), start(start), stop(끝 + 0.01).
-// - 시각이 음수면 원본 AudioParam, start 가 RangeError 를 던져 아무것도 틀지 않는 것처럼 보내지 않는다.
-// - start 는 크롬처럼 부른 때의 시계보다 앞으로 두지 않고, stop 은 0 보다 앞으로 두지 않는다.
+/// 비프 명령. (current_time: 부른 때의 컨텍스트 시계)
+/// - 원본처럼 frequency.setValueAtTime(frequency, start), gain 의 setValueAtTime(바닥, start), linearRamp(최고, attack 끝),
+///   setValueAtTime(최고, release 시작), exponentialRamp(바닥, 끝), start(start), stop(끝 + 0.01).
+/// - 시각이 음수면 원본 AudioParam, start 가 RangeError 를 던져 아무것도 틀지 않는 것처럼 보내지 않는다.
+/// - start 는 크롬처럼 부른 때의 시계보다 앞으로 두지 않고, stop 은 0 보다 앞으로 두지 않는다.
 //==============================================================================
 fn create_beep_command(beep_envelope: &BeepEnvelope, periodic_wave: Arc<PeriodicWave>, current_time: f64) -> Option<MixerCommand> {
 	let beep_schedule = beep_envelope.get_schedule(current_time);
@@ -829,7 +829,7 @@ fn create_beep_command(beep_envelope: &BeepEnvelope, periodic_wave: Arc<Periodic
 }
 
 //==============================================================================
-// 파형의 대역 제한 표. (원본 컨텍스트가 표본율마다 한 번 짓는 PeriodicWave 처럼 지어 둔다, 표본율이 바뀌면 새로)
+/// 파형의 대역 제한 표. (원본 컨텍스트가 표본율마다 한 번 짓는 PeriodicWave 처럼 지어 둔다, 표본율이 바뀌면 새로)
 //==============================================================================
 fn get_periodic_wave(periodic_wave_list: &mut Vec<Arc<PeriodicWave>>, oscillator_type: OscillatorType, sample_rate: f32) -> Arc<PeriodicWave> {
 	if let Some(periodic_wave) = periodic_wave_list.iter().find(|periodic_wave| periodic_wave.get_oscillator_type() == oscillator_type && periodic_wave.get_sample_rate() == sample_rate) {
@@ -864,7 +864,7 @@ mod tests {
 	use std::sync::mpsc::channel;
 
 	//==============================================================================
-	// base64 풀기. (시험 기대값)
+	/// base64 풀기. (시험 기대값)
 	//==============================================================================
 	fn decode_base64(text: &str) -> Vec<u8> {
 		let mut byte_list = Vec::with_capacity(text.len() / 4 * 3);
@@ -890,9 +890,9 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 크롬(158) OfflineAudioContext 의 원본 playTone 그래프와 표본마다 견준다. (tests/assets/mixer/chromebeep.cjs 가 찍은 chrome_beep.json)
-	// - 네 파형, 프리셋 시퀀스, 표본 사이 시작, 그리는 도중 부르기, 표본율 22050(표 2048 칸), 96000(표 16384 칸), 3 점과 5 점 보간, 나이퀴스트 가까이.
-	// - 크롬의 오실레이터 커널은 CPU 마다 다르다. 기대값을 찍은 CPU 와 같으면 1e-6, 다르면 1e-4 안으로 본다.
+	/// 크롬(158) OfflineAudioContext 의 원본 playTone 그래프와 표본마다 견준다. (tests/assets/mixer/chromebeep.cjs 가 찍은 chrome_beep.json)
+	/// - 네 파형, 프리셋 시퀀스, 표본 사이 시작, 그리는 도중 부르기, 표본율 22050(표 2048 칸), 96000(표 16384 칸), 3 점과 5 점 보간, 나이퀴스트 가까이.
+	/// - 크롬의 오실레이터 커널은 CPU 마다 다르다. 기대값을 찍은 CPU 와 같으면 1e-6, 다르면 1e-4 안으로 본다.
 	//==============================================================================
 	#[test]
 	fn beep_matches_chrome_offline_rendering() {
@@ -953,7 +953,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 시각이 음수면 보내지 않고, 시작은 부른 때의 시계보다 앞으로 두지 않는다.
+	/// 시각이 음수면 보내지 않고, 시작은 부른 때의 시계보다 앞으로 두지 않는다.
 	//==============================================================================
 	#[test]
 	fn beep_command_follows_original_time_rules() {

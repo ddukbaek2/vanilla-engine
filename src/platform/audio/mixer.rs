@@ -1,18 +1,18 @@
 //==============================================================================
-// 데스크탑 믹서. (cpal 의 소리 스레드에서 도는 WebAudio 노드 그래프, 원본이 쓰는 크롬 WebAudio 와 같은 셈)
-// - 그래프: AudioBufferSourceNode → GainNode(플레이어) → [StereoPannerNode] → GainNode(버스) 또는 출력. 비프는 OscillatorNode → GainNode → 출력.
-//   원본 AudioPlayer, AudioBus, SoundSystem.playEffect, BeepPlayer 가 짓는 그래프와 같다. (웹 백엔드 web.rs 와도 같다)
-// - 128 프레임 렌더 퀀텀마다 그린다. (크롬 kRenderQuantumFrames) 명령은 퀀텀을 그리기 전에 받아, 값 바꾸기와 시작, 정지가 퀀텀 경계에서 걸린다.
-// - 소스: 크롬 audio_buffer_source_handler.cc 를 옮겼다. 시작 위치(TimeToSampleFrame 의 1024 배 오버샘플 반올림), 재생 빠르기(버퍼 표본율 / 컨텍스트 표본율 x playbackRate),
-//   빠르기 1 이고 위치가 정수면 그대로 베끼고(ProcessFastPath), 아니면 선형 보간(ProcessInterpolatedPath, 끝에서는 선형 외삽), 루프는 버퍼 전체를 되풀이한다.
-// - GainNode: gain 은 AudioParam 이다. (audioparam.rs, 크로미엄과 같은 자동화 셈) 자동화가 있는 퀀텀은 표본마다, 없으면 퀀텀마다 하나로 곱하고,
-//   0 이면 소리를 낸다고 치지 않는다. 소스가 없는 동안에도 자동화는 흐른다. (GainHandler::Process, ProcessOnlyAudioParams)
-// - 소스의 stop(when): 그 시각을 올림한 프레임에서 끊고 끝낸다. (AudioScheduledSourceHandler::UpdateSchedulingInfo)
-// - OscillatorNode: 크롬 oscillator_handler.cc 와 CPU 별 커널을 옮겼다. (oscillator.rs) 대역 제한 표, 시작과 정지 프레임, frequency 자동화, 표본마다 같은 차례의 읽기와 보간.
-// - StereoPannerNode: 크롬 stereo_panner.cc 의 PanToTargetValue. 모노는 x = (pan + 1) / 2 로 L = in cos(x π/2), R = in sin(x π/2),
-//   스테레오는 pan <= 0 이면 L = L + R cos((pan + 1) π/2), R = R sin((pan + 1) π/2), 아니면 L = L cos(pan π/2), R = R + L sin(pan π/2). 이득은 f64 로 셈해 f32 로 곱한다.
-// - 섞기: 모노를 스테레오 입력에 섞을 때는 스피커 규칙으로 양쪽에 같게 올린다. 출력에 내보낼 때 크롬처럼 -1 ~ 1 로 자른다.
-// - 컨텍스트 멈춤(suspend) 동안은 그리지 않고 시계도 서며, 장치에는 0 을 낸다.
+//! 데스크탑 믹서. (cpal 의 소리 스레드에서 도는 WebAudio 노드 그래프, 원본이 쓰는 크롬 WebAudio 와 같은 셈)
+//! - 그래프: AudioBufferSourceNode → GainNode(플레이어) → `[StereoPannerNode]` → GainNode(버스) 또는 출력. 비프는 OscillatorNode → GainNode → 출력.
+//!   원본 AudioPlayer, AudioBus, SoundSystem.playEffect, BeepPlayer 가 짓는 그래프와 같다. (웹 백엔드 web.rs 와도 같다)
+//! - 128 프레임 렌더 퀀텀마다 그린다. (크롬 kRenderQuantumFrames) 명령은 퀀텀을 그리기 전에 받아, 값 바꾸기와 시작, 정지가 퀀텀 경계에서 걸린다.
+//! - 소스: 크롬 audio_buffer_source_handler.cc 를 옮겼다. 시작 위치(TimeToSampleFrame 의 1024 배 오버샘플 반올림), 재생 빠르기(버퍼 표본율 / 컨텍스트 표본율 x playbackRate),
+//!   빠르기 1 이고 위치가 정수면 그대로 베끼고(ProcessFastPath), 아니면 선형 보간(ProcessInterpolatedPath, 끝에서는 선형 외삽), 루프는 버퍼 전체를 되풀이한다.
+//! - GainNode: gain 은 AudioParam 이다. (audioparam.rs, 크로미엄과 같은 자동화 셈) 자동화가 있는 퀀텀은 표본마다, 없으면 퀀텀마다 하나로 곱하고,
+//!   0 이면 소리를 낸다고 치지 않는다. 소스가 없는 동안에도 자동화는 흐른다. (GainHandler::Process, ProcessOnlyAudioParams)
+//! - 소스의 stop(when): 그 시각을 올림한 프레임에서 끊고 끝낸다. (AudioScheduledSourceHandler::UpdateSchedulingInfo)
+//! - OscillatorNode: 크롬 oscillator_handler.cc 와 CPU 별 커널을 옮겼다. (oscillator.rs) 대역 제한 표, 시작과 정지 프레임, frequency 자동화, 표본마다 같은 차례의 읽기와 보간.
+//! - StereoPannerNode: 크롬 stereo_panner.cc 의 PanToTargetValue. 모노는 x = (pan + 1) / 2 로 L = in cos(x π/2), R = in sin(x π/2),
+//!   스테레오는 pan <= 0 이면 L = L + R cos((pan + 1) π/2), R = R sin((pan + 1) π/2), 아니면 L = L cos(pan π/2), R = R + L sin(pan π/2). 이득은 f64 로 셈해 f32 로 곱한다.
+//! - 섞기: 모노를 스테레오 입력에 섞을 때는 스피커 규칙으로 양쪽에 같게 올린다. 출력에 내보낼 때 크롬처럼 -1 ~ 1 로 자른다.
+//! - 컨텍스트 멈춤(suspend) 동안은 그리지 않고 시계도 서며, 장치에는 0 을 낸다.
 //==============================================================================
 use super::audioparam::{AudioParam, ParamAutomation};
 use super::oscillator::{OscillatorNode, PeriodicWave};
@@ -20,13 +20,13 @@ use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 
-// 렌더 퀀텀 프레임 수. (크롬 kRenderQuantumFrames)
+/// 렌더 퀀텀 프레임 수. (크롬 kRenderQuantumFrames)
 pub(crate) const RENDER_QUANTUM_FRAMES: usize = 128;
-// 재생 빠르기 한계. (크롬 kMaxRate)
+/// 재생 빠르기 한계. (크롬 kMaxRate)
 const MAXIMUM_PLAYBACK_RATE: f64 = 1024.0;
 
 //==============================================================================
-// 푼 소리. (원본 AudioBuffer 자리, 1 채널이나 2 채널, decode 가 크롬처럼 푼 것)
+/// 푼 소리. (원본 AudioBuffer 자리, 1 채널이나 2 채널, decode 가 크롬처럼 푼 것)
 //==============================================================================
 pub struct AudioBufferData {
 	pub(crate) sample_rate: f64,
@@ -40,7 +40,7 @@ impl AudioBufferData {
 }
 
 //==============================================================================
-// 소리 스레드에 보내는 명령.
+/// 소리 스레드에 보내는 명령.
 //==============================================================================
 pub(crate) enum MixerCommand {
 	AddBus {
@@ -82,8 +82,8 @@ pub(crate) enum MixerCommand {
 		player_id: u64,
 		time: f64,
 	},
-	// 비프 톤 하나. (원본 BeepPlayer.playTone: OscillatorNode(frequency.setValueAtTime(frequency, start_time)) → GainNode(엔벨로프 자동화 넷) → 출력.
-	// call_time 은 부른 때의 컨텍스트 시계, start_time 은 그보다 앞이 아니다)
+	/// 비프 톤 하나. (원본 BeepPlayer.playTone: OscillatorNode(frequency.setValueAtTime(frequency, start_time)) → GainNode(엔벨로프 자동화 넷) → 출력.
+	/// call_time 은 부른 때의 컨텍스트 시계, start_time 은 그보다 앞이 아니다)
 	PlayBeep {
 		periodic_wave: Arc<PeriodicWave>,
 		frequency: f32,
@@ -97,8 +97,8 @@ pub(crate) enum MixerCommand {
 }
 
 //==============================================================================
-// 소리 스레드와 나누는 값. (컨텍스트 시계와 표본율)
-// - 시계는 그린 프레임 수 / 표본율의 f64 비트다. (원본 currentTime, 장치가 바뀌어 표본율이 달라지면 프레임 수를 그 비로 옮겨 잇는다)
+/// 소리 스레드와 나누는 값. (컨텍스트 시계와 표본율)
+/// - 시계는 그린 프레임 수 / 표본율의 f64 비트다. (원본 currentTime, 장치가 바뀌어 표본율이 달라지면 프레임 수를 그 비로 옮겨 잇는다)
 //==============================================================================
 pub(crate) struct MixerShared {
 	rendered_seconds_bits: AtomicU64,
@@ -114,14 +114,14 @@ impl MixerShared {
 	}
 
 	//==============================================================================
-	// 그린 시간. (초, 원본 currentTime)
+	/// 그린 시간. (초, 원본 currentTime)
 	//==============================================================================
 	pub(crate) fn get_rendered_seconds(&self) -> f64 {
 		f64::from_bits(self.rendered_seconds_bits.load(Ordering::Acquire))
 	}
 
 	//==============================================================================
-	// 표본율. (원본 sampleRate, 장치의 표본율)
+	/// 표본율. (원본 sampleRate, 장치의 표본율)
 	//==============================================================================
 	pub(crate) fn get_sample_rate(&self) -> f64 {
 		f64::from_bits(self.sample_rate_bits.load(Ordering::Acquire))
@@ -133,7 +133,7 @@ impl MixerShared {
 }
 
 //==============================================================================
-// 시간을 표본 자리로. (크롬 audio_utilities::TimeToSampleFrame, 1024 배로 셈해 반올림한 뒤 가장 가까운 정수)
+/// 시간을 표본 자리로. (크롬 audio_utilities::TimeToSampleFrame, 1024 배로 셈해 반올림한 뒤 가장 가까운 정수)
 //==============================================================================
 fn time_to_sample_frame(time: f64, sample_rate: f64) -> f64 {
 	const OVERSAMPLE_FACTOR: f64 = 1024.0;
@@ -142,7 +142,7 @@ fn time_to_sample_frame(time: f64, sample_rate: f64) -> f64 {
 }
 
 //==============================================================================
-// 시간을 표본 자리로 올림. (TimeToSampleFrame 의 kRoundUp, 예약 정지)
+/// 시간을 표본 자리로 올림. (TimeToSampleFrame 의 kRoundUp, 예약 정지)
 //==============================================================================
 pub(super) fn time_to_sample_frame_rounded_up(time: f64, sample_rate: f64) -> u64 {
 	const OVERSAMPLE_FACTOR: f64 = 1024.0;
@@ -151,7 +151,7 @@ pub(super) fn time_to_sample_frame_rounded_up(time: f64, sample_rate: f64) -> u6
 }
 
 //==============================================================================
-// AudioBufferSourceNode. (크롬 AudioBufferSourceHandler, 루프는 버퍼 전체, 빠르기는 0 보다 크다)
+/// AudioBufferSourceNode. (크롬 AudioBufferSourceHandler, 루프는 버퍼 전체, 빠르기는 0 보다 크다)
 //==============================================================================
 struct BufferSource {
 	audio_buffer: Arc<AudioBufferData>,
@@ -159,13 +159,13 @@ struct BufferSource {
 	computed_playback_rate: f64,
 	is_looping: bool,
 	is_finished: bool,
-	// stop(when) 의 시각. (없으면 끝까지)
+	/// stop(when) 의 시각. (없으면 끝까지)
 	end_time: Option<f64>,
 }
 
 impl BufferSource {
 	//==============================================================================
-	// 생성. (start(0, offset): ClampGrainParameters 와 ComputePlaybackRate)
+	/// 생성. (start(0, offset): ClampGrainParameters 와 ComputePlaybackRate)
 	//==============================================================================
 	fn new(audio_buffer: Arc<AudioBufferData>, is_loop: bool, offset_seconds: f64, playback_rate: f64, context_sample_rate: f64) -> BufferSource {
 		let buffer_sample_rate = audio_buffer.sample_rate;
@@ -186,7 +186,7 @@ impl BufferSource {
 	}
 
 	//==============================================================================
-	// 퀀텀 하나 그리기. (RenderFromBuffer, 채널 수를 돌려준다. 끝나면 is_finished)
+	/// 퀀텀 하나 그리기. (RenderFromBuffer, 채널 수를 돌려준다. 끝나면 is_finished)
 	//==============================================================================
 	fn render(&mut self, destination: &mut [[f32; RENDER_QUANTUM_FRAMES]; 2], frame_count: usize) -> usize {
 		let channel_count = self.audio_buffer.channel_list.len().min(2);
@@ -236,7 +236,7 @@ impl BufferSource {
 	}
 
 	//==============================================================================
-	// 그대로 베끼기. (ProcessFastPath)
+	/// 그대로 베끼기. (ProcessFastPath)
 	//==============================================================================
 	fn process_fast_path(&mut self, destination: &mut [[f32; RENDER_QUANTUM_FRAMES]; 2], channel_count: usize, virtual_delta_frames: f64, virtual_end_frame: f64, frames_to_process: usize, virtual_read_index: f64) -> (usize, f64) {
 		let buffer_length = self.audio_buffer.get_length();
@@ -278,7 +278,7 @@ impl BufferSource {
 	}
 
 	//==============================================================================
-	// 선형 보간. (ProcessInterpolatedPath, 빠르기가 0 보다 큰 쪽)
+	/// 선형 보간. (ProcessInterpolatedPath, 빠르기가 0 보다 큰 쪽)
 	//==============================================================================
 	#[allow(clippy::too_many_arguments)]
 	fn process_interpolated_path(&mut self, destination: &mut [[f32; RENDER_QUANTUM_FRAMES]; 2], channel_count: usize, virtual_start_frame: f64, virtual_delta_frames: f64, virtual_end_frame: f64, frames_to_process: usize, mut virtual_read_index: f64) -> (usize, f64) {
@@ -346,7 +346,7 @@ impl BufferSource {
 }
 
 //==============================================================================
-// 좌우 이득. (크롬 StereoPanner::PanToTargetValue, f64 로 셈해 f32 로)
+/// 좌우 이득. (크롬 StereoPanner::PanToTargetValue, f64 로 셈해 f32 로)
 //==============================================================================
 fn get_pan_gains(pan: f32, channel_count: usize) -> (f32, f32) {
 	let target_pan = pan.clamp(-1.0, 1.0) as f64;
@@ -363,14 +363,14 @@ fn get_pan_gains(pan: f32, channel_count: usize) -> (f32, f32) {
 }
 
 //==============================================================================
-// 플레이어. (원본 AudioPlayer 의 GainNode 와 지금 소스, 좌우 노드)
+/// 플레이어. (원본 AudioPlayer 의 GainNode 와 지금 소스, 좌우 노드)
 //==============================================================================
 struct PlayerNode {
 	player_id: u64,
 	gain: AudioParam,
-	// 원본 gain.value 가 읽는 내재 값을 플레이어 손잡이에 나눠 준다.
+	/// 원본 gain.value 가 읽는 내재 값을 플레이어 손잡이에 나눠 준다.
 	gain_value: Arc<AtomicU32>,
-	// StereoPannerNode 의 값. (0 이 아닌 좌우를 처음 걸 때 생기고 그 뒤로 남는다)
+	/// StereoPannerNode 의 값. (0 이 아닌 좌우를 처음 걸 때 생기고 그 뒤로 남는다)
 	pan: Option<f32>,
 	output_bus_id: Option<u64>,
 	source: Option<(BufferSource, u64)>,
@@ -378,18 +378,18 @@ struct PlayerNode {
 }
 
 //==============================================================================
-// 버스. (원본 AudioBus 의 GainNode)
+/// 버스. (원본 AudioBus 의 GainNode)
 //==============================================================================
 struct BusNode {
 	bus_id: u64,
 	gain: AudioParam,
 	input: [[f32; RENDER_QUANTUM_FRAMES]; 2],
-	// 이 퀀텀에 소리 나는 입력이 있었는지. (없으면 크롬처럼 자동화만 흘린다)
+	/// 이 퀀텀에 소리 나는 입력이 있었는지. (없으면 크롬처럼 자동화만 흘린다)
 	has_sound_input: bool,
 }
 
 //==============================================================================
-// GainNode 의 gain 을 퀀텀에 걸기. (GainHandler::Process: 자동화가 있으면 표본마다, 없으면 하나, 0 이면 소리 없음. 소리가 나면 참)
+/// GainNode 의 gain 을 퀀텀에 걸기. (GainHandler::Process: 자동화가 있으면 표본마다, 없으면 하나, 0 이면 소리 없음. 소리가 나면 참)
 //==============================================================================
 fn apply_gain_param(gain: &mut AudioParam, quantum: &mut [[f32; RENDER_QUANTUM_FRAMES]; 2], channel_count: usize, gain_value_list: &mut [f32; RENDER_QUANTUM_FRAMES], current_frame: u64, sample_rate: f64) -> bool {
 	if gain.has_sample_accurate_values(current_frame, sample_rate, RENDER_QUANTUM_FRAMES) {
@@ -416,13 +416,13 @@ fn apply_gain_param(gain: &mut AudioParam, quantum: &mut [[f32; RENDER_QUANTUM_F
 	true
 }
 
-// GainNode 의 gain 기본값과 범위. (1, f32 전체)
+/// GainNode 의 gain 기본값과 범위. (1, f32 전체)
 fn create_gain_param() -> AudioParam {
 	AudioParam::new(1.0, f32::MIN, f32::MAX)
 }
 
 //==============================================================================
-// 비프. (OscillatorNode → GainNode → 출력, 오실레이터가 끝나면 뺀다)
+/// 비프. (OscillatorNode → GainNode → 출력, 오실레이터가 끝나면 뺀다)
 //==============================================================================
 struct BeepVoice {
 	oscillator: OscillatorNode,
@@ -430,19 +430,19 @@ struct BeepVoice {
 }
 
 //==============================================================================
-// 소리 스레드의 믹서.
+/// 소리 스레드의 믹서.
 //==============================================================================
 pub(crate) struct MixerRenderer {
 	command_receiver: Receiver<MixerCommand>,
 	shared: Arc<MixerShared>,
 	sample_rate: f64,
-	// 그린 프레임 수. (원본 currentSampleFrame, 다음 퀀텀의 첫 프레임)
+	/// 그린 프레임 수. (원본 currentSampleFrame, 다음 퀀텀의 첫 프레임)
 	current_frame: u64,
 	is_suspended: bool,
 	player_list: Vec<PlayerNode>,
 	bus_list: Vec<BusNode>,
 	beep_list: Vec<BeepVoice>,
-	// 그린 퀀텀. (출력 L, R 과 다음에 낼 자리)
+	/// 그린 퀀텀. (출력 L, R 과 다음에 낼 자리)
 	output_quantum: [[f32; RENDER_QUANTUM_FRAMES]; 2],
 	output_position: usize,
 	source_quantum: [[f32; RENDER_QUANTUM_FRAMES]; 2],
@@ -451,7 +451,7 @@ pub(crate) struct MixerRenderer {
 
 impl MixerRenderer {
 	//==============================================================================
-	// 생성.
+	/// 생성.
 	//==============================================================================
 	pub(crate) fn new(command_receiver: Receiver<MixerCommand>, shared: Arc<MixerShared>, sample_rate: f64) -> MixerRenderer {
 		MixerRenderer {
@@ -471,7 +471,7 @@ impl MixerRenderer {
 	}
 
 	//==============================================================================
-	// 받은 명령 처리하기.
+	/// 받은 명령 처리하기.
 	//==============================================================================
 	fn receive_commands(&mut self) {
 		while let Ok(command) = self.command_receiver.try_recv() {
@@ -555,7 +555,7 @@ impl MixerRenderer {
 	}
 
 	//==============================================================================
-	// 퀀텀 하나 그리기. (플레이어 → 버스 → 출력, 비프 → 출력)
+	/// 퀀텀 하나 그리기. (플레이어 → 버스 → 출력, 비프 → 출력)
 	//==============================================================================
 	fn render_quantum(&mut self) {
 		for channel in self.output_quantum.iter_mut() {
@@ -681,7 +681,7 @@ impl MixerRenderer {
 	}
 
 	//==============================================================================
-	// 장치가 바뀌어 표본율이 달라졌을 때. (새로 트는 소스부터 그 표본율로 빠르기를 셈한다)
+	/// 장치가 바뀌어 표본율이 달라졌을 때. (새로 트는 소스부터 그 표본율로 빠르기를 셈한다)
 	//==============================================================================
 	pub(crate) fn set_sample_rate(&mut self, sample_rate: f64) {
 		if self.sample_rate > 0.0 && sample_rate != self.sample_rate {
@@ -692,7 +692,7 @@ impl MixerRenderer {
 	}
 
 	//==============================================================================
-	// 장치 버퍼 채우기. (끼워 넣은 channel_count 채널, 앞 두 채널에 L, R 과 나머지 0, 모노 장치는 0.5 * (L + R). -1 ~ 1 로 자른다)
+	/// 장치 버퍼 채우기. (끼워 넣은 channel_count 채널, 앞 두 채널에 L, R 과 나머지 0, 모노 장치는 0.5 * (L + R). -1 ~ 1 로 자른다)
 	//==============================================================================
 	pub(crate) fn render_interleaved(&mut self, output: &mut [f32], channel_count: usize) {
 		if channel_count == 0 {
@@ -725,7 +725,7 @@ impl MixerRenderer {
 }
 
 //==============================================================================
-// 입력 섞기. (모노 입력은 스피커 규칙으로 양쪽에 같게 올린다)
+/// 입력 섞기. (모노 입력은 스피커 규칙으로 양쪽에 같게 올린다)
 //==============================================================================
 fn mix_into(target: &mut [[f32; RENDER_QUANTUM_FRAMES]; 2], source: &[[f32; RENDER_QUANTUM_FRAMES]; 2], source_channel_count: usize) {
 	for frame_index in 0..RENDER_QUANTUM_FRAMES {
@@ -756,7 +756,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 같은 표본율, 빠르기 1 은 그대로 베끼고 끝에서 멈춘다. (ProcessFastPath)
+	/// 같은 표본율, 빠르기 1 은 그대로 베끼고 끝에서 멈춘다. (ProcessFastPath)
 	//==============================================================================
 	#[test]
 	fn buffer_source_copies_and_finishes() {
@@ -773,7 +773,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 표본율이 다르면 선형 보간하고, 끝 표본은 선형으로 넘겨 그린다. (ProcessInterpolatedPath)
+	/// 표본율이 다르면 선형 보간하고, 끝 표본은 선형으로 넘겨 그린다. (ProcessInterpolatedPath)
 	//==============================================================================
 	#[test]
 	fn buffer_source_interpolates_linearly() {
@@ -787,7 +787,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 루프는 버퍼 전체를 되풀이하고, 시작 위치는 1024 배 오버샘플로 반올림한다.
+	/// 루프는 버퍼 전체를 되풀이하고, 시작 위치는 1024 배 오버샘플로 반올림한다.
 	//==============================================================================
 	#[test]
 	fn buffer_source_loops_from_offset() {
@@ -801,7 +801,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 좌우: 모노는 가운데에서 양쪽 cos(π/4), 스테레오는 0 이면 그대로. (크롬 PanToTargetValue)
+	/// 좌우: 모노는 가운데에서 양쪽 cos(π/4), 스테레오는 0 이면 그대로. (크롬 PanToTargetValue)
 	//==============================================================================
 	#[test]
 	fn stereo_panner_matches_chromium() {
@@ -818,7 +818,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 그래프: 플레이어(음량, 좌우) → 버스(음량) → 출력. 모노는 양쪽에 올리고, 멈춘 동안은 그리지 않는다.
+	/// 그래프: 플레이어(음량, 좌우) → 버스(음량) → 출력. 모노는 양쪽에 올리고, 멈춘 동안은 그리지 않는다.
 	//==============================================================================
 	#[test]
 	fn mixer_graph_applies_gain_pan_and_bus() {
@@ -858,9 +858,9 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 크롬(158) OfflineAudioContext 와 같은 그래프를 그려 견준다. (tests/assets/mixer/chromemixer.cjs 가 찍은 chrome_mixer.json)
-	// - 소스(같은 표본율과 다른 표본율, 빠르기, 루프, 시작 위치, stop(when)), 플레이어 GainNode, StereoPannerNode(모노와 스테레오, 0 포함), 버스 GainNode, 섞기.
-	// - AudioParam 자동화(value 대입, setValueAtTime, linearRamp, exponentialRamp, setTarget, cancel)와 그리는 도중 지금 gain.value 에서 줄여 끄기, 새 음악 올리기.
+	/// 크롬(158) OfflineAudioContext 와 같은 그래프를 그려 견준다. (tests/assets/mixer/chromemixer.cjs 가 찍은 chrome_mixer.json)
+	/// - 소스(같은 표본율과 다른 표본율, 빠르기, 루프, 시작 위치, stop(when)), 플레이어 GainNode, StereoPannerNode(모노와 스테레오, 0 포함), 버스 GainNode, 섞기.
+	/// - AudioParam 자동화(value 대입, setValueAtTime, linearRamp, exponentialRamp, setTarget, cancel)와 그리는 도중 지금 gain.value 에서 줄여 끄기, 새 음악 올리기.
 	//==============================================================================
 	#[test]
 	fn mixer_matches_chrome_offline_rendering() {

@@ -1,20 +1,20 @@
 //==============================================================================
-// AudioParam 자동화. (데스크탑 믹서, 크로미엄 audio_param_handler.cc(옛 audio_param_timeline.cc)를 옮긴 것, Chromium Authors BSD-3-Clause)
-// - 원본이 쓰는 value 대입, setValueAtTime, linearRampToValueAtTime, exponentialRampToValueAtTime, setTargetAtTime, cancelScheduledValues 를 옮겼다.
-//   (setValueCurveAtTime, cancelAndHoldAtTime 은 원본이 쓰지 않아 옮기지 않았다)
-// - 값은 렌더 퀀텀마다 크롬처럼 셈한다. GainNode 의 gain 은 a-rate 라 표본마다 셈하고(CalculateSampleAccurateValues),
-//   자동화가 없는 동안은 퀀텀마다 하나(Value)다. 마지막에 셈한 값이 내재 값(intrinsic value)이 되어 원본 gain.value 가 읽는 값이다.
-// - value 대입은 크롬처럼 내재 값을 바꾸고 그 때 setValueAtTime 을 하나 넣는다. (AudioParam::setValue)
-// - 사건은 넣을 때의 시각(컨텍스트 시계)보다 앞이면 그 시각으로 당기고, 그리기 전에 한 번 더 지금 퀀텀으로 당긴다. (ClampNewEventsToCurrentTime)
-// - 표본마다의 셈과 합 차례는 aarch64 의 크롬(스칼라)과 같고, x86_64 는 크롬의 SSE 길(4 줄 묶음)과 같게 셈한다.
+//! AudioParam 자동화. (데스크탑 믹서, 크로미엄 audio_param_handler.cc(옛 audio_param_timeline.cc)를 옮긴 것, Chromium Authors BSD-3-Clause)
+//! - 원본이 쓰는 value 대입, setValueAtTime, linearRampToValueAtTime, exponentialRampToValueAtTime, setTargetAtTime, cancelScheduledValues 를 옮겼다.
+//!   (setValueCurveAtTime, cancelAndHoldAtTime 은 원본이 쓰지 않아 옮기지 않았다)
+//! - 값은 렌더 퀀텀마다 크롬처럼 셈한다. GainNode 의 gain 은 a-rate 라 표본마다 셈하고(CalculateSampleAccurateValues),
+//!   자동화가 없는 동안은 퀀텀마다 하나(Value)다. 마지막에 셈한 값이 내재 값(intrinsic value)이 되어 원본 gain.value 가 읽는 값이다.
+//! - value 대입은 크롬처럼 내재 값을 바꾸고 그 때 setValueAtTime 을 하나 넣는다. (AudioParam::setValue)
+//! - 사건은 넣을 때의 시각(컨텍스트 시계)보다 앞이면 그 시각으로 당기고, 그리기 전에 한 번 더 지금 퀀텀으로 당긴다. (ClampNewEventsToCurrentTime)
+//! - 표본마다의 셈과 합 차례는 aarch64 의 크롬(스칼라)과 같고, x86_64 는 크롬의 SSE 길(4 줄 묶음)과 같게 셈한다.
 //==============================================================================
 
-// 목표를 따라가다 다 왔다고 칠 시간 상수 수와 남은 비. (kTimeConstantsToConverge, kSetTargetThreshold)
+/// 목표를 따라가다 다 왔다고 칠 시간 상수 수와 남은 비. (kTimeConstantsToConverge, kSetTargetThreshold)
 const TIME_CONSTANTS_TO_CONVERGE: f32 = 10.0;
 const SET_TARGET_THRESHOLD: f32 = 4.539992976248485e-05;
 
 //==============================================================================
-// 사건 종류.
+/// 사건 종류.
 //==============================================================================
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum ParamEventType {
@@ -25,17 +25,17 @@ enum ParamEventType {
 }
 
 //==============================================================================
-// 자동화 사건 하나.
+/// 자동화 사건 하나.
 //==============================================================================
 #[derive(Clone, Debug)]
 struct ParamEvent {
 	event_type: ParamEventType,
 	value: f32,
 	time: f64,
-	// 램프를 넣을 때의 내재 값. (사건이 없을 때 앞에 SetValue 로 넣는다)
+	/// 램프를 넣을 때의 내재 값. (사건이 없을 때 앞에 SetValue 로 넣는다)
 	initial_value: f32,
 	time_constant: f64,
-	// 넣은 뒤 아직 지금 시각으로 당기지 않았는지.
+	/// 넣은 뒤 아직 지금 시각으로 당기지 않았는지.
 	is_new: bool,
 }
 
@@ -53,7 +53,7 @@ impl ParamEvent {
 }
 
 //==============================================================================
-// 원본 AudioParam 의 자동화 호출. (믹서 명령으로 보낸다)
+/// 원본 AudioParam 의 자동화 호출. (믹서 명령으로 보낸다)
 //==============================================================================
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum ParamAutomation {
@@ -83,7 +83,7 @@ pub(crate) enum ParamAutomation {
 }
 
 //==============================================================================
-// AudioParam 하나. (내재 값과 사건 목록)
+/// AudioParam 하나. (내재 값과 사건 목록)
 //==============================================================================
 pub(crate) struct AudioParam {
 	intrinsic_value: f32,
@@ -94,7 +94,7 @@ pub(crate) struct AudioParam {
 
 impl AudioParam {
 	//==============================================================================
-	// 생성. (GainNode 의 gain 은 기본 1, 범위는 f32 전체)
+	/// 생성. (GainNode 의 gain 은 기본 1, 범위는 f32 전체)
 	//==============================================================================
 	pub(crate) fn new(default_value: f32, minimum_value: f32, maximum_value: f32) -> AudioParam {
 		AudioParam {
@@ -106,7 +106,7 @@ impl AudioParam {
 	}
 
 	//==============================================================================
-	// 내재 값. (원본 gain.value 가 읽는 값)
+	/// 내재 값. (원본 gain.value 가 읽는 값)
 	//==============================================================================
 	pub(crate) fn get_intrinsic_value(&self) -> f32 {
 		self.intrinsic_value
@@ -117,15 +117,15 @@ impl AudioParam {
 	}
 
 	//==============================================================================
-	// 자동화 호출 받기. (current_frame 은 지금 그릴 퀀텀의 첫 프레임)
+	/// 자동화 호출 받기. (current_frame 은 지금 그릴 퀀텀의 첫 프레임)
 	//==============================================================================
 	pub(crate) fn apply_automation(&mut self, automation: ParamAutomation, current_frame: u64, sample_rate: f64) {
 		self.apply_automation_at_call_time(automation, current_frame as f64 / sample_rate, current_frame, sample_rate);
 	}
 
 	//==============================================================================
-	// 자동화 호출 받기, 부른 때의 시계를 따로 받는 꼴. (call_time: 원본 메인 스레드가 부른 때의 currentTime)
-	// - 사건 시각은 call_time 보다 앞이면 그 시각으로 당기고(ClampedToCurrentTime), 그리기 전에 지금 퀀텀으로 한 번 더 당긴다.
+	/// 자동화 호출 받기, 부른 때의 시계를 따로 받는 꼴. (call_time: 원본 메인 스레드가 부른 때의 currentTime)
+	/// - 사건 시각은 call_time 보다 앞이면 그 시각으로 당기고(ClampedToCurrentTime), 그리기 전에 지금 퀀텀으로 한 번 더 당긴다.
 	//==============================================================================
 	pub(crate) fn apply_automation_at_call_time(&mut self, automation: ParamAutomation, call_time: f64, current_frame: u64, sample_rate: f64) {
 		let current_time = call_time;
@@ -173,7 +173,7 @@ impl AudioParam {
 	}
 
 	//==============================================================================
-	// 사건 넣기. (InsertEvent: 지난 사건을 치우고, 비었는데 램프면 앞에 내재 값을 둔 SetValue, 같은 시각이면 뒤에)
+	/// 사건 넣기. (InsertEvent: 지난 사건을 치우고, 비었는데 램프면 앞에 내재 값을 둔 SetValue, 같은 시각이면 뒤에)
 	//==============================================================================
 	fn insert_event(&mut self, event: ParamEvent, current_frame: u64, sample_rate: f64) {
 		if !self.event_list.is_empty() {
@@ -207,7 +207,7 @@ impl AudioParam {
 	}
 
 	//==============================================================================
-	// 지난 사건 치우기. (RemoveOldEvents, 마지막 하나는 남긴다)
+	/// 지난 사건 치우기. (RemoveOldEvents, 마지막 하나는 남긴다)
 	//==============================================================================
 	fn remove_old_events(&mut self, event_count: usize) {
 		let event_list_length = self.event_list.len();
@@ -218,7 +218,7 @@ impl AudioParam {
 	}
 
 	//==============================================================================
-	// 이 퀀텀에서 표본마다 셈해야 하는지. (HasSampleAccurateValues)
+	/// 이 퀀텀에서 표본마다 셈해야 하는지. (HasSampleAccurateValues)
 	//==============================================================================
 	pub(crate) fn has_sample_accurate_values(&self, current_frame: u64, sample_rate: f64, render_quantum_frames: usize) -> bool {
 		let Some(first_event) = self.event_list.first() else {
@@ -247,7 +247,7 @@ impl AudioParam {
 	}
 
 	//==============================================================================
-	// 표본마다의 값. (CalculateSampleAccurateValues → CalculateTimelineValues, 마지막 값이 내재 값이 된다)
+	/// 표본마다의 값. (CalculateSampleAccurateValues → CalculateTimelineValues, 마지막 값이 내재 값이 된다)
 	//==============================================================================
 	pub(crate) fn calculate_sample_accurate_values(&mut self, value_list: &mut [f32], current_frame: u64, sample_rate: f64) {
 		let start_frame = current_frame as usize;
@@ -258,7 +258,7 @@ impl AudioParam {
 	}
 
 	//==============================================================================
-	// 퀀텀의 값 하나. (Value: 사건이 시작했으면 퀀텀 첫 프레임의 값을 control rate 로 셈한다)
+	/// 퀀텀의 값 하나. (Value: 사건이 시작했으면 퀀텀 첫 프레임의 값을 control rate 로 셈한다)
 	//==============================================================================
 	pub(crate) fn calculate_quantum_value(&mut self, current_frame: u64, sample_rate: f64, render_quantum_frames: usize) -> f32 {
 		let mut value = self.intrinsic_value;
@@ -273,7 +273,7 @@ impl AudioParam {
 	}
 
 	//==============================================================================
-	// 프레임 범위의 값. (ValuesForFrameRange, 범위로 자른 뒤 마지막 값)
+	/// 프레임 범위의 값. (ValuesForFrameRange, 범위로 자른 뒤 마지막 값)
 	//==============================================================================
 	fn calculate_values_for_frame_range(&mut self, start_frame: usize, end_frame: usize, default_value: f32, value_list: &mut [f32], sample_rate: f64, control_rate: f64) -> f32 {
 		self.calculate_values_for_frame_range_inner(start_frame, end_frame, default_value, value_list, sample_rate, control_rate);
@@ -285,7 +285,7 @@ impl AudioParam {
 	}
 
 	//==============================================================================
-	// ValuesForFrameRangeImpl.
+	/// ValuesForFrameRangeImpl.
 	//==============================================================================
 	fn calculate_values_for_frame_range_inner(&mut self, start_frame: usize, end_frame: usize, mut default_value: f32, value_list: &mut [f32], sample_rate: f64, control_rate: f64) {
 		if self.event_list.is_empty() || end_frame as f64 / sample_rate <= self.event_list[0].time {
@@ -349,7 +349,7 @@ impl AudioParam {
 	}
 
 	//==============================================================================
-	// 새 사건을 지금 시각으로 당기기. (ClampNewEventsToCurrentTime)
+	/// 새 사건을 지금 시각으로 당기기. (ClampNewEventsToCurrentTime)
 	//==============================================================================
 	fn clamp_new_events_to_current_time(&mut self, current_time: f64) {
 		let mut is_clamped = false;
@@ -368,7 +368,7 @@ impl AudioParam {
 	}
 
 	//==============================================================================
-	// 모든 사건이 지난 경우. (HandleAllEventsInThePast)
+	/// 모든 사건이 지난 경우. (HandleAllEventsInThePast)
 	//==============================================================================
 	fn handle_all_events_in_the_past(&mut self, current_time: f64, sample_rate: f64, default_value: &mut f32, value_list: &mut [f32]) -> bool {
 		let Some(last_event) = self.event_list.last() else {
@@ -392,7 +392,7 @@ impl AudioParam {
 	}
 
 	//==============================================================================
-	// 첫 사건 앞을 채우기. (HandleFirstEvent)
+	/// 첫 사건 앞을 채우기. (HandleFirstEvent)
 	//==============================================================================
 	fn handle_first_event(&self, value_list: &mut [f32], default_value: f32, start_frame: usize, end_frame: usize, sample_rate: f64) -> (usize, usize) {
 		let mut current_frame = start_frame;
@@ -413,7 +413,7 @@ impl AudioParam {
 	}
 
 	//==============================================================================
-	// 목표 따라가기 뒤에 램프가 오면 지금 값으로 SetValue 를 둔다. (ProcessSetTargetFollowedByRamp)
+	/// 목표 따라가기 뒤에 램프가 오면 지금 값으로 SetValue 를 둔다. (ProcessSetTargetFollowedByRamp)
 	//==============================================================================
 	fn process_set_target_followed_by_ramp(&mut self, event_index: usize, next_event: Option<&ParamEvent>, current_frame: usize, sample_rate: f64, control_rate: f64, value: &mut f32) {
 		let event = &self.event_list[event_index];
@@ -439,7 +439,7 @@ impl AudioParam {
 }
 
 //==============================================================================
-// 지금 쓸 사건인지. (IsEventCurrent)
+/// 지금 쓸 사건인지. (IsEventCurrent)
 //==============================================================================
 fn is_event_current(event: &ParamEvent, next_event: Option<&ParamEvent>, current_frame: f64, sample_rate: f64) -> bool {
 	let Some(next_event) = next_event else {
@@ -453,7 +453,7 @@ fn is_event_current(event: &ParamEvent, next_event: Option<&ParamEvent>, current
 }
 
 //==============================================================================
-// 목표에 다 왔는지. (HasSetTargetConverged)
+/// 목표에 다 왔는지. (HasSetTargetConverged)
 //==============================================================================
 fn has_set_target_converged(value: f32, target: f32, current_time: f64, start_time: f64, time_constant: f64) -> bool {
 	if current_time > start_time + TIME_CONSTANTS_TO_CONVERGE as f64 * time_constant {
@@ -469,14 +469,14 @@ fn has_set_target_converged(value: f32, target: f32, current_time: f64, start_ti
 }
 
 //==============================================================================
-// 이산 시간 상수. (audio_utilities::DiscreteTimeConstantForSampleRate, 1 - exp(-1 / (표본율 x 시간 상수)))
+/// 이산 시간 상수. (audio_utilities::DiscreteTimeConstantForSampleRate, 1 - exp(-1 / (표본율 x 시간 상수)))
 //==============================================================================
 fn discrete_time_constant_for_sample_rate(time_constant: f64, sample_rate: f64) -> f64 {
 	1.0 - (-1.0 / (sample_rate * time_constant)).exp()
 }
 
 //==============================================================================
-// 선형 램프. (ProcessLinearRamp, x86_64 는 크롬의 SSE 4 줄 묶음과 같게)
+/// 선형 램프. (ProcessLinearRamp, x86_64 는 크롬의 SSE 4 줄 묶음과 같게)
 //==============================================================================
 #[allow(clippy::too_many_arguments)]
 fn process_linear_ramp(fill_to_frame: usize, time1: f64, time2: f64, value1: f32, value2: f32, sample_rate: f64, value_list: &mut [f32], mut current_frame: usize, mut value: f32, write_index: usize) -> (usize, f32, usize) {
@@ -521,7 +521,7 @@ fn process_linear_ramp(fill_to_frame: usize, time1: f64, time2: f64, value1: f32
 }
 
 //==============================================================================
-// 지수 램프. (ProcessExponentialRamp)
+/// 지수 램프. (ProcessExponentialRamp)
 //==============================================================================
 #[allow(clippy::too_many_arguments)]
 fn process_exponential_ramp(fill_to_frame: usize, time1: f64, time2: f64, value1: f32, value2: f32, sample_rate: f64, value_list: &mut [f32], mut current_frame: usize, write_index: usize) -> (usize, f32, usize) {
@@ -553,7 +553,7 @@ fn process_exponential_ramp(fill_to_frame: usize, time1: f64, time2: f64, value1
 }
 
 //==============================================================================
-// 목표 따라가기. (ProcessSetTarget, x86_64 는 크롬의 SSE 4 줄 묶음과 같게)
+/// 목표 따라가기. (ProcessSetTarget, x86_64 는 크롬의 SSE 4 줄 묶음과 같게)
 //==============================================================================
 #[allow(clippy::too_many_arguments)]
 fn process_set_target(fill_to_frame: usize, time1: f64, value1: f32, sample_rate: f64, control_rate: f64, fill_to_end_frame: usize, event: &ParamEvent, value_list: &mut [f32], mut current_frame: usize, mut value: f32, mut write_index: usize) -> (usize, f32, usize) {
@@ -611,7 +611,7 @@ mod tests {
 	use super::*;
 
 	//==============================================================================
-	// setValueAtTime 뒤 linearRampToValueAtTime: 선형으로 내려가고 끝에서 멈춘다.
+	/// setValueAtTime 뒤 linearRampToValueAtTime: 선형으로 내려가고 끝에서 멈춘다.
 	//==============================================================================
 	#[test]
 	fn linear_ramp_follows_chromium() {
@@ -628,7 +628,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// setTargetAtTime: 시간 상수 하나 뒤 1/e 만큼 남는다. value 대입은 지금 SetValue 를 하나 넣는다.
+	/// setTargetAtTime: 시간 상수 하나 뒤 1/e 만큼 남는다. value 대입은 지금 SetValue 를 하나 넣는다.
 	//==============================================================================
 	#[test]
 	fn set_target_and_value_setter() {
