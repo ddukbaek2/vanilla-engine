@@ -279,18 +279,41 @@ pub fn set_title(_platform_window: Option<&PlatformWindow>, title: &str) {
 
 //==============================================================================
 // 애셋 바이트 읽기. (fetch 로 받고, 받으면 끝낸다. 그 사이 프레임은 계속 돈다)
-// - 그림 확장자(png, jpg, gif, webp, bmp, ico, svg, avif 등)면 끝내기 전에 원본처럼 브라우저가 풀게 해 손잡이에 둔다. (ImageAsset, AssetLoader 가 그대로 쓴다)
+// - 응답의 content-type 을 손잡이에 적는다. (원본 Material.loadImageDescription 의 response.headers.get("content-type"))
+// - 응답이 그림 형(image/...)이거나 주소가 그림 확장자(png, jpg, gif, webp, bmp, ico, svg, avif 등)면 끝내기 전에 원본처럼 브라우저가 풀게 해 손잡이에 둔다.
+//   (ImageAsset, AssetLoader 가 그대로 쓴다) 원본 HTMLImageElement 처럼 응답의 content-type 을 그대로 형으로 넘겨, 브라우저가 SVG 는 그 형(image/svg+xml)으로,
+//   그 밖의 그림은 내용으로 가린다. 머리가 없는 응답만 확장자의 형을 쓴다. data: 주소는 fetch 가 주소의 형을 content-type 으로 준다.
 //==============================================================================
 pub fn request_asset_bytes(asset_location: String, load_handle: AssetLoadHandle, is_no_cache: bool) {
 	wasm_bindgen_futures::spawn_local(async move {
-		let result = fetch_bytes(&asset_location, is_no_cache).await;
-		if let (Ok(bytes), Some(mime_type)) = (&result, read_image_mime_type(&asset_location)) {
-			if let Some(image) = decode_browser_image(bytes, mime_type).await {
-				load_handle.set_decoded_image(image);
+		let result = match fetch_bytes(&asset_location, is_no_cache).await {
+			Ok((bytes, content_type)) => {
+				if let Some(mime_type) = read_browser_image_mime_type(&asset_location, content_type.as_deref()) {
+					if let Some(image) = decode_browser_image(&bytes, &mime_type).await {
+						load_handle.set_decoded_image(image);
+					}
+				}
+				load_handle.set_content_type(content_type);
+				Ok(bytes)
 			}
-		}
+			Err(error_message) => {
+				Err(error_message)
+			}
+		};
 		load_handle.finish(result);
 	});
+}
+
+//==============================================================================
+// 브라우저가 풀 그림의 형. (응답이 그림 형이거나 주소가 그림 확장자일 때, 형은 응답의 content-type 이고 머리가 없으면 확장자의 형. 그림이 아니면 None)
+//==============================================================================
+fn read_browser_image_mime_type(asset_location: &str, content_type: Option<&str>) -> Option<String> {
+	let extension_mime_type = read_image_mime_type(asset_location);
+	let is_image_content_type = content_type.map(|content_type| content_type.trim_start().to_ascii_lowercase().starts_with("image/")).unwrap_or(false);
+	if !is_image_content_type && extension_mime_type.is_none() {
+		return None;
+	}
+	content_type.map(String::from).or(extension_mime_type.map(String::from))
 }
 
 //==============================================================================
@@ -366,9 +389,9 @@ async fn decode_browser_image(bytes: &[u8], mime_type: &str) -> Option<std::rc::
 }
 
 //==============================================================================
-// 주소에서 바이트 받기. (is_no_cache 면 원본 TextAsset 처럼 fetch 에 cache: "no-cache" 를 붙인다)
+// 주소에서 바이트와 응답의 content-type 받기. (is_no_cache 면 원본 TextAsset 처럼 fetch 에 cache: "no-cache" 를 붙인다, 머리가 없으면 content-type 은 None)
 //==============================================================================
-async fn fetch_bytes(asset_location: &str, is_no_cache: bool) -> Result<Vec<u8>, String> {
+async fn fetch_bytes(asset_location: &str, is_no_cache: bool) -> Result<(Vec<u8>, Option<String>), String> {
 	let window = web_sys::window().ok_or_else(|| String::from("window 없음"))?;
 	let response_promise = if is_no_cache {
 		let request_init = js_sys::Object::new();
@@ -385,10 +408,20 @@ async fn fetch_bytes(asset_location: &str, is_no_cache: bool) -> Result<Vec<u8>,
 	if !response.ok() {
 		return Err(format!("애셋 받기 실패 ({}): HTTP {}", asset_location, response.status()));
 	}
+	let content_type = read_response_content_type(&response);
 	let array_buffer_promise = response.array_buffer().map_err(|error| format!("애셋 본문 읽기 실패 ({}): {}", asset_location, describe_js_error(error)))?;
 	let array_buffer = wasm_bindgen_futures::JsFuture::from(array_buffer_promise).await.map_err(|error| format!("애셋 본문 읽기 실패 ({}): {}", asset_location, describe_js_error(error)))?;
 	let bytes = js_sys::Uint8Array::new(&array_buffer).to_vec();
-	Ok(bytes)
+	Ok((bytes, content_type))
+}
+
+//==============================================================================
+// 응답의 content-type 머리. (response.headers.get("content-type"), 없으면 None)
+//==============================================================================
+fn read_response_content_type(response: &web_sys::Response) -> Option<String> {
+	let headers = js_sys::Reflect::get(response, &JsValue::from_str("headers")).ok()?;
+	let get_function: js_sys::Function = js_sys::Reflect::get(&headers, &JsValue::from_str("get")).ok()?.dyn_into().ok()?;
+	get_function.call1(&headers, &JsValue::from_str("content-type")).ok()?.as_string()
 }
 
 //==============================================================================
