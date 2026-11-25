@@ -1,5 +1,6 @@
 //==============================================================================
-// 툰 HDR 마무리. (실수 렌더 타겟에 그린 선형 색을 블룸, 노출, 톤매핑, 감마로 화면에 낸다)
+// 툰 HDR 마무리. (vanilla.js experimental/graphics/toon/toonpostprocess.js 의 ToonPostProcess)
+// - 실수 렌더 타겟에 그린 선형 색을 블룸, 노출, 톤매핑, 감마로 화면에 낸다.
 // - 엔진의 RenderTarget(반정밀 실수 색, 깊이), BloomEffect(또는 MultiLevelBloomEffect), FullscreenPass 를 엮는다.
 // - 사용: ToonRenderer::set_hdr_output(true) 뒤
 //   begin(gl, 바탕 선형 색) → ToonRenderer 로 그리기 → end(gl, 낼 프레임버퍼, 뷰포트)
@@ -30,6 +31,7 @@ use crate::graphics3d::multilevelbloomeffect::MultiLevelBloomEffect;
 use crate::graphics3d::rendertarget::{RenderTarget, RenderTargetOptions};
 use crate::graphics3d::{read_framebuffer_binding, read_texture_binding, GlFramebuffer};
 
+// 합성 프래그먼트 셰이더. (씬에 블룸을 더해 HDR 길은 노출, 톤매핑, 감마를 걸고 LDR 길은 그대로 자른 뒤, 밝기(밝힌 자리 안은 1 쪽으로), 채도, 색조, 안개빛, 대비, 가장자리 어둡게 차례로 건다)
 const COMPOSITE_FRAGMENT_SHADER: &str = "#version 300 es
 precision highp float;
 in vec2 fragmentTextureCoordinate;
@@ -94,6 +96,9 @@ pub struct ToonPostProcessOptions {
 }
 
 impl Default for ToonPostProcessOptions {
+	//==============================================================================
+	// 기본 옵션. (멀티샘플 없음, 실수 판, 깊이 16, 깊이 텍스처 없음)
+	//==============================================================================
 	fn default() -> ToonPostProcessOptions {
 		ToonPostProcessOptions { sample_count: 0, use_float_color: true, depth_bits: 16, use_depth_texture: false }
 	}
@@ -110,7 +115,11 @@ struct LitArea {
 	inverse_view_projection_matrix: Matrix4,
 }
 
+//==============================================================================
+// 툰 HDR 마무리. (머리말 참고)
+//==============================================================================
 pub struct ToonPostProcess {
+	// 씬을 그리는 렌더 타겟. (출력 크기 x 해상도 배율, 멀티샘플이면 end 앞에서 푼다)
 	scene_render_target: RenderTarget,
 	bloom_effect: BloomEffect,
 	// 단 수를 주면 쓰는 다단 블룸.
@@ -118,6 +127,7 @@ pub struct ToonPostProcess {
 	composite_pass: FullscreenPass,
 	// 씬 판이 실수인지. (HDR 길)
 	use_float_color: bool,
+	// 요청한 멀티샘플 표본 수. (실제 수는 씬 판의 get_sample_count)
 	requested_sample_count: i32,
 	depth_bits: i32,
 	use_depth_texture: bool,
@@ -132,9 +142,11 @@ pub struct ToonPostProcess {
 	bloom_threshold: f32,
 	bloom_knee: f32,
 	brightness: f32,
+	// 밝힌 자리. (깊이 텍스처가 있을 때만 쓴다)
 	lit_area: Option<LitArea>,
 	saturation: f32,
 	contrast: f32,
+	// 밝기 1 로 맞춘 색조 곱.
 	tone_color: [f32; 3],
 	tone_amount: f32,
 	haze_color: [f32; 3],

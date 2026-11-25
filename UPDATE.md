@@ -447,6 +447,29 @@
 - ToonDrawQueue: set_screen_outline(Option<&'a mut ToonScreenOutline>), has_screen_outline(). 맡기면 draw 와 draw_with_matrices 가 몸 앞에 불투명한 것을 선의 판에 그리고 바깥선 껍데기 뒤 AfterOutline 단계 앞에 섞는다. 화면 사각형이 있으면 그 사각형을 그리는 영역으로 쓴다
 - 예제 toonstyle: 툰 셰이딩과 바깥선 견주기 장면. (TOON_STYLE_SCALE 로 선의 판 몫, TOON_STYLE_TOGGLES=1 로 모형마다의 꼴) vanilla.js examples/toonstyle 과 같은 장면이다. 숨긴 창으로 찍어 원본(헤드리스 크롬)과 견주면 2560x1440 에서 화소 차이 평균 0.005, 8 넘게 다른 화소 0.024% 다. (꺾임 각 문턱에 걸친 엷은 꺾임 선 몇 군데)
 - 예제 toonfx: 새 set_crease, set_depth_threshold 로 바꿨다
+- 툰 셰이딩을 실시간 툰 렌더링의 정석 꼴로 다시 지었다. (vanilla.js 와 같은 셰이더, 같은 값)
+  - 그늘 램프: 빛을 받는 몫(반 램버트 기본)에 그림자를 곱해 램프에 대어 색을 고른다. 칸마다 자리, 선형 색, 부드러움, 경계는 fwidth 로 계단 없이. 그림자는 그늘 색으로 들어간다
+    - ToonLightSet::set_shade(ToonShade { step, feather, color, second_step, second_feather, second_color, is_half_lambert }), set_shade_ramp(자리, 색, 부드러움, 반 램버트), clear_shade_ramp, set_ramp_texture(Option<GlTexture>, 반 램버트)
+    - set_band_count, set_band_ramp 는 같은 램프로 짓는다
+  - 빛마다: 해는 램프 색을 통째로, 채움 빛, 점광, 스포트라이트는 램프의 밝기 단계를 받는다
+  - 하이라이트: set_specular(세기, 지수, 부드러움, 색), 해와 점광 모두. 림 빛: set_rim_light(색, 거듭제곱, 부드러움, 해 쪽 가림), 바탕색에 곱하지 않고 더한다
+  - 스포트라이트: ToonPointLight 의 direction (Some 이면 스포트라이트), inner_cone_angle, outer_cone_angle (기본 0 과 π/4)
+  - ToonDrawOptions: receives_shadow, shade_offset, specular_scale, rim_scale, matcap_texture, matcap_strength, matcap_blend (ToonMatcapBlend), outline_color, outline_width_scale
+  - 표면 조각에 shadeOffset, specularMask, rimMask, 빛 조각에 rim, sunLevel
+  - 노멀을 역행렬의 전치로 옮긴다. (늘이고 줄인 모형의 빛과 화면 공간 꺾임 선을 바로잡음)
+  - 기본 빛: 해 [0.84, 0.8, 0.74], 하늘 [0.3, 0.33, 0.42], 땅 [0.17, 0.16, 0.15]
+  - 옮기는 법 (공개 API 를 바꿨다)
+    - 부드러운 램버트는 clear_shade_ramp() 나 set_band_count(0)
+    - ToonBandRamp, get_band_ramp, get_band_count, clear_band_ramp 는 없어졌다. ToonShadeRamp, get_shade_ramp, clear_shade_ramp
+    - set_specular(세기, 지수) → set_specular(세기, 지수, 부드러움, 색). 지금까지의 모습은 set_specular(세기, 지수, 1.0, [1.0; 3]). get_specular() 는 ToonSpecular
+    - set_rim_light(색, 거듭제곱) → set_rim_light(색, 거듭제곱, 부드러움, 해 쪽 가림). 지금까지와 같은 부드러운 테는 (색, 거듭제곱, 1.0, 0.0), 바탕색에 곱하지 않는다. get_rim_light() 는 ToonRimLight
+    - ToonPointLight 를 이름으로 지을 때는 ..ToonPointLight::default() 를 붙인다. (새 칸 direction, inner_cone_angle, outer_cone_angle)
+- ToonRenderer: 껍데기 바깥선을 셰이더에서 민다. (바탕 자리와 미는 쪽, outline_color, outline_width_scale, set_outline_distance_scale, get_outline_distance_scale) read_view_rotation, read_outline_vertex_data 를 내보낸다
+- ToonMatcapBlend: 매트캡을 섞는 방식. (Multiply, Add)
+- ToonShade, ToonShadeRamp, ToonRimLight, ToonSpecular 를 크레이트 맨 위에서 내보낸다
+- 예제 toonmaterial: 애버런트 몸 셰이딩 식 대조를 뺐다. (게임 하나의 식이고, 엔진 빛 꼴이 정석으로 바뀌어 같은 값이 나오지 않는다) 바위 정점 조각의 노멀 크기 맞춤을 뺐다
+- 예제 toonstyle: 그늘 셋, 단단한 하이라이트, 해 쪽 림, 스포트라이트, 매트캡, TOON_STYLE_SHELL=1 로 껍데기 바깥선. 원본과 견주면 2560x1440 에서 화소 차이 평균 0.004, 8 넘게 다른 화소 0.018% (껍데기 장면은 0.279%, 기하 가장자리의 MSAA 차이)
+- 툰 폴더 파일의 머리 주석을 채웠다. (모든 함수와 공개 칸)
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.

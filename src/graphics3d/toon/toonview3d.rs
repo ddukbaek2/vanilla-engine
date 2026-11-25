@@ -26,10 +26,14 @@ use crate::core::node::worldnode::NodeTransform;
 use crate::graphics3d::camera3d::Camera3D;
 use crate::graphics3d::toon::toonrenderer::ToonRenderer;
 
+//==============================================================================
 // 그리기 함수. (렌더러, 카메라, 화면 사각형, GL, 드로잉 버퍼 높이)
+//==============================================================================
 pub type ToonViewDrawCallback = Box<dyn FnMut(&mut ToonRenderer, &Camera3D, Rect, &glow::Context, i32)>;
 
+//==============================================================================
 // 대체 그리기 함수. (렌더러를 짓지 못한 기기에서 2D 로, 노드 변환이 걸린 Graphic 과 내용 크기)
+//==============================================================================
 pub type ToonViewFallbackDrawCallback = Box<dyn FnMut(&mut Graphic, Vector2)>;
 
 //==============================================================================
@@ -48,14 +52,20 @@ impl Drop for ScreenRectGuard<'_> {
 	}
 }
 
+//==============================================================================
+// 툰 3D 를 노드 사각형 안에 그리는 컴포넌트. (머리말 참고)
+//==============================================================================
 pub struct ToonView3D {
 	component_base: ComponentBase,
+	// 툰 렌더러. (처음 그릴 때 짓거나 set_renderer 로 넣은 것, 여러 노드가 함께 쓸 수 있다)
 	renderer: Option<Rc<RefCell<ToonRenderer>>>,
+	// 렌더러를 짓지 못함. (다시 짓지 않음)
 	is_renderer_failed: bool,
 	camera: Camera3D,
 	draw_callback: Option<ToonViewDrawCallback>,
 	fallback_draw_callback: Option<ToonViewFallbackDrawCallback>,
 	is_depth_cleared: bool,
+	// 이번 그리기의 화면 사각형. (드로잉 버퍼 픽셀)
 	screen_rect: Rect,
 }
 
@@ -189,6 +199,9 @@ impl ToonView3D {
 }
 
 impl Default for ToonView3D {
+	//==============================================================================
+	// 기본값. (new 와 같다)
+	//==============================================================================
 	fn default() -> Self {
 		ToonView3D::new()
 	}
@@ -196,18 +209,30 @@ impl Default for ToonView3D {
 
 #[crate::reflect]
 impl Component for ToonView3D {
+	//==============================================================================
+	// 공통 상태 반환.
+	//==============================================================================
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base
 	}
 
+	//==============================================================================
+	// 공통 상태 반환. (변경용)
+	//==============================================================================
 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 		&mut self.component_base
 	}
 
+	//==============================================================================
+	// 컴포넌트 이름.
+	//==============================================================================
 	fn get_component_type(&self) -> &'static str {
 		"ToonView3D"
 	}
 
+	//==============================================================================
+	// 갱신할 것이 없다.
+	//==============================================================================
 	fn is_tick_needed(&self) -> bool {
 		false
 	}
