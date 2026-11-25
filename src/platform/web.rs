@@ -3,6 +3,7 @@
 // - 원본처럼 캔버스를 창 안쪽에 꽉 채우고, 원본과 같은 옵션으로 WebGL2 컨텍스트를 얻는다.
 // - request_animation_frame 콜백마다 엔진 프레임 하나. (브라우저가 수직 동기에 맞춰 부르고, 콜백이 끝나면 화면을 넘긴다)
 // - 입력은 아직 키보드만 받는다. 입력 필드의 글 입력(숨긴 DOM <input>, IME 조합, 문맥 메뉴)과 클립보드는 web/textinput.rs 가 맡는다.
+// - 키를 누르면 입력 매니저의 막을 키(set_prevented_keys)면 글자 입력칸에 쓰는 중이 아닐 때 기본 동작을 막는다. 마지막으로 쓴 장치를 키, 마우스, 손가락 사건마다 적는다.
 // - 오디오: 원본 engine.js 처럼 click / touchstart / keydown(설정하면 touchend / pointerup 도)은 user gesture 로 보고
 //   engine.resume_on_user_gesture(), focus 와 페이지가 다시 보일 때는 engine.resume() 을 부른다.
 // - 페이지: visibilitychange, blur, focus, pointerdown 을 엔진의 페이지 이벤트로 넘기고, 다시 보이면 on_page_visibility_restored,
@@ -11,7 +12,7 @@
 use crate::core::asset::AssetLoadHandle;
 use crate::core::engine::{EngineRunner, PageEvent};
 use crate::core::graphic::Graphic;
-use crate::core::inputmanager::{MouseButton, TouchPoint};
+use crate::core::inputmanager::{InputDevice, MouseButton};
 use crate::base::vector2::Vector2;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -61,6 +62,42 @@ pub fn is_coarse_pointer() -> bool {
 		.and_then(|window| window.match_media("(pointer: coarse)").ok().flatten())
 		.map(|media_query_list| media_query_list.matches())
 		.unwrap_or(false)
+}
+
+//==============================================================================
+// 문서의 초점이 글자 입력칸에 있는지. (글자 종류의 input, textarea, contenteditable, select)
+//==============================================================================
+pub fn is_text_field_focused() -> bool {
+	let active_element = match web_sys::window().and_then(|window| window.document()).and_then(|document| document.active_element()) {
+		Some(active_element) => {
+			active_element
+		}
+		None => {
+			return false;
+		}
+	};
+	if let Some(html_element) = active_element.dyn_ref::<web_sys::HtmlElement>() {
+		if html_element.is_content_editable() {
+			return true;
+		}
+	}
+	let tag_name = active_element.tag_name();
+	if tag_name == "TEXTAREA" || tag_name == "SELECT" {
+		return true;
+	}
+	if tag_name != "INPUT" {
+		return false;
+	}
+	let input_type = match active_element.dyn_ref::<web_sys::HtmlInputElement>() {
+		Some(input_element) => {
+			input_element.type_().to_lowercase()
+		}
+		None => {
+			String::from("text")
+		}
+	};
+	let non_text_input_types = ["button", "checkbox", "color", "file", "hidden", "image", "radio", "range", "reset", "submit"];
+	!non_text_input_types.contains(&input_type.as_str())
 }
 
 //==============================================================================
@@ -240,11 +277,18 @@ fn add_keyboard_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) ->
 	let window = web_sys::window().ok_or_else(|| String::from("window 없음"))?;
 	let web_application_cell_for_key_down = web_application_cell.clone();
 	let key_down_callback: Closure<dyn FnMut(web_sys::KeyboardEvent)> = Closure::new(move |keyboard_event: web_sys::KeyboardEvent| {
+		let key_code = keyboard_event.code();
+		let mut web_application = web_application_cell_for_key_down.borrow_mut();
+		let input_manager = web_application.engine_runner.engine.get_input_manager_mut();
+		// 막을 키의 브라우저 기본 동작. (되풀이도 막는다, 글자 입력칸에 쓰는 중이면 그대로)
+		if input_manager.is_key_prevented(&key_code) && !input_manager.is_typing_in_text_field() {
+			keyboard_event.prevent_default();
+		}
 		if keyboard_event.repeat() {
 			return;
 		}
-		let key_code = keyboard_event.code();
-		web_application_cell_for_key_down.borrow_mut().engine_runner.engine.get_input_manager_mut().push_key(&key_code);
+		input_manager.push_key(&key_code);
+		input_manager.set_last_input_device(InputDevice::Keyboard);
 	});
 	let web_application_cell_for_key_up = web_application_cell.clone();
 	let key_up_callback: Closure<dyn FnMut(web_sys::KeyboardEvent)> = Closure::new(move |keyboard_event: web_sys::KeyboardEvent| {
@@ -272,6 +316,8 @@ fn add_keyboard_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) ->
 // - 프레임 안에서 사건이 바로 불려도 겹쳐 빌리지 않게 try_borrow_mut 로 본다. (못 빌리면 그 사건은 버린다)
 //==============================================================================
 const COMPATIBILITY_MOUSE_MILLISECONDS: f64 = 800.0;
+// 마우스가 이만큼(CSS 픽셀) 넘게 움직여야 마지막 장치를 마우스로 본다.
+const MOUSE_DEVICE_MOVE_THRESHOLD: i32 = 6;
 
 fn add_pointer_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> Result<(), String> {
 	let window = web_sys::window().ok_or_else(|| String::from("window 없음"))?;
@@ -289,6 +335,7 @@ fn add_pointer_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> 
 			web_application.update_pointer_position(mouse_event.client_x() as f64, mouse_event.client_y() as f64);
 			let input_manager = web_application.engine_runner.engine.get_input_manager_mut();
 			input_manager.set_touch_input(false);
+			input_manager.set_last_input_device(InputDevice::Mouse);
 			let mouse_button = read_mouse_button(mouse_event.button());
 			if let Some(mouse_button) = mouse_button {
 				input_manager.set_mouse_button_down(mouse_button, true);
@@ -316,6 +363,11 @@ fn add_pointer_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> 
 			let input_manager = web_application.engine_runner.engine.get_input_manager_mut();
 			input_manager.set_touch_input(false);
 			input_manager.set_touch_moved(true);
+			// 창이 흔들릴 때 나는 작은 움직임은 마우스를 쓴 것으로 보지 않는다.
+			let movement = mouse_event.movement_x().abs() + mouse_event.movement_y().abs();
+			if movement >= MOUSE_DEVICE_MOVE_THRESHOLD {
+				input_manager.set_last_input_device(InputDevice::Mouse);
+			}
 		}
 	});
 	let web_application_cell_for_mouse_up = web_application_cell.clone();
@@ -348,6 +400,7 @@ fn add_pointer_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> 
 			let input_manager = web_application.engine_runner.engine.get_input_manager_mut();
 			input_manager.add_wheel_delta(wheel_event.delta_x() as f32, wheel_event.delta_y() as f32);
 			input_manager.set_wheel_with_ctrl(wheel_event.ctrl_key());
+			input_manager.set_last_input_device(InputDevice::Mouse);
 		}
 	});
 
@@ -582,20 +635,29 @@ impl WebApplication {
 	}
 
 	//==============================================================================
-	// 손가락 사건. (닿은 손가락 목록을 새로 쓰고, 첫 손가락의 누름, 움직임, 뗌을 터치로 넘긴다)
+	// 손가락 사건. (바뀐 손가락마다 닿음, 움직임, 뗌을 적고, 첫 손가락의 누름, 움직임, 뗌을 터치로 넘긴다)
+	// - 사건의 touches 에 없는 손가락은 놓친 뗌으로 보아 취소로 지운다.
 	//==============================================================================
 	fn handle_touch_event(&mut self, touch_event: &web_sys::TouchEvent) {
 		let event_type = touch_event.type_();
 		let touch_list = touch_event.touches();
-		let mut touch_points: Vec<TouchPoint> = Vec::new();
-		for touch_index in 0..touch_list.length() {
-			if let Some(touch) = touch_list.get(touch_index) {
+		let changed_touch_list = touch_event.changed_touches();
+		let mut changed_touch_point_list: Vec<(i64, Vector2, Vector2)> = Vec::new();
+		for touch_index in 0..changed_touch_list.length() {
+			if let Some(touch) = changed_touch_list.get(touch_index) {
 				if let Some(canvas_native_position) = self.read_canvas_native_position(touch.client_x() as f64, touch.client_y() as f64) {
-					touch_points.push(TouchPoint { identifier: touch.identifier() as i64, canvas_native_position });
+					let view_position = self.engine_runner.engine.get_view_manager().canvas_position_to_view_position(canvas_native_position);
+					changed_touch_point_list.push((touch.identifier() as i64, canvas_native_position, view_position));
 				}
 			}
 		}
-		let changed_touch = touch_event.changed_touches().get(0);
+		let mut touching_identifier_list: Vec<i64> = Vec::new();
+		for touch_index in 0..touch_list.length() {
+			if let Some(touch) = touch_list.get(touch_index) {
+				touching_identifier_list.push(touch.identifier() as i64);
+			}
+		}
+		let changed_touch = changed_touch_list.get(0);
 		let was_down = self.engine_runner.engine.get_input_manager().is_touch_down();
 		let previous_first_identifier = self.engine_runner.engine.get_input_manager().get_touch_points().first().map(|touch_point| touch_point.identifier);
 		if let Some(changed_touch) = &changed_touch {
@@ -605,8 +667,28 @@ impl WebApplication {
 			}
 		}
 		let input_manager = self.engine_runner.engine.get_input_manager_mut();
-		input_manager.set_touch_points(touch_points);
+		for (identifier, canvas_native_position, view_position) in changed_touch_point_list {
+			match event_type.as_str() {
+				"touchstart" => {
+					input_manager.begin_touch_point(identifier, canvas_native_position, view_position);
+				}
+				"touchmove" => {
+					input_manager.move_touch_point(identifier, canvas_native_position, view_position);
+				}
+				"touchend" => {
+					input_manager.end_touch_point(identifier, canvas_native_position, view_position, false);
+				}
+				_ => {
+					input_manager.end_touch_point(identifier, canvas_native_position, view_position, true);
+				}
+			}
+		}
+		let missed_touch_point_list: Vec<_> = input_manager.get_touch_points().iter().filter(|touch_point| !touching_identifier_list.contains(&touch_point.identifier)).copied().collect();
+		for missed_touch_point in missed_touch_point_list {
+			input_manager.end_touch_point(missed_touch_point.identifier, missed_touch_point.canvas_native_position, missed_touch_point.view_position, true);
+		}
 		input_manager.set_touch_input(true);
+		input_manager.set_last_input_device(InputDevice::Touch);
 		match event_type.as_str() {
 			"touchstart" => {
 				if !was_down {

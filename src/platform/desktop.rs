@@ -4,6 +4,7 @@
 // - 창 이벤트를 입력 관리자 꼴로 바꿔 넣는다. (키는 W3C KeyboardEvent.code 와 같은 이름, 마우스 왼쪽 단추는 터치)
 // - 엔진 본체(EngineRunner)는 창을 모른다. 여기서 프레임을 부르고, 그린 뒤 화면을 넘긴다.
 // - 글 입력(키 글자, 편집 키, IME 조합)과 클립보드는 desktop/textinput.rs 가 맡는다. 오른쪽 단추는 입력 필드 문맥 메뉴 요청이다.
+// - 마지막으로 쓴 장치를 키, 마우스, 손가락 이벤트마다 적는다. 막을 키(set_prevented_keys)는 창에 막을 브라우저 기본 동작이 없어 쓰지 않는다.
 // - 페이지 이벤트: 창 가림(Occluded, 맥과 X11 만 알린다)은 Hidden / Visible, 포커스는 Focused / Blurred, 마우스 단추와 손가락 누름은 PointerDown.
 //   가림이 풀리면 on_page_visibility_restored, suspended 뒤 resumed 면 on_page_process_restored. (윈도우, 맥, 리눅스는 suspended 가 오지 않는다)
 //==============================================================================
@@ -24,7 +25,7 @@ use web_time::Instant;
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent};
-use crate::core::inputmanager::{MouseButton as EngineMouseButton, TouchPoint};
+use crate::core::inputmanager::{InputDevice, MouseButton as EngineMouseButton};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::CursorIcon;
 use winit::keyboard::PhysicalKey;
@@ -132,6 +133,13 @@ pub fn set_cursor(platform_window: Option<&PlatformWindow>, _css_value: &str, cu
 // 주된 손이 손가락인지. (데스크탑은 마우스가 주된 손이다)
 //==============================================================================
 pub fn is_coarse_pointer() -> bool {
+	false
+}
+
+//==============================================================================
+// 문서의 초점이 글자 입력칸에 있는지. (데스크탑에는 문서가 없어 늘 false, 엔진 입력 필드는 입력 매니저가 따로 본다)
+//==============================================================================
+pub fn is_text_field_focused() -> bool {
 	false
 }
 
@@ -308,35 +316,35 @@ impl DesktopApplication {
 	}
 
 	//==============================================================================
-	// 손가락. (닿아 있는 손가락 목록을 새로 쓰고, 첫 손가락은 마우스 왼쪽 단추처럼 터치로 넘긴다)
+	// 손가락. (손가락마다 닿음, 움직임, 뗌을 적고, 첫 손가락은 마우스 왼쪽 단추처럼 터치로 넘긴다)
 	//==============================================================================
 	fn handle_touch(&mut self, touch: winit::event::Touch) {
 		let device_pixel_ratio = self.engine_runner.engine.get_view_manager().get_device_pixel_ratio();
 		let canvas_native_position = Vector2::create(touch.location.x as f32 / device_pixel_ratio, touch.location.y as f32 / device_pixel_ratio);
+		let view_position = self.engine_runner.engine.get_view_manager().canvas_position_to_view_position(canvas_native_position);
 		let identifier = touch.id as i64;
-		let mut touch_points: Vec<TouchPoint> = self.engine_runner.engine.get_input_manager().get_touch_points().to_vec();
+		let touch_points = self.engine_runner.engine.get_input_manager().get_touch_points();
 		let is_first_finger = touch_points.is_empty() || touch_points[0].identifier == identifier;
-		match touch.phase {
-			TouchPhase::Started | TouchPhase::Moved => {
-				match touch_points.iter_mut().find(|touch_point| touch_point.identifier == identifier) {
-					Some(touch_point) => {
-						touch_point.canvas_native_position = canvas_native_position;
-					}
-					None => {
-						touch_points.push(TouchPoint { identifier, canvas_native_position });
-					}
-				}
-			}
-			TouchPhase::Ended | TouchPhase::Cancelled => {
-				touch_points.retain(|touch_point| touch_point.identifier != identifier);
-			}
-		}
 		if is_first_finger {
 			self.update_input_position(touch.location.x, touch.location.y);
 		}
 		let input_manager = self.engine_runner.engine.get_input_manager_mut();
-		input_manager.set_touch_points(touch_points);
+		match touch.phase {
+			TouchPhase::Started => {
+				input_manager.begin_touch_point(identifier, canvas_native_position, view_position);
+			}
+			TouchPhase::Moved => {
+				input_manager.move_touch_point(identifier, canvas_native_position, view_position);
+			}
+			TouchPhase::Ended => {
+				input_manager.end_touch_point(identifier, canvas_native_position, view_position, false);
+			}
+			TouchPhase::Cancelled => {
+				input_manager.end_touch_point(identifier, canvas_native_position, view_position, true);
+			}
+		}
 		input_manager.set_touch_input(true);
+		input_manager.set_last_input_device(InputDevice::Touch);
 		if !is_first_finger {
 			return;
 		}
@@ -449,6 +457,7 @@ impl ApplicationHandler for DesktopApplication {
 					match key_event.state {
 						ElementState::Pressed => {
 							input_manager.push_key(&key);
+							input_manager.set_last_input_device(InputDevice::Keyboard);
 						}
 						ElementState::Released => {
 							input_manager.pop_key(&key);
@@ -468,6 +477,7 @@ impl ApplicationHandler for DesktopApplication {
 				let input_manager = self.engine_runner.engine.get_input_manager_mut();
 				input_manager.set_touch_moved(true);
 				input_manager.set_touch_input(false);
+				input_manager.set_last_input_device(InputDevice::Mouse);
 			}
 			WindowEvent::CursorLeft { .. } => {
 				let input_manager = self.engine_runner.engine.get_input_manager_mut();
@@ -480,6 +490,7 @@ impl ApplicationHandler for DesktopApplication {
 				let input_manager = self.engine_runner.engine.get_input_manager_mut();
 				input_manager.set_mouse_button_down(EngineMouseButton::Left, state == ElementState::Pressed);
 				input_manager.set_touch_input(false);
+				input_manager.set_last_input_device(InputDevice::Mouse);
 				match state {
 					ElementState::Pressed => {
 						input_manager.set_touch_pressed(true);
@@ -495,6 +506,7 @@ impl ApplicationHandler for DesktopApplication {
 				let input_manager = self.engine_runner.engine.get_input_manager_mut();
 				input_manager.set_mouse_button_down(EngineMouseButton::Right, state == ElementState::Pressed);
 				input_manager.set_touch_input(false);
+				input_manager.set_last_input_device(InputDevice::Mouse);
 				if state == ElementState::Pressed {
 					let view_input_position = input_manager.get_view_input_position();
 					input_manager.get_text_input_mut().set_context_menu_request_position(Some(view_input_position));
@@ -504,6 +516,7 @@ impl ApplicationHandler for DesktopApplication {
 				let input_manager = self.engine_runner.engine.get_input_manager_mut();
 				input_manager.set_mouse_button_down(EngineMouseButton::Middle, state == ElementState::Pressed);
 				input_manager.set_touch_input(false);
+				input_manager.set_last_input_device(InputDevice::Mouse);
 			}
 			WindowEvent::Touch(touch) => {
 				self.handle_touch(touch);
@@ -512,6 +525,7 @@ impl ApplicationHandler for DesktopApplication {
 				let input_manager = self.engine_runner.engine.get_input_manager_mut();
 				let is_ctrl_pressed = input_manager.is_key_pressed("ControlLeft") || input_manager.is_key_pressed("ControlRight");
 				input_manager.set_wheel_with_ctrl(is_ctrl_pressed);
+				input_manager.set_last_input_device(InputDevice::Mouse);
 				match delta {
 					MouseScrollDelta::LineDelta(line_x, line_y) => {
 						input_manager.add_wheel_delta(-line_x * WHEEL_LINE_PIXEL_SIZE, -line_y * WHEEL_LINE_PIXEL_SIZE);

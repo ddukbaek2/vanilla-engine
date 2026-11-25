@@ -156,4 +156,6 @@ pub use crate::web::websocketclient::{WebSocketClient, WebSocketReceiveEvent};
 pub use crate::ui::uidocument::{UIDocument, UIDocumentLoadContext, UIDocumentSaveContext, UIDOCUMENT_VERSION};
 pub use crate::effect::particlesystem::{EmitterShape, ParticleRenderShape};
 pub use crate::core::component::text::TextWrapMode;
+pub use crate::core::inputmanager::{InputDevice, TouchPhase};
+pub use crate::core::inputactions::{InputActionSource, InputActions};
 pub use crate::core::gamepadmanager::{read_gamepad_kind, GamepadKind};

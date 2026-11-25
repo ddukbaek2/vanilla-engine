@@ -23,3 +23,7 @@ pub mod web;
 pub use web::{is_coarse_pointer, read_clipboard_text, request_asset_bytes, run, set_cursor, set_cursor_visible, set_title, write_clipboard_text, PlatformWindow};
 #[cfg(target_arch = "wasm32")]
 pub use web::{read_page_query_value, read_safe_area_insets};
+#[cfg(not(target_arch = "wasm32"))]
+pub use desktop::is_text_field_focused;
+#[cfg(target_arch = "wasm32")]
+pub use web::is_text_field_focused;

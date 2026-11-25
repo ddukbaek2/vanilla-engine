@@ -7,9 +7,16 @@
 //   카메라 손짓(CameraGestures)처럼 단추 하나 터치 밖의 입력을 쓰는 곳이 읽는다. 플랫폼이 채운다. (vanilla.js 는 캔버스 DOM 사건을 직접 읽던 것)
 // - 게임패드는 원본과 같이 InputManager 가 GamepadManager 를 들고 tick 에서 폴링한다. (core/gamepadmanager.rs)
 // - 글 입력(확정 글, IME 조합, 편집 키)은 TextInput 줄에 모은다. 입력 필드가 꺼내 쓴다. (core/textinput.rs, 원본에 없는 층)
+// - 키와 마우스 단추의 이번 프레임 누름과 뗌은 원본처럼 지난 프레임 끝 뒤로 온 사건을 쌓아 본다. 프레임 사이에 눌렀다 뗀 것도 잡힌다.
+// - 손가락은 원본처럼 닿음(begin_touch_point), 움직임, 뗌을 받아 단계(TouchPhase)를 매기고, 떨어진 손가락은 한 프레임 get_ended_touch_points 에 남는다.
+// - 마지막으로 쓴 장치(InputDevice)와 패드 종류, 막을 키(set_prevented_keys), 글자 입력칸에 쓰는 중인지(is_typing_in_text_field), 입력 동작(InputActions)을 둔다.
+//   막을 키는 웹에서만 뜻이 있다. (데스크탑 창에는 막을 브라우저 기본 동작이 없다)
+//   글자 입력칸은 엔진 입력 필드(TextInput 의 활성 필드)와, 웹에서는 문서의 초점(글자 input, textarea, contenteditable, select)을 본다.
+//   원본 ViewManager.convertClientToView 는 옮기지 않았다. 브라우저의 화면 좌표는 플랫폼 층이 캔버스 좌표로 바꿔 넣는다.
 //==============================================================================
 use crate::base::vector2::Vector2;
-use crate::core::gamepadmanager::{Gamepad, GamepadManager};
+use crate::core::gamepadmanager::{read_gamepad_kind, Gamepad, GamepadKind, GamepadManager};
+use crate::core::inputactions::InputActions;
 use crate::core::textinput::TextInput;
 use std::collections::HashSet;
 
@@ -118,17 +125,43 @@ impl MouseButton {
 }
 
 //==============================================================================
-// 닿아 있는 손가락 하나. (자리는 캔버스 논리 좌표, 플랫폼의 손가락 번호)
+// 손가락의 단계. (Began 이번 프레임에 닿음, Moved 움직임, Stationary 가만히, Ended 뗌, Cancelled 취소)
+//==============================================================================
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum TouchPhase {
+	Began,
+	Moved,
+	Stationary,
+	Ended,
+	Cancelled,
+}
+
+//==============================================================================
+// 마지막으로 쓴 입력 장치.
+//==============================================================================
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum InputDevice {
+	Keyboard,
+	Mouse,
+	Touch,
+	Gamepad,
+}
+
+//==============================================================================
+// 닿아 있는 손가락 하나. (플랫폼의 손가락 번호, 단계, 캔버스 논리 좌표와 뷰 좌표)
 //==============================================================================
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct TouchPoint {
 	pub identifier: i64,
+	pub phase: TouchPhase,
 	pub canvas_native_position: Vector2,
+	pub view_position: Vector2,
 }
 
 pub struct InputManager {
 	pressed_keys: HashSet<String>,
-	previous_pressed_keys: HashSet<String>,
+	just_pressed_keys: HashSet<String>,
+	just_released_keys: HashSet<String>,
 	is_touch_pressed: bool,
 	is_touch_released: bool,
 	is_touch_cancelled: bool,
@@ -141,10 +174,16 @@ pub struct InputManager {
 	gamepad_manager: GamepadManager,
 	text_input: TextInput,
 	mouse_buttons_down: [bool; 3],
-	previous_mouse_buttons_down: [bool; 3],
+	mouse_buttons_just_pressed: [bool; 3],
+	mouse_buttons_just_released: [bool; 3],
 	touch_points: Vec<TouchPoint>,
+	ended_touch_points: Vec<TouchPoint>,
 	is_touch_input: bool,
 	is_wheel_with_ctrl: bool,
+	last_input_device: InputDevice,
+	last_gamepad_kind: GamepadKind,
+	prevented_keys: HashSet<String>,
+	input_actions: InputActions,
 }
 
 impl InputManager {
@@ -154,7 +193,8 @@ impl InputManager {
 	pub fn new() -> InputManager {
 		InputManager {
 			pressed_keys: HashSet::new(),
-			previous_pressed_keys: HashSet::new(),
+			just_pressed_keys: HashSet::new(),
+			just_released_keys: HashSet::new(),
 			is_touch_pressed: false,
 			is_touch_released: false,
 			is_touch_cancelled: false,
@@ -167,19 +207,45 @@ impl InputManager {
 			gamepad_manager: GamepadManager::new(),
 			text_input: TextInput::new(),
 			mouse_buttons_down: [false; 3],
-			previous_mouse_buttons_down: [false; 3],
+			mouse_buttons_just_pressed: [false; 3],
+			mouse_buttons_just_released: [false; 3],
 			touch_points: Vec::new(),
+			ended_touch_points: Vec::new(),
 			is_touch_input: false,
 			is_wheel_with_ctrl: false,
+			last_input_device: if crate::platform::is_coarse_pointer() {
+				InputDevice::Touch
+			}
+			else {
+				InputDevice::Keyboard
+			},
+			last_gamepad_kind: GamepadKind::Other,
+			prevented_keys: HashSet::new(),
+			input_actions: InputActions::new(),
 		}
 	}
 
 	//==============================================================================
-	// 주기적 갱신. (게임패드 폴링)
+	// 주기적 갱신. (게임패드 폴링, 패드를 썼으면 마지막 장치를 게임패드로, 입력 동작 갱신)
 	//==============================================================================
 	pub fn tick(&mut self, time_delta: f32) {
 		let gamepad_manager = self.get_gamepad_manager_mut();
 		gamepad_manager.tick(time_delta);
+		let active_gamepad_kind = gamepad_manager.get_active_gamepad_id().map(read_gamepad_kind);
+		if let Some(gamepad_kind) = active_gamepad_kind {
+			self.set_last_input_device(InputDevice::Gamepad);
+			self.set_last_gamepad_kind(gamepad_kind);
+		}
+		self.update_input_actions(time_delta);
+	}
+
+	//==============================================================================
+	// 입력 동작 갱신. (동작이 입력 매니저를 읽고 마지막 장치를 적을 수 있게 잠깐 꺼낸다)
+	//==============================================================================
+	pub(crate) fn update_input_actions(&mut self, time_delta: f32) {
+		let mut input_actions = std::mem::take(&mut self.input_actions);
+		input_actions.update(self, time_delta);
+		self.input_actions = input_actions;
 	}
 
 	//==============================================================================
@@ -187,6 +253,12 @@ impl InputManager {
 	//==============================================================================
 	pub fn clear(&mut self) {
 		self.pressed_keys.clear();
+		self.just_pressed_keys.clear();
+		self.just_released_keys.clear();
+		self.mouse_buttons_just_pressed = [false; 3];
+		self.mouse_buttons_just_released = [false; 3];
+		self.ended_touch_points.clear();
+		self.input_actions.clear();
 		self.is_touch_down = false;
 		self.is_touch_pressed = false;
 		self.is_touch_released = false;
@@ -226,14 +298,18 @@ impl InputManager {
 	// 키 눌림 기록.
 	//==============================================================================
 	pub fn push_key(&mut self, key: &str) {
-		self.pressed_keys.insert(key.to_string());
+		if self.pressed_keys.insert(key.to_string()) {
+			self.just_pressed_keys.insert(key.to_string());
+		}
 	}
 
 	//==============================================================================
 	// 키 뗌 기록.
 	//==============================================================================
 	pub fn pop_key(&mut self, key: &str) {
-		self.pressed_keys.remove(key);
+		if self.pressed_keys.remove(key) {
+			self.just_released_keys.insert(key.to_string());
+		}
 	}
 
 	//==============================================================================
@@ -244,32 +320,46 @@ impl InputManager {
 	}
 
 	//==============================================================================
-	// 이번 프레임에 눌렸는지.
+	// 이번 프레임에 눌렸는지. (지난 프레임 끝 뒤로 온 사건, 프레임 사이에 눌렀다 뗀 키도 참이고 그때는 is_key_pressed 가 거짓)
 	//==============================================================================
 	pub fn is_key_just_pressed(&self, key: &str) -> bool {
-		self.pressed_keys.contains(key) && !self.previous_pressed_keys.contains(key)
+		self.just_pressed_keys.contains(key)
 	}
 
 	//==============================================================================
 	// 이번 프레임에 떼졌는지.
 	//==============================================================================
 	pub fn is_key_just_released(&self, key: &str) -> bool {
-		!self.pressed_keys.contains(key) && self.previous_pressed_keys.contains(key)
+		self.just_released_keys.contains(key)
 	}
 
 	//==============================================================================
-	// 프레임 끝 스냅샷. (다음 프레임의 Just 판정 기준)
+	// 프레임 끝 스냅샷. (쌓인 키와 마우스 단추의 누름과 뗌을 비우고, 떨어진 손가락을 지우고 남은 손가락을 가만히로)
 	//==============================================================================
 	pub fn update_frame_snapshot(&mut self) {
-		self.previous_pressed_keys = self.pressed_keys.clone();
-		self.previous_mouse_buttons_down = self.mouse_buttons_down;
+		self.just_pressed_keys.clear();
+		self.just_released_keys.clear();
+		self.mouse_buttons_just_pressed = [false; 3];
+		self.mouse_buttons_just_released = [false; 3];
+		self.ended_touch_points.clear();
+		for touch_point in self.touch_points.iter_mut() {
+			touch_point.phase = TouchPhase::Stationary;
+		}
 	}
 
 	//==============================================================================
 	// 마우스 단추 눌림 설정. (플랫폼이 부른다)
 	//==============================================================================
 	pub fn set_mouse_button_down(&mut self, mouse_button: MouseButton, is_down: bool) {
-		self.mouse_buttons_down[mouse_button.get_index()] = is_down;
+		let button_index = mouse_button.get_index();
+		let was_down = self.mouse_buttons_down[button_index];
+		if is_down && !was_down {
+			self.mouse_buttons_just_pressed[button_index] = true;
+		}
+		if !is_down && was_down {
+			self.mouse_buttons_just_released[button_index] = true;
+		}
+		self.mouse_buttons_down[button_index] = is_down;
 	}
 
 	//==============================================================================
@@ -283,27 +373,85 @@ impl InputManager {
 	// 이번 프레임에 마우스 단추를 눌렀는지.
 	//==============================================================================
 	pub fn is_mouse_button_just_pressed(&self, mouse_button: MouseButton) -> bool {
-		let button_index = mouse_button.get_index();
-		self.mouse_buttons_down[button_index] && !self.previous_mouse_buttons_down[button_index]
+		self.mouse_buttons_just_pressed[mouse_button.get_index()]
 	}
 
 	//==============================================================================
 	// 이번 프레임에 마우스 단추를 뗐는지.
 	//==============================================================================
 	pub fn is_mouse_button_just_released(&self, mouse_button: MouseButton) -> bool {
-		let button_index = mouse_button.get_index();
-		!self.mouse_buttons_down[button_index] && self.previous_mouse_buttons_down[button_index]
+		self.mouse_buttons_just_released[mouse_button.get_index()]
 	}
 
 	//==============================================================================
-	// 닿아 있는 손가락 목록 설정. (플랫폼이 손가락이 바뀔 때마다 통째로 넘긴다)
+	// 손가락이 닿음. (플랫폼이 부른다, 이미 있는 번호면 움직임으로 본다)
+	//==============================================================================
+	pub fn begin_touch_point(&mut self, identifier: i64, canvas_native_position: Vector2, view_position: Vector2) {
+		if self.touch_points.iter().any(|touch_point| touch_point.identifier == identifier) {
+			self.move_touch_point(identifier, canvas_native_position, view_position);
+			return;
+		}
+		self.touch_points.push(TouchPoint {
+			identifier,
+			phase: TouchPhase::Began,
+			canvas_native_position,
+			view_position,
+		});
+	}
+
+	//==============================================================================
+	// 손가락이 움직임. (이번 프레임에 닿은 손가락은 Began 그대로)
+	//==============================================================================
+	pub fn move_touch_point(&mut self, identifier: i64, canvas_native_position: Vector2, view_position: Vector2) {
+		if let Some(touch_point) = self.touch_points.iter_mut().find(|touch_point| touch_point.identifier == identifier) {
+			touch_point.canvas_native_position = canvas_native_position;
+			touch_point.view_position = view_position;
+			if touch_point.phase != TouchPhase::Began {
+				touch_point.phase = TouchPhase::Moved;
+			}
+		}
+	}
+
+	//==============================================================================
+	// 손가락이 떨어짐. (닿은 목록에서 빼서 이번 프레임의 떨어진 목록에 둔다)
+	//==============================================================================
+	pub fn end_touch_point(&mut self, identifier: i64, canvas_native_position: Vector2, view_position: Vector2, is_cancelled: bool) {
+		let touch_index = match self.touch_points.iter().position(|touch_point| touch_point.identifier == identifier) {
+			Some(touch_index) => {
+				touch_index
+			}
+			None => {
+				return;
+			}
+		};
+		let mut touch_point = self.touch_points.remove(touch_index);
+		touch_point.canvas_native_position = canvas_native_position;
+		touch_point.view_position = view_position;
+		touch_point.phase = if is_cancelled {
+			TouchPhase::Cancelled
+		}
+		else {
+			TouchPhase::Ended
+		};
+		self.ended_touch_points.push(touch_point);
+	}
+
+	//==============================================================================
+	// 이번 프레임에 떨어진 손가락 목록. (단계는 Ended, Cancelled, 자리는 뗀 자리)
+	//==============================================================================
+	pub fn get_ended_touch_points(&self) -> &[TouchPoint] {
+		&self.ended_touch_points
+	}
+
+	//==============================================================================
+	// 닿아 있는 손가락 목록 설정. (통째로 바꾼다, 단계는 넘긴 그대로)
 	//==============================================================================
 	pub fn set_touch_points(&mut self, touch_points: Vec<TouchPoint>) {
 		self.touch_points = touch_points;
 	}
 
 	//==============================================================================
-	// 닿아 있는 손가락 목록.
+	// 닿아 있는 손가락 목록. (닿은 차례, 단계는 Began, Moved, Stationary)
 	//==============================================================================
 	pub fn get_touch_points(&self) -> &[TouchPoint] {
 		&self.touch_points
@@ -453,10 +601,157 @@ impl InputManager {
 	pub fn get_text_input_mut(&mut self) -> &mut TextInput {
 		&mut self.text_input
 	}
+
+	//==============================================================================
+	// 마지막으로 쓴 입력 장치 설정. (플랫폼이 키, 마우스, 손가락 입력에서 부른다, 게임이 바깥 입력원을 쓸 때도)
+	//==============================================================================
+	pub fn set_last_input_device(&mut self, input_device: InputDevice) {
+		self.last_input_device = input_device;
+	}
+
+	//==============================================================================
+	// 마지막으로 쓴 입력 장치. (처음은 손가락 기기면 Touch, 아니면 Keyboard)
+	//==============================================================================
+	pub fn get_last_input_device(&self) -> InputDevice {
+		self.last_input_device
+	}
+
+	//==============================================================================
+	// 마지막으로 쓴 게임패드의 종류 설정.
+	//==============================================================================
+	pub fn set_last_gamepad_kind(&mut self, gamepad_kind: GamepadKind) {
+		self.last_gamepad_kind = gamepad_kind;
+	}
+
+	//==============================================================================
+	// 마지막으로 쓴 게임패드의 종류. (단추를 누르거나 스틱을 크게 기울인 패드의 이름으로 가른다, 처음은 Other)
+	//==============================================================================
+	pub fn get_last_gamepad_kind(&self) -> GamepadKind {
+		self.last_gamepad_kind
+	}
+
+	//==============================================================================
+	// 브라우저 기본 동작을 막을 키 설정. (KeyboardEvent.code 목록, 웹에서만 뜻이 있다, 글자 입력칸에 쓰는 중이면 막지 않는다)
+	//==============================================================================
+	pub fn set_prevented_keys(&mut self, keys: &[&str]) {
+		self.prevented_keys = keys.iter().map(|key| key.to_string()).collect();
+	}
+
+	//==============================================================================
+	// 브라우저 기본 동작을 막을 키 목록.
+	//==============================================================================
+	pub fn get_prevented_keys(&self) -> Vec<String> {
+		self.prevented_keys.iter().cloned().collect()
+	}
+
+	//==============================================================================
+	// 그 키의 기본 동작을 막는지.
+	//==============================================================================
+	pub fn is_key_prevented(&self, key: &str) -> bool {
+		self.prevented_keys.contains(key)
+	}
+
+	//==============================================================================
+	// 글자 입력칸에 쓰는 중인지. (엔진 입력 필드의 포커스, 웹은 문서의 초점이 글자 input, textarea, contenteditable, select 에 있음)
+	//==============================================================================
+	pub fn is_typing_in_text_field(&self) -> bool {
+		self.text_input.get_active_field_state().is_some() || crate::platform::is_text_field_focused()
+	}
+
+	//==============================================================================
+	// 입력 동작. (동작 이름에 키, 패드 단추, 축을 묶어 읽는다, tick 마다 갱신된다)
+	//==============================================================================
+	pub fn get_input_actions(&self) -> &InputActions {
+		&self.input_actions
+	}
+
+	//==============================================================================
+	// 입력 동작. (묶기, 반복, 바깥 입력원)
+	//==============================================================================
+	pub fn get_input_actions_mut(&mut self) -> &mut InputActions {
+		&mut self.input_actions
+	}
 }
 
 impl Default for InputManager {
 	fn default() -> InputManager {
 		InputManager::new()
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	//==============================================================================
+	// 마우스 단추: 프레임 사이에 눌렀다 뗀 것도 그 프레임의 누름과 뗌이다.
+	//==============================================================================
+	#[test]
+	fn mouse_button_edges_within_frame() {
+		let mut input_manager = InputManager::new();
+		input_manager.set_mouse_button_down(MouseButton::Right, true);
+		input_manager.set_mouse_button_down(MouseButton::Right, false);
+		assert!(!input_manager.is_mouse_button_down(MouseButton::Right));
+		assert!(input_manager.is_mouse_button_just_pressed(MouseButton::Right));
+		assert!(input_manager.is_mouse_button_just_released(MouseButton::Right));
+		assert!(!input_manager.is_mouse_button_just_pressed(MouseButton::Left));
+		input_manager.update_frame_snapshot();
+		assert!(!input_manager.is_mouse_button_just_pressed(MouseButton::Right));
+		input_manager.set_mouse_button_down(MouseButton::Left, true);
+		input_manager.set_mouse_button_down(MouseButton::Left, true);
+		assert!(input_manager.is_mouse_button_just_pressed(MouseButton::Left));
+		input_manager.update_frame_snapshot();
+		assert!(input_manager.is_mouse_button_down(MouseButton::Left));
+		assert!(!input_manager.is_mouse_button_just_pressed(MouseButton::Left));
+	}
+
+	//==============================================================================
+	// 손가락 단계: 닿음 Began → 프레임 끝 Stationary → 움직임 Moved, 뗀 손가락은 한 프레임 떨어진 목록에.
+	//==============================================================================
+	#[test]
+	fn touch_point_phases() {
+		let mut input_manager = InputManager::new();
+		input_manager.begin_touch_point(1, Vector2::create(10.0, 10.0), Vector2::create(20.0, 20.0));
+		input_manager.begin_touch_point(2, Vector2::create(30.0, 30.0), Vector2::create(60.0, 60.0));
+		input_manager.move_touch_point(2, Vector2::create(31.0, 30.0), Vector2::create(62.0, 60.0));
+		let touch_points = input_manager.get_touch_points();
+		assert_eq!(touch_points.len(), 2);
+		assert!(touch_points.iter().all(|touch_point| touch_point.phase == TouchPhase::Began));
+		assert_eq!(touch_points[1].view_position, Vector2::create(62.0, 60.0));
+		input_manager.update_frame_snapshot();
+		input_manager.move_touch_point(2, Vector2::create(40.0, 30.0), Vector2::create(80.0, 60.0));
+		let touch_points = input_manager.get_touch_points();
+		assert_eq!(touch_points[0].phase, TouchPhase::Stationary);
+		assert_eq!(touch_points[1].phase, TouchPhase::Moved);
+		input_manager.end_touch_point(1, Vector2::create(11.0, 10.0), Vector2::create(22.0, 20.0), false);
+		input_manager.end_touch_point(9, Vector2::zero(), Vector2::zero(), true);
+		assert_eq!(input_manager.get_touch_points().len(), 1);
+		let ended_touch_points = input_manager.get_ended_touch_points();
+		assert_eq!(ended_touch_points.len(), 1);
+		assert_eq!(ended_touch_points[0].identifier, 1);
+		assert_eq!(ended_touch_points[0].phase, TouchPhase::Ended);
+		input_manager.update_frame_snapshot();
+		assert!(input_manager.get_ended_touch_points().is_empty());
+		input_manager.end_touch_point(2, Vector2::zero(), Vector2::zero(), true);
+		assert_eq!(input_manager.get_ended_touch_points()[0].phase, TouchPhase::Cancelled);
+	}
+
+	//==============================================================================
+	// 키 되풀이는 새 누름이 아니고, 막을 키는 정한 것만이다.
+	//==============================================================================
+	#[test]
+	fn key_repeat_and_prevented_keys() {
+		let mut input_manager = InputManager::new();
+		input_manager.push_key("KeyA");
+		input_manager.update_frame_snapshot();
+		input_manager.push_key("KeyA");
+		assert!(!input_manager.is_key_just_pressed("KeyA"));
+		assert!(input_manager.is_key_pressed("KeyA"));
+		input_manager.set_prevented_keys(&["Tab", "Space"]);
+		assert!(input_manager.is_key_prevented("Tab"));
+		assert!(!input_manager.is_key_prevented("KeyQ"));
+		assert_eq!(input_manager.get_prevented_keys().len(), 2);
+		assert!(!input_manager.is_typing_in_text_field());
+		assert_eq!(input_manager.get_last_input_device(), InputDevice::Keyboard);
 	}
 }

@@ -349,8 +349,7 @@ impl EngineExtrasScene {
 	fn update_status(&mut self, engine: &Engine) {
 		let input_manager = engine.get_input_manager();
 		let button_marks = [MouseButton::Left, MouseButton::Middle, MouseButton::Right].map(|mouse_button| if input_manager.is_mouse_button_down(mouse_button) { "●" } else { "○" });
-		let input_kind = if input_manager.is_touch_input() { "손가락" } else { "마우스" };
-		let status_text = format!("마우스 왼 {} 가운데 {} 오른 {}  손가락 {}개  마지막 입력 {}  손짓 중 {}", button_marks[0], button_marks[1], button_marks[2], input_manager.get_touch_points().len(), input_kind, self.camera_gestures.is_gesture_active());
+		let status_text = format!("마우스 왼 {} 가운데 {} 오른 {}  손가락 {}개  장치 {:?} ({:?})  손짓 중 {}", button_marks[0], button_marks[1], button_marks[2], input_manager.get_touch_points().len(), input_manager.get_last_input_device(), input_manager.get_last_gamepad_kind(), self.camera_gestures.is_gesture_active());
 		if let Some(status_id) = self.status_id {
 			if let Some(status_label) = self.scene_base.get_node_tree_mut()[status_id].get_component_mut::<UILabel>() {
 				status_label.set_text(&status_text);
