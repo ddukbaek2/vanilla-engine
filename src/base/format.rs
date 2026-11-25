@@ -10,7 +10,9 @@
 //   위 묶음 길이(인도식은 3 다음 2), 최소 묶음 자리(1234 는 묶지 않는 es, pl 등), NaN 글을 node 25(ICU 78.3, CLDR 48)의 Intl 에서 뽑아 표로 넣었다.
 //   무한대는 모든 로캘이 ∞ 다. 언어 태그는 대소문자를 가리지 않고 뒤 조각부터 하나씩 떼며 표에서 찾는다. (zh-Hant-TW → zh-hant)
 //   유니코드 확장(-u-...)은 보지 않고, 밑줄은 하이픈으로 본다. 표에 없는 태그는 원본이 브라우저의 기본 로캘로 쓰듯 시스템 언어로 쓴다.
-//   (웹은 navigator.languages 의 첫째, 데스크탑은 LANGUAGE / LC_ALL / LC_MESSAGES / LANG 의 첫째. 그것도 표에 없으면 en-US)
+//   시스템 언어는 Localization.detect_language 와 같은 공용 함수(localization::read_preferred_language_tags)의 첫째다.
+//   (웹은 navigator.languages, 데스크탑은 sys-locale 이 읽은 시스템 선호 언어 차례: 윈도우 GetUserPreferredUILanguages, 맥 CFLocaleCopyPreferredLanguages,
+//   리눅스 LANGUAGE / LC_ALL / LC_MESSAGES / LANG. 그것도 표에 없으면 en-US)
 //   (원본은 틀린 태그면 RangeError 를 던진다. 러스트 판은 던지지 않고 표에 없는 태그처럼 쓴다)
 // - fraction_digits 는 원본 toFixed 처럼 0 ~ 100 이 맞다. 넘겨도 던지지 않고 그 자릿수로 낸다.
 //==============================================================================

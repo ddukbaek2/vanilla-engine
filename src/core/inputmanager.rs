@@ -119,8 +119,8 @@ impl KeyCode {
 	pub const AUDIOVOLUMEDOWN: &'static str = "AudioVolumeDown";
 	// 음소거. (W3C code 표의 이름 AudioVolumeMute)
 	pub const AUDIOMUTE: &'static str = "AudioVolumeMute";
-	// 재생. (크롬은 리눅스와 크롬OS 에서만 MediaPlay 를 낸다. 흔한 재생/멈춤 키는 MediaPlayPause, winit 에는 MediaPlay 가 없다)
-	pub const AUDIOPLAY: &'static str = "MediaPlay";
+	// 재생/멈춤. (W3C code 표의 이름 MediaPlayPause, 표에 MediaPlay 는 없다)
+	pub const AUDIOPLAY: &'static str = "MediaPlayPause";
 	pub const AUDIOSTOP: &'static str = "MediaStop";
 	pub const AUDIOPREV: &'static str = "MediaTrackPrevious";
 	pub const AUDIONEXT: &'static str = "MediaTrackNext";
