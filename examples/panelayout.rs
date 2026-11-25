@@ -394,6 +394,10 @@ impl vanilla::Scene for DesktopPaneScene {
 		if let Some(preview_pane) = self.preview_pane.as_ref() {
 			let node_tree = self.scene_base.get_node_tree();
 			let preview_position = node_tree.get_position(preview_pane.get_container());
+			let preview_size = node_tree[preview_pane.get_container()].get_content_size();
+			// 웹 판은 이 자리를 엔진 캔버스가 덮어 씬의 바탕(검정)이 보인다.
+			graphic.set_fill_color(self.scene_base.get_scene_background_color());
+			graphic.draw_rect(vanilla::Rect::create(preview_position.x, preview_position.y, preview_size.x, preview_size.y));
 			graphic.set_fill_color(vanilla::Colors::VANILLA);
 			graphic.draw_rect(vanilla::Rect::create(preview_position.x + 60.0, preview_position.y + 60.0, 240.0, 140.0));
 		}

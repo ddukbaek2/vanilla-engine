@@ -914,7 +914,7 @@ impl PaneElement {
 	}
 
 	//==============================================================================
-	// 제 크기. (글 폭과 줄 높이에 안쪽 여백과 테두리를 더한다. 입력 칸은 원본 input 의 size 20 처럼 글자 스무 개 폭)
+	// 제 크기. (글 폭과 줄 높이에 안쪽 여백과 테두리를 더한다. 입력 칸은 원본 input 의 size 20 처럼 글자 스무 개 폭, 프리셋은 폭 100% 라 부모 폭을 쓴다)
 	//==============================================================================
 	fn measure_intrinsic_size(&self) -> Vector2 {
 		let border_size = self.border_width * 2.0;
@@ -1319,7 +1319,6 @@ impl PaneStyle {
 				element.apply_style("background", PaneTheme::COLOR_INPUT_BACKGROUND);
 				element.apply_style("border", &format!("1px solid {}", PaneTheme::COLOR_RESIZER));
 				element.apply_style("padding", "4px");
-				element.width = PaneLength::Auto;
 			}
 			"textarea" => {
 				element.apply_style("background-color", PaneTheme::COLOR_BACKGROUND);
