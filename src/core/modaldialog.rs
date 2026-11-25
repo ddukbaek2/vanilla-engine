@@ -212,36 +212,47 @@ mod desktop_dialog {
 	// 커서 깜빡임 주기. (초)
 	const CURSOR_BLINK_SECONDS: f32 = 0.5;
 
-	// 모양. (크롬 탭 모달 대화 상자를 본뜬 값)
-	const DIALOG_WIDTH: f32 = 448.0;
+	// 모양. (크롬 main 의 값: MessageBoxView kDefaultMessageWidth 400, ChromeLayoutProvider INSETS_DIALOG 20, 제목 STYLE_HEADLINE_4 16px 500 줄 24,
+	// 본문 CONTEXT_DIALOG_BODY_TEXT 13px 줄 20, 제목과 본문 사이 DIALOG_CONTENT_MARGIN_TOP_TEXT 8, 본문과 입력 칸 사이 RELATED_CONTROL_VERTICAL 8,
+	// 아래 여백 입력 칸이 있으면 CONTROL 24 없으면 TEXT 16, 단추 줄 여백 (0, 20, 20, 20), 단추 사이 8, 단추 최소 폭 64 안쪽 16 글 13px 500 알약 꼴,
+	// 입력 칸 안쪽 10 모서리 8, 대화 상자 모서리 12, 기본 밝은 팔레트 색. 단추와 입력 칸 높이는 글꼴 높이 + 위아래 10 을 기본 글꼴로 셈한 값이다)
+	const DIALOG_WIDTH: f32 = 400.0;
 	const DIALOG_MARGIN: f32 = 8.0;
 	const DIALOG_PADDING_TOP: f32 = 20.0;
 	const DIALOG_PADDING_SIDE: f32 = 20.0;
 	const DIALOG_PADDING_BOTTOM: f32 = 20.0;
 	const DIALOG_CORNER_RADIUS: f32 = 12.0;
-	const TITLE_FONT_STRING: &str = "500 15px system-ui";
-	const TITLE_LINE_HEIGHT: f32 = 22.0;
+	const TITLE_FONT_STRING: &str = "500 16px system-ui";
+	const TITLE_LINE_HEIGHT: f32 = 24.0;
 	const MESSAGE_FONT_STRING: &str = "13px system-ui";
 	const FIELD_FONT_STRING: &str = "13px system-ui";
 	const MESSAGE_LINE_HEIGHT: f32 = 20.0;
-	const SECTION_GAP: f32 = 16.0;
-	const FIELD_HEIGHT: f32 = 32.0;
-	const FIELD_PADDING_X: f32 = 8.0;
+	const TITLE_MESSAGE_GAP: f32 = 8.0;
+	const MESSAGE_FIELD_GAP: f32 = 8.0;
+	const CONTENT_BOTTOM_WITH_FIELD: f32 = 24.0;
+	const CONTENT_BOTTOM_WITHOUT_FIELD: f32 = 16.0;
+	const FIELD_HEIGHT: f32 = 36.0;
+	const FIELD_PADDING_X: f32 = 10.0;
 	const FIELD_CORNER_RADIUS: f32 = 8.0;
 	const BUTTON_HEIGHT: f32 = 36.0;
-	const BUTTON_MINIMUM_WIDTH: f32 = 80.0;
+	const BUTTON_MINIMUM_WIDTH: f32 = 64.0;
 	const BUTTON_PADDING_X: f32 = 16.0;
 	const BUTTON_GAP: f32 = 8.0;
 	const BUTTON_FONT_STRING: &str = "500 13px system-ui";
 	const COLOR_DIALOG_BACKGROUND: &str = "#ffffff";
+	const COLOR_DIALOG_BORDER: &str = "#e1e3e1";
 	const COLOR_TITLE: &str = "#1f1f1f";
-	const COLOR_MESSAGE: &str = "#474747";
+	const COLOR_MESSAGE: &str = "#1f1f1f";
 	const COLOR_FOCUS_RING: &str = "#0b57d0";
 	const COLOR_SELECTION: &str = "#d3e3fd";
 	const COLOR_PRIMARY_BUTTON: &str = "#0b57d0";
 	const COLOR_PRIMARY_BUTTON_TEXT: &str = "#ffffff";
-	const COLOR_SECONDARY_BUTTON_BORDER: &str = "#c7c7c7";
+	const COLOR_SECONDARY_BUTTON_BORDER: &str = "#a8c7fa";
 	const COLOR_SECONDARY_BUTTON_TEXT: &str = "#0b57d0";
+	// 그림자. (bubble_border.cc 의 두 겹: 아래로 2, 흐림 8 과 12, kGoogleGrey800 #3C4043 의 알파 0x33 과 0x1A. 맥은 운영체제가 그린다)
+	const SHADOW_COLOR_RED: f32 = 60.0 / 255.0;
+	const SHADOW_COLOR_GREEN: f32 = 64.0 / 255.0;
+	const SHADOW_COLOR_BLUE: f32 = 67.0 / 255.0;
 
 	//==============================================================================
 	// 단추.
@@ -563,20 +574,21 @@ mod desktop_dialog {
 		let box_x = ((canvas_native_size.x - box_width) * 0.5).max(0.0);
 		let box_y = 0.0;
 		let title_top = box_y + DIALOG_PADDING_TOP;
-		let mut content_bottom = title_top + TITLE_LINE_HEIGHT * title_line_list.len() as f32;
-		let message_top = content_bottom + SECTION_GAP * 0.5;
+		let mut content_bottom = title_top + TITLE_LINE_HEIGHT * title_line_list.len() as f32 + TITLE_MESSAGE_GAP;
+		let message_top = content_bottom;
 		if !message_line_list.is_empty() {
 			content_bottom = message_top + MESSAGE_LINE_HEIGHT * message_line_list.len() as f32;
 		}
 		let field_rect = if dialog.kind == ModalDialogKind::Prompt {
-			let field_rect = Rect::create(box_x + DIALOG_PADDING_SIDE, content_bottom + SECTION_GAP, content_width, FIELD_HEIGHT);
-			content_bottom = field_rect.position.y + FIELD_HEIGHT;
+			let field_rect = Rect::create(box_x + DIALOG_PADDING_SIDE, content_bottom + MESSAGE_FIELD_GAP, content_width, FIELD_HEIGHT);
+			content_bottom = field_rect.position.y + FIELD_HEIGHT + CONTENT_BOTTOM_WITH_FIELD;
 			Some(field_rect)
 		}
 		else {
+			content_bottom += CONTENT_BOTTOM_WITHOUT_FIELD;
 			None
 		};
-		let button_top = content_bottom + SECTION_GAP + 8.0;
+		let button_top = content_bottom;
 		let mut button_rect_list: Vec<(DialogButton, Rect)> = Vec::new();
 		let mut button_right = box_x + box_width - DIALOG_PADDING_SIDE;
 		for button in dialog.read_button_list().into_iter().rev() {
@@ -745,15 +757,22 @@ mod desktop_dialog {
 		let layout = calculate_layout(dialog, graphic, canvas_native_size);
 		graphic.push_state();
 
-		// 그림자와 바탕.
+		// 그림자와 바탕. (흐림은 겹친 둥근 사각형으로 갈음한다, 윈도우와 리눅스는 1px 테두리)
 		let box_rect = layout.box_rect;
-		for shadow_index in 0..4 {
-			let spread = 2.0 + shadow_index as f32 * 3.0;
-			graphic.set_fill_color(Color::create(0.0, 0.0, 0.0, 0.035));
-			graphic.draw_round_rect(Rect::create(box_rect.position.x - spread * 0.5, box_rect.position.y + spread * 0.5, box_rect.size.x + spread, box_rect.size.y + spread * 0.5), DIALOG_CORNER_RADIUS + spread * 0.5);
+		for (blur_size, layer_alpha) in [(8.0f32, 0x33 as f32 / 255.0), (12.0f32, 0x1A as f32 / 255.0)] {
+			let step_count = 4;
+			for step_index in 0..step_count {
+				let spread = blur_size * 0.5 * (step_index as f32 + 1.0) / step_count as f32;
+				graphic.set_fill_color(Color::create(SHADOW_COLOR_RED, SHADOW_COLOR_GREEN, SHADOW_COLOR_BLUE, layer_alpha / step_count as f32));
+				graphic.draw_round_rect(Rect::create(box_rect.position.x - spread, box_rect.position.y + 2.0 - spread, box_rect.size.x + spread * 2.0, box_rect.size.y + spread * 2.0), DIALOG_CORNER_RADIUS + spread);
+			}
 		}
 		graphic.set_fill_color(COLOR_DIALOG_BACKGROUND);
 		graphic.draw_round_rect(box_rect, DIALOG_CORNER_RADIUS);
+		if !cfg!(target_os = "macos") {
+			graphic.set_stroke_color(COLOR_DIALOG_BORDER);
+			graphic.draw_stroke_round_rect(Rect::create(box_rect.position.x + 0.5, box_rect.position.y + 0.5, box_rect.size.x - 1.0, box_rect.size.y - 1.0), DIALOG_CORNER_RADIUS - 0.5, 1.0);
+		}
 
 		// 제목과 묻는 글.
 		let content_x = box_rect.position.x + DIALOG_PADDING_SIDE;
@@ -824,6 +843,8 @@ mod desktop_dialog {
 				graphic.draw_round_rect(*button_rect, corner_radius);
 			}
 			else {
+				graphic.set_fill_color(COLOR_DIALOG_BACKGROUND);
+				graphic.draw_round_rect(*button_rect, corner_radius);
 				graphic.set_stroke_color(COLOR_SECONDARY_BUTTON_BORDER);
 				graphic.draw_stroke_round_rect(Rect::create(button_rect.position.x + 0.5, button_rect.position.y + 0.5, button_rect.size.x - 1.0, button_rect.size.y - 1.0), corner_radius - 0.5, 1.0);
 			}

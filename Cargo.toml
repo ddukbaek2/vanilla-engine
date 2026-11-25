@@ -64,6 +64,8 @@ raw-window-handle = "0.6"
 kira = { version = "0.12", default-features = false, features = ["cpal", "cpal-realtime", "ogg", "vorbis", "mp3", "wav", "pcm", "flac", "isomp4", "aac"] }
 # SVG 그림. (데스크탑, usvg 로 읽고 tiny-skia 로 그린다. 원본은 브라우저가 SVG 를 그림으로 푼다. 웹은 브라우저가 푼다)
 resvg = "0.50"
+# 2D 그리기 대상 Canvas2D 의 칠하기. (데스크탑, 크롬이 쓰는 Skia 의 CPU 래스터라이저를 옮긴 것. resvg 가 쓰는 같은 판이라 더 받는 크레이트가 없다. 원본과 웹은 브라우저 캔버스)
+tiny-skia = "0.12"
 # AVIF 그림. (데스크탑, HEIF 상자는 엔진이 읽고 dav1d 를 러스트로 옮긴 rav1d 로 AV1 을 푼다. 원본은 브라우저가 AVIF 를 푼다. 웹은 브라우저가 푼다)
 # rav1d 의 asm 은 끈다. (켜면 x86 에서 nasm, arm 에서 C 어셈블러가 있어야 빌드된다. 그림 한 장 푸는 데는 순수 러스트로 넉넉하다)
 rav1d = { version = "1.1", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
@@ -113,7 +115,7 @@ wayland-client = "0.31"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
-web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlCanvasElement", "WebGl2RenderingContext", "CssStyleDeclaration", "HtmlElement", "KeyboardEvent", "console", "AudioContext", "BaseAudioContext", "OfflineAudioContext", "AudioBuffer", "AudioBufferSourceNode", "AudioScheduledSourceNode", "AudioNode", "AudioDestinationNode", "AudioParam", "GainNode", "OscillatorNode", "OscillatorType", "Response", "Performance", "Navigator", "VisibilityState", "Storage", "HtmlInputElement", "HtmlHeadElement", "Event", "CompositionEvent", "MouseEvent", "WheelEvent", "MediaQueryList", "TouchEvent", "TouchList", "Touch", "DomRect", "Node", "AddEventListenerOptions", "CanvasRenderingContext2d", "TextMetrics", "ImageData", "Blob", "BlobPropertyBag", "Url", "HtmlImageElement"] }
+web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlCanvasElement", "WebGl2RenderingContext", "CssStyleDeclaration", "HtmlElement", "KeyboardEvent", "console", "AudioContext", "BaseAudioContext", "OfflineAudioContext", "AudioBuffer", "AudioBufferSourceNode", "AudioScheduledSourceNode", "AudioNode", "AudioDestinationNode", "AudioParam", "GainNode", "OscillatorNode", "OscillatorType", "Response", "Performance", "Navigator", "VisibilityState", "Storage", "HtmlInputElement", "HtmlHeadElement", "Event", "CompositionEvent", "MouseEvent", "WheelEvent", "MediaQueryList", "TouchEvent", "TouchList", "Touch", "DomRect", "Node", "AddEventListenerOptions", "CanvasRenderingContext2d", "CanvasWindingRule", "CanvasGradient", "CanvasPattern", "Path2d", "TextMetrics", "ImageData", "Blob", "BlobPropertyBag", "Url", "HtmlImageElement"] }
 
 # 출시 빌드. (한 덩어리로 묶어 최적화하고 디버그 기호를 뺀다. 이 저장소를 맨 위로 빌드할 때만 쓰인다)
 [profile.release]

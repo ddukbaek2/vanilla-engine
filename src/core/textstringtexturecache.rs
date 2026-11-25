@@ -117,6 +117,18 @@ pub fn measure_text_without_graphic(font_string: &str, text: &str) -> Option<Tex
 	})
 }
 
+//==============================================================================
+// Graphic 없이 글 래스터 받기. (2D 그리기 대상 Canvas2D 의 fillText 가 쓴다, 그릴 때와 같은 얼굴 고르기와 모양 짓기)
+// - 데스크탑만. 글꼴이 하나도 없거나 아직 등록한 캐시가 없으면 None 이다.
+//==============================================================================
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn rasterize_text_without_graphic(text: &str, font_string: &str, bake_scale: f32, padding: i32, direction: ShapingDirection) -> Option<TextRaster> {
+	SHARED_MEASURE_CACHE.with(|shared_measure_cache_cell| {
+		let shared_measure_cache = shared_measure_cache_cell.borrow();
+		shared_measure_cache.as_ref()?.rasterize_text(text, font_string, bake_scale, padding, direction)
+	})
+}
+
 // 캐시 상한. (원본과 같음)
 const MAXIMUM_ENTRY_COUNT: usize = 512;
 // 글 재기 캐시 상한. (원본과 같음)
@@ -3180,7 +3192,7 @@ fn read_line_metrics(font: &LoadedFont, pixel_size: f32) -> (f32, f32) {
 //==============================================================================
 // 외곽선 띠 만들기. (원 모양으로 넓힌 값 - 원 모양으로 좁힌 값)
 //==============================================================================
-fn build_stroke_coverage(coverage: &[u8], bitmap_width: i32, bitmap_height: i32, stroke_radius: f32) -> Vec<u8> {
+pub(crate) fn build_stroke_coverage(coverage: &[u8], bitmap_width: i32, bitmap_height: i32, stroke_radius: f32) -> Vec<u8> {
 	let radius_ceiling = stroke_radius.ceil() as i32;
 	let mut offset_list: Vec<(i32, i32)> = Vec::new();
 	for offset_y in -radius_ceiling..=radius_ceiling {

@@ -3314,6 +3314,7 @@ dependencies = [
  "skrifa 0.50.0",
  "slotmap",
  "sys-locale",
+ "tiny-skia 0.12.0",
  "unicode-bidi",
  "unicode-normalization",
  "unicode-properties",

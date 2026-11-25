@@ -13,6 +13,8 @@ pub mod engine;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod browseruitext;
 pub mod modaldialog;
+// 2D 그리기 대상. (원본 브라우저 캔버스와 2D 컨텍스트 자리)
+pub mod canvas2d;
 pub mod frame;
 pub mod fullscreenpass;
 pub mod gamepadmanager;
