@@ -2,7 +2,8 @@
 // 입력 관리자.
 // - 키 이름은 원본과 같이 KeyboardEvent.code 꼴이다. ("KeyA", "ArrowLeft", "Space" ...)
 //   winit 의 KeyCode 이름이 같은 W3C 규약을 따르므로 그대로 문자열로 바꿔 쓴다.
-// - 마우스 왼쪽 버튼(또는 첫 손가락)을 터치로 다룬다. (원본은 마우스와 터치를 하나로 모은다)
+// - 마우스 단추(또는 첫 손가락)를 터치로 다룬다. (원본은 마우스와 터치를 하나로 모은다) 원본처럼 처음에는 어느 단추든 터치이고,
+//   set_touch_from_left_button_only(true) 면 왼쪽 단추만 터치다. 캔버스의 오른쪽 클릭 메뉴를 막을지(set_context_menu_prevented, 처음은 참)는 웹만 뜻이 있다.
 // - 그 밖에 마우스 단추 셋(왼쪽, 가운데, 오른쪽)의 눌림, 닿아 있는 손가락 목록, 마지막 입력이 손가락인지, 휠을 Ctrl 과 함께 굴렸는지를 둔다.
 //   카메라 손짓(CameraGestures)처럼 단추 하나 터치 밖의 입력을 쓰는 곳이 읽는다. 플랫폼이 채운다. (vanilla.js 는 캔버스 DOM 사건을 직접 읽던 것)
 // - 게임패드는 원본과 같이 InputManager 가 GamepadManager 를 들고 tick 에서 폴링한다. (core/gamepadmanager.rs)
@@ -12,7 +13,6 @@
 // - 마지막으로 쓴 장치(InputDevice)와 패드 종류, 막을 키(set_prevented_keys), 글자 입력칸에 쓰는 중인지(is_typing_in_text_field), 입력 동작(InputActions)을 둔다.
 //   막을 키는 웹에서만 뜻이 있다. (데스크탑 창에는 막을 브라우저 기본 동작이 없다)
 //   글자 입력칸은 엔진 입력 필드(TextInput 의 활성 필드)와, 웹에서는 문서의 초점(글자 input, textarea, contenteditable, select)을 본다.
-//   원본 ViewManager.convertClientToView 는 옮기지 않았다. 브라우저의 화면 좌표는 플랫폼 층이 캔버스 좌표로 바꿔 넣는다.
 //==============================================================================
 use crate::base::vector2::Vector2;
 use crate::core::gamepadmanager::{read_gamepad_kind, Gamepad, GamepadKind, GamepadManager};
@@ -184,6 +184,10 @@ pub struct InputManager {
 	last_gamepad_kind: GamepadKind,
 	prevented_keys: HashSet<String>,
 	input_actions: InputActions,
+	// 캔버스의 오른쪽 클릭 메뉴를 막는지.
+	is_context_menu_prevented: bool,
+	// 마우스 왼쪽 단추만 터치로 넘기는지.
+	is_touch_from_left_button_only: bool,
 }
 
 impl InputManager {
@@ -222,6 +226,8 @@ impl InputManager {
 			last_gamepad_kind: GamepadKind::Other,
 			prevented_keys: HashSet::new(),
 			input_actions: InputActions::new(),
+			is_context_menu_prevented: true,
+			is_touch_from_left_button_only: false,
 		}
 	}
 
@@ -384,10 +390,53 @@ impl InputManager {
 	}
 
 	//==============================================================================
+	// 마우스 왼쪽 단추만 터치로 넘길지 설정. (끄면(기본) 어느 단추든 터치다)
+	// - 오른쪽이나 가운데 끌기를 카메라에 쓰는 게임이 켜면 그 단추로 UI 가 눌리지 않는다.
+	//==============================================================================
+	pub fn set_touch_from_left_button_only(&mut self, is_left_button_only: bool) {
+		self.is_touch_from_left_button_only = is_left_button_only;
+	}
+
+	//==============================================================================
+	// 마우스 왼쪽 단추만 터치로 넘기는지 반환.
+	//==============================================================================
+	pub fn is_touch_from_left_button_only(&self) -> bool {
+		self.is_touch_from_left_button_only
+	}
+
+	//==============================================================================
+	// 그 마우스 단추를 터치로 넘기는지. (플랫폼이 마우스 누름과 뗌에서 부른다)
+	//==============================================================================
+	pub fn is_touch_button(&self, mouse_button: MouseButton) -> bool {
+		!self.is_touch_from_left_button_only || mouse_button == MouseButton::Left
+	}
+
+	//==============================================================================
+	// 캔버스의 오른쪽 클릭 메뉴를 막을지 설정. (처음은 참, 데스크탑 창에는 막을 메뉴가 없다)
+	//==============================================================================
+	pub fn set_context_menu_prevented(&mut self, is_prevented: bool) {
+		self.is_context_menu_prevented = is_prevented;
+	}
+
+	//==============================================================================
+	// 캔버스의 오른쪽 클릭 메뉴를 막는지 반환.
+	//==============================================================================
+	pub fn is_context_menu_prevented(&self) -> bool {
+		self.is_context_menu_prevented
+	}
+
+	//==============================================================================
+	// 닿아 있는 손가락 찾기. (없으면 None)
+	//==============================================================================
+	pub fn find_touch_point(&self, identifier: i64) -> Option<&TouchPoint> {
+		self.touch_points.iter().find(|touch_point| touch_point.identifier == identifier)
+	}
+
+	//==============================================================================
 	// 손가락이 닿음. (플랫폼이 부른다, 이미 있는 번호면 움직임으로 본다)
 	//==============================================================================
 	pub fn begin_touch_point(&mut self, identifier: i64, canvas_native_position: Vector2, view_position: Vector2) {
-		if self.touch_points.iter().any(|touch_point| touch_point.identifier == identifier) {
+		if self.find_touch_point(identifier).is_some() {
 			self.move_touch_point(identifier, canvas_native_position, view_position);
 			return;
 		}
@@ -753,5 +802,24 @@ mod tests {
 		assert_eq!(input_manager.get_prevented_keys().len(), 2);
 		assert!(!input_manager.is_typing_in_text_field());
 		assert_eq!(input_manager.get_last_input_device(), InputDevice::Keyboard);
+	}
+
+	//==============================================================================
+	// 원본처럼 처음에는 어느 단추든 터치, 왼쪽만으로 바꿀 수 있다. 오른쪽 클릭 메뉴는 처음에 막는다. 닿은 손가락 찾기.
+	//==============================================================================
+	#[test]
+	fn touch_buttons_context_menu_and_find_touch_point() {
+		let mut input_manager = InputManager::new();
+		assert!(!input_manager.is_touch_from_left_button_only());
+		assert!(input_manager.is_touch_button(MouseButton::Right));
+		input_manager.set_touch_from_left_button_only(true);
+		assert!(input_manager.is_touch_button(MouseButton::Left));
+		assert!(!input_manager.is_touch_button(MouseButton::Middle));
+		assert!(input_manager.is_context_menu_prevented());
+		input_manager.set_context_menu_prevented(false);
+		assert!(!input_manager.is_context_menu_prevented());
+		input_manager.begin_touch_point(7, Vector2::create(1.0, 2.0), Vector2::create(3.0, 4.0));
+		assert_eq!(input_manager.find_touch_point(7).map(|touch_point| touch_point.view_position), Some(Vector2::create(3.0, 4.0)));
+		assert!(input_manager.find_touch_point(8).is_none());
 	}
 }

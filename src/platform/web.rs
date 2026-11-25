@@ -338,9 +338,9 @@ fn add_keyboard_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) ->
 
 //==============================================================================
 // 마우스와 손가락 입력. (원본 engine.js 의 mousedown, mousemove, mouseup, wheel, touchstart, touchmove, touchend, touchcancel)
-// - 마우스 왼쪽 단추와 첫 손가락을 엔진의 터치로 넘기고, 단추 셋과 손가락 목록, 휠의 Ctrl 을 입력 매니저에 적는다.
+// - 마우스 단추(원본처럼 어느 것이든, set_touch_from_left_button_only 면 왼쪽만)와 첫 손가락을 엔진의 터치로 넘기고, 단추 셋과 손가락 목록, 휠의 Ctrl 을 입력 매니저에 적는다.
 // - 손가락을 뗀 바로 뒤에 브라우저가 흉내 내 보내는 마우스 사건은 무시한다. (터치로 한 번, 마우스로 또 한 번 눌리지 않게)
-// - 캔버스 위의 손가락은 기본 동작(스크롤, 확대)을 막는다. 오른쪽 클릭 메뉴도 막는다.
+// - 캔버스 위의 손가락은 기본 동작(스크롤, 확대)을 막는다. 오른쪽 클릭 메뉴는 set_context_menu_prevented 가 참(처음)이면 막는다.
 // - 프레임 안에서 사건이 바로 불려도 겹쳐 빌리지 않게 try_borrow_mut 로 본다. (못 빌리면 그 사건은 버린다)
 //==============================================================================
 const COMPATIBILITY_MOUSE_MILLISECONDS: f64 = 800.0;
@@ -368,7 +368,7 @@ fn add_pointer_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> 
 			if let Some(mouse_button) = mouse_button {
 				input_manager.set_mouse_button_down(mouse_button, true);
 			}
-			if mouse_button == Some(MouseButton::Left) {
+			if mouse_button.map(|mouse_button| input_manager.is_touch_button(mouse_button)).unwrap_or(false) {
 				input_manager.set_touch_pressed(true);
 				input_manager.set_touch_moved(true);
 				input_manager.set_touch_down(true);
@@ -411,7 +411,8 @@ fn add_pointer_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> 
 			if let Some(mouse_button) = mouse_button {
 				input_manager.set_mouse_button_down(mouse_button, false);
 			}
-			if mouse_button == Some(MouseButton::Left) && input_manager.is_touch_down() {
+			let is_touch_button = mouse_button.map(|mouse_button| input_manager.is_touch_button(mouse_button)).unwrap_or(false);
+			if is_touch_button && input_manager.is_touch_down() {
 				input_manager.set_touch_moved(false);
 				input_manager.set_touch_released(true);
 				input_manager.set_touch_down(false);
@@ -444,9 +445,20 @@ fn add_pointer_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> 
 		}
 	});
 
-	// 오른쪽 클릭 메뉴 막기.
+	// 오른쪽 클릭 메뉴 막기. (막게 해 두었을 때)
+	let web_application_cell_for_context_menu = web_application_cell.clone();
 	let context_menu_callback: Closure<dyn FnMut(web_sys::Event)> = Closure::new(move |event: web_sys::Event| {
-		event.prevent_default();
+		let is_context_menu_prevented = match web_application_cell_for_context_menu.try_borrow() {
+			Ok(web_application) => {
+				web_application.engine_runner.engine.get_input_manager().is_context_menu_prevented()
+			}
+			Err(_) => {
+				true
+			}
+		};
+		if is_context_menu_prevented {
+			event.prevent_default();
+		}
 	});
 
 	let passive_false_options = web_sys::AddEventListenerOptions::new();

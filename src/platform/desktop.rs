@@ -1,7 +1,7 @@
 //==============================================================================
 // 데스크탑 플랫폼. (윈도우, 맥, 리눅스)
 // - 창(winit)과 GL 3.3 코어 컨텍스트(glutin)를 만들고, 창의 다시 그리기 요청마다 엔진 프레임을 하나 돈다.
-// - 창 이벤트를 입력 관리자 꼴로 바꿔 넣는다. (키는 W3C KeyboardEvent.code 와 같은 이름, 마우스 왼쪽 단추는 터치)
+// - 창 이벤트를 입력 관리자 꼴로 바꿔 넣는다. (키는 W3C KeyboardEvent.code 와 같은 이름, 마우스 단추는 원본처럼 어느 것이든 터치, 왼쪽만으로 바꿀 수 있다)
 // - 엔진 본체(EngineRunner)는 창을 모른다. 여기서 프레임을 부르고, 그린 뒤 화면을 넘긴다.
 // - 글 입력(키 글자, 편집 키, IME 조합)과 클립보드는 desktop/textinput.rs 가 맡는다. 오른쪽 단추는 입력 필드 문맥 메뉴 요청이다.
 // - 마지막으로 쓴 장치를 키, 마우스, 손가락 이벤트마다 적는다. 막을 키(set_prevented_keys)는 창에 막을 브라우저 기본 동작이 없어 쓰지 않는다.
@@ -648,37 +648,47 @@ impl ApplicationHandler for DesktopApplication {
 					input_manager.set_touch_cancelled(true);
 				}
 			}
-			WindowEvent::MouseInput { state, button: MouseButton::Left, .. } => {
+			WindowEvent::MouseInput { state, button, .. } => {
+				let engine_mouse_button = match button {
+					MouseButton::Left => {
+						EngineMouseButton::Left
+					}
+					MouseButton::Right => {
+						EngineMouseButton::Right
+					}
+					MouseButton::Middle => {
+						EngineMouseButton::Middle
+					}
+					_ => {
+						return;
+					}
+				};
 				let input_manager = self.engine_runner.engine.get_input_manager_mut();
-				input_manager.set_mouse_button_down(EngineMouseButton::Left, state == ElementState::Pressed);
+				input_manager.set_mouse_button_down(engine_mouse_button, state == ElementState::Pressed);
 				input_manager.set_touch_input(false);
 				input_manager.set_last_input_device(InputDevice::Mouse);
-				match state {
-					ElementState::Pressed => {
-						input_manager.set_touch_pressed(true);
-						input_manager.set_touch_down(true);
-					}
-					ElementState::Released => {
-						input_manager.set_touch_released(true);
-						input_manager.set_touch_down(false);
+				// 원본처럼 어느 단추든 터치다. (set_touch_from_left_button_only 면 왼쪽만)
+				if input_manager.is_touch_button(engine_mouse_button) {
+					match state {
+						ElementState::Pressed => {
+							input_manager.set_touch_pressed(true);
+							input_manager.set_touch_moved(true);
+							input_manager.set_touch_down(true);
+						}
+						ElementState::Released => {
+							if input_manager.is_touch_down() {
+								input_manager.set_touch_moved(false);
+								input_manager.set_touch_released(true);
+								input_manager.set_touch_down(false);
+							}
+						}
 					}
 				}
-			}
-			WindowEvent::MouseInput { state, button: MouseButton::Right, .. } => {
-				let input_manager = self.engine_runner.engine.get_input_manager_mut();
-				input_manager.set_mouse_button_down(EngineMouseButton::Right, state == ElementState::Pressed);
-				input_manager.set_touch_input(false);
-				input_manager.set_last_input_device(InputDevice::Mouse);
-				if state == ElementState::Pressed {
+				// 오른쪽 단추는 입력 필드 문맥 메뉴 요청이다.
+				if engine_mouse_button == EngineMouseButton::Right && state == ElementState::Pressed {
 					let view_input_position = input_manager.get_view_input_position();
 					input_manager.get_text_input_mut().set_context_menu_request_position(Some(view_input_position));
 				}
-			}
-			WindowEvent::MouseInput { state, button: MouseButton::Middle, .. } => {
-				let input_manager = self.engine_runner.engine.get_input_manager_mut();
-				input_manager.set_mouse_button_down(EngineMouseButton::Middle, state == ElementState::Pressed);
-				input_manager.set_touch_input(false);
-				input_manager.set_last_input_device(InputDevice::Mouse);
 			}
 			WindowEvent::Touch(touch) => {
 				self.handle_touch(touch);
