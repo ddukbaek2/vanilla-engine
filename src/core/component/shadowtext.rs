@@ -13,6 +13,7 @@
 // - 웹에서 글꼴 바이트가 없으면 브라우저 시스템 글꼴의 모양을 받아 같은 방식으로 굽는다. (글자 캐시 rasterize_text)
 // - 색 글리프(이모지)는 제 색에 글자 색의 알파만 곱해 얹고, 그림자는 이모지 모양까지 드리운다. (원본 fillStyle 과 캔버스 그림자)
 // - 원본과 다른 것: 원본 setFontFace(FontFace) 는 set_font_family(올린 글꼴 이름), 그림자의 색과 불투명도(setShadow 의 색 글과 opacity)는 Color 하나(알파가 불투명도)로 받는다.
+//   원본 getBakeCanvas 는 구운 캔버스 대신 구운 Image 를 돌려주는 get_bake_image 다.
 //==============================================================================
 use std::rc::Rc;
 
@@ -566,6 +567,13 @@ impl ShadowText {
 	//==============================================================================
 	pub fn get_fit_minimum_ratio(&self) -> f32 {
 		self.fit_minimum_ratio
+	}
+
+	//==============================================================================
+	// 구운 그림 반환. (아직 굽지 않았거나 그림자 없이 엔진의 글로 그렸으면 None, 원본 getBakeCanvas)
+	//==============================================================================
+	pub fn get_bake_image(&self) -> Option<&Rc<Image>> {
+		self.baked_text.as_ref().map(|baked_text| &baked_text.image)
 	}
 }
 

@@ -412,10 +412,22 @@ struct ClipEntry {
 	transform_matrix: TransformMatrix,
 }
 
+//==============================================================================
+// 이미지 스무딩 퀄리티. (원본 setImageSmoothingQuality 의 "low", "medium", "high")
+// - GL 은 LINEAR / NEAREST 둘뿐이라 원본처럼 보관만 한다.
+//==============================================================================
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ImageSmoothingQuality {
+	Low,
+	Medium,
+	High,
+}
+
 pub struct Graphic {
 	gl: glow::Context,
 	is_force_gizmos_visible: bool,
 	is_image_smoothing_enabled: bool,
+	image_smoothing_quality: ImageSmoothingQuality,
 	is_image_mipmap_enabled: bool,
 	image_mipmap_bias: f32,
 	shader_program: ShaderProgram,
@@ -571,6 +583,7 @@ impl Graphic {
 			gl,
 			is_force_gizmos_visible: false,
 			is_image_smoothing_enabled: true,
+			image_smoothing_quality: ImageSmoothingQuality::High,
 			is_image_mipmap_enabled: false,
 			image_mipmap_bias: 0.0,
 			shader_program,
@@ -790,6 +803,20 @@ impl Graphic {
 	//==============================================================================
 	pub fn is_image_smoothing_enabled(&self) -> bool {
 		self.is_image_smoothing_enabled
+	}
+
+	//==============================================================================
+	// 이미지 스무딩 퀄리티 설정. (GL 은 LINEAR / NEAREST 이분법이라 보관만 한다, 처음은 High)
+	//==============================================================================
+	pub fn set_image_smoothing_quality(&mut self, value: ImageSmoothingQuality) {
+		self.image_smoothing_quality = value;
+	}
+
+	//==============================================================================
+	// 이미지 스무딩 퀄리티 반환.
+	//==============================================================================
+	pub fn get_image_smoothing_quality(&self) -> ImageSmoothingQuality {
+		self.image_smoothing_quality
 	}
 
 	//==============================================================================
@@ -2711,6 +2738,27 @@ impl Graphic {
 	pub fn get_gl(&self) -> &glow::Context {
 		self.forget_bound_render_state();
 		&self.gl
+	}
+
+	//==============================================================================
+	// 버텍스 어레이 반환. (기본 그리기의 것, GL 을 만지려면 get_gl 로 컨텍스트를 받는다)
+	//==============================================================================
+	pub fn get_vertex_array(&self) -> GlVertexArray {
+		self.vertex_array
+	}
+
+	//==============================================================================
+	// 버텍스 버퍼 반환.
+	//==============================================================================
+	pub fn get_vertex_buffer(&self) -> GlBuffer {
+		self.vertex_buffer
+	}
+
+	//==============================================================================
+	// 스크래치 버텍스 데이터 반환. (write_quad 와 draw_vertices 가 쓰는 배열)
+	//==============================================================================
+	pub fn get_vertex_data(&mut self) -> &mut [f32] {
+		&mut self.vertex_data
 	}
 
 	//==============================================================================

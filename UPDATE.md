@@ -241,6 +241,10 @@
   - GlyphRaster.color_pixels, TextRaster.color_pixels (색 글리프 몫, 프리멀티플라이드 RGBA). coverage 는 색 글리프를 뺀 글자의 덮인 정도다. 구조체에 필드가 늘어 직접 짓는 코드는 고쳐야 한다
 - 웹: 글꼴 바이트가 없을 때 브라우저로 굽는 글(platform/web/systemfont.rs)이 캔버스의 알파만 꺼내 흰색으로 올려 색 이모지가 흰 실루엣으로 나오던 것을 고쳤다. 원본처럼 RGBA 를 프리멀티플라이드로 올린다. 시스템 글꼴 조각(올린 글꼴에 없는 글자)은 흰 픽셀은 덮인 정도, 색 픽셀은 색 몫으로 나눈다. 안티앨리어싱을 끄면 알파로 가르고 곧은 색으로 채운다. (원본은 곧은 알파의 알파 칸을 가른다)
 - 예제 textshaping: 색 이모지 줄(😀👍🏽 ❤️❤ 🇰🇷 👨‍👩‍👧 1️⃣), 그림자 글 이모지, 기울인 이모지, 글자 아틀라스의 ⭐
+- 원본에 있고 러스트 판에 없던 게터: ShadowImage.get_image, get_image_rect, get_bake_image(원본 getBakeCanvas), ShadowText.get_bake_image, SoftShade.get_color, get_fade_width, get_bake_unit, get_bake_maximum_size, get_bake_image
+- slice_graphemes(text, count) (원본 sliceGraphemes, 앞에서 글자 묶음 count 개까지, 크레이트 맨 위에서 낸다)
+- Graphic.set_image_smoothing_quality, get_image_smoothing_quality, ImageSmoothingQuality(Low, Medium, High, 처음 High. 원본처럼 보관만 한다), get_vertex_array, get_vertex_buffer, get_vertex_data (기본 그리기의 버텍스 어레이, 버퍼, 스크래치 배열)
+- create_guid() (원본 base/reflection.js 의 createGUID, 앞 12 자리는 밀리초 시각이고 나머지는 난수인 UUID 꼴 글, 크레이트 맨 위에서 낸다)
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.

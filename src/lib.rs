@@ -217,3 +217,6 @@ pub use crate::core::soundsystem::{read_sound_system, set_sound_system};
 pub use crate::base::platform::{LoadedFile, ResourceUsage};
 pub use crate::base::identifier::Identifier;
 pub use crate::core::engine::FrameCaptureHandler;
+pub use crate::base::identifier::create_guid;
+pub use crate::core::component::text::slice_graphemes;
+pub use crate::core::graphic::ImageSmoothingQuality;

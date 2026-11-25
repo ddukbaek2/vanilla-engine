@@ -45,6 +45,13 @@ pub fn count_graphemes(text: &str) -> usize {
 }
 
 //==============================================================================
+// 앞에서 글자 묶음 count 개까지의 글. (원본 sliceGraphemes, 글이 짧으면 글 전체)
+//==============================================================================
+pub fn slice_graphemes(text: &str, count: usize) -> &str {
+	&text[..find_grapheme_prefix_length(text, count)]
+}
+
+//==============================================================================
 // 앞에서 글자 묶음 count 개까지의 바이트 길이. (글이 짧으면 글 전체 길이)
 //==============================================================================
 pub fn find_grapheme_prefix_length(text: &str, count: usize) -> usize {
@@ -1339,6 +1346,8 @@ mod tests {
 		assert_eq!(split_graphemes("👨‍👩‍👧e\u{301}xy"), vec!["👨‍👩‍👧", "e\u{301}", "x", "y"]);
 		assert_eq!(count_graphemes("👨‍👩‍👧e\u{301}xy"), 4);
 		assert_eq!(&"👨‍👩‍👧e\u{301}xy"[..find_grapheme_prefix_length("👨‍👩‍👧e\u{301}xy", 2)], "👨‍👩‍👧e\u{301}");
+		assert_eq!(slice_graphemes("👨‍👩‍👧e\u{301}xy", 2), "👨‍👩‍👧e\u{301}");
+		assert_eq!(slice_graphemes("가나", 5), "가나");
 		assert_eq!(split_words("Rust로 게임engine입니다."), vec!["Rust", "로 ", "게임", "engine", "입니다."]);
 		assert_eq!(split_words("HP\u{00A0}100 MP"), vec!["HP\u{00A0}100 ", "MP"]);
 		assert_eq!(split_words("我们今天去公园玩吧"), vec!["我们", "今天", "去", "公园", "玩", "吧"]);
