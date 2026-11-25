@@ -130,6 +130,33 @@ pub fn read_canvas_client_position() -> Vector2 {
 }
 
 //==============================================================================
+// 검증용 화면 저장. (원본처럼 내려받기, PNG 를 Blob 주소로 만들어 a 요소의 download 로 누른다)
+//==============================================================================
+pub fn save_capture_file(file_name: &str, png_bytes: &[u8]) -> Result<(), String> {
+	let window = web_sys::window().ok_or_else(|| String::from("window 없음"))?;
+	let document = window.document().ok_or_else(|| String::from("document 없음"))?;
+	let byte_array = js_sys::Uint8Array::from(png_bytes);
+	let blob_options = js_sys::Object::new();
+	js_sys::Reflect::set(&blob_options, &JsValue::from_str("type"), &JsValue::from_str("image/png")).map_err(describe_js_error)?;
+	let blob_constructor: js_sys::Function = js_sys::Reflect::get(&window, &JsValue::from_str("Blob")).map_err(describe_js_error)?.dyn_into().map_err(|_| String::from("Blob 없음"))?;
+	let blob = js_sys::Reflect::construct(&blob_constructor, &js_sys::Array::of2(&js_sys::Array::of1(&byte_array), &blob_options)).map_err(describe_js_error)?;
+	let url_object = js_sys::Reflect::get(&window, &JsValue::from_str("URL")).map_err(describe_js_error)?;
+	let create_object_url: js_sys::Function = js_sys::Reflect::get(&url_object, &JsValue::from_str("createObjectURL")).map_err(describe_js_error)?.dyn_into().map_err(|_| String::from("URL.createObjectURL 없음"))?;
+	let object_url = create_object_url.call1(&url_object, &blob).map_err(describe_js_error)?;
+	let anchor_element: web_sys::HtmlElement = document.create_element("a").map_err(describe_js_error)?.dyn_into().map_err(|_| String::from("a 요소 아님"))?;
+	anchor_element.set_attribute("href", &object_url.as_string().unwrap_or_default()).map_err(describe_js_error)?;
+	anchor_element.set_attribute("download", file_name).map_err(describe_js_error)?;
+	let body = document.body().ok_or_else(|| String::from("body 없음"))?;
+	body.append_child(&anchor_element).map_err(describe_js_error)?;
+	anchor_element.click();
+	anchor_element.remove();
+	if let Ok(revoke_object_url) = js_sys::Reflect::get(&url_object, &JsValue::from_str("revokeObjectURL")).and_then(|value| value.dyn_into::<js_sys::Function>().map_err(JsValue::from)) {
+		let _ = revoke_object_url.call1(&url_object, &object_url);
+	}
+	Ok(())
+}
+
+//==============================================================================
 // 페이지 전체 크기. (원본 window.innerWidth, innerHeight)
 //==============================================================================
 pub fn read_client_native_size() -> Option<Vector2> {

@@ -182,3 +182,4 @@ pub use crate::resource::spriteatlas::SpriteAtlas;
 pub use crate::core::soundsystem::{read_sound_system, set_sound_system};
 pub use crate::base::platform::{LoadedFile, ResourceUsage};
 pub use crate::base::identifier::Identifier;
+pub use crate::core::engine::FrameCaptureHandler;

@@ -198,6 +198,13 @@ pub fn read_canvas_client_position() -> Vector2 {
 }
 
 //==============================================================================
+// 검증용 화면 저장. (파일로 쓴다)
+//==============================================================================
+pub fn save_capture_file(output_path: &str, png_bytes: &[u8]) -> Result<(), String> {
+	std::fs::write(output_path, png_bytes).map_err(|error| error.to_string())
+}
+
+//==============================================================================
 // 페이지 전체 크기. (원본 window.innerWidth, innerHeight, 데스크탑에는 페이지가 없어 None 이고 ViewManager 가 창 안쪽 크기를 쓴다)
 //==============================================================================
 pub fn read_client_native_size() -> Option<Vector2> {

@@ -173,6 +173,9 @@ pub enum PageEvent {
 // 페이지 이벤트 리스너. (엔진은 약한 참조로 들어, 리스너를 버리면 더 부르지 않는다)
 pub type PageEventListener = Rc<RefCell<dyn FnMut(PageEvent)>>;
 
+// 검증용 화면 저장을 받는 함수. (그 프레임을 다 그린 화면의 PNG 바이트, 원본은 PNG data URL)
+pub type FrameCaptureHandler = Box<dyn FnOnce(&[u8])>;
+
 //==============================================================================
 // 엔진.
 //==============================================================================
@@ -187,6 +190,8 @@ pub struct Engine {
 	frame_number: u64,
 	version: Version,
 	is_exit_requested: bool,
+	// 프레임 번호마다 화면 저장을 받을 함수. (request_frame_capture)
+	frame_capture_handler_map: std::collections::HashMap<u64, Vec<FrameCaptureHandler>>,
 	// 다음 프레임 첫머리에 캔버스와 뷰 영역을 다시 맞춰 달라고 했는지. (resize)
 	pub(crate) is_resize_requested: bool,
 	pending_scene_list: Vec<Box<dyn Scene>>,
@@ -220,6 +225,7 @@ impl Engine {
 			frame_number: 1,
 			version: ENGINE_VERSION,
 			is_exit_requested: false,
+			frame_capture_handler_map: std::collections::HashMap::new(),
 			is_resize_requested: false,
 			pending_scene_list: Vec::new(),
 			is_unload_all_scenes_requested: false,
@@ -583,13 +589,24 @@ impl Engine {
 	pub fn get_version_string(&self) -> String {
 		self.version.to_string()
 	}
+
+	//==============================================================================
+	// 검증용 화면 저장 요청. (그 프레임을 다 그린 뒤 화면의 PNG 바이트를 넘긴다, 원본 requestFrameCapture 는 PNG data URL 을 프로미스로 넘긴다)
+	// - 이미 지난 번호면 이번(프레임 사이에 부르면 다음) 프레임을 저장한다.
+	// - 주소 쿼리(웹 ?capture=120,240&captureName=shot_{frame}.png&captureExit=1)와 환경 변수(데스크탑 VANILLA_CAPTURE_*)로도 건다.
+	//==============================================================================
+	pub fn request_frame_capture(&mut self, frame_number: u64, capture_handler: FrameCaptureHandler) {
+		let target_frame_number = frame_number.max(self.frame_number);
+		self.frame_capture_handler_map.entry(target_frame_number).or_default().push(capture_handler);
+	}
 }
 
 //==============================================================================
-// 화면 저장 요청. (검증용, 환경 변수로 켠다)
+// 화면 저장 요청. (검증용, 데스크탑은 환경 변수, 웹은 원본처럼 주소 쿼리로 켠다)
 // - VANILLA_CAPTURE_PATH:   저장 경로. "{frame}" 은 프레임 번호로 바뀐다. 예: shots/shot_{frame}.png
 // - VANILLA_CAPTURE_FRAMES: 저장할 프레임 번호, 쉼표로 여럿. (기본 120)
 // - VANILLA_CAPTURE_EXIT:   1 이면 마지막 저장 뒤 끝낸다.
+// - 웹: ?capture=120,240 (번호, 빈 값이면 120), captureName=파일 이름("{frame}" 은 번호, 기본 capture_{frame}.png), captureExit=1. 내려받기로 저장한다.
 //==============================================================================
 struct CaptureRequest {
 	output_path: String,
@@ -601,12 +618,28 @@ impl CaptureRequest {
 	//==============================================================================
 	// 환경 변수에서 읽기. (경로가 없으면 None)
 	//==============================================================================
+	#[cfg(not(target_arch = "wasm32"))]
 	fn create_from_environment() -> Option<CaptureRequest> {
 		let output_path = std::env::var("VANILLA_CAPTURE_PATH").ok()?;
 		let frame_numbers_text = std::env::var("VANILLA_CAPTURE_FRAMES").unwrap_or_else(|_| String::from("120"));
-		let mut frame_numbers: Vec<u64> = frame_numbers_text.split(',').filter_map(|part| part.trim().parse::<u64>().ok()).collect();
-		frame_numbers.sort();
+		let frame_numbers = parse_capture_frame_numbers(&frame_numbers_text);
 		let is_exit_after_last_capture = std::env::var("VANILLA_CAPTURE_EXIT").map(|value| value == "1").unwrap_or(false);
+		Some(CaptureRequest {
+			output_path,
+			frame_numbers,
+			is_exit_after_last_capture,
+		})
+	}
+
+	//==============================================================================
+	// 주소 쿼리에서 읽기. (웹, capture 가 없으면 None)
+	//==============================================================================
+	#[cfg(target_arch = "wasm32")]
+	fn create_from_environment() -> Option<CaptureRequest> {
+		let frame_numbers_text = platform::read_page_query_value("capture")?;
+		let frame_numbers = parse_capture_frame_numbers(&frame_numbers_text);
+		let output_path = platform::read_page_query_value("captureName").filter(|capture_name| !capture_name.is_empty()).unwrap_or_else(|| String::from("capture_{frame}.png"));
+		let is_exit_after_last_capture = platform::read_page_query_value("captureExit").map(|value| value == "1").unwrap_or(false);
 		Some(CaptureRequest {
 			output_path,
 			frame_numbers,
@@ -674,6 +707,22 @@ impl EngineRunner {
 	//==============================================================================
 	fn capture_frame_if_requested(&mut self) {
 		let frame_number = self.engine.frame_number;
+		// request_frame_capture 로 건 함수들. (PNG 바이트)
+		if let Some(capture_handler_list) = self.engine.frame_capture_handler_map.remove(&frame_number) {
+			if let Some(graphic) = &self.graphic {
+				let (width, height, pixels) = graphic.read_framebuffer_pixels();
+				match encode_png(&pixels, width, height) {
+					Ok(png_bytes) => {
+						for capture_handler in capture_handler_list {
+							capture_handler(&png_bytes);
+						}
+					}
+					Err(error) => {
+						eprintln!("Engine: 화면 저장 실패: {}", error);
+					}
+				}
+			}
+		}
 		let capture_request = match &mut self.capture_request {
 			Some(capture_request) => {
 				capture_request
@@ -695,7 +744,8 @@ impl EngineRunner {
 		};
 		let (width, height, pixels) = graphic.read_framebuffer_pixels();
 		let output_path = capture_request.output_path.replace("{frame}", &frame_number.to_string());
-		match image::save_buffer(&output_path, &pixels, width, height, image::ExtendedColorType::Rgba8) {
+		let save_result = encode_png(&pixels, width, height).and_then(|png_bytes| platform::save_capture_file(&output_path, &png_bytes));
+		match save_result {
 			Ok(()) => {
 				eprintln!("Engine: 화면 저장 {} ({}x{})", output_path, width, height);
 			}
@@ -1034,6 +1084,34 @@ fn draw_statistics(engine: &Engine, graphic: &mut Graphic) {
 }
 
 //==============================================================================
+// 화면 저장 프레임 번호 읽기. (쉼표로 여럿, 같은 번호는 한 번, 하나도 없으면 원본처럼 120)
+//==============================================================================
+fn parse_capture_frame_numbers(frame_numbers_text: &str) -> Vec<u64> {
+	let mut frame_numbers: Vec<u64> = Vec::new();
+	for part in frame_numbers_text.split(',') {
+		if let Ok(frame_number) = part.trim().parse::<u64>() {
+			if !frame_numbers.contains(&frame_number) {
+				frame_numbers.push(frame_number);
+			}
+		}
+	}
+	if frame_numbers.is_empty() {
+		frame_numbers.push(120);
+	}
+	frame_numbers.sort();
+	frame_numbers
+}
+
+//==============================================================================
+// RGBA 픽셀을 PNG 바이트로.
+//==============================================================================
+fn encode_png(pixels: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String> {
+	let mut png_bytes: Vec<u8> = Vec::new();
+	image::write_buffer_with_format(&mut std::io::Cursor::new(&mut png_bytes), pixels, width, height, image::ExtendedColorType::Rgba8, image::ImageFormat::Png).map_err(|error| error.to_string())?;
+	Ok(png_bytes)
+}
+
+//==============================================================================
 // 씬 하나 내리기. (원본 SceneManager.unloadScene 의 finalize, unload 다음 러스트 판의 destroy)
 //==============================================================================
 fn unload_scene_instance(engine: &mut Engine, scene: &mut dyn Scene) {
@@ -1302,5 +1380,23 @@ mod tests {
 		dispatch_scene_touch(&mut engine, &mut scene);
 		unload_scene_instance(&mut engine, &mut scene);
 		assert_eq!(*record_list.borrow(), vec!["press", "move", "release", "wheel", "finalize", "unload", "destroy"]);
+	}
+
+	//==============================================================================
+	// 화면 저장 요청은 지난 번호면 지금 프레임으로, 번호 글은 쉼표로 여럿(같은 번호 한 번, 없으면 120), PNG 로 굽는다.
+	//==============================================================================
+	#[test]
+	fn frame_capture_request_and_frame_numbers() {
+		let mut engine = Engine::new(EngineConfiguration::new());
+		assert_eq!(engine.get_frame_number(), 1);
+		engine.frame_number = 5;
+		engine.request_frame_capture(2, Box::new(|_png_bytes: &[u8]| {}));
+		engine.request_frame_capture(9, Box::new(|_png_bytes: &[u8]| {}));
+		assert!(engine.frame_capture_handler_map.contains_key(&5));
+		assert!(engine.frame_capture_handler_map.contains_key(&9));
+		assert_eq!(parse_capture_frame_numbers("240, 120,240,x"), vec![120, 240]);
+		assert_eq!(parse_capture_frame_numbers(""), vec![120]);
+		let png_bytes = encode_png(&[255, 0, 0, 255], 1, 1).expect("png");
+		assert_eq!(&png_bytes[1..4], b"PNG");
 	}
 }
