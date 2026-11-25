@@ -2,7 +2,7 @@
 // 웹 플랫폼. (wasm32)
 // - 원본처럼 캔버스를 창 안쪽에 꽉 채우고, 원본과 같은 옵션으로 WebGL2 컨텍스트를 얻는다.
 // - request_animation_frame 콜백마다 엔진 프레임 하나. (브라우저가 수직 동기에 맞춰 부르고, 콜백이 끝나면 화면을 넘긴다)
-// - 입력은 아직 키보드만 받는다. 입력 필드의 글 입력(숨긴 DOM <input>, IME 조합, 문맥 메뉴)과 클립보드는 web/textinput.rs 가 맡는다.
+// - 키보드, 마우스, 손가락을 받는다. 입력 필드의 글 입력(숨긴 DOM <input>, IME 조합, 문맥 메뉴)과 클립보드는 web/textinput.rs 가 맡는다.
 // - 키를 누르면 입력 매니저의 막을 키(set_prevented_keys)면 글자 입력칸에 쓰는 중이 아닐 때 기본 동작을 막는다. 마지막으로 쓴 장치를 키, 마우스, 손가락 사건마다 적는다.
 // - 오디오: 원본 engine.js 처럼 click / touchstart / keydown(설정하면 touchend / pointerup 도)은 user gesture 로 보고
 //   engine.resume_on_user_gesture(), focus 와 페이지가 다시 보일 때는 engine.resume() 을 부른다.
@@ -113,7 +113,35 @@ pub fn read_page_query_value(name: &str) -> Option<String> {
 	get_function.call1(&search_parameters, &JsValue::from_str(name)).ok()?.as_string()
 }
 
+//==============================================================================
+// 화면(client) 좌표에서 캔버스의 왼쪽 위. (원본 canvas.getBoundingClientRect() 의 left, top, 캔버스가 없으면 0)
+//==============================================================================
+pub fn read_canvas_client_position() -> Vector2 {
+	let canvas = ENGINE_CANVAS.with(|engine_canvas| engine_canvas.borrow().clone());
+	match canvas {
+		Some(canvas) => {
+			let canvas_rect = canvas.get_bounding_client_rect();
+			Vector2::create(canvas_rect.left() as f32, canvas_rect.top() as f32)
+		}
+		None => {
+			Vector2::zero()
+		}
+	}
+}
+
+//==============================================================================
+// 페이지 전체 크기. (원본 window.innerWidth, innerHeight)
+//==============================================================================
+pub fn read_client_native_size() -> Option<Vector2> {
+	let window = web_sys::window()?;
+	let client_width = window.inner_width().ok()?.as_f64()?;
+	let client_height = window.inner_height().ok()?.as_f64()?;
+	Some(Vector2::create(client_width as f32, client_height as f32))
+}
+
 thread_local! {
+	// 엔진이 그리는 캔버스. (read_canvas_client_position 이 자리를 읽는다)
+	static ENGINE_CANVAS: RefCell<Option<web_sys::HtmlCanvasElement>> = const { RefCell::new(None) };
 	// env(safe-area-inset-*) 를 재는 숨은 요소. (처음 잴 때 만들어 body 에 붙여 둔다)
 	static SAFE_AREA_PROBE_ELEMENT: RefCell<Option<web_sys::HtmlElement>> = const { RefCell::new(None) };
 }
@@ -754,6 +782,9 @@ impl WebApplication {
 
 		self.engine_runner.attach_graphic(graphic);
 		self.engine_runner.engine.platform_window = Some(canvas.clone());
+		ENGINE_CANVAS.with(|engine_canvas| {
+			*engine_canvas.borrow_mut() = Some(canvas.clone());
+		});
 		self.window_state = Some(WindowState {
 			canvas,
 			client_width: 0.0,

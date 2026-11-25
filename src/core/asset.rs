@@ -8,6 +8,7 @@
 // - 중앙 리소스 매니저는 원본처럼 두지 않는다. 애셋은 씬이 멤버로 든다.
 //==============================================================================
 use crate::core::engine::Engine;
+use crate::core::image::Image;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -40,10 +41,21 @@ pub enum AssetLoadState {
 //==============================================================================
 // 읽기 손잡이. (요청한 쪽과 읽는 쪽이 나눠 든다)
 //==============================================================================
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct AssetLoadHandle {
 	asset_path: String,
 	load_state: Rc<RefCell<AssetLoadState>>,
+	// 받은 바이트를 미리 풀어 둔 그림. (AssetLoader 가 다 받았을 때 풀어 보고 ImageAsset 이 그대로 쓴다)
+	decoded_image: Rc<RefCell<Option<Rc<Image>>>>,
+}
+
+impl std::fmt::Debug for AssetLoadHandle {
+	//==============================================================================
+	// 디버그 출력. (경로와 읽기 상태, 풀어 둔 그림은 있는지만)
+	//==============================================================================
+	fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		formatter.debug_struct("AssetLoadHandle").field("asset_path", &self.asset_path).field("load_state", &self.load_state).field("has_decoded_image", &self.decoded_image.borrow().is_some()).finish()
+	}
 }
 
 impl AssetLoadHandle {
@@ -54,6 +66,7 @@ impl AssetLoadHandle {
 		AssetLoadHandle {
 			asset_path: asset_path.to_string(),
 			load_state: Rc::new(RefCell::new(AssetLoadState::Pending)),
+			decoded_image: Rc::new(RefCell::new(None)),
 		}
 	}
 
@@ -64,6 +77,7 @@ impl AssetLoadHandle {
 		AssetLoadHandle {
 			asset_path: asset_path.to_string(),
 			load_state: Rc::new(RefCell::new(AssetLoadState::Loaded(Rc::new(bytes)))),
+			decoded_image: Rc::new(RefCell::new(None)),
 		}
 	}
 
@@ -121,6 +135,17 @@ impl AssetLoadHandle {
 				None
 			}
 		}
+	}
+
+	//==============================================================================
+	// 미리 풀어 둔 그림 설정과 반환. (같은 손잡이를 나눠 든 ImageAsset 이 다시 풀지 않게)
+	//==============================================================================
+	pub fn set_decoded_image(&self, image: Rc<Image>) {
+		*self.decoded_image.borrow_mut() = Some(image);
+	}
+
+	pub fn get_decoded_image(&self) -> Option<Rc<Image>> {
+		self.decoded_image.borrow().clone()
 	}
 
 	//==============================================================================

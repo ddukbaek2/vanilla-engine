@@ -5,8 +5,15 @@
 // - 엔진 본체(EngineRunner)는 창을 모른다. 여기서 프레임을 부르고, 그린 뒤 화면을 넘긴다.
 // - 글 입력(키 글자, 편집 키, IME 조합)과 클립보드는 desktop/textinput.rs 가 맡는다. 오른쪽 단추는 입력 필드 문맥 메뉴 요청이다.
 // - 마지막으로 쓴 장치를 키, 마우스, 손가락 이벤트마다 적는다. 막을 키(set_prevented_keys)는 창에 막을 브라우저 기본 동작이 없어 쓰지 않는다.
-// - 페이지 이벤트: 창 가림(Occluded, 맥과 X11 만 알린다)은 Hidden / Visible, 포커스는 Focused / Blurred, 마우스 단추와 손가락 누름은 PointerDown.
-//   가림이 풀리면 on_page_visibility_restored, suspended 뒤 resumed 면 on_page_process_restored. (윈도우, 맥, 리눅스는 suspended 가 오지 않는다)
+// - 페이지 이벤트: 창이 가려짐(Occluded, 맥과 X11 이 알린다), 최소화(크기 0 이나 is_minimized, 윈도우가 이것으로 알린다), 앱 멈춤(suspended, 모바일)
+//   가운데 하나라도 맞으면 Hidden, 모두 풀리면 Visible 과 on_page_visibility_restored. 포커스는 Focused / Blurred, 마우스 단추와 손가락 누름은 PointerDown.
+//   웨이랜드는 가림도 최소화도 알리지 않아 Hidden 이 오지 않는다.
+// - 페이지 프로세스 복원(on_page_process_restored, 원본 Chromium freeze 뒤 resume 과 bfcache): suspended 뒤 resumed, 그리고 시스템 잠자기에서 깬 것.
+//   잠자기는 두 프레임 사이에 벽시계(SystemTime)가 단조 시계(Instant)보다 SYSTEM_SLEEP_GAP_SECONDS 넘게 더 흘렀으면 깬 것으로 본다.
+//   (맥과 리눅스의 단조 시계는 잠든 동안 멈춘다. 윈도우의 단조 시계는 잠든 동안에도 흐르는 것으로 알려져 있어 이 판정이 맞지 않을 수 있다, 짐작)
+// - 렌더 배율 상한(ViewManager.set_max_render_pixel_ratio): 그 배율로 줄인 크기로 그리고 프레임 끝에 창 크기로 늘인다. (desktop/renderscaler.rs)
+//   입력 좌표는 창의 배율로 논리 좌표로 바꾸므로 렌더 크기와 상관없다.
+// - 페이지 주소의 쿼리 값(read_page_query_value)은 환경 변수 VANILLA_ 뒤에 이름을 대문자 뱀꼴로 붙인 것으로 읽는다. (safeArea → VANILLA_SAFE_AREA)
 //==============================================================================
 use crate::base::vector2::Vector2;
 use crate::core::asset::AssetLoadHandle;
@@ -21,7 +28,7 @@ use raw_window_handle::HasWindowHandle;
 use std::num::NonZeroU32;
 use std::rc::Rc;
 use std::time::Duration;
-use web_time::Instant;
+use web_time::{Instant, SystemTime};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent};
@@ -31,6 +38,7 @@ use winit::window::CursorIcon;
 use winit::keyboard::PhysicalKey;
 use winit::window::{Icon, Window, WindowId};
 
+mod renderscaler;
 mod textinput;
 pub use textinput::{read_clipboard_text, write_clipboard_text};
 
@@ -39,6 +47,8 @@ pub type PlatformWindow = Rc<Window>;
 
 // 휠 한 줄을 픽셀로 볼 때의 값. (브라우저 deltaMode 줄 단위 환산과 같은 자리)
 const WHEEL_LINE_PIXEL_SIZE: f32 = 40.0;
+// 두 프레임 사이에 벽시계가 단조 시계보다 이만큼 넘게 더 흐르면 시스템이 잠들었다 깬 것으로 본다. (초)
+const SYSTEM_SLEEP_GAP_SECONDS: f64 = 2.0;
 
 //==============================================================================
 // 시작. (창을 닫거나 exit_application 을 부를 때까지 돌아오지 않는다)
@@ -53,6 +63,13 @@ pub fn run(engine_runner: EngineRunner) -> Result<(), String> {
 		fatal_error: None,
 		text_input_state: textinput::DesktopTextInputState::new(),
 		is_suspended: false,
+		is_occluded: false,
+		is_minimized: false,
+		is_page_hidden: false,
+		window_scale_factor: 1.0,
+		applied_max_render_pixel_ratio: 0.0,
+		render_scaler: None,
+		last_frame_clock: None,
 	};
 	event_loop.run_app(&mut desktop_application).map_err(|error| format!("이벤트 루프 실행 실패: {}", error))?;
 	match desktop_application.fatal_error.take() {
@@ -144,9 +161,38 @@ pub fn is_text_field_focused() -> bool {
 }
 
 //==============================================================================
-// 페이지 주소의 쿼리 값. (데스크탑에는 주소가 없어 늘 None)
+// 페이지 주소의 쿼리 값. (데스크탑에는 주소가 없어 환경 변수 VANILLA_ 뒤에 이름을 대문자 뱀꼴로 붙인 것을 읽는다, 없으면 None)
+// - safeArea → VANILLA_SAFE_AREA, quality → VANILLA_QUALITY
 //==============================================================================
-pub fn read_page_query_value(_name: &str) -> Option<String> {
+pub fn read_page_query_value(name: &str) -> Option<String> {
+	std::env::var(convert_query_name_to_variable_name(name)).ok()
+}
+
+//==============================================================================
+// 쿼리 이름을 환경 변수 이름으로. (첫 글자가 아닌 대문자 앞에 밑줄, 모두 대문자, 앞에 VANILLA_)
+//==============================================================================
+fn convert_query_name_to_variable_name(name: &str) -> String {
+	let mut variable_name = String::from("VANILLA_");
+	for (character_index, character) in name.chars().enumerate() {
+		if character.is_ascii_uppercase() && character_index > 0 {
+			variable_name.push('_');
+		}
+		variable_name.push(character.to_ascii_uppercase());
+	}
+	variable_name
+}
+
+//==============================================================================
+// 화면(client) 좌표에서 캔버스의 왼쪽 위. (데스크탑은 창 안쪽 전체가 캔버스라 창의 논리 좌표가 곧 client 좌표다, 늘 0)
+//==============================================================================
+pub fn read_canvas_client_position() -> Vector2 {
+	Vector2::zero()
+}
+
+//==============================================================================
+// 페이지 전체 크기. (원본 window.innerWidth, innerHeight, 데스크탑에는 페이지가 없어 None 이고 ViewManager 가 창 안쪽 크기를 쓴다)
+//==============================================================================
+pub fn read_client_native_size() -> Option<Vector2> {
 	None
 }
 
@@ -194,6 +240,20 @@ struct DesktopApplication {
 	text_input_state: textinput::DesktopTextInputState,
 	// 앱이 suspended 되었는지. (다시 resumed 되면 페이지 프로세스 복원으로 알린다)
 	is_suspended: bool,
+	// 창이 가려졌는지. (Occluded)
+	is_occluded: bool,
+	// 창이 최소화되었는지.
+	is_minimized: bool,
+	// 엔진에 알린 페이지 가려짐. (가려짐, 최소화, 앱 멈춤 가운데 하나)
+	is_page_hidden: bool,
+	// 창의 배율. (입력 좌표를 논리 좌표로 바꿀 때, 렌더 배율 상한과 상관없다)
+	window_scale_factor: f32,
+	// 지금 렌더 크기에 건 배율 상한. (바뀌면 다시 맞춘다)
+	applied_max_render_pixel_ratio: f32,
+	// 줄인 렌더 영역을 창 크기로 늘이개. (처음 쓸 때 만든다)
+	render_scaler: Option<renderscaler::RenderScaler>,
+	// 지난 프레임의 단조 시계와 벽시계. (잠자기 판정)
+	last_frame_clock: Option<(Instant, SystemTime)>,
 }
 
 impl DesktopApplication {
@@ -298,17 +358,63 @@ impl DesktopApplication {
 		if let (Some(width), Some(height)) = (NonZeroU32::new(physical_size.width), NonZeroU32::new(physical_size.height)) {
 			window_state.surface.resize(&window_state.context, width, height);
 		}
-		self.engine_runner.engine.get_view_manager_mut().calculate_view_rect(physical_size.width, physical_size.height, scale_factor);
+		// 렌더 배율 상한을 넘으면 그 배율로 줄인 크기로 그린다. (웹 캔버스 드로잉 버퍼와 같은 셈)
+		let view_manager = self.engine_runner.engine.get_view_manager_mut();
+		let render_pixel_ratio = view_manager.limit_render_pixel_ratio(scale_factor);
+		let (render_width, render_height) = if render_pixel_ratio < scale_factor {
+			let render_scale = render_pixel_ratio / scale_factor;
+			(((physical_size.width as f32 * render_scale).round() as u32).max(1), ((physical_size.height as f32 * render_scale).round() as u32).max(1))
+		}
+		else {
+			(physical_size.width, physical_size.height)
+		};
+		view_manager.calculate_view_rect(render_width, render_height, render_pixel_ratio);
+		self.applied_max_render_pixel_ratio = view_manager.get_max_render_pixel_ratio();
+		self.window_scale_factor = scale_factor;
 		self.engine_runner.notify_scene_resize();
+	}
+
+	//==============================================================================
+	// 페이지 가려짐 알리기. (가려짐, 최소화, 앱 멈춤 가운데 하나라도 맞으면 Hidden, 모두 풀리면 Visible 과 on_page_visibility_restored, 바뀔 때만)
+	//==============================================================================
+	fn update_page_visibility(&mut self) {
+		let is_page_hidden = self.is_occluded || self.is_minimized || self.is_suspended;
+		if is_page_hidden == self.is_page_hidden {
+			return;
+		}
+		self.is_page_hidden = is_page_hidden;
+		if is_page_hidden {
+			self.engine_runner.engine.dispatch_page_event(PageEvent::Hidden);
+		}
+		else {
+			self.engine_runner.engine.dispatch_page_event(PageEvent::Visible);
+			self.engine_runner.notify_page_visibility_restored();
+		}
+	}
+
+	//==============================================================================
+	// 시스템 잠자기에서 깼는지 보고 알리기. (두 프레임 사이에 벽시계가 단조 시계보다 SYSTEM_SLEEP_GAP_SECONDS 넘게 더 흘렀으면)
+	//==============================================================================
+	fn check_system_sleep(&mut self) {
+		let now_instant = Instant::now();
+		let now_system_time = SystemTime::now();
+		if let Some((last_instant, last_system_time)) = self.last_frame_clock {
+			let monotonic_seconds = now_instant.duration_since(last_instant).as_secs_f64();
+			let wall_seconds = now_system_time.duration_since(last_system_time).map(|duration| duration.as_secs_f64()).unwrap_or(0.0);
+			if wall_seconds - monotonic_seconds > SYSTEM_SLEEP_GAP_SECONDS {
+				self.engine_runner.notify_page_process_restored();
+			}
+		}
+		self.last_frame_clock = Some((now_instant, now_system_time));
 	}
 
 	//==============================================================================
 	// 창 안쪽 물리 좌표 → 입력 위치 갱신.
 	//==============================================================================
 	fn update_input_position(&mut self, physical_x: f64, physical_y: f64) {
+		let window_scale_factor = self.window_scale_factor;
 		let engine = &mut self.engine_runner.engine;
-		let device_pixel_ratio = engine.get_view_manager().get_device_pixel_ratio();
-		let canvas_native_input_position = Vector2::create(physical_x as f32 / device_pixel_ratio, physical_y as f32 / device_pixel_ratio);
+		let canvas_native_input_position = Vector2::create(physical_x as f32 / window_scale_factor, physical_y as f32 / window_scale_factor);
 		let view_input_position = engine.get_view_manager().canvas_position_to_view_position(canvas_native_input_position);
 		let input_manager = engine.get_input_manager_mut();
 		input_manager.set_canvas_native_input_position(canvas_native_input_position);
@@ -319,8 +425,8 @@ impl DesktopApplication {
 	// 손가락. (손가락마다 닿음, 움직임, 뗌을 적고, 첫 손가락은 마우스 왼쪽 단추처럼 터치로 넘긴다)
 	//==============================================================================
 	fn handle_touch(&mut self, touch: winit::event::Touch) {
-		let device_pixel_ratio = self.engine_runner.engine.get_view_manager().get_device_pixel_ratio();
-		let canvas_native_position = Vector2::create(touch.location.x as f32 / device_pixel_ratio, touch.location.y as f32 / device_pixel_ratio);
+		let window_scale_factor = self.window_scale_factor;
+		let canvas_native_position = Vector2::create(touch.location.x as f32 / window_scale_factor, touch.location.y as f32 / window_scale_factor);
 		let view_position = self.engine_runner.engine.get_view_manager().canvas_position_to_view_position(canvas_native_position);
 		let identifier = touch.id as i64;
 		let touch_points = self.engine_runner.engine.get_input_manager().get_touch_points();
@@ -374,12 +480,65 @@ impl DesktopApplication {
 		if self.window_state.is_none() {
 			return;
 		}
+		self.check_system_sleep();
+		let max_render_pixel_ratio = self.engine_runner.engine.get_view_manager().get_max_render_pixel_ratio();
+		if max_render_pixel_ratio != self.applied_max_render_pixel_ratio {
+			self.resize();
+		}
 		self.engine_runner.update_engine();
+		self.present_render_scaled();
 		if let Some(window_state) = &self.window_state {
 			self.text_input_state.apply_active_field(&window_state.window, self.engine_runner.engine.get_input_manager().get_text_input());
 			if let Err(error) = window_state.surface.swap_buffers(&window_state.context) {
 				eprintln!("Engine: 화면 넘기기 실패: {}", error);
 			}
+		}
+	}
+}
+
+impl DesktopApplication {
+	//==============================================================================
+	// 줄인 렌더 크기로 그렸으면 창 크기로 늘여 그리기. (렌더 크기가 창 크기와 같으면 하지 않는다)
+	//==============================================================================
+	fn present_render_scaled(&mut self) {
+		let window_size = match &self.window_state {
+			Some(window_state) => {
+				window_state.window.inner_size()
+			}
+			None => {
+				return;
+			}
+		};
+		let canvas_pixel_size = self.engine_runner.engine.get_view_manager().get_canvas_pixel_size();
+		let render_width = canvas_pixel_size.x as i32;
+		let render_height = canvas_pixel_size.y as i32;
+		let window_width = window_size.width as i32;
+		let window_height = window_size.height as i32;
+		if render_width <= 0 || render_height <= 0 || (render_width == window_width && render_height == window_height) {
+			return;
+		}
+		let graphic = match self.engine_runner.get_graphic() {
+			Some(graphic) => {
+				graphic
+			}
+			None => {
+				return;
+			}
+		};
+		let gl = graphic.get_gl();
+		if self.render_scaler.is_none() {
+			match renderscaler::RenderScaler::new(gl) {
+				Ok(render_scaler) => {
+					self.render_scaler = Some(render_scaler);
+				}
+				Err(error) => {
+					eprintln!("Engine: 렌더 배율 늘이개 생성 실패: {}", error);
+					return;
+				}
+			}
+		}
+		if let Some(render_scaler) = &self.render_scaler {
+			render_scaler.present(gl, render_width, render_height, window_width, window_height);
 		}
 	}
 }
@@ -392,6 +551,7 @@ impl ApplicationHandler for DesktopApplication {
 		if self.window_state.is_some() {
 			if self.is_suspended {
 				self.is_suspended = false;
+				self.update_page_visibility();
 				self.engine_runner.notify_page_process_restored();
 			}
 			return;
@@ -410,6 +570,7 @@ impl ApplicationHandler for DesktopApplication {
 	//==============================================================================
 	fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
 		self.is_suspended = true;
+		self.update_page_visibility();
 	}
 
 	//==============================================================================
@@ -425,7 +586,13 @@ impl ApplicationHandler for DesktopApplication {
 			WindowEvent::CloseRequested => {
 				event_loop.exit();
 			}
-			WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
+			WindowEvent::Resized(physical_size) => {
+				let is_window_minimized = self.window_state.as_ref().and_then(|window_state| window_state.window.is_minimized()).unwrap_or(false);
+				self.is_minimized = physical_size.width == 0 || physical_size.height == 0 || is_window_minimized;
+				self.update_page_visibility();
+				self.resize();
+			}
+			WindowEvent::ScaleFactorChanged { .. } => {
 				self.resize();
 			}
 			WindowEvent::Focused(is_focused) => {
@@ -441,13 +608,8 @@ impl ApplicationHandler for DesktopApplication {
 				self.engine_runner.engine.dispatch_page_event(page_event);
 			}
 			WindowEvent::Occluded(is_occluded) => {
-				if is_occluded {
-					self.engine_runner.engine.dispatch_page_event(PageEvent::Hidden);
-				}
-				else {
-					self.engine_runner.engine.dispatch_page_event(PageEvent::Visible);
-					self.engine_runner.notify_page_visibility_restored();
-				}
+				self.is_occluded = is_occluded;
+				self.update_page_visibility();
 			}
 
 			WindowEvent::KeyboardInput { event: key_event, .. } => {
@@ -631,4 +793,18 @@ fn load_window_icon(icon_path: &std::path::Path) -> Result<Icon, String> {
 	let icon_width = icon_image.width();
 	let icon_height = icon_image.height();
 	Icon::from_rgba(icon_image.into_raw(), icon_width, icon_height).map_err(|error| format!("창 아이콘 생성 실패: {}", error))
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	//==============================================================================
+	// 쿼리 이름은 VANILLA_ 뒤 대문자 뱀꼴 환경 변수로 읽는다.
+	//==============================================================================
+	#[test]
+	fn query_name_becomes_variable_name() {
+		assert_eq!(convert_query_name_to_variable_name("safeArea"), "VANILLA_SAFE_AREA");
+		assert_eq!(convert_query_name_to_variable_name("quality"), "VANILLA_QUALITY");
+	}
 }

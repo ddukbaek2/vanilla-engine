@@ -1,7 +1,8 @@
 //==============================================================================
 // 이미지 애셋. (원본 resource/imageasset.js)
 // - 원본은 HTMLImageElement 에 src 를 넣고 onload 를 기다린다.
-//   러스트 판은 엔진에게 바이트를 부탁하고, 다 오면 처음 get_image 할 때 풀어서 Image 로 만든다. (PNG, JPEG)
+//   러스트 판은 엔진에게 바이트를 부탁하고, 다 오면 처음 get_image 할 때 풀어서 Image 로 만든다. (PNG, JPEG, WebP)
+//   AssetLoader 로 받은 것은 다 받았을 때 이미 풀어 둔 그림(손잡이의 get_decoded_image)을 그대로 쓴다. (풀지 못했으면 손잡이가 실패다)
 //==============================================================================
 use crate::base::vector2::Vector2;
 use crate::core::asset::{Asset, AssetBase, AssetType};
@@ -64,6 +65,10 @@ impl ImageAsset {
 		}
 		if self.is_decode_failed {
 			return None;
+		}
+		if let Some(decoded_image) = self.asset_base.get_load_handle().and_then(|load_handle| load_handle.get_decoded_image()) {
+			self.image = Some(decoded_image.clone());
+			return Some(decoded_image);
 		}
 		let bytes = self.asset_base.get_bytes()?;
 		match Image::load_from_memory(&bytes) {

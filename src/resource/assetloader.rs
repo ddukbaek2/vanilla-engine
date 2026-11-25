@@ -12,10 +12,12 @@
 //   글꼴은 FontAsset 대신 읽기 손잡이를 돌려준다. (러스트 판 글꼴은 엔진이 이름으로 등록하고, FontAsset 은 손잡이를 든 껍데기라서)
 //   소리는 Rc<AudioAsset> 을 돌려주고, 바이트를 받은 뒤 디코딩까지 끝나야 끝난 것으로 친다.
 //   원본 addTask(직접 만든 받기) 자리는 add_load_handle 이다. 직접 요청한 읽기 손잡이를 넣으면 진행률에 같이 센다. (동시 수에는 넣지 않는다)
-//   그림을 풀지 못하는 것(깨진 PNG)은 바이트를 받은 뒤 처음 get_image 할 때 알 수 있어서 실패 목록에 들지 않는다.
+//   그림은 원본 img.onload 처럼 다 받았을 때 풀어 본다. 풀지 못하는 것(깨진 PNG)은 실패 목록에 들고, 푼 그림은 손잡이에 담아 ImageAsset 이 다시 풀지 않는다.
+//   원본 load() 는 부른 때의 목록 수로 일꾼을 띄워 그 뒤에 더한 것을 일꾼 수만큼 함께 받지 못하는데(원본 버그), 러스트 판은 update 마다 빈 자리를 채운다.
 //==============================================================================
 use crate::core::asset::{Asset, AssetLoadHandle};
 use crate::core::engine::Engine;
+use crate::core::image::Image;
 use crate::resource::audioasset::AudioAsset;
 use crate::resource::blobasset::BlobAsset;
 use crate::resource::imageasset::ImageAsset;
@@ -48,8 +50,12 @@ pub type AssetLoaderCompleteHandler = Box<dyn FnMut(&[AssetLoadFailure])>;
 // 목록 한 칸의 종류.
 //==============================================================================
 enum AssetLoaderEntryKind {
-	// 바이트를 받으면 끝나는 것. (그림, 글, JSON, 바이너리, 글꼴)
+	// 바이트를 받으면 끝나는 것. (글, JSON, 바이너리, 글꼴)
 	Bytes,
+	// 바이트를 받은 뒤 풀어 보기까지. (is_decode_checked: 풀어 보았는지)
+	Image {
+		is_decode_checked: bool,
+	},
 	// 바이트를 받은 뒤 디코딩까지. (is_handed_over: 바이트를 애셋에 넘겼는지)
 	Audio {
 		audio_asset: Rc<AudioAsset>,
@@ -91,6 +97,9 @@ impl AssetLoaderEntry {
 					return true;
 				}
 				*is_handed_over && (audio_asset.is_loaded() || audio_asset.get_load_error().is_some())
+			}
+			AssetLoaderEntryKind::Image { is_decode_checked } => {
+				self.load_handle.is_failed() || (self.load_handle.is_loaded() && *is_decode_checked)
 			}
 			_ => {
 				self.load_handle.is_finished()
@@ -192,7 +201,7 @@ impl AssetLoader {
 	// 그림 넣기. (받으면 바이트가 차는 애셋, 처음 get_image 할 때 푼다)
 	//==============================================================================
 	pub fn add_image(&self, path: &str) -> ImageAsset {
-		let load_handle = self.add_entry(path, AssetLoaderEntryKind::Bytes);
+		let load_handle = self.add_entry(path, AssetLoaderEntryKind::Image { is_decode_checked: false });
 		let mut image_asset = ImageAsset::new();
 		image_asset.get_asset_base_mut().load_from_handle(load_handle);
 		image_asset
@@ -280,6 +289,7 @@ impl AssetLoader {
 		loop {
 			let is_started = self.start_next_entries(engine);
 			self.hand_over_audio_bytes();
+			self.decode_loaded_images();
 			if !is_started {
 				break;
 			}
@@ -335,6 +345,38 @@ impl AssetLoader {
 				let byte_vector = (*bytes).clone();
 				if let Err(error_message) = audio_asset.load_from_bytes(byte_vector) {
 					audio_asset.set_load_error(error_message);
+				}
+			}
+		}
+	}
+
+	//==============================================================================
+	// 받은 그림 풀어 보기. (풀면 손잡이에 담고, 풀지 못하면 손잡이를 실패로 바꾼다)
+	//==============================================================================
+	fn decode_loaded_images(&self) {
+		let mut state = self.state.borrow_mut();
+		for entry in state.entry_list.iter_mut() {
+			let load_handle = entry.load_handle.clone();
+			if let AssetLoaderEntryKind::Image { is_decode_checked } = &mut entry.kind {
+				if *is_decode_checked || !load_handle.is_loaded() {
+					continue;
+				}
+				*is_decode_checked = true;
+				let bytes = match load_handle.get_bytes() {
+					Some(bytes) => {
+						bytes
+					}
+					None => {
+						continue;
+					}
+				};
+				match Image::load_from_memory(&bytes) {
+					Ok(image) => {
+						load_handle.set_decoded_image(image);
+					}
+					Err(error_message) => {
+						load_handle.finish(Err(format!("그림을 풀지 못했습니다 ({}): {}", entry.path, error_message)));
+					}
 				}
 			}
 		}
@@ -610,6 +652,31 @@ mod tests {
 		asset_loader.load(&engine);
 		assert_eq!(asset_loader.get_in_flight_count(), 0);
 		assert_eq!(asset_loader.get_loaded_count(), 4);
+		let _ = std::fs::remove_dir_all(&asset_directory_path);
+	}
+
+	//==============================================================================
+	// 그림은 다 받았을 때 풀어 본다. 깨진 그림은 실패 목록에, 푼 그림은 ImageAsset 이 그대로 쓴다.
+	//==============================================================================
+	#[test]
+	fn broken_image_is_failure_and_good_image_is_decoded_once() {
+		let (engine, asset_directory_path) = create_test_engine("vanillaAssetLoaderImage");
+		std::fs::write(asset_directory_path.join("broken.png"), [0x89u8, b'P', b'N', b'G', 0, 1, 2, 3]).expect("broken file");
+		let mut png_bytes: Vec<u8> = Vec::new();
+		let pixel_image = image::RgbaImage::from_pixel(2, 3, image::Rgba([255, 0, 0, 255]));
+		pixel_image.write_to(&mut std::io::Cursor::new(&mut png_bytes), image::ImageFormat::Png).expect("png");
+		std::fs::write(asset_directory_path.join("good.png"), &png_bytes).expect("good file");
+		let asset_loader = AssetLoader::new();
+		let mut broken_image_asset = asset_loader.add_image("broken.png");
+		let mut good_image_asset = asset_loader.add_image("good.png");
+		asset_loader.load(&engine);
+		assert!(asset_loader.is_finished());
+		assert_eq!(asset_loader.get_loaded_count(), 1);
+		let failed_path_list: Vec<String> = asset_loader.get_failed_list().into_iter().map(|failure| failure.path).collect();
+		assert_eq!(failed_path_list, vec![String::from("broken.png")]);
+		assert!(broken_image_asset.get_image().is_none());
+		assert!(good_image_asset.get_asset_base().get_load_handle().and_then(|load_handle| load_handle.get_decoded_image()).is_some());
+		assert_eq!(good_image_asset.get_image_size(), crate::base::vector2::Vector2::create(2.0, 3.0));
 		let _ = std::fs::remove_dir_all(&asset_directory_path);
 	}
 }

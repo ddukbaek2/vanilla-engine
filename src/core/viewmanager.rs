@@ -6,11 +6,13 @@
 // - view_size:			실제 사용되는 뷰 크기. (씬이 그리는 좌표계의 크기)
 // - 원본의 device_pixel_ratio 는 창의 배율(scale factor)이다.
 // - 렌더 배율 상한(set_max_render_pixel_ratio): 원본은 바로 뷰 영역을 다시 셈해 캔버스 크기를 줄인다.
-//   러스트 판은 캔버스를 플랫폼이 맞추므로 웹은 다음 프레임 첫머리에 상한을 건 배율로 캔버스와 뷰 영역을 다시 맞춘다.
-//   데스크탑은 GL 기본 프레임버퍼가 창의 물리 픽셀 크기로 정해져 줄일 수 없어 값만 들고 쓰지 않는다.
+//   러스트 판은 캔버스를 플랫폼이 맞추므로 다음 프레임 첫머리에 상한을 건 배율로 다시 맞춘다. 웹은 캔버스 드로잉 버퍼를 줄이고,
+//   데스크탑은 기본 프레임버퍼의 왼쪽 아래에 줄인 크기로 그린 뒤 창 크기로 늘인다. (platform/desktop/renderscaler.rs)
 // - 세이프 에어리어 인셋(get_safe_area_insets)은 [위, 오른쪽, 아래, 왼쪽] 이다. (원본 { top, right, bottom, left }, GameSceneBase 와 같은 차례)
-//   주소의 ?safeArea=위,오른쪽,아래,왼쪽 과 CSS env(safe-area-inset-*) 는 웹만 읽는다. 데스크탑에는 주소도 env() 도 없어 0 이고,
-//   노치를 흉내 내려면 set_safe_area_override 를 쓴다.
+//   주소의 ?safeArea=위,오른쪽,아래,왼쪽 자리는 데스크탑에서 환경 변수 VANILLA_SAFE_AREA=위,오른쪽,아래,왼쪽 이다.
+//   CSS env(safe-area-inset-*) 는 웹만 있고 데스크탑은 노치가 없어 0 이다. set_safe_area_override 는 둘 다에서 먹는다.
+// - get_client_native_size: 원본처럼 페이지 전체 크기(window.innerWidth, innerHeight)다. 데스크탑은 페이지가 없어 창 안쪽 논리 크기다.
+// - convert_client_to_view: 화면(client) 좌표를 뷰 좌표로. 웹은 캔버스의 지금 자리를 빼고, 데스크탑은 창의 논리 좌표가 곧 client 좌표다.
 // - 무시할 세이프 에어리어 쪽(set_ignored_safe_area_sides)은 원본의 "top" 같은 글 대신 SafeAreaSide 열거형으로 받는다.
 // - get_css_pixel_scale 의 캔버스 CSS 높이는 canvas_native_size.y 다. (웹은 캔버스의 CSS 높이, 데스크탑은 창의 논리 높이)
 // - apply_aspect_view_scale_mode 는 캔버스 논리 크기로 비를 잰다. (원본은 캔버스 크기가 0 이면 창 안쪽 크기를 쓴다.
@@ -58,6 +60,7 @@ pub enum ViewScaleMode {
 pub struct ViewManager {
 	device_pixel_ratio: f32,
 	target_resolution_scale: f32,
+	client_native_size: Vector2,
 	canvas_native_size: Vector2,
 	canvas_pixel_size: Vector2,
 	reference_resolution_size: Vector2,
@@ -80,6 +83,7 @@ impl ViewManager {
 		ViewManager {
 			device_pixel_ratio: 1.0,
 			target_resolution_scale: 1.0,
+			client_native_size: Vector2::zero(),
 			canvas_native_size: Vector2::zero(),
 			canvas_pixel_size: Vector2::zero(),
 			reference_resolution_size,
@@ -106,6 +110,7 @@ impl ViewManager {
 		let canvas_pixel_size = Vector2::create(physical_width as f32, physical_height as f32);
 		let reference_resolution_size = self.get_reference_resolution_size();
 		self.device_pixel_ratio = device_pixel_ratio;
+		self.client_native_size = platform::read_client_native_size().unwrap_or(canvas_native_size);
 		self.canvas_native_size = canvas_native_size;
 		self.canvas_pixel_size = canvas_pixel_size;
 
@@ -240,6 +245,13 @@ impl ViewManager {
 	//==============================================================================
 	pub fn get_view_scale_mode(&self) -> ViewScaleMode {
 		self.view_scale_mode
+	}
+
+	//==============================================================================
+	// 페이지 전체 크기. (원본 window.innerWidth, innerHeight, 데스크탑은 창 안쪽 논리 크기)
+	//==============================================================================
+	pub fn get_client_native_size(&self) -> Vector2 {
+		self.client_native_size
 	}
 
 	//==============================================================================
@@ -439,6 +451,15 @@ impl ViewManager {
 		let view_y = ((canvas_position.y * device_pixel_ratio - view_native_rect.position.y * device_pixel_ratio) / total_scale).round();
 		Vector2::create(view_x, view_y)
 	}
+
+	//==============================================================================
+	// 화면(client) 좌표를 뷰 좌표로. (캔버스의 지금 자리를 빼서 canvas_position_to_view_position 으로 바꾼다)
+	//==============================================================================
+	pub fn convert_client_to_view(&self, client_x: f32, client_y: f32) -> Vector2 {
+		let canvas_client_position = platform::read_canvas_client_position();
+		let canvas_position = Vector2::create(client_x - canvas_client_position.x, client_y - canvas_client_position.y);
+		self.canvas_position_to_view_position(canvas_position)
+	}
 }
 
 //==============================================================================
@@ -608,5 +629,20 @@ mod tests {
 		assert_eq!(view_manager.get_safe_area_insets(), [0.0, 10.0, 30.0, 0.0]);
 		view_manager.set_ignored_safe_area_sides(&[]);
 		assert_eq!(view_manager.get_safe_area_insets(), [40.0, 10.0, 30.0, 20.0]);
+	}
+
+	//==============================================================================
+	// 화면 좌표 → 뷰 좌표, 페이지 전체 크기. (데스크탑은 캔버스가 창 안쪽 전체라 창 좌표와 같다)
+	// - 렌더 배율을 줄여 그려도(배율 1 로 640x360 픽셀) 같은 논리 좌표는 같은 뷰 좌표가 된다.
+	//==============================================================================
+	#[test]
+	fn client_to_view_and_client_size() {
+		let view_manager = create_view_manager(1280, 720, ViewScaleMode::StretchShort);
+		assert_eq!(view_manager.get_client_native_size(), Vector2::create(640.0, 360.0));
+		assert_eq!(view_manager.convert_client_to_view(320.0, 180.0), Vector2::create(640.0, 360.0));
+		let mut reduced_view_manager = ViewManager::new(Vector2::create(1280.0, 720.0), ViewScaleMode::StretchShort);
+		reduced_view_manager.calculate_view_rect(640, 360, 1.0);
+		assert_eq!(reduced_view_manager.get_canvas_native_size(), Vector2::create(640.0, 360.0));
+		assert_eq!(reduced_view_manager.convert_client_to_view(320.0, 180.0), Vector2::create(640.0, 360.0));
 	}
 }
