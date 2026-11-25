@@ -176,6 +176,26 @@
 - UILabel: set_visible_character_count, get_visible_character_count. UIProgressRing::get_perimeter_points. attach_button_motion, attach_toast_motion
 - UIInputField: set_use_dominput, is_using_dominput 을 러스트 이름 규칙대로 set_use_dom_input, is_using_dom_input 으로 바꿨다 (원본 setUseDOMInput)
 - 예제: uiscenelayout. UIScene 과 UINode 제약(세이프 에어리어 가이드, 약한 바람 너비와 범위, 여백 가이드, 같은 너비 단추, 자연 크기 글). VANILLA_EXAMPLE_DEVTOOLS=1 이면 개발자 도구를 연다. windowshowcase 는 GameScene 트레이트, 놀이 입력 처리기, fade_screen_with_hold 로 바꿨다
+- 글자, 글꼴을 원본(vanilla.js, 브라우저 Canvas2D)과 맞췄다:
+  - 글자 모양 짓기(core/textshaping.rs): 양방향 정렬(unicode-bidi)과 글자 모양 잇기(rustybuzz)로 오른쪽에서 왼쪽 글(아랍어 글자 잇기, 히브리어)과 섞인 글, 합자, 커닝, 결합 부호를 브라우저처럼 그린다. 모든 글이 이 길을 지난다
+  - 글자 방향: Graphic.set_text_direction, get_text_direction, resolve_text_direction, TextDirection(Inherit, Ltr, Rtl, Auto), detect_text_direction. resolve_text_align(text_align, text_direction) 은 원본처럼 방향을 받는다. (공개 API 를 바꾸는 일이다) 구운 글자의 키에 문단 방향이 든다. Text, RichText, UILabel, ShadowText 의 set_text_direction, get_text_direction. RichText 는 오른쪽에서 왼쪽 문단이면 조각을 오른쪽부터 놓는다
+  - 글꼴 얼굴: 이름 하나 아래에 굵기, 기울기, 글자 범위(unicode-range)가 다른 얼굴을 여럿 올린다. (TextStringTextureCache.register_font_face, unregister_font_face, set_font_face_order, clear, FontFaceDescriptors, Engine.register_font_face_when_loaded, unregister_font_face, set_font_face_order, clear_text_cache, FontAsset.load_font_with_descriptors, unload) 고르기는 CSS 차례(기울기, 굵기)를 따르고 나중에 올린 얼굴이 먼저다. 폰트 문자열의 숫자 굵기(500 등)를 읽는다
+  - 가짜 기울임은 Chromium 과 같은 기울기 1/4 (전에는 0.2), 가짜 굵게는 Skia 와 같은 두께(9px 이하 크기의 1/24, 36px 이상 1/32)로 글리프마다 입힌다. 기울인 얼굴, 굵은 얼굴이 있으면 그것을 쓴다. 웹의 default_font_url 글꼴은 보통 굵기로만 올려 굵은 글이 가짜 굵게가 된다. (원본과 같다)
+  - 얼굴을 올리면 그 이름과 글자 범위에 든 구운 글자만 버린다. (원본 invalidateFontFaces) ShadowText 도 글꼴이 올라오면 다시 굽는다
+  - 대체 글꼴: 데스크탑은 등록된 어느 글꼴에도 없는 글자가 나오면 EngineConfiguration.fallback_font_paths 의 시스템 글꼴을 앞에서부터 읽어 쓴다. (원본 브라우저의 시스템 글꼴 대체 자리) 웹은 올린 글꼴에 없는 글자를 브라우저 시스템 글꼴 조각으로 그린다. 결합 부호는 묶음을 모두 가진 얼굴로 그린다
+  - 웹에서 글꼴 바이트가 없어도 ShadowText 와 DynamicFont 가 브라우저 시스템 글꼴로 굽는다. (전에는 그림자 없이 그렸다)
+  - TextMetrics 에 actual_bounding_box_left, right, ascent, descent 를 더했다
+  - 줄바꿈(Text.wrap_text_to_lines): 원본과 같은 차례로 공백, 낱말 사이(공백 없는 한중일, 태국어), 글자 묶음으로 나눈다. 낱말은 데스크탑 ICU4X(icu_segmenter), 웹은 원본처럼 브라우저 Intl.Segmenter. 한글 덩어리는 브라우저처럼 따로 한 낱말이다. split_graphemes, split_words, segment_words, count_graphemes, find_grapheme_prefix_length, wrap_text_to_lines_with(재는 함수를 받는다)
+  - 표시 글자 수(set_visible_character_count)와 Typewriter 는 글자 묶음 단위로 센다. (이모지 묶음, 결합 부호가 쪼개지지 않는다) Typewriter 의 글자 공개 알림은 (&str, 번호) 를 받는다. (공개 API 를 바꾸는 일이다) UILabel 에 set_visible_character_count, get_visible_character_count 를 더했다
+  - Text: measure_wrapped_size(TextWrappedSize), calculate_intrinsic_content_size, calculate_text_bounds (원본 measureWrappedSize, getIntrinsicContentSize, calculateTextBounds)
+  - ShadowText: get_font_family, get_font_size, is_bold
+  - DynamicFont, GlyphInfo (misc/dynamicfont.rs, 원본 misc/dynamicfont.js): 글자를 아틀라스 한 장에 모아 굽고 잘라 그린다. build_atlas, rebuild_atlas, draw_text, measure_text, get_glyph, clear_atlas
+  - uifont (misc/uifont.rs, 원본 misc/uifont.js): 여러 문자의 글꼴 조각을 한 이름 아래 글자 범위로 올리고, 고른 언어의 묶음을 라틴 바로 앞에 두며, 쓸 글자의 조각만 받는다. load_ui_font, update, apply_ui_font_group, load_ui_font_text, request_ui_font_text, is_ui_font_ready, read_ui_font_face, build_ui_font_string, configure_ui_font(UiFontOptions), read_ui_font_family
+  - languagepack (misc/languagepack.rs, 원본 misc/languagepack.js): 자산의 JSON 언어 목록과 언어 표. load_language_list, load_language, apply_language_setting, update, is_loading, match_language_tag, resolve_language_code, translate, format_text, read_text_direction, isolate_text, mirror_layout_x, read_layout_text_align, read_all_texts, set_language_paths, set_document_title_key(웹은 탭 제목과 html lang, 데스크탑은 창 제목), set_language_loaded_handler, set_language_list_from_json, set_language_texts_from_json
+  - Color::from_cache: 1024 개를 넘으면 통째로 비우던 것을 원본처럼 가장 오래 안 쓴 것부터 버린다. get_cached_color_count
+  - Localization: 이름 자리 무리의 빗금 앞뒤 빈칸을 원본처럼 모든 빈칸 글자로 본다
+  - 새 의존성: rustybuzz, unicode-bidi, unicode-segmentation, icu_segmenter(데스크탑). 웹 wasm 이 커졌다 (uigallery wasm-bindgen 뒤 1.14 MB → 1.93 MB, gzip 0.40 MB → 0.68 MB)
+- 예제: textshaping. 아랍어 오른쪽에서 왼쪽 글(Rtl, Auto, RichText), 가짜 기울임과 굵게, 그림자 글의 기울임과 밑줄과 취소선, 한중일 낱말 줄바꿈, 글자 묶음 표시 수, DynamicFont
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.

@@ -5,11 +5,13 @@
 // - 가로 정렬은 노드 안에서 왼쪽, 가운데, 오른쪽이고, 세로는 노드의 가운데다.
 // - 글이 노드 너비를 넘으면 처음 크기에서 최소 비율(set_fit_minimum_ratio)까지 줄여 맞춘다.
 // - 그림자는 상자 흐림 세 번(가우시안에 가까움)으로 번지게 할 수 있다. 번지는 만큼 구운 그림의 가장자리를 넓힌다.
-// - 굽는 배율, 글, 꼴, 노드 너비가 바뀌면 다시 굽는다. 같은 모양을 구운 것이 있으면 나눠 쓴다. (sharedbakecache.rs)
+// - 굽는 배율, 글, 꼴, 글 방향, 노드 너비가 바뀌거나 글꼴이 새로 올라오면 다시 굽는다. 같은 모양을 구운 것이 있으면 나눠 쓴다. (sharedbakecache.rs)
+// - 글 방향(set_text_direction, 원본 setTextDirection, 처음 Ltr)으로 양방향 정렬과 모양 짓기를 하고, 정렬 Start / End 를 푼다.
 // - 화면 밖 거르기는 마지막으로 구운 한 장이 놓이는 사각형(넘친 글, 그림자 여백 포함)으로 판정한다. 세터로 바꾼 뒤 아직 굽지 않았거나 노드 너비나 굽는 배율이 달라졌으면 거르지 않는다.
-// - 원본과 다른 것: 웹에서 글꼴 바이트 없이 시스템 글꼴로 굽는 경우는 모양을 받을 수 없어 그림자 없이 Graphic 의 글로 그린다.
-//   기울임, 밑줄, 취소선(set_italic, set_underline, set_strikethrough)을 더했다. (원본에는 없다) 이름과 선의 자리, 두께는 Text 의 가운데 기준선과 같고,
-//   선도 글과 함께 구워 그림자가 깔린다. 한 줄을 줄여 맞추는 글이라 줄바꿈 방식은 두지 않는다.
+// - 기울임, 밑줄, 취소선(set_italic, set_underline, set_strikethrough): 선의 자리, 두께는 Text 의 가운데 기준선과 같고, 선도 글과 함께 구워 그림자가 깔린다.
+//   한 줄을 줄여 맞추는 글이라 줄바꿈 방식은 두지 않는다.
+// - 웹에서 글꼴 바이트가 없으면 브라우저 시스템 글꼴의 모양을 받아 같은 방식으로 굽는다. (글자 캐시 rasterize_text)
+// - 원본과 다른 것: 원본 setFontFace(FontFace) 는 set_font_family(올린 글꼴 이름), 그림자의 색과 불투명도(setShadow 의 색 글과 opacity)는 Color 하나(알파가 불투명도)로 받는다.
 //==============================================================================
 use std::rc::Rc;
 
@@ -18,7 +20,7 @@ use crate::base::rect::Rect;
 use crate::base::vector2::Vector2;
 use crate::core::component::richtext::build_font_string;
 use crate::core::component::{Component, ComponentBase};
-use crate::core::graphic::{Graphic, TextAlign, TextBaseline};
+use crate::core::graphic::{Graphic, TextAlign, TextBaseline, TextDirection};
 use crate::core::image::Image;
 use crate::core::node::worldnode::NodeTransform;
 use crate::core::sharedbakecache;
@@ -137,6 +139,7 @@ pub struct ShadowText {
 	is_underline: bool,
 	is_strikethrough: bool,
 	text_align: TextAlign,
+	text_direction: TextDirection,
 	text_color: Color,
 	shadow_color: Color,
 	shadow_offset: f32,
@@ -163,6 +166,7 @@ impl ShadowText {
 			is_underline: false,
 			is_strikethrough: false,
 			text_align: TextAlign::Center,
+			text_direction: TextDirection::Ltr,
 			text_color: Color::white(),
 			shadow_color: Color::black(),
 			shadow_offset: 0.0,
@@ -207,7 +211,8 @@ impl ShadowText {
 		}
 		let content_size = transform.get_content_size();
 		let bake_scale = graphic.calculate_text_bake_scale();
-		let bake_key = format!("ShadowText|{}|{}|{}|{}|{}|{}|{}|{:?}|{:?}|{}|{}|{}|{}|{}", self.text, self.font_family, self.font_size, self.is_bold, self.is_italic, self.is_underline, self.is_strikethrough, self.text_color, self.shadow_color, self.shadow_offset, self.shadow_blur, self.fit_minimum_ratio, content_size.x, bake_scale);
+		let font_registration_count = graphic.get_text_string_texture_cache().get_font_registration_count();
+		let bake_key = format!("ShadowText|{}|{}|{}|{}|{}|{}|{}|{:?}|{:?}|{}|{}|{}|{}|{}|{}|{}", self.text, self.font_family, self.font_size, self.is_bold, self.is_italic, self.is_underline, self.is_strikethrough, self.text_color, self.shadow_color, self.shadow_offset, self.shadow_blur, self.fit_minimum_ratio, content_size.x, bake_scale, self.text_direction.get_name(), font_registration_count);
 		if bake_key != self.bake_key {
 			// 같은 모양을 구운 것이 있으면 나눠 쓰고, 없으면 굽는다.
 			self.baked_text = sharedbakecache::acquire_shared_bake(&bake_key, || self.bake(graphic, content_size.x, bake_scale).map(Rc::new));
@@ -220,8 +225,10 @@ impl ShadowText {
 			}
 			None => {
 				// 글꼴 모양을 받을 수 없으면 그림자 없이 엔진의 글로.
-				let text_align = self.text_align;
-				let anchor_x = match graphic.resolve_text_align(text_align) {
+				let text_direction = self.resolve_shaping_text_direction();
+				let text_align = graphic.resolve_text_align(self.text_align, text_direction);
+				graphic.set_text_direction(text_direction);
+				let anchor_x = match text_align {
 					TextAlign::Left => {
 						0.0
 					}
@@ -240,7 +247,7 @@ impl ShadowText {
 				graphic.draw_fill_text(&self.text, anchor_x, content_size.y * 0.5);
 				if self.is_underline || self.is_strikethrough {
 					let text_width = graphic.measure_text(&self.text).width;
-					let start_x = match graphic.resolve_text_align(text_align) {
+					let start_x = match text_align {
 						TextAlign::Left => {
 							anchor_x
 						}
@@ -277,7 +284,7 @@ impl ShadowText {
 	// 구운 한 장이 놓이는 사각형. (가로는 정렬대로, 세로는 가운데(middle 기준선)에 놓는다)
 	//==============================================================================
 	fn calculate_quad_rect(&self, graphic: &Graphic, baked_text: &BakedText, content_width: f32, content_height: f32) -> Rect {
-		let (anchor_x, align_offset) = match graphic.resolve_text_align(self.text_align) {
+		let (anchor_x, align_offset) = match graphic.resolve_text_align(self.text_align, self.resolve_shaping_text_direction()) {
 			TextAlign::Left => {
 				(0.0, 0.0)
 			}
@@ -314,7 +321,7 @@ impl ShadowText {
 			// 밑줄은 기준선 아래로 내려가므로 여유를 더 둔다.
 			padding += ((font_size * 0.25 + 2.0) * bake_scale).ceil() as i32;
 		}
-		let mut text_raster = graphic.get_text_string_texture_cache().rasterize_text(&self.text, &font_string, bake_scale, padding)?;
+		let mut text_raster = graphic.get_text_string_texture_cache().rasterize_text(&self.text, &font_string, bake_scale, padding, self.resolve_shaping_text_direction().to_shaping_direction())?;
 		self.draw_decoration_lines(&mut text_raster, font_size, bake_scale);
 		let image = compose_shadow_image(&text_raster.coverage, None, text_raster.width, text_raster.height, self.text_color, self.shadow_color, scaled_blur, scaled_offset);
 		Some(BakedText {
@@ -371,11 +378,64 @@ impl ShadowText {
 	}
 
 	//==============================================================================
-	// 글꼴 이름 설정. (엔진에 올린 글꼴 이름, 처음은 default)
+	// 글꼴 이름 설정. (엔진에 올린 글꼴 이름, 처음은 default. 원본 setFontFace)
 	//==============================================================================
 	pub fn set_font_family(&mut self, font_family: &str) {
 		self.font_family = String::from(font_family);
 		self.is_bake_dirty = true;
+	}
+
+	//==============================================================================
+	// 글꼴 이름 반환. (원본 getFontFace)
+	//==============================================================================
+	pub fn get_font_family(&self) -> &str {
+		&self.font_family
+	}
+
+	//==============================================================================
+	// 처음 글자 크기 반환. (원본 getFontSize)
+	//==============================================================================
+	pub fn get_font_size(&self) -> f32 {
+		self.font_size
+	}
+
+	//==============================================================================
+	// 굵게 여부.
+	//==============================================================================
+	pub fn is_bold(&self) -> bool {
+		self.is_bold
+	}
+
+	//==============================================================================
+	// 글 방향 설정. (Ltr, Rtl, Auto. 원본 setTextDirection("ltr" / "rtl"), Inherit 는 Ltr 로 본다)
+	//==============================================================================
+	pub fn set_text_direction(&mut self, text_direction: TextDirection) {
+		self.text_direction = text_direction;
+		self.is_bake_dirty = true;
+	}
+
+	//==============================================================================
+	// 글 방향 반환.
+	//==============================================================================
+	pub fn get_text_direction(&self) -> TextDirection {
+		self.text_direction
+	}
+
+	//==============================================================================
+	// 굽는 실제 방향. (Rtl 이면 오른쪽에서 왼쪽, Auto 는 글의 첫 강한 글자로, 그 밖은 왼쪽에서 오른쪽)
+	//==============================================================================
+	fn resolve_shaping_text_direction(&self) -> TextDirection {
+		match self.text_direction {
+			TextDirection::Rtl => {
+				TextDirection::Rtl
+			}
+			TextDirection::Auto => {
+				crate::core::graphic::detect_text_direction(&self.text)
+			}
+			_ => {
+				TextDirection::Ltr
+			}
+		}
 	}
 
 	//==============================================================================

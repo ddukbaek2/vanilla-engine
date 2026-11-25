@@ -125,11 +125,13 @@ EngineRunner (플랫폼이 들고 프레임마다 부른다)
 
 ## 9. 아직 안 옮긴 것
 
-- DynamicFont.
 - UINode, 오토레이아웃(ui/autolayout), UIScene 은 옮겼다. 노드 종류가 WorldNode 하나뿐이라 UINode 는 노드에 붙는 컴포넌트이고, 솔버 값을 노드의 자리와 content_size 로 옮긴다. (ui/uinode.rs, ui/uiscene.rs)
 - GameScene, UIScene 의 덮어쓰기는 GameScene, UIScene 트레이트와 game_scene!, ui_scene! 매크로다. 바탕이 resize, layout, post_draw 를 스스로 부른다. (game/gamescene.rs)
 - DevTools 는 옮겼다. 리플렉션이 없어 인스펙터의 컴포넌트 속성은 UIDocument 가 저장하는 키와 값으로 보인다. (misc/devtools.rs)
 - web/Pane(DOM 화면 분할 패널)은 웹(wasm32) 빌드에만 옮겼다. 데스크탑에는 DOM 이 없다. (web/pane.rs)
+- 글자, 글꼴 갈래는 원본과 맞췄다. (2026-11-25) 오른쪽에서 왼쪽 글(양방향 정렬과 글자 모양 짓기, core/textshaping.rs), CSS 같은 글꼴 얼굴 고르기와 가짜 기울임, 가짜 굵게(Chromium 과 Skia 의 값),
+  ICU 낱말 나누기와 글자 묶음 줄바꿈, DynamicFont, UIFont, LanguagePack 을 옮겼다. 원본과 같아질 수 없어 남은 것: 래스터 픽셀(fontdue 와 브라우저 Skia, CoreGraphics),
+  일본어와 태국어 낱말 사전(ICU4X 와 크롬의 ICU4C 데이터), 색 이모지 글꼴(fontdue 가 색 글리프를 그리지 못한다), 데스크탑의 시스템 글꼴 대체 목록(브라우저와 운영체제가 고르는 목록 대신 EngineConfiguration.fallback_font_paths).
 - UIDocument 는 옮겼다. 원본의 리플렉션 직렬화 대신 종류 이름마다 짓기, 쓰기, 읽기 함수를 표에 등록하고, 원본이 반사로 저장하는 종류는 원본 반사 결과와 같은 키로 쓴다. (ui/uidocument.rs)
 - 원본 160파일 가운데 122파일을 옮겼고, 20파일은 죽은 코드이거나 러스트 표준으로 대신해서 일부러 옮기지 않았다. (2026-11-25, HumanSkinRenderer 를 옮김)
 - experimental/camera.js 는 옮기지 않는다. 회전과 begin/end 를 Camera2D(misc/camera2d.rs)에 넣어 그 기능을 모두 덮는다. experimental/transform2d.js, aabb.js 는 파일 전체가 주석이다.
