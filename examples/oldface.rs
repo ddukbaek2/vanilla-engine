@@ -7,7 +7,8 @@
 //   → 합성(HDR) → 블룸 → 톤 매핑(LDR) → FXAA(화면) → graphic.restore_render_state() → draw 에서 2D 글.
 // - 원본 예제의 HTML 패널(옵션, 슬라이더, 머티리얼 그래프, HUD)은 옮기지 않는다. 표정은 4초마다 차례로 바뀌고,
 //   숫자 키 1 ~ 9 로 고르면 자동 전환이 멈춘다. 끌기로 궤도 회전, 휠로 줌.
-// - 갱신은 원본 기본 30fps 처럼 1/30초씩 고정으로 나아간다. (화면 저장이 프레임 번호로 같은 장면을 잡도록)
+// - 원본 FRAME RATE 기본처럼 30fps 로 제한하고, 갱신 시간은 원본처럼 지난 시간(0.1초 상한)을 쓴다.
+//   화면 저장(VANILLA_CAPTURE_PATH)을 켜면 1/30초씩 고정으로 나아간다. (프레임 번호로 같은 장면을 잡도록)
 // - 실행: cargo run --release --example oldface
 //   화면 저장: VANILLA_CAPTURE_PATH=shots/oldface_{frame}.png VANILLA_CAPTURE_FRAMES=61 VANILLA_CAPTURE_EXIT=1
 //==============================================================================
@@ -45,8 +46,9 @@ const RENDER_BASE_HEIGHT: f32 = 1080.0;
 // 높이 디테일 텍스처 한 변. (원본 DETAIL_TEXTURE_SIZE)
 const DETAIL_TEXTURE_SIZE: f32 = 4096.0;
 
-// 갱신 걸음. (원본 FRAME RATE 기본 30fps)
-const FIXED_TIME_STEP: f32 = 1.0 / 30.0;
+// 프레임 제한과 화면 저장 때의 고정 갱신 걸음. (원본 FRAME RATE 기본 30fps)
+const FRAME_RATE: f32 = 30.0;
+const FIXED_TIME_STEP: f32 = 1.0 / FRAME_RATE;
 
 // 표정 자동 전환 간격. (초)
 const EXPRESSION_CYCLE_SECONDS: f32 = 4.0;
@@ -293,6 +295,7 @@ struct OldFaceScene {
 	resources: Option<FaceResources>,
 	load_error_message: Option<String>,
 	load_seconds: f32,
+	use_fixed_time_step: bool,
 	elapsed_time: f32,
 	active_expression_index: usize,
 	is_expression_cycle_enabled: bool,
@@ -340,6 +343,7 @@ impl OldFaceScene {
 			resources: None,
 			load_error_message: None,
 			load_seconds: 0.0,
+			use_fixed_time_step: std::env::var("VANILLA_CAPTURE_PATH").is_ok(),
 			elapsed_time: 0.0,
 			active_expression_index: 0,
 			is_expression_cycle_enabled: true,
@@ -891,11 +895,16 @@ impl Scene for OldFaceScene {
 	//==============================================================================
 	// 갱신. (원본 renderFrame 의 카메라, 표정, 머리 방향, 주름, 파라미터, 스키닝 갱신)
 	//==============================================================================
-	fn tick(&mut self, engine: &mut Engine, _time_delta: f32) {
+	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
 		if self.resources.is_none() {
 			return;
 		}
-		let delta_time = FIXED_TIME_STEP;
+		let delta_time = if self.use_fixed_time_step {
+			FIXED_TIME_STEP
+		}
+		else {
+			time_delta.min(0.1)
+		};
 		self.elapsed_time += delta_time;
 		let elapsed_time = self.elapsed_time;
 		self.handle_input(engine);
@@ -1061,6 +1070,7 @@ fn main() {
 	let mut engine_configuration = EngineConfiguration::new();
 	engine_configuration.title = String::from("바닐라엔진 graphics3d oldface");
 	engine_configuration.window_size = Vector2::create(1280.0, 720.0);
+	engine_configuration.maximum_frame_per_second = FRAME_RATE;
 	engine_configuration.asset_directory_paths = vec![PathBuf::from(EXAMPLE_ASSET_DIRECTORY)];
 	let engine = Engine::new(engine_configuration);
 	if let Err(error) = engine.run(Box::new(OldFaceScene::new())) {
