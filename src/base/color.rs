@@ -1,5 +1,9 @@
 //==============================================================================
-// 색상. (각 성분 0 ~ 1)
+// 색상. (각 성분 0 ~ 1, 원본 base/color.js)
+// - 원본의 red, green, blue, alpha 프로퍼티는 공개 필드로, clone 은 복사(Copy)로 갈음한다.
+// - to_rgba_string, to_hex_string 은 원본처럼 알파가 1 보다 작을 때만 알파를 붙인다. 원본은 0 ~ 1 밖의 값을 자르지 않아
+//   두 자리가 넘는 16진수가 나올 수 있는데, 러스트 판은 0 ~ 1 로 잘라 늘 두 자리다.
+// - from_hex_cached, from_cache 는 Color 가 Copy 라 나눠 쓰는 인스턴스 대신 캐시에 든 값을 복사해 준다.
 //==============================================================================
 use crate::base::math;
 use std::cell::RefCell;
@@ -11,6 +15,8 @@ const MAXIMUM_CACHED_COLOR_COUNT: usize = 1024;
 thread_local! {
 	// 색 문자열 → 풀어 둔 색. (Color::from_cache)
 	static COLOR_STRING_CACHE: RefCell<HashMap<String, Color>> = RefCell::new(HashMap::new());
+	// "색 문자열@알파" → 풀어 둔 색. (Color::from_hex_cached)
+	static COLOR_HEX_CACHE: RefCell<HashMap<String, Color>> = RefCell::new(HashMap::new());
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -138,13 +144,34 @@ impl Color {
 	}
 
 	//==============================================================================
-	// "#rrggbbaa" 문자열로 변환.
+	// "rgb(r, g, b)" 또는 "rgba(r, g, b, a)" 문자열로 변환. (알파가 1 보다 작을 때만 rgba)
 	//==============================================================================
-	pub fn to_hexstring(&self) -> String {
-		let to_byte = |value: f32| -> u8 {
-			(math::clamp01(value) * 255.0).round() as u8
-		};
-		format!("#{:02x}{:02x}{:02x}{:02x}", to_byte(self.red), to_byte(self.green), to_byte(self.blue), to_byte(self.alpha))
+	pub fn to_rgba_string(&self) -> String {
+		let red = convert_component_to_byte(self.red);
+		let green = convert_component_to_byte(self.green);
+		let blue = convert_component_to_byte(self.blue);
+		if self.alpha < 1.0 {
+			format!("rgba({}, {}, {}, {})", red, green, blue, self.alpha)
+		}
+		else {
+			format!("rgb({}, {}, {})", red, green, blue)
+		}
+	}
+
+	//==============================================================================
+	// "#rrggbb" 또는 "#rrggbbaa" 문자열로 변환. (알파가 1 보다 작을 때만 aa)
+	//==============================================================================
+	pub fn to_hex_string(&self) -> String {
+		let red = convert_component_to_byte(self.red);
+		let green = convert_component_to_byte(self.green);
+		let blue = convert_component_to_byte(self.blue);
+		if self.alpha < 1.0 {
+			let alpha = convert_component_to_byte(self.alpha);
+			format!("#{:02x}{:02x}{:02x}{:02x}", red, green, blue, alpha)
+		}
+		else {
+			format!("#{:02x}{:02x}{:02x}", red, green, blue)
+		}
 	}
 
 	//==============================================================================
@@ -192,6 +219,36 @@ impl Color {
 	}
 }
 
+impl Color {
+	//==============================================================================
+	// HEX 문자열과 알파로 캐시한 색 반환. (원본 Color.fromHEXCached, 알파는 0.01 단위로 다듬어 키에 넣는다)
+	//==============================================================================
+	pub fn from_hex_cached(color_string: &str, alpha: f32) -> Color {
+		let quantized_alpha = (alpha * 100.0).round() / 100.0;
+		let cache_key = format!("{}@{}", color_string, quantized_alpha);
+		COLOR_HEX_CACHE.with(|color_cache| {
+			if let Some(color) = color_cache.borrow().get(&cache_key) {
+				return *color;
+			}
+			let mut color = Color::create_from_hex(color_string);
+			color.alpha = quantized_alpha;
+			let mut color_cache = color_cache.borrow_mut();
+			if color_cache.len() >= MAXIMUM_CACHED_COLOR_COUNT {
+				color_cache.clear();
+			}
+			color_cache.insert(cache_key, color);
+			color
+		})
+	}
+}
+
+//==============================================================================
+// 성분(0 ~ 1)을 0 ~ 255 정수로. (반올림, 범위 밖은 자른다)
+//==============================================================================
+fn convert_component_to_byte(value: f32) -> u8 {
+	(math::clamp01(value) * 255.0).round() as u8
+}
+
 impl From<&str> for Color {
 	fn from(color_string: &str) -> Color {
 		let trimmed_color_string = color_string.trim().to_lowercase();
@@ -208,5 +265,35 @@ impl From<&str> for Color {
 impl From<&String> for Color {
 	fn from(color_string: &String) -> Color {
 		Color::from(color_string.as_str())
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	//==============================================================================
+	// 문자열 변환이 원본과 같은지. (알파가 1 이면 붙이지 않는다)
+	//==============================================================================
+	#[test]
+	fn strings_match_original() {
+		let color = Color::create(1.0, 0.5, 0.0, 1.0);
+		assert_eq!(color.to_rgba_string(), "rgb(255, 128, 0)");
+		assert_eq!(color.to_hex_string(), "#ff8000");
+		let transparent_color = color.with_alpha(0.5);
+		assert_eq!(transparent_color.to_rgba_string(), "rgba(255, 128, 0, 0.5)");
+		assert_eq!(transparent_color.to_hex_string(), "#ff800080");
+	}
+
+	//==============================================================================
+	// HEX 캐시는 알파를 0.01 단위로 다듬는다.
+	//==============================================================================
+	#[test]
+	fn hex_cache_quantizes_alpha() {
+		let color = Color::from_hex_cached("#ff0000", 0.504);
+		assert_eq!(color.red, 1.0);
+		assert_eq!(color.alpha, 0.5);
+		assert_eq!(Color::from_hex_cached("#ff0000", 0.504), color);
+		assert_eq!(Color::from_cache("rgb(0, 255, 0)").green, 1.0);
 	}
 }

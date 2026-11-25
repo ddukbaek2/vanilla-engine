@@ -1066,7 +1066,7 @@ impl Graphic {
 			self.is_uploaded_uniform_known = false;
 		}
 
-		self.transform_matrix.write_to_array(&mut self.model_matrix_array);
+		self.transform_matrix.write_to_float32_array(&mut self.model_matrix_array);
 
 		// 틴트. (없으면 0, 0, 0, 0)
 		let tint_color_value_list = match self.image_tint_color {
@@ -1406,7 +1406,7 @@ impl Graphic {
 				return;
 			}
 		};
-		self.transform_matrix.write_to_array(&mut self.model_matrix_array);
+		self.transform_matrix.write_to_float32_array(&mut self.model_matrix_array);
 		self.use_shader_program(particle_shader_program);
 		let projection_matrix_location = particle_shader_program.get_uniform_location(&self.gl, "projectionMatrix");
 		let model_matrix_location = particle_shader_program.get_uniform_location(&self.gl, "modelMatrix");
