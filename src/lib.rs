@@ -133,7 +133,7 @@ pub use crate::ui::uidraggable::{UIDraggable, UIDraggableEvent, UIDraggablePosit
 pub use crate::ui::uidropdown::{UIDropdown, UIDropdownEvent, UIDropdownOptions};
 pub use crate::ui::uihitarea::UIHitArea;
 pub use crate::ui::uiimageview::UIImageView;
-pub use crate::ui::uiinputfield::{TextEditBuffer, UIInputField, UIInputFieldEvent, UIInputFieldMenuAction};
+pub use crate::ui::uiinputfield::{TextEditBuffer, TextEditKind, UIInputField, UIInputFieldEvent, UIInputFieldMenuAction, UIInputFieldWritingDirection};
 pub use crate::ui::uilabel::UILabel;
 pub use crate::ui::uilistview::{UIListView, UIListViewBindItemEvent, UIListViewCreateItemEvent, UIListViewReachEndEvent};
 pub use crate::ui::uiprogressview::{ProgressDirection, UIProgressView};

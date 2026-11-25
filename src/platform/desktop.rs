@@ -67,6 +67,7 @@ pub mod gamepadhaptics;
 pub mod systemfont;
 #[cfg(target_os = "macos")]
 pub mod coretextglyph;
+pub mod emojipanel;
 
 // 엔진이 들고 있는 창 손잡이. (커서, 제목을 바꿀 때)
 pub type PlatformWindow = Rc<Window>;

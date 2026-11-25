@@ -22,6 +22,8 @@
 //     (원본 캔버스 모드는 다른 필드를 눌러도 앞 필드가 포커스를 쥐고 있다. 러스트 판은 나중에 포커스를 얻은 필드만 남긴다)
 //   - 포커스를 잃을 때 조합 중이던 글은 확정해 값에 넣는다. (브라우저가 DOM 입력에 하는 일과 같다)
 //   - 데스크탑 문맥 메뉴(오른쪽 단추)는 DOM 이 없어 캔버스에 그린다. 루트의 마지막 자식 노드로 만들어 위에 그린다. 웹은 원본처럼 DOM 메뉴다.
+//     DOM 입력을 직접 누르게 한 필드(use_direct_touch)는 원본에서 크롬이 띄우는 편집 칸 메뉴를 같은 항목과 단축키 글로 그린다. (ui/uiinputfieldmenu.rs)
+//   - 데스크탑 DOM 입력 필드는 원본 DOM 입력 칸처럼 되돌리기와 다시 하기를 한다. (Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y, 맥은 Cmd, 블링크의 묶음 규칙, TextEditBuffer)
 //   - 노드를 끄거나(set_active(false)) 지우면 tick 이 돌지 않아 포커스와 IME, 웹의 숨긴 <input> 이 함께 사라진다. (원본은 detach 해야 사라진다)
 //   - getRenderState 는 옮기지 않았다. (그리는 컴포넌트가 하나라 넘길 일이 없다)
 //==============================================================================
@@ -66,19 +68,75 @@ static NEXT_FOCUS_SERIAL: AtomicU64 = AtomicU64::new(1);
 pub type UIInputFieldEvent = Box<dyn FnMut(&mut UIInputField, &mut ComponentContext)>;
 
 //==============================================================================
-// 문맥 메뉴 항목. (원본 잘라내기 / 복사 / 붙여넣기)
+// 문맥 메뉴 항목. (원본 잘라내기 / 복사 / 붙여넣기, 그 밖은 크롬 편집 칸 메뉴의 항목)
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UIInputFieldMenuAction {
 	Cut,
 	Copy,
 	Paste,
+	// 실행 취소.
+	Undo,
+	// 다시 실행.
+	Redo,
+	// 일반 텍스트로 붙여넣기. (맥 붙여넣고 스타일 일치시킴, 글만 받는 칸이라 붙여넣기와 같다)
+	PasteAsPlainText,
+	// 전체 선택.
+	SelectAll,
+	// 운영체제 이모티콘 창.
+	Emoji,
+	// 쓰기 방향.
+	WritingDirectionDefault,
+	WritingDirectionLeftToRight,
+	WritingDirectionRightToLeft,
+	// 검사. (엔진 개발자 도구에서 이 필드의 노드를 고른다)
+	Inspect,
 }
+
+//==============================================================================
+// 쓰기 방향. (원본 DOM 입력 칸의 dir, 크롬 문맥 메뉴의 쓰기 방향이 바꾼다. 엔진이 그린 글은 원본처럼 그대로다)
+//==============================================================================
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UIInputFieldWritingDirection {
+	Default,
+	LeftToRight,
+	RightToLeft,
+}
+
+//==============================================================================
+// 되돌리기 묶음 종류. (블링크 TypingCommand 와 붙여넣기)
+//==============================================================================
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextEditKind {
+	// 글자 넣기. (열린 묶음이 있으면 종류를 가리지 않고 그 묶음에 붙고, 묶음은 글자 넣기가 된다)
+	InsertText,
+	// 뒤로 지우기. (열린 묶음이 뒤로 지우기일 때만 붙고, 아니면 새 묶음)
+	DeleteBackward,
+	// 앞으로 지우기. (열린 묶음이 앞으로 지우기일 때만 붙고, 아니면 새 묶음)
+	DeleteForward,
+	// 붙여넣기와 잘라내기. (늘 따로 한 묶음이고, 그 뒤 글자 넣기도 새 묶음)
+	Paste,
+}
+
+//==============================================================================
+// 되돌릴 때 돌아갈 값과 선택.
+//==============================================================================
+#[derive(Clone, Debug, Default)]
+struct TextEditSnapshot {
+	value: String,
+	selection_start: usize,
+	cursor_index: usize,
+}
+
+// 되돌리기 깊이. (블링크 undo_stack.cc 의 kMaximumUndoStackDepth)
+const MAXIMUM_UNDO_DEPTH: usize = 1000;
 
 //==============================================================================
 // 편집 버퍼. (값, 조합 글, 커서, 선택 시작. 원본 UIInputField 의 #value / #composition / #cursor_index / #selection_start 와 편집 함수)
 // - 자리는 문자 단위다. 커서와 선택 시작이 다르면 그 사이가 선택 영역이다. (커서가 앞일 수도 있다)
 // - max_length 는 원본 maxLength 처럼 UTF-16 단위다. (웹 DOM <input> 의 maxlength 와 같은 셈)
+// - 되돌리기와 다시 하기: 원본 DOM 입력 칸은 브라우저가 해 준다. 묶음은 블링크와 같다. (이어 친 글자는 한 번에, 커서를 옮기거나 선택을 바꾸면 끊긴다,
+//   새 편집은 다시 하기 목록을 지운다, 값을 코드로 넣으면 목록을 비운다) 편집하는 쪽이 고치기 전에 begin_edit 를 부른다.
 //==============================================================================
 #[derive(Clone, Debug, Default)]
 pub struct TextEditBuffer {
@@ -87,6 +145,9 @@ pub struct TextEditBuffer {
 	cursor_index: usize,
 	selection_start: usize,
 	max_length: usize,
+	undo_list: Vec<TextEditSnapshot>,
+	redo_list: Vec<TextEditSnapshot>,
+	open_edit_kind: Option<TextEditKind>,
 }
 
 impl TextEditBuffer {
@@ -105,6 +166,114 @@ impl TextEditBuffer {
 		self.truncate_to_max_length();
 		self.cursor_index = count_characters(&self.value);
 		self.selection_start = self.cursor_index;
+		self.undo_list.clear();
+		self.redo_list.clear();
+		self.open_edit_kind = None;
+	}
+
+	//==============================================================================
+	// 편집 시작 알리기. (고치기 전에 부른다. 새 묶음이면 지금 값을 되돌리기 목록에 쌓고 다시 하기 목록을 지운다)
+	//==============================================================================
+	pub fn begin_edit(&mut self, edit_kind: TextEditKind) {
+		match (self.open_edit_kind, edit_kind) {
+			(Some(_), TextEditKind::InsertText) => {
+				self.open_edit_kind = Some(TextEditKind::InsertText);
+				return;
+			}
+			(Some(TextEditKind::DeleteBackward), TextEditKind::DeleteBackward) | (Some(TextEditKind::DeleteForward), TextEditKind::DeleteForward) => {
+				return;
+			}
+			_ => {
+			}
+		}
+		self.undo_list.push(self.create_snapshot());
+		if self.undo_list.len() > MAXIMUM_UNDO_DEPTH {
+			self.undo_list.remove(0);
+		}
+		self.redo_list.clear();
+		self.open_edit_kind = if edit_kind == TextEditKind::Paste {
+			None
+		}
+		else {
+			Some(edit_kind)
+		};
+	}
+
+	//==============================================================================
+	// 열린 묶음 닫기. (다음 편집은 새 묶음)
+	//==============================================================================
+	pub fn close_edit_group(&mut self) {
+		self.open_edit_kind = None;
+	}
+
+	//==============================================================================
+	// 되돌릴 것이 있는지.
+	//==============================================================================
+	pub fn can_undo(&self) -> bool {
+		!self.undo_list.is_empty()
+	}
+
+	//==============================================================================
+	// 다시 할 것이 있는지.
+	//==============================================================================
+	pub fn can_redo(&self) -> bool {
+		!self.redo_list.is_empty()
+	}
+
+	//==============================================================================
+	// 되돌리기. (했으면 true)
+	//==============================================================================
+	pub fn undo(&mut self) -> bool {
+		self.open_edit_kind = None;
+		let snapshot = match self.undo_list.pop() {
+			Some(snapshot) => {
+				snapshot
+			}
+			None => {
+				return false;
+			}
+		};
+		self.redo_list.push(self.create_snapshot());
+		self.apply_snapshot(snapshot);
+		true
+	}
+
+	//==============================================================================
+	// 다시 하기. (했으면 true)
+	//==============================================================================
+	pub fn redo(&mut self) -> bool {
+		self.open_edit_kind = None;
+		let snapshot = match self.redo_list.pop() {
+			Some(snapshot) => {
+				snapshot
+			}
+			None => {
+				return false;
+			}
+		};
+		self.undo_list.push(self.create_snapshot());
+		self.apply_snapshot(snapshot);
+		true
+	}
+
+	//==============================================================================
+	// 지금 값과 선택.
+	//==============================================================================
+	fn create_snapshot(&self) -> TextEditSnapshot {
+		TextEditSnapshot {
+			value: self.value.clone(),
+			selection_start: self.selection_start,
+			cursor_index: self.cursor_index,
+		}
+	}
+
+	//==============================================================================
+	// 값과 선택 되돌려 놓기.
+	//==============================================================================
+	fn apply_snapshot(&mut self, snapshot: TextEditSnapshot) {
+		self.value = snapshot.value;
+		self.selection_start = snapshot.selection_start;
+		self.cursor_index = snapshot.cursor_index;
 	}
 
 	//==============================================================================
@@ -189,6 +358,7 @@ impl TextEditBuffer {
 		let character_count = count_characters(&self.value);
 		self.selection_start = selection_start.min(character_count);
 		self.cursor_index = cursor_index.min(character_count);
+		self.open_edit_kind = None;
 	}
 
 	//==============================================================================
@@ -295,6 +465,7 @@ impl TextEditBuffer {
 		if !is_selection_extended {
 			self.selection_start = self.cursor_index;
 		}
+		self.open_edit_kind = None;
 	}
 
 	//==============================================================================
@@ -303,6 +474,7 @@ impl TextEditBuffer {
 	pub fn select_all(&mut self) {
 		self.selection_start = 0;
 		self.cursor_index = count_characters(&self.value);
+		self.open_edit_kind = None;
 	}
 
 	//==============================================================================
@@ -386,6 +558,7 @@ pub struct UIInputField {
 	value_revision: u64,
 	context_menu_node_id: Option<NodeId>,
 	pending_menu_action: Option<UIInputFieldMenuAction>,
+	writing_direction: UIInputFieldWritingDirection,
 }
 
 impl UIInputField {
@@ -439,6 +612,7 @@ impl UIInputField {
 			value_revision: 0,
 			context_menu_node_id: None,
 			pending_menu_action: None,
+			writing_direction: UIInputFieldWritingDirection::LeftToRight,
 		}
 	}
 
@@ -510,6 +684,34 @@ impl UIInputField {
 	//==============================================================================
 	pub fn is_using_direct_touch(&self) -> bool {
 		self.use_direct_touch
+	}
+
+	//==============================================================================
+	// 쓰기 방향 설정. (크롬 문맥 메뉴의 쓰기 방향, 처음은 왼쪽에서 오른쪽)
+	//==============================================================================
+	pub fn set_writing_direction(&mut self, writing_direction: UIInputFieldWritingDirection) {
+		self.writing_direction = writing_direction;
+	}
+
+	//==============================================================================
+	// 쓰기 방향.
+	//==============================================================================
+	pub fn get_writing_direction(&self) -> UIInputFieldWritingDirection {
+		self.writing_direction
+	}
+
+	//==============================================================================
+	// 되돌릴 것이 있는지.
+	//==============================================================================
+	pub fn can_undo(&self) -> bool {
+		self.edit_buffer.can_undo()
+	}
+
+	//==============================================================================
+	// 다시 할 것이 있는지.
+	//==============================================================================
+	pub fn can_redo(&self) -> bool {
+		self.edit_buffer.can_redo()
 	}
 
 	//==============================================================================
@@ -850,9 +1052,33 @@ impl UIInputField {
 	// 선택을 글로 바꾸고 바뀜 이벤트 부르기. (원본 replace_selection)
 	//==============================================================================
 	pub fn replace_selection(&mut self, context: &mut ComponentContext, text: &str) {
+		self.replace_selection_with_edit(context, text, TextEditKind::InsertText);
+	}
+
+	//==============================================================================
+	// 선택을 글로 바꾸기. (되돌리기 묶음 종류와 함께)
+	//==============================================================================
+	fn replace_selection_with_edit(&mut self, context: &mut ComponentContext, text: &str, edit_kind: TextEditKind) {
+		self.edit_buffer.begin_edit(edit_kind);
 		self.edit_buffer.replace_selection(text);
 		self.bump_value_revision();
 		self.fire_change_event(context);
+	}
+
+	//==============================================================================
+	// 되돌리기나 다시 하기. (했으면 바뀜 이벤트)
+	//==============================================================================
+	fn apply_edit_history(&mut self, context: &mut ComponentContext, is_redo: bool) {
+		let is_changed = if is_redo {
+			self.edit_buffer.redo()
+		}
+		else {
+			self.edit_buffer.undo()
+		};
+		if is_changed {
+			self.bump_value_revision();
+			self.fire_change_event(context);
+		}
 	}
 
 	//==============================================================================
@@ -864,7 +1090,7 @@ impl UIInputField {
 		}
 		let selection_text = self.get_selection_text();
 		context.get_engine().write_clipboard_text(&selection_text);
-		self.replace_selection(context, "");
+		self.replace_selection_with_edit(context, "", TextEditKind::Paste);
 	}
 
 	//==============================================================================
@@ -900,7 +1126,7 @@ impl UIInputField {
 		let clipboard_text = context.get_engine().read_clipboard_text();
 		if let Some(clipboard_text) = clipboard_text {
 			if !clipboard_text.is_empty() {
-				self.replace_selection(context, &clipboard_text);
+				self.replace_selection_with_edit(context, &clipboard_text, TextEditKind::Paste);
 			}
 		}
 	}
@@ -957,6 +1183,7 @@ impl UIInputField {
 		if composition.is_empty() || self.is_dom_synchronized() {
 			return None;
 		}
+		self.edit_buffer.begin_edit(TextEditKind::InsertText);
 		self.edit_buffer.replace_selection(&composition);
 		self.bump_value_revision();
 		Some(composition)
@@ -1074,7 +1301,7 @@ impl UIInputField {
 			}
 			TextInputEventKind::Paste(text) => {
 				if !text.is_empty() {
-					self.replace_selection(context, &text);
+					self.replace_selection_with_edit(context, &text, TextEditKind::Paste);
 				}
 				self.reset_cursor_blink();
 			}
@@ -1126,15 +1353,27 @@ impl UIInputField {
 				self.paste(context);
 			}
 			TextInputKey::Backspace => {
+				if self.edit_buffer.has_selection() || cursor_index > 0 {
+					self.edit_buffer.begin_edit(TextEditKind::DeleteBackward);
+				}
 				if self.edit_buffer.delete_backward() {
 					self.bump_value_revision();
 					self.fire_change_event(context);
 				}
 			}
 			TextInputKey::Delete => {
+				if self.edit_buffer.has_selection() || cursor_index < count_characters(self.edit_buffer.get_text()) {
+					self.edit_buffer.begin_edit(TextEditKind::DeleteForward);
+				}
 				if self.edit_buffer.delete_forward() {
 					self.bump_value_revision();
 					self.fire_change_event(context);
+				}
+			}
+			TextInputKey::Undo | TextInputKey::Redo => {
+				// 원본 캔버스 모드에는 되돌리기가 없고, DOM 입력 칸은 브라우저가 한다. (웹은 숨긴 <input> 이 해서 값으로 온다)
+				if self.use_dom_input && !self.is_dom_synchronized() {
+					self.apply_edit_history(context, key == TextInputKey::Redo);
 				}
 			}
 			TextInputKey::Left => {
@@ -1170,8 +1409,36 @@ impl UIInputField {
 			UIInputFieldMenuAction::Copy => {
 				self.copy(context.get_engine());
 			}
-			UIInputFieldMenuAction::Paste => {
+			UIInputFieldMenuAction::Paste | UIInputFieldMenuAction::PasteAsPlainText => {
 				self.paste(context);
+			}
+			UIInputFieldMenuAction::Undo => {
+				self.apply_edit_history(context, false);
+			}
+			UIInputFieldMenuAction::Redo => {
+				self.apply_edit_history(context, true);
+			}
+			UIInputFieldMenuAction::SelectAll => {
+				self.select_all();
+			}
+			UIInputFieldMenuAction::Emoji => {
+				#[cfg(not(target_arch = "wasm32"))]
+				{
+					crate::platform::desktop::emojipanel::show_emoji_panel();
+				}
+			}
+			UIInputFieldMenuAction::WritingDirectionDefault => {
+				self.writing_direction = UIInputFieldWritingDirection::Default;
+			}
+			UIInputFieldMenuAction::WritingDirectionLeftToRight => {
+				self.writing_direction = UIInputFieldWritingDirection::LeftToRight;
+			}
+			UIInputFieldMenuAction::WritingDirectionRightToLeft => {
+				self.writing_direction = UIInputFieldWritingDirection::RightToLeft;
+			}
+			UIInputFieldMenuAction::Inspect => {
+				let node_id = context.get_node_id();
+				context.get_engine().request_dev_tools_inspect(node_id);
 			}
 		}
 	}
@@ -1181,6 +1448,13 @@ impl UIInputField {
 	//==============================================================================
 	fn show_context_menu(&mut self, context: &mut ComponentContext, view_position: Vector2) {
 		self.hide_context_menu(context);
+		#[cfg(not(target_arch = "wasm32"))]
+		{
+			if self.use_direct_touch && self.use_dom_input {
+				self.show_browser_context_menu(context, view_position);
+				return;
+			}
+		}
 		let owner_node_id = context.get_node_id();
 		let is_selection_available = self.has_selection();
 		let node_tree = context.get_node_tree_mut();
@@ -1193,6 +1467,29 @@ impl UIInputField {
 		menu_node.set_local_position(local_position);
 		menu_node.set_content_size(Vector2::create(CONTEXT_MENU_WIDTH, CONTEXT_MENU_PADDING_Y * 2.0 + CONTEXT_MENU_ITEM_HEIGHT * CONTEXT_MENU_ITEM_LIST.len() as f32));
 		node_tree.add_component(menu_id, UIInputFieldContextMenu::new(owner_node_id, is_selection_available));
+		self.context_menu_node_id = Some(menu_id);
+	}
+
+	//==============================================================================
+	// 크롬 편집 칸 메뉴 열기. (데스크탑, DOM 입력을 직접 누르게 한 필드. 원본은 크롬이 띄운다)
+	//==============================================================================
+	#[cfg(not(target_arch = "wasm32"))]
+	fn show_browser_context_menu(&mut self, context: &mut ComponentContext, view_position: Vector2) {
+		let field_state = crate::ui::uiinputfieldmenu::BrowserMenuFieldState {
+			can_undo: self.edit_buffer.can_undo(),
+			can_redo: self.edit_buffer.can_redo(),
+			has_selection: self.edit_buffer.has_selection(),
+			has_clipboard_text: context.get_engine().read_clipboard_text().map(|clipboard_text| !clipboard_text.is_empty()).unwrap_or(false),
+			is_empty: self.edit_buffer.get_text().is_empty(),
+			writing_direction: self.writing_direction,
+		};
+		let entry_list = crate::ui::uiinputfieldmenu::build_browser_menu(&field_state);
+		let view_manager = context.get_engine().get_view_manager();
+		let view_size = view_manager.get_view_size();
+		let canvas_native_size = view_manager.get_canvas_native_size();
+		let view_scale = Vector2::create(canvas_native_size.x / view_size.x.max(1.0), canvas_native_size.y / view_size.y.max(1.0));
+		let owner_node_id = context.get_node_id();
+		let menu_id = crate::ui::uiinputfieldmenu::create_browser_menu_node(context.get_node_tree_mut(), owner_node_id, view_position, view_scale, view_size, entry_list);
 		self.context_menu_node_id = Some(menu_id);
 	}
 
@@ -1222,7 +1519,14 @@ impl UIInputField {
 		let is_inside = is_node_visible_in_hierarchy(node_tree, node_id) && is_view_position_inside_node(node_tree, node_id, view_input_position);
 		let is_inside_menu = match self.context_menu_node_id {
 			Some(context_menu_node_id) => {
-				is_view_position_inside_node(node_tree, context_menu_node_id, view_input_position)
+				#[cfg(not(target_arch = "wasm32"))]
+				{
+					crate::ui::uiinputfieldmenu::is_view_position_inside_menu(node_tree, context_menu_node_id, view_input_position)
+				}
+				#[cfg(target_arch = "wasm32")]
+				{
+					is_view_position_inside_node(node_tree, context_menu_node_id, view_input_position)
+				}
 			}
 			None => {
 				false
@@ -1595,7 +1899,7 @@ impl UIInputFieldContextMenu {
 			UIInputFieldMenuAction::Cut | UIInputFieldMenuAction::Copy => {
 				self.is_selection_available
 			}
-			UIInputFieldMenuAction::Paste => {
+			_ => {
 				true
 			}
 		}
@@ -1791,6 +2095,106 @@ mod tests {
 	fn run_frame(node_tree: &mut NodeTree, engine: &mut Engine) {
 		node_tree.tick(engine, 1.0 / 60.0);
 		engine.get_input_manager_mut().get_text_input_mut().finish_frame();
+	}
+
+	//==============================================================================
+	// 되돌리기 묶음: 이어 친 글자는 한 번에, 뒤로 지우기는 새 묶음이고 그 뒤 친 글자는 그 묶음에 붙는다, 붙여넣기는 따로, 커서를 옮기면 끊긴다. (블링크 TypingCommand)
+	//==============================================================================
+	#[test]
+	fn edit_buffer_undo_groups_like_blink() {
+		let mut edit_buffer = TextEditBuffer::new();
+		for character in ["a", "b", "c"] {
+			edit_buffer.begin_edit(TextEditKind::InsertText);
+			edit_buffer.replace_selection(character);
+		}
+		for _ in 0..2 {
+			edit_buffer.begin_edit(TextEditKind::DeleteBackward);
+			edit_buffer.delete_backward();
+		}
+		edit_buffer.begin_edit(TextEditKind::InsertText);
+		edit_buffer.replace_selection("d");
+		assert_eq!(edit_buffer.get_text(), "ad");
+		assert!(edit_buffer.undo());
+		assert_eq!(edit_buffer.get_text(), "abc");
+		assert!(edit_buffer.undo());
+		assert_eq!(edit_buffer.get_text(), "");
+		assert!(!edit_buffer.undo());
+		assert!(edit_buffer.redo());
+		assert_eq!(edit_buffer.get_text(), "abc");
+		assert!(edit_buffer.redo());
+		assert_eq!(edit_buffer.get_text(), "ad");
+		assert!(!edit_buffer.can_redo());
+
+		// 커서를 옮기면 끊기고, 붙여넣기는 따로 한 묶음이며 새 편집은 다시 하기를 지운다.
+		edit_buffer.move_cursor(0, false);
+		edit_buffer.begin_edit(TextEditKind::InsertText);
+		edit_buffer.replace_selection("x");
+		edit_buffer.begin_edit(TextEditKind::Paste);
+		edit_buffer.replace_selection("PP");
+		edit_buffer.begin_edit(TextEditKind::InsertText);
+		edit_buffer.replace_selection("y");
+		assert_eq!(edit_buffer.get_text(), "xPPyad");
+		assert!(edit_buffer.undo());
+		assert_eq!(edit_buffer.get_text(), "xPPad");
+		assert!(edit_buffer.undo());
+		assert_eq!(edit_buffer.get_text(), "xad");
+		assert!(edit_buffer.undo());
+		assert_eq!(edit_buffer.get_text(), "ad");
+		edit_buffer.begin_edit(TextEditKind::InsertText);
+		edit_buffer.replace_selection("z");
+		assert!(!edit_buffer.can_redo());
+		edit_buffer.set_text("reset");
+		assert!(!edit_buffer.can_undo());
+	}
+
+	//==============================================================================
+	// DOM 입력 필드의 되돌리기 키. (캔버스 모드는 원본처럼 되돌리지 않는다)
+	//==============================================================================
+	#[test]
+	fn undo_keys_in_dom_input_field() {
+		let mut engine = Engine::new(EngineConfiguration::new());
+		let (mut node_tree, field_id) = create_field_tree();
+		get_field(&mut node_tree, field_id).focus();
+		for character in ["h", "i"] {
+			push_event(&mut engine, TextInputEventKind::Commit(String::from(character)));
+		}
+		run_frame(&mut node_tree, &mut engine);
+		assert_eq!(get_field(&mut node_tree, field_id).get_text(), "hi");
+		assert!(get_field(&mut node_tree, field_id).can_undo());
+		push_event(&mut engine, TextInputEventKind::Key { key: TextInputKey::Undo, is_shift: false });
+		run_frame(&mut node_tree, &mut engine);
+		assert_eq!(get_field(&mut node_tree, field_id).get_text(), "");
+		push_event(&mut engine, TextInputEventKind::Key { key: TextInputKey::Redo, is_shift: true });
+		run_frame(&mut node_tree, &mut engine);
+		assert_eq!(get_field(&mut node_tree, field_id).get_text(), "hi");
+		get_field(&mut node_tree, field_id).set_use_dom_input(false);
+		push_event(&mut engine, TextInputEventKind::Key { key: TextInputKey::Undo, is_shift: false });
+		run_frame(&mut node_tree, &mut engine);
+		assert_eq!(get_field(&mut node_tree, field_id).get_text(), "hi");
+	}
+
+	//==============================================================================
+	// 직접 누르는 DOM 입력 필드의 오른쪽 클릭은 크롬 편집 칸 메뉴를 연다. 메뉴의 검사는 개발자 도구 부탁을 남긴다.
+	//==============================================================================
+	#[cfg(not(target_arch = "wasm32"))]
+	#[test]
+	fn direct_touch_field_opens_browser_menu() {
+		let mut engine = Engine::new(EngineConfiguration::new());
+		let (mut node_tree, field_id) = create_field_tree();
+		let root_id = node_tree.get_root_id();
+		get_field(&mut node_tree, field_id).set_use_direct_touch(true);
+		engine.get_input_manager_mut().get_text_input_mut().set_context_menu_request_position(Some(Vector2::create(200.0, 120.0)));
+		run_frame(&mut node_tree, &mut engine);
+		let menu_id = node_tree.find_child_by_name(root_id, "uiInputFieldBrowserMenu").expect("browser menu");
+		assert!(node_tree.find_child_by_name(root_id, "uiInputFieldContextMenu").is_none());
+		assert!(node_tree[menu_id].get_content_size().x >= 160.0);
+		get_field(&mut node_tree, field_id).request_menu_action(UIInputFieldMenuAction::Inspect);
+		get_field(&mut node_tree, field_id).request_menu_action(UIInputFieldMenuAction::WritingDirectionRightToLeft);
+		run_frame(&mut node_tree, &mut engine);
+		assert_eq!(get_field(&mut node_tree, field_id).get_writing_direction(), UIInputFieldWritingDirection::RightToLeft);
+		get_field(&mut node_tree, field_id).request_menu_action(UIInputFieldMenuAction::Inspect);
+		run_frame(&mut node_tree, &mut engine);
+		assert_eq!(engine.take_dev_tools_inspect_request(&node_tree), Some(field_id));
 	}
 
 	//==============================================================================

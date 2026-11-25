@@ -529,6 +529,11 @@ impl DevTools {
 	// 갱신. (F2 토글, 트리 목록, 터치)
 	//==============================================================================
 	pub fn tick(&mut self, engine: &mut Engine, node_tree: &mut NodeTree, _time_delta: f32) {
+		// 검사 부탁. (입력 필드 문맥 메뉴의 검사, 크롬이 개발자 도구를 열어 그 요소를 고르는 자리)
+		if let Some(inspect_node_id) = engine.take_dev_tools_inspect_request(node_tree) {
+			self.inspect_node(engine, node_tree, inspect_node_id);
+		}
+
 		let is_key_f2 = engine.get_input_manager().is_key_pressed(KeyCode::F2);
 
 		// F2 를 막 누름.
@@ -576,6 +581,22 @@ impl DevTools {
 
 		// 누름이 부탁한 질문은 원본처럼 같은 프레임에 띄운다.
 		self.process_local_storage_dialog(engine);
+	}
+
+	//==============================================================================
+	// 노드 검사. (보이고, Node Hierarchy 탭으로, 조상을 펼치고 그 노드를 고른다)
+	//==============================================================================
+	pub fn inspect_node(&mut self, engine: &Engine, node_tree: &NodeTree, node_id: NodeId) {
+		if !self.is_visible {
+			self.set_visible(engine, true);
+		}
+		self.set_active_tab(1);
+		let mut ancestor_id = node_tree.get_parent_id(node_id);
+		while let Some(current_id) = ancestor_id {
+			self.expanded_node_ids.insert(current_id);
+			ancestor_id = node_tree.get_parent_id(current_id);
+		}
+		self.set_selected_node(Some(node_id));
 	}
 
 	//==============================================================================
@@ -2644,6 +2665,24 @@ mod tests {
 	//==============================================================================
 	// F2 로 오른쪽 아래에 보이고, 트리 줄을 눌러 고르고 펼치고, A, G 칸으로 액티브와 기즈모를 바꾼다.
 	//==============================================================================
+	#[test]
+	fn inspect_request_opens_and_selects_node() {
+		let storage_directory_path = use_temporary_storage_directory("inspect");
+		let mut engine = create_test_engine();
+		let (mut node_tree, [root_id, _a_id, _b_id, _c_id, d_id, _e_id]) = create_test_tree();
+		let mut dev_tools = DevTools::new();
+		dev_tools.set_root_nodes(vec![root_id]);
+		dev_tools.set_active_tab(3);
+		engine.request_dev_tools_inspect(d_id);
+		dev_tools.tick(&mut engine, &mut node_tree, 0.016);
+		assert!(dev_tools.is_visible());
+		assert_eq!(dev_tools.get_active_tab(), 1);
+		assert_eq!(dev_tools.get_selected_node(), Some(d_id));
+		let parent_id = node_tree.get_parent_id(d_id).expect("parent");
+		assert!(dev_tools.is_node_expanded(parent_id));
+		let _ = std::fs::remove_dir_all(&storage_directory_path);
+	}
+
 	#[test]
 	fn tick_toggles_with_f2_and_tree_press_changes_nodes() {
 		let storage_directory_path = use_temporary_storage_directory("tick");

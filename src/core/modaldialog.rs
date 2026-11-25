@@ -11,7 +11,7 @@
 //   - 글(제목, 확인, 취소)은 브라우저 화면 언어 자리인 시스템 언어로 고른다. (core/browseruitext.rs)
 //   - 떠 있는 동안 원본에서 자바스크립트가 멈추듯 씬을 갱신하지 않고(그리기는 멈춘 화면 그대로), 입력은 창만 받는다. 닫히면 눌린 키와 단추를 비운다.
 //     (원본은 창이 포커스를 가져가 페이지에 키가 오지 않는다)
-//   - 입력 칸은 글 입력 줄(core/textinput.rs)에서 IME 와 편집 키를 받는다. 누르고 끌어 커서와 선택을 정한다.
+//   - 입력 칸은 글 입력 줄(core/textinput.rs)에서 IME 와 편집 키를 받는다. 누르고 끌어 커서와 선택을 정한다. 되돌리기와 다시 하기도 된다. (크롬 Textfield 처럼)
 //   - 여러 개를 한 프레임에 부르면 차례로 띄운다. (원본은 창이 떠 있는 동안 자바스크립트가 멈춰 겹쳐 부를 수 없다)
 // - 원본 prompt 는 답할 때까지 막고 값을 돌려준다. 러스트 판은 엔진 루프를 막을 수 없어 ModalDialogHandle 을 돌려주고, 답하면 끝난다. (is_finished)
 //   끝난 뒤 부를 함수는 set_callback 으로 건다. await 꼴은 async 를 넣는 작업이 맡는다.
@@ -198,7 +198,7 @@ mod desktop_dialog {
 	use crate::core::graphic::{Graphic, TextAlign, TextBaseline};
 	use crate::core::inputmanager::KeyCode;
 	use crate::core::textinput::{convert_character_index_to_byte_index, count_characters, TextInputEventKind, TextInputFieldState, TextInputKey};
-	use crate::ui::uiinputfield::TextEditBuffer;
+	use crate::ui::uiinputfield::{TextEditBuffer, TextEditKind};
 
 	// 글 입력 줄에서 질문 창 입력 칸을 가리키는 id. (입력 필드 id 는 1 부터 늘고, DevTools 는 u64::MAX 를 쓴다)
 	const DIALOG_FIELD_ID: u64 = u64::MAX - 1;
@@ -390,6 +390,7 @@ mod desktop_dialog {
 				TextInputEventKind::Commit(text) | TextInputEventKind::Paste(text) => {
 					let printable_text: String = text.chars().filter(|character| !character.is_control()).collect();
 					if self.kind == ModalDialogKind::Prompt && !printable_text.is_empty() {
+						self.edit_buffer.begin_edit(TextEditKind::InsertText);
 						self.edit_buffer.replace_selection(&printable_text);
 						self.bump_value_revision();
 					}
@@ -434,19 +435,27 @@ mod desktop_dialog {
 				TextInputKey::Cut => {
 					if self.edit_buffer.has_selection() {
 						engine.write_clipboard_text(&self.edit_buffer.get_selection_text());
+						self.edit_buffer.begin_edit(TextEditKind::Paste);
 						self.edit_buffer.replace_selection("");
 					}
 				}
 				TextInputKey::Paste => {
 					if let Some(clipboard_text) = engine.read_clipboard_text() {
 						let printable_text: String = clipboard_text.chars().filter(|character| !character.is_control()).collect();
+						self.edit_buffer.begin_edit(TextEditKind::Paste);
 						self.edit_buffer.replace_selection(&printable_text);
 					}
 				}
 				TextInputKey::Backspace => {
+					if self.edit_buffer.has_selection() || cursor_index > 0 {
+						self.edit_buffer.begin_edit(TextEditKind::DeleteBackward);
+					}
 					self.edit_buffer.delete_backward();
 				}
 				TextInputKey::Delete => {
+					if self.edit_buffer.has_selection() || cursor_index < character_count {
+						self.edit_buffer.begin_edit(TextEditKind::DeleteForward);
+					}
 					self.edit_buffer.delete_forward();
 				}
 				TextInputKey::Left => {
@@ -476,6 +485,12 @@ mod desktop_dialog {
 				}
 				TextInputKey::End => {
 					self.edit_buffer.move_cursor(character_count, is_shift);
+				}
+				TextInputKey::Undo => {
+					self.edit_buffer.undo();
+				}
+				TextInputKey::Redo => {
+					self.edit_buffer.redo();
 				}
 				TextInputKey::Enter | TextInputKey::Tab => {
 				}

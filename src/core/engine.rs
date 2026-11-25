@@ -240,6 +240,8 @@ pub struct Engine {
 	// 떠 있거나 기다리는 질문 창. (데스크탑, 맨 앞 것이 떠 있다. 웹은 브라우저가 띄운다)
 	#[cfg(not(target_arch = "wasm32"))]
 	modal_dialog_list: std::collections::VecDeque<crate::core::modaldialog::ModalDialog>,
+	// 개발자 도구에서 고를 노드. (크롬 문맥 메뉴의 검사 자리, 그 노드를 가진 씬의 DevTools 가 꺼낸다)
+	dev_tools_inspect_request: std::cell::Cell<Option<crate::core::node::nodetree::NodeId>>,
 }
 
 impl Engine {
@@ -276,7 +278,27 @@ impl Engine {
 			page_event_listener_list: RefCell::new(Vec::new()),
 			#[cfg(not(target_arch = "wasm32"))]
 			modal_dialog_list: std::collections::VecDeque::new(),
+			dev_tools_inspect_request: std::cell::Cell::new(None),
 		}
+	}
+
+	//==============================================================================
+	// 개발자 도구로 노드 검사하기 부탁. (크롬 문맥 메뉴의 검사 자리. 그 노드를 가진 씬의 DevTools 가 다음 tick 에 열고 고른다)
+	//==============================================================================
+	pub fn request_dev_tools_inspect(&self, node_id: crate::core::node::nodetree::NodeId) {
+		self.dev_tools_inspect_request.set(Some(node_id));
+	}
+
+	//==============================================================================
+	// 검사 부탁 꺼내기. (그 노드가 node_tree 에 있을 때만 꺼낸다)
+	//==============================================================================
+	pub(crate) fn take_dev_tools_inspect_request(&self, node_tree: &crate::core::node::nodetree::NodeTree) -> Option<crate::core::node::nodetree::NodeId> {
+		let node_id = self.dev_tools_inspect_request.get()?;
+		if !node_tree.contains(node_id) {
+			return None;
+		}
+		self.dev_tools_inspect_request.set(None);
+		Some(node_id)
 	}
 
 	//==============================================================================
