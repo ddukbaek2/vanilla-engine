@@ -43,6 +43,8 @@ const SECTION_RETURNS: &str = "# 돌려줌";
 const SECTION_EXAMPLES: &str = "# 예제";
 /// 멤버 종류. (원본 자료와 같은 이름)
 const MEMBER_KINDS: [&str; 5] = ["method", "property", "constructor", "static", "field"];
+/// 원본의 여러 클래스를 합친 타입이 멤버의 짝을 더 찾아볼 원본 클래스. (ARCHITECTURE.md '원본과의 대응': 씬 매니저는 엔진과 씬에, 노드 셋은 NodeTree 와 WorldNode 에, 터치 레이캐스터는 씬에 합쳤다)
+const COUNTERPART_CLASS_ALIASES: [(&str, &[&str]); 3] = [("Engine", &["SceneManager"]), ("SceneBase", &["SceneManager", "TouchRaycaster"]), ("NodeTree", &["WorldNode", "TransformNode", "ComponentNode", "Node"])];
 /// 클래스 자리에 두는 것의 종류. (러스트 struct, trait, 꼴 별칭)
 const CLASS_KINDS: [&str; 3] = ["struct", "trait", "type"];
 
@@ -1594,6 +1596,7 @@ struct CounterpartMember {
 //==============================================================================
 struct CounterpartIndex {
 	classes: HashMap<String, (String, Vec<CounterpartMember>)>,
+	parents: HashMap<String, String>,
 	enums: HashMap<String, (String, Vec<String>)>,
 	functions: HashMap<String, Vec<(String, String, String)>>,
 }
@@ -1604,6 +1607,7 @@ struct CounterpartIndex {
 fn build_counterpart_index(document: &Value) -> CounterpartIndex {
 	let mut index = CounterpartIndex {
 		classes: HashMap::new(),
+		parents: HashMap::new(),
 		enums: HashMap::new(),
 		functions: HashMap::new(),
 	};
@@ -1615,6 +1619,9 @@ fn build_counterpart_index(document: &Value) -> CounterpartIndex {
 				name: member["name"].as_str().unwrap_or("").to_string(),
 				kind: member["kind"].as_str().unwrap_or("").to_string(),
 			}).collect();
+			if let Some(parent) = class["extends"].as_str() {
+				index.parents.entry(class_name.clone()).or_insert(parent.to_string());
+			}
 			index.classes.entry(class_name).or_insert((module_name.clone(), members));
 		}
 		for entry in module["enums"].as_array().into_iter().flatten() {
@@ -1642,21 +1649,38 @@ fn read_module_stem(module_name: &str) -> &str {
 /// 멤버의 짝 찾기. (같은 이름의 camelCase, 밑줄과 대소문자를 뺀 이름, get_ / set_ / is_ / has_ 를 뗀 속성과 필드, new 와 constructor)
 //==============================================================================
 fn find_counterpart_member(member: &Member, candidates: &[CounterpartMember]) -> Option<String> {
-	if member.kind == "constructor" {
+	if let Some(found) = find_counterpart_member_by_name(member.kind, &member.name, candidates) {
+		return Some(found);
+	}
+	for suffix in ["_mut", "_async"] {
+		if let Some(stripped) = member.name.strip_suffix(suffix) {
+			if let Some(found) = find_counterpart_member_by_name(member.kind, stripped, candidates) {
+				return Some(found);
+			}
+		}
+	}
+	None
+}
+
+//==============================================================================
+/// 이름 하나로 멤버의 짝 찾기.
+//==============================================================================
+fn find_counterpart_member_by_name(kind: &str, member_name: &str, candidates: &[CounterpartMember]) -> Option<String> {
+	if kind == "constructor" {
 		if let Some(found) = candidates.iter().find(|candidate| candidate.kind == "constructor") {
 			return Some(found.name.clone());
 		}
 	}
-	let camel = convert_snake_to_camel(&member.name);
+	let camel = convert_snake_to_camel(member_name);
 	if let Some(found) = candidates.iter().find(|candidate| candidate.name == camel) {
 		return Some(found.name.clone());
 	}
-	let normalized = normalize_name(&member.name);
+	let normalized = normalize_name(member_name);
 	if let Some(found) = candidates.iter().find(|candidate| normalize_name(&candidate.name) == normalized) {
 		return Some(found.name.clone());
 	}
 	for prefix in ["get_", "set_", "is_", "has_"] {
-		if let Some(rest) = member.name.strip_prefix(prefix) {
+		if let Some(rest) = member_name.strip_prefix(prefix) {
 			let normalized_rest = normalize_name(rest);
 			if let Some(found) = candidates.iter().find(|candidate| (candidate.kind == "property" || candidate.kind == "field") && normalize_name(&candidate.name) == normalized_rest) {
 				return Some(found.name.clone());
@@ -1693,6 +1717,13 @@ fn build_counterpart_items(modules: &[ModuleEntry], counterpart_document: &Value
 	for module in modules {
 		for class in &module.classes {
 			let base_name = class.name.strip_suffix("Base").unwrap_or(&class.name).to_string();
+			let alias_primary = COUNTERPART_CLASS_ALIASES.iter().find(|(name, _)| *name == class.name).and_then(|(_, aliases)| aliases.first()).map(|alias| alias.to_string()).unwrap_or_default();
+			let base_name = if index.classes.contains_key(&class.name) || index.classes.contains_key(&base_name) {
+				base_name
+			}
+			else {
+				alias_primary
+			};
 			if let Some((other_module, other_members)) = index.classes.get(&class.name).or_else(|| index.classes.get(&base_name)) {
 				let other_class_name = if index.classes.contains_key(&class.name) {
 					class.name.clone()
@@ -1704,8 +1735,34 @@ fn build_counterpart_items(modules: &[ModuleEntry], counterpart_document: &Value
 					push_pair(create_key(&module.name, &class.name, ""), create_key(other_module, &other_class_name, ""));
 				}
 				for member in &class.members {
-					match find_counterpart_member(member, other_members) {
-						Some(other_name) => push_pair(create_key(&module.name, &class.name, &member.name), create_key(other_module, &other_class_name, &other_name)),
+					let mut found: Option<(String, String, String)> = find_counterpart_member(member, other_members).map(|other_name| (other_module.clone(), other_class_name.clone(), other_name));
+					let mut parent_name = index.parents.get(&other_class_name).cloned();
+					let mut depth = 0;
+					while found.is_none() && depth < 8 {
+						let parent = match parent_name {
+							Some(parent) => parent,
+							None => break,
+						};
+						if let Some((parent_module, parent_members)) = index.classes.get(&parent) {
+							found = find_counterpart_member(member, parent_members).map(|other_name| (parent_module.clone(), parent.clone(), other_name));
+						}
+						parent_name = index.parents.get(&parent).cloned();
+						depth += 1;
+					}
+					if found.is_none() {
+						if let Some((_, aliases)) = COUNTERPART_CLASS_ALIASES.iter().find(|(name, _)| *name == class.name) {
+							for alias in aliases.iter() {
+								if let Some((alias_module, alias_members)) = index.classes.get(*alias) {
+									found = find_counterpart_member(member, alias_members).map(|other_name| (alias_module.clone(), alias.to_string(), other_name));
+								}
+								if found.is_some() {
+									break;
+								}
+							}
+						}
+					}
+					match found {
+						Some((found_module, found_class, other_name)) => push_pair(create_key(&module.name, &class.name, &member.name), create_key(&found_module, &found_class, &other_name)),
 						None => unmatched.push(format!("{}::{}", class.name, member.name)),
 					}
 				}
