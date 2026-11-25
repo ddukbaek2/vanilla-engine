@@ -74,7 +74,7 @@ impl ToonPostProcess {
 	// 생성. (화면 픽셀 크기)
 	//==============================================================================
 	pub fn new(gl: &glow::Context, width: i32, height: i32) -> Result<ToonPostProcess, String> {
-		let options = RenderTargetOptions { color_attachment_count: 1, use_float_color: true, use_depth_texture: false };
+		let options = RenderTargetOptions { color_attachment_count: 1, use_float_color: true, use_depth_texture: false, ..RenderTargetOptions::default() };
 		let scene_render_target = RenderTarget::new(gl, width.max(1), height.max(1), true, Some(options))?;
 		let mut bloom_effect = BloomEffect::new(gl)?;
 		bloom_effect.resize(gl, width.max(1), height.max(1))?;
