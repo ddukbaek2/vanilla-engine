@@ -3,9 +3,11 @@
 // - 원본은 HTMLImageElement 에 src 를 넣고 onload 를 기다린다.
 //   러스트 판은 엔진에게 바이트를 부탁하고, 다 오면 처음 get_image 할 때 풀어서 Image 로 만든다. (Image::load_from_memory 의 형식, 웹은 받을 때 브라우저가 푼 그림을 손잡이에서 쓴다)
 //   AssetLoader 로 받은 것은 다 받았을 때 이미 풀어 둔 그림(손잡이의 get_decoded_image)을 그대로 쓴다. (풀지 못했으면 손잡이가 실패다)
+// - load, load_from_bytes 는 원본처럼 await 할 수 있는 읽기 손잡이를 돌려준다. await 는 원본 img.onload 처럼 풀기까지 끝나야 끝나고,
+//   풀지 못하면 실패(원본 onerror 의 reject)로 끝난다. 푼 그림은 손잡이에 담겨 get_image 가 다시 풀지 않는다.
 //==============================================================================
 use crate::base::vector2::Vector2;
-use crate::core::asset::{Asset, AssetBase, AssetType};
+use crate::core::asset::{Asset, AssetBase, AssetLoadHandle, AssetType};
 use crate::core::engine::Engine;
 use crate::core::image::Image;
 use std::rc::Rc;
@@ -32,19 +34,23 @@ impl ImageAsset {
 	}
 
 	//==============================================================================
-	// 읽기 요청. (원본 load)
+	// 읽기 요청. (원본 load, await 할 수 있는 읽기 손잡이를 돌려준다. 풀기까지 끝나야 끝난다)
 	//==============================================================================
-	pub fn load(&mut self, engine: &Engine, asset_path: &str) {
-		self.asset_base.request_load(engine, asset_path);
+	pub fn load(&mut self, engine: &Engine, asset_path: &str) -> AssetLoadHandle {
+		let load_handle = self.asset_base.request_load(engine, asset_path);
+		load_handle.request_image_decode();
+		load_handle
 	}
 
 	//==============================================================================
-	// 이미 가진 바이트로 읽기.
+	// 이미 가진 바이트로 읽기. (원본 loadFromBytes, await 할 수 있는 읽기 손잡이를 돌려준다. 풀지 못하면 실패로 끝난다)
 	//==============================================================================
-	pub fn load_from_bytes(&mut self, asset_path: &str, bytes: Vec<u8>) {
+	pub fn load_from_bytes(&mut self, asset_path: &str, bytes: Vec<u8>) -> AssetLoadHandle {
 		self.image = None;
 		self.is_decode_failed = false;
-		self.asset_base.load_from_bytes(asset_path, bytes);
+		let load_handle = self.asset_base.load_from_bytes(asset_path, bytes);
+		load_handle.request_image_decode();
+		load_handle
 	}
 
 	//==============================================================================

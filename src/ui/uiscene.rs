@@ -491,6 +491,9 @@ macro_rules! ui_scene {
 				if $crate::ui::uiscene::UIScene::get_ui_scene_base_mut(self).tick(engine, time_delta) {
 					$crate::ui::uiscene::UIScene::layout(self, engine);
 				}
+				if let Some(screen_fade_dark_starter) = $crate::ui::uiscene::UIScene::get_ui_scene_base_mut(self).get_game_scene_base_mut().take_screen_fade_dark_starter() {
+					screen_fade_dark_starter.start(self, engine);
+				}
 				$crate::ui::uiscene::UIScene::tick(self, engine, time_delta);
 			}
 

@@ -1,8 +1,9 @@
 //==============================================================================
 // 애셋.
-// - 원본은 new ImageAsset() 뒤에 await asset.load(경로) 로 읽는다. 러스트 판은 load(engine, 경로) 가 읽기를 요청하고,
-//   엔진 작업(Engine::spawn_task, spawn_scene_task) 안에서 wait_for_load().await 로 다 읽히기를 기다린다. (원본 await 자리)
-//   요청하면 AssetLoadHandle 이 생기고, 바이트가 다 오면 상태가 loaded 가 된다. 손잡이도 그대로 await 할 수 있다. (IntoFuture)
+// - 원본은 new ImageAsset() 뒤에 await asset.load(경로) 로 읽는다. 러스트 판도 load(engine, 경로) 가 읽기를 요청하고 읽기 손잡이(AssetLoadHandle)를
+//   돌려주며, 손잡이는 애셋을 빌리지 않는 나눠 든 상태라 엔진 작업 안에서 그대로 await 한다. (scene_context.with(|씬, 엔진| 씬.애셋.load(엔진, 경로)).await)
+//   바이트가 다 오면 상태가 loaded 가 되고, await 는 읽은 바이트나 실패 까닭(원본 reject 자리)으로 끝난다. 이미 load 한 애셋은 wait_for_load().await 로도 기다린다.
+//   그림 손잡이(ImageAsset::load)는 원본 img.onload 처럼 풀기까지 끝나야 끝나고, 풀지 못하면 실패로 끝난다.
 //   데스크탑은 요청하는 자리에서 파일을 바로 읽어 끝내고, 웹은 fetch 가 끝난 뒤 다음 프레임들 사이에 끝난다.
 // - await 없이 쓰는 꼴도 그대로 된다: 씬은 create 에서 애셋을 요청하고 scene_base.track_asset 으로 맡겨 두면, 맡긴 애셋이 다 읽힌 뒤 엔진이 initialize 를 부른다.
 //   (원본처럼 다 읽힌 뒤 0.3초 더 기다린다) 그동안은 원본처럼 draw_on_load 로 로딩 화면을 그린다.
@@ -10,7 +11,7 @@
 //==============================================================================
 use crate::core::engine::Engine;
 use crate::core::image::Image;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::future::{Future, IntoFuture};
 use std::pin::Pin;
 use std::rc::Rc;
@@ -53,6 +54,8 @@ pub struct AssetLoadHandle {
 	decoded_image: Rc<RefCell<Option<Rc<Image>>>>,
 	// 응답의 content-type. (웹 fetch 응답 머리, 데스크탑 파일과 머리가 없는 응답은 None)
 	content_type: Rc<RefCell<Option<String>>>,
+	// 그림으로 풀어야 끝나는지. (ImageAsset 이 건다, await 가 다 받은 뒤 풀어 보고 풀지 못하면 실패로 끝낸다)
+	is_image_decode_requested: Rc<Cell<bool>>,
 }
 
 impl std::fmt::Debug for AssetLoadHandle {
@@ -74,6 +77,7 @@ impl AssetLoadHandle {
 			load_state: Rc::new(RefCell::new(AssetLoadState::Pending)),
 			decoded_image: Rc::new(RefCell::new(None)),
 			content_type: Rc::new(RefCell::new(None)),
+			is_image_decode_requested: Rc::new(Cell::new(false)),
 		}
 	}
 
@@ -86,6 +90,7 @@ impl AssetLoadHandle {
 			load_state: Rc::new(RefCell::new(AssetLoadState::Loaded(Rc::new(bytes)))),
 			decoded_image: Rc::new(RefCell::new(None)),
 			content_type: Rc::new(RefCell::new(None)),
+			is_image_decode_requested: Rc::new(Cell::new(false)),
 		}
 	}
 
@@ -175,6 +180,13 @@ impl AssetLoadHandle {
 	}
 
 	//==============================================================================
+	// 그림으로 풀어야 끝나는 손잡이로 하기. (ImageAsset 이 부른다, 원본 img.onload 처럼 await 가 풀기까지 기다린다)
+	//==============================================================================
+	pub fn request_image_decode(&self) {
+		self.is_image_decode_requested.set(true);
+	}
+
+	//==============================================================================
 	// 읽기 끝냄. (읽는 쪽이 부른다)
 	//==============================================================================
 	pub fn finish(&self, result: Result<Vec<u8>, String>) {
@@ -226,16 +238,30 @@ impl Future for AssetLoadFuture {
 				return Poll::Ready(Err(String::from("Asset: 읽기를 요청하기 전에 기다렸습니다")));
 			}
 		};
-		match &*load_handle.load_state.borrow() {
+		let load_state = load_handle.load_state.borrow().clone();
+		match load_state {
 			AssetLoadState::Pending => {
 				context.waker().wake_by_ref();
 				Poll::Pending
 			}
 			AssetLoadState::Loaded(bytes) => {
-				Poll::Ready(Ok(bytes.clone()))
+				// 그림 손잡이: 웹은 받을 때 브라우저가 풀어 두었고, 아니면 여기서 풀어 본다. (AssetLoader 의 그림과 같다)
+				if load_handle.is_image_decode_requested.get() && load_handle.get_decoded_image().is_none() {
+					match Image::load_from_memory(&bytes) {
+						Ok(image) => {
+							load_handle.set_decoded_image(image);
+						}
+						Err(error_message) => {
+							let error_message = format!("그림을 풀지 못했습니다 ({}): {}", load_handle.get_asset_path(), error_message);
+							load_handle.finish(Err(error_message.clone()));
+							return Poll::Ready(Err(error_message));
+						}
+					}
+				}
+				Poll::Ready(Ok(bytes))
 			}
 			AssetLoadState::Failed(error_message) => {
-				Poll::Ready(Err(error_message.clone()))
+				Poll::Ready(Err(error_message))
 			}
 		}
 	}
@@ -293,28 +319,31 @@ impl AssetBase {
 	}
 
 	//==============================================================================
-	// 읽기 요청. (엔진에게 바이트를 부탁한다. 이미 요청했으면 다시 하지 않는다)
+	// 읽기 요청. (엔진에게 바이트를 부탁하고 읽기 손잡이를 돌려준다. 이미 요청했으면 다시 하지 않고 그 손잡이를 돌려준다)
 	//==============================================================================
-	pub fn request_load(&mut self, engine: &Engine, asset_path: &str) {
-		self.request_load_with_cache(engine, asset_path, false);
+	pub fn request_load(&mut self, engine: &Engine, asset_path: &str) -> AssetLoadHandle {
+		self.request_load_with_cache(engine, asset_path, false)
 	}
 
 	//==============================================================================
-	// 읽기 요청. (is_no_cache 면 웹은 브라우저 캐시를 쓰지 않는다, 이미 요청했으면 다시 하지 않는다)
+	// 읽기 요청. (is_no_cache 면 웹은 브라우저 캐시를 쓰지 않는다, 이미 요청했으면 다시 하지 않고 그 손잡이를 돌려준다)
 	//==============================================================================
-	pub fn request_load_with_cache(&mut self, engine: &Engine, asset_path: &str, is_no_cache: bool) {
-		if self.load_handle.is_some() {
-			return;
+	pub fn request_load_with_cache(&mut self, engine: &Engine, asset_path: &str, is_no_cache: bool) -> AssetLoadHandle {
+		if let Some(load_handle) = &self.load_handle {
+			return load_handle.clone();
 		}
 		let load_handle = engine.request_asset_bytes_with_cache(asset_path, is_no_cache);
-		self.load_handle = Some(load_handle);
+		self.load_handle = Some(load_handle.clone());
+		load_handle
 	}
 
 	//==============================================================================
-	// 이미 가진 바이트로 읽기. (내장 자료나 직접 받은 것)
+	// 이미 가진 바이트로 읽기. (내장 자료나 직접 받은 것, 읽기 손잡이를 돌려준다)
 	//==============================================================================
-	pub fn load_from_bytes(&mut self, asset_path: &str, bytes: Vec<u8>) {
-		self.load_handle = Some(AssetLoadHandle::create_loaded(asset_path, bytes));
+	pub fn load_from_bytes(&mut self, asset_path: &str, bytes: Vec<u8>) -> AssetLoadHandle {
+		let load_handle = AssetLoadHandle::create_loaded(asset_path, bytes);
+		self.load_handle = Some(load_handle.clone());
+		load_handle
 	}
 
 	//==============================================================================
@@ -406,7 +435,7 @@ pub trait Asset {
 	}
 
 	//==============================================================================
-	// 다 읽히기를 기다리는 퓨처. (원본 await asset.load(경로) 의 await 자리, load 로 요청한 뒤 엔진 작업 안에서 await 한다)
+	// 다 읽히기를 기다리는 퓨처. (load 가 돌려준 손잡이를 await 하는 것과 같다, 이미 load 한 애셋을 뒤에 엔진 작업 안에서 기다릴 때 쓴다)
 	// - 퓨처는 애셋을 빌리지 않아서 씬이 든 애셋에도 쓸 수 있다. 요청 전이면 바로 실패로 끝난다.
 	// - 끝나면 읽은 바이트, 실패하면 까닭이다. (원본은 거부된다) 그림 풀기와 JSON 풀기는 애셋의 get_image, get_data 가 한다.
 	//==============================================================================

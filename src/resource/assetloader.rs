@@ -1,8 +1,9 @@
 //==============================================================================
 // 애셋 함께 받기. (원본 resource/assetloader.js)
 // - 그림, JSON, 글, 바이너리, 소리, 글꼴을 목록에 넣고 동시에 받는 수(set_concurrency)만큼씩 받는다. 실패한 것도 끝난 것으로 쳐서 멈추지 않는다.
-// - 원본은 await load() 로 기다린다. 러스트 판은 load(engine) 로 시작하고 엔진 작업 안에서 wait_for_load().await 로 기다린다. (실패 목록이 나온다)
-//   wait_for_load 는 기다리는 동안 프레임마다 update 를 불러 준다. await 없이 쓰는 꼴은 엔진의 "요청 → 나중에 다 읽힘" 꼴을 따른다:
+// - 원본은 await load() 로 기다린다. 러스트 판도 load(engine) 가 원본처럼 await 할 수 있는 손잡이(AssetLoaderLoadHandle)를 돌려주고,
+//   await 하면 다 받을 때까지 기다려 실패 목록이 나온다. (기다리는 동안 프레임마다 update 를 불러 준다, wait_for_load().await 도 같다)
+//   await 없이 쓰는 꼴은 엔진의 "요청 → 나중에 다 읽힘" 꼴을 따른다:
 //     add_image 같은 함수가 아직 비어 있는 읽기 손잡이를 단 애셋을 바로 돌려주고, load(engine) 가 첫 몫을 요청한다.
 //     그 뒤로는 update(engine) 를 프레임마다 불러야 앞의 것이 끝난 만큼 다음 것을 요청한다. (데스크탑은 그 자리에서 읽혀 load 에서 다 끝난다)
 //     씬은 get_completion_handle() 을 scene_base.track_load_handle 로 맡겨 다 받을 때까지 initialize 를 미룬다.
@@ -21,7 +22,6 @@
 //   그림은 원본 img.onload 처럼 다 받았을 때 풀어 본다. 풀지 못하는 것(깨진 PNG)은 실패 목록에 들고, 푼 그림은 손잡이에 담아 ImageAsset 이 다시 풀지 않는다.
 //   받는 동안 더한 것은 원본처럼 빈 자리만큼 함께 받는다. (원본은 넣을 때 일꾼을 더 띄우고, 러스트 판은 update 마다 빈 자리를 채운다)
 //==============================================================================
-use crate::base::wait;
 use crate::core::asset::{Asset, AssetLoadHandle};
 use crate::core::engine::Engine;
 use crate::core::task;
@@ -32,7 +32,10 @@ use crate::resource::blobasset::BlobAsset;
 use crate::resource::imageasset::ImageAsset;
 use crate::resource::textasset::{parse_json_bytes, JsonAsset, ParsedJsonCell, TextAsset};
 use std::cell::RefCell;
+use std::future::{Future, IntoFuture};
+use std::pin::Pin;
 use std::rc::Rc;
+use std::task::{Context, Poll};
 
 // 함께 받는 수의 기본값. (원본과 같음)
 const DEFAULT_CONCURRENCY: usize = 6;
@@ -155,6 +158,52 @@ struct AssetLoaderState {
 	is_loading: bool,
 	progress_handler: Option<AssetLoaderProgressHandler>,
 	complete_handler: Option<AssetLoaderCompleteHandler>,
+}
+
+//==============================================================================
+// 함께 받기 손잡이. (AssetLoader::load 가 돌려준다. 원본 load 의 Promise 자리, 받기 목록을 나눠 든다)
+//==============================================================================
+#[derive(Clone)]
+pub struct AssetLoaderLoadHandle {
+	asset_loader: AssetLoader,
+}
+
+impl IntoFuture for AssetLoaderLoadHandle {
+	type Output = Vec<AssetLoadFailure>;
+	type IntoFuture = AssetLoaderLoadFuture;
+
+	//==============================================================================
+	// 손잡이를 그대로 await 하기.
+	//==============================================================================
+	fn into_future(self) -> AssetLoaderLoadFuture {
+		AssetLoaderLoadFuture {
+			asset_loader: self.asset_loader,
+		}
+	}
+}
+
+//==============================================================================
+// 다 받기를 기다리는 퓨처. (손잡이를 await 하거나 wait_for_load 가 돌려준다. 실패 목록으로 끝난다)
+//==============================================================================
+#[derive(Clone)]
+pub struct AssetLoaderLoadFuture {
+	asset_loader: AssetLoader,
+}
+
+impl Future for AssetLoaderLoadFuture {
+	type Output = Vec<AssetLoadFailure>;
+
+	//==============================================================================
+	// update 를 부르고 다 받았는지 보기. (아직이면 다음 프레임에 다시 본다)
+	//==============================================================================
+	fn poll(self: Pin<&mut AssetLoaderLoadFuture>, context: &mut Context<'_>) -> Poll<Vec<AssetLoadFailure>> {
+		task::with_polling_engine(|engine| self.asset_loader.update(engine));
+		if self.asset_loader.is_finished() {
+			return Poll::Ready(self.asset_loader.get_failed_list());
+		}
+		context.waker().wake_by_ref();
+		Poll::Pending
+	}
 }
 
 //==============================================================================
@@ -293,10 +342,14 @@ impl AssetLoader {
 
 	//==============================================================================
 	// 받기 시작. (첫 몫을 요청한다. 데스크탑은 여기서 다 끝난다. 그 뒤로는 update 를 프레임마다 부른다)
+	// - 원본처럼 await 할 수 있는 손잡이를 돌려준다. await 하면 다 받을 때까지 기다려 실패 목록이 나온다.
 	//==============================================================================
-	pub fn load(&self, engine: &Engine) {
+	pub fn load(&self, engine: &Engine) -> AssetLoaderLoadHandle {
 		self.state.borrow_mut().is_loading = true;
 		self.update(engine);
+		AssetLoaderLoadHandle {
+			asset_loader: self.clone(),
+		}
 	}
 
 	//==============================================================================
@@ -363,9 +416,7 @@ impl AssetLoader {
 					}
 				};
 				let byte_vector = (*bytes).clone();
-				if let Err(error_message) = audio_asset.load_from_bytes(byte_vector) {
-					audio_asset.set_load_error(error_message);
-				}
+				audio_asset.load_from_bytes(byte_vector);
 			}
 		}
 	}
@@ -552,17 +603,9 @@ impl AssetLoader {
 	// 다 받기를 기다리는 퓨처. (원본 await load() 의 await 자리, load 를 부른 뒤 엔진 작업 안에서 await 한다. 실패 목록이 나온다)
 	// - 기다리는 동안 프레임마다 update 를 불러 다음 것을 요청한다. 손잡이를 나눠 들어 빌리지 않는다.
 	//==============================================================================
-	pub fn wait_for_load(&self) -> impl std::future::Future<Output = Vec<AssetLoadFailure>> + 'static {
-		let asset_loader = self.clone();
-		async move {
-			loop {
-				task::with_polling_engine(|engine| asset_loader.update(engine));
-				if asset_loader.is_finished() {
-					break;
-				}
-				wait::next_frame().await;
-			}
-			asset_loader.get_failed_list()
+	pub fn wait_for_load(&self) -> AssetLoaderLoadFuture {
+		AssetLoaderLoadFuture {
+			asset_loader: self.clone(),
 		}
 	}
 

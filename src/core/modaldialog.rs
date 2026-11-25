@@ -969,11 +969,11 @@ mod tests {
 			let prompt_promise = engine_context.with(|engine| engine.prompt_async("이름:", "기본"));
 			*task_received_text.borrow_mut() = Some(prompt_promise.await);
 		});
-		crate::core::task::poll_tasks(&mut engine, &mut scene_list, None);
+		crate::core::task::poll_tasks(&mut engine, &mut scene_list, &mut Vec::new(), None);
 		assert!(engine.is_modal_dialog_open());
 		engine.get_input_manager_mut().get_text_input_mut().push_focused_field_event(TextInputEventKind::Key { key: TextInputKey::Enter, is_shift: false });
 		tick_modal_dialog(&mut engine, &measure_fixed_width, 0.016);
-		crate::core::task::poll_tasks(&mut engine, &mut scene_list, None);
+		crate::core::task::poll_tasks(&mut engine, &mut scene_list, &mut Vec::new(), None);
 		assert_eq!(*received_text.borrow(), Some(Some(String::from("기본"))));
 	}
 

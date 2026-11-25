@@ -46,9 +46,11 @@
 //   - track_asset_loader 로 맡긴 AssetLoader 는 draw_on_load 가 프레임마다 update 를 불러 준다.
 //   - 원본 setLoadingColors 의 넷째 값(바깥 색)은 러스트에 기본값 인자가 없어 set_loading_outside_color 로 따로 정한다.
 // - 화면 틀 (vanilla.js GameScene 의 fadeScreen, isUserInterfaceAt, setPlayInputHandler, setPlayAreaReference 와 같은 기능):
-//   - 화면 페이드: 원본은 onDark 가 Promise 를 돌려주면 끝날 때까지 어둡게 둔다. 러스트 판의 같은 꼴은 fade_screen_async(engine, on_dark) 다.
-//     다 어두워지면 on_dark 가 돌려준 퓨처를 씬 작업으로 돌리고(SceneContext 로 씬과 엔진에 닿는다), 퓨처가 끝나면 밝아진다.
-//     GameScene 을 구현한 씬은 GameScene::fade_screen_async 로, Scene 을 직접 구현한 씬은 GameSceneBase::fade_screen_async::<씬 타입> 으로 부른다.
+//   - 화면 페이드: 원본은 onDark 가 Promise 를 돌려주면 끝날 때까지 어둡게 둔다. 러스트 판의 같은 꼴은 fade_screen_async(on_dark) 다.
+//     다 어두워진 그 tick 에서 on_dark 의 퓨처를 씬 작업으로 맡겨 원본처럼 그 자리에서 첫 await 까지 돌리고(SceneContext 로 씬과 엔진에 닿는다),
+//     퓨처가 끝나면 밝아진다. GameScene 을 구현한 씬은 GameScene::fade_screen_async 로 부르고 game_scene! 이 시작을 맡는다.
+//     Scene 을 직접 구현한 씬은 GameSceneBase::fade_screen_async::<씬 타입> 으로 부르고, 바탕 tick 뒤에 take_screen_fade_dark_starter 로 꺼내 start 한다.
+//     (꺼내지 않으면 바탕이 post_draw 나 다음 tick 에서 다음 폴링 차례로 맡긴다)
 //     동기 꼴 fade_screen(on_dark) 은 다 어두워지면 on_dark(트리, 엔진)를 부르고, on_dark 가 ScreenFadeHold 를 돌려주면 그 손잡이의 release 가 불릴 때까지 어둡게 둔다.
 //     (None 이면 바로 밝힌다) 콜백 꼴 fade_screen_with_hold(on_dark) 는 on_dark 가 손잡이를 받아 두었다가 일이 끝나면 release 한다. (Promise 의 resolve 자리)
 //     막은 post_draw 가 그린다. 막이 걸린 동안은 누름과 휠을 받지 않는다.
@@ -67,7 +69,7 @@ use crate::core::engine::Engine;
 use crate::core::graphic::Graphic;
 use crate::core::node::nodetree::{NodeId, NodeTree};
 use crate::core::scene::{Scene, SceneBase, SceneId};
-use crate::core::task::{self, Promise, SceneContext};
+use crate::core::task::{self, SceneContext};
 use crate::core::viewmanager::{SafeAreaInsets, ViewScaleMode};
 use crate::misc::devtools::DevTools;
 use crate::misc::loadingprogress::LoadingProgress;
@@ -146,6 +148,38 @@ impl Drop for ScreenFadeHoldRelease {
 }
 
 //==============================================================================
+// 화면 페이드 작업을 시작하는 자리. (다 어두워진 tick 의 씬과 엔진에서 바로, 또는 다음 폴링 차례로)
+//==============================================================================
+enum ScreenFadeDarkStartPlace<'a> {
+	Now(&'a mut Engine, &'a mut dyn Scene),
+	Deferred(&'a Engine, SceneId),
+}
+
+//==============================================================================
+// 화면 페이드의 async on_dark 를 시작하는 것. (fade_screen_async 가 만들고, 다 어두워지면 씬이 take_screen_fade_dark_starter 로 꺼내 start 한다)
+//==============================================================================
+pub struct ScreenFadeDarkStarter {
+	start_function: Box<dyn for<'a> FnOnce(ScreenFadeDarkStartPlace<'a>, ScreenFadeHold)>,
+	screen_fade_hold: ScreenFadeHold,
+}
+
+impl ScreenFadeDarkStarter {
+	//==============================================================================
+	// 시작. (on_dark 의 퓨처를 이 씬의 작업으로 맡겨 그 자리에서 첫 await 까지 돌린다. 씬이 fade_screen_async 의 타입이 아니면 바로 밝아진다)
+	//==============================================================================
+	pub fn start(self, scene: &mut dyn Scene, engine: &mut Engine) {
+		(self.start_function)(ScreenFadeDarkStartPlace::Now(engine, scene), self.screen_fade_hold);
+	}
+
+	//==============================================================================
+	// 다음 폴링 차례로 시작. (씬이 꺼내 가지 않았을 때 바탕이 부른다)
+	//==============================================================================
+	fn start_deferred(self, engine: &Engine, scene_id: SceneId) {
+		(self.start_function)(ScreenFadeDarkStartPlace::Deferred(engine, scene_id), self.screen_fade_hold);
+	}
+}
+
+//==============================================================================
 // 다 어두워졌을 때 부르는 함수. (트리와 엔진을 받는다. 손잡이를 돌려주면 놓을 때까지 어둡게 둔다)
 //==============================================================================
 pub type ScreenFadeEvent = Box<dyn FnOnce(&mut NodeTree, &Engine) -> Option<ScreenFadeHold>>;
@@ -212,6 +246,9 @@ pub struct GameSceneBase {
 	screen_fade_event: Option<ScreenFadeEvent>,
 	// 다 어두워진 뒤 붙잡고 있는 손잡이.
 	screen_fade_hold: Option<ScreenFadeHold>,
+	// fade_screen_async 의 시작. (다 어두워지면 꺼낼 수 있다)
+	screen_fade_dark_starter: Option<ScreenFadeDarkStarter>,
+	is_screen_fade_dark_starter_ready: bool,
 	screen_fade_color: Color,
 	screen_fade_seconds: f32,
 	is_play_input_enabled: bool,
@@ -262,6 +299,8 @@ impl GameSceneBase {
 			screen_fade_direction: 0,
 			screen_fade_event: None,
 			screen_fade_hold: None,
+			screen_fade_dark_starter: None,
+			is_screen_fade_dark_starter_ready: false,
 			screen_fade_color: Color::black(),
 			screen_fade_seconds: DEFAULT_SCREEN_FADE_SECONDS,
 			is_play_input_enabled: false,
@@ -800,6 +839,7 @@ impl GameSceneBase {
 	// - 모바일 주소창이 나타나고 사라질 때처럼 resize 만으로는 놓칠 수 있어 매 tick 확인한다. (원본과 같음)
 	//==============================================================================
 	pub fn tick(&mut self, engine: &mut Engine, time_delta: f32) -> bool {
+		self.start_left_screen_fade_dark_starter(engine);
 		self.scene_base.get_node_tree_mut().tick(engine, time_delta);
 		self.tick_touch(engine);
 		self.scene_base.tick_tweens(time_delta);
@@ -939,6 +979,7 @@ impl GameSceneBase {
 	// 이후 출력. (어두워지는 막을 세이프 에어리어까지 캔버스 전체에 그리고, 개발자 도구를 맨 위에 그린다)
 	//==============================================================================
 	pub fn post_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
+		self.start_left_screen_fade_dark_starter(engine);
 		self.draw_screen_fade(engine, graphic);
 		if let Some(dev_tools) = self.dev_tools.as_mut() {
 			dev_tools.draw(engine, self.scene_base.get_node_tree(), graphic);
@@ -989,11 +1030,13 @@ impl GameSceneBase {
 
 	//==============================================================================
 	// 어두워졌다 밝아지기의 async 꼴. (원본 fadeScreen(async () => { ... }), 이미 페이드 중이면 false)
-	// - 다 어두워지면 on_dark 가 돌려준 퓨처를 이 씬의 작업으로 돌리고, 퓨처가 끝나면 밝아진다. 퓨처 안에서는 SceneContext::with 로 씬(S 타입)과 엔진을 빌린다.
-	// - S 는 이 바탕을 든 씬의 타입이다. (GameScene 을 구현한 씬은 GameScene::fade_screen_async 가 S 를 채운다) 다른 타입이면 with 가 패닉한다.
-	// - 씬을 내려 작업이 버려지면 막도 밝아진다.
+	// - 다 어두워진 tick 에서 on_dark 가 돌려준 퓨처를 이 씬의 작업으로 맡겨 그 자리에서 첫 await 까지 돌리고, 퓨처가 끝나면 밝아진다.
+	//   퓨처 안에서는 SceneContext::with 로 씬(S 타입)과 엔진을 빌린다.
+	// - S 는 이 바탕을 든 씬의 타입이다. (GameScene 을 구현한 씬은 GameScene::fade_screen_async 가 S 를 채운다) 다른 타입이면 바로 밝아진다.
+	// - 시작은 바탕 tick 뒤에 씬이 take_screen_fade_dark_starter 로 꺼내 start 한다. (game_scene!, ui_scene! 은 저절로 한다)
+	//   꺼내지 않으면 바탕이 post_draw 나 다음 tick 에서 다음 폴링 차례로 맡긴다.
 	//==============================================================================
-	pub fn fade_screen_async<S, F, OnDarkFuture>(&mut self, engine: &Engine, on_dark: F) -> bool
+	pub fn fade_screen_async<S, F, OnDarkFuture>(&mut self, on_dark: F) -> bool
 	where
 		S: Scene + 'static,
 		F: FnOnce(SceneContext<S>) -> OnDarkFuture + 'static,
@@ -1002,24 +1045,55 @@ impl GameSceneBase {
 		if self.is_screen_fading() {
 			return false;
 		}
-		let (dark_promise, dark_resolver) = Promise::create();
-		let screen_fade_hold = ScreenFadeHold::new();
-		let screen_fade_hold_release = ScreenFadeHoldRelease {
-			screen_fade_hold: screen_fade_hold.clone(),
-		};
-		self.fade_screen(Some(Box::new(move |_node_tree: &mut NodeTree, _engine: &Engine| {
-			dark_resolver.resolve(());
-			Some(screen_fade_hold)
-		})));
-		let scene_id = SceneId::from(&self.scene_base);
-		task::spawn_scene_task(&engine.task_executor, scene_id, move |scene_context: SceneContext<S>| {
-			async move {
-				let _screen_fade_hold_release = screen_fade_hold_release;
-				dark_promise.await;
-				on_dark(scene_context).await;
+		let start_function = Box::new(move |start_place: ScreenFadeDarkStartPlace<'_>, screen_fade_hold: ScreenFadeHold| {
+			let screen_fade_hold_release = ScreenFadeHoldRelease {
+				screen_fade_hold,
+			};
+			let task_function = move |scene_context: SceneContext<S>| {
+				async move {
+					let _screen_fade_hold_release = screen_fade_hold_release;
+					on_dark(scene_context).await;
+				}
+			};
+			match start_place {
+				ScreenFadeDarkStartPlace::Now(engine, scene) => {
+					if let Some(scene) = scene.as_scene_any_mut().downcast_mut::<S>() {
+						engine.spawn_scene_task(scene, task_function);
+					}
+				}
+				ScreenFadeDarkStartPlace::Deferred(engine, scene_id) => {
+					task::spawn_deferred_scene_task(&engine.task_executor, scene_id, task_function);
+				}
 			}
 		});
+		self.screen_fade_dark_starter = Some(ScreenFadeDarkStarter {
+			start_function,
+			screen_fade_hold: ScreenFadeHold::new(),
+		});
+		self.is_screen_fade_dark_starter_ready = false;
+		self.screen_fade_direction = 1;
 		true
+	}
+
+	//==============================================================================
+	// 다 어두워진 fade_screen_async 의 시작 꺼내기. (바탕 tick 뒤에 씬이 꺼내 start(씬, 엔진) 한다, 아직이면 None)
+	//==============================================================================
+	pub fn take_screen_fade_dark_starter(&mut self) -> Option<ScreenFadeDarkStarter> {
+		if !self.is_screen_fade_dark_starter_ready {
+			return None;
+		}
+		self.is_screen_fade_dark_starter_ready = false;
+		self.screen_fade_dark_starter.take()
+	}
+
+	//==============================================================================
+	// 씬이 꺼내 가지 않은 시작을 다음 폴링 차례로 맡기기.
+	//==============================================================================
+	fn start_left_screen_fade_dark_starter(&mut self, engine: &Engine) {
+		if let Some(screen_fade_dark_starter) = self.take_screen_fade_dark_starter() {
+			let scene_id = SceneId::from(&self.scene_base);
+			screen_fade_dark_starter.start_deferred(engine, scene_id);
+		}
 	}
 
 	//==============================================================================
@@ -1084,6 +1158,13 @@ impl GameSceneBase {
 		}
 		// 다 어두워졌다. 맡긴 일이 손잡이를 돌려주면 놓을 때까지 막을 그대로 두고, 아니면 바로 밝아진다.
 		self.screen_fade_direction = -1;
+		if let Some(screen_fade_dark_starter) = self.screen_fade_dark_starter.as_ref() {
+			// async 꼴: 손잡이를 쥐고 시작을 꺼낼 수 있게 한다. (작업이 끝나거나 버려지면 놓는다)
+			self.screen_fade_direction = 0;
+			self.screen_fade_hold = Some(screen_fade_dark_starter.screen_fade_hold.clone());
+			self.is_screen_fade_dark_starter_ready = true;
+			return;
+		}
 		if let Some(screen_fade_event) = self.screen_fade_event.take() {
 			let screen_fade_hold = screen_fade_event(self.scene_base.get_node_tree_mut(), engine);
 			if let Some(screen_fade_hold) = screen_fade_hold {
@@ -1277,15 +1358,16 @@ pub trait GameScene: 'static {
 
 	//==============================================================================
 	// 어두워졌다 밝아지기의 async 꼴. (원본 fadeScreen(async () => { ... }), 이미 페이드 중이면 false)
-	// - 다 어두워지면 on_dark 가 돌려준 퓨처를 이 씬의 작업으로 돌리고, 끝나면 밝아진다. 퓨처 안에서는 SceneContext::with 로 이 씬과 엔진을 빌린다.
+	// - 다 어두워진 tick 에서 on_dark 가 돌려준 퓨처를 이 씬의 작업으로 맡겨 그 자리에서 첫 await 까지 돌리고, 끝나면 밝아진다.
+	//   퓨처 안에서는 SceneContext::with 로 이 씬과 엔진을 빌린다.
 	//==============================================================================
-	fn fade_screen_async<F, OnDarkFuture>(&mut self, engine: &Engine, on_dark: F) -> bool
+	fn fade_screen_async<F, OnDarkFuture>(&mut self, on_dark: F) -> bool
 	where
 		Self: Scene + Sized,
 		F: FnOnce(SceneContext<Self>) -> OnDarkFuture + 'static,
 		OnDarkFuture: Future<Output = ()> + 'static,
 	{
-		self.get_game_scene_base_mut().fade_screen_async::<Self, F, OnDarkFuture>(engine, on_dark)
+		self.get_game_scene_base_mut().fade_screen_async::<Self, F, OnDarkFuture>(on_dark)
 	}
 
 	//==============================================================================
@@ -1454,6 +1536,9 @@ macro_rules! game_scene {
 			fn tick(&mut self, engine: &mut $crate::core::engine::Engine, time_delta: f32) {
 				if $crate::game::gamescene::GameScene::get_game_scene_base_mut(self).tick(engine, time_delta) {
 					$crate::game::gamescene::GameScene::layout(self, engine);
+				}
+				if let Some(screen_fade_dark_starter) = $crate::game::gamescene::GameScene::get_game_scene_base_mut(self).take_screen_fade_dark_starter() {
+					screen_fade_dark_starter.start(self, engine);
 				}
 				$crate::game::gamescene::GameScene::tick(self, engine, time_delta);
 			}
@@ -1846,10 +1931,11 @@ mod tests {
 	}
 
 	//==============================================================================
-	// async 페이드: 다 어두워지면 on_dark 의 퓨처가 씬 작업으로 돌고, 퓨처가 await 하는 동안은 어둡고, 끝나면 밝아진다. 페이드 중 다시 부르면 false.
+	// async 페이드: 다 어두워진 tick 에서 on_dark 의 퓨처가 씬 작업으로 맡겨져 그 자리에서 첫 await 까지 돌고(game_scene! 이 시작한다),
+	// 퓨처가 await 하는 동안은 어둡고, 끝나면 밝아진다. 페이드 중 다시 부르면 false. 씬이 꺼내지 않으면 바탕이 다음 tick 에 다음 폴링 차례로 맡긴다.
 	//==============================================================================
 	#[test]
-	fn fade_screen_async_holds_until_future_finishes() {
+	fn fade_screen_async_starts_on_dark_tick_and_holds_until_future_finishes() {
 		use crate::core::scene::Scene;
 		let mut engine = Engine::new(EngineConfiguration::new());
 		engine.get_view_manager_mut().calculate_view_rect(800, 600, 1.0);
@@ -1862,36 +1948,42 @@ mod tests {
 		scene.game_scene_base.set_safe_area_insets(Some(SafeAreaInsets::create(0.0, 0.0, 0.0, 0.0)));
 		Scene::initialize(&mut scene, &mut engine);
 		scene.game_scene_base.set_screen_fade_seconds(0.1);
-		let (finish_promise, finish_resolver) = Promise::create();
-		assert!(scene.fade_screen_async(&engine, move |mut scene_context: SceneContext<LayoutCountScene>| async move {
+		let (finish_promise, finish_resolver) = crate::core::task::Promise::create();
+		assert!(scene.fade_screen_async(move |mut scene_context: SceneContext<LayoutCountScene>| async move {
+			scene_context.with(|scene, _engine| {
+				scene.layout_count += 1000;
+			});
 			finish_promise.await;
 			scene_context.with(|scene, _engine| {
-				scene.layout_count += 100;
+				scene.layout_count += 100000;
 			});
 		}));
-		assert!(!scene.fade_screen_async(&engine, |_scene_context| async {}));
+		assert!(!scene.fade_screen_async(|_scene_context| async {}));
 		let mut scene_list: Vec<Box<dyn Scene>> = vec![Box::new(scene)];
 		let mut current_seconds = 1.0;
 		engine.get_time_manager_mut().update(current_seconds);
 		let mut step_scene_frame = |engine: &mut Engine, scene_list: &mut Vec<Box<dyn Scene>>| -> (f32, u32) {
 			current_seconds += 0.06;
 			engine.get_time_manager_mut().update(current_seconds);
-			task::poll_tasks(engine, scene_list, None);
+			task::poll_tasks(engine, scene_list, &mut Vec::new(), None);
 			scene_list[0].tick(engine, 0.06);
 			let scene = scene_list[0].as_scene_any_mut().downcast_mut::<LayoutCountScene>().expect("시험용 씬");
 			(scene.game_scene_base.get_screen_fade_alpha(), scene.layout_count)
 		};
-		step_scene_frame(&mut engine, &mut scene_list);
-		let (alpha, _) = step_scene_frame(&mut engine, &mut scene_list);
+		let (alpha, layout_count) = step_scene_frame(&mut engine, &mut scene_list);
+		assert!(alpha < 1.0);
+		assert!(layout_count < 1000);
+		let (alpha, layout_count) = step_scene_frame(&mut engine, &mut scene_list);
 		assert_eq!(alpha, 1.0);
+		assert!(layout_count >= 1000 && layout_count < 100000);
 		for _ in 0..3 {
 			let (alpha, layout_count) = step_scene_frame(&mut engine, &mut scene_list);
 			assert_eq!(alpha, 1.0);
-			assert!(layout_count < 100);
+			assert!(layout_count < 100000);
 		}
 		finish_resolver.resolve(());
 		let (alpha, layout_count) = step_scene_frame(&mut engine, &mut scene_list);
-		assert!(layout_count >= 100);
+		assert!(layout_count >= 100000);
 		assert_eq!(alpha, 1.0);
 		let (alpha, _) = step_scene_frame(&mut engine, &mut scene_list);
 		assert!(alpha < 1.0);
@@ -1901,5 +1993,22 @@ mod tests {
 		let scene = scene_list[0].as_scene_any_mut().downcast_mut::<LayoutCountScene>().expect("시험용 씬");
 		assert!(!scene.game_scene_base.is_screen_fading());
 		assert_eq!(engine.task_executor.get_task_count(), 0);
+
+		// 바탕만 직접 돌려 시작을 꺼내지 않으면 다음 tick 에 다음 폴링 차례로 맡긴다.
+		let started = Rc::new(Cell::new(false));
+		let task_started = started.clone();
+		assert!(scene.game_scene_base.fade_screen_async::<LayoutCountScene, _, _>(move |_scene_context| async move {
+			task_started.set(true);
+		}));
+		for _ in 0..2 {
+			current_seconds += 0.06;
+			engine.get_time_manager_mut().update(current_seconds);
+			scene.game_scene_base.tick(&mut engine, 0.06);
+		}
+		assert!(!started.get());
+		scene.game_scene_base.tick(&mut engine, 0.06);
+		let mut moved_scene_list: Vec<Box<dyn Scene>> = vec![scene_list.remove(0)];
+		task::poll_tasks(&mut engine, &mut moved_scene_list, &mut Vec::new(), None);
+		assert!(started.get());
 	}
 }

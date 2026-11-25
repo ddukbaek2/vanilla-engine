@@ -9,8 +9,8 @@
 // - 쪽 경로에 빗금(/)이 없으면 JSON 이 있는 폴더를 기준으로, 있으면 적힌 그대로 읽는다. ("./" 로 시작하면 그 "./" 를 떼고 애셋 폴더 기준이다)
 // - 원본과 다른 것:
 //   원본은 load 가 JSON 을 기다린 뒤 쪽 그림을 받는 async 다. 러스트 판은 애셋처럼 요청만 하고, update 가 JSON 이 온 것을 보고 쪽 그림을 청한다.
-//   원본 await load(경로) 자리는 load(engine, 경로) 다음 엔진 작업 안에서 wait_for_load().await 다. (기다리는 동안 프레임마다 update 를 불러 준다)
-//   wait_for_load 는 아틀라스를 빌려 기다리므로 작업의 지역 값으로 불러온 뒤 씬이나 Rc<RefCell> 로 옮긴다. (RefCell 빌림을 await 너머로 쥐지 않게)
+//   load, load_data 는 원본처럼 await 할 수 있는 SpriteAtlasLoadHandle 을 돌려준다. 손잡이는 불러오기 상태를 나눠 들어 아틀라스를 빌리지 않으므로
+//   씬이 든 아틀라스도 scene_context.with(|씬, 엔진| 씬.아틀라스.load(엔진, 경로)).await 로 기다린다. (기다리는 동안 프레임마다 update 를 불러 준다)
 //   데스크탑은 그 자리에서 읽혀 load 가 끝나면 다 읽혔다. 웹은 JSON 과 쪽 그림이 차례로 오므로 is_loaded 가 true 가 될 때까지 tick 에서 update 를 부르고,
 //   그 뒤에 조각을 건다. (씬이 맡아 기다리게 하려면 JSON 은 track_json_asset, 쪽 그림은 온 뒤 update 가 청한다)
 //   원본의 찾을 아틀라스 목록(add_search_atlas, find_frame, apply_search_frame)은 스레드 하나에 하나인 목록이고, 아틀라스를 나눠 들게 Rc<RefCell<SpriteAtlas>> 로 넣는다.
@@ -18,7 +18,6 @@
 //   get_page_images 는 원본 HTMLImageElement 목록 대신 읽힌 쪽 그림(Image) 목록이다.
 //==============================================================================
 use crate::base::rect::Rect;
-use crate::base::wait;
 use crate::core::asset::Asset;
 use crate::core::component::sprite::Sprite;
 use crate::core::engine::Engine;
@@ -28,9 +27,12 @@ use crate::core::scene::SceneBase;
 use crate::core::task;
 use crate::resource::imageasset::ImageAsset;
 use crate::resource::textasset::JsonAsset;
-use std::cell::RefCell;
+use std::cell::{Cell, OnceCell, RefCell};
 use std::collections::HashMap;
+use std::future::{Future, IntoFuture};
+use std::pin::Pin;
 use std::rc::Rc;
+use std::task::{Context, Poll};
 
 thread_local! {
 	// 찾을 아틀라스 목록. (원본 모듈의 searchAtlasList, 넣은 차례로 찾는다)
@@ -46,14 +48,256 @@ struct AtlasFrameValue {
 	rect: Rect,
 }
 
-pub struct SpriteAtlas {
-	json_asset: Option<JsonAsset>,
-	base_directory: String,
+//==============================================================================
+// 아틀라스 자료에서 읽은 것. (조각 값과 쪽 그림, 자료를 읽었는지)
+//==============================================================================
+#[derive(Default)]
+struct SpriteAtlasData {
 	frame_value_list: Vec<AtlasFrameValue>,
 	page_asset_list: Vec<ImageAsset>,
-	frame_table: HashMap<String, Frame>,
 	is_data_read: bool,
-	is_loaded: bool,
+}
+
+//==============================================================================
+// 아틀라스 불러오기 하나의 나눠 든 상태. (아틀라스와 받기 손잡이가 나눠 들어, 손잡이의 await 가 아틀라스를 빌리지 않고 이어 간다)
+//==============================================================================
+struct SpriteAtlasLoad {
+	json_asset: Option<JsonAsset>,
+	base_directory: String,
+	atlas_data: RefCell<SpriteAtlasData>,
+	// 지은 조각. (쪽 그림이 다 오면 한 번 채운다, 채우면 다 읽힌 것이다)
+	frame_table: OnceCell<HashMap<String, Frame>>,
+	// 끝났는지. (조각을 지었거나, 원본처럼 자료를 읽지 못해 조각 없이 끝났거나)
+	is_finished: Cell<bool>,
+}
+
+impl SpriteAtlasLoad {
+	//==============================================================================
+	// 생성.
+	//==============================================================================
+	fn new(json_asset: Option<JsonAsset>, base_directory: &str) -> SpriteAtlasLoad {
+		SpriteAtlasLoad {
+			json_asset,
+			base_directory: base_directory.to_string(),
+			atlas_data: RefCell::new(SpriteAtlasData::default()),
+			frame_table: OnceCell::new(),
+			is_finished: Cell::new(false),
+		}
+	}
+
+	//==============================================================================
+	// 진행. (JSON 이 왔으면 쪽 그림을 청하고, 쪽 그림이 다 왔으면 조각을 짓는다. 끝났으면 true)
+	// - 원본처럼 JSON 을 읽지 못했거나 꼴을 모르면 조각을 짓지 않고 끝난다. (원본 loadData 가 알리고 그냥 돌아온다)
+	//==============================================================================
+	fn update(&self, engine: &Engine) -> bool {
+		if self.is_finished.get() {
+			return true;
+		}
+		let is_data_read = self.atlas_data.borrow().is_data_read;
+		if !is_data_read {
+			let atlas_data = match self.json_asset.as_ref() {
+				Some(json_asset) => {
+					if !json_asset.get_asset_base().get_load_handle().map(|load_handle| load_handle.is_finished()).unwrap_or(false) {
+						return false;
+					}
+					json_asset.get_data().cloned()
+				}
+				None => {
+					return false;
+				}
+			};
+			let is_data_read = match atlas_data {
+				Some(atlas_data) => {
+					self.read_data(engine, &atlas_data)
+				}
+				None => {
+					eprintln!("SpriteAtlas: 아틀라스 JSON 을 읽지 못했습니다");
+					false
+				}
+			};
+			if !is_data_read {
+				self.is_finished.set(true);
+				return true;
+			}
+		}
+		let is_every_page_finished = self.atlas_data.borrow().page_asset_list.iter().all(|page_asset| page_asset.get_asset_base().get_load_handle().map(|load_handle| load_handle.is_finished()).unwrap_or(true));
+		if !is_every_page_finished {
+			return false;
+		}
+		self.build_frames();
+		self.is_finished.set(true);
+		true
+	}
+
+	//==============================================================================
+	// 자료 읽기. (조각 값을 담고 쪽 그림을 청한다, 꼴을 모르면 원본처럼 알리고 false)
+	//==============================================================================
+	fn read_data(&self, engine: &Engine, atlas_data: &serde_json::Value) -> bool {
+		let mut page_path_list: Vec<String> = Vec::new();
+		let mut frame_value_list: Vec<AtlasFrameValue> = Vec::new();
+		if let Some(image_table) = atlas_data.get("images").and_then(|images| images.as_object()) {
+			let meta = atlas_data.get("meta");
+			let page_list = meta.and_then(|meta| meta.get("pages")).and_then(|pages| pages.as_array());
+			match page_list {
+				Some(page_list) => {
+					for page in page_list {
+						let image_file_name = page.get("imageFileName").and_then(|value| value.as_str()).unwrap_or("");
+						page_path_list.push(image_file_name.to_string());
+					}
+				}
+				None => {
+					if let Some(image_file_name) = meta.and_then(|meta| meta.get("imageFileName")).and_then(|value| value.as_str()) {
+						page_path_list.push(image_file_name.to_string());
+					}
+				}
+			}
+			for (file_name, image_data) in image_table {
+				let read_number = |key: &str| -> f32 {
+					image_data.get(key).and_then(|value| value.as_f64()).unwrap_or(0.0) as f32
+				};
+				let page_index = image_data.get("page").and_then(|value| value.as_u64()).unwrap_or(0) as usize;
+				frame_value_list.push(AtlasFrameValue {
+					frame_name: file_name.clone(),
+					page_index,
+					rect: Rect::create(read_number("x"), read_number("y"), read_number("width"), read_number("height")),
+				});
+			}
+		}
+		else if let Some(frame_table) = atlas_data.get("frames").and_then(|frames| frames.as_object()) {
+			if let Some(page_paths) = atlas_data.get("pagePaths").and_then(|page_paths| page_paths.as_array()) {
+				for page_path in page_paths {
+					page_path_list.push(page_path.as_str().unwrap_or("").to_string());
+				}
+			}
+			for (frame_name, frame_values) in frame_table {
+				let read_number = |index: usize| -> f64 {
+					frame_values.get(index).and_then(|value| value.as_f64()).unwrap_or(0.0)
+				};
+				frame_value_list.push(AtlasFrameValue {
+					frame_name: frame_name.clone(),
+					page_index: read_number(0) as usize,
+					rect: Rect::create(read_number(1) as f32, read_number(2) as f32, read_number(3) as f32, read_number(4) as f32),
+				});
+			}
+		}
+		else {
+			eprintln!("SpriteAtlas: 아틀라스 꼴을 읽지 못했습니다");
+			return false;
+		}
+
+		// 쪽 그림을 한꺼번에 청한다.
+		let mut page_asset_list: Vec<ImageAsset> = Vec::new();
+		for page_path in &page_path_list {
+			let resolved_path = if page_path.contains('/') {
+				page_path.trim_start_matches("./").to_string()
+			}
+			else {
+				format!("{}{}", self.base_directory, page_path)
+			};
+			let mut page_asset = ImageAsset::new();
+			page_asset.load(engine, &resolved_path);
+			page_asset_list.push(page_asset);
+		}
+		let mut sprite_atlas_data = self.atlas_data.borrow_mut();
+		sprite_atlas_data.frame_value_list = frame_value_list;
+		sprite_atlas_data.page_asset_list = page_asset_list;
+		sprite_atlas_data.is_data_read = true;
+		true
+	}
+
+	//==============================================================================
+	// 조각 짓기. (쪽 그림이 없거나 풀리지 않은 조각은 뺀다)
+	//==============================================================================
+	fn build_frames(&self) {
+		let mut frame_table: HashMap<String, Frame> = HashMap::new();
+		let mut sprite_atlas_data = self.atlas_data.borrow_mut();
+		let mut page_image_list = Vec::with_capacity(sprite_atlas_data.page_asset_list.len());
+		for page_asset in sprite_atlas_data.page_asset_list.iter_mut() {
+			page_image_list.push(page_asset.get_image());
+		}
+		for frame_value in &sprite_atlas_data.frame_value_list {
+			let page_image = match page_image_list.get(frame_value.page_index).and_then(|page_image| page_image.clone()) {
+				Some(page_image) => {
+					page_image
+				}
+				None => {
+					continue;
+				}
+			};
+			let frame = Frame::new(page_image, Some(frame_value.rect));
+			let base_name = remove_extension(&frame_value.frame_name);
+			if base_name != frame_value.frame_name && !frame_table.contains_key(base_name) {
+				frame_table.insert(base_name.to_string(), frame.clone());
+			}
+			frame_table.insert(frame_value.frame_name.clone(), frame);
+		}
+		let _ = self.frame_table.set(frame_table);
+	}
+}
+
+//==============================================================================
+// 아틀라스 받기 손잡이. (SpriteAtlas::load, load_data 가 돌려준다. 원본 load 의 Promise 자리, 아틀라스를 빌리지 않는다)
+// - await 하면 JSON 과 쪽 그림을 다 받아 조각을 지을 때까지 기다린다. (기다리는 동안 프레임마다 update 를 불러 준다)
+//==============================================================================
+#[derive(Clone)]
+pub struct SpriteAtlasLoadHandle {
+	atlas_load: Rc<SpriteAtlasLoad>,
+}
+
+impl SpriteAtlasLoadHandle {
+	//==============================================================================
+	// 끝났는지. (조각을 지었거나 자료를 읽지 못해 끝났거나)
+	//==============================================================================
+	pub fn is_finished(&self) -> bool {
+		self.atlas_load.is_finished.get()
+	}
+}
+
+impl IntoFuture for SpriteAtlasLoadHandle {
+	type Output = ();
+	type IntoFuture = SpriteAtlasLoadFuture;
+
+	//==============================================================================
+	// 손잡이를 그대로 await 하기.
+	//==============================================================================
+	fn into_future(self) -> SpriteAtlasLoadFuture {
+		SpriteAtlasLoadFuture {
+			atlas_load: self.atlas_load,
+		}
+	}
+}
+
+//==============================================================================
+// 아틀라스 받기를 기다리는 퓨처. (손잡이를 await 하거나 wait_for_load 가 돌려준다)
+//==============================================================================
+#[derive(Clone)]
+pub struct SpriteAtlasLoadFuture {
+	atlas_load: Rc<SpriteAtlasLoad>,
+}
+
+impl Future for SpriteAtlasLoadFuture {
+	type Output = ();
+
+	//==============================================================================
+	// update 를 부르고 끝났는지 보기. (아직이면 다음 프레임에 다시 본다, 원본처럼 자료를 읽지 못해도 끝난다)
+	//==============================================================================
+	fn poll(self: Pin<&mut SpriteAtlasLoadFuture>, context: &mut Context<'_>) -> Poll<()> {
+		task::with_polling_engine(|engine| self.atlas_load.update(engine));
+		if self.atlas_load.is_finished.get() {
+			return Poll::Ready(());
+		}
+		context.waker().wake_by_ref();
+		Poll::Pending
+	}
+}
+
+//==============================================================================
+// 스프라이트 아틀라스.
+//==============================================================================
+pub struct SpriteAtlas {
+	atlas_load: Rc<SpriteAtlasLoad>,
+	// 앞서 다 읽힌 불러오기. (다시 불러오는 동안 원본처럼 앞의 조각을 그대로 쓴다)
+	previous_atlas_load: Option<Rc<SpriteAtlasLoad>>,
 }
 
 //==============================================================================
@@ -77,20 +321,16 @@ impl SpriteAtlas {
 	//==============================================================================
 	pub fn new() -> SpriteAtlas {
 		SpriteAtlas {
-			json_asset: None,
-			base_directory: String::new(),
-			frame_value_list: Vec::new(),
-			page_asset_list: Vec::new(),
-			frame_table: HashMap::new(),
-			is_data_read: false,
-			is_loaded: false,
+			atlas_load: Rc::new(SpriteAtlasLoad::new(None, "")),
+			previous_atlas_load: None,
 		}
 	}
 
 	//==============================================================================
 	// 아틀라스 JSON 과 쪽 그림 불러오기. (JSON 이 오면 쪽 그림을 청한다, 데스크탑은 이 자리에서 다 읽힌다)
+	// - 원본처럼 await 할 수 있는 손잡이를 돌려준다. (조각을 지을 때까지)
 	//==============================================================================
-	pub fn load(&mut self, engine: &Engine, json_path: &str) {
+	pub fn load(&mut self, engine: &Engine, json_path: &str) -> SpriteAtlasLoadHandle {
 		let base_directory = match json_path.rfind('/') {
 			Some(slash_index) => {
 				&json_path[..slash_index + 1]
@@ -99,198 +339,88 @@ impl SpriteAtlas {
 				""
 			}
 		};
-		self.base_directory = base_directory.to_string();
 		let mut json_asset = JsonAsset::new();
 		json_asset.load(engine, json_path);
-		self.json_asset = Some(json_asset);
-		self.is_data_read = false;
-		self.is_loaded = false;
-		self.update(engine);
+		self.replace_atlas_load(SpriteAtlasLoad::new(Some(json_asset), base_directory));
+		self.atlas_load.update(engine);
+		SpriteAtlasLoadHandle {
+			atlas_load: self.atlas_load.clone(),
+		}
 	}
 
 	//==============================================================================
 	// 아틀라스 자료로 불러오기. (JSON 을 읽은 값이나 코드에 둔 같은 꼴의 값, 쪽 경로에 빗금이 없으면 base_directory 를 앞에 붙인다)
+	// - 원본 loadData 처럼 await 할 수 있는 손잡이를 돌려준다. (쪽 그림을 다 받아 조각을 지을 때까지)
 	//==============================================================================
-	pub fn load_data(&mut self, engine: &Engine, atlas_data: &serde_json::Value, base_directory: &str) {
-		self.json_asset = None;
-		self.base_directory = base_directory.to_string();
-		self.is_loaded = false;
-		self.read_data(engine, atlas_data);
-		self.update(engine);
+	pub fn load_data(&mut self, engine: &Engine, atlas_data: &serde_json::Value, base_directory: &str) -> SpriteAtlasLoadHandle {
+		self.replace_atlas_load(SpriteAtlasLoad::new(None, base_directory));
+		if !self.atlas_load.read_data(engine, atlas_data) {
+			self.atlas_load.is_finished.set(true);
+		}
+		self.atlas_load.update(engine);
+		SpriteAtlasLoadHandle {
+			atlas_load: self.atlas_load.clone(),
+		}
 	}
 
 	//==============================================================================
-	// 진행. (JSON 이 왔으면 쪽 그림을 청하고, 쪽 그림이 다 왔으면 조각을 짓는다. 다 읽혔으면 true)
+	// 새 불러오기로 바꾸기. (조각을 지은 앞의 불러오기는 새 것이 조각을 지을 때까지 남겨 둔다)
+	//==============================================================================
+	fn replace_atlas_load(&mut self, atlas_load: SpriteAtlasLoad) {
+		if self.atlas_load.frame_table.get().is_some() {
+			self.previous_atlas_load = Some(self.atlas_load.clone());
+		}
+		self.atlas_load = Rc::new(atlas_load);
+	}
+
+	//==============================================================================
+	// 지금 보이는 불러오기. (새 것이 조각을 지었으면 새 것, 아니면 앞서 다 읽힌 것, 그것도 없으면 새 것)
+	//==============================================================================
+	fn read_shown_atlas_load(&self) -> &Rc<SpriteAtlasLoad> {
+		if self.atlas_load.frame_table.get().is_none() {
+			if let Some(previous_atlas_load) = &self.previous_atlas_load {
+				return previous_atlas_load;
+			}
+		}
+		&self.atlas_load
+	}
+
+	//==============================================================================
+	// 지금 보이는 조각 표. (지은 것이 없으면 None)
+	//==============================================================================
+	fn read_frame_table(&self) -> Option<&HashMap<String, Frame>> {
+		self.read_shown_atlas_load().frame_table.get()
+	}
+
+	//==============================================================================
+	// 진행. (JSON 이 왔으면 쪽 그림을 청하고, 쪽 그림이 다 왔으면 조각을 짓는다. 끝났으면 true, 원본처럼 자료를 읽지 못해도 끝난다)
 	//==============================================================================
 	pub fn update(&mut self, engine: &Engine) -> bool {
-		if self.is_loaded {
-			return true;
-		}
-		if !self.is_data_read {
-			let atlas_data = match self.json_asset.as_mut() {
-				Some(json_asset) => {
-					if !json_asset.get_asset_base().get_load_handle().map(|load_handle| load_handle.is_finished()).unwrap_or(false) {
-						return false;
-					}
-					json_asset.get_data().cloned()
-				}
-				None => {
-					return false;
-				}
-			};
-			match atlas_data {
-				Some(atlas_data) => {
-					self.read_data(engine, &atlas_data);
-				}
-				None => {
-					eprintln!("SpriteAtlas: 아틀라스 JSON 을 읽지 못했습니다");
-					self.is_data_read = true;
-					self.is_loaded = true;
-					return true;
-				}
-			}
-		}
-		let is_every_page_finished = self.page_asset_list.iter().all(|page_asset| page_asset.get_asset_base().get_load_handle().map(|load_handle| load_handle.is_finished()).unwrap_or(true));
-		if !is_every_page_finished {
-			return false;
-		}
-		self.build_frames();
-		self.is_loaded = true;
-		true
-	}
-
-	//==============================================================================
-	// 자료 읽기. (조각 값을 담고 쪽 그림을 청한다)
-	//==============================================================================
-	fn read_data(&mut self, engine: &Engine, atlas_data: &serde_json::Value) {
-		let mut page_path_list: Vec<String> = Vec::new();
-		self.frame_value_list.clear();
-		if let Some(image_table) = atlas_data.get("images").and_then(|images| images.as_object()) {
-			let meta = atlas_data.get("meta");
-			let page_list = meta.and_then(|meta| meta.get("pages")).and_then(|pages| pages.as_array());
-			match page_list {
-				Some(page_list) => {
-					for page in page_list {
-						let image_file_name = page.get("imageFileName").and_then(|value| value.as_str()).unwrap_or("");
-						page_path_list.push(image_file_name.to_string());
-					}
-				}
-				None => {
-					if let Some(image_file_name) = meta.and_then(|meta| meta.get("imageFileName")).and_then(|value| value.as_str()) {
-						page_path_list.push(image_file_name.to_string());
-					}
-				}
-			}
-			for (file_name, image_data) in image_table {
-				let read_number = |key: &str| -> f32 {
-					image_data.get(key).and_then(|value| value.as_f64()).unwrap_or(0.0) as f32
-				};
-				let page_index = image_data.get("page").and_then(|value| value.as_u64()).unwrap_or(0) as usize;
-				self.frame_value_list.push(AtlasFrameValue {
-					frame_name: file_name.clone(),
-					page_index,
-					rect: Rect::create(read_number("x"), read_number("y"), read_number("width"), read_number("height")),
-				});
-			}
-		}
-		else if let Some(frame_table) = atlas_data.get("frames").and_then(|frames| frames.as_object()) {
-			if let Some(page_paths) = atlas_data.get("pagePaths").and_then(|page_paths| page_paths.as_array()) {
-				for page_path in page_paths {
-					page_path_list.push(page_path.as_str().unwrap_or("").to_string());
-				}
-			}
-			for (frame_name, frame_values) in frame_table {
-				let read_number = |index: usize| -> f64 {
-					frame_values.get(index).and_then(|value| value.as_f64()).unwrap_or(0.0)
-				};
-				self.frame_value_list.push(AtlasFrameValue {
-					frame_name: frame_name.clone(),
-					page_index: read_number(0) as usize,
-					rect: Rect::create(read_number(1) as f32, read_number(2) as f32, read_number(3) as f32, read_number(4) as f32),
-				});
-			}
-		}
-		else {
-			eprintln!("SpriteAtlas: 아틀라스 꼴을 읽지 못했습니다");
-		}
-
-		// 쪽 그림을 한꺼번에 청한다.
-		self.page_asset_list.clear();
-		for page_path in &page_path_list {
-			let resolved_path = if page_path.contains('/') {
-				page_path.trim_start_matches("./").to_string()
-			}
-			else {
-				format!("{}{}", self.base_directory, page_path)
-			};
-			let mut page_asset = ImageAsset::new();
-			page_asset.load(engine, &resolved_path);
-			self.page_asset_list.push(page_asset);
-		}
-		self.is_data_read = true;
-	}
-
-	//==============================================================================
-	// 조각 짓기. (쪽 그림이 없거나 풀리지 않은 조각은 뺀다)
-	//==============================================================================
-	fn build_frames(&mut self) {
-		self.frame_table.clear();
-		let mut page_image_list = Vec::with_capacity(self.page_asset_list.len());
-		for page_asset in self.page_asset_list.iter_mut() {
-			page_image_list.push(page_asset.get_image());
-		}
-		for frame_value in &self.frame_value_list {
-			let page_image = match page_image_list.get(frame_value.page_index).and_then(|page_image| page_image.clone()) {
-				Some(page_image) => {
-					page_image
-				}
-				None => {
-					continue;
-				}
-			};
-			let frame = Frame::new(page_image, Some(frame_value.rect));
-			let base_name = remove_extension(&frame_value.frame_name);
-			if base_name != frame_value.frame_name && !self.frame_table.contains_key(base_name) {
-				self.frame_table.insert(base_name.to_string(), frame.clone());
-			}
-			self.frame_table.insert(frame_value.frame_name.clone(), frame);
-		}
+		self.atlas_load.update(engine)
 	}
 
 	//==============================================================================
 	// 씬이 아틀라스 JSON 을 기다리게 맡기기. (쪽 그림은 JSON 이 온 뒤 update 가 청한다)
 	//==============================================================================
 	pub fn track_json_asset(&self, scene_base: &mut SceneBase) {
-		if let Some(json_asset) = &self.json_asset {
+		if let Some(json_asset) = &self.atlas_load.json_asset {
 			scene_base.track_asset(json_asset);
 		}
 	}
 
 	//==============================================================================
-	// 다 읽혔는지. (조각을 지었는지)
+	// 다 읽혔는지. (조각을 지었는지, 다시 불러오는 동안은 원본처럼 앞의 것으로 본다)
 	//==============================================================================
 	pub fn is_loaded(&self) -> bool {
-		self.is_loaded
+		self.read_frame_table().is_some()
 	}
 
 	//==============================================================================
-	// 다 읽히기를 기다리기. (원본 await load(경로) 의 await 자리, load 나 load_data 뒤에 엔진 작업 안에서 await 한다)
-	// - 기다리는 동안 프레임마다 update 를 부른다. 아틀라스를 빌려 기다리므로 작업의 지역 값으로 쓴다.
+	// 다 읽히기를 기다리는 퓨처. (load 나 load_data 가 돌려준 손잡이를 await 하는 것과 같다. 아틀라스를 빌리지 않는다)
 	//==============================================================================
-	pub async fn wait_for_load(&mut self) {
-		loop {
-			let is_loaded = match task::with_polling_engine(|engine| self.update(engine)) {
-				Some(is_loaded) => {
-					is_loaded
-				}
-				None => {
-					self.is_loaded
-				}
-			};
-			if is_loaded {
-				return;
-			}
-			wait::next_frame().await;
+	pub fn wait_for_load(&self) -> SpriteAtlasLoadFuture {
+		SpriteAtlasLoadFuture {
+			atlas_load: self.atlas_load.clone(),
 		}
 	}
 
@@ -298,14 +428,14 @@ impl SpriteAtlas {
 	// 조각 읽기. (없거나 아직 읽히지 않았으면 None)
 	//==============================================================================
 	pub fn read_frame(&self, frame_name: &str) -> Option<&Frame> {
-		self.frame_table.get(frame_name)
+		self.read_frame_table()?.get(frame_name)
 	}
 
 	//==============================================================================
 	// 조각이 있는지.
 	//==============================================================================
 	pub fn has_frame(&self, frame_name: &str) -> bool {
-		self.frame_table.contains_key(frame_name)
+		self.read_frame(frame_name).is_some()
 	}
 
 	//==============================================================================
@@ -318,24 +448,24 @@ impl SpriteAtlas {
 	}
 
 	//==============================================================================
-	// 쪽 그림 목록. (읽힌 쪽만, 쪽 차례)
+	// 쪽 그림 목록. (읽힌 쪽만, 쪽 차례, 다시 불러오는 동안은 원본처럼 앞의 것)
 	//==============================================================================
 	pub fn get_page_images(&mut self) -> Vec<Rc<Image>> {
-		self.page_asset_list.iter_mut().filter_map(|page_asset| page_asset.get_image()).collect()
+		self.read_shown_atlas_load().atlas_data.borrow_mut().page_asset_list.iter_mut().filter_map(|page_asset| page_asset.get_image()).collect()
 	}
 
 	//==============================================================================
 	// 쪽 수.
 	//==============================================================================
 	pub fn get_page_count(&self) -> usize {
-		self.page_asset_list.len()
+		self.read_shown_atlas_load().atlas_data.borrow().page_asset_list.len()
 	}
 
 	//==============================================================================
-	// 이름 목록. (확장자를 뗀 이름과 파일 이름이 함께 든다)
+	// 조각 이름 목록.
 	//==============================================================================
 	pub fn get_frame_names(&self) -> Vec<String> {
-		self.frame_table.keys().cloned().collect()
+		self.read_frame_table().map(|frame_table| frame_table.keys().cloned().collect()).unwrap_or_default()
 	}
 
 	//==============================================================================

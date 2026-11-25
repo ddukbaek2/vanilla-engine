@@ -53,7 +53,7 @@ fn main() {
 	// 메모리의 wav 를 디코딩한다.
 	let tone_audio_asset = Rc::new(AudioAsset::new());
 	let tone_wave_bytes = create_tone_wave_bytes(440.0, 0.4, 0.5);
-	if let Err(error) = tone_audio_asset.load_from_bytes(tone_wave_bytes) {
+	if let Some(error) = tone_audio_asset.load_from_bytes(tone_wave_bytes).get_load_error() {
 		eprintln!("audiotone: {}", error);
 		std::process::exit(1);
 	}

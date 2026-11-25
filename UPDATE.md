@@ -390,19 +390,33 @@
   - ARCHITECTURE: 배치와 소유 구조, 프레임 루프, 블렌드와 글꼴과 애셋 형식, 9장 원본과의 대응(원본 200 파일 가운데 181 옮김, 일부러 안 옮긴 19 파일과 까닭), 10장 두 엔진의 차이(정말 맞출 수 없는 것과 일부러 정한 꼴)
   - UPDATE.md 이 판 머리의 겹친 줄(찍기 모드 여섯 벌)을 하나로, math 줄의 옛 설명을 고쳤다
   - 머리 주석: 원본에서도 고쳐 이제는 같은 것(묶어 그리기와 거르기 기본 켬, 프로그램과 텍스처 기억, Text 거르기, UIScene 의 use_dev_tools, 웹소켓 바이너리 JSON, Identifier.reset, Vector2 버그, pageshow 복구, DynamicFont 다시 놓기, 길이 0 트윈, set_playback_rate), UIImageView 의 그리는 차례(원본도 배경이 먼저), 그림 형식 목록(Material, GLB 그림, 쓰지 않는 avif-parse), 웹 글자 굽기, Scene 의 initialize 이름, lib.rs 의 웹 모듈 자리
-- async/await 를 원본처럼 쓴다. (지금까지는 받기 손잡이와 콜백으로 대신했다. 손잡이와 콜백 API 는 그대로 둔다)
-  - 엔진이 스레드 하나짜리 실행기를 품는다. (core/task.rs, 외부 런타임 없음, 데스크탑과 웹이 같은 코드) Engine::spawn_task(엔진 작업), spawn_scene_task(씬 작업, 그 씬을 내리면 버린다)로 맡긴 퓨처를 프레임마다 시간과 입력을 갱신한 뒤, 씬의 tick 앞에서 깨어난 것만 한 번씩 폴링한다. 퓨처는 Send 가 아니어도 된다
+- async/await 를 원본처럼 쓴다. (지금까지는 받기 손잡이와 콜백으로 대신했다. 손잡이를 맡기는 동기 꼴과 콜백 API 는 그대로 둔다)
+  - 엔진이 스레드 하나짜리 실행기를 품는다. (core/task.rs, 외부 런타임 없음, 데스크탑과 웹이 같은 코드, 퓨처는 Send 가 아니어도 된다)
+    Engine::spawn_task(엔진 작업), spawn_scene_task(씬 작업)는 원본 async 함수를 부를 때처럼 맡기는 자리에서 첫 await 까지 돌고,
+    남은 것은 프레임마다 시간과 입력을 갱신한 뒤 씬의 tick 앞에서 원본 마이크로태스크 줄처럼 깨운 차례대로 줄이 빌 때까지 폴링한다.
+    (한 작업이 Promise 를 풀거나 끝나면 기다리던 작업이 같은 차례에 풀린 차례대로 이어 가고, 스스로를 깨운 퓨처는 다음 프레임) &Engine 만 있는 자리는 spawn_deferred_task, spawn_deferred_scene_task
   - 작업은 컨텍스트(EngineContext, SceneContext<씬 타입>)의 with(|씬, 엔진| ...) 안에서만 씬과 엔진을 빌린다. 폴링하는 동안만 스레드 지역 칸에 둔 포인터를 꺼내 쓰고 되돌려 두 번째 &mut 가 생기지 않는다. 그래픽은 with_graphic. TaskHandle 로 끝났는지 묻거나 await 한다
-  - Promise, PromiseResolver: 원본 new Promise((resolve) => ...) 자리. Promise::create 가 퓨처와 resolve 손잡이를 짝으로 준다. Promise::resolved
-  - wait::seconds, wait::next_frame (원본 base/wait.js, 그동안 옮기지 않았다). seconds 는 원본 setTimeout 처럼 벽시계 초다. (시간 배율을 곱하지 않는다) 원본 nextFrame 은 만든 Promise 를 await 하지 않아 바로 끝나는 버그가 있다. 러스트 판은 다음 프레임까지 기다린다
-  - 씬: 원본 async load 자리로 create 에서 맡긴 작업을 SceneBase::track_task 로 맡기면 끝날 때까지 initialize 를 미룬다. Engine::load_scene_async, unload_scene_async, unload_all_scenes_async (원본 await SceneManager.loadScene 들)
-  - 애셋: Asset::wait_for_load, AssetLoadHandle 은 IntoFuture. (AssetLoadFuture) AudioAsset, AssetLoader(실패 목록), SpriteAtlas, BuildInfo, SoundSystem 의 wait_for_load, languagepack::wait_for_load, uifont::wait_for_load. 기다리는 동안 update 가 드는 것은 퓨처가 불러 준다
-  - FbxLoadHandle, ImageDescriptionLoadHandle 은 IntoFuture (FbxLoadFuture, ImageDescriptionLoadFuture). SkinnedModel::load_from_url_async, load_from_fbx_url_async (다 받으면 작업을 폴링하는 엔진의 GL 로 짓는다). Timeline::load_from_url (원본 loadFromUrl)
+  - Promise, PromiseResolver: 원본 new Promise((resolve, reject) => ...) 자리. Promise::create, Promise::resolved, Promise<Result<T, E>> 의 reject(까닭)
+  - wait::seconds, wait::next_frame (원본 base/wait.js, 그동안 옮기지 않았다). seconds 는 원본 setTimeout 처럼 벽시계 초이고(시간 배율을 곱하지 않는다) 0 초라도 한 차례 쉬며, 밀리초를 WebIDL long 으로 감는 것도 같다.
+    원본 nextFrame 이 만든 Promise 를 await 하지 않아 바로 끝나던 것은 원본(vanilla.js dev 89847b7)에서도 고쳐 둘 다 다음 프레임까지 기다린다
+  - 씬: 원본 async load 자리로 create 에서 맡긴 작업을 SceneBase::track_task 로 맡기면 끝날 때까지 initialize 를 미룬다. unload 에서 맡기면 원본 await scene.unload 처럼 끝날 때까지 씬이 목록에 남는다(tick, draw 도 받는다).
+    씬을 내려도 그 씬의 작업은 원본의 Promise 사슬처럼 이어 돌고, 엔진은 작업이 끝날 때까지 씬 값을 살려 둔다(tick, draw 없이, with 는 그 씬을 준다). 불러오는 도중에 내린 씬은 원본 loadScene 처럼 불러오기가 끝나면 initialize 까지 받는다. destroy 는 씬 값을 버릴 때 부른다.
+    Engine::load_scene_async, unload_scene_async, unload_all_scenes_async (원본 await SceneManager.loadScene 들, 내리기는 unload 의 작업까지 끝나야 풀린다)
+  - 원본에서 Promise 를 돌려주는 load 들이 애셋이나 씬을 빌리지 않는 await 할 수 있는 손잡이를 돌려준다. (원본 await this.atlas.load(경로) 가 scene_context.with(|씬, 엔진| 씬.atlas.load(엔진, 경로)).await 한 줄)
+    ImageAsset(풀기까지, 풀지 못하면 실패), TextAsset, JsonAsset, BlobAsset, BunchAsset, VisualAsset(원본처럼 경로만 적고 바로 끝남), FontAsset 의 load_font 들(FontLoadHandle, 글꼴 목록에 올리기까지),
+    AudioAsset 의 load, load_from_bytes, load_from_asset(AudioLoadHandle, 디코딩까지. 돌려주던 Result 대신 손잡이의 get_load_error 로 그 자리 실패를 본다), AssetLoader::load(실패 목록), SpriteAtlas 의 load, load_data(아틀라스를 빌리지 않는 나눠 든 상태),
+    BuildInfo::load, SoundSystem::load_sounds, languagepack 의 load_language_list, load_language, apply_language_setting, uifont 의 load_ui_font, load_ui_font_text(UiFontTextLoadHandle).
+    Engine::register_font_face_when_loaded 도 FontLoadHandle 을 돌려준다. 이미 load 한 것은 wait_for_load().await 로도 기다린다
+  - FbxLoadHandle, ImageDescriptionLoadHandle 은 IntoFuture. SkinnedModel::load_from_url_async, load_from_fbx_url_async (다 받으면 작업을 폴링하는 엔진의 GL 로 짓는다). Timeline::load_from_url (원본 loadFromUrl)
+  - SkinnedModel::add_animations_from_fbx_url 이 AnimationLoadHandle 을 돌려준다. await 가 끝날 때는 원본처럼 클립이 이미 더해져 있다. (클립 목록을 손잡이와 나눠 들어, 받은 차례로 더한다) get_animation_list 는 빌린 값(Ref)을 준다
+  - languagepack::set_language_loaded_async_handler: 퓨처를 돌려주는 불러온 뒤 함수. 원본 applyLanguageSetting 처럼 그 퓨처가 끝날 때까지 불러오는 중이다
+  - SpriteAtlas 는 원본처럼 다시 불러오는 동안 앞의 조각과 쪽 그림을 그대로 쓰고, JSON 을 읽지 못했거나 꼴을 모르면 조각 없이 끝난다. (지금까지는 빈 조각으로 읽힌 것으로 쳤다)
   - Engine::read_clipboard_text_async (원본 readClipboardText, 없거나 거부되면 None), request_frame_capture_async (원본 requestFrameCapture, PNG 바이트)
-  - 화면 페이드: GameScene::fade_screen_async, GameSceneBase::fade_screen_async (원본 onDark 가 Promise 를 돌려주면 끝날 때까지 어둡게 두는 것)
+  - 화면 페이드: GameScene::fade_screen_async(on_dark), GameSceneBase::fade_screen_async::<씬 타입>. 다 어두워진 tick 에서 game_scene!, ui_scene! 이 on_dark 를 씬 작업으로 맡겨 그 자리에서 첫 await 까지 돌리고(원본 onDark 를 부르는 자리), 퓨처가 끝나면 밝아진다.
+    Scene 을 직접 구현한 씬은 바탕 tick 뒤에 take_screen_fade_dark_starter 로 꺼내 start 한다
   - Scene 트레이트에 SceneAny 바탕 트레이트(as_scene_any_mut, 모든 'static 씬에 저절로 붙는다)를 더했다. SceneContext 가 씬을 제 타입으로 되돌릴 때 쓴다
-  - 예제 asyncawait. 시험 12 개(실행기, 깨우기, 기다리기, 애셋 퓨처, 컨텍스트 접근, 빼돌린 컨텍스트의 패닉, 씬 불러오기와 내리기, 페이드)
-  - README 장점과 사용법(씬 생명주기, 애셋 로딩의 원본과 러스트 표, 예제), 기술 노트, ARCHITECTURE 배치와 소유 구조와 프레임 루프, 9장(원본 182 파일 옮김), 10장(async 를 정말 맞출 수 없는 것에서 빼고 남은 꼴을 일부러 정한 꼴에)
+  - 예제 asyncawait. 시험 17 개(실행기와 그 자리 첫 폴링, 깨우기, 깨운 차례 줄, 기다리기와 setTimeout 지연, 애셋과 그림 손잡이, 엔진을 빌리는 손잡이, 컨텍스트 접근, 빼돌린 컨텍스트의 패닉, 씬 불러오기, 내린 씬 살려 두기, unload 기다리기, 불러오는 도중 내린 씬, 페이드, 언어 묶음 async 함수, 애니메이션 손잡이)
+  - README 장점과 사용법(씬 생명주기, 애셋 로딩의 원본과 러스트 표, 예제), 기술 노트, ARCHITECTURE 배치와 소유 구조와 프레임 루프, 9장(원본 182 파일 옮김), 10장(async 를 정말 맞출 수 없는 것에서 빼고 with 만 일부러 정한 꼴에)
 - 데스크탑을 크롬 위의 원본과 더 맞췄다. (크로미엄 소스로 크롬이 하는 것을 확인해 옮김, ARCHITECTURE 10장)
   - 웨이랜드 페이지 이벤트 Hidden: 크롬 리눅스 웨이랜드처럼 보낸 wl_surface.frame 콜백이 3 초 동안 오지 않으면 가려짐으로 보고 Hidden, 다시 오면 Visible 과 on_page_visibility_restored 를 낸다. winit 창의 wl_display 에 wayland-client 를 손님 연결로 붙여 제 큐에서 콜백을 보낸다. 메사가 가려진 창에서 eglSwapBuffers 안에 멈추지 않게, 웨이랜드는 SDL 처럼 EGL 스왑 간격을 0 으로 두고 엔진이 지난 프레임 콜백을 1/20 초까지 기다린다. xdg_toplevel suspended 는 winit 이 쥐고 있어 받지 못한다
   - 윈도우 터치 키보드: 크롬 윈도우처럼 손가락이나 펜으로 플랫폼 입력 필드(use_dominput)에 포커스하거나 누르면 창에 묶은 InputPane 으로 터치 키보드를 띄우고(300 밀리초로 고름), 포커스가 떠나면 내린다. 가린 영역의 세로만큼 visualViewport 를 줄여 auto_resize_on_window_resize 면 캔버스가 줄고, ignore_virtual_keyboard_resize 가 데스크탑에서도 원본처럼 그것을 막는다. 맥과 리눅스는 크롬처럼 뷰포트를 줄이지 않는다

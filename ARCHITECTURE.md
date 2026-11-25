@@ -77,7 +77,7 @@ EngineRunner (플랫폼이 들고 프레임마다 부른다)
 │   ├── PointerCursor (켜져 있으면 프레임 끝에 커서를 플랫폼에 넘긴다)
 │   ├── AudioManager (소리 장치는 처음 쓸 때 연다)
 │   ├── Platform (플랫폼, 브라우저 정보)
-│   ├── TaskExecutor (async 작업, 씬 작업은 씬 핸들로 묶여 그 씬을 내리면 버린다)
+│   ├── TaskExecutor (async 작업, 씬 작업은 씬 핸들로 그 씬을 가리킨다)
 │   ├── platform_window (창 손잡이: 데스크탑 winit Window, 웹 캔버스)
 │   ├── pending_scene_list, pending_font_registration_list, 페이지 이벤트 리스너
 ├── Graphic (플랫폼이 GL 컨텍스트를 만든 뒤 attach_graphic 으로 넘김)
@@ -86,13 +86,14 @@ EngineRunner (플랫폼이 들고 프레임마다 부른다)
 │   ├── TextStringTextureCache (데스크탑: rustybuzz 모양 짓기, fontdue 와 skrifa 래스터, 색 글리프 colorglyph, 맥 색 이모지는 CoreText,
 │   │                           시스템 글꼴 사슬과 운영체제 대체 글꼴 / 웹: 브라우저 Canvas2D)
 │   └── 묶음 버퍼, 클립 스택, 블렌드 섞기용 바탕 칸
-└── Scene[] (Box<dyn Scene>)
-    └── SceneBase
-        ├── NodeTree ── slotmap<NodeId, WorldNode>, 루트 노드
-        │   └── WorldNode ── NodeTransform, Vec<Box<dyn Component>>, parent_id, child_ids
-        ├── Tween[] (TweenId 로 가리킴)
-        ├── 맡긴 애셋 목록 (다 읽히고 0.3초 뒤 initialize)
-        └── 눌린 노드, 첫 터치 콜백
+├── Scene[] (Box<dyn Scene>, 불러온 씬. unload 가 맡긴 작업을 기다리는 내리는 중인 씬도 원본처럼 여기 남는다)
+│   └── SceneBase
+│       ├── NodeTree ── slotmap<NodeId, WorldNode>, 루트 노드
+│       │   └── WorldNode ── NodeTransform, Vec<Box<dyn Component>>, parent_id, child_ids
+│       ├── Tween[] (TweenId 로 가리킴)
+│       ├── 맡긴 애셋과 작업 목록 (다 끝나고 0.3초 뒤 initialize), unload 에서 맡긴 목록 (끝나야 내리기가 끝난다)
+│       └── 눌린 노드, 첫 터치 콜백
+└── 내린 뒤 살려 둔 씬[] (그 씬의 작업이 남았거나 불러오기가 덜 끝난 씬. tick, draw 는 받지 않고 작업의 with 가 받는다. 다 끝나면 destroy)
 ```
 
 애셋은 원본처럼 중앙 매니저 없이 씬이 멤버로 든다. 같은 그림을 여러 번 그려도 GPU 텍스처는 Graphic 의 캐시가 하나만 만든다. 여럿을 함께 받을 때는 AssetLoader 가 동시 수만큼 요청하고 진행률을 센다.
@@ -117,6 +118,7 @@ EngineRunner (플랫폼이 들고 프레임마다 부른다)
 2. graphic.apply_settings()          뷰포트, 프로젝션, 상태 리셋, 화면 비우기 (preserve_drawing_buffer 면 원본처럼 스텐실만 비운다)
 3. time_manager.update(), input_manager.tick() (게임패드 폴링, 입력 동작 갱신 포함)
 4. 깨어난 작업 폴링 (task::poll_tasks, 작업마다 많아야 한 번. 씬 작업은 그 씬과 엔진을, 엔진 작업은 엔진을 with 안에서 빌린다)
+   → 내리기 마무리 (unload 가 맡긴 작업이 끝난 씬을 목록에서 빼고 unload_scene_async 의 Promise 를 푼다, 작업이 다 끝난 살려 둔 씬은 destroy)
 5. 씬마다:
    - 맡긴 애셋과 작업을 기다리는 씬: 다 끝나고 0.3초가 지났으면 initialize 와 resize(그리고 load_scene_async 의 Promise 를 푼다), 아니면 draw_on_load 만
    - scene.tick → SceneBase.tick: 노드 tick(컴포넌트 → 자식) → 휠, 터치 전달 → 트윈
@@ -124,18 +126,23 @@ EngineRunner (플랫폼이 들고 프레임마다 부른다)
    - pre_draw → draw(NodeTree.draw 재귀) → post_draw → (기즈모)
 6. 통계 출력(옵션: FPS, DrawCall, Vertex, Culled) → 마우스 커서(PointerCursor) → 1회성 입력 플래그 지우기
 7. graphic.end_frame() (묶음 내보내기) → 검증용 화면 저장(request_frame_capture, 데스크탑 VANILLA_CAPTURE_*, 웹 ?capture=) → 프레임 번호 증가 (첫 프레임 1)
-8. 씬 목록 바꾸기 (apply_pending_scenes: 불러온 씬 create, 내린 씬 finalize, unload, destroy 와 그 씬의 작업 버리기, unload_scene_async 의 Promise 풀기)
+8. 씬 목록 바꾸기 (apply_pending_scenes: 내릴 씬 finalize, unload 와 내리기 마무리, 불러온 씬 create. create 와 unload 에서 맡긴 작업은 그 자리에서 첫 await 까지 돈다)
 플랫폼: 데스크탑은 preserve_drawing_buffer 면 update_engine 앞에 지난 프레임 그림을 되그리고 뒤에 떠 둔다(desktop/preserveddrawingbuffer.rs)
 플랫폼: 데스크탑은 렌더 배율 상한이나 캔버스 비 상한으로 줄여 그렸으면 창의 캔버스 자리로 늘이고(desktop/renderscaler.rs), 화면 넘기기 (데스크탑 swap_buffers, 웹은 콜백이 끝나면 브라우저가)
 플랫폼: 웨이랜드는 EGL 스왑 간격을 0 으로 두고, 넘기기 전에 지난 프레임 콜백을 1/20 초까지 기다린 뒤 새 콜백을 보낸다 (desktop/waylandframecallback.rs)
 ```
 
-씬 불러오기는 원본의 create → load(비동기) → set_loaded → initialize 를 create → (맡긴 애셋과 작업을 기다림) → initialize 로 옮겼다. 원본 async load 의 몸은 create 에서 spawn_scene_task 로 맡긴 불러오기 작업이고, track_task 로 씬에 맡기면 엔진이 그 작업이 끝나기를 기다린다. (애셋 손잡이를 track_asset 으로 맡기는 동기 꼴도 그대로 된다) create 바로 뒤에 루트를 원본 Scene.load 처럼 뷰 크기로 맞추고, 맡긴 것이 다 끝난 뒤에도 원본 SceneManager.loadScene 처럼 0.3초 더 로딩 화면을 보인다. 데스크탑은 애셋이 그 자리에서 읽혀서 작업이 없으면 create 뒤 0.3초에 initialize 가 불린다.
+씬 불러오기는 원본의 create → load(비동기) → set_loaded → initialize 를 create → (맡긴 애셋과 작업을 기다림) → initialize 로 옮겼다. 원본 async load 의 몸은 create 에서 spawn_scene_task 로 맡긴 불러오기 작업이고(맡기는 자리에서 첫 await 까지 돈다), track_task 로 씬에 맡기면 엔진이 그 작업이 끝나기를 기다린다. (애셋 손잡이를 track_asset 으로 맡기는 동기 꼴도 그대로 된다) create 바로 뒤에 루트를 원본 Scene.load 처럼 뷰 크기로 맞추고, 맡긴 것이 다 끝난 뒤에도 원본 SceneManager.loadScene 처럼 0.3초 더 로딩 화면을 보인다. 데스크탑은 애셋이 그 자리에서 읽혀서 작업이 없으면 create 뒤 0.3초에 initialize 가 불린다.
+
+씬 내리기는 원본 SceneManager.unloadScene 처럼 finalize, unload 를 부르고 unload 가 track_task 로 맡긴 작업(원본 await scene.unload)이 끝날 때까지 씬을 목록에 둔다. (원본처럼 그동안 tick, draw 를 받는다) 끝나면 목록에서 빼고 unload_scene_async, unload_all_scenes_async 의 Promise 를 푼다. 그 씬의 작업이 남았거나 불러오기가 덜 끝났으면 원본의 Promise 사슬처럼 씬 값을 살려 두고(tick, draw 없이), 불러오기가 끝나면 원본 loadScene 처럼 initialize 까지 부른다. 다 끝나면 destroy 를 부르고 버린다.
 
 async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(core/task.rs)를 품는다. 퓨처는 Send 가 아니어도 되고 데스크탑과 웹이 같은 코드로 돈다.
-- 깨우기: 작업마다 Arc 에 든 원자 표시를 std::task::Wake 로 만든 Waker 다. 깨우면 표시만 서고, 폴링 차례에 목록을 한 번 돌며 표시가 선 작업만 표시를 내리고 폴링한다. 한 작업은 한 프레임에 많아야 한 번이고, 스스로 깨운 작업은 다음 프레임이다. 엔진 상태를 보는 퓨처(애셋 손잡이, wait::seconds, wait::next_frame)는 아직이면 스스로 깨워 다음 프레임에 다시 보고, Promise 는 resolve 가, 웹 Promise 는 JsFuture 가 깨운다.
+- 맡기기: spawn_task(&mut Engine), spawn_scene_task(&mut Engine, &mut 씬)는 원본 async 함수를 부를 때처럼 그 자리에서 첫 await 까지 한 번 폴링한다. 받은 &mut 로 칸을 세우고 폴링이 끝나면 앞의 값으로 되돌린다. (그 자리에는 그래픽이 없어 첫 구간의 with_graphic 은 None) &Engine 만 있는 자리는 spawn_deferred_task, spawn_deferred_scene_task 로 맡기고 다음 폴링 차례에 처음 돈다.
+- 깨우기: 원본 마이크로태스크 줄처럼 깨운 차례대로 줄에 넣고(Waker 는 std::task::Wake, 줄은 Arc 와 Mutex), 폴링 차례에 줄이 빌 때까지 앞에서부터 폴링한다. 한 작업이 Promise 를 풀거나 끝나면 기다리던 작업은 같은 차례에 풀린 차례대로 이어 간다. 폴링되는 도중에 스스로를 깨운 작업(엔진 상태를 보는 퓨처: 애셋 손잡이, wait::seconds, wait::next_frame)은 다음 프레임 줄에 들어간다. Promise 는 resolve 가, TaskHandle 은 그 작업이 끝날 때, 웹 Promise 는 JsFuture 가 깨운다. 내리기 마무리가 푼 Promise 를 기다리던 작업도 같은 차례에 이어 간다.
 - 엔진과 씬에 닿기: 퓨처는 &mut 를 await 너머로 쥘 수 없어서, 작업은 컨텍스트의 with(|씬, 엔진| ...) 클로저 안에서만 빌린다. 폴링하는 동안만 스레드 지역 칸에 엔진, 그래픽, 그 작업의 씬을 가리키는 포인터를 두고, with 는 그것을 꺼내 쓰고 되돌린다. 포인터는 실행기가 &mut 로 쥔 서로 다른 값(EngineRunner 의 엔진, 그래픽, 씬 목록의 한 칸)에서 만들고 폴링이 끝날 때까지 실행기는 그 &mut 를 쓰지 않는다. 폴링하는 작업 목록은 엔진에서 꺼내 둔 지역 값이다. with 가 쓰는 동안 칸이 비어 있어 두 번째 &mut 가 생길 길이 없고, 컨텍스트는 복제할 수 없고 with 가 &mut self 를 받아 겹친 with 는 컴파일되지 않는다. 클로저 인자의 수명은 클로저마다 새로 매겨져 참조가 밖으로 새지 않는다. 씬은 Any 로 컨텍스트의 타입인지 보고, 씬 핸들로 그 작업의 씬인지 본다. (빼돌린 컨텍스트를 작업 바깥이나 다른 씬에서 쓰면 이중 빌림 대신 까닭을 적은 패닉)
-- 엔진을 빌려 이어 가는 퓨처(AssetLoader, SpriteAtlas, LanguagePack, UIFont 의 wait_for_load, 모델 짓기)는 같은 칸을 crate 안에서 잠깐 꺼내 update 를 부르거나 GL 을 쓴다.
+- 원본에서 Promise 를 돌려주는 load 들은 애셋이나 씬을 빌리지 않는 나눠 든 상태의 손잡이(IntoFuture)를 돌려준다. 그래서 원본 await this.atlas.load(경로) 가 scene_context.with(|씬, 엔진| 씬.atlas.load(엔진, 경로)).await 한 줄이다.
+- 엔진을 빌려 이어 가는 퓨처(AssetLoader, SpriteAtlas, LanguagePack, UIFont 의 손잡이, 모델 짓기)는 같은 칸을 crate 안에서 잠깐 꺼내 update 를 부르거나 GL 을 쓴다.
+- 화면 페이드(fade_screen_async)는 다 어두워진 tick 에서 game_scene! 이 on_dark 를 씬 작업으로 맡겨 그 자리에서 첫 await 까지 돌린다. (원본 onDark 를 부르는 자리)
 
 데스크탑 찍기 모드(VANILLA_CAPTURE_PATH)는 창을 숨기고 돈다. 숨긴 창은 다시 그리기 요청과 수직 동기가 없어 about_to_wait 에서 프레임을 바로 돌고, 최대 FPS 가 없으면 모니터 주사율(모르면 60)로 빠르기를 맞춘다. 창을 보려면 VANILLA_CAPTURE_SHOW_WINDOW=1 이다.
 
@@ -155,7 +162,7 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
 
 ## 7. 애셋
 
-- `ImageAsset`, `TextAsset`, `JsonAsset`, `BlobAsset`, `FontAsset`: `load(engine, 경로)` 로 요청하고 `scene_base.track_asset(&asset)` 으로 맡긴다. 엔진 작업 안에서는 `wait_for_load().await` 로 기다린다. (원본 await asset.load(경로), 읽기 손잡이 AssetLoadHandle 도 그대로 await 한다) 데스크탑은 애셋 폴더 후보에서 파일을 읽고, 웹은 `asset_base_url + 경로` 를 fetch 한다.
+- `ImageAsset`, `TextAsset`, `JsonAsset`, `BlobAsset`, `FontAsset`: `load(engine, 경로)` 로 요청하고 `scene_base.track_asset(&asset)` 으로 맡긴다. load 는 원본처럼 await 할 수 있는 손잡이를 돌려준다. (원본 await asset.load(경로) 는 엔진 작업 안에서 `scene_context.with(|씬, 엔진| 씬.애셋.load(엔진, 경로)).await`, 그림은 풀기까지, 글꼴은 글꼴 목록에 올리기까지 기다린다) 데스크탑은 애셋 폴더 후보에서 파일을 읽고, 웹은 `asset_base_url + 경로` 를 fetch 한다.
 - 실패한 애셋도 "끝난 것"으로 쳐서 씬이 멈추지 않는다. 풀지 못한 JSON 은 원본처럼 읽히지 않은 것이다.
 - AssetLoader 는 여러 애셋을 동시 수(기본 6)만큼 받고 진행률과 실패 목록을 센다. 다 받은 그림은 원본 img.onload 처럼 풀어 보고, 깨진 것은 실패로 친다. 푼 그림은 읽기 손잡이에 담겨 ImageAsset 이 다시 풀지 않는다.
 - `AudioAsset` 은 오디오 백엔드와 붙어 있어 `engine.load_audio_asset` 으로 읽고 `track_audio_asset` 으로 맡긴다.
@@ -257,8 +264,5 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
 | 콜백은 Box<dyn FnMut> 로 받고, 콜백 게터와 갈아 끼운 저장소는 Rc<RefCell> 로 돌려준다 | 엔진과 부르는 쪽이 같은 함수를 나눠 쥐고 부르는 동안 다시 부르는 것을 막는다 |
 | 예외 대신 Result 와 Option, 셰이더를 짓지 못하면 한 번 알리고 건너뛴다 | 러스트는 예외를 던지지 않는다. 한 효과가 실패해도 프레임이 멈추지 않게 했다 |
 | 이름은 러스트 규칙(snake_case, UpperCamelCase, SCREAMING_SNAKE_CASE)이다 | Rust API Guidelines C-CASE 를 따른다 |
-| async 작업은 컨텍스트의 with(\|씬, 엔진\| ...) 안에서만 씬과 엔진을 만진다 (원본은 await 다음 줄에서 this 와 엔진을 바로 쓴다) | 러스트 퓨처는 &mut 를 await 너머로 쥘 수 없다. 폴링하는 동안만 빌려 주어 이중 빌림이 생기지 않게 했다 |
-| 작업은 spawn_task, spawn_scene_task 로 맡기고 다음 프레임의 폴링 차례에 처음 돈다 (원본 async 함수는 부르는 자리에서 첫 await 까지 바로 돈다) | 러스트 퓨처는 폴링해야 돈다. 맡기는 자리(create, tick 같은)는 씬과 엔진을 빌린 중이라 거기서 폴링하면 겹쳐 빌리게 된다 |
-| await 하는 꼴은 load(engine, ...) 다음 wait_for_load().await 다 (원본 load 는 Promise 를 돌려준다) | 요청만 하는 지금 load 와 손잡이를 맡기는 동기 꼴을 그대로 두고 기다리기를 더했다 |
-| 씬을 내리면 그 씬의 작업을 버린다, unload 는 기다리지 않는다 (원본은 Promise 사슬이 이어 돌고, SceneManager 가 await unload 뒤에 목록에서 뺀다) | 작업이 빌릴 씬이 없어진다. 내린 뒤에 할 비동기 일은 엔진 작업(spawn_task)으로 맡긴다 |
-| Promise 는 resolve 만 있다 (실패는 Result 를 담아 푼다) | 예외 대신 Result 를 쓰는 것과 같다 |
+| async 작업은 컨텍스트의 with(\|씬, 엔진\| ...) 안에서만 씬과 엔진을 만진다 (원본은 await 다음 줄에서 this 와 엔진을 바로 쓴다) | 전역 엔진이 없고 노드를 NodeId 로 가리키는 것과 같은 러스트 빌림 꼴이다. 러스트 퓨처는 &mut 를 await 너머로 쥘 수 없어, 폴링하는 동안만 빌려 주어 이중 빌림이 생기지 않게 했다 |
+| 원본 reject 는 Promise<Result<T, E>> 의 reject(까닭)이고, 실패할 수 있는 손잡이의 await 는 Result 로 끝난다 | 예외 대신 Result 를 쓰는 것과 같다 |

@@ -13,7 +13,9 @@
 // - 원본 async load(engine) 자리: create 에서 Engine::spawn_scene_task 로 불러오기 작업을 맡기고 track_task 로 씬에 맡긴다.
 //   작업 안에서는 원본처럼 await 로 애셋을 기다리고, SceneContext::with 안에서 씬과 엔진을 만진다. 맡긴 작업과 애셋이 모두 끝나야 initialize 를 부른다.
 //   애셋 손잡이를 track_asset 으로 맡기는 동기 꼴도 그대로 된다. (둘을 섞어도 된다)
-//   원본 unload(engine) 의 await 는 러스트 판에서 기다리지 않는다. 씬은 그 프레임 끝에 내리고 그 씬의 작업도 버린다. (내린 뒤에 할 비동기 일은 엔진 작업 spawn_task 로 맡긴다)
+//   원본 await unload(engine) 자리: unload 에서 맡긴 작업(track_task)이 끝날 때까지 씬은 목록에 남아 tick, draw 를 받고, 끝나면 목록에서 빠진다.
+//   그 뒤에도 그 씬의 작업이 남았으면 원본의 Promise 사슬처럼 다 끝날 때까지 씬 값이 살고(tick, draw 는 받지 않는다), 불러오는 도중에 내린 씬은
+//   원본 SceneManager.loadScene 처럼 불러오기가 끝나면 initialize 까지 받는다. 다 끝나면 엔진이 destroy 를 부르고 버린다.
 // - 원본 Scene.load 가 루트를 뷰 크기로 맞추는 것(자리 0, 왼쪽 위 피벗, 콘텐츠 크기는 뷰 크기)은 엔진이 create 바로 뒤에 한다.
 //   원본 SceneManager.loadScene 처럼 맡긴 애셋이 다 끝난 뒤에도 로딩 화면(draw_on_load)을 최소 0.3초 더 보이고 initialize 를 부른다.
 // - 씬의 터치 훅(touch_press, touch_move, touch_release, touch_cancel, touch_wheel)은 원본 Scene.tickTouch 차례로 엔진이 tick 뒤에 부른다.
@@ -88,6 +90,9 @@ pub struct SceneBase {
 	scene_background_color: Color,
 	pressed_node_id: Option<NodeId>,
 	tracked_load_list: Vec<TrackedLoad>,
+	// 내리기를 시작했는지. (그 뒤로 맡긴 것은 내리기 작업이다, 원본 await scene.unload 자리)
+	is_unload_started: bool,
+	tracked_unload_list: Vec<TrackedLoad>,
 	has_ever_touched: bool,
 	first_touch_callback: Option<Box<dyn FnMut()>>,
 	scene_id: Option<SceneId>,
@@ -112,6 +117,8 @@ impl SceneBase {
 			scene_background_color: Color::black(),
 			pressed_node_id: None,
 			tracked_load_list: Vec::new(),
+			is_unload_started: false,
+			tracked_unload_list: Vec::new(),
 			has_ever_touched: false,
 			first_touch_callback: None,
 			scene_id: None,
@@ -161,7 +168,7 @@ impl SceneBase {
 	//==============================================================================
 	pub fn track_asset(&mut self, asset: &dyn Asset) {
 		if let Some(load_handle) = asset.get_asset_base().get_load_handle() {
-			self.tracked_load_list.push(TrackedLoad::AssetLoadHandle(load_handle.clone()));
+			self.push_tracked_load(TrackedLoad::AssetLoadHandle(load_handle.clone()));
 		}
 	}
 
@@ -169,21 +176,48 @@ impl SceneBase {
 	// 읽기 손잡이 맡기기. (애셋 꼴이 아닌 것)
 	//==============================================================================
 	pub fn track_load_handle(&mut self, load_handle: &AssetLoadHandle) {
-		self.tracked_load_list.push(TrackedLoad::AssetLoadHandle(load_handle.clone()));
+		self.push_tracked_load(TrackedLoad::AssetLoadHandle(load_handle.clone()));
 	}
 
 	//==============================================================================
 	// 오디오 애셋 맡기기. (engine.load_audio_asset 으로 받은 것. 웹은 디코딩이 끝나야 읽힌 것으로 친다)
 	//==============================================================================
 	pub fn track_audio_asset(&mut self, audio_asset: &Rc<AudioAsset>) {
-		self.tracked_load_list.push(TrackedLoad::AudioAsset(audio_asset.clone()));
+		self.push_tracked_load(TrackedLoad::AudioAsset(audio_asset.clone()));
 	}
 
 	//==============================================================================
 	// 작업 맡기기. (원본 async load 자리, create 에서 spawn_scene_task 로 맡긴 불러오기 작업. 끝나야 엔진이 initialize 를 부른다)
+	// - unload 에서 맡기면 원본 await scene.unload 처럼 끝나야 내리기가 끝난다. (그동안 씬은 목록에 남는다)
 	//==============================================================================
 	pub fn track_task(&mut self, task_handle: &TaskHandle) {
-		self.tracked_load_list.push(TrackedLoad::Task(task_handle.clone()));
+		self.push_tracked_load(TrackedLoad::Task(task_handle.clone()));
+	}
+
+	//==============================================================================
+	// 맡긴 것 넣기. (내리기를 시작했으면 내리기 목록에)
+	//==============================================================================
+	fn push_tracked_load(&mut self, tracked_load: TrackedLoad) {
+		if self.is_unload_started {
+			self.tracked_unload_list.push(tracked_load);
+		}
+		else {
+			self.tracked_load_list.push(tracked_load);
+		}
+	}
+
+	//==============================================================================
+	// 내리기 시작. (엔진이 unload 를 부르기 바로 앞에 부른다, 그 뒤로 맡긴 것은 내리기가 기다린다)
+	//==============================================================================
+	pub(crate) fn begin_unload_tracking(&mut self) {
+		self.is_unload_started = true;
+	}
+
+	//==============================================================================
+	// unload 에서 맡긴 것이 다 끝났는지. (읽혔거나 실패했거나 작업이 끝났거나)
+	//==============================================================================
+	pub fn are_tracked_unloads_finished(&self) -> bool {
+		self.tracked_unload_list.iter().all(|tracked_load| tracked_load.is_finished())
 	}
 
 	//==============================================================================
@@ -558,13 +592,13 @@ pub trait Scene: SceneAny {
 	}
 
 	//==============================================================================
-	// 로딩 해제. (내릴 때 finalize 뒤에 한 번, 원본 unload)
+	// 로딩 해제. (내릴 때 finalize 뒤에 한 번, 원본 async unload. 여기서 track_task 로 맡긴 작업이 끝나야 내리기가 끝난다)
 	//==============================================================================
 	fn unload(&mut self, _engine: &mut Engine) {
 	}
 
 	//==============================================================================
-	// 해제. (엔진이 씬을 내릴 때 unload 뒤, 씬을 버리기 직전에 한 번)
+	// 해제. (엔진이 씬을 내릴 때 unload 뒤, 씬을 버리기 직전에 한 번. 그 씬의 작업이 남았으면 다 끝난 뒤)
 	//==============================================================================
 	fn destroy(&mut self, _engine: &mut Engine) {
 	}

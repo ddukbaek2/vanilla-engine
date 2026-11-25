@@ -10,14 +10,62 @@
 //   3. 둘 다 없으면 set_package_version 으로 넣은 판. (게임 크레이트가 env!("CARGO_PKG_VERSION") 을 넘긴다, 넣지 않았으면 원본처럼 빈 글)
 // - 원본과 다른 점:
 //   원본 생성자의 version.json 주소 기본 인자는 new()(기본 주소)와 set_version_json_path 로 나눴다.
-//   원본 await load() 는 받을 때까지 기다린다. 러스트 판은 load(engine) 가 요청만 하고, 엔진 작업 안에서 wait_for_load().await 로 기다린다.
+//   원본 await load() 는 받을 때까지 기다린다. 러스트 판도 load(engine) 가 await 할 수 있는 BuildInfoLoadHandle 을 돌려준다. (wait_for_load().await 도 같다)
 //   await 없이는 마쳤는지를 is_loaded() 로 보고, 씬은 get_load_handle() 을 track_load_handle 로 맡긴다.
 //==============================================================================
 use crate::core::asset::AssetLoadHandle;
 use crate::core::engine::Engine;
 use crate::platform::document::Document;
 use serde_json::Value;
-use std::future::Future;
+use std::future::{Future, IntoFuture};
+use std::pin::Pin;
+use std::task::{Context, Poll};
+
+//==============================================================================
+// 빌드 정보 읽기 손잡이. (BuildInfo::load 가 돌려준다. 원본 load 의 Promise 자리, meta 로 읽었으면 바로 끝난다)
+//==============================================================================
+#[derive(Clone, Debug)]
+pub struct BuildInfoLoadHandle {
+	load_handle: Option<AssetLoadHandle>,
+}
+
+impl IntoFuture for BuildInfoLoadHandle {
+	type Output = ();
+	type IntoFuture = BuildInfoLoadFuture;
+
+	//==============================================================================
+	// 손잡이를 그대로 await 하기.
+	//==============================================================================
+	fn into_future(self) -> BuildInfoLoadFuture {
+		BuildInfoLoadFuture {
+			load_handle: self.load_handle,
+		}
+	}
+}
+
+//==============================================================================
+// 빌드 정보 읽기를 기다리는 퓨처. (실패해도 마친 것이다)
+//==============================================================================
+#[derive(Clone, Debug)]
+pub struct BuildInfoLoadFuture {
+	load_handle: Option<AssetLoadHandle>,
+}
+
+impl Future for BuildInfoLoadFuture {
+	type Output = ();
+
+	//==============================================================================
+	// 끝났는지 보기. (아직이면 다음 프레임에 다시 본다)
+	//==============================================================================
+	fn poll(self: Pin<&mut BuildInfoLoadFuture>, context: &mut Context<'_>) -> Poll<()> {
+		let is_finished = self.load_handle.as_ref().map(|load_handle| load_handle.is_finished()).unwrap_or(true);
+		if is_finished {
+			return Poll::Ready(());
+		}
+		context.waker().wake_by_ref();
+		Poll::Pending
+	}
+}
 
 // 빌드 판을 적는 meta 의 이름.
 const DEFAULT_META_NAME: &str = "build-version";
@@ -71,19 +119,21 @@ impl BuildInfo {
 	}
 
 	//==============================================================================
-	// 읽기 요청. (문서의 meta 를 바로 읽고, 없으면 웹은 version.json 을 캐시 없이 요청한다. 데스크탑은 애셋 폴더의 version.json 을 읽는다)
+	// 읽기 요청. (문서의 meta 를 바로 읽고, 없으면 웹은 version.json 을 캐시 없이 요청한다. 데스크탑은 애셋 폴더의 version.json 을 읽는다. await 할 수 있는 손잡이를 돌려준다)
 	//==============================================================================
-	pub fn load(&mut self, engine: &Engine) {
+	pub fn load(&mut self, engine: &Engine) -> BuildInfoLoadHandle {
 		self.is_load_requested = true;
 		self.meta_text = self.read_meta_text();
 		self.load_handle = None;
 		self.version_data = None;
 		self.is_version_data_read = false;
-		if !self.meta_text.is_empty() || self.version_json_path.is_empty() {
-			return;
+		if self.meta_text.is_empty() && !self.version_json_path.is_empty() {
+			let load_handle = platform_build_info::request_version_json(engine, &self.version_json_path);
+			self.load_handle = Some(load_handle);
 		}
-		let load_handle = platform_build_info::request_version_json(engine, &self.version_json_path);
-		self.load_handle = Some(load_handle);
+		BuildInfoLoadHandle {
+			load_handle: self.load_handle.clone(),
+		}
 	}
 
 	//==============================================================================
@@ -107,12 +157,9 @@ impl BuildInfo {
 	// 읽기를 마치기를 기다리는 퓨처. (원본 await load() 의 await 자리, load 를 부른 뒤 엔진 작업 안에서 await 한다. 실패해도 마친 것)
 	// - meta 로 읽었으면 바로 끝난다. 손잡이를 나눠 들어 빌리지 않는다.
 	//==============================================================================
-	pub fn wait_for_load(&self) -> impl Future<Output = ()> + 'static {
-		let load_handle = self.load_handle.clone();
-		async move {
-			if let Some(load_handle) = load_handle {
-				let _ = load_handle.await;
-			}
+	pub fn wait_for_load(&self) -> BuildInfoLoadFuture {
+		BuildInfoLoadFuture {
+			load_handle: self.load_handle.clone(),
 		}
 	}
 
