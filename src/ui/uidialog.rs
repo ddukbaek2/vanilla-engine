@@ -13,7 +13,7 @@
 // - 원본과 다른 것:
 //   - show 는 노드를 바꾸므로 트리를 받는다. 씬 코드는 node_tree.with_component_mut 로, 콜백에서는 context.get_node_tree_mut() 로 부른다.
 //   - 확인 / 취소 처리기는 대화 상자와 그 호스트의 문맥을 받는 한 번짜리 함수(FnOnce)다. dismiss 는 처리기에 문맥을 넘기려고 문맥을 받는다.
-//     씬 코드에서 닫을 때는 request_dismiss 를 부르면 다음 tick 에 dismiss 한다.
+//     문맥이 없는 씬 코드에서는 원본에도 있는 request_dismiss 를 부르면 다음 tick 에 dismiss 한다.
 //   - 원본은 PopupMotion 닫힘 알림에서 set_active(false) 한다. 러스트 판은 tick 에서 보이던 것이 닫힘이 되면(즉시 전환이면 dismiss 에서) 끈다.
 //   - 원본 tick 은 자식 tick 다음에 전환기를 돌린다. 러스트 판은 컴포넌트가 자식보다 먼저 돈다. (보이는 차이는 없다)
 //   - 전환 시간은 PopupMotion 그대로다. (등장 0.32 초, 퇴장 0.22 초. Tween 은 쓰지 않는다)

@@ -17,14 +17,15 @@
 //   - 노드 종류는 WorldNode 하나뿐이라 트리의 Type 칸과 인스펙터의 type 은 늘 "WorldNode" 다.
 //   - 리플렉션이 없어 원본 getComponentProperties(get*, is* 게터를 모두 불러 보이기)를 옮길 수 없다.
 //     대신 UIDocument 에 등록된 컴포넌트는 UIDocument 가 저장하는 키와 값(serialize_component)을 속성으로 보인다. 이름은 저장 키 그대로다.
+//     처음 문서는 엔진 컴포넌트만 등록된 것이고, 게임이 자기 컴포넌트를 등록한 문서를 set_ui_document 로 걸면(또는 get_ui_document_mut 로 등록하면) 그 컴포넌트도 보인다.
 //     값은 원본 formatPropertyValue 처럼 적는다. (수는 소수 둘째 자리, 수 둘 배열은 벡터, 이름에 color 가 든 수 넷 배열은 rgba, 그 밖의 수 넷 배열은 사각형,
 //     노드 참조는 [WorldNode]) 등록하지 않은 컴포넌트는 종류 이름만 보인다.
 //   - Local Storage 탭의 키 입력, 값 고치기, 지울지 묻기: 웹은 원본처럼 window.prompt, window.confirm 을 부른다.
 //     데스크탑에는 그런 창이 없어 패널 안에 작은 입력 창을 띄운다. (글은 TextInput 줄에서 받아 IME 도 된다. Enter 나 OK 는 확인, Escape 나 Cancel 은 취소)
-//   - Statistics 의 clientNativeSize(웹 페이지 전체 크기)는 러스트 판 ViewManager 에 없어 "(N/A)" 다. 메모리(Chrome 의 performance.memory)도 읽지 않아 "(N/A)" 다.
+//   - Statistics 의 clientNativeSize 는 ViewManager::get_client_native_size(웹은 페이지 전체 크기, 데스크탑은 창 안쪽 논리 크기)다.
+//     메모리는 웹에서 원본처럼 Chrome 의 performance.memory 를 읽고, 없는 브라우저와 데스크탑(자바스크립트 힙이 없다)은 "(N/A)" 다.
 //     viewScaleMode 는 러스트 열거 이름(StretchHeight 등)으로 적는다.
 //   - 화면 비율 가이드는 원본처럼 그때의 좌표계에 기대지 않고 스스로 뷰 좌표계(apply_view_rect)를 걸고 그린다. (원본 GameScene 에서 같은 결과)
-//   - 보이고 숨기기(set_visible), 탭(set_active_tab), 고른 노드(set_selected_node), 노드 펼치기(set_node_expanded)는 원본에 없는 함수다. (예제와 시험이 쓴다)
 //   - 원본은 FPS 표시 설정을 is_frame_per_second_visible 로 알려 주기만 하고 스스로 그리지 않는다. 러스트 판도 같다.
 // - 옮기지 않은 것: 없음. (원본에서 아무도 부르지 않는 그리기 오류 무시 try/catch 는 러스트에서 필요 없다)
 //==============================================================================
@@ -347,7 +348,7 @@ pub struct DevTools {
 	is_statistics_scroll_dragging: bool,
 	statistics_scroll_drag_start_mouse_y: f32,
 	statistics_scroll_drag_start_scroll_y: f32,
-	// 인스펙터의 컴포넌트 속성을 읽는 문서. (엔진 컴포넌트가 등록되어 있다)
+	// 인스펙터의 컴포넌트 속성을 읽는 문서. (처음은 엔진 컴포넌트만 등록된 것, set_ui_document 로 게임 문서를 건다)
 	ui_document: UIDocument,
 	// 다음 draw 에 Graphic 에 걸 모든 기즈모 강제 표시 값.
 	pending_force_gizmos_visible: Option<bool>,
@@ -503,6 +504,20 @@ impl DevTools {
 		else {
 			self.expanded_node_ids.remove(&node_id);
 		}
+	}
+
+	//==============================================================================
+	// 인스펙터가 컴포넌트 속성을 읽을 문서 설정. (게임이 자기 컴포넌트를 등록한 UIDocument 를 걸면 그 컴포넌트의 속성도 보인다)
+	//==============================================================================
+	pub fn set_ui_document(&mut self, ui_document: UIDocument) {
+		self.ui_document = ui_document;
+	}
+
+	//==============================================================================
+	// 인스펙터가 컴포넌트 속성을 읽는 문서. (변경용, 컴포넌트 종류를 더 등록할 때)
+	//==============================================================================
+	pub fn get_ui_document_mut(&mut self) -> &mut UIDocument {
+		&mut self.ui_document
 	}
 
 	//==============================================================================
@@ -2026,7 +2041,7 @@ impl DevTools {
 		items.push(StatisticsItem::create("browserName", String::from(platform.get_browser_name().get_name())));
 
 		items.push(StatisticsItem::create_section_header("Screen"));
-		items.push(StatisticsItem::create("clientNativeSize", String::from("(N/A)")));
+		items.push(StatisticsItem::create("clientNativeSize", format_vector2(view_manager.get_client_native_size())));
 		items.push(StatisticsItem::create("canvasNativeSize", format_vector2(view_manager.get_canvas_native_size())));
 		items.push(StatisticsItem::create("canvasPixelSize", format_vector2(view_manager.get_canvas_pixel_size())));
 		items.push(StatisticsItem::create("referenceResolutionSize", format_vector2(view_manager.get_reference_resolution_size())));
@@ -2045,9 +2060,18 @@ impl DevTools {
 		items.push(StatisticsItem::create("timeDelta", format!("{:.3}s", time_manager.get_time_delta())));
 
 		items.push(StatisticsItem::create_section_header("Memory (Chrome Only)"));
-		items.push(StatisticsItem::create("usedJSHeapSize", String::from("(N/A)")));
-		items.push(StatisticsItem::create("totalJSHeapSize", String::from("(N/A)")));
-		items.push(StatisticsItem::create("jsHeapSizeLimit", String::from("(N/A)")));
+		match read_performance_memory() {
+			Some(performance_memory) => {
+				items.push(StatisticsItem::create("usedJSHeapSize", format_megabytes(performance_memory.used_heap_size)));
+				items.push(StatisticsItem::create("totalJSHeapSize", format_megabytes(performance_memory.total_heap_size)));
+				items.push(StatisticsItem::create("jsHeapSizeLimit", format_megabytes(performance_memory.heap_size_limit)));
+			}
+			None => {
+				items.push(StatisticsItem::create("usedJSHeapSize", String::from("(N/A)")));
+				items.push(StatisticsItem::create("totalJSHeapSize", String::from("(N/A)")));
+				items.push(StatisticsItem::create("jsHeapSizeLimit", String::from("(N/A)")));
+			}
+		}
 
 		items
 	}
@@ -2493,6 +2517,51 @@ fn format_boolean(value: bool) -> &'static str {
 //==============================================================================
 fn format_vector2(vector: Vector2) -> String {
 	format!("({}, {})", vector.x, vector.y)
+}
+
+//==============================================================================
+// 바이트를 메가바이트 글로. (원본 (바이트 / (1024 * 1024)).toFixed(2) MB)
+//==============================================================================
+fn format_megabytes(bytes: f64) -> String {
+	format!("{:.2} MB", bytes / (1024.0 * 1024.0))
+}
+
+//==============================================================================
+// 자바스크립트 힙 크기. (원본 performance.memory 의 usedJSHeapSize, totalJSHeapSize, jsHeapSizeLimit, 바이트)
+//==============================================================================
+struct PerformanceMemory {
+	used_heap_size: f64,
+	total_heap_size: f64,
+	heap_size_limit: f64,
+}
+
+//==============================================================================
+// 자바스크립트 힙 크기 읽기. (웹: Chrome 의 performance.memory, 없는 브라우저는 None)
+//==============================================================================
+#[cfg(target_arch = "wasm32")]
+fn read_performance_memory() -> Option<PerformanceMemory> {
+	use wasm_bindgen::JsValue;
+	let performance = web_sys::window()?.performance()?;
+	let memory = js_sys::Reflect::get(&performance, &JsValue::from_str("memory")).ok()?;
+	if memory.is_undefined() || memory.is_null() {
+		return None;
+	}
+	let read_size = |key: &str| -> Option<f64> {
+		js_sys::Reflect::get(&memory, &JsValue::from_str(key)).ok()?.as_f64()
+	};
+	Some(PerformanceMemory {
+		used_heap_size: read_size("usedJSHeapSize")?,
+		total_heap_size: read_size("totalJSHeapSize")?,
+		heap_size_limit: read_size("jsHeapSizeLimit")?,
+	})
+}
+
+//==============================================================================
+// 자바스크립트 힙 크기 읽기. (데스크탑에는 자바스크립트 힙이 없어 None, 원본에서 performance.memory 가 없는 브라우저와 같다)
+//==============================================================================
+#[cfg(not(target_arch = "wasm32"))]
+fn read_performance_memory() -> Option<PerformanceMemory> {
+	None
 }
 
 //==============================================================================

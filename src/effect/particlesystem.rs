@@ -10,8 +10,9 @@
 // - 원본과 다른 것:
 //   - 방출 모양, 렌더 모양, 합성은 원본의 문자열 대신 열거형(ParticleEmitterShape, ParticleRenderShape, BlendMode)이다. 서술(apply_description)은 원본 문자열을 읽는다.
 //   - 원본의 기본 인자(setStartLifetime(min, max = min) 같은)는 러스트에 없어 두 값을 다 받는다. emit 의 원점 보정은 Option 이다.
-//   - 월드 공간(set_world_space)에서 낼 때 더하는 노드 로컬 위치는 tick 에서 읽어 둔 것이다. 러스트 컴포넌트는 tick 과 draw 밖에서 노드를 읽을 수 없다.
-//     (원본은 낼 때마다 노드에서 읽는다. tick 사이에 노드를 옮기고 바로 emit 하면 지난 tick 의 위치로 낸다)
+//   - 월드 공간(set_world_space)에서 낼 때 더하는 노드 로컬 위치는 tick 에서 읽어 둔다. 러스트 컴포넌트는 tick 과 draw 밖에서 노드를 읽을 수 없어서다.
+//     원본처럼 낼 때의 노드 위치로 내려면 ParticleSystem::emit_in_tree(트리, 노드, 수, 보정)로 내거나, set_node_position 으로 위치를 넣고 emit 한다.
+//     (Timeline 의 emit 이벤트는 그 자리의 노드 위치를 넣고 낸다)
 //   - 정점 색 쿼드는 한 번에 그릴 수 있는 정점 수(Graphic 한도)씩 나눠 그린다. 원본은 배열을 늘려 한 번에 그린다.
 //==============================================================================
 use crate::base::color::Color;
@@ -21,7 +22,7 @@ use crate::base::vector2::Vector2;
 use crate::core::component::{Component, ComponentBase};
 use crate::core::graphic::{BlendMode, Graphic, PARTICLE_FLOATS_PER_VERTEX};
 use crate::core::image::Image;
-use crate::core::node::nodetree::ComponentContext;
+use crate::core::node::nodetree::{ComponentContext, NodeId, NodeTree};
 use crate::core::node::worldnode::NodeTransform;
 use std::rc::Rc;
 
@@ -260,6 +261,38 @@ impl ParticleSystem {
 		for _ in 0..count {
 			self.spawn_particle(origin_offset);
 		}
+	}
+
+	//==============================================================================
+	// 노드의 지금 위치로 여러 개 방출. (원본 emit 처럼 낼 때 노드 로컬 위치를 읽는다. 노드나 파티클 시스템이 없으면 false)
+	//==============================================================================
+	pub fn emit_in_tree(node_tree: &mut NodeTree, node_id: NodeId, count: usize, origin_offset: Option<Vector2>) -> bool {
+		let node = match node_tree.get_node_mut(node_id) {
+			Some(node) => {
+				node
+			}
+			None => {
+				return false;
+			}
+		};
+		let node_position = node.get_local_position();
+		match node.get_component_mut::<ParticleSystem>() {
+			Some(particle_system) => {
+				particle_system.set_node_position(node_position);
+				particle_system.emit(count, origin_offset);
+				true
+			}
+			None => {
+				false
+			}
+		}
+	}
+
+	//==============================================================================
+	// 월드 공간에서 낼 때 더할 노드 로컬 위치 설정. (tick 이 읽어 두는 값을 낼 자리에서 고칠 때)
+	//==============================================================================
+	pub fn set_node_position(&mut self, node_position: Vector2) {
+		self.node_position = node_position;
 	}
 
 	//==============================================================================
@@ -1095,6 +1128,19 @@ mod tests {
 		particle_system.set_world_space(true);
 		particle_system.emit(1, None);
 		assert_eq!(particle_system.get_particle_position_list()[1], Vector2::create(300.0, 40.0));
+
+		// 트리에서 내면 tick 을 기다리지 않고 지금 노드 위치로 낸다.
+		let mut node_tree = NodeTree::new();
+		let root_id = node_tree.get_root_id();
+		let emitter_id = node_tree.create_child(root_id, "emitter");
+		let tree_particle_system = node_tree.add_component(emitter_id, ParticleSystem::new()).expect("particle system");
+		tree_particle_system.set_emitter_shape(ParticleEmitterShape::Edge);
+		tree_particle_system.set_edge_width(0.0);
+		tree_particle_system.set_world_space(true);
+		node_tree[emitter_id].set_local_position(Vector2::create(120.0, 80.0));
+		assert!(ParticleSystem::emit_in_tree(&mut node_tree, emitter_id, 1, None));
+		assert_eq!(node_tree[emitter_id].get_component::<ParticleSystem>().expect("particle system").get_particle_position_list()[0], Vector2::create(120.0, 80.0));
+		assert!(!ParticleSystem::emit_in_tree(&mut node_tree, root_id, 1, None));
 	}
 
 	//==============================================================================

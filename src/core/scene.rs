@@ -175,6 +175,22 @@ impl SceneBase {
 	}
 
 	//==============================================================================
+	// 맡긴 애셋이 하나를 빼고 다 끝났는지. (GameSceneBase 가 로딩 문을 빼고 원본 load_assets 가 끝났는지 볼 때)
+	//==============================================================================
+	pub fn are_tracked_assets_finished_except(&self, excluded_load_handle: &AssetLoadHandle) -> bool {
+		self.tracked_load_list.iter().all(|tracked_load| {
+			match tracked_load {
+				TrackedLoad::AssetLoadHandle(load_handle) => {
+					load_handle.is_same_load(excluded_load_handle) || load_handle.is_finished()
+				}
+				TrackedLoad::AudioAsset(_) => {
+					tracked_load.is_finished()
+				}
+			}
+		})
+	}
+
+	//==============================================================================
 	// 맡긴 애셋 가운데 끝난 비율. (로딩 화면 진행 막대용, 맡긴 것이 없으면 1)
 	//==============================================================================
 	pub fn get_tracked_asset_progress(&self) -> f32 {

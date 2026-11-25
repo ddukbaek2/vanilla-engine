@@ -3,7 +3,7 @@
 // - 원본 examples/timelineshowcase 의 문서 8 개(*.timeline.json)와 그림을 그대로 읽어 무대를 만들고 차례로 튼다.
 //   애셋은 원본 저장소 폴더에서 읽기만 한다. (modelviewer 예제와 같은 방식)
 // - 씬은 GameSceneBase 를 품는다: 로딩 화면, 세이프 에어리어 노드, 뷰 크기가 바뀌면 다시 놓기, 배경 칠하기.
-// - "screen" 트랙은 external 대상이라 tick 뒤에 apply_external_properties 로 ScreenEffect 에 넘긴다.
+// - "screen" 트랙은 External 대상이다. 씬이 Rc<RefCell> 로 쥔 ScreenEffect 를 대상 해석기가 넘기고, 타임라인이 그 자리에서 값을 건다.
 // - 무대 오른쪽 아래에 HeatHazeEffect 노드(아지랑이), 머리 오른쪽에 Indicator(돌아가는 톱니)를 같이 띄운다.
 // - 화면 저장이 같은 모양으로 나오게 타임라인은 프레임마다 1/60 초씩 흘린다. 150 프레임마다 다음 문서로, 누르면 바로 다음으로 넘어간다.
 // - 실행: cargo run --release --example timelineshowcase
@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use vanilla::core::graphic::TextAlign;
 use vanilla::core::component::mask::Mask;
-use vanilla::{Color, HeatHazeEffect, Indicator, Engine, EngineConfiguration, GameSceneBase, Graphic, Image, ImageAsset, JsonAsset, NodeId, NodeTree, Paint, Pivot, Scene, SceneBase, ScreenEffect, Text, Timeline, TimelineKey, TimelineMarker, TimelineTarget, Vector2, ViewScaleMode};
+use vanilla::{Color, HeatHazeEffect, Indicator, Engine, EngineConfiguration, GameSceneBase, Graphic, Image, ImageAsset, JsonAsset, NodeId, NodeTree, Paint, Pivot, Scene, SceneBase, ScreenEffect, Text, Timeline, TimelineKey, TimelineMarker, TimelinePropertyTarget, TimelineTarget, Vector2, ViewScaleMode};
 
 //==============================================================================
 // 전역 상수 목록.
@@ -62,7 +62,7 @@ struct TimelineShowcaseScene {
 	mode_list: Vec<TimelineMode>,
 	current_mode_index: usize,
 	mode_frame_count: u64,
-	screen_effect: ScreenEffect,
+	screen_effect: Rc<RefCell<ScreenEffect>>,
 	stage_id: Option<NodeId>,
 	title_label_id: Option<NodeId>,
 	status_label_id: Option<NodeId>,
@@ -83,7 +83,7 @@ impl TimelineShowcaseScene {
 			mode_list: Vec::new(),
 			current_mode_index: 0,
 			mode_frame_count: 0,
-			screen_effect: ScreenEffect::new(),
+			screen_effect: Rc::new(RefCell::new(ScreenEffect::new())),
 			stage_id: None,
 			title_label_id: None,
 			status_label_id: None,
@@ -117,7 +117,7 @@ impl TimelineShowcaseScene {
 			mode.timeline.stop(node_tree);
 			node_tree[mode.root_id].set_active(false);
 		}
-		self.screen_effect.reset_all();
+		self.screen_effect.borrow_mut().reset_all();
 		self.current_mode_index = mode_index;
 		self.mode_frame_count = 0;
 		self.last_signal.borrow_mut().clear();
@@ -125,7 +125,6 @@ impl TimelineShowcaseScene {
 			node_tree[mode.root_id].set_active(true);
 			mode.timeline.seek(node_tree, 0.0);
 			mode.timeline.play();
-			mode.timeline.apply_external_properties("screen", &mut self.screen_effect);
 			if let Some(title_label_id) = self.title_label_id {
 				if let Some(text) = node_tree[title_label_id].get_component_mut::<Text>() {
 					text.set_text(&format!("TIMELINE SHOWCASE  {} / {}  {}", mode_index + 1, MODE_DEFINITIONS.len(), mode.title));
@@ -250,20 +249,21 @@ impl Scene for TimelineShowcaseScene {
 			}
 			let mut timeline = Timeline::new(Some(description));
 			timeline.build_stage(node_tree, root_id, Some(&image_resolver));
-			timeline.set_target_resolver(Some(Box::new(|target_name: &str| {
+			let screen_target: Rc<RefCell<dyn TimelinePropertyTarget>> = self.screen_effect.clone();
+			timeline.set_target_resolver(Some(Box::new(move |target_name: &str| {
 				if target_name == "screen" {
-					Some(TimelineTarget::External)
+					Some(TimelineTarget::External(screen_target.clone()))
 				}
 				else {
 					None
 				}
 			})));
 			let marker_signal = self.last_signal.clone();
-			timeline.set_marker_handler(Some(Box::new(move |marker_name: &str, _marker: &TimelineMarker, _node_tree: &mut NodeTree| {
+			timeline.set_marker_handler(Some(Box::new(move |marker_name: &str, _marker: &TimelineMarker, _timeline: &mut Timeline, _node_tree: &mut NodeTree| {
 				*marker_signal.borrow_mut() = format!("marker {}", marker_name);
 			})));
 			let event_signal = self.last_signal.clone();
-			timeline.set_event_handler(Some(Box::new(move |target_name: &str, event_name: &str, _key: &TimelineKey, _node_tree: &mut NodeTree| {
+			timeline.set_event_handler(Some(Box::new(move |target_name: &str, event_name: &str, _key: &TimelineKey, _timeline: &mut Timeline, _node_tree: &mut NodeTree| {
 				*event_signal.borrow_mut() = format!("event {} {}", target_name, event_name);
 			})));
 			self.mode_list.push(TimelineMode { root_id, timeline, title: title.to_string() });
@@ -309,7 +309,6 @@ impl Scene for TimelineShowcaseScene {
 		let node_tree = self.game_scene_base.get_scene_base_mut().get_node_tree_mut();
 		if let Some(mode) = self.mode_list.get_mut(self.current_mode_index) {
 			mode.timeline.tick(node_tree, TIMELINE_FRAME_STEP);
-			mode.timeline.apply_external_properties("screen", &mut self.screen_effect);
 			let status_text = format!("{:.2} / {:.2} s  {}  {}", mode.timeline.get_time(), mode.timeline.get_duration(), if mode.timeline.is_loop() { "loop" } else { "once" }, self.last_signal.borrow());
 			if let Some(status_label_id) = self.status_label_id {
 				if let Some(text) = node_tree[status_label_id].get_component_mut::<Text>() {
@@ -317,7 +316,7 @@ impl Scene for TimelineShowcaseScene {
 				}
 			}
 		}
-		self.screen_effect.tick(TIMELINE_FRAME_STEP);
+		self.screen_effect.borrow_mut().tick(TIMELINE_FRAME_STEP);
 		self.indicator.tick(TIMELINE_FRAME_STEP);
 	}
 
@@ -325,7 +324,7 @@ impl Scene for TimelineShowcaseScene {
 	// 이전 출력. (화면 효과 시작 → 배경)
 	//==============================================================================
 	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
-		self.screen_effect.begin(graphic);
+		self.screen_effect.borrow_mut().begin(graphic);
 		self.game_scene_base.pre_draw(engine, graphic);
 	}
 
@@ -336,7 +335,7 @@ impl Scene for TimelineShowcaseScene {
 		let view_size = engine.get_view_manager().get_view_size();
 		self.indicator.set_position(view_size.x - 40.0, 36.0);
 		self.indicator.draw(graphic);
-		self.screen_effect.end(graphic);
+		self.screen_effect.borrow_mut().end(graphic);
 	}
 
 	//==============================================================================

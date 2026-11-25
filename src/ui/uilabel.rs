@@ -10,7 +10,7 @@
 // - 원본 setFont(FontFace) 는 set_font_family(등록한 폰트 이름) 로 바꿨다.
 // - 글자 방향(set_text_direction)과 표시 글자 수(set_visible_character_count)는 원본처럼 글자 컴포넌트에 넘긴다.
 // - 원본에서 옮기지 않은 것: invalidateIntrinsicContentSize (UINode 노선 전용).
-// - 배경색(UIView)은 글자보다 먼저 그린다. (원본은 Text 가 먼저 붙어 배경이 글자를 덮는다. 기본 배경이 투명이라 보통은 차이가 없다)
+// - 배경색(UIView)은 글자보다 먼저 그린다. (원본도 UILabel 이 require 한 Text, RichText 보다 앞 차례로 붙어 배경을 먼저 그린다)
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::rect::Rect;

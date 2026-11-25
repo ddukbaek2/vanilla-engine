@@ -8,6 +8,7 @@
 //   - 원본은 set_scroll_offset / set_scroll_content_size / setShows...ScrollBar 에서 바로 노드를 바꾼다. 러스트 판의 씬 코드는 컴포넌트만 쥐고 있어
 //     값을 정해 두고 다음 tick 에 content 노드와 스크롤바 노드에 반영한다. 같은 프레임에 바로 옮기려면 UIScrollView::set_scroll_offset_in_tree 를 쓴다.
 //   - 그래서 get_vertical_scroll_bar / get_horizontal_scroll_bar 는 보이기로 정한 뒤 첫 tick 이 지나야 노드 핸들을 돌려준다.
+//     원본처럼 그 자리에서 스크롤바 노드를 만들고 켜려면 UIScrollView::set_shows_vertical_scroll_bar_in_tree(가로는 horizontal)를 쓴다. (만든 노드 핸들을 돌려준다)
 //   - 보이는 영역 크기(호스트 content_size)는 붙을 때와 tick / 터치 / 휠 때 읽어 둔다. 씬 코드에서 정한 오프셋은 다음 tick 에 새 크기로 다시 자른다.
 //   - 드래그를 위 스크롤 뷰로 넘기는 손짓(원본 TouchRecognizer)은 ui/touchrecognizer.rs 에 따로 있다. 씬이 골라 쓴다.
 // - 원본 그대로인 버릇: 콘텐트가 영역 안에 들어와 스스로 꺼진(자동 숨김) 스크롤바 노드는 tick 이 돌지 않아 저절로 다시 켜지지 않는다.
@@ -536,6 +537,74 @@ impl UIScrollView {
 	}
 
 	//==============================================================================
+	// 세로 스크롤바 보이기 설정을 그 자리에서 노드에 건다. (원본 setShowsVerticalScrollBar 처럼 없으면 호스트의 자식으로 만들고 켜거나 끈다, 스크롤바 노드 핸들)
+	//==============================================================================
+	pub fn set_shows_vertical_scroll_bar_in_tree(node_tree: &mut NodeTree, scroll_node_id: NodeId, shows: bool) -> Option<NodeId> {
+		UIScrollView::set_shows_scroll_bar_in_tree(node_tree, scroll_node_id, ScrollBarAxis::Vertical, shows)
+	}
+
+	//==============================================================================
+	// 가로 스크롤바 보이기 설정을 그 자리에서 노드에 건다. (원본 setShowsHorizontalScrollBar)
+	//==============================================================================
+	pub fn set_shows_horizontal_scroll_bar_in_tree(node_tree: &mut NodeTree, scroll_node_id: NodeId, shows: bool) -> Option<NodeId> {
+		UIScrollView::set_shows_scroll_bar_in_tree(node_tree, scroll_node_id, ScrollBarAxis::Horizontal, shows)
+	}
+
+	//==============================================================================
+	// 한 축의 스크롤바 보이기 설정을 그 자리에서 노드에 건다. (보이기면 노드를 만들고 미뤄 둔 켜기 / 끄기를 바로 반영한다)
+	//==============================================================================
+	fn set_shows_scroll_bar_in_tree(node_tree: &mut NodeTree, scroll_node_id: NodeId, axis: ScrollBarAxis, shows: bool) -> Option<NodeId> {
+		let scroll_bar_id = {
+			let scroll_view = node_tree.get_node_mut(scroll_node_id)?.get_component_mut::<UIScrollView>()?;
+			match axis {
+				ScrollBarAxis::Vertical => {
+					scroll_view.set_shows_vertical_scroll_bar(shows);
+					scroll_view.vertical_scroll_bar_id
+				}
+				ScrollBarAxis::Horizontal => {
+					scroll_view.set_shows_horizontal_scroll_bar(shows);
+					scroll_view.horizontal_scroll_bar_id
+				}
+			}
+		};
+		let scroll_bar_id = match scroll_bar_id {
+			Some(scroll_bar_id) => {
+				scroll_bar_id
+			}
+			None => {
+				if !shows {
+					return None;
+				}
+				let scroll_bar_name = match axis {
+					ScrollBarAxis::Vertical => {
+						"verticalScrollBar"
+					}
+					ScrollBarAxis::Horizontal => {
+						"horizontalScrollBar"
+					}
+				};
+				UIScrollView::create_scroll_bar(node_tree, scroll_node_id, scroll_bar_name, axis)
+			}
+		};
+		if let Some(scroll_view) = node_tree[scroll_node_id].get_component_mut::<UIScrollView>() {
+			match axis {
+				ScrollBarAxis::Vertical => {
+					scroll_view.vertical_scroll_bar_id = Some(scroll_bar_id);
+					scroll_view.pending_vertical_scroll_bar_active = None;
+				}
+				ScrollBarAxis::Horizontal => {
+					scroll_view.horizontal_scroll_bar_id = Some(scroll_bar_id);
+					scroll_view.pending_horizontal_scroll_bar_active = None;
+				}
+			}
+		}
+		if let Some(scroll_bar_node) = node_tree.get_node_mut(scroll_bar_id) {
+			scroll_bar_node.set_active(shows);
+		}
+		Some(scroll_bar_id)
+	}
+
+	//==============================================================================
 	// 세로 스크롤바 노드 핸들. (꾸밀 때 node_tree[id].get_component_mut::<UIScrollBar>())
 	//==============================================================================
 	pub fn get_vertical_scroll_bar(&self) -> Option<NodeId> {
@@ -593,9 +662,7 @@ impl UIScrollView {
 	//==============================================================================
 	// 스크롤바 노드 하나 만들기. (호스트의 자식)
 	//==============================================================================
-	fn create_scroll_bar(context: &mut ComponentContext, name: &str, axis: ScrollBarAxis) -> NodeId {
-		let scroll_node_id = context.get_node_id();
-		let node_tree = context.get_node_tree_mut();
+	fn create_scroll_bar(node_tree: &mut NodeTree, scroll_node_id: NodeId, name: &str, axis: ScrollBarAxis) -> NodeId {
 		let scroll_bar_id = node_tree.create_child(scroll_node_id, name);
 		let mut scroll_bar = UIScrollBar::new();
 		scroll_bar.set_axis(axis);
@@ -608,15 +675,16 @@ impl UIScrollView {
 	// 보이기로 정한 스크롤바를 만들고, 미뤄 둔 켜기 / 끄기를 반영한다.
 	//==============================================================================
 	fn update_scroll_bar_nodes(&mut self, context: &mut ComponentContext) {
+		let scroll_node_id = context.get_node_id();
+		let node_tree = context.get_node_tree_mut();
 		if self.shows_vertical_scroll_bar && self.vertical_scroll_bar_id.is_none() {
-			let scroll_bar_id = UIScrollView::create_scroll_bar(context, "verticalScrollBar", ScrollBarAxis::Vertical);
+			let scroll_bar_id = UIScrollView::create_scroll_bar(node_tree, scroll_node_id, "verticalScrollBar", ScrollBarAxis::Vertical);
 			self.vertical_scroll_bar_id = Some(scroll_bar_id);
 		}
 		if self.shows_horizontal_scroll_bar && self.horizontal_scroll_bar_id.is_none() {
-			let scroll_bar_id = UIScrollView::create_scroll_bar(context, "horizontalScrollBar", ScrollBarAxis::Horizontal);
+			let scroll_bar_id = UIScrollView::create_scroll_bar(node_tree, scroll_node_id, "horizontalScrollBar", ScrollBarAxis::Horizontal);
 			self.horizontal_scroll_bar_id = Some(scroll_bar_id);
 		}
-		let node_tree = context.get_node_tree_mut();
 		if let Some(is_active) = self.pending_vertical_scroll_bar_active.take() {
 			if let Some(scroll_bar) = self.vertical_scroll_bar_id.and_then(|scroll_bar_id| node_tree.get_node_mut(scroll_bar_id)) {
 				scroll_bar.set_active(is_active);
@@ -960,5 +1028,18 @@ mod tests {
 		get_scroll_view(&mut node_tree, scroll_id).set_shows_vertical_scroll_bar(false);
 		node_tree.tick(&engine, 0.016);
 		assert!(!node_tree[scroll_bar_id].is_active());
+
+		// 원본처럼 그 자리에서: 첫 tick 전에도 가로 스크롤바 노드가 생기고 켜진다. 끄면 바로 꺼진다.
+		let (mut immediate_tree, immediate_scroll_id) = create_scroll_tree();
+		let horizontal_bar_id = UIScrollView::set_shows_horizontal_scroll_bar_in_tree(&mut immediate_tree, immediate_scroll_id, true).expect("horizontal bar");
+		assert_eq!(get_scroll_view(&mut immediate_tree, immediate_scroll_id).get_horizontal_scroll_bar(), Some(horizontal_bar_id));
+		assert_eq!(immediate_tree.get_parent_id(horizontal_bar_id), Some(immediate_scroll_id));
+		assert!(immediate_tree[horizontal_bar_id].is_active());
+		assert_eq!(UIScrollView::set_shows_horizontal_scroll_bar_in_tree(&mut immediate_tree, immediate_scroll_id, false), Some(horizontal_bar_id));
+		assert!(!immediate_tree[horizontal_bar_id].is_active());
+		assert!(UIScrollView::set_shows_vertical_scroll_bar_in_tree(&mut immediate_tree, immediate_scroll_id, false).is_none());
+		immediate_tree.tick(&engine, 0.016);
+		assert!(!immediate_tree[horizontal_bar_id].is_active());
+		assert!(get_scroll_view(&mut immediate_tree, immediate_scroll_id).get_vertical_scroll_bar().is_none());
 	}
 }

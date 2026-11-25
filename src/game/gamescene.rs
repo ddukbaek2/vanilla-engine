@@ -41,8 +41,8 @@
 //   게이지는 기본으로 최소 노출 시간의 경과(get_loading_progress)를 보이고, set_loading_progress 나 track_asset_loader 로 진행률을 알리면
 //   그 진행률을 부드럽게 따라간다. (LoadingProgress, get_loading_progress_state)
 //   - 원본 getLoadingProgress(LoadingProgress 를 돌려줌)는 러스트 판에 이미 같은 이름(경과 시간 비율)이 있어 get_loading_progress_state 다.
-//   - 원본은 load_assets 가 끝나면 진행률을 1 로 채운다. 러스트 판은 씬이 기다리는 애셋 목록을 따로 셀 수 없어서, 맡긴 AssetLoader 가 다 끝나면 1 이 된다.
-//     (set_loading_progress 로 직접 알리는 씬은 끝에 1 을 알린다)
+//   - 원본은 load_assets 가 끝나면(알린 적이 있을 때) 진행률을 1 로 채운다. 러스트 판은 씬에 맡긴 애셋 가운데 로딩 문을 뺀 것이 다 끝나면
+//     draw_on_load 가 1 로 채운다. (complete_loading_progress_if_assets_finished, 프레임에 걸쳐 일하는 씬은 읽기 손잡이를 맡겨 두고 끝나면 연다)
 //   - track_asset_loader 로 맡긴 AssetLoader 는 draw_on_load 가 프레임마다 update 를 불러 준다.
 //   - 원본 setLoadingColors 의 넷째 값(바깥 색)은 러스트에 기본값 인자가 없어 set_loading_outside_color 로 따로 정한다.
 // - 화면 틀 (vanilla.js GameScene 의 fadeScreen, isUserInterfaceAt, setPlayInputHandler, setPlayAreaReference 와 같은 기능):
@@ -448,6 +448,26 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
+	// 로딩 문을 뺀 맡긴 애셋이 다 끝났으면 진행률을 1 로 채운다. (원본 load 가 load_assets 를 기다린 뒤 1 을 알리는 자리, 알린 적이 없으면 하지 않는다)
+	//==============================================================================
+	pub fn complete_loading_progress_if_assets_finished(&mut self) {
+		if !self.is_loading_progress_reported {
+			return;
+		}
+		let are_assets_finished = match self.load_gate_handle.as_ref() {
+			Some(load_gate_handle) => {
+				self.scene_base.are_tracked_assets_finished_except(load_gate_handle)
+			}
+			None => {
+				self.scene_base.are_tracked_assets_finished()
+			}
+		};
+		if are_assets_finished {
+			self.loading_progress.set_progress(1.0);
+		}
+	}
+
+	//==============================================================================
 	// 캔버스 배경색 설정. (pre_draw 에서 캔버스 전체에 칠한다)
 	//==============================================================================
 	pub fn set_scene_background_color(&mut self, color: impl Into<Color>) {
@@ -561,8 +581,9 @@ impl GameSceneBase {
 		let is_touch_pressed = engine.get_input_manager().is_touch_pressed();
 		self.update_loading(current_time, is_touch_pressed);
 
-		// 진행률. (맡긴 애셋 함께 받기를 갱신해 읽고, 보이는 정도를 따라가게 한다)
+		// 진행률. (맡긴 애셋 함께 받기를 갱신해 읽고, 로딩 문을 뺀 애셋이 다 끝났으면 1 로 채우고, 보이는 정도를 따라가게 한다)
 		self.update_tracked_asset_loaders(engine);
+		self.complete_loading_progress_if_assets_finished();
 		let unscaled_time_delta = engine.get_time_manager().get_unscale_delta_time();
 		self.loading_progress.update(unscaled_time_delta);
 		let progress = if self.is_loading_progress_reported {
@@ -1648,6 +1669,19 @@ mod tests {
 		assert!(colored_scene_base.get_loading_drawer().is_some());
 		colored_scene_base.set_loading_progress(0.25);
 		assert_eq!(colored_scene_base.get_loading_progress_state().get_progress(), 0.25);
+
+		// 원본처럼 로딩 문을 뺀 애셋이 다 끝나면 1. (로딩 문이 아직 닫혀 있어도)
+		let mut reported_scene_base = GameSceneBase::new();
+		reported_scene_base.begin_loading(0.0);
+		let scene_asset_handle = AssetLoadHandle::create_pending("scene");
+		reported_scene_base.get_scene_base_mut().track_load_handle(&scene_asset_handle);
+		reported_scene_base.set_loading_progress(0.3);
+		reported_scene_base.complete_loading_progress_if_assets_finished();
+		assert_eq!(reported_scene_base.get_loading_progress_state().get_progress(), 0.3);
+		scene_asset_handle.finish(Ok(Vec::new()));
+		reported_scene_base.complete_loading_progress_if_assets_finished();
+		assert_eq!(reported_scene_base.get_loading_progress_state().get_progress(), 1.0);
+		assert!(!reported_scene_base.get_scene_base().are_tracked_assets_finished());
 	}
 	//==============================================================================
 	// game_scene! 으로 만든 씬: 바탕이 resize 에서 게임 영역 기준과 레이아웃을 하고 씬의 layout 을 부른다. 첫 tick 에도 layout 이 불린다.

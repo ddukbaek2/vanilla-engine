@@ -10,18 +10,19 @@
 //   - 러스트엔 리플렉션이 없어 원본의 반사 저장(saveByReflection, loadByReflection, getReflectedProperties)이 없다.
 //     종류 이름마다 짓기, 쓰기, 읽기 함수를 표에 등록한다. (register_component_type, 위젯은 register_widget_type) 게임도 자기 컴포넌트를 같은 길로 등록한다.
 //     원본이 반사로 저장하는 Outline, SoftShade, ShadowText, UIProgressRing 은 원본 반사 결과와 같은 키(머리 대문자: Color, LineWidth, GizmoVisible, Enable, ComponentType 등)로 쓰고 읽는다.
-//     러스트 판에 없는 속성(ShadowText 의 TextDirection, FontFace)은 쓰지 않고, 읽을 때도 버린다.
+//     ShadowText 는 원본처럼 Text, TextAlign, TextDirection, Italic, Underline, Strikethrough, FitMinimumRatio 를 쓴다. (원본 FontFace 는 글꼴 객체라 반사 저장이 적지 않는다)
 //   - 등록하지 않은 종류는 원본처럼 읽을 때 건너뛰고 경고를 낸다. 쓸 때 원본은 반사로 적지만, 러스트 판은 경고를 내고 뺀다.
 //   - ShadowImage 는 원본 표에 없다. 러스트 판은 원본이 반사로 적을 꼴(ImageColor, GizmoVisible, Enable, ComponentType)에 Sprite 처럼 imagePath 를 더해 등록한다.
 //   - 노드 종류는 WorldNode 하나뿐이라 노드 종류 표(registerNodeType)가 없다. type 은 늘 "WorldNode" 로 적고, 읽을 때는 보지 않는다.
-//   - 원본 getComponentType(이름 → 생성자)은 에디터의 컴포넌트 더하기 메뉴용이라 옮기지 않았다. 이름 목록(get_component_type_names)만 둔다.
+//   - 원본 getComponentType(이름 → 생성자)은 생성자를 값으로 돌려줄 수 없어(노드 트리는 구체 타입으로 붙인다) create_component(트리, 노드, 이름)가
+//     그 이름의 컴포넌트를 지어 노드에 붙이고 컴포넌트 차례 번호를 돌려준다. (원본에서 생성자를 받아 addComponent 하는 자리)
 //   - 그림 경로(imagePath)는 원본처럼 이미지 해석기(set_image_resolver)로 찾는다. 해석기를 주지 않으면 문서가 든 애셋 창고에서 찾는다.
 //     load_images 가 문서의 imagePath 를 ImageAsset 으로 요청하고(받은 읽기 손잡이는 씬이 track_load_handle 로 맡길 수 있다),
 //     아직 읽히지 않은 그림은 bind_pending_images 가 다 읽힌 뒤 붙인다. (러스트 애셋은 요청 뒤 나중에 다 읽힌다)
 //   - 노드 참조($nodeRef)의 기준 뿌리는 to_json_text, from_json_text 의 뿌리다. serialize_node, deserialize_node 를 바로 부르면 그 노드가 뿌리다.
 //     (원본은 serializeNode 만 부르면 참조를 적지 않고, deserializeNode 만 부르면 참조를 잇지 않는다)
 //   - 수는 f32 를 가장 짧은 십진으로 적는다. (0.22 는 0.22, 정수는 소수점 없이) 원본 f64 의 끝자리(0.1 + 0.2 같은)는 f32 로 줄어든다.
-// - 원본 버그를 고친 것: Sprite 의 nineSlice 를 원본은 쓰기만 하고 읽지 않았다. 러스트 판은 원본이 쓰는 꼴([왼쪽, 위, 왼쪽 + 오른쪽, 위 + 아래], Rect 의 left, top, right, bottom)을 거꾸로 풀어 읽는다.
+// - Sprite 의 nineSlice 는 원본이 쓰는 꼴([왼쪽, 위, 왼쪽 + 오른쪽, 위 + 아래], Rect 의 left, top, right, bottom)을 원본처럼 거꾸로 풀어 읽는다.
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::rect::Rect;
@@ -38,7 +39,7 @@ use crate::core::component::sprite::{Sprite, SpriteDrawMode};
 use crate::core::component::text::Text;
 use crate::core::component::Component;
 use crate::core::engine::Engine;
-use crate::core::graphic::{BlendMode, TextAlign, TextBaseline};
+use crate::core::graphic::{BlendMode, TextAlign, TextBaseline, TextDirection};
 use crate::core::image::Image;
 use crate::core::node::nodetree::{NodeId, NodeTree};
 use crate::resource::imageasset::ImageAsset;
@@ -387,6 +388,14 @@ impl UIDocument {
 	//==============================================================================
 	pub fn get_component_type_names(&self) -> Vec<&str> {
 		self.component_type_list.iter().map(|registered_type| registered_type.type_name.as_str()).collect()
+	}
+
+	//==============================================================================
+	// 이름으로 컴포넌트를 지어 노드에 붙인다. (원본 getComponentType 으로 받은 생성자로 짓고 붙이는 자리, 등록하지 않은 이름이면 None)
+	//==============================================================================
+	pub fn create_component(&self, node_tree: &mut NodeTree, node_id: NodeId, type_name: &str) -> Option<usize> {
+		let component_type = self.component_type_list.iter().find(|registered_type| registered_type.type_name == type_name)?;
+		(component_type.add_component)(node_tree, node_id)
 	}
 
 	//==============================================================================
@@ -1211,12 +1220,16 @@ fn load_soft_shade(soft_shade: &mut SoftShade, component_data: &Map<String, Valu
 }
 
 //==============================================================================
-// ShadowText 쓰기. (원본 반사 저장 꼴에서 러스트 판에 없는 FontFace, TextDirection 을 뺀 것)
+// ShadowText 쓰기. (원본 반사 저장 꼴. 원본 FontFace 는 글꼴 객체라 반사 저장이 적지 않는다)
 //==============================================================================
 fn save_shadow_text(shadow_text: &ShadowText, _save_context: &UIDocumentSaveContext) -> Map<String, Value> {
 	let mut component_data = Map::new();
 	write_value(&mut component_data, "Text", Value::from(shadow_text.get_text()));
 	write_value(&mut component_data, "TextAlign", Value::from(find_name(&TEXT_ALIGN_NAME_TABLE, shadow_text.get_text_align())));
+	write_value(&mut component_data, "TextDirection", Value::from(shadow_text.get_text_direction().get_name()));
+	write_value(&mut component_data, "Italic", Value::from(shadow_text.is_italic()));
+	write_value(&mut component_data, "Underline", Value::from(shadow_text.is_underline()));
+	write_value(&mut component_data, "Strikethrough", Value::from(shadow_text.is_strikethrough()));
 	write_value(&mut component_data, "FitMinimumRatio", UIDocument::number_to_value(shadow_text.get_fit_minimum_ratio()));
 	write_component_base(&mut component_data, shadow_text);
 	component_data
@@ -1231,6 +1244,18 @@ fn load_shadow_text(shadow_text: &mut ShadowText, component_data: &Map<String, V
 	}
 	if let Some(text_align) = read_string(component_data, "TextAlign").and_then(|name| find_value(&TEXT_ALIGN_NAME_TABLE, name)) {
 		shadow_text.set_text_align(text_align);
+	}
+	if let Some(text_direction_name) = read_string(component_data, "TextDirection") {
+		shadow_text.set_text_direction(TextDirection::from_name(text_direction_name));
+	}
+	if let Some(is_italic) = read_bool(component_data, "Italic") {
+		shadow_text.set_italic(is_italic);
+	}
+	if let Some(is_underline) = read_bool(component_data, "Underline") {
+		shadow_text.set_underline(is_underline);
+	}
+	if let Some(is_strikethrough) = read_bool(component_data, "Strikethrough") {
+		shadow_text.set_strikethrough(is_strikethrough);
 	}
 	if let Some(fit_minimum_ratio) = read_number(component_data, "FitMinimumRatio") {
 		shadow_text.set_fit_minimum_ratio(fit_minimum_ratio);
@@ -1674,7 +1699,7 @@ mod tests {
 	const WIDGET_SCENE_TEXT: &str = r#"{"version":1,"root":{"type":"WorldNode","name":"widgetRoot","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0.5,0.5],"anchor":[0.5,0.5],"contentSize":[0,0],"interactable":false,"components":[],"children":[{"type":"WorldNode","name":"outline","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0.5,0.5],"anchor":[0.5,0.5],"contentSize":[200,40],"interactable":false,"components":[{"Color":[1,0.5,0.25,1],"LineWidth":3,"RoundSize":12,"Circle":true,"GizmoVisible":false,"Enable":true,"ComponentType":"Outline","type":"Outline"}],"children":[]},{"type":"WorldNode","name":"ring","active":false,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0.5,0.5],"anchor":[0.5,0.5],"contentSize":[200,40],"interactable":true,"components":[{"Ratio":0.25,"RoundSize":20,"LineWidth":4,"FillColor":[0.5,1,0.5,1],"TrackColor":[0.2,0.2,0.25,1],"GizmoVisible":false,"Enable":true,"ComponentType":"UIProgressRing","type":"UIProgressRing"}],"children":[]},{"type":"WorldNode","name":"shade","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0.5,0.5],"anchor":[0.5,0.5],"contentSize":[200,40],"interactable":false,"components":[{"GizmoVisible":false,"Enable":false,"ComponentType":"SoftShade","type":"SoftShade"}],"children":[]},{"type":"WorldNode","name":"mask","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0.5,0.5],"anchor":[0.5,0.5],"contentSize":[200,40],"interactable":false,"components":[{"type":"Mask"}],"children":[]},{"type":"WorldNode","name":"rich","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0.5,0.5],"anchor":[0.5,0.5],"contentSize":[200,40],"interactable":false,"components":[{"text":"<b>굵게</b> 보통","fontSize":20,"textColor":[1,1,1,1],"strokeColor":[0,0,0,1],"strokeWidth":2,"textAlign":"left","textBaseline":"top","type":"RichText"}],"children":[]},{"type":"WorldNode","name":"label","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0.5,0.5],"anchor":[0.5,0.5],"contentSize":[200,40],"interactable":false,"components":[{"text":"라벨","fontSize":24,"textColor":[1,1,1,1],"backgroundColor":[0,0,0,0.5],"textAlign":"right","textBaseline":"middle","type":"UILabel"}],"children":[]},{"type":"WorldNode","name":"button","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0.5,0.5],"anchor":[0.5,0.5],"contentSize":[200,40],"interactable":true,"components":[{"pressedTintColor":[0,0,0,0.5],"type":"UIButton"}],"children":[],"contentChildren":[{"type":"WorldNode","name":"caption","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0.5,0.5],"anchor":[0.5,0.5],"contentSize":[200,40],"interactable":false,"components":[{"text":"눌러","fontSize":32,"textColor":[1,1,1,1],"strokeColor":[1,1,1,1],"strokeWidth":0,"textAlign":"center","textBaseline":"middle","type":"Text"}],"children":[]}]},{"type":"WorldNode","name":"toggle","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0.5,0.5],"anchor":[0.5,0.5],"contentSize":[200,40],"interactable":true,"components":[{"pressedTintColor":[0,0,0,0.3],"type":"UIToggleButton"}],"children":[]},{"type":"WorldNode","name":"progress","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0.5,0.5],"anchor":[0.5,0.5],"contentSize":[200,40],"interactable":false,"components":[{"value":50,"minValue":0,"maxValue":200,"type":"UIProgressView"}],"children":[]},{"type":"WorldNode","name":"slider","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0.5,0.5],"anchor":[0.5,0.5],"contentSize":[200,40],"interactable":true,"components":[{"value":0.75,"thumbRadius":12,"trackThickness":6,"ThumbNode":{"$nodeRef":"/slider/thumb"},"type":"UISlider"}],"children":[{"type":"WorldNode","name":"thumb","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0.5,0.5],"anchor":[0.5,0.5],"contentSize":[200,40],"interactable":false,"components":[],"children":[]}]},{"type":"WorldNode","name":"scroll","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0.5,0.5],"anchor":[0.5,0.5],"contentSize":[200,40],"interactable":true,"components":[{"scrollContentSize":[200,600],"scrollMode":"elastic","dragSensitivity":1.5,"horizontal":false,"vertical":true,"backgroundColor":[1,1,1,0],"type":"UIScrollView"}],"children":[],"contentChildren":[{"type":"WorldNode","name":"item","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0.5,0.5],"anchor":[0.5,0.5],"contentSize":[200,40],"interactable":false,"components":[{"color":[0.25,0.25,0.25,1],"roundSize":0,"type":"Paint"}],"children":[]}]},{"type":"WorldNode","name":"image","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0.5,0.5],"anchor":[0.5,0.5],"contentSize":[200,40],"interactable":false,"components":[{"imagePath":"star.png","type":"UIImageView"},{"color":[0,0,0,0],"roundSize":0,"imagePath":"","nineSlice":[0,0,0,0],"spriteDrawMode":"simple","spriteBlendMode":"source-over","type":"Sprite"}],"children":[]}]}}"#;
 
 	// vanilla.js UIDocument.toJsonText(뿌리, false) 가 낸 글. (ShadowText 하나)
-	const SHADOW_TEXT_SCENE_TEXT: &str = r#"{"version":1,"root":{"type":"WorldNode","name":"shadowRoot","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0.5,0.5],"anchor":[0.5,0.5],"contentSize":[0,0],"interactable":false,"components":[],"children":[{"type":"WorldNode","name":"shadowText","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0.5,0.5],"anchor":[0.5,0.5],"contentSize":[0,0],"interactable":false,"components":[{"Text":"그림자","TextAlign":"left","TextDirection":"ltr","FitMinimumRatio":0.5,"GizmoVisible":false,"Enable":true,"ComponentType":"ShadowText","type":"ShadowText"}],"children":[]}]}}"#;
+	const SHADOW_TEXT_SCENE_TEXT: &str = r#"{"version":1,"root":{"type":"WorldNode","name":"shadowRoot","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0.5,0.5],"anchor":[0.5,0.5],"contentSize":[0,0],"interactable":false,"components":[],"children":[{"type":"WorldNode","name":"shadowText","active":true,"position":[0,0],"scale":[1,1],"rotation":0,"opacity":1,"pivot":[0.5,0.5],"anchor":[0.5,0.5],"contentSize":[0,0],"interactable":false,"components":[{"Text":"그림자","TextAlign":"left","TextDirection":"rtl","Italic":true,"Underline":false,"Strikethrough":true,"FitMinimumRatio":0.5,"GizmoVisible":false,"Enable":true,"ComponentType":"ShadowText","type":"ShadowText"}],"children":[]}]}}"#;
 
 	//==============================================================================
 	// 에디터 씬 파일(frameSize 를 얹은 것)을 읽어 다시 쓰면 원본이 낸 글과 한 글자도 다르지 않다.
@@ -1758,15 +1783,24 @@ mod tests {
 	}
 
 	//==============================================================================
-	// ShadowText 는 러스트 판에 없는 TextDirection 만 빠지고 같다.
+	// ShadowText 는 원본 반사 저장과 같은 키로 쓰고 읽는다. (글 방향, 기울임, 밑줄, 가운데줄 포함)
 	//==============================================================================
 	#[test]
-	fn shadow_text_round_trip_drops_text_direction() {
+	fn shadow_text_round_trip_keeps_reflected_keys() {
 		let mut node_tree = NodeTree::new();
 		let mut document = UIDocument::new();
 		let shadow_root_id = document.from_json_text(&mut node_tree, SHADOW_TEXT_SCENE_TEXT).expect("document");
-		let expected_text = SHADOW_TEXT_SCENE_TEXT.replace("\"TextDirection\":\"ltr\",", "");
-		assert_eq!(document.to_json_text(&node_tree, shadow_root_id, false), expected_text);
+		assert_eq!(document.to_json_text(&node_tree, shadow_root_id, false), SHADOW_TEXT_SCENE_TEXT);
+		let shadow_text_id = node_tree.find_child_by_name(shadow_root_id, "shadowText").expect("shadow text");
+		let shadow_text = node_tree[shadow_text_id].get_component::<ShadowText>().expect("shadow text");
+		assert_eq!(shadow_text.get_text_direction(), TextDirection::Rtl);
+		assert!(shadow_text.is_italic());
+		assert!(shadow_text.is_strikethrough());
+
+		// 이름으로 지어 붙이기. (원본 getComponentType)
+		let created_index = document.create_component(&mut node_tree, shadow_root_id, "UIProgressRing").expect("created");
+		assert!(node_tree[shadow_root_id].get_all_components()[created_index].as_any().is::<UIProgressRing>());
+		assert!(document.create_component(&mut node_tree, shadow_root_id, "Unknown").is_none());
 	}
 
 	//==============================================================================

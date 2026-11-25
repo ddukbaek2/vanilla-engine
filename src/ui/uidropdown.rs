@@ -2,6 +2,8 @@
 // 드롭다운. (원본 ui/uidropdown.js 의 UIDropdown, 콤보박스)
 // - 닫힌 머리 단추에 지금 값이 보이고, 누르면 아래로 선택지 목록이 펼쳐진다. 행을 누르면 고르고 접힌다.
 // - 펼칠 때 목록을 트리 뿌리의 마지막 자식으로 옮겨, 나중에 그려지는 형제 노드에 가리지 않게 한다. (접으면 머리 단추 아래로 되돌린다)
+// - 머리 단추의 틴트 대상에서 펼침 목록 노드를 뺀다. (exclude_node_from_tint, 빼지 않으면 고른 뒤 머리 단추가 매 tick 눌렀을 때 담아 둔 옛 행 색을 다시 써서
+//   선택 강조가 덮인다) 강조를 바꾼 뒤에는 행 단추들이 틴트 원래 색을 다시 담게 한다. (원본은 그 자리에서, 러스트 판은 다음 tick 에)
 // - 원본은 WorldNode 를 상속한 노드다. 러스트 판은 노드(호스트)에 붙는 컴포넌트이고, 붙을 때 원본 생성자처럼
 //   호스트를 꾸미고(왼쪽 위 피봇, 크기, interactable) Paint + UIButton + UILabel(머리 글)을 호스트에, 화살표 노드와 펼침 목록 노드를 자식으로 만든다.
 //   UIDropdown::create(node_tree, parent_id, options) 가 원본 new UIDropdown(options) + add_child 자리다.
@@ -13,9 +15,6 @@
 //   - 트리를 바꾸는 함수(set_option_list, set_open, set_selected_index)는 트리를 받는다. 씬 코드는 node_tree.with_component_mut 로 부른다.
 //     select_index 는 바뀜 이벤트에 문맥을 넘기려고 문맥을 받는다. (행 단추가 ComponentContext::with_component_mut 로 부른다)
 //   - 바뀜 이벤트는 드롭다운과 문맥을 받는다. options 객체는 UIDropdownOptions 구조체다.
-//   - 머리 단추의 틴트 대상에서 펼침 목록 노드를 뺀다. 원본은 목록 행까지 머리 단추 틴트에 잡혀, 고른 뒤 머리 단추가 매 tick
-//     눌렀을 때 담아 둔 옛 행 색을 다시 써서 선택 강조가 덮인다. (exclude_node_from_tint 로 막았다)
-//     같은 까닭으로 강조를 바꾼 뒤에는 행 단추들이 틴트 원래 색을 다음 tick 에 다시 담게 한다. (원본은 다시 펼치면 행 단추가 옛 색을 쓴다)
 //   - 행 강조는 펼침 목록의 자식 순서 대신 만든 행 노드 목록으로 고친다. (tick 중에 다시 만들면 지운 행이 잠깐 자식으로 남는다)
 //   - 화살표 글자는 원본의 작은 삼각형(▾ ▴, U+25BE / U+25B4)이 기본 글꼴(맑은 고딕, Segoe UI, Arial)에 없어
 //     WGL4 에 든 ▼ ▲ 를 글자 크기 0.75 배로 쓴다.
