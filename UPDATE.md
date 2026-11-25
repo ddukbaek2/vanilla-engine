@@ -448,6 +448,13 @@
   - 버스로 만든 플레이어와 내보낼 곳을 직접 넘긴 플레이어는 원본 WebAudio 처럼 이어진 동안 버스 노드를 살려 둔다
   - 그래프 다섯(같은 표본율과 다른 표본율의 소스, 빠르기와 루프와 시작 위치, 모노와 스테레오 좌우와 0, 버스, 섞기)을 크롬 158 OfflineAudioContext 결과(tests/assets/mixer/chromemixer.cjs 가 찍은 chrome_mixer.json)와 견주는 시험을 더했다. 1e-6 안에서 같다
   - 줄어든 크레이트 8: kira, atomic-arena, crossbeam-utils, glam, mint, pastey, rtrb, triple_buffer. 직접 의존은 cpal 하나다 (kira 가 쓰던 cpal 0.18 그대로, realtime 기능)
+- 브라우저가 해 주던 것을 데스크탑에서도 같은 API 로 (원본은 크롬 위에서 돈다, 러스트 웹판은 같은 브라우저 기능을 쓰고 데스크탑은 엔진이 같은 일을 한다)
+  - Canvas2D, Path2D, CanvasGradient(곧은, 둥근, 원뿔), CanvasPattern, ImageData: 원본과 게임이 document.createElement("canvas") 와 getContext("2d") 로 쓰는 캔버스와 2D 컨텍스트. 웹은 문서에 붙이지 않은 브라우저 캔버스, 데스크탑은 tiny-skia(resvg 가 쓰는 같은 판)로 칠한다. 경로, 선과 점선, 자르기, 그림자, 합치기 26 가지, 그림, 글(엔진 글자 캐시), 픽셀 읽고 쓰기, to_image
+  - Engine::alert, confirm, prompt 와 alert_async, confirm_async, prompt_async: 원본 window.alert, confirm, prompt. 웹은 브라우저 창, 데스크탑은 엔진이 그린 크롬 탭 모달 같은 창(제목 "이 페이지 내용:", 기본값을 모두 고른 입력 칸, 윈도우 [확인][취소] 맥과 리눅스 [취소][확인], 크로미엄 번역 82 로케일). 떠 있는 동안 씬과 async 작업이 멈춘다. DevTools 의 Local Storage 탭도 이것을 쓴다 (패널 안 입력 창을 뺐다)
+  - Document: html lang 과 head 의 meta. 웹은 브라우저 문서, 데스크탑은 엔진이 든 값(EngineConfiguration.document_language, document_meta_list). BuildInfo 는 데스크탑에서도 meta 의 build-version 을 먼저 읽고, LanguagePack 은 두 플랫폼 모두 문서 언어를 바꾼다
+  - Pane, PaneStyle: 데스크탑에서 엔진 노드로 짓는 분할 패널(같은 크기 셈과 끌기 셈, 테마 색, 리사이저 커서), PaneStyle 프리셋 노드(PaneElement, set_on_click). PointerCursor::request_element_cursor
+  - 입력 필드: 데스크탑 DOM 입력 필드의 되돌리기와 다시 하기(블링크 묶음 규칙, Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y, 윈도우 Alt+Backspace), 직접 누르는 필드의 크롬 편집 칸 문맥 메뉴(그림 이모티콘, 실행 취소, 다시 실행, 잘라내기, 복사, 붙여넣기, 일반 텍스트로 붙여넣기, 전체 선택, 쓰기 방향, 검사). 검사는 Engine::request_dev_tools_inspect 로 개발자 도구가 그 노드를 고른다
+  - LocalStorage, PersistedStore: 원본이 저장한 짝 없는 서로게이트(잘린 이모지, JSON.stringify 의 \ud83d)를 원래 UTF-16 단위로 지킨다. 전에는 그런 JSON 을 읽지 못해 PersistedStore 가 기본값으로 돌아가고 다음 쓰기에 원본 저장을 덮었다. get_item_code_units, set_item_code_units
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.
