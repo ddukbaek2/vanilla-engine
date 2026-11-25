@@ -160,3 +160,5 @@ pub use crate::ui::uiscale::{UIScale, UIScaleOptions};
 pub use crate::ui::uiwindow::{UIWindow, UIWindowBehavior, UIWindowDefaultBehavior, UIWindowEvent, UIWindowParts};
 pub use crate::ui::uiwindowlayer::{UIWindowChangeEvent, UIWindowLayer};
 pub use crate::ui::uiconfirmwindow::{UIConfirmWindow, UIConfirmWindowOptions};
+pub use crate::game::gamescene::{PlayInput, ScreenFadeEvent, ScreenFadeHold};
+pub use crate::core::viewmanager::SafeAreaSide;

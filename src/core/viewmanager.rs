@@ -11,6 +11,7 @@
 // - 세이프 에어리어 인셋(get_safe_area_insets)은 [위, 오른쪽, 아래, 왼쪽] 이다. (원본 { top, right, bottom, left }, GameSceneBase 와 같은 차례)
 //   주소의 ?safeArea=위,오른쪽,아래,왼쪽 과 CSS env(safe-area-inset-*) 는 웹만 읽는다. 데스크탑에는 주소도 env() 도 없어 0 이고,
 //   노치를 흉내 내려면 set_safe_area_override 를 쓴다.
+// - 무시할 세이프 에어리어 쪽(set_ignored_safe_area_sides)은 원본의 "top" 같은 글 대신 SafeAreaSide 열거형으로 받는다.
 // - get_css_pixel_scale 의 캔버스 CSS 높이는 canvas_native_size.y 다. (웹은 캔버스의 CSS 높이, 데스크탑은 창의 논리 높이)
 // - apply_aspect_view_scale_mode 는 캔버스 논리 크기로 비를 잰다. (원본은 캔버스 크기가 0 이면 창 안쪽 크기를 쓴다.
 //   러스트 판은 씬이 돌기 전에 플랫폼이 캔버스 크기를 맞춰 두어 0 일 때는 창도 0 이다)
@@ -19,6 +20,17 @@ use crate::base::rect::Rect;
 use crate::base::vector2::Vector2;
 use crate::core::graphic::Graphic;
 use crate::platform;
+
+//==============================================================================
+// 세이프 에어리어의 쪽. (원본 "top", "right", "bottom", "left")
+//==============================================================================
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SafeAreaSide {
+	Top,
+	Right,
+	Bottom,
+	Left,
+}
 
 //==============================================================================
 // 뷰 스케일 모드.
@@ -56,6 +68,8 @@ pub struct ViewManager {
 	max_render_pixel_ratio: f32,
 	// 세이프 에어리어 강제값. (CSS 픽셀, 위 / 오른쪽 / 아래 / 왼쪽)
 	safe_area_override: Option<[f32; 4]>,
+	// 무시할 세이프 에어리어 쪽. (get_safe_area_insets 가 0 으로 돌려준다)
+	ignored_safe_area_sides: Vec<SafeAreaSide>,
 }
 
 impl ViewManager {
@@ -74,6 +88,7 @@ impl ViewManager {
 			view_size: Vector2::zero(),
 			max_render_pixel_ratio: 0.0,
 			safe_area_override: None,
+			ignored_safe_area_sides: Vec::new(),
 		}
 	}
 
@@ -372,7 +387,40 @@ impl ViewManager {
 		else {
 			1.0
 		};
-		[css_insets[0] * scale, css_insets[1] * scale, css_insets[2] * scale, css_insets[3] * scale]
+		let mut insets = [css_insets[0] * scale, css_insets[1] * scale, css_insets[2] * scale, css_insets[3] * scale];
+		for ignored_side in &self.ignored_safe_area_sides {
+			let side_index = match ignored_side {
+				SafeAreaSide::Top => {
+					0
+				}
+				SafeAreaSide::Right => {
+					1
+				}
+				SafeAreaSide::Bottom => {
+					2
+				}
+				SafeAreaSide::Left => {
+					3
+				}
+			};
+			insets[side_index] = 0.0;
+		}
+		insets
+	}
+
+	//==============================================================================
+	// 무시할 세이프 에어리어 쪽 설정. (get_safe_area_insets 가 그 쪽을 0 으로 돌려준다, 빈 목록이면 모두 쓴다)
+	// - 플랫폼의 앱이 그 쪽을 이미 비켜 그리는 웹뷰처럼, 어느 쪽을 무시할지는 게임이 정해 넘긴다.
+	//==============================================================================
+	pub fn set_ignored_safe_area_sides(&mut self, sides: &[SafeAreaSide]) {
+		self.ignored_safe_area_sides = sides.to_vec();
+	}
+
+	//==============================================================================
+	// 무시할 세이프 에어리어 쪽 반환.
+	//==============================================================================
+	pub fn get_ignored_safe_area_sides(&self) -> &[SafeAreaSide] {
+		&self.ignored_safe_area_sides
 	}
 
 	//==============================================================================
@@ -546,5 +594,19 @@ mod tests {
 		assert!(parse_leading_float("px").is_nan());
 		assert!(parse_leading_float("-").is_nan());
 		assert!(parse_leading_float(".").is_nan());
+	}
+
+	//==============================================================================
+	// 무시할 쪽은 강제값이 있어도 0 이고, 빈 목록이면 다시 모두 쓴다.
+	//==============================================================================
+	#[test]
+	fn ignored_safe_area_sides_are_zero() {
+		let mut view_manager = create_view_manager(2560, 1440, ViewScaleMode::None);
+		view_manager.set_safe_area_override(Some([40.0, 10.0, 30.0, 20.0]));
+		view_manager.set_ignored_safe_area_sides(&[SafeAreaSide::Top, SafeAreaSide::Left]);
+		assert_eq!(view_manager.get_ignored_safe_area_sides(), &[SafeAreaSide::Top, SafeAreaSide::Left]);
+		assert_eq!(view_manager.get_safe_area_insets(), [0.0, 10.0, 30.0, 0.0]);
+		view_manager.set_ignored_safe_area_sides(&[]);
+		assert_eq!(view_manager.get_safe_area_insets(), [40.0, 10.0, 30.0, 20.0]);
 	}
 }

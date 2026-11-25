@@ -77,6 +77,12 @@
 - UIScale, UIScaleOptions: 뷰 한 단위가 minimum_css_scale(0.8) CSS 픽셀보다 작으면 UI 층만 키울 배율. (1 ~ maximum_scale 1.8, 낮은 화면은 minimum_layer_height 아래로 키우지 않음(기본 0 이면 보지 않음), 세로 화면(가로가 세로의 portrait_ratio 1.1 배 이하)은 상한 없음) UIScale::read(view_width, view_height, css_pixel_scale, &options), is_portrait
 - Text: get_measured_line_count(). 그린 뒤 글, 폰트, 줄바꿈 폭이 그대로일 때 마지막으로 나눈 줄 수. (Graphic 이 없는 레이아웃이 그린 결과를 읽을 때)
 - 예제: windowshowcase. 게임 영역 기준(세이프 에어리어 위 40, 아래 30 흉내), 기본 창과 긴 글 확인 창 쌓기, 바깥 누르기와 모두 닫기, 화면 페이드(손잡이로 0.6 초 붙잡기), UI 가 받지 않은 누름만 놀이로. 처음 몇 초는 저절로 둘러본다
+- GameSceneBase: fade_screen(on_dark), ScreenFadeHold, ScreenFadeEvent. 다 어두워지면 on_dark(트리, 엔진)를 부르고, ScreenFadeHold 를 돌려주면 release 할 때까지 어둡게 둔다(원본 Promise 자리). 이미 페이드 중이면 false. set_screen_fade_color(기본 검정), set_screen_fade_seconds(기본 0.35), is_screen_fading, get_screen_fade_alpha. 막은 post_draw(새로 더함, 씬 post_draw 에서 부른다)가 세이프 에어리어까지 캔버스 전체에 그리고, 배율을 곱하지 않은 시간으로 움직인다. 막이 걸린 동안은 누름과 휠을 막고 누르던 손가락의 이동, 뗌, 취소만 넘긴다
+- GameSceneBase: is_user_interface_at(view_position), set_play_input_enabled, take_play_inputs, PlayInput(Press, Move, Release, Wheel), convert_view_to_play_area. UI 가 받지 않은 누름과 그 누름의 이동과 뗌(취소 포함), UI 밖의 휠을 세이프 에어리어 왼쪽 위 기준 게임 영역 좌표로 모은다. (원본은 처리기 객체, 러스트 판은 처리기가 씬 상태를 빌릴 수 없어 큐)
+- GameSceneBase: set_play_area_reference(fixed_length, is_landscape, engine), apply_play_area_reference(engine), calculate_play_area_reference_length. 세이프 에어리어를 뺀 게임 영역의 고정 쪽 길이가 늘 fixed_length 가 되게 기준 해상도를 늘린다. initialize 는 스스로 걸고, resize 는 엔진을 바꿀 수 없어 씬이 resize 첫머리에 apply_play_area_reference 를 부른다
+- ViewManager: set_ignored_safe_area_sides(&[SafeAreaSide]), get_ignored_safe_area_sides, SafeAreaSide. get_safe_area_insets 가 그 쪽을 0 으로 돌려준다
+- TouchRecognizer: is_touching()
+- GameSceneBase 의 바뀐 동작: set_safe_area_insets 로 정하지 않았으면 compute_safe_area_rect 가 플랫폼 env 를 따로 재던 것 대신 ViewManager::get_safe_area_insets 를 읽는다. 지금까지는 set_safe_area_override, 주소의 ?safeArea=, (새) 무시할 쪽이 GameSceneBase 의 세이프 에어리어에 닿지 않았다. 웹 env 값은 정수로 잘리지 않는 것 말고 같고, 데스크탑은 그대로 0 이다. 따로 재던 read_platform_safe_area_insets 와 parse_leading_integer 는 쓰지 않게 되어 뺐다
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.
