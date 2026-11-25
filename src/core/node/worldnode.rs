@@ -14,7 +14,8 @@ use crate::base::pivot::Pivot;
 use crate::base::rect::Rect;
 use crate::base::transformmatrix::TransformMatrix;
 use crate::base::vector2::Vector2;
-use crate::core::component::Component;
+use crate::core::component::{Component, RequiredComponent};
+use std::any::Any;
 use crate::core::graphic::Graphic;
 use crate::core::node::nodetree::NodeId;
 
@@ -320,6 +321,41 @@ impl WorldNode {
 	}
 
 	//==============================================================================
+	// 부모가 없는지. (원본 isRoot, 트리의 루트와 아직 붙이지 않은 노드)
+	//==============================================================================
+	pub fn is_root(&self) -> bool {
+		self.parent_id.is_none()
+	}
+
+	//==============================================================================
+	// 자식이 없는지. (원본 isLeaf)
+	//==============================================================================
+	pub fn is_leaf(&self) -> bool {
+		self.child_ids.is_empty()
+	}
+
+	//==============================================================================
+	// 부모가 있는지. (원본 hasParent)
+	//==============================================================================
+	pub fn has_parent(&self) -> bool {
+		self.parent_id.is_some()
+	}
+
+	//==============================================================================
+	// 그 자리의 자식. (범위 밖이면 None, 원본 getChild 의 null)
+	//==============================================================================
+	pub fn get_child(&self, child_index: usize) -> Option<NodeId> {
+		self.child_ids.get(child_index).copied()
+	}
+
+	//==============================================================================
+	// 그 노드가 자식인지. (원본 hasChild)
+	//==============================================================================
+	pub fn has_child(&self, child_id: NodeId) -> bool {
+		self.child_ids.contains(&child_id)
+	}
+
+	//==============================================================================
 	// 자식의 자리. (그리는 순서의 번호, 자식이 아니면 None. 원본 getChildIndex 의 -1)
 	//==============================================================================
 	pub fn get_child_index(&self, child_id: NodeId) -> Option<usize> {
@@ -481,11 +517,51 @@ impl WorldNode {
 	//==============================================================================
 	pub fn add_component<T: Component + 'static>(&mut self, component: T) -> &mut T {
 		let mut boxed_component: Box<dyn Component> = Box::new(component);
+		self.add_required_components(boxed_component.require());
 		boxed_component.attach(&mut self.transform);
 		self.components.push(boxed_component);
 		let last_component = self.components.last_mut().expect("added component");
 		let component_reference: &mut dyn Component = last_component.as_mut();
 		component_reference.as_any_mut().downcast_mut::<T>().expect("added component type")
+	}
+
+	//==============================================================================
+	// 의존 컴포넌트 붙이기. (그 타입이 없을 때만, 의존 컴포넌트의 의존도 먼저 붙인다)
+	//==============================================================================
+	fn add_required_components(&mut self, required_component_list: Vec<RequiredComponent>) {
+		for required_component in required_component_list {
+			let is_present = self.components.iter().any(|component| {
+				let component_reference: &dyn Component = component.as_ref();
+				Any::type_id(component_reference.as_any()) == required_component.type_id
+			});
+			if is_present {
+				continue;
+			}
+			let mut boxed_component = (required_component.create)();
+			self.add_required_components(boxed_component.require());
+			boxed_component.attach(&mut self.transform);
+			self.components.push(boxed_component);
+		}
+	}
+
+	//==============================================================================
+	// 컴포넌트 반환. 없으면 기본값으로 만들어 붙이고 반환. (원본 getOrAddComponent)
+	//==============================================================================
+	pub fn get_or_add_component<T: Component + Default + 'static>(&mut self) -> &mut T {
+		if !self.has_component::<T>() {
+			return self.add_component(T::default());
+		}
+		self.get_component_mut::<T>().expect("present component")
+	}
+
+	//==============================================================================
+	// 그 타입의 컴포넌트 모두. (원본 getComponents)
+	//==============================================================================
+	pub fn get_components<T: Component + 'static>(&self) -> Vec<&T> {
+		self.components.iter().filter_map(|component| {
+			let component_reference: &dyn Component = component.as_ref();
+			component_reference.as_any().downcast_ref::<T>()
+		}).collect()
 	}
 
 	//==============================================================================
@@ -526,9 +602,14 @@ impl WorldNode {
 	//==============================================================================
 	pub fn remove_component<T: Component + 'static>(&mut self) -> usize {
 		let before_count = self.components.len();
-		self.components.retain(|component| {
+		let transform = &mut self.transform;
+		self.components.retain_mut(|component| {
 			let component_reference: &dyn Component = component.as_ref();
-			!component_reference.as_any().is::<T>()
+			if !component_reference.as_any().is::<T>() {
+				return true;
+			}
+			component.detach(transform);
+			false
 		});
 		before_count - self.components.len()
 	}

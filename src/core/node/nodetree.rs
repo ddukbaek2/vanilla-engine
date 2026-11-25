@@ -11,7 +11,10 @@
 // - 형제 순서(원본 Node.setSiblingIndex, getSiblingIndex, getSiblings)와 계층 판정(isActiveInHierarchy, TransformNode.isVisibleInHierarchy)은
 //   부모를 봐야 해서 NodeTree 가 노드 핸들을 받아 한다. 원본의 -1 과 null 은 None 이다.
 //   원본 isVisible 은 활성이고 불투명도가 0 보다 큰 것이다. 러스트 판은 그리기를 끄는 보이기 플래그(set_visible)가 따로 있어 그것까지 본다.
+// - 원본 Node 의 계층 함수는 같은 이름으로 둔다. 노드 객체를 주고받는 자리는 NodeId 이고, 이름 끝에 _id(_ids)가 붙은 것은 핸들을 돌려주는 짝이다.
+//   (getParent → get_parent_id, getChildren → get_child_ids, getSiblings → get_sibling_ids) 부모에서 떼는 것(remove_child)은 노드를 지우지 않는다.
 //==============================================================================
+use crate::base::math;
 use crate::base::rect::Rect;
 use crate::base::transformmatrix::TransformMatrix;
 use crate::base::vector2::Vector2;
@@ -202,6 +205,61 @@ impl NodeTree {
 			parent_node.child_ids.retain(|candidate_id| *candidate_id != child_id);
 		}
 		self.nodes[child_id].parent_id = None;
+	}
+
+	//==============================================================================
+	// 부모 설정. (None 이면 부모에서 뗀다, 자기 자신이나 자손 밑으로는 붙이지 않는다, 원본 setParent)
+	//==============================================================================
+	pub fn set_parent(&mut self, child_id: NodeId, parent_id: Option<NodeId>) -> bool {
+		match parent_id {
+			Some(parent_id) => {
+				if self.get_parent_id(child_id) == Some(parent_id) {
+					return true;
+				}
+				self.add_child(parent_id, child_id)
+			}
+			None => {
+				self.remove_from_parent(child_id);
+				true
+			}
+		}
+	}
+
+	//==============================================================================
+	// 자식 떼기. (그 부모의 자식일 때만, 노드는 지우지 않는다, 원본 removeChild)
+	//==============================================================================
+	pub fn remove_child(&mut self, parent_id: NodeId, child_id: NodeId) {
+		if self.get_parent_id(child_id) == Some(parent_id) {
+			self.remove_from_parent(child_id);
+		}
+	}
+
+	//==============================================================================
+	// 그 자리의 자식 떼기. (원본 removeChildAt)
+	//==============================================================================
+	pub fn remove_child_at(&mut self, parent_id: NodeId, child_index: usize) {
+		if let Some(child_id) = self.get_child_ids(parent_id).get(child_index).copied() {
+			self.remove_from_parent(child_id);
+		}
+	}
+
+	//==============================================================================
+	// 모든 자식 떼기. (바로 아래만 떼고 자식들의 계층은 그대로, 원본 removeChildren)
+	//==============================================================================
+	pub fn remove_children(&mut self, parent_id: NodeId) {
+		let child_ids: Vec<NodeId> = self.get_child_ids(parent_id).to_vec();
+		for child_id in child_ids {
+			self.remove_from_parent(child_id);
+		}
+	}
+
+	//==============================================================================
+	// 이름으로 자식 떼기. (바로 아래 처음 하나, 원본 removeChildByName)
+	//==============================================================================
+	pub fn remove_child_by_name(&mut self, parent_id: NodeId, name: &str) {
+		if let Some(child_id) = self.find_child_by_name(parent_id, name) {
+			self.remove_from_parent(child_id);
+		}
 	}
 
 	//==============================================================================
@@ -426,6 +484,35 @@ impl NodeTree {
 	}
 
 	//==============================================================================
+	// 조건으로 자식 찾기. (바로 아래만, 처음 하나, 원본 findChild)
+	//==============================================================================
+	pub fn find_child(&self, parent_id: NodeId, predicate: impl Fn(&WorldNode) -> bool) -> Option<NodeId> {
+		self.get_child_ids(parent_id).iter().copied().find(|child_id| predicate(&self.nodes[*child_id]))
+	}
+
+	//==============================================================================
+	// 조건으로 자손 찾기. (깊이 우선, 그리는 순서로 처음 하나, 원본 findChildRecursive)
+	//==============================================================================
+	pub fn find_child_recursive(&self, parent_id: NodeId, predicate: &dyn Fn(&WorldNode) -> bool) -> Option<NodeId> {
+		for child_id in self.get_child_ids(parent_id).iter().copied() {
+			if predicate(&self.nodes[child_id]) {
+				return Some(child_id);
+			}
+			if let Some(found_id) = self.find_child_recursive(child_id, predicate) {
+				return Some(found_id);
+			}
+		}
+		None
+	}
+
+	//==============================================================================
+	// 이름으로 자손 찾기. (원본 findChildRecursiveByName, find_descendant_by_name 과 같다)
+	//==============================================================================
+	pub fn find_child_recursive_by_name(&self, parent_id: NodeId, name: &str) -> Option<NodeId> {
+		self.find_descendant_by_name(parent_id, name)
+	}
+
+	//==============================================================================
 	// 이름으로 자식 찾기. (바로 아래만, 처음 하나)
 	//==============================================================================
 	pub fn find_child_by_name(&self, parent_id: NodeId, name: &str) -> Option<NodeId> {
@@ -445,6 +532,137 @@ impl NodeTree {
 			}
 		}
 		None
+	}
+
+	//==============================================================================
+	// 전역 위치. (원본 TransformNode.getPosition: 부모들의 위치, 회전, 크기를 차례로 걸어 셈한다, 피봇과 앵커는 넣지 않는다)
+	//==============================================================================
+	pub fn get_position(&self, node_id: NodeId) -> Vector2 {
+		let local_position = self.nodes[node_id].get_local_position();
+		let parent_id = match self.get_parent_id(node_id) {
+			Some(parent_id) => {
+				parent_id
+			}
+			None => {
+				return local_position;
+			}
+		};
+		let parent_position = self.get_position(parent_id);
+		let parent_rotation = self.get_rotation(parent_id);
+		let parent_scale = self.get_scale(parent_id);
+		let radian = math::degree_to_radian(parent_rotation);
+		let cosine = math::cos(radian);
+		let sine = math::sin(radian);
+		let scaled_x = local_position.x * parent_scale.x;
+		let scaled_y = local_position.y * parent_scale.y;
+		let rotated_x = scaled_x * cosine - scaled_y * sine;
+		let rotated_y = scaled_x * sine + scaled_y * cosine;
+		Vector2::create(parent_position.x + rotated_x, parent_position.y + rotated_y)
+	}
+
+	//==============================================================================
+	// 전역 위치 설정. (부모가 없으면 로컬 위치, 원본 TransformNode.setPosition)
+	//==============================================================================
+	pub fn set_position(&mut self, node_id: NodeId, position: Vector2) {
+		let parent_id = match self.get_parent_id(node_id) {
+			Some(parent_id) => {
+				parent_id
+			}
+			None => {
+				self.nodes[node_id].set_local_position(position);
+				return;
+			}
+		};
+		let parent_position = self.get_position(parent_id);
+		let parent_rotation = self.get_rotation(parent_id);
+		let parent_scale = self.get_scale(parent_id);
+		let delta_x = position.x - parent_position.x;
+		let delta_y = position.y - parent_position.y;
+		let radian = math::degree_to_radian(-parent_rotation);
+		let cosine = math::cos(radian);
+		let sine = math::sin(radian);
+		let rotated_x = delta_x * cosine - delta_y * sine;
+		let rotated_y = delta_x * sine + delta_y * cosine;
+		let local_x = if parent_scale.x != 0.0 { rotated_x / parent_scale.x } else { 0.0 };
+		let local_y = if parent_scale.y != 0.0 { rotated_y / parent_scale.y } else { 0.0 };
+		self.nodes[node_id].set_local_position(Vector2::create(local_x, local_y));
+	}
+
+	//==============================================================================
+	// 전역 크기. (부모들의 크기를 곱한다, 원본 TransformNode.getScale)
+	//==============================================================================
+	pub fn get_scale(&self, node_id: NodeId) -> Vector2 {
+		let local_scale = self.nodes[node_id].get_local_scale();
+		match self.get_parent_id(node_id) {
+			Some(parent_id) => {
+				let parent_scale = self.get_scale(parent_id);
+				Vector2::create(parent_scale.x * local_scale.x, parent_scale.y * local_scale.y)
+			}
+			None => {
+				local_scale
+			}
+		}
+	}
+
+	//==============================================================================
+	// 전역 크기 설정. (부모의 전역 크기로 나눈다, 0 이면 0, 원본 TransformNode.setScale)
+	//==============================================================================
+	pub fn set_scale(&mut self, node_id: NodeId, scale: Vector2) {
+		let local_scale = match self.get_parent_id(node_id) {
+			Some(parent_id) => {
+				let parent_scale = self.get_scale(parent_id);
+				let local_x = if parent_scale.x != 0.0 { scale.x / parent_scale.x } else { 0.0 };
+				let local_y = if parent_scale.y != 0.0 { scale.y / parent_scale.y } else { 0.0 };
+				Vector2::create(local_x, local_y)
+			}
+			None => {
+				scale
+			}
+		};
+		self.nodes[node_id].set_local_scale(local_scale);
+	}
+
+	//==============================================================================
+	// 전역 회전. (도, 부모들의 회전을 더한다, 원본 TransformNode.getRotation)
+	//==============================================================================
+	pub fn get_rotation(&self, node_id: NodeId) -> f32 {
+		let local_rotation = self.nodes[node_id].get_local_rotation();
+		match self.get_parent_id(node_id) {
+			Some(parent_id) => {
+				self.get_rotation(parent_id) + local_rotation
+			}
+			None => {
+				local_rotation
+			}
+		}
+	}
+
+	//==============================================================================
+	// 전역 회전 설정. (도, 원본 TransformNode.setRotation)
+	//==============================================================================
+	pub fn set_rotation(&mut self, node_id: NodeId, rotation: f32) {
+		let local_rotation = match self.get_parent_id(node_id) {
+			Some(parent_id) => {
+				rotation - self.get_rotation(parent_id)
+			}
+			None => {
+				rotation
+			}
+		};
+		self.nodes[node_id].set_local_rotation(local_rotation);
+	}
+
+	//==============================================================================
+	// 전역 투명도. (부모들의 투명도를 곱한다, 원본 TransformNode.getOpacity)
+	//==============================================================================
+	pub fn get_opacity(&self, node_id: NodeId) -> f32 {
+		let mut opacity = self.nodes[node_id].get_local_opacity();
+		let mut current_id = self.get_parent_id(node_id);
+		while let Some(parent_id) = current_id {
+			opacity *= self.nodes[parent_id].get_local_opacity();
+			current_id = self.get_parent_id(parent_id);
+		}
+		opacity
 	}
 
 	//==============================================================================
@@ -1409,5 +1627,136 @@ mod sibling_tests {
 			})
 		});
 		assert!(!is_placeholder_left);
+	}
+
+	//==============================================================================
+	// 원본 Node 의 계층 함수: 부모 설정, 떼기(지우지 않음), 조건 찾기, 뿌리와 잎.
+	//==============================================================================
+	#[test]
+	fn original_hierarchy_functions() {
+		let mut node_tree = NodeTree::new();
+		let root_id = node_tree.get_root_id();
+		let layer_id = node_tree.create_child(root_id, "layer");
+		let first_id = node_tree.create_child(layer_id, "first");
+		let second_id = node_tree.create_child(layer_id, "second");
+		let deep_id = node_tree.create_child(second_id, "deep");
+		assert!(node_tree[root_id].is_root());
+		assert!(node_tree[first_id].is_leaf());
+		assert!(node_tree[second_id].has_parent());
+		assert_eq!(node_tree[layer_id].get_child(1), Some(second_id));
+		assert_eq!(node_tree[layer_id].get_child(2), None);
+		assert!(node_tree[layer_id].has_child(first_id));
+		assert_eq!(node_tree.find_child(layer_id, |node| node.get_name().starts_with("sec")), Some(second_id));
+		assert_eq!(node_tree.find_child_recursive(root_id, &|node| node.get_name() == "deep"), Some(deep_id));
+		assert_eq!(node_tree.find_child_recursive_by_name(root_id, "deep"), Some(deep_id));
+
+		// 떼기는 노드를 지우지 않는다.
+		node_tree.remove_child(layer_id, first_id);
+		assert!(node_tree.contains(first_id));
+		assert!(node_tree[first_id].is_root());
+		assert!(node_tree.set_parent(first_id, Some(second_id)));
+		assert_eq!(node_tree.get_parent_id(first_id), Some(second_id));
+		assert!(!node_tree.set_parent(second_id, Some(deep_id)));
+		node_tree.remove_child_by_name(second_id, "deep");
+		assert!(node_tree[deep_id].is_root());
+		node_tree.remove_child_at(second_id, 0);
+		assert!(node_tree[second_id].is_leaf());
+		node_tree.remove_children(root_id);
+		assert!(node_tree[root_id].is_leaf());
+		assert!(node_tree.contains(layer_id));
+		assert!(node_tree.set_parent(layer_id, None));
+	}
+
+	//==============================================================================
+	// 의존 컴포넌트는 붙기 전에 없을 때만 붙고, 떼어질 때 detach 가 불린다. get_or_add_component, get_components.
+	//==============================================================================
+	#[derive(Default)]
+	struct RequiredMarker {
+		component_base: ComponentBase,
+	}
+
+	impl Component for RequiredMarker {
+		fn get_component_base(&self) -> &ComponentBase {
+			&self.component_base
+		}
+
+		fn get_component_base_mut(&mut self) -> &mut ComponentBase {
+			&mut self.component_base
+		}
+
+		fn get_component_type(&self) -> &'static str {
+			"RequiredMarker"
+		}
+
+		fn detach(&mut self, transform: &mut NodeTransform) {
+			transform.set_local_opacity(0.25);
+		}
+	}
+
+	#[derive(Default)]
+	struct NeedsMarker {
+		component_base: ComponentBase,
+	}
+
+	impl Component for NeedsMarker {
+		fn get_component_base(&self) -> &ComponentBase {
+			&self.component_base
+		}
+
+		fn get_component_base_mut(&mut self) -> &mut ComponentBase {
+			&mut self.component_base
+		}
+
+		fn get_component_type(&self) -> &'static str {
+			"NeedsMarker"
+		}
+
+		fn require(&self) -> Vec<crate::core::component::RequiredComponent> {
+			vec![crate::core::component::RequiredComponent::of::<RequiredMarker>()]
+		}
+	}
+
+	#[test]
+	fn required_components_detach_and_get_components() {
+		let mut node = WorldNode::new("node");
+		node.add_component(NeedsMarker::default());
+		node.add_component(NeedsMarker::default());
+		assert_eq!(node.get_components::<RequiredMarker>().len(), 1);
+		assert_eq!(node.get_components::<NeedsMarker>().len(), 2);
+		node.get_or_add_component::<NeedsMarker>();
+		assert_eq!(node.get_components::<NeedsMarker>().len(), 2);
+		assert_eq!(node.remove_component::<RequiredMarker>(), 1);
+		assert_eq!(node.get_local_opacity(), 0.25);
+		node.get_or_add_component::<RequiredMarker>();
+		assert!(node.has_component::<RequiredMarker>());
+	}
+
+	//==============================================================================
+	// 전역 위치, 크기, 회전, 투명도. (원본 TransformNode 식, 설정한 값이 다시 읽힌다)
+	//==============================================================================
+	#[test]
+	fn global_transform_round_trip() {
+		let mut node_tree = NodeTree::new();
+		let root_id = node_tree.get_root_id();
+		let parent_id = node_tree.create_child(root_id, "parent");
+		let child_id = node_tree.create_child(parent_id, "child");
+		node_tree[parent_id].set_local_position(Vector2::create(100.0, 50.0));
+		node_tree[parent_id].set_local_rotation(90.0);
+		node_tree[parent_id].set_local_scale(Vector2::create(2.0, 2.0));
+		node_tree[parent_id].set_local_opacity(0.5);
+		node_tree[child_id].set_local_position(Vector2::create(10.0, 0.0));
+		node_tree[child_id].set_local_opacity(0.5);
+		let position = node_tree.get_position(child_id);
+		assert!((position.x - 100.0).abs() < 1e-3 && (position.y - 70.0).abs() < 1e-3);
+		node_tree.set_position(child_id, Vector2::create(80.0, 50.0));
+		let local_position = node_tree[child_id].get_local_position();
+		assert!(local_position.x.abs() < 1e-3 && (local_position.y - 10.0).abs() < 1e-3);
+		assert_eq!(node_tree.get_scale(child_id), Vector2::create(2.0, 2.0));
+		node_tree.set_scale(child_id, Vector2::create(4.0, 1.0));
+		assert_eq!(node_tree[child_id].get_local_scale(), Vector2::create(2.0, 0.5));
+		node_tree.set_rotation(child_id, 30.0);
+		assert_eq!(node_tree[child_id].get_local_rotation(), -60.0);
+		assert_eq!(node_tree.get_rotation(child_id), 30.0);
+		assert_eq!(node_tree.get_opacity(child_id), 0.25);
 	}
 }

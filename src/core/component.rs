@@ -5,6 +5,9 @@
 //   문맥에서 자기 노드(트랜스폼), 트리 전체(다른 노드 찾기, 만들기, 지우기), 엔진(입력, 시간, 뷰)을 꺼낸다.
 // - draw 는 노드 트랜스폼이 걸린 상태에서 자기 트랜스폼만 받는다. (그리는 동안에는 트리를 바꾸지 않는다)
 // - enable / gizmo 같은 공통 상태는 ComponentBase 에 두고, 구현체는 그것을 돌려주기만 한다.
+// - 의존 컴포넌트(원본 require): 원본은 클래스 목록을 돌려준다. 러스트 판은 RequiredComponent(타입과 기본값으로 만드는 함수) 목록을 돌려주고,
+//   WorldNode::add_component 가 붙이기 전에 그 타입이 없으면 만들어 붙인다. 떼어질 때는 원본처럼 detach 를 부른다.
+// - 원본 setNode, getNode, setComponentType 은 옮기지 않았다. 러스트 판은 노드를 문맥으로 넘기고(전역 객체 참조가 없다) 이름은 타입이 정한다.
 //==============================================================================
 pub mod mask;
 pub mod outline;
@@ -21,7 +24,34 @@ use crate::base::vector2::Vector2;
 use crate::core::graphic::Graphic;
 use crate::core::node::nodetree::{ComponentContext, NodeId, NodeTree};
 use crate::core::node::worldnode::NodeTransform;
-use std::any::Any;
+use std::any::{Any, TypeId};
+
+//==============================================================================
+// 의존 컴포넌트 하나. (그 타입과 없을 때 만드는 함수, 원본 require 가 돌려주는 클래스 자리)
+//==============================================================================
+pub struct RequiredComponent {
+	pub type_id: TypeId,
+	pub create: fn() -> Box<dyn Component>,
+}
+
+impl RequiredComponent {
+	//==============================================================================
+	// 그 타입의 기본값으로 만드는 의존 컴포넌트.
+	//==============================================================================
+	pub fn of<T: Component + Default + 'static>() -> RequiredComponent {
+		RequiredComponent {
+			type_id: TypeId::of::<T>(),
+			create: create_default_component::<T>,
+		}
+	}
+}
+
+//==============================================================================
+// 기본값 컴포넌트 만들기.
+//==============================================================================
+fn create_default_component<T: Component + Default + 'static>() -> Box<dyn Component> {
+	Box::new(T::default())
+}
 
 //==============================================================================
 // 구체 타입으로 꺼내기 위한 도움 트레이트. (get_component::<Sprite>() 같은 곳)
@@ -119,6 +149,19 @@ pub trait Component: AsAny {
 	// 노드에 붙을 때. (WorldNode::add_component 와 NodeTree::add_component 둘 다 부른다)
 	//==============================================================================
 	fn attach(&mut self, _transform: &mut NodeTransform) {
+	}
+
+	//==============================================================================
+	// 노드에서 떨어질 때. (WorldNode::remove_component 가 부른다)
+	//==============================================================================
+	fn detach(&mut self, _transform: &mut NodeTransform) {
+	}
+
+	//==============================================================================
+	// 의존 컴포넌트 목록. (붙기 전에 같은 노드에 없으면 만들어 붙인다, 원본 Unity RequireComponent 사상)
+	//==============================================================================
+	fn require(&self) -> Vec<RequiredComponent> {
+		Vec::new()
 	}
 
 	//==============================================================================
