@@ -260,6 +260,7 @@
 - 새 크레이트: 맥 objc2-core-graphics 0.3
 - 데스크탑 낱말 나누기를 크롬 Intl.Segmenter(ICU4C 사전)와 맞췄다. 태국어, 라오어, 크메르어, 버마어는 LSTM 대신 사전으로 나눈다. (ICU4X WordSegmenter::new_dictionary) 한중일 덩어리는 ICU4X 가 가장 긴 낱말부터 고르고 ICU4C 는 낱말 값의 합이 가장 작은 나누기를 골라 일본어가 달랐다("今日|はい|い"). ICU4C CjkBreakEngine 의 셈(사전에 없는 글자 값 255, 이어진 가타카나 1 ~ 8 자의 길이 값, 사전 찾기 전 NFKC)을 옮겨 ICU4X 의 같은 사전(cjdict)으로 다시 나눈다. 일본어, 중국어, 태국어, 라오어, 크메르어, 버마어 22 문장이 크롬과 같다. (시험으로 넣었다)
 - 새 크레이트: icu_provider 2, icu_collections 2 (icu_segmenter 가 이미 쓰는 판), unicode-normalization 0.1 (데스크탑)
+- UIFont: 미리 받지 않은 글자도 그 글꼴로 재거나 그리면 update 가 그 글자의 조각을 받는다. (원본 브라우저는 document.fonts 에 올려 둔 FontFace 의 글자 범위에 든 글자를 캔버스가 그릴 때 그 얼굴을 받기 시작한다. 전에는 load_ui_font_text, request_ui_font_text 로 청한 글자만 받았다) 받기 전에는 원본처럼 다른 글꼴로 그리고 받으면 다시 굽는다. 글자 캐시가 지켜보는 이름으로 재거나 구운 글에서 올린 얼굴의 글자 범위에 들지 않은 글자를 모은다. (textstringtexturecache::watch_unresolved_family_characters, take_unresolved_family_characters)
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.

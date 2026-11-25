@@ -22,6 +22,8 @@
 // - 글 재기(measure_text)는 폰트 문자열과 글이 같으면 다시 재지 않는다. (원본 measureTextMetrics 의 캐시, 2048 개)
 //   원본은 넘칠 때마다 가장 오래 안 쓴 하나를 버린다. 여기서는 넘치면 오래 안 쓴 반을 한 번에 버린다. (하나씩 찾으면 넘친 뒤로 잴 때마다 2048 개를 훑는다)
 //   글꼴을 새로 등록하면 비운다. (원본은 웹 글꼴이 받아지면 비운다) measure_text 가 &self 라 캐시는 RefCell 에 든다.
+// - 얼굴을 그때그때 받기(watch_unresolved_family_characters, take_unresolved_family_characters): 원본 브라우저는 올려 둔 FontFace 의 글자 범위에 든 글자를 그릴 때 그 얼굴을 받는다.
+//   러스트 판은 지켜보는 이름으로 재거나 구운 글에서 올린 얼굴의 범위에 들지 않은 글자를 모으고, UIFont 가 update 에서 꺼내 그 글자의 조각을 받는다.
 // - Graphic 없이 재기(measure_text_without_graphic): 원본은 어디서든 공용 2D 캔버스로 글을 잰다. 러스트 판은 글꼴을 등록할 때마다
 //   글꼴 목록(Rc)을 스레드 하나의 전역에 알려 두고, 그 목록으로 잰다. UI 레이아웃이 그리기 전에 글 줄 수를 알아야 할 때 쓴다. (UIConfirmWindow)
 //==============================================================================
@@ -39,6 +41,36 @@ use std::rc::Rc;
 //==============================================================================
 thread_local! {
 	static SHARED_MEASURE_CACHE: RefCell<Option<TextStringTextureCache>> = const { RefCell::new(None) };
+	// 지켜보는 이름(소문자) → 그 이름으로 재거나 구운 글 가운데 그 이름의 어느 얼굴의 글자 범위에도 들지 않은 글자. (UIFont 가 조각을 받는다)
+	static UNRESOLVED_FAMILY_CHARACTER_TABLE: RefCell<HashMap<String, std::collections::BTreeSet<char>>> = RefCell::new(HashMap::new());
+}
+
+//==============================================================================
+// 이름의 얼굴이 없는 글자 지켜보기 시작. (원본 브라우저는 FontFace 를 document.fonts 에 올려 두면 캔버스가 그 글꼴로 글을 그릴 때 그 글자의 범위에 든 얼굴을 받기 시작한다)
+// - 러스트 판은 얼굴을 받은 뒤에 올리므로, 지켜보는 이름으로 재거나 구운 글에서 올린 얼굴의 글자 범위에 들지 않은 글자를 모아 받는 쪽(UIFont)이 꺼내 받는다.
+//==============================================================================
+pub fn watch_unresolved_family_characters(family_name: &str) {
+	let family_key = family_name.trim().to_lowercase();
+	UNRESOLVED_FAMILY_CHARACTER_TABLE.with(|table_cell| {
+		table_cell.borrow_mut().entry(family_key).or_default();
+	});
+}
+
+//==============================================================================
+// 지켜보는 이름에서 얼굴이 없던 글자 꺼내기. (꺼내면 비운다, 지켜보지 않는 이름이면 빈 글)
+//==============================================================================
+pub fn take_unresolved_family_characters(family_name: &str) -> String {
+	let family_key = family_name.trim().to_lowercase();
+	UNRESOLVED_FAMILY_CHARACTER_TABLE.with(|table_cell| {
+		match table_cell.borrow_mut().get_mut(&family_key) {
+			Some(character_set) => {
+				std::mem::take(character_set).into_iter().collect()
+			}
+			None => {
+				String::new()
+			}
+		}
+	})
 }
 
 //==============================================================================
@@ -1287,9 +1319,43 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
+	// 지켜보는 이름의 얼굴이 없는 글자 모으기. (폰트 문자열의 이름 가운데 지켜보는 것마다, 올린 얼굴의 글자 범위에 들지 않은 글자)
+	//==============================================================================
+	fn note_unresolved_family_characters(&self, text: &str, font_description: &FontDescription) {
+		UNRESOLVED_FAMILY_CHARACTER_TABLE.with(|table_cell| {
+			let mut table = table_cell.borrow_mut();
+			if table.is_empty() {
+				return;
+			}
+			for family_name in &font_description.family_name_list {
+				let family_key = family_name.to_lowercase();
+				let character_set = match table.get_mut(&family_key) {
+					Some(character_set) => {
+						character_set
+					}
+					None => {
+						continue;
+					}
+				};
+				let face_list = self.font_family_table.get(&family_key);
+				for character in text.chars() {
+					if character.is_whitespace() || character.is_control() {
+						continue;
+					}
+					let is_covered = face_list.map(|face_list| face_list.iter().any(|face| face.descriptors.contains_character(character))).unwrap_or(false);
+					if !is_covered {
+						character_set.insert(character);
+					}
+				}
+			}
+		});
+	}
+
+	//==============================================================================
 	// 글자를 그릴 얼굴 목록. (대체 글꼴 후보와 운영체제 대체 글꼴을 먼저 채우고 고른다)
 	//==============================================================================
 	fn resolve_covering_face_list(&self, text: &str, font_description: &FontDescription) -> Vec<ResolvedFontFace> {
+		self.note_unresolved_family_characters(text, font_description);
 		self.ensure_fallback_coverage(text);
 		let face_list = self.resolve_face_list(font_description);
 		if !self.system_font_state.borrow().is_fallback_enabled {
@@ -2331,6 +2397,30 @@ mod tests {
 		assert_eq!(alpha_sum, 66360);
 		let chinese_raster = text_string_texture_cache.rasterize_text("\u{4EEC}", "32px default", 1.0, 2, ShapingDirection::LeftToRight).expect("chinese raster");
 		assert!(chinese_raster.coverage.iter().any(|value| *value > 0));
+	}
+
+	//==============================================================================
+	// 지켜보는 이름: 올린 얼굴의 글자 범위에 들지 않은 글자만 모으고, 꺼내면 비운다. (지켜보지 않는 이름은 모으지 않는다)
+	//==============================================================================
+	#[test]
+	fn unresolved_family_characters_are_collected() {
+		let font_bytes = match crate::platform::find_fallback_font_file("가", 400, false, false).and_then(|source| std::fs::read(source.path).ok()) {
+			Some(font_bytes) => {
+				font_bytes
+			}
+			None => {
+				return;
+			}
+		};
+		let mut text_string_texture_cache = TextStringTextureCache::new();
+		text_string_texture_cache.register_font_face("WatchedFamily", FontFaceDescriptors::create_from_css("400", "normal", "U+0000-00FF"), font_bytes.clone()).expect("latin face");
+		text_string_texture_cache.register_font_face("OtherFamily", FontFaceDescriptors::new(), font_bytes).expect("other face");
+		watch_unresolved_family_characters("WatchedFamily");
+		text_string_texture_cache.measure_text("16px WatchedFamily", "Ab 가나");
+		text_string_texture_cache.measure_text("16px OtherFamily", "다");
+		assert_eq!(take_unresolved_family_characters("watchedfamily"), "가나");
+		assert_eq!(take_unresolved_family_characters("WatchedFamily"), "");
+		assert_eq!(take_unresolved_family_characters("OtherFamily"), "");
 	}
 
 	//==============================================================================
