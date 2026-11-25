@@ -88,7 +88,7 @@ pub use crate::graphics3d::subsurfacescatteringeffect::SubsurfaceScatteringEffec
 pub use crate::graphics3d::toon::glbmeshreader::{read_animation_swing, read_glb_arrays, read_glb_node_arrays, read_glb_node_infos, write_skin_pose, ToonAnimation, ToonAnimationChannel, ToonChannelPath, ToonNodeInfo, ToonOutlineOptions, ToonPartArrays, ToonPoseBlend, ToonSkeleton, ToonSkeletonNode, ToonSwingScales};
 pub use crate::graphics3d::toon::meshbuilder::{create_box_geometry, create_capsule_geometry, create_cylinder_geometry, create_lathe_geometry, create_octahedron_geometry, create_part_matrix, create_rounded_box_geometry, create_sphere_geometry, create_torus_geometry, read_color_values, MeshBuilder, ToonGeometry, ToonMeshArrays, ToonPartOptions, ToonQuad, DEFAULT_OUTLINE_WIDTH, SKIN_FLOAT_COUNT, VERTEX_FLOAT_COUNT};
 pub use crate::graphics3d::toon::toonpostprocess::ToonPostProcess;
-pub use crate::graphics3d::toon::toonrenderer::{ToonDrawOptions, ToonFrameStatistics, ToonInstance, ToonMesh, ToonRenderer, ToonShadowInput, TOON_ATTRIBUTE_LOCATIONS, TOON_INSTANCE_FLOAT_COUNT, TOON_MAXIMUM_JOINTS};
+pub use crate::graphics3d::toon::toonrenderer::{ToonDrawOptions, ToonFrameStatistics, ToonInstance, ToonMesh, ToonRenderer, TOON_ATTRIBUTE_LOCATIONS, TOON_INSTANCE_FLOAT_COUNT, TOON_MAXIMUM_JOINTS};
 pub use crate::misc::beepplayer::{BeepPlayer, BeepTone, BeepWaveform};
 pub use crate::misc::camera2d::Camera2D;
 pub use crate::misc::cameragestures::CameraGestures;
@@ -179,3 +179,4 @@ pub use crate::ui::uiconfirmwindow::{UIConfirmWindow, UIConfirmWindowOptions};
 pub use crate::game::gamescene::{PlayInput, ScreenFadeEvent, ScreenFadeHold};
 pub use crate::core::viewmanager::SafeAreaSide;
 pub use crate::resource::spriteatlas::SpriteAtlas;
+pub use crate::graphics3d::toon::toonrenderer::extract_frustum_planes;

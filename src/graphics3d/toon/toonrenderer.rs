@@ -7,7 +7,8 @@
 // - 뼈대: write_skin_pose 가 셈한 본 행렬을 draw_mesh 에 넘긴다. (TOON_MAXIMUM_JOINTS 까지, 엔진 SkinnedModelRenderer 와 같은 96)
 // - GPU 인스턴싱: draw_mesh_instanced 로 같은 모형 여럿을 인스턴스마다 행렬과 틴트로 한 번에 그린다. (몸과 바깥선 모두)
 // - 화면 밖 거르기: 모형의 경계 구를 보기와 투영의 절두체에 대어 밖이면 그리지 않는다. (인스턴스는 하나씩 걸러 남은 것만 올린다)
-// - 그림자: 엔진 ShadowMap 에 begin_shadow_pass 와 draw_mesh_shadow 로 드리우고, set_shadow 로 받는다. (3x3 PCF)
+// - 그림자: 엔진 ShadowMap 에 begin_shadow_pass 와 draw_mesh 로 드리우고, set_shadow 로 받는다. (3x3 PCF)
+//   그림자를 받지 않을 때도 그림자 유닛에 1x1 비교 깊이 텍스처를 묶는다. (sampler2DShadow 유닛에 깊이 텍스처가 없으면 맥 드라이버가 알리고, 색 텍스처가 묶여 있으면 WebGL 이 그리기를 거부한다)
 // - HDR: set_hdr_output(true) 면 감마를 걸지 않은 선형 색을 낸다. 실수 렌더 타겟(ToonPostProcess)에 그리고 블룸과 톤매핑으로 마무리한다.
 // - 사용: create_mesh(gl, arrays) → 매 프레임 begin_frame(gl, 보기와 투영) → draw_mesh / draw_mesh_instanced → end_frame(gl) → 다 쓰면 delete_mesh.
 //   begin_frame 이 앞의 그리기 상태(섞기, 깊이, 면 가리기)를 적어 두고 깊이 시험과 면 가리기를 켜며, end_frame 이 적어 둔 상태로 돌린다.
@@ -298,20 +299,11 @@ pub struct ToonInstance {
 // 받을 그림자. (깊이 텍스처, 빛의 보기와 투영, 해상도, 세기 0 ~ 1)
 //==============================================================================
 #[derive(Clone, Copy, Debug)]
-pub struct ToonShadowInput {
-	pub depth_texture: GlTexture,
-	pub light_view_projection_matrix: Matrix4,
-	pub resolution: i32,
-	pub strength: f32,
-}
-
-impl ToonShadowInput {
-	//==============================================================================
-	// 엔진 ShadowMap 에서. (세기 0.6)
-	//==============================================================================
-	pub fn from_shadow_map(shadow_map: &ShadowMap) -> ToonShadowInput {
-		ToonShadowInput { depth_texture: shadow_map.get_depth_texture(), light_view_projection_matrix: *shadow_map.get_light_view_projection_matrix(), resolution: shadow_map.get_resolution(), strength: 0.6 }
-	}
+struct ToonShadowInput {
+	depth_texture: GlTexture,
+	light_view_projection_matrix: Matrix4,
+	resolution: i32,
+	strength: f32,
 }
 
 //==============================================================================
@@ -344,6 +336,8 @@ pub struct ToonRenderer {
 	solid_program: ShaderProgram,
 	outline_program: ShaderProgram,
 	depth_program: ShaderProgram,
+	// 그림자를 받지 않을 때 그림자 유닛에 묶는 1x1 비교 깊이 텍스처. (깊이 1 이라 늘 빛을 받음)
+	empty_shadow_texture: GlTexture,
 	view_projection_matrix: Matrix4,
 	frustum_planes: [[f32; 4]; 6],
 	sun_direction: [f32; 3],
@@ -380,7 +374,7 @@ fn index_slice_to_bytes(values: &[u32]) -> &[u8] {
 //==============================================================================
 // 보기와 투영 행렬에서 절두체의 면 여섯. (ax + by + cz + d >= 0 이 안쪽, 정규화)
 //==============================================================================
-fn extract_frustum_planes(matrix: &Matrix4) -> [[f32; 4]; 6] {
+pub fn extract_frustum_planes(matrix: &Matrix4) -> [[f32; 4]; 6] {
 	let elements = &matrix.elements;
 	let row = |row_index: usize| [elements[row_index], elements[4 + row_index], elements[8 + row_index], elements[12 + row_index]];
 	let row0 = row(0);
@@ -461,10 +455,12 @@ impl ToonRenderer {
 		let solid_program = ShaderProgram::create_with_attribute_locations(gl, &solid_vertex_source, &solid_fragment_source, &TOON_ATTRIBUTE_LOCATIONS)?;
 		let outline_program = ShaderProgram::create_with_attribute_locations(gl, &outline_vertex_source, &outline_fragment_source, &TOON_ATTRIBUTE_LOCATIONS)?;
 		let depth_program = ShaderProgram::create_with_attribute_locations(gl, &depth_vertex_source, &depth_fragment_source, &TOON_ATTRIBUTE_LOCATIONS)?;
+		let empty_shadow_texture = ToonRenderer::create_empty_shadow_texture(gl)?;
 		Ok(ToonRenderer {
 			solid_program,
 			outline_program,
 			depth_program,
+			empty_shadow_texture,
 			view_projection_matrix: Matrix4::default(),
 			frustum_planes: [[0.0, 0.0, 0.0, 1.0]; 6],
 			sun_direction: [-0.4, -1.0, -0.3],
@@ -482,6 +478,40 @@ impl ToonRenderer {
 			screen_rect: None,
 			is_scissor_applied: false,
 		})
+	}
+
+	//==============================================================================
+	// 빈 그림자 텍스처 짓기. (1x1 깊이 1, 비교 샘플링)
+	//==============================================================================
+	fn create_empty_shadow_texture(gl: &glow::Context) -> Result<GlTexture, String> {
+		unsafe {
+			let texture = gl.create_texture()?;
+			gl.active_texture(glow::TEXTURE0 + SHADOW_TEXTURE_UNIT);
+			gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+			let depth_bytes = u32::MAX.to_ne_bytes();
+			gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::DEPTH_COMPONENT24 as i32, 1, 1, 0, glow::DEPTH_COMPONENT, glow::UNSIGNED_INT, glow::PixelUnpackData::Slice(Some(&depth_bytes)));
+			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
+			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
+			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
+			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
+			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_COMPARE_MODE, glow::COMPARE_REF_TO_TEXTURE as i32);
+			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_COMPARE_FUNC, glow::LEQUAL as i32);
+			gl.bind_texture(glow::TEXTURE_2D, None);
+			gl.active_texture(glow::TEXTURE0);
+			Ok(texture)
+		}
+	}
+
+	//==============================================================================
+	// 렌더러 지우기. (세 프로그램과 빈 그림자 텍스처, 모형은 delete_mesh 로 따로)
+	//==============================================================================
+	pub fn destroy(&self, gl: &glow::Context) {
+		unsafe {
+			gl.delete_program(self.solid_program.get_program());
+			gl.delete_program(self.outline_program.get_program());
+			gl.delete_program(self.depth_program.get_program());
+			gl.delete_texture(self.empty_shadow_texture);
+		}
 	}
 
 	//==============================================================================
@@ -942,8 +972,11 @@ impl ToonRenderer {
 					gl.active_texture(glow::TEXTURE0);
 				}
 				None => {
+					gl.active_texture(glow::TEXTURE0 + SHADOW_TEXTURE_UNIT);
+					gl.bind_texture(glow::TEXTURE_2D, Some(self.empty_shadow_texture));
 					gl.uniform_1_f32(solid_program.get_uniform_location(gl, "shadowEnabled").as_ref(), 0.0);
 					gl.uniform_1_i32(solid_program.get_uniform_location(gl, "shadowTexture").as_ref(), SHADOW_TEXTURE_UNIT as i32);
+					gl.active_texture(glow::TEXTURE0);
 				}
 			}
 			gl.cull_face(glow::BACK);
@@ -1011,10 +1044,12 @@ impl ToonRenderer {
 	}
 
 	//==============================================================================
-	// 받을 그림자 설정. (None 이면 받지 않는다)
+	// 받을 그림자 설정. (ShadowMap 이나 None, 세기 0 ~ 1, 원본 기본 세기는 0.6)
 	//==============================================================================
-	pub fn set_shadow(&mut self, shadow_input: Option<ToonShadowInput>) {
-		self.shadow_input = shadow_input;
+	pub fn set_shadow(&mut self, shadow_map: Option<&ShadowMap>, strength: f32) {
+		self.shadow_input = shadow_map.map(|shadow_map| {
+			ToonShadowInput { depth_texture: shadow_map.get_depth_texture(), light_view_projection_matrix: *shadow_map.get_light_view_projection_matrix(), resolution: shadow_map.get_resolution(), strength }
+		});
 	}
 
 	//==============================================================================
@@ -1022,6 +1057,27 @@ impl ToonRenderer {
 	//==============================================================================
 	pub fn get_frame_statistics(&self) -> ToonFrameStatistics {
 		self.frame_statistics
+	}
+
+	//==============================================================================
+	// 몸 프로그램 반환.
+	//==============================================================================
+	pub fn get_solid_program(&self) -> &ShaderProgram {
+		&self.solid_program
+	}
+
+	//==============================================================================
+	// 바깥선 프로그램 반환.
+	//==============================================================================
+	pub fn get_outline_program(&self) -> &ShaderProgram {
+		&self.outline_program
+	}
+
+	//==============================================================================
+	// 그림자 깊이 프로그램 반환.
+	//==============================================================================
+	pub fn get_depth_program(&self) -> &ShaderProgram {
+		&self.depth_program
 	}
 }
 
