@@ -13,9 +13,12 @@
 //     원본 descriptors(굵기, 기울기, 글자 범위)는 FontFaceDescriptors 로 받아 엔진의 register_font_face_when_loaded 에 넘긴다. (없으면 FontFaceDescriptors::new())
 //   JSON 은 원본처럼 받은 뒤 풀지 못하면 실패다. (원본 isLoaded() 가 거짓이면 실패)
 //   소리는 Rc<AudioAsset> 을 돌려주고, 바이트를 받은 뒤 디코딩까지 끝나야 끝난 것으로 친다.
-//   원본 addTask(직접 만든 받기) 자리는 add_load_handle 이다. 직접 요청한 읽기 손잡이를 넣으면 진행률에 같이 센다. (동시 수에는 넣지 않는다)
+//   원본 addTask(직접 만든 받기) 자리는 add_load_handle 이다. 직접 요청한 읽기 손잡이를 넣으면 진행률에 같이 센다.
+//     원본 일꾼이 addTask 를 집어 끝날 때까지 한 자리를 쓰듯, 끝나기 전까지 받는 중인 수(get_in_flight_count)와 동시 수에 든다.
+//     손잡이는 넣기 전에 이미 요청된 것이라 원본처럼 차례가 올 때까지 미루지는 못하고, 넣은 때부터 받는 중이다.
+//   받는 중인 수는 원본처럼 집어 받기 시작했고 아직 끝나지 않은 것이다. (그림은 풀어 보기까지, 소리는 디코딩까지. 원본 일꾼이 그것까지 기다린다) 동시 수도 이것으로 센다.
 //   그림은 원본 img.onload 처럼 다 받았을 때 풀어 본다. 풀지 못하는 것(깨진 PNG)은 실패 목록에 들고, 푼 그림은 손잡이에 담아 ImageAsset 이 다시 풀지 않는다.
-//   원본 load() 는 부른 때의 목록 수로 일꾼을 띄워 그 뒤에 더한 것을 일꾼 수만큼 함께 받지 못하는데(원본 버그), 러스트 판은 update 마다 빈 자리를 채운다.
+//   받는 동안 더한 것은 원본처럼 빈 자리만큼 함께 받는다. (원본은 넣을 때 일꾼을 더 띄우고, 러스트 판은 update 마다 빈 자리를 채운다)
 //==============================================================================
 use crate::core::asset::{Asset, AssetLoadHandle};
 use crate::core::engine::Engine;
@@ -85,10 +88,10 @@ struct AssetLoaderEntry {
 
 impl AssetLoaderEntry {
 	//==============================================================================
-	// 바이트 요청이 끝났는지. (동시 수를 셀 때 쓴다)
+	// 받는 중인지. (원본 getInFlightCount 의 한 칸: 집어 받기 시작했고 아직 끝나지 않은 것, 동시 수도 이것으로 센다)
 	//==============================================================================
-	fn is_request_finished(&self) -> bool {
-		self.load_handle.is_finished()
+	fn is_in_flight(&self) -> bool {
+		self.is_started && !self.is_finished()
 	}
 
 	//==============================================================================
@@ -317,7 +320,7 @@ impl AssetLoader {
 	fn start_next_entries(&self, engine: &Engine) -> bool {
 		let mut state = self.state.borrow_mut();
 		let concurrency = state.concurrency;
-		let mut in_flight_count = state.entry_list.iter().filter(|entry| entry.is_started && !entry.is_request_finished() && !matches!(entry.kind, AssetLoaderEntryKind::External)).count();
+		let mut in_flight_count = state.entry_list.iter().filter(|entry| entry.is_in_flight()).count();
 		let mut is_started = false;
 		for entry in state.entry_list.iter_mut() {
 			if in_flight_count >= concurrency {
@@ -329,7 +332,7 @@ impl AssetLoader {
 			entry.is_started = true;
 			is_started = true;
 			engine.request_asset_bytes_into(&entry.path, &entry.load_handle);
-			if !entry.is_request_finished() {
+			if entry.is_in_flight() {
 				in_flight_count += 1;
 			}
 		}
@@ -551,10 +554,10 @@ impl AssetLoader {
 	}
 
 	//==============================================================================
-	// 지금 받는 중인 수. (요청했고 바이트가 아직 오지 않은 것)
+	// 지금 받는 중인 수. (원본 getInFlightCount, 집어 받기 시작했고 아직 끝나지 않은 것. 넣은 바깥 손잡이도 끝나기 전까지 센다)
 	//==============================================================================
 	pub fn get_in_flight_count(&self) -> usize {
-		self.state.borrow().entry_list.iter().filter(|entry| entry.is_started && !entry.is_request_finished() && !matches!(entry.kind, AssetLoaderEntryKind::External)).count()
+		self.state.borrow().entry_list.iter().filter(|entry| entry.is_in_flight()).count()
 	}
 }
 
@@ -636,10 +639,13 @@ mod tests {
 		assert!(font_handle.is_failed());
 		let failed_path_list: Vec<String> = asset_loader.get_failed_list().into_iter().map(|failure| failure.path).collect();
 		assert_eq!(failed_path_list, vec![String::from("broken.json"), String::from("missing.png"), String::from("missing.ttf")]);
+		// 원본 addTask 처럼 끝나지 않은 바깥 손잡이는 받는 중이다.
+		assert_eq!(asset_loader.get_in_flight_count(), 1);
 
 		// 바깥 손잡이가 끝나면 다 받음.
 		external_handle.finish(Ok(Vec::new()));
 		asset_loader.update(&engine);
+		assert_eq!(asset_loader.get_in_flight_count(), 0);
 		assert!(asset_loader.is_finished());
 		assert_eq!(asset_loader.get_progress(), 1.0);
 		assert!(asset_loader.get_completion_handle().is_finished());
@@ -675,6 +681,20 @@ mod tests {
 		asset_loader.load(&engine);
 		assert_eq!(asset_loader.get_in_flight_count(), 0);
 		assert_eq!(asset_loader.get_loaded_count(), 4);
+
+		// 원본 일꾼이 addTask 를 집으면 끝날 때까지 한 자리를 쓰듯, 끝나지 않은 바깥 손잡이도 동시 수의 한 자리다.
+		let task_loader = AssetLoader::new();
+		task_loader.set_concurrency(1);
+		let external_handle = AssetLoadHandle::create_pending("external");
+		task_loader.add_load_handle(&external_handle);
+		let text_asset = task_loader.add_text("file0.txt");
+		task_loader.load(&engine);
+		assert_eq!(task_loader.get_in_flight_count(), 1);
+		assert!(!text_asset.is_loaded());
+		external_handle.finish(Ok(Vec::new()));
+		task_loader.update(&engine);
+		assert!(text_asset.is_loaded());
+		assert!(task_loader.is_finished());
 		let _ = std::fs::remove_dir_all(&asset_directory_path);
 	}
 
