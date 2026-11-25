@@ -4,7 +4,7 @@
 // - 원본은 attach 때 호스트에 Sprite 를 붙이고 참조를 든다. 러스트 판은 Sprite 를 품는다. (UILabel 이 Text 를 품는 것과 같은 까닭)
 //   품은 Sprite 는 원본처럼 get_sprite / get_sprite_mut 로 꺼낸다. 이미지 뷰 노드의 get_component::<Sprite>() 는 None 이다.
 // - 원본 set_image 는 이미지 요소와 ImageAsset 을 함께 받는다. 러스트 판은 set_image(Option<Rc<Image>>) 와 set_image_asset 으로 나눴다.
-// - 배경색(UIView)은 스프라이트보다 먼저 그린다. (원본은 Sprite 가 먼저 붙어 배경이 그림을 덮는다. 기본 배경이 투명이라 보통은 차이가 없다)
+// - 배경색(UIView)은 스프라이트보다 먼저 그린다. (원본도 UIImageView 가 먼저 붙고 attach 에서 Sprite 를 뒤에 붙여 같은 차례다)
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::rect::Rect;

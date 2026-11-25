@@ -2,7 +2,7 @@
 
 # 바닐라엔진
 
-**한 번 짠 러스트 게임 코드가 윈도우 창에서도, 웹 브라우저에서도 그대로 돕니다.**
+**한 번 짠 러스트 게임 코드가 데스크탑 창에서도, 웹 브라우저에서도 그대로 돕니다.**
 
 [![version](https://img.shields.io/badge/version-0.3.2-d4b06a?style=flat-square)](UPDATE.md)
 [![license](https://img.shields.io/badge/license-MIT-3f3f46?style=flat-square)](LICENSE)
@@ -22,20 +22,20 @@
 
 바닐라엔진은 실제 게임을 만들며 다듬어 온 웹게임 엔진 [vanilla.js](https://github.com/ddukbaek2/vanilla.js) 를 러스트로 옮긴 2D/3D 게임 엔진입니다. 검증된 API 와 씬 구조는 그대로 가져오고, 러스트의 속도와 안전함, 네이티브 실행을 더했습니다.
 
-- **코드 하나로 데스크탑과 웹.** 같은 게임 코드로 윈도우 실행 파일(OpenGL 3.3)과 브라우저용 wasm(WebGL2)을 만듭니다. 창, GL, 입력, 애셋 로딩, 오디오, 클립보드, 한글 입력(IME)의 차이는 엔진의 플랫폼 레이어가 모두 처리합니다.
+- **코드 하나로 데스크탑과 웹.** 같은 게임 코드로 데스크탑 실행 파일(윈도우, macOS, OpenGL 3.3)과 브라우저용 wasm(WebGL2)을 만듭니다. 창, GL, 입력, 애셋 로딩, 오디오, 클립보드, 한글 입력(IME), 시스템 글꼴의 차이는 엔진의 플랫폼 레이어가 모두 처리합니다.
 - **빌림 검사기(borrow checker)와 싸우지 않는 씬 그래프.** 노드는 제너레이셔널 핸들(`NodeId`)로 가리킵니다. `Rc<RefCell>` 없이 노드를 마음껏 만들고 지우고, 지운 노드를 가리키는 핸들은 `None` 이 되어 댕글링 참조가 생기지 않습니다.
 - **익숙한 노드와 컴포넌트.** ECS 를 새로 배울 필요 없이, 유니티나 코코스처럼 노드에 컴포넌트를 붙여 게임을 짭니다. vanilla.js 와 이름과 흐름이 같아서 자바스크립트 게임을 옮기기도 쉽습니다.
 - **기본으로 빠른 2D.** 자동 배칭과 화면 밖 컬링이 처음부터 켜져 있습니다. 적 3만 2천 마리가 움직이는 장면에서 드로우 콜이 32,008 번에서 73 번으로 줄어듭니다.
-- **바로 쓰는 UI 위젯 20종.** 버튼, 슬라이더, 스크롤 뷰, 리스트 뷰, 드롭다운, 대화 상자, 토스트, 차트, 그리고 한글 조합까지 되는 입력 필드와 리치텍스트가 들어 있습니다.
-- **연출 도구가 엔진 안에.** 파티클, 셰이더 스프라이트 효과 50종, 화면 효과 58종, 트레일, 이징 31종을 갖춘 타임라인과 애니메이터, 트윈.
-- **3D 도 같은 화면에서.** glTF/GLB 와 FBX(순수 러스트 로더) 스키닝 모델, PBR 머티리얼, 그림자, 블룸, 앰비언트 오클루전, 서브서피스 스캐터링. 3D 장면 위에 2D UI 를 바로 얹습니다.
-- **게임 제작에 필요한 기능까지.** 길찾기, 2D 충돌, 스티어링, 플랫포머 캐릭터 물리, 상태 머신(FSM), 오브젝트 풀, 시드 기반 난수(vanilla.js 와 비트까지 같은 수열), 다국어, 대화 시스템, 타자기 효과, 로컬 저장소, 게임패드, 웹소켓, 오디오.
+- **바로 쓰는 UI 위젯.** 버튼, 슬라이더, 스크롤 뷰, 리스트 뷰, 드롭다운, 대화 상자, 토스트, 차트, 진행 고리, 창 쌓기와 확인 창, 단추 반응과 토스트 모션, 누름 자리 넓히기, 제약 기반 오토레이아웃, 그리고 한글 조합까지 되는 입력 필드와 리치텍스트가 들어 있습니다.
+- **연출 도구가 엔진 안에.** 파티클, 셰이더 스프라이트 효과 49종, 화면 효과 58종, 트레일, 아지랑이, 이징 31종을 갖춘 타임라인과 애니메이터, 트윈. 블렌드 모드는 Canvas2D 합성 26 가지를 모두 그립니다.
+- **3D 도 같은 화면에서.** glTF/GLB 와 FBX(순수 러스트 로더) 스키닝 모델, PBR 머티리얼, 사람 피부 렌더러, 그림자, 블룸과 다단 블룸, 멀티샘플 렌더 타겟, 앰비언트 오클루전, 서브서피스 스캐터링. 툰 3D 는 셀 셰이딩과 바깥선(껍데기, 화면 공간), 빛 묶음(점광, 림, 정반사, 띠 램프), 셰이더 조각을 끼우는 머티리얼, 인스턴스 꼴과 영구 인스턴스 버퍼, 그리기 단계 콜백, HDR 마무리(MSAA, 다단 블룸, 색 보정), GPU 효과(파티클, 불덩이, 충격파, 자국, 빔, 번개)를 갖췄습니다. 3D 장면 위에 2D UI 를 바로 얹고, 노드 사각형 안에도 3D 를 그립니다.
+- **게임 제작에 필요한 기능까지.** 길찾기, 2D 충돌, 스티어링, 플랫포머 캐릭터 물리, 상태 머신(FSM), 오브젝트 풀, 고정 걸음, 시드 기반 난수(vanilla.js 와 비트까지 같은 수열), 다국어와 언어 묶음, 대화 시스템, 타자기 효과, 로컬 저장소, 입력 동작(키, 패드 단추, 축 묶기), 게임패드와 진동, 카메라 손짓, 애셋 함께 받기와 로딩 진행률, 스프라이트 아틀라스, 소리 표와 음악, 효과음 버스, 화질 자동 조절, 웹소켓(wss 포함).
 - **async 없는 게임 코드.** 애셋을 요청해 두면 엔진이 로딩이 끝날 때까지 로딩 화면을 그리고, 끝나면 씬을 초기화합니다. 게임 코드에 `async` 와 `await` 가 필요 없습니다.
 
 | UI 위젯 | 한글 입력 필드와 리치텍스트 |
 | --- | --- |
 | <img src="docs/images/uigallery.jpg" alt="UI 위젯 갤러리"> | <img src="docs/images/inputgallery.jpg" alt="입력 필드와 리치텍스트"> |
-| **셰이더 스프라이트 50종, 화면 효과, 트레일** | **스키닝 3D, 그림자, 블룸** |
+| **셰이더 스프라이트 49종, 화면 효과, 트레일** | **스키닝 3D, 그림자, 블룸** |
 | <img src="docs/images/effectgallery.jpg" alt="효과 갤러리"> | <img src="docs/images/modelviewer.jpg" alt="3D 모델 보기"> |
 | **타임라인** | **같은 UI 갤러리를 크롬(wasm)에서** |
 | <img src="docs/images/timelineshowcase.jpg" alt="타임라인 쇼케이스"> | <img src="docs/images/web_uigallery.jpg" alt="웹에서 돌린 UI 갤러리"> |
@@ -197,7 +197,8 @@ impl Scene for GameScene {
 ```
 
 - 데스크탑은 `EngineConfiguration.asset_directory_paths` 폴더에서 바로 읽고, 웹은 `asset_base_url + 경로` 를 fetch 합니다. 게임 코드는 같습니다.
-- 이미지(png, jpg, webp), 텍스트, JSON, 바이너리, 폰트(ttf, otf, woff, woff2), 오디오(ogg, mp3, wav)를 지원합니다.
+- 이미지(png, jpg, webp, gif 첫 장, bmp, ico, svg, avif), 텍스트, JSON, 바이너리, 폰트(ttf, otf, woff, woff2), 오디오(ogg, mp3, wav, flac, m4a)를 지원합니다. 데스크탑은 엔진이 풀고, 웹은 원본처럼 브라우저가 풉니다.
+- 여러 애셋을 함께 받을 때는 `AssetLoader` 가 동시 수만큼 요청하고 진행률과 실패 목록을 셉니다.
 - 로딩에 실패한 애셋도 완료로 처리해서 씬이 멈추지 않습니다.
 
 ### 웹으로 빌드
@@ -227,6 +228,39 @@ init();
 
 캔버스는 `EngineConfiguration.canvas_id`(기본 `mainCanvas`)로 찾고, 없으면 엔진이 만듭니다.
 
+### 기능 플래그와 빌드 메모
+
+- 기능 `tls`(기본 켬): 데스크탑 `WebSocketClient` 가 `wss://` 를 엽니다. (ewebsock 의 tls, rustls 와 암호 공급자 ring) `default-features = false` 로 쓰면 데스크탑은 `ws://` 만 열립니다. 웹은 브라우저 WebSocket 이라 상관없습니다.
+- 맥에서 윈도우 대상 검사: ring 이 C 를 빌드해서 윈도우 C 헤더가 없는 맥에서는 `tls` 를 끄고 검사합니다.
+
+  ```bash
+  rustup target add x86_64-pc-windows-msvc
+  cargo check --target x86_64-pc-windows-msvc --no-default-features
+  ```
+
+- 리눅스 대상 검사: cpal 의 alsa-sys 와 gilrs 의 libudev-sys 가 pkg-config 를 부릅니다. 맥에서는 빈 플래그를 내는 pkg-config 를 `PKG_CONFIG` 로 주고 `PKG_CONFIG_ALLOW_CROSS=1` 로 검사합니다.
+- 데스크탑 AVIF 는 [rav1d](https://crates.io/crates/rav1d) 로 풉니다. rav1d 는 opt-level 0 이면 느려서(1600 x 1200 한 장이 dev 빌드 2.9 초, rav1d 만 opt-level 3 이면 0.9 초) 게임의 `Cargo.toml` 에 아래를 두기를 권합니다.
+
+  ```toml
+  [profile.dev.package.rav1d]
+  opt-level = 3
+  ```
+
+### 검증용 화면 저장
+
+데스크탑은 환경 변수, 웹은 주소 쿼리로 정한 프레임을 PNG 로 저장합니다. (게임 코드에서는 `engine.request_frame_capture`)
+
+| 데스크탑 | 웹 | 하는 일 |
+| --- | --- | --- |
+| `VANILLA_CAPTURE_PATH` | `captureName` | 저장 경로. `{frame}` 은 프레임 번호로 바뀝니다. 데스크탑은 이 변수가 있으면 찍기 모드이고, 웹은 파일 이름(기본 `capture_{frame}.png`)으로 내려받습니다 |
+| `VANILLA_CAPTURE_FRAMES` | `capture=120,240` | 저장할 프레임 번호, 쉼표로 여럿 (기본 120). 웹은 `capture` 가 있으면 찍기 모드입니다 |
+| `VANILLA_CAPTURE_EXIT=1` | `captureExit=1` | 마지막 저장 뒤 끝냅니다 |
+| `VANILLA_CAPTURE_SHOW_WINDOW=1` | | 찍기 모드의 데스크탑 창은 기본으로 숨기고 돕니다. 창을 보려면 켭니다 |
+
+```bash
+VANILLA_CAPTURE_PATH=shots/uigallery_{frame}.png VANILLA_CAPTURE_FRAMES=60 VANILLA_CAPTURE_EXIT=1 cargo run --example uigallery
+```
+
 ## 예제
 
 | 예제 | 내용 |
@@ -235,19 +269,26 @@ init();
 | `nodebasics` | 노드, Paint, Text, 직접 만든 컴포넌트 |
 | `uigallery`, `uigallery2` | UI 위젯 전부 |
 | `inputgallery` | 입력 필드, 한글 IME 조합, 선택 영역, 리치텍스트, 게임패드 진동 시험 (패드의 A, B, X, Y) |
-| `effectgallery` | 셰이더 스프라이트 50종, 화면 효과, 트레일, 파티클(렌더 모양 넷, 끌개, 흔들림, edge, 월드 공간) |
+| `effectgallery` | 셰이더 스프라이트 49종, 화면 효과, 트레일, 파티클(렌더 모양 넷, 끌개, 흔들림, edge, 월드 공간) |
 | `misctour` | 카메라, 길찾기, 대화 시스템, 화면 흔들림, 플로팅 텍스트 |
 | `timelineshowcase` | 타임라인 문서 재생 |
 | `modelviewer` | 스키닝 3D(glTF, FBX), 그림자, 블룸 |
+| `oldface` | 원본 OLD FACE 장면: 사람 피부 렌더러(피부, 눈, 머리카락), 그림자, AO, SSS, 블룸, ACES, FXAA, 표정 모프와 주름 맵 (숫자 키로 표정) |
 | `engineextras` | 테, 진행 고리, 부드러운 그늘, 마우스 커서, 카메라 손짓, 마우스 단추와 손가락 입력 (직접 눌러 본다) |
 | `devtoolsshowcase` | 개발자 도구(F2): 하이어라키, 인스펙터, 통계, 로컬 스토리지, 설정 |
-| `toonshowcase` | 툰 3D: 기본 도형과 바깥선, GLB 모형의 뼈대 움직임, 셀 셰이딩 |
+| `toonshowcase` | 툰 3D: 기본 도형과 바깥선, GLB 모형의 뼈대 움직임, 셀 셰이딩, 바위 2 천 개 인스턴싱과 화면 밖 거르기, 그림자, HDR 블룸 |
 | `toonview` | 노드 사각형 안 툰(ToonView3D), Camera3D 로 3D 점 위에 얹은 2D, 비치는 것 정렬, 툰 색 보정 |
+| `toonfx` | 툰 화면 공간 바깥선과 GPU 효과(터짐, 연기 기둥, 흐르는 자국, 빔, 번개, 리본, 빛 점) |
+| `toonpost` | 툰 HDR 마무리 세 판(기본, 멀티샘플 4 와 다단 블룸, LDR 길의 밝기와 밝힌 자리), 새 자국 꼴과 발밑 그늘 |
+| `toonmaterial` | 툰 머티리얼 셰이더 조각, 바탕색 텍스처와 데칼, 점광과 정반사와 림, 반 램버트 띠, 더하기 홀로그램, 평면 거울, 영구 인스턴스 버퍼 |
 | `audiotone` | 소리 재생, 효과음 풀, 비프 |
 | `gamepadlist` | 연결된 게임패드 목록 |
 | `uiscenelayout` | UIScene 과 UINode 오토레이아웃(세이프 에어리어 가이드, 여백 가이드, 같은 너비 단추, 글의 자연 크기) |
+| `windowshowcase` | 창 쌓기와 긴 글 확인 창, 바깥 누르기와 모두 닫기, 화면 페이드, UI 가 받지 않은 누름만 놀이 입력으로 |
+| `loadingshowcase` | AssetLoader 로 함께 받기(없는 파일은 실패 목록), 바꾼 로딩 화면, 빌드 판, FixedStepper 로 움직이는 공 |
+| `textnodeextras` | 글자 칸 맞춤, 배율이 움직이는 글, 반투명 고리와 호와 선분, 스프라이트 아틀라스, 구운 그림을 나눠 쓰는 그림자 글 |
 | `panelayout` | DOM 화면 분할 패널(Pane): 도구 막대, 끌어서 크기를 바꾸는 패널, 오른쪽 패널의 엔진 캔버스 (웹 전용) |
-| `blendmodes` | 블렌드 모드 26 가지를 칸마다: 반투명 그림과 도형, 글자, 나인슬라이스, 자르기, 파티클, 바꿔 끼운 셰이더 |
+| `blendmodes` | 블렌드 모드 26 가지를 칸마다: 반투명 그림과 도형, 글자, 나인슬라이스, 자르기, 파티클, 바꿔 끼운 셰이더, 반투명 렌더 타겟 |
 | `textshaping` | 글자 모양 짓기: 오른쪽에서 왼쪽 글(아랍어 글자 잇기), 가짜 기울임과 굵게, 한중일 낱말 줄바꿈, 글자 묶음 표시 수, 그림자 글의 기울임과 밑줄, DynamicFont 글자 아틀라스 |
 | `scenedocument` | UI 문서: vanilla.js 비주얼 에디터 꼴의 씬 파일(.scene.json)을 읽어 노드 트리를 짓고, 다시 내보내 견준다 |
 
@@ -256,7 +297,7 @@ cargo run --example uigallery
 cargo run --release --example modelviewer
 ```
 
-`modelviewer` 와 `timelineshowcase` 는 vanilla.js 의 예제 애셋을 씁니다. vanilla.js 저장소를 이 저장소 옆에 받아 두면 됩니다. (`Github/vanilla.js`, `Github/vanilla-engine`)
+`modelviewer`, `oldface`, `toonshowcase`, `timelineshowcase`, `loadingshowcase`, `scenedocument` 는 vanilla.js 의 예제 애셋을 씁니다. vanilla.js 저장소를 이 저장소 옆에 받아 두면 됩니다. (`Github/vanilla.js`, `Github/vanilla-engine`)
 
 ## 기술 노트
 
@@ -266,15 +307,15 @@ cargo run --release --example modelviewer
 
 **컴포넌트가 자기 노드와 트리에 동시에 접근하는 방법.** 컴포넌트의 `tick` 을 호출할 때는 그 컴포넌트 하나만 노드에서 잠시 꺼내고 플레이스홀더로 바꿔 둡니다. 그래서 컴포넌트는 `&mut self` 를 가진 채로 자기 노드, 트리 전체, 같은 노드의 형제 컴포넌트, 엔진에 빌림 충돌 없이 접근할 수 있습니다.
 
-**하나의 경로로 모이는 2D 렌더링.** 스프라이트, 도형, 텍스트, 파티클이 모두 `Graphic.draw_vertices` 하나를 거칩니다. 버텍스를 CPU 에서 변환해 모아 두었다가 같은 텍스처가 이어지는 동안 드로우 콜 한 번으로 그리고, 블렌드 모드가 바뀌거나 클리핑이 걸릴 때, 프레임이 끝날 때 플러시합니다. 정점마다 색과 틴트를 싣는 배치 셰이더라서 색이나 틴트가 다른 그리기도 같은 배치에 들어갑니다. 벤치 장면에서 배칭을 켠 화면과 끈 화면을 비교하면 픽셀까지 같습니다. 블렌드 모드는 Canvas2D 합성 26 가지를 모두 그립니다. overlay, soft-light, hue 같은 13 가지는 그릴 영역 아래를 떠 와 W3C Compositing and Blending 공식대로 셰이더로 섞습니다. (이 모드에서는 배칭하지 않습니다)
+**하나의 경로로 모이는 2D 렌더링.** 스프라이트, 도형, 텍스트, 파티클이 모두 `Graphic.draw_vertices` 하나를 거칩니다. 버텍스를 CPU 에서 변환해 모아 두었다가 같은 텍스처가 이어지는 동안 드로우 콜 한 번으로 그리고, 블렌드 모드가 바뀌거나 클리핑이 걸릴 때, 프레임이 끝날 때 플러시합니다. 정점마다 색과 틴트를 싣는 배치 셰이더라서 색이나 틴트가 다른 그리기도 같은 배치에 들어갑니다. 벤치 장면에서 배칭을 켠 화면과 끈 화면을 비교하면 픽셀까지 같습니다. 블렌드 모드는 Canvas2D 합성 26 가지를 모두 그립니다. overlay, soft-light, hue 같은 13 가지와 렌더 타겟에 그리는 multiply 는 그릴 영역 아래를 떠 와 W3C Compositing and Blending 공식대로 셰이더로 섞습니다. (이 모드에서는 배칭하지 않습니다)
 
-**컬링과 업데이트 생략.** 영역 안에만 그리는 컴포넌트(Paint, Sprite, Mask)와 글(Text, UILabel, ShadowText)만 붙은 노드는 화면 밖이면 그리지 않습니다. 글은 정렬, 넘침, 줄바꿈 결과로 실제로 그리는 사각형을 셈해 판정합니다. 그리기만 하는 컴포넌트만 붙은 노드는 업데이트에서 아예 건너뜁니다.
+**컬링과 업데이트 생략.** 영역 안에만 그리는 컴포넌트(Paint, Sprite, Mask)와 글(Text, UILabel, ShadowText), 그림자 그림(ShadowImage)만 붙은 노드는 화면 밖이면 그리지 않습니다. 글은 정렬, 넘침, 줄바꿈 결과로 실제로 그리는 사각형을 셈해 판정합니다. 그리기만 하는 컴포넌트만 붙은 노드는 업데이트에서 아예 건너뜁니다.
 
-**async 없는 애셋 로딩.** 애셋을 요청하면 로딩 핸들을 받고, 데이터가 도착하면 상태가 완료로 바뀝니다. 데스크탑은 파일을 바로 읽어서 `create` 직후에 `initialize` 가 호출되고, 웹은 fetch 가 끝나는 프레임까지 `draw_on_load` 로 로딩 화면을 그립니다. 같은 게임 코드가 두 플랫폼에서 그대로 돌아갑니다.
+**async 없는 애셋 로딩.** 애셋을 요청하면 로딩 핸들을 받고, 데이터가 도착하면 상태가 완료로 바뀝니다. 데스크탑은 파일을 바로 읽고, 웹은 fetch 가 끝나는 프레임까지 `draw_on_load` 로 로딩 화면을 그립니다. 다 읽힌 뒤에는 원본처럼 0.3초 더 로딩 화면을 보이고 `initialize` 를 부릅니다. 같은 게임 코드가 두 플랫폼에서 그대로 돌아갑니다.
 
-**텍스트 렌더링.** 문자열 하나를 [fontdue](https://crates.io/crates/fontdue) 로 래스터라이즈해 텍스처 한 장으로 베이크하고, 최근에 쓴 512 개를 LRU 캐시에 둡니다. 첫 폰트에 없는 글자는 기본 폰트, 폴백 폰트 순으로 찾습니다. 웹 폰트(WOFF, WOFF2)도 디코딩해 쓰고, 웹에서 폰트를 지정하지 않으면 브라우저 Canvas2D 로 베이크해 시스템 폰트로 나옵니다. 밑줄, 취소선, 낱말 단위와 글자 단위 줄바꿈을 지원하고, 기울임은 래스터를 기울여 흉내 냅니다(웹 시스템 폰트는 브라우저의 italic). 도트 폰트용으로 글자 안티앨리어싱을 끌 수 있습니다(`set_text_antialias_enabled`). 색 이모지는 글꼴의 색 글리프(sbix, CBDT, COLR v0/v1)를 직접 그려 브라우저처럼 제 색으로 나옵니다.
+**텍스트 렌더링.** 문자열 하나를 텍스처 한 장으로 베이크하고, 최근에 쓴 512 개를 LRU 캐시에 둡니다. 데스크탑은 [rustybuzz](https://crates.io/crates/rustybuzz) 로 글자 모양을 짓고(양방향 정렬, 아랍어 글자 잇기, 합자, 커닝) [fontdue](https://crates.io/crates/fontdue) 로, 가변 글꼴은 [skrifa](https://crates.io/crates/skrifa) 윤곽으로 래스터라이즈합니다. 기본 글꼴은 원본의 시스템 글꼴 목록을 운영체제 글꼴에서 찾아 잇고, 글꼴에 없는 글자는 운영체제가 고른 대체 글꼴(맥 CoreText, 윈도우 DirectWrite, 리눅스 fontconfig)로 그립니다. 일반 이름(serif, monospace 같은 것)의 기본 글꼴, 폰트 문자열의 CSS 단위와 `calc()`, 맥 시스템 UI 글꼴의 광학 크기와 자간, 가짜 기울임과 굵게까지 크롬 Canvas2D 와 맞췄습니다. 웹은 원본처럼 브라우저 Canvas2D 로 굽고, 받은 글꼴(WOFF, WOFF2 포함)은 FontFace 로 올립니다. 밑줄, 취소선, 낱말 단위와 글자 단위 줄바꿈(공백 없는 한중일과 태국어는 사전으로 낱말을 나눕니다)을 지원하고, 도트 폰트용으로 글자 안티앨리어싱을 끌 수 있습니다(`set_text_antialias_enabled`). 색 이모지는 글꼴의 색 글리프(sbix, CBDT, COLR v0/v1)를 직접 그려 브라우저처럼 제 색으로 나옵니다.
 
-**GL 컨텍스트 하나에 2D 와 3D.** 씬의 `pre_draw` 에서 그림자, 3D 장면, 블룸 패스를 그리고 `graphic.restore_render_state()` 로 2D 상태를 되살린 뒤 UI 를 그립니다. 화면 효과는 화면(또는 영역)을 텍스처로 캡처해 풀스크린 패스를 체인으로 연결합니다.
+**GL 컨텍스트 하나에 2D 와 3D.** 씬의 `pre_draw` 에서 그림자, 3D 장면, 블룸 패스를 그리고 `graphic.restore_render_state()` 로 2D 상태를 되살린 뒤 UI 를 그립니다. 2D 그리기 사이에 끼우는 3D 는 `graphic.run_external_pass` 로 감싸고, `ToonView3D` 는 이 길로 노드 사각형 안에 툰 3D 를 그립니다. 화면 효과는 화면(또는 영역)을 텍스처로 캡처해 풀스크린 패스를 체인으로 연결합니다.
 
 **웹에서도 제대로 되는 한글 입력.** 웹에서는 입력 필드마다 숨겨진 DOM `<input>` 을 두고 IME 조합 이벤트를 받아 캔버스에 그립니다. iOS 처럼 사용자 입력 안에서만 키보드가 뜨는 브라우저를 위해 터치 핸들러 안에서 포커스를 줍니다. 데스크탑은 winit 의 IME 이벤트를 씁니다.
 
@@ -295,27 +336,28 @@ cargo run --release --example modelviewer
 
 ## 외부 의존성
 
-엔진이 직접 쓰는 크레이트입니다. 버전은 `Cargo.lock` 기준이고, 직접 의존성은 모두 MIT, Apache-2.0, Zlib 같은 허용적 라이선스입니다.
+엔진이 직접 쓰는 크레이트입니다. 버전은 `Cargo.lock` 기준이고, 라이선스는 각 크레이트의 `Cargo.toml` 에 적힌 것입니다. 직접 의존성은 dwrote(MPL-2.0, 윈도우만)를 빼면 모두 MIT, Apache-2.0, Zlib, BSD, ISC, Unicode-3.0 같은 허용적 라이선스입니다. (self_cell 은 Apache-2.0 과 GPL-2.0 가운데 하나를 고르는 이중 라이선스입니다. kira 가 데스크탑 소리 해석에 쓰는 symphonia 는 MPL-2.0 입니다)
 
 **데스크탑, 웹 공통**
 
 | 크레이트 | 버전 | 쓰는 곳 | 하는 일 | 라이선스 |
 | --- | --- | --- | --- | --- |
 | [glow](https://crates.io/crates/glow) | 0.18.0 | `core/graphic.rs`, `graphics3d/`, `effect/` | OpenGL 3.3 과 WebGL2 를 같은 API 로 감싼 GL 바인딩. 모든 렌더링이 이 위에서 돕니다 | MIT / Apache-2.0 / Zlib |
-| [fontdue](https://crates.io/crates/fontdue) | 0.9.5 | `core/textstringtexturecache.rs` | 폰트 래스터라이즈. 문자열을 텍스처로 베이크합니다 | MIT / Apache-2.0 / Zlib |
+| [fontdue](https://crates.io/crates/fontdue) | 0.9.5 | `core/textshaping.rs`, `core/textstringtexturecache.rs` | 데스크탑 글리프 래스터라이즈. (웹은 브라우저 Canvas2D 가 굽습니다) | MIT / Apache-2.0 / Zlib |
+| [skrifa](https://crates.io/crates/skrifa) | 0.50.0 | `core/textshaping.rs` | 가변 글꼴의 축 값을 건 글리프 윤곽. fontdue 와 ttf-parser 가 그리지 못하는 맥 SFNS 같은 글꼴을 그립니다 (크롬도 skrifa 를 씁니다) | MIT / Apache-2.0 |
+| [self_cell](https://crates.io/crates/self_cell) | 1.3.0 | `core/textshaping.rs` | 글꼴 바이트와 그 바이트를 빌리는 rustybuzz 얼굴을 한 값에 들어, 글꼴을 내리면 바이트도 돌려줍니다 | Apache-2.0 / GPL-2.0 |
 | [wuff](https://crates.io/crates/wuff) | 0.2.10 | `core/textstringtexturecache.rs` | WOFF, WOFF2 웹 폰트 디코딩 | MIT |
 | [rustybuzz](https://crates.io/crates/rustybuzz) | 0.20.1 | `core/textshaping.rs`, `core/colorglyph.rs` | 글자 모양 짓기(HarfBuzz 를 옮긴 것). 아랍어 글자 잇기, 합자, 커닝, 결합 부호 자리를 브라우저처럼 잡습니다. 다시 내보내는 ttf-parser 로 색 글리프 표(sbix, CBDT, COLR)를 읽습니다 | MIT |
 | [unicode-bidi](https://crates.io/crates/unicode-bidi) | 0.3.18 | `core/textshaping.rs` | 양방향 정렬(UAX #9). 오른쪽에서 왼쪽 글과 섞인 글의 그리는 차례 | MIT / Apache-2.0 |
-| [unicode-properties](https://crates.io/crates/unicode-properties) | 0.1.5 | `core/textshaping.rs` | 이모지 성질(UTS #51 Emoji_Presentation). 글자 묶음을 색 이모지 글꼴로 그릴지 가립니다 | MIT / Apache-2.0, Unicode-3.0 |
+| [unicode-properties](https://crates.io/crates/unicode-properties) | 0.1.5 | `core/textshaping.rs` | 이모지 성질(UTS #51 Emoji_Presentation)과 일반 범주. 글자 묶음을 색 이모지 글꼴로 그릴지 가리고, 크롬 캔버스처럼 낱말마다 모양 지을 때 결합 부호를 앞 글자에 붙입니다 | MIT / Apache-2.0, Unicode-3.0 |
+| [unicode-script](https://crates.io/crates/unicode-script) | 0.5.9 | `core/textshaping.rs` | 글자의 문자(Script). 크롬 캔버스처럼 낱말을 나눌 때 씁니다 | MIT / Apache-2.0 |
 | [unicode-segmentation](https://crates.io/crates/unicode-segmentation) | 1.13.3 | `core/component/text.rs`, `core/textshaping.rs`, `misc/typewriter.rs`, `misc/dynamicfont.rs` | 글자 묶음 나누기(UAX #29). 줄바꿈과 표시 글자 수가 받침, 결합 부호, 이모지 묶음을 쪼개지 않습니다 | MIT / Apache-2.0 |
-| [icu_segmenter](https://crates.io/crates/icu_segmenter) | 2.4.0 | `core/component/text.rs` (데스크탑) | 낱말 나누기. 공백 없이 쓰는 한중일(사전), 태국어 같은 동남아 글자(LSTM)의 낱말 사이에서 줄을 바꿉니다. 웹은 원본처럼 브라우저 Intl.Segmenter 를 써서 넣지 않습니다 | Unicode-3.0 |
-| [image](https://crates.io/crates/image) | 0.25.10 | `core/image.rs`, `graphics3d/material.rs`, `core/colorglyph.rs`, 창 아이콘, 화면 저장 | png, jpeg, webp 디코딩과 PNG 저장 (이 세 형식만 켭니다). 색 이모지 글꼴(sbix, CBDT)의 PNG 글리프도 풉니다 | MIT / Apache-2.0 |
+| [image](https://crates.io/crates/image) | 0.25.10 | `core/image.rs`, `graphics3d/material.rs`, `graphics3d/toon/glbmeshreader.rs`, `core/colorglyph.rs`, 창 아이콘, 화면 저장 | png, jpeg, webp, gif, bmp, ico 디코딩과 PNG 저장 (이 여섯 형식만 켭니다). 색 이모지 글꼴(sbix, CBDT)의 PNG 글리프도 풉니다 | MIT / Apache-2.0 |
 | [slotmap](https://crates.io/crates/slotmap) | 1.1.1 | `core/node/nodetree.rs` | 노드 저장소. 제너레이셔널 핸들 `NodeId` 를 만듭니다 | Zlib |
-| [serde_json](https://crates.io/crates/serde_json) | 1.0.154 | JSON 애셋, 타임라인, 애니메이터, 파티클 설정, 다국어, 로컬 저장소, 애니메이션 클립, 웹소켓 메시지, UI 문서(씬 파일) | JSON 파싱과 저장. 객체 키는 적힌 차례를 지킵니다 (preserve_order) | MIT / Apache-2.0 |
+| [serde_json](https://crates.io/crates/serde_json) | 1.0.154 | JSON 애셋, 타임라인, 애니메이터, 파티클 설정, 다국어, 로컬 저장소, 애니메이션 클립, 아틀라스, 웹소켓 메시지, UI 문서(씬 파일) | JSON 파싱과 저장. 객체 키는 적힌 차례를 지킵니다 (preserve_order) | MIT / Apache-2.0 |
 | [flate2](https://crates.io/crates/flate2) | 1.1.11 | `graphics3d/fbxloader.rs` | FBX 의 압축 배열(zlib) 해제. 순수 러스트 백엔드라 wasm 에서도 돕니다 | MIT / Apache-2.0 |
-| [web-time](https://crates.io/crates/web-time) | 1.1.0 | `core/engine.rs`, `base/math.rs` | 프레임 시계와 난수 시드. 데스크탑은 `std::time`, 웹은 `performance.now()` 를 같은 API 로 씁니다 | MIT / Apache-2.0 |
-| [gilrs](https://crates.io/crates/gilrs) | 0.11.2 | `core/gamepadmanager.rs` | 게임패드 입력. 데스크탑은 OS 입력, 웹은 Gamepad API 를 읽습니다 | MIT / Apache-2.0 |
-| [ewebsock](https://crates.io/crates/ewebsock) | 0.8.0 | `web/websocketclient.rs` | 웹소켓. 데스크탑은 tungstenite, 웹은 브라우저 WebSocket 을 씁니다 | MIT / Apache-2.0 |
+| [web-time](https://crates.io/crates/web-time) | 1.1.0 | `core/engine.rs`, `base/math.rs` 외 | 프레임 시계와 난수 시드. 데스크탑은 `std::time`, 웹은 `performance.now()` 를 같은 API 로 씁니다 | MIT / Apache-2.0 |
+| [ewebsock](https://crates.io/crates/ewebsock) | 0.8.0 | `web/websocketclient.rs` | 웹소켓. 데스크탑은 tungstenite(`tls` 기능이면 rustls 로 wss), 웹은 브라우저 WebSocket 을 씁니다 | MIT / Apache-2.0 |
 
 **데스크탑만**
 
@@ -323,31 +365,54 @@ cargo run --release --example modelviewer
 | --- | --- | --- | --- | --- |
 | [winit](https://crates.io/crates/winit) | 0.30.13 | `platform/desktop.rs` | 창, 키보드, 마우스, 터치, IME 이벤트와 이벤트 루프 | Apache-2.0 |
 | [glutin](https://crates.io/crates/glutin), [glutin-winit](https://crates.io/crates/glutin-winit) | 0.32.3, 0.5.0 | `platform/desktop.rs` | OpenGL 3.3 코어 컨텍스트 생성 (깊이 24, 스텐실 8) | Apache-2.0, MIT |
-| [raw-window-handle](https://crates.io/crates/raw-window-handle) | 0.6.2 | `platform/desktop.rs` | winit 창을 glutin 에 넘깁니다 | MIT / Apache-2.0 / Zlib |
-| [kira](https://crates.io/crates/kira) | 0.12.6 | `platform/audio/desktop.rs` | 오디오 재생과 믹서 트랙. ogg, mp3, wav 디코딩만 켭니다 | MIT / Apache-2.0 |
+| [raw-window-handle](https://crates.io/crates/raw-window-handle) | 0.6.2 | `platform/desktop.rs`, `platform/desktop/windowsplatform.rs` | winit 창을 glutin 과 윈도우 창 서브클래싱에 넘깁니다 | MIT / Apache-2.0 / Zlib |
+| [gilrs](https://crates.io/crates/gilrs) | 0.11.2 | `core/gamepadmanager.rs` | 게임패드 입력과 진동(리눅스, 윈도우). OS 입력을 W3C Standard Gamepad 꼴로 바꿉니다. 웹은 원본처럼 `navigator.getGamepads()` 를 직접 읽습니다 | MIT / Apache-2.0 |
+| [kira](https://crates.io/crates/kira) | 0.12.6 | `platform/audio/desktop.rs` | 오디오 재생과 믹서 트랙. ogg, mp3, wav, flac, m4a(isomp4 와 aac) 해석만 켭니다 (symphonia) | MIT / Apache-2.0 |
+| [resvg](https://crates.io/crates/resvg) | 0.50.0 | `core/image.rs`, `animation/timeline.rs` | SVG 그림을 usvg 로 읽고 tiny-skia 로 그립니다 | MIT / Apache-2.0 |
+| [rav1d](https://crates.io/crates/rav1d) | 1.1.0 | `core/avifimage.rs` | AVIF 의 AV1 해석(dav1d 를 러스트로 옮긴 것). asm 을 꺼 nasm 이나 C 컴파일러 없이 빌드합니다. HEIF 상자는 엔진이 읽습니다 | BSD-2-Clause |
+| [icu_segmenter](https://crates.io/crates/icu_segmenter), [icu_provider](https://crates.io/crates/icu_provider), [icu_collections](https://crates.io/crates/icu_collections) | 2.4.0 | `core/component/text.rs` | 낱말 나누기. 공백 없이 쓰는 한중일과 태국어 같은 동남아 글자를 사전으로 나누고, 한중일은 사전(cjdict)의 낱말 값으로 크롬 ICU4C 처럼 값의 합이 가장 작은 나누기를 고릅니다. 웹은 원본처럼 브라우저 Intl.Segmenter 를 씁니다 | Unicode-3.0 |
+| [unicode-normalization](https://crates.io/crates/unicode-normalization) | 0.1.26 | `core/component/text.rs` | 한중일 사전을 찾기 전에 NFKC 로 바꿉니다 (ICU4C CjkBreakEngine 과 같게) | MIT / Apache-2.0, Unicode-3.0 |
 | [arboard](https://crates.io/crates/arboard) | 3.7.0 | `platform/desktop/textinput.rs` | 시스템 클립보드. 입력 필드의 복사, 잘라내기, 붙여넣기 | MIT / Apache-2.0 |
+| [sys-locale](https://crates.io/crates/sys-locale) | 0.3.2 | `misc/localization.rs` | 시스템 선호 언어 목록 (원본 navigator.languages 자리) | MIT / Apache-2.0 |
+| [rustls](https://crates.io/crates/rustls) | 0.23.46 | `web/websocketclient.rs` | `tls` 기능일 때만. ewebsock 의 wss 에 쓰는 TLS 의 암호 공급자를 ring 0.17.14 로 정합니다 | MIT / Apache-2.0 / ISC (ring 은 Apache-2.0 과 ISC) |
+
+**윈도우만**
+
+| 크레이트 | 버전 | 쓰는 곳 | 하는 일 | 라이선스 |
+| --- | --- | --- | --- | --- |
+| [windows-sys](https://crates.io/crates/windows-sys) | 0.52.0 | `platform/desktop/windowsplatform.rs`, `platform/desktop/systemfont.rs` | 잠자기에서 깸(WM_POWERBROADCAST)을 받는 창 서브클래싱, 주된 손이 손가락인지, system-ui 의 메뉴 글꼴과 ClearType 켜짐. 켜는 기능은 Win32_Foundation, Win32_Devices_Display, Win32_Graphics_Gdi, Win32_System_Power, Win32_UI_Shell, Win32_UI_WindowsAndMessaging 뿐입니다 | MIT / Apache-2.0 |
+| [dwrote](https://crates.io/crates/dwrote), [winapi](https://crates.io/crates/winapi) | 0.11.5, 0.3.9 | `platform/desktop/systemfont.rs` | DirectWrite 로 글꼴 이름의 파일을 찾고, 글꼴에 없는 글자의 대체 글꼴을 IDWriteFontFallback 으로 고릅니다 | MPL-2.0, MIT / Apache-2.0 |
 
 **macOS 만**
 
 | 크레이트 | 버전 | 쓰는 곳 | 하는 일 | 라이선스 |
 | --- | --- | --- | --- | --- |
+| [objc2-core-text](https://crates.io/crates/objc2-core-text), [objc2-core-foundation](https://crates.io/crates/objc2-core-foundation) | 0.3.2, 0.3.2 | `platform/desktop/systemfont.rs`, `platform/desktop/coretextglyph.rs` | CoreText 로 글꼴 이름과 시스템 UI 글꼴의 파일을 찾고, 글꼴에 없는 글자의 대체 글꼴을 CTFontCreateForString 으로 고릅니다 | Zlib / Apache-2.0 / MIT |
+| [objc2-core-graphics](https://crates.io/crates/objc2-core-graphics) | 0.3.2 | `platform/desktop/coretextglyph.rs` | 색 이모지와 열린 해석기가 없는 글꼴(PingFang 의 hvgl)의 글리프를 CoreText 로 그립니다 | Zlib / Apache-2.0 / MIT |
 | [objc2-game-controller](https://crates.io/crates/objc2-game-controller), [objc2-core-haptics](https://crates.io/crates/objc2-core-haptics) | 0.3.2, 0.3.2 | `platform/desktop/gamepadhaptics.rs` | 게임패드 진동. gilrs 가 맥에서 진동을 대지 않아 GameController 의 컨트롤러 햅틱으로 CoreHaptics 엔진을 지어 떱니다 (쓰는 기능만 켭니다) | Zlib / Apache-2.0 / MIT |
 | [objc2](https://crates.io/crates/objc2), [objc2-foundation](https://crates.io/crates/objc2-foundation), [block2](https://crates.io/crates/block2) | 0.6.5, 0.3.2, 0.6.2 | `platform/desktop/gamepadhaptics.rs` | 오브젝티브 C 메시지, NSArray 같은 기본 타입, 햅틱 엔진의 멈춤과 리셋 처리기(블록) | MIT |
+
+**리눅스와 그 밖의 유닉스만**
+
+| 크레이트 | 버전 | 쓰는 곳 | 하는 일 | 라이선스 |
+| --- | --- | --- | --- | --- |
+| [yeslogic-fontconfig-sys](https://crates.io/crates/yeslogic-fontconfig-sys) | 6.0.1 | `platform/desktop/systemfont.rs` | fontconfig 로 글꼴 이름과 대체 글꼴을 고릅니다. 라이브러리는 빌드할 때 잇지 않고 실행할 때 엽니다 (dlopen) | MIT |
+| [x11-dl](https://crates.io/crates/x11-dl), [wayland-client](https://crates.io/crates/wayland-client) | 2.21.0, 0.31.15 | `platform/desktop/linuxplatform.rs` | 주된 손이 손가락인지 화면 서버의 입력 장치로 읽습니다 (X11 XInput, 웨이랜드 wl_seat). glutin, winit 이 쓰는 같은 판입니다 | MIT |
 
 **웹(wasm)만**
 
 | 크레이트 | 버전 | 쓰는 곳 | 하는 일 | 라이선스 |
 | --- | --- | --- | --- | --- |
 | [wasm-bindgen](https://crates.io/crates/wasm-bindgen), [js-sys](https://crates.io/crates/js-sys) | 0.2.130, 0.3.107 | `platform/web.rs` 외 | 러스트와 자바스크립트 연결 | MIT / Apache-2.0 |
-| [web-sys](https://crates.io/crates/web-sys) | 0.3.107 | `platform/web.rs`, `platform/audio/web.rs`, 입력 필드, 로컬 저장소 | 캔버스, WebGL2, DOM 이벤트, WebAudio, fetch, localStorage | MIT / Apache-2.0 |
-| [wasm-bindgen-futures](https://crates.io/crates/wasm-bindgen-futures) | 0.4.80 | `platform/web.rs`, `platform/audio/web.rs` | fetch, 오디오 디코딩 같은 브라우저 비동기 API 를 엔진 안에서 기다립니다. 게임 코드는 async 를 쓰지 않습니다 | MIT / Apache-2.0 |
+| [web-sys](https://crates.io/crates/web-sys) | 0.3.107 | `platform/web.rs`, `platform/web/`, `platform/audio/web.rs`, 입력 필드, 로컬 저장소 | 캔버스, WebGL2, DOM 이벤트, WebAudio, fetch, localStorage, Canvas2D 글자 굽기, HTMLImageElement 그림 풀기 | MIT / Apache-2.0 |
+| [wasm-bindgen-futures](https://crates.io/crates/wasm-bindgen-futures) | 0.4.80 | `platform/web.rs`, `platform/audio/web.rs` | fetch, 오디오 디코딩, 그림 풀기 같은 브라우저 비동기 API 를 엔진 안에서 기다립니다. 게임 코드는 async 를 쓰지 않습니다 | MIT / Apache-2.0 |
 
 ## 진행 상황
 
 - 버전 0.3.2. 버전 번호는 vanilla.js 0.3.2 에서 이어 받았습니다.
-- vanilla.js 의 원본 160 파일 가운데 122 파일을 옮겼습니다. 20 파일은 러스트에 필요 없어서(컬렉션, 죽은 코드 같은 것) 옮기지 않았습니다.
-- 다음에 옮길 것: DynamicFont
-- 윈도우 11 데스크탑, macOS(애플 실리콘) 데스크탑, 크롬에서 확인했습니다. 리눅스와 실제 모바일 기기는 아직 돌려 보지 않았습니다.
+- vanilla.js 의 원본 200 파일 가운데 181 파일을 옮겼습니다. (같은 이름 175, 다른 파일에 합친 것 6) 19 파일은 빈 파일, 죽은 코드, 러스트 표준이 맡는 것(컬렉션, 객체 모델 도우미)이라 일부러 옮기지 않았습니다. 목록과 까닭은 [ARCHITECTURE.md](ARCHITECTURE.md) 9장에 있습니다.
+- 두 엔진은 기능 차이를 두지 않습니다. 언어나 플랫폼 때문에 정말 맞출 수 없는 것과 러스트에 맞게 정한 꼴은 [ARCHITECTURE.md](ARCHITECTURE.md) 10장에 모았습니다.
+- 윈도우 11 데스크탑, macOS(애플 실리콘) 데스크탑, 크롬에서 돌려 확인했습니다. 윈도우와 리눅스의 시스템 글꼴 갈래(DirectWrite, fontconfig)와 리눅스 손가락 판정은 그 대상으로 컴파일해 본 것까지입니다. 리눅스와 실제 모바일 기기는 아직 돌려 보지 않았습니다.
 
 ## 코드 스타일
 
@@ -360,8 +425,8 @@ cargo run --release --example modelviewer
 
 ## 개발 환경
 
-- Windows 11 Pro
-- Rust 1.99.1
+- Windows 11 Pro, macOS(애플 실리콘)
+- Rust 1.100.0
 - 쓰는 크레이트는 [외부 의존성](#외부-의존성) 에 정리했습니다
 
 ## 링크

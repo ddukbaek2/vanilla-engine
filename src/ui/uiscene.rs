@@ -17,7 +17,6 @@
 //   - 원본은 Scene 을 바로 상속해 GameScene 과 같은 코드를 따로 든다. 러스트 판은 공통 틀을 GameSceneBase 로 품고(세이프 에어리어 노드는 만들지 않는다)
 //     솔버와 두 가이드만 더한다. 그래서 GameSceneBase 의 화면 페이드와 놀이 입력도 쓸 수 있다. (원본 UIScene 에는 없다)
 //   - 원본은 create 에서 솔버와 가이드를 만든다. 러스트 판은 엔진이 필요 없어 생성할 때 만든다. 원본 load 끝의 "뷰 크기를 솔버에 바로 반영"은 initialize 에서 한다.
-//   - 원본은 UIScene 이 EngineConfiguration.useDevTools 를 보지 않고 늘 개발자 도구를 만든다. 러스트 판은 GameSceneBase 를 따라 그 설정을 본다.
 //   - 세이프 에어리어 인셋은 { top, left, bottom, right } 객체 대신 LayoutMargins 다. 솔버 오류는 Result<(), LayoutError> 로 돌려준다.
 //==============================================================================
 use crate::base::vector2::Vector2;

@@ -6,11 +6,11 @@
 // - 클리핑은 스텐실 버퍼 기반. 텍스트는 문자열 텍스처로 구워 출력.
 // - 묶어 그리기(기본 켬): 같은 텍스처를 잇달아 그리면 정점을 CPU 에서 변환해 모았다가 한 번에 그린다.
 //   원본과 같은 묶음 셰이더로 정점마다 색과 틴트를 실어, 틴트가 걸린 그리기도 묶는다. 클립 영역 기록은 묶지 않는다.
-//   블렌드, 클립, 파티클 그리기, 프레임 끝에서 모은 것을 먼저 내보낸다(flush_batch). 원본은 setSpriteBatchingEnabled 로 켜야 묶는다.
-// - 화면 밖 거르기(기본 켬): NodeTree 가 노드를 그리기 전에 is_local_rect_visible 로 묻는다. 원본은 전부 그린다.
+//   블렌드, 클립, 파티클 그리기, 프레임 끝에서 모은 것을 먼저 내보낸다(flush_batch). 원본도 기본으로 켠다. (setSpriteBatchingEnabled)
+// - 화면 밖 거르기(기본 켬): NodeTree 가 노드를 그리기 전에 is_local_rect_visible 로 묻는다. 원본도 기본으로 켜고 WorldNode 가 같은 함수로 묻는다. (setCullingEnabled)
 // - 셰이더 바꿔 끼우기(set_shader_program_override): ShaderSprite 같은 효과가 기본 프로그램 대신 제 프로그램으로 그린다. 바꿔 끼운 동안은 묶지 않는다.
 //   바꿔 끼울 프로그램은 resolve_shader_program 이 이름으로 담아 두고, 어트리뷰트 위치를 기본 프로그램과 같게 고정해 기본 버텍스 어레이를 같이 쓴다.
-// - 마지막으로 건 셰이더 프로그램과 텍스처 유닛 0 의 텍스처를 기억해, 같은 것을 다시 거는 GL 호출을 건너뛴다. (원본은 늘 건다)
+// - 마지막으로 건 셰이더 프로그램과 텍스처 유닛 0 의 텍스처를 기억해, 같은 것을 다시 거는 GL 호출을 건너뛴다. (원본도 같다)
 //   GL 을 밖에서 만질 수 있는 때(get_gl 로 컨텍스트를 내줄 때, restore_render_state, 프레임 시작과 끝)에는 잊고 다음에 다시 건다.
 // - 밉맵 단계 보정(set_image_mipmap_bias)은 기본, 묶음, 파티클 셰이더의 textureLodBias 유니폼으로 건다. 바꿔 끼운 셰이더는 그 유니폼이 있으면 받는다. (원본과 같음)
 // - 글자 방향(set_text_direction, 원본 setTextDirection)은 상태에 들고, 구운 문자열을 그 문단 방향으로 모양 짓는다. (textshaping.rs 의 양방향 정렬과 모양 짓기)

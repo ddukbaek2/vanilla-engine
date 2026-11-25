@@ -460,7 +460,7 @@ pub fn read_glb_images(bytes: &[u8]) -> Result<Vec<ToonGlbImage>, String> {
 }
 
 //==============================================================================
-// read_glb_images 의 그림 하나를 풀기. ((너비, 높이, RGBA 바이트), 알파를 미리 곱하지 않는다, png, jpeg, webp)
+// read_glb_images 의 그림 하나를 풀기. ((너비, 높이, RGBA 바이트), 알파를 미리 곱하지 않는다, image 크레이트의 png, jpeg, webp, gif, bmp, ico)
 //==============================================================================
 pub fn decode_glb_image(image: &ToonGlbImage) -> Result<(u32, u32, Vec<u8>), String> {
 	let decoded = image::load_from_memory(&image.data).map_err(|error| format!("GLB 그림 {} 을 풀지 못했다: {}", image.name, error))?;

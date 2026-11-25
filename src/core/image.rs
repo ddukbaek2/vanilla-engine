@@ -1,7 +1,7 @@
 //==============================================================================
 // 이미지. (원본 HTMLImageElement / ImageAsset 자리)
 // - 형식: 원본은 브라우저가 푸는 형식을 모두 받는다. 데스크탑은 image 크레이트로 PNG, JPEG, WebP, GIF(첫 장), BMP, ICO, resvg 로 SVG,
-//   avif-parse 와 rav1d 로 AVIF 를 푼다. (core/avifimage.rs)
+//   HEIF 상자는 엔진이 읽고 AV1 은 rav1d 로 풀어 AVIF 를 받는다. (core/avifimage.rs)
 //   웹은 애셋을 받을 때 브라우저(HTMLImageElement)가 먼저 풀어 손잡이에 둔다. (platform/web.rs, AVIF 와 애니메이션 PNG 의 첫 장 포함)
 // - 형(MIME)을 아는 바이트(data: 주소)는 load_from_memory_with_mime_type 으로 푼다. 브라우저처럼 형이 image/svg+xml 일 때만 SVG 이고, 그 밖은 내용으로 가린다.
 //   형을 모르는 바이트(파일)는 load_from_memory 가 내용으로 SVG 까지 가린다. (데스크탑에는 응답의 형이 없다)

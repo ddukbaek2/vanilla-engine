@@ -3,8 +3,8 @@
 // - 원본 add / subtract / multiply / divide / modulo 는 수와 Vector2 를 다 받는다. 러스트 판은 Vector2 를 받는 것과
 //   수를 받는 ..._scalar 로 나눴다. 원본 수는 f64 이고 러스트 판은 엔진의 다른 값처럼 f32 다.
 // - lerp 는 원본 math.lerp 식(from * (1 - t) + to * t)을 그대로 쓴다. (Vector3 와 같다)
-// - 원본의 버그 둘을 고쳤다. modulo 가 나머지 대신 나누기를 하고, half 가 반 대신 두 배(0.5 로 나누기)를 돌려준다.
-//   러스트 판은 modulo 가 나머지(%)를, half 가 반을 돌려준다. (vanilla.js 와 게임에서 둘을 쓰는 곳은 없다)
+// - 원본에 있던 버그 둘(modulo 가 나머지 대신 나누기를 하고, half 가 반 대신 두 배(0.5 로 나누기)를 돌려주던 것)을 두 엔진에서 같이 고쳤다.
+//   modulo 는 나머지(%)를, half 는 반을 돌려준다. (vanilla.js 와 게임에서 둘을 쓰는 곳은 없다)
 //==============================================================================
 use crate::base::math;
 use std::ops::{Add, AddAssign, Mul, Sub, SubAssign};

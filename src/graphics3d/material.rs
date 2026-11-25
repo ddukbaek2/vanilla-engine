@@ -8,7 +8,7 @@
 // - 원본과 다른 것:
 //   - 셰이더 프로그램은 Rc<ShaderProgram> 으로 렌더러와 나눠 든다. 모델의 드로어블은 Rc<Material> 로 가리킨다. (원본 참조 의미)
 //     원본이 인스턴스를 고치는 set_texture / set_use_alpha_cutout / set_subsurface_factor 는 &self 로 부를 수 있게 안에서 Cell 로 든다.
-//   - 이미지 해석은 원본 createImageBitmap(비동기) 대신 image 크레이트(png, jpeg, webp)로 그 자리에서 한다. 그래서 async 가 없다.
+//   - 이미지 해석은 원본 createImageBitmap(비동기) 대신 image 크레이트(png, jpeg, webp, gif, bmp, ico)로 그 자리에서 한다. 그래서 async 가 없다.
 //     형은 원본 크롬처럼 해석에 쓰지 않고 내용으로 가린다. (크롬 createImageBitmap(Blob) 도 Blob 의 형이 아니라 내용으로 해독기를 고른다)
 //     원본처럼 flip_y 면 위아래를 뒤집고, is_color_data 면 SRGB8_ALPHA8 로 올린다.
 //   - 원본 loadImageDescription(url) 의 Promise 는 ImageAsset 처럼 받기 손잡이(ImageDescriptionLoadHandle)다. load_image_description(엔진, 애셋 경로, 옵션)이

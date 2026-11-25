@@ -18,7 +18,7 @@
 //   데스크탑: 창 가림(Occluded, 맥과 X11 만 winit 이 알린다, 윈도우와 웨이랜드는 오지 않는다), 포커스, 마우스 단추와 손가락 누름.
 // - 페이지 복원 훅: 원본 setupAllDocumentEvents 처럼 소리를 다시 깨우고 입력을 비운 뒤 씬마다 부른다.
 //   웹: visibilitychange 의 visible → on_page_visibility_restored, 문서 resume 과 pageshow(persisted) → on_page_process_restored.
-//   원본은 pageshow 에서 정의되지 않은 dispatchPageProcessRestored 를 불러 예외가 났다. 러스트 판은 resume 과 같은 복구를 한다.
+//   pageshow 는 resume 과 같은 복구를 한다. (원본이 정의되지 않은 dispatchPageProcessRestored 를 불러 예외가 나던 것은 원본에서도 같게 고쳤다)
 //   데스크탑: 창 가림이 풀리면 on_page_visibility_restored, 앱이 suspended 뒤 resumed 되면 on_page_process_restored.
 //   (윈도우, 맥, 리눅스의 winit 은 suspended 를 보내지 않아 데스크탑에서는 on_page_process_restored 가 불리지 않는다)
 //

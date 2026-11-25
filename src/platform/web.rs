@@ -24,7 +24,7 @@ use std::rc::Rc;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
 
-// 글꼴 바이트가 없을 때 브라우저 시스템 글꼴로 글자 굽기. (원본처럼 Canvas2D)
+// 글자 굽기와 재기. (원본처럼 늘 브라우저 Canvas2D 로, 올린 글꼴 바이트는 document.fonts 의 FontFace 로 올린다)
 pub(crate) mod systemfont;
 mod textinput;
 pub use textinput::{read_clipboard_text, read_clipboard_text_with_callback, write_clipboard_text};
