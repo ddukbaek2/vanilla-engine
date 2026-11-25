@@ -11,3 +11,5 @@ pub mod toonpostprocess;
 pub mod toonrenderer;
 pub mod toondrawqueue;
 pub mod toonview3d;
+pub mod toonscreenoutline;
+pub mod toonvfx;
