@@ -20,7 +20,6 @@
 //   component(type, callback) 은 component(값) 과 component_with(값, 콜백) 둘로 나눴다. (러스트는 생략 인자가 없다)
 //   children(...layouts) 의 가변 인자는 배열이나 Vec 하나로 받는다.
 //   anchored_position 은 build 때 부모 content_size 기준으로 건다. 원본은 부모가 붙기 전에 불려서 사실상 local_position 과 같았다.
-//   arrange_fan 은 원본이 System 을 가져오지 않아 부르면 멈추고, 라디안 값을 도 단위 회전에 넣는다. 러스트 판은 각도를 도로 바꿔 건다.
 //   mask_enabled(false) 는 원본처럼 첫 마스크만이 아니라 그 노드의 Mask 를 모두 뗀다.
 //==============================================================================
 use crate::base::math;

@@ -256,6 +256,7 @@
 - GraphicsQualityGovernor.apply_search_text 가 원본 URLSearchParams 처럼 + 와 %XX 를 풀고 빈 조각을 건너뛴다
 - 컴포넌트에 노드 출력 상태 앞뒤 훅 push_transform, pop_transform 을 더했다. (자기 컴포넌트와 자식, 기즈모를 감싸서 불린다, 원본 노드가 pushTransform, popTransform 을 덮어쓰던 자리) TouchEffect 가 이 훅으로 원본처럼 자식까지 더하기 블렌드로 그린다. (전에는 자기 입자만)
 - 데스크탑 찍기 모드(VANILLA_CAPTURE_PATH)는 창을 숨기고 돈다. 검증 도구가 예제를 찍을 때 사용자 화면에 창이 뜨지 않는다. 숨긴 창은 다시 그리기 요청과 수직 동기가 없어 about_to_wait 에서 프레임을 바로 돌고, 최대 FPS 가 없으면 모니터 주사율(모르면 60)로 보일 때와 같은 빠르기를 맞춘다. 가려짐 알림은 받지 않는다. 맥은 독 아이콘과 포커스도 가져가지 않는다(활성화 정책 Accessory). 창을 보려면 VANILLA_CAPTURE_SHOW_WINDOW=1. (맥에서 toonshowcase, uigallery, textshaping 을 숨긴 채 찍어 확인)
+- vanilla.js 에서도 OBB.overlaps, NodeLayout.arrangeFan, SoundEffectPool 보이스 0 버그를 고치고 AudioAsset.getLoadError 를 넣어, 이 판의 머리 주석에서 그 '원본과 다른 점' 을 뺐다. (obb, nodelayout, soundeffectpool, audioasset)
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.
