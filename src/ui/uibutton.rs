@@ -44,10 +44,15 @@ use std::rc::Rc;
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ButtonState {
+	/// 보통. (누르지도 올리지도 않음)
 	Normal,
+	/// 마우스를 올려 둔 상태.
 	Hover,
+	/// 누르고 있는 상태. (최소 눌림 시간을 채우려고 뗌을 미루는 동안도)
 	Pressed,
+	/// 뗌을 처리하는 중. (뗌, 클릭 이벤트를 부르는 동안만이고 끝나면 Normal)
 	Released,
+	/// 누를 수 없는 상태. (set_interactable(false))
 	Disabled,
 }
 
@@ -55,6 +60,9 @@ pub enum ButtonState {
 /// 버튼 상태의 반사 값. (원본 ButtonState 는 Enum.begin() 으로 매긴 수다. Normal 1, Hover 2, Pressed 3, Released 4, Disabled 5)
 //==============================================================================
 impl crate::core::reflection::ToReflectValue for ButtonState {
+	//==============================================================================
+	/// 반사 값 반환. (Normal 1 부터 차례로 매긴 수)
+	//==============================================================================
 	fn to_reflect_value(&self) -> crate::core::reflection::ReflectValue {
 		crate::core::reflection::ReflectValue::Number((*self as usize + 1) as f64)
 	}
@@ -121,6 +129,40 @@ struct PendingRelease {
 
 //==============================================================================
 /// 버튼.
+///
+/// # 예제
+/// 글자가 있는 단추 만들기
+/// ```rust
+/// use std::cell::Cell;
+/// use std::rc::Rc;
+/// use vanilla::{ComponentContext, Engine, EngineConfiguration, NodeTree, Paint, Text, TouchKind, UIButton, Vector2};
+///
+/// let engine = Engine::new(EngineConfiguration::new());
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.get_root_id();
+/// let button_id = node_tree.create_child(root_id, "OkButton");
+/// node_tree[button_id].set_local_position(Vector2::create(200.0, 100.0));
+/// node_tree[button_id].set_content_size(Vector2::create(160.0, 48.0));
+/// node_tree[button_id].add_component(Paint::create_with_color("#3b82f6"));
+/// node_tree[button_id].add_component(Text::create_with_text("OK", 24.0));
+/// let click_count = Rc::new(Cell::new(0));
+/// let click_count_for_event = click_count.clone();
+/// let button = node_tree.add_component(button_id, UIButton::new()).expect("button");
+/// button.set_click_event(Box::new(move |_button: &mut UIButton, _context: &mut ComponentContext| {
+/// 	click_count_for_event.set(click_count_for_event.get() + 1);
+/// }));
+/// assert!(node_tree[button_id].is_interactable());
+///
+/// let inside = Vector2::create(210.0, 105.0);
+/// node_tree.dispatch_touch(button_id, &engine, TouchKind::Press, inside);
+/// node_tree.dispatch_touch(button_id, &engine, TouchKind::Release, inside);
+/// assert_eq!(click_count.get(), 1);
+///
+/// let outside = Vector2::create(400.0, 105.0);
+/// node_tree.dispatch_touch(button_id, &engine, TouchKind::Press, inside);
+/// node_tree.dispatch_touch(button_id, &engine, TouchKind::Release, outside);
+/// assert_eq!(click_count.get(), 1);
+/// ```
 //==============================================================================
 pub struct UIButton {
 	ui_control: UIControl,
@@ -153,6 +195,10 @@ pub struct UIButton {
 impl UIButton {
 	//==============================================================================
 	/// 생성.
+	/// - 트리에 붙이려면 node_tree.add_component(node_id, UIButton::new()) 를 쓴다. (붙을 때 컨텐트 노드를 만들고 호스트 노드를 interactable 로 켠다)
+	///
+	/// # 돌려줌
+	/// 이벤트가 없는 새 버튼. (길게 누름 0.5 초, 최소 눌림 0 초, 눌림 틴트 검정 알파 0.3, 오버 틴트 흰색 알파 0.12, 트랜지션 0.3 초)
 	//==============================================================================
 	pub fn new() -> UIButton {
 		UIButton {
@@ -185,6 +231,9 @@ impl UIButton {
 
 	//==============================================================================
 	/// 품은 컨트롤 반환.
+	///
+	/// # 돌려줌
+	/// 품은 UIControl.
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn get_uicontrol(&self) -> &UIControl {
@@ -193,6 +242,9 @@ impl UIButton {
 
 	//==============================================================================
 	/// 품은 컨트롤 반환. (변경용)
+	///
+	/// # 돌려줌
+	/// 품은 UIControl.
 	//==============================================================================
 	pub fn get_uicontrol_mut(&mut self) -> &mut UIControl {
 		&mut self.ui_control
@@ -200,6 +252,9 @@ impl UIButton {
 
 	//==============================================================================
 	/// 컨텐트 노드 핸들.
+	///
+	/// # 돌려줌
+	/// 호스트 노드 밑에 만든 컨텐트 노드. 트리에 붙기 전이면 None.
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn get_content(&self) -> Option<NodeId> {
@@ -208,6 +263,34 @@ impl UIButton {
 
 	//==============================================================================
 	/// 트랜지션 대상에서 노드를 제외. (그 노드와 모든 자손의 컴포넌트가 색 대상에서 빠진다)
+	/// - 다음에 색 대상을 모을 때(누름, 오버, 사용 불가)부터 빠진다.
+	///
+	/// # 인자
+	/// - `node_id`: 틴트에서 뺄 노드. (이미 든 노드면 그대로)
+	///
+	/// # 예제
+	/// 단추 안의 배지는 틴트하지 않기
+	/// ```rust
+	/// use vanilla::{Color, Engine, EngineConfiguration, NodeTree, Paint, TouchKind, UIButton, Vector2};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let button_id = node_tree.create_child(root_id, "Button");
+	/// node_tree[button_id].set_content_size(Vector2::create(100.0, 40.0));
+	/// node_tree[button_id].add_component(Paint::create_with_color(Color::white()));
+	/// let badge_id = node_tree.create_child(button_id, "Badge");
+	/// node_tree[badge_id].add_component(Paint::create_with_color(Color::white()));
+	/// let button = node_tree.add_component(button_id, UIButton::new()).expect("button");
+	/// button.exclude_node_from_tint(badge_id);
+	///
+	/// node_tree.dispatch_touch(button_id, &engine, TouchKind::Press, Vector2::zero());
+	/// node_tree.tick(&engine, 0.3);
+	/// let button_color = node_tree[button_id].get_component::<Paint>().expect("paint").get_color();
+	/// let badge_color = node_tree[badge_id].get_component::<Paint>().expect("paint").get_color();
+	/// assert!((button_color.red - 0.7).abs() < 0.001);
+	/// assert_eq!(badge_color, Color::white());
+	/// ```
 	//==============================================================================
 	pub fn exclude_node_from_tint(&mut self, node_id: NodeId) {
 		if !self.tint_excluded_node_ids.contains(&node_id) {
@@ -217,6 +300,33 @@ impl UIButton {
 
 	//==============================================================================
 	/// 트랜지션 대상에서 그 노드의 T 타입 컴포넌트만 제외. (원본은 컴포넌트 인스턴스를 받는다)
+	/// - 다음에 색 대상을 모을 때부터 빠진다. 자손 노드의 T 는 빠지지 않는다.
+	///
+	/// # 인자
+	/// - `node_id`: T 타입 컴포넌트를 뺄 노드. (호스트 노드나 그 자손)
+	///
+	/// # 예제
+	/// 바탕 Paint 는 그대로 두고 글자만 틴트하기
+	/// ```rust
+	/// use vanilla::{Color, Engine, EngineConfiguration, NodeTree, Paint, Text, TouchKind, UIButton, Vector2};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let button_id = node_tree.create_child(root_id, "Button");
+	/// node_tree[button_id].set_content_size(Vector2::create(100.0, 40.0));
+	/// node_tree[button_id].add_component(Paint::create_with_color(Color::white()));
+	/// node_tree[button_id].add_component(Text::create_with_text("OK", 20.0));
+	/// let button = node_tree.add_component(button_id, UIButton::new()).expect("button");
+	/// button.exclude_component_from_tint::<Paint>(button_id);
+	///
+	/// node_tree.dispatch_touch(button_id, &engine, TouchKind::Press, Vector2::zero());
+	/// node_tree.tick(&engine, 0.3);
+	/// let paint_color = node_tree[button_id].get_component::<Paint>().expect("paint").get_color();
+	/// let text_color = node_tree[button_id].get_component::<Text>().expect("text").get_text_color();
+	/// assert_eq!(paint_color, Color::white());
+	/// assert!(text_color.red < 1.0);
+	/// ```
 	//==============================================================================
 	pub fn exclude_component_from_tint<T: Component + 'static>(&mut self, node_id: NodeId) {
 		let excluded_component = (node_id, TypeId::of::<T>());
@@ -284,6 +394,41 @@ impl UIButton {
 
 	//==============================================================================
 	/// 클릭 알림만 부르기. (누르지 않고 클릭이 난 것처럼 Clicked, Click 차례로, UIHitArea 가 넓힌 자리의 클릭을 넘길 때)
+	/// - 지금 부르는 중인 이벤트는 건너뛴다. (클릭됨 이벤트 안에서 부르면 클릭만 한 번 더 불린다)
+	///
+	/// # 인자
+	/// - `context`: 이 버튼 노드의 문맥. (이벤트에 그대로 넘긴다)
+	///
+	/// # 예제
+	/// 다른 단추의 클릭을 이 단추로 넘기기
+	/// ```rust
+	/// use std::cell::Cell;
+	/// use std::rc::Rc;
+	/// use vanilla::{ComponentContext, Engine, EngineConfiguration, NodeTree, TouchKind, UIButton, Vector2};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let button_id = node_tree.create_child(root_id, "Button");
+	/// let click_count = Rc::new(Cell::new(0));
+	/// let click_count_for_event = click_count.clone();
+	/// let button = node_tree.add_component(button_id, UIButton::new()).expect("button");
+	/// button.set_click_event(Box::new(move |_button: &mut UIButton, _context: &mut ComponentContext| {
+	/// 	click_count_for_event.set(click_count_for_event.get() + 1);
+	/// }));
+	///
+	/// let relay_id = node_tree.create_child(root_id, "Relay");
+	/// node_tree[relay_id].set_content_size(Vector2::create(40.0, 40.0));
+	/// let relay_button = node_tree.add_component(relay_id, UIButton::new()).expect("relay");
+	/// relay_button.set_click_event(Box::new(move |_relay_button: &mut UIButton, context: &mut ComponentContext| {
+	/// 	context.with_component_mut::<UIButton, ()>(button_id, |button, button_context| {
+	/// 		button.fire_click_events(button_context);
+	/// 	});
+	/// }));
+	/// node_tree.dispatch_touch(relay_id, &engine, TouchKind::Press, Vector2::zero());
+	/// node_tree.dispatch_touch(relay_id, &engine, TouchKind::Release, Vector2::zero());
+	/// assert_eq!(click_count.get(), 1);
+	/// ```
 	//==============================================================================
 	pub fn fire_click_events(&mut self, context: &mut ComponentContext) {
 		self.fire_event(context, ButtonEventKind::Clicked);
@@ -617,6 +762,9 @@ impl UIButton {
 
 	//==============================================================================
 	/// 버튼 상태 설정.
+	///
+	/// # 인자
+	/// - `button_state`: 새 상태. (이벤트를 부르거나 틴트를 다시 걸지 않는다)
 	//==============================================================================
 	pub fn set_button_state(&mut self, button_state: ButtonState) {
 		self.button_state = button_state;
@@ -624,6 +772,9 @@ impl UIButton {
 
 	//==============================================================================
 	/// 버튼 상태 반환.
+	///
+	/// # 돌려줌
+	/// 지금 상태.
 	//==============================================================================
 	pub fn get_button_state(&self) -> ButtonState {
 		self.button_state
@@ -631,6 +782,49 @@ impl UIButton {
 
 	//==============================================================================
 	/// 길게 누름 이벤트 설정. (임계 시간을 넘기면 한 번 알리고, 그 누름의 클릭은 삼킨다)
+	/// - 임계 시간은 set_long_press_seconds 로 정한다. 시간은 tick 에서 센다.
+	///
+	/// # 인자
+	/// - `long_pressed_event`: 길게 누름이 되었을 때 부를 함수. (버튼과 문맥을 받는다)
+	///
+	/// # 예제
+	/// 길게 누르면 지우고 짧게 누르면 열기
+	/// ```rust
+	/// use std::cell::Cell;
+	/// use std::rc::Rc;
+	/// use vanilla::{ComponentContext, Engine, EngineConfiguration, NodeTree, TouchKind, UIButton, Vector2};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let button_id = node_tree.create_child(root_id, "Slot");
+	/// node_tree[button_id].set_content_size(Vector2::create(80.0, 80.0));
+	/// let delete_count = Rc::new(Cell::new(0));
+	/// let open_count = Rc::new(Cell::new(0));
+	/// let delete_count_for_event = delete_count.clone();
+	/// let open_count_for_event = open_count.clone();
+	/// let button = node_tree.add_component(button_id, UIButton::new()).expect("button");
+	/// button.set_long_press_seconds(0.5);
+	/// button.set_long_pressed_event(Box::new(move |_button: &mut UIButton, _context: &mut ComponentContext| {
+	/// 	delete_count_for_event.set(delete_count_for_event.get() + 1);
+	/// }));
+	/// button.set_click_event(Box::new(move |_button: &mut UIButton, _context: &mut ComponentContext| {
+	/// 	open_count_for_event.set(open_count_for_event.get() + 1);
+	/// }));
+	///
+	/// node_tree.dispatch_touch(button_id, &engine, TouchKind::Press, Vector2::zero());
+	/// node_tree.tick(&engine, 0.3);
+	/// node_tree.tick(&engine, 0.3);
+	/// node_tree.dispatch_touch(button_id, &engine, TouchKind::Release, Vector2::zero());
+	/// assert_eq!(delete_count.get(), 1);
+	/// assert_eq!(open_count.get(), 0);
+	///
+	/// node_tree.dispatch_touch(button_id, &engine, TouchKind::Press, Vector2::zero());
+	/// node_tree.tick(&engine, 0.1);
+	/// node_tree.dispatch_touch(button_id, &engine, TouchKind::Release, Vector2::zero());
+	/// assert_eq!(delete_count.get(), 1);
+	/// assert_eq!(open_count.get(), 1);
+	/// ```
 	//==============================================================================
 	pub fn set_long_pressed_event(&mut self, long_pressed_event: UIButtonEvent) {
 		self.long_pressed_event = Some(Rc::new(RefCell::new(long_pressed_event)));
@@ -638,6 +832,9 @@ impl UIButton {
 
 	//==============================================================================
 	/// 이번 누름이 이어진 시간 반환. (누르고 있지 않으면 0. 게이지 연출용)
+	///
+	/// # 돌려줌
+	/// 누른 뒤 지난 초. (tick 에서 쌓는다, 누르고 있지 않으면 0)
 	//==============================================================================
 	pub fn get_pressed_elapsed_seconds(&self) -> f32 {
 		if self.is_press_tracking {
@@ -650,6 +847,9 @@ impl UIButton {
 
 	//==============================================================================
 	/// 길게 누름 판정 시간 설정. (초)
+	///
+	/// # 인자
+	/// - `long_press_seconds`: 누름이 이만큼 이어지면 길게 누름으로 본다. (초, 기본 0.5)
 	//==============================================================================
 	pub fn set_long_press_seconds(&mut self, long_press_seconds: f32) {
 		self.long_press_seconds = long_press_seconds;
@@ -657,6 +857,9 @@ impl UIButton {
 
 	//==============================================================================
 	/// 길게 누름 판정 시간 반환.
+	///
+	/// # 돌려줌
+	/// 길게 누름 판정 시간. (초)
 	//==============================================================================
 	pub fn get_long_press_seconds(&self) -> f32 {
 		self.long_press_seconds
@@ -664,6 +867,39 @@ impl UIButton {
 
 	//==============================================================================
 	/// 최소 눌림 표시 시간 설정. (짧게 눌러도 이 시간만큼 눌린 모습을 보인 뒤 클릭한다. 기본 0 = 바로)
+	/// - 시간을 못 채운 뗌은 미뤄 두었다가 tick 에서 처리하고, 그동안 상태는 Pressed 다.
+	///
+	/// # 인자
+	/// - `minimum_pressed_seconds`: 최소 눌림 표시 시간. (초, 0 보다 작으면 0)
+	///
+	/// # 예제
+	/// 톡 쳐도 0.2 초는 눌린 모습 보이기
+	/// ```rust
+	/// use std::cell::Cell;
+	/// use std::rc::Rc;
+	/// use vanilla::{ButtonState, ComponentContext, Engine, EngineConfiguration, NodeTree, TouchKind, UIButton, Vector2};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let button_id = node_tree.create_child(root_id, "Button");
+	/// node_tree[button_id].set_content_size(Vector2::create(100.0, 40.0));
+	/// let click_count = Rc::new(Cell::new(0));
+	/// let click_count_for_event = click_count.clone();
+	/// let button = node_tree.add_component(button_id, UIButton::new()).expect("button");
+	/// button.set_minimum_pressed_seconds(0.2);
+	/// button.set_click_event(Box::new(move |_button: &mut UIButton, _context: &mut ComponentContext| {
+	/// 	click_count_for_event.set(click_count_for_event.get() + 1);
+	/// }));
+	///
+	/// node_tree.dispatch_touch(button_id, &engine, TouchKind::Press, Vector2::zero());
+	/// node_tree.dispatch_touch(button_id, &engine, TouchKind::Release, Vector2::zero());
+	/// let button_state = node_tree[button_id].get_component::<UIButton>().expect("button").get_button_state();
+	/// assert_eq!(button_state, ButtonState::Pressed);
+	/// assert_eq!(click_count.get(), 0);
+	/// node_tree.tick(&engine, 0.25);
+	/// assert_eq!(click_count.get(), 1);
+	/// ```
 	//==============================================================================
 	pub fn set_minimum_pressed_seconds(&mut self, minimum_pressed_seconds: f32) {
 		self.minimum_pressed_seconds = minimum_pressed_seconds.max(0.0);
@@ -671,6 +907,9 @@ impl UIButton {
 
 	//==============================================================================
 	/// 최소 눌림 표시 시간 반환.
+	///
+	/// # 돌려줌
+	/// 최소 눌림 표시 시간. (초, 기본 0)
 	//==============================================================================
 	pub fn get_minimum_pressed_seconds(&self) -> f32 {
 		self.minimum_pressed_seconds
@@ -678,6 +917,31 @@ impl UIButton {
 
 	//==============================================================================
 	/// 클릭 이벤트 설정. (클릭됨 이벤트 다음에 불린다)
+	/// - 클릭은 눌렀다가 버튼 영역 안에서 뗄 때만 난다. 길게 누름이 발화한 누름은 클릭을 삼킨다.
+	///
+	/// # 인자
+	/// - `click_event`: 클릭할 때 부를 함수. (버튼과 문맥을 받는다, 문맥으로 다른 노드를 바꿀 수 있다)
+	///
+	/// # 예제
+	/// 닫기 단추를 누르면 판 숨기기
+	/// ```rust
+	/// use vanilla::{ComponentContext, Engine, EngineConfiguration, NodeTree, TouchKind, UIButton, Vector2};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let panel_id = node_tree.create_child(root_id, "Panel");
+	/// let close_id = node_tree.create_child(root_id, "Close");
+	/// node_tree[close_id].set_content_size(Vector2::create(40.0, 40.0));
+	/// let close_button = node_tree.add_component(close_id, UIButton::new()).expect("button");
+	/// close_button.set_click_event(Box::new(move |_button: &mut UIButton, context: &mut ComponentContext| {
+	/// 	context.get_node_tree_mut()[panel_id].set_visible(false);
+	/// }));
+	///
+	/// node_tree.dispatch_touch(close_id, &engine, TouchKind::Press, Vector2::zero());
+	/// node_tree.dispatch_touch(close_id, &engine, TouchKind::Release, Vector2::zero());
+	/// assert!(!node_tree[panel_id].is_visible());
+	/// ```
 	//==============================================================================
 	pub fn set_click_event(&mut self, click_event: UIButtonEvent) {
 		self.click_event = Some(Rc::new(RefCell::new(click_event)));
@@ -685,6 +949,37 @@ impl UIButton {
 
 	//==============================================================================
 	/// 클릭 이벤트 반환. (부를 때는 borrow_mut 로 빌린다)
+	///
+	/// # 돌려줌
+	/// 건 클릭 이벤트. 걸지 않았으면 None.
+	///
+	/// # 예제
+	/// 누르는 순간 클릭 이벤트를 꺼내 부르기
+	/// ```rust
+	/// use std::cell::Cell;
+	/// use std::rc::Rc;
+	/// use vanilla::{ComponentContext, Engine, EngineConfiguration, NodeTree, TouchKind, UIButton, Vector2};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let button_id = node_tree.create_child(root_id, "Button");
+	/// let click_count = Rc::new(Cell::new(0));
+	/// let click_count_for_event = click_count.clone();
+	/// let button = node_tree.add_component(button_id, UIButton::new()).expect("button");
+	/// assert!(button.get_click_event().is_none());
+	/// button.set_click_event(Box::new(move |_button: &mut UIButton, _context: &mut ComponentContext| {
+	/// 	click_count_for_event.set(click_count_for_event.get() + 1);
+	/// }));
+	/// button.set_pressed_event(Box::new(|button: &mut UIButton, context: &mut ComponentContext| {
+	/// 	if let Some(click_event) = button.get_click_event() {
+	/// 		(*click_event.borrow_mut())(button, context);
+	/// 	}
+	/// }));
+	///
+	/// node_tree.dispatch_touch(button_id, &engine, TouchKind::Press, Vector2::zero());
+	/// assert_eq!(click_count.get(), 1);
+	/// ```
 	//==============================================================================
 	pub fn get_click_event(&self) -> Option<Rc<RefCell<UIButtonEvent>>> {
 		self.click_event.clone()
@@ -692,6 +987,9 @@ impl UIButton {
 
 	//==============================================================================
 	/// 누름 이벤트 설정.
+	///
+	/// # 인자
+	/// - `pressed_event`: 누를 때 부를 함수. (버튼과 문맥을 받는다, 누를 수 없으면 불리지 않는다)
 	//==============================================================================
 	pub fn set_pressed_event(&mut self, pressed_event: UIButtonEvent) {
 		self.pressed_event = Some(Rc::new(RefCell::new(pressed_event)));
@@ -699,6 +997,9 @@ impl UIButton {
 
 	//==============================================================================
 	/// 누름 이벤트 반환. (부를 때는 borrow_mut 로 빌린다)
+	///
+	/// # 돌려줌
+	/// 건 누름 이벤트. 걸지 않았으면 None.
 	//==============================================================================
 	pub fn get_pressed_event(&self) -> Option<Rc<RefCell<UIButtonEvent>>> {
 		self.pressed_event.clone()
@@ -706,6 +1007,9 @@ impl UIButton {
 
 	//==============================================================================
 	/// 뗌 이벤트 설정. (영역 밖에서 떼도 불린다)
+	///
+	/// # 인자
+	/// - `released_event`: 뗄 때 부를 함수. (버튼과 문맥을 받는다, 클릭됨, 클릭 이벤트보다 먼저 불리고 취소에는 불리지 않는다)
 	//==============================================================================
 	pub fn set_released_event(&mut self, released_event: UIButtonEvent) {
 		self.released_event = Some(Rc::new(RefCell::new(released_event)));
@@ -713,6 +1017,9 @@ impl UIButton {
 
 	//==============================================================================
 	/// 뗌 이벤트 반환. (부를 때는 borrow_mut 로 빌린다)
+	///
+	/// # 돌려줌
+	/// 건 뗌 이벤트. 걸지 않았으면 None.
 	//==============================================================================
 	pub fn get_released_event(&self) -> Option<Rc<RefCell<UIButtonEvent>>> {
 		self.released_event.clone()
@@ -720,6 +1027,9 @@ impl UIButton {
 
 	//==============================================================================
 	/// 클릭됨 이벤트 설정.
+	///
+	/// # 인자
+	/// - `clicked_event`: 클릭할 때 클릭 이벤트보다 먼저 부를 함수. (버튼과 문맥을 받는다)
 	//==============================================================================
 	pub fn set_clicked_event(&mut self, clicked_event: UIButtonEvent) {
 		self.clicked_event = Some(Rc::new(RefCell::new(clicked_event)));
@@ -727,6 +1037,9 @@ impl UIButton {
 
 	//==============================================================================
 	/// 클릭됨 이벤트 반환. (부를 때는 borrow_mut 로 빌린다)
+	///
+	/// # 돌려줌
+	/// 건 클릭됨 이벤트. 걸지 않았으면 None.
 	//==============================================================================
 	pub fn get_clicked_event(&self) -> Option<Rc<RefCell<UIButtonEvent>>> {
 		self.clicked_event.clone()
@@ -734,6 +1047,9 @@ impl UIButton {
 
 	//==============================================================================
 	/// 오버 틴트 색 설정.
+	///
+	/// # 인자
+	/// - `color`: 마우스를 올렸을 때 덮거나 섞을 색. (알파가 세기, 기본 흰색 알파 0.12)
 	//==============================================================================
 	pub fn set_hover_tint_color(&mut self, color: impl Into<Color>) {
 		self.hover_tint_color = color.into();
@@ -741,6 +1057,9 @@ impl UIButton {
 
 	//==============================================================================
 	/// 오버 틴트 색 반환.
+	///
+	/// # 돌려줌
+	/// 오버 틴트 색.
 	//==============================================================================
 	pub fn get_hover_tint_color(&self) -> Color {
 		self.hover_tint_color
@@ -748,6 +1067,9 @@ impl UIButton {
 
 	//==============================================================================
 	/// 오버 진입 이벤트 설정.
+	///
+	/// # 인자
+	/// - `hover_event`: 마우스가 버튼 위로 들어올 때 한 번 부를 함수. (버튼과 문맥을 받는다)
 	//==============================================================================
 	pub fn set_hover_event(&mut self, hover_event: UIButtonEvent) {
 		self.hover_event = Some(Rc::new(RefCell::new(hover_event)));
@@ -755,6 +1077,9 @@ impl UIButton {
 
 	//==============================================================================
 	/// 오버 진입 이벤트 반환. (부를 때는 borrow_mut 로 빌린다)
+	///
+	/// # 돌려줌
+	/// 건 오버 진입 이벤트. 걸지 않았으면 None.
 	//==============================================================================
 	pub fn get_hover_event(&self) -> Option<Rc<RefCell<UIButtonEvent>>> {
 		self.hover_event.clone()
@@ -762,6 +1087,9 @@ impl UIButton {
 
 	//==============================================================================
 	/// 눌림 틴트 색 설정.
+	///
+	/// # 인자
+	/// - `color`: 누를 때 덮거나 섞을 색. (알파가 세기, 기본 검정 알파 0.3)
 	//==============================================================================
 	pub fn set_pressed_tint_color(&mut self, color: impl Into<Color>) {
 		self.pressed_tint_color = color.into();
@@ -769,6 +1097,9 @@ impl UIButton {
 
 	//==============================================================================
 	/// 눌림 틴트 색 반환.
+	///
+	/// # 돌려줌
+	/// 눌림 틴트 색.
 	//==============================================================================
 	pub fn get_pressed_tint_color(&self) -> Color {
 		self.pressed_tint_color
@@ -776,6 +1107,9 @@ impl UIButton {
 
 	//==============================================================================
 	/// 트랜지션 시간 설정. (초)
+	///
+	/// # 인자
+	/// - `transition_duration`: 틴트가 끝까지 차오르거나 빠지는 시간. (초, 기본 0.3)
 	//==============================================================================
 	pub fn set_transition_duration(&mut self, transition_duration: f32) {
 		self.transition_duration = transition_duration;
@@ -783,6 +1117,9 @@ impl UIButton {
 
 	//==============================================================================
 	/// 트랜지션 시간 반환.
+	///
+	/// # 돌려줌
+	/// 트랜지션 시간. (초)
 	//==============================================================================
 	pub fn get_transition_duration(&self) -> f32 {
 		self.transition_duration
@@ -790,6 +1127,9 @@ impl UIButton {
 
 	//==============================================================================
 	/// 사용 가능 설정. (끄면 다음 tick 에 색 대상을 모아 어두운 틴트를 건다)
+	///
+	/// # 인자
+	/// - `is_interactable`: 누를 수 있게 하려면 true. (끄면 상태가 Disabled, 켜면 Normal, 지금과 같으면 그대로)
 	//==============================================================================
 	pub fn set_interactable(&mut self, is_interactable: bool) {
 		if self.get_interactable() == is_interactable {
@@ -808,6 +1148,9 @@ impl UIButton {
 
 	//==============================================================================
 	/// 사용 가능 여부.
+	///
+	/// # 돌려줌
+	/// 누를 수 있으면 true. (기본 true)
 	//==============================================================================
 	pub fn get_interactable(&self) -> bool {
 		self.is_interactable
@@ -822,6 +1165,9 @@ impl UIButton {
 }
 
 impl Default for UIButton {
+	//==============================================================================
+	/// 기본값. (UIButton::new 와 같다)
+	//==============================================================================
 	fn default() -> UIButton {
 		UIButton::new()
 	}
@@ -880,45 +1226,75 @@ fn set_color_entry_color(node_tree: &mut NodeTree, color_entry: &ColorEntry, col
 
 #[crate::reflect]
 impl Component for UIButton {
+	//==============================================================================
+	/// 컴포넌트 공통 칸 반환. (품은 컨트롤의 것)
+	//==============================================================================
 	fn get_component_base(&self) -> &ComponentBase {
 		self.ui_control.get_component_base()
 	}
 
+	//==============================================================================
+	/// 컴포넌트 공통 칸 반환. (변경용)
+	//==============================================================================
 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 		self.ui_control.get_component_base_mut()
 	}
 
+	//==============================================================================
+	/// 컴포넌트 종류 이름 반환. ("Button")
+	//==============================================================================
 	fn get_component_type(&self) -> &'static str {
 		"Button"
 	}
 
+	//==============================================================================
+	/// 트리에 붙을 때. (컨텐트 노드를 만들고 호스트 노드를 interactable 로 켠다)
+	//==============================================================================
 	fn attach_to_tree(&mut self, node_tree: &mut NodeTree, node_id: NodeId) {
 		self.ui_control.get_uiview_mut().create_content_node(node_tree, node_id);
 		node_tree[node_id].set_interactable(true);
 	}
 
+	//==============================================================================
+	/// 갱신. (누름 추적과 미룬 뗌, 마우스 오버, 틴트 트랜지션)
+	//==============================================================================
 	fn tick(&mut self, context: &mut ComponentContext, time_delta: f32) {
 		self.tick_press(context, time_delta);
 		self.update_hover_state(context);
 		self.update_tint_transition(context, time_delta);
 	}
 
+	//==============================================================================
+	/// 컨텐트 안에 그리는지. (늘 true)
+	//==============================================================================
 	#[reflect(skip)]
 	fn is_drawn_inside_content(&self) -> bool {
 		true
 	}
 
+	//==============================================================================
+	/// 출력. (그리는 것이 없다, 틴트는 다른 컴포넌트의 색에 건다)
+	//==============================================================================
 	fn draw(&mut self, _transform: &NodeTransform, _graphic: &mut Graphic) {
 	}
 
+	//==============================================================================
+	/// 터치 누름. (누름 추적을 시작하고 누름 이벤트)
+	//==============================================================================
 	fn touch_press(&mut self, context: &mut ComponentContext, _view_input_position: Vector2) {
 		self.handle_touch_press(context);
 	}
 
+	//==============================================================================
+	/// 터치 뗌. (뗌 처리, 영역 안이면 클릭)
+	//==============================================================================
 	fn touch_release(&mut self, context: &mut ComponentContext, view_input_position: Vector2) {
 		self.handle_touch_release(context, view_input_position);
 	}
 
+	//==============================================================================
+	/// 터치 취소. (클릭 없이 누름을 푼다)
+	//==============================================================================
 	fn touch_cancel(&mut self, context: &mut ComponentContext, _view_input_position: Vector2) {
 		self.handle_touch_cancel(context);
 	}

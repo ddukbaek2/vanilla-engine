@@ -13,6 +13,20 @@
 
 //==============================================================================
 /// UI 배율 설정. (원본 options = { minimumCssScale = 0.8, maximumScale = 1.8, minimumLayerHeight = 0, portraitRatio = 1.1 })
+///
+/// # 예제
+/// 낮은 화면에서 UI 층 높이 지키기
+/// ```rust
+/// use vanilla::{UIScale, UIScaleOptions};
+///
+/// let options = UIScaleOptions {
+/// 	minimum_layer_height: 900.0,
+/// 	..UIScaleOptions::default()
+/// };
+/// assert_eq!(options.maximum_scale, 1.8);
+/// let ui_scale = UIScale::read(1920.0, 1080.0, 0.4, &options);
+/// assert!((ui_scale - 1.2).abs() < 0.0001);
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UIScaleOptions {
@@ -42,12 +56,50 @@ impl Default for UIScaleOptions {
 
 //==============================================================================
 /// UI 배율.
+///
+/// # 예제
+/// UI 층 노드를 화면에 맞춰 키우기
+/// ```rust
+/// use vanilla::{Engine, EngineConfiguration, NodeTree, UIScale, UIScaleOptions, Vector2};
+///
+/// let engine = Engine::new(EngineConfiguration::new());
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.get_root_id();
+/// let layer_id = node_tree.create_child(root_id, "UILayer");
+/// let view_manager = engine.get_view_manager();
+/// let view_size = view_manager.get_view_size();
+/// let ui_scale = UIScale::read(view_size.x, view_size.y, view_manager.get_css_pixel_scale(), &UIScaleOptions::default());
+/// node_tree[layer_id].set_local_scale(Vector2::create(ui_scale, ui_scale));
+/// assert!(ui_scale >= 1.0);
+/// ```
 //==============================================================================
 pub struct UIScale;
 
 impl UIScale {
 	//==============================================================================
 	/// UI 배율 읽기. (view_width, view_height 는 UI 층이 덮는 영역, css_pixel_scale 은 뷰 한 단위의 CSS 픽셀)
+	///
+	/// # 인자
+	/// - `view_width`: UI 층이 덮는 영역의 너비. (뷰 단위)
+	/// - `view_height`: UI 층이 덮는 영역의 높이. (뷰 단위)
+	/// - `css_pixel_scale`: 뷰 한 단위가 화면에서 차지하는 CSS 픽셀. (ViewManager::get_css_pixel_scale, 0 보다 크지 않으면 셈하지 않는다)
+	/// - `options`: 배율 설정.
+	///
+	/// # 돌려줌
+	/// UI 층에 곱할 배율. (1 이상, css_pixel_scale 이 0 보다 크지 않으면 1, 세로 화면은 maximum_scale 을 넘을 수 있다)
+	///
+	/// # 예제
+	/// 한 단위의 CSS 픽셀에 따른 배율
+	/// ```rust
+	/// use vanilla::{UIScale, UIScaleOptions};
+	///
+	/// let options = UIScaleOptions::default();
+	/// assert_eq!(UIScale::read(1920.0, 1080.0, 1.0, &options), 1.0);
+	/// assert!((UIScale::read(1920.0, 1080.0, 0.5, &options) - 1.6).abs() < 0.0001);
+	/// assert!((UIScale::read(1920.0, 1080.0, 0.2, &options) - 1.8).abs() < 0.0001);
+	/// assert!((UIScale::read(1080.0, 1920.0, 0.2, &options) - 4.0).abs() < 0.0001);
+	/// assert_eq!(UIScale::read(1920.0, 1080.0, 0.0, &options), 1.0);
+	/// ```
 	//==============================================================================
 	pub fn read(view_width: f32, view_height: f32, css_pixel_scale: f32, options: &UIScaleOptions) -> f32 {
 		if !(css_pixel_scale > 0.0) {
@@ -66,6 +118,14 @@ impl UIScale {
 
 	//==============================================================================
 	/// 세로 화면인지. (가로가 세로의 portrait_ratio 배 이하)
+	///
+	/// # 인자
+	/// - `view_width`: 영역의 너비. (뷰 단위)
+	/// - `view_height`: 영역의 높이. (뷰 단위)
+	/// - `portrait_ratio`: 세로 화면으로 보는 가로 / 세로 비의 상한. (기본 설정은 1.1)
+	///
+	/// # 돌려줌
+	/// 가로가 세로의 portrait_ratio 배 이하면 true.
 	//==============================================================================
 	pub fn is_portrait(view_width: f32, view_height: f32, portrait_ratio: f32) -> bool {
 		view_width <= view_height * portrait_ratio

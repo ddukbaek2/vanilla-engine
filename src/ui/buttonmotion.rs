@@ -73,6 +73,9 @@ struct MotionValues {
 }
 
 impl ButtonMotionStyle {
+	//==============================================================================
+	/// 꼴마다의 값 읽기.
+	//==============================================================================
 	fn read_values(&self) -> MotionValues {
 		match self {
 			ButtonMotionStyle::Normal => {
@@ -87,6 +90,29 @@ impl ButtonMotionStyle {
 
 //==============================================================================
 /// 노드 밑의 단추가 따를 꼴을 거는 표시. (창이 제 판에 건다)
+///
+/// # 예제
+/// 판 안의 단추를 Inset 꼴로
+/// ```rust
+/// use vanilla::{attach_button_motion, set_button_motion_area, ButtonMotionArea, ButtonMotionStyle, Engine, EngineConfiguration, NodeTree, TouchKind, UIButton, Vector2};
+///
+/// let engine = Engine::new(EngineConfiguration::new());
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.get_root_id();
+/// let panel_id = node_tree.create_child(root_id, "Panel");
+/// set_button_motion_area(&mut node_tree, panel_id, ButtonMotionStyle::Inset);
+/// let button_id = node_tree.create_child(panel_id, "Button");
+/// node_tree[button_id].set_content_size(Vector2::create(120.0, 40.0));
+/// node_tree.add_component(button_id, UIButton::new());
+/// attach_button_motion(&mut node_tree, button_id).expect("button motion");
+///
+/// node_tree.dispatch_touch(button_id, &engine, TouchKind::Press, Vector2::zero());
+/// node_tree.tick(&engine, 0.1);
+/// let pressed_scale = node_tree[button_id].get_local_scale();
+/// assert!((pressed_scale.x - 0.96).abs() < 0.001);
+/// let area = node_tree[panel_id].get_component::<ButtonMotionArea>().expect("area");
+/// assert_eq!(area.get_style(), ButtonMotionStyle::Inset);
+/// ```
 //==============================================================================
 pub struct ButtonMotionArea {
 	component_base: ComponentBase,
@@ -95,10 +121,25 @@ pub struct ButtonMotionArea {
 
 #[crate::reflect]
 impl ButtonMotionArea {
+	//==============================================================================
+	/// 생성. (노드에 걸 때는 set_button_motion_area 를 쓴다)
+	///
+	/// # 인자
+	/// - `style`: 이 노드 밑의 단추가 따를 꼴.
+	///
+	/// # 돌려줌
+	/// 그 꼴을 거는 표시.
+	//==============================================================================
 	pub fn new(style: ButtonMotionStyle) -> ButtonMotionArea {
 		ButtonMotionArea { component_base: ComponentBase::new(), style }
 	}
 
+	//==============================================================================
+	/// 건 꼴 반환.
+	///
+	/// # 돌려줌
+	/// 이 노드 밑의 단추가 따를 꼴.
+	//==============================================================================
 	pub fn get_style(&self) -> ButtonMotionStyle {
 		self.style
 	}
@@ -106,18 +147,30 @@ impl ButtonMotionArea {
 
 #[crate::reflect]
 impl Component for ButtonMotionArea {
+	//==============================================================================
+	/// 컴포넌트 공통 칸 반환.
+	//==============================================================================
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base
 	}
 
+	//==============================================================================
+	/// 컴포넌트 공통 칸 반환. (변경용)
+	//==============================================================================
 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 		&mut self.component_base
 	}
 
+	//==============================================================================
+	/// 컴포넌트 종류 이름 반환. ("ButtonMotionArea")
+	//==============================================================================
 	fn get_component_type(&self) -> &'static str {
 		"ButtonMotionArea"
 	}
 
+	//==============================================================================
+	/// tick 이 필요한지. (표시라서 늘 false)
+	//==============================================================================
 	fn is_tick_needed(&self) -> bool {
 		false
 	}
@@ -125,6 +178,11 @@ impl Component for ButtonMotionArea {
 
 //==============================================================================
 /// 노드 밑의 단추가 따를 꼴 걸기. (창이 제 판에 Inset 을 걸면 그 안의 단추는 커지지 않는다, 단추가 set_style 로 정한 꼴이 먼저)
+///
+/// # 인자
+/// - `node_tree`: 노드 트리.
+/// - `node_id`: 꼴을 걸 노드. (창의 판 같은, 이미 ButtonMotionArea 가 붙어 있으면 꼴만 바꾸고 노드가 없으면 아무 일도 없다)
+/// - `style`: 그 노드 밑의 단추가 따를 꼴. (단추에서 위로 거슬러 올라 가장 가까운 것을 따른다)
 //==============================================================================
 pub fn set_button_motion_area(node_tree: &mut NodeTree, node_id: NodeId, style: ButtonMotionStyle) {
 	if let Some(node) = node_tree.get_node_mut(node_id) {
@@ -136,6 +194,42 @@ pub fn set_button_motion_area(node_tree: &mut NodeTree, node_id: NodeId, style: 
 	node_tree.add_component(node_id, ButtonMotionArea::new(style));
 }
 
+//==============================================================================
+/// 단추 반응. (단추 노드에 UIButton 다음으로 붙어, 단추 상태에 따라 노드를 가운데를 두고 키우고 줄인다)
+///
+/// # 예제
+/// 눌러지는 단추와 누를 수 없을 때 흔들기
+/// ```rust
+/// use vanilla::{attach_button_motion, shake_button, Engine, EngineConfiguration, NodeTree, Paint, TouchKind, UIButton, Vector2};
+///
+/// let engine = Engine::new(EngineConfiguration::new());
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.get_root_id();
+/// let button_id = node_tree.create_child(root_id, "PlayButton");
+/// node_tree[button_id].set_local_position(Vector2::create(200.0, 100.0));
+/// node_tree[button_id].set_content_size(Vector2::create(160.0, 48.0));
+/// node_tree[button_id].add_component(Paint::create_with_color("#3b82f6"));
+/// node_tree.add_component(button_id, UIButton::new());
+/// attach_button_motion(&mut node_tree, button_id).expect("button motion");
+///
+/// node_tree.dispatch_touch(button_id, &engine, TouchKind::Press, Vector2::create(200.0, 100.0));
+/// node_tree.tick(&engine, 0.05);
+/// let pressed_scale = node_tree[button_id].get_local_scale();
+/// assert!((pressed_scale.x - 0.92).abs() < 0.001);
+///
+/// node_tree.dispatch_touch(button_id, &engine, TouchKind::Cancel, Vector2::create(200.0, 100.0));
+/// for _frame_index in 0..30 {
+/// 	node_tree.tick(&engine, 0.05);
+/// }
+/// assert_eq!(node_tree[button_id].get_local_scale(), Vector2::create(1.0, 1.0));
+/// assert_eq!(node_tree[button_id].get_local_position(), Vector2::create(200.0, 100.0));
+///
+/// node_tree[button_id].get_component_mut::<UIButton>().expect("button").set_interactable(false);
+/// shake_button(&mut node_tree, button_id);
+/// node_tree.tick(&engine, 0.05);
+/// assert_ne!(node_tree[button_id].get_local_position().x, 200.0);
+/// ```
+//==============================================================================
 pub struct ButtonMotion {
 	component_base: ComponentBase,
 	scale: f32,
@@ -161,6 +255,9 @@ pub struct ButtonMotion {
 impl ButtonMotion {
 	//==============================================================================
 	/// 생성.
+	///
+	/// # 돌려줌
+	/// 꼴을 정하지 않은 새 단추 반응. (위 노드에 건 꼴을 따른다, 단추 노드에 붙일 때는 attach_button_motion 을 쓴다)
 	//==============================================================================
 	pub fn new() -> ButtonMotion {
 		ButtonMotion {
@@ -187,6 +284,9 @@ impl ButtonMotion {
 
 	//==============================================================================
 	/// 이 단추의 꼴 설정. (None 이면 위 노드에 건 꼴을 따른다)
+	///
+	/// # 인자
+	/// - `style`: 이 단추의 꼴. (None 이면 위 노드에 건 가장 가까운 꼴, 그것도 없으면 Normal)
 	//==============================================================================
 	pub fn set_style(&mut self, style: Option<ButtonMotionStyle>) {
 		self.style = style;
@@ -201,6 +301,33 @@ impl ButtonMotion {
 
 	//==============================================================================
 	/// 밝힘을 맡는 함수 설정. (None 이면 이 부품이 흰 테 판과 밝힌 바탕 판을 둔다)
+	/// - 함수를 거는 동안 단추의 눌림 틴트 색은 투명으로 두고, 바탕 Paint 를 밝히거나 흰 테를 그리지 않는다.
+	///
+	/// # 인자
+	/// - `lit_handler`: 밝힘을 맡을 함수. (문맥, 밝히는지, 누르는 중인지를 받아 tick 마다 불린다, None 이면 함수를 뗀다)
+	///
+	/// # 예제
+	/// 얹은 빛 노드로 밝히기
+	/// ```rust
+	/// use vanilla::{attach_button_motion, ButtonMotionStyle, ComponentContext, Engine, EngineConfiguration, NodeTree, TouchKind, UIButton, Vector2};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let button_id = node_tree.create_child(root_id, "Button");
+	/// let glow_id = node_tree.create_child(button_id, "Glow");
+	/// node_tree[glow_id].set_visible(false);
+	/// node_tree.add_component(button_id, UIButton::new());
+	/// let button_motion = attach_button_motion(&mut node_tree, button_id).expect("button motion");
+	/// button_motion.set_style(Some(ButtonMotionStyle::Inset));
+	/// button_motion.set_lit_handler(Some(Box::new(move |context: &mut ComponentContext, is_lit: bool, _is_pressed: bool| {
+	/// 	context.get_node_tree_mut()[glow_id].set_visible(is_lit);
+	/// })));
+	///
+	/// node_tree.dispatch_touch(button_id, &engine, TouchKind::Press, Vector2::zero());
+	/// node_tree.tick(&engine, 0.016);
+	/// assert_eq!(node_tree[glow_id].is_visible(), !engine.is_coarse_pointer());
+	/// ```
 	//==============================================================================
 	pub fn set_lit_handler(&mut self, lit_handler: Option<ButtonLitHandler>) {
 		self.lit_handler = lit_handler.map(|lit_handler| Rc::new(RefCell::new(lit_handler)));
@@ -208,6 +335,9 @@ impl ButtonMotion {
 
 	//==============================================================================
 	/// 밝힘을 맡는 함수 반환. (부를 때는 borrow_mut 로 빌린다)
+	///
+	/// # 돌려줌
+	/// 건 밝힘 함수. 걸지 않았으면 None.
 	//==============================================================================
 	pub fn get_lit_handler(&self) -> Option<Rc<RefCell<ButtonLitHandler>>> {
 		self.lit_handler.clone()
@@ -373,6 +503,9 @@ impl ButtonMotion {
 }
 
 impl Default for ButtonMotion {
+	//==============================================================================
+	/// 기본값. (ButtonMotion::new 와 같다)
+	//==============================================================================
 	fn default() -> ButtonMotion {
 		ButtonMotion::new()
 	}
@@ -380,14 +513,23 @@ impl Default for ButtonMotion {
 
 #[crate::reflect]
 impl Component for ButtonMotion {
+	//==============================================================================
+	/// 컴포넌트 공통 칸 반환.
+	//==============================================================================
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base
 	}
 
+	//==============================================================================
+	/// 컴포넌트 공통 칸 반환. (변경용)
+	//==============================================================================
 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 		&mut self.component_base
 	}
 
+	//==============================================================================
+	/// 컴포넌트 종류 이름 반환. ("ButtonMotion")
+	//==============================================================================
 	fn get_component_type(&self) -> &'static str {
 		"ButtonMotion"
 	}
@@ -414,6 +556,9 @@ impl Component for ButtonMotion {
 		graphic.draw_stroke_round_rect(rect, (self.lit_round_size - half_width).max(0.0), LIT_RING_WIDTH);
 	}
 
+	//==============================================================================
+	/// 단추 따라 움직이기. (단추 상태로 목표 크기를 정해 다가가고, 통 튐과 흔들림을 더해 노드의 가운데를 두고 놓는다, 반응이 없으면 노드를 건드리지 않는다)
+	//==============================================================================
 	fn tick(&mut self, context: &mut ComponentContext, time_delta: f32) {
 		let button_state = match context.get_node().get_component::<UIButton>() {
 			Some(button) => {
@@ -479,6 +624,13 @@ impl Component for ButtonMotion {
 
 //==============================================================================
 /// 단추 노드에 반응 붙이기. (UIButton 이 이미 붙은 노드, 붙인 ButtonMotion 을 돌려준다. 원본 attachButtonMotion)
+///
+/// # 인자
+/// - `node_tree`: 노드 트리.
+/// - `node_id`: UIButton 이 이미 붙은 단추 노드. (반응은 UIButton 다음 컴포넌트로 붙는다)
+///
+/// # 돌려줌
+/// 붙인 ButtonMotion. 노드가 없으면 None.
 //==============================================================================
 pub fn attach_button_motion(node_tree: &mut NodeTree, node_id: NodeId) -> Option<&mut ButtonMotion> {
 	node_tree.add_component(node_id, ButtonMotion::new())
@@ -486,6 +638,11 @@ pub fn attach_button_motion(node_tree: &mut NodeTree, node_id: NodeId) -> Option
 
 //==============================================================================
 /// 단추 흔들기. (노드의 ButtonMotion 을 찾아 흔든다, 없으면 아무 일도 없다)
+/// - 0.25 초 동안 좌우로 흔들린다.
+///
+/// # 인자
+/// - `node_tree`: 노드 트리.
+/// - `node_id`: ButtonMotion 이 붙은 단추 노드.
 //==============================================================================
 pub fn shake_button(node_tree: &mut NodeTree, node_id: NodeId) {
 	if let Some(button_motion) = node_tree.get_node_mut(node_id).and_then(|node| node.get_component_mut::<ButtonMotion>()) {
