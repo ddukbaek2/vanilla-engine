@@ -37,7 +37,7 @@ type GlRenderbuffer = <glow::Context as glow::HasContext>::Renderbuffer;
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ScreenEffectType {
-	/// --- 형태 왜곡 ---
+	// --- 형태 왜곡 ---
 	/// 배럴 / 핀쿠션 렌즈 왜곡. (parameters = `[세기: 음수면 핀쿠션]`)
 	LensDistortion, // 배럴 / 핀쿠션 렌즈 왜곡. (parameters = [세기: 음수면 핀쿠션])
 	/// 볼록 / 오목. (parameters = `[중심 x, 중심 y, 세기, 반지름]`)
@@ -62,7 +62,7 @@ pub enum ScreenEffectType {
 	Shockwave,      // 충격파 링 왜곡. (parameters = [중심 x, 중심 y, 반지름 0 ~ 1.5, 폭], color = 링 빛)
 	/// 화면 물결. (parameters = `[빈도, 속도]`)
 	Wave,           // 화면 물결. (parameters = [빈도, 속도])
-	/// --- 흐림 ---
+	// --- 흐림 ---
 	/// 방향 블러. (parameters = `[각도 라디안, 길이 픽셀]`)
 	MotionBlur,     // 방향 블러. (parameters = [각도 라디안, 길이 픽셀])
 	/// 중심으로 뻗는 방사 블러. (parameters = `[중심 x, 중심 y, 길이]`)
@@ -77,14 +77,14 @@ pub enum ScreenEffectType {
 	Bloom,          // 밝은 곳 번짐. (parameters = [문턱, 세기 배율, 반지름 픽셀])
 	/// 가로 렌즈 플레어. (parameters = `[문턱, 세기 배율, 폭 픽셀]`, color = 플레어 색)
 	Anamorphic,     // 가로 렌즈 플레어. (parameters = [문턱, 세기 배율, 폭 픽셀], color = 플레어 색)
-	/// --- 글리치 ---
+	// --- 글리치 ---
 	/// 가로 줄 어긋남 + 색 분리 + 블록 반전. (parameters = `[줄 수, 초당 변화, 어긋남 폭]`)
 	Glitch,         // 가로 줄 어긋남 + 색 분리 + 블록 반전. (parameters = [줄 수, 초당 변화, 어긋남 폭])
 	/// VHS 테이프. (흔들림 + 색 번짐 + 노이즈 줄, parameters = `[흔들림, 노이즈]`)
 	Vhs,            // VHS 테이프. (흔들림 + 색 번짐 + 노이즈 줄, parameters = [흔들림, 노이즈])
 	/// 색수차. (parameters = `[배율]`)
 	Chromatic,      // 색수차. (parameters = [배율])
-	/// --- 색 ---
+	// --- 색 ---
 	/// 색온도 / 틴트. (parameters = `[온도 -1 ~ 1, 틴트 -1 ~ 1]`)
 	WhiteBalance,   // 색온도 / 틴트. (parameters = [온도 -1 ~ 1, 틴트 -1 ~ 1])
 	/// 리프트 / 감마 / 게인. (parameters = `[리프트, 감마, 게인]`)
@@ -119,7 +119,7 @@ pub enum ScreenEffectType {
 	NightVision,    // 야시경. (color = 틴트)
 	/// 색 반전.
 	Invert,         // 색 반전.
-	/// --- 무늬 / 마스크 ---
+	// --- 무늬 / 마스크 ---
 	/// CRT 곡면 + 주사선 + RGB 마스크. (parameters = `[곡률, 주사선 밀도]`)
 	Scanline,       // CRT 곡면 + 주사선 + RGB 마스크. (parameters = [곡률, 주사선 밀도])
 	/// 필름 그레인.
@@ -136,7 +136,7 @@ pub enum ScreenEffectType {
 	SpeedLines,     // 집중선. (parameters = [중심 x, 중심 y, 밀도, 속도], color = 선 색)
 	/// 위아래 / 좌우 검은 띠. (parameters = `[세로 띠 비율, 가로 띠 비율]`, color = 띠 색)
 	Letterbox,      // 위아래 / 좌우 검은 띠. (parameters = [세로 띠 비율, 가로 띠 비율], color = 띠 색)
-	/// --- 전환 (strength 0 → 1 로 color 에 덮인다) ---
+	// --- 전환 (strength 0 → 1 로 color 에 덮인다) ---
 	/// 블록 디졸브. (parameters = `[블록 수]`)
 	PixelDissolve,  // 블록 디졸브. (parameters = [블록 수])
 	/// 방향 와이프. (parameters = `[방향 x, 방향 y, 부드러움]`)

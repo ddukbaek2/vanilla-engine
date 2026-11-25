@@ -39,7 +39,7 @@ use std::rc::Rc;
 pub enum ShaderSpriteEffect {
 	/// 효과 없음. (Sprite 와 같이 그리고 효과 없는 것끼리 묶어 그린다)
 	None,
-	/// --- 색 ---
+	// --- 색 ---
 	/// 실루엣을 단색으로 덮음. (피격 섬광: progress = 세기, color = 덮을 색)
 	Flash,         // 실루엣을 단색으로 덮음. (피격 섬광: progress = 세기, color = 덮을 색)
 	/// 실루엣 단색. (progress = 세기, color = 색: 그림자 / 잔상)
@@ -62,7 +62,7 @@ pub enum ShaderSpriteEffect {
 	Threshold,     // 흑백 문턱. (parameters = [문턱])
 	/// 밝기를 두 색 사이로 매핑. (parameters.xyz = 어두운 색, color = 밝은 색)
 	GradientMap,   // 밝기를 두 색 사이로 매핑. (parameters.xyz = 어두운 색, color = 밝은 색)
-	/// --- 외곽 ---
+	// --- 외곽 ---
 	/// 실루엣 바깥 외곽선. (color = 선 색, parameters = `[두께 픽셀]`)
 	Outline,       // 실루엣 바깥 외곽선. (color = 선 색, parameters = [두께 픽셀])
 	/// 실루엣 안쪽 외곽선. (color = 선 색, parameters = `[두께 픽셀]`)
@@ -79,14 +79,14 @@ pub enum ShaderSpriteEffect {
 	Emboss,        // 엠보스.
 	/// 샤픈.
 	Sharpen,       // 샤픈.
-	/// --- 흐림 ---
+	// --- 흐림 ---
 	/// 가우시안 블러. (parameters = `[반지름 픽셀]`)
 	Blur,          // 가우시안 블러. (parameters = [반지름 픽셀])
 	/// 방향 블러. (parameters = `[방향 x, 방향 y, 길이 픽셀]`)
 	MotionBlur,    // 방향 블러. (parameters = [방향 x, 방향 y, 길이 픽셀])
 	/// 중심 방사 블러. (parameters = `[길이 0 ~ 1]`)
 	RadialBlur,    // 중심 방사 블러. (parameters = [길이 0 ~ 1])
-	/// --- 왜곡 ---
+	// --- 왜곡 ---
 	/// 가로 물결 왜곡. (parameters = `[빈도, 속도, 진폭]`)
 	Wave,          // 가로 물결 왜곡. (parameters = [빈도, 속도, 진폭])
 	/// 깃발 펄럭임. (parameters = `[빈도, 속도, 진폭]`)
@@ -111,7 +111,7 @@ pub enum ShaderSpriteEffect {
 	Glitch,        // 가로 줄 어긋남 + 색 분리. (parameters = [줄 수, 초당 변화, 어긋남 폭])
 	/// 색수차. (parameters = `[분리 픽셀]`)
 	Chromatic,     // 색수차. (parameters = [분리 픽셀])
-	/// --- 화면 무늬 ---
+	// --- 화면 무늬 ---
 	/// 주사선 + 틴트 + 깜빡임. (color = 틴트, parameters = `[주사선 수, 흐르는 속도]`)
 	Hologram,      // 주사선 + 틴트 + 깜빡임. (color = 틴트, parameters = [주사선 수, 흐르는 속도])
 	/// 주사선. (parameters = `[주사선 수]`)
@@ -122,7 +122,7 @@ pub enum ShaderSpriteEffect {
 	Vignette,      // 비네트. (color = 가장자리 색, parameters = [시작, 끝])
 	/// 대각선 하이라이트 띠가 지나감. (color = 띠 색, parameters = `[띠 폭]`)
 	Shine,         // 대각선 하이라이트 띠가 지나감. (color = 띠 색, parameters = [띠 폭])
-	/// --- 사라짐 / 드러남 (progress 0 → 1) ---
+	// --- 사라짐 / 드러남 (progress 0 → 1) ---
 	/// 노이즈로 타 들어가며 사라짐. (color = 가장자리 색, parameters = `[노이즈 배율, 가장자리 폭]`)
 	Dissolve,      // 노이즈로 타 들어가며 사라짐. (color = 가장자리 색, parameters = [노이즈 배율, 가장자리 폭])
 	/// 불에 타듯 사라짐. (안쪽 밝은 띠 + 바깥 그을음, parameters = `[노이즈 배율, 띠 폭]`)
