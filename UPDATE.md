@@ -390,6 +390,14 @@
   - ARCHITECTURE: 배치와 소유 구조, 프레임 루프, 블렌드와 글꼴과 애셋 형식, 9장 원본과의 대응(원본 200 파일 가운데 181 옮김, 일부러 안 옮긴 19 파일과 까닭), 10장 두 엔진의 차이(정말 맞출 수 없는 것과 일부러 정한 꼴)
   - UPDATE.md 이 판 머리의 겹친 줄(찍기 모드 여섯 벌)을 하나로, math 줄의 옛 설명을 고쳤다
   - 머리 주석: 원본에서도 고쳐 이제는 같은 것(묶어 그리기와 거르기 기본 켬, 프로그램과 텍스처 기억, Text 거르기, UIScene 의 use_dev_tools, 웹소켓 바이너리 JSON, Identifier.reset, Vector2 버그, pageshow 복구, DynamicFont 다시 놓기, 길이 0 트윈, set_playback_rate), UIImageView 의 그리는 차례(원본도 배경이 먼저), 그림 형식 목록(Material, GLB 그림, 쓰지 않는 avif-parse), 웹 글자 굽기, Scene 의 initialize 이름, lib.rs 의 웹 모듈 자리
+- 데스크탑을 크롬 위의 원본과 더 맞췄다. (크로미엄 소스로 크롬이 하는 것을 확인해 옮김, ARCHITECTURE 10장)
+  - 웨이랜드 페이지 이벤트 Hidden: 크롬 리눅스 웨이랜드처럼 보낸 wl_surface.frame 콜백이 3 초 동안 오지 않으면 가려짐으로 보고 Hidden, 다시 오면 Visible 과 on_page_visibility_restored 를 낸다. winit 창의 wl_display 에 wayland-client 를 손님 연결로 붙여 제 큐에서 콜백을 보낸다. 메사가 가려진 창에서 eglSwapBuffers 안에 멈추지 않게, 웨이랜드는 SDL 처럼 EGL 스왑 간격을 0 으로 두고 엔진이 지난 프레임 콜백을 1/20 초까지 기다린다. xdg_toplevel suspended 는 winit 이 쥐고 있어 받지 못한다
+  - 윈도우 터치 키보드: 크롬 윈도우처럼 손가락이나 펜으로 플랫폼 입력 필드(use_dominput)에 포커스하거나 누르면 창에 묶은 InputPane 으로 터치 키보드를 띄우고(300 밀리초로 고름), 포커스가 떠나면 내린다. 가린 영역의 세로만큼 visualViewport 를 줄여 auto_resize_on_window_resize 면 캔버스가 줄고, ignore_virtual_keyboard_resize 가 데스크탑에서도 원본처럼 그것을 막는다. 맥과 리눅스는 크롬처럼 뷰포트를 줄이지 않는다
+  - preserve_drawing_buffer: 원본처럼 켜면 프레임 첫머리에 색을 비우지 않는다. (원본 applySettings 는 스텐실만 비운다. 지금까지 러스트 판은 웹과 데스크탑 모두 늘 비워서, 켜도 지난 프레임 그림 위에 쌓아 그려지지 않았다) 데스크탑은 다 그린 프레임을 떠 두었다가 다음 프레임 첫머리에 되그린다. Graphic::new 가 원본 생성자처럼 preserve_drawing_buffer 를 받는다
+  - auto_resize_on_window_resize 를 끄면 데스크탑도 원본처럼 캔버스 비 상한(max_canvas_aspect_ratio)을 걸지 않는다. (원본은 이 설정이 켜졌을 때만 비 상한을 건다. 데스크탑 창은 캔버스가 창을 가득 채운 페이지로 본다)
+  - 데스크탑 Platform 의 브라우저를 Unknown 에서 Chrome 으로: 데스크탑 판이 크롬 위의 원본과 같은 결과를 내므로 게임 코드의 브라우저 분기도 크롬 갈래로 간다
+  - 개발자 도구의 메모리 칸: 데스크탑은 (N/A) 대신 시스템 할당자의 힙(맥 malloc_zone_statistics, 윈도우 프로세스 힙 HeapSummary, 리눅스 glibc mallinfo2)을 usedJSHeapSize, totalJSHeapSize 칸에 적는다. jsHeapSizeLimit 는 그런 상한이 없어 (N/A) 다
+  - 차이 표에서 뺀 것: 세이프 에어리어 인셋 0(크롬 데스크탑도 0, SetDisplayCutoutSafeArea 는 안드로이드에만 있다), set_prevented_keys 와 오른쪽 클릭 메뉴 막기(데스크탑 창에는 막을 브라우저 기본 동작이 없어 막은 것과 같다), 화면 키보드, 웨이랜드 Hidden, preserve_drawing_buffer, auto_resize_on_window_resize, 브라우저 이름
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.

@@ -23,7 +23,9 @@
 //   - Local Storage 탭의 키 입력, 값 고치기, 지울지 묻기: 웹은 원본처럼 window.prompt, window.confirm 을 부른다.
 //     데스크탑에는 그런 창이 없어 패널 안에 작은 입력 창을 띄운다. (글은 TextInput 줄에서 받아 IME 도 된다. Enter 나 OK 는 확인, Escape 나 Cancel 은 취소)
 //   - Statistics 의 clientNativeSize 는 ViewManager::get_client_native_size(웹은 페이지 전체 크기, 데스크탑은 창 안쪽 논리 크기)다.
-//     메모리는 웹에서 원본처럼 Chrome 의 performance.memory 를 읽고, 없는 브라우저와 데스크탑(자바스크립트 힙이 없다)은 "(N/A)" 다.
+//     메모리는 웹에서 원본처럼 Chrome 의 performance.memory 를 읽고, 없는 브라우저는 "(N/A)" 다.
+//     데스크탑은 자바스크립트 힙이 없어 같은 칸에 러스트가 쓰는 시스템 할당자의 힙(쓰는 중, 잡아 둔 것)을 적는다. (platform/desktop.rs read_heap_usage)
+//     jsHeapSizeLimit 는 V8 이 정한 힙 상한인데 시스템 할당자에는 그런 상한이 없어 "(N/A)" 다. 힙을 못 읽는 OS 는 셋 다 "(N/A)" 다.
 //     viewScaleMode 는 러스트 열거 이름(StretchHeight 등)으로 적는다.
 //   - 화면 비율 가이드는 원본처럼 그때의 좌표계에 기대지 않고 스스로 뷰 좌표계(apply_view_rect)를 걸고 그린다. (원본 GameScene 에서 같은 결과)
 //   - 원본은 FPS 표시 설정을 is_frame_per_second_visible 로 알려 주기만 하고 스스로 그리지 않는다. 러스트 판도 같다.
@@ -2064,7 +2066,15 @@ impl DevTools {
 			Some(performance_memory) => {
 				items.push(StatisticsItem::create("usedJSHeapSize", format_megabytes(performance_memory.used_heap_size)));
 				items.push(StatisticsItem::create("totalJSHeapSize", format_megabytes(performance_memory.total_heap_size)));
-				items.push(StatisticsItem::create("jsHeapSizeLimit", format_megabytes(performance_memory.heap_size_limit)));
+				let heap_size_limit_text = match performance_memory.heap_size_limit {
+					Some(heap_size_limit) => {
+						format_megabytes(heap_size_limit)
+					}
+					None => {
+						String::from("(N/A)")
+					}
+				};
+				items.push(StatisticsItem::create("jsHeapSizeLimit", heap_size_limit_text));
 			}
 			None => {
 				items.push(StatisticsItem::create("usedJSHeapSize", String::from("(N/A)")));
@@ -2527,12 +2537,12 @@ fn format_megabytes(bytes: f64) -> String {
 }
 
 //==============================================================================
-// 자바스크립트 힙 크기. (원본 performance.memory 의 usedJSHeapSize, totalJSHeapSize, jsHeapSizeLimit, 바이트)
+// 자바스크립트 힙 크기. (원본 performance.memory 의 usedJSHeapSize, totalJSHeapSize, jsHeapSizeLimit, 바이트, 상한이 없으면 None)
 //==============================================================================
 struct PerformanceMemory {
 	used_heap_size: f64,
 	total_heap_size: f64,
-	heap_size_limit: f64,
+	heap_size_limit: Option<f64>,
 }
 
 //==============================================================================
@@ -2552,16 +2562,21 @@ fn read_performance_memory() -> Option<PerformanceMemory> {
 	Some(PerformanceMemory {
 		used_heap_size: read_size("usedJSHeapSize")?,
 		total_heap_size: read_size("totalJSHeapSize")?,
-		heap_size_limit: read_size("jsHeapSizeLimit")?,
+		heap_size_limit: Some(read_size("jsHeapSizeLimit")?),
 	})
 }
 
 //==============================================================================
-// 자바스크립트 힙 크기 읽기. (데스크탑에는 자바스크립트 힙이 없어 None, 원본에서 performance.memory 가 없는 브라우저와 같다)
+// 자바스크립트 힙 크기 읽기. (데스크탑에는 자바스크립트 힙이 없어 시스템 할당자의 힙을 읽는다, 상한은 없다. 못 읽는 OS 는 None)
 //==============================================================================
 #[cfg(not(target_arch = "wasm32"))]
 fn read_performance_memory() -> Option<PerformanceMemory> {
-	None
+	let (used_heap_size, total_heap_size) = crate::platform::desktop::read_heap_usage()?;
+	Some(PerformanceMemory {
+		used_heap_size,
+		total_heap_size,
+		heap_size_limit: None,
+	})
 }
 
 //==============================================================================

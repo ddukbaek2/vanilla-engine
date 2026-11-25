@@ -5,10 +5,18 @@
 // - 엔진 본체(EngineRunner)는 창을 모른다. 여기서 프레임을 부르고, 그린 뒤 화면을 넘긴다.
 // - 글 입력(키 글자, 편집 키, IME 조합)과 클립보드는 desktop/textinput.rs 가 맡는다. 오른쪽 단추는 입력 필드 문맥 메뉴 요청이다.
 // - 맥의 게임패드 진동은 desktop/gamepadhaptics.rs 가 맡는다. (GameController 와 CoreHaptics, 다른 OS 는 gilrs 가 떤다)
-// - 마지막으로 쓴 장치를 키, 마우스, 손가락 이벤트마다 적는다. 막을 키(set_prevented_keys)는 창에 막을 브라우저 기본 동작이 없어 쓰지 않는다.
-// - 페이지 이벤트: 창이 가려짐(Occluded, 맥과 X11 이 알린다), 최소화(크기 0 이나 is_minimized, 윈도우가 이것으로 알린다), 앱 멈춤(suspended, 모바일)
+// - 마지막으로 쓴 장치를 키, 마우스, 손가락 이벤트마다 적는다. 막을 키(set_prevented_keys)와 오른쪽 클릭 메뉴 막기는 창에 막을 브라우저 기본 동작이 없어 쓰지 않는다.
+//   (크롬에서 막은 것과 같은 결과다. winit 은 윈도우에서 메뉴가 없는 창의 WM_SYSKEYUP 을 DefWindowProc 에 넘기지 않아 Alt, F10 도 시스템 메뉴로 들어가지 않는다)
+// - 페이지 이벤트: 창이 가려짐(Occluded, 맥과 X11 이 알린다), 최소화(크기 0 이나 is_minimized, 윈도우가 이것으로 알린다), 앱 멈춤(suspended, 모바일),
+//   웨이랜드 프레임 콜백이 3 초 넘게 오지 않음(크롬 리눅스 웨이랜드의 가려짐, desktop/waylandframecallback.rs)
 //   가운데 하나라도 맞으면 Hidden, 모두 풀리면 Visible 과 on_page_visibility_restored. 포커스는 Focused / Blurred, 마우스 단추와 손가락 누름은 PointerDown.
-//   웨이랜드는 가림도 최소화도 알리지 않아 Hidden 이 오지 않는다.
+//   웨이랜드의 xdg_toplevel suspended 상태는 winit 이 쥐고 알리지 않아 받지 못한다.
+// - 웨이랜드 수직 동기: EGL 스왑 간격을 0 으로 두고 넘기기 전에 지난 프레임 콜백을 1/20 초까지 기다린다. (메사는 간격 1 이면 가려진 창에서 스왑 안에 멈춘다)
+// - 캔버스 크기(auto_resize_on_window_resize): 창은 캔버스가 창을 가득 채운 페이지와 같다. 켜면 원본처럼 visualViewport(창에서 화면 키보드가 가린 아래를 뺀 것)에
+//   맞추고 ignore_virtual_keyboard_resize 와 캔버스 비 상한을 건다. 끄면 창 크기 그대로다.
+// - 화면 키보드: 윈도우는 크롬처럼 손가락으로 플랫폼 입력 필드에 포커스하면 터치 키보드(InputPane)를 띄우고 가린 영역을 visualViewport 에서 뺀다. (desktop/windowsinputpane.rs)
+//   맥과 리눅스는 크롬처럼 뷰포트를 줄이지 않는다.
+// - 드로잉 버퍼 남기기(preserve_drawing_buffer): 다 그린 프레임을 떠 두고 다음 프레임 첫머리에 되그린다. (desktop/preserveddrawingbuffer.rs)
 // - 페이지 프로세스 복원(on_page_process_restored, 원본 Chromium freeze 뒤 resume 과 bfcache): suspended 뒤 resumed, 그리고 시스템 잠자기에서 깬 것.
 //   윈도우는 창을 서브클래싱해 WM_POWERBROADCAST 의 PBT_APMRESUMEAUTOMATIC 을 받는다. (desktop/windowsplatform.rs, 윈도우의 단조 시계는 잠든 동안에도 흘러 시계로는 못 가린다)
 //   맥과 리눅스는 두 프레임 사이에 벽시계(SystemTime)가 단조 시계(Instant)보다 SYSTEM_SLEEP_GAP_SECONDS 넘게 더 흘렀으면 깬 것으로 본다.
@@ -55,12 +63,17 @@ use std::collections::HashMap;
 use winit::keyboard::PhysicalKey;
 use winit::window::{Icon, Window, WindowId};
 
+mod preserveddrawingbuffer;
 mod renderscaler;
 mod textinput;
+#[cfg(target_os = "windows")]
+mod windowsinputpane;
 #[cfg(target_os = "windows")]
 mod windowsplatform;
 #[cfg(any(test, all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android"))))]
 mod linuxplatform;
+#[cfg(any(test, all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android"))))]
+mod waylandframecallback;
 pub use textinput::{read_clipboard_text, read_clipboard_text_with_callback, write_clipboard_text};
 #[cfg(target_os = "macos")]
 pub mod gamepadhaptics;
@@ -108,11 +121,19 @@ pub fn run(engine_runner: EngineRunner) -> Result<(), String> {
 		is_suspended: false,
 		is_occluded: false,
 		is_minimized: false,
+		is_frame_callback_occluded: false,
 		is_page_hidden: false,
 		is_window_hidden,
 		window_scale_factor: 1.0,
 		applied_max_render_pixel_ratio: 0.0,
 		render_scaler: None,
+		preserved_drawing_buffer: None,
+		virtual_keyboard_inset: 0.0,
+		applied_client_size: None,
+		#[cfg(target_os = "windows")]
+		virtual_keyboard_controller: None,
+		#[cfg(target_os = "windows")]
+		touch_started_position: None,
 		#[cfg(not(target_os = "windows"))]
 		last_frame_clock: None,
 		canvas_physical_rect: [0, 0, 0, 0],
@@ -286,10 +307,117 @@ pub fn read_client_native_size() -> Option<Vector2> {
 }
 
 //==============================================================================
-// CSS env(safe-area-inset-*) 세이프 에어리어 인셋. (데스크탑에는 없어 0)
+// 화면 키보드가 가린 창 아래. (논리 좌표, visualViewport 아래 인셋)
+// - 윈도우는 크롬처럼 터치 키보드(InputPane)가 가린 영역의 세로다. (desktop/windowsinputpane.rs)
+// - 맥과 리눅스는 0 이다. 크롬 맥은 화면 키보드를 띄우지 않고 보이는 뷰포트가 늘 창 크기다. (render_widget_host_view_base.cc GetVisibleViewportSize)
+//   크롬 리눅스 웨이랜드는 text-input 으로 입력판을 띄우기만 하고 그 영역을 받지 않아 뷰포트를 줄이지 않는다. (wayland_input_method_context.cc OnInputPanelState)
+//   엔진도 winit 의 IME 켜기(웨이랜드 text-input-v3 enable)로 같은 신호를 낸다.
+//==============================================================================
+fn read_virtual_keyboard_inset() -> f32 {
+	#[cfg(target_os = "windows")]
+	{
+		windowsinputpane::read_occluded_height()
+	}
+	#[cfg(not(target_os = "windows"))]
+	{
+		0.0
+	}
+}
+
+//==============================================================================
+// CSS env(safe-area-inset-*) 세이프 에어리어 인셋. (데스크탑은 0)
+// - 크롬 데스크탑도 0 이다. 0 이 아닌 인셋은 WebContentsImpl::SetDisplayCutoutSafeArea 로만 들어오는데, 이 함수는 #if BUILDFLAG(IS_ANDROID) 안에 있고
+//   안드로이드(web_contents_android.cc)만 부른다. 그 밖에는 블링크 기본값 "0px" 이다. (style_environment_variables.cc, 노치가 있는 맥북의 전체 화면도 같다)
 //==============================================================================
 pub fn read_safe_area_insets() -> [f32; 4] {
 	[0.0, 0.0, 0.0, 0.0]
+}
+
+//==============================================================================
+// 힙 사용량. (바이트, (쓰는 중, 잡아 둔 것), 못 읽으면 None. 개발자 도구의 메모리 칸, 원본 performance.memory 의 usedJSHeapSize, totalJSHeapSize 자리)
+// - 데스크탑에는 자바스크립트 힙이 없어 러스트가 쓰는 시스템 할당자의 힙을 읽는다. (러스트 System 할당자는 맥과 리눅스는 malloc, 윈도우는 프로세스 힙의 HeapAlloc)
+// - 맥: malloc_zone_statistics(모든 영역)의 size_in_use, size_allocated.
+// - 윈도우: 프로세스 힙의 HeapSummary 의 cbAllocated, cbCommitted.
+// - 리눅스(glibc): mallinfo2 의 uordblks + hblkhd(쓰는 중, mmap 으로 잡은 큰 덩어리 포함), arena + hblkhd(잡아 둔 것). glibc 2.33 부터라 실행할 때 찾고, 없으면 None.
+// - 그 밖의 OS 는 None 이다.
+//==============================================================================
+pub fn read_heap_usage() -> Option<(f64, f64)> {
+	#[cfg(target_os = "macos")]
+	{
+		#[repr(C)]
+		struct MallocStatistics {
+			blocks_in_use: std::os::raw::c_uint,
+			size_in_use: usize,
+			max_size_in_use: usize,
+			size_allocated: usize,
+		}
+		extern "C" {
+			fn malloc_zone_statistics(zone: *mut std::ffi::c_void, statistics: *mut MallocStatistics);
+		}
+		let mut statistics = MallocStatistics {
+			blocks_in_use: 0,
+			size_in_use: 0,
+			max_size_in_use: 0,
+			size_allocated: 0,
+		};
+		unsafe {
+			malloc_zone_statistics(std::ptr::null_mut(), &mut statistics);
+		}
+		Some((statistics.size_in_use as f64, statistics.size_allocated as f64))
+	}
+	#[cfg(target_os = "windows")]
+	{
+		use windows_sys::Win32::System::Memory::{GetProcessHeap, HeapSummary, HEAP_SUMMARY};
+		let mut heap_summary = HEAP_SUMMARY {
+			cb: std::mem::size_of::<HEAP_SUMMARY>() as u32,
+			cbAllocated: 0,
+			cbCommitted: 0,
+			cbReserved: 0,
+			cbMaxReserve: 0,
+		};
+		let is_read = unsafe {
+			HeapSummary(GetProcessHeap(), 0, &mut heap_summary)
+		};
+		if is_read == 0 {
+			return None;
+		}
+		Some((heap_summary.cbAllocated as f64, heap_summary.cbCommitted as f64))
+	}
+	#[cfg(all(target_os = "linux", target_env = "gnu"))]
+	{
+		#[repr(C)]
+		struct MallocInformation {
+			arena: usize,
+			ordblks: usize,
+			smblks: usize,
+			hblks: usize,
+			hblkhd: usize,
+			usmblks: usize,
+			fsmblks: usize,
+			uordblks: usize,
+			fordblks: usize,
+			keepcost: usize,
+		}
+		extern "C" {
+			fn dlsym(handle: *mut std::ffi::c_void, symbol: *const std::os::raw::c_char) -> *mut std::ffi::c_void;
+		}
+		// RTLD_DEFAULT 는 glibc 에서 널이다.
+		let mallinfo2_pointer = unsafe {
+			dlsym(std::ptr::null_mut(), c"mallinfo2".as_ptr())
+		};
+		if mallinfo2_pointer.is_null() {
+			return None;
+		}
+		let mallinfo2: extern "C" fn() -> MallocInformation = unsafe {
+			std::mem::transmute(mallinfo2_pointer)
+		};
+		let malloc_information = mallinfo2();
+		Some(((malloc_information.uordblks + malloc_information.hblkhd) as f64, (malloc_information.arena + malloc_information.hblkhd) as f64))
+	}
+	#[cfg(not(any(target_os = "macos", target_os = "windows", all(target_os = "linux", target_env = "gnu"))))]
+	{
+		None
+	}
 }
 
 //==============================================================================
@@ -320,8 +448,12 @@ pub fn request_asset_bytes(asset_location: String, load_handle: AssetLoadHandle,
 
 //==============================================================================
 // 창과 GL 상태.
+// - 필드 차례대로 버린다. 웨이랜드 프레임 콜백 맞추개는 winit 창의 표면과 wl_display 를 빌려 쓰므로 창보다 먼저 버린다.
 //==============================================================================
 struct WindowState {
+	// 웨이랜드 창이면 프레임 콜백 맞추개. (가려짐과 수직 동기, desktop/waylandframecallback.rs)
+	#[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
+	wayland_frame_pacer: Option<waylandframecallback::WaylandFramePacer>,
 	window: Rc<Window>,
 	surface: Surface<WindowSurface>,
 	context: PossiblyCurrentContext,
@@ -342,7 +474,9 @@ struct DesktopApplication {
 	is_occluded: bool,
 	// 창이 최소화되었는지.
 	is_minimized: bool,
-	// 엔진에 알린 페이지 가려짐. (가려짐, 최소화, 앱 멈춤 가운데 하나)
+	// 웨이랜드 프레임 콜백이 3 초 넘게 오지 않아 가려진 것으로 보는지. (크롬 리눅스 웨이랜드의 가려짐)
+	is_frame_callback_occluded: bool,
+	// 엔진에 알린 페이지 가려짐. (가려짐, 최소화, 앱 멈춤, 웨이랜드 프레임 콜백 가려짐 가운데 하나)
 	is_page_hidden: bool,
 	// 창의 배율. (입력 좌표를 논리 좌표로 바꿀 때, 렌더 배율 상한과 상관없다)
 	window_scale_factor: f32,
@@ -350,6 +484,18 @@ struct DesktopApplication {
 	applied_max_render_pixel_ratio: f32,
 	// 줄인 렌더 영역을 창 크기로 늘이개. (처음 쓸 때 만든다)
 	render_scaler: Option<renderscaler::RenderScaler>,
+	// 드로잉 버퍼 남기개. (preserve_drawing_buffer 일 때 처음 쓸 때 만든다)
+	preserved_drawing_buffer: Option<preserveddrawingbuffer::PreservedDrawingBuffer>,
+	// 화면 키보드가 가린 창 아래. (논리 좌표, visualViewport 아래 인셋, 윈도우 터치 키보드만 0 이 아니다)
+	virtual_keyboard_inset: f32,
+	// 마지막으로 맞춘 visualViewport 크기. (ignore_virtual_keyboard_resize 가 견준다, 원본 appliedClientNativeSize)
+	applied_client_size: Option<(f32, f32)>,
+	// 윈도우 터치 키보드 제어. (창을 만들 때 만든다)
+	#[cfg(target_os = "windows")]
+	virtual_keyboard_controller: Option<windowsinputpane::VirtualKeyboardController>,
+	// 지난 프레임 뒤에 손가락을 댄 자리. (창 안쪽 논리 좌표, 윈도우 터치 키보드 띄우기)
+	#[cfg(target_os = "windows")]
+	touch_started_position: Option<Vector2>,
 	// 창을 숨기고 도는지. (찍기 모드, is_capture_window_hidden)
 	is_window_hidden: bool,
 	// 지난 프레임의 단조 시계와 벽시계. (맥과 리눅스의 잠자기 판정)
@@ -418,7 +564,14 @@ impl DesktopApplication {
 		}.map_err(|error| format!("서피스 생성 실패: {}", error))?;
 		let context = not_current_context.make_current(&surface).map_err(|error| format!("컨텍스트 활성화 실패: {}", error))?;
 
-		let use_vertical_sync = engine_configuration.use_vertical_sync;
+		// 웨이랜드는 EGL 스왑 간격을 0 으로 두고 수직 동기를 프레임 콜백 맞추개가 맡는다. (메사가 가려진 창에서 스왑 안에 멈추지 않게)
+		#[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
+		let wayland_frame_pacer = waylandframecallback::WaylandFramePacer::new(&window);
+		#[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
+		let is_vertical_sync_paced = wayland_frame_pacer.is_some();
+		#[cfg(not(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android"))))]
+		let is_vertical_sync_paced = false;
+		let use_vertical_sync = engine_configuration.use_vertical_sync && !is_vertical_sync_paced;
 		let swap_interval = if use_vertical_sync {
 			SwapInterval::Wait(NonZeroU32::new(1).expect("one"))
 		}
@@ -432,16 +585,19 @@ impl DesktopApplication {
 		let gl = unsafe {
 			glow::Context::from_loader_function_cstr(|symbol_name| gl_display.get_proc_address(symbol_name) as *const _)
 		};
-		let graphic = Graphic::new(gl)?;
+		let graphic = Graphic::new(gl, engine_configuration.preserve_drawing_buffer)?;
 
 		#[cfg(target_os = "windows")]
 		{
 			windowsplatform::install_power_broadcast_hook(&window);
+			self.virtual_keyboard_controller = windowsinputpane::VirtualKeyboardController::new(&window);
 		}
 		let window = Rc::new(window);
 		self.engine_runner.attach_graphic(graphic);
 		self.engine_runner.engine.platform_window = Some(window.clone());
 		self.window_state = Some(WindowState {
+			#[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
+			wayland_frame_pacer,
 			window,
 			surface,
 			context,
@@ -467,18 +623,41 @@ impl DesktopApplication {
 		if let (Some(width), Some(height)) = (NonZeroU32::new(physical_size.width), NonZeroU32::new(physical_size.height)) {
 			window_state.surface.resize(&window_state.context, width, height);
 		}
-		// 캔버스 비 상한이 있으면 원본처럼 캔버스를 줄여 창 가운데에 둔다. (논리 좌표, 내림)
 		let client_width = physical_size.width as f32 / scale_factor;
 		let client_height = physical_size.height as f32 / scale_factor;
-		// 폰트 문자열의 뷰포트 단위(vw, vh)는 원본 window.innerWidth / innerHeight 처럼 창의 논리 크기에 댄다.
+		// 폰트 문자열의 뷰포트 단위(vw, vh)는 원본 window.innerWidth / innerHeight 처럼 창의 논리 크기에 댄다. (화면 키보드는 visualViewport 만 줄인다)
 		crate::core::textstringtexturecache::set_font_viewport_size(client_width, client_height);
-		let max_canvas_aspect_ratio = self.engine_runner.engine.get_engine_configuration().max_canvas_aspect_ratio;
-		let (canvas_left, canvas_top, canvas_width, canvas_height) = if max_canvas_aspect_ratio > 0.0 {
-			let canvas_width = client_width.min(client_height * max_canvas_aspect_ratio).floor();
-			let canvas_height = client_height.min(client_width * max_canvas_aspect_ratio).floor();
-			(((client_width - canvas_width) * 0.5).floor(), ((client_height - canvas_height) * 0.5).floor(), canvas_width, canvas_height)
+		let engine_configuration = self.engine_runner.engine.get_engine_configuration();
+		let is_auto_resize = engine_configuration.auto_resize_on_window_resize;
+		let is_virtual_keyboard_ignored = engine_configuration.ignore_virtual_keyboard_resize;
+		let max_canvas_aspect_ratio = engine_configuration.max_canvas_aspect_ratio;
+		let is_text_field_focused = self.engine_runner.engine.get_input_manager().get_text_input().get_active_field_state().map(|field_state| field_state.use_dominput).unwrap_or(false);
+		let (canvas_left, canvas_top, canvas_width, canvas_height) = if is_auto_resize {
+			// 원본 engine.resize: visualViewport 크기에 맞춘다. (창 안쪽에서 화면 키보드가 가린 아래를 뺀 것)
+			let viewport_width = client_width;
+			let mut viewport_height = (client_height - self.virtual_keyboard_inset).max(0.0);
+			// 화면 키보드: 글자 입력칸이 포커스된 동안 가로가 같고 세로만 줄었으면 크기를 그대로 둔다. (설정으로 켠다)
+			if is_virtual_keyboard_ignored && is_text_field_focused {
+				if let Some((applied_client_width, applied_client_height)) = self.applied_client_size {
+					if (viewport_width - applied_client_width).abs() < 1.0 && viewport_height < applied_client_height {
+						viewport_height = applied_client_height;
+					}
+				}
+			}
+			self.applied_client_size = Some((viewport_width, viewport_height));
+			// 캔버스 비 상한이 있으면 원본처럼 캔버스를 줄여 가운데에 둔다. (논리 좌표, 내림)
+			if max_canvas_aspect_ratio > 0.0 {
+				let canvas_width = viewport_width.min(viewport_height * max_canvas_aspect_ratio).floor();
+				let canvas_height = viewport_height.min(viewport_width * max_canvas_aspect_ratio).floor();
+				(((viewport_width - canvas_width) * 0.5).floor(), ((viewport_height - canvas_height) * 0.5).floor(), canvas_width, canvas_height)
+			}
+			else {
+				(0.0, 0.0, viewport_width, viewport_height)
+			}
 		}
 		else {
+			// 끄면 원본은 페이지가 정한 캔버스 크기를 읽는다. 데스크탑 창은 캔버스가 창을 가득 채운 페이지(CSS 100%)와 같아 창 크기다.
+			// (그런 페이지의 캔버스는 화면 키보드에 줄지 않고, 캔버스 비 상한도 원본처럼 걸지 않는다)
 			(0.0, 0.0, client_width, client_height)
 		};
 		CANVAS_CLIENT_POSITION.with(|canvas_client_position| canvas_client_position.set(Vector2::create(canvas_left, canvas_top)));
@@ -495,10 +674,10 @@ impl DesktopApplication {
 	}
 
 	//==============================================================================
-	// 페이지 가려짐 알리기. (가려짐, 최소화, 앱 멈춤 가운데 하나라도 맞으면 Hidden, 모두 풀리면 Visible 과 on_page_visibility_restored, 바뀔 때만)
+	// 페이지 가려짐 알리기. (가려짐, 최소화, 앱 멈춤, 웨이랜드 프레임 콜백 가려짐 가운데 하나라도 맞으면 Hidden, 모두 풀리면 Visible 과 on_page_visibility_restored, 바뀔 때만)
 	//==============================================================================
 	fn update_page_visibility(&mut self) {
-		let is_page_hidden = self.is_occluded || self.is_minimized || self.is_suspended;
+		let is_page_hidden = self.is_occluded || self.is_minimized || self.is_suspended || self.is_frame_callback_occluded;
 		if is_page_hidden == self.is_page_hidden {
 			return;
 		}
@@ -509,6 +688,49 @@ impl DesktopApplication {
 		else {
 			self.engine_runner.engine.dispatch_page_event(PageEvent::Visible);
 			self.engine_runner.notify_page_visibility_restored();
+		}
+	}
+
+	//==============================================================================
+	// 웨이랜드 프레임 콜백으로 본 가려짐 알리기. (크롬 리눅스 웨이랜드처럼 보낸 콜백이 3 초 넘게 오지 않으면 가려짐, 찍기 모드는 받지 않는다)
+	//==============================================================================
+	#[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
+	fn update_frame_callback_occlusion(&mut self) {
+		if self.is_window_hidden {
+			return;
+		}
+		let is_frame_callback_occluded = match self.window_state.as_mut().and_then(|window_state| window_state.wayland_frame_pacer.as_mut()) {
+			Some(wayland_frame_pacer) => {
+				wayland_frame_pacer.is_occluded()
+			}
+			None => {
+				return;
+			}
+		};
+		if is_frame_callback_occluded != self.is_frame_callback_occluded {
+			self.is_frame_callback_occluded = is_frame_callback_occluded;
+			self.update_page_visibility();
+		}
+	}
+
+	//==============================================================================
+	// 윈도우 터치 키보드 띄우고 내리기. (크롬 윈도우처럼 손가락으로 글자 입력칸에 포커스하거나 그 입력칸을 누르면 띄우고, 포커스가 떠나면 내린다. desktop/windowsinputpane.rs)
+	//==============================================================================
+	#[cfg(target_os = "windows")]
+	fn update_virtual_keyboard(&mut self) {
+		let touch_started_position = self.touch_started_position.take();
+		let input_manager = self.engine_runner.engine.get_input_manager();
+		let (focused_field_id, is_field_touched) = match input_manager.get_text_input().get_active_field_state() {
+			Some(field_state) if field_state.use_dominput => {
+				(field_state.field_id, touch_started_position.map(|position| field_state.field_rect.contains(position)).unwrap_or(false))
+			}
+			_ => {
+				(0, false)
+			}
+		};
+		let is_last_pointer_touch = input_manager.get_last_input_device() == InputDevice::Touch;
+		if let Some(virtual_keyboard_controller) = &mut self.virtual_keyboard_controller {
+			virtual_keyboard_controller.update(focused_field_id, is_field_touched, is_last_pointer_touch);
 		}
 	}
 
@@ -564,6 +786,10 @@ impl DesktopApplication {
 		let identifier = touch.id as i64;
 		let touch_points = self.engine_runner.engine.get_input_manager().get_touch_points();
 		let is_first_finger = touch_points.is_empty() || touch_points[0].identifier == identifier;
+		#[cfg(target_os = "windows")]
+		if touch.phase == TouchPhase::Started {
+			self.touch_started_position = Some(Vector2::create(touch.location.x as f32 / window_scale_factor, touch.location.y as f32 / window_scale_factor));
+		}
 		if is_first_finger {
 			self.update_input_position(touch.location.x, touch.location.y);
 		}
@@ -616,17 +842,39 @@ impl DesktopApplication {
 			return;
 		}
 		self.check_system_sleep();
+		#[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
+		self.update_frame_callback_occlusion();
+		// 화면 키보드가 가린 아래가 바뀌면 다시 맞춘다. (원본은 visualViewport 의 resize 이벤트로 engine.resize 를 부른다)
+		let virtual_keyboard_inset = read_virtual_keyboard_inset();
+		if virtual_keyboard_inset != self.virtual_keyboard_inset {
+			self.virtual_keyboard_inset = virtual_keyboard_inset;
+			self.engine_runner.engine.is_resize_requested = true;
+		}
 		let max_render_pixel_ratio = self.engine_runner.engine.get_view_manager().get_max_render_pixel_ratio();
 		if max_render_pixel_ratio != self.applied_max_render_pixel_ratio || self.engine_runner.engine.is_resize_requested {
 			self.engine_runner.engine.is_resize_requested = false;
 			self.resize();
 		}
+		self.restore_preserved_drawing_buffer();
 		self.engine_runner.update_engine();
+		self.save_preserved_drawing_buffer();
 		self.present_render_scaled();
-		if let Some(window_state) = &self.window_state {
+		#[cfg(target_os = "windows")]
+		self.update_virtual_keyboard();
+		#[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
+		let use_vertical_sync = self.engine_runner.engine.get_engine_configuration().use_vertical_sync;
+		if let Some(window_state) = &mut self.window_state {
 			self.text_input_state.apply_active_field(&window_state.window, self.engine_runner.engine.get_input_manager().get_text_input());
+			#[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
+			if let Some(wayland_frame_pacer) = &mut window_state.wayland_frame_pacer {
+				wayland_frame_pacer.prepare_swap(use_vertical_sync);
+			}
 			if let Err(error) = window_state.surface.swap_buffers(&window_state.context) {
 				eprintln!("Engine: 화면 넘기기 실패: {}", error);
+			}
+			#[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
+			if let Some(wayland_frame_pacer) = &mut window_state.wayland_frame_pacer {
+				wayland_frame_pacer.finish_swap();
 			}
 		}
 	}
@@ -678,6 +926,57 @@ impl DesktopApplication {
 		if let Some(custom_cursor) = custom_cursor {
 			window.set_cursor_visible(true);
 			window.set_cursor(custom_cursor);
+		}
+	}
+
+	//==============================================================================
+	// 지난 프레임 그림 되살리기. (preserve_drawing_buffer 일 때 엔진 프레임 첫머리, desktop/preserveddrawingbuffer.rs)
+	//==============================================================================
+	fn restore_preserved_drawing_buffer(&mut self) {
+		let graphic = match self.engine_runner.get_graphic() {
+			Some(graphic) => {
+				graphic
+			}
+			None => {
+				return;
+			}
+		};
+		if !graphic.is_drawing_buffer_preserved() {
+			return;
+		}
+		let canvas_pixel_size = self.engine_runner.engine.get_view_manager().get_canvas_pixel_size();
+		let gl = graphic.get_gl();
+		if self.preserved_drawing_buffer.is_none() {
+			match preserveddrawingbuffer::PreservedDrawingBuffer::new(gl) {
+				Ok(preserved_drawing_buffer) => {
+					self.preserved_drawing_buffer = Some(preserved_drawing_buffer);
+				}
+				Err(error) => {
+					eprintln!("Engine: 드로잉 버퍼 남기개 생성 실패: {}", error);
+					return;
+				}
+			}
+		}
+		if let Some(preserved_drawing_buffer) = &self.preserved_drawing_buffer {
+			preserved_drawing_buffer.restore(gl, canvas_pixel_size.x as i32, canvas_pixel_size.y as i32);
+		}
+	}
+
+	//==============================================================================
+	// 다 그린 프레임 떠 두기. (preserve_drawing_buffer 일 때 엔진 프레임 뒤, 늘이개가 늘이기 전)
+	//==============================================================================
+	fn save_preserved_drawing_buffer(&mut self) {
+		let canvas_pixel_size = self.engine_runner.engine.get_view_manager().get_canvas_pixel_size();
+		let graphic = match self.engine_runner.get_graphic() {
+			Some(graphic) => {
+				graphic
+			}
+			None => {
+				return;
+			}
+		};
+		if let Some(preserved_drawing_buffer) = &mut self.preserved_drawing_buffer {
+			preserved_drawing_buffer.save(graphic.get_gl(), canvas_pixel_size.x as i32, canvas_pixel_size.y as i32);
 		}
 	}
 
@@ -1122,6 +1421,18 @@ mod tests {
 		assert_eq!(convert_key_code_to_code_name(winit::keyboard::KeyCode::AudioVolumeUp), crate::core::inputmanager::KeyCode::AUDIOVOLUMEUP);
 		assert_eq!(convert_key_code_to_code_name(winit::keyboard::KeyCode::AudioVolumeMute), crate::core::inputmanager::KeyCode::AUDIOMUTE);
 		assert_eq!(convert_key_code_to_code_name(winit::keyboard::KeyCode::MediaPlayPause), crate::core::inputmanager::KeyCode::AUDIOPLAY);
+	}
+
+	//==============================================================================
+	// 힙 사용량은 맥, 윈도우, 리눅스(glibc)에서 읽히고, 쓰는 중인 것이 잡아 둔 것보다 크지 않다.
+	//==============================================================================
+	#[test]
+	#[cfg(any(target_os = "macos", target_os = "windows", all(target_os = "linux", target_env = "gnu")))]
+	fn heap_usage_is_read() {
+		let held_bytes = vec![7u8; 1 << 20];
+		let (used_heap_size, total_heap_size) = read_heap_usage().expect("heap usage");
+		assert!(used_heap_size >= held_bytes.len() as f64);
+		assert!(used_heap_size <= total_heap_size);
 	}
 
 	//==============================================================================

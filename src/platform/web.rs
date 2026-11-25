@@ -1055,7 +1055,7 @@ impl WebApplication {
 			*engine_gl_context.borrow_mut() = Some(context.clone());
 		});
 		let gl = glow::Context::from_webgl2_context(context);
-		let graphic = Graphic::new(gl)?;
+		let graphic = Graphic::new(gl, preserve_drawing_buffer)?;
 
 		self.engine_runner.attach_graphic(graphic);
 		self.engine_runner.engine.platform_window = Some(canvas.clone());

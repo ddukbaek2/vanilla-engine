@@ -6,7 +6,8 @@
 // - KeyCode 의 상수 이름은 원본 KeyCode 의 키 이름을 러스트 상수 꼴로 바꾼 것이다. ("0" 처럼 이름이 될 수 없는 것은 DIGIT0)
 //   원본에 없던 LEFT, UP, RIGHT, DOWN 은 ARROWLEFT 들과 같은 값으로 남긴다.
 // - 마우스 단추(또는 첫 손가락)를 터치로 다룬다. (원본은 마우스와 터치를 하나로 모은다) 원본처럼 처음에는 어느 단추든 터치이고,
-//   set_touch_from_left_button_only(true) 면 왼쪽 단추만 터치다. 캔버스의 오른쪽 클릭 메뉴를 막을지(set_context_menu_prevented, 처음은 참)는 웹만 뜻이 있다.
+//   set_touch_from_left_button_only(true) 면 왼쪽 단추만 터치다. 캔버스의 오른쪽 클릭 메뉴를 막을지(set_context_menu_prevented, 처음은 참)는 웹에서 브라우저 문맥 메뉴를 막는다.
+//   데스크탑 창에는 브라우저 문맥 메뉴가 없어 크롬에서 막은 것과 같은 결과다.
 // - 그 밖에 마우스 단추 셋(왼쪽, 가운데, 오른쪽)의 눌림, 닿아 있는 손가락 목록, 마지막 입력이 손가락인지, 휠을 Ctrl 과 함께 굴렸는지를 둔다.
 //   카메라 손짓(CameraGestures)처럼 단추 하나 터치 밖의 입력을 쓰는 곳이 읽는다. 플랫폼이 채운다. (vanilla.js 는 캔버스 DOM 사건을 직접 읽던 것)
 // - 게임패드는 원본과 같이 InputManager 가 GamepadManager 를 들고 tick 에서 폴링한다. (core/gamepadmanager.rs)
@@ -14,7 +15,7 @@
 // - 키와 마우스 단추의 이번 프레임 누름과 뗌은 원본처럼 지난 프레임 끝 뒤로 온 사건을 쌓아 본다. 프레임 사이에 눌렀다 뗀 것도 잡힌다.
 // - 손가락은 원본처럼 닿음(begin_touch_point), 움직임, 뗌을 받아 단계(TouchPhase)를 매기고, 떨어진 손가락은 한 프레임 get_ended_touch_points 에 남는다.
 // - 마지막으로 쓴 장치(InputDevice)와 패드 종류, 막을 키(set_prevented_keys), 글자 입력칸에 쓰는 중인지(is_typing_in_text_field), 입력 동작(InputActions)을 둔다.
-//   막을 키는 웹에서만 뜻이 있다. (데스크탑 창에는 막을 브라우저 기본 동작이 없다)
+//   막을 키는 웹에서 브라우저 기본 동작(Tab 의 포커스 옮기기, Space 와 화살표의 스크롤, F5 새로 고침 같은 것)을 막는다. 데스크탑 창에는 그런 기본 동작이 없어 막은 것과 같은 결과다.
 //   글자 입력칸은 엔진 입력 필드(TextInput 의 활성 필드)와, 웹에서는 문서의 초점(글자 input, textarea, contenteditable, select)을 본다.
 //==============================================================================
 use crate::base::vector2::Vector2;

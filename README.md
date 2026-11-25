@@ -380,8 +380,8 @@ cargo run --release --example modelviewer
 
 | 크레이트 | 버전 | 쓰는 곳 | 하는 일 | 라이선스 |
 | --- | --- | --- | --- | --- |
-| [windows-sys](https://crates.io/crates/windows-sys) | 0.52.0 | `platform/desktop/windowsplatform.rs`, `platform/desktop/systemfont.rs` | 잠자기에서 깸(WM_POWERBROADCAST)을 받는 창 서브클래싱, 주된 손이 손가락인지, system-ui 의 메뉴 글꼴과 ClearType 켜짐, 대체 글꼴을 고를 사용자 기본 언어. 켜는 기능은 Win32_Foundation, Win32_Devices_Display, Win32_Globalization, Win32_Graphics_Gdi, Win32_System_Power, Win32_UI_Shell, Win32_UI_WindowsAndMessaging 뿐입니다 | MIT / Apache-2.0 |
-| [windows](https://crates.io/crates/windows), [windows-core](https://crates.io/crates/windows-core) | 0.62.2 | `platform/desktop/systemfont.rs` | DirectWrite 로 글꼴 이름의 파일을 찾고, 글꼴에 없는 글자의 대체 글꼴을 IDWriteFontFallback 으로 고릅니다 (cpal, gilrs 가 쓰는 같은 판) | MIT / Apache-2.0 |
+| [windows-sys](https://crates.io/crates/windows-sys) | 0.52.0 | `platform/desktop/windowsplatform.rs`, `platform/desktop/systemfont.rs`, `platform/desktop/windowsinputpane.rs`, `platform/desktop.rs` | 잠자기에서 깸(WM_POWERBROADCAST)을 받는 창 서브클래싱, 주된 손이 손가락인지, system-ui 의 메뉴 글꼴과 ClearType 켜짐, 대체 글꼴을 고를 사용자 기본 언어, 터치 키보드 스레드의 메시지 큐, 개발자 도구의 힙 사용량(HeapSummary). 켜는 기능은 Win32_Foundation, Win32_Devices_Display, Win32_Globalization, Win32_Graphics_Gdi, Win32_System_Memory, Win32_System_Power, Win32_System_Threading, Win32_UI_Shell, Win32_UI_WindowsAndMessaging 뿐입니다 | MIT / Apache-2.0 |
+| [windows](https://crates.io/crates/windows), [windows-core](https://crates.io/crates/windows-core) | 0.62.2 | `platform/desktop/systemfont.rs`, `platform/desktop/windowsinputpane.rs` | DirectWrite 로 글꼴 이름의 파일을 찾고, 글꼴에 없는 글자의 대체 글꼴을 IDWriteFontFallback 으로 고릅니다. 크롬 윈도우처럼 창에 묶은 WinRT InputPane 으로 터치 키보드를 띄우고 내리며 가린 영역을 받습니다 (cpal, gilrs 가 쓰는 같은 판) | MIT / Apache-2.0 |
 
 **macOS 만**
 
@@ -397,7 +397,7 @@ cargo run --release --example modelviewer
 | 크레이트 | 버전 | 쓰는 곳 | 하는 일 | 라이선스 |
 | --- | --- | --- | --- | --- |
 | [yeslogic-fontconfig-sys](https://crates.io/crates/yeslogic-fontconfig-sys) | 6.0.1 | `platform/desktop/systemfont.rs` | fontconfig 로 글꼴 이름과 대체 글꼴을 고릅니다. 라이브러리는 빌드할 때 잇지 않고 실행할 때 엽니다 (dlopen) | MIT |
-| [x11-dl](https://crates.io/crates/x11-dl), [wayland-client](https://crates.io/crates/wayland-client) | 2.21.0, 0.31.15 | `platform/desktop/linuxplatform.rs` | 주된 손이 손가락인지 화면 서버의 입력 장치로 읽습니다 (X11 XInput, 웨이랜드 wl_seat). glutin, winit 이 쓰는 같은 판입니다 | MIT |
+| [x11-dl](https://crates.io/crates/x11-dl), [wayland-client](https://crates.io/crates/wayland-client) | 2.21.0, 0.31.15 | `platform/desktop/linuxplatform.rs`, `platform/desktop/waylandframecallback.rs` | 주된 손이 손가락인지 화면 서버의 입력 장치로 읽습니다 (X11 XInput, 웨이랜드 wl_seat). 웨이랜드 창의 가려짐과 수직 동기는 winit 의 wl_display 에 손님으로 붙어 wl_surface.frame 콜백으로 봅니다 (libwayland 를 쓰는 system 백엔드). glutin, winit 이 쓰는 같은 판입니다 | MIT |
 
 **웹(wasm)만**
 
@@ -412,7 +412,7 @@ cargo run --release --example modelviewer
 - 버전 0.3.2. 버전 번호는 vanilla.js 0.3.2 에서 이어 받았습니다.
 - vanilla.js 의 원본 200 파일 가운데 181 파일을 옮겼습니다. (같은 이름 175, 다른 파일에 합친 것 6) 19 파일은 빈 파일, 죽은 코드, 러스트 표준이 맡는 것(컬렉션, 객체 모델 도우미)이라 일부러 옮기지 않았습니다. 목록과 까닭은 [ARCHITECTURE.md](ARCHITECTURE.md) 9장에 있습니다.
 - 두 엔진은 기능 차이를 두지 않습니다. 언어나 플랫폼 때문에 정말 맞출 수 없는 것과 러스트에 맞게 정한 꼴은 [ARCHITECTURE.md](ARCHITECTURE.md) 10장에 모았습니다.
-- 윈도우 11 데스크탑, macOS(애플 실리콘) 데스크탑, 크롬에서 돌려 확인했습니다. 윈도우와 리눅스의 시스템 글꼴 갈래(DirectWrite, fontconfig)와 리눅스 손가락 판정은 그 대상으로 컴파일해 본 것까지입니다. 리눅스와 실제 모바일 기기는 아직 돌려 보지 않았습니다.
+- 윈도우 11 데스크탑, macOS(애플 실리콘) 데스크탑, 크롬에서 돌려 확인했습니다. 윈도우와 리눅스의 시스템 글꼴 갈래(DirectWrite, fontconfig), 리눅스 손가락 판정, 윈도우 터치 키보드(InputPane), 웨이랜드 프레임 콜백의 가려짐과 수직 동기는 그 대상으로 컴파일해 본 것까지입니다. 리눅스와 실제 모바일 기기는 아직 돌려 보지 않았습니다.
 
 ## 코드 스타일
 
