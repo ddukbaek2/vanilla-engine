@@ -14,6 +14,7 @@
 //     덕분에 씬의 tick 에서 update 를 부를 수 있다.
 //   - 원본 노드 / 드로어블 / 스킨 / 클립 객체는 SkinnedModelNode / Drawable / Skin / AnimationClip 구조체다.
 //     드로어블의 머티리얼은 Rc<Material> 이다. 클립은 인덱스로 가리키고, sample_animation 도 클립 인덱스를 받는다.
+//     upload_wireframe_indices / upload_morph_targets 는 원본의 드로어블 객체 대신 드로어블 인덱스를 받는다. (모델을 &mut 로 빌린 채 드로어블을 넘길 수 없어서다)
 //   - 드로어블의 mesh_description 은 모프 타깃을 morph_target_list 로 옮긴 뒤라 morph_targets 가 비어 있다. (큰 델타 배열을 두 벌 들지 않는다)
 //   - 원본처럼 노드 matrix 와 CUBICSPLINE 보간, 프리미티브 mode 는 보지 않는다. FBX 는 원본처럼 스킨이 붙은 메시만 그린다.
 //   - destroy 가 지우는 머티리얼: 원본은 이 모델이 업로드에서 지은 것을 지운다. 러스트 판은 그 가운데 다른 곳에서 Rc 로 쥐지 않은 것만 지운다.
