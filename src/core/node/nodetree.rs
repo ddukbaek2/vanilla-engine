@@ -13,8 +13,8 @@
 //   원본 isVisible 은 활성이고 불투명도가 0 보다 큰 것이다. 러스트 판은 그리기를 끄는 보이기 플래그(set_visible)가 따로 있어 그것까지 본다.
 // - 원본 Node 의 계층 함수는 같은 이름으로 둔다. 노드 객체를 주고받는 자리는 NodeId 이고, 이름 끝에 _id(_ids)가 붙은 것은 핸들을 돌려주는 짝이다.
 //   (getParent → get_parent_id, getChildren → get_child_ids, getSiblings → get_sibling_ids) 부모에서 떼는 것(remove_child)은 노드를 지우지 않는다.
-// - 원본 WorldNode.getWorldCorners, getWorldBounds 도 노드 핸들을 받아 한다. 원본처럼 WorldNode.getPosition(부모 피벗 기준) 의 전역 위치와
-//   전역 크기, 전역 회전으로 셈한다.
+// - 원본 WorldNode.getPosition, setPosition, getWorldCorners, getWorldBounds 도 노드 핸들을 받아 한다. 전역 위치는 원본처럼 부모 피벗 기준으로 셈한
+//   피벗 점의 자리이고, 네 모서리는 그 전역 위치와 전역 크기, 전역 회전으로 셈한다.
 //==============================================================================
 use crate::base::math;
 use crate::base::rect::Rect;
@@ -537,7 +537,9 @@ impl NodeTree {
 	}
 
 	//==============================================================================
-	// 전역 위치. (원본 TransformNode.getPosition: 부모들의 위치, 회전, 크기를 차례로 걸어 셈한다, 피봇과 앵커는 넣지 않는다)
+	// 전역 위치. (피벗 점의 전역 위치, 원본 WorldNode.getPosition)
+	// - 로컬 위치는 부모 내용 영역의 왼쪽 위에서 본 자리라, 부모 피벗 점(부모 내용 크기 x 부모 피벗) 기준으로 옮긴 뒤 부모의 전역 회전과 크기를 걸고
+	//   부모 피벗 점의 전역 위치에 더한다. (앵커는 넣지 않는다) 그리는 변환(calculate_world_matrix)이 피벗 점을 놓는 자리와 같다.
 	//==============================================================================
 	pub fn get_position(&self, node_id: NodeId) -> Vector2 {
 		let local_position = self.nodes[node_id].get_local_position();
@@ -550,20 +552,27 @@ impl NodeTree {
 			}
 		};
 		let parent_position = self.get_position(parent_id);
+		let parent_node = &self.nodes[parent_id];
+		let parent_content_size = parent_node.get_content_size();
+		let parent_pivot = parent_node.get_pivot();
 		let parent_rotation = self.get_rotation(parent_id);
 		let parent_scale = self.get_scale(parent_id);
+		let total_local_x = local_position.x - parent_content_size.x * parent_pivot.x;
+		let total_local_y = local_position.y - parent_content_size.y * parent_pivot.y;
 		let radian = math::degree_to_radian(parent_rotation);
 		let cosine = math::cos(radian);
 		let sine = math::sin(radian);
-		let scaled_x = local_position.x * parent_scale.x;
-		let scaled_y = local_position.y * parent_scale.y;
+		let scaled_x = total_local_x * parent_scale.x;
+		let scaled_y = total_local_y * parent_scale.y;
 		let rotated_x = scaled_x * cosine - scaled_y * sine;
 		let rotated_y = scaled_x * sine + scaled_y * cosine;
 		Vector2::create(parent_position.x + rotated_x, parent_position.y + rotated_y)
 	}
 
 	//==============================================================================
-	// 전역 위치 설정. (부모가 없으면 로컬 위치, 원본 TransformNode.setPosition)
+	// 전역 위치 설정. (부모가 없으면 로컬 위치, get_position 의 거꾸로. 원본 WorldNode.setPosition)
+	// - 부모 피벗 점의 전역 위치에서 본 차이를 부모의 전역 회전과 크기를 풀어 부모 피벗 점 기준으로 되돌리고, 부모 내용 영역의 왼쪽 위 기준(로컬 위치)으로 옮긴다.
+	// - 부모의 전역 크기가 0 인 축은 부모 피벗 점에 놓는다.
 	//==============================================================================
 	pub fn set_position(&mut self, node_id: NodeId, position: Vector2) {
 		let parent_id = match self.get_parent_id(node_id) {
@@ -576,6 +585,9 @@ impl NodeTree {
 			}
 		};
 		let parent_position = self.get_position(parent_id);
+		let parent_node = &self.nodes[parent_id];
+		let parent_content_size = parent_node.get_content_size();
+		let parent_pivot = parent_node.get_pivot();
 		let parent_rotation = self.get_rotation(parent_id);
 		let parent_scale = self.get_scale(parent_id);
 		let delta_x = position.x - parent_position.x;
@@ -585,8 +597,10 @@ impl NodeTree {
 		let sine = math::sin(radian);
 		let rotated_x = delta_x * cosine - delta_y * sine;
 		let rotated_y = delta_x * sine + delta_y * cosine;
-		let local_x = if parent_scale.x != 0.0 { rotated_x / parent_scale.x } else { 0.0 };
-		let local_y = if parent_scale.y != 0.0 { rotated_y / parent_scale.y } else { 0.0 };
+		let offset_x = if parent_scale.x != 0.0 { rotated_x / parent_scale.x } else { 0.0 };
+		let offset_y = if parent_scale.y != 0.0 { rotated_y / parent_scale.y } else { 0.0 };
+		let local_x = offset_x + parent_content_size.x * parent_pivot.x;
+		let local_y = offset_y + parent_content_size.y * parent_pivot.y;
 		self.nodes[node_id].set_local_position(Vector2::create(local_x, local_y));
 	}
 
@@ -668,42 +682,11 @@ impl NodeTree {
 	}
 
 	//==============================================================================
-	// 피벗 점의 전역 위치. (원본 WorldNode.getPosition: 로컬 위치를 부모 피벗 점 기준으로 옮긴 뒤 부모의 전역 회전과 크기를 건다)
-	//==============================================================================
-	fn calculate_world_pivot_position(&self, node_id: NodeId) -> Vector2 {
-		let local_position = self.nodes[node_id].get_local_position();
-		let parent_id = match self.get_parent_id(node_id) {
-			Some(parent_id) => {
-				parent_id
-			}
-			None => {
-				return local_position;
-			}
-		};
-		let parent_position = self.calculate_world_pivot_position(parent_id);
-		let parent_node = &self.nodes[parent_id];
-		let parent_content_size = parent_node.get_content_size();
-		let parent_pivot = parent_node.get_pivot();
-		let parent_rotation = self.get_rotation(parent_id);
-		let parent_scale = self.get_scale(parent_id);
-		let total_local_x = local_position.x - parent_content_size.x * parent_pivot.x;
-		let total_local_y = local_position.y - parent_content_size.y * parent_pivot.y;
-		let radian = math::degree_to_radian(parent_rotation);
-		let cosine = math::cos(radian);
-		let sine = math::sin(radian);
-		let scaled_x = total_local_x * parent_scale.x;
-		let scaled_y = total_local_y * parent_scale.y;
-		let rotated_x = scaled_x * cosine - scaled_y * sine;
-		let rotated_y = scaled_x * sine + scaled_y * cosine;
-		Vector2::create(parent_position.x + rotated_x, parent_position.y + rotated_y)
-	}
-
-	//==============================================================================
 	// 실제 화면에 그려지는 영역의 네 모서리. (원본 WorldNode.getWorldCorners, OBB. 왼쪽 위, 오른쪽 위, 오른쪽 아래, 왼쪽 아래)
 	// - 크기는 전역 크기의 절댓값을 곱하고, 피벗 점의 전역 위치를 중심으로 전역 회전만큼 돌린다.
 	//==============================================================================
 	pub fn get_world_corners(&self, node_id: NodeId) -> [Vector2; 4] {
-		let position = self.calculate_world_pivot_position(node_id);
+		let position = self.get_position(node_id);
 		let scale = self.get_scale(node_id);
 		let rotation = self.get_rotation(node_id);
 		let node = &self.nodes[node_id];
@@ -1876,5 +1859,40 @@ mod sibling_tests {
 		assert_eq!(node_tree[child_id].get_local_rotation(), -60.0);
 		assert_eq!(node_tree.get_rotation(child_id), 30.0);
 		assert_eq!(node_tree.get_opacity(child_id), 0.25);
+	}
+
+	//==============================================================================
+	// 전역 위치는 부모 피벗 점 기준으로 셈한 피벗 점의 자리다. (원본 WorldNode.getPosition, 그리는 변환이 놓는 자리와 같고 set_position 이 거꾸로 되돌린다)
+	//==============================================================================
+	#[test]
+	fn global_position_follows_parent_pivot() {
+		let mut node_tree = NodeTree::new();
+		let root_id = node_tree.get_root_id();
+		let parent_id = node_tree.create_child(root_id, "parent");
+		let child_id = node_tree.create_child(parent_id, "child");
+		node_tree[parent_id].set_local_position(Vector2::create(300.0, 200.0));
+		node_tree[parent_id].set_content_size(Vector2::create(100.0, 60.0));
+		node_tree[parent_id].set_pivot(Vector2::create(0.5, 0.5));
+		node_tree[parent_id].set_local_rotation(90.0);
+		node_tree[parent_id].set_local_scale(Vector2::create(2.0, 2.0));
+		node_tree[child_id].set_content_size(Vector2::create(20.0, 10.0));
+		node_tree[child_id].set_pivot(Vector2::create(0.5, 0.5));
+		node_tree[child_id].set_local_position(Vector2::create(60.0, 30.0));
+
+		// 부모 피벗 점(50, 30)에서 (10, 0) 떨어진 자리를 크기 2 와 90 도로 옮기면 (0, 20) 이다.
+		let position = node_tree.get_position(child_id);
+		assert!((position.x - 300.0).abs() < 1e-3 && (position.y - 220.0).abs() < 1e-3);
+		let drawn_pivot_position = node_tree.convert_node_position_to_view_position(child_id, Vector2::create(10.0, 5.0));
+		assert!((drawn_pivot_position.x - position.x).abs() < 1e-3 && (drawn_pivot_position.y - position.y).abs() < 1e-3);
+		let world_corners = node_tree.get_world_corners(child_id);
+		let corner_center_x = (world_corners[0].x + world_corners[2].x) * 0.5;
+		let corner_center_y = (world_corners[0].y + world_corners[2].y) * 0.5;
+		assert!((corner_center_x - position.x).abs() < 1e-3 && (corner_center_y - position.y).abs() < 1e-3);
+
+		node_tree.set_position(child_id, Vector2::create(280.0, 200.0));
+		let local_position = node_tree[child_id].get_local_position();
+		assert!((local_position.x - 50.0).abs() < 1e-3 && (local_position.y - 40.0).abs() < 1e-3);
+		let round_trip_position = node_tree.get_position(child_id);
+		assert!((round_trip_position.x - 280.0).abs() < 1e-3 && (round_trip_position.y - 200.0).abs() < 1e-3);
 	}
 }

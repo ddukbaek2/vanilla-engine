@@ -339,6 +339,7 @@
 - 새 크레이트: resvg 0.50 (데스크탑)
 - 웹 래스터를 원본처럼 브라우저 Canvas2D 로: 글꼴 바이트가 있어도 fontdue 로 굽지 않고 늘 캔버스의 fillText, strokeText, measureText 로 굽고 잰다. 올린 글꼴 바이트(FontAsset, default_font_bytes, default_font_url, UIFont 조각)는 원본 new FontFace(이름, 바이트, 서술자) 처럼 document.fonts 에 올려 브라우저가 고르고 그린다. (같은 이름 안에서 나중 얼굴이 먼저, 기본 폰트는 VanillaEngineDefault, 대체 폰트는 VanillaEngineFallback1, 2 … 이름으로 폰트 문자열 이름 뒤, 시스템 글꼴 앞에 둔다) 올린 글꼴이 받아지면(loadingdone) 프레임 시작에 구운 글을 버린다. (TextStringTextureCache.is_browser_raster)
 - 웹 ShadowText: 원본 bakeText 처럼 캔버스에 그림자(shadowColor, shadowBlur, shadowOffsetY)를 걸고 글자 색으로 fillText, 밑줄과 취소선은 fillRect 로 굽는다. 여백(2 + 번짐 올림)과 자리 셈이 원본과 같다. 웹 ShadowImage: 원본 readScaledImage, bakeImage 처럼 drawImage(imageSmoothingQuality high)로 줄이고 색은 source-in 으로 칠한 뒤 캔버스 그림자를 깐다. (데스크탑은 그대로 직접 셈한다)
+- NodeTree.get_position 을 원본 WorldNode.getPosition 과 같게 했다. 로컬 위치를 부모 피벗 점(부모 내용 크기 x 부모 피벗) 기준으로 옮긴 뒤 부모의 전역 회전과 크기를 걸어, 그리는 변환(calculate_world_matrix)이 피벗 점을 놓는 자리와 같다. 지금까지는 원본 TransformNode.getPosition 처럼 부모 피벗을 빼지 않아 부모의 내용 크기와 피벗이 0 이 아니면 달랐다. set_position 은 그 거꾸로다. (원본 setPosition 이 부모 피벗을 되돌리지 않던 버그를 같이 고침) 엔진 안에서 get_position 을 부르는 곳은 set_position 뿐이고 UI, 레이아웃, 트윈, 타임라인은 로컬 위치와 월드 행렬로 셈해서 예제 화면은 그대로다
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.
