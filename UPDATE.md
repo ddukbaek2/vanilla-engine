@@ -241,6 +241,11 @@
   - GlyphRaster.color_pixels, TextRaster.color_pixels (색 글리프 몫, 프리멀티플라이드 RGBA). coverage 는 색 글리프를 뺀 글자의 덮인 정도다. 구조체에 필드가 늘어 직접 짓는 코드는 고쳐야 한다
 - 웹: 글꼴 바이트가 없을 때 브라우저로 굽는 글(platform/web/systemfont.rs)이 캔버스의 알파만 꺼내 흰색으로 올려 색 이모지가 흰 실루엣으로 나오던 것을 고쳤다. 원본처럼 RGBA 를 프리멀티플라이드로 올린다. 시스템 글꼴 조각(올린 글꼴에 없는 글자)은 흰 픽셀은 덮인 정도, 색 픽셀은 색 몫으로 나눈다. 안티앨리어싱을 끄면 알파로 가르고 곧은 색으로 채운다. (원본은 곧은 알파의 알파 칸을 가른다)
 - 예제 textshaping: 색 이모지 줄(😀👍🏽 ❤️❤ 🇰🇷 👨‍👩‍👧 1️⃣), 그림자 글 이모지, 기울인 이모지, 글자 아틀라스의 ⭐
+- 데스크탑 AudioContext 멈춤을 원본 suspend 처럼 했다. 컨텍스트를 만들 때 메인 트랙 아래 뿌리 트랙(원본 destination 자리)을 두고 플레이어, 버스, 비프를 그 아래에 달아, 멈추면 뿌리 트랙을 kira pause 로 세운다. 소리가 그 자리에서 서고 다시 돌리면 이어 울며, 컨텍스트 시계(get_context_time)도 서고 is_context_running 은 거짓이다. (전에는 메인 트랙을 무음으로만 두어 소리와 시계가 흐르고 늘 돌고 있다고 했다) AudioPlayer.play 는 원본처럼 멈춘 컨텍스트를 깨운 뒤 튼다
+- AudioPlayer::new(audio_manager, output_node), AudioBus::new(audio_manager) 를 공개했다. (원본 new AudioPlayer(audioContext, outputNode), new AudioBus(audioContext)) 내보낼 곳(platform::audio::AudioOutputNode)은 웹 &AudioNode, 데스크탑 kira &mut TrackHandle 이다. AudioBus::get_gain_node 가 데스크탑에서도 버스 트랙(RefMut<TrackHandle>)을 빌려 준다. (공개 API 를 바꾸는 일이다: 오디오 백엔드의 create, is_audio_context_running, play_beep_tone 이 매니저 상태를 받는다)
+- SoundSystem: 무리에서 고르기와 음 높이 흔들기가 고정 씨앗(SeededRandom 0x50f7) 대신 원본 Math.random 자리인 math::random(시각으로 씨앗)을 쓴다. SoundRow.maximum_voices 를 Option<usize> 로 바꿨다. (공개 API 를 바꾸는 일이다) None 이면 효과음 전체의 수까지, Some(0) 이면 원본처럼 하나만 난다. (전에는 0 이 12 였다)
+- 데스크탑 소리 파일: kira 의 flac, isomp4, aac 기능을 켜 FLAC 와 M4A(AAC)도 읽는다. (새로 받는 크레이트: symphonia-bundle-flac, symphonia-format-isomp4, symphonia-codec-aac 0.6.1)
+- BeepPlayer 데스크탑 파형을 크롬 WebAudio OscillatorNode(PeriodicWave)와 같은 셈으로 그린다. 푸리에 계수를 1/3 옥타브마다 덜어 낸 두 표 사이를 섞어 대역을 제한하고, 배음을 다 둔 표의 꼭대기로 크기를 맞춘다. 헤드리스 크롬 OfflineAudioContext 로 그린 오실레이터(사각, 톱니, 삼각, 사인, 150 / 440 / 1000 Hz, 2048 샘플)와 가장 큰 차이가 0.0003 이다. (전에는 대역 제한 없는 사각파, 톱니파였다)
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.

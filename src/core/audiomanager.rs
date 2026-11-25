@@ -2,7 +2,7 @@
 // 오디오 매니저.
 // - 원본 core/audiomanager.js. 공유 AudioContext 를 들고 AudioPlayer 생성을 맡는다.
 // - AudioContext 자리는 백엔드가 채운다. (platform/audio)
-//   데스크탑: kira 의 AudioManager. 처음 쓸 때 소리 장치를 연다.
+//   데스크탑: kira 의 AudioManager. 처음 쓸 때 소리 장치를 연다. 멈추면(SoundSystem 음소거) 소리와 시계가 원본처럼 그 자리에서 선다.
 //   웹: 원본과 같은 WebAudio AudioContext. 원본처럼 user gesture 뒤에 만들고, iOS 에서는 복원 뒤 시계를 확인한다.
 // - 원본처럼 AudioContext 는 늦게 만든다. resume_context() 는 user gesture 전에는 아무것도 하지 않고,
 //   create_audio_player() 는 user gesture 전이라도 (마지못해) 만든다.
@@ -15,10 +15,11 @@
 //   AudioManager 는 나눠 든 상태의 손잡이라 Clone 하면 같은 AudioContext 를 보는 손잡이가 하나 더 생긴다. (SoundSystem 이 원본처럼 매니저를 들 때)
 //   생성자는 엔진을 받지 않는다. (원본은 iOS 판별에 엔진의 플랫폼 정보를 쓰고, 여기서는 웹 백엔드가 같은 규칙으로 직접 판별한다)
 //   create_audio_bus(원본 createAudioBus)는 AudioBus 를 만든다. 버스도 플레이어처럼 부른 쪽이 소유한다.
+//   create_audio_player 와 create_audio_bus 는 원본처럼 AudioPlayer::new(매니저, None), AudioBus::new(매니저) 와 같다.
 //==============================================================================
 use crate::core::audiobus::AudioBus;
 use crate::core::audioplayer::AudioPlayer;
-use crate::platform::audio::{self as audio_backend, AudioBusBackend, AudioContext, AudioPlatformState, AudioPlayerBackend};
+use crate::platform::audio::{self as audio_backend, AudioContext, AudioPlatformState};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -43,17 +44,10 @@ impl AudioManagerState {
 	}
 
 	//==============================================================================
-	// AudioContext 가 있고 돌고 있는지. (원본 audio_context !== null && state === "running")
+	// AudioContext 가 있고 돌고 있는지. (원본 audio_context !== null && state === "running", 데스크탑은 멈춰 두지 않았으면)
 	//==============================================================================
 	pub(crate) fn is_context_running(&self) -> bool {
-		match &self.audio_context {
-			Some(audio_context) => {
-				audio_backend::is_audio_context_running(audio_context)
-			}
-			None => {
-				false
-			}
-		}
+		audio_backend::is_audio_context_running(self)
 	}
 }
 
@@ -115,7 +109,7 @@ impl AudioManager {
 	// 오디오 컨텍스트 재개.
 	// - user gesture 전에는 아무것도 하지 않는다.
 	// - 웹: "suspended" 나 "interrupted" 일 때만 resume() 하고, 거부는 조용히 넘긴다. iOS 는 복원 뒤 시계를 확인한다.
-	// - 데스크탑: 소리 장치를 아직 열지 않았으면 연다. (멈춤 상태가 없어 그 밖에 할 일은 없다)
+	// - 데스크탑: 소리 장치를 아직 열지 않았으면 열고, 멈춰 두었으면 다시 돌린다.
 	//==============================================================================
 	pub fn resume_context(&self) {
 		resume_audio_manager_state(&self.state);
@@ -125,22 +119,14 @@ impl AudioManager {
 	// 오디오 플레이어 생성. (AudioContext 가 없으면 만든다. 만들지 못하면 소리 없는 플레이어)
 	//==============================================================================
 	pub fn create_audio_player(&self) -> AudioPlayer {
-		let mut state = self.state.borrow_mut();
-		let audio_context = state.ensure_audio_context();
-		let audio_player_backend = AudioPlayerBackend::create(audio_context);
-		let mut audio_player = AudioPlayer::new(audio_player_backend);
-		audio_player.set_audio_manager_state(self.state.clone());
-		audio_player
+		AudioPlayer::new(self, None)
 	}
 
 	//==============================================================================
 	// 오디오 버스 생성. (AudioContext 가 없으면 만든다. 만들지 못하면 소리 없는 버스)
 	//==============================================================================
 	pub fn create_audio_bus(&self) -> AudioBus {
-		let mut state = self.state.borrow_mut();
-		let audio_context = state.ensure_audio_context();
-		let audio_bus_backend = AudioBusBackend::create(audio_context);
-		AudioBus::new(audio_bus_backend, self.state.clone())
+		AudioBus::new(self)
 	}
 
 	//==============================================================================

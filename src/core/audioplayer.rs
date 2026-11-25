@@ -3,7 +3,13 @@
 // - 원본 core/audioplayer.js. AudioAsset 에 로드된 오디오 버퍼를 재생한다.
 // - 음량, 음소거, 루프, 재생 위치는 여기서 들고, 소리를 내는 일은 백엔드(platform/audio 의 AudioPlayerBackend)가 한다.
 //   원본의 GainNode 자리: 데스크탑은 플레이어마다 kira 믹서 하위 트랙 하나, 웹은 원본처럼 GainNode 하나.
-// - 만드는 곳은 AudioManager::create_audio_player() 다. AudioContext 가 없으면 아무 소리도 내지 않는 플레이어가 된다. (원본과 같다)
+// - 만드는 곳은 AudioManager::create_audio_player() 나 AudioPlayer::new(매니저, 내보낼 곳) 이다. AudioContext 가 없으면 아무 소리도 내지 않는 플레이어가 된다. (원본과 같다)
+//   new 는 원본 new AudioPlayer(audioContext, outputNode) 자리다. 첫 인자는 AudioContext 를 든 매니저이고(AudioContext 가 없으면 만든다),
+//   내보낼 곳(AudioOutputNode)은 웹이 &AudioNode(버스의 get_gain_node() 같은 것), 데스크탑이 kira 의 &mut TrackHandle(버스의 get_gain_node() 같은 것)이다. None 이면 출력이다.
+//     웹: AudioPlayer::new(&audio_manager, audio_bus.get_gain_node().as_deref())
+//     데스크탑: AudioPlayer::new(&audio_manager, audio_bus.get_gain_node().as_deref_mut())
+//   내보낼 곳을 직접 넘겨 만든 플레이어는 버스 손잡이를 들지 않는다. (버스가 버려지면 데스크탑은 그 아래 트랙도 같이 없어진다)
+// - play 는 원본처럼 AudioContext 가 멈춰 있으면 깨운 뒤 튼다. (웹은 resume() 을 기다렸다가, 데스크탑은 그 자리에서)
 // - 원본과 다른 점:
 //   애셋은 Rc<AudioAsset> 로 나눠 든다.
 //   플레이어를 버리면 재생 중인 소리도 멈춘다. (원본은 가비지 수거와 상관없이 소스 노드가 끝까지 운다)
@@ -14,8 +20,8 @@
 //   AudioBus::create_audio_player 로 만든 플레이어는 출력 대신 그 버스로 소리를 낸다. (원본 AudioPlayer 의 출력 노드 인자) 버스 손잡이를 하나 들어 버스를 살려 둔다.
 //==============================================================================
 use crate::core::audiobus::AudioBus;
-use crate::core::audiomanager::AudioManagerState;
-use crate::platform::audio::{AudioContext, AudioPlayerBackend};
+use crate::core::audiomanager::{AudioManager, AudioManagerState};
+use crate::platform::audio::{self as audio_backend, AudioContext, AudioOutputNode, AudioPlayerBackend};
 use std::cell::{Ref, RefCell};
 use crate::resource::audioasset::AudioAsset;
 use std::rc::Rc;
@@ -53,9 +59,24 @@ pub struct AudioPlayer {
 
 impl AudioPlayer {
 	//==============================================================================
-	// 생성. (AudioManager::create_audio_player 가 백엔드를 만들어 넘긴다)
+	// 생성. (원본 new AudioPlayer(audioContext, outputNode), 매니저의 AudioContext 가 없으면 만든다, 내보낼 곳이 None 이면 출력)
 	//==============================================================================
-	pub(crate) fn new(audio_player_backend: AudioPlayerBackend) -> AudioPlayer {
+	pub fn new(audio_manager: &AudioManager, output_node: Option<AudioOutputNode<'_>>) -> AudioPlayer {
+		let audio_manager_state = audio_manager.get_shared_state();
+		let audio_player_backend = {
+			let mut state = audio_manager_state.borrow_mut();
+			state.ensure_audio_context();
+			AudioPlayerBackend::create(&mut state, output_node)
+		};
+		let mut audio_player = AudioPlayer::from_backend(audio_player_backend);
+		audio_player.set_audio_manager_state(audio_manager_state);
+		audio_player
+	}
+
+	//==============================================================================
+	// 만든 백엔드로 생성. (AudioBus::create_audio_player 와 시험이 쓴다)
+	//==============================================================================
+	pub(crate) fn from_backend(audio_player_backend: AudioPlayerBackend) -> AudioPlayer {
 		AudioPlayer {
 			audio_player_backend,
 			audio_manager_state: None,
@@ -70,7 +91,7 @@ impl AudioPlayer {
 
 	//==============================================================================
 	// 재생. (재생 중이면 멈추고 재생 위치부터 다시 튼다)
-	// - 웹: 오디오 컨텍스트가 일시 중단돼 있으면 재개한 뒤에 튼다.
+	// - 오디오 컨텍스트가 일시 중단돼 있으면 재개한 뒤에 튼다. (웹은 resume() 을 기다렸다가, 데스크탑은 그 자리에서)
 	//==============================================================================
 	pub fn play(&mut self, is_loop: bool) {
 		if !self.audio_player_backend.is_available() {
@@ -95,6 +116,11 @@ impl AudioPlayer {
 
 		// 재생 중일 경우 정지.
 		self.audio_player_backend.stop_source();
+
+		// 오디오 컨텍스트가 일시 중단된 경우 재개.
+		if let Some(audio_manager_state) = &self.audio_manager_state {
+			audio_backend::resume_audio_context_before_playback(audio_manager_state);
+		}
 
 		// 내부 재생 시작.
 		self.is_loop = is_loop;
@@ -265,7 +291,7 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn player_without_context_keeps_volume_only() {
-		let mut audio_player = AudioPlayer::new(AudioPlayerBackend::create(None));
+		let mut audio_player = AudioPlayer::from_backend(AudioPlayerBackend::create_silent());
 		audio_player.set_volume(0.25);
 		assert_eq!(audio_player.get_volume(), 0.25);
 		audio_player.mute();

@@ -46,8 +46,8 @@ winit = "0.30"
 glutin = "0.32"
 glutin-winit = "0.5"
 raw-window-handle = "0.6"
-# 소리. (믹서 트랙, 정적 소리. 기본 기능을 끄고 cpal 출력과 ogg(vorbis), mp3, wav(pcm) 해석만 켠다)
-kira = { version = "0.12", default-features = false, features = ["cpal", "cpal-realtime", "ogg", "vorbis", "mp3", "wav", "pcm"] }
+# 소리. (믹서 트랙, 정적 소리. 기본 기능을 끄고 cpal 출력과 ogg(vorbis), mp3, wav(pcm), flac, m4a(isomp4 와 aac) 해석만 켠다. 웹은 브라우저가 이 꼴들을 푼다)
+kira = { version = "0.12", default-features = false, features = ["cpal", "cpal-realtime", "ogg", "vorbis", "mp3", "wav", "pcm", "flac", "isomp4", "aac"] }
 # 낱말 나누기. (공백 없이 쓰는 한중일은 사전, 태국어 같은 동남아 글자는 LSTM 으로 낱말 사이를 찾는다. 웹은 원본처럼 브라우저 Intl.Segmenter 를 쓴다)
 icu_segmenter = "2"
 # 시스템 클립보드. (입력 필드의 복사, 잘라내기, 붙여넣기. winit 에 클립보드가 없다. 그림 기능은 끈다)

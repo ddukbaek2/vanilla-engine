@@ -151,7 +151,7 @@ mod tests {
 	fn create_silent_pool(voice_count: usize) -> SoundEffectPool {
 		let mut player_list = Vec::new();
 		for _ in 0..voice_count {
-			player_list.push(AudioPlayer::new(AudioPlayerBackend::create(None)));
+			player_list.push(AudioPlayer::from_backend(AudioPlayerBackend::create_silent()));
 		}
 		SoundEffectPool::create_from_player_list(player_list)
 	}

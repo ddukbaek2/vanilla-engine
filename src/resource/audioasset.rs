@@ -2,7 +2,7 @@
 // 오디오 애셋.
 // - 원본 resource/audioasset.js. 소리 파일을 디코딩한 오디오 버퍼를 들고 있다.
 // - 오디오 버퍼 자리는 백엔드가 채운다. (platform/audio 의 AudioBuffer)
-//   데스크탑: kira 의 StaticSoundData. (ogg vorbis, mp3, wav 를 symphonia 로 디코딩한다)
+//   데스크탑: kira 의 StaticSoundData. (ogg vorbis, mp3, wav, flac, m4a(aac) 를 symphonia 로 디코딩한다)
 //   웹: 원본과 같은 WebAudio AudioBuffer. (OfflineAudioContext 로 디코딩한다, 없으면 잠시 쓰는 AudioContext)
 // - 읽기:
 //   데스크탑은 load / load_from_bytes 가 그 자리에서 파일을 읽고 디코딩한 뒤 돌아온다. 실패하면 Err.
