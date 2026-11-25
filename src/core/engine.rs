@@ -116,12 +116,14 @@ pub struct EngineConfiguration {
 	pub resume_audio_on_touch_end: bool,
 	// 웹에서 애셋 주소 앞에 붙일 것. (비우면 페이지 기준 상대 주소. 데스크탑은 asset_directory_paths 를 쓴다)
 	pub asset_base_url: String,
-	// 창 크기가 바뀌면 캔버스를 창에 맞춘다. (웹, 끄면 페이지가 정한 캔버스 크기를 읽는다. 원본처럼 기본은 끔,
-	// 데스크탑은 창이 곧 캔버스라 늘 맞춘다)
+	// 창 크기가 바뀌면 캔버스를 창에 맞춘다. (원본처럼 기본은 끔. 켜면 visualViewport 크기에 맞추고 캔버스 비 상한을 건다. 끄면 웹은 페이지가 정한 캔버스 크기를 읽는다)
+	// 데스크탑 창은 캔버스가 창을 가득 채운 페이지와 같아, 끄면 창 크기 그대로이고 화면 키보드에 줄지 않으며 캔버스 비 상한도 걸지 않는다.
 	pub auto_resize_on_window_resize: bool,
-	// 프레임이 끝난 뒤에도 그린 것을 캔버스에 남긴다. (웹 WebGL 컨텍스트 옵션, 캔버스 위에 후처리를 얹는 페이지가 읽는다, 데스크탑은 쓰지 않는다)
+	// 프레임이 끝난 뒤에도 그린 것을 캔버스에 남긴다. (원본 WebGL 컨텍스트 옵션 preserveDrawingBuffer, 켜면 프레임 첫머리에 색을 비우지 않아 지난 프레임 그림 위에 그린다.
+	// 웹은 컨텍스트 옵션으로 넘기고, 데스크탑은 다 그린 프레임을 떠 두었다가 다음 프레임 첫머리에 되그린다. platform/desktop/preserveddrawingbuffer.rs)
 	pub preserve_drawing_buffer: bool,
-	// 화면 키보드: 글자 입력칸이 포커스된 동안 가로가 같고 세로만 줄었으면 크기를 그대로 둔다. (웹, 데스크탑은 화면 키보드가 없다)
+	// 화면 키보드: 글자 입력칸이 포커스된 동안 가로가 같고 세로만 줄었으면 크기를 그대로 둔다. (auto_resize_on_window_resize 일 때,
+	// 데스크탑은 크롬 윈도우처럼 터치 키보드가 visualViewport 를 줄인다. 맥과 리눅스는 크롬처럼 줄지 않는다)
 	pub ignore_virtual_keyboard_resize: bool,
 	// 캔버스의 가로세로 비 상한. (창이 그보다 길쭉하면 캔버스를 줄여 창의 가운데에 둔다, 0 이면 제한 없음)
 	pub max_canvas_aspect_ratio: f32,

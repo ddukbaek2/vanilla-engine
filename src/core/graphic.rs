@@ -921,6 +921,8 @@ pub struct Graphic {
 	bound_backdrop_texture: Cell<Option<GlTexture>>,
 	// 지금 프레임버퍼에 맞는 색 쓰기 마스크를 걸었는지. (apply_color_mask)
 	is_color_mask_known: Cell<bool>,
+	// 프레임이 끝난 뒤에도 그린 것을 남기는지. (원본 생성 인자 preserveDrawingBuffer, 켜면 프레임 첫머리에 색을 비우지 않는다)
+	is_drawing_buffer_preserved: bool,
 }
 
 //==============================================================================
@@ -941,9 +943,9 @@ impl Drop for ExternalPassGuard<'_> {
 
 impl Graphic {
 	//==============================================================================
-	// 생성.
+	// 생성. (preserve_drawing_buffer 는 원본 생성 인자 preserveDrawingBuffer, 엔진 설정의 같은 이름 값을 넘긴다)
 	//==============================================================================
-	pub fn new(gl: glow::Context) -> Result<Graphic, String> {
+	pub fn new(gl: glow::Context, preserve_drawing_buffer: bool) -> Result<Graphic, String> {
 		// 셰이더 프로그램.
 		let shader_program = ShaderProgram::new(&gl, VERTEXSHADER_SOURCE, FRAGMENTSHADER_SOURCE)?;
 
@@ -1074,14 +1076,23 @@ impl Graphic {
 			bound_texture: Cell::new(None),
 			bound_backdrop_texture: Cell::new(None),
 			is_color_mask_known: Cell::new(false),
+			is_drawing_buffer_preserved: preserve_drawing_buffer,
 		})
+	}
+
+	//==============================================================================
+	// 프레임이 끝난 뒤에도 그린 것을 남기는지. (원본 preserveDrawingBuffer)
+	//==============================================================================
+	pub fn is_drawing_buffer_preserved(&self) -> bool {
+		self.is_drawing_buffer_preserved
 	}
 
 	//==============================================================================
 	// 설정 반영. (매 프레임 시작 시 엔진이 호출)
 	// - 드로잉 버퍼 크기 변화 감지 및 뷰포트/프로젝션 갱신.
 	// - 프레임 시작 기준 상태로 리셋.
-	// - 브라우저는 preserveDrawingBuffer 가 꺼져 있으면 프레임마다 화면을 비워 준다. 창에서는 직접 비운다.
+	// - 브라우저는 preserveDrawingBuffer 가 꺼져 있으면 화면에 낸 뒤 드로잉 버퍼를 비워 준다. 창은 화면을 넘긴 뒤의 뒷 버퍼가 정해져 있지 않아 여기서 직접 비운다.
+	//   켜져 있으면 원본처럼 색을 비우지 않는다. (원본 applySettings 는 스텐실만 비운다. 지난 프레임 그림 위에 그리고, 데스크탑은 플랫폼이 지난 프레임 그림을 되살려 둔다)
 	//==============================================================================
 	pub fn apply_settings(&mut self, drawing_buffer_width: i32, drawing_buffer_height: i32) {
 		self.frame_number += 1;
@@ -1128,9 +1139,14 @@ impl Graphic {
 				self.gl.disable(glow::STENCIL_TEST);
 			}
 			self.gl.color_mask(true, true, true, true);
-			self.gl.clear_color(0.0, 0.0, 0.0, 1.0);
 			self.gl.clear_stencil(0);
-			self.gl.clear(glow::COLOR_BUFFER_BIT | glow::STENCIL_BUFFER_BIT);
+			if self.is_drawing_buffer_preserved {
+				self.gl.clear(glow::STENCIL_BUFFER_BIT);
+			}
+			else {
+				self.gl.clear_color(0.0, 0.0, 0.0, 1.0);
+				self.gl.clear(glow::COLOR_BUFFER_BIT | glow::STENCIL_BUFFER_BIT);
+			}
 		}
 	}
 

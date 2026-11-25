@@ -9,6 +9,7 @@
 //   save_capture_file(검증용 화면 저장, 데스크탑은 파일, 웹은 내려받기)
 // - 웹만 is_gl_binding_present(GL 의 묶인 것이 있는지, glow 웹이 null 을 읽으면 패닉해서)를 낸다. (core::graphic 의 read_*_binding 이 쓴다)
 // - 맥만 vibrate_gamepads / release_disconnected_gamepad_haptics(게임패드 진동, desktop/gamepadhaptics.rs)를 낸다.
+// - 데스크탑만 desktop::read_heap_usage(시스템 할당자의 힙 사용량, 개발자 도구의 메모리 칸)를 낸다. (웹은 원본처럼 performance.memory 를 읽는다)
 // - 안드로이드, iOS 는 여기에 모듈을 더한다. (아직 없음)
 //==============================================================================
 // 오디오 백엔드. (데스크탑 kira, 웹 WebAudio. 두 갈래를 안에서 고른다)

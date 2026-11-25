@@ -2,7 +2,9 @@
 // 플랫폼 정보. (원본 base/platform.js)
 // - 원본은 navigator.user_agent 를 보고 플랫폼과 브라우저를 고른다.
 // - 러스트 판은 웹(wasm32)에서는 원본과 같은 규칙으로 user_agent 를 보고, 데스크탑에서는 빌드 대상 OS 를 쓴다.
-//   데스크탑의 브라우저는 unknown 이다. 리눅스는 스팀덱이면 SteamDeck 이다. 스팀이 스팀덱에서 띄울 때 넣는 환경 변수 SteamDeck=1
+//   데스크탑의 브라우저는 Chrome 이다. 데스크탑 판은 크롬 위에서 도는 원본과 같은 결과를 내도록 맞췄고(글꼴과 글자 너비, 주된 손 판정, 페이지 이벤트,
+//   세이프 에어리어, 화면 키보드), 원본은 이 이름을 개발자 도구와 통계 글에 보이기만 하므로, 게임 코드의 브라우저 분기도 크롬 갈래로 가야 같은 결과다.
+//   리눅스는 스팀덱이면 SteamDeck 이다. 스팀이 스팀덱에서 띄울 때 넣는 환경 변수 SteamDeck=1
 //   (밸브 Proton 실행 스크립트가 이것으로 스팀덱을 가린다), 또는 밸브 SteamOS 의 jupiter-hw-support 처럼
 //   /sys/class/dmi/id/board_vendor 가 Valve 이고 board_name 이 Jupiter(LCD) 나 Galileo(OLED) 이면 스팀덱으로 본다.
 // - 원본의 getOrAddCanvas 는 platform/web.rs 가 엔진 설정의 캔버스 id 로 한다.
@@ -10,7 +12,7 @@
 //   엔진이 애셋으로 읽은 파일(애셋 바이트 읽기, Engine::load_image, 오디오 파일)을 읽은 차례로 든다. 종류는 "file", 전송량과 푼 크기는 둘 다 파일 바이트 수다.
 //   (기본 글꼴과 대체 글꼴처럼 시스템에서 읽는 글꼴은 원본의 시스템 글꼴처럼 들지 않는다)
 //   옛 이름의 오타 get_resouce_usage 는 같은 함수를 부르는 별칭으로 남긴다. (원본도 같다)
-// - get_safe_area_rect: 원본은 캔버스(없으면 창)의 크기를 읽는다. 러스트 판은 문서 객체가 없어 그 크기를 받는다. 데스크탑의 인셋은 0 이다.
+// - get_safe_area_rect: 원본은 캔버스(없으면 창)의 크기를 읽는다. 러스트 판은 문서 객체가 없어 그 크기를 받는다. 데스크탑의 인셋은 크롬 데스크탑처럼 0 이다.
 // - is_coarse_pointer: 원본처럼 CSS pointer: coarse. 데스크탑은 크로미엄의 판정을 옮겼다. (윈도우는 태블릿 모드나 마우스 없는 터치 기기, 리눅스는 마우스와 터치패드 없이
 //   터치스크린만 있을 때 참, 맥은 늘 거짓. platform/desktop.rs)
 // - is_desktop_web: 원본은 부를 때마다 플랫폼 정보를 새로 읽는다. 러스트 판은 만들 때 읽은 것을 쓴다. (user_agent 는 바뀌지 않는다)
@@ -148,7 +150,7 @@ impl Platform {
 		#[cfg(not(target_arch = "wasm32"))]
 		{
 			self.platform_name = detect_native_platform_type();
-			self.browser_name = BrowserType::Unknown;
+			self.browser_name = BrowserType::Chrome;
 			self.is_mobile = matches!(self.platform_name, PlatformType::Android | PlatformType::IOs | PlatformType::IPadOs);
 		}
 		(self.platform_name, self.browser_name)
@@ -530,10 +532,12 @@ mod tests {
 
 	//==============================================================================
 	// 세이프 에어리어 사각형은 받은 크기에서 인셋을 뺀 것이다. (데스크탑 인셋 0) 데스크탑 리소스 사용량은 엔진이 읽은 파일이다.
+	// 데스크탑의 브라우저는 크롬 위의 원본과 같은 갈래로 가게 Chrome 이다.
 	//==============================================================================
 	#[test]
 	fn safe_area_rect_and_resource_usage() {
 		let platform = Platform::new();
+		assert_eq!(platform.get_browser_name(), BrowserType::Chrome);
 		assert_eq!(platform.get_safe_area_rect(Vector2::create(800.0, 600.0)), Rect::create(0.0, 0.0, 800.0, 600.0));
 		assert!(!platform.is_coarse_pointer());
 		assert_eq!(platform.get_resource_usage(), ResourceUsage::default());
