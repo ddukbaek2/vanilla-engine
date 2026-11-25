@@ -7,7 +7,8 @@
 //   AudioBus 하나 = 출력에 이은 GainNode. (AudioGainNode, 원본 getGainNode) 버스로 만든 플레이어는 버스 손잡이를 들고 있어,
 //   원본 WebAudio 처럼 이어진 플레이어가 있는 동안 버스가 살아 있다. 손잡이가 모두 없어지면 노드를 뺀다.
 // - 컨텍스트 멈춤(SoundSystem 이 음소거 동안 부른다): 믹서가 그리기를 멈춰 소리와 시계가 그 자리에서 선다. (원본 AudioContext.suspend) resume 이 다시 돌린다.
-// - 컨텍스트 시계(get_audio_context_time)는 그린 프레임 수 / 표본율이다. (원본 currentTime, 128 프레임 퀀텀마다 오른다)
+// - 컨텍스트 시계(get_audio_context_time)는 그린 시간이다. (원본 currentTime, 128 프레임 퀀텀마다 128 / 표본율 초씩 오른다)
+// - 스트림은 관리 스레드가 든다. 장치가 빠지면(맥이 아니면 기본 장치가 바뀌어도) 같은 믹서로 기본 장치를 다시 연다. (원본 크롬도 기본 장치를 따라간다)
 // - AudioBuffer 자리: 푼 소리를 Arc 로 든다. 복제는 값싸다. 해석은 decode 가 원본의 크롬 decodeAudioData 와 같게 한다.
 //   (webm, ogg 의 Opus 와 Vorbis, mp3, wav, flac, m4a 와 aac 의 AAC. 앞뒤 다듬기, 44100Hz, WebAudio 스피커 규칙으로 내린 1 채널이나 2 채널)
 // - 음량, 좌우, 정지는 다음 렌더 퀀텀부터 바로 바뀐다. 재생 빠르기는 다음 재생부터다. (원본과 같다)
@@ -24,14 +25,15 @@ use std::cell::{Cell, RefCell};
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::mpsc::{channel, Sender};
+use std::sync::mpsc::channel;
+use std::sync::mpsc::Sender;
 use std::sync::Arc;
 
 //==============================================================================
 // 공유 오디오 컨텍스트. (원본 AudioContext 자리, 장치 스트림과 믹서로 가는 길)
 //==============================================================================
 pub struct AudioContext {
-	_stream: cpal::Stream,
+	_stream_manager: StreamManager,
 	mixer_link: Rc<MixerLink>,
 }
 
@@ -40,7 +42,7 @@ impl AudioContext {
 	// 표본율. (원본 audioContext.sampleRate, 장치의 표본율)
 	//==============================================================================
 	pub fn sample_rate(&self) -> f32 {
-		self.mixer_link.sample_rate as f32
+		self.mixer_link.shared.get_sample_rate() as f32
 	}
 
 	//==============================================================================
@@ -125,7 +127,6 @@ const CENTS_PER_OCTAVE: f64 = 1200.0;
 struct MixerLink {
 	command_sender: Sender<MixerCommand>,
 	shared: Arc<MixerShared>,
-	sample_rate: f64,
 	next_node_id: Cell<u64>,
 }
 
@@ -141,7 +142,7 @@ impl MixerLink {
 	}
 
 	fn get_current_time(&self) -> f64 {
-		self.shared.rendered_frame_count.load(Ordering::Acquire) as f64 / self.sample_rate
+		self.shared.get_rendered_seconds()
 	}
 }
 
@@ -175,12 +176,19 @@ pub fn create_audio_context(audio_platform_state: &mut AudioPlatformState) -> Op
 	if audio_platform_state.is_audio_context_failed {
 		return None;
 	}
-	match open_output_stream() {
-		Ok((stream, mixer_link)) => {
+	let (command_sender, command_receiver) = channel();
+	let shared = Arc::new(MixerShared::new(0.0));
+	match StreamManager::start(command_receiver, shared.clone()) {
+		Ok(stream_manager) => {
+			let mixer_link = Rc::new(MixerLink {
+				command_sender,
+				shared,
+				next_node_id: Cell::new(0),
+			});
 			audio_platform_state.is_audio_context_suspended = false;
 			audio_platform_state.mixer_link = Some(mixer_link.clone());
 			Some(AudioContext {
-				_stream: stream,
+				_stream_manager: stream_manager,
 				mixer_link,
 			})
 		}
@@ -192,50 +200,163 @@ pub fn create_audio_context(audio_platform_state: &mut AudioPlatformState) -> Op
 	}
 }
 
+// 장치를 살피는 간격. (빠지거나 바뀐 장치로 스트림을 다시 연다)
+const STREAM_CHECK_INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
+
 //==============================================================================
-// 출력 스트림 열기. (장치의 표본 꼴마다 실수 믹서 출력을 그 꼴로 바꿔 낸다)
+// 출력 스트림 관리자. (스트림을 든 스레드, 장치가 빠지면(그리고 맥이 아니면 기본 장치가 바뀌면) 같은 믹서로 스트림을 다시 연다)
+// - 원본 크롬도 기본 장치를 따라간다. 컨텍스트를 버리면 스레드가 스트림을 닫고 끝난다.
 //==============================================================================
-fn open_output_stream() -> Result<(cpal::Stream, Rc<MixerLink>), String> {
+struct StreamManager {
+	should_stop: Arc<AtomicBool>,
+}
+
+impl StreamManager {
+	//==============================================================================
+	// 시작. (스레드에서 첫 스트림을 열고 그 결과를 기다린다)
+	//==============================================================================
+	fn start(command_receiver: std::sync::mpsc::Receiver<MixerCommand>, shared: Arc<MixerShared>) -> Result<StreamManager, String> {
+		let should_stop = Arc::new(AtomicBool::new(false));
+		let thread_should_stop = should_stop.clone();
+		let (result_sender, result_receiver) = channel::<Result<(), String>>();
+		std::thread::Builder::new().name(String::from("vanilla-audio-stream")).spawn(move || {
+			let renderer = Arc::new(std::sync::Mutex::new(MixerRenderer::new(command_receiver, shared, 0.0)));
+			let needs_restart = Arc::new(AtomicBool::new(false));
+			let mut running_stream = match open_output_stream(&renderer, &needs_restart) {
+				Ok(running_stream) => {
+					let _ = result_sender.send(Ok(()));
+					running_stream
+				}
+				Err(error) => {
+					let _ = result_sender.send(Err(error));
+					return;
+				}
+			};
+			loop {
+				std::thread::sleep(STREAM_CHECK_INTERVAL);
+				if thread_should_stop.load(Ordering::Acquire) {
+					break;
+				}
+				let should_reopen = needs_restart.swap(false, Ordering::AcqRel) || has_default_device_changed(&running_stream);
+				if should_reopen {
+					drop(running_stream);
+					match open_output_stream(&renderer, &needs_restart) {
+						Ok(reopened_stream) => {
+							running_stream = reopened_stream;
+						}
+						Err(error) => {
+							eprintln!("AudioManager: 소리 장치를 다시 열지 못했습니다. ({})", error);
+							// 다음 간격에 다시 해 본다.
+							needs_restart.store(true, Ordering::Release);
+							running_stream = RunningStream::empty();
+						}
+					}
+				}
+			}
+		}).map_err(|error| format!("{}", error))?;
+		result_receiver.recv().map_err(|error| format!("{}", error))??;
+		Ok(StreamManager {
+			should_stop,
+		})
+	}
+}
+
+impl Drop for StreamManager {
+	fn drop(&mut self) {
+		self.should_stop.store(true, Ordering::Release);
+	}
+}
+
+//==============================================================================
+// 열린 스트림. (장치 이름표와 표본율, 스트림을 버리면 닫힌다)
+//==============================================================================
+struct RunningStream {
+	_stream: Option<cpal::Stream>,
+	#[cfg_attr(target_os = "macos", allow(dead_code))]
+	device_id: String,
+	#[cfg_attr(target_os = "macos", allow(dead_code))]
+	sample_rate: u32,
+}
+
+impl RunningStream {
+	fn empty() -> RunningStream {
+		RunningStream {
+			_stream: None,
+			device_id: String::new(),
+			sample_rate: 0,
+		}
+	}
+}
+
+//==============================================================================
+// 기본 출력 장치가 바뀌었는지. (이름표나 표본율, 맥은 재생 중에 장치를 물으면 소리가 튀어 묻지 않고 빠짐 오류로만 다시 연다)
+//==============================================================================
+#[cfg(not(target_os = "macos"))]
+fn has_default_device_changed(running_stream: &RunningStream) -> bool {
+	let Some(device) = cpal::default_host().default_output_device() else {
+		return false;
+	};
+	let Ok(supported_config) = device.default_output_config() else {
+		return false;
+	};
+	read_device_id(&device) != running_stream.device_id || supported_config.sample_rate() != running_stream.sample_rate
+}
+
+#[cfg(target_os = "macos")]
+fn has_default_device_changed(_running_stream: &RunningStream) -> bool {
+	false
+}
+
+fn read_device_id(device: &cpal::Device) -> String {
+	device.id().map(|device_id| format!("{}", device_id)).unwrap_or_default()
+}
+
+//==============================================================================
+// 기본 출력 장치를 열어 스트림 짓기. (장치의 표본 꼴마다 실수 믹서 출력을 그 꼴로 바꿔 낸다, 표본율이 바뀌었으면 믹서에 알린다)
+//==============================================================================
+fn open_output_stream(renderer: &Arc<std::sync::Mutex<MixerRenderer>>, needs_restart: &Arc<AtomicBool>) -> Result<RunningStream, String> {
 	let host = cpal::default_host();
 	let device = host.default_output_device().ok_or_else(|| String::from("기본 출력 장치가 없습니다"))?;
 	let supported_config = device.default_output_config().map_err(|error| format!("{}", error))?;
 	let sample_format = supported_config.sample_format();
 	let stream_config = supported_config.config();
-	let sample_rate = stream_config.sample_rate as f64;
-	let (command_sender, command_receiver) = channel();
-	let shared = Arc::new(MixerShared { rendered_frame_count: AtomicU64::new(0) });
-	let renderer = MixerRenderer::new(command_receiver, shared.clone(), sample_rate);
+	let sample_rate = stream_config.sample_rate;
+	if let Ok(mut renderer) = renderer.lock() {
+		renderer.set_sample_rate(sample_rate as f64);
+	}
 	let stream = match sample_format {
-		cpal::SampleFormat::F32 => build_output_stream::<f32>(&device, stream_config, renderer),
-		cpal::SampleFormat::F64 => build_output_stream::<f64>(&device, stream_config, renderer),
-		cpal::SampleFormat::I16 => build_output_stream::<i16>(&device, stream_config, renderer),
-		cpal::SampleFormat::I32 => build_output_stream::<i32>(&device, stream_config, renderer),
-		cpal::SampleFormat::U16 => build_output_stream::<u16>(&device, stream_config, renderer),
-		cpal::SampleFormat::U8 => build_output_stream::<u8>(&device, stream_config, renderer),
-		cpal::SampleFormat::I8 => build_output_stream::<i8>(&device, stream_config, renderer),
+		cpal::SampleFormat::F32 => build_output_stream::<f32>(&device, stream_config, renderer, needs_restart),
+		cpal::SampleFormat::F64 => build_output_stream::<f64>(&device, stream_config, renderer, needs_restart),
+		cpal::SampleFormat::I16 => build_output_stream::<i16>(&device, stream_config, renderer, needs_restart),
+		cpal::SampleFormat::I32 => build_output_stream::<i32>(&device, stream_config, renderer, needs_restart),
+		cpal::SampleFormat::U16 => build_output_stream::<u16>(&device, stream_config, renderer, needs_restart),
+		cpal::SampleFormat::U8 => build_output_stream::<u8>(&device, stream_config, renderer, needs_restart),
+		cpal::SampleFormat::I8 => build_output_stream::<i8>(&device, stream_config, renderer, needs_restart),
 		other => {
 			return Err(format!("표본 꼴 {} 은 받지 않습니다", other));
 		}
 	}?;
 	stream.play().map_err(|error| format!("{}", error))?;
-	Ok((stream, Rc::new(MixerLink {
-		command_sender,
-		shared,
+	Ok(RunningStream {
+		_stream: Some(stream),
+		device_id: read_device_id(&device),
 		sample_rate,
-		next_node_id: Cell::new(0),
-	})))
+	})
 }
 
 //==============================================================================
-// 꼴 하나로 스트림 짓기. (믹서가 실수로 채운 것을 장치 꼴로 바꾼다, 오류는 한 번만 알린다)
+// 꼴 하나로 스트림 짓기. (믹서가 실수로 채운 것을 장치 꼴로 바꾼다. 장치가 빠지면 다시 열라고 알리고, 그 밖의 오류는 한 번만 알린다)
+// - 믹서는 스트림을 다시 열 때만 잠깐 잠긴다. 소리 스레드는 기다리지 않고 그 동안 0 을 낸다.
 //==============================================================================
-fn build_output_stream<T>(device: &cpal::Device, stream_config: cpal::StreamConfig, mut renderer: MixerRenderer) -> Result<cpal::Stream, String>
+fn build_output_stream<T>(device: &cpal::Device, stream_config: cpal::StreamConfig, renderer: &Arc<std::sync::Mutex<MixerRenderer>>, needs_restart: &Arc<AtomicBool>) -> Result<cpal::Stream, String>
 where
 	T: cpal::SizedSample + cpal::FromSample<f32>,
 {
 	let channel_count = stream_config.channels as usize;
 	let mut float_output: Vec<f32> = Vec::new();
 	let is_error_reported = Arc::new(AtomicBool::new(false));
+	let callback_renderer = renderer.clone();
+	let error_needs_restart = needs_restart.clone();
 	device.build_output_stream::<T, _, _>(
 		stream_config,
 		move |output: &mut [T], _: &cpal::OutputCallbackInfo| {
@@ -243,14 +364,28 @@ where
 				float_output.resize(output.len(), 0.0);
 			}
 			let float_slice = &mut float_output[..output.len()];
-			renderer.render_interleaved(float_slice, channel_count);
+			match callback_renderer.try_lock() {
+				Ok(mut renderer) => {
+					renderer.render_interleaved(float_slice, channel_count);
+				}
+				Err(_) => {
+					float_slice.fill(0.0);
+				}
+			}
 			for (sample, value) in output.iter_mut().zip(float_slice.iter()) {
 				*sample = T::from_sample(*value);
 			}
 		},
 		move |error| {
-			if !is_error_reported.swap(true, Ordering::Relaxed) {
-				eprintln!("AudioManager: 소리 장치 오류. ({})", error);
+			match error.kind() {
+				cpal::ErrorKind::DeviceNotAvailable | cpal::ErrorKind::StreamInvalidated => {
+					error_needs_restart.store(true, Ordering::Release);
+				}
+				_ => {
+					if !is_error_reported.swap(true, Ordering::Relaxed) {
+						eprintln!("AudioManager: 소리 장치 오류. ({})", error);
+					}
+				}
 			}
 		},
 		None,
@@ -592,8 +727,9 @@ pub fn play_beep_tone(state: &mut AudioManagerState, beep_envelope: &BeepEnvelop
 	let Some(mixer_link) = &state.platform_state.mixer_link else {
 		return;
 	};
-	let sample_list = render_beep_samples(beep_envelope, mixer_link.sample_rate);
-	let delay_frame_count = (beep_envelope.delay_seconds.max(0.0) * mixer_link.sample_rate).round() as u64;
+	let sample_rate = mixer_link.shared.get_sample_rate();
+	let sample_list = render_beep_samples(beep_envelope, sample_rate);
+	let delay_frame_count = (beep_envelope.delay_seconds.max(0.0) * sample_rate).round() as u64;
 	mixer_link.send(MixerCommand::PlayBeep { sample_list, delay_frame_count });
 }
 

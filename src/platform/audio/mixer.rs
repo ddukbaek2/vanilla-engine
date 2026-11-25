@@ -84,10 +84,40 @@ pub(crate) enum MixerCommand {
 }
 
 //==============================================================================
-// 소리 스레드와 나누는 값. (그린 프레임 수, 컨텍스트 시계)
+// 소리 스레드와 나누는 값. (컨텍스트 시계와 표본율)
+// - 시계는 퀀텀마다 128 / 표본율 초씩 더한 f64 의 비트다. (장치가 바뀌어 표본율이 달라져도 이어진다)
 //==============================================================================
 pub(crate) struct MixerShared {
-	pub(crate) rendered_frame_count: AtomicU64,
+	rendered_seconds_bits: AtomicU64,
+	sample_rate_bits: AtomicU64,
+}
+
+impl MixerShared {
+	pub(crate) fn new(sample_rate: f64) -> MixerShared {
+		MixerShared {
+			rendered_seconds_bits: AtomicU64::new(0f64.to_bits()),
+			sample_rate_bits: AtomicU64::new(sample_rate.to_bits()),
+		}
+	}
+
+	//==============================================================================
+	// 그린 시간. (초, 원본 currentTime)
+	//==============================================================================
+	pub(crate) fn get_rendered_seconds(&self) -> f64 {
+		f64::from_bits(self.rendered_seconds_bits.load(Ordering::Acquire))
+	}
+
+	//==============================================================================
+	// 표본율. (원본 sampleRate, 장치의 표본율)
+	//==============================================================================
+	pub(crate) fn get_sample_rate(&self) -> f64 {
+		f64::from_bits(self.sample_rate_bits.load(Ordering::Acquire))
+	}
+
+	fn add_rendered_seconds(&self, seconds: f64) {
+		let rendered_seconds = self.get_rendered_seconds() + seconds;
+		self.rendered_seconds_bits.store(rendered_seconds.to_bits(), Ordering::Release);
+	}
 }
 
 //==============================================================================
@@ -552,7 +582,15 @@ impl MixerRenderer {
 			}
 		}
 		self.beep_list.retain(|beep| beep.position < beep.sample_list.len());
-		self.shared.rendered_frame_count.fetch_add(RENDER_QUANTUM_FRAMES as u64, Ordering::Release);
+		self.shared.add_rendered_seconds(RENDER_QUANTUM_FRAMES as f64 / self.sample_rate);
+	}
+
+	//==============================================================================
+	// 장치가 바뀌어 표본율이 달라졌을 때. (새로 트는 소스부터 그 표본율로 빠르기를 셈한다)
+	//==============================================================================
+	pub(crate) fn set_sample_rate(&mut self, sample_rate: f64) {
+		self.sample_rate = sample_rate;
+		self.shared.sample_rate_bits.store(sample_rate.to_bits(), Ordering::Release);
 	}
 
 	//==============================================================================
@@ -615,7 +653,7 @@ mod tests {
 
 	fn create_renderer(sample_rate: f64) -> (std::sync::mpsc::Sender<MixerCommand>, MixerRenderer, Arc<MixerShared>) {
 		let (command_sender, command_receiver) = channel();
-		let shared = Arc::new(MixerShared { rendered_frame_count: AtomicU64::new(0) });
+		let shared = Arc::new(MixerShared::new(sample_rate));
 		(command_sender, MixerRenderer::new(command_receiver, shared.clone(), sample_rate), shared)
 	}
 
@@ -712,12 +750,13 @@ mod tests {
 		renderer.render_interleaved(&mut tail, 2);
 		assert_eq!(ended_generation.load(Ordering::Acquire), 1);
 		// 멈춘 동안은 0 을 내고 시계도 선다.
-		let frame_count = shared.rendered_frame_count.load(Ordering::Acquire);
+		let rendered_seconds = shared.get_rendered_seconds();
+		assert!((rendered_seconds - 6.0 * 128.0 / 44100.0).abs() < 1e-12);
 		command_sender.send(MixerCommand::Suspend).unwrap();
 		let mut silent = vec![1.0f32; 2 * 300];
 		renderer.render_interleaved(&mut silent, 2);
 		assert!(silent.iter().all(|sample| *sample == 0.0));
-		assert!(shared.rendered_frame_count.load(Ordering::Acquire) <= frame_count + RENDER_QUANTUM_FRAMES as u64);
+		assert_eq!(shared.get_rendered_seconds(), rendered_seconds);
 	}
 
 	//==============================================================================
