@@ -3,7 +3,7 @@
 // - 재질 색으로 칠하는 모형을 툰 3D 의 MeshBuilder 꼭짓점 배열로 읽는다. 텍스처 좌표와 재질 텍스처가 있으면 그것도 읽는다. (외계행성 광부 키우기에서 왔다)
 //   - 부품 하나가 노드 하나이고, 노드의 메시는 색마다 프리미티브 하나다. 꼭짓점은 위치와 노멀, 뼈대가 있으면 본 번호와 무게다.
 //   - 재질의 baseColorFactor 는 선형 색이라 sRGB 로 바꿔 담고, emissiveFactor 가 있으면 빛남으로 담는다. (emissiveTexture 가 있으면 빛남은 재질 범위로만 넘긴다)
-//   - TEXCOORD_0 이 있으면 uv_data 로 담는다. 프리미티브마다 재질 범위(ToonMaterialRange)를 담는다. (재질 이름, extras, 텍스처 그림 차례)
+//   - TEXCOORD_0 이 있으면 uv_data 로, TEXCOORD_1 이 있으면 uv1_data(2 번 UV, 천사 고리)로 담는다. 프리미티브마다 재질 범위(ToonMaterialRange)를 담는다. (재질 이름, extras, 텍스처 그림 차례)
 //     부품 안에서 칸을 갈라 칠할 때(강조색 칸, 표시판) 재질 이름이나 extras 로 고르고 ToonDrawOptions 의 index_start, index_count 로 그 칸만 그린다.
 //   - 그림은 read_glb_images 로 읽고 decode_glb_image 로 풀어 ToonRenderer::create_texture 에 넘긴다.
 //   - 재질 extras 의 outline 은 바깥선 껍데기(뒷면만 그림), basic 은 빛을 받지 않는 부품이다.
@@ -429,6 +429,7 @@ fn add_primitive(builder: &mut MeshBuilder, chunks: &GlbChunks, node: &Value, pr
 	};
 	let normals = read_accessor(chunks, normal_accessor);
 	let uvs = attributes["TEXCOORD_0"].as_u64().map(|uv_accessor| read_accessor(chunks, uv_accessor as usize));
+	let uvs1 = attributes["TEXCOORD_1"].as_u64().map(|uv_accessor| read_accessor(chunks, uv_accessor as usize));
 	let base_color = read_float_array(&material["pbrMetallicRoughness"]["baseColorFactor"], [1.0; 4]);
 	let color = [base_color[0].max(0.0).powf(1.0 / 2.2), base_color[1].max(0.0).powf(1.0 / 2.2), base_color[2].max(0.0).powf(1.0 / 2.2)];
 	// 빛남은 바탕색에 곱하는 세기로 담는다. (셰이더는 바탕색 x 세기를 더한다)
@@ -442,7 +443,7 @@ fn add_primitive(builder: &mut MeshBuilder, chunks: &GlbChunks, node: &Value, pr
 	}
 	let is_unlit = material["extras"]["basic"].as_bool() == Some(true);
 	let index_start = builder.get_index_count();
-	builder.add_triangles_with_uvs(&positions, &normals, &indices, part_matrix, color, glow, is_unlit, joints.as_deref(), weights.as_deref(), uvs.as_deref());
+	builder.add_triangles_with_uvs(&positions, &normals, &indices, part_matrix, color, glow, is_unlit, joints.as_deref(), weights.as_deref(), uvs.as_deref(), uvs1.as_deref());
 	builder.add_material_range(ToonMaterialRange {
 		name: String::from(material["name"].as_str().unwrap_or("")),
 		material_index: primitive["material"].as_u64().map(|material_index| material_index as usize),
