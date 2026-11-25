@@ -94,6 +94,15 @@ pub struct EngineConfiguration {
 	pub resume_audio_on_touch_end: bool,
 	// 웹에서 애셋 주소 앞에 붙일 것. (비우면 페이지 기준 상대 주소. 데스크탑은 asset_directory_paths 를 쓴다)
 	pub asset_base_url: String,
+	// 창 크기가 바뀌면 캔버스를 창에 맞춘다. (웹, 끄면 페이지가 정한 캔버스 크기를 읽는다. 원본 기본은 끔이지만 러스트 판은 지금까지처럼 켬,
+	// 데스크탑은 창이 곧 캔버스라 늘 맞춘다)
+	pub auto_resize_on_window_resize: bool,
+	// 프레임이 끝난 뒤에도 그린 것을 캔버스에 남긴다. (웹 WebGL 컨텍스트 옵션, 캔버스 위에 후처리를 얹는 페이지가 읽는다, 데스크탑은 쓰지 않는다)
+	pub preserve_drawing_buffer: bool,
+	// 화면 키보드: 글자 입력칸이 포커스된 동안 가로가 같고 세로만 줄었으면 크기를 그대로 둔다. (웹, 데스크탑은 화면 키보드가 없다)
+	pub ignore_virtual_keyboard_resize: bool,
+	// 캔버스의 가로세로 비 상한. (창이 그보다 길쭉하면 캔버스를 줄여 창의 가운데에 둔다, 0 이면 제한 없음)
+	pub max_canvas_aspect_ratio: f32,
 }
 
 impl EngineConfiguration {
@@ -130,6 +139,10 @@ impl EngineConfiguration {
 			default_font_url: String::new(),
 			resume_audio_on_touch_end: false,
 			asset_base_url: String::new(),
+			auto_resize_on_window_resize: true,
+			preserve_drawing_buffer: false,
+			ignore_virtual_keyboard_resize: false,
+			max_canvas_aspect_ratio: 0.0,
 		}
 	}
 }
@@ -381,6 +394,20 @@ impl Engine {
 	//==============================================================================
 	pub fn set_visible_cursor(&self, is_visible: bool) {
 		platform::set_cursor_visible(self.platform_window.as_ref(), is_visible);
+	}
+
+	//==============================================================================
+	// 캔버스. (원본 getCanvas, 웹은 그리는 캔버스 요소, 데스크탑은 창, 플랫폼이 붙이기 전에는 None)
+	//==============================================================================
+	pub fn get_canvas(&self) -> Option<&PlatformWindow> {
+		self.platform_window.as_ref()
+	}
+
+	//==============================================================================
+	// 글자 입력칸이 포커스되어 있는지. (원본 isTextInputFocused, 웹은 문서의 초점이 글자 input, textarea, contenteditable 이면 참, 데스크탑은 문서가 없어 거짓)
+	//==============================================================================
+	pub fn is_text_input_focused(&self) -> bool {
+		platform::is_text_field_focused()
 	}
 
 	//==============================================================================

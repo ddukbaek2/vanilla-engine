@@ -230,9 +230,11 @@ async fn fetch_bytes(asset_location: &str, is_no_cache: bool) -> Result<Vec<u8>,
 //==============================================================================
 struct WindowState {
 	canvas: web_sys::HtmlCanvasElement,
-	client_width: f64,
-	client_height: f64,
+	canvas_width: f64,
+	canvas_height: f64,
 	device_pixel_ratio: f64,
+	// 마지막으로 맞춘 창 안쪽 크기. (화면 키보드로 세로만 줄었는지 볼 때, 원본 appliedClientNativeSize)
+	applied_client_size: Option<(f64, f64)>,
 }
 
 //==============================================================================
@@ -791,7 +793,8 @@ impl WebApplication {
 
 		// 원본 graphic.js 와 같은 컨텍스트 옵션.
 		let context_options = js_sys::Object::new();
-		for (option_name, option_value) in [("alpha", false), ("stencil", true), ("premultipliedAlpha", true), ("preserveDrawingBuffer", false)] {
+		let preserve_drawing_buffer = self.engine_runner.engine.get_engine_configuration().preserve_drawing_buffer;
+		for (option_name, option_value) in [("alpha", false), ("stencil", true), ("premultipliedAlpha", true), ("preserveDrawingBuffer", preserve_drawing_buffer)] {
 			js_sys::Reflect::set(&context_options, &JsValue::from_str(option_name), &JsValue::from_bool(option_value)).map_err(describe_js_error)?;
 		}
 		let context = canvas
@@ -810,17 +813,20 @@ impl WebApplication {
 		});
 		self.window_state = Some(WindowState {
 			canvas,
-			client_width: 0.0,
-			client_height: 0.0,
+			canvas_width: 0.0,
+			canvas_height: 0.0,
 			device_pixel_ratio: 0.0,
+			applied_client_size: None,
 		});
 		self.resize_if_changed();
 		Ok(())
 	}
 
 	//==============================================================================
-	// 창 크기나 배율이 바뀌었으면 캔버스를 맞추고 뷰 영역을 다시 계산.
-	// (원본 view_manager.calculate_view_rect 처럼 캔버스를 창 안쪽에 꽉 채운다)
+	// 창 크기나 배율이 바뀌었으면 캔버스를 맞추고 뷰 영역을 다시 계산. (원본 engine.resize 와 view_manager.calculate_view_rect)
+	// - auto_resize_on_window_resize 면 캔버스를 창 안쪽(visualViewport 가 있으면 그것)에 맞춘다. 끄면 페이지가 정한 캔버스 크기를 읽는다.
+	// - ignore_virtual_keyboard_resize 면 글자 입력칸이 포커스된 동안 가로가 같고 세로만 줄었을 때 세로를 그대로 둔다.
+	// - max_canvas_aspect_ratio 가 있으면 창이 그보다 길쭉할 때 캔버스를 줄여 가운데에 둔다.
 	//==============================================================================
 	fn resize_if_changed(&mut self) {
 		let window = match web_sys::window() {
@@ -831,8 +837,10 @@ impl WebApplication {
 				return;
 			}
 		};
-		let client_width = window.inner_width().ok().and_then(|value| value.as_f64()).unwrap_or(0.0);
-		let client_height = window.inner_height().ok().and_then(|value| value.as_f64()).unwrap_or(0.0);
+		let engine_configuration = self.engine_runner.engine.get_engine_configuration();
+		let is_auto_resize = engine_configuration.auto_resize_on_window_resize;
+		let is_virtual_keyboard_ignored = engine_configuration.ignore_virtual_keyboard_resize;
+		let max_canvas_aspect_ratio = engine_configuration.max_canvas_aspect_ratio as f64;
 		let device_pixel_ratio = if window.device_pixel_ratio() > 0.0 {
 			window.device_pixel_ratio()
 		}
@@ -841,6 +849,7 @@ impl WebApplication {
 		};
 		// 렌더 배율 상한을 건다. (상한이 바뀌어도 이 값이 달라져 다시 맞춘다)
 		let device_pixel_ratio = self.engine_runner.engine.get_view_manager().limit_render_pixel_ratio(device_pixel_ratio as f32) as f64;
+		let is_text_field_focused = is_text_field_focused();
 		let window_state = match self.window_state.as_mut() {
 			Some(window_state) => {
 				window_state
@@ -849,17 +858,54 @@ impl WebApplication {
 				return;
 			}
 		};
-		if window_state.client_width == client_width && window_state.client_height == client_height && window_state.device_pixel_ratio == device_pixel_ratio {
+		let canvas_style = window_state.canvas.style();
+		let (canvas_width, canvas_height, canvas_left, canvas_top) = if is_auto_resize {
+			// 창 안쪽 크기. (visualViewport 가 있으면 그것, 모바일 주소 줄과 화면 키보드로 줄어든 실제 보이는 영역)
+			let visual_viewport = js_sys::Reflect::get(&window, &JsValue::from_str("visualViewport")).ok().filter(|value| !value.is_undefined() && !value.is_null());
+			let read_viewport_number = |name: &str| -> Option<f64> {
+				visual_viewport.as_ref().and_then(|visual_viewport| js_sys::Reflect::get(visual_viewport, &JsValue::from_str(name)).ok()).and_then(|value| value.as_f64())
+			};
+			let client_width = read_viewport_number("width").unwrap_or_else(|| window.inner_width().ok().and_then(|value| value.as_f64()).unwrap_or(0.0));
+			let mut client_height = read_viewport_number("height").unwrap_or_else(|| window.inner_height().ok().and_then(|value| value.as_f64()).unwrap_or(0.0));
+			if is_virtual_keyboard_ignored && is_text_field_focused {
+				if let Some((applied_client_width, applied_client_height)) = window_state.applied_client_size {
+					if (client_width - applied_client_width).abs() < 1.0 && client_height < applied_client_height {
+						client_height = applied_client_height;
+					}
+				}
+			}
+			window_state.applied_client_size = Some((client_width, client_height));
+			if max_canvas_aspect_ratio > 0.0 {
+				let canvas_width = client_width.min(client_height * max_canvas_aspect_ratio).floor();
+				let canvas_height = client_height.min(client_width * max_canvas_aspect_ratio).floor();
+				(canvas_width, canvas_height, Some(((client_width - canvas_width) * 0.5).floor()), Some(((client_height - canvas_height) * 0.5).floor()))
+			}
+			else {
+				(client_width, client_height, None, None)
+			}
+		}
+		else {
+			// 페이지가 정한 캔버스 크기. (원본 canvas.getBoundingClientRect)
+			let canvas_rect = window_state.canvas.get_bounding_client_rect();
+			(canvas_rect.width().round(), canvas_rect.height().round(), None, None)
+		};
+		if window_state.canvas_width == canvas_width && window_state.canvas_height == canvas_height && window_state.device_pixel_ratio == device_pixel_ratio {
 			return;
 		}
-		window_state.client_width = client_width;
-		window_state.client_height = client_height;
+		window_state.canvas_width = canvas_width;
+		window_state.canvas_height = canvas_height;
 		window_state.device_pixel_ratio = device_pixel_ratio;
-		let canvas_style = window_state.canvas.style();
-		let _ = canvas_style.set_property("width", &format!("{}px", client_width));
-		let _ = canvas_style.set_property("height", &format!("{}px", client_height));
-		let canvas_pixel_width = (client_width * device_pixel_ratio).round() as u32;
-		let canvas_pixel_height = (client_height * device_pixel_ratio).round() as u32;
+		if is_auto_resize {
+			let _ = canvas_style.set_property("width", &format!("{}px", canvas_width));
+			let _ = canvas_style.set_property("height", &format!("{}px", canvas_height));
+			// 비 상한이 없으면 가운데에 두던 여백을 지운다. (정한 적이 없으면 아무것도 바뀌지 않는다)
+			let margin_left = canvas_left.map(|canvas_left| format!("{}px", canvas_left)).unwrap_or_default();
+			let margin_top = canvas_top.map(|canvas_top| format!("{}px", canvas_top)).unwrap_or_default();
+			let _ = canvas_style.set_property("margin-left", &margin_left);
+			let _ = canvas_style.set_property("margin-top", &margin_top);
+		}
+		let canvas_pixel_width = (canvas_width * device_pixel_ratio).round() as u32;
+		let canvas_pixel_height = (canvas_height * device_pixel_ratio).round() as u32;
 		window_state.canvas.set_width(canvas_pixel_width);
 		window_state.canvas.set_height(canvas_pixel_height);
 		self.engine_runner.engine.get_view_manager_mut().calculate_view_rect(canvas_pixel_width, canvas_pixel_height, device_pixel_ratio as f32);

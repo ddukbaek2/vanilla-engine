@@ -13,6 +13,8 @@
 //   (맥과 리눅스의 단조 시계는 잠든 동안 멈춘다. 윈도우의 단조 시계는 잠든 동안에도 흐르는 것으로 알려져 있어 이 판정이 맞지 않을 수 있다, 짐작)
 // - 렌더 배율 상한(ViewManager.set_max_render_pixel_ratio): 그 배율로 줄인 크기로 그리고 프레임 끝에 창 크기로 늘인다. (desktop/renderscaler.rs)
 //   입력 좌표는 창의 배율로 논리 좌표로 바꾸므로 렌더 크기와 상관없다.
+// - 캔버스 비 상한(EngineConfiguration.max_canvas_aspect_ratio): 창이 그보다 길쭉하면 캔버스(그리는 영역)를 원본처럼 줄여 창 가운데에 두고 나머지는 검다.
+//   입력 좌표에서 캔버스의 왼쪽 위를 빼고, read_canvas_client_position 이 그 자리를 돌려준다.
 // - 페이지 주소의 쿼리 값(read_page_query_value)은 환경 변수 VANILLA_ 뒤에 이름을 대문자 뱀꼴로 붙인 것으로 읽는다. (safeArea → VANILLA_SAFE_AREA)
 //==============================================================================
 use crate::base::vector2::Vector2;
@@ -50,6 +52,11 @@ const WHEEL_LINE_PIXEL_SIZE: f32 = 40.0;
 // 두 프레임 사이에 벽시계가 단조 시계보다 이만큼 넘게 더 흐르면 시스템이 잠들었다 깬 것으로 본다. (초)
 const SYSTEM_SLEEP_GAP_SECONDS: f64 = 2.0;
 
+thread_local! {
+	// 창 안에서 캔버스의 왼쪽 위. (논리 좌표, 캔버스 비 상한으로 가운데에 둘 때만 0 이 아니다)
+	static CANVAS_CLIENT_POSITION: std::cell::Cell<Vector2> = const { std::cell::Cell::new(Vector2::create(0.0, 0.0)) };
+}
+
 //==============================================================================
 // 시작. (창을 닫거나 exit_application 을 부를 때까지 돌아오지 않는다)
 //==============================================================================
@@ -70,6 +77,7 @@ pub fn run(engine_runner: EngineRunner) -> Result<(), String> {
 		applied_max_render_pixel_ratio: 0.0,
 		render_scaler: None,
 		last_frame_clock: None,
+		canvas_physical_rect: [0, 0, 0, 0],
 	};
 	event_loop.run_app(&mut desktop_application).map_err(|error| format!("이벤트 루프 실행 실패: {}", error))?;
 	match desktop_application.fatal_error.take() {
@@ -183,10 +191,10 @@ fn convert_query_name_to_variable_name(name: &str) -> String {
 }
 
 //==============================================================================
-// 화면(client) 좌표에서 캔버스의 왼쪽 위. (데스크탑은 창 안쪽 전체가 캔버스라 창의 논리 좌표가 곧 client 좌표다, 늘 0)
+// 화면(client) 좌표에서 캔버스의 왼쪽 위. (데스크탑은 창의 논리 좌표가 client 좌표다, 캔버스 비 상한으로 가운데에 둘 때만 0 이 아니다)
 //==============================================================================
 pub fn read_canvas_client_position() -> Vector2 {
-	Vector2::zero()
+	CANVAS_CLIENT_POSITION.with(|canvas_client_position| canvas_client_position.get())
 }
 
 //==============================================================================
@@ -254,6 +262,8 @@ struct DesktopApplication {
 	render_scaler: Option<renderscaler::RenderScaler>,
 	// 지난 프레임의 단조 시계와 벽시계. (잠자기 판정)
 	last_frame_clock: Option<(Instant, SystemTime)>,
+	// 창 안의 캔버스 자리. (물리 픽셀 [왼쪽, 위, 가로, 세로], 위 왼쪽 원점)
+	canvas_physical_rect: [i32; 4],
 }
 
 impl DesktopApplication {
@@ -358,16 +368,25 @@ impl DesktopApplication {
 		if let (Some(width), Some(height)) = (NonZeroU32::new(physical_size.width), NonZeroU32::new(physical_size.height)) {
 			window_state.surface.resize(&window_state.context, width, height);
 		}
+		// 캔버스 비 상한이 있으면 원본처럼 캔버스를 줄여 창 가운데에 둔다. (논리 좌표, 내림)
+		let client_width = physical_size.width as f32 / scale_factor;
+		let client_height = physical_size.height as f32 / scale_factor;
+		let max_canvas_aspect_ratio = self.engine_runner.engine.get_engine_configuration().max_canvas_aspect_ratio;
+		let (canvas_left, canvas_top, canvas_width, canvas_height) = if max_canvas_aspect_ratio > 0.0 {
+			let canvas_width = client_width.min(client_height * max_canvas_aspect_ratio).floor();
+			let canvas_height = client_height.min(client_width * max_canvas_aspect_ratio).floor();
+			(((client_width - canvas_width) * 0.5).floor(), ((client_height - canvas_height) * 0.5).floor(), canvas_width, canvas_height)
+		}
+		else {
+			(0.0, 0.0, client_width, client_height)
+		};
+		CANVAS_CLIENT_POSITION.with(|canvas_client_position| canvas_client_position.set(Vector2::create(canvas_left, canvas_top)));
+		self.canvas_physical_rect = [(canvas_left * scale_factor).round() as i32, (canvas_top * scale_factor).round() as i32, (canvas_width * scale_factor).round() as i32, (canvas_height * scale_factor).round() as i32];
 		// 렌더 배율 상한을 넘으면 그 배율로 줄인 크기로 그린다. (웹 캔버스 드로잉 버퍼와 같은 셈)
 		let view_manager = self.engine_runner.engine.get_view_manager_mut();
 		let render_pixel_ratio = view_manager.limit_render_pixel_ratio(scale_factor);
-		let (render_width, render_height) = if render_pixel_ratio < scale_factor {
-			let render_scale = render_pixel_ratio / scale_factor;
-			(((physical_size.width as f32 * render_scale).round() as u32).max(1), ((physical_size.height as f32 * render_scale).round() as u32).max(1))
-		}
-		else {
-			(physical_size.width, physical_size.height)
-		};
+		let render_width = ((canvas_width * render_pixel_ratio).round() as u32).max(1);
+		let render_height = ((canvas_height * render_pixel_ratio).round() as u32).max(1);
 		view_manager.calculate_view_rect(render_width, render_height, render_pixel_ratio);
 		self.applied_max_render_pixel_ratio = view_manager.get_max_render_pixel_ratio();
 		self.window_scale_factor = scale_factor;
@@ -413,8 +432,9 @@ impl DesktopApplication {
 	//==============================================================================
 	fn update_input_position(&mut self, physical_x: f64, physical_y: f64) {
 		let window_scale_factor = self.window_scale_factor;
+		let canvas_client_position = read_canvas_client_position();
 		let engine = &mut self.engine_runner.engine;
-		let canvas_native_input_position = Vector2::create(physical_x as f32 / window_scale_factor, physical_y as f32 / window_scale_factor);
+		let canvas_native_input_position = Vector2::create(physical_x as f32 / window_scale_factor - canvas_client_position.x, physical_y as f32 / window_scale_factor - canvas_client_position.y);
 		let view_input_position = engine.get_view_manager().canvas_position_to_view_position(canvas_native_input_position);
 		let input_manager = engine.get_input_manager_mut();
 		input_manager.set_canvas_native_input_position(canvas_native_input_position);
@@ -426,7 +446,8 @@ impl DesktopApplication {
 	//==============================================================================
 	fn handle_touch(&mut self, touch: winit::event::Touch) {
 		let window_scale_factor = self.window_scale_factor;
-		let canvas_native_position = Vector2::create(touch.location.x as f32 / window_scale_factor, touch.location.y as f32 / window_scale_factor);
+		let canvas_client_position = read_canvas_client_position();
+		let canvas_native_position = Vector2::create(touch.location.x as f32 / window_scale_factor - canvas_client_position.x, touch.location.y as f32 / window_scale_factor - canvas_client_position.y);
 		let view_position = self.engine_runner.engine.get_view_manager().canvas_position_to_view_position(canvas_native_position);
 		let identifier = touch.id as i64;
 		let touch_points = self.engine_runner.engine.get_input_manager().get_touch_points();
@@ -500,7 +521,7 @@ impl DesktopApplication {
 
 impl DesktopApplication {
 	//==============================================================================
-	// 줄인 렌더 크기로 그렸으면 창 크기로 늘여 그리기. (렌더 크기가 창 크기와 같으면 하지 않는다)
+	// 줄인 렌더 크기로 그렸거나 캔버스를 가운데에 두었으면 창의 캔버스 자리로 늘여 그리기. (렌더 크기가 창 크기와 같으면 하지 않는다)
 	//==============================================================================
 	fn present_render_scaled(&mut self) {
 		let window_size = match &self.window_state {
@@ -519,6 +540,9 @@ impl DesktopApplication {
 		if render_width <= 0 || render_height <= 0 || (render_width == window_width && render_height == window_height) {
 			return;
 		}
+		// GL 은 왼쪽 아래 원점이라 위에서 잰 캔버스 자리를 뒤집는다.
+		let canvas_physical_rect = self.canvas_physical_rect;
+		let destination_rect = [canvas_physical_rect[0], window_height - canvas_physical_rect[1] - canvas_physical_rect[3], canvas_physical_rect[2], canvas_physical_rect[3]];
 		let graphic = match self.engine_runner.get_graphic() {
 			Some(graphic) => {
 				graphic
@@ -540,7 +564,7 @@ impl DesktopApplication {
 			}
 		}
 		if let Some(render_scaler) = &self.render_scaler {
-			render_scaler.present(gl, render_width, render_height, window_width, window_height);
+			render_scaler.present(gl, render_width, render_height, destination_rect, window_width, window_height);
 		}
 	}
 }
