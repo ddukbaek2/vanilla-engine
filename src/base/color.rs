@@ -2,6 +2,16 @@
 // 색상. (각 성분 0 ~ 1)
 //==============================================================================
 use crate::base::math;
+use std::cell::RefCell;
+use std::collections::HashMap;
+
+// 색 문자열 캐시가 드는 상한. (넘으면 비우고 다시 쌓는다)
+const MAXIMUM_CACHED_COLOR_COUNT: usize = 1024;
+
+thread_local! {
+	// 색 문자열 → 풀어 둔 색. (Color::from_cache)
+	static COLOR_STRING_CACHE: RefCell<HashMap<String, Color>> = RefCell::new(HashMap::new());
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Color {
@@ -160,6 +170,28 @@ impl Color {
 //==============================================================================
 // 문자열 → 색상. ("#..." 또는 "rgb(...)", 그 외는 흰색. 원본 parse_color_value 와 같다)
 //==============================================================================
+impl Color {
+	//==============================================================================
+	// 색 문자열로 캐시한 색 반환. (원본 Color.fromCache, 풀기는 From<&str> 과 같다: "#...", "rgb(...)", 그 밖은 흰색)
+	// - 같은 문자열이면 다시 풀지 않는다. (From<&str> 은 부를 때마다 소문자 글을 새로 만든다) 매 프레임 같은 문자열로 색을 정할 때 쓴다.
+	// - 원본은 오래 안 쓴 것부터 버린다. 여기서는 1024 개를 넘으면 통째로 비우고 다시 쌓는다. Color 는 Copy 라 나눠 쓰는 인스턴스가 없다.
+	//==============================================================================
+	pub fn from_cache(color_string: &str) -> Color {
+		COLOR_STRING_CACHE.with(|color_cache| {
+			if let Some(color) = color_cache.borrow().get(color_string) {
+				return *color;
+			}
+			let color = Color::from(color_string);
+			let mut color_cache = color_cache.borrow_mut();
+			if color_cache.len() >= MAXIMUM_CACHED_COLOR_COUNT {
+				color_cache.clear();
+			}
+			color_cache.insert(color_string.to_string(), color);
+			color
+		})
+	}
+}
+
 impl From<&str> for Color {
 	fn from(color_string: &str) -> Color {
 		let trimmed_color_string = color_string.trim().to_lowercase();

@@ -148,7 +148,46 @@ impl UILabel {
 	// 글 설정.
 	//==============================================================================
 	pub fn set_text(&mut self, text: &str) {
+		// 같은 글이면 건너뛴다. (리치텍스트는 조각을 따로 쌓았을 수 있어 늘 넣는다)
+		if !self.use_rich_text && self.rich_text.get_text() == text {
+			return;
+		}
 		self.rich_text.set_text(text);
+	}
+
+	//==============================================================================
+	// 한 줄 글을 너비에 맞추기 설정. (품은 Text 의 set_fit_width, 리치텍스트 모드는 맞추지 않는다)
+	//==============================================================================
+	pub fn set_fit_width(&mut self, width: f32, minimum_ratio: f32) {
+		self.rich_text.get_text_component_mut().set_fit_width(width, minimum_ratio);
+	}
+
+	//==============================================================================
+	// 맞출 너비 반환. (0 이면 맞추지 않는다)
+	//==============================================================================
+	pub fn get_fit_width(&self) -> f32 {
+		self.rich_text.get_text_component().get_fit_width()
+	}
+
+	//==============================================================================
+	// 그릴 때의 크기 반환. (마지막으로 그리거나 잰 때의 값)
+	//==============================================================================
+	pub fn get_fitted_font_size(&self) -> f32 {
+		self.rich_text.get_text_component().get_fitted_font_size()
+	}
+
+	//==============================================================================
+	// 그릴 때의 크기를 그 자리에서 재어 반환.
+	//==============================================================================
+	pub fn calculate_fitted_font_size(&mut self, graphic: &mut Graphic) -> f32 {
+		self.rich_text.get_text_component_mut().calculate_fitted_font_size(graphic)
+	}
+
+	//==============================================================================
+	// 글의 너비 재기. (품은 Text 의 measure_text)
+	//==============================================================================
+	pub fn measure_text(&self, graphic: &Graphic, text: &str, font_size: f32) -> f32 {
+		self.rich_text.get_text_component().measure_text(graphic, text, font_size)
 	}
 
 	//==============================================================================

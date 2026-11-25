@@ -10,8 +10,11 @@
 // - 원본에서 옮기지 않은 것: 오른쪽에서 왼쪽 방향.
 // - 글자 수만큼 보이기(set_visible_character_count, 타자기 연출)는 원본처럼 앞에서부터 자른다. 원본은 UTF-16 단위로 세고, 여기서는 글자(char) 단위로 센다.
 //   여러 줄일 때 원본은 남은 수가 음수로 떨어지면 다음 줄을 통째로 그린다. 여기서는 0 에서 멈춰 다음 줄을 그리지 않는다.
+// - 한 줄 글을 너비에 맞추기(set_fit_width): 원본처럼 넘치면 처음 크기에서 최소 비율까지 0.1 단위로 줄여 그린다. 줄인 크기는 줄을 나눌 때(update_layout) 재므로
+//   Graphic 이 있어야 안다. (get_fitted_font_size 는 마지막으로 잰 값, calculate_fitted_font_size 는 그 자리에서 잰다) 그리는 사각형은 줄인 글의 너비를 따른다.
 //==============================================================================
 use crate::base::color::Color;
+use crate::base::math;
 use crate::base::rect::Rect;
 use crate::base::vector2::Vector2;
 use crate::core::component::{Component, ComponentBase};
@@ -62,6 +65,12 @@ pub struct Text {
 	line_width_list: Vec<f32>,
 	layout_font_ascent: f32,
 	layout_font_descent: f32,
+	// 한 줄 글을 맞출 너비와 줄이는 가장 작은 비율. (너비가 0 이면 맞추지 않는다)
+	fit_width: f32,
+	fit_minimum_ratio: f32,
+	// 그릴 때의 크기와 폰트 문자열. (맞춰 줄였으면 줄인 크기, update_layout 이 정한다)
+	fitted_font_size: f32,
+	draw_font_string: String,
 }
 
 impl Text {
@@ -95,8 +104,13 @@ impl Text {
 			line_width_list: Vec::new(),
 			layout_font_ascent: 0.0,
 			layout_font_descent: 0.0,
+			fit_width: 0.0,
+			fit_minimum_ratio: 0.55,
+			fitted_font_size: 32.0,
+			draw_font_string: String::new(),
 		};
 		text.font_string = text.build_font_string();
+		text.draw_font_string = text.font_string.clone();
 		text
 	}
 
@@ -114,6 +128,13 @@ impl Text {
 	// Canvas2D font 꼴 문자열 만들기.
 	//==============================================================================
 	pub fn build_font_string(&self) -> String {
+		self.build_font_string_with_size(self.font_size)
+	}
+
+	//==============================================================================
+	// 크기를 주어 Canvas2D font 꼴 문자열 만들기. (이 글자의 폰트 이름, 굵게, 기울임으로)
+	//==============================================================================
+	pub fn build_font_string_with_size(&self, font_size: f32) -> String {
 		let mut style_parts: Vec<String> = Vec::new();
 		if self.is_italic {
 			style_parts.push(String::from("italic"));
@@ -121,7 +142,7 @@ impl Text {
 		if self.is_bold {
 			style_parts.push(String::from("bold"));
 		}
-		style_parts.push(format!("{}px", self.font_size));
+		style_parts.push(format!("{}px", font_size));
 		style_parts.push(self.font_family.clone());
 		style_parts.join(" ")
 	}
@@ -162,7 +183,23 @@ impl Text {
 		if !self.is_layout_dirty && self.layout_wrap_width == wrap_width && self.layout_font_registration_count == font_registration_count {
 			return;
 		}
-		graphic.set_font_string(&self.font_string);
+		// 한 줄 글이 맞출 너비를 넘치면 처음 크기에서 최소 비율까지 줄인다. (원본 setFitWidth, 0.1 단위로 내림)
+		let mut fitted_font_size = self.font_size;
+		if !is_wrapped && self.fit_width > 0.0 && !self.text.is_empty() {
+			let natural_width = graphic.measure_text_with_font_string(&self.font_string, &self.text).width;
+			if natural_width > self.fit_width {
+				let fit_ratio = self.fit_minimum_ratio.max(self.fit_width / natural_width);
+				fitted_font_size = (self.font_size * fit_ratio * 10.0).floor() / 10.0;
+			}
+		}
+		self.fitted_font_size = fitted_font_size;
+		self.draw_font_string = if fitted_font_size == self.font_size {
+			self.font_string.clone()
+		}
+		else {
+			self.build_font_string_with_size(fitted_font_size)
+		};
+		graphic.set_font_string(&self.draw_font_string);
 		let line_list = if is_wrapped {
 			self.wrap_text_to_lines(graphic, &self.text, wrap_width)
 		}
@@ -432,7 +469,7 @@ impl Text {
 			}
 		};
 
-		graphic.set_font_string(&self.font_string);
+		graphic.set_font_string(&self.draw_font_string);
 		graphic.set_text_align(text_align);
 		graphic.set_text_baseline(self.text_baseline);
 
@@ -448,11 +485,11 @@ impl Text {
 			let line_width = self.calculate_decoration_line_width();
 			graphic.set_stroke_color(self.text_color);
 			if self.is_underline {
-				let underline_y = draw_y + self.calculate_underline_offset_y(self.font_size);
+				let underline_y = draw_y + self.calculate_underline_offset_y(self.fitted_font_size);
 				self.draw_horizontal_line(graphic, start_x, underline_y, text_width, line_width);
 			}
 			if self.is_strikethrough {
-				let strikethrough_y = draw_y + self.calculate_strikethrough_offset_y(self.font_size);
+				let strikethrough_y = draw_y + self.calculate_strikethrough_offset_y(self.fitted_font_size);
 				self.draw_horizontal_line(graphic, start_x, strikethrough_y, text_width, line_width);
 			}
 		}
@@ -579,6 +616,67 @@ impl Text {
 	//==============================================================================
 	pub fn get_font_size(&self) -> f32 {
 		self.font_size
+	}
+
+	//==============================================================================
+	// 한 줄 글을 너비에 맞추기 설정. (넘치면 처음 크기에서 최소 비율까지 줄여 그린다, 원본 setFitWidth)
+	// - 칸을 넓힐 수 없는 곳(단추, 줄 이름, 제목)에서 언어마다 길이가 다른 글이 넘칠 때 쓴다.
+	// - 정한 크기(get_font_size)는 그대로 두고 그릴 때의 크기만 줄인다. 최소 비율로도 넘치면 넘친 채로 그리고, 화면 밖 거르기도 넘친 너비까지 본다.
+	// - 줄을 바꾸는 글은 맞추지 않는다. width 가 0 이하면 맞추지 않는다. (기본) minimum_ratio 는 0 ~ 1 (원본 기본 0.55)
+	//==============================================================================
+	pub fn set_fit_width(&mut self, width: f32, minimum_ratio: f32) {
+		let fit_width = width.max(0.0);
+		let fit_minimum_ratio = math::clamp(minimum_ratio, 0.0, 1.0);
+		if self.fit_width != fit_width || self.fit_minimum_ratio != fit_minimum_ratio {
+			self.fit_width = fit_width;
+			self.fit_minimum_ratio = fit_minimum_ratio;
+			self.is_layout_dirty = true;
+		}
+	}
+
+	//==============================================================================
+	// 맞출 너비 반환. (0 이면 맞추지 않는다)
+	//==============================================================================
+	pub fn get_fit_width(&self) -> f32 {
+		self.fit_width
+	}
+
+	//==============================================================================
+	// 맞출 때 줄이는 가장 작은 비율 반환.
+	//==============================================================================
+	pub fn get_fit_minimum_ratio(&self) -> f32 {
+		self.fit_minimum_ratio
+	}
+
+	//==============================================================================
+	// 그릴 때의 크기 반환. (마지막으로 그리거나 잰 때의 값, 맞춰 줄였으면 줄인 크기)
+	//==============================================================================
+	pub fn get_fitted_font_size(&self) -> f32 {
+		if self.is_layout_dirty {
+			return self.font_size;
+		}
+		self.fitted_font_size
+	}
+
+	//==============================================================================
+	// 그릴 때의 크기를 그 자리에서 재어 반환. (맞출 너비를 넘치면 줄인 크기)
+	//==============================================================================
+	pub fn calculate_fitted_font_size(&mut self, graphic: &mut Graphic) -> f32 {
+		let content_width = self.layout_wrap_width;
+		self.update_layout(graphic, content_width);
+		self.fitted_font_size
+	}
+
+	//==============================================================================
+	// 글의 너비 재기. (이 글자의 폰트 이름, 굵게, 기울임과 주어진 크기로, 원본 measureText)
+	// - 글자 캐시가 폰트 문자열과 글이 같으면 다시 재지 않는다. (TextStringTextureCache.measure_text)
+	//==============================================================================
+	pub fn measure_text(&self, graphic: &Graphic, text: &str, font_size: f32) -> f32 {
+		if text.is_empty() {
+			return 0.0;
+		}
+		let font_string = self.build_font_string_with_size(font_size);
+		graphic.measure_text_with_font_string(&font_string, text).width
 	}
 
 	//==============================================================================
@@ -839,6 +937,11 @@ impl Component for Text {
 			return;
 		}
 
+		// 맞출 너비가 있으면 그릴 크기를 먼저 정한다. (글이나 폰트가 그대로면 지난번 결과)
+		if self.fit_width > 0.0 {
+			self.update_layout(graphic, content_size.x);
+		}
+
 		// 밑줄 / 취소선 길이. (글 전체면 담아 둔 폭, 앞에서 잘랐으면 잘린 글을 잰다)
 		let mut text_width = 0.0;
 		if self.is_underline || self.is_strikethrough {
@@ -847,7 +950,7 @@ impl Component for Text {
 				text_width = self.line_width_list.first().copied().unwrap_or(0.0);
 			}
 			else {
-				graphic.set_font_string(&self.font_string);
+				graphic.set_font_string(&self.draw_font_string);
 				text_width = graphic.measure_text(&self.text[..visible_length]).width;
 			}
 		}
