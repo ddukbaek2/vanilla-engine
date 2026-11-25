@@ -33,7 +33,7 @@
 // 1. graphic.apply_settings()      # 뷰포트/프로젝션 갱신 + 상태 리셋 + 화면 비우기
 // 2. time_manager.update()         # time_delta 산출
 // 3. input_manager.tick()
-// 4. 깨어난 작업 폴링 (poll_tasks)
+// 4. 깨어난 작업 폴링 (begin_poll_frame, 깨운 차례 줄이 빌 때까지 poll_woken_tasks 와 내리기 마무리)
 // 5. 씬마다 tick → pre_draw → draw → post_draw (→ draw_gizmos)
 // 6. 통계 출력(옵션) → 1회성 입력 플래그 클리어(글 입력 줄 마무리 포함) → 묶음 내보내기 → (검증용 화면 저장)
 // 화면 넘기기는 플랫폼이 update_engine 다음에 한다.
@@ -1219,8 +1219,14 @@ impl EngineRunner {
 	//==============================================================================
 	#[cfg(test)]
 	pub(crate) fn poll_tasks(&mut self) {
-		task::poll_tasks(&mut self.engine, &mut self.scene_list, &mut self.detached_scene_list, None);
-		self.finish_scene_unloads();
+		task::begin_poll_frame(&mut self.engine);
+		loop {
+			task::poll_woken_tasks(&mut self.engine, &mut self.scene_list, &mut self.detached_scene_list, None);
+			self.finish_scene_unloads();
+			if !self.engine.task_executor.has_woken_tasks() {
+				break;
+			}
+		}
 	}
 
 	//==============================================================================
@@ -1325,9 +1331,15 @@ impl EngineRunner {
 		self.engine.input_manager.tick(time_delta);
 
 		// 깨어난 작업 폴링. (await 다음 줄이 이번 프레임의 시간과 입력을 보고, 바꾼 것이 이번 프레임에 그려진다)
-		// unload 가 맡긴 작업이 끝난 씬은 원본처럼 이번 프레임부터 목록에서 빠진다.
-		task::poll_tasks(&mut self.engine, &mut self.scene_list, &mut self.detached_scene_list, Some(&mut *graphic));
-		finish_scene_unloads(&mut self.engine, &mut self.scene_list, &mut self.unloading_scene_id_list, &mut self.detached_scene_list, &mut self.unload_waiting_list, seconds_since_startup);
+		// unload 가 맡긴 작업이 끝난 씬은 원본처럼 이번 프레임부터 목록에서 빠지고, 내리기를 기다리던 작업도 원본 마이크로태스크처럼 같은 차례에 이어 간다.
+		task::begin_poll_frame(&mut self.engine);
+		loop {
+			task::poll_woken_tasks(&mut self.engine, &mut self.scene_list, &mut self.detached_scene_list, Some(&mut *graphic));
+			finish_scene_unloads(&mut self.engine, &mut self.scene_list, &mut self.unloading_scene_id_list, &mut self.detached_scene_list, &mut self.unload_waiting_list, seconds_since_startup);
+			if !self.engine.task_executor.has_woken_tasks() {
+				break;
+			}
+		}
 
 		// 그리기 통계. (지난 프레임 값을 넘겨 두고 이번 프레임을 새로 센다)
 		graphic.begin_frame_statistics();

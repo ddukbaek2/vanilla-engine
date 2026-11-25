@@ -393,7 +393,8 @@
 - async/await 를 원본처럼 쓴다. (지금까지는 받기 손잡이와 콜백으로 대신했다. 손잡이를 맡기는 동기 꼴과 콜백 API 는 그대로 둔다)
   - 엔진이 스레드 하나짜리 실행기를 품는다. (core/task.rs, 외부 런타임 없음, 데스크탑과 웹이 같은 코드, 퓨처는 Send 가 아니어도 된다)
     Engine::spawn_task(엔진 작업), spawn_scene_task(씬 작업)는 원본 async 함수를 부를 때처럼 맡기는 자리에서 첫 await 까지 돌고,
-    남은 것은 프레임마다 시간과 입력을 갱신한 뒤 씬의 tick 앞에서 깨어난 것만 한 번씩 폴링한다. &Engine 만 있는 자리는 spawn_deferred_task, spawn_deferred_scene_task
+    남은 것은 프레임마다 시간과 입력을 갱신한 뒤 씬의 tick 앞에서 원본 마이크로태스크 줄처럼 깨운 차례대로 줄이 빌 때까지 폴링한다.
+    (한 작업이 Promise 를 풀거나 끝나면 기다리던 작업이 같은 차례에 풀린 차례대로 이어 가고, 스스로를 깨운 퓨처는 다음 프레임) &Engine 만 있는 자리는 spawn_deferred_task, spawn_deferred_scene_task
   - 작업은 컨텍스트(EngineContext, SceneContext<씬 타입>)의 with(|씬, 엔진| ...) 안에서만 씬과 엔진을 빌린다. 폴링하는 동안만 스레드 지역 칸에 둔 포인터를 꺼내 쓰고 되돌려 두 번째 &mut 가 생기지 않는다. 그래픽은 with_graphic. TaskHandle 로 끝났는지 묻거나 await 한다
   - Promise, PromiseResolver: 원본 new Promise((resolve, reject) => ...) 자리. Promise::create, Promise::resolved, Promise<Result<T, E>> 의 reject(까닭)
   - wait::seconds, wait::next_frame (원본 base/wait.js, 그동안 옮기지 않았다). seconds 는 원본 setTimeout 처럼 벽시계 초이고(시간 배율을 곱하지 않는다) 0 초라도 한 차례 쉬며, 밀리초를 WebIDL long 으로 감는 것도 같다.
@@ -414,7 +415,7 @@
   - 화면 페이드: GameScene::fade_screen_async(on_dark), GameSceneBase::fade_screen_async::<씬 타입>. 다 어두워진 tick 에서 game_scene!, ui_scene! 이 on_dark 를 씬 작업으로 맡겨 그 자리에서 첫 await 까지 돌리고(원본 onDark 를 부르는 자리), 퓨처가 끝나면 밝아진다.
     Scene 을 직접 구현한 씬은 바탕 tick 뒤에 take_screen_fade_dark_starter 로 꺼내 start 한다
   - Scene 트레이트에 SceneAny 바탕 트레이트(as_scene_any_mut, 모든 'static 씬에 저절로 붙는다)를 더했다. SceneContext 가 씬을 제 타입으로 되돌릴 때 쓴다
-  - 예제 asyncawait. 시험 16 개(실행기와 그 자리 첫 폴링, 깨우기, 기다리기와 setTimeout 지연, 애셋과 그림 손잡이, 엔진을 빌리는 손잡이, 컨텍스트 접근, 빼돌린 컨텍스트의 패닉, 씬 불러오기, 내린 씬 살려 두기, unload 기다리기, 불러오는 도중 내린 씬, 페이드, 언어 묶음 async 함수, 애니메이션 손잡이)
+  - 예제 asyncawait. 시험 17 개(실행기와 그 자리 첫 폴링, 깨우기, 깨운 차례 줄, 기다리기와 setTimeout 지연, 애셋과 그림 손잡이, 엔진을 빌리는 손잡이, 컨텍스트 접근, 빼돌린 컨텍스트의 패닉, 씬 불러오기, 내린 씬 살려 두기, unload 기다리기, 불러오는 도중 내린 씬, 페이드, 언어 묶음 async 함수, 애니메이션 손잡이)
   - README 장점과 사용법(씬 생명주기, 애셋 로딩의 원본과 러스트 표, 예제), 기술 노트, ARCHITECTURE 배치와 소유 구조와 프레임 루프, 9장(원본 182 파일 옮김), 10장(async 를 정말 맞출 수 없는 것에서 빼고 with 만 일부러 정한 꼴에)
 
 # 0.3.2 (2026-11-18)

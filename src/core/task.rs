@@ -2,14 +2,15 @@
 // 작업. (async/await 로 쓴 게임 코드를 엔진이 프레임마다 이어 돌린다. 러스트 판에만 있는 파일)
 // - 원본은 브라우저가 Promise 를 돌리고, async 함수는 await 에서 멈췄다가 Promise 가 풀리면 이어 간다.
 //   러스트 판은 엔진이 스레드 하나짜리 실행기를 품는다. Engine::spawn_task, spawn_scene_task 는 원본 async 함수를 부를 때처럼
-//   맡기는 그 자리에서 첫 await 까지 한 번 폴링하고, 남은 작업은 프레임마다 한 번(시간과 입력을 갱신한 뒤, 씬의 tick 앞) 깨어난 것만 폴링한다.
+//   맡기는 그 자리에서 첫 await 까지 한 번 폴링하고, 남은 작업은 프레임마다(시간과 입력을 갱신한 뒤, 씬의 tick 앞) 깨어난 것만 폴링한다.
 //   (&Engine 만 있는 자리에서는 spawn_deferred_task, spawn_deferred_scene_task 로 맡기고 다음 폴링 차례에 처음 돈다)
 //   외부 런타임은 쓰지 않고, 데스크탑과 웹이 같은 코드로 돈다. 퓨처는 Send 가 아니어도 된다. (Rc 를 들어도 된다, 웹은 스레드가 없다)
-// - 깨우기: 작업마다 깨움 표시(Arc 에 든 AtomicBool)를 std::task::Wake 로 Waker 로 만든다. 깨우면 표시만 세우고,
-//   실행기는 폴링 차례에 목록을 한 번 돌며 표시가 선 작업만 표시를 내리고 폴링한다. 그래서 한 작업은 한 프레임에 많아야 한 번 폴링하고,
-//   폴링하는 동안 스스로 깨운 작업은 다음 프레임에 다시 폴링한다. (앞의 작업이 깨운 뒤쪽 작업은 같은 차례에 폴링한다)
-//   엔진의 상태를 보는 퓨처(애셋 손잡이, wait::seconds, wait::next_frame 같은 것)는 아직이면 스스로 깨워 다음 프레임에 다시 본다.
-//   Promise 는 resolve 가 깨운다. 웹 Promise 를 감싼 JsFuture 는 브라우저가 풀 때 깨운다. (Waker 는 Send + Sync 라 Arc 와 원자 값으로 든다)
+// - 깨우기: 원본 마이크로태스크 줄처럼 깨운 차례대로 줄(TaskWakeQueue)에 넣고, 폴링 차례에 줄이 빌 때까지 앞에서부터 폴링한다.
+//   그래서 한 작업이 Promise 를 풀거나 끝나면 그것을 기다리던 작업은 원본처럼 같은 차례에 풀린 차례대로 이어 간다.
+//   작업이 폴링되는 도중에 스스로를 깨우면(엔진의 상태를 보는 퓨처: 애셋 손잡이, wait::seconds, wait::next_frame 같은 것) 다음 프레임 줄에 넣는다.
+//   (원본에서 그런 Promise 는 브라우저 일이 끝난 다음 태스크에 풀리므로 같은 프레임 안에서 다시 보지 않는다)
+//   Promise 는 resolve 가, TaskHandle 은 그 작업이 끝날 때, 웹 Promise 를 감싼 JsFuture 는 브라우저가 풀 때 깨운다.
+//   Waker 는 Send + Sync 라 줄은 Arc 와 Mutex, 표시는 원자 값으로 든다. (웹은 스레드가 없어도 같은 코드다)
 // - 엔진과 씬에 닿기: 퓨처는 &mut 를 await 너머로 쥘 수 없다. 작업은 컨텍스트(EngineContext, SceneContext)를 받고,
 //   with(|씬, 엔진| ...) 클로저 안에서만 엔진과 씬을 빌린다. 클로저는 동기라 그 안에서 await 할 수 없고, 클로저가 받는 참조의 수명은
 //   클로저마다 새로 매겨져(for<'a>) 돌려주는 값(R)에 담을 수 없으니 참조가 클로저 밖으로 새지 못한다.
@@ -34,44 +35,154 @@ use crate::core::engine::Engine;
 use crate::core::graphic::Graphic;
 use crate::core::scene::{Scene, SceneId};
 use std::cell::{Cell, RefCell};
+use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::ptr::NonNull;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Wake, Waker};
+
+thread_local! {
+	// 지금 폴링하는 작업의 번호. (그 작업이 스스로를 깨우면 다음 프레임 줄에 넣는다)
+	static POLLING_TASK_ID: Cell<Option<u64>> = const { Cell::new(None) };
+}
+
+//==============================================================================
+// 깨운 작업의 줄. (이번 차례 줄은 깨운 차례대로, 스스로 깨운 작업은 다음 프레임 줄)
+//==============================================================================
+#[derive(Default)]
+struct TaskWakeQueue {
+	woken_task_id_list: Mutex<VecDeque<u64>>,
+	next_frame_task_id_list: Mutex<VecDeque<u64>>,
+}
+
+impl TaskWakeQueue {
+	//==============================================================================
+	// 줄 뒤에 넣기. (Mutex 가 독이 들어도 줄은 그대로 쓴다)
+	//==============================================================================
+	fn push(task_id_list: &Mutex<VecDeque<u64>>, task_id: u64) {
+		task_id_list.lock().unwrap_or_else(|poison_error| poison_error.into_inner()).push_back(task_id);
+	}
+
+	//==============================================================================
+	// 줄 앞에서 꺼내기.
+	//==============================================================================
+	fn pop(task_id_list: &Mutex<VecDeque<u64>>) -> Option<u64> {
+		task_id_list.lock().unwrap_or_else(|poison_error| poison_error.into_inner()).pop_front()
+	}
+
+	//==============================================================================
+	// 줄 모두 꺼내기.
+	//==============================================================================
+	fn take_all(task_id_list: &Mutex<VecDeque<u64>>) -> VecDeque<u64> {
+		std::mem::take(&mut *task_id_list.lock().unwrap_or_else(|poison_error| poison_error.into_inner()))
+	}
+
+	//==============================================================================
+	// 이번 차례 줄이 비었는지.
+	//==============================================================================
+	fn is_woken_empty(&self) -> bool {
+		self.woken_task_id_list.lock().unwrap_or_else(|poison_error| poison_error.into_inner()).is_empty()
+	}
+}
+
+//==============================================================================
+// 폴링하는 작업 번호를 지키는 값. (버릴 때 앞의 번호로 되돌린다, 맡기는 자리의 첫 폴링이 겹칠 때도)
+//==============================================================================
+struct PollingTaskScope {
+	previous_task_id: Option<u64>,
+}
+
+impl PollingTaskScope {
+	//==============================================================================
+	// 번호 두기.
+	//==============================================================================
+	fn install(task_id: u64) -> PollingTaskScope {
+		let previous_task_id = POLLING_TASK_ID.with(|polling_task_id| polling_task_id.replace(Some(task_id)));
+		PollingTaskScope {
+			previous_task_id,
+		}
+	}
+}
+
+impl Drop for PollingTaskScope {
+	//==============================================================================
+	// 되돌리기.
+	//==============================================================================
+	fn drop(&mut self) {
+		POLLING_TASK_ID.with(|polling_task_id| polling_task_id.set(self.previous_task_id));
+	}
+}
 
 //==============================================================================
 // 작업을 깨우는 표시. (Waker 는 Send + Sync 라서 Arc 와 원자 값으로 든다. 웹은 스레드가 없어도 같은 코드다)
 //==============================================================================
 struct TaskWakeFlag {
-	is_woken: AtomicBool,
+	task_id: u64,
+	wake_queue: Arc<TaskWakeQueue>,
+	// 이번 차례 줄에 들었는지, 다음 프레임 줄에 들었는지. (한 줄에 두 번 넣지 않는다)
+	is_woken_queued: AtomicBool,
+	is_next_frame_queued: AtomicBool,
 }
 
 impl Wake for TaskWakeFlag {
 	//==============================================================================
-	// 깨우기. (표시만 세운다, 다음 폴링 차례에 폴링한다)
+	// 깨우기. (줄에 넣는다)
 	//==============================================================================
 	fn wake(self: Arc<TaskWakeFlag>) {
-		self.is_woken.store(true, Ordering::Release);
+		self.wake_by_ref();
 	}
 
 	//==============================================================================
-	// 깨우기. (빌린 것으로)
+	// 깨우기. (빌린 것으로, 폴링하는 도중에 스스로 깨우면 다음 프레임 줄, 아니면 이번 차례 줄)
 	//==============================================================================
 	fn wake_by_ref(self: &Arc<TaskWakeFlag>) {
-		self.is_woken.store(true, Ordering::Release);
+		let is_self_wake = POLLING_TASK_ID.with(|polling_task_id| polling_task_id.get()) == Some(self.task_id);
+		if is_self_wake {
+			if !self.is_next_frame_queued.swap(true, Ordering::AcqRel) {
+				TaskWakeQueue::push(&self.wake_queue.next_frame_task_id_list, self.task_id);
+			}
+		}
+		else if !self.is_woken_queued.swap(true, Ordering::AcqRel) {
+			TaskWakeQueue::push(&self.wake_queue.woken_task_id_list, self.task_id);
+		}
 	}
 }
 
 //==============================================================================
-// 작업의 끝 상태. (작업과 손잡이가 나눠 든다)
+// 작업의 끝 상태. (작업과 손잡이가 나눠 든다. 끝나면 손잡이를 기다리는 작업을 깨운다)
 //==============================================================================
-#[derive(Debug, Default)]
+#[derive(Default)]
 struct TaskState {
 	is_finished: Cell<bool>,
+	waiting_waker_list: RefCell<Vec<Waker>>,
+}
+
+impl TaskState {
+	//==============================================================================
+	// 끝냄. (처음 한 번만 기다리던 작업을 깨운다, 빌림을 놓은 뒤 깨운다)
+	//==============================================================================
+	fn finish(&self) {
+		if self.is_finished.replace(true) {
+			return;
+		}
+		let waiting_waker_list = std::mem::take(&mut *self.waiting_waker_list.borrow_mut());
+		for waiting_waker in waiting_waker_list {
+			waiting_waker.wake();
+		}
+	}
+}
+
+impl std::fmt::Debug for TaskState {
+	//==============================================================================
+	// 디버그 출력. (끝났는지만)
+	//==============================================================================
+	fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		formatter.debug_struct("TaskState").field("is_finished", &self.is_finished.get()).finish()
+	}
 }
 
 //==============================================================================
@@ -97,13 +208,16 @@ impl Future for TaskHandle {
 	type Output = ();
 
 	//==============================================================================
-	// 끝날 때까지 기다리기. (아직이면 다음 프레임에 다시 본다)
+	// 끝날 때까지 기다리기. (아직이면 깨울 Waker 를 적어 두고, 그 작업이 끝나면 원본처럼 같은 차례에 이어 간다)
 	//==============================================================================
 	fn poll(self: Pin<&mut TaskHandle>, context: &mut Context<'_>) -> Poll<()> {
 		if self.is_finished() {
 			return Poll::Ready(());
 		}
-		context.waker().wake_by_ref();
+		let mut waiting_waker_list = self.task_state.waiting_waker_list.borrow_mut();
+		if !waiting_waker_list.iter().any(|waiting_waker| waiting_waker.will_wake(context.waker())) {
+			waiting_waker_list.push(context.waker().clone());
+		}
 		Poll::Pending
 	}
 }
@@ -117,31 +231,23 @@ struct Task {
 	wake_flag: Arc<TaskWakeFlag>,
 	waker: Waker,
 	task_state: Rc<TaskState>,
-	is_done: bool,
 }
 
 impl Task {
 	//==============================================================================
-	// 생성. (손잡이를 같이 준다. is_woken 이면 다음 폴링 차례에 폴링한다)
+	// 폴링. (그 작업의 번호를 두고, 칸에는 받은 것을 둔다. 끝났으면 true)
 	//==============================================================================
-	fn create(scene_id: Option<SceneId>, future: Pin<Box<dyn Future<Output = ()>>>, is_woken: bool) -> (Task, TaskHandle) {
-		let wake_flag = Arc::new(TaskWakeFlag {
-			is_woken: AtomicBool::new(is_woken),
-		});
-		let waker = Waker::from(wake_flag.clone());
-		let task_state = Rc::new(TaskState::default());
-		let task = Task {
-			scene_id,
-			future,
-			wake_flag,
-			waker,
-			task_state: task_state.clone(),
-			is_done: false,
-		};
-		let task_handle = TaskHandle {
-			task_state,
-		};
-		(task, task_handle)
+	fn poll(&mut self, task_access: TaskAccess) -> bool {
+		let _polling_task_scope = PollingTaskScope::install(self.wake_flag.task_id);
+		let _task_access_scope = TaskAccessScope::install(task_access);
+		let mut context = Context::from_waker(&self.waker);
+		let poll_result = self.future.as_mut().poll(&mut context);
+		if poll_result.is_ready() {
+			// 손잡이를 기다리던 작업은 원본처럼 같은 차례에 이어 간다. (버리기는 그 뒤)
+			self.task_state.finish();
+			return true;
+		}
+		false
 	}
 }
 
@@ -150,7 +256,7 @@ impl Drop for Task {
 	// 버리기. (다 돌았든 버려졌든 손잡이에는 끝난 것으로 알린다)
 	//==============================================================================
 	fn drop(&mut self) {
-		self.task_state.is_finished.set(true);
+		self.task_state.finish();
 	}
 }
 
@@ -158,9 +264,11 @@ impl Drop for Task {
 // 실행기. (엔진이 들고, EngineRunner 가 프레임마다 poll_tasks 로 돌린다)
 //==============================================================================
 pub(crate) struct TaskExecutor {
-	task_list: Vec<Task>,
+	task_map: HashMap<u64, Task>,
 	// 맡긴 새 작업. (폴링하는 동안에도 엔진을 &self 로 빌린 곳에서 맡길 수 있게 따로 둔다)
 	spawned_task_list: RefCell<Vec<Task>>,
+	wake_queue: Arc<TaskWakeQueue>,
+	next_task_id: Cell<u64>,
 }
 
 impl TaskExecutor {
@@ -169,16 +277,48 @@ impl TaskExecutor {
 	//==============================================================================
 	pub(crate) fn new() -> TaskExecutor {
 		TaskExecutor {
-			task_list: Vec::new(),
+			task_map: HashMap::new(),
 			spawned_task_list: RefCell::new(Vec::new()),
+			wake_queue: Arc::new(TaskWakeQueue::default()),
+			next_task_id: Cell::new(1),
 		}
+	}
+
+	//==============================================================================
+	// 작업 만들기. (번호와 깨우는 표시를 매기고 손잡이를 같이 준다. is_woken 이면 이번 차례 줄에 넣는다)
+	//==============================================================================
+	fn create_task(&self, scene_id: Option<SceneId>, future: Pin<Box<dyn Future<Output = ()>>>, is_woken: bool) -> (Task, TaskHandle) {
+		let task_id = self.next_task_id.get();
+		self.next_task_id.set(task_id + 1);
+		let wake_flag = Arc::new(TaskWakeFlag {
+			task_id,
+			wake_queue: self.wake_queue.clone(),
+			is_woken_queued: AtomicBool::new(false),
+			is_next_frame_queued: AtomicBool::new(false),
+		});
+		let waker = Waker::from(wake_flag.clone());
+		if is_woken {
+			waker.wake_by_ref();
+		}
+		let task_state = Rc::new(TaskState::default());
+		let task = Task {
+			scene_id,
+			future,
+			wake_flag,
+			waker,
+			task_state: task_state.clone(),
+		};
+		let task_handle = TaskHandle {
+			task_state,
+		};
+		(task, task_handle)
 	}
 
 	//==============================================================================
 	// 작업 맡기기. (깨어난 채로 넣어 다음 폴링 차례에 처음 폴링한다)
 	//==============================================================================
 	pub(crate) fn spawn(&self, scene_id: Option<SceneId>, future: Pin<Box<dyn Future<Output = ()>>>) -> TaskHandle {
-		let (task, task_handle) = Task::create(scene_id, future, true);
+		let (task, task_handle) = self.create_task(scene_id, future, true);
 		self.spawned_task_list.borrow_mut().push(task);
 		task_handle
 	}
@@ -187,7 +327,23 @@ impl TaskExecutor {
 	// 그 씬의 작업이 남았는지. (내린 씬을 살려 둘지 엔진이 본다)
 	//==============================================================================
 	pub(crate) fn has_scene_tasks(&self, scene_id: SceneId) -> bool {
-		self.task_list.iter().any(|task| task.scene_id == Some(scene_id)) || self.spawned_task_list.borrow().iter().any(|task| task.scene_id == Some(scene_id))
+		self.task_map.values().any(|task| task.scene_id == Some(scene_id)) || self.spawned_task_list.borrow().iter().any(|task| task.scene_id == Some(scene_id))
+	}
+
+	//==============================================================================
+	// 이번 차례 줄에 깨운 작업이 남았는지. (엔진이 내리기 마무리가 깨운 작업까지 돌릴지 본다)
+	//==============================================================================
+	pub(crate) fn has_woken_tasks(&self) -> bool {
+		!self.wake_queue.is_woken_empty()
+	}
+
+	//==============================================================================
+	// 맡긴 새 작업을 작업 표로. (폴링 차례 사이와 작업 하나를 폴링한 뒤)
+	//==============================================================================
+	fn merge_spawned_tasks(task_map: &mut HashMap<u64, Task>, spawned_task_list: &mut Vec<Task>) {
+		for task in spawned_task_list.drain(..) {
+			task_map.insert(task.wake_flag.task_id, task);
+		}
 	}
 
 	//==============================================================================
@@ -195,7 +351,7 @@ impl TaskExecutor {
 	//==============================================================================
 	#[cfg(test)]
 	pub(crate) fn get_task_count(&self) -> usize {
-		self.task_list.len() + self.spawned_task_list.borrow().len()
+		self.task_map.len() + self.spawned_task_list.borrow().len()
 	}
 }
 
@@ -479,12 +635,7 @@ fn poll_spawned_task(engine: &mut Engine, scene_pointer: Option<NonNull<dyn Scen
 		scene: scene_pointer,
 		scene_id: task.scene_id,
 	};
-	let poll_result = {
-		let _task_access_scope = TaskAccessScope::install(task_access);
-		let mut context = Context::from_waker(&task.waker);
-		task.future.as_mut().poll(&mut context)
-	};
-	if poll_result.is_pending() {
+	if !task.poll(task_access) {
 		engine.task_executor.spawned_task_list.borrow_mut().push(task);
 	}
 }
@@ -498,7 +649,7 @@ where
 	TaskFuture: Future<Output = ()> + 'static,
 {
 	let future = task_function(EngineContext::new());
-	let (task, task_handle) = Task::create(None, Box::pin(future), false);
+	let (task, task_handle) = engine.task_executor.create_task(None, Box::pin(future), false);
 	poll_spawned_task(engine, None, task);
 	task_handle
 }
@@ -514,7 +665,7 @@ where
 {
 	let scene_id = SceneId::from(scene.get_scene_base());
 	let future = task_function(SceneContext::<S>::new(scene_id));
-	let (task, task_handle) = Task::create(Some(scene_id), Box::pin(future), false);
+	let (task, task_handle) = engine.task_executor.create_task(Some(scene_id), Box::pin(future), false);
 	let scene_object: &mut (dyn Scene + 'static) = scene;
 	poll_spawned_task(engine, Some(NonNull::from(scene_object)), task);
 	task_handle
@@ -546,19 +697,42 @@ where
 }
 
 //==============================================================================
-// 깨어난 작업 폴링하기. (EngineRunner 가 프레임마다 한 번, 씬의 tick 앞에 부른다)
-// - 작업 목록을 엔진에서 꺼내 돌리고, 그동안 맡긴 새 작업은 뒤에 붙인다. (다음 프레임에 처음 폴링한다)
-// - 씬 작업의 씬은 불러온 씬 목록과 내렸지만 작업이 남아 살려 둔 씬 목록에서 찾는다. 어디에도 없으면(씬을 버렸으면) 작업을 버린다.
-// - 폴링 차례 번호를 하나 올린다. (wait::seconds, wait::next_frame 이 적어도 한 차례 쉬었는지 본다)
+// 폴링 차례 시작. (프레임마다 한 번, 차례 번호를 올리고 지난 프레임에 스스로 깨운 작업을 이번 차례 줄 뒤에 붙인다)
+// - wait::seconds, wait::next_frame 은 차례 번호로 적어도 한 차례 쉬었는지 본다.
 //==============================================================================
-pub(crate) fn poll_tasks(engine: &mut Engine, scene_list: &mut [Box<dyn Scene>], detached_scene_list: &mut [Box<dyn Scene>], mut graphic: Option<&mut Graphic>) {
+pub(crate) fn begin_poll_frame(engine: &mut Engine) {
 	crate::base::wait::advance_poll_frame();
-	let mut task_list = std::mem::take(&mut engine.task_executor.task_list);
-	task_list.append(engine.task_executor.spawned_task_list.get_mut());
-	for task in task_list.iter_mut() {
-		if !task.wake_flag.is_woken.swap(false, Ordering::AcqRel) {
-			continue;
+	let task_executor = &mut engine.task_executor;
+	TaskExecutor::merge_spawned_tasks(&mut task_executor.task_map, task_executor.spawned_task_list.get_mut());
+	for task_id in TaskWakeQueue::take_all(&task_executor.wake_queue.next_frame_task_id_list) {
+		if let Some(task) = task_executor.task_map.get(&task_id) {
+			task.wake_flag.is_next_frame_queued.store(false, Ordering::Release);
+			if !task.wake_flag.is_woken_queued.swap(true, Ordering::AcqRel) {
+				TaskWakeQueue::push(&task_executor.wake_queue.woken_task_id_list, task_id);
+			}
 		}
+	}
+}
+
+//==============================================================================
+// 깨운 작업 폴링하기. (이번 차례 줄이 빌 때까지 깨운 차례대로, 원본 마이크로태스크 줄처럼)
+// - 작업 표를 엔진에서 꺼내 돌리고, 그동안 맡긴 새 작업은 작업 하나를 폴링할 때마다 표에 넣는다.
+// - 씬 작업의 씬은 불러온 씬 목록과 내렸지만 살려 둔 씬 목록에서 찾는다. 어디에도 없으면(씬을 버렸으면) 작업을 버린다.
+//==============================================================================
+pub(crate) fn poll_woken_tasks(engine: &mut Engine, scene_list: &mut [Box<dyn Scene>], detached_scene_list: &mut [Box<dyn Scene>], mut graphic: Option<&mut Graphic>) {
+	let mut task_map = std::mem::take(&mut engine.task_executor.task_map);
+	TaskExecutor::merge_spawned_tasks(&mut task_map, engine.task_executor.spawned_task_list.get_mut());
+	let wake_queue = engine.task_executor.wake_queue.clone();
+	while let Some(task_id) = TaskWakeQueue::pop(&wake_queue.woken_task_id_list) {
+		let task = match task_map.get_mut(&task_id) {
+			Some(task) => {
+				task
+			}
+			None => {
+				continue;
+			}
+		};
+		task.wake_flag.is_woken_queued.store(false, Ordering::Release);
 		let scene_pointer = match task.scene_id {
 			Some(scene_id) => {
 				match scene_list.iter_mut().chain(detached_scene_list.iter_mut()).find(|scene| scene.get_scene_base().get_scene_id() == Some(scene_id)) {
@@ -566,7 +740,7 @@ pub(crate) fn poll_tasks(engine: &mut Engine, scene_list: &mut [Box<dyn Scene>],
 						Some(NonNull::from(&mut **scene))
 					}
 					None => {
-						task.is_done = true;
+						task_map.remove(&task_id);
 						continue;
 					}
 				}
@@ -581,20 +755,21 @@ pub(crate) fn poll_tasks(engine: &mut Engine, scene_list: &mut [Box<dyn Scene>],
 			scene: scene_pointer,
 			scene_id: task.scene_id,
 		};
-		let poll_result = {
-			let _task_access_scope = TaskAccessScope::install(task_access);
-			let mut context = Context::from_waker(&task.waker);
-			task.future.as_mut().poll(&mut context)
-		};
-		if poll_result.is_ready() {
-			// 같은 차례의 뒤쪽 작업이 이 손잡이를 보면 바로 끝난 것이어야 한다. (버리기는 차례가 끝난 뒤)
-			task.is_done = true;
-			task.task_state.is_finished.set(true);
+		if task.poll(task_access) {
+			task_map.remove(&task_id);
 		}
+		TaskExecutor::merge_spawned_tasks(&mut task_map, engine.task_executor.spawned_task_list.get_mut());
 	}
-	task_list.retain(|task| !task.is_done);
-	task_list.append(engine.task_executor.spawned_task_list.get_mut());
-	engine.task_executor.task_list = task_list;
+	engine.task_executor.task_map = task_map;
+}
+
+//==============================================================================
+// 프레임 하나의 폴링. (차례 시작과 깨운 작업 폴링, 시험이 쓴다. 엔진은 그 사이에 내리기 마무리를 끼운다)
+//==============================================================================
+#[cfg(test)]
+pub(crate) fn poll_tasks(engine: &mut Engine, scene_list: &mut [Box<dyn Scene>], detached_scene_list: &mut [Box<dyn Scene>], graphic: Option<&mut Graphic>) {
+	begin_poll_frame(engine);
+	poll_woken_tasks(engine, scene_list, detached_scene_list, graphic);
 }
 
 //==============================================================================
@@ -861,6 +1036,53 @@ mod tests {
 		result_resolver.reject(String::from("까닭"));
 		poll_frame(&mut engine, &mut scene_list);
 		assert_eq!(*rejected_error.borrow(), "까닭");
+	}
+
+	//==============================================================================
+	// 깨운 차례 줄: 한 작업이 Promise 를 풀거나 끝나면, 기다리던 작업들은 원본 마이크로태스크처럼 같은 차례에 풀린 차례대로 이어 간다.
+	// 스스로 깨운 작업(next_frame)은 같은 차례에 다시 돌지 않는다.
+	//==============================================================================
+	#[test]
+	fn woken_tasks_continue_in_resolve_order_within_frame() {
+		let mut engine = Engine::new(EngineConfiguration::new());
+		let mut scene_list: Vec<Box<dyn Scene>> = Vec::new();
+		let order_list: Rc<RefCell<Vec<&'static str>>> = Rc::new(RefCell::new(Vec::new()));
+		let (first_promise, first_resolver) = Promise::<()>::create();
+		let (second_promise, second_resolver) = Promise::<()>::create();
+		let second_order_list = order_list.clone();
+		engine.spawn_task(move |_engine_context| async move {
+			second_promise.await;
+			second_order_list.borrow_mut().push("second");
+		});
+		let first_order_list = order_list.clone();
+		engine.spawn_task(move |_engine_context| async move {
+			first_promise.await;
+			first_order_list.borrow_mut().push("first");
+		});
+		let resolver_order_list = order_list.clone();
+		let resolver_task_handle = engine.spawn_task(move |_engine_context| async move {
+			wait::next_frame().await;
+			first_resolver.resolve(());
+			second_resolver.resolve(());
+			resolver_order_list.borrow_mut().push("resolved");
+		});
+		let joined_order_list = order_list.clone();
+		engine.spawn_task(move |_engine_context| async move {
+			resolver_task_handle.await;
+			joined_order_list.borrow_mut().push("joined");
+		});
+		let frame_order_list = order_list.clone();
+		engine.spawn_task(move |_engine_context| async move {
+			loop {
+				wait::next_frame().await;
+				frame_order_list.borrow_mut().push("frame");
+			}
+		});
+		assert!(order_list.borrow().is_empty());
+		poll_frame(&mut engine, &mut scene_list);
+		assert_eq!(*order_list.borrow(), vec!["resolved", "frame", "first", "second", "joined"]);
+		poll_frame(&mut engine, &mut scene_list);
+		assert_eq!(*order_list.borrow(), vec!["resolved", "frame", "first", "second", "joined", "frame"]);
 	}
 
 	//==============================================================================
