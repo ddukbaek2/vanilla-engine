@@ -5,27 +5,25 @@
 // - 세이프 에어리어 노드 "safeArea" + 세이프 에어리어 영역 계산.
 // - 뷰 크기가 바뀌면 다음 tick 에서 layout 을 다시 부른다.
 // - 캔버스 전체를 배경색으로 칠한다. (pre_draw)
-// - 러스트 판은 상속 대신 씬이 GameSceneBase 를 품고 Scene 함수마다 이쪽을 부른다:
-//     struct TitleScene { game_scene_base: GameSceneBase, logoAsset: ImageAsset }
-//     impl Scene for TitleScene {
-//         fn get_scene_base(&self) -> &SceneBase { self.game_scene_base.get_scene_base() }
-//         fn get_scene_base_mut(&mut self) -> &mut SceneBase { self.game_scene_base.get_scene_base_mut() }
-//         fn create(&mut self, engine: &mut Engine) {
-//             self.game_scene_base.set_loading_image_url("loading.png");
-//             self.game_scene_base.create(engine);                       // 원본 load + super.load_assets
-//             self.logoAsset.load(engine, "logo.png");                 // 원본 load_assets 재정의 자리
-//             self.game_scene_base.get_scene_base_mut().track_asset(&self.logoAsset);
+// - 러스트 판은 상속 대신 씬이 GameSceneBase 를 품고 GameScene 트레이트(원본에서 덮어쓰는 자리)를 구현한 뒤 game_scene! 한 줄로 Scene 을 얻는다:
+//     struct TitleScene { game_scene_base: GameSceneBase, logo_asset: ImageAsset }
+//     impl GameScene for TitleScene {
+//         fn get_game_scene_base(&self) -> &GameSceneBase { &self.game_scene_base }
+//         fn get_game_scene_base_mut(&mut self) -> &mut GameSceneBase { &mut self.game_scene_base }
+//         fn load_assets(&mut self, engine: &mut Engine) {                       // 원본 load_assets 재정의 자리 (바탕의 로딩 이미지 요청 뒤)
+//             self.logo_asset.load(engine, "logo.png");
+//             self.game_scene_base.get_scene_base_mut().track_asset(&self.logo_asset);
 //         }
-//         fn draw_on_load(&mut self, engine: &mut Engine, graphic: &mut Graphic) { self.game_scene_base.draw_on_load(engine, graphic); }
-//         fn initialize(&mut self, engine: &mut Engine) {
-//             self.game_scene_base.initialize(engine);
+//         fn initialize(&mut self, engine: &mut Engine) {                          // 바탕 initialize 뒤
 //             let safe_area_id = self.game_scene_base.get_safe_area_node_id().unwrap();   // 콘텐츠는 여기 아래에 붙인다
 //         }
-//         fn resize(&mut self, engine: &mut Engine, canvas_native_size: Vector2) { self.game_scene_base.resize(engine, canvas_native_size); self.layout(engine); }
-//         fn tick(&mut self, engine: &mut Engine, time_delta: f32) { if self.game_scene_base.tick(engine, time_delta) { self.layout(engine); } }
-//         fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) { self.game_scene_base.pre_draw(engine, graphic); }
+//         fn layout(&mut self, engine: &mut Engine) { /* game_scene_base.get_safe_area_rect() 를 읽어 콘텐츠를 놓는다 */ }
 //     }
-//   씬의 layout 은 원본 layout 재정의 자리다. (game_scene_base.get_safe_area_rect() 를 읽어 콘텐츠를 놓는다)
+//     vanilla::game_scene!(TitleScene);
+//   Scene 함수마다 바탕을 먼저 부르고 GameScene 의 같은 이름 함수를 부른다. (원본에서 super 를 먼저 부르는 덮어쓰기)
+//   post_draw 만 씬의 것을 먼저 부르고 바탕(페이드 막, 개발자 도구)을 위에 그린다. layout 은 바탕이 세이프 에어리어를 다시 계산한 뒤 부른다.
+//   (크기 바뀜, 그리고 tick 이 뷰 크기 변화를 볼 때. 첫 tick 에도 한 번)
+//   GameSceneBase 함수를 Scene 함수에서 직접 부르는 길도 그대로 된다. 그때는 tick 이 돌려준 bool 을 보고 씬이 자기 layout 을 부르고, post_draw 도 직접 부른다.
 // - 원본과 다른 점:
 //   - 원본 load(비동기)의 "load_assets 를 기다린 뒤 최소 시간 / 터치까지 기다림"은 러스트 애셋 흐름으로 옮겼다.
 //     create 에서 "로딩 문" 읽기 손잡이 하나를 맡겨 두고, draw_on_load 가 최소 시간이 지나거나 화면을 누르면 문을 연다.
@@ -34,11 +32,10 @@
 //   - 화면 누름은 원본 window pointerdown 대신 입력 매니저의 is_touch_pressed 로 본다.
 //   - 원본은 TouchRecognizer 를 initialize 에서 만든다. 러스트 판은 생성할 때 만든다. 터치는 원본 touch_press 같은 함수 대신 tick 이 넘긴다.
 //     (SceneBase 의 터치 레이캐스터와 첫 터치 콜백은 쓰지 않는다)
-//   - tick 과 resize 는 원본처럼 layout 을 부르되, 씬의 layout 은 부를 수 없어서 bool(tick) 로 알리거나 씬이 resize 뒤에 직접 부른다.
 //   - 세이프 에어리어: 웹은 원본처럼 CSS env(safe-area-inset-*) 를 읽는다. 데스크탑에는 그런 값이 없어서 0 이고,
 //     set_safe_area_insets 로 정해 줄 수 있다. (정하면 웹에서도 그 값을 쓴다)
 //   - set_view_scale_mode 는 엔진을 같이 받는다. (전역 엔진이 없다) 엔진을 주면 원본처럼 바로 뷰 영역을 다시 계산한다.
-//   - 개발자 도구(DEVTools)는 옮기지 않았다. is_dev_tools_capturing_input 은 늘 false 이고, post_draw 의 도구 그리기는 없다.
+//   - 개발자 도구(DevTools)는 EngineConfiguration::use_dev_tools 가 켜져 있으면 initialize 에서 만든다. (원본과 같음) tick 이 F2 와 터치를 넘기고 post_draw 가 그린다.
 // - 로딩 화면 바꾸기: set_loading_colors 로 색만, set_loading_drawer 로 바탕 위 그림 전체를 바꾼다. (원본 setLoadingColors, setLoadingDrawer)
 //   게이지는 기본으로 최소 노출 시간의 경과(get_loading_progress)를 보이고, set_loading_progress 나 track_asset_loader 로 진행률을 알리면
 //   그 진행률을 부드럽게 따라간다. (LoadingProgress, get_loading_progress_state)
@@ -46,14 +43,16 @@
 //   - 원본은 load_assets 가 끝나면 진행률을 1 로 채운다. 러스트 판은 씬이 기다리는 애셋 목록을 따로 셀 수 없어서, 맡긴 AssetLoader 가 다 끝나면 1 이 된다.
 //     (set_loading_progress 로 직접 알리는 씬은 끝에 1 을 알린다)
 //   - track_asset_loader 로 맡긴 AssetLoader 는 draw_on_load 가 프레임마다 update 를 불러 준다.
+//   - 원본 setLoadingColors 의 넷째 값(바깥 색)은 러스트에 기본값 인자가 없어 set_loading_outside_color 로 따로 정한다.
 // - 화면 틀 (vanilla.js GameScene 의 fadeScreen, isUserInterfaceAt, setPlayInputHandler, setPlayAreaReference 와 같은 기능):
 //   - 화면 페이드 fade_screen(on_dark): 다 어두워지면 on_dark(트리, 엔진)를 부른다. 원본은 onDark 가 Promise 를 돌려주면 끝날 때까지 어둡게 둔다.
 //     러스트 판은 on_dark 가 ScreenFadeHold 를 돌려주면 그 손잡이의 release 가 불릴 때까지 어둡게 둔다. (None 이면 바로 밝힌다)
-//     막은 post_draw 가 그린다. 씬은 post_draw 에서 game_scene_base.post_draw 를 부른다. 막이 걸린 동안은 누름과 휠을 받지 않는다.
-//   - UI 가 받지 않은 입력: 원본은 처리기 객체({ press, move, release, wheel })를 부른다. 러스트 판은 처리기가 씬의 상태를 빌릴 수 없어서
-//     set_play_input_enabled(true) 로 켜면 PlayInput 을 모아 두고 씬이 tick 뒤에 take_play_inputs 로 꺼낸다. (좌표는 세이프 에어리어 왼쪽 위 기준)
-//   - 게임 영역 기준 set_play_area_reference: resize 는 엔진을 바꿀 수 없어서 씬이 resize 첫머리에 apply_play_area_reference(engine) 를 부른다.
-//     (initialize 는 스스로 부른다)
+//     콜백 꼴은 fade_screen_with_hold(on_dark) 다. on_dark 가 손잡이를 받아 두었다가 일이 끝나면 release 한다. (Promise 의 resolve 자리)
+//     막은 post_draw 가 그린다. 막이 걸린 동안은 누름과 휠을 받지 않는다.
+//   - UI 가 받지 않은 입력: 원본처럼 처리기(set_play_input_handler)를 부른다. 원본 처리기 객체의 press, move, release, wheel 은 PlayInput 의 갈래다.
+//     처리기는 씬을 빌릴 수 없어서 씬 상태는 Rc<RefCell> 로 나눠 쥔다. 씬이 tick 에서 직접 꺼내 쓰려면 set_play_input_enabled(true) 로 모아 take_play_inputs 로 꺼낸다.
+//     (좌표는 세이프 에어리어 왼쪽 위 기준)
+//   - 휠: 원본처럼 창 층(UIWindowLayer) 안을 가리키면 맨 위의 창이 먼저 받고(UIWindowLayer::scroll_window_at), 아니면 그 자리의 스크롤 칸이 받는다.
 //   - 세이프 에어리어는 set_safe_area_insets 로 정하지 않았으면 ViewManager::get_safe_area_insets 를 읽는다. (강제값, 주소, env, 무시할 쪽을 따른다)
 //==============================================================================
 use crate::base::color::Color;
@@ -66,10 +65,12 @@ use crate::core::graphic::Graphic;
 use crate::core::node::nodetree::{NodeId, NodeTree};
 use crate::core::scene::SceneBase;
 use crate::core::viewmanager::ViewScaleMode;
+use crate::misc::devtools::DevTools;
 use crate::misc::loadingprogress::LoadingProgress;
 use crate::resource::assetloader::AssetLoader;
 use crate::resource::imageasset::ImageAsset;
 use crate::ui::touchrecognizer::TouchRecognizer;
+use crate::ui::uiwindowlayer::UIWindowLayer;
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -129,6 +130,16 @@ impl ScreenFadeHold {
 pub type ScreenFadeEvent = Box<dyn FnOnce(&mut NodeTree, &Engine) -> Option<ScreenFadeHold>>;
 
 //==============================================================================
+// 다 어두워졌을 때 부르는 함수의 콜백 꼴. (트리, 엔진, 손잡이를 받는다. 손잡이를 놓을 때까지 어둡게 둔다, fade_screen_with_hold)
+//==============================================================================
+pub type ScreenFadeHoldEvent = Box<dyn FnOnce(&mut NodeTree, &Engine, ScreenFadeHold)>;
+
+//==============================================================================
+// UI 가 받지 않은 입력의 처리기. (원본 setPlayInputHandler 의 처리기 객체, 좌표는 게임 영역 좌표)
+//==============================================================================
+pub type PlayInputHandler = Box<dyn FnMut(PlayInput)>;
+
+//==============================================================================
 // UI 가 받지 않은 입력. (게임 영역 좌표: 세이프 에어리어 왼쪽 위 기준, 원본 처리기의 press, move, release, wheel)
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -184,11 +195,16 @@ pub struct GameSceneBase {
 	screen_fade_seconds: f32,
 	is_play_input_enabled: bool,
 	play_inputs: Vec<PlayInput>,
+	play_input_handler: Option<PlayInputHandler>,
 	// 지금 누름이 놀이로 갔는지.
 	is_play_press_active: bool,
 	// 게임 영역의 고정 쪽 길이. (0 이면 쓰지 않음)
 	play_area_fixed_length: f32,
 	is_play_area_landscape: bool,
+	// initialize 에서 세이프 에어리어 노드를 만드는지. (UISceneBase 는 노드 대신 가이드 UINode 를 쓴다)
+	is_safe_area_node_enabled: bool,
+	// 개발자 도구. (EngineConfiguration::use_dev_tools 가 꺼져 있으면 None)
+	dev_tools: Option<DevTools>,
 }
 
 impl GameSceneBase {
@@ -229,10 +245,34 @@ impl GameSceneBase {
 			screen_fade_seconds: DEFAULT_SCREEN_FADE_SECONDS,
 			is_play_input_enabled: false,
 			play_inputs: Vec::new(),
+			play_input_handler: None,
 			is_play_press_active: false,
 			play_area_fixed_length: 0.0,
 			is_play_area_landscape: false,
+			is_safe_area_node_enabled: true,
+			dev_tools: None,
 		}
+	}
+
+	//==============================================================================
+	// 개발자 도구 반환. (initialize 전이거나 EngineConfiguration::use_dev_tools 가 꺼져 있으면 None)
+	//==============================================================================
+	pub fn get_dev_tools(&self) -> Option<&DevTools> {
+		self.dev_tools.as_ref()
+	}
+
+	//==============================================================================
+	// 개발자 도구 반환. (변경용)
+	//==============================================================================
+	pub fn get_dev_tools_mut(&mut self) -> Option<&mut DevTools> {
+		self.dev_tools.as_mut()
+	}
+
+	//==============================================================================
+	// initialize 에서 세이프 에어리어 노드를 만들지 설정. (UISceneBase 가 끈다)
+	//==============================================================================
+	pub(crate) fn set_safe_area_node_enabled(&mut self, is_safe_area_node_enabled: bool) {
+		self.is_safe_area_node_enabled = is_safe_area_node_enabled;
 	}
 
 	//==============================================================================
@@ -324,6 +364,13 @@ impl GameSceneBase {
 	//==============================================================================
 	pub fn has_loading_drawer(&self) -> bool {
 		self.loading_drawer.is_some()
+	}
+
+	//==============================================================================
+	// 로딩 화면 그리기 함수 반환. (없으면 None)
+	//==============================================================================
+	pub fn get_loading_drawer(&self) -> Option<&LoadingDrawer> {
+		self.loading_drawer.as_ref()
 	}
 
 	//==============================================================================
@@ -579,7 +626,21 @@ impl GameSceneBase {
 	pub fn initialize(&mut self, engine: &mut Engine) {
 		self.apply_view_scale_mode(engine);
 		self.apply_play_area_reference(engine);
-		self.create_safe_area_node();
+		// 개발자 도구. (EngineConfiguration::use_dev_tools 가 꺼져 있으면 만들지 않는다)
+		self.dev_tools = None;
+		if engine.get_engine_configuration().use_dev_tools {
+			let mut dev_tools = DevTools::new();
+			dev_tools.set_root_nodes(vec![self.scene_base.get_root_id()]);
+			self.dev_tools = Some(dev_tools);
+		}
+		if self.is_safe_area_node_enabled {
+			self.create_safe_area_node();
+		}
+		else {
+			self.last_safe_area_rect = Rect::zero();
+			self.last_view_size_x = 0.0;
+			self.last_view_size_y = 0.0;
+		}
 	}
 
 	//==============================================================================
@@ -598,9 +659,10 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 화면 크기 변경됨. (기본 레이아웃을 다시 한다. 씬은 이 뒤에 자기 layout 을 부른다)
+	// 화면 크기 변경됨. (게임 영역 기준을 다시 걸고 기본 레이아웃을 다시 한다. 씬의 layout 은 game_scene! 이 이 뒤에 부른다)
 	//==============================================================================
-	pub fn resize(&mut self, engine: &Engine, _canvas_native_size: Vector2) {
+	pub fn resize(&mut self, engine: &mut Engine, _canvas_native_size: Vector2) {
+		self.apply_play_area_reference(engine);
 		self.layout(engine);
 	}
 
@@ -693,18 +755,24 @@ impl GameSceneBase {
 	// 갱신. (노드 → TouchRecognizer 터치 → 트윈, 그다음 뷰 크기 변화를 보고 레이아웃. 레이아웃을 다시 했으면 true)
 	// - 모바일 주소창이 나타나고 사라질 때처럼 resize 만으로는 놓칠 수 있어 매 tick 확인한다. (원본과 같음)
 	//==============================================================================
-	pub fn tick(&mut self, engine: &Engine, time_delta: f32) -> bool {
+	pub fn tick(&mut self, engine: &mut Engine, time_delta: f32) -> bool {
 		self.scene_base.get_node_tree_mut().tick(engine, time_delta);
 		self.tick_touch(engine);
 		self.scene_base.tick_tweens(time_delta);
+		let is_layout_changed = self.update_layout_if_view_size_changed(engine);
 		self.update_screen_fade(engine);
-		self.update_layout_if_view_size_changed(engine)
+		if let Some(dev_tools) = self.dev_tools.as_mut() {
+			let unscaled_time_delta = engine.get_time_manager().get_unscale_delta_time();
+			dev_tools.tick(engine, self.scene_base.get_node_tree_mut(), unscaled_time_delta);
+		}
+		is_layout_changed
 	}
 
 	//==============================================================================
-	// 터치 갱신. (TouchRecognizer 로 UI 에 넘기고, 켜져 있으면 UI 가 받지 않은 입력을 놀이 입력으로 모은다)
+	// 터치 갱신. (TouchRecognizer 로 UI 에 넘기고, 처리기나 모으기가 켜져 있으면 UI 가 받지 않은 입력을 놀이 입력으로 넘긴다)
 	// - 페이드 막이 걸린 동안은 누름과 휠을 막고, 이미 누르던 손가락의 이동, 뗌, 취소만 넘긴다.
 	// - UI 판정은 넘기기 전에 한다. (누른 단추가 창을 띄워도 이 누름은 놀이로 가지 않게)
+	// - 휠은 창 층 안을 가리키면 맨 위의 창이 먼저 받는다. (원본 touchWheel)
 	//==============================================================================
 	fn tick_touch(&mut self, engine: &Engine) {
 		let input_manager = engine.get_input_manager();
@@ -714,8 +782,16 @@ impl GameSceneBase {
 		let is_touch_ended = input_manager.is_touch_released() || input_manager.is_touch_cancelled();
 		let wheel_delta = Vector2::create(input_manager.get_wheel_delta_x(), input_manager.get_wheel_delta_y());
 		let is_wheel = wheel_delta.x != 0.0 || wheel_delta.y != 0.0;
+		// 개발자 도구 판 위의 입력은 UI 와 놀이로 넘기지 않는다. (원본 isDevToolsCapturingInput)
+		if self.is_dev_tools_capturing_input(engine) {
+			return;
+		}
 		let is_screen_fading = self.is_screen_fading();
+		let is_play_input_wanted = self.is_play_input_enabled || self.play_input_handler.is_some();
 		if is_screen_fading {
+			if is_touch_pressed {
+				self.is_play_press_active = false;
+			}
 			if self.touch_recognizer.is_touching() {
 				let node_tree = self.scene_base.get_node_tree_mut();
 				if is_touch_moved {
@@ -731,31 +807,59 @@ impl GameSceneBase {
 		}
 		else {
 			let is_user_interface_pressed = is_touch_pressed && self.is_user_interface_at(view_input_position);
-			let is_user_interface_wheeled = is_wheel && self.is_user_interface_at(view_input_position);
-			self.touch_recognizer.tick_touch(self.scene_base.get_node_tree_mut(), engine);
-			if self.is_play_input_enabled {
-				let play_area_position = self.convert_view_to_play_area(view_input_position);
-				if is_wheel && !is_user_interface_wheeled {
-					self.play_inputs.push(PlayInput::Wheel(play_area_position, wheel_delta));
-				}
-				if is_touch_pressed {
-					self.is_play_press_active = !is_user_interface_pressed;
-					if self.is_play_press_active {
-						self.play_inputs.push(PlayInput::Press(play_area_position));
+			let mut is_play_wheel = false;
+			if is_wheel {
+				let hit_node_id = self.scene_base.get_node_tree().find_topmost_interactable_node(view_input_position);
+				let window_layer_id = hit_node_id.and_then(|hit_node_id| UIWindowLayer::find_window_layer_of(self.scene_base.get_node_tree(), hit_node_id));
+				match window_layer_id {
+					Some(window_layer_id) => {
+						UIWindowLayer::scroll_window_at(self.scene_base.get_node_tree_mut(), engine, window_layer_id, view_input_position, wheel_delta);
+						self.touch_recognizer.mark_wheel_handled();
+					}
+					None => {
+						let is_wheel_handled = self.touch_recognizer.tick_wheel(self.scene_base.get_node_tree_mut(), engine);
+						is_play_wheel = !is_wheel_handled && hit_node_id.is_none();
 					}
 				}
 			}
+			else {
+				self.touch_recognizer.tick_wheel(self.scene_base.get_node_tree_mut(), engine);
+			}
+			self.touch_recognizer.tick_pointer(self.scene_base.get_node_tree_mut(), engine);
+			if is_play_wheel && is_play_input_wanted {
+				let play_area_position = self.convert_view_to_play_area(view_input_position);
+				self.dispatch_play_input(PlayInput::Wheel(play_area_position, wheel_delta));
+			}
+			if is_touch_pressed {
+				self.is_play_press_active = is_play_input_wanted && !is_user_interface_pressed;
+				if self.is_play_press_active {
+					let play_area_position = self.convert_view_to_play_area(view_input_position);
+					self.dispatch_play_input(PlayInput::Press(play_area_position));
+				}
+			}
 		}
-		if !self.is_play_input_enabled || !self.is_play_press_active {
+		if !self.is_play_press_active {
 			return;
 		}
 		let play_area_position = self.convert_view_to_play_area(view_input_position);
 		if is_touch_moved && !is_touch_pressed {
-			self.play_inputs.push(PlayInput::Move(play_area_position));
+			self.dispatch_play_input(PlayInput::Move(play_area_position));
 		}
 		if is_touch_ended {
 			self.is_play_press_active = false;
-			self.play_inputs.push(PlayInput::Release(play_area_position));
+			self.dispatch_play_input(PlayInput::Release(play_area_position));
+		}
+	}
+
+	//==============================================================================
+	// 놀이 입력 넘기기. (처리기가 있으면 부르고, 모으기가 켜져 있으면 모은다, 원본 dispatchPlayInput)
+	//==============================================================================
+	fn dispatch_play_input(&mut self, play_input: PlayInput) {
+		if let Some(play_input_handler) = self.play_input_handler.as_mut() {
+			play_input_handler(play_input);
+		}
+		if self.is_play_input_enabled {
+			self.play_inputs.push(play_input);
 		}
 	}
 
@@ -767,10 +871,17 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 개발자 도구가 입력을 가져가는 중인지. (DEVTools 를 옮기지 않아 늘 false)
+	// 개발자 도구가 입력을 가져가는 중인지. (보이고, 누른 자리가 판 안)
 	//==============================================================================
-	pub fn is_dev_tools_capturing_input(&self) -> bool {
-		false
+	pub fn is_dev_tools_capturing_input(&self, engine: &Engine) -> bool {
+		match self.dev_tools.as_ref() {
+			Some(dev_tools) => {
+				dev_tools.is_visible() && dev_tools.is_pointer_inside_panel(engine)
+			}
+			None => {
+				false
+			}
+		}
 	}
 
 	//==============================================================================
@@ -781,9 +892,19 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 이후 출력. (어두워지는 막을 세이프 에어리어까지 캔버스 전체에 그린다, 씬 post_draw 에서 부른다)
+	// 이후 출력. (어두워지는 막을 세이프 에어리어까지 캔버스 전체에 그리고, 개발자 도구를 맨 위에 그린다)
 	//==============================================================================
-	pub fn post_draw(&self, engine: &Engine, graphic: &mut Graphic) {
+	pub fn post_draw(&mut self, engine: &Engine, graphic: &mut Graphic) {
+		self.draw_screen_fade(engine, graphic);
+		if let Some(dev_tools) = self.dev_tools.as_mut() {
+			dev_tools.draw(engine, self.scene_base.get_node_tree(), graphic);
+		}
+	}
+
+	//==============================================================================
+	// 어두워지는 막 그리기. (세이프 에어리어까지 캔버스 전체, 원본 drawScreenFade)
+	//==============================================================================
+	pub fn draw_screen_fade(&self, engine: &Engine, graphic: &mut Graphic) {
 		if self.screen_fade_alpha <= 0.0 {
 			return;
 		}
@@ -808,6 +929,18 @@ impl GameSceneBase {
 		self.screen_fade_event = on_dark;
 		self.screen_fade_direction = 1;
 		true
+	}
+
+	//==============================================================================
+	// 어두워졌다 밝아지기의 콜백 꼴. (다 어두워지면 on_dark 에 손잡이를 넘기고, 그 손잡이를 놓을 때까지 어둡게 둔다, 이미 페이드 중이면 false)
+	// - 원본 onDark 가 돌려주는 Promise 의 resolve 자리가 손잡이의 release 다. 다 어두워진 자리에서 바로 놓으면 바로 밝아진다.
+	//==============================================================================
+	pub fn fade_screen_with_hold(&mut self, on_dark: ScreenFadeHoldEvent) -> bool {
+		self.fade_screen(Some(Box::new(move |node_tree: &mut NodeTree, engine: &Engine| {
+			let screen_fade_hold = ScreenFadeHold::new();
+			on_dark(node_tree, engine, screen_fade_hold.clone());
+			Some(screen_fade_hold)
+		})))
 	}
 
 	//==============================================================================
@@ -899,6 +1032,14 @@ impl GameSceneBase {
 		if !is_play_input_enabled {
 			self.play_inputs.clear();
 		}
+	}
+
+	//==============================================================================
+	// UI 가 받지 않은 입력의 처리기 설정. (원본 setPlayInputHandler, None 이면 끈다, 놀이로 간 누름은 잊는다)
+	//==============================================================================
+	pub fn set_play_input_handler(&mut self, play_input_handler: Option<PlayInputHandler>) {
+		self.play_input_handler = play_input_handler;
+		self.is_play_press_active = false;
 	}
 
 	//==============================================================================
@@ -1030,6 +1171,144 @@ impl Default for GameSceneBase {
 	}
 }
 
+//==============================================================================
+// 게임 씬. (원본 GameScene 을 상속한 씬이 덮어쓰는 자리)
+// - 씬은 GameSceneBase 를 품고 이 트레이트를 구현한 뒤 game_scene!(씬 타입) 으로 Scene 을 얻는다.
+// - game_scene! 이 만든 Scene 함수는 바탕(GameSceneBase)을 먼저 부르고 이 트레이트의 같은 이름 함수를 부른다. (원본에서 super 를 먼저 부르는 덮어쓰기)
+//   post_draw 만 씬의 것을 먼저 부르고 바탕(페이드 막, 개발자 도구)을 위에 그린다.
+// - layout 은 바탕이 세이프 에어리어를 다시 계산한 뒤 부른다. (resize, 그리고 tick 이 뷰 크기 변화를 본 때. 첫 tick 에도 한 번)
+// - load_assets 는 create 에서 바탕의 로딩 이미지 요청 뒤에 부른다. 씬의 애셋을 요청하고 get_scene_base_mut().track_asset 으로 맡긴다.
+//==============================================================================
+pub trait GameScene: 'static {
+	//==============================================================================
+	// 바탕 반환.
+	//==============================================================================
+	fn get_game_scene_base(&self) -> &GameSceneBase;
+
+	//==============================================================================
+	// 바탕 반환. (변경용)
+	//==============================================================================
+	fn get_game_scene_base_mut(&mut self) -> &mut GameSceneBase;
+
+	//==============================================================================
+	// 씬의 애셋 읽기. (원본 load_assets 덮어쓰기, 바탕의 로딩 이미지 요청 뒤)
+	//==============================================================================
+	fn load_assets(&mut self, _engine: &mut Engine) {
+	}
+
+	//==============================================================================
+	// 로딩 화면 위에 더 그리기. (바탕의 로딩 화면 뒤)
+	//==============================================================================
+	fn draw_on_load(&mut self, _engine: &mut Engine, _graphic: &mut Graphic) {
+	}
+
+	//==============================================================================
+	// 초기화. (바탕 initialize 뒤, 세이프 에어리어 노드가 생긴 다음)
+	//==============================================================================
+	fn initialize(&mut self, _engine: &mut Engine) {
+	}
+
+	//==============================================================================
+	// 소멸.
+	//==============================================================================
+	fn destroy(&mut self, _engine: &mut Engine) {
+	}
+
+	//==============================================================================
+	// 레이아웃. (원본 layout 덮어쓰기, 바탕이 세이프 에어리어를 다시 계산한 뒤)
+	//==============================================================================
+	fn layout(&mut self, _engine: &mut Engine) {
+	}
+
+	//==============================================================================
+	// 갱신. (바탕 tick 뒤: 노드, 터치, 트윈, 레이아웃, 페이드, 개발자 도구)
+	//==============================================================================
+	fn tick(&mut self, _engine: &mut Engine, _time_delta: f32) {
+	}
+
+	//==============================================================================
+	// 이전 출력. (바탕의 배경 칠하기 뒤)
+	//==============================================================================
+	fn pre_draw(&mut self, _engine: &mut Engine, _graphic: &mut Graphic) {
+	}
+
+	//==============================================================================
+	// 출력. (노드 트리를 그린 뒤)
+	//==============================================================================
+	fn draw(&mut self, _engine: &mut Engine, _graphic: &mut Graphic) {
+	}
+
+	//==============================================================================
+	// 이후 출력. (바탕의 페이드 막과 개발자 도구보다 먼저)
+	//==============================================================================
+	fn post_draw(&mut self, _engine: &mut Engine, _graphic: &mut Graphic) {
+	}
+}
+
+//==============================================================================
+// GameScene 을 구현한 씬에 Scene 을 만들어 준다. (vanilla::game_scene!(TitleScene);)
+//==============================================================================
+#[macro_export]
+macro_rules! game_scene {
+	($scene_type:ty) => {
+		impl $crate::core::scene::Scene for $scene_type {
+			fn get_scene_base(&self) -> &$crate::core::scene::SceneBase {
+				$crate::game::gamescene::GameScene::get_game_scene_base(self).get_scene_base()
+			}
+
+			fn get_scene_base_mut(&mut self) -> &mut $crate::core::scene::SceneBase {
+				$crate::game::gamescene::GameScene::get_game_scene_base_mut(self).get_scene_base_mut()
+			}
+
+			fn create(&mut self, engine: &mut $crate::core::engine::Engine) {
+				$crate::game::gamescene::GameScene::get_game_scene_base_mut(self).create(engine);
+				$crate::game::gamescene::GameScene::load_assets(self, engine);
+			}
+
+			fn draw_on_load(&mut self, engine: &mut $crate::core::engine::Engine, graphic: &mut $crate::core::graphic::Graphic) {
+				$crate::game::gamescene::GameScene::get_game_scene_base_mut(self).draw_on_load(engine, graphic);
+				$crate::game::gamescene::GameScene::draw_on_load(self, engine, graphic);
+			}
+
+			fn initialize(&mut self, engine: &mut $crate::core::engine::Engine) {
+				$crate::game::gamescene::GameScene::get_game_scene_base_mut(self).initialize(engine);
+				$crate::game::gamescene::GameScene::initialize(self, engine);
+			}
+
+			fn destroy(&mut self, engine: &mut $crate::core::engine::Engine) {
+				$crate::game::gamescene::GameScene::destroy(self, engine);
+			}
+
+			fn resize(&mut self, engine: &mut $crate::core::engine::Engine, canvas_native_size: $crate::base::vector2::Vector2) {
+				$crate::game::gamescene::GameScene::get_game_scene_base_mut(self).resize(engine, canvas_native_size);
+				$crate::game::gamescene::GameScene::layout(self, engine);
+			}
+
+			fn tick(&mut self, engine: &mut $crate::core::engine::Engine, time_delta: f32) {
+				if $crate::game::gamescene::GameScene::get_game_scene_base_mut(self).tick(engine, time_delta) {
+					$crate::game::gamescene::GameScene::layout(self, engine);
+				}
+				$crate::game::gamescene::GameScene::tick(self, engine, time_delta);
+			}
+
+			fn pre_draw(&mut self, engine: &mut $crate::core::engine::Engine, graphic: &mut $crate::core::graphic::Graphic) {
+				$crate::game::gamescene::GameScene::get_game_scene_base(self).pre_draw(engine, graphic);
+				$crate::game::gamescene::GameScene::pre_draw(self, engine, graphic);
+			}
+
+			fn draw(&mut self, engine: &mut $crate::core::engine::Engine, graphic: &mut $crate::core::graphic::Graphic) {
+				$crate::game::gamescene::GameScene::get_game_scene_base_mut(self).get_scene_base_mut().draw(graphic);
+				$crate::game::gamescene::GameScene::draw(self, engine, graphic);
+			}
+
+			fn post_draw(&mut self, engine: &mut $crate::core::engine::Engine, graphic: &mut $crate::core::graphic::Graphic) {
+				$crate::game::gamescene::GameScene::post_draw(self, engine, graphic);
+				$crate::game::gamescene::GameScene::get_game_scene_base_mut(self).post_draw(engine, graphic);
+			}
+		}
+	};
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -1095,21 +1374,21 @@ mod tests {
 		let safe_area_node_id = game_scene_base.get_safe_area_node_id().expect("safe area node");
 		assert_eq!(game_scene_base.get_scene_base().get_node_tree()[safe_area_node_id].get_name(), "safeArea");
 
-		assert!(game_scene_base.tick(&engine, 0.016));
+		assert!(game_scene_base.tick(&mut engine, 0.016));
 		assert_eq!(game_scene_base.get_safe_area_rect(), Rect::create(5.0, 10.0, 795.0, 570.0));
 		let safe_area_node = &game_scene_base.get_scene_base().get_node_tree()[safe_area_node_id];
 		assert_eq!(safe_area_node.get_local_position(), Vector2::create(5.0, 10.0));
 		assert_eq!(safe_area_node.get_content_size(), Vector2::create(795.0, 570.0));
-		assert!(!game_scene_base.tick(&engine, 0.016));
+		assert!(!game_scene_base.tick(&mut engine, 0.016));
 
 		engine.get_view_manager_mut().calculate_view_rect(1024, 768, 1.0);
-		assert!(game_scene_base.tick(&engine, 0.016));
+		assert!(game_scene_base.tick(&mut engine, 0.016));
 		assert_eq!(game_scene_base.get_safe_area_rect(), Rect::create(5.0, 10.0, 1019.0, 738.0));
-		assert!(!game_scene_base.tick(&engine, 0.016));
+		assert!(!game_scene_base.tick(&mut engine, 0.016));
 
 		game_scene_base.set_view_scale_mode(ViewScaleMode::ReferenceResolution, Some(&mut engine));
 		assert_eq!(engine.get_view_manager().get_view_size(), Vector2::create(1280.0, 720.0));
-		assert!(game_scene_base.tick(&engine, 0.016));
+		assert!(game_scene_base.tick(&mut engine, 0.016));
 		assert_eq!(game_scene_base.get_safe_area_rect(), Rect::create(5.0, 10.0, 1275.0, 690.0));
 	}
 
@@ -1291,5 +1570,97 @@ mod tests {
 		assert!(colored_scene_base.has_loading_drawer());
 		colored_scene_base.set_loading_progress(0.25);
 		assert_eq!(colored_scene_base.get_loading_progress_state().get_progress(), 0.25);
+	}
+	//==============================================================================
+	// game_scene! 으로 만든 씬: 바탕이 resize 에서 게임 영역 기준과 레이아웃을 하고 씬의 layout 을 부른다. 첫 tick 에도 layout 이 불린다.
+	//==============================================================================
+	struct LayoutCountScene {
+		game_scene_base: GameSceneBase,
+		layout_count: u32,
+		tick_count: u32,
+	}
+
+	impl GameScene for LayoutCountScene {
+		fn get_game_scene_base(&self) -> &GameSceneBase {
+			&self.game_scene_base
+		}
+
+		fn get_game_scene_base_mut(&mut self) -> &mut GameSceneBase {
+			&mut self.game_scene_base
+		}
+
+		fn layout(&mut self, _engine: &mut Engine) {
+			self.layout_count += 1;
+		}
+
+		fn tick(&mut self, _engine: &mut Engine, _time_delta: f32) {
+			self.tick_count += 1;
+		}
+	}
+
+	crate::game_scene!(LayoutCountScene);
+
+	#[test]
+	fn game_scene_macro_calls_base_and_hooks() {
+		use crate::core::scene::Scene;
+		let mut engine = Engine::new(EngineConfiguration::new());
+		engine.get_view_manager_mut().calculate_view_rect(800, 600, 1.0);
+		engine.get_view_manager_mut().set_safe_area_override(Some([40.0, 0.0, 30.0, 0.0]));
+		let mut scene = LayoutCountScene {
+			game_scene_base: GameSceneBase::new(),
+			layout_count: 0,
+			tick_count: 0,
+		};
+		scene.game_scene_base.set_play_area_reference(720.0, false, None);
+		Scene::initialize(&mut scene, &mut engine);
+		assert!(scene.game_scene_base.get_dev_tools().is_some());
+		Scene::tick(&mut scene, &mut engine, 0.016);
+		assert_eq!(scene.layout_count, 1);
+		assert_eq!(scene.tick_count, 1);
+		Scene::tick(&mut scene, &mut engine, 0.016);
+		assert_eq!(scene.layout_count, 1);
+		Scene::resize(&mut scene, &mut engine, Vector2::create(800.0, 600.0));
+		assert_eq!(scene.layout_count, 2);
+		assert!((scene.game_scene_base.get_safe_area_rect().size.y - 720.0).abs() < 0.01);
+	}
+
+	//==============================================================================
+	// 놀이 입력 처리기: UI 가 받지 않은 누름과 그 뗌을 처리기로 받는다. 페이드 콜백 꼴: 받은 손잡이를 놓을 때까지 어둡다.
+	//==============================================================================
+	#[test]
+	fn play_input_handler_and_fade_with_hold() {
+		let mut engine = Engine::new(EngineConfiguration::new());
+		engine.get_view_manager_mut().calculate_view_rect(800, 600, 1.0);
+		let mut game_scene_base = GameSceneBase::new();
+		game_scene_base.set_safe_area_insets(Some([0.0, 0.0, 0.0, 0.0]));
+		game_scene_base.initialize(&mut engine);
+		let received_inputs: Rc<std::cell::RefCell<Vec<PlayInput>>> = Rc::new(std::cell::RefCell::new(Vec::new()));
+		let received_inputs_handler = received_inputs.clone();
+		game_scene_base.set_play_input_handler(Some(Box::new(move |play_input: PlayInput| {
+			received_inputs_handler.borrow_mut().push(play_input);
+		})));
+		let mut current_seconds = 1.0;
+		press_and_release(&mut engine, &mut game_scene_base, &mut current_seconds, Vector2::create(50.0, 60.0));
+		assert_eq!(*received_inputs.borrow(), vec![PlayInput::Press(Vector2::create(50.0, 60.0)), PlayInput::Release(Vector2::create(50.0, 60.0))]);
+		assert!(game_scene_base.take_play_inputs().is_empty());
+
+		game_scene_base.set_screen_fade_seconds(0.1);
+		let held_hold: Rc<std::cell::RefCell<Option<ScreenFadeHold>>> = Rc::new(std::cell::RefCell::new(None));
+		let held_hold_event = held_hold.clone();
+		assert!(game_scene_base.fade_screen_with_hold(Box::new(move |_node_tree: &mut NodeTree, _engine: &Engine, screen_fade_hold: ScreenFadeHold| {
+			*held_hold_event.borrow_mut() = Some(screen_fade_hold);
+		})));
+		for _ in 0..3 {
+			step_frame(&mut engine, &mut game_scene_base, &mut current_seconds, 0.1);
+		}
+		assert!(held_hold.borrow().is_some());
+		assert_eq!(game_scene_base.get_screen_fade_alpha(), 1.0);
+		if let Some(screen_fade_hold) = held_hold.borrow().as_ref() {
+			screen_fade_hold.release();
+		}
+		for _ in 0..3 {
+			step_frame(&mut engine, &mut game_scene_base, &mut current_seconds, 0.1);
+		}
+		assert!(!game_scene_base.is_screen_fading());
 	}
 }

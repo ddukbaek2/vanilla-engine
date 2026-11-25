@@ -1,5 +1,5 @@
 //==============================================================================
-// 알림이 나오고 사라지는 모션. (vanilla.js ui/toastmotion.js 의 ToastMotion, readToastSeconds)
+// 알림이 나오고 사라지는 모션. (vanilla.js ui/toastmotion.js 의 ToastMotion, ToastPhase, readToastSeconds, attachToastMotion)
 // - 알림 노드에 붙여 show 로 띄운다. 바깥쪽(위 알림은 위, 아래 알림은 아래)에서 미끄러져 들어오며 보이고 살짝 커졌다 돌아오고,
 //   머무는 시간이 지나면 떠오르며 사라진다.
 // - 떠 있는 동안 다른 글이 오면 앞 것이 빨리 비키고 새 글이 들어오며, 같은 글이 또 오면 시간만 다시 채우고 통 튄다.
@@ -12,7 +12,7 @@ use std::f32::consts::PI;
 
 use crate::base::vector2::Vector2;
 use crate::core::component::{Component, ComponentBase};
-use crate::core::node::nodetree::ComponentContext;
+use crate::core::node::nodetree::{ComponentContext, NodeId, NodeTree};
 
 // 나옴: 바깥쪽에서 미끄러져 들어오는 거리, 투명에서 보이기까지와 커졌다 돌아오는 초, 크기.
 const ENTER_DISTANCE: f32 = 10.0;
@@ -217,6 +217,13 @@ impl ToastMotion {
 		transform.set_local_opacity(opacity);
 		self.applied_position = Some(position);
 	}
+}
+
+//==============================================================================
+// 알림 노드에 모션 붙이기. (들어오는 쪽을 정하고 붙인 ToastMotion 을 돌려준다, 원본 attachToastMotion)
+//==============================================================================
+pub fn attach_toast_motion(node_tree: &mut NodeTree, node_id: NodeId, enter_side: f32) -> Option<&mut ToastMotion> {
+	node_tree.add_component(node_id, ToastMotion::new(enter_side))
 }
 
 impl Component for ToastMotion {

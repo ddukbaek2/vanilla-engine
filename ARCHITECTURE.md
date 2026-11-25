@@ -18,13 +18,14 @@ src/resource/        애셋 (이미지, 글, JSON, 바이너리, 글꼴, 오디�
 src/effect/          ParticleSystem, ShaderSprite, ScreenEffect, TrailRenderer
 src/misc/            BeepPlayer, Camera2D, Shaker, Grid, PathFinder, Collision2D, Steering2D, NodeLayout, LocalStorage, PersistedStore,
                      FloatingText, VirtualPad, PlatformerBody, SpriteAnimator, Localization, Typewriter, Dialogue, FocusNavigator,
-                     PointerGesture, ImageScroller, TouchEffect
+                     PointerGesture, ImageScroller, TouchEffect, DevTools(F2 하이어라키/인스펙터)
 src/graphics3d/      Material, SkinnedModel(glTF/GLB), FbxLoader, SkinnedModelRenderer(스키닝 PBR), ShadowMap, RenderTarget, BloomEffect,
                      AmbientOcclusionEffect, SubsurfaceScatteringEffect (FullscreenPass 는 core)
 src/ui/              UIView, UIControl, UILabel, UIButton, UIToggleButton, UISlider, UIProgressView, UIImageView, UIScrollView, UIScrollBar, TouchRecognizer, UIInputField(데스크탑 winit IME, 웹 숨긴 DOM input, 클립보드 arboard),
-                     UIListView, UISnapScrollView, UIDropdown, UIDialog, UIToast, PopupMotion, UIDraggable, UISpinner, UIContextMenu, UIChart
-src/game/            GameSceneBase (원본 GameScene: 로딩 화면, 터치 라우팅, 세이프 에어리어, 크기 바뀌면 다시 놓기)
-src/web/             WebSocketClient (ewebsock, 데스크탑과 웹)
+                     UIListView, UISnapScrollView, UIDropdown, UIDialog, UIToast, PopupMotion, UIDraggable, UISpinner, UIContextMenu, UIChart,
+                     UIWindow, UIWindowLayer, UIConfirmWindow, UIDocument, UINode, UIScene(UISceneBase), autolayout(LayoutSolver 등)
+src/game/            GameSceneBase, GameScene 트레이트와 game_scene! (원본 GameScene: 로딩 화면, 터치 라우팅, 세이프 에어리어, 크기 바뀌면 다시 놓기, 페이드, 놀이 입력, 개발자 도구)
+src/web/             WebSocketClient (ewebsock, 데스크탑과 웹), Pane (DOM 화면 분할 패널, 웹 전용)
 src/platform/        창, GL 컨텍스트, 입력 이벤트, 프레임 루프, 화면 넘기기, 애셋 바이트 읽기, 오디오 백엔드
   desktop.rs         winit 0.30 + glutin 0.32 (OpenGL 3.3 코어)
   web.rs             캔버스 + WebGL2 + request_animation_frame + fetch
@@ -124,8 +125,11 @@ EngineRunner (플랫폼이 들고 프레임마다 부른다)
 
 ## 9. 아직 안 옮긴 것
 
-- UINode, 오토레이아웃(ui/autolayout), UIScene: 게임들이 쓰지 않아 미뤘다.
-- DevTools(F2 하이어라키/인스펙터), DynamicFont, web/Pane(DOM 창).
+- DynamicFont.
+- UINode, 오토레이아웃(ui/autolayout), UIScene 은 옮겼다. 노드 종류가 WorldNode 하나뿐이라 UINode 는 노드에 붙는 컴포넌트이고, 솔버 값을 노드의 자리와 content_size 로 옮긴다. (ui/uinode.rs, ui/uiscene.rs)
+- GameScene, UIScene 의 덮어쓰기는 GameScene, UIScene 트레이트와 game_scene!, ui_scene! 매크로다. 바탕이 resize, layout, post_draw 를 스스로 부른다. (game/gamescene.rs)
+- DevTools 는 옮겼다. 리플렉션이 없어 인스펙터의 컴포넌트 속성은 UIDocument 가 저장하는 키와 값으로 보인다. (misc/devtools.rs)
+- web/Pane(DOM 화면 분할 패널)은 웹(wasm32) 빌드에만 옮겼다. 데스크탑에는 DOM 이 없다. (web/pane.rs)
 - UIDocument 는 옮겼다. 원본의 리플렉션 직렬화 대신 종류 이름마다 짓기, 쓰기, 읽기 함수를 표에 등록하고, 원본이 반사로 저장하는 종류는 원본 반사 결과와 같은 키로 쓴다. (ui/uidocument.rs)
 - 원본 160파일 가운데 122파일을 옮겼고, 20파일은 죽은 코드이거나 러스트 표준으로 대신해서 일부러 옮기지 않았다. (2026-11-25, HumanSkinRenderer 를 옮김)
 - experimental/camera.js 는 옮기지 않는다. 회전과 begin/end 를 Camera2D(misc/camera2d.rs)에 넣어 그 기능을 모두 덮는다. experimental/transform2d.js, aabb.js 는 파일 전체가 주석이다.

@@ -1,6 +1,6 @@
 //==============================================================================
 // 입력 필드 갤러리. (바닐라엔진 UIInputField, RichText 예제)
-// - 입력 필드 넷: 포커스를 받아 한글을 치는 칸, 안내 글만 있는 칸, 선택 영역이 남은 칸, 캔버스 모드(use_dominput 꺼짐) 칸.
+// - 입력 필드 넷: 포커스를 받아 한글을 치는 칸, 안내 글만 있는 칸, 선택 영역이 남은 칸, 캔버스 모드(use_dom_input 꺼짐) 칸.
 // - 리치텍스트 라벨 셋: 굵게, 색, 크기, 밑줄, 취소선, 기울임, 모르는 태그. 정렬을 달리한다.
 // - 사람이 없어도 확인할 수 있게, 정해 둔 프레임에 입력을 흉내 낸다. (엔진 글 입력 줄에 직접 넣는다)
 //   5 프레임: 첫 칸을 누름 → 12, 16: 확정 글 "안녕하세요 ", "vanilla" → 30 ~ 36: 조합 "ㅎ" → "하" → "한" (밑줄과 커서)
@@ -60,11 +60,11 @@ fn create_label_node(node_tree: &mut NodeTree, parent_id: NodeId, name: &str, po
 //==============================================================================
 // 입력 필드 노드 만들기. (위에 설명 글, DOM 입력 여부, attach)
 //==============================================================================
-fn create_field_node(node_tree: &mut NodeTree, parent_id: NodeId, name: &str, position: Vector2, caption: &str, use_dominput: bool) -> NodeId {
+fn create_field_node(node_tree: &mut NodeTree, parent_id: NodeId, name: &str, position: Vector2, caption: &str, use_dom_input: bool) -> NodeId {
 	create_label_node(node_tree, parent_id, "caption", Vector2::create(position.x, position.y - 28.0), Vector2::create(FIELD_WIDTH, 24.0), caption, 16.0, CAPTION_COLOR);
 	let field_id = create_box_node(node_tree, parent_id, name, position, Vector2::create(FIELD_WIDTH, FIELD_HEIGHT));
 	let field = node_tree.add_component(field_id, UIInputField::new()).expect("field");
-	field.set_use_dominput(use_dominput);
+	field.set_use_dom_input(use_dom_input);
 	field.set_background_color("#f8fafc");
 	field.set_cursor_color(ACCENT_COLOR);
 	field.set_focus_border_color(ACCENT_COLOR);

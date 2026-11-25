@@ -239,10 +239,13 @@ init();
 | `timelineshowcase` | 타임라인 문서 재생 |
 | `modelviewer` | 스키닝 3D(glTF, FBX), 그림자, 블룸 |
 | `engineextras` | 테, 진행 고리, 부드러운 그늘, 마우스 커서, 카메라 손짓, 마우스 단추와 손가락 입력 (직접 눌러 본다) |
+| `devtoolsshowcase` | 개발자 도구(F2): 하이어라키, 인스펙터, 통계, 로컬 스토리지, 설정 |
 | `toonshowcase` | 툰 3D: 기본 도형과 바깥선, GLB 모형의 뼈대 움직임, 셀 셰이딩 |
 | `toonview` | 노드 사각형 안 툰(ToonView3D), Camera3D 로 3D 점 위에 얹은 2D, 비치는 것 정렬, 툰 색 보정 |
 | `audiotone` | 소리 재생, 효과음 풀, 비프 |
 | `gamepadlist` | 연결된 게임패드 목록 |
+| `uiscenelayout` | UIScene 과 UINode 오토레이아웃(세이프 에어리어 가이드, 여백 가이드, 같은 너비 단추, 글의 자연 크기) |
+| `panelayout` | DOM 화면 분할 패널(Pane): 도구 막대, 끌어서 크기를 바꾸는 패널, 오른쪽 패널의 엔진 캔버스 (웹 전용) |
 | `scenedocument` | UI 문서: vanilla.js 비주얼 에디터 꼴의 씬 파일(.scene.json)을 읽어 노드 트리를 짓고, 다시 내보내 견준다 |
 
 ```bash
@@ -335,7 +338,7 @@ cargo run --release --example modelviewer
 
 - 버전 0.3.2. 버전 번호는 vanilla.js 0.3.2 에서 이어 받았습니다.
 - vanilla.js 의 원본 160 파일 가운데 122 파일을 옮겼습니다. 20 파일은 러스트에 필요 없어서(컬렉션, 죽은 코드 같은 것) 옮기지 않았습니다.
-- 다음에 옮길 것: UINode, UIScene, UIDocument, 오토레이아웃, DevTools, DynamicFont, web/Pane
+- 다음에 옮길 것: DynamicFont
 - 윈도우 11 데스크탑, macOS(애플 실리콘) 데스크탑, 크롬에서 확인했습니다. 리눅스와 실제 모바일 기기는 아직 돌려 보지 않았습니다.
 
 ## 코드 스타일

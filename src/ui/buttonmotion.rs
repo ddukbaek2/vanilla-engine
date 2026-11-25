@@ -1,5 +1,5 @@
 //==============================================================================
-// 단추 반응. (vanilla.js ui/buttonmotion.js 의 ButtonMotion, ButtonMotionStyle, setButtonMotionArea, shakeButton)
+// 단추 반응. (vanilla.js ui/buttonmotion.js 의 ButtonMotion, ButtonMotionStyle, attachButtonMotion, setButtonMotionArea, shakeButton)
 // - 단추 노드에 UIButton 다음으로 붙이면, 프레임마다 그 단추의 상태를 읽어 노드를 가운데를 두고 키우고 줄인다.
 //   올리면 커지고, 누르는 동안 줄고, 떼면 통 튀고, 누를 수 없을 때 shake 를 부르면 좌우로 흔들린다.
 // - 색은 건드리지 않는다. (글 단추의 바탕과 글자 색은 화면의 코드가 정하고, 그림 단추는 UIButton 의 틴트가 맡는다)
@@ -452,6 +452,13 @@ impl Component for ButtonMotion {
 			self.applied_position = None;
 		}
 	}
+}
+
+//==============================================================================
+// 단추 노드에 반응 붙이기. (UIButton 이 이미 붙은 노드, 붙인 ButtonMotion 을 돌려준다. 원본 attachButtonMotion)
+//==============================================================================
+pub fn attach_button_motion(node_tree: &mut NodeTree, node_id: NodeId) -> Option<&mut ButtonMotion> {
+	node_tree.add_component(node_id, ButtonMotion::new())
 }
 
 //==============================================================================

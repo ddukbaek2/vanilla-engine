@@ -10,11 +10,9 @@
 //     for message in self.web_socket_client.take_received_messages() { ... }
 //     self.web_socket_client.send(&serde_json::json!({ "type": "move", "x": 3 }));
 // - 원본과 다른 점:
-//   - 받은 JSON 은 수신 콜백이 있으면 그것을 부르고(원본과 같음), 없으면 버리지 않고 모아 두었다가 take_received_messages 로 꺼낸다.
-//     (러스트 콜백은 씬을 빌려 들 수 없어서 꺼내 쓰는 길을 더했다. 최대 RECEIVED_MESSAGE_LIMIT 개, 넘치면 오래된 것부터 버린다)
+//   - 받은 JSON 은 수신 콜백이 있으면 그것을 부르고, 없으면 모아 두었다가 take_received_messages 로 꺼낸다. (원본에도 넣었다, 최대 RECEIVED_MESSAGE_LIMIT 개, 넘치면 오래된 것부터 버린다)
 //   - disconnect 는 원본처럼 onclose 를 기다리지 않고 그 자리에서 끊긴 것으로 친다. (ewebsock 데스크탑은 이쪽에서 닫으면 Closed 사건을 보내지 않는다)
 //   - 오류 사건은 원본처럼 알리고, 끊긴 것으로 친다. (브라우저는 onerror 뒤에 늘 onclose 가 오고, ewebsock 데스크탑은 오류 뒤 스레드가 끝난다)
-//   - 원본 get_receive_event 는 실수로 웹소켓을 돌려준다. 러스트 판은 수신 콜백을 돌려준다.
 //   - get_web_socket 은 ewebsock 의 송신기(WsSender)다.
 //   - 데스크탑에서 wss:// 주소는 ewebsock 의 "tls" 기능을 켜야 열린다. (기본은 꺼 두었다)
 //   - 바이너리 메시지도 UTF-8 JSON 이면 받는다. (원본은 Blob 을 JSON.parse 하다 실패한다)

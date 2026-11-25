@@ -13,6 +13,7 @@
 //     그때 SceneBase 의 첫 터치 콜백과 get_touch_target 은 쓰지 않는다. (이쪽 get_touch_target 을 쓴다)
 //   - 원본 setTimeout(150ms) 은 프레임 간격(배율을 곱하지 않은 시간)을 쌓아 센다.
 //   - 스크롤 뷰에 넘기는 터치는 그 노드의 컴포넌트 모두에게 간다. (NodeTree::dispatch_touch)
+//   - tick_touch 는 휠(tick_wheel)과 누름(tick_pointer)으로 나뉜다. 휠을 다른 길(창 층)로 넘긴 씬은 tick_wheel 대신 mark_wheel_handled 를 부른다. (GameSceneBase)
 //==============================================================================
 use crate::base::vector2::Vector2;
 use crate::core::engine::Engine;
@@ -86,13 +87,16 @@ impl TouchRecognizer {
 	// 터치 갱신. (SceneBase::tick_touch 자리. 휠 → 미룬 누름 → 누름 / 이동 / 뗌 / 취소)
 	//==============================================================================
 	pub fn tick_touch(&mut self, node_tree: &mut NodeTree, engine: &Engine) {
-		let elapsed_seconds = engine.get_time_manager().get_unscale_delta_time();
-		self.update_press_delay(node_tree, engine, elapsed_seconds);
+		self.tick_wheel(node_tree, engine);
+		self.tick_pointer(node_tree, engine);
+	}
 
+	//==============================================================================
+	// 휠 갱신. (누름과 상관없이 그 자리의 가장 앞 스크롤 칸이나 누를 수 있는 노드부터 부모 쪽으로, NodeTree::dispatch_wheel_at, 받아 썼으면 true)
+	//==============================================================================
+	pub fn tick_wheel(&mut self, node_tree: &mut NodeTree, engine: &Engine) -> bool {
 		let input_manager = engine.get_input_manager();
 		let view_input_position = input_manager.get_view_input_position();
-
-		// 휠. (누름과 상관없이 그 자리의 가장 앞 스크롤 칸이나 누를 수 있는 노드부터 부모 쪽으로, NodeTree::dispatch_wheel_at)
 		let wheel_delta_x = input_manager.get_wheel_delta_x();
 		let wheel_delta_y = input_manager.get_wheel_delta_y();
 		let wheel_delta = Vector2::create(wheel_delta_x, wheel_delta_y);
@@ -100,7 +104,25 @@ impl TouchRecognizer {
 		if wheel_delta.x != 0.0 || wheel_delta.y != 0.0 {
 			self.is_wheel_handled = node_tree.dispatch_wheel_at(view_input_position, engine, wheel_delta);
 		}
+		self.is_wheel_handled
+	}
 
+	//==============================================================================
+	// 이번 프레임의 휠을 다른 길(창 층 같은)이 받아 썼다고 적기. (tick_wheel 대신 부른다)
+	//==============================================================================
+	pub fn mark_wheel_handled(&mut self) {
+		self.is_wheel_handled = true;
+	}
+
+	//==============================================================================
+	// 누름 갱신. (미룬 누름 → 누름 / 이동 / 뗌 / 취소)
+	//==============================================================================
+	pub fn tick_pointer(&mut self, node_tree: &mut NodeTree, engine: &Engine) {
+		let elapsed_seconds = engine.get_time_manager().get_unscale_delta_time();
+		self.update_press_delay(node_tree, engine, elapsed_seconds);
+
+		let input_manager = engine.get_input_manager();
+		let view_input_position = input_manager.get_view_input_position();
 		if input_manager.is_touch_pressed() {
 			self.touch_press(node_tree, engine, view_input_position);
 		}

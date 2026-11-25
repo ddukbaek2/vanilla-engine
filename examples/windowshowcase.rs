@@ -2,15 +2,16 @@
 // 창 쌓기와 화면 틀 예제.
 // - 게임 영역 기준(set_play_area_reference): 세이프 에어리어(위 40, 아래 30 을 흉내 냄)를 뺀 게임 영역의 세로가 늘 720 이다.
 // - 창 층(UIWindowLayer)에 기본 창과 확인 창(UIConfirmWindow, 긴 글은 스크롤)을 쌓는다. 맨 위 창만 보이고, 어둠이 세이프 에어리어까지 덮는다.
-// - 화면 페이드(fade_screen): 다 어두워지면 글을 바꾸고 손잡이(ScreenFadeHold)를 0.6 초 붙잡았다가 밝힌다.
-// - UI 가 받지 않은 누름만 놀이 입력(take_play_inputs)으로 받아 표시를 옮긴다. 단추와 창 위 누름은 놀이로 가지 않는다.
+// - 화면 페이드(fade_screen_with_hold): 다 어두워지면 글을 바꾸고 받은 손잡이(ScreenFadeHold)를 0.6 초 붙잡았다가 놓아 밝힌다.
+// - UI 가 받지 않은 누름만 놀이 입력 처리기(set_play_input_handler)로 받아 표시를 옮긴다. 단추와 창 위 누름은 놀이로 가지 않는다.
+// - 씬은 GameScene 트레이트를 구현하고 game_scene! 으로 Scene 을 얻는다. (바탕의 resize, tick, post_draw 를 직접 부르지 않는다)
 // - 처음 몇 초는 저절로 둘러본다: 창 둘 쌓기 → 확인 창 닫기 → 모두 닫기 → 페이드. 그 뒤로는 단추를 눌러 본다.
 // - 실행: cargo run --example windowshowcase
 //==============================================================================
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use vanilla::{Color, ComponentContext, Engine, EngineConfiguration, GameSceneBase, Graphic, NodeId, NodeTree, Paint, Pivot, PlayInput, Scene, SceneBase, ScreenFadeHold, Text, TextAlign, UIButton, UIConfirmWindow, UIConfirmWindowOptions, UILabel, UIWindow, UIWindowDefaultBehavior, UIWindowLayer, Vector2};
+use vanilla::{Color, ComponentContext, Engine, EngineConfiguration, GameScene, GameSceneBase, NodeId, NodeTree, Paint, Pivot, PlayInput, ScreenFadeHold, Text, TextAlign, UIButton, UIConfirmWindow, UIConfirmWindowOptions, UILabel, UIWindow, UIWindowDefaultBehavior, UIWindowLayer, Vector2};
 
 // 저절로 둘러보는 때. (초)
 const TOUR_CLOSE_CONFIRM_SECONDS: f32 = 2.5;
@@ -35,9 +36,12 @@ struct MainScene {
 	fade_requested: Rc<Cell<bool>>,
 	// 다 어두워진 횟수. (on_dark 가 늘린다)
 	dark_count: Rc<Cell<u32>>,
-	screen_fade_hold: Option<ScreenFadeHold>,
+	// 다 어두워졌을 때 받은 손잡이. (on_dark 가 넣는다)
+	screen_fade_hold: Rc<RefCell<Option<ScreenFadeHold>>>,
 	hold_remain_seconds: f32,
-	press_count: u32,
+	press_count: Rc<Cell<u32>>,
+	// 놀이 입력 처리기가 정한 표시 자리.
+	marker_position: Rc<Cell<Option<Vector2>>>,
 	confirm_count: Rc<Cell<u32>>,
 }
 
@@ -112,7 +116,7 @@ impl MainScene {
 	//==============================================================================
 	// 레이아웃. (게임 영역 = 세이프 에어리어, 창 층에 크기와 세이프 에어리어 너비를 알린다)
 	//==============================================================================
-	fn layout(&mut self, engine: &Engine) {
+	fn layout_content(&mut self, engine: &Engine) {
 		let (play_area_id, layer_id) = match (self.play_area_id, self.layer_id) {
 			(Some(play_area_id), Some(layer_id)) => {
 				(play_area_id, layer_id)
@@ -139,17 +143,15 @@ impl MainScene {
 	fn start_fade(&mut self) {
 		let dark_count = self.dark_count.clone();
 		let status_id = self.status_id;
-		let screen_fade_hold = ScreenFadeHold::new();
-		let returned_hold = screen_fade_hold.clone();
-		let is_started = self.game_scene_base.fade_screen(Some(Box::new(move |node_tree: &mut NodeTree, _engine: &Engine| {
+		let screen_fade_hold_slot = self.screen_fade_hold.clone();
+		let is_started = self.game_scene_base.fade_screen_with_hold(Box::new(move |node_tree: &mut NodeTree, _engine: &Engine, screen_fade_hold: ScreenFadeHold| {
 			dark_count.set(dark_count.get() + 1);
 			if let Some(status_text) = status_id.and_then(|status_id| node_tree.get_node_mut(status_id)).and_then(|status_node| status_node.get_component_mut::<Text>()) {
 				status_text.set_text_color("#ffd166");
 			}
-			Some(returned_hold)
-		})));
+			*screen_fade_hold_slot.borrow_mut() = Some(screen_fade_hold);
+		}));
 		if is_started {
-			self.screen_fade_hold = Some(screen_fade_hold);
 			self.hold_remain_seconds = FADE_HOLD_SECONDS;
 		}
 	}
@@ -210,7 +212,7 @@ impl MainScene {
 			let window_count = window_layer.map(|window_layer| window_layer.get_window_count()).unwrap_or(0);
 			let ui_scale = window_layer.map(|window_layer| window_layer.get_ui_scale()).unwrap_or(1.0);
 			let safe_area_rect = self.game_scene_base.get_safe_area_rect();
-			format!("게임 영역 {:.0} x {:.0}   창 {}   UI 배율 {:.2}   놀이 누름 {}   확인 {}   어두워짐 {}   막 {:.2}", safe_area_rect.size.x, safe_area_rect.size.y, window_count, ui_scale, self.press_count, self.confirm_count.get(), self.dark_count.get(), fade_alpha)
+			format!("게임 영역 {:.0} x {:.0}   창 {}   UI 배율 {:.2}   놀이 누름 {}   확인 {}   어두워짐 {}   막 {:.2}", safe_area_rect.size.x, safe_area_rect.size.y, window_count, ui_scale, self.press_count.get(), self.confirm_count.get(), self.dark_count.get(), fade_alpha)
 		};
 		if let Some(status_text) = self.game_scene_base.get_scene_base_mut().get_node_tree_mut()[status_id].get_component_mut::<Text>() {
 			status_text.set_text(&status_line);
@@ -218,39 +220,36 @@ impl MainScene {
 	}
 }
 
-impl Scene for MainScene {
-	fn get_scene_base(&self) -> &SceneBase {
-		self.game_scene_base.get_scene_base()
+impl GameScene for MainScene {
+	fn get_game_scene_base(&self) -> &GameSceneBase {
+		&self.game_scene_base
 	}
 
-	fn get_scene_base_mut(&mut self) -> &mut SceneBase {
-		self.game_scene_base.get_scene_base_mut()
+	fn get_game_scene_base_mut(&mut self) -> &mut GameSceneBase {
+		&mut self.game_scene_base
 	}
 
 	//==============================================================================
-	// 생성. (세이프 에어리어를 흉내 내고 게임 영역 기준을 정한다)
+	// 애셋 읽기 자리. (세이프 에어리어를 흉내 내고 게임 영역 기준과 놀이 입력 처리기를 정한다)
 	//==============================================================================
-	fn create(&mut self, engine: &mut Engine) {
+	fn load_assets(&mut self, engine: &mut Engine) {
 		engine.get_view_manager_mut().set_safe_area_override(Some([40.0, 0.0, 30.0, 0.0]));
-		self.game_scene_base.set_loading_min_duration_ms(0.0);
 		self.game_scene_base.set_scene_background_color(Color::create_from_hex("#4a1f1f"));
 		self.game_scene_base.set_play_area_reference(720.0, false, Some(engine));
-		self.game_scene_base.set_play_input_enabled(true);
-		self.game_scene_base.create(engine);
-	}
-
-	//==============================================================================
-	// 로딩 화면.
-	//==============================================================================
-	fn draw_on_load(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
-		self.game_scene_base.draw_on_load(engine, graphic);
+		let press_count = self.press_count.clone();
+		let marker_position = self.marker_position.clone();
+		self.game_scene_base.set_play_input_handler(Some(Box::new(move |play_input: PlayInput| {
+			if let PlayInput::Press(play_area_position) = play_input {
+				press_count.set(press_count.get() + 1);
+				marker_position.set(Some(play_area_position));
+			}
+		})));
 	}
 
 	//==============================================================================
 	// 초기화. (게임 영역, 상태 글, 표시, 단추 둘, 창 층)
 	//==============================================================================
 	fn initialize(&mut self, engine: &mut Engine) {
-		self.game_scene_base.initialize(engine);
 		let safe_area_id = self.game_scene_base.get_safe_area_node_id().expect("safe area node");
 		let confirm_count = self.confirm_count.clone();
 		let fade_requested = self.fade_requested.clone();
@@ -285,65 +284,47 @@ impl Scene for MainScene {
 		self.layer_id = Some(layer_id);
 		self.status_id = Some(status_id);
 		self.marker_id = Some(marker_id);
-		self.layout(engine);
+		self.layout_content(engine);
 	}
 
 	//==============================================================================
-	// 화면 크기 변경됨. (게임 영역 기준을 먼저 다시 건다)
+	// 레이아웃. (바탕이 세이프 에어리어를 다시 계산한 뒤)
 	//==============================================================================
-	fn resize(&mut self, engine: &mut Engine, canvas_native_size: Vector2) {
-		self.game_scene_base.apply_play_area_reference(engine);
-		self.game_scene_base.resize(engine, canvas_native_size);
-		self.layout(engine);
+	fn layout(&mut self, engine: &mut Engine) {
+		self.layout_content(engine);
 	}
 
 	//==============================================================================
 	// 갱신. (둘러보기, 놀이 입력으로 표시 옮기기, 페이드 손잡이 놓기)
 	//==============================================================================
-	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
-		if self.game_scene_base.tick(engine, time_delta) {
-			self.layout(engine);
-		}
+	fn tick(&mut self, _engine: &mut Engine, time_delta: f32) {
 		self.elapsed_seconds += time_delta;
 		self.update_tour();
 		if self.fade_requested.replace(false) {
 			self.start_fade();
 		}
-		if let Some(screen_fade_hold) = self.screen_fade_hold.as_ref() {
-			if self.dark_count.get() > 0 {
+		let is_hold_finished = match self.screen_fade_hold.borrow().as_ref() {
+			Some(_) => {
 				self.hold_remain_seconds -= time_delta;
-				if self.hold_remain_seconds <= 0.0 {
-					screen_fade_hold.release();
-					self.screen_fade_hold = None;
-				}
+				self.hold_remain_seconds <= 0.0
+			}
+			None => {
+				false
+			}
+		};
+		if is_hold_finished {
+			if let Some(screen_fade_hold) = self.screen_fade_hold.borrow_mut().take() {
+				screen_fade_hold.release();
 			}
 		}
-		let play_inputs = self.game_scene_base.take_play_inputs();
-		for play_input in play_inputs {
-			if let PlayInput::Press(play_area_position) = play_input {
-				self.press_count += 1;
-				if let Some(marker_id) = self.marker_id {
-					self.game_scene_base.get_scene_base_mut().get_node_tree_mut()[marker_id].set_local_position(play_area_position);
-				}
-			}
+		if let (Some(play_area_position), Some(marker_id)) = (self.marker_position.take(), self.marker_id) {
+			self.game_scene_base.get_scene_base_mut().get_node_tree_mut()[marker_id].set_local_position(play_area_position);
 		}
 		self.update_status();
 	}
-
-	//==============================================================================
-	// 이전 출력. (배경)
-	//==============================================================================
-	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
-		self.game_scene_base.pre_draw(engine, graphic);
-	}
-
-	//==============================================================================
-	// 이후 출력. (어두워지는 막)
-	//==============================================================================
-	fn post_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
-		self.game_scene_base.post_draw(engine, graphic);
-	}
 }
+
+vanilla::game_scene!(MainScene);
 
 //==============================================================================
 // 시작.
@@ -353,8 +334,11 @@ fn main() {
 	engine_configuration.title = String::from("창 쌓기와 화면 틀 (바닐라엔진)");
 	engine_configuration.reference_resolution_size = Vector2::create(1280.0, 720.0);
 	let engine = Engine::new(engine_configuration);
+	// 로딩 화면 설정은 create 전에. (원본 생성자 자리)
+	let mut game_scene_base = GameSceneBase::new();
+	game_scene_base.set_loading_min_duration_ms(0.0);
 	let main_scene = MainScene {
-		game_scene_base: GameSceneBase::new(),
+		game_scene_base,
 		play_area_id: None,
 		layer_id: None,
 		status_id: None,
@@ -364,9 +348,10 @@ fn main() {
 		tour_step: 0,
 		fade_requested: Rc::new(Cell::new(false)),
 		dark_count: Rc::new(Cell::new(0)),
-		screen_fade_hold: None,
+		screen_fade_hold: Rc::new(RefCell::new(None)),
 		hold_remain_seconds: 0.0,
-		press_count: 0,
+		press_count: Rc::new(Cell::new(0)),
+		marker_position: Rc::new(Cell::new(None)),
 		confirm_count: Rc::new(Cell::new(0)),
 	};
 	if let Err(error) = engine.run(Box::new(main_scene)) {

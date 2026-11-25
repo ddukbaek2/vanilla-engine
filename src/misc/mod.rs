@@ -1,11 +1,12 @@
 //==============================================================================
 // 기타 도구. (원본 src/misc)
-// - 옮기지 않은 것: devtools(UI 에 기대는 큰 개발 도구), dynamicfont(캔버스 글꼴 기법), uibuilder(빈 파일).
+// - 옮기지 않은 것: dynamicfont(캔버스 글꼴 기법), uibuilder(빈 파일).
 //==============================================================================
 pub mod beepplayer;
 pub mod camera2d;
 pub mod cameragestures;
 pub mod collision2d;
+pub mod devtools;
 pub mod dialogue;
 pub mod floatingtext;
 pub mod focusnavigator;
