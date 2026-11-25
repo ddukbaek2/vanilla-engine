@@ -51,7 +51,7 @@ pub type GlUniformLocation = <glow::Context as glow::HasContext>::UniformLocatio
 pub type GlFramebuffer = <glow::Context as glow::HasContext>::Framebuffer;
 
 //==============================================================================
-/// 전역 상수 목록.
+// 전역 상수 목록.
 //==============================================================================
 /// 버텍스 셰이더. (픽셀 좌표 → 클립 좌표)
 const VERTEXSHADER_SOURCE: &str = "#version 300 es

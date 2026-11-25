@@ -33,7 +33,7 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
 
 //==============================================================================
-/// 전역 상수 목록.
+// 전역 상수 목록.
 //==============================================================================
 /// 숨긴 <input> 의 클래스 이름. (원본과 같음)
 const HIDDEN_INPUT_CLASS_NAME: &str = "uiinputfield-hidden";

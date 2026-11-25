@@ -11,7 +11,7 @@ use crate::graphics3d::rendertarget::{RenderTarget, RenderTargetOptions};
 use glow::HasContext;
 
 //==============================================================================
-/// 전역 상수 목록.
+// 전역 상수 목록.
 //==============================================================================
 /// 밝은 영역 추출 패스. (씬 → 하프 해상도)
 const BRIGHTPASS_FRAGMENTSHADER_SOURCE: &str = "#version 300 es
