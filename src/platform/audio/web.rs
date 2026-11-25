@@ -21,7 +21,7 @@
 //==============================================================================
 use super::GainAutomation;
 use crate::core::audiomanager::{resume_audio_manager_state, AudioManagerState};
-use crate::misc::beepplayer::{BeepEnvelope, BeepWaveform, BEEP_FLOOR_VOLUME, BEEP_STOP_MARGIN_SECONDS};
+use crate::misc::beepplayer::{BeepEnvelope, BeepWaveform, BEEP_FLOOR_VOLUME};
 use crate::resource::audioasset::AudioAsset;
 use std::cell::RefCell;
 use std::path::Path;
@@ -929,10 +929,8 @@ pub fn play_beep_tone(state: &mut AudioManagerState, beep_envelope: &BeepEnvelop
 			return;
 		}
 	};
-	let start_time = audio_context.current_time() + beep_envelope.delay_seconds;
-	let end_time = start_time + beep_envelope.duration_seconds;
-	let attack_end_time = start_time + beep_envelope.attack_seconds;
-	let release_start_time = start_time + beep_envelope.get_release_start_seconds();
+	let beep_schedule = beep_envelope.get_schedule(audio_context.current_time());
+	let start_time = beep_schedule.start_time;
 
 	let oscillator_node = match audio_context.create_oscillator() {
 		Ok(oscillator_node) => {
@@ -957,15 +955,15 @@ pub fn play_beep_tone(state: &mut AudioManagerState, beep_envelope: &BeepEnvelop
 	};
 	let gain_parameter = gain_node.gain();
 	let _ = gain_parameter.set_value_at_time(BEEP_FLOOR_VOLUME, start_time);
-	let _ = gain_parameter.linear_ramp_to_value_at_time(beep_envelope.peak_volume, attack_end_time);
-	let _ = gain_parameter.set_value_at_time(beep_envelope.peak_volume, release_start_time);
-	let _ = gain_parameter.exponential_ramp_to_value_at_time(BEEP_FLOOR_VOLUME, end_time);
+	let _ = gain_parameter.linear_ramp_to_value_at_time(beep_envelope.peak_volume, beep_schedule.attack_end_time);
+	let _ = gain_parameter.set_value_at_time(beep_envelope.peak_volume, beep_schedule.release_start_time);
+	let _ = gain_parameter.exponential_ramp_to_value_at_time(BEEP_FLOOR_VOLUME, beep_schedule.end_time);
 
 	let destination = audio_context.destination();
 	let _ = oscillator_node.connect_with_audio_node(&gain_node);
 	let _ = gain_node.connect_with_audio_node(&destination);
 	let _ = oscillator_node.start_with_when(start_time);
-	let _ = oscillator_node.stop_with_when(end_time + BEEP_STOP_MARGIN_SECONDS);
+	let _ = oscillator_node.stop_with_when(beep_schedule.stop_time);
 
 	// 끝나면 노드를 뗀다. (한 번 불리고 스스로 풀리는 콜백)
 	let oscillator_node_for_ended = oscillator_node.clone();

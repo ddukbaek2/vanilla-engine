@@ -1,6 +1,6 @@
 //==============================================================================
 // 데스크탑 믹서. (cpal 의 소리 스레드에서 도는 WebAudio 노드 그래프, 원본이 쓰는 크롬 WebAudio 와 같은 셈)
-// - 그래프: AudioBufferSourceNode → GainNode(플레이어) → [StereoPannerNode] → GainNode(버스) 또는 출력. 비프는 출력으로.
+// - 그래프: AudioBufferSourceNode → GainNode(플레이어) → [StereoPannerNode] → GainNode(버스) 또는 출력. 비프는 OscillatorNode → GainNode → 출력.
 //   원본 AudioPlayer, AudioBus, SoundSystem.playEffect, BeepPlayer 가 짓는 그래프와 같다. (웹 백엔드 web.rs 와도 같다)
 // - 128 프레임 렌더 퀀텀마다 그린다. (크롬 kRenderQuantumFrames) 명령은 퀀텀을 그리기 전에 받아, 값 바꾸기와 시작, 정지가 퀀텀 경계에서 걸린다.
 // - 소스: 크롬 audio_buffer_source_handler.cc 를 옮겼다. 시작 위치(TimeToSampleFrame 의 1024 배 오버샘플 반올림), 재생 빠르기(버퍼 표본율 / 컨텍스트 표본율 x playbackRate),
@@ -8,12 +8,14 @@
 // - GainNode: gain 은 AudioParam 이다. (audioparam.rs, 크로미엄과 같은 자동화 셈) 자동화가 있는 퀀텀은 표본마다, 없으면 퀀텀마다 하나로 곱하고,
 //   0 이면 소리를 낸다고 치지 않는다. 소스가 없는 동안에도 자동화는 흐른다. (GainHandler::Process, ProcessOnlyAudioParams)
 // - 소스의 stop(when): 그 시각을 올림한 프레임에서 끊고 끝낸다. (AudioScheduledSourceHandler::UpdateSchedulingInfo)
+// - OscillatorNode: 크롬 oscillator_handler.cc 와 CPU 별 커널을 옮겼다. (oscillator.rs) 대역 제한 표, 시작과 정지 프레임, frequency 자동화, 표본마다 같은 차례의 읽기와 보간.
 // - StereoPannerNode: 크롬 stereo_panner.cc 의 PanToTargetValue. 모노는 x = (pan + 1) / 2 로 L = in cos(x π/2), R = in sin(x π/2),
 //   스테레오는 pan <= 0 이면 L = L + R cos((pan + 1) π/2), R = R sin((pan + 1) π/2), 아니면 L = L cos(pan π/2), R = R + L sin(pan π/2). 이득은 f64 로 셈해 f32 로 곱한다.
 // - 섞기: 모노를 스테레오 입력에 섞을 때는 스피커 규칙으로 양쪽에 같게 올린다. 출력에 내보낼 때 크롬처럼 -1 ~ 1 로 자른다.
 // - 컨텍스트 멈춤(suspend) 동안은 그리지 않고 시계도 서며, 장치에는 0 을 낸다.
 //==============================================================================
 use super::audioparam::{AudioParam, ParamAutomation};
+use super::oscillator::{OscillatorNode, PeriodicWave};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
@@ -80,9 +82,15 @@ pub(crate) enum MixerCommand {
 		player_id: u64,
 		time: f64,
 	},
+	// 비프 톤 하나. (원본 BeepPlayer.playTone: OscillatorNode(frequency.setValueAtTime(frequency, start_time)) → GainNode(엔벨로프 자동화 넷) → 출력.
+	// call_time 은 부른 때의 컨텍스트 시계, start_time 은 그보다 앞이 아니다)
 	PlayBeep {
-		sample_list: Vec<f32>,
-		delay_frame_count: u64,
+		periodic_wave: Arc<PeriodicWave>,
+		frequency: f32,
+		gain_automation_list: [ParamAutomation; 4],
+		call_time: f64,
+		start_time: f64,
+		stop_time: f64,
 	},
 	Suspend,
 	Resume,
@@ -136,7 +144,7 @@ fn time_to_sample_frame(time: f64, sample_rate: f64) -> f64 {
 //==============================================================================
 // 시간을 표본 자리로 올림. (TimeToSampleFrame 의 kRoundUp, 예약 정지)
 //==============================================================================
-fn time_to_sample_frame_rounded_up(time: f64, sample_rate: f64) -> u64 {
+pub(super) fn time_to_sample_frame_rounded_up(time: f64, sample_rate: f64) -> u64 {
 	const OVERSAMPLE_FACTOR: f64 = 1024.0;
 	let frame = (time * sample_rate * OVERSAMPLE_FACTOR).round() / OVERSAMPLE_FACTOR;
 	frame.ceil().max(0.0) as u64
@@ -414,12 +422,11 @@ fn create_gain_param() -> AudioParam {
 }
 
 //==============================================================================
-// 비프. (오실레이터와 엔벨로프를 그린 모노 표본, 지연 뒤에 출력으로)
+// 비프. (OscillatorNode → GainNode → 출력, 오실레이터가 끝나면 뺀다)
 //==============================================================================
 struct BeepVoice {
-	sample_list: Vec<f32>,
-	position: usize,
-	delay_frame_count: u64,
+	oscillator: OscillatorNode,
+	gain: AudioParam,
 }
 
 //==============================================================================
@@ -522,8 +529,16 @@ impl MixerRenderer {
 						}
 					}
 				}
-				MixerCommand::PlayBeep { sample_list, delay_frame_count } => {
-					self.beep_list.push(BeepVoice { sample_list, position: 0, delay_frame_count });
+				MixerCommand::PlayBeep { periodic_wave, frequency, gain_automation_list, call_time, start_time, stop_time } => {
+					// 자동화 시각은 원본 메인 스레드처럼 부른 때의 시계로 당긴다. (그리기 전에 지금 퀀텀으로 한 번 더)
+					let (current_frame, sample_rate) = (self.current_frame, self.sample_rate);
+					let mut oscillator = OscillatorNode::new(periodic_wave, sample_rate, start_time, stop_time);
+					oscillator.frequency.apply_automation_at_call_time(ParamAutomation::SetValueAtTime { value: frequency, time: start_time }, call_time, current_frame, sample_rate);
+					let mut gain = create_gain_param();
+					for automation in gain_automation_list {
+						gain.apply_automation_at_call_time(automation, call_time, current_frame, sample_rate);
+					}
+					self.beep_list.push(BeepVoice { oscillator, gain });
 				}
 				MixerCommand::Suspend => {
 					self.is_suspended = true;
@@ -651,20 +666,16 @@ impl MixerRenderer {
 			}
 		}
 		for beep in self.beep_list.iter_mut() {
-			for frame_index in 0..RENDER_QUANTUM_FRAMES {
-				if beep.delay_frame_count > 0 {
-					beep.delay_frame_count -= 1;
-					continue;
-				}
-				let Some(sample) = beep.sample_list.get(beep.position) else {
-					break;
-				};
-				self.output_quantum[0][frame_index] += *sample;
-				self.output_quantum[1][frame_index] += *sample;
-				beep.position += 1;
+			// OscillatorNode → GainNode. (오실레이터가 소리를 내지 않는 동안은 자동화만 흘린다) 모노라 출력 양쪽에 같게.
+			if !beep.oscillator.process(&mut self.source_quantum[0], current_frame, sample_rate) {
+				beep.gain.calculate_sample_accurate_values(&mut self.gain_value_list, current_frame, sample_rate);
+				continue;
+			}
+			if apply_gain_param(&mut beep.gain, &mut self.source_quantum, 1, &mut self.gain_value_list, current_frame, sample_rate) {
+				mix_into(&mut self.output_quantum, &self.source_quantum, 1);
 			}
 		}
-		self.beep_list.retain(|beep| beep.position < beep.sample_list.len());
+		self.beep_list.retain(|beep| !beep.oscillator.is_finished());
 		self.current_frame += RENDER_QUANTUM_FRAMES as u64;
 		self.shared.set_rendered_seconds(self.current_frame as f64 / self.sample_rate);
 	}

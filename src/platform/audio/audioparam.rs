@@ -120,7 +120,15 @@ impl AudioParam {
 	// 자동화 호출 받기. (current_frame 은 지금 그릴 퀀텀의 첫 프레임)
 	//==============================================================================
 	pub(crate) fn apply_automation(&mut self, automation: ParamAutomation, current_frame: u64, sample_rate: f64) {
-		let current_time = current_frame as f64 / sample_rate;
+		self.apply_automation_at_call_time(automation, current_frame as f64 / sample_rate, current_frame, sample_rate);
+	}
+
+	//==============================================================================
+	// 자동화 호출 받기, 부른 때의 시계를 따로 받는 꼴. (call_time: 원본 메인 스레드가 부른 때의 currentTime)
+	// - 사건 시각은 call_time 보다 앞이면 그 시각으로 당기고(ClampedToCurrentTime), 그리기 전에 지금 퀀텀으로 한 번 더 당긴다.
+	//==============================================================================
+	pub(crate) fn apply_automation_at_call_time(&mut self, automation: ParamAutomation, call_time: f64, current_frame: u64, sample_rate: f64) {
+		let current_time = call_time;
 		match automation {
 			ParamAutomation::SetValue { value } => {
 				// AudioParam::setValue: 내재 값을 바꾸고 그 값으로 지금 setValueAtTime.
