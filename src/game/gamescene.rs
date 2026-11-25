@@ -46,6 +46,15 @@
 //   - 원본은 load_assets 가 끝나면 진행률을 1 로 채운다. 러스트 판은 씬이 기다리는 애셋 목록을 따로 셀 수 없어서, 맡긴 AssetLoader 가 다 끝나면 1 이 된다.
 //     (set_loading_progress 로 직접 알리는 씬은 끝에 1 을 알린다)
 //   - track_asset_loader 로 맡긴 AssetLoader 는 draw_on_load 가 프레임마다 update 를 불러 준다.
+// - 화면 틀 (vanilla.js GameScene 의 fadeScreen, isUserInterfaceAt, setPlayInputHandler, setPlayAreaReference 와 같은 기능):
+//   - 화면 페이드 fade_screen(on_dark): 다 어두워지면 on_dark(트리, 엔진)를 부른다. 원본은 onDark 가 Promise 를 돌려주면 끝날 때까지 어둡게 둔다.
+//     러스트 판은 on_dark 가 ScreenFadeHold 를 돌려주면 그 손잡이의 release 가 불릴 때까지 어둡게 둔다. (None 이면 바로 밝힌다)
+//     막은 post_draw 가 그린다. 씬은 post_draw 에서 game_scene_base.post_draw 를 부른다. 막이 걸린 동안은 누름과 휠을 받지 않는다.
+//   - UI 가 받지 않은 입력: 원본은 처리기 객체({ press, move, release, wheel })를 부른다. 러스트 판은 처리기가 씬의 상태를 빌릴 수 없어서
+//     set_play_input_enabled(true) 로 켜면 PlayInput 을 모아 두고 씬이 tick 뒤에 take_play_inputs 로 꺼낸다. (좌표는 세이프 에어리어 왼쪽 위 기준)
+//   - 게임 영역 기준 set_play_area_reference: resize 는 엔진을 바꿀 수 없어서 씬이 resize 첫머리에 apply_play_area_reference(engine) 를 부른다.
+//     (initialize 는 스스로 부른다)
+//   - 세이프 에어리어는 set_safe_area_insets 로 정하지 않았으면 ViewManager::get_safe_area_insets 를 읽는다. (강제값, 주소, env, 무시할 쪽을 따른다)
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::pivot::Pivot;
@@ -54,13 +63,15 @@ use crate::base::vector2::Vector2;
 use crate::core::asset::AssetLoadHandle;
 use crate::core::engine::Engine;
 use crate::core::graphic::Graphic;
-use crate::core::node::nodetree::NodeId;
+use crate::core::node::nodetree::{NodeId, NodeTree};
 use crate::core::scene::SceneBase;
 use crate::core::viewmanager::ViewScaleMode;
 use crate::misc::loadingprogress::LoadingProgress;
 use crate::resource::assetloader::AssetLoader;
 use crate::resource::imageasset::ImageAsset;
 use crate::ui::touchrecognizer::TouchRecognizer;
+use std::cell::Cell;
+use std::rc::Rc;
 
 // 로딩 화면 최소 노출 시간 기본값. (밀리초)
 const DEFAULT_LOAD_MIN_DURATION_MS: f32 = 3000.0;
@@ -73,6 +84,64 @@ const LOADING_GATE_PATH: &str = "GameSceneBase.loadingGate";
 
 // 로딩 화면 그리기 함수. (graphic, 뷰 크기, 보이는 진행률 0 ~ 1, 로딩을 시작한 뒤의 초. 뷰 좌표계가 걸려 있다)
 pub type LoadingDrawer = Box<dyn FnMut(&mut Graphic, Vector2, f32, f32)>;
+// 화면 페이드의 어두워지는 시간과 밝아지는 시간 기본값. (초)
+const DEFAULT_SCREEN_FADE_SECONDS: f32 = 0.35;
+
+// 화면 페이드가 한 프레임에 쓰는 가장 긴 시간. (초)
+const SCREEN_FADE_MAXIMUM_STEP_SECONDS: f32 = 0.1;
+
+//==============================================================================
+// 화면 페이드를 어둡게 붙잡는 손잡이. (원본 onDark 가 돌려주는 Promise 자리, 복제한 손잡이 어느 것이든 release 하면 밝아진다)
+//==============================================================================
+#[derive(Clone, Debug, Default)]
+pub struct ScreenFadeHold {
+	is_released: Rc<Cell<bool>>,
+}
+
+impl ScreenFadeHold {
+	//==============================================================================
+	// 생성. (아직 놓지 않음)
+	//==============================================================================
+	pub fn new() -> ScreenFadeHold {
+		ScreenFadeHold {
+			is_released: Rc::new(Cell::new(false)),
+		}
+	}
+
+	//==============================================================================
+	// 놓기. (막이 밝아진다)
+	//==============================================================================
+	pub fn release(&self) {
+		self.is_released.set(true);
+	}
+
+	//==============================================================================
+	// 놓았는지.
+	//==============================================================================
+	pub fn is_released(&self) -> bool {
+		self.is_released.get()
+	}
+}
+
+//==============================================================================
+// 다 어두워졌을 때 부르는 함수. (트리와 엔진을 받는다. 손잡이를 돌려주면 놓을 때까지 어둡게 둔다)
+//==============================================================================
+pub type ScreenFadeEvent = Box<dyn FnOnce(&mut NodeTree, &Engine) -> Option<ScreenFadeHold>>;
+
+//==============================================================================
+// UI 가 받지 않은 입력. (게임 영역 좌표: 세이프 에어리어 왼쪽 위 기준, 원본 처리기의 press, move, release, wheel)
+//==============================================================================
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum PlayInput {
+	// UI 가 받지 않은 누름.
+	Press(Vector2),
+	// 놀이로 간 누름의 이동.
+	Move(Vector2),
+	// 놀이로 간 누름의 뗌. (취소 포함)
+	Release(Vector2),
+	// UI 밖의 휠. (자리, 휠 값)
+	Wheel(Vector2, Vector2),
+}
 
 //==============================================================================
 // 게임 공통 베이스 씬.
@@ -92,7 +161,7 @@ pub struct GameSceneBase {
 	load_touched_to_skip: bool,
 	load_gate_handle: Option<AssetLoadHandle>,
 	view_scale_mode: ViewScaleMode,
-	// 세이프 에어리어 인셋. (CSS 픽셀, 위 / 오른쪽 / 아래 / 왼쪽. 없으면 플랫폼에서 읽는다)
+	// 세이프 에어리어 인셋. (CSS 픽셀, 위 / 오른쪽 / 아래 / 왼쪽. 없으면 뷰 매니저에서 읽는다)
 	safe_area_insets: Option<[f32; 4]>,
 	loading_drawer: Option<LoadingDrawer>,
 	loading_background_color: Color,
@@ -104,6 +173,22 @@ pub struct GameSceneBase {
 	// 진행률을 알린 적이 있는지. (없으면 게이지는 경과 시간)
 	is_loading_progress_reported: bool,
 	tracked_asset_loader_list: Vec<AssetLoader>,
+	// 어두워지는 막의 진하기. (0 ~ 1)
+	screen_fade_alpha: f32,
+	// 1 이면 어두워지는 중, -1 이면 밝아지는 중, 0 이면 멈춤.
+	screen_fade_direction: i32,
+	screen_fade_event: Option<ScreenFadeEvent>,
+	// 다 어두워진 뒤 붙잡고 있는 손잡이.
+	screen_fade_hold: Option<ScreenFadeHold>,
+	screen_fade_color: Color,
+	screen_fade_seconds: f32,
+	is_play_input_enabled: bool,
+	play_inputs: Vec<PlayInput>,
+	// 지금 누름이 놀이로 갔는지.
+	is_play_press_active: bool,
+	// 게임 영역의 고정 쪽 길이. (0 이면 쓰지 않음)
+	play_area_fixed_length: f32,
+	is_play_area_landscape: bool,
 }
 
 impl GameSceneBase {
@@ -136,6 +221,17 @@ impl GameSceneBase {
 			loading_progress: LoadingProgress::new(),
 			is_loading_progress_reported: false,
 			tracked_asset_loader_list: Vec::new(),
+			screen_fade_alpha: 0.0,
+			screen_fade_direction: 0,
+			screen_fade_event: None,
+			screen_fade_hold: None,
+			screen_fade_color: Color::black(),
+			screen_fade_seconds: DEFAULT_SCREEN_FADE_SECONDS,
+			is_play_input_enabled: false,
+			play_inputs: Vec::new(),
+			is_play_press_active: false,
+			play_area_fixed_length: 0.0,
+			is_play_area_landscape: false,
 		}
 	}
 
@@ -325,7 +421,7 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	// 세이프 에어리어 인셋 직접 설정. (CSS 픽셀: 위, 오른쪽, 아래, 왼쪽. None 이면 플랫폼에서 읽는다)
+	// 세이프 에어리어 인셋 직접 설정. (CSS 픽셀: 위, 오른쪽, 아래, 왼쪽. None 이면 뷰 매니저의 get_safe_area_insets 를 읽는다)
 	//==============================================================================
 	pub fn set_safe_area_insets(&mut self, insets: Option<[f32; 4]>) {
 		self.safe_area_insets = insets;
@@ -482,6 +578,7 @@ impl GameSceneBase {
 	//==============================================================================
 	pub fn initialize(&mut self, engine: &mut Engine) {
 		self.apply_view_scale_mode(engine);
+		self.apply_play_area_reference(engine);
 		self.create_safe_area_node();
 	}
 
@@ -533,15 +630,30 @@ impl GameSceneBase {
 	//==============================================================================
 	pub fn compute_safe_area_rect(&self, engine: &Engine) -> Rect {
 		let view_manager = engine.get_view_manager();
-		let insets = match self.safe_area_insets {
+		let target_resolution_scale = view_manager.get_target_resolution_scale();
+		// 게임 영역 기준을 쓰면 올림한 뷰 크기 대신 캔버스를 배율로 나눈 실제 크기로 셈해 고정 쪽이 딱 맞게 한다.
+		let mut view_size = view_manager.get_view_size();
+		if self.play_area_fixed_length > 0.0 {
+			let canvas_native_size = view_manager.get_canvas_native_size();
+			let view_scale = if target_resolution_scale > 0.0 {
+				target_resolution_scale
+			}
+			else {
+				1.0
+			};
+			view_size = Vector2::create(canvas_native_size.x / view_scale, canvas_native_size.y / view_scale);
+		}
+		match self.safe_area_insets {
 			Some(insets) => {
-				insets
+				GameSceneBase::calculate_safe_area_rect(view_size, target_resolution_scale, insets)
 			}
 			None => {
-				read_platform_safe_area_insets()
+				let [inset_top, inset_right, inset_bottom, inset_left] = view_manager.get_safe_area_insets();
+				let width = (view_size.x - inset_left - inset_right).max(0.0);
+				let height = (view_size.y - inset_top - inset_bottom).max(0.0);
+				Rect::create(inset_left, inset_top, width, height)
 			}
-		};
-		GameSceneBase::calculate_safe_area_rect(view_manager.get_view_size(), view_manager.get_target_resolution_scale(), insets)
+		}
 	}
 
 	//==============================================================================
@@ -583,9 +695,68 @@ impl GameSceneBase {
 	//==============================================================================
 	pub fn tick(&mut self, engine: &Engine, time_delta: f32) -> bool {
 		self.scene_base.get_node_tree_mut().tick(engine, time_delta);
-		self.touch_recognizer.tick_touch(self.scene_base.get_node_tree_mut(), engine);
+		self.tick_touch(engine);
 		self.scene_base.tick_tweens(time_delta);
+		self.update_screen_fade(engine);
 		self.update_layout_if_view_size_changed(engine)
+	}
+
+	//==============================================================================
+	// 터치 갱신. (TouchRecognizer 로 UI 에 넘기고, 켜져 있으면 UI 가 받지 않은 입력을 놀이 입력으로 모은다)
+	// - 페이드 막이 걸린 동안은 누름과 휠을 막고, 이미 누르던 손가락의 이동, 뗌, 취소만 넘긴다.
+	// - UI 판정은 넘기기 전에 한다. (누른 단추가 창을 띄워도 이 누름은 놀이로 가지 않게)
+	//==============================================================================
+	fn tick_touch(&mut self, engine: &Engine) {
+		let input_manager = engine.get_input_manager();
+		let view_input_position = input_manager.get_view_input_position();
+		let is_touch_pressed = input_manager.is_touch_pressed();
+		let is_touch_moved = input_manager.is_touch_moved();
+		let is_touch_ended = input_manager.is_touch_released() || input_manager.is_touch_cancelled();
+		let wheel_delta = Vector2::create(input_manager.get_wheel_delta_x(), input_manager.get_wheel_delta_y());
+		let is_wheel = wheel_delta.x != 0.0 || wheel_delta.y != 0.0;
+		let is_screen_fading = self.is_screen_fading();
+		if is_screen_fading {
+			if self.touch_recognizer.is_touching() {
+				let node_tree = self.scene_base.get_node_tree_mut();
+				if is_touch_moved {
+					self.touch_recognizer.touch_move(node_tree, engine, view_input_position);
+				}
+				if input_manager.is_touch_released() {
+					self.touch_recognizer.touch_release(node_tree, engine, view_input_position);
+				}
+				else if input_manager.is_touch_cancelled() {
+					self.touch_recognizer.touch_cancel(node_tree, engine, view_input_position);
+				}
+			}
+		}
+		else {
+			let is_user_interface_pressed = is_touch_pressed && self.is_user_interface_at(view_input_position);
+			let is_user_interface_wheeled = is_wheel && self.is_user_interface_at(view_input_position);
+			self.touch_recognizer.tick_touch(self.scene_base.get_node_tree_mut(), engine);
+			if self.is_play_input_enabled {
+				let play_area_position = self.convert_view_to_play_area(view_input_position);
+				if is_wheel && !is_user_interface_wheeled {
+					self.play_inputs.push(PlayInput::Wheel(play_area_position, wheel_delta));
+				}
+				if is_touch_pressed {
+					self.is_play_press_active = !is_user_interface_pressed;
+					if self.is_play_press_active {
+						self.play_inputs.push(PlayInput::Press(play_area_position));
+					}
+				}
+			}
+		}
+		if !self.is_play_input_enabled || !self.is_play_press_active {
+			return;
+		}
+		let play_area_position = self.convert_view_to_play_area(view_input_position);
+		if is_touch_moved && !is_touch_pressed {
+			self.play_inputs.push(PlayInput::Move(play_area_position));
+		}
+		if is_touch_ended {
+			self.is_play_press_active = false;
+			self.play_inputs.push(PlayInput::Release(play_area_position));
+		}
 	}
 
 	//==============================================================================
@@ -601,6 +772,249 @@ impl GameSceneBase {
 	pub fn pre_draw(&self, engine: &Engine, graphic: &mut Graphic) {
 		self.scene_base.draw_scene_background(engine, graphic);
 	}
+
+	//==============================================================================
+	// 이후 출력. (어두워지는 막을 세이프 에어리어까지 캔버스 전체에 그린다, 씬 post_draw 에서 부른다)
+	//==============================================================================
+	pub fn post_draw(&self, engine: &Engine, graphic: &mut Graphic) {
+		if self.screen_fade_alpha <= 0.0 {
+			return;
+		}
+		let view_manager = engine.get_view_manager();
+		let canvas_native_size = view_manager.get_canvas_native_size();
+		let global_alpha = graphic.get_global_alpha();
+		view_manager.apply_canvas_native_rect(graphic);
+		graphic.set_global_alpha(global_alpha * self.screen_fade_alpha);
+		graphic.set_fill_color(self.screen_fade_color);
+		graphic.draw_rect(Rect::create(0.0, 0.0, canvas_native_size.x, canvas_native_size.y));
+		graphic.set_global_alpha(global_alpha);
+		view_manager.apply_view_rect(graphic);
+	}
+
+	//==============================================================================
+	// 어두워졌다 밝아지기. (다 어두워지면 on_dark 를 부르고, 그것이 손잡이를 돌려주면 놓을 때까지 어둡게 둔다, 이미 페이드 중이면 false)
+	//==============================================================================
+	pub fn fade_screen(&mut self, on_dark: Option<ScreenFadeEvent>) -> bool {
+		if self.is_screen_fading() {
+			return false;
+		}
+		self.screen_fade_event = on_dark;
+		self.screen_fade_direction = 1;
+		true
+	}
+
+	//==============================================================================
+	// 페이드 중인지. (어두워지거나, 손잡이를 기다리거나, 밝아지는 중)
+	//==============================================================================
+	pub fn is_screen_fading(&self) -> bool {
+		self.screen_fade_direction != 0 || self.screen_fade_hold.is_some() || self.screen_fade_alpha > 0.0
+	}
+
+	//==============================================================================
+	// 어두워지는 막의 색 설정. (기본 검정)
+	//==============================================================================
+	pub fn set_screen_fade_color(&mut self, color: impl Into<Color>) {
+		self.screen_fade_color = color.into();
+	}
+
+	//==============================================================================
+	// 어두워지는 시간과 밝아지는 시간 설정. (초, 기본 0.35, 0 이면 바로)
+	//==============================================================================
+	pub fn set_screen_fade_seconds(&mut self, seconds: f32) {
+		self.screen_fade_seconds = seconds.max(0.0);
+	}
+
+	//==============================================================================
+	// 어두워지는 막의 진하기. (0 ~ 1)
+	//==============================================================================
+	pub fn get_screen_fade_alpha(&self) -> f32 {
+		self.screen_fade_alpha
+	}
+
+	//==============================================================================
+	// 막 갱신. (배율을 곱하지 않은 시간으로 움직여 놀이를 멈춰도 돈다, 한 프레임은 0.1 초까지)
+	//==============================================================================
+	fn update_screen_fade(&mut self, engine: &Engine) {
+		if let Some(screen_fade_hold) = self.screen_fade_hold.as_ref() {
+			if screen_fade_hold.is_released() {
+				self.screen_fade_hold = None;
+				self.screen_fade_direction = -1;
+			}
+			return;
+		}
+		if self.screen_fade_direction == 0 {
+			return;
+		}
+		let unscaled_time_delta = engine.get_time_manager().get_unscale_delta_time().min(SCREEN_FADE_MAXIMUM_STEP_SECONDS);
+		let fade_step = if self.screen_fade_seconds > 0.0 {
+			unscaled_time_delta / self.screen_fade_seconds
+		}
+		else {
+			1.0
+		};
+		if self.screen_fade_direction < 0 {
+			self.screen_fade_alpha = (self.screen_fade_alpha - fade_step).max(0.0);
+			if self.screen_fade_alpha <= 0.0 {
+				self.screen_fade_direction = 0;
+			}
+			return;
+		}
+		self.screen_fade_alpha = (self.screen_fade_alpha + fade_step).min(1.0);
+		if self.screen_fade_alpha < 1.0 {
+			return;
+		}
+		// 다 어두워졌다. 맡긴 일이 손잡이를 돌려주면 놓을 때까지 막을 그대로 두고, 아니면 바로 밝아진다.
+		self.screen_fade_direction = -1;
+		if let Some(screen_fade_event) = self.screen_fade_event.take() {
+			let screen_fade_hold = screen_fade_event(self.scene_base.get_node_tree_mut(), engine);
+			if let Some(screen_fade_hold) = screen_fade_hold {
+				if !screen_fade_hold.is_released() {
+					self.screen_fade_direction = 0;
+					self.screen_fade_hold = Some(screen_fade_hold);
+				}
+			}
+		}
+	}
+
+	//==============================================================================
+	// 그 자리에 UI(누를 수 있는 노드: 단추, 창의 어둠과 판, 스크롤 칸)가 있는지. (뷰 좌표)
+	//==============================================================================
+	pub fn is_user_interface_at(&self, view_position: Vector2) -> bool {
+		self.scene_base.get_node_tree().find_topmost_interactable_node(view_position).is_some()
+	}
+
+	//==============================================================================
+	// 놀이 입력 모으기 켜기. (끄면 모은 것을 버린다)
+	//==============================================================================
+	pub fn set_play_input_enabled(&mut self, is_play_input_enabled: bool) {
+		self.is_play_input_enabled = is_play_input_enabled;
+		self.is_play_press_active = false;
+		if !is_play_input_enabled {
+			self.play_inputs.clear();
+		}
+	}
+
+	//==============================================================================
+	// 모은 놀이 입력 꺼내기. (온 차례대로, 꺼내면 비운다)
+	//==============================================================================
+	pub fn take_play_inputs(&mut self) -> Vec<PlayInput> {
+		std::mem::take(&mut self.play_inputs)
+	}
+
+	//==============================================================================
+	// 뷰 좌표 → 게임 영역 좌표. (세이프 에어리어 왼쪽 위가 0, 0)
+	//==============================================================================
+	pub fn convert_view_to_play_area(&self, view_position: Vector2) -> Vector2 {
+		let safe_area_position = self.last_safe_area_rect.position;
+		Vector2::create(view_position.x - safe_area_position.x, view_position.y - safe_area_position.y)
+	}
+
+	//==============================================================================
+	// 게임 영역 기준 설정. (세이프 에어리어를 뺀 게임 영역의 고정 쪽 길이가 늘 fixed_length 가 되게 기준 해상도를 늘린다)
+	// - 캔버스 길이 : 세이프 에어리어를 뺀 길이 = 기준 해상도 길이 : fixed_length.
+	// - is_landscape 면 가로, 아니면 세로가 고정 쪽이다. 뷰 배율 방식도 그에 맞춰 둔다. (가로 고정 StretchWidthExpandHeight, 세로 고정 StretchHeightExpandWidth)
+	// - 무시할 세이프 에어리어 쪽은 ViewManager::set_ignored_safe_area_sides 로 넘긴다. fixed_length 가 0 이면 끈다.
+	// - 엔진을 주면 바로 건다. 씬은 resize 첫머리에 apply_play_area_reference 를 부른다.
+	//==============================================================================
+	pub fn set_play_area_reference(&mut self, fixed_length: f32, is_landscape: bool, engine: Option<&mut Engine>) {
+		self.play_area_fixed_length = fixed_length.max(0.0);
+		self.is_play_area_landscape = is_landscape;
+		if self.play_area_fixed_length <= 0.0 {
+			return;
+		}
+		let view_scale_mode = if is_landscape {
+			ViewScaleMode::StretchWidthExpandHeight
+		}
+		else {
+			ViewScaleMode::StretchHeightExpandWidth
+		};
+		match engine {
+			Some(engine) => {
+				self.set_view_scale_mode(view_scale_mode, Some(&mut *engine));
+				self.apply_play_area_reference(engine);
+			}
+			None => {
+				self.view_scale_mode = view_scale_mode;
+			}
+		}
+	}
+
+	//==============================================================================
+	// 게임 영역의 고정 쪽 길이. (0 이면 쓰지 않음)
+	//==============================================================================
+	pub fn get_play_area_fixed_length(&self) -> f32 {
+		self.play_area_fixed_length
+	}
+
+	//==============================================================================
+	// 게임 영역 기준을 기준 해상도에 걸기. (캔버스와 인셋 크기에서만 셈해 몇 번을 불러도 같다, 바꿨으면 뷰 영역을 다시 셈하고 true)
+	//==============================================================================
+	pub fn apply_play_area_reference(&mut self, engine: &mut Engine) -> bool {
+		if self.play_area_fixed_length <= 0.0 {
+			return false;
+		}
+		let view_manager = engine.get_view_manager_mut();
+		let canvas_native_size = view_manager.get_canvas_native_size();
+		if canvas_native_size.x <= 0.0 || canvas_native_size.y <= 0.0 {
+			return false;
+		}
+		// 인셋을 캔버스 단위로. (직접 정한 인셋은 CSS 픽셀 그대로, 뷰 매니저의 것은 지금 배율을 곱한다)
+		let canvas_insets = match self.safe_area_insets {
+			Some(insets) => {
+				insets
+			}
+			None => {
+				let target_resolution_scale = view_manager.get_target_resolution_scale();
+				let inset_scale = if target_resolution_scale > 0.0 {
+					target_resolution_scale
+				}
+				else {
+					1.0
+				};
+				let view_insets = view_manager.get_safe_area_insets();
+				[view_insets[0] * inset_scale, view_insets[1] * inset_scale, view_insets[2] * inset_scale, view_insets[3] * inset_scale]
+			}
+		};
+		let reference_length = GameSceneBase::calculate_play_area_reference_length(self.play_area_fixed_length, self.is_play_area_landscape, canvas_native_size, canvas_insets);
+		if reference_length <= 0.0 {
+			return false;
+		}
+		let reference_resolution_size = view_manager.get_reference_resolution_size();
+		let current_reference_length = if self.is_play_area_landscape {
+			reference_resolution_size.x
+		}
+		else {
+			reference_resolution_size.y
+		};
+		if (current_reference_length - reference_length).abs() < 0.0001 {
+			return false;
+		}
+		// 고정하는 쪽만 뷰 계산에 쓰인다. 다른 쪽에도 같은 값을 넣어 둔다.
+		view_manager.apply_reference_resolution_size(Vector2::create(reference_length, reference_length));
+		let canvas_pixel_size = view_manager.get_canvas_pixel_size();
+		if canvas_pixel_size.x > 0.0 && canvas_pixel_size.y > 0.0 {
+			let device_pixel_ratio = view_manager.get_device_pixel_ratio();
+			view_manager.calculate_view_rect(canvas_pixel_size.x as u32, canvas_pixel_size.y as u32, device_pixel_ratio);
+		}
+		true
+	}
+
+	//==============================================================================
+	// 게임 영역 기준의 기준 해상도 길이 셈. (정적, 인셋은 캔버스 단위 [위, 오른쪽, 아래, 왼쪽], 못 셈하면 0)
+	//==============================================================================
+	pub fn calculate_play_area_reference_length(fixed_length: f32, is_landscape: bool, canvas_native_size: Vector2, canvas_insets: [f32; 4]) -> f32 {
+		let (canvas_length, inset_sum) = if is_landscape {
+			(canvas_native_size.x, canvas_insets[3] + canvas_insets[1])
+		}
+		else {
+			(canvas_native_size.y, canvas_insets[0] + canvas_insets[2])
+		};
+		let safe_area_length = canvas_length - inset_sum;
+		if safe_area_length <= 0.0 || canvas_length <= 0.0 {
+			return 0.0;
+		}
+		fixed_length * canvas_length / safe_area_length
+	}
 }
 
 impl Default for GameSceneBase {
@@ -609,78 +1023,11 @@ impl Default for GameSceneBase {
 	}
 }
 
-//==============================================================================
-// 글 앞의 정수 읽기. (원본 parseInt(글) || 0. "34px" → 34)
-//==============================================================================
-#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-fn parse_leading_integer(text: &str) -> f32 {
-	let trimmed_text = text.trim_start();
-	let (sign, unsigned_text) = match trimmed_text.strip_prefix('-') {
-		Some(rest) => {
-			(-1.0, rest)
-		}
-		None => {
-			(1.0, trimmed_text.strip_prefix('+').unwrap_or(trimmed_text))
-		}
-	};
-	let digit_text: String = unsigned_text.chars().take_while(|character| character.is_ascii_digit()).collect();
-	match digit_text.parse::<f32>() {
-		Ok(value) => {
-			sign * value
-		}
-		Err(_) => {
-			0.0
-		}
-	}
-}
-
-//==============================================================================
-// 플랫폼의 세이프 에어리어 인셋 읽기. (웹: CSS env(safe-area-inset-*), 위 / 오른쪽 / 아래 / 왼쪽 CSS 픽셀)
-// - 원본처럼 보이지 않는 div 에 패딩으로 걸고 계산된 스타일을 읽은 뒤 뗀다.
-//==============================================================================
-#[cfg(target_arch = "wasm32")]
-fn read_platform_safe_area_insets() -> [f32; 4] {
-	use wasm_bindgen::JsCast;
-	let read_insets = || -> Option<[f32; 4]> {
-		let window = web_sys::window()?;
-		let document = window.document()?;
-		let body = document.body()?;
-		let element: web_sys::HtmlElement = document.create_element("div").ok()?.dyn_into().ok()?;
-		let style = element.style();
-		style.set_property("position", "absolute").ok()?;
-		style.set_property("visibility", "hidden").ok()?;
-		style.set_property("padding-top", "env(safe-area-inset-top)").ok()?;
-		style.set_property("padding-right", "env(safe-area-inset-right)").ok()?;
-		style.set_property("padding-bottom", "env(safe-area-inset-bottom)").ok()?;
-		style.set_property("padding-left", "env(safe-area-inset-left)").ok()?;
-		body.insert_adjacent_element("beforeend", &element).ok()?;
-		let insets = match window.get_computed_style(&element) {
-			Ok(Some(computed_style)) => {
-				let read_padding = |property_name: &str| parse_leading_integer(&computed_style.get_property_value(property_name).unwrap_or_default());
-				Some([read_padding("padding-top"), read_padding("padding-right"), read_padding("padding-bottom"), read_padding("padding-left")])
-			}
-			_ => {
-				None
-			}
-		};
-		element.remove();
-		insets
-	};
-	read_insets().unwrap_or([0.0, 0.0, 0.0, 0.0])
-}
-
-//==============================================================================
-// 플랫폼의 세이프 에어리어 인셋 읽기. (데스크탑에는 그런 값이 없어 0)
-//==============================================================================
-#[cfg(not(target_arch = "wasm32"))]
-fn read_platform_safe_area_insets() -> [f32; 4] {
-	[0.0, 0.0, 0.0, 0.0]
-}
-
 #[cfg(test)]
 mod tests {
 	use super::*;
 	use crate::core::engine::EngineConfiguration;
+	use crate::core::viewmanager::SafeAreaSide;
 
 	//==============================================================================
 	// 로딩 문은 최소 노출 시간이 지나야 열리고, 게이지는 경과 시간 비율이다. 다른 애셋이 남아 있으면 씬은 계속 기다린다.
@@ -760,7 +1107,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 세이프 에어리어 계산은 뷰 배율로 인셋을 나누고 음수 크기를 0 으로 막는다. CSS 패딩 글은 앞 정수만 읽는다.
+	// 세이프 에어리어 계산은 뷰 배율로 인셋을 나누고 음수 크기를 0 으로 막는다.
 	//==============================================================================
 	#[test]
 	fn safe_area_calculation() {
@@ -768,10 +1115,135 @@ mod tests {
 		assert_eq!(safe_area_rect, Rect::create(15.0, 20.0, 380.0, 270.0));
 		let collapsed_rect = GameSceneBase::calculate_safe_area_rect(Vector2::create(10.0, 10.0), 0.0, [20.0, 20.0, 20.0, 20.0]);
 		assert_eq!(collapsed_rect, Rect::create(20.0, 20.0, 0.0, 0.0));
-		assert_eq!(parse_leading_integer("34px"), 34.0);
-		assert_eq!(parse_leading_integer("12.7px"), 12.0);
-		assert_eq!(parse_leading_integer(""), 0.0);
-		assert_eq!(parse_leading_integer("-3px"), -3.0);
+	}
+
+	//==============================================================================
+	// 한 프레임 진행. (시간을 seconds 만큼 흘리고 tick)
+	//==============================================================================
+	fn step_frame(engine: &mut Engine, game_scene_base: &mut GameSceneBase, current_seconds: &mut f64, seconds: f64) {
+		*current_seconds += seconds;
+		engine.get_time_manager_mut().update(*current_seconds);
+		game_scene_base.tick(engine, seconds as f32);
+	}
+
+	//==============================================================================
+	// 누름을 한 프레임 넣고 다음 프레임에 뗀다.
+	//==============================================================================
+	fn press_and_release(engine: &mut Engine, game_scene_base: &mut GameSceneBase, current_seconds: &mut f64, position: Vector2) {
+		engine.get_input_manager_mut().set_view_input_position(position);
+		engine.get_input_manager_mut().set_touch_pressed(true);
+		step_frame(engine, game_scene_base, current_seconds, 0.016);
+		engine.get_input_manager_mut().set_touch_pressed(false);
+		engine.get_input_manager_mut().set_touch_released(true);
+		step_frame(engine, game_scene_base, current_seconds, 0.016);
+		engine.get_input_manager_mut().set_touch_released(false);
+	}
+
+	//==============================================================================
+	// 페이드: 다 어두워지면 on_dark, 손잡이를 놓을 때까지 어둡고, 그동안 누름은 막히고, 놓으면 밝아진다. 페이드 중 다시 부르면 false.
+	//==============================================================================
+	#[test]
+	fn screen_fade_holds_until_release_and_blocks_press() {
+		let mut engine = Engine::new(EngineConfiguration::new());
+		engine.get_view_manager_mut().calculate_view_rect(800, 600, 1.0);
+		let mut game_scene_base = GameSceneBase::new();
+		game_scene_base.set_safe_area_insets(Some([0.0, 0.0, 0.0, 0.0]));
+		game_scene_base.initialize(&mut engine);
+		game_scene_base.set_play_input_enabled(true);
+		game_scene_base.set_screen_fade_seconds(0.2);
+		let mut current_seconds = 1.0;
+		engine.get_time_manager_mut().update(current_seconds);
+		let screen_fade_hold = ScreenFadeHold::new();
+		let returned_hold = screen_fade_hold.clone();
+		let dark_count = Rc::new(Cell::new(0));
+		let dark_count_event = dark_count.clone();
+		assert!(game_scene_base.fade_screen(Some(Box::new(move |_node_tree: &mut NodeTree, _engine: &Engine| {
+			dark_count_event.set(dark_count_event.get() + 1);
+			Some(returned_hold)
+		}))));
+		assert!(!game_scene_base.fade_screen(None));
+		step_frame(&mut engine, &mut game_scene_base, &mut current_seconds, 0.1);
+		assert!((game_scene_base.get_screen_fade_alpha() - 0.5).abs() < 0.001);
+		assert_eq!(dark_count.get(), 0);
+		step_frame(&mut engine, &mut game_scene_base, &mut current_seconds, 0.1);
+		assert_eq!(game_scene_base.get_screen_fade_alpha(), 1.0);
+		assert_eq!(dark_count.get(), 1);
+		step_frame(&mut engine, &mut game_scene_base, &mut current_seconds, 0.1);
+		assert_eq!(game_scene_base.get_screen_fade_alpha(), 1.0);
+		press_and_release(&mut engine, &mut game_scene_base, &mut current_seconds, Vector2::create(100.0, 100.0));
+		assert!(game_scene_base.take_play_inputs().is_empty());
+		screen_fade_hold.release();
+		for _ in 0..4 {
+			step_frame(&mut engine, &mut game_scene_base, &mut current_seconds, 0.1);
+		}
+		assert_eq!(game_scene_base.get_screen_fade_alpha(), 0.0);
+		assert!(!game_scene_base.is_screen_fading());
+		press_and_release(&mut engine, &mut game_scene_base, &mut current_seconds, Vector2::create(100.0, 100.0));
+		assert_eq!(game_scene_base.take_play_inputs().first(), Some(&PlayInput::Press(Vector2::create(100.0, 100.0))));
+	}
+
+	//==============================================================================
+	// 놀이 입력: UI 가 받지 않은 누름만 게임 영역 좌표로, 그 누름의 뗌까지. UI 위 누름은 넘기지 않는다.
+	//==============================================================================
+	#[test]
+	fn play_input_skips_user_interface() {
+		let mut engine = Engine::new(EngineConfiguration::new());
+		engine.get_view_manager_mut().calculate_view_rect(800, 600, 1.0);
+		let mut game_scene_base = GameSceneBase::new();
+		game_scene_base.set_safe_area_insets(Some([10.0, 0.0, 0.0, 20.0]));
+		game_scene_base.initialize(&mut engine);
+		let mut current_seconds = 1.0;
+		step_frame(&mut engine, &mut game_scene_base, &mut current_seconds, 0.016);
+		game_scene_base.set_play_input_enabled(true);
+		let root_id = game_scene_base.get_scene_base().get_node_tree().get_root_id();
+		let button_id = game_scene_base.get_scene_base_mut().get_node_tree_mut().create_child(root_id, "button");
+		{
+			let button_node = &mut game_scene_base.get_scene_base_mut().get_node_tree_mut()[button_id];
+			button_node.set_pivot(Pivot::TOP_LEFT);
+			button_node.set_content_size(Vector2::create(100.0, 100.0));
+			button_node.set_local_position(Vector2::create(600.0, 400.0));
+			button_node.set_interactable(true);
+		}
+		assert!(game_scene_base.is_user_interface_at(Vector2::create(650.0, 450.0)));
+		assert!(!game_scene_base.is_user_interface_at(Vector2::create(120.0, 110.0)));
+		press_and_release(&mut engine, &mut game_scene_base, &mut current_seconds, Vector2::create(120.0, 110.0));
+		let play_inputs = game_scene_base.take_play_inputs();
+		assert_eq!(play_inputs.first(), Some(&PlayInput::Press(Vector2::create(100.0, 100.0))));
+		assert_eq!(play_inputs.last(), Some(&PlayInput::Release(Vector2::create(100.0, 100.0))));
+		press_and_release(&mut engine, &mut game_scene_base, &mut current_seconds, Vector2::create(650.0, 450.0));
+		assert!(game_scene_base.take_play_inputs().is_empty());
+		engine.get_input_manager_mut().add_wheel_delta(0.0, 120.0);
+		step_frame(&mut engine, &mut game_scene_base, &mut current_seconds, 0.016);
+		assert!(game_scene_base.take_play_inputs().is_empty());
+		engine.get_input_manager_mut().clear_wheel_delta();
+		engine.get_input_manager_mut().set_view_input_position(Vector2::create(120.0, 110.0));
+		engine.get_input_manager_mut().add_wheel_delta(0.0, 120.0);
+		step_frame(&mut engine, &mut game_scene_base, &mut current_seconds, 0.016);
+		assert_eq!(game_scene_base.take_play_inputs(), vec![PlayInput::Wheel(Vector2::create(100.0, 100.0), Vector2::create(0.0, 120.0))]);
+	}
+
+	//==============================================================================
+	// 게임 영역 기준: 세이프 에어리어를 뺀 세로가 늘 고정 길이가 되게 기준 해상도를 늘린다. 무시한 쪽은 빼지 않는다.
+	//==============================================================================
+	#[test]
+	fn play_area_reference_keeps_fixed_length() {
+		let mut engine = Engine::new(EngineConfiguration::new());
+		engine.get_view_manager_mut().calculate_view_rect(800, 600, 1.0);
+		let mut game_scene_base = GameSceneBase::new();
+		engine.get_view_manager_mut().set_safe_area_override(Some([40.0, 0.0, 30.0, 0.0]));
+		game_scene_base.set_play_area_reference(720.0, false, Some(&mut engine));
+		assert_eq!(engine.get_view_manager().get_view_scale_mode(), ViewScaleMode::StretchHeightExpandWidth);
+		game_scene_base.initialize(&mut engine);
+		game_scene_base.layout(&engine);
+		assert!((game_scene_base.get_safe_area_rect().size.y - 720.0).abs() < 0.01);
+		assert!((engine.get_view_manager().get_reference_resolution_size().y - 720.0 * 600.0 / 530.0).abs() < 0.01);
+		engine.get_view_manager_mut().set_ignored_safe_area_sides(&[SafeAreaSide::Top]);
+		assert!(game_scene_base.apply_play_area_reference(&mut engine));
+		game_scene_base.layout(&engine);
+		assert!((game_scene_base.get_safe_area_rect().size.y - 720.0).abs() < 0.01);
+		assert_eq!(game_scene_base.get_safe_area_rect().position.y, 0.0);
+		assert!(!game_scene_base.apply_play_area_reference(&mut engine));
+		assert!((GameSceneBase::calculate_play_area_reference_length(1920.0, true, Vector2::create(1000.0, 500.0), [0.0, 50.0, 0.0, 50.0]) - 1920.0 * 1000.0 / 900.0).abs() < 0.01);
 	}
 
 	//==============================================================================
