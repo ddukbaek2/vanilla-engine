@@ -3,10 +3,23 @@
 //! - 맥: [NSApp orderFrontCharacterPalette:nil] (크롬 ui/base/emoji/emoji_panel_helper_mac.mm 과 같다)
 //! - 윈도우: SendInput 으로 윈도우 키 + '.' 의 누름과 뗌을 보낸다. 윈도우 10 RS4 부터 이모티콘 창이 뜬다. (emoji_panel_helper_win.cc 와 같다)
 //! - 리눅스: 크롬처럼 없다. (emoji_panel_helper.cc 의 IsEmojiPanelSupported 가 false, 메뉴에도 항목이 없다)
+//!
+//! # 예제
+//! 이모티콘 창이 있으면 띄우기 (창이 떠서 실행하지 않는다)
+//! ```rust,no_run
+//! use vanilla::platform::desktop::emojipanel;
+//!
+//! if emojipanel::is_emoji_panel_supported() {
+//! 	emojipanel::show_emoji_panel();
+//! }
+//! ```
 //==============================================================================
 
 //==============================================================================
 /// 이모티콘 창이 있는지. (크롬 IsEmojiPanelSupported, 윈도우는 판을 보지 않고 참으로 둔다)
+///
+/// # 돌려줌
+/// 맥과 윈도우면 true, 그 밖은 false.
 //==============================================================================
 pub fn is_emoji_panel_supported() -> bool {
 	cfg!(any(target_os = "macos", target_os = "windows"))

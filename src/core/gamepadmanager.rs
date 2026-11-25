@@ -116,62 +116,130 @@ const STANDARD_AXIS_LIST: [(Axis, f32); STANDARD_AXIS_COUNT] = [
 
 //==============================================================================
 /// 게임패드 아날로그 스틱 식별자. (W3C Standard Gamepad 매핑 규격)
+/// - 값은 Gamepad.axes 의 번호이고 get_axis_value 의 axis_index 로 쓴다.
+///
+/// # 예제
+/// 왼쪽 스틱 축 읽기
+/// ```rust
+/// use vanilla::{Gamepad, GamepadAnalogStickCode, GamepadManager};
+///
+/// let mut gamepad_manager = GamepadManager::new();
+/// gamepad_manager.set_log_enabled(false);
+/// let mut gamepad = Gamepad::create(0, "Test Pad");
+/// gamepad.axes[GamepadAnalogStickCode::LEFT_X] = 0.75;
+/// gamepad.axes[GamepadAnalogStickCode::LEFT_Y] = -1.0;
+/// gamepad_manager.update_all_gamepads_with_list(vec![Some(gamepad)]);
+/// assert_eq!(gamepad_manager.get_axis_value(0, GamepadAnalogStickCode::LEFT_X), 0.75);
+/// assert_eq!(gamepad_manager.get_axis_value(0, GamepadAnalogStickCode::LEFT_Y), -1.0);
+/// assert_eq!(gamepad_manager.get_axis_value(0, GamepadAnalogStickCode::RIGHT_X), 0.0);
+/// ```
 //==============================================================================
 pub struct GamepadAnalogStickCode;
 
 impl GamepadAnalogStickCode {
+	/// 왼쪽 스틱 가로 축. (-1 왼쪽 ~ 1 오른쪽)
 	pub const LEFT_X: usize = 0;
+	/// 왼쪽 스틱 세로 축. (-1 위 ~ 1 아래)
 	pub const LEFT_Y: usize = 1;
+	/// 오른쪽 스틱 가로 축. (-1 왼쪽 ~ 1 오른쪽)
 	pub const RIGHT_X: usize = 2;
+	/// 오른쪽 스틱 세로 축. (-1 위 ~ 1 아래)
 	pub const RIGHT_Y: usize = 3;
 }
 
 //==============================================================================
 /// 게임패드 트리거 식별자. (W3C Standard Gamepad 매핑 규격)
+/// - 값은 버튼 번호다. (GamepadButtonCode::L2, R2 와 같다) 아날로그 값은 get_button_value 로 읽는다.
+///
+/// # 예제
+/// 오른쪽 트리거를 반쯤 당긴 값 읽기
+/// ```rust
+/// use vanilla::{Gamepad, GamepadButton, GamepadButtonCode, GamepadManager, GamepadTriggerCode};
+///
+/// let mut gamepad_manager = GamepadManager::new();
+/// gamepad_manager.set_log_enabled(false);
+/// let mut gamepad = Gamepad::create(0, "Test Pad");
+/// gamepad.buttons[GamepadTriggerCode::R2] = GamepadButton { pressed: true, value: 0.5 };
+/// gamepad_manager.update_all_gamepads_with_list(vec![Some(gamepad)]);
+/// assert!(gamepad_manager.is_button_pressed(0, GamepadTriggerCode::R2));
+/// assert_eq!(gamepad_manager.get_button_value(0, GamepadTriggerCode::R2), 0.5);
+/// assert_eq!(GamepadTriggerCode::L2, GamepadButtonCode::L2);
+/// ```
 //==============================================================================
 pub struct GamepadTriggerCode;
 
 impl GamepadTriggerCode {
+	/// 왼쪽 트리거. (버튼 6번, 값 0 ~ 1)
 	pub const L2: usize = 6;
+	/// 오른쪽 트리거. (버튼 7번, 값 0 ~ 1)
 	pub const R2: usize = 7;
 }
 
 //==============================================================================
 /// 게임패드 버튼 식별자. (W3C Standard Gamepad 매핑 규격)
+/// - 값은 Gamepad.buttons 의 번호이고 is_button_pressed 들의 button_index 로 쓴다. 앞면 버튼은 자리로 정한다. (아래 0, 오른쪽 1, 왼쪽 2, 위 3)
+///
+/// # 예제
+/// 두 번 갱신하며 방금 눌림과 눌린 채 가르기
+/// ```rust
+/// use vanilla::{Gamepad, GamepadButton, GamepadButtonCode, GamepadManager};
+///
+/// let mut gamepad_manager = GamepadManager::new();
+/// gamepad_manager.set_log_enabled(false);
+/// let mut gamepad = Gamepad::create(0, "Test Pad");
+/// gamepad.buttons[GamepadButtonCode::A_CROSS] = GamepadButton { pressed: true, value: 1.0 };
+/// gamepad_manager.update_all_gamepads_with_list(vec![Some(gamepad.clone())]);
+/// assert!(gamepad_manager.is_button_just_pressed(0, GamepadButtonCode::A_CROSS));
+/// gamepad_manager.update_all_gamepads_with_list(vec![Some(gamepad)]);
+/// assert!(gamepad_manager.is_button_pressed(0, GamepadButtonCode::A_CROSS));
+/// assert!(!gamepad_manager.is_button_just_pressed(0, GamepadButtonCode::A_CROSS));
+/// assert!(!gamepad_manager.is_button_pressed(0, GamepadButtonCode::B_CIRCLE));
+/// ```
 //==============================================================================
 pub struct GamepadButtonCode;
 
 impl GamepadButtonCode {
 	/// 앞면 버튼.
 	pub const A_CROSS: usize = 0;
+	/// 앞면 오른쪽 버튼. (엑스박스 B, 플레이스테이션 동그라미)
 	pub const B_CIRCLE: usize = 1;
+	/// 앞면 왼쪽 버튼. (엑스박스 X, 플레이스테이션 네모)
 	pub const X_SQUARE: usize = 2;
+	/// 앞면 위쪽 버튼. (엑스박스 Y, 플레이스테이션 세모)
 	pub const Y_TRIANGLE: usize = 3;
 
 	/// 범퍼.
 	pub const L1: usize = 4;
+	/// 오른쪽 범퍼.
 	pub const R1: usize = 5;
 
 	/// 트리거. (버튼으로도 인식됨)
 	pub const L2: usize = 6;
+	/// 오른쪽 트리거. (값 0 ~ 1)
 	pub const R2: usize = 7;
 
 	/// 시스템.
 	pub const SHARE_VIEW: usize = 8;
+	/// 오른쪽 시스템 버튼. (엑스박스 메뉴, 플레이스테이션 옵션)
 	pub const OPTIONS_MENU: usize = 9;
 
 	/// 스틱 누름.
 	pub const L3: usize = 10;
+	/// 오른쪽 스틱 누름.
 	pub const R3: usize = 11;
 
 	/// 십자키.
 	pub const DPAD_UP: usize = 12;
+	/// 십자키 아래.
 	pub const DPAD_DOWN: usize = 13;
+	/// 십자키 왼쪽.
 	pub const DPAD_LEFT: usize = 14;
+	/// 십자키 오른쪽.
 	pub const DPAD_RIGHT: usize = 15;
 
 	/// 가운데.
 	pub const HOME_PS: usize = 16;
+	/// 플레이스테이션 터치패드 누름. (표준 17개 뒤의 버튼, 듀얼쇼크4와 듀얼센스만)
 	pub const TOUCHPAD: usize = 17;
 }
 
@@ -180,9 +248,13 @@ impl GamepadButtonCode {
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum GamepadKind {
+	/// 엑스박스 패드. (이름에 045e, xbox, xinput, microsoft)
 	Xbox,
+	/// 플레이스테이션 패드. (이름에 054c, playstation, dualshock, dualsense, sony)
 	PlayStation,
+	/// 닌텐도 패드. (이름에 057e, nintendo, joy-con, pro controller)
 	Nintendo,
+	/// 그 밖. (이름으로 가르지 못한 패드)
 	Other,
 }
 
@@ -195,6 +267,24 @@ const GAMEPAD_ACTIVE_AXIS_THRESHOLD: f64 = 0.5;
 
 //==============================================================================
 /// 패드 이름으로 종류 가르기. (플레이스테이션 054c, 닌텐도 057e, 엑스박스 045e 와 이름, 모르면 Other)
+/// - 대소문자를 가리지 않고 플레이스테이션, 닌텐도, 엑스박스 차례로 본다.
+///
+/// # 인자
+/// - `gamepad_id`: 패드 이름. (Gamepad.id)
+///
+/// # 돌려줌
+/// 이름에 든 제조사 번호나 흔한 이름으로 가른 종류. 맞는 것이 없으면 Other.
+///
+/// # 예제
+/// 브라우저와 데스크탑 꼴 이름 가르기
+/// ```rust
+/// use vanilla::{read_gamepad_kind, GamepadKind};
+///
+/// let dual_sense_id = "DualSense Wireless Controller (STANDARD GAMEPAD Vendor: 054c Product: 0ce6)";
+/// assert_eq!(read_gamepad_kind(dual_sense_id), GamepadKind::PlayStation);
+/// assert_eq!(read_gamepad_kind("Xbox 360 Controller (XInput STANDARD GAMEPAD)"), GamepadKind::Xbox);
+/// assert_eq!(read_gamepad_kind("Steam Virtual Gamepad"), GamepadKind::Other);
+/// ```
 //==============================================================================
 pub fn read_gamepad_kind(gamepad_id: &str) -> GamepadKind {
 	let lower_case_id = gamepad_id.to_lowercase();
@@ -231,6 +321,17 @@ pub type GamepadInputCallback = Box<dyn FnMut(usize, GamepadInputType, usize, f3
 
 //==============================================================================
 /// 게임패드 버튼 하나. (W3C GamepadButton)
+///
+/// # 예제
+/// 패드 사본의 버튼 바꾸기
+/// ```rust
+/// use vanilla::{Gamepad, GamepadButton, GamepadButtonCode};
+///
+/// let mut gamepad = Gamepad::create(0, "Test Pad");
+/// assert!(!gamepad.buttons[GamepadButtonCode::L2].pressed);
+/// gamepad.buttons[GamepadButtonCode::L2] = GamepadButton { pressed: true, value: 0.4 };
+/// assert_eq!(gamepad.buttons[GamepadButtonCode::L2].value, 0.4);
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GamepadButton {
@@ -242,6 +343,24 @@ pub struct GamepadButton {
 
 //==============================================================================
 /// 게임패드 하나의 사본. (W3C Gamepad, navigator.getGamepads() 가 주는 것과 같은 꼴)
+///
+/// # 예제
+/// 패드를 만들어 연결된 패드 목록에서 읽기
+/// ```rust
+/// use vanilla::{read_gamepad_kind, Gamepad, GamepadKind, GamepadManager};
+///
+/// let gamepad = Gamepad::create(1, "Xbox Wireless Controller");
+/// assert_eq!(gamepad.buttons.len(), 17);
+/// assert_eq!(gamepad.axes.len(), 4);
+/// assert!(gamepad.connected);
+/// assert_eq!(read_gamepad_kind(&gamepad.id), GamepadKind::Xbox);
+///
+/// let mut gamepad_manager = GamepadManager::new();
+/// gamepad_manager.set_log_enabled(false);
+/// gamepad_manager.update_all_gamepads_with_list(vec![None, Some(gamepad)]);
+/// let connected_gamepad = gamepad_manager.get_connected_gamepad(0);
+/// assert_eq!(connected_gamepad.map(|gamepad| gamepad.index), Some(1));
+/// ```
 //==============================================================================
 #[derive(Clone, Debug, PartialEq)]
 pub struct Gamepad {
@@ -260,6 +379,13 @@ pub struct Gamepad {
 impl Gamepad {
 	//==============================================================================
 	/// 생성. (버튼 17개는 뗀 상태, 축 4개는 0)
+	///
+	/// # 인자
+	/// - `index`: 하드웨어 식별 번호. (update_all_gamepads_with_list 에 넘기는 목록의 번호와 같게)
+	/// - `id`: 장치 이름.
+	///
+	/// # 돌려줌
+	/// 연결된(connected 가 true) 패드 사본.
 	//==============================================================================
 	pub fn create(index: usize, id: &str) -> Gamepad {
 		Gamepad {
@@ -293,6 +419,50 @@ struct GamepadState {
 
 //==============================================================================
 /// 게임패드 관리자.
+/// - InputManager 가 하나 들고 tick 에서 폴링한다. 씬은 engine.get_input_manager().get_gamepad_manager() 로 읽는다.
+///
+/// # 예제
+/// 콜백으로 버튼 변화 받기
+/// ```rust
+/// use std::cell::RefCell;
+/// use std::rc::Rc;
+/// use vanilla::{Gamepad, GamepadButton, GamepadButtonCode, GamepadInputType, GamepadManager};
+///
+/// let event_list = Rc::new(RefCell::new(Vec::new()));
+/// let callback_event_list = event_list.clone();
+/// let mut gamepad_manager = GamepadManager::new();
+/// gamepad_manager.set_log_enabled(false);
+/// gamepad_manager.set_callback(Some(Box::new(move |gamepad_index, input_type, input_index, value| {
+/// 	callback_event_list.borrow_mut().push((gamepad_index, input_type, input_index, value));
+/// })));
+/// let mut gamepad = Gamepad::create(0, "Test Pad");
+/// gamepad.buttons[GamepadButtonCode::A_CROSS] = GamepadButton { pressed: true, value: 1.0 };
+/// gamepad_manager.update_all_gamepads_with_list(vec![Some(gamepad)]);
+/// assert_eq!(gamepad_manager.get_connected_gamepad_count(), 1);
+/// assert_eq!(event_list.borrow()[0], (0, GamepadInputType::Button, GamepadButtonCode::A_CROSS, 1.0));
+/// ```
+///
+/// 씬에서 첫 패드의 단추와 스틱 읽기
+/// ```rust,no_run
+/// use vanilla::{Engine, GamepadAnalogStickCode, GamepadButtonCode};
+///
+/// fn read_first_gamepad(engine: &Engine) {
+/// 	let gamepad_manager = engine.get_input_manager().get_gamepad_manager();
+/// 	let gamepad_index = match gamepad_manager.get_connected_gamepad(0) {
+/// 		Some(gamepad) => {
+/// 			gamepad.index
+/// 		}
+/// 		None => {
+/// 			return;
+/// 		}
+/// 	};
+/// 	if gamepad_manager.is_button_just_pressed(gamepad_index, GamepadButtonCode::A_CROSS) {
+/// 		println!("confirm");
+/// 	}
+/// 	let stick_x = gamepad_manager.get_axis_value(gamepad_index, GamepadAnalogStickCode::LEFT_X);
+/// 	println!("{}", stick_x);
+/// }
+/// ```
 //==============================================================================
 pub struct GamepadManager {
 	/// 연결된 게임패드 식별자(index) 목록.
@@ -318,6 +488,10 @@ pub struct GamepadManager {
 impl GamepadManager {
 	//==============================================================================
 	/// 생성.
+	/// - 로그는 켜고 입력 로그는 끈 채 시작한다. 장치(gilrs)는 첫 갱신 때 연다.
+	///
+	/// # 돌려줌
+	/// 연결된 패드가 없는 관리자.
 	//==============================================================================
 	pub fn new() -> GamepadManager {
 		GamepadManager {
@@ -335,6 +509,10 @@ impl GamepadManager {
 
 	//==============================================================================
 	/// 갱신.
+	/// - update_all_gamepads 를 부른다.
+	///
+	/// # 인자
+	/// - `_time_delta`: 지난 프레임 뒤로 흐른 초. (쓰지 않는다)
 	//==============================================================================
 	pub fn tick(&mut self, _time_delta: f32) {
 		self.update_all_gamepads();
@@ -342,6 +520,10 @@ impl GamepadManager {
 
 	//==============================================================================
 	/// 게임패드 연결.
+	/// - 상태 칸을 그 패드의 버튼, 축 수만큼 뗀 상태와 0 으로 만든다. 로그가 켜져 있으면 연결 로그를 낸다.
+	///
+	/// # 인자
+	/// - `gamepad`: 붙일 패드. (같은 index 가 이미 붙어 있으면 건너뛴다)
 	//==============================================================================
 	pub fn connect(&mut self, gamepad: &Gamepad) {
 		if self.connected_gamepad_indices.contains(&gamepad.index) {
@@ -367,6 +549,9 @@ impl GamepadManager {
 
 	//==============================================================================
 	/// 게임패드 연결 해제.
+	///
+	/// # 인자
+	/// - `gamepad`: 뗄 패드. (index 로 찾는다, 붙어 있지 않으면 건너뛴다)
 	//==============================================================================
 	pub fn disconnect(&mut self, gamepad: &Gamepad) {
 		let list_index = match self.connected_gamepad_indices.iter().position(|connected_gamepad_index| *connected_gamepad_index == gamepad.index) {
@@ -387,6 +572,9 @@ impl GamepadManager {
 
 	//==============================================================================
 	/// 콜백 설정. (None 이면 끈다)
+	///
+	/// # 인자
+	/// - `callback`: 갱신 중 입력이 바뀔 때마다 부를 함수. (gamepad_index 는 Gamepad.index, 버튼 눌림은 Button 과 1.0 / 0.0, 아날로그 값은 Value, 축은 Axis)
 	//==============================================================================
 	pub fn set_callback(&mut self, callback: Option<GamepadInputCallback>) {
 		self.input_event_callback = callback;
@@ -394,6 +582,9 @@ impl GamepadManager {
 
 	//==============================================================================
 	/// 로그 켜고 끄기. (러스트 판에서 더한 것. 기본은 원본처럼 켜짐)
+	///
+	/// # 인자
+	/// - `is_enabled`: 연결, 해제, 입력 로그를 모두 내려면 true.
 	//==============================================================================
 	pub fn set_log_enabled(&mut self, is_enabled: bool) {
 		self.is_log_enabled = is_enabled;
@@ -401,6 +592,9 @@ impl GamepadManager {
 
 	//==============================================================================
 	/// 단추와 축이 바뀔 때마다 로그를 낼지. (기본은 끔, set_log_enabled 가 꺼져 있으면 켜도 내지 않는다)
+	///
+	/// # 인자
+	/// - `is_enabled`: 입력 로그를 내려면 true.
 	//==============================================================================
 	pub fn set_input_log_enabled(&mut self, is_enabled: bool) {
 		self.is_input_log_enabled = is_enabled;
@@ -408,6 +602,9 @@ impl GamepadManager {
 
 	//==============================================================================
 	/// 단추와 축이 바뀔 때마다 로그를 내는지.
+	///
+	/// # 돌려줌
+	/// 입력 로그를 켰으면 true. (set_log_enabled 는 보지 않는다)
 	//==============================================================================
 	pub fn is_input_log_enabled(&self) -> bool {
 		self.is_input_log_enabled
@@ -415,6 +612,9 @@ impl GamepadManager {
 
 	//==============================================================================
 	/// 마지막 갱신에 단추를 누르거나 축을 0.5 넘게 기울인 패드의 이름. (없으면 None, 마지막으로 쓴 장치를 가릴 때)
+	///
+	/// # 돌려줌
+	/// 그 패드의 Gamepad.id. 마지막 갱신에 새로 누른 단추나 0.5 를 새로 넘긴 축이 없으면 None. (누른 채 두면 다음 갱신에 None)
 	//==============================================================================
 	pub fn get_active_gamepad_id(&self) -> Option<&str> {
 		self.active_gamepad_id.as_deref()
@@ -423,6 +623,22 @@ impl GamepadManager {
 	//==============================================================================
 	/// 연결된 패드를 모두 떨기. (세기는 0 ~ 1, 무거운 모터와 가벼운 모터, 초)
 	/// - 데스크탑은 gilrs force feedback(macOS 는 GameController 와 CoreHaptics), 웹은 Gamepad.vibrationActuator 의 dual-rumble. 진동을 대지 않는 패드는 건너뛴다.
+	///
+	/// # 인자
+	/// - `strong_magnitude`: 무거운(낮은 주파수) 모터 세기. (0 ~ 1 로 자르고, 수가 아니면 0)
+	/// - `weak_magnitude`: 가벼운(높은 주파수) 모터 세기. (0 ~ 1 로 자르고, 수가 아니면 0)
+	/// - `seconds`: 떠는 길이. (초, 음수나 수가 아니면 0, 밀리초로 반올림한다)
+	///
+	/// # 예제
+	/// 맞았을 때 0.2 초 떨기
+	/// ```rust,no_run
+	/// use vanilla::Engine;
+	///
+	/// fn shake_on_hit(engine: &mut Engine) {
+	/// 	let gamepad_manager = engine.get_input_manager_mut().get_gamepad_manager_mut();
+	/// 	gamepad_manager.vibrate(1.0, 0.5, 0.2);
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn vibrate(&mut self, strong_magnitude: f32, weak_magnitude: f32, seconds: f32) {
 		let clamped_strong_magnitude = if strong_magnitude.is_finite() {
@@ -505,6 +721,25 @@ impl GamepadManager {
 	//==============================================================================
 	/// 주어진 목록으로 모든 게임패드 갱신. (원본 update_all_gamepads 의 본문, 목록 번호가 index)
 	/// - gilrs 없이 상태를 넣을 때 쓴다. (시험, 다른 입력원)
+	/// - 목록에 새로 나타난 패드는 붙이고 사라진 패드는 놓는다. 값은 소수점 둘째 자리로 반올림하고 바뀐 것만 콜백에 알린다.
+	///
+	/// # 인자
+	/// - `gamepad_list`: 패드 목록. (번호가 Gamepad.index, 빈 자리는 None, navigator.getGamepads() 와 같은 꼴)
+	///
+	/// # 예제
+	/// 둘째 자리에 패드를 넣었다가 빼기
+	/// ```rust
+	/// use vanilla::{Gamepad, GamepadManager};
+	///
+	/// let mut gamepad_manager = GamepadManager::new();
+	/// gamepad_manager.set_log_enabled(false);
+	/// let gamepad = Gamepad::create(1, "Second Pad");
+	/// gamepad_manager.update_all_gamepads_with_list(vec![None, Some(gamepad)]);
+	/// assert_eq!(gamepad_manager.get_connected_gamepad_count(), 1);
+	/// assert_eq!(gamepad_manager.get_all_connected_gamepads()[0].id, "Second Pad");
+	/// gamepad_manager.update_all_gamepads_with_list(Vec::new());
+	/// assert_eq!(gamepad_manager.get_connected_gamepad_count(), 0);
+	/// ```
 	//==============================================================================
 	pub fn update_all_gamepads_with_list(&mut self, gamepad_list: Vec<Option<Gamepad>>) {
 		// 목록에 있는데 아직 맞이하지 않은 패드를 여기서 붙인다.
@@ -662,6 +897,13 @@ impl GamepadManager {
 
 	//==============================================================================
 	/// 버튼 눌림 상태 반환.
+	///
+	/// # 인자
+	/// - `gamepad_index`: 패드의 하드웨어 식별 번호. (Gamepad.index, 연결 목록의 순번이 아니다)
+	/// - `button_index`: 버튼 번호. (GamepadButtonCode)
+	///
+	/// # 돌려줌
+	/// 눌린 채면 true. 패드가 붙어 있지 않거나 버튼 번호가 없으면 false.
 	//==============================================================================
 	pub fn is_button_pressed(&self, gamepad_index: usize, button_index: usize) -> bool {
 		match self.find_button_state(gamepad_index, button_index) {
@@ -676,6 +918,13 @@ impl GamepadManager {
 
 	//==============================================================================
 	/// 이번 갱신에 방금 눌린 버튼인지. (원본 isButtonJustPressed, 키보드 is_key_just_pressed 와 같은 쓰임)
+	///
+	/// # 인자
+	/// - `gamepad_index`: 패드의 하드웨어 식별 번호. (Gamepad.index, 연결 목록의 순번이 아니다)
+	/// - `button_index`: 버튼 번호. (GamepadButtonCode)
+	///
+	/// # 돌려줌
+	/// 지난 갱신에 떼어 있다가 이번 갱신에 눌렸으면 true. 패드나 버튼이 없으면 false.
 	//==============================================================================
 	pub fn is_button_just_pressed(&self, gamepad_index: usize, button_index: usize) -> bool {
 		match self.find_button_state(gamepad_index, button_index) {
@@ -690,6 +939,13 @@ impl GamepadManager {
 
 	//==============================================================================
 	/// 이번 갱신에 방금 떼어진 버튼인지. (원본 isButtonJustReleased)
+	///
+	/// # 인자
+	/// - `gamepad_index`: 패드의 하드웨어 식별 번호. (Gamepad.index, 연결 목록의 순번이 아니다)
+	/// - `button_index`: 버튼 번호. (GamepadButtonCode)
+	///
+	/// # 돌려줌
+	/// 지난 갱신에 눌려 있다가 이번 갱신에 떼어졌으면 true. 패드나 버튼이 없으면 false.
 	//==============================================================================
 	pub fn is_button_just_released(&self, gamepad_index: usize, button_index: usize) -> bool {
 		match self.find_button_state(gamepad_index, button_index) {
@@ -704,6 +960,13 @@ impl GamepadManager {
 
 	//==============================================================================
 	/// 버튼/트리거 아날로그 값 반환. (0.0 ~ 1.0)
+	///
+	/// # 인자
+	/// - `gamepad_index`: 패드의 하드웨어 식별 번호. (Gamepad.index, 연결 목록의 순번이 아니다)
+	/// - `button_index`: 버튼 번호. (GamepadButtonCode)
+	///
+	/// # 돌려줌
+	/// 소수점 둘째 자리로 반올림한 값. 패드나 버튼이 없으면 0.0.
 	//==============================================================================
 	pub fn get_button_value(&self, gamepad_index: usize, button_index: usize) -> f32 {
 		match self.find_button_state(gamepad_index, button_index) {
@@ -718,6 +981,14 @@ impl GamepadManager {
 
 	//==============================================================================
 	/// 아날로그 스틱 축 값 반환. (-1.0 ~ 1.0)
+	/// - 0.01 넘게 바뀐 때만 새 값을 받는다. 죽은 구역은 빼지 않는다. (InputActions 가 뺀다)
+	///
+	/// # 인자
+	/// - `gamepad_index`: 패드의 하드웨어 식별 번호. (Gamepad.index)
+	/// - `axis_index`: 축 번호. (GamepadAnalogStickCode, 세로 축은 아래가 양수)
+	///
+	/// # 돌려줌
+	/// 소수점 둘째 자리로 반올림한 값. 패드나 축이 없거나 NaN 이면 0.0.
 	//==============================================================================
 	pub fn get_axis_value(&self, gamepad_index: usize, axis_index: usize) -> f32 {
 		let state = match self.connected_gamepad_states.get(&gamepad_index) {
@@ -740,6 +1011,9 @@ impl GamepadManager {
 
 	//==============================================================================
 	/// 연결된 모든 게임패드 반환. (마지막 갱신의 사본)
+	///
+	/// # 돌려줌
+	/// 붙은 차례의 패드 목록. 없으면 빈 목록.
 	//==============================================================================
 	pub fn get_all_connected_gamepads(&self) -> Vec<&Gamepad> {
 		let mut connected_gamepad_list = Vec::new();
@@ -753,6 +1027,9 @@ impl GamepadManager {
 
 	//==============================================================================
 	/// 연결된 게임패드 수 반환.
+	///
+	/// # 돌려줌
+	/// 붙어 있는 패드 수.
 	//==============================================================================
 	pub fn get_connected_gamepad_count(&self) -> usize {
 		self.connected_gamepad_indices.len()
@@ -760,6 +1037,12 @@ impl GamepadManager {
 
 	//==============================================================================
 	/// 연결된 게임패드 반환. (gamepad_index 는 연결 목록의 순번, 0 ~ get_connected_gamepad_count() - 1)
+	///
+	/// # 인자
+	/// - `gamepad_index`: 연결 목록의 순번. (붙은 차례, Gamepad.index 가 아니다)
+	///
+	/// # 돌려줌
+	/// 마지막 갱신의 패드 사본. 순번이 범위를 넘거나 그 패드가 마지막 목록에 없으면 None.
 	//==============================================================================
 	pub fn get_connected_gamepad(&self, gamepad_index: usize) -> Option<&Gamepad> {
 		let hardware_index = *self.connected_gamepad_indices.get(gamepad_index)?;
@@ -783,6 +1066,9 @@ impl GamepadManager {
 }
 
 impl Default for GamepadManager {
+	//==============================================================================
+	/// 기본값. (GamepadManager::new 와 같다)
+	//==============================================================================
 	fn default() -> GamepadManager {
 		GamepadManager::new()
 	}

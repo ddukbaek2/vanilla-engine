@@ -11,6 +11,17 @@
 //! - 최대 FPS 는 원본처럼 세기 시작한 뒤 처리한 프레임 수로 차례를 정한다. (platform/framelimiter.rs, 90 Hz 에서 60 FPS 도 평균 60)
 //! - 캔버스의 webglcontextlost, webglcontextrestored 에서 원본 Graphic 처럼 묶음 기억을 잊는다.
 //! - exit_application: 원본처럼 Capacitor 의 App.exitApp, 없으면 window.close 를 시도한다.
+//!
+//! # 예제
+//! 페이지 쿼리 값, 세이프 에어리어, 주된 손 읽기 (데스크탑과 같은 이름으로 부른다)
+//! ```rust,no_run
+//! use vanilla::platform;
+//!
+//! let quality = platform::read_page_query_value("quality").unwrap_or_else(|| String::from("high"));
+//! let safe_area_insets = platform::read_safe_area_insets();
+//! let is_touch_first = platform::is_coarse_pointer();
+//! println!("{} {:?} {}", quality, safe_area_insets, is_touch_first);
+//! ```
 //==============================================================================
 use crate::core::asset::AssetLoadHandle;
 use crate::core::engine::{EngineRunner, PageEvent};
@@ -38,6 +49,11 @@ type FrameCallbackCell = Rc<RefCell<Option<Closure<dyn FnMut(f64)>>>>;
 
 //==============================================================================
 /// 커서 보이기 설정.
+/// - 캔버스의 cursor 스타일을 감출 때 none, 보일 때 빈 값(브라우저 기본)으로 쓴다.
+///
+/// # 인자
+/// - `platform_window`: 엔진 캔버스. (None 이면 아무것도 하지 않는다)
+/// - `is_visible`: 보이려면 true.
 //==============================================================================
 pub fn set_cursor_visible(platform_window: Option<&PlatformWindow>, is_visible: bool) {
 	if let Some(canvas) = platform_window {
@@ -53,6 +69,10 @@ pub fn set_cursor_visible(platform_window: Option<&PlatformWindow>, is_visible: 
 
 //==============================================================================
 /// 커서 모양 설정. (캔버스의 cursor 스타일에 CSS 값을 쓴다, 빈 값이면 브라우저의 기본, 그림 커서는 CSS 값에 그림이 든다)
+///
+/// # 인자
+/// - `platform_window`: 엔진 캔버스. (None 이면 아무것도 하지 않는다)
+/// - `cursor_value`: 커서 값. (css_value 를 그대로 쓴다)
 //==============================================================================
 pub fn set_cursor(platform_window: Option<&PlatformWindow>, cursor_value: &CursorValue) {
 	if let Some(canvas) = platform_window {
@@ -62,6 +82,9 @@ pub fn set_cursor(platform_window: Option<&PlatformWindow>, cursor_value: &Curso
 
 //==============================================================================
 /// 주된 손이 손가락인지. (CSS 의 pointer: coarse)
+///
+/// # 돌려줌
+/// matchMedia("(pointer: coarse)") 가 맞으면 true. window 가 없거나 읽지 못하면 false.
 //==============================================================================
 pub fn is_coarse_pointer() -> bool {
 	web_sys::window()
@@ -72,6 +95,9 @@ pub fn is_coarse_pointer() -> bool {
 
 //==============================================================================
 /// 문서의 초점이 글자 입력칸에 있는지. (글자 종류의 input, textarea, contenteditable, select)
+///
+/// # 돌려줌
+/// document.activeElement 가 글자 입력칸이면 true. (button, checkbox 같은 input 은 false, 초점이 없으면 false)
 //==============================================================================
 pub fn is_text_field_focused() -> bool {
 	let active_element = match web_sys::window().and_then(|window| window.document()).and_then(|document| document.active_element()) {
@@ -108,6 +134,12 @@ pub fn is_text_field_focused() -> bool {
 
 //==============================================================================
 /// 페이지 주소의 쿼리 값. (원본처럼 location.search 를 URLSearchParams 로 읽어 처음 값, 없으면 None)
+///
+/// # 인자
+/// - `name`: 쿼리 이름. (safeArea 같은)
+///
+/// # 돌려줌
+/// 그 이름의 첫 값. 쿼리에 없거나 window, location, URLSearchParams 를 읽지 못하면 None.
 //==============================================================================
 pub fn read_page_query_value(name: &str) -> Option<String> {
 	let window = web_sys::window()?;
@@ -121,6 +153,9 @@ pub fn read_page_query_value(name: &str) -> Option<String> {
 
 //==============================================================================
 /// 화면(client) 좌표에서 캔버스의 왼쪽 위. (원본 canvas.getBoundingClientRect() 의 left, top, 캔버스가 없으면 0)
+///
+/// # 돌려줌
+/// 캔버스의 왼쪽 위 자리. (CSS 픽셀, 엔진 캔버스가 아직 없으면 0, 0)
 //==============================================================================
 pub fn read_canvas_client_position() -> Vector2 {
 	let canvas = ENGINE_CANVAS.with(|engine_canvas| engine_canvas.borrow().clone());
@@ -137,6 +172,13 @@ pub fn read_canvas_client_position() -> Vector2 {
 
 //==============================================================================
 /// 검증용 화면 저장. (원본처럼 내려받기, PNG 를 Blob 주소로 만들어 a 요소의 download 로 누른다)
+///
+/// # 인자
+/// - `file_name`: 내려받을 파일 이름. (a 요소의 download 값)
+/// - `png_bytes`: PNG 파일 바이트.
+///
+/// # 돌려줌
+/// 내려받기를 눌렀으면 Ok. window, document, body, Blob, URL.createObjectURL 이 없거나 DOM 호출이 실패하면 Err(까닭 글).
 //==============================================================================
 pub fn save_capture_file(file_name: &str, png_bytes: &[u8]) -> Result<(), String> {
 	let window = web_sys::window().ok_or_else(|| String::from("window 없음"))?;
@@ -164,6 +206,9 @@ pub fn save_capture_file(file_name: &str, png_bytes: &[u8]) -> Result<(), String
 
 //==============================================================================
 /// 페이지 전체 크기. (원본 window.innerWidth, innerHeight)
+///
+/// # 돌려줌
+/// 창 안쪽 크기. (CSS 픽셀) window 가 없거나 값을 읽지 못하면 None.
 //==============================================================================
 pub fn read_client_native_size() -> Option<Vector2> {
 	let window = web_sys::window()?;
@@ -237,6 +282,9 @@ pub(crate) fn read_renderbuffer_sample_counts(internal_format: u32) -> Vec<i32> 
 //==============================================================================
 /// CSS env(safe-area-inset-*) 세이프 에어리어 인셋. (원본 view_manager.readSafeAreaFromEnvironment, CSS 픽셀 [위, 오른쪽, 아래, 왼쪽])
 /// - 숨은 요소의 padding 에 env() 를 걸고 계산된 값을 parseFloat 로 읽는다. 문서나 body 가 없으면 0.
+///
+/// # 돌려줌
+/// [위, 오른쪽, 아래, 왼쪽] 인셋. (CSS 픽셀, 읽지 못한 칸은 0)
 //==============================================================================
 pub fn read_safe_area_insets() -> [f32; 4] {
 	let read_insets = || -> Option<[f32; 4]> {
@@ -270,6 +318,10 @@ pub fn read_safe_area_insets() -> [f32; 4] {
 
 //==============================================================================
 /// 창 제목 설정. (문서 제목)
+///
+/// # 인자
+/// - `_platform_window`: 엔진 캔버스. (쓰지 않는다, 데스크탑과 같은 꼴을 맞춘 것)
+/// - `title`: 제목 글. (document.title)
 //==============================================================================
 pub fn set_title(_platform_window: Option<&PlatformWindow>, title: &str) {
 	if let Some(document) = web_sys::window().and_then(|window| window.document()) {
@@ -283,6 +335,11 @@ pub fn set_title(_platform_window: Option<&PlatformWindow>, title: &str) {
 /// - 응답이 그림 형(image/...)이거나 주소가 그림 확장자(png, jpg, gif, webp, bmp, ico, svg, avif 등)면 끝내기 전에 원본처럼 브라우저가 풀게 해 손잡이에 둔다.
 ///   (ImageAsset, AssetLoader 가 그대로 쓴다) 원본 HTMLImageElement 처럼 응답의 content-type 을 그대로 형으로 넘겨, 브라우저가 SVG 는 그 형(image/svg+xml)으로,
 ///   그 밖의 그림은 내용으로 가린다. 머리가 없는 응답만 확장자의 형을 쓴다. data: 주소는 fetch 가 주소의 형을 content-type 으로 준다.
+///
+/// # 인자
+/// - `asset_location`: 받을 주소. (엔진이 애셋 경로로 만든 것, data: 주소도 된다)
+/// - `load_handle`: 다 받으면 바이트나 오류 글로 끝낼 손잡이.
+/// - `is_no_cache`: true 면 fetch 에 cache: "no-cache" 를 붙인다. (원본 TextAsset)
 //==============================================================================
 pub fn request_asset_bytes(asset_location: String, load_handle: AssetLoadHandle, is_no_cache: bool) {
 	wasm_bindgen_futures::spawn_local(async move {
@@ -446,6 +503,12 @@ struct WebApplication {
 
 //==============================================================================
 /// 시작. (캔버스와 WebGL2 를 잡고 request_animation_frame 을 걸어 둔 뒤 바로 돌아온다)
+///
+/// # 인자
+/// - `engine_runner`: 엔진 실행자. (Engine::run 이 엔진과 첫 씬으로 만들어 넘긴다)
+///
+/// # 돌려줌
+/// 프레임 콜백을 걸었으면 Ok. 캔버스나 WebGL2 컨텍스트를 얻지 못했거나 사건 리스너를 달지 못했으면 Err(까닭 글).
 //==============================================================================
 pub fn run(engine_runner: EngineRunner) -> Result<(), String> {
 	let web_application_cell = Rc::new(RefCell::new(WebApplication {
@@ -563,6 +626,9 @@ const COMPATIBILITY_MOUSE_MILLISECONDS: f64 = 800.0;
 /// 마우스가 이만큼(CSS 픽셀) 넘게 움직여야 마지막 장치를 마우스로 본다.
 const MOUSE_DEVICE_MOVE_THRESHOLD: i32 = 6;
 
+//==============================================================================
+/// 마우스와 손가락 리스너 달기. (자세한 것은 위 COMPATIBILITY_MOUSE_MILLISECONDS 앞의 머리 주석, 캔버스나 window 가 없으면 Err)
+//==============================================================================
 fn add_pointer_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> Result<(), String> {
 	let window = web_sys::window().ok_or_else(|| String::from("window 없음"))?;
 	let canvas = web_application_cell.borrow().engine_runner.engine.platform_window.clone().ok_or_else(|| String::from("캔버스 없음"))?;

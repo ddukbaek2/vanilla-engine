@@ -12,6 +12,18 @@
 //! - 글꼴은 그 얼굴의 PostScript 이름으로 짓는다. (시스템에 올린 글꼴만 CoreText 가 이모지를 키워 그린다) 이름이 점으로 시작하는 숨은 글꼴이거나 축 값을 걸면
 //!   파일 경로의 CTFontManagerCreateFontDescriptorsFromURL 서술자를 PostScript 이름(없으면 모음 안의 차례)으로 골라 짓는다. 글자 크기마다 지은 CTFont 는 담아 둔다. (스레드 하나, 넘치면 비운다)
 //! - 그림은 프리멀티플라이드 RGBA(sRGB) 비트맵 컨텍스트에 흰색으로 그린다. 크롬 캔버스처럼 회색 안티앨리어싱이고 LCD 글자 다듬기는 끈다.
+//!
+//! # 예제
+//! 색 이모지 글꼴의 키움 비 재기
+//! ```rust
+//! use vanilla::platform::desktop::coretextglyph::read_emoji_scale;
+//! use vanilla::platform::find_fallback_font_file;
+//!
+//! if let Some(source) = find_fallback_font_file("\u{1F600}", 400, false, true) {
+//! 	let emoji_scale = read_emoji_scale(&source.path, source.face_index.unwrap_or(0), 16.0);
+//! 	assert!(emoji_scale > 0.0);
+//! }
+//! ```
 //==============================================================================
 use objc2_core_foundation::{CFArray, CFDictionary, CFNumber, CFRetained, CFString, CFType, CFURL, CGPoint, CGRect};
 use objc2_core_graphics::{kCGColorSpaceSRGB, CGBitmapContextCreate, CGColorSpace, CGContext, CGImageAlphaInfo, CGImageByteOrderInfo};
@@ -36,12 +48,40 @@ thread_local! {
 
 //==============================================================================
 /// CoreText 로 그린 글리프. (프리멀티플라이드 RGBA, 왼쪽 위 자리는 펜 원점에서 오른쪽 left_x, 기준선에서 위로 top_y)
+///
+/// # 예제
+/// 시스템 대체 글꼴의 A 글리프 그리기
+/// ```rust
+/// use std::rc::Rc;
+/// use vanilla::core::textshaping::LoadedFont;
+/// use vanilla::platform::desktop::coretextglyph::{rasterize_glyph, CoreTextGlyphRaster};
+/// use vanilla::platform::find_fallback_font_file;
+///
+/// fn rasterize_character(character: char, pixel_size: f32) -> Option<CoreTextGlyphRaster> {
+/// 	let source = find_fallback_font_file(&character.to_string(), 400, false, false)?;
+/// 	let face_index = source.face_index.unwrap_or(0);
+/// 	let font_bytes: Rc<[u8]> = std::fs::read(&source.path).ok()?.into();
+/// 	let loaded_font = LoadedFont::create_from_shared_bytes(font_bytes, face_index, &[]).ok()?;
+/// 	let glyph_id = loaded_font.get_shaping_face().glyph_index(character)?;
+/// 	rasterize_glyph(&source.path, face_index, glyph_id.0, pixel_size, &[])
+/// }
+///
+/// if let Some(raster) = rasterize_character('A', 32.0) {
+/// 	assert_eq!(raster.pixels.len(), (raster.width * raster.height * 4) as usize);
+/// 	assert!(raster.top_y > 0);
+/// }
+/// ```
 //==============================================================================
 pub struct CoreTextGlyphRaster {
+	/// 픽셀. (프리멀티플라이드 RGBA, 한 줄 width * 4 바이트, 위 줄부터)
 	pub pixels: Vec<u8>,
+	/// 가로. (픽셀, 글리프 상자에 사방 1 픽셀을 더한 것)
 	pub width: i32,
+	/// 세로. (픽셀, 글리프 상자에 사방 1 픽셀을 더한 것)
 	pub height: i32,
+	/// 펜 원점에서 그림 왼쪽까지. (픽셀, 오른쪽이 양수)
 	pub left_x: i32,
+	/// 기준선에서 그림 위쪽까지. (픽셀, 위가 양수)
 	pub top_y: i32,
 }
 
@@ -155,6 +195,16 @@ fn read_font(path: &Path, face_index: u32, pixel_size: f32, variation_list: &[(u
 
 //==============================================================================
 /// 글리프가 그려지는 상자. (CTFontGetBoundingRectsForGlyphs, 펜 원점 기준 픽셀, y 는 위가 양수. 그릴 것이 없으면 None)
+///
+/// # 인자
+/// - `path`: 글꼴 파일 경로.
+/// - `face_index`: 모음(TTC) 안의 얼굴 번호.
+/// - `glyph_index`: 글리프 번호.
+/// - `pixel_size`: 글자 크기. (픽셀)
+/// - `variation_list`: 가변 글꼴 축 값. ((4 글자 태그의 수, 값) 목록, 비면 축을 걸지 않는다)
+///
+/// # 돌려줌
+/// 글리프 상자. CoreText 가 글꼴을 짓지 못했거나 상자의 가로나 세로가 0 이하면 None.
 //==============================================================================
 pub fn read_glyph_bounds(path: &Path, face_index: u32, glyph_index: u16, pixel_size: f32, variation_list: &[(u32, f32)]) -> Option<CGRect> {
 	let font = read_font(path, face_index, pixel_size, variation_list)?;
@@ -169,6 +219,14 @@ pub fn read_glyph_bounds(path: &Path, face_index: u32, glyph_index: u16, pixel_s
 
 //==============================================================================
 /// 색 이모지 글꼴을 CoreText 가 키워 그리는 비. (웃는 얼굴 이모지 상자의 높이 / 글자 크기, 재지 못하면 1)
+///
+/// # 인자
+/// - `path`: 글꼴 파일 경로.
+/// - `face_index`: 모음(TTC) 안의 얼굴 번호.
+/// - `pixel_size`: 글자 크기. (픽셀)
+///
+/// # 돌려줌
+/// 이모지 상자 높이를 글자 크기로 나눈 비. (16px 에서 1.25, 24px 부터 1) 글자 크기가 0 이하이거나, 글꼴에 웃는 얼굴이 없거나, 재지 못하면 1.
 //==============================================================================
 pub fn read_emoji_scale(path: &Path, face_index: u32, pixel_size: f32) -> f32 {
 	if pixel_size <= 0.0 {
@@ -190,6 +248,16 @@ pub fn read_emoji_scale(path: &Path, face_index: u32, pixel_size: f32) -> f32 {
 
 //==============================================================================
 /// 글리프 하나 그리기. (흰색, 색 글리프는 제 색. 그릴 것이 없거나 CoreText 가 읽지 못하면 None)
+///
+/// # 인자
+/// - `path`: 글꼴 파일 경로.
+/// - `face_index`: 모음(TTC) 안의 얼굴 번호.
+/// - `glyph_index`: 글리프 번호.
+/// - `pixel_size`: 글자 크기. (픽셀)
+/// - `variation_list`: 가변 글꼴 축 값. ((4 글자 태그의 수, 값) 목록)
+///
+/// # 돌려줌
+/// 그린 글리프. 그릴 것이 없거나, CoreText 가 글꼴을 짓지 못했거나, 그림이 4096 픽셀을 넘으면 None.
 //==============================================================================
 pub fn rasterize_glyph(path: &Path, face_index: u32, glyph_index: u16, pixel_size: f32, variation_list: &[(u32, f32)]) -> Option<CoreTextGlyphRaster> {
 	let font = read_font(path, face_index, pixel_size, variation_list)?;

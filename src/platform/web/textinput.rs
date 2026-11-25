@@ -17,6 +17,17 @@
 //!   (apply_frame 이 부르는 focus() 가 그 자리에서 focus / blur 이벤트를 부르기 때문)
 //! - 원본과 다른 것: 숨긴 <input> 은 필드가 tick 을 도는 동안만 있다. (노드를 끄거나 지우면 함께 빠진다) setTimeout 으로 미루는 커서 옮기기와
 //!   메뉴 닫기 리스너는 원본과 같다.
+//!
+//! # 예제
+//! 클립보드에 쓰고 비동기로 읽기 (웹은 그 자리에서 읽지 못해 콜백으로 받는다)
+//! ```rust,no_run
+//! use vanilla::platform;
+//!
+//! platform::write_clipboard_text("vanilla");
+//! platform::read_clipboard_text_with_callback(Box::new(|text: String| {
+//! 	println!("{}", text);
+//! }));
+//! ```
 //==============================================================================
 use crate::core::engine::Engine;
 use crate::core::textinput::{convert_character_index_to_utf16_index, convert_utf16_index_to_character_index, TextInputEvent, TextInputEventKind, TextInputFieldState, TextInputKey};
@@ -265,6 +276,9 @@ fn call_clipboard_function(function_name: &str, argument_list: &js_sys::Array) -
 
 //==============================================================================
 /// 시스템 클립보드에 글 쓰기. (navigator.clipboard.writeText, 실패는 무시. 원본 writeClipboard)
+///
+/// # 인자
+/// - `text`: 쓸 글.
 //==============================================================================
 pub fn write_clipboard_text(text: &str) {
 	let argument_list = js_sys::Array::of1(&JsValue::from_str(text));
@@ -277,6 +291,9 @@ pub fn write_clipboard_text(text: &str) {
 
 //==============================================================================
 /// 시스템 클립보드 글 읽기. (웹은 비동기라 그 자리에서 읽지 못한다. read_clipboard_text_with_callback 이나 request_clipboard_paste 로 읽는다)
+///
+/// # 돌려줌
+/// 늘 None.
 //==============================================================================
 pub fn read_clipboard_text() -> Option<String> {
 	None
@@ -284,6 +301,9 @@ pub fn read_clipboard_text() -> Option<String> {
 
 //==============================================================================
 /// 시스템 클립보드 글을 비동기로 읽어 콜백에 넘기기. (원본 readClipboard 의 navigator.clipboard.readText().then, 못 읽거나 거부되면 빈 글)
+///
+/// # 인자
+/// - `callback`: 읽은 글을 받을 함수. (readText 가 끝난 뒤 한 번 불린다)
 //==============================================================================
 pub fn read_clipboard_text_with_callback(callback: Box<dyn FnOnce(String)>) {
 	read_optional_clipboard_text_with_callback(Box::new(move |text: Option<String>| {
@@ -293,6 +313,9 @@ pub fn read_clipboard_text_with_callback(callback: Box<dyn FnOnce(String)>) {
 
 //==============================================================================
 /// 시스템 클립보드 글을 비동기로 읽어 콜백에 넘기기. (원본 engine.readClipboardText, 클립보드가 없거나 거부되면 원본 null 자리의 None)
+///
+/// # 인자
+/// - `callback`: 읽은 글을 받을 함수. (readText 가 끝난 뒤 한 번, navigator.clipboard 가 없으면 그 자리에서 None 으로 불린다)
 //==============================================================================
 pub fn read_optional_clipboard_text_with_callback(callback: Box<dyn FnOnce(Option<String>)>) {
 	let promise = match call_clipboard_function("readText", &js_sys::Array::new()) {
