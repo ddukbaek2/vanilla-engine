@@ -10,13 +10,12 @@
 // - 사용: 매 프레임 begin_line_ids(gl, 보기, 투영) → draw_mesh / draw_mesh_instanced → end_line_ids(gl) (가면까지 셈) → 툰 몸 그리기 → draw_outline(gl).
 //   begin_line_ids 는 그때의 뷰포트를 그리는 영역으로 적어 두고, 선의 판을 그 크기에 맞춰 짓는다. end_line_ids 가 프레임버퍼, 뷰포트, 상태를 돌린다.
 //   (엔진 2D 그리기 사이에 끼울 때, 그 전에 Graphic 의 묶음을 내보내고 끝에 restore_render_state)
-// - 원본과 다른 점: 인스턴스마다의 번호는 인스턴스 객체의 lineId 대신 draw_mesh_instanced 의 line_id_list 로 받는다. 상태를 돌릴 때 프로그램과 버텍스 어레이는 ToonRenderer 처럼 풀어 둔다.
-//   웹에서는 앞의 프레임버퍼와 텍스처를 읽을 수 없어(graphics3d::read_framebuffer_binding 머리말, glow 제약) 기본 프레임버퍼와 빈 텍스처로 돌린다.
+// - 인스턴스마다의 번호는 ToonInstance 의 line_id 다. (원본 인스턴스 객체의 lineId, None 이면 공통 번호)
 //==============================================================================
 use glow::HasContext;
 
 use crate::base::matrix4::Matrix4;
-use crate::core::graphic::GlTexture;
+use crate::core::graphic::{GlProgram, GlTexture, GlVertexArray};
 use crate::core::shaderprogram::ShaderProgram;
 use crate::graphics3d::toon::toonrenderer::{ToonInstance, ToonMesh, TOON_ATTRIBUTE_LOCATIONS, TOON_INSTANCE_FLOAT_COUNT, TOON_MAXIMUM_JOINTS};
 use crate::graphics3d::GlFramebuffer;
@@ -102,6 +101,8 @@ struct SavedState {
 	blend_source_alpha: i32,
 	blend_destination_alpha: i32,
 	clear_color: [f32; 4],
+	program: Option<GlProgram>,
+	vertex_array: Option<GlVertexArray>,
 	viewport: [i32; 4],
 	framebuffer: Option<GlFramebuffer>,
 }
@@ -110,7 +111,7 @@ pub struct ToonScreenOutline {
 	line_program: ShaderProgram,
 	mask_program: ShaderProgram,
 	composite_program: ShaderProgram,
-	empty_vertex_array: crate::core::graphic::GlVertexArray,
+	empty_vertex_array: GlVertexArray,
 	line_target: Option<ToonLineTarget>,
 	color: [f32; 4],
 	width: f32,
@@ -416,21 +417,21 @@ impl ToonScreenOutline {
 	}
 
 	//==============================================================================
-	// 같은 모형 여럿의 번호를 한 번에 그리기. (line_id_list 가 있으면 인스턴스마다 그 번호, 없거나 모자라면 공통 번호)
+	// 같은 모형 여럿의 번호를 한 번에 그리기. (인스턴스에 line_id 가 있으면 그 번호, 없으면 공통 번호)
 	//==============================================================================
-	pub fn draw_mesh_instanced(&mut self, gl: &glow::Context, mesh: &ToonMesh, instance_list: &[ToonInstance], line_id_list: Option<&[u32]>, line_id: u32, options: ToonLineDrawOptions) {
+	pub fn draw_mesh_instanced(&mut self, gl: &glow::Context, mesh: &ToonMesh, instance_list: &[ToonInstance], line_id: u32, options: ToonLineDrawOptions) {
 		if !self.is_drawing_line_ids {
 			return;
 		}
 		let mut instance_data = std::mem::take(&mut self.instance_data);
 		instance_data.clear();
 		let mut instance_count = 0;
-		for (instance_index, instance) in instance_list.iter().enumerate() {
+		for instance in instance_list {
 			if options.is_culled && !self.is_visible(mesh, &instance.model_matrix) {
 				continue;
 			}
 			self.add_drawn_distance(mesh, &instance.model_matrix);
-			let instance_line_id = line_id_list.and_then(|line_id_list| line_id_list.get(instance_index).copied()).unwrap_or(line_id);
+			let instance_line_id = instance.line_id.unwrap_or(line_id);
 			instance_data.extend_from_slice(&instance.model_matrix.elements);
 			instance_data.extend_from_slice(&[instance_line_id as f32, 0.0, 0.0, 1.0]);
 			instance_count += 1;
@@ -716,6 +717,8 @@ impl ToonScreenOutline {
 				blend_source_alpha: gl.get_parameter_i32(glow::BLEND_SRC_ALPHA),
 				blend_destination_alpha: gl.get_parameter_i32(glow::BLEND_DST_ALPHA),
 				clear_color,
+				program: crate::graphics3d::read_program_binding(gl),
+				vertex_array: crate::graphics3d::read_vertex_array_binding(gl),
 				viewport,
 				framebuffer: crate::graphics3d::read_framebuffer_binding(gl),
 			});
@@ -723,7 +726,7 @@ impl ToonScreenOutline {
 	}
 
 	//==============================================================================
-	// 적어 둔 상태로 돌리기. (프로그램과 버텍스 어레이는 풀어 둔다)
+	// 적어 둔 상태로 돌리기.
 	//==============================================================================
 	fn restore_state(&mut self, gl: &glow::Context) {
 		let saved_state = match self.saved_state.take() {
@@ -735,11 +738,11 @@ impl ToonScreenOutline {
 			}
 		};
 		unsafe {
-			gl.bind_vertex_array(None);
-			gl.use_program(None);
 			gl.bind_framebuffer(glow::FRAMEBUFFER, saved_state.framebuffer);
 			gl.viewport(saved_state.viewport[0], saved_state.viewport[1], saved_state.viewport[2], saved_state.viewport[3]);
 			gl.clear_color(saved_state.clear_color[0], saved_state.clear_color[1], saved_state.clear_color[2], saved_state.clear_color[3]);
+			gl.bind_vertex_array(saved_state.vertex_array);
+			gl.use_program(saved_state.program);
 			gl.depth_mask(saved_state.depth_mask);
 			gl.depth_func(saved_state.depth_function as u32);
 			gl.cull_face(glow::BACK);

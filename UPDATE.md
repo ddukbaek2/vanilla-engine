@@ -217,6 +217,12 @@
 - PointerCursor: get_button_cursor_name, get_default_cursor_name, is_coarse_pointer. FrameProbe: 설정 반환 함수들. Platform: is_coarse_pointer, get_safe_area_rect, get_resouce_usage(원본 이름 그대로). Identifier(원본 차례 번호, reset 은 처음 번호로, 원본은 아무것도 하지 않던 버그)
 - Localization.text_named: 빗금 앞뒤 빈칸을 원본 정규식 \s 처럼 탭과 줄바꿈까지 받는다. WebSocketClient.disconnect: 원본처럼 닫기만 걸고 다음 tick 에 끊긴 것으로 친다
 - GameScene, UIScene 트레이트에 finalize, unload, on_page_process_restored, on_page_visibility_restored, 씬의 터치 훅(touch_press, touch_move, touch_release, touch_cancel, touch_wheel)을 더하고 game_scene!, ui_scene! 이 Scene 의 같은 함수로 넘긴다. (원본 GameScene, UIScene 하위 클래스가 덮어쓰던 것)
+- 웹: 툰 3D 가 앞의 GL 상태를 원본처럼 돌린다. glow 웹 컨텍스트는 묶인 것이 없을 때(null) 읽으면 패닉해서 지금까지 웹은 앞의 프레임버퍼를 읽지 않고 기본 프레임버퍼로 돌렸다. 웹 플랫폼 층이 WebGL2 컨텍스트를 함께 들고 null 인지 먼저 보고(platform::is_gl_binding_present), 묶인 것이 있을 때만 glow 로 읽는다. (core::graphic 의 read_framebuffer_binding, read_texture_binding, read_program_binding, read_vertex_array_binding, graphics3d 가 다시 내보낸다)
+  - ToonRenderer 의 end_shadow_pass 와 ToonScreenOutline 의 end_line_ids, draw_outline 이 웹에서도 앞의 프레임버퍼로 돌린다. 웹에서 그림자 패스를 ToonPostProcess.begin 앞에 해야 하던 제약이 없어졌다. ToonScreenOutline 이 선의 판을 지은 뒤 앞의 텍스처도 돌린다
+  - ToonRenderer, ToonScreenOutline, ToonVfx 가 원본처럼 앞의 셰이더 프로그램과 버텍스 어레이로 돌린다. (지금까지는 데스크탑도 풀어 두었다)
+  - Graphic 이 놓은 픽셀을 텍스처에서 되읽을 때(ShadowImage) 웹에서 기본 프레임버퍼가 묶여 있으면 같은 까닭으로 패닉하던 것을 고쳤다
+  - 예제 toonshowcase: HDR 타겟(ToonPostProcess.begin)을 건 뒤 그림자 패스를 그린다. end_shadow_pass 가 HDR 타겟으로 돌아오는 것을 데스크탑과 웹에서 같게 본다
+- ToonInstance.line_id: 인스턴스마다의 화면 공간 바깥선 번호. (원본 instances[i].lineId, None 이면 공통 번호, ToonRenderer 는 읽지 않는다) ToonInstance::default() (단위 행렬, 흰 틴트, 번호 없음). ToonScreenOutline::draw_mesh_instanced 의 line_id_list 인자를 뺐다. (공개 API 를 바꾸는 일이다, 원본과 같은 쓰임) ToonInstance 를 구조체 꼴로 짓는 코드는 line_id 를 주거나 ..ToonInstance::default() 를 붙인다. 예제 toonfx, toonshowcase, toonview 를 고쳤다
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.

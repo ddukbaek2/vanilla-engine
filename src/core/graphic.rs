@@ -1634,7 +1634,7 @@ impl Graphic {
 		let height = image.get_height() as i32;
 		let mut pixels = vec![0u8; (width * height * 4) as usize];
 		let is_read = unsafe {
-			let previous_framebuffer = self.gl.get_parameter_framebuffer(glow::FRAMEBUFFER_BINDING);
+			let previous_framebuffer = read_framebuffer_binding(&self.gl);
 			let framebuffer = match self.gl.create_framebuffer() {
 				Ok(framebuffer) => {
 					framebuffer
@@ -2739,6 +2739,71 @@ impl Graphic {
 	//==============================================================================
 	pub fn get_text_string_texture_cache(&mut self) -> &mut TextStringTextureCache {
 		&mut self.text_string_texture_cache
+	}
+}
+
+//==============================================================================
+// GL 의 묶인 것이 있는지. (read_*_binding 이 glow 로 읽기 전에 본다)
+// - 웹의 glow 는 묶인 것이 없을 때(null) 읽으면 "A resource was created externally" 로 패닉한다.
+//   그래서 웹은 플랫폼 층이 들고 있는 WebGL2 컨텍스트로 먼저 null 인지 보고, 묶인 것이 있을 때만 glow 로 읽는다. 데스크탑 glow 는 0 을 None 으로 준다.
+//==============================================================================
+fn is_gl_binding_present(parameter: u32) -> bool {
+	#[cfg(target_arch = "wasm32")]
+	{
+		crate::platform::is_gl_binding_present(parameter)
+	}
+	#[cfg(not(target_arch = "wasm32"))]
+	{
+		let _ = parameter;
+		true
+	}
+}
+
+//==============================================================================
+// 지금 묶인 프레임버퍼 읽기. (앞의 것을 돌려 놓을 때, 원본 getParameter(FRAMEBUFFER_BINDING), 기본 프레임버퍼면 None)
+//==============================================================================
+pub(crate) fn read_framebuffer_binding(gl: &glow::Context) -> Option<<glow::Context as glow::HasContext>::Framebuffer> {
+	if !is_gl_binding_present(glow::FRAMEBUFFER_BINDING) {
+		return None;
+	}
+	unsafe {
+		gl.get_parameter_framebuffer(glow::FRAMEBUFFER_BINDING)
+	}
+}
+
+//==============================================================================
+// 지금 유닛에 묶인 2D 텍스처 읽기. (원본 getParameter(TEXTURE_BINDING_2D))
+//==============================================================================
+pub(crate) fn read_texture_binding(gl: &glow::Context) -> Option<GlTexture> {
+	if !is_gl_binding_present(glow::TEXTURE_BINDING_2D) {
+		return None;
+	}
+	unsafe {
+		gl.get_parameter_texture(glow::TEXTURE_BINDING_2D)
+	}
+}
+
+//==============================================================================
+// 지금 쓰는 셰이더 프로그램 읽기. (원본 getParameter(CURRENT_PROGRAM))
+//==============================================================================
+pub(crate) fn read_program_binding(gl: &glow::Context) -> Option<GlProgram> {
+	if !is_gl_binding_present(glow::CURRENT_PROGRAM) {
+		return None;
+	}
+	unsafe {
+		gl.get_parameter_program(glow::CURRENT_PROGRAM)
+	}
+}
+
+//==============================================================================
+// 지금 묶인 버텍스 어레이 읽기. (원본 getParameter(VERTEX_ARRAY_BINDING))
+//==============================================================================
+pub(crate) fn read_vertex_array_binding(gl: &glow::Context) -> Option<GlVertexArray> {
+	if !is_gl_binding_present(glow::VERTEX_ARRAY_BINDING) {
+		return None;
+	}
+	unsafe {
+		gl.get_parameter_vertex_array(glow::VERTEX_ARRAY_BINDING)
 	}
 }
 

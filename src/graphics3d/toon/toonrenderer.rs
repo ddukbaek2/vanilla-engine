@@ -11,15 +11,13 @@
 //   그림자를 받지 않을 때도 그림자 유닛에 1x1 비교 깊이 텍스처를 묶는다. (sampler2DShadow 유닛에 깊이 텍스처가 없으면 맥 드라이버가 알리고, 색 텍스처가 묶여 있으면 WebGL 이 그리기를 거부한다)
 // - HDR: set_hdr_output(true) 면 감마를 걸지 않은 선형 색을 낸다. 실수 렌더 타겟(ToonPostProcess)에 그리고 블룸과 톤매핑으로 마무리한다.
 // - 사용: create_mesh(gl, arrays) → 매 프레임 begin_frame(gl, 보기와 투영) → draw_mesh / draw_mesh_instanced → end_frame(gl) → 다 쓰면 delete_mesh.
-//   begin_frame 이 앞의 그리기 상태(섞기, 깊이, 면 가리기)를 적어 두고 깊이 시험과 면 가리기를 켜며, end_frame 이 적어 둔 상태로 돌린다.
+//   begin_frame 이 앞의 그리기 상태(섞기, 깊이, 면 가리기, 프로그램, 버텍스 어레이)를 적어 두고 깊이 시험과 면 가리기를 켜며, end_frame 이 적어 둔 상태로 돌린다.
 //   (엔진 2D 그리기 사이에 끼울 때, 그 전에 Graphic 의 묶음을 내보낸다)
 // - read_program_sources 로 ShaderWarmer 에 넘길 소스를 준다.
 // - 노드 사각형 안에 그리기: set_screen_rect(x, y, 너비, 높이) 를 주면 begin_frame 이 보기와 투영의 클립 공간을 그 사각형으로 옮기고 가위로 밖을 자른다.
 //   사각형은 begin_frame 때의 뷰포트(보통 드로잉 버퍼 전체) 안의 픽셀이고 왼쪽 위가 원점이다. 화면 밖 거르기는 옮기기 전의 절두체로 한다. end_frame 이 가위를 푼다.
 // - begin_frame_with_camera(Camera3D) 는 카메라의 보기와 투영으로 begin_frame 을 부른다. 2D 표시(Camera3D::project_to_view)와 같은 카메라를 쓴다.
 // - draw_mesh_outline 은 바깥선 껍데기만 그린다. (ToonDrawQueue 가 불투명한 몸을 다 그린 뒤 바깥선을 몰아 그릴 때, 그린 수는 세지 않는다)
-// - 웹에서는 앞의 프레임버퍼를 읽을 수 없어(graphics3d::read_framebuffer_binding 머리말, glow 제약) end_shadow_pass 가 기본 프레임버퍼로 돌린다.
-//   그림자 패스는 다른 프레임버퍼(ToonPostProcess 의 begin)를 걸기 전에 한다. (원본은 앞의 프레임버퍼로 돌린다)
 // - ToonDrawOptions 의 casts_shadow 는 ToonDrawQueue::draw_shadows 만 읽는다. is_body_drawn 이 false 면 바깥선만 그린다. (원본은 꼴 객체에 이름으로 단다)
 //==============================================================================
 use glow::HasContext;
@@ -28,7 +26,7 @@ use crate::base::rect::Rect;
 use crate::graphics3d::camera3d::Camera3D;
 
 use crate::base::matrix4::Matrix4;
-use crate::core::graphic::{GlBuffer, GlTexture, GlVertexArray};
+use crate::core::graphic::{GlBuffer, GlProgram, GlTexture, GlVertexArray};
 use crate::graphics3d::GlFramebuffer;
 use crate::core::shaderprogram::ShaderProgram;
 use crate::graphics3d::shadowmap::ShadowMap;
@@ -290,11 +288,19 @@ impl Default for ToonDrawOptions<'_> {
 
 //==============================================================================
 // 인스턴스 하나. (모형 행렬과 틴트, 틴트의 알파는 바깥선에도 곱한다)
+// - line_id 는 ToonScreenOutline::draw_mesh_instanced 가 읽는 이 인스턴스의 선 번호다. (원본 lineId, None 이면 공통 번호, ToonRenderer 는 읽지 않는다)
 //==============================================================================
 #[derive(Clone, Copy, Debug)]
 pub struct ToonInstance {
 	pub model_matrix: Matrix4,
 	pub tint_color: [f32; 4],
+	pub line_id: Option<u32>,
+}
+
+impl Default for ToonInstance {
+	fn default() -> Self {
+		ToonInstance { model_matrix: Matrix4::create_identity(), tint_color: [1.0, 1.0, 1.0, 1.0], line_id: None }
+	}
 }
 
 //==============================================================================
@@ -330,6 +336,8 @@ struct SavedState {
 	blend_destination_rgb: i32,
 	blend_source_alpha: i32,
 	blend_destination_alpha: i32,
+	program: Option<GlProgram>,
+	vertex_array: Option<GlVertexArray>,
 	viewport: [i32; 4],
 	framebuffer: Option<GlFramebuffer>,
 }
@@ -659,6 +667,8 @@ impl ToonRenderer {
 				blend_destination_rgb: gl.get_parameter_i32(glow::BLEND_DST_RGB),
 				blend_source_alpha: gl.get_parameter_i32(glow::BLEND_SRC_ALPHA),
 				blend_destination_alpha: gl.get_parameter_i32(glow::BLEND_DST_ALPHA),
+				program: crate::graphics3d::read_program_binding(gl),
+				vertex_array: crate::graphics3d::read_vertex_array_binding(gl),
 				viewport,
 				framebuffer: crate::graphics3d::read_framebuffer_binding(gl),
 			});
@@ -666,13 +676,11 @@ impl ToonRenderer {
 	}
 
 	//==============================================================================
-	// 적어 둔 상태로 돌리기. (프로그램과 버텍스 어레이는 풀어 둔다)
+	// 적어 둔 상태로 돌리기.
 	//==============================================================================
 	fn restore_state(&mut self, gl: &glow::Context, is_framebuffer_restored: bool) {
 		unsafe {
 			gl.cull_face(glow::BACK);
-			gl.bind_vertex_array(None);
-			gl.use_program(None);
 			let saved_state = match self.saved_state.take() {
 				Some(saved_state) => {
 					saved_state
@@ -685,6 +693,8 @@ impl ToonRenderer {
 				gl.bind_framebuffer(glow::FRAMEBUFFER, saved_state.framebuffer);
 				gl.viewport(saved_state.viewport[0], saved_state.viewport[1], saved_state.viewport[2], saved_state.viewport[3]);
 			}
+			gl.bind_vertex_array(saved_state.vertex_array);
+			gl.use_program(saved_state.program);
 			gl.depth_mask(saved_state.depth_mask);
 			gl.blend_func_separate(saved_state.blend_source_rgb as u32, saved_state.blend_destination_rgb as u32, saved_state.blend_source_alpha as u32, saved_state.blend_destination_alpha as u32);
 			for (capability, is_enabled) in [(glow::BLEND, saved_state.is_blend_enabled), (glow::DEPTH_TEST, saved_state.is_depth_test_enabled), (glow::CULL_FACE, saved_state.is_cull_face_enabled)] {

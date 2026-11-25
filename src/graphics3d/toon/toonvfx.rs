@@ -12,8 +12,7 @@
 // - 어느 사건에 어느 효과를 어떤 값으로 낼지(처방)는 게임 몫이다. 엔진은 매개변수만 받는다.
 // - 바닥: set_floor_height_reader 로 게임이 바닥 높이를 알려 주면 자국, 충격파, 연기 기둥은 그 높이에, is_grounded 파티클은 그 높이에서 멈춘다. (없으면 0)
 // - 시계: update(초) 가 이 바탕의 시계를 나아가게 한다. queue 로 넘긴 것은 그 프레임에 한 번 그리고 비운다.
-// - 그리기: draw(gl, 보기, 투영) 를 툰 모형을 그린 뒤 부른다. 깊이 시험은 켜고 깊이는 쓰지 않으며 미리 곱한 알파로 섞는다. 앞의 상태를 적어 두었다 돌린다.
-//   프로그램과 버텍스 어레이는 돌리지 않고 풀어 둔다. (원본은 돌린다. 웹의 glow 는 묶인 것이 없을 때 읽으면 패닉해서 읽지 않는다, graphics3d::read_framebuffer_binding 머리말)
+// - 그리기: draw(gl, 보기, 투영) 를 툰 모형을 그린 뒤 부른다. 깊이 시험은 켜고 깊이는 쓰지 않으며 미리 곱한 알파로 섞는다. 앞의 상태(프로그램과 버텍스 어레이 포함)를 적어 두었다 돌린다.
 // - 원본과 다른 점: 효과마다의 options 객체 대신 기본값을 가진 구조체(ToonParticleOptions 등)를 받는다. 범위가 되는 값은 ToonVfxRange 다.
 //   원본에서 주지 않아도 되는 값(undefined)은 Option 이다. add_lightning 의 life, age 는 ToonLightningOptions 에 함께 든다.
 //==============================================================================
@@ -1759,6 +1758,8 @@ impl ToonVfx {
 			let depth_mask = gl.get_parameter_bool(glow::DEPTH_WRITEMASK);
 			let depth_function = gl.get_parameter_i32(glow::DEPTH_FUNC);
 			let blend_functions = [gl.get_parameter_i32(glow::BLEND_SRC_RGB), gl.get_parameter_i32(glow::BLEND_DST_RGB), gl.get_parameter_i32(glow::BLEND_SRC_ALPHA), gl.get_parameter_i32(glow::BLEND_DST_ALPHA)];
+			let previous_program = crate::graphics3d::read_program_binding(gl);
+			let previous_vertex_array = crate::graphics3d::read_vertex_array_binding(gl);
 			gl.enable(glow::DEPTH_TEST);
 			gl.depth_func(glow::LEQUAL);
 			gl.depth_mask(false);
@@ -1779,8 +1780,8 @@ impl ToonVfx {
 			gl.active_texture(glow::TEXTURE0 + VFX_TEXTURE_UNIT);
 			gl.bind_texture(glow::TEXTURE_2D, None);
 			gl.active_texture(glow::TEXTURE0);
-			gl.bind_vertex_array(None);
-			gl.use_program(None);
+			gl.bind_vertex_array(previous_vertex_array);
+			gl.use_program(previous_program);
 			gl.depth_mask(depth_mask);
 			gl.depth_func(depth_function as u32);
 			gl.blend_func_separate(blend_functions[0] as u32, blend_functions[1] as u32, blend_functions[2] as u32, blend_functions[3] as u32);

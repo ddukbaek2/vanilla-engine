@@ -171,6 +171,33 @@ thread_local! {
 	static ENGINE_CANVAS: RefCell<Option<web_sys::HtmlCanvasElement>> = const { RefCell::new(None) };
 	// env(safe-area-inset-*) 를 재는 숨은 요소. (처음 잴 때 만들어 body 에 붙여 둔다)
 	static SAFE_AREA_PROBE_ELEMENT: RefCell<Option<web_sys::HtmlElement>> = const { RefCell::new(None) };
+	// 엔진의 WebGL2 컨텍스트. (glow 가 감싼 것과 같은 컨텍스트, is_gl_binding_present 가 묶인 것을 읽는다)
+	static ENGINE_GL_CONTEXT: RefCell<Option<web_sys::WebGl2RenderingContext>> = const { RefCell::new(None) };
+}
+
+//==============================================================================
+// GL 의 묶인 것(..._BINDING, CURRENT_PROGRAM)이 있는지. (원본 getParameter 가 null 이 아닌지)
+// - glow 웹 컨텍스트는 묶인 것이 없을 때(null) 읽으면 "A resource was created externally" 로 패닉하고 감싼 컨텍스트를 내주지 않는다.
+//   그래서 컨텍스트를 만들 때 같은 것을 따로 들고 있다가 여기서 읽는다. 컨텍스트가 아직 없으면 false.
+//==============================================================================
+pub(crate) fn is_gl_binding_present(parameter: u32) -> bool {
+	ENGINE_GL_CONTEXT.with(|engine_gl_context| {
+		match engine_gl_context.borrow().as_ref() {
+			Some(context) => {
+				match context.get_parameter(parameter) {
+					Ok(value) => {
+						!value.is_null() && !value.is_undefined()
+					}
+					Err(_) => {
+						false
+					}
+				}
+			}
+			None => {
+				false
+			}
+		}
+	})
 }
 
 //==============================================================================
@@ -830,6 +857,9 @@ impl WebApplication {
 			.ok_or_else(|| String::from("WebGL2 Not Supported."))?
 			.dyn_into::<web_sys::WebGl2RenderingContext>()
 			.map_err(|_| String::from("WebGL2 컨텍스트 변환 실패"))?;
+		ENGINE_GL_CONTEXT.with(|engine_gl_context| {
+			*engine_gl_context.borrow_mut() = Some(context.clone());
+		});
 		let gl = glow::Context::from_webgl2_context(context);
 		let graphic = Graphic::new(gl)?;
 
