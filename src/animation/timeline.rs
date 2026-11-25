@@ -858,10 +858,10 @@ pub trait TimelinePropertyTarget {
 
 impl TimelinePropertyTarget for ScreenEffect {
 	//==============================================================================
-	// 화면 효과에 값 걸기. (ScreenEffect 의 set_timeline_property 는 값을 글로 받는다)
+	// 화면 효과에 값 걸기. (값을 그대로 넘긴다)
 	//==============================================================================
 	fn set_timeline_property(&mut self, property_name: &str, value: &TimelineValue) {
-		ScreenEffect::set_timeline_property(self, property_name, &value.to_text());
+		ScreenEffect::set_timeline_property(self, property_name, value);
 	}
 }
 
