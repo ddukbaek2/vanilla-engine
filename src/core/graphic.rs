@@ -15,6 +15,7 @@
 // - 밉맵 단계 보정(set_image_mipmap_bias)은 기본, 묶음, 파티클 셰이더의 textureLodBias 유니폼으로 건다. 바꿔 끼운 셰이더는 그 유니폼이 있으면 받는다. (원본과 같음)
 // - 글자 방향(set_text_direction, 원본 setTextDirection)은 상태에 들고, 구운 문자열을 그 문단 방향으로 모양 짓는다. (textshaping.rs 의 양방향 정렬과 모양 짓기)
 // - 블렌드 모드 26 가지(원본과 같음): 13 가지는 고정 블렌딩, 13 가지는 그릴 영역 아래를 지금 프레임버퍼에서 blit_framebuffer 로 떠 와 W3C 공식대로 셰이더로 섞는다.
+//   Multiply 는 기본 프레임버퍼에서는 고정 블렌딩, 렌더 타겟에 그릴 때는 셰이더로 섞는다. (바탕이 반투명하면 고정 블렌딩이 W3C 식과 달라서, 원본과 같음)
 //   셰이더 글은 원본과 한 글자도 다르지 않다. 바꿔 끼운 셰이더는 덧그림 칸(데스크탑은 늘 RGBA16F, 웹은 원본처럼 EXT_color_buffer_float 가 있을 때 RGBA16F)에 먼저 그리고 섞어 옮긴다.
 // - 기본 프레임버퍼에 그릴 때는 알파를 쓰지 않는다(apply_color_mask). 원본과 웹은 캔버스가 alpha: false 라 화면 알파가 늘 1 인데, 데스크탑 기본 프레임버퍼는 알파가 있어
 //   알파를 낮추는 모드 뒤에 DST_ALPHA 를 쓰는 모드와 셰이더 섞기가 웹과 달랐다. 렌더 타겟에는 알파도 쓴다.
@@ -153,12 +154,12 @@ void main() {
 // 셰이더 섞기 함수. (고정 블렌딩으로 안 되는 블렌드 모드에서 그릴 영역 아래와 섞는다, 원본과 같은 글)
 // - backdropTexture 는 그리기 직전에 지금 프레임버퍼에서 그릴 영역만 떠 온 것이다. (프레임버퍼와 같은 크기와 형식, 프리멀티플라이드)
 // - 공식은 W3C Compositing and Blending Level 1 (https://www.w3.org/TR/compositing-1/, 2024-03-21 후보 권고안) 그대로다.
-//   10.1 분리 섞기: overlay = HardLight(Cs, Cb), darken = min, lighten = max, color-dodge, color-burn, hard-light, soft-light (D(Cb) 포함), difference, exclusion.
+//   10.1 분리 섞기: multiply = Cb x Cs, overlay = HardLight(Cs, Cb), darken = min, lighten = max, color-dodge, color-burn, hard-light, soft-light (D(Cb) 포함), difference, exclusion.
 //   10.2 비분리 섞기: hue, saturation, color, luminosity. (Lum = 0.3 R + 0.59 G + 0.11 B, ClipColor, SetLum, Sat, SetSat)
 //   섞은 색은 범위로 자른다. (10 장 "The result of the mixing formula must be clamped")
 // - 6 장 일반식대로 Cs' = (1 - αb) x Cs + αb x B(Cb, Cs) 로 섞은 색을 (Cs' x αs, αs) 로 내보내고,
 //   그 뒤 source-over 합성 co = cs' + cb x (1 - αs) 는 고정 블렌딩(ONE, ONE_MINUS_SRC_ALPHA)이 한다.
-// - blendModeIndex 는 BlendMode::get_shader_blend_mode_index 의 번호다.
+// - blendModeIndex 는 BlendMode::get_shader_blend_mode_index 의 번호다. Multiply 는 렌더 타겟에 그릴 때만 MULTIPLY_SHADER_BLEND_MODE_INDEX 로 섞는다.
 // - 아래 두 셰이더 글에 concat! 으로 끼우려고 글자 그대로 내는 매크로로 둔다.
 macro_rules! blend_function_source {
 	() => {
@@ -280,6 +281,9 @@ vec3 blendColors(vec3 backdropColor, vec3 sourceColor) {
 	if (blendModeIndex == 13) {
 		return setLuminosity(backdropColor, getLuminosity(sourceColor));
 	}
+	if (blendModeIndex == 14) {
+		return backdropColor * sourceColor;
+	}
 	return sourceColor;
 }
 
@@ -340,6 +344,11 @@ void main() {
 	outputColor = blendWithBackdrop(vec4(finalColor, finalAlpha));
 }
 ");
+
+// Multiply 를 셰이더로 섞을 때의 번호. (blend_function_source 의 blendModeIndex, 원본 MULTIPLY_SHADER_BLEND_MODE_INDEX)
+// - Multiply 고정 블렌딩(DST_COLOR, ONE_MINUS_SRC_ALPHA)은 바탕이 불투명할 때만 W3C 식과 같다. 바탕 알파가 1 보다 작으면 cs x (1 - αb) 항이 빠지고
+//   알파가 바탕 알파로 남는다. 기본 프레임버퍼는 바탕 알파가 늘 1 이라(apply_color_mask) 고정 블렌딩으로 그리고, 렌더 타겟에 그릴 때만 이 번호로 셰이더로 섞는다.
+const MULTIPLY_SHADER_BLEND_MODE_INDEX: i32 = 14;
 
 // 셰이더 섞기로 파티클을 그릴 때 한 번에 그리는 쿼드 수 상한. (서로 겹치지 않는 쿼드끼리 한 번 떠 와 함께 그린다, 겹침을 따질 때 견주는 수)
 const SHADER_BLEND_PARTICLE_GROUP_CAPACITY: usize = 32;
@@ -1461,6 +1470,7 @@ impl Graphic {
 	// - 나머지 13 가지(Overlay, Darken, Lighten, ColorDodge, ColorBurn, HardLight, SoftLight, Difference, Exclusion, Hue, Saturation, Color, Luminosity)는
 	//   그리기마다 그릴 영역 아래를 떠 와 셰이더로 섞는다. 이 모드에서는 묶어 그리지 않고, 그리기 하나에 영역 복사 한 번과 드로우 콜 한 번이 든다.
 	//   (바꿔 끼운 셰이더로 그릴 때는 덧그림 칸에 먼저 그리고 옮기므로 드로우 콜이 두 번)
+	// - Multiply 는 렌더 타겟(기본 프레임버퍼가 아닌 것)에 그릴 때만 셰이더로 섞는다. (get_draw_shader_blend_mode_index)
 	//==============================================================================
 	pub fn set_blend_mode(&mut self, blend_mode: BlendMode) {
 		if blend_mode == self.blend_mode {
@@ -1488,6 +1498,42 @@ impl Graphic {
 	//==============================================================================
 	pub fn get_blend_mode(&self) -> BlendMode {
 		self.blend_mode
+	}
+
+	//==============================================================================
+	// 이번 그리기의 셰이더 섞기 번호. (0 이면 고정 블렌딩, 원본 getDrawShaderBlendModeIndex)
+	// - Multiply 는 기본 프레임버퍼에서는 고정 블렌딩으로 그리고(묶어 그리기도 그대로), 렌더 타겟에 그릴 때만 셰이더로 섞는다. (MULTIPLY_SHADER_BLEND_MODE_INDEX)
+	//==============================================================================
+	fn get_draw_shader_blend_mode_index(&self) -> i32 {
+		if self.blend_mode != BlendMode::Multiply {
+			return self.shader_blend_mode_index;
+		}
+		if read_framebuffer_binding(&self.gl).is_none() {
+			return 0;
+		}
+		MULTIPLY_SHADER_BLEND_MODE_INDEX
+	}
+
+	//==============================================================================
+	// 셰이더 섞기의 합성 계수로 바꾸거나 되돌리기. (셰이더로 섞은 색은 source-over 로 합성한다, 원본 applyShaderBlendCompositeFunction)
+	// - 셰이더로만 섞는 13 가지는 apply_blend_mode 가 이미 source-over 계수를 걸어 두므로 그대로 둔다.
+	//   Multiply 는 고정 블렌딩 계수가 걸려 있어, 렌더 타겟에서 셰이더로 섞는 동안만 source-over 로 바꾸고(is_shader_blending 이 참) 다 그린 뒤 되돌린다.
+	//==============================================================================
+	fn apply_shader_blend_composite_function(&self, is_shader_blending: bool) {
+		if self.blend_mode != BlendMode::Multiply {
+			return;
+		}
+		let blend_function = if is_shader_blending {
+			BlendMode::Normal.get_blend_function()
+		}
+		else {
+			self.blend_mode.get_blend_function()
+		};
+		if let Some((source_factor, destination_factor)) = blend_function {
+			unsafe {
+				self.gl.blend_func(source_factor, destination_factor);
+			}
+		}
 	}
 
 	//==============================================================================
@@ -1559,7 +1605,8 @@ impl Graphic {
 		}
 
 		// 셰이더 섞기 모드는 그리기마다 그 아래를 떠 와 섞으므로 묶지 않는다. (클립 영역을 스텐실에 적을 때는 색을 쓰지 않으므로 그냥 그린다)
-		let is_shader_blend_draw = self.shader_blend_mode_index > 0 && self.batch_suspend_depth == 0;
+		let shader_blend_mode_index = if self.batch_suspend_depth == 0 { self.get_draw_shader_blend_mode_index() } else { 0 };
+		let is_shader_blend_draw = shader_blend_mode_index > 0;
 
 		// 묶어 그리기. (클립 영역 기록 중이 아니고 바꿔 끼운 셰이더가 없을 때. 바꿔 끼운 셰이더는 제 유니폼을 쓰므로 바로 그린다)
 		let is_batchable = self.is_batching_enabled && self.batch_suspend_depth == 0 && self.shader_program_override.is_none() && !is_shader_blend_draw;
@@ -1569,7 +1616,9 @@ impl Graphic {
 		}
 		self.flush_batch();
 		if is_shader_blend_draw {
-			self.draw_vertices_with_shader_blend(vertex_count, texture, color);
+			self.apply_shader_blend_composite_function(true);
+			self.draw_vertices_with_shader_blend(vertex_count, texture, color, shader_blend_mode_index);
+			self.apply_shader_blend_composite_function(false);
 			return;
 		}
 
@@ -1667,7 +1716,7 @@ impl Graphic {
 	// - 바꿔 끼운 셰이더(ShaderSprite 등)는 섞기 함수를 모르므로, 그 셰이더로 덧그림 칸에 먼저 그리고 그 칸을 섞기 셰이더로 옮긴다.
 	//   덧그림 칸에는 스텐실이 없어 자르기는 옮겨 그릴 때 걸린다.
 	//==============================================================================
-	fn draw_vertices_with_shader_blend(&mut self, vertex_count: usize, texture: GlTexture, color: Color) {
+	fn draw_vertices_with_shader_blend(&mut self, vertex_count: usize, texture: GlTexture, color: Color, shader_blend_mode_index: i32) {
 		let float_count = vertex_count * FLOATS_PER_VERTEX;
 		let backdrop_rect = match measure_backdrop_rect(&self.vertex_data[..float_count], FLOATS_PER_VERTEX, self.transform_matrix, self.applied_viewport_width, self.applied_viewport_height) {
 			Some(backdrop_rect) => {
@@ -1687,7 +1736,7 @@ impl Graphic {
 			self.gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, vertex_bytes, glow::DYNAMIC_DRAW);
 		}
 		if self.shader_program_override.is_none() {
-			self.draw_with_blend_shader_program(vertex_count, texture, color);
+			self.draw_with_blend_shader_program(vertex_count, texture, color, shader_blend_mode_index);
 			return;
 		}
 
@@ -1740,7 +1789,7 @@ impl Graphic {
 		self.global_alpha = 1.0;
 		self.image_tint_color = None;
 		let white_color = self.white_color;
-		self.draw_with_blend_shader_program(layer_vertex_count, layer_target.texture, white_color);
+		self.draw_with_blend_shader_program(layer_vertex_count, layer_target.texture, white_color, shader_blend_mode_index);
 		self.transform_matrix = transform_matrix;
 		self.global_alpha = global_alpha;
 		self.image_tint_color = image_tint_color;
@@ -1749,7 +1798,7 @@ impl Graphic {
 	//==============================================================================
 	// 올려 둔 버텍스를 섞기 셰이더로 그리기. (그릴 영역 아래는 이미 떠 와 유닛 1 에 바인드되어 있다)
 	//==============================================================================
-	fn draw_with_blend_shader_program(&mut self, vertex_count: usize, texture: GlTexture, color: Color) {
+	fn draw_with_blend_shader_program(&mut self, vertex_count: usize, texture: GlTexture, color: Color, shader_blend_mode_index: i32) {
 		if let Err(error) = self.ensure_blend_shader_program() {
 			eprintln!("Graphic: blend shader program failed: {}", error);
 			return;
@@ -1767,7 +1816,7 @@ impl Graphic {
 		let blend_mode_index_location = blend_shader_program.get_uniform_location(&self.gl, "blendModeIndex");
 		unsafe {
 			self.gl.uniform_matrix_3_f32_slice(projection_matrix_location.as_ref(), false, &self.projection_matrix_array);
-			self.gl.uniform_1_i32(blend_mode_index_location.as_ref(), self.shader_blend_mode_index);
+			self.gl.uniform_1_i32(blend_mode_index_location.as_ref(), shader_blend_mode_index);
 		}
 		self.upload_draw_uniforms(color, true);
 		self.bind_main_texture(texture);
@@ -2297,7 +2346,8 @@ impl Graphic {
 		let vertex_count = vertex_count.min(PARTICLE_VERTEX_CAPACITY).min(self.particle_vertex_data.len() / PARTICLE_FLOATS_PER_VERTEX);
 
 		// 셰이더 섞기 모드는 섞기 프로그램으로 그린다.
-		let is_shader_blend_draw = self.shader_blend_mode_index > 0;
+		let shader_blend_mode_index = self.get_draw_shader_blend_mode_index();
+		let is_shader_blend_draw = shader_blend_mode_index > 0;
 		if is_shader_blend_draw {
 			if let Err(error) = self.ensure_particle_blend_shader_program() {
 				eprintln!("Graphic: particle blend shader program failed: {}", error);
@@ -2333,11 +2383,13 @@ impl Graphic {
 			self.gl.uniform_matrix_3_f32_slice(model_matrix_location.as_ref(), false, &self.model_matrix_array);
 			self.gl.uniform_1_f32(global_alpha_location.as_ref(), self.global_alpha);
 			if is_shader_blend_draw {
-				self.gl.uniform_1_i32(blend_mode_index_location.as_ref(), self.shader_blend_mode_index);
+				self.gl.uniform_1_i32(blend_mode_index_location.as_ref(), shader_blend_mode_index);
 			}
 		}
 		if is_shader_blend_draw {
+			self.apply_shader_blend_composite_function(true);
 			self.draw_colored_quad_groups(vertex_count, texture);
+			self.apply_shader_blend_composite_function(false);
 		}
 		else {
 			self.bind_main_texture(texture);
@@ -3937,6 +3989,7 @@ mod tests {
 	//==============================================================================
 	// Screen 은 어느 바탕에서나, Multiply 는 불투명한 바탕에서 고정 블렌딩이 W3C 일반식과 같은지.
 	// - Multiply 고정 블렌딩(DST_COLOR, ONE_MINUS_SRC_ALPHA)은 바탕이 반투명하면 cs x (1 - αb) 항이 빠지고 알파가 바탕 알파로 남는다. (기본 화면은 불투명이다)
+	//   그래서 렌더 타겟에서는 셰이더로 섞는다. (multiply_shader_blend_index_is_separate, shader_output_with_source_over_matches_general_formula)
 	//==============================================================================
 	#[test]
 	fn multiply_and_screen_factors_match_general_formula() {
@@ -3973,7 +4026,8 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn shader_output_with_source_over_matches_general_formula() {
-		let blend_list: [fn(f32, f32) -> f32; 3] = [
+		let blend_list: [fn(f32, f32) -> f32; 4] = [
+			|backdrop_value, source_value| backdrop_value * source_value,
 			|backdrop_value, source_value| (backdrop_value - source_value).abs(),
 			|backdrop_value, source_value| backdrop_value + source_value - 2.0 * backdrop_value * source_value,
 			|backdrop_value, source_value| {
@@ -4014,6 +4068,20 @@ mod tests {
 				}
 			}
 		}
+	}
+
+	//==============================================================================
+	// Multiply 를 렌더 타겟에서 섞는 셰이더 번호는 셰이더 섞기 13 가지와 겹치지 않고, 두 섞기 셰이더 글에 그 번호의 Cb x Cs 가 있는지.
+	//==============================================================================
+	#[test]
+	fn multiply_shader_blend_index_is_separate() {
+		for (blend_mode, _) in BLEND_MODE_NAME_TABLE {
+			assert_ne!(blend_mode.get_shader_blend_mode_index(), MULTIPLY_SHADER_BLEND_MODE_INDEX);
+		}
+		assert_eq!(BlendMode::Multiply.get_shader_blend_mode_index(), 0);
+		let multiply_branch = format!("if (blendModeIndex == {}) {{\n\t\treturn backdropColor * sourceColor;", MULTIPLY_SHADER_BLEND_MODE_INDEX);
+		assert!(BLEND_FRAGMENTSHADER_SOURCE.contains(&multiply_branch));
+		assert!(PARTICLE_BLEND_FRAGMENTSHADER_SOURCE.contains(&multiply_branch));
 	}
 
 	//==============================================================================

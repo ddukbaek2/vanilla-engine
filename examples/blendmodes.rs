@@ -7,13 +7,16 @@
 //   1. 글자, 나인슬라이스, 자르기 안의 그림.
 //   2. 겹치는 파티클 24 개를 draw_colored_quads 로. 3. 같은 쿼드를 하나씩 draw_vertices 로. (둘이 같아야 한다)
 //   4. 기본 셰이더와 같은 글로 만든 바꿔 끼운 셰이더로 돌리고 틴트를 건 그림과 자르기 안의 나인슬라이스. 5. 같은 장면을 기본 셰이더로. (둘이 같아야 한다)
+//   6, 7. 투명하게 비운 렌더 타겟(RGBA8)에 바탕 열마다 알파를 255, 192, 102, 0 으로 깔고 장면 0 을 그린 뒤, 6 은 검정 위에, 7 은 흰색 위에 옮긴다.
+//      (반투명 바탕의 섞기를 크롬의 반투명 Canvas2D 와 견줄 수 있다. 검정 위는 프리멀티플라이드 색이고, 흰색 위와의 차이에서 알파가 나온다)
 // - 렌더 배율을 1 로 묶어 창 크기(1120x640) 그대로 그린다.
 // - 실행: cargo run --release --example blendmodes
-//   화면 저장: VANILLA_CAPTURE_PATH=shots/blend_{frame}.png VANILLA_CAPTURE_FRAMES=30,90,150,210,270,330 VANILLA_CAPTURE_EXIT=1
+//   화면 저장: VANILLA_CAPTURE_PATH=shots/blend_{frame}.png VANILLA_CAPTURE_FRAMES=30,90,150,210,270,330,390,450 VANILLA_CAPTURE_EXIT=1
 //==============================================================================
 
+use glow::HasContext;
 use std::rc::Rc;
-use vanilla::{BlendMode, Color, Engine, EngineConfiguration, Graphic, Image, Rect, Scene, SceneBase, TextAlign, TextBaseline, Vector2, ViewScaleMode};
+use vanilla::{BlendMode, Color, Engine, EngineConfiguration, Graphic, Image, Rect, RenderTarget, Scene, SceneBase, TextAlign, TextBaseline, Vector2, ViewScaleMode};
 
 //==============================================================================
 // 전역 상수 목록.
@@ -23,14 +26,17 @@ const VIEW_HEIGHT: f32 = 640.0;
 const CELL_SIZE: f32 = 160.0;
 const COLUMN_COUNT: usize = 7;
 const PAGE_FRAME_COUNT: u64 = 60;
-const PAGE_COUNT: u64 = 6;
+const PAGE_COUNT: u64 = 8;
 const IMAGE_SIZE: u32 = 96;
 const NINE_SLICE_IMAGE_SIZE: u32 = 30;
 const PARTICLE_COUNT: usize = 24;
 const BLEND_MODE_NAME_LIST: [&str; 26] = ["source-over", "source-in", "source-out", "source-atop", "destination-over", "destination-in", "destination-out", "destination-atop", "lighter", "copy", "xor", "multiply", "screen", "overlay", "darken", "lighten", "color-dodge", "color-burn", "hard-light", "soft-light", "difference", "exclusion", "hue", "saturation", "color", "luminosity"];
 const STRIPE_COLOR_LIST: [[u8; 3]; 4] = [[224, 60, 49], [47, 168, 79], [45, 108, 223], [242, 193, 78]];
 const BAND_COLOR_LIST: [[u8; 3]; 4] = [[255, 255, 255], [128, 128, 128], [0, 0, 0], [138, 43, 226]];
-const PAGE_NAME_LIST: [&str; 6] = ["그림, 사각형, 다각형", "글자, 나인슬라이스, 자르기", "파티클 (묶음)", "파티클 (낱장)", "바꿔 끼운 셰이더", "기본 셰이더"];
+// 반투명 렌더 타겟 장면의 바탕 열 알파. (원본 시험과 같다)
+const TRANSLUCENT_COLUMN_ALPHA_LIST: [u8; 4] = [255, 192, 102, 0];
+const OPAQUE_COLUMN_ALPHA_LIST: [u8; 4] = [255, 255, 255, 255];
+const PAGE_NAME_LIST: [&str; 8] = ["그림, 사각형, 다각형", "글자, 나인슬라이스, 자르기", "파티클 (묶음)", "파티클 (낱장)", "바꿔 끼운 셰이더", "기본 셰이더", "반투명 렌더 타겟 (검정 위)", "반투명 렌더 타겟 (흰색 위)"];
 
 // 기본 셰이더와 같은 글의 바꿔 끼울 셰이더. (덧그림 칸을 거쳐 섞어도 기본 셰이더로 그린 것과 같아야 한다)
 const IDENTITY_VERTEXSHADER_SOURCE: &str = "#version 300 es
@@ -161,21 +167,24 @@ struct BlendModeScene {
 	scene_base: SceneBase,
 	test_image: Rc<Image>,
 	nine_slice_image: Rc<Image>,
+	// 장면 6, 7 의 렌더 타겟. (처음 그릴 때 드로잉 버퍼 크기로 만든다)
+	render_target: Option<RenderTarget>,
 }
 
 impl BlendModeScene {
 	//==============================================================================
-	// 칸 바탕. (네 가지 색 줄무늬와 흰색, 회색, 검정, 보라 띠, source-over)
+	// 칸 바탕. (네 가지 색 줄무늬와 흰색, 회색, 검정, 보라 띠, 열마다 column_alpha_list 의 알파, source-over)
 	//==============================================================================
-	fn draw_cell_background(&self, graphic: &mut Graphic, cell_x: f32, cell_y: f32) {
+	fn draw_cell_background(&self, graphic: &mut Graphic, cell_x: f32, cell_y: f32, column_alpha_list: [u8; 4]) {
 		graphic.set_blend_mode(BlendMode::Normal);
 		for column_index in 0..4 {
 			let column_x = cell_x + column_index as f32 * 40.0;
+			let column_alpha = column_alpha_list[column_index];
 			let stripe_color = STRIPE_COLOR_LIST[column_index];
-			graphic.set_fill_color(Color::create_from_bytes(stripe_color[0], stripe_color[1], stripe_color[2], 255));
+			graphic.set_fill_color(Color::create_from_bytes(stripe_color[0], stripe_color[1], stripe_color[2], column_alpha));
 			graphic.draw_rect(Rect::create(column_x, cell_y, 40.0, 120.0));
 			let band_color = BAND_COLOR_LIST[column_index];
-			graphic.set_fill_color(Color::create_from_bytes(band_color[0], band_color[1], band_color[2], 255));
+			graphic.set_fill_color(Color::create_from_bytes(band_color[0], band_color[1], band_color[2], column_alpha));
 			graphic.draw_rect(Rect::create(column_x, cell_y + 120.0, 40.0, 40.0));
 		}
 	}
@@ -259,6 +268,77 @@ impl BlendModeScene {
 			graphic.set_shader_program_override(None);
 		}
 	}
+
+	//==============================================================================
+	// 장면 6, 7. (투명하게 비운 렌더 타겟에 반투명 바탕과 장면 0 을 칸마다 그 칸의 모드로 그리고, 검정이나 흰색 위에 옮긴다)
+	//==============================================================================
+	fn draw_render_target_page(&mut self, graphic: &mut Graphic, is_white_background: bool) {
+		let drawing_buffer_width = graphic.get_drawing_buffer_width();
+		let drawing_buffer_height = graphic.get_drawing_buffer_height();
+		graphic.flush_batch();
+		if self.render_target.is_none() {
+			match RenderTarget::new(graphic.get_gl(), drawing_buffer_width, drawing_buffer_height, false, None) {
+				Ok(render_target) => {
+					self.render_target = Some(render_target);
+				}
+				Err(error) => {
+					eprintln!("blendmodes: render target failed: {}", error);
+					return;
+				}
+			}
+		}
+		let render_target_texture = match self.render_target.as_ref().and_then(|render_target| render_target.get_color_texture(0)) {
+			Some(render_target_texture) => {
+				render_target_texture
+			}
+			None => {
+				return;
+			}
+		};
+		if let Some(render_target) = &self.render_target {
+			let gl = graphic.get_gl();
+			render_target.bind(gl);
+			unsafe {
+				gl.clear_color(0.0, 0.0, 0.0, 0.0);
+				gl.clear(glow::COLOR_BUFFER_BIT);
+			}
+		}
+		for (mode_index, blend_mode_name) in BLEND_MODE_NAME_LIST.iter().enumerate() {
+			let blend_mode = match BlendMode::from_name(blend_mode_name) {
+				Some(blend_mode) => {
+					blend_mode
+				}
+				None => {
+					continue;
+				}
+			};
+			let (cell_x, cell_y) = get_cell_origin(mode_index);
+			self.draw_cell_background(graphic, cell_x, cell_y, TRANSLUCENT_COLUMN_ALPHA_LIST);
+			graphic.set_blend_mode(blend_mode);
+			self.draw_shape_page(graphic, cell_x, cell_y);
+		}
+		graphic.set_blend_mode(BlendMode::Normal);
+		graphic.flush_batch();
+		{
+			let gl = graphic.get_gl();
+			unsafe {
+				gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+				gl.viewport(0, 0, drawing_buffer_width, drawing_buffer_height);
+			}
+		}
+
+		// 바탕을 칠하고 렌더 타겟을 그대로 옮긴다. (렌더 타겟은 아래가 0 이라 위아래를 뒤집어 짚는다, 프리멀티플라이드라 source-over)
+		let background_color = if is_white_background {
+			Color::white()
+		}
+		else {
+			Color::black()
+		};
+		graphic.set_fill_color(background_color);
+		graphic.draw_rect(Rect::create(0.0, 0.0, VIEW_WIDTH, VIEW_HEIGHT));
+		let vertex_count = graphic.write_quad(0, 0.0, 0.0, VIEW_WIDTH, VIEW_HEIGHT, 0.0, 1.0, 1.0, 0.0) / 4;
+		graphic.draw_vertices(vertex_count, render_target_texture, Color::white());
+	}
 }
 
 impl Scene for BlendModeScene {
@@ -282,30 +362,35 @@ impl Scene for BlendModeScene {
 	//==============================================================================
 	fn draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
 		let page_index = (engine.get_frame_number() / PAGE_FRAME_COUNT) % PAGE_COUNT;
-		for (mode_index, blend_mode_name) in BLEND_MODE_NAME_LIST.iter().enumerate() {
-			let blend_mode = match BlendMode::from_name(blend_mode_name) {
-				Some(blend_mode) => {
-					blend_mode
-				}
-				None => {
-					continue;
-				}
-			};
-			let (cell_x, cell_y) = get_cell_origin(mode_index);
-			self.draw_cell_background(graphic, cell_x, cell_y);
-			graphic.set_blend_mode(blend_mode);
-			match page_index {
-				0 => {
-					self.draw_shape_page(graphic, cell_x, cell_y);
-				}
-				1 => {
-					self.draw_path_page(graphic, cell_x, cell_y);
-				}
-				2 | 3 => {
-					self.draw_particle_page(graphic, cell_x, cell_y, page_index == 2);
-				}
-				_ => {
-					self.draw_override_page(graphic, cell_x, cell_y, page_index == 4);
+		if page_index >= 6 {
+			self.draw_render_target_page(graphic, page_index == 7);
+		}
+		else {
+			for (mode_index, blend_mode_name) in BLEND_MODE_NAME_LIST.iter().enumerate() {
+				let blend_mode = match BlendMode::from_name(blend_mode_name) {
+					Some(blend_mode) => {
+						blend_mode
+					}
+					None => {
+						continue;
+					}
+				};
+				let (cell_x, cell_y) = get_cell_origin(mode_index);
+				self.draw_cell_background(graphic, cell_x, cell_y, OPAQUE_COLUMN_ALPHA_LIST);
+				graphic.set_blend_mode(blend_mode);
+				match page_index {
+					0 => {
+						self.draw_shape_page(graphic, cell_x, cell_y);
+					}
+					1 => {
+						self.draw_path_page(graphic, cell_x, cell_y);
+					}
+					2 | 3 => {
+						self.draw_particle_page(graphic, cell_x, cell_y, page_index == 2);
+					}
+					_ => {
+						self.draw_override_page(graphic, cell_x, cell_y, page_index == 4);
+					}
 				}
 			}
 		}
@@ -337,6 +422,7 @@ fn main() {
 		scene_base: SceneBase::new(),
 		test_image: create_test_image(),
 		nine_slice_image: create_nine_slice_image(),
+		render_target: None,
 	};
 	if let Err(error) = engine.run(Box::new(blend_mode_scene)) {
 		eprintln!("{}", error);
