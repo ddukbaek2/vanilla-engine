@@ -5,10 +5,13 @@
 //   상한과 키 구성(방식, 문단 방향, 폰트 문자열, 선 두께, 배율, 글)은 원본과 같다.
 //   원본은 키를 문자열로 이어 붙인다. 여기서는 찾을 때마다 문자열을 만들지 않게 키의 해시로 찾고, 같은 해시 안에서 키를 하나씩 맞춰 본다.
 // - 글자는 흰색으로 굽고, 그릴 때 색을 곱한다. (색이 바뀌어도 다시 굽지 않는다)
+//   색 글리프(이모지)는 제 색으로 흰 글자 위에 얹어 굽는다. 원본도 흰색으로 fillText 한 캔버스를 올리므로 이모지는 제 색으로 구워지고 그릴 때 같은 색이 곱해진다.
+//   외곽선(Stroke)으로 구울 때도 색 글리프는 테를 긋지 않고 색 그대로 얹는다. (크롬 strokeText 와 같다)
 // - 폰트 문자열은 Canvas2D font 와 같은 꼴을 읽는다. 예: "16px DOSGothic", "bold 24px default", "italic 500 16px default"
 // - 글꼴은 원본 document.fonts 처럼 이름 하나 아래에 얼굴(굵기, 기울기, 글자 범위)을 여럿 올린다. (register_font_face)
 //   고르기는 CSS 의 차례를 따르고, 기울인 얼굴이 없으면 가짜 기울임(기울기 1/4), 굵은 얼굴이 없으면 가짜 굵게를 글리프마다 입힌다. (textshaping.rs)
 // - 이름의 얼굴들에 없는 글자는 기본 폰트, 대체 폰트 순으로 찾는다. (브라우저의 글꼴 대체와 같은 자리)
+//   대체 글꼴 후보 파일은 쓸 때 읽는다. 이모지 표시 글자는 색 글리프 표가 있는 후보를, 그 밖의 글자는 색 글리프 표가 없는 후보를 먼저 읽는다. (표 목록만 먼저 엿본다)
 // - 글꼴 얼굴을 새로 올리면 그 이름을 쓰는 폰트 문자열로 구웠고 그 얼굴의 글자 범위에 든 글자가 있는 문자열만 버린다. (원본 invalidateFontFaces)
 //   기본 폰트와 대체 폰트를 바꾸면 모두 버린다.
 // - 웹에서 글꼴 바이트가 하나도 없으면 원본처럼 브라우저 Canvas2D 로 굽고 잰다. 그래서 시스템 글꼴로 나온다. (platform/web/systemfont.rs)
@@ -22,6 +25,7 @@
 //   글꼴 목록(Rc)을 스레드 하나의 전역에 알려 두고, 그 목록으로 잰다. UI 레이아웃이 그리기 전에 글 줄 수를 알아야 할 때 쓴다. (UIConfirmWindow)
 //==============================================================================
 use crate::core::textshaping::{self, FontFaceDescriptors, LoadedFont, RegisteredFontFace, ResolvedFontFace, ShapedText, ShapingDirection};
+use unicode_segmentation::UnicodeSegmentation;
 use glow::HasContext;
 use std::cell::{Cell, RefCell};
 use std::collections::hash_map::DefaultHasher;
@@ -107,10 +111,12 @@ pub struct TextEntry {
 
 //==============================================================================
 // 글 모양 래스터. (덮인 정도 0 ~ 255, 길이 단위는 굽는 배율을 곱한 픽셀)
+// - coverage 는 색 글리프를 뺀 글자의 덮인 정도다. 색 글리프(이모지)가 있으면 color_pixels 에 제 색으로 든다. (프리멀티플라이드 RGBA, 같은 크기)
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct TextRaster {
 	pub coverage: Vec<u8>,
+	pub color_pixels: Option<Vec<u8>>,
 	pub width: i32,
 	pub height: i32,
 	pub origin_x: f32,
@@ -178,9 +184,11 @@ struct CachedTextMetrics {
 
 //==============================================================================
 // 래스터로 놓은 글. (덮인 정도와 자리, 길이 단위는 배율을 곱한 픽셀)
+// - coverage 는 색 글리프를 뺀 글자, color_pixels 는 색 글리프 층이다. (프리멀티플라이드 RGBA, 색 글리프가 없으면 None)
 //==============================================================================
 struct LaidOutText {
 	coverage: Vec<u8>,
+	color_pixels: Option<Vec<u8>>,
 	width: i32,
 	height: i32,
 	origin_x: f32,
@@ -208,7 +216,8 @@ pub struct TextStringTextureCache {
 	// 글꼴을 등록한 횟수. (늘면 재 둔 글 폭이 바뀌었을 수 있다)
 	font_registration_count: Cell<u64>,
 	// 글자가 없을 때 차례로 읽어 볼 대체 글꼴 파일. (원본 브라우저의 시스템 글꼴 대체 자리, 데스크탑, 쓸 때 읽는다)
-	fallback_font_candidate_list: RefCell<Vec<std::path::PathBuf>>,
+	// 앞의 경로와 그 파일에 색 글리프 표가 있는지. (더할 때 한 번 엿본다)
+	fallback_font_candidate_list: RefCell<Vec<(std::path::PathBuf, bool)>>,
 	// 버릴 구운 문자열의 텍스처. (등록할 때는 GL 이 없어서 다음 굽기 때 지운다)
 	pending_deleted_texture_list: Vec<crate::core::graphic::GlTexture>,
 	// 글자 안티앨리어싱. (기본 켬)
@@ -473,51 +482,78 @@ impl TextStringTextureCache {
 	// - 없는 파일, 읽지 못하는 파일은 넘긴다.
 	//==============================================================================
 	pub fn add_fallback_font_candidate(&mut self, font_path: std::path::PathBuf) {
-		self.fallback_font_candidate_list.borrow_mut().push(font_path);
+		let has_color_tables = peek_color_font_tables(&font_path);
+		self.fallback_font_candidate_list.borrow_mut().push((font_path, has_color_tables));
 	}
 
 	//==============================================================================
 	// 글의 글자가 모두 그려지게 대체 글꼴 후보 읽기. (어느 글꼴에도 없는 글자가 있으면 그 글자를 가진 후보가 나올 때까지)
+	// - 이모지 표시 글자 묶음의 첫 글자는 색 글리프로, 그 밖의 글자는 색이 아닌 글리프로 가진 글꼴을 찾는다. (브라우저가 이모지를 색 이모지 글꼴로, 맨 ❤ 는 글 글꼴로 그리는 자리)
+	//   바라는 쪽의 후보가 다 떨어졌으면 다른 쪽이라도 가진 글꼴이 있으면 그것으로 그린다.
 	//==============================================================================
 	fn ensure_fallback_coverage(&self, text: &str) {
 		if self.fallback_font_candidate_list.borrow().is_empty() {
 			return;
 		}
-		for character in text.chars() {
-			if character.is_whitespace() || character.is_control() || ('\u{200B}'..='\u{200F}').contains(&character) || ('\u{2028}'..='\u{206F}').contains(&character) || ('\u{FE00}'..='\u{FE0F}').contains(&character) {
-				continue;
-			}
-			if self.is_character_covered(character) {
-				continue;
-			}
-			loop {
-				let font_path = {
-					let mut fallback_font_candidate_list = self.fallback_font_candidate_list.borrow_mut();
-					if fallback_font_candidate_list.is_empty() {
+		for grapheme in text.graphemes(true) {
+			let is_emoji_grapheme = textshaping::is_emoji_presentation(grapheme);
+			for (character_index, character) in grapheme.chars().enumerate() {
+				if character.is_whitespace() || character.is_control() || ('\u{200B}'..='\u{200F}').contains(&character) || ('\u{2028}'..='\u{206F}').contains(&character) || ('\u{FE00}'..='\u{FE0F}').contains(&character) {
+					continue;
+				}
+				let is_color_wanted = is_emoji_grapheme && character_index == 0;
+				loop {
+					let is_wanted_covered = if is_color_wanted {
+						self.is_color_character_covered(character)
+					}
+					else {
+						self.is_text_character_covered(character)
+					};
+					if is_wanted_covered {
+						break;
+					}
+					let has_wanted_candidate = self.fallback_font_candidate_list.borrow().iter().any(|(_, has_color_tables)| *has_color_tables == is_color_wanted);
+					if !has_wanted_candidate && self.is_character_covered(character) {
+						break;
+					}
+					if !self.load_next_fallback_candidate(is_color_wanted) {
 						return;
 					}
-					fallback_font_candidate_list.remove(0)
-				};
-				let font = match std::fs::read(&font_path).map_err(|error| error.to_string()).and_then(load_font) {
-					Ok(font) => {
-						Rc::new(font)
-					}
-					Err(_) => {
-						continue;
-					}
-				};
-				let has_character = font.has_character(character);
-				self.fallback_face_list.borrow_mut().push(RegisteredFontFace {
-					descriptors: FontFaceDescriptors::new(),
-					font,
-					order_number: 0,
-				});
-				self.font_registration_count.set(self.font_registration_count.get() + 1);
-				self.publish_shared_font_set();
-				if has_character {
-					break;
 				}
 			}
+		}
+	}
+
+	//==============================================================================
+	// 대체 글꼴 후보 하나 읽어 대체 폰트로 더하기. (색을 바라면 색 글리프 표가 있는 후보, 아니면 없는 후보부터. 후보가 없으면 false)
+	// - 못 읽는 파일은 버리고 다음 후보를 본다.
+	//==============================================================================
+	fn load_next_fallback_candidate(&self, is_color_wanted: bool) -> bool {
+		loop {
+			let font_path = {
+				let mut fallback_font_candidate_list = self.fallback_font_candidate_list.borrow_mut();
+				if fallback_font_candidate_list.is_empty() {
+					return false;
+				}
+				let preferred_index = fallback_font_candidate_list.iter().position(|(_, has_color_tables)| *has_color_tables == is_color_wanted).unwrap_or(0);
+				fallback_font_candidate_list.remove(preferred_index).0
+			};
+			let font = match std::fs::read(&font_path).map_err(|error| error.to_string()).and_then(load_font) {
+				Ok(font) => {
+					Rc::new(font)
+				}
+				Err(_) => {
+					continue;
+				}
+			};
+			self.fallback_face_list.borrow_mut().push(RegisteredFontFace {
+				descriptors: FontFaceDescriptors::new(),
+				font,
+				order_number: 0,
+			});
+			self.font_registration_count.set(self.font_registration_count.get() + 1);
+			self.publish_shared_font_set();
+			return true;
 		}
 	}
 
@@ -527,6 +563,23 @@ impl TextStringTextureCache {
 	fn is_character_covered(&self, character: char) -> bool {
 		let is_in_family = self.font_family_table.values().any(|face_list| face_list.iter().any(|face| face.descriptors.contains_character(character) && face.font.has_character(character)));
 		is_in_family || self.default_face_list.iter().any(|face| face.font.has_character(character)) || self.fallback_face_list.borrow().iter().any(|face| face.font.has_character(character))
+	}
+
+	//==============================================================================
+	// 등록된 어느 글꼴이 그 글자를 색이 아닌 글리프로 가졌는지.
+	//==============================================================================
+	fn is_text_character_covered(&self, character: char) -> bool {
+		let has_text_character = |face: &RegisteredFontFace| face.font.has_character(character) && !face.font.has_color_character(character);
+		let is_in_family = self.font_family_table.values().any(|face_list| face_list.iter().any(|face| face.descriptors.contains_character(character) && has_text_character(face)));
+		is_in_family || self.default_face_list.iter().any(has_text_character) || self.fallback_face_list.borrow().iter().any(has_text_character)
+	}
+
+	//==============================================================================
+	// 등록된 어느 글꼴이 그 글자를 색 글리프로 가졌는지.
+	//==============================================================================
+	fn is_color_character_covered(&self, character: char) -> bool {
+		let is_in_family = self.font_family_table.values().any(|face_list| face_list.iter().any(|face| face.descriptors.contains_character(character) && face.font.has_color_character(character)));
+		is_in_family || self.default_face_list.iter().any(|face| face.font.has_color_character(character)) || self.fallback_face_list.borrow().iter().any(|face| face.font.has_color_character(character))
 	}
 
 	//==============================================================================
@@ -811,6 +864,7 @@ impl TextStringTextureCache {
 		let laid_out_text = lay_out_text(&face_list, &font_description, text, font_description.font_size * bake_scale, direction, padding.max(1))?;
 		Some(TextRaster {
 			coverage: laid_out_text.coverage,
+			color_pixels: laid_out_text.color_pixels,
 			width: laid_out_text.width,
 			height: laid_out_text.height,
 			origin_x: laid_out_text.origin_x,
@@ -876,15 +930,21 @@ impl TextStringTextureCache {
 				height: 0,
 				left_x: 0,
 				top_y: 0,
+				color_pixels: None,
 			};
 			return Some((empty_raster, shaped_text.advance_width, font_ascent, font_descent));
 		}
 		let width = maximum_x - minimum_x;
 		let height = maximum_top - minimum_bottom;
 		let mut coverage = vec![0u8; (width * height) as usize];
+		let mut color_pixels: Option<Vec<u8>> = None;
 		for (glyph_raster, left_x, top_y) in &glyph_raster_list {
 			let offset_x = left_x - minimum_x;
 			let offset_y = maximum_top - top_y;
+			if let Some(glyph_color_pixels) = glyph_raster.color_pixels.as_ref() {
+				let layer_pixels = color_pixels.get_or_insert_with(|| vec![0u8; (width * height * 4) as usize]);
+				draw_color_pixels(layer_pixels, width, height, glyph_color_pixels, glyph_raster.width, glyph_raster.height, offset_x, offset_y);
+			}
 			for glyph_y in 0..glyph_raster.height {
 				for glyph_x in 0..glyph_raster.width {
 					let index = ((offset_y + glyph_y) * width + offset_x + glyph_x) as usize;
@@ -898,6 +958,7 @@ impl TextStringTextureCache {
 			height,
 			left_x: minimum_x,
 			top_y: maximum_top,
+			color_pixels,
 		};
 		Some((glyph_raster, shaped_text.advance_width, font_ascent, font_descent))
 	}
@@ -960,10 +1021,11 @@ impl TextStringTextureCache {
 		let pixel_size = font_description.font_size * bake_scale;
 		let laid_out_text = lay_out_text(&face_list, &font_description, text, pixel_size, direction, padding)?;
 		let mut coverage = laid_out_text.coverage;
+		let mut color_pixels = laid_out_text.color_pixels;
 		let bitmap_width = laid_out_text.width;
 		let bitmap_height = laid_out_text.height;
 
-		// 외곽선: 윤곽 바깥으로 반두께 넓힌 것에서 안으로 반두께 좁힌 것을 뺀 띠. (Canvas2D strokeText 는 윤곽선 가운데에 선을 긋는다)
+		// 외곽선: 윤곽 바깥으로 반두께 넓힌 것에서 안으로 반두께 좁힌 것을 뺀 띠. (Canvas2D strokeText 는 윤곽선 가운데에 선을 긋는다, 색 글리프는 테 없이 그대로)
 		if text_draw_kind == TextDrawKind::Stroke {
 			coverage = build_stroke_coverage(&coverage, bitmap_width, bitmap_height, stroke_radius);
 		}
@@ -972,16 +1034,13 @@ impl TextStringTextureCache {
 		let is_antialias = self.is_text_antialias_enabled;
 		if !is_antialias {
 			apply_alpha_threshold(&mut coverage);
+			if let Some(color_pixels) = color_pixels.as_mut() {
+				apply_premultiplied_alpha_threshold(color_pixels);
+			}
 		}
 
-		// 흰색 프리멀티플라이드 RGBA 로 올리기.
-		let mut pixels = Vec::with_capacity(coverage.len() * 4);
-		for value in &coverage {
-			pixels.push(*value);
-			pixels.push(*value);
-			pixels.push(*value);
-			pixels.push(*value);
-		}
+		// 흰색 프리멀티플라이드 RGBA 위에 색 글리프를 얹어 올리기.
+		let pixels = compose_text_pixels(&coverage, color_pixels.as_deref());
 		let texture = upload_text_texture(gl, bitmap_width, bitmap_height, &pixels, is_antialias)?;
 
 		Some(TextEntry {
@@ -1044,12 +1103,17 @@ fn lay_out_text(face_list: &[ResolvedFontFace], font_description: &FontDescripti
 		return None;
 	}
 
-	// 겹치는 곳은 큰 값.
+	// 겹치는 곳은 큰 값. 색 글리프는 따로 색 층에 얹는다.
 	let mut coverage = vec![0u8; (width * height) as usize];
+	let mut color_pixels: Option<Vec<u8>> = None;
 	let origin_x_integer = origin_x as i32;
 	for (glyph_raster, left_x, top_y) in &glyph_raster_list {
 		let glyph_left_x = origin_x_integer + left_x;
 		let glyph_top_y = baseline_y - top_y;
+		if let Some(glyph_color_pixels) = glyph_raster.color_pixels.as_ref() {
+			let layer_pixels = color_pixels.get_or_insert_with(|| vec![0u8; (width * height * 4) as usize]);
+			draw_color_pixels(layer_pixels, width, height, glyph_color_pixels, glyph_raster.width, glyph_raster.height, glyph_left_x, glyph_top_y);
+		}
 		for glyph_y in 0..glyph_raster.height {
 			let bitmap_y = glyph_top_y + glyph_y;
 			if bitmap_y < 0 || bitmap_y >= height {
@@ -1068,6 +1132,7 @@ fn lay_out_text(face_list: &[ResolvedFontFace], font_description: &FontDescripti
 	}
 	Some(LaidOutText {
 		coverage,
+		color_pixels,
 		width,
 		height,
 		origin_x,
@@ -1096,8 +1161,14 @@ fn rasterize_system_font_text(font_description: &FontDescription, text: &str, ba
 			coverage[((position_y + padding) * width + position_x + padding) as usize] = glyph_raster.coverage[(position_y * glyph_raster.width + position_x) as usize];
 		}
 	}
+	let color_pixels = glyph_raster.color_pixels.as_ref().map(|glyph_color_pixels| {
+		let mut layer_pixels = vec![0u8; (width * height * 4) as usize];
+		draw_color_pixels(&mut layer_pixels, width, height, glyph_color_pixels, glyph_raster.width, glyph_raster.height, padding, padding);
+		layer_pixels
+	});
 	Some(TextRaster {
 		coverage,
+		color_pixels,
 		width,
 		height,
 		origin_x: (padding - glyph_raster.left_x) as f32,
@@ -1154,8 +1225,8 @@ fn create_system_font_measure(font_description: &FontDescription, pixel_size: f3
 fn bake_system_font_entry(gl: &glow::Context, text_draw_kind: TextDrawKind, text: &str, font_description: &FontDescription, line_width: f32, bake_scale: f32, is_antialias: bool, direction: ShapingDirection) -> Option<TextEntry> {
 	let mut system_font_bitmap = crate::platform::web::systemfont::bake_text(text_draw_kind, text, font_description, line_width, bake_scale, direction)?;
 	if !is_antialias {
-		// 흰색 프리멀티플라이드라 네 칸 모두 덮인 정도다.
-		apply_alpha_threshold(&mut system_font_bitmap.pixels);
+		// 프리멀티플라이드라 알파로 가르고 색은 곧은 색으로 채운다. (흰 글자는 네 칸 모두 덮인 정도, 색 이모지는 제 색)
+		apply_premultiplied_alpha_threshold(&mut system_font_bitmap.pixels);
 	}
 	let texture = upload_text_texture(gl, system_font_bitmap.bitmap_width, system_font_bitmap.bitmap_height, &system_font_bitmap.pixels, is_antialias)?;
 	Some(TextEntry {
@@ -1181,6 +1252,101 @@ fn apply_alpha_threshold(values: &mut [u8]) {
 		else {
 			0
 		};
+	}
+}
+
+//==============================================================================
+// 프리멀티플라이드 RGBA 를 알파 문턱값으로 가르기. (원본처럼 곧은 알파의 알파 칸만 0 과 255 로, 남는 픽셀은 곧은 색 그대로 불투명)
+//==============================================================================
+fn apply_premultiplied_alpha_threshold(pixels: &mut [u8]) {
+	for pixel in pixels.chunks_exact_mut(4) {
+		let alpha = pixel[3] as u32;
+		if alpha >= ALPHA_THRESHOLD as u32 {
+			for channel_index in 0..3 {
+				pixel[channel_index] = ((pixel[channel_index] as u32 * 255 + alpha / 2) / alpha).min(255) as u8;
+			}
+			pixel[3] = 255;
+		}
+		else {
+			pixel.fill(0);
+		}
+	}
+}
+
+//==============================================================================
+// 색 그림을 색 층에 얹기. (프리멀티플라이드 RGBA, 원본 위에 얹기. 왼쪽 위 자리 offset 부터, 층 밖은 버린다)
+//==============================================================================
+#[allow(clippy::too_many_arguments)]
+fn draw_color_pixels(layer_pixels: &mut [u8], layer_width: i32, layer_height: i32, source_pixels: &[u8], source_width: i32, source_height: i32, offset_x: i32, offset_y: i32) {
+	for source_y in 0..source_height {
+		let layer_y = offset_y + source_y;
+		if layer_y < 0 || layer_y >= layer_height {
+			continue;
+		}
+		for source_x in 0..source_width {
+			let layer_x = offset_x + source_x;
+			if layer_x < 0 || layer_x >= layer_width {
+				continue;
+			}
+			let source_index = ((source_y * source_width + source_x) * 4) as usize;
+			let source_alpha = source_pixels[source_index + 3] as u32;
+			if source_alpha == 0 {
+				continue;
+			}
+			let layer_index = ((layer_y * layer_width + layer_x) * 4) as usize;
+			for channel_index in 0..4 {
+				let layer_value = layer_pixels[layer_index + channel_index] as u32;
+				layer_pixels[layer_index + channel_index] = (source_pixels[source_index + channel_index] as u32 + (layer_value * (255 - source_alpha) + 127) / 255).min(255) as u8;
+			}
+		}
+	}
+}
+
+//==============================================================================
+// 흰 글자와 색 층을 한 장으로. (흰색 프리멀티플라이드 RGBA 위에 색 층을 얹는다, 색 층이 없으면 흰 글자만)
+//==============================================================================
+pub(crate) fn compose_text_pixels(coverage: &[u8], color_pixels: Option<&[u8]>) -> Vec<u8> {
+	let mut pixels = Vec::with_capacity(coverage.len() * 4);
+	match color_pixels {
+		Some(color_pixels) => {
+			for (pixel_index, value) in coverage.iter().enumerate() {
+				let color_alpha = color_pixels[pixel_index * 4 + 3] as u32;
+				let white_value = (*value as u32 * (255 - color_alpha) + 127) / 255;
+				for channel_index in 0..4 {
+					pixels.push((color_pixels[pixel_index * 4 + channel_index] as u32 + white_value).min(255) as u8);
+				}
+			}
+		}
+		None => {
+			for value in coverage {
+				pixels.push(*value);
+				pixels.push(*value);
+				pixels.push(*value);
+				pixels.push(*value);
+			}
+		}
+	}
+	pixels
+}
+
+//==============================================================================
+// 글꼴 파일에 색 글리프 표(sbix, CBDT, COLR)가 있는지 엿보기. (파일 앞머리의 표 목록만 읽는다, 못 읽으면 false)
+// - 대체 글꼴 후보를 고를 때 쓴다. 큰 색 이모지 글꼴(맥 Apple Color Emoji 는 190MB 남짓)을 이모지가 아닌 글자 때문에 읽지 않게 한다.
+//==============================================================================
+fn peek_color_font_tables(font_path: &std::path::Path) -> bool {
+	use std::io::Read;
+	let mut header_bytes: Vec<u8> = Vec::new();
+	let is_read = std::fs::File::open(font_path).and_then(|file| file.take(65536).read_to_end(&mut header_bytes)).is_ok();
+	if !is_read {
+		return false;
+	}
+	match rustybuzz::ttf_parser::RawFace::parse(&header_bytes, 0) {
+		Ok(raw_face) => {
+			raw_face.table_records.into_iter().any(|table_record| matches!(&table_record.tag.to_bytes(), b"sbix" | b"CBDT" | b"COLR"))
+		}
+		Err(_) => {
+			false
+		}
 	}
 }
 

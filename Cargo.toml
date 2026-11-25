@@ -23,6 +23,8 @@ rustybuzz = "0.20"
 unicode-bidi = "0.3"
 # 글자 묶음 나누기. (UAX #29, 받침, 결합 부호, 이모지 묶음. 원본 Intl.Segmenter granularity "grapheme")
 unicode-segmentation = "1"
+# 이모지 성질. (Emoji_Presentation 같은 UTS #51 성질, 글자 묶음이 색 이모지로 그려질지 가린다. rustybuzz 가 이미 쓰는 크레이트에 emoji 기능만 켠다)
+unicode-properties = { version = "0.1", default-features = false, features = ["emoji"] }
 # JsonAsset 이 JSON 을 푼다. (원본 JSON.parse 자리) 객체 키는 적힌 차례를 지킨다. (UIDocument 가 원본 JSON.stringify 와 같은 차례로 쓴다)
 serde_json = { version = "1", features = ["preserve_order"] }
 # FBX 압축 배열(zlib deflate)을 푼다. (원본 DecompressionStream 자리, 순수 러스트 miniz_oxide 기본 백엔드라 wasm32 에서도 돈다)

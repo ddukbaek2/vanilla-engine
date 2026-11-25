@@ -7,6 +7,9 @@
 //   - 양방향 정렬: unicode-bidi (UAX #9). 문단 방향은 굽는 쪽이 준다. (원본 canvas.direction)
 //   - 모양 짓기: rustybuzz (HarfBuzz 를 옮긴 것). 아랍어 글자 잇기, 합자, 커닝, 결합 부호 자리를 브라우저처럼 잡는다.
 //   - 래스터: fontdue 의 글리프 번호 래스터. 굵은 얼굴이 없으면 가짜 굵게, 기울인 얼굴이 없으면 가짜 기울임을 글리프마다 입힌다.
+//     색 글리프(sbix, CBDT, COLR)는 colorglyph.rs 가 제 색으로 그린다. 크롬처럼 가짜 기울임은 입히고 가짜 굵게는 입히지 않는다.
+// - 이모지 표시: VS16(FE0F), Emoji_Presentation 글자, 피부색 조정자, 국기, 키캡, 태그 묶음은 색 글리프를 가진 얼굴을 먼저 고른다. 그 밖(VS15 포함)은 색이 아닌 얼굴을 먼저.
+//   크롬은 지정한 글꼴에 흑백 ❤ 가 있어도 ❤️ (FE0F) 는 색 이모지 글꼴로, 맨 ❤ 는 지정한 글꼴로 그린다. (맥 크롬에서 Canvas2D 로 확인)
 // - 가짜 기울임과 가짜 굵게는 Chromium 이 Skia 에 주는 값과 같다:
 //   기울기 1/4 (font_platform_data.cc 의 setSkewX(-SK_Scalar1 / 4)), 굵게는 글자 크기의 1/24 (9px 이하) ~ 1/32 (36px 이상) 두께로 윤곽을 칠해 넓힌다.
 //   (Skia SkTextFormatParams.h 의 kStdFakeBoldInterpKeys / Values) 둘 다 전진폭은 그대로다.
@@ -14,8 +17,10 @@
 // - 글꼴 바이트는 등록할 때 한 번 'static 으로 붙잡아(Box::leak) rustybuzz 얼굴을 담아 둔다. 원본의 document.fonts 처럼 등록한 글꼴은
 //   프로그램이 끝날 때까지 남는 것으로 본다. (등록을 지워도 바이트는 돌려주지 않는다)
 //==============================================================================
+use crate::core::colorglyph;
 use std::rc::Rc;
 use unicode_bidi::{BidiInfo, Level};
+use unicode_properties::{EmojiStatus, UnicodeEmoji};
 use unicode_segmentation::UnicodeSegmentation;
 
 // 가짜 기울임의 기울기. (기준선에서 1 픽셀 올라갈 때 오른쪽으로 밀리는 픽셀, Chromium setSkewX(-1/4))
@@ -203,12 +208,13 @@ pub fn parse_unicode_range(unicode_range: &str) -> Vec<(u32, u32)> {
 }
 
 //==============================================================================
-// 읽은 글꼴 하나. (래스터용 fontdue, 모양 짓기용 rustybuzz 얼굴)
+// 읽은 글꼴 하나. (래스터용 fontdue, 모양 짓기용 rustybuzz 얼굴, 색 글리프 표가 있는지)
 //==============================================================================
 pub struct LoadedFont {
 	pub raster_font: fontdue::Font,
 	pub shaping_face: rustybuzz::Face<'static>,
 	pub units_per_em: f32,
+	pub has_color_tables: bool,
 }
 
 impl LoadedFont {
@@ -220,10 +226,12 @@ impl LoadedFont {
 		let raster_font = fontdue::Font::from_bytes(static_bytes, fontdue::FontSettings::default()).map_err(|error| format!("폰트 읽기 실패: {}", error))?;
 		let shaping_face = rustybuzz::Face::from_slice(static_bytes, 0).ok_or_else(|| String::from("폰트 읽기 실패: 모양 짓기 얼굴을 만들 수 없음"))?;
 		let units_per_em = shaping_face.units_per_em() as f32;
+		let has_color_tables = colorglyph::has_color_tables(&shaping_face);
 		Ok(LoadedFont {
 			raster_font,
 			shaping_face,
 			units_per_em,
+			has_color_tables,
 		})
 	}
 
@@ -233,6 +241,52 @@ impl LoadedFont {
 	pub fn has_character(&self, character: char) -> bool {
 		self.raster_font.lookup_glyph_index(character) != 0
 	}
+
+	//==============================================================================
+	// 글자를 색 글리프로 가졌는지. (sbix, CBDT, COLR)
+	//==============================================================================
+	pub fn has_color_character(&self, character: char) -> bool {
+		if !self.has_color_tables {
+			return false;
+		}
+		match self.shaping_face.glyph_index(character) {
+			Some(glyph_id) => {
+				colorglyph::has_color_glyph(&self.shaping_face, glyph_id.0)
+			}
+			None => {
+				false
+			}
+		}
+	}
+}
+
+//==============================================================================
+// 글자 묶음이 이모지 표시인지. (UTS #51, 아니면 글 표시)
+// - VS15(FE0E) 가 있으면 글 표시, VS16(FE0F) 이나 키캡(20E3)이 있으면 이모지 표시다.
+// - 첫 글자가 Emoji_Presentation 이거나(국기의 지역 표시 글자 포함), 피부색 조정자나 태그 글자가 붙었거나, 이음 문자로 이은 이모지 묶음이면 이모지 표시다.
+//   ❤ 처럼 Emoji 이지만 Emoji_Presentation 이 아닌 글자 하나는 글 표시다. (크롬도 맨 ❤ 는 글 글꼴로 그린다)
+//==============================================================================
+pub fn is_emoji_presentation(grapheme: &str) -> bool {
+	let base_character = match grapheme.chars().next() {
+		Some(base_character) => {
+			base_character
+		}
+		None => {
+			return false;
+		}
+	};
+	if grapheme.contains('\u{FE0E}') {
+		return false;
+	}
+	if grapheme.contains('\u{FE0F}') || grapheme.contains('\u{20E3}') {
+		return true;
+	}
+	let is_presentation = matches!(base_character.emoji_status(), EmojiStatus::EmojiPresentation | EmojiStatus::EmojiPresentationAndModifierBase | EmojiStatus::EmojiPresentationAndEmojiComponent | EmojiStatus::EmojiPresentationAndModifierAndEmojiComponent);
+	if is_presentation {
+		return true;
+	}
+	let has_sequence_part = grapheme.chars().skip(1).any(|character| ('\u{1F3FB}'..='\u{1F3FF}').contains(&character) || ('\u{E0020}'..='\u{E007F}').contains(&character) || character == '\u{200D}');
+	has_sequence_part && base_character.is_emoji_char()
 }
 
 //==============================================================================
@@ -342,6 +396,8 @@ pub struct ShapedText {
 //==============================================================================
 // 글자 묶음에 쓸 얼굴 고르기. (묶음의 글자를 모두 가진 첫 얼굴, 없으면 첫 글자를 가진 첫 얼굴, 그것도 없으면 0)
 // - 브라우저처럼 결합 부호까지 한 얼굴로 그린다. 이음 문자, 이형 선택자처럼 보이지 않는 글자는 따지지 않는다.
+// - 이모지 표시 묶음은 첫 글자를 색 글리프로 가진 얼굴을, 글 표시 묶음은 첫 글자를 색이 아닌 글리프로 가진 얼굴을 같은 조건 안에서 먼저 고른다. (is_emoji_presentation)
+//   차례: 글자를 모두 가지고 색이 맞는 얼굴 → 글자를 모두 가진 얼굴 → 첫 글자를 가지고 색이 맞는 얼굴 → 첫 글자를 가진 얼굴.
 //==============================================================================
 fn select_face_index(face_list: &[ResolvedFontFace], grapheme: &str) -> Option<usize> {
 	let base_character = grapheme.chars().next()?;
@@ -351,11 +407,28 @@ fn select_face_index(face_list: &[ResolvedFontFace], grapheme: &str) -> Option<u
 	let is_ignorable = |character: char| -> bool {
 		('\u{200B}'..='\u{200F}').contains(&character) || ('\u{FE00}'..='\u{FE0F}').contains(&character) || ('\u{E0100}'..='\u{E01EF}').contains(&character) || ('\u{2060}'..='\u{206F}').contains(&character)
 	};
+	let is_color_wanted = is_emoji_presentation(grapheme);
+	let is_color_matched = |face: &ResolvedFontFace| -> bool {
+		face.font.has_color_character(base_character) == is_color_wanted
+	};
 	if grapheme.chars().nth(1).is_some() {
+		let has_all_characters = |face: &ResolvedFontFace| -> bool {
+			grapheme.chars().filter(|character| !is_ignorable(*character)).all(|character| has_character(face, character))
+		};
 		for (face_index, face) in face_list.iter().enumerate() {
-			if grapheme.chars().filter(|character| !is_ignorable(*character)).all(|character| has_character(face, character)) {
+			if has_all_characters(face) && is_color_matched(face) {
 				return Some(face_index);
 			}
+		}
+		for (face_index, face) in face_list.iter().enumerate() {
+			if has_all_characters(face) {
+				return Some(face_index);
+			}
+		}
+	}
+	for (face_index, face) in face_list.iter().enumerate() {
+		if has_character(face, base_character) && is_color_matched(face) {
+			return Some(face_index);
 		}
 	}
 	for (face_index, face) in face_list.iter().enumerate() {
@@ -375,6 +448,7 @@ fn select_face_index(face_list: &[ResolvedFontFace], grapheme: &str) -> Option<u
 // - direction 은 문단의 방향이다. (원본 canvas.direction) 문단 안의 글자 순서는 양방향 알고리즘이 정한다.
 // - 줄바꿈 문자는 한 줄로 보고 그대로 모양 짓는다. (원본 fillText 도 줄을 바꾸지 않는다)
 // - system_font_measure 를 주면(웹) 올린 어느 얼굴에도 없는 글자 묶음은 브라우저 시스템 글꼴 조각(SYSTEM_FACE_INDEX)으로 둔다. 원본 브라우저의 글꼴 대체와 같다.
+//   이모지 표시 묶음인데 올린 얼굴에 색 글리프가 없으면 흑백 글리프가 있어도 브라우저 조각(색 이모지)으로 둔다. (크롬도 ❤️ 는 색 이모지 글꼴로 그린다)
 //   주지 않으면 첫 얼굴의 빈 글리프로 그린다.
 //==============================================================================
 pub fn shape_text(face_list: &[ResolvedFontFace], text: &str, pixel_size: f32, direction: ShapingDirection, system_font_measure: Option<SystemFontMeasure>) -> ShapedText {
@@ -397,7 +471,13 @@ pub fn shape_text(face_list: &[ResolvedFontFace], text: &str, pixel_size: f32, d
 	let grapheme_face_list: Vec<(usize, usize)> = text.grapheme_indices(true).map(|(byte_index, grapheme)| {
 		let face_index = match select_face_index(face_list, grapheme) {
 			Some(face_index) => {
-				face_index
+				let is_color_missing = system_font_measure.is_some() && is_emoji_presentation(grapheme) && grapheme.chars().next().is_some_and(|base_character| !face_list[face_index].font.has_color_character(base_character));
+				if is_color_missing {
+					SYSTEM_FACE_INDEX
+				}
+				else {
+					face_index
+				}
 			}
 			None => {
 				if system_font_measure.is_some() {
@@ -530,6 +610,7 @@ pub fn calculate_synthetic_bold_radius(pixel_size: f32) -> f32 {
 
 //==============================================================================
 // 글리프 래스터 하나. (덮인 정도, 왼쪽 위 자리는 펜 원점에서 오른쪽 xmin, 기준선에서 위로 top)
+// - coverage 는 색이 아닌 글자의 덮인 정도다. 색 글리프 몫은 color_pixels 에 제 색으로 든다. (프리멀티플라이드 RGBA, 같은 크기, 없으면 None)
 //==============================================================================
 pub struct GlyphRaster {
 	pub coverage: Vec<u8>,
@@ -537,12 +618,29 @@ pub struct GlyphRaster {
 	pub height: i32,
 	pub left_x: i32,
 	pub top_y: i32,
+	pub color_pixels: Option<Vec<u8>>,
 }
 
 //==============================================================================
-// 글리프 래스터. (가짜 굵게는 넓히고, 가짜 기울임은 기준선 기준으로 민다)
+// 글리프 래스터. (가짜 굵게는 넓히고, 가짜 기울임은 기준선 기준으로 민다. 색 글리프는 제 색으로, 가짜 굵게 없이)
 //==============================================================================
 pub fn rasterize_glyph(face: &ResolvedFontFace, glyph_index: u16, pixel_size: f32) -> GlyphRaster {
+	if face.font.has_color_tables {
+		if let Some(color_glyph_raster) = colorglyph::rasterize_color_glyph(&face.font.shaping_face, glyph_index, pixel_size) {
+			let mut glyph_raster = GlyphRaster {
+				coverage: vec![0u8; (color_glyph_raster.width * color_glyph_raster.height) as usize],
+				width: color_glyph_raster.width,
+				height: color_glyph_raster.height,
+				left_x: color_glyph_raster.left_x,
+				top_y: color_glyph_raster.top_y,
+				color_pixels: Some(color_glyph_raster.pixels),
+			};
+			if face.is_synthetic_italic {
+				apply_synthetic_italic(&mut glyph_raster);
+			}
+			return glyph_raster;
+		}
+	}
 	let (metrics, bitmap) = face.font.raster_font.rasterize_indexed(glyph_index, pixel_size);
 	let mut glyph_raster = GlyphRaster {
 		coverage: bitmap,
@@ -550,6 +648,7 @@ pub fn rasterize_glyph(face: &ResolvedFontFace, glyph_index: u16, pixel_size: f3
 		height: metrics.height as i32,
 		left_x: metrics.xmin,
 		top_y: metrics.ymin + metrics.height as i32,
+		color_pixels: None,
 	};
 	if glyph_raster.width == 0 || glyph_raster.height == 0 {
 		return glyph_raster;
@@ -572,24 +671,49 @@ pub fn rasterize_glyph(face: &ResolvedFontFace, glyph_index: u16, pixel_size: f3
 		glyph_raster.top_y += margin;
 	}
 	if face.is_synthetic_italic {
-		let top_extent = glyph_raster.top_y.max(0) as f32;
-		let bottom_extent = (glyph_raster.height - glyph_raster.top_y).max(0) as f32;
-		let left_margin = (bottom_extent * SYNTHETIC_ITALIC_SKEW).ceil() as i32 + 1;
-		let right_margin = (top_extent * SYNTHETIC_ITALIC_SKEW).ceil() as i32 + 1;
-		let width = glyph_raster.width + left_margin + right_margin;
-		let height = glyph_raster.height;
+		apply_synthetic_italic(&mut glyph_raster);
+	}
+	glyph_raster
+}
+
+//==============================================================================
+// 가짜 기울임 입히기. (기준선 위는 오른쪽, 아래는 왼쪽으로 밀고 그만큼 넓힌다. 색 그림이 있으면 채널마다 같이 민다)
+//==============================================================================
+fn apply_synthetic_italic(glyph_raster: &mut GlyphRaster) {
+	if glyph_raster.width == 0 || glyph_raster.height == 0 {
+		return;
+	}
+	let top_extent = glyph_raster.top_y.max(0) as f32;
+	let bottom_extent = (glyph_raster.height - glyph_raster.top_y).max(0) as f32;
+	let left_margin = (bottom_extent * SYNTHETIC_ITALIC_SKEW).ceil() as i32 + 1;
+	let right_margin = (top_extent * SYNTHETIC_ITALIC_SKEW).ceil() as i32 + 1;
+	let width = glyph_raster.width + left_margin + right_margin;
+	let height = glyph_raster.height;
+	// 기준선은 이 비트맵의 top_y 줄이다.
+	let baseline_y = glyph_raster.top_y as f32;
+	let shear_channel = |source: &[u8], channel_count: usize, channel_index: usize| -> Vec<u8> {
 		let mut padded = vec![0u8; (width * height) as usize];
 		for position_y in 0..height {
 			for position_x in 0..glyph_raster.width {
-				padded[(position_y * width + position_x + left_margin) as usize] = glyph_raster.coverage[(position_y * glyph_raster.width + position_x) as usize];
+				padded[(position_y * width + position_x + left_margin) as usize] = source[(position_y * glyph_raster.width + position_x) as usize * channel_count + channel_index];
 			}
 		}
-		// 기준선은 이 비트맵의 top_y 줄이다.
-		glyph_raster.coverage = shear_coverage(&padded, width, height, glyph_raster.top_y as f32, SYNTHETIC_ITALIC_SKEW);
-		glyph_raster.width = width;
-		glyph_raster.left_x -= left_margin;
+		shear_coverage(&padded, width, height, baseline_y, SYNTHETIC_ITALIC_SKEW)
+	};
+	let sheared_coverage = shear_channel(&glyph_raster.coverage, 1, 0);
+	if let Some(color_pixels) = glyph_raster.color_pixels.as_ref() {
+		let channel_list: Vec<Vec<u8>> = (0..4).map(|channel_index| shear_channel(color_pixels, 4, channel_index)).collect();
+		let mut sheared_pixels = vec![0u8; (width * height * 4) as usize];
+		for pixel_index in 0..(width * height) as usize {
+			for channel_index in 0..4 {
+				sheared_pixels[pixel_index * 4 + channel_index] = channel_list[channel_index][pixel_index];
+			}
+		}
+		glyph_raster.color_pixels = Some(sheared_pixels);
 	}
-	glyph_raster
+	glyph_raster.coverage = sheared_coverage;
+	glyph_raster.width = width;
+	glyph_raster.left_x -= left_margin;
 }
 
 //==============================================================================
@@ -713,6 +837,74 @@ mod tests {
 		assert_eq!(dilated[(width + 3) as usize], 255);
 		assert!((dilated[(width + 2) as usize] as i32 - 128).abs() <= 2);
 		assert_eq!(dilated[(width) as usize], 0);
+	}
+
+	//==============================================================================
+	// 이모지 표시 판정. (UTS #51, FE0F 와 Emoji_Presentation, 국기, 키캡, 피부색은 이모지, 맨 ❤ 와 FE0E 는 글)
+	//==============================================================================
+	#[test]
+	fn emoji_presentation_follows_uts51() {
+		assert!(is_emoji_presentation("\u{1F600}"));
+		assert!(is_emoji_presentation("\u{2764}\u{FE0F}"));
+		assert!(!is_emoji_presentation("\u{2764}"));
+		assert!(!is_emoji_presentation("\u{1F600}\u{FE0E}"));
+		assert!(is_emoji_presentation("\u{1F1F0}\u{1F1F7}"));
+		assert!(is_emoji_presentation("1\u{FE0F}\u{20E3}"));
+		assert!(is_emoji_presentation("\u{261D}\u{1F3FD}"));
+		assert!(is_emoji_presentation("\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}"));
+		assert!(!is_emoji_presentation("A"));
+		assert!(!is_emoji_presentation("가"));
+		assert!(!is_emoji_presentation("1"));
+	}
+
+	//==============================================================================
+	// 얼굴 고르기: ❤️ 는 색 글리프 얼굴로, 맨 ❤ 는 흑백 얼굴로. 시스템 조각을 쓸 수 있으면(웹) 색 얼굴이 없을 때 ❤️ 는 브라우저 조각으로.
+	// (대체 글꼴 후보 가운데 흑백 ❤ 를 가진 글꼴과 색 ❤ 를 가진 글꼴이 있을 때만 본다, 맥은 Arial Unicode 와 Apple Color Emoji)
+	//==============================================================================
+	#[test]
+	fn emoji_presentation_selects_color_face() {
+		let engine_configuration = crate::core::engine::EngineConfiguration::new();
+		let find_font = |is_color: bool| -> Option<LoadedFont> {
+			engine_configuration.fallback_font_paths.iter().find_map(|font_path| {
+				let font = LoadedFont::create_from_bytes(std::fs::read(font_path).ok()?).ok()?;
+				let is_matched = if is_color {
+					font.has_color_character('\u{2764}')
+				}
+				else {
+					font.has_character('\u{2764}') && !font.has_color_character('\u{2764}')
+				};
+				if is_matched {
+					Some(font)
+				}
+				else {
+					None
+				}
+			})
+		};
+		let (text_font, color_font) = match (find_font(false), find_font(true)) {
+			(Some(text_font), Some(color_font)) => {
+				(text_font, color_font)
+			}
+			_ => {
+				return;
+			}
+		};
+		let create_face = |font: LoadedFont| ResolvedFontFace { font: Rc::new(font), descriptors: FontFaceDescriptors::new(), is_synthetic_bold: false, is_synthetic_italic: false };
+		let face_list = vec![create_face(text_font), create_face(color_font)];
+		let emoji_shaped_text = shape_text(&face_list, "\u{2764}\u{FE0F}", 32.0, ShapingDirection::LeftToRight, None);
+		assert_eq!(emoji_shaped_text.glyph_list[0].face_index, 1);
+		let text_shaped_text = shape_text(&face_list, "\u{2764}", 32.0, ShapingDirection::LeftToRight, None);
+		assert_eq!(text_shaped_text.glyph_list[0].face_index, 0);
+		let color_raster = rasterize_glyph(&face_list[1], emoji_shaped_text.glyph_list[0].glyph_index, 32.0);
+		assert!(color_raster.color_pixels.is_some() && color_raster.width > 0);
+		let text_raster = rasterize_glyph(&face_list[0], text_shaped_text.glyph_list[0].glyph_index, 32.0);
+		assert!(text_raster.color_pixels.is_none());
+		let system_font_measure = |_piece_text: &str, _is_right_to_left: bool| -> f32 {
+			32.0
+		};
+		let text_face_list = vec![face_list[0].clone()];
+		let system_shaped_text = shape_text(&text_face_list, "\u{2764}\u{FE0F}", 32.0, ShapingDirection::LeftToRight, Some(&system_font_measure));
+		assert_eq!(system_shaped_text.glyph_list[0].face_index, SYSTEM_FACE_INDEX);
 	}
 
 	#[test]

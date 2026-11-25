@@ -7,6 +7,7 @@
 // - 글꼴 목록은 폰트 문자열의 이름을 앞에 두고 원본 SYSTEM_FONT_STRING 을 뒤에 붙인다.
 //   (CSS @font-face 로 문서에 올린 글꼴 이름이면 그 글꼴이, 아니면 시스템 글꼴이 나온다)
 // - 캔버스는 처음 쓸 때 하나 만들어 굽기와 재기에 같이 쓴다. 문서에는 붙이지 않는다.
+// - 원본처럼 캔버스의 RGBA 를 그대로 올린다. 글자는 흰색이고 색 이모지는 브라우저가 그린 제 색이다. (프리멀티플라이드로 바꿔 둔다)
 //==============================================================================
 use crate::base::platform::SYSTEM_FONT_STRING;
 use crate::core::textshaping::ShapingDirection;
@@ -20,7 +21,7 @@ use wasm_bindgen::{JsCast, JsValue};
 pub struct SystemFontBitmap {
 	pub bitmap_width: i32,
 	pub bitmap_height: i32,
-	// 흰색 프리멀티플라이드 RGBA. (fontdue 길과 같은 꼴)
+	// 프리멀티플라이드 RGBA. (글자는 흰색이라 fontdue 길과 같은 꼴, 색 이모지는 제 색)
 	pub pixels: Vec<u8>,
 	pub pen_x: f32,
 	pub baseline_y: f32,
@@ -130,14 +131,14 @@ pub fn bake_text(text_draw_kind: TextDrawKind, text: &str, font_description: &Fo
 			}
 		}
 
-		// 알파만 꺼내 흰색 프리멀티플라이드로. (흰색으로 그렸으니 알파가 곧 덮인 정도다)
+		// 곧은 알파 RGBA 를 프리멀티플라이드로. (원본은 UNPACK_PREMULTIPLY_ALPHA_WEBGL 로 올린다. 흰 글자는 네 칸 모두 덮인 정도가 된다)
 		let image_data = context.get_image_data(0.0, 0.0, bitmap_width as f64, bitmap_height as f64).ok()?;
 		let mut pixels = image_data.data().0;
 		for pixel in pixels.chunks_exact_mut(4) {
-			let alpha = pixel[3];
-			pixel[0] = alpha;
-			pixel[1] = alpha;
-			pixel[2] = alpha;
+			let alpha = pixel[3] as u32;
+			for channel_index in 0..3 {
+				pixel[channel_index] = ((pixel[channel_index] as u32 * alpha + 127) / 255) as u8;
+			}
 		}
 
 		Some(SystemFontBitmap {
@@ -176,6 +177,7 @@ pub fn measure_piece(font_description: &FontDescription, pixel_size: f32, text: 
 
 //==============================================================================
 // 시스템 글꼴 조각 래스터. (덮인 정도, 왼쪽은 펜 자리에서, 위는 기준선에서. 크기는 픽셀)
+// - 흰 픽셀은 글자의 덮인 정도로, 흰색이 아닌 픽셀(브라우저가 그린 색 이모지)은 색 몫(color_pixels)으로 나눈다.
 //==============================================================================
 pub fn rasterize_piece(font_description: &FontDescription, pixel_size: f32, text: &str, is_right_to_left: bool) -> Option<crate::core::textshaping::GlyphRaster> {
 	let mut piece_description = font_description.clone();
@@ -187,13 +189,32 @@ pub fn rasterize_piece(font_description: &FontDescription, pixel_size: f32, text
 		ShapingDirection::LeftToRight
 	};
 	let bitmap = bake_text(TextDrawKind::Fill, text, &piece_description, 0.0, 1.0, direction)?;
-	let coverage: Vec<u8> = bitmap.pixels.chunks_exact(4).map(|pixel| pixel[3]).collect();
+	let mut coverage: Vec<u8> = Vec::with_capacity(bitmap.pixels.len() / 4);
+	let mut color_pixels = vec![0u8; bitmap.pixels.len()];
+	let mut has_color = false;
+	for (pixel_index, pixel) in bitmap.pixels.chunks_exact(4).enumerate() {
+		let is_white = pixel[0] == pixel[3] && pixel[1] == pixel[3] && pixel[2] == pixel[3];
+		if is_white {
+			coverage.push(pixel[3]);
+		}
+		else {
+			coverage.push(0);
+			color_pixels[pixel_index * 4..pixel_index * 4 + 4].copy_from_slice(pixel);
+			has_color = true;
+		}
+	}
 	Some(crate::core::textshaping::GlyphRaster {
 		coverage,
 		width: bitmap.bitmap_width,
 		height: bitmap.bitmap_height,
 		left_x: -(bitmap.pen_x.round() as i32),
 		top_y: bitmap.baseline_y.round() as i32,
+		color_pixels: if has_color {
+			Some(color_pixels)
+		}
+		else {
+			None
+		},
 	})
 }
 

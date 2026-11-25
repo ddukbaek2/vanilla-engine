@@ -223,6 +223,15 @@
   - Graphic 이 놓은 픽셀을 텍스처에서 되읽을 때(ShadowImage) 웹에서 기본 프레임버퍼가 묶여 있으면 같은 까닭으로 패닉하던 것을 고쳤다
   - 예제 toonshowcase: HDR 타겟(ToonPostProcess.begin)을 건 뒤 그림자 패스를 그린다. end_shadow_pass 가 HDR 타겟으로 돌아오는 것을 데스크탑과 웹에서 같게 본다
 - ToonInstance.line_id: 인스턴스마다의 화면 공간 바깥선 번호. (원본 instances[i].lineId, None 이면 공통 번호, ToonRenderer 는 읽지 않는다) ToonInstance::default() (단위 행렬, 흰 틴트, 번호 없음). ToonScreenOutline::draw_mesh_instanced 의 line_id_list 인자를 뺐다. (공개 API 를 바꾸는 일이다, 원본과 같은 쓰임) ToonInstance 를 구조체 꼴로 짓는 코드는 line_id 를 주거나 ..ToonInstance::default() 를 붙인다. 예제 toonfx, toonshowcase, toonview 를 고쳤다
+- 색 이모지: 글꼴의 색 글리프를 제 색으로 굽는다. (core/colorglyph.rs, 지금까지 데스크탑은 fontdue 가 색 글리프를 그리지 못해 흑백이나 빈칸이었다) 원본(브라우저 Canvas2D)처럼 흰 글자 위에 제 색으로 굽고 그릴 때 글자 색이 곱해진다
+  - 비트맵: sbix (Apple Color Emoji), CBDT/CBLC (Noto Color Emoji 비트맵 판)의 PNG 와 프리멀티플라이드 BGRA. 그 글리프를 가진 판 가운데 글자 크기 이상인 가장 작은 판을 골라 넓이 평균으로 줄인다. (Apple Color Emoji 는 판마다 빠진 글리프가 있다)
+  - 윤곽: COLR/CPAL v0 과 v1. ttf-parser 의 Painter 로 받아 넓이 누적 래스터, 한 색과 선형, 두 원 방사, 스윕 그라데이션(Pad, Repeat, Reflect), 변환, 자르기, 28 가지 합성을 직접 칠한다. 크롬처럼 OT-SVG 는 그리지 않는다
+  - 크롬과 같게: 가짜 기울임은 색 글리프에도 입히고 가짜 굵게는 입히지 않는다. 외곽선(Stroke)으로 구울 때 색 글리프는 테 없이 색 그대로 얹는다. ShadowText 는 이모지에 글자 색의 알파만 곱하고 그림자는 이모지 모양까지 드리운다. DynamicFont 아틀라스도 색 글리프를 제 색으로 굽는다. (맥 크롬 Canvas2D 로 확인)
+  - 얼굴 고르기: 이모지 표시 묶음(VS16 FE0F, Emoji_Presentation, 피부색, 국기, 키캡, 태그, 이음 문자 묶음)은 색 글리프를 가진 얼굴을, 그 밖(맨 ❤, VS15)은 색이 아닌 얼굴을 먼저 고른다. 크롬도 지정한 글꼴에 흑백 ❤ 가 있으면 ❤️ 는 색 이모지 글꼴로, 맨 ❤ 는 그 글꼴로 그린다. 웹에서 올린 글꼴에 색 글리프가 없으면 이모지 표시 묶음은 브라우저 조각(색 이모지)으로 둔다. (textshaping::is_emoji_presentation, unicode-properties 의 emoji 기능을 켰다)
+  - 대체 글꼴: EngineConfiguration.fallback_font_paths 기본값에 C:/Windows/Fonts/seguiemj.ttf, /System/Library/Fonts/Apple Color Emoji.ttc, /usr/share/fonts/truetype/noto/NotoColorEmoji.ttf 를 더했다. 후보는 더할 때 파일 머리의 표 목록만 엿봐 색 글리프 표(sbix, CBDT, COLR)가 있는지 적어 두고, 이모지 표시 글자는 색 후보를, 그 밖의 글자는 색이 아닌 후보를 먼저 읽는다. (190MB 남짓한 Apple Color Emoji 를 한중일 글자 때문에 읽지 않는다)
+  - GlyphRaster.color_pixels, TextRaster.color_pixels (색 글리프 몫, 프리멀티플라이드 RGBA). coverage 는 색 글리프를 뺀 글자의 덮인 정도다. 구조체에 필드가 늘어 직접 짓는 코드는 고쳐야 한다
+- 웹: 글꼴 바이트가 없을 때 브라우저로 굽는 글(platform/web/systemfont.rs)이 캔버스의 알파만 꺼내 흰색으로 올려 색 이모지가 흰 실루엣으로 나오던 것을 고쳤다. 원본처럼 RGBA 를 프리멀티플라이드로 올린다. 시스템 글꼴 조각(올린 글꼴에 없는 글자)은 흰 픽셀은 덮인 정도, 색 픽셀은 색 몫으로 나눈다. 안티앨리어싱을 끄면 알파로 가르고 곧은 색으로 채운다. (원본은 곧은 알파의 알파 칸을 가른다)
+- 예제 textshaping: 색 이모지 줄(😀👍🏽 ❤️❤ 🇰🇷 👨‍👩‍👧 1️⃣), 그림자 글 이모지, 기울인 이모지, 글자 아틀라스의 ⭐
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.
