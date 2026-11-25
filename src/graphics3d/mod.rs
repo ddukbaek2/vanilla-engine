@@ -5,7 +5,7 @@
 // - 3D 를 그리기 전에 graphic.flush_batch() 로 모아 둔 2D 를 내보내고, 다 그린 뒤 graphic.restore_render_state() 로
 //   2D 프로그램, 버텍스 어레이, 뷰포트, 블렌드, 깊이 상태를 되돌린다.
 // - 파일 하나가 원본 파일 하나다. fullscreenpass.js 는 core::fullscreenpass 에 있고 여기서 다시 내보낸다.
-//   원본에서 옮기지 않은 것: humanskinrenderer.js(게임이 안 씀), webgl2.js 와 gl2d.js(죽은 코드).
+//   원본에서 옮기지 않은 것: webgl2.js 와 gl2d.js(죽은 코드).
 //==============================================================================
 pub mod ambientocclusioneffect;
 pub mod bloomeffect;
@@ -25,3 +25,4 @@ pub use crate::core::fullscreenpass;
 pub type GlFramebuffer = <glow::Context as glow::HasContext>::Framebuffer;
 pub type GlRenderbuffer = <glow::Context as glow::HasContext>::Renderbuffer;
 pub mod camera3d;
+pub mod humanskinrenderer;
