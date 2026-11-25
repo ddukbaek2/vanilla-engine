@@ -4,7 +4,6 @@
 //   반복하지 않으면 마지막 프레임에서 멈추고 완료 콜백을 부른다.
 // - 원본도 컴포넌트가 아니라 그냥 객체다. 노드에 붙지 않고, 들고 있는 쪽(컴포넌트 등)이 tick 을 불러 주고
 //   get_current_image / get_current_rect 로 지금 프레임을 꺼내 Sprite 에 넣는다.
-// - 원본의 pause / resume 은 비어 있다. 그래서 goto_and_stop 도 프레임만 옮기고 재생을 멈추지 않는다. 그대로 옮겼다.
 // - 원본의 set_frames 계열은 배열이 아니거나 비면 그냥 돌아간다. 러스트 판은 타입이 정해져 있어서 빈 목록만 거른다.
 //   (set_frames 는 원본처럼 빈 목록도 받는다)
 // - 프레임 번호는 usize 다. 원본 goto_and_play(-1) 처럼 음수를 0 으로 맞추는 일은 타입이 대신한다.
@@ -89,26 +88,23 @@ impl Animation {
 	}
 
 	//==============================================================================
-	// 일시정지. (원본도 비어 있다)
+	// 일시정지. (지금 프레임과 쌓인 시간을 그대로 둔다)
 	//==============================================================================
 	pub fn pause(&mut self) {
+		self.is_playing = false;
 	}
 
 	//==============================================================================
-	// 재개. (원본도 비어 있다)
+	// 재개. (멈춘 프레임에서 이어 간다)
 	//==============================================================================
 	pub fn resume(&mut self) {
+		self.is_playing = true;
 	}
 
 	//==============================================================================
-	// 정지. (재생 중일 때만 첫 프레임으로 되돌린다)
+	// 정지. (첫 프레임으로 되돌린다. 멈춰 있어도 되돌린다)
 	//==============================================================================
 	pub fn stop(&mut self) {
-		let is_playing = self.is_playing();
-		if !is_playing {
-			return;
-		}
-
 		self.is_playing = false;
 		self.current_frame_index = 0;
 		self.frame_time_counter = 0.0;
@@ -175,7 +171,7 @@ impl Animation {
 	}
 
 	//==============================================================================
-	// 특정 프레임으로 이동하여 정지한다. (원본처럼 pause 를 부르는데 pause 가 비어 있어 재생은 이어진다)
+	// 특정 프레임으로 이동하여 정지한다. (번호는 프레임 수 안으로 맞춘다)
 	//==============================================================================
 	pub fn goto_and_stop(&mut self, index: usize) {
 		self.current_frame_index = self.clamp_frame_index(index);
@@ -343,10 +339,10 @@ mod tests {
 	}
 
 	//==============================================================================
-	// stop 은 재생 중일 때만 첫 프레임으로 되돌린다.
+	// stop 은 늘 첫 프레임으로 되돌린다. (프레임을 바꾸면 멈춰 있던 번호도 0 이 된다)
 	//==============================================================================
 	#[test]
-	fn stop_resets_only_while_playing() {
+	fn stop_always_resets() {
 		let mut animation = create_sheet_animation(4);
 		animation.set_animation_speed(1.0);
 		animation.play();
@@ -358,11 +354,38 @@ mod tests {
 
 		animation.goto_and_stop(3);
 		animation.stop();
-		assert_eq!(animation.get_current_frame_index(), 3);
+		assert_eq!(animation.get_current_frame_index(), 0);
+
+		animation.goto_and_stop(3);
+		let pixels = vec![0u8; 16 * 16 * 4];
+		let image = Image::create_from_pixels(16, 16, pixels);
+		animation.set_frames_from_rects(image, &[Rect::create(0.0, 0.0, 16.0, 16.0)]);
+		assert_eq!(animation.get_current_frame_index(), 0);
+		assert!(animation.get_current_frame().is_some());
 	}
 
 	//==============================================================================
-	// goto 계열은 번호를 프레임 수 안으로 맞춘다. goto_and_stop 은 원본처럼 재생을 멈추지 않는다.
+	// pause 는 프레임과 쌓인 시간을 두고 멈추고, resume 은 그 자리에서 이어 간다.
+	//==============================================================================
+	#[test]
+	fn pause_and_resume_keep_frame() {
+		let mut animation = create_sheet_animation(4);
+		animation.set_animation_speed(4.0);
+		animation.play();
+		animation.tick(0.375);
+		assert_eq!(animation.get_current_frame_index(), 1);
+		animation.pause();
+		assert!(!animation.is_playing());
+		animation.tick(1.0);
+		assert_eq!(animation.get_current_frame_index(), 1);
+		animation.resume();
+		assert!(animation.is_playing());
+		animation.tick(0.125);
+		assert_eq!(animation.get_current_frame_index(), 2);
+	}
+
+	//==============================================================================
+	// goto 계열은 번호를 프레임 수 안으로 맞춘다. goto_and_stop 은 그 프레임에서 멈춘다.
 	//==============================================================================
 	#[test]
 	fn goto_clamps_index() {
@@ -373,7 +396,7 @@ mod tests {
 
 		animation.goto_and_stop(1);
 		assert_eq!(animation.get_current_frame_index(), 1);
-		assert!(animation.is_playing());
+		assert!(!animation.is_playing());
 
 		let mut empty_animation = Animation::new();
 		empty_animation.goto_and_play(5);
