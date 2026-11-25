@@ -14,6 +14,10 @@
 //   GL 을 밖에서 만질 수 있는 때(get_gl 로 컨텍스트를 내줄 때, restore_render_state, 프레임 시작과 끝)에는 잊고 다음에 다시 건다.
 // - 밉맵 단계 보정(set_image_mipmap_bias)은 기본, 묶음, 파티클 셰이더의 textureLodBias 유니폼으로 건다. 바꿔 끼운 셰이더는 그 유니폼이 있으면 받는다. (원본과 같음)
 // - 글자 방향(set_text_direction, 원본 setTextDirection)은 상태에 들고, 구운 문자열을 그 문단 방향으로 모양 짓는다. (textshaping.rs 의 양방향 정렬과 모양 짓기)
+// - 블렌드 모드 26 가지(원본과 같음): 13 가지는 고정 블렌딩, 13 가지는 그릴 영역 아래를 지금 프레임버퍼에서 blit_framebuffer 로 떠 와 W3C 공식대로 셰이더로 섞는다.
+//   셰이더 글은 원본과 한 글자도 다르지 않다. 바꿔 끼운 셰이더는 덧그림 칸(데스크탑은 늘 RGBA16F, 웹은 원본처럼 EXT_color_buffer_float 가 있을 때 RGBA16F)에 먼저 그리고 섞어 옮긴다.
+// - 기본 프레임버퍼에 그릴 때는 알파를 쓰지 않는다(apply_color_mask). 원본과 웹은 캔버스가 alpha: false 라 화면 알파가 늘 1 인데, 데스크탑 기본 프레임버퍼는 알파가 있어
+//   알파를 낮추는 모드 뒤에 DST_ALPHA 를 쓰는 모드와 셰이더 섞기가 웹과 달랐다. 렌더 타겟에는 알파도 쓴다.
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::math;
@@ -27,7 +31,7 @@ use crate::core::textshaping::ShapingDirection;
 use crate::core::textstringtexturecache::{TextDrawKind, TextEntry, TextMetrics, TextStringTextureCache};
 use glow::HasContext;
 use std::cell::Cell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 // GL 객체 타입. (데스크탑은 glow::Native*, 웹은 WebGL 객체. glow 컨텍스트가 정한 것을 그대로 쓴다)
@@ -37,6 +41,7 @@ pub type GlVertexArray = <glow::Context as glow::HasContext>::VertexArray;
 pub type GlProgram = <glow::Context as glow::HasContext>::Program;
 pub type GlShader = <glow::Context as glow::HasContext>::Shader;
 pub type GlUniformLocation = <glow::Context as glow::HasContext>::UniformLocation;
+pub type GlFramebuffer = <glow::Context as glow::HasContext>::Framebuffer;
 
 //==============================================================================
 // 전역 상수 목록.
@@ -145,6 +150,206 @@ void main() {
 }
 ";
 
+// 셰이더 섞기 함수. (고정 블렌딩으로 안 되는 블렌드 모드에서 그릴 영역 아래와 섞는다, 원본과 같은 글)
+// - backdropTexture 는 그리기 직전에 지금 프레임버퍼에서 그릴 영역만 떠 온 것이다. (프레임버퍼와 같은 크기와 형식, 프리멀티플라이드)
+// - 공식은 W3C Compositing and Blending Level 1 (https://www.w3.org/TR/compositing-1/, 2024-03-21 후보 권고안) 그대로다.
+//   10.1 분리 섞기: overlay = HardLight(Cs, Cb), darken = min, lighten = max, color-dodge, color-burn, hard-light, soft-light (D(Cb) 포함), difference, exclusion.
+//   10.2 비분리 섞기: hue, saturation, color, luminosity. (Lum = 0.3 R + 0.59 G + 0.11 B, ClipColor, SetLum, Sat, SetSat)
+//   섞은 색은 범위로 자른다. (10 장 "The result of the mixing formula must be clamped")
+// - 6 장 일반식대로 Cs' = (1 - αb) x Cs + αb x B(Cb, Cs) 로 섞은 색을 (Cs' x αs, αs) 로 내보내고,
+//   그 뒤 source-over 합성 co = cs' + cb x (1 - αs) 는 고정 블렌딩(ONE, ONE_MINUS_SRC_ALPHA)이 한다.
+// - blendModeIndex 는 BlendMode::get_shader_blend_mode_index 의 번호다.
+// - 아래 두 셰이더 글에 concat! 으로 끼우려고 글자 그대로 내는 매크로로 둔다.
+macro_rules! blend_function_source {
+	() => {
+"uniform highp sampler2D backdropTexture;
+uniform int blendModeIndex;
+
+float blendColorDodge(float backdropValue, float sourceValue) {
+	if (backdropValue == 0.0) {
+		return 0.0;
+	}
+	if (sourceValue == 1.0) {
+		return 1.0;
+	}
+	return min(1.0, backdropValue / (1.0 - sourceValue));
+}
+
+float blendColorBurn(float backdropValue, float sourceValue) {
+	if (backdropValue == 1.0) {
+		return 1.0;
+	}
+	if (sourceValue == 0.0) {
+		return 0.0;
+	}
+	return 1.0 - min(1.0, (1.0 - backdropValue) / sourceValue);
+}
+
+float blendHardLight(float backdropValue, float sourceValue) {
+	if (sourceValue <= 0.5) {
+		return backdropValue * 2.0 * sourceValue;
+	}
+	float screenValue = 2.0 * sourceValue - 1.0;
+	return backdropValue + screenValue - backdropValue * screenValue;
+}
+
+float blendSoftLight(float backdropValue, float sourceValue) {
+	if (sourceValue <= 0.5) {
+		return backdropValue - (1.0 - 2.0 * sourceValue) * backdropValue * (1.0 - backdropValue);
+	}
+	float darkenedValue = sqrt(backdropValue);
+	if (backdropValue <= 0.25) {
+		darkenedValue = ((16.0 * backdropValue - 12.0) * backdropValue + 4.0) * backdropValue;
+	}
+	return backdropValue + (2.0 * sourceValue - 1.0) * (darkenedValue - backdropValue);
+}
+
+float getLuminosity(vec3 color) {
+	return 0.3 * color.r + 0.59 * color.g + 0.11 * color.b;
+}
+
+vec3 clipColor(vec3 color) {
+	float luminosity = getLuminosity(color);
+	float minimumValue = min(min(color.r, color.g), color.b);
+	float maximumValue = max(max(color.r, color.g), color.b);
+	vec3 clippedColor = color;
+	if (minimumValue < 0.0) {
+		clippedColor = luminosity + (clippedColor - luminosity) * luminosity / (luminosity - minimumValue);
+	}
+	if (maximumValue > 1.0) {
+		clippedColor = luminosity + (clippedColor - luminosity) * (1.0 - luminosity) / (maximumValue - luminosity);
+	}
+	return clippedColor;
+}
+
+vec3 setLuminosity(vec3 color, float luminosity) {
+	float luminosityDelta = luminosity - getLuminosity(color);
+	return clipColor(color + luminosityDelta);
+}
+
+float getSaturation(vec3 color) {
+	return max(max(color.r, color.g), color.b) - min(min(color.r, color.g), color.b);
+}
+
+vec3 setSaturation(vec3 color, float saturation) {
+	float minimumValue = min(min(color.r, color.g), color.b);
+	float maximumValue = max(max(color.r, color.g), color.b);
+	if (maximumValue > minimumValue) {
+		return (color - minimumValue) * saturation / (maximumValue - minimumValue);
+	}
+	return vec3(0.0);
+}
+
+vec3 blendColors(vec3 backdropColor, vec3 sourceColor) {
+	if (blendModeIndex == 1) {
+		return min(backdropColor, sourceColor);
+	}
+	if (blendModeIndex == 2) {
+		return max(backdropColor, sourceColor);
+	}
+	if (blendModeIndex == 3) {
+		return vec3(blendHardLight(sourceColor.r, backdropColor.r), blendHardLight(sourceColor.g, backdropColor.g), blendHardLight(sourceColor.b, backdropColor.b));
+	}
+	if (blendModeIndex == 4) {
+		return vec3(blendColorDodge(backdropColor.r, sourceColor.r), blendColorDodge(backdropColor.g, sourceColor.g), blendColorDodge(backdropColor.b, sourceColor.b));
+	}
+	if (blendModeIndex == 5) {
+		return vec3(blendColorBurn(backdropColor.r, sourceColor.r), blendColorBurn(backdropColor.g, sourceColor.g), blendColorBurn(backdropColor.b, sourceColor.b));
+	}
+	if (blendModeIndex == 6) {
+		return vec3(blendHardLight(backdropColor.r, sourceColor.r), blendHardLight(backdropColor.g, sourceColor.g), blendHardLight(backdropColor.b, sourceColor.b));
+	}
+	if (blendModeIndex == 7) {
+		return vec3(blendSoftLight(backdropColor.r, sourceColor.r), blendSoftLight(backdropColor.g, sourceColor.g), blendSoftLight(backdropColor.b, sourceColor.b));
+	}
+	if (blendModeIndex == 8) {
+		return abs(backdropColor - sourceColor);
+	}
+	if (blendModeIndex == 9) {
+		return backdropColor + sourceColor - 2.0 * backdropColor * sourceColor;
+	}
+	if (blendModeIndex == 10) {
+		return setLuminosity(setSaturation(sourceColor, getSaturation(backdropColor)), getLuminosity(backdropColor));
+	}
+	if (blendModeIndex == 11) {
+		return setLuminosity(setSaturation(backdropColor, getSaturation(sourceColor)), getLuminosity(backdropColor));
+	}
+	if (blendModeIndex == 12) {
+		return setLuminosity(sourceColor, getLuminosity(backdropColor));
+	}
+	if (blendModeIndex == 13) {
+		return setLuminosity(backdropColor, getLuminosity(sourceColor));
+	}
+	return sourceColor;
+}
+
+vec4 blendWithBackdrop(vec4 sourceColor) {
+	vec4 backdropColor = texelFetch(backdropTexture, ivec2(gl_FragCoord.xy), 0);
+	float sourceAlpha = clamp(sourceColor.a, 0.0, 1.0);
+	float backdropAlpha = clamp(backdropColor.a, 0.0, 1.0);
+	vec3 straightSourceColor = vec3(0.0);
+	if (sourceAlpha > 0.0) {
+		straightSourceColor = clamp(sourceColor.rgb / sourceAlpha, 0.0, 1.0);
+	}
+	vec3 straightBackdropColor = vec3(0.0);
+	if (backdropAlpha > 0.0) {
+		straightBackdropColor = clamp(backdropColor.rgb / backdropAlpha, 0.0, 1.0);
+	}
+	vec3 mixedColor = clamp(blendColors(straightBackdropColor, straightSourceColor), 0.0, 1.0);
+	vec3 blendedColor = (1.0 - backdropAlpha) * straightSourceColor + backdropAlpha * mixedColor;
+	return vec4(blendedColor * sourceAlpha, sourceAlpha);
+}
+"
+	};
+}
+
+// 셰이더 섞기 프래그먼트 셰이더. (기본 셰이더와 같은 색 셈 뒤 그릴 영역 아래와 섞는다, 원본과 같은 글)
+const BLEND_FRAGMENTSHADER_SOURCE: &str = concat!("#version 300 es
+precision highp float;
+in vec2 fragmentTextureCoordinate;
+uniform sampler2D mainTexture;
+uniform vec4 mainColor;
+uniform vec4 tintColor;
+uniform float globalAlpha;
+uniform float textureLodBias;
+out vec4 outputColor;
+", blend_function_source!(), "
+void main() {
+	vec4 textureColor = texture(mainTexture, fragmentTextureCoordinate, textureLodBias);
+	vec3 tintedColor = mix(textureColor.rgb, tintColor.rgb * textureColor.a, tintColor.a);
+	float finalAlpha = textureColor.a * mainColor.a * globalAlpha;
+	vec3 finalColor = tintedColor * mainColor.rgb * mainColor.a * globalAlpha;
+	outputColor = blendWithBackdrop(vec4(finalColor, finalAlpha));
+}
+");
+
+// 파티클 셰이더 섞기 프래그먼트 셰이더. (파티클 셰이더와 같은 색 셈 뒤 그릴 영역 아래와 섞는다, 원본과 같은 글)
+const PARTICLE_BLEND_FRAGMENTSHADER_SOURCE: &str = concat!("#version 300 es
+precision highp float;
+in vec2 fragmentTextureCoordinate;
+in vec4 fragmentColor;
+uniform sampler2D mainTexture;
+uniform float globalAlpha;
+uniform float textureLodBias;
+out vec4 outputColor;
+", blend_function_source!(), "
+void main() {
+	vec4 textureColor = texture(mainTexture, fragmentTextureCoordinate, textureLodBias);
+	float finalAlpha = textureColor.a * fragmentColor.a * globalAlpha;
+	vec3 finalColor = textureColor.rgb * fragmentColor.rgb * fragmentColor.a * globalAlpha;
+	outputColor = blendWithBackdrop(vec4(finalColor, finalAlpha));
+}
+");
+
+// 셰이더 섞기로 파티클을 그릴 때 한 번에 그리는 쿼드 수 상한. (서로 겹치지 않는 쿼드끼리 한 번 떠 와 함께 그린다, 겹침을 따질 때 견주는 수)
+const SHADER_BLEND_PARTICLE_GROUP_CAPACITY: usize = 32;
+
+// 기본 프레임버퍼의 색 버퍼 이름. (붙인 색 텍스처의 형식을 물을 때. 데스크탑 GL 3.3 은 BACK_LEFT, WebGL2 는 BACK 을 받는다)
+#[cfg(not(target_arch = "wasm32"))]
+const DEFAULT_FRAMEBUFFER_COLOR_BUFFER: u32 = glow::BACK_LEFT;
+#[cfg(target_arch = "wasm32")]
+const DEFAULT_FRAMEBUFFER_COLOR_BUFFER: u32 = glow::BACK;
+
 // 버텍스 1개당 float 수. (x, y, u, v)
 pub const FLOATS_PER_VERTEX: usize = 4;
 // 파티클 버텍스 1개당 float 수. (x, y, u, v, r, g, b, a)
@@ -188,7 +393,8 @@ const IMAGE_TEXTURE_SWEEP_INTERVAL: u64 = 600;
 
 //==============================================================================
 // 블렌드 모드. (원본 SpriteBlendMode, Canvas2D globalCompositeOperation 대응)
-// - 고정 블렌딩으로 재현 가능한 9 종만 실제로 적용하고, 나머지는 normal(source-over)로 폴백한다. (원본과 같음)
+// - 26 가지 모두 그린다. 13 가지(포터 더프 연산자, Lighter, Multiply, Screen)는 고정 블렌딩, 나머지 13 가지는 그릴 영역 아래를 떠 와 셰이더로 섞는다. (원본과 같음)
+// - Canvas2D 는 SourceIn, SourceOut, DestinationIn, DestinationAtop, Copy 가 그린 도형 밖(자르기 안 전체)도 지우지만, Graphic 은 그린 도형 안만 바꾼다. (원본과 같음)
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum BlendMode {
@@ -263,6 +469,191 @@ impl BlendMode {
 	//==============================================================================
 	pub fn from_name(name: &str) -> Option<BlendMode> {
 		BLEND_MODE_NAME_TABLE.iter().find(|(_, blend_mode_name)| *blend_mode_name == name).map(|(blend_mode, _)| *blend_mode)
+	}
+
+	//==============================================================================
+	// 고정 블렌딩 계수. ((소스 계수, 대상 계수), 프리멀티플라이드 알파 기준. 셰이더로 섞는 모드는 None)
+	// - 포터 더프 연산자는 W3C Compositing and Blending Level 1 의 9.1 장 Fa, Fb 를 그대로 계수로 쓴다. (co = cs x Fa + cb x Fb, 알파도 같은 계수라 blend_func 하나로 된다)
+	//   SourceOut: Fa = 1 - αb, Fb = 0 / SourceAtop: Fa = αb, Fb = 1 - αs / DestinationAtop: Fa = 1 - αb, Fb = αs / Xor: Fa = 1 - αb, Fb = 1 - αs
+	//==============================================================================
+	fn get_blend_function(&self) -> Option<(u32, u32)> {
+		match self {
+			BlendMode::Normal => {
+				Some((glow::ONE, glow::ONE_MINUS_SRC_ALPHA))
+			}
+			BlendMode::Lighter => {
+				Some((glow::ONE, glow::ONE))
+			}
+			BlendMode::Multiply => {
+				Some((glow::DST_COLOR, glow::ONE_MINUS_SRC_ALPHA))
+			}
+			BlendMode::Screen => {
+				Some((glow::ONE, glow::ONE_MINUS_SRC_COLOR))
+			}
+			BlendMode::DestinationOver => {
+				Some((glow::ONE_MINUS_DST_ALPHA, glow::ONE))
+			}
+			BlendMode::DestinationOut => {
+				Some((glow::ZERO, glow::ONE_MINUS_SRC_ALPHA))
+			}
+			BlendMode::SourceIn => {
+				Some((glow::DST_ALPHA, glow::ZERO))
+			}
+			BlendMode::DestinationIn => {
+				Some((glow::ZERO, glow::SRC_ALPHA))
+			}
+			BlendMode::Copy => {
+				Some((glow::ONE, glow::ZERO))
+			}
+			BlendMode::SourceOut => {
+				Some((glow::ONE_MINUS_DST_ALPHA, glow::ZERO))
+			}
+			BlendMode::SourceAtop => {
+				Some((glow::DST_ALPHA, glow::ONE_MINUS_SRC_ALPHA))
+			}
+			BlendMode::DestinationAtop => {
+				Some((glow::ONE_MINUS_DST_ALPHA, glow::SRC_ALPHA))
+			}
+			BlendMode::Xor => {
+				Some((glow::ONE_MINUS_DST_ALPHA, glow::ONE_MINUS_SRC_ALPHA))
+			}
+			_ => {
+				None
+			}
+		}
+	}
+
+	//==============================================================================
+	// 셰이더 섞기 번호. (BLEND_FUNCTION_SOURCE 의 blendModeIndex, 고정 블렌딩이면 0. 원본 SHADER_BLEND_MODE_INDEX_TABLE)
+	// - Darken, Lighten 도 셰이더로 섞는다. blend_equation MIN / MAX 는 계수 없이 min(cs, cb), max(cs, cb) 를 내는데,
+	//   W3C 식을 프리멀티플라이드로 풀면 darken 은 cs + cb - max(cs x αb, cb x αs), lighten 은 cs + cb - min(cs x αb, cb x αs) 라서 소스나 바탕이 반투명이면 같지 않다.
+	//   (불투명한 바탕 cb = 0.2 에 검정을 알파 0.5 로 그리면 W3C darken 은 0.1, MIN 은 0. 흰색을 알파 0.5 로 그리면 W3C lighten 은 0.6, MAX 는 0.5)
+	//==============================================================================
+	fn get_shader_blend_mode_index(&self) -> i32 {
+		match self {
+			BlendMode::Darken => {
+				1
+			}
+			BlendMode::Lighten => {
+				2
+			}
+			BlendMode::Overlay => {
+				3
+			}
+			BlendMode::ColorDodge => {
+				4
+			}
+			BlendMode::ColorBurn => {
+				5
+			}
+			BlendMode::HardLight => {
+				6
+			}
+			BlendMode::SoftLight => {
+				7
+			}
+			BlendMode::Difference => {
+				8
+			}
+			BlendMode::Exclusion => {
+				9
+			}
+			BlendMode::Hue => {
+				10
+			}
+			BlendMode::Saturation => {
+				11
+			}
+			BlendMode::Color => {
+				12
+			}
+			BlendMode::Luminosity => {
+				13
+			}
+			_ => {
+				0
+			}
+		}
+	}
+}
+
+//==============================================================================
+// 오프스크린 칸의 색 텍스처 형식. (셰이더 섞기에서 그릴 영역 아래를 떠 올 칸과 덧그림 칸)
+//==============================================================================
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum OffscreenFormat {
+	Rgb8,
+	Rgba8,
+	Rgba16Float,
+	Rgba32Float,
+}
+
+impl OffscreenFormat {
+	//==============================================================================
+	// GL 텍스처 형식. (내부 형식, 픽셀 형식, 픽셀 자료형)
+	//==============================================================================
+	fn get_texture_format(&self) -> (u32, u32, u32) {
+		match self {
+			OffscreenFormat::Rgb8 => {
+				(glow::RGB8, glow::RGB, glow::UNSIGNED_BYTE)
+			}
+			OffscreenFormat::Rgba8 => {
+				(glow::RGBA8, glow::RGBA, glow::UNSIGNED_BYTE)
+			}
+			OffscreenFormat::Rgba16Float => {
+				(glow::RGBA16F, glow::RGBA, glow::HALF_FLOAT)
+			}
+			OffscreenFormat::Rgba32Float => {
+				(glow::RGBA32F, glow::RGBA, glow::FLOAT)
+			}
+		}
+	}
+}
+
+//==============================================================================
+// 오프스크린 칸. (색 텍스처 하나를 붙인 프레임버퍼)
+//==============================================================================
+#[derive(Clone, Copy)]
+struct OffscreenTarget {
+	texture: GlTexture,
+	framebuffer: GlFramebuffer,
+	width: i32,
+	height: i32,
+}
+
+//==============================================================================
+// 떠 올 영역. (GL 픽셀, 왼쪽 아래 원점)
+//==============================================================================
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct BackdropRect {
+	x: i32,
+	y: i32,
+	width: i32,
+	height: i32,
+}
+
+impl BackdropRect {
+	//==============================================================================
+	// 다른 영역과 겹치는지. (변을 맞댄 것은 겹치지 않는다)
+	//==============================================================================
+	fn is_overlapping(&self, other: &BackdropRect) -> bool {
+		self.x < other.x + other.width && other.x < self.x + self.width && self.y < other.y + other.height && other.y < self.y + self.height
+	}
+
+	//==============================================================================
+	// 다른 영역까지 덮는 경계 상자.
+	//==============================================================================
+	fn union(&self, other: &BackdropRect) -> BackdropRect {
+		let left_x = self.x.min(other.x);
+		let bottom_y = self.y.min(other.y);
+		let right_x = (self.x + self.width).max(other.x + other.width);
+		let top_y = (self.y + self.height).max(other.y + other.height);
+		BackdropRect {
+			x: left_x,
+			y: bottom_y,
+			width: right_x - left_x,
+			height: top_y - bottom_y,
+		}
 	}
 }
 
@@ -455,7 +846,19 @@ pub struct Graphic {
 	state_stack_depth: usize,
 	global_alpha: f32,
 	blend_mode: BlendMode,
-	warned_blend_modes: HashSet<BlendMode>,
+	// 지금 블렌드 모드의 셰이더 섞기 번호. (0 이면 고정 블렌딩)
+	shader_blend_mode_index: i32,
+	// 셰이더 섞기 프로그램과 파티클 셰이더 섞기 프로그램. (처음 쓸 때 만든다)
+	blend_shader_program: Option<ShaderProgram>,
+	particle_blend_shader_program: Option<ShaderProgram>,
+	// 그릴 영역 아래를 떠 올 칸. (텍스처 형식마다 하나)
+	backdrop_target_table: HashMap<OffscreenFormat, OffscreenTarget>,
+	// 프레임버퍼마다 색 텍스처 형식. (None 은 기본 프레임버퍼, 프레임마다 잊는다)
+	framebuffer_format_table: HashMap<Option<GlFramebuffer>, OffscreenFormat>,
+	// 바꿔 끼운 셰이더로 먼저 그려 둘 덧그림 칸. (처음 쓸 때 만든다)
+	layer_target: Option<OffscreenTarget>,
+	// 셰이더 섞기로 함께 그릴 파티클 쿼드의 영역. (저장소를 다시 쓴다)
+	particle_group_rect_list: Vec<BackdropRect>,
 	fill_color: Color,
 	stroke_color: Color,
 	white_color: Color,
@@ -493,6 +896,10 @@ pub struct Graphic {
 	bound_program: Cell<Option<GlProgram>>,
 	// 텍스처 유닛 0 에 마지막으로 바인드한 텍스처. (모르면 None, 같으면 bind_texture 를 건너뛴다)
 	bound_texture: Cell<Option<GlTexture>>,
+	// 텍스처 유닛 1 에 마지막으로 바인드한 떠 온 아래. (셰이더 섞기, 모르면 None)
+	bound_backdrop_texture: Cell<Option<GlTexture>>,
+	// 지금 프레임버퍼에 맞는 색 쓰기 마스크를 걸었는지. (apply_color_mask)
+	is_color_mask_known: Cell<bool>,
 }
 
 //==============================================================================
@@ -603,7 +1010,13 @@ impl Graphic {
 			state_stack_depth: 0,
 			global_alpha: 1.0,
 			blend_mode: BlendMode::Normal,
-			warned_blend_modes: HashSet::new(),
+			shader_blend_mode_index: 0,
+			blend_shader_program: None,
+			particle_blend_shader_program: None,
+			backdrop_target_table: HashMap::new(),
+			framebuffer_format_table: HashMap::new(),
+			layer_target: None,
+			particle_group_rect_list: Vec::with_capacity(SHADER_BLEND_PARTICLE_GROUP_CAPACITY),
 			fill_color: Color::black(),
 			stroke_color: Color::black(),
 			white_color: Color::white(),
@@ -637,6 +1050,8 @@ impl Graphic {
 			is_culling_enabled: true,
 			bound_program: Cell::new(None),
 			bound_texture: Cell::new(None),
+			bound_backdrop_texture: Cell::new(None),
+			is_color_mask_known: Cell::new(false),
 		})
 	}
 
@@ -673,9 +1088,10 @@ impl Graphic {
 			self.gl.uniform_matrix_3_f32_slice(projection_matrix_location.as_ref(), false, &self.projection_matrix_array);
 		}
 
-		// 프레임 시작 기준 상태로 리셋.
+		// 프레임 시작 기준 상태로 리셋. (프레임버퍼의 색 형식은 프레임 사이에 렌더 타겟을 다시 만들었을 수 있어 잊는다)
 		self.state_stack_depth = 0;
 		self.is_uploaded_uniform_known = false;
+		self.framebuffer_format_table.clear();
 		self.transform_matrix.set_identity();
 		self.global_alpha = 1.0;
 		self.image_tint_color = None;
@@ -738,6 +1154,34 @@ impl Graphic {
 	fn forget_bound_render_state(&self) {
 		self.bound_program.set(None);
 		self.bound_texture.set(None);
+		self.bound_backdrop_texture.set(None);
+
+		// 밖의 GL 코드는 모든 채널을 쓰는 마스크를 기대하므로 되돌린다.
+		if self.is_color_mask_known.get() {
+			unsafe {
+				self.gl.color_mask(true, true, true, true);
+			}
+			self.is_color_mask_known.set(false);
+		}
+	}
+
+	//==============================================================================
+	// 색 쓰기 마스크 걸기. (기본 프레임버퍼에 그릴 때는 알파를 쓰지 않는다, 그리기 직전에 부른다)
+	// - 원본과 웹은 캔버스가 alpha: false 라 화면의 알파가 늘 1 이다. 데스크탑 기본 프레임버퍼는 알파 8 비트가 있어,
+	//   알파를 낮추는 모드(source-out, xor, destination-out 같은 것) 뒤에 DST_ALPHA 를 쓰는 모드와 셰이더 섞기가 웹과 다르게 나왔다.
+	//   프레임 첫머리에 알파를 1 로 비우고 기본 프레임버퍼에는 알파를 쓰지 않아 웹과 같게 한다. (웹 기본 프레임버퍼는 알파가 없어 걸어도 그대로다)
+	// - 렌더 타겟에 그릴 때는 알파도 쓴다. 한 번 걸면 GL 을 밖에 내주거나 프레임버퍼를 바꿀 때까지 다시 묻지 않는다.
+	// - 스텐실에 클립 영역을 적는 동안은 색을 쓰지 않는 마스크가 걸려 있으므로 건드리지 않는다.
+	//==============================================================================
+	fn apply_color_mask(&self) {
+		if self.is_color_mask_known.get() || self.batch_suspend_depth > 0 {
+			return;
+		}
+		let is_default_framebuffer = read_framebuffer_binding(&self.gl).is_none();
+		unsafe {
+			self.gl.color_mask(true, true, true, !is_default_framebuffer);
+		}
+		self.is_color_mask_known.set(true);
 	}
 
 	//==============================================================================
@@ -814,7 +1258,7 @@ impl Graphic {
 	pub fn set_image_mipmap_bias(&mut self, value: f32) {
 		self.flush_batch();
 		self.image_mipmap_bias = value;
-		let shader_program_list: [Option<&ShaderProgram>; 4] = [Some(&self.shader_program), self.batch_shader_program.as_ref(), self.particle_shader_program.as_ref(), self.shader_program_override.as_deref()];
+		let shader_program_list: [Option<&ShaderProgram>; 6] = [Some(&self.shader_program), self.batch_shader_program.as_ref(), self.particle_shader_program.as_ref(), self.blend_shader_program.as_ref(), self.particle_blend_shader_program.as_ref(), self.shader_program_override.as_deref()];
 		for shader_program in shader_program_list.into_iter().flatten() {
 			self.use_shader_program(shader_program);
 			self.apply_image_mipmap_bias(shader_program);
@@ -985,8 +1429,11 @@ impl Graphic {
 	}
 
 	//==============================================================================
-	// 블렌드 모드 설정.
-	// - 고정 블렌딩으로 재현 불가능한 모드는 normal(source-over) 로 폴백.
+	// 블렌드 모드 설정. (원본 setBlendMode)
+	// - 고정 블렌딩으로 되는 13 가지는 blend_func 로 건다.
+	// - 나머지 13 가지(Overlay, Darken, Lighten, ColorDodge, ColorBurn, HardLight, SoftLight, Difference, Exclusion, Hue, Saturation, Color, Luminosity)는
+	//   그리기마다 그릴 영역 아래를 떠 와 셰이더로 섞는다. 이 모드에서는 묶어 그리지 않고, 그리기 하나에 영역 복사 한 번과 드로우 콜 한 번이 든다.
+	//   (바꿔 끼운 셰이더로 그릴 때는 덧그림 칸에 먼저 그리고 옮기므로 드로우 콜이 두 번)
 	//==============================================================================
 	pub fn set_blend_mode(&mut self, blend_mode: BlendMode) {
 		if blend_mode == self.blend_mode {
@@ -1000,51 +1447,10 @@ impl Graphic {
 	// 블렌드 모드를 GL 에 건다. (같은 모드여도 건다)
 	//==============================================================================
 	fn apply_blend_mode(&mut self, blend_mode: BlendMode) {
-		let blend_function = match blend_mode {
-			BlendMode::Normal => {
-				Some((glow::ONE, glow::ONE_MINUS_SRC_ALPHA))
-			}
-			BlendMode::Lighter => {
-				Some((glow::ONE, glow::ONE))
-			}
-			BlendMode::Multiply => {
-				Some((glow::DST_COLOR, glow::ONE_MINUS_SRC_ALPHA))
-			}
-			BlendMode::Screen => {
-				Some((glow::ONE, glow::ONE_MINUS_SRC_COLOR))
-			}
-			BlendMode::DestinationOver => {
-				Some((glow::ONE_MINUS_DST_ALPHA, glow::ONE))
-			}
-			BlendMode::DestinationOut => {
-				Some((glow::ZERO, glow::ONE_MINUS_SRC_ALPHA))
-			}
-			BlendMode::SourceIn => {
-				Some((glow::DST_ALPHA, glow::ZERO))
-			}
-			BlendMode::DestinationIn => {
-				Some((glow::ZERO, glow::SRC_ALPHA))
-			}
-			BlendMode::Copy => {
-				Some((glow::ONE, glow::ZERO))
-			}
-			_ => {
-				None
-			}
-		};
-		let (source_factor, destination_factor) = match blend_function {
-			Some(blend_function) => {
-				blend_function
-			}
-			None => {
-				if !self.warned_blend_modes.contains(&blend_mode) {
-					self.warned_blend_modes.insert(blend_mode);
-					eprintln!("Graphic: unsupported blend mode \"{:?}\", falling back to \"normal\".", blend_mode);
-				}
-				(glow::ONE, glow::ONE_MINUS_SRC_ALPHA)
-			}
-		};
+		// 셰이더로 섞은 색은 source-over 로 합성한다.
+		let (source_factor, destination_factor) = blend_mode.get_blend_function().unwrap_or((glow::ONE, glow::ONE_MINUS_SRC_ALPHA));
 		self.blend_mode = blend_mode;
+		self.shader_blend_mode_index = blend_mode.get_shader_blend_mode_index();
 		unsafe {
 			self.gl.blend_func(source_factor, destination_factor);
 		}
@@ -1125,13 +1531,20 @@ impl Graphic {
 			return;
 		}
 
+		// 셰이더 섞기 모드는 그리기마다 그 아래를 떠 와 섞으므로 묶지 않는다. (클립 영역을 스텐실에 적을 때는 색을 쓰지 않으므로 그냥 그린다)
+		let is_shader_blend_draw = self.shader_blend_mode_index > 0 && self.batch_suspend_depth == 0;
+
 		// 묶어 그리기. (클립 영역 기록 중이 아니고 바꿔 끼운 셰이더가 없을 때. 바꿔 끼운 셰이더는 제 유니폼을 쓰므로 바로 그린다)
-		let is_batchable = self.is_batching_enabled && self.batch_suspend_depth == 0 && self.shader_program_override.is_none();
+		let is_batchable = self.is_batching_enabled && self.batch_suspend_depth == 0 && self.shader_program_override.is_none() && !is_shader_blend_draw;
 		if is_batchable {
 			self.append_batch_vertices(vertex_count, texture, color);
 			return;
 		}
 		self.flush_batch();
+		if is_shader_blend_draw {
+			self.draw_vertices_with_shader_blend(vertex_count, texture, color);
+			return;
+		}
 
 		// 버텍스 업로드. (쓸 만큼만 새 저장소를 잡으며 올린다. 지난 드로우와 저장소가 겹치지 않는다)
 		let float_count = vertex_count * FLOATS_PER_VERTEX;
@@ -1142,10 +1555,11 @@ impl Graphic {
 
 		// 유니폼 업로드. (묶음을 내보낸 뒤에는 묶음 프로그램이 걸려 있을 수 있어 지금 쓰는 프로그램을 건다)
 		self.use_shader_program(self.get_shader_program());
-		self.upload_draw_uniforms(color);
+		self.upload_draw_uniforms(color, false);
 
 		// 텍스처 바인드 및 출력.
 		self.bind_main_texture(texture);
+		self.apply_color_mask();
 		unsafe {
 			self.gl.draw_arrays(glow::TRIANGLES, 0, vertex_count as i32);
 		}
@@ -1157,15 +1571,18 @@ impl Graphic {
 	// 드로우 콜 하나의 유니폼 업로드. (draw_vertices 가 부른다)
 	// - 유니폼 자리는 셰이더 프로그램이 바뀔 때만 다시 찾는다.
 	// - 기본 프로그램의 틴트와 전역 투명도는 지난번에 올린 값과 같으면 다시 올리지 않는다. (프레임 시작과 프로그램이 바뀔 때 잊는다)
-	// - 바꿔 끼운 셰이더 프로그램에는 늘 올린다.
+	// - 바꿔 끼운 셰이더 프로그램과 섞기 셰이더 프로그램(is_blend_program)에는 늘 올린다.
 	//==============================================================================
-	fn upload_draw_uniforms(&mut self, color: Color) {
-		let is_default_program = self.shader_program_override.is_none();
-		let shader_program = match &self.shader_program_override {
-			Some(shader_program_override) => {
+	fn upload_draw_uniforms(&mut self, color: Color, is_blend_program: bool) {
+		let is_default_program = self.shader_program_override.is_none() && !is_blend_program;
+		let shader_program = match (&self.blend_shader_program, &self.shader_program_override) {
+			(Some(blend_shader_program), _) if is_blend_program => {
+				blend_shader_program
+			}
+			(_, Some(shader_program_override)) => {
 				shader_program_override.as_ref()
 			}
-			None => {
+			_ => {
 				&self.shader_program
 			}
 		};
@@ -1215,6 +1632,341 @@ impl Graphic {
 			self.uploaded_global_alpha = global_alpha;
 			self.is_uploaded_uniform_known = true;
 		}
+	}
+
+	//==============================================================================
+	// 기록된 버텍스를 셰이더 섞기로 출력. (draw_vertices 가 셰이더 섞기 모드에서 부른다, 원본 drawVerticesWithShaderBlend)
+	// - 그릴 영역(정점의 경계 상자)만 지금 프레임버퍼에서 떠 온 뒤 섞기 셰이더로 그린다.
+	// - 바꿔 끼운 셰이더(ShaderSprite 등)는 섞기 함수를 모르므로, 그 셰이더로 덧그림 칸에 먼저 그리고 그 칸을 섞기 셰이더로 옮긴다.
+	//   덧그림 칸에는 스텐실이 없어 자르기는 옮겨 그릴 때 걸린다.
+	//==============================================================================
+	fn draw_vertices_with_shader_blend(&mut self, vertex_count: usize, texture: GlTexture, color: Color) {
+		let float_count = vertex_count * FLOATS_PER_VERTEX;
+		let backdrop_rect = match measure_backdrop_rect(&self.vertex_data[..float_count], FLOATS_PER_VERTEX, self.transform_matrix, self.applied_viewport_width, self.applied_viewport_height) {
+			Some(backdrop_rect) => {
+				backdrop_rect
+			}
+			None => {
+				return;
+			}
+		};
+		let framebuffer = read_framebuffer_binding(&self.gl);
+		if let Err(error) = self.copy_backdrop(framebuffer, backdrop_rect) {
+			eprintln!("Graphic: backdrop copy failed: {}", error);
+			return;
+		}
+		let vertex_bytes = float_slice_to_bytes(&self.vertex_data[..float_count]);
+		unsafe {
+			self.gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, vertex_bytes, glow::DYNAMIC_DRAW);
+		}
+		if self.shader_program_override.is_none() {
+			self.draw_with_blend_shader_program(vertex_count, texture, color);
+			return;
+		}
+
+		// 바꿔 끼운 셰이더로 덧그림 칸의 그릴 영역을 비우고 그린다.
+		let layer_target = match self.ensure_layer_target(framebuffer) {
+			Ok(layer_target) => {
+				layer_target
+			}
+			Err(error) => {
+				eprintln!("Graphic: layer target failed: {}", error);
+				return;
+			}
+		};
+		unsafe {
+			self.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(layer_target.framebuffer));
+			self.gl.color_mask(true, true, true, true);
+			self.is_color_mask_known.set(false);
+			self.gl.enable(glow::SCISSOR_TEST);
+			self.gl.scissor(backdrop_rect.x, backdrop_rect.y, backdrop_rect.width, backdrop_rect.height);
+			self.gl.clear_buffer_f32_slice(glow::COLOR, 0, &[0.0, 0.0, 0.0, 0.0]);
+			self.gl.disable(glow::SCISSOR_TEST);
+		}
+		self.use_shader_program(self.get_shader_program());
+		self.upload_draw_uniforms(color, false);
+		self.bind_main_texture(texture);
+		unsafe {
+			self.gl.draw_arrays(glow::TRIANGLES, 0, vertex_count as i32);
+			self.gl.bind_framebuffer(glow::FRAMEBUFFER, framebuffer);
+		}
+		self.is_color_mask_known.set(false);
+		self.draw_call_count += 1;
+		self.draw_vertex_count += vertex_count as u32;
+
+		// 덧그림 칸의 그릴 영역을 단위 행렬, 흰색, 틴트 없이 섞어 옮긴다. (칸은 화면과 같은 크기라 디바이스 픽셀 그대로 짚는다)
+		let viewport_width = self.applied_viewport_width as f32;
+		let viewport_height = self.applied_viewport_height as f32;
+		let left_x = backdrop_rect.x as f32;
+		let right_x = (backdrop_rect.x + backdrop_rect.width) as f32;
+		let top_y = viewport_height - (backdrop_rect.y + backdrop_rect.height) as f32;
+		let bottom_y = viewport_height - backdrop_rect.y as f32;
+		let layer_vertex_count = self.write_quad(0, left_x, top_y, right_x, bottom_y, left_x / viewport_width, (viewport_height - top_y) / viewport_height, right_x / viewport_width, (viewport_height - bottom_y) / viewport_height) / FLOATS_PER_VERTEX;
+		let layer_vertex_bytes = float_slice_to_bytes(&self.vertex_data[..layer_vertex_count * FLOATS_PER_VERTEX]);
+		unsafe {
+			self.gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, layer_vertex_bytes, glow::DYNAMIC_DRAW);
+		}
+		let transform_matrix = self.transform_matrix;
+		let global_alpha = self.global_alpha;
+		let image_tint_color = self.image_tint_color;
+		self.transform_matrix = TransformMatrix::identity();
+		self.global_alpha = 1.0;
+		self.image_tint_color = None;
+		let white_color = self.white_color;
+		self.draw_with_blend_shader_program(layer_vertex_count, layer_target.texture, white_color);
+		self.transform_matrix = transform_matrix;
+		self.global_alpha = global_alpha;
+		self.image_tint_color = image_tint_color;
+	}
+
+	//==============================================================================
+	// 올려 둔 버텍스를 섞기 셰이더로 그리기. (그릴 영역 아래는 이미 떠 와 유닛 1 에 바인드되어 있다)
+	//==============================================================================
+	fn draw_with_blend_shader_program(&mut self, vertex_count: usize, texture: GlTexture, color: Color) {
+		if let Err(error) = self.ensure_blend_shader_program() {
+			eprintln!("Graphic: blend shader program failed: {}", error);
+			return;
+		}
+		let blend_shader_program = match &self.blend_shader_program {
+			Some(blend_shader_program) => {
+				blend_shader_program
+			}
+			None => {
+				return;
+			}
+		};
+		self.use_shader_program(blend_shader_program);
+		let projection_matrix_location = blend_shader_program.get_uniform_location(&self.gl, "projectionMatrix");
+		let blend_mode_index_location = blend_shader_program.get_uniform_location(&self.gl, "blendModeIndex");
+		unsafe {
+			self.gl.uniform_matrix_3_f32_slice(projection_matrix_location.as_ref(), false, &self.projection_matrix_array);
+			self.gl.uniform_1_i32(blend_mode_index_location.as_ref(), self.shader_blend_mode_index);
+		}
+		self.upload_draw_uniforms(color, true);
+		self.bind_main_texture(texture);
+		self.apply_color_mask();
+		unsafe {
+			self.gl.draw_arrays(glow::TRIANGLES, 0, vertex_count as i32);
+		}
+		self.draw_call_count += 1;
+		self.draw_vertex_count += vertex_count as u32;
+	}
+
+	//==============================================================================
+	// 그릴 영역 아래 떠 오기. (지금 프레임버퍼의 그 영역을 같은 형식, 같은 자리의 칸에 blit_framebuffer 로 옮기고 유닛 1 에 바인드한다)
+	// - 같은 자리로 옮기므로 멀티샘플 기본 프레임버퍼(데스크탑의 멀티샘플 4, 웹의 안티에일리어싱)에서도 된다. copy_tex_sub_image_2d 는 멀티샘플에서 안 된다.
+	// - 렌더 타겟에 그리는 중이어도 그 색 텍스처를 바로 읽지 않고 떠 온다. 그리는 대상의 텍스처를 셰이더가 읽으면 피드백 루프라 GL 이 그리기를 막거나 결과가 정해지지 않는다.
+	//==============================================================================
+	fn copy_backdrop(&mut self, framebuffer: Option<GlFramebuffer>, backdrop_rect: BackdropRect) -> Result<(), String> {
+		let backdrop_target = self.ensure_backdrop_target(framebuffer)?;
+		let left_x = backdrop_rect.x;
+		let bottom_y = backdrop_rect.y;
+		let right_x = backdrop_rect.x + backdrop_rect.width;
+		let top_y = backdrop_rect.y + backdrop_rect.height;
+		unsafe {
+			self.gl.bind_framebuffer(glow::READ_FRAMEBUFFER, framebuffer);
+			self.gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(backdrop_target.framebuffer));
+			self.gl.blit_framebuffer(left_x, bottom_y, right_x, top_y, left_x, bottom_y, right_x, top_y, glow::COLOR_BUFFER_BIT, glow::NEAREST);
+			self.gl.bind_framebuffer(glow::FRAMEBUFFER, framebuffer);
+			if self.bound_backdrop_texture.get() != Some(backdrop_target.texture) {
+				self.gl.active_texture(glow::TEXTURE1);
+				self.gl.bind_texture(glow::TEXTURE_2D, Some(backdrop_target.texture));
+				self.gl.active_texture(glow::TEXTURE0);
+				self.bound_backdrop_texture.set(Some(backdrop_target.texture));
+			}
+		}
+		Ok(())
+	}
+
+	//==============================================================================
+	// 프레임버퍼의 색 텍스처 형식 읽기. (웹 기본 프레임버퍼는 alpha: false 라 RGB8, 데스크탑 기본 프레임버퍼와 렌더 타겟은 RGBA8 이나 실수 RGBA16F / RGBA32F)
+	//==============================================================================
+	fn read_framebuffer_format(&self, framebuffer: Option<GlFramebuffer>) -> OffscreenFormat {
+		let attachment = match framebuffer {
+			Some(_) => {
+				glow::COLOR_ATTACHMENT0
+			}
+			None => {
+				DEFAULT_FRAMEBUFFER_COLOR_BUFFER
+			}
+		};
+		unsafe {
+			let component_type = self.gl.get_framebuffer_attachment_parameter_i32(glow::FRAMEBUFFER, attachment, glow::FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE) as u32;
+			if component_type == glow::FLOAT {
+				let red_size = self.gl.get_framebuffer_attachment_parameter_i32(glow::FRAMEBUFFER, attachment, glow::FRAMEBUFFER_ATTACHMENT_RED_SIZE);
+				if red_size > 16 {
+					return OffscreenFormat::Rgba32Float;
+				}
+				return OffscreenFormat::Rgba16Float;
+			}
+			let alpha_size = self.gl.get_framebuffer_attachment_parameter_i32(glow::FRAMEBUFFER, attachment, glow::FRAMEBUFFER_ATTACHMENT_ALPHA_SIZE);
+			if alpha_size > 0 {
+				OffscreenFormat::Rgba8
+			}
+			else {
+				OffscreenFormat::Rgb8
+			}
+		}
+	}
+
+	//==============================================================================
+	// 그릴 영역 아래를 떠 올 칸 준비. (지금 프레임버퍼와 같은 형식, 화면과 같은 크기. 형식마다 하나, 크기가 바뀌면 다시 만든다)
+	//==============================================================================
+	fn ensure_backdrop_target(&mut self, framebuffer: Option<GlFramebuffer>) -> Result<OffscreenTarget, String> {
+		let offscreen_format = match self.framebuffer_format_table.get(&framebuffer) {
+			Some(offscreen_format) => {
+				*offscreen_format
+			}
+			None => {
+				let offscreen_format = self.read_framebuffer_format(framebuffer);
+				self.framebuffer_format_table.insert(framebuffer, offscreen_format);
+				offscreen_format
+			}
+		};
+		let viewport_width = self.applied_viewport_width;
+		let viewport_height = self.applied_viewport_height;
+		if let Some(backdrop_target) = self.backdrop_target_table.get(&offscreen_format).copied() {
+			if backdrop_target.width == viewport_width && backdrop_target.height == viewport_height {
+				return Ok(backdrop_target);
+			}
+			self.destroy_offscreen_target(backdrop_target);
+		}
+		let backdrop_target = self.create_offscreen_target(framebuffer, offscreen_format, viewport_width, viewport_height)?;
+		self.backdrop_target_table.insert(offscreen_format, backdrop_target);
+		Ok(backdrop_target)
+	}
+
+	//==============================================================================
+	// 바꿔 끼운 셰이더로 먼저 그려 둘 덧그림 칸 준비. (화면과 같은 크기, 크기가 바뀌면 다시 만든다)
+	// - 실수 색을 그릴 수 있으면 RGBA16F 로 만든다. (데스크탑 GL 3.3 은 늘, 웹은 EXT_color_buffer_float 가 있을 때)
+	//   RGBA8 이면 옮길 때 프리멀티플라이드를 되돌리며 알파가 작은 가장자리의 색이 8 비트로 뭉개져,
+	//   color-dodge, color-burn, hue 처럼 나눗셈이 든 섞기가 바꿔 끼우지 않은 그리기와 15 단계까지 달라졌다. (원본 시험, RGBA16F 는 거의 2 단계 안)
+	//==============================================================================
+	fn ensure_layer_target(&mut self, framebuffer: Option<GlFramebuffer>) -> Result<OffscreenTarget, String> {
+		let viewport_width = self.applied_viewport_width;
+		let viewport_height = self.applied_viewport_height;
+		if let Some(layer_target) = self.layer_target {
+			if layer_target.width == viewport_width && layer_target.height == viewport_height {
+				return Ok(layer_target);
+			}
+			self.destroy_offscreen_target(layer_target);
+			self.layer_target = None;
+		}
+		#[cfg(not(target_arch = "wasm32"))]
+		let offscreen_format = OffscreenFormat::Rgba16Float;
+		#[cfg(target_arch = "wasm32")]
+		let offscreen_format = if self.gl.supported_extensions().contains("EXT_color_buffer_float") {
+			OffscreenFormat::Rgba16Float
+		}
+		else {
+			OffscreenFormat::Rgba8
+		};
+		let layer_target = self.create_offscreen_target(framebuffer, offscreen_format, viewport_width, viewport_height)?;
+		self.layer_target = Some(layer_target);
+		Ok(layer_target)
+	}
+
+	//==============================================================================
+	// 오프스크린 칸 만들기. (색 텍스처 하나를 붙인 프레임버퍼, 거르기 NEAREST. 만든 뒤 framebuffer 를 다시 바인드한다)
+	//==============================================================================
+	fn create_offscreen_target(&self, framebuffer: Option<GlFramebuffer>, offscreen_format: OffscreenFormat, width: i32, height: i32) -> Result<OffscreenTarget, String> {
+		let (internal_format, pixel_format, pixel_type) = offscreen_format.get_texture_format();
+		unsafe {
+			let texture = self.gl.create_texture()?;
+			self.bind_main_texture(texture);
+			self.gl.tex_image_2d(glow::TEXTURE_2D, 0, internal_format as i32, width, height, 0, pixel_format, pixel_type, glow::PixelUnpackData::Slice(None));
+			self.gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
+			self.gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
+			self.gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
+			self.gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
+			let target_framebuffer = self.gl.create_framebuffer()?;
+			self.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(target_framebuffer));
+			self.gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(texture), 0);
+			self.gl.bind_framebuffer(glow::FRAMEBUFFER, framebuffer);
+			Ok(OffscreenTarget {
+				texture,
+				framebuffer: target_framebuffer,
+				width,
+				height,
+			})
+		}
+	}
+
+	//==============================================================================
+	// 오프스크린 칸 지우기. (지운 텍스처를 바인드했다고 기억하면 잊는다. 데스크탑은 지운 이름을 다시 쓰므로 기억이 남으면 새 텍스처를 바인드하지 않게 된다)
+	//==============================================================================
+	fn destroy_offscreen_target(&self, offscreen_target: OffscreenTarget) {
+		if self.bound_texture.get() == Some(offscreen_target.texture) {
+			self.bound_texture.set(None);
+		}
+		if self.bound_backdrop_texture.get() == Some(offscreen_target.texture) {
+			self.bound_backdrop_texture.set(None);
+		}
+		unsafe {
+			self.gl.delete_framebuffer(offscreen_target.framebuffer);
+			self.gl.delete_texture(offscreen_target.texture);
+		}
+	}
+
+	//==============================================================================
+	// 섞기 셰이더 프로그램 준비. (기본 버텍스 셰이더, 어트리뷰트 위치를 기본 프로그램과 같게 고정해 기본 버텍스 어레이를 같이 쓴다)
+	//==============================================================================
+	fn ensure_blend_shader_program(&mut self) -> Result<(), String> {
+		if self.blend_shader_program.is_some() {
+			return Ok(());
+		}
+		let mut attribute_location_list: Vec<(&str, u32)> = Vec::new();
+		for attribute_name in ["vertexPosition", "vertexTextureCoordinate"] {
+			if let Some(attribute_location) = self.shader_program.get_attribute_location(&self.gl, attribute_name) {
+				attribute_location_list.push((attribute_name, attribute_location));
+			}
+		}
+		let blend_shader_program = ShaderProgram::create_with_attribute_locations(&self.gl, VERTEXSHADER_SOURCE, BLEND_FRAGMENTSHADER_SOURCE, &attribute_location_list)?;
+		self.use_shader_program(&blend_shader_program);
+		self.apply_blend_texture_units(&blend_shader_program);
+		self.blend_shader_program = Some(blend_shader_program);
+		Ok(())
+	}
+
+	//==============================================================================
+	// 파티클 섞기 셰이더 프로그램 준비. (파티클 버텍스 셰이더, 어트리뷰트 위치를 파티클 프로그램과 같게 고정해 파티클 버텍스 어레이를 같이 쓴다)
+	//==============================================================================
+	fn ensure_particle_blend_shader_program(&mut self) -> Result<(), String> {
+		if self.particle_blend_shader_program.is_some() {
+			return Ok(());
+		}
+		let particle_shader_program = match &self.particle_shader_program {
+			Some(particle_shader_program) => {
+				particle_shader_program
+			}
+			None => {
+				return Err(String::from("파티클 프로그램이 없습니다"));
+			}
+		};
+		let mut attribute_location_list: Vec<(&str, u32)> = Vec::new();
+		for attribute_name in ["vertexPosition", "vertexTextureCoordinate", "vertexColor"] {
+			if let Some(attribute_location) = particle_shader_program.get_attribute_location(&self.gl, attribute_name) {
+				attribute_location_list.push((attribute_name, attribute_location));
+			}
+		}
+		let particle_blend_shader_program = ShaderProgram::create_with_attribute_locations(&self.gl, PARTICLE_VERTEXSHADER_SOURCE, PARTICLE_BLEND_FRAGMENTSHADER_SOURCE, &attribute_location_list)?;
+		self.use_shader_program(&particle_blend_shader_program);
+		self.apply_blend_texture_units(&particle_blend_shader_program);
+		self.particle_blend_shader_program = Some(particle_blend_shader_program);
+		Ok(())
+	}
+
+	//==============================================================================
+	// 사용 중인 섞기 셰이더 프로그램에 텍스처 유닛(그릴 그림 0 번, 떠 온 아래 1 번)과 밉맵 단계 보정 걸기.
+	//==============================================================================
+	fn apply_blend_texture_units(&self, shader_program: &ShaderProgram) {
+		let main_texture_location = shader_program.get_uniform_location(&self.gl, "mainTexture");
+		let backdrop_texture_location = shader_program.get_uniform_location(&self.gl, "backdropTexture");
+		unsafe {
+			self.gl.uniform_1_i32(main_texture_location.as_ref(), 0);
+			self.gl.uniform_1_i32(backdrop_texture_location.as_ref(), 1);
+		}
+		self.apply_image_mipmap_bias(shader_program);
 	}
 
 	//==============================================================================
@@ -1297,6 +2049,7 @@ impl Graphic {
 			self.gl.uniform_matrix_3_f32_slice(projection_matrix_location.as_ref(), false, &self.projection_matrix_array);
 		}
 		self.bind_main_texture(texture);
+		self.apply_color_mask();
 		unsafe {
 			self.gl.draw_arrays(glow::TRIANGLES, 0, vertex_count as i32);
 
@@ -1515,7 +2268,22 @@ impl Graphic {
 			return;
 		}
 		let vertex_count = vertex_count.min(PARTICLE_VERTEX_CAPACITY).min(self.particle_vertex_data.len() / PARTICLE_FLOATS_PER_VERTEX);
-		let particle_shader_program = match &self.particle_shader_program {
+
+		// 셰이더 섞기 모드는 섞기 프로그램으로 그린다.
+		let is_shader_blend_draw = self.shader_blend_mode_index > 0;
+		if is_shader_blend_draw {
+			if let Err(error) = self.ensure_particle_blend_shader_program() {
+				eprintln!("Graphic: particle blend shader program failed: {}", error);
+				return;
+			}
+		}
+		let selected_shader_program = if is_shader_blend_draw {
+			&self.particle_blend_shader_program
+		}
+		else {
+			&self.particle_shader_program
+		};
+		let particle_shader_program = match selected_shader_program {
 			Some(particle_shader_program) => {
 				particle_shader_program
 			}
@@ -1528,6 +2296,7 @@ impl Graphic {
 		let projection_matrix_location = particle_shader_program.get_uniform_location(&self.gl, "projectionMatrix");
 		let model_matrix_location = particle_shader_program.get_uniform_location(&self.gl, "modelMatrix");
 		let global_alpha_location = particle_shader_program.get_uniform_location(&self.gl, "globalAlpha");
+		let blend_mode_index_location = particle_shader_program.get_uniform_location(&self.gl, "blendModeIndex");
 		let vertex_bytes = float_slice_to_bytes(&self.particle_vertex_data[..vertex_count * PARTICLE_FLOATS_PER_VERTEX]);
 		unsafe {
 			self.gl.bind_vertex_array(self.particle_vertex_array);
@@ -1536,17 +2305,102 @@ impl Graphic {
 			self.gl.uniform_matrix_3_f32_slice(projection_matrix_location.as_ref(), false, &self.projection_matrix_array);
 			self.gl.uniform_matrix_3_f32_slice(model_matrix_location.as_ref(), false, &self.model_matrix_array);
 			self.gl.uniform_1_f32(global_alpha_location.as_ref(), self.global_alpha);
+			if is_shader_blend_draw {
+				self.gl.uniform_1_i32(blend_mode_index_location.as_ref(), self.shader_blend_mode_index);
+			}
 		}
-		self.bind_main_texture(texture);
-		unsafe {
-			self.gl.draw_arrays(glow::TRIANGLES, 0, vertex_count as i32);
+		if is_shader_blend_draw {
+			self.draw_colored_quad_groups(vertex_count, texture);
+		}
+		else {
+			self.bind_main_texture(texture);
+			self.apply_color_mask();
+			unsafe {
+				self.gl.draw_arrays(glow::TRIANGLES, 0, vertex_count as i32);
+			}
+			self.draw_call_count += 1;
+			self.draw_vertex_count += vertex_count as u32;
+		}
 
-			// 기본 버텍스 어레이로 복귀. (프로그램은 다음에 낱장으로 그릴 때 건다)
+		// 기본 버텍스 어레이로 복귀. (프로그램은 다음에 낱장으로 그릴 때 건다)
+		unsafe {
 			self.gl.bind_vertex_array(Some(self.vertex_array));
 			self.gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vertex_buffer));
 		}
+	}
+
+	//==============================================================================
+	// 올려 둔 파티클 쿼드를 셰이더 섞기로 그리기. (draw_colored_quads 가 섞기 프로그램을 쓰게 한 뒤 부른다, 원본 drawColoredQuadGroups)
+	// - Canvas2D 처럼 쿼드마다 앞 쿼드가 그린 위에 섞이도록, 서로 겹치지 않는 쿼드를 앞에서부터 모아 그 영역을 한 번 떠 와 함께 그린다.
+	//   모은 쿼드와 겹치는 쿼드가 나오거나 SHADER_BLEND_PARTICLE_GROUP_CAPACITY 개가 차면 거기서 끊는다. (모두 겹치면 쿼드 하나에 복사 한 번, 드로우 콜 한 번)
+	//==============================================================================
+	fn draw_colored_quad_groups(&mut self, vertex_count: usize, texture: GlTexture) {
+		let framebuffer = read_framebuffer_binding(&self.gl);
+		let quad_float_count = 6 * PARTICLE_FLOATS_PER_VERTEX;
+		let quad_count = vertex_count / 6;
+		let mut group_rect_list = std::mem::take(&mut self.particle_group_rect_list);
+		group_rect_list.clear();
+		let mut group_rect: Option<BackdropRect> = None;
+		let mut group_start_quad_index = 0;
+		for quad_index in 0..quad_count {
+			let quad_values = &self.particle_vertex_data[quad_index * quad_float_count..(quad_index + 1) * quad_float_count];
+			let quad_rect = match measure_backdrop_rect(quad_values, PARTICLE_FLOATS_PER_VERTEX, self.transform_matrix, self.applied_viewport_width, self.applied_viewport_height) {
+				Some(quad_rect) => {
+					quad_rect
+				}
+				None => {
+					continue;
+				}
+			};
+			let is_overlapped = group_rect_list.len() >= SHADER_BLEND_PARTICLE_GROUP_CAPACITY || group_rect_list.iter().any(|rect| rect.is_overlapping(&quad_rect));
+			if is_overlapped {
+				self.draw_colored_quad_group(framebuffer, group_rect, group_start_quad_index, quad_index, texture);
+				group_start_quad_index = quad_index;
+				group_rect_list.clear();
+				group_rect = None;
+			}
+
+			// 영역을 모은다. (모은 영역 전체의 경계 상자를 떠 온다)
+			group_rect_list.push(quad_rect);
+			group_rect = match group_rect {
+				Some(group_rect) => {
+					Some(group_rect.union(&quad_rect))
+				}
+				None => {
+					Some(quad_rect)
+				}
+			};
+		}
+		self.draw_colored_quad_group(framebuffer, group_rect, group_start_quad_index, quad_count, texture);
+		self.particle_group_rect_list = group_rect_list;
+	}
+
+	//==============================================================================
+	// 모은 파티클 쿼드 한 묶음 그리기. (모은 영역이 없으면 그리지 않는다)
+	//==============================================================================
+	fn draw_colored_quad_group(&mut self, framebuffer: Option<GlFramebuffer>, group_rect: Option<BackdropRect>, start_quad_index: usize, end_quad_index: usize, texture: GlTexture) {
+		let group_rect = match group_rect {
+			Some(group_rect) => {
+				group_rect
+			}
+			None => {
+				return;
+			}
+		};
+		if let Err(error) = self.copy_backdrop(framebuffer, group_rect) {
+			eprintln!("Graphic: backdrop copy failed: {}", error);
+			return;
+		}
+
+		// 떠 올 칸을 처음 만들 때 유닛 0 을 쓰므로 그림은 떠 온 뒤에 바인드한다.
+		self.bind_main_texture(texture);
+		let group_vertex_count = (end_quad_index - start_quad_index) * 6;
+		self.apply_color_mask();
+		unsafe {
+			self.gl.draw_arrays(glow::TRIANGLES, (start_quad_index * 6) as i32, group_vertex_count as i32);
+		}
 		self.draw_call_count += 1;
-		self.draw_vertex_count += vertex_count as u32;
+		self.draw_vertex_count += group_vertex_count as u32;
 	}
 
 	//==============================================================================
@@ -2516,6 +3370,7 @@ impl Graphic {
 			self.draw_rect(rect);
 		}
 		self.batch_suspend_depth -= 1;
+		self.is_color_mask_known.set(false);
 		unsafe {
 			self.gl.color_mask(true, true, true, true);
 			self.gl.stencil_op(glow::KEEP, glow::KEEP, glow::KEEP);
@@ -2555,6 +3410,7 @@ impl Graphic {
 			self.draw_rect(clip_entry.rect);
 		}
 		self.batch_suspend_depth -= 1;
+		self.is_color_mask_known.set(false);
 		unsafe {
 			self.gl.color_mask(true, true, true, true);
 			self.gl.stencil_op(glow::KEEP, glow::KEEP, glow::KEEP);
@@ -2808,10 +3664,329 @@ pub(crate) fn read_vertex_array_binding(gl: &glow::Context) -> Option<GlVertexAr
 }
 
 //==============================================================================
+// 정점들이 덮는 영역을 떠 올 영역으로. (원본 measureBackdropRect)
+// - 변환으로 옮긴 경계 상자를 픽셀 경계로 넓히고 화면으로 자른 GL 픽셀(왼쪽 아래 원점) 영역이다. 화면에 걸치지 않으면 None.
+//==============================================================================
+fn measure_backdrop_rect(vertex_values: &[f32], floats_per_vertex: usize, matrix: TransformMatrix, viewport_width: i32, viewport_height: i32) -> Option<BackdropRect> {
+	let mut minimum_x = f32::INFINITY;
+	let mut minimum_y = f32::INFINITY;
+	let mut maximum_x = f32::NEG_INFINITY;
+	let mut maximum_y = f32::NEG_INFINITY;
+	for vertex_values in vertex_values.chunks_exact(floats_per_vertex) {
+		let position_x = vertex_values[0];
+		let position_y = vertex_values[1];
+		let device_x = matrix.a * position_x + matrix.c * position_y + matrix.e;
+		let device_y = matrix.b * position_x + matrix.d * position_y + matrix.f;
+		minimum_x = minimum_x.min(device_x);
+		minimum_y = minimum_y.min(device_y);
+		maximum_x = maximum_x.max(device_x);
+		maximum_y = maximum_y.max(device_y);
+	}
+	let left_x = minimum_x.floor().max(0.0);
+	let top_y = minimum_y.floor().max(0.0);
+	let right_x = maximum_x.ceil().min(viewport_width as f32);
+	let bottom_y = maximum_y.ceil().min(viewport_height as f32);
+	let is_visible = right_x > left_x && bottom_y > top_y;
+	if !is_visible {
+		return None;
+	}
+	Some(BackdropRect {
+		x: left_x as i32,
+		y: viewport_height - bottom_y as i32,
+		width: (right_x - left_x) as i32,
+		height: (bottom_y - top_y) as i32,
+	})
+}
+
+//==============================================================================
 // f32 배열을 바이트 배열로 본다. (GL 버퍼 업로드용)
 //==============================================================================
 fn float_slice_to_bytes(values: &[f32]) -> &[u8] {
 	unsafe {
 		std::slice::from_raw_parts(values.as_ptr() as *const u8, std::mem::size_of_val(values))
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	// 시험에 쓰는 프리멀티플라이드 색. (r, g, b, a, 알파를 곱한 값)
+	const SAMPLE_COLOR_LIST: [[f32; 4]; 6] = [[0.0, 0.0, 0.0, 0.0], [0.2, 0.1, 0.05, 0.35], [0.5, 0.25, 0.0, 0.5], [0.9, 0.4, 0.1, 1.0], [0.0, 0.6, 0.3, 0.75], [1.0, 1.0, 1.0, 1.0]];
+
+	//==============================================================================
+	// GL 블렌드 계수 값. (채널마다, 알파 채널은 색 계수도 알파 성분을 쓴다)
+	//==============================================================================
+	fn read_factor_value(factor: u32, source: [f32; 4], destination: [f32; 4], channel: usize) -> f32 {
+		match factor {
+			glow::ZERO => {
+				0.0
+			}
+			glow::ONE => {
+				1.0
+			}
+			glow::SRC_ALPHA => {
+				source[3]
+			}
+			glow::ONE_MINUS_SRC_ALPHA => {
+				1.0 - source[3]
+			}
+			glow::DST_ALPHA => {
+				destination[3]
+			}
+			glow::ONE_MINUS_DST_ALPHA => {
+				1.0 - destination[3]
+			}
+			glow::DST_COLOR => {
+				destination[channel]
+			}
+			glow::ONE_MINUS_SRC_COLOR => {
+				1.0 - source[channel]
+			}
+			_ => {
+				panic!("시험이 모르는 계수 {}", factor);
+			}
+		}
+	}
+
+	//==============================================================================
+	// 고정 블렌딩 한 번. (GL 의 FUNC_ADD, 결과는 0 ~ 1 로 자른다)
+	//==============================================================================
+	fn blend_with_function(blend_mode: BlendMode, source: [f32; 4], destination: [f32; 4]) -> [f32; 4] {
+		let (source_factor, destination_factor) = blend_mode.get_blend_function().expect("고정 블렌딩 모드");
+		let mut result = [0.0; 4];
+		for channel in 0..4 {
+			let value = source[channel] * read_factor_value(source_factor, source, destination, channel) + destination[channel] * read_factor_value(destination_factor, source, destination, channel);
+			result[channel] = value.clamp(0.0, 1.0);
+		}
+		result
+	}
+
+	//==============================================================================
+	// W3C 9.1 장의 Fa, Fb. (포터 더프 연산자)
+	//==============================================================================
+	fn read_porter_duff_fractions(blend_mode: BlendMode, source_alpha: f32, backdrop_alpha: f32) -> (f32, f32) {
+		match blend_mode {
+			BlendMode::Copy => {
+				(1.0, 0.0)
+			}
+			BlendMode::Normal => {
+				(1.0, 1.0 - source_alpha)
+			}
+			BlendMode::DestinationOver => {
+				(1.0 - backdrop_alpha, 1.0)
+			}
+			BlendMode::SourceIn => {
+				(backdrop_alpha, 0.0)
+			}
+			BlendMode::DestinationIn => {
+				(0.0, source_alpha)
+			}
+			BlendMode::SourceOut => {
+				(1.0 - backdrop_alpha, 0.0)
+			}
+			BlendMode::DestinationOut => {
+				(0.0, 1.0 - source_alpha)
+			}
+			BlendMode::SourceAtop => {
+				(backdrop_alpha, 1.0 - source_alpha)
+			}
+			BlendMode::DestinationAtop => {
+				(1.0 - backdrop_alpha, source_alpha)
+			}
+			BlendMode::Xor => {
+				(1.0 - backdrop_alpha, 1.0 - source_alpha)
+			}
+			BlendMode::Lighter => {
+				(1.0, 1.0)
+			}
+			_ => {
+				panic!("포터 더프 연산자가 아님 {:?}", blend_mode);
+			}
+		}
+	}
+
+	//==============================================================================
+	// W3C 6 장 일반식의 source-over 섞기. (co = cs x (1 - αb) + cb x (1 - αs) + αs x αb x B(Cb, Cs), 알파는 source-over)
+	//==============================================================================
+	fn blend_with_general_formula(source: [f32; 4], backdrop: [f32; 4], blend: impl Fn(f32, f32) -> f32) -> [f32; 4] {
+		let source_alpha = source[3];
+		let backdrop_alpha = backdrop[3];
+		let mut result = [0.0; 4];
+		for channel in 0..3 {
+			let straight_source = if source_alpha > 0.0 {
+				source[channel] / source_alpha
+			}
+			else {
+				0.0
+			};
+			let straight_backdrop = if backdrop_alpha > 0.0 {
+				backdrop[channel] / backdrop_alpha
+			}
+			else {
+				0.0
+			};
+			result[channel] = source[channel] * (1.0 - backdrop_alpha) + backdrop[channel] * (1.0 - source_alpha) + source_alpha * backdrop_alpha * blend(straight_backdrop, straight_source).clamp(0.0, 1.0);
+		}
+		result[3] = source_alpha + backdrop_alpha * (1.0 - source_alpha);
+		result
+	}
+
+	//==============================================================================
+	// 두 색이 거의 같은지.
+	//==============================================================================
+	fn assert_color_near(actual: [f32; 4], expected: [f32; 4], description: &str) {
+		for channel in 0..4 {
+			assert!((actual[channel] - expected[channel]).abs() < 1e-5, "{} 채널 {}: {} 이어야 하는데 {}", description, channel, expected[channel], actual[channel]);
+		}
+	}
+
+	//==============================================================================
+	// 26 가지가 고정 블렌딩 13 가지와 셰이더 섞기 13 가지로 빠짐없이 나뉘고, 셰이더 섞기 번호는 1 ~ 13 이 하나씩인지.
+	//==============================================================================
+	#[test]
+	fn blend_modes_split_into_fixed_and_shader() {
+		let mut fixed_count = 0;
+		let mut shader_index_list = Vec::new();
+		for (blend_mode, blend_mode_name) in BLEND_MODE_NAME_TABLE {
+			assert_eq!(BlendMode::from_name(blend_mode_name), Some(blend_mode));
+			let is_fixed = blend_mode.get_blend_function().is_some();
+			let shader_blend_mode_index = blend_mode.get_shader_blend_mode_index();
+			assert!(is_fixed != (shader_blend_mode_index > 0), "{} 는 고정과 셰이더 가운데 하나여야 한다", blend_mode_name);
+			if is_fixed {
+				fixed_count += 1;
+			}
+			else {
+				shader_index_list.push(shader_blend_mode_index);
+			}
+		}
+		shader_index_list.sort();
+		assert_eq!(fixed_count, 13);
+		assert_eq!(shader_index_list, (1..=13).collect::<Vec<i32>>());
+	}
+
+	//==============================================================================
+	// 포터 더프 연산자의 고정 블렌딩 계수가 W3C 9.1 장 식(co = αs x Fa x Cs + αb x Fb x Cb, αo = αs x Fa + αb x Fb)과 같은지. (바탕이 반투명, 투명이어도)
+	//==============================================================================
+	#[test]
+	fn fixed_blend_factors_match_porter_duff() {
+		let porter_duff_mode_list = [BlendMode::Copy, BlendMode::Normal, BlendMode::DestinationOver, BlendMode::SourceIn, BlendMode::DestinationIn, BlendMode::SourceOut, BlendMode::DestinationOut, BlendMode::SourceAtop, BlendMode::DestinationAtop, BlendMode::Xor, BlendMode::Lighter];
+		for blend_mode in porter_duff_mode_list {
+			for source in SAMPLE_COLOR_LIST {
+				for backdrop in SAMPLE_COLOR_LIST {
+					let (source_fraction, backdrop_fraction) = read_porter_duff_fractions(blend_mode, source[3], backdrop[3]);
+					let mut expected = [0.0; 4];
+					for channel in 0..4 {
+						expected[channel] = (source[channel] * source_fraction + backdrop[channel] * backdrop_fraction).clamp(0.0, 1.0);
+					}
+					let actual = blend_with_function(blend_mode, source, backdrop);
+					assert_color_near(actual, expected, blend_mode.get_name());
+				}
+			}
+		}
+	}
+
+	//==============================================================================
+	// Screen 은 어느 바탕에서나, Multiply 는 불투명한 바탕에서 고정 블렌딩이 W3C 일반식과 같은지.
+	// - Multiply 고정 블렌딩(DST_COLOR, ONE_MINUS_SRC_ALPHA)은 바탕이 반투명하면 cs x (1 - αb) 항이 빠지고 알파가 바탕 알파로 남는다. (기본 화면은 불투명이다)
+	//==============================================================================
+	#[test]
+	fn multiply_and_screen_factors_match_general_formula() {
+		for source in SAMPLE_COLOR_LIST {
+			for backdrop in SAMPLE_COLOR_LIST {
+				let screen_expected = blend_with_general_formula(source, backdrop, |backdrop_value, source_value| backdrop_value + source_value - backdrop_value * source_value);
+				assert_color_near(blend_with_function(BlendMode::Screen, source, backdrop), screen_expected, "screen");
+				if backdrop[3] == 1.0 {
+					let multiply_expected = blend_with_general_formula(source, backdrop, |backdrop_value, source_value| backdrop_value * source_value);
+					assert_color_near(blend_with_function(BlendMode::Multiply, source, backdrop), multiply_expected, "multiply");
+				}
+			}
+		}
+	}
+
+	//==============================================================================
+	// blend_equation MIN / MAX 가 반투명 소스에서 W3C darken, lighten 과 다른지. (Darken, Lighten 을 셰이더로 섞는 까닭)
+	//==============================================================================
+	#[test]
+	fn minimum_maximum_equations_differ_from_darken_lighten() {
+		let backdrop = [0.2, 0.2, 0.2, 1.0];
+		let half_black = [0.0, 0.0, 0.0, 0.5];
+		let half_white = [0.5, 0.5, 0.5, 0.5];
+		let darken = blend_with_general_formula(half_black, backdrop, |backdrop_value: f32, source_value: f32| backdrop_value.min(source_value));
+		let lighten = blend_with_general_formula(half_white, backdrop, |backdrop_value: f32, source_value: f32| backdrop_value.max(source_value));
+		assert!((darken[0] - 0.1).abs() < 1e-6);
+		assert!((lighten[0] - 0.6).abs() < 1e-6);
+		assert!((half_black[0].min(backdrop[0]) - darken[0]).abs() > 0.05);
+		assert!((half_white[0].max(backdrop[0]) - lighten[0]).abs() > 0.05);
+	}
+
+	//==============================================================================
+	// 셰이더가 내보내는 (Cs' x αs, αs) 를 고정 블렌딩 source-over 로 합성하면 W3C 6 장 일반식과 같은지. (blendWithBackdrop 뒤의 셈)
+	//==============================================================================
+	#[test]
+	fn shader_output_with_source_over_matches_general_formula() {
+		let blend_list: [fn(f32, f32) -> f32; 3] = [
+			|backdrop_value, source_value| (backdrop_value - source_value).abs(),
+			|backdrop_value, source_value| backdrop_value + source_value - 2.0 * backdrop_value * source_value,
+			|backdrop_value, source_value| {
+				if source_value <= 0.5 {
+					backdrop_value * 2.0 * source_value
+				}
+				else {
+					let screen_value = 2.0 * source_value - 1.0;
+					backdrop_value + screen_value - backdrop_value * screen_value
+				}
+			},
+		];
+		for blend in blend_list {
+			for source in SAMPLE_COLOR_LIST {
+				for backdrop in SAMPLE_COLOR_LIST {
+					let source_alpha = source[3];
+					let backdrop_alpha = backdrop[3];
+					let mut shader_output = [0.0, 0.0, 0.0, source_alpha];
+					for channel in 0..3 {
+						let straight_source = if source_alpha > 0.0 {
+							source[channel] / source_alpha
+						}
+						else {
+							0.0
+						};
+						let straight_backdrop = if backdrop_alpha > 0.0 {
+							backdrop[channel] / backdrop_alpha
+						}
+						else {
+							0.0
+						};
+						let blended_value = (1.0 - backdrop_alpha) * straight_source + backdrop_alpha * blend(straight_backdrop, straight_source).clamp(0.0, 1.0);
+						shader_output[channel] = blended_value * source_alpha;
+					}
+					let actual = blend_with_function(BlendMode::Normal, shader_output, backdrop);
+					let expected = blend_with_general_formula(source, backdrop, blend);
+					assert_color_near(actual, expected, "shader output");
+				}
+			}
+		}
+	}
+
+	//==============================================================================
+	// 떠 올 영역이 변환을 받은 경계 상자를 픽셀로 넓히고 화면으로 자른 GL 픽셀 영역인지. (위아래가 뒤집힌다, 화면 밖은 None)
+	//==============================================================================
+	#[test]
+	fn backdrop_rect_covers_transformed_bounds() {
+		let quad_values = [10.2, 20.5, 0.0, 0.0, 40.0, 20.5, 1.0, 0.0, 10.2, 50.7, 0.0, 1.0];
+		let backdrop_rect = measure_backdrop_rect(&quad_values, FLOATS_PER_VERTEX, TransformMatrix::identity(), 100, 80);
+		assert_eq!(backdrop_rect, Some(BackdropRect { x: 10, y: 80 - 51, width: 30, height: 31 }));
+		let mut matrix = TransformMatrix::identity();
+		matrix.translate(-60.0, 0.0);
+		assert_eq!(measure_backdrop_rect(&quad_values, FLOATS_PER_VERTEX, matrix, 100, 80), None);
+		matrix.set_identity();
+		matrix.translate(80.0, 40.0);
+		assert_eq!(measure_backdrop_rect(&quad_values, FLOATS_PER_VERTEX, matrix, 100, 80), Some(BackdropRect { x: 90, y: 0, width: 10, height: 20 }));
+		let left_rect = BackdropRect { x: 0, y: 0, width: 10, height: 10 };
+		let touching_rect = BackdropRect { x: 10, y: 0, width: 10, height: 10 };
+		let overlapping_rect = BackdropRect { x: 9, y: 9, width: 4, height: 4 };
+		assert!(!left_rect.is_overlapping(&touching_rect));
+		assert!(left_rect.is_overlapping(&overlapping_rect));
+		assert_eq!(left_rect.union(&overlapping_rect), BackdropRect { x: 0, y: 0, width: 13, height: 13 });
 	}
 }
