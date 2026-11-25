@@ -705,6 +705,7 @@ impl Engine {
 // - VANILLA_CAPTURE_PATH:   저장 경로. "{frame}" 은 프레임 번호로 바뀐다. 예: shots/shot_{frame}.png
 // - VANILLA_CAPTURE_FRAMES: 저장할 프레임 번호, 쉼표로 여럿. (기본 120)
 // - VANILLA_CAPTURE_EXIT:   1 이면 마지막 저장 뒤 끝낸다.
+// - VANILLA_CAPTURE_SHOW_WINDOW: 1 이면 창을 보인다. (찍기 모드의 데스크탑 창은 기본으로 숨긴다)
 // - 웹: ?capture=120,240 (번호, 빈 값이면 120), captureName=파일 이름("{frame}" 은 번호, 기본 capture_{frame}.png), captureExit=1. 내려받기로 저장한다.
 //==============================================================================
 struct CaptureRequest {

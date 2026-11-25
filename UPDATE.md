@@ -266,6 +266,7 @@
   - EngineConfiguration.rebake_text_on_font_load (원본 rebakeTextOnFontLoad, 기본 끔): 켰을 때만 글꼴 얼굴을 올리면 그 얼굴의 글자로 구운 문자열을 버린다. (예전에는 늘 버렸다)
   - NodeTree.get_world_corners, get_world_bounds (원본 WorldNode.getWorldCorners, getWorldBounds)
   - Cooldown.r#use, FullscreenPass.r#use, ShaderProgram.r#use: 원본 이름 use 를 r# 로 그대로 쓴다. activate, use_program 은 같은 일을 하는 이름으로 남긴다.
+- 데스크탑 찍기 모드(VANILLA_CAPTURE_PATH)는 창을 숨기고 돈다. 검증 도구가 예제를 찍을 때 사용자 화면에 창이 뜨지 않는다. 숨긴 창은 다시 그리기 요청과 수직 동기가 없어 about_to_wait 에서 프레임을 바로 돌고, 최대 FPS 가 없으면 모니터 주사율(모르면 60)로 보일 때와 같은 빠르기를 맞춘다. 가려짐 알림은 받지 않는다. 맥은 독 아이콘과 포커스도 가져가지 않는다(활성화 정책 Accessory). 창을 보려면 VANILLA_CAPTURE_SHOW_WINDOW=1. (맥에서 toonshowcase, uigallery, textshaping 을 숨긴 채 찍어 확인)
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.
