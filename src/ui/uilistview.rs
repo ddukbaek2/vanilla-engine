@@ -53,6 +53,46 @@ pub type UIListViewReachEndEvent = Box<dyn FnMut(&mut UIListView, &mut Component
 
 //==============================================================================
 /// 재활용 리스트 뷰.
+/// - 같은 노드의 스크롤 뷰(없으면 붙을 때 UIScrollView 를 함께 붙인다) 오프셋으로 보이는 항목만 content 노드 아래에 노드로 둔다.
+/// - 항목 노드를 만드는 함수(set_create_item_event 나 set_template_node)가 없으면 tick 에서 아무것도 하지 않는다.
+///
+/// # 예제
+/// 항목 500 개 가운데 보이는 다섯 개만 노드로 만들기
+/// ```rust
+/// use std::cell::RefCell;
+/// use std::rc::Rc;
+/// use vanilla::{Engine, EngineConfiguration, NodeId, NodeTree, Pivot, UIListView, Vector2};
+///
+/// let engine = Engine::new(EngineConfiguration::new());
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.get_root_id();
+/// let list_id = node_tree.create_child(root_id, "list");
+/// node_tree[list_id].set_pivot(Pivot::TOP_LEFT);
+/// node_tree[list_id].set_content_size(Vector2::create(200.0, 100.0));
+/// let bound_index_list = Rc::new(RefCell::new(Vec::new()));
+/// let bound_index_recorder = bound_index_list.clone();
+///
+/// let list_view = node_tree.add_component(list_id, UIListView::new()).expect("list view");
+/// list_view.set_create_item_event(Box::new(|tree: &mut NodeTree| {
+/// 	let item_id = tree.create_node("item");
+/// 	tree[item_id].set_pivot(Pivot::TOP_LEFT);
+/// 	tree[item_id].set_content_size(Vector2::create(200.0, 30.0));
+/// 	item_id
+/// }));
+/// list_view.set_bind_item_event(Box::new(move |_tree: &mut NodeTree, _item_id: NodeId, item_index: usize| {
+/// 	bound_index_recorder.borrow_mut().push(item_index);
+/// }));
+/// list_view.set_item_count(500);
+/// node_tree.tick(&engine, 0.016);
+///
+/// let list_view = node_tree[list_id].get_component::<UIListView>().expect("list view");
+/// assert_eq!(list_view.get_item_size(), 30.0);
+/// assert_eq!(list_view.get_active_item_count(), 5);
+/// assert_eq!(*bound_index_list.borrow(), vec![0, 1, 2, 3, 4]);
+/// let fourth_id = list_view.get_item_node(4).expect("item 4");
+/// assert_eq!(node_tree[fourth_id].get_local_position(), Vector2::create(0.0, 120.0));
+/// assert!(list_view.get_item_node(100).is_none());
+/// ```
 //==============================================================================
 pub struct UIListView {
 	component_base: ComponentBase,
@@ -76,6 +116,10 @@ pub struct UIListView {
 impl UIListView {
 	//==============================================================================
 	/// 생성. (세로, 여유 1 칸, 끝 알림 거리 120 픽셀)
+	/// - 노드에 붙일 때는 node_tree.add_component 를 쓴다. (노드에 스크롤 뷰가 없으면 UIScrollView 를 함께 붙인다)
+	///
+	/// # 돌려줌
+	/// 항목 0 개, 항목 크기 0(처음 만든 항목에서 읽음), 간격 0 의 새 리스트 뷰.
 	//==============================================================================
 	pub fn new() -> UIListView {
 		UIListView {
@@ -99,6 +143,8 @@ impl UIListView {
 
 	//==============================================================================
 	/// 항목 노드 만들기 함수 설정. (원본 setTemplateNode 자리)
+	/// # 인자
+	/// - `create_item_event`: 트리에 새 항목 노드를 지어 돌려주는 함수. 돌려준 노드는 content 노드의 자식으로 옮겨 붙인다. 트리에 없는 노드를 돌려주면 그 tick 의 항목 만들기를 멈춘다.
 	//==============================================================================
 	pub fn set_create_item_event(&mut self, create_item_event: UIListViewCreateItemEvent) {
 		self.create_item_event = Some(create_item_event);
@@ -106,6 +152,43 @@ impl UIListView {
 
 	//==============================================================================
 	/// 템플릿 노드 설정. (UIDocument 로 직렬화해 두고 항목마다 복제한다, 템플릿은 끈다. 항목 크기가 0 이면 템플릿 크기로, 원본 setTemplateNode)
+	/// - UIDocument 에 등록한 엔진 종류만 복제한다. 게임 컴포넌트가 든 템플릿은 set_template_node_with_document 를 쓴다.
+	/// - 이 위젯을 트리에서 꺼내 불러야 해서 씬 코드에서는 node_tree.with_component_mut 안에서 부른다.
+	///
+	/// # 인자
+	/// - `node_tree`: 템플릿 노드가 든 트리.
+	/// - `template_node_id`: 복제할 템플릿 노드. 없는 노드면 아무것도 하지 않는다.
+	///
+	/// # 예제
+	/// 템플릿 노드를 항목마다 복제하기
+	/// ```rust
+	/// use vanilla::{Engine, EngineConfiguration, NodeTree, Pivot, UIListView, Vector2};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let list_id = node_tree.create_child(root_id, "list");
+	/// node_tree[list_id].set_pivot(Pivot::TOP_LEFT);
+	/// node_tree[list_id].set_content_size(Vector2::create(200.0, 100.0));
+	/// node_tree.add_component(list_id, UIListView::new());
+	/// let template_id = node_tree.create_child(root_id, "template");
+	/// node_tree[template_id].set_pivot(Pivot::TOP_LEFT);
+	/// node_tree[template_id].set_content_size(Vector2::create(200.0, 40.0));
+	///
+	/// node_tree.with_component_mut::<UIListView, _>(list_id, |list_view, tree| {
+	/// 	list_view.set_template_node(tree, template_id);
+	/// 	list_view.set_item_count(20);
+	/// });
+	/// assert!(!node_tree[template_id].is_active());
+	/// node_tree.tick(&engine, 0.016);
+	///
+	/// let list_view = node_tree[list_id].get_component::<UIListView>().expect("list view");
+	/// assert_eq!(list_view.get_item_size(), 40.0);
+	/// assert_eq!(list_view.get_active_item_count(), 4);
+	/// let item_id = list_view.get_item_node(1).expect("item 1");
+	/// assert_eq!(node_tree[item_id].get_content_size(), Vector2::create(200.0, 40.0));
+	/// assert!(node_tree[item_id].is_active());
+	/// ```
 	//==============================================================================
 	pub fn set_template_node(&mut self, node_tree: &mut NodeTree, template_node_id: NodeId) {
 		self.set_template_node_with_document(node_tree, template_node_id, UIDocument::new());
@@ -113,6 +196,10 @@ impl UIListView {
 
 	//==============================================================================
 	/// 템플릿 노드 설정. (게임 컴포넌트를 등록한 UIDocument 로 직렬화하고 복제한다)
+	/// # 인자
+	/// - `node_tree`: 템플릿 노드가 든 트리.
+	/// - `template_node_id`: 복제할 템플릿 노드. 없는 노드면 아무것도 하지 않는다.
+	/// - `ui_document`: 템플릿을 쓰고 읽을 문서. (템플릿의 컴포넌트 종류를 등록해 둔 것, 항목을 만들 때마다 이 문서로 읽는다)
 	//==============================================================================
 	pub fn set_template_node_with_document(&mut self, node_tree: &mut NodeTree, template_node_id: NodeId, ui_document: UIDocument) {
 		let mut template_data = ui_document.serialize_node(node_tree, template_node_id);
@@ -138,6 +225,8 @@ impl UIListView {
 
 	//==============================================================================
 	/// 항목 수 설정. (늘면 끝 알림을 다시 무장한다. 스크롤 영역 갱신과 다시 바인딩은 다음 tick)
+	/// # 인자
+	/// - `item_count`: 전체 항목 수. (줄면 넘친 항목 노드는 다음 tick 에 회수한다)
 	//==============================================================================
 	pub fn set_item_count(&mut self, item_count: usize) {
 		let previous_item_count = self.item_count;
@@ -158,6 +247,10 @@ impl UIListView {
 
 	//==============================================================================
 	/// 보이는 항목 모두 지금 다시 바인딩. (트리를 쥔 씬 코드용. 원본 refresh 그대로)
+	/// - 바인드 이벤트가 없으면 아무것도 하지 않는다. 항목 수를 넘은 항목과 지워진 노드는 건너뛴다.
+	///
+	/// # 인자
+	/// - `node_tree`: 항목 노드가 든 트리.
 	//==============================================================================
 	pub fn refresh_in_tree(&mut self, node_tree: &mut NodeTree) {
 		self.is_refresh_pending = false;
@@ -180,6 +273,11 @@ impl UIListView {
 
 	//==============================================================================
 	/// 특정 항목의 실제 노드. (화면 밖이면 None)
+	/// # 인자
+	/// - `item_index`: 항목 번호. (0 부터)
+	///
+	/// # 돌려줌
+	/// 그 항목을 보이는 노드. 지금 만들어 둔 범위(보이는 범위와 여유 칸) 밖이면 None.
 	//==============================================================================
 	pub fn get_item_node(&self, item_index: usize) -> Option<NodeId> {
 		self.active_item_list.iter().find(|(active_index, _)| *active_index == item_index).map(|(_, item_node_id)| *item_node_id)
@@ -187,6 +285,8 @@ impl UIListView {
 
 	//==============================================================================
 	/// 바인드 이벤트 설정.
+	/// # 인자
+	/// - `bind_item_event`: (트리, 항목 노드, 항목 번호) 를 받아 항목 노드 내용을 채우는 함수. 노드를 새로 놓을 때(만들거나 다시 쓸 때)와 다시 바인딩할 때 부른다.
 	//==============================================================================
 	pub fn set_bind_item_event(&mut self, bind_item_event: UIListViewBindItemEvent) {
 		self.bind_item_event = Some(bind_item_event);
@@ -194,6 +294,44 @@ impl UIListView {
 
 	//==============================================================================
 	/// 끝 알림 설정.
+	/// # 인자
+	/// - `reach_end_event`: 끝까지 남은 길이가 끝 알림 거리 이하가 되면 한 번 부를 함수. (리스트 뷰와 문맥을 받는다, 안에서 set_item_count 로 항목을 늘리면 다시 무장된다)
+	///
+	/// # 예제
+	/// 끝 근처에 닿으면 항목 50 개 더 불러오기
+	/// ```rust
+	/// use std::cell::Cell;
+	/// use std::rc::Rc;
+	/// use vanilla::{ComponentContext, Engine, EngineConfiguration, NodeTree, Pivot, UIListView, UIScrollView, Vector2};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let list_id = node_tree.create_child(root_id, "list");
+	/// node_tree[list_id].set_pivot(Pivot::TOP_LEFT);
+	/// node_tree[list_id].set_content_size(Vector2::create(200.0, 100.0));
+	/// let reach_end_count = Rc::new(Cell::new(0));
+	/// let reach_end_counter = reach_end_count.clone();
+	///
+	/// let list_view = node_tree.add_component(list_id, UIListView::new()).expect("list view");
+	/// list_view.set_create_item_event(Box::new(|tree: &mut NodeTree| {
+	/// 	tree.create_node("item")
+	/// }));
+	/// list_view.set_item_size(30.0);
+	/// list_view.set_item_count(100);
+	/// list_view.set_reach_end_event(Box::new(move |list_view: &mut UIListView, _context: &mut ComponentContext| {
+	/// 	reach_end_counter.set(reach_end_counter.get() + 1);
+	/// 	let item_count = list_view.get_item_count();
+	/// 	list_view.set_item_count(item_count + 50);
+	/// }));
+	/// node_tree.tick(&engine, 0.016);
+	/// assert_eq!(reach_end_count.get(), 0);
+	///
+	/// node_tree[list_id].get_component_mut::<UIScrollView>().expect("scroll view").set_scroll_offset(Vector2::create(0.0, -2900.0));
+	/// node_tree.tick(&engine, 0.016);
+	/// assert_eq!(reach_end_count.get(), 1);
+	/// assert_eq!(node_tree[list_id].get_component::<UIListView>().expect("list view").get_item_count(), 150);
+	/// ```
 	//==============================================================================
 	pub fn set_reach_end_event(&mut self, reach_end_event: UIListViewReachEndEvent) {
 		self.reach_end_event = Some(reach_end_event);
@@ -201,6 +339,8 @@ impl UIListView {
 
 	//==============================================================================
 	/// 끝 알림 거리 설정. (픽셀)
+	/// # 인자
+	/// - `reach_end_threshold`: 끝까지 남은 길이가 이 값 이하면 알린다. (픽셀, 기본 120)
 	//==============================================================================
 	pub fn set_reach_end_threshold(&mut self, reach_end_threshold: f32) {
 		self.reach_end_threshold = reach_end_threshold;
@@ -208,6 +348,8 @@ impl UIListView {
 
 	//==============================================================================
 	/// 진행 축 방향 항목 크기 설정. (스크롤 영역은 다음 tick 에 갱신)
+	/// # 인자
+	/// - `item_size`: 항목 하나의 진행 축 길이. (픽셀, 0 이하면 처음 만든 항목 노드의 content_size 를 읽는다)
 	//==============================================================================
 	pub fn set_item_size(&mut self, item_size: f32) {
 		self.item_size = item_size;
@@ -216,6 +358,8 @@ impl UIListView {
 
 	//==============================================================================
 	/// 항목 사이 간격 설정. (스크롤 영역은 다음 tick 에 갱신)
+	/// # 인자
+	/// - `spacing`: 항목 사이 간격. (픽셀, 기본 0)
 	//==============================================================================
 	pub fn set_spacing(&mut self, spacing: f32) {
 		self.spacing = spacing;
@@ -224,6 +368,10 @@ impl UIListView {
 
 	//==============================================================================
 	/// 가로 진행 설정. (기본 세로)
+	/// - 스크롤 영역은 바로 다시 셈하지 않는다. (원본처럼, 항목 수나 크기, 간격을 정할 때 다시 셈한다)
+	///
+	/// # 인자
+	/// - `is_horizontal`: true 면 항목을 x 축으로 늘어놓는다.
 	//==============================================================================
 	pub fn set_horizontal(&mut self, is_horizontal: bool) {
 		self.is_horizontal = is_horizontal;
@@ -231,6 +379,8 @@ impl UIListView {
 
 	//==============================================================================
 	/// 화면 밖 여유 항목 수 설정.
+	/// # 인자
+	/// - `buffer_item_count`: 보이는 범위 앞뒤로 더 만들어 둘 항목 수. (기본 1)
 	//==============================================================================
 	pub fn set_buffer_item_count(&mut self, buffer_item_count: usize) {
 		self.buffer_item_count = buffer_item_count;
@@ -238,6 +388,8 @@ impl UIListView {
 
 	//==============================================================================
 	/// 항목 수 반환.
+	/// # 돌려줌
+	/// 전체 항목 수.
 	//==============================================================================
 	pub fn get_item_count(&self) -> usize {
 		self.item_count
@@ -245,6 +397,8 @@ impl UIListView {
 
 	//==============================================================================
 	/// 항목 크기 반환.
+	/// # 돌려줌
+	/// 항목 하나의 진행 축 길이. (픽셀, 아직 읽지 않았으면 0)
 	//==============================================================================
 	pub fn get_item_size(&self) -> f32 {
 		self.item_size
@@ -252,6 +406,8 @@ impl UIListView {
 
 	//==============================================================================
 	/// 항목 사이 간격 반환.
+	/// # 돌려줌
+	/// 항목 사이 간격. (픽셀)
 	//==============================================================================
 	pub fn get_spacing(&self) -> f32 {
 		self.spacing
@@ -259,6 +415,8 @@ impl UIListView {
 
 	//==============================================================================
 	/// 가로 진행 여부.
+	/// # 돌려줌
+	/// 가로로 늘어놓으면 true.
 	//==============================================================================
 	pub fn is_horizontal(&self) -> bool {
 		self.is_horizontal
@@ -266,6 +424,8 @@ impl UIListView {
 
 	//==============================================================================
 	/// 지금 만들어 둔(보이는) 항목 수.
+	/// # 돌려줌
+	/// 지금 노드로 만들어 둔 항목 수. (보이는 범위와 여유 칸)
 	//==============================================================================
 	pub fn get_active_item_count(&self) -> usize {
 		self.active_item_list.len()
@@ -362,6 +522,9 @@ impl UIListView {
 }
 
 impl Default for UIListView {
+	//==============================================================================
+	/// 기본값. (new 와 같다)
+	//==============================================================================
 	fn default() -> UIListView {
 		UIListView::new()
 	}
@@ -369,14 +532,23 @@ impl Default for UIListView {
 
 #[crate::reflect]
 impl Component for UIListView {
+	//==============================================================================
+	/// 컴포넌트 공통 상태 반환.
+	//==============================================================================
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base
 	}
 
+	//==============================================================================
+	/// 컴포넌트 공통 상태 반환. (변경용)
+	//==============================================================================
 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 		&mut self.component_base
 	}
 
+	//==============================================================================
+	/// 컴포넌트 종류 이름. ("UIListView")
+	//==============================================================================
 	fn get_component_type(&self) -> &'static str {
 		"UIListView"
 	}

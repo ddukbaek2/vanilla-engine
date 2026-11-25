@@ -19,6 +19,31 @@ use crate::core::node::worldnode::NodeTransform;
 
 //==============================================================================
 /// 라인 차트.
+/// - 그리기만 하는 컴포넌트라 tick 이 없다. 노드 content_size 영역에 가로 격자와 폴리라인을 그린다.
+///
+/// # 예제
+/// 값을 밀어 넣어 꺾은선 그리기
+/// ```rust
+/// use vanilla::{Color, NodeTree, UILineChart, Vector2};
+///
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.get_root_id();
+/// let chart_id = node_tree.create_child(root_id, "chart");
+/// node_tree[chart_id].set_content_size(Vector2::create(300.0, 120.0));
+/// let line_chart = node_tree[chart_id].add_component(UILineChart::new());
+/// line_chart.set_max_sample_count(60);
+/// line_chart.set_value_range(Some(0.0), Some(100.0));
+/// line_chart.set_line_color(Color::create(0.3, 0.8, 1.0, 1.0));
+/// line_chart.set_line_width(2.0);
+/// for sample_index in 0..80 {
+/// 	line_chart.push_value(50.0 + (sample_index as f32 * 0.3).sin() * 30.0);
+/// }
+///
+/// assert_eq!(line_chart.get_value_list().len(), 60);
+/// let points = line_chart.calculate_points(300.0, 120.0);
+/// assert_eq!(points.len(), 60);
+/// assert_eq!(points[59].x, 300.0);
+/// ```
 //==============================================================================
 pub struct UILineChart {
 	component_base: ComponentBase,
@@ -37,6 +62,8 @@ pub struct UILineChart {
 impl UILineChart {
 	//==============================================================================
 	/// 생성. (표본 60 개, 자동 범위, 격자 3 줄)
+	/// # 돌려줌
+	/// 값이 빈 새 라인 차트. (선 두께 1.5)
 	//==============================================================================
 	pub fn new() -> UILineChart {
 		UILineChart {
@@ -55,6 +82,8 @@ impl UILineChart {
 
 	//==============================================================================
 	/// 값 하나 추가. (표본 수를 넘기면 앞에서 밀려난다)
+	/// # 인자
+	/// - `value`: 끝에 더할 값.
 	//==============================================================================
 	pub fn push_value(&mut self, value: f32) {
 		self.value_list.push(value);
@@ -109,6 +138,32 @@ impl UILineChart {
 
 	//==============================================================================
 	/// 폴리라인 점 계산. (그리기와 같은 자리)
+	/// - 표본 i 의 x 는 i / (최대 표본 수 - 1) x 너비라 덜 찬 동안은 왼쪽부터 채운다. y 는 값 범위의 최소가 아래, 최대가 위다. (위아래 2 픽셀 여백)
+	///
+	/// # 인자
+	/// - `width`: 그릴 영역 너비. (픽셀)
+	/// - `height`: 그릴 영역 높이. (픽셀)
+	///
+	/// # 돌려줌
+	/// 표본마다 점 하나. (영역 왼쪽 위 기준, 픽셀) 표본이 둘보다 적으면 빈 목록.
+	///
+	/// # 예제
+	/// 자동 범위와 고정 범위의 점
+	/// ```rust
+	/// use vanilla::{UILineChart, Vector2};
+	///
+	/// let mut line_chart = UILineChart::new();
+	/// line_chart.set_max_sample_count(5);
+	/// line_chart.push_value(0.0);
+	/// assert!(line_chart.calculate_points(100.0, 54.0).is_empty());
+	///
+	/// line_chart.push_value(10.0);
+	/// line_chart.push_value(5.0);
+	/// assert_eq!(line_chart.calculate_points(100.0, 54.0), vec![Vector2::create(0.0, 52.0), Vector2::create(25.0, 2.0), Vector2::create(50.0, 27.0)]);
+	///
+	/// line_chart.set_value_range(Some(0.0), Some(20.0));
+	/// assert_eq!(line_chart.calculate_points(100.0, 54.0)[1], Vector2::create(25.0, 27.0));
+	/// ```
 	//==============================================================================
 	pub fn calculate_points(&self, width: f32, height: f32) -> Vec<Vector2> {
 		let mut points: Vec<Vector2> = Vec::new();
@@ -118,6 +173,10 @@ impl UILineChart {
 
 	//==============================================================================
 	/// 최대 표본 수 설정. (2 보다 작게 하지 않는다)
+	/// - 이미 든 값은 바로 줄이지 않는다. (원본처럼 다음 push_value 때 앞에서 밀려난다)
+	///
+	/// # 인자
+	/// - `max_sample_count`: 들고 그릴 표본 수 상한. (기본 60, 2 보다 작으면 2)
 	//==============================================================================
 	pub fn set_max_sample_count(&mut self, max_sample_count: usize) {
 		self.max_sample_count = max_sample_count.max(2);
@@ -125,6 +184,8 @@ impl UILineChart {
 
 	//==============================================================================
 	/// 최대 표본 수 반환.
+	/// # 돌려줌
+	/// 표본 수 상한. (2 이상)
 	//==============================================================================
 	pub fn get_max_sample_count(&self) -> usize {
 		self.max_sample_count
@@ -132,6 +193,9 @@ impl UILineChart {
 
 	//==============================================================================
 	/// 값 범위 설정. (None 이면 그쪽은 자동)
+	/// # 인자
+	/// - `min_value`: 영역 아래 끝에 올 값. None 이면 지금 값들의 최소.
+	/// - `max_value`: 영역 위 끝에 올 값. None 이면 지금 값들의 최대.
 	//==============================================================================
 	pub fn set_value_range(&mut self, min_value: Option<f32>, max_value: Option<f32>) {
 		self.min_value = min_value;
@@ -140,6 +204,8 @@ impl UILineChart {
 
 	//==============================================================================
 	/// 값 목록 설정. (최대 표본 수만큼 뒤쪽만 남긴다)
+	/// # 인자
+	/// - `value_list`: 새 값 목록. (복사해 든다)
 	//==============================================================================
 	pub fn set_value_list(&mut self, value_list: &[f32]) {
 		let start_index = value_list.len().saturating_sub(self.max_sample_count);
@@ -148,6 +214,8 @@ impl UILineChart {
 
 	//==============================================================================
 	/// 값 목록 반환.
+	/// # 돌려줌
+	/// 지금 든 값. (든 차례대로)
 	//==============================================================================
 	pub fn get_value_list(&self) -> &[f32] {
 		&self.value_list
@@ -155,6 +223,8 @@ impl UILineChart {
 
 	//==============================================================================
 	/// 선 색 설정.
+	/// # 인자
+	/// - `line_color`: 폴리라인 색. (기본 (0.42, 0.48, 1, 1))
 	//==============================================================================
 	pub fn set_line_color(&mut self, line_color: impl Into<Color>) {
 		self.line_color = line_color.into();
@@ -162,6 +232,8 @@ impl UILineChart {
 
 	//==============================================================================
 	/// 격자 색 설정.
+	/// # 인자
+	/// - `grid_color`: 가로 격자선 색. (기본 (1, 1, 1, 0.07))
 	//==============================================================================
 	pub fn set_grid_color(&mut self, grid_color: impl Into<Color>) {
 		self.grid_color = grid_color.into();
@@ -169,6 +241,8 @@ impl UILineChart {
 
 	//==============================================================================
 	/// 선 두께 설정.
+	/// # 인자
+	/// - `line_width`: 폴리라인 두께. (픽셀, 기본 1.5)
 	//==============================================================================
 	pub fn set_line_width(&mut self, line_width: f32) {
 		self.line_width = line_width;
@@ -176,6 +250,9 @@ impl UILineChart {
 }
 
 impl Default for UILineChart {
+	//==============================================================================
+	/// 기본값. (new 와 같다)
+	//==============================================================================
 	fn default() -> UILineChart {
 		UILineChart::new()
 	}
@@ -183,23 +260,38 @@ impl Default for UILineChart {
 
 #[crate::reflect]
 impl Component for UILineChart {
+	//==============================================================================
+	/// 컴포넌트 공통 상태 반환.
+	//==============================================================================
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base
 	}
 
+	//==============================================================================
+	/// 컴포넌트 공통 상태 반환. (변경용)
+	//==============================================================================
 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 		&mut self.component_base
 	}
 
+	//==============================================================================
+	/// 컴포넌트 종류 이름. ("UILineChart")
+	//==============================================================================
 	fn get_component_type(&self) -> &'static str {
 		"UILineChart"
 	}
 
+	//==============================================================================
+	/// tick 이 필요한지. (그리기만 해서 false)
+	//==============================================================================
 	#[reflect(skip)]
 	fn is_tick_needed(&self) -> bool {
 		false
 	}
 
+	//==============================================================================
+	/// 내용 영역 안에 그리는지. (늘 true)
+	//==============================================================================
 	#[reflect(skip)]
 	fn is_drawn_inside_content(&self) -> bool {
 		true
@@ -233,6 +325,26 @@ impl Component for UILineChart {
 
 //==============================================================================
 /// 바 차트.
+/// - 그리기만 하는 컴포넌트라 tick 이 없다. 노드 content_size 영역에 값마다 세로 막대를 바닥에서 위로 그린다.
+///
+/// # 예제
+/// 네 값의 막대와 강조
+/// ```rust
+/// use vanilla::{NodeTree, Rect, UIBarChart, Vector2};
+///
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.get_root_id();
+/// let chart_id = node_tree.create_child(root_id, "chart");
+/// node_tree[chart_id].set_content_size(Vector2::create(100.0, 80.0));
+/// let bar_chart = node_tree[chart_id].add_component(UIBarChart::new());
+/// bar_chart.set_value_list(&[1.0, 2.0, 4.0, 0.0]);
+/// bar_chart.set_highlight_index(Some(2));
+///
+/// let bar_rects = bar_chart.calculate_bar_rects(100.0, 80.0);
+/// assert_eq!(bar_rects[0], Rect::create(0.0, 60.0, 22.0, 20.0));
+/// assert_eq!(bar_rects[2], Rect::create(52.0, 0.0, 22.0, 80.0));
+/// assert_eq!(bar_rects[3].get_height(), 1.0);
+/// ```
 //==============================================================================
 pub struct UIBarChart {
 	component_base: ComponentBase,
@@ -248,6 +360,8 @@ pub struct UIBarChart {
 impl UIBarChart {
 	//==============================================================================
 	/// 생성. (자동 최댓값, 강조 없음, 막대 사이 4 픽셀)
+	/// # 돌려줌
+	/// 값이 빈 새 바 차트.
 	//==============================================================================
 	pub fn new() -> UIBarChart {
 		UIBarChart {
@@ -295,6 +409,29 @@ impl UIBarChart {
 
 	//==============================================================================
 	/// 막대 사각형 목록 계산. (그리기와 같은 자리)
+	/// - 막대 폭은 (너비 - 간격 x (막대 수 - 1)) / 막대 수, 높이는 값 / 최댓값 비율(0 ~ 1 로 자름) x 높이이고 적어도 1 픽셀이다.
+	///
+	/// # 인자
+	/// - `width`: 그릴 영역 너비. (픽셀)
+	/// - `height`: 그릴 영역 높이. (픽셀)
+	///
+	/// # 돌려줌
+	/// 값마다 막대 사각형. (영역 왼쪽 위 기준, 픽셀) 값이 없으면 빈 목록.
+	///
+	/// # 예제
+	/// 최댓값을 정하면 그 값이 영역 높이다
+	/// ```rust
+	/// use vanilla::UIBarChart;
+	///
+	/// let mut bar_chart = UIBarChart::new();
+	/// bar_chart.set_value_list(&[1.0, 2.0, 4.0, 0.0]);
+	/// assert_eq!(bar_chart.calculate_bar_rects(100.0, 80.0)[2].get_height(), 80.0);
+	///
+	/// bar_chart.set_max_value(Some(8.0));
+	/// assert_eq!(bar_chart.calculate_bar_rects(100.0, 80.0)[2].get_height(), 40.0);
+	/// bar_chart.set_max_value(Some(2.0));
+	/// assert_eq!(bar_chart.calculate_bar_rects(100.0, 80.0)[2].get_height(), 80.0);
+	/// ```
 	//==============================================================================
 	pub fn calculate_bar_rects(&self, width: f32, height: f32) -> Vec<Rect> {
 		if self.value_list.is_empty() {
@@ -307,6 +444,8 @@ impl UIBarChart {
 
 	//==============================================================================
 	/// 값 목록 설정.
+	/// # 인자
+	/// - `value_list`: 막대로 그릴 값 목록. (복사해 든다)
 	//==============================================================================
 	pub fn set_value_list(&mut self, value_list: &[f32]) {
 		self.value_list = value_list.to_vec();
@@ -314,6 +453,8 @@ impl UIBarChart {
 
 	//==============================================================================
 	/// 값 목록 반환.
+	/// # 돌려줌
+	/// 지금 든 값. (든 차례대로)
 	//==============================================================================
 	pub fn get_value_list(&self) -> &[f32] {
 		&self.value_list
@@ -321,6 +462,8 @@ impl UIBarChart {
 
 	//==============================================================================
 	/// 최댓값 설정. (None 이면 자동)
+	/// # 인자
+	/// - `max_value`: 영역 높이에 맞출 값. None 이면 지금 값들의 최대. (적어도 0.0001)
 	//==============================================================================
 	pub fn set_max_value(&mut self, max_value: Option<f32>) {
 		self.max_value = max_value;
@@ -328,6 +471,8 @@ impl UIBarChart {
 
 	//==============================================================================
 	/// 막대 색 설정.
+	/// # 인자
+	/// - `bar_color`: 막대 색. (기본 (0.42, 0.48, 1, 0.85))
 	//==============================================================================
 	pub fn set_bar_color(&mut self, bar_color: impl Into<Color>) {
 		self.bar_color = bar_color.into();
@@ -335,6 +480,8 @@ impl UIBarChart {
 
 	//==============================================================================
 	/// 강조색 설정.
+	/// # 인자
+	/// - `highlight_color`: 강조 번호 막대의 색. (기본 (0.22, 0.84, 1, 1))
 	//==============================================================================
 	pub fn set_highlight_color(&mut self, highlight_color: impl Into<Color>) {
 		self.highlight_color = highlight_color.into();
@@ -342,6 +489,8 @@ impl UIBarChart {
 
 	//==============================================================================
 	/// 강조 번호 설정. (None 이면 강조 없음)
+	/// # 인자
+	/// - `highlight_index`: 강조색으로 그릴 막대 번호. (0 부터)
 	//==============================================================================
 	pub fn set_highlight_index(&mut self, highlight_index: Option<usize>) {
 		self.highlight_index = highlight_index;
@@ -349,6 +498,8 @@ impl UIBarChart {
 
 	//==============================================================================
 	/// 막대 사이 간격 설정.
+	/// # 인자
+	/// - `bar_gap`: 막대 사이 간격. (픽셀, 기본 4)
 	//==============================================================================
 	pub fn set_bar_gap(&mut self, bar_gap: f32) {
 		self.bar_gap = bar_gap;
@@ -356,6 +507,9 @@ impl UIBarChart {
 }
 
 impl Default for UIBarChart {
+	//==============================================================================
+	/// 기본값. (new 와 같다)
+	//==============================================================================
 	fn default() -> UIBarChart {
 		UIBarChart::new()
 	}
@@ -363,23 +517,38 @@ impl Default for UIBarChart {
 
 #[crate::reflect]
 impl Component for UIBarChart {
+	//==============================================================================
+	/// 컴포넌트 공통 상태 반환.
+	//==============================================================================
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base
 	}
 
+	//==============================================================================
+	/// 컴포넌트 공통 상태 반환. (변경용)
+	//==============================================================================
 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 		&mut self.component_base
 	}
 
+	//==============================================================================
+	/// 컴포넌트 종류 이름. ("UIBarChart")
+	//==============================================================================
 	fn get_component_type(&self) -> &'static str {
 		"UIBarChart"
 	}
 
+	//==============================================================================
+	/// tick 이 필요한지. (그리기만 해서 false)
+	//==============================================================================
 	#[reflect(skip)]
 	fn is_tick_needed(&self) -> bool {
 		false
 	}
 
+	//==============================================================================
+	/// 내용 영역 안에 그리는지. (늘 true)
+	//==============================================================================
 	#[reflect(skip)]
 	fn is_drawn_inside_content(&self) -> bool {
 		true

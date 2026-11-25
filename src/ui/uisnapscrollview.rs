@@ -50,6 +50,42 @@ struct SnapTween {
 
 //==============================================================================
 /// 스냅 스크롤 뷰.
+/// - content 자식 하나하나가 한 칸이다. 놓으면 가장 가까운 칸(끈 방향으로 최대 한 칸)의 가운데가 보이는 영역 가운데로 미끄러진다.
+/// - 오프셋은 품은 스크롤 뷰가 콘텐트 크기로 자르므로 set_scroll_content_size 로 칸 전체 길이를 정해 둔다.
+///
+/// # 예제
+/// 다섯 칸 가로 페이지를 끌어 다음 칸으로 넘기기
+/// ```rust
+/// use vanilla::{Engine, EngineConfiguration, NodeTree, Pivot, TouchKind, UISnapScrollView, Vector2};
+///
+/// let engine = Engine::new(EngineConfiguration::new());
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.get_root_id();
+/// let snap_id = node_tree.create_child(root_id, "snap");
+/// node_tree[snap_id].set_pivot(Pivot::TOP_LEFT);
+/// node_tree[snap_id].set_content_size(Vector2::create(200.0, 100.0));
+/// let snap_view = node_tree.add_component(snap_id, UISnapScrollView::new()).expect("snap view");
+/// snap_view.set_scroll_content_size(Vector2::create(1000.0, 100.0));
+/// let content_id = snap_view.get_content().expect("content");
+/// for page_index in 0..5 {
+/// 	let page_id = node_tree.create_child(content_id, "page");
+/// 	node_tree[page_id].set_pivot(Pivot::TOP_LEFT);
+/// 	node_tree[page_id].set_rect(page_index as f32 * 200.0, 0.0, 200.0, 100.0);
+/// }
+///
+/// node_tree.dispatch_touch(snap_id, &engine, TouchKind::Press, Vector2::create(150.0, 50.0));
+/// node_tree.dispatch_touch(snap_id, &engine, TouchKind::Moved, Vector2::create(50.0, 50.0));
+/// node_tree.tick(&engine, 0.016);
+/// node_tree.dispatch_touch(snap_id, &engine, TouchKind::Release, Vector2::create(50.0, 50.0));
+/// for _ in 0..30 {
+/// 	node_tree.tick(&engine, 0.016);
+/// }
+///
+/// let snap_view = node_tree[snap_id].get_component::<UISnapScrollView>().expect("snap view");
+/// assert_eq!(snap_view.get_snap_current_index(), 1);
+/// assert_eq!(snap_view.get_scroll_offset(), Vector2::create(-200.0, 0.0));
+/// assert_eq!(node_tree[content_id].get_local_position(), Vector2::create(-200.0, 0.0));
+/// ```
 //==============================================================================
 pub struct UISnapScrollView {
 	scroll_view: UIScrollView,
@@ -66,6 +102,10 @@ pub struct UISnapScrollView {
 impl UISnapScrollView {
 	//==============================================================================
 	/// 생성. (clamp 모드, 가로만 스크롤)
+	/// - 노드에 붙일 때는 node_tree.add_component 를 쓴다. (품은 뷰가 content 노드와 Mask 를 만든다)
+	///
+	/// # 돌려줌
+	/// 지금 칸 0, 칸 넘김 비율 0.35, 방향성 스냅 최소 속도 200 의 새 스냅 뷰.
 	//==============================================================================
 	pub fn new() -> UISnapScrollView {
 		let mut scroll_view = UIScrollView::new();
@@ -86,6 +126,8 @@ impl UISnapScrollView {
 
 	//==============================================================================
 	/// 품은 스크롤 뷰 반환.
+	/// # 돌려줌
+	/// 품은 스크롤 뷰.
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn get_scroll_view(&self) -> &UIScrollView {
@@ -94,6 +136,8 @@ impl UISnapScrollView {
 
 	//==============================================================================
 	/// 품은 스크롤 뷰 반환. (변경용)
+	/// # 돌려줌
+	/// 품은 스크롤 뷰의 가변 참조. (드래그 배율, 휠 배율 같은 스크롤 뷰 설정을 여기에 한다)
 	//==============================================================================
 	pub fn get_scroll_view_mut(&mut self) -> &mut UIScrollView {
 		&mut self.scroll_view
@@ -101,6 +145,8 @@ impl UISnapScrollView {
 
 	//==============================================================================
 	/// 컨텐트 노드 핸들. (아이템 노드를 여기에 붙인다)
+	/// # 돌려줌
+	/// content 노드. 트리에 붙기(node_tree.add_component) 전에는 None.
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn get_content(&self) -> Option<NodeId> {
@@ -109,6 +155,8 @@ impl UISnapScrollView {
 
 	//==============================================================================
 	/// 배경색 설정.
+	/// # 인자
+	/// - `background_color`: 보이는 영역의 바탕색. (기본 투명, 투명이면 그리지 않는다)
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn set_background_color(&mut self, background_color: impl Into<Color>) {
@@ -117,6 +165,8 @@ impl UISnapScrollView {
 
 	//==============================================================================
 	/// 스크롤 콘텐츠 크기 설정.
+	/// # 인자
+	/// - `scroll_content_size`: 칸 전체를 담는 콘텐트 크기. (픽셀, 오프셋을 이 크기로 자르므로 칸 전체 길이 이상으로 둔다)
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn set_scroll_content_size(&mut self, scroll_content_size: Vector2) {
@@ -125,6 +175,8 @@ impl UISnapScrollView {
 
 	//==============================================================================
 	/// 스크롤 콘텐츠 크기 반환.
+	/// # 돌려줌
+	/// 콘텐트 전체 크기. (픽셀)
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn get_scroll_content_size(&self) -> Vector2 {
@@ -133,6 +185,8 @@ impl UISnapScrollView {
 
 	//==============================================================================
 	/// 오프셋 설정. (범위로 자른다)
+	/// # 인자
+	/// - `offset`: 새 오프셋. (픽셀, content 노드의 로컬 위치. 칸을 바꾸지 않고 content 는 다음 tick 에 옮겨진다)
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn set_scroll_offset(&mut self, offset: Vector2) {
@@ -141,6 +195,8 @@ impl UISnapScrollView {
 
 	//==============================================================================
 	/// 오프셋 반환.
+	/// # 돌려줌
+	/// 지금 오프셋. (픽셀, 0 이하)
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn get_scroll_offset(&self) -> Vector2 {
@@ -149,6 +205,8 @@ impl UISnapScrollView {
 
 	//==============================================================================
 	/// 가로 스크롤 켜기 설정.
+	/// # 인자
+	/// - `is_horizontal`: true 면 가로로 스냅한다. (기본 true, 세로 스냅은 false 로 두고 set_vertical(true))
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn set_horizontal(&mut self, is_horizontal: bool) {
@@ -157,6 +215,8 @@ impl UISnapScrollView {
 
 	//==============================================================================
 	/// 가로 스크롤 켜짐 여부.
+	/// # 돌려줌
+	/// 가로 스크롤이 켜져 있으면 true. (true 면 진행 축이 x 다)
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn is_horizontal(&self) -> bool {
@@ -165,6 +225,8 @@ impl UISnapScrollView {
 
 	//==============================================================================
 	/// 세로 스크롤 켜기 설정.
+	/// # 인자
+	/// - `is_vertical`: true 면 세로로 스크롤한다. (기본 false)
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn set_vertical(&mut self, is_vertical: bool) {
@@ -173,6 +235,8 @@ impl UISnapScrollView {
 
 	//==============================================================================
 	/// 세로 스크롤 켜짐 여부.
+	/// # 돌려줌
+	/// 세로 스크롤이 켜져 있으면 true.
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn is_vertical(&self) -> bool {
@@ -181,6 +245,8 @@ impl UISnapScrollView {
 
 	//==============================================================================
 	/// 드래그 중인지.
+	/// # 돌려줌
+	/// 눌러 끄는 중이면 true.
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn is_dragging(&self) -> bool {
@@ -189,6 +255,8 @@ impl UISnapScrollView {
 
 	//==============================================================================
 	/// 스냅 모드 설정. (원본처럼 값만 든다)
+	/// # 인자
+	/// - `is_snap_to_nearest`: 가장 가까운 칸으로 스냅할지. (기본 false, 지금 스냅 계산은 이 값을 읽지 않는다)
 	//==============================================================================
 	pub fn set_snap_to_nearest(&mut self, is_snap_to_nearest: bool) {
 		self.is_snap_to_nearest = is_snap_to_nearest;
@@ -196,6 +264,8 @@ impl UISnapScrollView {
 
 	//==============================================================================
 	/// 스냅 모드 반환.
+	/// # 돌려줌
+	/// set_snap_to_nearest 로 정한 값.
 	//==============================================================================
 	pub fn get_snap_to_nearest(&self) -> bool {
 		self.is_snap_to_nearest
@@ -203,6 +273,8 @@ impl UISnapScrollView {
 
 	//==============================================================================
 	/// 방향성 스냅 최소 속도 설정. (px/s, 원본처럼 값만 든다)
+	/// # 인자
+	/// - `velocity_threshold`: 방향성 스냅 최소 속도. (픽셀/초, 기본 200, 지금 스냅 계산은 이 값을 읽지 않는다)
 	//==============================================================================
 	pub fn set_velocity_threshold(&mut self, velocity_threshold: f32) {
 		self.velocity_threshold = velocity_threshold;
@@ -210,6 +282,8 @@ impl UISnapScrollView {
 
 	//==============================================================================
 	/// 방향성 스냅 최소 속도 반환.
+	/// # 돌려줌
+	/// 방향성 스냅 최소 속도. (픽셀/초)
 	//==============================================================================
 	pub fn get_velocity_threshold(&self) -> f32 {
 		self.velocity_threshold
@@ -217,6 +291,8 @@ impl UISnapScrollView {
 
 	//==============================================================================
 	/// 칸을 넘길 끈 거리 비율 설정. (다음 아이템 크기 대비, 기본 0.35)
+	/// # 인자
+	/// - `page_change_threshold`: 끈 거리가 끈 쪽 다음 칸 크기의 이 비율 이상이면 그 칸으로 넘긴다. (0 ~ 1)
 	//==============================================================================
 	pub fn set_page_change_threshold(&mut self, page_change_threshold: f32) {
 		self.page_change_threshold = page_change_threshold;
@@ -224,6 +300,8 @@ impl UISnapScrollView {
 
 	//==============================================================================
 	/// 칸을 넘길 끈 거리 비율 반환.
+	/// # 돌려줌
+	/// 칸 넘김 비율.
 	//==============================================================================
 	pub fn get_page_change_threshold(&self) -> f32 {
 		self.page_change_threshold
@@ -231,6 +309,8 @@ impl UISnapScrollView {
 
 	//==============================================================================
 	/// 지금 스냅 칸 반환.
+	/// # 돌려줌
+	/// 지금 칸 번호. (0 부터, content 자식 순서)
 	//==============================================================================
 	pub fn get_snap_current_index(&self) -> usize {
 		self.snap_current_index
@@ -238,6 +318,8 @@ impl UISnapScrollView {
 
 	//==============================================================================
 	/// 미끄러지는 중인지.
+	/// # 돌려줌
+	/// 스냅 미끄러짐이 진행 중이면 true.
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn is_snapping(&self) -> bool {
@@ -295,6 +377,34 @@ impl UISnapScrollView {
 
 	//==============================================================================
 	/// content 자식마다 스냅 오프셋 계산. (각 아이템 가운데가 보이는 영역 가운데에 오는 오프셋, 크기가 달라도 맞다)
+	/// # 인자
+	/// - `node_tree`: 이 스냅 뷰가 붙은 노드 트리.
+	///
+	/// # 돌려줌
+	/// content 자식 순서대로 진행 축의 스냅 오프셋. (픽셀, 범위로 자르지 않은 값) 트리에 붙기 전이거나 content 가 없으면 빈 목록.
+	///
+	/// # 예제
+	/// 200 픽셀 칸 셋의 스냅 오프셋
+	/// ```rust
+	/// use vanilla::{NodeTree, Pivot, UISnapScrollView, Vector2};
+	///
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let snap_id = node_tree.create_child(root_id, "snap");
+	/// node_tree[snap_id].set_pivot(Pivot::TOP_LEFT);
+	/// node_tree[snap_id].set_content_size(Vector2::create(200.0, 100.0));
+	/// let snap_view = node_tree.add_component(snap_id, UISnapScrollView::new()).expect("snap view");
+	/// let content_id = snap_view.get_content().expect("content");
+	/// for page_index in 0..3 {
+	/// 	let page_id = node_tree.create_child(content_id, "page");
+	/// 	node_tree[page_id].set_pivot(Pivot::TOP_LEFT);
+	/// 	node_tree[page_id].set_rect(page_index as f32 * 200.0, 0.0, 200.0, 100.0);
+	/// }
+	///
+	/// let snap_view = node_tree[snap_id].get_component::<UISnapScrollView>().expect("snap view");
+	/// assert_eq!(snap_view.compute_snap_offsets(&node_tree), vec![0.0, -200.0, -400.0]);
+	/// assert!(UISnapScrollView::new().compute_snap_offsets(&node_tree).is_empty());
+	/// ```
 	//==============================================================================
 	pub fn compute_snap_offsets(&self, node_tree: &NodeTree) -> Vec<f32> {
 		let mut snap_offsets: Vec<f32> = Vec::new();
@@ -328,6 +438,10 @@ impl UISnapScrollView {
 
 	//==============================================================================
 	/// 끄는 동안 오프셋을 지금 칸의 앞뒤 칸 범위로 자른다.
+	/// - tick 이 끄는 중에 부른다. 칸이 없으면 아무것도 하지 않는다.
+	///
+	/// # 인자
+	/// - `node_tree`: 이 스냅 뷰가 붙은 노드 트리. (content 자식을 읽는다)
 	//==============================================================================
 	pub fn clamp_scroll_offset_to_adjacent_pages(&mut self, node_tree: &mut NodeTree) {
 		let snap_offsets = self.compute_snap_offsets(node_tree);
@@ -350,6 +464,10 @@ impl UISnapScrollView {
 
 	//==============================================================================
 	/// 지금 오프셋으로 목표 칸을 정하고 미끄러짐을 시작한다. (끈 방향으로 최대 한 칸, 다음 칸이 비율 이상 드러나면 넘김)
+	/// - tick 이 드래그를 놓은 때 부른다. 칸이 없으면 아무것도 하지 않는다.
+	///
+	/// # 인자
+	/// - `node_tree`: 이 스냅 뷰가 붙은 노드 트리. (content 자식을 읽는다)
 	//==============================================================================
 	pub fn play_snap_tween(&mut self, node_tree: &mut NodeTree) {
 		let snap_offsets = self.compute_snap_offsets(node_tree);
@@ -395,6 +513,48 @@ impl UISnapScrollView {
 
 	//==============================================================================
 	/// 지정 칸으로 이동. (smooth 면 미끄러지고, 아니면 바로 옮긴다)
+	/// - 이 컴포넌트를 트리에서 꺼내 불러야 해서 씬 코드에서는 node_tree.with_component_mut 안에서 부른다.
+	///
+	/// # 인자
+	/// - `node_tree`: 이 스냅 뷰가 붙은 노드 트리.
+	/// - `index`: 옮길 칸 번호. (0 부터, 칸 수를 넘으면 마지막 칸) 칸이 없으면 아무것도 하지 않는다.
+	/// - `smooth`: true 면 0.3 초 cubic.out 으로 미끄러지고(다음 tick 부터), false 면 오프셋과 content 노드를 바로 옮긴다.
+	///
+	/// # 예제
+	/// 바로 옮기기와 미끄러지기
+	/// ```rust
+	/// use vanilla::{Engine, EngineConfiguration, NodeTree, Pivot, UISnapScrollView, Vector2};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let snap_id = node_tree.create_child(root_id, "snap");
+	/// node_tree[snap_id].set_pivot(Pivot::TOP_LEFT);
+	/// node_tree[snap_id].set_content_size(Vector2::create(200.0, 100.0));
+	/// let snap_view = node_tree.add_component(snap_id, UISnapScrollView::new()).expect("snap view");
+	/// snap_view.set_scroll_content_size(Vector2::create(1000.0, 100.0));
+	/// let content_id = snap_view.get_content().expect("content");
+	/// for page_index in 0..5 {
+	/// 	let page_id = node_tree.create_child(content_id, "page");
+	/// 	node_tree[page_id].set_pivot(Pivot::TOP_LEFT);
+	/// 	node_tree[page_id].set_rect(page_index as f32 * 200.0, 0.0, 200.0, 100.0);
+	/// }
+	///
+	/// node_tree.with_component_mut::<UISnapScrollView, _>(snap_id, |snap_view, tree| {
+	/// 	snap_view.page_to(tree, 9, false);
+	/// });
+	/// assert_eq!(node_tree[content_id].get_local_position(), Vector2::create(-800.0, 0.0));
+	///
+	/// node_tree.with_component_mut::<UISnapScrollView, _>(snap_id, |snap_view, tree| {
+	/// 	snap_view.page_to(tree, 2, true);
+	/// });
+	/// for _ in 0..20 {
+	/// 	node_tree.tick(&engine, 0.016);
+	/// }
+	/// let snap_view = node_tree[snap_id].get_component::<UISnapScrollView>().expect("snap view");
+	/// assert_eq!(snap_view.get_snap_current_index(), 2);
+	/// assert_eq!(node_tree[content_id].get_local_position(), Vector2::create(-400.0, 0.0));
+	/// ```
 	//==============================================================================
 	pub fn page_to(&mut self, node_tree: &mut NodeTree, index: usize, smooth: bool) {
 		let item_count = self.get_item_count(node_tree);
@@ -417,6 +577,11 @@ impl UISnapScrollView {
 
 	//==============================================================================
 	/// 지정 칸으로 미끄러짐 시작. (지금 오프셋에서 그 칸의 스냅 오프셋까지)
+	/// - 미끄러짐은 다음 tick 부터 0.3 초 cubic.out 으로 간다. (page_to 의 smooth 와 같다)
+	///
+	/// # 인자
+	/// - `node_tree`: 이 스냅 뷰가 붙은 노드 트리.
+	/// - `index`: 목표 칸 번호. (0 부터, 칸 수를 넘으면 마지막 칸) 칸이 없으면 아무것도 하지 않는다.
 	//==============================================================================
 	pub fn set_snap_current_index(&mut self, node_tree: &mut NodeTree, index: usize) {
 		let item_count = self.get_item_count(node_tree);
@@ -463,6 +628,9 @@ impl UISnapScrollView {
 }
 
 impl Default for UISnapScrollView {
+	//==============================================================================
+	/// 기본값. (new 와 같다)
+	//==============================================================================
 	fn default() -> UISnapScrollView {
 		UISnapScrollView::new()
 	}
@@ -470,18 +638,30 @@ impl Default for UISnapScrollView {
 
 #[crate::reflect]
 impl Component for UISnapScrollView {
+	//==============================================================================
+	/// 컴포넌트 공통 상태 반환. (품은 뷰의 것)
+	//==============================================================================
 	fn get_component_base(&self) -> &ComponentBase {
 		self.scroll_view.get_component_base()
 	}
 
+	//==============================================================================
+	/// 컴포넌트 공통 상태 반환. (변경용, 품은 뷰의 것)
+	//==============================================================================
 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 		self.scroll_view.get_component_base_mut()
 	}
 
+	//==============================================================================
+	/// 컴포넌트 종류 이름. ("SnapScrollView")
+	//==============================================================================
 	fn get_component_type(&self) -> &'static str {
 		"SnapScrollView"
 	}
 
+	//==============================================================================
+	/// 휠을 받는지. (늘 true)
+	//==============================================================================
 	#[reflect(skip)]
 	fn is_wheel_receiver(&self) -> bool {
 		true
@@ -539,27 +719,45 @@ impl Component for UISnapScrollView {
 		}
 	}
 
+	//==============================================================================
+	/// 출력. (품은 뷰의 배경)
+	//==============================================================================
 	fn draw(&mut self, transform: &NodeTransform, graphic: &mut Graphic) {
 		self.scroll_view.draw(transform, graphic);
 	}
 
+	//==============================================================================
+	/// 내용 영역 안에 그리는지. (늘 true)
+	//==============================================================================
 	#[reflect(skip)]
 	fn is_drawn_inside_content(&self) -> bool {
 		true
 	}
 
+	//==============================================================================
+	/// 터치 누름. (품은 뷰로 넘긴다)
+	//==============================================================================
 	fn touch_press(&mut self, context: &mut ComponentContext, view_input_position: Vector2) {
 		self.scroll_view.touch_press(context, view_input_position);
 	}
 
+	//==============================================================================
+	/// 터치 이동. (품은 뷰로 넘긴다)
+	//==============================================================================
 	fn touch_move(&mut self, context: &mut ComponentContext, view_input_position: Vector2) {
 		self.scroll_view.touch_move(context, view_input_position);
 	}
 
+	//==============================================================================
+	/// 터치 뗌. (품은 뷰로 넘긴다. 스냅은 다음 tick 에 시작한다)
+	//==============================================================================
 	fn touch_release(&mut self, context: &mut ComponentContext, view_input_position: Vector2) {
 		self.scroll_view.touch_release(context, view_input_position);
 	}
 
+	//==============================================================================
+	/// 터치 취소. (품은 뷰로 넘긴다)
+	//==============================================================================
 	fn touch_cancel(&mut self, context: &mut ComponentContext, view_input_position: Vector2) {
 		self.scroll_view.touch_cancel(context, view_input_position);
 	}
@@ -574,6 +772,28 @@ impl Component for UISnapScrollView {
 
 //==============================================================================
 /// 노드의 스크롤 뷰 찾기. (UIScrollView, 없으면 UISnapScrollView 가 품은 뷰. 원본 getComponents(UIScrollView) 가 하위 클래스까지 잡는 자리)
+/// # 인자
+/// - `node`: 찾을 노드.
+///
+/// # 돌려줌
+/// 노드의 UIScrollView, 없으면 UISnapScrollView 가 품은 스크롤 뷰. 둘 다 없거나 그 컴포넌트가 tick 중이라 꺼내져 있으면 None.
+///
+/// # 예제
+/// 스냅 뷰 노드에서 품은 스크롤 뷰 찾기
+/// ```rust
+/// use vanilla::{NodeTree, UISnapScrollView};
+/// use vanilla::ui::uisnapscrollview::find_scroll_view;
+///
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.get_root_id();
+/// let snap_id = node_tree.create_child(root_id, "snap");
+/// node_tree.add_component(snap_id, UISnapScrollView::new());
+///
+/// let scroll_view = find_scroll_view(&node_tree[snap_id]).expect("scroll view");
+/// assert!(scroll_view.is_horizontal());
+/// assert!(!scroll_view.is_vertical());
+/// assert!(find_scroll_view(&node_tree[root_id]).is_none());
+/// ```
 //==============================================================================
 pub fn find_scroll_view(node: &WorldNode) -> Option<&UIScrollView> {
 	if let Some(scroll_view) = node.get_component::<UIScrollView>() {
@@ -584,6 +804,11 @@ pub fn find_scroll_view(node: &WorldNode) -> Option<&UIScrollView> {
 
 //==============================================================================
 /// 노드의 스크롤 뷰 찾기. (변경용)
+/// # 인자
+/// - `node`: 찾을 노드.
+///
+/// # 돌려줌
+/// 노드의 UIScrollView, 없으면 UISnapScrollView 가 품은 스크롤 뷰의 가변 참조. 둘 다 없으면 None.
 //==============================================================================
 pub fn find_scroll_view_mut(node: &mut WorldNode) -> Option<&mut UIScrollView> {
 	if node.has_component::<UIScrollView>() {
