@@ -6,7 +6,8 @@
 // - 밑줄 / 취소선은 원본처럼 글자 색 선을 긋는다. (두께 max(1, 글자 크기 / 16), 자리는 원본 computeUnderlineOffsetY / computeStrikethroughOffsetY)
 // - 줄바꿈 방식(set_wrap_mode): Word 는 공백 단위로 채우고, 넘치는 조각에 낱말이 여럿이면(공백 없이 쓰는 한중일, 태국어 등) 낱말 사이에서,
 //   그래도 넘치는 낱말은 글자 묶음 단위로 나눈다. Character 는 처음부터 글자 묶음 단위. (원본 "word" / "char", 셈의 차례가 원본과 같다)
-//   글자 묶음은 UAX #29(unicode-segmentation), 낱말은 ICU 사전(icu_segmenter)으로 찾는다. 원본 Intl.Segmenter 도 ICU 의 같은 규칙과 사전이다.
+//   글자 묶음은 UAX #29(unicode-segmentation), 낱말은 ICU 사전(icu_segmenter)으로 찾는다. 원본 Intl.Segmenter 도 ICU(ICU4C)의 같은 규칙과 사전이다.
+//   한중일은 ICU4X 가 가장 긴 낱말부터 고르고 ICU4C 는 낱말 값의 합이 가장 작은 나누기를 골라 달라서, 데스크탑은 ICU4C 의 셈을 옮겨 같은 사전(cjdict)으로 나눈다.
 // - 기울임은 폰트 문자열에 italic 을 넣는다. 기울인 얼굴이 없으면 글자 캐시가 브라우저와 같은 가짜 기울임(기울기 1/4)으로 굽는다.
 // - 글자 방향(set_text_direction, 원본 setTextDirection): Inherit 면 그리는 때의 Graphic 방향을 따른다. 정렬 Start / End 가 그 방향으로 풀리고,
 //   글자 캐시가 그 문단 방향으로 양방향 정렬과 모양 짓기(아랍어 글자 잇기)를 한다.
@@ -67,7 +68,7 @@ pub fn find_grapheme_prefix_length(text: &str, count: usize) -> usize {
 
 //==============================================================================
 // 낱말로 나누기. (원본 splitWords, 줄바꿈 용)
-// - 태국어, 라오어, 크메르어, 버마어, 한중일처럼 공백 없이 쓰는 글자도 낱말 사이를 찾는다. (ICU4X 낱말 나누기: 한중일은 사전, 동남아 글자는 LSTM)
+// - 태국어, 라오어, 크메르어, 버마어, 한중일처럼 공백 없이 쓰는 글자도 낱말 사이를 찾는다. (ICU4X 사전 낱말 나누기, 한중일 덩어리는 크롬의 ICU4C CjkBreakEngine 과 같은 셈으로 다시 나눈다)
 //   브라우저(ICU4C)처럼 한글이 이어진 덩어리는 따로 한 낱말로 본다. ("Rust로" → "Rust", "로". ICU4X 는 한글과 라틴 글자를 한 낱말로 잇는다)
 //   웹은 원본처럼 브라우저의 Intl.Segmenter 로 나눈다. (없는 브라우저면 원본처럼 통째로 한 조각)
 // - 문장 부호처럼 낱말이 아닌 조각은 앞 낱말에 붙인다. (줄 맨 앞에 문장 부호가 오지 않게) 맨 앞의 것은 첫 낱말 앞에 붙인다.
@@ -144,11 +145,11 @@ pub fn segment_words(text: &str) -> Vec<(&str, bool)> {
 }
 
 //==============================================================================
-// 낱말 경계 찾기. ((시작, 끝, 낱말인지) 목록, 데스크탑은 ICU4X)
+// 낱말 경계 찾기. ((시작, 끝, 낱말인지) 목록, 데스크탑은 ICU4X 사전 나누기, 한중일 덩어리는 ICU4C 와 같은 셈으로 다시 나눈다)
 //==============================================================================
 #[cfg(not(target_arch = "wasm32"))]
 fn find_word_boundaries(text: &str) -> Vec<(usize, usize, bool)> {
-	let word_segmenter = icu_segmenter::WordSegmenter::new_auto(icu_segmenter::options::WordBreakInvariantOptions::default());
+	let word_segmenter = icu_segmenter::WordSegmenter::new_dictionary(icu_segmenter::options::WordBreakInvariantOptions::default());
 	let mut boundary_list: Vec<(usize, usize, bool)> = Vec::new();
 	let mut break_iterator = word_segmenter.segment_str(text);
 	let mut previous_index = 0;
@@ -159,8 +160,210 @@ fn find_word_boundaries(text: &str) -> Vec<(usize, usize, bool)> {
 		boundary_list.push((previous_index, break_index, break_iterator.is_word_like()));
 		previous_index = break_index;
 	}
-	boundary_list
+	split_cjk_dictionary_runs(text, boundary_list)
 }
+
+//==============================================================================
+// 한중일 사전 글자인지. (ICU4C CjkBreakEngine 의 글자 모음: 한자, 히라가나, 가타카나, 장음 부호, 반각 장음과 탁점)
+//==============================================================================
+#[cfg(not(target_arch = "wasm32"))]
+fn is_cjk_dictionary_character(character: char) -> bool {
+	let code_point = character as u32;
+	let is_han = (0x3400..=0x4DBF).contains(&code_point) || (0x4E00..=0x9FFF).contains(&code_point) || (0xF900..=0xFAFF).contains(&code_point) || (0x20000..=0x323AF).contains(&code_point) || code_point == 0x3005 || code_point == 0x3007 || (0x3021..=0x3029).contains(&code_point) || (0x3038..=0x303B).contains(&code_point);
+	let is_hiragana = (0x3041..=0x3096).contains(&code_point) || (0x309D..=0x309F).contains(&code_point) || code_point == 0x1B001 || code_point == 0x1F200;
+	let is_katakana = (0x30A1..=0x30FA).contains(&code_point) || (0x30FD..=0x30FF).contains(&code_point) || (0x31F0..=0x31FF).contains(&code_point) || (0x32D0..=0x32FE).contains(&code_point) || (0x3300..=0x3357).contains(&code_point) || (0xFF66..=0xFF6F).contains(&code_point) || (0xFF71..=0xFF9D).contains(&code_point);
+	is_han || is_hiragana || is_katakana || code_point == 0x30FC || code_point == 0xFF70 || code_point == 0xFF9E || code_point == 0xFF9F
+}
+
+//==============================================================================
+// 가타카나인지. (ICU4C isKatakana, 가운뎃점 U+30FB 는 빼고 반각 가타카나는 든다)
+//==============================================================================
+#[cfg(not(target_arch = "wasm32"))]
+fn is_katakana_character(character: char) -> bool {
+	let code_point = character as u32;
+	((0x30A1..=0x30FE).contains(&code_point) && code_point != 0x30FB) || (0xFF66..=0xFF9F).contains(&code_point)
+}
+
+//==============================================================================
+// 한중일 사전 글자가 이어진 덩어리를 크롬(ICU4C CjkBreakEngine)처럼 다시 나누기. (나머지 경계는 그대로)
+// - ICU4X 의 사전 나누기는 가장 긴 낱말부터 고르고, ICU4C 는 사전의 낱말 값(작을수록 흔하다)의 합이 가장 작은 나누기를 동적 계획법으로 고른다.
+//   (사전에 없는 글자 하나는 값 255, 이어진 가타카나 1 ~ 8 자는 한 낱말 후보로 길이마다 정한 값, ICU4C dictbe.cpp 의 값과 같다)
+//   사전은 ICU4X 가 같이 들고 온 cjdict 다. 읽지 못하면 ICU4X 의 나누기를 그대로 쓴다. 사전을 찾기 전에 ICU4C 처럼 NFKC 로 바꾼다. (반각 가타카나)
+//==============================================================================
+#[cfg(not(target_arch = "wasm32"))]
+fn split_cjk_dictionary_runs(text: &str, boundary_list: Vec<(usize, usize, bool)>) -> Vec<(usize, usize, bool)> {
+	let dictionary_trie = match read_cjk_dictionary() {
+		Some(dictionary_trie) => {
+			dictionary_trie
+		}
+		None => {
+			return boundary_list;
+		}
+	};
+	let mut result_list: Vec<(usize, usize, bool)> = Vec::with_capacity(boundary_list.len());
+	let mut segment_index = 0;
+	while segment_index < boundary_list.len() {
+		let (segment_start, segment_end, is_word_like) = boundary_list[segment_index];
+		let is_cjk_segment = |start: usize, end: usize| -> bool {
+			text[start..end].chars().all(is_cjk_dictionary_character)
+		};
+		if !is_cjk_segment(segment_start, segment_end) {
+			result_list.push((segment_start, segment_end, is_word_like));
+			segment_index += 1;
+			continue;
+		}
+		// 이어진 한중일 조각들을 한 덩어리로.
+		let run_start = segment_start;
+		let mut run_end = segment_end;
+		segment_index += 1;
+		while segment_index < boundary_list.len() && is_cjk_segment(boundary_list[segment_index].0, boundary_list[segment_index].1) {
+			run_end = boundary_list[segment_index].1;
+			segment_index += 1;
+		}
+		for (piece_start, piece_end) in divide_cjk_dictionary_range(dictionary_trie, &text[run_start..run_end]) {
+			result_list.push((run_start + piece_start, run_start + piece_end, true));
+		}
+	}
+	result_list
+}
+
+//==============================================================================
+// 한중일 사전. (ICU4X 의 내장 자료 cjdict, 처음 쓸 때 읽는다)
+//==============================================================================
+#[cfg(not(target_arch = "wasm32"))]
+fn read_cjk_dictionary() -> Option<&'static icu_collections::char16trie::Char16Trie<'static>> {
+	use icu_provider::prelude::*;
+	static CJK_DICTIONARY: std::sync::OnceLock<Option<&'static icu_collections::char16trie::Char16Trie<'static>>> = std::sync::OnceLock::new();
+	*CJK_DICTIONARY.get_or_init(|| {
+		let mut request_metadata = DataRequestMetadata::default();
+		request_metadata.silent = true;
+		request_metadata.attributes_prefix_match = true;
+		let data_request = DataRequest {
+			id: DataIdentifierBorrowed::for_marker_attributes(DataMarkerAttributes::from_str_or_panic("cjdict")),
+			metadata: request_metadata,
+		};
+		let data_response: DataResponse<icu_segmenter::provider::SegmenterDictionaryAutoV2> = icu_segmenter::provider::Baked.load(data_request).ok()?;
+		match data_response.payload.get_static()? {
+			icu_segmenter::provider::DictionaryBreakData::Char16Trie(dictionary_trie) => {
+				Some(dictionary_trie)
+			}
+			_ => {
+				None
+			}
+		}
+	})
+}
+
+//==============================================================================
+// 한중일 덩어리 하나를 낱말로 나누기. (ICU4C CjkBreakEngine::divideUpDictionaryRange, 바이트 자리 쌍 목록)
+//==============================================================================
+#[cfg(not(target_arch = "wasm32"))]
+fn divide_cjk_dictionary_range(dictionary_trie: &icu_collections::char16trie::Char16Trie<'static>, run_text: &str) -> Vec<(usize, usize)> {
+	// 사전 낱말의 가장 긴 글자 수, 사전에 없는 글자의 값, 가타카나 덩어리의 길이 상한과 길이마다의 값. (ICU4C 와 같다)
+	const MAXIMUM_WORD_LENGTH: usize = 20;
+	const UNKNOWN_CHARACTER_COST: u32 = 255;
+	const MAXIMUM_KATAKANA_GROUP_LENGTH: usize = 20;
+	const KATAKANA_COST_LIST: [u32; 9] = [8192, 984, 408, 240, 204, 252, 300, 372, 480];
+	// NFKC 로 바꾼 글자와 그 글자가 나온 원래 글의 바이트 자리. (ICU4C 처럼 정규화 덩어리의 첫 자리, 반각 가타카나와 탁점은 전각 한 글자로)
+	let character_list = normalize_cjk_dictionary_text(run_text);
+	let character_count = character_list.len();
+	let mut best_cost = vec![u32::MAX; character_count + 1];
+	let mut previous_index = vec![usize::MAX; character_count + 1];
+	best_cost[0] = 0;
+	let mut is_previous_katakana = false;
+	for character_index in 0..character_count {
+		if best_cost[character_index] == u32::MAX {
+			is_previous_katakana = is_katakana_character(character_list[character_index].1);
+			continue;
+		}
+		// 이 글자에서 시작하는 사전 낱말들. (글자 수, 값)
+		let mut match_list: Vec<(usize, u32)> = Vec::new();
+		let mut trie_cursor = dictionary_trie.cursor();
+		for word_length in 1..=MAXIMUM_WORD_LENGTH.min(character_count - character_index) {
+			trie_cursor.step(character_list[character_index + word_length - 1].1);
+			if let Some(value) = trie_cursor.value() {
+				match_list.push((word_length, value.max(0) as u32));
+			}
+			if trie_cursor.is_empty() {
+				break;
+			}
+		}
+		if match_list.first().map(|(word_length, _)| *word_length != 1).unwrap_or(true) {
+			match_list.push((1, UNKNOWN_CHARACTER_COST));
+		}
+		for (word_length, value) in match_list {
+			let new_cost = best_cost[character_index].saturating_add(value);
+			if new_cost < best_cost[character_index + word_length] {
+				best_cost[character_index + word_length] = new_cost;
+				previous_index[character_index + word_length] = character_index;
+			}
+		}
+		// 이어진 가타카나는 덩어리째 한 낱말 후보. (가타카나 한 글자 낱말은 드물다)
+		let is_katakana = is_katakana_character(character_list[character_index].1);
+		if !is_previous_katakana && is_katakana {
+			let mut katakana_run_length = 1;
+			while character_index + katakana_run_length < character_count && katakana_run_length < MAXIMUM_KATAKANA_GROUP_LENGTH && is_katakana_character(character_list[character_index + katakana_run_length].1) {
+				katakana_run_length += 1;
+			}
+			if katakana_run_length < MAXIMUM_KATAKANA_GROUP_LENGTH {
+				let katakana_cost = KATAKANA_COST_LIST.get(katakana_run_length).copied().unwrap_or(8192);
+				let new_cost = best_cost[character_index].saturating_add(katakana_cost);
+				if new_cost < best_cost[character_index + katakana_run_length] {
+					best_cost[character_index + katakana_run_length] = new_cost;
+					previous_index[character_index + katakana_run_length] = character_index;
+				}
+			}
+		}
+		is_previous_katakana = is_katakana;
+	}
+	// 끝에서 거꾸로 따라가 경계를 모은다.
+	let mut boundary_index_list: Vec<usize> = vec![character_count];
+	let mut current_index = character_count;
+	while current_index > 0 && previous_index[current_index] != usize::MAX {
+		current_index = previous_index[current_index];
+		boundary_index_list.push(current_index);
+	}
+	if current_index != 0 {
+		boundary_index_list.push(0);
+	}
+	boundary_index_list.reverse();
+	let byte_offset = |character_index: usize| -> usize {
+		character_list.get(character_index).map(|(byte_index, _)| *byte_index).unwrap_or(run_text.len())
+	};
+	let mut byte_boundary_list: Vec<usize> = boundary_index_list.into_iter().map(byte_offset).collect();
+	byte_boundary_list.dedup();
+	byte_boundary_list.windows(2).map(|window| (window[0], window[1])).collect()
+}
+
+//==============================================================================
+// 한중일 사전 찾기에 쓸 NFKC 글자. ((원래 글의 바이트 자리, 바꾼 글자) 목록)
+// - 원래 글을 정규화 덩어리(글자 하나와 뒤에 붙는 결합 부호, 탁점)로 나눠 덩어리마다 NFKC 로 바꾸고, 바꾼 글자는 모두 덩어리의 첫 자리를 가리킨다. (ICU4C 의 inputMap)
+//==============================================================================
+#[cfg(not(target_arch = "wasm32"))]
+fn normalize_cjk_dictionary_text(run_text: &str) -> Vec<(usize, char)> {
+	use unicode_normalization::char::canonical_combining_class;
+	use unicode_normalization::UnicodeNormalization;
+	let is_attached = |character: char| -> bool {
+		canonical_combining_class(character) != 0 || character == '\u{FF9E}' || character == '\u{FF9F}' || character == '\u{3099}' || character == '\u{309A}'
+	};
+	let mut normalized_list: Vec<(usize, char)> = Vec::with_capacity(run_text.len());
+	let mut chunk_start: Option<usize> = None;
+	for (byte_index, character) in run_text.char_indices() {
+		if chunk_start.is_some() && !is_attached(character) {
+			let start = chunk_start.unwrap_or(0);
+			normalized_list.extend(run_text[start..byte_index].nfkc().map(|normalized_character| (start, normalized_character)));
+			chunk_start = None;
+		}
+		if chunk_start.is_none() {
+			chunk_start = Some(byte_index);
+		}
+	}
+	if let Some(start) = chunk_start {
+		normalized_list.extend(run_text[start..].nfkc().map(|normalized_character| (start, normalized_character)));
+	}
+	normalized_list
+}
+
 
 #[cfg(target_arch = "wasm32")]
 thread_local! {
@@ -1368,5 +1571,29 @@ mod tests {
 		assert_eq!(text.wrap_text_to_lines_with("a\n\nb", 50.0, &measure_width), vec!["a", "", "b"]);
 		text.set_wrap_mode(TextWrapMode::Character);
 		assert_eq!(text.wrap_text_to_lines_with("👨‍👩‍👧e\u{301}xy", 20.0, &measure_width), vec!["👨‍👩‍👧e\u{301}", "xy"]);
+	}
+
+	//==============================================================================
+	// 낱말 나누기: 크롬 Intl.Segmenter(ICU4C) 와 같다. (데스크탑, 일본어는 낱말 값의 합이 가장 작은 나누기와 반각 가타카나 NFKC, 태국어 등은 사전)
+	//==============================================================================
+	#[cfg(not(target_arch = "wasm32"))]
+	#[test]
+	fn word_boundaries_match_chrome_intl_segmenter() {
+		let chrome_result_list = [
+			("今日はいい天気ですね。明日も晴れるといいですね。", "今日|は|いい|天気|です|ね|。~|明日|も|晴れる|と|いい|です|ね|。~"),
+			("カタカナとひらがなを混ぜた文章です", "カタカナ|と|ひ|ら|が|な|を|混|ぜ|た|文章|です"),
+			("彼女はアイスクリームを食べながらテレビを見ていた", "彼女|は|アイスクリーム|を|食|べ|ながら|テレビ|を|見|てい|た"),
+			("ｶﾀｶﾅﾊﾝｶｸ文字列", "ｶﾀｶﾅ|ﾊﾝ|ｶｸ|文字|列"),
+			("我们今天去公园玩吧，天气非常好", "我们|今天|去|公园|玩|吧|，~|天气|非常|好"),
+			("ภาษาไทยเป็นภาษาที่สวยงามมาก", "ภาษา|ไทย|เป็น|ภาษา|ที่|สวยงาม|มาก"),
+			("สวัสดีครับ ยินดีต้อนรับสู่ประเทศไทย", "สวัสดี|ครับ| ~|ยินดี|ต้อนรับ|สู่|ประเทศไทย"),
+			("ພາສາລາວງາມຫຼາຍ", "ພາສາ|ລາວ|ງາມ|ຫຼາຍ"),
+			("မြန်မာဘာသာစကား", "မြန်မာဘာသာ|စကား"),
+			("Vanillaエンジンで日本語を表示します", "Vanilla|エンジン|で|日本語|を|表示|し|ます"),
+		];
+		for (text, chrome_result) in chrome_result_list {
+			let piece_list: Vec<String> = find_word_boundaries(text).into_iter().map(|(start, end, is_word_like)| format!("{}{}", &text[start..end], if is_word_like { "" } else { "~" })).collect();
+			assert_eq!(piece_list.join("|"), chrome_result);
+		}
 	}
 }

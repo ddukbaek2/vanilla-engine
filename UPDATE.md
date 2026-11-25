@@ -258,6 +258,8 @@
 - 맥 색 이모지를 CoreText 로 그린다. (platform/desktop/coretextglyph.rs) 크롬 맥처럼 작은 글자 크기에서 이모지를 키워 그리고 아래로 내린다. (16px 에서 20px 그림, 24px 부터 글자 크기 그대로) 전진폭은 CoreText 가 그린 그림 상자의 높이를 정수로 반올림한 값이다. 크롬 measureText 와 8 ~ 128px 의 23 가지 크기에서 같고(8px 10, 13px 16, 16px 20, 21px 23), 12, 16, 20, 32, 64px 의 그림 상자와 알파 합이 크롬 캔버스 getImageData 와 같다. (색 합은 0.01% 안) 시스템에 올린 글꼴만 CoreText 가 이모지를 키우므로 PostScript 이름으로 글꼴을 짓는다
 - 맥: 윤곽이 glyf, CFF, CFF2 에 없는 글꼴도 CoreText 로 그린다. 맥 26 의 중국어 대체 글꼴 PingFangUI.ttc 는 윤곽이 애플 전용 hvgl 표에 있어 열린 해석기로 그릴 수 없다. (전에는 간체 글자가 빈칸이었다) LoadedFont.with_source_path, is_core_text_raster, read_advance_scale, is_integer_advance
 - 새 크레이트: 맥 objc2-core-graphics 0.3
+- 데스크탑 낱말 나누기를 크롬 Intl.Segmenter(ICU4C 사전)와 맞췄다. 태국어, 라오어, 크메르어, 버마어는 LSTM 대신 사전으로 나눈다. (ICU4X WordSegmenter::new_dictionary) 한중일 덩어리는 ICU4X 가 가장 긴 낱말부터 고르고 ICU4C 는 낱말 값의 합이 가장 작은 나누기를 골라 일본어가 달랐다("今日|はい|い"). ICU4C CjkBreakEngine 의 셈(사전에 없는 글자 값 255, 이어진 가타카나 1 ~ 8 자의 길이 값, 사전 찾기 전 NFKC)을 옮겨 ICU4X 의 같은 사전(cjdict)으로 다시 나눈다. 일본어, 중국어, 태국어, 라오어, 크메르어, 버마어 22 문장이 크롬과 같다. (시험으로 넣었다)
+- 새 크레이트: icu_provider 2, icu_collections 2 (icu_segmenter 가 이미 쓰는 판), unicode-normalization 0.1 (데스크탑)
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.
