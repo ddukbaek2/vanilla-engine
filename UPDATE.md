@@ -506,6 +506,7 @@
   - Canvas2D, Path2D: arc, ellipse, arcTo, roundRect 를 크롬처럼 스키아 원뿔 곡선으로 담는다. (블링크 canvas_path.cc 의 각 다듬기와 납작한 타원, 스키아 SkPathBuilder::arcTo, SkConic::BuildUnitArc, SkRRect 반지름 줄이기와 addRRect 점 차례) 데스크탑은 칠할 때 스키아 CPU 래스터처럼 기기 픽셀 0.25 안의 2 차 곡선으로 나눈다. (전에는 3 차 베지어 근사)
   - Canvas2D, Path2D: roundRect 가 타원 모서리를 받는다. (CanvasRadius::Elliptical, (x, y), 원본 DOMPointInit) 웹 Path2D 는 원본처럼 브라우저 Path2D 의 arc, roundRect 같은 함수를 그대로 부른다
   - Canvas2D: GPU 에 올리며 CPU 픽셀을 놓은 엔진 Image 도 그린다. (그림이 기억한 텍스처를 되읽는다, 전에는 알리고 건너뛰었다)
+  - 입력 필드(데스크탑, DOM 입력을 직접 누르게 한 필드): 크롬 데스크탑 터치처럼 손가락으로 650ms 길게 누르면(크롬 aura 의 길게 누르기 500 + 누름 표시 150, 허용 거리 15 DIP) 그 자리 낱말을 고르고 터치 선택 손잡이(크롬 벡터 아이콘 꼴, 끌어 선택을 바꾼다)와 빠른 메뉴(잘라내기, 복사, 붙여넣기, "...", 뗀 뒤 100ms, 선택 위 가운데)를 띄운다. 고른 것도 붙여 넣을 것도 없으면 크롬 편집 칸 메뉴다. 윈도우는 뗄 때(블링크 context_menu_on_mouse_up) 정한다. 키, 마우스 누름, 휠은 손잡이와 메뉴를 지운다. "..." 는 선택 위 가운데에 편집 칸 메뉴(크롬 터치 메뉴 자리)
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.

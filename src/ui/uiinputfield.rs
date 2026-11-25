@@ -23,6 +23,7 @@
 //   - 포커스를 잃을 때 조합 중이던 글은 확정해 값에 넣는다. (브라우저가 DOM 입력에 하는 일과 같다)
 //   - 데스크탑 문맥 메뉴(오른쪽 단추)는 DOM 이 없어 캔버스에 그린다. 루트의 마지막 자식 노드로 만들어 위에 그린다. 웹은 원본처럼 DOM 메뉴다.
 //     DOM 입력을 직접 누르게 한 필드(use_direct_touch)는 원본에서 크롬이 띄우는 편집 칸 메뉴를 같은 항목과 단축키 글로 그린다. (ui/uiinputfieldmenu.rs)
+//     그 필드는 크롬 데스크탑 터치처럼 손가락 길게 누르기(650ms, 15 DIP 안)로 낱말을 고르고 터치 손잡이와 빠른 메뉴를 띄운다. (윈도우는 뗄 때 메뉴를 정한다)
 //   - 데스크탑 DOM 입력 필드는 원본 DOM 입력 칸처럼 되돌리기와 다시 하기를 한다. (Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y, 맥은 Cmd, 블링크의 묶음 규칙, TextEditBuffer)
 //   - 데스크탑 한 줄 DOM 입력 필드는 블링크 입력 칸처럼 넣는 글의 끝 줄바꿈을 지우고 가운데 줄바꿈을 공백으로 바꾸고, 위와 page 위는 글 앞, 아래와 page 아래는 글 끝으로 옮긴다.
 //   - set_multiline(true) 면 크롬 textarea 같은 여러 줄 입력이다. (원본 엔진에는 없고, 원본은 Pane 의 textarea 프리셋으로 DOM textarea 를 쓴다)
@@ -53,6 +54,7 @@ use crate::core::textinput::{convert_character_index_to_byte_index, convert_char
 use crate::ui::textarealayout::{build_text_area_layout, TextAreaLayout};
 use crate::ui::uicontrol::UIControl;
 use crate::ui::uiview::is_view_position_inside_node;
+use std::f32::consts::PI;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 //==============================================================================
@@ -60,6 +62,18 @@ use std::sync::atomic::{AtomicU64, Ordering};
 //==============================================================================
 // 커서 깜빡임 주기. (초)
 const CURSOR_BLINK_SECONDS: f32 = 0.5;
+// 손가락 길게 누르기. (크롬 데스크탑 aura: long_press_time 500 에 show_press_delay 150 을 더한 650ms, 허용 거리 max_touch_move_in_pixels_for_click 15 + 0.05)
+#[cfg(not(target_arch = "wasm32"))]
+const LONG_PRESS_SECONDS: f32 = 0.65;
+const LONG_PRESS_TOUCH_SLOP: f32 = 15.05;
+// 빠른 메뉴는 손가락을 뗀 뒤 100ms 에 뜬다. (크롬 kQuickMenuDelayInMs)
+#[cfg(not(target_arch = "wasm32"))]
+const QUICK_MENU_DELAY_SECONDS: f32 = 0.1;
+// 터치 선택 손잡이. (크롬 touch_handle_drawable_aura: 왼쪽과 오른쪽 32, 가운데 39 DIP, 누름 판정은 좌우와 아래 6 더, 색 kColorSysPrimary #0B57D0, 불투명도 0.8)
+const TOUCH_HANDLE_SIZE: f32 = 32.0;
+const TOUCH_CENTER_HANDLE_SIZE: f32 = 39.0;
+const TOUCH_HANDLE_PADDING: f32 = 6.0;
+const TOUCH_HANDLE_COLOR: Color = Color::create(11.0 / 255.0, 87.0 / 255.0, 208.0 / 255.0, 0.8);
 // 여러 줄 필드의 탭 크기. (공백 몇 개 폭, CSS tab-size 기본 8)
 const DEFAULT_TAB_SIZE: f32 = 8.0;
 // 여러 줄 필드의 스크롤 막대 썸. (얹는 막대, PaneStyle 과 같다)
@@ -599,6 +613,41 @@ pub struct UIInputField {
 	caret_reveal_request: Option<CaretRevealKind>,
 	// 썸을 끄는 중이면 (누른 y, 그때 scroll_top).
 	scrollbar_drag_start: Option<(f32, f32)>,
+	// 손가락 길게 누르기. (데스크탑, DOM 입력을 직접 누르게 한 필드)
+	long_press_state: Option<LongPressState>,
+	// 터치 선택 손잡이를 보이는지와 손잡이 끝점들. ((노드 좌표 끝점, 앞인지, 커서 손잡이인지), 그릴 때 둔다)
+	is_touch_handle_visible: bool,
+	touch_handle_list: Vec<(Vector2, bool, bool)>,
+	dragging_touch_handle: Option<TouchHandleDrag>,
+	// 빠른 메뉴. (크롬 quick_menu_requested_, 뗀 뒤 남은 시간, 띄운 노드)
+	is_quick_menu_requested: bool,
+	quick_menu_delay: Option<f32>,
+	quick_menu_node_id: Option<NodeId>,
+	#[cfg(not(target_arch = "wasm32"))]
+	pending_quick_menu_command: Option<crate::ui::uiinputfieldmenu::QuickMenuCommand>,
+	// 노드 한 단위의 창 픽셀. (손잡이와 빠른 메뉴 크기)
+	window_pixel_per_unit: f32,
+}
+
+//==============================================================================
+// 손가락 길게 누르기 상태. (누른 뷰 자리, 지난 시간, 길게 누르기를 했는지)
+//==============================================================================
+#[derive(Clone, Copy, Debug)]
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+struct LongPressState {
+	start_view_position: Vector2,
+	elapsed: f32,
+	is_fired: bool,
+}
+
+//==============================================================================
+// 끄는 터치 손잡이. (앞 손잡이인지, 누른 자리에서 손잡이 끝점까지의 노드 좌표 차이)
+//==============================================================================
+#[derive(Clone, Copy, Debug)]
+struct TouchHandleDrag {
+	is_start_handle: bool,
+	is_caret_handle: bool,
+	focus_offset: Vector2,
 }
 
 //==============================================================================
@@ -676,6 +725,16 @@ impl UIInputField {
 			is_caret_upstream: false,
 			caret_reveal_request: None,
 			scrollbar_drag_start: None,
+			long_press_state: None,
+			is_touch_handle_visible: false,
+			touch_handle_list: Vec::new(),
+			dragging_touch_handle: None,
+			is_quick_menu_requested: false,
+			quick_menu_delay: None,
+			quick_menu_node_id: None,
+			#[cfg(not(target_arch = "wasm32"))]
+			pending_quick_menu_command: None,
+			window_pixel_per_unit: 1.0,
 		}
 	}
 
@@ -1353,6 +1412,8 @@ impl UIInputField {
 	fn handle_blur(&mut self, context: &mut ComponentContext) {
 		let committed_text = self.apply_blur();
 		self.hide_context_menu(context);
+		self.hide_touch_selection(context);
+		self.long_press_state = None;
 		if let Some(committed_text) = committed_text {
 			context.get_engine().get_input_manager().get_text_input().set_ime_commit_guard(&committed_text);
 			self.fire_change_event(context);
@@ -1702,6 +1763,14 @@ impl UIInputField {
 	//==============================================================================
 	#[cfg(not(target_arch = "wasm32"))]
 	fn show_browser_context_menu(&mut self, context: &mut ComponentContext, view_position: Vector2) {
+		self.show_browser_context_menu_with_anchor(context, view_position, false);
+	}
+
+	//==============================================================================
+	// 크롬 편집 칸 메뉴 열기. (is_touch_anchor 면 크롬 터치 메뉴 자리: 점 위 가운데에 15 띄워, 위로 넘치면 아래)
+	//==============================================================================
+	#[cfg(not(target_arch = "wasm32"))]
+	fn show_browser_context_menu_with_anchor(&mut self, context: &mut ComponentContext, view_position: Vector2, is_touch_anchor: bool) {
 		let field_state = crate::ui::uiinputfieldmenu::BrowserMenuFieldState {
 			can_undo: self.edit_buffer.can_undo(),
 			can_redo: self.edit_buffer.can_redo(),
@@ -1716,7 +1785,7 @@ impl UIInputField {
 		let canvas_native_size = view_manager.get_canvas_native_size();
 		let view_scale = Vector2::create(canvas_native_size.x / view_size.x.max(1.0), canvas_native_size.y / view_size.y.max(1.0));
 		let owner_node_id = context.get_node_id();
-		let menu_id = crate::ui::uiinputfieldmenu::create_browser_menu_node(context.get_node_tree_mut(), owner_node_id, view_position, view_scale, view_size, entry_list);
+		let menu_id = crate::ui::uiinputfieldmenu::create_browser_menu_node(context.get_node_tree_mut(), owner_node_id, view_position, view_scale, view_size, entry_list, is_touch_anchor);
 		self.context_menu_node_id = Some(menu_id);
 	}
 
@@ -1759,7 +1828,8 @@ impl UIInputField {
 				false
 			}
 		};
-		if !is_inside && !is_inside_menu {
+		let is_inside_quick_menu = self.quick_menu_node_id.map(|quick_menu_node_id| node_tree.contains(quick_menu_node_id) && is_view_position_inside_node(node_tree, quick_menu_node_id, view_input_position)).unwrap_or(false);
+		if !is_inside && !is_inside_menu && !is_inside_quick_menu {
 			self.handle_blur(context);
 		}
 	}
@@ -2145,12 +2215,417 @@ impl UIInputField {
 		}
 		graphic.end_clip_rect();
 
+		// 터치 선택 손잡이. (경계 줄의 아래 끝)
+		{
+			let selection_range = self.edit_buffer.get_selection_range().filter(|_| composition_count == 0);
+			let (start_point, end_point) = match selection_range {
+				Some((start_index, end_index)) => {
+					let (start_x, start_top) = self.text_area_layout.get_caret_position(start_index, false);
+					let (end_x, end_top) = self.text_area_layout.get_caret_position(end_index, true);
+					(Vector2::create(padding + start_x, origin_y + start_top + line_height), Vector2::create(padding + end_x, origin_y + end_top + line_height))
+				}
+				None => {
+					let caret_point = Vector2::create(self.caret_local_x, self.caret_local_top + line_height);
+					(caret_point, caret_point)
+				}
+			};
+			self.place_and_draw_touch_handles(graphic, start_point, end_point, selection_range.is_some());
+		}
+
 		// 썸.
 		if let Some(thumb_rect) = self.calculate_text_area_thumb_rect(content_size) {
 			graphic.set_fill_color(Color::create(121.0 / 255.0, 121.0 / 255.0, 121.0 / 255.0, 0.4));
 			graphic.draw_rect(thumb_rect);
 		}
 		graphic.pop_state();
+	}
+}
+
+//==============================================================================
+// 손가락 길게 누르기, 터치 선택 손잡이, 빠른 메뉴. (데스크탑에서 DOM 입력을 직접 누르게 한 필드, 원본은 크롬 데스크탑 터치가 한다)
+// - 손가락으로 누른 채 650ms(크롬 aura 의 길게 누르기 500 + 누름 표시 150) 동안 15 DIP 안에 있으면 길게 누르기다.
+// - 길게 누르면 그 자리의 낱말을 고르고(블링크 터치: 줄바꿈으로 시작하거나 공백뿐이거나 글 끝이면 커서만) 손잡이를 보인다.
+// - 메뉴는 윈도우는 뗄 때(블링크 context_menu_on_mouse_up), 그 밖은 길게 누르는 순간 정한다. (크롬 TouchSelectionControllerClientAura::HandleContextMenu)
+//   고른 것이 있거나 클립보드에 글이 있으면 빠른 메뉴를 부탁하고(뗀 뒤 100ms), 둘 다 없으면 손잡이를 숨기고 보통 문맥 메뉴다.
+// - 손잡이를 끌면 그 끝을 옮긴다. 키, 마우스 누름, 휠, 다른 자리 누름은 손잡이와 빠른 메뉴를 지운다.
+//==============================================================================
+impl UIInputField {
+	//==============================================================================
+	// 손가락 길게 누르기를 받는 필드인지. (데스크탑, 크롬 편집 칸 메뉴를 그리는 필드와 같다)
+	//==============================================================================
+	fn is_long_press_target(&self) -> bool {
+		cfg!(not(target_arch = "wasm32")) && self.use_direct_touch && self.use_dom_input
+	}
+
+	//==============================================================================
+	// 뷰 한 단위의 창 픽셀.
+	//==============================================================================
+	fn read_view_scale(context: &ComponentContext) -> Vector2 {
+		let view_manager = context.get_engine().get_view_manager();
+		let view_size = view_manager.get_view_size();
+		let canvas_native_size = view_manager.get_canvas_native_size();
+		let scale_x = canvas_native_size.x / view_size.x.max(1.0);
+		let scale_y = canvas_native_size.y / view_size.y.max(1.0);
+		// 창이 없으면(시험) 1.
+		if scale_x <= 0.0 || scale_y <= 0.0 {
+			return Vector2::create(1.0, 1.0);
+		}
+		Vector2::create(scale_x, scale_y)
+	}
+
+	//==============================================================================
+	// 빠른 메뉴 닫기. (부탁은 남긴다)
+	//==============================================================================
+	fn hide_quick_menu(&mut self, context: &mut ComponentContext) {
+		if let Some(quick_menu_node_id) = self.quick_menu_node_id.take() {
+			if context.get_node_tree().contains(quick_menu_node_id) {
+				context.get_node_tree_mut().destroy_node(quick_menu_node_id);
+			}
+		}
+	}
+
+	//==============================================================================
+	// 손잡이와 빠른 메뉴 지우기. (크롬 HideAndDisallowShowingAutomatically)
+	//==============================================================================
+	fn hide_touch_selection(&mut self, context: &mut ComponentContext) {
+		self.is_touch_handle_visible = false;
+		self.is_quick_menu_requested = false;
+		self.quick_menu_delay = None;
+		self.dragging_touch_handle = None;
+		self.hide_quick_menu(context);
+	}
+
+	//==============================================================================
+	// 노드 좌표의 문자 자리. ((자리, 위쪽 친화), 한 줄은 x, 여러 줄은 배치)
+	//==============================================================================
+	fn find_character_index_at_local(&mut self, context: &ComponentContext, local_position: Vector2) -> (usize, bool) {
+		if self.is_multiline {
+			let content_size = context.get_transform().get_content_size();
+			self.ensure_text_area_layout_without_graphic(content_size.x);
+			return self.text_area_layout.find_character_index_at(local_position.x - self.padding, local_position.y - self.padding + self.scroll_top);
+		}
+		(self.measure_character_index_at_local_x(local_position.x), false)
+	}
+
+	//==============================================================================
+	// 길게 누른 자리의 낱말 고르기. (블링크 SelectClosestWordFromHitTestResult 의 터치, 뒤 공백은 넣지 않는다)
+	//==============================================================================
+	#[cfg(not(target_arch = "wasm32"))]
+	fn select_word_at(&mut self, character_index: usize) {
+		let text = self.edit_buffer.get_text().to_string();
+		let character_count = count_characters(&text);
+		let mut word_range: Option<(usize, usize)> = None;
+		if character_index < character_count {
+			let mut segment_start = 0;
+			for (segment, _) in crate::core::component::text::segment_words(&text) {
+				let segment_length = segment.chars().count();
+				if character_index < segment_start + segment_length {
+					let is_no_word = segment.starts_with('\n') || segment.chars().all(char::is_whitespace);
+					if !is_no_word {
+						word_range = Some((segment_start, segment_start + segment_length));
+					}
+					break;
+				}
+				segment_start += segment_length;
+			}
+		}
+		match word_range {
+			Some((start_index, end_index)) => {
+				self.edit_buffer.set_selection(start_index, end_index);
+			}
+			None => {
+				self.edit_buffer.set_selection(character_index, character_index);
+			}
+		}
+		self.bump_value_revision();
+	}
+
+	//==============================================================================
+	// 길게 누르기 셈. (누른 채 650ms 이면 낱말을 고르고 손잡이를 보인다. 윈도우가 아니면 메뉴도 이때 정한다)
+	//==============================================================================
+	#[cfg(not(target_arch = "wasm32"))]
+	fn update_long_press(&mut self, context: &mut ComponentContext, time_delta: f32) {
+		let mut long_press_state = match self.long_press_state {
+			Some(long_press_state) if !long_press_state.is_fired => {
+				long_press_state
+			}
+			_ => {
+				return;
+			}
+		};
+		if !context.get_engine().get_input_manager().is_touch_down() {
+			self.long_press_state = None;
+			return;
+		}
+		long_press_state.elapsed += time_delta;
+		if long_press_state.elapsed < LONG_PRESS_SECONDS {
+			self.long_press_state = Some(long_press_state);
+			return;
+		}
+		long_press_state.is_fired = true;
+		self.long_press_state = Some(long_press_state);
+		self.drag_start_index = None;
+		let local_position = context.get_node_tree().convert_view_position_to_node_position(context.get_node_id(), long_press_state.start_view_position).unwrap_or(Vector2::zero());
+		let (character_index, _) = self.find_character_index_at_local(context, local_position);
+		self.select_word_at(character_index);
+		self.is_touch_handle_visible = true;
+		self.reset_cursor_blink();
+		if !cfg!(target_os = "windows") {
+			self.handle_touch_context_menu(context, long_press_state.start_view_position);
+		}
+	}
+
+	//==============================================================================
+	// 터치 문맥 메뉴 정하기. (고른 것이 있거나 붙여 넣을 수 있으면 빠른 메뉴 부탁, 아니면 손잡이를 숨기고 보통 문맥 메뉴)
+	//==============================================================================
+	#[cfg(not(target_arch = "wasm32"))]
+	fn handle_touch_context_menu(&mut self, context: &mut ComponentContext, view_position: Vector2) {
+		let has_selection = self.edit_buffer.has_selection();
+		let can_paste = context.get_engine().read_clipboard_text().map(|clipboard_text| !clipboard_text.is_empty()).unwrap_or(false);
+		if crate::ui::uiinputfieldmenu::is_quick_menu_available(has_selection, can_paste) {
+			self.is_quick_menu_requested = true;
+			return;
+		}
+		self.hide_touch_selection(context);
+		self.show_context_menu(context, view_position);
+	}
+
+	//==============================================================================
+	// 빠른 메뉴 띄우고 닫기. (부탁이 있고, 손가락이 떨어져 있고, 손잡이를 끌지 않을 때 100ms 뒤 띄운다)
+	//==============================================================================
+	#[cfg(not(target_arch = "wasm32"))]
+	fn update_quick_menu(&mut self, context: &mut ComponentContext, time_delta: f32) {
+		if let Some(quick_menu_node_id) = self.quick_menu_node_id {
+			if !context.get_node_tree().contains(quick_menu_node_id) {
+				self.quick_menu_node_id = None;
+			}
+		}
+		let is_touch_down = context.get_engine().get_input_manager().is_touch_down();
+		let should_show = self.is_quick_menu_requested && self.is_focused && !is_touch_down && self.dragging_touch_handle.is_none();
+		if !should_show {
+			self.hide_quick_menu(context);
+			self.quick_menu_delay = None;
+			return;
+		}
+		if self.quick_menu_node_id.is_some() {
+			return;
+		}
+		let remaining_seconds = self.quick_menu_delay.unwrap_or(QUICK_MENU_DELAY_SECONDS) - time_delta;
+		if remaining_seconds > 0.0 {
+			self.quick_menu_delay = Some(remaining_seconds);
+			return;
+		}
+		self.quick_menu_delay = None;
+		let has_selection = self.edit_buffer.has_selection();
+		let can_paste = context.get_engine().read_clipboard_text().map(|clipboard_text| !clipboard_text.is_empty()).unwrap_or(false);
+		if !crate::ui::uiinputfieldmenu::is_quick_menu_available(has_selection, can_paste) {
+			return;
+		}
+		let command_list = crate::ui::uiinputfieldmenu::build_quick_menu_command_list(has_selection, can_paste);
+		let anchor_rect = self.read_selection_bound_view_rect(context);
+		let handle_size = if has_selection {
+			Vector2::create(TOUCH_HANDLE_SIZE + TOUCH_HANDLE_PADDING * 2.0, TOUCH_HANDLE_SIZE)
+		}
+		else {
+			Vector2::create(TOUCH_CENTER_HANDLE_SIZE + TOUCH_HANDLE_PADDING * 2.0, TOUCH_CENTER_HANDLE_SIZE)
+		};
+		let view_scale = UIInputField::read_view_scale(context);
+		let view_size = context.get_engine().get_view_manager().get_view_size();
+		let owner_node_id = context.get_node_id();
+		let quick_menu_node_id = crate::ui::uiinputfieldmenu::create_quick_menu_node(context.get_node_tree_mut(), owner_node_id, anchor_rect, handle_size, view_scale, view_size, &command_list);
+		self.quick_menu_node_id = Some(quick_menu_node_id);
+	}
+
+	//==============================================================================
+	// 선택 경계 사이의 뷰 사각형. (크롬 RectFBetweenVisibleSelectionBounds: 두 경계 선분의 끝점을 감싼다. 커서 하나면 커서 선분)
+	//==============================================================================
+	#[cfg(not(target_arch = "wasm32"))]
+	fn read_selection_bound_view_rect(&self, context: &ComponentContext) -> Rect {
+		let world_matrix = context.get_node_tree().calculate_world_matrix(context.get_node_id());
+		let mut minimum_position = Vector2::create(f32::MAX, f32::MAX);
+		let mut maximum_position = Vector2::create(f32::MIN, f32::MIN);
+		for (focus_point, _, _) in self.touch_handle_list.iter() {
+			for point in [Vector2::create(focus_point.x, focus_point.y - self.read_touch_line_height()), *focus_point] {
+				let view_point = world_matrix.transform_point(point.x, point.y);
+				minimum_position = Vector2::create(minimum_position.x.min(view_point.x), minimum_position.y.min(view_point.y));
+				maximum_position = Vector2::create(maximum_position.x.max(view_point.x), maximum_position.y.max(view_point.y));
+			}
+		}
+		if minimum_position.x > maximum_position.x {
+			return Rect::zero();
+		}
+		Rect::create(minimum_position.x, minimum_position.y, maximum_position.x - minimum_position.x, maximum_position.y - minimum_position.y)
+	}
+
+	//==============================================================================
+	// 선택 경계 선분의 높이. (한 줄은 선택 사각형 높이, 여러 줄은 줄 높이)
+	//==============================================================================
+	fn read_touch_line_height(&self) -> f32 {
+		if self.is_multiline {
+			self.text_area_layout.line_height
+		}
+		else {
+			self.font_size * 1.3
+		}
+	}
+
+	//==============================================================================
+	// 빠른 메뉴 명령 하기. (잘라내기, 복사, 붙여넣기는 손잡이를 숨기고 한다. "..." 는 선택 위 가운데에서 보통 문맥 메뉴)
+	//==============================================================================
+	#[cfg(not(target_arch = "wasm32"))]
+	fn perform_quick_menu_command(&mut self, context: &mut ComponentContext, command: crate::ui::uiinputfieldmenu::QuickMenuCommand) {
+		use crate::ui::uiinputfieldmenu::QuickMenuCommand;
+		let anchor_rect = self.read_selection_bound_view_rect(context);
+		self.hide_touch_selection(context);
+		match command {
+			QuickMenuCommand::Cut => {
+				self.perform_menu_action(context, UIInputFieldMenuAction::Cut);
+			}
+			QuickMenuCommand::Copy => {
+				self.perform_menu_action(context, UIInputFieldMenuAction::Copy);
+			}
+			QuickMenuCommand::Paste => {
+				self.perform_menu_action(context, UIInputFieldMenuAction::Paste);
+			}
+			QuickMenuCommand::Ellipsis => {
+				let anchor_point = Vector2::create(anchor_rect.position.x + anchor_rect.size.x * 0.5, anchor_rect.position.y);
+				self.hide_context_menu(context);
+				self.show_browser_context_menu_with_anchor(context, anchor_point, true);
+			}
+		}
+	}
+
+	//==============================================================================
+	// 빠른 메뉴 명령 부탁. (빠른 메뉴가 부른다, 다음 tick 에 한다)
+	//==============================================================================
+	#[cfg(not(target_arch = "wasm32"))]
+	pub(crate) fn request_quick_menu_command(&mut self, command: crate::ui::uiinputfieldmenu::QuickMenuCommand) {
+		self.pending_quick_menu_command = Some(command);
+	}
+
+	//==============================================================================
+	// 손잡이 그림 사각형. (노드 좌표, 왼쪽 손잡이는 오른쪽 위가, 오른쪽 손잡이는 왼쪽 위가, 커서 손잡이는 위 꼭짓점이 끝점)
+	//==============================================================================
+	fn calculate_touch_handle_rect(&self, focus_point: Vector2, is_start_handle: bool, is_caret_handle: bool) -> Rect {
+		let unit = 1.0 / self.window_pixel_per_unit.max(1e-4);
+		if is_caret_handle {
+			let size = TOUCH_CENTER_HANDLE_SIZE * unit;
+			Rect::create(focus_point.x - 19.5 * unit, focus_point.y, size, size)
+		}
+		else if is_start_handle {
+			let size = TOUCH_HANDLE_SIZE * unit;
+			Rect::create(focus_point.x - size, focus_point.y, size, size)
+		}
+		else {
+			let size = TOUCH_HANDLE_SIZE * unit;
+			Rect::create(focus_point.x, focus_point.y, size, size)
+		}
+	}
+
+	//==============================================================================
+	// 그 자리의 손잡이. (누름 판정은 그림 사각형을 좌우와 아래로 6 DIP 넓힌 것)
+	//==============================================================================
+	fn find_touch_handle_at(&self, context: &ComponentContext, view_position: Vector2) -> Option<TouchHandleDrag> {
+		let local_position = context.get_node_tree().convert_view_position_to_node_position(context.get_node_id(), view_position)?;
+		let padding = TOUCH_HANDLE_PADDING / self.window_pixel_per_unit.max(1e-4);
+		for (focus_point, is_start_handle, is_caret_handle) in self.touch_handle_list.iter() {
+			let handle_rect = self.calculate_touch_handle_rect(*focus_point, *is_start_handle, *is_caret_handle);
+			let is_inside = local_position.x >= handle_rect.position.x - padding && local_position.x <= handle_rect.position.x + handle_rect.size.x + padding && local_position.y >= handle_rect.position.y && local_position.y <= handle_rect.position.y + handle_rect.size.y + padding;
+			if is_inside {
+				return Some(TouchHandleDrag {
+					is_start_handle: *is_start_handle,
+					is_caret_handle: *is_caret_handle,
+					focus_offset: Vector2::create(focus_point.x - local_position.x, focus_point.y - local_position.y),
+				});
+			}
+		}
+		None
+	}
+
+	//==============================================================================
+	// 손잡이 끌기. (손가락 자리에 누를 때의 끝점 차이를 더하고 줄 안쪽으로 반 줄 올린 자리로 그 끝을 옮긴다)
+	//==============================================================================
+	fn drag_touch_handle(&mut self, context: &ComponentContext, view_position: Vector2, touch_handle_drag: TouchHandleDrag) {
+		let local_position = match context.get_node_tree().convert_view_position_to_node_position(context.get_node_id(), view_position) {
+			Some(local_position) => {
+				local_position
+			}
+			None => {
+				return;
+			}
+		};
+		let target_position = Vector2::create(local_position.x + touch_handle_drag.focus_offset.x, local_position.y + touch_handle_drag.focus_offset.y - self.read_touch_line_height() * 0.5);
+		let (target_index, is_upstream) = self.find_character_index_at_local(context, target_position);
+		if touch_handle_drag.is_caret_handle {
+			self.edit_buffer.set_selection(target_index, target_index);
+		}
+		else {
+			let cursor_index = self.edit_buffer.get_cursor_index();
+			let (start_index, end_index) = self.edit_buffer.get_selection_range().unwrap_or((cursor_index, cursor_index));
+			let fixed_index = if touch_handle_drag.is_start_handle {
+				end_index
+			}
+			else {
+				start_index
+			};
+			self.edit_buffer.set_selection(fixed_index, target_index);
+		}
+		self.is_caret_upstream = is_upstream;
+		self.request_caret_reveal(CaretRevealKind::IfNeeded);
+		self.bump_value_revision();
+		self.reset_cursor_blink();
+	}
+
+	//==============================================================================
+	// 손잡이 끝점 두기와 그리기. (선택이 있으면 앞과 뒤 경계 아래 끝, 없으면 커서 아래 끝. 보일 때만 그린다)
+	// - 그림은 크롬 벡터 아이콘 꼴: 반지름 16 원의 한 귀퉁이가 뾰족한 물방울. 볼록한 꼴이라 한 번에 칠한다.
+	//==============================================================================
+	fn place_and_draw_touch_handles(&mut self, graphic: &mut Graphic, start_bottom: Vector2, end_bottom: Vector2, has_selection: bool) {
+		self.touch_handle_list.clear();
+		if has_selection {
+			self.touch_handle_list.push((start_bottom, true, false));
+			self.touch_handle_list.push((end_bottom, false, false));
+		}
+		else {
+			self.touch_handle_list.push((end_bottom, false, true));
+		}
+		if !self.is_touch_handle_visible || !self.is_focused {
+			return;
+		}
+		let unit = 1.0 / self.window_pixel_per_unit.max(1e-4);
+		for (focus_point, is_start_handle, is_caret_handle) in self.touch_handle_list.clone() {
+			let handle_rect = self.calculate_touch_handle_rect(focus_point, is_start_handle, is_caret_handle);
+			let origin = handle_rect.position;
+			let mut point_list: Vec<Vector2> = Vec::new();
+			let step_count = 24;
+			if is_caret_handle {
+				// 위 꼭짓점 (19.5, 0), 원 가운데 (19.5, 22.63), 반지름 16, 접점 (8.19, 11.31) 과 (30.81, 11.31).
+				let center = Vector2::create(origin.x + 19.5 * unit, origin.y + 22.63 * unit);
+				point_list.push(Vector2::create(origin.x + 19.5 * unit, origin.y));
+				let start_angle = -PI * 0.25;
+				for step_index in 0..=step_count {
+					let angle = start_angle + PI * 1.5 * step_index as f32 / step_count as f32;
+					point_list.push(Vector2::create(center.x + 16.0 * unit * angle.cos(), center.y + 16.0 * unit * angle.sin()));
+				}
+			}
+			else {
+				let radius = handle_rect.size.x * 0.5;
+				let center = Vector2::create(origin.x + radius, origin.y + radius);
+				// 뾰족한 귀퉁이: 왼쪽 손잡이는 오른쪽 위, 오른쪽 손잡이는 왼쪽 위. 나머지는 원호 270 도.
+				let (corner, start_angle) = if is_start_handle {
+					(Vector2::create(origin.x + handle_rect.size.x, origin.y), 0.0)
+				}
+				else {
+					(origin, PI * 1.5)
+				};
+				point_list.push(corner);
+				for step_index in 0..=step_count {
+					let angle = start_angle + PI * 1.5 * step_index as f32 / step_count as f32;
+					point_list.push(Vector2::create(center.x + radius * angle.cos(), center.y + radius * angle.sin()));
+				}
+			}
+			graphic.draw_convex_polygon(&point_list, TOUCH_HANDLE_COLOR);
+		}
 	}
 }
 
@@ -2229,8 +2704,23 @@ impl Component for UIInputField {
 		// 글 입력 줄에서 이 필드 몫 꺼내기.
 		let accepts_focused_field_events = self.is_focused && self.is_attached;
 		let event_kind_list = context.get_engine().get_input_manager().get_text_input().take_events_for_field(self.field_id, accepts_focused_field_events);
+		// 키와 글 입력, 휠은 터치 손잡이와 빠른 메뉴를 지운다. (크롬 EnvEventObserver)
+		let is_typing = event_kind_list.iter().any(|event_kind| matches!(event_kind, TextInputEventKind::Commit(_) | TextInputEventKind::Key { .. } | TextInputEventKind::Paste(_) | TextInputEventKind::Preedit { .. }));
+		if (is_typing || context.get_engine().get_input_manager().has_wheel_delta()) && (self.is_touch_handle_visible || self.is_quick_menu_requested) {
+			self.hide_touch_selection(context);
+		}
 		for event_kind in event_kind_list {
 			self.handle_text_input_event(context, event_kind);
+		}
+
+		// 손가락 길게 누르기와 빠른 메뉴. (데스크탑)
+		#[cfg(not(target_arch = "wasm32"))]
+		{
+			self.update_long_press(context, time_delta);
+			if let Some(quick_menu_command) = self.pending_quick_menu_command.take() {
+				self.perform_quick_menu_command(context, quick_menu_command);
+			}
+			self.update_quick_menu(context, time_delta);
 		}
 
 		// 여러 줄: 커서가 보이게 스크롤. (그리기 전에도 스크롤 자리가 맞게 tick 에서 한다)
@@ -2252,9 +2742,13 @@ impl Component for UIInputField {
 			self.is_cursor_visible = true;
 		}
 
-		// 플랫폼에 올릴 상태.
+		// 플랫폼에 올릴 상태. (노드 한 단위의 창 픽셀도 둔다)
 		if self.is_attached || self.is_focused {
 			let field_state = self.build_field_state(context);
+			let content_width = context.get_transform().get_content_size().x;
+			if content_width > 0.0 && field_state.field_rect.size.x > 0.0 {
+				self.window_pixel_per_unit = field_state.field_rect.size.x / content_width;
+			}
 			context.get_engine().get_input_manager().get_text_input().register_field_state(field_state);
 		}
 	}
@@ -2274,6 +2768,26 @@ impl Component for UIInputField {
 		self.hide_context_menu(context);
 		self.preferred_caret_x = None;
 		self.scrollbar_drag_start = None;
+		// 손가락: 손잡이를 누르면 끌고, 아니면 손잡이와 빠른 메뉴를 지우고 길게 누르기를 잰다. 마우스 누름은 지우기만.
+		if self.is_long_press_target() && context.get_engine().get_input_manager().is_touch_input() {
+			if self.is_touch_handle_visible {
+				if let Some(touch_handle_drag) = self.find_touch_handle_at(context, view_input_position) {
+					self.dragging_touch_handle = Some(touch_handle_drag);
+					self.hide_quick_menu(context);
+					return;
+				}
+			}
+			self.hide_touch_selection(context);
+			self.long_press_state = Some(LongPressState {
+				start_view_position: view_input_position,
+				elapsed: 0.0,
+				is_fired: false,
+			});
+		}
+		else {
+			self.hide_touch_selection(context);
+			self.long_press_state = None;
+		}
 		if self.is_multiline {
 			// 썸을 누르면 끌어 스크롤한다. (선택은 그대로)
 			let content_size = context.get_transform().get_content_size();
@@ -2302,6 +2816,22 @@ impl Component for UIInputField {
 	}
 
 	fn touch_move(&mut self, context: &mut ComponentContext, view_input_position: Vector2) {
+		if let Some(touch_handle_drag) = self.dragging_touch_handle {
+			self.drag_touch_handle(context, view_input_position, touch_handle_drag);
+			return;
+		}
+		if let Some(long_press_state) = self.long_press_state {
+			// 길게 누른 뒤의 움직임은 선택을 바꾸지 않는다. 그 전에 허용 거리를 넘으면 길게 누르기가 아니다.
+			if long_press_state.is_fired {
+				return;
+			}
+			let view_scale = UIInputField::read_view_scale(context);
+			let delta_x = (view_input_position.x - long_press_state.start_view_position.x) * view_scale.x;
+			let delta_y = (view_input_position.y - long_press_state.start_view_position.y) * view_scale.y;
+			if delta_x * delta_x + delta_y * delta_y > LONG_PRESS_TOUCH_SLOP * LONG_PRESS_TOUCH_SLOP {
+				self.long_press_state = None;
+			}
+		}
 		if let Some((start_y, start_scroll_top)) = self.scrollbar_drag_start {
 			// 썸을 옮긴 만큼을 글 높이의 비로 넘긴다.
 			let content_size = context.get_transform().get_content_size();
@@ -2338,14 +2868,27 @@ impl Component for UIInputField {
 		self.reset_cursor_blink();
 	}
 
-	fn touch_release(&mut self, _context: &mut ComponentContext, _view_input_position: Vector2) {
+	fn touch_release(&mut self, context: &mut ComponentContext, _view_input_position: Vector2) {
 		self.drag_start_index = None;
 		self.scrollbar_drag_start = None;
+		self.dragging_touch_handle = None;
+		// 윈도우는 길게 누른 손가락을 뗄 때 메뉴를 정한다. (블링크 context_menu_on_mouse_up, LongTap)
+		if let Some(long_press_state) = self.long_press_state.take() {
+			#[cfg(not(target_arch = "wasm32"))]
+			{
+				if long_press_state.is_fired && cfg!(target_os = "windows") {
+					self.handle_touch_context_menu(context, long_press_state.start_view_position);
+				}
+			}
+			let _ = (long_press_state, &context);
+		}
 	}
 
 	fn touch_cancel(&mut self, _context: &mut ComponentContext, _view_input_position: Vector2) {
 		self.drag_start_index = None;
 		self.scrollbar_drag_start = None;
+		self.dragging_touch_handle = None;
+		self.long_press_state = None;
 	}
 
 	#[reflect(skip)]
@@ -2443,6 +2986,20 @@ impl Component for UIInputField {
 			padding + graphic.measure_text(&cursor_before_text).width
 		};
 		self.caret_local_x = cursor_x;
+		// 터치 선택 손잡이. (선택 사각형 아래 끝)
+		{
+			let selection_bottom = draw_y + font_size * 0.65;
+			let selection_range = self.edit_buffer.get_selection_range();
+			let (start_x, end_x) = match selection_range {
+				Some((start_index, end_index)) => {
+					(padding + self.get_character_offset(start_index), padding + self.get_character_offset(end_index))
+				}
+				None => {
+					(cursor_x, cursor_x)
+				}
+			};
+			self.place_and_draw_touch_handles(graphic, Vector2::create(start_x, selection_bottom), Vector2::create(end_x, selection_bottom), selection_range.is_some());
+		}
 		if self.is_focused && self.is_cursor_visible {
 			let half_height = font_size * 0.6;
 			graphic.set_stroke_color(self.cursor_color);
@@ -2820,6 +3377,87 @@ mod tests {
 		get_field(&mut node_tree, field_id).request_menu_action(UIInputFieldMenuAction::Inspect);
 		run_frame(&mut node_tree, &mut engine);
 		assert_eq!(engine.take_dev_tools_inspect_request(&node_tree), Some(field_id));
+	}
+
+	//==============================================================================
+	// 손가락 길게 누르기: 650ms 동안 허용 거리 안이면 낱말을 고르고 손잡이를 보인다. 메뉴는 윈도우는 뗄 때, 그 밖은 그때 정하고,
+	// 고른 것이 있으면 뗀 뒤 100ms 에 빠른 메뉴(잘라내기, 복사, ..., 붙여넣기는 클립보드에 따라). 허용 거리를 넘으면 길게 누르기가 아니다.
+	//==============================================================================
+	#[test]
+	fn long_press_selects_word_and_opens_quick_menu() {
+		let mut engine = Engine::new(EngineConfiguration::new());
+		let (mut node_tree, field_id) = create_field_tree();
+		let root_id = node_tree.get_root_id();
+		{
+			let field = get_field(&mut node_tree, field_id);
+			field.set_use_direct_touch(true);
+			field.set_font_size(20.0);
+			field.set_text("hello world");
+		}
+		// 글자 경계를 재게 한 번 그린 것처럼 둔다. (테스트에는 Graphic 이 없어 Graphic 없는 재기로 같은 글자 경계를 만든다)
+		{
+			let field = get_field(&mut node_tree, field_id);
+			let font_string = field.build_font_string();
+			let value = field.edit_buffer.get_text().to_string();
+			let mut character_offsets = vec![0.0];
+			for (byte_index, character) in value.char_indices() {
+				let prefix_end = byte_index + character.len_utf8();
+				character_offsets.push(crate::core::textstringtexturecache::measure_text_without_graphic(&font_string, &value[..prefix_end]).map(|text_metrics| text_metrics.width).unwrap_or(prefix_end as f32 * 11.0));
+			}
+			field.character_offsets = character_offsets;
+			field.measured_value = value;
+			field.measured_font_string = font_string;
+		}
+		let word_offset = get_field(&mut node_tree, field_id).character_offsets[8];
+		let press_position = Vector2::create(100.0 + 16.0 + word_offset, 130.0);
+		let press = |node_tree: &mut NodeTree, engine: &mut Engine, position: Vector2| {
+			let input_manager = engine.get_input_manager_mut();
+			input_manager.set_touch_input(true);
+			input_manager.set_view_input_position(position);
+			input_manager.set_touch_down(true);
+			node_tree.dispatch_touch(field_id, engine, TouchKind::Press, position);
+		};
+		press(&mut node_tree, &mut engine, press_position);
+		for _ in 0..30 {
+			node_tree.tick(&engine, 0.02);
+		}
+		assert!(!get_field(&mut node_tree, field_id).has_selection());
+		for _ in 0..10 {
+			node_tree.tick(&engine, 0.02);
+		}
+		// 0.8 초: 낱말 world 를 고르고 손잡이를 보인다.
+		{
+			let field = get_field(&mut node_tree, field_id);
+			assert_eq!(field.get_selection_text(), "world");
+			assert!(field.is_touch_handle_visible);
+		}
+		// 뗀다. 고른 것이 있으니 빠른 메뉴 부탁이고, 손가락이 떨어진 뒤 100ms 에 뜬다.
+		engine.get_input_manager_mut().set_touch_down(false);
+		node_tree.dispatch_touch(field_id, &engine, TouchKind::Release, press_position);
+		assert!(get_field(&mut node_tree, field_id).is_quick_menu_requested);
+		node_tree.tick(&engine, 0.05);
+		assert!(node_tree.find_child_by_name(root_id, "uiInputFieldQuickMenu").is_none());
+		node_tree.tick(&engine, 0.06);
+		let quick_menu_id = node_tree.find_child_by_name(root_id, "uiInputFieldQuickMenu").expect("quick menu");
+		// 메뉴는 선택 위에 뜬다.
+		assert!(node_tree.get_position(quick_menu_id).y < 100.0);
+		// 키를 치면 손잡이와 메뉴가 사라진다.
+		engine.get_input_manager_mut().get_text_input_mut().push_focused_field_event(TextInputEventKind::Key { key: TextInputKey::Right, is_shift: false });
+		node_tree.tick(&engine, 0.02);
+		node_tree.tick(&engine, 0.02);
+		assert!(!get_field(&mut node_tree, field_id).is_touch_handle_visible);
+		assert!(node_tree.find_child_by_name(root_id, "uiInputFieldQuickMenu").is_none());
+		engine.get_input_manager_mut().get_text_input_mut().finish_frame();
+
+		// 허용 거리(15)를 넘게 움직이면 길게 누르기가 아니다.
+		press(&mut node_tree, &mut engine, press_position);
+		let moved_position = Vector2::create(press_position.x + 20.0, press_position.y);
+		engine.get_input_manager_mut().set_view_input_position(moved_position);
+		node_tree.dispatch_touch(field_id, &engine, TouchKind::Moved, moved_position);
+		for _ in 0..40 {
+			node_tree.tick(&engine, 0.02);
+		}
+		assert!(!get_field(&mut node_tree, field_id).is_touch_handle_visible);
 	}
 
 	//==============================================================================
