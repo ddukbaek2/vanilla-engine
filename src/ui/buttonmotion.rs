@@ -54,6 +54,12 @@ pub enum ButtonMotionStyle {
 	Inset,
 }
 
+// 단추 반응 꼴의 반사 값. (원본 ButtonMotionStyle 글)
+crate::core::reflection::impl_reflect_names!(ButtonMotionStyle, [
+	(ButtonMotionStyle::Normal, "normal"),
+	(ButtonMotionStyle::Inset, "inset"),
+]);
+
 //==============================================================================
 // 꼴마다의 값. (올렸을 때, 누르는 동안의 크기와 그리로 가는 초, 떼었을 때 통 튀는 크기, 올렸을 때 밝히는지)
 //==============================================================================
@@ -87,6 +93,7 @@ pub struct ButtonMotionArea {
 	style: ButtonMotionStyle,
 }
 
+#[crate::reflect]
 impl ButtonMotionArea {
 	pub fn new(style: ButtonMotionStyle) -> ButtonMotionArea {
 		ButtonMotionArea { component_base: ComponentBase::new(), style }
@@ -97,6 +104,7 @@ impl ButtonMotionArea {
 	}
 }
 
+#[crate::reflect]
 impl Component for ButtonMotionArea {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base
@@ -149,6 +157,7 @@ pub struct ButtonMotion {
 	lit_handler: Option<Rc<RefCell<ButtonLitHandler>>>,
 }
 
+#[crate::reflect]
 impl ButtonMotion {
 	//==============================================================================
 	// 생성.
@@ -369,6 +378,7 @@ impl Default for ButtonMotion {
 	}
 }
 
+#[crate::reflect]
 impl Component for ButtonMotion {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base

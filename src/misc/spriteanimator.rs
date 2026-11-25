@@ -78,6 +78,7 @@ pub struct SpriteAnimator {
 	on_complete: Option<SpriteAnimatorCompleteEvent>,
 }
 
+#[crate::reflect]
 impl SpriteAnimator {
 	// 클립의 기본 초당 프레임 수. (원본 fps = 10)
 	pub const DEFAULT_FRAME_PER_SECOND: f32 = 10.0;
@@ -257,6 +258,7 @@ impl Default for SpriteAnimator {
 	}
 }
 
+#[crate::reflect]
 impl Component for SpriteAnimator {
 	//==============================================================================
 	// 공통 상태 반환.

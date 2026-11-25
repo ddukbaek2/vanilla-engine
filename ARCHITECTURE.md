@@ -8,10 +8,12 @@ vanilla.js 를 러스트로 옮긴 엔진의 구성과 소유 구조를 정리�
 ## 1. 전체 배치
 
 ```
+Cargo.toml           워크스페이스 (엔진 크레이트와 macros/)
+macros/              반사 절차 매크로 #[reflect] (vanilla-engine-macros, 엔진이 vanilla::reflect 로 다시 내보낸다)
 src/lib.rs           공개 API 를 다시 내보낸다 (원본 import.js 자리)
 src/animation/       Timeline, Animator, Action (원본 experimental/animation, experimental/action)
 src/base/            엔진을 모르는 기반 타입 (수학, 색, 식별자, 플랫폼 정보, Format, FiniteStateMachine, ObjectPool, SeededRandom, Timer, Version)
-src/core/            엔진 본체 (Engine, 매니저, Scene, 노드 트리, Graphic, Component, 애셋 꼴, 트윈, Animation, Frame)
+src/core/            엔진 본체 (Engine, 매니저, Scene, 노드 트리, Graphic, Component, reflection(반사 값과 트레이트), 애셋 꼴, 트윈, Animation, Frame)
                      입력: InputManager, InputActions, GamepadManager, PointerCursor, textinput(글 입력 줄)
                      소리: AudioManager, AudioPlayer, AudioBus, SoundSystem, SoundEffectPool
                      그리기: Graphic, ShaderProgram, ShaderWarmer, FullscreenPass, ImageTextureCache, TextStringTextureCache, sharedbakecache
@@ -174,7 +176,8 @@ EngineRunner (플랫폼이 들고 프레임마다 부른다)
 - 옮기며 바꾼 쓰임새:
   - GameScene, UIScene 의 덮어쓰기는 GameScene, UIScene 트레이트와 game_scene!, ui_scene! 매크로다. 바탕이 resize, layout, post_draw 를 스스로 부른다. (game/gamescene.rs)
   - UINode 는 노드에 붙는 컴포넌트이고, 솔버 값을 노드의 자리와 content_size 로 옮긴다. (ui/uinode.rs, ui/uiscene.rs)
-  - UIDocument 는 원본의 리플렉션 직렬화 대신 종류 이름마다 짓기, 쓰기, 읽기 함수를 표에 등록하고, 원본이 반사로 저장하는 종류는 원본 반사 결과와 같은 키로 쓴다. DevTools 인스펙터의 컴포넌트 속성도 UIDocument 가 저장하는 키와 값으로 보인다. (ui/uidocument.rs, misc/devtools.rs)
+  - 원본의 실행 중 반사(uidocument.js 의 collectReflectedProperties, saveByReflection, loadByReflection, devtools.js 의 getComponentProperties)는 절차 매크로 #[reflect](macros/ 크레이트, 엔진이 vanilla::reflect 로 다시 내보낸다)가 컴파일 때 지은 코드로 한다. 저장소는 엔진과 매크로 두 크레이트의 워크스페이스다. 엔진 컴포넌트는 모두 붙였고, 원본 상위 클래스는 품은 필드를 #[reflect(base = 필드)] 로 잇는다. (core/reflection.rs)
+  - UIDocument 는 원본처럼 쓰기, 읽기 함수가 없는 종류를 반사로 쓰고 읽는다. 원본 노드 종류(WorldNode 하위 클래스, UIInputField, UIScrollBar 같은 것)는 러스트 판의 컴포넌트를 register_node_type 으로 등록해 원본 문서의 노드 type 과 생성자가 만든 컴포넌트, 자식 꼴 그대로 쓰고 읽는다. 원본 에디터가 더 등록하는 종류는 register_editor_types 한 줄이다. DevTools 인스펙터는 원본처럼 게터를 모두 불러 보인다. (ui/uidocument.rs, misc/devtools.rs)
   - web/Pane(DOM 화면 분할 패널)은 웹(wasm32) 빌드에만 있다. (web/pane.rs)
   - SoundSystem 의 음악과 효과음 버스는 AudioBus 다. (원본에도 같은 꼴로 넣었다) 데스크탑은 kira 하위 트랙, 웹은 GainNode 이고, get_gain_node 는 두 플랫폼 모두 AudioGainNode(웹 GainNode, 데스크탑은 버스 트랙을 나눠 드는 Rc<RefCell<TrackHandle>>)를 돌려준다.
   - Cooldown.use(원본 base/timer.js), FullscreenPass.use, ShaderProgram.use 는 use 가 러스트 예약어라 r#use 로 부른다. activate, use_program 은 같은 일을 하는 이름으로 남긴다.
@@ -195,7 +198,8 @@ EngineRunner (플랫폼이 들고 프레임마다 부른다)
 | 차이 | 까닭 |
 | --- | --- |
 | async/Promise 대신 받기 손잡이와 콜백 (AssetLoadHandle, ScreenFadeHold, read_clipboard_text_with_callback 같은 것) | 엔진이 프레임마다 씬과 컴포넌트를 &mut 로 빌려 부르는 동기 루프라, 그 함수 안에서 await 로 멈춰 기다릴 수 없다 |
-| 런타임 리플렉션이 없다 (UIDocument 와 DevTools 는 종류마다 등록한 표) | 러스트는 실행 중에 필드와 메서드를 훑는 길이 없다 |
+| 반사(UIDocument 의 반사 저장과 읽기, DevTools 인스펙터의 게터 목록)는 #[vanilla::reflect] 를 붙인 타입만 된다. 엔진 컴포넌트는 모두 붙였고, 게임 컴포넌트는 impl 블록과 impl Component 블록에 붙인다 (원본은 모든 객체) | 러스트에는 실행 중에 필드와 메서드를 훑는 길이 없다. C++ 엔진(언리얼 UHT, Qt moc)처럼 컴파일 때 절차 매크로가 함수 목록과 부르는 코드를 짓는다 |
+| 반사로 부를 수 없는 함수가 있다. &mut self 게터와 인자를 둘 이상 받는 세터(UISnapScrollView::set_snap_current_index(트리, 칸) 같은 것)는 반사로 읽거나 넣지 않는다 (속성 목록과 저장에는 원본처럼 든다) | 실행 중에 인자를 만들어 넣을 수 없고, 반사는 &self 로 읽는다 |
 | 데스크탑에 DOM 이 없다 (Pane 은 웹만, 데스크탑 입력 필드는 winit IME, 저장소 입력은 패널 안 입력 창) | 데스크탑 창에는 HTML 문서가 없다 |
 | 데스크탑에서 뜻이 없는 브라우저 설정 (auto_resize_on_window_resize, preserve_drawing_buffer, set_no_cache, 오른쪽 클릭 메뉴 막기, set_prevented_keys) | 데스크탑에는 페이지, 브라우저 캐시, 브라우저 기본 동작이 없고 창은 늘 창 크기에 맞춘다 |
 | 데스크탑에 화면 키보드가 없다 (ignore_virtual_keyboard_resize 는 웹만) | 브라우저의 화면 키보드가 줄이는 visualViewport 크기 변화가 데스크탑 창에는 없다 |
@@ -213,6 +217,7 @@ EngineRunner (플랫폼이 들고 프레임마다 부른다)
 | 노드는 NodeTree 안에 있고 NodeId 핸들로 가리킨다 | 부모와 자식을 Rc<RefCell> 로 서로 가리키면 순환 참조와 실행 중 빌림 검사가 생긴다. 지운 노드의 핸들은 None 이 된다 |
 | 노드 종류는 WorldNode 하나다 (원본 Node, ComponentNode, TransformNode, WorldNode 를 합침, 원본에서 노드인 위젯과 UINode 는 컴포넌트) | 러스트에 클래스 상속이 없어 노드 꼴을 하나로 두고 기능을 컴포넌트로 붙였다 |
 | 상속 대신 트레이트와 품기 (Scene + SceneBase, Component + ComponentBase, ShaderSprite 는 Sprite 를 품고 Deref) | 러스트에 클래스 상속이 없어 공통 상태는 구조체로, 덮어쓰기는 트레이트 함수로 둔다 |
+| 반사는 원본 상위 클래스 몫을 품은 필드로 잇고(#[reflect(base = 필드)]), 러스트 판이 impl Component 에서 다시 정의한 게터(isTickNeeded 같은 것)도 그 타입의 게터로 보인다. 읽을 때 꼴은 지금 값이 아니라 세터의 꼴로 가린다. 원본이 setComponentType 을 부르지 않아 ComponentType 이 "Component" 로 적히는 종류(Visual, UIListView)는 러스트 판의 종류 이름으로 적는다 | 상속이 없고 꼴을 컴파일 때 안다. 원본의 빠뜨린 setComponentType 은 옮기지 않았다 |
 | 수는 f32 다 (Format, LocalStorage 처럼 JS 수의 글을 그대로 내야 하는 곳은 f64) | GL 에 올리는 값과 같은 정밀도로 들고 메모리를 아낀다. 원본 Matrix4 는 f32 로 담고 f64 로 셈해 끝자리가 조금 다를 수 있다 |
 | GL 을 쓰는 객체는 컨텍스트를 들지 않고 함수마다 gl 을 받는다 (FullscreenPass, RenderTarget, 툰 렌더러 같은 것) | 컨텍스트는 Graphic 이 들고, 객체마다 나눠 쥐면 수명과 빌림이 엮인다 |
 | 트리를 받는 `*_in_tree` 함수를 따로 둔 곳 15 개 (UIScrollView::set_shows_vertical_scroll_bar_in_tree, UIWindow::close_in_tree, ParticleSystem::emit_in_tree 같은 것) | 씬 코드가 컴포넌트를 쥔 동안 같은 트리의 다른 노드를 함께 빌릴 수 없다 |

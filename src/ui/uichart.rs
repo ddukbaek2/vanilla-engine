@@ -33,6 +33,7 @@ pub struct UILineChart {
 	point_buffer: Vec<Vector2>,
 }
 
+#[crate::reflect]
 impl UILineChart {
 	//==============================================================================
 	// 생성. (표본 60 개, 자동 범위, 격자 3 줄)
@@ -180,6 +181,7 @@ impl Default for UILineChart {
 	}
 }
 
+#[crate::reflect]
 impl Component for UILineChart {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base
@@ -240,6 +242,7 @@ pub struct UIBarChart {
 	bar_gap: f32,
 }
 
+#[crate::reflect]
 impl UIBarChart {
 	//==============================================================================
 	// 생성. (자동 최댓값, 강조 없음, 막대 사이 4 픽셀)
@@ -356,6 +359,7 @@ impl Default for UIBarChart {
 	}
 }
 
+#[crate::reflect]
 impl Component for UIBarChart {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base

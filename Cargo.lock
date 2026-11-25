@@ -3332,6 +3332,7 @@ dependencies = [
  "unicode-properties",
  "unicode-script",
  "unicode-segmentation",
+ "vanilla-engine-macros",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "wayland-client",
@@ -3343,6 +3344,15 @@ dependencies = [
  "wuff",
  "x11-dl",
  "yeslogic-fontconfig-sys",
+]
+
+[[package]]
+name = "vanilla-engine-macros"
+version = "0.3.2"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]

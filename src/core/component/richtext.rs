@@ -143,6 +143,7 @@ pub struct RichText {
 	segments: Vec<RichTextSegment>,
 }
 
+#[crate::reflect]
 impl RichText {
 	//==============================================================================
 	// 생성. (기본값은 Text 와 같다)
@@ -249,6 +250,7 @@ impl RichText {
 	//==============================================================================
 	// 폰트 이름 반환.
 	//==============================================================================
+	#[reflect(transient)]
 	pub fn get_font_family(&self) -> &str {
 		self.text.get_font_family()
 	}
@@ -669,6 +671,7 @@ impl Default for RichText {
 	}
 }
 
+#[crate::reflect]
 impl Component for RichText {
 	fn get_component_base(&self) -> &ComponentBase {
 		self.text.get_component_base()

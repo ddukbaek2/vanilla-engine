@@ -1085,6 +1085,7 @@ pub struct TimelineSpriteFrameGrid {
 	pending_image_load: Option<(AssetLoadHandle, i64)>,
 }
 
+#[crate::reflect]
 impl TimelineSpriteFrameGrid {
 	//==============================================================================
 	// 생성. (칸 수는 1 이상)
@@ -1121,6 +1122,7 @@ impl TimelineSpriteFrameGrid {
 	}
 }
 
+#[crate::reflect]
 impl Component for TimelineSpriteFrameGrid {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base
@@ -1189,6 +1191,7 @@ pub struct TimelineSound {
 	volume: f32,
 }
 
+#[crate::reflect]
 impl TimelineSound {
 	//==============================================================================
 	// 생성. (비어 있음)
@@ -1273,6 +1276,7 @@ impl Default for TimelineSound {
 	}
 }
 
+#[crate::reflect]
 impl Component for TimelineSound {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base

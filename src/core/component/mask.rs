@@ -12,6 +12,7 @@ pub struct Mask {
 	round_size: f32,
 }
 
+#[crate::reflect]
 impl Mask {
 	//==============================================================================
 	// 생성.
@@ -60,6 +61,7 @@ impl Default for Mask {
 	}
 }
 
+#[crate::reflect]
 impl Component for Mask {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base

@@ -176,6 +176,7 @@ pub struct UIWindow {
 	panel_color: Color,
 }
 
+#[crate::reflect]
 impl UIWindow {
 	//==============================================================================
 	// 생성. (노드에는 node_tree.add_component 로 붙인다, 보통은 UIWindow::create)
@@ -675,6 +676,7 @@ impl UIWindow {
 	}
 }
 
+#[crate::reflect]
 impl Component for UIWindow {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base

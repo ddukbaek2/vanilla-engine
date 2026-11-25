@@ -25,6 +25,12 @@ pub enum SoftShadeShape {
 	Bottom,
 }
 
+// 그늘 모양의 반사 값. (원본 SoftShadeShape 글)
+crate::core::reflection::impl_reflect_names!(SoftShadeShape, [
+	(SoftShadeShape::Band, "band"),
+	(SoftShadeShape::Bottom, "bottom"),
+]);
+
 pub struct SoftShade {
 	component_base: ComponentBase,
 	shape: SoftShadeShape,
@@ -48,6 +54,7 @@ fn read_smooth_rise(edge: f32, value: f32) -> f32 {
 	ratio * ratio * (3.0 - 2.0 * ratio)
 }
 
+#[crate::reflect]
 impl SoftShade {
 	//==============================================================================
 	// 생성.
@@ -197,6 +204,7 @@ impl Default for SoftShade {
 	}
 }
 
+#[crate::reflect]
 impl Component for SoftShade {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base

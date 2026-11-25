@@ -465,6 +465,9 @@ const BLEND_MODE_NAME_TABLE: [(BlendMode, &str); 26] = [
 	(BlendMode::Luminosity, "luminosity"),
 ];
 
+// 블렌드 모드의 반사 값. (원본 globalCompositeOperation 글, 원본 SpriteBlendMode 값)
+crate::core::reflection::impl_reflect_names!(BlendMode, BLEND_MODE_NAME_TABLE);
+
 impl BlendMode {
 	//==============================================================================
 	// 원본 이름 반환. ("source-over" 같은 문자열)
@@ -678,6 +681,15 @@ pub enum TextAlign {
 	End,
 }
 
+// 가로 정렬의 반사 값. (원본 TextAlign 글)
+crate::core::reflection::impl_reflect_names!(TextAlign, [
+	(TextAlign::Left, "left"),
+	(TextAlign::Center, "center"),
+	(TextAlign::Right, "right"),
+	(TextAlign::Start, "start"),
+	(TextAlign::End, "end"),
+]);
+
 //==============================================================================
 // 세로 기준선.
 //==============================================================================
@@ -691,6 +703,16 @@ pub enum TextBaseline {
 	Alphabetic,
 }
 
+// 세로 기준선의 반사 값. (원본 TextBaseline 글)
+crate::core::reflection::impl_reflect_names!(TextBaseline, [
+	(TextBaseline::Top, "top"),
+	(TextBaseline::Middle, "middle"),
+	(TextBaseline::Bottom, "bottom"),
+	(TextBaseline::Ideographic, "ideographic"),
+	(TextBaseline::Hanging, "hanging"),
+	(TextBaseline::Alphabetic, "alphabetic"),
+]);
+
 //==============================================================================
 // 글자 방향. (원본 "inherit" | "ltr" | "rtl" | "auto", Canvas2D direction)
 // - Inherit 는 Graphic 에서는 왼쪽에서 오른쪽으로 본다. 글자 컴포넌트에서는 그리는 때의 Graphic 방향을 따른다는 뜻이다.
@@ -703,6 +725,14 @@ pub enum TextDirection {
 	Rtl,
 	Auto,
 }
+
+// 글자 방향의 반사 값. (원본 글)
+crate::core::reflection::impl_reflect_names!(TextDirection, [
+	(TextDirection::Inherit, "inherit"),
+	(TextDirection::Ltr, "ltr"),
+	(TextDirection::Rtl, "rtl"),
+	(TextDirection::Auto, "auto"),
+]);
 
 impl TextDirection {
 	//==============================================================================

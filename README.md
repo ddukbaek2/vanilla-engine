@@ -168,6 +168,36 @@ square_node.add_component(Spin {
 - 씬 코드에서 컴포넌트와 트리를 함께 수정할 때는 `node_tree.with_component_mut::<T, _>(node_id, |component, tree| ...)` 를 씁니다.
 - `node_tree.destroy_node(node_id)` 는 자식 노드까지 삭제합니다. tick 이나 터치 처리 도중에 호출해도 순회가 끝난 뒤에 안전하게 삭제합니다.
 
+컴포넌트의 `impl` 블록과 `impl Component` 블록에 `#[vanilla::reflect]` 를 붙이면 vanilla.js 의 실행 중 반사처럼 get, is, set 함수를 찾아 씁니다. UI 문서(`UIDocument`)가 등록 한 줄로 그 컴포넌트를 vanilla.js 와 같은 키로 저장하고 읽으며, 개발자 도구 인스펙터가 게터를 모두 불러 보입니다. ([`examples/devtoolsshowcase.rs`](examples/devtoolsshowcase.rs))
+
+```rust
+#[vanilla::reflect]
+impl Spin {
+	pub fn set_degrees_per_second(&mut self, degrees_per_second: f32) {
+		self.degrees_per_second = degrees_per_second;
+	}
+
+	pub fn get_degrees_per_second(&self) -> f32 {
+		self.degrees_per_second
+	}
+}
+
+#[vanilla::reflect]
+impl Component for Spin {
+	// 위와 같다
+}
+
+// UI 문서에 등록하면 { "DegreesPerSecond": 90, ..., "type": "Spin" } 으로 저장하고 읽습니다
+ui_document.register_component_type("Spin", || Spin {
+	component_base: ComponentBase::new(),
+	degrees_per_second: 0.0,
+});
+```
+
+- 게터는 인자 없는 `pub fn get_*`, `pub fn is_*` 이고, 같은 이름의 `set_*` 이 있으면 저장 속성입니다. 키는 접두어를 뗀 vanilla.js 이름(`get_line_width` → `LineWidth`)입니다.
+- 저장할 수 없는 꼴의 게터(그림, 콜백 같은 것)도 컴파일 에러 없이 저장에서 빠지고 인스펙터에는 `[종류 이름]` 으로 보입니다.
+- 함수에 `#[reflect(skip)]`(반사에서 빼기), `#[reflect(transient)]`(인스펙터에만 보이기), `#[reflect(name = "UIScale")]`(키 이름 정하기)를, 블록에 `#[vanilla::reflect(base = 필드)]`(품은 컴포넌트를 vanilla.js 의 상위 클래스처럼 잇기)를 붙일 수 있습니다.
+
 ### 애셋 로딩
 
 ```rust
@@ -319,6 +349,8 @@ cargo run --release --example modelviewer
 
 **웹에서도 제대로 되는 한글 입력.** 웹에서는 입력 필드마다 숨겨진 DOM `<input>` 을 두고 IME 조합 이벤트를 받아 캔버스에 그립니다. iOS 처럼 사용자 입력 안에서만 키보드가 뜨는 브라우저를 위해 터치 핸들러 안에서 포커스를 줍니다. 데스크탑은 winit 의 IME 이벤트를 씁니다.
 
+**컴파일 때 짓는 반사(리플렉션).** vanilla.js 는 실행 중에 객체의 프로토타입을 훑어 get, is, set 함수를 찾아 UI 문서 저장과 인스펙터에 씁니다. 러스트에는 실행 중 반사가 없어, 언리얼의 UHT 나 Qt 의 moc 처럼 컴파일 때 코드를 짓습니다. 절차 매크로 `#[vanilla::reflect]` 가 impl 블록의 함수 목록과 그 함수를 부르는 코드를 만들고, 값으로 바꿀 수 없는 꼴의 게터는 자동 참조 특수화(autoref specialization)로 골라내 건너뜁니다. 저장 결과는 vanilla.js 가 쓰는 JSON 과 키, 차례, 값까지 같습니다.
+
 **플랫폼 레이어 분리.** 창, GL, 입력, 메인 루프, 파일 읽기, 오디오는 `platform/desktop` 과 `platform/web` 에만 있고, 엔진 코어는 플랫폼에 의존하지 않습니다. 새 플랫폼은 이 레이어에 모듈을 추가하면 됩니다.
 
 ## 성능
@@ -336,7 +368,7 @@ cargo run --release --example modelviewer
 
 ## 외부 의존성
 
-엔진이 직접 쓰는 크레이트입니다. 버전은 `Cargo.lock` 기준이고, 라이선스는 각 크레이트의 `Cargo.toml` 에 적힌 것입니다. 직접 의존성은 dwrote(MPL-2.0, 윈도우만)를 빼면 모두 MIT, Apache-2.0, Zlib, BSD, ISC, Unicode-3.0 같은 허용적 라이선스입니다. (self_cell 은 Apache-2.0 과 GPL-2.0 가운데 하나를 고르는 이중 라이선스입니다. kira 가 데스크탑 소리 해석에 쓰는 symphonia 는 MPL-2.0 입니다)
+엔진이 직접 쓰는 크레이트입니다. (반사 매크로 크레이트 `macros/` 가 쓰는 것 포함) 버전은 `Cargo.lock` 기준이고, 라이선스는 각 크레이트의 `Cargo.toml` 에 적힌 것입니다. 직접 의존성은 dwrote(MPL-2.0, 윈도우만)를 빼면 모두 MIT, Apache-2.0, Zlib, BSD, ISC, Unicode-3.0 같은 허용적 라이선스입니다. (self_cell 은 Apache-2.0 과 GPL-2.0 가운데 하나를 고르는 이중 라이선스입니다. kira 가 데스크탑 소리 해석에 쓰는 symphonia 는 MPL-2.0 입니다)
 
 **데스크탑, 웹 공통**
 
@@ -358,6 +390,14 @@ cargo run --release --example modelviewer
 | [flate2](https://crates.io/crates/flate2) | 1.1.11 | `graphics3d/fbxloader.rs` | FBX 의 압축 배열(zlib) 해제. 순수 러스트 백엔드라 wasm 에서도 돕니다 | MIT / Apache-2.0 |
 | [web-time](https://crates.io/crates/web-time) | 1.1.0 | `core/engine.rs`, `base/math.rs` 외 | 프레임 시계와 난수 시드. 데스크탑은 `std::time`, 웹은 `performance.now()` 를 같은 API 로 씁니다 | MIT / Apache-2.0 |
 | [ewebsock](https://crates.io/crates/ewebsock) | 0.8.0 | `web/websocketclient.rs` | 웹소켓. 데스크탑은 tungstenite(`tls` 기능이면 rustls 로 wss), 웹은 브라우저 WebSocket 을 씁니다 | MIT / Apache-2.0 |
+
+**반사 매크로 (`macros/`, 컴파일할 때만 돌고 게임 실행 파일에는 들지 않습니다)**
+
+| 크레이트 | 버전 | 쓰는 곳 | 하는 일 | 라이선스 |
+| --- | --- | --- | --- | --- |
+| [syn](https://crates.io/crates/syn) | 2.0.119 | `macros/src/lib.rs` | `#[reflect]` 를 붙인 impl 블록과 함수 꼴을 읽습니다 (full, visit, visit-mut 기능) | MIT / Apache-2.0 |
+| [quote](https://crates.io/crates/quote) | 1.0.47 | `macros/src/lib.rs` | 반사 구현 코드를 씁니다 | MIT / Apache-2.0 |
+| [proc-macro2](https://crates.io/crates/proc-macro2) | 1.0.107 | `macros/src/lib.rs` | syn 과 quote 가 쓰는 토큰 흐름 | MIT / Apache-2.0 |
 
 **데스크탑만**
 

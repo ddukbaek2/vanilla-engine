@@ -27,6 +27,7 @@ pub struct UIProgressRing {
 	perimeter_key: [f32; 4],
 }
 
+#[crate::reflect]
 impl UIProgressRing {
 	//==============================================================================
 	// 생성.
@@ -42,13 +43,6 @@ impl UIProgressRing {
 			perimeter_points: Vec::new(),
 			perimeter_key: [-1.0; 4],
 		}
-	}
-
-	//==============================================================================
-	// 마지막으로 셈한 둘레의 점. (그린 뒤에 맞는 값, 원본 getPerimeterPoints)
-	//==============================================================================
-	pub fn get_perimeter_points(&self) -> &[Vector2] {
-		&self.perimeter_points
 	}
 
 	//==============================================================================
@@ -208,6 +202,13 @@ impl UIProgressRing {
 	pub fn get_track_color(&self) -> Color {
 		self.track_color
 	}
+
+	//==============================================================================
+	// 마지막으로 셈한 둘레의 점. (그린 뒤에 맞는 값, 원본 getPerimeterPoints)
+	//==============================================================================
+	pub fn get_perimeter_points(&self) -> &[Vector2] {
+		&self.perimeter_points
+	}
 }
 
 impl Default for UIProgressRing {
@@ -216,6 +217,7 @@ impl Default for UIProgressRing {
 	}
 }
 
+#[crate::reflect]
 impl Component for UIProgressRing {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base

@@ -20,6 +20,7 @@ pub struct UIHitArea {
 	clip_id: Option<NodeId>,
 }
 
+#[crate::reflect]
 impl UIHitArea {
 	//==============================================================================
 	// 생성.
@@ -123,6 +124,7 @@ impl Default for UIHitArea {
 	}
 }
 
+#[crate::reflect]
 impl Component for UIHitArea {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base

@@ -28,6 +28,13 @@ pub enum SpriteDrawMode {
 	Tiled,
 }
 
+// 스프라이트 출력 방식의 반사 값. (원본 SpriteDrawMode 글)
+crate::core::reflection::impl_reflect_names!(SpriteDrawMode, [
+	(SpriteDrawMode::Simple, "simple"),
+	(SpriteDrawMode::Sliced, "sliced"),
+	(SpriteDrawMode::Tiled, "tiled"),
+]);
+
 pub struct Sprite {
 	paint: Paint,
 	image: Option<Rc<Image>>,
@@ -40,6 +47,7 @@ pub struct Sprite {
 	image_path: String,
 }
 
+#[crate::reflect(base = paint)]
 impl Sprite {
 	//==============================================================================
 	// 생성.
@@ -152,6 +160,7 @@ impl Sprite {
 	//==============================================================================
 	// 그림 경로 반환. (정하지 않았으면 빈 글)
 	//==============================================================================
+	#[reflect(transient)]
 	pub fn get_image_path(&self) -> &str {
 		&self.image_path
 	}
@@ -220,6 +229,7 @@ impl Sprite {
 	//==============================================================================
 	// 색상 설정. (이미지가 있으면 틴트, 없으면 채우기 색)
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn set_color(&mut self, color: impl Into<Color>) {
 		self.paint.set_color(color);
 	}
@@ -227,6 +237,7 @@ impl Sprite {
 	//==============================================================================
 	// 색상 반환.
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn get_color(&self) -> Color {
 		self.paint.get_color()
 	}
@@ -234,6 +245,7 @@ impl Sprite {
 	//==============================================================================
 	// 둥근 모서리 크기 설정. (이미지가 없을 때 칠하는 사각형, 원본은 Paint 를 상속해 같은 함수를 쓴다)
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn set_round_size(&mut self, round_size: f32) {
 		self.paint.set_round_size(round_size);
 	}
@@ -241,6 +253,7 @@ impl Sprite {
 	//==============================================================================
 	// 둥근 모서리 크기 반환.
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn get_round_size(&self) -> f32 {
 		self.paint.get_round_size()
 	}
@@ -252,6 +265,7 @@ impl Default for Sprite {
 	}
 }
 
+#[crate::reflect]
 impl Component for Sprite {
 	fn get_component_base(&self) -> &ComponentBase {
 		self.paint.get_component_base()

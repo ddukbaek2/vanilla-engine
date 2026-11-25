@@ -2,6 +2,7 @@
 // 개발자 도구 예제. (DevTools, 원본 F2 하이어라키/인스펙터 패널)
 // - 씬이 DevTools 를 품고 tick 에서 tick, post_draw 에서 draw 를 부른다. 시작하면 패널을 연다. (F2 로 닫고 연다)
 // - 노드 몇 개(Paint, Text, 직접 만든 Spin 컴포넌트, 비활성 노드, 중첩)를 놓고 "card" 를 골라 인스펙터에 보인다.
+// - Spin 은 #[vanilla::reflect] 를 붙여, 인스펙터가 엔진 컴포넌트처럼 게터(degreesPerSecond)를 불러 보인다.
 // - 환경 변수 VANILLA_DEVTOOLS_TAB 에 0 ~ 3 을 주면 그 탭으로 연다. (0 Statistics, 1 Node Hierarchy, 2 Local Storage, 3 Settings)
 // - 실행: cargo run --example devtoolsshowcase
 //==============================================================================
@@ -9,13 +10,31 @@
 use vanilla::{Component, ComponentBase, ComponentContext, DevTools, Engine, EngineConfiguration, Graphic, LocalStorage, NodeId, Paint, Pivot, Scene, SceneBase, Text, TextAlign, Vector2};
 
 //==============================================================================
-// 노드를 돌리는 컴포넌트. (UIDocument 에 등록하지 않아 인스펙터에는 이름만 보인다)
+// 노드를 돌리는 컴포넌트. (반사 매크로를 붙여 인스펙터에 속성이 보인다)
 //==============================================================================
 struct Spin {
 	component_base: ComponentBase,
 	degrees_per_second: f32,
 }
 
+#[vanilla::reflect]
+impl Spin {
+	//==============================================================================
+	// 초당 도는 각도 설정.
+	//==============================================================================
+	pub fn set_degrees_per_second(&mut self, degrees_per_second: f32) {
+		self.degrees_per_second = degrees_per_second;
+	}
+
+	//==============================================================================
+	// 초당 도는 각도 반환.
+	//==============================================================================
+	pub fn get_degrees_per_second(&self) -> f32 {
+		self.degrees_per_second
+	}
+}
+
+#[vanilla::reflect]
 impl Component for Spin {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base

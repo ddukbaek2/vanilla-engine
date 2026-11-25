@@ -73,6 +73,7 @@ pub struct FloatingText {
 	free_list: Vec<NodeId>,
 }
 
+#[crate::reflect]
 impl FloatingText {
 	//==============================================================================
 	// 생성.
@@ -207,6 +208,7 @@ impl Default for FloatingText {
 	}
 }
 
+#[crate::reflect]
 impl Component for FloatingText {
 	//==============================================================================
 	// 공통 상태 반환.

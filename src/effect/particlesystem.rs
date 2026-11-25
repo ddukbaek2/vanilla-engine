@@ -52,6 +52,9 @@ const EMITTER_SHAPE_NAME_TABLE: [(ParticleEmitterShape, &str); 5] = [
 	(ParticleEmitterShape::Edge, "edge"),
 ];
 
+// 방출 모양의 반사 값. (원본 ParticleEmitterShape 글)
+crate::core::reflection::impl_reflect_names!(ParticleEmitterShape, EMITTER_SHAPE_NAME_TABLE);
+
 //==============================================================================
 // 렌더 모양. (원본 ParticleRenderShape)
 //==============================================================================
@@ -74,6 +77,9 @@ const RENDER_SHAPE_NAME_TABLE: [(ParticleRenderShape, &str); 4] = [
 	(ParticleRenderShape::Streak, "streak"),
 	(ParticleRenderShape::Image, "image"),
 ];
+
+// 렌더 모양의 반사 값. (원본 ParticleRenderShape 글)
+crate::core::reflection::impl_reflect_names!(ParticleRenderShape, RENDER_SHAPE_NAME_TABLE);
 
 // 쿼드 네 모서리의 텍스처 좌표. (왼쪽 위, 오른쪽 위, 오른쪽 아래, 왼쪽 아래)
 const QUAD_TEXTURE_COORDINATES: [(f32, f32); 4] = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)];
@@ -174,6 +180,7 @@ pub struct ParticleSystem {
 	random_seed: Option<u32>,
 }
 
+#[crate::reflect]
 impl ParticleSystem {
 	//==============================================================================
 	// 생성. (원본 생성자의 기본값)
@@ -853,6 +860,7 @@ impl Default for ParticleSystem {
 	}
 }
 
+#[crate::reflect]
 impl Component for ParticleSystem {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base

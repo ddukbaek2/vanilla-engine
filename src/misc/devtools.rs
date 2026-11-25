@@ -15,11 +15,13 @@
 //   - Graphic 은 엔진이 아니라 EngineRunner 가 들어서 tick 에서는 만질 수 없다. 원본이 tick 과 눌림에서 부르는 setForceGizmosVisible 은
 //     바랄 값만 적어 두었다가 다음 draw 첫머리에 Graphic 에 건다. (원본 setEngine 이 거는 false 도 첫 draw 에 건다)
 //   - 노드 종류는 WorldNode 하나뿐이라 트리의 Type 칸과 인스펙터의 type 은 늘 "WorldNode" 다.
-//   - 리플렉션이 없어 원본 getComponentProperties(get*, is* 게터를 모두 불러 보이기)를 옮길 수 없다.
-//     대신 UIDocument 에 등록된 컴포넌트는 UIDocument 가 저장하는 키와 값(serialize_component)을 속성으로 보인다. 이름은 저장 키 그대로다.
-//     처음 문서는 엔진 컴포넌트만 등록된 것이고, 게임이 자기 컴포넌트를 등록한 문서를 set_ui_document 로 걸면(또는 get_ui_document_mut 로 등록하면) 그 컴포넌트도 보인다.
-//     값은 원본 formatPropertyValue 처럼 적는다. (수는 소수 둘째 자리, 수 둘 배열은 벡터, 이름에 color 가 든 수 넷 배열은 rgba, 그 밖의 수 넷 배열은 사각형,
-//     노드 참조는 [WorldNode]) 등록하지 않은 컴포넌트는 종류 이름만 보인다.
+//   - 인스펙터의 컴포넌트 속성은 원본 getComponentProperties 처럼 그 컴포넌트의 get*, is* 게터를 모두 불러 보인다.
+//     원본은 실행 중에 프로토타입을 훑고, 러스트 판은 #[reflect] 매크로가 컴파일 때 지은 목록을 쓴다. (core/reflection.rs, 엔진 컴포넌트는 모두 붙였다)
+//     이름은 원본 formatMethodName(getTextColor → textColor, is 로 시작하면 그대로), 값은 원본 formatPropertyValue 꼴이다.
+//     (수는 toFixed(2), Vector2 는 (x, y), Rect 는 (x, y, 너비, 높이) toFixed(1), Color 는 rgba, null, 노드는 [WorldNode], 배열은 [Array], 그 밖은 [종류 이름])
+//     러스트 판이 impl Component 에서 다시 정의한 게터(isTickNeeded 같은 것)도 그 타입의 함수라 보인다. 그래서 목록이 원본과 조금 다른 컴포넌트가 있다.
+//   - 반사가 없는 컴포넌트(#[reflect] 를 붙이지 않은 게임 컴포넌트)는 UIDocument 에 쓰기 함수로 등록했으면 그 저장 키와 값을 보이고, 아니면 종류 이름만 보인다.
+//     게임이 자기 컴포넌트를 등록한 문서는 set_ui_document 로 건다. (또는 get_ui_document_mut 로 등록한다) 이 때 수 넷 배열은 이름에 color 가 들면 rgba, 아니면 사각형으로 본다.
 //   - Local Storage 탭의 키 입력, 값 고치기, 지울지 묻기: 웹은 원본처럼 window.prompt, window.confirm 을 부른다.
 //     데스크탑에는 그런 창이 없어 패널 안에 작은 입력 창을 띄운다. (글은 TextInput 줄에서 받아 IME 도 된다. Enter 나 OK 는 확인, Escape 나 Cancel 은 취소)
 //   - Statistics 의 clientNativeSize 는 ViewManager::get_client_native_size(웹은 페이지 전체 크기, 데스크탑은 창 안쪽 논리 크기)다.
@@ -35,7 +37,9 @@ use crate::base::vector2::Vector2;
 use crate::core::engine::Engine;
 use crate::core::graphic::{Graphic, TextAlign, TextBaseline};
 use crate::core::inputmanager::KeyCode;
+use crate::base::format::format_fixed;
 use crate::core::node::nodetree::{NodeId, NodeTree};
+use crate::core::reflection::{collect_reflected_getters, ReflectValue};
 use crate::core::viewmanager::ViewScaleMode;
 use crate::misc::localstorage::LocalStorage;
 use crate::ui::uidocument::UIDocument;
@@ -1235,8 +1239,19 @@ impl DevTools {
 				// 컴포넌트 헤더.
 				lines.push(InspectorLine::new(None, component.get_component_type(), COLOR_COMPONENT, false, false, true, Some(component_reference), false));
 
-				// 펼쳐진 경우 프로퍼티 목록. (UIDocument 에 등록하지 않은 컴포넌트는 종류 이름만)
+				// 펼쳐진 경우 프로퍼티 목록. (반사가 있으면 원본 getComponentProperties 처럼 모든 게터, 없으면 UIDocument 의 저장 키, 그것도 없으면 종류 이름만)
 				if !is_expanded {
+					continue;
+				}
+				if let Some(getter_list) = collect_reflected_getters(component.as_ref()) {
+					if getter_list.is_empty() {
+						lines.push(InspectorLine::new(None, "(프로퍼티 없음)", COLOR_TEXT_DIM, false, false, false, None, true));
+					}
+					for getter in getter_list.iter() {
+						let property_name = format_method_name(getter.name);
+						let property_text = format_property_value(&getter.value);
+						lines.push(InspectorLine::new(Some(&property_name), &property_text, COLOR_PROPERTY_VALUE, false, false, false, None, true));
+					}
 					continue;
 				}
 				let component_properties = match self.ui_document.serialize_component(node_tree, reference_root_id, component.as_ref()) {
@@ -1252,7 +1267,7 @@ impl DevTools {
 				}
 				else {
 					for (property_name, property_value) in component_properties.iter() {
-						let property_text = format_property_value(property_name, property_value);
+						let property_text = format_document_value(property_name, property_value);
 						lines.push(InspectorLine::new(Some(property_name), &property_text, COLOR_PROPERTY_VALUE, false, false, false, None, true));
 					}
 				}
@@ -2565,10 +2580,85 @@ fn read_performance_memory() -> Option<PerformanceMemory> {
 }
 
 //==============================================================================
-// 프로퍼티 값을 문자열로 포맷. (원본 formatPropertyValue 를 UIDocument 의 JSON 값에 맞춘 것)
+// get* 함수 이름을 속성 이름 꼴로. (원본 formatMethodName, getTextColor → textColor. is 로 시작하는 이름은 그대로)
+//==============================================================================
+fn format_method_name(method_name: &str) -> String {
+	match method_name.strip_prefix("get") {
+		Some(trimmed_name) if !trimmed_name.is_empty() => {
+			let mut characters = trimmed_name.chars();
+			let mut property_name = String::with_capacity(trimmed_name.len());
+			if let Some(first_character) = characters.next() {
+				property_name.extend(first_character.to_lowercase());
+			}
+			property_name.push_str(characters.as_str());
+			property_name
+		}
+		_ => {
+			String::from(method_name)
+		}
+	}
+}
+
+//==============================================================================
+// 게터 값을 문자열로 포맷. (원본 formatPropertyValue, 수는 원본 toFixed 와 같이 반올림한다)
+//==============================================================================
+fn format_property_value(value: &ReflectValue) -> String {
+	match value {
+		ReflectValue::Null => {
+			String::from("null")
+		}
+		ReflectValue::Boolean(boolean_value) => {
+			String::from(format_boolean(*boolean_value))
+		}
+		ReflectValue::Number(number) => {
+			format_fixed(*number, 2)
+		}
+		ReflectValue::String(text) => {
+			format_quoted_text(text)
+		}
+		ReflectValue::Vector2(vector) => {
+			format!("({}, {})", format_fixed(vector.x as f64, 2), format_fixed(vector.y as f64, 2))
+		}
+		ReflectValue::Rect(rect) => {
+			format!("({}, {}, {}, {})", format_fixed(rect.position.x as f64, 1), format_fixed(rect.position.y as f64, 1), format_fixed(rect.size.x as f64, 1), format_fixed(rect.size.y as f64, 1))
+		}
+		ReflectValue::Color(color) => {
+			let red = (color.red as f64 * 255.0).round();
+			let green = (color.green as f64 * 255.0).round();
+			let blue = (color.blue as f64 * 255.0).round();
+			format!("rgba({}, {}, {}, {})", red, green, blue, format_fixed(color.alpha as f64, 2))
+		}
+		ReflectValue::Node(_) => {
+			format!("[{}]", NODE_TYPE_NAME)
+		}
+		ReflectValue::List(_) => {
+			String::from("[Array]")
+		}
+		ReflectValue::Object(type_name) => {
+			format!("[{}]", type_name)
+		}
+	}
+}
+
+//==============================================================================
+// 따옴표로 감싼 글. (28 자를 넘으면 25 자와 ...)
+//==============================================================================
+fn format_quoted_text(text: &str) -> String {
+	let truncated_text = if text.chars().count() > 28 {
+		let kept_text: String = text.chars().take(25).collect();
+		format!("{}...", kept_text)
+	}
+	else {
+		String::from(text)
+	};
+	format!("\"{}\"", truncated_text)
+}
+
+//==============================================================================
+// 문서 값을 문자열로 포맷. (반사가 없는 컴포넌트의 UIDocument 저장 값, 원본 formatPropertyValue 를 JSON 값에 맞춘 것)
 // - 수 둘 배열은 벡터, 이름에 color 가 든 수 넷 배열은 rgba, 그 밖의 수 넷 배열은 사각형으로 본다.
 //==============================================================================
-fn format_property_value(property_name: &str, value: &Value) -> String {
+fn format_document_value(property_name: &str, value: &Value) -> String {
 	match value {
 		Value::Null => {
 			String::from("null")
@@ -2580,14 +2670,7 @@ fn format_property_value(property_name: &str, value: &Value) -> String {
 			format!("{:.2}", number_value.as_f64().unwrap_or(0.0))
 		}
 		Value::String(string_value) => {
-			let truncated_text = if string_value.chars().count() > 28 {
-				let kept_text: String = string_value.chars().take(25).collect();
-				format!("{}...", kept_text)
-			}
-			else {
-				string_value.clone()
-			};
-			format!("\"{}\"", truncated_text)
+			format_quoted_text(string_value)
 		}
 		Value::Array(item_values) => {
 			let numbers: Option<Vec<f64>> = item_values.iter().map(Value::as_f64).collect();
@@ -2830,31 +2913,52 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 프로퍼티 값 글은 원본 formatPropertyValue 와 같은 꼴이다.
+	// 게터 값 글과 이름은 원본 formatPropertyValue, formatMethodName 과 같은 꼴이다.
 	//==============================================================================
 	#[test]
 	fn property_values_are_formatted_like_original() {
-		assert_eq!(format_property_value("enable", &serde_json::json!(true)), "true");
-		assert_eq!(format_property_value("roundSize", &serde_json::json!(4)), "4.00");
-		assert_eq!(format_property_value("fontSize", &serde_json::json!(12.345)), "12.35");
-		assert_eq!(format_property_value("text", &serde_json::json!("hello")), "\"hello\"");
-		assert_eq!(format_property_value("text", &serde_json::json!("abcdefghijklmnopqrstuvwxyz0123")), "\"abcdefghijklmnopqrstuvwxy...\"");
-		assert_eq!(format_property_value("anchor", &serde_json::json!([0.5, 1])), "(0.50, 1.00)");
-		assert_eq!(format_property_value("textColor", &serde_json::json!([1, 0.5, 0, 0.25])), "rgba(255, 128, 0, 0.25)");
-		assert_eq!(format_property_value("nineSlice", &serde_json::json!([1, 2, 3.5, 4])), "(1.0, 2.0, 3.5, 4.0)");
-		assert_eq!(format_property_value("list", &serde_json::json!(["a"])), "[Array]");
-		assert_eq!(format_property_value("target", &serde_json::json!({ "$nodeRef": "a/b" })), "[WorldNode]");
-		assert_eq!(format_property_value("other", &serde_json::json!({ "x": 1 })), "[Object]");
-		assert_eq!(format_property_value("nothing", &Value::Null), "null");
+		assert_eq!(format_property_value(&ReflectValue::Boolean(true)), "true");
+		assert_eq!(format_property_value(&ReflectValue::Number(4.0)), "4.00");
+		assert_eq!(format_property_value(&ReflectValue::Number(12.345)), "12.35");
+		assert_eq!(format_property_value(&ReflectValue::Number(0.125)), "0.13");
+		assert_eq!(format_property_value(&ReflectValue::String(String::from("hello"))), "\"hello\"");
+		assert_eq!(format_property_value(&ReflectValue::String(String::from("abcdefghijklmnopqrstuvwxyz0123"))), "\"abcdefghijklmnopqrstuvwxy...\"");
+		assert_eq!(format_property_value(&ReflectValue::Vector2(Vector2::create(0.5, 1.0))), "(0.50, 1.00)");
+		assert_eq!(format_property_value(&ReflectValue::Rect(Rect::create(1.0, 2.0, 3.5, 4.0))), "(1.0, 2.0, 3.5, 4.0)");
+		assert_eq!(format_property_value(&ReflectValue::Color(Color::create(1.0, 0.5, 0.0, 0.25))), "rgba(255, 128, 0, 0.25)");
+		assert_eq!(format_property_value(&ReflectValue::Node(NodeTree::new().get_root_id())), "[WorldNode]");
+		assert_eq!(format_property_value(&ReflectValue::List(Vec::new())), "[Array]");
+		assert_eq!(format_property_value(&ReflectValue::Object(String::from("Image"))), "[Image]");
+		assert_eq!(format_property_value(&ReflectValue::Null), "null");
+		assert_eq!(format_method_name("getTextColor"), "textColor");
+		assert_eq!(format_method_name("isCircle"), "isCircle");
+		assert_eq!(format_method_name("get"), "get");
 		assert_eq!(truncate_text("abcdefghij", 8), "abcde...");
 		assert_eq!(truncate_text("abc", 8), "abc");
 	}
 
 	//==============================================================================
-	// 인스펙터는 노드 정보와 UIDocument 가 저장하는 컴포넌트 속성을 보이고, 접은 컴포넌트는 머리만 남긴다.
+	// 반사가 없는 컴포넌트의 문서 값 글. (UIDocument 의 JSON 값)
 	//==============================================================================
 	#[test]
-	fn inspector_lines_show_serialized_component_properties() {
+	fn document_values_are_formatted_like_original() {
+		assert_eq!(format_document_value("enable", &serde_json::json!(true)), "true");
+		assert_eq!(format_document_value("roundSize", &serde_json::json!(4)), "4.00");
+		assert_eq!(format_document_value("text", &serde_json::json!("hello")), "\"hello\"");
+		assert_eq!(format_document_value("anchor", &serde_json::json!([0.5, 1])), "(0.50, 1.00)");
+		assert_eq!(format_document_value("textColor", &serde_json::json!([1, 0.5, 0, 0.25])), "rgba(255, 128, 0, 0.25)");
+		assert_eq!(format_document_value("nineSlice", &serde_json::json!([1, 2, 3.5, 4])), "(1.0, 2.0, 3.5, 4.0)");
+		assert_eq!(format_document_value("list", &serde_json::json!(["a"])), "[Array]");
+		assert_eq!(format_document_value("target", &serde_json::json!({ "$nodeRef": "a/b" })), "[WorldNode]");
+		assert_eq!(format_document_value("other", &serde_json::json!({ "x": 1 })), "[Object]");
+		assert_eq!(format_document_value("nothing", &Value::Null), "null");
+	}
+
+	//==============================================================================
+	// 인스펙터는 노드 정보와 컴포넌트의 게터(원본 getComponentProperties)를 보이고, 접은 컴포넌트는 머리만 남긴다.
+	//==============================================================================
+	#[test]
+	fn inspector_lines_show_reflected_component_properties() {
 		let storage_directory_path = use_temporary_storage_directory("inspector");
 		let mut node_tree = NodeTree::new();
 		let root_id = node_tree.get_root_id();
@@ -2870,6 +2974,8 @@ mod tests {
 		assert!(line_texts.contains(&(Some(String::from("type")), String::from("WorldNode"))));
 		assert!(line_texts.contains(&(Some(String::from("color")), String::from("rgba(255, 128, 0, 1.00)"))));
 		assert!(line_texts.contains(&(Some(String::from("roundSize")), String::from("0.00"))));
+		assert!(line_texts.contains(&(Some(String::from("isDrawnInsideContent")), String::from("true"))));
+		let paint_property_count = dev_tools.cached_inspector_lines.iter().filter(|line| line.is_component_property).count();
 		let header_lines: Vec<&InspectorLine> = dev_tools.cached_inspector_lines.iter().filter(|line| line.is_component_header).collect();
 		assert_eq!(header_lines.len(), 2);
 		assert_eq!(header_lines[0].value, "Paint");
@@ -2881,7 +2987,7 @@ mod tests {
 		let line_count = dev_tools.cached_inspector_lines.len();
 		dev_tools.collapsed_components.insert((node_id, 0));
 		dev_tools.build_inspector_lines(&node_tree, node_id);
-		assert_eq!(dev_tools.cached_inspector_lines.len(), line_count - 2);
+		assert_eq!(dev_tools.cached_inspector_lines.len(), line_count - paint_property_count);
 		let _ = std::fs::remove_dir_all(&storage_directory_path);
 	}
 

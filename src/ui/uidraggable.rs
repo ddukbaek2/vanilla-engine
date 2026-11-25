@@ -47,6 +47,7 @@ pub struct UIDraggable {
 	drag_end_event: Option<UIDraggablePositionEvent>,
 }
 
+#[crate::reflect(base = ui_control)]
 impl UIDraggable {
 	//==============================================================================
 	// 생성. (복귀 꺼짐, 복귀 속도 14)
@@ -70,6 +71,7 @@ impl UIDraggable {
 	//==============================================================================
 	// 품은 컨트롤 반환.
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn get_uicontrol(&self) -> &UIControl {
 		&self.ui_control
 	}
@@ -84,6 +86,7 @@ impl UIDraggable {
 	//==============================================================================
 	// 컨텐트 노드 핸들.
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn get_content(&self) -> Option<NodeId> {
 		self.ui_control.get_content()
 	}
@@ -91,6 +94,7 @@ impl UIDraggable {
 	//==============================================================================
 	// 배경색 설정.
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn set_background_color(&mut self, background_color: impl Into<Color>) {
 		self.ui_control.set_background_color(background_color);
 	}
@@ -234,6 +238,7 @@ impl Default for UIDraggable {
 	}
 }
 
+#[crate::reflect]
 impl Component for UIDraggable {
 	fn get_component_base(&self) -> &ComponentBase {
 		self.ui_control.get_component_base()

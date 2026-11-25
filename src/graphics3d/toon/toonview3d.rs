@@ -59,6 +59,7 @@ pub struct ToonView3D {
 	screen_rect: Rect,
 }
 
+#[crate::reflect]
 impl ToonView3D {
 	//==============================================================================
 	// 생성. (깊이를 비움)
@@ -193,6 +194,7 @@ impl Default for ToonView3D {
 	}
 }
 
+#[crate::reflect]
 impl Component for ToonView3D {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base

@@ -56,6 +56,7 @@ pub struct UISnapScrollView {
 	page_change_threshold: f32,
 }
 
+#[crate::reflect(base = scroll_view)]
 impl UISnapScrollView {
 	//==============================================================================
 	// 생성. (clamp 모드, 가로만 스크롤)
@@ -80,6 +81,7 @@ impl UISnapScrollView {
 	//==============================================================================
 	// 품은 스크롤 뷰 반환.
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn get_scroll_view(&self) -> &UIScrollView {
 		&self.scroll_view
 	}
@@ -94,6 +96,7 @@ impl UISnapScrollView {
 	//==============================================================================
 	// 컨텐트 노드 핸들. (아이템 노드를 여기에 붙인다)
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn get_content(&self) -> Option<NodeId> {
 		self.scroll_view.get_content()
 	}
@@ -101,6 +104,7 @@ impl UISnapScrollView {
 	//==============================================================================
 	// 배경색 설정.
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn set_background_color(&mut self, background_color: impl Into<Color>) {
 		self.scroll_view.set_background_color(background_color);
 	}
@@ -108,6 +112,7 @@ impl UISnapScrollView {
 	//==============================================================================
 	// 스크롤 콘텐츠 크기 설정.
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn set_scroll_content_size(&mut self, scroll_content_size: Vector2) {
 		self.scroll_view.set_scroll_content_size(scroll_content_size);
 	}
@@ -115,6 +120,7 @@ impl UISnapScrollView {
 	//==============================================================================
 	// 스크롤 콘텐츠 크기 반환.
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn get_scroll_content_size(&self) -> Vector2 {
 		self.scroll_view.get_scroll_content_size()
 	}
@@ -122,6 +128,7 @@ impl UISnapScrollView {
 	//==============================================================================
 	// 오프셋 설정. (범위로 자른다)
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn set_scroll_offset(&mut self, offset: Vector2) {
 		self.scroll_view.set_scroll_offset(offset);
 	}
@@ -129,6 +136,7 @@ impl UISnapScrollView {
 	//==============================================================================
 	// 오프셋 반환.
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn get_scroll_offset(&self) -> Vector2 {
 		self.scroll_view.get_scroll_offset()
 	}
@@ -136,6 +144,7 @@ impl UISnapScrollView {
 	//==============================================================================
 	// 가로 스크롤 켜기 설정.
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn set_horizontal(&mut self, is_horizontal: bool) {
 		self.scroll_view.set_horizontal(is_horizontal);
 	}
@@ -143,6 +152,7 @@ impl UISnapScrollView {
 	//==============================================================================
 	// 가로 스크롤 켜짐 여부.
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn is_horizontal(&self) -> bool {
 		self.scroll_view.is_horizontal()
 	}
@@ -150,6 +160,7 @@ impl UISnapScrollView {
 	//==============================================================================
 	// 세로 스크롤 켜기 설정.
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn set_vertical(&mut self, is_vertical: bool) {
 		self.scroll_view.set_vertical(is_vertical);
 	}
@@ -157,6 +168,7 @@ impl UISnapScrollView {
 	//==============================================================================
 	// 세로 스크롤 켜짐 여부.
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn is_vertical(&self) -> bool {
 		self.scroll_view.is_vertical()
 	}
@@ -164,6 +176,7 @@ impl UISnapScrollView {
 	//==============================================================================
 	// 드래그 중인지.
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn is_dragging(&self) -> bool {
 		self.scroll_view.is_dragging()
 	}
@@ -448,6 +461,7 @@ impl Default for UISnapScrollView {
 	}
 }
 
+#[crate::reflect]
 impl Component for UISnapScrollView {
 	fn get_component_base(&self) -> &ComponentBase {
 		self.scroll_view.get_component_base()
