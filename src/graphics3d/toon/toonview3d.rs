@@ -262,3 +262,24 @@ impl Component for ToonView3D {
 		});
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::core::node::nodetree::NodeTree;
+
+	#[test]
+	fn component_is_found_without_type_argument() {
+		let mut node_tree = NodeTree::new();
+		let root_id = node_tree.get_root_id();
+		let node_id = node_tree.create_child(root_id, "view");
+		let toon_view = node_tree[node_id].add_component(ToonView3D::new());
+		toon_view.set_draw_callback(Some(Box::new(|_renderer, _camera, _screen_rect, _gl, _drawing_buffer_height| {
+		})));
+		toon_view.set_depth_cleared(false);
+		let found = node_tree[node_id].get_component_mut::<ToonView3D>().expect("ToonView3D");
+		assert!(!found.is_depth_cleared());
+		assert!(found.get_renderer().is_none());
+		assert!(!found.is_renderer_failed());
+	}
+}
