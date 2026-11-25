@@ -3226,12 +3226,14 @@ dependencies = [
  "unicode-segmentation",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "wayland-client",
  "web-sys",
  "web-time",
  "winapi",
  "windows-sys 0.52.0",
  "winit",
  "wuff",
+ "x11-dl",
  "yeslogic-fontconfig-sys",
 ]
 

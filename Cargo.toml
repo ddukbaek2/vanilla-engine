@@ -98,6 +98,9 @@ objc2-core-graphics = { version = "0.3", default-features = false, features = ["
 # 리눅스와 그 밖의 유닉스: 시스템 글꼴. (fontconfig 로 글꼴 이름과 대체 글꼴을 고른다. 원본 크롬 리눅스도 fontconfig 로 고른다. 라이브러리는 빌드할 때 잇지 않고 실행할 때 연다)
 [target.'cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android"), not(target_arch = "wasm32")))'.dependencies]
 yeslogic-fontconfig-sys = { version = "6", features = ["dlopen"] }
+# 주된 손이 손가락인지 크로미엄처럼 화면 서버의 입력 장치로 읽는다. (X11 XInput 은 x11-dl 로 libX11, libXi 를 실행할 때 열고, 웨이랜드 wl_seat 은 wayland-client. 둘 다 glutin, winit 이 쓰는 같은 판)
+x11-dl = "2.21"
+wayland-client = "0.31"
 
 # 웹(wasm): 캔버스와 WebGL2, requestAnimationFrame, WebAudio, fetch.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
