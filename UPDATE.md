@@ -434,7 +434,7 @@
   - 섞기: 그리는 영역의 화소마다 가장 가까운 경계까지의 거리로 clamp(굵기 / 2 - 거리 + 0.5, 0, 1) 만큼 덮는다. 줄인 선의 판에서도 선이 끊기지 않는다
   - 모형마다: ToonLineDrawOptions 의 has_screen_outline (false 면 가리기만), has_crease_line, is_mirrored (None 이면 행렬식으로)
   - 옮기는 법 (공개 API 를 바꿨다)
-    - set_crease(각, 진하기, 이어짐 픽셀) → set_crease(각, 굵기, 진하기). 굵기는 set_width 의 단위, 진하기는 0 ~ 1. 이어짐 픽셀은 없어졌다. 옛 set_crease(60.0, 0.5, 2.0) 과 비슷한 모습은 set_crease(60.0, 1.0, 0.8)
+    - set_crease(각, 진하기, 이어짐 픽셀) → set_crease(각, 굵기, 진하기). 굵기는 set_width 의 단위, 진하기는 0 ~ 1. 이어짐 픽셀은 없어졌다. 옛 set_crease(60.0, 0.5, 2.0) 과 비슷한 모습은 픽셀 단위면 set_crease(60.0, 1.0, 0.8), 월드 단위면 굵기를 바깥 선 굵기의 반쯤으로 (set_width(0.022, World) 면 set_crease(60.0, 0.011, 0.8)). 굵기가 set_width 의 단위라 월드 단위에 1 을 주면 1 미터 굵기가 된다
     - set_depth_threshold(깊이 문턱, 맞닿음 문턱) → set_depth_threshold(깊이 문턱). 뜻이 접평면 거리로 바뀌었다. 맞닿음 문턱은 없어졌다
     - set_width 의 뜻: 선 하나의 굵기를 경계 양쪽에 반씩. 기본 1.5 → 2 픽셀
     - set_sample_count, TOON_SCREEN_OUTLINE_MAXIMUM_SAMPLES, TOON_SCREEN_OUTLINE_MAXIMUM_CREASE_SAMPLES 는 없어졌다. 가벼운 길은 set_resolution_scale 만 낮춘다
@@ -446,7 +446,7 @@
 - ToonDrawOptions: line_id (None 이면 그리기 줄이 담은 차례 + 1), has_screen_outline, has_crease_line. (화면 공간 바깥선의 모형마다 꼴, ToonRenderer 는 읽지 않는다)
 - ToonDrawQueue: set_screen_outline(Option<&'a mut ToonScreenOutline>), has_screen_outline(). 맡기면 draw 와 draw_with_matrices 가 몸 앞에 불투명한 것을 선의 판에 그리고 바깥선 껍데기 뒤 AfterOutline 단계 앞에 섞는다. 화면 사각형이 있으면 그 사각형을 그리는 영역으로 쓴다
 - 예제 toonstyle: 툰 셰이딩과 바깥선 견주기 장면. (TOON_STYLE_SCALE 로 선의 판 몫, TOON_STYLE_TOGGLES=1 로 모형마다의 꼴) vanilla.js examples/toonstyle 과 같은 장면이다. 숨긴 창으로 찍어 원본(헤드리스 크롬)과 견주면 2560x1440 에서 화소 차이 평균 0.005, 8 넘게 다른 화소 0.024% 다. (꺾임 각 문턱에 걸친 엷은 꺾임 선 몇 군데)
-- 예제 toonfx: 새 set_crease, set_depth_threshold 로 바꿨다
+- 예제 toonfx: 새 set_crease(60.0, 0.011, 0.8) (월드 단위), set_depth_threshold 로 바꿨다
 - 툰 셰이딩을 실시간 툰 렌더링의 정석 꼴로 다시 지었다. (vanilla.js 와 같은 셰이더, 같은 값)
   - 그늘 램프: 빛을 받는 몫(반 램버트 기본)에 그림자를 곱해 램프에 대어 색을 고른다. 칸마다 자리, 선형 색, 부드러움, 경계는 fwidth 로 계단 없이. 그림자는 그늘 색으로 들어간다
     - ToonLightSet::set_shade(ToonShade { step, feather, color, second_step, second_feather, second_color, is_half_lambert }), set_shade_ramp(자리, 색, 부드러움, 반 램버트), clear_shade_ramp, set_ramp_texture(Option<GlTexture>, 반 램버트)
