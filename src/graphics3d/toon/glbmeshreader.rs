@@ -1,8 +1,11 @@
 //==============================================================================
 // 점토 모형(GLB) 읽기와 뼈대 자세. (vanilla.js experimental/graphics/toon/glbmeshreader.js)
-// - 텍스처 없이 재질 색으로 칠하는 모형을 툰 3D 의 MeshBuilder 꼭짓점 배열로 읽는다. (외계행성 광부 키우기에서 왔다)
+// - 재질 색으로 칠하는 모형을 툰 3D 의 MeshBuilder 꼭짓점 배열로 읽는다. 텍스처 좌표와 재질 텍스처가 있으면 그것도 읽는다. (외계행성 광부 키우기에서 왔다)
 //   - 부품 하나가 노드 하나이고, 노드의 메시는 색마다 프리미티브 하나다. 꼭짓점은 위치와 노멀, 뼈대가 있으면 본 번호와 무게다.
-//   - 재질의 baseColorFactor 는 선형 색이라 sRGB 로 바꿔 담고, emissiveFactor 가 있으면 빛남으로 담는다.
+//   - 재질의 baseColorFactor 는 선형 색이라 sRGB 로 바꿔 담고, emissiveFactor 가 있으면 빛남으로 담는다. (emissiveTexture 가 있으면 빛남은 재질 범위로만 넘긴다)
+//   - TEXCOORD_0 이 있으면 uv_data 로 담는다. 프리미티브마다 재질 범위(ToonMaterialRange)를 담는다. (재질 이름, extras, 텍스처 그림 차례)
+//     부품 안에서 칸을 갈라 칠할 때(강조색 칸, 표시판) 재질 이름이나 extras 로 고르고 ToonDrawOptions 의 index_start, index_count 로 그 칸만 그린다.
+//   - 그림은 read_glb_images 로 읽고 decode_glb_image 로 풀어 ToonRenderer::create_texture 에 넘긴다.
 //   - 재질 extras 의 outline 은 바깥선 껍데기(뒷면만 그림), basic 은 빛을 받지 않는 부품이다.
 //     바깥선 설정을 주면 그 껍데기는 담지 않고, ".outline" 짝이 있는 노드의 몸으로 점마다 같은 굵기의 껍데기를 새로 짓는다.
 //   - 뼈대(skin)가 있으면 본 노드와 그 거꾸로 묶는 행렬, 움직임(animations)과 그 extras 를 함께 읽는다. 자세는 write_skin_pose 가 셈한다.
@@ -16,7 +19,7 @@ use serde_json::Value;
 
 use crate::base::matrix4::Matrix4;
 use crate::base::quaternion::Quaternion;
-use crate::graphics3d::toon::meshbuilder::{MeshBuilder, ToonMeshArrays};
+use crate::graphics3d::toon::meshbuilder::{MeshBuilder, ToonMaterialRange, ToonMeshArrays};
 
 // GLB 의 머리와 덩어리 종류.
 const GLB_MAGIC: u32 = 0x46546c67;
@@ -382,18 +385,87 @@ fn add_primitive(builder: &mut MeshBuilder, chunks: &GlbChunks, node: &Value, pr
 		}
 	};
 	let normals = read_accessor(chunks, normal_accessor);
+	let uvs = attributes["TEXCOORD_0"].as_u64().map(|uv_accessor| read_accessor(chunks, uv_accessor as usize));
 	let base_color = read_float_array(&material["pbrMetallicRoughness"]["baseColorFactor"], [1.0; 4]);
 	let color = [base_color[0].max(0.0).powf(1.0 / 2.2), base_color[1].max(0.0).powf(1.0 / 2.2), base_color[2].max(0.0).powf(1.0 / 2.2)];
 	// 빛남은 바탕색에 곱하는 세기로 담는다. (셰이더는 바탕색 x 세기를 더한다)
 	let mut glow = 0.0;
-	if material["emissiveFactor"].is_array() {
+	let emissive_image = read_texture_image(chunks, &material["emissiveTexture"]);
+	if material["emissiveFactor"].is_array() && emissive_image.is_none() {
 		let emissive = read_float_array(&material["emissiveFactor"], [0.0; 3]);
 		let emissive_maximum = emissive[0].max(emissive[1]).max(emissive[2]);
 		let base_maximum = base_color[0].max(base_color[1]).max(base_color[2]).max(0.001);
 		glow = emissive_maximum / base_maximum;
 	}
 	let is_unlit = material["extras"]["basic"].as_bool() == Some(true);
-	builder.add_triangles(&positions, &normals, &indices, part_matrix, color, glow, is_unlit, joints.as_deref(), weights.as_deref());
+	let index_start = builder.get_index_count();
+	builder.add_triangles_with_uvs(&positions, &normals, &indices, part_matrix, color, glow, is_unlit, joints.as_deref(), weights.as_deref(), uvs.as_deref());
+	builder.add_material_range(ToonMaterialRange {
+		name: String::from(material["name"].as_str().unwrap_or("")),
+		material_index: primitive["material"].as_u64().map(|material_index| material_index as usize),
+		node_name: read_node_name(node),
+		index_start,
+		index_count: builder.get_index_count() - index_start,
+		extras: if material["extras"].is_object() { material["extras"].clone() } else { Value::Object(serde_json::Map::new()) },
+		alpha_mode: String::from(material["alphaMode"].as_str().unwrap_or("OPAQUE")),
+		alpha_cutoff: material["alphaCutoff"].as_f64().unwrap_or(0.5) as f32,
+		base_color_factor: base_color,
+		emissive_factor: read_float_array(&material["emissiveFactor"], [0.0; 3]),
+		base_color_image: read_texture_image(chunks, &material["pbrMetallicRoughness"]["baseColorTexture"]),
+		emissive_image,
+		has_uv: uvs.is_some(),
+	});
+}
+
+//==============================================================================
+// 재질의 텍스처 정보가 가리키는 그림 차례. (textures[index].source, 없으면 None)
+//==============================================================================
+fn read_texture_image(chunks: &GlbChunks, texture_info: &Value) -> Option<usize> {
+	let texture_index = texture_info["index"].as_u64()? as usize;
+	chunks.json["textures"][texture_index]["source"].as_u64().map(|source| source as usize)
+}
+
+//==============================================================================
+// GLB 에 든 그림 하나. (images 의 차례, 재질 범위의 base_color_image, emissive_image 가 가리킨다)
+//==============================================================================
+#[derive(Clone, Debug, Default)]
+pub struct ToonGlbImage {
+	pub name: String,
+	pub mime_type: String,
+	pub data: Vec<u8>,
+}
+
+//==============================================================================
+// GLB 에 든 그림들. (바이너리 덩어리의 bufferView 로 담긴 그림만 읽는다, 바깥 파일 uri 는 data 가 빈 것)
+//==============================================================================
+pub fn read_glb_images(bytes: &[u8]) -> Result<Vec<ToonGlbImage>, String> {
+	let chunks = read_glb_chunks(bytes)?;
+	let image_list = chunks.json["images"].as_array().cloned().unwrap_or_default();
+	Ok(image_list.iter().map(|image| {
+		let name = String::from(image["name"].as_str().unwrap_or(""));
+		let mime_type = String::from(image["mimeType"].as_str().unwrap_or(""));
+		let data = match image["bufferView"].as_u64() {
+			Some(buffer_view_index) => {
+				let buffer_view = &chunks.json["bufferViews"][buffer_view_index as usize];
+				let byte_offset = buffer_view["byteOffset"].as_u64().unwrap_or(0) as usize;
+				let byte_length = buffer_view["byteLength"].as_u64().unwrap_or(0) as usize;
+				chunks.binary.get(byte_offset..byte_offset + byte_length).map(|slice| slice.to_vec()).unwrap_or_default()
+			}
+			None => {
+				Vec::new()
+			}
+		};
+		ToonGlbImage { name, mime_type, data }
+	}).collect())
+}
+
+//==============================================================================
+// read_glb_images 의 그림 하나를 풀기. ((너비, 높이, RGBA 바이트), 알파를 미리 곱하지 않는다, png, jpeg, webp)
+//==============================================================================
+pub fn decode_glb_image(image: &ToonGlbImage) -> Result<(u32, u32, Vec<u8>), String> {
+	let decoded = image::load_from_memory(&image.data).map_err(|error| format!("GLB 그림 {} 을 풀지 못했다: {}", image.name, error))?;
+	let rgba = decoded.to_rgba8();
+	Ok((rgba.width(), rgba.height(), rgba.into_raw()))
 }
 
 //==============================================================================
@@ -950,5 +1022,89 @@ pub fn write_skin_pose(skeleton: &ToonSkeleton, animation_name: &str, time: f32,
 		}
 		joint_matrix.multiply(&inverse_bind_matrix);
 		target[target_offset..target_offset + 16].copy_from_slice(&joint_matrix.elements);
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	//==============================================================================
+	// 시험용 작은 GLB. (네모 하나, TEXCOORD_0 은 정규화한 u16, 재질 이름과 extras, 바탕색 텍스처의 그림)
+	//==============================================================================
+	fn build_test_glb(image_bytes: &[u8]) -> Vec<u8> {
+		let positions: [f32; 12] = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0];
+		let normals: [f32; 12] = [0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0];
+		let uvs: [u16; 8] = [0, 65535, 65535, 65535, 65535, 0, 0, 0];
+		let indices: [u16; 6] = [0, 1, 2, 0, 2, 3];
+		let mut part_list: Vec<Vec<u8>> = Vec::new();
+		part_list.push(positions.iter().flat_map(|value| value.to_le_bytes()).collect());
+		part_list.push(normals.iter().flat_map(|value| value.to_le_bytes()).collect());
+		part_list.push(uvs.iter().flat_map(|value| value.to_le_bytes()).collect());
+		part_list.push(indices.iter().flat_map(|value| value.to_le_bytes()).collect());
+		part_list.push(image_bytes.to_vec());
+		let mut binary: Vec<u8> = Vec::new();
+		let mut view_list = Vec::new();
+		for part in part_list.iter() {
+			view_list.push(serde_json::json!({ "buffer": 0, "byteOffset": binary.len(), "byteLength": part.len() }));
+			binary.extend_from_slice(part);
+			while binary.len() % 4 != 0 {
+				binary.push(0);
+			}
+		}
+		let json = serde_json::json!({
+			"asset": { "version": "2.0" }, "scene": 0, "scenes": [{ "nodes": [0] }],
+			"nodes": [{ "name": "plate", "mesh": 0, "extras": { "mark": { "kind": "logo" } } }],
+			"meshes": [{ "primitives": [{ "attributes": { "POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2 }, "indices": 3, "material": 0 }] }],
+			"materials": [{ "name": "logoPlate", "extras": { "slot": "accent" }, "pbrMetallicRoughness": { "baseColorFactor": [1.0, 1.0, 1.0, 1.0], "baseColorTexture": { "index": 0 } } }],
+			"textures": [{ "source": 0 }], "images": [{ "name": "logo", "mimeType": "image/png", "bufferView": 4 }],
+			"buffers": [{ "byteLength": binary.len() }], "bufferViews": view_list,
+			"accessors": [
+				{ "bufferView": 0, "componentType": 5126, "count": 4, "type": "VEC3" },
+				{ "bufferView": 1, "componentType": 5126, "count": 4, "type": "VEC3" },
+				{ "bufferView": 2, "componentType": 5123, "normalized": true, "count": 4, "type": "VEC2" },
+				{ "bufferView": 3, "componentType": 5123, "count": 6, "type": "SCALAR" }
+			]
+		});
+		let mut json_bytes = serde_json::to_vec(&json).unwrap();
+		while json_bytes.len() % 4 != 0 {
+			json_bytes.push(b' ');
+		}
+		let total_length = 12 + 8 + json_bytes.len() + 8 + binary.len();
+		let mut glb = Vec::with_capacity(total_length);
+		glb.extend_from_slice(&GLB_MAGIC.to_le_bytes());
+		glb.extend_from_slice(&2u32.to_le_bytes());
+		glb.extend_from_slice(&(total_length as u32).to_le_bytes());
+		glb.extend_from_slice(&(json_bytes.len() as u32).to_le_bytes());
+		glb.extend_from_slice(&CHUNK_TYPE_JSON.to_le_bytes());
+		glb.extend_from_slice(&json_bytes);
+		glb.extend_from_slice(&(binary.len() as u32).to_le_bytes());
+		glb.extend_from_slice(&CHUNK_TYPE_BINARY.to_le_bytes());
+		glb.extend_from_slice(&binary);
+		glb
+	}
+
+	#[test]
+	fn glb_reads_uv_material_range_and_image() {
+		let mut png_bytes: Vec<u8> = Vec::new();
+		let source_image = image::RgbaImage::from_raw(2, 1, vec![255, 0, 0, 255, 0, 255, 0, 128]).unwrap();
+		image::DynamicImage::ImageRgba8(source_image).write_to(&mut std::io::Cursor::new(&mut png_bytes), image::ImageFormat::Png).unwrap();
+		let glb = build_test_glb(&png_bytes);
+		let arrays = read_glb_arrays(&glb, None).unwrap();
+		assert_eq!(arrays.uv_data, vec![0.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0]);
+		let range = &arrays.material_ranges[0];
+		assert_eq!((range.name.as_str(), range.index_start, range.index_count), ("logoPlate", 0, 6));
+		assert_eq!(range.extras["slot"].as_str(), Some("accent"));
+		assert_eq!(range.base_color_image, Some(0));
+		assert!(range.has_uv);
+		let parts = read_glb_node_arrays(&glb, None).unwrap();
+		assert_eq!(parts["plate"].extras["mark"]["kind"].as_str(), Some("logo"));
+		assert_eq!(parts["plate"].arrays.uv_data.len(), 8);
+		let images = read_glb_images(&glb).unwrap();
+		assert_eq!((images[0].name.as_str(), images[0].mime_type.as_str()), ("logo", "image/png"));
+		assert_eq!(images[0].data, png_bytes);
+		let (width, height, pixels) = decode_glb_image(&images[0]).unwrap();
+		assert_eq!((width, height), (2, 1));
+		assert_eq!(pixels, vec![255, 0, 0, 255, 0, 255, 0, 128]);
 	}
 }
