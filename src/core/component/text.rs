@@ -15,6 +15,19 @@
 //!   여러 줄이면 줄마다 남은 수만큼 그리고, 남은 수가 0 이 되면 다음 줄부터 그리지 않는다.
 //! - 한 줄 글을 너비에 맞추기(set_fit_width): 원본처럼 넘치면 처음 크기에서 최소 비율까지 0.1 단위로 줄여 그린다. 줄인 크기는 줄을 나눌 때(update_layout) 재므로
 //!   Graphic 이 있어야 안다. (get_fitted_font_size 는 마지막으로 잰 값, calculate_fitted_font_size 는 그 자리에서 잰다) 그리는 사각형은 줄인 글의 너비를 따른다.
+//!
+//! # 예제
+//! 글자 묶음 단위로 세고 자르기
+//! ```rust
+//! use vanilla::{count_graphemes, slice_graphemes, split_graphemes};
+//!
+//! let text = "e\u{301}xy";
+//! assert_eq!(text.chars().count(), 4);
+//! assert_eq!(count_graphemes(text), 3);
+//! assert_eq!(split_graphemes(text), vec!["e\u{301}", "x", "y"]);
+//! assert_eq!(slice_graphemes(text, 2), "e\u{301}x");
+//! assert_eq!(slice_graphemes(text, 9), text);
+//! ```
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::math;
@@ -33,6 +46,12 @@ const NO_BREAK_SPACE: char = '\u{00A0}';
 
 //==============================================================================
 /// 글자 묶음으로 나누기. (원본 splitGraphemes, UAX #29 확장 글자 묶음: 받침, 성조, 결합 부호, 이모지 묶음이 앞 글자에서 떨어지지 않는다)
+///
+/// # 인자
+/// - `text`: 나눌 글.
+///
+/// # 돌려줌
+/// 글자 묶음 목록. (text 를 빌린 조각)
 //==============================================================================
 pub fn split_graphemes(text: &str) -> Vec<&str> {
 	text.graphemes(true).collect()
@@ -40,6 +59,12 @@ pub fn split_graphemes(text: &str) -> Vec<&str> {
 
 //==============================================================================
 /// 글자 묶음 수. (표시 글자 수가 세는 단위)
+///
+/// # 인자
+/// - `text`: 셀 글.
+///
+/// # 돌려줌
+/// 글자 묶음 수.
 //==============================================================================
 pub fn count_graphemes(text: &str) -> usize {
 	text.graphemes(true).count()
@@ -47,6 +72,13 @@ pub fn count_graphemes(text: &str) -> usize {
 
 //==============================================================================
 /// 앞에서 글자 묶음 count 개까지의 글. (원본 sliceGraphemes, 글이 짧으면 글 전체)
+///
+/// # 인자
+/// - `text`: 글.
+/// - `count`: 남길 글자 묶음 수.
+///
+/// # 돌려줌
+/// 앞 조각. (text 를 빌린다)
 //==============================================================================
 pub fn slice_graphemes(text: &str, count: usize) -> &str {
 	&text[..find_grapheme_prefix_length(text, count)]
@@ -54,6 +86,13 @@ pub fn slice_graphemes(text: &str, count: usize) -> &str {
 
 //==============================================================================
 /// 앞에서 글자 묶음 count 개까지의 바이트 길이. (글이 짧으면 글 전체 길이)
+///
+/// # 인자
+/// - `text`: 글.
+/// - `count`: 글자 묶음 수.
+///
+/// # 돌려줌
+/// 바이트 길이.
 //==============================================================================
 pub fn find_grapheme_prefix_length(text: &str, count: usize) -> usize {
 	match text.grapheme_indices(true).nth(count) {
@@ -73,6 +112,21 @@ pub fn find_grapheme_prefix_length(text: &str, count: usize) -> usize {
 ///   웹은 원본처럼 브라우저의 Intl.Segmenter 로 나눈다. (없는 브라우저면 원본처럼 통째로 한 조각)
 /// - 문장 부호처럼 낱말이 아닌 조각은 앞 낱말에 붙인다. (줄 맨 앞에 문장 부호가 오지 않게) 맨 앞의 것은 첫 낱말 앞에 붙인다.
 /// - 줄바꿈 없는 빈칸(U+00A0)으로 이은 낱말 사이는 나누지 않는다. (이름과 값, 숫자와 단위처럼 함께 있어야 하는 것)
+///
+/// # 인자
+/// - `text`: 나눌 글.
+///
+/// # 돌려줌
+/// 낱말 조각 목록. (조각을 이으면 원래 글이다)
+///
+/// # 예제
+/// 문장 부호는 앞 낱말에, 줄바꿈 없는 빈칸은 잇는다
+/// ```rust
+/// use vanilla::split_words;
+///
+/// assert_eq!(split_words("Hello, world!"), vec!["Hello, ", "world!"]);
+/// assert_eq!(split_words("HP\u{00A0}100 MP"), vec!["HP\u{00A0}100 ", "MP"]);
+/// ```
 //==============================================================================
 pub fn split_words(text: &str) -> Vec<String> {
 	let mut piece_list: Vec<String> = Vec::new();
@@ -117,6 +171,12 @@ fn is_hangul_character(character: char) -> bool {
 
 //==============================================================================
 /// 낱말 조각으로 나누기. ((조각, 낱말인지) 목록, ICU 낱말 경계에 한글 덩어리 경계를 더한다)
+///
+/// # 인자
+/// - `text`: 나눌 글.
+///
+/// # 돌려줌
+/// (조각, 낱말인지) 목록. (조각을 이으면 원래 글이다)
 //==============================================================================
 pub fn segment_words(text: &str) -> Vec<(&str, bool)> {
 	let mut segment_list: Vec<(&str, bool)> = Vec::new();
@@ -415,11 +475,28 @@ fn find_word_boundaries(text: &str) -> Vec<(usize, usize, bool)> {
 
 //==============================================================================
 /// 줄바꿈 반영 크기. (원본 measureWrappedSize 의 { width, height, lineCount })
+///
+/// # 예제
+/// 줄바꿈 폭으로 나눈 글의 크기
+/// ```rust,no_run
+/// use vanilla::{Graphic, Text, TextWrappedSize};
+///
+/// fn measure_description(graphic: &mut Graphic) -> TextWrappedSize {
+/// 	let mut text = Text::create_with_text("A long description that wraps", 20.0);
+/// 	text.set_word_wrap_width(240.0);
+/// 	let wrapped_size = text.measure_wrapped_size(graphic);
+/// 	assert_eq!(wrapped_size.height, wrapped_size.line_count as f32 * 20.0 * text.get_line_spacing());
+/// 	wrapped_size
+/// }
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct TextWrappedSize {
+	/// 가장 넓은 줄의 너비. (픽셀)
 	pub width: f32,
+	/// 높이. (줄 수 * 글자 크기 * 줄 간격)
 	pub height: f32,
+	/// 줄 수. (글이 비었으면 0)
 	pub line_count: usize,
 }
 
@@ -440,6 +517,26 @@ crate::core::reflection::impl_reflect_names!(TextWrapMode, [
 	(TextWrapMode::Character, "char"),
 ]);
 
+//==============================================================================
+/// 텍스트 컴포넌트. (원본 Text, 노드 content_size 영역 안에 정렬해 글자를 그린다)
+///
+/// # 예제
+/// 노드에 글 붙이기
+/// ```rust
+/// use vanilla::{Colors, NodeTree, Text, TextAlign, Vector2};
+///
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.get_root_id();
+/// let label_id = node_tree.create_child(root_id, "label");
+/// node_tree[label_id].set_content_size(Vector2::create(300.0, 60.0));
+/// let text = node_tree.add_component(label_id, Text::create_with_text("Hello", 24.0)).expect("text");
+/// text.set_text_color(Colors::VANILLA);
+/// text.set_text_align(TextAlign::Left);
+/// text.set_stroke_width(2.0);
+/// assert_eq!(text.get_text(), "Hello");
+/// assert_eq!(text.build_font_string(), "24px default");
+/// ```
+//==============================================================================
 pub struct Text {
 	component_base: ComponentBase,
 	font_family: String,
@@ -483,6 +580,9 @@ pub struct Text {
 impl Text {
 	//==============================================================================
 	/// 생성. (기본값은 원본과 같다: 32px, 흰색, 가운데 정렬, 가운데 기준선, 줄 간격 1.25)
+	///
+	/// # 돌려줌
+	/// 빈 글의 텍스트 컴포넌트. (폰트 이름 default, Word 줄바꿈, 외곽선 없음)
 	//==============================================================================
 	pub fn new() -> Text {
 		let mut text = Text {
@@ -524,6 +624,13 @@ impl Text {
 
 	//==============================================================================
 	/// 글과 크기로 생성.
+	///
+	/// # 인자
+	/// - `text`: 처음 글.
+	/// - `font_size`: 글자 크기. (픽셀)
+	///
+	/// # 돌려줌
+	/// 컴포넌트. (그 밖은 new 와 같다)
 	//==============================================================================
 	pub fn create_with_text(text: &str, font_size: f32) -> Text {
 		let mut text_component = Text::new();
@@ -534,6 +641,9 @@ impl Text {
 
 	//==============================================================================
 	/// Canvas2D font 꼴 문자열 만들기.
+	///
+	/// # 돌려줌
+	/// 폰트 문자열. (예: `italic bold 32px default`, 기울임과 굵게는 켰을 때만 든다)
 	//==============================================================================
 	pub fn build_font_string(&self) -> String {
 		self.build_font_string_with_size(self.font_size)
@@ -541,6 +651,25 @@ impl Text {
 
 	//==============================================================================
 	/// 크기를 주어 Canvas2D font 꼴 문자열 만들기. (이 글자의 폰트 이름, 굵게, 기울임으로)
+	///
+	/// # 인자
+	/// - `font_size`: 글자 크기. (픽셀)
+	///
+	/// # 돌려줌
+	/// 폰트 문자열.
+	///
+	/// # 예제
+	/// 굵게, 기울임, 폰트 이름이 든 문자열
+	/// ```rust
+	/// use vanilla::Text;
+	///
+	/// let mut text = Text::new();
+	/// text.set_bold(true);
+	/// text.set_italic(true);
+	/// text.set_font_family("GameFont");
+	/// assert_eq!(text.build_font_string(), "italic bold 32px GameFont");
+	/// assert_eq!(text.build_font_string_with_size(12.5), "italic bold 12.5px GameFont");
+	/// ```
 	//==============================================================================
 	pub fn build_font_string_with_size(&self, font_size: f32) -> String {
 		let mut style_parts: Vec<String> = Vec::new();
@@ -714,6 +843,25 @@ impl Text {
 	/// - Word: 공백 단위로 채운다. 넘치는 조각에 낱말이 여럿이면(공백 없이 쓰는 글) 낱말 사이에서 나눠 지금 줄의 남은 자리부터 채우고,
 	///   한 낱말이 폭을 넘으면 글자 묶음 단위로 나눈다. (공백 없는 한중일 문장도 낱말 사이에서 나뉜다)
 	/// - Character: 처음부터 글자 묶음 단위로 나눈다.
+	///
+	/// # 인자
+	/// - `graphic`: 잴 Graphic. (지금 폰트 문자열로 잰다)
+	/// - `text`: 나눌 글.
+	/// - `maximum_width`: 줄 최대 폭. (픽셀, 0 이하면 줄바꿈 문자로만 나눈다)
+	///
+	/// # 돌려줌
+	/// 줄 목록. (빈 문단은 빈 줄)
+	///
+	/// # 예제
+	/// 이 글자의 폰트로 줄 나누기
+	/// ```rust,no_run
+	/// use vanilla::{Graphic, Text};
+	///
+	/// fn wrap_description(graphic: &mut Graphic, text: &Text) -> Vec<String> {
+	/// 	graphic.set_font_string(&text.build_font_string());
+	/// 	text.wrap_text_to_lines(graphic, text.get_text(), 200.0)
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn wrap_text_to_lines(&self, graphic: &Graphic, text: &str, maximum_width: f32) -> Vec<String> {
 		self.wrap_text_to_lines_with(text, maximum_width, &|candidate_text: &str| graphic.measure_text(candidate_text).width)
@@ -721,6 +869,29 @@ impl Text {
 
 	//==============================================================================
 	/// 폭에 맞춰 줄 나누기. (재는 함수를 받는다. wrap_text_to_lines 의 셈, Graphic 없이 시험하거나 다른 글꼴로 잴 때)
+	///
+	/// # 인자
+	/// - `text`: 나눌 글.
+	/// - `maximum_width`: 줄 최대 폭. (measure_width 와 같은 단위, 0 이하면 줄바꿈 문자로만 나눈다)
+	/// - `measure_width`: 글을 받아 너비를 돌려주는 함수.
+	///
+	/// # 돌려줌
+	/// 줄 목록. (빈 문단은 빈 줄)
+	///
+	/// # 예제
+	/// 글자마다 폭 10 으로 재어 나누기
+	/// ```rust
+	/// use vanilla::{Text, TextWrapMode};
+	///
+	/// let measure_width = |line_text: &str| -> f32 {
+	/// 	line_text.chars().count() as f32 * 10.0
+	/// };
+	/// let mut text = Text::new();
+	/// assert_eq!(text.wrap_text_to_lines_with("aaa bbb ccc", 75.0, &measure_width), vec!["aaa bbb", "ccc"]);
+	/// assert_eq!(text.wrap_text_to_lines_with("a\n\nb", 0.0, &measure_width), vec!["a", "", "b"]);
+	/// text.set_wrap_mode(TextWrapMode::Character);
+	/// assert_eq!(text.wrap_text_to_lines_with("abcdef", 25.0, &measure_width), vec!["ab", "cd", "ef"]);
+	/// ```
 	//==============================================================================
 	pub fn wrap_text_to_lines_with(&self, text: &str, maximum_width: f32, measure_width: &dyn Fn(&str) -> f32) -> Vec<String> {
 		if maximum_width <= 0.0 {
@@ -810,6 +981,29 @@ impl Text {
 	//==============================================================================
 	/// Graphic 없이 나눈 줄 목록. (지금 글과 폰트 문자열, 폭으로 나눈다, 글꼴이 없어 잴 수 없으면 None)
 	/// - 그리기 전에 줄 수가 필요한 레이아웃(창의 내용 놓기 같은)이 쓴다. (textstringtexturecache::measure_text_without_graphic)
+	///
+	/// # 인자
+	/// - `maximum_width`: 줄 최대 폭. (픽셀, 0 이하면 줄바꿈 문자로만 나눈다)
+	///
+	/// # 돌려줌
+	/// 줄 목록. 데스크탑에서 이 스레드에 글꼴을 등록한 글자 캐시가 없거나 고를 얼굴이 없으면 None.
+	///
+	/// # 예제
+	/// 글꼴을 등록한 뒤 Graphic 없이 줄 나누기
+	/// ```rust
+	/// use vanilla::core::textstringtexturecache::TextStringTextureCache;
+	/// use vanilla::platform::find_fallback_font_file;
+	/// use vanilla::Text;
+	///
+	/// let text = Text::create_with_text("one two three four five", 20.0);
+	/// assert!(text.wrap_lines_without_graphic(100.0).is_none());
+	/// if let Some(source) = find_fallback_font_file("A", 400, false, false) {
+	/// 	let mut text_string_texture_cache = TextStringTextureCache::new();
+	/// 	text_string_texture_cache.set_default_font(false, std::fs::read(&source.path).expect("font file")).expect("font");
+	/// 	let line_list = text.wrap_lines_without_graphic(100.0).expect("lines");
+	/// 	assert!(line_list.len() > 1);
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn wrap_lines_without_graphic(&self, maximum_width: f32) -> Option<Vec<String>> {
 		crate::core::textstringtexturecache::measure_text_without_graphic(&self.font_string, "")?;
@@ -819,6 +1013,12 @@ impl Text {
 
 	//==============================================================================
 	/// 줄바꿈 반영 크기 재기. (원본 measureWrappedSize, 레이아웃 용. 줄바꿈 폭이 없으면 줄바꿈 문자로만 나눈다)
+	///
+	/// # 인자
+	/// - `graphic`: 잴 Graphic. (상태는 되돌려 둔다)
+	///
+	/// # 돌려줌
+	/// 크기. (글이 비었으면 모두 0)
 	//==============================================================================
 	pub fn measure_wrapped_size(&self, graphic: &mut Graphic) -> TextWrappedSize {
 		if self.text.is_empty() {
@@ -852,6 +1052,12 @@ impl Text {
 
 	//==============================================================================
 	/// 글의 자연 크기. (원본 getIntrinsicContentSize: 한 줄 너비와 글자 크기, 글이 없으면 (0, 글자 크기), 꺼져 있으면 (-1, -1))
+	///
+	/// # 인자
+	/// - `graphic`: 잴 Graphic.
+	///
+	/// # 돌려줌
+	/// (너비, 글자 크기). (픽셀)
 	//==============================================================================
 	pub fn calculate_intrinsic_content_size(&self, graphic: &Graphic) -> Vector2 {
 		if !self.component_base.is_enable() {
@@ -865,6 +1071,13 @@ impl Text {
 
 	//==============================================================================
 	/// 글이 차지하는 영역. (원본 Text.calculateTextBounds: 굵게, 기울임 없이 잰 너비와 실제 글리프의 위아래 높이)
+	///
+	/// # 인자
+	/// - `graphic`: 잴 Graphic.
+	/// - `text_component`: 잴 컴포넌트. (폰트 이름, 글자 크기, 글을 쓴다)
+	///
+	/// # 돌려줌
+	/// (0, 0, 너비, 위아래 높이) 사각형. (픽셀)
 	//==============================================================================
 	pub fn calculate_text_bounds(graphic: &Graphic, text_component: &Text) -> Rect {
 		let font_string = crate::core::component::richtext::build_font_string(&text_component.font_family, text_component.font_size, false, false);
@@ -1104,6 +1317,24 @@ impl Text {
 	/// - 칸을 넓힐 수 없는 곳(단추, 줄 이름, 제목)에서 언어마다 길이가 다른 글이 넘칠 때 쓴다.
 	/// - 정한 크기(get_font_size)는 그대로 두고 그릴 때의 크기만 줄인다. 최소 비율로도 넘치면 넘친 채로 그리고, 화면 밖 거르기도 넘친 너비까지 본다.
 	/// - 줄을 바꾸는 글은 맞추지 않는다. width 가 0 이하면 맞추지 않는다. (기본) minimum_ratio 는 0 ~ 1 (원본 기본 0.55)
+	///
+	/// # 인자
+	/// - `width`: 맞출 너비. (픽셀, 음수는 0)
+	/// - `minimum_ratio`: 줄이는 가장 작은 비율. (0 ~ 1 로 자른다)
+	///
+	/// # 예제
+	/// 단추 이름을 200 픽셀에 맞추기
+	/// ```rust,no_run
+	/// use vanilla::{Graphic, Text};
+	///
+	/// fn fit_button_label(graphic: &mut Graphic) {
+	/// 	let mut text = Text::create_with_text("Start a new adventure", 32.0);
+	/// 	text.set_fit_width(200.0, 0.55);
+	/// 	let fitted_font_size = text.calculate_fitted_font_size(graphic);
+	/// 	assert!(fitted_font_size <= 32.0);
+	/// 	assert_eq!(text.get_font_size(), 32.0);
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn set_fit_width(&mut self, width: f32, minimum_ratio: f32) {
 		let fit_width = width.max(0.0);
@@ -1117,6 +1348,9 @@ impl Text {
 
 	//==============================================================================
 	/// 맞출 너비 반환. (0 이면 맞추지 않는다)
+	///
+	/// # 돌려줌
+	/// 맞출 너비. (픽셀)
 	//==============================================================================
 	pub fn get_fit_width(&self) -> f32 {
 		self.fit_width
@@ -1124,6 +1358,9 @@ impl Text {
 
 	//==============================================================================
 	/// 맞출 때 줄이는 가장 작은 비율 반환.
+	///
+	/// # 돌려줌
+	/// 비율. (0 ~ 1, 기본 0.55)
 	//==============================================================================
 	pub fn get_fit_minimum_ratio(&self) -> f32 {
 		self.fit_minimum_ratio
@@ -1131,6 +1368,9 @@ impl Text {
 
 	//==============================================================================
 	/// 그릴 때의 크기 반환. (마지막으로 그리거나 잰 때의 값, 맞춰 줄였으면 줄인 크기)
+	///
+	/// # 돌려줌
+	/// 크기. (픽셀, 줄을 다시 셀 일이 남았으면 정한 크기)
 	//==============================================================================
 	pub fn get_fitted_font_size(&self) -> f32 {
 		if self.is_layout_dirty {
@@ -1143,6 +1383,9 @@ impl Text {
 	/// 마지막으로 나눈 줄의 수. (그린 뒤 글, 폰트, 줄바꿈 폭이 그대로일 때만, 아니면 None)
 	/// - 줄은 그릴 때 Graphic 의 글꼴로 나눈다. Graphic 이 없는 레이아웃(창의 내용 놓기 같은)이 그린 결과를 읽어 다시 놓을 때 쓴다.
 	/// - 줄바꿈 폭(set_word_wrap_width)을 주지 않은 여러 줄 글은 노드 폭으로 나누므로 None 이다.
+	///
+	/// # 돌려줌
+	/// 줄 수. 아직 나누지 않았거나, 그 뒤 바뀌었거나, 노드 폭으로 나눈 글이면 None.
 	//==============================================================================
 	pub fn get_measured_line_count(&self) -> Option<usize> {
 		if self.is_layout_dirty || self.line_list.is_empty() {
@@ -1166,6 +1409,9 @@ impl Text {
 
 	//==============================================================================
 	/// 폰트 이름 설정. (Graphic 에 등록한 이름, 없으면 기본 폰트)
+	///
+	/// # 인자
+	/// - `font_family`: 폰트 이름.
 	//==============================================================================
 	pub fn set_font_family(&mut self, font_family: &str) {
 		if self.font_family != font_family {
@@ -1176,6 +1422,9 @@ impl Text {
 
 	//==============================================================================
 	/// 폰트 이름 반환.
+	///
+	/// # 돌려줌
+	/// 폰트 이름. (기본 default)
 	//==============================================================================
 	#[reflect(transient, name = "FontFace")]
 	pub fn get_font_family(&self) -> &str {
@@ -1184,6 +1433,9 @@ impl Text {
 
 	//==============================================================================
 	/// 줄바꿈 폭 설정. (0 이면 줄바꿈 문자로만 나눈다)
+	///
+	/// # 인자
+	/// - `word_wrap_width`: 줄바꿈 폭. (픽셀, 0 이하면 줄바꿈 문자로만 나눈다)
 	//==============================================================================
 	pub fn set_word_wrap_width(&mut self, word_wrap_width: f32) {
 		if self.word_wrap_width != word_wrap_width {
@@ -1194,6 +1446,9 @@ impl Text {
 
 	//==============================================================================
 	/// 줄바꿈 폭 반환.
+	///
+	/// # 돌려줌
+	/// 줄바꿈 폭. (픽셀)
 	//==============================================================================
 	pub fn get_word_wrap_width(&self) -> f32 {
 		self.word_wrap_width
@@ -1201,6 +1456,12 @@ impl Text {
 
 	//==============================================================================
 	/// 그릴 때의 크기를 그 자리에서 재어 반환. (맞출 너비를 넘치면 줄인 크기)
+	///
+	/// # 인자
+	/// - `graphic`: 잴 Graphic.
+	///
+	/// # 돌려줌
+	/// 크기. (픽셀)
 	//==============================================================================
 	pub fn calculate_fitted_font_size(&mut self, graphic: &mut Graphic) -> f32 {
 		let content_width = self.layout_wrap_width;
@@ -1211,6 +1472,14 @@ impl Text {
 	//==============================================================================
 	/// 글의 너비 재기. (이 글자의 폰트 이름, 굵게, 기울임과 주어진 크기로, 원본 measureText)
 	/// - 글자 캐시가 폰트 문자열과 글이 같으면 다시 재지 않는다. (TextStringTextureCache.measure_text)
+	///
+	/// # 인자
+	/// - `graphic`: 잴 Graphic.
+	/// - `text`: 잴 글.
+	/// - `font_size`: 잴 크기. (픽셀)
+	///
+	/// # 돌려줌
+	/// 너비. (픽셀, 빈 글은 0)
 	//==============================================================================
 	pub fn measure_text(&self, graphic: &Graphic, text: &str, font_size: f32) -> f32 {
 		if text.is_empty() {
@@ -1222,6 +1491,9 @@ impl Text {
 
 	//==============================================================================
 	/// 줄바꿈 방식 설정. (기본 Word)
+	///
+	/// # 인자
+	/// - `wrap_mode`: 줄바꿈 방식.
 	//==============================================================================
 	pub fn set_wrap_mode(&mut self, wrap_mode: TextWrapMode) {
 		if self.wrap_mode != wrap_mode {
@@ -1232,6 +1504,9 @@ impl Text {
 
 	//==============================================================================
 	/// 줄바꿈 방식 반환.
+	///
+	/// # 돌려줌
+	/// 줄바꿈 방식.
 	//==============================================================================
 	pub fn get_wrap_mode(&self) -> TextWrapMode {
 		self.wrap_mode
@@ -1239,6 +1514,9 @@ impl Text {
 
 	//==============================================================================
 	/// 줄 간격 설정. (글자 크기의 배수)
+	///
+	/// # 인자
+	/// - `line_spacing`: 줄 간격. (글자 크기의 배수, 기본 1.25)
 	//==============================================================================
 	pub fn set_line_spacing(&mut self, line_spacing: f32) {
 		self.line_spacing = line_spacing;
@@ -1246,6 +1524,9 @@ impl Text {
 
 	//==============================================================================
 	/// 줄 간격 반환.
+	///
+	/// # 돌려줌
+	/// 줄 간격. (글자 크기의 배수)
 	//==============================================================================
 	pub fn get_line_spacing(&self) -> f32 {
 		self.line_spacing
@@ -1253,6 +1534,9 @@ impl Text {
 
 	//==============================================================================
 	/// 보일 글자 수 설정. (-1 이면 전체, 타자기 연출용. -1 아래는 -1 로 맞춘다)
+	///
+	/// # 인자
+	/// - `visible_character_count`: 보일 글자 묶음 수. (-1 이면 전체)
 	//==============================================================================
 	pub fn set_visible_character_count(&mut self, visible_character_count: i32) {
 		self.visible_character_count = visible_character_count.max(-1);
@@ -1260,6 +1544,9 @@ impl Text {
 
 	//==============================================================================
 	/// 보일 글자 수 반환.
+	///
+	/// # 돌려줌
+	/// 보일 글자 묶음 수. (-1 이면 전체)
 	//==============================================================================
 	pub fn get_visible_character_count(&self) -> i32 {
 		self.visible_character_count
@@ -1267,6 +1554,9 @@ impl Text {
 
 	//==============================================================================
 	/// 글 설정.
+	///
+	/// # 인자
+	/// - `text`: 글. (줄바꿈 문자로 여러 줄)
 	//==============================================================================
 	pub fn set_text(&mut self, text: &str) {
 		if self.text != text {
@@ -1277,6 +1567,9 @@ impl Text {
 
 	//==============================================================================
 	/// 글 반환.
+	///
+	/// # 돌려줌
+	/// 글.
 	//==============================================================================
 	pub fn get_text(&self) -> &str {
 		&self.text
@@ -1284,6 +1577,9 @@ impl Text {
 
 	//==============================================================================
 	/// 글자 크기 설정. (픽셀)
+	///
+	/// # 인자
+	/// - `font_size`: 글자 크기. (픽셀, 기본 32)
 	//==============================================================================
 	pub fn set_font_size(&mut self, font_size: f32) {
 		if self.font_size != font_size {
@@ -1294,6 +1590,9 @@ impl Text {
 
 	//==============================================================================
 	/// 글자 크기 반환.
+	///
+	/// # 돌려줌
+	/// 글자 크기. (픽셀, 맞춰 줄인 크기가 아니라 정한 크기)
 	//==============================================================================
 	pub fn get_font_size(&self) -> f32 {
 		self.font_size
@@ -1301,6 +1600,9 @@ impl Text {
 
 	//==============================================================================
 	/// 글자 색 설정.
+	///
+	/// # 인자
+	/// - `color`: 글자 색. (기본 흰색)
 	//==============================================================================
 	pub fn set_text_color(&mut self, color: impl Into<Color>) {
 		self.text_color = color.into();
@@ -1308,6 +1610,9 @@ impl Text {
 
 	//==============================================================================
 	/// 글자 색 반환.
+	///
+	/// # 돌려줌
+	/// 글자 색.
 	//==============================================================================
 	pub fn get_text_color(&self) -> Color {
 		self.text_color
@@ -1315,6 +1620,9 @@ impl Text {
 
 	//==============================================================================
 	/// 외곽선 색 설정.
+	///
+	/// # 인자
+	/// - `color`: 외곽선 색. (기본 흰색)
 	//==============================================================================
 	pub fn set_stroke_color(&mut self, color: impl Into<Color>) {
 		self.stroke_color = color.into();
@@ -1322,6 +1630,9 @@ impl Text {
 
 	//==============================================================================
 	/// 외곽선 색 반환.
+	///
+	/// # 돌려줌
+	/// 외곽선 색.
 	//==============================================================================
 	pub fn get_stroke_color(&self) -> Color {
 		self.stroke_color
@@ -1329,6 +1640,9 @@ impl Text {
 
 	//==============================================================================
 	/// 외곽선 두께 설정. (0 이면 외곽선 없음)
+	///
+	/// # 인자
+	/// - `stroke_width`: 외곽선 두께. (픽셀, 기본 0)
 	//==============================================================================
 	pub fn set_stroke_width(&mut self, stroke_width: f32) {
 		self.stroke_width = stroke_width;
@@ -1336,6 +1650,9 @@ impl Text {
 
 	//==============================================================================
 	/// 외곽선 두께 반환.
+	///
+	/// # 돌려줌
+	/// 외곽선 두께. (픽셀)
 	//==============================================================================
 	pub fn get_stroke_width(&self) -> f32 {
 		self.stroke_width
@@ -1343,6 +1660,9 @@ impl Text {
 
 	//==============================================================================
 	/// 굵게 설정.
+	///
+	/// # 인자
+	/// - `is_bold`: true 면 굵게.
 	//==============================================================================
 	pub fn set_bold(&mut self, is_bold: bool) {
 		if self.is_bold != is_bold {
@@ -1353,6 +1673,9 @@ impl Text {
 
 	//==============================================================================
 	/// 굵게 여부.
+	///
+	/// # 돌려줌
+	/// 굵게면 true.
 	//==============================================================================
 	pub fn is_bold(&self) -> bool {
 		self.is_bold
@@ -1360,6 +1683,9 @@ impl Text {
 
 	//==============================================================================
 	/// 기울임 설정. (폰트 문자열에 italic 을 넣는다)
+	///
+	/// # 인자
+	/// - `is_italic`: true 면 기울임.
 	//==============================================================================
 	pub fn set_italic(&mut self, is_italic: bool) {
 		if self.is_italic != is_italic {
@@ -1370,6 +1696,9 @@ impl Text {
 
 	//==============================================================================
 	/// 기울임 여부.
+	///
+	/// # 돌려줌
+	/// 기울임이면 true.
 	//==============================================================================
 	pub fn is_italic(&self) -> bool {
 		self.is_italic
@@ -1377,6 +1706,9 @@ impl Text {
 
 	//==============================================================================
 	/// 밑줄 설정.
+	///
+	/// # 인자
+	/// - `is_underline`: true 면 밑줄을 긋는다.
 	//==============================================================================
 	pub fn set_underline(&mut self, is_underline: bool) {
 		self.is_underline = is_underline;
@@ -1384,6 +1716,9 @@ impl Text {
 
 	//==============================================================================
 	/// 밑줄 여부.
+	///
+	/// # 돌려줌
+	/// 밑줄을 그으면 true.
 	//==============================================================================
 	pub fn is_underline(&self) -> bool {
 		self.is_underline
@@ -1391,6 +1726,9 @@ impl Text {
 
 	//==============================================================================
 	/// 취소선 설정.
+	///
+	/// # 인자
+	/// - `is_strikethrough`: true 면 취소선을 긋는다.
 	//==============================================================================
 	pub fn set_strikethrough(&mut self, is_strikethrough: bool) {
 		self.is_strikethrough = is_strikethrough;
@@ -1398,6 +1736,9 @@ impl Text {
 
 	//==============================================================================
 	/// 취소선 여부.
+	///
+	/// # 돌려줌
+	/// 취소선을 그으면 true.
 	//==============================================================================
 	pub fn is_strikethrough(&self) -> bool {
 		self.is_strikethrough
@@ -1405,6 +1746,9 @@ impl Text {
 
 	//==============================================================================
 	/// 가로 정렬 설정.
+	///
+	/// # 인자
+	/// - `text_align`: 가로 정렬. (기본 Center)
 	//==============================================================================
 	pub fn set_text_align(&mut self, text_align: TextAlign) {
 		self.text_align = text_align;
@@ -1412,6 +1756,9 @@ impl Text {
 
 	//==============================================================================
 	/// 가로 정렬 반환.
+	///
+	/// # 돌려줌
+	/// 가로 정렬.
 	//==============================================================================
 	pub fn get_text_align(&self) -> TextAlign {
 		self.text_align
@@ -1421,6 +1768,9 @@ impl Text {
 	/// 글자 방향 설정. (Inherit | Ltr | Rtl | Auto, 원본 setTextDirection)
 	/// - Inherit 면 그리는 때의 Graphic 방향을 따른다. (기본)
 	/// - 정렬 Start / End 가 이 방향에 따라 왼쪽, 오른쪽이 된다. (오른쪽에서 왼쪽 언어의 화면은 Rtl 과 Start)
+	///
+	/// # 인자
+	/// - `text_direction`: 글자 방향.
 	//==============================================================================
 	pub fn set_text_direction(&mut self, text_direction: TextDirection) {
 		self.text_direction = text_direction;
@@ -1428,6 +1778,9 @@ impl Text {
 
 	//==============================================================================
 	/// 글자 방향 반환.
+	///
+	/// # 돌려줌
+	/// 글자 방향. (기본 Inherit)
 	//==============================================================================
 	pub fn get_text_direction(&self) -> TextDirection {
 		self.text_direction
@@ -1435,6 +1788,9 @@ impl Text {
 
 	//==============================================================================
 	/// 세로 기준선 설정.
+	///
+	/// # 인자
+	/// - `text_baseline`: 세로 기준선. (기본 Middle)
 	//==============================================================================
 	pub fn set_text_baseline(&mut self, text_baseline: TextBaseline) {
 		self.text_baseline = text_baseline;
@@ -1442,6 +1798,9 @@ impl Text {
 
 	//==============================================================================
 	/// 세로 기준선 반환.
+	///
+	/// # 돌려줌
+	/// 세로 기준선.
 	//==============================================================================
 	pub fn get_text_baseline(&self) -> TextBaseline {
 		self.text_baseline
@@ -1459,6 +1818,9 @@ impl Text {
 }
 
 impl Default for Text {
+	//==============================================================================
+	/// 기본값. (new 와 같다)
+	//==============================================================================
 	fn default() -> Text {
 		Text::new()
 	}
@@ -1466,14 +1828,23 @@ impl Default for Text {
 
 #[crate::reflect]
 impl Component for Text {
+	//==============================================================================
+	/// 컴포넌트 공통 상태.
+	//==============================================================================
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base
 	}
 
+	//==============================================================================
+	/// 컴포넌트 공통 상태. (바꿀 수 있게)
+	//==============================================================================
 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 		&mut self.component_base
 	}
 
+	//==============================================================================
+	/// 컴포넌트 종류 이름. ("Text")
+	//==============================================================================
 	fn get_component_type(&self) -> &'static str {
 		"Text"
 	}
@@ -1499,10 +1870,16 @@ impl Component for Text {
 		}
 	}
 
+	//==============================================================================
+	/// tick 이 필요한지. (늘 false)
+	//==============================================================================
 	fn is_tick_needed(&self) -> bool {
 		false
 	}
 
+	//==============================================================================
+	/// 그리는 사각형. (content 좌표, 글이 비었으면 빈 사각형)
+	//==============================================================================
 	fn calculate_drawn_rect(&mut self, transform: &NodeTransform, graphic: &mut Graphic) -> Option<Rect> {
 		if self.text.is_empty() {
 			return Some(Rect::create(0.0, 0.0, 0.0, 0.0));
@@ -1511,6 +1888,9 @@ impl Component for Text {
 		Some(self.calculate_text_rect(graphic, content_size.x, content_size.y))
 	}
 
+	//==============================================================================
+	/// 그리기. (여러 줄이면 줄마다, 한 줄이면 보일 글자 수만큼)
+	//==============================================================================
 	fn draw(&mut self, transform: &NodeTransform, graphic: &mut Graphic) {
 		if self.text.is_empty() {
 			return;

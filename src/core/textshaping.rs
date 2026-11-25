@@ -36,6 +36,19 @@
 //!   빈칸(U+0020), 탭, ZWSP 는 하나씩, 한중일 글자와 이모지는 글자마다 따로다. (find_chrome_word_end) 캔버스의 탭, 줄바꿈, 폼 피드, 캐리지 리턴은 빈칸으로 바꾼다.
 //! - 맥: 파일에서 읽은 색 이모지 글꼴(sbix)과 윤곽 표가 없는 글꼴(PingFang 의 hvgl)은 CoreText 로 그린다. (platform/desktop/coretextglyph.rs, 원본 크롬 맥도 CoreText 로 그린다)
 //!   색 이모지의 전진폭은 CoreText 가 작은 크기에서 키워 그리는 비를 곱하고 정수 픽셀로 반올림한다. (16px 에서 20, 13px 에서 16, 크롬 measureText 와 같다)
+//!
+//! # 예제
+//! 이모지 표시인지 글 표시인지 가리기
+//! ```rust
+//! use vanilla::core::textshaping::is_emoji_presentation;
+//!
+//! assert!(is_emoji_presentation("\u{1F600}"));
+//! assert!(is_emoji_presentation("\u{2764}\u{FE0F}"));
+//! assert!(!is_emoji_presentation("\u{2764}"));
+//! assert!(!is_emoji_presentation("\u{1F600}\u{FE0E}"));
+//! assert!(is_emoji_presentation("\u{1F1F0}\u{1F1F7}"));
+//! assert!(!is_emoji_presentation("A"));
+//! ```
 //==============================================================================
 use crate::core::colorglyph;
 use std::rc::Rc;
@@ -65,7 +78,9 @@ pub type SystemFontMeasure<'a> = &'a dyn Fn(&str, bool) -> f32;
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ShapingDirection {
+	/// 왼쪽에서 오른쪽. (원본 "ltr")
 	LeftToRight,
+	/// 오른쪽에서 왼쪽. (원본 "rtl")
 	RightToLeft,
 }
 
@@ -74,19 +89,41 @@ pub enum ShapingDirection {
 /// - 굵기는 범위로 든다. (가변 글꼴 "100 900" 처럼, 한 값이면 처음과 끝이 같다)
 /// - 글자 범위가 비었으면 모든 글자다.
 /// - source_key 는 같은 이름 아래에서 얼굴을 가리키는 열쇠다. (보통 파일 경로, 차례 정하기와 지우기에 쓴다)
+///
+/// # 예제
+/// CSS 서술자 글로 만들고 글자 범위 보기
+/// ```rust
+/// use vanilla::FontFaceDescriptors;
+///
+/// let font_face_descriptors = FontFaceDescriptors::create_from_css("100 900", "italic", "U+AC00-D7A3");
+/// assert_eq!((font_face_descriptors.minimum_weight, font_face_descriptors.maximum_weight), (100, 900));
+/// assert!(font_face_descriptors.is_italic);
+/// assert!(font_face_descriptors.contains_character('\u{AC00}'));
+/// assert!(!font_face_descriptors.contains_character('A'));
+/// assert!(FontFaceDescriptors::new().contains_character('A'));
+/// assert_eq!(FontFaceDescriptors::create_with_bold(true).minimum_weight, 700);
+/// ```
 //==============================================================================
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FontFaceDescriptors {
+	/// 굵기 범위의 처음. (CSS 굵기 1 ~ 1000, 기본 400)
 	pub minimum_weight: u16,
+	/// 굵기 범위의 끝. (한 값이면 minimum_weight 와 같다)
 	pub maximum_weight: u16,
+	/// 기울인 얼굴인지.
 	pub is_italic: bool,
+	/// 글자 범위 목록. ((처음, 끝) 코드 포인트, 끝 포함. 비었으면 모든 글자)
 	pub unicode_range_list: Vec<(u32, u32)>,
+	/// 얼굴 열쇠. (기본 빈 글)
 	pub source_key: String,
 }
 
 impl FontFaceDescriptors {
 	//==============================================================================
 	/// 생성. (굵기 400, 기울이지 않음, 모든 글자. 원본 서술자를 주지 않은 FontFace 와 같다)
+	///
+	/// # 돌려줌
+	/// 굵기 400, 기울이지 않음, 모든 글자, 빈 열쇠의 서술자.
 	//==============================================================================
 	pub fn new() -> FontFaceDescriptors {
 		FontFaceDescriptors {
@@ -100,6 +137,12 @@ impl FontFaceDescriptors {
 
 	//==============================================================================
 	/// 굵은 얼굴인지로 생성. (굵으면 700, 아니면 400)
+	///
+	/// # 인자
+	/// - `is_bold`: true 면 굵기 700, false 면 400.
+	///
+	/// # 돌려줌
+	/// 서술자. (굵기 밖은 new 와 같다)
 	//==============================================================================
 	pub fn create_with_bold(is_bold: bool) -> FontFaceDescriptors {
 		let mut font_face_descriptors = FontFaceDescriptors::new();
@@ -112,6 +155,14 @@ impl FontFaceDescriptors {
 	//==============================================================================
 	/// CSS 서술자 글로 생성. (원본 { weight, style, unicodeRange }, 빈 글은 기본값)
 	/// - weight: "400", "bold", "100 900". style: "normal", "italic", "oblique". unicode_range: "U+0000-00FF, U+0131, U+4??"
+	///
+	/// # 인자
+	/// - `weight`: CSS font-weight 글. (빈 글이나 모르는 글이면 400)
+	/// - `style`: CSS font-style 글. (italic 이나 oblique 로 시작하면 기울임, 대소문자는 가리지 않는다)
+	/// - `unicode_range`: CSS unicode-range 글. (빈 글이면 모든 글자)
+	///
+	/// # 돌려줌
+	/// 서술자. (source_key 는 빈 글)
 	//==============================================================================
 	pub fn create_from_css(weight: &str, style: &str, unicode_range: &str) -> FontFaceDescriptors {
 		let mut font_face_descriptors = FontFaceDescriptors::new();
@@ -124,6 +175,9 @@ impl FontFaceDescriptors {
 
 	//==============================================================================
 	/// 굵기 한 값 설정.
+	///
+	/// # 인자
+	/// - `weight`: 굵기. (처음과 끝을 이 값으로)
 	//==============================================================================
 	pub fn set_weight(&mut self, weight: u16) {
 		self.minimum_weight = weight;
@@ -132,6 +186,9 @@ impl FontFaceDescriptors {
 
 	//==============================================================================
 	/// CSS 굵기 글로 설정. ("normal", "bold", "500", "100 900", 모르는 글은 그대로 둔다)
+	///
+	/// # 인자
+	/// - `weight`: CSS 굵기 글. (빈칸으로 나눈 값이 하나면 그 값, 둘 이상이면 앞의 둘로 범위)
 	//==============================================================================
 	pub fn set_weight_from_css(&mut self, weight: &str) {
 		let weight_values: Vec<u16> = weight.split_whitespace().filter_map(parse_css_weight).collect();
@@ -149,6 +206,12 @@ impl FontFaceDescriptors {
 
 	//==============================================================================
 	/// 글자가 글자 범위에 드는지. (범위가 비었으면 늘 든다)
+	///
+	/// # 인자
+	/// - `character`: 볼 글자.
+	///
+	/// # 돌려줌
+	/// 범위에 들면 true.
 	//==============================================================================
 	pub fn contains_character(&self, character: char) -> bool {
 		if self.unicode_range_list.is_empty() {
@@ -160,6 +223,12 @@ impl FontFaceDescriptors {
 
 	//==============================================================================
 	/// 글에 글자 범위에 드는 글자가 있는지.
+	///
+	/// # 인자
+	/// - `text`: 볼 글.
+	///
+	/// # 돌려줌
+	/// 범위에 드는 글자가 하나라도 있으면 true. (빈 글은 false)
 	//==============================================================================
 	pub fn contains_any_character(&self, text: &str) -> bool {
 		text.chars().any(|character| self.contains_character(character))
@@ -167,6 +236,9 @@ impl FontFaceDescriptors {
 }
 
 impl Default for FontFaceDescriptors {
+	//==============================================================================
+	/// 기본값. (new 와 같다)
+	//==============================================================================
 	fn default() -> FontFaceDescriptors {
 		FontFaceDescriptors::new()
 	}
@@ -174,6 +246,24 @@ impl Default for FontFaceDescriptors {
 
 //==============================================================================
 /// CSS 굵기 값 하나 읽기. ("normal" 400, "bold" 700, 숫자 1 ~ 1000)
+///
+/// # 인자
+/// - `weight_text`: CSS 굵기 값 하나. (앞뒤 빈칸은 떼고 대소문자는 가리지 않는다)
+///
+/// # 돌려줌
+/// 굵기. (소수는 반올림) 1 ~ 1000 밖이거나 읽지 못하면 None.
+///
+/// # 예제
+/// 낱말, 숫자, 범위 밖
+/// ```rust
+/// use vanilla::core::textshaping::parse_css_weight;
+///
+/// assert_eq!(parse_css_weight("normal"), Some(400));
+/// assert_eq!(parse_css_weight(" BOLD "), Some(700));
+/// assert_eq!(parse_css_weight("450.6"), Some(451));
+/// assert_eq!(parse_css_weight("1001"), None);
+/// assert_eq!(parse_css_weight("heavy"), None);
+/// ```
 //==============================================================================
 pub fn parse_css_weight(weight_text: &str) -> Option<u16> {
 	let lowercase_weight_text = weight_text.trim().to_lowercase();
@@ -199,6 +289,22 @@ pub fn parse_css_weight(weight_text: &str) -> Option<u16> {
 //==============================================================================
 /// unicode-range 글 → 코드 포인트 범위 목록. ("U+0-FF, U+4??" → [(0, 255), (1024, 1279)], 비었으면 빈 목록 = 모든 글자)
 /// - 원본 textstringtexturecache.js, uifont.js 의 parseUnicodeRange 와 같다.
+///
+/// # 인자
+/// - `unicode_range`: 쉼표로 이은 범위 글. (U+ 나 u+ 로 시작하지 않거나 16 진수가 아닌 조각은 넘긴다)
+///
+/// # 돌려줌
+/// (처음, 끝) 코드 포인트 목록. (끝 포함)
+///
+/// # 예제
+/// 범위, 한 글자, ? 자리
+/// ```rust
+/// use vanilla::core::textshaping::parse_unicode_range;
+///
+/// assert_eq!(parse_unicode_range("U+0-FF, U+4??"), vec![(0, 255), (0x400, 0x4FF)]);
+/// assert_eq!(parse_unicode_range("U+0131"), vec![(0x131, 0x131)]);
+/// assert!(parse_unicode_range("").is_empty());
+/// ```
 //==============================================================================
 pub fn parse_unicode_range(unicode_range: &str) -> Vec<(u32, u32)> {
 	let mut range_list: Vec<(u32, u32)> = Vec::new();
@@ -244,11 +350,30 @@ self_cell::self_cell!(
 
 //==============================================================================
 /// 읽은 글꼴 하나. (래스터용 fontdue, 모양 짓기용 rustybuzz 얼굴과 그 바이트, 색 글리프 표가 있는지)
+///
+/// # 예제
+/// 글꼴 바이트 읽기
+/// ```rust
+/// use vanilla::core::textshaping::LoadedFont;
+/// use vanilla::platform::find_fallback_font_file;
+///
+/// assert!(LoadedFont::create_from_bytes(vec![0, 1, 2, 3]).is_err());
+/// if let Some(source) = find_fallback_font_file("A", 400, false, false) {
+/// 	let font = LoadedFont::create_from_bytes(std::fs::read(&source.path).expect("font file")).expect("font");
+/// 	assert!(font.has_character('A'));
+/// 	assert!(font.units_per_em > 0.0);
+/// 	assert_eq!(font.get_face_index(), 0);
+/// 	assert!(!font.is_variation_applied());
+/// }
+/// ```
 //==============================================================================
 pub struct LoadedFont {
+	/// 래스터용 fontdue 글꼴.
 	pub raster_font: fontdue::Font,
 	shaping_face_cell: ShapingFaceCell,
+	/// 글꼴 단위의 em 크기. (head 표의 unitsPerEm)
 	pub units_per_em: f32,
+	/// 색 글리프 표(sbix, CBDT, COLR)가 있는지.
 	pub has_color_tables: bool,
 	/// 글꼴 모음 안의 얼굴 번호. (TTC 가 아니면 0)
 	face_index: u32,
@@ -271,6 +396,12 @@ pub struct LoadedFont {
 impl LoadedFont {
 	//==============================================================================
 	/// 풀린 글꼴 바이트(ttf, otf, ttc)로 읽기. (모음이면 0 번 얼굴)
+	///
+	/// # 인자
+	/// - `font_bytes`: 글꼴 바이트. (WOFF, WOFF2 는 풀어서 줘야 한다)
+	///
+	/// # 돌려줌
+	/// 읽은 글꼴. 읽지 못하면 Err(까닭).
 	//==============================================================================
 	pub fn create_from_bytes(font_bytes: Vec<u8>) -> Result<LoadedFont, String> {
 		LoadedFont::create_from_shared_bytes(Rc::from(font_bytes), 0, &[])
@@ -278,6 +409,14 @@ impl LoadedFont {
 
 	//==============================================================================
 	/// 나눠 든 바이트의 얼굴 하나 읽기. (모음 안의 얼굴 번호, 가변 글꼴의 축 값)
+	///
+	/// # 인자
+	/// - `font_bytes`: 나눠 드는 글꼴 바이트.
+	/// - `face_index`: 모음 안의 얼굴 번호. (모음이 아니면 0)
+	/// - `variation_list`: 걸 축 값. (비었으면 기본 인스턴스)
+	///
+	/// # 돌려줌
+	/// 읽은 글꼴. 읽지 못하거나 그 번호의 얼굴이 없으면 Err(까닭).
 	//==============================================================================
 	pub fn create_from_shared_bytes(font_bytes: Rc<[u8]>, face_index: u32, variation_list: &[rustybuzz::Variation]) -> Result<LoadedFont, String> {
 		let font_settings = fontdue::FontSettings {
@@ -323,6 +462,12 @@ impl LoadedFont {
 	/// trak 표의 가로 자간. (글꼴 단위, ptem 은 글자 크기 픽셀. 표나 STAT 표가 없거나 맥 색 이모지면 0. HarfBuzz 15 의 TrackData::get_tracking 에서 track 0)
 	/// - 크기: 표의 크기 사이는 곧게 잇고, 처음보다 작으면 첫 값, 끝보다 크면 끝 값.
 	/// - track: 0 과 같은 줄이 있으면 그 줄, 없으면 0 을 사이에 둔 두 줄을 곧게 잇는다.
+	///
+	/// # 인자
+	/// - `ptem`: 글자 크기. (픽셀)
+	///
+	/// # 돌려줌
+	/// 자간. (글꼴 단위)
 	//==============================================================================
 	pub fn read_horizontal_tracking(&self, ptem: f32) -> f32 {
 		if self.is_integer_advance() {
@@ -401,6 +546,12 @@ impl LoadedFont {
 
 	//==============================================================================
 	/// opsz 축을 글자 크기로 걸지 정하기. (처음은 건다. 크롬은 윈도우와 리눅스의 시스템 글꼴에는 걸지 않는다)
+	///
+	/// # 인자
+	/// - `is_optical_sizing_auto`: true 면 건다.
+	///
+	/// # 돌려줌
+	/// 바꾼 글꼴.
 	//==============================================================================
 	pub fn with_optical_sizing_auto(mut self, is_optical_sizing_auto: bool) -> LoadedFont {
 		self.is_optical_sizing_auto = is_optical_sizing_auto;
@@ -409,6 +560,12 @@ impl LoadedFont {
 
 	//==============================================================================
 	/// 글자 크기에 거는 opsz 축 값. (축이 있고 거는 글꼴이면 크기를 축 범위로 자른 값, 아니면 None)
+	///
+	/// # 인자
+	/// - `pixel_size`: 글자 크기. (픽셀)
+	///
+	/// # 돌려줌
+	/// 축 값. opsz 축이 없거나 걸지 않기로 한 글꼴이면 None.
 	//==============================================================================
 	pub fn read_optical_size(&self, pixel_size: f32) -> Option<f32> {
 		if !self.is_optical_sizing_auto {
@@ -436,6 +593,12 @@ impl LoadedFont {
 
 	//==============================================================================
 	/// 글자 크기의 모양 짓기 얼굴. (opsz 축을 건다. trak 자간은 shape_text 가 따로 더하므로 rustybuzz 의 ptem 은 두지 않는다)
+	///
+	/// # 인자
+	/// - `pixel_size`: 글자 크기. (픽셀)
+	///
+	/// # 돌려줌
+	/// 모양 짓기 얼굴의 사본. (opsz 를 걸지 않는 글꼴이면 그대로)
 	//==============================================================================
 	pub fn create_sized_shaping_face(&self, pixel_size: f32) -> rustybuzz::Face<'_> {
 		let mut shaping_face = self.get_shaping_face().clone();
@@ -447,6 +610,12 @@ impl LoadedFont {
 
 	//==============================================================================
 	/// 글꼴 파일 경로 적기. (파일에서 읽은 글꼴. 맥은 색 이모지와 윤곽 표가 없는 글꼴을 CoreText 로 그리게 한다)
+	///
+	/// # 인자
+	/// - `source_path`: 글꼴 파일 경로.
+	///
+	/// # 돌려줌
+	/// 경로를 적은 글꼴.
 	//==============================================================================
 	pub fn with_source_path(mut self, source_path: std::path::PathBuf) -> LoadedFont {
 		#[cfg(target_os = "macos")]
@@ -461,6 +630,9 @@ impl LoadedFont {
 
 	//==============================================================================
 	/// 맥 CoreText 로 그리는지.
+	///
+	/// # 돌려줌
+	/// CoreText 로 그리면 true. (맥 밖은 늘 false)
 	//==============================================================================
 	pub fn is_core_text_raster(&self) -> bool {
 		self.is_core_text_raster
@@ -468,6 +640,12 @@ impl LoadedFont {
 
 	//==============================================================================
 	/// 모양 짓기 전진폭에 곱할 비. (맥 색 이모지는 CoreText 가 작은 크기에서 키워 그리는 비, 그 밖은 1)
+	///
+	/// # 인자
+	/// - `pixel_size`: 글자 크기. (픽셀)
+	///
+	/// # 돌려줌
+	/// 비. (맥 색 이모지 밖은 1)
 	//==============================================================================
 	pub fn read_advance_scale(&self, pixel_size: f32) -> f32 {
 		#[cfg(target_os = "macos")]
@@ -484,6 +662,9 @@ impl LoadedFont {
 
 	//==============================================================================
 	/// 전진폭을 정수 픽셀로 반올림하는지. (맥 색 이모지, 크롬 measureText 가 13px 에서 16, 17px 에서 21 처럼 정수를 준다)
+	///
+	/// # 돌려줌
+	/// 반올림하면 true. (CoreText 로 그리는 맥 색 이모지만)
 	//==============================================================================
 	pub fn is_integer_advance(&self) -> bool {
 		self.is_core_text_raster && self.get_shaping_face().tables().sbix.is_some()
@@ -499,6 +680,9 @@ impl LoadedFont {
 
 	//==============================================================================
 	/// 모양 짓기 얼굴. (축 값을 건 얼굴, 글꼴 표도 이것으로 읽는다)
+	///
+	/// # 돌려줌
+	/// rustybuzz 얼굴.
 	//==============================================================================
 	pub fn get_shaping_face(&self) -> &rustybuzz::Face<'_> {
 		self.shaping_face_cell.borrow_dependent()
@@ -506,6 +690,9 @@ impl LoadedFont {
 
 	//==============================================================================
 	/// 글꼴 바이트. (같은 파일의 다른 얼굴이 나눠 든다)
+	///
+	/// # 돌려줌
+	/// 글꼴 바이트.
 	//==============================================================================
 	pub fn get_font_bytes(&self) -> &Rc<[u8]> {
 		self.shaping_face_cell.borrow_owner()
@@ -513,6 +700,9 @@ impl LoadedFont {
 
 	//==============================================================================
 	/// 글꼴 모음 안의 얼굴 번호.
+	///
+	/// # 돌려줌
+	/// 얼굴 번호. (모음이 아니면 0)
 	//==============================================================================
 	pub fn get_face_index(&self) -> u32 {
 		self.face_index
@@ -520,6 +710,9 @@ impl LoadedFont {
 
 	//==============================================================================
 	/// 축 값을 건 가변 글꼴 인스턴스인지.
+	///
+	/// # 돌려줌
+	/// 축 값을 걸었으면 true.
 	//==============================================================================
 	pub fn is_variation_applied(&self) -> bool {
 		!self.variation_list.is_empty()
@@ -527,6 +720,9 @@ impl LoadedFont {
 
 	//==============================================================================
 	/// 글리프를 윤곽에서 직접 그리는지. (가변 글꼴. fontdue 는 축 값을 읽지 못하고 맥 SFNS 같은 가변 글꼴의 윤곽을 그리지 못한다)
+	///
+	/// # 돌려줌
+	/// 가변 글꼴이거나 축 값을 걸었으면 true.
 	//==============================================================================
 	pub fn is_outline_raster(&self) -> bool {
 		self.is_variable_font || !self.variation_list.is_empty()
@@ -534,6 +730,13 @@ impl LoadedFont {
 
 	//==============================================================================
 	/// 글리프가 덮는 픽셀 상자. (펜 원점에서 왼쪽, 아래, 너비, 높이. fontdue Metrics 의 xmin, ymin, width, height 와 같은 뜻, 비었으면 너비와 높이가 0)
+	///
+	/// # 인자
+	/// - `glyph_index`: 글리프 번호.
+	/// - `pixel_size`: 글자 크기. (픽셀)
+	///
+	/// # 돌려줌
+	/// (왼쪽, 아래, 너비, 높이). (픽셀, 위가 양수)
 	//==============================================================================
 	pub fn read_glyph_metrics(&self, glyph_index: u16, pixel_size: f32) -> (i32, i32, i32, i32) {
 		#[cfg(target_os = "macos")]
@@ -573,6 +776,14 @@ impl LoadedFont {
 	//==============================================================================
 	/// 글리프 윤곽 그리기. (글꼴 단위, 그 글자 크기의 축 값(opsz 포함)을 건 윤곽. 가변 글꼴은 skrifa 로, 아니면 ttf-parser 로. 윤곽이 없으면 false)
 	/// - ttf-parser 는 글리프마다 변형이 32 개를 넘는 가변 글꼴(맥 SFNS 같은)의 윤곽을 읽지 못한다.
+	///
+	/// # 인자
+	/// - `glyph_index`: 글리프 번호.
+	/// - `pixel_size`: 글자 크기. (픽셀, 가변 글꼴의 opsz 축 값을 고르는 데만 쓴다)
+	/// - `outline_builder`: 윤곽을 받을 쪽.
+	///
+	/// # 돌려줌
+	/// 윤곽을 그렸으면 true.
 	//==============================================================================
 	pub fn draw_glyph_outline(&self, glyph_index: u16, pixel_size: f32, outline_builder: &mut dyn rustybuzz::ttf_parser::OutlineBuilder) -> bool {
 		if !self.is_variable_font {
@@ -605,6 +816,12 @@ impl LoadedFont {
 
 	//==============================================================================
 	/// 글자를 가졌는지.
+	///
+	/// # 인자
+	/// - `character`: 볼 글자.
+	///
+	/// # 돌려줌
+	/// 글리프가 있으면 true.
 	//==============================================================================
 	pub fn has_character(&self, character: char) -> bool {
 		self.raster_font.lookup_glyph_index(character) != 0
@@ -612,6 +829,12 @@ impl LoadedFont {
 
 	//==============================================================================
 	/// 글자를 색 글리프로 가졌는지. (sbix, CBDT, COLR)
+	///
+	/// # 인자
+	/// - `character`: 볼 글자.
+	///
+	/// # 돌려줌
+	/// 색 글리프가 있으면 true. (색 글리프 표가 없는 글꼴은 늘 false)
 	//==============================================================================
 	pub fn has_color_character(&self, character: char) -> bool {
 		if !self.has_color_tables {
@@ -678,6 +901,12 @@ impl skrifa::outline::OutlinePen for SkrifaOutlinePen<'_> {
 /// - VS15(FE0E) 가 있으면 글 표시, VS16(FE0F) 이나 키캡(20E3)이 있으면 이모지 표시다.
 /// - 첫 글자가 Emoji_Presentation 이거나(국기의 지역 표시 글자 포함), 피부색 조정자나 태그 글자가 붙었거나, 이음 문자로 이은 이모지 묶음이면 이모지 표시다.
 ///   ❤ 처럼 Emoji 이지만 Emoji_Presentation 이 아닌 글자 하나는 글 표시다. (크롬도 맨 ❤ 는 글 글꼴로 그린다)
+///
+/// # 인자
+/// - `grapheme`: 글자 묶음 하나.
+///
+/// # 돌려줌
+/// 이모지 표시면 true. (빈 글은 false)
 //==============================================================================
 pub fn is_emoji_presentation(grapheme: &str) -> bool {
 	let base_character = match grapheme.chars().next() {
@@ -704,10 +933,40 @@ pub fn is_emoji_presentation(grapheme: &str) -> bool {
 
 //==============================================================================
 /// 등록된 글꼴 얼굴 하나.
+///
+/// # 예제
+/// 보통과 굵은 얼굴 가운데 굵게 고르기
+/// ```rust
+/// use std::rc::Rc;
+/// use vanilla::core::textshaping::{select_font_faces, LoadedFont, RegisteredFontFace};
+/// use vanilla::platform::find_fallback_font_file;
+/// use vanilla::FontFaceDescriptors;
+///
+/// if let Some(source) = find_fallback_font_file("A", 400, false, false) {
+/// 	let font = Rc::new(LoadedFont::create_from_bytes(std::fs::read(&source.path).expect("font file")).expect("font"));
+/// 	let regular_face = RegisteredFontFace {
+/// 		descriptors: FontFaceDescriptors::create_with_bold(false),
+/// 		font: font.clone(),
+/// 		order_number: 1,
+/// 	};
+/// 	let bold_face = RegisteredFontFace {
+/// 		descriptors: FontFaceDescriptors::create_with_bold(true),
+/// 		font,
+/// 		order_number: 2,
+/// 	};
+/// 	let mut resolved_face_list = Vec::new();
+/// 	select_font_faces(&[&regular_face, &bold_face], 700, false, &mut resolved_face_list);
+/// 	assert_eq!(resolved_face_list.len(), 1);
+/// 	assert_eq!(resolved_face_list[0].descriptors.minimum_weight, 700);
+/// 	assert!(!resolved_face_list[0].is_synthetic_bold);
+/// }
+/// ```
 //==============================================================================
 #[derive(Clone)]
 pub struct RegisteredFontFace {
+	/// 얼굴 서술자.
 	pub descriptors: FontFaceDescriptors,
+	/// 읽은 글꼴. (같은 글꼴을 여러 얼굴이 나눠 들 수 있다)
 	pub font: Rc<LoadedFont>,
 	/// 올린 차례. (클수록 나중, 나중 것이 먼저 그린다)
 	pub order_number: u64,
@@ -715,18 +974,66 @@ pub struct RegisteredFontFace {
 
 //==============================================================================
 /// 그릴 때 고른 얼굴 하나. (가짜 굵게, 가짜 기울임을 입힐지 함께 든다)
+///
+/// # 예제
+/// 가짜 기울임은 전진폭을 바꾸지 않는다
+/// ```rust
+/// use std::rc::Rc;
+/// use vanilla::core::textshaping::{shape_text, LoadedFont, ResolvedFontFace};
+/// use vanilla::platform::find_fallback_font_file;
+/// use vanilla::{FontFaceDescriptors, ShapingDirection};
+///
+/// if let Some(source) = find_fallback_font_file("A", 400, false, false) {
+/// 	let font = Rc::new(LoadedFont::create_from_bytes(std::fs::read(&source.path).expect("font file")).expect("font"));
+/// 	let upright_face = ResolvedFontFace {
+/// 		font: font.clone(),
+/// 		descriptors: FontFaceDescriptors::new(),
+/// 		is_synthetic_bold: false,
+/// 		is_synthetic_italic: false,
+/// 	};
+/// 	let italic_face = ResolvedFontFace {
+/// 		is_synthetic_italic: true,
+/// 		..upright_face.clone()
+/// 	};
+/// 	let upright_text = shape_text(&[upright_face], "Hello", 20.0, ShapingDirection::LeftToRight, None);
+/// 	let italic_text = shape_text(&[italic_face], "Hello", 20.0, ShapingDirection::LeftToRight, None);
+/// 	assert_eq!(upright_text.advance_width, italic_text.advance_width);
+/// }
+/// ```
 //==============================================================================
 #[derive(Clone)]
 pub struct ResolvedFontFace {
+	/// 읽은 글꼴.
 	pub font: Rc<LoadedFont>,
+	/// 얼굴 서술자.
 	pub descriptors: FontFaceDescriptors,
+	/// 가짜 굵게를 입힐지. (청한 굵기가 600 이상이고 얼굴 굵기가 600 아래)
 	pub is_synthetic_bold: bool,
+	/// 가짜 기울임을 입힐지. (기울임을 청했는데 바른 얼굴)
 	pub is_synthetic_italic: bool,
 }
 
 //==============================================================================
 /// 굵기 고르기 점수. (작을수록 먼저, CSS Fonts 4 의 차례. 굵기 범위가 청한 굵기를 품으면 (0, 0))
 /// - 청한 값이 400 ~ 500 이면 그 값부터 500 까지 오름, 그 아래 내림, 500 위 오름. 400 아래면 아래 내림, 위 오름. 500 위면 위 오름, 아래 내림.
+///
+/// # 인자
+/// - `face_minimum_weight`: 얼굴 굵기 범위의 처음.
+/// - `face_maximum_weight`: 얼굴 굵기 범위의 끝.
+/// - `desired_weight`: 청한 굵기.
+///
+/// # 돌려줌
+/// (갈래, 굵기 차이). (튜플로 견주어 작은 것이 먼저)
+///
+/// # 예제
+/// 400 을 청하면 500, 300, 600 차례
+/// ```rust
+/// use vanilla::core::textshaping::calculate_weight_score;
+///
+/// assert_eq!(calculate_weight_score(100, 900, 700), (0, 0));
+/// assert!(calculate_weight_score(500, 500, 400) < calculate_weight_score(300, 300, 400));
+/// assert!(calculate_weight_score(300, 300, 400) < calculate_weight_score(600, 600, 400));
+/// ```
 //==============================================================================
 pub fn calculate_weight_score(face_minimum_weight: u16, face_maximum_weight: u16, desired_weight: u16) -> (u32, u32) {
 	let minimum_weight = face_minimum_weight as i32;
@@ -760,6 +1067,14 @@ pub fn calculate_weight_score(face_minimum_weight: u16, face_maximum_weight: u16
 /// 글꼴 모음(TTC)에서 청한 굵기와 기울기에 가장 맞는 얼굴 번호. (모음이 아니면 0)
 /// - 굵기는 OS/2 의 usWeightClass, 기울기는 OS/2 와 head 의 기울임 표시로 본다. 기울기를 먼저, 그다음 굵기를 select_font_faces 와 같은 차례로 고른다.
 /// - PostScript 이름이 점으로 시작하는 얼굴(맥 시스템 글꼴이 안에서만 쓰는 얼굴)은 다른 얼굴이 없을 때만 고른다. 점수가 같으면 앞 번호.
+///
+/// # 인자
+/// - `font_bytes`: 글꼴 바이트. (모음이나 글꼴 하나)
+/// - `desired_weight`: 청한 굵기.
+/// - `is_italic_desired`: 기울임을 청하는지.
+///
+/// # 돌려줌
+/// 얼굴 번호. (읽을 수 있는 얼굴이 없으면 0)
 //==============================================================================
 pub fn find_collection_face_index(font_bytes: &[u8], desired_weight: u16, is_italic_desired: bool) -> u32 {
 	let face_count = rustybuzz::ttf_parser::fonts_in_collection(font_bytes).unwrap_or(1);
@@ -793,6 +1108,14 @@ pub fn find_collection_face_index(font_bytes: &[u8], desired_weight: u16, is_ita
 
 //==============================================================================
 /// 가변 글꼴의 굵기 축 값. (wght 축이 있고 청한 굵기가 기본값과 다르면 축 범위로 자른 값 하나, 아니면 빈 목록)
+///
+/// # 인자
+/// - `font_bytes`: 글꼴 바이트.
+/// - `face_index`: 모음 안의 얼굴 번호. (모음이 아니면 0)
+/// - `desired_weight`: 청한 굵기.
+///
+/// # 돌려줌
+/// wght 축 값 하나의 목록. 축이 없거나, 자른 값이 기본값과 0.5 안으로 같거나, 글꼴을 읽지 못하면 빈 목록.
 //==============================================================================
 pub fn read_weight_variation(font_bytes: &[u8], face_index: u32, desired_weight: u16) -> Vec<rustybuzz::Variation> {
 	let face = match rustybuzz::ttf_parser::Face::parse(font_bytes, face_index) {
@@ -822,6 +1145,13 @@ pub fn read_weight_variation(font_bytes: &[u8], face_index: u32, desired_weight:
 
 //==============================================================================
 /// 가변 글꼴의 굵기 범위. (wght 축의 처음과 끝, 축이 없으면 None)
+///
+/// # 인자
+/// - `font_bytes`: 글꼴 바이트.
+/// - `face_index`: 모음 안의 얼굴 번호. (모음이 아니면 0)
+///
+/// # 돌려줌
+/// (처음, 끝) 굵기. (반올림) 축이 없거나 글꼴을 읽지 못하면 None.
 //==============================================================================
 pub fn read_weight_axis_range(font_bytes: &[u8], face_index: u32) -> Option<(u16, u16)> {
 	let face = rustybuzz::ttf_parser::Face::parse(font_bytes, face_index).ok()?;
@@ -834,6 +1164,33 @@ pub fn read_weight_axis_range(font_bytes: &[u8], face_index: u32) -> Option<(u16
 /// - 기울기를 먼저 고른다. 기울임을 청하면 기울인 얼굴, 없으면 바른 얼굴(가짜 기울임). 바르게를 청하면 바른 얼굴, 없으면 기울인 얼굴.
 /// - 굵기: 청한 값이 400 ~ 500 이면 그 값부터 500 까지 오름, 그 아래 내림, 500 위 오름. 400 아래면 아래 내림, 위 오름. 500 위면 위 오름, 아래 내림.
 /// - 고른 굵기와 기울기의 얼굴을 모두 나중 것부터 돌려준다. (글자 범위로 나눠 그린다)
+///
+/// # 인자
+/// - `face_list`: 한 이름 아래의 얼굴들. (비었으면 아무것도 더하지 않는다)
+/// - `desired_weight`: 청한 굵기.
+/// - `is_italic_desired`: 기울임을 청하는지.
+/// - `output_list`: 고른 얼굴을 뒤에 더할 목록. (있던 것은 그대로 둔다)
+///
+/// # 예제
+/// 바른 보통 얼굴 하나에 굵은 기울임을 청하면 가짜로 입힌다
+/// ```rust
+/// use std::rc::Rc;
+/// use vanilla::core::textshaping::{select_font_faces, LoadedFont, RegisteredFontFace};
+/// use vanilla::platform::find_fallback_font_file;
+/// use vanilla::FontFaceDescriptors;
+///
+/// if let Some(source) = find_fallback_font_file("A", 400, false, false) {
+/// 	let regular_face = RegisteredFontFace {
+/// 		descriptors: FontFaceDescriptors::new(),
+/// 		font: Rc::new(LoadedFont::create_from_bytes(std::fs::read(&source.path).expect("font file")).expect("font")),
+/// 		order_number: 1,
+/// 	};
+/// 	let mut resolved_face_list = Vec::new();
+/// 	select_font_faces(&[&regular_face], 700, true, &mut resolved_face_list);
+/// 	assert!(resolved_face_list[0].is_synthetic_bold);
+/// 	assert!(resolved_face_list[0].is_synthetic_italic);
+/// }
+/// ```
 //==============================================================================
 pub fn select_font_faces(face_list: &[&RegisteredFontFace], desired_weight: u16, is_italic_desired: bool, output_list: &mut Vec<ResolvedFontFace>) {
 	if face_list.is_empty() {
@@ -866,24 +1223,78 @@ pub fn select_font_faces(face_list: &[&RegisteredFontFace], desired_weight: u16,
 
 //==============================================================================
 /// 모양 지은 글리프 하나. (길이 단위는 픽셀, y 는 위가 양수)
+///
+/// # 예제
+/// 글리프는 왼쪽부터 놓인다
+/// ```rust
+/// use std::rc::Rc;
+/// use vanilla::core::textshaping::{shape_text, LoadedFont, ResolvedFontFace};
+/// use vanilla::platform::find_fallback_font_file;
+/// use vanilla::{FontFaceDescriptors, ShapingDirection};
+///
+/// if let Some(source) = find_fallback_font_file("A", 400, false, false) {
+/// 	let face_list = vec![ResolvedFontFace {
+/// 		font: Rc::new(LoadedFont::create_from_bytes(std::fs::read(&source.path).expect("font file")).expect("font")),
+/// 		descriptors: FontFaceDescriptors::new(),
+/// 		is_synthetic_bold: false,
+/// 		is_synthetic_italic: false,
+/// 	}];
+/// 	let shaped_text = shape_text(&face_list, "ab", 20.0, ShapingDirection::LeftToRight, None);
+/// 	let first_glyph = shaped_text.glyph_list[0];
+/// 	let second_glyph = shaped_text.glyph_list[1];
+/// 	assert_eq!(first_glyph.face_index, 0);
+/// 	assert!(second_glyph.position_x > first_glyph.position_x);
+/// 	assert!(!second_glyph.is_right_to_left);
+/// }
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug)]
 pub struct ShapedGlyph {
+	/// 얼굴 목록 안의 자리. (SYSTEM_FACE_INDEX 면 브라우저 시스템 글꼴 조각)
 	pub face_index: usize,
+	/// 글리프 번호. (시스템 글꼴 조각이면 0)
 	pub glyph_index: u16,
+	/// 글리프 원점 x. (글 왼쪽 끝에서, 모양 짓기의 x 오프셋 포함)
 	pub position_x: f32,
+	/// 글리프 원점 y. (기준선에서, 모양 짓기의 y 오프셋)
 	pub position_y: f32,
 	/// 시스템 글꼴 조각이면 그 조각의 글 자리. (바이트, face_index 가 SYSTEM_FACE_INDEX 일 때만)
 	pub text_start: usize,
+	/// 시스템 글꼴 조각의 글 끝 자리. (바이트, 끝은 빼고. 조각이 아니면 0)
 	pub text_end: usize,
+	/// 든 줄기(run)가 오른쪽에서 왼쪽인지.
 	pub is_right_to_left: bool,
 }
 
 //==============================================================================
 /// 모양 지은 글. (글리프는 왼쪽에서 오른쪽 그리는 차례)
+///
+/// # 예제
+/// 글 전체 전진폭
+/// ```rust
+/// use std::rc::Rc;
+/// use vanilla::core::textshaping::{shape_text, LoadedFont, ResolvedFontFace};
+/// use vanilla::platform::find_fallback_font_file;
+/// use vanilla::{FontFaceDescriptors, ShapingDirection};
+///
+/// if let Some(source) = find_fallback_font_file("A", 400, false, false) {
+/// 	let face_list = vec![ResolvedFontFace {
+/// 		font: Rc::new(LoadedFont::create_from_bytes(std::fs::read(&source.path).expect("font file")).expect("font")),
+/// 		descriptors: FontFaceDescriptors::new(),
+/// 		is_synthetic_bold: false,
+/// 		is_synthetic_italic: false,
+/// 	}];
+/// 	let shaped_text = shape_text(&face_list, "abc", 20.0, ShapingDirection::LeftToRight, None);
+/// 	assert_eq!(shaped_text.glyph_list.len(), 3);
+/// 	let last_glyph = shaped_text.glyph_list[2];
+/// 	assert!(shaped_text.advance_width > last_glyph.position_x);
+/// }
+/// ```
 //==============================================================================
 pub struct ShapedText {
+	/// 글리프 목록. (왼쪽부터 그리는 차례)
 	pub glyph_list: Vec<ShapedGlyph>,
+	/// 글 전체 전진폭. (픽셀)
 	pub advance_width: f32,
 }
 
@@ -990,6 +1401,28 @@ fn is_mark_or_modifier(character: char) -> bool {
 /// - 그 밖: 한중일 글자나 기호가 아닌 글자로 시작하면 빈칸이나 한중일 글자(결합 부호 따위가 아닌 것) 앞에서 끊는다.
 ///   한중일이나 이모지로 시작하면 글자마다 끊되 결합 부호, 수식 글자, ZWJ, 이모지 성분, 그림 문자는 붙이고, 문자가 Common, Inherited 인 한중일 기호와
 ///   첫 글자가 Common 일 때 다음 한 글자도 붙인다.
+///
+/// # 인자
+/// - `text`: 글.
+/// - `start`: 낱말이 시작하는 바이트 자리. (글자 경계여야 한다, 아니면 패닉)
+/// - `is_latin1`: 글의 모든 글자가 U+00FF 이하인지.
+///
+/// # 돌려줌
+/// 낱말 끝 바이트 자리. (끝은 빼고) start 가 글 끝이면 start.
+///
+/// # 예제
+/// 빈칸은 따로, 한자는 글자마다
+/// ```rust
+/// use vanilla::core::textshaping::find_chrome_word_end;
+///
+/// let text = "ab cd";
+/// assert_eq!(find_chrome_word_end(text, 0, true), 2);
+/// assert_eq!(find_chrome_word_end(text, 2, true), 3);
+/// assert_eq!(find_chrome_word_end(text, 3, true), 5);
+/// let ideograph_text = "\u{4E00}\u{4E8C}";
+/// assert_eq!(find_chrome_word_end(ideograph_text, 0, false), 3);
+/// assert_eq!(find_chrome_word_end(ideograph_text, 3, false), 6);
+/// ```
 //==============================================================================
 pub fn find_chrome_word_end(text: &str, start: usize, is_latin1: bool) -> usize {
 	let is_word_delimiter = |character: char, is_zero_width_space_delimiter: bool| -> bool {
@@ -1054,6 +1487,40 @@ pub fn find_chrome_word_end(text: &str, start: usize, is_latin1: bool) -> usize 
 /// - system_font_measure 를 주면(웹) 올린 어느 얼굴에도 없는 글자 묶음은 브라우저 시스템 글꼴 조각(SYSTEM_FACE_INDEX)으로 둔다. 원본 브라우저의 글꼴 대체와 같다.
 ///   이모지 표시 묶음인데 올린 얼굴에 색 글리프가 없으면 흑백 글리프가 있어도 브라우저 조각(색 이모지)으로 둔다. (크롬도 ❤️ 는 색 이모지 글꼴로 그린다)
 ///   주지 않으면 첫 얼굴의 빈 글리프로 그린다.
+///
+/// # 인자
+/// - `face_list`: 고른 얼굴들. (글자 묶음마다 앞 얼굴부터 찾는다)
+/// - `text`: 모양 지을 글.
+/// - `pixel_size`: 글자 크기. (픽셀)
+/// - `direction`: 문단 방향.
+/// - `system_font_measure`: 시스템 글꼴 조각 재기. (웹, None 이면 조각을 두지 않는다)
+///
+/// # 돌려줌
+/// 모양 지은 글. 얼굴이 없거나 글이 비었으면 글리프 없이 전진폭 0.
+///
+/// # 예제
+/// 크기가 커지면 전진폭도 커진다
+/// ```rust
+/// use std::rc::Rc;
+/// use vanilla::core::textshaping::{shape_text, LoadedFont, ResolvedFontFace};
+/// use vanilla::platform::find_fallback_font_file;
+/// use vanilla::{FontFaceDescriptors, ShapingDirection};
+///
+/// if let Some(source) = find_fallback_font_file("A", 400, false, false) {
+/// 	let face_list = vec![ResolvedFontFace {
+/// 		font: Rc::new(LoadedFont::create_from_bytes(std::fs::read(&source.path).expect("font file")).expect("font")),
+/// 		descriptors: FontFaceDescriptors::new(),
+/// 		is_synthetic_bold: false,
+/// 		is_synthetic_italic: false,
+/// 	}];
+/// 	let small_text = shape_text(&face_list, "Hello", 16.0, ShapingDirection::LeftToRight, None);
+/// 	let large_text = shape_text(&face_list, "Hello", 32.0, ShapingDirection::LeftToRight, None);
+/// 	assert!(large_text.advance_width > small_text.advance_width);
+/// 	let empty_text = shape_text(&face_list, "", 16.0, ShapingDirection::LeftToRight, None);
+/// 	assert!(empty_text.glyph_list.is_empty());
+/// 	assert_eq!(empty_text.advance_width, 0.0);
+/// }
+/// ```
 //==============================================================================
 pub fn shape_text(face_list: &[ResolvedFontFace], text: &str, pixel_size: f32, direction: ShapingDirection, system_font_measure: Option<SystemFontMeasure>) -> ShapedText {
 	let mut shaped_text = ShapedText {
@@ -1235,6 +1702,21 @@ pub fn shape_text(face_list: &[ResolvedFontFace], text: &str, pixel_size: f32, d
 
 //==============================================================================
 /// 가짜 굵게의 넓히는 반지름. (픽셀, Skia 의 칠하는 두께의 반)
+///
+/// # 인자
+/// - `pixel_size`: 글자 크기. (픽셀)
+///
+/// # 돌려줌
+/// 반지름. (픽셀, 9px 이하는 크기의 1/48, 36px 이상은 1/64, 사이는 곧게 잇는다)
+///
+/// # 예제
+/// 36px 이상은 크기의 1/64
+/// ```rust
+/// use vanilla::core::textshaping::calculate_synthetic_bold_radius;
+///
+/// assert_eq!(calculate_synthetic_bold_radius(48.0), 0.75);
+/// assert!((calculate_synthetic_bold_radius(6.0) - 0.125).abs() < 0.00001);
+/// ```
 //==============================================================================
 pub fn calculate_synthetic_bold_radius(pixel_size: f32) -> f32 {
 	let ratio = if pixel_size <= SYNTHETIC_BOLD_SIZE_KEYS[0] {
@@ -1253,18 +1735,83 @@ pub fn calculate_synthetic_bold_radius(pixel_size: f32) -> f32 {
 //==============================================================================
 /// 글리프 래스터 하나. (덮인 정도, 왼쪽 위 자리는 펜 원점에서 오른쪽 xmin, 기준선에서 위로 top)
 /// - coverage 는 색이 아닌 글자의 덮인 정도다. 색 글리프 몫은 color_pixels 에 제 색으로 든다. (프리멀티플라이드 RGBA, 같은 크기, 없으면 None)
+///
+/// # 예제
+/// 글리프 하나 래스터
+/// ```rust
+/// use std::rc::Rc;
+/// use vanilla::core::textshaping::{rasterize_glyph, shape_text, LoadedFont, ResolvedFontFace};
+/// use vanilla::platform::find_fallback_font_file;
+/// use vanilla::{FontFaceDescriptors, ShapingDirection};
+///
+/// if let Some(source) = find_fallback_font_file("A", 400, false, false) {
+/// 	let face = ResolvedFontFace {
+/// 		font: Rc::new(LoadedFont::create_from_bytes(std::fs::read(&source.path).expect("font file")).expect("font")),
+/// 		descriptors: FontFaceDescriptors::new(),
+/// 		is_synthetic_bold: false,
+/// 		is_synthetic_italic: false,
+/// 	};
+/// 	let shaped_text = shape_text(&[face.clone()], "A", 32.0, ShapingDirection::LeftToRight, None);
+/// 	let glyph_raster = rasterize_glyph(&face, shaped_text.glyph_list[0].glyph_index, 32.0);
+/// 	assert!(glyph_raster.width > 0 && glyph_raster.height > 0);
+/// 	assert_eq!(glyph_raster.coverage.len(), (glyph_raster.width * glyph_raster.height) as usize);
+/// 	assert!(glyph_raster.top_y > 0);
+/// 	assert!(glyph_raster.color_pixels.is_none());
+/// }
+/// ```
 //==============================================================================
 pub struct GlyphRaster {
+	/// 덮인 정도. (0 ~ 255, width * height 개, 위 줄부터)
 	pub coverage: Vec<u8>,
+	/// 너비. (픽셀)
 	pub width: i32,
+	/// 높이. (픽셀)
 	pub height: i32,
+	/// 펜 원점에서 래스터 왼쪽까지. (픽셀, 오른쪽이 양수)
 	pub left_x: i32,
+	/// 기준선에서 래스터 위까지. (픽셀, 위가 양수)
 	pub top_y: i32,
+	/// 색 글리프 층. (프리멀티플라이드 RGBA, width * height * 4 바이트, 색 글리프가 아니면 None)
 	pub color_pixels: Option<Vec<u8>>,
 }
 
 //==============================================================================
 /// 글리프 래스터. (가짜 굵게는 넓히고, 가짜 기울임은 기준선 기준으로 민다. 색 글리프는 제 색으로, 가짜 굵게 없이)
+///
+/// # 인자
+/// - `face`: 그릴 얼굴. (가짜 굵게, 가짜 기울임을 입힐지 함께)
+/// - `glyph_index`: 글리프 번호.
+/// - `pixel_size`: 글자 크기. (픽셀)
+///
+/// # 돌려줌
+/// 래스터. 윤곽이 없는 글리프(빈칸)는 너비와 높이가 0.
+///
+/// # 예제
+/// 가짜 굵게는 래스터를 넓힌다
+/// ```rust
+/// use std::rc::Rc;
+/// use vanilla::core::textshaping::{rasterize_glyph, shape_text, LoadedFont, ResolvedFontFace};
+/// use vanilla::platform::find_fallback_font_file;
+/// use vanilla::{FontFaceDescriptors, ShapingDirection};
+///
+/// if let Some(source) = find_fallback_font_file("A", 400, false, false) {
+/// 	let face = ResolvedFontFace {
+/// 		font: Rc::new(LoadedFont::create_from_bytes(std::fs::read(&source.path).expect("font file")).expect("font")),
+/// 		descriptors: FontFaceDescriptors::new(),
+/// 		is_synthetic_bold: false,
+/// 		is_synthetic_italic: false,
+/// 	};
+/// 	let bold_face = ResolvedFontFace {
+/// 		is_synthetic_bold: true,
+/// 		..face.clone()
+/// 	};
+/// 	let glyph_index = shape_text(&[face.clone()], "H", 32.0, ShapingDirection::LeftToRight, None).glyph_list[0].glyph_index;
+/// 	let glyph_raster = rasterize_glyph(&face, glyph_index, 32.0);
+/// 	let bold_glyph_raster = rasterize_glyph(&bold_face, glyph_index, 32.0);
+/// 	assert!(bold_glyph_raster.width > glyph_raster.width);
+/// 	assert!(bold_glyph_raster.left_x < glyph_raster.left_x);
+/// }
+/// ```
 //==============================================================================
 pub fn rasterize_glyph(face: &ResolvedFontFace, glyph_index: u16, pixel_size: f32) -> GlyphRaster {
 	#[cfg(target_os = "macos")]
@@ -1466,6 +2013,33 @@ fn apply_synthetic_italic(glyph_raster: &mut GlyphRaster) {
 /// 덮인 정도를 원 모양으로 넓히기. (가짜 굵게, 윤곽을 바깥으로 radius 픽셀 민 것)
 /// - 덮인 정도를 픽셀 가운데에서 윤곽까지의 거리로 본다. (덮인 정도 - 0.5, 안이 양수)
 ///   이웃 픽셀의 거리에서 이웃까지의 거리를 뺀 가장 큰 값에 radius 를 더해 다시 덮인 정도로 바꾼다. 곧은 윤곽은 정확히 radius 만큼 밀린다.
+///
+/// # 인자
+/// - `coverage`: 덮인 정도. (0 ~ 255, width * height 개)
+/// - `width`: 너비. (픽셀)
+/// - `height`: 높이. (픽셀)
+/// - `radius`: 넓힐 반지름. (픽셀, 0 이하면 그대로 복사)
+///
+/// # 돌려줌
+/// 넓힌 덮인 정도. (같은 크기, 원래 값보다 작아지지 않는다)
+///
+/// # 예제
+/// 두 열짜리 막대를 반 픽셀 넓히기
+/// ```rust
+/// use vanilla::core::textshaping::dilate_coverage;
+///
+/// let width = 8;
+/// let height = 3;
+/// let mut coverage = vec![0u8; (width * height) as usize];
+/// for position_y in 0..height {
+/// 	coverage[(position_y * width + 3) as usize] = 255;
+/// 	coverage[(position_y * width + 4) as usize] = 255;
+/// }
+/// let dilated_coverage = dilate_coverage(&coverage, width, height, 0.5);
+/// assert_eq!(dilated_coverage[(width + 3) as usize], 255);
+/// assert!((dilated_coverage[(width + 2) as usize] as i32 - 128).abs() <= 2);
+/// assert_eq!(dilated_coverage[width as usize], 0);
+/// ```
 //==============================================================================
 pub fn dilate_coverage(coverage: &[u8], width: i32, height: i32, radius: f32) -> Vec<u8> {
 	if radius <= 0.0 {
@@ -1512,6 +2086,33 @@ pub fn dilate_coverage(coverage: &[u8], width: i32, height: i32, radius: f32) ->
 
 //==============================================================================
 /// 덮인 정도를 가로로 기울이기. (기준선 위 줄은 오른쪽, 아래 줄은 왼쪽으로 줄 높이 × 기울기만큼 밀고, 두 픽셀 사이는 섞는다)
+///
+/// # 인자
+/// - `coverage`: 덮인 정도. (0 ~ 255, bitmap_width * bitmap_height 개)
+/// - `bitmap_width`: 너비. (픽셀)
+/// - `bitmap_height`: 높이. (픽셀)
+/// - `baseline_y`: 기준선 자리. (위에서 픽셀)
+/// - `shear`: 기울기. (1 픽셀 올라갈 때 오른쪽으로 밀리는 픽셀)
+///
+/// # 돌려줌
+/// 기울인 덮인 정도. (같은 크기, 밖으로 밀린 몫은 잘린다)
+///
+/// # 예제
+/// 기준선 위 세로 막대가 오른쪽으로 밀린다
+/// ```rust
+/// use vanilla::core::textshaping::shear_coverage;
+///
+/// let width = 12;
+/// let height = 12;
+/// let mut coverage = vec![0u8; (width * height) as usize];
+/// for position_y in 0..10 {
+/// 	coverage[(position_y * width + 5) as usize] = 255;
+/// }
+/// let sheared_coverage = shear_coverage(&coverage, width, height, 10.0, 0.5);
+/// let top_row = &sheared_coverage[0..width as usize];
+/// assert_eq!(top_row[5], 0);
+/// assert!(top_row[9] > 0 && top_row[10] > 0);
+/// ```
 //==============================================================================
 pub fn shear_coverage(coverage: &[u8], bitmap_width: i32, bitmap_height: i32, baseline_y: f32, shear: f32) -> Vec<u8> {
 	let read_coverage = |position_x: i32, position_y: i32| -> f32 {
@@ -1652,6 +2253,9 @@ mod tests {
 		assert_eq!(system_shaped_text.glyph_list[0].face_index, SYSTEM_FACE_INDEX);
 	}
 
+	//==============================================================================
+	/// 기울이면 기준선 위는 오른쪽으로 아래는 왼쪽으로 밀린다.
+	//==============================================================================
 	#[test]
 	fn shear_moves_above_baseline_right() {
 		let width = 12;

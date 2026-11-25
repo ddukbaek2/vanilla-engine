@@ -50,23 +50,51 @@ const NAMED_COLOR_LIST: [(&str, &str); 22] = [
 
 //==============================================================================
 /// 조각 속성. (None / false 면 Text 의 값을 쓴다)
+///
+/// # 예제
+/// 코드로 조각 쌓기
+/// ```rust
+/// use vanilla::{Color, RichText, RichTextAttributes};
+///
+/// let mut warning_attributes = RichTextAttributes::new();
+/// warning_attributes.text_color = Some(Color::create_from_hex("#ff0000"));
+/// warning_attributes.font_size = Some(28.0);
+/// warning_attributes.is_bold = true;
+/// let mut rich_text = RichText::new();
+/// rich_text.append_segment("HP ", RichTextAttributes::new()).append_segment("5", warning_attributes);
+/// assert!(rich_text.has_segments());
+/// assert_eq!(rich_text.get_segments()[0].attributes, RichTextAttributes::new());
+/// assert_eq!(rich_text.get_segments()[1].attributes.font_size, Some(28.0));
+/// ```
 //==============================================================================
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RichTextAttributes {
+	/// 글자 색. (None 이면 Text 의 글자 색)
 	pub text_color: Option<Color>,
+	/// 글자 크기. (픽셀, None 이면 Text 의 글자 크기)
 	pub font_size: Option<f32>,
+	/// 폰트 이름. (None 이면 Text 의 폰트 이름)
 	pub font_family: Option<String>,
+	/// 외곽선 색. (None 이면 Text 의 외곽선 색)
 	pub stroke_color: Option<Color>,
+	/// 외곽선 두께. (픽셀, None 이면 Text 의 외곽선 두께)
 	pub stroke_width: Option<f32>,
+	/// 굵게. (false 면 Text 의 값을 따른다)
 	pub is_bold: bool,
+	/// 기울임. (false 면 Text 의 값을 따른다)
 	pub is_italic: bool,
+	/// 밑줄. (false 면 Text 의 값을 따른다)
 	pub is_underline: bool,
+	/// 취소선. (false 면 Text 의 값을 따른다)
 	pub is_strikethrough: bool,
 }
 
 impl RichTextAttributes {
 	//==============================================================================
 	/// 생성. (아무것도 정하지 않음)
+	///
+	/// # 돌려줌
+	/// 아무것도 정하지 않은 속성. (default 와 같다)
 	//==============================================================================
 	pub fn new() -> RichTextAttributes {
 		RichTextAttributes::default()
@@ -100,43 +128,126 @@ impl RichTextAttributes {
 
 //==============================================================================
 /// 조각. (글 + 속성)
+///
+/// # 예제
+/// 겹친 태그는 속성을 합친다
+/// ```rust
+/// use vanilla::core::component::richtext::parse_markup_to_segments;
+/// use vanilla::Color;
+///
+/// let segment_list = parse_markup_to_segments("A<b>B<color=red>C</color></b>").expect("segments");
+/// assert_eq!(segment_list.len(), 3);
+/// assert_eq!(segment_list[0].text, "A");
+/// assert!(!segment_list[0].attributes.is_bold);
+/// assert!(segment_list[2].attributes.is_bold);
+/// assert_eq!(segment_list[2].attributes.text_color, Some(Color::create_from_hex("#ff0000")));
+/// ```
 //==============================================================================
 #[derive(Clone, Debug, PartialEq)]
 pub struct RichTextSegment {
+	/// 조각 글. (태그를 뺀 글)
 	pub text: String,
+	/// 조각 속성. (겹친 태그를 합친 것)
 	pub attributes: RichTextAttributes,
 }
 
 //==============================================================================
 /// 배치된 조각 하나. (그릴 자리와 모든 속성을 푼 값)
+///
+/// # 예제
+/// 조각에 정하지 않은 속성은 Text 의 값으로 푼다
+/// ```rust
+/// use vanilla::{Color, RichText, TextDirection, Vector2};
+///
+/// let mut measure_width = |_font_string: &str, text: &str| -> f32 {
+/// 	text.chars().count() as f32 * 10.0
+/// };
+/// let mut rich_text = RichText::create_with_text("ab<size=40><u>cd</u></size>", 20.0);
+/// rich_text.set_text_color("#00ff00");
+/// let layout = rich_text.layout_segments(Vector2::create(200.0, 60.0), TextDirection::Ltr, &mut measure_width);
+/// let first_run = &layout.run_list[0];
+/// let second_run = &layout.run_list[1];
+/// assert_eq!(first_run.font_string, "20px default");
+/// assert_eq!(first_run.text_color, Color::create_from_hex("#00ff00"));
+/// assert!(!first_run.is_underline);
+/// assert_eq!(second_run.font_size, 40.0);
+/// assert!(second_run.is_underline);
+/// assert_eq!(second_run.x, first_run.x + first_run.width);
+/// ```
 //==============================================================================
 #[derive(Clone, Debug, PartialEq)]
 pub struct RichTextRun {
+	/// 조각 글.
 	pub text: String,
+	/// 폰트 문자열. (Canvas2D font 꼴)
 	pub font_string: String,
+	/// 글자 크기. (픽셀)
 	pub font_size: f32,
+	/// 그릴 왼쪽 x. (content 좌표, 정렬과 문단 방향을 반영한 값)
 	pub x: f32,
+	/// 잰 폭.
 	pub width: f32,
+	/// 글자 색.
 	pub text_color: Color,
+	/// 외곽선 색.
 	pub stroke_color: Color,
+	/// 외곽선 두께. (0 이면 외곽선을 긋지 않는다)
 	pub stroke_width: f32,
+	/// 밑줄을 긋는지.
 	pub is_underline: bool,
+	/// 취소선을 긋는지.
 	pub is_strikethrough: bool,
 }
 
 //==============================================================================
 /// 조각 배치 결과.
+///
+/// # 예제
+/// 가운데 정렬과 가운데 기준선
+/// ```rust
+/// use vanilla::{RichText, TextAlign, TextBaseline, TextDirection, Vector2};
+///
+/// let mut measure_width = |_font_string: &str, text: &str| -> f32 {
+/// 	text.chars().count() as f32 * 10.0
+/// };
+/// let mut rich_text = RichText::create_with_text("ab<size=40>cd</size>", 20.0);
+/// rich_text.set_text_align(TextAlign::Center);
+/// rich_text.set_text_baseline(TextBaseline::Middle);
+/// let layout = rich_text.layout_segments(Vector2::create(200.0, 60.0), TextDirection::Ltr, &mut measure_width);
+/// assert_eq!(layout.total_width, 40.0);
+/// assert_eq!(layout.maximum_font_size, 40.0);
+/// assert_eq!(layout.baseline_y, 30.0);
+/// assert_eq!(layout.run_list[0].x, 80.0);
+/// ```
 //==============================================================================
 #[derive(Clone, Debug, PartialEq)]
 pub struct RichTextLayout {
+	/// 배치된 조각 목록. (글이 빈 조각은 빼고 조각 차례)
 	pub run_list: Vec<RichTextRun>,
+	/// 조각 폭의 합.
 	pub total_width: f32,
+	/// 가장 큰 글자 크기. (픽셀, 조각이 없으면 0)
 	pub maximum_font_size: f32,
+	/// 기준선 y. (content 좌표, Top 과 Hanging 은 0, Middle 은 높이의 반, 그 밖은 높이)
 	pub baseline_y: f32,
 }
 
 //==============================================================================
 /// 리치텍스트 컴포넌트.
+/// - 원본처럼 조각은 한 줄로 잇는다. 마크업이 없으면 품은 Text 로 그린다.
+///
+/// # 예제
+/// 마크업 글 넣기
+/// ```rust
+/// use vanilla::RichText;
+///
+/// let mut rich_text = RichText::create_with_text("Get <b>100</b> <color=yellow>gold</color>", 20.0);
+/// assert!(rich_text.has_segments());
+/// assert_eq!(rich_text.get_segments().len(), 4);
+/// assert_eq!(rich_text.get_text(), "Get <b>100</b> <color=yellow>gold</color>");
+/// rich_text.set_text("plain text");
+/// assert!(!rich_text.has_segments());
+/// ```
 //==============================================================================
 pub struct RichText {
 	text: Text,
@@ -147,6 +258,9 @@ pub struct RichText {
 impl RichText {
 	//==============================================================================
 	/// 생성. (기본값은 Text 와 같다)
+	///
+	/// # 돌려줌
+	/// 빈 글의 리치텍스트 컴포넌트.
 	//==============================================================================
 	pub fn new() -> RichText {
 		RichText {
@@ -157,6 +271,13 @@ impl RichText {
 
 	//==============================================================================
 	/// 글과 크기로 생성.
+	///
+	/// # 인자
+	/// - `text`: 처음 글. (마크업을 쓸 수 있다)
+	/// - `font_size`: 기본 글자 크기. (픽셀)
+	///
+	/// # 돌려줌
+	/// 컴포넌트.
 	//==============================================================================
 	pub fn create_with_text(text: &str, font_size: f32) -> RichText {
 		let mut rich_text = RichText::new();
@@ -167,6 +288,9 @@ impl RichText {
 
 	//==============================================================================
 	/// 품은 글자 컴포넌트 반환. (전역 속성과 마크업이 없을 때의 그리기)
+	///
+	/// # 돌려줌
+	/// 품은 Text.
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn get_text_component(&self) -> &Text {
@@ -175,6 +299,9 @@ impl RichText {
 
 	//==============================================================================
 	/// 품은 글자 컴포넌트 반환. (변경용)
+	///
+	/// # 돌려줌
+	/// 품은 Text.
 	//==============================================================================
 	pub fn get_text_component_mut(&mut self) -> &mut Text {
 		&mut self.text
@@ -182,6 +309,9 @@ impl RichText {
 
 	//==============================================================================
 	/// 글 설정. (마크업을 풀어 조각으로 둔다. 알려진 태그가 없으면 조각을 비우고 일반 글로 그린다)
+	///
+	/// # 인자
+	/// - `text`: 글. (마크업을 쓸 수 있다)
 	//==============================================================================
 	pub fn set_text(&mut self, text: &str) {
 		self.text.set_text(text);
@@ -190,6 +320,9 @@ impl RichText {
 
 	//==============================================================================
 	/// 글 반환. (마크업이 든 원래 글)
+	///
+	/// # 돌려줌
+	/// 글.
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn get_text(&self) -> &str {
@@ -198,6 +331,13 @@ impl RichText {
 
 	//==============================================================================
 	/// 조각 하나 더하기. (마크업 없이 코드로 조각을 쌓을 때)
+	///
+	/// # 인자
+	/// - `text`: 조각 글. (마크업을 풀지 않고 그대로 둔다)
+	/// - `attributes`: 조각 속성.
+	///
+	/// # 돌려줌
+	/// 이 컴포넌트. (이어 부를 수 있다)
 	//==============================================================================
 	pub fn append_segment(&mut self, text: &str, attributes: RichTextAttributes) -> &mut RichText {
 		self.segments.push(RichTextSegment {
@@ -216,6 +356,9 @@ impl RichText {
 
 	//==============================================================================
 	/// 조각 목록.
+	///
+	/// # 돌려줌
+	/// 조각 목록. (마크업이 없으면 비었다)
 	//==============================================================================
 	pub fn get_segments(&self) -> &[RichTextSegment] {
 		&self.segments
@@ -223,6 +366,9 @@ impl RichText {
 
 	//==============================================================================
 	/// 글이 있는 조각이 하나라도 있는지.
+	///
+	/// # 돌려줌
+	/// 글이 있는 조각이 있으면 true.
 	//==============================================================================
 	pub fn has_segments(&self) -> bool {
 		self.segments.iter().any(|segment| !segment.text.is_empty())
@@ -230,6 +376,9 @@ impl RichText {
 
 	//==============================================================================
 	/// 글자 크기 설정.
+	///
+	/// # 인자
+	/// - `font_size`: 기본 글자 크기. (픽셀, 크기를 정하지 않은 조각이 쓴다)
 	//==============================================================================
 	pub fn set_font_size(&mut self, font_size: f32) {
 		self.text.set_font_size(font_size);
@@ -237,6 +386,9 @@ impl RichText {
 
 	//==============================================================================
 	/// 글자 크기 반환.
+	///
+	/// # 돌려줌
+	/// 기본 글자 크기. (픽셀)
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn get_font_size(&self) -> f32 {
@@ -245,6 +397,9 @@ impl RichText {
 
 	//==============================================================================
 	/// 폰트 이름 설정.
+	///
+	/// # 인자
+	/// - `font_family`: 기본 폰트 이름.
 	//==============================================================================
 	pub fn set_font_family(&mut self, font_family: &str) {
 		self.text.set_font_family(font_family);
@@ -252,6 +407,9 @@ impl RichText {
 
 	//==============================================================================
 	/// 폰트 이름 반환.
+	///
+	/// # 돌려줌
+	/// 기본 폰트 이름.
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn get_font_family(&self) -> &str {
@@ -260,6 +418,9 @@ impl RichText {
 
 	//==============================================================================
 	/// 글자 색 설정.
+	///
+	/// # 인자
+	/// - `color`: 기본 글자 색.
 	//==============================================================================
 	pub fn set_text_color(&mut self, color: impl Into<Color>) {
 		self.text.set_text_color(color);
@@ -267,6 +428,9 @@ impl RichText {
 
 	//==============================================================================
 	/// 글자 색 반환.
+	///
+	/// # 돌려줌
+	/// 기본 글자 색.
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn get_text_color(&self) -> Color {
@@ -275,6 +439,9 @@ impl RichText {
 
 	//==============================================================================
 	/// 외곽선 색 설정.
+	///
+	/// # 인자
+	/// - `color`: 기본 외곽선 색.
 	//==============================================================================
 	pub fn set_stroke_color(&mut self, color: impl Into<Color>) {
 		self.text.set_stroke_color(color);
@@ -282,6 +449,9 @@ impl RichText {
 
 	//==============================================================================
 	/// 외곽선 색 반환.
+	///
+	/// # 돌려줌
+	/// 기본 외곽선 색.
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn get_stroke_color(&self) -> Color {
@@ -290,6 +460,9 @@ impl RichText {
 
 	//==============================================================================
 	/// 외곽선 두께 설정.
+	///
+	/// # 인자
+	/// - `stroke_width`: 기본 외곽선 두께. (픽셀, 0 이면 없음)
 	//==============================================================================
 	pub fn set_stroke_width(&mut self, stroke_width: f32) {
 		self.text.set_stroke_width(stroke_width);
@@ -297,6 +470,9 @@ impl RichText {
 
 	//==============================================================================
 	/// 외곽선 두께 반환.
+	///
+	/// # 돌려줌
+	/// 기본 외곽선 두께. (픽셀)
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn get_stroke_width(&self) -> f32 {
@@ -305,6 +481,9 @@ impl RichText {
 
 	//==============================================================================
 	/// 굵게 설정.
+	///
+	/// # 인자
+	/// - `is_bold`: true 면 모든 조각을 굵게.
 	//==============================================================================
 	pub fn set_bold(&mut self, is_bold: bool) {
 		self.text.set_bold(is_bold);
@@ -312,6 +491,9 @@ impl RichText {
 
 	//==============================================================================
 	/// 굵게 여부.
+	///
+	/// # 돌려줌
+	/// 굵게면 true.
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn is_bold(&self) -> bool {
@@ -320,6 +502,9 @@ impl RichText {
 
 	//==============================================================================
 	/// 기울임 설정.
+	///
+	/// # 인자
+	/// - `is_italic`: true 면 모든 조각을 기울임.
 	//==============================================================================
 	pub fn set_italic(&mut self, is_italic: bool) {
 		self.text.set_italic(is_italic);
@@ -327,6 +512,9 @@ impl RichText {
 
 	//==============================================================================
 	/// 기울임 여부.
+	///
+	/// # 돌려줌
+	/// 기울임이면 true.
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn is_italic(&self) -> bool {
@@ -335,6 +523,9 @@ impl RichText {
 
 	//==============================================================================
 	/// 밑줄 설정. (조각에 `<u>` 가 없어도 모든 조각에 긋는다)
+	///
+	/// # 인자
+	/// - `is_underline`: true 면 밑줄을 긋는다.
 	//==============================================================================
 	pub fn set_underline(&mut self, is_underline: bool) {
 		self.text.set_underline(is_underline);
@@ -342,6 +533,9 @@ impl RichText {
 
 	//==============================================================================
 	/// 밑줄 여부.
+	///
+	/// # 돌려줌
+	/// 밑줄을 그으면 true.
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn is_underline(&self) -> bool {
@@ -350,6 +544,9 @@ impl RichText {
 
 	//==============================================================================
 	/// 취소선 설정. (조각에 `<s>` 가 없어도 모든 조각에 긋는다)
+	///
+	/// # 인자
+	/// - `is_strikethrough`: true 면 취소선을 긋는다.
 	//==============================================================================
 	pub fn set_strikethrough(&mut self, is_strikethrough: bool) {
 		self.text.set_strikethrough(is_strikethrough);
@@ -357,6 +554,9 @@ impl RichText {
 
 	//==============================================================================
 	/// 취소선 여부.
+	///
+	/// # 돌려줌
+	/// 취소선을 그으면 true.
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn is_strikethrough(&self) -> bool {
@@ -365,6 +565,9 @@ impl RichText {
 
 	//==============================================================================
 	/// 줄바꿈 방식 설정. (마크업이 없을 때만 쓰인다. 조각은 원본처럼 한 줄)
+	///
+	/// # 인자
+	/// - `wrap_mode`: 줄바꿈 방식.
 	//==============================================================================
 	pub fn set_wrap_mode(&mut self, wrap_mode: TextWrapMode) {
 		self.text.set_wrap_mode(wrap_mode);
@@ -372,6 +575,9 @@ impl RichText {
 
 	//==============================================================================
 	/// 줄바꿈 방식 반환.
+	///
+	/// # 돌려줌
+	/// 줄바꿈 방식.
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn get_wrap_mode(&self) -> TextWrapMode {
@@ -380,6 +586,9 @@ impl RichText {
 
 	//==============================================================================
 	/// 가로 정렬 설정.
+	///
+	/// # 인자
+	/// - `text_align`: 가로 정렬. (조각은 합친 폭으로 정렬한다)
 	//==============================================================================
 	pub fn set_text_align(&mut self, text_align: TextAlign) {
 		self.text.set_text_align(text_align);
@@ -387,6 +596,9 @@ impl RichText {
 
 	//==============================================================================
 	/// 가로 정렬 반환.
+	///
+	/// # 돌려줌
+	/// 가로 정렬.
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn get_text_align(&self) -> TextAlign {
@@ -395,6 +607,9 @@ impl RichText {
 
 	//==============================================================================
 	/// 세로 기준선 설정.
+	///
+	/// # 인자
+	/// - `text_baseline`: 세로 기준선.
 	//==============================================================================
 	pub fn set_text_baseline(&mut self, text_baseline: TextBaseline) {
 		self.text.set_text_baseline(text_baseline);
@@ -402,6 +617,9 @@ impl RichText {
 
 	//==============================================================================
 	/// 세로 기준선 반환.
+	///
+	/// # 돌려줌
+	/// 세로 기준선.
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn get_text_baseline(&self) -> TextBaseline {
@@ -410,6 +628,9 @@ impl RichText {
 
 	//==============================================================================
 	/// 줄바꿈 폭 설정. (마크업이 없을 때만 쓰인다. 조각은 원본처럼 한 줄)
+	///
+	/// # 인자
+	/// - `word_wrap_width`: 줄바꿈 폭. (픽셀, 0 이하면 줄바꿈 문자로만 나눈다)
 	//==============================================================================
 	pub fn set_word_wrap_width(&mut self, word_wrap_width: f32) {
 		self.text.set_word_wrap_width(word_wrap_width);
@@ -417,6 +638,9 @@ impl RichText {
 
 	//==============================================================================
 	/// 줄바꿈 폭 반환.
+	///
+	/// # 돌려줌
+	/// 줄바꿈 폭. (픽셀)
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn get_word_wrap_width(&self) -> f32 {
@@ -425,6 +649,9 @@ impl RichText {
 
 	//==============================================================================
 	/// 줄 간격 설정.
+	///
+	/// # 인자
+	/// - `line_spacing`: 줄 간격. (글자 크기의 배수, 마크업이 없을 때만 쓰인다)
 	//==============================================================================
 	pub fn set_line_spacing(&mut self, line_spacing: f32) {
 		self.text.set_line_spacing(line_spacing);
@@ -432,6 +659,9 @@ impl RichText {
 
 	//==============================================================================
 	/// 줄 간격 반환.
+	///
+	/// # 돌려줌
+	/// 줄 간격. (글자 크기의 배수)
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn get_line_spacing(&self) -> f32 {
@@ -452,8 +682,35 @@ impl RichText {
 	//==============================================================================
 	/// 조각 배치. (합친 폭과 가장 큰 글자 크기로 정렬, 기준선은 Text 와 같은 규칙. 원본 draw_segments 의 자리 계산)
 	/// - measure_width(폰트 문자열, 글) 은 글 폭을 돌려준다.
-	//==============================================================================
 	/// - text_direction 은 실제 문단 방향이다. (Ltr 또는 Rtl, Rtl 이면 조각을 오른쪽부터 놓고 Start 는 오른쪽 정렬)
+	///
+	/// # 인자
+	/// - `content_size`: 노드 content 크기. (정렬과 기준선에 쓴다)
+	/// - `text_direction`: 실제 문단 방향. (Rtl 밖은 모두 왼쪽에서 오른쪽으로 놓는다)
+	/// - `measure_width`: (폰트 문자열, 글) 을 받아 폭을 돌려주는 함수.
+	///
+	/// # 돌려줌
+	/// 배치 결과.
+	///
+	/// # 예제
+	/// 오른쪽에서 왼쪽 문단은 앞 조각이 오른쪽에 온다
+	/// ```rust
+	/// use vanilla::{RichText, TextAlign, TextDirection, Vector2};
+	///
+	/// let mut measure_width = |_font_string: &str, text: &str| -> f32 {
+	/// 	text.chars().count() as f32 * 10.0
+	/// };
+	/// let mut rich_text = RichText::create_with_text("ab<b>cd</b>", 20.0);
+	/// rich_text.set_text_align(TextAlign::Start);
+	/// let left_to_right_layout = rich_text.layout_segments(Vector2::create(200.0, 40.0), TextDirection::Ltr, &mut measure_width);
+	/// assert_eq!(left_to_right_layout.run_list[0].x, 0.0);
+	/// assert_eq!(left_to_right_layout.run_list[1].x, 20.0);
+	/// assert_eq!(left_to_right_layout.run_list[1].font_string, "bold 20px default");
+	/// let right_to_left_layout = rich_text.layout_segments(Vector2::create(200.0, 40.0), TextDirection::Rtl, &mut measure_width);
+	/// assert_eq!(right_to_left_layout.run_list[0].x, 180.0);
+	/// assert_eq!(right_to_left_layout.run_list[1].x, 160.0);
+	/// ```
+	//==============================================================================
 	pub fn layout_segments(&self, content_size: Vector2, text_direction: TextDirection, measure_width: &mut dyn FnMut(&str, &str) -> f32) -> RichTextLayout {
 		let mut run_list: Vec<RichTextRun> = Vec::new();
 		let mut total_width = 0.0;
@@ -540,6 +797,26 @@ impl RichText {
 
 	//==============================================================================
 	/// 글의 자연 크기. (조각이 있으면 합친 폭 x 가장 큰 글자 크기, 없으면 일반 글 폭 x 글자 크기. 원본 getIntrinsicContentSize)
+	///
+	/// # 인자
+	/// - `measure_width`: (폰트 문자열, 글) 을 받아 폭을 돌려주는 함수.
+	///
+	/// # 돌려줌
+	/// (너비, 높이).
+	///
+	/// # 예제
+	/// 조각이 있으면 합친 폭과 가장 큰 글자 크기
+	/// ```rust
+	/// use vanilla::{RichText, Vector2};
+	///
+	/// let mut measure_width = |_font_string: &str, text: &str| -> f32 {
+	/// 	text.chars().count() as f32 * 10.0
+	/// };
+	/// let mut rich_text = RichText::create_with_text("ab<size=40>cd</size>", 20.0);
+	/// assert_eq!(rich_text.calculate_intrinsic_content_size(&mut measure_width), Vector2::create(40.0, 40.0));
+	/// rich_text.set_text("plain");
+	/// assert_eq!(rich_text.calculate_intrinsic_content_size(&mut measure_width), Vector2::create(50.0, 20.0));
+	/// ```
 	//==============================================================================
 	pub fn calculate_intrinsic_content_size(&self, measure_width: &mut dyn FnMut(&str, &str) -> f32) -> Vector2 {
 		if !self.has_segments() {
@@ -559,6 +836,12 @@ impl RichText {
 
 	//==============================================================================
 	/// 조각을 이은 글의 실제 방향. (품은 Text 의 방향, Inherit 면 Graphic 의 방향. Auto 는 이은 글의 첫 강한 글자로)
+	///
+	/// # 인자
+	/// - `graphic`: 방향이 Inherit 일 때 볼 Graphic.
+	///
+	/// # 돌려줌
+	/// Ltr 또는 Rtl.
 	//==============================================================================
 	pub fn resolve_segment_text_direction(&self, graphic: &Graphic) -> TextDirection {
 		let base_direction = if self.text.get_text_direction() != TextDirection::Inherit {
@@ -583,6 +866,9 @@ impl RichText {
 
 	//==============================================================================
 	/// 글자 방향 설정. (품은 Text 에 넘긴다, 원본 setTextDirection)
+	///
+	/// # 인자
+	/// - `text_direction`: 글자 방향.
 	//==============================================================================
 	pub fn set_text_direction(&mut self, text_direction: TextDirection) {
 		self.text.set_text_direction(text_direction);
@@ -590,6 +876,9 @@ impl RichText {
 
 	//==============================================================================
 	/// 글자 방향 반환.
+	///
+	/// # 돌려줌
+	/// 글자 방향.
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn get_text_direction(&self) -> TextDirection {
@@ -598,6 +887,9 @@ impl RichText {
 
 	//==============================================================================
 	/// 보일 글자 수 설정. (품은 Text 에 넘긴다, -1 이면 전체. 마크업이 있는 글은 원본처럼 자르지 않는다)
+	///
+	/// # 인자
+	/// - `visible_character_count`: 보일 글자 묶음 수. (-1 이면 전체)
 	//==============================================================================
 	pub fn set_visible_character_count(&mut self, visible_character_count: i32) {
 		self.text.set_visible_character_count(visible_character_count);
@@ -605,6 +897,9 @@ impl RichText {
 
 	//==============================================================================
 	/// 보일 글자 수 반환.
+	///
+	/// # 돌려줌
+	/// 보일 글자 묶음 수. (-1 이면 전체)
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn get_visible_character_count(&self) -> i32 {
@@ -647,6 +942,10 @@ impl RichText {
 
 	//==============================================================================
 	/// 조각 그리기. (원본 draw_segments)
+	///
+	/// # 인자
+	/// - `graphic`: 그릴 Graphic. (문단 방향, 정렬, 기준선, 폰트 문자열, 색을 바꿔 가며 그린다)
+	/// - `content_size`: 노드 content 크기.
 	//==============================================================================
 	pub fn draw_segments(&self, graphic: &mut Graphic, content_size: Vector2) {
 		let text_direction = self.resolve_segment_text_direction(graphic);
@@ -683,6 +982,9 @@ impl RichText {
 }
 
 impl Default for RichText {
+	//==============================================================================
+	/// 기본값. (new 와 같다)
+	//==============================================================================
 	fn default() -> RichText {
 		RichText::new()
 	}
@@ -690,14 +992,23 @@ impl Default for RichText {
 
 #[crate::reflect]
 impl Component for RichText {
+	//==============================================================================
+	/// 컴포넌트 공통 상태. (품은 Text 의 것)
+	//==============================================================================
 	fn get_component_base(&self) -> &ComponentBase {
 		self.text.get_component_base()
 	}
 
+	//==============================================================================
+	/// 컴포넌트 공통 상태. (품은 Text 의 것, 바꿀 수 있게)
+	//==============================================================================
 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 		self.text.get_component_base_mut()
 	}
 
+	//==============================================================================
+	/// 컴포넌트 종류 이름. ("RichText")
+	//==============================================================================
 	fn get_component_type(&self) -> &'static str {
 		"RichText"
 	}
@@ -716,11 +1027,17 @@ impl Component for RichText {
 		self.calculate_intrinsic_content_size(&mut |font_string: &str, text: &str| crate::core::textstringtexturecache::measure_text_without_graphic(font_string, text).map(|text_metrics| text_metrics.width).unwrap_or(0.0))
 	}
 
+	//==============================================================================
+	/// tick 이 필요한지. (늘 false)
+	//==============================================================================
 	#[reflect(after = "getIntrinsicContentSize")]
 	fn is_tick_needed(&self) -> bool {
 		false
 	}
 
+	//==============================================================================
+	/// 그리기. (조각이 없으면 품은 Text 로)
+	//==============================================================================
 	fn draw(&mut self, transform: &NodeTransform, graphic: &mut Graphic) {
 		if !self.has_segments() {
 			self.text.draw(transform, graphic);
@@ -732,6 +1049,24 @@ impl Component for RichText {
 
 //==============================================================================
 /// Canvas2D font 꼴 문자열. (원본 text.js 의 build_font_string)
+///
+/// # 인자
+/// - `font_family`: 폰트 이름.
+/// - `font_size`: 글자 크기. (픽셀)
+/// - `is_bold`: true 면 bold 를 넣는다.
+/// - `is_italic`: true 면 italic 을 넣는다.
+///
+/// # 돌려줌
+/// 폰트 문자열.
+///
+/// # 예제
+/// 기울임, 굵게, 크기, 이름 차례
+/// ```rust
+/// use vanilla::core::component::richtext::build_font_string;
+///
+/// assert_eq!(build_font_string("default", 20.0, false, false), "20px default");
+/// assert_eq!(build_font_string("GameFont", 16.5, true, true), "italic bold 16.5px GameFont");
+/// ```
 //==============================================================================
 pub fn build_font_string(font_family: &str, font_size: f32, is_bold: bool, is_italic: bool) -> String {
 	let mut style_parts: Vec<String> = Vec::new();
@@ -860,6 +1195,25 @@ fn match_tag_at(input: &str, start_byte_index: usize) -> Option<(usize, bool, St
 //==============================================================================
 /// 마크업 → 조각 목록. (알려진 태그가 하나도 없으면 None. 원본 parse_markup_to_segments)
 /// - 모르는 여는 태그는 글로 남긴다. 닫는 태그는 짝이 없어도 글에서 빠진다. (원본과 같음)
+///
+/// # 인자
+/// - `input`: 마크업 글.
+///
+/// # 돌려줌
+/// 조각 목록. 알려진 태그가 하나도 없으면(빈 글, `<` 가 없는 글도) None.
+///
+/// # 예제
+/// 모르는 태그는 글로 남는다
+/// ```rust
+/// use vanilla::core::component::richtext::parse_markup_to_segments;
+///
+/// assert!(parse_markup_to_segments("plain text").is_none());
+/// assert!(parse_markup_to_segments("a < b and <unknown>tag</unknown>").is_none());
+/// let segment_list = parse_markup_to_segments("<u>x</u><foo>y").expect("segments");
+/// let text_list: Vec<&str> = segment_list.iter().map(|segment| segment.text.as_str()).collect();
+/// assert_eq!(text_list, vec!["x", "<foo>", "y"]);
+/// assert!(segment_list[0].attributes.is_underline);
+/// ```
 //==============================================================================
 pub fn parse_markup_to_segments(input: &str) -> Option<Vec<RichTextSegment>> {
 	if input.is_empty() || !input.contains('<') {
