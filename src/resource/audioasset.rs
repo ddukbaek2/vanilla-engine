@@ -2,7 +2,8 @@
 // 오디오 애셋.
 // - 원본 resource/audioasset.js. 소리 파일을 디코딩한 오디오 버퍼를 들고 있다.
 // - 오디오 버퍼 자리는 백엔드가 채운다. (platform/audio 의 AudioBuffer)
-//   데스크탑: kira 의 StaticSoundData. (ogg vorbis, mp3, wav, flac, m4a(aac) 를 symphonia 로 디코딩한다)
+//   데스크탑: 푼 소리를 Arc 로 든 AudioBuffer. (platform/audio/decode 가 원본의 크롬 decodeAudioData 와 같은 길이, 표본율(44100), 표본으로 푼다.
+//   webm, ogg 의 Opus 와 Vorbis, mp3, wav, flac, m4a 와 aac 의 AAC. 꼴은 확장자가 아니라 내용으로 가린다)
 //   웹: 원본과 같은 WebAudio AudioBuffer. (OfflineAudioContext 로 디코딩한다, 없으면 잠시 쓰는 AudioContext)
 // - 읽기:
 //   데스크탑은 load / load_from_bytes 가 그 자리에서 파일을 읽고 디코딩한 뒤 돌아온다. 실패하면 Err.
@@ -140,9 +141,24 @@ impl AudioAsset {
 	}
 
 	//==============================================================================
-	// 애셋 경로로 읽기. (데스크탑은 애셋 폴더 후보, 웹은 asset_base_url 기준. 원본 load(경로) 의 상대 경로 자리, await 할 수 있는 손잡이를 돌려준다)
+	// 애셋 경로로 읽기. (데스크탑은 애셋 폴더 후보, 웹은 asset_base_url 기준, "data:" 주소도 된다. 원본 load(경로) 자리, await 할 수 있는 손잡이를 돌려준다)
+	// - 데스크탑의 data: 주소는 형을 보지 않고 바이트를 내용으로 가려 푼다. (원본 decodeAudioData 와 같다, 웹은 브라우저 fetch 가 푼다)
 	//==============================================================================
 	pub fn load_from_asset(self: &Rc<AudioAsset>, engine: &Engine, relative_path: &str) -> AudioLoadHandle {
+		#[cfg(not(target_arch = "wasm32"))]
+		{
+			if crate::base::dataurl::is_data_url(relative_path) {
+				return match crate::base::dataurl::parse_data_url(relative_path) {
+					Some(data_url) => {
+						self.load_from_bytes(data_url.bytes)
+					}
+					None => {
+						self.set_load_error(String::from("Error loading sound (data: 주소를 풀 수 없습니다)"));
+						self.create_load_handle()
+					}
+				};
+			}
+		}
 		self.load(&engine.resolve_audio_asset_path(relative_path))
 	}
 

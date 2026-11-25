@@ -2,20 +2,19 @@
 // 오디오 플레이어.
 // - 원본 core/audioplayer.js. AudioAsset 에 로드된 오디오 버퍼를 재생한다.
 // - 음량, 음소거, 루프, 재생 위치는 여기서 들고, 소리를 내는 일은 백엔드(platform/audio 의 AudioPlayerBackend)가 한다.
-//   원본의 GainNode 자리: 데스크탑은 플레이어마다 kira 믹서 하위 트랙 하나, 웹은 원본처럼 GainNode 하나.
+//   원본의 GainNode 자리: 두 플랫폼 모두 원본처럼 GainNode 하나. (데스크탑은 엔진 믹서의 노드, 셈은 크롬 WebAudio 와 같다)
 // - 만드는 곳은 AudioManager::create_audio_player() 나 AudioPlayer::new(매니저, 내보낼 곳) 이다. AudioContext 가 없으면 아무 소리도 내지 않는 플레이어가 된다. (원본과 같다)
 //   new 는 원본 new AudioPlayer(audioContext, outputNode) 자리다. 첫 인자는 AudioContext 를 든 매니저이고(AudioContext 가 없으면 만든다),
 //   내보낼 곳(AudioOutputNode)은 버스의 get_gain_node()(AudioGainNode)의 as_deref() 다. None 이면 출력이다. 두 플랫폼에서 같은 코드다.
 //     AudioPlayer::new(&audio_manager, audio_bus.get_gain_node().as_deref())
-//   (웹은 &AudioNode 라 다른 AudioNode 도 넘길 수 있고, 데스크탑은 kira 트랙의 &RefCell<TrackHandle> 이다)
-//   내보낼 곳을 직접 넘겨 만든 플레이어는 버스 손잡이를 들지 않는다. (버스가 버려지면 데스크탑은 그 아래 트랙도 같이 없어진다)
+//   (웹은 &AudioNode 라 다른 AudioNode 도 넘길 수 있고, 데스크탑은 믹서 버스의 &MixerGainNode 다)
+//   데스크탑은 내보낼 곳을 직접 넘겨 만든 플레이어도 원본 WebAudio 처럼 이어진 동안 그 버스 노드를 살려 둔다.
 // - play 는 원본처럼 AudioContext 가 멈춰 있으면 깨운 뒤 튼다. (웹은 resume() 을 기다렸다가, 데스크탑은 그 자리에서)
 // - 원본과 다른 점:
 //   애셋은 Rc<AudioAsset> 로 나눠 든다.
 //   플레이어를 버리면 재생 중인 소리도 멈춘다. (원본은 가비지 수거와 상관없이 소스 노드가 끝까지 운다)
-//   데스크탑의 is_playing() 은 onended 콜백 대신 kira 소리 핸들의 상태를 읽는다. (끝나면 거짓)
-//   데스크탑의 음량은 데시벨로 바꿔 트랙에 건다. 0.001(-60dB) 아래는 kira 가 무음으로 친다.
-//   get_audio_context 는 만든 매니저의 AudioContext 를 빌려 준다. (웹 WebAudio AudioContext, 데스크탑 kira AudioManager, 매니저 없이 만든 플레이어는 None)
+//   데스크탑의 is_playing() 은 onended 콜백 대신 믹서가 소스를 끝냈는지 읽는다. (끝나면 거짓)
+//   get_audio_context 는 만든 매니저의 AudioContext 를 빌려 준다. (웹 WebAudio AudioContext, 데스크탑 엔진 믹서의 AudioContext, 매니저 없이 만든 플레이어는 None)
 //   set_playback_rate 는 원본에 없던 것을 러스트 판에서 먼저 만들었다. (원본에도 넣었다)
 //   AudioBus::create_audio_player 로 만든 플레이어는 출력 대신 그 버스로 소리를 낸다. (원본 AudioPlayer 의 출력 노드 인자) 버스 손잡이를 하나 들어 버스를 살려 둔다.
 //==============================================================================

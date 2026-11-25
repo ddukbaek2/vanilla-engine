@@ -10,6 +10,9 @@
 // - 의존 컴포넌트(원본 require): 원본은 클래스 목록을 돌려준다. 러스트 판은 RequiredComponent(타입과 기본값으로 만드는 함수) 목록을 돌려주고,
 //   WorldNode::add_component 가 붙이기 전에 그 타입이 없으면 만들어 붙인다. 떼어질 때는 원본처럼 detach 를 부른다.
 // - 원본 setNode, getNode, setComponentType 은 옮기지 않았다. 러스트 판은 노드를 문맥으로 넘기고(전역 객체 참조가 없다) 이름은 타입이 정한다.
+// - 반사(원본이 실행 중에 프로토타입을 훑어 get, is, set 함수를 찾는 것): impl 블록과 impl Component 블록에 #[vanilla::reflect] 를 붙이면
+//   매크로가 컴파일 때 그 목록과 부르는 코드를 짓고, get_reflection 이 그것을 돌려준다. (core/reflection.rs) 붙이지 않은 컴포넌트는 None 이다.
+//   구체 타입으로 꺼내기(C++ RTTI 의 dynamic_cast 자리)는 AsAny 다.
 //==============================================================================
 pub mod mask;
 pub mod outline;
@@ -26,6 +29,7 @@ use crate::base::vector2::Vector2;
 use crate::core::graphic::Graphic;
 use crate::core::node::nodetree::{ComponentContext, NodeId, NodeTree};
 use crate::core::node::worldnode::NodeTransform;
+use crate::core::reflection::Reflect;
 use std::any::{Any, TypeId};
 
 //==============================================================================
@@ -288,6 +292,20 @@ pub trait Component: AsAny {
 	//==============================================================================
 	fn get_intrinsic_content_size(&self) -> Vector2 {
 		Vector2::create(-1.0, -1.0)
+	}
+
+	//==============================================================================
+	// 반사 구현. (#[reflect] 를 붙인 impl Component 블록에서 매크로가 Some(self) 로 채운다. 원본은 모든 객체가 반사된다)
+	//==============================================================================
+	fn get_reflection(&self) -> Option<&dyn Reflect> {
+		None
+	}
+
+	//==============================================================================
+	// 반사 구현. (변경용)
+	//==============================================================================
+	fn get_reflection_mut(&mut self) -> Option<&mut dyn Reflect> {
+		None
 	}
 
 	//==============================================================================

@@ -1,6 +1,6 @@
 //==============================================================================
 // 오디오 확인 예제. (데스크탑, 창 없이 1초 남짓 소리를 내고 스스로 끝난다)
-// - 440Hz 사인파 wav 를 메모리에서 만들어 AudioAsset::load_from_bytes 로 디코딩하고(kira 의 wav 해석),
+// - 440Hz 사인파 wav 를 메모리에서 만들어 AudioAsset::load_from_bytes 로 디코딩하고(크롬과 같은 symphonia 해석),
 //   AudioPlayer, SoundEffectPool, BeepPlayer 로 차례로 튼다.
 // - 실행: cargo run --example audiotone
 //==============================================================================

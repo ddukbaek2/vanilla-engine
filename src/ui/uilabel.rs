@@ -32,6 +32,7 @@ pub struct UILabel {
 	use_rich_text: bool,
 }
 
+#[crate::reflect(base = ui_view)]
 impl UILabel {
 	//==============================================================================
 	// 생성. (글자 기본값은 Text 와 같다: 32px, 흰색, 가운데 정렬, 가운데 기준선)
@@ -57,6 +58,7 @@ impl UILabel {
 	//==============================================================================
 	// 품은 뷰 반환.
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn get_uiview(&self) -> &UIView {
 		&self.ui_view
 	}
@@ -71,6 +73,7 @@ impl UILabel {
 	//==============================================================================
 	// 컨텐트 노드 핸들.
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn get_content(&self) -> Option<NodeId> {
 		self.ui_view.get_content()
 	}
@@ -78,6 +81,7 @@ impl UILabel {
 	//==============================================================================
 	// 배경색 설정.
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn set_background_color(&mut self, background_color: impl Into<Color>) {
 		self.ui_view.set_background_color(background_color);
 	}
@@ -85,6 +89,7 @@ impl UILabel {
 	//==============================================================================
 	// 배경색 반환.
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn get_background_color(&self) -> Color {
 		self.ui_view.get_background_color()
 	}
@@ -92,6 +97,7 @@ impl UILabel {
 	//==============================================================================
 	// 품은 글자 컴포넌트 반환. (원본의 node.get_component(Text) 자리)
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn get_text_component(&self) -> &Text {
 		self.rich_text.get_text_component()
 	}
@@ -106,6 +112,7 @@ impl UILabel {
 	//==============================================================================
 	// 품은 리치텍스트 컴포넌트 반환. (원본의 node.get_component(RichText) 자리)
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn get_rich_text_component(&self) -> &RichText {
 		&self.rich_text
 	}
@@ -223,6 +230,7 @@ impl UILabel {
 	//==============================================================================
 	// 폰트 이름 반환.
 	//==============================================================================
+	#[reflect(transient)]
 	pub fn get_font_family(&self) -> &str {
 		self.rich_text.get_font_family()
 	}
@@ -402,6 +410,7 @@ impl Default for UILabel {
 	}
 }
 
+#[crate::reflect]
 impl Component for UILabel {
 	fn get_component_base(&self) -> &ComponentBase {
 		self.ui_view.get_component_base()

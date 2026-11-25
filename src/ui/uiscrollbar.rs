@@ -8,6 +8,7 @@
 //   - 대상은 스크롤 뷰 컴포넌트 대신 UIScrollView 가 붙은 노드의 핸들이다. (set_scroll_view / get_scroll_view)
 //   - 트랙 누름 자리와 썸 안 판정은 노드 행렬의 역으로 바꾼 로컬 좌표로 한다. (원본은 월드 위치를 뺀다. 회전 / 크기가 없으면 같다)
 //   - 썸 색은 원본이 0 ~ 255 를 섞어 쓴 Color(255, 255, 255, 0.6) 이다. 러스트 판은 같은 뜻의 (1, 1, 1, 0.6) 으로 둔다.
+// - UI 문서(UIDocument)는 register_node_type 으로 등록하면 원본 노드 꼴로 쓰고 읽는다. (노드 type "UIScrollBar", 트랙 Paint, 썸 노드, uidocument.rs 의 UIDocumentNode)
 // - 보통은 UIScrollView::set_shows_vertical_scroll_bar 가 만든다. 직접 만들 때는 node_tree.add_component 로 붙인다. (피봇 / 앵커 왼쪽 위, interactable)
 //==============================================================================
 use crate::base::color::Color;
@@ -32,6 +33,12 @@ pub enum ScrollBarAxis {
 	Horizontal,
 	Vertical,
 }
+
+// 스크롤바 축의 반사 값. (원본 ScrollBarAxis 글)
+crate::core::reflection::impl_reflect_names!(ScrollBarAxis, [
+	(ScrollBarAxis::Horizontal, "horizontal"),
+	(ScrollBarAxis::Vertical, "vertical"),
+]);
 
 //==============================================================================
 // 대상 스크롤 상태. (스크롤바가 tick / 터치 때 대상 노드에서 읽는다)
@@ -70,6 +77,7 @@ pub struct UIScrollBar {
 	auto_hide: bool,
 }
 
+#[crate::reflect]
 impl UIScrollBar {
 	//==============================================================================
 	// 생성. (세로, 트랙 옅은 검정, 썸 반투명 흰색, 썸 최소 길이 24, 자동 숨김)
@@ -130,6 +138,20 @@ impl UIScrollBar {
 	//==============================================================================
 	pub fn set_thumb_color(&mut self, color: impl Into<Color>) {
 		self.thumb_color = color.into();
+	}
+
+	//==============================================================================
+	// 트랙 색 반환. (원본은 트랙 Paint 컴포넌트의 색이다. 러스트 판은 직접 그려 색을 든다)
+	//==============================================================================
+	pub fn get_track_color(&self) -> Color {
+		self.track_color
+	}
+
+	//==============================================================================
+	// 썸 색 반환. (원본은 썸 노드 Paint 컴포넌트의 색이다)
+	//==============================================================================
+	pub fn get_thumb_color(&self) -> Color {
+		self.thumb_color
 	}
 
 	//==============================================================================
@@ -344,6 +366,7 @@ impl Default for UIScrollBar {
 	}
 }
 
+#[crate::reflect]
 impl Component for UIScrollBar {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base

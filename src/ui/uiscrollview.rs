@@ -47,6 +47,12 @@ pub enum ScrollMode {
 	Elastic,
 }
 
+// 스크롤 방식의 반사 값. (원본 ScrollMode 글)
+crate::core::reflection::impl_reflect_names!(ScrollMode, [
+	(ScrollMode::Clamp, "clamp"),
+	(ScrollMode::Elastic, "elastic"),
+]);
+
 //==============================================================================
 // 스크롤 뷰.
 //==============================================================================
@@ -78,6 +84,7 @@ pub struct UIScrollView {
 	is_content_size_sync_pending: bool,
 }
 
+#[crate::reflect(base = ui_view)]
 impl UIScrollView {
 	//==============================================================================
 	// 생성.
@@ -115,6 +122,7 @@ impl UIScrollView {
 	//==============================================================================
 	// 품은 뷰 반환.
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn get_uiview(&self) -> &UIView {
 		&self.ui_view
 	}
@@ -129,6 +137,7 @@ impl UIScrollView {
 	//==============================================================================
 	// 컨텐트 노드 핸들. (스크롤할 자식 노드를 여기에 붙인다)
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn get_content(&self) -> Option<NodeId> {
 		self.ui_view.get_content()
 	}
@@ -136,6 +145,7 @@ impl UIScrollView {
 	//==============================================================================
 	// 배경색 설정.
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn set_background_color(&mut self, background_color: impl Into<Color>) {
 		self.ui_view.set_background_color(background_color);
 	}
@@ -143,6 +153,7 @@ impl UIScrollView {
 	//==============================================================================
 	// 배경색 반환.
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn get_background_color(&self) -> Color {
 		self.ui_view.get_background_color()
 	}
@@ -734,6 +745,7 @@ impl Default for UIScrollView {
 	}
 }
 
+#[crate::reflect]
 impl Component for UIScrollView {
 	fn get_component_base(&self) -> &ComponentBase {
 		self.ui_view.get_component_base()

@@ -106,6 +106,7 @@ pub struct UIDialog {
 	pending_dismiss: Option<bool>,
 }
 
+#[crate::reflect]
 impl UIDialog {
 	//==============================================================================
 	// 생성. (기본 설정)
@@ -371,6 +372,7 @@ impl Default for UIDialog {
 	}
 }
 
+#[crate::reflect]
 impl Component for UIDialog {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base

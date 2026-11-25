@@ -487,7 +487,7 @@ fn round_decimal_digits(digit_text: &str, point_position: i32, fraction_digit_co
 //==============================================================================
 // 원본 Number.prototype.toFixed. (실제 값으로 반올림하고 딱 반이면 크기를 올린다, 1e21 이상과 무한대는 String(수))
 //==============================================================================
-fn format_fixed(value: f64, fraction_digit_count: usize) -> String {
+pub(crate) fn format_fixed(value: f64, fraction_digit_count: usize) -> String {
 	if value.is_nan() {
 		return String::from(NOT_A_NUMBER_TEXT);
 	}

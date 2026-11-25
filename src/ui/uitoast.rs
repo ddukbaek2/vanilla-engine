@@ -94,6 +94,7 @@ pub struct UIToast {
 	rest_x: Option<f32>,
 }
 
+#[crate::reflect]
 impl UIToast {
 	//==============================================================================
 	// 생성. (기본 설정)
@@ -218,6 +219,7 @@ impl Default for UIToast {
 	}
 }
 
+#[crate::reflect]
 impl Component for UIToast {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base

@@ -106,6 +106,7 @@ pub struct TouchEffect {
 	original_blend_mode: BlendMode,
 }
 
+#[crate::reflect]
 impl TouchEffect {
 	//==============================================================================
 	// 생성.
@@ -187,6 +188,7 @@ impl Default for TouchEffect {
 	}
 }
 
+#[crate::reflect]
 impl Component for TouchEffect {
 	//==============================================================================
 	// 공통 상태 반환.

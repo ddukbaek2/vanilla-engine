@@ -109,6 +109,7 @@ pub struct UIContextMenu {
 	is_showing: bool,
 }
 
+#[crate::reflect]
 impl UIContextMenu {
 	//==============================================================================
 	// 생성. (기본 설정)
@@ -275,6 +276,7 @@ impl Default for UIContextMenu {
 	}
 }
 
+#[crate::reflect]
 impl Component for UIContextMenu {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base

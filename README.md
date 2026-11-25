@@ -169,6 +169,36 @@ square_node.add_component(Spin {
 - 씬 코드에서 컴포넌트와 트리를 함께 수정할 때는 `node_tree.with_component_mut::<T, _>(node_id, |component, tree| ...)` 를 씁니다.
 - `node_tree.destroy_node(node_id)` 는 자식 노드까지 삭제합니다. tick 이나 터치 처리 도중에 호출해도 순회가 끝난 뒤에 안전하게 삭제합니다.
 
+컴포넌트의 `impl` 블록과 `impl Component` 블록에 `#[vanilla::reflect]` 를 붙이면 vanilla.js 의 실행 중 반사처럼 get, is, set 함수를 찾아 씁니다. UI 문서(`UIDocument`)가 등록 한 줄로 그 컴포넌트를 vanilla.js 와 같은 키로 저장하고 읽으며, 개발자 도구 인스펙터가 게터를 모두 불러 보입니다. ([`examples/devtoolsshowcase.rs`](examples/devtoolsshowcase.rs))
+
+```rust
+#[vanilla::reflect]
+impl Spin {
+	pub fn set_degrees_per_second(&mut self, degrees_per_second: f32) {
+		self.degrees_per_second = degrees_per_second;
+	}
+
+	pub fn get_degrees_per_second(&self) -> f32 {
+		self.degrees_per_second
+	}
+}
+
+#[vanilla::reflect]
+impl Component for Spin {
+	// 위와 같다
+}
+
+// UI 문서에 등록하면 { "DegreesPerSecond": 90, ..., "type": "Spin" } 으로 저장하고 읽습니다
+ui_document.register_component_type("Spin", || Spin {
+	component_base: ComponentBase::new(),
+	degrees_per_second: 0.0,
+});
+```
+
+- 게터는 인자 없는 `pub fn get_*`, `pub fn is_*` 이고, 같은 이름의 `set_*` 이 있으면 저장 속성입니다. 키는 접두어를 뗀 vanilla.js 이름(`get_line_width` → `LineWidth`)입니다.
+- 저장할 수 없는 꼴의 게터(그림, 콜백 같은 것)도 컴파일 에러 없이 저장에서 빠지고 인스펙터에는 `[종류 이름]` 으로 보입니다.
+- 함수에 `#[reflect(skip)]`(반사에서 빼기), `#[reflect(transient)]`(인스펙터에만 보이기), `#[reflect(name = "UIScale")]`(키 이름 정하기)를, 블록에 `#[vanilla::reflect(base = 필드)]`(품은 컴포넌트를 vanilla.js 의 상위 클래스처럼 잇기)를 붙일 수 있습니다.
+
 ### 애셋 로딩
 
 ```rust
@@ -230,7 +260,7 @@ impl Scene for TitleScene {
 | `new Promise((resolve, reject) => ...)` | `let (promise, resolver) = Promise::create();` (실패는 `Promise<Result<T, E>>` 와 `resolver.reject(까닭)`) |
 
 - 데스크탑은 `EngineConfiguration.asset_directory_paths` 폴더에서 바로 읽고, 웹은 `asset_base_url + 경로` 를 fetch 합니다. 게임 코드는 같습니다.
-- 이미지(png, jpg, webp, gif 첫 장, bmp, ico, svg, avif), 텍스트, JSON, 바이너리, 폰트(ttf, otf, woff, woff2), 오디오(ogg, mp3, wav, flac, m4a)를 지원합니다. 데스크탑은 엔진이 풀고, 웹은 원본처럼 브라우저가 풉니다.
+- 이미지(png, jpg, webp, gif 첫 장, bmp, ico, svg, avif), 텍스트, JSON, 바이너리, 폰트(ttf, otf, woff, woff2), 오디오(webm, ogg 의 Opus 와 Vorbis, mp3, wav, flac, m4a 와 aac 의 AAC)를 지원합니다. 데스크탑은 엔진이 풀고, 웹은 원본처럼 브라우저가 풉니다. 데스크탑 소리는 크롬 decodeAudioData 와 같은 해석기(FLAC, MP3, PCM, Vorbis 는 크롬이 쓰는 symphonia)로 풀고 앞뒤 다듬기, 44100Hz 로 바꾸기(크로미엄 SincResampler 를 옮긴 것)까지 같게 해 길이와 표본이 크롬과 같습니다. (`tests/assets/audio` 의 21 파일을 크롬 158 의 결과와 견줍니다)
 - 여러 애셋을 함께 받을 때는 `AssetLoader` 가 동시 수만큼 요청하고 진행률과 실패 목록을 셉니다.
 - 로딩에 실패한 애셋도 완료로 처리해서 씬이 멈추지 않습니다.
 
@@ -353,6 +383,8 @@ cargo run --release --example modelviewer
 
 **웹에서도 제대로 되는 한글 입력.** 웹에서는 입력 필드마다 숨겨진 DOM `<input>` 을 두고 IME 조합 이벤트를 받아 캔버스에 그립니다. iOS 처럼 사용자 입력 안에서만 키보드가 뜨는 브라우저를 위해 터치 핸들러 안에서 포커스를 줍니다. 데스크탑은 winit 의 IME 이벤트를 씁니다.
 
+**컴파일 때 짓는 반사(리플렉션).** vanilla.js 는 실행 중에 객체의 프로토타입을 훑어 get, is, set 함수를 찾아 UI 문서 저장과 인스펙터에 씁니다. 러스트에는 실행 중 반사가 없어, 언리얼의 UHT 나 Qt 의 moc 처럼 컴파일 때 코드를 짓습니다. 절차 매크로 `#[vanilla::reflect]` 가 impl 블록의 함수 목록과 그 함수를 부르는 코드를 만들고, 값으로 바꿀 수 없는 꼴의 게터는 자동 참조 특수화(autoref specialization)로 골라내 건너뜁니다. 저장 결과는 vanilla.js 가 쓰는 JSON 과 키, 차례, 값까지 같습니다.
+
 **플랫폼 레이어 분리.** 창, GL, 입력, 메인 루프, 파일 읽기, 오디오는 `platform/desktop` 과 `platform/web` 에만 있고, 엔진 코어는 플랫폼에 의존하지 않습니다. 새 플랫폼은 이 레이어에 모듈을 추가하면 됩니다.
 
 ## 성능
@@ -370,7 +402,7 @@ cargo run --release --example modelviewer
 
 ## 외부 의존성
 
-엔진이 직접 쓰는 크레이트입니다. 버전은 `Cargo.lock` 기준이고, 라이선스는 각 크레이트의 `Cargo.toml` 에 적힌 것입니다. 직접 의존성은 모두 MIT, Apache-2.0, Zlib, BSD, ISC, Unicode-3.0 같은 허용적 라이선스입니다. (self_cell 은 Apache-2.0 과 GPL-2.0 가운데 하나를 고르는 이중 라이선스입니다. kira 가 데스크탑 소리 해석에 쓰는 symphonia 는 MPL-2.0 입니다)
+엔진이 직접 쓰는 크레이트입니다. (반사 매크로 크레이트 `macros/` 가 쓰는 것 포함) 버전은 `Cargo.lock` 기준이고, 라이선스는 각 크레이트의 `Cargo.toml` 에 적힌 것입니다. 직접 의존성은 symphonia 를 빼고 모두 MIT, Apache-2.0, Zlib, BSD, ISC, Unicode-3.0 같은 허용적 라이선스입니다. (self_cell 은 Apache-2.0 과 GPL-2.0 가운데 하나를 고르는 이중 라이선스입니다) 데스크탑 소리 해석의 symphonia 는 파일 단위 약한 카피레프트인 MPL-2.0 입니다. 원본이 쓰는 크롬도 decodeAudioData 의 FLAC, MP3, PCM, Vorbis 를 같은 symphonia 0.6 으로 풀어 MPL-2.0 그대로 싣고, 엔진은 크롬과 같은 해석기를 쓰려고 이것을 골랐습니다.
 
 **데스크탑, 웹 공통**
 
@@ -393,6 +425,14 @@ cargo run --release --example modelviewer
 | [web-time](https://crates.io/crates/web-time) | 1.1.0 | `core/engine.rs`, `base/math.rs` 외 | 프레임 시계와 난수 시드. 데스크탑은 `std::time`, 웹은 `performance.now()` 를 같은 API 로 씁니다 | MIT / Apache-2.0 |
 | [ewebsock](https://crates.io/crates/ewebsock) | 0.8.0 | `web/websocketclient.rs` | 웹소켓. 데스크탑은 tungstenite(`tls` 기능이면 rustls 로 wss), 웹은 브라우저 WebSocket 을 씁니다 | MIT / Apache-2.0 |
 
+**반사 매크로 (`macros/`, 컴파일할 때만 돌고 게임 실행 파일에는 들지 않습니다)**
+
+| 크레이트 | 버전 | 쓰는 곳 | 하는 일 | 라이선스 |
+| --- | --- | --- | --- | --- |
+| [syn](https://crates.io/crates/syn) | 2.0.119 | `macros/src/lib.rs` | `#[reflect]` 를 붙인 impl 블록과 함수 꼴을 읽습니다 (full, visit, visit-mut 기능) | MIT / Apache-2.0 |
+| [quote](https://crates.io/crates/quote) | 1.0.47 | `macros/src/lib.rs` | 반사 구현 코드를 씁니다 | MIT / Apache-2.0 |
+| [proc-macro2](https://crates.io/crates/proc-macro2) | 1.0.107 | `macros/src/lib.rs` | syn 과 quote 가 쓰는 토큰 흐름 | MIT / Apache-2.0 |
+
 **데스크탑만**
 
 | 크레이트 | 버전 | 쓰는 곳 | 하는 일 | 라이선스 |
@@ -401,7 +441,9 @@ cargo run --release --example modelviewer
 | [glutin](https://crates.io/crates/glutin), [glutin-winit](https://crates.io/crates/glutin-winit) | 0.32.3, 0.5.0 | `platform/desktop.rs` | OpenGL 3.3 코어 컨텍스트 생성 (깊이 24, 스텐실 8) | Apache-2.0, MIT |
 | [raw-window-handle](https://crates.io/crates/raw-window-handle) | 0.6.2 | `platform/desktop.rs`, `platform/desktop/windowsplatform.rs` | winit 창을 glutin 과 윈도우 창 서브클래싱에 넘깁니다 | MIT / Apache-2.0 / Zlib |
 | [gilrs](https://crates.io/crates/gilrs) | 0.11.2 | `core/gamepadmanager.rs` | 게임패드 입력과 진동(리눅스, 윈도우). OS 입력을 W3C Standard Gamepad 꼴로 바꿉니다. 웹은 원본처럼 `navigator.getGamepads()` 를 직접 읽습니다 | MIT / Apache-2.0 |
-| [kira](https://crates.io/crates/kira) | 0.12.6 | `platform/audio/desktop.rs` | 오디오 재생과 믹서 트랙. ogg, mp3, wav, flac, m4a(isomp4 와 aac) 해석만 켭니다 (symphonia) | MIT / Apache-2.0 |
+| [cpal](https://crates.io/crates/cpal) | 0.18.2 | `platform/audio/desktop.rs` | 기본 출력 장치. 그 위의 믹서(소스, GainNode, StereoPannerNode, 버스)는 엔진이 크롬 WebAudio 와 같은 셈으로 짓습니다 (`platform/audio/mixer.rs`). realtime 기능으로 윈도우, 리눅스의 소리 스레드 우선순위를 올립니다 | Apache-2.0 |
+| [symphonia](https://crates.io/crates/symphonia) | 0.6.1 | `platform/audio/decode/` | 소리 해석. 크롬 decodeAudioData 와 같은 해석기로 FLAC, MP3, PCM, Vorbis 를 풀고(크롬이 켜는 기능과 같게), AAC 와 컨테이너(wav, ogg, mkv(webm), isomp4(m4a), flac, mp3, adts)도 풉니다 | MPL-2.0 |
+| [opus-pure](https://crates.io/crates/opus-pure) | 0.2.5 | `platform/audio/decode/opus.rs` | Opus 해석. libopus 를 러스트로 옮긴 것으로 symphonia 코덱 등록표에 엔진 해석기로 넣습니다 (크롬은 libopus 로 풉니다). C 빌드가 없어 맥에서 윈도우 대상 검사가 됩니다 | BSD-3-Clause |
 | [resvg](https://crates.io/crates/resvg) | 0.50.0 | `core/image.rs`, `animation/timeline.rs` | SVG 그림을 usvg 로 읽고 tiny-skia 로 그립니다 | MIT / Apache-2.0 |
 | [rav1d](https://crates.io/crates/rav1d) | 1.1.0 | `core/avifimage.rs` | AVIF 의 AV1 해석(dav1d 를 러스트로 옮긴 것). asm 을 꺼 nasm 이나 C 컴파일러 없이 빌드합니다. HEIF 상자는 엔진이 읽습니다 | BSD-2-Clause |
 | [icu_segmenter](https://crates.io/crates/icu_segmenter), [icu_provider](https://crates.io/crates/icu_provider), [icu_collections](https://crates.io/crates/icu_collections) | 2.4.0 | `core/component/text.rs` | 낱말 나누기. 공백 없이 쓰는 한중일과 태국어 같은 동남아 글자를 사전으로 나누고, 한중일은 사전(cjdict)의 낱말 값으로 크롬 ICU4C 처럼 값의 합이 가장 작은 나누기를 고릅니다. 웹은 원본처럼 브라우저 Intl.Segmenter 를 씁니다 | Unicode-3.0 |
@@ -414,8 +456,8 @@ cargo run --release --example modelviewer
 
 | 크레이트 | 버전 | 쓰는 곳 | 하는 일 | 라이선스 |
 | --- | --- | --- | --- | --- |
-| [windows-sys](https://crates.io/crates/windows-sys) | 0.52.0 | `platform/desktop/windowsplatform.rs`, `platform/desktop/systemfont.rs` | 잠자기에서 깸(WM_POWERBROADCAST)을 받는 창 서브클래싱, 주된 손이 손가락인지, system-ui 의 메뉴 글꼴과 ClearType 켜짐, 대체 글꼴을 고를 사용자 기본 언어. 켜는 기능은 Win32_Foundation, Win32_Devices_Display, Win32_Globalization, Win32_Graphics_Gdi, Win32_System_Power, Win32_UI_Shell, Win32_UI_WindowsAndMessaging 뿐입니다 | MIT / Apache-2.0 |
-| [windows](https://crates.io/crates/windows), [windows-core](https://crates.io/crates/windows-core) | 0.62.2 | `platform/desktop/systemfont.rs` | DirectWrite 로 글꼴 이름의 파일을 찾고, 글꼴에 없는 글자의 대체 글꼴을 IDWriteFontFallback 으로 고릅니다 (cpal, gilrs 가 쓰는 같은 판) | MIT / Apache-2.0 |
+| [windows-sys](https://crates.io/crates/windows-sys) | 0.52.0 | `platform/desktop/windowsplatform.rs`, `platform/desktop/systemfont.rs`, `platform/desktop/windowsinputpane.rs`, `platform/desktop.rs` | 잠자기에서 깸(WM_POWERBROADCAST)을 받는 창 서브클래싱, 주된 손이 손가락인지, system-ui 의 메뉴 글꼴과 ClearType 켜짐, 대체 글꼴을 고를 사용자 기본 언어, 터치 키보드 스레드의 메시지 큐, 개발자 도구의 힙 사용량(HeapSummary). 켜는 기능은 Win32_Foundation, Win32_Devices_Display, Win32_Globalization, Win32_Graphics_Gdi, Win32_System_Memory, Win32_System_Power, Win32_System_Threading, Win32_UI_Shell, Win32_UI_WindowsAndMessaging 뿐입니다 | MIT / Apache-2.0 |
+| [windows](https://crates.io/crates/windows), [windows-core](https://crates.io/crates/windows-core) | 0.62.2 | `platform/desktop/systemfont.rs`, `platform/desktop/windowsinputpane.rs` | DirectWrite 로 글꼴 이름의 파일을 찾고, 글꼴에 없는 글자의 대체 글꼴을 IDWriteFontFallback 으로 고릅니다. 크롬 윈도우처럼 창에 묶은 WinRT InputPane 으로 터치 키보드를 띄우고 내리며 가린 영역을 받습니다 (cpal, gilrs 가 쓰는 같은 판) | MIT / Apache-2.0 |
 
 **macOS 만**
 
@@ -431,7 +473,7 @@ cargo run --release --example modelviewer
 | 크레이트 | 버전 | 쓰는 곳 | 하는 일 | 라이선스 |
 | --- | --- | --- | --- | --- |
 | [yeslogic-fontconfig-sys](https://crates.io/crates/yeslogic-fontconfig-sys) | 6.0.1 | `platform/desktop/systemfont.rs` | fontconfig 로 글꼴 이름과 대체 글꼴을 고릅니다. 라이브러리는 빌드할 때 잇지 않고 실행할 때 엽니다 (dlopen) | MIT |
-| [x11-dl](https://crates.io/crates/x11-dl), [wayland-client](https://crates.io/crates/wayland-client) | 2.21.0, 0.31.15 | `platform/desktop/linuxplatform.rs` | 주된 손이 손가락인지 화면 서버의 입력 장치로 읽습니다 (X11 XInput, 웨이랜드 wl_seat). glutin, winit 이 쓰는 같은 판입니다 | MIT |
+| [x11-dl](https://crates.io/crates/x11-dl), [wayland-client](https://crates.io/crates/wayland-client) | 2.21.0, 0.31.15 | `platform/desktop/linuxplatform.rs`, `platform/desktop/waylandframecallback.rs` | 주된 손이 손가락인지 화면 서버의 입력 장치로 읽습니다 (X11 XInput, 웨이랜드 wl_seat). 웨이랜드 창의 가려짐과 수직 동기는 winit 의 wl_display 에 손님으로 붙어 wl_surface.frame 콜백으로 봅니다 (libwayland 를 쓰는 system 백엔드). glutin, winit 이 쓰는 같은 판입니다 | MIT |
 
 **웹(wasm)만**
 
@@ -446,7 +488,7 @@ cargo run --release --example modelviewer
 - 버전 0.3.2. 버전 번호는 vanilla.js 0.3.2 에서 이어 받았습니다.
 - vanilla.js 의 원본 200 파일 가운데 182 파일을 옮겼습니다. (같은 이름 176, 다른 파일에 합친 것 6) 18 파일은 빈 파일, 죽은 코드, 러스트 표준이 맡는 것(컬렉션, 객체 모델 도우미)이라 일부러 옮기지 않았습니다. 목록과 까닭은 [ARCHITECTURE.md](ARCHITECTURE.md) 9장에 있습니다.
 - 두 엔진은 기능 차이를 두지 않습니다. 언어나 플랫폼 때문에 정말 맞출 수 없는 것과 러스트에 맞게 정한 꼴은 [ARCHITECTURE.md](ARCHITECTURE.md) 10장에 모았습니다.
-- 윈도우 11 데스크탑, macOS(애플 실리콘) 데스크탑, 크롬에서 돌려 확인했습니다. 윈도우와 리눅스의 시스템 글꼴 갈래(DirectWrite, fontconfig)와 리눅스 손가락 판정은 그 대상으로 컴파일해 본 것까지입니다. 리눅스와 실제 모바일 기기는 아직 돌려 보지 않았습니다.
+- 윈도우 11 데스크탑, macOS(애플 실리콘) 데스크탑, 크롬에서 돌려 확인했습니다. 윈도우와 리눅스의 시스템 글꼴 갈래(DirectWrite, fontconfig), 리눅스 손가락 판정, 윈도우 터치 키보드(InputPane), 웨이랜드 프레임 콜백의 가려짐과 수직 동기는 그 대상으로 컴파일해 본 것까지입니다. 리눅스와 실제 모바일 기기는 아직 돌려 보지 않았습니다.
 
 ## 코드 스타일
 

@@ -8,10 +8,12 @@ vanilla.js 를 러스트로 옮긴 엔진의 구성과 소유 구조를 정리�
 ## 1. 전체 배치
 
 ```
+Cargo.toml           워크스페이스 (엔진 크레이트와 macros/)
+macros/              반사 절차 매크로 #[reflect] (vanilla-engine-macros, 엔진이 vanilla::reflect 로 다시 내보낸다)
 src/lib.rs           공개 API 를 다시 내보낸다 (원본 import.js 자리)
 src/animation/       Timeline, Animator, Action (원본 experimental/animation, experimental/action)
 src/base/            엔진을 모르는 기반 타입 (수학, 색, 식별자, 플랫폼 정보, Format, FiniteStateMachine, ObjectPool, SeededRandom, Timer, Version, wait(Wait.seconds, nextFrame))
-src/core/            엔진 본체 (Engine, 매니저, Scene, 노드 트리, Graphic, Component, 애셋 꼴, 트윈, Animation, Frame)
+src/core/            엔진 본체 (Engine, 매니저, Scene, 노드 트리, Graphic, Component, reflection(반사 값과 트레이트), 애셋 꼴, 트윈, Animation, Frame)
                      async: task(스레드 하나짜리 실행기, EngineContext, SceneContext, TaskHandle, Promise)
                      입력: InputManager, InputActions, GamepadManager, PointerCursor, textinput(글 입력 줄)
                      소리: AudioManager, AudioPlayer, AudioBus, SoundSystem, SoundEffectPool
@@ -36,12 +38,14 @@ src/game/            GameSceneBase, GameScene 트레이트와 game_scene! (원�
 src/web/             WebSocketClient (ewebsock, 데스크탑과 웹), Pane (DOM 화면 분할 패널, 웹 전용)
 src/platform/        창, GL 컨텍스트, 입력 이벤트, 프레임 루프, 화면 넘기기, 애셋 바이트 읽기, 오디오 백엔드
   desktop.rs         winit 0.30 + glutin 0.32 (OpenGL 3.3 코어)
-  desktop/           renderscaler(렌더 배율 상한), textinput(IME, 클립보드), systemfont(운영체제 글꼴과 대체 글꼴), coretextglyph(맥 CoreText 글리프),
-                     gamepadhaptics(맥 패드 진동), windowsplatform(윈도우 잠자기 깸, 손가락 판정), linuxplatform(리눅스 손가락 판정)
+  desktop/           renderscaler(렌더 배율 상한), preserveddrawingbuffer(드로잉 버퍼 남기기), textinput(IME, 클립보드), systemfont(운영체제 글꼴과 대체 글꼴),
+                     coretextglyph(맥 CoreText 글리프), gamepadhaptics(맥 패드 진동), windowsplatform(윈도우 잠자기 깸, 손가락 판정),
+                     windowsinputpane(윈도우 터치 키보드), linuxplatform(리눅스 손가락 판정), waylandframecallback(웨이랜드 가려짐과 수직 동기)
   web.rs             캔버스 + WebGL2 + request_animation_frame + fetch
   web/               systemfont(브라우저 Canvas2D 로 글자 굽기와 재기), textinput(숨긴 DOM input, 클립보드)
   framelimiter.rs    웹 최대 FPS 의 프레임 세기
-  audio/             데스크탑 kira 0.12, 웹 WebAudio
+  audio/             데스크탑 cpal 위의 엔진 믹서(mixer.rs, 크롬 WebAudio 와 같은 노드 그래프와 셈), 웹 WebAudio
+    decode/          데스크탑 소리 해석 (크롬 decodeAudioData 와 같게: symphonia 0.6, Opus 는 opus-pure, 앞뒤 다듬기, SincResampler, 내리기)
 ```
 
 레이어 방향은 원본처럼 아래에서 위로만 의존한다: base ← core ← (resource, effect, misc). platform 은 core 밑에서 창과 GL 과 입력을 대 준다. 엔진 본체(core::engine::EngineRunner)는 플랫폼을 모른다.
@@ -108,7 +112,7 @@ EngineRunner (플랫폼이 들고 프레임마다 부른다)
 플랫폼: 최대 FPS 차례가 아닌 프레임은 건너뛴다 (웹은 원본처럼 처리한 프레임 수로 센다, platform/framelimiter.rs)
 매 프레임 EngineRunner.update_engine:
 1. 바이트가 온 글꼴을 글자 캐시에 등록
-2. graphic.apply_settings()          뷰포트, 프로젝션, 상태 리셋, 화면 비우기
+2. graphic.apply_settings()          뷰포트, 프로젝션, 상태 리셋, 화면 비우기 (preserve_drawing_buffer 면 원본처럼 스텐실만 비운다)
 3. time_manager.update(), input_manager.tick() (게임패드 폴링, 입력 동작 갱신 포함)
 4. 깨어난 작업 폴링 (task::poll_tasks, 작업마다 많아야 한 번. 씬 작업은 그 씬과 엔진을, 엔진 작업은 엔진을 with 안에서 빌린다)
    → 내리기 마무리 (unload 가 맡긴 작업이 끝난 씬을 목록에서 빼고 unload_scene_async 의 Promise 를 푼다, 작업이 다 끝난 살려 둔 씬은 destroy)
@@ -120,7 +124,9 @@ EngineRunner (플랫폼이 들고 프레임마다 부른다)
 6. 통계 출력(옵션: FPS, DrawCall, Vertex, Culled) → 마우스 커서(PointerCursor) → 1회성 입력 플래그 지우기
 7. graphic.end_frame() (묶음 내보내기) → 검증용 화면 저장(request_frame_capture, 데스크탑 VANILLA_CAPTURE_*, 웹 ?capture=) → 프레임 번호 증가 (첫 프레임 1)
 8. 씬 목록 바꾸기 (apply_pending_scenes: 내릴 씬 finalize, unload 와 내리기 마무리, 불러온 씬 create. create 와 unload 에서 맡긴 작업은 그 자리에서 첫 await 까지 돈다)
+플랫폼: 데스크탑은 preserve_drawing_buffer 면 update_engine 앞에 지난 프레임 그림을 되그리고 뒤에 떠 둔다(desktop/preserveddrawingbuffer.rs)
 플랫폼: 데스크탑은 렌더 배율 상한이나 캔버스 비 상한으로 줄여 그렸으면 창의 캔버스 자리로 늘이고(desktop/renderscaler.rs), 화면 넘기기 (데스크탑 swap_buffers, 웹은 콜백이 끝나면 브라우저가)
+플랫폼: 웨이랜드는 EGL 스왑 간격을 0 으로 두고, 넘기기 전에 지난 프레임 콜백을 1/20 초까지 기다린 뒤 새 콜백을 보낸다 (desktop/waylandframecallback.rs)
 ```
 
 씬 불러오기는 원본의 create → load(비동기) → set_loaded → initialize 를 create → (맡긴 애셋과 작업을 기다림) → initialize 로 옮겼다. 원본 async load 의 몸은 create 에서 spawn_scene_task 로 맡긴 불러오기 작업이고(맡기는 자리에서 첫 await 까지 돈다), track_task 로 씬에 맡기면 엔진이 그 작업이 끝나기를 기다린다. (애셋 손잡이를 track_asset 으로 맡기는 동기 꼴도 그대로 된다) create 바로 뒤에 루트를 원본 Scene.load 처럼 뷰 크기로 맞추고, 맡긴 것이 다 끝난 뒤에도 원본 SceneManager.loadScene 처럼 0.3초 더 로딩 화면을 보인다. 데스크탑은 애셋이 그 자리에서 읽혀서 작업이 없으면 create 뒤 0.3초에 initialize 가 불린다.
@@ -158,7 +164,9 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
 - AssetLoader 는 여러 애셋을 동시 수(기본 6)만큼 받고 진행률과 실패 목록을 센다. 다 받은 그림은 원본 img.onload 처럼 풀어 보고, 깨진 것은 실패로 친다. 푼 그림은 읽기 손잡이에 담겨 ImageAsset 이 다시 풀지 않는다.
 - `AudioAsset` 은 오디오 백엔드와 붙어 있어 `engine.load_audio_asset` 으로 읽고 `track_audio_asset` 으로 맡긴다.
 - 그림: 데스크탑은 png, jpeg, webp, gif(첫 장), bmp, ico 를 image 크레이트로, SVG 를 resvg 로, AVIF 를 엔진의 HEIF 상자 읽기와 rav1d 로 푼다. 웹은 원본처럼 브라우저(HTMLImageElement 의 decode)가 푼다. 그림의 형은 원본처럼 응답의 content-type 이다. (SVG 는 형으로, 래스터는 내용으로 가린다. 응답이 없는 데스크탑은 내용으로 고른다)
-- 소리: 데스크탑은 kira(symphonia)로 ogg, mp3, wav, flac, m4a(aac) 를 풀고, 웹은 브라우저 WebAudio 가 푼다.
+- 소리: 웹은 원본처럼 브라우저 decodeAudioData 가 풀고, 데스크탑은 같은 결과가 나오게 platform/audio/decode 가 푼다. 꼴은 내용으로 가리고, symphonia 0.6 으로 디먹스해 FLAC, MP3, PCM, Vorbis 는 크롬과 같은 symphonia 해석기, Opus 는 opus-pure(libopus 를 옮긴 것), AAC 는 symphonia 의 AAC 로 푼다. 크롬이 FFmpeg 디먹스 값으로 버리는 앞뒤(Opus pre-skip 과 webm CodecDelay, DiscardPadding, MP3 LAME 지연, Vorbis granule, m4a 편집 목록과 iTunSMPB)를 같게 버리고, 정수 표본을 크롬 식으로 실수로 바꾸고, 원본 DECODE_SAMPLE_RATE(44100)로 크로미엄 SincResampler 를 옮겨 바꾸고, WebAudio 스피커 규칙으로 1 채널이나 2 채널로 내린다. `tests/assets/audio` 의 21 파일이 크롬 158 과 길이, 채널, 표본까지 같다. (Opus, AAC 는 1e-7 안팎)
+- 소리 내기: 데스크탑은 cpal 로 기본 출력 장치를 열고 그 표본율(원본 AudioContext 의 하드웨어 표본율)로 엔진 믹서를 돌린다. 원본이 짓는 그래프(AudioBufferSourceNode → 플레이어 GainNode → [StereoPannerNode] → 버스 GainNode 또는 출력, 비프 오실레이터 → 출력)를 128 프레임 퀀텀으로 그리고, 소스(시작 위치, 선형 보간과 끝의 외삽, 루프, playbackRate 는 f32), StereoPanner(모노와 스테레오 식), GainNode, 모노를 양쪽에 올리는 섞기, 출력의 -1 ~ 1 자르기를 크로미엄 audio_buffer_source_handler.cc, stereo_panner.cc 와 같게 셈한다. `tests/assets/mixer` 의 그래프 다섯이 크롬 158 OfflineAudioContext 와 1e-6 안에서 같다.
+- "data:" 주소: 데스크탑 애셋 읽기(request_asset_bytes, load_image, load_audio_asset)와 타임라인이 base/dataurl.rs 로 푼다. 웹은 기준 주소를 붙이지 않고 브라우저 fetch 에 맡긴다.
 - 글꼴: ttf, otf, woff, woff2 를 읽는다. 데스크탑은 woff, woff2 를 wuff 로 풀고, 운영체제 글꼴은 글꼴 모음(TTC)에서 이름이나 굵기로 얼굴을 고른다. 웹은 원본처럼 글꼴 바이트를 document.fonts 의 FontFace 로 올린다.
 - 이미지는 GPU 에 올린 뒤 CPU 픽셀을 놓는다. 픽셀을 다시 읽을 그림은 `Image.set_pixels_retained(true)` 로 남긴다. (ShadowImage 는 받은 그림을 스스로 남기고, 이미 놓였으면 텍스처를 프레임버퍼에 붙여 되읽는다) GL 컨텍스트를 잃었다 되살리는 길은 아직 없다.
 - 기본 글꼴은 엔진에 넣지 않는다. 둘 다 시스템 글꼴이 기본이다.
@@ -189,9 +197,10 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
 - 옮기며 바꾼 쓰임새:
   - GameScene, UIScene 의 덮어쓰기는 GameScene, UIScene 트레이트와 game_scene!, ui_scene! 매크로다. 바탕이 resize, layout, post_draw 를 스스로 부른다. (game/gamescene.rs)
   - UINode 는 노드에 붙는 컴포넌트이고, 솔버 값을 노드의 자리와 content_size 로 옮긴다. (ui/uinode.rs, ui/uiscene.rs)
-  - UIDocument 는 원본의 리플렉션 직렬화 대신 종류 이름마다 짓기, 쓰기, 읽기 함수를 표에 등록하고, 원본이 반사로 저장하는 종류는 원본 반사 결과와 같은 키로 쓴다. DevTools 인스펙터의 컴포넌트 속성도 UIDocument 가 저장하는 키와 값으로 보인다. (ui/uidocument.rs, misc/devtools.rs)
+  - 원본의 실행 중 반사(uidocument.js 의 collectReflectedProperties, saveByReflection, loadByReflection, devtools.js 의 getComponentProperties)는 절차 매크로 #[reflect](macros/ 크레이트, 엔진이 vanilla::reflect 로 다시 내보낸다)가 컴파일 때 지은 코드로 한다. 저장소는 엔진과 매크로 두 크레이트의 워크스페이스다. 엔진 컴포넌트는 모두 붙였고, 원본 상위 클래스는 품은 필드를 #[reflect(base = 필드)] 로 잇는다. (core/reflection.rs)
+  - UIDocument 는 원본처럼 쓰기, 읽기 함수가 없는 종류를 반사로 쓰고 읽는다. 원본 노드 종류(WorldNode 하위 클래스, UIInputField, UIScrollBar 같은 것)는 러스트 판의 컴포넌트를 register_node_type 으로 등록해 원본 문서의 노드 type 과 생성자가 만든 컴포넌트, 자식 꼴 그대로 쓰고 읽는다. 원본 에디터가 더 등록하는 종류는 register_editor_types 한 줄이다. DevTools 인스펙터는 원본처럼 게터를 모두 불러 보인다. (ui/uidocument.rs, misc/devtools.rs)
   - web/Pane(DOM 화면 분할 패널)은 웹(wasm32) 빌드에만 있다. (web/pane.rs)
-  - SoundSystem 의 음악과 효과음 버스는 AudioBus 다. (원본에도 같은 꼴로 넣었다) 데스크탑은 kira 하위 트랙, 웹은 GainNode 이고, get_gain_node 는 두 플랫폼 모두 AudioGainNode(웹 GainNode, 데스크탑은 버스 트랙을 나눠 드는 Rc<RefCell<TrackHandle>>)를 돌려준다.
+  - SoundSystem 의 음악과 효과음 버스는 AudioBus 다. (원본에도 같은 꼴로 넣었다) 데스크탑은 엔진 믹서의 버스 노드, 웹은 GainNode 이고, get_gain_node 는 두 플랫폼 모두 AudioGainNode(웹 GainNode, 데스크탑은 버스 노드를 나눠 드는 Rc<MixerGainNode>)를 돌려준다.
   - Cooldown.use(원본 base/timer.js), FullscreenPass.use, ShaderProgram.use 는 use 가 러스트 예약어라 r#use 로 부른다. activate, use_program 은 같은 일을 하는 이름으로 남긴다.
   - 노드 객체를 돌려주는 getParent, getChildren, getSiblings 는 핸들을 돌려주는 get_parent_id, get_child_ids, get_sibling_ids 다.
   - 갈아 끼운 저장소(LocalStorage.get_backend, PersistedStore.get_storage_backend)와 콜백 게터(UIButton.get_click_event 같은 것)는 Rc<RefCell> 에 담아 돌려주고, 부르는 쪽이 빌려 쓴다. SpriteAnimator.findSprite(형제를 쥐기)와 SharedBakeCache 의 놓기(release)는 빌림 규칙과 Rc 참조 수로 갈음한다.
@@ -209,15 +218,26 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
 
 | 차이 | 까닭 |
 | --- | --- |
-| 런타임 리플렉션이 없다 (UIDocument 와 DevTools 는 종류마다 등록한 표) | 러스트는 실행 중에 필드와 메서드를 훑는 길이 없다 |
+| 반사(UIDocument 의 반사 저장과 읽기, DevTools 인스펙터의 게터 목록)는 #[vanilla::reflect] 를 붙인 타입만 된다. 엔진 컴포넌트는 모두 붙였고, 게임 컴포넌트는 impl 블록과 impl Component 블록에 붙인다 (원본은 모든 객체) | 러스트에는 실행 중에 필드와 메서드를 훑는 길이 없다. C++ 엔진(언리얼 UHT, Qt moc)처럼 컴파일 때 절차 매크로가 함수 목록과 부르는 코드를 짓는다 |
+| 반사로 부를 수 없는 함수가 있다. &mut self 게터와 인자를 둘 이상 받는 세터(UISnapScrollView::set_snap_current_index(트리, 칸) 같은 것)는 반사로 읽거나 넣지 않는다 (속성 목록과 저장에는 원본처럼 든다) | 실행 중에 인자를 만들어 넣을 수 없고, 반사는 &self 로 읽는다 |
 | 데스크탑에 DOM 이 없다 (Pane 은 웹만, 데스크탑 입력 필드는 winit IME, 저장소 입력은 패널 안 입력 창) | 데스크탑 창에는 HTML 문서가 없다 |
-| 데스크탑에서 뜻이 없는 브라우저 설정 (auto_resize_on_window_resize, preserve_drawing_buffer, set_no_cache, 오른쪽 클릭 메뉴 막기, set_prevented_keys) | 데스크탑에는 페이지, 브라우저 캐시, 브라우저 기본 동작이 없고 창은 늘 창 크기에 맞춘다 |
-| 데스크탑에 화면 키보드가 없다 (ignore_virtual_keyboard_resize 는 웹만) | 브라우저의 화면 키보드가 줄이는 visualViewport 크기 변화가 데스크탑 창에는 없다 |
-| 웨이랜드에서는 페이지 이벤트 Hidden 이 오지 않는다 | winit 0.30 이 웨이랜드에서 창 가림도 최소화도 알리지 않는다 (맥과 X11 은 가림, 윈도우는 최소화로 낸다) |
-| 데스크탑 세이프 에어리어 인셋은 0 이다 (강제값 set_safe_area_override 와 VANILLA_SAFE_AREA 는 된다) | CSS env(safe-area-inset-*) 가 없고, winit 0.30 은 세이프 에어리어를 iOS 에서만 읽는다 |
-| 데스크탑에는 브라우저 정보가 없다 (Platform 의 브라우저는 unknown, DevTools 메모리는 (N/A)) | 브라우저 위에서 돌지 않는다 |
+| 데스크탑에서 뜻이 없는 set_no_cache | 데스크탑에는 브라우저 캐시가 없다 (파일을 늘 그 자리에서 읽는다) |
+| 웨이랜드에서 xdg_toplevel 의 suspended 상태는 받지 못한다. 가려짐(페이지 이벤트 Hidden)은 크롬의 다른 갈래인 프레임 콜백 3 초 규칙으로만 본다 | xdg_toplevel 은 winit(sctk)이 리스너를 달아 쥐고 있고 libwayland 는 프록시 하나에 리스너 하나만 단다. winit 0.30.13 은 configure 의 suspended 를 받아 두기만 하고 알리지 않는다 (0.31 베타 4 와 본줄기도 같다). suspended 를 보내면서 프레임 콜백도 계속 보내는 컴포지터에서만 크롬과 달라진다 |
+| DevTools 메모리 칸은 자바스크립트 힙 대신 시스템 할당자의 힙이고, jsHeapSizeLimit 는 (N/A) 다 | 데스크탑에는 V8 힙이 없다. 시스템 할당자에는 V8 처럼 정한 힙 상한이 없다 |
 | 데스크탑의 글자 래스터 픽셀과 도형 가장자리 안티에일리어싱이 크롬과 다르다 (글자 너비는 크롬 measureText 와 맞췄고, 도형 안쪽 색은 같다) | 크롬의 Skia, CoreGraphics 래스터라이저 대신 fontdue, skrifa(맥의 색 이모지와 일부 글꼴은 CoreText)와 GL 이 칠한다 |
 | PersistedStore 와 LocalStorage 의 글은 짝 없는 서로게이트를 담지 못한다 | 러스트 String 은 UTF-8 이라 짝 없는 서로게이트를 담을 수 없다 (JS 글은 UTF-16 이라 담는다) |
+| 데스크탑 Opus 와 AAC 의 표본 끝자리가 크롬과 1e-7 안팎으로 다르다 (길이와 다듬기는 같다) | 크롬은 Opus 를 libopus(C), AAC 를 FFmpeg(LGPL)로 푼다. 데스크탑은 C 빌드 없이 맥에서 윈도우 대상 검사가 되도록 libopus 를 러스트로 옮긴 opus-pure 로, AAC 는 LGPL 코드를 옮기지 않고 symphonia 로 푼다 |
+| 데스크탑은 HE-AAC(SBR, PS)와 3 채널 이상 AAC 를 풀지 못한다 | symphonia 0.6.1 의 AAC 는 AAC-LC 2 채널까지만 받는다 ("aac too complex"). 크롬은 FFmpeg 로 푼다 |
+
+**크롬과 결과가 같아 차이가 아닌 것** (크로미엄 소스로 확인한 것)
+
+- 세이프 에어리어 인셋 0: 크롬 데스크탑도 env(safe-area-inset-*) 가 0 이다. 0 이 아닌 값은 WebContentsImpl::SetDisplayCutoutSafeArea 로만 들어오는데 이 함수는 `#if BUILDFLAG(IS_ANDROID)` 안에만 있고 부르는 곳도 안드로이드(web_contents_android.cc)뿐이다. 그 밖에는 블링크 기본값 "0px" 이다 (style_environment_variables.cc kSafeAreaInsetDefault). 노치가 있는 맥북의 전체 화면도 같다.
+- 화면 키보드: 크롬 윈도우는 손가락이나 펜으로 글자 입력칸에 포커스하면 InputPane 으로 터치 키보드를 띄우고, 가린 영역의 세로만큼 visualViewport 를 줄인다 (virtual_keyboard_controller_win.cc, on_screen_keyboard_display_manager_input_pane.cc). 데스크탑 윈도우도 같은 InputPane 으로 띄우고 같은 인셋을 쓴다 (desktop/windowsinputpane.rs). auto_resize_on_window_resize 면 캔버스가 줄고 ignore_virtual_keyboard_resize 가 원본처럼 그것을 막는다. 크롬 맥은 화면 키보드를 띄우지 않고 보이는 뷰포트가 창 크기 그대로다 (render_widget_host_view_base.cc). 크롬 리눅스 웨이랜드는 text-input 으로 입력판을 띄우기만 하고 영역을 받지 않아 뷰포트를 줄이지 않는다 (wayland_input_method_context.cc OnInputPanelState). 데스크탑도 winit 의 IME 켜기(text-input-v3 enable)로 같은 신호를 낸다.
+- 웨이랜드 가려짐: 크롬은 suspended 이거나 보낸 wl_surface.frame 콜백이 3 초 동안 오지 않으면 창을 가려짐으로 보고 페이지를 hidden 으로 만든다 (wayland_toplevel_window.cc MaybeUpdateOcclusionState, wayland_frame_manager.cc kFrameCallbackOcclusionTimeout, kWaylandWindowOcclusion 기본 켬). 데스크탑도 winit 창의 표면에 손님 연결로 프레임 콜백을 보내 같은 3 초 규칙으로 Hidden 과 Visible 을 낸다 (위 표의 suspended 만 빼고).
+- preserve_drawing_buffer: 원본은 엔진이 프레임마다 색을 비우지 않고(applySettings 는 스텐실만), 꺼져 있으면 브라우저가 드로잉 버퍼를 비우고, 켜져 있으면 지난 프레임 그림이 남아 화면을 다 덮지 않는 씬은 쌓아 그린다. 데스크탑은 꺼져 있으면 프레임 첫머리에 비우고, 켜져 있으면 비우지 않고 지난 프레임 그림을 되살린다 (뒷 버퍼는 넘긴 뒤 내용이 정해져 있지 않아서). 검증용 화면 저장은 원본처럼 프레임 끝, 넘기기 전에 읽는다. 다른 캔버스가 이 캔버스를 읽는 쓰임은 페이지의 일이라 데스크탑에는 없다.
+- auto_resize_on_window_resize: 데스크탑 창은 캔버스가 창을 가득 채운 페이지(캔버스 CSS 100%)와 같다고 본다. 켜면 원본처럼 visualViewport(창에서 화면 키보드가 가린 아래를 뺀 것)에 맞추고 캔버스 비 상한을 건다. 끄면 원본처럼 페이지가 정한 캔버스 크기(창 크기)를 쓰고 화면 키보드에 줄지 않으며 캔버스 비 상한도 걸지 않는다.
+- set_prevented_keys 와 오른쪽 클릭 메뉴 막기: 크롬에서 막는 것은 브라우저 기본 동작(Tab 의 포커스 옮기기, Space 와 화살표의 스크롤, F5 새로 고침, 브라우저 문맥 메뉴)이다. 데스크탑 창에는 그런 기본 동작이 없어 막은 것과 결과가 같다. (winit 은 윈도우에서 메뉴가 없는 창의 WM_SYSKEYUP 을 DefWindowProc 에 넘기지 않아 Alt, F10 이 시스템 메뉴로 들어가지도 않는다)
+- 브라우저 이름: 원본은 Platform 의 브라우저 이름을 개발자 도구와 통계 글에 보이기만 한다. 데스크탑 판은 크롬 위의 원본과 같은 결과를 내도록 맞췄으므로 브라우저는 Chrome 이고, 게임 코드의 브라우저 분기도 크롬 갈래로 간다.
 
 **일부러 정한 꼴**
 
@@ -227,6 +247,7 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
 | 노드는 NodeTree 안에 있고 NodeId 핸들로 가리킨다 | 부모와 자식을 Rc<RefCell> 로 서로 가리키면 순환 참조와 실행 중 빌림 검사가 생긴다. 지운 노드의 핸들은 None 이 된다 |
 | 노드 종류는 WorldNode 하나다 (원본 Node, ComponentNode, TransformNode, WorldNode 를 합침, 원본에서 노드인 위젯과 UINode 는 컴포넌트) | 러스트에 클래스 상속이 없어 노드 꼴을 하나로 두고 기능을 컴포넌트로 붙였다 |
 | 상속 대신 트레이트와 품기 (Scene + SceneBase, Component + ComponentBase, ShaderSprite 는 Sprite 를 품고 Deref) | 러스트에 클래스 상속이 없어 공통 상태는 구조체로, 덮어쓰기는 트레이트 함수로 둔다 |
+| 반사는 원본 상위 클래스 몫을 품은 필드로 잇고(#[reflect(base = 필드)]), 러스트 판이 impl Component 에서 다시 정의한 게터(isTickNeeded 같은 것)도 그 타입의 게터로 보인다. 읽을 때 꼴은 지금 값이 아니라 세터의 꼴로 가린다. 원본이 setComponentType 을 부르지 않아 ComponentType 이 "Component" 로 적히는 종류(Visual, UIListView)는 러스트 판의 종류 이름으로 적는다 | 상속이 없고 꼴을 컴파일 때 안다. 원본의 빠뜨린 setComponentType 은 옮기지 않았다 |
 | 수는 f32 다 (Format, LocalStorage 처럼 JS 수의 글을 그대로 내야 하는 곳은 f64) | GL 에 올리는 값과 같은 정밀도로 들고 메모리를 아낀다. 원본 Matrix4 는 f32 로 담고 f64 로 셈해 끝자리가 조금 다를 수 있다 |
 | GL 을 쓰는 객체는 컨텍스트를 들지 않고 함수마다 gl 을 받는다 (FullscreenPass, RenderTarget, 툰 렌더러 같은 것) | 컨텍스트는 Graphic 이 들고, 객체마다 나눠 쥐면 수명과 빌림이 엮인다 |
 | 트리를 받는 `*_in_tree` 함수를 따로 둔 곳 15 개 (UIScrollView::set_shows_vertical_scroll_bar_in_tree, UIWindow::close_in_tree, ParticleSystem::emit_in_tree 같은 것) | 씬 코드가 컴포넌트를 쥔 동안 같은 트리의 다른 노드를 함께 빌릴 수 없다 |
