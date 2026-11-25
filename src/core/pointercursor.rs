@@ -7,6 +7,7 @@
 //   데스크탑은 winit 의 커서 아이콘으로 바꿔 쓰고, 웹은 캔버스의 cursor 스타일에 쓴다.
 // - register_image_cursor 로 그림 커서를 더하면 웹은 그 그림(1 배와 2 배)을, 데스크탑은 함께 준 CSS 커서를 쓴다.
 // - 손가락 기기(pointer: coarse)에서는 건드리지 않는다. 바뀔 때만 플랫폼에 넘긴다.
+// - 원본 apply 는 전역 엔진의 캔버스(readEngineCanvas)에 바로 쓴다. 러스트 판은 전역 엔진이 없어 엔진이 take_cursor_change 로 바뀐 값을 받아 플랫폼에 넘긴다.
 //==============================================================================
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -92,6 +93,27 @@ impl PointerCursor {
 	pub fn set_cursor_names(&mut self, button_cursor_name: &str, default_cursor_name: &str) {
 		self.button_cursor_name = String::from(button_cursor_name);
 		self.default_cursor_name = String::from(default_cursor_name);
+	}
+
+	//==============================================================================
+	// 단추 위의 커서 반환.
+	//==============================================================================
+	pub fn get_button_cursor_name(&self) -> &str {
+		&self.button_cursor_name
+	}
+
+	//==============================================================================
+	// 기본의 커서 반환.
+	//==============================================================================
+	pub fn get_default_cursor_name(&self) -> &str {
+		&self.default_cursor_name
+	}
+
+	//==============================================================================
+	// 주된 손이 손가락인지. (원본 static isCoarsePointer, CSS 의 pointer: coarse, 데스크탑은 거짓)
+	//==============================================================================
+	pub fn is_coarse_pointer() -> bool {
+		crate::platform::is_coarse_pointer()
 	}
 
 	//==============================================================================

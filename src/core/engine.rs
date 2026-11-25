@@ -283,12 +283,19 @@ impl Engine {
 	// - 웹: asset_base_url + 상대 경로를 fetch 하고, 받으면 끝낸다. (그 사이 프레임은 계속 돈다)
 	//==============================================================================
 	pub fn request_asset_bytes(&self, relative_path: &str) -> AssetLoadHandle {
+		self.request_asset_bytes_with_cache(relative_path, false)
+	}
+
+	//==============================================================================
+	// 애셋 바이트 부탁. (is_no_cache 면 웹은 브라우저 캐시를 쓰지 않고 다시 확인한다, 원본 TextAsset.setNoCache)
+	//==============================================================================
+	pub fn request_asset_bytes_with_cache(&self, relative_path: &str, is_no_cache: bool) -> AssetLoadHandle {
 		let load_handle = AssetLoadHandle::create_pending(relative_path);
 		#[cfg(not(target_arch = "wasm32"))]
 		let asset_location = self.resolve_asset_path(relative_path).to_string_lossy().into_owned();
 		#[cfg(target_arch = "wasm32")]
 		let asset_location = format!("{}{}", self.engine_configuration.asset_base_url, relative_path);
-		platform::request_asset_bytes(asset_location, load_handle.clone());
+		platform::request_asset_bytes(asset_location, load_handle.clone(), is_no_cache);
 		load_handle
 	}
 
@@ -300,7 +307,7 @@ impl Engine {
 		let asset_location = self.resolve_asset_path(relative_path).to_string_lossy().into_owned();
 		#[cfg(target_arch = "wasm32")]
 		let asset_location = format!("{}{}", self.engine_configuration.asset_base_url, relative_path);
-		platform::request_asset_bytes(asset_location, load_handle.clone());
+		platform::request_asset_bytes(asset_location, load_handle.clone(), false);
 	}
 
 	//==============================================================================
@@ -587,7 +594,7 @@ impl EngineRunner {
 			let has_default_font = graphic.get_text_string_texture_cache().has_default_font();
 			if !has_default_font && !default_font_url.is_empty() {
 				let load_handle = AssetLoadHandle::create_pending(&default_font_url);
-				platform::request_asset_bytes(default_font_url, load_handle.clone());
+				platform::request_asset_bytes(default_font_url, load_handle.clone(), false);
 				self.engine.pending_default_font_handle = Some(load_handle);
 			}
 		}

@@ -2,7 +2,7 @@
 // 글 애셋. (원본 resource/textasset.js, resource/jsonasset.js)
 // - 원본 TextAsset 은 fetch 로 받은 글을 text 에, JsonAsset 은 JSON.parse 한 것을 data 에 둔다.
 // - 러스트 판은 바이트가 다 오면 처음 꺼낼 때 UTF-8 글로 풀고, JsonAsset 은 serde_json::Value 로 푼다.
-// - 원본의 setNoCache(웹 fetch 캐시 끄기)는 옮기지 않았다.
+// - set_no_cache: 참이면 웹 fetch 에 cache: "no-cache" 를 붙여 배포 뒤 옛 자료를 쓰지 않게 한다. (원본과 같다, 데스크탑 파일 읽기에는 캐시가 없다)
 //==============================================================================
 use crate::core::asset::{Asset, AssetBase, AssetType};
 use crate::core::engine::Engine;
@@ -13,6 +13,7 @@ use crate::core::engine::Engine;
 pub struct TextAsset {
 	asset_base: AssetBase,
 	text: Option<String>,
+	is_no_cache: bool,
 }
 
 impl TextAsset {
@@ -23,14 +24,29 @@ impl TextAsset {
 		TextAsset {
 			asset_base: AssetBase::new(AssetType::Text),
 			text: None,
+			is_no_cache: false,
 		}
+	}
+
+	//==============================================================================
+	// 캐시 무효화 로드 여부 설정. (참이면 웹 fetch 에 cache: "no-cache" 를 붙인다, 데이터 표 JSON 등)
+	//==============================================================================
+	pub fn set_no_cache(&mut self, is_no_cache: bool) {
+		self.is_no_cache = is_no_cache;
+	}
+
+	//==============================================================================
+	// 캐시 무효화 로드 여부 반환.
+	//==============================================================================
+	pub fn is_no_cache(&self) -> bool {
+		self.is_no_cache
 	}
 
 	//==============================================================================
 	// 읽기 요청. (원본 load)
 	//==============================================================================
 	pub fn load(&mut self, engine: &Engine, asset_path: &str) {
-		self.asset_base.request_load(engine, asset_path);
+		self.asset_base.request_load_with_cache(engine, asset_path, self.is_no_cache);
 	}
 
 	//==============================================================================
@@ -85,6 +101,7 @@ pub struct JsonAsset {
 	asset_base: AssetBase,
 	data: Option<serde_json::Value>,
 	is_parse_failed: bool,
+	is_no_cache: bool,
 }
 
 impl JsonAsset {
@@ -96,14 +113,29 @@ impl JsonAsset {
 			asset_base: AssetBase::new(AssetType::Json),
 			data: None,
 			is_parse_failed: false,
+			is_no_cache: false,
 		}
+	}
+
+	//==============================================================================
+	// 캐시 무효화 로드 여부 설정. (참이면 웹 fetch 에 cache: "no-cache" 를 붙인다, 데이터 표 JSON 등)
+	//==============================================================================
+	pub fn set_no_cache(&mut self, is_no_cache: bool) {
+		self.is_no_cache = is_no_cache;
+	}
+
+	//==============================================================================
+	// 캐시 무효화 로드 여부 반환.
+	//==============================================================================
+	pub fn is_no_cache(&self) -> bool {
+		self.is_no_cache
 	}
 
 	//==============================================================================
 	// 읽기 요청. (원본 load)
 	//==============================================================================
 	pub fn load(&mut self, engine: &Engine, asset_path: &str) {
-		self.asset_base.request_load(engine, asset_path);
+		self.asset_base.request_load_with_cache(engine, asset_path, self.is_no_cache);
 	}
 
 	//==============================================================================

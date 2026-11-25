@@ -196,10 +196,17 @@ impl AssetBase {
 	// 읽기 요청. (엔진에게 바이트를 부탁한다. 이미 요청했으면 다시 하지 않는다)
 	//==============================================================================
 	pub fn request_load(&mut self, engine: &Engine, asset_path: &str) {
+		self.request_load_with_cache(engine, asset_path, false);
+	}
+
+	//==============================================================================
+	// 읽기 요청. (is_no_cache 면 웹은 브라우저 캐시를 쓰지 않는다, 이미 요청했으면 다시 하지 않는다)
+	//==============================================================================
+	pub fn request_load_with_cache(&mut self, engine: &Engine, asset_path: &str, is_no_cache: bool) {
 		if self.load_handle.is_some() {
 			return;
 		}
-		let load_handle = engine.request_asset_bytes(asset_path);
+		let load_handle = engine.request_asset_bytes_with_cache(asset_path, is_no_cache);
 		self.load_handle = Some(load_handle);
 	}
 

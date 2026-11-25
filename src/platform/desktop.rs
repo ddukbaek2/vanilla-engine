@@ -213,9 +213,9 @@ pub fn set_title(platform_window: Option<&PlatformWindow>, title: &str) {
 }
 
 //==============================================================================
-// 애셋 바이트 읽기. (파일을 그 자리에서 읽고 끝낸다)
+// 애셋 바이트 읽기. (파일을 그 자리에서 읽고 끝낸다, 파일에는 캐시가 없어 is_no_cache 는 쓰지 않는다)
 //==============================================================================
-pub fn request_asset_bytes(asset_location: String, load_handle: AssetLoadHandle) {
+pub fn request_asset_bytes(asset_location: String, load_handle: AssetLoadHandle, _is_no_cache: bool) {
 	let result = std::fs::read(&asset_location).map_err(|error| format!("애셋 읽기 실패 ({}): {}", asset_location, error));
 	load_handle.finish(result);
 }

@@ -192,19 +192,28 @@ pub fn set_title(_platform_window: Option<&PlatformWindow>, title: &str) {
 //==============================================================================
 // 애셋 바이트 읽기. (fetch 로 받고, 받으면 끝낸다. 그 사이 프레임은 계속 돈다)
 //==============================================================================
-pub fn request_asset_bytes(asset_location: String, load_handle: AssetLoadHandle) {
+pub fn request_asset_bytes(asset_location: String, load_handle: AssetLoadHandle, is_no_cache: bool) {
 	wasm_bindgen_futures::spawn_local(async move {
-		let result = fetch_bytes(&asset_location).await;
+		let result = fetch_bytes(&asset_location, is_no_cache).await;
 		load_handle.finish(result);
 	});
 }
 
 //==============================================================================
-// 주소에서 바이트 받기.
+// 주소에서 바이트 받기. (is_no_cache 면 원본 TextAsset 처럼 fetch 에 cache: "no-cache" 를 붙인다)
 //==============================================================================
-async fn fetch_bytes(asset_location: &str) -> Result<Vec<u8>, String> {
+async fn fetch_bytes(asset_location: &str, is_no_cache: bool) -> Result<Vec<u8>, String> {
 	let window = web_sys::window().ok_or_else(|| String::from("window 없음"))?;
-	let response_promise = window.fetch_with_str(asset_location);
+	let response_promise = if is_no_cache {
+		let request_init = js_sys::Object::new();
+		js_sys::Reflect::set(&request_init, &JsValue::from_str("cache"), &JsValue::from_str("no-cache")).map_err(describe_js_error)?;
+		let fetch_function: js_sys::Function = js_sys::Reflect::get(&window, &JsValue::from_str("fetch")).map_err(describe_js_error)?.dyn_into().map_err(|_| String::from("fetch 없음"))?;
+		let promise_value = fetch_function.call2(&window, &JsValue::from_str(asset_location), &request_init).map_err(describe_js_error)?;
+		promise_value.dyn_into::<js_sys::Promise>().map_err(|_| String::from("fetch 가 프로미스를 돌려주지 않음"))?
+	}
+	else {
+		window.fetch_with_str(asset_location)
+	};
 	let response_value = wasm_bindgen_futures::JsFuture::from(response_promise).await.map_err(|error| format!("애셋 받기 실패 ({}): {}", asset_location, describe_js_error(error)))?;
 	let response: web_sys::Response = response_value.dyn_into().map_err(|_| format!("애셋 응답이 아님 ({})", asset_location))?;
 	if !response.ok() {
