@@ -127,6 +127,20 @@ fn get_audio_context_state_name(audio_context: &AudioContext) -> String {
 }
 
 //==============================================================================
+// 오디오 컨텍스트 시계. (초, audio_context.currentTime, 컨텍스트가 없으면 0)
+//==============================================================================
+pub fn get_audio_context_time(state: &AudioManagerState) -> f64 {
+	match &state.audio_context {
+		Some(audio_context) => {
+			audio_context.current_time()
+		}
+		None => {
+			0.0
+		}
+	}
+}
+
+//==============================================================================
 // 오디오 컨텍스트가 돌고 있는지.
 //==============================================================================
 pub fn is_audio_context_running(audio_context: &AudioContext) -> bool {

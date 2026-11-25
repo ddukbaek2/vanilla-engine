@@ -10,6 +10,7 @@
 //   재생할 때마다 버퍼를 복제해 그 트랙에 튼다. 트랙 핸들을 버리면 트랙과 그 위의 소리가 같이 없어진다.
 // - 음량(0 ~ 1)은 데시벨로 바꿔 건다. kira 는 -60dB 이하를 무음으로 친다.
 // - 원본 WebAudio 처럼 음량 바꾸기와 정지는 바로 한다. (트윈 0초)
+// - 컨텍스트 시계(get_audio_context_time)는 컨텍스트를 만든 뒤 흐른 시간이다.
 // - BeepPlayer 의 톤은 엔벨로프를 곱한 파형을 샘플로 그려 메인 트랙(원본 audio_context.destination 자리)에 튼다.
 //==============================================================================
 use crate::core::audiomanager::AudioManagerState;
@@ -25,6 +26,7 @@ use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
+use web_time::Instant;
 
 // 공유 오디오 컨텍스트. (원본 AudioContext 자리)
 pub type AudioContext = kira::AudioManager<DefaultBackend>;
@@ -48,6 +50,8 @@ pub struct AudioPlatformState {
 	is_audio_context_failed: bool,
 	// 컨텍스트를 멈춰 두었는지. (메인 트랙을 무음으로 둔 동안)
 	is_audio_context_suspended: bool,
+	// 컨텍스트를 만든 때. (컨텍스트 시계의 0 초)
+	audio_context_start_instant: Option<Instant>,
 }
 
 //==============================================================================
@@ -57,6 +61,7 @@ pub fn create_audio_platform_state() -> AudioPlatformState {
 	AudioPlatformState {
 		is_audio_context_failed: false,
 		is_audio_context_suspended: false,
+		audio_context_start_instant: None,
 	}
 }
 
@@ -76,6 +81,7 @@ pub fn create_audio_context(audio_platform_state: &mut AudioPlatformState) -> Op
 	};
 	match AudioContext::new(audio_manager_settings) {
 		Ok(audio_context) => {
+			audio_platform_state.audio_context_start_instant = Some(Instant::now());
 			Some(audio_context)
 		}
 		Err(error) => {
@@ -116,6 +122,21 @@ pub fn suspend_audio_context(state_cell: &Rc<RefCell<AudioManagerState>>) {
 //==============================================================================
 pub fn is_audio_context_running(_audio_context: &AudioContext) -> bool {
 	true
+}
+
+//==============================================================================
+// 오디오 컨텍스트 시계. (초, 원본 audio_context.currentTime 자리, 컨텍스트를 만든 뒤 흐른 시간, 없으면 0)
+// - kira 매니저는 멈춤이 없어 컨텍스트를 멈춰 둔 동안에도 소리와 함께 흐른다.
+//==============================================================================
+pub fn get_audio_context_time(state: &AudioManagerState) -> f64 {
+	match state.platform_state.audio_context_start_instant {
+		Some(audio_context_start_instant) => {
+			audio_context_start_instant.elapsed().as_secs_f64()
+		}
+		None => {
+			0.0
+		}
+	}
 }
 
 //==============================================================================
