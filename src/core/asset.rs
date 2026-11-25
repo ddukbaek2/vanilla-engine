@@ -1,16 +1,20 @@
 //==============================================================================
 // 애셋.
-// - 원본은 new ImageAsset() 뒤에 await asset.load(경로) 로 읽는다. 러스트는 씬 생성에서 기다릴 수 없어서
-//   "읽기 요청 → 나중에 다 읽힘" 꼴로 바꿨다. 요청하면 AssetLoadHandle 을 받고, 바이트가 다 오면 상태가 loaded 가 된다.
+// - 원본은 new ImageAsset() 뒤에 await asset.load(경로) 로 읽는다. 러스트 판은 load(engine, 경로) 가 읽기를 요청하고,
+//   엔진 작업(Engine::spawn_task, spawn_scene_task) 안에서 wait_for_load().await 로 다 읽히기를 기다린다. (원본 await 자리)
+//   요청하면 AssetLoadHandle 이 생기고, 바이트가 다 오면 상태가 loaded 가 된다. 손잡이도 그대로 await 할 수 있다. (IntoFuture)
 //   데스크탑은 요청하는 자리에서 파일을 바로 읽어 끝내고, 웹은 fetch 가 끝난 뒤 다음 프레임들 사이에 끝난다.
-// - 씬은 create 에서 애셋을 요청하고 scene_base.track_asset 으로 맡겨 두면, 맡긴 애셋이 다 읽힌 뒤 엔진이 initialize 를 부른다.
+// - await 없이 쓰는 꼴도 그대로 된다: 씬은 create 에서 애셋을 요청하고 scene_base.track_asset 으로 맡겨 두면, 맡긴 애셋이 다 읽힌 뒤 엔진이 initialize 를 부른다.
 //   (원본처럼 다 읽힌 뒤 0.3초 더 기다린다) 그동안은 원본처럼 draw_on_load 로 로딩 화면을 그린다.
 // - 중앙 리소스 매니저는 원본처럼 두지 않는다. 애셋은 씬이 멤버로 든다.
 //==============================================================================
 use crate::core::engine::Engine;
 use crate::core::image::Image;
 use std::cell::RefCell;
+use std::future::{Future, IntoFuture};
+use std::pin::Pin;
 use std::rc::Rc;
+use std::task::{Context, Poll};
 
 //==============================================================================
 // 애셋 타입. (원본 AssetType)
@@ -188,6 +192,80 @@ impl AssetLoadHandle {
 }
 
 //==============================================================================
+// 다 읽히기를 기다리는 퓨처. (읽은 바이트, 실패하면 까닭. 원본 await asset.load() 자리)
+// - 엔진 작업 안에서 await 한다. 아직이면 다음 프레임에 다시 본다.
+//==============================================================================
+#[derive(Clone, Debug)]
+pub struct AssetLoadFuture {
+	load_handle: Option<AssetLoadHandle>,
+}
+
+impl AssetLoadFuture {
+	//==============================================================================
+	// 생성. (손잡이가 없으면 요청 전이라 바로 실패로 끝난다)
+	//==============================================================================
+	pub fn new(load_handle: Option<AssetLoadHandle>) -> AssetLoadFuture {
+		AssetLoadFuture {
+			load_handle,
+		}
+	}
+}
+
+impl Future for AssetLoadFuture {
+	type Output = Result<Rc<Vec<u8>>, String>;
+
+	//==============================================================================
+	// 끝났는지 보기. (읽혔으면 바이트, 실패했으면 까닭, 아직이면 스스로 깨워 다음 프레임에 다시 본다)
+	//==============================================================================
+	fn poll(self: Pin<&mut AssetLoadFuture>, context: &mut Context<'_>) -> Poll<Result<Rc<Vec<u8>>, String>> {
+		let load_handle = match &self.load_handle {
+			Some(load_handle) => {
+				load_handle
+			}
+			None => {
+				return Poll::Ready(Err(String::from("Asset: 읽기를 요청하기 전에 기다렸습니다")));
+			}
+		};
+		match &*load_handle.load_state.borrow() {
+			AssetLoadState::Pending => {
+				context.waker().wake_by_ref();
+				Poll::Pending
+			}
+			AssetLoadState::Loaded(bytes) => {
+				Poll::Ready(Ok(bytes.clone()))
+			}
+			AssetLoadState::Failed(error_message) => {
+				Poll::Ready(Err(error_message.clone()))
+			}
+		}
+	}
+}
+
+impl IntoFuture for AssetLoadHandle {
+	type Output = Result<Rc<Vec<u8>>, String>;
+	type IntoFuture = AssetLoadFuture;
+
+	//==============================================================================
+	// 손잡이를 그대로 await 하기. (다 읽힐 때까지)
+	//==============================================================================
+	fn into_future(self) -> AssetLoadFuture {
+		AssetLoadFuture::new(Some(self))
+	}
+}
+
+impl IntoFuture for &AssetLoadHandle {
+	type Output = Result<Rc<Vec<u8>>, String>;
+	type IntoFuture = AssetLoadFuture;
+
+	//==============================================================================
+	// 빌린 손잡이를 await 하기. (복제해 기다린다)
+	//==============================================================================
+	fn into_future(self) -> AssetLoadFuture {
+		AssetLoadFuture::new(Some(self.clone()))
+	}
+}
+
+//==============================================================================
 // 애셋 공통 상태. (원본 Asset 의 asset_path, asset_type)
 //==============================================================================
 #[derive(Clone, Debug)]
@@ -325,5 +403,14 @@ pub trait Asset {
 	//==============================================================================
 	fn get_asset_path(&self) -> &str {
 		self.get_asset_base().get_asset_path()
+	}
+
+	//==============================================================================
+	// 다 읽히기를 기다리는 퓨처. (원본 await asset.load(경로) 의 await 자리, load 로 요청한 뒤 엔진 작업 안에서 await 한다)
+	// - 퓨처는 애셋을 빌리지 않아서 씬이 든 애셋에도 쓸 수 있다. 요청 전이면 바로 실패로 끝난다.
+	// - 끝나면 읽은 바이트, 실패하면 까닭이다. (원본은 거부된다) 그림 풀기와 JSON 풀기는 애셋의 get_image, get_data 가 한다.
+	//==============================================================================
+	fn wait_for_load(&self) -> AssetLoadFuture {
+		AssetLoadFuture::new(self.get_asset_base().get_load_handle().cloned())
 	}
 }

@@ -21,13 +21,18 @@
 //   pageshow 는 resume 과 같은 복구를 한다. (원본이 정의되지 않은 dispatchPageProcessRestored 를 불러 예외가 나던 것은 원본에서도 같게 고쳤다)
 //   데스크탑: 창 가림이 풀리면 on_page_visibility_restored, 앱이 suspended 뒤 resumed 되면 on_page_process_restored.
 //   (윈도우, 맥, 리눅스의 winit 은 suspended 를 보내지 않아 데스크탑에서는 on_page_process_restored 가 불리지 않는다)
+// - async/await: 엔진이 스레드 하나짜리 실행기(core/task.rs)를 품는다. spawn_task, spawn_scene_task 로 맡긴 퓨처를 프레임마다
+//   씬의 tick 앞에서 깨어난 것만 한 번씩 폴링한다. 원본에서 Promise 를 돌려주는 엔진 함수는 await 할 수 있는 꼴을 같이 둔다.
+//   (load_scene_async, unload_scene_async, unload_all_scenes_async, read_clipboard_text_async, request_frame_capture_async)
+//   씬을 내리면 그 씬의 작업도 버린다.
 //
 // 매 프레임 (update_engine):
 // 1. graphic.apply_settings()      # 뷰포트/프로젝션 갱신 + 상태 리셋 + 화면 비우기
 // 2. time_manager.update()         # time_delta 산출
 // 3. input_manager.tick()
-// 4. 씬마다 tick → pre_draw → draw → post_draw (→ draw_gizmos)
-// 5. 통계 출력(옵션) → 1회성 입력 플래그 클리어(글 입력 줄 마무리 포함) → 묶음 내보내기 → (검증용 화면 저장)
+// 4. 깨어난 작업 폴링 (poll_tasks)
+// 5. 씬마다 tick → pre_draw → draw → post_draw (→ draw_gizmos)
+// 6. 통계 출력(옵션) → 1회성 입력 플래그 클리어(글 입력 줄 마무리 포함) → 묶음 내보내기 → (검증용 화면 저장)
 // 화면 넘기기는 플랫폼이 update_engine 다음에 한다.
 //==============================================================================
 use crate::base::color::Color;
@@ -44,11 +49,13 @@ use crate::core::image::Image;
 use crate::core::inputmanager::InputManager;
 use crate::core::pointercursor::PointerCursor;
 use crate::core::scene::{Scene, SceneId};
+use crate::core::task::{self, EngineContext, Promise, PromiseResolver, SceneContext, TaskExecutor, TaskHandle};
 use crate::core::timemanager::TimeManager;
 use crate::core::viewmanager::{ViewManager, ViewScaleMode};
 use crate::platform::{self, PlatformWindow};
 use crate::resource::audioasset::AudioAsset;
 use std::cell::RefCell;
+use std::future::Future;
 use std::path::PathBuf;
 use std::rc::{Rc, Weak};
 use web_time::Instant;
@@ -229,6 +236,10 @@ pub struct Engine {
 	loaded_scene_id_list: Vec<SceneId>,
 	is_page_hidden: bool,
 	page_event_listener_list: RefCell<Vec<Weak<RefCell<dyn FnMut(PageEvent)>>>>,
+	// async 작업의 실행기. (EngineRunner 가 프레임마다 폴링한다)
+	pub(crate) task_executor: TaskExecutor,
+	// 씬을 내린 뒤에 풀 Promise. (unload_scene_async, unload_all_scenes_async)
+	pending_unload_resolver_list: Vec<PromiseResolver<()>>,
 }
 
 impl Engine {
@@ -262,6 +273,8 @@ impl Engine {
 			loaded_scene_id_list: Vec::new(),
 			is_page_hidden: false,
 			page_event_listener_list: RefCell::new(Vec::new()),
+			task_executor: TaskExecutor::new(),
+			pending_unload_resolver_list: Vec::new(),
 		}
 	}
 
@@ -298,6 +311,65 @@ impl Engine {
 	//==============================================================================
 	pub fn unload_all_scenes(&mut self) {
 		self.is_unload_all_scenes_requested = true;
+	}
+
+	//==============================================================================
+	// 씬 불러오기. (원본 await SceneManager.loadScene(scene), initialize 까지 끝나면 그 씬의 핸들로 풀리는 Promise 를 돌려준다)
+	// - 불러오기는 load_scene 과 같다. 다 불러오기 전에 그 씬을 내리면 풀리지 않는다.
+	//==============================================================================
+	pub fn load_scene_async(&mut self, mut scene: Box<dyn Scene>) -> Promise<SceneId> {
+		let (load_promise, load_resolver) = Promise::create();
+		scene.get_scene_base_mut().add_load_resolver(load_resolver);
+		self.load_scene(scene);
+		load_promise
+	}
+
+	//==============================================================================
+	// 씬 하나 내리기. (원본 await SceneManager.unloadScene(scene), 이번 프레임 끝에 내린 뒤 풀리는 Promise 를 돌려준다. 없는 핸들이어도 풀린다)
+	//==============================================================================
+	pub fn unload_scene_async(&mut self, scene: impl Into<SceneId>) -> Promise<()> {
+		let (unload_promise, unload_resolver) = Promise::create();
+		self.unload_scene(scene);
+		self.pending_unload_resolver_list.push(unload_resolver);
+		unload_promise
+	}
+
+	//==============================================================================
+	// 모든 씬 내리기. (원본 await SceneManager.unloadAllScenes(), 이번 프레임 끝에 다 내린 뒤 풀리는 Promise 를 돌려준다)
+	// - 그 씬들의 작업은 버려지므로, 내린 뒤를 기다리는 일은 엔진 작업(spawn_task)에서 await 한다.
+	//==============================================================================
+	pub fn unload_all_scenes_async(&mut self) -> Promise<()> {
+		let (unload_promise, unload_resolver) = Promise::create();
+		self.unload_all_scenes();
+		self.pending_unload_resolver_list.push(unload_resolver);
+		unload_promise
+	}
+
+	//==============================================================================
+	// 엔진 작업 맡기기. (씬과 따로 사는 async 작업, 작업 함수가 받은 EngineContext 의 with 안에서 엔진을 빌린다)
+	// - 다음 프레임의 폴링 차례에 처음 돈다. 돌려준 손잡이로 끝났는지 묻거나 await 한다.
+	//==============================================================================
+	pub fn spawn_task<F, TaskFuture>(&self, task_function: F) -> TaskHandle
+	where
+		F: FnOnce(EngineContext) -> TaskFuture,
+		TaskFuture: Future<Output = ()> + 'static,
+	{
+		task::spawn_engine_task(&self.task_executor, task_function)
+	}
+
+	//==============================================================================
+	// 씬 작업 맡기기. (그 씬과 수명을 같이하는 async 작업, 작업 함수가 받은 SceneContext 의 with 안에서 그 씬(S 타입)과 엔진을 빌린다)
+	// - 원본 async 함수 안에서 this 를 쓰는 자리다. 씬을 내리면 작업도 버린다. load_scene 전의 씬이면 첫 폴링 차례에 버린다.
+	// - 다음 프레임의 폴링 차례에 처음 돈다. 불러오기 작업이면 씬의 track_task 로 맡겨 끝날 때까지 initialize 를 미룬다.
+	//==============================================================================
+	pub fn spawn_scene_task<S, F, TaskFuture>(&self, scene: &S, task_function: F) -> TaskHandle
+	where
+		S: Scene + 'static,
+		F: FnOnce(SceneContext<S>) -> TaskFuture,
+		TaskFuture: Future<Output = ()> + 'static,
+	{
+		let scene_id = SceneId::from(scene.get_scene_base());
+		task::spawn_scene_task(&self.task_executor, scene_id, task_function)
 	}
 
 	//==============================================================================
@@ -524,6 +596,18 @@ impl Engine {
 		platform::read_clipboard_text_with_callback(Box::new(callback));
 	}
 
+	//==============================================================================
+	// 시스템 클립보드 글 읽기. (원본 await engine.readClipboardText(), 클립보드가 없거나 거부되면 원본 null 자리의 None)
+	// - 웹은 navigator.clipboard.readText 가 끝난 뒤, 데스크탑은 그 자리에서 읽어 풀린다.
+	//==============================================================================
+	pub fn read_clipboard_text_async(&self) -> Promise<Option<String>> {
+		let (clipboard_promise, clipboard_resolver) = Promise::create();
+		platform::read_optional_clipboard_text_with_callback(Box::new(move |clipboard_text: Option<String>| {
+			clipboard_resolver.resolve(clipboard_text);
+		}));
+		clipboard_promise
+	}
+
 	pub fn get_engine_configuration(&self) -> &EngineConfiguration {
 		&self.engine_configuration
 	}
@@ -675,6 +759,17 @@ impl Engine {
 	pub fn request_frame_capture(&mut self, frame_number: u64, capture_handler: FrameCaptureHandler) {
 		let target_frame_number = frame_number.max(self.frame_number);
 		self.frame_capture_handler_map.entry(target_frame_number).or_default().push(capture_handler);
+	}
+
+	//==============================================================================
+	// 검증용 화면 저장 요청. (원본 await engine.requestFrameCapture(번호), 그 프레임을 다 그린 화면의 PNG 바이트로 풀리는 Promise. 원본은 PNG data URL)
+	//==============================================================================
+	pub fn request_frame_capture_async(&mut self, frame_number: u64) -> Promise<Vec<u8>> {
+		let (capture_promise, capture_resolver) = Promise::create();
+		self.request_frame_capture(frame_number, Box::new(move |png_bytes: &[u8]| {
+			capture_resolver.resolve(png_bytes.to_vec());
+		}));
+		capture_promise
 	}
 }
 
@@ -1056,6 +1151,14 @@ impl EngineRunner {
 	}
 
 	//==============================================================================
+	// 깨어난 작업 폴링. (그래픽 없이, 시험에서 프레임 하나를 흉내 낼 때)
+	//==============================================================================
+	#[cfg(test)]
+	pub(crate) fn poll_tasks(&mut self) {
+		task::poll_tasks(&mut self.engine, &mut self.scene_list, None);
+	}
+
+	//==============================================================================
 	// 미뤄 둔 씬 내리기 / 불러오기.
 	//==============================================================================
 	pub(crate) fn apply_pending_scenes(&mut self) {
@@ -1078,6 +1181,9 @@ impl EngineRunner {
 					unload_scene_instance(&mut self.engine, scene.as_mut());
 				}
 			}
+		}
+		for unload_resolver in std::mem::take(&mut self.engine.pending_unload_resolver_list) {
+			unload_resolver.resolve(());
 		}
 		while !self.engine.pending_scene_list.is_empty() {
 			let pending_scene_list = std::mem::take(&mut self.engine.pending_scene_list);
@@ -1120,6 +1226,9 @@ impl EngineRunner {
 
 		// 입력 처리.
 		self.engine.input_manager.tick(time_delta);
+
+		// 깨어난 작업 폴링. (await 다음 줄이 이번 프레임의 시간과 입력을 보고, 바꾼 것이 이번 프레임에 그려진다)
+		task::poll_tasks(&mut self.engine, &mut self.scene_list, Some(&mut *graphic));
 
 		// 그리기 통계. (지난 프레임 값을 넘겨 두고 이번 프레임을 새로 센다)
 		graphic.begin_frame_statistics();
@@ -1236,12 +1345,15 @@ fn encode_png(pixels: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String>
 }
 
 //==============================================================================
-// 씬 하나 내리기. (원본 SceneManager.unloadScene 의 finalize, unload 다음 러스트 판의 destroy)
+// 씬 하나 내리기. (원본 SceneManager.unloadScene 의 finalize, unload 다음 러스트 판의 destroy, 그리고 그 씬의 작업을 버린다)
 //==============================================================================
 fn unload_scene_instance(engine: &mut Engine, scene: &mut dyn Scene) {
 	scene.finalize(engine);
 	scene.unload(engine);
 	scene.destroy(engine);
+	if let Some(scene_id) = scene.get_scene_base().get_scene_id() {
+		engine.task_executor.cancel_scene_tasks(scene_id);
+	}
 }
 
 //==============================================================================
@@ -1285,7 +1397,7 @@ fn apply_scene_root_to_view_size(engine: &Engine, scene: &mut dyn Scene) {
 }
 
 //==============================================================================
-// 씬이 맡긴 애셋이 다 읽혔으면 initialize 하고 불러온 것으로 친다. (원본 load 다음 0.3초 더 기다리고 set_loaded, initialize)
+// 씬이 맡긴 애셋과 작업이 다 끝났으면 initialize 하고 불러온 것으로 친다. (원본 load 다음 0.3초 더 기다리고 set_loaded, initialize, 그리고 loadScene 의 Promise 를 푼다)
 // - current_time 은 엔진 시작 뒤 지금까지의 실제 초다. (첫 프레임 전에도 맞는 시각이어야 해서 시간 관리자의 지난 값을 쓰지 않는다)
 //==============================================================================
 fn initialize_scene_if_ready(engine: &mut Engine, scene: &mut dyn Scene, current_time: f64) {
@@ -1301,6 +1413,7 @@ fn initialize_scene_if_ready(engine: &mut Engine, scene: &mut dyn Scene, current
 	scene.get_scene_base_mut().set_loaded(true);
 	let canvas_native_size = engine.view_manager.get_canvas_native_size();
 	scene.resize(engine, canvas_native_size);
+	scene.get_scene_base_mut().resolve_load_resolvers();
 }
 
 #[cfg(test)]
@@ -1566,5 +1679,149 @@ mod tests {
 		assert_eq!(parse_capture_frame_numbers(""), vec![120]);
 		let png_bytes = encode_png(&[255, 0, 0, 255], 1, 1).expect("png");
 		assert_eq!(&png_bytes[1..4], b"PNG");
+	}
+
+	//==============================================================================
+	// 시험용 씬. (원본 async load 처럼 create 에서 불러오기 작업을 맡기고, initialize 에서 오래 도는 작업을 맡긴다)
+	//==============================================================================
+	struct AsyncLoadScene {
+		scene_base: SceneBase,
+		load_step_count: u32,
+		initialize_count: u32,
+		long_task_handle: Rc<RefCell<Option<TaskHandle>>>,
+		never_promise: Option<Promise<()>>,
+	}
+
+	impl Scene for AsyncLoadScene {
+		fn get_scene_base(&self) -> &SceneBase {
+			&self.scene_base
+		}
+
+		fn get_scene_base_mut(&mut self) -> &mut SceneBase {
+			&mut self.scene_base
+		}
+
+		fn create(&mut self, engine: &mut Engine) {
+			let load_task_handle = engine.spawn_scene_task(self, |mut scene_context| async move {
+				let load_handle = AssetLoadHandle::create_pending("stage.json");
+				let task_load_handle = load_handle.clone();
+				scene_context.with(move |scene: &mut AsyncLoadScene, _engine| {
+					scene.load_step_count += 1;
+					task_load_handle.finish(Ok(b"{}".to_vec()));
+				});
+				load_handle.await.expect("읽힘");
+				crate::base::wait::next_frame().await;
+				scene_context.with(|scene, _engine| {
+					scene.load_step_count += 1;
+				});
+			});
+			self.scene_base.track_task(&load_task_handle);
+		}
+
+		fn initialize(&mut self, engine: &mut Engine) {
+			self.initialize_count += 1;
+			let never_promise = self.never_promise.take().expect("기다릴 Promise");
+			let long_task_handle = engine.spawn_scene_task(self, move |_scene_context| async move {
+				never_promise.await;
+			});
+			*self.long_task_handle.borrow_mut() = Some(long_task_handle);
+		}
+	}
+
+	//==============================================================================
+	// 씬의 async 불러오기: 맡긴 작업이 끝나고 0.3초 뒤에 initialize, 씬을 내리면 그 씬의 작업을 버린다.
+	//==============================================================================
+	#[test]
+	fn scene_load_task_delays_initialize_and_unload_drops_tasks() {
+		let long_task_handle: Rc<RefCell<Option<TaskHandle>>> = Rc::new(RefCell::new(None));
+		let (never_promise, _never_resolver) = Promise::create();
+		let scene = AsyncLoadScene {
+			scene_base: SceneBase::new(),
+			load_step_count: 0,
+			initialize_count: 0,
+			long_task_handle: long_task_handle.clone(),
+			never_promise: Some(never_promise),
+		};
+		let mut engine_runner = EngineRunner::new(Engine::new(EngineConfiguration::new()), Box::new(scene));
+		engine_runner.apply_pending_scenes();
+		assert!(!engine_runner.scene_list[0].get_scene_base().is_loaded());
+		let read_scene = |engine_runner: &mut EngineRunner| -> (u32, u32) {
+			let scene = engine_runner.scene_list[0].as_scene_any_mut().downcast_mut::<AsyncLoadScene>().expect("시험용 씬");
+			(scene.load_step_count, scene.initialize_count)
+		};
+		engine_runner.poll_tasks();
+		assert_eq!(read_scene(&mut engine_runner), (1, 0));
+		initialize_scene_if_ready(&mut engine_runner.engine, engine_runner.scene_list[0].as_mut(), 10.0);
+		assert!(!engine_runner.scene_list[0].get_scene_base().is_loaded());
+		engine_runner.poll_tasks();
+		assert_eq!(read_scene(&mut engine_runner), (2, 0));
+		initialize_scene_if_ready(&mut engine_runner.engine, engine_runner.scene_list[0].as_mut(), 10.0);
+		initialize_scene_if_ready(&mut engine_runner.engine, engine_runner.scene_list[0].as_mut(), 10.2);
+		assert!(!engine_runner.scene_list[0].get_scene_base().is_loaded());
+		initialize_scene_if_ready(&mut engine_runner.engine, engine_runner.scene_list[0].as_mut(), 10.31);
+		assert!(engine_runner.scene_list[0].get_scene_base().is_loaded());
+		assert_eq!(read_scene(&mut engine_runner), (2, 1));
+
+		engine_runner.poll_tasks();
+		let long_task_handle = long_task_handle.borrow().clone().expect("오래 도는 작업");
+		assert!(!long_task_handle.is_finished());
+		assert_eq!(engine_runner.engine.task_executor.get_task_count(), 1);
+		engine_runner.engine.unload_all_scenes();
+		engine_runner.apply_pending_scenes();
+		assert!(long_task_handle.is_finished());
+		assert_eq!(engine_runner.engine.task_executor.get_task_count(), 0);
+	}
+
+	//==============================================================================
+	// 원본 await loadScene, await unloadScene: 엔진 작업에서 initialize 까지 끝나면 핸들로, 내린 뒤에 풀린다.
+	//==============================================================================
+	#[test]
+	fn load_scene_async_and_unload_scene_async_resolve() {
+		let counts = [Rc::new(Cell::new(0)), Rc::new(Cell::new(0)), Rc::new(Cell::new(0))];
+		let mut engine_runner = EngineRunner::new(Engine::new(EngineConfiguration::new()), CountingScene::create_boxed(&counts[0], &counts[1], &counts[2]));
+		engine_runner.apply_pending_scenes();
+		let second_counts = [Rc::new(Cell::new(0)), Rc::new(Cell::new(0)), Rc::new(Cell::new(0))];
+		let second_scene = CountingScene::create_boxed(&second_counts[0], &second_counts[1], &second_counts[2]);
+		let record_list: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+		let task_record_list = record_list.clone();
+		let task_handle = engine_runner.engine.spawn_task(move |mut engine_context| async move {
+			let load_promise = engine_context.with(|engine| engine.load_scene_async(second_scene));
+			let scene_id = load_promise.await;
+			task_record_list.borrow_mut().push(String::from("loaded"));
+			let unload_promise = engine_context.with(|engine| engine.unload_scene_async(scene_id));
+			unload_promise.await;
+			let loaded_count = engine_context.with(|engine| engine.get_all_loaded_scenes().len());
+			task_record_list.borrow_mut().push(format!("unloaded {}", loaded_count));
+		});
+		engine_runner.poll_tasks();
+		engine_runner.apply_pending_scenes();
+		assert_eq!(second_counts[0].get(), 1);
+		initialize_scene_if_ready(&mut engine_runner.engine, engine_runner.scene_list[1].as_mut(), 0.0);
+		engine_runner.poll_tasks();
+		assert!(record_list.borrow().is_empty());
+		initialize_scene_if_ready(&mut engine_runner.engine, engine_runner.scene_list[1].as_mut(), 0.31);
+		engine_runner.poll_tasks();
+		assert_eq!(*record_list.borrow(), vec![String::from("loaded")]);
+		engine_runner.apply_pending_scenes();
+		assert_eq!(second_counts[1].get(), 1);
+		engine_runner.poll_tasks();
+		assert_eq!(*record_list.borrow(), vec![String::from("loaded"), String::from("unloaded 1")]);
+		assert!(task_handle.is_finished());
+	}
+
+	//==============================================================================
+	// 원본 await requestFrameCapture(번호): 그 프레임의 PNG 바이트로 풀린다.
+	//==============================================================================
+	#[test]
+	fn request_frame_capture_async_resolves_with_png_bytes() {
+		let mut engine_runner = EngineRunner::new(Engine::new(EngineConfiguration::new()), Box::new(RecordingScene { scene_base: SceneBase::new(), record_list: Rc::new(RefCell::new(Vec::new())) }));
+		let mut capture_promise = engine_runner.engine.request_frame_capture_async(1);
+		let handler_list = engine_runner.engine.frame_capture_handler_map.remove(&1).expect("요청");
+		for capture_handler in handler_list {
+			capture_handler(&[1, 2, 3]);
+		}
+		let waker = std::task::Waker::noop();
+		let mut context = std::task::Context::from_waker(waker);
+		assert_eq!(std::pin::Pin::new(&mut capture_promise).poll(&mut context), std::task::Poll::Ready(vec![1, 2, 3]));
 	}
 }

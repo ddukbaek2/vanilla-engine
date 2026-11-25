@@ -7,6 +7,7 @@
 //   - 원본은 async 다. (압축 배열을 브라우저 DecompressionStream 으로 풀어서다) 러스트 판은 flate2 로 그 자리에서 끝난다.
 //     원본 loadFromUrl(url) 의 Promise 는 ImageAsset 처럼 받기 손잡이(FbxLoadHandle)다. load_from_url(엔진, 애셋 경로)이 엔진의 애셋 받기
 //     (데스크탑은 애셋 폴더 후보에서 읽고, 웹은 asset_base_url 에서 fetch)로 바이트를 부탁하고, 다 받으면 get_scene_data 가 파싱한 결과를 돌려준다.
+//     손잡이는 그대로 await 할 수 있다. (엔진 작업 안에서 FbxLoader::load_from_url(engine, 경로).await 가 원본 await FbxLoader.loadFromUrl(url) 처럼 파싱 결과를 낸다)
 //   - 64비트 정수: 원본은 오브젝트 id 처럼 하나로 든 값이 2^53 을 넘으면 BigInt 로 든다. 러스트 판은 i64 다. 배열(키 시간)은 원본이 Number 다.
 //   - 원본은 순서 있는 Map 을 쓴다. 러스트 판은 넣은 순서를 지키는 FbxObjectMap 으로 같은 순회 순서를 낸다.
 //   - 원본에서 만들고 쓰지 않는 objectById 와 getDataView / getFileBytes / getTextDecoder 는 옮기지 않았다.
@@ -15,8 +16,11 @@ use crate::core::asset::AssetLoadHandle;
 use crate::core::engine::Engine;
 use crate::graphics3d::skinnedmodel::AnimationPath;
 use std::collections::{HashMap, HashSet};
+use std::future::{Future, IntoFuture};
 use std::io::Read;
+use std::pin::Pin;
 use std::rc::Rc;
+use std::task::{Context, Poll};
 
 //==============================================================================
 // 전역 상수 목록.
@@ -692,6 +696,47 @@ impl FbxLoadHandle {
 			}
 		};
 		Some(FbxLoader::new().parse(&file_bytes))
+	}
+}
+
+//==============================================================================
+// FBX 받기를 기다리는 퓨처. (FbxLoadHandle 을 await 하면 된다. 다 받으면 파싱한 결과, 원본 loadFromUrl 의 Promise 가 풀린 값)
+//==============================================================================
+#[derive(Clone, Debug)]
+pub struct FbxLoadFuture {
+	fbx_load_handle: FbxLoadHandle,
+}
+
+impl Future for FbxLoadFuture {
+	type Output = Result<FbxSceneData, String>;
+
+	//==============================================================================
+	// 끝났는지 보기. (아직이면 다음 프레임에 다시 본다)
+	//==============================================================================
+	fn poll(self: Pin<&mut FbxLoadFuture>, context: &mut Context<'_>) -> Poll<Result<FbxSceneData, String>> {
+		match self.fbx_load_handle.get_scene_data() {
+			Some(scene_data_result) => {
+				Poll::Ready(scene_data_result)
+			}
+			None => {
+				context.waker().wake_by_ref();
+				Poll::Pending
+			}
+		}
+	}
+}
+
+impl IntoFuture for FbxLoadHandle {
+	type Output = Result<FbxSceneData, String>;
+	type IntoFuture = FbxLoadFuture;
+
+	//==============================================================================
+	// 손잡이를 그대로 await 하기.
+	//==============================================================================
+	fn into_future(self) -> FbxLoadFuture {
+		FbxLoadFuture {
+			fbx_load_handle: self,
+		}
 	}
 }
 

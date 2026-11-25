@@ -48,6 +48,11 @@ pub use web::exit_application;
 pub use desktop::read_clipboard_text_with_callback;
 #[cfg(target_arch = "wasm32")]
 pub use web::read_clipboard_text_with_callback;
+// 시스템 클립보드 글을 읽어 콜백에 넘기기. (못 읽거나 거부되면 None, Engine::read_clipboard_text_async)
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use desktop::read_optional_clipboard_text_with_callback;
+#[cfg(target_arch = "wasm32")]
+pub(crate) use web::read_optional_clipboard_text_with_callback;
 // 웹 클립보드를 비동기로 읽어 그 입력 필드에 붙일 글로 넣기. (UIInputField.paste)
 #[cfg(target_arch = "wasm32")]
 pub(crate) use web::request_clipboard_paste;

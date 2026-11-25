@@ -30,7 +30,8 @@
 //   - 원본의 스프라이트 격자 표와 사운드 표(WeakMap)는 노드에 붙는 작은 컴포넌트 TimelineSpriteFrameGrid, TimelineSound 로 바꿨다.
 //   - 원본 Timeline.setAudioManager(정적)와 사운드 노드의 비동기 읽기는 load_sounds(node_tree, engine) 로 바꿨다.
 //     무대를 만든 뒤 한 번 부르면 사운드 노드마다 오디오 애셋을 읽고 플레이어를 만든다. (돌려준 애셋을 씬이 track_audio_asset 으로 맡겨도 된다)
-//   - loadFromUrl(비동기 fetch) 대신 JsonAsset 으로 받은 문서를 create_from_json_asset / load_from_text 로 넘긴다.
+//   - loadFromUrl(비동기 fetch)은 load_from_url(엔진, 애셋 경로)이다. 엔진의 애셋 받기로 바이트를 부탁하고, 엔진 작업 안에서 await 하면 타임라인이 나온다.
+//     (데스크탑은 애셋 폴더 후보, 웹은 asset_base_url 에서 fetch) await 없이는 JsonAsset 으로 받은 문서를 create_from_json_asset / load_from_text 로 넘긴다.
 //   - "data:" 주소 이미지: 웹은 원본처럼 브라우저가 풀어(fetch 와 HTMLImageElement, platform/web.rs) 다 풀리면 스프라이트에 걸고 서술의 칸을 다시 고른다.
 //     (원본 image.onload 의 applySpriteFrame, 그동안 TimelineSpriteFrameGrid 가 기다리며 갱신한다)
 //     데스크탑은 그 자리에서 푼다. 브라우저처럼 본문의 퍼센트 꼴(%XX)을 먼저 풀고, ;base64 면 base64 를 푼다. 주소의 형이 image/svg+xml 이면 resvg 로 그린 SVG,
@@ -63,6 +64,7 @@ use crate::resource::textasset::JsonAsset;
 use serde_json::{json, Value};
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::future::Future;
 use std::rc::Rc;
 use std::sync::LazyLock;
 
@@ -1540,6 +1542,18 @@ impl Timeline {
 	pub fn load_from_text(text: &str) -> Result<Timeline, String> {
 		let description: Value = serde_json::from_str(text).map_err(|error| format!("Timeline: JSON 을 읽지 못했습니다. ({})", error))?;
 		Ok(Timeline::new(Some(description)))
+	}
+
+	//==============================================================================
+	// 주소에서 읽기. (원본 정적 await Timeline.loadFromUrl(url), 애셋 경로를 받기 부탁하고 엔진 작업 안에서 await 한다)
+	// - 받기나 JSON 읽기에 실패하면 까닭이다. (원본은 Promise 가 거부된다)
+	//==============================================================================
+	pub fn load_from_url(engine: &Engine, url: &str) -> impl Future<Output = Result<Timeline, String>> + 'static {
+		let load_handle = engine.request_asset_bytes(url);
+		async move {
+			let bytes = load_handle.await?;
+			Timeline::load_from_text(&String::from_utf8_lossy(&bytes))
+		}
 	}
 
 	//==============================================================================

@@ -23,6 +23,7 @@ pub mod shaderprogram;
 pub mod shaderwarmer;
 pub mod soundeffectpool;
 pub mod soundsystem;
+pub mod task;
 pub mod textinput;
 pub mod textstringtexturecache;
 pub mod timemanager;
