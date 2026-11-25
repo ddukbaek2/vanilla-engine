@@ -5,12 +5,14 @@
 //   돌 일곱은 인스턴스마다 번호를 따로, 나머지 일곱은 한 번호로 그려 서로 맞닿은 곳의 선이 다른 것을 본다.
 // - ToonVfx 로 3 초마다 터짐(충격파, 불덩이, 그을음, 불꽃 줄기, 연기, 흙 알갱이)과 연기 기둥, 흐르는 테 자국을 내고,
 //   프레임마다 빔(겉집과 심), 번개, 리본, 빛 점을 넘긴다. 램프 색은 예제가 정한 넷(불, 푸른 빛, 보라, 연기)이다.
+// - 터질 때 화면 섬광(add_flash)과 카메라 흔들림(add_shake, read_shake 를 카메라 오른쪽과 위쪽으로 더함), 1.2 초 사는 번개(add_lightning, 번짐 색)를 낸다.
+//   테를 두른 빛살 파티클(rim 1)과 빛 점(rim 1, 하나 걸러), 번짐 색 리본(glow)은 가장자리를 테 색으로 덮는다.
 // - 실행: cargo run --example toonfx
 //==============================================================================
 use glow::HasContext;
 use std::f32::consts::PI;
 use vanilla::{
-	create_box_geometry, create_cylinder_geometry, read_color_values, create_octahedron_geometry, create_part_matrix, create_rounded_box_geometry, create_sphere_geometry, create_torus_geometry, Engine, EngineConfiguration, Graphic, Matrix4, MeshBuilder, Scene, SceneBase, ToonDrawOptions, ToonGeometry, ToonInstance, ToonLineDrawOptions, ToonMesh, ToonOutlineWidthUnit, ToonPartOptions, ToonRenderer, ToonScreenOutline, ToonBeamOptions, ToonDecalOptions, ToonFireballOptions, ToonGlintOptions, ToonLightningOptions, ToonParticleOptions, ToonPlumeOptions, ToonRibbonOptions, ToonShockwaveOptions, ToonVfx, ToonVfxDecalMode, ToonVfxLook, ToonVfxRange, ToonVfxShape, ToonVfxSlot, Vector2, Vector3, TOON_VFX_DEFAULT_PARTICLE_CAPACITY,
+	create_box_geometry, create_cylinder_geometry, create_octahedron_geometry, create_part_matrix, create_rounded_box_geometry, create_sphere_geometry, create_torus_geometry, Engine, EngineConfiguration, Graphic, Matrix4, MeshBuilder, Scene, SceneBase, ToonDrawOptions, ToonGeometry, ToonInstance, ToonLineDrawOptions, ToonMesh, ToonOutlineWidthUnit, ToonPartOptions, ToonRenderer, ToonScreenOutline, ToonBeamOptions, ToonDecalOptions, ToonFireballOptions, ToonGlintOptions, ToonLightningOptions, ToonParticleOptions, ToonPlumeOptions, ToonRibbonOptions, ToonShockwaveOptions, ToonFlashOptions, ToonVfx, ToonVfxDecalMode, ToonVfxLook, ToonVfxRange, ToonVfxShape, ToonVfxSlot, Vector2, Vector3, TOON_VFX_DEFAULT_PARTICLE_CAPACITY,
 };
 
 //==============================================================================
@@ -103,7 +105,7 @@ impl ToonFxScene {
 			["#ffffff", "#f0d0ff", "#b070ff", "#6030c0", "#281050", "#100818"],
 			["#e8e4de", "#b8b0a8", "#888078", "#5a544e", "#36322e", "#1a1816"],
 		];
-		let ramp_list: Vec<Vec<[f32; 3]>> = ramp_text_list.iter().map(|ramp_texts| ramp_texts.iter().map(|color_text| read_color_values(color_text)).collect()).collect();
+		let ramp_list: Vec<Vec<&str>> = ramp_text_list.iter().map(|ramp_texts| ramp_texts.to_vec()).collect();
 		vfx.set_ramps(&ramp_list);
 		vfx.set_floor_height_reader(Some(Box::new(|x: f32, z: f32| if x.abs() <= 4.0 && z.abs() <= 2.5 { 0.0 } else { -1.0 })));
 		vfx.prepare(gl);
@@ -127,6 +129,10 @@ impl ToonFxScene {
 		vfx.emit_particles(&ToonParticleOptions { count: 30, position: [blast[0], 0.2, blast[2]], shape: ToonVfxShape::Ring, radius: 0.4, speed: ToonVfxRange::new(1.5, 2.5), rise: ToonVfxRange::new(0.2, 0.6), gravity: 2.0, drag: 1.5, size: ToonVfxRange::new(0.06, 0.12), life: ToonVfxRange::new(0.6, 1.2), color: [0.45, 0.4, 0.36], look: ToonVfxLook::Grit, is_grounded: true, ..ToonParticleOptions::default() });
 		vfx.add_plume(&ToonPlumeOptions { x: 3.3, z: 0.4, height: 2.4, cap_radius: Some(0.9), stem_radius: Some(0.22), life: 3.0, ramp: 0, ..ToonPlumeOptions::default() });
 		vfx.add_decal(&ToonDecalOptions { x: 1.4, z: 0.5, radius: 0.7, life: 3.0, slot: ToonVfxSlot::Glow, mode: ToonVfxDecalMode::Ring, ramp: 1, tint: [0.6, 1.4, 1.4], alpha: 1.0, ring: [0.75, 0.08, 3.0, 0.6], ..ToonDecalOptions::default() });
+		vfx.emit_particles(&ToonParticleOptions { count: 14, position: [blast[0], 0.6, blast[2]], shape: ToonVfxShape::Sphere, radius: 0.3, speed: ToonVfxRange::new(1.2, 2.4), drag: 1.5, size: ToonVfxRange::new(0.3, 0.45), size_end: ToonVfxRange::from(0.4), life: ToonVfxRange::new(0.6, 1.0), color: [1.0, 0.8, 0.45], look: ToonVfxLook::Star, brightness: 1.3, rim: 1.0, ..ToonParticleOptions::default() });
+		vfx.add_lightning(&ToonLightningOptions { start: [blast[0], 3.2, blast[2]], end: [blast[0], 0.1, blast[2]], radius: 0.1, count: 2, width: 0.12, turns: 0.6, brightness: 1.3, glow: Some([0.55, 0.85, 1.0]), life: 1.2, ..ToonLightningOptions::default() });
+		vfx.add_flash(&ToonFlashOptions { color: [1.0, 0.9, 0.7], strength: 0.45, life: 0.25, ..ToonFlashOptions::default() });
+		vfx.add_shake(0.08);
 	}
 
 	//==============================================================================
@@ -135,16 +141,21 @@ impl ToonFxScene {
 	fn queue_frame_effects(vfx: &mut ToonVfx, elapsed_seconds: f32) {
 		vfx.queue_beam(&ToonBeamOptions { start: [1.4, 5.0, 0.5], end: [1.4, 0.0, 0.5], radius: 0.28, is_core: false, alpha: 1.0, brightness: 1.3, ramp: 1, wobble: 0.14, flow_speed: 8.0, grain_repeat: 1.4, ..ToonBeamOptions::default() });
 		vfx.queue_beam(&ToonBeamOptions { start: [1.4, 5.0, 0.5], end: [1.4, 0.0, 0.5], radius: 0.1, is_core: true, alpha: 1.0, brightness: 1.5, ramp: 1, wobble: 0.05, flow_speed: 14.0, grain_repeat: 2.0, ..ToonBeamOptions::default() });
-		vfx.queue_lightning(&ToonLightningOptions { start: [-2.4, 1.1, -0.8], end: [0.2, 1.2, -0.9], radius: 0.12, count: 2, width: 0.07, turns: 1.5, ramp: 2, brightness: 1.4, seed: 3.0, ..ToonLightningOptions::default() });
+		vfx.queue_lightning(&ToonLightningOptions { start: [-2.4, 1.1, -0.8], end: [0.2, 1.2, -0.9], radius: 0.12, count: 2, width: 0.07, turns: 1.5, ramp: 2, brightness: 1.4, seed: Some(3.0), ..ToonLightningOptions::default() });
 		let arc_points: Vec<[f32; 3]> = (0..=24).map(|index| {
 			let ratio = index as f32 / 24.0;
 			[2.7 - ratio * 3.0, 0.3 + (ratio * PI).sin() * 1.4, -0.4 + ratio * 1.8]
 		}).collect();
 		vfx.queue_ribbon(ToonRibbonOptions { points: arc_points, width: 0.14, taper: 0.5, ramp: 2, brightness: 1.2, ..ToonRibbonOptions::default() });
+		let glow_points: Vec<[f32; 3]> = (0..=24).map(|index| {
+			let ratio = index as f32 / 24.0;
+			[-3.4 + ratio * 1.6, 0.4 + ratio * 1.6, 1.4 + (ratio * PI * 2.0 + elapsed_seconds * 2.0).sin() * 0.25]
+		}).collect();
+		vfx.queue_ribbon(ToonRibbonOptions { points: glow_points, width: 0.22, taper: 0.4, brightness: 1.2, glow: Some([1.0, 0.45, 0.8]), ..ToonRibbonOptions::default() });
 		for glint_index in 0..12 {
 			let angle = glint_index as f32 / 12.0 * PI * 2.0 + elapsed_seconds;
 			let look = if glint_index % 2 == 0 { ToonVfxLook::Star } else { ToonVfxLook::Soft };
-			vfx.queue_glint(&ToonGlintOptions { position: [0.2 + angle.cos() * 0.75, 0.55 + (angle * 2.0).sin() * 0.1, -0.9 + angle.sin() * 0.75], size: 0.22, color: [0.6, 1.0, 1.0], look, brightness: 1.3, ..ToonGlintOptions::default() });
+			vfx.queue_glint(&ToonGlintOptions { position: [0.2 + angle.cos() * 0.75, 0.55 + (angle * 2.0).sin() * 0.1, -0.9 + angle.sin() * 0.75], size: 0.22, color: [0.6, 1.0, 1.0], look, brightness: 1.3, rim: if glint_index % 2 == 0 { 1.0 } else { 0.0 }, ..ToonGlintOptions::default() });
 		}
 	}
 }
@@ -197,8 +208,18 @@ impl Scene for ToonFxScene {
 		let gl = graphic.get_gl();
 		let canvas_pixel_size = engine.get_view_manager().get_canvas_pixel_size();
 		let aspect_ratio = canvas_pixel_size.x / canvas_pixel_size.y.max(1.0);
-		let eye_position = Vector3::create(0.0, 4.2, 6.2);
-		let look_position = Vector3::create(0.0, 0.4, 0.0);
+		let mut eye_position = Vector3::create(0.0, 4.2, 6.2);
+		let mut look_position = Vector3::create(0.0, 0.4, 0.0);
+		// 카메라 흔들림. (오른쪽과 위쪽으로 자리와 보는 곳을 같이 옮긴다)
+		if let Some(vfx) = self.vfx.as_ref() {
+			let shake = vfx.read_shake();
+			let forward = look_position.subtract(eye_position).normalize();
+			let right = forward.cross(Vector3::create(0.0, 1.0, 0.0)).normalize();
+			let up = right.cross(forward);
+			let offset = right.multiply_scalar(shake.x).add(up.multiply_scalar(shake.y));
+			eye_position = eye_position.add(offset);
+			look_position = look_position.add(offset);
+		}
 		let view_matrix = Matrix4::create_look_at(eye_position, look_position, Vector3::create(0.0, 1.0, 0.0));
 		let projection_matrix = Matrix4::create_perspective(0.75, aspect_ratio, 0.1, 100.0);
 		let mut view_projection_matrix = projection_matrix;

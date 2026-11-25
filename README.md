@@ -334,8 +334,8 @@ cargo run --release --example modelviewer
 ## 진행 상황
 
 - 버전 0.3.2. 버전 번호는 vanilla.js 0.3.2 에서 이어 받았습니다.
-- vanilla.js 의 원본 160 파일 가운데 121 파일을 옮겼습니다. 20 파일은 러스트에 필요 없어서(컬렉션, 죽은 코드 같은 것) 옮기지 않았습니다.
-- 다음에 옮길 것: UINode, UIScene, UIDocument, 오토레이아웃, DevTools, DynamicFont, web/Pane, HumanSkinRenderer
+- vanilla.js 의 원본 160 파일 가운데 122 파일을 옮겼습니다. 20 파일은 러스트에 필요 없어서(컬렉션, 죽은 코드 같은 것) 옮기지 않았습니다.
+- 다음에 옮길 것: UINode, UIScene, UIDocument, 오토레이아웃, DevTools, DynamicFont, web/Pane
 - 윈도우 11 데스크탑, macOS(애플 실리콘) 데스크탑, 크롬에서 확인했습니다. 리눅스와 실제 모바일 기기는 아직 돌려 보지 않았습니다.
 
 ## 코드 스타일

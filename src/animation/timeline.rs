@@ -32,9 +32,8 @@
 //     무대를 만든 뒤 한 번 부르면 사운드 노드마다 오디오 애셋을 읽고 플레이어를 만든다. (돌려준 애셋을 씬이 track_audio_asset 으로 맡겨도 된다)
 //   - loadFromUrl(비동기 fetch) 대신 JsonAsset 으로 받은 문서를 create_from_json_asset / load_from_text 로 넘긴다.
 //   - "data:" 주소 이미지는 원본처럼 나중에 읽히지 않고 그 자리에서 base64 를 풀어 만든다.
-//   - 원본 엔진의 Math.pow 는 정수 지수만 맞게 계산해서 원본 exponential, elastic 곡선은 소수 지수에서 값이 틀어진다.
-//     러스트 판은 Tween 처럼 실제 powf 를 쓴다. (나머지 곡선은 원본과 같은 값이 나온다)
-//   - 같은 이름의 무대 노드가 둘이면 원본은 앞의 것을 붙이지 않고 버린다. 러스트 판은 모두 붙이고 이름 표에는 뒤의 것이 남는다.
+// - 이징 곡선 값은 원본과 같다. 같은 이름의 무대 노드가 둘이면 모두 붙이고 이름 표에는 뒤의 것이 남는다(원본과 같다).
+//   부모가 자기 자신이거나 고리가 되면 무대 부모에 붙인다. load_from_text, create_from_json_asset 은 원본에도 있다.
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::pivot::Pivot;
@@ -859,10 +858,10 @@ pub trait TimelinePropertyTarget {
 
 impl TimelinePropertyTarget for ScreenEffect {
 	//==============================================================================
-	// 화면 효과에 값 걸기. (ScreenEffect 의 set_timeline_property 는 값을 글로 받는다)
+	// 화면 효과에 값 걸기. (값을 그대로 넘긴다)
 	//==============================================================================
 	fn set_timeline_property(&mut self, property_name: &str, value: &TimelineValue) {
-		ScreenEffect::set_timeline_property(self, property_name, &value.to_text());
+		ScreenEffect::set_timeline_property(self, property_name, value);
 	}
 }
 
@@ -1581,18 +1580,15 @@ impl Timeline {
 	}
 
 	//==============================================================================
-	// 파티클 시간 진행. (재생 중 매 프레임. 방출점은 노드 content_size 가운데)
+	// 파티클 시간 진행. (재생 중 매 프레임)
 	//==============================================================================
 	pub fn simulate_particles(&mut self, node_tree: &mut NodeTree, time_delta: f32) {
 		if time_delta <= 0.0 {
 			return;
 		}
 		for node_id in self.particle_node_ids.iter() {
-			if let Some(node) = node_tree.get_node_mut(*node_id) {
-				let emitter_center = node.get_content_size().multiply_scalar(0.5);
-				if let Some(particle_system) = node.get_component_mut::<ParticleSystem>() {
-					particle_system.simulate(time_delta, emitter_center);
-				}
+			if let Some(particle_system) = node_tree.get_node_mut(*node_id).and_then(|node| node.get_component_mut::<ParticleSystem>()) {
+				particle_system.simulate(time_delta);
 			}
 		}
 	}
@@ -1747,13 +1743,17 @@ impl Timeline {
 		}
 		for (node_id, parent_name) in created_list {
 			let parent_description_node_id = parent_name.and_then(|parent_name| node_table.get(&parent_name).copied());
-			match parent_description_node_id {
+			// 부모가 자기 자신이거나 고리가 되면 add_child 가 거절하므로 무대 부모에 붙인다.
+			let is_added = match parent_description_node_id {
 				Some(parent_description_node_id) => {
-					node_tree.add_child(parent_description_node_id, node_id);
+					node_tree.add_child(parent_description_node_id, node_id)
 				}
 				None => {
-					node_tree.add_child(parent_id, node_id);
+					false
 				}
+			};
+			if !is_added {
+				node_tree.add_child(parent_id, node_id);
 			}
 		}
 		self.invalidate();
@@ -2042,7 +2042,6 @@ impl Timeline {
 						sound.handle_event(&event_name);
 					}
 				}
-				let emitter_center = node.get_content_size().multiply_scalar(0.5);
 				if let Some(particle_system) = node.get_component_mut::<ParticleSystem>() {
 					if event_name == "play" {
 						particle_system.play();
@@ -2068,7 +2067,7 @@ impl Timeline {
 						else {
 							DEFAULT_EMIT_COUNT
 						};
-						particle_system.emit(emit_count.max(0.0).ceil() as usize, emitter_center);
+						particle_system.emit(emit_count.max(0.0).ceil() as usize, None);
 					}
 				}
 			}
@@ -2553,6 +2552,30 @@ mod tests {
 			"set vignette=0.0500", "time 0.1000",
 		];
 		assert_eq!(*log.borrow(), expected_log.iter().map(|line| line.to_string()).collect::<Vec<String>>());
+	}
+
+	//==============================================================================
+	// 같은 이름 무대 노드는 모두 붙고 이름 표에는 뒤의 것이 남는다. 자기 자신을 부모로 두면 무대 부모에 붙는다.
+	//==============================================================================
+	#[test]
+	fn build_stage_keeps_same_name_nodes_and_rejects_self_parent() {
+		let description = json!({
+			"duration": 1,
+			"stage": { "nodes": [
+				{ "name": "a", "type": "node" },
+				{ "name": "a", "type": "node" },
+				{ "name": "self", "type": "node", "parent": "self" },
+				{ "name": "child", "type": "node", "parent": "a" },
+			] },
+			"tracks": [],
+		});
+		let mut node_tree = NodeTree::new();
+		let root_id = node_tree.get_root_id();
+		let mut timeline = Timeline::new(Some(description));
+		let node_table = timeline.build_stage(&mut node_tree, root_id, None);
+		assert_eq!(node_tree.get_child_count(root_id), 3);
+		assert_eq!(node_tree.get_child_count(node_table["a"]), 1);
+		assert_eq!(node_tree.get_parent_id(node_table["self"]), Some(root_id));
 	}
 
 	//==============================================================================

@@ -1,28 +1,25 @@
 //==============================================================================
-// 아지랑이 효과 컴포넌트. (원본 experimental/heathazeeffect.js 의 HeatHazeEffect)
+// 아지랑이 효과 컴포넌트. (원본 effect/heathazeeffect.js 의 HeatHazeEffect)
 // - 이 노드가 그려지기 전까지 화면에 그려진 것을 노드 영역만큼 떠 와서, 한 줄씩 사인 곡선을 따라 좌우로 흔들어 다시 그린다.
 //   그래서 씬의 맨 위(마지막)에 그려지는 노드에 붙여야 보인다. 자식 노드는 효과 위에 그려진다.
-// - 원본은 Canvas2D 로 캔버스 자신을 줄마다 draw_image 한다. 러스트 판은 묶음을 내보낸 뒤 노드의 화면 영역(픽셀)을
-//   copyTexSubImage2D 로 텍스처에 떠 오고(ScreenEffect 와 같은 방식), 줄마다 쿼드 한 장씩 정점 색 쿼드(draw_colored_quads)로 그린다.
+// - 원본처럼 묶음을 내보낸 뒤 노드의 화면 영역(픽셀)을 copyTexSubImage2D 로 텍스처에 떠 오고, 줄마다 쿼드 한 장씩 정점 색 쿼드(draw_colored_quads)로 그린다.
+//   노드 영역이 화면 밖으로 나가면 화면 가장자리 픽셀을 늘인다. (CLAMP_TO_EDGE)
+// - 원본처럼 노드에 붙이는 컴포넌트이고, 붙을 때 노드 content_size 가 비어 있으면 300 x 300 으로 정한다.
 // - 원본과 다른 점:
-//   - 원본은 TransformNode 를 상속한 노드다. 러스트 판은 노드에 붙이는 컴포넌트다. (노드 하나 = 효과 하나)
-//   - 원본 생성자는 노드 content_size 를 300 x 300 으로 정한다. 러스트 판은 붙을 때 노드 content_size 가 비어 있을 때만 정한다.
-//   - 떠 온 텍스처는 GL 자원이라 다 쓰면 destroy(graphic) 를 부른다. (ScreenEffect 와 같다. 부르지 않으면 컨텍스트가 없어질 때까지 남는다)
-//   - 줄 수는 한 번에 그릴 수 있는 정점 수(8192 = 1365 줄)로 막는다. 노드가 그보다 높으면 한 줄이 1 픽셀보다 두꺼워진다.
-//   - 노드 영역이 화면 밖으로 나가면 원본은 그 부분을 비워 두고, 러스트 판은 화면 가장자리 픽셀을 늘인다. (CLAMP_TO_EDGE)
+//   - 떠 온 텍스처는 GL 자원이라 다 쓰면 destroy(graphic) 를 부른다. 원본 destroy() 는 텍스처를 만든 컨텍스트를 쥐고 있어 인자가 없다.
+//     러스트 판은 GL 컨텍스트를 Graphic 만 쥐므로 graphic 을 받는다. (ScreenEffect 와 같다. 부르지 않으면 컨텍스트가 없어질 때까지 남는다)
+//   - 줄이 한 번에 그릴 수 있는 정점 수(Graphic 한도)를 넘으면 나눠 그린다. 원본은 배열을 늘려 한 번에 그린다.
 //==============================================================================
 use crate::base::vector2::Vector2;
 use crate::core::component::{Component, ComponentBase};
 use crate::core::graphic::{GlTexture, Graphic, PARTICLE_FLOATS_PER_VERTEX};
+use crate::effect::particlesystem::draw_colored_quads_in_chunks;
 use crate::core::node::nodetree::ComponentContext;
 use crate::core::node::worldnode::NodeTransform;
 use glow::HasContext;
 
 // 붙을 때 content_size 가 비어 있으면 쓰는 크기. (원본 생성자)
 const DEFAULT_CONTENT_SIZE: f32 = 300.0;
-
-// 한 번에 그리는 줄 수 한도. (draw_colored_quads 정점 한도 8192 / 줄마다 6 정점)
-const MAXIMUM_ROW_COUNT: usize = 1365;
 
 //==============================================================================
 // 아지랑이 효과 컴포넌트.
@@ -108,7 +105,7 @@ impl HeatHazeEffect {
 	}
 
 	//==============================================================================
-	// 줄의 좌우 흔들림. (원본: sin(시계 + 줄 위치 * 빈도) * 폭)
+	// 줄의 좌우 흔들림. (sin(시계 + 줄 위치 * 빈도) * 폭)
 	//==============================================================================
 	pub fn calculate_row_offset(&self, local_y: f32) -> f32 {
 		(self.timer + local_y * self.frequency).sin() * self.amplitude
@@ -261,7 +258,7 @@ impl Component for HeatHazeEffect {
 		}
 
 		// 줄마다 쿼드. (x, y, u, v, r, g, b, a)
-		let row_count = (content_size.y.ceil() as usize).clamp(1, MAXIMUM_ROW_COUNT);
+		let row_count = (content_size.y.ceil() as usize).max(1);
 		let row_height = content_size.y / row_count as f32;
 		let left_u = (minimum_x - region_x as f32) / region_width as f32;
 		let right_u = (maximum_x - region_x as f32) / region_width as f32;
@@ -287,10 +284,7 @@ impl Component for HeatHazeEffect {
 				vertex_values.extend_from_slice(&[corner_x, corner_y, corner_u, corner_v, 1.0, 1.0, 1.0, 1.0]);
 			}
 		}
-		let particle_vertex_data = graphic.get_particle_vertex_data(vertex_values.len());
-		let writable_float_count = particle_vertex_data.len().min(vertex_values.len());
-		particle_vertex_data[..writable_float_count].copy_from_slice(&vertex_values[..writable_float_count]);
-		graphic.draw_colored_quads(writable_float_count / PARTICLE_FLOATS_PER_VERTEX, capture_texture);
+		draw_colored_quads_in_chunks(graphic, &vertex_values, capture_texture);
 	}
 }
 

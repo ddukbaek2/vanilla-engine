@@ -397,6 +397,22 @@ pub struct Graphic {
 	bound_texture: Cell<Option<GlTexture>>,
 }
 
+//==============================================================================
+// run_external_pass 가 끝나면(패닉해도) 2D 상태를 되돌리는 가드.
+//==============================================================================
+struct ExternalPassGuard<'a> {
+	graphic: &'a mut Graphic,
+}
+
+impl Drop for ExternalPassGuard<'_> {
+	//==============================================================================
+	// 2D 상태 되돌리기.
+	//==============================================================================
+	fn drop(&mut self) {
+		self.graphic.restore_render_state();
+	}
+}
+
 impl Graphic {
 	//==============================================================================
 	// 생성.
@@ -650,7 +666,7 @@ impl Graphic {
 	// 2D 그리기 사이에 GL 패스 끼우기. (원본 runExternalPass)
 	// - 앞의 2D 묶음을 내보내고, 기억한 프로그램과 텍스처를 잊고, is_depth_cleared 면 깊이를 비운 뒤 pass 를 부르고, 끝나면 restore_render_state 를 부른다.
 	// - pass 는 GL 컨텍스트를 받아 프로그램, 버텍스 어레이, 뷰포트, 섞기, 깊이, 면 가리기를 바꿔도 된다. (클립 중이면 스텐실 테스트는 restore_render_state 가 다시 켠다)
-	// - 원본은 callback 이 던져도 되돌린다. 러스트 판은 pass 가 돌려준 값을 그대로 돌려준다. (패닉은 되돌리지 않는다)
+	// - pass 가 돌려준 값을 그대로 돌려준다. pass 가 패닉해도 풀리는 동안 가드가 restore_render_state 를 부른다. (원본은 던져도 되돌린다)
 	//==============================================================================
 	pub fn run_external_pass<R>(&mut self, is_depth_cleared: bool, pass: impl FnOnce(&glow::Context) -> R) -> R {
 		self.flush_batch();
@@ -658,9 +674,8 @@ impl Graphic {
 			self.clear_depth_buffer();
 		}
 		self.forget_bound_render_state();
-		let result = pass(&self.gl);
-		self.restore_render_state();
-		result
+		let guard = ExternalPassGuard { graphic: self };
+		pass(&guard.graphic.gl)
 	}
 
 	//==============================================================================

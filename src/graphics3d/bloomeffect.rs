@@ -174,6 +174,8 @@ impl BloomEffect {
 	pub fn destroy(&mut self, gl: &glow::Context) {
 		self.ping_render_target.destroy(gl);
 		self.pong_render_target.destroy(gl);
+		self.bright_pass.destroy(gl);
+		self.blur_pass.destroy(gl);
 	}
 
 	//==============================================================================

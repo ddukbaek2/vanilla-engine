@@ -10,7 +10,7 @@
 use std::f32::consts::PI;
 use std::path::PathBuf;
 use vanilla::{
-	create_box_geometry, create_capsule_geometry, create_cylinder_geometry, create_octahedron_geometry, create_part_matrix, create_rounded_box_geometry, create_sphere_geometry, create_torus_geometry, read_glb_arrays, write_skin_pose, BlobAsset, Engine, EngineConfiguration, Graphic, Matrix4, MeshBuilder, Scene, SceneBase, ToonDrawOptions, ToonMesh, ToonMeshArrays, ToonOutlineOptions, ToonPartOptions, ToonRenderer, Vector2, Vector3, ShadowMap, ToonInstance, ToonPostProcess, ToonShadowInput,
+	create_box_geometry, create_capsule_geometry, create_cylinder_geometry, create_octahedron_geometry, create_part_matrix, create_rounded_box_geometry, create_sphere_geometry, create_torus_geometry, read_glb_arrays, write_skin_pose, BlobAsset, Engine, EngineConfiguration, Graphic, Matrix4, MeshBuilder, Scene, SceneBase, ToonDrawOptions, ToonMesh, ToonMeshArrays, ToonOutlineOptions, ToonPartOptions, ToonRenderer, Vector2, Vector3, ShadowMap, ToonInstance, ToonPostProcess,
 	TOON_MAXIMUM_JOINTS,
 };
 
@@ -239,7 +239,7 @@ impl Scene for ToonShowcaseScene {
 				renderer.begin_shadow_pass(gl, shadow_map);
 			}
 			else {
-				renderer.set_shadow(Some(ToonShadowInput::from_shadow_map(shadow_map)));
+				renderer.set_shadow(Some(shadow_map), 0.6);
 				post_process.begin(gl, [0.006, 0.007, 0.012]);
 				renderer.begin_frame(gl, &view_projection_matrix);
 			}

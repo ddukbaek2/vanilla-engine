@@ -289,6 +289,8 @@ impl AmbientOcclusionEffect {
 		self.occlusion_render_target.destroy(gl);
 		self.ping_render_target.destroy(gl);
 		self.pong_render_target.destroy(gl);
+		self.occlusion_pass.destroy(gl);
+		self.blur_pass.destroy(gl);
 	}
 
 	//==============================================================================
