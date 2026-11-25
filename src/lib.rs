@@ -156,3 +156,7 @@ pub use crate::web::websocketclient::{WebSocketClient, WebSocketReceiveEvent};
 pub use crate::ui::uidocument::{UIDocument, UIDocumentLoadContext, UIDocumentSaveContext, UIDOCUMENT_VERSION};
 pub use crate::effect::particlesystem::{EmitterShape, ParticleRenderShape};
 pub use crate::core::component::text::TextWrapMode;
+pub use crate::ui::uiscale::{UIScale, UIScaleOptions};
+pub use crate::ui::uiwindow::{UIWindow, UIWindowBehavior, UIWindowDefaultBehavior, UIWindowEvent, UIWindowParts};
+pub use crate::ui::uiwindowlayer::{UIWindowChangeEvent, UIWindowLayer};
+pub use crate::ui::uiconfirmwindow::{UIConfirmWindow, UIConfirmWindowOptions};

@@ -714,6 +714,31 @@ impl Text {
 	}
 
 	//==============================================================================
+	// 마지막으로 나눈 줄의 수. (그린 뒤 글, 폰트, 줄바꿈 폭이 그대로일 때만, 아니면 None)
+	// - 줄은 그릴 때 Graphic 의 글꼴로 나눈다. Graphic 이 없는 레이아웃(창의 내용 놓기 같은)이 그린 결과를 읽어 다시 놓을 때 쓴다.
+	// - 줄바꿈 폭(set_word_wrap_width)을 주지 않은 여러 줄 글은 노드 폭으로 나누므로 None 이다.
+	//==============================================================================
+	pub fn get_measured_line_count(&self) -> Option<usize> {
+		if self.is_layout_dirty || self.line_list.is_empty() {
+			return None;
+		}
+		let is_wrapped = self.is_wrapped();
+		if is_wrapped && self.word_wrap_width <= 0.0 {
+			return None;
+		}
+		let expected_wrap_width = if is_wrapped {
+			self.word_wrap_width
+		}
+		else {
+			0.0
+		};
+		if self.layout_wrap_width != expected_wrap_width {
+			return None;
+		}
+		Some(self.line_list.len())
+	}
+
+	//==============================================================================
 	// 줄바꿈 폭 설정. (0 이면 줄바꿈 문자로만 나눈다)
 	//==============================================================================
 	pub fn set_word_wrap_width(&mut self, word_wrap_width: f32) {

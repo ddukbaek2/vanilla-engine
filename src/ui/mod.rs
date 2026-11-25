@@ -36,3 +36,7 @@ pub mod uitoast;
 pub mod uitogglebutton;
 pub mod uiview;
 pub mod uidocument;
+pub mod uiscale;
+pub mod uiwindow;
+pub mod uiwindowlayer;
+pub mod uiconfirmwindow;
