@@ -29,3 +29,4 @@ pub mod humanskinrenderer;
 
 // 지금 묶인 GL 객체 읽기. (앞의 것을 돌려 놓을 때, 원본 getParameter(..._BINDING). 웹에서 null 을 먼저 가리는 까닭은 core::graphic::is_gl_binding_present 머리말)
 pub(crate) use crate::core::graphic::{read_framebuffer_binding, read_program_binding, read_texture_binding, read_vertex_array_binding};
+pub mod multilevelbloomeffect;
