@@ -121,6 +121,11 @@ pub struct EngineConfiguration {
 	// 글꼴이 늦게 받아지면 그 글꼴로 구운 글자 가운데 그 글꼴의 글자 범위에 든 것만 버려 다시 굽게 할지. (원본 rebakeTextOnFontLoad, 원본처럼 기본 끔)
 	// 끄면 받기 전에 다른 글꼴로 구운 글자는 캐시에서 밀려날 때까지 그대로 남는다. (글자 범위로 나눈 글꼴 조각을 그때그때 받는 프로젝트가 켠다)
 	pub rebake_text_on_font_load: bool,
+	// 문서 언어. (웹 판 index.html 의 html lang 자리, Document::get_language. 비우면 데스크탑은 빈 글이고 웹은 페이지가 적어 둔 그대로)
+	pub document_language: String,
+	// 문서의 meta. ((이름, content) 목록, 웹 판 index.html 의 head 의 meta 자리. Document::get_meta_content, BuildInfo 가 build-version 을 읽는다)
+	// - 데스크탑 배포 빌드는 웹 판이 index.html 에 적는 판을 여기에 넣는다. (build.rs 의 rustc-env 를 env! 로 읽는 것 같은 것) 웹에서도 비어 있지 않으면 문서에 쓴다.
+	pub document_meta_list: Vec<(String, String)>,
 }
 
 impl EngineConfiguration {
@@ -154,6 +159,8 @@ impl EngineConfiguration {
 			ignore_virtual_keyboard_resize: false,
 			max_canvas_aspect_ratio: 0.0,
 			rebake_text_on_font_load: false,
+			document_language: String::new(),
+			document_meta_list: Vec::new(),
 		}
 	}
 }
@@ -238,6 +245,7 @@ impl Engine {
 	pub fn new(engine_configuration: EngineConfiguration) -> Engine {
 		let reference_resolution_size = engine_configuration.reference_resolution_size;
 		let view_scale_mode = engine_configuration.view_scale_mode;
+		crate::platform::document::apply_engine_configuration(&engine_configuration.document_language, &engine_configuration.document_meta_list);
 		Engine {
 			engine_configuration,
 			time_manager: TimeManager::new(),

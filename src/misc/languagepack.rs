@@ -6,7 +6,7 @@
 //   언어마다 한 파일(열쇠 → 글자)이다. 설정의 언어가 비어 있으면 플랫폼이 알려 준 언어(set_preferred_language_tag), 그다음 기기의 언어를 따르고,
 //   목록에 없으면 기본 언어(영어)이다. 고른 언어의 표에 없는 열쇠는 기본 언어의 글자로, 거기에도 없으면 열쇠 그대로 쓴다.
 // - 언어를 불러오면 페이지의 언어(html lang)와 제목(set_document_title_key 의 열쇠, 처음은 game.title)을 그 언어로 바꾼다.
-//   데스크탑은 html 이 없어 창 제목만 바꾼다.
+//   언어는 Document::set_language 로 쓴다. (웹은 html 의 lang, 데스크탑은 엔진이 든 문서 언어. Document::get_language 로 읽는다) 제목은 창 제목이다.
 // - 원본과 다른 것:
 //   원본은 async 함수로 기다린다. 러스트 판은 엔진의 "요청 → 나중에 다 읽힘" 꼴이라 load_language_list, load_language, apply_language_setting 이
 //   읽기를 요청하고, 프레임마다 update(engine) 를 불러야 이어 간다. (데스크탑은 그 자리에서 읽혀 요청한 함수 안에서 끝난다) is_loading 으로 기다린다.
@@ -16,6 +16,7 @@
 use crate::core::asset::AssetLoadHandle;
 use crate::core::engine::Engine;
 use crate::core::graphic::TextAlign;
+use crate::platform::document::Document;
 use std::cell::RefCell;
 
 // 방향 격리 문자. (처음 나오는 방향이 강한 글자로 방향을 정하는 격리의 시작과 끝, isolate_text)
@@ -480,19 +481,10 @@ pub fn update(engine: &mut Engine) {
 }
 
 //==============================================================================
-// 페이지의 언어와 제목을 지금 언어로. (원본 applyDocumentLanguage: html 의 lang 과 탭의 제목, 데스크탑은 창 제목)
+// 페이지의 언어와 제목을 지금 언어로. (원본 applyDocumentLanguage: html 의 lang 과 탭의 제목, 데스크탑은 엔진이 든 문서 언어와 창 제목)
 //==============================================================================
 fn apply_document_language(engine: &mut Engine, language: &LanguageEntry) {
-	#[cfg(target_arch = "wasm32")]
-	{
-		if let Some(document_element) = web_sys::window().and_then(|window| window.document()).and_then(|document| document.document_element()) {
-			let _ = document_element.set_attribute("lang", &language.code);
-		}
-	}
-	#[cfg(not(target_arch = "wasm32"))]
-	{
-		let _ = &language.code;
-	}
+	Document::set_language(&language.code);
 	let document_title_key = with_state(|state| state.document_title_key.clone());
 	if document_title_key.is_empty() {
 		return;
@@ -786,5 +778,32 @@ mod tests {
 		assert_eq!(formatted, "\u{2068}1/40\u{2069} نقاط");
 		assert_eq!(mirror_layout_x(10.0, 20.0, 100.0), 70.0);
 		assert_eq!(read_layout_text_align(TextAlign::Left), TextAlign::Right);
+	}
+
+	//==============================================================================
+	// 언어를 불러오면 문서 언어가 그 언어다. (원본 applyDocumentLanguage 의 html lang, 데스크탑은 엔진이 든 문서 언어)
+	//==============================================================================
+	#[cfg(not(target_arch = "wasm32"))]
+	#[test]
+	fn loaded_language_sets_document_language() {
+		let asset_directory_path = std::env::temp_dir().join(format!("vanillaLanguagePackTest-{}", std::process::id()));
+		let localization_directory_path = asset_directory_path.join("localization");
+		std::fs::create_dir_all(&localization_directory_path).expect("localization directory");
+		std::fs::write(localization_directory_path.join("languages.json"), LANGUAGE_LIST_JSON).expect("language list");
+		std::fs::write(localization_directory_path.join("en.json"), r#"{ "game.title": "Game" }"#).expect("en");
+		std::fs::write(localization_directory_path.join("zh-Hant.json"), r#"{ "game.title": "遊戲" }"#).expect("zh-Hant");
+		let mut engine_configuration = crate::core::engine::EngineConfiguration::new();
+		engine_configuration.asset_directory_paths = vec![asset_directory_path.clone()];
+		engine_configuration.document_language = String::from("en");
+		let mut engine = Engine::new(engine_configuration);
+		assert_eq!(Document::get_language(), "en");
+		set_language_paths("localization/languages.json", "localization/");
+		load_language(&mut engine, "zh-Hant");
+		update(&mut engine);
+		assert!(!is_loading());
+		assert_eq!(read_language_code(), "zh-Hant");
+		assert_eq!(Document::get_language(), "zh-Hant");
+		assert_eq!(translate("game.title"), "遊戲");
+		let _ = std::fs::remove_dir_all(&asset_directory_path);
 	}
 }
