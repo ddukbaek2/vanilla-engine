@@ -1,18 +1,20 @@
 //==============================================================================
-// 스킨드 모델 렌더러. (원본 experimental/graphics/skinnedmodelrenderer.js)
-// - 스키닝 PBR 셰이더 템플릿 + 환경 상태(섀도우 맵 / 태양 / 안개) 소유, 씬당 하나. SkinnedModel 은 데이터/포즈만 갖고,
-//   렌더링은 이 객체가 모델 인스턴스를 받아 한다.
-// - 프래그먼트 셰이더 소스를 주입하면 같은 스키닝/모프 버텍스 경로 위에 다른 셰이딩 템플릿을 세울 수 있다.
-//   (파생 렌더러는 셰이더를 쓴 뒤 고유 유니폼을 설정하고 draw() 를 부른다)
-// - GLSL 은 원본과 같다. (쿡-토런스 GGX, 화면공간 미분 코탄젠트 노멀맵, 3x3 PCF 섀도우, 반구 앰비언트, 거리 안개)
-//   원본 템플릿 문자열의 ${MORPH_GLSL} / ${MORPH_TARGET_MAXIMUM} 은 concat! 과 숫자 96 으로 옮겼다. (시험이 둘이 같은지 본다)
-// - 텍스처 유닛: 0 = base_color, 1 = 섀도우 맵, 2 ~ 8 = 머티리얼 슬롯, 15 = 모프 타깃 텍스처.
-//   섀도우 맵이 없으면 섀도우 유닛에 1x1 비교 깊이 텍스처를 묶는다. (원본과 같다)
-// - 원본과 다른 것:
-//   - 그리기 함수는 gl 과 &mut SkinnedModel 을 받는다. 바뀐 모프 타깃 업로드(원본 update 6단계)와 와이어프레임 인덱스 업로드를
-//     여기서 먼저 한다. 행렬 인자는 원본 get_elements() 처럼 &[f32; 16] 이다. (matrix.get_elements())
-//   - set_shadow_map 은 원본처럼 배열을 참조로 들지 않고 16개를 복사해 둔다.
-//   - 생성은 셰이더 컴파일 실패를 오류(Result)로 돌려준다.
+//! 스킨드 모델 렌더러. (원본 experimental/graphics/skinnedmodelrenderer.js)
+//! - 스키닝 PBR 셰이더 템플릿 + 환경 상태(섀도우 맵 / 태양 / 안개) 소유, 씬당 하나. SkinnedModel 은 데이터/포즈만 갖고,
+//!   렌더링은 이 객체가 모델 인스턴스를 받아 한다.
+//! - 프래그먼트 셰이더 소스를 주입하면 같은 스키닝/모프 버텍스 경로 위에 다른 셰이딩 템플릿을 세울 수 있다.
+//!   (파생 렌더러는 셰이더를 쓴 뒤 고유 유니폼을 설정하고 draw() 를 부른다)
+//! - GLSL 은 원본과 같다. (쿡-토런스 GGX, 화면공간 미분 코탄젠트 노멀맵, 3x3 PCF 섀도우, 반구 앰비언트, 거리 안개)
+//!   원본 템플릿 문자열의 ${MORPH_GLSL} / ${MORPH_TARGET_MAXIMUM} 은 concat! 과 숫자 96 으로 옮겼다. (시험이 둘이 같은지 본다)
+//! - 텍스처 유닛: 0 = base_color, 1 = 섀도우 맵, 2 ~ 8 = 머티리얼 슬롯, 15 = 모프 타깃 텍스처.
+//!   섀도우 맵이 없으면 섀도우 유닛에 1x1 비교 깊이 텍스처를 묶는다. (원본과 같다)
+//! - 원본과 다른 것:
+//!   - 그리기 함수는 gl 과 &mut SkinnedModel 을 받는다. 바뀐 모프 타깃 업로드(원본 update 6단계)와 와이어프레임 인덱스 업로드를
+//!   ```text
+//!     여기서 먼저 한다. 행렬 인자는 원본 get_elements() 처럼 &[f32; 16] 이다. (matrix.get_elements())
+//!   ```
+//!   - set_shadow_map 은 원본처럼 배열을 참조로 들지 않고 16개를 복사해 둔다.
+//!   - 생성은 셰이더 컴파일 실패를 오류(Result)로 돌려준다.
 //==============================================================================
 use crate::core::graphic::GlTexture;
 use crate::core::shaderprogram::ShaderProgram;
@@ -22,13 +24,13 @@ use glow::HasContext;
 use std::rc::Rc;
 
 //==============================================================================
-// 전역 상수 목록.
+/// 전역 상수 목록.
 //==============================================================================
-// 모프 타깃 텍스처 유닛. (머티리얼 슬롯 0 / 2~8, 섀도우 맵 1, 추가 슬롯 9~ 와 겹치지 않는 값)
+/// 모프 타깃 텍스처 유닛. (머티리얼 슬롯 0 / 2~8, 섀도우 맵 1, 추가 슬롯 9~ 와 겹치지 않는 값)
 pub const MORPH_TEXTURE_UNIT: u32 = 15;
 
-// 모프 타깃 GLSL 본문. (버텍스 셰이더 삽입, 실수 텍스처의 위치/노멀 델타를 가중 합산, 배열 크기는 MORPH_TARGET_MAXIMUM)
-// - 텍셀 인덱스 = gl_VertexID, 타깃 블록 = [위치 행들][노멀 행들] 순서.
+/// 모프 타깃 GLSL 본문. (버텍스 셰이더 삽입, 실수 텍스처의 위치/노멀 델타를 가중 합산, 배열 크기는 MORPH_TARGET_MAXIMUM)
+/// - 텍셀 인덱스 = gl_VertexID, 타깃 블록 = [위치 행들][노멀 행들] 순서.
 macro_rules! morphGlslSource {
 	() => {
 		"
@@ -59,10 +61,10 @@ void applyMorphTargets(inout vec3 position, inout vec3 normal) {
 	};
 }
 
-// 모프 타깃 GLSL. (원본 MORPH_GLSL, 파생 렌더러가 대체 버텍스 셰이더에 넣어 쓴다)
+/// 모프 타깃 GLSL. (원본 MORPH_GLSL, 파생 렌더러가 대체 버텍스 셰이더에 넣어 쓴다)
 pub const MORPH_GLSL: &str = morphGlslSource!();
 
-// 스키닝 버텍스 셰이더. (모프 타깃 → 조인트 4개 가중 혼합, 어트리뷰트 위치 고정)
+/// 스키닝 버텍스 셰이더. (모프 타깃 → 조인트 4개 가중 혼합, 어트리뷰트 위치 고정)
 pub const SKINNED_VERTEXSHADER_SOURCE: &str = concat!("#version 300 es
 layout(location = 0) in vec3 vertexPosition;
 layout(location = 1) in vec3 vertexNormal;
@@ -98,9 +100,9 @@ void main() {
 }
 ");
 
-// 스키닝 프래그먼트 셰이더. (metallic-roughness PBR + 태양/반구 라이팅 + 섀도우 맵 + 거리 안개)
-// - 노멀 매핑은 화면 공간 미분 기반 코탄젠트 프레임 사용. (탄젠트 어트리뷰트 불필요)
-// - FBX 스펙큘러/글로스 경로: use_glossiness=1 이면 러프니스 = 1 - 글로스, 스펙큘러 맵은 F0 변조.
+/// 스키닝 프래그먼트 셰이더. (metallic-roughness PBR + 태양/반구 라이팅 + 섀도우 맵 + 거리 안개)
+/// - 노멀 매핑은 화면 공간 미분 기반 코탄젠트 프레임 사용. (탄젠트 어트리뷰트 불필요)
+/// - FBX 스펙큘러/글로스 경로: use_glossiness=1 이면 러프니스 = 1 - 글로스, 스펙큘러 맵은 F0 변조.
 pub const SKINNED_FRAGMENTSHADER_SOURCE: &str = "#version 300 es
 precision highp float;
 in vec3 worldPosition;
@@ -232,7 +234,7 @@ void main() {
 	outputColor = vec4(color, 1.0);
 }";
 
-// 깊이 전용 스키닝 버텍스 셰이더. (섀도우 맵 캐스팅, 모프 타깃 포함)
+/// 깊이 전용 스키닝 버텍스 셰이더. (섀도우 맵 캐스팅, 모프 타깃 포함)
 const SKINNED_DEPTH_VERTEXSHADER_SOURCE: &str = concat!("#version 300 es
 layout(location = 0) in vec3 vertexPosition;
 layout(location = 3) in uvec4 vertexJoints;
@@ -253,13 +255,13 @@ void main() {
 }
 ");
 
-// 깊이 전용 프래그먼트 셰이더.
+/// 깊이 전용 프래그먼트 셰이더.
 const SKINNED_DEPTH_FRAGMENTSHADER_SOURCE: &str = "#version 300 es
 precision highp float;
 void main() {
 }";
 
-// 와이어프레임 버텍스 셰이더. (모프 + 스키닝을 그대로 따르는 선 출력)
+/// 와이어프레임 버텍스 셰이더. (모프 + 스키닝을 그대로 따르는 선 출력)
 const SKINNED_WIREFRAME_VERTEXSHADER_SOURCE: &str = concat!("#version 300 es
 layout(location = 0) in vec3 vertexPosition;
 layout(location = 3) in uvec4 vertexJoints;
@@ -280,7 +282,7 @@ void main() {
 }
 ");
 
-// 와이어프레임 프래그먼트 셰이더. (단색)
+/// 와이어프레임 프래그먼트 셰이더. (단색)
 const SKINNED_WIREFRAME_FRAGMENTSHADER_SOURCE: &str = "#version 300 es
 precision highp float;
 uniform vec4 wireframeColor;
@@ -290,14 +292,14 @@ void main() {
 }";
 
 //==============================================================================
-// 스킨드 모델 렌더러.
+/// 스킨드 모델 렌더러.
 //==============================================================================
 pub struct SkinnedModelRenderer {
 	shader_program: Rc<ShaderProgram>,
 	depth_shader_program: ShaderProgram,
 	wireframe_shader_program: ShaderProgram,
 	shadow_map_texture: Option<GlTexture>,
-	// 그림자를 받지 않을 때 섀도우 유닛에 묶는 1x1 비교 깊이 텍스처.
+	/// 그림자를 받지 않을 때 섀도우 유닛에 묶는 1x1 비교 깊이 텍스처.
 	empty_shadow_texture: GlTexture,
 	light_view_projection_elements: Option<[f32; 16]>,
 	shadow_strength: f32,
@@ -309,8 +311,8 @@ pub struct SkinnedModelRenderer {
 
 impl SkinnedModelRenderer {
 	//==============================================================================
-	// 생성. (대체 프래그먼트 / 버텍스 셰이더 소스, None 이면 기본 PBR / 기본 스키닝)
-	// - 대체 버텍스 셰이더는 같은 어트리뷰트 위치 / 출력 규약을 지켜야 한다.
+	/// 생성. (대체 프래그먼트 / 버텍스 셰이더 소스, None 이면 기본 PBR / 기본 스키닝)
+	/// - 대체 버텍스 셰이더는 같은 어트리뷰트 위치 / 출력 규약을 지켜야 한다.
 	//==============================================================================
 	pub fn new(gl: &glow::Context, fragment_shader_source: Option<&str>, vertex_shader_source: Option<&str>) -> Result<SkinnedModelRenderer, String> {
 		let resolved_fragment_shader_source = fragment_shader_source.unwrap_or(SKINNED_FRAGMENTSHADER_SOURCE);
@@ -335,8 +337,8 @@ impl SkinnedModelRenderer {
 	}
 
 	//==============================================================================
-	// 빈 그림자 텍스처 짓기. (1x1 깊이 1, 비교 샘플링)
-	// - sampler2DShadow 유닛에 비교 모드가 없는 텍스처가 묶이면 WebGL 이 그리기를 거부하고, 깊이 텍스처가 없으면 맥 드라이버가 알린다.
+	/// 빈 그림자 텍스처 짓기. (1x1 깊이 1, 비교 샘플링)
+	/// - sampler2DShadow 유닛에 비교 모드가 없는 텍스처가 묶이면 WebGL 이 그리기를 거부하고, 깊이 텍스처가 없으면 맥 드라이버가 알린다.
 	//==============================================================================
 	fn create_empty_shadow_texture(gl: &glow::Context) -> Result<GlTexture, String> {
 		unsafe {
@@ -360,8 +362,8 @@ impl SkinnedModelRenderer {
 	}
 
 	//==============================================================================
-	// 출력. (모델 인스턴스의 드로어블 순회, 머티리얼 적용 + 조인트 행렬 업로드)
-	// - 깊이 테스트 / 컬링 / 블렌드 / 프레임버퍼는 호출자가 잡는다. (원본과 같다)
+	/// 출력. (모델 인스턴스의 드로어블 순회, 머티리얼 적용 + 조인트 행렬 업로드)
+	/// - 깊이 테스트 / 컬링 / 블렌드 / 프레임버퍼는 호출자가 잡는다. (원본과 같다)
 	//==============================================================================
 	pub fn draw(&self, gl: &glow::Context, skinned_model: &mut SkinnedModel, view_projection_elements: &[f32; 16], model_matrix_elements: &[f32; 16], camera_x: f32, camera_y: f32, camera_z: f32) {
 		skinned_model.upload_pending_morph_targets(gl);
@@ -434,7 +436,7 @@ impl SkinnedModelRenderer {
 	}
 
 	//==============================================================================
-	// 깊이 패스 출력. (섀도우 맵 캐스팅, ShadowMap.begin_render() 이후 호출)
+	/// 깊이 패스 출력. (섀도우 맵 캐스팅, ShadowMap.begin_render() 이후 호출)
 	//==============================================================================
 	pub fn draw_depth(&self, gl: &glow::Context, skinned_model: &mut SkinnedModel, light_view_projection_elements: &[f32; 16], model_matrix_elements: &[f32; 16]) {
 		skinned_model.upload_pending_morph_targets(gl);
@@ -469,8 +471,8 @@ impl SkinnedModelRenderer {
 	}
 
 	//==============================================================================
-	// 와이어프레임 출력. (모서리 선, 모프 / 스키닝 반영, 블렌드 / 깊이 상태는 호출자가 잡는다)
-	// - 드로어블 버텍스 어레이의 엘리먼트 버퍼를 잠시 선 인덱스로 바꿔 그리고 원래 인덱스로 되돌린다.
+	/// 와이어프레임 출력. (모서리 선, 모프 / 스키닝 반영, 블렌드 / 깊이 상태는 호출자가 잡는다)
+	/// - 드로어블 버텍스 어레이의 엘리먼트 버퍼를 잠시 선 인덱스로 바꿔 그리고 원래 인덱스로 되돌린다.
 	//==============================================================================
 	pub fn draw_wireframe(&self, gl: &glow::Context, skinned_model: &mut SkinnedModel, view_projection_elements: &[f32; 16], model_matrix_elements: &[f32; 16], red: f32, green: f32, blue: f32, alpha: f32) {
 		skinned_model.upload_pending_morph_targets(gl);
@@ -519,7 +521,7 @@ impl SkinnedModelRenderer {
 	}
 
 	//==============================================================================
-	// 모프 유니폼 적용. (드로어블의 모프 텍스처/가중치, 타깃이 없으면 개수 0 으로 비활성)
+	/// 모프 유니폼 적용. (드로어블의 모프 텍스처/가중치, 타깃이 없으면 개수 0 으로 비활성)
 	//==============================================================================
 	pub fn apply_morph_uniforms(&self, gl: &glow::Context, shader_program: &ShaderProgram, drawable: &Drawable) {
 		let morph_target_count_location = shader_program.get_uniform_location(gl, "morphTargetCount");
@@ -553,7 +555,7 @@ impl SkinnedModelRenderer {
 	}
 
 	//==============================================================================
-	// 섀도우 맵 설정. (본 패스에서 그림자 수신, 행렬은 복사해 둔다)
+	/// 섀도우 맵 설정. (본 패스에서 그림자 수신, 행렬은 복사해 둔다)
 	//==============================================================================
 	pub fn set_shadow_map(&mut self, shadow_map_texture: Option<GlTexture>, light_view_projection_elements: Option<&[f32; 16]>, texel_size: f32) {
 		self.shadow_map_texture = shadow_map_texture;
@@ -562,28 +564,28 @@ impl SkinnedModelRenderer {
 	}
 
 	//==============================================================================
-	// 그림자 강도 설정. (0 = 수신 안 함)
+	/// 그림자 강도 설정. (0 = 수신 안 함)
 	//==============================================================================
 	pub fn set_shadow_strength(&mut self, shadow_strength: f32) {
 		self.shadow_strength = shadow_strength;
 	}
 
 	//==============================================================================
-	// 태양 방향 설정.
+	/// 태양 방향 설정.
 	//==============================================================================
 	pub fn set_sun_direction(&mut self, x: f32, y: f32, z: f32) {
 		self.sun_direction = [x, y, z];
 	}
 
 	//==============================================================================
-	// 안개 색 설정.
+	/// 안개 색 설정.
 	//==============================================================================
 	pub fn set_fog_color(&mut self, red: f32, green: f32, blue: f32) {
 		self.fog_color = [red, green, blue];
 	}
 
 	//==============================================================================
-	// 안개 거리 범위 설정.
+	/// 안개 거리 범위 설정.
 	//==============================================================================
 	pub fn set_fog_range(&mut self, start_distance: f32, end_distance: f32) {
 		self.fog_range = [start_distance, end_distance];
@@ -592,7 +594,7 @@ impl SkinnedModelRenderer {
 	//==============================================================================
 	// 셰이더 프로그램 반환. (스키닝 PBR 템플릿, 모델과 머티리얼이 나눠 든다)
 	//==============================================================================
-	// 빈 그림자 텍스처 반환. (그림자를 받지 않을 때 섀도우 유닛에 묶는 1x1 비교 깊이 텍스처, 파생 렌더러가 같이 쓴다)
+	/// 빈 그림자 텍스처 반환. (그림자를 받지 않을 때 섀도우 유닛에 묶는 1x1 비교 깊이 텍스처, 파생 렌더러가 같이 쓴다)
 	//==============================================================================
 	pub fn get_empty_shadow_texture(&self) -> GlTexture {
 		self.empty_shadow_texture
@@ -604,14 +606,14 @@ impl SkinnedModelRenderer {
 	}
 
 	//==============================================================================
-	// 깊이 셰이더 프로그램 반환.
+	/// 깊이 셰이더 프로그램 반환.
 	//==============================================================================
 	pub fn get_depth_shader_program(&self) -> &ShaderProgram {
 		&self.depth_shader_program
 	}
 
 	//==============================================================================
-	// 와이어프레임 셰이더 프로그램 반환.
+	/// 와이어프레임 셰이더 프로그램 반환.
 	//==============================================================================
 	pub fn get_wireframe_shader_program(&self) -> &ShaderProgram {
 		&self.wireframe_shader_program
@@ -619,7 +621,7 @@ impl SkinnedModelRenderer {
 }
 
 //==============================================================================
-// 드로어블 삼각형 출력. (인덱스가 있으면 drawElements, 없으면 drawArrays)
+/// 드로어블 삼각형 출력. (인덱스가 있으면 drawElements, 없으면 drawArrays)
 //==============================================================================
 fn draw_drawable_triangles(gl: &glow::Context, drawable: &Drawable) {
 	unsafe {
@@ -639,7 +641,7 @@ mod tests {
 	use crate::graphics3d::skinnedmodel::MORPH_TARGET_MAXIMUM;
 
 	//==============================================================================
-	// 셰이더 소스의 배열 크기가 상수와 같은지. (원본 템플릿 ${MORPH_TARGET_MAXIMUM} 자리)
+	/// 셰이더 소스의 배열 크기가 상수와 같은지. (원본 템플릿 ${MORPH_TARGET_MAXIMUM} 자리)
 	//==============================================================================
 	#[test]
 	fn morph_glsl_matches_maximum() {

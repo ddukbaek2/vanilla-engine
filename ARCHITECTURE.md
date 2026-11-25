@@ -184,6 +184,8 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
 
 이름은 러스트 규칙(Rust API Guidelines C-CASE)을 따른다: 함수, 메서드, 변수, 필드, 모듈은 snake_case, 타입과 트레이트와 열거 값은 UpperCamelCase, 상수는 SCREAMING_SNAKE_CASE. vanilla.js 의 이름은 이 규칙으로 바꿔 옮긴다. (setFillColor → set_fill_color, Colors.white → Colors::WHITE) 나머지는 vanilla.js 지침을 따른다: 이름 줄이지 않기, 중괄호 늘 쓰기, else 는 다음 줄, `//====` 머리 주석에 독백체 설명, 파일 머리에 원본과의 대응과 다른 점. rustfmt 는 else 줄바꿈을 망가뜨려서 돌리지 않는다.
 
+문서 주석: 머리 주석(`//====` 두 줄 사이)의 설명 줄은 rustdoc 의 `///`, 파일 머리는 `//!` 다. 인자는 `# 인자` 절의 `` - `이름`: 설명 ``, 돌려줌은 `# 돌려줌` 절, 예제는 `# 예제` 절의 ```rust 칸(바로 앞 한 줄이 제목)으로 쓴다. 예제는 `cargo test --doc` 이 컴파일하고 돌린다. (창이나 GL 이 있어야 하면 no_run) 이 주석에서 API 문서 자료(docs/api/<판>.json)를 뽑는다. (tools/apidoc) 자세한 꼴은 CLAUDE.md 의 '문서 주석'.
+
 ## 9. 원본과의 대응
 
 2026-11-26 dev 기준으로 원본 `src/` 의 .js 200 파일 가운데 182 파일을 옮겼고, 18 파일은 일부러 옮기지 않았다. (원본 파일마다 같은 이름의 .rs 가 있는지 보고, 없는 것은 러스트 파일 머리 주석의 원본 경로로 찾아 셌다)

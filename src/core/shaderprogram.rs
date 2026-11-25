@@ -1,8 +1,8 @@
 //==============================================================================
-// 셰이더 프로그램.
-// - 원본은 GLSL ES 3.00 (#version 300 es) 이다. 데스크탑 GL 3.3 코어에서 돌도록 머리만 #version 330 core 로 바꿔 컴파일한다.
-//   (precision 한정자는 GLSL 1.30 부터 의미 없이 받아 주므로 본문은 그대로 둔다)
-// - 유니폼 / 어트리뷰트 위치는 처음 물을 때 읽어 담아 둔다.
+//! 셰이더 프로그램.
+//! - 원본은 GLSL ES 3.00 (#version 300 es) 이다. 데스크탑 GL 3.3 코어에서 돌도록 머리만 #version 330 core 로 바꿔 컴파일한다.
+//!   (precision 한정자는 GLSL 1.30 부터 의미 없이 받아 주므로 본문은 그대로 둔다)
+//! - 유니폼 / 어트리뷰트 위치는 처음 물을 때 읽어 담아 둔다.
 //==============================================================================
 use glow::HasContext;
 use std::cell::RefCell;
@@ -16,14 +16,14 @@ pub struct ShaderProgram {
 
 impl ShaderProgram {
 	//==============================================================================
-	// 생성. (컴파일 / 링크 실패면 로그를 담은 오류)
+	/// 생성. (컴파일 / 링크 실패면 로그를 담은 오류)
 	//==============================================================================
 	pub fn new(gl: &glow::Context, vertex_shader_source: &str, fragment_shader_source: &str) -> Result<ShaderProgram, String> {
 		ShaderProgram::create_with_attribute_locations(gl, vertex_shader_source, fragment_shader_source, &[])
 	}
 
 	//==============================================================================
-	// 어트리뷰트 위치를 링크 전에 고정해 생성. (원본 생성자의 attribute_location_table 인자, 다른 프로그램의 버텍스 어레이를 함께 쓸 때)
+	/// 어트리뷰트 위치를 링크 전에 고정해 생성. (원본 생성자의 attribute_location_table 인자, 다른 프로그램의 버텍스 어레이를 함께 쓸 때)
 	//==============================================================================
 	pub fn create_with_attribute_locations(gl: &glow::Context, vertex_shader_source: &str, fragment_shader_source: &str, attribute_location_list: &[(&str, u32)]) -> Result<ShaderProgram, String> {
 		let desktop_vertex_shader_source = convert_to_desktop_source(vertex_shader_source);
@@ -57,7 +57,7 @@ impl ShaderProgram {
 	}
 
 	//==============================================================================
-	// 사용. (원본 use(), 러스트에서 use 는 예약어라 r# 을 붙여 부른다)
+	/// 사용. (원본 use(), 러스트에서 use 는 예약어라 r# 을 붙여 부른다)
 	//==============================================================================
 	pub fn r#use(&self, gl: &glow::Context) {
 		unsafe {
@@ -66,16 +66,16 @@ impl ShaderProgram {
 	}
 
 	//==============================================================================
-	// 사용. (r#use 와 같다)
+	/// 사용. (r#use 와 같다)
 	//==============================================================================
 	pub fn use_program(&self, gl: &glow::Context) {
 		self.r#use(gl);
 	}
 
 	//==============================================================================
-	// 유니폼 위치 반환.
+	/// 유니폼 위치 반환.
 	//==============================================================================
-	// 웹 판 때문에 clone 을 쓴다. (데스크탑에서는 Copy 라 clippy 가 말린다)
+	/// 웹 판 때문에 clone 을 쓴다. (데스크탑에서는 Copy 라 clippy 가 말린다)
 	#[allow(clippy::clone_on_copy)]
 	pub fn get_uniform_location(&self, gl: &glow::Context, name: &str) -> Option<crate::core::graphic::GlUniformLocation> {
 		let mut uniform_location_table = self.uniform_location_table.borrow_mut();
@@ -91,7 +91,7 @@ impl ShaderProgram {
 	}
 
 	//==============================================================================
-	// 어트리뷰트 위치 반환.
+	/// 어트리뷰트 위치 반환.
 	//==============================================================================
 	pub fn get_attribute_location(&self, gl: &glow::Context, name: &str) -> Option<u32> {
 		let mut attribute_location_table = self.attribute_location_table.borrow_mut();
@@ -106,7 +106,7 @@ impl ShaderProgram {
 	}
 
 	//==============================================================================
-	// GL 프로그램 반환.
+	/// GL 프로그램 반환.
 	//==============================================================================
 	pub fn get_program(&self) -> crate::core::graphic::GlProgram {
 		self.program
@@ -114,7 +114,7 @@ impl ShaderProgram {
 }
 
 //==============================================================================
-// GLSL ES 3.00 머리를 데스크탑 GLSL 3.30 으로 바꾼다. (웹 WebGL2 에서는 원본 그대로)
+/// GLSL ES 3.00 머리를 데스크탑 GLSL 3.30 으로 바꾼다. (웹 WebGL2 에서는 원본 그대로)
 //==============================================================================
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn convert_to_desktop_source(source: &str) -> String {
@@ -127,7 +127,7 @@ pub(crate) fn convert_to_desktop_source(source: &str) -> String {
 }
 
 //==============================================================================
-// 셰이더 하나 컴파일.
+/// 셰이더 하나 컴파일.
 //==============================================================================
 unsafe fn compile_shader(gl: &glow::Context, shader_type: u32, source: &str) -> Result<crate::core::graphic::GlShader, String> {
 	let shader = gl.create_shader(shader_type)?;

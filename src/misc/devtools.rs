@@ -1,39 +1,53 @@
 //==============================================================================
-// 개발자 도구. (원본 misc/devtools.js 의 DEVTools)
-// - F2 키로 보이고 숨긴다. 패널은 뷰 스케일 모드와 상관없이 창 안쪽 논리 좌표(canvas native)로 오른쪽 아래에 붙어 나온다.
-// - 탭 넷: Statistics(엔진, 화면, 시간 정보), Node Hierarchy(왼쪽 트리 + 오른쪽 인스펙터), Local Storage(키와 값 보기, 더하기, 고치기, 지우기),
-//   Settings(바탕 어둡게, 모든 기즈모, 화면 비율 가이드, FPS 표시. 로컬 스토리지 "hierarchy.settings" 에 원본과 같은 JSON 으로 남긴다)
-// - 타이틀바를 끌어 옮기고, 모서리와 꼭짓점을 끌어 크기를 바꾸고, 가운데 구분선을 끌어 좌우 비율을 바꾼다.
-// - 트리: 펼치기와 접기, 액티브(A)와 기즈모(G) 칸, 고르기, 끌어 스크롤. 인스펙터: 컴포넌트 머리를 눌러 속성을 펼치고 접는다. (기본 펼침)
-// - 러스트 판은 씬이 DevTools 를 품고 함수마다 부른다:
-//     tick 에서 dev_tools.tick(engine, node_tree, unscaled_time_delta), post_draw 에서 dev_tools.draw(engine, node_tree, graphic).
-//     is_visible() && is_pointer_inside_panel(engine) 이면 씬은 그 입력을 노드에 넘기지 않는다. (원본 GameScene.isDevToolsCapturingInput)
-// - 원본과 다른 점:
-//   - 전역 엔진이 없어 원본 setEngine 이 없다. tick, draw, is_pointer_inside_panel 이 엔진을 받는다.
-//   - 노드 대신 NodeId 로 가리킨다. 루트 목록은 set_root_nodes(Vec<NodeId>) 이고, 펼친 노드는 NodeId 집합, 접은 컴포넌트는 (NodeId, 컴포넌트 차례) 집합이다.
-//     지운 노드는 트리와 인스펙터에서 빠지고, 고른 노드가 지워지면 고르지 않은 것으로 돌아간다.
-//   - Graphic 은 엔진이 아니라 EngineRunner 가 들어서 tick 에서는 만질 수 없다. 원본이 tick 과 눌림에서 부르는 setForceGizmosVisible 은
-//     바랄 값만 적어 두었다가 다음 draw 첫머리에 Graphic 에 건다. (원본 setEngine 이 거는 false 도 첫 draw 에 건다)
-//   - 노드 종류는 WorldNode 하나뿐이라 트리의 Type 칸과 인스펙터의 type 은 늘 "WorldNode" 다.
-//   - 인스펙터의 컴포넌트 속성은 원본 getComponentProperties 처럼 그 컴포넌트의 get*, is* 게터를 모두 불러 보인다.
-//     원본은 실행 중에 프로토타입을 훑고, 러스트 판은 #[reflect] 매크로가 컴파일 때 지은 목록을 쓴다. (core/reflection.rs, 엔진 컴포넌트는 모두 붙였다)
-//     트리를 받는 게터(원본은 이웃 컴포넌트를 바로 쥐는 것)는 그리기에서 트리를 넘겨 부르고, &mut self 게터가 있는 컴포넌트는 tick 이 트리를 쥐고 읽어 둔 값을 보인다.
-//     이름은 원본 formatMethodName(getTextColor → textColor, is 로 시작하면 그대로), 값은 원본 formatPropertyValue 꼴이다.
-//     (수는 toFixed(2), Vector2 는 (x, y), Rect 는 (x, y, 너비, 높이) toFixed(1), Color 는 rgba, null, 노드는 [WorldNode], 배열은 [Array], 그 밖은 [종류 이름])
-//     목록과 차례는 원본과 같다. (원본 클래스에 없는 러스트 판의 다시 정의는 빼고, 원본과 이름이 다른 게터는 원본 이름으로 보인다) 원본 getEngine 은 전역 엔진이 없어 없다.
-//   - 반사가 없는 컴포넌트(#[reflect] 를 붙이지 않은 게임 컴포넌트)는 UIDocument 에 쓰기 함수로 등록했으면 그 저장 키와 값을 보이고,
-//     아니면 종류 이름 아래에 매크로를 붙이라는 "반사 없음" 줄을 보인다. (빠뜨린 것을 알 수 있게)
-//     게임이 자기 컴포넌트를 등록한 문서는 set_ui_document 로 건다. (또는 get_ui_document_mut 로 등록한다) 이 때 수 넷 배열은 이름에 color 가 들면 rgba, 아니면 사각형으로 본다.
-//   - Local Storage 탭의 키 입력, 값 고치기, 지울지 묻기는 원본 window.prompt, window.confirm 자리인 Engine::prompt, Engine::confirm 이다. (core/modaldialog.rs)
-//     웹은 원본처럼 브라우저 창이 그 자리에서 답한다. 데스크탑은 엔진이 그린 같은 질문 창이 떠서 답할 때까지 씬이 멈추고, 답은 다음 tick 에 받는다.
-//   - Statistics 의 clientNativeSize 는 ViewManager::get_client_native_size(웹은 페이지 전체 크기, 데스크탑은 창 안쪽 논리 크기)다.
-//     메모리는 웹에서 원본처럼 Chrome 의 performance.memory 를 읽고, 없는 브라우저는 "(N/A)" 다.
-//     데스크탑은 자바스크립트 힙이 없어 같은 칸에 러스트가 쓰는 시스템 할당자의 힙(쓰는 중, 잡아 둔 것)을 적는다. (platform/desktop.rs read_heap_usage)
-//     jsHeapSizeLimit 는 V8 이 정한 힙 상한인데 시스템 할당자에는 그런 상한이 없어 "(N/A)" 다. 힙을 못 읽는 OS 는 셋 다 "(N/A)" 다.
-//     viewScaleMode 는 러스트 열거 이름(StretchHeight 등)으로 적는다.
-//   - 화면 비율 가이드는 원본처럼 그때의 좌표계에 기대지 않고 스스로 뷰 좌표계(apply_view_rect)를 걸고 그린다. (원본 GameScene 에서 같은 결과)
-//   - 원본은 FPS 표시 설정을 is_frame_per_second_visible 로 알려 주기만 하고 스스로 그리지 않는다. 러스트 판도 같다.
-// - 옮기지 않은 것: 없음. (원본에서 아무도 부르지 않는 그리기 오류 무시 try/catch 는 러스트에서 필요 없다)
+//! 개발자 도구. (원본 misc/devtools.js 의 DEVTools)
+//! - F2 키로 보이고 숨긴다. 패널은 뷰 스케일 모드와 상관없이 창 안쪽 논리 좌표(canvas native)로 오른쪽 아래에 붙어 나온다.
+//! - 탭 넷: Statistics(엔진, 화면, 시간 정보), Node Hierarchy(왼쪽 트리 + 오른쪽 인스펙터), Local Storage(키와 값 보기, 더하기, 고치기, 지우기),
+//!   Settings(바탕 어둡게, 모든 기즈모, 화면 비율 가이드, FPS 표시. 로컬 스토리지 "hierarchy.settings" 에 원본과 같은 JSON 으로 남긴다)
+//! - 타이틀바를 끌어 옮기고, 모서리와 꼭짓점을 끌어 크기를 바꾸고, 가운데 구분선을 끌어 좌우 비율을 바꾼다.
+//! - 트리: 펼치기와 접기, 액티브(A)와 기즈모(G) 칸, 고르기, 끌어 스크롤. 인스펙터: 컴포넌트 머리를 눌러 속성을 펼치고 접는다. (기본 펼침)
+//! - 러스트 판은 씬이 DevTools 를 품고 함수마다 부른다:
+//!   ```text
+//!     tick 에서 dev_tools.tick(engine, node_tree, unscaled_time_delta), post_draw 에서 dev_tools.draw(engine, node_tree, graphic).
+//!     is_visible() && is_pointer_inside_panel(engine) 이면 씬은 그 입력을 노드에 넘기지 않는다. (원본 GameScene.isDevToolsCapturingInput)
+//!   ```
+//! - 원본과 다른 점:
+//!   - 전역 엔진이 없어 원본 setEngine 이 없다. tick, draw, is_pointer_inside_panel 이 엔진을 받는다.
+//!   - 노드 대신 NodeId 로 가리킨다. 루트 목록은 set_root_nodes(`Vec<NodeId>`) 이고, 펼친 노드는 NodeId 집합, 접은 컴포넌트는 (NodeId, 컴포넌트 차례) 집합이다.
+//!   ```text
+//!     지운 노드는 트리와 인스펙터에서 빠지고, 고른 노드가 지워지면 고르지 않은 것으로 돌아간다.
+//!   ```
+//!   - Graphic 은 엔진이 아니라 EngineRunner 가 들어서 tick 에서는 만질 수 없다. 원본이 tick 과 눌림에서 부르는 setForceGizmosVisible 은
+//!   ```text
+//!     바랄 값만 적어 두었다가 다음 draw 첫머리에 Graphic 에 건다. (원본 setEngine 이 거는 false 도 첫 draw 에 건다)
+//!   ```
+//!   - 노드 종류는 WorldNode 하나뿐이라 트리의 Type 칸과 인스펙터의 type 은 늘 "WorldNode" 다.
+//!   - 인스펙터의 컴포넌트 속성은 원본 getComponentProperties 처럼 그 컴포넌트의 get*, is* 게터를 모두 불러 보인다.
+//!   ```text
+//!     원본은 실행 중에 프로토타입을 훑고, 러스트 판은 #[reflect] 매크로가 컴파일 때 지은 목록을 쓴다. (core/reflection.rs, 엔진 컴포넌트는 모두 붙였다)
+//!     트리를 받는 게터(원본은 이웃 컴포넌트를 바로 쥐는 것)는 그리기에서 트리를 넘겨 부르고, &mut self 게터가 있는 컴포넌트는 tick 이 트리를 쥐고 읽어 둔 값을 보인다.
+//!     이름은 원본 formatMethodName(getTextColor → textColor, is 로 시작하면 그대로), 값은 원본 formatPropertyValue 꼴이다.
+//!     (수는 toFixed(2), Vector2 는 (x, y), Rect 는 (x, y, 너비, 높이) toFixed(1), Color 는 rgba, null, 노드는 [WorldNode], 배열은 [Array], 그 밖은 [종류 이름])
+//!     목록과 차례는 원본과 같다. (원본 클래스에 없는 러스트 판의 다시 정의는 빼고, 원본과 이름이 다른 게터는 원본 이름으로 보인다) 원본 getEngine 은 전역 엔진이 없어 없다.
+//!   ```
+//!   - 반사가 없는 컴포넌트(`#[reflect]` 를 붙이지 않은 게임 컴포넌트)는 UIDocument 에 쓰기 함수로 등록했으면 그 저장 키와 값을 보이고,
+//!   ```text
+//!     아니면 종류 이름 아래에 매크로를 붙이라는 "반사 없음" 줄을 보인다. (빠뜨린 것을 알 수 있게)
+//!     게임이 자기 컴포넌트를 등록한 문서는 set_ui_document 로 건다. (또는 get_ui_document_mut 로 등록한다) 이 때 수 넷 배열은 이름에 color 가 들면 rgba, 아니면 사각형으로 본다.
+//!   ```
+//!   - Local Storage 탭의 키 입력, 값 고치기, 지울지 묻기는 원본 window.prompt, window.confirm 자리인 Engine::prompt, Engine::confirm 이다. (core/modaldialog.rs)
+//!   ```text
+//!     웹은 원본처럼 브라우저 창이 그 자리에서 답한다. 데스크탑은 엔진이 그린 같은 질문 창이 떠서 답할 때까지 씬이 멈추고, 답은 다음 tick 에 받는다.
+//!   ```
+//!   - Statistics 의 clientNativeSize 는 ViewManager::get_client_native_size(웹은 페이지 전체 크기, 데스크탑은 창 안쪽 논리 크기)다.
+//!   ```text
+//!     메모리는 웹에서 원본처럼 Chrome 의 performance.memory 를 읽고, 없는 브라우저는 "(N/A)" 다.
+//!     데스크탑은 자바스크립트 힙이 없어 같은 칸에 러스트가 쓰는 시스템 할당자의 힙(쓰는 중, 잡아 둔 것)을 적는다. (platform/desktop.rs read_heap_usage)
+//!     jsHeapSizeLimit 는 V8 이 정한 힙 상한인데 시스템 할당자에는 그런 상한이 없어 "(N/A)" 다. 힙을 못 읽는 OS 는 셋 다 "(N/A)" 다.
+//!     viewScaleMode 는 러스트 열거 이름(StretchHeight 등)으로 적는다.
+//!   ```
+//!   - 화면 비율 가이드는 원본처럼 그때의 좌표계에 기대지 않고 스스로 뷰 좌표계(apply_view_rect)를 걸고 그린다. (원본 GameScene 에서 같은 결과)
+//!   - 원본은 FPS 표시 설정을 is_frame_per_second_visible 로 알려 주기만 하고 스스로 그리지 않는다. 러스트 판도 같다.
+//! - 옮기지 않은 것: 없음. (원본에서 아무도 부르지 않는 그리기 오류 무시 try/catch 는 러스트에서 필요 없다)
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::rect::Rect;
@@ -52,11 +66,11 @@ use std::collections::HashSet;
 
 use crate::core::modaldialog::{ModalDialogHandle, ModalDialogKind};
 
-// 반사도 UIDocument 등록도 없는 컴포넌트의 속성 자리 글. (원본은 모든 객체가 반사되어 이런 컴포넌트가 없다)
+/// 반사도 UIDocument 등록도 없는 컴포넌트의 속성 자리 글. (원본은 모든 객체가 반사되어 이런 컴포넌트가 없다)
 const MISSING_REFLECTION_TEXT: &str = "(반사 없음: #[vanilla::reflect] 를 붙이면 보임)";
 
 //==============================================================================
-// 고정 레이아웃 상수.
+/// 고정 레이아웃 상수.
 //==============================================================================
 const TITLE_HEIGHT: f32 = 28.0;
 const TAB_HEIGHT: f32 = 24.0;
@@ -78,18 +92,18 @@ const DEFAULT_PANEL_HEIGHT: f32 = 520.0;
 const DEFAULT_LEFT_WIDTH: f32 = 405.0;
 const SETTINGS_STORAGE_KEY: &str = "hierarchy.settings";
 
-// 글꼴. (원본 FONT_SIZE 12 로 짓는 `${FONT_SIZE}px monospace`, `bold ...`, `${FONT_SIZE - 1}px ...`)
+/// 글꼴. (원본 FONT_SIZE 12 로 짓는 `${FONT_SIZE}px monospace`, `bold ...`, `${FONT_SIZE - 1}px ...`)
 const FONT_STRING: &str = "12px monospace";
 const BOLD_FONT_STRING: &str = "bold 12px monospace";
 const SMALL_FONT_STRING: &str = "11px monospace";
 
-// 로컬 스토리지 탭의 단추와 칸.
+/// 로컬 스토리지 탭의 단추와 칸.
 const LOCAL_STORAGE_BUTTON_WIDTH: f32 = 48.0;
 const LOCAL_STORAGE_DELETE_COLUMN_WIDTH: f32 = 24.0;
 const CONTEXT_MENU_HEIGHT: f32 = ITEM_HEIGHT + 8.0;
 const CONTEXT_BUTTON_TEXTS: [&str; 4] = ["Edit Key", "Edit Value", "Duplicate", "Remove"];
 
-// 세팅 탭 줄. (글, 칸의 x 오프셋)
+/// 세팅 탭 줄. (글, 칸의 x 오프셋)
 const SETTINGS_ROWS: [(&str, f32); 5] = [
 	("Dim Background", 120.0),
 	("Show All Gizmos", 120.0),
@@ -98,14 +112,14 @@ const SETTINGS_ROWS: [(&str, f32); 5] = [
 	("Show FPS", 120.0),
 ];
 
-// 노드 종류 이름. (러스트 판의 노드는 WorldNode 하나다)
+/// 노드 종류 이름. (러스트 판의 노드는 WorldNode 하나다)
 const NODE_TYPE_NAME: &str = "WorldNode";
 
-// UIDocument 가 노드 참조를 적는 키.
+/// UIDocument 가 노드 참조를 적는 키.
 const NODE_REFERENCE_KEY: &str = "$nodeRef";
 
 //==============================================================================
-// 색상 상수. (원본 CSS 색, 0 ~ 255)
+/// 색상 상수. (원본 CSS 색, 0 ~ 255)
 //==============================================================================
 const COLOR_BACKGROUND: Color = create_color(22.0, 18.0, 12.0, 0.97);
 const COLOR_TITLE_BACKGROUND: Color = create_color(40.0, 32.0, 18.0, 1.0);
@@ -126,13 +140,13 @@ const COLOR_INACTIVE_TEXT: Color = create_color(140.0, 116.0, 85.0, 1.0);
 const COLOR_SCROLLBAR: Color = create_color(110.0, 88.0, 50.0, 0.55);
 const COLOR_TRUE: Color = create_color(140.0, 200.0, 120.0, 1.0);
 const COLOR_FALSE: Color = create_color(200.0, 120.0, 120.0, 1.0);
-// 빈 체크 칸의 속. (원본 "#16120a")
+/// 빈 체크 칸의 속. (원본 "#16120a")
 const COLOR_CHECKBOX_EMPTY: Color = create_color(22.0, 18.0, 10.0, 1.0);
-// 인스펙터 구분선. (원본 "rgba(75, 60, 35, 0.8)")
+/// 인스펙터 구분선. (원본 "rgba(75, 60, 35, 0.8)")
 const COLOR_INSPECTOR_SEPARATOR: Color = create_color(75.0, 60.0, 35.0, 0.8);
-// 바탕 어둡게. (원본 "rgba(0, 0, 0, 0.5)")
+/// 바탕 어둡게. (원본 "rgba(0, 0, 0, 0.5)")
 const COLOR_DIM: Color = create_color(0.0, 0.0, 0.0, 0.5);
-// 로컬 스토리지 단추.
+/// 로컬 스토리지 단추.
 const COLOR_ADD_BUTTON: Color = create_color(60.0, 100.0, 60.0, 0.9);
 const COLOR_CLEAR_BUTTON: Color = create_color(100.0, 40.0, 30.0, 0.9);
 const COLOR_DELETE_BUTTON: Color = create_color(100.0, 40.0, 30.0, 0.6);
@@ -148,19 +162,19 @@ const CONTEXT_BUTTON_TEXT_COLORS: [Color; 4] = [
 	create_color(120.0, 180.0, 200.0, 1.0),
 	create_color(200.0, 120.0, 120.0, 1.0),
 ];
-// 화면 비율 가이드. (세로 기준, 가로 기준)
+/// 화면 비율 가이드. (세로 기준, 가로 기준)
 const COLOR_HEIGHT_ASPECT_GUIDE: Color = create_color(80.0, 200.0, 240.0, 1.0);
 const COLOR_WIDTH_ASPECT_GUIDE: Color = create_color(240.0, 180.0, 80.0, 1.0);
 
 //==============================================================================
-// 0 ~ 255 색 값으로 색 만들기. (알파는 0 ~ 1)
+/// 0 ~ 255 색 값으로 색 만들기. (알파는 0 ~ 1)
 //==============================================================================
 const fn create_color(red: f32, green: f32, blue: f32, alpha: f32) -> Color {
 	Color::create(red / 255.0, green / 255.0, blue / 255.0, alpha)
 }
 
 //==============================================================================
-// 리사이즈 모드.
+/// 리사이즈 모드.
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ResizeMode {
@@ -176,18 +190,18 @@ enum ResizeMode {
 }
 
 //==============================================================================
-// 트리 목록 항목.
+/// 트리 목록 항목.
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct DevToolsFlatItem {
 	node_id: NodeId,
 	depth: usize,
-	// 자기와 조상이 모두 액티브인지.
+	/// 자기와 조상이 모두 액티브인지.
 	effective_active: bool,
 }
 
 //==============================================================================
-// 인스펙터 라인.
+/// 인스펙터 라인.
 //==============================================================================
 #[derive(Clone, Debug)]
 struct InspectorLine {
@@ -197,14 +211,14 @@ struct InspectorLine {
 	is_separator: bool,
 	is_section_header: bool,
 	is_component_header: bool,
-	// 컴포넌트 머리가 가리키는 컴포넌트. (노드, 컴포넌트 차례)
+	/// 컴포넌트 머리가 가리키는 컴포넌트. (노드, 컴포넌트 차례)
 	component_reference: Option<(NodeId, usize)>,
 	is_component_property: bool,
 }
 
 impl InspectorLine {
 	//==============================================================================
-	// 생성. (원본 생성자와 같은 차례)
+	/// 생성. (원본 생성자와 같은 차례)
 	//==============================================================================
 	fn new(text: Option<&str>, value: &str, color: Color, is_separator: bool, is_section_header: bool, is_component_header: bool, component_reference: Option<(NodeId, usize)>, is_component_property: bool) -> InspectorLine {
 		InspectorLine {
@@ -221,7 +235,7 @@ impl InspectorLine {
 }
 
 //==============================================================================
-// 통계 항목.
+/// 통계 항목.
 //==============================================================================
 #[derive(Clone, Debug)]
 struct StatisticsItem {
@@ -233,7 +247,7 @@ struct StatisticsItem {
 
 impl StatisticsItem {
 	//==============================================================================
-	// 키와 값 항목.
+	/// 키와 값 항목.
 	//==============================================================================
 	fn create(key: &str, value: String) -> StatisticsItem {
 		StatisticsItem {
@@ -245,7 +259,7 @@ impl StatisticsItem {
 	}
 
 	//==============================================================================
-	// 하위 섹션 머리 항목.
+	/// 하위 섹션 머리 항목.
 	//==============================================================================
 	fn create_section_header(key: &str) -> StatisticsItem {
 		StatisticsItem {
@@ -258,26 +272,26 @@ impl StatisticsItem {
 }
 
 //==============================================================================
-// 로컬 스토리지 입력 창이 끝나면 할 일. (원본 prompt, confirm 뒤의 코드)
+/// 로컬 스토리지 입력 창이 끝나면 할 일. (원본 prompt, confirm 뒤의 코드)
 //==============================================================================
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum LocalStorageDialogAction {
-	// "키 입력:" 뒤 값을 묻는다.
+	/// "키 입력:" 뒤 값을 묻는다.
 	AddKey,
-	// "값 입력:" 뒤 키에 값을 쓴다.
+	/// "값 입력:" 뒤 키에 값을 쓴다.
 	AddValue(String),
-	// 키 이름 바꾸기.
+	/// 키 이름 바꾸기.
 	EditKey(String),
-	// 값 바꾸기.
+	/// 값 바꾸기.
 	EditValue(String),
-	// 모두 지우기.
+	/// 모두 지우기.
 	Clear,
-	// 하나 지우기.
+	/// 하나 지우기.
 	Remove(String),
 }
 
 //==============================================================================
-// 로컬 스토리지 질문 부탁. (원본이 그 자리에서 부르는 window.prompt, window.confirm. 엔진을 받는 tick 에서 띄운다)
+/// 로컬 스토리지 질문 부탁. (원본이 그 자리에서 부르는 window.prompt, window.confirm. 엔진을 받는 tick 에서 띄운다)
 //==============================================================================
 struct LocalStorageDialogRequest {
 	kind: ModalDialogKind,
@@ -287,7 +301,7 @@ struct LocalStorageDialogRequest {
 }
 
 //==============================================================================
-// 개발자 도구 패널.
+/// 개발자 도구 패널.
 //==============================================================================
 pub struct DevTools {
 	root_ids: Vec<NodeId>,
@@ -316,10 +330,10 @@ pub struct DevTools {
 	previous_is_key_f2: bool,
 	flat_list: Vec<DevToolsFlatItem>,
 	expanded_node_ids: HashSet<NodeId>,
-	// 접은 컴포넌트. (노드, 컴포넌트 차례. 없으면 펼친 것)
+	/// 접은 컴포넌트. (노드, 컴포넌트 차례. 없으면 펼친 것)
 	collapsed_components: HashSet<(NodeId, usize)>,
 	cached_inspector_lines: Vec<InspectorLine>,
-	// &mut self 게터가 있는 컴포넌트의 게터 값. (고른 노드, 컴포넌트 차례 → 게터 목록. tick 이 트리를 쥐고 &mut 갈래로 읽어 둔다)
+	/// &mut self 게터가 있는 컴포넌트의 게터 값. (고른 노드, 컴포넌트 차례 → 게터 목록. tick 이 트리를 쥐고 &mut 갈래로 읽어 둔다)
 	mutable_getter_cache: Vec<(NodeId, usize, Vec<ReflectedGetter>)>,
 	is_tree_scroll_dragging: bool,
 	tree_scroll_drag_start_mouse_y: f32,
@@ -338,25 +352,25 @@ pub struct DevTools {
 	is_height_aspect_guide_visible: bool,
 	is_width_aspect_guide_visible: bool,
 	is_frame_per_second_visible: bool,
-	// 로컬 스토리지 선택 메뉴 단추 자리. (원본 ctxButtonRects, 그릴 때 정한다)
+	/// 로컬 스토리지 선택 메뉴 단추 자리. (원본 ctxButtonRects, 그릴 때 정한다)
 	context_button_rects: Vec<Rect>,
 	selected_statistics_key: Option<String>,
 	statistics_scroll_y: f32,
 	is_statistics_scroll_dragging: bool,
 	statistics_scroll_drag_start_mouse_y: f32,
 	statistics_scroll_drag_start_scroll_y: f32,
-	// 인스펙터의 컴포넌트 속성을 읽는 문서. (처음은 엔진 컴포넌트만 등록된 것, set_ui_document 로 게임 문서를 건다)
+	/// 인스펙터의 컴포넌트 속성을 읽는 문서. (처음은 엔진 컴포넌트만 등록된 것, set_ui_document 로 게임 문서를 건다)
 	ui_document: UIDocument,
-	// 다음 draw 에 Graphic 에 걸 모든 기즈모 강제 표시 값.
+	/// 다음 draw 에 Graphic 에 걸 모든 기즈모 강제 표시 값.
 	pending_force_gizmos_visible: Option<bool>,
-	// 띄울 질문과 답을 기다리는 질문.
+	/// 띄울 질문과 답을 기다리는 질문.
 	local_storage_dialog_request: Option<LocalStorageDialogRequest>,
 	local_storage_dialog_wait: Option<(ModalDialogHandle, LocalStorageDialogAction)>,
 }
 
 impl DevTools {
 	//==============================================================================
-	// 생성. (숨긴 채, Node Hierarchy 탭, 저장한 설정을 읽는다)
+	/// 생성. (숨긴 채, Node Hierarchy 탭, 저장한 설정을 읽는다)
 	//==============================================================================
 	pub fn new() -> DevTools {
 		let mut dev_tools = DevTools {
@@ -422,7 +436,7 @@ impl DevTools {
 	}
 
 	//==============================================================================
-	// 루트 노드 목록 설정. (루트는 펼친 채로 둔다)
+	/// 루트 노드 목록 설정. (루트는 펼친 채로 둔다)
 	//==============================================================================
 	pub fn set_root_nodes(&mut self, root_ids: Vec<NodeId>) {
 		for root_id in root_ids.iter() {
@@ -432,14 +446,14 @@ impl DevTools {
 	}
 
 	//==============================================================================
-	// 표시 여부 반환.
+	/// 표시 여부 반환.
 	//==============================================================================
 	pub fn is_visible(&self) -> bool {
 		self.is_visible
 	}
 
 	//==============================================================================
-	// 보이기와 숨기기. (F2 와 같다. 보일 때 패널을 창 오른쪽 아래에 붙이고, 모든 기즈모 설정을 건다)
+	/// 보이기와 숨기기. (F2 와 같다. 보일 때 패널을 창 오른쪽 아래에 붙이고, 모든 기즈모 설정을 건다)
 	//==============================================================================
 	pub fn set_visible(&mut self, engine: &Engine, is_visible: bool) {
 		self.is_visible = is_visible;
@@ -456,14 +470,14 @@ impl DevTools {
 	}
 
 	//==============================================================================
-	// 지금 탭 반환. (0 Statistics, 1 Node Hierarchy, 2 Local Storage, 3 Settings)
+	/// 지금 탭 반환. (0 Statistics, 1 Node Hierarchy, 2 Local Storage, 3 Settings)
 	//==============================================================================
 	pub fn get_active_tab(&self) -> usize {
 		self.active_tab
 	}
 
 	//==============================================================================
-	// 탭 설정. (없는 탭이면 무시)
+	/// 탭 설정. (없는 탭이면 무시)
 	//==============================================================================
 	pub fn set_active_tab(&mut self, tab_index: usize) {
 		if tab_index < TABS.len() {
@@ -472,14 +486,14 @@ impl DevTools {
 	}
 
 	//==============================================================================
-	// 고른 노드 반환.
+	/// 고른 노드 반환.
 	//==============================================================================
 	pub fn get_selected_node(&self) -> Option<NodeId> {
 		self.selected_node_id
 	}
 
 	//==============================================================================
-	// 노드 고르기. (인스펙터 스크롤은 맨 위로)
+	/// 노드 고르기. (인스펙터 스크롤은 맨 위로)
 	//==============================================================================
 	pub fn set_selected_node(&mut self, node_id: Option<NodeId>) {
 		self.selected_node_id = node_id;
@@ -487,14 +501,14 @@ impl DevTools {
 	}
 
 	//==============================================================================
-	// 트리에서 노드를 펼쳤는지.
+	/// 트리에서 노드를 펼쳤는지.
 	//==============================================================================
 	pub fn is_node_expanded(&self, node_id: NodeId) -> bool {
 		self.expanded_node_ids.contains(&node_id)
 	}
 
 	//==============================================================================
-	// 트리에서 노드 펼치기와 접기.
+	/// 트리에서 노드 펼치기와 접기.
 	//==============================================================================
 	pub fn set_node_expanded(&mut self, node_id: NodeId, is_expanded: bool) {
 		if is_expanded {
@@ -506,28 +520,28 @@ impl DevTools {
 	}
 
 	//==============================================================================
-	// 인스펙터가 컴포넌트 속성을 읽을 문서 설정. (게임이 자기 컴포넌트를 등록한 UIDocument 를 걸면 그 컴포넌트의 속성도 보인다)
+	/// 인스펙터가 컴포넌트 속성을 읽을 문서 설정. (게임이 자기 컴포넌트를 등록한 UIDocument 를 걸면 그 컴포넌트의 속성도 보인다)
 	//==============================================================================
 	pub fn set_ui_document(&mut self, ui_document: UIDocument) {
 		self.ui_document = ui_document;
 	}
 
 	//==============================================================================
-	// 인스펙터가 컴포넌트 속성을 읽는 문서. (변경용, 컴포넌트 종류를 더 등록할 때)
+	/// 인스펙터가 컴포넌트 속성을 읽는 문서. (변경용, 컴포넌트 종류를 더 등록할 때)
 	//==============================================================================
 	pub fn get_ui_document_mut(&mut self) -> &mut UIDocument {
 		&mut self.ui_document
 	}
 
 	//==============================================================================
-	// 패널 영역 반환. (창 안쪽 논리 좌표)
+	/// 패널 영역 반환. (창 안쪽 논리 좌표)
 	//==============================================================================
 	pub fn get_panel_rect(&self) -> Rect {
 		Rect::create(self.panel_x, self.panel_y, self.panel_width, self.panel_height)
 	}
 
 	//==============================================================================
-	// 현재 터치 위치가 패널 내부에 있는지 반환.
+	/// 현재 터치 위치가 패널 내부에 있는지 반환.
 	//==============================================================================
 	pub fn is_pointer_inside_panel(&self, engine: &Engine) -> bool {
 		if !self.is_visible {
@@ -540,7 +554,7 @@ impl DevTools {
 	}
 
 	//==============================================================================
-	// 갱신. (F2 토글, 트리 목록, 터치)
+	/// 갱신. (F2 토글, 트리 목록, 터치)
 	//==============================================================================
 	pub fn tick(&mut self, engine: &mut Engine, node_tree: &mut NodeTree, _time_delta: f32) {
 		// 검사 부탁. (입력 필드 문맥 메뉴의 검사, 크롬이 개발자 도구를 열어 그 요소를 고르는 자리)
@@ -601,7 +615,7 @@ impl DevTools {
 	}
 
 	//==============================================================================
-	// 노드 검사. (보이고, Node Hierarchy 탭으로, 조상을 펼치고 그 노드를 고른다)
+	/// 노드 검사. (보이고, Node Hierarchy 탭으로, 조상을 펼치고 그 노드를 고른다)
 	//==============================================================================
 	pub fn inspect_node(&mut self, engine: &Engine, node_tree: &NodeTree, node_id: NodeId) {
 		if !self.is_visible {
@@ -617,7 +631,7 @@ impl DevTools {
 	}
 
 	//==============================================================================
-	// 로컬 스토리지 질문 이어 가기. (답이 왔으면 할 일을 하고, 부탁이 있으면 띄운다. 웹은 그 자리에서 답해 이어서 다음 질문을 띄운다)
+	/// 로컬 스토리지 질문 이어 가기. (답이 왔으면 할 일을 하고, 부탁이 있으면 띄운다. 웹은 그 자리에서 답해 이어서 다음 질문을 띄운다)
 	//==============================================================================
 	fn process_local_storage_dialog(&mut self, engine: &mut Engine) {
 		loop {
@@ -670,7 +684,7 @@ impl DevTools {
 	}
 
 	//==============================================================================
-	// 리사이즈 드래그 시작.
+	/// 리사이즈 드래그 시작.
 	//==============================================================================
 	fn start_resize(&mut self, resize_mode: ResizeMode, touch_x: f32, touch_y: f32) {
 		self.resize_mode = resize_mode;
@@ -684,7 +698,7 @@ impl DevTools {
 	}
 
 	//==============================================================================
-	// 눌림 처리.
+	/// 눌림 처리.
 	//==============================================================================
 	fn handle_press(&mut self, engine: &Engine, node_tree: &mut NodeTree, touch_x: f32, touch_y: f32) {
 		let panel_x = self.panel_x;
@@ -884,7 +898,7 @@ impl DevTools {
 	}
 
 	//==============================================================================
-	// 이동 처리.
+	/// 이동 처리.
 	//==============================================================================
 	fn handle_move(&mut self, touch_x: f32, touch_y: f32) {
 		// 패널 드래그.
@@ -972,7 +986,7 @@ impl DevTools {
 	}
 
 	//==============================================================================
-	// 뗌 처리.
+	/// 뗌 처리.
 	//==============================================================================
 	fn handle_release(&mut self, _touch_x: f32, _touch_y: f32) {
 		self.is_dragging_panel = false;
@@ -984,7 +998,7 @@ impl DevTools {
 	}
 
 	//==============================================================================
-	// 로컬 스토리지 탭 눌림 처리.
+	/// 로컬 스토리지 탭 눌림 처리.
 	//==============================================================================
 	fn handle_local_storage_press(&mut self, touch_x: f32, touch_y: f32, panel_x: f32, panel_y: f32, panel_width: f32, panel_height: f32) {
 		let button_height = ITEM_HEIGHT - 4.0;
@@ -1079,7 +1093,7 @@ impl DevTools {
 	}
 
 	//==============================================================================
-	// 글을 묻는다. (원본 window.prompt, 엔진을 받는 tick 에서 Engine::prompt 로 띄운다)
+	/// 글을 묻는다. (원본 window.prompt, 엔진을 받는 tick 에서 Engine::prompt 로 띄운다)
 	//==============================================================================
 	fn open_local_storage_prompt(&mut self, message: &str, default_value: &str, action: LocalStorageDialogAction) {
 		self.local_storage_dialog_request = Some(LocalStorageDialogRequest {
@@ -1091,7 +1105,7 @@ impl DevTools {
 	}
 
 	//==============================================================================
-	// 확인을 묻는다. (원본 window.confirm, 엔진을 받는 tick 에서 Engine::confirm 으로 띄운다)
+	/// 확인을 묻는다. (원본 window.confirm, 엔진을 받는 tick 에서 Engine::confirm 으로 띄운다)
 	//==============================================================================
 	fn open_local_storage_confirm(&mut self, message: &str, action: LocalStorageDialogAction) {
 		self.local_storage_dialog_request = Some(LocalStorageDialogRequest {
@@ -1103,7 +1117,7 @@ impl DevTools {
 	}
 
 	//==============================================================================
-	// 입력 창이 끝난 뒤 할 일. (result 는 확인이면 Some(입력한 글), 취소면 None. 원본 prompt 의 null 과 confirm 의 false 가 None)
+	/// 입력 창이 끝난 뒤 할 일. (result 는 확인이면 Some(입력한 글), 취소면 None. 원본 prompt 의 null 과 confirm 의 false 가 None)
 	//==============================================================================
 	fn complete_local_storage_dialog(&mut self, action: LocalStorageDialogAction, result: Option<String>) {
 		match action {
@@ -1154,14 +1168,14 @@ impl DevTools {
 	}
 
 	//==============================================================================
-	// 띄우지 않은 질문을 버린다. (패널을 숨길 때. 떠 있는 질문은 답할 때까지 씬이 멈춰 있어 숨길 수 없다)
+	/// 띄우지 않은 질문을 버린다. (패널을 숨길 때. 떠 있는 질문은 답할 때까지 씬이 멈춰 있어 숨길 수 없다)
 	//==============================================================================
 	fn close_local_storage_dialog(&mut self) {
 		self.local_storage_dialog_request = None;
 	}
 
 	//==============================================================================
-	// 트리 목록 재구성.
+	/// 트리 목록 재구성.
 	//==============================================================================
 	fn rebuild_flat_list(&mut self, node_tree: &NodeTree) {
 		self.flat_list.clear();
@@ -1172,7 +1186,7 @@ impl DevTools {
 	}
 
 	//==============================================================================
-	// 노드를 플랫 목록에 재귀 추가. (지운 노드는 건너뛴다)
+	/// 노드를 플랫 목록에 재귀 추가. (지운 노드는 건너뛴다)
 	//==============================================================================
 	fn collect_node(&mut self, node_tree: &NodeTree, node_id: NodeId, depth: usize, parent_active: bool) {
 		let node = match node_tree.get_node(node_id) {
@@ -1200,7 +1214,7 @@ impl DevTools {
 	}
 
 	//==============================================================================
-	// &mut self 게터가 있는 고른 노드 컴포넌트의 게터 값 읽기. (컴포넌트를 트리에서 잠깐 꺼내 &mut 갈래로 읽는다)
+	/// &mut self 게터가 있는 고른 노드 컴포넌트의 게터 값 읽기. (컴포넌트를 트리에서 잠깐 꺼내 &mut 갈래로 읽는다)
 	//==============================================================================
 	fn collect_mutable_getters(&mut self, node_tree: &mut NodeTree) {
 		self.mutable_getter_cache.clear();
@@ -1225,7 +1239,7 @@ impl DevTools {
 	}
 
 	//==============================================================================
-	// 인스펙터 라인 목록 구성. (cached_inspector_lines 에 담는다)
+	/// 인스펙터 라인 목록 구성. (cached_inspector_lines 에 담는다)
 	//==============================================================================
 	fn build_inspector_lines(&mut self, node_tree: &NodeTree, node_id: NodeId) {
 		let mut lines: Vec<InspectorLine> = Vec::new();
@@ -1338,7 +1352,7 @@ impl DevTools {
 	}
 
 	//==============================================================================
-	// 출력. (창 안쪽 논리 좌표로 그리고, 끝나면 들어올 때의 그리기 상태로 돌린다)
+	/// 출력. (창 안쪽 논리 좌표로 그리고, 끝나면 들어올 때의 그리기 상태로 돌린다)
 	//==============================================================================
 	pub fn draw(&mut self, engine: &Engine, node_tree: &NodeTree, graphic: &mut Graphic) {
 		if let Some(is_force_gizmos_visible) = self.pending_force_gizmos_visible.take() {
@@ -1481,7 +1495,7 @@ impl DevTools {
 	}
 
 	//==============================================================================
-	// 트리 패널 출력.
+	/// 트리 패널 출력.
 	//==============================================================================
 	fn draw_tree_panel(&mut self, node_tree: &NodeTree, graphic: &mut Graphic, panel_x: f32, panel_y: f32, panel_width: f32, panel_height: f32) {
 		graphic.begin_clip_rect(Rect::create(panel_x, panel_y, panel_width, panel_height), 0.0);
@@ -1625,7 +1639,7 @@ impl DevTools {
 	}
 
 	//==============================================================================
-	// 인스펙터 패널 출력.
+	/// 인스펙터 패널 출력.
 	//==============================================================================
 	fn draw_inspector_panel(&mut self, node_tree: &NodeTree, graphic: &mut Graphic, panel_x: f32, panel_y: f32, panel_width: f32, panel_height: f32) {
 		graphic.begin_clip_rect(Rect::create(panel_x, panel_y, panel_width, panel_height), 0.0);
@@ -1752,7 +1766,7 @@ impl DevTools {
 	}
 
 	//==============================================================================
-	// 로컬 스토리지 패널 출력.
+	/// 로컬 스토리지 패널 출력.
 	//==============================================================================
 	fn draw_local_storage_panel(&mut self, graphic: &mut Graphic, panel_x: f32, panel_y: f32, panel_width: f32, panel_height: f32) {
 		graphic.begin_clip_rect(Rect::create(panel_x, panel_y, panel_width, panel_height), 0.0);
@@ -1915,7 +1929,7 @@ impl DevTools {
 	}
 
 	//==============================================================================
-	// 화면 비율 가이드라인 출력. (늘이는 뷰 스케일 모드에서만, 뷰 좌표계)
+	/// 화면 비율 가이드라인 출력. (늘이는 뷰 스케일 모드에서만, 뷰 좌표계)
 	//==============================================================================
 	fn draw_aspect_guide(&self, engine: &Engine, graphic: &mut Graphic) {
 		if !self.is_height_aspect_guide_visible && !self.is_width_aspect_guide_visible {
@@ -1958,14 +1972,14 @@ impl DevTools {
 	}
 
 	//==============================================================================
-	// 세팅 줄의 값. (SETTINGS_ROWS 차례)
+	/// 세팅 줄의 값. (SETTINGS_ROWS 차례)
 	//==============================================================================
 	fn get_setting_values(&self) -> [bool; 5] {
 		[self.is_dim_enabled, self.is_all_gizmos_visible, self.is_height_aspect_guide_visible, self.is_width_aspect_guide_visible, self.is_frame_per_second_visible]
 	}
 
 	//==============================================================================
-	// 세팅 줄의 체크 칸 자리.
+	/// 세팅 줄의 체크 칸 자리.
 	//==============================================================================
 	fn calculate_setting_checkbox_rect(row_index: usize, panel_x: f32, panel_y: f32) -> Rect {
 		let row_y = panel_y + ITEM_HEIGHT * (row_index as f32 + 1.0);
@@ -1976,7 +1990,7 @@ impl DevTools {
 	}
 
 	//==============================================================================
-	// 세팅 패널 출력.
+	/// 세팅 패널 출력.
 	//==============================================================================
 	fn draw_settings_panel(&self, graphic: &mut Graphic, panel_x: f32, panel_y: f32, panel_width: f32, panel_height: f32) {
 		graphic.begin_clip_rect(Rect::create(panel_x, panel_y, panel_width, panel_height), 0.0);
@@ -2009,7 +2023,7 @@ impl DevTools {
 	}
 
 	//==============================================================================
-	// 세팅 탭 눌림 처리.
+	/// 세팅 탭 눌림 처리.
 	//==============================================================================
 	fn handle_settings_press(&mut self, touch_x: f32, touch_y: f32, panel_x: f32, panel_y: f32) {
 		let hit_row_index = (0..SETTINGS_ROWS.len()).find(|row_index| is_point_in_rect(touch_x, touch_y, DevTools::calculate_setting_checkbox_rect(*row_index, panel_x, panel_y)));
@@ -2038,7 +2052,7 @@ impl DevTools {
 	}
 
 	//==============================================================================
-	// 설정 불러오기. (없거나 깨졌으면 기본값, 논리 값이 아닌 칸은 건너뛴다)
+	/// 설정 불러오기. (없거나 깨졌으면 기본값, 논리 값이 아닌 칸은 건너뛴다)
 	//==============================================================================
 	fn load_settings(&mut self) {
 		if !LocalStorage::contains_key(SETTINGS_STORAGE_KEY) {
@@ -2071,7 +2085,7 @@ impl DevTools {
 	}
 
 	//==============================================================================
-	// 설정 저장. (원본 JSON.stringify 와 같은 글)
+	/// 설정 저장. (원본 JSON.stringify 와 같은 글)
 	//==============================================================================
 	fn save_settings(&self) {
 		let settings_object = serde_json::json!({
@@ -2085,14 +2099,14 @@ impl DevTools {
 	}
 
 	//==============================================================================
-	// FPS 표시 여부 반환.
+	/// FPS 표시 여부 반환.
 	//==============================================================================
 	pub fn is_frame_per_second_visible(&self) -> bool {
 		self.is_frame_per_second_visible
 	}
 
 	//==============================================================================
-	// 통계 항목 수집.
+	/// 통계 항목 수집.
 	//==============================================================================
 	fn gather_statistics_items(&self, engine: &Engine) -> Vec<StatisticsItem> {
 		let mut items: Vec<StatisticsItem> = Vec::new();
@@ -2151,7 +2165,7 @@ impl DevTools {
 	}
 
 	//==============================================================================
-	// 통계 패널 출력.
+	/// 통계 패널 출력.
 	//==============================================================================
 	fn draw_statistics_panel(&mut self, engine: &Engine, graphic: &mut Graphic, panel_x: f32, panel_y: f32, panel_width: f32, panel_height: f32) {
 		graphic.begin_clip_rect(Rect::create(panel_x, panel_y, panel_width, panel_height), 0.0);
@@ -2248,7 +2262,7 @@ impl DevTools {
 	}
 
 	//==============================================================================
-	// 통계 탭 눌림 처리.
+	/// 통계 탭 눌림 처리.
 	//==============================================================================
 	fn handle_statistics_press(&mut self, engine: &Engine, touch_y: f32, panel_y: f32) {
 		let statistics_items = self.gather_statistics_items(engine);
@@ -2286,14 +2300,14 @@ impl Default for DevTools {
 }
 
 //==============================================================================
-// 점이 사각형 안(경계 포함)에 있는지. (원본의 >= / <= 비교)
+/// 점이 사각형 안(경계 포함)에 있는지. (원본의 >= / <= 비교)
 //==============================================================================
 fn is_point_in_rect(x: f32, y: f32, rect: Rect) -> bool {
 	x >= rect.position.x && x <= rect.position.x + rect.size.x && y >= rect.position.y && y <= rect.position.y + rect.size.y
 }
 
 //==============================================================================
-// 체크 칸 출력. (테두리 색으로 채우고, 꺼졌으면 속을 빈 칸 색으로 덮는다)
+/// 체크 칸 출력. (테두리 색으로 채우고, 꺼졌으면 속을 빈 칸 색으로 덮는다)
 //==============================================================================
 fn draw_checkbox(graphic: &mut Graphic, checkbox_x: f32, checkbox_y: f32, border_color: Color, is_checked: bool) {
 	graphic.set_fill_color(border_color);
@@ -2305,7 +2319,7 @@ fn draw_checkbox(graphic: &mut Graphic, checkbox_x: f32, checkbox_y: f32, border
 }
 
 //==============================================================================
-// 탭 내용의 제목 줄 출력. (Local Storage, Settings, Statistics 의 헤더 배경과 타이틀)
+/// 탭 내용의 제목 줄 출력. (Local Storage, Settings, Statistics 의 헤더 배경과 타이틀)
 //==============================================================================
 fn draw_section_title(graphic: &mut Graphic, title: &str, panel_x: f32, panel_y: f32, panel_width: f32) {
 	graphic.set_fill_color(COLOR_SECTION_HEADER_BACKGROUND);
@@ -2318,7 +2332,7 @@ fn draw_section_title(graphic: &mut Graphic, title: &str, panel_x: f32, panel_y:
 }
 
 //==============================================================================
-// 세로 스크롤바 출력. (막대 높이는 보이는 비율, 최소 20)
+/// 세로 스크롤바 출력. (막대 높이는 보이는 비율, 최소 20)
 //==============================================================================
 fn draw_scroll_bar(graphic: &mut Graphic, bar_x: f32, area_y: f32, area_height: f32, total_height: f32, scroll_y: f32) {
 	let maximum_scroll_y = total_height - area_height;
@@ -2330,7 +2344,7 @@ fn draw_scroll_bar(graphic: &mut Graphic, bar_x: f32, area_y: f32, area_height: 
 }
 
 //==============================================================================
-// 글자 수로 자르기. (넘치면 앞의 maximum_characters - 3 글자 + "...", 원본 slice 와 같다)
+/// 글자 수로 자르기. (넘치면 앞의 maximum_characters - 3 글자 + "...", 원본 slice 와 같다)
 //==============================================================================
 fn truncate_text(text: &str, maximum_characters: usize) -> String {
 	if text.chars().count() > maximum_characters {
@@ -2343,7 +2357,7 @@ fn truncate_text(text: &str, maximum_characters: usize) -> String {
 }
 
 //==============================================================================
-// 논리 값 글.
+/// 논리 값 글.
 //==============================================================================
 fn format_boolean(value: bool) -> &'static str {
 	if value {
@@ -2355,21 +2369,21 @@ fn format_boolean(value: bool) -> &'static str {
 }
 
 //==============================================================================
-// 벡터 글. (원본 `(${x}, ${y})`, 수는 가장 짧은 십진)
+/// 벡터 글. (원본 `(${x}, ${y})`, 수는 가장 짧은 십진)
 //==============================================================================
 fn format_vector2(vector: Vector2) -> String {
 	format!("({}, {})", vector.x, vector.y)
 }
 
 //==============================================================================
-// 바이트를 메가바이트 글로. (원본 (바이트 / (1024 * 1024)).toFixed(2) MB)
+/// 바이트를 메가바이트 글로. (원본 (바이트 / (1024 * 1024)).toFixed(2) MB)
 //==============================================================================
 fn format_megabytes(bytes: f64) -> String {
 	format!("{:.2} MB", bytes / (1024.0 * 1024.0))
 }
 
 //==============================================================================
-// 자바스크립트 힙 크기. (원본 performance.memory 의 usedJSHeapSize, totalJSHeapSize, jsHeapSizeLimit, 바이트, 상한이 없으면 None)
+/// 자바스크립트 힙 크기. (원본 performance.memory 의 usedJSHeapSize, totalJSHeapSize, jsHeapSizeLimit, 바이트, 상한이 없으면 None)
 //==============================================================================
 struct PerformanceMemory {
 	used_heap_size: f64,
@@ -2378,7 +2392,7 @@ struct PerformanceMemory {
 }
 
 //==============================================================================
-// 자바스크립트 힙 크기 읽기. (웹: Chrome 의 performance.memory, 없는 브라우저는 None)
+/// 자바스크립트 힙 크기 읽기. (웹: Chrome 의 performance.memory, 없는 브라우저는 None)
 //==============================================================================
 #[cfg(target_arch = "wasm32")]
 fn read_performance_memory() -> Option<PerformanceMemory> {
@@ -2399,7 +2413,7 @@ fn read_performance_memory() -> Option<PerformanceMemory> {
 }
 
 //==============================================================================
-// 자바스크립트 힙 크기 읽기. (데스크탑에는 자바스크립트 힙이 없어 시스템 할당자의 힙을 읽는다, 상한은 없다. 못 읽는 OS 는 None)
+/// 자바스크립트 힙 크기 읽기. (데스크탑에는 자바스크립트 힙이 없어 시스템 할당자의 힙을 읽는다, 상한은 없다. 못 읽는 OS 는 None)
 //==============================================================================
 #[cfg(not(target_arch = "wasm32"))]
 fn read_performance_memory() -> Option<PerformanceMemory> {
@@ -2412,7 +2426,7 @@ fn read_performance_memory() -> Option<PerformanceMemory> {
 }
 
 //==============================================================================
-// get* 함수 이름을 속성 이름 꼴로. (원본 formatMethodName, getTextColor → textColor. is 로 시작하는 이름은 그대로)
+/// get* 함수 이름을 속성 이름 꼴로. (원본 formatMethodName, getTextColor → textColor. is 로 시작하는 이름은 그대로)
 //==============================================================================
 fn format_method_name(method_name: &str) -> String {
 	match method_name.strip_prefix("get") {
@@ -2432,7 +2446,7 @@ fn format_method_name(method_name: &str) -> String {
 }
 
 //==============================================================================
-// 게터 값을 문자열로 포맷. (원본 formatPropertyValue, 수는 원본 toFixed 와 같이 반올림한다)
+/// 게터 값을 문자열로 포맷. (원본 formatPropertyValue, 수는 원본 toFixed 와 같이 반올림한다)
 //==============================================================================
 fn format_property_value(value: &ReflectValue) -> String {
 	match value {
@@ -2473,7 +2487,7 @@ fn format_property_value(value: &ReflectValue) -> String {
 }
 
 //==============================================================================
-// 따옴표로 감싼 글. (28 자를 넘으면 25 자와 ...)
+/// 따옴표로 감싼 글. (28 자를 넘으면 25 자와 ...)
 //==============================================================================
 fn format_quoted_text(text: &str) -> String {
 	let truncated_text = if text.chars().count() > 28 {
@@ -2487,8 +2501,8 @@ fn format_quoted_text(text: &str) -> String {
 }
 
 //==============================================================================
-// 문서 값을 문자열로 포맷. (반사가 없는 컴포넌트의 UIDocument 저장 값, 원본 formatPropertyValue 를 JSON 값에 맞춘 것)
-// - 수 둘 배열은 벡터, 이름에 color 가 든 수 넷 배열은 rgba, 그 밖의 수 넷 배열은 사각형으로 본다.
+/// 문서 값을 문자열로 포맷. (반사가 없는 컴포넌트의 UIDocument 저장 값, 원본 formatPropertyValue 를 JSON 값에 맞춘 것)
+/// - 수 둘 배열은 벡터, 이름에 color 가 든 수 넷 배열은 rgba, 그 밖의 수 넷 배열은 사각형으로 본다.
 //==============================================================================
 fn format_document_value(property_name: &str, value: &Value) -> String {
 	match value {
@@ -2536,7 +2550,7 @@ fn format_document_value(property_name: &str, value: &Value) -> String {
 }
 
 //==============================================================================
-// 시험. (데스크탑, 로컬 스토리지는 임시 폴더에 쓴다)
+/// 시험. (데스크탑, 로컬 스토리지는 임시 폴더에 쓴다)
 //==============================================================================
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
@@ -2547,7 +2561,7 @@ mod tests {
 	use std::path::PathBuf;
 
 	//==============================================================================
-	// 시험마다 다른 임시 폴더를 로컬 스토리지 폴더로 정한다.
+	/// 시험마다 다른 임시 폴더를 로컬 스토리지 폴더로 정한다.
 	//==============================================================================
 	fn use_temporary_storage_directory(test_name: &str) -> PathBuf {
 		let unique_suffix = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|duration| duration.as_nanos()).unwrap_or(0);
@@ -2557,7 +2571,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 시험용 트리. (root → a(b, c(d)), e)
+	/// 시험용 트리. (root → a(b, c(d)), e)
 	//==============================================================================
 	fn create_test_tree() -> (NodeTree, [NodeId; 6]) {
 		let mut node_tree = NodeTree::new();
@@ -2571,14 +2585,14 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 플랫 목록의 노드 차례.
+	/// 플랫 목록의 노드 차례.
 	//==============================================================================
 	fn read_flat_node_ids(dev_tools: &DevTools) -> Vec<NodeId> {
 		dev_tools.flat_list.iter().map(|flat_item| flat_item.node_id).collect()
 	}
 
 	//==============================================================================
-	// 1280 x 720 창의 엔진.
+	/// 1280 x 720 창의 엔진.
 	//==============================================================================
 	fn create_test_engine() -> Engine {
 		let mut engine = Engine::new(EngineConfiguration::new());
@@ -2587,7 +2601,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 시험용 컴포넌트. (UIDocument 에 등록하지 않은 종류)
+	/// 시험용 컴포넌트. (UIDocument 에 등록하지 않은 종류)
 	//==============================================================================
 	struct UnregisteredComponent {
 		component_base: ComponentBase,
@@ -2608,7 +2622,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 펼치기와 접기에 따라 플랫 목록과 깊이가 바뀐다.
+	/// 펼치기와 접기에 따라 플랫 목록과 깊이가 바뀐다.
 	//==============================================================================
 	#[test]
 	fn flat_list_follows_expand_and_collapse() {
@@ -2637,7 +2651,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 비활성 노드 아래는 모두 effective_active 가 거짓이다. 지운 노드는 빠진다.
+	/// 비활성 노드 아래는 모두 effective_active 가 거짓이다. 지운 노드는 빠진다.
 	//==============================================================================
 	#[test]
 	fn effective_active_propagates_to_descendants() {
@@ -2660,7 +2674,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 크기 바꾸기는 최소 크기와 스플리터 범위에서 멈춘다.
+	/// 크기 바꾸기는 최소 크기와 스플리터 범위에서 멈춘다.
 	//==============================================================================
 	#[test]
 	fn panel_resize_is_clamped() {
@@ -2710,7 +2724,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 설정은 원본과 같은 JSON 으로 남고 새 DevTools 가 읽는다. 깨진 글은 기본값.
+	/// 설정은 원본과 같은 JSON 으로 남고 새 DevTools 가 읽는다. 깨진 글은 기본값.
 	//==============================================================================
 	#[test]
 	fn settings_round_trip_through_local_storage() {
@@ -2745,7 +2759,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 게터 값 글과 이름은 원본 formatPropertyValue, formatMethodName 과 같은 꼴이다.
+	/// 게터 값 글과 이름은 원본 formatPropertyValue, formatMethodName 과 같은 꼴이다.
 	//==============================================================================
 	#[test]
 	fn property_values_are_formatted_like_original() {
@@ -2770,7 +2784,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 반사가 없는 컴포넌트의 문서 값 글. (UIDocument 의 JSON 값)
+	/// 반사가 없는 컴포넌트의 문서 값 글. (UIDocument 의 JSON 값)
 	//==============================================================================
 	#[test]
 	fn document_values_are_formatted_like_original() {
@@ -2787,7 +2801,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 인스펙터는 노드 정보와 컴포넌트의 게터(원본 getComponentProperties)를 보이고, 접은 컴포넌트는 머리만 남긴다.
+	/// 인스펙터는 노드 정보와 컴포넌트의 게터(원본 getComponentProperties)를 보이고, 접은 컴포넌트는 머리만 남긴다.
 	//==============================================================================
 	#[test]
 	fn inspector_lines_show_reflected_component_properties() {
@@ -2827,7 +2841,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 시험용 컴포넌트. (&mut self 게터와 트리를 받는 게터)
+	/// 시험용 컴포넌트. (&mut self 게터와 트리를 받는 게터)
 	//==============================================================================
 	struct Probe {
 		component_base: ComponentBase,
@@ -2863,7 +2877,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 인스펙터는 &mut self 게터를 tick 에서 트리를 쥐고 읽어 두었다가 보이고, 트리를 받는 게터는 그리기에서 트리를 넘겨 부른다.
+	/// 인스펙터는 &mut self 게터를 tick 에서 트리를 쥐고 읽어 두었다가 보이고, 트리를 받는 게터는 그리기에서 트리를 넘겨 부른다.
 	//==============================================================================
 	#[test]
 	fn inspector_reads_mutable_and_tree_getters() {
@@ -2892,7 +2906,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// F2 로 오른쪽 아래에 보이고, 트리 줄을 눌러 고르고 펼치고, A, G 칸으로 액티브와 기즈모를 바꾼다.
+	/// F2 로 오른쪽 아래에 보이고, 트리 줄을 눌러 고르고 펼치고, A, G 칸으로 액티브와 기즈모를 바꾼다.
 	//==============================================================================
 	#[test]
 	fn inspect_request_opens_and_selects_node() {
@@ -2966,7 +2980,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 로컬 스토리지 입력 창: 키 → 값 차례로 묻고, 고치고, 지운다. (데스크탑 창)
+	/// 로컬 스토리지 입력 창: 키 → 값 차례로 묻고, 고치고, 지운다. (데스크탑 창)
 	//==============================================================================
 	#[test]
 	fn local_storage_dialog_actions() {

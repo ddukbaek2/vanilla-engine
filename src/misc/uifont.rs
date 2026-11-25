@@ -1,24 +1,24 @@
 //==============================================================================
-// UI 글꼴. (원본 misc/uifont.js, 화면 위의 모든 글자, 여러 문자의 글꼴 조각을 한 이름 아래 묶음)
-// - 글꼴 이름, 목록 파일과 폴더, 맨 뒤 묶음, 굵기, 기다리는 시간은 configure_ui_font 로 정한다. (처음은 GameUI, ./assets/fonts/fonts.json, latin, 500 과 700)
-// - 목록은 fonts.json(색인 { fonts: [{ group, manifest }] })과 fonts-<묶음>.json(조각 { faces: [{ file, weight, style, unicodeRange }] })이다.
-// - 화면의 모든 언어를 한 글꼴 이름 아래에 모아 그린다. 글꼴 파일을 합치지 않고 조각마다 글꼴 얼굴을 만들어 그 조각의 글자 범위로 올린다.
-//   그래서 화면에 쓰는 글자가 든 조각만 받는다. (한, 중, 일 글꼴은 조각이 수백 개이다)
-//   한자처럼 여러 글꼴이 함께 가진 글자는 나중에 올린 글꼴이 그린다. 고른 언어의 묶음을 라틴 바로 앞(뒤에서 둘째)에 두어
-//   일본어면 일본 글꼴, 중국어 번체면 번체 글꼴의 한자가 나오게 한다. 라틴은 늘 맨 뒤라 숫자와 영문은 어느 언어에서나 라틴 글꼴이다.
-// - 모든 조각을 configure_ui_font 의 weights(처음은 500, 700) 두 굵기로만 올린다. 가변 굵기 조각은 두 번(500 과 700), 400 뿐인 조각은 500 으로 올린다.
-// - 쓸 글자의 조각은 미리 받는다. (load_ui_font_text) 조각을 받으면 엔진(EngineConfiguration.rebake_text_on_font_load)이 그 조각의 글자로 구운 글자만 버려 다시 굽는다.
-//   미리 받지 않은 글자도 그 글꼴로 재거나 그리면 update 가 그 글자의 조각을 받는다. (원본 브라우저는 올려 둔 FontFace 의 범위에 든 글자를 그릴 때 그 얼굴을 받는다)
-//   받기 전에는 원본 캔버스처럼 다른 글꼴로 그리고, 받으면 (rebake_text_on_font_load 를 켰을 때) 다시 굽는다.
-// - 처음에는 고른 언어와 라틴의 목록만 받고, 나머지 묶음은 놀이를 시작하고 조금 뒤(remaining_delay_milliseconds)에 받는다.
-//   처음의 조각은 wait_milliseconds 까지만 기다린다. (is_ui_font_ready 가 그 시간이 지나거나 다 받으면 참)
-// - 원본과 다른 것:
-//   원본은 FontFace 를 만들어 document.fonts 에 넣고 async 로 기다린다. 러스트 판은 데스크탑과 웹 모두 조각 파일의 바이트를 받아
-//   엔진의 글자 캐시에 같은 이름의 얼굴로 올린다. (Engine.register_font_face_when_loaded, 차례는 Engine.set_font_face_order)
-//   그래서 웹에서도 브라우저 글꼴이 아니라 엔진의 모양 짓기로 그린다. 받는 일은 요청만 하고 update(engine) 를 프레임마다 불러 이어 간다.
-//   load_ui_font 는 원본처럼 await 할 수 있는 UiFontLoadHandle 을 돌려준다. (기다리는 동안 update 를 불러 주고, 처음 글자를 다 올렸거나 wait_milliseconds 가 지나면 끝난다)
-//   load_ui_font_text 는 그 글자의 얼굴들을 글꼴 목록에 올리면 끝나는 UiFontTextLoadHandle 을 돌려준다. (원본 await loadUiFontText(글자))
-//   원본 readUiFontFace(FontFace) 는 read_ui_font_face(올린 이름, 못 불러왔으면 None) 다. options 객체는 UiFontOptions 구조체다.
+//! UI 글꼴. (원본 misc/uifont.js, 화면 위의 모든 글자, 여러 문자의 글꼴 조각을 한 이름 아래 묶음)
+//! - 글꼴 이름, 목록 파일과 폴더, 맨 뒤 묶음, 굵기, 기다리는 시간은 configure_ui_font 로 정한다. (처음은 GameUI, ./assets/fonts/fonts.json, latin, 500 과 700)
+//! - 목록은 fonts.json(색인 { fonts: [{ group, manifest }] })과 fonts-<묶음>.json(조각 { faces: [{ file, weight, style, unicodeRange }] })이다.
+//! - 화면의 모든 언어를 한 글꼴 이름 아래에 모아 그린다. 글꼴 파일을 합치지 않고 조각마다 글꼴 얼굴을 만들어 그 조각의 글자 범위로 올린다.
+//!   그래서 화면에 쓰는 글자가 든 조각만 받는다. (한, 중, 일 글꼴은 조각이 수백 개이다)
+//!   한자처럼 여러 글꼴이 함께 가진 글자는 나중에 올린 글꼴이 그린다. 고른 언어의 묶음을 라틴 바로 앞(뒤에서 둘째)에 두어
+//!   일본어면 일본 글꼴, 중국어 번체면 번체 글꼴의 한자가 나오게 한다. 라틴은 늘 맨 뒤라 숫자와 영문은 어느 언어에서나 라틴 글꼴이다.
+//! - 모든 조각을 configure_ui_font 의 weights(처음은 500, 700) 두 굵기로만 올린다. 가변 굵기 조각은 두 번(500 과 700), 400 뿐인 조각은 500 으로 올린다.
+//! - 쓸 글자의 조각은 미리 받는다. (load_ui_font_text) 조각을 받으면 엔진(EngineConfiguration.rebake_text_on_font_load)이 그 조각의 글자로 구운 글자만 버려 다시 굽는다.
+//!   미리 받지 않은 글자도 그 글꼴로 재거나 그리면 update 가 그 글자의 조각을 받는다. (원본 브라우저는 올려 둔 FontFace 의 범위에 든 글자를 그릴 때 그 얼굴을 받는다)
+//!   받기 전에는 원본 캔버스처럼 다른 글꼴로 그리고, 받으면 (rebake_text_on_font_load 를 켰을 때) 다시 굽는다.
+//! - 처음에는 고른 언어와 라틴의 목록만 받고, 나머지 묶음은 놀이를 시작하고 조금 뒤(remaining_delay_milliseconds)에 받는다.
+//!   처음의 조각은 wait_milliseconds 까지만 기다린다. (is_ui_font_ready 가 그 시간이 지나거나 다 받으면 참)
+//! - 원본과 다른 것:
+//!   원본은 FontFace 를 만들어 document.fonts 에 넣고 async 로 기다린다. 러스트 판은 데스크탑과 웹 모두 조각 파일의 바이트를 받아
+//!   엔진의 글자 캐시에 같은 이름의 얼굴로 올린다. (Engine.register_font_face_when_loaded, 차례는 Engine.set_font_face_order)
+//!   그래서 웹에서도 브라우저 글꼴이 아니라 엔진의 모양 짓기로 그린다. 받는 일은 요청만 하고 update(engine) 를 프레임마다 불러 이어 간다.
+//!   load_ui_font 는 원본처럼 await 할 수 있는 UiFontLoadHandle 을 돌려준다. (기다리는 동안 update 를 불러 주고, 처음 글자를 다 올렸거나 wait_milliseconds 가 지나면 끝난다)
+//!   load_ui_font_text 는 그 글자의 얼굴들을 글꼴 목록에 올리면 끝나는 UiFontTextLoadHandle 을 돌려준다. (원본 await loadUiFontText(글자))
+//!   원본 readUiFontFace(FontFace) 는 read_ui_font_face(올린 이름, 못 불러왔으면 None) 다. options 객체는 UiFontOptions 구조체다.
 //==============================================================================
 use crate::core::asset::AssetLoadHandle;
 use crate::core::engine::Engine;
@@ -34,7 +34,7 @@ use std::collections::HashSet;
 use web_time::Instant;
 
 //==============================================================================
-// UI 글꼴 설정. (원본 configureUiFont 의 options, None 인 칸은 그대로)
+/// UI 글꼴 설정. (원본 configureUiFont 의 options, None 인 칸은 그대로)
 //==============================================================================
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct UiFontOptions {
@@ -48,7 +48,7 @@ pub struct UiFontOptions {
 }
 
 //==============================================================================
-// 조각 하나의 한 굵기. (같은 파일을 두 굵기로 올리면 둘이다)
+/// 조각 하나의 한 굵기. (같은 파일을 두 굵기로 올리면 둘이다)
 //==============================================================================
 #[derive(Clone)]
 struct UiFontFace {
@@ -60,7 +60,7 @@ struct UiFontFace {
 }
 
 //==============================================================================
-// 글꼴 묶음 하나. (order 는 색인의 차례)
+/// 글꼴 묶음 하나. (order 는 색인의 차례)
 //==============================================================================
 struct UiFontGroup {
 	group: String,
@@ -69,7 +69,7 @@ struct UiFontGroup {
 }
 
 //==============================================================================
-// UI 글꼴 전역 상태. (원본 모듈 변수)
+/// UI 글꼴 전역 상태. (원본 모듈 변수)
 //==============================================================================
 struct UiFontState {
 	family: String,
@@ -84,7 +84,7 @@ struct UiFontState {
 	index_handle: Option<AssetLoadHandle>,
 	group_handle_list: Vec<(String, usize, AssetLoadHandle)>,
 	current_group: String,
-	// 처음 불러오기: 고른 묶음과 미리 받을 글자. (목록을 다 받으면 앞세우고 글자를 받는다)
+	/// 처음 불러오기: 고른 묶음과 미리 받을 글자. (목록을 다 받으면 앞세우고 글자를 받는다)
 	pending_initial_load: Option<(String, String)>,
 	initial_load_instant: Option<Instant>,
 	is_remaining_groups_requested: bool,
@@ -92,7 +92,7 @@ struct UiFontState {
 	is_remaining_groups_loading: bool,
 	is_loaded: bool,
 	requested_characters: HashSet<char>,
-	// 처음 글자로 받기를 청한 얼굴들. (다 올리면 준비된 것이다)
+	/// 처음 글자로 받기를 청한 얼굴들. (다 올리면 준비된 것이다)
 	initial_text_handle_list: Vec<FontLoadHandle>,
 }
 
@@ -122,15 +122,15 @@ thread_local! {
 }
 
 //==============================================================================
-// 전역 상태 읽고 쓰기.
+/// 전역 상태 읽고 쓰기.
 //==============================================================================
 fn with_state<R>(visitor: impl FnOnce(&mut UiFontState) -> R) -> R {
 	UI_FONT_STATE.with(|state_cell| visitor(&mut state_cell.borrow_mut()))
 }
 
 //==============================================================================
-// 조각의 굵기 → 올릴 굵기. ("400 700" → [500, 700], "400" → [500], "700" → [700], 원본 readTargetWeights)
-// - 범위면 그 안의 굵기 모두, 한 값이면 가장 가까운 하나이다.
+/// 조각의 굵기 → 올릴 굵기. ("400 700" → [500, 700], "400" → `[500]`, "700" → `[700]`, 원본 readTargetWeights)
+/// - 범위면 그 안의 굵기 모두, 한 값이면 가장 가까운 하나이다.
 //==============================================================================
 pub fn read_target_weights(weight_descriptor: &str, weights: &[u16]) -> Vec<u16> {
 	let weight_values: Vec<f32> = weight_descriptor.split_whitespace().filter_map(|weight_text| weight_text.parse::<f32>().ok()).collect();
@@ -151,8 +151,8 @@ pub fn read_target_weights(weight_descriptor: &str, weights: &[u16]) -> Vec<u16>
 }
 
 //==============================================================================
-// UI 글꼴 불러오기. (고른 언어와 라틴의 묶음을 올려 앞세우고, 그 언어의 글자를 미리 받는다. 원본 loadUiFont)
-// - 받는 동안은 update 를 프레임마다 부른다. 처음 글자가 준비됐는지는 is_ui_font_ready 로 본다. (돌려준 손잡이를 await 하면 준비될 때까지 기다린다)
+/// UI 글꼴 불러오기. (고른 언어와 라틴의 묶음을 올려 앞세우고, 그 언어의 글자를 미리 받는다. 원본 loadUiFont)
+/// - 받는 동안은 update 를 프레임마다 부른다. 처음 글자가 준비됐는지는 is_ui_font_ready 로 본다. (돌려준 손잡이를 await 하면 준비될 때까지 기다린다)
 //==============================================================================
 pub fn load_ui_font(engine: &mut Engine, font_group: &str, text: &str) -> UiFontLoadHandle {
 	let primary_group = with_state(|state| {
@@ -168,7 +168,7 @@ pub fn load_ui_font(engine: &mut Engine, font_group: &str, text: &str) -> UiFont
 }
 
 //==============================================================================
-// 글꼴 목록의 색인 받기 요청. (한 번만)
+/// 글꼴 목록의 색인 받기 요청. (한 번만)
 //==============================================================================
 fn load_font_index(engine: &mut Engine) {
 	let manifest_path = with_state(|state| {
@@ -187,7 +187,7 @@ fn load_font_index(engine: &mut Engine) {
 }
 
 //==============================================================================
-// 색인을 받았으면 든다.
+/// 색인을 받았으면 든다.
 //==============================================================================
 fn poll_font_index() {
 	let bytes = with_state(|state| {
@@ -227,7 +227,7 @@ fn poll_font_index() {
 }
 
 //==============================================================================
-// 글꼴 묶음 하나의 목록 받기 요청. (이미 있거나 받는 중이면 그대로, 색인을 아직 못 받았으면 받은 뒤 update 가 다시 청한다)
+/// 글꼴 묶음 하나의 목록 받기 요청. (이미 있거나 받는 중이면 그대로, 색인을 아직 못 받았으면 받은 뒤 update 가 다시 청한다)
 //==============================================================================
 fn request_font_group(engine: &mut Engine, group: &str) {
 	let request = with_state(|state| {
@@ -247,7 +247,7 @@ fn request_font_group(engine: &mut Engine, group: &str) {
 }
 
 //==============================================================================
-// 받은 묶음 목록 들기. (조각마다 굵기마다 얼굴을 만든다, 올리기는 apply_ui_font_group 이 차례를 맞춰 한다)
+/// 받은 묶음 목록 들기. (조각마다 굵기마다 얼굴을 만든다, 올리기는 apply_ui_font_group 이 차례를 맞춰 한다)
 //==============================================================================
 fn poll_font_groups() {
 	let finished_list = with_state(|state| {
@@ -306,7 +306,7 @@ fn poll_font_groups() {
 }
 
 //==============================================================================
-// 이어 가기. (받은 색인과 묶음 목록을 들고, 처음 불러오기를 마저 하고, 때가 되면 나머지 묶음을 받는다. 프레임마다 부른다)
+/// 이어 가기. (받은 색인과 묶음 목록을 들고, 처음 불러오기를 마저 하고, 때가 되면 나머지 묶음을 받는다. 프레임마다 부른다)
 //==============================================================================
 pub fn update(engine: &mut Engine) {
 	poll_font_index();
@@ -386,7 +386,7 @@ pub fn update(engine: &mut Engine) {
 }
 
 //==============================================================================
-// 고른 언어의 글꼴 묶음 앞세우기. (그 묶음을 라틴 바로 앞에 두고 모든 얼굴의 차례를 다시 정한다, 원본 applyUiFontGroup)
+/// 고른 언어의 글꼴 묶음 앞세우기. (그 묶음을 라틴 바로 앞에 두고 모든 얼굴의 차례를 다시 정한다, 원본 applyUiFontGroup)
 //==============================================================================
 pub fn apply_ui_font_group(engine: &mut Engine, font_group: &str) {
 	let order_request = with_state(|state| {
@@ -419,7 +419,7 @@ pub fn apply_ui_font_group(engine: &mut Engine, font_group: &str) {
 }
 
 //==============================================================================
-// 그 글자를 그 굵기로 그릴 얼굴의 자리. (나중에 놓인 묶음부터 보아 범위에 드는 첫 얼굴, 없으면 None. 원본 findDrawingFontFace)
+/// 그 글자를 그 굵기로 그릴 얼굴의 자리. (나중에 놓인 묶음부터 보아 범위에 드는 첫 얼굴, 없으면 None. 원본 findDrawingFontFace)
 //==============================================================================
 fn find_drawing_face(state: &UiFontState, code_point: u32, target_weight: u16) -> Option<(usize, usize)> {
 	for group_index in (0..state.font_groups.len()).rev() {
@@ -436,8 +436,8 @@ fn find_drawing_face(state: &UiFontState, code_point: u32, target_weight: u16) -
 }
 
 //==============================================================================
-// 글자의 조각 받기. (그 글자를 그릴 얼굴만, 원본 loadUiFontText. 청한 얼굴을 모두 올리면 끝나는 손잡이를 돌려준다)
-// - 같은 파일을 여러 굵기로 올리면 바이트는 한 번 받고 굵기마다 올린다.
+/// 글자의 조각 받기. (그 글자를 그릴 얼굴만, 원본 loadUiFontText. 청한 얼굴을 모두 올리면 끝나는 손잡이를 돌려준다)
+/// - 같은 파일을 여러 굵기로 올리면 바이트는 한 번 받고 굵기마다 올린다.
 //==============================================================================
 pub fn load_ui_font_text(engine: &mut Engine, text: &str) -> UiFontTextLoadHandle {
 	let request_list = with_state(|state| {
@@ -485,7 +485,7 @@ pub fn load_ui_font_text(engine: &mut Engine, text: &str) -> UiFontTextLoadHandl
 }
 
 //==============================================================================
-// 글자의 조각 받기 청하기. (사람 이름처럼 그때그때 나오는 글자, 처음 보는 글자만. 원본 requestUiFontText)
+/// 글자의 조각 받기 청하기. (사람 이름처럼 그때그때 나오는 글자, 처음 보는 글자만. 원본 requestUiFontText)
 //==============================================================================
 pub fn request_ui_font_text(engine: &mut Engine, text: &str) {
 	let new_text: String = with_state(|state| {
@@ -501,21 +501,21 @@ pub fn request_ui_font_text(engine: &mut Engine, text: &str) {
 }
 
 //==============================================================================
-// 처음 불러오기를 기다리는 퓨처. (원본 await loadUiFont(묶음, 글자) 의 await 자리, load_ui_font 가 돌려준 손잡이를 await 하는 것과 같다)
-// - 기다리는 동안 프레임마다 update 를 부른다. 원본처럼 처음 글자를 다 올렸거나 wait_milliseconds 가 지나면 끝난다. (is_ui_font_ready)
+/// 처음 불러오기를 기다리는 퓨처. (원본 await loadUiFont(묶음, 글자) 의 await 자리, load_ui_font 가 돌려준 손잡이를 await 하는 것과 같다)
+/// - 기다리는 동안 프레임마다 update 를 부른다. 원본처럼 처음 글자를 다 올렸거나 wait_milliseconds 가 지나면 끝난다. (is_ui_font_ready)
 //==============================================================================
 pub fn wait_for_load() -> UiFontLoadFuture {
 	UiFontLoadFuture
 }
 
 //==============================================================================
-// UI 글꼴 불러오기 손잡이. (load_ui_font 가 돌려준다. 원본 loadUiFont 의 Promise 자리)
+/// UI 글꼴 불러오기 손잡이. (load_ui_font 가 돌려준다. 원본 loadUiFont 의 Promise 자리)
 //==============================================================================
 #[derive(Clone, Copy, Debug, Default)]
 pub struct UiFontLoadHandle;
 
 //==============================================================================
-// UI 글꼴 처음 불러오기를 기다리는 퓨처.
+/// UI 글꼴 처음 불러오기를 기다리는 퓨처.
 //==============================================================================
 #[derive(Clone, Copy, Debug, Default)]
 pub struct UiFontLoadFuture;
@@ -524,7 +524,7 @@ impl Future for UiFontLoadFuture {
 	type Output = ();
 
 	//==============================================================================
-	// update 를 부르고 준비됐는지 보기. (아직이면 다음 프레임에 다시 본다)
+	/// update 를 부르고 준비됐는지 보기. (아직이면 다음 프레임에 다시 본다)
 	//==============================================================================
 	fn poll(self: Pin<&mut UiFontLoadFuture>, context: &mut Context<'_>) -> Poll<()> {
 		task::with_polling_engine(update);
@@ -541,7 +541,7 @@ impl IntoFuture for UiFontLoadHandle {
 	type IntoFuture = UiFontLoadFuture;
 
 	//==============================================================================
-	// 손잡이를 그대로 await 하기.
+	/// 손잡이를 그대로 await 하기.
 	//==============================================================================
 	fn into_future(self) -> UiFontLoadFuture {
 		UiFontLoadFuture
@@ -549,7 +549,7 @@ impl IntoFuture for UiFontLoadHandle {
 }
 
 //==============================================================================
-// 글자 조각 받기 손잡이. (load_ui_font_text 가 돌려준다. 원본 loadUiFontText 의 Promise 자리, 청한 얼굴을 모두 올리면 끝난다)
+/// 글자 조각 받기 손잡이. (load_ui_font_text 가 돌려준다. 원본 loadUiFontText 의 Promise 자리, 청한 얼굴을 모두 올리면 끝난다)
 //==============================================================================
 #[derive(Clone, Debug, Default)]
 pub struct UiFontTextLoadHandle {
@@ -558,14 +558,14 @@ pub struct UiFontTextLoadHandle {
 
 impl UiFontTextLoadHandle {
 	//==============================================================================
-	// 청한 얼굴의 글꼴 받기 손잡이 목록. (씬에 맡길 때는 저마다의 get_load_handle)
+	/// 청한 얼굴의 글꼴 받기 손잡이 목록. (씬에 맡길 때는 저마다의 get_load_handle)
 	//==============================================================================
 	pub fn get_font_load_handles(&self) -> &[FontLoadHandle] {
 		&self.font_load_handle_list
 	}
 
 	//==============================================================================
-	// 다 끝났는지. (올렸거나 실패했거나, 청한 것이 없으면 참)
+	/// 다 끝났는지. (올렸거나 실패했거나, 청한 것이 없으면 참)
 	//==============================================================================
 	pub fn is_finished(&self) -> bool {
 		self.font_load_handle_list.iter().all(|font_load_handle| font_load_handle.is_finished())
@@ -573,7 +573,7 @@ impl UiFontTextLoadHandle {
 }
 
 //==============================================================================
-// 글자 조각 받기를 기다리는 퓨처. (원본처럼 받지 못한 조각이 있어도 실패로 끝내지 않는다)
+/// 글자 조각 받기를 기다리는 퓨처. (원본처럼 받지 못한 조각이 있어도 실패로 끝내지 않는다)
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct UiFontTextLoadFuture {
@@ -584,7 +584,7 @@ impl Future for UiFontTextLoadFuture {
 	type Output = ();
 
 	//==============================================================================
-	// 다 끝났는지 보기. (아직이면 다음 프레임에 다시 본다)
+	/// 다 끝났는지 보기. (아직이면 다음 프레임에 다시 본다)
 	//==============================================================================
 	fn poll(self: Pin<&mut UiFontTextLoadFuture>, context: &mut Context<'_>) -> Poll<()> {
 		if self.text_load_handle.is_finished() {
@@ -600,7 +600,7 @@ impl IntoFuture for UiFontTextLoadHandle {
 	type IntoFuture = UiFontTextLoadFuture;
 
 	//==============================================================================
-	// 손잡이를 그대로 await 하기.
+	/// 손잡이를 그대로 await 하기.
 	//==============================================================================
 	fn into_future(self) -> UiFontTextLoadFuture {
 		UiFontTextLoadFuture {
@@ -610,8 +610,8 @@ impl IntoFuture for UiFontTextLoadHandle {
 }
 
 //==============================================================================
-// 처음 불러오기가 준비됐는지. (처음 글자의 조각을 다 받았거나 wait_milliseconds 가 지났으면 참, 원본 loadUiFont 의 기다림)
-// - 불러오기를 시작하지 않았거나 목록을 못 읽었으면 참이다. (시스템 글꼴로 이어 간다)
+/// 처음 불러오기가 준비됐는지. (처음 글자의 조각을 다 받았거나 wait_milliseconds 가 지났으면 참, 원본 loadUiFont 의 기다림)
+/// - 불러오기를 시작하지 않았거나 목록을 못 읽었으면 참이다. (시스템 글꼴로 이어 간다)
 //==============================================================================
 pub fn is_ui_font_ready() -> bool {
 	with_state(|state| {
@@ -634,7 +634,7 @@ pub fn is_ui_font_ready() -> bool {
 }
 
 //==============================================================================
-// 불러온 UI 글꼴의 이름. (엔진의 글자 컴포넌트에 set_font_family 로 준다, 못 불러왔으면 None. 원본 readUiFontFace)
+/// 불러온 UI 글꼴의 이름. (엔진의 글자 컴포넌트에 set_font_family 로 준다, 못 불러왔으면 None. 원본 readUiFontFace)
 //==============================================================================
 pub fn read_ui_font_face() -> Option<String> {
 	with_state(|state| {
@@ -648,7 +648,7 @@ pub fn read_ui_font_face() -> Option<String> {
 }
 
 //==============================================================================
-// UI 글꼴 문자열. (굵기, 크기. 원본 buildUiFontString)
+/// UI 글꼴 문자열. (굵기, 크기. 원본 buildUiFontString)
 //==============================================================================
 pub fn build_ui_font_string(font_weight: u16, font_size: f32) -> String {
 	let family = read_ui_font_family();
@@ -656,7 +656,7 @@ pub fn build_ui_font_string(font_weight: u16, font_size: f32) -> String {
 }
 
 //==============================================================================
-// UI 글꼴 설정. (불러오기 전에 부른다, None 인 칸은 그대로. 원본 configureUiFont)
+/// UI 글꼴 설정. (불러오기 전에 부른다, None 인 칸은 그대로. 원본 configureUiFont)
 //==============================================================================
 pub fn configure_ui_font(options: UiFontOptions) {
 	with_state(|state| {
@@ -686,7 +686,7 @@ pub fn configure_ui_font(options: UiFontOptions) {
 }
 
 //==============================================================================
-// UI 글꼴 이름 반환. (원본 readUiFontFamily)
+/// UI 글꼴 이름 반환. (원본 readUiFontFamily)
 //==============================================================================
 pub fn read_ui_font_family() -> String {
 	with_state(|state| state.family.clone())
@@ -697,7 +697,7 @@ mod tests {
 	use super::*;
 
 	//==============================================================================
-	// 조각의 굵기 → 올릴 굵기. (원본 readTargetWeights 와 같은 결과)
+	/// 조각의 굵기 → 올릴 굵기. (원본 readTargetWeights 와 같은 결과)
 	//==============================================================================
 	#[test]
 	fn target_weights_like_original() {

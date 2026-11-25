@@ -1,16 +1,16 @@
 //==============================================================================
-// 웹 시스템 글꼴로 글자 굽기. (wasm32)
-// - 원본 textstringtexturecache.js 의 bake_entry, measure_text 를 옮긴 것이다. 원본은 늘 오프스크린 2D 캔버스에
-//   fillText / strokeText 로 굽는다. 그래서 글꼴을 따로 주지 않아도 브라우저가 고른 시스템 글꼴로 글자가 나온다.
-// - 러스트 판 웹도 원본처럼 글자를 늘 여기서 굽고 잰다. 글꼴 바이트(default_font_bytes, default_font_url, FontAsset, UIFont 조각)는
-//   원본 new FontFace(이름, 바이트, 서술자) 와 같이 document.fonts 에 올려 브라우저가 고르고 그리게 한다. (sync_font_faces)
-//   기본 폰트는 VanillaEngineDefault, 대체 폰트는 VanillaEngineFallback1, 2 … 이름으로 올린다.
-// - 글꼴 목록은 폰트 문자열의 이름들, 기본 폰트와 대체 폰트의 이름, 원본 SYSTEM_FONT_STRING 차례다.
-//   (CSS @font-face 나 FontFace 로 문서에 올린 글꼴 이름이면 그 글꼴이, 아니면 시스템 글꼴이 나온다)
-// - 올린 글꼴이 다 받아지면(loadingdone) 바뀐 횟수를 늘린다. 글자 캐시가 프레임 시작에 보고 구운 글을 버린다. (원본 textstringtexturecache.js 와 같다)
-// - 그림자 글(bake_shadow_text)과 그림자 그림(bake_shadow_image)도 원본 ShadowText, ShadowImage 처럼 캔버스의 shadowBlur 와 drawImage(imageSmoothingQuality high)로 굽는다.
-// - 캔버스는 처음 쓸 때 하나 만들어 굽기와 재기에 같이 쓴다. 문서에는 붙이지 않는다.
-// - 원본처럼 캔버스의 RGBA 를 그대로 올린다. 글자는 흰색이고 색 이모지는 브라우저가 그린 제 색이다. (프리멀티플라이드로 바꿔 둔다)
+//! 웹 시스템 글꼴로 글자 굽기. (wasm32)
+//! - 원본 textstringtexturecache.js 의 bake_entry, measure_text 를 옮긴 것이다. 원본은 늘 오프스크린 2D 캔버스에
+//!   fillText / strokeText 로 굽는다. 그래서 글꼴을 따로 주지 않아도 브라우저가 고른 시스템 글꼴로 글자가 나온다.
+//! - 러스트 판 웹도 원본처럼 글자를 늘 여기서 굽고 잰다. 글꼴 바이트(default_font_bytes, default_font_url, FontAsset, UIFont 조각)는
+//!   원본 new FontFace(이름, 바이트, 서술자) 와 같이 document.fonts 에 올려 브라우저가 고르고 그리게 한다. (sync_font_faces)
+//!   기본 폰트는 VanillaEngineDefault, 대체 폰트는 VanillaEngineFallback1, 2 … 이름으로 올린다.
+//! - 글꼴 목록은 폰트 문자열의 이름들, 기본 폰트와 대체 폰트의 이름, 원본 SYSTEM_FONT_STRING 차례다.
+//!   (CSS @font-face 나 FontFace 로 문서에 올린 글꼴 이름이면 그 글꼴이, 아니면 시스템 글꼴이 나온다)
+//! - 올린 글꼴이 다 받아지면(loadingdone) 바뀐 횟수를 늘린다. 글자 캐시가 프레임 시작에 보고 구운 글을 버린다. (원본 textstringtexturecache.js 와 같다)
+//! - 그림자 글(bake_shadow_text)과 그림자 그림(bake_shadow_image)도 원본 ShadowText, ShadowImage 처럼 캔버스의 shadowBlur 와 drawImage(imageSmoothingQuality high)로 굽는다.
+//! - 캔버스는 처음 쓸 때 하나 만들어 굽기와 재기에 같이 쓴다. 문서에는 붙이지 않는다.
+//! - 원본처럼 캔버스의 RGBA 를 그대로 올린다. 글자는 흰색이고 색 이모지는 브라우저가 그린 제 색이다. (프리멀티플라이드로 바꿔 둔다)
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::platform::SYSTEM_FONT_STRING;
@@ -21,16 +21,16 @@ use std::rc::Rc;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
 
-// 구운 캔버스의 가장자리 여유. (원본 ShadowText, ShadowImage 의 BAKE_PADDING, 픽셀)
+/// 구운 캔버스의 가장자리 여유. (원본 ShadowText, ShadowImage 의 BAKE_PADDING, 픽셀)
 const SHADOW_BAKE_PADDING: f32 = 2.0;
 
 //==============================================================================
-// 구운 비트맵. (길이 단위는 배율을 곱한 픽셀)
+/// 구운 비트맵. (길이 단위는 배율을 곱한 픽셀)
 //==============================================================================
 pub struct SystemFontBitmap {
 	pub bitmap_width: i32,
 	pub bitmap_height: i32,
-	// 프리멀티플라이드 RGBA. (글자는 흰색이라 fontdue 길과 같은 꼴, 색 이모지는 제 색)
+	/// 프리멀티플라이드 RGBA. (글자는 흰색이라 fontdue 길과 같은 꼴, 색 이모지는 제 색)
 	pub pixels: Vec<u8>,
 	pub pen_x: f32,
 	pub baseline_y: f32,
@@ -45,7 +45,7 @@ struct SystemFontCanvas {
 }
 
 //==============================================================================
-// 문서에 올린 FontFace 하나. (이름, 글꼴(같은 글꼴인지 Rc 자리로 본다), 서술자, FontFace)
+/// 문서에 올린 FontFace 하나. (이름, 글꼴(같은 글꼴인지 Rc 자리로 본다), 서술자, FontFace)
 //==============================================================================
 struct BrowserFontFace {
 	family: String,
@@ -55,7 +55,7 @@ struct BrowserFontFace {
 }
 
 //==============================================================================
-// 캔버스로 구운 그림. (곧은 알파 RGBA, 캔버스 getImageData 그대로)
+/// 캔버스로 구운 그림. (곧은 알파 RGBA, 캔버스 getImageData 그대로)
 //==============================================================================
 pub struct BrowserBakeBitmap {
 	pub pixels: Vec<u8>,
@@ -64,7 +64,7 @@ pub struct BrowserBakeBitmap {
 }
 
 //==============================================================================
-// 캔버스로 구운 그림자 글. (길이 단위는 배율을 곱한 픽셀, 원본 ShadowText 의 bakeMetrics)
+/// 캔버스로 구운 그림자 글. (길이 단위는 배율을 곱한 픽셀, 원본 ShadowText 의 bakeMetrics)
 //==============================================================================
 pub struct BrowserShadowTextBake {
 	pub bitmap: BrowserBakeBitmap,
@@ -76,29 +76,29 @@ pub struct BrowserShadowTextBake {
 }
 
 thread_local! {
-	// 굽기와 재기에 쓰는 캔버스. (처음 쓸 때 만든다. 못 만들면 비어 있다)
+	/// 굽기와 재기에 쓰는 캔버스. (처음 쓸 때 만든다. 못 만들면 비어 있다)
 	static SYSTEM_FONT_CANVAS: RefCell<Option<SystemFontCanvas>> = const { RefCell::new(None) };
-	// 문서에 올린 FontFace 들. (올린 차례)
+	/// 문서에 올린 FontFace 들. (올린 차례)
 	static BROWSER_FONT_FACE_LIST: RefCell<Vec<BrowserFontFace>> = const { RefCell::new(Vec::new()) };
-	// 폰트 문자열 이름 뒤, 시스템 글꼴 앞에 붙이는 이름. (기본 폰트, 대체 폰트)
+	/// 폰트 문자열 이름 뒤, 시스템 글꼴 앞에 붙이는 이름. (기본 폰트, 대체 폰트)
 	static EXTRA_FAMILY_LIST: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
-	// 올린 글꼴이 바뀌거나 받아진 횟수.
+	/// 올린 글꼴이 바뀌거나 받아진 횟수.
 	static FONT_CHANGE_COUNT: Cell<u64> = const { Cell::new(0) };
-	// document.fonts 의 loadingdone 을 듣는지.
+	/// document.fonts 의 loadingdone 을 듣는지.
 	static IS_LOADING_DONE_LISTENED: Cell<bool> = const { Cell::new(false) };
 }
 
 //==============================================================================
-// 올린 글꼴이 바뀌거나 받아진 횟수. (글자 캐시가 늘었으면 구운 글을 버린다)
+/// 올린 글꼴이 바뀌거나 받아진 횟수. (글자 캐시가 늘었으면 구운 글을 버린다)
 //==============================================================================
 pub fn read_font_change_count() -> u64 {
 	FONT_CHANGE_COUNT.with(|font_change_count| font_change_count.get())
 }
 
 //==============================================================================
-// 글꼴 얼굴들을 문서에 올리기. ((이름, 서술자, 글꼴) 목록과 덧붙일 이름 목록, 원본 document.fonts.add)
-// - 지금 올린 것과 차례까지 같으면 아무것도 하지 않는다. 다르면 모두 내리고 차례대로 다시 올린다. (같은 글꼴의 FontFace 는 다시 쓴다)
-//   같은 이름 안에서는 나중에 올린 얼굴이 먼저 그린다. (CSS 와 같다)
+/// 글꼴 얼굴들을 문서에 올리기. ((이름, 서술자, 글꼴) 목록과 덧붙일 이름 목록, 원본 document.fonts.add)
+/// - 지금 올린 것과 차례까지 같으면 아무것도 하지 않는다. 다르면 모두 내리고 차례대로 다시 올린다. (같은 글꼴의 FontFace 는 다시 쓴다)
+///   같은 이름 안에서는 나중에 올린 얼굴이 먼저 그린다. (CSS 와 같다)
 //==============================================================================
 pub fn sync_font_faces(request_list: &[(String, FontFaceDescriptors, Rc<LoadedFont>)], extra_family_list: Vec<String>) {
 	EXTRA_FAMILY_LIST.with(|extra_family_list_cell| {
@@ -156,7 +156,7 @@ pub fn sync_font_faces(request_list: &[(String, FontFaceDescriptors, Rc<LoadedFo
 }
 
 //==============================================================================
-// FontFace 만들기. (원본 new FontFace(family, source, descriptors), 바이트로 만든다)
+/// FontFace 만들기. (원본 new FontFace(family, source, descriptors), 바이트로 만든다)
 //==============================================================================
 fn create_font_face(family: &str, descriptors: &FontFaceDescriptors, font: &LoadedFont) -> Option<JsValue> {
 	let font_face_class: js_sys::Function = js_sys::Reflect::get(&js_sys::global(), &JsValue::from_str("FontFace")).ok()?.dyn_into().ok()?;
@@ -179,7 +179,7 @@ fn create_font_face(family: &str, descriptors: &FontFaceDescriptors, font: &Load
 }
 
 //==============================================================================
-// document.fonts 의 loadingdone 듣기. (한 번만, 받아질 때마다 바뀐 횟수를 늘린다)
+/// document.fonts 의 loadingdone 듣기. (한 번만, 받아질 때마다 바뀐 횟수를 늘린다)
 //==============================================================================
 fn listen_loading_done(font_face_set: &JsValue) {
 	if IS_LOADING_DONE_LISTENED.with(|is_listened| is_listened.replace(true)) {
@@ -196,14 +196,14 @@ fn listen_loading_done(font_face_set: &JsValue) {
 }
 
 //==============================================================================
-// 색을 캔버스의 rgba 글로. (원본 buildRGBAString)
+/// 색을 캔버스의 rgba 글로. (원본 buildRGBAString)
 //==============================================================================
 fn build_rgba_string(color: Color) -> String {
 	format!("rgba({}, {}, {}, {})", (color.red * 255.0).round().clamp(0.0, 255.0), (color.green * 255.0).round().clamp(0.0, 255.0), (color.blue * 255.0).round().clamp(0.0, 255.0), color.alpha.clamp(0.0, 1.0))
 }
 
 //==============================================================================
-// 굽기용 새 캔버스. (원본처럼 구울 때마다 새로 만든다, 픽셀을 바로 읽으니 willReadFrequently)
+/// 굽기용 새 캔버스. (원본처럼 구울 때마다 새로 만든다, 픽셀을 바로 읽으니 willReadFrequently)
 //==============================================================================
 fn create_bake_canvas(width: u32, height: u32) -> Option<(web_sys::HtmlCanvasElement, web_sys::CanvasRenderingContext2d)> {
 	let document = web_sys::window()?.document()?;
@@ -217,7 +217,7 @@ fn create_bake_canvas(width: u32, height: u32) -> Option<(web_sys::HtmlCanvasEle
 }
 
 //==============================================================================
-// 그림자 글 굽기. (원본 ShadowText.bakeText 와 같은 셈, font_description 의 크기는 맞춰 줄인 크기. 그림자 내림과 번짐은 내용 크기 단위)
+/// 그림자 글 굽기. (원본 ShadowText.bakeText 와 같은 셈, font_description 의 크기는 맞춰 줄인 크기. 그림자 내림과 번짐은 내용 크기 단위)
 //==============================================================================
 #[allow(clippy::too_many_arguments)]
 pub fn bake_shadow_text(text: &str, font_description: &FontDescription, bake_scale: f32, direction: ShapingDirection, text_color: Color, shadow_color: Color, shadow_offset: f32, shadow_blur: f32, is_underline: bool, is_strikethrough: bool) -> Option<BrowserShadowTextBake> {
@@ -298,8 +298,8 @@ pub fn bake_shadow_text(text: &str, font_description: &FontDescription, bake_sca
 }
 
 //==============================================================================
-// 그림자 그림 굽기. (원본 ShadowImage.bakeImage, readScaledImage 와 같다. 그림은 프리멀티플라이드 RGBA, 길이는 배율을 곱한 픽셀)
-// - 그림의 조각을 imageSmoothingQuality high 로 그릴 크기에 그리고, 색이 있으면 source-in 으로 칠한 뒤, 그 밑에 캔버스 그림자를 깔아 한 장으로.
+/// 그림자 그림 굽기. (원본 ShadowImage.bakeImage, readScaledImage 와 같다. 그림은 프리멀티플라이드 RGBA, 길이는 배율을 곱한 픽셀)
+/// - 그림의 조각을 imageSmoothingQuality high 로 그릴 크기에 그리고, 색이 있으면 source-in 으로 칠한 뒤, 그 밑에 캔버스 그림자를 깔아 한 장으로.
 //==============================================================================
 #[allow(clippy::too_many_arguments)]
 pub fn bake_shadow_image(source_pixels: &[u8], source_width: u32, source_height: u32, source_rect: [f32; 4], scaled_width: u32, scaled_height: u32, image_color: Option<Color>, shadow_color: Color, scaled_shadow_offset: f32, scaled_shadow_blur: f32) -> Option<BrowserBakeBitmap> {
@@ -347,7 +347,7 @@ pub fn bake_shadow_image(source_pixels: &[u8], source_width: u32, source_height:
 }
 
 //==============================================================================
-// 문자열 재기. (원본 measure_text)
+/// 문자열 재기. (원본 measure_text)
 //==============================================================================
 pub fn measure_text(font_description: &FontDescription, text: &str) -> TextMetrics {
 	let font_string = build_css_font_string(font_description, 1.0);
@@ -369,17 +369,17 @@ pub fn measure_text(font_description: &FontDescription, text: &str) -> TextMetri
 }
 
 thread_local! {
-	// 브라우저로 푼 글자 크기. (폰트 문자열과 창 크기 → px, 틀린 문자열이면 None)
+	/// 브라우저로 푼 글자 크기. (폰트 문자열과 창 크기 → px, 틀린 문자열이면 None)
 	static RESOLVED_FONT_SIZE_TABLE: RefCell<std::collections::HashMap<String, Option<f32>>> = RefCell::new(std::collections::HashMap::new());
 }
 
-// 틀린 문자열을 가리려고 먼저 넣어 두는 폰트. (브라우저는 틀린 font 를 받지 않고 앞의 값을 둔다)
+/// 틀린 문자열을 가리려고 먼저 넣어 두는 폰트. (브라우저는 틀린 font 를 받지 않고 앞의 값을 둔다)
 const FONT_SIZE_SENTINEL: &str = "7.25px vanilla-font-size-sentinel";
 
 //==============================================================================
-// 폰트 문자열의 글자 크기를 브라우저로 풀기. (px, 틀린 문자열이면 None)
-// - 원본은 글꼴에 대는 단위(ex, ch, cap, ic, lh, rem 같은), 뷰포트 단위, calc() 를 브라우저 캔버스의 font 가 셈한다.
-//   원본처럼 문서에 붙이지 않은 캔버스의 font 에 넣고 다시 읽어 같은 값을 받는다. 한 번 푼 문자열은 창 크기와 함께 기억한다.
+/// 폰트 문자열의 글자 크기를 브라우저로 풀기. (px, 틀린 문자열이면 None)
+/// - 원본은 글꼴에 대는 단위(ex, ch, cap, ic, lh, rem 같은), 뷰포트 단위, calc() 를 브라우저 캔버스의 font 가 셈한다.
+///   원본처럼 문서에 붙이지 않은 캔버스의 font 에 넣고 다시 읽어 같은 값을 받는다. 한 번 푼 문자열은 창 크기와 함께 기억한다.
 //==============================================================================
 pub fn resolve_font_size(font_string: &str) -> Option<f32> {
 	let window = web_sys::window()?;
@@ -406,7 +406,7 @@ pub fn resolve_font_size(font_string: &str) -> Option<f32> {
 }
 
 //==============================================================================
-// 문자열 굽기. (원본 bake_entry. 크기와 펜 자리 계산이 원본과 같다, direction 은 캔버스의 direction)
+/// 문자열 굽기. (원본 bake_entry. 크기와 펜 자리 계산이 원본과 같다, direction 은 캔버스의 direction)
 //==============================================================================
 pub fn bake_text(text_draw_kind: TextDrawKind, text: &str, font_description: &FontDescription, line_width: f32, bake_scale: f32, direction: ShapingDirection) -> Option<SystemFontBitmap> {
 	let font_string = build_css_font_string(font_description, bake_scale);
@@ -498,7 +498,7 @@ pub fn bake_text(text_draw_kind: TextDrawKind, text: &str, font_description: &Fo
 }
 
 //==============================================================================
-// 시스템 글꼴 조각 재기. (올린 글꼴에 없는 글자 묶음, 크기는 픽셀. 원본 브라우저의 글꼴 대체 자리)
+/// 시스템 글꼴 조각 재기. (올린 글꼴에 없는 글자 묶음, 크기는 픽셀. 원본 브라우저의 글꼴 대체 자리)
 //==============================================================================
 pub fn measure_piece(font_description: &FontDescription, pixel_size: f32, text: &str, is_right_to_left: bool) -> f32 {
 	let mut piece_description = font_description.clone();
@@ -519,8 +519,8 @@ pub fn measure_piece(font_description: &FontDescription, pixel_size: f32, text: 
 }
 
 //==============================================================================
-// 시스템 글꼴 조각 래스터. (덮인 정도, 왼쪽은 펜 자리에서, 위는 기준선에서. 크기는 픽셀)
-// - 흰 픽셀은 글자의 덮인 정도로, 흰색이 아닌 픽셀(브라우저가 그린 색 이모지)은 색 몫(color_pixels)으로 나눈다.
+/// 시스템 글꼴 조각 래스터. (덮인 정도, 왼쪽은 펜 자리에서, 위는 기준선에서. 크기는 픽셀)
+/// - 흰 픽셀은 글자의 덮인 정도로, 흰색이 아닌 픽셀(브라우저가 그린 색 이모지)은 색 몫(color_pixels)으로 나눈다.
 //==============================================================================
 pub fn rasterize_piece(font_description: &FontDescription, pixel_size: f32, text: &str, is_right_to_left: bool) -> Option<crate::core::textshaping::GlyphRaster> {
 	let mut piece_description = font_description.clone();
@@ -562,8 +562,8 @@ pub fn rasterize_piece(font_description: &FontDescription, pixel_size: f32, text
 }
 
 //==============================================================================
-// CSS 폰트 문자열 만들기. ("italic bold 32px "이름", 시스템 글꼴 목록")
-// - 이름 목록을 차례로 앞에 두고 기본 폰트와 대체 폰트의 이름(sync_font_faces), 시스템 글꼴 목록을 뒤에 붙인다. 비었거나 "default" 인 이름은 빼고, 일반 글꼴 이름(sans-serif 등)은 따옴표 없이 둔다.
+/// CSS 폰트 문자열 만들기. ("italic bold 32px "이름", 시스템 글꼴 목록")
+/// - 이름 목록을 차례로 앞에 두고 기본 폰트와 대체 폰트의 이름(sync_font_faces), 시스템 글꼴 목록을 뒤에 붙인다. 비었거나 "default" 인 이름은 빼고, 일반 글꼴 이름(sans-serif 등)은 따옴표 없이 둔다.
 //==============================================================================
 fn build_css_font_string(font_description: &FontDescription, bake_scale: f32) -> String {
 	let style_text = if font_description.is_italic {
@@ -602,7 +602,7 @@ fn build_css_font_string(font_description: &FontDescription, bake_scale: f32) ->
 }
 
 //==============================================================================
-// CSS 일반 글꼴 이름인지. (따옴표로 싸면 그 이름의 글꼴을 찾으므로 그대로 둔다)
+/// CSS 일반 글꼴 이름인지. (따옴표로 싸면 그 이름의 글꼴을 찾으므로 그대로 둔다)
 //==============================================================================
 fn is_generic_family_name(family_name: &str) -> bool {
 	let lowercase_family_name = family_name.to_lowercase();
@@ -610,14 +610,14 @@ fn is_generic_family_name(family_name: &str) -> bool {
 }
 
 //==============================================================================
-// 캔버스의 글 방향 넣기. (web-sys 에 direction 세터가 없는 판도 있어 속성으로 넣는다)
+/// 캔버스의 글 방향 넣기. (web-sys 에 direction 세터가 없는 판도 있어 속성으로 넣는다)
 //==============================================================================
 fn set_canvas_direction(context: &web_sys::CanvasRenderingContext2d, direction_name: &str) {
 	let _ = js_sys::Reflect::set(context, &JsValue::from_str("direction"), &JsValue::from_str(direction_name));
 }
 
 //==============================================================================
-// 폰트 위아래 경계. (fontBoundingBox 를 모르는 브라우저는 실측 경계로, 그것도 없으면 크기로 어림)
+/// 폰트 위아래 경계. (fontBoundingBox 를 모르는 브라우저는 실측 경계로, 그것도 없으면 크기로 어림)
 //==============================================================================
 fn read_font_bounding_box(text_metrics: &web_sys::TextMetrics) -> (f32, f32) {
 	let actual_ascent = read_finite_value(text_metrics.actual_bounding_box_ascent(), 0.0);
@@ -628,7 +628,7 @@ fn read_font_bounding_box(text_metrics: &web_sys::TextMetrics) -> (f32, f32) {
 }
 
 //==============================================================================
-// 브라우저가 모르는 값(undefined 는 NaN 으로 온다)이면 대신 값.
+/// 브라우저가 모르는 값(undefined 는 NaN 으로 온다)이면 대신 값.
 //==============================================================================
 fn read_finite_value(value: f64, fallback_value: f32) -> f32 {
 	if value.is_finite() {
@@ -640,7 +640,7 @@ fn read_finite_value(value: f64, fallback_value: f32) -> f32 {
 }
 
 //==============================================================================
-// 캔버스를 빌려 일하기. (없으면 만든다)
+/// 캔버스를 빌려 일하기. (없으면 만든다)
 //==============================================================================
 fn with_canvas<Output>(work: impl FnOnce(&SystemFontCanvas) -> Option<Output>) -> Option<Output> {
 	SYSTEM_FONT_CANVAS.with(|system_font_canvas_cell| {
@@ -654,7 +654,7 @@ fn with_canvas<Output>(work: impl FnOnce(&SystemFontCanvas) -> Option<Output>) -
 }
 
 //==============================================================================
-// 캔버스 만들기. (굽고 나서 픽셀을 바로 읽으니 willReadFrequently 를 켠다)
+/// 캔버스 만들기. (굽고 나서 픽셀을 바로 읽으니 willReadFrequently 를 켠다)
 //==============================================================================
 fn create_canvas() -> Option<SystemFontCanvas> {
 	let document = web_sys::window()?.document()?;

@@ -1,19 +1,23 @@
 //==============================================================================
-// 토스트. (원본 ui/uitoast.js 의 UIToast)
-// - show(message) 로 알약 모양 알림이 아래에서 떠올라(0.24 초) 잠시 머문 뒤(기본 1.8 초) 위로 빠지며 사라진다(0.2 초).
-// - 여러 번 부르면 줄을 세워 하나씩 보여 준다.
-// - 씬 뿌리의 맨 위(마지막 자식)에 두고 쓴다. 가로 자리를 정하지 않으면 부모 가로 가운데에 선다. (부모 크기를 모르면 480)
-// - 원본은 WorldNode 를 상속한 노드이고 노드 자신이 알약이다. 러스트 판은 노드(호스트)에 붙는 컴포넌트이고, 붙을 때 원본 생성자처럼
-//   호스트를 꾸미고(가운데 피봇, 크기) Paint(둥근 알약)와 UILabel 을 호스트에 붙인다. UIToast::create(node_tree, parent_id, options) 가 new + add_child 자리다.
-// - 사용:
-//     let toast_id = UIToast::create(node_tree, root_id, UIToastOptions::default());
-//     node_tree[toast_id].get_component_mut::<UIToast>().unwrap().show("저장되었습니다.");
-// - 원본과 다른 것:
-//   - show 는 줄에 넣기만 하고, 꺼내서 보이는 것은 다음 tick 이 한다. (같은 tick 에 첫 걸음도 가므로 시간 흐름은 원본과 같다)
-//     그래서 원본은 숨을 때 set_active(false) 하지만 러스트 판은 tick 이 돌아야 해서 set_visible(false) 로 숨긴다.
-//     UI 문서는 원본처럼 숨은 토스트를 active false 로 쓰고 읽는다. (uidocument.rs 의 UIDocumentNode)
-//   - 등장 / 머묾 / 퇴장 시간과 곡선은 원본 그대로 이 안에서 센다. (Tween 은 쓰지 않는다)
-//   - 가로 자리 rest_x 는 Option<f32> 다. (원본 null = 부모 가운데) options 객체는 UIToastOptions 구조체다.
+//! 토스트. (원본 ui/uitoast.js 의 UIToast)
+//! - show(message) 로 알약 모양 알림이 아래에서 떠올라(0.24 초) 잠시 머문 뒤(기본 1.8 초) 위로 빠지며 사라진다(0.2 초).
+//! - 여러 번 부르면 줄을 세워 하나씩 보여 준다.
+//! - 씬 뿌리의 맨 위(마지막 자식)에 두고 쓴다. 가로 자리를 정하지 않으면 부모 가로 가운데에 선다. (부모 크기를 모르면 480)
+//! - 원본은 WorldNode 를 상속한 노드이고 노드 자신이 알약이다. 러스트 판은 노드(호스트)에 붙는 컴포넌트이고, 붙을 때 원본 생성자처럼
+//!   호스트를 꾸미고(가운데 피봇, 크기) Paint(둥근 알약)와 UILabel 을 호스트에 붙인다. UIToast::create(node_tree, parent_id, options) 가 new + add_child 자리다.
+//! - 사용:
+//!   ```text
+//!     let toast_id = UIToast::create(node_tree, root_id, UIToastOptions::default());
+//!     node_tree[toast_id].get_component_mut::<UIToast>().unwrap().show("저장되었습니다.");
+//!   ```
+//! - 원본과 다른 것:
+//!   - show 는 줄에 넣기만 하고, 꺼내서 보이는 것은 다음 tick 이 한다. (같은 tick 에 첫 걸음도 가므로 시간 흐름은 원본과 같다)
+//!   ```text
+//!     그래서 원본은 숨을 때 set_active(false) 하지만 러스트 판은 tick 이 돌아야 해서 set_visible(false) 로 숨긴다.
+//!     UI 문서는 원본처럼 숨은 토스트를 active false 로 쓰고 읽는다. (uidocument.rs 의 UIDocumentNode)
+//!   ```
+//!   - 등장 / 머묾 / 퇴장 시간과 곡선은 원본 그대로 이 안에서 센다. (Tween 은 쓰지 않는다)
+//!   - 가로 자리 rest_x 는 `Option<f32>` 다. (원본 null = 부모 가운데) options 객체는 UIToastOptions 구조체다.
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::pivot::Pivot;
@@ -24,28 +28,28 @@ use crate::core::node::nodetree::{ComponentContext, NodeId, NodeTree};
 use crate::ui::uilabel::UILabel;
 use std::collections::VecDeque;
 
-// 등장 / 퇴장 시간. (초, 원본과 같다)
+/// 등장 / 퇴장 시간. (초, 원본과 같다)
 const ENTER_SECONDS: f32 = 0.24;
 const EXIT_SECONDS: f32 = 0.2;
 
-// 떠오르는 거리. (픽셀, 원본과 같다)
+/// 떠오르는 거리. (픽셀, 원본과 같다)
 const RISE_DISTANCE: f32 = 28.0;
 
-// 부모 크기를 모를 때의 가운데. (원본과 같다)
+/// 부모 크기를 모를 때의 가운데. (원본과 같다)
 const DEFAULT_CENTER_X: f32 = 480.0;
 
 //==============================================================================
-// 토스트 설정. (원본 options = { width = 400, height = 48, rest_y = 560, rest_x = null, hold_seconds = 1.8, font_size = 15, background_color?, text_color? })
+/// 토스트 설정. (원본 options = { width = 400, height = 48, rest_y = 560, rest_x = null, hold_seconds = 1.8, font_size = 15, background_color?, text_color? })
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UIToastOptions {
 	pub width: f32,
 	pub height: f32,
-	// 머무는 자리의 가운데 세로 좌표.
+	/// 머무는 자리의 가운데 세로 좌표.
 	pub rest_y: f32,
-	// 머무는 자리의 가운데 가로 좌표. (None 이면 부모 가로 가운데)
+	/// 머무는 자리의 가운데 가로 좌표. (None 이면 부모 가로 가운데)
 	pub rest_x: Option<f32>,
-	// 머무는 시간. (초)
+	/// 머무는 시간. (초)
 	pub hold_seconds: f32,
 	pub font_size: f32,
 	pub background_color: Color,
@@ -54,7 +58,7 @@ pub struct UIToastOptions {
 
 impl Default for UIToastOptions {
 	//==============================================================================
-	// 기본값. (원본과 같다)
+	/// 기본값. (원본과 같다)
 	//==============================================================================
 	fn default() -> UIToastOptions {
 		UIToastOptions {
@@ -71,7 +75,7 @@ impl Default for UIToastOptions {
 }
 
 //==============================================================================
-// 토스트 단계. (원본 "hidden" | "enter" | "hold" | "exit")
+/// 토스트 단계. (원본 "hidden" | "enter" | "hold" | "exit")
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ToastPhase {
@@ -82,7 +86,7 @@ enum ToastPhase {
 }
 
 //==============================================================================
-// 토스트.
+/// 토스트.
 //==============================================================================
 pub struct UIToast {
 	component_base: ComponentBase,
@@ -98,14 +102,14 @@ pub struct UIToast {
 #[crate::reflect]
 impl UIToast {
 	//==============================================================================
-	// 생성. (기본 설정)
+	/// 생성. (기본 설정)
 	//==============================================================================
 	pub fn new() -> UIToast {
 		UIToast::create_with_options(UIToastOptions::default())
 	}
 
 	//==============================================================================
-	// 설정으로 생성. (노드에는 node_tree.add_component 로 붙인다)
+	/// 설정으로 생성. (노드에는 node_tree.add_component 로 붙인다)
 	//==============================================================================
 	pub fn create_with_options(options: UIToastOptions) -> UIToast {
 		UIToast {
@@ -121,7 +125,7 @@ impl UIToast {
 	}
 
 	//==============================================================================
-	// 노드 만들기. (parent_id 밑에 "UIToast" 노드를 만들어 붙인다. 원본 new UIToast(options) + add_child)
+	/// 노드 만들기. (parent_id 밑에 "UIToast" 노드를 만들어 붙인다. 원본 new UIToast(options) + add_child)
 	//==============================================================================
 	pub fn create(node_tree: &mut NodeTree, parent_id: NodeId, options: UIToastOptions) -> NodeId {
 		let toast_id = node_tree.create_child(parent_id, "UIToast");
@@ -130,14 +134,14 @@ impl UIToast {
 	}
 
 	//==============================================================================
-	// 토스트 표시. (줄에 넣는다. 보이는 중이면 차례를 기다린다)
+	/// 토스트 표시. (줄에 넣는다. 보이는 중이면 차례를 기다린다)
 	//==============================================================================
 	pub fn show(&mut self, message_text: &str) {
 		self.message_queue.push_back(message_text.to_string());
 	}
 
 	//==============================================================================
-	// 다음 메시지 꺼내 보이기. (줄이 비었으면 숨긴다)
+	/// 다음 메시지 꺼내 보이기. (줄이 비었으면 숨긴다)
 	//==============================================================================
 	fn present_next(&mut self, context: &mut ComponentContext) {
 		let message_text = match self.message_queue.pop_front() {
@@ -162,7 +166,7 @@ impl UIToast {
 	}
 
 	//==============================================================================
-	// 진행 비율로 자리 고치기. (0 = 아래에서 출발, 1 = 제자리)
+	/// 진행 비율로 자리 고치기. (0 = 아래에서 출발, 1 = 제자리)
 	//==============================================================================
 	fn update_position(&self, context: &mut ComponentContext, progress_ratio: f32) {
 		let center_x = match self.rest_x {
@@ -186,28 +190,28 @@ impl UIToast {
 	}
 
 	//==============================================================================
-	// 머무는 자리(가운데 세로 좌표) 설정.
+	/// 머무는 자리(가운데 세로 좌표) 설정.
 	//==============================================================================
 	pub fn set_rest_y(&mut self, rest_y: f32) {
 		self.rest_y = rest_y;
 	}
 
 	//==============================================================================
-	// 머무는 자리(가운데 가로 좌표) 설정. (None 이면 부모 가로 가운데)
+	/// 머무는 자리(가운데 가로 좌표) 설정. (None 이면 부모 가로 가운데)
 	//==============================================================================
 	pub fn set_rest_x(&mut self, rest_x: Option<f32>) {
 		self.rest_x = rest_x;
 	}
 
 	//==============================================================================
-	// 머무는 시간 설정. (초)
+	/// 머무는 시간 설정. (초)
 	//==============================================================================
 	pub fn set_hold_seconds(&mut self, hold_seconds: f32) {
 		self.hold_seconds = hold_seconds;
 	}
 
 	//==============================================================================
-	// 보이는 중인지. (줄에 남은 메시지가 있어도 참)
+	/// 보이는 중인지. (줄에 남은 메시지가 있어도 참)
 	//==============================================================================
 	pub fn is_showing(&self) -> bool {
 		self.phase != ToastPhase::Hidden || !self.message_queue.is_empty()
@@ -235,7 +239,7 @@ impl Component for UIToast {
 	}
 
 	//==============================================================================
-	// 트리에 붙음. (원본 생성자: 가운데 피봇, 크기, 숨김, 알약 Paint, UILabel)
+	/// 트리에 붙음. (원본 생성자: 가운데 피봇, 크기, 숨김, 알약 Paint, UILabel)
 	//==============================================================================
 	fn attach_to_tree(&mut self, node_tree: &mut NodeTree, node_id: NodeId) {
 		let options = self.options;
@@ -254,7 +258,7 @@ impl Component for UIToast {
 	}
 
 	//==============================================================================
-	// 갱신. (숨은 동안 줄에 메시지가 있으면 꺼내고, 등장 → 머묾 → 퇴장을 센다)
+	/// 갱신. (숨은 동안 줄에 메시지가 있으면 꺼내고, 등장 → 머묾 → 퇴장을 센다)
 	//==============================================================================
 	fn tick(&mut self, context: &mut ComponentContext, time_delta: f32) {
 		if self.phase == ToastPhase::Hidden {
@@ -301,7 +305,7 @@ mod tests {
 	use crate::core::engine::{Engine, EngineConfiguration};
 
 	//==============================================================================
-	// 시험 장면. (800 x 600 뿌리 밑의 토스트)
+	/// 시험 장면. (800 x 600 뿌리 밑의 토스트)
 	//==============================================================================
 	fn create_toast_tree() -> (NodeTree, NodeId) {
 		let mut node_tree = NodeTree::new();
@@ -312,14 +316,14 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 토스트 반환.
+	/// 토스트 반환.
 	//==============================================================================
 	fn get_toast(node_tree: &mut NodeTree, toast_id: NodeId) -> &mut UIToast {
 		node_tree[toast_id].get_component_mut::<UIToast>().expect("toast")
 	}
 
 	//==============================================================================
-	// 두 메시지가 차례로: 등장 0.24 → 머묾 1.8 → 퇴장 0.2 → 다음 메시지 → 끝나면 숨는다.
+	/// 두 메시지가 차례로: 등장 0.24 → 머묾 1.8 → 퇴장 0.2 → 다음 메시지 → 끝나면 숨는다.
 	//==============================================================================
 	#[test]
 	fn queued_messages_play_in_order() {
@@ -365,7 +369,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 가로 자리를 정하면 그 자리에 선다.
+	/// 가로 자리를 정하면 그 자리에 선다.
 	//==============================================================================
 	#[test]
 	fn rest_xoverrides_parent_center() {

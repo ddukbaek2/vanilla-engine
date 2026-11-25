@@ -1,18 +1,22 @@
 //==============================================================================
-// 절차적 비프 재생기.
-// - 원본 misc/beepplayer.js. 오디오 파일 없이 UI 효과음을 합성한다.
-//   attack / sustain / release 엔벨로프로 클릭음이 나지 않게 한다.
-// - click / confirm / cancel / error / success / warning / notification 프리셋과
-//   임의 톤 시퀀스 재생(play_sequence)을 제공한다.
-// - 사용:
-//     let beep_player = BeepPlayer::new(engine.get_audio_manager(), BeepPlayer::DEFAULT_VOLUME);
-//     beep_player.play_preset("confirm");
-// - 소리를 내는 곳:
-//   웹: 원본처럼 OscillatorNode + GainNode 를 만들어 오디오 컨텍스트의 출력에 바로 잇는다.
-//   데스크탑: 같은 엔벨로프로 파형을 컨텍스트 표본율로 그려 믹서의 출력에 바로 섞는다. (지연은 그 프레임 수만큼 늦춰 시작)
-//     파형은 크롬 WebAudio 오실레이터처럼 대역을 제한한 푸리에 급수다. (square, sawtooth, triangle 의 높은 배음을 주파수에 따라 덜어 내고 크기를 맞춘다)
-// - 원본과 다른 점:
-//   파형 이름은 문자열 대신 BeepWaveform, 시퀀스의 톤은 BeepTone 이다. 프리셋 이름은 원본처럼 문자열이다.
+//! 절차적 비프 재생기.
+//! - 원본 misc/beepplayer.js. 오디오 파일 없이 UI 효과음을 합성한다.
+//!   attack / sustain / release 엔벨로프로 클릭음이 나지 않게 한다.
+//! - click / confirm / cancel / error / success / warning / notification 프리셋과
+//!   임의 톤 시퀀스 재생(play_sequence)을 제공한다.
+//! - 사용:
+//!   ```text
+//!     let beep_player = BeepPlayer::new(engine.get_audio_manager(), BeepPlayer::DEFAULT_VOLUME);
+//!     beep_player.play_preset("confirm");
+//!   ```
+//! - 소리를 내는 곳:
+//!   웹: 원본처럼 OscillatorNode + GainNode 를 만들어 오디오 컨텍스트의 출력에 바로 잇는다.
+//!   데스크탑: 같은 엔벨로프로 파형을 컨텍스트 표본율로 그려 믹서의 출력에 바로 섞는다. (지연은 그 프레임 수만큼 늦춰 시작)
+//!   ```text
+//!     파형은 크롬 WebAudio 오실레이터처럼 대역을 제한한 푸리에 급수다. (square, sawtooth, triangle 의 높은 배음을 주파수에 따라 덜어 내고 크기를 맞춘다)
+//!   ```
+//! - 원본과 다른 점:
+//!   파형 이름은 문자열 대신 BeepWaveform, 시퀀스의 톤은 BeepTone 이다. 프리셋 이름은 원본처럼 문자열이다.
 //==============================================================================
 use crate::core::audiomanager::{resume_audio_manager_state, AudioManager, AudioManagerState};
 use crate::platform::audio as audio_backend;
@@ -20,7 +24,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 //==============================================================================
-// 파형. (원본 OscillatorNode.type 문자열)
+/// 파형. (원본 OscillatorNode.type 문자열)
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BeepWaveform {
@@ -31,22 +35,22 @@ pub enum BeepWaveform {
 }
 
 //==============================================================================
-// 시퀀스의 톤 하나. (원본 { frequency, duration, waveform?, volume_scale? })
+/// 시퀀스의 톤 하나. (원본 { frequency, duration, waveform?, volume_scale? })
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BeepTone {
-	// 주파수. (Hz)
+	/// 주파수. (Hz)
 	pub frequency: f32,
-	// 길이. (초)
+	/// 길이. (초)
 	pub duration: f64,
 	pub waveform: BeepWaveform,
-	// 이 톤만의 음량 배율.
+	/// 이 톤만의 음량 배율.
 	pub volume_scale: f32,
 }
 
 impl BeepTone {
 	//==============================================================================
-	// 생성. (사인파, 배율 1. 원본에서 waveform, volume_scale 을 비운 꼴)
+	/// 생성. (사인파, 배율 1. 원본에서 waveform, volume_scale 을 비운 꼴)
 	//==============================================================================
 	pub const fn create(frequency: f32, duration: f64) -> BeepTone {
 		BeepTone {
@@ -58,7 +62,7 @@ impl BeepTone {
 	}
 
 	//==============================================================================
-	// 파형과 배율까지 정해 생성.
+	/// 파형과 배율까지 정해 생성.
 	//==============================================================================
 	pub const fn create_with_waveform(frequency: f32, duration: f64, waveform: BeepWaveform, volume_scale: f32) -> BeepTone {
 		BeepTone {
@@ -71,7 +75,7 @@ impl BeepTone {
 }
 
 //==============================================================================
-// 톤 하나의 엔벨로프. (원본 play_tone 이 계산하는 값들. 시간은 톤 시작 기준 초)
+/// 톤 하나의 엔벨로프. (원본 play_tone 이 계산하는 값들. 시간은 톤 시작 기준 초)
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct BeepEnvelope {
@@ -84,14 +88,14 @@ pub(crate) struct BeepEnvelope {
 	pub(crate) peak_volume: f32,
 }
 
-// 엔벨로프의 바닥 음량. (원본 0.0001, 지수 램프는 0 으로 갈 수 없다)
+/// 엔벨로프의 바닥 음량. (원본 0.0001, 지수 램프는 0 으로 갈 수 없다)
 pub(crate) const BEEP_FLOOR_VOLUME: f32 = 0.0001;
-// 오실레이터를 엔벨로프 끝보다 조금 더 돌리는 시간. (초, 원본 stop(end_time + 0.01))
+/// 오실레이터를 엔벨로프 끝보다 조금 더 돌리는 시간. (초, 원본 stop(end_time + 0.01))
 pub(crate) const BEEP_STOP_MARGIN_SECONDS: f64 = 0.01;
 
 impl BeepEnvelope {
 	//==============================================================================
-	// 생성. (원본 play_tone 의 attack, release, peak 계산)
+	/// 생성. (원본 play_tone 의 attack, release, peak 계산)
 	//==============================================================================
 	pub(crate) fn create(frequency: f32, duration_seconds: f64, waveform: BeepWaveform, delay_seconds: f64, volume: f32, volume_scale: f32) -> BeepEnvelope {
 		BeepEnvelope {
@@ -106,7 +110,7 @@ impl BeepEnvelope {
 	}
 
 	//==============================================================================
-	// 최고 음량을 유지하다가 줄어들기 시작하는 시각. (원본 max(start_time + attack, end_time - release))
+	/// 최고 음량을 유지하다가 줄어들기 시작하는 시각. (원본 max(start_time + attack, end_time - release))
 	//==============================================================================
 	pub(crate) fn get_release_start_seconds(&self) -> f64 {
 		self.attack_seconds.max(self.duration_seconds - self.release_seconds)
@@ -114,7 +118,7 @@ impl BeepEnvelope {
 }
 
 //==============================================================================
-// 절차적 비프 재생기.
+/// 절차적 비프 재생기.
 //==============================================================================
 pub struct BeepPlayer {
 	audio_manager_state: Rc<RefCell<AudioManagerState>>,
@@ -123,11 +127,11 @@ pub struct BeepPlayer {
 }
 
 impl BeepPlayer {
-	// 원본 생성자의 기본 음량.
+	/// 원본 생성자의 기본 음량.
 	pub const DEFAULT_VOLUME: f32 = 0.35;
 
 	//==============================================================================
-	// 생성. (volume: 0 ~ 1. 원본처럼 매니저를 참조로 든다)
+	/// 생성. (volume: 0 ~ 1. 원본처럼 매니저를 참조로 든다)
 	//==============================================================================
 	pub fn new(audio_manager: &AudioManager, volume: f32) -> BeepPlayer {
 		let audio_manager_state = audio_manager.get_shared_state();
@@ -139,9 +143,9 @@ impl BeepPlayer {
 	}
 
 	//==============================================================================
-	// 단일 톤 재생.
-	// - frequency: 주파수(Hz), duration_seconds: 길이(초), delay_seconds: 시작 지연(초), volume_scale: 이 톤만의 음량 배율.
-	// - 컨텍스트가 없거나 돌고 있지 않으면 아무것도 하지 않는다.
+	/// 단일 톤 재생.
+	/// - frequency: 주파수(Hz), duration_seconds: 길이(초), delay_seconds: 시작 지연(초), volume_scale: 이 톤만의 음량 배율.
+	/// - 컨텍스트가 없거나 돌고 있지 않으면 아무것도 하지 않는다.
 	//==============================================================================
 	pub fn play_tone(&self, frequency: f32, duration_seconds: f64, waveform: BeepWaveform, delay_seconds: f64, volume_scale: f32) {
 		if self.is_muted {
@@ -157,7 +161,7 @@ impl BeepPlayer {
 	}
 
 	//==============================================================================
-	// 톤 시퀀스 재생. (차례로 이어 튼다)
+	/// 톤 시퀀스 재생. (차례로 이어 튼다)
 	//==============================================================================
 	pub fn play_sequence(&self, tone_list: &[BeepTone]) {
 		let mut delay_seconds = 0.0;
@@ -168,7 +172,7 @@ impl BeepPlayer {
 	}
 
 	//==============================================================================
-	// 프리셋 재생. ("click" | "confirm" | "cancel" | "error" | "success" | "warning" | "notification", 모르는 이름은 click)
+	/// 프리셋 재생. ("click" | "confirm" | "cancel" | "error" | "success" | "warning" | "notification", 모르는 이름은 click)
 	//==============================================================================
 	pub fn play_preset(&self, preset_name: &str) {
 		match preset_name {
@@ -204,28 +208,28 @@ impl BeepPlayer {
 	}
 
 	//==============================================================================
-	// 기본 음량 설정. (0 ~ 1)
+	/// 기본 음량 설정. (0 ~ 1)
 	//==============================================================================
 	pub fn set_volume(&mut self, volume: f32) {
 		self.volume = volume.clamp(0.0, 1.0);
 	}
 
 	//==============================================================================
-	// 기본 음량 반환.
+	/// 기본 음량 반환.
 	//==============================================================================
 	pub fn get_volume(&self) -> f32 {
 		self.volume
 	}
 
 	//==============================================================================
-	// 음소거 설정.
+	/// 음소거 설정.
 	//==============================================================================
 	pub fn set_muted(&mut self, is_muted: bool) {
 		self.is_muted = is_muted;
 	}
 
 	//==============================================================================
-	// 음소거 여부.
+	/// 음소거 여부.
 	//==============================================================================
 	pub fn is_muted(&self) -> bool {
 		self.is_muted
@@ -237,7 +241,7 @@ mod tests {
 	use super::*;
 
 	//==============================================================================
-	// 엔벨로프 값은 원본 play_tone 의 계산과 같다.
+	/// 엔벨로프 값은 원본 play_tone 의 계산과 같다.
 	//==============================================================================
 	#[test]
 	fn envelope_matches_original_formula() {

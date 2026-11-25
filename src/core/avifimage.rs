@@ -1,23 +1,29 @@
 //==============================================================================
-// AVIF 그림 풀기. (데스크탑, core/image.rs 가 부른다)
-// - 원본은 브라우저가 AVIF 를 푼다. (크롬은 libavif 를 러스트로 옮긴 CrabbyAvif 와 dav1d) 웹 판도 브라우저가 푼다. 데스크탑은 순수 러스트로 푼다.
-//   HEIF 상자는 여기서 읽고(libavif src/read.c 와 같은 규칙), AV1 은 dav1d 를 러스트로 옮긴 rav1d 가 YUV 로 푼다.
-// - 상자: meta 의 pitm(주 그림), iinf(항목 형 av01, grid), iloc(자료 자리, 파일 안과 idat 안), iref(auxl, dimg, prem), iprp 의 ipco 와 ipma(auxC, colr, irot, imir, clap).
-//   - 색 정보: libavif 처럼 주 그림에 colr(nclx)이 있으면 그 matrix_coefficients 와 full_range_flag 를, 없으면 AV1 순서 머리의 것을 쓴다.
-//   - grid: 타일(dimg 차례)을 YUV 로 풀어 줄과 칸으로 이어 붙이고 출력 크기로 자른 뒤 한 번에 RGB 로 바꾼다. (libavif 처럼)
-//   - 알파: 주 그림을 auxl 로 가리키고 auxC 가 urn:mpeg:mpegB:cicp:systems:auxiliary:alpha 나 urn:mpeg:hevc:2015:auxid:1 인 항목. (libavif isAlphaURN 의 둘)
-//     주 그림이 prem 으로 알파를 가리키면 색이 이미 알파로 곱해진 것이라 그대로 프리멀티플라이드 픽셀로 쓴다.
-//   - 크롬 AVIFImageDecoder 처럼 clap(깨끗한 테두리)은 자른 자리의 원점이 (0, 0) 일 때만 오른쪽과 아래를 자르고, 아니면 그림 전체를 쓴다.
-//     그다음 irot(반시계 angle x 90 도), imir(axis 0 은 위아래, 1 은 좌우를 바꾼다) 차례로 건다. (MIAF 7.3.6.7 의 차례)
-// - YUV 를 RGB 로 바꾸는 셈은 libavif(src/reformat.c, src/colr.c)의 기준 셈을 따른다.
-//   - 색 계수(Kr, Kb)는 matrix_coefficients 로 고른다. (BT.709, FCC, BT.470BG, BT.601, SMPTE 240, BT.2020 NCL, 그 밖과 미지정은 BT.601)
-//     Identity 는 G = Y, B = Cb, R = Cr 이고 YCgCo 는 H.273 식 47~50 이다.
-//   - 범위: 제한 범위면 Y 는 (v - 16 x 2^(깊이-8)) / (219 x 2^(깊이-8)), Cb, Cr 은 (v - 2^(깊이-1)) / (224 x 2^(깊이-8)). 전체 범위면 최댓값으로 나눈다.
-//   - 4:2:0, 4:2:2 의 크로마는 libavif 의 양선형(가장 가까운 것 9/16, 같은 줄과 같은 칸의 이웃 3/16 씩, 대각 1/16)으로 늘린다. 가장자리는 가장 가까운 것을 되풀이한다.
-//   - 알파 그림은 전체 범위로 읽는다.
-// - 원본(크롬)과 다른 것: 색 프로필(ICC, nclx 의 원색과 전달 특성) 변환을 하지 않는다. (image 크레이트로 푸는 PNG, JPEG 도 색 프로필을 걸지 않는다)
-//   움직이는 AVIF(avis)는 정지 그림 항목(pitm)만 푼다. (브라우저는 움직인다) 게인 맵(HDR)은 쓰지 않는다.
-// - rav1d 의 asm 은 끈 채 쓴다. (Cargo.toml)
+//! AVIF 그림 풀기. (데스크탑, core/image.rs 가 부른다)
+//! - 원본은 브라우저가 AVIF 를 푼다. (크롬은 libavif 를 러스트로 옮긴 CrabbyAvif 와 dav1d) 웹 판도 브라우저가 푼다. 데스크탑은 순수 러스트로 푼다.
+//!   HEIF 상자는 여기서 읽고(libavif src/read.c 와 같은 규칙), AV1 은 dav1d 를 러스트로 옮긴 rav1d 가 YUV 로 푼다.
+//! - 상자: meta 의 pitm(주 그림), iinf(항목 형 av01, grid), iloc(자료 자리, 파일 안과 idat 안), iref(auxl, dimg, prem), iprp 의 ipco 와 ipma(auxC, colr, irot, imir, clap).
+//!   - 색 정보: libavif 처럼 주 그림에 colr(nclx)이 있으면 그 matrix_coefficients 와 full_range_flag 를, 없으면 AV1 순서 머리의 것을 쓴다.
+//!   - grid: 타일(dimg 차례)을 YUV 로 풀어 줄과 칸으로 이어 붙이고 출력 크기로 자른 뒤 한 번에 RGB 로 바꾼다. (libavif 처럼)
+//!   - 알파: 주 그림을 auxl 로 가리키고 auxC 가 urn:mpeg:mpegB:cicp:systems:auxiliary:alpha 나 urn:mpeg:hevc:2015:auxid:1 인 항목. (libavif isAlphaURN 의 둘)
+//!   ```text
+//!     주 그림이 prem 으로 알파를 가리키면 색이 이미 알파로 곱해진 것이라 그대로 프리멀티플라이드 픽셀로 쓴다.
+//!   ```
+//!   - 크롬 AVIFImageDecoder 처럼 clap(깨끗한 테두리)은 자른 자리의 원점이 (0, 0) 일 때만 오른쪽과 아래를 자르고, 아니면 그림 전체를 쓴다.
+//!   ```text
+//!     그다음 irot(반시계 angle x 90 도), imir(axis 0 은 위아래, 1 은 좌우를 바꾼다) 차례로 건다. (MIAF 7.3.6.7 의 차례)
+//!   ```
+//! - YUV 를 RGB 로 바꾸는 셈은 libavif(src/reformat.c, src/colr.c)의 기준 셈을 따른다.
+//!   - 색 계수(Kr, Kb)는 matrix_coefficients 로 고른다. (BT.709, FCC, BT.470BG, BT.601, SMPTE 240, BT.2020 NCL, 그 밖과 미지정은 BT.601)
+//!   ```text
+//!     Identity 는 G = Y, B = Cb, R = Cr 이고 YCgCo 는 H.273 식 47~50 이다.
+//!   ```
+//!   - 범위: 제한 범위면 Y 는 (v - 16 x 2^(깊이-8)) / (219 x 2^(깊이-8)), Cb, Cr 은 (v - 2^(깊이-1)) / (224 x 2^(깊이-8)). 전체 범위면 최댓값으로 나눈다.
+//!   - 4:2:0, 4:2:2 의 크로마는 libavif 의 양선형(가장 가까운 것 9/16, 같은 줄과 같은 칸의 이웃 3/16 씩, 대각 1/16)으로 늘린다. 가장자리는 가장 가까운 것을 되풀이한다.
+//!   - 알파 그림은 전체 범위로 읽는다.
+//! - 원본(크롬)과 다른 것: 색 프로필(ICC, nclx 의 원색과 전달 특성) 변환을 하지 않는다. (image 크레이트로 푸는 PNG, JPEG 도 색 프로필을 걸지 않는다)
+//!   움직이는 AVIF(avis)는 정지 그림 항목(pitm)만 푼다. (브라우저는 움직인다) 게인 맵(HDR)은 쓰지 않는다.
+//! - rav1d 의 asm 은 끈 채 쓴다. (Cargo.toml)
 //==============================================================================
 use crate::core::image::Image;
 use rav1d::include::dav1d::data::Dav1dData;
@@ -30,39 +36,39 @@ use std::mem::MaybeUninit;
 use std::ptr::NonNull;
 use std::rc::Rc;
 
-// 해독에 쓰는 스레드 수의 끝. (그림 한 장)
+/// 해독에 쓰는 스레드 수의 끝. (그림 한 장)
 const MAXIMUM_DECODE_THREAD_COUNT: usize = 8;
-// 알파 그림을 가리키는 보조 형. (libavif AVIF_URN_ALPHA0, AVIF_URN_ALPHA1)
+/// 알파 그림을 가리키는 보조 형. (libavif AVIF_URN_ALPHA0, AVIF_URN_ALPHA1)
 const ALPHA_AUXILIARY_TYPE_LIST: [&str; 2] = ["urn:mpeg:mpegB:cicp:systems:auxiliary:alpha", "urn:mpeg:hevc:2015:auxid:1"];
-// grid 의 타일 수 끝. (줄 수와 칸 수는 각각 256 까지)
+/// grid 의 타일 수 끝. (줄 수와 칸 수는 각각 256 까지)
 const MAXIMUM_GRID_TILE_COUNT: usize = 256 * 256;
 
 //==============================================================================
-// 푼 AV1 그림 한 장. (rav1d 의 그림에서 평면을 꺼내 둔 것, grid 는 타일을 이어 붙인 것)
+/// 푼 AV1 그림 한 장. (rav1d 의 그림에서 평면을 꺼내 둔 것, grid 는 타일을 이어 붙인 것)
 //==============================================================================
 struct DecodedAv1Picture {
 	width: usize,
 	height: usize,
 	bit_depth: u32,
-	// 크로마를 가로, 세로로 줄인 단계. (4:2:0 은 (1, 1), 4:2:2 는 (1, 0), 4:4:4 는 (0, 0))
+	/// 크로마를 가로, 세로로 줄인 단계. (4:2:0 은 (1, 1), 4:2:2 는 (1, 0), 4:4:4 는 (0, 0))
 	chroma_shift: (usize, usize),
 	is_monochrome: bool,
 	matrix_coefficients: u32,
 	is_full_range: bool,
-	// Y, Cb, Cr 평면. (줄 사이 빈칸 없이, 크로마는 줄인 크기, 흑백이면 Cb, Cr 은 비어 있다)
+	/// Y, Cb, Cr 평면. (줄 사이 빈칸 없이, 크로마는 줄인 크기, 흑백이면 Cb, Cr 은 비어 있다)
 	plane_list: [Vec<u16>; 3],
 }
 
 impl DecodedAv1Picture {
 	//==============================================================================
-	// 크로마 평면의 너비와 높이.
+	/// 크로마 평면의 너비와 높이.
 	//==============================================================================
 	fn get_chroma_size(&self) -> (usize, usize) {
 		((self.width + self.chroma_shift.0) >> self.chroma_shift.0, (self.height + self.chroma_shift.1) >> self.chroma_shift.1)
 	}
 
 	//==============================================================================
-	// 평면 하나의 너비와 높이. (0 은 Y, 1 과 2 는 크로마)
+	/// 평면 하나의 너비와 높이. (0 은 Y, 1 과 2 는 크로마)
 	//==============================================================================
 	fn get_plane_size(&self, plane_index: usize) -> (usize, usize) {
 		if plane_index == 0 {
@@ -75,18 +81,18 @@ impl DecodedAv1Picture {
 }
 
 //==============================================================================
-// 항목 자료의 자리. (iloc 의 항목 하나)
+/// 항목 자료의 자리. (iloc 의 항목 하나)
 //==============================================================================
 struct HeifItemLocation {
-	// 0 은 파일 안, 1 은 idat 안. (그 밖은 받지 않는다)
+	/// 0 은 파일 안, 1 은 idat 안. (그 밖은 받지 않는다)
 	construction_method: u16,
 	base_offset: u64,
-	// (자리, 길이) 목록. 길이 0 은 끝까지다.
+	/// (자리, 길이) 목록. 길이 0 은 끝까지다.
 	extent_list: Vec<(u64, u64)>,
 }
 
 //==============================================================================
-// 항목 사이의 가리킴. (iref 의 갈래 하나)
+/// 항목 사이의 가리킴. (iref 의 갈래 하나)
 //==============================================================================
 struct HeifItemReference {
 	reference_type: [u8; 4],
@@ -95,21 +101,21 @@ struct HeifItemReference {
 }
 
 //==============================================================================
-// 항목 성질. (ipco 의 상자 하나, 쓰는 것만)
+/// 항목 성질. (ipco 의 상자 하나, 쓰는 것만)
 //==============================================================================
 enum HeifItemProperty {
-	// auxC 의 보조 형.
+	/// auxC 의 보조 형.
 	AuxiliaryType(String),
-	// irot 의 angle. (반시계 angle x 90 도)
+	/// irot 의 angle. (반시계 angle x 90 도)
 	Rotation(u8),
-	// imir 의 axis. (0 은 위아래, 1 은 좌우를 바꾼다)
+	/// imir 의 axis. (0 은 위아래, 1 은 좌우를 바꾼다)
 	Mirror(u8),
-	// colr 의 nclx. (matrix_coefficients, full_range_flag)
+	/// colr 의 nclx. (matrix_coefficients, full_range_flag)
 	ColorInformation {
 		matrix_coefficients: u32,
 		is_full_range: bool,
 	},
-	// clap 의 너비, 높이, 가로 자리, 세로 자리. (분자, 분모, 자리는 부호 있는 분자)
+	/// clap 의 너비, 높이, 가로 자리, 세로 자리. (분자, 분모, 자리는 부호 있는 분자)
 	CleanAperture {
 		width: (u32, u32),
 		height: (u32, u32),
@@ -120,22 +126,22 @@ enum HeifItemProperty {
 }
 
 //==============================================================================
-// meta 상자에서 읽은 것.
+/// meta 상자에서 읽은 것.
 //==============================================================================
 struct HeifMeta<'a> {
 	primary_item_id: u32,
 	item_type_table: HashMap<u32, [u8; 4]>,
 	item_location_table: HashMap<u32, HeifItemLocation>,
 	reference_list: Vec<HeifItemReference>,
-	// ipco 의 성질. (ipma 의 번호는 1 부터, 0 은 없음)
+	/// ipco 의 성질. (ipma 의 번호는 1 부터, 0 은 없음)
 	property_list: Vec<HeifItemProperty>,
-	// 항목마다 붙은 성질 번호. (ipma 의 차례)
+	/// 항목마다 붙은 성질 번호. (ipma 의 차례)
 	association_table: HashMap<u32, Vec<usize>>,
 	item_data: &'a [u8],
 }
 
 //==============================================================================
-// 상자 안을 앞에서부터 읽는 것. (큰 쪽부터 읽는 정수)
+/// 상자 안을 앞에서부터 읽는 것. (큰 쪽부터 읽는 정수)
 //==============================================================================
 struct BoxReader<'a> {
 	bytes: &'a [u8],
@@ -144,7 +150,7 @@ struct BoxReader<'a> {
 
 impl<'a> BoxReader<'a> {
 	//==============================================================================
-	// 생성.
+	/// 생성.
 	//==============================================================================
 	fn new(bytes: &'a [u8]) -> BoxReader<'a> {
 		BoxReader {
@@ -154,7 +160,7 @@ impl<'a> BoxReader<'a> {
 	}
 
 	//==============================================================================
-	// 바이트 몇 개 읽기. (모자라면 Err)
+	/// 바이트 몇 개 읽기. (모자라면 Err)
 	//==============================================================================
 	fn read_bytes(&mut self, byte_count: usize) -> Result<&'a [u8], String> {
 		let end = self.position.checked_add(byte_count).filter(|end| *end <= self.bytes.len()).ok_or_else(|| String::from("AVIF 상자가 짧습니다."))?;
@@ -164,7 +170,7 @@ impl<'a> BoxReader<'a> {
 	}
 
 	//==============================================================================
-	// 정수 읽기. (byte_count 바이트, 0 이면 0)
+	/// 정수 읽기. (byte_count 바이트, 0 이면 0)
 	//==============================================================================
 	fn read_unsigned(&mut self, byte_count: usize) -> Result<u64, String> {
 		let read_bytes = self.read_bytes(byte_count)?;
@@ -172,7 +178,7 @@ impl<'a> BoxReader<'a> {
 	}
 
 	//==============================================================================
-	// 8, 16, 32 비트 정수 읽기.
+	/// 8, 16, 32 비트 정수 읽기.
 	//==============================================================================
 	fn read_u8(&mut self) -> Result<u8, String> {
 		Ok(self.read_unsigned(1)? as u8)
@@ -187,7 +193,7 @@ impl<'a> BoxReader<'a> {
 	}
 
 	//==============================================================================
-	// 네 글자 이름 읽기.
+	/// 네 글자 이름 읽기.
 	//==============================================================================
 	fn read_four_character_code(&mut self) -> Result<[u8; 4], String> {
 		let read_bytes = self.read_bytes(4)?;
@@ -195,7 +201,7 @@ impl<'a> BoxReader<'a> {
 	}
 
 	//==============================================================================
-	// 남은 바이트.
+	/// 남은 바이트.
 	//==============================================================================
 	fn read_remaining(&mut self) -> &'a [u8] {
 		let remaining_bytes = &self.bytes[self.position..];
@@ -205,7 +211,7 @@ impl<'a> BoxReader<'a> {
 }
 
 //==============================================================================
-// 상자 목록으로 나누기. ((이름, 내용) 목록, 크기 1 은 64 비트 크기, 0 은 끝까지)
+/// 상자 목록으로 나누기. ((이름, 내용) 목록, 크기 1 은 64 비트 크기, 0 은 끝까지)
 //==============================================================================
 fn split_boxes(bytes: &[u8]) -> Result<Vec<([u8; 4], &[u8])>, String> {
 	let mut box_list: Vec<([u8; 4], &[u8])> = Vec::new();
@@ -229,7 +235,7 @@ fn split_boxes(bytes: &[u8]) -> Result<Vec<([u8; 4], &[u8])>, String> {
 }
 
 //==============================================================================
-// 버전과 표시가 붙은 상자의 머리 나누기. ((버전, 표시, 나머지))
+/// 버전과 표시가 붙은 상자의 머리 나누기. ((버전, 표시, 나머지))
 //==============================================================================
 fn split_full_box(content: &[u8]) -> Result<(u8, u32, &[u8]), String> {
 	if content.len() < 4 {
@@ -240,7 +246,7 @@ fn split_full_box(content: &[u8]) -> Result<(u8, u32, &[u8]), String> {
 }
 
 //==============================================================================
-// meta 상자 읽기. (pitm, iinf, iloc, iref, iprp, idat)
+/// meta 상자 읽기. (pitm, iinf, iloc, iref, iprp, idat)
 //==============================================================================
 fn read_heif_meta(file_bytes: &[u8]) -> Result<HeifMeta<'_>, String> {
 	let meta_content = split_boxes(file_bytes)?.into_iter().find(|(box_type, _)| box_type == b"meta").map(|(_, content)| content).ok_or_else(|| String::from("AVIF 에 meta 상자가 없습니다."))?;
@@ -289,7 +295,7 @@ fn read_heif_meta(file_bytes: &[u8]) -> Result<HeifMeta<'_>, String> {
 }
 
 //==============================================================================
-// iinf 읽기. (infe 판 2, 3 의 항목 형)
+/// iinf 읽기. (infe 판 2, 3 의 항목 형)
 //==============================================================================
 fn read_item_info_box<'a>(content: &'a [u8], meta: &mut HeifMeta<'a>) -> Result<(), String> {
 	let (version, _, body) = split_full_box(content)?;
@@ -318,7 +324,7 @@ fn read_item_info_box<'a>(content: &'a [u8], meta: &mut HeifMeta<'a>) -> Result<
 }
 
 //==============================================================================
-// iloc 읽기. (판 0, 1, 2, 자리와 길이의 바이트 수는 머리에 적힌 대로)
+/// iloc 읽기. (판 0, 1, 2, 자리와 길이의 바이트 수는 머리에 적힌 대로)
 //==============================================================================
 fn read_item_location_box<'a>(content: &'a [u8], meta: &mut HeifMeta<'a>) -> Result<(), String> {
 	let (version, _, body) = split_full_box(content)?;
@@ -353,7 +359,7 @@ fn read_item_location_box<'a>(content: &'a [u8], meta: &mut HeifMeta<'a>) -> Res
 }
 
 //==============================================================================
-// iref 읽기. (판 0 은 16 비트, 1 은 32 비트 항목 번호)
+/// iref 읽기. (판 0 은 16 비트, 1 은 32 비트 항목 번호)
 //==============================================================================
 fn read_item_reference_box<'a>(content: &'a [u8], meta: &mut HeifMeta<'a>) -> Result<(), String> {
 	let (version, _, body) = split_full_box(content)?;
@@ -375,7 +381,7 @@ fn read_item_reference_box<'a>(content: &'a [u8], meta: &mut HeifMeta<'a>) -> Re
 }
 
 //==============================================================================
-// iprp 읽기. (ipco 의 성질과 ipma 의 항목마다 붙은 성질 번호)
+/// iprp 읽기. (ipco 의 성질과 ipma 의 항목마다 붙은 성질 번호)
 //==============================================================================
 fn read_item_property_box<'a>(content: &'a [u8], meta: &mut HeifMeta<'a>) -> Result<(), String> {
 	for (box_type, property_content) in split_boxes(content)? {
@@ -403,7 +409,7 @@ fn read_item_property_box<'a>(content: &'a [u8], meta: &mut HeifMeta<'a>) -> Res
 }
 
 //==============================================================================
-// 성질 상자 하나 읽기. (auxC, colr 의 nclx, irot, imir, clap, 그 밖은 Other)
+/// 성질 상자 하나 읽기. (auxC, colr 의 nclx, irot, imir, clap, 그 밖은 Other)
 //==============================================================================
 fn read_item_property(property_type: &[u8; 4], property_body: &[u8]) -> Result<HeifItemProperty, String> {
 	match property_type {
@@ -455,7 +461,7 @@ fn read_item_property(property_type: &[u8; 4], property_body: &[u8]) -> Result<H
 
 impl HeifMeta<'_> {
 	//==============================================================================
-	// 항목에 붙은 성질 목록. (ipma 의 차례)
+	/// 항목에 붙은 성질 목록. (ipma 의 차례)
 	//==============================================================================
 	fn get_item_property_list(&self, item_id: u32) -> Vec<&HeifItemProperty> {
 		match self.association_table.get(&item_id) {
@@ -469,7 +475,7 @@ impl HeifMeta<'_> {
 	}
 
 	//==============================================================================
-	// 항목 자료 읽기. (iloc 의 조각을 차례로 이어 붙인다, 파일 안과 idat 안)
+	/// 항목 자료 읽기. (iloc 의 조각을 차례로 이어 붙인다, 파일 안과 idat 안)
 	//==============================================================================
 	fn read_item_data(&self, file_bytes: &[u8], item_id: u32) -> Result<Vec<u8>, String> {
 		let item_location = self.item_location_table.get(&item_id).ok_or_else(|| format!("AVIF 항목 {} 의 자리가 없습니다.", item_id))?;
@@ -499,7 +505,7 @@ impl HeifMeta<'_> {
 	}
 
 	//==============================================================================
-	// 주 그림의 알파 항목. (주 그림을 auxl 로 가리키고 auxC 가 알파 형인 항목)
+	/// 주 그림의 알파 항목. (주 그림을 auxl 로 가리키고 auxC 가 알파 형인 항목)
 	//==============================================================================
 	fn find_alpha_item_id(&self) -> Option<u32> {
 		self.reference_list.iter().filter(|reference| &reference.reference_type == b"auxl" && reference.from_item_id != self.primary_item_id && reference.to_item_id_list.contains(&self.primary_item_id)).map(|reference| reference.from_item_id).find(|item_id| {
@@ -515,14 +521,14 @@ impl HeifMeta<'_> {
 	}
 
 	//==============================================================================
-	// 주 그림이 알파로 곱해졌는지. (주 그림에서 알파 항목으로 가는 prem)
+	/// 주 그림이 알파로 곱해졌는지. (주 그림에서 알파 항목으로 가는 prem)
 	//==============================================================================
 	fn is_premultiplied(&self, alpha_item_id: u32) -> bool {
 		self.reference_list.iter().any(|reference| &reference.reference_type == b"prem" && reference.from_item_id == self.primary_item_id && reference.to_item_id_list.contains(&alpha_item_id))
 	}
 
 	//==============================================================================
-	// 항목 하나를 YUV 그림으로 풀기. (av01 은 그대로, grid 는 타일을 풀어 이어 붙인다)
+	/// 항목 하나를 YUV 그림으로 풀기. (av01 은 그대로, grid 는 타일을 풀어 이어 붙인다)
 	//==============================================================================
 	fn decode_item_picture(&self, file_bytes: &[u8], item_id: u32) -> Result<DecodedAv1Picture, String> {
 		let item_type = self.item_type_table.get(&item_id).copied().ok_or_else(|| format!("AVIF 항목 {} 의 형이 없습니다.", item_id))?;
@@ -540,8 +546,8 @@ impl HeifMeta<'_> {
 	}
 
 	//==============================================================================
-	// grid 항목 풀기. (ImageGrid 의 줄, 칸, 출력 크기를 읽고 dimg 차례의 타일을 왼쪽 위부터 줄마다 놓은 뒤 출력 크기로 자른다)
-	// - 타일은 모두 같은 크기, 깊이, 크로마 배치여야 한다. (libavif 와 같다)
+	/// grid 항목 풀기. (ImageGrid 의 줄, 칸, 출력 크기를 읽고 dimg 차례의 타일을 왼쪽 위부터 줄마다 놓은 뒤 출력 크기로 자른다)
+	/// - 타일은 모두 같은 크기, 깊이, 크로마 배치여야 한다. (libavif 와 같다)
 	//==============================================================================
 	fn decode_grid_picture(&self, file_bytes: &[u8], item_id: u32) -> Result<DecodedAv1Picture, String> {
 		let grid_bytes = self.read_item_data(file_bytes, item_id)?;
@@ -617,7 +623,7 @@ impl HeifMeta<'_> {
 }
 
 //==============================================================================
-// AVIF 풀기. (주 그림을 RGB 로, 알파 그림이 있으면 알파로 만들고 clap, irot, imir 를 건다. 못 풀면 까닭)
+/// AVIF 풀기. (주 그림을 RGB 로, 알파 그림이 있으면 알파로 만들고 clap, irot, imir 를 건다. 못 풀면 까닭)
 //==============================================================================
 pub(crate) fn decode_avif(bytes: &[u8]) -> Result<Rc<Image>, String> {
 	let meta = read_heif_meta(bytes)?;
@@ -677,8 +683,8 @@ pub(crate) fn decode_avif(bytes: &[u8]) -> Result<Rc<Image>, String> {
 }
 
 //==============================================================================
-// clap 의 자를 크기. (크롬 AVIFImageDecoder 처럼 자른 자리의 원점이 (0, 0) 이고 크기가 정수로 그림 안이면 Some, 아니면 그림 전체를 쓴다)
-// - 원점 = (그림 크기 - 깨끗한 크기) / 2 + 자리. (ISO/IEC 14496-12 의 clap, 분수로 셈한다)
+/// clap 의 자를 크기. (크롬 AVIFImageDecoder 처럼 자른 자리의 원점이 (0, 0) 이고 크기가 정수로 그림 안이면 Some, 아니면 그림 전체를 쓴다)
+/// - 원점 = (그림 크기 - 깨끗한 크기) / 2 + 자리. (ISO/IEC 14496-12 의 clap, 분수로 셈한다)
 //==============================================================================
 fn read_clean_aperture_size(image_width: usize, image_height: usize, clean_width: (u32, u32), clean_height: (u32, u32), horizontal_offset: (i32, u32), vertical_offset: (i32, u32)) -> Option<(usize, usize)> {
 	let read_axis = |image_size: usize, clean_size: (u32, u32), offset: (i32, u32)| -> Option<usize> {
@@ -702,7 +708,7 @@ fn read_clean_aperture_size(image_width: usize, image_height: usize, clean_width
 }
 
 //==============================================================================
-// RGBA 픽셀의 왼쪽 위 crop_width x crop_height 만 남기기.
+/// RGBA 픽셀의 왼쪽 위 crop_width x crop_height 만 남기기.
 //==============================================================================
 fn crop_pixels(pixels: &[u8], width: usize, crop_width: usize, crop_height: usize) -> Vec<u8> {
 	let mut cropped_pixels: Vec<u8> = Vec::with_capacity(crop_width * crop_height * 4);
@@ -714,7 +720,7 @@ fn crop_pixels(pixels: &[u8], width: usize, crop_width: usize, crop_height: usiz
 }
 
 //==============================================================================
-// RGBA 픽셀을 반시계로 90 도 돌리기. (새 너비는 옛 높이)
+/// RGBA 픽셀을 반시계로 90 도 돌리기. (새 너비는 옛 높이)
 //==============================================================================
 fn rotate_pixels_anticlockwise(pixels: &[u8], width: usize, height: usize) -> Vec<u8> {
 	let mut rotated_pixels = vec![0u8; pixels.len()];
@@ -730,7 +736,7 @@ fn rotate_pixels_anticlockwise(pixels: &[u8], width: usize, height: usize) -> Ve
 }
 
 //==============================================================================
-// RGBA 픽셀 뒤집기. (axis 0 은 위아래를, 1 은 좌우를 바꾼다)
+/// RGBA 픽셀 뒤집기. (axis 0 은 위아래를, 1 은 좌우를 바꾼다)
 //==============================================================================
 fn mirror_pixels(pixels: &mut [u8], width: usize, height: usize, axis: u8) {
 	if axis == 0 {
@@ -752,7 +758,7 @@ fn mirror_pixels(pixels: &mut [u8], width: usize, height: usize, axis: u8) {
 }
 
 //==============================================================================
-// AV1 자료 하나(AVIF 항목 하나)를 그림으로 풀기. (여러 층이면 마지막 층이 다 된 그림이다)
+/// AV1 자료 하나(AVIF 항목 하나)를 그림으로 풀기. (여러 층이면 마지막 층이 다 된 그림이다)
 //==============================================================================
 fn decode_av1_picture(av1_bytes: &[u8]) -> Result<DecodedAv1Picture, String> {
 	let mut context: Option<Dav1dContext> = None;
@@ -778,7 +784,7 @@ fn decode_av1_picture(av1_bytes: &[u8]) -> Result<DecodedAv1Picture, String> {
 }
 
 //==============================================================================
-// 열린 해독기로 AV1 자료 하나 풀기. (자료를 다 보낼 때까지 나온 그림을 꺼내고, 끝에 남은 그림까지 꺼내 마지막 것을 쓴다)
+/// 열린 해독기로 AV1 자료 하나 풀기. (자료를 다 보낼 때까지 나온 그림을 꺼내고, 끝에 남은 그림까지 꺼내 마지막 것을 쓴다)
 //==============================================================================
 unsafe fn decode_av1_picture_with_context(context: Option<Dav1dContext>, av1_bytes: &[u8]) -> Result<DecodedAv1Picture, String> {
 	let mut data = Dav1dData::default();
@@ -841,7 +847,7 @@ unsafe fn decode_av1_picture_with_context(context: Option<Dav1dContext>, av1_byt
 }
 
 //==============================================================================
-// rav1d 그림의 평면을 꺼내 두기. (8 비트는 바이트, 그보다 깊으면 16 비트 낱개, 줄 너비(stride)는 Y 하나와 크로마 둘이 함께 쓰는 하나)
+/// rav1d 그림의 평면을 꺼내 두기. (8 비트는 바이트, 그보다 깊으면 16 비트 낱개, 줄 너비(stride)는 Y 하나와 크로마 둘이 함께 쓰는 하나)
 //==============================================================================
 unsafe fn copy_decoded_picture(picture: &Dav1dPicture) -> Result<DecodedAv1Picture, String> {
 	let width = picture.p.w.max(0) as usize;
@@ -913,7 +919,7 @@ unsafe fn copy_decoded_picture(picture: &Dav1dPicture) -> Result<DecodedAv1Pictu
 }
 
 //==============================================================================
-// 색 계수 Kr, Kb. (libavif avifCalcYUVCoefficients, 표에 없는 것과 미지정은 BT.601)
+/// 색 계수 Kr, Kb. (libavif avifCalcYUVCoefficients, 표에 없는 것과 미지정은 BT.601)
 //==============================================================================
 fn read_luma_coefficients(matrix_coefficients: u32) -> (f32, f32) {
 	match matrix_coefficients {
@@ -939,8 +945,8 @@ fn read_luma_coefficients(matrix_coefficients: u32) -> (f32, f32) {
 }
 
 //==============================================================================
-// 4:2:0, 4:2:2 의 크로마 하나 읽기. (libavif 의 양선형 9/16, 3/16, 3/16, 1/16, 4:4:4 는 그 자리 값)
-// - 가장 가까운 크로마 칸의 이웃은 홀수 칸이면 오른쪽(아래), 짝수 칸이면 왼쪽(위)이다. 첫 칸과 마지막 홀수 칸은 이웃 대신 자기를 쓴다. 4:2:2 는 세로 이웃이 없다.
+/// 4:2:0, 4:2:2 의 크로마 하나 읽기. (libavif 의 양선형 9/16, 3/16, 3/16, 1/16, 4:4:4 는 그 자리 값)
+/// - 가장 가까운 크로마 칸의 이웃은 홀수 칸이면 오른쪽(아래), 짝수 칸이면 왼쪽(위)이다. 첫 칸과 마지막 홀수 칸은 이웃 대신 자기를 쓴다. 4:2:2 는 세로 이웃이 없다.
 //==============================================================================
 fn read_upsampled_chroma(picture: &DecodedAv1Picture, plane: &[u16], column: usize, row: usize) -> f32 {
 	let (chroma_width, _) = picture.get_chroma_size();
@@ -974,7 +980,7 @@ fn read_upsampled_chroma(picture: &DecodedAv1Picture, plane: &[u16], column: usi
 }
 
 //==============================================================================
-// YUV 를 8 비트 RGBA 로. (libavif avifImageYUVToRGB 의 기준 셈, 알파 그림이 없으면 불투명)
+/// YUV 를 8 비트 RGBA 로. (libavif avifImageYUVToRGB 의 기준 셈, 알파 그림이 없으면 불투명)
 //==============================================================================
 fn convert_to_rgba_pixels(picture: &DecodedAv1Picture, alpha_picture: Option<&DecodedAv1Picture>) -> Vec<u8> {
 	let maximum_value = ((1u32 << picture.bit_depth) - 1) as f32;
@@ -1044,7 +1050,7 @@ fn convert_to_rgba_pixels(picture: &DecodedAv1Picture, alpha_picture: Option<&De
 mod tests {
 	use super::*;
 
-	// 맥 ImageIO 가 쓴 16 x 16 AVIF. (위 반은 불투명, 아래 반은 알파 128, 왼쪽 반 빨강, 오른쪽 반 파랑, 알파 보조 형 urn:mpeg:hevc:2015:auxid:1)
+	/// 맥 ImageIO 가 쓴 16 x 16 AVIF. (위 반은 불투명, 아래 반은 알파 128, 왼쪽 반 빨강, 오른쪽 반 파랑, 알파 보조 형 urn:mpeg:hevc:2015:auxid:1)
 	const TINY_ALPHA_AVIF_HEX: &str = concat!(
 		"000000206674797061766966000000004d695072617669666d6961666d696631000001b76d657461000000000000002168646c7200000000000000007069637400000000000000000000000000000000",
 		"2464696e660000001c6472656600000000000000010000000c75726c20000000010000000e7069746d0000000000010000003869696e6600000000000200000015696e66650200000000010000617630",
@@ -1055,7 +1061,7 @@ mod tests {
 		"0000000000006712000a0d000000019ff9fff0204040d08032221400648002082088bfce7af0677d33e22d10f7ec60798f5d5dd235890468da13a2a812000a09000000019ff9fff05432131400638008",
 		"2200bfdc0c9de724cc897ef4a3c4",
 	);
-	// 맥 ImageIO 가 쓴 1100 x 64 AVIF. (512 너비 타일 3 개의 grid, 왼쪽 512 는 빨강, 나머지는 검정)
+	/// 맥 ImageIO 가 쓴 1100 x 64 AVIF. (512 너비 타일 3 개의 grid, 왼쪽 512 는 빨강, 나머지는 검정)
 	const GRID_1100X64_AVIF_HEX: &str = concat!(
 		"000000206674797061766966000000004d695072617669666d6961666d696631000001e86d657461000000000000002168646c7200000000000000007069637400000000000000000000000000000000",
 		"2464696e660000001c6472656600000000000000010000000c75726c20000000010000000e7069746d0000000000040000006269696e6600000000000400000015696e66650200000100010000617630",
@@ -1070,14 +1076,14 @@ mod tests {
 	);
 
 	//==============================================================================
-	// 16진 글을 바이트로.
+	/// 16진 글을 바이트로.
 	//==============================================================================
 	fn decode_hex(hex_text: &str) -> Vec<u8> {
 		(0..hex_text.len()).step_by(2).map(|character_index| u8::from_str_radix(&hex_text[character_index..character_index + 2], 16).expect("16진")).collect()
 	}
 
 	//==============================================================================
-	// 픽셀 하나. (프리멀티플라이드 RGBA)
+	/// 픽셀 하나. (프리멀티플라이드 RGBA)
 	//==============================================================================
 	fn read_pixel(image: &Image, x: usize, y: usize) -> [u8; 4] {
 		let pixels = image.get_pixels();
@@ -1086,7 +1092,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 두 픽셀이 손실 압축의 오차(2) 안에서 같은지.
+	/// 두 픽셀이 손실 압축의 오차(2) 안에서 같은지.
 	//==============================================================================
 	fn assert_pixel_near(actual_pixel: [u8; 4], expected_pixel: [u8; 4]) {
 		for channel in 0..4 {
@@ -1095,7 +1101,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 알파 보조 형이 hevc 꼴(맥)이어도 알파를 읽고, grid 는 타일을 이어 출력 크기로 자른다.
+	/// 알파 보조 형이 hevc 꼴(맥)이어도 알파를 읽고, grid 는 타일을 이어 출력 크기로 자른다.
 	//==============================================================================
 	#[test]
 	fn decode_alpha_and_grid() {
@@ -1117,7 +1123,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// clap 은 원점이 (0, 0) 일 때만 자르고, irot 는 반시계, imir 는 axis 0 이 위아래, 1 이 좌우다.
+	/// clap 은 원점이 (0, 0) 일 때만 자르고, irot 는 반시계, imir 는 axis 0 이 위아래, 1 이 좌우다.
 	//==============================================================================
 	#[test]
 	fn clean_aperture_rotation_and_mirror() {

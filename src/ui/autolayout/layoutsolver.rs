@@ -1,25 +1,29 @@
 //==============================================================================
-// 제약 솔버. (원본 ui/autolayout/layoutsolver.js 의 LayoutSolver, Kiwi dual simplex 기반)
-// - 사용:
-//   let solver = LayoutSolver::new();
-//   let x = LayoutVariable::new("x");
-//   let y = LayoutVariable::new("y");
-//   solver.add_constraint(&LayoutExpression::from_variable(&x).equal_to(10))?;
-//   solver.add_constraint(&LayoutExpression::from_variable(&y).equal_to(LayoutExpression::from_variable(&x).add(20)))?;
-//   solver.update_variables();
-//   x.get_value(); // 10
-//   y.get_value(); // 30
-// - 움직이는 입력(끌기 등):
-//   solver.add_edit_variable(&x, LayoutStrength::STRONG)?;
-//   solver.suggest_value(&x, 50.0)?;
-//   solver.update_variables();
-// - 원본과 다른 것:
-//   - 원본은 객체 하나를 여러 UINode 와 UIScene 이 같이 쥔다. 러스트 판은 Rc<RefCell> 을 품은 값싼 Clone 핸들이고 함수는 모두 &self 다.
-//   - 원본이 예외를 던지는 곳(겹친 제약, 만족할 수 없는 required 제약, 모르는 제약과 편집 변수, required 편집 강도,
-//     솔버 안의 실패)은 Result<(), LayoutError> 를 돌려준다. 문구는 원본과 같되 긴 줄표는 쌍점으로 바꿨다.
-//   - 원본의 Map 가운데 차례가 고르는 심볼을 바꾸는 행 맵은 넣은 차례를 지키는 LayoutSymbolMap 이다.
-//     차례를 보지 않는 제약, 변수, 편집 변수 맵은 HashMap 이다.
-//   - 원본 LayoutTag 의 null 심볼은 무효 심볼(LayoutSymbol::invalid)이다. (Kiwi 와 같다)
+//! 제약 솔버. (원본 ui/autolayout/layoutsolver.js 의 LayoutSolver, Kiwi dual simplex 기반)
+//! - 사용:
+//!   let solver = LayoutSolver::new();
+//!   let x = LayoutVariable::new("x");
+//!   let y = LayoutVariable::new("y");
+//!   solver.add_constraint(&LayoutExpression::from_variable(&x).equal_to(10))?;
+//!   solver.add_constraint(&LayoutExpression::from_variable(&y).equal_to(LayoutExpression::from_variable(&x).add(20)))?;
+//!   solver.update_variables();
+//!   x.get_value(); // 10
+//!   y.get_value(); // 30
+//! - 움직이는 입력(끌기 등):
+//!   solver.add_edit_variable(&x, LayoutStrength::STRONG)?;
+//!   solver.suggest_value(&x, 50.0)?;
+//!   solver.update_variables();
+//! - 원본과 다른 것:
+//!   - 원본은 객체 하나를 여러 UINode 와 UIScene 이 같이 쥔다. 러스트 판은 `Rc<RefCell>` 을 품은 값싼 Clone 핸들이고 함수는 모두 &self 다.
+//!   - 원본이 예외를 던지는 곳(겹친 제약, 만족할 수 없는 required 제약, 모르는 제약과 편집 변수, required 편집 강도,
+//!   ```text
+//!     솔버 안의 실패)은 Result<(), LayoutError> 를 돌려준다. 문구는 원본과 같되 긴 줄표는 쌍점으로 바꿨다.
+//!   ```
+//!   - 원본의 Map 가운데 차례가 고르는 심볼을 바꾸는 행 맵은 넣은 차례를 지키는 LayoutSymbolMap 이다.
+//!   ```text
+//!     차례를 보지 않는 제약, 변수, 편집 변수 맵은 HashMap 이다.
+//!   ```
+//!   - 원본 LayoutTag 의 null 심볼은 무효 심볼(LayoutSymbol::invalid)이다. (Kiwi 와 같다)
 //==============================================================================
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -35,41 +39,41 @@ use crate::ui::autolayout::layoutsymbol::{LayoutSymbol, LayoutSymbolMap};
 use crate::ui::autolayout::layoutsymboltype::LayoutSymbolType;
 use crate::ui::autolayout::layoutvariable::LayoutVariable;
 
-// 최적화 반복의 상한. (원본 safeguard)
+/// 최적화 반복의 상한. (원본 safeguard)
 const OPTIMIZE_SAFEGUARD: usize = 100000;
 
 //==============================================================================
-// 솔버 오류. (원본이 던지는 예외 자리)
+/// 솔버 오류. (원본이 던지는 예외 자리)
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LayoutError {
-	// 이미 추가한 제약을 또 추가했다.
+	/// 이미 추가한 제약을 또 추가했다.
 	DuplicateConstraint,
-	// required 제약을 만족할 수 없다.
+	/// required 제약을 만족할 수 없다.
 	UnsatisfiableConstraint,
-	// 등록하지 않은 제약을 지우려 했다.
+	/// 등록하지 않은 제약을 지우려 했다.
 	UnknownConstraint,
-	// 이미 편집 변수로 등록한 변수를 또 등록했다.
+	/// 이미 편집 변수로 등록한 변수를 또 등록했다.
 	DuplicateEditVariable,
-	// 편집 변수에 required 강도를 주었다.
+	/// 편집 변수에 required 강도를 주었다.
 	BadRequiredStrength,
-	// 등록하지 않은 편집 변수를 쓰거나 지우려 했다.
+	/// 등록하지 않은 편집 변수를 쓰거나 지우려 했다.
 	UnknownEditVariable,
-	// 제약을 지울 때 marker 가 떠날 행을 못 찾았다. (솔버 안의 실패)
+	/// 제약을 지울 때 marker 가 떠날 행을 못 찾았다. (솔버 안의 실패)
 	RemoveConstraintFailed,
-	// 목적함수가 끝없이 줄어든다. (솔버 안의 실패)
+	/// 목적함수가 끝없이 줄어든다. (솔버 안의 실패)
 	UnboundedObjective,
-	// optimize 반복 상한을 넘었다. (솔버 안의 실패)
+	/// optimize 반복 상한을 넘었다. (솔버 안의 실패)
 	OptimizeLimitExceeded,
-	// dual_optimize 에서 들어올 심볼을 못 찾았다. (솔버 안의 실패)
+	/// dual_optimize 에서 들어올 심볼을 못 찾았다. (솔버 안의 실패)
 	DualOptimizeFailed,
-	// dual_optimize 반복 상한을 넘었다. (솔버 안의 실패)
+	/// dual_optimize 반복 상한을 넘었다. (솔버 안의 실패)
 	DualOptimizeLimitExceeded,
 }
 
 impl fmt::Display for LayoutError {
 	//==============================================================================
-	// 원본 예외 문구를 보인다.
+	/// 원본 예외 문구를 보인다.
 	//==============================================================================
 	fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
 		let message = match self {
@@ -115,7 +119,7 @@ impl std::error::Error for LayoutError {
 }
 
 //==============================================================================
-// 제약을 등록할 때 붙는 marker, other 심볼 쌍. (없으면 무효 심볼)
+/// 제약을 등록할 때 붙는 marker, other 심볼 쌍. (없으면 무효 심볼)
 //==============================================================================
 #[derive(Clone, Copy, Debug)]
 struct LayoutTag {
@@ -125,7 +129,7 @@ struct LayoutTag {
 
 impl LayoutTag {
 	//==============================================================================
-	// 생성. (둘 다 무효 심볼)
+	/// 생성. (둘 다 무효 심볼)
 	//==============================================================================
 	fn new() -> LayoutTag {
 		LayoutTag {
@@ -136,7 +140,7 @@ impl LayoutTag {
 }
 
 //==============================================================================
-// 편집 변수 정보.
+/// 편집 변수 정보.
 //==============================================================================
 struct LayoutEditInfo {
 	constraint: LayoutConstraint,
@@ -145,18 +149,18 @@ struct LayoutEditInfo {
 }
 
 //==============================================================================
-// optimize 가 줄일 목적함수. (원본은 행 객체를 넘긴다)
+/// optimize 가 줄일 목적함수. (원본은 행 객체를 넘긴다)
 //==============================================================================
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum LayoutObjective {
-	// 솔버의 목적함수.
+	/// 솔버의 목적함수.
 	Main,
-	// 인공 변수로 행을 넣을 때의 인공 목적함수.
+	/// 인공 변수로 행을 넣을 때의 인공 목적함수.
 	Artificial,
 }
 
 //==============================================================================
-// 핸들이 같이 가리키는 솔버 본체.
+/// 핸들이 같이 가리키는 솔버 본체.
 //==============================================================================
 struct LayoutSolverData {
 	constraint_tags: HashMap<LayoutConstraint, LayoutTag>,
@@ -169,7 +173,7 @@ struct LayoutSolverData {
 }
 
 //==============================================================================
-// 제약 솔버. (복제해도 같은 솔버를 가리킨다)
+/// 제약 솔버. (복제해도 같은 솔버를 가리킨다)
 //==============================================================================
 #[derive(Clone)]
 pub struct LayoutSolver {
@@ -178,7 +182,7 @@ pub struct LayoutSolver {
 
 impl LayoutSolver {
 	//==============================================================================
-	// 생성.
+	/// 생성.
 	//==============================================================================
 	pub fn new() -> LayoutSolver {
 		LayoutSolver {
@@ -195,7 +199,7 @@ impl LayoutSolver {
 	}
 
 	//==============================================================================
-	// 제약 추가.
+	/// 제약 추가.
 	//==============================================================================
 	pub fn add_constraint(&self, constraint: &LayoutConstraint) -> Result<(), LayoutError> {
 		self.data.borrow_mut().add_constraint(constraint)?;
@@ -203,50 +207,50 @@ impl LayoutSolver {
 	}
 
 	//==============================================================================
-	// 제약 제거.
+	/// 제약 제거.
 	//==============================================================================
 	pub fn remove_constraint(&self, constraint: &LayoutConstraint) -> Result<(), LayoutError> {
 		self.data.borrow_mut().remove_constraint(constraint)
 	}
 
 	//==============================================================================
-	// 제약이 등록되어 있는지. (핸들이 가리키는 제약으로 가린다)
+	/// 제약이 등록되어 있는지. (핸들이 가리키는 제약으로 가린다)
 	//==============================================================================
 	pub fn has_constraint(&self, constraint: &LayoutConstraint) -> bool {
 		self.data.borrow().constraint_tags.contains_key(constraint)
 	}
 
 	//==============================================================================
-	// 편집 변수 추가. (suggest_value 를 쓰기 전에 꼭 등록한다. strength 는 REQUIRED 보다 작아야 한다)
+	/// 편집 변수 추가. (suggest_value 를 쓰기 전에 꼭 등록한다. strength 는 REQUIRED 보다 작아야 한다)
 	//==============================================================================
 	pub fn add_edit_variable(&self, variable: &LayoutVariable, strength: f64) -> Result<(), LayoutError> {
 		self.data.borrow_mut().add_edit_variable(variable, strength)
 	}
 
 	//==============================================================================
-	// 편집 변수 제거.
+	/// 편집 변수 제거.
 	//==============================================================================
 	pub fn remove_edit_variable(&self, variable: &LayoutVariable) -> Result<(), LayoutError> {
 		self.data.borrow_mut().remove_edit_variable(variable)
 	}
 
 	//==============================================================================
-	// 편집 변수로 등록되어 있는지.
+	/// 편집 변수로 등록되어 있는지.
 	//==============================================================================
 	pub fn has_edit_variable(&self, variable: &LayoutVariable) -> bool {
 		self.data.borrow().edit_infos.contains_key(variable)
 	}
 
 	//==============================================================================
-	// 편집 변수에 바라는 값을 준다. (끌기 갱신 등)
-	// - 솔버는 되도록 그 값을 지키되 다른 제약과 부딪히면 강도에 따라 양보한다.
+	/// 편집 변수에 바라는 값을 준다. (끌기 갱신 등)
+	/// - 솔버는 되도록 그 값을 지키되 다른 제약과 부딪히면 강도에 따라 양보한다.
 	//==============================================================================
 	pub fn suggest_value(&self, variable: &LayoutVariable, value: f64) -> Result<(), LayoutError> {
 		self.data.borrow_mut().suggest_value(variable, value)
 	}
 
 	//==============================================================================
-	// 변수 값 갱신. (tableau 의 external 행 상수항을 각 LayoutVariable 에 넣는다)
+	/// 변수 값 갱신. (tableau 의 external 행 상수항을 각 LayoutVariable 에 넣는다)
 	//==============================================================================
 	pub fn update_variables(&self) {
 		self.data.borrow().update_variables();
@@ -261,7 +265,7 @@ impl Default for LayoutSolver {
 
 impl LayoutSolverData {
 	//==============================================================================
-	// 제약 추가. (붙인 tag 를 돌려준다)
+	/// 제약 추가. (붙인 tag 를 돌려준다)
 	//==============================================================================
 	fn add_constraint(&mut self, constraint: &LayoutConstraint) -> Result<LayoutTag, LayoutError> {
 		if self.constraint_tags.contains_key(constraint) {
@@ -298,7 +302,7 @@ impl LayoutSolverData {
 	}
 
 	//==============================================================================
-	// 제약 제거.
+	/// 제약 제거.
 	//==============================================================================
 	fn remove_constraint(&mut self, constraint: &LayoutConstraint) -> Result<(), LayoutError> {
 		let tag = match self.constraint_tags.remove(constraint) {
@@ -332,7 +336,7 @@ impl LayoutSolverData {
 	}
 
 	//==============================================================================
-	// 편집 변수 추가.
+	/// 편집 변수 추가.
 	//==============================================================================
 	fn add_edit_variable(&mut self, variable: &LayoutVariable, strength: f64) -> Result<(), LayoutError> {
 		if self.edit_infos.contains_key(variable) {
@@ -355,7 +359,7 @@ impl LayoutSolverData {
 	}
 
 	//==============================================================================
-	// 편집 변수 제거.
+	/// 편집 변수 제거.
 	//==============================================================================
 	fn remove_edit_variable(&mut self, variable: &LayoutVariable) -> Result<(), LayoutError> {
 		let constraint = match self.edit_infos.get(variable) {
@@ -372,7 +376,7 @@ impl LayoutSolverData {
 	}
 
 	//==============================================================================
-	// 편집 변수에 바라는 값을 준다.
+	/// 편집 변수에 바라는 값을 준다.
 	//==============================================================================
 	fn suggest_value(&mut self, variable: &LayoutVariable, value: f64) -> Result<(), LayoutError> {
 		let (delta, tag) = match self.edit_infos.get_mut(variable) {
@@ -416,7 +420,7 @@ impl LayoutSolverData {
 	}
 
 	//==============================================================================
-	// 변수 값 갱신.
+	/// 변수 값 갱신.
 	//==============================================================================
 	fn update_variables(&self) {
 		for (variable, symbol) in &self.variable_symbols {
@@ -432,7 +436,7 @@ impl LayoutSolverData {
 	}
 
 	//==============================================================================
-	// 변수의 심볼 찾기. (없으면 만든다)
+	/// 변수의 심볼 찾기. (없으면 만든다)
 	//==============================================================================
 	fn get_or_create_symbol(&mut self, variable: &LayoutVariable) -> LayoutSymbol {
 		if let Some(symbol) = self.variable_symbols.get(variable) {
@@ -444,7 +448,7 @@ impl LayoutSolverData {
 	}
 
 	//==============================================================================
-	// 행에서 symbol 의 행을 꺼낸다. (부르는 쪽이 행 맵에서 고른 심볼이라 늘 있다)
+	/// 행에서 symbol 의 행을 꺼낸다. (부르는 쪽이 행 맵에서 고른 심볼이라 늘 있다)
 	//==============================================================================
 	fn take_row(&mut self, symbol: LayoutSymbol) -> LayoutRow {
 		match self.rows.remove(&symbol) {
@@ -458,7 +462,7 @@ impl LayoutSolverData {
 	}
 
 	//==============================================================================
-	// 제약으로 행 만들기. (tag 에 marker, other 심볼을 채운다)
+	/// 제약으로 행 만들기. (tag 에 marker, other 심볼을 채운다)
 	//==============================================================================
 	fn create_row(&mut self, constraint: &LayoutConstraint, tag: &mut LayoutTag) -> LayoutRow {
 		let expression = constraint.get_expression();
@@ -529,8 +533,8 @@ impl LayoutSolverData {
 	}
 
 	//==============================================================================
-	// 행에서 subject 심볼 고르기.
-	// - 1) 외부 변수가 먼저. 2) 계수가 음수인 slack, error 의 marker, other. 3) 둘 다 없으면 무효.
+	/// 행에서 subject 심볼 고르기.
+	/// - 1) 외부 변수가 먼저. 2) 계수가 음수인 slack, error 의 marker, other. 3) 둘 다 없으면 무효.
 	//==============================================================================
 	fn choose_subject(&self, row: &LayoutRow, tag: &LayoutTag) -> LayoutSymbol {
 		for (symbol, _) in row.get_cells().iter() {
@@ -554,7 +558,7 @@ impl LayoutSolverData {
 	}
 
 	//==============================================================================
-	// 인공 변수로 행을 억지로 넣는다. (성공했는지 돌려준다)
+	/// 인공 변수로 행을 억지로 넣는다. (성공했는지 돌려준다)
 	//==============================================================================
 	fn add_with_artificial_variable(&mut self, row: &LayoutRow) -> Result<bool, LayoutError> {
 		let artificial_symbol = LayoutSymbol::new(LayoutSymbolType::Slack);
@@ -596,7 +600,7 @@ impl LayoutSolverData {
 	}
 
 	//==============================================================================
-	// 모든 행과 목적함수에서 symbol 을 row 로 바꿔 넣는다.
+	/// 모든 행과 목적함수에서 symbol 을 row 로 바꿔 넣는다.
 	//==============================================================================
 	fn substitute(&mut self, symbol: LayoutSymbol, row: &LayoutRow) {
 		for (basic_symbol, basic_row) in self.rows.iter_mut() {
@@ -612,7 +616,7 @@ impl LayoutSolverData {
 	}
 
 	//==============================================================================
-	// 1차(primal) 최적화. 목적함수에 음수 계수가 없어질 때까지 되풀이한다.
+	/// 1차(primal) 최적화. 목적함수에 음수 계수가 없어질 때까지 되풀이한다.
 	//==============================================================================
 	fn optimize(&mut self, objective: LayoutObjective) -> Result<(), LayoutError> {
 		for _ in 0..OPTIMIZE_SAFEGUARD {
@@ -647,7 +651,7 @@ impl LayoutSolverData {
 	}
 
 	//==============================================================================
-	// dual simplex 최적화. 상수항이 음수가 된(infeasible) 행을 고친다.
+	/// dual simplex 최적화. 상수항이 음수가 된(infeasible) 행을 고친다.
 	//==============================================================================
 	fn dual_optimize(&mut self) -> Result<(), LayoutError> {
 		for _ in 0..OPTIMIZE_SAFEGUARD {
@@ -682,7 +686,7 @@ impl LayoutSolverData {
 	}
 
 	//==============================================================================
-	// 떠날 심볼 고르기. (비율 시험)
+	/// 떠날 심볼 고르기. (비율 시험)
 	//==============================================================================
 	fn get_leaving_symbol(&self, entering_symbol: LayoutSymbol) -> LayoutSymbol {
 		let mut ratio = f64::INFINITY;
@@ -704,7 +708,7 @@ impl LayoutSolverData {
 	}
 
 	//==============================================================================
-	// dual 에서 들어올 심볼 고르기.
+	/// dual 에서 들어올 심볼 고르기.
 	//==============================================================================
 	fn get_dual_entering_symbol(&self, row: &LayoutRow) -> LayoutSymbol {
 		let mut ratio = f64::INFINITY;
@@ -723,7 +727,7 @@ impl LayoutSolverData {
 	}
 
 	//==============================================================================
-	// marker 를 지울 때 떠날 행의 심볼 고르기.
+	/// marker 를 지울 때 떠날 행의 심볼 고르기.
 	//==============================================================================
 	fn get_marker_leaving_symbol(&self, marker: LayoutSymbol) -> LayoutSymbol {
 		let mut first_ratio = f64::INFINITY;
@@ -765,7 +769,7 @@ impl LayoutSolverData {
 	}
 
 	//==============================================================================
-	// 제약의 오차 변수가 목적함수에 끼친 것을 걷어 낸다.
+	/// 제약의 오차 변수가 목적함수에 끼친 것을 걷어 낸다.
 	//==============================================================================
 	fn remove_constraint_effects(&mut self, constraint: &LayoutConstraint, tag: &LayoutTag) {
 		let marker_symbol = tag.marker;
@@ -779,7 +783,7 @@ impl LayoutSolverData {
 	}
 
 	//==============================================================================
-	// 오차 변수 하나가 끼친 것을 걷어 낸다.
+	/// 오차 변수 하나가 끼친 것을 걷어 낸다.
 	//==============================================================================
 	fn remove_marker_effect(&mut self, marker_symbol: LayoutSymbol, strength: f64) {
 		match self.rows.get(&marker_symbol) {
@@ -794,7 +798,7 @@ impl LayoutSolverData {
 }
 
 //==============================================================================
-// 목적함수에서 계수가 음수인 첫 심볼을 들어올 심볼로 고른다. (dummy 는 빼고)
+/// 목적함수에서 계수가 음수인 첫 심볼을 들어올 심볼로 고른다. (dummy 는 빼고)
 //==============================================================================
 fn get_entering_symbol(objective: &LayoutRow) -> LayoutSymbol {
 	for (symbol, value) in objective.get_cells().iter() {
@@ -806,7 +810,7 @@ fn get_entering_symbol(objective: &LayoutRow) -> LayoutSymbol {
 }
 
 //==============================================================================
-// 행이 dummy 심볼만 담았는지.
+/// 행이 dummy 심볼만 담았는지.
 //==============================================================================
 fn all_dummies(row: &LayoutRow) -> bool {
 	for (symbol, _) in row.get_cells().iter() {
@@ -818,7 +822,7 @@ fn all_dummies(row: &LayoutRow) -> bool {
 }
 
 //==============================================================================
-// 행에서 축으로 삼을 수 있는 첫 심볼. (slack, error 만)
+/// 행에서 축으로 삼을 수 있는 첫 심볼. (slack, error 만)
 //==============================================================================
 fn any_pivotable_symbol(row: &LayoutRow) -> LayoutSymbol {
 	for (symbol, _) in row.get_cells().iter() {
@@ -836,21 +840,21 @@ mod tests {
 	use crate::ui::autolayout::layoutpriority::LayoutPriority;
 
 	//==============================================================================
-	// 두 값이 거의 같은지 본다.
+	/// 두 값이 거의 같은지 본다.
 	//==============================================================================
 	fn assert_near(actual: f64, expected: f64) {
 		assert!((actual - expected).abs() < 1e-6, "값 {} 이 {} 가 아니다", actual, expected);
 	}
 
 	//==============================================================================
-	// 변수 하나를 식으로.
+	/// 변수 하나를 식으로.
 	//==============================================================================
 	fn expression(variable: &LayoutVariable) -> LayoutExpression {
 		LayoutExpression::from_variable(variable)
 	}
 
 	//==============================================================================
-	// 가로 축만 본 UINode 꼴. (left, right, width, center_x 와 본질 제약 둘)
+	/// 가로 축만 본 UINode 꼴. (left, right, width, center_x 와 본질 제약 둘)
 	//==============================================================================
 	struct HorizontalNode {
 		left: LayoutVariable,
@@ -861,7 +865,7 @@ mod tests {
 
 	impl HorizontalNode {
 		//==============================================================================
-		// 생성하고 원본 buildIntrinsicConstraints 의 가로 둘(right == left + width, center_x == left + width / 2)을 등록한다.
+		/// 생성하고 원본 buildIntrinsicConstraints 의 가로 둘(right == left + width, center_x == left + width / 2)을 등록한다.
 		//==============================================================================
 		fn new(solver: &LayoutSolver) -> HorizontalNode {
 			let node = HorizontalNode {
@@ -876,7 +880,7 @@ mod tests {
 		}
 
 		//==============================================================================
-		// 원본 buildIntrinsicSizeConstraints 의 가로 둘(hug, 압축 저항)을 등록한다.
+		/// 원본 buildIntrinsicSizeConstraints 의 가로 둘(hug, 압축 저항)을 등록한다.
 		//==============================================================================
 		fn add_intrinsic_width(&self, solver: &LayoutSolver, intrinsic_width: f64, hugging_priority: f64, compression_priority: f64) {
 			let hug = expression(&self.width).less_than_or_equal_to(intrinsic_width).with_strength(LayoutStrength::from_priority(hugging_priority));
@@ -887,7 +891,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 원본 머리 주석의 사용 예: x == 10, y == x + 20.
+	/// 원본 머리 주석의 사용 예: x == 10, y == x + 20.
 	//==============================================================================
 	#[test]
 	fn simple_equality() {
@@ -902,7 +906,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 부딪히는 제약은 강도가 센 쪽이 이기고, required 부등식은 늘 지킨다.
+	/// 부딪히는 제약은 강도가 센 쪽이 이기고, required 부등식은 늘 지킨다.
 	//==============================================================================
 	#[test]
 	fn inequality_with_strengths() {
@@ -923,7 +927,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 편집 변수에 바라는 값을 주면 값이 따라가고, required 제약에 막히면 거기서 멈춘다. 지우면 다른 제약대로 돌아간다.
+	/// 편집 변수에 바라는 값을 주면 값이 따라가고, required 제약에 막히면 거기서 멈춘다. 지우면 다른 제약대로 돌아간다.
 	//==============================================================================
 	#[test]
 	fn edit_variable_suggest_value() {
@@ -954,7 +958,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 이긴 제약을 지우면 앞의 해로 돌아간다.
+	/// 이긴 제약을 지우면 앞의 해로 돌아간다.
 	//==============================================================================
 	#[test]
 	fn remove_constraint_restores_previous_solution() {
@@ -983,7 +987,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 같은 제약을 또 넣으면 오류다. 식이 같아도 따로 만든 제약은 다른 제약이다. (원본 객체 동일성)
+	/// 같은 제약을 또 넣으면 오류다. 식이 같아도 따로 만든 제약은 다른 제약이다. (원본 객체 동일성)
 	//==============================================================================
 	#[test]
 	fn duplicate_constraint_error() {
@@ -1003,8 +1007,8 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 만족할 수 없는 required 제약은 오류다. (dummy 만 남는 등식, 인공 변수로도 못 넣는 부등식)
-	// - 인공 변수 길에서 실패하면 원본, Kiwi 처럼 tableau 가 돌려지지 않으므로 그 뒤의 y 값은 보지 않는다.
+	/// 만족할 수 없는 required 제약은 오류다. (dummy 만 남는 등식, 인공 변수로도 못 넣는 부등식)
+	/// - 인공 변수 길에서 실패하면 원본, Kiwi 처럼 tableau 가 돌려지지 않으므로 그 뒤의 y 값은 보지 않는다.
 	//==============================================================================
 	#[test]
 	fn unsatisfiable_required_constraint_error() {
@@ -1023,7 +1027,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 모르는 제약, 모르는 편집 변수, 겹친 편집 변수, required 편집 강도는 오류다.
+	/// 모르는 제약, 모르는 편집 변수, 겹친 편집 변수, required 편집 강도는 오류다.
 	//==============================================================================
 	#[test]
 	fn unknown_and_edit_variable_errors() {
@@ -1039,7 +1043,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 복제한 솔버 핸들은 같은 솔버다. (여러 노드가 나눠 쥔다)
+	/// 복제한 솔버 핸들은 같은 솔버다. (여러 노드가 나눠 쥔다)
 	//==============================================================================
 	#[test]
 	fn cloned_solver_shares_state() {
@@ -1054,7 +1058,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// UIKit 꼴 배치: 화면(UIScene 처럼 left == 0, 너비는 편집 변수), 여백 10 의 자식, 가운데 맞춘 라벨의 hug, 압축 저항.
+	/// UIKit 꼴 배치: 화면(UIScene 처럼 left == 0, 너비는 편집 변수), 여백 10 의 자식, 가운데 맞춘 라벨의 hug, 압축 저항.
 	//==============================================================================
 	#[test]
 	fn uikit_like_layout() {
@@ -1102,7 +1106,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 나란한 두 라벨이 자리보다 크면 압축 저항이 낮은 쪽이 줄고, 자리가 남으면 hug 가 낮은 쪽이 는다.
+	/// 나란한 두 라벨이 자리보다 크면 압축 저항이 낮은 쪽이 줄고, 자리가 남으면 hug 가 낮은 쪽이 는다.
 	//==============================================================================
 	#[test]
 	fn compression_and_hugging_choose_lower_priority() {
@@ -1133,7 +1137,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 원본 UIScene 의 safeAreaLayoutGuide 다시 짓기: 제약 넷을 지우고 새 여백으로 다시 넣는다.
+	/// 원본 UIScene 의 safeAreaLayoutGuide 다시 짓기: 제약 넷을 지우고 새 여백으로 다시 넣는다.
 	//==============================================================================
 	#[test]
 	fn rebuild_guide_constraints() {

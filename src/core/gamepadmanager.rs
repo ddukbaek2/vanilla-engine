@@ -1,81 +1,89 @@
 //==============================================================================
-// 게임패드 관리자.
-// - 원본 core/gamepadmanager.js 를 옮겼다. 공개 이름(GamepadButtonCode, GamepadAnalogStickCode, GamepadTriggerCode,
-//   connect, disconnect, set_callback, update_all_gamepads, is_button_pressed, get_button_value, get_axis_value,
-//   get_all_connected_gamepads, get_connected_gamepad_count, get_connected_gamepad)과 갱신 규칙은 원본 그대로다.
-//   (값은 소수점 둘째 자리로 반올림, 축은 0.01 넘게 바뀔 때만 받기, 아날로그 값은 0 보다 클 때만 알리기, 로그 문구)
-// - 원본은 navigator.getGamepads() 를 읽는다. 웹(wasm32)은 원본처럼 navigator.getGamepads() 를 직접 읽어 브라우저가 주는 버튼과 축을 모두 받고,
-//   연결과 해제는 원본 engine.js 처럼 gamepadconnected / gamepaddisconnected 로 받는다.
-//   데스크탑은 gilrs 가 OS 입력(윈도우는 Windows.Gaming.Input)을 읽고, 원본과 같은 W3C Standard Gamepad 꼴
-//   (버튼 0~16, 축 0~3, 축 Y 는 아래가 양수)의 Gamepad 목록으로 바꾼 뒤 같은 규칙을 돌린다.
-// - 원본과 다른 점:
-//   - gilrs 기본 필터(데드존, 떨림 거르기)는 끈다. 브라우저처럼 날값을 받고, 데드존은 원본처럼 게임이 건다.
-//   - 아날로그 버튼(트리거)의 눌림은 크로미엄과 같이 값이 30/255 를 넘을 때다. (gilrs 기본은 0.75 에 눌림, 0.65 에 뗌)
-//   - 축(햇 스위치)으로 오는 십자키는 버튼 12~15 로 바꾼다. (브라우저가 하는 일)
-//   - 데스크탑의 버튼은 표준 17개 뒤에 gilrs 가 표준 버튼으로 잇지 못한 단추(매핑에 없는 단추, gilrs 의 C, Z)를, 축은 표준 4개 뒤에
-//     매핑에 없는 축을 처음 움직인 차례로 붙인다. gilrs 가 장치의 단추 목록을 내주지 않고 한 번이라도 움직인 단추만 알려서, 그 단추를 처음 누른 뒤에야 생긴다.
-//     버튼이나 축 수가 늘면 그 패드의 상태 칸도 늘린다.
-//   - 플레이스테이션 패드(소니 054c 의 듀얼쇼크4 05c4, 09cc, 0ba0 와 듀얼센스 0ce6, 0df2, 0e5f)는 크롬(device/gamepad 의 MapperDualshock4, MapperDualSense)처럼
-//     버튼 18개이고 원시 단추 13번(HID 단추 14)이 TOUCHPAD(17)다. 누르기 전에도 늘 있고, 그 밖의 단추(듀얼센스 마이크 단추)와 축은 붙이지 않는다.
-//     gilrs 가 SDL 매핑의 touchpad:b13 을 이름 없는 단추(Button::Unknown, misc1 과 같은 이름)로 잇기만 해서, 그 단추의 원시 코드를 플랫폼마다 정해 찾는다.
-//     (맥 IOKit 단추 쪽의 쓰임 14, 윈도우 Windows.Gaming.Input 의 단추 13번, 리눅스 hid-generic 의 BTN_GAMEPAD + 13)
-//     리눅스의 hid-sony(커널 4.10 부터), hid-playstation(5.12 부터) 드라이버는 터치패드를 따로 장치로 내고 bcdHID 에 0x8000 을 붙인다.
-//     그때는 크롬(MapperPs4Ps5)처럼 버튼 17개다. (gilrs 의 uuid 13, 14번째 바이트가 그 판 번호다)
-//     맥 GameController 의 GCDualSenseGamepad.touchpadButton 도 있지만, GameController 는 패드의 제조사, 제품 번호를 내주지 않아 gilrs 패드와 짝짓지 못해 쓰지 않는다.
-//   - Gamepad.index 는 데스크탑에서는 gilrs 의 GamepadId 번호다. (처음 붙은 순서로 0 부터, 브라우저 index 와 같은 쓰임) 웹은 브라우저 index 다.
-//   - Gamepad.id 는 웹에서는 브라우저 id 그대로, 데스크탑에서는 크롬 꼴 "이름 (STANDARD GAMEPAD Vendor: 054c Product: 0ce6)" 로 만든다.
-//   - get_all_connected_gamepads / get_connected_gamepad 는 마지막 갱신(tick)에 읽은 사본을 돌려준다. (원본은 부를 때마다 새로 읽는다)
-//   - 콜백의 button 값은 bool 대신 1.0(눌림) / 0.0(뗌) 이다.
-//   - gilrs(웹은 연결 리스너)는 처음 갱신할 때 만든다. (갱신하지 않는 엔진과 시험에서는 장치를 열지 않는다)
-//   - 더한 것: set_log_enabled (로그 켜고 끄기),
-//     update_all_gamepads_with_list (gilrs 없이 목록을 넣는 길. 시험이나 다른 입력원)
-//   - 배터리 정보는 원본에 없어 옮기지 않는다.
-//   - 단추와 축이 바뀔 때마다 찍는 로그는 원본처럼 set_input_log_enabled 로 켜고, 기본은 끔이다. set_log_enabled 는 연결과 해제를 포함한 모든 로그의 큰 스위치다.
-//   - GamepadKind, read_gamepad_kind: 패드 이름으로 종류(엑스박스, 플레이스테이션, 닌텐도, 그 밖)를 가른다. get_active_gamepad_id 는 마지막 갱신에 단추를 누르거나 축을 크게 기울인 패드다.
-//   - vibrate(strong_magnitude, weak_magnitude, seconds): 연결된 패드를 모두 떤다.
-//     데스크탑은 gilrs force feedback(리눅스 evdev, 윈도우 XInput 과 Windows.Gaming.Input)으로 떨고, gilrs 가 진동을 대지 않는 macOS 는
-//     플랫폼 층(platform/desktop/gamepadhaptics.rs)이 GameController 와 CoreHaptics 로 gilrs 패드와 짝인 컨트롤러를 떤다. (macOS 는 길이나 세기가 0 이면 앞 진동을 멈춘다)
-//     그래서 gilrs 를 진동을 켠 채 만든다. (데스크탑에서 gilrs 의 진동 스레드 하나가 돈다) 웹은 원본처럼 navigator.getGamepads() 의 vibrationActuator 에 dual-rumble 을 건다.
-//     첫 갱신(tick) 전에 부르면 gilrs 가 아직 없어 데스크탑에서는 떨지 않는다.
+//! 게임패드 관리자.
+//! - 원본 core/gamepadmanager.js 를 옮겼다. 공개 이름(GamepadButtonCode, GamepadAnalogStickCode, GamepadTriggerCode,
+//!   connect, disconnect, set_callback, update_all_gamepads, is_button_pressed, get_button_value, get_axis_value,
+//!   get_all_connected_gamepads, get_connected_gamepad_count, get_connected_gamepad)과 갱신 규칙은 원본 그대로다.
+//!   (값은 소수점 둘째 자리로 반올림, 축은 0.01 넘게 바뀔 때만 받기, 아날로그 값은 0 보다 클 때만 알리기, 로그 문구)
+//! - 원본은 navigator.getGamepads() 를 읽는다. 웹(wasm32)은 원본처럼 navigator.getGamepads() 를 직접 읽어 브라우저가 주는 버튼과 축을 모두 받고,
+//!   연결과 해제는 원본 engine.js 처럼 gamepadconnected / gamepaddisconnected 로 받는다.
+//!   데스크탑은 gilrs 가 OS 입력(윈도우는 Windows.Gaming.Input)을 읽고, 원본과 같은 W3C Standard Gamepad 꼴
+//!   (버튼 0~16, 축 0~3, 축 Y 는 아래가 양수)의 Gamepad 목록으로 바꾼 뒤 같은 규칙을 돌린다.
+//! - 원본과 다른 점:
+//!   - gilrs 기본 필터(데드존, 떨림 거르기)는 끈다. 브라우저처럼 날값을 받고, 데드존은 원본처럼 게임이 건다.
+//!   - 아날로그 버튼(트리거)의 눌림은 크로미엄과 같이 값이 30/255 를 넘을 때다. (gilrs 기본은 0.75 에 눌림, 0.65 에 뗌)
+//!   - 축(햇 스위치)으로 오는 십자키는 버튼 12~15 로 바꾼다. (브라우저가 하는 일)
+//!   - 데스크탑의 버튼은 표준 17개 뒤에 gilrs 가 표준 버튼으로 잇지 못한 단추(매핑에 없는 단추, gilrs 의 C, Z)를, 축은 표준 4개 뒤에
+//!   ```text
+//!     매핑에 없는 축을 처음 움직인 차례로 붙인다. gilrs 가 장치의 단추 목록을 내주지 않고 한 번이라도 움직인 단추만 알려서, 그 단추를 처음 누른 뒤에야 생긴다.
+//!     버튼이나 축 수가 늘면 그 패드의 상태 칸도 늘린다.
+//!   ```
+//!   - 플레이스테이션 패드(소니 054c 의 듀얼쇼크4 05c4, 09cc, 0ba0 와 듀얼센스 0ce6, 0df2, 0e5f)는 크롬(device/gamepad 의 MapperDualshock4, MapperDualSense)처럼
+//!   ```text
+//!     버튼 18개이고 원시 단추 13번(HID 단추 14)이 TOUCHPAD(17)다. 누르기 전에도 늘 있고, 그 밖의 단추(듀얼센스 마이크 단추)와 축은 붙이지 않는다.
+//!     gilrs 가 SDL 매핑의 touchpad:b13 을 이름 없는 단추(Button::Unknown, misc1 과 같은 이름)로 잇기만 해서, 그 단추의 원시 코드를 플랫폼마다 정해 찾는다.
+//!     (맥 IOKit 단추 쪽의 쓰임 14, 윈도우 Windows.Gaming.Input 의 단추 13번, 리눅스 hid-generic 의 BTN_GAMEPAD + 13)
+//!     리눅스의 hid-sony(커널 4.10 부터), hid-playstation(5.12 부터) 드라이버는 터치패드를 따로 장치로 내고 bcdHID 에 0x8000 을 붙인다.
+//!     그때는 크롬(MapperPs4Ps5)처럼 버튼 17개다. (gilrs 의 uuid 13, 14번째 바이트가 그 판 번호다)
+//!     맥 GameController 의 GCDualSenseGamepad.touchpadButton 도 있지만, GameController 는 패드의 제조사, 제품 번호를 내주지 않아 gilrs 패드와 짝짓지 못해 쓰지 않는다.
+//!   ```
+//!   - Gamepad.index 는 데스크탑에서는 gilrs 의 GamepadId 번호다. (처음 붙은 순서로 0 부터, 브라우저 index 와 같은 쓰임) 웹은 브라우저 index 다.
+//!   - Gamepad.id 는 웹에서는 브라우저 id 그대로, 데스크탑에서는 크롬 꼴 "이름 (STANDARD GAMEPAD Vendor: 054c Product: 0ce6)" 로 만든다.
+//!   - get_all_connected_gamepads / get_connected_gamepad 는 마지막 갱신(tick)에 읽은 사본을 돌려준다. (원본은 부를 때마다 새로 읽는다)
+//!   - 콜백의 button 값은 bool 대신 1.0(눌림) / 0.0(뗌) 이다.
+//!   - gilrs(웹은 연결 리스너)는 처음 갱신할 때 만든다. (갱신하지 않는 엔진과 시험에서는 장치를 열지 않는다)
+//!   - 더한 것: set_log_enabled (로그 켜고 끄기),
+//!   ```text
+//!     update_all_gamepads_with_list (gilrs 없이 목록을 넣는 길. 시험이나 다른 입력원)
+//!   ```
+//!   - 배터리 정보는 원본에 없어 옮기지 않는다.
+//!   - 단추와 축이 바뀔 때마다 찍는 로그는 원본처럼 set_input_log_enabled 로 켜고, 기본은 끔이다. set_log_enabled 는 연결과 해제를 포함한 모든 로그의 큰 스위치다.
+//!   - GamepadKind, read_gamepad_kind: 패드 이름으로 종류(엑스박스, 플레이스테이션, 닌텐도, 그 밖)를 가른다. get_active_gamepad_id 는 마지막 갱신에 단추를 누르거나 축을 크게 기울인 패드다.
+//!   - vibrate(strong_magnitude, weak_magnitude, seconds): 연결된 패드를 모두 떤다.
+//!   ```text
+//!     데스크탑은 gilrs force feedback(리눅스 evdev, 윈도우 XInput 과 Windows.Gaming.Input)으로 떨고, gilrs 가 진동을 대지 않는 macOS 는
+//!     플랫폼 층(platform/desktop/gamepadhaptics.rs)이 GameController 와 CoreHaptics 로 gilrs 패드와 짝인 컨트롤러를 떤다. (macOS 는 길이나 세기가 0 이면 앞 진동을 멈춘다)
+//!     그래서 gilrs 를 진동을 켠 채 만든다. (데스크탑에서 gilrs 의 진동 스레드 하나가 돈다) 웹은 원본처럼 navigator.getGamepads() 의 vibrationActuator 에 dual-rumble 을 건다.
+//!     첫 갱신(tick) 전에 부르면 gilrs 가 아직 없어 데스크탑에서는 떨지 않는다.
+//!   ```
 //==============================================================================
 #[cfg(not(target_arch = "wasm32"))]
 use gilrs::{Axis, Button, GilrsBuilder};
 use std::collections::HashMap;
 
-// W3C Standard Gamepad 의 버튼 수. (0~16)
+/// W3C Standard Gamepad 의 버튼 수. (0~16)
 const STANDARD_BUTTON_COUNT: usize = 17;
-// W3C Standard Gamepad 의 축 수. (0~3)
+/// W3C Standard Gamepad 의 축 수. (0~3)
 const STANDARD_AXIS_COUNT: usize = 4;
-// 아날로그 버튼을 눌림으로 보는 값. (크로미엄 GamepadButton::kDefaultButtonPressedThreshold, XInput 트리거 데드존과 같다)
+/// 아날로그 버튼을 눌림으로 보는 값. (크로미엄 GamepadButton::kDefaultButtonPressedThreshold, XInput 트리거 데드존과 같다)
 #[cfg(not(target_arch = "wasm32"))]
 const BUTTON_PRESSED_THRESHOLD: f32 = 30.0 / 255.0;
-// 축(햇 스위치)으로 오는 십자키를 눌림으로 보는 값.
+/// 축(햇 스위치)으로 오는 십자키를 눌림으로 보는 값.
 #[cfg(not(target_arch = "wasm32"))]
 const DIRECTIONAL_PAD_AXIS_THRESHOLD: f32 = 0.5;
-// 축 변화를 받는 최소 폭. (원본: 미세한 떨림을 거르려 0.01 넘는 변화만 받는다)
+/// 축 변화를 받는 최소 폭. (원본: 미세한 떨림을 거르려 0.01 넘는 변화만 받는다)
 const AXIS_CHANGE_THRESHOLD: f64 = 0.01;
-// 플레이스테이션 패드의 USB 제조사 번호. (소니)
+/// 플레이스테이션 패드의 USB 제조사 번호. (소니)
 #[cfg(not(target_arch = "wasm32"))]
 const PLAYSTATION_VENDOR_ID: u16 = 0x054c;
-// 터치패드 단추를 TOUCHPAD(17) 에 두는 플레이스테이션 패드의 제품 번호. (크롬 gamepad_standard_mappings 가 MapperDualshock4, MapperDualSense 로 잇는 것)
+/// 터치패드 단추를 TOUCHPAD(17) 에 두는 플레이스테이션 패드의 제품 번호. (크롬 gamepad_standard_mappings 가 MapperDualshock4, MapperDualSense 로 잇는 것)
 #[cfg(not(target_arch = "wasm32"))]
 const PLAYSTATION_TOUCHPAD_PRODUCT_ID_LIST: [u16; 6] = [0x05c4, 0x09cc, 0x0ba0, 0x0ce6, 0x0df2, 0x0e5f];
-// 패드의 원시 단추 목록에서 터치패드의 자리. (크롬 input.buttons[13], SDL 매핑 touchpad:b13)
+/// 패드의 원시 단추 목록에서 터치패드의 자리. (크롬 `input.buttons[13]`, SDL 매핑 touchpad:b13)
 #[cfg(not(target_arch = "wasm32"))]
 const PLAYSTATION_TOUCHPAD_RAW_BUTTON_INDEX: u32 = 13;
-// 맥 IOKit 의 단추 쪽 번호. (kHIDPage_Button, gilrs 의 맥 원시 코드는 쪽 << 16 | 쓰임)
+/// 맥 IOKit 의 단추 쪽 번호. (kHIDPage_Button, gilrs 의 맥 원시 코드는 쪽 << 16 | 쓰임)
 #[cfg(not(target_arch = "wasm32"))]
 const HID_BUTTON_USAGE_PAGE: u32 = 0x09;
-// 리눅스 evdev 의 키 사건 종류와 첫 게임패드 단추. (EV_KEY, BTN_GAMEPAD. gilrs 의 리눅스 원시 코드는 종류 << 16 | 코드)
+/// 리눅스 evdev 의 키 사건 종류와 첫 게임패드 단추. (EV_KEY, BTN_GAMEPAD. gilrs 의 리눅스 원시 코드는 종류 << 16 | 코드)
 #[cfg(not(target_arch = "wasm32"))]
 const LINUX_EVENT_KEY_TYPE: u32 = 0x01;
 #[cfg(not(target_arch = "wasm32"))]
 const LINUX_FIRST_GAMEPAD_BUTTON_CODE: u32 = 0x130;
-// 리눅스 드라이버가 플레이스테이션 패드를 고쳐 잡았다는 표시. (hid-sony, hid-playstation 이 bcdHID 에 붙이는 것, 크롬 kDualshockPatchedBcdHidMask)
+/// 리눅스 드라이버가 플레이스테이션 패드를 고쳐 잡았다는 표시. (hid-sony, hid-playstation 이 bcdHID 에 붙이는 것, 크롬 kDualshockPatchedBcdHidMask)
 #[cfg(not(target_arch = "wasm32"))]
 const LINUX_PATCHED_HID_VERSION_MASK: u16 = 0x8000;
 
-// W3C Standard Gamepad 버튼 순서의 gilrs 버튼. (배열 번호가 GamepadButtonCode)
+/// W3C Standard Gamepad 버튼 순서의 gilrs 버튼. (배열 번호가 GamepadButtonCode)
 #[cfg(not(target_arch = "wasm32"))]
 const STANDARD_BUTTON_LIST: [Button; STANDARD_BUTTON_COUNT] = [
 	Button::South,
@@ -97,7 +105,7 @@ const STANDARD_BUTTON_LIST: [Button; STANDARD_BUTTON_COUNT] = [
 	Button::Mode,
 ];
 
-// W3C Standard Gamepad 축 순서의 gilrs 축과 곱할 부호. (gilrs 의 Y 는 위가 양수, W3C 는 아래가 양수라 뒤집는다)
+/// W3C Standard Gamepad 축 순서의 gilrs 축과 곱할 부호. (gilrs 의 Y 는 위가 양수, W3C 는 아래가 양수라 뒤집는다)
 #[cfg(not(target_arch = "wasm32"))]
 const STANDARD_AXIS_LIST: [(Axis, f32); STANDARD_AXIS_COUNT] = [
 	(Axis::LeftStickX, 1.0),
@@ -107,7 +115,7 @@ const STANDARD_AXIS_LIST: [(Axis, f32); STANDARD_AXIS_COUNT] = [
 ];
 
 //==============================================================================
-// 게임패드 아날로그 스틱 식별자. (W3C Standard Gamepad 매핑 규격)
+/// 게임패드 아날로그 스틱 식별자. (W3C Standard Gamepad 매핑 규격)
 //==============================================================================
 pub struct GamepadAnalogStickCode;
 
@@ -119,7 +127,7 @@ impl GamepadAnalogStickCode {
 }
 
 //==============================================================================
-// 게임패드 트리거 식별자. (W3C Standard Gamepad 매핑 규격)
+/// 게임패드 트리거 식별자. (W3C Standard Gamepad 매핑 규격)
 //==============================================================================
 pub struct GamepadTriggerCode;
 
@@ -129,46 +137,46 @@ impl GamepadTriggerCode {
 }
 
 //==============================================================================
-// 게임패드 버튼 식별자. (W3C Standard Gamepad 매핑 규격)
+/// 게임패드 버튼 식별자. (W3C Standard Gamepad 매핑 규격)
 //==============================================================================
 pub struct GamepadButtonCode;
 
 impl GamepadButtonCode {
-	// 앞면 버튼.
+	/// 앞면 버튼.
 	pub const A_CROSS: usize = 0;
 	pub const B_CIRCLE: usize = 1;
 	pub const X_SQUARE: usize = 2;
 	pub const Y_TRIANGLE: usize = 3;
 
-	// 범퍼.
+	/// 범퍼.
 	pub const L1: usize = 4;
 	pub const R1: usize = 5;
 
-	// 트리거. (버튼으로도 인식됨)
+	/// 트리거. (버튼으로도 인식됨)
 	pub const L2: usize = 6;
 	pub const R2: usize = 7;
 
-	// 시스템.
+	/// 시스템.
 	pub const SHARE_VIEW: usize = 8;
 	pub const OPTIONS_MENU: usize = 9;
 
-	// 스틱 누름.
+	/// 스틱 누름.
 	pub const L3: usize = 10;
 	pub const R3: usize = 11;
 
-	// 십자키.
+	/// 십자키.
 	pub const DPAD_UP: usize = 12;
 	pub const DPAD_DOWN: usize = 13;
 	pub const DPAD_LEFT: usize = 14;
 	pub const DPAD_RIGHT: usize = 15;
 
-	// 가운데.
+	/// 가운데.
 	pub const HOME_PS: usize = 16;
 	pub const TOUCHPAD: usize = 17;
 }
 
 //==============================================================================
-// 게임패드 종류. (단추 안내를 그 패드의 표기로 보일 때 쓴다)
+/// 게임패드 종류. (단추 안내를 그 패드의 표기로 보일 때 쓴다)
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum GamepadKind {
@@ -178,15 +186,15 @@ pub enum GamepadKind {
 	Other,
 }
 
-// 패드 이름(Gamepad.id)에 이것이 있으면 그 종류다. (소문자, 브라우저와 데스크탑 id 의 USB 제조사 번호와 흔한 이름)
+/// 패드 이름(Gamepad.id)에 이것이 있으면 그 종류다. (소문자, 브라우저와 데스크탑 id 의 USB 제조사 번호와 흔한 이름)
 const PLAYSTATION_GAMEPAD_ID_PARTS: [&str; 5] = ["054c", "playstation", "dualshock", "dualsense", "sony"];
 const NINTENDO_GAMEPAD_ID_PARTS: [&str; 4] = ["057e", "nintendo", "joy-con", "pro controller"];
 const XBOX_GAMEPAD_ID_PARTS: [&str; 4] = ["045e", "xbox", "xinput", "microsoft"];
-// 축이 이만큼 넘게 기울면 그 패드를 쓴 것으로 본다. (가운데의 떨림으로 마지막 장치가 바뀌지 않게)
+/// 축이 이만큼 넘게 기울면 그 패드를 쓴 것으로 본다. (가운데의 떨림으로 마지막 장치가 바뀌지 않게)
 const GAMEPAD_ACTIVE_AXIS_THRESHOLD: f64 = 0.5;
 
 //==============================================================================
-// 패드 이름으로 종류 가르기. (플레이스테이션 054c, 닌텐도 057e, 엑스박스 045e 와 이름, 모르면 Other)
+/// 패드 이름으로 종류 가르기. (플레이스테이션 054c, 닌텐도 057e, 엑스박스 045e 와 이름, 모르면 Other)
 //==============================================================================
 pub fn read_gamepad_kind(gamepad_id: &str) -> GamepadKind {
 	let lower_case_id = gamepad_id.to_lowercase();
@@ -206,52 +214,52 @@ pub fn read_gamepad_kind(gamepad_id: &str) -> GamepadKind {
 }
 
 //==============================================================================
-// 입력 종류. (원본 콜백의 input_type 문자열 "button" / "value" / "axis")
+/// 입력 종류. (원본 콜백의 input_type 문자열 "button" / "value" / "axis")
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GamepadInputType {
-	// 눌림 변화. (값은 1.0 눌림, 0.0 뗌)
+	/// 눌림 변화. (값은 1.0 눌림, 0.0 뗌)
 	Button,
-	// 버튼 아날로그 값 변화. (0 보다 클 때만 온다)
+	/// 버튼 아날로그 값 변화. (0 보다 클 때만 온다)
 	Value,
-	// 스틱 축 값 변화.
+	/// 스틱 축 값 변화.
 	Axis,
 }
 
-// 입력 콜백. (gamepad_index, input_type, input_index, value)
+/// 입력 콜백. (gamepad_index, input_type, input_index, value)
 pub type GamepadInputCallback = Box<dyn FnMut(usize, GamepadInputType, usize, f32)>;
 
 //==============================================================================
-// 게임패드 버튼 하나. (W3C GamepadButton)
+/// 게임패드 버튼 하나. (W3C GamepadButton)
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GamepadButton {
-	// 눌렸는지.
+	/// 눌렸는지.
 	pub pressed: bool,
-	// 값. (0.0 ~ 1.0, 트리거는 아날로그)
+	/// 값. (0.0 ~ 1.0, 트리거는 아날로그)
 	pub value: f32,
 }
 
 //==============================================================================
-// 게임패드 하나의 사본. (W3C Gamepad, navigator.getGamepads() 가 주는 것과 같은 꼴)
+/// 게임패드 하나의 사본. (W3C Gamepad, navigator.getGamepads() 가 주는 것과 같은 꼴)
 //==============================================================================
 #[derive(Clone, Debug, PartialEq)]
 pub struct Gamepad {
-	// 하드웨어 식별 번호. (is_button_pressed 들의 gamepad_index)
+	/// 하드웨어 식별 번호. (is_button_pressed 들의 gamepad_index)
 	pub index: usize,
-	// 장치 이름.
+	/// 장치 이름.
 	pub id: String,
-	// 연결되어 있는지.
+	/// 연결되어 있는지.
 	pub connected: bool,
-	// 버튼 목록. (GamepadButtonCode 순서)
+	/// 버튼 목록. (GamepadButtonCode 순서)
 	pub buttons: Vec<GamepadButton>,
-	// 축 목록. (GamepadAnalogStickCode 순서, -1.0 ~ 1.0)
+	/// 축 목록. (GamepadAnalogStickCode 순서, -1.0 ~ 1.0)
 	pub axes: Vec<f32>,
 }
 
 impl Gamepad {
 	//==============================================================================
-	// 생성. (버튼 17개는 뗀 상태, 축 4개는 0)
+	/// 생성. (버튼 17개는 뗀 상태, 축 4개는 0)
 	//==============================================================================
 	pub fn create(index: usize, id: &str) -> Gamepad {
 		Gamepad {
@@ -265,18 +273,18 @@ impl Gamepad {
 }
 
 //==============================================================================
-// 버튼 하나의 마지막 상태. (원본 { pressed, value })
+/// 버튼 하나의 마지막 상태. (원본 { pressed, value })
 //==============================================================================
 #[derive(Clone, Copy)]
 struct GamepadButtonState {
 	pressed: bool,
 	value: f64,
-	// 지난 갱신의 눌림. (러스트 판에서 더한 Just 판정용)
+	/// 지난 갱신의 눌림. (러스트 판에서 더한 Just 판정용)
 	previous_pressed: bool,
 }
 
 //==============================================================================
-// 게임패드 하나의 마지막 상태. (원본 { buttons: Map, axes: Map })
+/// 게임패드 하나의 마지막 상태. (원본 { buttons: Map, axes: Map })
 //==============================================================================
 struct GamepadState {
 	buttons: Vec<GamepadButtonState>,
@@ -284,32 +292,32 @@ struct GamepadState {
 }
 
 //==============================================================================
-// 게임패드 관리자.
+/// 게임패드 관리자.
 //==============================================================================
 pub struct GamepadManager {
-	// 연결된 게임패드 식별자(index) 목록.
+	/// 연결된 게임패드 식별자(index) 목록.
 	connected_gamepad_indices: Vec<usize>,
-	// key: index, value: 마지막 상태.
+	/// key: index, value: 마지막 상태.
 	connected_gamepad_states: HashMap<usize, GamepadState>,
-	// 입력 콜백 함수.
+	/// 입력 콜백 함수.
 	input_event_callback: Option<GamepadInputCallback>,
-	// 마지막 갱신에 읽은 목록. (navigator.getGamepads() 자리, 번호가 index)
+	/// 마지막 갱신에 읽은 목록. (navigator.getGamepads() 자리, 번호가 index)
 	gamepad_list: Vec<Option<Gamepad>>,
-	// gilrs 입력원. (처음 갱신할 때 만든다)
+	/// gilrs 입력원. (처음 갱신할 때 만든다)
 	gamepad_reader: Option<GamepadReader>,
-	// gilrs 를 만들어 봤는지.
+	/// gilrs 를 만들어 봤는지.
 	is_gamepad_reader_creation_tried: bool,
-	// 로그를 내는지.
+	/// 로그를 내는지.
 	is_log_enabled: bool,
-	// 단추와 축이 바뀔 때마다 로그를 내는지.
+	/// 단추와 축이 바뀔 때마다 로그를 내는지.
 	is_input_log_enabled: bool,
-	// 마지막 갱신에 단추를 누르거나 축을 크게 기울인 패드의 이름.
+	/// 마지막 갱신에 단추를 누르거나 축을 크게 기울인 패드의 이름.
 	active_gamepad_id: Option<String>,
 }
 
 impl GamepadManager {
 	//==============================================================================
-	// 생성.
+	/// 생성.
 	//==============================================================================
 	pub fn new() -> GamepadManager {
 		GamepadManager {
@@ -326,14 +334,14 @@ impl GamepadManager {
 	}
 
 	//==============================================================================
-	// 갱신.
+	/// 갱신.
 	//==============================================================================
 	pub fn tick(&mut self, _time_delta: f32) {
 		self.update_all_gamepads();
 	}
 
 	//==============================================================================
-	// 게임패드 연결.
+	/// 게임패드 연결.
 	//==============================================================================
 	pub fn connect(&mut self, gamepad: &Gamepad) {
 		if self.connected_gamepad_indices.contains(&gamepad.index) {
@@ -358,7 +366,7 @@ impl GamepadManager {
 	}
 
 	//==============================================================================
-	// 게임패드 연결 해제.
+	/// 게임패드 연결 해제.
 	//==============================================================================
 	pub fn disconnect(&mut self, gamepad: &Gamepad) {
 		let list_index = match self.connected_gamepad_indices.iter().position(|connected_gamepad_index| *connected_gamepad_index == gamepad.index) {
@@ -378,43 +386,43 @@ impl GamepadManager {
 	}
 
 	//==============================================================================
-	// 콜백 설정. (None 이면 끈다)
+	/// 콜백 설정. (None 이면 끈다)
 	//==============================================================================
 	pub fn set_callback(&mut self, callback: Option<GamepadInputCallback>) {
 		self.input_event_callback = callback;
 	}
 
 	//==============================================================================
-	// 로그 켜고 끄기. (러스트 판에서 더한 것. 기본은 원본처럼 켜짐)
+	/// 로그 켜고 끄기. (러스트 판에서 더한 것. 기본은 원본처럼 켜짐)
 	//==============================================================================
 	pub fn set_log_enabled(&mut self, is_enabled: bool) {
 		self.is_log_enabled = is_enabled;
 	}
 
 	//==============================================================================
-	// 단추와 축이 바뀔 때마다 로그를 낼지. (기본은 끔, set_log_enabled 가 꺼져 있으면 켜도 내지 않는다)
+	/// 단추와 축이 바뀔 때마다 로그를 낼지. (기본은 끔, set_log_enabled 가 꺼져 있으면 켜도 내지 않는다)
 	//==============================================================================
 	pub fn set_input_log_enabled(&mut self, is_enabled: bool) {
 		self.is_input_log_enabled = is_enabled;
 	}
 
 	//==============================================================================
-	// 단추와 축이 바뀔 때마다 로그를 내는지.
+	/// 단추와 축이 바뀔 때마다 로그를 내는지.
 	//==============================================================================
 	pub fn is_input_log_enabled(&self) -> bool {
 		self.is_input_log_enabled
 	}
 
 	//==============================================================================
-	// 마지막 갱신에 단추를 누르거나 축을 0.5 넘게 기울인 패드의 이름. (없으면 None, 마지막으로 쓴 장치를 가릴 때)
+	/// 마지막 갱신에 단추를 누르거나 축을 0.5 넘게 기울인 패드의 이름. (없으면 None, 마지막으로 쓴 장치를 가릴 때)
 	//==============================================================================
 	pub fn get_active_gamepad_id(&self) -> Option<&str> {
 		self.active_gamepad_id.as_deref()
 	}
 
 	//==============================================================================
-	// 연결된 패드를 모두 떨기. (세기는 0 ~ 1, 무거운 모터와 가벼운 모터, 초)
-	// - 데스크탑은 gilrs force feedback(macOS 는 GameController 와 CoreHaptics), 웹은 Gamepad.vibrationActuator 의 dual-rumble. 진동을 대지 않는 패드는 건너뛴다.
+	/// 연결된 패드를 모두 떨기. (세기는 0 ~ 1, 무거운 모터와 가벼운 모터, 초)
+	/// - 데스크탑은 gilrs force feedback(macOS 는 GameController 와 CoreHaptics), 웹은 Gamepad.vibrationActuator 의 dual-rumble. 진동을 대지 않는 패드는 건너뛴다.
 	//==============================================================================
 	pub fn vibrate(&mut self, strong_magnitude: f32, weak_magnitude: f32, seconds: f32) {
 		let clamped_strong_magnitude = if strong_magnitude.is_finite() {
@@ -448,7 +456,7 @@ impl GamepadManager {
 	}
 
 	//==============================================================================
-	// 모든 게임패드 갱신. (gilrs 를 읽어 update_all_gamepads_with_list 로 넘긴다)
+	/// 모든 게임패드 갱신. (gilrs 를 읽어 update_all_gamepads_with_list 로 넘긴다)
 	//==============================================================================
 	pub fn update_all_gamepads(&mut self) {
 		if !self.is_gamepad_reader_creation_tried {
@@ -495,8 +503,8 @@ impl GamepadManager {
 	}
 
 	//==============================================================================
-	// 주어진 목록으로 모든 게임패드 갱신. (원본 update_all_gamepads 의 본문, 목록 번호가 index)
-	// - gilrs 없이 상태를 넣을 때 쓴다. (시험, 다른 입력원)
+	/// 주어진 목록으로 모든 게임패드 갱신. (원본 update_all_gamepads 의 본문, 목록 번호가 index)
+	/// - gilrs 없이 상태를 넣을 때 쓴다. (시험, 다른 입력원)
 	//==============================================================================
 	pub fn update_all_gamepads_with_list(&mut self, gamepad_list: Vec<Option<Gamepad>>) {
 		// 목록에 있는데 아직 맞이하지 않은 패드를 여기서 붙인다.
@@ -653,7 +661,7 @@ impl GamepadManager {
 	}
 
 	//==============================================================================
-	// 버튼 눌림 상태 반환.
+	/// 버튼 눌림 상태 반환.
 	//==============================================================================
 	pub fn is_button_pressed(&self, gamepad_index: usize, button_index: usize) -> bool {
 		match self.find_button_state(gamepad_index, button_index) {
@@ -667,7 +675,7 @@ impl GamepadManager {
 	}
 
 	//==============================================================================
-	// 이번 갱신에 방금 눌린 버튼인지. (원본 isButtonJustPressed, 키보드 is_key_just_pressed 와 같은 쓰임)
+	/// 이번 갱신에 방금 눌린 버튼인지. (원본 isButtonJustPressed, 키보드 is_key_just_pressed 와 같은 쓰임)
 	//==============================================================================
 	pub fn is_button_just_pressed(&self, gamepad_index: usize, button_index: usize) -> bool {
 		match self.find_button_state(gamepad_index, button_index) {
@@ -681,7 +689,7 @@ impl GamepadManager {
 	}
 
 	//==============================================================================
-	// 이번 갱신에 방금 떼어진 버튼인지. (원본 isButtonJustReleased)
+	/// 이번 갱신에 방금 떼어진 버튼인지. (원본 isButtonJustReleased)
 	//==============================================================================
 	pub fn is_button_just_released(&self, gamepad_index: usize, button_index: usize) -> bool {
 		match self.find_button_state(gamepad_index, button_index) {
@@ -695,7 +703,7 @@ impl GamepadManager {
 	}
 
 	//==============================================================================
-	// 버튼/트리거 아날로그 값 반환. (0.0 ~ 1.0)
+	/// 버튼/트리거 아날로그 값 반환. (0.0 ~ 1.0)
 	//==============================================================================
 	pub fn get_button_value(&self, gamepad_index: usize, button_index: usize) -> f32 {
 		match self.find_button_state(gamepad_index, button_index) {
@@ -709,7 +717,7 @@ impl GamepadManager {
 	}
 
 	//==============================================================================
-	// 아날로그 스틱 축 값 반환. (-1.0 ~ 1.0)
+	/// 아날로그 스틱 축 값 반환. (-1.0 ~ 1.0)
 	//==============================================================================
 	pub fn get_axis_value(&self, gamepad_index: usize, axis_index: usize) -> f32 {
 		let state = match self.connected_gamepad_states.get(&gamepad_index) {
@@ -731,7 +739,7 @@ impl GamepadManager {
 	}
 
 	//==============================================================================
-	// 연결된 모든 게임패드 반환. (마지막 갱신의 사본)
+	/// 연결된 모든 게임패드 반환. (마지막 갱신의 사본)
 	//==============================================================================
 	pub fn get_all_connected_gamepads(&self) -> Vec<&Gamepad> {
 		let mut connected_gamepad_list = Vec::new();
@@ -744,14 +752,14 @@ impl GamepadManager {
 	}
 
 	//==============================================================================
-	// 연결된 게임패드 수 반환.
+	/// 연결된 게임패드 수 반환.
 	//==============================================================================
 	pub fn get_connected_gamepad_count(&self) -> usize {
 		self.connected_gamepad_indices.len()
 	}
 
 	//==============================================================================
-	// 연결된 게임패드 반환. (gamepad_index 는 연결 목록의 순번, 0 ~ get_connected_gamepad_count() - 1)
+	/// 연결된 게임패드 반환. (gamepad_index 는 연결 목록의 순번, 0 ~ get_connected_gamepad_count() - 1)
 	//==============================================================================
 	pub fn get_connected_gamepad(&self, gamepad_index: usize) -> Option<&Gamepad> {
 		let hardware_index = *self.connected_gamepad_indices.get(gamepad_index)?;
@@ -766,7 +774,7 @@ impl GamepadManager {
 	}
 
 	//==============================================================================
-	// 버튼 상태 찾기.
+	/// 버튼 상태 찾기.
 	//==============================================================================
 	fn find_button_state(&self, gamepad_index: usize, button_index: usize) -> Option<&GamepadButtonState> {
 		let state = self.connected_gamepad_states.get(&gamepad_index)?;
@@ -781,7 +789,7 @@ impl Default for GamepadManager {
 }
 
 //==============================================================================
-// 로그 문구의 입력 이름. (L2, R2 는 Trigger)
+/// 로그 문구의 입력 이름. (L2, R2 는 Trigger)
 //==============================================================================
 fn get_button_input_text(button_index: usize) -> &'static str {
 	if button_index == GamepadButtonCode::L2 || button_index == GamepadButtonCode::R2 {
@@ -793,14 +801,14 @@ fn get_button_input_text(button_index: usize) -> &'static str {
 }
 
 //==============================================================================
-// 소수점 둘째 자리로 반올림. (원본 parseFloat(value.toFixed(2)) 자리)
+/// 소수점 둘째 자리로 반올림. (원본 parseFloat(value.toFixed(2)) 자리)
 //==============================================================================
 fn round_to_hundredths(value: f64) -> f64 {
 	(value * 100.0).round() / 100.0
 }
 
 //==============================================================================
-// 0, -0, NaN 을 0 으로 바꾼다. (원본 `value || 0` 자리)
+/// 0, -0, NaN 을 0 으로 바꾼다. (원본 `value || 0` 자리)
 //==============================================================================
 fn zero_if_falsy(value: f64) -> f64 {
 	if value == 0.0 || value.is_nan() {
@@ -812,7 +820,7 @@ fn zero_if_falsy(value: f64) -> f64 {
 }
 
 //==============================================================================
-// 로그 출력. (원본 console.log 자리. 웹은 브라우저 콘솔, 데스크탑은 표준 오류)
+/// 로그 출력. (원본 console.log 자리. 웹은 브라우저 콘솔, 데스크탑은 표준 오류)
 //==============================================================================
 fn write_log(message: &str) {
 	#[cfg(target_arch = "wasm32")]
@@ -827,7 +835,7 @@ fn write_log(message: &str) {
 }
 
 //==============================================================================
-// 브라우저 패드 떨기. (원본처럼 navigator.getGamepads() 의 vibrationActuator.playEffect("dual-rumble"), 없으면 건너뛴다)
+/// 브라우저 패드 떨기. (원본처럼 navigator.getGamepads() 의 vibrationActuator.playEffect("dual-rumble"), 없으면 건너뛴다)
 //==============================================================================
 #[cfg(target_arch = "wasm32")]
 fn vibrate_browser_gamepads(strong_magnitude: f32, weak_magnitude: f32, duration_milliseconds: u32) {
@@ -897,20 +905,20 @@ fn vibrate_browser_gamepads(strong_magnitude: f32, weak_magnitude: f32, duration
 }
 
 //==============================================================================
-// 패드 하나에서 버튼과 축을 읽는 것. (gilrs 패드, 시험용 가짜 패드)
+/// 패드 하나에서 버튼과 축을 읽는 것. (gilrs 패드, 시험용 가짜 패드)
 //==============================================================================
 #[cfg(not(target_arch = "wasm32"))]
 trait GamepadElementReader {
-	// 버튼의 눌림과 값.
+	/// 버튼의 눌림과 값.
 	fn read_button(&self, button: Button) -> GamepadButton;
-	// 축의 값. (gilrs 꼴, Y 는 위가 양수)
+	/// 축의 값. (gilrs 꼴, Y 는 위가 양수)
 	fn read_axis(&self, axis: Axis) -> f32;
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl GamepadElementReader for gilrs::Gamepad<'_> {
 	//==============================================================================
-	// 버튼 읽기. (gilrs 가 모르는 버튼은 뗀 상태)
+	/// 버튼 읽기. (gilrs 가 모르는 버튼은 뗀 상태)
 	//==============================================================================
 	fn read_button(&self, button: Button) -> GamepadButton {
 		match self.button_data(button) {
@@ -930,7 +938,7 @@ impl GamepadElementReader for gilrs::Gamepad<'_> {
 	}
 
 	//==============================================================================
-	// 축 읽기. (gilrs 가 모르는 축은 0)
+	/// 축 읽기. (gilrs 가 모르는 축은 0)
 	//==============================================================================
 	fn read_axis(&self, axis: Axis) -> f32 {
 		self.value(axis)
@@ -938,7 +946,7 @@ impl GamepadElementReader for gilrs::Gamepad<'_> {
 }
 
 //==============================================================================
-// 십자키 버튼에 겹쳐 읽을 축과 방향. (햇 스위치를 축으로 주는 패드. gilrs DPadX 는 오른쪽, DPadY 는 위가 양수)
+/// 십자키 버튼에 겹쳐 읽을 축과 방향. (햇 스위치를 축으로 주는 패드. gilrs DPadX 는 오른쪽, DPadY 는 위가 양수)
 //==============================================================================
 #[cfg(not(target_arch = "wasm32"))]
 fn get_directional_pad_axis(button_index: usize) -> Option<(Axis, f32)> {
@@ -962,9 +970,9 @@ fn get_directional_pad_axis(button_index: usize) -> Option<(Axis, f32)> {
 }
 
 //==============================================================================
-// 패드 하나를 W3C Standard Gamepad 꼴로 읽는다.
-// - 아날로그 버튼은 값이 30/255 를 넘으면 눌림. 눌린 디지털 버튼의 값은 1.
-// - 축은 Y 를 뒤집어 아래가 양수가 되게 한다.
+/// 패드 하나를 W3C Standard Gamepad 꼴로 읽는다.
+/// - 아날로그 버튼은 값이 30/255 를 넘으면 눌림. 눌린 디지털 버튼의 값은 1.
+/// - 축은 Y 를 뒤집어 아래가 양수가 되게 한다.
 //==============================================================================
 #[cfg(not(target_arch = "wasm32"))]
 fn create_standard_gamepad(index: usize, id: &str, element_reader: &impl GamepadElementReader) -> Gamepad {
@@ -995,7 +1003,7 @@ fn create_standard_gamepad(index: usize, id: &str, element_reader: &impl Gamepad
 }
 
 //==============================================================================
-// 데스크탑 패드 이름. (크롬 id 꼴. 게임이 "054c" 같은 제조사 번호로 패드 종류를 가른다)
+/// 데스크탑 패드 이름. (크롬 id 꼴. 게임이 "054c" 같은 제조사 번호로 패드 종류를 가른다)
 //==============================================================================
 #[cfg(not(target_arch = "wasm32"))]
 fn create_desktop_gamepad_identifier(gamepad_name: &str, vendor_id: Option<u16>, product_id: Option<u16>) -> String {
@@ -1010,7 +1018,7 @@ fn create_desktop_gamepad_identifier(gamepad_name: &str, vendor_id: Option<u16>,
 }
 
 //==============================================================================
-// gilrs 패드를 Gamepad 로. (표준 17 버튼, 4 축)
+/// gilrs 패드를 Gamepad 로. (표준 17 버튼, 4 축)
 //==============================================================================
 #[cfg(not(target_arch = "wasm32"))]
 fn create_gamepad_from_gilrs(gamepad_id: gilrs::GamepadId, gilrs_gamepad: &gilrs::Gamepad) -> Gamepad {
@@ -1024,7 +1032,7 @@ fn create_gamepad_from_gilrs(gamepad_id: gilrs::GamepadId, gilrs_gamepad: &gilrs
 }
 
 //==============================================================================
-// gilrs 의 단추 코드가 표준 버튼 뒤에 붙일 단추인지. (매핑에 없거나 표준 17 개가 아닌 gilrs 단추, 축으로 매핑된 것은 아니다)
+/// gilrs 의 단추 코드가 표준 버튼 뒤에 붙일 단추인지. (매핑에 없거나 표준 17 개가 아닌 gilrs 단추, 축으로 매핑된 것은 아니다)
 //==============================================================================
 #[cfg(not(target_arch = "wasm32"))]
 fn is_extra_button_code(gilrs_gamepad: &gilrs::Gamepad, code: gilrs::ev::Code) -> bool {
@@ -1042,7 +1050,7 @@ fn is_extra_button_code(gilrs_gamepad: &gilrs::Gamepad, code: gilrs::ev::Code) -
 }
 
 //==============================================================================
-// gilrs 의 축 코드가 표준 축 뒤에 붙일 축인지. (매핑에 없는 축, 트리거와 십자키 축은 버튼으로 읽으므로 아니다)
+/// gilrs 의 축 코드가 표준 축 뒤에 붙일 축인지. (매핑에 없는 축, 트리거와 십자키 축은 버튼으로 읽으므로 아니다)
 //==============================================================================
 #[cfg(not(target_arch = "wasm32"))]
 fn is_extra_axis_code(gilrs_gamepad: &gilrs::Gamepad, code: gilrs::ev::Code) -> bool {
@@ -1060,36 +1068,36 @@ fn is_extra_axis_code(gilrs_gamepad: &gilrs::Gamepad, code: gilrs::ev::Code) -> 
 }
 
 //==============================================================================
-// 입력원에서 이번 갱신에 읽은 것.
+/// 입력원에서 이번 갱신에 읽은 것.
 //==============================================================================
 #[derive(Default)]
 struct GamepadReadResult {
-	// 이번에 붙은 패드 index.
+	/// 이번에 붙은 패드 index.
 	connected_gamepad_index_list: Vec<usize>,
-	// 이번에 떨어진 패드 index.
+	/// 이번에 떨어진 패드 index.
 	disconnected_gamepad_index_list: Vec<usize>,
-	// 연결된 패드 목록. (번호가 index, 빈 칸은 None)
+	/// 연결된 패드 목록. (번호가 index, 빈 칸은 None)
 	gamepad_list: Vec<Option<Gamepad>>,
 }
 
 //==============================================================================
-// gilrs 입력원. (데스크탑, gilrs 를 들고 W3C 꼴 목록을 만든다)
+/// gilrs 입력원. (데스크탑, gilrs 를 들고 W3C 꼴 목록을 만든다)
 //==============================================================================
 #[cfg(not(target_arch = "wasm32"))]
 struct GamepadReader {
 	gilrs: gilrs::Gilrs,
-	// 떨고 있는 진동과 끝나는 때. (gilrs 는 효과 손잡이를 놓으면 바로 멈추므로 끝날 때까지 든다)
+	/// 떨고 있는 진동과 끝나는 때. (gilrs 는 효과 손잡이를 놓으면 바로 멈추므로 끝날 때까지 든다)
 	vibration_effect_list: Vec<(gilrs::ff::Effect, web_time::Instant)>,
-	// 패드 index 마다 표준 버튼 뒤에 붙인 단추 코드. (처음 움직인 차례, 번호가 17 부터의 버튼 번호)
+	/// 패드 index 마다 표준 버튼 뒤에 붙인 단추 코드. (처음 움직인 차례, 번호가 17 부터의 버튼 번호)
 	extra_button_code_table: HashMap<usize, Vec<gilrs::ev::Code>>,
-	// 패드 index 마다 표준 축 뒤에 붙인 축 코드. (처음 움직인 차례, 번호가 4 부터의 축 번호)
+	/// 패드 index 마다 표준 축 뒤에 붙인 축 코드. (처음 움직인 차례, 번호가 4 부터의 축 번호)
 	extra_axis_code_table: HashMap<usize, Vec<gilrs::ev::Code>>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl GamepadReader {
 	//==============================================================================
-	// 생성. (기본 필터는 끄고 진동은 켠다. 게임패드를 모르는 플랫폼이면 패드가 없는 것처럼 돈다)
+	/// 생성. (기본 필터는 끄고 진동은 켠다. 게임패드를 모르는 플랫폼이면 패드가 없는 것처럼 돈다)
 	//==============================================================================
 	fn create() -> Option<GamepadReader> {
 		let gilrs_builder = GilrsBuilder::new().with_default_filters(false).with_force_feedback(true);
@@ -1109,7 +1117,7 @@ impl GamepadReader {
 	}
 
 	//==============================================================================
-	// gilrs 로 만들기.
+	/// gilrs 로 만들기.
 	//==============================================================================
 	fn from_gilrs(gilrs: gilrs::Gilrs) -> GamepadReader {
 		GamepadReader {
@@ -1121,7 +1129,7 @@ impl GamepadReader {
 	}
 
 	//==============================================================================
-	// 연결된 패드를 모두 떨기. (macOS: gilrs 패드의 OS 이름을 연결 차례로 넘겨 플랫폼 층이 짝인 GCController 를 떤다)
+	/// 연결된 패드를 모두 떨기. (macOS: gilrs 패드의 OS 이름을 연결 차례로 넘겨 플랫폼 층이 짝인 GCController 를 떤다)
 	//==============================================================================
 	#[cfg(target_os = "macos")]
 	fn vibrate(&mut self, strong_magnitude: f32, weak_magnitude: f32, duration_milliseconds: u32) {
@@ -1130,7 +1138,7 @@ impl GamepadReader {
 	}
 
 	//==============================================================================
-	// 진동을 대는 연결된 패드를 모두 떨기. (gilrs force feedback, 무거운 모터 Strong 과 가벼운 모터 Weak)
+	/// 진동을 대는 연결된 패드를 모두 떨기. (gilrs force feedback, 무거운 모터 Strong 과 가벼운 모터 Weak)
 	//==============================================================================
 	#[cfg(all(not(target_arch = "wasm32"), not(target_os = "macos")))]
 	fn vibrate(&mut self, strong_magnitude: f32, weak_magnitude: f32, duration_milliseconds: u32) {
@@ -1169,7 +1177,7 @@ impl GamepadReader {
 	}
 
 	//==============================================================================
-	// 읽기. (이벤트를 비워야 gilrs 의 상태가 갱신된다, 끝난 진동은 놓는다)
+	/// 읽기. (이벤트를 비워야 gilrs 의 상태가 갱신된다, 끝난 진동은 놓는다)
 	//==============================================================================
 	fn read_gamepads(&mut self) -> GamepadReadResult {
 		let now = web_time::Instant::now();
@@ -1208,9 +1216,9 @@ impl GamepadReader {
 }
 
 //==============================================================================
-// 플레이스테이션 패드의 터치패드 단추 자리. (크롬 MapperDualshock4, MapperDualSense, MapperPs4Ps5)
-// - 플레이스테이션 패드가 아니면 None. 맞으면 Some 이고, 안의 값은 터치패드 단추의 gilrs 원시 코드(Code::into_u32)다. 터치패드 단추가 없는 장치면 Some(None).
-// - operating_system 은 std::env::consts::OS 꼴이다. (시험이 플랫폼마다 부른다) hid_version 은 gilrs uuid 의 판 번호(리눅스 input_id.version, bcdHID)다.
+/// 플레이스테이션 패드의 터치패드 단추 자리. (크롬 MapperDualshock4, MapperDualSense, MapperPs4Ps5)
+/// - 플레이스테이션 패드가 아니면 None. 맞으면 Some 이고, 안의 값은 터치패드 단추의 gilrs 원시 코드(Code::into_u32)다. 터치패드 단추가 없는 장치면 Some(None).
+/// - operating_system 은 std::env::consts::OS 꼴이다. (시험이 플랫폼마다 부른다) hid_version 은 gilrs uuid 의 판 번호(리눅스 input_id.version, bcdHID)다.
 //==============================================================================
 #[cfg(not(target_arch = "wasm32"))]
 fn find_playstation_touchpad_code(operating_system: &str, vendor_id: Option<u16>, product_id: Option<u16>, hid_version: u16) -> Option<Option<u32>> {
@@ -1243,7 +1251,7 @@ fn find_playstation_touchpad_code(operating_system: &str, vendor_id: Option<u16>
 }
 
 //==============================================================================
-// gilrs uuid 의 판 번호. (SDL GUID 꼴, 13, 14번째 바이트가 작은 쪽부터의 판 번호)
+/// gilrs uuid 의 판 번호. (SDL GUID 꼴, 13, 14번째 바이트가 작은 쪽부터의 판 번호)
 //==============================================================================
 #[cfg(not(target_arch = "wasm32"))]
 fn read_uuid_version(uuid: &[u8; 16]) -> u16 {
@@ -1251,7 +1259,7 @@ fn read_uuid_version(uuid: &[u8; 16]) -> u16 {
 }
 
 //==============================================================================
-// gilrs 단추 상태를 W3C 버튼으로. (표준 버튼처럼 값이 30/255 를 넘으면 눌림, 눌린 디지털 단추의 값은 1)
+/// gilrs 단추 상태를 W3C 버튼으로. (표준 버튼처럼 값이 30/255 를 넘으면 눌림, 눌린 디지털 단추의 값은 1)
 //==============================================================================
 #[cfg(not(target_arch = "wasm32"))]
 fn convert_button_data(button_data: Option<&gilrs::ev::state::ButtonData>) -> GamepadButton {
@@ -1275,9 +1283,9 @@ fn convert_button_data(button_data: Option<&gilrs::ev::state::ButtonData>) -> Ga
 }
 
 //==============================================================================
-// 표준 버튼과 축 뒤에 gilrs 가 알린 나머지 단추와 축 붙이기. (처음 움직인 차례로 번호를 매겨 그 뒤로는 번호가 바뀌지 않는다)
-// - 단추는 표준 버튼처럼 값이 30/255 를 넘으면 눌림, 눌린 디지털 단추의 값은 1 이다.
-// - 플레이스테이션 패드는 크롬처럼 터치패드 단추 하나만 TOUCHPAD(17) 에 붙인다. (누른 적이 없으면 뗀 상태, 터치패드가 없는 장치면 붙이지 않는다)
+/// 표준 버튼과 축 뒤에 gilrs 가 알린 나머지 단추와 축 붙이기. (처음 움직인 차례로 번호를 매겨 그 뒤로는 번호가 바뀌지 않는다)
+/// - 단추는 표준 버튼처럼 값이 30/255 를 넘으면 눌림, 눌린 디지털 단추의 값은 1 이다.
+/// - 플레이스테이션 패드는 크롬처럼 터치패드 단추 하나만 TOUCHPAD(17) 에 붙인다. (누른 적이 없으면 뗀 상태, 터치패드가 없는 장치면 붙이지 않는다)
 //==============================================================================
 #[cfg(not(target_arch = "wasm32"))]
 fn append_extra_elements(extra_button_code_table: &mut HashMap<usize, Vec<gilrs::ev::Code>>, extra_axis_code_table: &mut HashMap<usize, Vec<gilrs::ev::Code>>, gamepad: &mut Gamepad, gilrs_gamepad: &gilrs::Gamepad) {
@@ -1308,18 +1316,18 @@ fn append_extra_elements(extra_button_code_table: &mut HashMap<usize, Vec<gilrs:
 }
 
 //==============================================================================
-// 브라우저 입력원. (웹, 원본처럼 navigator.getGamepads() 를 직접 읽는다)
+/// 브라우저 입력원. (웹, 원본처럼 navigator.getGamepads() 를 직접 읽는다)
 //==============================================================================
 #[cfg(target_arch = "wasm32")]
 struct GamepadReader {
-	// gamepadconnected / gamepaddisconnected 로 받은 패드 index 와 붙었는지. (리스너가 넣고 읽을 때 꺼낸다)
+	/// gamepadconnected / gamepaddisconnected 로 받은 패드 index 와 붙었는지. (리스너가 넣고 읽을 때 꺼낸다)
 	connection_event_list: std::rc::Rc<std::cell::RefCell<Vec<(usize, bool)>>>,
 }
 
 #[cfg(target_arch = "wasm32")]
 impl GamepadReader {
 	//==============================================================================
-	// 생성. (원본 engine.js 처럼 창에 gamepadconnected / gamepaddisconnected 리스너를 단다. 리스너는 페이지가 살아 있는 동안 산다)
+	/// 생성. (원본 engine.js 처럼 창에 gamepadconnected / gamepaddisconnected 리스너를 단다. 리스너는 페이지가 살아 있는 동안 산다)
 	//==============================================================================
 	fn create() -> Option<GamepadReader> {
 		use wasm_bindgen::JsCast;
@@ -1344,7 +1352,7 @@ impl GamepadReader {
 	}
 
 	//==============================================================================
-	// 읽기. (연결 이벤트를 꺼내고, navigator.getGamepads() 의 패드마다 index, id, connected, 버튼 모두, 축 모두를 그대로 옮긴다)
+	/// 읽기. (연결 이벤트를 꺼내고, navigator.getGamepads() 의 패드마다 index, id, connected, 버튼 모두, 축 모두를 그대로 옮긴다)
 	//==============================================================================
 	fn read_gamepads(&mut self) -> GamepadReadResult {
 		let mut read_result = GamepadReadResult::default();
@@ -1368,7 +1376,7 @@ impl GamepadReader {
 }
 
 //==============================================================================
-// navigator.getGamepads() 읽기. (빈 칸은 None, 브라우저가 주는 버튼과 축을 모두 옮긴다)
+/// navigator.getGamepads() 읽기. (빈 칸은 None, 브라우저가 주는 버튼과 축을 모두 옮긴다)
 //==============================================================================
 #[cfg(target_arch = "wasm32")]
 fn read_browser_gamepads() -> Vec<Option<Gamepad>> {
@@ -1439,11 +1447,11 @@ mod tests {
 	use std::cell::RefCell;
 	use std::rc::Rc;
 
-	// 콜백으로 받은 입력 하나. (gamepad_index, input_type, input_index, value)
+	/// 콜백으로 받은 입력 하나. (gamepad_index, input_type, input_index, value)
 	type ReceivedInputEvent = (usize, GamepadInputType, usize, f32);
 
 	//==============================================================================
-	// 시험용 가짜 패드. (눌린 버튼과 값, 축 값을 직접 준다)
+	/// 시험용 가짜 패드. (눌린 버튼과 값, 축 값을 직접 준다)
 	//==============================================================================
 	struct TestElementReader {
 		button_list: Vec<(Button, GamepadButton)>,
@@ -1452,7 +1460,7 @@ mod tests {
 
 	impl GamepadElementReader for TestElementReader {
 		//==============================================================================
-		// 버튼 읽기.
+		/// 버튼 읽기.
 		//==============================================================================
 		fn read_button(&self, button: Button) -> GamepadButton {
 			for (listed_button, listed_state) in self.button_list.iter() {
@@ -1467,7 +1475,7 @@ mod tests {
 		}
 
 		//==============================================================================
-		// 축 읽기.
+		/// 축 읽기.
 		//==============================================================================
 		fn read_axis(&self, axis: Axis) -> f32 {
 			for (listed_axis, listed_value) in self.axis_list.iter() {
@@ -1480,7 +1488,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 가짜 패드에서 버튼 하나만 디지털로 눌러 읽는다.
+	/// 가짜 패드에서 버튼 하나만 디지털로 눌러 읽는다.
 	//==============================================================================
 	fn read_with_pressed_button(button: Button) -> Gamepad {
 		let element_reader = TestElementReader {
@@ -1491,7 +1499,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 시험용 관리자. (gilrs 없이, 로그 끔)
+	/// 시험용 관리자. (gilrs 없이, 로그 끔)
 	//==============================================================================
 	fn create_test_manager() -> GamepadManager {
 		let mut gamepad_manager = GamepadManager::new();
@@ -1500,7 +1508,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// gilrs 버튼이 W3C 번호(원본 GamepadButtonCode)로 간다.
+	/// gilrs 버튼이 W3C 번호(원본 GamepadButtonCode)로 간다.
 	//==============================================================================
 	#[test]
 	fn button_index_mapping() {
@@ -1537,7 +1545,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 축은 W3C 순서이고 Y 는 아래가 양수다.
+	/// 축은 W3C 순서이고 Y 는 아래가 양수다.
 	//==============================================================================
 	#[test]
 	fn axis_index_mapping() {
@@ -1563,7 +1571,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 트리거는 값이 30/255 를 넘으면 눌림이고 값은 그대로 간다.
+	/// 트리거는 값이 30/255 를 넘으면 눌림이고 값은 그대로 간다.
 	//==============================================================================
 	#[test]
 	fn trigger_pressed_threshold() {
@@ -1584,7 +1592,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 축(햇 스위치)으로 오는 십자키는 버튼 12~15 가 된다.
+	/// 축(햇 스위치)으로 오는 십자키는 버튼 12~15 가 된다.
 	//==============================================================================
 	#[test]
 	fn directional_pad_from_hat_axis() {
@@ -1601,7 +1609,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 데스크탑 패드 이름은 크롬 id 꼴이다.
+	/// 데스크탑 패드 이름은 크롬 id 꼴이다.
 	//==============================================================================
 	#[test]
 	fn desktop_gamepad_identifier() {
@@ -1612,7 +1620,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 축은 소수점 둘째 자리로 반올림하고 0.01 넘게 바뀔 때만 받는다. (원본 데드존)
+	/// 축은 소수점 둘째 자리로 반올림하고 0.01 넘게 바뀔 때만 받는다. (원본 데드존)
 	//==============================================================================
 	#[test]
 	fn axis_dead_zone() {
@@ -1647,7 +1655,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 방금 눌림 / 방금 뗌은 갱신 하나 동안만 켜진다.
+	/// 방금 눌림 / 방금 뗌은 갱신 하나 동안만 켜진다.
 	//==============================================================================
 	#[test]
 	fn button_edges_across_ticks() {
@@ -1685,7 +1693,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 표준 뒤의 단추와 축(터치패드 17, 다섯째 축)도 받고, 붙은 뒤에 늘어나도 상태 칸을 늘려 받는다.
+	/// 표준 뒤의 단추와 축(터치패드 17, 다섯째 축)도 받고, 붙은 뒤에 늘어나도 상태 칸을 늘려 받는다.
 	//==============================================================================
 	#[test]
 	fn extra_buttons_and_axes_grow_state() {
@@ -1703,7 +1711,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 플레이스테이션 패드의 터치패드 단추 자리. (크롬 MapperDualshock4, MapperDualSense 의 input.buttons[13], 리눅스 고친 드라이버는 MapperPs4Ps5 라 없음)
+	/// 플레이스테이션 패드의 터치패드 단추 자리. (크롬 MapperDualshock4, MapperDualSense 의 `input.buttons[13]`, 리눅스 고친 드라이버는 MapperPs4Ps5 라 없음)
 	//==============================================================================
 	#[test]
 	fn playstation_touchpad_code() {
@@ -1724,7 +1732,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 콜백: 눌림 변화는 button, 0 보다 큰 값 변화만 value, 축은 axis.
+	/// 콜백: 눌림 변화는 button, 0 보다 큰 값 변화만 value, 축은 axis.
 	//==============================================================================
 	#[test]
 	fn input_callback() {
@@ -1763,7 +1771,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 목록에 나타나면 붙고, 사라지면 놓는다. (원본 update_all_gamepads 의 보완 훑기)
+	/// 목록에 나타나면 붙고, 사라지면 놓는다. (원본 update_all_gamepads 의 보완 훑기)
 	//==============================================================================
 	#[test]
 	fn connect_and_disconnect_by_list() {
@@ -1786,7 +1794,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// connect 는 같은 패드를 두 번 붙이지 않고, disconnect 는 붙은 패드만 뗀다.
+	/// connect 는 같은 패드를 두 번 붙이지 않고, disconnect 는 붙은 패드만 뗀다.
 	//==============================================================================
 	#[test]
 	fn connect_ignores_duplicate() {
@@ -1803,7 +1811,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 패드 이름으로 종류를 가른다.
+	/// 패드 이름으로 종류를 가른다.
 	//==============================================================================
 	#[test]
 	fn gamepad_kind_from_identifier() {
@@ -1815,7 +1823,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 단추를 누르거나 축을 0.5 넘게 기울인 갱신에만 그 패드가 활동한 패드다.
+	/// 단추를 누르거나 축을 0.5 넘게 기울인 갱신에만 그 패드가 활동한 패드다.
 	//==============================================================================
 	#[test]
 	fn active_gamepad_identifier() {
@@ -1838,7 +1846,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 반올림은 원본 toFixed(2) 와 같은 값을 낸다.
+	/// 반올림은 원본 toFixed(2) 와 같은 값을 낸다.
 	//==============================================================================
 	#[test]
 	fn round_to_hundredths_matches_to_fixed() {
