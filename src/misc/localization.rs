@@ -31,7 +31,9 @@ use std::fmt::Display;
 //==============================================================================
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LocalizationValue {
+	/// 글 하나. (text 로 읽는다)
 	Text(String),
+	/// 글 목록. (대사처럼 여러 줄인 항목, text_list 로 읽는다)
 	TextList(Vec<String>),
 }
 
@@ -114,6 +116,20 @@ fn with_state<R>(visitor: impl FnOnce(&mut LocalizationState) -> R) -> R {
 
 //==============================================================================
 /// 로컬라이제이션. (정적 함수 묶음)
+/// - 상태는 스레드 하나의 전역이다. 처음 쓸 때 지금 언어와 폴백 언어가 "ko" 다.
+///
+/// # 예제
+/// 표를 넣고 언어를 골라 번역하기
+/// ```rust
+/// use vanilla::Localization;
+///
+/// Localization::set_table("fr", [("OK", "D'accord"), ("Got {0} points", "{0} points gagnes")]);
+/// Localization::set_language(&Localization::detect_language(&["fr"], "fr"));
+/// assert_eq!(Localization::get_language(), "fr");
+/// assert_eq!(Localization::text("OK", &[]), "D'accord");
+/// assert_eq!(Localization::text("Got {0} points", &[&120]), "120 points gagnes");
+/// assert_eq!(Localization::text("Not translated yet", &[]), "Not translated yet");
+/// ```
 //==============================================================================
 pub struct Localization;
 
@@ -121,6 +137,14 @@ impl Localization {
 	//==============================================================================
 	/// 사용자 언어 감지. (선호 언어 순서대로 지원 목록에 있는 첫 언어, 없으면 기본 언어)
 	/// - "zh-TW" 같은 지역 표기는 "zh-tw" → "zh" 순으로 대조한다.
+	/// - 선호 언어는 웹이면 navigator.languages, 데스크탑이면 시스템 선호 언어 차례다.
+	///
+	/// # 인자
+	/// - `supported_language_codes`: 게임이 지원하는 언어 코드 목록. (대소문자 상관없다)
+	/// - `default_language_code`: 맞는 것이 없을 때 쓸 언어 코드.
+	///
+	/// # 돌려줌
+	/// 맞은 언어 코드. (소문자) 없으면 default_language_code 그대로.
 	//==============================================================================
 	pub fn detect_language(supported_language_codes: &[&str], default_language_code: &str) -> String {
 		let candidate_list = read_preferred_language_tags();
@@ -129,8 +153,27 @@ impl Localization {
 
 	//==============================================================================
 	/// 선호 언어 목록에서 지원하는 첫 언어 고르기. (detect_language 의 대조 부분)
-	//==============================================================================
 	/// - 태그의 뒤 조각부터 하나씩 떼며 지원 목록의 코드와 별칭을 본다. ("zh-Hant-TW" → "zh-hant-tw", "zh-hant", "zh", 밑줄은 하이픈으로)
+	///
+	/// # 인자
+	/// - `candidate_list`: 선호 언어 태그 목록. (앞이 먼저)
+	/// - `supported_language_codes`: 지원하는 언어 코드 목록. (대소문자 상관없다)
+	/// - `default_language_code`: 맞는 것이 없을 때 쓸 언어 코드.
+	///
+	/// # 돌려줌
+	/// 처음 맞은 지원 언어 코드. (소문자, 별칭으로 맞았으면 그 별칭의 언어) 없으면 default_language_code 그대로.
+	///
+	/// # 예제
+	/// 지역 태그를 줄여 가며 맞추기
+	/// ```rust
+	/// use vanilla::Localization;
+	///
+	/// let candidate_list = vec![String::from("zh-TW"), String::from("en-US")];
+	/// assert_eq!(Localization::select_language(&candidate_list, &["ko", "zh-tw", "en"], "ko"), "zh-tw");
+	/// assert_eq!(Localization::select_language(&candidate_list, &["ko", "en"], "ko"), "en");
+	/// assert_eq!(Localization::select_language(&candidate_list, &["ko"], "ko"), "ko");
+	/// ```
+	//==============================================================================
 	pub fn select_language(candidate_list: &[String], supported_language_codes: &[&str], default_language_code: &str) -> String {
 		let supported_set: HashSet<String> = supported_language_codes.iter().map(|code| code.to_lowercase()).collect();
 		let alias_to_language = with_state(|state| state.alias_to_language.clone());
@@ -154,6 +197,19 @@ impl Localization {
 
 	//==============================================================================
 	/// 언어의 별칭 설정. (예: "zh-hant" 에 "zh-tw", "zh-hk", 태그를 맞출 때 별칭도 그 언어로 본다)
+	///
+	/// # 인자
+	/// - `language_code`: 별칭이 가리킬 언어 코드. (소문자로 바꿔 든다)
+	/// - `alias_list`: 별칭 목록. (소문자로, 밑줄은 하이픈으로 바꿔 든다. 같은 별칭이 있으면 바꾼다)
+	///
+	/// # 예제
+	/// 대만, 홍콩 태그를 번체 중국어로
+	/// ```rust
+	/// use vanilla::Localization;
+	///
+	/// Localization::set_language_aliases("zh-hant", &["zh-tw", "zh_HK"]);
+	/// assert_eq!(Localization::select_language(&[String::from("zh_HK")], &["en", "zh-hant"], "en"), "zh-hant");
+	/// ```
 	//==============================================================================
 	pub fn set_language_aliases(language_code: &str, alias_list: &[&str]) {
 		let lowered_language_code = language_code.to_lowercase();
@@ -166,6 +222,10 @@ impl Localization {
 
 	//==============================================================================
 	/// 오른쪽에서 왼쪽으로 쓰는 언어로 정하거나 풀기. (처음은 ar, fa, he, ur, ps, yi, dv)
+	///
+	/// # 인자
+	/// - `language_code`: 언어 코드. (첫 조각만 쓴다, "ar-EG" 는 "ar")
+	/// - `is_right_to_left`: true 면 넣고, false 면 뺀다.
 	//==============================================================================
 	pub fn set_right_to_left(language_code: &str, is_right_to_left: bool) {
 		let primary_code = language_code.to_lowercase().replace('_', "-").split('-').next().unwrap_or("").to_string();
@@ -181,6 +241,9 @@ impl Localization {
 
 	//==============================================================================
 	/// 지금 언어가 오른쪽에서 왼쪽으로 쓰는 언어인지. (글자를 그 방향으로 굽고 배치를 좌우로 뒤집을 때)
+	///
+	/// # 돌려줌
+	/// 지금 언어 코드의 첫 조각이 오른쪽에서 왼쪽 언어 목록에 있으면 true.
 	//==============================================================================
 	pub fn is_right_to_left() -> bool {
 		with_state(|state| {
@@ -192,6 +255,26 @@ impl Localization {
 	//==============================================================================
 	/// 배치의 가로 자리. (오른쪽에서 왼쪽 언어면 부모 너비 안에서 좌우를 뒤집은 왼쪽, 아니면 그대로)
 	/// - 창과 표의 왼쪽, 오른쪽 배치를 언어 방향에 맞춰 뒤집을 때 쓴다. 화면 구석의 자리나 슬라이더의 방향처럼 뒤집지 않을 것은 부르지 않는다.
+	///
+	/// # 인자
+	/// - `x`: 왼쪽에서 오른쪽 언어일 때의 왼쪽 자리. (픽셀, 부모 왼쪽 기준)
+	/// - `width`: 배치할 것의 너비. (픽셀)
+	/// - `parent_width`: 부모 너비. (픽셀)
+	///
+	/// # 돌려줌
+	/// 오른쪽에서 왼쪽 언어면 parent_width - x - width, 아니면 x.
+	///
+	/// # 예제
+	/// 아랍어에서는 좌우를 뒤집는다
+	/// ```rust
+	/// use vanilla::{Localization, TextAlign};
+	///
+	/// Localization::set_language("en");
+	/// assert_eq!(Localization::mirror_layout_x(10.0, 20.0, 100.0), 10.0);
+	/// Localization::set_language("ar");
+	/// assert_eq!(Localization::mirror_layout_x(10.0, 20.0, 100.0), 70.0);
+	/// assert_eq!(Localization::read_layout_text_align(TextAlign::Left), TextAlign::Right);
+	/// ```
 	//==============================================================================
 	pub fn mirror_layout_x(x: f32, width: f32, parent_width: f32) -> f32 {
 		if !Localization::is_right_to_left() {
@@ -202,6 +285,12 @@ impl Localization {
 
 	//==============================================================================
 	/// 배치의 글자 정렬. (오른쪽에서 왼쪽 언어면 Left 와 Right 를 바꾸고, 나머지는 그대로)
+	///
+	/// # 인자
+	/// - `text_align`: 왼쪽에서 오른쪽 언어일 때의 정렬.
+	///
+	/// # 돌려줌
+	/// 지금 언어 방향에 맞춘 정렬.
 	//==============================================================================
 	pub fn read_layout_text_align(text_align: TextAlign) -> TextAlign {
 		if !Localization::is_right_to_left() {
@@ -223,6 +312,23 @@ impl Localization {
 	//==============================================================================
 	/// 글 사이에 끼우는 값 묶기. (오른쪽에서 왼쪽 언어면 방향 격리 문자로 묶고, 아니면 그대로)
 	/// - 숫자와 단위(123°/s, +60%)나 사람 이름이 앞뒤 글과 섞여 흩어지지 않고 제 방향으로 한 덩어리로 놓이게 한다.
+	///
+	/// # 인자
+	/// - `text`: 끼울 값의 글.
+	///
+	/// # 돌려줌
+	/// 오른쪽에서 왼쪽 언어면 U+2068 과 U+2069 로 묶은 글. 아니거나 빈 글이면 그대로.
+	///
+	/// # 예제
+	/// 아랍어일 때만 묶는다
+	/// ```rust
+	/// use vanilla::Localization;
+	///
+	/// Localization::set_language("en");
+	/// assert_eq!(Localization::isolate_text("+60%"), "+60%");
+	/// Localization::set_language("ar");
+	/// assert_eq!(Localization::isolate_text("+60%"), "\u{2068}+60%\u{2069}");
+	/// ```
 	//==============================================================================
 	pub fn isolate_text(text: &str) -> String {
 		if text.is_empty() || !Localization::is_right_to_left() {
@@ -236,6 +342,26 @@ impl Localization {
 	/// - 오른쪽에서 왼쪽 언어면 넣은 값을 방향 격리 문자로 묶는다.
 	/// - 빗금으로만 이은 값들("{count}/{limit}")은 값마다가 아니라 통째로 한 번 묶는다. (값마다 묶으면 1/40 이 40/1 로 보인다)
 	/// - 이름이 없는 자리는 그대로 둔다.
+	/// - 키는 text 처럼 지금 언어, 폴백 언어, 키 원문 차례로 찾는다. 이름은 영문과 숫자만 된다.
+	///
+	/// # 인자
+	/// - `key`: 번역 키. (원문)
+	/// - `values`: (이름, 값) 목록. 같은 이름이 여럿이면 처음 것을 쓴다.
+	///
+	/// # 돌려줌
+	/// 이름 자리를 채운 번역문.
+	///
+	/// # 예제
+	/// 이름 자리 채우기
+	/// ```rust
+	/// use vanilla::Localization;
+	///
+	/// Localization::set_language("en");
+	/// Localization::set_table("en", [("restart", "Restart {seconds}"), ("count", "{count}/{limit} workers")]);
+	/// assert_eq!(Localization::text_named("restart", &[("seconds", &3)]), "Restart 3");
+	/// assert_eq!(Localization::text_named("count", &[("count", &1), ("limit", &40)]), "1/40 workers");
+	/// assert_eq!(Localization::text_named("{who} and {other}", &[("who", &"Ann")]), "Ann and {other}");
+	/// ```
 	//==============================================================================
 	pub fn text_named(key: &str, values: &[(&str, &dyn Display)]) -> String {
 		let text = Localization::text(key, &[]);
@@ -336,6 +462,24 @@ impl Localization {
 
 	//==============================================================================
 	/// 번역 표 설정. (언어 코드는 소문자로 바꿔 든다. 같은 언어 표가 있으면 바꾼다)
+	///
+	/// # 인자
+	/// - `language_code`: 언어 코드.
+	/// - `table`: (키, 값) 목록. 키는 String 으로, 값은 글이나 글 목록(LocalizationValue)으로 바꿀 수 있는 것.
+	///
+	/// # 예제
+	/// 글과 글 목록을 함께 넣기
+	/// ```rust
+	/// use vanilla::{Localization, LocalizationValue};
+	///
+	/// Localization::set_table("en", [
+	/// 	("title", LocalizationValue::from("Mine")),
+	/// 	("intro", LocalizationValue::from(vec!["First line", "Second line"])),
+	/// ]);
+	/// Localization::set_language("en");
+	/// assert_eq!(Localization::text("title", &[]), "Mine");
+	/// assert_eq!(Localization::text_list("intro"), vec!["First line", "Second line"]);
+	/// ```
 	//==============================================================================
 	pub fn set_table<K, V>(language_code: &str, table: impl IntoIterator<Item = (K, V)>)
 	where
@@ -351,6 +495,23 @@ impl Localization {
 
 	//==============================================================================
 	/// JSON 객체로 번역 표 설정. (값이 글이면 글, 글 배열이면 목록. 그 밖의 값은 건너뛴다)
+	/// - 배열 안의 글이 아닌 값은 뺀다. 객체가 아니면 빈 표가 된다.
+	///
+	/// # 인자
+	/// - `language_code`: 언어 코드.
+	/// - `table_json`: { 키: 글 또는 글 배열 } 꼴의 JSON 객체.
+	///
+	/// # 예제
+	/// JSON 객체로 표 넣기
+	/// ```rust
+	/// use vanilla::Localization;
+	///
+	/// Localization::set_table_from_json("fr", &serde_json::json!({ "OK": "D'accord", "lines": ["a", "b"], "number": 3 }));
+	/// Localization::set_language("fr");
+	/// assert_eq!(Localization::text("OK", &[]), "D'accord");
+	/// assert_eq!(Localization::text_list("lines"), vec!["a", "b"]);
+	/// assert_eq!(Localization::text("number", &[]), "number");
+	/// ```
 	//==============================================================================
 	pub fn set_table_from_json(language_code: &str, table_json: &serde_json::Value) {
 		let mut localization_table = LocalizationTable::new();
@@ -374,6 +535,9 @@ impl Localization {
 
 	//==============================================================================
 	/// 지금 언어 설정. (소문자로)
+	///
+	/// # 인자
+	/// - `language_code`: 언어 코드. (표의 언어 코드와 같아야 그 표를 쓴다)
 	//==============================================================================
 	pub fn set_language(language_code: &str) {
 		let lowered_language_code = language_code.to_lowercase();
@@ -384,6 +548,9 @@ impl Localization {
 
 	//==============================================================================
 	/// 지금 언어 반환.
+	///
+	/// # 돌려줌
+	/// 지금 언어 코드. (소문자, 처음은 "ko")
 	//==============================================================================
 	pub fn get_language() -> String {
 		with_state(|state| state.language_code.clone())
@@ -391,6 +558,9 @@ impl Localization {
 
 	//==============================================================================
 	/// 폴백 언어 설정. (지금 언어 표에 없으면 이 언어 표를 본다)
+	///
+	/// # 인자
+	/// - `language_code`: 폴백 언어 코드. (소문자로 바꿔 든다, 처음은 "ko")
 	//==============================================================================
 	pub fn set_fallback_language(language_code: &str) {
 		let lowered_language_code = language_code.to_lowercase();
@@ -402,6 +572,24 @@ impl Localization {
 	//==============================================================================
 	/// 번역문 찾기. (지금 언어 → 폴백 언어 → 키 원문 순, {0} {1} ... 을 인자로 바꾼다)
 	/// - 값이 목록이면 원본처럼 키를 쓴다.
+	///
+	/// # 인자
+	/// - `key`: 번역 키. (원문)
+	/// - `substitutions`: {0}, {1} ... 자리에 차례로 넣을 값 목록. (Display 로 글이 된다)
+	///
+	/// # 돌려줌
+	/// 자리를 바꾼 번역문. 표에 없으면 키 원문에서 자리를 바꾼 것.
+	///
+	/// # 예제
+	/// 자리 차례를 바꾼 번역
+	/// ```rust
+	/// use vanilla::Localization;
+	///
+	/// Localization::set_table("en", [("{0}/{1}", "{1} of {0}")]);
+	/// Localization::set_language("en");
+	/// assert_eq!(Localization::text("{0}/{1}", &[&3, &"ten"]), "ten of 3");
+	/// assert_eq!(Localization::text("Missing {0}", &[&1.5]), "Missing 1.5");
+	/// ```
 	//==============================================================================
 	pub fn text(key: &str, substitutions: &[&dyn Display]) -> String {
 		let mut resolved_text = match Localization::lookup(key) {
@@ -422,6 +610,12 @@ impl Localization {
 
 	//==============================================================================
 	/// 목록형 번역 찾기. (대사 목록처럼 여러 줄인 항목. 글 하나면 한 줄짜리 목록, 없으면 `[키]`)
+	///
+	/// # 인자
+	/// - `key`: 번역 키.
+	///
+	/// # 돌려줌
+	/// 찾은 글 목록. 자리 표시자는 바꾸지 않는다.
 	//==============================================================================
 	pub fn text_list(key: &str) -> Vec<String> {
 		match Localization::lookup(key) {
@@ -439,6 +633,12 @@ impl Localization {
 
 	//==============================================================================
 	/// 값 그대로 찾기. (지금 언어 → 폴백 언어, 없으면 None)
+	///
+	/// # 인자
+	/// - `key`: 번역 키.
+	///
+	/// # 돌려줌
+	/// 찾은 값의 복사본. 두 표 모두에 없으면 None.
 	//==============================================================================
 	pub fn lookup(key: &str) -> Option<LocalizationValue> {
 		with_state(|state| {

@@ -29,6 +29,26 @@ const ATLAS_PADDING: i32 = 2;
 
 //==============================================================================
 /// 글리프 정보. (원본 GlyphInfo)
+/// - DynamicFont 가 아틀라스를 구울 때 글자마다 하나씩 만든다. get_glyph 로 읽는다.
+///
+/// # 예제
+/// 글리프 하나의 그릴 자리 셈
+/// ```rust
+/// use vanilla::{GlyphInfo, Rect, Vector2};
+///
+/// let glyph_info = GlyphInfo {
+/// 	character: String::from("7"),
+/// 	uv_rect: Rect::create(2.0, 2.0, 18.0, 24.0),
+/// 	advance: 20.0,
+/// 	bearing_x: -1.0,
+/// 	bearing_y: 23.0,
+/// };
+/// let pen_position = Vector2::create(100.0, 50.0);
+/// let draw_left = pen_position.x - glyph_info.bearing_x;
+/// let draw_top = pen_position.y - glyph_info.bearing_y;
+/// assert_eq!((draw_left, draw_top), (101.0, 27.0));
+/// assert_eq!(pen_position.x + glyph_info.advance, 120.0);
+/// ```
 //==============================================================================
 #[derive(Clone, Debug, PartialEq)]
 pub struct GlyphInfo {
@@ -63,6 +83,24 @@ struct AtlasGlyph {
 
 //==============================================================================
 /// 다이나믹 폰트.
+/// - 쓸 글자를 build_atlas 로 한 번 굽고, 매 프레임 draw_text 로 그린다. 둘 다 Graphic 이 있어야 한다.
+///
+/// # 예제
+/// 점수 숫자를 굽고 가운데에 그리기
+/// ```rust,no_run
+/// use vanilla::{DynamicFont, Graphic, Vector2};
+///
+/// fn draw_score(dynamic_font: &mut DynamicFont, graphic: &mut Graphic, score: u32) {
+/// 	dynamic_font.build_atlas(graphic, "0123456789");
+/// 	let score_text = score.to_string();
+/// 	let text_width = dynamic_font.measure_text(&score_text);
+/// 	dynamic_font.draw_text(&score_text, Vector2::create(640.0 - text_width * 0.5, 80.0), graphic);
+/// }
+///
+/// let mut dynamic_font = DynamicFont::new();
+/// dynamic_font.set_font_size(48.0);
+/// dynamic_font.set_letter_spacing(2.0);
+/// ```
 //==============================================================================
 pub struct DynamicFont {
 	font_family: String,
@@ -77,6 +115,9 @@ pub struct DynamicFont {
 impl DynamicFont {
 	//==============================================================================
 	/// 생성. (글자 크기 32, 자간 0, 글꼴은 기본 글꼴. 원본과 같음)
+	///
+	/// # 돌려줌
+	/// 아틀라스가 없는 새 다이나믹 폰트. (글꼴 이름 "default")
 	//==============================================================================
 	pub fn new() -> DynamicFont {
 		DynamicFont {
@@ -91,6 +132,10 @@ impl DynamicFont {
 
 	//==============================================================================
 	/// 글꼴 이름 설정. (원본 setFontAsset, FontAsset 이면 get_family 를 넘긴다)
+	/// - 이미 구운 아틀라스는 바꾸지 않는다. 바꾼 뒤 rebuild_atlas 를 부른다.
+	///
+	/// # 인자
+	/// - `font_family`: Graphic 의 글자 캐시에 올린 글꼴 이름. ("default" 는 기본 글꼴)
 	//==============================================================================
 	pub fn set_font_family(&mut self, font_family: &str) {
 		self.font_family = font_family.to_string();
@@ -98,6 +143,9 @@ impl DynamicFont {
 
 	//==============================================================================
 	/// 글꼴 이름 반환.
+	///
+	/// # 돌려줌
+	/// 지금 글꼴 이름.
 	//==============================================================================
 	pub fn get_font_family(&self) -> &str {
 		&self.font_family
@@ -105,6 +153,9 @@ impl DynamicFont {
 
 	//==============================================================================
 	/// 글자 크기 설정. (픽셀, 다음 build_atlas 부터)
+	///
+	/// # 인자
+	/// - `font_size`: 글자 크기. (픽셀, 아틀라스에 없는 글자는 이것의 반만큼 비운다)
 	//==============================================================================
 	pub fn set_font_size(&mut self, font_size: f32) {
 		self.font_size = font_size;
@@ -112,6 +163,9 @@ impl DynamicFont {
 
 	//==============================================================================
 	/// 글자 크기 반환.
+	///
+	/// # 돌려줌
+	/// 지금 글자 크기. (픽셀)
 	//==============================================================================
 	pub fn get_font_size(&self) -> f32 {
 		self.font_size
@@ -119,6 +173,9 @@ impl DynamicFont {
 
 	//==============================================================================
 	/// 자간 설정. (픽셀, 다음 build_atlas 부터)
+	///
+	/// # 인자
+	/// - `letter_spacing`: 글자마다 전진폭에 더할 양. (픽셀)
 	//==============================================================================
 	pub fn set_letter_spacing(&mut self, letter_spacing: f32) {
 		self.letter_spacing = letter_spacing;
@@ -126,6 +183,9 @@ impl DynamicFont {
 
 	//==============================================================================
 	/// 자간 반환.
+	///
+	/// # 돌려줌
+	/// 지금 자간. (픽셀)
 	//==============================================================================
 	pub fn get_letter_spacing(&self) -> f32 {
 		self.letter_spacing
@@ -133,6 +193,9 @@ impl DynamicFont {
 
 	//==============================================================================
 	/// 아틀라스 그림 반환. (아직 굽지 않았으면 None, 원본 getAtlasCanvas)
+	///
+	/// # 돌려줌
+	/// 가로 1024 픽셀의 아틀라스 그림. 아직 굽지 않았거나 clear_atlas 뒤면 None.
 	//==============================================================================
 	pub fn get_atlas_image(&self) -> Option<&Rc<Image>> {
 		self.atlas_image.as_ref()
@@ -140,6 +203,12 @@ impl DynamicFont {
 
 	//==============================================================================
 	/// 글리프 정보 반환. (아틀라스에 없으면 None)
+	///
+	/// # 인자
+	/// - `character`: 글자 묶음 하나.
+	///
+	/// # 돌려줌
+	/// 그 글자의 글리프 정보. 아틀라스에 없으면 None.
 	//==============================================================================
 	pub fn get_glyph(&self, character: &str) -> Option<&GlyphInfo> {
 		self.glyph_table.get(character)
@@ -149,6 +218,11 @@ impl DynamicFont {
 	/// 아틀라스 굽기. (charset 의 글자 가운데 아직 없는 글자를 더하고, 아틀라스를 모든 글자로 다시 굽는다)
 	/// - 든 글자를 모두 다시 놓는다. (원본도 같다, 새 글자만 새 캔버스에 놓아 앞서 구운 글자가 어긋나던 것은 원본에서도 고쳤다)
 	/// - 데스크탑에서 글자를 덮는 얼굴이 하나도 없으면 굽지 못하고 그대로 둔다. (웹은 브라우저 Canvas2D 로 굽는다)
+	/// - 새 글자가 없고 아틀라스가 이미 있으면 아무것도 하지 않는다.
+	///
+	/// # 인자
+	/// - `graphic`: 글자 캐시를 쓸 그래픽.
+	/// - `charset`: 구울 글자들. (글자 묶음 단위로 나누고, 이미 든 글자는 건너뛴다)
 	//==============================================================================
 	pub fn build_atlas(&mut self, graphic: &mut Graphic, charset: &str) {
 		let mut is_changed = false;
@@ -167,6 +241,9 @@ impl DynamicFont {
 
 	//==============================================================================
 	/// 든 글자를 모두 다시 굽기. (글꼴, 크기, 자간을 바꾼 뒤 부른다)
+	///
+	/// # 인자
+	/// - `graphic`: 글자 캐시를 쓸 그래픽.
 	//==============================================================================
 	pub fn rebuild_atlas(&mut self, graphic: &mut Graphic) {
 		let font_string = build_font_string(&self.font_family, self.font_size, false, false);
@@ -259,6 +336,24 @@ impl DynamicFont {
 
 	//==============================================================================
 	/// 글 그리기. (position 은 첫 글자의 펜 자리, y 는 기준선. 색은 Graphic 의 그림 틴트를 따른다, 원본 drawText)
+	/// - 아틀라스가 없으면 아무것도 그리지 않는다.
+	///
+	/// # 인자
+	/// - `text`: 그릴 글. (아틀라스에 없는 글자는 글자 크기의 반만큼 비운다)
+	/// - `position`: 첫 글자의 펜 자리. (x 는 펜 자리, y 는 기준선, 지금 좌표계의 픽셀)
+	/// - `graphic`: 그릴 그래픽.
+	///
+	/// # 예제
+	/// 노란 피해 숫자 그리기
+	/// ```rust,no_run
+	/// use vanilla::{Color, DynamicFont, Graphic, Vector2};
+	///
+	/// fn draw_damage(dynamic_font: &DynamicFont, graphic: &mut Graphic, damage: i32) {
+	/// 	graphic.set_image_tint_color(Some(Color::create(1.0, 0.85, 0.2, 1.0)));
+	/// 	dynamic_font.draw_text(&damage.to_string(), Vector2::create(300.0, 200.0), graphic);
+	/// 	graphic.set_image_tint_color(None);
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn draw_text(&self, text: &str, position: Vector2, graphic: &mut Graphic) {
 		let atlas_image = match &self.atlas_image {
@@ -291,6 +386,23 @@ impl DynamicFont {
 
 	//==============================================================================
 	/// 글 너비 재기. (아틀라스의 전진폭 합, 없는 글자는 글자 크기의 반)
+	///
+	/// # 인자
+	/// - `text`: 잴 글.
+	///
+	/// # 돌려줌
+	/// 글 너비. (픽셀, 자간 포함)
+	///
+	/// # 예제
+	/// 굽기 전에는 글자마다 크기의 반
+	/// ```rust
+	/// use vanilla::DynamicFont;
+	///
+	/// let mut dynamic_font = DynamicFont::new();
+	/// dynamic_font.set_font_size(40.0);
+	/// assert_eq!(dynamic_font.measure_text("123"), 60.0);
+	/// assert!(dynamic_font.get_atlas_image().is_none());
+	/// ```
 	//==============================================================================
 	pub fn measure_text(&self, text: &str) -> f32 {
 		text.graphemes(true).map(|character| self.glyph_table.get(character).map(|glyph_info| glyph_info.advance).unwrap_or(self.font_size * 0.5)).sum()
@@ -307,6 +419,9 @@ impl DynamicFont {
 }
 
 impl Default for DynamicFont {
+	//==============================================================================
+	/// 기본값. (new 와 같다)
+	//==============================================================================
 	fn default() -> DynamicFont {
 		DynamicFont::new()
 	}

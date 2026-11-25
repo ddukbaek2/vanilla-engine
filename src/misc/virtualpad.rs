@@ -18,15 +18,22 @@ use crate::core::graphic::Graphic;
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VirtualPadState {
+	/// 기다림. (누르지 않았고 구슬이 가운데에 있다, 원본 "wait")
 	None,
+	/// 눌렀다. (구슬이 누른 곳에 있다)
 	Pressed,
+	/// 끄는 중. (원본 "move")
 	Moved,
+	/// 뗐다. (구슬이 가운데로 돌아가는 중, 다 돌아오면 None)
 	Released,
 }
 
 impl VirtualPadState {
 	//==============================================================================
 	/// 원본 상태 값의 글자.
+	///
+	/// # 돌려줌
+	/// None 은 "wait", Pressed 는 "pressed", Moved 는 "move", Released 는 "released".
 	//==============================================================================
 	pub fn get_name(&self) -> &'static str {
 		match self {
@@ -51,6 +58,37 @@ type BallMoveEvent = Box<dyn FnMut(Vector2, f32)>;
 
 //==============================================================================
 /// 가상 패드.
+/// - 들고 있는 쪽이 터치 입력을 touch_press, touch_move, touch_release 로 넘기고 매 프레임 tick 과 draw 를 부른다.
+///
+/// # 예제
+/// 오른쪽으로 끝까지 끌고 떼기
+/// ```rust
+/// use std::cell::RefCell;
+/// use std::rc::Rc;
+/// use vanilla::{Vector2, VirtualPad, VirtualPadState};
+///
+/// let last_event = Rc::new(RefCell::new((Vector2::zero(), 0.0)));
+/// let last_event_for_callback = last_event.clone();
+/// let mut virtual_pad = VirtualPad::new();
+/// virtual_pad.set_pad_radius(100.0);
+/// virtual_pad.set_pad_position(Vector2::create(200.0, 200.0));
+/// virtual_pad.set_ball_move_event(move |direction, pull_strength| {
+/// 	*last_event_for_callback.borrow_mut() = (direction, pull_strength);
+/// });
+///
+/// virtual_pad.touch_press(Vector2::create(200.0, 200.0));
+/// virtual_pad.touch_move(Vector2::create(500.0, 200.0));
+/// virtual_pad.tick(1.0 / 60.0);
+/// assert_eq!(virtual_pad.get_ball_position(), Vector2::create(300.0, 200.0));
+/// assert_eq!(*last_event.borrow(), (Vector2::create(1.0, 0.5), 1.0));
+///
+/// virtual_pad.touch_release(Vector2::create(500.0, 200.0));
+/// for _ in 0..10 {
+/// 	virtual_pad.tick(1.0 / 60.0);
+/// }
+/// assert_eq!(virtual_pad.get_virtual_pad_state(), VirtualPadState::None);
+/// assert_eq!(*last_event.borrow(), (Vector2::create(0.5, 0.5), 0.0));
+/// ```
 //==============================================================================
 pub struct VirtualPad {
 	virtual_pad_state: VirtualPadState,
@@ -67,6 +105,9 @@ pub struct VirtualPad {
 impl VirtualPad {
 	//==============================================================================
 	/// 생성. (패드 반지름 200 검은색, 구슬 반지름 50 흰색, 돌아가는 속도 초당 1600)
+	///
+	/// # 돌려줌
+	/// 패드와 구슬이 (0, 0) 에 있고 기다리는 상태인 새 가상 패드.
 	//==============================================================================
 	pub fn new() -> VirtualPad {
 		VirtualPad {
@@ -96,6 +137,10 @@ impl VirtualPad {
 
 	//==============================================================================
 	/// 갱신. (누르고 끄는 동안 구슬을 패드 안에 가두고, 떼면 가운데로 돌려보낸다)
+	/// - 기다리는 상태면 아무것도 하지 않는다. 누르거나 끄는 동안은 tick 마다 구슬 이동 이벤트를 부른다.
+	///
+	/// # 인자
+	/// - `time_delta`: 지난 시간. (초, 돌아가는 거리는 초당 1600 픽셀 * time_delta)
 	//==============================================================================
 	pub fn tick(&mut self, time_delta: f32) {
 		let virtual_pad_state = self.get_virtual_pad_state();
@@ -147,6 +192,9 @@ impl VirtualPad {
 
 	//==============================================================================
 	/// 출력. (바깥 원 다음 안쪽 원, 부른 쪽의 좌표계 그대로)
+	///
+	/// # 인자
+	/// - `graphic`: 그릴 그래픽. (채우기 색을 패드 색, 구슬 색으로 바꾸고 되돌리지 않는다)
 	//==============================================================================
 	pub fn draw(&self, graphic: &mut Graphic) {
 		let pad_position = self.get_pad_position();
@@ -164,6 +212,9 @@ impl VirtualPad {
 
 	//==============================================================================
 	/// 터치 누름. (구슬을 누른 곳으로)
+	///
+	/// # 인자
+	/// - `view_input_position`: 누른 위치. (패드 위치와 같은 좌표계, 보통 뷰 좌표)
 	//==============================================================================
 	pub fn touch_press(&mut self, view_input_position: Vector2) {
 		self.virtual_pad_state = VirtualPadState::Pressed;
@@ -172,6 +223,10 @@ impl VirtualPad {
 
 	//==============================================================================
 	/// 터치 끌기. (구슬을 끈 곳으로)
+	/// - 패드 밖이어도 그대로 두고, 다음 tick 에서 패드 가장자리로 가둔다.
+	///
+	/// # 인자
+	/// - `view_input_position`: 끈 위치. (패드 위치와 같은 좌표계)
 	//==============================================================================
 	pub fn touch_move(&mut self, view_input_position: Vector2) {
 		self.virtual_pad_state = VirtualPadState::Moved;
@@ -180,6 +235,9 @@ impl VirtualPad {
 
 	//==============================================================================
 	/// 터치 뗌. (구슬은 그 자리에서 가운데로 돌아가기 시작한다)
+	///
+	/// # 인자
+	/// - `_view_input_position`: 뗀 위치. (쓰지 않는다)
 	//==============================================================================
 	pub fn touch_release(&mut self, _view_input_position: Vector2) {
 		self.virtual_pad_state = VirtualPadState::Released;
@@ -194,6 +252,9 @@ impl VirtualPad {
 
 	//==============================================================================
 	/// 가상 패드 상태 반환.
+	///
+	/// # 돌려줌
+	/// 지금 상태.
 	//==============================================================================
 	pub fn get_virtual_pad_state(&self) -> VirtualPadState {
 		self.virtual_pad_state
@@ -201,6 +262,9 @@ impl VirtualPad {
 
 	//==============================================================================
 	/// 구슬 이동 이벤트 설정. (방향 0 ~ 1, 당긴 세기 0 ~ 1)
+	///
+	/// # 인자
+	/// - `callback`: 구슬이 움직일 때 부를 함수. 방향(단위 벡터의 각 축을 (값 + 1) / 2 로 바꾼 것, 가운데가 (0.5, 0.5))과 당긴 세기(패드 가운데에서 거리 / 패드 반지름)를 받는다.
 	//==============================================================================
 	pub fn set_ball_move_event(&mut self, callback: impl FnMut(Vector2, f32) + 'static) {
 		self.ball_move_event = Some(Box::new(callback));
@@ -208,6 +272,9 @@ impl VirtualPad {
 
 	//==============================================================================
 	/// 패드 위치 설정. (구슬도 그 자리로)
+	///
+	/// # 인자
+	/// - `pad_position`: 패드 가운데 위치. (픽셀)
 	//==============================================================================
 	pub fn set_pad_position(&mut self, pad_position: Vector2) {
 		self.pad_position = pad_position;
@@ -216,6 +283,9 @@ impl VirtualPad {
 
 	//==============================================================================
 	/// 패드 위치 반환.
+	///
+	/// # 돌려줌
+	/// 패드 가운데 위치. (픽셀)
 	//==============================================================================
 	pub fn get_pad_position(&self) -> Vector2 {
 		self.pad_position
@@ -223,6 +293,9 @@ impl VirtualPad {
 
 	//==============================================================================
 	/// 패드 반지름 설정.
+	///
+	/// # 인자
+	/// - `pad_radius`: 패드 반지름. (픽셀, 구슬 중심이 이 안에 갇힌다)
 	//==============================================================================
 	pub fn set_pad_radius(&mut self, pad_radius: f32) {
 		self.pad_radius = pad_radius;
@@ -230,6 +303,9 @@ impl VirtualPad {
 
 	//==============================================================================
 	/// 패드 반지름 반환.
+	///
+	/// # 돌려줌
+	/// 패드 반지름. (픽셀)
 	//==============================================================================
 	pub fn get_pad_radius(&self) -> f32 {
 		self.pad_radius
@@ -237,6 +313,9 @@ impl VirtualPad {
 
 	//==============================================================================
 	/// 구슬 위치 반환.
+	///
+	/// # 돌려줌
+	/// 구슬 가운데 위치. (픽셀)
 	//==============================================================================
 	pub fn get_ball_position(&self) -> Vector2 {
 		self.ball_position
@@ -244,6 +323,9 @@ impl VirtualPad {
 
 	//==============================================================================
 	/// 구슬 반지름 설정.
+	///
+	/// # 인자
+	/// - `ball_radius`: 구슬 반지름. (픽셀, 그리기에만 쓴다)
 	//==============================================================================
 	pub fn set_ball_radius(&mut self, ball_radius: f32) {
 		self.ball_radius = ball_radius;
@@ -251,6 +333,9 @@ impl VirtualPad {
 
 	//==============================================================================
 	/// 구슬 반지름 반환.
+	///
+	/// # 돌려줌
+	/// 구슬 반지름. (픽셀)
 	//==============================================================================
 	pub fn get_ball_radius(&self) -> f32 {
 		self.ball_radius
@@ -258,6 +343,9 @@ impl VirtualPad {
 
 	//==============================================================================
 	/// 패드 색 설정.
+	///
+	/// # 인자
+	/// - `pad_color`: 패드 색. (Color 나 "#000000" 같은 색 글)
 	//==============================================================================
 	pub fn set_pad_color(&mut self, pad_color: impl Into<Color>) {
 		self.pad_color = pad_color.into();
@@ -265,6 +353,9 @@ impl VirtualPad {
 
 	//==============================================================================
 	/// 패드 색 반환.
+	///
+	/// # 돌려줌
+	/// 패드 색.
 	//==============================================================================
 	pub fn get_pad_color(&self) -> Color {
 		self.pad_color
@@ -272,6 +363,9 @@ impl VirtualPad {
 
 	//==============================================================================
 	/// 구슬 색 설정.
+	///
+	/// # 인자
+	/// - `ball_color`: 구슬 색. (Color 나 "#ffffff" 같은 색 글)
 	//==============================================================================
 	pub fn set_ball_color(&mut self, ball_color: impl Into<Color>) {
 		self.ball_color = ball_color.into();
@@ -279,6 +373,9 @@ impl VirtualPad {
 
 	//==============================================================================
 	/// 구슬 색 반환.
+	///
+	/// # 돌려줌
+	/// 구슬 색.
 	//==============================================================================
 	pub fn get_ball_color(&self) -> Color {
 		self.ball_color

@@ -11,6 +11,20 @@ use crate::base::vector2::Vector2;
 
 //==============================================================================
 /// 제스처 설정. (원본 options = { drag_threshold = 12, long_press_seconds = 0.6 })
+///
+/// # 예제
+/// 롱프레스 시간만 바꾸기
+/// ```rust
+/// use vanilla::{PointerGesture, PointerGestureOptions};
+///
+/// let pointer_gesture_options = PointerGestureOptions {
+/// 	long_press_seconds: 1.0,
+/// 	..PointerGestureOptions::default()
+/// };
+/// assert_eq!(pointer_gesture_options.drag_threshold, 12.0);
+/// let pointer_gesture = PointerGesture::new(pointer_gesture_options);
+/// assert!(!pointer_gesture.is_pressed());
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PointerGestureOptions {
@@ -39,6 +53,38 @@ type DragEvent = Box<dyn FnMut(Vector2, Vector2)>;
 
 //==============================================================================
 /// 포인터 제스처 인식기.
+/// - press, r#move, tick, release 차례로 넘기고 콜백으로 탭, 드래그, 드래그 끝, 롱프레스를 받는다.
+///
+/// # 예제
+/// 탭과 드래그 가르기
+/// ```rust
+/// use std::cell::RefCell;
+/// use std::rc::Rc;
+/// use vanilla::{PointerGesture, PointerGestureOptions, Vector2};
+///
+/// let event_list = Rc::new(RefCell::new(Vec::new()));
+/// let mut pointer_gesture = PointerGesture::new(PointerGestureOptions::default());
+/// let tap_event_list = event_list.clone();
+/// pointer_gesture.set_tap_event(move |position| {
+/// 	tap_event_list.borrow_mut().push(("tap", position));
+/// });
+/// let drag_end_event_list = event_list.clone();
+/// pointer_gesture.set_drag_end_event(move |position, _press_position| {
+/// 	drag_end_event_list.borrow_mut().push(("drag_end", position));
+/// });
+///
+/// pointer_gesture.press(10.0, 10.0);
+/// pointer_gesture.r#move(14.0, 10.0);
+/// pointer_gesture.tick(0.1);
+/// pointer_gesture.release();
+///
+/// pointer_gesture.press(10.0, 10.0);
+/// pointer_gesture.r#move(40.0, 10.0);
+/// assert!(pointer_gesture.is_dragging());
+/// pointer_gesture.release();
+///
+/// assert_eq!(*event_list.borrow(), vec![("tap", Vector2::create(14.0, 10.0)), ("drag_end", Vector2::create(40.0, 10.0))]);
+/// ```
 //==============================================================================
 pub struct PointerGesture {
 	is_pressed: bool,
@@ -58,6 +104,12 @@ pub struct PointerGesture {
 impl PointerGesture {
 	//==============================================================================
 	/// 생성.
+	///
+	/// # 인자
+	/// - `options`: 드래그 임계값과 롱프레스 시간.
+	///
+	/// # 돌려줌
+	/// 눌리지 않고 콜백이 없는 새 인식기.
 	//==============================================================================
 	pub fn new(options: PointerGestureOptions) -> PointerGesture {
 		PointerGesture {
@@ -78,6 +130,11 @@ impl PointerGesture {
 
 	//==============================================================================
 	/// 누름.
+	/// - 드래그, 롱프레스 상태와 누른 시간을 비우고 누른 위치를 기억한다.
+	///
+	/// # 인자
+	/// - `x`: 누른 위치 x. (픽셀, 좌표계는 넘기는 쪽이 정한다)
+	/// - `y`: 누른 위치 y. (픽셀)
 	//==============================================================================
 	pub fn press(&mut self, x: f32, y: f32) {
 		self.is_pressed = true;
@@ -90,6 +147,11 @@ impl PointerGesture {
 
 	//==============================================================================
 	/// 이동. (누른 곳에서 임계값을 넘으면 드래그로 정하고, 그 뒤 움직일 때마다 드래그 알림을 부른다)
+	/// - 눌려 있지 않으면 아무것도 하지 않는다. 누른 곳에서 거리가 임계값 이상이면 드래그다.
+	///
+	/// # 인자
+	/// - `x`: 지금 위치 x. (픽셀, press 와 같은 좌표계)
+	/// - `y`: 지금 위치 y. (픽셀)
 	//==============================================================================
 	pub fn r#move(&mut self, x: f32, y: f32) {
 		if !self.is_pressed {
@@ -112,6 +174,38 @@ impl PointerGesture {
 
 	//==============================================================================
 	/// 갱신. (드래그가 아닌 채 long_press_seconds 를 넘기면 롱프레스를 한 번 알린다)
+	///
+	/// # 인자
+	/// - `time_delta`: 지난 시간. (초, 누른 시간에 더한다)
+	///
+	/// # 예제
+	/// 0.6 초 누르고 있으면 롱프레스, 뗄 때 탭은 없다
+	/// ```rust
+	/// use std::cell::Cell;
+	/// use std::rc::Rc;
+	/// use vanilla::{PointerGesture, PointerGestureOptions};
+	///
+	/// let long_press_count = Rc::new(Cell::new(0));
+	/// let tap_count = Rc::new(Cell::new(0));
+	/// let mut pointer_gesture = PointerGesture::new(PointerGestureOptions::default());
+	/// let long_press_count_for_event = long_press_count.clone();
+	/// pointer_gesture.set_long_press_event(move |_position| {
+	/// 	long_press_count_for_event.set(long_press_count_for_event.get() + 1);
+	/// });
+	/// let tap_count_for_event = tap_count.clone();
+	/// pointer_gesture.set_tap_event(move |_position| {
+	/// 	tap_count_for_event.set(tap_count_for_event.get() + 1);
+	/// });
+	///
+	/// pointer_gesture.press(50.0, 50.0);
+	/// pointer_gesture.tick(0.3);
+	/// assert!((pointer_gesture.get_long_press_ratio() - 0.5).abs() < 0.0001);
+	/// pointer_gesture.tick(0.3);
+	/// pointer_gesture.tick(0.3);
+	/// pointer_gesture.release();
+	/// assert_eq!(long_press_count.get(), 1);
+	/// assert_eq!(tap_count.get(), 0);
+	/// ```
 	//==============================================================================
 	pub fn tick(&mut self, time_delta: f32) {
 		if !self.is_pressed || self.is_dragging || self.is_long_pressed {
@@ -163,6 +257,9 @@ impl PointerGesture {
 
 	//==============================================================================
 	/// 롱프레스 진행 비율. (게이지 표시용, 0 ~ 1)
+	///
+	/// # 돌려줌
+	/// 누른 시간 / 롱프레스 시간. (1 에서 자른다) 눌려 있지 않거나, 드래그 중이거나, 롱프레스 시간이 0 이하면 0.
 	//==============================================================================
 	pub fn get_long_press_ratio(&self) -> f32 {
 		if !self.is_pressed || self.is_dragging || self.long_press_seconds <= 0.0 {
@@ -173,6 +270,9 @@ impl PointerGesture {
 
 	//==============================================================================
 	/// 눌려 있는지.
+	///
+	/// # 돌려줌
+	/// press 뒤 release 나 cancel 전이면 true.
 	//==============================================================================
 	pub fn is_pressed(&self) -> bool {
 		self.is_pressed
@@ -180,6 +280,9 @@ impl PointerGesture {
 
 	//==============================================================================
 	/// 드래그 중인지.
+	///
+	/// # 돌려줌
+	/// 이번 누름에서 임계값을 넘게 움직였으면 true.
 	//==============================================================================
 	pub fn is_dragging(&self) -> bool {
 		self.is_dragging
@@ -187,6 +290,9 @@ impl PointerGesture {
 
 	//==============================================================================
 	/// 탭 알림 설정. (뗀 위치)
+	///
+	/// # 인자
+	/// - `tap_event`: 탭일 때 부를 함수. 마지막 위치를 받는다. (앞의 알림은 바꾼다)
 	//==============================================================================
 	pub fn set_tap_event(&mut self, tap_event: impl FnMut(Vector2) + 'static) {
 		self.tap_event = Some(Box::new(tap_event));
@@ -194,6 +300,9 @@ impl PointerGesture {
 
 	//==============================================================================
 	/// 드래그 알림 설정. (지금 위치, 누른 위치)
+	///
+	/// # 인자
+	/// - `drag_event`: 드래그 중 움직일 때마다 부를 함수. 지금 위치와 누른 위치를 받는다.
 	//==============================================================================
 	pub fn set_drag_event(&mut self, drag_event: impl FnMut(Vector2, Vector2) + 'static) {
 		self.drag_event = Some(Box::new(drag_event));
@@ -201,6 +310,9 @@ impl PointerGesture {
 
 	//==============================================================================
 	/// 드래그 끝 알림 설정. (지금 위치, 누른 위치)
+	///
+	/// # 인자
+	/// - `drag_end_event`: 드래그하다 뗄 때 부를 함수. 마지막 위치와 누른 위치를 받는다.
 	//==============================================================================
 	pub fn set_drag_end_event(&mut self, drag_end_event: impl FnMut(Vector2, Vector2) + 'static) {
 		self.drag_end_event = Some(Box::new(drag_end_event));
@@ -208,6 +320,9 @@ impl PointerGesture {
 
 	//==============================================================================
 	/// 롱프레스 알림 설정. (누른 위치)
+	///
+	/// # 인자
+	/// - `long_press_event`: 롱프레스가 되는 순간 한 번 부를 함수. 누른 위치를 받는다.
 	//==============================================================================
 	pub fn set_long_press_event(&mut self, long_press_event: impl FnMut(Vector2) + 'static) {
 		self.long_press_event = Some(Box::new(long_press_event));
@@ -215,6 +330,9 @@ impl PointerGesture {
 
 	//==============================================================================
 	/// 드래그 임계값 설정. (픽셀)
+	///
+	/// # 인자
+	/// - `drag_threshold`: 드래그로 칠 거리. (픽셀)
 	//==============================================================================
 	pub fn set_drag_threshold(&mut self, drag_threshold: f32) {
 		self.drag_threshold = drag_threshold;
@@ -222,6 +340,9 @@ impl PointerGesture {
 
 	//==============================================================================
 	/// 롱프레스 시간 설정. (초)
+	///
+	/// # 인자
+	/// - `long_press_seconds`: 롱프레스로 칠 누른 시간. (초)
 	//==============================================================================
 	pub fn set_long_press_seconds(&mut self, long_press_seconds: f32) {
 		self.long_press_seconds = long_press_seconds;

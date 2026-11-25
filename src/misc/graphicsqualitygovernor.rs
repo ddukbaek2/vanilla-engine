@@ -19,12 +19,38 @@ use crate::platform;
 //==============================================================================
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum GraphicsQuality {
+	/// 자동. (처음부터 가벼운 길이거나 FrameProbe 가 처지는 기기로 잰 때 가벼운 길, 기본값)
 	#[default]
 	Auto,
+	/// 높음. (늘 가벼운 길이 아니다)
 	High,
+	/// 낮음. (늘 가벼운 길)
 	Low,
 }
 
+//==============================================================================
+/// 그래픽 품질 정하기.
+/// - 덮어쓰기, 품질 설정, 자동(프레임 재기) 차례로 가벼운 길인지 정하고, 길마다 렌더 배율 상한을 건다.
+///
+/// # 예제
+/// 느린 프레임이 이어지면 자동으로 가벼운 길
+/// ```rust
+/// use vanilla::GraphicsQualityGovernor;
+///
+/// let mut governor = GraphicsQualityGovernor::new();
+/// governor.set_render_pixel_ratio_limits(0.0, 1.5);
+/// governor.get_frame_probe_mut().set_seconds(0.0, 1.0);
+/// let mut changed_count = 0;
+/// for _ in 0..40 {
+/// 	if governor.update(0.05, 60.0) {
+/// 		changed_count += 1;
+/// 	}
+/// }
+/// assert!(governor.is_lite());
+/// assert_eq!(changed_count, 1);
+/// assert_eq!(governor.read_max_render_pixel_ratio(), 1.5);
+/// ```
+//==============================================================================
 pub struct GraphicsQualityGovernor {
 	quality: GraphicsQuality,
 	lite_override: Option<bool>,
@@ -36,6 +62,9 @@ pub struct GraphicsQualityGovernor {
 }
 
 impl Default for GraphicsQualityGovernor {
+	//==============================================================================
+	/// 기본값. (new 와 같다)
+	//==============================================================================
 	fn default() -> GraphicsQualityGovernor {
 		GraphicsQualityGovernor::new()
 	}
@@ -44,6 +73,9 @@ impl Default for GraphicsQualityGovernor {
 impl GraphicsQualityGovernor {
 	//==============================================================================
 	/// 생성. (자동, 덮어쓰기 없음, 렌더 배율 제한 없음)
+	///
+	/// # 돌려줌
+	/// 가벼운 길이 아닌 새 품질 정하기. (FrameProbe 는 기본값)
 	//==============================================================================
 	pub fn new() -> GraphicsQualityGovernor {
 		GraphicsQualityGovernor {
@@ -59,6 +91,9 @@ impl GraphicsQualityGovernor {
 
 	//==============================================================================
 	/// 품질 설정.
+	///
+	/// # 인자
+	/// - `quality`: 품질 설정 값. (덮어쓰기가 있으면 그것이 먼저다)
 	//==============================================================================
 	pub fn set_quality(&mut self, quality: GraphicsQuality) {
 		self.quality = quality;
@@ -66,6 +101,9 @@ impl GraphicsQualityGovernor {
 
 	//==============================================================================
 	/// 품질 설정 반환.
+	///
+	/// # 돌려줌
+	/// 지금 품질 설정 값.
 	//==============================================================================
 	pub fn get_quality(&self) -> GraphicsQuality {
 		self.quality
@@ -73,6 +111,9 @@ impl GraphicsQualityGovernor {
 
 	//==============================================================================
 	/// 덮어쓰기 설정. (Some(true) 면 늘 가벼운 길, Some(false) 면 늘 아님, None 이면 풀기)
+	///
+	/// # 인자
+	/// - `lite_override`: 덮어쓰기 값.
 	//==============================================================================
 	pub fn set_lite_override(&mut self, lite_override: Option<bool>) {
 		self.lite_override = lite_override;
@@ -80,6 +121,9 @@ impl GraphicsQualityGovernor {
 
 	//==============================================================================
 	/// 덮어쓰기 반환.
+	///
+	/// # 돌려줌
+	/// 지금 덮어쓰기 값. 없으면 None.
 	//==============================================================================
 	pub fn get_lite_override(&self) -> Option<bool> {
 		self.lite_override
@@ -87,6 +131,24 @@ impl GraphicsQualityGovernor {
 
 	//==============================================================================
 	/// 쿼리 글로 덮어쓰기. (lite_key 가 있으면 가벼운 길, 값이 "0" 이나 "false" 면 늘 아님, 없으면 그대로)
+	///
+	/// # 인자
+	/// - `search_text`: 쿼리 글. ("?light", "?a=1&light=0" 처럼, 앞의 ? 는 없어도 된다)
+	/// - `lite_key`: 찾을 이름. (풀어 쓴 이름과 견준다, 같은 이름이 여럿이면 첫 값)
+	///
+	/// # 예제
+	/// 주소의 light 로 덮어쓰기
+	/// ```rust
+	/// use vanilla::GraphicsQualityGovernor;
+	///
+	/// let mut governor = GraphicsQualityGovernor::new();
+	/// governor.apply_search_text("?a=1&light", "light");
+	/// assert_eq!(governor.get_lite_override(), Some(true));
+	/// governor.apply_search_text("?light=0", "light");
+	/// assert_eq!(governor.get_lite_override(), Some(false));
+	/// governor.apply_search_text("?other=1", "light");
+	/// assert_eq!(governor.get_lite_override(), Some(false));
+	/// ```
 	//==============================================================================
 	pub fn apply_search_text(&mut self, search_text: &str, lite_key: &str) {
 		let query_text = search_text.strip_prefix('?').unwrap_or(search_text);
@@ -112,6 +174,10 @@ impl GraphicsQualityGovernor {
 
 	//==============================================================================
 	/// 페이지 주소의 쿼리로 덮어쓰기. (웹 전용, 데스크탑은 그대로)
+	/// - 값을 못 읽으면 그대로 둔다. 읽으면 "0" 이나 "false" 는 늘 아님, 그 밖은 가벼운 길이다.
+	///
+	/// # 인자
+	/// - `lite_key`: 쿼리 이름. (웹은 페이지 주소 쿼리에서, 데스크탑은 환경 변수 VANILLA_ 뒤에 이 이름을 대문자 뱀꼴로 붙인 것에서 읽는다. platform::read_page_query_value)
 	//==============================================================================
 	pub fn apply_page_query(&mut self, lite_key: &str) {
 		if let Some(value) = platform::read_page_query_value(lite_key) {
@@ -121,6 +187,9 @@ impl GraphicsQualityGovernor {
 
 	//==============================================================================
 	/// 자동일 때 처음부터 가벼운 길인지 설정. (손가락 기기처럼 재기 전부터 가볍게 갈 때)
+	///
+	/// # 인자
+	/// - `is_auto_lite_default`: true 면 자동일 때 프레임을 재지 않고 가벼운 길이다.
 	//==============================================================================
 	pub fn set_auto_lite_default(&mut self, is_auto_lite_default: bool) {
 		self.is_auto_lite_default = is_auto_lite_default;
@@ -128,6 +197,9 @@ impl GraphicsQualityGovernor {
 
 	//==============================================================================
 	/// 자동일 때 처음부터 가벼운 길인지 반환.
+	///
+	/// # 돌려줌
+	/// set_auto_lite_default 로 정한 값. (기본 false)
 	//==============================================================================
 	pub fn is_auto_lite_default(&self) -> bool {
 		self.is_auto_lite_default
@@ -135,6 +207,9 @@ impl GraphicsQualityGovernor {
 
 	//==============================================================================
 	/// 프레임 재기 반환.
+	///
+	/// # 돌려줌
+	/// 자동일 때 쓰는 프레임 재기의 참조.
 	//==============================================================================
 	pub fn get_frame_probe(&self) -> &FrameProbe {
 		&self.frame_probe
@@ -142,6 +217,9 @@ impl GraphicsQualityGovernor {
 
 	//==============================================================================
 	/// 프레임 재기 반환. (기다리는 초, 판정 문턱을 바꾸거나 무거운 장면에서 measure_again 할 때)
+	///
+	/// # 돌려줌
+	/// 자동일 때 쓰는 프레임 재기의 변경용 참조.
 	//==============================================================================
 	pub fn get_frame_probe_mut(&mut self) -> &mut FrameProbe {
 		&mut self.frame_probe
@@ -149,6 +227,9 @@ impl GraphicsQualityGovernor {
 
 	//==============================================================================
 	/// 가벼운 길로 그리는지.
+	///
+	/// # 돌려줌
+	/// 덮어쓰기가 있으면 그 값. 없으면 낮음은 true, 높음은 false, 자동은 처음부터 가벼운 길이거나 FrameProbe 가 처지는 기기로 쟀으면 true.
 	//==============================================================================
 	pub fn is_lite(&self) -> bool {
 		if let Some(lite_override) = self.lite_override {
@@ -169,6 +250,14 @@ impl GraphicsQualityGovernor {
 
 	//==============================================================================
 	/// 한 프레임. (자동이고 아직 가벼운 길이 아니면 프레임을 잰다, 가벼운 길이 바뀐 프레임에 true)
+	/// - 덮어쓰기가 없고, 자동이고, 처음부터 가벼운 길이 아닐 때만 FrameProbe 로 잰다.
+	///
+	/// # 인자
+	/// - `frame_seconds`: 이번 프레임 간격. (초)
+	/// - `maximum_frame_per_second`: 최대 프레임. (0 이하면 FrameProbe 의 무제한 목표 프레임으로 본다)
+	///
+	/// # 돌려줌
+	/// 지난 update 때와 is_lite 가 달라졌으면 true. (설정이나 덮어쓰기로 바뀐 것도 다음 update 에서 true)
 	//==============================================================================
 	pub fn update(&mut self, frame_seconds: f32, maximum_frame_per_second: f32) -> bool {
 		let is_measured = self.lite_override.is_none() && self.quality == GraphicsQuality::Auto && !self.is_auto_lite_default;
@@ -183,6 +272,10 @@ impl GraphicsQualityGovernor {
 
 	//==============================================================================
 	/// 렌더 배율 상한 설정. (보통 길과 가벼운 길, 0 이면 제한 없음)
+	///
+	/// # 인자
+	/// - `normal_max_render_pixel_ratio`: 보통 길의 렌더 배율 상한. (음수는 0)
+	/// - `lite_max_render_pixel_ratio`: 가벼운 길의 렌더 배율 상한. (음수는 0)
 	//==============================================================================
 	pub fn set_render_pixel_ratio_limits(&mut self, normal_max_render_pixel_ratio: f32, lite_max_render_pixel_ratio: f32) {
 		self.normal_max_render_pixel_ratio = normal_max_render_pixel_ratio.max(0.0);
@@ -191,6 +284,9 @@ impl GraphicsQualityGovernor {
 
 	//==============================================================================
 	/// 지금 길의 렌더 배율 상한.
+	///
+	/// # 돌려줌
+	/// is_lite 면 가벼운 길의 상한, 아니면 보통 길의 상한. (0 이면 제한 없음)
 	//==============================================================================
 	pub fn read_max_render_pixel_ratio(&self) -> f32 {
 		if self.is_lite() {
@@ -203,6 +299,25 @@ impl GraphicsQualityGovernor {
 
 	//==============================================================================
 	/// 렌더 배율 상한 걸기. (ViewManager 의 값과 다를 때만, 걸었으면 true)
+	///
+	/// # 인자
+	/// - `view_manager`: 상한을 걸 뷰 관리자.
+	///
+	/// # 돌려줌
+	/// 값이 달라 새로 걸었으면 true. 이미 같으면 false.
+	///
+	/// # 예제
+	/// 바뀔 때만 걸기
+	/// ```rust
+	/// use vanilla::{GraphicsQualityGovernor, Vector2, ViewManager, ViewScaleMode};
+	///
+	/// let mut governor = GraphicsQualityGovernor::new();
+	/// governor.set_render_pixel_ratio_limits(2.0, 1.0);
+	/// let mut view_manager = ViewManager::new(Vector2::create(1280.0, 720.0), ViewScaleMode::StretchShort);
+	/// assert!(governor.apply_render_pixel_ratio(&mut view_manager));
+	/// assert_eq!(view_manager.get_max_render_pixel_ratio(), 2.0);
+	/// assert!(!governor.apply_render_pixel_ratio(&mut view_manager));
+	/// ```
 	//==============================================================================
 	pub fn apply_render_pixel_ratio(&self, view_manager: &mut ViewManager) -> bool {
 		let max_render_pixel_ratio = self.read_max_render_pixel_ratio();
@@ -247,6 +362,9 @@ fn decode_form_component(text: &str) -> String {
 mod tests {
 	use super::*;
 
+	//==============================================================================
+	/// 자동이면 느린 프레임으로 가벼운 길이 되고, 바뀐 프레임에 한 번만 알린다.
+	//==============================================================================
 	#[test]
 	fn slow_frames_turn_auto_to_lite_once() {
 		let mut governor = GraphicsQualityGovernor::new();
@@ -264,6 +382,9 @@ mod tests {
 		assert_eq!(governor.read_max_render_pixel_ratio(), 1.5);
 	}
 
+	//==============================================================================
+	/// 덮어쓰기가 설정보다, 설정이 자동보다 먼저다. 쿼리 글 풀기.
+	//==============================================================================
 	#[test]
 	fn override_beats_setting_and_setting_beats_auto() {
 		let mut governor = GraphicsQualityGovernor::new();
@@ -295,6 +416,9 @@ mod tests {
 		assert!(governor.is_lite());
 	}
 
+	//==============================================================================
+	/// 렌더 배율 상한은 값이 다를 때만 건다.
+	//==============================================================================
 	#[test]
 	fn render_pixel_ratio_applies_only_on_change() {
 		let mut governor = GraphicsQualityGovernor::new();

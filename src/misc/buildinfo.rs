@@ -27,6 +27,29 @@ use std::task::{Context, Poll};
 
 //==============================================================================
 /// 빌드 정보 읽기 손잡이. (BuildInfo::load 가 돌려준다. 원본 load 의 Promise 자리, meta 로 읽었으면 바로 끝난다)
+/// - 엔진 작업 안에서 그대로 await 한다. 읽기에 실패해도 끝난다.
+///
+/// # 예제
+/// 엔진 작업에서 load 를 await 하기
+/// ```rust
+/// use std::cell::RefCell;
+/// use std::rc::Rc;
+/// use vanilla::{BuildInfo, Engine, EngineConfiguration};
+///
+/// let mut engine_configuration = EngineConfiguration::new();
+/// engine_configuration.document_meta_list = vec![(String::from("build-version"), String::from("1.2.3"))];
+/// let mut engine = Engine::new(engine_configuration);
+/// let version_text = Rc::new(RefCell::new(String::new()));
+/// let version_text_for_task = version_text.clone();
+/// let task_handle = engine.spawn_task(|mut engine_context| async move {
+/// 	let mut build_info = BuildInfo::new();
+/// 	let load_handle = engine_context.with(|engine| build_info.load(engine));
+/// 	load_handle.await;
+/// 	*version_text_for_task.borrow_mut() = build_info.read_text();
+/// });
+/// assert!(task_handle.is_finished());
+/// assert_eq!(*version_text.borrow(), "1.2.3");
+/// ```
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct BuildInfoLoadHandle {
@@ -49,6 +72,29 @@ impl IntoFuture for BuildInfoLoadHandle {
 
 //==============================================================================
 /// 빌드 정보 읽기를 기다리는 퓨처. (실패해도 마친 것이다)
+/// - BuildInfo::wait_for_load 나 BuildInfoLoadHandle 의 into_future 로 얻는다. 아직이면 다음 프레임에 다시 본다.
+///
+/// # 예제
+/// load 를 부른 뒤 wait_for_load 로 기다리기
+/// ```rust
+/// use std::cell::RefCell;
+/// use std::rc::Rc;
+/// use vanilla::{BuildInfo, Engine, EngineConfiguration};
+///
+/// let mut engine_configuration = EngineConfiguration::new();
+/// engine_configuration.document_meta_list = vec![(String::from("build-version"), String::from("2026-11-26 def5678"))];
+/// let mut engine = Engine::new(engine_configuration);
+/// let build_info = Rc::new(RefCell::new(BuildInfo::new()));
+/// build_info.borrow_mut().load(&engine);
+/// let build_info_for_task = build_info.clone();
+/// let task_handle = engine.spawn_task(|_engine_context| async move {
+/// 	let load_future = build_info_for_task.borrow().wait_for_load();
+/// 	load_future.await;
+/// 	assert!(build_info_for_task.borrow().is_loaded());
+/// });
+/// assert!(task_handle.is_finished());
+/// assert_eq!(build_info.borrow_mut().read_text(), "2026-11-26 def5678");
+/// ```
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct BuildInfoLoadFuture {
@@ -79,6 +125,25 @@ const DEFAULT_VERSION_JSON_PATH: &str = "version.json";
 
 //==============================================================================
 /// 빌드 정보.
+/// - 켜질 때 load 를 한 번 부르고, 마친 뒤 read_text 로 판의 글을 읽는다. (meta, version.json, 빌드 때 넣은 판 차례)
+///
+/// # 예제
+/// 문서의 meta 에 적은 판 읽기
+/// ```rust
+/// use vanilla::{BuildInfo, Engine, EngineConfiguration};
+///
+/// let mut engine_configuration = EngineConfiguration::new();
+/// engine_configuration.document_meta_list = vec![(String::from("build-version"), String::from(" 2026-11-26 def5678 "))];
+/// let engine = Engine::new(engine_configuration);
+///
+/// let mut build_info = BuildInfo::new();
+/// build_info.set_package_version(env!("CARGO_PKG_VERSION"));
+/// assert!(!build_info.is_loaded());
+/// build_info.load(&engine);
+/// assert!(build_info.is_loaded());
+/// assert!(build_info.get_load_handle().is_none());
+/// assert_eq!(build_info.read_text(), "2026-11-26 def5678");
+/// ```
 //==============================================================================
 pub struct BuildInfo {
 	package_version: String,
@@ -94,6 +159,9 @@ pub struct BuildInfo {
 impl BuildInfo {
 	//==============================================================================
 	/// 생성. (version.json 주소는 기본 "version.json")
+	///
+	/// # 돌려줌
+	/// 아직 읽지 않은 새 빌드 정보. (meta 이름 "build-version", 빌드 때 넣은 판은 빈 글)
 	//==============================================================================
 	pub fn new() -> BuildInfo {
 		BuildInfo {
@@ -110,6 +178,9 @@ impl BuildInfo {
 
 	//==============================================================================
 	/// meta 이름 설정. (기본 "build-version")
+	///
+	/// # 인자
+	/// - `meta_name`: 판을 적은 meta 의 name.
 	//==============================================================================
 	pub fn set_meta_name(&mut self, meta_name: &str) {
 		self.meta_name = meta_name.to_string();
@@ -117,6 +188,9 @@ impl BuildInfo {
 
 	//==============================================================================
 	/// 빌드 판 파일 경로 설정. (기본 "version.json", 빈 글이면 파일을 받지 않는다)
+	///
+	/// # 인자
+	/// - `version_json_path`: version.json 경로. (웹은 페이지 기준 주소, 데스크탑은 애셋 폴더 기준)
 	//==============================================================================
 	pub fn set_version_json_path(&mut self, version_json_path: &str) {
 		self.version_json_path = version_json_path.to_string();
@@ -124,6 +198,28 @@ impl BuildInfo {
 
 	//==============================================================================
 	/// 읽기 요청. (문서의 meta 를 바로 읽고, 없으면 웹은 version.json 을 캐시 없이 요청한다. 데스크탑은 애셋 폴더의 version.json 을 읽는다. await 할 수 있는 손잡이를 돌려준다)
+	/// - 다시 부르면 앞에서 읽은 것을 비우고 처음부터 읽는다.
+	///
+	/// # 인자
+	/// - `engine`: 애셋을 받을 엔진.
+	///
+	/// # 돌려줌
+	/// 읽기를 기다리는 손잡이. meta 로 읽었거나 파일 경로가 빈 글이면 바로 끝난 손잡이.
+	///
+	/// # 예제
+	/// meta 도 version.json 도 없으면 빌드 때 넣은 판
+	/// ```rust
+	/// use vanilla::{BuildInfo, Engine, EngineConfiguration};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let mut build_info = BuildInfo::new();
+	/// build_info.set_package_version("0.4.0");
+	/// build_info.set_version_json_path("missing-version.json");
+	/// build_info.load(&engine);
+	/// assert!(build_info.is_loaded());
+	/// assert!(build_info.read_version_data().is_none());
+	/// assert_eq!(build_info.read_text(), "0.4.0");
+	/// ```
 	//==============================================================================
 	pub fn load(&mut self, engine: &Engine) -> BuildInfoLoadHandle {
 		self.is_load_requested = true;
@@ -142,6 +238,9 @@ impl BuildInfo {
 
 	//==============================================================================
 	/// 읽기를 마쳤는지. (원본 isLoaded, load 전이면 거짓, 실패해도 마친 것)
+	///
+	/// # 돌려줌
+	/// load 를 불렀고 meta 로 읽었거나 version.json 받기가 끝났으면 true.
 	//==============================================================================
 	pub fn is_loaded(&self) -> bool {
 		if !self.is_load_requested {
@@ -160,6 +259,9 @@ impl BuildInfo {
 	//==============================================================================
 	/// 읽기를 마치기를 기다리는 퓨처. (원본 await load() 의 await 자리, load 를 부른 뒤 엔진 작업 안에서 await 한다. 실패해도 마친 것)
 	/// - meta 로 읽었으면 바로 끝난다. 손잡이를 나눠 들어 빌리지 않는다.
+	///
+	/// # 돌려줌
+	/// 지금 읽기를 기다리는 퓨처. load 전에 부르면 바로 끝난다.
 	//==============================================================================
 	pub fn wait_for_load(&self) -> BuildInfoLoadFuture {
 		BuildInfoLoadFuture {
@@ -169,6 +271,9 @@ impl BuildInfo {
 
 	//==============================================================================
 	/// version.json 읽기 손잡이. (씬이 track_load_handle 로 맡긴다. meta 로 읽었으면 None)
+	///
+	/// # 돌려줌
+	/// version.json 받기 손잡이. load 전이거나 meta 로 읽었거나 파일 경로가 빈 글이면 None.
 	//==============================================================================
 	pub fn get_load_handle(&self) -> Option<&AssetLoadHandle> {
 		self.load_handle.as_ref()
@@ -176,6 +281,10 @@ impl BuildInfo {
 
 	//==============================================================================
 	/// version.json 에서 읽은 값. (받기 전이거나 meta 로 읽었거나 풀 수 없으면 None)
+	/// - 처음 받은 뒤 한 번만 풀어 두고 같은 값을 돌려준다.
+	///
+	/// # 돌려줌
+	/// JSON 객체 값. 객체가 아니거나, 받지 못했거나, 아직이면 None.
 	//==============================================================================
 	pub fn read_version_data(&mut self) -> Option<&Value> {
 		if !self.is_version_data_read {
@@ -197,6 +306,9 @@ impl BuildInfo {
 
 	//==============================================================================
 	/// 판의 글. (meta > version.json > 빌드 때 넣은 판)
+	///
+	/// # 돌려줌
+	/// meta 의 글(앞뒤 빈칸을 뗀 것), 없으면 compose_text 로 만든 version.json 의 글, 그것도 비면 빌드 때 넣은 판. (넣지 않았으면 빈 글)
 	//==============================================================================
 	pub fn read_text(&mut self) -> String {
 		if !self.meta_text.is_empty() {
@@ -213,6 +325,9 @@ impl BuildInfo {
 
 	//==============================================================================
 	/// 문서의 meta 에 적힌 판. (원본 readMetaText, 없으면 빈 글. 데스크탑은 엔진이 든 문서의 meta)
+	///
+	/// # 돌려줌
+	/// meta 이름이 같은 meta 의 content 에서 앞뒤 빈칸을 뗀 글. 없으면 빈 글.
 	//==============================================================================
 	pub fn read_meta_text(&self) -> String {
 		Document::get_meta_content(&self.meta_name).map(|content| content.trim().to_string()).unwrap_or_default()
@@ -220,6 +335,9 @@ impl BuildInfo {
 
 	//==============================================================================
 	/// 빌드 때 넣은 판 설정. (meta 도 version.json 도 없을 때의 글, 보통 env!("CARGO_PKG_VERSION"))
+	///
+	/// # 인자
+	/// - `package_version`: 판의 글.
 	//==============================================================================
 	pub fn set_package_version(&mut self, package_version: &str) {
 		self.package_version = package_version.to_string();
@@ -227,6 +345,9 @@ impl BuildInfo {
 
 	//==============================================================================
 	/// 빌드 때 넣은 판.
+	///
+	/// # 돌려줌
+	/// set_package_version 으로 넣은 글. (처음은 빈 글)
 	//==============================================================================
 	pub fn get_package_version(&self) -> &str {
 		&self.package_version
@@ -234,6 +355,23 @@ impl BuildInfo {
 
 	//==============================================================================
 	/// version.json 값으로 판의 글 만들기. (정적, "날짜 시각 (해시)", 해시가 없으면 version, 그것도 없으면 빈 글)
+	///
+	/// # 인자
+	/// - `version_data`: version.json 의 JSON 값. (글 칸만 읽고 앞뒤 빈칸을 뗀다)
+	///
+	/// # 돌려줌
+	/// 판의 글. 날짜나 시각이 없으면 그 조각을 빼고 잇는다.
+	///
+	/// # 예제
+	/// 해시가 있을 때와 없을 때
+	/// ```rust
+	/// use vanilla::BuildInfo;
+	///
+	/// let version_data = serde_json::json!({ "version": "1.2.3", "date": "2026-11-25", "time": "04:00", "hash": "abc1234" });
+	/// assert_eq!(BuildInfo::compose_text(&version_data), "2026-11-25 04:00 (abc1234)");
+	/// assert_eq!(BuildInfo::compose_text(&serde_json::json!({ "version": " 2.0.0 " })), "2.0.0");
+	/// assert_eq!(BuildInfo::compose_text(&serde_json::json!({ "hash": "def5678" })), "(def5678)");
+	/// ```
 	//==============================================================================
 	pub fn compose_text(version_data: &Value) -> String {
 		let read_string = |name: &str| -> String {
@@ -258,6 +396,9 @@ impl BuildInfo {
 }
 
 impl Default for BuildInfo {
+	//==============================================================================
+	/// 기본값. (new 와 같다)
+	//==============================================================================
 	fn default() -> BuildInfo {
 		BuildInfo::new()
 	}
