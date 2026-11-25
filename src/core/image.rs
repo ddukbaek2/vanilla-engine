@@ -10,9 +10,11 @@
 // - Rc 로 나눠 쓰고, GPU 텍스처는 Graphic 의 ImageTextureCache 가 처음 그릴 때 만든다.
 // - GPU 에 올린 뒤에는 CPU 픽셀을 놓아 메모리를 돌려준다. (원본은 브라우저가 HTMLImageElement 를 들고 있다)
 //   픽셀을 다시 읽어야 하는 그림은 set_pixels_retained(true) 로 남긴다. (ShadowImage 는 그림을 받을 때 스스로 남기고, 이미 놓였으면 텍스처에서 되읽는다)
+//   그림은 올린 텍스처를 기억해, Canvas2D 처럼 Graphic 이 없는 곳도 놓인 픽셀을 텍스처에서 되읽는다. (imagetexturecache::restore_image_pixels_from_texture)
 //   이 엔진은 GL 컨텍스트를 잃었다 되살리는 길이 없어서 놓은 픽셀로 텍스처를 다시 올릴 일은 없다.
 //==============================================================================
 use crate::base::identifier;
+use crate::core::graphic::GlTexture;
 use std::cell::{Cell, Ref, RefCell};
 use std::path::Path;
 use std::rc::Rc;
@@ -25,6 +27,8 @@ pub struct Image {
 	pixels: RefCell<Vec<u8>>,
 	// GPU 에 올린 뒤에도 CPU 픽셀을 남길지.
 	is_pixels_retained: Cell<bool>,
+	// GPU 에 올린 텍스처. (놓은 픽셀을 되읽을 때 쓴다, 올리기 전에는 None)
+	uploaded_texture: Cell<Option<GlTexture>>,
 }
 
 impl Image {
@@ -101,6 +105,7 @@ impl Image {
 			height,
 			pixels: RefCell::new(pixels),
 			is_pixels_retained: Cell::new(false),
+			uploaded_texture: Cell::new(None),
 		})
 	}
 
@@ -121,6 +126,7 @@ impl Image {
 			height,
 			pixels: RefCell::new(pixels),
 			is_pixels_retained: Cell::new(false),
+			uploaded_texture: Cell::new(None),
 		})
 	}
 
@@ -174,9 +180,10 @@ impl Image {
 	}
 
 	//==============================================================================
-	// CPU 픽셀 놓기. (ImageTextureCache 가 GPU 에 올린 뒤 부른다. 남기게 했으면 그대로 둔다)
+	// CPU 픽셀 놓기. (ImageTextureCache 가 GPU 에 올린 뒤 그 텍스처와 함께 부른다. 남기게 했으면 그대로 둔다)
 	//==============================================================================
-	pub(crate) fn release_pixels(&self) {
+	pub(crate) fn release_pixels(&self, uploaded_texture: GlTexture) {
+		self.uploaded_texture.set(Some(uploaded_texture));
 		if self.is_pixels_retained.get() {
 			return;
 		}
@@ -185,7 +192,14 @@ impl Image {
 	}
 
 	//==============================================================================
-	// 놓았던 CPU 픽셀 되돌리기. (Graphic 이 텍스처에서 되읽은 것)
+	// GPU 에 올린 텍스처. (올리기 전에는 None)
+	//==============================================================================
+	pub(crate) fn get_uploaded_texture(&self) -> Option<GlTexture> {
+		self.uploaded_texture.get()
+	}
+
+	//==============================================================================
+	// 놓았던 CPU 픽셀 되돌리기. (텍스처에서 되읽은 것)
 	//==============================================================================
 	pub(crate) fn restore_pixels(&self, pixels: Vec<u8>) {
 		*self.pixels.borrow_mut() = pixels;
@@ -286,12 +300,15 @@ mod tests {
 		let image = Image::create_from_pixels(2, 1, vec![255, 0, 0, 255, 0, 255, 0, 128]);
 		assert!(image.has_pixels());
 		assert_eq!(image.get_pixels()[7], 128);
+		assert!(image.get_uploaded_texture().is_none());
+		let uploaded_texture = glow::NativeTexture(std::num::NonZeroU32::new(1).expect("texture name"));
 		image.set_pixels_retained(true);
-		image.release_pixels();
+		image.release_pixels(uploaded_texture);
 		assert!(image.has_pixels());
 		image.set_pixels_retained(false);
-		image.release_pixels();
+		image.release_pixels(uploaded_texture);
 		assert!(!image.has_pixels());
+		assert_eq!(image.get_uploaded_texture(), Some(uploaded_texture));
 		assert!(image.get_pixels().is_empty());
 		assert_eq!(image.get_width(), 2);
 		image.restore_pixels(vec![1, 2, 3, 4, 5, 6, 7, 8]);

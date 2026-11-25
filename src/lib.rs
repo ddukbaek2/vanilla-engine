@@ -69,7 +69,7 @@ pub use crate::core::fullscreenpass::FullscreenPass;
 pub use crate::core::gamepadmanager::{Gamepad, GamepadAnalogStickCode, GamepadButton, GamepadButtonCode, GamepadInputCallback, GamepadInputType, GamepadManager, GamepadTriggerCode};
 pub use crate::core::graphic::{BlendMode, Graphic, TextAlign, TextBaseline};
 pub use crate::core::image::Image;
-pub use crate::core::canvas2d::{Canvas2D, CanvasFillRule, CanvasGradient, CanvasGradientKind, CanvasImageSource, CanvasLineCap, CanvasLineJoin, CanvasMatrix, CanvasPattern, CanvasPatternRepetition, CanvasStyle, CanvasTextAlign, CanvasTextBaseline, ImageData, Path2D};
+pub use crate::core::canvas2d::{Canvas2D, CanvasFillRule, CanvasGradient, CanvasGradientKind, CanvasImageSource, CanvasLineCap, CanvasLineJoin, CanvasMatrix, CanvasPattern, CanvasPatternRepetition, CanvasRadius, CanvasStyle, CanvasTextAlign, CanvasTextBaseline, ImageData, Path2D};
 pub use crate::core::inputmanager::{InputManager, KeyCode, MouseButton, TouchPoint};
 pub use crate::core::pointercursor::{CursorValue, PointerCursor};
 pub use crate::core::textstringtexturecache::TextRaster;

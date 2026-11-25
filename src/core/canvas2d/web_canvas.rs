@@ -3,7 +3,7 @@
 // - Path2D 는 엔진이 든 조각을 브라우저 Path2D 로 다시 그어 넘긴다. 그라데이션과 패턴은 칠할 것으로 정할 때 브라우저 것을 만든다.
 // - getter 는 브라우저 컨텍스트의 값을 읽는다. 변환과 칠할 것은 러스트 쪽에 같은 값을 들고 save, restore 와 함께 쌓는다.
 //==============================================================================
-use super::{is_composite_operation_name, normalize_line_dash, premultiply_pixels, unpremultiply_pixels, CanvasFillRule, CanvasGradient, CanvasGradientKind, CanvasImageSource, CanvasLineCap, CanvasLineJoin, CanvasMatrix, CanvasPattern, CanvasPatternRepetition, CanvasStyle, CanvasTextAlign, CanvasTextBaseline, ImageData, Path2D, PathSegment};
+use super::{is_composite_operation_name, normalize_line_dash, premultiply_pixels, unpremultiply_pixels, CanvasFillRule, CanvasGradient, CanvasGradientKind, CanvasImageSource, CanvasLineCap, CanvasLineJoin, CanvasMatrix, CanvasPattern, CanvasPatternRepetition, CanvasRadius, CanvasStyle, CanvasTextAlign, CanvasTextBaseline, ImageData, Path2D, BrowserPathCommand};
 use crate::base::color::Color;
 use crate::core::image::Image;
 use crate::core::textstringtexturecache::TextMetrics;
@@ -806,14 +806,11 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 둥근 사각형 조각. (원본 roundRect)
+	// 둥근 사각형 조각. (원본 roundRect, 반지름은 수(f32)나 타원 모서리((x, y), CanvasRadius::Elliptical, 브라우저에는 DOMPointInit {x, y})
 	//==============================================================================
-	pub fn round_rect(&mut self, x: f32, y: f32, width: f32, height: f32, radius_list: &[f32]) -> bool {
-		let radius_array = js_sys::Array::new();
-		for radius in radius_list {
-			radius_array.push(&JsValue::from_f64(*radius as f64));
-		}
-		self.context.round_rect_with_f64_sequence(x as f64, y as f64, width as f64, height as f64, &radius_array).is_ok()
+	pub fn round_rect<R: Into<CanvasRadius> + Copy>(&mut self, x: f32, y: f32, width: f32, height: f32, radius_list: &[R]) -> bool {
+		let radius_list: Vec<CanvasRadius> = radius_list.iter().map(|radius| (*radius).into()).collect();
+		self.context.round_rect_with_f64_sequence(x as f64, y as f64, width as f64, height as f64, &create_radius_array(&radius_list)).is_ok()
 	}
 
 	//==============================================================================
@@ -1079,30 +1076,102 @@ fn convert_fill_rule(fill_rule: CanvasFillRule) -> CanvasWindingRule {
 }
 
 //==============================================================================
-// 엔진 경로 → 브라우저 Path2D.
+// 둥근 사각형 반지름 → 브라우저 배열. (수는 수, 타원 모서리는 DOMPointInit {x, y})
 //==============================================================================
-fn create_browser_path(path: &Path2D) -> Option<web_sys::Path2d> {
-	let browser_path = web_sys::Path2d::new().ok()?;
-	for segment in path.get_segment_list() {
-		match *segment {
-			PathSegment::MoveTo(x, y) => {
-				browser_path.move_to(x as f64, y as f64);
+fn create_radius_array(radius_list: &[CanvasRadius]) -> js_sys::Array {
+	let radius_array = js_sys::Array::new();
+	for radius in radius_list {
+		match *radius {
+			CanvasRadius::Circular(radius) => {
+				radius_array.push(&JsValue::from_f64(radius as f64));
 			}
-			PathSegment::LineTo(x, y) => {
-				browser_path.line_to(x as f64, y as f64);
-			}
-			PathSegment::QuadraticTo(control_x, control_y, x, y) => {
-				browser_path.quadratic_curve_to(control_x as f64, control_y as f64, x as f64, y as f64);
-			}
-			PathSegment::CubicTo(first_control_x, first_control_y, second_control_x, second_control_y, x, y) => {
-				browser_path.bezier_curve_to(first_control_x as f64, first_control_y as f64, second_control_x as f64, second_control_y as f64, x as f64, y as f64);
-			}
-			PathSegment::Close => {
-				browser_path.close_path();
+			CanvasRadius::Elliptical {
+				x,
+				y,
+			} => {
+				let point_object = js_sys::Object::new();
+				let _ = js_sys::Reflect::set(&point_object, &JsValue::from_str("x"), &JsValue::from_f64(x as f64));
+				let _ = js_sys::Reflect::set(&point_object, &JsValue::from_str("y"), &JsValue::from_f64(y as f64));
+				radius_array.push(&point_object);
 			}
 		}
 	}
+	radius_array
+}
+
+//==============================================================================
+// 엔진 경로 → 브라우저 Path2D. (원본처럼 브라우저 Path2D 의 함수를 같은 차례로 부른다. 원호와 둥근 사각형도 브라우저가 짓는다)
+//==============================================================================
+fn create_browser_path(path: &Path2D) -> Option<web_sys::Path2d> {
+	let browser_path = web_sys::Path2d::new().ok()?;
+	replay_browser_commands(&browser_path, path.get_browser_command_list());
 	Some(browser_path)
+}
+
+//==============================================================================
+// 명령을 브라우저 Path2D 에 다시 넣기. (예외는 원본의 예외 자리라 그 명령만 건너뛴다)
+//==============================================================================
+fn replay_browser_commands(browser_path: &web_sys::Path2d, command_list: &[BrowserPathCommand]) {
+	for command in command_list {
+		match command {
+			BrowserPathCommand::MoveTo(x, y) => {
+				browser_path.move_to(*x as f64, *y as f64);
+			}
+			BrowserPathCommand::LineTo(x, y) => {
+				browser_path.line_to(*x as f64, *y as f64);
+			}
+			BrowserPathCommand::QuadraticCurveTo(control_x, control_y, x, y) => {
+				browser_path.quadratic_curve_to(*control_x as f64, *control_y as f64, *x as f64, *y as f64);
+			}
+			BrowserPathCommand::BezierCurveTo(first_control_x, first_control_y, second_control_x, second_control_y, x, y) => {
+				browser_path.bezier_curve_to(*first_control_x as f64, *first_control_y as f64, *second_control_x as f64, *second_control_y as f64, *x as f64, *y as f64);
+			}
+			BrowserPathCommand::Arc(x, y, radius, start_angle, end_angle, is_counterclockwise) => {
+				let _ = browser_path.arc_with_anticlockwise(*x as f64, *y as f64, *radius as f64, *start_angle as f64, *end_angle as f64, *is_counterclockwise);
+			}
+			BrowserPathCommand::ArcTo(first_x, first_y, second_x, second_y, radius) => {
+				let _ = browser_path.arc_to(*first_x as f64, *first_y as f64, *second_x as f64, *second_y as f64, *radius as f64);
+			}
+			BrowserPathCommand::Ellipse(x, y, radius_x, radius_y, rotation, start_angle, end_angle, is_counterclockwise) => {
+				let _ = browser_path.ellipse_with_anticlockwise(*x as f64, *y as f64, *radius_x as f64, *radius_y as f64, *rotation as f64, *start_angle as f64, *end_angle as f64, *is_counterclockwise);
+			}
+			BrowserPathCommand::Rect(x, y, width, height) => {
+				browser_path.rect(*x as f64, *y as f64, *width as f64, *height as f64);
+			}
+			BrowserPathCommand::RoundRect(x, y, width, height, radius_list) => {
+				let _ = browser_path.round_rect_with_f64_sequence(*x as f64, *y as f64, *width as f64, *height as f64, &create_radius_array(radius_list));
+			}
+			BrowserPathCommand::ClosePath => {
+				browser_path.close_path();
+			}
+			BrowserPathCommand::AddPath(command_list, transform) => {
+				let child_path = match web_sys::Path2d::new() {
+					Ok(child_path) => {
+						child_path
+					}
+					Err(_) => {
+						continue;
+					}
+				};
+				replay_browser_commands(&child_path, command_list);
+				match transform {
+					Some(matrix) => {
+						let matrix_object = js_sys::Object::new();
+						for (name, value) in [("a", matrix.a), ("b", matrix.b), ("c", matrix.c), ("d", matrix.d), ("e", matrix.e), ("f", matrix.f)] {
+							let _ = js_sys::Reflect::set(&matrix_object, &JsValue::from_str(name), &JsValue::from_f64(value as f64));
+						}
+						let add_path_function = js_sys::Reflect::get(browser_path, &JsValue::from_str("addPath")).ok().and_then(|function_value| function_value.dyn_into::<js_sys::Function>().ok());
+						if let Some(add_path_function) = add_path_function {
+							let _ = add_path_function.call2(browser_path, &child_path, &matrix_object);
+						}
+					}
+					None => {
+						browser_path.add_path(&child_path);
+					}
+				}
+			}
+		}
+	}
 }
 
 //==============================================================================

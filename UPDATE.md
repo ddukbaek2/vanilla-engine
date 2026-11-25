@@ -503,6 +503,9 @@
   - PaneStyle(데스크탑): 원본 도구가 쓰는 CSS 를 읽는다. flex 배치(flex-direction column, flex, flex-grow, flex-shrink, flex-basis 를 CSS Flexbox 의 길이 셈대로, justify-content 의 space-between 같은 것, align-items 기본 stretch), min, max 크기, right 와 bottom, 쪽마다 안쪽과 바깥 여백과 테두리, line-height, text-align, overflow(넘친 자식 자르기, auto 와 scroll 은 휠과 썸 끌기로 넘기고 끝에 닿으면 휠을 부모에게 넘긴다, scrollbar-color). auto 크기 요소는 자식의 크기를 더해 잰다. PaneElement::get_scroll_offset, set_scroll_offset
   - UIInputField::set_multiline: 크롬 textarea 같은 여러 줄 입력. 줄바꿈 문자와 폭으로 나누고(pre-wrap, break-word, 데스크탑은 ICU4X 유니코드 줄 나누기), Enter 는 줄 넣기, 위아래(가로 자리 지키기), Home 과 End(보이는 줄), Ctrl + Home, End(맥은 Cmd + 위, 아래), PageUp, PageDown(블링크의 87.5% 거리), 탭 자리, 선택과 끌기, 조합 밑줄, 휠과 썸 끌기 스크롤, 커서 따라 스크롤. set_line_height, set_tab_size, get_scroll_top, set_scroll_top. 웹 DOM 입력은 숨긴 <textarea>. 데스크탑 PaneStyle 의 textarea 가 이 필드로 글을 받는다
   - TextInputKey: Up, Down, PageUp, PageDown, DocumentStart, DocumentEnd. TextInputFieldState.is_multiline. 데스크탑 한 줄 DOM 입력 필드는 블링크처럼 위아래를 글 앞과 끝으로 옮기고, 넣는 글의 줄바꿈을 공백으로 바꾼다(끝 줄바꿈은 지운다). 맥 Cmd + 왼쪽, 오른쪽은 줄 앞과 끝
+  - Canvas2D, Path2D: arc, ellipse, arcTo, roundRect 를 크롬처럼 스키아 원뿔 곡선으로 담는다. (블링크 canvas_path.cc 의 각 다듬기와 납작한 타원, 스키아 SkPathBuilder::arcTo, SkConic::BuildUnitArc, SkRRect 반지름 줄이기와 addRRect 점 차례) 데스크탑은 칠할 때 스키아 CPU 래스터처럼 기기 픽셀 0.25 안의 2 차 곡선으로 나눈다. (전에는 3 차 베지어 근사)
+  - Canvas2D, Path2D: roundRect 가 타원 모서리를 받는다. (CanvasRadius::Elliptical, (x, y), 원본 DOMPointInit) 웹 Path2D 는 원본처럼 브라우저 Path2D 의 arc, roundRect 같은 함수를 그대로 부른다
+  - Canvas2D: GPU 에 올리며 CPU 픽셀을 놓은 엔진 Image 도 그린다. (그림이 기억한 텍스처를 되읽는다, 전에는 알리고 건너뛰었다)
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.

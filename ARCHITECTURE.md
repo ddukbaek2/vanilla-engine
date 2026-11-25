@@ -174,7 +174,7 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
 - 소리 내기: 데스크탑은 cpal 로 기본 출력 장치를 열고 그 표본율(원본 AudioContext 의 하드웨어 표본율)로 엔진 믹서를 돌린다. 원본이 짓는 그래프(AudioBufferSourceNode → 플레이어 GainNode → [StereoPannerNode] → 버스 GainNode 또는 출력, 비프 오실레이터 → 출력)를 128 프레임 퀀텀으로 그리고, 소스(시작 위치, 선형 보간과 끝의 외삽, 루프, playbackRate 는 f32), StereoPanner(모노와 스테레오 식), GainNode, 모노를 양쪽에 올리는 섞기, 출력의 -1 ~ 1 자르기를 크로미엄 audio_buffer_source_handler.cc, stereo_panner.cc 와 같게 셈한다. `tests/assets/mixer` 의 그래프 다섯이 크롬 158 OfflineAudioContext 와 1e-6 안에서 같다.
 - "data:" 주소: 데스크탑 애셋 읽기(request_asset_bytes, load_image, load_audio_asset)와 타임라인이 base/dataurl.rs 로 푼다. 웹은 기준 주소를 붙이지 않고 브라우저 fetch 에 맡긴다.
 - 글꼴: ttf, otf, woff, woff2 를 읽는다. 데스크탑은 woff, woff2 를 wuff 로 풀고, 운영체제 글꼴은 글꼴 모음(TTC)에서 이름이나 굵기로 얼굴을 고른다. 웹은 원본처럼 글꼴 바이트를 document.fonts 의 FontFace 로 올린다.
-- 이미지는 GPU 에 올린 뒤 CPU 픽셀을 놓는다. 픽셀을 다시 읽을 그림은 `Image.set_pixels_retained(true)` 로 남긴다. (ShadowImage 는 받은 그림을 스스로 남기고, 이미 놓였으면 텍스처를 프레임버퍼에 붙여 되읽는다) GL 컨텍스트를 잃었다 되살리는 길은 아직 없다.
+- 이미지는 GPU 에 올린 뒤 CPU 픽셀을 놓는다. 픽셀을 다시 읽을 그림은 `Image.set_pixels_retained(true)` 로 남긴다. (ShadowImage 는 받은 그림을 스스로 남기고, 이미 놓였으면 텍스처를 프레임버퍼에 붙여 되읽는다. Canvas2D 의 drawImage 와 createPattern 도 놓인 그림은 텍스처에서 되읽는다) GL 컨텍스트를 잃었다 되살리는 길은 아직 없다.
 - 기본 글꼴은 엔진에 넣지 않는다. 둘 다 시스템 글꼴이 기본이다.
   - 데스크탑: `default_font_paths` 가 비었으면(기본) 원본 SYSTEM_FONT_STRING 의 이름 차례로 운영체제 글꼴을 찾아 사슬로 잇는다. 맥은 크롬처럼 -apple-system 을 모르는 이름으로 넘겨 Apple SD Gothic Neo, 윈도우는 Segoe UI 와 맑은 고딕이다. 폰트 문자열의 올리지 않은 이름도 운영체제 글꼴에서 찾고, 일반 이름(serif, sans-serif, monospace 등)은 크롬의 기본 글꼴 표대로 고른다. 글꼴 목록에 없는 글자는 운영체제가 고른 대체 글꼴(맥 CoreText, 윈도우 DirectWrite, 리눅스 fontconfig)로 그린다. (platform/desktop/systemfont.rs)
   - 웹: 원본처럼 늘 브라우저 Canvas2D 로 굽고 잰다. (platform/web/systemfont.rs)
@@ -216,7 +216,7 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
   - rustybuzz 는 글리프 위치를 글꼴 단위 정수로 들어 GPOS 가변 델타를 반올림한다. HarfBuzz 15 는 소수로 든다. 맥 SFNS 18, 20, 21, 24px 의 "Hello World Wifi" 너비가 크롬과 0.002 ~ 0.004px 다르다.
   - 윈도우와 리눅스의 글꼴 갈래(DirectWrite, 메뉴 글꼴, fontconfig, 부모 글꼴 치수)는 그 대상으로 컴파일해 보았고 실행해 크롬과 견주지는 못했다.
   - 데스크탑 AVIF 는 색 프로필 변환과 움직이는 AVIF 를 하지 않는다.
-  - 데스크탑 Canvas2D 는 arc, ellipse, arcTo, roundRect 를 3 차 베지어로 잇는다(크롬 Skia 는 원뿔 곡선, 반지름의 0.03% 안쪽), roundRect 모서리는 수 반지름만 받는다(DOMPointInit 타원 모서리는 받지 않는다), 그림자 흐림은 상자 흐림 세 번이다. 엔진 Image 를 그리려면 CPU 픽셀이 남아 있어야 한다. (GPU 에 올린 뒤 놓은 그림은 알리고 건너뛴다)
+  - 데스크탑 Canvas2D 의 그림자 흐림은 상자 흐림 세 번이다. 경로의 arc, ellipse, arcTo, roundRect 는 크롬과 같은 스키아 원뿔 곡선 점과 무게이고(블링크 canvas_path.cc, 스키아 SkPathBuilder 의 셈), 칠할 때는 스키아 CPU 래스터처럼 기기 픽셀 0.25 안의 2 차 곡선으로 나눈다. 크롬이 GPU 로 칠하는 캔버스의 곡선 나누기와는 가장자리 픽셀이 다를 수 있다.
   - 데스크탑 PaneStyle 은 프리셋과 원본 도구가 쓰는 CSS(블록과 flex 배치, flex 비율과 세로 flex, min, max, 쪽마다 여백과 테두리, overflow 자르기와 휠, 썸 끌기 스크롤)를 읽는다. flex-wrap 줄넘김과 말줄임(white-space, text-overflow)은 읽지 않고, 스크롤 막대는 자리를 차지하지 않는 얹는 썸이다. (여러 줄 입력 필드도 같다) textarea 는 엔진 여러 줄 입력 필드가 받는다.
   - 데스크탑 질문 창과 브라우저 문맥 메뉴의 치수와 색은 크롬 main 의 값(MessageBoxView 폭 400, 여백 20, 제목 16px, 기본 밝은 팔레트 같은 것)이고, 흐린 그림자는 겹친 둥근 사각형으로 갈음한다. 단추와 입력 칸 높이는 크롬 셈을 기본 글꼴로 갈음한 값이다.
   - 직접 누르는 입력 필드의 크롬 편집 칸 메뉴는 데스크탑에서 오른쪽 단추로 연다. 손가락 길게 누르기로는 열지 않는다.

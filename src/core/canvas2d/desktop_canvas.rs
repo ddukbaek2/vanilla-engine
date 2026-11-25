@@ -1,7 +1,7 @@
 //==============================================================================
 // 2D 그리기 대상의 데스크탑 판. (tiny-skia 로 칠한다, core/canvas2d.rs 머리 주석)
 //==============================================================================
-use super::{is_composite_operation_name, normalize_line_dash, premultiply_pixels, unpremultiply_pixels, CanvasFillRule, CanvasGradient, CanvasGradientKind, CanvasImageSource, CanvasLineCap, CanvasLineJoin, CanvasMatrix, CanvasPattern, CanvasPatternRepetition, CanvasStyle, CanvasTextAlign, CanvasTextBaseline, ImageData, Path2D, PathSegment};
+use super::{convert_conic_to_quads, evaluate_conic, is_composite_operation_name, normalize_line_dash, premultiply_pixels, unpremultiply_pixels, CanvasFillRule, CanvasGradient, CanvasGradientKind, CanvasImageSource, CanvasLineCap, CanvasLineJoin, CanvasMatrix, CanvasPattern, CanvasPatternRepetition, CanvasRadius, CanvasStyle, CanvasTextAlign, CanvasTextBaseline, ImageData, Path2D, PathSegment};
 use crate::base::color::Color;
 use crate::core::image::Image;
 use crate::core::textshaping::ShapingDirection;
@@ -697,7 +697,7 @@ impl Canvas2D {
 	//==============================================================================
 	pub fn arc(&mut self, x: f32, y: f32, radius: f32, start_angle: f32, end_angle: f32, is_counterclockwise: bool) -> bool {
 		let matrix = self.state.transform;
-		self.path.ellipse_with(&matrix, x, y, radius, radius, 0.0, start_angle, end_angle, is_counterclockwise)
+		self.path.arc_with(&matrix, x, y, radius, start_angle, end_angle, is_counterclockwise)
 	}
 
 	//==============================================================================
@@ -725,18 +725,19 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 둥근 사각형 조각. (원본 roundRect)
+	// 둥근 사각형 조각. (원본 roundRect, 반지름은 수(f32)나 타원 모서리((x, y), CanvasRadius::Elliptical))
 	//==============================================================================
-	pub fn round_rect(&mut self, x: f32, y: f32, width: f32, height: f32, radius_list: &[f32]) -> bool {
+	pub fn round_rect<R: Into<CanvasRadius> + Copy>(&mut self, x: f32, y: f32, width: f32, height: f32, radius_list: &[R]) -> bool {
 		let matrix = self.state.transform;
-		self.path.round_rect_with(&matrix, x, y, width, height, radius_list)
+		let radius_list: Vec<CanvasRadius> = radius_list.iter().map(|radius| (*radius).into()).collect();
+		self.path.round_rect_with(&matrix, x, y, width, height, &radius_list)
 	}
 
 	//==============================================================================
 	// 지금 경로 채우기. (원본 fill(fillRule))
 	//==============================================================================
 	pub fn fill(&mut self, fill_rule: CanvasFillRule) {
-		if let Some(path) = build_skia_path(&self.path) {
+		if let Some(path) = build_skia_path(&self.path, CONIC_TOLERANCE) {
 			let shape = CanvasShape::Fill {
 				path,
 				fill_rule: convert_fill_rule(fill_rule),
@@ -751,7 +752,7 @@ impl Canvas2D {
 	// 경로 채우기. (원본 fill(path, fillRule), 경로는 지금 변환으로 옮겨 칠한다)
 	//==============================================================================
 	pub fn fill_path(&mut self, path: &Path2D, fill_rule: CanvasFillRule) {
-		if let Some(skia_path) = build_skia_path(path) {
+		if let Some(skia_path) = build_skia_path(path, CONIC_TOLERANCE / calculate_resolution_scale(&self.state.transform)) {
 			let shape = CanvasShape::Fill {
 				path: skia_path,
 				fill_rule: convert_fill_rule(fill_rule),
@@ -783,7 +784,7 @@ impl Canvas2D {
 	// 경로 긋기. (원본 stroke(path))
 	//==============================================================================
 	pub fn stroke_path(&mut self, path: &Path2D) {
-		let skia_path = match build_skia_path(path) {
+		let skia_path = match build_skia_path(path, CONIC_TOLERANCE / calculate_resolution_scale(&self.state.transform)) {
 			Some(skia_path) => {
 				skia_path
 			}
@@ -836,7 +837,8 @@ impl Canvas2D {
 				}
 			}
 		};
-		match build_skia_path(path) {
+		let resolution_scale = calculate_resolution_scale(&CanvasMatrix::create(transform.sx, transform.ky, transform.kx, transform.sy, transform.tx, transform.ty));
+		match build_skia_path(path, CONIC_TOLERANCE / resolution_scale) {
 			Some(skia_path) => {
 				clip_mask.intersect_path(&skia_path, convert_fill_rule(fill_rule), true, transform);
 			}
@@ -1528,26 +1530,61 @@ fn build_rect_path(x: f32, y: f32, width: f32, height: f32) -> Option<tiny_skia:
 }
 
 //==============================================================================
-// 엔진 경로 → tiny-skia 경로. (비었으면 None)
+// 원뿔 곡선을 2 차 곡선으로 나누는 허용 오차. (스키아 CPU 래스터 SkEdgeBuilder 의 kConicTol, 기기 픽셀)
 //==============================================================================
-fn build_skia_path(path: &Path2D) -> Option<tiny_skia::Path> {
+const CONIC_TOLERANCE: f32 = 0.25;
+
+//==============================================================================
+// 변환의 배율. (스키아 SkMatrixPriv::ComputeResScaleForStroking: 두 열 길이 가운데 큰 쪽, 유한하지 않거나 0 이면 1)
+//==============================================================================
+fn calculate_resolution_scale(matrix: &CanvasMatrix) -> f32 {
+	let scale_x = (matrix.a * matrix.a + matrix.b * matrix.b).sqrt();
+	let scale_y = (matrix.c * matrix.c + matrix.d * matrix.d).sqrt();
+	if scale_x.is_finite() && scale_y.is_finite() {
+		let scale = scale_x.max(scale_y);
+		if scale > 0.0 {
+			return scale;
+		}
+	}
+	1.0
+}
+
+//==============================================================================
+// 엔진 경로 → tiny-skia 경로. (비었으면 None, 원뿔 곡선은 conic_tolerance 안의 2 차 곡선들로)
+//==============================================================================
+fn build_skia_path(path: &Path2D, conic_tolerance: f32) -> Option<tiny_skia::Path> {
 	let mut path_builder = PathBuilder::new();
+	let mut last_point = (0.0, 0.0);
+	let mut subpath_start_point = (0.0, 0.0);
 	for segment in path.get_segment_list() {
 		match *segment {
 			PathSegment::MoveTo(x, y) => {
 				path_builder.move_to(x, y);
+				last_point = (x, y);
+				subpath_start_point = (x, y);
 			}
 			PathSegment::LineTo(x, y) => {
 				path_builder.line_to(x, y);
+				last_point = (x, y);
 			}
 			PathSegment::QuadraticTo(control_x, control_y, x, y) => {
 				path_builder.quad_to(control_x, control_y, x, y);
+				last_point = (x, y);
 			}
 			PathSegment::CubicTo(first_control_x, first_control_y, second_control_x, second_control_y, x, y) => {
 				path_builder.cubic_to(first_control_x, first_control_y, second_control_x, second_control_y, x, y);
+				last_point = (x, y);
+			}
+			PathSegment::ConicTo(control_x, control_y, x, y, weight) => {
+				let point_list = convert_conic_to_quads(last_point, (control_x, control_y), (x, y), weight, conic_tolerance);
+				for quad_points in point_list[1..].chunks_exact(2) {
+					path_builder.quad_to(quad_points[0].0, quad_points[0].1, quad_points[1].0, quad_points[1].1);
+				}
+				last_point = (x, y);
 			}
 			PathSegment::Close => {
 				path_builder.close();
+				last_point = subpath_start_point;
 			}
 		}
 	}
@@ -1567,6 +1604,15 @@ fn is_point_inside(path: &Path2D, matrix: &CanvasMatrix, x: f32, y: f32, fill_ru
 	let curve_step_count = 16;
 	for segment in path.get_segment_list() {
 		match *segment {
+			PathSegment::ConicTo(control_x, control_y, point_x, point_y, weight) => {
+				let control = matrix.transform_point(control_x, control_y);
+				let end = matrix.transform_point(point_x, point_y);
+				for step_index in 1..=curve_step_count {
+					let time = step_index as f32 / curve_step_count as f32;
+					current_polygon.push(evaluate_conic(last_point, control, end, weight, time));
+				}
+				last_point = end;
+			}
 			PathSegment::MoveTo(point_x, point_y) => {
 				if current_polygon.len() > 1 {
 					polygon_list.push(std::mem::take(&mut current_polygon));
