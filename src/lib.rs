@@ -4,6 +4,51 @@
 //! - 원본의 WebGL2 렌더러는 OpenGL 3.3 코어(glow)로, 캔버스와 DOM 이벤트는 창(winit)과 GL 컨텍스트(glutin)로 바꿨다.
 //!   웹(wasm32)으로 빌드하면 원본처럼 캔버스와 WebGL2, request_animation_frame 으로 돈다. (platform/web.rs)
 //! - 이름은 러스트 규칙을 따른다. (함수와 변수는 snake_case, 타입과 열거 값은 UpperCamelCase, 상수는 SCREAMING_SNAKE_CASE, 원본의 setFillColor 는 set_fill_color)
+//! - 쓰는 꼴: Scene 트레이트를 구현한 씬(SceneBase 를 품는다)을 만들어 Engine::new(설정).run(첫 씬) 으로 돌린다. 공개 타입은 대부분 크레이트 뿌리(vanilla::)에서 바로 쓴다.
+//!
+//! # 예제
+//! 씬 하나를 만들어 흰 사각형 하나를 그리기 (창이 떠서 컴파일만, examples/quickstart.rs 와 같다)
+//! ```rust,no_run
+//! use vanilla::{Colors, Engine, EngineConfiguration, Graphic, Rect, Scene, SceneBase, Vector2};
+//!
+//! struct MainScene {
+//! 	scene_base: SceneBase,
+//! }
+//!
+//! impl Scene for MainScene {
+//! 	fn get_scene_base(&self) -> &SceneBase {
+//! 		&self.scene_base
+//! 	}
+//!
+//! 	fn get_scene_base_mut(&mut self) -> &mut SceneBase {
+//! 		&mut self.scene_base
+//! 	}
+//!
+//! 	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+//! 		self.scene_base.draw_scene_background(engine, graphic);
+//! 	}
+//!
+//! 	fn draw(&mut self, _engine: &mut Engine, graphic: &mut Graphic) {
+//! 		graphic.set_fill_color(Colors::WHITE);
+//! 		graphic.draw_rect(Rect::create(100.0, 100.0, 200.0, 120.0));
+//! 	}
+//! }
+//!
+//! fn main() {
+//! 	let mut engine_configuration = EngineConfiguration::new();
+//! 	engine_configuration.title = String::from("Vanilla Engine");
+//! 	engine_configuration.auto_resize_on_window_resize = true;
+//! 	engine_configuration.reference_resolution_size = Vector2::create(1280.0, 720.0);
+//! 	let engine = Engine::new(engine_configuration);
+//! 	let main_scene = MainScene {
+//! 		scene_base: SceneBase::new(),
+//! 	};
+//! 	if let Err(error) = engine.run(Box::new(main_scene)) {
+//! 		eprintln!("{}", error);
+//! 		std::process::exit(1);
+//! 	}
+//! }
+//! ```
 //==============================================================================
 #![allow(clippy::too_many_arguments)]
 

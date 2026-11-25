@@ -3,9 +3,7 @@
 //! - 쪽 그림 몇 장에 모은 그림을 이름으로 꺼낸다. 같은 쪽 그림을 쓰는 스프라이트는 엔진이 묶어 한 번에 그린다.
 //! - 읽는 JSON 꼴은 원본과 같은 둘이다.
 //!   1. tools/atlas.cjs 가 만든 것. { images: { "이름.png": { x, y, width, height, page } }, meta: { imageFileName, pages: [{ imageFileName }] } }
-//!   ```text
 //!      page 가 없으면 0 쪽, meta.pages 가 없으면 meta.imageFileName 한 장이다.
-//!   ```
 //!   2. 쪽 경로와 [쪽, x, y, 가로, 세로] 표. { pagePaths: `["경로"]`, frames: { "이름": [쪽, x, y, 가로, 세로] } }
 //! - 그림 이름은 확장자를 뗀 이름으로도 찾는다. ("icon-close.png" 는 "icon-close" 로도 "icon-close.png" 로도 찾는다)
 //! - 쪽 경로에 빗금(/)이 없으면 JSON 이 있는 폴더를 기준으로, 있으면 적힌 그대로 읽는다. ("./" 로 시작하면 그 "./" 를 떼고 애셋 폴더 기준이다)
@@ -240,6 +238,22 @@ impl SpriteAtlasLoad {
 //==============================================================================
 /// 아틀라스 받기 손잡이. (SpriteAtlas::load, load_data 가 돌려준다. 원본 load 의 Promise 자리, 아틀라스를 빌리지 않는다)
 /// - await 하면 JSON 과 쪽 그림을 다 받아 조각을 지을 때까지 기다린다. (기다리는 동안 프레임마다 update 를 불러 준다)
+///
+/// # 예제
+/// 엔진 작업 안에서 아틀라스 받기를 기다리기 (데스크탑은 load 에서 이미 끝나 바로 넘어간다)
+/// ```rust
+/// use vanilla::{Engine, EngineConfiguration, SpriteAtlas};
+///
+/// let mut engine = Engine::new(EngineConfiguration::new());
+/// let mut sprite_atlas = SpriteAtlas::new();
+/// let atlas_load_handle = sprite_atlas.load(&engine, "examples/assets/atlas/icons.json");
+/// assert!(atlas_load_handle.is_finished());
+/// let task_handle = engine.spawn_task(|_engine_context| async move {
+/// 	atlas_load_handle.await;
+/// });
+/// assert!(task_handle.is_finished());
+/// assert!(sprite_atlas.has_frame("star"));
+/// ```
 //==============================================================================
 #[derive(Clone)]
 pub struct SpriteAtlasLoadHandle {
@@ -249,6 +263,9 @@ pub struct SpriteAtlasLoadHandle {
 impl SpriteAtlasLoadHandle {
 	//==============================================================================
 	/// 끝났는지. (조각을 지었거나 자료를 읽지 못해 끝났거나)
+	///
+	/// # 돌려줌
+	/// 조각을 지었거나 자료를 읽지 못해 끝났으면 true.
 	//==============================================================================
 	pub fn is_finished(&self) -> bool {
 		self.atlas_load.is_finished.get()
@@ -271,6 +288,23 @@ impl IntoFuture for SpriteAtlasLoadHandle {
 
 //==============================================================================
 /// 아틀라스 받기를 기다리는 퓨처. (손잡이를 await 하거나 wait_for_load 가 돌려준다)
+/// - 폴링할 때마다 update 를 부른다. 원본처럼 자료를 읽지 못해도 끝난다.
+///
+/// # 예제
+/// load 를 부른 뒤 wait_for_load 로 기다리기
+/// ```rust
+/// use vanilla::{Engine, EngineConfiguration, SpriteAtlas};
+///
+/// let mut engine = Engine::new(EngineConfiguration::new());
+/// let mut sprite_atlas = SpriteAtlas::new();
+/// sprite_atlas.load(&engine, "examples/assets/atlas/icons.json");
+/// let atlas_load_future = sprite_atlas.wait_for_load();
+/// let task_handle = engine.spawn_task(|_engine_context| async move {
+/// 	atlas_load_future.await;
+/// });
+/// assert!(task_handle.is_finished());
+/// assert!(sprite_atlas.is_loaded());
+/// ```
 //==============================================================================
 #[derive(Clone)]
 pub struct SpriteAtlasLoadFuture {
@@ -295,6 +329,27 @@ impl Future for SpriteAtlasLoadFuture {
 
 //==============================================================================
 /// 스프라이트 아틀라스.
+/// - 쪽 그림 몇 장에 모은 그림을 이름으로 꺼내 스프라이트에 건다. 이름은 확장자를 뗀 것으로도 찾는다.
+///
+/// # 예제
+/// 저장소의 아틀라스를 읽어 조각을 스프라이트에 걸기
+/// ```rust
+/// use vanilla::{Engine, EngineConfiguration, Rect, Sprite, SpriteAtlas};
+///
+/// let engine = Engine::new(EngineConfiguration::new());
+/// let mut sprite_atlas = SpriteAtlas::new();
+/// sprite_atlas.load(&engine, "examples/assets/atlas/icons.json");
+/// assert!(sprite_atlas.is_loaded());
+/// assert_eq!(sprite_atlas.get_page_count(), 1);
+/// let coin_frame = sprite_atlas.read_frame("coin").expect("coin");
+/// assert_eq!(coin_frame.get_image_rect(), Rect::create(84.0, 55.0, 30.0, 30.0));
+/// assert!(sprite_atlas.has_frame("coin.png"));
+/// let mut sprite = Sprite::new();
+/// assert!(sprite_atlas.apply_frame(&mut sprite, "star"));
+/// assert_eq!(sprite.get_image_rect(), Rect::create(63.0, 2.0, 48.0, 48.0));
+/// assert!(!sprite_atlas.apply_frame(&mut sprite, "nothing"));
+/// assert!(sprite.get_image().is_none());
+/// ```
 //==============================================================================
 pub struct SpriteAtlas {
 	atlas_load: Rc<SpriteAtlasLoad>,
@@ -320,6 +375,9 @@ fn remove_extension(file_name: &str) -> &str {
 impl SpriteAtlas {
 	//==============================================================================
 	/// 생성.
+	///
+	/// # 돌려줌
+	/// 조각이 없는 빈 아틀라스.
 	//==============================================================================
 	pub fn new() -> SpriteAtlas {
 		SpriteAtlas {
@@ -331,6 +389,14 @@ impl SpriteAtlas {
 	//==============================================================================
 	/// 아틀라스 JSON 과 쪽 그림 불러오기. (JSON 이 오면 쪽 그림을 청한다, 데스크탑은 이 자리에서 다 읽힌다)
 	/// - 원본처럼 await 할 수 있는 손잡이를 돌려준다. (조각을 지을 때까지)
+	/// - 앞서 다 읽힌 조각은 새 것이 조각을 지을 때까지 그대로 쓴다.
+	///
+	/// # 인자
+	/// - `engine`: 바이트를 부탁할 엔진.
+	/// - `json_path`: 아틀라스 JSON 경로. (빗금 없는 쪽 경로는 이 JSON 이 있는 폴더 기준)
+	///
+	/// # 돌려줌
+	/// 조각을 짓거나 자료를 읽지 못해 끝나면 끝나는 손잡이. (아틀라스를 빌리지 않는다)
 	//==============================================================================
 	pub fn load(&mut self, engine: &Engine, json_path: &str) -> SpriteAtlasLoadHandle {
 		let base_directory = match json_path.rfind('/') {
@@ -353,6 +419,28 @@ impl SpriteAtlas {
 	//==============================================================================
 	/// 아틀라스 자료로 불러오기. (JSON 을 읽은 값이나 코드에 둔 같은 꼴의 값, 쪽 경로에 빗금이 없으면 base_directory 를 앞에 붙인다)
 	/// - 원본 loadData 처럼 await 할 수 있는 손잡이를 돌려준다. (쪽 그림을 다 받아 조각을 지을 때까지)
+	/// - 꼴을 모르는 자료면 알리고 조각 없이 끝난다.
+	///
+	/// # 인자
+	/// - `engine`: 쪽 그림을 부탁할 엔진.
+	/// - `atlas_data`: 아틀라스 자료. (images 와 meta 꼴이나 pagePaths 와 frames 꼴)
+	/// - `base_directory`: 빗금 없는 쪽 경로 앞에 그대로 이어 붙일 폴더. (빗금으로 끝나게 준다, 비우면 애셋 폴더 기준)
+	///
+	/// # 돌려줌
+	/// 조각을 짓거나 자료를 읽지 못해 끝나면 끝나는 손잡이. (아틀라스를 빌리지 않는다)
+	///
+	/// # 예제
+	/// 코드에 둔 쪽 경로와 표 꼴로 불러오기
+	/// ```rust
+	/// use vanilla::{Engine, EngineConfiguration, Rect, SpriteAtlas};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let atlas_data = serde_json::json!({ "pagePaths": ["icons.png"], "frames": { "gem": [0, 2, 2, 56, 40] } });
+	/// let mut sprite_atlas = SpriteAtlas::new();
+	/// let atlas_load_handle = sprite_atlas.load_data(&engine, &atlas_data, "examples/assets/atlas/");
+	/// assert!(atlas_load_handle.is_finished());
+	/// assert_eq!(sprite_atlas.read_frame("gem").expect("gem").get_image_rect(), Rect::create(2.0, 2.0, 56.0, 40.0));
+	/// ```
 	//==============================================================================
 	pub fn load_data(&mut self, engine: &Engine, atlas_data: &serde_json::Value, base_directory: &str) -> SpriteAtlasLoadHandle {
 		self.replace_atlas_load(SpriteAtlasLoad::new(None, base_directory));
@@ -396,6 +484,13 @@ impl SpriteAtlas {
 
 	//==============================================================================
 	/// 진행. (JSON 이 왔으면 쪽 그림을 청하고, 쪽 그림이 다 왔으면 조각을 짓는다. 끝났으면 true, 원본처럼 자료를 읽지 못해도 끝난다)
+	/// - 웹은 is_loaded 가 true 가 될 때까지 tick 에서 부른다. 데스크탑은 load 에서 이미 끝나 있다.
+	///
+	/// # 인자
+	/// - `engine`: 쪽 그림을 부탁할 엔진.
+	///
+	/// # 돌려줌
+	/// 끝났으면 true. 불러오기를 건 적이 없으면 false.
 	//==============================================================================
 	pub fn update(&mut self, engine: &Engine) -> bool {
 		self.atlas_load.update(engine)
@@ -403,6 +498,10 @@ impl SpriteAtlas {
 
 	//==============================================================================
 	/// 씬이 아틀라스 JSON 을 기다리게 맡기기. (쪽 그림은 JSON 이 온 뒤 update 가 청한다)
+	/// - load 로 건 불러오기만 맡긴다. (load_data 는 JSON 이 없어 아무것도 하지 않는다)
+	///
+	/// # 인자
+	/// - `scene_base`: JSON 애셋을 맡을 씬 공통 상태.
 	//==============================================================================
 	pub fn track_json_asset(&self, scene_base: &mut SceneBase) {
 		if let Some(json_asset) = &self.atlas_load.json_asset {
@@ -412,6 +511,9 @@ impl SpriteAtlas {
 
 	//==============================================================================
 	/// 다 읽혔는지. (조각을 지었는지, 다시 불러오는 동안은 원본처럼 앞의 것으로 본다)
+	///
+	/// # 돌려줌
+	/// 지금 보이는 불러오기가 조각을 지었으면 true.
 	//==============================================================================
 	pub fn is_loaded(&self) -> bool {
 		self.read_frame_table().is_some()
@@ -419,6 +521,9 @@ impl SpriteAtlas {
 
 	//==============================================================================
 	/// 다 읽히기를 기다리는 퓨처. (load 나 load_data 가 돌려준 손잡이를 await 하는 것과 같다. 아틀라스를 빌리지 않는다)
+	///
+	/// # 돌려줌
+	/// 마지막으로 건 불러오기가 끝나면 끝나는 퓨처. (불러오기를 건 적이 없으면 끝나지 않는다)
 	//==============================================================================
 	pub fn wait_for_load(&self) -> SpriteAtlasLoadFuture {
 		SpriteAtlasLoadFuture {
@@ -428,6 +533,12 @@ impl SpriteAtlas {
 
 	//==============================================================================
 	/// 조각 읽기. (없거나 아직 읽히지 않았으면 None)
+	///
+	/// # 인자
+	/// - `frame_name`: 그림 이름. (확장자를 뗀 이름도 된다)
+	///
+	/// # 돌려줌
+	/// 그 이름의 조각. 없거나 아직 읽히지 않았으면 None.
 	//==============================================================================
 	pub fn read_frame(&self, frame_name: &str) -> Option<&Frame> {
 		self.read_frame_table()?.get(frame_name)
@@ -435,6 +546,12 @@ impl SpriteAtlas {
 
 	//==============================================================================
 	/// 조각이 있는지.
+	///
+	/// # 인자
+	/// - `frame_name`: 그림 이름. (확장자를 뗀 이름도 된다)
+	///
+	/// # 돌려줌
+	/// 그 이름의 조각이 있으면 true. 아직 읽히지 않았으면 false.
 	//==============================================================================
 	pub fn has_frame(&self, frame_name: &str) -> bool {
 		self.read_frame(frame_name).is_some()
@@ -442,6 +559,13 @@ impl SpriteAtlas {
 
 	//==============================================================================
 	/// 스프라이트에 조각 걸기. (없는 이름이면 그림을 비우고 false)
+	///
+	/// # 인자
+	/// - `sprite`: 조각을 걸 스프라이트.
+	/// - `frame_name`: 그림 이름. (확장자를 뗀 이름도 된다)
+	///
+	/// # 돌려줌
+	/// 조각을 걸었으면 true. 없는 이름이거나 아직 읽히지 않았으면 그림을 비우고 false.
 	//==============================================================================
 	pub fn apply_frame(&self, sprite: &mut Sprite, frame_name: &str) -> bool {
 		let frame = self.read_frame(frame_name);
@@ -451,6 +575,9 @@ impl SpriteAtlas {
 
 	//==============================================================================
 	/// 쪽 그림 목록. (읽힌 쪽만, 쪽 차례, 다시 불러오는 동안은 원본처럼 앞의 것)
+	///
+	/// # 돌려줌
+	/// 읽혀 풀린 쪽 그림 목록. (읽히지 않았거나 풀지 못한 쪽은 빠진다)
 	//==============================================================================
 	pub fn get_page_images(&mut self) -> Vec<Rc<Image>> {
 		self.read_shown_atlas_load().atlas_data.borrow_mut().page_asset_list.iter_mut().filter_map(|page_asset| page_asset.get_image()).collect()
@@ -458,6 +585,9 @@ impl SpriteAtlas {
 
 	//==============================================================================
 	/// 쪽 수.
+	///
+	/// # 돌려줌
+	/// 자료에 적힌 쪽 그림 수. (자료를 읽기 전이면 0)
 	//==============================================================================
 	pub fn get_page_count(&self) -> usize {
 		self.read_shown_atlas_load().atlas_data.borrow().page_asset_list.len()
@@ -465,6 +595,23 @@ impl SpriteAtlas {
 
 	//==============================================================================
 	/// 조각 이름 목록.
+	///
+	/// # 돌려줌
+	/// 조각 이름 목록. (확장자가 있는 이름과 뗀 이름 모두, 차례는 정해지지 않는다. 읽히지 않았으면 빈 목록)
+	///
+	/// # 예제
+	/// 이름 목록은 정렬해서 본다
+	/// ```rust
+	/// use vanilla::{Engine, EngineConfiguration, SpriteAtlas};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let atlas_data = serde_json::json!({ "pagePaths": ["icons.png"], "frames": { "star": [0, 63, 2, 48, 48], "gem.png": [0, 2, 2, 56, 40] } });
+	/// let mut sprite_atlas = SpriteAtlas::new();
+	/// sprite_atlas.load_data(&engine, &atlas_data, "examples/assets/atlas/");
+	/// let mut frame_names = sprite_atlas.get_frame_names();
+	/// frame_names.sort();
+	/// assert_eq!(frame_names, vec!["gem", "gem.png", "star"]);
+	/// ```
 	//==============================================================================
 	pub fn get_frame_names(&self) -> Vec<String> {
 		self.read_frame_table().map(|frame_table| frame_table.keys().cloned().collect()).unwrap_or_default()
@@ -472,6 +619,29 @@ impl SpriteAtlas {
 
 	//==============================================================================
 	/// 여러 아틀라스에서 차례로 조각 찾기. (앞의 것이 이긴다, 원본 SpriteAtlas.findFrame 의 찾을 목록 자리)
+	///
+	/// # 인자
+	/// - `atlas_list`: 찾을 아틀라스 목록. (앞의 것부터 찾는다)
+	/// - `frame_name`: 그림 이름. (확장자를 뗀 이름도 된다)
+	///
+	/// # 돌려줌
+	/// 처음 찾은 조각. 어느 아틀라스에도 없으면 None.
+	///
+	/// # 예제
+	/// 같은 이름이면 앞의 아틀라스가 이긴다
+	/// ```rust
+	/// use vanilla::{Engine, EngineConfiguration, SpriteAtlas};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let mut first_atlas = SpriteAtlas::new();
+	/// first_atlas.load_data(&engine, &serde_json::json!({ "pagePaths": ["icons.png"], "frames": { "star": [0, 0, 0, 8, 8] } }), "examples/assets/atlas/");
+	/// let mut second_atlas = SpriteAtlas::new();
+	/// second_atlas.load(&engine, "examples/assets/atlas/icons.json");
+	/// let atlas_list = [&first_atlas, &second_atlas];
+	/// assert_eq!(SpriteAtlas::find_frame_in_order(&atlas_list, "star").expect("star").get_image_rect().size.x, 8.0);
+	/// assert_eq!(SpriteAtlas::find_frame_in_order(&atlas_list, "gem").expect("gem").get_image_rect().size.x, 56.0);
+	/// assert!(SpriteAtlas::find_frame_in_order(&atlas_list, "nothing").is_none());
+	/// ```
 	//==============================================================================
 	pub fn find_frame_in_order<'a>(atlas_list: &[&'a SpriteAtlas], frame_name: &str) -> Option<&'a Frame> {
 		atlas_list.iter().find_map(|sprite_atlas| sprite_atlas.read_frame(frame_name))
@@ -479,6 +649,14 @@ impl SpriteAtlas {
 
 	//==============================================================================
 	/// 여러 아틀라스에서 차례로 찾은 조각을 스프라이트에 걸기. (없으면 그림을 비우고 false, 원본 applySearchFrame)
+	///
+	/// # 인자
+	/// - `atlas_list`: 찾을 아틀라스 목록. (앞의 것부터 찾는다)
+	/// - `sprite`: 조각을 걸 스프라이트.
+	/// - `frame_name`: 그림 이름. (확장자를 뗀 이름도 된다)
+	///
+	/// # 돌려줌
+	/// 조각을 걸었으면 true. 어느 아틀라스에도 없으면 그림을 비우고 false.
 	//==============================================================================
 	pub fn apply_frame_in_order(atlas_list: &[&SpriteAtlas], sprite: &mut Sprite, frame_name: &str) -> bool {
 		let frame = SpriteAtlas::find_frame_in_order(atlas_list, frame_name);
@@ -488,6 +666,31 @@ impl SpriteAtlas {
 
 	//==============================================================================
 	/// 찾을 아틀라스 넣기. (맨 뒤에 넣는다, 이미 들었으면 그대로)
+	/// - 목록은 스레드 하나에 하나다. 같은 아틀라스인지는 Rc 가 같은 것을 가리키는지로 본다.
+	///
+	/// # 인자
+	/// - `sprite_atlas`: 넣을 아틀라스. (나눠 든다)
+	///
+	/// # 예제
+	/// 찾을 목록에 넣고 이름으로 찾아 걸기
+	/// ```rust
+	/// use std::cell::RefCell;
+	/// use std::rc::Rc;
+	/// use vanilla::{Engine, EngineConfiguration, Sprite, SpriteAtlas};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let mut sprite_atlas = SpriteAtlas::new();
+	/// sprite_atlas.load(&engine, "examples/assets/atlas/icons.json");
+	/// let sprite_atlas = Rc::new(RefCell::new(sprite_atlas));
+	/// SpriteAtlas::add_search_atlas(&sprite_atlas);
+	/// assert_eq!(SpriteAtlas::find_frame("heart").expect("heart").get_image_rect().size.x, 40.0);
+	/// let mut sprite = Sprite::new();
+	/// assert!(SpriteAtlas::apply_search_frame(&mut sprite, "leaf"));
+	/// assert!(!SpriteAtlas::apply_search_frame(&mut sprite, "nothing"));
+	/// SpriteAtlas::remove_search_atlas(&sprite_atlas);
+	/// assert!(SpriteAtlas::find_frame("heart").is_none());
+	/// SpriteAtlas::clear_search_atlases();
+	/// ```
 	//==============================================================================
 	pub fn add_search_atlas(sprite_atlas: &Rc<RefCell<SpriteAtlas>>) {
 		SEARCH_ATLAS_LIST.with(|search_atlas_list| {
@@ -501,6 +704,9 @@ impl SpriteAtlas {
 
 	//==============================================================================
 	/// 찾을 아틀라스 빼기.
+	///
+	/// # 인자
+	/// - `sprite_atlas`: 뺄 아틀라스. (Rc 가 같은 것을 가리키는 것을 뺀다, 없으면 아무것도 하지 않는다)
 	//==============================================================================
 	pub fn remove_search_atlas(sprite_atlas: &Rc<RefCell<SpriteAtlas>>) {
 		SEARCH_ATLAS_LIST.with(|search_atlas_list| {
@@ -519,6 +725,12 @@ impl SpriteAtlas {
 
 	//==============================================================================
 	/// 찾을 아틀라스들에서 조각 찾기. (넣은 차례로, 없으면 None, 다른 곳에서 고치는 중인 아틀라스는 건너뛴다)
+	///
+	/// # 인자
+	/// - `frame_name`: 그림 이름. (확장자를 뗀 이름도 된다)
+	///
+	/// # 돌려줌
+	/// 처음 찾은 조각의 복사. (그림 Rc 와 영역이라 값싸다) 어디에도 없으면 None.
 	//==============================================================================
 	pub fn find_frame(frame_name: &str) -> Option<Frame> {
 		SEARCH_ATLAS_LIST.with(|search_atlas_list| {
@@ -535,6 +747,13 @@ impl SpriteAtlas {
 
 	//==============================================================================
 	/// 찾을 아틀라스들에서 찾은 조각을 스프라이트에 걸기. (없으면 그림을 비우고 false)
+	///
+	/// # 인자
+	/// - `sprite`: 조각을 걸 스프라이트.
+	/// - `frame_name`: 그림 이름. (확장자를 뗀 이름도 된다)
+	///
+	/// # 돌려줌
+	/// 조각을 걸었으면 true. 어디에도 없으면 그림을 비우고 false.
 	//==============================================================================
 	pub fn apply_search_frame(sprite: &mut Sprite, frame_name: &str) -> bool {
 		let frame = SpriteAtlas::find_frame(frame_name);
@@ -544,6 +763,9 @@ impl SpriteAtlas {
 }
 
 impl Default for SpriteAtlas {
+	//==============================================================================
+	/// 조각이 없는 빈 아틀라스. (new 와 같다)
+	//==============================================================================
 	fn default() -> SpriteAtlas {
 		SpriteAtlas::new()
 	}

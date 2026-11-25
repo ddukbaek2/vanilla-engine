@@ -11,6 +11,24 @@ use crate::misc::visual::Visual;
 
 //==============================================================================
 /// 비주얼 애셋.
+/// - load 는 경로만 적고 바로 끝난다. 읽힌 것으로 치지 않아(is_loaded 는 늘 false) 씬을 붙잡지 않는다. 비주얼은 set_visual 로 직접 건다.
+///
+/// # 예제
+/// 경로를 적고 비주얼을 직접 걸기
+/// ```rust
+/// use vanilla::{Asset, SceneBase, Visual, VisualAsset};
+///
+/// let mut visual_asset = VisualAsset::new();
+/// let load_handle = visual_asset.load("hero.visual");
+/// assert!(load_handle.is_finished());
+/// assert_eq!(visual_asset.get_asset_path(), "hero.visual");
+/// assert!(!visual_asset.is_loaded());
+/// let mut scene_base = SceneBase::new();
+/// scene_base.track_asset(&visual_asset);
+/// assert!(scene_base.are_tracked_assets_finished());
+/// visual_asset.set_visual(Some(Visual::new()));
+/// assert!(visual_asset.get_visual().is_some());
+/// ```
 //==============================================================================
 pub struct VisualAsset {
 	asset_base: AssetBase,
@@ -23,6 +41,9 @@ pub struct VisualAsset {
 impl VisualAsset {
 	//==============================================================================
 	/// 생성. (애셋 타입 visual)
+	///
+	/// # 돌려줌
+	/// 경로도 비주얼도 없는 비주얼 애셋.
 	//==============================================================================
 	pub fn new() -> VisualAsset {
 		VisualAsset {
@@ -35,6 +56,12 @@ impl VisualAsset {
 
 	//==============================================================================
 	/// 읽기. (이미 읽혔으면 아무것도 하지 않고, 아니면 경로만 적는다. 원본과 같다. await 하면 바로 끝나는 손잡이를 돌려준다)
+	///
+	/// # 인자
+	/// - `asset_path`: 적어 둘 경로. (파일은 읽지 않는다)
+	///
+	/// # 돌려줌
+	/// 빈 바이트로 이미 끝난 읽기 손잡이. (wait_for_load 도 이 손잡이를 기다린다)
 	//==============================================================================
 	pub fn load(&mut self, asset_path: &str) -> AssetLoadHandle {
 		if !self.is_loaded() {
@@ -47,6 +74,9 @@ impl VisualAsset {
 
 	//==============================================================================
 	/// 비주얼 설정.
+	///
+	/// # 인자
+	/// - `visual`: 걸 비주얼. None 이면 뗀다.
 	//==============================================================================
 	pub fn set_visual(&mut self, visual: Option<Visual>) {
 		self.visual = visual;
@@ -54,6 +84,9 @@ impl VisualAsset {
 
 	//==============================================================================
 	/// 비주얼 반환.
+	///
+	/// # 돌려줌
+	/// 건 비주얼. 걸지 않았으면 None.
 	//==============================================================================
 	pub fn get_visual(&self) -> Option<&Visual> {
 		self.visual.as_ref()
@@ -61,16 +94,25 @@ impl VisualAsset {
 }
 
 impl Default for VisualAsset {
+	//==============================================================================
+	/// 경로도 비주얼도 없는 비주얼 애셋. (new 와 같다)
+	//==============================================================================
 	fn default() -> VisualAsset {
 		VisualAsset::new()
 	}
 }
 
 impl Asset for VisualAsset {
+	//==============================================================================
+	/// 공통 상태. (읽기 손잡이를 두지 않는다)
+	//==============================================================================
 	fn get_asset_base(&self) -> &AssetBase {
 		&self.asset_base
 	}
 
+	//==============================================================================
+	/// 공통 상태. (변경용)
+	//==============================================================================
 	fn get_asset_base_mut(&mut self) -> &mut AssetBase {
 		&mut self.asset_base
 	}

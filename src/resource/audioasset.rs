@@ -27,6 +27,19 @@ use std::task::{Context, Poll};
 
 //==============================================================================
 /// 오디오 읽기 손잡이. (AudioAsset 의 load 들이 돌려준다. 원본 load 의 Promise 자리, 애셋을 나눠 든다)
+///
+/// # 예제
+/// 소리가 아닌 바이트는 데스크탑에서 그 자리에서 실패로 끝난다
+/// ```rust
+/// use std::rc::Rc;
+/// use vanilla::AudioAsset;
+///
+/// let audio_asset = Rc::new(AudioAsset::new());
+/// let audio_load_handle = audio_asset.load_from_bytes(vec![0, 1, 2, 3]);
+/// assert!(audio_load_handle.is_finished());
+/// assert!(audio_load_handle.get_load_error().is_some());
+/// assert!(!audio_load_handle.get_audio_asset().is_loaded());
+/// ```
 //==============================================================================
 #[derive(Clone)]
 pub struct AudioLoadHandle {
@@ -36,6 +49,9 @@ pub struct AudioLoadHandle {
 impl AudioLoadHandle {
 	//==============================================================================
 	/// 읽는 애셋.
+	///
+	/// # 돌려줌
+	/// 이 손잡이가 나눠 든 오디오 애셋.
 	//==============================================================================
 	pub fn get_audio_asset(&self) -> &Rc<AudioAsset> {
 		&self.audio_asset
@@ -43,6 +59,9 @@ impl AudioLoadHandle {
 
 	//==============================================================================
 	/// 읽기 실패의 까닭. (데스크탑은 그 자리에서, 웹은 디코딩이 끝난 뒤 알 수 있다)
+	///
+	/// # 돌려줌
+	/// 실패 까닭. 읽는 중이거나 읽혔으면 None.
 	//==============================================================================
 	pub fn get_load_error(&self) -> Option<String> {
 		self.audio_asset.get_load_error()
@@ -50,6 +69,9 @@ impl AudioLoadHandle {
 
 	//==============================================================================
 	/// 끝났는지. (디코딩까지 끝났거나 실패했거나)
+	///
+	/// # 돌려줌
+	/// 디코딩까지 끝났거나 실패했으면 true.
 	//==============================================================================
 	pub fn is_finished(&self) -> bool {
 		self.audio_asset.is_loaded() || self.audio_asset.get_load_error().is_some()
@@ -67,6 +89,24 @@ impl std::fmt::Debug for AudioLoadHandle {
 
 //==============================================================================
 /// 오디오 읽기를 기다리는 퓨처. (AudioLoadHandle 을 await 하거나 wait_for_load 가 돌려준다. 읽기를 걸지 않은 애셋이면 끝나지 않는다)
+/// - 디코딩까지 끝나면 Ok(()), 실패하면 Err(까닭)으로 끝난다.
+///
+/// # 예제
+/// 엔진 작업 안에서 소리 읽기를 기다리기
+/// ```rust
+/// use std::path::Path;
+/// use std::rc::Rc;
+/// use vanilla::{AudioAsset, Engine, EngineConfiguration};
+///
+/// let mut engine = Engine::new(EngineConfiguration::new());
+/// let audio_asset = Rc::new(AudioAsset::new());
+/// audio_asset.load(Path::new("tests/assets/audio/wav_s16_stereo.wav"));
+/// let audio_load_future = audio_asset.wait_for_load();
+/// let task_handle = engine.spawn_task(|_engine_context| async move {
+/// 	assert!(audio_load_future.await.is_ok());
+/// });
+/// assert!(task_handle.is_finished());
+/// ```
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct AudioLoadFuture {
@@ -107,6 +147,22 @@ impl IntoFuture for AudioLoadHandle {
 
 //==============================================================================
 /// 오디오 애셋.
+/// - 플레이어들이 같이 들 수 있게 `Rc<AudioAsset>` 로 쓴다. load 들이 Rc 에 대고 부르는 까닭이다.
+///
+/// # 예제
+/// 애셋 경로로 소리를 읽어 길이 보기
+/// ```rust
+/// use std::rc::Rc;
+/// use vanilla::{AudioAsset, Engine, EngineConfiguration};
+///
+/// let engine = Engine::new(EngineConfiguration::new());
+/// let audio_asset = Rc::new(AudioAsset::new());
+/// let audio_load_handle = audio_asset.load_from_asset(&engine, "tests/assets/audio/wav_s16_stereo.wav");
+/// assert!(audio_load_handle.get_load_error().is_none());
+/// assert!(audio_asset.is_loaded());
+/// assert!(audio_asset.get_duration() > 0.0);
+/// assert!(audio_asset.get_audio_buffer().is_some());
+/// ```
 //==============================================================================
 pub struct AudioAsset {
 	is_loaded: Cell<bool>,
@@ -117,6 +173,9 @@ pub struct AudioAsset {
 impl AudioAsset {
 	//==============================================================================
 	/// 생성. (비어 있는 애셋, load 로 채운다)
+	///
+	/// # 돌려줌
+	/// 버퍼도 실패 까닭도 없는 오디오 애셋.
 	//==============================================================================
 	pub fn new() -> AudioAsset {
 		AudioAsset {
@@ -129,6 +188,31 @@ impl AudioAsset {
 	//==============================================================================
 	/// 파일에서 읽기. (데스크탑: 바로 읽고 디코딩한다. 웹: 경로를 주소로 fetch 하고 디코딩을 걸어 둔다, await 할 수 있는 손잡이를 돌려준다)
 	/// - 이미 로드된 상태라면 아무것도 하지 않는다.
+	/// - 읽기 전에 앞의 실패 까닭을 지운다. 실패하면 까닭이 get_load_error 에 남는다.
+	///
+	/// # 인자
+	/// - `asset_path`: 소리 파일 경로. (데스크탑은 파일 경로 그대로, 웹은 fetch 할 주소, 애셋 폴더 기준으로 읽으려면 load_from_asset)
+	///
+	/// # 돌려줌
+	/// 읽기 손잡이. (데스크탑은 그 자리에서 디코딩까지 끝나 있다)
+	///
+	/// # 예제
+	/// 파일 경로로 읽고, 없는 파일은 까닭이 남는다
+	/// ```rust
+	/// use std::path::Path;
+	/// use std::rc::Rc;
+	/// use vanilla::AudioAsset;
+	///
+	/// let audio_asset = Rc::new(AudioAsset::new());
+	/// audio_asset.load(Path::new("tests/assets/audio/wav_u8_mono8k.wav"));
+	/// assert!(audio_asset.is_loaded());
+	/// assert!((audio_asset.get_duration() - 0.25).abs() < 0.01);
+	///
+	/// let missing_asset = Rc::new(AudioAsset::new());
+	/// let audio_load_handle = missing_asset.load(Path::new("tests/assets/audio/missing.wav"));
+	/// assert!(audio_load_handle.get_load_error().is_some());
+	/// assert_eq!(missing_asset.get_duration(), 0.0);
+	/// ```
 	//==============================================================================
 	pub fn load(self: &Rc<AudioAsset>, asset_path: &Path) -> AudioLoadHandle {
 		if !self.is_loaded() {
@@ -143,6 +227,14 @@ impl AudioAsset {
 	//==============================================================================
 	/// 애셋 경로로 읽기. (데스크탑은 애셋 폴더 후보, 웹은 asset_base_url 기준, "data:" 주소도 된다. 원본 load(경로) 자리, await 할 수 있는 손잡이를 돌려준다)
 	/// - 데스크탑의 data: 주소는 형을 보지 않고 바이트를 내용으로 가려 푼다. (원본 decodeAudioData 와 같다, 웹은 브라우저 fetch 가 푼다)
+	/// - 데스크탑에서 data: 주소를 풀지 못하면 실패 까닭을 남긴다.
+	///
+	/// # 인자
+	/// - `engine`: 애셋 폴더 후보와 웹 기준 주소를 가진 엔진.
+	/// - `relative_path`: 애셋 폴더 기준 상대 경로나 "data:" 주소.
+	///
+	/// # 돌려줌
+	/// 읽기 손잡이. (데스크탑은 그 자리에서 디코딩까지 끝나 있다)
 	//==============================================================================
 	pub fn load_from_asset(self: &Rc<AudioAsset>, engine: &Engine, relative_path: &str) -> AudioLoadHandle {
 		#[cfg(not(target_arch = "wasm32"))]
@@ -164,6 +256,26 @@ impl AudioAsset {
 
 	//==============================================================================
 	/// 메모리에서 읽기. (파일 내용 그대로. 데스크탑: 바로 디코딩한다. 웹: 디코딩을 걸어 둔다, await 할 수 있는 손잡이를 돌려준다)
+	/// - 이미 로드된 상태라면 아무것도 하지 않는다. 꼴은 확장자 없이 내용으로 가린다.
+	///
+	/// # 인자
+	/// - `bytes`: 소리 파일 바이트. (wav, mp3, ogg, webm, flac, m4a, aac)
+	///
+	/// # 돌려줌
+	/// 읽기 손잡이. (데스크탑은 그 자리에서 디코딩까지 끝나 있다)
+	///
+	/// # 예제
+	/// 파일 바이트를 메모리에서 디코딩하기
+	/// ```rust
+	/// use std::rc::Rc;
+	/// use vanilla::AudioAsset;
+	///
+	/// let wav_bytes = std::fs::read("tests/assets/audio/wav_s16_stereo.wav").expect("wav file");
+	/// let audio_asset = Rc::new(AudioAsset::new());
+	/// let audio_load_handle = audio_asset.load_from_bytes(wav_bytes);
+	/// assert!(audio_load_handle.is_finished());
+	/// assert!(audio_asset.is_loaded());
+	/// ```
 	//==============================================================================
 	pub fn load_from_bytes(self: &Rc<AudioAsset>, bytes: Vec<u8>) -> AudioLoadHandle {
 		if !self.is_loaded() {
@@ -186,6 +298,9 @@ impl AudioAsset {
 
 	//==============================================================================
 	/// 로드 여부.
+	///
+	/// # 돌려줌
+	/// 디코딩한 버퍼가 들어 있으면 true.
 	//==============================================================================
 	pub fn is_loaded(&self) -> bool {
 		self.is_loaded.get()
@@ -193,6 +308,9 @@ impl AudioAsset {
 
 	//==============================================================================
 	/// 마지막 읽기 실패의 까닭. (웹에서 디코딩이 끝난 뒤에 알 수 있다)
+	///
+	/// # 돌려줌
+	/// 실패 까닭. 실패한 적이 없거나 다시 읽기를 걸었으면 None.
 	//==============================================================================
 	pub fn get_load_error(&self) -> Option<String> {
 		self.load_error.borrow().clone()
@@ -201,6 +319,9 @@ impl AudioAsset {
 	//==============================================================================
 	/// 디코딩까지 끝나기를 기다리는 퓨처. (원본 await audioAsset.load() 의 await 자리, 엔진 작업 안에서 await 한다. 실패하면 까닭)
 	/// - 애셋을 나눠 들어 빌리지 않는다. 읽기를 걸지 않은 애셋이면 끝나지 않는다.
+	///
+	/// # 돌려줌
+	/// 디코딩까지 끝나면 Ok(()), 실패하면 Err(까닭)으로 끝나는 퓨처.
 	//==============================================================================
 	pub fn wait_for_load(self: &Rc<AudioAsset>) -> AudioLoadFuture {
 		self.create_load_handle().into_future()
@@ -208,6 +329,9 @@ impl AudioAsset {
 
 	//==============================================================================
 	/// 읽기 손잡이. (애셋을 나눠 든다, 읽기를 건 뒤의 것을 모아 기다릴 때)
+	///
+	/// # 돌려줌
+	/// 이 애셋을 나눠 든 새 읽기 손잡이.
 	//==============================================================================
 	pub fn get_load_handle(self: &Rc<AudioAsset>) -> AudioLoadHandle {
 		self.create_load_handle()
@@ -215,6 +339,9 @@ impl AudioAsset {
 
 	//==============================================================================
 	/// 오디오 버퍼 반환. (값싼 복제: 데스크탑은 Arc, 웹은 자바스크립트 객체 참조)
+	///
+	/// # 돌려줌
+	/// 디코딩한 버퍼. 읽히기 전이거나 실패했으면 None.
 	//==============================================================================
 	pub fn get_audio_buffer(&self) -> Option<AudioBuffer> {
 		self.audio_buffer.borrow().clone()
@@ -222,6 +349,9 @@ impl AudioAsset {
 
 	//==============================================================================
 	/// 재생 시간 반환. (초, 버퍼가 없으면 0)
+	///
+	/// # 돌려줌
+	/// 버퍼의 재생 시간. (초) 버퍼가 없으면 0.
 	//==============================================================================
 	pub fn get_duration(&self) -> f64 {
 		match self.audio_buffer.borrow().as_ref() {
@@ -251,6 +381,9 @@ impl AudioAsset {
 }
 
 impl Default for AudioAsset {
+	//==============================================================================
+	/// 비어 있는 오디오 애셋. (new 와 같다)
+	//==============================================================================
 	fn default() -> AudioAsset {
 		AudioAsset::new()
 	}
