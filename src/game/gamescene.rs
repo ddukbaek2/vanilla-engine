@@ -1243,6 +1243,45 @@ pub trait GameScene: 'static {
 	//==============================================================================
 	fn post_draw(&mut self, _engine: &mut Engine, _graphic: &mut Graphic) {
 	}
+
+	//==============================================================================
+	// 종료처리. (내릴 때 unload 앞, 원본 Scene.finalize 덮어쓰기)
+	//==============================================================================
+	fn finalize(&mut self, _engine: &mut Engine) {
+	}
+
+	//==============================================================================
+	// 로딩 해제. (내릴 때 finalize 뒤, 원본 Scene.unload 덮어쓰기)
+	//==============================================================================
+	fn unload(&mut self, _engine: &mut Engine) {
+	}
+
+	//==============================================================================
+	// 페이지 프로세스 복원과 가시성 복원. (원본 onPageProcessRestored, onPageVisibilityRestored 덮어쓰기)
+	//==============================================================================
+	fn on_page_process_restored(&mut self, _engine: &mut Engine) {
+	}
+
+	fn on_page_visibility_restored(&mut self, _engine: &mut Engine) {
+	}
+
+	//==============================================================================
+	// 씬의 터치 훅. (원본 touchPress, touchMove, touchRelease, touchCancel, touchWheel 덮어쓰기, 바탕이 UI 와 놀이 입력에 넘긴 뒤 엔진이 부른다)
+	//==============================================================================
+	fn touch_press(&mut self, _engine: &mut Engine, _view_input_position: Vector2) {
+	}
+
+	fn touch_move(&mut self, _engine: &mut Engine, _view_input_position: Vector2) {
+	}
+
+	fn touch_release(&mut self, _engine: &mut Engine, _view_input_position: Vector2) {
+	}
+
+	fn touch_cancel(&mut self, _engine: &mut Engine, _view_input_position: Vector2) {
+	}
+
+	fn touch_wheel(&mut self, _engine: &mut Engine, _view_input_position: Vector2, _wheel_delta: Vector2) {
+	}
 }
 
 //==============================================================================
@@ -1277,6 +1316,42 @@ macro_rules! game_scene {
 
 			fn destroy(&mut self, engine: &mut $crate::core::engine::Engine) {
 				$crate::game::gamescene::GameScene::destroy(self, engine);
+			}
+
+			fn finalize(&mut self, engine: &mut $crate::core::engine::Engine) {
+				$crate::game::gamescene::GameScene::finalize(self, engine);
+			}
+
+			fn unload(&mut self, engine: &mut $crate::core::engine::Engine) {
+				$crate::game::gamescene::GameScene::unload(self, engine);
+			}
+
+			fn on_page_process_restored(&mut self, engine: &mut $crate::core::engine::Engine) {
+				$crate::game::gamescene::GameScene::on_page_process_restored(self, engine);
+			}
+
+			fn on_page_visibility_restored(&mut self, engine: &mut $crate::core::engine::Engine) {
+				$crate::game::gamescene::GameScene::on_page_visibility_restored(self, engine);
+			}
+
+			fn touch_press(&mut self, engine: &mut $crate::core::engine::Engine, view_input_position: $crate::base::vector2::Vector2) {
+				$crate::game::gamescene::GameScene::touch_press(self, engine, view_input_position);
+			}
+
+			fn touch_move(&mut self, engine: &mut $crate::core::engine::Engine, view_input_position: $crate::base::vector2::Vector2) {
+				$crate::game::gamescene::GameScene::touch_move(self, engine, view_input_position);
+			}
+
+			fn touch_release(&mut self, engine: &mut $crate::core::engine::Engine, view_input_position: $crate::base::vector2::Vector2) {
+				$crate::game::gamescene::GameScene::touch_release(self, engine, view_input_position);
+			}
+
+			fn touch_cancel(&mut self, engine: &mut $crate::core::engine::Engine, view_input_position: $crate::base::vector2::Vector2) {
+				$crate::game::gamescene::GameScene::touch_cancel(self, engine, view_input_position);
+			}
+
+			fn touch_wheel(&mut self, engine: &mut $crate::core::engine::Engine, view_input_position: $crate::base::vector2::Vector2, wheel_delta: $crate::base::vector2::Vector2) {
+				$crate::game::gamescene::GameScene::touch_wheel(self, engine, view_input_position, wheel_delta);
 			}
 
 			fn resize(&mut self, engine: &mut $crate::core::engine::Engine, canvas_native_size: $crate::base::vector2::Vector2) {

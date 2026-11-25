@@ -216,6 +216,7 @@
 - BuildInfo: new() 와 set_version_json_path, is_loaded(load 전 거짓), read_meta_text 는 인스턴스 함수, 빌드 때 판은 set_package_version 으로. (BuildInfo::new(판) 을 바꾸는 일이다)
 - PointerCursor: get_button_cursor_name, get_default_cursor_name, is_coarse_pointer. FrameProbe: 설정 반환 함수들. Platform: is_coarse_pointer, get_safe_area_rect, get_resouce_usage(원본 이름 그대로). Identifier(원본 차례 번호, reset 은 처음 번호로, 원본은 아무것도 하지 않던 버그)
 - Localization.text_named: 빗금 앞뒤 빈칸을 원본 정규식 \s 처럼 탭과 줄바꿈까지 받는다. WebSocketClient.disconnect: 원본처럼 닫기만 걸고 다음 tick 에 끊긴 것으로 친다
+- GameScene, UIScene 트레이트에 finalize, unload, on_page_process_restored, on_page_visibility_restored, 씬의 터치 훅(touch_press, touch_move, touch_release, touch_cancel, touch_wheel)을 더하고 game_scene!, ui_scene! 이 Scene 의 같은 함수로 넘긴다. (원본 GameScene, UIScene 하위 클래스가 덮어쓰던 것)
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.
