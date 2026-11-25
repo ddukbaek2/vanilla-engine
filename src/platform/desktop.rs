@@ -1111,6 +1111,8 @@ mod tests {
 		assert_eq!(convert_key_code_to_code_name(winit::keyboard::KeyCode::NumpadAdd), crate::core::inputmanager::KeyCode::NUMPAD_ADD);
 		assert_eq!(convert_key_code_to_code_name(winit::keyboard::KeyCode::Backquote), crate::core::inputmanager::KeyCode::BACKQUOTE);
 		assert_eq!(convert_key_code_to_code_name(winit::keyboard::KeyCode::AudioVolumeUp), crate::core::inputmanager::KeyCode::AUDIOVOLUMEUP);
+		assert_eq!(convert_key_code_to_code_name(winit::keyboard::KeyCode::AudioVolumeMute), crate::core::inputmanager::KeyCode::AUDIOMUTE);
+		assert_eq!(convert_key_code_to_code_name(winit::keyboard::KeyCode::MediaPlayPause), crate::core::inputmanager::KeyCode::AUDIOPLAY);
 	}
 
 	//==============================================================================
