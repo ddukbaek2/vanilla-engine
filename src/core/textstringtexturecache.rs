@@ -1,28 +1,35 @@
 //==============================================================================
 // 문자열 텍스처 캐시.
 // - 원본은 오프스크린 2D 캔버스에 fillText / strokeText 로 문자열을 구워 텍스처로 쓴다. (LRU 상한 512)
-// - 여기서는 글자 모양 짓기(textshaping.rs: 양방향 정렬, rustybuzz 모양 짓기)로 글리프를 놓고 fontdue 로 래스터화해 문자열 한 장으로 굽는다.
+// - 데스크탑은 글자 모양 짓기(textshaping.rs: 양방향 정렬, rustybuzz 모양 짓기)로 글리프를 놓고 래스터화해(fontdue, 가변 글꼴은 skrifa 윤곽, 맥 색 이모지는 CoreText) 문자열 한 장으로 굽는다.
 //   상한과 키 구성(방식, 문단 방향, 폰트 문자열, 선 두께, 배율, 글)은 원본과 같다.
 //   원본은 키를 문자열로 이어 붙인다. 여기서는 찾을 때마다 문자열을 만들지 않게 키의 해시로 찾고, 같은 해시 안에서 키를 하나씩 맞춰 본다.
 // - 글자는 흰색으로 굽고, 그릴 때 색을 곱한다. (색이 바뀌어도 다시 굽지 않는다)
 //   색 글리프(이모지)는 제 색으로 흰 글자 위에 얹어 굽는다. 원본도 흰색으로 fillText 한 캔버스를 올리므로 이모지는 제 색으로 구워지고 그릴 때 같은 색이 곱해진다.
 //   외곽선(Stroke)으로 구울 때도 색 글리프는 테를 긋지 않고 색 그대로 얹는다. (크롬 strokeText 와 같다)
-// - 폰트 문자열은 Canvas2D font 와 같은 꼴을 읽는다. 예: "16px DOSGothic", "bold 24px default", "italic 500 16px default"
+// - 폰트 문자열은 Canvas2D font 와 같은 꼴(CSS font 줄임 꼴)을 읽는다. 예: "16px DOSGothic", "bold 24px default", "italic 500 16px default", "12pt 'A B', C, sans-serif"
+//   크기는 px 밖의 CSS 단위와 이름 크기도 읽고 "/줄높이"는 넘긴다. 쉼표로 이은 이름 목록은 글자마다 앞 이름의 얼굴부터 찾는다. (브라우저의 글꼴 목록과 같다, parse_font_string)
 // - 글꼴은 원본 document.fonts 처럼 이름 하나 아래에 얼굴(굵기, 기울기, 글자 범위)을 여럿 올린다. (register_font_face)
 //   고르기는 CSS 의 차례를 따르고, 기울인 얼굴이 없으면 가짜 기울임(기울기 1/4), 굵은 얼굴이 없으면 가짜 굵게를 글리프마다 입힌다. (textshaping.rs)
-// - 이름의 얼굴들에 없는 글자는 기본 폰트, 대체 폰트 순으로 찾는다. (브라우저의 글꼴 대체와 같은 자리)
-//   대체 글꼴 후보 파일은 쓸 때 읽는다. 이모지 표시 글자는 색 글리프 표가 있는 후보를, 그 밖의 글자는 색 글리프 표가 없는 후보를 먼저 읽는다. (표 목록만 먼저 엿본다)
+// - 이름의 얼굴들에 없는 글자는 기본 폰트, 시스템 글꼴 사슬, 대체 폰트 순으로 찾는다. (브라우저의 글꼴 대체와 같은 자리)
+//   데스크탑 시스템 글꼴 사슬(set_system_font_chain)은 원본 SYSTEM_FONT_STRING 의 이름을 운영체제 글꼴에서 찾은 것이고, 켜면 폰트 문자열의 올리지 않은 이름도
+//   운영체제 글꼴에서 찾는다. 얼굴은 그 굵기와 기울기의 글자를 처음 쓸 때 읽는다. (platform/desktop/systemfont.rs)
+//   대체 글꼴은 운영체제가 고른다. (set_system_font_fallback_enabled, 굵게를 청하면 굵은 얼굴을 따로 묻는다) 후보 파일을 주면(add_fallback_font_candidate) 그것을 먼저 쓴다.
+//   후보 파일은 쓸 때 읽는다. 이모지 표시 글자는 색 글리프 표가 있는 후보를, 그 밖의 글자는 색 글리프 표가 없는 후보를 먼저 읽는다. (표 목록만 먼저 엿본다)
 // - 글꼴 얼굴을 새로 올리면 그 이름을 쓰는 폰트 문자열로 구웠고 그 얼굴의 글자 범위에 든 글자가 있는 문자열만 버린다. (원본 invalidateFontFaces)
 //   원본처럼 set_rebake_text_on_font_load 로 켰을 때만 한다. (엔진이 EngineConfiguration.rebake_text_on_font_load 로 켠다, 기본 끔)
 //   끄면 받기 전에 다른 글꼴로 구운 글자는 캐시에서 밀려날 때까지 그대로 남는다. 얼굴 지우기와 차례 바꾸기는 켜짐과 상관없이 버린다.
 //   기본 폰트와 대체 폰트를 바꾸면 모두 버린다.
-// - 웹에서 글꼴 바이트가 하나도 없으면 원본처럼 브라우저 Canvas2D 로 굽고 잰다. 그래서 시스템 글꼴로 나온다. (platform/web/systemfont.rs)
+// - 웹은 원본처럼 늘 브라우저 Canvas2D 로 굽고 잰다. (platform/web/systemfont.rs) 올린 글꼴 바이트는 document.fonts 에 FontFace 로 올려 브라우저가 고르고 그린다.
+//   올린 글꼴이 받아지면(loadingdone) 프레임 시작에 구운 글을 버린다. 데스크탑은 위의 모양 짓기와 래스터로 굽는다.
 // - 글자 안티앨리어싱(set_text_antialias_enabled, 원본 setTextAntialiasEnabled): 끄면 구운 글자의 알파를 문턱값 128 로 0 과 255 로 가르고 텍스처를 NEAREST 로 뽑는다.
 //   도트 글꼴을 설계 크기의 정수 배로 그리는 프로젝트가 끈다. 원본은 모듈 전역 값이고 이미 구운 글자는 그대로 둔다.
 //   여기서는 캐시가 들고, 켜짐 여부를 키에 넣어 바꾼 다음 그리는 글자부터 바로 그 방식으로 굽는다. (rasterize_text 는 원본 ShadowText 처럼 받지 않는다)
 // - 글 재기(measure_text)는 폰트 문자열과 글이 같으면 다시 재지 않는다. (원본 measureTextMetrics 의 캐시, 2048 개)
 //   원본은 넘칠 때마다 가장 오래 안 쓴 하나를 버린다. 여기서는 넘치면 오래 안 쓴 반을 한 번에 버린다. (하나씩 찾으면 넘친 뒤로 잴 때마다 2048 개를 훑는다)
 //   글꼴을 새로 등록하면 비운다. (원본은 웹 글꼴이 받아지면 비운다) measure_text 가 &self 라 캐시는 RefCell 에 든다.
+// - 얼굴을 그때그때 받기(watch_unresolved_family_characters, take_unresolved_family_characters): 원본 브라우저는 올려 둔 FontFace 의 글자 범위에 든 글자를 그릴 때 그 얼굴을 받는다.
+//   러스트 판은 지켜보는 이름으로 재거나 구운 글에서 올린 얼굴의 범위에 들지 않은 글자를 모으고, UIFont 가 update 에서 꺼내 그 글자의 조각을 받는다.
 // - Graphic 없이 재기(measure_text_without_graphic): 원본은 어디서든 공용 2D 캔버스로 글을 잰다. 러스트 판은 글꼴을 등록할 때마다
 //   글꼴 목록(Rc)을 스레드 하나의 전역에 알려 두고, 그 목록으로 잰다. UI 레이아웃이 그리기 전에 글 줄 수를 알아야 할 때 쓴다. (UIConfirmWindow)
 //==============================================================================
@@ -40,12 +47,42 @@ use std::rc::Rc;
 //==============================================================================
 thread_local! {
 	static SHARED_MEASURE_CACHE: RefCell<Option<TextStringTextureCache>> = const { RefCell::new(None) };
+	// 지켜보는 이름(소문자) → 그 이름으로 재거나 구운 글 가운데 그 이름의 어느 얼굴의 글자 범위에도 들지 않은 글자. (UIFont 가 조각을 받는다)
+	static UNRESOLVED_FAMILY_CHARACTER_TABLE: RefCell<HashMap<String, std::collections::BTreeSet<char>>> = RefCell::new(HashMap::new());
+}
+
+//==============================================================================
+// 이름의 얼굴이 없는 글자 지켜보기 시작. (원본 브라우저는 FontFace 를 document.fonts 에 올려 두면 캔버스가 그 글꼴로 글을 그릴 때 그 글자의 범위에 든 얼굴을 받기 시작한다)
+// - 러스트 판은 얼굴을 받은 뒤에 올리므로, 지켜보는 이름으로 재거나 구운 글에서 올린 얼굴의 글자 범위에 들지 않은 글자를 모아 받는 쪽(UIFont)이 꺼내 받는다.
+//==============================================================================
+pub fn watch_unresolved_family_characters(family_name: &str) {
+	let family_key = family_name.trim().to_lowercase();
+	UNRESOLVED_FAMILY_CHARACTER_TABLE.with(|table_cell| {
+		table_cell.borrow_mut().entry(family_key).or_default();
+	});
+}
+
+//==============================================================================
+// 지켜보는 이름에서 얼굴이 없던 글자 꺼내기. (꺼내면 비운다, 지켜보지 않는 이름이면 빈 글)
+//==============================================================================
+pub fn take_unresolved_family_characters(family_name: &str) -> String {
+	let family_key = family_name.trim().to_lowercase();
+	UNRESOLVED_FAMILY_CHARACTER_TABLE.with(|table_cell| {
+		match table_cell.borrow_mut().get_mut(&family_key) {
+			Some(character_set) => {
+				std::mem::take(character_set).into_iter().collect()
+			}
+			None => {
+				String::new()
+			}
+		}
+	})
 }
 
 //==============================================================================
 // Graphic 없이 글 재기. (폰트 문자열과 글, 원본의 공용 캔버스 measureText 자리)
 // - 그릴 때와 같은 얼굴 고르기와 모양 잇기로 잰다.
-// - 글꼴 바이트가 없으면 웹은 브라우저 시스템 글꼴로 재고, 데스크탑은 None 이다. (그릴 때도 글이 나오지 않는 상태)
+// - 웹은 브라우저 Canvas2D 로 잰다. 데스크탑은 글꼴이 하나도 없으면 None 이다. (그릴 때도 글이 나오지 않는 상태)
 //==============================================================================
 pub fn measure_text_without_graphic(font_string: &str, text: &str) -> Option<TextMetrics> {
 	SHARED_MEASURE_CACHE.with(|shared_measure_cache_cell| {
@@ -153,7 +190,62 @@ pub struct FontDescription {
 	pub font_weight: u16,
 	pub is_bold: bool,
 	pub is_italic: bool,
+	// 목록의 첫 이름.
 	pub family_name: String,
+	// 쉼표로 이은 이름 목록. (앞 이름부터 찾는다)
+	pub family_name_list: Vec<String>,
+}
+
+//==============================================================================
+// 글꼴 파일 하나의 얼굴. (데스크탑 시스템 글꼴, platform 이 찾아 준다)
+// - face_index 를 모르면(맥) post_script_name 으로 모음 안의 얼굴을 찾고, 그것도 없으면 굵기와 기울기로 고른다.
+//==============================================================================
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FontFileSource {
+	pub path: std::path::PathBuf,
+	pub face_index: Option<u32>,
+	pub post_script_name: Option<String>,
+}
+
+//==============================================================================
+// 데스크탑 시스템 글꼴의 얼굴 후보 하나. (청한 굵기와 기울기로 운영체제가 찾아 준 파일, 쓸 때 읽는다)
+//==============================================================================
+struct SystemFontCandidate {
+	weight: u16,
+	is_italic: bool,
+	source: FontFileSource,
+	is_loaded: bool,
+}
+
+//==============================================================================
+// 데스크탑 시스템 글꼴 이름 하나. (얼굴 후보들과 읽은 얼굴들)
+//==============================================================================
+#[derive(Default)]
+struct SystemFontFamily {
+	candidate_list: Vec<SystemFontCandidate>,
+	face_list: Vec<RegisteredFontFace>,
+}
+
+//==============================================================================
+// 데스크탑 시스템 글꼴 상태. (원본 브라우저가 CSS 이름을 운영체제 글꼴로 찾고, 없는 글자를 운영체제의 대체 글꼴로 그리는 자리)
+// - Graphic 없이 재기의 사본과 나눠 들어(Rc) 같은 파일을 두 번 읽지 않는다.
+//==============================================================================
+#[derive(Default)]
+struct SystemFontState {
+	// 올리지 않은 이름을 운영체제 글꼴에서 찾는지. (set_system_font_chain 이 켠다)
+	is_lookup_enabled: bool,
+	// 글꼴에 없는 글자를 운영체제가 고른 대체 글꼴로 그리는지.
+	is_fallback_enabled: bool,
+	// 기본 글꼴 사슬. (원본 SYSTEM_FONT_STRING 의 이름 차례, 기본 폰트 뒤에 찾는다)
+	chain_name_list: Vec<String>,
+	// 이름(소문자) → 찾은 글꼴. (None 은 운영체제에 없는 이름)
+	family_table: HashMap<String, Option<SystemFontFamily>>,
+	// 이미 물어본 대체 글꼴. (글자, 굵게, 기울임, 색)
+	fallback_query_set: std::collections::HashSet<(char, bool, bool, bool)>,
+	// 운영체제가 고른 대체 글꼴 얼굴. (source_key 가 같은 것끼리 한 이름으로 고른다)
+	fallback_face_list: Vec<RegisteredFontFace>,
+	// 읽은 파일 바이트. (같은 파일의 여러 얼굴이 나눠 든다)
+	shared_bytes_table: HashMap<std::path::PathBuf, std::rc::Weak<[u8]>>,
 }
 
 struct CachedTextEntry {
@@ -220,6 +312,13 @@ pub struct TextStringTextureCache {
 	// 글자가 없을 때 차례로 읽어 볼 대체 글꼴 파일. (원본 브라우저의 시스템 글꼴 대체 자리, 데스크탑, 쓸 때 읽는다)
 	// 앞의 경로와 그 파일에 색 글리프 표가 있는지. (더할 때 한 번 엿본다)
 	fallback_font_candidate_list: RefCell<Vec<(std::path::PathBuf, bool)>>,
+	// 데스크탑 시스템 글꼴. (기본 글꼴 사슬, 이름 찾기, 대체 글꼴)
+	system_font_state: Rc<RefCell<SystemFontState>>,
+	// 브라우저 Canvas2D 로 굽고 재는지. (웹, 원본과 같다)
+	is_browser_raster: bool,
+	// 마지막으로 본 브라우저 글꼴 바뀐 횟수. (웹, 늘었으면 구운 글을 버린다)
+	#[cfg(target_arch = "wasm32")]
+	browser_font_change_count: u64,
 	// 버릴 구운 문자열의 텍스처. (등록할 때는 GL 이 없어서 다음 굽기 때 지운다)
 	pending_deleted_texture_list: Vec<crate::core::graphic::GlTexture>,
 	// 글자 안티앨리어싱. (기본 켬)
@@ -249,6 +348,10 @@ impl TextStringTextureCache {
 			frame_number: 0,
 			font_registration_count: Cell::new(0),
 			fallback_font_candidate_list: RefCell::new(Vec::new()),
+			system_font_state: Rc::new(RefCell::new(SystemFontState::default())),
+			is_browser_raster: cfg!(target_arch = "wasm32"),
+			#[cfg(target_arch = "wasm32")]
+			browser_font_change_count: 0,
 			pending_deleted_texture_list: Vec::new(),
 			is_text_antialias_enabled: true,
 			is_rebake_text_on_font_load: false,
@@ -264,6 +367,23 @@ impl TextStringTextureCache {
 	//==============================================================================
 	pub fn begin_frame(&mut self) {
 		self.frame_number += 1;
+		// 웹: 올린 글꼴이 바뀌거나 받아졌으면 구운 글과 잰 글을 버린다. (원본 loadingdone)
+		#[cfg(target_arch = "wasm32")]
+		{
+			let browser_font_change_count = crate::platform::web::systemfont::read_font_change_count();
+			if browser_font_change_count != self.browser_font_change_count {
+				self.browser_font_change_count = browser_font_change_count;
+				self.clear();
+				self.font_registration_count.set(self.font_registration_count.get() + 1);
+			}
+		}
+	}
+
+	//==============================================================================
+	// 브라우저 Canvas2D 로 굽고 재는지. (웹은 원본처럼 늘 참, 데스크탑은 거짓)
+	//==============================================================================
+	pub fn is_browser_raster(&self) -> bool {
+		self.is_browser_raster
 	}
 
 	//==============================================================================
@@ -387,7 +507,7 @@ impl TextStringTextureCache {
 		self.entry_table.retain(|_, cached_text_entry_list| {
 			cached_text_entry_list.retain(|cached_text_entry| {
 				let font_description = parse_font_string(&cached_text_entry.font_string);
-				let is_affected = font_description.family_name.to_lowercase() == family_key && font_face_descriptors.contains_any_character(&cached_text_entry.text);
+				let is_affected = font_description.family_name_list.iter().any(|family_name| family_name.to_lowercase() == family_key) && font_face_descriptors.contains_any_character(&cached_text_entry.text);
 				if is_affected {
 					pending_deleted_texture_list.push(cached_text_entry.entry.texture);
 					removed_count += 1;
@@ -457,9 +577,42 @@ impl TextStringTextureCache {
 		shared_measure_cache.default_face_list = self.default_face_list.clone();
 		shared_measure_cache.fallback_face_list = RefCell::new(self.fallback_face_list.borrow().clone());
 		shared_measure_cache.fallback_font_candidate_list = RefCell::new(self.fallback_font_candidate_list.borrow().clone());
+		shared_measure_cache.system_font_state = self.system_font_state.clone();
 		SHARED_MEASURE_CACHE.with(|shared_measure_cache_cell| {
 			*shared_measure_cache_cell.borrow_mut() = Some(shared_measure_cache);
 		});
+		#[cfg(target_arch = "wasm32")]
+		self.sync_browser_font_faces();
+	}
+
+	//==============================================================================
+	// 올린 글꼴 얼굴을 문서의 FontFace 로 맞추기. (웹, 이름의 얼굴은 그 이름으로, 기본 폰트는 VanillaEngineDefault, 대체 폰트는 VanillaEngineFallback1, 2 …)
+	//==============================================================================
+	#[cfg(target_arch = "wasm32")]
+	fn sync_browser_font_faces(&self) {
+		let mut request_list: Vec<(String, FontFaceDescriptors, Rc<LoadedFont>)> = Vec::new();
+		let mut family_key_list: Vec<&String> = self.font_family_table.keys().collect();
+		family_key_list.sort();
+		for family_key in family_key_list {
+			let mut face_list: Vec<&RegisteredFontFace> = self.font_family_table[family_key].iter().collect();
+			face_list.sort_by_key(|face| face.order_number);
+			for face in face_list {
+				request_list.push((family_key.clone(), face.descriptors.clone(), face.font.clone()));
+			}
+		}
+		let mut extra_family_list: Vec<String> = Vec::new();
+		if !self.default_face_list.is_empty() {
+			extra_family_list.push(String::from("VanillaEngineDefault"));
+			for face in self.default_face_list.iter() {
+				request_list.push((String::from("VanillaEngineDefault"), face.descriptors.clone(), face.font.clone()));
+			}
+		}
+		for (fallback_index, face) in self.fallback_face_list.borrow().iter().enumerate() {
+			let family_name = format!("VanillaEngineFallback{}", fallback_index + 1);
+			request_list.push((family_name.clone(), face.descriptors.clone(), face.font.clone()));
+			extra_family_list.push(family_name);
+		}
+		crate::platform::web::systemfont::sync_font_faces(&request_list, extra_family_list);
 	}
 
 	//==============================================================================
@@ -488,6 +641,200 @@ impl TextStringTextureCache {
 	//==============================================================================
 	pub fn get_font_registration_count(&self) -> u64 {
 		self.font_registration_count.get()
+	}
+
+	//==============================================================================
+	// 시스템 글꼴 사슬 정하기. (데스크탑, 원본 SYSTEM_FONT_STRING 처럼 기본 폰트 뒤에 이름 차례로 찾는다)
+	// - 켜면 폰트 문자열의 올리지 않은 이름도 운영체제 글꼴에서 찾는다. ("16px Arial" 이 시스템의 Arial 로 그려진다, 브라우저와 같다)
+	// - 얼굴은 그 굵기와 기울기의 글자를 처음 그리거나 잴 때 읽는다.
+	//==============================================================================
+	pub fn set_system_font_chain(&mut self, family_name_list: Vec<String>) {
+		{
+			let mut system_font_state = self.system_font_state.borrow_mut();
+			system_font_state.is_lookup_enabled = true;
+			system_font_state.chain_name_list = family_name_list.iter().map(|family_name| family_name.trim().to_lowercase()).collect();
+		}
+		self.clear();
+		self.font_registration_count.set(self.font_registration_count.get() + 1);
+		self.publish_shared_font_set();
+	}
+
+	//==============================================================================
+	// 시스템 글꼴 이름에 얼굴 후보 파일 더하기. (데스크탑, 그 이름을 사슬 맨 뒤에 둔다. 운영체제에서 찾지 않고 파일을 주는 경우)
+	// - 얼굴 번호가 없으면 PostScript 이름, 그것도 없으면 청한 굵기와 기울기로 모음 안의 얼굴을 고른다. 가변 글꼴은 굵기를 축 값으로 만든다.
+	//==============================================================================
+	pub fn add_system_font_candidate(&mut self, family_name: &str, weight: u16, is_italic: bool, source: FontFileSource) {
+		{
+			let mut system_font_state = self.system_font_state.borrow_mut();
+			let family_key = family_name.trim().to_lowercase();
+			if !system_font_state.chain_name_list.contains(&family_key) {
+				system_font_state.chain_name_list.push(family_key.clone());
+			}
+			let system_font_family = system_font_state.family_table.entry(family_key).or_insert_with(|| Some(SystemFontFamily::default())).get_or_insert_with(SystemFontFamily::default);
+			if !system_font_family.candidate_list.iter().any(|candidate| candidate.source == source && candidate.weight == weight && candidate.is_italic == is_italic) {
+				system_font_family.candidate_list.push(SystemFontCandidate {
+					weight,
+					is_italic,
+					source,
+					is_loaded: false,
+				});
+			}
+		}
+		self.clear();
+		self.font_registration_count.set(self.font_registration_count.get() + 1);
+		self.publish_shared_font_set();
+	}
+
+	//==============================================================================
+	// 운영체제 대체 글꼴 켬 / 끔. (데스크탑, 켜면 어느 글꼴에도 없는 글자를 운영체제가 고른 글꼴로 그린다. 대체 글꼴 후보 파일이 있으면 그것이 먼저다)
+	//==============================================================================
+	pub fn set_system_font_fallback_enabled(&mut self, value: bool) {
+		self.system_font_state.borrow_mut().is_fallback_enabled = value;
+		self.clear();
+		self.font_registration_count.set(self.font_registration_count.get() + 1);
+		self.publish_shared_font_set();
+	}
+
+	//==============================================================================
+	// 시스템 글꼴 사슬이나 후보가 있는지. (데스크탑)
+	//==============================================================================
+	pub fn has_system_font(&self) -> bool {
+		let system_font_state = self.system_font_state.borrow();
+		system_font_state.chain_name_list.iter().any(|family_key| matches!(system_font_state.family_table.get(family_key), Some(Some(_)))) || (system_font_state.is_lookup_enabled && !system_font_state.chain_name_list.is_empty())
+	}
+
+	//==============================================================================
+	// 시스템 글꼴 이름의 얼굴들을 고른 목록에 더하기. (처음 보는 이름이면 운영체제에서 찾고, 청한 굵기와 기울기에 맞는 후보를 읽는다, 없으면 false)
+	//==============================================================================
+	fn append_system_family_faces(&self, family_key: &str, desired_weight: u16, is_italic_desired: bool, output_list: &mut Vec<ResolvedFontFace>) -> bool {
+		let mut system_font_state = self.system_font_state.borrow_mut();
+		if !system_font_state.family_table.contains_key(family_key) {
+			if !system_font_state.is_lookup_enabled {
+				return false;
+			}
+			let system_font_family = find_system_font_family(family_key);
+			system_font_state.family_table.insert(family_key.to_string(), system_font_family);
+		}
+		let state = &mut *system_font_state;
+		let system_font_family = match state.family_table.get_mut(family_key) {
+			Some(Some(system_font_family)) => {
+				system_font_family
+			}
+			_ => {
+				return false;
+			}
+		};
+		// 청한 기울기를 먼저, 그다음 굵기로 가장 맞는 후보를 아직 읽지 않았으면 읽는다.
+		let best_candidate_index = (0..system_font_family.candidate_list.len()).min_by_key(|candidate_index| {
+			let candidate = &system_font_family.candidate_list[*candidate_index];
+			(candidate.is_italic != is_italic_desired, textshaping::calculate_weight_score(candidate.weight, candidate.weight, desired_weight))
+		});
+		if let Some(candidate_index) = best_candidate_index {
+			if !system_font_family.candidate_list[candidate_index].is_loaded {
+				system_font_family.candidate_list[candidate_index].is_loaded = true;
+				let candidate = &system_font_family.candidate_list[candidate_index];
+				match load_system_font_face(&mut state.shared_bytes_table, &candidate.source, candidate.weight, candidate.is_italic) {
+					Ok(registered_font_face) => {
+						let is_duplicate = system_font_family.face_list.iter().any(|face| Rc::ptr_eq(face.font.get_font_bytes(), registered_font_face.font.get_font_bytes()) && face.font.get_face_index() == registered_font_face.font.get_face_index() && face.descriptors == registered_font_face.descriptors);
+						if !is_duplicate {
+							system_font_family.face_list.push(registered_font_face);
+						}
+					}
+					Err(error) => {
+						eprintln!("TextStringTextureCache: {} ({})", error, candidate.source.path.display());
+					}
+				}
+			}
+		}
+		if system_font_family.face_list.is_empty() {
+			return false;
+		}
+		let face_reference_list: Vec<&RegisteredFontFace> = system_font_family.face_list.iter().collect();
+		textshaping::select_font_faces(&face_reference_list, desired_weight, is_italic_desired, output_list);
+		true
+	}
+
+	//==============================================================================
+	// 글의 글자가 운영체제 대체 글꼴로 그려지게 하기. (어느 얼굴에도 없는 글자를 운영체제에 묻는다, 같은 물음은 한 번)
+	// - 굵게를 청했는데 그 글자를 가진 대체 얼굴이 모두 600 아래면 굵은 대체 얼굴을 따로 묻는다. (크롬도 굵기를 주고 대체 글꼴을 고른다)
+	//==============================================================================
+	fn ensure_system_fallback_coverage(&self, text: &str, font_description: &FontDescription, resolved_face_list: &[ResolvedFontFace]) {
+		if !self.system_font_state.borrow().is_fallback_enabled {
+			return;
+		}
+		let is_bold_desired = font_description.font_weight >= textshaping::BOLD_WEIGHT_THRESHOLD;
+		for grapheme in text.graphemes(true) {
+			let is_emoji_grapheme = textshaping::is_emoji_presentation(grapheme);
+			let character = match grapheme.chars().next() {
+				Some(character) => {
+					character
+				}
+				None => {
+					continue;
+				}
+			};
+			if character.is_whitespace() || character.is_control() || ('\u{200B}'..='\u{200F}').contains(&character) || ('\u{2028}'..='\u{206F}').contains(&character) || ('\u{FE00}'..='\u{FE0F}').contains(&character) {
+				continue;
+			}
+			let is_covered_by_face = |face: &RegisteredFontFace| -> bool {
+				if is_emoji_grapheme {
+					face.font.has_color_character(character)
+				}
+				else {
+					face.font.has_character(character) && !face.font.has_color_character(character)
+				}
+			};
+			let is_resolved_covered = resolved_face_list.iter().any(|face| {
+				let has_character = if is_emoji_grapheme {
+					face.font.has_color_character(character)
+				}
+				else {
+					face.font.has_character(character) && !face.font.has_color_character(character)
+				};
+				face.descriptors.contains_character(character) && has_character
+			});
+			if is_resolved_covered {
+				continue;
+			}
+			let query_key = (character, is_bold_desired, font_description.is_italic, is_emoji_grapheme);
+			{
+				let system_font_state = self.system_font_state.borrow();
+				if system_font_state.fallback_query_set.contains(&query_key) {
+					continue;
+				}
+				let covering_face_list: Vec<&RegisteredFontFace> = system_font_state.fallback_face_list.iter().filter(|face| is_covered_by_face(face)).collect();
+				if !covering_face_list.is_empty() && (!is_bold_desired || covering_face_list.iter().any(|face| face.descriptors.maximum_weight >= textshaping::BOLD_WEIGHT_THRESHOLD)) {
+					continue;
+				}
+			}
+			self.system_font_state.borrow_mut().fallback_query_set.insert(query_key);
+			let source = match find_system_fallback_font(grapheme, font_description.font_weight, font_description.is_italic, is_emoji_grapheme) {
+				Some(source) => {
+					source
+				}
+				None => {
+					continue;
+				}
+			};
+			let mut system_font_state = self.system_font_state.borrow_mut();
+			let state = &mut *system_font_state;
+			let is_loaded_already = state.fallback_face_list.iter().any(|face| face.descriptors.source_key == read_fallback_source_key(&source) && face.descriptors.minimum_weight == font_description.font_weight.clamp(face.descriptors.minimum_weight, face.descriptors.maximum_weight) && face.descriptors.is_italic == font_description.is_italic);
+			if is_loaded_already {
+				continue;
+			}
+			match load_system_font_face(&mut state.shared_bytes_table, &source, font_description.font_weight, font_description.is_italic) {
+				Ok(mut registered_font_face) => {
+					registered_font_face.descriptors.source_key = read_fallback_source_key(&source);
+					let is_duplicate = state.fallback_face_list.iter().any(|face| Rc::ptr_eq(face.font.get_font_bytes(), registered_font_face.font.get_font_bytes()) && face.font.get_face_index() == registered_font_face.font.get_face_index() && face.descriptors == registered_font_face.descriptors);
+					if !is_duplicate {
+						state.fallback_face_list.push(registered_font_face);
+					}
+				}
+				Err(error) => {
+					eprintln!("TextStringTextureCache: {} ({})", error, source.path.display());
+				}
+			}
+		}
 	}
 
 	//==============================================================================
@@ -554,7 +901,7 @@ impl TextStringTextureCache {
 			};
 			let font = match std::fs::read(&font_path).map_err(|error| error.to_string()).and_then(load_font) {
 				Ok(font) => {
-					Rc::new(font)
+					Rc::new(font.with_source_path(font_path.clone()))
 				}
 				Err(_) => {
 					continue;
@@ -576,7 +923,23 @@ impl TextStringTextureCache {
 	//==============================================================================
 	fn is_character_covered(&self, character: char) -> bool {
 		let is_in_family = self.font_family_table.values().any(|face_list| face_list.iter().any(|face| face.descriptors.contains_character(character) && face.font.has_character(character)));
-		is_in_family || self.default_face_list.iter().any(|face| face.font.has_character(character)) || self.fallback_face_list.borrow().iter().any(|face| face.font.has_character(character))
+		is_in_family || self.default_face_list.iter().any(|face| face.font.has_character(character)) || self.fallback_face_list.borrow().iter().any(|face| face.font.has_character(character)) || self.is_system_character_covered(&|face| face.font.has_character(character))
+	}
+
+	//==============================================================================
+	// 읽은 시스템 글꼴 얼굴(사슬, 운영체제 대체 글꼴) 가운데 조건에 맞는 것이 있는지.
+	//==============================================================================
+	fn is_system_character_covered(&self, is_covered: &dyn Fn(&RegisteredFontFace) -> bool) -> bool {
+		let system_font_state = self.system_font_state.borrow();
+		let is_in_chain = system_font_state.chain_name_list.iter().any(|family_key| match system_font_state.family_table.get(family_key) {
+			Some(Some(system_font_family)) => {
+				system_font_family.face_list.iter().any(is_covered)
+			}
+			_ => {
+				false
+			}
+		});
+		is_in_chain || system_font_state.fallback_face_list.iter().any(is_covered)
 	}
 
 	//==============================================================================
@@ -585,7 +948,7 @@ impl TextStringTextureCache {
 	fn is_text_character_covered(&self, character: char) -> bool {
 		let has_text_character = |face: &RegisteredFontFace| face.font.has_character(character) && !face.font.has_color_character(character);
 		let is_in_family = self.font_family_table.values().any(|face_list| face_list.iter().any(|face| face.descriptors.contains_character(character) && has_text_character(face)));
-		is_in_family || self.default_face_list.iter().any(has_text_character) || self.fallback_face_list.borrow().iter().any(has_text_character)
+		is_in_family || self.default_face_list.iter().any(has_text_character) || self.fallback_face_list.borrow().iter().any(has_text_character) || self.is_system_character_covered(&has_text_character)
 	}
 
 	//==============================================================================
@@ -593,7 +956,7 @@ impl TextStringTextureCache {
 	//==============================================================================
 	fn is_color_character_covered(&self, character: char) -> bool {
 		let is_in_family = self.font_family_table.values().any(|face_list| face_list.iter().any(|face| face.descriptors.contains_character(character) && face.font.has_color_character(character)));
-		is_in_family || self.default_face_list.iter().any(|face| face.font.has_color_character(character)) || self.fallback_face_list.borrow().iter().any(|face| face.font.has_color_character(character))
+		is_in_family || self.default_face_list.iter().any(|face| face.font.has_color_character(character)) || self.fallback_face_list.borrow().iter().any(|face| face.font.has_color_character(character)) || self.is_system_character_covered(&|face| face.font.has_color_character(character))
 	}
 
 	//==============================================================================
@@ -680,11 +1043,10 @@ impl TextStringTextureCache {
 	// 문자열 측정. (캐시를 거치지 않는다)
 	//==============================================================================
 	fn measure_text_uncached(&self, font_string: &str, text: &str) -> TextMetrics {
-		self.ensure_fallback_coverage(text);
 		let font_description = parse_font_string(font_string);
-		let face_list = self.resolve_face_list(&font_description);
-		if face_list.is_empty() {
-			// 웹: 글꼴 바이트가 없으면 브라우저 시스템 글꼴로 잰다.
+		let face_list = self.resolve_covering_face_list(text, &font_description);
+		if face_list.is_empty() || self.is_browser_raster {
+			// 웹: 원본처럼 브라우저 Canvas2D 로 잰다. (올린 글꼴은 document.fonts 의 FontFace, 없으면 시스템 글꼴)
 			#[cfg(target_arch = "wasm32")]
 			{
 				return crate::platform::web::systemfont::measure_text(&font_description, text);
@@ -713,14 +1075,14 @@ impl TextStringTextureCache {
 				continue;
 			}
 			let face = &face_list[shaped_glyph.face_index];
-			let metrics = face.font.raster_font.metrics_indexed(shaped_glyph.glyph_index, font_size);
-			if metrics.width == 0 || metrics.height == 0 {
+			let (glyph_left_x, glyph_bottom_y, glyph_width, glyph_height) = face.font.read_glyph_metrics(shaped_glyph.glyph_index, font_size);
+			if glyph_width == 0 || glyph_height == 0 {
 				continue;
 			}
-			let mut left_x = shaped_glyph.position_x + metrics.xmin as f32;
-			let mut right_x = left_x + metrics.width as f32;
-			let mut top_y = shaped_glyph.position_y + (metrics.ymin + metrics.height as i32) as f32;
-			let mut bottom_y = shaped_glyph.position_y + metrics.ymin as f32;
+			let mut left_x = shaped_glyph.position_x + glyph_left_x as f32;
+			let mut right_x = left_x + glyph_width as f32;
+			let mut top_y = shaped_glyph.position_y + (glyph_bottom_y + glyph_height) as f32;
+			let mut bottom_y = shaped_glyph.position_y + glyph_bottom_y as f32;
 			if face.is_synthetic_bold {
 				let radius = textshaping::calculate_synthetic_bold_radius(font_size);
 				left_x -= radius;
@@ -855,17 +1217,16 @@ impl TextStringTextureCache {
 
 	//==============================================================================
 	// 글의 모양만 래스터로 받기. (텍스처로 올리지 않는다, 그림자를 깐 글처럼 따로 굽는 쪽이 쓴다)
-	// - 웹에서 글꼴 바이트가 없으면 브라우저 시스템 글꼴로 받는다. 데스크탑에서 글꼴이 하나도 없으면 None.
+	// - 웹은 원본처럼 브라우저 Canvas2D 로 받는다. 데스크탑에서 글꼴이 하나도 없으면 None.
 	//==============================================================================
 	pub fn rasterize_text(&self, text: &str, font_string: &str, bake_scale: f32, padding: i32, direction: ShapingDirection) -> Option<TextRaster> {
 		if text.is_empty() {
 			return None;
 		}
-		self.ensure_fallback_coverage(text);
 		let font_description = parse_font_string(font_string);
-		let face_list = self.resolve_face_list(&font_description);
-		if face_list.is_empty() {
-			// 웹: 글꼴 바이트가 없으면 브라우저 시스템 글꼴의 덮인 정도를 받는다.
+		let face_list = self.resolve_covering_face_list(text, &font_description);
+		if face_list.is_empty() || self.is_browser_raster {
+			// 웹: 원본처럼 브라우저 Canvas2D 로 그린 덮인 정도를 받는다.
 			#[cfg(target_arch = "wasm32")]
 			{
 				return rasterize_system_font_text(&font_description, text, bake_scale, padding.max(1), direction);
@@ -890,16 +1251,15 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	// 글리프 하나 래스터. (글자 아틀라스가 쓴다, 글리프 번호는 글자로 찾는다. 웹에서 글꼴 바이트가 없으면 브라우저 시스템 글꼴로, 데스크탑에서 글꼴이 하나도 없으면 None)
+	// 글리프 하나 래스터. (글자 아틀라스가 쓴다, 글리프 번호는 글자로 찾는다. 웹은 브라우저 Canvas2D 로, 데스크탑에서 글꼴이 하나도 없으면 None)
 	// - 돌려주는 것: (래스터, 전진폭, 글꼴 위 길이, 글꼴 아래 길이) 길이 단위는 픽셀.
 	//==============================================================================
 	pub fn rasterize_character(&self, character: &str, font_string: &str) -> Option<(textshaping::GlyphRaster, f32, f32, f32)> {
-		self.ensure_fallback_coverage(character);
 		let font_description = parse_font_string(font_string);
-		let face_list = self.resolve_face_list(&font_description);
+		let face_list = self.resolve_covering_face_list(character, &font_description);
 		let font_size = font_description.font_size;
-		if face_list.is_empty() {
-			// 웹: 글꼴 바이트가 없으면 브라우저 시스템 글꼴로 굽는다.
+		if face_list.is_empty() || self.is_browser_raster {
+			// 웹: 원본처럼 브라우저 Canvas2D 로 굽는다.
 			#[cfg(target_arch = "wasm32")]
 			{
 				let glyph_raster = crate::platform::web::systemfont::rasterize_piece(&font_description, font_size, character, false)?;
@@ -985,33 +1345,109 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	// 폰트 문자열에 맞는 얼굴 목록. (이름의 얼굴들, 기본 폰트, 대체 폰트 차례. 글자마다 앞에서부터 찾는다)
+	// 폰트 문자열에 맞는 얼굴 목록. (이름 목록의 차례로 이름마다 그 얼굴들, 기본 폰트, 대체 폰트 차례. 글자마다 앞에서부터 찾는다, 올리지 않은 이름은 넘긴다)
 	//==============================================================================
 	fn resolve_face_list(&self, font_description: &FontDescription) -> Vec<ResolvedFontFace> {
 		let mut face_list: Vec<ResolvedFontFace> = Vec::new();
-		let family_key = font_description.family_name.to_lowercase();
-		if let Some(family_face_list) = self.font_family_table.get(&family_key) {
-			let family_face_reference_list: Vec<&RegisteredFontFace> = family_face_list.iter().collect();
-			textshaping::select_font_faces(&family_face_reference_list, font_description.font_weight, font_description.is_italic, &mut face_list);
+		let mut used_system_family_list: Vec<String> = Vec::new();
+		for family_name in &font_description.family_name_list {
+			let family_key = family_name.to_lowercase();
+			if let Some(family_face_list) = self.font_family_table.get(&family_key) {
+				let family_face_reference_list: Vec<&RegisteredFontFace> = family_face_list.iter().collect();
+				textshaping::select_font_faces(&family_face_reference_list, font_description.font_weight, font_description.is_italic, &mut face_list);
+				continue;
+			}
+			// 올리지 않은 이름은 운영체제 글꼴에서 찾는다. (데스크탑, 사슬을 켰을 때)
+			if !used_system_family_list.contains(&family_key) && self.append_system_family_faces(&family_key, font_description.font_weight, font_description.is_italic, &mut face_list) {
+				used_system_family_list.push(family_key);
+			}
 		}
 		let default_face_reference_list: Vec<&RegisteredFontFace> = self.default_face_list.iter().collect();
 		textshaping::select_font_faces(&default_face_reference_list, font_description.font_weight, font_description.is_italic, &mut face_list);
+		// 기본 글꼴 사슬. (원본 SYSTEM_FONT_STRING 의 차례)
+		let chain_name_list = self.system_font_state.borrow().chain_name_list.clone();
+		for family_key in chain_name_list {
+			if used_system_family_list.contains(&family_key) {
+				continue;
+			}
+			if self.append_system_family_faces(&family_key, font_description.font_weight, font_description.is_italic, &mut face_list) {
+				used_system_family_list.push(family_key);
+			}
+		}
 		for fallback_face in self.fallback_face_list.borrow().iter() {
 			let fallback_face_reference_list = [fallback_face];
 			textshaping::select_font_faces(&fallback_face_reference_list, font_description.font_weight, font_description.is_italic, &mut face_list);
 		}
+		// 운영체제가 고른 대체 글꼴. (같은 글꼴의 굵기들은 한 이름으로 고른다)
+		let system_font_state = self.system_font_state.borrow();
+		let mut grouped_key_list: Vec<&str> = Vec::new();
+		for fallback_face in system_font_state.fallback_face_list.iter() {
+			let source_key = fallback_face.descriptors.source_key.as_str();
+			if grouped_key_list.contains(&source_key) {
+				continue;
+			}
+			grouped_key_list.push(source_key);
+			let group_face_list: Vec<&RegisteredFontFace> = system_font_state.fallback_face_list.iter().filter(|face| face.descriptors.source_key == source_key).collect();
+			textshaping::select_font_faces(&group_face_list, font_description.font_weight, font_description.is_italic, &mut face_list);
+		}
 		face_list
+	}
+
+	//==============================================================================
+	// 지켜보는 이름의 얼굴이 없는 글자 모으기. (폰트 문자열의 이름 가운데 지켜보는 것마다, 올린 얼굴의 글자 범위에 들지 않은 글자)
+	//==============================================================================
+	fn note_unresolved_family_characters(&self, text: &str, font_description: &FontDescription) {
+		UNRESOLVED_FAMILY_CHARACTER_TABLE.with(|table_cell| {
+			let mut table = table_cell.borrow_mut();
+			if table.is_empty() {
+				return;
+			}
+			for family_name in &font_description.family_name_list {
+				let family_key = family_name.to_lowercase();
+				let character_set = match table.get_mut(&family_key) {
+					Some(character_set) => {
+						character_set
+					}
+					None => {
+						continue;
+					}
+				};
+				let face_list = self.font_family_table.get(&family_key);
+				for character in text.chars() {
+					if character.is_whitespace() || character.is_control() {
+						continue;
+					}
+					let is_covered = face_list.map(|face_list| face_list.iter().any(|face| face.descriptors.contains_character(character))).unwrap_or(false);
+					if !is_covered {
+						character_set.insert(character);
+					}
+				}
+			}
+		});
+	}
+
+	//==============================================================================
+	// 글자를 그릴 얼굴 목록. (대체 글꼴 후보와 운영체제 대체 글꼴을 먼저 채우고 고른다)
+	//==============================================================================
+	fn resolve_covering_face_list(&self, text: &str, font_description: &FontDescription) -> Vec<ResolvedFontFace> {
+		self.note_unresolved_family_characters(text, font_description);
+		self.ensure_fallback_coverage(text);
+		let face_list = self.resolve_face_list(font_description);
+		if !self.system_font_state.borrow().is_fallback_enabled {
+			return face_list;
+		}
+		self.ensure_system_fallback_coverage(text, font_description, &face_list);
+		self.resolve_face_list(font_description)
 	}
 
 	//==============================================================================
 	// 문자열 굽기.
 	//==============================================================================
 	fn bake_entry(&self, gl: &glow::Context, text_draw_kind: TextDrawKind, text: &str, font_string: &str, line_width: f32, bake_scale: f32, direction: ShapingDirection) -> Option<TextEntry> {
-		self.ensure_fallback_coverage(text);
 		let font_description = parse_font_string(font_string);
-		let face_list = self.resolve_face_list(&font_description);
-		if face_list.is_empty() {
-			// 웹: 글꼴 바이트가 없으면 브라우저 시스템 글꼴로 굽는다.
+		let face_list = self.resolve_covering_face_list(text, &font_description);
+		if face_list.is_empty() || self.is_browser_raster {
+			// 웹: 원본처럼 브라우저 Canvas2D 로 굽는다.
 			#[cfg(target_arch = "wasm32")]
 			{
 				return bake_system_font_entry(gl, text_draw_kind, text, &font_description, line_width, bake_scale, self.is_text_antialias_enabled, direction);
@@ -1413,58 +1849,317 @@ fn create_entry_hash(text_draw_kind: TextDrawKind, is_antialias: bool, direction
 }
 
 //==============================================================================
-// 폰트 문자열 해석. ("bold 16px DOSGothic" → 크기 16, 굵기 700, 이름 DOSGothic)
-// - 크기 앞의 낱말: italic / oblique 는 기울임, bold / bolder 는 700, lighter 는 100, 숫자는 굵기(1 ~ 1000), normal 과 그 밖은 넘긴다.
-// - 크기 뒤는 모두 이름이다. 따옴표는 뗀다. 쉼표로 이은 목록이면 첫 이름을 쓴다.
+// 운영체제 글꼴에서 이름 하나 찾기. (보통, 굵게, 기울임, 굵은 기울임 네 가지를 묻고 같은 얼굴은 하나로, 하나도 없으면 None. 데스크탑만)
+//==============================================================================
+fn find_system_font_family(family_key: &str) -> Option<SystemFontFamily> {
+	#[cfg(not(target_arch = "wasm32"))]
+	{
+		let mut system_font_family = SystemFontFamily::default();
+		for (weight, is_italic) in [(400, false), (700, false), (400, true), (700, true)] {
+			let source = match crate::platform::find_family_font_file(family_key, weight, is_italic) {
+				Some(source) => {
+					source
+				}
+				None => {
+					continue;
+				}
+			};
+			// 같은 얼굴이면 앞(보통 굵기, 바른 꼴)의 것만 둔다. (기울인 얼굴이 없는 글꼴은 바른 얼굴에 가짜 기울임)
+			if system_font_family.candidate_list.iter().any(|candidate| candidate.source == source) {
+				continue;
+			}
+			system_font_family.candidate_list.push(SystemFontCandidate {
+				weight,
+				is_italic,
+				source,
+				is_loaded: false,
+			});
+		}
+		if system_font_family.candidate_list.is_empty() {
+			return None;
+		}
+		Some(system_font_family)
+	}
+	#[cfg(target_arch = "wasm32")]
+	{
+		let _ = family_key;
+		None
+	}
+}
+
+//==============================================================================
+// 운영체제가 고른 대체 글꼴 파일. (데스크탑만, 웹은 None)
+//==============================================================================
+fn find_system_fallback_font(grapheme: &str, weight: u16, is_italic: bool, is_color_wanted: bool) -> Option<FontFileSource> {
+	#[cfg(not(target_arch = "wasm32"))]
+	{
+		crate::platform::find_fallback_font_file(grapheme, weight, is_italic, is_color_wanted)
+	}
+	#[cfg(target_arch = "wasm32")]
+	{
+		let _ = (grapheme, weight, is_italic, is_color_wanted);
+		None
+	}
+}
+
+//==============================================================================
+// 운영체제 대체 글꼴을 한 이름으로 묶는 열쇠. (파일 경로, 같은 파일의 굵기 얼굴들이 함께 고른다)
+//==============================================================================
+fn read_fallback_source_key(source: &FontFileSource) -> String {
+	source.path.to_string_lossy().into_owned()
+}
+
+//==============================================================================
+// 시스템 글꼴 파일의 얼굴 하나 읽기. (같은 파일의 바이트는 나눠 든다)
+// - 얼굴 번호: 준 번호, 없으면 PostScript 이름이 같은 얼굴, 그것도 없으면 청한 굵기와 기울기로 고른 얼굴.
+// - 서술자: 가변 글꼴(wght 축)이면 청한 굵기를 축 범위로 자른 값의 인스턴스, 아니면 그 얼굴의 OS/2 굵기와 기울임 표시.
+//==============================================================================
+fn load_system_font_face(shared_bytes_table: &mut HashMap<std::path::PathBuf, std::rc::Weak<[u8]>>, source: &FontFileSource, weight: u16, is_italic: bool) -> Result<RegisteredFontFace, String> {
+	let font_bytes: Rc<[u8]> = match shared_bytes_table.get(&source.path).and_then(|weak_bytes| weak_bytes.upgrade()) {
+		Some(font_bytes) => {
+			font_bytes
+		}
+		None => {
+			let font_bytes: Rc<[u8]> = Rc::from(std::fs::read(&source.path).map_err(|error| format!("글꼴 파일 읽기 실패: {}", error))?);
+			shared_bytes_table.insert(source.path.clone(), Rc::downgrade(&font_bytes));
+			font_bytes
+		}
+	};
+	let face_index = match source.face_index {
+		Some(face_index) => {
+			face_index
+		}
+		None => {
+			let face_count = rustybuzz::ttf_parser::fonts_in_collection(&font_bytes).unwrap_or(1);
+			let post_script_index = source.post_script_name.as_ref().and_then(|post_script_name| {
+				(0..face_count).find(|face_index| {
+					rustybuzz::ttf_parser::Face::parse(&font_bytes, *face_index).map(|face| face.names().into_iter().any(|name| name.name_id == rustybuzz::ttf_parser::name_id::POST_SCRIPT_NAME && name.to_string().as_deref() == Some(post_script_name.as_str()))).unwrap_or(false)
+				})
+			});
+			post_script_index.unwrap_or_else(|| textshaping::find_collection_face_index(&font_bytes, weight, is_italic))
+		}
+	};
+	let mut font_face_descriptors = FontFaceDescriptors::new();
+	let variation_list = match textshaping::read_weight_axis_range(&font_bytes, face_index) {
+		Some((minimum_weight, maximum_weight)) => {
+			font_face_descriptors.set_weight(weight.clamp(minimum_weight, maximum_weight));
+			textshaping::read_weight_variation(&font_bytes, face_index, weight)
+		}
+		None => {
+			Vec::new()
+		}
+	};
+	let font = LoadedFont::create_from_shared_bytes(font_bytes, face_index, &variation_list)?.with_source_path(source.path.clone());
+	if variation_list.is_empty() && textshaping::read_weight_axis_range(font.get_font_bytes(), face_index).is_none() {
+		let shaping_face = font.get_shaping_face();
+		font_face_descriptors.set_weight(shaping_face.weight().to_number());
+	}
+	font_face_descriptors.is_italic = font.get_shaping_face().is_italic();
+	Ok(RegisteredFontFace {
+		descriptors: font_face_descriptors,
+		font: Rc::new(font),
+		order_number: 0,
+	})
+}
+
+//==============================================================================
+// 폰트 문자열 해석. (Canvas2D font 의 CSS font 줄임 꼴, "bold 16px DOSGothic" → 크기 16, 굵기 700, 이름 DOSGothic)
+// - 크기 앞의 낱말: normal, italic / oblique(뒤의 각도는 넘긴다)는 기울임, small-caps, 늘이기 낱말(condensed 등)은 넘긴다.
+//   bold / bolder 는 700, lighter 는 100, 숫자는 굵기(1 ~ 1000). 그 밖의 낱말이 오면 틀린 문자열이다.
+// - 크기: px, pt, pc, in, cm, mm, q 와 em, rem, %, larger, smaller, 이름 크기(xx-small ~ xxx-large). 뒤의 "/줄높이"는 읽고 넘긴다. (캔버스는 줄높이를 쓰지 않는다)
+//   em, rem, %, larger, smaller 는 10px 에 대어 셈한다. (원본이 글을 굽고 재는 캔버스는 문서에 붙이지 않아 브라우저가 기본 글꼴 10px 에 댄다, 크롬으로 확인)
+// - 크기 뒤는 쉼표로 이은 이름 목록이다. 따옴표 이름은 따옴표를 떼고, 따옴표 없는 이름은 낱말을 빈칸 하나로 잇는다. 그리는 쪽이 목록의 앞 이름부터 찾는다.
+// - 틀린 문자열(크기나 이름이 없음, 음수 크기, 모르는 낱말)은 캔버스의 처음 값 "10px sans-serif" 로 본다.
 //==============================================================================
 pub fn parse_font_string(font_string: &str) -> FontDescription {
-	let mut font_size: f32 = 10.0;
+	parse_font_string_strict(font_string).unwrap_or_else(|| FontDescription {
+		font_size: 10.0,
+		font_weight: 400,
+		is_bold: false,
+		is_italic: false,
+		family_name: String::from("sans-serif"),
+		family_name_list: vec![String::from("sans-serif")],
+	})
+}
+
+//==============================================================================
+// 폰트 문자열 해석. (틀리면 None)
+//==============================================================================
+fn parse_font_string_strict(font_string: &str) -> Option<FontDescription> {
 	let mut font_weight: u16 = 400;
 	let mut is_italic = false;
-	let mut family_name_parts: Vec<&str> = Vec::new();
-	let mut has_found_size = false;
-	for token in font_string.split_whitespace() {
-		if has_found_size {
-			family_name_parts.push(token);
-			continue;
-		}
+	let mut remainder = font_string.trim_start();
+	let mut font_size: Option<f32> = None;
+	let mut is_after_oblique = false;
+	while !remainder.is_empty() {
+		let token_end = remainder.find(char::is_whitespace).unwrap_or(remainder.len());
+		let token = &remainder[..token_end];
 		let lowercase_token = token.to_lowercase();
-		if lowercase_token == "bold" || lowercase_token == "bolder" {
-			font_weight = 700;
-			continue;
-		}
-		if lowercase_token == "lighter" {
-			font_weight = 100;
-			continue;
-		}
-		if lowercase_token == "italic" || lowercase_token == "oblique" {
-			is_italic = true;
-			continue;
-		}
-		if let Ok(parsed_weight) = lowercase_token.parse::<u32>() {
-			if (1..=1000).contains(&parsed_weight) {
-				font_weight = parsed_weight as u16;
+		// 크기. ("16px", "16px/1.5" 처럼 줄높이가 붙어 와도 된다)
+		let size_text = lowercase_token.split('/').next().unwrap_or("");
+		if let Some(parsed_font_size) = parse_css_font_size(size_text) {
+			font_size = Some(parsed_font_size);
+			remainder = remainder[size_text.len()..].trim_start();
+			// 줄높이. ("/1.5", "/ 20px")
+			if let Some(line_height_text) = remainder.strip_prefix('/') {
+				let line_height_text = line_height_text.trim_start();
+				let line_height_end = line_height_text.find(char::is_whitespace).unwrap_or(line_height_text.len());
+				if line_height_end == 0 {
+					return None;
+				}
+				remainder = line_height_text[line_height_end..].trim_start();
 			}
+			break;
+		}
+		// oblique 뒤의 각도. ("oblique 10deg")
+		let is_angle = is_after_oblique && ["deg", "grad", "rad", "turn"].iter().any(|unit| lowercase_token.strip_suffix(unit).map(|number_text| number_text.parse::<f32>().is_ok()).unwrap_or(false));
+		is_after_oblique = false;
+		if is_angle {
+			remainder = remainder[token_end..].trim_start();
 			continue;
 		}
-		if let Some(size_text) = lowercase_token.strip_suffix("px") {
-			if let Ok(parsed_font_size) = size_text.parse::<f32>() {
-				font_size = parsed_font_size;
-				has_found_size = true;
+		match lowercase_token.as_str() {
+			"normal" | "small-caps" | "ultra-condensed" | "extra-condensed" | "condensed" | "semi-condensed" | "semi-expanded" | "expanded" | "extra-expanded" | "ultra-expanded" => {}
+			"italic" => {
+				is_italic = true;
 			}
-			continue;
+			"oblique" => {
+				is_italic = true;
+				is_after_oblique = true;
+			}
+			"bold" | "bolder" => {
+				font_weight = 700;
+			}
+			"lighter" => {
+				font_weight = 100;
+			}
+			_ => {
+				if let Ok(parsed_weight) = lowercase_token.parse::<f32>() {
+					if !(1.0..=1000.0).contains(&parsed_weight) {
+						return None;
+					}
+					font_weight = parsed_weight.round() as u16;
+				}
+				else {
+					return None;
+				}
+			}
 		}
+		remainder = remainder[token_end..].trim_start();
 	}
-	let family_list_text = family_name_parts.join(" ");
-	let first_family_text = family_list_text.split(',').next().unwrap_or("");
-	let family_name = first_family_text.trim().trim_matches(|character| character == '"' || character == '\'').to_string();
-	FontDescription {
+	let font_size = font_size?;
+	let family_name_list = parse_css_family_list(remainder)?;
+	Some(FontDescription {
 		font_size,
 		font_weight,
 		is_bold: font_weight >= textshaping::BOLD_WEIGHT_THRESHOLD,
 		is_italic,
-		family_name,
+		family_name: family_name_list[0].clone(),
+		family_name_list,
+	})
+}
+
+//==============================================================================
+// CSS 글자 크기 하나 읽기. (픽셀, 크기가 아니거나 음수면 None. 상대 크기는 10px 에 댄다)
+//==============================================================================
+fn parse_css_font_size(size_text: &str) -> Option<f32> {
+	const BASE_FONT_SIZE: f32 = 10.0;
+	let named_size = match size_text {
+		"xx-small" => Some(9.0),
+		"x-small" => Some(10.0),
+		"small" => Some(13.0),
+		"medium" => Some(16.0),
+		"large" => Some(18.0),
+		"x-large" => Some(24.0),
+		"xx-large" => Some(32.0),
+		"xxx-large" => Some(48.0),
+		"larger" => Some(BASE_FONT_SIZE * 1.2),
+		"smaller" => Some(BASE_FONT_SIZE / 1.2),
+		_ => None,
+	};
+	if named_size.is_some() {
+		return named_size;
 	}
+	// 단위와 1 단위의 픽셀. (CSS 절대 길이: 1in = 96px = 2.54cm = 72pt = 6pc, 1q = 0.25mm)
+	let unit_list: [(&str, f32); 10] = [("px", 1.0), ("pt", 96.0 / 72.0), ("pc", 16.0), ("in", 96.0), ("cm", 96.0 / 2.54), ("mm", 96.0 / 25.4), ("q", 96.0 / 101.6), ("rem", BASE_FONT_SIZE), ("em", BASE_FONT_SIZE), ("%", BASE_FONT_SIZE / 100.0)];
+	for (unit, pixel_per_unit) in unit_list {
+		if let Some(number_text) = size_text.strip_suffix(unit) {
+			// "rem" 이 "em" 보다 먼저라 "2rem" 을 "2r" + "em" 으로 읽지 않는다.
+			let number = number_text.parse::<f32>().ok()?;
+			if !number.is_finite() || number < 0.0 || number_text.starts_with('+') {
+				return None;
+			}
+			return Some(number * pixel_per_unit);
+		}
+	}
+	None
+}
+
+//==============================================================================
+// CSS 글꼴 이름 목록 읽기. ("'A B', C D, sans-serif" → ["A B", "C D", "sans-serif"], 비었거나 틀리면 None)
+//==============================================================================
+fn parse_css_family_list(family_list_text: &str) -> Option<Vec<String>> {
+	let mut family_name_list: Vec<String> = Vec::new();
+	let mut characters = family_list_text.chars().peekable();
+	loop {
+		while characters.peek().map(|character| character.is_whitespace()).unwrap_or(false) {
+			characters.next();
+		}
+		let family_name = match characters.peek().copied() {
+			Some(quote) if quote == '"' || quote == '\'' => {
+				characters.next();
+				let mut quoted_name = String::new();
+				loop {
+					match characters.next() {
+						Some(character) if character == quote => {
+							break;
+						}
+						Some(character) => {
+							quoted_name.push(character);
+						}
+						None => {
+							return None;
+						}
+					}
+				}
+				while characters.peek().map(|character| character.is_whitespace()).unwrap_or(false) {
+					characters.next();
+				}
+				if !matches!(characters.peek(), None | Some(',')) {
+					return None;
+				}
+				quoted_name
+			}
+			_ => {
+				let mut unquoted_text = String::new();
+				while let Some(character) = characters.peek().copied() {
+					if character == ',' {
+						break;
+					}
+					if character == '"' || character == '\'' {
+						return None;
+					}
+					unquoted_text.push(character);
+					characters.next();
+				}
+				let word_list: Vec<&str> = unquoted_text.split_whitespace().collect();
+				if word_list.is_empty() {
+					return None;
+				}
+				word_list.join(" ")
+			}
+		};
+		family_name_list.push(family_name);
+		match characters.next() {
+			Some(',') => {
+				continue;
+			}
+			_ => {
+				break;
+			}
+		}
+	}
+	Some(family_name_list)
 }
 
 //==============================================================================
@@ -1573,8 +2268,7 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn measure_cache_reuses_and_clears_on_font_registration() {
-		let engine_configuration = crate::core::engine::EngineConfiguration::new();
-		let font_bytes = match engine_configuration.default_font_paths.iter().find_map(|font_path| std::fs::read(font_path).ok()) {
+		let font_bytes = match crate::platform::find_fallback_font_file("가", 400, false, false).and_then(|source| std::fs::read(source.path).ok()) {
 			Some(font_bytes) => {
 				font_bytes
 			}
@@ -1670,6 +2364,138 @@ mod tests {
 		assert!(!weighted_description.is_bold);
 		assert_eq!(weighted_description.family_name, "GameUI");
 		assert!(!parse_font_string("20px default").is_italic);
+	}
+
+	//==============================================================================
+	// 폰트 문자열: CSS 단위와 이름 크기, 줄높이, 이름 목록, 틀린 문자열. (크롬 Canvas2D 의 font 가 돌려준 값과 대었다)
+	//==============================================================================
+	#[test]
+	fn parse_font_string_reads_css_units_and_family_list() {
+		let read_size = |font_string: &str| -> f32 {
+			parse_font_string(font_string).font_size
+		};
+		assert_eq!(read_size("12pt a"), 16.0);
+		assert_eq!(read_size("2em a"), 20.0);
+		assert_eq!(read_size("2rem a"), 20.0);
+		assert_eq!(read_size("150% a"), 15.0);
+		assert_eq!(read_size("medium a"), 16.0);
+		assert_eq!(read_size("x-large a"), 24.0);
+		assert_eq!(read_size("xx-small a"), 9.0);
+		assert_eq!(read_size("larger a"), 12.0);
+		assert!((read_size("smaller a") - 8.33333).abs() < 0.001);
+		assert_eq!(read_size("1in a"), 96.0);
+		assert!((read_size("1cm a") - 37.7953).abs() < 0.001);
+		assert!((read_size("10q a") - 9.44882).abs() < 0.001);
+		assert_eq!(read_size("1pc a"), 16.0);
+		assert_eq!(read_size("16.5px a"), 16.5);
+		assert_eq!(read_size("16PX A"), 16.0);
+		let line_height_description = parse_font_string("bold 16px/20px a, b");
+		assert_eq!(line_height_description.font_size, 16.0);
+		assert_eq!(line_height_description.font_weight, 700);
+		assert_eq!(line_height_description.family_name_list, vec!["a", "b"]);
+		assert_eq!(parse_font_string("16px / 1.5 a").family_name, "a");
+		let list_description = parse_font_string("500 16px 'A B', \"C\", sans-serif");
+		assert_eq!(list_description.family_name_list, vec!["A B", "C", "sans-serif"]);
+		assert_eq!(parse_font_string("italic 16px a  b c").family_name, "a b c");
+		let keyword_description = parse_font_string("italic small-caps bold condensed 16px a");
+		assert!(keyword_description.is_italic && keyword_description.font_weight == 700);
+		assert!(parse_font_string("oblique 10deg 16px a").is_italic);
+		assert_eq!(parse_font_string("lighter 16px a").font_weight, 100);
+		for invalid_font_string in ["16px", "-5px a", "bold a 16px", "x 16px a", "16px 'a"] {
+			let invalid_description = parse_font_string(invalid_font_string);
+			assert_eq!(invalid_description.font_size, 10.0, "{}", invalid_font_string);
+			assert_eq!(invalid_description.family_name, "sans-serif", "{}", invalid_font_string);
+		}
+	}
+
+	//==============================================================================
+	// 시스템 글꼴 사슬과 운영체제 이름 찾기, 대체 글꼴: 맥 크롬 Canvas2D 의 measureText 값과 같다. (맥만, 같은 글꼴이 있을 때)
+	// - 한글은 사슬의 Apple SD Gothic Neo, "16px Helvetica" 와 "16px Menlo" 는 올리지 않은 이름을 운영체제 글꼴에서 찾은 것, 태국어는 운영체제 대체 글꼴.
+	//==============================================================================
+	#[cfg(target_os = "macos")]
+	#[test]
+	fn system_font_chain_matches_chrome_widths_on_macos() {
+		let mut text_string_texture_cache = TextStringTextureCache::new();
+		let system_font_description = parse_font_string(&format!("10px {}", crate::base::platform::SYSTEM_FONT_STRING));
+		text_string_texture_cache.set_system_font_chain(system_font_description.family_name_list);
+		text_string_texture_cache.set_system_font_fallback_enabled(true);
+		if crate::platform::find_family_font_file("Apple SD Gothic Neo", 400, false).is_none() || crate::platform::find_family_font_file("Menlo", 400, false).is_none() {
+			return;
+		}
+		let measure_width = |font_string: &str, text: &str| -> f32 {
+			text_string_texture_cache.measure_text(font_string, text).width
+		};
+		assert!((measure_width("16px default", "가나다라") - 55.360).abs() < 0.01);
+		assert!((measure_width("bold 16px default", "가나다라") - 55.360).abs() < 0.01);
+		assert!((measure_width("16px Helvetica", "Hello World Wifi") - 113.508).abs() < 0.01);
+		assert!((measure_width("16px Menlo", "Hello World Wifi") - 154.125).abs() < 0.01);
+		assert!(measure_width("16px default", "ภาษาไทย") > 50.0);
+		assert!(measure_width("bold 16px default", "Hello World Wifi") > measure_width("16px default", "Hello World Wifi"));
+	}
+
+	//==============================================================================
+	// 맥 색 이모지와 hvgl 글꼴: CoreText 로 그려 맥 크롬과 같다. (맥만, Apple Color Emoji 가 있을 때)
+	// - 이모지 전진폭은 크롬 measureText 값, 16px 이모지의 그림 상자와 알파 합은 크롬 캔버스 getImageData 로 잰 값이다.
+	// - 중국어 간체(PingFangUI, 윤곽이 애플 전용 hvgl 표에 있다)도 그려진다.
+	//==============================================================================
+	#[cfg(target_os = "macos")]
+	#[test]
+	fn color_emoji_matches_chrome_on_macos() {
+		if crate::platform::find_family_font_file("Apple Color Emoji", 400, false).is_none() {
+			return;
+		}
+		let mut text_string_texture_cache = TextStringTextureCache::new();
+		let system_font_description = parse_font_string(&format!("10px {}", crate::base::platform::SYSTEM_FONT_STRING));
+		text_string_texture_cache.set_system_font_chain(system_font_description.family_name_list);
+		text_string_texture_cache.set_system_font_fallback_enabled(true);
+		for (font_size, chrome_advance) in [(8.0, 10.0), (10.0, 13.0), (13.0, 16.0), (16.0, 20.0), (17.0, 21.0), (21.0, 23.0), (24.0, 24.0), (32.0, 32.0), (64.0, 64.0)] {
+			let text_metrics = text_string_texture_cache.measure_text(&format!("{}px default", font_size), "\u{1F600}");
+			assert_eq!(text_metrics.width, chrome_advance, "{}px", font_size);
+		}
+		let text_raster = text_string_texture_cache.rasterize_text("\u{1F600}", "16px default", 1.0, 2, ShapingDirection::LeftToRight).expect("emoji raster");
+		let color_pixels = text_raster.color_pixels.expect("color pixels");
+		let mut bounds = [i32::MAX, i32::MAX, -1, -1];
+		let mut alpha_sum: u64 = 0;
+		for position_y in 0..text_raster.height {
+			for position_x in 0..text_raster.width {
+				let alpha = color_pixels[((position_y * text_raster.width + position_x) * 4 + 3) as usize];
+				if alpha > 0 {
+					bounds = [bounds[0].min(position_x), bounds[1].min(position_y), bounds[2].max(position_x), bounds[3].max(position_y)];
+					alpha_sum += alpha as u64;
+				}
+			}
+		}
+		assert_eq!(bounds[0] as f32 - text_raster.origin_x, 0.0);
+		assert_eq!(bounds[2] as f32 + 1.0 - text_raster.origin_x, 20.0);
+		assert_eq!(text_raster.baseline_y - bounds[1] as f32, 16.0);
+		assert_eq!(bounds[3] as f32 + 1.0 - text_raster.baseline_y, 4.0);
+		assert_eq!(alpha_sum, 66360);
+		let chinese_raster = text_string_texture_cache.rasterize_text("\u{4EEC}", "32px default", 1.0, 2, ShapingDirection::LeftToRight).expect("chinese raster");
+		assert!(chinese_raster.coverage.iter().any(|value| *value > 0));
+	}
+
+	//==============================================================================
+	// 지켜보는 이름: 올린 얼굴의 글자 범위에 들지 않은 글자만 모으고, 꺼내면 비운다. (지켜보지 않는 이름은 모으지 않는다)
+	//==============================================================================
+	#[test]
+	fn unresolved_family_characters_are_collected() {
+		let font_bytes = match crate::platform::find_fallback_font_file("가", 400, false, false).and_then(|source| std::fs::read(source.path).ok()) {
+			Some(font_bytes) => {
+				font_bytes
+			}
+			None => {
+				return;
+			}
+		};
+		let mut text_string_texture_cache = TextStringTextureCache::new();
+		text_string_texture_cache.register_font_face("WatchedFamily", FontFaceDescriptors::create_from_css("400", "normal", "U+0000-00FF"), font_bytes.clone()).expect("latin face");
+		text_string_texture_cache.register_font_face("OtherFamily", FontFaceDescriptors::new(), font_bytes).expect("other face");
+		watch_unresolved_family_characters("WatchedFamily");
+		text_string_texture_cache.measure_text("16px WatchedFamily", "Ab 가나");
+		text_string_texture_cache.measure_text("16px OtherFamily", "다");
+		assert_eq!(take_unresolved_family_characters("watchedfamily"), "가나");
+		assert_eq!(take_unresolved_family_characters("WatchedFamily"), "");
+		assert_eq!(take_unresolved_family_characters("OtherFamily"), "");
 	}
 
 	//==============================================================================

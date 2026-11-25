@@ -10,9 +10,11 @@
 // - 화면 밖 거르기는 마지막으로 구운 한 장이 놓이는 사각형(넘친 글, 그림자 여백 포함)으로 판정한다. 세터로 바꾼 뒤 아직 굽지 않았거나 노드 너비나 굽는 배율이 달라졌으면 거르지 않는다.
 // - 기울임, 밑줄, 취소선(set_italic, set_underline, set_strikethrough): 선의 자리, 두께는 Text 의 가운데 기준선과 같고, 선도 글과 함께 구워 그림자가 깔린다.
 //   한 줄을 줄여 맞추는 글이라 줄바꿈 방식은 두지 않는다.
-// - 웹에서 글꼴 바이트가 없으면 브라우저 시스템 글꼴의 모양을 받아 같은 방식으로 굽는다. (글자 캐시 rasterize_text)
+// - 웹은 원본처럼 캔버스에 그림자(shadowColor, shadowBlur, shadowOffsetY)를 걸고 글자 색으로 fillText 해 굽는다. (platform/web/systemfont.rs 의 bake_shadow_text, 여백과 자리 셈이 원본과 같다)
+//   데스크탑은 글자 캐시의 rasterize_text 로 모양을 받아 상자 흐림 세 번으로 그림자를 셈한다.
 // - 색 글리프(이모지)는 제 색에 글자 색의 알파만 곱해 얹고, 그림자는 이모지 모양까지 드리운다. (원본 fillStyle 과 캔버스 그림자)
 // - 원본과 다른 것: 원본 setFontFace(FontFace) 는 set_font_family(올린 글꼴 이름), 그림자의 색과 불투명도(setShadow 의 색 글과 opacity)는 Color 하나(알파가 불투명도)로 받는다.
+//   원본 getBakeCanvas 는 구운 캔버스 대신 구운 Image 를 돌려주는 get_bake_image 다.
 //==============================================================================
 use std::rc::Rc;
 
@@ -341,6 +343,13 @@ impl ShadowText {
 			font_size = (self.font_size * fit_ratio * 10.0).floor() / 10.0;
 		}
 		let font_string = self.build_font_string(font_size);
+		// 웹: 원본처럼 캔버스에 그림자를 걸고 fillText 로 굽는다.
+		#[cfg(target_arch = "wasm32")]
+		{
+			if graphic.get_text_string_texture_cache().is_browser_raster() {
+				return self.bake_with_browser(&font_string, fit_width, bake_scale);
+			}
+		}
 		let scaled_blur = self.shadow_blur * bake_scale;
 		let scaled_offset = (self.shadow_offset * bake_scale).round() as i32;
 		let mut padding = BAKE_PADDING + scaled_blur.ceil() as i32 * 2 + scaled_offset.max(0);
@@ -369,6 +378,25 @@ impl ShadowText {
 			advance_width: text_raster.advance_width / bake_scale,
 			font_ascent: text_raster.font_ascent / bake_scale,
 			font_descent: text_raster.font_descent / bake_scale,
+		})
+	}
+
+	//==============================================================================
+	// 브라우저 캔버스로 굽기. (웹, 원본 bakeText: 글자 색으로 fillText, 그림자는 캔버스의 shadowColor / shadowBlur / shadowOffsetY, 밑줄과 취소선은 fillRect)
+	//==============================================================================
+	#[cfg(target_arch = "wasm32")]
+	fn bake_with_browser(&self, font_string: &str, fit_width: f32, bake_scale: f32) -> Option<BakedText> {
+		let font_description = crate::core::textstringtexturecache::parse_font_string(font_string);
+		let browser_bake = crate::platform::web::systemfont::bake_shadow_text(&self.text, &font_description, bake_scale, self.resolve_shaping_text_direction().to_shaping_direction(), self.text_color, self.shadow_color, self.shadow_offset, self.shadow_blur, self.is_underline, self.is_strikethrough)?;
+		Some(BakedText {
+			image: Image::create_from_pixels(browser_bake.bitmap.width, browser_bake.bitmap.height, browser_bake.bitmap.pixels),
+			scale: bake_scale,
+			content_width: fit_width,
+			pen_offset_x: browser_bake.pen_x / bake_scale,
+			baseline_offset_y: browser_bake.baseline_y / bake_scale,
+			advance_width: browser_bake.advance_width / bake_scale,
+			font_ascent: browser_bake.font_ascent / bake_scale,
+			font_descent: browser_bake.font_descent / bake_scale,
 		})
 	}
 
@@ -566,6 +594,13 @@ impl ShadowText {
 	//==============================================================================
 	pub fn get_fit_minimum_ratio(&self) -> f32 {
 		self.fit_minimum_ratio
+	}
+
+	//==============================================================================
+	// 구운 그림 반환. (아직 굽지 않았거나 그림자 없이 엔진의 글로 그렸으면 None, 원본 getBakeCanvas)
+	//==============================================================================
+	pub fn get_bake_image(&self) -> Option<&Rc<Image>> {
+		self.baked_text.as_ref().map(|baked_text| &baked_text.image)
 	}
 }
 

@@ -60,7 +60,7 @@ pub fn has_color_glyph(face: &Face, glyph_index: u16) -> bool {
 //==============================================================================
 // 색 글리프 래스터. (COLR 이 먼저, 없으면 비트맵, 색 글리프가 아니면 None)
 //==============================================================================
-pub fn rasterize_color_glyph(face: &Face<'static>, glyph_index: u16, pixel_size: f32) -> Option<ColorGlyphRaster> {
+pub fn rasterize_color_glyph(face: &Face<'_>, glyph_index: u16, pixel_size: f32) -> Option<ColorGlyphRaster> {
 	if pixel_size <= 0.0 {
 		return None;
 	}
@@ -249,7 +249,7 @@ fn build_resample_weights(source_length: usize, offset: f32, scale: f32, destina
 //==============================================================================
 // COLR 색 글리프 래스터. (경계를 먼저 재고, 그 판에 칠한다)
 //==============================================================================
-fn rasterize_outline_color_glyph(face: &Face<'static>, glyph_index: u16, pixel_size: f32) -> Option<ColorGlyphRaster> {
+fn rasterize_outline_color_glyph(face: &Face<'_>, glyph_index: u16, pixel_size: f32) -> Option<ColorGlyphRaster> {
 	let scale = pixel_size / face.units_per_em() as f32;
 	let mut bounds_painter = BoundsPainter {
 		face,
@@ -303,6 +303,46 @@ fn rasterize_outline_color_glyph(face: &Face<'static>, glyph_index: u16, pixel_s
 }
 
 //==============================================================================
+// 윤곽이 덮는 픽셀 상자. (윤곽을 그리는 함수와 글꼴 단위 → 픽셀 배율. 펜 원점에서 왼쪽, 기준선에서 위, 너비, 높이. 비었으면 None)
+//==============================================================================
+pub fn read_outline_bounds(draw_outline: &dyn Fn(&mut dyn OutlineBuilder) -> bool, scale: f32) -> Option<(i32, i32, i32, i32)> {
+	let mut bounds_collector = SegmentCollector::new(Transform::new(scale, 0.0, 0.0, scale, 0.0, 0.0));
+	if !draw_outline(&mut bounds_collector) || bounds_collector.segment_list.is_empty() {
+		return None;
+	}
+	let mut bounds = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
+	for segment in &bounds_collector.segment_list {
+		bounds[0] = bounds[0].min(segment[0]).min(segment[2]);
+		bounds[1] = bounds[1].min(segment[1]).min(segment[3]);
+		bounds[2] = bounds[2].max(segment[0]).max(segment[2]);
+		bounds[3] = bounds[3].max(segment[1]).max(segment[3]);
+	}
+	let left_x = bounds[0].floor() as i32;
+	let right_x = bounds[2].ceil() as i32;
+	let bottom_y = bounds[1].floor() as i32;
+	let top_y = bounds[3].ceil() as i32;
+	let width = right_x - left_x;
+	let height = top_y - bottom_y;
+	if width <= 0 || height <= 0 || width > MAXIMUM_RASTER_SIZE || height > MAXIMUM_RASTER_SIZE {
+		return None;
+	}
+	Some((left_x, top_y, width, height))
+}
+
+//==============================================================================
+// 윤곽의 덮인 정도. (가변 글꼴의 글리프, fontdue 가 축 값을 읽지 못하고 맥 SFNS 같은 가변 글꼴의 윤곽을 그리지 못해 여기서 그린다. 비었으면 None)
+// - 돌려주는 것: (덮인 정도, 너비, 높이, 펜 원점에서 왼쪽, 기준선에서 위). 색 글리프와 같은 넓이 누적 래스터다.
+//==============================================================================
+pub fn rasterize_outline(draw_outline: &dyn Fn(&mut dyn OutlineBuilder) -> bool, scale: f32) -> Option<(Vec<u8>, i32, i32, i32, i32)> {
+	let (left_x, top_y, width, height) = read_outline_bounds(draw_outline, scale)?;
+	let mut segment_collector = SegmentCollector::new(Transform::new(scale, 0.0, 0.0, -scale, -left_x as f32, top_y as f32));
+	draw_outline(&mut segment_collector);
+	let mask = rasterize_segments(&segment_collector.segment_list, width, height);
+	let coverage: Vec<u8> = mask.iter().map(|value| (value.clamp(0.0, 1.0) * 255.0).round() as u8).collect();
+	Some((coverage, width, height, left_x, top_y))
+}
+
+//==============================================================================
 // 점 하나를 변환으로 옮기기.
 //==============================================================================
 fn apply_transform(transform: &Transform, position_x: f32, position_y: f32) -> (f32, f32) {
@@ -312,8 +352,8 @@ fn apply_transform(transform: &Transform, position_x: f32, position_y: f32) -> (
 //==============================================================================
 // 경계 재는 그리개. (변환을 건 윤곽 경계 상자들의 합, 윤곽이 없으면 자르기 상자들의 합. 글꼴 단위)
 //==============================================================================
-struct BoundsPainter<'face> {
-	face: &'face Face<'static>,
+struct BoundsPainter<'face, 'font> {
+	face: &'face Face<'font>,
 	transform_stack: Vec<Transform>,
 	transform: Transform,
 	outline_bounds: Option<[f32; 4]>,
@@ -340,7 +380,7 @@ fn add_transformed_box(bounds: &mut Option<[f32; 4]>, transform: &Transform, box
 	}
 }
 
-impl<'face> Painter<'static> for BoundsPainter<'face> {
+impl<'face, 'font> Painter<'font> for BoundsPainter<'face, 'font> {
 	//==============================================================================
 	// 윤곽 받기. (경계 상자만)
 	//==============================================================================
@@ -354,7 +394,7 @@ impl<'face> Painter<'static> for BoundsPainter<'face> {
 	//==============================================================================
 	// 칠. (경계에는 쓰지 않는다)
 	//==============================================================================
-	fn paint(&mut self, _paint: Paint<'static>) {}
+	fn paint(&mut self, _paint: Paint<'font>) {}
 
 	//==============================================================================
 	// 윤곽 자르기. (경계에는 쓰지 않는다)
@@ -707,7 +747,7 @@ impl PreparedPaint {
 	//==============================================================================
 	// 칠 만들기. (선형은 p0 에서 p1 을 p0p2 에 수직으로 돌린 p3 쪽, COLR 명세의 셈)
 	//==============================================================================
-	fn create(paint: &Paint<'static>) -> PreparedPaint {
+	fn create(paint: &Paint<'_>) -> PreparedPaint {
 		match paint {
 			Paint::Solid(color) => {
 				let alpha = color.alpha as f32 / 255.0;
@@ -839,8 +879,8 @@ impl PreparedPaint {
 //==============================================================================
 // 색 그리개. (글꼴 단위 → 픽셀은 scale 배, y 를 뒤집어 판 왼쪽 위 기준)
 //==============================================================================
-struct ColorPainter<'face> {
-	face: &'face Face<'static>,
+struct ColorPainter<'face, 'font> {
+	face: &'face Face<'font>,
 	width: i32,
 	height: i32,
 	scale: f32,
@@ -857,7 +897,7 @@ struct ColorPainter<'face> {
 	canvas: Vec<[f32; 4]>,
 }
 
-impl ColorPainter<'_> {
+impl ColorPainter<'_, '_> {
 	//==============================================================================
 	// 글꼴 단위(지금 변환 앞) → 픽셀 변환.
 	//==============================================================================
@@ -893,7 +933,7 @@ impl ColorPainter<'_> {
 	}
 }
 
-impl<'face> Painter<'static> for ColorPainter<'face> {
+impl<'face, 'font> Painter<'font> for ColorPainter<'face, 'font> {
 	//==============================================================================
 	// 윤곽 받기. (지금 변환으로 픽셀 좌표 선분에)
 	//==============================================================================
@@ -906,7 +946,7 @@ impl<'face> Painter<'static> for ColorPainter<'face> {
 	//==============================================================================
 	// 칠. (자르기가 있으면 자르기 영역, 없으면 마지막 윤곽을 칠 색으로 덮는다. 원본 위에 얹기)
 	//==============================================================================
-	fn paint(&mut self, paint: Paint<'static>) {
+	fn paint(&mut self, paint: Paint<'font>) {
 		let prepared_paint = PreparedPaint::create(&paint);
 		let outline_mask;
 		let mask: &[f32] = match self.clip_stack.last() {

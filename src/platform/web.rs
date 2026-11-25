@@ -279,12 +279,90 @@ pub fn set_title(_platform_window: Option<&PlatformWindow>, title: &str) {
 
 //==============================================================================
 // 애셋 바이트 읽기. (fetch 로 받고, 받으면 끝낸다. 그 사이 프레임은 계속 돈다)
+// - 그림 확장자(png, jpg, gif, webp, bmp, ico, svg, avif 등)면 끝내기 전에 원본처럼 브라우저가 풀게 해 손잡이에 둔다. (ImageAsset, AssetLoader 가 그대로 쓴다)
 //==============================================================================
 pub fn request_asset_bytes(asset_location: String, load_handle: AssetLoadHandle, is_no_cache: bool) {
 	wasm_bindgen_futures::spawn_local(async move {
 		let result = fetch_bytes(&asset_location, is_no_cache).await;
+		if let (Ok(bytes), Some(mime_type)) = (&result, read_image_mime_type(&asset_location)) {
+			if let Some(image) = decode_browser_image(bytes, mime_type).await {
+				load_handle.set_decoded_image(image);
+			}
+		}
 		load_handle.finish(result);
 	});
+}
+
+//==============================================================================
+// 주소의 확장자로 그림 형식 이름. (그림이 아니면 None)
+//==============================================================================
+fn read_image_mime_type(asset_location: &str) -> Option<&'static str> {
+	let path = asset_location.split(['?', '#']).next()?;
+	let file_name = path.rsplit('/').next()?;
+	let (_, extension) = file_name.rsplit_once('.')?;
+	match extension.to_lowercase().as_str() {
+		"png" | "apng" => {
+			Some("image/png")
+		}
+		"jpg" | "jpeg" | "jfif" | "pjpeg" | "pjp" => {
+			Some("image/jpeg")
+		}
+		"gif" => {
+			Some("image/gif")
+		}
+		"webp" => {
+			Some("image/webp")
+		}
+		"bmp" => {
+			Some("image/bmp")
+		}
+		"ico" | "cur" => {
+			Some("image/x-icon")
+		}
+		"svg" => {
+			Some("image/svg+xml")
+		}
+		"avif" => {
+			Some("image/avif")
+		}
+		_ => {
+			None
+		}
+	}
+}
+
+//==============================================================================
+// 브라우저로 그림 풀기. (원본 HTMLImageElement 처럼 Blob 주소를 img 에 넣고 decode 를 기다려 캔버스에 그려 픽셀을 읽는다, 못 풀면 None)
+// - 크기는 그림의 natural 크기다. 크기가 없는 SVG 는 CSS 의 기본 대상 크기 300 x 150 으로 그린다.
+//==============================================================================
+async fn decode_browser_image(bytes: &[u8], mime_type: &str) -> Option<std::rc::Rc<crate::core::image::Image>> {
+	let byte_array = js_sys::Uint8Array::from(bytes);
+	let blob_part_list = js_sys::Array::of1(&byte_array);
+	let blob_options = web_sys::BlobPropertyBag::new();
+	blob_options.set_type(mime_type);
+	let blob = web_sys::Blob::new_with_u8_array_sequence_and_options(&blob_part_list, &blob_options).ok()?;
+	let object_url = web_sys::Url::create_object_url_with_blob(&blob).ok()?;
+	let image_element = web_sys::HtmlImageElement::new().ok()?;
+	image_element.set_src(&object_url);
+	let decode_result = wasm_bindgen_futures::JsFuture::from(image_element.decode()).await;
+	let _ = web_sys::Url::revoke_object_url(&object_url);
+	decode_result.ok()?;
+	let mut image_width = image_element.natural_width();
+	let mut image_height = image_element.natural_height();
+	if image_width == 0 || image_height == 0 {
+		image_width = 300;
+		image_height = 150;
+	}
+	let document = web_sys::window()?.document()?;
+	let canvas: web_sys::HtmlCanvasElement = document.create_element("canvas").ok()?.dyn_into().ok()?;
+	canvas.set_width(image_width);
+	canvas.set_height(image_height);
+	let context_options = js_sys::Object::new();
+	js_sys::Reflect::set(&context_options, &JsValue::from_str("willReadFrequently"), &JsValue::TRUE).ok()?;
+	let context: web_sys::CanvasRenderingContext2d = canvas.get_context_with_context_options("2d", &context_options).ok()??.dyn_into().ok()?;
+	context.draw_image_with_html_image_element_and_dw_and_dh(&image_element, 0.0, 0.0, image_width as f64, image_height as f64).ok()?;
+	let image_data = context.get_image_data(0.0, 0.0, image_width as f64, image_height as f64).ok()?;
+	Some(crate::core::image::Image::create_from_pixels(image_width, image_height, image_data.data().0))
 }
 
 //==============================================================================

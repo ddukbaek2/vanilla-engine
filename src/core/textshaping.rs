@@ -14,8 +14,14 @@
 //   기울기 1/4 (font_platform_data.cc 의 setSkewX(-SK_Scalar1 / 4)), 굵게는 글자 크기의 1/24 (9px 이하) ~ 1/32 (36px 이상) 두께로 윤곽을 칠해 넓힌다.
 //   (Skia SkTextFormatParams.h 의 kStdFakeBoldInterpKeys / Values) 둘 다 전진폭은 그대로다.
 //   가짜 굵게를 쓰는 때는 청한 굵기가 600 이상이고 고른 얼굴이 600 아래일 때다. (Blink kBoldThreshold)
-// - 글꼴 바이트는 등록할 때 한 번 'static 으로 붙잡아(Box::leak) rustybuzz 얼굴을 담아 둔다. 원본의 document.fonts 처럼 등록한 글꼴은
-//   프로그램이 끝날 때까지 남는 것으로 본다. (등록을 지워도 바이트는 돌려주지 않는다)
+// - 글꼴 바이트는 LoadedFont 가 rustybuzz 얼굴과 함께 든다. (self_cell, 얼굴이 바이트를 빌린다) 등록을 지우고 쓰는 곳이 없어지면 바이트도 돌려준다.
+//   같은 파일의 여러 얼굴(TTC 의 굵기들, 가변 글꼴의 굵기 인스턴스)은 바이트(Rc)를 나눠 든다.
+// - TTC 같은 글꼴 모음은 얼굴 번호(face_index)를 골라 읽는다. (find_collection_face_index 가 굵기와 기울기로 고른다)
+// - 가변 글꼴(fvar 의 wght 축)은 굵기 인스턴스를 축 값으로 만든다. (create_from_shared_bytes 의 variation_list) 모양 짓기는 rustybuzz 가 축 값을 읽고,
+//   래스터는 fontdue 가 축 값을 읽지 못하고 맥 SFNS 같은 가변 글꼴의 윤곽을 그리지 못해, 가변 글꼴은 skrifa 로 축 값을 건 윤곽을 받아 colorglyph 의 넓이 누적 래스터로 그린다.
+//   (크롬도 가변 글꼴의 굵기를 축 값으로 그린다)
+// - 맥: 파일에서 읽은 색 이모지 글꼴(sbix)과 윤곽 표가 없는 글꼴(PingFang 의 hvgl)은 CoreText 로 그린다. (platform/desktop/coretextglyph.rs, 원본 크롬 맥도 CoreText 로 그린다)
+//   색 이모지의 전진폭은 CoreText 가 작은 크기에서 키워 그리는 비를 곱하고 정수 픽셀로 반올림한다. (16px 에서 20, 13px 에서 16, 크롬 measureText 와 같다)
 //==============================================================================
 use crate::core::colorglyph;
 use std::rc::Rc;
@@ -208,31 +214,234 @@ pub fn parse_unicode_range(unicode_range: &str) -> Vec<(u32, u32)> {
 }
 
 //==============================================================================
-// 읽은 글꼴 하나. (래스터용 fontdue, 모양 짓기용 rustybuzz 얼굴, 색 글리프 표가 있는지)
+// 글꼴 바이트와 그것을 빌린 모양 짓기 얼굴. (바이트를 같은 값 안에 들어 얼굴이 바이트보다 오래 살지 않는다)
+//==============================================================================
+type ShapingFace<'font> = rustybuzz::Face<'font>;
+
+self_cell::self_cell!(
+	struct ShapingFaceCell {
+		owner: Rc<[u8]>,
+
+		#[covariant]
+		dependent: ShapingFace,
+	}
+);
+
+//==============================================================================
+// 읽은 글꼴 하나. (래스터용 fontdue, 모양 짓기용 rustybuzz 얼굴과 그 바이트, 색 글리프 표가 있는지)
 //==============================================================================
 pub struct LoadedFont {
 	pub raster_font: fontdue::Font,
-	pub shaping_face: rustybuzz::Face<'static>,
+	shaping_face_cell: ShapingFaceCell,
 	pub units_per_em: f32,
 	pub has_color_tables: bool,
+	// 글꼴 모음 안의 얼굴 번호. (TTC 가 아니면 0)
+	face_index: u32,
+	// 건 축 값. (가변 글꼴의 인스턴스, 비었으면 기본 인스턴스)
+	variation_list: Vec<rustybuzz::Variation>,
+	// 가변 글꼴인지. (fvar 표가 있다, 래스터와 글리프 상자를 윤곽에서 직접 셈한다)
+	is_variable_font: bool,
+	// 글꼴 파일 경로. (시스템 글꼴처럼 파일에서 읽었으면, 맥 CoreText 가 같은 파일로 그린다)
+	source_path: Option<std::path::PathBuf>,
+	// 맥 CoreText 로 그리는지. (파일 경로가 있고 색 이모지(sbix)이거나 윤곽 표(glyf, CFF, CFF2)가 없는 글꼴)
+	is_core_text_raster: bool,
 }
 
 impl LoadedFont {
 	//==============================================================================
-	// 풀린 글꼴 바이트(ttf, otf, ttc)로 읽기. (바이트는 'static 으로 붙잡는다)
+	// 풀린 글꼴 바이트(ttf, otf, ttc)로 읽기. (모음이면 0 번 얼굴)
 	//==============================================================================
 	pub fn create_from_bytes(font_bytes: Vec<u8>) -> Result<LoadedFont, String> {
-		let static_bytes: &'static [u8] = Box::leak(font_bytes.into_boxed_slice());
-		let raster_font = fontdue::Font::from_bytes(static_bytes, fontdue::FontSettings::default()).map_err(|error| format!("폰트 읽기 실패: {}", error))?;
-		let shaping_face = rustybuzz::Face::from_slice(static_bytes, 0).ok_or_else(|| String::from("폰트 읽기 실패: 모양 짓기 얼굴을 만들 수 없음"))?;
+		LoadedFont::create_from_shared_bytes(Rc::from(font_bytes), 0, &[])
+	}
+
+	//==============================================================================
+	// 나눠 든 바이트의 얼굴 하나 읽기. (모음 안의 얼굴 번호, 가변 글꼴의 축 값)
+	//==============================================================================
+	pub fn create_from_shared_bytes(font_bytes: Rc<[u8]>, face_index: u32, variation_list: &[rustybuzz::Variation]) -> Result<LoadedFont, String> {
+		let font_settings = fontdue::FontSettings {
+			collection_index: face_index,
+			..fontdue::FontSettings::default()
+		};
+		let raster_font = fontdue::Font::from_bytes(&*font_bytes, font_settings).map_err(|error| format!("폰트 읽기 실패: {}", error))?;
+		let shaping_face_cell = ShapingFaceCell::try_new(font_bytes, |font_bytes| {
+			let mut shaping_face = rustybuzz::Face::from_slice(font_bytes, face_index).ok_or_else(|| String::from("폰트 읽기 실패: 모양 짓기 얼굴을 만들 수 없음"))?;
+			shaping_face.set_variations(variation_list);
+			Ok::<ShapingFace, String>(shaping_face)
+		})?;
+		let shaping_face = shaping_face_cell.borrow_dependent();
 		let units_per_em = shaping_face.units_per_em() as f32;
-		let has_color_tables = colorglyph::has_color_tables(&shaping_face);
+		let has_color_tables = colorglyph::has_color_tables(shaping_face);
+		let is_variable_font = shaping_face.tables().fvar.is_some();
 		Ok(LoadedFont {
 			raster_font,
-			shaping_face,
+			shaping_face_cell,
 			units_per_em,
 			has_color_tables,
+			face_index,
+			variation_list: variation_list.to_vec(),
+			is_variable_font,
+			source_path: None,
+			is_core_text_raster: false,
 		})
+	}
+
+	//==============================================================================
+	// 글꼴 파일 경로 적기. (파일에서 읽은 글꼴. 맥은 색 이모지와 윤곽 표가 없는 글꼴을 CoreText 로 그리게 한다)
+	//==============================================================================
+	pub fn with_source_path(mut self, source_path: std::path::PathBuf) -> LoadedFont {
+		#[cfg(target_os = "macos")]
+		{
+			let tables = self.get_shaping_face().tables();
+			let has_outline_table = tables.glyf.is_some() || tables.cff.is_some() || tables.cff2.is_some();
+			self.is_core_text_raster = tables.sbix.is_some() || !has_outline_table;
+		}
+		self.source_path = Some(source_path);
+		self
+	}
+
+	//==============================================================================
+	// 맥 CoreText 로 그리는지.
+	//==============================================================================
+	pub fn is_core_text_raster(&self) -> bool {
+		self.is_core_text_raster
+	}
+
+	//==============================================================================
+	// 모양 짓기 전진폭에 곱할 비. (맥 색 이모지는 CoreText 가 작은 크기에서 키워 그리는 비, 그 밖은 1)
+	//==============================================================================
+	pub fn read_advance_scale(&self, pixel_size: f32) -> f32 {
+		#[cfg(target_os = "macos")]
+		{
+			if self.is_core_text_raster && self.get_shaping_face().tables().sbix.is_some() {
+				if let Some(source_path) = self.source_path.as_ref() {
+					return crate::platform::desktop::coretextglyph::read_emoji_scale(source_path, self.face_index, pixel_size);
+				}
+			}
+		}
+		let _ = pixel_size;
+		1.0
+	}
+
+	//==============================================================================
+	// 전진폭을 정수 픽셀로 반올림하는지. (맥 색 이모지, 크롬 measureText 가 13px 에서 16, 17px 에서 21 처럼 정수를 준다)
+	//==============================================================================
+	pub fn is_integer_advance(&self) -> bool {
+		self.is_core_text_raster && self.get_shaping_face().tables().sbix.is_some()
+	}
+
+	//==============================================================================
+	// 맥 CoreText 에 줄 축 값. ((4 글자 태그의 수, 값) 목록)
+	//==============================================================================
+	#[cfg(target_os = "macos")]
+	fn read_core_text_variation_list(&self) -> Vec<(u32, f32)> {
+		self.variation_list.iter().map(|variation| (variation.tag.0, variation.value)).collect()
+	}
+
+	//==============================================================================
+	// 모양 짓기 얼굴. (축 값을 건 얼굴, 글꼴 표도 이것으로 읽는다)
+	//==============================================================================
+	pub fn get_shaping_face(&self) -> &rustybuzz::Face<'_> {
+		self.shaping_face_cell.borrow_dependent()
+	}
+
+	//==============================================================================
+	// 글꼴 바이트. (같은 파일의 다른 얼굴이 나눠 든다)
+	//==============================================================================
+	pub fn get_font_bytes(&self) -> &Rc<[u8]> {
+		self.shaping_face_cell.borrow_owner()
+	}
+
+	//==============================================================================
+	// 글꼴 모음 안의 얼굴 번호.
+	//==============================================================================
+	pub fn get_face_index(&self) -> u32 {
+		self.face_index
+	}
+
+	//==============================================================================
+	// 축 값을 건 가변 글꼴 인스턴스인지.
+	//==============================================================================
+	pub fn is_variation_applied(&self) -> bool {
+		!self.variation_list.is_empty()
+	}
+
+	//==============================================================================
+	// 글리프를 윤곽에서 직접 그리는지. (가변 글꼴. fontdue 는 축 값을 읽지 못하고 맥 SFNS 같은 가변 글꼴의 윤곽을 그리지 못한다)
+	//==============================================================================
+	pub fn is_outline_raster(&self) -> bool {
+		self.is_variable_font || !self.variation_list.is_empty()
+	}
+
+	//==============================================================================
+	// 글리프가 덮는 픽셀 상자. (펜 원점에서 왼쪽, 아래, 너비, 높이. fontdue Metrics 의 xmin, ymin, width, height 와 같은 뜻, 비었으면 너비와 높이가 0)
+	//==============================================================================
+	pub fn read_glyph_metrics(&self, glyph_index: u16, pixel_size: f32) -> (i32, i32, i32, i32) {
+		#[cfg(target_os = "macos")]
+		{
+			if self.is_core_text_raster {
+				if let Some(source_path) = self.source_path.as_ref() {
+					return match crate::platform::desktop::coretextglyph::read_glyph_bounds(source_path, self.face_index, glyph_index, pixel_size, &self.read_core_text_variation_list()) {
+						Some(glyph_rect) => {
+							let left_x = glyph_rect.origin.x.floor() as i32;
+							let bottom_y = glyph_rect.origin.y.floor() as i32;
+							let right_x = (glyph_rect.origin.x + glyph_rect.size.width).ceil() as i32;
+							let top_y = (glyph_rect.origin.y + glyph_rect.size.height).ceil() as i32;
+							(left_x, bottom_y, right_x - left_x, top_y - bottom_y)
+						}
+						None => {
+							(0, 0, 0, 0)
+						}
+					};
+				}
+			}
+		}
+		if self.is_outline_raster() {
+			let scale = pixel_size / self.units_per_em;
+			return match colorglyph::read_outline_bounds(&|outline_builder| self.draw_glyph_outline(glyph_index, outline_builder), scale) {
+				Some((left_x, top_y, width, height)) => {
+					(left_x, top_y - height, width, height)
+				}
+				None => {
+					(0, 0, 0, 0)
+				}
+			};
+		}
+		let metrics = self.raster_font.metrics_indexed(glyph_index, pixel_size);
+		(metrics.xmin, metrics.ymin, metrics.width as i32, metrics.height as i32)
+	}
+
+	//==============================================================================
+	// 글리프 윤곽 그리기. (글꼴 단위, 축 값을 건 윤곽. 가변 글꼴은 skrifa 로, 아니면 ttf-parser 로. 윤곽이 없으면 false)
+	// - ttf-parser 는 글리프마다 변형이 32 개를 넘는 가변 글꼴(맥 SFNS 같은)의 윤곽을 읽지 못한다.
+	//==============================================================================
+	pub fn draw_glyph_outline(&self, glyph_index: u16, outline_builder: &mut dyn rustybuzz::ttf_parser::OutlineBuilder) -> bool {
+		if !self.is_variable_font {
+			return self.get_shaping_face().outline_glyph(rustybuzz::ttf_parser::GlyphId(glyph_index), outline_builder).is_some();
+		}
+		use skrifa::MetadataProvider;
+		let font_ref = match skrifa::FontRef::from_index(self.get_font_bytes(), self.face_index) {
+			Ok(font_ref) => {
+				font_ref
+			}
+			Err(_) => {
+				return false;
+			}
+		};
+		let location = font_ref.axes().location(self.variation_list.iter().map(|variation| (skrifa::Tag::new(&variation.tag.to_bytes()), variation.value)));
+		let outline_glyph_collection = font_ref.outline_glyphs();
+		let outline_glyph = match outline_glyph_collection.get(skrifa::GlyphId::new(glyph_index as u32)) {
+			Some(outline_glyph) => {
+				outline_glyph
+			}
+			None => {
+				return false;
+			}
+		};
+		let mut outline_pen = SkrifaOutlinePen {
+			outline_builder,
+		};
+		outline_glyph.draw(skrifa::outline::DrawSettings::unhinted(skrifa::instance::Size::unscaled(), &location), &mut outline_pen).is_ok()
 	}
 
 	//==============================================================================
@@ -249,14 +458,59 @@ impl LoadedFont {
 		if !self.has_color_tables {
 			return false;
 		}
-		match self.shaping_face.glyph_index(character) {
+		let shaping_face = self.get_shaping_face();
+		match shaping_face.glyph_index(character) {
 			Some(glyph_id) => {
-				colorglyph::has_color_glyph(&self.shaping_face, glyph_id.0)
+				colorglyph::has_color_glyph(shaping_face, glyph_id.0)
 			}
 			None => {
 				false
 			}
 		}
+	}
+}
+
+//==============================================================================
+// skrifa 윤곽을 ttf-parser 윤곽 받개로 넘기는 펜.
+//==============================================================================
+struct SkrifaOutlinePen<'builder> {
+	outline_builder: &'builder mut dyn rustybuzz::ttf_parser::OutlineBuilder,
+}
+
+impl skrifa::outline::OutlinePen for SkrifaOutlinePen<'_> {
+	//==============================================================================
+	// 새 윤곽 시작.
+	//==============================================================================
+	fn move_to(&mut self, position_x: f32, position_y: f32) {
+		self.outline_builder.move_to(position_x, position_y);
+	}
+
+	//==============================================================================
+	// 곧은 선.
+	//==============================================================================
+	fn line_to(&mut self, position_x: f32, position_y: f32) {
+		self.outline_builder.line_to(position_x, position_y);
+	}
+
+	//==============================================================================
+	// 2 차 곡선.
+	//==============================================================================
+	fn quad_to(&mut self, control_x: f32, control_y: f32, position_x: f32, position_y: f32) {
+		self.outline_builder.quad_to(control_x, control_y, position_x, position_y);
+	}
+
+	//==============================================================================
+	// 3 차 곡선.
+	//==============================================================================
+	fn curve_to(&mut self, first_control_x: f32, first_control_y: f32, second_control_x: f32, second_control_y: f32, position_x: f32, position_y: f32) {
+		self.outline_builder.curve_to(first_control_x, first_control_y, second_control_x, second_control_y, position_x, position_y);
+	}
+
+	//==============================================================================
+	// 윤곽 닫기.
+	//==============================================================================
+	fn close(&mut self) {
+		self.outline_builder.close();
 	}
 }
 
@@ -312,6 +566,111 @@ pub struct ResolvedFontFace {
 }
 
 //==============================================================================
+// 굵기 고르기 점수. (작을수록 먼저, CSS Fonts 4 의 차례. 굵기 범위가 청한 굵기를 품으면 (0, 0))
+// - 청한 값이 400 ~ 500 이면 그 값부터 500 까지 오름, 그 아래 내림, 500 위 오름. 400 아래면 아래 내림, 위 오름. 500 위면 위 오름, 아래 내림.
+//==============================================================================
+pub fn calculate_weight_score(face_minimum_weight: u16, face_maximum_weight: u16, desired_weight: u16) -> (u32, u32) {
+	let minimum_weight = face_minimum_weight as i32;
+	let maximum_weight = face_maximum_weight as i32;
+	let desired = desired_weight as i32;
+	if desired >= minimum_weight && desired <= maximum_weight {
+		return (0, 0);
+	}
+	if (400..=500).contains(&desired) {
+		if minimum_weight > desired && minimum_weight <= 500 {
+			return (1, (minimum_weight - desired) as u32);
+		}
+		if maximum_weight < desired {
+			return (2, (desired - maximum_weight) as u32);
+		}
+		return (3, (minimum_weight - desired) as u32);
+	}
+	if desired < 400 {
+		if maximum_weight < desired {
+			return (1, (desired - maximum_weight) as u32);
+		}
+		return (2, (minimum_weight - desired) as u32);
+	}
+	if minimum_weight > desired {
+		return (1, (minimum_weight - desired) as u32);
+	}
+	(2, (desired - maximum_weight) as u32)
+}
+
+//==============================================================================
+// 글꼴 모음(TTC)에서 청한 굵기와 기울기에 가장 맞는 얼굴 번호. (모음이 아니면 0)
+// - 굵기는 OS/2 의 usWeightClass, 기울기는 OS/2 와 head 의 기울임 표시로 본다. 기울기를 먼저, 그다음 굵기를 select_font_faces 와 같은 차례로 고른다.
+// - PostScript 이름이 점으로 시작하는 얼굴(맥 시스템 글꼴이 안에서만 쓰는 얼굴)은 다른 얼굴이 없을 때만 고른다. 점수가 같으면 앞 번호.
+//==============================================================================
+pub fn find_collection_face_index(font_bytes: &[u8], desired_weight: u16, is_italic_desired: bool) -> u32 {
+	let face_count = rustybuzz::ttf_parser::fonts_in_collection(font_bytes).unwrap_or(1);
+	let mut best_face: Option<((bool, bool, (u32, u32)), u32)> = None;
+	for face_index in 0..face_count {
+		let face = match rustybuzz::ttf_parser::Face::parse(font_bytes, face_index) {
+			Ok(face) => {
+				face
+			}
+			Err(_) => {
+				continue;
+			}
+		};
+		let is_hidden = face.names().into_iter().any(|name| name.name_id == rustybuzz::ttf_parser::name_id::POST_SCRIPT_NAME && name.to_string().map(|text| text.starts_with('.')).unwrap_or(false));
+		let weight = face.weight().to_number();
+		let score = (is_hidden, face.is_italic() != is_italic_desired, calculate_weight_score(weight, weight, desired_weight));
+		let is_better = match &best_face {
+			Some((best_score, _)) => {
+				score < *best_score
+			}
+			None => {
+				true
+			}
+		};
+		if is_better {
+			best_face = Some((score, face_index));
+		}
+	}
+	best_face.map(|(_, face_index)| face_index).unwrap_or(0)
+}
+
+//==============================================================================
+// 가변 글꼴의 굵기 축 값. (wght 축이 있고 청한 굵기가 기본값과 다르면 축 범위로 자른 값 하나, 아니면 빈 목록)
+//==============================================================================
+pub fn read_weight_variation(font_bytes: &[u8], face_index: u32, desired_weight: u16) -> Vec<rustybuzz::Variation> {
+	let face = match rustybuzz::ttf_parser::Face::parse(font_bytes, face_index) {
+		Ok(face) => {
+			face
+		}
+		Err(_) => {
+			return Vec::new();
+		}
+	};
+	let weight_tag = rustybuzz::ttf_parser::Tag::from_bytes(b"wght");
+	for variation_axis in face.variation_axes() {
+		if variation_axis.tag != weight_tag {
+			continue;
+		}
+		let value = (desired_weight as f32).clamp(variation_axis.min_value, variation_axis.max_value);
+		if (value - variation_axis.def_value).abs() < 0.5 {
+			return Vec::new();
+		}
+		return vec![rustybuzz::Variation {
+			tag: weight_tag,
+			value,
+		}];
+	}
+	Vec::new()
+}
+
+//==============================================================================
+// 가변 글꼴의 굵기 범위. (wght 축의 처음과 끝, 축이 없으면 None)
+//==============================================================================
+pub fn read_weight_axis_range(font_bytes: &[u8], face_index: u32) -> Option<(u16, u16)> {
+	let face = rustybuzz::ttf_parser::Face::parse(font_bytes, face_index).ok()?;
+	let weight_tag = rustybuzz::ttf_parser::Tag::from_bytes(b"wght");
+	face.variation_axes().into_iter().find(|variation_axis| variation_axis.tag == weight_tag).map(|variation_axis| (variation_axis.min_value.round() as u16, variation_axis.max_value.round() as u16))
+}
+
+//==============================================================================
 // 한 이름 아래의 얼굴들에서 청한 굵기와 기울기에 맞는 얼굴들 고르기. (CSS Fonts 4 의 글꼴 고르기 차례)
 // - 기울기를 먼저 고른다. 기울임을 청하면 기울인 얼굴, 없으면 바른 얼굴(가짜 기울임). 바르게를 청하면 바른 얼굴, 없으면 기울인 얼굴.
 // - 굵기: 청한 값이 400 ~ 500 이면 그 값부터 500 까지 오름, 그 아래 내림, 500 위 오름. 400 아래면 아래 내림, 위 오름. 500 위면 위 오름, 아래 내림.
@@ -324,31 +683,7 @@ pub fn select_font_faces(face_list: &[&RegisteredFontFace], desired_weight: u16,
 	let has_desired_style = face_list.iter().any(|face| face.descriptors.is_italic == is_italic_desired);
 	let style_face_list: Vec<&&RegisteredFontFace> = face_list.iter().filter(|face| !has_desired_style || face.descriptors.is_italic == is_italic_desired).collect();
 	let calculate_weight_score = |face: &RegisteredFontFace| -> (u32, u32) {
-		let minimum_weight = face.descriptors.minimum_weight as i32;
-		let maximum_weight = face.descriptors.maximum_weight as i32;
-		let desired = desired_weight as i32;
-		if desired >= minimum_weight && desired <= maximum_weight {
-			return (0, 0);
-		}
-		if (400..=500).contains(&desired) {
-			if minimum_weight > desired && minimum_weight <= 500 {
-				return (1, (minimum_weight - desired) as u32);
-			}
-			if maximum_weight < desired {
-				return (2, (desired - maximum_weight) as u32);
-			}
-			return (3, (minimum_weight - desired) as u32);
-		}
-		if desired < 400 {
-			if maximum_weight < desired {
-				return (1, (desired - maximum_weight) as u32);
-			}
-			return (2, (minimum_weight - desired) as u32);
-		}
-		if minimum_weight > desired {
-			return (1, (minimum_weight - desired) as u32);
-		}
-		(2, (desired - maximum_weight) as u32)
+		calculate_weight_score(face.descriptors.minimum_weight, face.descriptors.maximum_weight, desired_weight)
 	};
 	let best_score = match style_face_list.iter().map(|face| calculate_weight_score(face)).min() {
 		Some(best_score) => {
@@ -570,8 +905,9 @@ pub fn shape_text(face_list: &[ResolvedFontFace], text: &str, pixel_size: f32, d
 					rustybuzz::Direction::LeftToRight
 				});
 				unicode_buffer.guess_segment_properties();
-				let glyph_buffer = rustybuzz::shape(&face.font.shaping_face, &[], unicode_buffer);
-				let scale = pixel_size / face.font.units_per_em;
+				let glyph_buffer = rustybuzz::shape(face.font.get_shaping_face(), &[], unicode_buffer);
+				let scale = pixel_size / face.font.units_per_em * face.font.read_advance_scale(pixel_size);
+				let is_integer_advance = face.font.is_integer_advance();
 				for (glyph_info, glyph_position) in glyph_buffer.glyph_infos().iter().zip(glyph_buffer.glyph_positions().iter()) {
 					shaped_text.glyph_list.push(ShapedGlyph {
 						face_index,
@@ -582,7 +918,14 @@ pub fn shape_text(face_list: &[ResolvedFontFace], text: &str, pixel_size: f32, d
 						text_end: 0,
 						is_right_to_left: is_right_to_left_run,
 					});
-					pen_x += glyph_position.x_advance as f32 * scale;
+					// 맥 색 이모지는 정수 픽셀로 반올림한다. (곱셈 오차로 0.5 가 조금 모자라 내려가지 않게 작은 값을 더한다)
+					let advance = if is_integer_advance {
+						(glyph_position.x_advance as f32 * scale + 0.001).round()
+					}
+					else {
+						glyph_position.x_advance as f32 * scale
+					};
+					pen_x += advance;
 				}
 			}
 		}
@@ -625,8 +968,14 @@ pub struct GlyphRaster {
 // 글리프 래스터. (가짜 굵게는 넓히고, 가짜 기울임은 기준선 기준으로 민다. 색 글리프는 제 색으로, 가짜 굵게 없이)
 //==============================================================================
 pub fn rasterize_glyph(face: &ResolvedFontFace, glyph_index: u16, pixel_size: f32) -> GlyphRaster {
+	#[cfg(target_os = "macos")]
+	{
+		if let Some(glyph_raster) = rasterize_core_text_glyph(face, glyph_index, pixel_size) {
+			return glyph_raster;
+		}
+	}
 	if face.font.has_color_tables {
-		if let Some(color_glyph_raster) = colorglyph::rasterize_color_glyph(&face.font.shaping_face, glyph_index, pixel_size) {
+		if let Some(color_glyph_raster) = colorglyph::rasterize_color_glyph(face.font.get_shaping_face(), glyph_index, pixel_size) {
 			let mut glyph_raster = GlyphRaster {
 				coverage: vec![0u8; (color_glyph_raster.width * color_glyph_raster.height) as usize],
 				width: color_glyph_raster.width,
@@ -641,14 +990,42 @@ pub fn rasterize_glyph(face: &ResolvedFontFace, glyph_index: u16, pixel_size: f3
 			return glyph_raster;
 		}
 	}
-	let (metrics, bitmap) = face.font.raster_font.rasterize_indexed(glyph_index, pixel_size);
-	let mut glyph_raster = GlyphRaster {
-		coverage: bitmap,
-		width: metrics.width as i32,
-		height: metrics.height as i32,
-		left_x: metrics.xmin,
-		top_y: metrics.ymin + metrics.height as i32,
-		color_pixels: None,
+	let mut glyph_raster = if face.font.is_outline_raster() {
+		// 가변 글꼴: 축 값을 건 윤곽으로. (fontdue 는 기본 인스턴스만 그리고 SFNS 같은 글꼴은 그리지 못한다)
+		let scale = pixel_size / face.font.units_per_em;
+		match colorglyph::rasterize_outline(&|outline_builder| face.font.draw_glyph_outline(glyph_index, outline_builder), scale) {
+			Some((coverage, width, height, left_x, top_y)) => {
+				GlyphRaster {
+					coverage,
+					width,
+					height,
+					left_x,
+					top_y,
+					color_pixels: None,
+				}
+			}
+			None => {
+				GlyphRaster {
+					coverage: Vec::new(),
+					width: 0,
+					height: 0,
+					left_x: 0,
+					top_y: 0,
+					color_pixels: None,
+				}
+			}
+		}
+	}
+	else {
+		let (metrics, bitmap) = face.font.raster_font.rasterize_indexed(glyph_index, pixel_size);
+		GlyphRaster {
+			coverage: bitmap,
+			width: metrics.width as i32,
+			height: metrics.height as i32,
+			left_x: metrics.xmin,
+			top_y: metrics.ymin + metrics.height as i32,
+			color_pixels: None,
+		}
 	};
 	if glyph_raster.width == 0 || glyph_raster.height == 0 {
 		return glyph_raster;
@@ -674,6 +1051,76 @@ pub fn rasterize_glyph(face: &ResolvedFontFace, glyph_index: u16, pixel_size: f3
 		apply_synthetic_italic(&mut glyph_raster);
 	}
 	glyph_raster
+}
+
+//==============================================================================
+// 맥 CoreText 로 글리프 그리기. (CoreText 로 그리는 글꼴이 아니면 None. 색 글리프는 제 색, 그 밖은 흰색의 알파를 덮인 정도로)
+// - 가짜 기울임은 색 글리프에도 입히고, 가짜 굵게는 색이 아닌 글리프에만 입힌다. (rasterize_glyph 와 같다)
+//==============================================================================
+#[cfg(target_os = "macos")]
+fn rasterize_core_text_glyph(face: &ResolvedFontFace, glyph_index: u16, pixel_size: f32) -> Option<GlyphRaster> {
+	if !face.font.is_core_text_raster() {
+		return None;
+	}
+	let source_path = face.font.source_path.as_ref()?;
+	let is_color_glyph = face.font.has_color_tables && colorglyph::has_color_glyph(face.font.get_shaping_face(), glyph_index);
+	let core_text_raster = match crate::platform::desktop::coretextglyph::rasterize_glyph(source_path, face.font.face_index, glyph_index, pixel_size, &face.font.read_core_text_variation_list()) {
+		Some(core_text_raster) => {
+			core_text_raster
+		}
+		None => {
+			return Some(GlyphRaster {
+				coverage: Vec::new(),
+				width: 0,
+				height: 0,
+				left_x: 0,
+				top_y: 0,
+				color_pixels: None,
+			});
+		}
+	};
+	let pixel_count = (core_text_raster.width * core_text_raster.height) as usize;
+	let mut glyph_raster = if is_color_glyph {
+		GlyphRaster {
+			coverage: vec![0u8; pixel_count],
+			width: core_text_raster.width,
+			height: core_text_raster.height,
+			left_x: core_text_raster.left_x,
+			top_y: core_text_raster.top_y,
+			color_pixels: Some(core_text_raster.pixels),
+		}
+	}
+	else {
+		GlyphRaster {
+			coverage: core_text_raster.pixels.chunks_exact(4).map(|pixel| pixel[3]).collect(),
+			width: core_text_raster.width,
+			height: core_text_raster.height,
+			left_x: core_text_raster.left_x,
+			top_y: core_text_raster.top_y,
+			color_pixels: None,
+		}
+	};
+	if face.is_synthetic_bold && !is_color_glyph {
+		let radius = calculate_synthetic_bold_radius(pixel_size);
+		let margin = radius.ceil() as i32 + 1;
+		let width = glyph_raster.width + margin * 2;
+		let height = glyph_raster.height + margin * 2;
+		let mut padded = vec![0u8; (width * height) as usize];
+		for position_y in 0..glyph_raster.height {
+			for position_x in 0..glyph_raster.width {
+				padded[((position_y + margin) * width + position_x + margin) as usize] = glyph_raster.coverage[(position_y * glyph_raster.width + position_x) as usize];
+			}
+		}
+		glyph_raster.coverage = dilate_coverage(&padded, width, height, radius);
+		glyph_raster.width = width;
+		glyph_raster.height = height;
+		glyph_raster.left_x -= margin;
+		glyph_raster.top_y += margin;
+	}
+	if face.is_synthetic_italic {
+		apply_synthetic_italic(&mut glyph_raster);
+	}
+	Some(glyph_raster)
 }
 
 //==============================================================================
@@ -859,14 +1306,13 @@ mod tests {
 
 	//==============================================================================
 	// 얼굴 고르기: ❤️ 는 색 글리프 얼굴로, 맨 ❤ 는 흑백 얼굴로. 시스템 조각을 쓸 수 있으면(웹) 색 얼굴이 없을 때 ❤️ 는 브라우저 조각으로.
-	// (대체 글꼴 후보 가운데 흑백 ❤ 를 가진 글꼴과 색 ❤ 를 가진 글꼴이 있을 때만 본다, 맥은 Arial Unicode 와 Apple Color Emoji)
+	// (운영체제가 고른 ❤ 의 흑백 대체 글꼴과 색 이모지 글꼴이 있을 때만 본다, 맥은 ZapfDingbats 와 Apple Color Emoji)
 	//==============================================================================
 	#[test]
 	fn emoji_presentation_selects_color_face() {
-		let engine_configuration = crate::core::engine::EngineConfiguration::new();
 		let find_font = |is_color: bool| -> Option<LoadedFont> {
-			engine_configuration.fallback_font_paths.iter().find_map(|font_path| {
-				let font = LoadedFont::create_from_bytes(std::fs::read(font_path).ok()?).ok()?;
+			crate::platform::find_fallback_font_file("\u{2764}", 400, false, is_color).and_then(|source| {
+				let font = LoadedFont::create_from_bytes(std::fs::read(source.path).ok()?).ok()?;
 				let is_matched = if is_color {
 					font.has_color_character('\u{2764}')
 				}

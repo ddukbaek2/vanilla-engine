@@ -224,3 +224,6 @@ pub use crate::graphics3d::skinnedmodel::SkinnedModelLoadHandle;
 pub use crate::graphics3d::multilevelbloomeffect::MultiLevelBloomEffect;
 pub use crate::graphics3d::toon::toonpostprocess::ToonPostProcessOptions;
 pub use crate::graphics3d::toon::toonvfx::ToonBlobShadowOptions;
+pub use crate::base::identifier::create_guid;
+pub use crate::core::component::text::slice_graphemes;
+pub use crate::core::graphic::ImageSmoothingQuality;

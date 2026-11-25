@@ -21,6 +21,10 @@ wuff = "0.2"
 rustybuzz = "0.20"
 # 양방향 정렬. (UAX #9, 오른쪽에서 왼쪽 글자와 섞인 글의 그리는 차례. 원본은 Canvas2D direction)
 unicode-bidi = "0.3"
+# 가변 글꼴의 윤곽. (축 값을 건 글리프 윤곽, ttf-parser 는 글리프마다 변형이 32 개를 넘는 가변 글꼴(맥 SFNS 같은)의 윤곽을 읽지 못한다. 원본 크롬도 fontations 의 skrifa 를 쓴다)
+skrifa = { version = "0.50", default-features = false, features = ["std"] }
+# 글꼴 바이트를 든 얼굴. (rustybuzz 얼굴이 빌리는 바이트를 같은 값 안에 들어, 글꼴을 내리면 바이트도 돌려준다)
+self_cell = "1"
 # 글자 묶음 나누기. (UAX #29, 받침, 결합 부호, 이모지 묶음. 원본 Intl.Segmenter granularity "grapheme")
 unicode-segmentation = "1"
 # 이모지 성질. (Emoji_Presentation 같은 UTS #51 성질, 글자 묶음이 색 이모지로 그려질지 가린다. rustybuzz 가 이미 쓰는 크레이트에 emoji 기능만 켠다)
@@ -29,8 +33,8 @@ unicode-properties = { version = "0.1", default-features = false, features = ["e
 serde_json = { version = "1", features = ["preserve_order"] }
 # FBX 압축 배열(zlib deflate)을 푼다. (원본 DecompressionStream 자리, 순수 러스트 miniz_oxide 기본 백엔드라 wasm32 에서도 돈다)
 flate2 = "1"
-# 이미지 해석. (게임들이 png, jpg, webp 를 쓴다)
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+# 이미지 해석. (원본은 브라우저가 푸는 형식을 모두 받는다. png, jpeg, webp, gif(첫 장), bmp, ico. 웹은 브라우저가 먼저 푼다)
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif", "bmp", "ico"] }
 # 노드 핸들. (세대 번호가 붙은 키로 씬의 노드 저장소를 가리킨다)
 slotmap = "1"
 # performance.now() 를 쓰는 Instant. (네이티브에서는 std::time 그대로)
@@ -48,8 +52,15 @@ glutin-winit = "0.5"
 raw-window-handle = "0.6"
 # 소리. (믹서 트랙, 정적 소리. 기본 기능을 끄고 cpal 출력과 ogg(vorbis), mp3, wav(pcm), flac, m4a(isomp4 와 aac) 해석만 켠다. 웹은 브라우저가 이 꼴들을 푼다)
 kira = { version = "0.12", default-features = false, features = ["cpal", "cpal-realtime", "ogg", "vorbis", "mp3", "wav", "pcm", "flac", "isomp4", "aac"] }
-# 낱말 나누기. (공백 없이 쓰는 한중일은 사전, 태국어 같은 동남아 글자는 LSTM 으로 낱말 사이를 찾는다. 웹은 원본처럼 브라우저 Intl.Segmenter 를 쓴다)
+# SVG 그림. (데스크탑, usvg 로 읽고 tiny-skia 로 그린다. 원본은 브라우저가 SVG 를 그림으로 푼다. 웹은 브라우저가 푼다)
+resvg = "0.50"
+# 낱말 나누기. (공백 없이 쓰는 한중일과 태국어 같은 동남아 글자를 사전으로 나눈다. 크롬의 ICU4C 도 사전이다. 웹은 원본처럼 브라우저 Intl.Segmenter 를 쓴다)
 icu_segmenter = "2"
+# 한중일 사전(cjdict)의 낱말 값을 읽는다. (icu_segmenter 가 쓰는 같은 판, 크롬의 ICU4C 처럼 낱말 값의 합이 가장 작은 나누기를 고른다)
+icu_provider = "2"
+icu_collections = "2"
+# 한중일 사전 찾기 전에 NFKC 로 바꾼다. (반각 가타카나 → 전각, ICU4C CjkBreakEngine 과 같다)
+unicode-normalization = "0.1"
 # 시스템 클립보드. (입력 필드의 복사, 잘라내기, 붙여넣기. winit 에 클립보드가 없다. 그림 기능은 끈다)
 arboard = { version = "3", default-features = false }
 # 데스크탑 wss://. (ewebsock 의 tls 기능, tungstenite 가 rustls 와 webpki 뿌리 인증서로 연다)
@@ -62,6 +73,9 @@ rustls = { version = "0.23", default-features = false, features = ["ring"] }
 # 윈도우: 잠자기에서 깸(WM_POWERBROADCAST)을 받으려 창을 서브클래싱하고, 주된 손이 손가락인지 크로미엄처럼 읽는다. (winit 과 같은 판, 쓰는 기능만 켠다)
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_Devices_Display", "Win32_System_Power", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+# 윈도우: 시스템 글꼴. (DirectWrite 로 글꼴 이름의 파일을 찾고, 글꼴에 없는 글자의 대체 글꼴을 IDWriteFontFallback 으로 고른다. 원본 크롬 윈도우도 DirectWrite 로 고른다)
+dwrote = { version = "0.11", default-features = false }
+winapi = { version = "0.3", features = ["dwrite", "winnls"] }
 
 # 맥: 게임패드 진동. (gilrs 의 macOS force feedback 이 비어 있어, GameController 의 GCController.haptics 로 CoreHaptics 엔진을 지어 떤다. 쓰는 기능만 켠다)
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -70,13 +84,22 @@ objc2-foundation = { version = "0.3", default-features = false, features = ["std
 objc2-game-controller = { version = "0.3", default-features = false, features = ["std", "GCController", "GCDevice", "GCDeviceHaptics"] }
 objc2-core-haptics = { version = "0.3", default-features = false, features = ["std", "block2", "CHHapticEngine", "CHHapticEvent", "CHHapticParameter", "CHHapticPattern", "CHHapticPatternPlayer"] }
 block2 = "0.6"
+# 맥: 시스템 글꼴. (CoreText 로 글꼴 이름과 시스템 UI 글꼴의 파일을 찾고, 글꼴에 없는 글자의 대체 글꼴을 CTFontCreateForString 으로 고른다. 원본 크롬 맥도 CoreText 로 고른다)
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFString", "CFURL", "CFDictionary", "CFNumber", "CFArray", "CFData", "CFCGTypes"] }
+objc2-core-text = { version = "0.3", default-features = false, features = ["std", "objc2-core-graphics", "CTFont", "CTFontDescriptor", "CTFontTraits", "CTFontManager"] }
+# 맥: 색 이모지와 열린 해석기가 없는 글꼴(PingFang 의 hvgl)의 글리프를 CoreText 로 그린다. (원본 크롬 맥도 CoreGraphics 로 그린다)
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGBitmapContext", "CGColorSpace", "CGContext", "CGFont", "CGImage"] }
+
+# 리눅스와 그 밖의 유닉스: 시스템 글꼴. (fontconfig 로 글꼴 이름과 대체 글꼴을 고른다. 원본 크롬 리눅스도 fontconfig 로 고른다. 라이브러리는 빌드할 때 잇지 않고 실행할 때 연다)
+[target.'cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android"), not(target_arch = "wasm32")))'.dependencies]
+yeslogic-fontconfig-sys = { version = "6", features = ["dlopen"] }
 
 # 웹(wasm): 캔버스와 WebGL2, requestAnimationFrame, WebAudio, fetch.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
-web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlCanvasElement", "WebGl2RenderingContext", "CssStyleDeclaration", "HtmlElement", "KeyboardEvent", "console", "AudioContext", "BaseAudioContext", "OfflineAudioContext", "AudioBuffer", "AudioBufferSourceNode", "AudioScheduledSourceNode", "AudioNode", "AudioDestinationNode", "AudioParam", "GainNode", "OscillatorNode", "OscillatorType", "Response", "Performance", "Navigator", "VisibilityState", "Storage", "HtmlInputElement", "HtmlHeadElement", "Event", "CompositionEvent", "MouseEvent", "WheelEvent", "MediaQueryList", "TouchEvent", "TouchList", "Touch", "DomRect", "Node", "AddEventListenerOptions", "CanvasRenderingContext2d", "TextMetrics", "ImageData"] }
+web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlCanvasElement", "WebGl2RenderingContext", "CssStyleDeclaration", "HtmlElement", "KeyboardEvent", "console", "AudioContext", "BaseAudioContext", "OfflineAudioContext", "AudioBuffer", "AudioBufferSourceNode", "AudioScheduledSourceNode", "AudioNode", "AudioDestinationNode", "AudioParam", "GainNode", "OscillatorNode", "OscillatorType", "Response", "Performance", "Navigator", "VisibilityState", "Storage", "HtmlInputElement", "HtmlHeadElement", "Event", "CompositionEvent", "MouseEvent", "WheelEvent", "MediaQueryList", "TouchEvent", "TouchList", "Touch", "DomRect", "Node", "AddEventListenerOptions", "CanvasRenderingContext2d", "TextMetrics", "ImageData", "Blob", "BlobPropertyBag", "Url", "HtmlImageElement"] }
 
 # 출시 빌드. (한 덩어리로 묶어 최적화하고 디버그 기호를 뺀다. 이 저장소를 맨 위로 빌드할 때만 쓰인다)
 [profile.release]

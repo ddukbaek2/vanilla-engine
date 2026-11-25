@@ -632,8 +632,7 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn confirm_window_measures_lines_before_first_draw() {
-		let engine_configuration = EngineConfiguration::new();
-		let font_bytes = match engine_configuration.default_font_paths.iter().find_map(|font_path| std::fs::read(font_path).ok()) {
+		let font_bytes = match crate::platform::find_fallback_font_file("가", 400, false, false).and_then(|source| std::fs::read(source.path).ok()) {
 			Some(font_bytes) => {
 				font_bytes
 			}

@@ -8,6 +8,8 @@
 //   일본어면 일본 글꼴, 중국어 번체면 번체 글꼴의 한자가 나오게 한다. 라틴은 늘 맨 뒤라 숫자와 영문은 어느 언어에서나 라틴 글꼴이다.
 // - 모든 조각을 configure_ui_font 의 weights(처음은 500, 700) 두 굵기로만 올린다. 가변 굵기 조각은 두 번(500 과 700), 400 뿐인 조각은 500 으로 올린다.
 // - 쓸 글자의 조각은 미리 받는다. (load_ui_font_text) 조각을 받으면 엔진(EngineConfiguration.rebake_text_on_font_load)이 그 조각의 글자로 구운 글자만 버려 다시 굽는다.
+//   미리 받지 않은 글자도 그 글꼴로 재거나 그리면 update 가 그 글자의 조각을 받는다. (원본 브라우저는 올려 둔 FontFace 의 범위에 든 글자를 그릴 때 그 얼굴을 받는다)
+//   받기 전에는 원본 캔버스처럼 다른 글꼴로 그리고, 받으면 (rebake_text_on_font_load 를 켰을 때) 다시 굽는다.
 // - 처음에는 고른 언어와 라틴의 목록만 받고, 나머지 묶음은 놀이를 시작하고 조금 뒤(remaining_delay_milliseconds)에 받는다.
 //   처음의 조각은 wait_milliseconds 까지만 기다린다. (is_ui_font_ready 가 그 시간이 지나거나 다 받으면 참)
 // - 원본과 다른 것:
@@ -19,6 +21,7 @@
 use crate::core::asset::AssetLoadHandle;
 use crate::core::engine::Engine;
 use crate::core::textshaping::{parse_unicode_range, FontFaceDescriptors};
+use crate::core::textstringtexturecache;
 use std::cell::RefCell;
 use std::collections::HashSet;
 use web_time::Instant;
@@ -299,6 +302,13 @@ fn poll_font_groups() {
 //==============================================================================
 pub fn update(engine: &mut Engine) {
 	poll_font_index();
+	// 그린 글 가운데 받은 조각에 없던 글자의 조각을 받는다. (원본 브라우저가 그 글자의 범위에 든 FontFace 를 받기 시작하는 자리)
+	let (family, is_ready_to_request) = with_state(|state| (state.family.clone(), !state.font_groups.is_empty()));
+	textstringtexturecache::watch_unresolved_family_characters(&family);
+	let unresolved_text = textstringtexturecache::take_unresolved_family_characters(&family);
+	if is_ready_to_request && !unresolved_text.is_empty() {
+		request_ui_font_text(engine, &unresolved_text);
+	}
 	// 색인을 받은 뒤 청하지 못한 처음 묶음을 청한다.
 	let initial_groups = with_state(|state| {
 		let (font_group, _) = state.pending_initial_load.as_ref()?;

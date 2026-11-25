@@ -1,5 +1,7 @@
 //==============================================================================
 // 이미지. (원본 HTMLImageElement / ImageAsset 자리)
+// - 형식: 원본은 브라우저가 푸는 형식을 모두 받는다. 데스크탑은 image 크레이트로 PNG, JPEG, WebP, GIF(첫 장), BMP, ICO, resvg 로 SVG 를 푼다.
+//   웹은 애셋을 받을 때 브라우저(HTMLImageElement)가 먼저 풀어 손잡이에 둔다. (platform/web.rs, AVIF 와 애니메이션 PNG 의 첫 장 포함)
 // - 픽셀은 프리멀티플라이드 알파 RGBA 로 들고 있다. (원본은 텍스처에 올릴 때 UNPACK_PREMULTIPLY_ALPHA 로 같은 일을 한다)
 // - Rc 로 나눠 쓰고, GPU 텍스처는 Graphic 의 ImageTextureCache 가 처음 그릴 때 만든다.
 // - GPU 에 올린 뒤에는 CPU 픽셀을 놓아 메모리를 돌려준다. (원본은 브라우저가 HTMLImageElement 를 들고 있다)
@@ -23,7 +25,7 @@ pub struct Image {
 
 impl Image {
 	//==============================================================================
-	// 파일에서 읽기. (PNG, 데스크탑은 읽은 파일을 리소스 사용량에 적는다)
+	// 파일에서 읽기. (load_from_memory 의 형식, 데스크탑은 읽은 파일을 리소스 사용량에 적는다)
 	//==============================================================================
 	pub fn load(path: &Path) -> Result<Rc<Image>, String> {
 		let bytes = std::fs::read(path).map_err(|error| format!("이미지 읽기 실패 ({}): {}", path.display(), error))?;
@@ -35,15 +37,35 @@ impl Image {
 	}
 
 	//==============================================================================
-	// 메모리에서 읽기. (PNG)
+	// 메모리에서 읽기. (PNG, JPEG, WebP, GIF 의 첫 장, BMP, ICO. 데스크탑은 SVG 도)
+	// - 웹은 애셋을 받을 때 브라우저가 먼저 풀어 손잡이에 둔다. (platform/web.rs, 브라우저가 푸는 형식 모두) 여기는 그 밖의 바이트를 푼다.
 	//==============================================================================
 	pub fn load_from_memory(bytes: &[u8]) -> Result<Rc<Image>, String> {
+		#[cfg(not(target_arch = "wasm32"))]
+		{
+			if is_svg_bytes(bytes) {
+				return decode_svg(bytes);
+			}
+		}
 		let dynamic_image = image::load_from_memory(bytes).map_err(|error| format!("이미지 해석 실패: {}", error))?;
 		let rgba_image = dynamic_image.to_rgba8();
 		let width = rgba_image.width();
 		let height = rgba_image.height();
 		let straight_pixels = rgba_image.into_raw();
 		Ok(Image::create_from_pixels(width, height, straight_pixels))
+	}
+
+	//==============================================================================
+	// 프리멀티플라이드 RGBA 픽셀로 생성. (SVG 를 그린 판처럼 이미 알파를 곱한 픽셀)
+	//==============================================================================
+	pub fn create_from_premultiplied_pixels(width: u32, height: u32, pixels: Vec<u8>) -> Rc<Image> {
+		Rc::new(Image {
+			instance_id: identifier::create_instance_id(),
+			width,
+			height,
+			pixels: RefCell::new(pixels),
+			is_pixels_retained: Cell::new(false),
+		})
 	}
 
 	//==============================================================================
@@ -134,6 +156,39 @@ impl Image {
 	}
 }
 
+//==============================================================================
+// SVG 바이트인지. (앞의 빈칸과 BOM 뒤가 '<' 로 시작하고 앞 4096 바이트 안에 "<svg" 가 있다)
+//==============================================================================
+#[cfg(not(target_arch = "wasm32"))]
+fn is_svg_bytes(bytes: &[u8]) -> bool {
+	let head_bytes = &bytes[..bytes.len().min(4096)];
+	let head_text = String::from_utf8_lossy(head_bytes);
+	let trimmed_text = head_text.trim_start_matches('\u{FEFF}').trim_start();
+	trimmed_text.starts_with('<') && trimmed_text.contains("<svg")
+}
+
+//==============================================================================
+// SVG 풀기. (usvg 로 읽고 그림의 크기(width, height, 없으면 viewBox)로 tiny-skia 에 그린다. 글은 시스템 글꼴로)
+//==============================================================================
+#[cfg(not(target_arch = "wasm32"))]
+fn decode_svg(bytes: &[u8]) -> Result<Rc<Image>, String> {
+	static SYSTEM_FONT_DATABASE: std::sync::OnceLock<std::sync::Arc<resvg::usvg::fontdb::Database>> = std::sync::OnceLock::new();
+	let mut options = resvg::usvg::Options::default();
+	// 글이 있는 SVG 만 시스템 글꼴을 읽는다. (처음 한 번)
+	if String::from_utf8_lossy(bytes).contains("<text") {
+		options.fontdb = SYSTEM_FONT_DATABASE.get_or_init(|| {
+			let mut font_database = resvg::usvg::fontdb::Database::new();
+			font_database.load_system_fonts();
+			std::sync::Arc::new(font_database)
+		}).clone();
+	}
+	let tree = resvg::usvg::Tree::from_data(bytes, &options).map_err(|error| format!("SVG 해석 실패: {}", error))?;
+	let image_size = tree.size().to_int_size();
+	let mut pixmap = resvg::tiny_skia::Pixmap::new(image_size.width(), image_size.height()).ok_or_else(|| String::from("SVG 크기가 0"))?;
+	resvg::render(&tree, resvg::tiny_skia::Transform::default(), &mut pixmap.as_mut());
+	Ok(Image::create_from_premultiplied_pixels(image_size.width(), image_size.height(), pixmap.take()))
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -157,5 +212,30 @@ mod tests {
 		image.restore_pixels(vec![1, 2, 3, 4, 5, 6, 7, 8]);
 		assert!(image.has_pixels());
 		assert_eq!(image.get_pixels()[4], 5);
+	}
+
+	//==============================================================================
+	// 형식: GIF, BMP, ICO 를 풀고, 데스크탑은 SVG 를 그림 크기로 그린다. (원본은 브라우저가 푸는 형식을 모두 받는다)
+	//==============================================================================
+	#[test]
+	fn load_gif_bmp_ico_and_svg() {
+		let mut source_image = ::image::RgbaImage::new(2, 2);
+		source_image.put_pixel(0, 0, ::image::Rgba([255, 0, 0, 255]));
+		source_image.put_pixel(1, 1, ::image::Rgba([0, 0, 255, 255]));
+		for image_format in [::image::ImageFormat::Gif, ::image::ImageFormat::Bmp, ::image::ImageFormat::Ico] {
+			let mut encoded_bytes: Vec<u8> = Vec::new();
+			::image::DynamicImage::ImageRgba8(source_image.clone()).write_to(&mut std::io::Cursor::new(&mut encoded_bytes), image_format).expect("encode");
+			let image = Image::load_from_memory(&encoded_bytes).expect("decode");
+			assert_eq!((image.get_width(), image.get_height()), (2, 2), "{:?}", image_format);
+			assert_eq!(&image.get_pixels()[0..4], &[255, 0, 0, 255], "{:?}", image_format);
+		}
+		#[cfg(not(target_arch = "wasm32"))]
+		{
+			let svg_text = "<?xml version=\"1.0\"?>\n<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"4\" height=\"2\"><rect width=\"2\" height=\"2\" fill=\"#ff0000\"/></svg>";
+			let svg_image = Image::load_from_memory(svg_text.as_bytes()).expect("svg");
+			assert_eq!((svg_image.get_width(), svg_image.get_height()), (4, 2));
+			assert_eq!(&svg_image.get_pixels()[0..4], &[255, 0, 0, 255]);
+			assert_eq!(svg_image.get_pixels()[3 * 4 + 3], 0);
+		}
 	}
 }

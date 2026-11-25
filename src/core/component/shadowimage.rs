@@ -4,10 +4,13 @@
 // - ShadowText 와 같이 그림의 모양(불투명도) 밑에 그림자를 깐 모습을 한 장으로 구워 그 한 장을 그린다.
 //   노드의 불투명도가 그림과 그림자에 한 장째로 먹는다.
 // - 그림 색을 주면 그림을 그 색 한 빛의 모양으로 칠한다. (같은 자리 위에 원래 그림을 얹어 그림자만 남기는 감쌈 등)
-// - 굽는 배율, 그림, 색, 그림자, 노드 크기가 바뀌면 다시 굽는다. 줄이기는 겹친 넓이로 고르게 섞는다.
+// - 굽는 배율, 그림, 색, 그림자, 노드 크기가 바뀌면 다시 굽는다. 데스크탑의 줄이기는 겹친 넓이로 고르게 섞는다.
 //   같은 그림(Image 의 인스턴스 식별자와 조각)과 모양을 구운 것이 있으면 나눠 쓴다. (sharedbakecache.rs, 원본은 그림마다 번호를 붙여 열쇠로 쓴다)
 // - 그림 경로(image_path)는 Sprite 의 것과 같이 UI 문서(UIDocument)가 그림 대신 적고 읽는 값이다. 그리기에는 쓰지 않는다.
 // - 다시 구울 때 그림의 CPU 픽셀을 읽으므로 받은 그림은 GPU 에 올린 뒤에도 픽셀을 남기게 한다. 이미 놓였으면 텍스처에서 되읽는다.
+// - 웹은 원본처럼 캔버스의 drawImage(imageSmoothingQuality high)로 줄이고 색은 source-in 으로 칠한 뒤 캔버스 그림자(shadowBlur)를 깔아 굽는다. (platform/web/systemfont.rs 의 bake_shadow_image)
+//   데스크탑은 겹친 넓이로 줄이고 상자 흐림 세 번으로 그림자를 셈한다.
+// - 원본 getBakeCanvas 는 구운 캔버스 대신 구운 Image 를 돌려주는 get_bake_image 다.
 //==============================================================================
 use std::rc::Rc;
 
@@ -155,7 +158,7 @@ impl ShadowImage {
 				if !graphic.restore_image_pixels(&image) {
 					return None;
 				}
-				Some(self.bake(&image, source_rect, image_width, image_height, bake_scale))
+				self.bake(&image, source_rect, image_width, image_height, bake_scale)
 			});
 			if bake_image.is_none() {
 				return;
@@ -183,9 +186,17 @@ impl ShadowImage {
 	//==============================================================================
 	// 굽기. (그릴 크기로 바꾼 그림을 가장자리를 둘러 놓고, 그 모양으로 그림자를 깐다)
 	//==============================================================================
-	fn bake(&self, image: &Image, source_rect: [f32; 4], image_width: f32, image_height: f32, bake_scale: f32) -> Rc<Image> {
+	fn bake(&self, image: &Image, source_rect: [f32; 4], image_width: f32, image_height: f32, bake_scale: f32) -> Option<Rc<Image>> {
 		let scaled_width = ((image_width * bake_scale).round() as i32).max(1);
 		let scaled_height = ((image_height * bake_scale).round() as i32).max(1);
+		// 웹: 원본처럼 캔버스의 drawImage(imageSmoothingQuality high)로 줄이고 캔버스 그림자를 깐다.
+		if cfg!(target_arch = "wasm32") {
+			#[cfg(target_arch = "wasm32")]
+			{
+				let browser_bake = crate::platform::web::systemfont::bake_shadow_image(&image.get_pixels(), image.get_width(), image.get_height(), source_rect, scaled_width as u32, scaled_height as u32, self.image_color, self.shadow_color, self.shadow_offset * bake_scale, self.shadow_blur * bake_scale)?;
+				return Some(Image::create_from_pixels(browser_bake.width, browser_bake.height, browser_bake.pixels));
+			}
+		}
 		let scaled_blur = self.shadow_blur * bake_scale;
 		let scaled_offset = (self.shadow_offset * bake_scale).round() as i32;
 		let padding = ShadowImage::calculate_bake_padding(self.shadow_blur, bake_scale);
@@ -214,7 +225,7 @@ impl ShadowImage {
 				shape_coverage[target_index] = alpha;
 			}
 		}
-		compose_shadow_image(&shape_coverage, Some(&shape_pixels), bake_width, bake_height, Color::white(), self.shadow_color, scaled_blur, scaled_offset)
+		Some(compose_shadow_image(&shape_coverage, Some(&shape_pixels), bake_width, bake_height, Color::white(), self.shadow_color, scaled_blur, scaled_offset))
 	}
 
 	//==============================================================================
@@ -222,7 +233,26 @@ impl ShadowImage {
 	//==============================================================================
 	fn calculate_bake_padding(shadow_blur: f32, bake_scale: f32) -> i32 {
 		let scaled_blur = shadow_blur * bake_scale;
-		BAKE_PADDING + scaled_blur.ceil() as i32 * 2
+		if cfg!(target_arch = "wasm32") {
+			// 웹: 원본 bakeImage 와 같다. (캔버스 그림자의 번짐)
+			BAKE_PADDING + scaled_blur.ceil() as i32
+		}
+		else {
+			BAKE_PADDING + scaled_blur.ceil() as i32 * 2
+		}
+	}
+
+	//==============================================================================
+	// 구운 그림이 그림자 내림으로 아래로 늘어나는 만큼. (픽셀, 웹은 원본처럼 올림, 데스크탑은 반올림한 내림만큼 옮겨 셈한다)
+	//==============================================================================
+	fn calculate_bake_offset(shadow_offset: f32, bake_scale: f32) -> i32 {
+		let scaled_offset = (shadow_offset * bake_scale).max(0.0);
+		if cfg!(target_arch = "wasm32") {
+			scaled_offset.ceil() as i32
+		}
+		else {
+			scaled_offset.round() as i32
+		}
 	}
 
 	//==============================================================================
@@ -235,6 +265,20 @@ impl ShadowImage {
 		self.image = image;
 		self.image_rect = image_rect;
 		self.image_version += 1;
+	}
+
+	//==============================================================================
+	// 그림 반환.
+	//==============================================================================
+	pub fn get_image(&self) -> Option<&Rc<Image>> {
+		self.image.as_ref()
+	}
+
+	//==============================================================================
+	// 그림 안의 조각 반환. (None 이면 그림 전체)
+	//==============================================================================
+	pub fn get_image_rect(&self) -> Option<Rect> {
+		self.image_rect
 	}
 
 	//==============================================================================
@@ -273,6 +317,13 @@ impl ShadowImage {
 		self.shadow_offset = shadow_offset;
 		self.shadow_blur = shadow_blur.max(0.0);
 	}
+
+	//==============================================================================
+	// 구운 그림 반환. (아직 굽지 않았으면 None, 원본 getBakeCanvas)
+	//==============================================================================
+	pub fn get_bake_image(&self) -> Option<&Rc<Image>> {
+		self.bake_image.as_ref()
+	}
 }
 
 impl Default for ShadowImage {
@@ -309,10 +360,8 @@ impl Component for ShadowImage {
 			return None;
 		}
 		let bake_scale = graphic.calculate_text_bake_scale();
-		let scaled_blur = self.shadow_blur * bake_scale;
-		let scaled_offset = (self.shadow_offset * bake_scale).round() as i32;
-		let padding = (BAKE_PADDING + scaled_blur.ceil() as i32 * 2) as f32 / bake_scale;
-		let offset = scaled_offset.max(0) as f32 / bake_scale;
+		let padding = ShadowImage::calculate_bake_padding(self.shadow_blur, bake_scale) as f32 / bake_scale;
+		let offset = ShadowImage::calculate_bake_offset(self.shadow_offset, bake_scale) as f32 / bake_scale;
 		Some(Rect::create(-padding, -padding, content_size.x + padding * 2.0, content_size.y + padding * 2.0 + offset))
 	}
 
