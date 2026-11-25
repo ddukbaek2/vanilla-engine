@@ -18,11 +18,29 @@ use glow::HasContext;
 
 //==============================================================================
 /// 렌더 타겟 옵션. (원본 options 객체, 기본값은 컬러 1장 / RGBA8 / 깊이 렌더버퍼 16 비트 / 멀티샘플 없음)
+///
+/// # 예제
+/// 기본값과 MRT 4장, HDR, 깊이 텍스처 옵션
+/// ```rust
+/// use vanilla::RenderTargetOptions;
+///
+/// let default_options = RenderTargetOptions::default();
+/// assert_eq!(default_options.color_attachment_count, 1);
+/// assert!(!default_options.use_float_color);
+/// assert_eq!(default_options.sample_count, 0);
+/// assert_eq!(default_options.depth_bits, 16);
+///
+/// let geometry_options = RenderTargetOptions { color_attachment_count: 4, use_float_color: true, use_depth_texture: true, ..RenderTargetOptions::default() };
+/// assert_eq!(geometry_options.depth_bits, 16);
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RenderTargetOptions {
+	/// 컬러 어태치먼트 수. (MRT, 0 이면 1 로 짓는다, 기본 1)
 	pub color_attachment_count: usize,
+	/// 컬러를 반정밀 실수(RGBA16F, HDR)로 지을지. (false 면 RGBA8, 기본 false)
 	pub use_float_color: bool,
+	/// 깊이를 샘플링할 수 있는 텍스처(24 비트)로 지을지. (false 면 깊이 렌더버퍼, use_depth 가 true 일 때만 쓴다, 기본 false)
 	pub use_depth_texture: bool,
 	/// 멀티샘플 표본 수. (2 밑이면 멀티샘플 없음)
 	pub sample_count: i32,
@@ -47,6 +65,33 @@ impl Default for RenderTargetOptions {
 
 //==============================================================================
 /// 렌더 타겟.
+///
+/// # 예제
+/// 씬을 HDR 렌더 타겟에 그리고 컬러 텍스처를 다음 패스에서 읽기
+/// ```rust,no_run
+/// use glow::HasContext;
+/// use vanilla::{RenderTarget, RenderTargetOptions};
+///
+/// fn create_scene_target(gl: &glow::Context) -> Result<RenderTarget, String> {
+/// 	let options = RenderTargetOptions { use_float_color: true, ..RenderTargetOptions::default() };
+/// 	RenderTarget::new(gl, 2, 2, true, Some(options))
+/// }
+///
+/// fn render_scene(gl: &glow::Context, scene_render_target: &mut RenderTarget, width: i32, height: i32) -> Result<(), String> {
+/// 	scene_render_target.resize(gl, width, height)?;
+/// 	scene_render_target.bind(gl);
+/// 	unsafe {
+/// 		gl.clear_color(0.0, 0.0, 0.0, 1.0);
+/// 		gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
+/// 	}
+/// 	let scene_color_texture = scene_render_target.get_color_texture(0);
+/// 	unsafe {
+/// 		gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+/// 		gl.bind_texture(glow::TEXTURE_2D, scene_color_texture);
+/// 	}
+/// 	Ok(())
+/// }
+/// ```
 //==============================================================================
 pub struct RenderTarget {
 	framebuffer: Option<GlFramebuffer>,
@@ -93,6 +138,24 @@ fn clamp_sample_count_to_formats(_gl: &glow::Context, sample_count: i32, _intern
 impl RenderTarget {
 	//==============================================================================
 	/// 기기가 받는 표본 수. (요청 수를 MAX_SAMPLES 와 포맷마다 받는 표본 수 밑의 가장 큰 수로, 2 밑이면 0)
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트.
+	/// - `requested_sample_count`: 바라는 표본 수. (2 밑이면 멀티샘플 없음)
+	/// - `internal_format_list`: 같이 쓸 렌더버퍼 포맷 목록. (glow::RGBA8, glow::DEPTH_COMPONENT24 같은 것, 데스크탑 GL 3.3 은 보지 않는다)
+	///
+	/// # 돌려줌
+	/// 지을 수 있는 표본 수. (2 이상) 요청이 2 밑이거나 받는 수가 2 밑이면 0.
+	///
+	/// # 예제
+	/// 4x MSAA 를 받는지 미리 보기
+	/// ```rust,no_run
+	/// use vanilla::RenderTarget;
+	///
+	/// fn read_msaa_sample_count(gl: &glow::Context) -> i32 {
+	/// 	RenderTarget::read_supported_sample_count(gl, 4, &[glow::RGBA8, glow::DEPTH_COMPONENT16])
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn read_supported_sample_count(gl: &glow::Context, requested_sample_count: i32, internal_format_list: &[u32]) -> i32 {
 		if requested_sample_count < 2 {
@@ -110,6 +173,33 @@ impl RenderTarget {
 
 	//==============================================================================
 	/// 생성. (options 가 None 이면 기본 옵션)
+	/// - 크기가 0 x 0 이면 GL 객체를 짓지 않는다. (resize 가 같은 크기라 건너뛴다)
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트. (Graphic::get_gl 로 꺼낸다)
+	/// - `width`: 가로 크기. (픽셀)
+	/// - `height`: 세로 크기. (픽셀)
+	/// - `use_depth`: 깊이 어태치먼트를 붙일지. (렌더버퍼, use_depth_texture 면 깊이 텍스처)
+	/// - `options`: 옵션. (None 이면 RenderTargetOptions::default())
+	///
+	/// # 돌려줌
+	/// 새 렌더 타겟. 프레임버퍼, 텍스처, 렌더버퍼를 못 만들면 Err(GL 의 오류 글).
+	///
+	/// # 예제
+	/// 4x MSAA 로 그리고 resolve 로 텍스처에 풀기
+	/// ```rust,no_run
+	/// use vanilla::{RenderTarget, RenderTargetOptions};
+	///
+	/// fn render_antialiased(gl: &glow::Context) -> Result<(), String> {
+	/// 	let options = RenderTargetOptions { sample_count: 4, depth_bits: 24, ..RenderTargetOptions::default() };
+	/// 	let render_target = RenderTarget::new(gl, 1280, 720, true, Some(options))?;
+	/// 	render_target.bind(gl);
+	/// 	render_target.resolve(gl);
+	/// 	let color_texture = render_target.get_color_texture(0);
+	/// 	assert!(color_texture.is_some());
+	/// 	Ok(())
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn new(gl: &glow::Context, width: i32, height: i32, use_depth: bool, options: Option<RenderTargetOptions>) -> Result<RenderTarget, String> {
 		let resolved_options = options.unwrap_or_default();
@@ -148,6 +238,15 @@ impl RenderTarget {
 
 	//==============================================================================
 	/// 크기 변경. (같은 크기면 무시, 다르면 리소스 재생성)
+	/// - 다시 지으면 앞의 텍스처는 지워지므로 get_color_texture 로 새로 받는다. 멀티샘플 표본 수도 다시 고른다.
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트.
+	/// - `width`: 새 가로 크기. (픽셀)
+	/// - `height`: 새 세로 크기. (픽셀)
+	///
+	/// # 돌려줌
+	/// 다시 지었거나 같은 크기면 Ok. GL 객체를 못 만들면 Err(GL 의 오류 글).
 	//==============================================================================
 	pub fn resize(&mut self, gl: &glow::Context, width: i32, height: i32) -> Result<(), String> {
 		if width == self.width && height == self.height {
@@ -285,6 +384,9 @@ impl RenderTarget {
 
 	//==============================================================================
 	/// 멀티샘플을 텍스처로 풀기. (멀티샘플이 아니면 아무것도 하지 않음, 컬러 어태치먼트마다와 깊이 텍스처, 묶여 있던 프레임버퍼로 돌림)
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트.
 	//==============================================================================
 	pub fn resolve(&self, gl: &glow::Context) {
 		let Some(multisample_framebuffer) = self.multisample_framebuffer else {
@@ -329,6 +431,9 @@ impl RenderTarget {
 
 	//==============================================================================
 	/// 렌더링 대상으로 바인드. (프레임버퍼 + 뷰포트, 멀티샘플이면 멀티샘플 프레임버퍼)
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트.
 	//==============================================================================
 	pub fn bind(&self, gl: &glow::Context) {
 		unsafe {
@@ -339,6 +444,10 @@ impl RenderTarget {
 
 	//==============================================================================
 	/// 파괴. (GL 리소스 해제)
+	/// - 크기를 0 으로 되돌리므로 그 뒤 resize 로 다시 지을 수 있다.
+	///
+	/// # 인자
+	/// - `gl`: 만들 때 쓴 GL 컨텍스트.
 	//==============================================================================
 	pub fn destroy(&mut self, gl: &glow::Context) {
 		unsafe {
@@ -380,6 +489,9 @@ impl RenderTarget {
 
 	//==============================================================================
 	/// 프레임버퍼 반환. (그리는 프레임버퍼, 멀티샘플이면 멀티샘플 프레임버퍼)
+	///
+	/// # 돌려줌
+	/// 그리는 프레임버퍼. destroy 뒤나 짓지 않았으면 None.
 	//==============================================================================
 	pub fn get_framebuffer(&self) -> Option<GlFramebuffer> {
 		if self.multisample_framebuffer.is_some() {
@@ -392,6 +504,9 @@ impl RenderTarget {
 
 	//==============================================================================
 	/// 텍스처가 붙은 프레임버퍼 반환. (멀티샘플이 아니면 get_framebuffer 와 같음)
+	///
+	/// # 돌려줌
+	/// 컬러 텍스처가 붙은 프레임버퍼. destroy 뒤나 짓지 않았으면 None.
 	//==============================================================================
 	pub fn get_resolve_framebuffer(&self) -> Option<GlFramebuffer> {
 		self.framebuffer
@@ -399,6 +514,9 @@ impl RenderTarget {
 
 	//==============================================================================
 	/// 실제로 지은 표본 수 반환. (0 이면 멀티샘플 없음)
+	///
+	/// # 돌려줌
+	/// 멀티샘플 표본 수. (0 이면 멀티샘플 없음, 요청보다 작을 수 있다)
 	//==============================================================================
 	pub fn get_sample_count(&self) -> i32 {
 		self.sample_count
@@ -406,6 +524,9 @@ impl RenderTarget {
 
 	//==============================================================================
 	/// 깊이 렌더버퍼 비트 수 반환. (16 이나 24)
+	///
+	/// # 돌려줌
+	/// 깊이 렌더버퍼 비트 수. (16 이나 24)
 	//==============================================================================
 	pub fn get_depth_bits(&self) -> i32 {
 		self.depth_bits
@@ -413,6 +534,12 @@ impl RenderTarget {
 
 	//==============================================================================
 	/// 컬러 텍스처 반환. (어태치먼트 인덱스, 원본 기본값 0)
+	///
+	/// # 인자
+	/// - `attachment_index`: 컬러 어태치먼트 번호. (0 부터)
+	///
+	/// # 돌려줌
+	/// 그 어태치먼트의 컬러 텍스처. 번호가 어태치먼트 수 이상이거나 짓지 않았으면 None.
 	//==============================================================================
 	pub fn get_color_texture(&self, attachment_index: usize) -> Option<GlTexture> {
 		self.color_texture_list.get(attachment_index).copied()
@@ -420,6 +547,9 @@ impl RenderTarget {
 
 	//==============================================================================
 	/// 깊이 텍스처 반환. (use_depth_texture 옵션일 때만 존재)
+	///
+	/// # 돌려줌
+	/// 깊이 텍스처. use_depth 와 use_depth_texture 가 모두 true 가 아니면 None.
 	//==============================================================================
 	pub fn get_depth_texture(&self) -> Option<GlTexture> {
 		self.depth_texture
@@ -427,6 +557,9 @@ impl RenderTarget {
 
 	//==============================================================================
 	/// 컬러 어태치먼트 개수 반환.
+	///
+	/// # 돌려줌
+	/// 컬러 어태치먼트 수. (1 이상)
 	//==============================================================================
 	pub fn get_color_attachment_count(&self) -> usize {
 		self.color_attachment_count
@@ -434,6 +567,9 @@ impl RenderTarget {
 
 	//==============================================================================
 	/// 실수 컬러 사용 여부 반환.
+	///
+	/// # 돌려줌
+	/// 컬러가 RGBA16F 면 true, RGBA8 이면 false.
 	//==============================================================================
 	pub fn get_use_float_color(&self) -> bool {
 		self.use_float_color
@@ -441,6 +577,9 @@ impl RenderTarget {
 
 	//==============================================================================
 	/// 깊이 텍스처 사용 여부 반환.
+	///
+	/// # 돌려줌
+	/// 옵션의 use_depth_texture.
 	//==============================================================================
 	pub fn get_use_depth_texture(&self) -> bool {
 		self.use_depth_texture
@@ -448,6 +587,9 @@ impl RenderTarget {
 
 	//==============================================================================
 	/// 가로 크기 반환.
+	///
+	/// # 돌려줌
+	/// 가로 크기. (픽셀, destroy 뒤에는 0)
 	//==============================================================================
 	pub fn get_width(&self) -> i32 {
 		self.width
@@ -455,6 +597,9 @@ impl RenderTarget {
 
 	//==============================================================================
 	/// 세로 크기 반환.
+	///
+	/// # 돌려줌
+	/// 세로 크기. (픽셀, destroy 뒤에는 0)
 	//==============================================================================
 	pub fn get_height(&self) -> i32 {
 		self.height

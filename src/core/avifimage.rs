@@ -6,18 +6,12 @@
 //!   - 색 정보: libavif 처럼 주 그림에 colr(nclx)이 있으면 그 matrix_coefficients 와 full_range_flag 를, 없으면 AV1 순서 머리의 것을 쓴다.
 //!   - grid: 타일(dimg 차례)을 YUV 로 풀어 줄과 칸으로 이어 붙이고 출력 크기로 자른 뒤 한 번에 RGB 로 바꾼다. (libavif 처럼)
 //!   - 알파: 주 그림을 auxl 로 가리키고 auxC 가 urn:mpeg:mpegB:cicp:systems:auxiliary:alpha 나 urn:mpeg:hevc:2015:auxid:1 인 항목. (libavif isAlphaURN 의 둘)
-//!   ```text
 //!     주 그림이 prem 으로 알파를 가리키면 색이 이미 알파로 곱해진 것이라 그대로 프리멀티플라이드 픽셀로 쓴다.
-//!   ```
 //!   - 크롬 AVIFImageDecoder 처럼 clap(깨끗한 테두리)은 자른 자리의 원점이 (0, 0) 일 때만 오른쪽과 아래를 자르고, 아니면 그림 전체를 쓴다.
-//!   ```text
 //!     그다음 irot(반시계 angle x 90 도), imir(axis 0 은 위아래, 1 은 좌우를 바꾼다) 차례로 건다. (MIAF 7.3.6.7 의 차례)
-//!   ```
 //! - YUV 를 RGB 로 바꾸는 셈은 libavif(src/reformat.c, src/colr.c)의 기준 셈을 따른다.
 //!   - 색 계수(Kr, Kb)는 matrix_coefficients 로 고른다. (BT.709, FCC, BT.470BG, BT.601, SMPTE 240, BT.2020 NCL, 그 밖과 미지정은 BT.601)
-//!   ```text
 //!     Identity 는 G = Y, B = Cb, R = Cr 이고 YCgCo 는 H.273 식 47~50 이다.
-//!   ```
 //!   - 범위: 제한 범위면 Y 는 (v - 16 x 2^(깊이-8)) / (219 x 2^(깊이-8)), Cb, Cr 은 (v - 2^(깊이-1)) / (224 x 2^(깊이-8)). 전체 범위면 최댓값으로 나눈다.
 //!   - 4:2:0, 4:2:2 의 크로마는 libavif 의 양선형(가장 가까운 것 9/16, 같은 줄과 같은 칸의 이웃 3/16 씩, 대각 1/16)으로 늘린다. 가장자리는 가장 가까운 것을 되풀이한다.
 //!   - 알파 그림은 전체 범위로 읽는다.

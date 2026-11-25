@@ -16,19 +16,13 @@
 //!   ```
 //! - 원본과 다른 것:
 //!   - 원본은 TransformNode 를 상속한 따로 된 노드이고 pushTransform 에서 솔버 값으로 옮긴다. 러스트 판은 노드가 WorldNode 하나뿐이라
-//!   ```text
 //!     WorldNode 에 붙는 컴포넌트이고, 솔버 값을 노드의 자리(local_position, 피봇과 앵커는 왼쪽 위)와 content_size 로 옮긴다.
 //!     옮기는 때는 컴포넌트 tick 과 apply_layout_in_tree(UISceneBase 가 솔버를 푼 바로 뒤에 부른다)다. 원본은 그릴 때마다 읽는다.
-//!   ```
 //!   - 원본 getIntrinsicContentSize 는 노드의 컴포넌트 가운데 그 함수가 있는 것(Text, RichText)의 값을 모은다. 러스트 판은 Component::get_intrinsic_content_size 를 모은다.
-//!   ```text
 //!     원본 UILabel 은 글이 바뀔 때 노드의 invalidateIntrinsicContentSize 를 부른다. 러스트 판의 컴포넌트는 노드의 다른 컴포넌트를 부를 수 없어서,
 //!     UINode 가 tick(과 UISceneBase 의 솔버 붙이기)마다 컴포넌트들의 값을 다시 읽어 바뀌었으면 스스로 invalidate 한다.
-//!   ```
 //!   - 원본이 예외를 던지는 곳(솔버의 겹친 제약, 만족할 수 없는 required 제약)은 `Result<(), LayoutError>` 를 돌려준다.
-//!   ```text
 //!     (add_constraint, remove_constraint, set_solver, set_layout_margins, invalidate_intrinsic_content_size)
-//!   ```
 //!   - 앵커는 원본의 게터 속성(leftAnchor) 대신 함수(left_anchor)다. 축 인자는 문자열 대신 LayoutConstraintAxis 열거라 "지원되지 않는 축" 예외가 없다.
 //!   - layout margins guide 는 원본처럼 트리에 들지 않는 UINode 다. 러스트 판은 이 UINode 가 Box 로 품는다.
 //==============================================================================

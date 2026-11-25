@@ -3,11 +3,9 @@
 //! - 원본에 없는 파일이다. 원본 크롬 맥은 글리프를 CoreText(CoreGraphics)로 그린다. 러스트 판은 대부분의 글리프를 fontdue 와 skrifa 로 직접 그리고,
 //!   CoreText 가 다르게 그리는 것과 열린 해석기가 읽지 못하는 것만 여기서 그린다. (textshaping.rs 가 부른다)
 //!   - 색 이모지(sbix, Apple Color Emoji): CoreText 는 작은 글자 크기에서 이모지를 키워 그리고 아래로 내린다. (16px 에서 20px 판, 24px 부터 글자 크기 그대로)
-//!   ```text
 //!     맥 크롬 Canvas2D 의 measureText 로 잰 이모지 전진폭은 CoreText 가 그린 이모지 상자의 높이와 같다. (8px 10, 12px 15, 16px 20, 20px 22, 24px 24, 32px 32, 64px 64)
 //!     크롬의 전진폭은 그 상자 높이를 정수로 반올림한 값이다. (13px 의 16.25 는 16, 10px 의 12.5 는 13. 8 ~ 128px 의 23 가지 크기에서 크롬과 같다, 반올림은 textshaping.rs 가 한다)
 //!     CoreText 의 전진폭(CTFontGetAdvancesForGlyphs)은 글꼴의 자간 표(trak)가 더해져 크롬과 다르므로 쓰지 않는다.
-//!   ```
 //!   - 글리프 윤곽이 glyf, CFF, CFF2 어디에도 없는 글꼴: 맥 26 의 PingFangUI.ttc(중국어 대체 글꼴)는 애플 전용 hvgl 표에 윤곽이 있다.
 //! - 글꼴은 그 얼굴의 PostScript 이름으로 짓는다. (시스템에 올린 글꼴만 CoreText 가 이모지를 키워 그린다) 이름이 점으로 시작하는 숨은 글꼴이거나 축 값을 걸면
 //!   파일 경로의 CTFontManagerCreateFontDescriptorsFromURL 서술자를 PostScript 이름(없으면 모음 안의 차례)으로 골라 짓는다. 글자 크기마다 지은 CTFont 는 담아 둔다. (스레드 하나, 넘치면 비운다)

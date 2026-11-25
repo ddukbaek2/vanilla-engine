@@ -2,15 +2,11 @@
 //! 빌드 정보. (원본 misc/buildinfo.js)
 //! - 배포 빌드가 적어 둔 판을 앱이 켜질 때 한 번 읽는다. 읽는 차례:
 //!   1. 문서 머리의 <meta name="build-version" content="..."> 의 content. (있으면 그 글 그대로, platform/document.rs 의 Document::get_meta_content)
-//!   ```text
 //!      웹은 원본처럼 페이지의 meta 다. 데스크탑은 엔진이 든 문서의 meta 이고, 배포 빌드가 EngineConfiguration.document_meta_list 에 넣는다.
 //!      (웹 판 index.html 의 meta 자리, build.rs 의 rustc-env 를 env! 로 읽어 넣는 것 같은 것)
-//!   ```
 //!   2. 없으면 version.json. { version, date, time, hash, ... } 꼴이고, 글은 "날짜 시각 (해시)" 이다. 해시가 없으면 version.
-//!   ```text
 //!      웹은 페이지 기준 주소를 캐시 없이(fetch 의 cache: "no-cache") 받는다. 새 판을 올려도 옛 판 표시가 남지 않게 한다.
 //!      데스크탑은 애셋 폴더에서 읽는다. (그 자리에서 끝난다, 파일이라 옛 판이 남는 캐시가 없다)
-//!   ```
 //!   3. 둘 다 없으면 set_package_version 으로 넣은 판. (게임 크레이트가 env!("CARGO_PKG_VERSION") 을 넘긴다, 넣지 않았으면 원본처럼 빈 글)
 //! - 원본과 다른 점:
 //!   원본 생성자의 version.json 주소 기본 인자는 new()(기본 주소)와 set_version_json_path 로 나눴다.

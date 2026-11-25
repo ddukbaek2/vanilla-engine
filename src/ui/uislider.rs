@@ -6,9 +6,7 @@
 //!   - 원본은 draw 안에서 손잡이 노드를 옮긴다. 러스트 판은 그리는 동안 트리를 바꿀 수 없어 tick 에서 옮긴다. (손잡이 노드는 호스트의 자식으로 둔다)
 //!   - 입력 좌표는 원본처럼 호스트 왼쪽 위 모서리 기준이되, 노드 행렬의 역으로 바꿔 크기와 회전까지 따른다. (원본은 모서리 위치만 뺀다)
 //!   - 값 바뀜 이벤트는 슬라이더와 문맥을 받는다. 씬 코드에서 부르는 fire_value_changed 는 다음 tick 에 이벤트를 부른다.
-//!   ```text
-//!     받은 이벤트는 Rc<RefCell> 에 담는다. get_value_changed_event 는 그 Rc 를 돌려주고, 부르는 쪽은 borrow_mut 로 빌려 부른다.
-//!   ```
+//!     받은 이벤트는 `Rc<RefCell>` 에 담는다. get_value_changed_event 는 그 Rc 를 돌려주고, 부르는 쪽은 borrow_mut 로 빌려 부른다.
 //! - attach_to_tree 에서 호스트 노드를 interactable 로 켠다. node_tree.add_component(node_id, UISlider::new()) 로 붙인다.
 //==============================================================================
 use crate::base::color::Color;

@@ -69,6 +69,30 @@ void main() {
 
 //==============================================================================
 /// 다단 블룸 이펙트.
+///
+/// # 예제
+/// 머리말의 쓰임: resize, render, get_result_texture 를 합성 패스에 묶기
+/// ```rust,no_run
+/// use glow::HasContext;
+/// use vanilla::{MultiLevelBloomEffect, RenderTarget};
+///
+/// fn create_bloom(gl: &glow::Context) -> Result<MultiLevelBloomEffect, String> {
+/// 	let mut multi_level_bloom_effect = MultiLevelBloomEffect::new(gl, 5, true)?;
+/// 	multi_level_bloom_effect.set_threshold(1.0, 0.25);
+/// 	Ok(multi_level_bloom_effect)
+/// }
+///
+/// fn render_bloom(gl: &glow::Context, multi_level_bloom_effect: &mut MultiLevelBloomEffect, scene_render_target: &RenderTarget) -> Result<(), String> {
+/// 	multi_level_bloom_effect.resize(gl, scene_render_target.get_width(), scene_render_target.get_height())?;
+/// 	multi_level_bloom_effect.render(gl, scene_render_target.get_color_texture(0));
+/// 	unsafe {
+/// 		gl.active_texture(glow::TEXTURE1);
+/// 		gl.bind_texture(glow::TEXTURE_2D, multi_level_bloom_effect.get_result_texture());
+/// 		gl.active_texture(glow::TEXTURE0);
+/// 	}
+/// 	Ok(())
+/// }
+/// ```
 //==============================================================================
 pub struct MultiLevelBloomEffect {
 	extract_pass: FullscreenPass,
@@ -89,6 +113,15 @@ pub struct MultiLevelBloomEffect {
 impl MultiLevelBloomEffect {
 	//==============================================================================
 	/// 생성. (단 수, 실수 판인지, 원본 기본값은 5 와 true)
+	/// - 판은 씬 크기 2 x 2 로 지어 두므로 그리기 전에 resize 로 씬 크기를 준다.
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트. (Graphic::get_gl 로 꺼낸다)
+	/// - `level_count`: 단 수. (0 이면 1, 단마다 반 크기)
+	/// - `use_float_color`: 판을 RGBA16F 로 지을지. (false 면 RGBA8 이라 1 에서 잘린다)
+	///
+	/// # 돌려줌
+	/// 새 다단 블룸. (문턱 1, 무릎 0.25) 셰이더 컴파일이나 판 만들기에 실패하면 Err(오류 글).
 	//==============================================================================
 	pub fn new(gl: &glow::Context, level_count: usize, use_float_color: bool) -> Result<MultiLevelBloomEffect, String> {
 		let mut multi_level_bloom_effect = MultiLevelBloomEffect {
@@ -136,6 +169,14 @@ impl MultiLevelBloomEffect {
 
 	//==============================================================================
 	/// 크기 변경. (씬 해상도 기준, 같으면 그대로)
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트.
+	/// - `scene_width`: 씬 가로 크기. (픽셀, 1 밑이면 1, 첫 단은 그 절반)
+	/// - `scene_height`: 씬 세로 크기. (픽셀, 1 밑이면 1, 첫 단은 그 절반)
+	///
+	/// # 돌려줌
+	/// 판을 맞췄으면 Ok. 다시 짓다 판을 못 만들면 Err(GL 의 오류 글).
 	//==============================================================================
 	pub fn resize(&mut self, gl: &glow::Context, scene_width: i32, scene_height: i32) -> Result<(), String> {
 		let safe_width = scene_width.max(1);
@@ -150,6 +191,13 @@ impl MultiLevelBloomEffect {
 
 	//==============================================================================
 	/// 단 수 설정. (1 이상, 같으면 그대로)
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트.
+	/// - `level_count`: 단 수. (0 이면 1)
+	///
+	/// # 돌려줌
+	/// 판을 맞췄으면 Ok. 다시 짓다 판을 못 만들면 Err(GL 의 오류 글).
 	//==============================================================================
 	pub fn set_level_count(&mut self, gl: &glow::Context, level_count: usize) -> Result<(), String> {
 		let safe_level_count = level_count.max(1);
@@ -162,6 +210,9 @@ impl MultiLevelBloomEffect {
 
 	//==============================================================================
 	/// 단 수 반환.
+	///
+	/// # 돌려줌
+	/// 단 수. (1 이상)
 	//==============================================================================
 	pub fn get_level_count(&self) -> usize {
 		self.level_count
@@ -169,6 +220,9 @@ impl MultiLevelBloomEffect {
 
 	//==============================================================================
 	/// 실수 판 사용 여부 반환.
+	///
+	/// # 돌려줌
+	/// 판이 RGBA16F 면 true, RGBA8 이면 false.
 	//==============================================================================
 	pub fn get_use_float_color(&self) -> bool {
 		self.use_float_color
@@ -176,6 +230,10 @@ impl MultiLevelBloomEffect {
 
 	//==============================================================================
 	/// 뽑는 문턱 설정. (밝기, 무릎은 문턱 둘레의 부드러운 폭, 0 이면 딱 자름)
+	///
+	/// # 인자
+	/// - `threshold`: 뽑는 문턱. (세 채널 가운데 가장 큰 값으로 잰 밝기, 0 밑은 0, 기본 1)
+	/// - `knee`: 문턱 둘레의 부드러운 폭. (0 밑은 0, 기본 0.25)
 	//==============================================================================
 	pub fn set_threshold(&mut self, threshold: f32, knee: f32) {
 		self.threshold = threshold.max(0.0);
@@ -184,6 +242,11 @@ impl MultiLevelBloomEffect {
 
 	//==============================================================================
 	/// 블룸 렌더링. (호출 후 결과는 get_result_texture())
+	/// - 판이 없으면(destroy 뒤) 아무것도 하지 않는다.
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트.
+	/// - `scene_color_texture`: 씬 컬러 텍스처. (크기는 resize 로 준 씬 크기와 같아야 뽑기의 텍셀 간격이 맞는다)
 	//==============================================================================
 	pub fn render(&self, gl: &glow::Context, scene_color_texture: Option<GlTexture>) {
 		let level_render_target_list = &self.level_render_target_list;
@@ -256,6 +319,9 @@ impl MultiLevelBloomEffect {
 
 	//==============================================================================
 	/// 결과 텍스처 반환. (render() 이후, 첫 단)
+	///
+	/// # 돌려줌
+	/// 첫 단(씬의 반 크기)의 컬러 텍스처. destroy 뒤면 None.
 	//==============================================================================
 	pub fn get_result_texture(&self) -> Option<GlTexture> {
 		self.level_render_target_list.first().and_then(|level_render_target| level_render_target.get_color_texture(0))
@@ -263,6 +329,9 @@ impl MultiLevelBloomEffect {
 
 	//==============================================================================
 	/// 파괴. (GL 리소스 해제)
+	///
+	/// # 인자
+	/// - `gl`: 만들 때 쓴 GL 컨텍스트.
 	//==============================================================================
 	pub fn destroy(&mut self, gl: &glow::Context) {
 		self.destroy_levels(gl);

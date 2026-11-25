@@ -8,15 +8,11 @@
 //!   뒤의 것이 이긴다. 같은 결과를 내려고 러스트 판도 스프라이트(와 UIImageView 의 스프라이트)를 두 번 담는다.
 //! - 원본과 다른 것:
 //!   - 이벤트는 `Box<dyn FnMut(&mut UIButton, &mut ComponentContext)>` 다. 원본 콜백은 버튼만 받는다.
-//!   ```text
 //!     문맥을 함께 넘겨 콜백에서 다른 노드를 바꾸거나 만들고 지울 수 있게 했다. (클릭 이벤트의 bool 반환은 원본에서도 쓰지 않아 뺐다)
-//!     받은 이벤트는 Rc<RefCell> 에 담는다. 이벤트 getter 는 그 Rc 를 돌려주고, 부르는 쪽은 borrow_mut 로 빌려 버튼과 문맥을 넘겨 부른다.
+//!     받은 이벤트는 `Rc<RefCell>` 에 담는다. 이벤트 getter 는 그 Rc 를 돌려주고, 부르는 쪽은 borrow_mut 로 빌려 버튼과 문맥을 넘겨 부른다.
 //!     부르는 동안 같은 이벤트를 다시 부르면(콜백 안에서 fire_click_events 같은) 이미 빌려 있어 건너뛴다.
-//!   ```
 //!   - 원본 set_interactable / UIToggleButton.set_is_on 은 그 자리에서 색 대상을 모으고 틴트를 건다. 러스트 판은 노드에 닿을 수 없는 자리라
-//!   ```text
 //!     다음 tick 에 모으고 건다. (tick 이 매 프레임 틴트를 다시 거므로 보이는 결과는 같다)
-//!   ```
 //!   - 제외 컴포넌트는 인스턴스 대신 (노드, 컴포넌트 타입) 으로 정한다: `exclude_component_from_tint::<Paint>`(node_id).
 //!   - setStateEvent(원본도 빈 함수)는 옮기지 않았다.
 //! - attach_to_tree 에서 호스트 노드를 interactable 로 켠다. node_tree.add_component(node_id, UIButton::new()) 로 붙인다.

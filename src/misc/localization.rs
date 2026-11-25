@@ -17,9 +17,7 @@
 //!   이름 자리 채우기(text_named, "{seconds}" 꼴, 빗금으로만 이은 값들은 통째로 한 번 묶는다).
 //!   배치 뒤집기(mirror_layout_x, read_layout_text_align, 원본 LanguagePack 의 mirrorLayoutX, readLayoutTextAlign).
 //!   detect_language 는 웹에서 원본처럼 navigator.languages 를 읽고, 데스크탑에서는 sys-locale 로 시스템의 선호 언어 차례를 읽는다.
-//!   ```text
 //!     (윈도우 GetUserPreferredUILanguages, 맥 CFLocaleCopyPreferredLanguages, 리눅스 LANGUAGE / LC_ALL / LC_MESSAGES / LANG 환경 변수)
-//!   ```
 //==============================================================================
 use crate::core::graphic::TextAlign;
 use std::cell::RefCell;

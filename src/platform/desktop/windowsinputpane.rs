@@ -4,19 +4,13 @@
 //!   (content/browser/renderer_host/virtual_keyboard_controller_win.cc, ui/base/ime/win/on_screen_keyboard_display_manager_input_pane.cc,
 //!   ui/base/ime/win/virtual_keyboard_debounce_timer.cc, content/browser/renderer_host/render_widget_host_view_aura.cc)
 //!   - 띄우기: 글자 입력칸에 포커스가 가거나 포커스된 입력칸을 누를 때, 마지막 포인터가 손가락이나 펜이면 터치 키보드를 띄운다.
-//!   ```text
 //!     (VirtualKeyboardControllerWin::UpdateTextInputState 의 IsPointerTypeValidForVirtualKeyboard 와 show_ime_if_needed)
-//!   ```
 //!   - 내리기: 포커스가 글자 입력칸을 떠나면, 엔진이 띄운 키보드만 내린다. (FocusedNodeChanged(false) 의 HideVirtualKeyboard)
 //!   - 띄우기와 내리기 요청은 300 밀리초로 고른다. 마지막 실행에서 300 밀리초가 지나야 마지막 요청 하나를 낸다. (VirtualKeyboardDebounceTimer(300))
 //!   - 윈도우 10 RS4 부터의 InputPane(IInputPaneInterop::GetForWindow 로 창에 묶은 것)의 TryShow, TryHide 를 COM STA 스레드에서 부르고,
-//!   ```text
 //!     Showing 에서 OccludedRect 를, Hiding 에서 빈 영역을 받는다. (크롬도 메시지를 돌리는 COM STA 작업 스레드에서 부른다)
-//!   ```
 //!   - 받은 가림 영역의 세로(DIP)를 visualViewport 아래 인셋으로 쓴다. (OnKeyboardVisible 의 SetInsets(0, 0, keyboard_rect.height(), 0),
-//!   ```text
 //!     RenderWidgetHostViewAura::GetVisibleViewportSize 가 창 크기에서 인셋을 뺀다. 창 크기, innerHeight 는 그대로다)
-//!   ```
 //!   - 사용자가 키보드를 손으로 닫거나 열면 그 상태를 따른다. (OnKeyboardHidden, OnKeyboardVisible 이 virtual_keyboard_shown_ 을 바꾼다)
 //! - 크롬의 navigator.virtualKeyboard.overlaysContent(키보드가 화면을 덮게 하는 웹 API)는 원본이 쓰지 않아 옮기지 않았다.
 //==============================================================================

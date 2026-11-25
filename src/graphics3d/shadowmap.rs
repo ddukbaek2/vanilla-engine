@@ -20,6 +20,29 @@ pub const DEFAULT_SHADOWMAP_RESOLUTION: i32 = 2048;
 
 //==============================================================================
 /// 섀도우 맵.
+/// - 깊이 텍스처는 정사각형 DEPTH_COMPONENT24 이고 비교 모드(LEQUAL)라 셰이더에서 sampler2DShadow 로 읽는다.
+///
+/// # 예제
+/// 한 프레임의 그림자 깊이 패스를 그리고 본 패스 렌더러에 섀도우 맵 넘기기
+/// ```rust,no_run
+/// use vanilla::graphics3d::shadowmap::DEFAULT_SHADOWMAP_RESOLUTION;
+/// use vanilla::{Matrix4, ShadowMap, SkinnedModel, SkinnedModelRenderer, Vector3};
+///
+/// fn create_shadow_map(gl: &glow::Context) -> Result<ShadowMap, String> {
+/// 	ShadowMap::new(gl, DEFAULT_SHADOWMAP_RESOLUTION)
+/// }
+///
+/// fn render_shadow_pass(gl: &glow::Context, shadow_map: &mut ShadowMap, skinned_model_renderer: &mut SkinnedModelRenderer, skinned_model: &mut SkinnedModel) {
+/// 	let light_direction = Vector3::create(-0.5, -0.8, -0.35);
+/// 	shadow_map.update_light_matrix(Vector3::zero(), light_direction, 4.0, 0.5, 30.0);
+/// 	let light_view_projection_elements = *shadow_map.get_light_view_projection_matrix().get_elements();
+/// 	let model_matrix = Matrix4::create_identity();
+/// 	shadow_map.begin_render(gl);
+/// 	skinned_model_renderer.draw_depth(gl, skinned_model, &light_view_projection_elements, model_matrix.get_elements());
+/// 	let texel_size = 1.0 / shadow_map.get_resolution() as f32;
+/// 	skinned_model_renderer.set_shadow_map(Some(shadow_map.get_depth_texture()), Some(&light_view_projection_elements), texel_size);
+/// }
+/// ```
 //==============================================================================
 pub struct ShadowMap {
 	framebuffer: GlFramebuffer,
@@ -31,6 +54,14 @@ pub struct ShadowMap {
 impl ShadowMap {
 	//==============================================================================
 	/// 생성. (깊이 텍스처 + 컬러 없는 프레임버퍼)
+	/// - 광원 행렬은 단위 행렬로 시작한다. (update_light_matrix 로 채운다)
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트. (Graphic::get_gl 로 꺼낸다)
+	/// - `resolution`: 깊이 텍스처 한 변의 텍셀 수. (정사각형, 원본 기본값은 DEFAULT_SHADOWMAP_RESOLUTION = 2048)
+	///
+	/// # 돌려줌
+	/// 새 섀도우 맵. 텍스처나 프레임버퍼를 못 만들면 Err(GL 의 오류 글).
 	//==============================================================================
 	pub fn new(gl: &glow::Context, resolution: i32) -> Result<ShadowMap, String> {
 		unsafe {
@@ -65,6 +96,27 @@ impl ShadowMap {
 	//==============================================================================
 	/// 광원 행렬 갱신. (초점 주변을 덮는 직교 투영, 텍셀 스냅)
 	/// - light_direction 은 빛이 나아가는 방향, extent 는 초점 기준 절반 커버 범위다.
+	/// - 광원 눈은 초점에서 빛 반대쪽으로 (near_distance + far_distance) / 2 만큼 떨어지고, 위쪽은 Vector3::up() 이다.
+	///   그래서 빛이 y 축과 나란하면(바로 위나 아래로) 위쪽과 겹쳐 행렬이 망가진다. (원본과 같음)
+	///
+	/// # 인자
+	/// - `focus_position`: 그림자를 덮을 가운데. (월드)
+	/// - `light_direction`: 빛이 나아가는 방향. (월드, 길이는 상관없다, 안에서 정규화)
+	/// - `extent`: 초점에서 가로와 세로로 덮는 절반 범위. (월드 단위, 직교 상자는 -extent ~ extent)
+	/// - `near_distance`: 광원 직교 투영의 가까운 거리. (월드 단위)
+	/// - `far_distance`: 광원 직교 투영의 먼 거리. (월드 단위)
+	///
+	/// # 예제
+	/// 해가 비스듬히 비출 때 원점 둘레 반지름 4 를 덮기
+	/// ```rust,no_run
+	/// use vanilla::{ShadowMap, Vector3};
+	///
+	/// fn aim_sun(shadow_map: &mut ShadowMap) {
+	/// 	let sun_direction = Vector3::create(0.5, 0.8, 0.35).normalize();
+	/// 	let light_travel_direction = sun_direction.multiply_scalar(-1.0);
+	/// 	shadow_map.update_light_matrix(Vector3::zero(), light_travel_direction, 4.0, 0.5, 30.0);
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn update_light_matrix(&mut self, focus_position: Vector3, light_direction: Vector3, extent: f32, near_distance: f32, far_distance: f32) {
 		let normalized_direction = light_direction.normalize();
@@ -88,6 +140,10 @@ impl ShadowMap {
 
 	//==============================================================================
 	/// 깊이 패스 시작. (프레임버퍼 바인드 + 뷰포트 + 깊이 클리어)
+	/// - 깊이 시험과 깊이 쓰기를 켠다. 끝나면 부르는 쪽이 다음 패스의 프레임버퍼와 뷰포트를 다시 잡는다.
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트.
 	//==============================================================================
 	pub fn begin_render(&self, gl: &glow::Context) {
 		unsafe {
@@ -101,6 +157,9 @@ impl ShadowMap {
 
 	//==============================================================================
 	/// 프레임버퍼 반환.
+	///
+	/// # 돌려줌
+	/// 깊이 전용 프레임버퍼. (컬러 어태치먼트 없음)
 	//==============================================================================
 	pub fn get_framebuffer(&self) -> GlFramebuffer {
 		self.framebuffer
@@ -108,6 +167,9 @@ impl ShadowMap {
 
 	//==============================================================================
 	/// 깊이 텍스처 반환.
+	///
+	/// # 돌려줌
+	/// 비교 샘플링(sampler2DShadow)용 깊이 텍스처. (DEPTH_COMPONENT24)
 	//==============================================================================
 	pub fn get_depth_texture(&self) -> GlTexture {
 		self.depth_texture
@@ -115,6 +177,9 @@ impl ShadowMap {
 
 	//==============================================================================
 	/// 해상도 반환.
+	///
+	/// # 돌려줌
+	/// 깊이 텍스처 한 변의 텍셀 수.
 	//==============================================================================
 	pub fn get_resolution(&self) -> i32 {
 		self.resolution
@@ -122,6 +187,9 @@ impl ShadowMap {
 
 	//==============================================================================
 	/// 광원 뷰 투영 행렬 반환.
+	///
+	/// # 돌려줌
+	/// 광원 뷰 투영 행렬. (월드 → 광원 클립, update_light_matrix 전에는 단위 행렬)
 	//==============================================================================
 	pub fn get_light_view_projection_matrix(&self) -> &Matrix4 {
 		&self.light_view_projection_matrix
@@ -129,6 +197,9 @@ impl ShadowMap {
 
 	//==============================================================================
 	/// 파괴. (GL 리소스 해제)
+	///
+	/// # 인자
+	/// - `gl`: 만들 때 쓴 GL 컨텍스트.
 	//==============================================================================
 	pub fn destroy(&self, gl: &glow::Context) {
 		unsafe {

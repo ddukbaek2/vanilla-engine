@@ -4,10 +4,8 @@
 //!   - KeyboardInput: 편집 키(Backspace, Delete, 화살표, Home, End, Enter, Tab), Ctrl/Cmd + A/C/V/X, KeyEvent.text 의 글자 → 글 입력 줄.
 //!   - Ime: Preedit 는 조합 시작 / 조합 글 / 조합 끝으로, Commit 은 확정 글로 바꾼다. (Preedit 커서는 바이트 자리라 문자 자리로 바꾼다)
 //!   - 프레임마다 지난 프레임 필드 상태를 읽어, 포커스를 가진 필드가 플랫폼 입력(use_dominput)을 쓸 때만 IME 를 켜고 후보 창 자리를 맞춘다.
-//!   ```text
 //!     포커스가 다른 필드로 옮겨 가거나 조합 중에 필드 안을 눌러 필드가 조합 글을 확정하면 IME 를 껐다 켜서 조합을 끊는다.
 //!     (끊긴 조합 글은 필드가 이미 확정했으므로 OS 가 다시 보낸 같은 Commit 은 버린다)
-//!   ```
 //! - 클립보드는 arboard 로 읽고 쓴다. (winit 에 클립보드가 없다. 리눅스는 Clipboard 객체가 살아 있어야 내용이 남아서 스레드에 하나 들고 있는다)
 //!
 //! # 예제

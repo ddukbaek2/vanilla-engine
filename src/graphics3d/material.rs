@@ -7,21 +7,15 @@
 //!   glossiness / occlusion / emissive / specular / opacity, 추가 슬롯은 9 이상.
 //! - 원본과 다른 것:
 //!   - 셰이더 프로그램은 `Rc<ShaderProgram>` 으로 렌더러와 나눠 든다. 모델의 드로어블은 `Rc<Material>` 로 가리킨다. (원본 참조 의미)
-//!   ```text
 //!     원본이 인스턴스를 고치는 set_texture / set_use_alpha_cutout / set_subsurface_factor 는 &self 로 부를 수 있게 안에서 Cell 로 든다.
-//!   ```
 //!   - 이미지 해석은 원본 createImageBitmap(비동기) 대신 image 크레이트(png, jpeg, webp, gif, bmp, ico)로 그 자리에서 한다. 그래서 async 가 없다.
-//!   ```text
 //!     형은 원본 크롬처럼 해석에 쓰지 않고 내용으로 가린다. (크롬 createImageBitmap(Blob) 도 Blob 의 형이 아니라 내용으로 해독기를 고른다)
 //!     원본처럼 flip_y 면 위아래를 뒤집고, is_color_data 면 SRGB8_ALPHA8 로 올린다.
-//!   ```
 //!   - 원본 loadImageDescription(url) 의 Promise 는 ImageAsset 처럼 받기 손잡이(ImageDescriptionLoadHandle)다. load_image_description(엔진, 애셋 경로, 옵션)이
-//!   ```text
 //!     엔진의 애셋 받기(데스크탑은 애셋 폴더 후보, 웹은 asset_base_url 에서 fetch)로 바이트를 부탁하고, 다 받으면 get_image_description 이 서술을 만든다.
 //!     손잡이는 그대로 await 할 수 있다. (엔진 작업 안에서 Material::load_image_description(engine, 경로, 옵션).await 가 원본 await 처럼 서술을 낸다)
 //!     mime_type 은 원본처럼 응답의 content-type 이다. (웹 fetch 응답 머리, 머리가 없으면 None) 데스크탑에는 응답이 없어 내용으로 고른 형이다.
 //!     (Image::sniff_image_mime_type, WHATWG MIME 스니핑의 그림 표와 AVIF, 모르면 None) 바이트를 받는 create_image_description(bytes) 는 원본과 같다.
-//!   ```
 //!   - 원본 이미지 서술의 source(캔버스/비트맵)는 RGBA 픽셀(ImageSource)로 받는다.
 //==============================================================================
 use crate::core::asset::AssetLoadHandle;
@@ -40,52 +34,126 @@ use std::task::{Context, Poll};
 //==============================================================================
 /// 텍스처 유닛 배치. (1번은 SkinnedModel 의 섀도우 맵 전용, 사용 금지)
 pub const TEXTURE_UNIT_BASECOLOR: u32 = 0;
+/// 섀도우 맵 유닛. (SkinnedModel 렌더러 전용, 머티리얼은 쓰지 않는다)
 pub const TEXTURE_UNIT_SHADOWMAP: u32 = 1;
+/// 노멀 맵 유닛. (유니폼 normalTexture)
 pub const TEXTURE_UNIT_NORMAL: u32 = 2;
+/// 메탈릭 러프니스 맵 유닛. (유니폼 metallicRoughnessTexture)
 pub const TEXTURE_UNIT_METALLICROUGHNESS: u32 = 3;
+/// 글로시니스 맵 유닛. (유니폼 glossinessTexture, FBX 스펙큘러/글로스 경로)
 pub const TEXTURE_UNIT_GLOSSINESS: u32 = 4;
+/// 오클루전 맵 유닛. (유니폼 occlusionTexture)
 pub const TEXTURE_UNIT_OCCLUSION: u32 = 5;
+/// 이미시브 맵 유닛. (유니폼 emissiveTexture)
 pub const TEXTURE_UNIT_EMISSIVE: u32 = 6;
+/// 스펙큘러 맵 유닛. (유니폼 specularTexture)
 pub const TEXTURE_UNIT_SPECULAR: u32 = 7;
+/// 오파시티 맵 유닛. (유니폼 opacityTexture, 알파 컷아웃)
 pub const TEXTURE_UNIT_OPACITY: u32 = 8;
 
 //==============================================================================
 /// 이미 푼 RGBA 픽셀. (원본 이미지 서술의 source, 캔버스/비트맵 자리, 스트레이트 알파, 위에서 아래로)
+///
+/// # 예제
+/// 2 x 1 픽셀(빨강, 파랑)을 이미지 서술의 source 로 넣기
+/// ```rust
+/// use std::rc::Rc;
+/// use vanilla::{ImageDescription, ImageSource};
+///
+/// let image_source = ImageSource { width: 2, height: 1, pixels: vec![255, 0, 0, 255, 0, 0, 255, 255] };
+/// let image_description = ImageDescription { source: Some(Rc::new(image_source)), is_color_data: true, ..ImageDescription::default() };
+/// assert!(image_description.bytes.is_empty());
+/// assert_eq!(image_description.source.as_ref().map(|source| source.width), Some(2));
+/// ```
 //==============================================================================
 #[derive(Clone, Debug, Default)]
 pub struct ImageSource {
+	/// 가로 픽셀 수.
 	pub width: u32,
+	/// 세로 픽셀 수.
 	pub height: u32,
+	/// RGBA 바이트. (픽셀마다 4 바이트, 위 행부터, 길이는 width x height x 4 이상)
 	pub pixels: Vec<u8>,
 }
 
 //==============================================================================
 /// 이미지 서술. (원본 { bytes, mime_type, flip_y, is_color_data, anisotropy } 또는 { source, flip_y })
 /// - bytes 는 png / jpeg / webp 파일 내용이다. 같은 이미지를 여러 텍스처가 쓰면 Rc 로 나눠 든다. (FBX 비디오 중복 참조)
+///
+/// # 예제
+/// 파일 바이트로 색 텍스처용 서술 만들기
+/// ```rust
+/// use vanilla::{ImageDescriptionOptions, Material};
+///
+/// let bytes = std::fs::read("examples/assets/atlas/icons.png").unwrap();
+/// let options = ImageDescriptionOptions { flip_y: false, is_color_data: true, anisotropy: 8.0 };
+/// let image_description = Material::create_image_description(bytes, Some(String::from("image/png")), Some(options));
+/// assert!(image_description.is_color_data);
+/// assert_eq!(image_description.anisotropy, 8.0);
+/// assert!(image_description.source.is_none());
+/// ```
 //==============================================================================
 #[derive(Clone, Debug, Default)]
 pub struct ImageDescription {
+	/// 이미지 파일 내용. (png, jpeg, webp, gif, bmp, ico, 비고 source 도 없으면 create_texture 가 대체색을 쓴다)
 	pub bytes: Rc<Vec<u8>>,
+	/// 형. (응답의 content-type 이나 내용으로 고른 형, 해석에는 쓰지 않는다, 모르면 None)
 	pub mime_type: Option<String>,
+	/// 이미 푼 RGBA 픽셀. (있으면 bytes 대신 쓴다)
 	pub source: Option<Rc<ImageSource>>,
+	/// 올릴 때 위아래를 뒤집을지. (원본 createImageBitmap 의 imageOrientation)
 	pub flip_y: bool,
+	/// 색 데이터인지. (true 면 SRGB8_ALPHA8 로 올려 선형으로 샘플링, 노멀 같은 데이터 맵은 false)
 	pub is_color_data: bool,
+	/// 이방성 필터 단계. (0 이하면 쓰지 않음, 기기 최대치로 자른다, 확장이 없으면 무시)
 	pub anisotropy: f32,
 }
 
 //==============================================================================
 /// 이미지 서술 옵션. (원본 load_image_description 의 options { flip_y, is_color_data, anisotropy })
+///
+/// # 예제
+/// 기본값은 모두 끈 것이고, 옵션을 None 으로 주면 기본값과 같다
+/// ```rust
+/// use vanilla::{ImageDescriptionOptions, Material};
+///
+/// assert_eq!(ImageDescriptionOptions::default(), ImageDescriptionOptions { flip_y: false, is_color_data: false, anisotropy: 0.0 });
+/// let image_description = Material::create_image_description(vec![1, 2, 3], None, None);
+/// assert!(!image_description.flip_y);
+/// assert!(!image_description.is_color_data);
+/// assert_eq!(image_description.anisotropy, 0.0);
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ImageDescriptionOptions {
+	/// 위아래를 뒤집을지. (기본 false)
 	pub flip_y: bool,
+	/// 색 데이터인지. (true 면 sRGB 로 올린다, 기본 false)
 	pub is_color_data: bool,
+	/// 이방성 필터 단계. (0 이면 쓰지 않음, 기본 0)
 	pub anisotropy: f32,
 }
 
 //==============================================================================
 /// 이미지 서술 받기 손잡이. (Material::load_image_description 이 돌려준다. 원본 loadImageDescription 의 Promise 자리)
 /// - 씬은 get_load_handle 을 SceneBase::track_load_handle 로 맡겨 다 받을 때까지 initialize 를 미룰 수 있다.
+///
+/// # 예제
+/// 애셋 바이트를 받아 서술 만들기 (데스크탑은 그 자리에서 끝난다)
+/// ```rust
+/// use vanilla::{Engine, EngineConfiguration, ImageDescriptionOptions, Material};
+///
+/// let engine = Engine::new(EngineConfiguration::new());
+/// let options = ImageDescriptionOptions { is_color_data: true, ..ImageDescriptionOptions::default() };
+/// let load_handle = Material::load_image_description(&engine, "examples/assets/atlas/icons.png", Some(options));
+/// assert!(load_handle.is_finished());
+/// let image_description = load_handle.get_image_description().unwrap().unwrap();
+/// assert_eq!(image_description.mime_type.as_deref(), Some("image/png"));
+/// assert!(image_description.is_color_data);
+///
+/// let missing_load_handle = Material::load_image_description(&engine, "missing_texture.png", None);
+/// assert!(missing_load_handle.get_image_description().unwrap().is_err());
+/// ```
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct ImageDescriptionLoadHandle {
@@ -96,6 +164,9 @@ pub struct ImageDescriptionLoadHandle {
 impl ImageDescriptionLoadHandle {
 	//==============================================================================
 	/// 바이트 읽기 손잡이. (씬에 맡길 때)
+	///
+	/// # 돌려줌
+	/// 바이트 읽기 손잡이. (SceneBase::track_load_handle 에 맡길 때)
 	//==============================================================================
 	pub fn get_load_handle(&self) -> &AssetLoadHandle {
 		&self.load_handle
@@ -103,6 +174,9 @@ impl ImageDescriptionLoadHandle {
 
 	//==============================================================================
 	/// 끝났는지. (받았거나 실패했거나)
+	///
+	/// # 돌려줌
+	/// 받았거나 받기에 실패했으면 true.
 	//==============================================================================
 	pub fn is_finished(&self) -> bool {
 		self.load_handle.is_finished()
@@ -110,6 +184,10 @@ impl ImageDescriptionLoadHandle {
 
 	//==============================================================================
 	/// 받은 바이트로 이미지 서술 만들기. (받는 중이면 None, 받기에 실패하면 Err. 원본 문구 "Material image load failed: url")
+	///
+	/// # 돌려줌
+	/// 받는 중이면 None. 받았으면 `Some(Ok(서술))`, 받기에 실패하면 `Some(Err("Material image load failed: 경로"))`.
+	/// (옵션은 load_image_description 에 준 것, mime_type 은 응답의 content-type 이고 데스크탑은 내용으로 고른 형)
 	//==============================================================================
 	pub fn get_image_description(&self) -> Option<Result<ImageDescription, String>> {
 		if !self.load_handle.is_finished() {
@@ -130,6 +208,22 @@ impl ImageDescriptionLoadHandle {
 
 //==============================================================================
 /// 이미지 서술 받기를 기다리는 퓨처. (ImageDescriptionLoadHandle 을 await 하면 된다. 원본 loadImageDescription 의 Promise 가 풀린 값)
+///
+/// # 예제
+/// 엔진 작업 안에서 손잡이를 await 하기
+/// ```rust,no_run
+/// use vanilla::{Engine, ImageDescriptionOptions, Material};
+///
+/// fn load_texture_description(engine: &mut Engine) {
+/// 	engine.spawn_task(|mut engine_context| async move {
+/// 		let options = ImageDescriptionOptions { is_color_data: true, ..ImageDescriptionOptions::default() };
+/// 		let load_handle = engine_context.with(|engine| Material::load_image_description(engine, "examples/assets/atlas/icons.png", Some(options)));
+/// 		if let Ok(image_description) = load_handle.await {
+/// 			assert!(!image_description.bytes.is_empty());
+/// 		}
+/// 	});
+/// }
+/// ```
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct ImageDescriptionLoadFuture {
@@ -171,25 +265,72 @@ impl IntoFuture for ImageDescriptionLoadHandle {
 
 //==============================================================================
 /// 중립 머티리얼 서술. (원본 create_default_description 이 만드는 객체, 팩터 + 이미지, GL 무관)
+///
+/// # 예제
+/// 기본 서술에 색과 거칠기를 바꾸고 노멀 맵 이미지 넣기
+/// ```rust
+/// use vanilla::{ImageDescriptionOptions, Material};
+///
+/// let mut description = Material::create_default_description();
+/// assert_eq!(description.metallic_factor, 0.0);
+/// description.base_color_factor = [0.8, 0.6, 0.5];
+/// description.roughness_factor = 0.7;
+/// let bytes = std::fs::read("examples/assets/atlas/icons.png").unwrap();
+/// description.normal_image = Some(Material::create_image_description(bytes, None, Some(ImageDescriptionOptions::default())));
+/// assert!(description.normal_image.is_some());
+/// assert!(description.base_color_image.is_none());
+/// ```
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct MaterialDescription {
+	/// 베이스 컬러 배율. (선형 rgb, 텍스처 색에 곱한다, 기본 흰색)
 	pub base_color_factor: [f32; 3],
+	/// 메탈릭 배율. (0 ~ 1, 기본 0)
 	pub metallic_factor: f32,
+	/// 러프니스 배율. (0 ~ 1, 기본 1)
 	pub roughness_factor: f32,
+	/// 이미시브 배율. (선형 rgb, 이미시브 텍스처에 곱한다, 기본 검정)
 	pub emissive_factor: [f32; 3],
+	/// 베이스 컬러 이미지. (None 이면 1x1 흰색)
 	pub base_color_image: Option<ImageDescription>,
+	/// 노멀 맵 이미지. (None 이면 1x1 (128, 128, 255) 평평한 노멀)
 	pub normal_image: Option<ImageDescription>,
+	/// 메탈릭 러프니스 맵 이미지. (g 러프니스, b 메탈릭, None 이면 1x1 흰색)
 	pub metallic_roughness_image: Option<ImageDescription>,
+	/// 글로시니스 맵 이미지. (있으면 글로시니스 경로로 러프니스를 근사한다, None 이면 1x1 흰색)
 	pub glossiness_image: Option<ImageDescription>,
+	/// 오클루전 맵 이미지. (None 이면 1x1 흰색)
 	pub occlusion_image: Option<ImageDescription>,
+	/// 이미시브 맵 이미지. (None 이면 1x1 흰색)
 	pub emissive_image: Option<ImageDescription>,
+	/// 스펙큘러 맵 이미지. (None 이면 1x1 흰색)
 	pub specular_image: Option<ImageDescription>,
+	/// 오파시티 맵 이미지. (있으면 알파 컷아웃을 켠다, None 이면 1x1 흰색)
 	pub opacity_image: Option<ImageDescription>,
 }
 
 //==============================================================================
 /// 머티리얼.
+/// - 셰이더 템플릿 하나를 여러 머티리얼이 나눠 들고, apply 가 그 셰이더에 팩터 유니폼과 텍스처 유닛을 건다.
+///
+/// # 예제
+/// 서술로 머티리얼을 짓고 그리기 전에 적용하기
+/// ```rust,no_run
+/// use vanilla::{ImageDescriptionOptions, Material, SkinnedModelRenderer};
+///
+/// fn create_material(gl: &glow::Context, skinned_model_renderer: &SkinnedModelRenderer) -> Result<Material, String> {
+/// 	let mut description = Material::create_default_description();
+/// 	description.base_color_factor = [0.8, 0.6, 0.5];
+/// 	let bytes = std::fs::read("examples/assets/atlas/icons.png").map_err(|error| error.to_string())?;
+/// 	let options = ImageDescriptionOptions { is_color_data: true, ..ImageDescriptionOptions::default() };
+/// 	description.base_color_image = Some(Material::create_image_description(bytes, None, Some(options)));
+/// 	let shader_program = skinned_model_renderer.get_shader_program();
+/// 	let material = Material::create_from_description(gl, shader_program.clone(), &description)?;
+/// 	shader_program.use_program(gl);
+/// 	material.apply(gl);
+/// 	Ok(material)
+/// }
+/// ```
 //==============================================================================
 pub struct Material {
 	shader_program: Rc<ShaderProgram>,
@@ -214,6 +355,12 @@ pub struct Material {
 impl Material {
 	//==============================================================================
 	/// 생성. (텍스처 없음, 흰색 팩터, 메탈릭 1, 러프니스 1)
+	///
+	/// # 인자
+	/// - `shader_program`: 쓸 셰이더 템플릿. (렌더러의 get_shader_program 이 돌려주는 것)
+	///
+	/// # 돌려줌
+	/// 팩터가 흰색, 메탈릭 1, 러프니스 1 이고 기본 슬롯 텍스처가 모두 None 인 머티리얼. (서브서피스 팩터 1, 알파 컷아웃 꺼짐)
 	//==============================================================================
 	pub fn new(shader_program: Rc<ShaderProgram>) -> Material {
 		Material {
@@ -239,6 +386,9 @@ impl Material {
 
 	//==============================================================================
 	/// 기본 머티리얼 서술 생성. (흰색 무광 비금속)
+	///
+	/// # 돌려줌
+	/// 베이스 흰색, 메탈릭 0, 러프니스 1, 이미시브 검정이고 이미지가 없는 서술.
 	//==============================================================================
 	pub fn create_default_description() -> MaterialDescription {
 		MaterialDescription {
@@ -259,6 +409,15 @@ impl Material {
 
 	//==============================================================================
 	/// 중립 머티리얼 서술로부터 생성. (이미지 바이트 → GL 텍스처, 못 풀면 오류)
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트. (Graphic::get_gl 로 꺼낸다)
+	/// - `shader_program`: 쓸 셰이더 템플릿. (렌더러의 get_shader_program 이 돌려주는 것)
+	/// - `description`: 팩터와 이미지를 담은 서술. (빈 이미지 슬롯은 1x1 대체색 텍스처)
+	///
+	/// # 돌려줌
+	/// 기본 슬롯 8 개에 모두 텍스처를 지은 머티리얼. (glossiness_image 가 있으면 글로시니스 경로, opacity_image 가 있으면 알파 컷아웃)
+	/// 이미지를 못 풀거나 텍스처를 못 만들면 Err(오류 글).
 	//==============================================================================
 	pub fn create_from_description(gl: &glow::Context, shader_program: Rc<ShaderProgram>, description: &MaterialDescription) -> Result<Material, String> {
 		let mut material = Material::new(shader_program);
@@ -283,6 +442,27 @@ impl Material {
 	/// 텍스처 생성. (이미지 서술 → GL 텍스처, 없으면 1x1 단색 대체)
 	/// - is_color_data: sRGB 로 저장된 색 텍스처, 하드웨어 디코드(SRGB8_ALPHA8)로 선형 공간 샘플링.
 	/// - anisotropy: 이방성 필터 단계. (확장 미지원 시 무시)
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트.
+	/// - `image_description`: 올릴 이미지. (None 이거나 bytes 가 비고 source 도 없으면 대체색)
+	/// - `fallback_color`: 대체색. (RGBA 바이트, 1x1 텍스처로 짓는다)
+	///
+	/// # 돌려줌
+	/// 새 GL 텍스처. (이미지면 밉맵, LINEAR_MIPMAP_LINEAR, 반복 감기) 이미지를 못 풀거나, 픽셀이 width x height x 4 바이트보다 적거나, 텍스처를 못 만들면 Err(오류 글).
+	///
+	/// # 예제
+	/// 바이트가 있으면 sRGB 색 텍스처로, 없으면 흰색 1x1 로 짓기
+	/// ```rust,no_run
+	/// use vanilla::core::graphic::GlTexture;
+	/// use vanilla::{ImageDescriptionOptions, Material};
+	///
+	/// fn create_albedo_texture(gl: &glow::Context, bytes: Option<Vec<u8>>) -> Result<GlTexture, String> {
+	/// 	let options = ImageDescriptionOptions { is_color_data: true, anisotropy: 8.0, ..ImageDescriptionOptions::default() };
+	/// 	let image_description = bytes.map(|bytes| Material::create_image_description(bytes, None, Some(options)));
+	/// 	Material::create_texture(gl, image_description.as_ref(), [255, 255, 255, 255])
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn create_texture(gl: &glow::Context, image_description: Option<&ImageDescription>, fallback_color: [u8; 4]) -> Result<GlTexture, String> {
 		let has_bytes = image_description.map(|description| !description.bytes.is_empty()).unwrap_or(false);
@@ -346,6 +526,14 @@ impl Material {
 
 	//==============================================================================
 	/// 바이트로 이미지 서술 생성. (원본 load_image_description 의 fetch 뒤 부분, 웹은 BlobAsset 바이트를 넘긴다)
+	///
+	/// # 인자
+	/// - `bytes`: 이미지 파일 내용. (png, jpeg, webp, gif, bmp, ico)
+	/// - `mime_type`: 형. (응답의 content-type 같은 것, 해석에는 쓰지 않는다, 모르면 None)
+	/// - `options`: 뒤집기, 색 데이터, 이방성 옵션. (None 이면 모두 끄고 0)
+	///
+	/// # 돌려줌
+	/// source 가 없는 이미지 서술. (여기서는 풀지 않고 create_texture 가 푼다)
 	//==============================================================================
 	pub fn create_image_description(bytes: Vec<u8>, mime_type: Option<String>, options: Option<ImageDescriptionOptions>) -> ImageDescription {
 		let resolved_options = options.unwrap_or_default();
@@ -361,6 +549,48 @@ impl Material {
 
 	//==============================================================================
 	/// 애셋 경로(웹은 URL)로부터 이미지 서술 받기 부탁. (원본 정적 loadImageDescription, 다 받으면 손잡이의 get_image_description 이 만든다)
+	///
+	/// # 인자
+	/// - `engine`: 애셋을 받을 엔진.
+	/// - `url`: 애셋 경로. (데스크탑은 애셋 폴더 후보 기준, 웹은 asset_base_url 기준 주소, data: 주소도 된다)
+	/// - `options`: 서술 옵션. (None 이면 모두 끄고 0)
+	///
+	/// # 돌려줌
+	/// 받기 손잡이. (데스크탑은 그 자리에서 읽어 이미 끝나 있고, 웹은 fetch 가 끝나야 끝난다, get_image_description 이나 await 로 서술을 받는다)
+	///
+	/// # 예제
+	/// 씬의 create 에서 부탁하고 다 받은 뒤 initialize 에서 서술 꺼내기
+	/// ```rust,no_run
+	/// use vanilla::{Engine, ImageDescriptionLoadHandle, ImageDescriptionOptions, Material, Scene, SceneBase};
+	///
+	/// struct TextureScene {
+	/// 	scene_base: SceneBase,
+	/// 	load_handle: Option<ImageDescriptionLoadHandle>,
+	/// }
+	///
+	/// impl Scene for TextureScene {
+	/// 	fn get_scene_base(&self) -> &SceneBase {
+	/// 		&self.scene_base
+	/// 	}
+	///
+	/// 	fn get_scene_base_mut(&mut self) -> &mut SceneBase {
+	/// 		&mut self.scene_base
+	/// 	}
+	///
+	/// 	fn create(&mut self, engine: &mut Engine) {
+	/// 		let options = ImageDescriptionOptions { is_color_data: true, ..ImageDescriptionOptions::default() };
+	/// 		let load_handle = Material::load_image_description(engine, "examples/assets/atlas/icons.png", Some(options));
+	/// 		self.scene_base.track_load_handle(load_handle.get_load_handle());
+	/// 		self.load_handle = Some(load_handle);
+	/// 	}
+	///
+	/// 	fn initialize(&mut self, _engine: &mut Engine) {
+	/// 		if let Some(Some(Ok(image_description))) = self.load_handle.as_ref().map(|load_handle| load_handle.get_image_description()) {
+	/// 			assert!(!image_description.bytes.is_empty());
+	/// 		}
+	/// 	}
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn load_image_description(engine: &Engine, url: &str, options: Option<ImageDescriptionOptions>) -> ImageDescriptionLoadHandle {
 		ImageDescriptionLoadHandle {
@@ -390,6 +620,23 @@ impl Material {
 	//==============================================================================
 	/// 추가 텍스처 설정. (셰이더 템플릿 고유 슬롯, 기본 슬롯 밖의 유니폼 이름 / 텍스처 유닛)
 	/// - 유닛 1 은 섀도우 맵 전용, 0 / 2~8 은 기본 슬롯이므로 9 이상을 사용한다. 같은 이름은 자리를 지키고 값만 바꾼다.
+	///
+	/// # 인자
+	/// - `uniform_name`: 셰이더의 샘플러 유니폼 이름.
+	/// - `texture_unit`: 텍스처 유닛. (9 이상)
+	/// - `texture`: 묶을 텍스처. (None 이면 그 유닛을 비워 묶는다, 지우는 것은 건 쪽이 한다)
+	///
+	/// # 예제
+	/// 피부 셰이더의 높이 디테일 슬롯에 회색 1x1 텍스처 걸기
+	/// ```rust,no_run
+	/// use vanilla::{Material, SKIN_TEXTURE_UNIT_DETAILHEIGHT};
+	///
+	/// fn attach_detail_height(gl: &glow::Context, material: &Material) -> Result<(), String> {
+	/// 	let detail_height_texture = Material::create_texture(gl, None, [128, 128, 128, 255])?;
+	/// 	material.set_texture("detailHeightTexture", SKIN_TEXTURE_UNIT_DETAILHEIGHT, Some(detail_height_texture));
+	/// 	Ok(())
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn set_texture(&self, uniform_name: &str, texture_unit: u32, texture: Option<GlTexture>) {
 		let mut extra_texture_bindings = self.extra_texture_bindings.borrow_mut();
@@ -405,6 +652,10 @@ impl Material {
 
 	//==============================================================================
 	/// 적용. (참조 셰이더에 유니폼 설정 + 텍스처 유닛 바인드)
+	/// - 유니폼은 지금 쓰는 프로그램에 걸리므로 참조 셰이더를 먼저 use_program 해 둔다. 끝나면 TEXTURE0 이 활성이다.
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트.
 	//==============================================================================
 	pub fn apply(&self, gl: &glow::Context) {
 		let shader_program = &self.shader_program;
@@ -443,6 +694,9 @@ impl Material {
 
 	//==============================================================================
 	/// 참조 셰이더 프로그램 반환. (머티리얼 템플릿의 셰이더)
+	///
+	/// # 돌려줌
+	/// 참조 셰이더 프로그램. (렌더러와 나눠 든 것)
 	//==============================================================================
 	pub fn get_shader_program(&self) -> &Rc<ShaderProgram> {
 		&self.shader_program
@@ -450,6 +704,9 @@ impl Material {
 
 	//==============================================================================
 	/// 베이스 컬러 팩터 반환.
+	///
+	/// # 돌려줌
+	/// 베이스 컬러 배율. (선형 rgb)
 	//==============================================================================
 	pub fn get_base_color_factor(&self) -> [f32; 3] {
 		self.base_color_factor
@@ -457,6 +714,9 @@ impl Material {
 
 	//==============================================================================
 	/// 메탈릭 팩터 반환.
+	///
+	/// # 돌려줌
+	/// 메탈릭 배율.
 	//==============================================================================
 	pub fn get_metallic_factor(&self) -> f32 {
 		self.metallic_factor
@@ -464,6 +724,9 @@ impl Material {
 
 	//==============================================================================
 	/// 러프니스 팩터 반환.
+	///
+	/// # 돌려줌
+	/// 러프니스 배율.
 	//==============================================================================
 	pub fn get_roughness_factor(&self) -> f32 {
 		self.roughness_factor
@@ -471,6 +734,9 @@ impl Material {
 
 	//==============================================================================
 	/// 이미시브 팩터 반환.
+	///
+	/// # 돌려줌
+	/// 이미시브 배율. (선형 rgb)
 	//==============================================================================
 	pub fn get_emissive_factor(&self) -> [f32; 3] {
 		self.emissive_factor
@@ -478,6 +744,9 @@ impl Material {
 
 	//==============================================================================
 	/// 글로시니스 경로 사용 여부 반환.
+	///
+	/// # 돌려줌
+	/// 글로시니스 맵으로 러프니스를 근사하면 true. (서술에 glossiness_image 가 있었을 때)
 	//==============================================================================
 	pub fn get_use_glossiness(&self) -> bool {
 		self.use_glossiness
@@ -485,6 +754,9 @@ impl Material {
 
 	//==============================================================================
 	/// 서브서피스 팩터 설정. (피부 셰이더의 화면 공간 산란 마스크 배율, 눈 / 치아처럼 산란하지 않는 부위는 0)
+	///
+	/// # 인자
+	/// - `subsurface_factor`: 산란 마스크 배율. (기본 1, 0 이면 산란하지 않음)
 	//==============================================================================
 	pub fn set_subsurface_factor(&self, subsurface_factor: f32) {
 		self.subsurface_factor.set(subsurface_factor);
@@ -492,6 +764,9 @@ impl Material {
 
 	//==============================================================================
 	/// 서브서피스 팩터 반환.
+	///
+	/// # 돌려줌
+	/// 서브서피스 팩터. (기본 1)
 	//==============================================================================
 	pub fn get_subsurface_factor(&self) -> f32 {
 		self.subsurface_factor.get()
@@ -499,6 +774,9 @@ impl Material {
 
 	//==============================================================================
 	/// 알파 컷아웃 사용 여부 설정. (오파시티 텍스처를 나중에 붙인 머티리얼용)
+	///
+	/// # 인자
+	/// - `use_alpha_cutout`: true 면 오파시티 텍스처로 투명한 곳을 잘라 낸다.
 	//==============================================================================
 	pub fn set_use_alpha_cutout(&self, use_alpha_cutout: bool) {
 		self.use_alpha_cutout.set(use_alpha_cutout);
@@ -506,6 +784,9 @@ impl Material {
 
 	//==============================================================================
 	/// 알파 컷아웃 사용 여부 반환. (오파시티 맵 보유 시, 머리카락/속눈썹 등)
+	///
+	/// # 돌려줌
+	/// 알파 컷아웃을 쓰면 true.
 	//==============================================================================
 	pub fn get_use_alpha_cutout(&self) -> bool {
 		self.use_alpha_cutout.get()
@@ -513,6 +794,9 @@ impl Material {
 
 	//==============================================================================
 	/// 텍스처 바인딩 목록 반환. (유니폼 이름 / 텍스처 유닛 / GL 텍스처, 기본 슬롯 8개 뒤에 추가 슬롯)
+	///
+	/// # 돌려줌
+	/// (유니폼 이름, 텍스처 유닛, 텍스처) 목록. (기본 슬롯 8 개 다음에 set_texture 로 건 추가 슬롯을 건 차례로)
 	//==============================================================================
 	pub fn get_texture_bindings(&self) -> Vec<(String, u32, Option<GlTexture>)> {
 		let mut texture_bindings = vec![
@@ -533,6 +817,9 @@ impl Material {
 
 	//==============================================================================
 	/// 파괴. (기본 슬롯 텍스처 해제, 추가 슬롯 텍스처는 건 쪽이 지운다)
+	///
+	/// # 인자
+	/// - `gl`: 만들 때 쓴 GL 컨텍스트.
 	//==============================================================================
 	pub fn destroy(&self, gl: &glow::Context) {
 		let owned_texture_list = [self.base_color_texture, self.normal_texture, self.metallic_roughness_texture, self.glossiness_texture, self.occlusion_texture, self.emissive_texture, self.specular_texture, self.opacity_texture];
@@ -546,6 +833,24 @@ impl Material {
 
 //==============================================================================
 /// 이미지 바이트 해석. (png / jpeg / webp → 너비, 높이, 스트레이트 알파 RGBA)
+///
+/// # 인자
+/// - `bytes`: 이미지 파일 내용. (형은 내용으로 가린다)
+///
+/// # 돌려줌
+/// (너비, 높이, 스트레이트 알파 RGBA 바이트). 못 풀면 Err("Material: image decode failed: 까닭").
+///
+/// # 예제
+/// png 파일 풀기와 못 푸는 바이트
+/// ```rust
+/// use vanilla::graphics3d::material::decode_image_bytes;
+///
+/// let bytes = std::fs::read("examples/assets/atlas/icons.png").unwrap();
+/// let (width, height, pixels) = decode_image_bytes(&bytes).unwrap();
+/// assert_eq!((width, height), (128, 128));
+/// assert_eq!(pixels.len(), 128 * 128 * 4);
+/// assert!(decode_image_bytes(&[1, 2, 3]).is_err());
+/// ```
 //==============================================================================
 pub fn decode_image_bytes(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
 	let dynamic_image = image::load_from_memory(bytes).map_err(|error| format!("Material: image decode failed: {}", error))?;
@@ -557,6 +862,21 @@ pub fn decode_image_bytes(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
 
 //==============================================================================
 /// 픽셀 행 위아래 뒤집기. (원본 createImageBitmap 의 imageOrientation: "flip_y")
+///
+/// # 인자
+/// - `pixels`: RGBA 바이트. (제자리에서 바꾼다, width x height x 4 바이트보다 짧으면 패닉)
+/// - `width`: 가로 픽셀 수.
+/// - `height`: 세로 픽셀 수.
+///
+/// # 예제
+/// 1 x 2 이미지의 위아래 행 바꾸기
+/// ```rust
+/// use vanilla::graphics3d::material::flip_pixel_rows;
+///
+/// let mut pixels = vec![255, 0, 0, 255, 0, 0, 255, 255];
+/// flip_pixel_rows(&mut pixels, 1, 2);
+/// assert_eq!(pixels, vec![0, 0, 255, 255, 255, 0, 0, 255]);
+/// ```
 //==============================================================================
 pub fn flip_pixel_rows(pixels: &mut [u8], width: usize, height: usize) {
 	let row_byte_count = width * 4;

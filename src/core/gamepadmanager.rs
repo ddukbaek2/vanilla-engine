@@ -13,38 +13,30 @@
 //!   - 아날로그 버튼(트리거)의 눌림은 크로미엄과 같이 값이 30/255 를 넘을 때다. (gilrs 기본은 0.75 에 눌림, 0.65 에 뗌)
 //!   - 축(햇 스위치)으로 오는 십자키는 버튼 12~15 로 바꾼다. (브라우저가 하는 일)
 //!   - 데스크탑의 버튼은 표준 17개 뒤에 gilrs 가 표준 버튼으로 잇지 못한 단추(매핑에 없는 단추, gilrs 의 C, Z)를, 축은 표준 4개 뒤에
-//!   ```text
 //!     매핑에 없는 축을 처음 움직인 차례로 붙인다. gilrs 가 장치의 단추 목록을 내주지 않고 한 번이라도 움직인 단추만 알려서, 그 단추를 처음 누른 뒤에야 생긴다.
 //!     버튼이나 축 수가 늘면 그 패드의 상태 칸도 늘린다.
-//!   ```
 //!   - 플레이스테이션 패드(소니 054c 의 듀얼쇼크4 05c4, 09cc, 0ba0 와 듀얼센스 0ce6, 0df2, 0e5f)는 크롬(device/gamepad 의 MapperDualshock4, MapperDualSense)처럼
-//!   ```text
 //!     버튼 18개이고 원시 단추 13번(HID 단추 14)이 TOUCHPAD(17)다. 누르기 전에도 늘 있고, 그 밖의 단추(듀얼센스 마이크 단추)와 축은 붙이지 않는다.
 //!     gilrs 가 SDL 매핑의 touchpad:b13 을 이름 없는 단추(Button::Unknown, misc1 과 같은 이름)로 잇기만 해서, 그 단추의 원시 코드를 플랫폼마다 정해 찾는다.
 //!     (맥 IOKit 단추 쪽의 쓰임 14, 윈도우 Windows.Gaming.Input 의 단추 13번, 리눅스 hid-generic 의 BTN_GAMEPAD + 13)
 //!     리눅스의 hid-sony(커널 4.10 부터), hid-playstation(5.12 부터) 드라이버는 터치패드를 따로 장치로 내고 bcdHID 에 0x8000 을 붙인다.
 //!     그때는 크롬(MapperPs4Ps5)처럼 버튼 17개다. (gilrs 의 uuid 13, 14번째 바이트가 그 판 번호다)
 //!     맥 GameController 의 GCDualSenseGamepad.touchpadButton 도 있지만, GameController 는 패드의 제조사, 제품 번호를 내주지 않아 gilrs 패드와 짝짓지 못해 쓰지 않는다.
-//!   ```
 //!   - Gamepad.index 는 데스크탑에서는 gilrs 의 GamepadId 번호다. (처음 붙은 순서로 0 부터, 브라우저 index 와 같은 쓰임) 웹은 브라우저 index 다.
 //!   - Gamepad.id 는 웹에서는 브라우저 id 그대로, 데스크탑에서는 크롬 꼴 "이름 (STANDARD GAMEPAD Vendor: 054c Product: 0ce6)" 로 만든다.
 //!   - get_all_connected_gamepads / get_connected_gamepad 는 마지막 갱신(tick)에 읽은 사본을 돌려준다. (원본은 부를 때마다 새로 읽는다)
 //!   - 콜백의 button 값은 bool 대신 1.0(눌림) / 0.0(뗌) 이다.
 //!   - gilrs(웹은 연결 리스너)는 처음 갱신할 때 만든다. (갱신하지 않는 엔진과 시험에서는 장치를 열지 않는다)
 //!   - 더한 것: set_log_enabled (로그 켜고 끄기),
-//!   ```text
 //!     update_all_gamepads_with_list (gilrs 없이 목록을 넣는 길. 시험이나 다른 입력원)
-//!   ```
 //!   - 배터리 정보는 원본에 없어 옮기지 않는다.
 //!   - 단추와 축이 바뀔 때마다 찍는 로그는 원본처럼 set_input_log_enabled 로 켜고, 기본은 끔이다. set_log_enabled 는 연결과 해제를 포함한 모든 로그의 큰 스위치다.
 //!   - GamepadKind, read_gamepad_kind: 패드 이름으로 종류(엑스박스, 플레이스테이션, 닌텐도, 그 밖)를 가른다. get_active_gamepad_id 는 마지막 갱신에 단추를 누르거나 축을 크게 기울인 패드다.
 //!   - vibrate(strong_magnitude, weak_magnitude, seconds): 연결된 패드를 모두 떤다.
-//!   ```text
 //!     데스크탑은 gilrs force feedback(리눅스 evdev, 윈도우 XInput 과 Windows.Gaming.Input)으로 떨고, gilrs 가 진동을 대지 않는 macOS 는
 //!     플랫폼 층(platform/desktop/gamepadhaptics.rs)이 GameController 와 CoreHaptics 로 gilrs 패드와 짝인 컨트롤러를 떤다. (macOS 는 길이나 세기가 0 이면 앞 진동을 멈춘다)
 //!     그래서 gilrs 를 진동을 켠 채 만든다. (데스크탑에서 gilrs 의 진동 스레드 하나가 돈다) 웹은 원본처럼 navigator.getGamepads() 의 vibrationActuator 에 dual-rumble 을 건다.
 //!     첫 갱신(tick) 전에 부르면 gilrs 가 아직 없어 데스크탑에서는 떨지 않는다.
-//!   ```
 //==============================================================================
 #[cfg(not(target_arch = "wasm32"))]
 use gilrs::{Axis, Button, GilrsBuilder};

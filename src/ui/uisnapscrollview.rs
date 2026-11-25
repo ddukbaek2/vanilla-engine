@@ -10,20 +10,14 @@
 //!   node_tree.add_component(node_id, UISnapScrollView::new()) 로 붙인다. (content 노드, Mask, interactable 은 품은 뷰가 만든다)
 //! - 원본과 다른 것:
 //!   - 칸을 바꾸는 함수(page_to, set_snap_current_index, play_snap_tween 등)는 content 자식을 읽어야 해서 트리를 받는다.
-//!   ```text
-//!     씬 코드에서는 node_tree.with_component_mut::<UISnapScrollView, _>(snap_id, |snap_view, tree| snap_view.page_to(tree, 2, true)) 로 부른다.
-//!   ```
+//!     씬 코드에서는 node_tree.`with_component_mut::<UISnapScrollView, _>`(snap_id, |snap_view, tree| snap_view.page_to(tree, 2, true)) 로 부른다.
 //!   - 스냅 미끄러짐은 원본 Tween 객체 대신 같은 계산(0.3 초, cubic.out, 만든 tick 에 첫 걸음)을 이 위젯 안에서 한다.
-//!   ```text
 //!     (원본 트윈의 갱신 콜백이 스크롤 뷰 자신을 부르는데, 러스트 트윈 콜백은 트리만 받아 tick 중에 꺼내진 이 위젯에 닿지 않는다)
-//!   ```
 //!   - 미끄러지는 동안 content 노드는 그 tick 안에서 바로 옮긴다. (품은 뷰의 반영은 다음 tick 이라 한 프레임 늦지 않게)
 //!   - set_snap_to_nearest, set_velocity_threshold 는 원본처럼 값만 든다. (원본 play_snap_tween 도 이 값을 읽지 않는다)
 //!   - 원본은 스냅 뷰가 UIScrollView 이기도 해서 TouchRecognizer, UIScrollBar, UIListView 가 그대로 알아본다.
-//!   ```text
 //!     러스트 판은 TouchRecognizer 와 UIListView 가 find_scroll_view 로 알아본다. UIScrollBar 는 UIScrollView 컴포넌트만 찾아서
 //!     스냅 뷰에는 스크롤바를 붙일 수 없다. (setShows...ScrollBar 는 품은 뷰에 값만 들어간다)
-//!   ```
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::math;

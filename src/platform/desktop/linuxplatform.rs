@@ -5,10 +5,8 @@
 //!   장치 목록은 크로미엄처럼 화면 서버에서 읽는다. (크로미엄의 evdev 장치 분류 InputDeviceFactoryEvdev 는 크롬OS 와 화면 서버 없이 도는 판의 것이다)
 //!   - 웨이랜드(ui/ozone/platform/wayland/host/wayland_connection.cc): wl_seat 에 pointer 능력이 있으면 마우스 하나, touch 능력이 있으면 터치스크린 하나다.
 //!   - X11(ui/events/platform/x11/x11_hotplug_event_handler.cc): XListInputDevices 의 장치 형(MOUSE, TOUCHPAD, TOUCHSCREEN 과 XWayland 의 xwayland-pointer, xwayland-touch)과
-//!   ```text
 //!     XIQueryDevice 의 쓰임과 켜짐으로 가른다. 터치스크린은 직접 터치이고 Abs MT Position X, Y 값 축(0 번과 1 번, 절대, 최소 0, 최대 0 초과)이 있어야 한다.
 //!     XTEST 장치는 뺀다. 실제 포인터가 하나도 없으면 "Virtual core pointer" 를 마우스로 친다. X11 에는 포인팅 스틱 목록이 없다. (크로미엄도 같다)
-//!   ```
 //! - 어느 서버에서 읽을지는 winit 처럼 WAYLAND_DISPLAY 가 있으면 웨이랜드, 아니면 X11(DISPLAY) 이다. 못 읽으면 거짓이다.
 //!   WAYLAND_SOCKET(넘겨받은 소켓)만 있으면 그 소켓은 winit 의 것이라 따로 열지 않고 X11 로 간다.
 //! - 크로미엄은 장치를 꽂고 뺄 때마다 다시 읽는다. 엔진은 이것을 매 프레임 불러서, 읽은 값을 들고 있다가 2 초가 지나면 다시 읽는다.

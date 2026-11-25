@@ -76,6 +76,26 @@ void main() {
 
 //==============================================================================
 /// 화면 공간 서브서피스 스캐터링.
+///
+/// # 예제
+/// 피부 MRT 패스의 조도(0 번 어태치먼트)를 깊이에 맞춰 흩기
+/// ```rust,no_run
+/// use vanilla::{Camera3D, RenderTarget, SubsurfaceScatteringEffect};
+///
+/// fn create_scattering(gl: &glow::Context) -> Result<SubsurfaceScatteringEffect, String> {
+/// 	let mut subsurface_scattering_effect = SubsurfaceScatteringEffect::new(gl)?;
+/// 	subsurface_scattering_effect.set_scatter_width(0.015);
+/// 	Ok(subsurface_scattering_effect)
+/// }
+///
+/// fn render_scattering(gl: &glow::Context, subsurface_scattering_effect: &mut SubsurfaceScatteringEffect, scene_render_target: &RenderTarget, camera: &Camera3D) -> Result<(), String> {
+/// 	subsurface_scattering_effect.resize(gl, scene_render_target.get_width(), scene_render_target.get_height())?;
+/// 	subsurface_scattering_effect.render(gl, scene_render_target.get_color_texture(0), scene_render_target.get_depth_texture(), camera.get_field_of_view(), camera.get_aspect_ratio(), camera.get_near_distance(), camera.get_far_distance());
+/// 	let scattered_irradiance_texture = subsurface_scattering_effect.get_result_texture();
+/// 	assert!(scattered_irradiance_texture.is_some());
+/// 	Ok(())
+/// }
+/// ```
 //==============================================================================
 pub struct SubsurfaceScatteringEffect {
 	scatter_pass: FullscreenPass,
@@ -90,6 +110,12 @@ pub struct SubsurfaceScatteringEffect {
 impl SubsurfaceScatteringEffect {
 	//==============================================================================
 	/// 생성. (패스 1개 + 반정밀 실수 타겟 2장, resize 로 크기를 맞춘다)
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트. (Graphic::get_gl 로 꺼낸다)
+	///
+	/// # 돌려줌
+	/// 새 이펙트. (산란 폭 0.2, 폴오프 (1, 0.37, 0.3), 강도 (0.48, 0.41, 0.28), 커널까지 셈한 것) 셰이더 컴파일이나 판 만들기에 실패하면 Err(오류 글).
 	//==============================================================================
 	pub fn new(gl: &glow::Context) -> Result<SubsurfaceScatteringEffect, String> {
 		let float_color_options = RenderTargetOptions {
@@ -118,6 +144,31 @@ impl SubsurfaceScatteringEffect {
 
 	//==============================================================================
 	/// 커널 만들기. (GL 무관, 표본마다 rgb 가중치 + w 오프셋)
+	///
+	/// # 인자
+	/// - `falloff_color`: 채널별 폴오프. (r, g, b, 클수록 그 채널이 멀리 퍼진다)
+	/// - `strength_color`: 채널별 강도. (r, g, b, 0 이면 그 채널은 흩지 않고 중앙만 1)
+	///
+	/// # 돌려줌
+	/// 표본 KERNEL_SAMPLE_COUNT(17) 개의 r 가중, g 가중, b 가중, 오프셋을 차례로 이은 배열. (0 번이 중앙이고 오프셋 0, 채널마다 가중치 합 1, 오프셋은 -3 ~ 3)
+	///
+	/// # 예제
+	/// 피부 기본 프로파일의 커널은 채널마다 합이 1 이고, 강도 0 이면 중앙만 남는다
+	/// ```rust
+	/// use vanilla::graphics3d::subsurfacescatteringeffect::KERNEL_SAMPLE_COUNT;
+	/// use vanilla::SubsurfaceScatteringEffect;
+	///
+	/// let kernel = SubsurfaceScatteringEffect::build_kernel([1.0, 0.37, 0.3], [0.48, 0.41, 0.28]);
+	/// for channel_index in 0..3 {
+	/// 	let weight_sum: f32 = (0..KERNEL_SAMPLE_COUNT).map(|sample_index| kernel[sample_index * 4 + channel_index]).sum();
+	/// 	assert!((weight_sum - 1.0).abs() < 1.0e-5);
+	/// }
+	/// assert_eq!(kernel[3], 0.0);
+	///
+	/// let identity_kernel = SubsurfaceScatteringEffect::build_kernel([1.0, 0.37, 0.3], [0.0, 0.0, 0.0]);
+	/// assert_eq!(identity_kernel[0], 1.0);
+	/// assert_eq!(identity_kernel[4], 0.0);
+	/// ```
 	//==============================================================================
 	pub fn build_kernel(falloff_color: [f32; 3], strength_color: [f32; 3]) -> [f32; KERNEL_SAMPLE_COUNT * 4] {
 		let sample_count = KERNEL_SAMPLE_COUNT;
@@ -208,6 +259,14 @@ impl SubsurfaceScatteringEffect {
 
 	//==============================================================================
 	/// 크기 변경. (조도 버퍼 해상도 기준, 전체 해상도 실수 타겟 2장)
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트.
+	/// - `width`: 조도 버퍼 가로 크기. (픽셀, 판도 같은 크기)
+	/// - `height`: 조도 버퍼 세로 크기. (픽셀, 판도 같은 크기)
+	///
+	/// # 돌려줌
+	/// 판을 맞췄으면 Ok. 다시 짓다 GL 객체를 못 만들면 Err(GL 의 오류 글).
 	//==============================================================================
 	pub fn resize(&mut self, gl: &glow::Context, width: i32, height: i32) -> Result<(), String> {
 		self.ping_render_target.resize(gl, width, height)?;
@@ -218,6 +277,16 @@ impl SubsurfaceScatteringEffect {
 	//==============================================================================
 	/// 산란 렌더링. (가로 → 핑, 세로 → 퐁, 결과는 get_result_texture())
 	/// - 부수 효과: 깊이/블렌드 비활성, TEXTURE0 활성, 프레임버퍼 바인드가 변경된다.
+	/// - 깊이 텍스처는 1 번 유닛에 묶었다가 끝에 풀어 둔다. (1 번은 섀도우 샘플러 자리)
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트.
+	/// - `irradiance_texture`: 확산 조도 텍스처. (rgb 조도, a 산란 마스크, 마스크가 0.001 밑인 곳은 그대로 둔다)
+	/// - `depth_texture`: 같은 패스의 깊이 텍스처. (하드웨어 깊이 0 ~ 1)
+	/// - `field_of_view_radian`: 세로 시야각. (라디안, 산란 폭을 화면에 투영할 때)
+	/// - `aspect_ratio`: 가로 세로 비. (너비 / 높이, 가로 걸음을 보정한다)
+	/// - `near_distance`: 투영의 가까운 거리. (깊이를 선형으로 풀 때)
+	/// - `far_distance`: 투영의 먼 거리.
 	//==============================================================================
 	pub fn render(&self, gl: &glow::Context, irradiance_texture: Option<GlTexture>, depth_texture: Option<GlTexture>, field_of_view_radian: f32, aspect_ratio: f32, near_distance: f32, far_distance: f32) {
 		unsafe {
@@ -269,6 +338,9 @@ impl SubsurfaceScatteringEffect {
 
 	//==============================================================================
 	/// 결과 텍스처 반환. (render() 이후)
+	///
+	/// # 돌려줌
+	/// 흩은 조도 텍스처. (퐁 판, a 에 산란 마스크) destroy 뒤면 None.
 	//==============================================================================
 	pub fn get_result_texture(&self) -> Option<GlTexture> {
 		self.pong_render_target.get_color_texture(0)
@@ -276,6 +348,9 @@ impl SubsurfaceScatteringEffect {
 
 	//==============================================================================
 	/// 산란 폭 설정. (월드 단위, 커널 전체 반경)
+	///
+	/// # 인자
+	/// - `scatter_width`: 산란 폭. (월드 단위, 기본 0.2, 화면에 투영한 폭은 화면 높이의 0.05 를 넘지 않게 셰이더가 자른다)
 	//==============================================================================
 	pub fn set_scatter_width(&mut self, scatter_width: f32) {
 		self.scatter_width = scatter_width;
@@ -283,6 +358,9 @@ impl SubsurfaceScatteringEffect {
 
 	//==============================================================================
 	/// 산란 폭 반환.
+	///
+	/// # 돌려줌
+	/// 산란 폭. (월드 단위)
 	//==============================================================================
 	pub fn get_scatter_width(&self) -> f32 {
 		self.scatter_width
@@ -290,6 +368,11 @@ impl SubsurfaceScatteringEffect {
 
 	//==============================================================================
 	/// 확산 프로파일 설정. (채널별 폴오프 / 강도, 피부 기본 (1, 0.37, 0.3) / (0.48, 0.41, 0.28))
+	/// - 커널을 바로 다시 셈한다.
+	///
+	/// # 인자
+	/// - `falloff_color`: 채널별 폴오프. (r, g, b, 클수록 그 채널이 멀리 퍼진다)
+	/// - `strength_color`: 채널별 강도. (r, g, b, 0 이면 그 채널은 흩지 않는다)
 	//==============================================================================
 	pub fn set_profile(&mut self, falloff_color: [f32; 3], strength_color: [f32; 3]) {
 		self.falloff_color = falloff_color;
@@ -299,6 +382,9 @@ impl SubsurfaceScatteringEffect {
 
 	//==============================================================================
 	/// 폴오프 색 반환.
+	///
+	/// # 돌려줌
+	/// 채널별 폴오프. (r, g, b)
 	//==============================================================================
 	pub fn get_falloff_color(&self) -> [f32; 3] {
 		self.falloff_color
@@ -306,6 +392,9 @@ impl SubsurfaceScatteringEffect {
 
 	//==============================================================================
 	/// 강도 색 반환.
+	///
+	/// # 돌려줌
+	/// 채널별 강도. (r, g, b)
 	//==============================================================================
 	pub fn get_strength_color(&self) -> [f32; 3] {
 		self.strength_color
@@ -313,6 +402,9 @@ impl SubsurfaceScatteringEffect {
 
 	//==============================================================================
 	/// 파괴. (GL 리소스 해제)
+	///
+	/// # 인자
+	/// - `gl`: 만들 때 쓴 GL 컨텍스트.
 	//==============================================================================
 	pub fn destroy(&mut self, gl: &glow::Context) {
 		self.ping_render_target.destroy(gl);
@@ -322,6 +414,9 @@ impl SubsurfaceScatteringEffect {
 
 	//==============================================================================
 	/// 산란 패스 반환.
+	///
+	/// # 돌려줌
+	/// 산란 패스. (가로, 세로 둘 다 이 패스)
 	//==============================================================================
 	pub fn get_scatter_pass(&self) -> &FullscreenPass {
 		&self.scatter_pass
@@ -329,6 +424,9 @@ impl SubsurfaceScatteringEffect {
 
 	//==============================================================================
 	/// 핑 렌더 타겟 반환. (가로 블러 결과)
+	///
+	/// # 돌려줌
+	/// 핑 렌더 타겟. (가로 산란 결과)
 	//==============================================================================
 	pub fn get_ping_render_target(&self) -> &RenderTarget {
 		&self.ping_render_target
@@ -336,6 +434,9 @@ impl SubsurfaceScatteringEffect {
 
 	//==============================================================================
 	/// 퐁 렌더 타겟 반환. (최종 결과 보관)
+	///
+	/// # 돌려줌
+	/// 퐁 렌더 타겟. (세로 산란 결과, 결과 텍스처의 주인)
 	//==============================================================================
 	pub fn get_pong_render_target(&self) -> &RenderTarget {
 		&self.pong_render_target

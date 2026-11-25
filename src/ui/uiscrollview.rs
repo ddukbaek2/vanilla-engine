@@ -6,13 +6,9 @@
 //! - 휠: 원본 TouchRaycaster.touchWheel → UIScrollView.wheel 길. 엔진이 터치 아래 노드부터 부모 쪽으로 wheel 을 묻고, 이 컴포넌트가 받아 쓴다.
 //! - 원본과 다른 것:
 //!   - 원본은 set_scroll_offset / set_scroll_content_size / setShows...ScrollBar 에서 바로 노드를 바꾼다. 러스트 판의 씬 코드는 컴포넌트만 쥐고 있어
-//!   ```text
 //!     값을 정해 두고 다음 tick 에 content 노드와 스크롤바 노드에 반영한다. 같은 프레임에 바로 옮기려면 UIScrollView::set_scroll_offset_in_tree 를 쓴다.
-//!   ```
 //!   - 그래서 get_vertical_scroll_bar / get_horizontal_scroll_bar 는 보이기로 정한 뒤 첫 tick 이 지나야 노드 핸들을 돌려준다.
-//!   ```text
 //!     원본처럼 그 자리에서 스크롤바 노드를 만들고 켜려면 UIScrollView::set_shows_vertical_scroll_bar_in_tree(가로는 horizontal)를 쓴다. (만든 노드 핸들을 돌려준다)
-//!   ```
 //!   - 보이는 영역 크기(호스트 content_size)는 붙을 때와 tick / 터치 / 휠 때 읽어 둔다. 씬 코드에서 정한 오프셋은 다음 tick 에 새 크기로 다시 자른다.
 //!   - 드래그를 위 스크롤 뷰로 넘기는 손짓(원본 TouchRecognizer)은 ui/touchrecognizer.rs 에 따로 있다. 씬이 골라 쓴다.
 //! - 원본 그대로인 버릇: 콘텐트가 영역 안에 들어와 스스로 꺼진(자동 숨김) 스크롤바 노드는 tick 이 돌지 않아 저절로 다시 켜지지 않는다.

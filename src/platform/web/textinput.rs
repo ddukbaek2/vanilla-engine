@@ -3,14 +3,10 @@
 //! - 원본 UIInputField 의 DOM 쪽을 옮긴 것이다. 원본은 필드가 자기 <input> 을 만들고 리스너를 단다.
 //!   러스트 판은 필드가 프레임마다 상태(자리, 값, 선택, 포커스)를 엔진에 올리고, 여기서 attach 한 DOM 입력 필드마다 숨긴 <input> 을 하나씩 맞춘다.
 //!   - 값과 선택은 DOM 이 주인이다. input / compositionstart / compositionupdate / compositionend / Enter keydown / focus / blur 를
-//!   ```text
 //!     그 필드 id 로 글 입력 줄에 넣고(replaceValue, 조합, 포커스), 화살표 같은 네이티브 이동은 프레임마다 선택을 폴링해 넣는다. (원본 tick)
-//!   ```
 //!   - 필드 쪽에서 값이나 커서를 바꾸면(set_text, 누른 자리, 잘라내기) 상태의 value_revision 이 늘고, 여기서 <input> 에 다시 쓴다. (조합 중엔 미룬다)
 //!   - iOS 는 사용자 제스처 안에서 focus() 해야 키보드가 뜬다. 원본처럼 캔버스 touchstart / mousedown(설정하면 touchend)에 동기 핸들러를 달아
-//!   ```text
 //!     지난 프레임 필드 자리로 맞춰 보고 그 자리에서 focus / blur 한다.
-//!   ```
 //!   - 오른쪽 단추 문맥 메뉴는 원본과 같은 모양의 DOM 메뉴다. 항목은 그 필드에 잘라내기 / 복사 키나 붙여 넣을 글로 넣는다.
 //!   - use_dominput 이 꺼진 필드는 원본 캔버스 모드처럼 window keydown 을 편집 키와 글자로 바꿔 넣는다.
 //! - DOM 이벤트 리스너는 엔진을 빌리지 않는다. 대기 줄(PENDING_EVENT_LIST)에 넣고 다음 프레임 시작에 엔진으로 옮긴다.
