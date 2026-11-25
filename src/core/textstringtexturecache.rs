@@ -187,6 +187,16 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
+	// 이름으로 등록한 폰트 빼기. (원본 document.fonts.delete, 그 뒤로 그 이름은 기본 폰트로 그린다)
+	//==============================================================================
+	pub fn unregister_font(&mut self, family_name: &str, is_bold: bool) {
+		let font_key = create_font_key(family_name, is_bold);
+		if self.font_table.remove(&font_key).is_some() {
+			self.font_registration_count += 1;
+		}
+	}
+
+	//==============================================================================
 	// 기본 폰트 설정. (이름을 찾지 못한 폰트 문자열과 글자 대체에 쓴다)
 	//==============================================================================
 	pub fn set_default_font(&mut self, is_bold: bool, font_bytes: Vec<u8>) -> Result<(), String> {

@@ -177,6 +177,8 @@ pub struct Engine {
 	pending_scene_list: Vec<Box<dyn Scene>>,
 	is_unload_all_scenes_requested: bool,
 	pending_font_registration_list: Vec<(String, bool, AssetLoadHandle)>,
+	// 빼 달라고 맡긴 글꼴. (FontAsset.unload, 프레임 시작에 뺀다)
+	pending_font_unregistration_list: Vec<(String, bool)>,
 	pending_default_font_handle: Option<AssetLoadHandle>,
 	platform: Platform,
 	next_scene_number: u64,
@@ -206,6 +208,7 @@ impl Engine {
 			pending_scene_list: Vec::new(),
 			is_unload_all_scenes_requested: false,
 			pending_font_registration_list: Vec::new(),
+			pending_font_unregistration_list: Vec::new(),
 			pending_default_font_handle: None,
 			platform: Platform::new(),
 			next_scene_number: 0,
@@ -315,6 +318,14 @@ impl Engine {
 	//==============================================================================
 	pub fn register_font_when_loaded(&mut self, family: &str, is_bold: bool, load_handle: AssetLoadHandle) {
 		self.pending_font_registration_list.push((family.to_string(), is_bold, load_handle));
+	}
+
+	//==============================================================================
+	// 이름으로 등록한 글꼴을 빼 달라고 맡기기. (FontAsset.unload 가 부른다, 아직 등록 전이면 등록하지 않는다)
+	//==============================================================================
+	pub fn unregister_font(&mut self, family: &str, is_bold: bool) {
+		self.pending_font_registration_list.retain(|(pending_family, pending_is_bold, _)| !(pending_family == family && *pending_is_bold == is_bold));
+		self.pending_font_unregistration_list.push((family.to_string(), is_bold));
 	}
 
 	//==============================================================================
@@ -723,7 +734,7 @@ impl EngineRunner {
 	//==============================================================================
 	fn register_pending_fonts(&mut self) {
 		self.register_pending_default_font();
-		if self.engine.pending_font_registration_list.is_empty() {
+		if self.engine.pending_font_registration_list.is_empty() && self.engine.pending_font_unregistration_list.is_empty() {
 			return;
 		}
 		let graphic = match self.graphic.as_mut() {
@@ -734,6 +745,9 @@ impl EngineRunner {
 				return;
 			}
 		};
+		for (family, is_bold) in std::mem::take(&mut self.engine.pending_font_unregistration_list) {
+			graphic.get_text_string_texture_cache().unregister_font(&family, is_bold);
+		}
 		let pending_font_registration_list = std::mem::take(&mut self.engine.pending_font_registration_list);
 		for (family, is_bold, load_handle) in pending_font_registration_list {
 			if !load_handle.is_finished() {
