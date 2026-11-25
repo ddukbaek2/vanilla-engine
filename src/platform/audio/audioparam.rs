@@ -40,6 +40,9 @@ struct ParamEvent {
 }
 
 impl ParamEvent {
+	//==============================================================================
+	/// 사건 생성. (램프의 처음 값과 시간 상수는 0, 아직 지금 시각으로 당기지 않은 새 사건)
+	//==============================================================================
 	fn new(event_type: ParamEventType, value: f32, time: f64) -> ParamEvent {
 		ParamEvent {
 			event_type,
@@ -112,6 +115,9 @@ impl AudioParam {
 		self.intrinsic_value
 	}
 
+	//==============================================================================
+	/// 내재 값 쓰기. (최소 ~ 최대로 자른다)
+	//==============================================================================
 	fn set_intrinsic_value(&mut self, value: f32) {
 		self.intrinsic_value = value.clamp(self.minimum_value, self.maximum_value);
 	}

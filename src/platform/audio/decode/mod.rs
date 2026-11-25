@@ -51,6 +51,9 @@ pub(crate) struct DecodedAudio {
 }
 
 impl DecodedAudio {
+	//==============================================================================
+	/// 프레임 수. (첫 채널의 길이, 채널이 없으면 0, 시험)
+	//==============================================================================
 	#[cfg(test)]
 	pub(crate) fn get_frame_count(&self) -> usize {
 		self.channel_data.first().map(|channel| channel.len()).unwrap_or(0)

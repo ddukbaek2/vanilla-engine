@@ -218,10 +218,16 @@ fn read_ebml_variable_integer(bytes: &[u8], position: usize, is_id: bool) -> Opt
 	Some((value, length, is_unknown_size))
 }
 
+//==============================================================================
+/// 큰 끝 부호 없는 정수 읽기. (바이트 수만큼, 8 바이트를 넘으면 위쪽은 버려진다)
+//==============================================================================
 fn read_unsigned(bytes: &[u8]) -> u64 {
 	bytes.iter().fold(0u64, |value, byte| (value << 8) | *byte as u64)
 }
 
+//==============================================================================
+/// 큰 끝 부호 있는 정수 읽기. (맨 위 비트로 부호를 넓힌다, 비면 0)
+//==============================================================================
 fn read_signed(bytes: &[u8]) -> i64 {
 	if bytes.is_empty() {
 		return 0;
@@ -231,6 +237,9 @@ fn read_signed(bytes: &[u8]) -> i64 {
 	((unsigned << shift) as i64) >> shift
 }
 
+//==============================================================================
+/// Matroska(webm) 시간 정보 읽기. (TimecodeScale, 첫 소리 트랙의 CodecDelay, 첫 블록 시각, DiscardPadding)
+//==============================================================================
 fn read_matroska_timing(bytes: &[u8]) -> MatroskaTiming {
 	let mut matroska_timing = MatroskaTiming { timecode_scale: 1000000, codec_delay: 0, first_block_timecode: 0, discard_padding_list: Vec::new() };
 	let mut audio_track_number: Option<u64> = None;
@@ -347,6 +356,9 @@ struct Mp4Timing {
 	itunes_remainder: i64,
 }
 
+//==============================================================================
+/// MP4 시간 정보 읽기. (moov 의 첫 소리 트랙의 mdhd 와 편집 목록, iTunSMPB)
+//==============================================================================
 fn read_mp4_timing(bytes: &[u8]) -> Mp4Timing {
 	let mut mp4_timing = Mp4Timing { edit_media_time: 0, has_edit_list: false, media_timescale: 0, media_duration: 0, duration_seconds: 0.0, itunes_priming: 0, itunes_remainder: 0 };
 	let Some(moov) = find_mp4_box(bytes, b"moov") else {
@@ -453,6 +465,9 @@ fn read_mp4_box(bytes: &[u8], position: usize) -> Option<([u8; 4], &[u8], usize)
 	Some((box_type, &bytes[position + header_size as usize..end], end))
 }
 
+//==============================================================================
+/// 그 종류의 첫 MP4 상자 몸통 찾기. (한 수준만 걷는다, 없으면 None)
+//==============================================================================
 fn find_mp4_box<'a>(bytes: &'a [u8], wanted_type: &[u8; 4]) -> Option<&'a [u8]> {
 	let mut position = 0;
 	while let Some((box_type, body, next)) = read_mp4_box(bytes, position) {

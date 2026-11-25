@@ -133,6 +133,9 @@ fn convolve(input: &[f32], kernel1: &[f32], kernel2: &[f32], kernel_interpolatio
 	convolve_four_lanes(input, kernel1, kernel2, kernel_interpolation_factor)
 }
 
+//==============================================================================
+/// 합성곱. (x86_64: AVX2 와 FMA 가 있으면 8 줄 묶음, 없으면 4 줄 합)
+//==============================================================================
 #[cfg(target_arch = "x86_64")]
 fn convolve(input: &[f32], kernel1: &[f32], kernel2: &[f32], kernel_interpolation_factor: f64) -> f32 {
 	if std::arch::is_x86_feature_detected!("avx2") && std::arch::is_x86_feature_detected!("fma") {
@@ -143,6 +146,9 @@ fn convolve(input: &[f32], kernel1: &[f32], kernel2: &[f32], kernel_interpolatio
 	}
 }
 
+//==============================================================================
+/// 합성곱. (그 밖의 CPU: 두 합을 차례로 더한 뒤 섞는다)
+//==============================================================================
 #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
 fn convolve(input: &[f32], kernel1: &[f32], kernel2: &[f32], kernel_interpolation_factor: f64) -> f32 {
 	let mut sum1 = 0.0f32;
@@ -233,6 +239,9 @@ pub(crate) fn resample_channel(source: &[f32], source_sample_rate: f64, destinat
 mod tests {
 	use super::*;
 
+	//==============================================================================
+	/// 다시 뽑은 길이가 블링크와 같다. (48000 에서 44100, 8000 에서 44100, 같은 표본율은 그대로)
+	//==============================================================================
 	#[test]
 	fn resample_length_matches_blink() {
 		assert_eq!(resample_channel(&vec![0.5; 2880], 48000.0, 44100.0).len(), 2645);
@@ -241,6 +250,9 @@ mod tests {
 		assert_eq!(resample_channel(&[0.25, 0.5], 44100.0, 44100.0), vec![0.25, 0.5]);
 	}
 
+	//==============================================================================
+	/// 고른 값은 다시 뽑아도 그 값이다. (0.01 안)
+	//==============================================================================
 	#[test]
 	fn resample_keeps_constant_level() {
 		let output = resample_channel(&vec![0.5; 4800], 48000.0, 44100.0);

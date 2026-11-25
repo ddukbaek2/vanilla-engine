@@ -131,10 +131,16 @@ impl PeriodicWave {
 		periodic_wave
 	}
 
+	//==============================================================================
+	/// 파형 종류.
+	//==============================================================================
 	pub(crate) fn get_oscillator_type(&self) -> OscillatorType {
 		self.oscillator_type
 	}
 
+	//==============================================================================
+	/// 표를 지은 표본율.
+	//==============================================================================
 	pub(crate) fn get_sample_rate(&self) -> f32 {
 		self.sample_rate
 	}
@@ -231,6 +237,9 @@ impl PeriodicWave {
 		frequency_list.map(|frequency| self.get_wave_data(frequency))
 	}
 
+	//==============================================================================
+	/// 주파수 하나가 섞을 두 표. (배음을 덜 둔 표, 더 둔 표)
+	//==============================================================================
 	fn get_table_pair(&self, wave_data: &WaveData) -> (&[f32], &[f32]) {
 		(&self.band_limited_table_list[wave_data.lower_index], &self.band_limited_table_list[wave_data.higher_index])
 	}
@@ -247,6 +256,9 @@ struct SineSeries {
 }
 
 impl SineSeries {
+	//==============================================================================
+	/// 생성. (size 칸, 2 의 거듭제곱, 회전 인자와 비트를 뒤집은 차례를 지어 둔다)
+	//==============================================================================
 	fn new(size: usize) -> SineSeries {
 		let bit_count = size.trailing_zeros();
 		SineSeries {
@@ -334,6 +346,9 @@ impl OscillatorNode {
 		}
 	}
 
+	//==============================================================================
+	/// 끝났는지. (멈출 시각을 지나 Finished 상태면 true)
+	//==============================================================================
 	pub(crate) fn is_finished(&self) -> bool {
 		self.playback_state == PlaybackState::Finished
 	}

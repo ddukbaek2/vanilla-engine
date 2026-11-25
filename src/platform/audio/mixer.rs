@@ -34,6 +34,9 @@ pub struct AudioBufferData {
 }
 
 impl AudioBufferData {
+	//==============================================================================
+	/// 프레임 수. (첫 채널의 길이, 채널이 없으면 0)
+	//==============================================================================
 	pub(crate) fn get_length(&self) -> usize {
 		self.channel_list.first().map(|channel| channel.len()).unwrap_or(0)
 	}
@@ -106,6 +109,9 @@ pub(crate) struct MixerShared {
 }
 
 impl MixerShared {
+	//==============================================================================
+	/// 생성. (시계는 0, 표본율은 sample_rate)
+	//==============================================================================
 	pub(crate) fn new(sample_rate: f64) -> MixerShared {
 		MixerShared {
 			rendered_seconds_bits: AtomicU64::new(0f64.to_bits()),
@@ -127,6 +133,9 @@ impl MixerShared {
 		f64::from_bits(self.sample_rate_bits.load(Ordering::Acquire))
 	}
 
+	//==============================================================================
+	/// 그린 시간 쓰기. (초, 소리 스레드가 퀀텀을 그릴 때마다)
+	//==============================================================================
 	fn set_rendered_seconds(&self, rendered_seconds: f64) {
 		self.rendered_seconds_bits.store(rendered_seconds.to_bits(), Ordering::Release);
 	}
@@ -550,6 +559,9 @@ impl MixerRenderer {
 		}
 	}
 
+	//==============================================================================
+	/// 번호로 플레이어 노드 찾기. (없으면 None)
+	//==============================================================================
 	fn find_player(&mut self, player_id: u64) -> Option<&mut PlayerNode> {
 		self.player_list.iter_mut().find(|player| player.player_id == player_id)
 	}
@@ -745,10 +757,16 @@ mod tests {
 	use super::*;
 	use std::sync::mpsc::channel;
 
+	//==============================================================================
+	/// 시험 버퍼. (채널 목록과 표본율)
+	//==============================================================================
 	fn create_buffer(channel_list: Vec<Vec<f32>>, sample_rate: f64) -> Arc<AudioBufferData> {
 		Arc::new(AudioBufferData { sample_rate, channel_list })
 	}
 
+	//==============================================================================
+	/// 시험 렌더러. (명령 보내는 쪽, 렌더러, 나누는 값)
+	//==============================================================================
 	fn create_renderer(sample_rate: f64) -> (std::sync::mpsc::Sender<MixerCommand>, MixerRenderer, Arc<MixerShared>) {
 		let (command_sender, command_receiver) = channel();
 		let shared = Arc::new(MixerShared::new(sample_rate));

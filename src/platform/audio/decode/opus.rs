@@ -227,6 +227,9 @@ fn create_chromium_channels(channel_count: usize, mapping_family: u8) -> Channel
 }
 
 impl AudioDecoder for OpusPacketDecoder {
+	//==============================================================================
+	/// 처음 상태로. (디코더 상태를 되돌린다, 오류는 넘긴다)
+	//==============================================================================
 	fn reset(&mut self) {
 		match &mut self.stream_decoder {
 			OpusStreamDecoder::Single(decoder) => {
@@ -238,14 +241,23 @@ impl AudioDecoder for OpusPacketDecoder {
 		}
 	}
 
+	//==============================================================================
+	/// 코덱 정보. (등록표의 Opus 항목)
+	//==============================================================================
 	fn codec_info(&self) -> &CodecInfo {
 		&OPUS_SUPPORTED_CODEC_LIST[0].info
 	}
 
+	//==============================================================================
+	/// 코덱 인자. (48kHz 와 크로미엄 차례의 채널로 고친 것)
+	//==============================================================================
 	fn codec_params(&self) -> &AudioCodecParameters {
 		&self.codec_params
 	}
 
+	//==============================================================================
+	/// 패킷 하나 풀기. (48kHz, 크로미엄 차례로 옮기고 자리 없는 채널은 0, 실패하면 Err)
+	//==============================================================================
 	fn decode_ref(&mut self, packet: &PacketRef<'_>) -> Result<GenericAudioBufferRef<'_>> {
 		self.buffer.clear();
 		let decode_result = match &mut self.stream_decoder {
@@ -289,16 +301,25 @@ impl AudioDecoder for OpusPacketDecoder {
 		Ok(self.buffer.as_generic_audio_buffer_ref())
 	}
 
+	//==============================================================================
+	/// 끝내기. (따로 셈할 것이 없어 기본 결과)
+	//==============================================================================
 	fn finalize(&mut self) -> FinalizeResult {
 		FinalizeResult::default()
 	}
 
+	//==============================================================================
+	/// 마지막으로 푼 버퍼.
+	//==============================================================================
 	fn last_decoded(&self) -> GenericAudioBufferRef<'_> {
 		self.buffer.as_generic_audio_buffer_ref()
 	}
 }
 
 impl RegisterableAudioDecoder for OpusPacketDecoder {
+	//==============================================================================
+	/// 등록표가 부르는 생성. (create 를 상자에 담는다)
+	//==============================================================================
 	fn try_registry_new(params: &AudioCodecParameters, _opts: &AudioDecoderOptions) -> Result<Box<dyn AudioDecoder>>
 	where
 		Self: Sized,
@@ -306,6 +327,9 @@ impl RegisterableAudioDecoder for OpusPacketDecoder {
 		Ok(Box::new(OpusPacketDecoder::create(params)?))
 	}
 
+	//==============================================================================
+	/// 받는 코덱. (Opus 하나)
+	//==============================================================================
 	fn supported_codecs() -> &'static [SupportedAudioCodec] {
 		&OPUS_SUPPORTED_CODEC_LIST
 	}
@@ -324,6 +348,9 @@ static OPUS_SUPPORTED_CODEC_LIST: [SupportedAudioCodec; 1] = [SupportedAudioCode
 mod tests {
 	use super::*;
 
+	//==============================================================================
+	/// OpusHead 읽기. (패밀리 1, 6 채널의 pre-skip, 출력 게인, 스트림 수, 매핑 표)
+	//==============================================================================
 	#[test]
 	fn opus_header_reads_family_one_map() {
 		let mut bytes = b"OpusHead".to_vec();

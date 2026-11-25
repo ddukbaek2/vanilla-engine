@@ -18,6 +18,22 @@
 //! - 원본과 다른 점:
 //!   플레이어를 버리면 재생 중인 소스 노드를 멈추고 GainNode 를 뗀다. (onended 콜백이 버려진 클로저를 부르지 않게)
 //!   일시 중단 상태에서 play 한 뒤 재개를 기다리는 사이 다른 소스가 시작됐으면 그것을 멈추고 튼다. (원본은 둘 다 운다)
+//!
+//! # 예제
+//! fetch 와 디코딩이 끝나기를 기다린 뒤 길이 보기 (웹은 끝나야 버퍼가 생긴다, 데스크탑에서도 같은 코드가 돈다)
+//! ```rust,no_run
+//! use std::rc::Rc;
+//! use vanilla::{AudioAsset, Engine, EngineConfiguration};
+//!
+//! let mut engine = Engine::new(EngineConfiguration::new());
+//! let audio_asset = Rc::new(AudioAsset::new());
+//! let audio_load_handle = audio_asset.load_from_asset(&engine, "tests/assets/audio/wav_s16_stereo.wav");
+//! engine.spawn_task(move |_engine_context| async move {
+//! 	if audio_load_handle.await.is_ok() {
+//! 		assert!(audio_asset.get_duration() > 0.0);
+//! 	}
+//! });
+//! ```
 //==============================================================================
 use super::GainAutomation;
 use crate::core::audiomanager::{resume_audio_manager_state, AudioManagerState};

@@ -35,6 +35,21 @@ use std::sync::Arc;
 
 //==============================================================================
 /// 공유 오디오 컨텍스트. (원본 AudioContext 자리, 장치 스트림과 믹서로 가는 길)
+/// - AudioManager 가 하나 들고, get_audio_context 로 빌려 읽는다. (게임 코드가 직접 만들지 않는다)
+///
+/// # 예제
+/// 장치를 열고 표본율과 시계 읽기
+/// ```rust,no_run
+/// use vanilla::AudioManager;
+///
+/// let audio_manager = AudioManager::new();
+/// audio_manager.resume_context();
+/// let audio_context = audio_manager.get_audio_context();
+/// if let Some(audio_context) = audio_context.as_deref() {
+/// 	assert!(audio_context.sample_rate() > 0.0);
+/// 	assert!(audio_context.current_time() >= 0.0);
+/// }
+/// ```
 //==============================================================================
 pub struct AudioContext {
 	_stream_manager: StreamManager,
@@ -44,6 +59,9 @@ pub struct AudioContext {
 impl AudioContext {
 	//==============================================================================
 	/// 표본율. (원본 audioContext.sampleRate, 장치의 표본율)
+	///
+	/// # 돌려줌
+	/// 지금 연 출력 장치의 표본율. (Hz, 장치가 바뀌면 새 장치의 것)
 	//==============================================================================
 	pub fn sample_rate(&self) -> f32 {
 		self.mixer_link.shared.get_sample_rate() as f32
@@ -51,6 +69,9 @@ impl AudioContext {
 
 	//==============================================================================
 	/// 시계. (초, 원본 audioContext.currentTime)
+	///
+	/// # 돌려줌
+	/// 컨텍스트를 만든 뒤 그린 시간. (초, 128 프레임 퀀텀마다 오르고 멈춰 둔 동안은 선다)
 	//==============================================================================
 	pub fn current_time(&self) -> f64 {
 		self.mixer_link.get_current_time()
@@ -59,6 +80,25 @@ impl AudioContext {
 
 //==============================================================================
 /// 푼 소리. (원본 AudioBuffer 자리, 복제는 Arc 하나라 값싸다)
+/// - AudioAsset 이 들고, get_audio_buffer 로 받는다. 소리 장치 없이도 그 자리에서 푼다.
+///
+/// # 예제
+/// 푼 소리는 44100Hz 이고 5.1 채널도 2 채널로 내린다
+/// ```rust
+/// use vanilla::{Engine, EngineConfiguration};
+///
+/// let engine = Engine::new(EngineConfiguration::new());
+/// let audio_asset = engine.load_audio_asset("tests/assets/audio/flac_51.flac").unwrap();
+/// let audio_buffer = audio_asset.get_audio_buffer().unwrap();
+/// assert_eq!(audio_buffer.sample_rate(), 44100.0);
+/// assert_eq!(audio_buffer.number_of_channels(), 2);
+/// assert_eq!(audio_buffer.duration(), audio_buffer.length() as f64 / 44100.0);
+///
+/// let mono_asset = engine.load_audio_asset("tests/assets/audio/mp3_mono22.mp3").unwrap();
+/// let mono_buffer = mono_asset.get_audio_buffer().unwrap();
+/// assert_eq!(mono_buffer.number_of_channels(), 1);
+/// assert_eq!(mono_buffer.sample_rate(), 44100.0);
+/// ```
 //==============================================================================
 #[derive(Clone)]
 pub struct AudioBuffer {
@@ -68,6 +108,9 @@ pub struct AudioBuffer {
 impl AudioBuffer {
 	//==============================================================================
 	/// 재생 시간. (초, 원본 duration)
+	///
+	/// # 돌려줌
+	/// 프레임 수 / 표본율. (초)
 	//==============================================================================
 	pub fn duration(&self) -> f64 {
 		self.data.get_length() as f64 / self.data.sample_rate
@@ -75,6 +118,9 @@ impl AudioBuffer {
 
 	//==============================================================================
 	/// 프레임 수. (원본 length)
+	///
+	/// # 돌려줌
+	/// 채널 하나의 표본 수. (첫 채널의 길이)
 	//==============================================================================
 	pub fn length(&self) -> usize {
 		self.data.get_length()
@@ -82,6 +128,9 @@ impl AudioBuffer {
 
 	//==============================================================================
 	/// 채널 수. (원본 numberOfChannels, 데스크탑은 스피커 규칙으로 내린 1 이나 2)
+	///
+	/// # 돌려줌
+	/// 1 이나 2.
 	//==============================================================================
 	pub fn number_of_channels(&self) -> usize {
 		self.data.channel_list.len()
@@ -89,6 +138,9 @@ impl AudioBuffer {
 
 	//==============================================================================
 	/// 표본율. (원본 sampleRate, 44100)
+	///
+	/// # 돌려줌
+	/// 푼 소리의 표본율. (Hz, 늘 44100)
 	//==============================================================================
 	pub fn sample_rate(&self) -> f32 {
 		self.data.sample_rate as f32
@@ -108,6 +160,9 @@ struct MixerGainNodeInner {
 }
 
 impl Drop for MixerGainNodeInner {
+	//==============================================================================
+	/// 버스 손잡이가 모두 없어지면 믹서에서 버스 노드를 뺀다.
+	//==============================================================================
 	fn drop(&mut self) {
 		self.mixer_link.send(MixerCommand::RemoveBus { bus_id: self.bus_id });
 	}
@@ -131,16 +186,25 @@ struct MixerLink {
 }
 
 impl MixerLink {
+	//==============================================================================
+	/// 믹서에 명령 보내기. (소리 스레드가 끝났으면 버린다)
+	//==============================================================================
 	fn send(&self, command: MixerCommand) {
 		let _ = self.command_sender.send(command);
 	}
 
+	//==============================================================================
+	/// 새 노드 번호. (1 부터 하나씩 오른다)
+	//==============================================================================
 	fn create_node_id(&self) -> u64 {
 		let node_id = self.next_node_id.get() + 1;
 		self.next_node_id.set(node_id);
 		node_id
 	}
 
+	//==============================================================================
+	/// 컨텍스트 시계. (초, 그린 시간)
+	//==============================================================================
 	fn get_current_time(&self) -> f64 {
 		self.shared.get_rendered_seconds()
 	}
@@ -265,6 +329,9 @@ impl StreamManager {
 }
 
 impl Drop for StreamManager {
+	//==============================================================================
+	/// 스레드에 멈추라고 알린다. (다음 살피는 간격에 스트림을 닫고 끝난다)
+	//==============================================================================
 	fn drop(&mut self) {
 		self.should_stop.store(true, Ordering::Release);
 	}
@@ -282,6 +349,9 @@ struct RunningStream {
 }
 
 impl RunningStream {
+	//==============================================================================
+	/// 스트림 없는 자리. (다시 열지 못한 동안 든다)
+	//==============================================================================
 	fn empty() -> RunningStream {
 		RunningStream {
 			_stream: None,
@@ -305,11 +375,17 @@ fn has_default_device_changed(running_stream: &RunningStream) -> bool {
 	read_device_id(&device) != running_stream.device_id || supported_config.sample_rate() != running_stream.sample_rate
 }
 
+//==============================================================================
+/// 기본 출력 장치가 바뀌었는지. (맥은 묻지 않고 늘 false, 빠짐 오류로만 다시 연다)
+//==============================================================================
 #[cfg(target_os = "macos")]
 fn has_default_device_changed(_running_stream: &RunningStream) -> bool {
 	false
 }
 
+//==============================================================================
+/// 장치 이름표 문자열. (읽지 못하면 빈 문자열)
+//==============================================================================
 fn read_device_id(device: &cpal::Device) -> String {
 	device.id().map(|device_id| format!("{}", device_id)).unwrap_or_default()
 }
@@ -544,6 +620,9 @@ impl AudioPlayerBackend {
 		}
 	}
 
+	//==============================================================================
+	/// 믹서에 명령 보내기. (소리 없는 플레이어면 버린다)
+	//==============================================================================
 	fn send(&self, command: MixerCommand) {
 		if let Some(mixer_link) = &self.mixer_link {
 			mixer_link.send(command);
@@ -648,6 +727,9 @@ impl AudioPlayerBackend {
 }
 
 impl Drop for AudioPlayerBackend {
+	//==============================================================================
+	/// 믹서에서 플레이어 노드를 뺀다.
+	//==============================================================================
 	fn drop(&mut self) {
 		self.send(MixerCommand::RemovePlayer { player_id: self.player_id });
 	}
@@ -841,6 +923,9 @@ fn get_periodic_wave(periodic_wave_list: &mut Vec<Arc<PeriodicWave>>, oscillator
 	periodic_wave
 }
 
+//==============================================================================
+/// 비프 파형을 오실레이터 종류로.
+//==============================================================================
 fn to_oscillator_type(beep_waveform: BeepWaveform) -> OscillatorType {
 	match beep_waveform {
 		BeepWaveform::Sine => {

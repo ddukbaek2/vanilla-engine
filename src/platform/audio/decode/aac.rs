@@ -33,6 +33,9 @@ struct OxideavDecoder {
 }
 
 impl OxideavDecoder {
+	//==============================================================================
+	/// 생성. (실수 표본을 받아 두게 켠다, last_pcm_f64 로 읽는다)
+	//==============================================================================
 	fn new(audio_object_type: u8, sampling_frequency_index: u8, sample_rate: u32, channel_configuration: u8) -> OxideavDecoder {
 		let mut stream_decoder = StreamDecoder::new();
 		stream_decoder.set_float_pcm_capture(true);
@@ -213,6 +216,9 @@ fn create_chromium_channels(channel_count: usize) -> Channels {
 }
 
 impl AudioDecoder for AacPacketDecoder {
+	//==============================================================================
+	/// 처음 상태로. (symphonia 쪽은 reset, oxideav-aac 쪽은 같은 값으로 새로 만든다)
+	//==============================================================================
 	fn reset(&mut self) {
 		match self.route.as_mut() {
 			Some(AacRoute::Undecided(symphonia_decoder, _)) | Some(AacRoute::Symphonia(symphonia_decoder)) => {
@@ -225,14 +231,23 @@ impl AudioDecoder for AacPacketDecoder {
 		}
 	}
 
+	//==============================================================================
+	/// 코덱 정보. (등록표의 AAC 항목)
+	//==============================================================================
 	fn codec_info(&self) -> &CodecInfo {
 		&AAC_SUPPORTED_CODEC_LIST[0].info
 	}
 
+	//==============================================================================
+	/// 코덱 인자. (ASC 의 표본율로 고친 것)
+	//==============================================================================
 	fn codec_params(&self) -> &AudioCodecParameters {
 		&self.codec_params
 	}
 
+	//==============================================================================
+	/// 패킷 하나 풀기. (첫 패킷에서 푸는 길을 가린다, 실패하면 버퍼를 비우고 Err)
+	//==============================================================================
 	fn decode_ref(&mut self, packet: &PacketRef<'_>) -> Result<GenericAudioBufferRef<'_>> {
 		let route = self.route.take();
 		let (next_route, result) = match route {
@@ -275,16 +290,25 @@ impl AudioDecoder for AacPacketDecoder {
 		Ok(self.buffer.as_generic_audio_buffer_ref())
 	}
 
+	//==============================================================================
+	/// 끝내기. (따로 셈할 것이 없어 기본 결과)
+	//==============================================================================
 	fn finalize(&mut self) -> FinalizeResult {
 		FinalizeResult::default()
 	}
 
+	//==============================================================================
+	/// 마지막으로 푼 버퍼.
+	//==============================================================================
 	fn last_decoded(&self) -> GenericAudioBufferRef<'_> {
 		self.buffer.as_generic_audio_buffer_ref()
 	}
 }
 
 impl RegisterableAudioDecoder for AacPacketDecoder {
+	//==============================================================================
+	/// 등록표가 부르는 생성. (create 를 상자에 담는다)
+	//==============================================================================
 	fn try_registry_new(params: &AudioCodecParameters, _opts: &AudioDecoderOptions) -> Result<Box<dyn AudioDecoder>>
 	where
 		Self: Sized,
@@ -292,6 +316,9 @@ impl RegisterableAudioDecoder for AacPacketDecoder {
 		Ok(Box::new(AacPacketDecoder::create(params)?))
 	}
 
+	//==============================================================================
+	/// 받는 코덱. (AAC 하나)
+	//==============================================================================
 	fn supported_codecs() -> &'static [SupportedAudioCodec] {
 		&AAC_SUPPORTED_CODEC_LIST
 	}
