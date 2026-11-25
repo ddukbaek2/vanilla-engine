@@ -74,12 +74,14 @@ pub struct EngineConfiguration {
 	pub maximum_frame_per_second: f32,
 	// 수직 동기.
 	pub use_vertical_sync: bool,
-	// 기본 폰트 후보 경로. (앞에서부터 읽히는 첫 파일. 원본 default_font_url 자리)
+	// 기본 글꼴 사슬의 파일. (데스크탑, 비우면(기본) 원본 SYSTEM_FONT_STRING 의 이름을 차례로 운영체제 글꼴에서 찾아 잇는다)
+	// - 주면 읽히는 파일을 모두 차례로 잇는다. 앞 글꼴에 없는 글자는 뒤 글꼴로 그린다. (원본 글꼴 목록과 같다) TTC 는 굵기로 얼굴을 고르고, 가변 글꼴은 굵기를 축 값으로 만든다.
 	pub default_font_paths: Vec<PathBuf>,
-	// 굵은 기본 폰트 후보 경로.
+	// 기본 글꼴 사슬의 굵은 파일. (default_font_paths 와 같은 자리의 글꼴의 굵기 700 얼굴, 데스크탑)
 	pub default_bold_font_paths: Vec<PathBuf>,
-	// 대체 글꼴 후보 경로. (원본은 브라우저가 글꼴에 없는 글자를 시스템 글꼴로 그린다. 데스크탑은 등록된 어느 글꼴에도 없는 글자가 나오면 앞에서부터 읽어 대체 폰트로 쓴다)
-	// - 색 이모지 글꼴(윈도우 Segoe UI Emoji, 맥 Apple Color Emoji, 리눅스 Noto Color Emoji)은 이모지 표시 글자가 나올 때 먼저 읽고, 다른 글자 때문에는 마지막에 읽는다.
+	// 대체 글꼴 후보 경로. (데스크탑, 비우면(기본) 원본 브라우저처럼 어느 글꼴에도 없는 글자를 운영체제가 고른 대체 글꼴로 그린다. 맥 CoreText, 윈도우 DirectWrite, 리눅스 fontconfig)
+	// - 주면 운영체제에 묻지 않고 등록된 어느 글꼴에도 없는 글자가 나올 때 앞에서부터 읽어 대체 폰트로 쓴다.
+	//   색 이모지 글꼴(색 글리프 표가 있는 파일)은 이모지 표시 글자가 나올 때 먼저 읽고, 다른 글자 때문에는 마지막에 읽는다.
 	pub fallback_font_paths: Vec<PathBuf>,
 	// 애셋 폴더 후보. (resolve_asset_path 가 앞에서부터 찾는다)
 	pub asset_directory_paths: Vec<PathBuf>,
@@ -126,33 +128,9 @@ impl EngineConfiguration {
 			use_dev_tools: true,
 			maximum_frame_per_second: 0.0,
 			use_vertical_sync: true,
-			default_font_paths: vec![
-				PathBuf::from("C:/Windows/Fonts/malgun.ttf"),
-				PathBuf::from("C:/Windows/Fonts/segoeui.ttf"),
-				PathBuf::from("C:/Windows/Fonts/arial.ttf"),
-				PathBuf::from("/System/Library/Fonts/AppleSDGothicNeo.ttc"),
-				PathBuf::from("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
-			],
-			default_bold_font_paths: vec![
-				PathBuf::from("C:/Windows/Fonts/malgunbd.ttf"),
-				PathBuf::from("C:/Windows/Fonts/segoeuib.ttf"),
-				PathBuf::from("C:/Windows/Fonts/arialbd.ttf"),
-			],
-			fallback_font_paths: vec![
-				PathBuf::from("C:/Windows/Fonts/msyh.ttc"),
-				PathBuf::from("C:/Windows/Fonts/meiryo.ttc"),
-				PathBuf::from("C:/Windows/Fonts/arial.ttf"),
-				PathBuf::from("C:/Windows/Fonts/LeelawUI.ttf"),
-				PathBuf::from("C:/Windows/Fonts/seguisym.ttf"),
-				PathBuf::from("C:/Windows/Fonts/seguiemj.ttf"),
-				PathBuf::from("/System/Library/Fonts/Hiragino Sans GB.ttc"),
-				PathBuf::from("/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc"),
-				PathBuf::from("/System/Library/Fonts/Supplemental/Arial Unicode.ttf"),
-				PathBuf::from("/System/Library/Fonts/Apple Color Emoji.ttc"),
-				PathBuf::from("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
-				PathBuf::from("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
-				PathBuf::from("/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf"),
-			],
+			default_font_paths: Vec::new(),
+			default_bold_font_paths: Vec::new(),
+			fallback_font_paths: Vec::new(),
 			asset_directory_paths: Vec::new(),
 			window_icon_path: String::new(),
 			default_font_bytes: None,
@@ -826,53 +804,64 @@ impl EngineRunner {
 	}
 
 	//==============================================================================
-	// 기본 폰트 읽기. (후보 경로 가운데 처음 읽히는 것)
+	// 기본 폰트 읽기. (미리 받은 바이트, 그다음 데스크탑 시스템 글꼴 사슬과 대체 글꼴)
+	// - 데스크탑 사슬: default_font_paths 가 비었으면 원본 SYSTEM_FONT_STRING 의 이름 차례로 운영체제 글꼴에서 찾는다. (맥 SF 와 Apple SD Gothic Neo, 윈도우 Segoe UI 와 맑은 고딕)
+	//   얼굴은 그 굵기와 기울기의 글자를 처음 쓸 때 읽는다.
+	// - 대체 글꼴: fallback_font_paths 가 비었으면 운영체제가 고른다.
 	//==============================================================================
 	fn load_default_fonts(&self, graphic: &mut Graphic) {
 		let engine_configuration = self.engine.get_engine_configuration();
 		let text_string_texture_cache = graphic.get_text_string_texture_cache();
 		let font_source_list = [
-			(false, &engine_configuration.default_font_bytes, &engine_configuration.default_font_paths),
-			(true, &engine_configuration.default_bold_font_bytes, &engine_configuration.default_bold_font_paths),
+			(false, &engine_configuration.default_font_bytes),
+			(true, &engine_configuration.default_bold_font_bytes),
 		];
-		for (is_bold, font_bytes, font_paths) in font_source_list {
-			// 미리 받은 내용이 있으면 그것부터.
+		for (is_bold, font_bytes) in font_source_list {
 			if let Some(font_bytes) = font_bytes {
-				match text_string_texture_cache.set_default_font(is_bold, font_bytes.clone()) {
-					Ok(()) => {
-						continue;
-					}
-					Err(error) => {
-						eprintln!("Engine: {} (미리 받은 폰트)", error);
-					}
-				}
-			}
-			for font_path in font_paths.iter() {
-				let font_bytes = match std::fs::read(font_path) {
-					Ok(font_bytes) => {
-						font_bytes
-					}
-					Err(_) => {
-						continue;
-					}
-				};
-				match text_string_texture_cache.set_default_font(is_bold, font_bytes) {
-					Ok(()) => {
-						break;
-					}
-					Err(error) => {
-						eprintln!("Engine: {} ({})", error, font_path.display());
-					}
+				if let Err(error) = text_string_texture_cache.set_default_font(is_bold, font_bytes.clone()) {
+					eprintln!("Engine: {} (미리 받은 폰트)", error);
 				}
 			}
 		}
-		for font_path in engine_configuration.fallback_font_paths.iter() {
-			if font_path.exists() {
-				text_string_texture_cache.add_fallback_font_candidate(font_path.clone());
+		#[cfg(not(target_arch = "wasm32"))]
+		{
+			use crate::core::textstringtexturecache::{parse_font_string, FontFileSource};
+			if engine_configuration.default_font_paths.is_empty() && engine_configuration.default_bold_font_paths.is_empty() {
+				let system_font_description = parse_font_string(&format!("10px {}", crate::base::platform::SYSTEM_FONT_STRING));
+				text_string_texture_cache.set_system_font_chain(system_font_description.family_name_list);
 			}
-		}
-		if !text_string_texture_cache.has_default_font() {
-			eprintln!("Engine: 기본 폰트를 찾지 못했습니다. 글자가 보이지 않습니다.");
+			else {
+				let path_font_list = [
+					(400, &engine_configuration.default_font_paths),
+					(700, &engine_configuration.default_bold_font_paths),
+				];
+				for (weight, font_paths) in path_font_list {
+					for (path_index, font_path) in font_paths.iter().enumerate() {
+						if !font_path.exists() {
+							continue;
+						}
+						let source = FontFileSource {
+							path: font_path.clone(),
+							face_index: None,
+							post_script_name: None,
+						};
+						text_string_texture_cache.add_system_font_candidate(&format!("default font path {}", path_index), weight, false, source);
+					}
+				}
+			}
+			if engine_configuration.fallback_font_paths.is_empty() {
+				text_string_texture_cache.set_system_font_fallback_enabled(true);
+			}
+			else {
+				for font_path in engine_configuration.fallback_font_paths.iter() {
+					if font_path.exists() {
+						text_string_texture_cache.add_fallback_font_candidate(font_path.clone());
+					}
+				}
+			}
+			if !text_string_texture_cache.has_default_font() && !text_string_texture_cache.has_system_font() {
+				eprintln!("Engine: 기본 폰트를 찾지 못했습니다. 글자가 보이지 않습니다.");
+			}
 		}
 	}
 

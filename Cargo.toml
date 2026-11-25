@@ -21,6 +21,10 @@ wuff = "0.2"
 rustybuzz = "0.20"
 # 양방향 정렬. (UAX #9, 오른쪽에서 왼쪽 글자와 섞인 글의 그리는 차례. 원본은 Canvas2D direction)
 unicode-bidi = "0.3"
+# 가변 글꼴의 윤곽. (축 값을 건 글리프 윤곽, ttf-parser 는 글리프마다 변형이 32 개를 넘는 가변 글꼴(맥 SFNS 같은)의 윤곽을 읽지 못한다. 원본 크롬도 fontations 의 skrifa 를 쓴다)
+skrifa = { version = "0.50", default-features = false, features = ["std"] }
+# 글꼴 바이트를 든 얼굴. (rustybuzz 얼굴이 빌리는 바이트를 같은 값 안에 들어, 글꼴을 내리면 바이트도 돌려준다)
+self_cell = "1"
 # 글자 묶음 나누기. (UAX #29, 받침, 결합 부호, 이모지 묶음. 원본 Intl.Segmenter granularity "grapheme")
 unicode-segmentation = "1"
 # 이모지 성질. (Emoji_Presentation 같은 UTS #51 성질, 글자 묶음이 색 이모지로 그려질지 가린다. rustybuzz 가 이미 쓰는 크레이트에 emoji 기능만 켠다)
@@ -60,6 +64,18 @@ objc2-foundation = { version = "0.3", default-features = false, features = ["std
 objc2-game-controller = { version = "0.3", default-features = false, features = ["std", "GCController", "GCDevice", "GCDeviceHaptics"] }
 objc2-core-haptics = { version = "0.3", default-features = false, features = ["std", "block2", "CHHapticEngine", "CHHapticEvent", "CHHapticParameter", "CHHapticPattern", "CHHapticPatternPlayer"] }
 block2 = "0.6"
+# 맥: 시스템 글꼴. (CoreText 로 글꼴 이름과 시스템 UI 글꼴의 파일을 찾고, 글꼴에 없는 글자의 대체 글꼴을 CTFontCreateForString 으로 고른다. 원본 크롬 맥도 CoreText 로 고른다)
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFString", "CFURL", "CFDictionary", "CFNumber", "CFArray", "CFData", "CFCGTypes"] }
+objc2-core-text = { version = "0.3", default-features = false, features = ["std", "objc2-core-graphics", "CTFont", "CTFontDescriptor", "CTFontTraits"] }
+
+# 윈도우: 시스템 글꼴. (DirectWrite 로 글꼴 이름의 파일을 찾고, 글꼴에 없는 글자의 대체 글꼴을 IDWriteFontFallback 으로 고른다. 원본 크롬 윈도우도 DirectWrite 로 고른다)
+[target.'cfg(target_os = "windows")'.dependencies]
+dwrote = { version = "0.11", default-features = false }
+winapi = { version = "0.3", features = ["dwrite", "winnls"] }
+
+# 리눅스와 그 밖의 유닉스: 시스템 글꼴. (fontconfig 로 글꼴 이름과 대체 글꼴을 고른다. 원본 크롬 리눅스도 fontconfig 로 고른다. 라이브러리는 빌드할 때 잇지 않고 실행할 때 연다)
+[target.'cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android"), not(target_arch = "wasm32")))'.dependencies]
+yeslogic-fontconfig-sys = { version = "6", features = ["dlopen"] }
 
 # 웹(wasm): 캔버스와 WebGL2, requestAnimationFrame, WebAudio, fetch.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
