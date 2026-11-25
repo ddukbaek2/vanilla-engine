@@ -42,6 +42,7 @@ use crate::core::audiomanager::AudioManager;
 use crate::core::graphic::{Graphic, TextAlign, TextBaseline};
 use crate::core::image::Image;
 use crate::core::inputmanager::InputManager;
+use crate::core::modaldialog::{ModalDialogHandle, ModalDialogKind};
 use crate::core::pointercursor::PointerCursor;
 use crate::core::scene::{Scene, SceneId};
 use crate::core::timemanager::TimeManager;
@@ -236,6 +237,9 @@ pub struct Engine {
 	loaded_scene_id_list: Vec<SceneId>,
 	is_page_hidden: bool,
 	page_event_listener_list: RefCell<Vec<Weak<RefCell<dyn FnMut(PageEvent)>>>>,
+	// 떠 있거나 기다리는 질문 창. (데스크탑, 맨 앞 것이 떠 있다. 웹은 브라우저가 띄운다)
+	#[cfg(not(target_arch = "wasm32"))]
+	modal_dialog_list: std::collections::VecDeque<crate::core::modaldialog::ModalDialog>,
 }
 
 impl Engine {
@@ -270,7 +274,85 @@ impl Engine {
 			loaded_scene_id_list: Vec::new(),
 			is_page_hidden: false,
 			page_event_listener_list: RefCell::new(Vec::new()),
+			#[cfg(not(target_arch = "wasm32"))]
+			modal_dialog_list: std::collections::VecDeque::new(),
 		}
+	}
+
+	//==============================================================================
+	// 알림 창. (원본 window.alert, 확인만 있다. 손잡이는 확인하면 끝난다)
+	// - 웹은 브라우저 창이 닫힐 때까지 막고 끝난 손잡이를 돌려준다. 데스크탑은 엔진이 그린 창을 띄우고, 닫힐 때까지 씬을 갱신하지 않는다. (core/modaldialog.rs)
+	//==============================================================================
+	pub fn alert(&mut self, message: &str) -> ModalDialogHandle {
+		self.show_modal_dialog(ModalDialogKind::Alert, message, "")
+	}
+
+	//==============================================================================
+	// 확인 창. (원본 window.confirm, 손잡이의 is_confirmed 가 원본이 돌려주는 값)
+	//==============================================================================
+	pub fn confirm(&mut self, message: &str) -> ModalDialogHandle {
+		self.show_modal_dialog(ModalDialogKind::Confirm, message, "")
+	}
+
+	//==============================================================================
+	// 입력 창. (원본 window.prompt(message, default), 손잡이의 get_prompt_text 가 원본이 돌려주는 값, 취소는 None)
+	//==============================================================================
+	pub fn prompt(&mut self, message: &str, default_value: &str) -> ModalDialogHandle {
+		self.show_modal_dialog(ModalDialogKind::Prompt, message, default_value)
+	}
+
+	//==============================================================================
+	// 질문 창 띄우기. (웹은 브라우저 함수, 데스크탑은 목록 끝에 더한다)
+	//==============================================================================
+	fn show_modal_dialog(&mut self, kind: ModalDialogKind, message: &str, default_value: &str) -> ModalDialogHandle {
+		#[cfg(target_arch = "wasm32")]
+		{
+			crate::core::modaldialog::show_browser_dialog(kind, message, default_value)
+		}
+		#[cfg(not(target_arch = "wasm32"))]
+		{
+			let handle = ModalDialogHandle::create_pending();
+			self.modal_dialog_list.push_back(crate::core::modaldialog::ModalDialog::new(kind, message, default_value, handle.clone()));
+			handle
+		}
+	}
+
+	//==============================================================================
+	// 질문 창이 떠 있는지. (데스크탑만 참이 될 수 있다. 떠 있는 동안 엔진은 씬을 갱신하지 않는다)
+	//==============================================================================
+	pub fn is_modal_dialog_open(&self) -> bool {
+		#[cfg(target_arch = "wasm32")]
+		{
+			false
+		}
+		#[cfg(not(target_arch = "wasm32"))]
+		{
+			!self.modal_dialog_list.is_empty()
+		}
+	}
+
+	//==============================================================================
+	// 맨 앞 질문 창 꺼내기. (갱신하는 동안 엔진을 함께 빌리려고 꺼냈다가 put_back_front_modal_dialog 로 돌려놓는다)
+	//==============================================================================
+	#[cfg(not(target_arch = "wasm32"))]
+	pub(crate) fn take_front_modal_dialog(&mut self) -> Option<crate::core::modaldialog::ModalDialog> {
+		self.modal_dialog_list.pop_front()
+	}
+
+	//==============================================================================
+	// 맨 앞 질문 창 돌려놓기.
+	//==============================================================================
+	#[cfg(not(target_arch = "wasm32"))]
+	pub(crate) fn put_back_front_modal_dialog(&mut self, modal_dialog: crate::core::modaldialog::ModalDialog) {
+		self.modal_dialog_list.push_front(modal_dialog);
+	}
+
+	//==============================================================================
+	// 맨 앞 질문 창.
+	//==============================================================================
+	#[cfg(not(target_arch = "wasm32"))]
+	pub(crate) fn get_front_modal_dialog_mut(&mut self) -> Option<&mut crate::core::modaldialog::ModalDialog> {
+		self.modal_dialog_list.front_mut()
 	}
 
 	//==============================================================================
@@ -1129,6 +1211,16 @@ impl EngineRunner {
 		// 입력 처리.
 		self.engine.input_manager.tick(time_delta);
 
+		// 질문 창. (데스크탑, 떠 있으면 원본에서 자바스크립트가 멈추듯 씬을 갱신하지 않고 창이 입력을 받는다)
+		let is_modal_dialog_open = self.engine.is_modal_dialog_open();
+		#[cfg(not(target_arch = "wasm32"))]
+		{
+			if is_modal_dialog_open {
+				let measure_graphic: &Graphic = graphic;
+				crate::core::modaldialog::tick_modal_dialog(&mut self.engine, &|text: &str| crate::core::modaldialog::measure_field_text_width(measure_graphic, text), time_delta);
+			}
+		}
+
 		// 그리기 통계. (지난 프레임 값을 넘겨 두고 이번 프레임을 새로 센다)
 		graphic.begin_frame_statistics();
 
@@ -1144,9 +1236,11 @@ impl EngineRunner {
 				continue;
 			}
 
-			// 갱신. (씬의 터치 훅은 원본 Scene.tickTouch 처럼 tick 안의 터치 다음)
-			scene.tick(&mut self.engine, time_delta);
-			dispatch_scene_touch(&mut self.engine, scene.as_mut());
+			// 갱신. (씬의 터치 훅은 원본 Scene.tickTouch 처럼 tick 안의 터치 다음, 질문 창이 떠 있던 프레임은 건너뛴다)
+			if !is_modal_dialog_open {
+				scene.tick(&mut self.engine, time_delta);
+				dispatch_scene_touch(&mut self.engine, scene.as_mut());
+			}
 
 			// 출력.
 			scene.pre_draw(&mut self.engine, graphic);
@@ -1164,6 +1258,15 @@ impl EngineRunner {
 		// 개발 정보 출력.
 		if self.engine.engine_configuration.use_statistics {
 			draw_statistics(&self.engine, graphic);
+		}
+
+		// 질문 창. (모든 것 위에, 창 안쪽 논리 좌표)
+		#[cfg(not(target_arch = "wasm32"))]
+		{
+			if self.engine.is_modal_dialog_open() {
+				self.engine.view_manager.apply_canvas_native_rect(graphic);
+				crate::core::modaldialog::draw_modal_dialog(&mut self.engine, graphic);
+			}
 		}
 
 		// 마우스 커서. (켜져 있고 바뀌었을 때만 플랫폼에 넘긴다)

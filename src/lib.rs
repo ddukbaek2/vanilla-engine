@@ -54,6 +54,7 @@ pub use crate::core::component::text::Text;
 pub use crate::core::component::{Component, ComponentBase};
 pub use crate::core::engine::{Engine, EngineConfiguration};
 pub use crate::core::engine::{PageEvent, PageEventListener};
+pub use crate::core::modaldialog::{ModalDialogHandle, ModalDialogKind, ModalDialogResult};
 pub use crate::core::frame::Frame;
 pub use crate::core::shaderprogram::ShaderProgram;
 pub use crate::core::shaderwarmer::{ShaderWarmer, ShaderWarmerSource};

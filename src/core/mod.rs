@@ -9,6 +9,10 @@ pub mod audioplayer;
 pub mod colorglyph;
 pub mod component;
 pub mod engine;
+// 브라우저 화면 글. (데스크탑이 그리는 질문 창과 문맥 메뉴의 글)
+#[cfg(not(target_arch = "wasm32"))]
+pub mod browseruitext;
+pub mod modaldialog;
 pub mod frame;
 pub mod fullscreenpass;
 pub mod gamepadmanager;
