@@ -3,6 +3,8 @@
 // - 표시 전용 위젯. 스프라이트의 이미지 / 색 / 뒤집기 / 출력 방식 / 블렌드 / 나인슬라이스를 노출한다.
 // - 원본은 attach 때 호스트에 Sprite 를 붙이고 참조를 든다. 러스트 판은 Sprite 를 품는다. (UILabel 이 Text 를 품는 것과 같은 까닭)
 //   품은 Sprite 는 원본처럼 get_sprite / get_sprite_mut 로 꺼낸다. 이미지 뷰 노드의 get_component::<Sprite>() 는 None 이다.
+//   UI 문서는 원본처럼 품은 Sprite 를 UIImageView 다음 Sprite 로 쓰고 읽는다. (uidocument.rs)
+// - 그림 경로(get_image_path)는 원본 imageView.imagePath 처럼 품은 Sprite 의 경로(원본 Sprite 의 imagePath)와 따로 든다.
 // - 원본 set_image 는 이미지 요소와 ImageAsset 을 함께 받는다. 러스트 판은 set_image(Option<Rc<Image>>) 와 set_image_asset 으로 나눴다.
 // - 배경색(UIView)은 스프라이트보다 먼저 그린다. (원본도 UIImageView 가 먼저 붙고 attach 에서 Sprite 를 뒤에 붙여 같은 차례다)
 //==============================================================================
@@ -24,6 +26,8 @@ use std::rc::Rc;
 pub struct UIImageView {
 	ui_view: UIView,
 	sprite: Sprite,
+	// 그림 경로. (원본 imageView.imagePath, 품은 스프라이트의 경로(원본 Sprite 의 imagePath)와 따로 든다)
+	image_path: String,
 }
 
 #[crate::reflect(base = ui_view)]
@@ -35,6 +39,7 @@ impl UIImageView {
 		UIImageView {
 			ui_view: UIView::new(),
 			sprite: Sprite::new(),
+			image_path: String::new(),
 		}
 	}
 
@@ -179,18 +184,18 @@ impl UIImageView {
 	}
 
 	//==============================================================================
-	// 그림 경로 설정. (원본 imageView.imagePath, 품은 스프라이트에 둔다. UI 문서가 적고 읽는다)
+	// 그림 경로 설정. (원본 imageView.imagePath, UI 문서가 적고 읽는다)
 	//==============================================================================
 	pub fn set_image_path(&mut self, image_path: &str) {
-		self.sprite.set_image_path(image_path);
+		self.image_path = String::from(image_path);
 	}
 
 	//==============================================================================
 	// 그림 경로 반환.
 	//==============================================================================
-	#[reflect(transient)]
+	#[reflect(skip)]
 	pub fn get_image_path(&self) -> &str {
-		self.sprite.get_image_path()
+		&self.image_path
 	}
 }
 
@@ -218,10 +223,12 @@ impl Component for UIImageView {
 		self.ui_view.create_content_node(node_tree, node_id);
 	}
 
+	#[reflect(skip)]
 	fn is_tick_needed(&self) -> bool {
 		false
 	}
 
+	#[reflect(skip)]
 	fn is_drawn_inside_content(&self) -> bool {
 		true
 	}

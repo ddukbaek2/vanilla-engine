@@ -420,6 +420,7 @@ impl Component for UISlider {
 		node_tree[node_id].set_interactable(true);
 	}
 
+	#[reflect(skip)]
 	fn is_tick_needed(&self) -> bool {
 		self.thumb_node_id.is_some() || self.is_value_changed_fire_pending
 	}

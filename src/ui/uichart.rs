@@ -195,10 +195,12 @@ impl Component for UILineChart {
 		"UILineChart"
 	}
 
+	#[reflect(skip)]
 	fn is_tick_needed(&self) -> bool {
 		false
 	}
 
+	#[reflect(skip)]
 	fn is_drawn_inside_content(&self) -> bool {
 		true
 	}
@@ -373,10 +375,12 @@ impl Component for UIBarChart {
 		"UIBarChart"
 	}
 
+	#[reflect(skip)]
 	fn is_tick_needed(&self) -> bool {
 		false
 	}
 
+	#[reflect(skip)]
 	fn is_drawn_inside_content(&self) -> bool {
 		true
 	}

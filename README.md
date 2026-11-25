@@ -196,7 +196,10 @@ ui_document.register_component_type("Spin", || Spin {
 
 - 게터는 인자 없는 `pub fn get_*`, `pub fn is_*` 이고, 같은 이름의 `set_*` 이 있으면 저장 속성입니다. 키는 접두어를 뗀 vanilla.js 이름(`get_line_width` → `LineWidth`)입니다.
 - 저장할 수 없는 꼴의 게터(그림, 콜백 같은 것)도 컴파일 에러 없이 저장에서 빠지고 인스펙터에는 `[종류 이름]` 으로 보입니다.
-- 함수에 `#[reflect(skip)]`(반사에서 빼기), `#[reflect(transient)]`(인스펙터에만 보이기), `#[reflect(name = "UIScale")]`(키 이름 정하기)를, 블록에 `#[vanilla::reflect(base = 필드)]`(품은 컴포넌트를 vanilla.js 의 상위 클래스처럼 잇기)를 붙일 수 있습니다.
+- 트리를 받는 게터(`fn get_leader_name<'a>(&self, node_tree: &'a NodeTree) -> &'a str`)는 인스펙터가 트리를 넘겨 부르고, `&mut self` 게터는 인스펙터가 tick 에서, 문서는 `to_json_text_mut` 가 부릅니다. 트리와 값을 받는 세터(`fn set_slot(&mut self, node_tree: &mut NodeTree, slot: usize)`)는 문서를 읽을 때 vanilla.js 처럼 그 자리에서 부릅니다.
+- 함수에 `#[reflect(skip)]`(반사에서 빼기), `#[reflect(transient)]`(인스펙터에만 보이기), `#[reflect(unsaved)]`(속성 목록에는 두고 저장에서 빼기), `#[reflect(name = "UIScale")]`(키 이름 정하기), `#[reflect(after = "getScreenRect")]`(`impl Component` 블록의 게터를 vanilla.js 클래스 몸통의 자리에 두기)를, 블록에 `#[vanilla::reflect(base = 필드)]`(품은 컴포넌트를 vanilla.js 의 상위 클래스처럼 잇기)를 붙일 수 있습니다.
+- 매크로를 빠뜨리면 한쪽만 붙였을 때는 컴파일 에러가, 둘 다 빠뜨렸을 때는 UI 문서 쓰기 경고와 인스펙터의 "반사 없음" 줄이 알려 줍니다.
+- `ui_document.register_editor_types()` 한 줄이 vanilla.js UI 에디터가 등록하는 종류(컴포넌트 35, `UIWindow`, `UIDialog`, `UIDropdown`, `UIToast`, `UIInputField`, `UIScrollBar` 같은 노드 종류 12)를 모두 등록해 에디터가 저장한 문서를 그대로 읽고 씁니다.
 
 ### 애셋 로딩
 

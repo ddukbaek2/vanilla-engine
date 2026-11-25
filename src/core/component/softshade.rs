@@ -193,6 +193,7 @@ impl SoftShade {
 	//==============================================================================
 	// 구운 그림 반환. (아직 굽지 않았으면 None, 원본 getBakeCanvas)
 	//==============================================================================
+	#[reflect(name = "BakeCanvas")]
 	pub fn get_bake_image(&self) -> Option<&Rc<Image>> {
 		self.bake_image.as_ref()
 	}
@@ -218,6 +219,7 @@ impl Component for SoftShade {
 		"SoftShade"
 	}
 
+	#[reflect(skip)]
 	fn is_tick_needed(&self) -> bool {
 		false
 	}

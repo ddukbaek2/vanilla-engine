@@ -759,6 +759,7 @@ impl Component for UIScrollView {
 		"ScrollView"
 	}
 
+	#[reflect(skip)]
 	fn is_wheel_receiver(&self) -> bool {
 		true
 	}
@@ -810,6 +811,7 @@ impl Component for UIScrollView {
 		self.ui_view.draw_background(transform, graphic);
 	}
 
+	#[reflect(skip)]
 	fn is_drawn_inside_content(&self) -> bool {
 		true
 	}

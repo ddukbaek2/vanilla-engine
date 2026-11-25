@@ -19,20 +19,30 @@
 //   - 게터는 인자 없는 pub get_*, is_* 함수, 저장 속성은 같은 이름의 set_* 이 있는 게터다. 키는 접두어를 뗀 원본 이름이다. (get_line_width → LineWidth)
 //   - 차례는 정의 차례이고 같은 키는 먼저 나온 것이다. 원본 Component 기반 클래스의 GizmoVisible, Enable, ComponentType 이 끝에 붙는다.
 //   - 저장하는 값은 원본 saveByReflection 이 가리는 꼴(수, 불, 글, Color, Vector2, 노드)이다. 원본에서 글인 열거(TextAlign 같은 것)는 같은 글로 바꾼다.
-// - 원본과 다른 것:
-//   - 원본은 모든 객체가 반사된다. 러스트 판은 #[reflect] 를 붙인 타입만이다. 붙이지 않은 컴포넌트는 get_reflection 이 None 이다.
+// - 원본처럼 하는 것:
 //   - 원본 상위 클래스의 게터는 프로토타입 사슬로 따라온다. 러스트 판은 상속이 없어 품은 값을 #[reflect(base = 필드)] 로 잇는다.
 //     원본에서 상위 클래스 몫인 함수를 러스트 판이 편의로 다시 둔 것은 #[reflect(skip)] 로 빼서 차례를 원본처럼 둔다.
-//   - &mut self 게터, 인자를 더 받는 세터(set_image(그림, 조각) 같은 것)는 값 하나로 부를 수 없다. 세터가 둘 이상을 받으면 속성 목록에는 들지만
-//     (원본처럼 set 함수가 있으면 짝이다) 읽기는 건너뛴다. 원본 setComponentType 자리는 러스트에 세터가 없어(종류는 타입이 정한다) 쓰기만 한다.
-//   - 원본은 읽을 때 지금 값의 꼴로 받을지 가린다. (배열이면 지금 값이 Color 인지 Vector2 인지, 그 밖은 typeof 가 같은지)
-//     러스트 판은 세터의 꼴로 가린다. 지금 값이 있으면 결과가 같고, 지금 값이 없는(None) 속성도 읽는다.
+//     읽기와 넣기는 원본 component[getterName], component[setterName] 처럼 따로 가장 아래 타입의 것부터 찾는다. (RichText 는 게터를 Text 에서 받고 세터는 제 것)
+//   - 짝은 원본처럼 키(baseName)로 짓는다. (get_target 의 키를 TargetNode 로 정하면 set_target(키 Target)과 짝이 아니다)
+//   - impl Component 블록에서 다시 정의한 게터는 원본 클래스에도 있는 것만 보이고(#[reflect(skip)] 으로 빼고), 원본 클래스 몸통의 자리는 #[reflect(after = "...")] 로 맞춘다.
+//   - 원본에서 값이 객체라 저장에서 빠지는 속성은 #[reflect(unsaved)] 로 목록에는 두고 저장에서 뺀다. (ShadowText 의 FontFace)
+//   - 읽을 때 꼴은 세터의 꼴로 가린다. 원본은 지금 값의 꼴로 가리고 지금 값이 없으면(null) 저장한 꼴로 받는다. (원본 saveByReflection 은 Color 만 수 넷,
+//     Vector2 만 수 둘로 적는다) 그래서 두 엔진이 같은 문서를 같게 읽는다.
+// - 원본과 다른 것:
+//   - 원본은 모든 객체가 반사된다. 러스트 판은 #[reflect] 를 붙인 타입만이다. 러스트에는 실행 중에 메서드 목록을 읽는 길이 없어 정말 방법이 없다.
+//     (언리얼 UCLASS, UPROPERTY 와 같은 꼴) 빠뜨린 것은 이렇게 알 수 있다: 한쪽 블록에만 붙이면 컴파일 에러가 붙일 곳을 알려 주고,
+//     둘 다 빠뜨리면 UIDocument 가 쓸 때 경고를 내고 DevTools 인스펙터가 "반사 없음" 줄을 보인다.
+//   - &mut self 게터는 &mut 를 받는 갈래(get_reflected_value_mut, collect_reflected_getters_mut)로 부른다. &self 갈래에서는 값이 None 이다.
+//     트리를 받는 게터(get_target_button(트리) 같은 것, 원본은 이웃 컴포넌트를 바로 쥔다)는 트리를 쥔 쪽이 collect_reflected_getters_in_tree 로 부른다.
+//     트리를 받는 세터(set_snap_current_index(트리, 칸) 같은 것)는 트리를 쥔 쪽이 set_reflected_value_in_tree 로 부른다.
+//     값 말고도 인자를 더 받는 세터(set_image(그림, 조각) 같은 것)는 속성 목록에는 들지만(원본처럼 set 함수가 있으면 짝이다) 넣지 않는다.
+//     원본 setComponentType 자리는 러스트에 세터가 없어(종류는 타입이 정한다) 쓰기만 한다. 원본도 이 키는 읽어도 종류가 바뀌지 않는다.
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::rect::Rect;
 use crate::base::vector2::Vector2;
 use crate::core::component::Component;
-use crate::core::node::nodetree::NodeId;
+use crate::core::node::nodetree::{NodeId, NodeTree};
 use std::marker::PhantomData;
 
 // 감싼 꼴의 앞머리. (인스펙터의 종류 이름은 감싼 것을 벗긴 안의 이름이다. Rc<RefCell<Image>> → Image)
@@ -73,12 +83,14 @@ pub trait FromReflectValue<'a>: Sized {
 //==============================================================================
 // 저장 속성 하나. (원본 getReflectedProperties 가 돌려주는 { name, getterName, setterName })
 // - name 은 원본 키(접두어를 뗀 원본 이름), getter_name 과 setter_name 은 러스트 함수 이름이다. setter_name 이 None 이면 러스트에 세터가 없다.
+// - is_saved 가 false 면 원본에서 값이 객체라 반사 저장이 적지 않는 속성이다. (#[reflect(unsaved)], ShadowText 의 FontFace)
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ReflectedProperty {
 	pub name: &'static str,
 	pub getter_name: &'static str,
 	pub setter_name: Option<&'static str>,
+	pub is_saved: bool,
 }
 
 //==============================================================================
@@ -106,19 +118,44 @@ pub trait Reflect {
 	fn get_reflected_properties(&self) -> Vec<ReflectedProperty>;
 
 	//==============================================================================
-	// 속성 값 읽기. (원본 키, 없는 키면 None)
+	// 속성 값 읽기. (원본 키, 없는 키나 &mut self 게터면 None)
 	//==============================================================================
 	fn get_reflected_value(&self, property_name: &str) -> Option<ReflectValue>;
 
 	//==============================================================================
-	// 속성 값 넣기. (꼴이 맞지 않거나, 없는 키거나, 값 하나로 부를 수 없는 세터면 false)
+	// 속성 값 읽기. (&mut self 게터까지)
+	//==============================================================================
+	fn get_reflected_value_mut(&mut self, property_name: &str) -> Option<ReflectValue>;
+
+	//==============================================================================
+	// 속성 값 넣기. (꼴이 맞지 않거나, 없는 키거나, 트리를 받거나 값 하나로 부를 수 없는 세터면 false)
 	//==============================================================================
 	fn set_reflected_value(&mut self, property_name: &str, value: &ReflectValue) -> bool;
 
 	//==============================================================================
-	// 게터 값 모으기. (인스펙터용, 세터가 없는 것까지 모든 게터. impl Component 블록에서 다시 정의한 것 → impl 블록 차례)
+	// 속성 값 넣기. (트리를 받는 세터까지. 이 컴포넌트는 트리에서 꺼낸 채로 부른다)
+	//==============================================================================
+	fn set_reflected_value_in_tree(&mut self, node_tree: &mut NodeTree, property_name: &str, value: &ReflectValue) -> bool;
+
+	//==============================================================================
+	// &mut self 게터가 있는지. (있으면 인스펙터와 저장이 &mut 갈래로 읽는다)
+	//==============================================================================
+	fn has_mutable_getters(&self) -> bool;
+
+	//==============================================================================
+	// 게터 값 모으기. (인스펙터용, 세터가 없는 것까지 모든 게터. impl Component 블록에서 다시 정의한 것 → impl 블록 차례. &mut self 게터는 뺀다)
 	//==============================================================================
 	fn collect_reflected_getters(&self, getter_list: &mut Vec<ReflectedGetter>);
+
+	//==============================================================================
+	// 게터 값 모으기. (트리를 받는 게터까지, &mut self 게터는 뺀다. 원본은 이웃 컴포넌트를 바로 쥐는 게터가 러스트 판에서는 트리를 받는다)
+	//==============================================================================
+	fn collect_reflected_getters_in_tree(&self, node_tree: &NodeTree, getter_list: &mut Vec<ReflectedGetter>);
+
+	//==============================================================================
+	// 게터 값 모으기. (&mut self 게터와 트리를 받는 게터까지, 정의 차례. 이 컴포넌트는 트리에서 꺼낸 채로 부른다)
+	//==============================================================================
+	fn collect_reflected_getters_mut(&mut self, node_tree: &NodeTree, getter_list: &mut Vec<ReflectedGetter>);
 }
 
 //==============================================================================
@@ -127,7 +164,10 @@ pub trait Reflect {
 //==============================================================================
 #[diagnostic::on_unimplemented(message = "`{Self}` 의 impl Component 블록에 #[reflect] 가 없다", label = "impl Component 블록에 #[reflect] 가 없는 타입", note = "`impl Component for {Self}` 블록에도 #[vanilla::reflect] 를 붙인다")]
 pub trait ReflectComponentGetters {
-	fn collect_component_getters(&self, getter_list: &mut Vec<ReflectedGetter>);
+	//==============================================================================
+	// 게터 모으기. (자리를 정한 것은 anchored_getter_list 에 (앞 원본 게터 이름, 게터) 로 담고, 나머지는 getter_list 앞에 담는다)
+	//==============================================================================
+	fn collect_component_getters(&self, getter_list: &mut Vec<ReflectedGetter>, anchored_getter_list: &mut Vec<(&'static str, ReflectedGetter)>);
 }
 
 //==============================================================================
@@ -138,16 +178,19 @@ pub const COMPONENT_REFLECTED_PROPERTIES: [ReflectedProperty; 3] = [
 		name: "GizmoVisible",
 		getter_name: "is_gizmo_visible",
 		setter_name: Some("set_gizmo_visible"),
+		is_saved: true,
 	},
 	ReflectedProperty {
 		name: "Enable",
 		getter_name: "is_enable",
 		setter_name: Some("set_enable"),
+		is_saved: true,
 	},
 	ReflectedProperty {
 		name: "ComponentType",
 		getter_name: "get_component_type",
 		setter_name: None,
+		is_saved: true,
 	},
 ];
 
@@ -198,6 +241,18 @@ pub fn read_reflected_property(component: &dyn Component, property_name: &str) -
 }
 
 //==============================================================================
+// 컴포넌트의 속성 값 읽기. (&mut self 게터까지)
+//==============================================================================
+pub fn read_reflected_property_mut(component: &mut dyn Component, property_name: &str) -> Option<ReflectValue> {
+	if let Some(reflection) = component.get_reflection_mut() {
+		if let Some(value) = reflection.get_reflected_value_mut(property_name) {
+			return Some(value);
+		}
+	}
+	read_reflected_property(component, property_name)
+}
+
+//==============================================================================
 // 컴포넌트의 속성 값 넣기. (원본 component[setterName](value), 넣었으면 true. ComponentType 은 러스트에 세터가 없어 false)
 //==============================================================================
 pub fn write_reflected_property(component: &mut dyn Component, property_name: &str, value: &ReflectValue) -> bool {
@@ -206,6 +261,25 @@ pub fn write_reflected_property(component: &mut dyn Component, property_name: &s
 			return true;
 		}
 	}
+	write_component_base_property(component, property_name, value)
+}
+
+//==============================================================================
+// 컴포넌트의 속성 값 넣기. (트리를 받는 세터까지. 이 컴포넌트는 트리에서 꺼낸 채로 부른다, NodeTree::with_component_at_mut)
+//==============================================================================
+pub fn write_reflected_property_in_tree(component: &mut dyn Component, node_tree: &mut NodeTree, property_name: &str, value: &ReflectValue) -> bool {
+	if let Some(reflection) = component.get_reflection_mut() {
+		if reflection.set_reflected_value_in_tree(node_tree, property_name, value) {
+			return true;
+		}
+	}
+	write_component_base_property(component, property_name, value)
+}
+
+//==============================================================================
+// Component 공통 속성 넣기. (GizmoVisible, Enable)
+//==============================================================================
+fn write_component_base_property(component: &mut dyn Component, property_name: &str, value: &ReflectValue) -> bool {
 	match (property_name, value) {
 		("GizmoVisible", ReflectValue::Boolean(is_gizmo_visible)) => {
 			component.set_gizmo_visible(*is_gizmo_visible);
@@ -229,6 +303,62 @@ pub fn collect_reflected_getters(component: &dyn Component) -> Option<Vec<Reflec
 	let mut getter_list: Vec<ReflectedGetter> = Vec::new();
 	reflection.collect_reflected_getters(&mut getter_list);
 	Some(getter_list)
+}
+
+//==============================================================================
+// 컴포넌트의 게터 값 모두. (트리를 받는 게터까지, 반사가 없으면 None)
+//==============================================================================
+pub fn collect_reflected_getters_in_tree(component: &dyn Component, node_tree: &NodeTree) -> Option<Vec<ReflectedGetter>> {
+	let reflection = component.get_reflection()?;
+	let mut getter_list: Vec<ReflectedGetter> = Vec::new();
+	reflection.collect_reflected_getters_in_tree(node_tree, &mut getter_list);
+	Some(getter_list)
+}
+
+//==============================================================================
+// 컴포넌트의 게터 값 모두. (&mut self 게터와 트리를 받는 게터까지. 이 컴포넌트는 트리에서 꺼낸 채로 부른다, NodeTree::with_component_at_mut. 반사가 없으면 None)
+//==============================================================================
+pub fn collect_reflected_getters_mut(component: &mut dyn Component, node_tree: &NodeTree) -> Option<Vec<ReflectedGetter>> {
+	let reflection = component.get_reflection_mut()?;
+	let mut getter_list: Vec<ReflectedGetter> = Vec::new();
+	reflection.collect_reflected_getters_mut(node_tree, &mut getter_list);
+	Some(getter_list)
+}
+
+//==============================================================================
+// 컴포넌트에 &mut self 게터가 있는지.
+//==============================================================================
+pub fn has_mutable_getters(component: &dyn Component) -> bool {
+	component.get_reflection().map(|reflection| reflection.has_mutable_getters()).unwrap_or(false)
+}
+
+//==============================================================================
+// 자리를 정한 게터 넣기. (앞 게터 바로 뒤, 같은 앞 게터면 담긴 차례로. 앞 게터가 없으면 끝에, 같은 이름이 이미 있으면 넣지 않는다)
+//==============================================================================
+pub fn insert_anchored_getters(getter_list: &mut Vec<ReflectedGetter>, anchored_getter_list: Vec<(&'static str, ReflectedGetter)>) {
+	let mut last_anchor: Option<(&'static str, usize)> = None;
+	for (anchor_name, getter) in anchored_getter_list {
+		if getter_list.iter().any(|existing_getter| existing_getter.name == getter.name) {
+			continue;
+		}
+		let insert_index = match last_anchor {
+			Some((last_anchor_name, last_insert_index)) if last_anchor_name == anchor_name => {
+				last_insert_index + 1
+			}
+			_ => {
+				match getter_list.iter().position(|existing_getter| existing_getter.name == anchor_name) {
+					Some(anchor_index) => {
+						anchor_index + 1
+					}
+					None => {
+						getter_list.len()
+					}
+				}
+			}
+		};
+		getter_list.insert(insert_index, getter);
+		last_anchor = Some((anchor_name, insert_index));
+	}
 }
 
 //==============================================================================

@@ -930,6 +930,7 @@ impl Component for ShaderSprite {
 	}
 
 	// 효과 시간을 흘려야 하므로 Sprite 와 달리 tick 을 받는다.
+	#[reflect(after = "getEffectParameters")]
 	fn is_tick_needed(&self) -> bool {
 		true
 	}

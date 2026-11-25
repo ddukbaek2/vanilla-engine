@@ -115,10 +115,12 @@ impl Component for UIView {
 		self.create_content_node(node_tree, node_id);
 	}
 
+	#[reflect(skip)]
 	fn is_tick_needed(&self) -> bool {
 		false
 	}
 
+	#[reflect(skip)]
 	fn is_drawn_inside_content(&self) -> bool {
 		true
 	}

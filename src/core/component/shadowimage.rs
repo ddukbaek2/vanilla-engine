@@ -306,7 +306,7 @@ impl ShadowImage {
 	//==============================================================================
 	// 그림 경로 반환. (정하지 않았으면 빈 글. UI 문서는 Sprite 처럼 imagePath 로 따로 적으므로 반사 저장 속성에서 뺀다)
 	//==============================================================================
-	#[reflect(transient)]
+	#[reflect(skip)]
 	pub fn get_image_path(&self) -> &str {
 		&self.image_path
 	}
@@ -323,6 +323,7 @@ impl ShadowImage {
 	//==============================================================================
 	// 구운 그림 반환. (아직 굽지 않았으면 None, 원본 getBakeCanvas)
 	//==============================================================================
+	#[reflect(name = "BakeCanvas")]
 	pub fn get_bake_image(&self) -> Option<&Rc<Image>> {
 		self.bake_image.as_ref()
 	}
@@ -348,10 +349,12 @@ impl Component for ShadowImage {
 		"ShadowImage"
 	}
 
+	#[reflect(skip)]
 	fn is_tick_needed(&self) -> bool {
 		false
 	}
 
+	#[reflect(skip)]
 	fn is_drawn_inside_content(&self) -> bool {
 		true
 	}

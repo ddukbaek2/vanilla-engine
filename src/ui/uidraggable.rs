@@ -220,6 +220,7 @@ impl UIDraggable {
 	//==============================================================================
 	// 돌아가는 중인지.
 	//==============================================================================
+	#[reflect(skip)]
 	pub fn is_returning(&self) -> bool {
 		self.is_returning
 	}
@@ -295,6 +296,7 @@ impl Component for UIDraggable {
 		self.ui_control.draw(transform, graphic);
 	}
 
+	#[reflect(skip)]
 	fn is_drawn_inside_content(&self) -> bool {
 		true
 	}

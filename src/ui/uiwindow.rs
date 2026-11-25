@@ -11,7 +11,8 @@
 //     덮어쓴 쪽이 원본 super 처럼 기본을 부르려면 UIWindow::layout_panel_default, apply_motion_default, set_covered_default)
 //     판 모양(그림자, 테, 글로시)은 게임이 build 에서 틀에 꾸밈 노드를 붙이고(판 뒤는 set_sibling_index(0)) layout_panel 에서 놓는다.
 //   - 창 노드는 UIWindow::create(node_tree, layer_id, name, behavior) 로 창 층 노드 밑에 만든다. 닫는 움직임이 끝나면 층에서 떼어 내고 지우지 않으므로
-//     원본처럼 같은 창 노드를 다시 띄울 수 있다. (UIWindowLayer::open_window)
+//     원본처럼 같은 창 노드를 다시 띄울 수 있다. (UIWindowLayer::open_window) 원본 창은 띄울 때 층에 붙으므로 create 는 띄우기 전까지 노드를 끈다.
+//     붙을 때는 원본 생성자처럼 노드를 끄지 않는다. (UI 문서가 창 노드를 원본처럼 켜진 채로 읽고 쓴다)
 //   - 닫기는 창 층을 거친다. 씬과 콜백 코드는 UIWindow::close_in_tree(node_tree, window_id) 를 부른다.
 //   - 알림(set_close_event)은 인자 없는 Box<dyn FnMut()> 다. (PopupMotion 알림과 같은 꼴, 노드를 바꿀 일은 씬이 tick 에서 상태를 보고 한다)
 //   - 휠은 원본처럼 GameSceneBase 가 창 층 안을 가리킨 휠을 UIWindowLayer::scroll_window_at 으로 넘겨 맨 위 창(UIWindowBehavior::handle_wheel)이 먼저 받고,
@@ -212,6 +213,8 @@ impl UIWindow {
 	pub fn create(node_tree: &mut NodeTree, layer_id: NodeId, name: &str, behavior: Box<dyn UIWindowBehavior>) -> NodeId {
 		let window_id = node_tree.create_child(layer_id, name);
 		node_tree.add_component(window_id, UIWindow::create_with_behavior(behavior));
+		// 원본 창은 띄울 때 층에 붙는다. 러스트 판은 층 밑에 미리 만들어 두므로 띄우기 전에는 끈다.
+		node_tree[window_id].set_active(false);
 		window_id
 	}
 
@@ -691,7 +694,7 @@ impl Component for UIWindow {
 	}
 
 	//==============================================================================
-	// 트리에 붙음. (원본 생성자: 창 꾸미기(왼쪽 위 피봇, 띄우기 전이라 끔), 어둠, 틀, 판, 그다음 UIWindowBehavior::build)
+	// 트리에 붙음. (원본 생성자: 창 꾸미기(왼쪽 위 피봇), 어둠, 틀, 판, 그다음 UIWindowBehavior::build)
 	//==============================================================================
 	fn attach_to_tree(&mut self, node_tree: &mut NodeTree, node_id: NodeId) {
 		self.node_id = Some(node_id);
@@ -699,7 +702,6 @@ impl Component for UIWindow {
 		let window_node = &mut node_tree[node_id];
 		window_node.set_pivot(Pivot::TOP_LEFT);
 		window_node.set_anchor(Pivot::TOP_LEFT);
-		window_node.set_active(false);
 
 		// 바깥. (누름을 삼키고, 바깥 닫기가 켜져 있으면 닫는다)
 		let dim_id = node_tree.create_child(node_id, &format!("{}Dim", name));

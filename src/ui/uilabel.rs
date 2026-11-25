@@ -165,6 +165,13 @@ impl UILabel {
 	}
 
 	//==============================================================================
+	// 글 반환.
+	//==============================================================================
+	pub fn get_text(&self) -> &str {
+		self.rich_text.get_text()
+	}
+
+	//==============================================================================
 	// 한 줄 글을 너비에 맞추기 설정. (품은 Text 의 set_fit_width, 리치텍스트 모드는 맞추지 않는다)
 	//==============================================================================
 	pub fn set_fit_width(&mut self, width: f32, minimum_ratio: f32) {
@@ -176,13 +183,6 @@ impl UILabel {
 	//==============================================================================
 	pub fn get_fit_width(&self) -> f32 {
 		self.rich_text.get_text_component().get_fit_width()
-	}
-
-	//==============================================================================
-	// 그릴 때의 크기 반환. (마지막으로 그리거나 잰 때의 값)
-	//==============================================================================
-	pub fn get_fitted_font_size(&self) -> f32 {
-		self.rich_text.get_text_component().get_fitted_font_size()
 	}
 
 	//==============================================================================
@@ -200,10 +200,10 @@ impl UILabel {
 	}
 
 	//==============================================================================
-	// 글 반환.
+	// 그릴 때의 크기 반환. (마지막으로 그리거나 잰 때의 값)
 	//==============================================================================
-	pub fn get_text(&self) -> &str {
-		self.rich_text.get_text()
+	pub fn get_fitted_font_size(&self) -> f32 {
+		self.rich_text.get_text_component().get_fitted_font_size()
 	}
 
 	//==============================================================================
@@ -230,7 +230,7 @@ impl UILabel {
 	//==============================================================================
 	// 폰트 이름 반환.
 	//==============================================================================
-	#[reflect(transient)]
+	#[reflect(skip)]
 	pub fn get_font_family(&self) -> &str {
 		self.rich_text.get_font_family()
 	}
@@ -264,17 +264,17 @@ impl UILabel {
 	}
 
 	//==============================================================================
-	// 글자 색 설정.
+	// 보일 글자 수 설정. (-1 이면 전체, 타자기 연출용. 원본 setVisibleCharacterCount)
 	//==============================================================================
-	pub fn set_text_color(&mut self, color: impl Into<Color>) {
-		self.rich_text.set_text_color(color);
+	pub fn set_visible_character_count(&mut self, visible_character_count: i32) {
+		self.rich_text.set_visible_character_count(visible_character_count);
 	}
 
 	//==============================================================================
-	// 글자 색 반환.
+	// 보일 글자 수 반환.
 	//==============================================================================
-	pub fn get_text_color(&self) -> Color {
-		self.rich_text.get_text_color()
+	pub fn get_visible_character_count(&self) -> i32 {
+		self.rich_text.get_visible_character_count()
 	}
 
 	//==============================================================================
@@ -289,6 +289,20 @@ impl UILabel {
 	//==============================================================================
 	pub fn set_stroke_width(&mut self, stroke_width: f32) {
 		self.rich_text.set_stroke_width(stroke_width);
+	}
+
+	//==============================================================================
+	// 글자 색 설정.
+	//==============================================================================
+	pub fn set_text_color(&mut self, color: impl Into<Color>) {
+		self.rich_text.set_text_color(color);
+	}
+
+	//==============================================================================
+	// 글자 색 반환.
+	//==============================================================================
+	pub fn get_text_color(&self) -> Color {
+		self.rich_text.get_text_color()
 	}
 
 	//==============================================================================
@@ -348,6 +362,20 @@ impl UILabel {
 	}
 
 	//==============================================================================
+	// 글자 방향 설정. (Inherit | Ltr | Rtl | Auto, 원본 setTextDirection. Inherit 면 그리는 때의 Graphic 방향)
+	//==============================================================================
+	pub fn set_text_direction(&mut self, text_direction: TextDirection) {
+		self.rich_text.set_text_direction(text_direction);
+	}
+
+	//==============================================================================
+	// 글자 방향 반환.
+	//==============================================================================
+	pub fn get_text_direction(&self) -> TextDirection {
+		self.rich_text.get_text_direction()
+	}
+
+	//==============================================================================
 	// 가로 정렬 설정.
 	//==============================================================================
 	pub fn set_text_align(&mut self, text_align: TextAlign) {
@@ -374,34 +402,6 @@ impl UILabel {
 	pub fn get_text_baseline(&self) -> TextBaseline {
 		self.rich_text.get_text_baseline()
 	}
-
-	//==============================================================================
-	// 글자 방향 설정. (Inherit | Ltr | Rtl | Auto, 원본 setTextDirection. Inherit 면 그리는 때의 Graphic 방향)
-	//==============================================================================
-	pub fn set_text_direction(&mut self, text_direction: TextDirection) {
-		self.rich_text.set_text_direction(text_direction);
-	}
-
-	//==============================================================================
-	// 글자 방향 반환.
-	//==============================================================================
-	pub fn get_text_direction(&self) -> TextDirection {
-		self.rich_text.get_text_direction()
-	}
-
-	//==============================================================================
-	// 보일 글자 수 설정. (-1 이면 전체, 타자기 연출용. 원본 setVisibleCharacterCount)
-	//==============================================================================
-	pub fn set_visible_character_count(&mut self, visible_character_count: i32) {
-		self.rich_text.set_visible_character_count(visible_character_count);
-	}
-
-	//==============================================================================
-	// 보일 글자 수 반환.
-	//==============================================================================
-	pub fn get_visible_character_count(&self) -> i32 {
-		self.rich_text.get_visible_character_count()
-	}
 }
 
 impl Default for UILabel {
@@ -427,6 +427,7 @@ impl Component for UILabel {
 	//==============================================================================
 	// 자연 크기. (품은 글의 자연 크기, UINode 가 모은다. 원본은 노드에 붙인 Text, RichText 의 값)
 	//==============================================================================
+	#[reflect(skip)]
 	fn get_intrinsic_content_size(&self) -> Vector2 {
 		if !self.is_enable() {
 			return Vector2::create(-1.0, -1.0);
@@ -438,8 +439,17 @@ impl Component for UILabel {
 		self.ui_view.create_content_node(node_tree, node_id);
 	}
 
+	#[reflect(skip)]
 	fn is_tick_needed(&self) -> bool {
 		false
+	}
+
+	//==============================================================================
+	// 노드 content_size 영역 안에만 그리는지. (원본 isDrawnInsideContent 처럼 true. 화면 밖 거르기는 calculate_drawn_rect 가 글 사각형으로 한다)
+	//==============================================================================
+	#[reflect(after = "getFittedFontSize")]
+	fn is_drawn_inside_content(&self) -> bool {
+		true
 	}
 
 	fn calculate_drawn_rect(&mut self, transform: &NodeTransform, graphic: &mut Graphic) -> Option<Rect> {

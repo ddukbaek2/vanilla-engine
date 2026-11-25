@@ -516,12 +516,14 @@ impl WorldNode {
 	// 컴포넌트 추가. (추가한 컴포넌트를 돌려준다)
 	//==============================================================================
 	pub fn add_component<T: Component + 'static>(&mut self, component: T) -> &mut T {
-		let mut boxed_component: Box<dyn Component> = Box::new(component);
-		self.add_required_components(boxed_component.require());
-		boxed_component.attach(&mut self.transform);
+		// 원본 addComponent 처럼 자기 자리를 먼저 잡고, 의존 컴포넌트를 그 뒤에 붙인 다음 붙는다.
+		let component_index = self.components.len();
+		let boxed_component: Box<dyn Component> = Box::new(component);
+		let required_component_list = boxed_component.require();
 		self.components.push(boxed_component);
-		let last_component = self.components.last_mut().expect("added component");
-		let component_reference: &mut dyn Component = last_component.as_mut();
+		self.add_required_components(required_component_list);
+		self.components[component_index].attach(&mut self.transform);
+		let component_reference: &mut dyn Component = self.components[component_index].as_mut();
 		component_reference.as_any_mut().downcast_mut::<T>().expect("added component type")
 	}
 

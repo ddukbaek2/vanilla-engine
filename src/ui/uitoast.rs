@@ -11,6 +11,7 @@
 // - 원본과 다른 것:
 //   - show 는 줄에 넣기만 하고, 꺼내서 보이는 것은 다음 tick 이 한다. (같은 tick 에 첫 걸음도 가므로 시간 흐름은 원본과 같다)
 //     그래서 원본은 숨을 때 set_active(false) 하지만 러스트 판은 tick 이 돌아야 해서 set_visible(false) 로 숨긴다.
+//     UI 문서는 원본처럼 숨은 토스트를 active false 로 쓰고 읽는다. (uidocument.rs 의 UIDocumentNode)
 //   - 등장 / 머묾 / 퇴장 시간과 곡선은 원본 그대로 이 안에서 센다. (Tween 은 쓰지 않는다)
 //   - 가로 자리 rest_x 는 Option<f32> 다. (원본 null = 부모 가운데) options 객체는 UIToastOptions 구조체다.
 //==============================================================================
