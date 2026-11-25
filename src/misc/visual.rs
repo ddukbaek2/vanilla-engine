@@ -1,7 +1,6 @@
 //==============================================================================
 // 비주얼 컴포넌트. (원본 experimental/visual/visual.js 의 Visual)
 // - 원본은 위치(location) 하나만 드는 뼈대 컴포넌트다. 그리지도 갱신하지도 않는다. 러스트 판도 그대로다.
-// - 원본 get_location(location) 은 쓰지 않는 인자를 받는다. 러스트 판은 받지 않는다.
 //==============================================================================
 use crate::base::vector2::Vector2;
 use crate::core::component::{Component, ComponentBase};

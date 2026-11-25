@@ -7,15 +7,14 @@
 //   in 은 러스트 예약어라 easing_function::quadratic::r#in 처럼 r# 을 붙여 부른다. (이름은 원본 그대로)
 // - 원본의 콜백은 노드 객체를 붙잡고 node.set_position(...) 을 부른다. 러스트 판은 노드가 씬의 NodeTree 에 있어서
 //   갱신 콜백과 완료 콜백이 &mut NodeTree 를 함께 받는다. (붙잡아 둔 NodeId 로 노드를 꺼내 쓴다)
-// - 러스트 판에서 덧붙인 것: set_target(node_id). 값 이름이 노드 속성 이름(TweenProperty, 예: "local_position")이면
-//   tick 마다 그 노드에 바로 쓴다. 대상 노드가 지워지면 콜백 없이 조용히 끝난다. create_node_tween 은 그것의 줄임이다.
-// - 원본은 이징 계산에 base/math.js 의 pow 를 쓰는데, 그 pow 는 정수 지수만 맞게 계산한다.
-//   그래서 원본의 exponential, elastic 은 공식과 다른 값을 낸다. (예: exponential.in 은 0 보다 크면 늘 1)
-//   러스트 판은 표준 powf 로 공식대로 계산한다. 나머지 이징은 원본과 값이 같다.
-//   (node 로 원본을 돌려 진행률 1001 곳을 대조했다. 나머지의 차이는 1e-8 아래)
-// - duration 이 0 이하이면 원본은 0 으로 나눠 한 프레임 NaN 이 나올 수 있다. 러스트 판은 바로 끝(진행률 1)으로 친다.
+// - set_target(node_id): 값 이름이 노드 속성 이름(TweenProperty, 예: "localPosition")이면 tick 마다 그 노드에 바로 쓴다.
+//   대상 노드가 지워지면 콜백 없이 조용히 끝난다. create_node_tween 은 그것의 줄임이다. (원본 setTarget(node), createNodeTween)
+//   원본은 노드를 지우는 대신 떼어 내므로, 처음 돈 때의 노드 트리에서 떨어지면 끝난다. 러스트 판은 destroy_node 로 지워지면 끝난다.
+// - 이징은 원본과 같은 공식이다. (원본 base/math.js 의 pow 도 내장 거듭제곱이라 exponential, elastic 값이 같다)
+// - duration 이 0 이하이면 바로 끝(진행률 1)으로 친다. (원본도 같다)
 // - 씬은 SceneBase::start_tween 으로 트윈을 넘겨받아 들고, 노드 tick → 터치 다음에 돌리며 끝난 트윈을 뺀다.
-//   원본은 트윈 객체를 들고 stop_tween(tween) 으로 가리키지만, 러스트 판은 start_tween 이 돌려준 TweenId 로 가리킨다.
+//   원본은 트윈 객체를 들고 stop_tween(tween) 으로 가리키지만, 러스트 판은 씬이 트윈을 가져가므로(소유권이 넘어간다)
+//   start_tween 이 돌려준 TweenId 로 가리킨다. get_tween / get_tween_mut 은 그 때문에 있다.
 //==============================================================================
 use crate::base::identifier;
 use crate::base::math;
@@ -320,7 +319,7 @@ impl Tween {
 	}
 
 	//==============================================================================
-	// 노드 속성 하나를 움직이는 트윈 생성. (러스트 판에서 덧붙인 줄임)
+	// 노드 속성 하나를 움직이는 트윈 생성.
 	// - Tween::new(시작값).to(목표값, duration).set_target(node_id) 와 같다. 값 이름은 속성 이름이다.
 	//==============================================================================
 	pub fn create_node_tween(node_id: NodeId, tween_property: TweenProperty, start_value: impl Into<TweenValue>, end_value: impl Into<TweenValue>, duration: f32) -> Tween {
@@ -342,7 +341,7 @@ impl Tween {
 			return;
 		}
 
-		// 대상 노드가 지워졌으면 콜백 없이 끝낸다. (러스트 판에서 덧붙인 것)
+		// 대상 노드가 지워졌으면 콜백 없이 끝낸다.
 		if let Some(target_node_id) = self.target_node_id {
 			if !node_tree.contains(target_node_id) {
 				self.stop();
@@ -458,7 +457,7 @@ impl Tween {
 	}
 
 	//==============================================================================
-	// 대상 노드 설정. (러스트 판에서 덧붙인 것. 값 이름이 TweenProperty 이름이면 이 노드에 쓴다)
+	// 대상 노드 설정. (값 이름이 TweenProperty 이름이면 이 노드에 쓴다)
 	//==============================================================================
 	pub fn set_target(mut self, node_id: NodeId) -> Tween {
 		self.target_node_id = Some(node_id);
@@ -679,7 +678,7 @@ pub mod easing_function {
 	}
 
 	//==============================================================================
-	// 지수 곡선. (원본은 정수 지수만 맞는 pow 를 써서 값이 틀린다. 여기서는 공식대로 powf)
+	// 지수 곡선.
 	//==============================================================================
 	pub mod exponential {
 		//==============================================================================
@@ -755,7 +754,6 @@ pub mod easing_function {
 	//==============================================================================
 	// 튕기는 고무줄.
 	// - 원본은 a = 0.1, p = 0.4 로 시작하지만 a < 1 이면 a = 1, s = p / 4 로 바꾸므로 늘 아래 값이다.
-	// - 원본은 정수 지수만 맞는 pow 를 써서 값이 틀린다. 여기서는 공식대로 powf.
 	//==============================================================================
 	pub mod elastic {
 		use super::PI;
@@ -912,8 +910,7 @@ mod tests {
 
 	//==============================================================================
 	// 이징 기준표.
-	// - 원본 tween.js 의 Tween.easing_function 을 node 에서 그대로 불러, Math 만 표준 Math 로 바꿔 뽑은 값이다.
-	//   (원본 그대로 돌리면 base/math.js 의 pow 때문에 exponential, elastic 만 다르다. 나머지는 원본 그대로와 같다)
+	// - 원본 tween.js 의 Tween.easing_function 을 node 에서 불러 뽑은 값이다. (원본을 그대로 돌려도 1e-8 안에서 같다)
 	// - 뽑은 숫자를 그대로 적어서 1/√2 같은 상수와 닮은 값이 있다. (approx_constant 를 끈다)
 	//==============================================================================
 	#[allow(clippy::approx_constant)]
