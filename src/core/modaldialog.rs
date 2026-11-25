@@ -1,27 +1,29 @@
 //==============================================================================
-// 모달 질문 창. (원본과 게임이 부르는 브라우저 window.alert, window.confirm, window.prompt 자리)
-// - 원본 DevTools 의 Local Storage 탭이 window.prompt, window.confirm 으로 키와 값을 묻고 지울지 묻는다. 게임도 같은 브라우저 함수를 부른다.
-//   러스트 판은 엔진 함수 Engine::alert, Engine::confirm, Engine::prompt 로 같은 일을 한다.
-// - 웹은 원본처럼 브라우저 함수를 부른다. 브라우저가 창을 띄우고 답할 때까지 페이지를 멈춘 뒤 돌려준 값을 손잡이에 넣는다. (그 자리에서 끝난다)
-// - 데스크탑은 엔진이 창 위에 크롬 탭 모달 대화 상자(JavaScriptTabModalDialogViewViews)와 같은 질문 창을 그린다.
-//   - 자리: 창 안쪽 가로 가운데, 위 끝. (크롬은 탭 내용 영역 가로 가운데에서 툴바 아래 끝과 3px 겹친다. 데스크탑 창에는 툴바가 없어 위 끝이다)
-//   - 제목: "이 페이지 내용:" (크롬이 출처가 없는 페이지(file:, data:)에 쓰는 제목, 데스크탑 앱에는 출처가 없다) 닫기 X 는 없다.
-//   - alert 는 확인만, confirm 과 prompt 는 확인과 취소. 기본 단추는 확인이다. 단추 차례는 크롬처럼 윈도우 [확인][취소], 맥과 리눅스 [취소][확인].
-//   - prompt 입력 칸은 기본값을 넣고 모두 고른 채로 초점을 받는다. Enter 는 확인, Escape 는 취소.
-//   - 글(제목, 확인, 취소)은 브라우저 화면 언어 자리인 시스템 언어로 고른다. (core/browseruitext.rs)
-//   - 떠 있는 동안 원본에서 자바스크립트가 멈추듯 씬과 async 작업을 갱신하지 않고(그리기는 멈춘 화면 그대로), 입력은 창만 받는다. 닫히면 눌린 키와 단추를 비운다.
-//     (원본은 창이 포커스를 가져가 페이지에 키가 오지 않는다)
-//   - 입력 칸은 글 입력 줄(core/textinput.rs)에서 IME 와 편집 키를 받는다. 누르고 끌어 커서와 선택을 정한다. 되돌리기와 다시 하기도 된다. (크롬 Textfield 처럼)
-//   - 여러 개를 한 프레임에 부르면 차례로 띄운다. (원본은 창이 떠 있는 동안 자바스크립트가 멈춰 겹쳐 부를 수 없다)
-// - 원본 prompt 는 답할 때까지 막고 값을 돌려준다. 러스트 판은 엔진 루프를 막을 수 없어 ModalDialogHandle 을 돌려주고, 답하면 끝난다. (is_finished)
-//   끝난 뒤 부를 함수는 set_callback 으로 건다. 엔진 작업 안에서는 Engine::alert_async, confirm_async, prompt_async 의 Promise 를 await 한다.
-//   (떠 있는 동안은 async 작업도 원본 자바스크립트처럼 멈춘다)
+//! 모달 질문 창. (원본과 게임이 부르는 브라우저 window.alert, window.confirm, window.prompt 자리)
+//! - 원본 DevTools 의 Local Storage 탭이 window.prompt, window.confirm 으로 키와 값을 묻고 지울지 묻는다. 게임도 같은 브라우저 함수를 부른다.
+//!   러스트 판은 엔진 함수 Engine::alert, Engine::confirm, Engine::prompt 로 같은 일을 한다.
+//! - 웹은 원본처럼 브라우저 함수를 부른다. 브라우저가 창을 띄우고 답할 때까지 페이지를 멈춘 뒤 돌려준 값을 손잡이에 넣는다. (그 자리에서 끝난다)
+//! - 데스크탑은 엔진이 창 위에 크롬 탭 모달 대화 상자(JavaScriptTabModalDialogViewViews)와 같은 질문 창을 그린다.
+//!   - 자리: 창 안쪽 가로 가운데, 위 끝. (크롬은 탭 내용 영역 가로 가운데에서 툴바 아래 끝과 3px 겹친다. 데스크탑 창에는 툴바가 없어 위 끝이다)
+//!   - 제목: "이 페이지 내용:" (크롬이 출처가 없는 페이지(file:, data:)에 쓰는 제목, 데스크탑 앱에는 출처가 없다) 닫기 X 는 없다.
+//!   - alert 는 확인만, confirm 과 prompt 는 확인과 취소. 기본 단추는 확인이다. 단추 차례는 크롬처럼 윈도우 `[확인][취소]`, 맥과 리눅스 `[취소][확인]`.
+//!   - prompt 입력 칸은 기본값을 넣고 모두 고른 채로 초점을 받는다. Enter 는 확인, Escape 는 취소.
+//!   - 글(제목, 확인, 취소)은 브라우저 화면 언어 자리인 시스템 언어로 고른다. (core/browseruitext.rs)
+//!   - 떠 있는 동안 원본에서 자바스크립트가 멈추듯 씬과 async 작업을 갱신하지 않고(그리기는 멈춘 화면 그대로), 입력은 창만 받는다. 닫히면 눌린 키와 단추를 비운다.
+//!   ```text
+//!     (원본은 창이 포커스를 가져가 페이지에 키가 오지 않는다)
+//!   ```
+//!   - 입력 칸은 글 입력 줄(core/textinput.rs)에서 IME 와 편집 키를 받는다. 누르고 끌어 커서와 선택을 정한다. 되돌리기와 다시 하기도 된다. (크롬 Textfield 처럼)
+//!   - 여러 개를 한 프레임에 부르면 차례로 띄운다. (원본은 창이 떠 있는 동안 자바스크립트가 멈춰 겹쳐 부를 수 없다)
+//! - 원본 prompt 는 답할 때까지 막고 값을 돌려준다. 러스트 판은 엔진 루프를 막을 수 없어 ModalDialogHandle 을 돌려주고, 답하면 끝난다. (is_finished)
+//!   끝난 뒤 부를 함수는 set_callback 으로 건다. 엔진 작업 안에서는 Engine::alert_async, confirm_async, prompt_async 의 Promise 를 await 한다.
+//!   (떠 있는 동안은 async 작업도 원본 자바스크립트처럼 멈춘다)
 //==============================================================================
 use std::cell::RefCell;
 use std::rc::Rc;
 
 //==============================================================================
-// 질문 창 종류. (원본 window.alert, window.confirm, window.prompt)
+/// 질문 창 종류. (원본 window.alert, window.confirm, window.prompt)
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ModalDialogKind {
@@ -31,21 +33,21 @@ pub enum ModalDialogKind {
 }
 
 //==============================================================================
-// 질문 창의 답.
+/// 질문 창의 답.
 //==============================================================================
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ModalDialogResult {
-	// 확인. (prompt 는 입력한 글, alert 와 confirm 은 빈 글)
+	/// 확인. (prompt 는 입력한 글, alert 와 confirm 은 빈 글)
 	Confirmed(String),
-	// 취소. (원본 prompt 의 null, confirm 의 false)
+	/// 취소. (원본 prompt 의 null, confirm 의 false)
 	Cancelled,
 }
 
-// 끝난 뒤 부를 함수.
+/// 끝난 뒤 부를 함수.
 type ModalDialogCallback = Box<dyn FnOnce(&ModalDialogResult)>;
 
 //==============================================================================
-// 손잡이 상태. (답과 끝난 뒤 부를 함수)
+/// 손잡이 상태. (답과 끝난 뒤 부를 함수)
 //==============================================================================
 struct ModalDialogHandleState {
 	result: Option<ModalDialogResult>,
@@ -53,7 +55,7 @@ struct ModalDialogHandleState {
 }
 
 //==============================================================================
-// 질문 창 손잡이. (clone 은 같은 창을 가리킨다)
+/// 질문 창 손잡이. (clone 은 같은 창을 가리킨다)
 //==============================================================================
 #[derive(Clone)]
 pub struct ModalDialogHandle {
@@ -62,7 +64,7 @@ pub struct ModalDialogHandle {
 
 impl ModalDialogHandle {
 	//==============================================================================
-	// 답을 기다리는 손잡이.
+	/// 답을 기다리는 손잡이.
 	//==============================================================================
 	pub(crate) fn create_pending() -> ModalDialogHandle {
 		ModalDialogHandle {
@@ -74,7 +76,7 @@ impl ModalDialogHandle {
 	}
 
 	//==============================================================================
-	// 답 넣기. (걸어 둔 함수를 부른다, 두 번째부터는 무시)
+	/// 답 넣기. (걸어 둔 함수를 부른다, 두 번째부터는 무시)
 	//==============================================================================
 	pub(crate) fn finish(&self, result: ModalDialogResult) {
 		let callback = {
@@ -91,28 +93,28 @@ impl ModalDialogHandle {
 	}
 
 	//==============================================================================
-	// 답했는지.
+	/// 답했는지.
 	//==============================================================================
 	pub fn is_finished(&self) -> bool {
 		self.state.borrow().result.is_some()
 	}
 
 	//==============================================================================
-	// 답. (아직이면 None)
+	/// 답. (아직이면 None)
 	//==============================================================================
 	pub fn get_result(&self) -> Option<ModalDialogResult> {
 		self.state.borrow().result.clone()
 	}
 
 	//==============================================================================
-	// 확인했는지. (원본 confirm 이 돌려주는 값, 아직이거나 취소면 거짓)
+	/// 확인했는지. (원본 confirm 이 돌려주는 값, 아직이거나 취소면 거짓)
 	//==============================================================================
 	pub fn is_confirmed(&self) -> bool {
 		matches!(self.state.borrow().result, Some(ModalDialogResult::Confirmed(_)))
 	}
 
 	//==============================================================================
-	// 입력한 글. (원본 prompt 가 돌려주는 값, 취소면 원본 null 처럼 None. 아직이어도 None)
+	/// 입력한 글. (원본 prompt 가 돌려주는 값, 취소면 원본 null 처럼 None. 아직이어도 None)
 	//==============================================================================
 	pub fn get_prompt_text(&self) -> Option<String> {
 		match &self.state.borrow().result {
@@ -126,7 +128,7 @@ impl ModalDialogHandle {
 	}
 
 	//==============================================================================
-	// 끝난 뒤 부를 함수 걸기. (이미 끝났으면 바로 부른다)
+	/// 끝난 뒤 부를 함수 걸기. (이미 끝났으면 바로 부른다)
 	//==============================================================================
 	pub fn set_callback(&self, callback: impl FnOnce(&ModalDialogResult) + 'static) {
 		let result = self.state.borrow().result.clone();
@@ -142,7 +144,7 @@ impl ModalDialogHandle {
 }
 
 //==============================================================================
-// 웹. (브라우저 함수를 불러 그 자리에서 끝낸다)
+/// 웹. (브라우저 함수를 불러 그 자리에서 끝낸다)
 //==============================================================================
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn show_browser_dialog(kind: ModalDialogKind, message: &str, default_value: &str) -> ModalDialogHandle {
@@ -186,7 +188,7 @@ pub(crate) fn show_browser_dialog(kind: ModalDialogKind, message: &str, default_
 pub(crate) use desktop_dialog::{draw_modal_dialog, measure_field_text_width, tick_modal_dialog, ModalDialog};
 
 //==============================================================================
-// 데스크탑. (엔진이 그리는 질문 창)
+/// 데스크탑. (엔진이 그리는 질문 창)
 //==============================================================================
 #[cfg(not(target_arch = "wasm32"))]
 mod desktop_dialog {
@@ -201,22 +203,22 @@ mod desktop_dialog {
 	use crate::core::textinput::{convert_character_index_to_byte_index, count_characters, TextInputEventKind, TextInputFieldState, TextInputKey};
 	use crate::ui::uiinputfield::{TextEditBuffer, TextEditKind};
 
-	// 글 입력 줄에서 질문 창 입력 칸을 가리키는 id. (입력 필드 id 는 1 부터 늘고, DevTools 는 u64::MAX 를 쓴다)
+	/// 글 입력 줄에서 질문 창 입력 칸을 가리키는 id. (입력 필드 id 는 1 부터 늘고, DevTools 는 u64::MAX 를 쓴다)
 	const DIALOG_FIELD_ID: u64 = u64::MAX - 1;
-	// 입력 칸 포커스 차례. (떠 있는 동안 다른 필드보다 늘 나중)
+	/// 입력 칸 포커스 차례. (떠 있는 동안 다른 필드보다 늘 나중)
 	const DIALOG_FOCUS_SERIAL: u64 = u64::MAX - 1;
-	// 크롬 prompt 기본값의 최대 길이. (javascript_dialog 의 kDefaultPromptMaxSize)
+	/// 크롬 prompt 기본값의 최대 길이. (javascript_dialog 의 kDefaultPromptMaxSize)
 	const DEFAULT_PROMPT_MAXIMUM_LENGTH: usize = 2000;
-	// 묻는 글의 최대 줄 수와 줄 글자 수. (kMessageTextMaxRows, kMessageTextMaxCols)
+	/// 묻는 글의 최대 줄 수와 줄 글자 수. (kMessageTextMaxRows, kMessageTextMaxCols)
 	const MESSAGE_MAXIMUM_ROW_COUNT: usize = 24;
 	const MESSAGE_MAXIMUM_COLUMN_COUNT: usize = 80;
-	// 커서 깜빡임 주기. (초)
+	/// 커서 깜빡임 주기. (초)
 	const CURSOR_BLINK_SECONDS: f32 = 0.5;
 
-	// 모양. (크롬 main 의 값: MessageBoxView kDefaultMessageWidth 400, ChromeLayoutProvider INSETS_DIALOG 20, 제목 STYLE_HEADLINE_4 16px 500 줄 24,
-	// 본문 CONTEXT_DIALOG_BODY_TEXT 13px 줄 20, 제목과 본문 사이 DIALOG_CONTENT_MARGIN_TOP_TEXT 8, 본문과 입력 칸 사이 RELATED_CONTROL_VERTICAL 8,
-	// 아래 여백 입력 칸이 있으면 CONTROL 24 없으면 TEXT 16, 단추 줄 여백 (0, 20, 20, 20), 단추 사이 8, 단추 최소 폭 64 안쪽 16 글 13px 500 알약 꼴,
-	// 입력 칸 안쪽 10 모서리 8, 대화 상자 모서리 12, 기본 밝은 팔레트 색. 단추와 입력 칸 높이는 글꼴 높이 + 위아래 10 을 기본 글꼴로 셈한 값이다)
+	/// 모양. (크롬 main 의 값: MessageBoxView kDefaultMessageWidth 400, ChromeLayoutProvider INSETS_DIALOG 20, 제목 STYLE_HEADLINE_4 16px 500 줄 24,
+	/// 본문 CONTEXT_DIALOG_BODY_TEXT 13px 줄 20, 제목과 본문 사이 DIALOG_CONTENT_MARGIN_TOP_TEXT 8, 본문과 입력 칸 사이 RELATED_CONTROL_VERTICAL 8,
+	/// 아래 여백 입력 칸이 있으면 CONTROL 24 없으면 TEXT 16, 단추 줄 여백 (0, 20, 20, 20), 단추 사이 8, 단추 최소 폭 64 안쪽 16 글 13px 500 알약 꼴,
+	/// 입력 칸 안쪽 10 모서리 8, 대화 상자 모서리 12, 기본 밝은 팔레트 색. 단추와 입력 칸 높이는 글꼴 높이 + 위아래 10 을 기본 글꼴로 셈한 값이다)
 	const DIALOG_WIDTH: f32 = 400.0;
 	const DIALOG_MARGIN: f32 = 8.0;
 	const DIALOG_PADDING_TOP: f32 = 20.0;
@@ -250,13 +252,13 @@ mod desktop_dialog {
 	const COLOR_PRIMARY_BUTTON_TEXT: &str = "#ffffff";
 	const COLOR_SECONDARY_BUTTON_BORDER: &str = "#a8c7fa";
 	const COLOR_SECONDARY_BUTTON_TEXT: &str = "#0b57d0";
-	// 그림자. (bubble_border.cc 의 두 겹: 아래로 2, 흐림 8 과 12, kGoogleGrey800 #3C4043 의 알파 0x33 과 0x1A. 맥은 운영체제가 그린다)
+	/// 그림자. (bubble_border.cc 의 두 겹: 아래로 2, 흐림 8 과 12, kGoogleGrey800 #3C4043 의 알파 0x33 과 0x1A. 맥은 운영체제가 그린다)
 	const SHADOW_COLOR_RED: f32 = 60.0 / 255.0;
 	const SHADOW_COLOR_GREEN: f32 = 64.0 / 255.0;
 	const SHADOW_COLOR_BLUE: f32 = 67.0 / 255.0;
 
 	//==============================================================================
-	// 단추.
+	/// 단추.
 	//==============================================================================
 	#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 	enum DialogButton {
@@ -265,7 +267,7 @@ mod desktop_dialog {
 	}
 
 	//==============================================================================
-	// 질문 창 자리. (창 안쪽 논리 좌표)
+	/// 질문 창 자리. (창 안쪽 논리 좌표)
 	//==============================================================================
 	#[derive(Clone, Debug, Default)]
 	struct DialogLayout {
@@ -279,7 +281,7 @@ mod desktop_dialog {
 	}
 
 	//==============================================================================
-	// 떠 있는 질문 창 하나.
+	/// 떠 있는 질문 창 하나.
 	//==============================================================================
 	pub struct ModalDialog {
 		kind: ModalDialogKind,
@@ -291,9 +293,9 @@ mod desktop_dialog {
 		pressed_button: Option<DialogButton>,
 		hovered_button: Option<DialogButton>,
 		drag_start_index: Option<usize>,
-		// 입력 칸 글의 가로 밀림. (커서가 보이게)
+		/// 입력 칸 글의 가로 밀림. (커서가 보이게)
 		text_scroll_x: f32,
-		// 마지막으로 그린 커서 자리. (IME 후보 창)
+		/// 마지막으로 그린 커서 자리. (IME 후보 창)
 		caret_rect: Rect,
 		blink_timer: f32,
 		is_cursor_visible: bool,
@@ -301,7 +303,7 @@ mod desktop_dialog {
 
 	impl ModalDialog {
 		//==============================================================================
-		// 생성. (prompt 는 기본값을 넣고 모두 고른다. 크롬처럼 커서는 글 맨 앞 쪽에 둔다)
+		/// 생성. (prompt 는 기본값을 넣고 모두 고른다. 크롬처럼 커서는 글 맨 앞 쪽에 둔다)
 		//==============================================================================
 		pub fn new(kind: ModalDialogKind, message: &str, default_value: &str, handle: ModalDialogHandle) -> ModalDialog {
 			let mut edit_buffer = TextEditBuffer::new();
@@ -332,7 +334,7 @@ mod desktop_dialog {
 		}
 
 		//==============================================================================
-		// 입력 칸의 글. (시험이 본다)
+		/// 입력 칸의 글. (시험이 본다)
 		//==============================================================================
 		#[cfg(test)]
 		pub(crate) fn get_text(&self) -> &str {
@@ -340,7 +342,7 @@ mod desktop_dialog {
 		}
 
 		//==============================================================================
-		// 단추 목록. (크롬 kIsOkButtonLeading: 윈도우는 확인이 앞, 맥과 리눅스는 취소가 앞)
+		/// 단추 목록. (크롬 kIsOkButtonLeading: 윈도우는 확인이 앞, 맥과 리눅스는 취소가 앞)
 		//==============================================================================
 		fn read_button_list(&self) -> Vec<DialogButton> {
 			if self.kind == ModalDialogKind::Alert {
@@ -355,7 +357,7 @@ mod desktop_dialog {
 		}
 
 		//==============================================================================
-		// 답. (확인이면 prompt 는 입력한 글)
+		/// 답. (확인이면 prompt 는 입력한 글)
 		//==============================================================================
 		fn build_result(&self, is_confirmed: bool) -> ModalDialogResult {
 			if !is_confirmed {
@@ -368,7 +370,7 @@ mod desktop_dialog {
 		}
 
 		//==============================================================================
-		// 커서 깜빡임을 처음부터.
+		/// 커서 깜빡임을 처음부터.
 		//==============================================================================
 		fn reset_cursor_blink(&mut self) {
 			self.blink_timer = 0.0;
@@ -376,7 +378,7 @@ mod desktop_dialog {
 		}
 
 		//==============================================================================
-		// 글이나 커서가 바뀜. (플랫폼 IME 상태를 다시 맞춘다)
+		/// 글이나 커서가 바뀜. (플랫폼 IME 상태를 다시 맞춘다)
 		//==============================================================================
 		fn bump_value_revision(&mut self) {
 			self.value_revision += 1;
@@ -384,7 +386,7 @@ mod desktop_dialog {
 		}
 
 		//==============================================================================
-		// 글 입력 이벤트 하나. (답이 정해지면 Some(확인인지))
+		/// 글 입력 이벤트 하나. (답이 정해지면 Some(확인인지))
 		//==============================================================================
 		fn handle_text_input_event(&mut self, engine: &Engine, event_kind: TextInputEventKind) -> Option<bool> {
 			match event_kind {
@@ -413,7 +415,7 @@ mod desktop_dialog {
 		}
 
 		//==============================================================================
-		// 편집 키. (Enter 는 확인, 나머지는 prompt 입력 칸 편집)
+		/// 편집 키. (Enter 는 확인, 나머지는 prompt 입력 칸 편집)
 		//==============================================================================
 		fn handle_edit_key(&mut self, engine: &Engine, key: TextInputKey, is_shift: bool) -> Option<bool> {
 			if key == TextInputKey::Enter {
@@ -501,7 +503,7 @@ mod desktop_dialog {
 		}
 
 		//==============================================================================
-		// 입력 칸 안 x 자리의 글자 자리. (가장 가까운 글자 경계)
+		/// 입력 칸 안 x 자리의 글자 자리. (가장 가까운 글자 경계)
 		//==============================================================================
 		fn find_character_index_at(&self, measure_width: &dyn Fn(&str) -> f32, local_x: f32) -> usize {
 			let text = self.edit_buffer.get_text();
@@ -520,14 +522,14 @@ mod desktop_dialog {
 	}
 
 	//==============================================================================
-	// 입력 칸 글꼴의 글 폭. (tick_modal_dialog 에 넘긴다)
+	/// 입력 칸 글꼴의 글 폭. (tick_modal_dialog 에 넘긴다)
 	//==============================================================================
 	pub fn measure_field_text_width(graphic: &Graphic, text: &str) -> f32 {
 		graphic.measure_text_with_font_string(FIELD_FONT_STRING, text).width
 	}
 
 	//==============================================================================
-	// 묻는 글 자르기. (크롬처럼 24 줄, 줄마다 80 글자까지)
+	/// 묻는 글 자르기. (크롬처럼 24 줄, 줄마다 80 글자까지)
 	//==============================================================================
 	fn limit_message(message: &str) -> String {
 		let mut line_list: Vec<String> = Vec::new();
@@ -538,7 +540,7 @@ mod desktop_dialog {
 	}
 
 	//==============================================================================
-	// 글을 폭에 맞춰 줄로 나누기. (공백에서 나누고, 공백 없이 넘치면 글자에서 나눈다. 줄바꿈 문자는 지킨다)
+	/// 글을 폭에 맞춰 줄로 나누기. (공백에서 나누고, 공백 없이 넘치면 글자에서 나눈다. 줄바꿈 문자는 지킨다)
 	//==============================================================================
 	fn wrap_lines(graphic: &Graphic, font_string: &str, text: &str, maximum_width: f32) -> Vec<String> {
 		let mut line_list: Vec<String> = Vec::new();
@@ -575,7 +577,7 @@ mod desktop_dialog {
 	}
 
 	//==============================================================================
-	// 질문 창 자리 셈. (창 안쪽 가로 가운데 위 끝, 폭은 창보다 넓지 않게)
+	/// 질문 창 자리 셈. (창 안쪽 가로 가운데 위 끝, 폭은 창보다 넓지 않게)
 	//==============================================================================
 	fn calculate_layout(dialog: &ModalDialog, graphic: &Graphic, canvas_native_size: Vector2) -> DialogLayout {
 		let box_width = DIALOG_WIDTH.min((canvas_native_size.x - DIALOG_MARGIN * 2.0).max(160.0));
@@ -628,7 +630,7 @@ mod desktop_dialog {
 	}
 
 	//==============================================================================
-	// 단추 글. (브라우저 화면 언어의 확인, 취소)
+	/// 단추 글. (브라우저 화면 언어의 확인, 취소)
 	//==============================================================================
 	fn read_button_text(button: DialogButton) -> String {
 		match button {
@@ -642,16 +644,16 @@ mod desktop_dialog {
 	}
 
 	//==============================================================================
-	// 점이 사각형 안에 있는지.
+	/// 점이 사각형 안에 있는지.
 	//==============================================================================
 	fn is_inside(rect: Rect, position: Vector2) -> bool {
 		position.x >= rect.position.x && position.x < rect.position.x + rect.size.x && position.y >= rect.position.y && position.y < rect.position.y + rect.size.y
 	}
 
 	//==============================================================================
-	// 맨 앞 질문 창 갱신. (엔진이 프레임마다 씬 대신 부른다. 답이 정해지면 창을 내리고 손잡이를 끝낸다)
+	/// 맨 앞 질문 창 갱신. (엔진이 프레임마다 씬 대신 부른다. 답이 정해지면 창을 내리고 손잡이를 끝낸다)
 	//==============================================================================
-	// - measure_width 는 입력 칸 글꼴로 글 폭을 잰다. (엔진은 Graphic 으로 잰다, measure_field_text_width)
+	/// - measure_width 는 입력 칸 글꼴로 글 폭을 잰다. (엔진은 Graphic 으로 잰다, measure_field_text_width)
 	pub fn tick_modal_dialog(engine: &mut Engine, measure_width: &dyn Fn(&str) -> f32, time_delta: f32) {
 		let mut dialog = match engine.take_front_modal_dialog() {
 			Some(dialog) => {
@@ -759,7 +761,7 @@ mod desktop_dialog {
 	}
 
 	//==============================================================================
-	// 맨 앞 질문 창 그리기. (씬과 개발 정보 위에, 창 안쪽 논리 좌표로)
+	/// 맨 앞 질문 창 그리기. (씬과 개발 정보 위에, 창 안쪽 논리 좌표로)
 	//==============================================================================
 	pub fn draw_modal_dialog(engine: &mut Engine, graphic: &mut Graphic) {
 		let canvas_native_size = engine.get_view_manager().get_canvas_native_size();
@@ -884,7 +886,7 @@ mod desktop_dialog {
 }
 
 //==============================================================================
-// 시험. (데스크탑 질문 창)
+/// 시험. (데스크탑 질문 창)
 //==============================================================================
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
@@ -895,14 +897,14 @@ mod tests {
 	use std::cell::Cell;
 
 	//==============================================================================
-	// 글자마다 8 의 폭.
+	/// 글자마다 8 의 폭.
 	//==============================================================================
 	fn measure_fixed_width(text: &str) -> f32 {
 		text.chars().count() as f32 * 8.0
 	}
 
 	//==============================================================================
-	// prompt: 기본값을 모두 고른 채로 뜨고, 친 글이 고른 것을 바꾸고, Enter 로 확인한다. 끝난 뒤 함수가 불린다.
+	/// prompt: 기본값을 모두 고른 채로 뜨고, 친 글이 고른 것을 바꾸고, Enter 로 확인한다. 끝난 뒤 함수가 불린다.
 	//==============================================================================
 	#[test]
 	fn prompt_replaces_selected_default_and_confirms() {
@@ -931,7 +933,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// confirm 과 prompt 는 Escape 로 취소한다. (원본 false 와 null) 여럿을 부르면 차례로 뜬다.
+	/// confirm 과 prompt 는 Escape 로 취소한다. (원본 false 와 null) 여럿을 부르면 차례로 뜬다.
 	//==============================================================================
 	#[test]
 	fn escape_cancels_and_dialogs_queue() {
@@ -958,7 +960,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// await 꼴: 엔진 작업이 prompt_async 를 기다리고, 답하면 다음 폴링에 그 값으로 이어 간다.
+	/// await 꼴: 엔진 작업이 prompt_async 를 기다리고, 답하면 다음 폴링에 그 값으로 이어 간다.
 	//==============================================================================
 	#[test]
 	fn prompt_async_resolves_in_task() {
@@ -979,7 +981,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// prompt 편집 키. (왼쪽은 선택을 접고, Shift 와 함께면 늘린다. 지우기, 모두 고르기)
+	/// prompt 편집 키. (왼쪽은 선택을 접고, Shift 와 함께면 늘린다. 지우기, 모두 고르기)
 	//==============================================================================
 	#[test]
 	fn prompt_edit_keys() {

@@ -12,19 +12,23 @@
 // - AudioBuffer 자리: 푼 소리를 Arc 로 든다. 복제는 값싸다. 해석은 decode 가 원본의 크롬 decodeAudioData 와 같게 한다.
 //   (webm, ogg 의 Opus 와 Vorbis, mp3, wav, flac, m4a 와 aac 의 AAC. 앞뒤 다듬기, 44100Hz, WebAudio 스피커 규칙으로 내린 1 채널이나 2 채널)
 // - 음량, 좌우, 정지는 다음 렌더 퀀텀부터 바로 바뀐다. 재생 빠르기는 다음 재생부터다. (원본과 같다)
-// - BeepPlayer 의 톤은 엔벨로프를 곱한 파형을 컨텍스트 표본율로 그려 출력에 섞는다. (원본 OscillatorNode 가 컨텍스트 표본율로 도는 것과 같다)
-//   파형은 크롬 WebAudio 오실레이터(PeriodicWave)와 같은 셈이다. 푸리에 계수를 표 크기의 반 아래까지 두고 주파수에 따라 1/3 옥타브마다 높은 배음을 덜어 낸
-//   두 표 사이를 섞으며(대역 제한), 배음을 다 둔 첫 표의 가장 큰 값이 1 이 되게 크기를 맞춘다.
+// - 음량은 GainNode 의 AudioParam 이다. 음량 설정은 원본 gain.value 대입, SoundSystem 은 원본처럼 자동화(setValueAtTime 들)와 stop(when)을 건다.
+//   지금 gain.value(get_gain_value)는 소리 스레드가 퀀텀마다 셈한 내재 값이다.
+// - BeepPlayer 의 톤은 원본 playTone 처럼 믹서에 OscillatorNode → GainNode(엔벨로프 자동화) → 출력을 짓는다. (셈은 크롬과 같다, oscillator.rs)
+//   파형의 대역 제한 표(PeriodicWave)는 원본 컨텍스트처럼 표본율마다 한 번 지어 둔다.
 //==============================================================================
+use super::audioparam::ParamAutomation;
 use super::mixer::{AudioBufferData, MixerCommand, MixerRenderer, MixerShared};
+use super::oscillator::{OscillatorType, PeriodicWave};
+use super::GainAutomation;
 use crate::core::audiomanager::AudioManagerState;
-use crate::misc::beepplayer::{BeepEnvelope, BeepWaveform, BEEP_FLOOR_VOLUME, BEEP_STOP_MARGIN_SECONDS};
+use crate::misc::beepplayer::{BeepEnvelope, BeepWaveform, BEEP_FLOOR_VOLUME};
 use crate::resource::audioasset::AudioAsset;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::cell::{Cell, RefCell};
 use std::path::Path;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::channel;
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
@@ -116,10 +120,6 @@ pub type AudioOutputNode<'a> = &'a MixerGainNode;
 
 // 데스크탑에는 자동재생 정책이 없다.
 pub const HAS_USER_GESTURE_AT_START: bool = true;
-// 대역 제한 표의 한 옥타브를 나누는 구간 수. (크롬 PeriodicWave 의 kNumberOfOctaveBands)
-const PERIODIC_WAVE_OCTAVE_BAND_COUNT: f64 = 3.0;
-// 한 옥타브의 센트.
-const CENTS_PER_OCTAVE: f64 = 1200.0;
 
 //==============================================================================
 // 믹서로 가는 길. (명령을 보내고 시계를 읽는다, 노드 번호를 매긴다)
@@ -156,6 +156,8 @@ pub struct AudioPlatformState {
 	is_audio_context_suspended: bool,
 	// 믹서로 가는 길. (컨텍스트가 있을 때)
 	mixer_link: Option<Rc<MixerLink>>,
+	// 비프 파형의 대역 제한 표. (컨텍스트 표본율의 것)
+	periodic_wave_list: Vec<Arc<PeriodicWave>>,
 }
 
 //==============================================================================
@@ -166,6 +168,7 @@ pub fn create_audio_platform_state() -> AudioPlatformState {
 		is_audio_context_failed: false,
 		is_audio_context_suspended: false,
 		mixer_link: None,
+		periodic_wave_list: Vec::new(),
 	}
 }
 
@@ -454,8 +457,33 @@ pub struct AudioPlayerBackend {
 	// 시작한 소스의 세대와 믹서가 끝냈다고 알린 세대.
 	started_generation: u64,
 	ended_generation: Arc<AtomicU64>,
+	// GainNode 의 gain 내재 값. (원본 gain.value 가 읽는 값, 소리 스레드가 퀀텀마다 쓴다)
+	gain_value: Arc<AtomicU32>,
 	is_source_active: bool,
 	playback_rate: f64,
+}
+
+//==============================================================================
+// 자동화를 믹서의 AudioParam 호출로.
+//==============================================================================
+fn to_param_automation(automation: GainAutomation) -> ParamAutomation {
+	match automation {
+		GainAutomation::SetValueAtTime { value, time } => {
+			ParamAutomation::SetValueAtTime { value, time }
+		}
+		GainAutomation::LinearRampToValueAtTime { value, time } => {
+			ParamAutomation::LinearRampToValueAtTime { value, time }
+		}
+		GainAutomation::ExponentialRampToValueAtTime { value, time } => {
+			ParamAutomation::ExponentialRampToValueAtTime { value, time }
+		}
+		GainAutomation::SetTargetAtTime { target, time, time_constant } => {
+			ParamAutomation::SetTargetAtTime { target, time, time_constant }
+		}
+		GainAutomation::CancelScheduledValues { time } => {
+			ParamAutomation::CancelScheduledValues { time }
+		}
+	}
 }
 
 impl AudioPlayerBackend {
@@ -488,6 +516,7 @@ impl AudioPlayerBackend {
 	//==============================================================================
 	fn create_with_output(mixer_link: Option<Rc<MixerLink>>, output_gain_node: Option<Rc<MixerGainNodeInner>>) -> AudioPlayerBackend {
 		let ended_generation = Arc::new(AtomicU64::new(0));
+		let gain_value = Arc::new(AtomicU32::new(1.0f32.to_bits()));
 		let player_id = match &mixer_link {
 			Some(mixer_link) => {
 				let player_id = mixer_link.create_node_id();
@@ -495,6 +524,7 @@ impl AudioPlayerBackend {
 					player_id,
 					output_bus_id: output_gain_node.as_ref().map(|output_gain_node| output_gain_node.bus_id),
 					ended_generation: ended_generation.clone(),
+					gain_value: gain_value.clone(),
 				});
 				player_id
 			}
@@ -508,6 +538,7 @@ impl AudioPlayerBackend {
 			_output_gain_node: output_gain_node,
 			started_generation: 0,
 			ended_generation,
+			gain_value,
 			is_source_active: false,
 			playback_rate: 1.0,
 		}
@@ -531,8 +562,17 @@ impl AudioPlayerBackend {
 	//==============================================================================
 	pub fn stop_source(&mut self) {
 		if self.is_source_active {
-			self.send(MixerCommand::StopSource { player_id: self.player_id });
+			self.send(MixerCommand::StopSource { player_id: self.player_id, time: 0.0 });
 			self.is_source_active = false;
+		}
+	}
+
+	//==============================================================================
+	// 그 시각에 소스를 멈춘다. (원본 source.stop(when), 끝나면 is_playing 이 거짓이 된다)
+	//==============================================================================
+	pub fn stop_source_at_time(&mut self, time: f64) {
+		if self.is_source_active {
+			self.send(MixerCommand::StopSource { player_id: self.player_id, time });
 		}
 	}
 
@@ -580,7 +620,23 @@ impl AudioPlayerBackend {
 	// 음량 설정. (GainNode 의 값, 0 ~ 1)
 	//==============================================================================
 	pub fn set_gain(&mut self, gain: f32) {
-		self.send(MixerCommand::SetPlayerGain { player_id: self.player_id, gain });
+		// 원본 gain.value 대입: 읽는 값은 바로 바뀌고 믹서에는 setValueAtTime(값, 지금)이 들어간다.
+		self.gain_value.store(gain.to_bits(), Ordering::Release);
+		self.send(MixerCommand::PlayerGainAutomation { player_id: self.player_id, automation: ParamAutomation::SetValue { value: gain } });
+	}
+
+	//==============================================================================
+	// 음량 자동화. (원본 gain.setValueAtTime 들)
+	//==============================================================================
+	pub fn apply_gain_automation(&mut self, automation: GainAutomation) {
+		self.send(MixerCommand::PlayerGainAutomation { player_id: self.player_id, automation: to_param_automation(automation) });
+	}
+
+	//==============================================================================
+	// 지금 음량. (원본 gain.value 읽기)
+	//==============================================================================
+	pub fn get_gain_value(&self) -> f32 {
+		f32::from_bits(self.gain_value.load(Ordering::Acquire))
 	}
 
 	//==============================================================================
@@ -636,7 +692,16 @@ impl AudioBusBackend {
 	//==============================================================================
 	pub fn set_gain(&mut self, gain: f32) {
 		if let Some(gain_node) = &self.gain_node {
-			gain_node.inner.mixer_link.send(MixerCommand::SetBusGain { bus_id: gain_node.inner.bus_id, gain });
+			gain_node.inner.mixer_link.send(MixerCommand::BusGainAutomation { bus_id: gain_node.inner.bus_id, automation: ParamAutomation::SetValue { value: gain } });
+		}
+	}
+
+	//==============================================================================
+	// 음량 자동화. (원본 SoundSystem 이 버스 gain 에 거는 setTargetAtTime 들)
+	//==============================================================================
+	pub fn apply_gain_automation(&mut self, automation: GainAutomation) {
+		if let Some(gain_node) = &self.gain_node {
+			gain_node.inner.mixer_link.send(MixerCommand::BusGainAutomation { bus_id: gain_node.inner.bus_id, automation: to_param_automation(automation) });
 		}
 	}
 
@@ -721,325 +786,191 @@ pub fn get_audio_buffer_duration(audio_buffer: &AudioBuffer) -> f64 {
 }
 
 //==============================================================================
-// 비프 톤 하나 재생. (컨텍스트 표본율로 그린 표본을 출력에, 지연은 프레임으로. 원본 osc.start(now + delay))
+// 비프 톤 하나 재생. (원본 playTone 의 그래프를 믹서에: OscillatorNode → GainNode → 출력, 시각은 지금 컨텍스트 시계 + 지연)
 //==============================================================================
 pub fn play_beep_tone(state: &mut AudioManagerState, beep_envelope: &BeepEnvelope) {
-	let Some(mixer_link) = &state.platform_state.mixer_link else {
+	let platform_state = &mut state.platform_state;
+	let Some(mixer_link) = platform_state.mixer_link.clone() else {
 		return;
 	};
-	let sample_rate = mixer_link.shared.get_sample_rate();
-	let sample_list = render_beep_samples(beep_envelope, sample_rate);
-	let delay_frame_count = (beep_envelope.delay_seconds.max(0.0) * sample_rate).round() as u64;
-	mixer_link.send(MixerCommand::PlayBeep { sample_list, delay_frame_count });
+	let sample_rate = mixer_link.shared.get_sample_rate() as f32;
+	let periodic_wave = get_periodic_wave(&mut platform_state.periodic_wave_list, to_oscillator_type(beep_envelope.waveform), sample_rate);
+	if let Some(command) = create_beep_command(beep_envelope, periodic_wave, mixer_link.get_current_time()) {
+		mixer_link.send(command);
+	}
 }
 
 //==============================================================================
-// 비프 톤을 표본으로 그린다. (원본 오실레이터가 도는 길이 = 엔벨로프 길이 + 0.01초, 모노)
+// 비프 명령. (current_time: 부른 때의 컨텍스트 시계)
+// - 원본처럼 frequency.setValueAtTime(frequency, start), gain 의 setValueAtTime(바닥, start), linearRamp(최고, attack 끝),
+//   setValueAtTime(최고, release 시작), exponentialRamp(바닥, 끝), start(start), stop(끝 + 0.01).
+// - 시각이 음수면 원본 AudioParam, start 가 RangeError 를 던져 아무것도 틀지 않는 것처럼 보내지 않는다.
+// - start 는 크롬처럼 부른 때의 시계보다 앞으로 두지 않고, stop 은 0 보다 앞으로 두지 않는다.
 //==============================================================================
-fn render_beep_samples(beep_envelope: &BeepEnvelope, sample_rate: f64) -> Vec<f32> {
-	let total_seconds = beep_envelope.duration_seconds + BEEP_STOP_MARGIN_SECONDS;
-	let frame_count = (total_seconds * sample_rate).ceil() as usize;
-	let phase_step = beep_envelope.frequency as f64 / sample_rate;
-	let band_limited_waveform = BandLimitedWaveform::create(beep_envelope.waveform, beep_envelope.frequency as f64, sample_rate);
-	let mut phase = 0.0f64;
-	let mut sample_list = Vec::with_capacity(frame_count);
-	for frame_index in 0..frame_count {
-		let elapsed_seconds = frame_index as f64 / sample_rate;
-		let gain = get_beep_envelope_gain(beep_envelope, elapsed_seconds);
-		sample_list.push(band_limited_waveform.read_sample(phase) * gain);
-		phase += phase_step;
-		phase -= phase.floor();
+fn create_beep_command(beep_envelope: &BeepEnvelope, periodic_wave: Arc<PeriodicWave>, current_time: f64) -> Option<MixerCommand> {
+	let beep_schedule = beep_envelope.get_schedule(current_time);
+	let time_list = [beep_schedule.start_time, beep_schedule.attack_end_time, beep_schedule.release_start_time, beep_schedule.end_time, beep_schedule.stop_time];
+	if time_list.iter().any(|time| !(*time >= 0.0) || !time.is_finite()) {
+		return None;
 	}
-	sample_list
+	Some(MixerCommand::PlayBeep {
+		periodic_wave,
+		frequency: beep_envelope.frequency,
+		gain_automation_list: [
+			ParamAutomation::SetValueAtTime { value: BEEP_FLOOR_VOLUME, time: beep_schedule.start_time },
+			ParamAutomation::LinearRampToValueAtTime { value: beep_envelope.peak_volume, time: beep_schedule.attack_end_time },
+			ParamAutomation::SetValueAtTime { value: beep_envelope.peak_volume, time: beep_schedule.release_start_time },
+			ParamAutomation::ExponentialRampToValueAtTime { value: BEEP_FLOOR_VOLUME, time: beep_schedule.end_time },
+		],
+		call_time: current_time,
+		start_time: beep_schedule.start_time.max(current_time),
+		stop_time: beep_schedule.stop_time,
+	})
 }
 
 //==============================================================================
-// 엔벨로프 음량. (원본 GainNode 자동화와 같은 값, elapsed_seconds 는 톤 시작 기준)
-// - 0 ~ attack: 바닥에서 최고까지 선형, attack ~ release 시작: 최고 유지, release 시작 ~ 끝: 바닥까지 지수, 그 뒤 바닥.
+// 파형의 대역 제한 표. (원본 컨텍스트가 표본율마다 한 번 짓는 PeriodicWave 처럼 지어 둔다, 표본율이 바뀌면 새로)
 //==============================================================================
-fn get_beep_envelope_gain(beep_envelope: &BeepEnvelope, elapsed_seconds: f64) -> f32 {
-	let floor_volume = BEEP_FLOOR_VOLUME as f64;
-	let peak_volume = beep_envelope.peak_volume as f64;
-	let release_start_seconds = beep_envelope.get_release_start_seconds();
-	if elapsed_seconds < beep_envelope.attack_seconds {
-		let progress = elapsed_seconds / beep_envelope.attack_seconds;
-		return (floor_volume + (peak_volume - floor_volume) * progress) as f32;
+fn get_periodic_wave(periodic_wave_list: &mut Vec<Arc<PeriodicWave>>, oscillator_type: OscillatorType, sample_rate: f32) -> Arc<PeriodicWave> {
+	if let Some(periodic_wave) = periodic_wave_list.iter().find(|periodic_wave| periodic_wave.get_oscillator_type() == oscillator_type && periodic_wave.get_sample_rate() == sample_rate) {
+		return periodic_wave.clone();
 	}
-	if elapsed_seconds < release_start_seconds {
-		return peak_volume as f32;
-	}
-	if elapsed_seconds < beep_envelope.duration_seconds {
-		let progress = (elapsed_seconds - release_start_seconds) / (beep_envelope.duration_seconds - release_start_seconds);
-		return (peak_volume * (floor_volume / peak_volume).powf(progress)) as f32;
-	}
-	floor_volume as f32
+	periodic_wave_list.retain(|periodic_wave| periodic_wave.get_sample_rate() == sample_rate);
+	let periodic_wave = Arc::new(PeriodicWave::create_basic_waveform(sample_rate, oscillator_type));
+	periodic_wave_list.push(periodic_wave.clone());
+	periodic_wave
 }
 
-//==============================================================================
-// 대역 제한 표 크기. (크롬 PeriodicWave: 샘플레이트 24000 이하 2048, 88200 이하 4096, 그 위 16384)
-//==============================================================================
-fn get_periodic_wave_size(sample_rate: f64) -> usize {
-	if sample_rate <= 24000.0 {
-		return 2048;
-	}
-	if sample_rate <= 88200.0 {
-		return 4096;
-	}
-	16384
-}
-
-//==============================================================================
-// 파형의 푸리에 계수. (사인 항 b[harmonic_index], 크롬 GenerateBasicWaveform 과 같은 식, 0 번은 0)
-//==============================================================================
-fn get_fourier_coefficient(beep_waveform: BeepWaveform, harmonic_index: usize) -> f64 {
-	if harmonic_index == 0 {
-		return 0.0;
-	}
-	let is_odd = harmonic_index % 2 == 1;
-	let pi_factor = 2.0 / (harmonic_index as f64 * std::f64::consts::PI);
+fn to_oscillator_type(beep_waveform: BeepWaveform) -> OscillatorType {
 	match beep_waveform {
 		BeepWaveform::Sine => {
-			if harmonic_index == 1 {
-				1.0
-			}
-			else {
-				0.0
-			}
+			OscillatorType::Sine
 		}
 		BeepWaveform::Square => {
-			if is_odd {
-				2.0 * pi_factor
-			}
-			else {
-				0.0
-			}
+			OscillatorType::Square
 		}
 		BeepWaveform::Sawtooth => {
-			if is_odd {
-				pi_factor
-			}
-			else {
-				-pi_factor
-			}
+			OscillatorType::Sawtooth
 		}
 		BeepWaveform::Triangle => {
-			if !is_odd {
-				return 0.0;
-			}
-			let sign = if ((harmonic_index - 1) / 2) % 2 == 1 {
-				-1.0
-			}
-			else {
-				1.0
-			};
-			2.0 * pi_factor * pi_factor * sign
+			OscillatorType::Triangle
 		}
-	}
-}
-
-//==============================================================================
-// 정규화 배율. (배음을 다 둔 첫 표의 표 칸 값 가운데 가장 큰 크기의 역수, 크롬 normalization_scale, 파형과 표 크기마다 한 번 셈해 둔다)
-// - 네 파형은 모두 f(1 - x) = -f(x) 라서 표의 앞 반과 가운데만 본다.
-//==============================================================================
-fn get_normalization_scale(beep_waveform: BeepWaveform, periodic_wave_size: usize) -> f64 {
-	thread_local! {
-		static NORMALIZATION_SCALE_LIST: RefCell<Vec<(BeepWaveform, usize, f64)>> = const { RefCell::new(Vec::new()) };
-	}
-	let cached_scale = NORMALIZATION_SCALE_LIST.with(|normalization_scale_list| {
-		normalization_scale_list.borrow().iter().find(|(cached_waveform, cached_size, _)| *cached_waveform == beep_waveform && *cached_size == periodic_wave_size).map(|(_, _, cached_scale)| *cached_scale)
-	});
-	if let Some(cached_scale) = cached_scale {
-		return cached_scale;
-	}
-	let half_size = periodic_wave_size / 2;
-	let index_mask = periodic_wave_size - 1;
-	let sine_table: Vec<f64> = (0..periodic_wave_size).map(|table_index| (std::f64::consts::TAU * table_index as f64 / periodic_wave_size as f64).sin()).collect();
-	let harmonic_list: Vec<(usize, f64)> = (1..half_size).map(|harmonic_index| (harmonic_index, get_fourier_coefficient(beep_waveform, harmonic_index))).filter(|(_, coefficient)| *coefficient != 0.0).collect();
-	let mut maximum_value = 0.0f64;
-	for table_index in 0..=half_size {
-		let mut value = 0.0f64;
-		for (harmonic_index, coefficient) in harmonic_list.iter() {
-			value += coefficient * sine_table[(harmonic_index * table_index) & index_mask];
-		}
-		maximum_value = maximum_value.max(value.abs());
-	}
-	let normalization_scale = if maximum_value > 0.0 {
-		1.0 / maximum_value
-	}
-	else {
-		1.0
-	};
-	NORMALIZATION_SCALE_LIST.with(|normalization_scale_list| {
-		normalization_scale_list.borrow_mut().push((beep_waveform, periodic_wave_size, normalization_scale));
-	});
-	normalization_scale
-}
-
-//==============================================================================
-// 대역을 제한한 파형 하나. (주파수 하나에 맞춘 크롬 OscillatorNode 의 두 표 섞기)
-//==============================================================================
-struct BandLimitedWaveform {
-	// 배음을 더 둔 표의 계수. (1 번부터, 배음을 덜 둔 표는 앞의 lower_partial_count 개)
-	coefficient_list: Vec<f64>,
-	lower_partial_count: usize,
-	// 두 표를 섞는 비. (0 이면 배음을 더 둔 표, 1 이면 덜 둔 표)
-	table_interpolation_factor: f64,
-	normalization_scale: f64,
-}
-
-impl BandLimitedWaveform {
-	//==============================================================================
-	// 생성. (크롬 WaveDataForFundamentalFrequency 처럼 주파수로 표 둘과 섞는 비를 고른다)
-	// - 표 r 의 배음 수는 표 크기의 반 x 2^(-r/3) 을 내린 것이다. (표 크기의 반 - 1 을 넘지 않는다)
-	//==============================================================================
-	fn create(beep_waveform: BeepWaveform, frequency: f64, sample_rate: f64) -> BandLimitedWaveform {
-		let periodic_wave_size = get_periodic_wave_size(sample_rate);
-		let half_size = periodic_wave_size / 2;
-		let range_count = (PERIODIC_WAVE_OCTAVE_BAND_COUNT * (periodic_wave_size as f64).log2()).round() as usize;
-		let cents_per_range = CENTS_PER_OCTAVE / PERIODIC_WAVE_OCTAVE_BAND_COUNT;
-		let lowest_fundamental_frequency = sample_rate / periodic_wave_size as f64;
-		let absolute_frequency = frequency.abs();
-		let frequency_ratio = if absolute_frequency > 0.0 {
-			absolute_frequency / lowest_fundamental_frequency
-		}
-		else {
-			0.5
-		};
-		let cents_above_lowest_frequency = frequency_ratio.log2() * CENTS_PER_OCTAVE;
-		let pitch_range = (1.0 + cents_above_lowest_frequency / cents_per_range).clamp(0.0, (range_count - 1) as f64);
-		let higher_range_index = pitch_range as usize;
-		let lower_range_index = if higher_range_index < range_count - 1 {
-			higher_range_index + 1
-		}
-		else {
-			higher_range_index
-		};
-		let read_partial_count = |range_index: usize| -> usize {
-			let culling_scale = 2.0f64.powf(-(range_index as f64 * cents_per_range) / CENTS_PER_OCTAVE);
-			let partial_count = (culling_scale * half_size as f64) as usize;
-			partial_count.min(half_size - 1)
-		};
-		let higher_partial_count = read_partial_count(higher_range_index);
-		let lower_partial_count = read_partial_count(lower_range_index);
-		BandLimitedWaveform {
-			coefficient_list: (1..=higher_partial_count).map(|harmonic_index| get_fourier_coefficient(beep_waveform, harmonic_index)).collect(),
-			lower_partial_count,
-			table_interpolation_factor: pitch_range - higher_range_index as f64,
-			normalization_scale: get_normalization_scale(beep_waveform, periodic_wave_size),
-		}
-	}
-
-	//==============================================================================
-	// 파형 한 점. (phase: 0 ~ 1, 0 에서 시작해 위로 올라가는 꼴, 사인 배음은 점화식 sin(nθ) = 2cos(θ)sin((n-1)θ) - sin((n-2)θ) 로 잇는다)
-	//==============================================================================
-	fn read_sample(&self, phase: f64) -> f32 {
-		let angle = phase * std::f64::consts::TAU;
-		let doubled_cosine = 2.0 * angle.cos();
-		let mut previous_sine = 0.0f64;
-		let mut current_sine = angle.sin();
-		let mut higher_sum = 0.0f64;
-		let mut lower_sum = 0.0f64;
-		for (coefficient_index, coefficient) in self.coefficient_list.iter().enumerate() {
-			let term = coefficient * current_sine;
-			higher_sum += term;
-			if coefficient_index < self.lower_partial_count {
-				lower_sum += term;
-			}
-			let next_sine = doubled_cosine * current_sine - previous_sine;
-			previous_sine = current_sine;
-			current_sine = next_sine;
-		}
-		let sample = ((1.0 - self.table_interpolation_factor) * higher_sum + self.table_interpolation_factor * lower_sum) * self.normalization_scale;
-		sample as f32
-	}
-
-	//==============================================================================
-	// 배음을 더 둔 표의 배음 수.
-	//==============================================================================
-	#[cfg(test)]
-	fn get_higher_partial_count(&self) -> usize {
-		self.coefficient_list.len()
 	}
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use std::sync::mpsc::channel;
 
 	//==============================================================================
-	// 엔벨로프는 바닥에서 올라 최고를 지키다 바닥으로 내려간다.
+	// base64 풀기. (시험 기대값)
 	//==============================================================================
-	#[test]
-	fn beep_envelope_gain_follows_automation() {
-		let beep_envelope = BeepEnvelope::create(880.0, 0.045, BeepWaveform::Sine, 0.0, 0.35, 1.0);
-		assert!((get_beep_envelope_gain(&beep_envelope, 0.0) - BEEP_FLOOR_VOLUME).abs() < 1e-7);
-		assert!((get_beep_envelope_gain(&beep_envelope, 0.0025) - (0.0001 + 0.3499 * 0.5)).abs() < 1e-5);
-		assert!((get_beep_envelope_gain(&beep_envelope, 0.01) - 0.35).abs() < 1e-6);
-		assert!((get_beep_envelope_gain(&beep_envelope, 0.024) - 0.35).abs() < 1e-6);
-		let middle_gain = get_beep_envelope_gain(&beep_envelope, 0.035);
-		assert!((middle_gain as f64 - (0.35f64 * 0.0001).sqrt()).abs() < 1e-5);
-		assert!((get_beep_envelope_gain(&beep_envelope, 0.05) - BEEP_FLOOR_VOLUME).abs() < 1e-7);
+	fn decode_base64(text: &str) -> Vec<u8> {
+		let mut byte_list = Vec::with_capacity(text.len() / 4 * 3);
+		let mut buffer = 0u32;
+		let mut bit_count = 0;
+		for character in text.bytes() {
+			let value = match character {
+				b'A'..=b'Z' => character - b'A',
+				b'a'..=b'z' => character - b'a' + 26,
+				b'0'..=b'9' => character - b'0' + 52,
+				b'+' => 62,
+				b'/' => 63,
+				_ => continue,
+			};
+			buffer = (buffer << 6) | value as u32;
+			bit_count += 6;
+			if bit_count >= 8 {
+				bit_count -= 8;
+				byte_list.push((buffer >> bit_count) as u8);
+			}
+		}
+		byte_list
 	}
 
 	//==============================================================================
-	// 파형은 0 에서 시작해 위로 올라가고, 사인은 그대로 사인이다. 정규화 배율은 크롬처럼 배음을 다 둔 표의 가장 큰 값으로 맞춘다.
-	// - 기대값은 같은 식(표 4096 칸, 배음 2047 개)을 파이썬으로 따로 셈한 것이다. (사각 1.17898, 톱니 1.17849, 삼각 0.99980)
+	// 크롬(158) OfflineAudioContext 의 원본 playTone 그래프와 표본마다 견준다. (tests/assets/mixer/chromebeep.cjs 가 찍은 chrome_beep.json)
+	// - 네 파형, 프리셋 시퀀스, 표본 사이 시작, 그리는 도중 부르기, 표본율 22050(표 2048 칸), 96000(표 16384 칸), 3 점과 5 점 보간, 나이퀴스트 가까이.
+	// - 크롬의 오실레이터 커널은 CPU 마다 다르다. 기대값을 찍은 CPU 와 같으면 1e-6, 다르면 1e-4 안으로 본다.
 	//==============================================================================
 	#[test]
-	fn band_limited_waveform_matches_periodic_wave() {
-		let sample_rate = 44100.0;
-		for beep_waveform in [BeepWaveform::Sine, BeepWaveform::Square, BeepWaveform::Sawtooth, BeepWaveform::Triangle] {
-			let band_limited_waveform = BandLimitedWaveform::create(beep_waveform, 440.0, sample_rate);
-			assert!(band_limited_waveform.read_sample(0.0).abs() < 1e-6);
-			assert!(band_limited_waveform.read_sample(0.1) > 0.0);
+	fn beep_matches_chrome_offline_rendering() {
+		let json: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/assets/mixer/chrome_beep.json")).expect("chrome_beep.json")).expect("json");
+		let chrome_architecture = json["architecture"].as_str().unwrap();
+		let architecture = if cfg!(target_arch = "aarch64") {
+			"arm64"
 		}
-		let sine_waveform = BandLimitedWaveform::create(BeepWaveform::Sine, 880.0, sample_rate);
-		for step_index in 0..16 {
-			let phase = step_index as f64 / 16.0;
-			assert!((sine_waveform.read_sample(phase) as f64 - (phase * std::f64::consts::TAU).sin()).abs() < 1e-6);
+		else if cfg!(target_arch = "x86_64") {
+			"x64"
 		}
-		assert!((get_normalization_scale(BeepWaveform::Square, 4096) - 1.0 / 1.1789798).abs() < 1e-5);
-		assert!((get_normalization_scale(BeepWaveform::Sawtooth, 4096) - 1.0 / 1.1784914).abs() < 1e-5);
-		assert!((get_normalization_scale(BeepWaveform::Triangle, 4096) - 1.0 / 0.9998021).abs() < 1e-5);
-
-		// 사각파의 가운데는 정규화 배율 근처, 삼각파의 꼭대기는 1 근처다.
-		let square_waveform = BandLimitedWaveform::create(BeepWaveform::Square, 440.0, sample_rate);
-		assert!((square_waveform.read_sample(0.25) - 0.848).abs() < 0.03);
-		assert!((square_waveform.read_sample(0.75) + 0.848).abs() < 0.03);
-		let triangle_waveform = BandLimitedWaveform::create(BeepWaveform::Triangle, 440.0, sample_rate);
-		assert!((triangle_waveform.read_sample(0.25) - 1.0).abs() < 0.02);
+		else {
+			"ia32"
+		};
+		let tolerance = if architecture == chrome_architecture { 1e-6 } else { 1e-4 };
+		let case_list = json["cases"].as_array().unwrap();
+		assert_eq!(case_list.len(), 9);
+		for test_case in case_list {
+			let name = test_case["name"].as_str().unwrap();
+			let context_rate = test_case["contextRate"].as_f64().unwrap();
+			let render_length = test_case["renderLength"].as_u64().unwrap() as usize;
+			let volume = test_case["volume"].as_f64().unwrap() as f32;
+			let expected_list: Vec<f32> = decode_base64(test_case["samples"].as_str().unwrap()).chunks(4).map(|bytes| f32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])).collect();
+			assert_eq!(expected_list.len(), render_length);
+			let (command_sender, command_receiver) = channel();
+			let mut renderer = MixerRenderer::new(command_receiver, Arc::new(MixerShared::new(context_rate)), context_rate);
+			let mut periodic_wave_list = Vec::new();
+			let mut output = vec![0.0f32; render_length * 2];
+			let mut rendered_frame_count = 0usize;
+			for call in test_case["callList"].as_array().unwrap() {
+				let call_time = call["callTime"].as_f64().unwrap();
+				let call_frame = (call_time * context_rate).round() as usize;
+				renderer.render_interleaved(&mut output[rendered_frame_count * 2..call_frame * 2], 2);
+				rendered_frame_count = call_frame;
+				for tone in call["toneList"].as_array().unwrap() {
+					let beep_waveform = match tone["waveform"].as_str().unwrap() {
+						"square" => BeepWaveform::Square,
+						"sawtooth" => BeepWaveform::Sawtooth,
+						"triangle" => BeepWaveform::Triangle,
+						_ => BeepWaveform::Sine,
+					};
+					let beep_envelope = BeepEnvelope::create(tone["frequency"].as_f64().unwrap() as f32, tone["duration"].as_f64().unwrap(), beep_waveform, tone["delay"].as_f64().unwrap(), volume, tone["volumeScale"].as_f64().unwrap() as f32);
+					let periodic_wave = get_periodic_wave(&mut periodic_wave_list, to_oscillator_type(beep_waveform), context_rate as f32);
+					command_sender.send(create_beep_command(&beep_envelope, periodic_wave, call_time).unwrap()).unwrap();
+				}
+			}
+			renderer.render_interleaved(&mut output[rendered_frame_count * 2..], 2);
+			let mut maximum_difference = 0.0f64;
+			for (frame_index, expected) in expected_list.iter().enumerate() {
+				let left = output[frame_index * 2];
+				assert_eq!(left, output[frame_index * 2 + 1], "{} 자리 {}: 왼쪽과 오른쪽", name, frame_index);
+				let difference = (left as f64 - *expected as f64).abs();
+				maximum_difference = maximum_difference.max(difference);
+				assert!(difference < tolerance, "{} 자리 {}: {} / {}", name, frame_index, left, expected);
+			}
+			println!("{}: 가장 큰 차이 {:e}", name, maximum_difference);
+		}
 	}
 
 	//==============================================================================
-	// 높은 배음은 나이퀴스트 아래에서 끊긴다. (크롬처럼 440 Hz 는 40 개와 32 개 사이, 880 Hz 는 20 개와 16 개 사이)
+	// 시각이 음수면 보내지 않고, 시작은 부른 때의 시계보다 앞으로 두지 않는다.
 	//==============================================================================
 	#[test]
-	fn band_limited_waveform_culls_partials() {
-		let sample_rate = 44100.0;
-		let waveform_440 = BandLimitedWaveform::create(BeepWaveform::Sawtooth, 440.0, sample_rate);
-		assert_eq!(waveform_440.get_higher_partial_count(), 40);
-		assert_eq!(waveform_440.lower_partial_count, 32);
-		let waveform_880 = BandLimitedWaveform::create(BeepWaveform::Square, 880.0, sample_rate);
-		assert_eq!(waveform_880.get_higher_partial_count(), 20);
-		assert_eq!(waveform_880.lower_partial_count, 16);
-		for frequency in [60.0, 220.0, 1000.0, 3000.0, 8000.0] {
-			let band_limited_waveform = BandLimitedWaveform::create(BeepWaveform::Sawtooth, frequency, sample_rate);
-			assert!(band_limited_waveform.get_higher_partial_count() as f64 * frequency < sample_rate * 0.5);
+	fn beep_command_follows_original_time_rules() {
+		let periodic_wave = Arc::new(PeriodicWave::create_basic_waveform(48000.0, OscillatorType::Sine));
+		let negative_envelope = BeepEnvelope::create(440.0, 0.05, BeepWaveform::Sine, -1.0, 0.35, 1.0);
+		assert!(create_beep_command(&negative_envelope, periodic_wave.clone(), 0.5).is_none());
+		let beep_envelope = BeepEnvelope::create(440.0, 0.05, BeepWaveform::Sine, 0.25, 0.35, 1.0);
+		match create_beep_command(&beep_envelope, periodic_wave, 0.5) {
+			Some(MixerCommand::PlayBeep { call_time, start_time, stop_time, frequency, .. }) => {
+				assert_eq!(call_time, 0.5);
+				assert_eq!(start_time, 0.75);
+				assert_eq!(stop_time, (0.75 + 0.05) + 0.01);
+				assert_eq!(frequency, 440.0);
+			}
+			_ => {
+				panic!("비프 명령");
+			}
 		}
-	}
-
-	//==============================================================================
-	// 그린 샘플 수는 (길이 + 0.01초) x 샘플레이트다.
-	//==============================================================================
-	#[test]
-	fn render_beep_frames_length() {
-		let beep_envelope = BeepEnvelope::create(440.0, 0.09, BeepWaveform::Square, 0.06, 0.35, 0.7);
-		let frame_list = render_beep_samples(&beep_envelope, 44100.0);
-		// (0.09 + 0.01 의 부동소수 오차로 마지막 한 샘플은 올림에 따라 달라진다)
-		let expected_frame_count = (0.1f64 * 44100.0) as i64;
-		assert!((frame_list.len() as i64 - expected_frame_count).abs() <= 1);
-		// 대역을 제한한 사각파는 깁스 너울 꼭대기가 1 근처다.
-		let peak_sample = frame_list.iter().map(|sample| sample.abs()).fold(0.0f32, f32::max);
-		assert!((peak_sample - 0.35 * 0.7).abs() < 0.35 * 0.7 * 0.05);
 	}
 }

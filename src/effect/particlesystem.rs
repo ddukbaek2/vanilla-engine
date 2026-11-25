@@ -1,19 +1,21 @@
 //==============================================================================
-// 파티클 시스템 컴포넌트.
-// - 원본 effect/particlesystem.js 의 ParticleSystem. 이름, 기본값, 쓰임새(play / stop / emit / simulate / setStart...)는 원본을 따른다.
-// - 입자는 원본처럼 컴포넌트가 그리는 좌표(노드 content_size 영역의 왼쪽 위가 원점)의 원점에서 나온다. content_size 가 0 인 노드면 노드 자리다.
-//   끌개 자리(set_attractor)도 원본처럼 같은 좌표다.
-// - 낼 때 난수를 뽑는 차례와 셈의 차례도 원본과 같다. 같은 씨앗(set_random_seed)이면 원본과 같은 입자가 나온다.
-//   (시드 난수는 원본과 비트까지 같은 수열이다. 입자 셈은 엔진의 다른 곳처럼 f32 라서 원본(f64)과 끝자리만 다르다)
-// - 정점마다 색을 실어 draw_colored_quads 로 그린다. image 모양도 원본처럼 색 곡선과 시작 색(r, g, b)을 쓰지 않고 시작 알파 x (1 - 수명 비율) 로만 흐려진다.
-//   원본은 image 를 입자마다 따로 그리고, 러스트 판은 그림 텍스처로 한 번에 그린다. (그려지는 자리와 색은 같다)
-// - 원본과 다른 것:
-//   - 방출 모양, 렌더 모양, 합성은 원본의 문자열 대신 열거형(ParticleEmitterShape, ParticleRenderShape, BlendMode)이다. 서술(apply_description)은 원본 문자열을 읽는다.
-//   - 원본의 기본 인자(setStartLifetime(min, max = min) 같은)는 러스트에 없어 두 값을 다 받는다. emit 의 원점 보정은 Option 이다.
-//   - 월드 공간(set_world_space)에서 낼 때 더하는 노드 로컬 위치는 tick 에서 읽어 둔다. 러스트 컴포넌트는 tick 과 draw 밖에서 노드를 읽을 수 없어서다.
-//     원본처럼 낼 때의 노드 위치로 내려면 ParticleSystem::emit_in_tree(트리, 노드, 수, 보정)로 내거나, set_node_position 으로 위치를 넣고 emit 한다.
-//     (Timeline 의 emit 이벤트는 그 자리의 노드 위치를 넣고 낸다)
-//   - 정점 색 쿼드는 한 번에 그릴 수 있는 정점 수(Graphic 한도)씩 나눠 그린다. 원본은 배열을 늘려 한 번에 그린다.
+//! 파티클 시스템 컴포넌트.
+//! - 원본 effect/particlesystem.js 의 ParticleSystem. 이름, 기본값, 쓰임새(play / stop / emit / simulate / setStart...)는 원본을 따른다.
+//! - 입자는 원본처럼 컴포넌트가 그리는 좌표(노드 content_size 영역의 왼쪽 위가 원점)의 원점에서 나온다. content_size 가 0 인 노드면 노드 자리다.
+//!   끌개 자리(set_attractor)도 원본처럼 같은 좌표다.
+//! - 낼 때 난수를 뽑는 차례와 셈의 차례도 원본과 같다. 같은 씨앗(set_random_seed)이면 원본과 같은 입자가 나온다.
+//!   (시드 난수는 원본과 비트까지 같은 수열이다. 입자 셈은 엔진의 다른 곳처럼 f32 라서 원본(f64)과 끝자리만 다르다)
+//! - 정점마다 색을 실어 draw_colored_quads 로 그린다. image 모양도 원본처럼 색 곡선과 시작 색(r, g, b)을 쓰지 않고 시작 알파 x (1 - 수명 비율) 로만 흐려진다.
+//!   원본은 image 를 입자마다 따로 그리고, 러스트 판은 그림 텍스처로 한 번에 그린다. (그려지는 자리와 색은 같다)
+//! - 원본과 다른 것:
+//!   - 방출 모양, 렌더 모양, 합성은 원본의 문자열 대신 열거형(ParticleEmitterShape, ParticleRenderShape, BlendMode)이다. 서술(apply_description)은 원본 문자열을 읽는다.
+//!   - 원본의 기본 인자(setStartLifetime(min, max = min) 같은)는 러스트에 없어 두 값을 다 받는다. emit 의 원점 보정은 Option 이다.
+//!   - 월드 공간(set_world_space)에서 낼 때 더하는 노드 로컬 위치는 tick 에서 읽어 둔다. 러스트 컴포넌트는 tick 과 draw 밖에서 노드를 읽을 수 없어서다.
+//!   ```text
+//!     원본처럼 낼 때의 노드 위치로 내려면 ParticleSystem::emit_in_tree(트리, 노드, 수, 보정)로 내거나, set_node_position 으로 위치를 넣고 emit 한다.
+//!     (Timeline 의 emit 이벤트는 그 자리의 노드 위치를 넣고 낸다)
+//!   ```
+//!   - 정점 색 쿼드는 한 번에 그릴 수 있는 정점 수(Graphic 한도)씩 나눠 그린다. 원본은 배열을 늘려 한 번에 그린다.
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::math;
@@ -27,23 +29,23 @@ use crate::core::node::worldnode::NodeTransform;
 use std::rc::Rc;
 
 //==============================================================================
-// 방출 모양. (원본 ParticleEmitterShape)
+/// 방출 모양. (원본 ParticleEmitterShape)
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ParticleEmitterShape {
-	// 노드 원점 한 점에서 모든 방향으로.
+	/// 노드 원점 한 점에서 모든 방향으로.
 	Point,
-	// 반지름 안 무작위 위치에서 바깥 방향으로.
+	/// 반지름 안 무작위 위치에서 바깥 방향으로.
 	Circle,
-	// 위쪽(-Y) 기준 반각 cone_angle 부채꼴 방향으로, 그 방향 반지름 안 위치에서.
+	/// 위쪽(-Y) 기준 반각 cone_angle 부채꼴 방향으로, 그 방향 반지름 안 위치에서.
 	Cone,
-	// box_size 사각 영역 안 무작위 위치에서 위쪽(-Y)으로.
+	/// box_size 사각 영역 안 무작위 위치에서 위쪽(-Y)으로.
 	Box,
-	// edge_width 가로 선분 위 무작위 위치에서 아래쪽(+Y)으로. (눈, 비처럼 위에서 뿌릴 때)
+	/// edge_width 가로 선분 위 무작위 위치에서 아래쪽(+Y)으로. (눈, 비처럼 위에서 뿌릴 때)
 	Edge,
 }
 
-// 서술의 방출 모양 이름. (원본 ParticleEmitterShape 값)
+/// 서술의 방출 모양 이름. (원본 ParticleEmitterShape 값)
 const EMITTER_SHAPE_NAME_TABLE: [(ParticleEmitterShape, &str); 5] = [
 	(ParticleEmitterShape::Point, "point"),
 	(ParticleEmitterShape::Circle, "circle"),
@@ -56,21 +58,21 @@ const EMITTER_SHAPE_NAME_TABLE: [(ParticleEmitterShape, &str); 5] = [
 crate::core::reflection::impl_reflect_names!(ParticleEmitterShape, EMITTER_SHAPE_NAME_TABLE);
 
 //==============================================================================
-// 렌더 모양. (원본 ParticleRenderShape)
+/// 렌더 모양. (원본 ParticleRenderShape)
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ParticleRenderShape {
-	// 부드러운 원. (기본)
+	/// 부드러운 원. (기본)
 	Circle,
-	// 사각형. (색종이 조각처럼 도는 판)
+	/// 사각형. (색종이 조각처럼 도는 판)
 	Rect,
-	// 진행 방향으로 늘인 띠. (비, 유성)
+	/// 진행 방향으로 늘인 띠. (비, 유성)
 	Streak,
-	// set_image 로 넣은 그림.
+	/// set_image 로 넣은 그림.
 	Image,
 }
 
-// 서술의 렌더 모양 이름. (원본 ParticleRenderShape 값)
+/// 서술의 렌더 모양 이름. (원본 ParticleRenderShape 값)
 const RENDER_SHAPE_NAME_TABLE: [(ParticleRenderShape, &str); 4] = [
 	(ParticleRenderShape::Circle, "circle"),
 	(ParticleRenderShape::Rect, "rect"),
@@ -81,14 +83,14 @@ const RENDER_SHAPE_NAME_TABLE: [(ParticleRenderShape, &str); 4] = [
 // 렌더 모양의 반사 값. (원본 ParticleRenderShape 글)
 crate::core::reflection::impl_reflect_names!(ParticleRenderShape, RENDER_SHAPE_NAME_TABLE);
 
-// 쿼드 네 모서리의 텍스처 좌표. (왼쪽 위, 오른쪽 위, 오른쪽 아래, 왼쪽 아래)
+/// 쿼드 네 모서리의 텍스처 좌표. (왼쪽 위, 오른쪽 위, 오른쪽 아래, 왼쪽 아래)
 const QUAD_TEXTURE_COORDINATES: [(f32, f32); 4] = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)];
 
-// 쿼드 한 장의 정점 수. (삼각형 둘)
+/// 쿼드 한 장의 정점 수. (삼각형 둘)
 const QUAD_VERTEX_COUNT: usize = 6;
 
 //==============================================================================
-// 버스트 하나. (재생 시작부터 time 초에 count 개를 한 번에 낸다. 반복이면 duration 주기마다)
+/// 버스트 하나. (재생 시작부터 time 초에 count 개를 한 번에 낸다. 반복이면 duration 주기마다)
 //==============================================================================
 struct ParticleBurst {
 	time: f32,
@@ -97,7 +99,7 @@ struct ParticleBurst {
 }
 
 //==============================================================================
-// 입자 하나. (원본 입자 객체의 칸)
+/// 입자 하나. (원본 입자 객체의 칸)
 //==============================================================================
 struct Particle {
 	x: f32,
@@ -121,23 +123,23 @@ pub struct ParticleSystem {
 	particle_list: Vec<Particle>,
 	is_playing: bool,
 	is_looping: bool,
-	// 루프 꺼짐일 때 방출이 이어지는 시간.
+	/// 루프 꺼짐일 때 방출이 이어지는 시간.
 	duration: f32,
 	play_elapsed_seconds: f32,
 	max_particle_count: usize,
 
-	// 방출.
+	/// 방출.
 	emission_rate: f32,
 	emission_accumulator: f32,
 	burst_list: Vec<ParticleBurst>,
 	emitter_shape: ParticleEmitterShape,
 	shape_radius: f32,
-	// cone 전용 반각. (라디안)
+	/// cone 전용 반각. (라디안)
 	cone_angle_radian: f32,
 	box_size: Vector2,
 	edge_width: f32,
 
-	// 시작 범위.
+	/// 시작 범위.
 	start_lifetime_min: f32,
 	start_lifetime_max: f32,
 	start_speed_min: f32,
@@ -149,31 +151,31 @@ pub struct ParticleSystem {
 	start_color_a: Color,
 	start_color_b: Color,
 
-	// 수명 동안 변화.
+	/// 수명 동안 변화.
 	color_over_lifetime: Vec<(f32, Color)>,
 	size_over_lifetime_start: f32,
 	size_over_lifetime_end: f32,
 	angular_velocity_min: f32,
 	angular_velocity_max: f32,
 
-	// 물리.
+	/// 물리.
 	gravity: Vector2,
 	damping: f32,
 
-	// 힘.
+	/// 힘.
 	attractor_position: Option<Vector2>,
 	attractor_strength: f32,
 	attractor_swirl: f32,
 	wobble_amplitude: f32,
 	wobble_frequency: f32,
 
-	// 렌더.
+	/// 렌더.
 	render_shape: ParticleRenderShape,
 	image: Option<Rc<Image>>,
 	blend_mode: BlendMode,
 	streak_scale: f32,
 	is_world_space: bool,
-	// 월드 공간에서 낼 때 더하는 노드 로컬 위치. (tick 에서 읽어 둔다)
+	/// 월드 공간에서 낼 때 더하는 노드 로컬 위치. (tick 에서 읽어 둔다)
 	node_position: Vector2,
 	is_manual_tick: bool,
 	random: Option<SeededRandom>,
@@ -183,7 +185,7 @@ pub struct ParticleSystem {
 #[crate::reflect]
 impl ParticleSystem {
 	//==============================================================================
-	// 생성. (원본 생성자의 기본값)
+	/// 생성. (원본 생성자의 기본값)
 	//==============================================================================
 	pub fn new() -> ParticleSystem {
 		ParticleSystem {
@@ -237,7 +239,7 @@ impl ParticleSystem {
 	}
 
 	//==============================================================================
-	// 재생.
+	/// 재생.
 	//==============================================================================
 	pub fn play(&mut self) {
 		self.is_playing = true;
@@ -248,7 +250,7 @@ impl ParticleSystem {
 	}
 
 	//==============================================================================
-	// 정지. (is_clearing 이면 살아 있는 입자도 지운다)
+	/// 정지. (is_clearing 이면 살아 있는 입자도 지운다)
 	//==============================================================================
 	pub fn stop(&mut self, is_clearing: bool) {
 		self.is_playing = false;
@@ -262,7 +264,7 @@ impl ParticleSystem {
 	}
 
 	//==============================================================================
-	// 한 번에 여러 개 방출. (버튼 클릭 등 이벤트성 연출, origin_offset 은 방출 원점 보정, 노드 로컬 기준)
+	/// 한 번에 여러 개 방출. (버튼 클릭 등 이벤트성 연출, origin_offset 은 방출 원점 보정, 노드 로컬 기준)
 	//==============================================================================
 	pub fn emit(&mut self, count: usize, origin_offset: Option<Vector2>) {
 		for _ in 0..count {
@@ -271,7 +273,7 @@ impl ParticleSystem {
 	}
 
 	//==============================================================================
-	// 노드의 지금 위치로 여러 개 방출. (원본 emit 처럼 낼 때 노드 로컬 위치를 읽는다. 노드나 파티클 시스템이 없으면 false)
+	/// 노드의 지금 위치로 여러 개 방출. (원본 emit 처럼 낼 때 노드 로컬 위치를 읽는다. 노드나 파티클 시스템이 없으면 false)
 	//==============================================================================
 	pub fn emit_in_tree(node_tree: &mut NodeTree, node_id: NodeId, count: usize, origin_offset: Option<Vector2>) -> bool {
 		let node = match node_tree.get_node_mut(node_id) {
@@ -296,14 +298,14 @@ impl ParticleSystem {
 	}
 
 	//==============================================================================
-	// 월드 공간에서 낼 때 더할 노드 로컬 위치 설정. (tick 이 읽어 두는 값을 낼 자리에서 고칠 때)
+	/// 월드 공간에서 낼 때 더할 노드 로컬 위치 설정. (tick 이 읽어 두는 값을 낼 자리에서 고칠 때)
 	//==============================================================================
 	pub fn set_node_position(&mut self, node_position: Vector2) {
 		self.node_position = node_position;
 	}
 
 	//==============================================================================
-	// 시간 진행. (방출 + 적분, 수동 tick 이면 밖에서 부른다)
+	/// 시간 진행. (방출 + 적분, 수동 tick 이면 밖에서 부른다)
 	//==============================================================================
 	pub fn simulate(&mut self, time_delta: f32) {
 		// 방출.
@@ -378,7 +380,7 @@ impl ParticleSystem {
 	}
 
 	//==============================================================================
-	// 파티클 하나 생성. (최대 수면 내지 않는다, 원본과 같은 차례로 난수를 뽑는다)
+	/// 파티클 하나 생성. (최대 수면 내지 않는다, 원본과 같은 차례로 난수를 뽑는다)
 	//==============================================================================
 	fn spawn_particle(&mut self, origin_offset: Option<Vector2>) {
 		if self.particle_list.len() >= self.max_particle_count {
@@ -459,7 +461,7 @@ impl ParticleSystem {
 	}
 
 	//==============================================================================
-	// 수명 비율에 따른 색 계산. (시작 색에 색 곡선을 곱한다, 알파는 0 ~ 1)
+	/// 수명 비율에 따른 색 계산. (시작 색에 색 곡선을 곱한다, 알파는 0 ~ 1)
 	//==============================================================================
 	fn evaluate_color(&self, particle: &Particle, life_ratio: f32) -> Color {
 		let mut red = particle.red;
@@ -494,7 +496,7 @@ impl ParticleSystem {
 	}
 
 	//==============================================================================
-	// 버스트 목록 설정. ((재생 시작부터 초, 개수) 목록)
+	/// 버스트 목록 설정. ((재생 시작부터 초, 개수) 목록)
 	//==============================================================================
 	pub fn set_burst_list(&mut self, burst_list: Vec<(f32, usize)>) {
 		self.burst_list = burst_list.into_iter().map(|(time, count)| ParticleBurst { time, count, is_fired: false }).collect();
@@ -505,14 +507,14 @@ impl ParticleSystem {
 	}
 
 	//==============================================================================
-	// circle / cone 반지름.
+	/// circle / cone 반지름.
 	//==============================================================================
 	pub fn set_shape_radius(&mut self, shape_radius: f32) {
 		self.shape_radius = shape_radius;
 	}
 
 	//==============================================================================
-	// cone 반각. (라디안)
+	/// cone 반각. (라디안)
 	//==============================================================================
 	pub fn set_cone_angle(&mut self, cone_angle_radian: f32) {
 		self.cone_angle_radian = cone_angle_radian;
@@ -523,7 +525,7 @@ impl ParticleSystem {
 	}
 
 	//==============================================================================
-	// edge 방출 모양의 가로 길이.
+	/// edge 방출 모양의 가로 길이.
 	//==============================================================================
 	pub fn set_edge_width(&mut self, edge_width: f32) {
 		self.edge_width = edge_width;
@@ -550,7 +552,7 @@ impl ParticleSystem {
 	}
 
 	//==============================================================================
-	// 시작 색. (둘 사이 무작위)
+	/// 시작 색. (둘 사이 무작위)
 	//==============================================================================
 	pub fn set_start_color(&mut self, color_a: impl Into<Color>, color_b: impl Into<Color>) {
 		self.start_color_a = color_a.into();
@@ -558,7 +560,7 @@ impl ParticleSystem {
 	}
 
 	//==============================================================================
-	// 수명에 따른 색 곡선. (수명 비율 0 ~ 1 과 색의 쌍 목록, 시작 색에 곱한다)
+	/// 수명에 따른 색 곡선. (수명 비율 0 ~ 1 과 색의 쌍 목록, 시작 색에 곱한다)
 	//==============================================================================
 	pub fn set_color_over_lifetime(&mut self, gradient: Vec<(f32, Color)>) {
 		self.color_over_lifetime = gradient;
@@ -579,28 +581,28 @@ impl ParticleSystem {
 	}
 
 	//==============================================================================
-	// 초당 감쇠 계수. (0 = 없음)
+	/// 초당 감쇠 계수. (0 = 없음)
 	//==============================================================================
 	pub fn set_damping(&mut self, damping: f32) {
 		self.damping = damping;
 	}
 
 	//==============================================================================
-	// 렌더 모양 설정. (기본 circle)
+	/// 렌더 모양 설정. (기본 circle)
 	//==============================================================================
 	pub fn set_render_shape(&mut self, render_shape: ParticleRenderShape) {
 		self.render_shape = render_shape;
 	}
 
 	//==============================================================================
-	// 입자 이미지. (렌더 모양이 image 일 때 쓴다)
+	/// 입자 이미지. (렌더 모양이 image 일 때 쓴다)
 	//==============================================================================
 	pub fn set_image(&mut self, image: Option<Rc<Image>>) {
 		self.image = image;
 	}
 
 	//==============================================================================
-	// 더하기 합성 여부. (set_blend_mode(Lighter) 의 설탕)
+	/// 더하기 합성 여부. (set_blend_mode(Lighter) 의 설탕)
 	//==============================================================================
 	pub fn set_additive(&mut self, is_additive: bool) {
 		self.blend_mode = if is_additive {
@@ -616,7 +618,7 @@ impl ParticleSystem {
 	}
 
 	//==============================================================================
-	// 끌개 설정. (컴포넌트 좌표의 자리, 중심 쪽 가속(음수면 밀어냄), 접선 쪽 가속(소용돌이))
+	/// 끌개 설정. (컴포넌트 좌표의 자리, 중심 쪽 가속(음수면 밀어냄), 접선 쪽 가속(소용돌이))
 	//==============================================================================
 	pub fn set_attractor(&mut self, x: f32, y: f32, strength: f32, swirl: f32) {
 		self.attractor_position = Some(Vector2::create(x, y));
@@ -625,14 +627,14 @@ impl ParticleSystem {
 	}
 
 	//==============================================================================
-	// 끌개 해제.
+	/// 끌개 해제.
 	//==============================================================================
 	pub fn clear_attractor(&mut self) {
 		self.attractor_position = None;
 	}
 
 	//==============================================================================
-	// 흔들림 설정. (가로로 살랑이는 폭, 초당 각속도. 원본 기본 각속도는 4)
+	/// 흔들림 설정. (가로로 살랑이는 폭, 초당 각속도. 원본 기본 각속도는 4)
 	//==============================================================================
 	pub fn set_wobble(&mut self, amplitude: f32, frequency: f32) {
 		self.wobble_amplitude = amplitude;
@@ -640,14 +642,14 @@ impl ParticleSystem {
 	}
 
 	//==============================================================================
-	// streak 길이 비율. (띠의 길이 = 속도 x 이 값)
+	/// streak 길이 비율. (띠의 길이 = 속도 x 이 값)
 	//==============================================================================
 	pub fn set_streak_scale(&mut self, streak_scale: f32) {
 		self.streak_scale = streak_scale;
 	}
 
 	//==============================================================================
-	// 월드 공간 설정. (켜면 낸 뒤 노드가 움직여도 입자는 그 자리에 남는다)
+	/// 월드 공간 설정. (켜면 낸 뒤 노드가 움직여도 입자는 그 자리에 남는다)
 	//==============================================================================
 	pub fn set_world_space(&mut self, is_world_space: bool) {
 		self.is_world_space = is_world_space;
@@ -658,7 +660,7 @@ impl ParticleSystem {
 	}
 
 	//==============================================================================
-	// 루프 꺼짐일 때 방출 시간. (버스트 반복 주기)
+	/// 루프 꺼짐일 때 방출 시간. (버스트 반복 주기)
 	//==============================================================================
 	pub fn set_duration(&mut self, duration: f32) {
 		self.duration = duration;
@@ -669,9 +671,9 @@ impl ParticleSystem {
 	}
 
 	//==============================================================================
-	// 서술(JSON) 적용. (원본 applyDescription. vfx 애셋 로드, 파티클 편집기 공용. 준 항목만 반영한다. 색은 [r, g, b, a] 배열)
-	// - attractor 는 { x, y, strength, swirl } 이고 null 이면 끌개를 푼다. wobble 은 [폭, 각속도] 이고 각속도를 빼면 4 다.
-	// - [최소, 최대] 쌍에서 최대를 빼면 원본 기본 인자처럼 최소와 같다.
+	/// 서술(JSON) 적용. (원본 applyDescription. vfx 애셋 로드, 파티클 편집기 공용. 준 항목만 반영한다. 색은 [r, g, b, a] 배열)
+	/// - attractor 는 { x, y, strength, swirl } 이고 null 이면 끌개를 푼다. wobble 은 [폭, 각속도] 이고 각속도를 빼면 4 다.
+	/// - [최소, 최대] 쌍에서 최대를 빼면 원본 기본 인자처럼 최소와 같다.
 	//==============================================================================
 	pub fn apply_description(&mut self, description: &serde_json::Value) {
 		let read_number = |name: &str| description.get(name).and_then(|value| value.as_f64()).map(|value| value as f32);
@@ -792,7 +794,7 @@ impl ParticleSystem {
 	}
 
 	//==============================================================================
-	// 입자 자리 목록. (컴포넌트 좌표, 흔들림을 넣지 않은 적분 자리. 같은 씨앗 비교와 시험용)
+	/// 입자 자리 목록. (컴포넌트 좌표, 흔들림을 넣지 않은 적분 자리. 같은 씨앗 비교와 시험용)
 	//==============================================================================
 	pub fn get_particle_position_list(&self) -> Vec<Vector2> {
 		self.particle_list.iter().map(|particle| Vector2::create(particle.x, particle.y)).collect()
@@ -803,8 +805,8 @@ impl ParticleSystem {
 	}
 
 	//==============================================================================
-	// 다 끝났는지. (방출할 것이 더 없고 남은 입자도 없음, 일회성 노드를 치울 때)
-	// - 정지했거나, 루프가 아니고 duration 이 지났으며 버스트를 다 냈으면 방출할 것이 없다.
+	/// 다 끝났는지. (방출할 것이 더 없고 남은 입자도 없음, 일회성 노드를 치울 때)
+	/// - 정지했거나, 루프가 아니고 duration 이 지났으며 버스트를 다 냈으면 방출할 것이 없다.
 	//==============================================================================
 	pub fn is_finished(&self) -> bool {
 		if !self.particle_list.is_empty() {
@@ -817,7 +819,7 @@ impl ParticleSystem {
 	}
 
 	//==============================================================================
-	// 수동 tick 설정. (켜면 노드 갱신에서 진행하지 않고 simulate 로만 진행한다. 타임라인처럼 밖에서 시간을 다룰 때)
+	/// 수동 tick 설정. (켜면 노드 갱신에서 진행하지 않고 simulate 로만 진행한다. 타임라인처럼 밖에서 시간을 다룰 때)
 	//==============================================================================
 	pub fn set_manual_tick(&mut self, is_manual_tick: bool) {
 		self.is_manual_tick = is_manual_tick;
@@ -828,7 +830,7 @@ impl ParticleSystem {
 	}
 
 	//==============================================================================
-	// 난수 씨앗 설정. (설정하면 스폰 난수가 씨앗 난수로 바뀌고 stop(true) 마다 씨앗으로 되돌아간다. 되감기 재현용)
+	/// 난수 씨앗 설정. (설정하면 스폰 난수가 씨앗 난수로 바뀌고 stop(true) 마다 씨앗으로 되돌아간다. 되감기 재현용)
 	//==============================================================================
 	pub fn set_random_seed(&mut self, random_seed: u32) {
 		self.random_seed = Some(random_seed);
@@ -840,7 +842,7 @@ impl ParticleSystem {
 	}
 
 	//==============================================================================
-	// 스폰용 난수. (씨앗이 있으면 씨앗 난수, 없으면 전역 난수)
+	/// 스폰용 난수. (씨앗이 있으면 씨앗 난수, 없으면 전역 난수)
 	//==============================================================================
 	pub fn random_range(&mut self, minimum_value: f32, maximum_value: f32) -> f32 {
 		match self.random.as_mut() {
@@ -875,7 +877,7 @@ impl Component for ParticleSystem {
 	}
 
 	//==============================================================================
-	// 갱신. (노드 위치를 읽어 두고, 수동 tick 이면 진행은 건너뛴다)
+	/// 갱신. (노드 위치를 읽어 두고, 수동 tick 이면 진행은 건너뛴다)
 	//==============================================================================
 	fn tick(&mut self, context: &mut ComponentContext, time_delta: f32) {
 		self.node_position = context.get_transform().get_local_position();
@@ -886,7 +888,7 @@ impl Component for ParticleSystem {
 	}
 
 	//==============================================================================
-	// 출력. (정점 색 배치. circle 은 부드러운 원, rect / streak 은 흰 텍스처, image 는 그림 텍스처)
+	/// 출력. (정점 색 배치. circle 은 부드러운 원, rect / streak 은 흰 텍스처, image 는 그림 텍스처)
 	//==============================================================================
 	fn draw(&mut self, transform: &NodeTransform, graphic: &mut Graphic) {
 		if self.particle_list.is_empty() {
@@ -994,7 +996,7 @@ impl Component for ParticleSystem {
 }
 
 //==============================================================================
-// 쿼드 한 장 넣기. (모서리 넷은 왼쪽 위, 오른쪽 위, 오른쪽 아래, 왼쪽 아래 차례. 삼각형 둘 = 정점 여섯, 정점마다 색)
+/// 쿼드 한 장 넣기. (모서리 넷은 왼쪽 위, 오른쪽 위, 오른쪽 아래, 왼쪽 아래 차례. 삼각형 둘 = 정점 여섯, 정점마다 색)
 //==============================================================================
 fn push_quad(vertex_values: &mut Vec<f32>, corners: [(f32, f32); 4], color: Color) {
 	for corner_index in [0usize, 1, 2, 0, 2, 3] {
@@ -1005,7 +1007,7 @@ fn push_quad(vertex_values: &mut Vec<f32>, corners: [(f32, f32); 4], color: Colo
 }
 
 //==============================================================================
-// 정점 색 쿼드를 Graphic 이 한 번에 받는 만큼씩 나눠 그린다. (쿼드가 둘로 갈리지 않게 쿼드 단위로 끊는다)
+/// 정점 색 쿼드를 Graphic 이 한 번에 받는 만큼씩 나눠 그린다. (쿼드가 둘로 갈리지 않게 쿼드 단위로 끊는다)
 //==============================================================================
 pub(crate) fn draw_colored_quads_in_chunks(graphic: &mut Graphic, vertex_values: &[f32], texture: crate::core::graphic::GlTexture) {
 	let quad_float_count = QUAD_VERTEX_COUNT * PARTICLE_FLOATS_PER_VERTEX;
@@ -1024,7 +1026,7 @@ pub(crate) fn draw_colored_quads_in_chunks(graphic: &mut Graphic, vertex_values:
 }
 
 //==============================================================================
-// 서술의 색 배열 읽기. ([r, g, b] 또는 [r, g, b, a], 원본 toColor)
+/// 서술의 색 배열 읽기. ([r, g, b] 또는 [r, g, b, a], 원본 toColor)
 //==============================================================================
 fn read_description_color(value: &serde_json::Value) -> Option<Color> {
 	let channels = value.as_array()?;
@@ -1037,7 +1039,7 @@ mod tests {
 	use super::*;
 
 	//==============================================================================
-	// edge 는 가로 선분 위에서 아래(+Y)로 낸다. (원점 보정만큼 옮긴 자리)
+	/// edge 는 가로 선분 위에서 아래(+Y)로 낸다. (원점 보정만큼 옮긴 자리)
 	//==============================================================================
 	#[test]
 	fn edge_shape_emits_downward_on_line() {
@@ -1056,7 +1058,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// box 는 사각 영역 안에서 위(-Y)로만 낸다. cone 은 반각 안 방향의 반지름 안에서 낸다.
+	/// box 는 사각 영역 안에서 위(-Y)로만 낸다. cone 은 반각 안 방향의 반지름 안에서 낸다.
 	//==============================================================================
 	#[test]
 	fn box_and_cone_follow_original_directions() {
@@ -1089,7 +1091,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 끌개는 그 자리 쪽으로 당기고, 소용돌이는 그 접선 쪽으로 민다.
+	/// 끌개는 그 자리 쪽으로 당기고, 소용돌이는 그 접선 쪽으로 민다.
 	//==============================================================================
 	#[test]
 	fn attractor_pulls_and_swirls() {
@@ -1123,7 +1125,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 월드 공간이면 낼 때 노드의 로컬 위치를 더해 둔다.
+	/// 월드 공간이면 낼 때 노드의 로컬 위치를 더해 둔다.
 	//==============================================================================
 	#[test]
 	fn world_space_adds_node_position_on_spawn() {
@@ -1152,7 +1154,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 루프가 아니면 duration 뒤 방출을 멈추고(원본처럼 재생 중으로 남는다), 버스트를 다 내고 입자가 다 사라지면 끝난 것이다.
+	/// 루프가 아니면 duration 뒤 방출을 멈추고(원본처럼 재생 중으로 남는다), 버스트를 다 내고 입자가 다 사라지면 끝난 것이다.
 	//==============================================================================
 	#[test]
 	fn finishes_after_duration_without_looping() {
@@ -1177,9 +1179,9 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 같은 씨앗이면 원본(vanilla.js)과 같은 입자 자리가 나온다. 모양마다 1/64 초씩 90 프레임. (1/64 는 f32 와 f64 에서 같은 값이라 방출 누적이 같은 프레임에 1 을 넘는다)
-	// - 기대값은 원본 effect/particlesystem.js 를 node 로 같은 설정, 같은 씨앗으로 돌려 찍은 값이다. (손 계산이 아니다)
-	//   원본은 f64, 러스트 판은 f32 라 오차 한도를 둔다.
+	/// 같은 씨앗이면 원본(vanilla.js)과 같은 입자 자리가 나온다. 모양마다 1/64 초씩 90 프레임. (1/64 는 f32 와 f64 에서 같은 값이라 방출 누적이 같은 프레임에 1 을 넘는다)
+	/// - 기대값은 원본 effect/particlesystem.js 를 node 로 같은 설정, 같은 씨앗으로 돌려 찍은 값이다. (손 계산이 아니다)
+	///   원본은 f64, 러스트 판은 f32 라 오차 한도를 둔다.
 	//==============================================================================
 	#[test]
 	fn same_seed_matches_original_positions() {
@@ -1198,7 +1200,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 같은 씨앗 비교 설정. (원본 쪽 시험과 같은 설정)
+	/// 같은 씨앗 비교 설정. (원본 쪽 시험과 같은 설정)
 	//==============================================================================
 	fn create_same_seed_particle_system(emitter_shape: ParticleEmitterShape) -> ParticleSystem {
 		let mut particle_system = ParticleSystem::new();
@@ -1222,9 +1224,9 @@ mod tests {
 	}
 
 
-	// 원본에서 90 프레임 뒤 살아 있는 입자 수. (모양마다 같다)
+	/// 원본에서 90 프레임 뒤 살아 있는 입자 수. (모양마다 같다)
 	const SAME_SEED_EXPECTED_COUNT: usize = 67;
-	// 원본에서 찍은 0 번, 7 번, 마지막 입자 자리.
+	/// 원본에서 찍은 0 번, 7 번, 마지막 입자 자리.
 	const SAME_SEED_EXPECTED: [(ParticleEmitterShape, [(f32, f32); 3]); 5] = [
 		(ParticleEmitterShape::Point, [(84.489852, -7.793926), (6.721317, -1.527093), (-1.519028, 0.371066)]),
 		(ParticleEmitterShape::Circle, [(6.347870, 130.951176), (-16.560686, 32.686644), (-11.429110, -21.374512)]),
@@ -1234,7 +1236,7 @@ mod tests {
 	];
 
 	//==============================================================================
-	// 서술의 항목을 원본 이름으로 읽는다. (coneAngle 은 원본처럼 반각 그대로)
+	/// 서술의 항목을 원본 이름으로 읽는다. (coneAngle 은 원본처럼 반각 그대로)
 	//==============================================================================
 	#[test]
 	fn description_reads_render_and_force_fields() {

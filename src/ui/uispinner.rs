@@ -1,16 +1,18 @@
 //==============================================================================
-// 회전 로딩 표시. (원본 ui/uispinner.js 의 UISpinner)
-// - 원 둘레에 점 여러 개를 놓고, 밝기가 꼬리처럼 돌아가는 표준 스피너. (점 투명도 0.15 ~ 1)
-// - 원본은 WorldNode 를 상속한 노드다. 러스트 판은 노드(호스트)에 붙는 컴포넌트이고, 붙을 때 원본 생성자처럼
-//   호스트를 꾸미고(가운데 피봇, 크기 = (반지름 + 점 반지름) x 2) 점 노드(둥근 Paint)를 자식으로 만든다.
-//   UISpinner::create(node_tree, parent_id, options) 가 원본 new UISpinner(options) + add_child 자리다.
-// - 사용:
-//     let spinner_id = UISpinner::create(node_tree, panel_id, UISpinnerOptions { radius: 9.0, dot_count: 10, ..UISpinnerOptions::default() });
-//     node_tree[spinner_id].set_local_position(Vector2::create(x, y));
-// - 원본과 다른 것:
-//   - set_dot_color 는 색을 정해 두고 다음 tick 에 점 노드에 건다. (점 노드는 씬 코드가 이 위젯을 쥔 동안 닿을 수 없다)
-//   - 위상(phase)은 0 ~ 1 로 접어 둔다. 꼬리 계산이 1 주기라 보이는 결과는 같고, 오래 돌아도 f32 정밀도가 떨어지지 않는다.
-//   - 점 노드 이름은 원본처럼 "SpinnerDot{번호}" 다. options 객체는 UISpinnerOptions 구조체다.
+//! 회전 로딩 표시. (원본 ui/uispinner.js 의 UISpinner)
+//! - 원 둘레에 점 여러 개를 놓고, 밝기가 꼬리처럼 돌아가는 표준 스피너. (점 투명도 0.15 ~ 1)
+//! - 원본은 WorldNode 를 상속한 노드다. 러스트 판은 노드(호스트)에 붙는 컴포넌트이고, 붙을 때 원본 생성자처럼
+//!   호스트를 꾸미고(가운데 피봇, 크기 = (반지름 + 점 반지름) x 2) 점 노드(둥근 Paint)를 자식으로 만든다.
+//!   UISpinner::create(node_tree, parent_id, options) 가 원본 new UISpinner(options) + add_child 자리다.
+//! - 사용:
+//!   ```text
+//!     let spinner_id = UISpinner::create(node_tree, panel_id, UISpinnerOptions { radius: 9.0, dot_count: 10, ..UISpinnerOptions::default() });
+//!     node_tree[spinner_id].set_local_position(Vector2::create(x, y));
+//!   ```
+//! - 원본과 다른 것:
+//!   - set_dot_color 는 색을 정해 두고 다음 tick 에 점 노드에 건다. (점 노드는 씬 코드가 이 위젯을 쥔 동안 닿을 수 없다)
+//!   - 위상(phase)은 0 ~ 1 로 접어 둔다. 꼬리 계산이 1 주기라 보이는 결과는 같고, 오래 돌아도 f32 정밀도가 떨어지지 않는다.
+//!   - 점 노드 이름은 원본처럼 "SpinnerDot{번호}" 다. options 객체는 UISpinnerOptions 구조체다.
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::pivot::Pivot;
@@ -20,23 +22,23 @@ use crate::core::component::{Component, ComponentBase};
 use crate::core::node::nodetree::{ComponentContext, NodeId, NodeTree};
 
 //==============================================================================
-// 스피너 설정. (원본 options = { radius = 9, dot_count = 10, dot_radius = 2, color?, rotation_speed = 1 })
+/// 스피너 설정. (원본 options = { radius = 9, dot_count = 10, dot_radius = 2, color?, rotation_speed = 1 })
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UISpinnerOptions {
-	// 점이 놓이는 원의 반지름.
+	/// 점이 놓이는 원의 반지름.
 	pub radius: f32,
 	pub dot_count: usize,
 	pub dot_radius: f32,
-	// 점 색. (기본 흰색)
+	/// 점 색. (기본 흰색)
 	pub color: Color,
-	// 초당 바퀴 수.
+	/// 초당 바퀴 수.
 	pub rotation_speed: f32,
 }
 
 impl Default for UISpinnerOptions {
 	//==============================================================================
-	// 기본값. (원본과 같다)
+	/// 기본값. (원본과 같다)
 	//==============================================================================
 	fn default() -> UISpinnerOptions {
 		UISpinnerOptions {
@@ -50,7 +52,7 @@ impl Default for UISpinnerOptions {
 }
 
 //==============================================================================
-// 회전 로딩 표시.
+/// 회전 로딩 표시.
 //==============================================================================
 pub struct UISpinner {
 	component_base: ComponentBase,
@@ -65,14 +67,14 @@ pub struct UISpinner {
 #[crate::reflect]
 impl UISpinner {
 	//==============================================================================
-	// 생성. (기본 설정)
+	/// 생성. (기본 설정)
 	//==============================================================================
 	pub fn new() -> UISpinner {
 		UISpinner::create_with_options(UISpinnerOptions::default())
 	}
 
 	//==============================================================================
-	// 설정으로 생성. (노드에는 node_tree.add_component 로 붙인다)
+	/// 설정으로 생성. (노드에는 node_tree.add_component 로 붙인다)
 	//==============================================================================
 	pub fn create_with_options(options: UISpinnerOptions) -> UISpinner {
 		UISpinner {
@@ -87,7 +89,7 @@ impl UISpinner {
 	}
 
 	//==============================================================================
-	// 노드 만들기. (parent_id 밑에 "UISpinner" 노드를 만들어 붙인다. 원본 new UISpinner(options) + add_child)
+	/// 노드 만들기. (parent_id 밑에 "UISpinner" 노드를 만들어 붙인다. 원본 new UISpinner(options) + add_child)
 	//==============================================================================
 	pub fn create(node_tree: &mut NodeTree, parent_id: NodeId, options: UISpinnerOptions) -> NodeId {
 		let spinner_id = node_tree.create_child(parent_id, "UISpinner");
@@ -96,7 +98,7 @@ impl UISpinner {
 	}
 
 	//==============================================================================
-	// 점 투명도 계산. (점 순서 비율에서 위상을 뺀 꼬리 비율이 작을수록 밝다)
+	/// 점 투명도 계산. (점 순서 비율에서 위상을 뺀 꼬리 비율이 작을수록 밝다)
 	//==============================================================================
 	pub fn calculate_dot_opacity(&self, dot_index: usize) -> f32 {
 		let order_ratio = dot_index as f32 / self.options.dot_count as f32;
@@ -108,7 +110,7 @@ impl UISpinner {
 	}
 
 	//==============================================================================
-	// 점 색 설정. (다음 tick 에 점 노드에 건다)
+	/// 점 색 설정. (다음 tick 에 점 노드에 건다)
 	//==============================================================================
 	pub fn set_dot_color(&mut self, dot_color: impl Into<Color>) {
 		self.dot_color = dot_color.into();
@@ -116,28 +118,28 @@ impl UISpinner {
 	}
 
 	//==============================================================================
-	// 점 색 반환.
+	/// 점 색 반환.
 	//==============================================================================
 	pub fn get_dot_color(&self) -> Color {
 		self.dot_color
 	}
 
 	//==============================================================================
-	// 회전 속도 설정. (초당 바퀴 수)
+	/// 회전 속도 설정. (초당 바퀴 수)
 	//==============================================================================
 	pub fn set_rotation_speed(&mut self, rotation_speed: f32) {
 		self.rotation_speed = rotation_speed;
 	}
 
 	//==============================================================================
-	// 회전 속도 반환.
+	/// 회전 속도 반환.
 	//==============================================================================
 	pub fn get_rotation_speed(&self) -> f32 {
 		self.rotation_speed
 	}
 
 	//==============================================================================
-	// 점 노드 핸들 목록.
+	/// 점 노드 핸들 목록.
 	//==============================================================================
 	pub fn get_dot_nodes(&self) -> &[NodeId] {
 		&self.dot_node_ids
@@ -165,7 +167,7 @@ impl Component for UISpinner {
 	}
 
 	//==============================================================================
-	// 트리에 붙음. (원본 생성자: 가운데 피봇, 크기, 둘레의 점 노드)
+	/// 트리에 붙음. (원본 생성자: 가운데 피봇, 크기, 둘레의 점 노드)
 	//==============================================================================
 	fn attach_to_tree(&mut self, node_tree: &mut NodeTree, node_id: NodeId) {
 		let options = self.options;
@@ -193,7 +195,7 @@ impl Component for UISpinner {
 	}
 
 	//==============================================================================
-	// 갱신. (위상을 돌리고 점마다 투명도를 건다. 미뤄 둔 점 색도 건다)
+	/// 갱신. (위상을 돌리고 점마다 투명도를 건다. 미뤄 둔 점 색도 건다)
 	//==============================================================================
 	fn tick(&mut self, context: &mut ComponentContext, time_delta: f32) {
 		self.phase += time_delta * self.rotation_speed;
@@ -227,7 +229,7 @@ mod tests {
 	use crate::core::engine::{Engine, EngineConfiguration};
 
 	//==============================================================================
-	// 점은 원 둘레에 놓이고, 꼬리 밝기가 위상을 따라 돈다. 점 색은 다음 tick 에 걸린다.
+	/// 점은 원 둘레에 놓이고, 꼬리 밝기가 위상을 따라 돈다. 점 색은 다음 tick 에 걸린다.
 	//==============================================================================
 	#[test]
 	fn dots_circle_and_tail_rotates() {

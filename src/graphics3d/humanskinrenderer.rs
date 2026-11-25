@@ -1,23 +1,27 @@
 //==============================================================================
-// 인체 피부 렌더러. (원본 experimental/graphics/humanskinrenderer.js)
-// - SkinnedModelRenderer 의 스키닝/모프 버텍스 경로 위에 피부 / 눈 / 머리카락 셰이딩 템플릿을 세운다.
-// - 선형 HDR 로 조도 / 알베도 / 스펙큘러 / 노멀을 MRT 로 나눠 출력하고, 합성은 SubsurfaceScatteringEffect 이후 호출자가 한다.
-// - 머티리얼마다 셰이딩 모드를 등록한다(set_material_shading). 불투명 패스(draw)는 피부 / 눈 / 머리카락 컷아웃,
-//   블렌드 패스(draw_blended)는 머리카락 프린지 / 차폐 / 유체를 그린다. (호출자가 블렌드 상태를 잡는다)
-// - 환경 상태: 조명 3개(0번 = 키 라이트, 섀도우 수신), 3색 반구 앰비언트, 노멀, 디테일, 러프니스, 스펙큘러, 주름, 마이크로, 눈, 머리카락 파라미터.
-// - GLSL 은 원본과 같다. 원본 템플릿 문자열의 ${WRINKLE_CHANNEL_COUNT} / ${SHADOW_SAMPLE_COUNT} / ${SKIN_SHADING_*} 는 숫자로,
-//   ${MORPH_GLSL} 은 생성할 때 MORPH_GLSL 을 이어 붙여 옮겼다. (시험이 숫자가 상수와 같은지 본다)
-// - 텍스처 유닛: 0 = base_color, 1 = 섀도우 맵, 2 ~ 8 = 머티리얼 슬롯, 9 ~ 14 = 피부 추가 슬롯, 15 = 모프 타깃 텍스처.
-// - 원본과 다른 것:
-//   - 원본은 SkinnedModelRenderer 를 상속한다. 러스트 판은 SkinnedModelRenderer 를 품고 Deref / DerefMut 로 기반 함수
-//     (draw_wireframe, apply_morph_uniforms, set_sun_direction, get_shader_program ...)를 그대로 부르게 한다.
-//     원본이 다시 정의한 draw / draw_depth / set_shadow_map / set_shadow_strength 는 이 타입의 함수가 먼저 불린다.
-//     SkinnedModel::load_from_bytes(gl, bytes, &human_skin_renderer) 처럼 기반 렌더러 자리에 그대로 넘길 수 있다. (Deref 강제 변환)
-//   - 그리기 함수는 기반 렌더러처럼 gl 과 &mut SkinnedModel 을 받고, 바뀐 모프 타깃 업로드를 먼저 한다.
-//   - 머티리얼 셰이딩 모드 표는 원본 Map<Material, number> 처럼 머티리얼 인스턴스(Rc 포인터)를 열쇠로 든다.
-//   - set_ambient_colors / set_hair_parameters 는 원본 배열 대신 고정 길이 배열을 받는다. set_shadow_sample_count 는 정수를 받아
-//     원본의 Math.floor 없이 1 ~ 24 로 자른다.
-//   - set_shadow_map 은 기반 렌더러처럼 행렬 16개를 복사해 둔다. 생성은 셰이더 컴파일 실패를 오류(Result)로 돌려준다.
+//! 인체 피부 렌더러. (원본 experimental/graphics/humanskinrenderer.js)
+//! - SkinnedModelRenderer 의 스키닝/모프 버텍스 경로 위에 피부 / 눈 / 머리카락 셰이딩 템플릿을 세운다.
+//! - 선형 HDR 로 조도 / 알베도 / 스펙큘러 / 노멀을 MRT 로 나눠 출력하고, 합성은 SubsurfaceScatteringEffect 이후 호출자가 한다.
+//! - 머티리얼마다 셰이딩 모드를 등록한다(set_material_shading). 불투명 패스(draw)는 피부 / 눈 / 머리카락 컷아웃,
+//!   블렌드 패스(draw_blended)는 머리카락 프린지 / 차폐 / 유체를 그린다. (호출자가 블렌드 상태를 잡는다)
+//! - 환경 상태: 조명 3개(0번 = 키 라이트, 섀도우 수신), 3색 반구 앰비언트, 노멀, 디테일, 러프니스, 스펙큘러, 주름, 마이크로, 눈, 머리카락 파라미터.
+//! - GLSL 은 원본과 같다. 원본 템플릿 문자열의 ${WRINKLE_CHANNEL_COUNT} / ${SHADOW_SAMPLE_COUNT} / ${SKIN_SHADING_*} 는 숫자로,
+//!   ${MORPH_GLSL} 은 생성할 때 MORPH_GLSL 을 이어 붙여 옮겼다. (시험이 숫자가 상수와 같은지 본다)
+//! - 텍스처 유닛: 0 = base_color, 1 = 섀도우 맵, 2 ~ 8 = 머티리얼 슬롯, 9 ~ 14 = 피부 추가 슬롯, 15 = 모프 타깃 텍스처.
+//! - 원본과 다른 것:
+//!   - 원본은 SkinnedModelRenderer 를 상속한다. 러스트 판은 SkinnedModelRenderer 를 품고 Deref / DerefMut 로 기반 함수
+//!   ```text
+//!     (draw_wireframe, apply_morph_uniforms, set_sun_direction, get_shader_program ...)를 그대로 부르게 한다.
+//!     원본이 다시 정의한 draw / draw_depth / set_shadow_map / set_shadow_strength 는 이 타입의 함수가 먼저 불린다.
+//!     SkinnedModel::load_from_bytes(gl, bytes, &human_skin_renderer) 처럼 기반 렌더러 자리에 그대로 넘길 수 있다. (Deref 강제 변환)
+//!   ```
+//!   - 그리기 함수는 기반 렌더러처럼 gl 과 &mut SkinnedModel 을 받고, 바뀐 모프 타깃 업로드를 먼저 한다.
+//!   - 머티리얼 셰이딩 모드 표는 원본 `Map<Material, number>` 처럼 머티리얼 인스턴스(Rc 포인터)를 열쇠로 든다.
+//!   - set_ambient_colors / set_hair_parameters 는 원본 배열 대신 고정 길이 배열을 받는다. set_shadow_sample_count 는 정수를 받아
+//!   ```text
+//!     원본의 Math.floor 없이 1 ~ 24 로 자른다.
+//!   ```
+//!   - set_shadow_map 은 기반 렌더러처럼 행렬 16개를 복사해 둔다. 생성은 셰이더 컴파일 실패를 오류(Result)로 돌려준다.
 //==============================================================================
 use crate::core::graphic::GlTexture;
 use crate::core::shaderprogram::ShaderProgram;
@@ -29,9 +33,9 @@ use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
 
 //==============================================================================
-// 전역 상수 목록.
+/// 전역 상수 목록.
 //==============================================================================
-// 셰이딩 모드. (머티리얼마다 set_material_shading 으로 지정, 같은 셰이더 안에서 분기)
+/// 셰이딩 모드. (머티리얼마다 set_material_shading 으로 지정, 같은 셰이더 안에서 분기)
 pub const SKIN_SHADING_SKIN: i32 = 0;
 pub const SKIN_SHADING_EYE: i32 = 1;
 pub const SKIN_SHADING_HAIR: i32 = 2;
@@ -39,9 +43,9 @@ pub const SKIN_SHADING_OCCLUSION: i32 = 3;
 pub const SKIN_SHADING_FLUID: i32 = 4;
 pub const SKIN_SHADING_FACIALHAIR: i32 = 5;
 
-// 추가 텍스처 유닛. (머티리얼 기본 슬롯 0 / 2~8 과 섀도우 1, 모프 15 를 피한 9~14)
-// - 피부: 9 높이 디테일, 10 마이크로(노멀 rgb + 캐비티 a), 11 주름 마스크 아틀라스(4x4), 12 주름 노멀 아틀라스(2x2), 13 주름 색 아틀라스(2x2)
-// - 눈: 12 홍채 색, 13 홍채 노멀 / 머리카락: 12 카드 탄젠트(rgb) + 가닥 좌표(a)
+/// 추가 텍스처 유닛. (머티리얼 기본 슬롯 0 / 2~8 과 섀도우 1, 모프 15 를 피한 9~14)
+/// - 피부: 9 높이 디테일, 10 마이크로(노멀 rgb + 캐비티 a), 11 주름 마스크 아틀라스(4x4), 12 주름 노멀 아틀라스(2x2), 13 주름 색 아틀라스(2x2)
+/// - 눈: 12 홍채 색, 13 홍채 노멀 / 머리카락: 12 카드 탄젠트(rgb) + 가닥 좌표(a)
 pub const SKIN_TEXTURE_UNIT_DETAILHEIGHT: u32 = 9;
 pub const SKIN_TEXTURE_UNIT_MICRO: u32 = 10;
 pub const SKIN_TEXTURE_UNIT_MASKATLAS: u32 = 11;
@@ -49,20 +53,20 @@ pub const SKIN_TEXTURE_UNIT_LAYERNORMAL: u32 = 12;
 pub const SKIN_TEXTURE_UNIT_LAYERCOLOR: u32 = 13;
 pub const SKIN_TEXTURE_UNIT_AUXILIARY: u32 = 14;
 
-// 주름 마스크 채널 수. (4x4 아틀라스 x RGBA, 채널마다 주름 맵 1 / 2 / 3 기여 가중치 vec3)
+/// 주름 마스크 채널 수. (4x4 아틀라스 x RGBA, 채널마다 주름 맵 1 / 2 / 3 기여 가중치 vec3)
 pub const WRINKLE_CHANNEL_COUNT: usize = 64;
 
-// 섀도우 포아송 표본 최대치. (회전 노이즈로 흩어 부드러운 반영, 실제 표본 수는 shadowSampleCount 유니폼)
+/// 섀도우 포아송 표본 최대치. (회전 노이즈로 흩어 부드러운 반영, 실제 표본 수는 shadowSampleCount 유니폼)
 const SHADOW_SAMPLE_COUNT: i32 = 24;
 
-// 인체 피부 프래그먼트 셰이더. (선형 HDR, 화면 공간 SSS 를 위해 조도 / 알베도 / 스펙큘러를 분리 출력)
-// - 조명: 방향광 3개(0번은 섀도우 맵 수신) + 3색 반구 앰비언트 + 조명 방향의 소프트박스 반사 환경.
-// - 피부: 노멀 맵 + 표정 주름 맵(마스크 아틀라스 가중 혼합) + 타일링 마이크로 노멀 / 캐비티 + 높이 미분 디테일, 이중 로브 GGX, 잔털.
-// - 눈: 각막 굴절 시차로 홍채를 샘플링, 홍채 노멀 / 림버스 / 동공, 각막 유리 하이라이트 + 환경 반사, 공막 정맥 노멀.
-// - 머리카락: 카드 탄젠트 아틀라스로 Kajiya-Kay 이중 로브 이방성 하이라이트, 뿌리 차폐, 투과 역광, 컷아웃 + 프린지 블렌드 2패스.
-// - 차폐 / 유체: 블렌드 패스 전용, 눈꺼풀 차폐 메시는 조도만 어둡게, 눈물선 / 침은 스펙큘러만 얹는다.
-// - 얼굴 털(눈썹 / 수염): 머리카락과 같은 셰이딩이지만 흔들림은 적용하지 않는다.
-// - 출력 0: 확산 조도(rgb) + SSS 마스크(a) / 1: 선형 알베도(rgb) + 커버리지(a) / 2: 스펙큘러(rgb) / 3: 월드 노멀(rgb).
+/// 인체 피부 프래그먼트 셰이더. (선형 HDR, 화면 공간 SSS 를 위해 조도 / 알베도 / 스펙큘러를 분리 출력)
+/// - 조명: 방향광 3개(0번은 섀도우 맵 수신) + 3색 반구 앰비언트 + 조명 방향의 소프트박스 반사 환경.
+/// - 피부: 노멀 맵 + 표정 주름 맵(마스크 아틀라스 가중 혼합) + 타일링 마이크로 노멀 / 캐비티 + 높이 미분 디테일, 이중 로브 GGX, 잔털.
+/// - 눈: 각막 굴절 시차로 홍채를 샘플링, 홍채 노멀 / 림버스 / 동공, 각막 유리 하이라이트 + 환경 반사, 공막 정맥 노멀.
+/// - 머리카락: 카드 탄젠트 아틀라스로 Kajiya-Kay 이중 로브 이방성 하이라이트, 뿌리 차폐, 투과 역광, 컷아웃 + 프린지 블렌드 2패스.
+/// - 차폐 / 유체: 블렌드 패스 전용, 눈꺼풀 차폐 메시는 조도만 어둡게, 눈물선 / 침은 스펙큘러만 얹는다.
+/// - 얼굴 털(눈썹 / 수염): 머리카락과 같은 셰이딩이지만 흔들림은 적용하지 않는다.
+/// - 출력 0: 확산 조도(rgb) + SSS 마스크(a) / 1: 선형 알베도(rgb) + 커버리지(a) / 2: 스펙큘러(rgb) / 3: 월드 노멀(rgb).
 pub const SKIN_FRAGMENTSHADER_SOURCE: &str = "#version 300 es
 precision highp float;
 precision highp int;
@@ -129,7 +133,7 @@ layout(location = 3) out vec4 normalOutput;
 
 const float PI = 3.14159265;
 
-// 포아송 원판. (24 표본, 프래그먼트마다 회전, 앞쪽 표본부터 쓴다)
+/// 포아송 원판. (24 표본, 프래그먼트마다 회전, 앞쪽 표본부터 쓴다)
 const vec2 POISSON_DISK[24] = vec2[](
 	vec2(-0.326, -0.406), vec2(-0.840, -0.074), vec2(-0.696, 0.457), vec2(-0.203, 0.621),
 	vec2(0.962, -0.195), vec2(0.473, -0.480), vec2(0.519, 0.767), vec2(0.185, -0.893),
@@ -579,7 +583,7 @@ void main() {
 }
 ";
 
-// 피부 버텍스 셰이더 앞부분. (원본 템플릿의 ${MORPH_GLSL} 앞, 기본 스키닝 / 모프 경로 + 머리카락 흔들림)
+/// 피부 버텍스 셰이더 앞부분. (원본 템플릿의 ${MORPH_GLSL} 앞, 기본 스키닝 / 모프 경로 + 머리카락 흔들림)
 const SKIN_VERTEXSHADER_HEAD_SOURCE: &str = "#version 300 es
 layout(location = 0) in vec3 vertexPosition;
 layout(location = 1) in vec3 vertexNormal;
@@ -599,7 +603,7 @@ out vec2 fragmentTextureCoordinate;
 out vec4 lightSpacePosition;
 ";
 
-// 피부 버텍스 셰이더 뒷부분. (원본 템플릿의 ${MORPH_GLSL} 뒤, 카드 탄젠트 아틀라스의 가닥 좌표(a)가 클수록(끝) 크게 흔든다)
+/// 피부 버텍스 셰이더 뒷부분. (원본 템플릿의 ${MORPH_GLSL} 뒤, 카드 탄젠트 아틀라스의 가닥 좌표(a)가 클수록(끝) 크게 흔든다)
 const SKIN_VERTEXSHADER_TAIL_SOURCE: &str = "
 void main() {
 	// 노멀 미보유 모델 가드. (비활성 어트리뷰트는 영벡터, 위쪽으로 대체)
@@ -630,7 +634,7 @@ void main() {
 }
 ";
 
-// 컷아웃 깊이 버텍스 셰이더 앞부분. (섀도우 맵 캐스팅, 머리카락 / 속눈썹의 투명 영역을 오파시티로 제거하기 위해 UV 를 넘긴다)
+/// 컷아웃 깊이 버텍스 셰이더 앞부분. (섀도우 맵 캐스팅, 머리카락 / 속눈썹의 투명 영역을 오파시티로 제거하기 위해 UV 를 넘긴다)
 const CUTOUT_DEPTH_VERTEXSHADER_HEAD_SOURCE: &str = "#version 300 es
 layout(location = 0) in vec3 vertexPosition;
 layout(location = 2) in vec2 vertexTextureCoordinate;
@@ -642,7 +646,7 @@ uniform mat4 jointMatrices[96];
 out vec2 fragmentTextureCoordinate;
 ";
 
-// 컷아웃 깊이 버텍스 셰이더 뒷부분.
+/// 컷아웃 깊이 버텍스 셰이더 뒷부분.
 const CUTOUT_DEPTH_VERTEXSHADER_TAIL_SOURCE: &str = "
 void main() {
 	vec3 morphedPosition = vertexPosition;
@@ -657,7 +661,7 @@ void main() {
 }
 ";
 
-// 컷아웃 깊이 프래그먼트 셰이더. (커버리지 텍스처 알파 0.5 미만 제거)
+/// 컷아웃 깊이 프래그먼트 셰이더. (커버리지 텍스처 알파 0.5 미만 제거)
 const CUTOUT_DEPTH_FRAGMENTSHADER_SOURCE: &str = "#version 300 es
 precision highp float;
 in vec2 fragmentTextureCoordinate;
@@ -670,21 +674,21 @@ void main() {
 ";
 
 //==============================================================================
-// 피부 버텍스 셰이더 소스 만들기. (원본 SKIN_VERTEXSHADER_SOURCE, 모프 GLSL 을 가운데 넣는다)
+/// 피부 버텍스 셰이더 소스 만들기. (원본 SKIN_VERTEXSHADER_SOURCE, 모프 GLSL 을 가운데 넣는다)
 //==============================================================================
 pub fn create_skin_vertex_shader_source() -> String {
 	format!("{}{}{}", SKIN_VERTEXSHADER_HEAD_SOURCE, MORPH_GLSL, SKIN_VERTEXSHADER_TAIL_SOURCE)
 }
 
 //==============================================================================
-// 컷아웃 깊이 버텍스 셰이더 소스 만들기. (원본 CUTOUT_DEPTH_VERTEXSHADER_SOURCE)
+/// 컷아웃 깊이 버텍스 셰이더 소스 만들기. (원본 CUTOUT_DEPTH_VERTEXSHADER_SOURCE)
 //==============================================================================
 pub fn create_cutout_depth_vertex_shader_source() -> String {
 	format!("{}{}{}", CUTOUT_DEPTH_VERTEXSHADER_HEAD_SOURCE, MORPH_GLSL, CUTOUT_DEPTH_VERTEXSHADER_TAIL_SOURCE)
 }
 
 //==============================================================================
-// 인체 피부 렌더러.
+/// 인체 피부 렌더러.
 //==============================================================================
 pub struct HumanSkinRenderer {
 	skinned_model_renderer: SkinnedModelRenderer,
@@ -730,7 +734,7 @@ pub struct HumanSkinRenderer {
 
 impl HumanSkinRenderer {
 	//==============================================================================
-	// 생성. (피부 셰이더를 주입한 기반 렌더러 + 컷아웃 깊이 셰이더, 기본 3점 조명)
+	/// 생성. (피부 셰이더를 주입한 기반 렌더러 + 컷아웃 깊이 셰이더, 기본 3점 조명)
 	//==============================================================================
 	pub fn new(gl: &glow::Context) -> Result<HumanSkinRenderer, String> {
 		let skin_vertex_shader_source = create_skin_vertex_shader_source();
@@ -787,21 +791,21 @@ impl HumanSkinRenderer {
 	}
 
 	//==============================================================================
-	// 불투명 패스 출력. (피부 / 눈 / 머리카락 컷아웃, 깊이 쓰기)
+	/// 불투명 패스 출력. (피부 / 눈 / 머리카락 컷아웃, 깊이 쓰기)
 	//==============================================================================
 	pub fn draw(&self, gl: &glow::Context, skinned_model: &mut SkinnedModel, view_projection_elements: &[f32; 16], model_matrix_elements: &[f32; 16], camera_x: f32, camera_y: f32, camera_z: f32) {
 		self.draw_pass(gl, skinned_model, view_projection_elements, model_matrix_elements, camera_x, camera_y, camera_z, 0);
 	}
 
 	//==============================================================================
-	// 블렌드 패스 출력. (머리카락 프린지 / 차폐 / 유체, 호출자가 블렌드 켜고 깊이 쓰기를 끈 뒤 호출)
+	/// 블렌드 패스 출력. (머리카락 프린지 / 차폐 / 유체, 호출자가 블렌드 켜고 깊이 쓰기를 끈 뒤 호출)
 	//==============================================================================
 	pub fn draw_blended(&self, gl: &glow::Context, skinned_model: &mut SkinnedModel, view_projection_elements: &[f32; 16], model_matrix_elements: &[f32; 16], camera_x: f32, camera_y: f32, camera_z: f32) {
 		self.draw_pass(gl, skinned_model, view_projection_elements, model_matrix_elements, camera_x, camera_y, camera_z, 1);
 	}
 
 	//==============================================================================
-	// 패스 출력. (공통 유니폼 → 드로어블 순회, 패스에 맞는 셰이딩 모드만, pass_mode 0 = 불투명, 1 = 블렌드)
+	/// 패스 출력. (공통 유니폼 → 드로어블 순회, 패스에 맞는 셰이딩 모드만, pass_mode 0 = 불투명, 1 = 블렌드)
 	//==============================================================================
 	#[allow(clippy::too_many_arguments)]
 	pub fn draw_pass(&self, gl: &glow::Context, skinned_model: &mut SkinnedModel, view_projection_elements: &[f32; 16], model_matrix_elements: &[f32; 16], camera_x: f32, camera_y: f32, camera_z: f32, pass_mode: i32) {
@@ -866,7 +870,7 @@ impl HumanSkinRenderer {
 	}
 
 	//==============================================================================
-	// 깊이 패스 출력. (섀도우 맵 캐스팅, 컷아웃 / 머리카락 머티리얼은 커버리지 텍스처로 투명 영역 제거, 차폐 / 유체는 제외)
+	/// 깊이 패스 출력. (섀도우 맵 캐스팅, 컷아웃 / 머리카락 머티리얼은 커버리지 텍스처로 투명 영역 제거, 차폐 / 유체는 제외)
 	//==============================================================================
 	pub fn draw_depth(&self, gl: &glow::Context, skinned_model: &mut SkinnedModel, light_view_projection_elements: &[f32; 16], model_matrix_elements: &[f32; 16]) {
 		skinned_model.upload_pending_morph_targets(gl);
@@ -934,7 +938,7 @@ impl HumanSkinRenderer {
 	}
 
 	//==============================================================================
-	// 환경 유니폼 적용. (조명 / 앰비언트 / 피부 / 주름 / 마이크로 / 눈 / 머리카락 파라미터)
+	/// 환경 유니폼 적용. (조명 / 앰비언트 / 피부 / 주름 / 마이크로 / 눈 / 머리카락 파라미터)
 	//==============================================================================
 	pub fn apply_environment_uniforms(&self, gl: &glow::Context, shader_program: &ShaderProgram) {
 		let light_directions_location = shader_program.get_uniform_location(gl, "lightDirections[0]");
@@ -998,7 +1002,7 @@ impl HumanSkinRenderer {
 	}
 
 	//==============================================================================
-	// 섀도우 유니폼 적용. (섀도우 샘플러 타입 불일치로 드로우가 무효화되지 않도록 강도와 무관하게 항상 바인드)
+	/// 섀도우 유니폼 적용. (섀도우 샘플러 타입 불일치로 드로우가 무효화되지 않도록 강도와 무관하게 항상 바인드)
 	//==============================================================================
 	pub fn apply_shadow_uniforms(&self, gl: &glow::Context, shader_program: &ShaderProgram) {
 		let shadow_map_texture_location = shader_program.get_uniform_location(gl, "shadowMapTexture");
@@ -1035,7 +1039,7 @@ impl HumanSkinRenderer {
 	}
 
 	//==============================================================================
-	// 섀도우 맵 설정. (본 패스에서 그림자 수신, 기반 렌더러에도 전달, 행렬은 복사해 둔다)
+	/// 섀도우 맵 설정. (본 패스에서 그림자 수신, 기반 렌더러에도 전달, 행렬은 복사해 둔다)
 	//==============================================================================
 	pub fn set_shadow_map(&mut self, shadow_map_texture: Option<GlTexture>, light_view_projection_elements: Option<&[f32; 16]>, texel_size: f32) {
 		self.skinned_model_renderer.set_shadow_map(shadow_map_texture, light_view_projection_elements, texel_size);
@@ -1045,7 +1049,7 @@ impl HumanSkinRenderer {
 	}
 
 	//==============================================================================
-	// 그림자 강도 설정. (0 = 수신 안 함)
+	/// 그림자 강도 설정. (0 = 수신 안 함)
 	//==============================================================================
 	pub fn set_shadow_strength(&mut self, shadow_strength: f32) {
 		self.skinned_model_renderer.set_shadow_strength(shadow_strength);
@@ -1053,35 +1057,35 @@ impl HumanSkinRenderer {
 	}
 
 	//==============================================================================
-	// 그림자 부드러움 설정. (포아송 반경, 섀도우 텍셀 단위)
+	/// 그림자 부드러움 설정. (포아송 반경, 섀도우 텍셀 단위)
 	//==============================================================================
 	pub fn set_shadow_softness(&mut self, shadow_softness: f32) {
 		self.shadow_softness = shadow_softness;
 	}
 
 	//==============================================================================
-	// 그림자 표본 수 설정. (1 ~ 24, 많을수록 부드럽고 느리다)
+	/// 그림자 표본 수 설정. (1 ~ 24, 많을수록 부드럽고 느리다)
 	//==============================================================================
 	pub fn set_shadow_sample_count(&mut self, shadow_sample_count: i32) {
 		self.shadow_sample_count = shadow_sample_count.clamp(1, SHADOW_SAMPLE_COUNT);
 	}
 
 	//==============================================================================
-	// 머리카락 흔들림 설정. (진폭 m / 시간 초 / 주파수, 진폭 0 이면 없음)
+	/// 머리카락 흔들림 설정. (진폭 m / 시간 초 / 주파수, 진폭 0 이면 없음)
 	//==============================================================================
 	pub fn set_hair_sway(&mut self, amplitude: f32, time: f32, frequency: f32) {
 		self.hair_sway = [amplitude, time, frequency];
 	}
 
 	//==============================================================================
-	// 머리카락 프린지 블렌드 사용 설정. (false 면 컷아웃만, 성능 위주)
+	/// 머리카락 프린지 블렌드 사용 설정. (false 면 컷아웃만, 성능 위주)
 	//==============================================================================
 	pub fn set_hair_fringe(&mut self, use_hair_fringe: bool) {
 		self.use_hair_fringe = use_hair_fringe;
 	}
 
 	//==============================================================================
-	// 머티리얼 셰이딩 모드 등록. (등록하지 않은 머티리얼은 피부, 같은 인스턴스는 값만 바꾼다)
+	/// 머티리얼 셰이딩 모드 등록. (등록하지 않은 머티리얼은 피부, 같은 인스턴스는 값만 바꾼다)
 	//==============================================================================
 	pub fn set_material_shading(&mut self, material: &Rc<Material>, shading_mode: i32) {
 		for entry in self.material_shading_modes.iter_mut() {
@@ -1094,7 +1098,7 @@ impl HumanSkinRenderer {
 	}
 
 	//==============================================================================
-	// 머티리얼 셰이딩 모드 반환.
+	/// 머티리얼 셰이딩 모드 반환.
 	//==============================================================================
 	pub fn get_material_shading_mode(&self, material: &Material) -> i32 {
 		for (registered_material, shading_mode) in self.material_shading_modes.iter() {
@@ -1106,7 +1110,7 @@ impl HumanSkinRenderer {
 	}
 
 	//==============================================================================
-	// 조명 설정. (0 = 키 라이트: 섀도우 맵 수신 / 1 = 필 / 2 = 림, 방향은 표면에서 빛을 향하는 벡터)
+	/// 조명 설정. (0 = 키 라이트: 섀도우 맵 수신 / 1 = 필 / 2 = 림, 방향은 표면에서 빛을 향하는 벡터)
 	//==============================================================================
 	#[allow(clippy::too_many_arguments)]
 	pub fn set_light(&mut self, light_index: usize, direction_x: f32, direction_y: f32, direction_z: f32, red: f32, green: f32, blue: f32, intensity: f32) {
@@ -1129,7 +1133,7 @@ impl HumanSkinRenderer {
 	}
 
 	//==============================================================================
-	// 앰비언트 3색 설정. (하늘 / 지평 / 바닥, 선형 색)
+	/// 앰비언트 3색 설정. (하늘 / 지평 / 바닥, 선형 색)
 	//==============================================================================
 	pub fn set_ambient_colors(&mut self, sky_color: [f32; 3], horizon_color: [f32; 3], ground_color: [f32; 3]) {
 		self.ambient_sky_color = sky_color;
@@ -1138,63 +1142,63 @@ impl HumanSkinRenderer {
 	}
 
 	//==============================================================================
-	// 노멀 맵 강도 설정. (1 = 원본, 크면 주름이 깊어진다)
+	/// 노멀 맵 강도 설정. (1 = 원본, 크면 주름이 깊어진다)
 	//==============================================================================
 	pub fn set_normal_strength(&mut self, normal_strength: f32) {
 		self.normal_strength = normal_strength;
 	}
 
 	//==============================================================================
-	// 높이 디테일 강도 설정. (0 = 디테일 노멀 없음)
+	/// 높이 디테일 강도 설정. (0 = 디테일 노멀 없음)
 	//==============================================================================
 	pub fn set_detail_strength(&mut self, detail_strength: f32) {
 		self.detail_strength = detail_strength;
 	}
 
 	//==============================================================================
-	// 높이 디테일 텍셀 크기 설정. (1 / 높이 맵 해상도)
+	/// 높이 디테일 텍셀 크기 설정. (1 / 높이 맵 해상도)
 	//==============================================================================
 	pub fn set_detail_texel_size(&mut self, detail_texel_size: f32) {
 		self.detail_texel_size = detail_texel_size;
 	}
 
 	//==============================================================================
-	// 캐비티 강도 설정. (0 = 차폐 없음)
+	/// 캐비티 강도 설정. (0 = 차폐 없음)
 	//==============================================================================
 	pub fn set_cavity_strength(&mut self, cavity_strength: f32) {
 		self.cavity_strength = cavity_strength;
 	}
 
 	//==============================================================================
-	// 러프니스 범위 설정. (스펙큘러 맵 1 → 최소, 0 → 최대)
+	/// 러프니스 범위 설정. (스펙큘러 맵 1 → 최소, 0 → 최대)
 	//==============================================================================
 	pub fn set_roughness_range(&mut self, minimum_roughness: f32, maximum_roughness: f32) {
 		self.roughness_range = [minimum_roughness, maximum_roughness];
 	}
 
 	//==============================================================================
-	// 스펙큘러 강도 설정. (피부 F0 배율)
+	/// 스펙큘러 강도 설정. (피부 F0 배율)
 	//==============================================================================
 	pub fn set_specular_strength(&mut self, specular_strength: f32) {
 		self.specular_strength = specular_strength;
 	}
 
 	//==============================================================================
-	// 잔털 산란 강도 설정.
+	/// 잔털 산란 강도 설정.
 	//==============================================================================
 	pub fn set_sheen_strength(&mut self, sheen_strength: f32) {
 		self.sheen_strength = sheen_strength;
 	}
 
 	//==============================================================================
-	// SSS 마스크 강도 설정. (조도 출력 알파, 0 이면 화면 공간 산란에서 제외)
+	/// SSS 마스크 강도 설정. (조도 출력 알파, 0 이면 화면 공간 산란에서 제외)
 	//==============================================================================
 	pub fn set_subsurface_amount(&mut self, subsurface_amount: f32) {
 		self.subsurface_amount = subsurface_amount;
 	}
 
 	//==============================================================================
-	// 마이크로 노멀 설정. (타일링 횟수 / 강도, 0 이면 사용 안 함)
+	/// 마이크로 노멀 설정. (타일링 횟수 / 강도, 0 이면 사용 안 함)
 	//==============================================================================
 	pub fn set_micro_detail(&mut self, micro_tiling: f32, micro_strength: f32) {
 		self.micro_tiling = micro_tiling;
@@ -1202,7 +1206,7 @@ impl HumanSkinRenderer {
 	}
 
 	//==============================================================================
-	// 주름 맵 사용 설정. (마스크 아틀라스 / 주름 노멀 / 색 아틀라스가 머티리얼에 붙어 있어야 한다)
+	/// 주름 맵 사용 설정. (마스크 아틀라스 / 주름 노멀 / 색 아틀라스가 머티리얼에 붙어 있어야 한다)
 	//==============================================================================
 	pub fn set_wrinkle_maps(&mut self, use_wrinkle_maps: bool, normal_strength: f32, color_strength: f32) {
 		self.use_wrinkle_maps = use_wrinkle_maps;
@@ -1211,7 +1215,7 @@ impl HumanSkinRenderer {
 	}
 
 	//==============================================================================
-	// 주름 채널 가중치 설정. (채널 = 마스크 아틀라스 타일 x 4 + RGBA 순서, 값 = 주름 맵 1 / 2 / 3 기여)
+	/// 주름 채널 가중치 설정. (채널 = 마스크 아틀라스 타일 x 4 + RGBA 순서, 값 = 주름 맵 1 / 2 / 3 기여)
 	//==============================================================================
 	pub fn set_wrinkle_channel_weight(&mut self, channel_index: usize, weight1: f32, weight2: f32, weight3: f32) {
 		if channel_index >= WRINKLE_CHANNEL_COUNT {
@@ -1223,14 +1227,14 @@ impl HumanSkinRenderer {
 	}
 
 	//==============================================================================
-	// 주름 채널 가중치 적용 마무리. (가중치가 있는 타일만 골라 비트마스크로, 셰이더가 빈 타일을 건너뛴다)
+	/// 주름 채널 가중치 적용 마무리. (가중치가 있는 타일만 골라 비트마스크로, 셰이더가 빈 타일을 건너뛴다)
 	//==============================================================================
 	pub fn finish_wrinkle_channel_weights(&mut self) {
 		self.wrinkle_tile_mask = build_wrinkle_tile_mask(&self.wrinkle_channel_weights);
 	}
 
 	//==============================================================================
-	// 눈 파라미터 설정. (UV 단위, 홍채 반경 / 동공 반경 / 홍채 평면 깊이)
+	/// 눈 파라미터 설정. (UV 단위, 홍채 반경 / 동공 반경 / 홍채 평면 깊이)
 	//==============================================================================
 	pub fn set_eye_parameters(&mut self, iris_radius: f32, pupil_radius: f32, iris_depth: f32) {
 		self.eye_iris_radius = iris_radius;
@@ -1239,15 +1243,15 @@ impl HumanSkinRenderer {
 	}
 
 	//==============================================================================
-	// 눈꺼풀 감김 정도 설정. (0 = 뜬 눈, 1 = 감은 눈, 눈알을 눈꺼풀 그늘만큼 어둡게)
+	/// 눈꺼풀 감김 정도 설정. (0 = 뜬 눈, 1 = 감은 눈, 눈알을 눈꺼풀 그늘만큼 어둡게)
 	//==============================================================================
 	pub fn set_eye_closure(&mut self, eye_closure: f32) {
 		self.eye_closure = eye_closure.clamp(0.0, 1.0);
 	}
 
 	//==============================================================================
-	// 머리카락 파라미터 설정. (1차 / 2차 로브 시프트, 지수, 강도, 투과 강도, 뿌리 차폐)
-	// - specular_shift: [1차, 2차], specular_power: [1차, 2차], specular_intensity: [1차, 2차, 투과]
+	/// 머리카락 파라미터 설정. (1차 / 2차 로브 시프트, 지수, 강도, 투과 강도, 뿌리 차폐)
+	/// - specular_shift: [1차, 2차], specular_power: [1차, 2차], specular_intensity: [1차, 2차, 투과]
 	//==============================================================================
 	pub fn set_hair_parameters(&mut self, specular_shift: [f32; 2], specular_power: [f32; 2], specular_intensity: [f32; 3], root_shade: f32) {
 		self.hair_specular_shift = [specular_shift[0], specular_shift[1], 0.0];
@@ -1257,7 +1261,7 @@ impl HumanSkinRenderer {
 	}
 
 	//==============================================================================
-	// 컷아웃 깊이 셰이더 프로그램 반환.
+	/// 컷아웃 깊이 셰이더 프로그램 반환.
 	//==============================================================================
 	pub fn get_cutout_depth_shader_program(&self) -> &ShaderProgram {
 		&self.cutout_depth_shader_program
@@ -1279,7 +1283,7 @@ impl DerefMut for HumanSkinRenderer {
 }
 
 //==============================================================================
-// 주름 타일 비트마스크 만들기. (채널 가중치 합이 0.002 를 넘는 채널의 타일 = 채널 / 4 번 비트)
+/// 주름 타일 비트마스크 만들기. (채널 가중치 합이 0.002 를 넘는 채널의 타일 = 채널 / 4 번 비트)
 //==============================================================================
 fn build_wrinkle_tile_mask(wrinkle_channel_weights: &[f32; WRINKLE_CHANNEL_COUNT * 3]) -> i32 {
 	let mut tile_mask = 0;
@@ -1293,7 +1297,7 @@ fn build_wrinkle_tile_mask(wrinkle_channel_weights: &[f32; WRINKLE_CHANNEL_COUNT
 }
 
 //==============================================================================
-// 드로어블 삼각형 출력. (인덱스가 있으면 drawElements, 없으면 drawArrays)
+/// 드로어블 삼각형 출력. (인덱스가 있으면 drawElements, 없으면 drawArrays)
 //==============================================================================
 fn draw_drawable_triangles(gl: &glow::Context, drawable: &Drawable) {
 	unsafe {
@@ -1312,7 +1316,7 @@ mod tests {
 	use super::*;
 
 	//==============================================================================
-	// 셰이더 소스의 숫자가 상수와 같은지. (원본 템플릿 ${WRINKLE_CHANNEL_COUNT} / ${SHADOW_SAMPLE_COUNT} / ${SKIN_SHADING_*} 자리)
+	/// 셰이더 소스의 숫자가 상수와 같은지. (원본 템플릿 ${WRINKLE_CHANNEL_COUNT} / ${SHADOW_SAMPLE_COUNT} / ${SKIN_SHADING_*} 자리)
 	//==============================================================================
 	#[test]
 	fn shader_sources_match_constants() {
@@ -1342,7 +1346,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 주름 타일 비트마스크. (가중치가 있는 채널의 타일만, 0.002 이하는 빈 타일)
+	/// 주름 타일 비트마스크. (가중치가 있는 채널의 타일만, 0.002 이하는 빈 타일)
 	//==============================================================================
 	#[test]
 	fn wrinkle_tile_mask_marks_weighted_tiles() {
@@ -1356,7 +1360,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 텍스처 유닛이 머티리얼 기본 슬롯, 섀도우, 모프 유닛과 겹치지 않는지. (원본 주석의 9 ~ 14)
+	/// 텍스처 유닛이 머티리얼 기본 슬롯, 섀도우, 모프 유닛과 겹치지 않는지. (원본 주석의 9 ~ 14)
 	//==============================================================================
 	#[test]
 	fn texture_units_avoid_reserved_slots() {

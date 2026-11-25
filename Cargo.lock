@@ -1948,6 +1948,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxideav-aac"
+version = "0.1.7"
+source = "git+https://github.com/OxideAV/oxideav-aac?rev=eac68f31d7a7310bb8ac298c6591a0177b846340#eac68f31d7a7310bb8ac298c6591a0177b846340"
+dependencies = [
+ "oxideav-core",
+]
+
+[[package]]
+name = "oxideav-core"
+version = "0.1.43"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ce90bfbe978dfc46d0c98d137b7c4566ac8eaae8c9209585eb53a8aedb0ef53c"
+dependencies = [
+ "bytemuck",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "parking_lot"
 version = "0.12.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3295,6 +3314,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "objc2-game-controller",
  "opus-pure",
+ "oxideav-aac",
  "rav1d",
  "raw-window-handle",
  "resvg",
@@ -3325,6 +3345,16 @@ dependencies = [
  "wuff",
  "x11-dl",
  "yeslogic-fontconfig-sys",
+]
+
+[[package]]
+name = "vanilla-engine-apidoc"
+version = "0.3.2"
+dependencies = [
+ "proc-macro2",
+ "serde_json",
+ "syn 2.0.119",
+ "vanilla-engine",
 ]
 
 [[package]]

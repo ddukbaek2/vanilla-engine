@@ -19,8 +19,9 @@
 //   플레이어를 버리면 재생 중인 소스 노드를 멈추고 GainNode 를 뗀다. (onended 콜백이 버려진 클로저를 부르지 않게)
 //   일시 중단 상태에서 play 한 뒤 재개를 기다리는 사이 다른 소스가 시작됐으면 그것을 멈추고 튼다. (원본은 둘 다 운다)
 //==============================================================================
+use super::GainAutomation;
 use crate::core::audiomanager::{resume_audio_manager_state, AudioManagerState};
-use crate::misc::beepplayer::{BeepEnvelope, BeepWaveform, BEEP_FLOOR_VOLUME, BEEP_STOP_MARGIN_SECONDS};
+use crate::misc::beepplayer::{BeepEnvelope, BeepWaveform, BEEP_FLOOR_VOLUME};
 use crate::resource::audioasset::AudioAsset;
 use std::cell::RefCell;
 use std::path::Path;
@@ -384,6 +385,8 @@ async fn restart_audio_context(audio_context: &AudioContext) -> bool {
 //==============================================================================
 struct PlaybackState {
 	audio_source: Option<web_sys::AudioBufferSourceNode>,
+	// 소스가 시작하기 전(컨텍스트를 깨우는 동안)에 받은 stop(when). (시작할 때 건다)
+	pending_stop_time: Option<f64>,
 	// 지금 소스의 onended 콜백. (소스를 바꾸거나 멈출 때 떼고 버린다)
 	ended_callback: Option<Closure<dyn FnMut()>>,
 	is_playing: bool,
@@ -394,6 +397,7 @@ impl PlaybackState {
 	// 지금 소스를 멈추고 뗀다. (onended 를 먼저 비워 콜백이 오지 않게 한다)
 	//==============================================================================
 	fn stop_source(&mut self) {
+		self.pending_stop_time = None;
 		if let Some(audio_source) = self.audio_source.take() {
 			let scheduled_source_node: &web_sys::AudioScheduledSourceNode = &audio_source;
 			scheduled_source_node.set_onended(None);
@@ -462,6 +466,7 @@ impl AudioPlayerBackend {
 			output_node,
 			panner_node: None,
 			playback_state: Rc::new(RefCell::new(PlaybackState {
+				pending_stop_time: None,
 				audio_source: None,
 				ended_callback: None,
 				is_playing: false,
@@ -578,6 +583,38 @@ impl AudioPlayerBackend {
 	}
 
 	//==============================================================================
+	// 음량 자동화. (원본 gain.setValueAtTime 들)
+	//==============================================================================
+	pub fn apply_gain_automation(&mut self, automation: GainAutomation) {
+		if let Some(gain_node) = &self.gain_node {
+			apply_gain_automation_to_param(&gain_node.gain(), automation);
+		}
+	}
+
+	//==============================================================================
+	// 지금 음량. (원본 gain.value 읽기)
+	//==============================================================================
+	pub fn get_gain_value(&self) -> f32 {
+		self.gain_node.as_ref().map(|gain_node| gain_node.gain().value()).unwrap_or(0.0)
+	}
+
+	//==============================================================================
+	// 그 시각에 소스를 멈춘다. (원본 source.stop(when), 아직 시작 전이면 시작할 때 건다)
+	//==============================================================================
+	pub fn stop_source_at_time(&mut self, time: f64) {
+		let mut playback_state = self.playback_state.borrow_mut();
+		match &playback_state.audio_source {
+			Some(audio_source) => {
+				let scheduled_source_node: &web_sys::AudioScheduledSourceNode = audio_source;
+				let _ = scheduled_source_node.stop_with_when(time);
+			}
+			None => {
+				playback_state.pending_stop_time = Some(time);
+			}
+		}
+	}
+
+	//==============================================================================
 	// 재생 중인지. (start_playback 에서 참, onended 나 stop 에서 거짓)
 	//==============================================================================
 	pub fn is_playing(&self) -> bool {
@@ -646,6 +683,15 @@ impl AudioBusBackend {
 	}
 
 	//==============================================================================
+	// 음량 자동화. (원본 SoundSystem 이 버스 gain 에 거는 setTargetAtTime 들)
+	//==============================================================================
+	pub fn apply_gain_automation(&mut self, automation: GainAutomation) {
+		if let Some(gain_node) = &self.gain_node {
+			apply_gain_automation_to_param(&gain_node.gain(), automation);
+		}
+	}
+
+	//==============================================================================
 	// 이 버스로 트는 플레이어 백엔드 생성. (플레이어의 GainNode 를 버스의 GainNode 에 잇는다, 버스가 소리 없으면 소리 없는 플레이어)
 	//==============================================================================
 	pub fn create_player_backend(&mut self) -> AudioPlayerBackend {
@@ -707,14 +753,41 @@ fn start_source(playback_state_cell: &Rc<RefCell<PlaybackState>>, audio_context:
 	scheduled_source_node.set_onended(Some(ended_callback.as_ref().unchecked_ref()));
 
 	let mut playback_state = playback_state_cell.borrow_mut();
+	let pending_stop_time = playback_state.pending_stop_time.take();
 	playback_state.stop_source();
 	if audio_source.start_with_when_and_grain_offset(0.0, time).is_err() {
 		scheduled_source_node.set_onended(None);
 		return;
 	}
+	if let Some(stop_time) = pending_stop_time {
+		let _ = scheduled_source_node.stop_with_when(stop_time);
+	}
 	playback_state.audio_source = Some(audio_source);
 	playback_state.ended_callback = Some(ended_callback);
 	playback_state.is_playing = true;
+}
+
+//==============================================================================
+// AudioParam 에 자동화 걸기. (원본 setValueAtTime 들, 거부는 넘긴다)
+//==============================================================================
+fn apply_gain_automation_to_param(gain_parameter: &web_sys::AudioParam, automation: GainAutomation) {
+	let _ = match automation {
+		GainAutomation::SetValueAtTime { value, time } => {
+			gain_parameter.set_value_at_time(value, time)
+		}
+		GainAutomation::LinearRampToValueAtTime { value, time } => {
+			gain_parameter.linear_ramp_to_value_at_time(value, time)
+		}
+		GainAutomation::ExponentialRampToValueAtTime { value, time } => {
+			gain_parameter.exponential_ramp_to_value_at_time(value, time)
+		}
+		GainAutomation::SetTargetAtTime { target, time, time_constant } => {
+			gain_parameter.set_target_at_time(target, time, time_constant)
+		}
+		GainAutomation::CancelScheduledValues { time } => {
+			gain_parameter.cancel_scheduled_values(time)
+		}
+	};
 }
 
 //==============================================================================
@@ -856,10 +929,8 @@ pub fn play_beep_tone(state: &mut AudioManagerState, beep_envelope: &BeepEnvelop
 			return;
 		}
 	};
-	let start_time = audio_context.current_time() + beep_envelope.delay_seconds;
-	let end_time = start_time + beep_envelope.duration_seconds;
-	let attack_end_time = start_time + beep_envelope.attack_seconds;
-	let release_start_time = start_time + beep_envelope.get_release_start_seconds();
+	let beep_schedule = beep_envelope.get_schedule(audio_context.current_time());
+	let start_time = beep_schedule.start_time;
 
 	let oscillator_node = match audio_context.create_oscillator() {
 		Ok(oscillator_node) => {
@@ -884,15 +955,15 @@ pub fn play_beep_tone(state: &mut AudioManagerState, beep_envelope: &BeepEnvelop
 	};
 	let gain_parameter = gain_node.gain();
 	let _ = gain_parameter.set_value_at_time(BEEP_FLOOR_VOLUME, start_time);
-	let _ = gain_parameter.linear_ramp_to_value_at_time(beep_envelope.peak_volume, attack_end_time);
-	let _ = gain_parameter.set_value_at_time(beep_envelope.peak_volume, release_start_time);
-	let _ = gain_parameter.exponential_ramp_to_value_at_time(BEEP_FLOOR_VOLUME, end_time);
+	let _ = gain_parameter.linear_ramp_to_value_at_time(beep_envelope.peak_volume, beep_schedule.attack_end_time);
+	let _ = gain_parameter.set_value_at_time(beep_envelope.peak_volume, beep_schedule.release_start_time);
+	let _ = gain_parameter.exponential_ramp_to_value_at_time(BEEP_FLOOR_VOLUME, beep_schedule.end_time);
 
 	let destination = audio_context.destination();
 	let _ = oscillator_node.connect_with_audio_node(&gain_node);
 	let _ = gain_node.connect_with_audio_node(&destination);
 	let _ = oscillator_node.start_with_when(start_time);
-	let _ = oscillator_node.stop_with_when(end_time + BEEP_STOP_MARGIN_SECONDS);
+	let _ = oscillator_node.stop_with_when(beep_schedule.stop_time);
 
 	// 끝나면 노드를 뗀다. (한 번 불리고 스스로 풀리는 콜백)
 	let oscillator_node_for_ended = oscillator_node.clone();

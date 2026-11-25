@@ -1,26 +1,30 @@
 //==============================================================================
-// 창 층. (vanilla.js 의 ui/uiwindowlayer.js, UIWindowLayer)
-// - 영역 위에 UIWindow 를 쌓는다. 창을 띄우면 맨 위에 쌓고, 맨 위의 창만 보인다. 위의 창이 닫히면 아래 창이 다시 보인다.
-// - 닫으면 목록에서 바로 빠져 누름과 덮임이 바로 풀리고, 닫는 움직임(PopupMotion)이 끝난 뒤에 창 노드를 층에서 떼어 낸다. 덮여 있던 창을 닫으면 바로 떼어 낸다.
-//   떼어 낸 창 노드는 지우지 않아 open_window 로 다시 띄울 수 있다. (원본과 같음) 다시 쓰지 않을 창은 씬이 destroy_node 로 지운다.
-// - 휠은 맨 위의 창이 먼저 받고(UIWindowBehavior::handle_wheel), 받지 않으면 그 자리의 스크롤 뷰가 받는다. (scroll_window_at, GameSceneBase 가 창 층 안을 가리킨 휠을 넘긴다)
-// - 이 층은 UI 배율(UIScale::read)만큼 커지고, 창에는 그만큼 나눈 영역의 크기와 세이프에어리어 너비를 알린다. (작은 화면에서도 글자가 읽히게)
-//   set_ui_scale_options(None) 이면 키우지 않는다.
-// - 창이 하나라도 떠 있는 동안은 놀이 밖이다. 창이 뜨고 닫힐 때 알린다(set_window_change_event, 떠 있는 창 수를 넘긴다). 씬이 has_open_window 를 보고 놀이를 멈춰도 된다.
-// - 사용: (영역 노드의 맨 위 자식으로 두고, 영역 크기가 바뀔 때마다 알린다)
-//     let layer_id = UIWindowLayer::create(node_tree, play_area_id);
-//     node_tree.with_component_mut::<UIWindowLayer, _>(layer_id, |layer, tree| {
-//         layer.set_view_size(tree, width, height, view_manager.get_css_pixel_scale());
-//         layer.set_view_bleed(tree, top, right, bottom, left);
-//     });
-//     let window_id = UIConfirmWindow::create(node_tree, layer_id, "quit", UIConfirmWindowOptions { title: ..., ..UIConfirmWindowOptions::default() });
-//     UIWindowLayer::open_window_in_tree(node_tree, layer_id, window_id);
-// - 원본과 다른 것:
-//   - 원본은 WorldNode 를 상속한 노드다. 러스트 판은 층 노드에 붙는 컴포넌트이고 창은 그 노드의 자식 노드다. 바꾸는 함수는 트리를 받는다.
-//   - 원본은 떼어 낸 창 객체를 들고 있으면 다시 띄운다. 러스트 판은 떼어 낸 노드가 트리 저장소에 남아 있으므로 그 핸들로 다시 띄운다.
-//     원본에서 아무도 들지 않은 창은 가비지 컬렉터가 치우지만, 러스트 판에서는 씬이 지우거나 씬이 끝날 때 함께 지워진다.
-//   - 원본은 층이 UIScale 에 엔진의 CSS 배율을 묻는다. 러스트 판은 set_view_size 가 CSS 배율(ViewManager::get_css_pixel_scale)을 받는다.
-//   - 창 알림은 Box<dyn FnMut(usize)> 다. (떠 있는 창 수)
+//! 창 층. (vanilla.js 의 ui/uiwindowlayer.js, UIWindowLayer)
+//! - 영역 위에 UIWindow 를 쌓는다. 창을 띄우면 맨 위에 쌓고, 맨 위의 창만 보인다. 위의 창이 닫히면 아래 창이 다시 보인다.
+//! - 닫으면 목록에서 바로 빠져 누름과 덮임이 바로 풀리고, 닫는 움직임(PopupMotion)이 끝난 뒤에 창 노드를 층에서 떼어 낸다. 덮여 있던 창을 닫으면 바로 떼어 낸다.
+//!   떼어 낸 창 노드는 지우지 않아 open_window 로 다시 띄울 수 있다. (원본과 같음) 다시 쓰지 않을 창은 씬이 destroy_node 로 지운다.
+//! - 휠은 맨 위의 창이 먼저 받고(UIWindowBehavior::handle_wheel), 받지 않으면 그 자리의 스크롤 뷰가 받는다. (scroll_window_at, GameSceneBase 가 창 층 안을 가리킨 휠을 넘긴다)
+//! - 이 층은 UI 배율(UIScale::read)만큼 커지고, 창에는 그만큼 나눈 영역의 크기와 세이프에어리어 너비를 알린다. (작은 화면에서도 글자가 읽히게)
+//!   set_ui_scale_options(None) 이면 키우지 않는다.
+//! - 창이 하나라도 떠 있는 동안은 놀이 밖이다. 창이 뜨고 닫힐 때 알린다(set_window_change_event, 떠 있는 창 수를 넘긴다). 씬이 has_open_window 를 보고 놀이를 멈춰도 된다.
+//! - 사용: (영역 노드의 맨 위 자식으로 두고, 영역 크기가 바뀔 때마다 알린다)
+//!   ```text
+//!     let layer_id = UIWindowLayer::create(node_tree, play_area_id);
+//!     node_tree.with_component_mut::<UIWindowLayer, _>(layer_id, |layer, tree| {
+//!         layer.set_view_size(tree, width, height, view_manager.get_css_pixel_scale());
+//!         layer.set_view_bleed(tree, top, right, bottom, left);
+//!     });
+//!     let window_id = UIConfirmWindow::create(node_tree, layer_id, "quit", UIConfirmWindowOptions { title: ..., ..UIConfirmWindowOptions::default() });
+//!     UIWindowLayer::open_window_in_tree(node_tree, layer_id, window_id);
+//!   ```
+//! - 원본과 다른 것:
+//!   - 원본은 WorldNode 를 상속한 노드다. 러스트 판은 층 노드에 붙는 컴포넌트이고 창은 그 노드의 자식 노드다. 바꾸는 함수는 트리를 받는다.
+//!   - 원본은 떼어 낸 창 객체를 들고 있으면 다시 띄운다. 러스트 판은 떼어 낸 노드가 트리 저장소에 남아 있으므로 그 핸들로 다시 띄운다.
+//!   ```text
+//!     원본에서 아무도 들지 않은 창은 가비지 컬렉터가 치우지만, 러스트 판에서는 씬이 지우거나 씬이 끝날 때 함께 지워진다.
+//!   ```
+//!   - 원본은 층이 UIScale 에 엔진의 CSS 배율을 묻는다. 러스트 판은 set_view_size 가 CSS 배율(ViewManager::get_css_pixel_scale)을 받는다.
+//!   - 창 알림은 `Box<dyn FnMut(usize)>` 다. (떠 있는 창 수)
 //==============================================================================
 use crate::base::pivot::Pivot;
 use crate::base::vector2::Vector2;
@@ -32,26 +36,26 @@ use crate::ui::uiview::is_view_position_inside_node;
 use crate::ui::uiwindow::UIWindow;
 
 //==============================================================================
-// 창이 뜨거나 닫힐 때 알림. (떠 있는 창 수)
+/// 창이 뜨거나 닫힐 때 알림. (떠 있는 창 수)
 //==============================================================================
 pub type UIWindowChangeEvent = Box<dyn FnMut(usize)>;
 
 //==============================================================================
-// 창 층.
+/// 창 층.
 //==============================================================================
 pub struct UIWindowLayer {
 	component_base: ComponentBase,
 	node_id: Option<NodeId>,
-	// 띄운 창. (아래에서 위로)
+	/// 띄운 창. (아래에서 위로)
 	window_ids: Vec<NodeId>,
-	// 닫는 움직임 중인 창. (끝나면 지움)
+	/// 닫는 움직임 중인 창. (끝나면 지움)
 	closing_window_ids: Vec<NodeId>,
-	// 영역의 크기. (부모 단위)
+	/// 영역의 크기. (부모 단위)
 	view_width: f32,
 	view_height: f32,
-	// 영역 밖으로 더 덮는 너비. (위, 오른쪽, 아래, 왼쪽, 부모 단위)
+	/// 영역 밖으로 더 덮는 너비. (위, 오른쪽, 아래, 왼쪽, 부모 단위)
 	view_bleed: [f32; 4],
-	// 마지막으로 받은 뷰 한 단위의 CSS 픽셀.
+	/// 마지막으로 받은 뷰 한 단위의 CSS 픽셀.
 	css_pixel_scale: f32,
 	ui_scale_options: Option<UIScaleOptions>,
 	ui_scale: f32,
@@ -61,7 +65,7 @@ pub struct UIWindowLayer {
 #[crate::reflect]
 impl UIWindowLayer {
 	//==============================================================================
-	// 생성. (노드에는 node_tree.add_component 로 붙인다, 보통은 UIWindowLayer::create)
+	/// 생성. (노드에는 node_tree.add_component 로 붙인다, 보통은 UIWindowLayer::create)
 	//==============================================================================
 	pub fn new() -> UIWindowLayer {
 		UIWindowLayer {
@@ -80,7 +84,7 @@ impl UIWindowLayer {
 	}
 
 	//==============================================================================
-	// 층 노드 만들기. (parent_id 밑에 "UIWindowLayer" 노드를 만들어 붙인다, 원본 new UIWindowLayer() + add_child)
+	/// 층 노드 만들기. (parent_id 밑에 "UIWindowLayer" 노드를 만들어 붙인다, 원본 new UIWindowLayer() + add_child)
 	//==============================================================================
 	pub fn create(node_tree: &mut NodeTree, parent_id: NodeId) -> NodeId {
 		let layer_id = node_tree.create_child(parent_id, "UIWindowLayer");
@@ -89,7 +93,7 @@ impl UIWindowLayer {
 	}
 
 	//==============================================================================
-	// 창 띄우기. (씬 코드용, with_component_mut 을 대신 부른다)
+	/// 창 띄우기. (씬 코드용, with_component_mut 을 대신 부른다)
 	//==============================================================================
 	pub fn open_window_in_tree(node_tree: &mut NodeTree, layer_id: NodeId, window_id: NodeId) {
 		node_tree.with_component_mut::<UIWindowLayer, _>(layer_id, |window_layer, tree| {
@@ -98,14 +102,14 @@ impl UIWindowLayer {
 	}
 
 	//==============================================================================
-	// 창이 뜨거나 닫힐 때 알림 설정.
+	/// 창이 뜨거나 닫힐 때 알림 설정.
 	//==============================================================================
 	pub fn set_window_change_event(&mut self, window_change_event: Option<UIWindowChangeEvent>) {
 		self.window_change_event = window_change_event;
 	}
 
 	//==============================================================================
-	// UI 배율 설정. (None 이면 키우지 않는다, 기본은 UIScaleOptions::default)
+	/// UI 배율 설정. (None 이면 키우지 않는다, 기본은 UIScaleOptions::default)
 	//==============================================================================
 	pub fn set_ui_scale_options(&mut self, node_tree: &mut NodeTree, ui_scale_options: Option<UIScaleOptions>) {
 		self.ui_scale_options = ui_scale_options;
@@ -114,42 +118,42 @@ impl UIWindowLayer {
 	}
 
 	//==============================================================================
-	// 지금의 UI 배율.
+	/// 지금의 UI 배율.
 	//==============================================================================
 	pub fn get_ui_scale(&self) -> f32 {
 		self.ui_scale
 	}
 
 	//==============================================================================
-	// 창이 하나라도 떠 있는지. (닫는 움직임 중인 창은 셈하지 않는다)
+	/// 창이 하나라도 떠 있는지. (닫는 움직임 중인 창은 셈하지 않는다)
 	//==============================================================================
 	pub fn has_open_window(&self) -> bool {
 		!self.window_ids.is_empty()
 	}
 
 	//==============================================================================
-	// 떠 있는 창의 수.
+	/// 떠 있는 창의 수.
 	//==============================================================================
 	pub fn get_window_count(&self) -> usize {
 		self.window_ids.len()
 	}
 
 	//==============================================================================
-	// 맨 위의 창. (없으면 None)
+	/// 맨 위의 창. (없으면 None)
 	//==============================================================================
 	pub fn get_top_window(&self) -> Option<NodeId> {
 		self.window_ids.last().copied()
 	}
 
 	//==============================================================================
-	// 그 이름의 창. (떠 있는 것 가운데 위에서부터, 없으면 None)
+	/// 그 이름의 창. (떠 있는 것 가운데 위에서부터, 없으면 None)
 	//==============================================================================
 	pub fn find_window(&self, node_tree: &NodeTree, window_name: &str) -> Option<NodeId> {
 		self.window_ids.iter().rev().copied().find(|window_id| node_tree.get_node(*window_id).map(|window_node| window_node.get_name() == window_name).unwrap_or(false))
 	}
 
 	//==============================================================================
-	// 영역의 크기 알리기. (UI 배율을 다시 읽고, 띄운 창을 모두 다시 놓는다, css_pixel_scale 은 ViewManager::get_css_pixel_scale)
+	/// 영역의 크기 알리기. (UI 배율을 다시 읽고, 띄운 창을 모두 다시 놓는다, css_pixel_scale 은 ViewManager::get_css_pixel_scale)
 	//==============================================================================
 	pub fn set_view_size(&mut self, node_tree: &mut NodeTree, view_width: f32, view_height: f32, css_pixel_scale: f32) {
 		self.view_width = view_width.max(1.0);
@@ -171,7 +175,7 @@ impl UIWindowLayer {
 	}
 
 	//==============================================================================
-	// 영역 밖으로 더 덮는 너비 알리기. (세이프에어리어, 부모 단위)
+	/// 영역 밖으로 더 덮는 너비 알리기. (세이프에어리어, 부모 단위)
 	//==============================================================================
 	pub fn set_view_bleed(&mut self, node_tree: &mut NodeTree, top: f32, right: f32, bottom: f32, left: f32) {
 		self.view_bleed = [top.max(0.0), right.max(0.0), bottom.max(0.0), left.max(0.0)];
@@ -179,7 +183,7 @@ impl UIWindowLayer {
 	}
 
 	//==============================================================================
-	// 띄운 창과 닫는 중인 창을 모두 다시 놓기.
+	/// 띄운 창과 닫는 중인 창을 모두 다시 놓기.
 	//==============================================================================
 	fn place_all_windows(&self, node_tree: &mut NodeTree) {
 		for window_id in self.window_ids.iter().chain(self.closing_window_ids.iter()) {
@@ -188,7 +192,7 @@ impl UIWindowLayer {
 	}
 
 	//==============================================================================
-	// 창 하나 놓기. (UI 배율로 나눈 영역의 크기와 덮는 너비를 알린다)
+	/// 창 하나 놓기. (UI 배율로 나눈 영역의 크기와 덮는 너비를 알린다)
 	//==============================================================================
 	fn place_window(&self, node_tree: &mut NodeTree, window_id: NodeId) {
 		let ui_scale = self.ui_scale;
@@ -201,7 +205,7 @@ impl UIWindowLayer {
 	}
 
 	//==============================================================================
-	// 창 띄우기. (맨 위에 쌓는다, 이미 떠 있으면 맨 위로 올린다, 층 노드의 자식이 아니면 붙인다. 떼어 낸 창도 다시 띄운다)
+	/// 창 띄우기. (맨 위에 쌓는다, 이미 떠 있으면 맨 위로 올린다, 층 노드의 자식이 아니면 붙인다. 떼어 낸 창도 다시 띄운다)
 	//==============================================================================
 	pub fn open_window(&mut self, node_tree: &mut NodeTree, window_id: NodeId) {
 		let layer_id = match self.node_id {
@@ -233,7 +237,7 @@ impl UIWindowLayer {
 	}
 
 	//==============================================================================
-	// 창 닫기. (목록에서 빼고 닫는 움직임을 시작한다, 떠 있지 않으면 아무 일도 없다)
+	/// 창 닫기. (목록에서 빼고 닫는 움직임을 시작한다, 떠 있지 않으면 아무 일도 없다)
 	//==============================================================================
 	pub fn close_window(&mut self, node_tree: &mut NodeTree, window_id: NodeId) {
 		let window_index = match self.window_ids.iter().position(|candidate_id| *candidate_id == window_id) {
@@ -263,7 +267,7 @@ impl UIWindowLayer {
 	}
 
 	//==============================================================================
-	// 창 모두 닫기. (위에서부터)
+	/// 창 모두 닫기. (위에서부터)
 	//==============================================================================
 	pub fn close_all_windows(&mut self, node_tree: &mut NodeTree) {
 		while let Some(top_window_id) = self.window_ids.last().copied() {
@@ -272,7 +276,7 @@ impl UIWindowLayer {
 	}
 
 	//==============================================================================
-	// 맨 위의 창 닫기. (기기의 뒤로 가기 자리, 바깥 닫기를 끈 창이면 닫지 않는다, 닫았으면 true)
+	/// 맨 위의 창 닫기. (기기의 뒤로 가기 자리, 바깥 닫기를 끈 창이면 닫지 않는다, 닫았으면 true)
 	//==============================================================================
 	pub fn close_top_window(&mut self, node_tree: &mut NodeTree) -> bool {
 		let top_window_id = match self.get_top_window() {
@@ -292,7 +296,7 @@ impl UIWindowLayer {
 	}
 
 	//==============================================================================
-	// 창 노드 떼어 내기. (UIWindowBehavior::dispose 뒤 층에서 뗀다, 노드는 남아 다시 띄울 수 있다)
+	/// 창 노드 떼어 내기. (UIWindowBehavior::dispose 뒤 층에서 뗀다, 노드는 남아 다시 띄울 수 있다)
 	//==============================================================================
 	fn remove_window_node(node_tree: &mut NodeTree, window_id: NodeId) {
 		node_tree.with_component_mut::<UIWindow, _>(window_id, |window, tree| {
@@ -303,7 +307,7 @@ impl UIWindowLayer {
 	}
 
 	//==============================================================================
-	// 마우스 휠을 맨 위의 창에 넘기기. (창이 받지 않으면 그 자리의 스크롤 뷰, 받았으면 true, 원본 scrollWindowAt)
+	/// 마우스 휠을 맨 위의 창에 넘기기. (창이 받지 않으면 그 자리의 스크롤 뷰, 받았으면 true, 원본 scrollWindowAt)
 	//==============================================================================
 	pub fn scroll_window_at(node_tree: &mut NodeTree, engine: &Engine, layer_id: NodeId, view_input_position: Vector2, wheel_delta: Vector2) -> bool {
 		let top_window_id = match node_tree.get_node(layer_id).and_then(|layer_node| layer_node.get_component::<UIWindowLayer>()).and_then(|window_layer| window_layer.get_top_window()) {
@@ -331,7 +335,7 @@ impl UIWindowLayer {
 	}
 
 	//==============================================================================
-	// 그 자리를 덮는 맨 앞(나중에 그리는) 스크롤 뷰 노드 찾기. (켜진 노드만, 휠을 받는 칸(Component::is_wheel_receiver)이 붙은 노드, 없으면 None)
+	/// 그 자리를 덮는 맨 앞(나중에 그리는) 스크롤 뷰 노드 찾기. (켜진 노드만, 휠을 받는 칸(Component::is_wheel_receiver)이 붙은 노드, 없으면 None)
 	//==============================================================================
 	pub fn find_scroll_view_at(node_tree: &NodeTree, node_id: NodeId, view_input_position: Vector2) -> Option<NodeId> {
 		let node = node_tree.get_node(node_id)?;
@@ -354,7 +358,7 @@ impl UIWindowLayer {
 	}
 
 	//==============================================================================
-	// 노드가 들어 있는 창 층 노드 찾기. (자기부터 부모 쪽으로, 없으면 None, 원본 findWindowLayerOf)
+	/// 노드가 들어 있는 창 층 노드 찾기. (자기부터 부모 쪽으로, 없으면 None, 원본 findWindowLayerOf)
 	//==============================================================================
 	pub fn find_window_layer_of(node_tree: &NodeTree, node_id: NodeId) -> Option<NodeId> {
 		let mut current_id = Some(node_id);
@@ -369,7 +373,7 @@ impl UIWindowLayer {
 	}
 
 	//==============================================================================
-	// 창 덮기. (맨 위의 창만 보이고 아래 창은 숨긴다)
+	/// 창 덮기. (맨 위의 창만 보이고 아래 창은 숨긴다)
 	//==============================================================================
 	fn refresh_window_covers(&self, node_tree: &mut NodeTree) {
 		let top_index = self.window_ids.len().saturating_sub(1);
@@ -382,7 +386,7 @@ impl UIWindowLayer {
 	}
 
 	//==============================================================================
-	// 창이 뜨거나 닫혔다고 알리기.
+	/// 창이 뜨거나 닫혔다고 알리기.
 	//==============================================================================
 	fn notify_window_change(&mut self) {
 		let window_count = self.window_ids.len();
@@ -413,7 +417,7 @@ impl Component for UIWindowLayer {
 	}
 
 	//==============================================================================
-	// 트리에 붙음. (층 노드 꾸미기: 왼쪽 위 피봇과 앵커)
+	/// 트리에 붙음. (층 노드 꾸미기: 왼쪽 위 피봇과 앵커)
 	//==============================================================================
 	fn attach_to_tree(&mut self, node_tree: &mut NodeTree, node_id: NodeId) {
 		self.node_id = Some(node_id);
@@ -423,7 +427,7 @@ impl Component for UIWindowLayer {
 	}
 
 	//==============================================================================
-	// 갱신. (닫는 움직임이 끝난 창을 지운다. 층은 자식보다 먼저 돌아서 끝난 창은 다음 프레임에 지운다)
+	/// 갱신. (닫는 움직임이 끝난 창을 지운다. 층은 자식보다 먼저 돌아서 끝난 창은 다음 프레임에 지운다)
 	//==============================================================================
 	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f32) {
 		self.node_id = Some(context.get_node_id());
@@ -450,7 +454,7 @@ mod tests {
 	use std::rc::Rc;
 
 	//==============================================================================
-	// 시험 장면. (800 x 600 뿌리 밑의 창 층, CSS 배율 1)
+	/// 시험 장면. (800 x 600 뿌리 밑의 창 층, CSS 배율 1)
 	//==============================================================================
 	fn create_layer_tree() -> (NodeTree, NodeId) {
 		let mut node_tree = NodeTree::new();
@@ -466,21 +470,21 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 층 반환.
+	/// 층 반환.
 	//==============================================================================
 	fn get_layer(node_tree: &mut NodeTree, layer_id: NodeId) -> &mut UIWindowLayer {
 		node_tree[layer_id].get_component_mut::<UIWindowLayer>().expect("layer")
 	}
 
 	//==============================================================================
-	// 창 반환.
+	/// 창 반환.
 	//==============================================================================
 	fn get_window(node_tree: &mut NodeTree, window_id: NodeId) -> &mut UIWindow {
 		node_tree[window_id].get_component_mut::<UIWindow>().expect("window")
 	}
 
 	//==============================================================================
-	// 노드 가운데를 누르고 뗀다.
+	/// 노드 가운데를 누르고 뗀다.
 	//==============================================================================
 	fn click_node(node_tree: &mut NodeTree, engine: &Engine, node_id: NodeId) {
 		let content_size = node_tree[node_id].get_content_size();
@@ -490,7 +494,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 창 둘을 쌓으면 맨 위만 보이고, 바깥을 누르면 닫혀 취소 알림, 아래 창이 다시 보이고, 움직임 뒤 지운다.
+	/// 창 둘을 쌓으면 맨 위만 보이고, 바깥을 누르면 닫혀 취소 알림, 아래 창이 다시 보이고, 움직임 뒤 지운다.
 	//==============================================================================
 	#[test]
 	fn stack_cover_outside_close_and_remove() {
@@ -569,7 +573,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 확인 단추는 확인 알림 뒤 닫고 취소 알림은 없다. 오른쪽에서 왼쪽이면 확인이 왼쪽.
+	/// 확인 단추는 확인 알림 뒤 닫고 취소 알림은 없다. 오른쪽에서 왼쪽이면 확인이 왼쪽.
 	//==============================================================================
 	#[test]
 	fn confirm_button_and_right_to_left() {
@@ -611,7 +615,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 작은 화면은 층이 커지고 창에는 나눈 크기를 알린다. 영역보다 큰 판은 통째로 줄인다. 배율을 끄면 1.
+	/// 작은 화면은 층이 커지고 창에는 나눈 크기를 알린다. 영역보다 큰 판은 통째로 줄인다. 배율을 끄면 1.
 	//==============================================================================
 	#[test]
 	fn ui_scale_and_tall_panel() {
@@ -630,7 +634,7 @@ mod tests {
 		assert_eq!(get_layer(&mut node_tree, layer_id).get_ui_scale(), 1.0);
 	}
 	//==============================================================================
-	// 확인 창은 Graphic 없이도 처음 놓을 때부터 글 줄 수를 재 판의 세로를 정한다. (글꼴 파일이 없는 PC 는 건너뛴다)
+	/// 확인 창은 Graphic 없이도 처음 놓을 때부터 글 줄 수를 재 판의 세로를 정한다. (글꼴 파일이 없는 PC 는 건너뛴다)
 	//==============================================================================
 	#[test]
 	fn confirm_window_measures_lines_before_first_draw() {
@@ -662,7 +666,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 휠: 맨 위 창이 받지 않으면 그 자리의 스크롤 뷰가 받는다. 창 층 찾기는 자기부터 부모 쪽으로.
+	/// 휠: 맨 위 창이 받지 않으면 그 자리의 스크롤 뷰가 받는다. 창 층 찾기는 자기부터 부모 쪽으로.
 	//==============================================================================
 	#[test]
 	fn scroll_window_at_goes_to_top_window_scroll_view() {

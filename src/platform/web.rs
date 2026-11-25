@@ -1,16 +1,16 @@
 //==============================================================================
-// 웹 플랫폼. (wasm32)
-// - 원본처럼 캔버스를 창 안쪽에 꽉 채우고, 원본과 같은 옵션으로 WebGL2 컨텍스트를 얻는다.
-// - request_animation_frame 콜백마다 엔진 프레임 하나. (브라우저가 수직 동기에 맞춰 부르고, 콜백이 끝나면 화면을 넘긴다)
-// - 키보드, 마우스, 손가락을 받는다. 입력 필드의 글 입력(숨긴 DOM <input>, IME 조합, 문맥 메뉴)과 클립보드는 web/textinput.rs 가 맡는다.
-// - 키를 누르면 입력 매니저의 막을 키(set_prevented_keys)면 글자 입력칸에 쓰는 중이 아닐 때 기본 동작을 막는다. 마지막으로 쓴 장치를 키, 마우스, 손가락 사건마다 적는다.
-// - 오디오: 원본 engine.js 처럼 click / touchstart / keydown(설정하면 touchend / pointerup 도)은 user gesture 로 보고
-//   engine.resume_on_user_gesture(), focus 와 페이지가 다시 보일 때는 engine.resume() 을 부른다.
-// - 페이지: visibilitychange, blur, focus, pointerdown 을 엔진의 페이지 이벤트로 넘기고, 다시 보이면 on_page_visibility_restored,
-//   문서 resume 과 pageshow(persisted) 면 on_page_process_restored 를 부른다. (원본 setupAllDocumentEvents)
-// - 최대 FPS 는 원본처럼 세기 시작한 뒤 처리한 프레임 수로 차례를 정한다. (platform/framelimiter.rs, 90 Hz 에서 60 FPS 도 평균 60)
-// - 캔버스의 webglcontextlost, webglcontextrestored 에서 원본 Graphic 처럼 묶음 기억을 잊는다.
-// - exit_application: 원본처럼 Capacitor 의 App.exitApp, 없으면 window.close 를 시도한다.
+//! 웹 플랫폼. (wasm32)
+//! - 원본처럼 캔버스를 창 안쪽에 꽉 채우고, 원본과 같은 옵션으로 WebGL2 컨텍스트를 얻는다.
+//! - request_animation_frame 콜백마다 엔진 프레임 하나. (브라우저가 수직 동기에 맞춰 부르고, 콜백이 끝나면 화면을 넘긴다)
+//! - 키보드, 마우스, 손가락을 받는다. 입력 필드의 글 입력(숨긴 DOM <input>, IME 조합, 문맥 메뉴)과 클립보드는 web/textinput.rs 가 맡는다.
+//! - 키를 누르면 입력 매니저의 막을 키(set_prevented_keys)면 글자 입력칸에 쓰는 중이 아닐 때 기본 동작을 막는다. 마지막으로 쓴 장치를 키, 마우스, 손가락 사건마다 적는다.
+//! - 오디오: 원본 engine.js 처럼 click / touchstart / keydown(설정하면 touchend / pointerup 도)은 user gesture 로 보고
+//!   engine.resume_on_user_gesture(), focus 와 페이지가 다시 보일 때는 engine.resume() 을 부른다.
+//! - 페이지: visibilitychange, blur, focus, pointerdown 을 엔진의 페이지 이벤트로 넘기고, 다시 보이면 on_page_visibility_restored,
+//!   문서 resume 과 pageshow(persisted) 면 on_page_process_restored 를 부른다. (원본 setupAllDocumentEvents)
+//! - 최대 FPS 는 원본처럼 세기 시작한 뒤 처리한 프레임 수로 차례를 정한다. (platform/framelimiter.rs, 90 Hz 에서 60 FPS 도 평균 60)
+//! - 캔버스의 webglcontextlost, webglcontextrestored 에서 원본 Graphic 처럼 묶음 기억을 잊는다.
+//! - exit_application: 원본처럼 Capacitor 의 App.exitApp, 없으면 window.close 를 시도한다.
 //==============================================================================
 use crate::core::asset::AssetLoadHandle;
 use crate::core::engine::{EngineRunner, PageEvent};
@@ -30,14 +30,14 @@ mod textinput;
 pub use textinput::{read_clipboard_text, read_clipboard_text_with_callback, read_optional_clipboard_text_with_callback, write_clipboard_text};
 pub(crate) use textinput::request_clipboard_paste;
 
-// 엔진이 들고 있는 창 손잡이. (커서를 바꿀 때)
+/// 엔진이 들고 있는 창 손잡이. (커서를 바꿀 때)
 pub type PlatformWindow = web_sys::HtmlCanvasElement;
 
-// 프레임 콜백을 담는 칸. (콜백이 자기 자신을 다시 걸어야 해서 Rc 로 나눠 든다)
+/// 프레임 콜백을 담는 칸. (콜백이 자기 자신을 다시 걸어야 해서 Rc 로 나눠 든다)
 type FrameCallbackCell = Rc<RefCell<Option<Closure<dyn FnMut(f64)>>>>;
 
 //==============================================================================
-// 커서 보이기 설정.
+/// 커서 보이기 설정.
 //==============================================================================
 pub fn set_cursor_visible(platform_window: Option<&PlatformWindow>, is_visible: bool) {
 	if let Some(canvas) = platform_window {
@@ -52,7 +52,7 @@ pub fn set_cursor_visible(platform_window: Option<&PlatformWindow>, is_visible: 
 }
 
 //==============================================================================
-// 커서 모양 설정. (캔버스의 cursor 스타일에 CSS 값을 쓴다, 빈 값이면 브라우저의 기본, 그림 커서는 CSS 값에 그림이 든다)
+/// 커서 모양 설정. (캔버스의 cursor 스타일에 CSS 값을 쓴다, 빈 값이면 브라우저의 기본, 그림 커서는 CSS 값에 그림이 든다)
 //==============================================================================
 pub fn set_cursor(platform_window: Option<&PlatformWindow>, cursor_value: &CursorValue) {
 	if let Some(canvas) = platform_window {
@@ -61,7 +61,7 @@ pub fn set_cursor(platform_window: Option<&PlatformWindow>, cursor_value: &Curso
 }
 
 //==============================================================================
-// 주된 손이 손가락인지. (CSS 의 pointer: coarse)
+/// 주된 손이 손가락인지. (CSS 의 pointer: coarse)
 //==============================================================================
 pub fn is_coarse_pointer() -> bool {
 	web_sys::window()
@@ -71,7 +71,7 @@ pub fn is_coarse_pointer() -> bool {
 }
 
 //==============================================================================
-// 문서의 초점이 글자 입력칸에 있는지. (글자 종류의 input, textarea, contenteditable, select)
+/// 문서의 초점이 글자 입력칸에 있는지. (글자 종류의 input, textarea, contenteditable, select)
 //==============================================================================
 pub fn is_text_field_focused() -> bool {
 	let active_element = match web_sys::window().and_then(|window| window.document()).and_then(|document| document.active_element()) {
@@ -107,7 +107,7 @@ pub fn is_text_field_focused() -> bool {
 }
 
 //==============================================================================
-// 페이지 주소의 쿼리 값. (원본처럼 location.search 를 URLSearchParams 로 읽어 처음 값, 없으면 None)
+/// 페이지 주소의 쿼리 값. (원본처럼 location.search 를 URLSearchParams 로 읽어 처음 값, 없으면 None)
 //==============================================================================
 pub fn read_page_query_value(name: &str) -> Option<String> {
 	let window = web_sys::window()?;
@@ -120,7 +120,7 @@ pub fn read_page_query_value(name: &str) -> Option<String> {
 }
 
 //==============================================================================
-// 화면(client) 좌표에서 캔버스의 왼쪽 위. (원본 canvas.getBoundingClientRect() 의 left, top, 캔버스가 없으면 0)
+/// 화면(client) 좌표에서 캔버스의 왼쪽 위. (원본 canvas.getBoundingClientRect() 의 left, top, 캔버스가 없으면 0)
 //==============================================================================
 pub fn read_canvas_client_position() -> Vector2 {
 	let canvas = ENGINE_CANVAS.with(|engine_canvas| engine_canvas.borrow().clone());
@@ -136,7 +136,7 @@ pub fn read_canvas_client_position() -> Vector2 {
 }
 
 //==============================================================================
-// 검증용 화면 저장. (원본처럼 내려받기, PNG 를 Blob 주소로 만들어 a 요소의 download 로 누른다)
+/// 검증용 화면 저장. (원본처럼 내려받기, PNG 를 Blob 주소로 만들어 a 요소의 download 로 누른다)
 //==============================================================================
 pub fn save_capture_file(file_name: &str, png_bytes: &[u8]) -> Result<(), String> {
 	let window = web_sys::window().ok_or_else(|| String::from("window 없음"))?;
@@ -163,7 +163,7 @@ pub fn save_capture_file(file_name: &str, png_bytes: &[u8]) -> Result<(), String
 }
 
 //==============================================================================
-// 페이지 전체 크기. (원본 window.innerWidth, innerHeight)
+/// 페이지 전체 크기. (원본 window.innerWidth, innerHeight)
 //==============================================================================
 pub fn read_client_native_size() -> Option<Vector2> {
 	let window = web_sys::window()?;
@@ -173,18 +173,18 @@ pub fn read_client_native_size() -> Option<Vector2> {
 }
 
 thread_local! {
-	// 엔진이 그리는 캔버스. (read_canvas_client_position 이 자리를 읽는다)
+	/// 엔진이 그리는 캔버스. (read_canvas_client_position 이 자리를 읽는다)
 	static ENGINE_CANVAS: RefCell<Option<web_sys::HtmlCanvasElement>> = const { RefCell::new(None) };
-	// env(safe-area-inset-*) 를 재는 숨은 요소. (처음 잴 때 만들어 body 에 붙여 둔다)
+	/// env(safe-area-inset-*) 를 재는 숨은 요소. (처음 잴 때 만들어 body 에 붙여 둔다)
 	static SAFE_AREA_PROBE_ELEMENT: RefCell<Option<web_sys::HtmlElement>> = const { RefCell::new(None) };
-	// 엔진의 WebGL2 컨텍스트. (glow 가 감싼 것과 같은 컨텍스트, is_gl_binding_present 가 묶인 것을 읽는다)
+	/// 엔진의 WebGL2 컨텍스트. (glow 가 감싼 것과 같은 컨텍스트, is_gl_binding_present 가 묶인 것을 읽는다)
 	static ENGINE_GL_CONTEXT: RefCell<Option<web_sys::WebGl2RenderingContext>> = const { RefCell::new(None) };
 }
 
 //==============================================================================
-// GL 의 묶인 것(..._BINDING, CURRENT_PROGRAM)이 있는지. (원본 getParameter 가 null 이 아닌지)
-// - glow 웹 컨텍스트는 묶인 것이 없을 때(null) 읽으면 "A resource was created externally" 로 패닉하고 감싼 컨텍스트를 내주지 않는다.
-//   그래서 컨텍스트를 만들 때 같은 것을 따로 들고 있다가 여기서 읽는다. 컨텍스트가 아직 없으면 false.
+/// GL 의 묶인 것(..._BINDING, CURRENT_PROGRAM)이 있는지. (원본 getParameter 가 null 이 아닌지)
+/// - glow 웹 컨텍스트는 묶인 것이 없을 때(null) 읽으면 "A resource was created externally" 로 패닉하고 감싼 컨텍스트를 내주지 않는다.
+///   그래서 컨텍스트를 만들 때 같은 것을 따로 들고 있다가 여기서 읽는다. 컨텍스트가 아직 없으면 false.
 //==============================================================================
 pub(crate) fn is_gl_binding_present(parameter: u32) -> bool {
 	ENGINE_GL_CONTEXT.with(|engine_gl_context| {
@@ -207,8 +207,8 @@ pub(crate) fn is_gl_binding_present(parameter: u32) -> bool {
 }
 
 //==============================================================================
-// 렌더버퍼 포맷이 받는 멀티샘플 표본 수. (원본 getInternalformatParameter(RENDERBUFFER, 포맷, SAMPLES), 큰 것부터, 못 읽으면 빈 목록)
-// - WebGL2 는 NUM_SAMPLE_COUNTS 를 받지 않고 SAMPLES 로 Int32Array 를 돌려준다. glow 는 길이를 먼저 알아야 해서 여기서 바로 읽는다.
+/// 렌더버퍼 포맷이 받는 멀티샘플 표본 수. (원본 getInternalformatParameter(RENDERBUFFER, 포맷, SAMPLES), 큰 것부터, 못 읽으면 빈 목록)
+/// - WebGL2 는 NUM_SAMPLE_COUNTS 를 받지 않고 SAMPLES 로 Int32Array 를 돌려준다. glow 는 길이를 먼저 알아야 해서 여기서 바로 읽는다.
 //==============================================================================
 pub(crate) fn read_renderbuffer_sample_counts(internal_format: u32) -> Vec<i32> {
 	ENGINE_GL_CONTEXT.with(|engine_gl_context| {
@@ -235,8 +235,8 @@ pub(crate) fn read_renderbuffer_sample_counts(internal_format: u32) -> Vec<i32> 
 }
 
 //==============================================================================
-// CSS env(safe-area-inset-*) 세이프 에어리어 인셋. (원본 view_manager.readSafeAreaFromEnvironment, CSS 픽셀 [위, 오른쪽, 아래, 왼쪽])
-// - 숨은 요소의 padding 에 env() 를 걸고 계산된 값을 parseFloat 로 읽는다. 문서나 body 가 없으면 0.
+/// CSS env(safe-area-inset-*) 세이프 에어리어 인셋. (원본 view_manager.readSafeAreaFromEnvironment, CSS 픽셀 [위, 오른쪽, 아래, 왼쪽])
+/// - 숨은 요소의 padding 에 env() 를 걸고 계산된 값을 parseFloat 로 읽는다. 문서나 body 가 없으면 0.
 //==============================================================================
 pub fn read_safe_area_insets() -> [f32; 4] {
 	let read_insets = || -> Option<[f32; 4]> {
@@ -269,7 +269,7 @@ pub fn read_safe_area_insets() -> [f32; 4] {
 }
 
 //==============================================================================
-// 창 제목 설정. (문서 제목)
+/// 창 제목 설정. (문서 제목)
 //==============================================================================
 pub fn set_title(_platform_window: Option<&PlatformWindow>, title: &str) {
 	if let Some(document) = web_sys::window().and_then(|window| window.document()) {
@@ -278,11 +278,11 @@ pub fn set_title(_platform_window: Option<&PlatformWindow>, title: &str) {
 }
 
 //==============================================================================
-// 애셋 바이트 읽기. (fetch 로 받고, 받으면 끝낸다. 그 사이 프레임은 계속 돈다)
-// - 응답의 content-type 을 손잡이에 적는다. (원본 Material.loadImageDescription 의 response.headers.get("content-type"))
-// - 응답이 그림 형(image/...)이거나 주소가 그림 확장자(png, jpg, gif, webp, bmp, ico, svg, avif 등)면 끝내기 전에 원본처럼 브라우저가 풀게 해 손잡이에 둔다.
-//   (ImageAsset, AssetLoader 가 그대로 쓴다) 원본 HTMLImageElement 처럼 응답의 content-type 을 그대로 형으로 넘겨, 브라우저가 SVG 는 그 형(image/svg+xml)으로,
-//   그 밖의 그림은 내용으로 가린다. 머리가 없는 응답만 확장자의 형을 쓴다. data: 주소는 fetch 가 주소의 형을 content-type 으로 준다.
+/// 애셋 바이트 읽기. (fetch 로 받고, 받으면 끝낸다. 그 사이 프레임은 계속 돈다)
+/// - 응답의 content-type 을 손잡이에 적는다. (원본 Material.loadImageDescription 의 response.headers.get("content-type"))
+/// - 응답이 그림 형(image/...)이거나 주소가 그림 확장자(png, jpg, gif, webp, bmp, ico, svg, avif 등)면 끝내기 전에 원본처럼 브라우저가 풀게 해 손잡이에 둔다.
+///   (ImageAsset, AssetLoader 가 그대로 쓴다) 원본 HTMLImageElement 처럼 응답의 content-type 을 그대로 형으로 넘겨, 브라우저가 SVG 는 그 형(image/svg+xml)으로,
+///   그 밖의 그림은 내용으로 가린다. 머리가 없는 응답만 확장자의 형을 쓴다. data: 주소는 fetch 가 주소의 형을 content-type 으로 준다.
 //==============================================================================
 pub fn request_asset_bytes(asset_location: String, load_handle: AssetLoadHandle, is_no_cache: bool) {
 	wasm_bindgen_futures::spawn_local(async move {
@@ -305,7 +305,7 @@ pub fn request_asset_bytes(asset_location: String, load_handle: AssetLoadHandle,
 }
 
 //==============================================================================
-// 브라우저가 풀 그림의 형. (응답이 그림 형이거나 주소가 그림 확장자일 때, 형은 응답의 content-type 이고 머리가 없으면 확장자의 형. 그림이 아니면 None)
+/// 브라우저가 풀 그림의 형. (응답이 그림 형이거나 주소가 그림 확장자일 때, 형은 응답의 content-type 이고 머리가 없으면 확장자의 형. 그림이 아니면 None)
 //==============================================================================
 fn read_browser_image_mime_type(asset_location: &str, content_type: Option<&str>) -> Option<String> {
 	let extension_mime_type = read_image_mime_type(asset_location);
@@ -317,7 +317,7 @@ fn read_browser_image_mime_type(asset_location: &str, content_type: Option<&str>
 }
 
 //==============================================================================
-// 주소의 확장자로 그림 형식 이름. (그림이 아니면 None)
+/// 주소의 확장자로 그림 형식 이름. (그림이 아니면 None)
 //==============================================================================
 fn read_image_mime_type(asset_location: &str) -> Option<&'static str> {
 	let path = asset_location.split(['?', '#']).next()?;
@@ -355,8 +355,8 @@ fn read_image_mime_type(asset_location: &str) -> Option<&'static str> {
 }
 
 //==============================================================================
-// 브라우저로 그림 풀기. (원본 HTMLImageElement 처럼 Blob 주소를 img 에 넣고 decode 를 기다려 캔버스에 그려 픽셀을 읽는다, 못 풀면 None)
-// - 크기는 그림의 natural 크기다. 크기가 없는 SVG 는 CSS 의 기본 대상 크기 300 x 150 으로 그린다.
+/// 브라우저로 그림 풀기. (원본 HTMLImageElement 처럼 Blob 주소를 img 에 넣고 decode 를 기다려 캔버스에 그려 픽셀을 읽는다, 못 풀면 None)
+/// - 크기는 그림의 natural 크기다. 크기가 없는 SVG 는 CSS 의 기본 대상 크기 300 x 150 으로 그린다.
 //==============================================================================
 async fn decode_browser_image(bytes: &[u8], mime_type: &str) -> Option<std::rc::Rc<crate::core::image::Image>> {
 	let byte_array = js_sys::Uint8Array::from(bytes);
@@ -389,7 +389,7 @@ async fn decode_browser_image(bytes: &[u8], mime_type: &str) -> Option<std::rc::
 }
 
 //==============================================================================
-// 주소에서 바이트와 응답의 content-type 받기. (is_no_cache 면 원본 TextAsset 처럼 fetch 에 cache: "no-cache" 를 붙인다, 머리가 없으면 content-type 은 None)
+/// 주소에서 바이트와 응답의 content-type 받기. (is_no_cache 면 원본 TextAsset 처럼 fetch 에 cache: "no-cache" 를 붙인다, 머리가 없으면 content-type 은 None)
 //==============================================================================
 async fn fetch_bytes(asset_location: &str, is_no_cache: bool) -> Result<(Vec<u8>, Option<String>), String> {
 	let window = web_sys::window().ok_or_else(|| String::from("window 없음"))?;
@@ -416,7 +416,7 @@ async fn fetch_bytes(asset_location: &str, is_no_cache: bool) -> Result<(Vec<u8>
 }
 
 //==============================================================================
-// 응답의 content-type 머리. (response.headers.get("content-type"), 없으면 None)
+/// 응답의 content-type 머리. (response.headers.get("content-type"), 없으면 None)
 //==============================================================================
 fn read_response_content_type(response: &web_sys::Response) -> Option<String> {
 	let headers = js_sys::Reflect::get(response, &JsValue::from_str("headers")).ok()?;
@@ -425,19 +425,19 @@ fn read_response_content_type(response: &web_sys::Response) -> Option<String> {
 }
 
 //==============================================================================
-// 캔버스 상태. (마지막으로 맞춘 창 크기와 배율, 배율은 렌더 배율 상한을 건 값)
+/// 캔버스 상태. (마지막으로 맞춘 창 크기와 배율, 배율은 렌더 배율 상한을 건 값)
 //==============================================================================
 struct WindowState {
 	canvas: web_sys::HtmlCanvasElement,
 	canvas_width: f64,
 	canvas_height: f64,
 	device_pixel_ratio: f64,
-	// 마지막으로 맞춘 창 안쪽 크기. (화면 키보드로 세로만 줄었는지 볼 때, 원본 appliedClientNativeSize)
+	/// 마지막으로 맞춘 창 안쪽 크기. (화면 키보드로 세로만 줄었는지 볼 때, 원본 appliedClientNativeSize)
 	applied_client_size: Option<(f64, f64)>,
 }
 
 //==============================================================================
-// 웹 실행자.
+/// 웹 실행자.
 //==============================================================================
 struct WebApplication {
 	engine_runner: EngineRunner,
@@ -445,7 +445,7 @@ struct WebApplication {
 }
 
 //==============================================================================
-// 시작. (캔버스와 WebGL2 를 잡고 request_animation_frame 을 걸어 둔 뒤 바로 돌아온다)
+/// 시작. (캔버스와 WebGL2 를 잡고 request_animation_frame 을 걸어 둔 뒤 바로 돌아온다)
 //==============================================================================
 pub fn run(engine_runner: EngineRunner) -> Result<(), String> {
 	let web_application_cell = Rc::new(RefCell::new(WebApplication {
@@ -500,7 +500,7 @@ pub fn run(engine_runner: EngineRunner) -> Result<(), String> {
 }
 
 //==============================================================================
-// 다음 프레임 요청.
+/// 다음 프레임 요청.
 //==============================================================================
 fn request_animation_frame(frame_callback: &Closure<dyn FnMut(f64)>) {
 	if let Some(window) = web_sys::window() {
@@ -509,7 +509,7 @@ fn request_animation_frame(frame_callback: &Closure<dyn FnMut(f64)>) {
 }
 
 //==============================================================================
-// 키보드 입력. (KeyboardEvent.code 는 winit KeyCode 이름과 같은 W3C 규약)
+/// 키보드 입력. (KeyboardEvent.code 는 winit KeyCode 이름과 같은 W3C 규약)
 //==============================================================================
 fn add_keyboard_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> Result<(), String> {
 	let window = web_sys::window().ok_or_else(|| String::from("window 없음"))?;
@@ -551,16 +551,16 @@ fn add_keyboard_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) ->
 }
 
 //==============================================================================
-// 마우스와 손가락 입력. (원본 engine.js 의 mousedown, mousemove, mouseup, wheel, touchstart, touchmove, touchend, touchcancel)
-// - 마우스 단추(원본처럼 어느 것이든, set_touch_from_left_button_only 면 왼쪽만)와 첫 손가락을 엔진의 터치로 넘기고, 단추 셋과 손가락 목록, 휠의 Ctrl 을 입력 매니저에 적는다.
-// - 손가락을 뗀 바로 뒤(800 밀리초)에 브라우저가 흉내 내 보내는 마우스 사건은 원본 engine.js 처럼 마지막 장치와 마지막 손에만 적지 않는다.
-//   단추와 자리, 터치는 원본처럼 그대로 넘긴다. (손가락 사건의 기본 동작을 막아 브라우저는 흉내 낸 마우스 사건을 보내지 않는다)
-//   CameraGestures 처럼 자기 문턱(set_thresholds 의 넷째 인자)으로 거르는 쪽이 원본처럼 사건을 모두 보고 거르게 하려는 것이다.
-// - 캔버스 위의 손가락은 기본 동작(스크롤, 확대)을 막는다. 오른쪽 클릭 메뉴는 set_context_menu_prevented 가 참(처음)이면 막는다.
-// - 프레임 안에서 사건이 바로 불려도 겹쳐 빌리지 않게 try_borrow_mut 로 본다. (못 빌리면 그 사건은 버린다)
+/// 마우스와 손가락 입력. (원본 engine.js 의 mousedown, mousemove, mouseup, wheel, touchstart, touchmove, touchend, touchcancel)
+/// - 마우스 단추(원본처럼 어느 것이든, set_touch_from_left_button_only 면 왼쪽만)와 첫 손가락을 엔진의 터치로 넘기고, 단추 셋과 손가락 목록, 휠의 Ctrl 을 입력 매니저에 적는다.
+/// - 손가락을 뗀 바로 뒤(800 밀리초)에 브라우저가 흉내 내 보내는 마우스 사건은 원본 engine.js 처럼 마지막 장치와 마지막 손에만 적지 않는다.
+///   단추와 자리, 터치는 원본처럼 그대로 넘긴다. (손가락 사건의 기본 동작을 막아 브라우저는 흉내 낸 마우스 사건을 보내지 않는다)
+///   CameraGestures 처럼 자기 문턱(set_thresholds 의 넷째 인자)으로 거르는 쪽이 원본처럼 사건을 모두 보고 거르게 하려는 것이다.
+/// - 캔버스 위의 손가락은 기본 동작(스크롤, 확대)을 막는다. 오른쪽 클릭 메뉴는 set_context_menu_prevented 가 참(처음)이면 막는다.
+/// - 프레임 안에서 사건이 바로 불려도 겹쳐 빌리지 않게 try_borrow_mut 로 본다. (못 빌리면 그 사건은 버린다)
 //==============================================================================
 const COMPATIBILITY_MOUSE_MILLISECONDS: f64 = 800.0;
-// 마우스가 이만큼(CSS 픽셀) 넘게 움직여야 마지막 장치를 마우스로 본다.
+/// 마우스가 이만큼(CSS 픽셀) 넘게 움직여야 마지막 장치를 마우스로 본다.
 const MOUSE_DEVICE_MOVE_THRESHOLD: i32 = 6;
 
 fn add_pointer_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> Result<(), String> {
@@ -693,21 +693,21 @@ fn add_pointer_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> 
 }
 
 //==============================================================================
-// 지금 시각. (밀리초, performance.now)
+/// 지금 시각. (밀리초, performance.now)
 //==============================================================================
 fn read_now_milliseconds() -> f64 {
 	web_sys::window().and_then(|window| window.performance()).map(|performance| performance.now()).unwrap_or(0.0)
 }
 
 //==============================================================================
-// 손가락을 뗀 바로 뒤의 마우스 사건인지. (브라우저가 흉내 내 보내는 것)
+/// 손가락을 뗀 바로 뒤의 마우스 사건인지. (브라우저가 흉내 내 보내는 것)
 //==============================================================================
 fn is_compatibility_mouse(last_touch_time: f64) -> bool {
 	read_now_milliseconds() - last_touch_time < COMPATIBILITY_MOUSE_MILLISECONDS
 }
 
 //==============================================================================
-// MouseEvent.button 을 마우스 단추로. (0 왼쪽, 1 가운데, 2 오른쪽, 그 밖은 없음)
+/// MouseEvent.button 을 마우스 단추로. (0 왼쪽, 1 가운데, 2 오른쪽, 그 밖은 없음)
 //==============================================================================
 fn read_mouse_button(button: i16) -> Option<MouseButton> {
 	match button {
@@ -727,8 +727,8 @@ fn read_mouse_button(button: i16) -> Option<MouseButton> {
 }
 
 //==============================================================================
-// 오디오 재개 이벤트. (원본 setupAllDocumentEvents 의 오디오 부분)
-// - 프레임 안에서 이벤트가 바로 불려도 겹쳐 빌리지 않게 try_borrow 로 본다. (못 빌리면 다음 이벤트에 맡긴다)
+/// 오디오 재개 이벤트. (원본 setupAllDocumentEvents 의 오디오 부분)
+/// - 프레임 안에서 이벤트가 바로 불려도 겹쳐 빌리지 않게 try_borrow 로 본다. (못 빌리면 다음 이벤트에 맡긴다)
 //==============================================================================
 fn add_audio_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> Result<(), String> {
 	let window = web_sys::window().ok_or_else(|| String::from("window 없음"))?;
@@ -780,8 +780,8 @@ fn add_audio_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> Re
 }
 
 //==============================================================================
-// 페이지 이벤트와 복원. (원본 setupAllDocumentEvents 의 resume, pageshow, visibilitychange 와 SoundSystem 의 blur, focus, pointerdown)
-// - 엔진을 고쳐 써야 해서 try_borrow_mut 로 본다. (이 이벤트들은 프레임 콜백 안에서 겹쳐 불리지 않는다)
+/// 페이지 이벤트와 복원. (원본 setupAllDocumentEvents 의 resume, pageshow, visibilitychange 와 SoundSystem 의 blur, focus, pointerdown)
+/// - 엔진을 고쳐 써야 해서 try_borrow_mut 로 본다. (이 이벤트들은 프레임 콜백 안에서 겹쳐 불리지 않는다)
 //==============================================================================
 fn add_page_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> Result<(), String> {
 	let window = web_sys::window().ok_or_else(|| String::from("window 없음"))?;
@@ -851,8 +851,8 @@ fn add_page_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> Res
 }
 
 //==============================================================================
-// GL 컨텍스트를 잃거나 되살림. (원본 Graphic 생성자처럼 캔버스의 webglcontextlost, webglcontextrestored 에서 그래픽의 묶음 기억을 잊는다)
-// - 컨텍스트를 잃거나 되살리면 GL 의 묶음이 처음으로 돌아가므로 기억을 잊는다. 프레임 콜백 안에서 겹쳐 불리지 않게 try_borrow 로 본다.
+/// GL 컨텍스트를 잃거나 되살림. (원본 Graphic 생성자처럼 캔버스의 webglcontextlost, webglcontextrestored 에서 그래픽의 묶음 기억을 잊는다)
+/// - 컨텍스트를 잃거나 되살리면 GL 의 묶음이 처음으로 돌아가므로 기억을 잊는다. 프레임 콜백 안에서 겹쳐 불리지 않게 try_borrow 로 본다.
 //==============================================================================
 fn add_context_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> Result<(), String> {
 	let canvas = web_application_cell.borrow().engine_runner.engine.platform_window.clone().ok_or_else(|| String::from("캔버스 없음"))?;
@@ -869,8 +869,8 @@ fn add_context_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> 
 }
 
 //==============================================================================
-// 응용 프로그램 종료. (원본 exitApplication: Capacitor 네이티브면 App 플러그인으로 끝내고, 아니면 창 닫기를 시도한다)
-// - 둘 다 환경에 따라 거부될 수 있으며 실패해도 오류를 내지 않는다. 엔진은 종료 요청을 적어 다음 프레임부터 돌지 않는다.
+/// 응용 프로그램 종료. (원본 exitApplication: Capacitor 네이티브면 App 플러그인으로 끝내고, 아니면 창 닫기를 시도한다)
+/// - 둘 다 환경에 따라 거부될 수 있으며 실패해도 오류를 내지 않는다. 엔진은 종료 요청을 적어 다음 프레임부터 돌지 않는다.
 //==============================================================================
 pub fn exit_application() {
 	let window = match web_sys::window() {
@@ -901,7 +901,7 @@ pub fn exit_application() {
 }
 
 //==============================================================================
-// 자바스크립트 오류를 글로.
+/// 자바스크립트 오류를 글로.
 //==============================================================================
 fn describe_js_error(error: JsValue) -> String {
 	format!("{:?}", error)
@@ -909,7 +909,7 @@ fn describe_js_error(error: JsValue) -> String {
 
 impl WebApplication {
 	//==============================================================================
-	// 화면(client) 좌표를 캔버스 논리 좌표와 뷰 좌표로 바꿔 입력 매니저에 적기.
+	/// 화면(client) 좌표를 캔버스 논리 좌표와 뷰 좌표로 바꿔 입력 매니저에 적기.
 	//==============================================================================
 	fn update_pointer_position(&mut self, client_x: f64, client_y: f64) {
 		let canvas_native_position = match self.read_canvas_native_position(client_x, client_y) {
@@ -928,7 +928,7 @@ impl WebApplication {
 	}
 
 	//==============================================================================
-	// 화면(client) 좌표를 캔버스 논리 좌표로. (캔버스의 실제 자리를 읽는다)
+	/// 화면(client) 좌표를 캔버스 논리 좌표로. (캔버스의 실제 자리를 읽는다)
 	//==============================================================================
 	fn read_canvas_native_position(&self, client_x: f64, client_y: f64) -> Option<Vector2> {
 		let canvas = self.engine_runner.engine.platform_window.as_ref()?;
@@ -937,8 +937,8 @@ impl WebApplication {
 	}
 
 	//==============================================================================
-	// 손가락 사건. (바뀐 손가락마다 닿음, 움직임, 뗌을 적고, 첫 손가락의 누름, 움직임, 뗌을 터치로 넘긴다)
-	// - 사건의 touches 에 없는 손가락은 놓친 뗌으로 보아 취소로 지운다.
+	/// 손가락 사건. (바뀐 손가락마다 닿음, 움직임, 뗌을 적고, 첫 손가락의 누름, 움직임, 뗌을 터치로 넘긴다)
+	/// - 사건의 touches 에 없는 손가락은 놓친 뗌으로 보아 취소로 지운다.
 	//==============================================================================
 	fn handle_touch_event(&mut self, touch_event: &web_sys::TouchEvent) {
 		let event_type = touch_event.type_();
@@ -1020,7 +1020,7 @@ impl WebApplication {
 	}
 
 	//==============================================================================
-	// 캔버스와 WebGL2 컨텍스트, 그래픽 만들기.
+	/// 캔버스와 WebGL2 컨텍스트, 그래픽 만들기.
 	//==============================================================================
 	fn create_canvas(&mut self) -> Result<(), String> {
 		let window = web_sys::window().ok_or_else(|| String::from("window 없음"))?;
@@ -1074,10 +1074,10 @@ impl WebApplication {
 	}
 
 	//==============================================================================
-	// 창 크기나 배율이 바뀌었으면 캔버스를 맞추고 뷰 영역을 다시 계산. (원본 engine.resize 와 view_manager.calculate_view_rect)
-	// - auto_resize_on_window_resize 면 캔버스를 창 안쪽(visualViewport 가 있으면 그것)에 맞춘다. 끄면 페이지가 정한 캔버스 크기를 읽는다.
-	// - ignore_virtual_keyboard_resize 면 글자 입력칸이 포커스된 동안 가로가 같고 세로만 줄었을 때 세로를 그대로 둔다.
-	// - max_canvas_aspect_ratio 가 있으면 창이 그보다 길쭉할 때 캔버스를 줄여 가운데에 둔다.
+	/// 창 크기나 배율이 바뀌었으면 캔버스를 맞추고 뷰 영역을 다시 계산. (원본 engine.resize 와 view_manager.calculate_view_rect)
+	/// - auto_resize_on_window_resize 면 캔버스를 창 안쪽(visualViewport 가 있으면 그것)에 맞춘다. 끄면 페이지가 정한 캔버스 크기를 읽는다.
+	/// - ignore_virtual_keyboard_resize 면 글자 입력칸이 포커스된 동안 가로가 같고 세로만 줄었을 때 세로를 그대로 둔다.
+	/// - max_canvas_aspect_ratio 가 있으면 창이 그보다 길쭉할 때 캔버스를 줄여 가운데에 둔다.
 	//==============================================================================
 	fn resize_if_changed(&mut self) {
 		let window = match web_sys::window() {

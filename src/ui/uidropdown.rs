@@ -1,24 +1,30 @@
 //==============================================================================
-// 드롭다운. (원본 ui/uidropdown.js 의 UIDropdown, 콤보박스)
-// - 닫힌 머리 단추에 지금 값이 보이고, 누르면 아래로 선택지 목록이 펼쳐진다. 행을 누르면 고르고 접힌다.
-// - 펼칠 때 목록을 트리 뿌리의 마지막 자식으로 옮겨, 나중에 그려지는 형제 노드에 가리지 않게 한다. (접으면 머리 단추 아래로 되돌린다)
-// - 머리 단추의 틴트 대상에서 펼침 목록 노드를 뺀다. (exclude_node_from_tint, 빼지 않으면 고른 뒤 머리 단추가 매 tick 눌렀을 때 담아 둔 옛 행 색을 다시 써서
-//   선택 강조가 덮인다) 강조를 바꾼 뒤에는 행 단추들이 틴트 원래 색을 다시 담게 한다. (원본은 그 자리에서, 러스트 판은 다음 tick 에)
-// - 원본은 WorldNode 를 상속한 노드다. 러스트 판은 노드(호스트)에 붙는 컴포넌트이고, 붙을 때 원본 생성자처럼
-//   호스트를 꾸미고(왼쪽 위 피봇, 크기, interactable) Paint + UIButton + UILabel(머리 글)을 호스트에, 화살표 노드와 펼침 목록 노드를 자식으로 만든다.
-//   UIDropdown::create(node_tree, parent_id, options) 가 원본 new UIDropdown(options) + add_child 자리다.
-// - 사용:
-//     let dropdown_id = UIDropdown::create(node_tree, panel_id, UIDropdownOptions { width: 180.0, ..UIDropdownOptions::default() });
-//     node_tree.with_component_mut::<UIDropdown, _>(dropdown_id, |dropdown, tree| dropdown.set_option_list(tree, &["Dark", "Light", "System"]));
-//     node_tree[dropdown_id].get_component_mut::<UIDropdown>().unwrap().set_changed_event(Box::new(|dropdown, context| { dropdown.get_selected_text(); }));
-// - 원본과 다른 것:
-//   - 트리를 바꾸는 함수(set_option_list, set_open, set_selected_index)는 트리를 받는다. 씬 코드는 node_tree.with_component_mut 로 부른다.
-//     select_index 는 바뀜 이벤트에 문맥을 넘기려고 문맥을 받는다. (행 단추가 ComponentContext::with_component_mut 로 부른다)
-//   - 바뀜 이벤트는 드롭다운과 문맥을 받는다. options 객체는 UIDropdownOptions 구조체다.
-//   - 행 강조는 펼침 목록의 자식 순서 대신 만든 행 노드 목록으로 고친다. (tick 중에 다시 만들면 지운 행이 잠깐 자식으로 남는다)
-//   - 화살표 글자는 원본처럼 작은 삼각형(▾ ▴, U+25BE / U+25B4)이다. 기본 글꼴(맑은 고딕, Segoe UI, Arial)에 없는 글자는
-//     크롬처럼 시스템 대체 글꼴로 그린다. (core/textshaping.rs)
-//   - 노드 이름은 원본처럼 "DropdownArrow", "DropdownPopup", "DropdownOption{번호}" 다. 호스트 이름은 만든 쪽이 정한다. (create 는 "UIDropdown")
+//! 드롭다운. (원본 ui/uidropdown.js 의 UIDropdown, 콤보박스)
+//! - 닫힌 머리 단추에 지금 값이 보이고, 누르면 아래로 선택지 목록이 펼쳐진다. 행을 누르면 고르고 접힌다.
+//! - 펼칠 때 목록을 트리 뿌리의 마지막 자식으로 옮겨, 나중에 그려지는 형제 노드에 가리지 않게 한다. (접으면 머리 단추 아래로 되돌린다)
+//! - 머리 단추의 틴트 대상에서 펼침 목록 노드를 뺀다. (exclude_node_from_tint, 빼지 않으면 고른 뒤 머리 단추가 매 tick 눌렀을 때 담아 둔 옛 행 색을 다시 써서
+//!   선택 강조가 덮인다) 강조를 바꾼 뒤에는 행 단추들이 틴트 원래 색을 다시 담게 한다. (원본은 그 자리에서, 러스트 판은 다음 tick 에)
+//! - 원본은 WorldNode 를 상속한 노드다. 러스트 판은 노드(호스트)에 붙는 컴포넌트이고, 붙을 때 원본 생성자처럼
+//!   호스트를 꾸미고(왼쪽 위 피봇, 크기, interactable) Paint + UIButton + UILabel(머리 글)을 호스트에, 화살표 노드와 펼침 목록 노드를 자식으로 만든다.
+//!   UIDropdown::create(node_tree, parent_id, options) 가 원본 new UIDropdown(options) + add_child 자리다.
+//! - 사용:
+//!   ```text
+//!     let dropdown_id = UIDropdown::create(node_tree, panel_id, UIDropdownOptions { width: 180.0, ..UIDropdownOptions::default() });
+//!     node_tree.with_component_mut::<UIDropdown, _>(dropdown_id, |dropdown, tree| dropdown.set_option_list(tree, &["Dark", "Light", "System"]));
+//!     node_tree[dropdown_id].get_component_mut::<UIDropdown>().unwrap().set_changed_event(Box::new(|dropdown, context| { dropdown.get_selected_text(); }));
+//!   ```
+//! - 원본과 다른 것:
+//!   - 트리를 바꾸는 함수(set_option_list, set_open, set_selected_index)는 트리를 받는다. 씬 코드는 node_tree.with_component_mut 로 부른다.
+//!   ```text
+//!     select_index 는 바뀜 이벤트에 문맥을 넘기려고 문맥을 받는다. (행 단추가 ComponentContext::with_component_mut 로 부른다)
+//!   ```
+//!   - 바뀜 이벤트는 드롭다운과 문맥을 받는다. options 객체는 UIDropdownOptions 구조체다.
+//!   - 행 강조는 펼침 목록의 자식 순서 대신 만든 행 노드 목록으로 고친다. (tick 중에 다시 만들면 지운 행이 잠깐 자식으로 남는다)
+//!   - 화살표 글자는 원본처럼 작은 삼각형(▾ ▴, U+25BE / U+25B4)이다. 기본 글꼴(맑은 고딕, Segoe UI, Arial)에 없는 글자는
+//!   ```text
+//!     크롬처럼 시스템 대체 글꼴로 그린다. (core/textshaping.rs)
+//!   ```
+//!   - 노드 이름은 원본처럼 "DropdownArrow", "DropdownPopup", "DropdownOption{번호}" 다. 호스트 이름은 만든 쪽이 정한다. (create 는 "UIDropdown")
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::pivot::Pivot;
@@ -29,32 +35,32 @@ use crate::core::node::nodetree::{ComponentContext, NodeId, NodeTree};
 use crate::ui::uibutton::UIButton;
 use crate::ui::uilabel::UILabel;
 
-// 펼친 화살표 / 접힌 화살표. (원본 ▴ ▾)
+/// 펼친 화살표 / 접힌 화살표. (원본 ▴ ▾)
 const ARROW_OPEN_TEXT: &str = "▴";
 const ARROW_CLOSED_TEXT: &str = "▾";
 
 //==============================================================================
-// 드롭다운 설정. (원본 options = { width = 180, height = 30, option_height = 28, font_size = 12, base_color?, popup_color?, highlight_color?, text_color? })
+/// 드롭다운 설정. (원본 options = { width = 180, height = 30, option_height = 28, font_size = 12, base_color?, popup_color?, highlight_color?, text_color? })
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UIDropdownOptions {
 	pub width: f32,
 	pub height: f32,
-	// 선택지 행 높이.
+	/// 선택지 행 높이.
 	pub option_height: f32,
 	pub font_size: f32,
-	// 머리 단추 바탕색.
+	/// 머리 단추 바탕색.
 	pub base_color: Color,
-	// 펼침 목록 바탕색.
+	/// 펼침 목록 바탕색.
 	pub popup_color: Color,
-	// 고른 행 강조색.
+	/// 고른 행 강조색.
 	pub highlight_color: Color,
 	pub text_color: Color,
 }
 
 impl Default for UIDropdownOptions {
 	//==============================================================================
-	// 기본값. (원본과 같다)
+	/// 기본값. (원본과 같다)
 	//==============================================================================
 	fn default() -> UIDropdownOptions {
 		UIDropdownOptions {
@@ -71,12 +77,12 @@ impl Default for UIDropdownOptions {
 }
 
 //==============================================================================
-// 드롭다운 이벤트. (드롭다운과 문맥을 받는다)
+/// 드롭다운 이벤트. (드롭다운과 문맥을 받는다)
 //==============================================================================
 pub type UIDropdownEvent = Box<dyn FnMut(&mut UIDropdown, &mut ComponentContext)>;
 
 //==============================================================================
-// 드롭다운.
+/// 드롭다운.
 //==============================================================================
 pub struct UIDropdown {
 	component_base: ComponentBase,
@@ -94,14 +100,14 @@ pub struct UIDropdown {
 #[crate::reflect]
 impl UIDropdown {
 	//==============================================================================
-	// 생성. (기본 설정)
+	/// 생성. (기본 설정)
 	//==============================================================================
 	pub fn new() -> UIDropdown {
 		UIDropdown::create_with_options(UIDropdownOptions::default())
 	}
 
 	//==============================================================================
-	// 설정으로 생성. (노드에는 node_tree.add_component 로 붙인다)
+	/// 설정으로 생성. (노드에는 node_tree.add_component 로 붙인다)
 	//==============================================================================
 	pub fn create_with_options(options: UIDropdownOptions) -> UIDropdown {
 		UIDropdown {
@@ -119,7 +125,7 @@ impl UIDropdown {
 	}
 
 	//==============================================================================
-	// 노드 만들기. (parent_id 밑에 "UIDropdown" 노드를 만들어 붙인다. 원본 new UIDropdown(options) + add_child)
+	/// 노드 만들기. (parent_id 밑에 "UIDropdown" 노드를 만들어 붙인다. 원본 new UIDropdown(options) + add_child)
 	//==============================================================================
 	pub fn create(node_tree: &mut NodeTree, parent_id: NodeId, options: UIDropdownOptions) -> NodeId {
 		let dropdown_id = node_tree.create_child(parent_id, "UIDropdown");
@@ -128,7 +134,7 @@ impl UIDropdown {
 	}
 
 	//==============================================================================
-	// 선택지 목록 설정. (펼침 목록 행을 다시 만든다)
+	/// 선택지 목록 설정. (펼침 목록 행을 다시 만든다)
 	//==============================================================================
 	pub fn set_option_list(&mut self, node_tree: &mut NodeTree, option_list: &[impl AsRef<str>]) {
 		self.option_list = option_list.iter().map(|option_text| option_text.as_ref().to_string()).collect();
@@ -187,7 +193,7 @@ impl UIDropdown {
 	}
 
 	//==============================================================================
-	// 고르기. (접고, 머리 글과 강조를 고치고, 바뀌었으면 바뀜 이벤트를 부른다. 문맥은 드롭다운 호스트의 것)
+	/// 고르기. (접고, 머리 글과 강조를 고치고, 바뀌었으면 바뀜 이벤트를 부른다. 문맥은 드롭다운 호스트의 것)
 	//==============================================================================
 	pub fn select_index(&mut self, context: &mut ComponentContext, option_index: usize) {
 		if option_index >= self.option_list.len() {
@@ -205,7 +211,7 @@ impl UIDropdown {
 	}
 
 	//==============================================================================
-	// 바뀜 이벤트 부르기. (부르는 동안 칸에서 꺼냈다가, 콜백이 새로 정하지 않았으면 되돌린다)
+	/// 바뀜 이벤트 부르기. (부르는 동안 칸에서 꺼냈다가, 콜백이 새로 정하지 않았으면 되돌린다)
 	//==============================================================================
 	fn fire_changed_event(&mut self, context: &mut ComponentContext) {
 		let mut changed_event = match self.changed_event.take() {
@@ -223,7 +229,7 @@ impl UIDropdown {
 	}
 
 	//==============================================================================
-	// 펼침 / 접힘. (펼치면 목록을 트리 뿌리로 옮기고, 접으면 되돌린다)
+	/// 펼침 / 접힘. (펼치면 목록을 트리 뿌리로 옮기고, 접으면 되돌린다)
 	//==============================================================================
 	pub fn set_open(&mut self, node_tree: &mut NodeTree, is_open: bool) {
 		self.is_open = is_open;
@@ -248,7 +254,7 @@ impl UIDropdown {
 	}
 
 	//==============================================================================
-	// 펼침 목록을 트리 뿌리로 옮긴다. (머리 단추 왼쪽 아래 + 4 의 뷰 좌표를 뿌리 로컬 좌표로 바꾼다)
+	/// 펼침 목록을 트리 뿌리로 옮긴다. (머리 단추 왼쪽 아래 + 4 의 뷰 좌표를 뿌리 로컬 좌표로 바꾼다)
 	//==============================================================================
 	fn attach_popup_to_root(&mut self, node_tree: &mut NodeTree) {
 		let (host_id, popup_id) = match (self.node_id, self.popup_node_id) {
@@ -278,7 +284,7 @@ impl UIDropdown {
 	}
 
 	//==============================================================================
-	// 펼침 목록을 머리 단추 아래로 되돌린다.
+	/// 펼침 목록을 머리 단추 아래로 되돌린다.
 	//==============================================================================
 	fn detach_popup_from_root(&mut self, node_tree: &mut NodeTree) {
 		let (host_id, popup_id) = match (self.node_id, self.popup_node_id) {
@@ -301,7 +307,7 @@ impl UIDropdown {
 	}
 
 	//==============================================================================
-	// 머리 글 갱신. (호스트의 UILabel)
+	/// 머리 글 갱신. (호스트의 UILabel)
 	//==============================================================================
 	fn refresh_header(&mut self, node_tree: &mut NodeTree) {
 		let selected_text = self.get_selected_text().to_string();
@@ -311,7 +317,7 @@ impl UIDropdown {
 	}
 
 	//==============================================================================
-	// 고른 행 강조 갱신. (행 단추가 틴트 원래 색을 다음 tick 에 다시 담게 한다)
+	/// 고른 행 강조 갱신. (행 단추가 틴트 원래 색을 다음 tick 에 다시 담게 한다)
 	//==============================================================================
 	fn refresh_highlight(&mut self, node_tree: &mut NodeTree) {
 		for (row_index, row_node_id) in self.row_node_ids.iter().copied().enumerate() {
@@ -339,14 +345,14 @@ impl UIDropdown {
 	}
 
 	//==============================================================================
-	// 바뀜 이벤트 설정.
+	/// 바뀜 이벤트 설정.
 	//==============================================================================
 	pub fn set_changed_event(&mut self, changed_event: UIDropdownEvent) {
 		self.changed_event = Some(changed_event);
 	}
 
 	//==============================================================================
-	// 고른 번호 설정. (범위로 자른다. 바뀜 이벤트는 부르지 않는다. 원본과 같음)
+	/// 고른 번호 설정. (범위로 자른다. 바뀜 이벤트는 부르지 않는다. 원본과 같음)
 	//==============================================================================
 	pub fn set_selected_index(&mut self, node_tree: &mut NodeTree, selected_index: usize) {
 		self.selected_index = selected_index.min(self.option_list.len().saturating_sub(1));
@@ -355,42 +361,42 @@ impl UIDropdown {
 	}
 
 	//==============================================================================
-	// 고른 번호 반환.
+	/// 고른 번호 반환.
 	//==============================================================================
 	pub fn get_selected_index(&self) -> usize {
 		self.selected_index
 	}
 
 	//==============================================================================
-	// 고른 글 반환. (선택지가 없으면 빈 글)
+	/// 고른 글 반환. (선택지가 없으면 빈 글)
 	//==============================================================================
 	pub fn get_selected_text(&self) -> &str {
 		self.option_list.get(self.selected_index).map(String::as_str).unwrap_or("")
 	}
 
 	//==============================================================================
-	// 선택지 목록 반환.
+	/// 선택지 목록 반환.
 	//==============================================================================
 	pub fn get_option_list(&self) -> &[String] {
 		&self.option_list
 	}
 
 	//==============================================================================
-	// 펼쳐져 있는지.
+	/// 펼쳐져 있는지.
 	//==============================================================================
 	pub fn is_open(&self) -> bool {
 		self.is_open
 	}
 
 	//==============================================================================
-	// 펼침 목록 노드 핸들. (펼친 동안은 트리 뿌리의 자식)
+	/// 펼침 목록 노드 핸들. (펼친 동안은 트리 뿌리의 자식)
 	//==============================================================================
 	pub fn get_popup_node(&self) -> Option<NodeId> {
 		self.popup_node_id
 	}
 
 	//==============================================================================
-	// 선택지 행 노드 핸들 목록.
+	/// 선택지 행 노드 핸들 목록.
 	//==============================================================================
 	pub fn get_option_nodes(&self) -> &[NodeId] {
 		&self.row_node_ids
@@ -418,7 +424,7 @@ impl Component for UIDropdown {
 	}
 
 	//==============================================================================
-	// 트리에 붙음. (원본 생성자: 호스트 꾸미기, 머리 단추, 화살표, 펼침 목록)
+	/// 트리에 붙음. (원본 생성자: 호스트 꾸미기, 머리 단추, 화살표, 펼침 목록)
 	//==============================================================================
 	fn attach_to_tree(&mut self, node_tree: &mut NodeTree, node_id: NodeId) {
 		self.node_id = Some(node_id);
@@ -497,7 +503,7 @@ mod tests {
 	use std::rc::Rc;
 
 	//==============================================================================
-	// 시험 장면. (800 x 600 뿌리, (100, 50) 에 놓은 드롭다운, 선택지 셋)
+	/// 시험 장면. (800 x 600 뿌리, (100, 50) 에 놓은 드롭다운, 선택지 셋)
 	//==============================================================================
 	fn create_dropdown_tree() -> (NodeTree, NodeId) {
 		let mut node_tree = NodeTree::new();
@@ -512,7 +518,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 노드 가운데를 누르고 뗀다.
+	/// 노드 가운데를 누르고 뗀다.
 	//==============================================================================
 	fn click_node(node_tree: &mut NodeTree, engine: &Engine, node_id: NodeId) {
 		let content_size = node_tree[node_id].get_content_size();
@@ -522,14 +528,14 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 드롭다운 반환.
+	/// 드롭다운 반환.
 	//==============================================================================
 	fn get_dropdown(node_tree: &mut NodeTree, dropdown_id: NodeId) -> &mut UIDropdown {
 		node_tree[dropdown_id].get_component_mut::<UIDropdown>().expect("dropdown")
 	}
 
 	//==============================================================================
-	// 붙으면 호스트가 꾸며지고, 선택지 행과 머리 글이 생긴다.
+	/// 붙으면 호스트가 꾸며지고, 선택지 행과 머리 글이 생긴다.
 	//==============================================================================
 	#[test]
 	fn option_list_builds_rows() {
@@ -548,7 +554,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 머리를 누르면 펼쳐져 목록이 뿌리로 옮겨 가고, 행을 누르면 고르고 접히며 바뀜 이벤트가 한 번 온다.
+	/// 머리를 누르면 펼쳐져 목록이 뿌리로 옮겨 가고, 행을 누르면 고르고 접히며 바뀜 이벤트가 한 번 온다.
 	//==============================================================================
 	#[test]
 	fn open_select_and_close() {
@@ -602,7 +608,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// set_selected_index 는 범위로 자르고 이벤트 없이 머리 글만 고친다.
+	/// set_selected_index 는 범위로 자르고 이벤트 없이 머리 글만 고친다.
 	//==============================================================================
 	#[test]
 	fn set_selected_index_clamps_without_event() {

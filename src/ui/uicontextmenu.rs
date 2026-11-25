@@ -1,21 +1,23 @@
 //==============================================================================
-// 컨텍스트 메뉴. (원본 ui/uicontextmenu.js 의 UIContextMenu, 우클릭 / 길게 누름 메뉴)
-// - show(node_tree, position, item_list) 로 항목 목록을 그 자리에 띄운다. 바깥을 누르면 닫히고, 항목을 누르면 닫힌 뒤 처리기를 부른다.
-// - 메뉴가 부모 영역 밖으로 나가지 않게 오른쪽 / 아래 끝에 붙인다. (부모 크기를 모르면 960 x 640)
-// - 씬 뿌리의 맨 위(마지막 자식)에 두고 쓴다.
-// - 원본은 WorldNode 를 상속한 노드다. 러스트 판은 노드(호스트)에 붙는 컴포넌트이고, 붙을 때 원본 생성자처럼
-//   호스트를 꾸미고(왼쪽 위 피봇, 비활성) 바깥 누름 막(투명 UIButton)과 메뉴 판(둥근 Paint)을 자식으로 만든다.
-//   UIContextMenu::create(node_tree, parent_id, options) 가 원본 new UIContextMenu(options) + add_child 자리다.
-// - 사용:
-//     let menu_id = UIContextMenu::create(node_tree, root_id, UIContextMenuOptions::default());
-//     node_tree.with_component_mut::<UIContextMenu, _>(menu_id, |context_menu, tree| {
-//         context_menu.show(tree, view_position, vec![UIContextMenuItem::create("복사", Box::new(|context| { ... })), UIContextMenuItem::create_disabled("삭제")]);
-//     });
-// - 원본과 다른 것:
-//   - show / close 는 노드를 바꾸므로 트리를 받는다. 씬 코드는 node_tree.with_component_mut 로 부른다.
-//   - 항목은 UIContextMenuItem 구조체({ text, handler?, is_disabled }), 처리기는 누른 행 노드의 문맥을 받는 한 번짜리 함수(FnOnce)다.
-//   - is_showing 은 노드 활성 대신 show / close 가 고치는 값을 돌려준다.
-//   - 이전 행은 떼기(removeChild) 대신 지운다. 행 노드 이름은 원본처럼 "ContextMenuItem{번호}" 다.
+//! 컨텍스트 메뉴. (원본 ui/uicontextmenu.js 의 UIContextMenu, 우클릭 / 길게 누름 메뉴)
+//! - show(node_tree, position, item_list) 로 항목 목록을 그 자리에 띄운다. 바깥을 누르면 닫히고, 항목을 누르면 닫힌 뒤 처리기를 부른다.
+//! - 메뉴가 부모 영역 밖으로 나가지 않게 오른쪽 / 아래 끝에 붙인다. (부모 크기를 모르면 960 x 640)
+//! - 씬 뿌리의 맨 위(마지막 자식)에 두고 쓴다.
+//! - 원본은 WorldNode 를 상속한 노드다. 러스트 판은 노드(호스트)에 붙는 컴포넌트이고, 붙을 때 원본 생성자처럼
+//!   호스트를 꾸미고(왼쪽 위 피봇, 비활성) 바깥 누름 막(투명 UIButton)과 메뉴 판(둥근 Paint)을 자식으로 만든다.
+//!   UIContextMenu::create(node_tree, parent_id, options) 가 원본 new UIContextMenu(options) + add_child 자리다.
+//! - 사용:
+//!   ```text
+//!     let menu_id = UIContextMenu::create(node_tree, root_id, UIContextMenuOptions::default());
+//!     node_tree.with_component_mut::<UIContextMenu, _>(menu_id, |context_menu, tree| {
+//!         context_menu.show(tree, view_position, vec![UIContextMenuItem::create("복사", Box::new(|context| { ... })), UIContextMenuItem::create_disabled("삭제")]);
+//!     });
+//!   ```
+//! - 원본과 다른 것:
+//!   - show / close 는 노드를 바꾸므로 트리를 받는다. 씬 코드는 node_tree.with_component_mut 로 부른다.
+//!   - 항목은 UIContextMenuItem 구조체({ text, handler?, is_disabled }), 처리기는 누른 행 노드의 문맥을 받는 한 번짜리 함수(FnOnce)다.
+//!   - is_showing 은 노드 활성 대신 show / close 가 고치는 값을 돌려준다.
+//!   - 이전 행은 떼기(removeChild) 대신 지운다. 행 노드 이름은 원본처럼 "ContextMenuItem{번호}" 다.
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::pivot::Pivot;
@@ -27,12 +29,12 @@ use crate::core::node::nodetree::{ComponentContext, NodeId, NodeTree};
 use crate::ui::uibutton::UIButton;
 use crate::ui::uilabel::UILabel;
 
-// 부모 크기를 모를 때 쓰는 영역. (원본과 같다)
+/// 부모 크기를 모를 때 쓰는 영역. (원본과 같다)
 const DEFAULT_AREA_WIDTH: f32 = 960.0;
 const DEFAULT_AREA_HEIGHT: f32 = 640.0;
 
 //==============================================================================
-// 컨텍스트 메뉴 설정. (원본 options = { menu_width = 168, item_height = 28, font_size = 12, panel_color?, text_color? })
+/// 컨텍스트 메뉴 설정. (원본 options = { menu_width = 168, item_height = 28, font_size = 12, panel_color?, text_color? })
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UIContextMenuOptions {
@@ -45,7 +47,7 @@ pub struct UIContextMenuOptions {
 
 impl Default for UIContextMenuOptions {
 	//==============================================================================
-	// 기본값. (원본과 같다)
+	/// 기본값. (원본과 같다)
 	//==============================================================================
 	fn default() -> UIContextMenuOptions {
 		UIContextMenuOptions {
@@ -59,12 +61,12 @@ impl Default for UIContextMenuOptions {
 }
 
 //==============================================================================
-// 항목 처리기. (누른 행 노드의 문맥을 받는다. 한 번만 불린다)
+/// 항목 처리기. (누른 행 노드의 문맥을 받는다. 한 번만 불린다)
 //==============================================================================
 pub type UIContextMenuHandler = Box<dyn FnOnce(&mut ComponentContext)>;
 
 //==============================================================================
-// 메뉴 항목. (원본 { text, handler?, is_disabled? })
+/// 메뉴 항목. (원본 { text, handler?, is_disabled? })
 //==============================================================================
 pub struct UIContextMenuItem {
 	pub text: String,
@@ -74,7 +76,7 @@ pub struct UIContextMenuItem {
 
 impl UIContextMenuItem {
 	//==============================================================================
-	// 처리기가 있는 항목 생성.
+	/// 처리기가 있는 항목 생성.
 	//==============================================================================
 	pub fn create(text: &str, handler: UIContextMenuHandler) -> UIContextMenuItem {
 		UIContextMenuItem {
@@ -85,7 +87,7 @@ impl UIContextMenuItem {
 	}
 
 	//==============================================================================
-	// 누를 수 없는 항목 생성. (회색 글자)
+	/// 누를 수 없는 항목 생성. (회색 글자)
 	//==============================================================================
 	pub fn create_disabled(text: &str) -> UIContextMenuItem {
 		UIContextMenuItem {
@@ -97,7 +99,7 @@ impl UIContextMenuItem {
 }
 
 //==============================================================================
-// 컨텍스트 메뉴.
+/// 컨텍스트 메뉴.
 //==============================================================================
 pub struct UIContextMenu {
 	component_base: ComponentBase,
@@ -112,14 +114,14 @@ pub struct UIContextMenu {
 #[crate::reflect]
 impl UIContextMenu {
 	//==============================================================================
-	// 생성. (기본 설정)
+	/// 생성. (기본 설정)
 	//==============================================================================
 	pub fn new() -> UIContextMenu {
 		UIContextMenu::create_with_options(UIContextMenuOptions::default())
 	}
 
 	//==============================================================================
-	// 설정으로 생성. (노드에는 node_tree.add_component 로 붙인다)
+	/// 설정으로 생성. (노드에는 node_tree.add_component 로 붙인다)
 	//==============================================================================
 	pub fn create_with_options(options: UIContextMenuOptions) -> UIContextMenu {
 		UIContextMenu {
@@ -134,7 +136,7 @@ impl UIContextMenu {
 	}
 
 	//==============================================================================
-	// 노드 만들기. (parent_id 밑에 "UIContextMenu" 노드를 만들어 붙인다. 원본 new UIContextMenu(options) + add_child)
+	/// 노드 만들기. (parent_id 밑에 "UIContextMenu" 노드를 만들어 붙인다. 원본 new UIContextMenu(options) + add_child)
 	//==============================================================================
 	pub fn create(node_tree: &mut NodeTree, parent_id: NodeId, options: UIContextMenuOptions) -> NodeId {
 		let menu_id = node_tree.create_child(parent_id, "UIContextMenu");
@@ -143,7 +145,7 @@ impl UIContextMenu {
 	}
 
 	//==============================================================================
-	// 메뉴 열기. (position 은 메뉴 왼쪽 위의 뷰 좌표. 행을 다시 만들고 영역 안에 붙여 띄운다)
+	/// 메뉴 열기. (position 은 메뉴 왼쪽 위의 뷰 좌표. 행을 다시 만들고 영역 안에 붙여 띄운다)
 	//==============================================================================
 	pub fn show(&mut self, node_tree: &mut NodeTree, position: Vector2, item_list: Vec<UIContextMenuItem>) {
 		let (menu_id, overlay_id, panel_id) = match (self.node_id, self.overlay_node_id, self.panel_node_id) {
@@ -232,7 +234,7 @@ impl UIContextMenu {
 	}
 
 	//==============================================================================
-	// 닫기.
+	/// 닫기.
 	//==============================================================================
 	pub fn close(&mut self, node_tree: &mut NodeTree) {
 		if let Some(menu_node) = self.node_id.and_then(|menu_id| node_tree.get_node_mut(menu_id)) {
@@ -242,28 +244,28 @@ impl UIContextMenu {
 	}
 
 	//==============================================================================
-	// 보이는 중인지.
+	/// 보이는 중인지.
 	//==============================================================================
 	pub fn is_showing(&self) -> bool {
 		self.is_showing
 	}
 
 	//==============================================================================
-	// 바깥 누름 막 노드 핸들.
+	/// 바깥 누름 막 노드 핸들.
 	//==============================================================================
 	pub fn get_overlay_node(&self) -> Option<NodeId> {
 		self.overlay_node_id
 	}
 
 	//==============================================================================
-	// 메뉴 판 노드 핸들.
+	/// 메뉴 판 노드 핸들.
 	//==============================================================================
 	pub fn get_panel_node(&self) -> Option<NodeId> {
 		self.panel_node_id
 	}
 
 	//==============================================================================
-	// 항목 행 노드 핸들 목록.
+	/// 항목 행 노드 핸들 목록.
 	//==============================================================================
 	pub fn get_item_nodes(&self) -> &[NodeId] {
 		&self.row_node_ids
@@ -291,7 +293,7 @@ impl Component for UIContextMenu {
 	}
 
 	//==============================================================================
-	// 트리에 붙음. (원본 생성자: 호스트 꾸미기, 바깥 누름 막, 메뉴 판)
+	/// 트리에 붙음. (원본 생성자: 호스트 꾸미기, 바깥 누름 막, 메뉴 판)
 	//==============================================================================
 	fn attach_to_tree(&mut self, node_tree: &mut NodeTree, node_id: NodeId) {
 		self.node_id = Some(node_id);
@@ -340,7 +342,7 @@ mod tests {
 	use std::rc::Rc;
 
 	//==============================================================================
-	// 시험 장면. (800 x 600 뿌리 밑의 메뉴)
+	/// 시험 장면. (800 x 600 뿌리 밑의 메뉴)
 	//==============================================================================
 	fn create_menu_tree() -> (NodeTree, NodeId) {
 		let mut node_tree = NodeTree::new();
@@ -351,7 +353,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 셈하는 항목.
+	/// 셈하는 항목.
 	//==============================================================================
 	fn create_counting_item(text: &str, counter: &Rc<Cell<u32>>) -> UIContextMenuItem {
 		let counter = counter.clone();
@@ -361,7 +363,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 메뉴 열기. (셈 항목 둘 + 누를 수 없는 항목 하나)
+	/// 메뉴 열기. (셈 항목 둘 + 누를 수 없는 항목 하나)
 	//==============================================================================
 	fn show_menu(node_tree: &mut NodeTree, menu_id: NodeId, position: Vector2, copy_count: &Rc<Cell<u32>>, paste_count: &Rc<Cell<u32>>) {
 		let item_list = vec![create_counting_item("복사", copy_count), create_counting_item("붙여넣기", paste_count), UIContextMenuItem::create_disabled("삭제")];
@@ -371,7 +373,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 노드 가운데를 누르고 뗀다.
+	/// 노드 가운데를 누르고 뗀다.
 	//==============================================================================
 	fn click_node(node_tree: &mut NodeTree, engine: &Engine, node_id: NodeId) {
 		let content_size = node_tree[node_id].get_content_size();
@@ -381,7 +383,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 열면 영역 안으로 붙고, 항목을 누르면 처리기를 부르고 닫힌다. 바깥을 누르면 처리기 없이 닫힌다.
+	/// 열면 영역 안으로 붙고, 항목을 누르면 처리기를 부르고 닫힌다. 바깥을 누르면 처리기 없이 닫힌다.
 	//==============================================================================
 	#[test]
 	fn show_clamp_item_click_and_overlay_close() {

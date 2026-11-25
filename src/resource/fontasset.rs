@@ -1,14 +1,14 @@
 //==============================================================================
-// 글꼴 애셋. (원본 resource/fontasset.js)
-// - 원본은 FontFace 를 만들어 document.fonts 에 더한다. 그 뒤로 폰트 문자열("16px 이름")에서 그 이름을 쓴다.
-// - 러스트 판은 바이트를 받은 뒤 엔진이 다음 프레임 시작에 Graphic 의 글자 캐시에 이름으로 등록한다.
-//   WOFF, WOFF2 도 된다. (글자 캐시가 TTF 로 푼다)
-// - 원본 descriptors(굵기, 기울기, 글자 범위)는 FontFaceDescriptors 로 받는다. (load_font_with_descriptors, 굵기만이면 load_font_with_bold)
-//   같은 이름에 굵기나 기울기가 다른 파일을 여러 개 올리면 글자 캐시가 CSS 처럼 골라 그린다. 진짜 기울인 얼굴이 있으면 가짜 기울임 대신 그것을 쓴다.
-// - unload 는 원본처럼 그 얼굴을 글꼴 목록에서 뺀다. (document.fonts.delete)
-// - load_font_from_bytes: 이미 가진 글꼴 바이트로 읽는다. (원본 loadFontFromBytes, 서술자의 source_key 가 비면 이름을 쓴다)
-// - load_font 들은 원본처럼 await 할 수 있는 FontLoadHandle 을 돌려준다. 바이트가 오고 엔진이 글꼴 목록에 올리면 끝난다.
-//   (원본 await fontFace.load() 와 document.fonts.add 뒤, 그 뒤로 그 이름으로 그린다) 받기나 올리기에 실패하면 까닭으로 끝난다.
+//! 글꼴 애셋. (원본 resource/fontasset.js)
+//! - 원본은 FontFace 를 만들어 document.fonts 에 더한다. 그 뒤로 폰트 문자열("16px 이름")에서 그 이름을 쓴다.
+//! - 러스트 판은 바이트를 받은 뒤 엔진이 다음 프레임 시작에 Graphic 의 글자 캐시에 이름으로 등록한다.
+//!   WOFF, WOFF2 도 된다. (글자 캐시가 TTF 로 푼다)
+//! - 원본 descriptors(굵기, 기울기, 글자 범위)는 FontFaceDescriptors 로 받는다. (load_font_with_descriptors, 굵기만이면 load_font_with_bold)
+//!   같은 이름에 굵기나 기울기가 다른 파일을 여러 개 올리면 글자 캐시가 CSS 처럼 골라 그린다. 진짜 기울인 얼굴이 있으면 가짜 기울임 대신 그것을 쓴다.
+//! - unload 는 원본처럼 그 얼굴을 글꼴 목록에서 뺀다. (document.fonts.delete)
+//! - load_font_from_bytes: 이미 가진 글꼴 바이트로 읽는다. (원본 loadFontFromBytes, 서술자의 source_key 가 비면 이름을 쓴다)
+//! - load_font 들은 원본처럼 await 할 수 있는 FontLoadHandle 을 돌려준다. 바이트가 오고 엔진이 글꼴 목록에 올리면 끝난다.
+//!   (원본 await fontFace.load() 와 document.fonts.add 뒤, 그 뒤로 그 이름으로 그린다) 받기나 올리기에 실패하면 까닭으로 끝난다.
 //==============================================================================
 use crate::core::asset::{Asset, AssetBase, AssetLoadHandle, AssetType};
 use crate::core::engine::Engine;
@@ -20,8 +20,8 @@ use std::rc::Rc;
 use std::task::{Context, Poll};
 
 //==============================================================================
-// 글꼴 받기 손잡이. (FontAsset 의 load_font 들, Engine::register_font_face_when_loaded 가 돌려준다. 원본 loadFont 의 Promise 자리)
-// - 엔진이 글꼴 목록에 올리면(또는 실패하면) 끝난다. 복제한 손잡이는 같은 올리기를 가리킨다.
+/// 글꼴 받기 손잡이. (FontAsset 의 load_font 들, Engine::register_font_face_when_loaded 가 돌려준다. 원본 loadFont 의 Promise 자리)
+/// - 엔진이 글꼴 목록에 올리면(또는 실패하면) 끝난다. 복제한 손잡이는 같은 올리기를 가리킨다.
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct FontLoadHandle {
@@ -31,7 +31,7 @@ pub struct FontLoadHandle {
 
 impl FontLoadHandle {
 	//==============================================================================
-	// 생성. (올리기 전)
+	/// 생성. (올리기 전)
 	//==============================================================================
 	pub(crate) fn new(load_handle: AssetLoadHandle) -> FontLoadHandle {
 		FontLoadHandle {
@@ -41,21 +41,21 @@ impl FontLoadHandle {
 	}
 
 	//==============================================================================
-	// 바이트 읽기 손잡이. (씬에 맡길 때)
+	/// 바이트 읽기 손잡이. (씬에 맡길 때)
 	//==============================================================================
 	pub fn get_load_handle(&self) -> &AssetLoadHandle {
 		&self.load_handle
 	}
 
 	//==============================================================================
-	// 끝났는지. (글꼴 목록에 올렸거나 실패했거나)
+	/// 끝났는지. (글꼴 목록에 올렸거나 실패했거나)
 	//==============================================================================
 	pub fn is_finished(&self) -> bool {
 		self.registration_result.borrow().is_some()
 	}
 
 	//==============================================================================
-	// 올리기 끝냄. (엔진이 부른다)
+	/// 올리기 끝냄. (엔진이 부른다)
 	//==============================================================================
 	pub(crate) fn finish(&self, registration_result: Result<(), String>) {
 		*self.registration_result.borrow_mut() = Some(registration_result);
@@ -63,7 +63,7 @@ impl FontLoadHandle {
 }
 
 //==============================================================================
-// 글꼴 받기를 기다리는 퓨처. (FontLoadHandle 을 await 하면 된다)
+/// 글꼴 받기를 기다리는 퓨처. (FontLoadHandle 을 await 하면 된다)
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct FontLoadFuture {
@@ -74,7 +74,7 @@ impl Future for FontLoadFuture {
 	type Output = Result<(), String>;
 
 	//==============================================================================
-	// 끝났는지 보기. (아직이면 다음 프레임에 다시 본다)
+	/// 끝났는지 보기. (아직이면 다음 프레임에 다시 본다)
 	//==============================================================================
 	fn poll(self: Pin<&mut FontLoadFuture>, context: &mut Context<'_>) -> Poll<Result<(), String>> {
 		let registration_result = self.font_load_handle.registration_result.borrow().clone();
@@ -95,7 +95,7 @@ impl IntoFuture for FontLoadHandle {
 	type IntoFuture = FontLoadFuture;
 
 	//==============================================================================
-	// 손잡이를 그대로 await 하기.
+	/// 손잡이를 그대로 await 하기.
 	//==============================================================================
 	fn into_future(self) -> FontLoadFuture {
 		FontLoadFuture {
@@ -105,7 +105,7 @@ impl IntoFuture for FontLoadHandle {
 }
 
 //==============================================================================
-// 글꼴 애셋.
+/// 글꼴 애셋.
 //==============================================================================
 pub struct FontAsset {
 	asset_base: AssetBase,
@@ -116,7 +116,7 @@ pub struct FontAsset {
 
 impl FontAsset {
 	//==============================================================================
-	// 생성.
+	/// 생성.
 	//==============================================================================
 	pub fn new() -> FontAsset {
 		FontAsset {
@@ -128,22 +128,22 @@ impl FontAsset {
 	}
 
 	//==============================================================================
-	// 글꼴 읽기 요청. (원본 load_font(family, asset_path). 다 오면 엔진이 family 이름으로 등록한다)
+	/// 글꼴 읽기 요청. (원본 load_font(family, asset_path). 다 오면 엔진이 family 이름으로 등록한다)
 	//==============================================================================
 	pub fn load_font(&mut self, engine: &mut Engine, family: &str, asset_path: &str) -> FontLoadHandle {
 		self.load_font_with_bold(engine, family, asset_path, false)
 	}
 
 	//==============================================================================
-	// 굵은 글꼴 읽기 요청. (원본 descriptors 의 weight 자리)
+	/// 굵은 글꼴 읽기 요청. (원본 descriptors 의 weight 자리)
 	//==============================================================================
 	pub fn load_font_with_bold(&mut self, engine: &mut Engine, family: &str, asset_path: &str, is_bold: bool) -> FontLoadHandle {
 		self.load_font_with_descriptors(engine, family, asset_path, FontFaceDescriptors::create_with_bold(is_bold))
 	}
 
 	//==============================================================================
-	// 서술자를 주어 글꼴 읽기 요청. (원본 loadFont(family, assetPath, descriptors), 서술자의 source_key 가 비면 경로를 쓴다)
-	// - 이미 요청했으면 다시 하지 않고 그 손잡이를 돌려준다. (원본도 fontFace 가 있으면 바로 끝난다)
+	/// 서술자를 주어 글꼴 읽기 요청. (원본 loadFont(family, assetPath, descriptors), 서술자의 source_key 가 비면 경로를 쓴다)
+	/// - 이미 요청했으면 다시 하지 않고 그 손잡이를 돌려준다. (원본도 fontFace 가 있으면 바로 끝난다)
 	//==============================================================================
 	pub fn load_font_with_descriptors(&mut self, engine: &mut Engine, family: &str, asset_path: &str, mut descriptors: FontFaceDescriptors) -> FontLoadHandle {
 		if let Some(font_load_handle) = &self.font_load_handle {
@@ -161,14 +161,14 @@ impl FontAsset {
 	}
 
 	//==============================================================================
-	// 이미 가진 글꼴 바이트로 읽기. (ttf, otf, woff, woff2, 원본 loadFontFromBytes, 엔진이 다음 프레임 시작에 family 이름으로 올린다)
+	/// 이미 가진 글꼴 바이트로 읽기. (ttf, otf, woff, woff2, 원본 loadFontFromBytes, 엔진이 다음 프레임 시작에 family 이름으로 올린다)
 	//==============================================================================
 	pub fn load_font_from_bytes(&mut self, engine: &mut Engine, family: &str, bytes: Vec<u8>) -> FontLoadHandle {
 		self.load_font_from_bytes_with_descriptors(engine, family, bytes, FontFaceDescriptors::new())
 	}
 
 	//==============================================================================
-	// 서술자를 주어 이미 가진 글꼴 바이트로 읽기. (원본 loadFontFromBytes(family, bytes, descriptors))
+	/// 서술자를 주어 이미 가진 글꼴 바이트로 읽기. (원본 loadFontFromBytes(family, bytes, descriptors))
 	//==============================================================================
 	pub fn load_font_from_bytes_with_descriptors(&mut self, engine: &mut Engine, family: &str, bytes: Vec<u8>, mut descriptors: FontFaceDescriptors) -> FontLoadHandle {
 		if let Some(font_load_handle) = &self.font_load_handle {
@@ -186,7 +186,7 @@ impl FontAsset {
 	}
 
 	//==============================================================================
-	// 애셋 내리기. (원본 unload: 글꼴 목록에서 이 얼굴을 뺀다)
+	/// 애셋 내리기. (원본 unload: 글꼴 목록에서 이 얼굴을 뺀다)
 	//==============================================================================
 	pub fn unload(&mut self, engine: &mut Engine) {
 		if self.asset_base.get_load_handle().is_none() {
@@ -198,21 +198,21 @@ impl FontAsset {
 	}
 
 	//==============================================================================
-	// 얼굴 서술자.
+	/// 얼굴 서술자.
 	//==============================================================================
 	pub fn get_descriptors(&self) -> &FontFaceDescriptors {
 		&self.descriptors
 	}
 
 	//==============================================================================
-	// 글꼴 이름.
+	/// 글꼴 이름.
 	//==============================================================================
 	pub fn get_family(&self) -> &str {
 		&self.family
 	}
 
 	//==============================================================================
-	// 굵은 글꼴인지.
+	/// 굵은 글꼴인지.
 	//==============================================================================
 	pub fn is_bold(&self) -> bool {
 		self.descriptors.minimum_weight >= crate::core::textshaping::BOLD_WEIGHT_THRESHOLD
@@ -241,7 +241,7 @@ mod tests {
 	use crate::core::engine::EngineConfiguration;
 
 	//==============================================================================
-	// 바이트로 읽으면 바로 읽힌 것이고, 내리면 읽히지 않은 것이 된다. 두 번째 읽기는 무시한다.
+	/// 바이트로 읽으면 바로 읽힌 것이고, 내리면 읽히지 않은 것이 된다. 두 번째 읽기는 무시한다.
 	//==============================================================================
 	#[test]
 	fn load_from_bytes_and_unload() {

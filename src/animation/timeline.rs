@@ -1,43 +1,59 @@
 //==============================================================================
-// 타임라인. (키프레임 애니메이션 문서 재생기)
-// - 원본 experimental/animation/timeline.js 를 옮긴 것이다. 문서(서술)는 무대 노드 목록 + 트랙(대상 이름 / 속성 / 키) + 마커로 이루어진 JSON 이며
-//   타임라인 편집기가 저장한다. 키의 easing 은 그 키에서 다음 키까지 구간에 걸린다.
-// - 이징 곡선은 core/tween.rs 의 easing_function 을 그대로 쓴다. "bezier" 는 CSS cubic-bezier 와 같은 제어점이다.
-// - 사용:
-//     // 씬 create 에서 문서를 요청하고 맡긴다.
-//     self.timeline_asset.load(engine, "assets/intro.timeline.json");
-//     self.scene_base.track_asset(&self.timeline_asset);
-//     // initialize 에서 무대를 만들고 튼다.
-//     let mut timeline = Timeline::create_from_json_asset(&mut self.timeline_asset).unwrap_or_default();
-//     let stage_id = self.scene_base.get_root_id();
-//     timeline.build_stage(self.scene_base.get_node_tree_mut(), stage_id, Some(&|image_name: &str| image_table.get(image_name).cloned()));
-//     timeline.play();
-//     // 매 프레임 (tick):
-//     timeline.tick(self.scene_base.get_node_tree_mut(), time_delta);
-// - 원본과 다른 점:
-//   - 대상은 객체 참조 대신 TimelineTarget 이다. 노드는 Node(NodeId), 노드가 아닌 것(화면 효과 같은)은 External(Rc<RefCell<dyn TimelinePropertyTarget>>) 이다.
-//     노드에 거는 함수(tick, seek, stop, evaluate, compile, build_stage, bind)는 NodeTree 를 같이 받는다.
-//   - External 대상에는 원본처럼 evaluate 가 그 자리에서 set_timeline_property 를 부른다. (씬은 대상을 Rc<RefCell> 로 나눠 쥔다)
-//     넘겨받는 쪽은 TimelinePropertyTarget 트레이트를 구현한다. ScreenEffect 는 이 파일에서 구현했다.
-//     마지막 evaluate 가 External 대상에 건 값은 get_external_properties 로 읽을 수 있다. (편집기와 시험용)
-//   - 값은 원본의 숫자 / 문자열 / 참거짓을 TimelineValue 열거형으로 든다. 숫자는 f32 다.
-//   - 핸들러는 원본처럼 마지막 인자로 타임라인 자신(&mut Timeline)을 받고, 노드에 거는 함수에 넘길 NodeTree 를 그 뒤에 같이 받는다.
-//     부르는 동안 핸들러를 칸에서 꺼내 두므로 핸들러 안에서 pause, seek, set_*_handler 를 부를 수 있다. (새로 건 핸들러가 이긴다)
-//   - 글 속성(text, number, fontSize, visibleCharacters, color)은 원본 get_component(Text) 가 Text 를 상속한 RichText 도 찾듯 RichText 노드에도 건다.
-//   - resolve_timeline_easing 은 함수 대신 TimelineEasing 값을 돌려준다. (evaluate(progress) 로 부른다)
-//   - TIMELINE_PROPERTY_DEFINITIONS 는 이름 → 정의 객체 대신 정의 배열이고 find_timeline_property_definition 으로 찾는다.
-//     TIMELINE_NODE_DEFAULTS 는 기본값을 채운 TimelineNodeDescription 이다. (원본 키 type 은 node_type)
-//   - 원본의 스프라이트 격자 표와 사운드 표(WeakMap)는 노드에 붙는 작은 컴포넌트 TimelineSpriteFrameGrid, TimelineSound 로 바꿨다.
-//   - 원본 Timeline.setAudioManager(정적)와 사운드 노드의 비동기 읽기는 load_sounds(node_tree, engine) 로 바꿨다.
-//     무대를 만든 뒤 한 번 부르면 사운드 노드마다 오디오 애셋을 읽고 플레이어를 만든다. (돌려준 애셋을 씬이 track_audio_asset 으로 맡겨도 된다)
-//   - loadFromUrl(비동기 fetch)은 load_from_url(엔진, 애셋 경로)이다. 엔진의 애셋 받기로 바이트를 부탁하고, 엔진 작업 안에서 await 하면 타임라인이 나온다.
-//     (데스크탑은 애셋 폴더 후보, 웹은 asset_base_url 에서 fetch) await 없이는 JsonAsset 으로 받은 문서를 create_from_json_asset / load_from_text 로 넘긴다.
-//   - "data:" 주소 이미지: 웹은 원본처럼 브라우저가 풀어(fetch 와 HTMLImageElement, platform/web.rs) 다 풀리면 스프라이트에 걸고 서술의 칸을 다시 고른다.
-//     (원본 image.onload 의 applySpriteFrame, 그동안 TimelineSpriteFrameGrid 가 기다리며 갱신한다)
-//     데스크탑은 그 자리에서 푼다. 브라우저처럼 본문의 퍼센트 꼴(%XX)을 먼저 풀고, ;base64 면 base64 를 푼다. 주소의 형이 image/svg+xml 이면 resvg 로 그린 SVG,
-//     그 밖은 내용으로 가린 래스터(png, jpeg, webp, gif, bmp, ico, avif)다. (Image::load_from_memory_with_mime_type)
-// - 이징 곡선 값은 원본과 같다. 같은 이름의 무대 노드가 둘이면 모두 붙이고 이름 표에는 뒤의 것이 남는다(원본과 같다).
-//   부모가 자기 자신이거나 고리가 되면 무대 부모에 붙인다. load_from_text, create_from_json_asset 은 원본에도 있다.
+//! 타임라인. (키프레임 애니메이션 문서 재생기)
+//! - 원본 experimental/animation/timeline.js 를 옮긴 것이다. 문서(서술)는 무대 노드 목록 + 트랙(대상 이름 / 속성 / 키) + 마커로 이루어진 JSON 이며
+//!   타임라인 편집기가 저장한다. 키의 easing 은 그 키에서 다음 키까지 구간에 걸린다.
+//! - 이징 곡선은 core/tween.rs 의 easing_function 을 그대로 쓴다. "bezier" 는 CSS cubic-bezier 와 같은 제어점이다.
+//! - 사용:
+//!   ```text
+//!     // 씬 create 에서 문서를 요청하고 맡긴다.
+//!     self.timeline_asset.load(engine, "assets/intro.timeline.json");
+//!     self.scene_base.track_asset(&self.timeline_asset);
+//!     // initialize 에서 무대를 만들고 튼다.
+//!     let mut timeline = Timeline::create_from_json_asset(&mut self.timeline_asset).unwrap_or_default();
+//!     let stage_id = self.scene_base.get_root_id();
+//!     timeline.build_stage(self.scene_base.get_node_tree_mut(), stage_id, Some(&|image_name: &str| image_table.get(image_name).cloned()));
+//!     timeline.play();
+//!     // 매 프레임 (tick):
+//!     timeline.tick(self.scene_base.get_node_tree_mut(), time_delta);
+//!   ```
+//! - 원본과 다른 점:
+//!   - 대상은 객체 참조 대신 TimelineTarget 이다. 노드는 Node(NodeId), 노드가 아닌 것(화면 효과 같은)은 External(`Rc<RefCell<dyn TimelinePropertyTarget>>`) 이다.
+//!   ```text
+//!     노드에 거는 함수(tick, seek, stop, evaluate, compile, build_stage, bind)는 NodeTree 를 같이 받는다.
+//!   ```
+//!   - External 대상에는 원본처럼 evaluate 가 그 자리에서 set_timeline_property 를 부른다. (씬은 대상을 `Rc<RefCell>` 로 나눠 쥔다)
+//!   ```text
+//!     넘겨받는 쪽은 TimelinePropertyTarget 트레이트를 구현한다. ScreenEffect 는 이 파일에서 구현했다.
+//!     마지막 evaluate 가 External 대상에 건 값은 get_external_properties 로 읽을 수 있다. (편집기와 시험용)
+//!   ```
+//!   - 값은 원본의 숫자 / 문자열 / 참거짓을 TimelineValue 열거형으로 든다. 숫자는 f32 다.
+//!   - 핸들러는 원본처럼 마지막 인자로 타임라인 자신(&mut Timeline)을 받고, 노드에 거는 함수에 넘길 NodeTree 를 그 뒤에 같이 받는다.
+//!   ```text
+//!     부르는 동안 핸들러를 칸에서 꺼내 두므로 핸들러 안에서 pause, seek, set_*_handler 를 부를 수 있다. (새로 건 핸들러가 이긴다)
+//!   ```
+//!   - 글 속성(text, number, fontSize, visibleCharacters, color)은 원본 get_component(Text) 가 Text 를 상속한 RichText 도 찾듯 RichText 노드에도 건다.
+//!   - resolve_timeline_easing 은 함수 대신 TimelineEasing 값을 돌려준다. (evaluate(progress) 로 부른다)
+//!   - TIMELINE_PROPERTY_DEFINITIONS 는 이름 → 정의 객체 대신 정의 배열이고 find_timeline_property_definition 으로 찾는다.
+//!   ```text
+//!     TIMELINE_NODE_DEFAULTS 는 기본값을 채운 TimelineNodeDescription 이다. (원본 키 type 은 node_type)
+//!   ```
+//!   - 원본의 스프라이트 격자 표와 사운드 표(WeakMap)는 노드에 붙는 작은 컴포넌트 TimelineSpriteFrameGrid, TimelineSound 로 바꿨다.
+//!   - 원본 Timeline.setAudioManager(정적)와 사운드 노드의 비동기 읽기는 load_sounds(node_tree, engine) 로 바꿨다.
+//!   ```text
+//!     무대를 만든 뒤 한 번 부르면 사운드 노드마다 오디오 애셋을 읽고 플레이어를 만든다. (돌려준 애셋을 씬이 track_audio_asset 으로 맡겨도 된다)
+//!   ```
+//!   - loadFromUrl(비동기 fetch)은 load_from_url(엔진, 애셋 경로)이다. 엔진의 애셋 받기로 바이트를 부탁하고, 엔진 작업 안에서 await 하면 타임라인이 나온다.
+//!   ```text
+//!     (데스크탑은 애셋 폴더 후보, 웹은 asset_base_url 에서 fetch) await 없이는 JsonAsset 으로 받은 문서를 create_from_json_asset / load_from_text 로 넘긴다.
+//!   ```
+//!   - "data:" 주소 이미지: 웹은 원본처럼 브라우저가 풀어(fetch 와 HTMLImageElement, platform/web.rs) 다 풀리면 스프라이트에 걸고 서술의 칸을 다시 고른다.
+//!   ```text
+//!     (원본 image.onload 의 applySpriteFrame, 그동안 TimelineSpriteFrameGrid 가 기다리며 갱신한다)
+//!     데스크탑은 그 자리에서 푼다. 브라우저처럼 본문의 퍼센트 꼴(%XX)을 먼저 풀고, ;base64 면 base64 를 푼다. 주소의 형이 image/svg+xml 이면 resvg 로 그린 SVG,
+//!     그 밖은 내용으로 가린 래스터(png, jpeg, webp, gif, bmp, ico, avif)다. (Image::load_from_memory_with_mime_type)
+//!   ```
+//! - 이징 곡선 값은 원본과 같다. 같은 이름의 무대 노드가 둘이면 모두 붙이고 이름 표에는 뒤의 것이 남는다(원본과 같다).
+//!   부모가 자기 자신이거나 고리가 되면 무대 부모에 붙인다. load_from_text, create_from_json_asset 은 원본에도 있다.
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::pivot::Pivot;
@@ -69,7 +85,7 @@ use std::rc::Rc;
 use std::sync::LazyLock;
 
 //==============================================================================
-// 이징 이름 목록. ("linear" / "step" / "bezier" / "<종류>.<in|out|in_out>")
+/// 이징 이름 목록. ("linear" / "step" / "bezier" / "<종류>.<in|out|in_out>")
 //==============================================================================
 pub const TIMELINE_EASING_NAMES: [&str; 33] = [
 	"linear", "step", "bezier",
@@ -85,10 +101,10 @@ pub const TIMELINE_EASING_NAMES: [&str; 33] = [
 	"bounce.in", "bounce.out", "bounce.inOut",
 ];
 
-// 이징 함수. (진행률 → 이징 값)
+/// 이징 함수. (진행률 → 이징 값)
 type EasingFunction = fn(f32) -> f32;
 
-// 이름 → Tween 이징 함수. (원본 Tween.easing_function[종류][방향])
+/// 이름 → Tween 이징 함수. (원본 `Tween.easing_function[종류][방향]`)
 const EASING_FUNCTION_TABLE: [(&str, EasingFunction); 30] = [
 	("quadratic.in", easing_function::quadratic::r#in),
 	("quadratic.out", easing_function::quadratic::out),
@@ -122,18 +138,18 @@ const EASING_FUNCTION_TABLE: [(&str, EasingFunction); 30] = [
 	("bounce.inOut", easing_function::bounce::in_out),
 ];
 
-// "bezier" 키에 곡선이 없을 때 쓰는 제어점. (CSS ease-in-out)
+/// "bezier" 키에 곡선이 없을 때 쓰는 제어점. (CSS ease-in-out)
 const DEFAULT_BEZIER_CURVE: [f32; 4] = [0.42, 0.0, 0.58, 1.0];
 
-// 파티클 씨앗. (수집 차례로 서로 다른 씨앗을 준다)
+/// 파티클 씨앗. (수집 차례로 서로 다른 씨앗을 준다)
 const PARTICLE_RANDOM_SEED_BASE: u32 = 0x9E3779B1;
 const PARTICLE_RANDOM_SEED_STEP: u32 = 7919;
 
-// emit 이벤트에 개수가 없을 때 내는 수.
+/// emit 이벤트에 개수가 없을 때 내는 수.
 const DEFAULT_EMIT_COUNT: f32 = 30.0;
 
 //==============================================================================
-// 3차 베지어 이징 값. (CSS cubic-bezier 와 같은 제어점, x 는 0 ~ 1 로 자른다. 뉴턴법 8 번)
+/// 3차 베지어 이징 값. (CSS cubic-bezier 와 같은 제어점, x 는 0 ~ 1 로 자른다. 뉴턴법 8 번)
 //==============================================================================
 fn evaluate_bezier_easing(x1: f32, y1: f32, x2: f32, y2: f32, progress: f32) -> f32 {
 	if progress <= 0.0 {
@@ -169,33 +185,33 @@ fn evaluate_bezier_easing(x1: f32, y1: f32, x2: f32, y2: f32, progress: f32) -> 
 }
 
 //==============================================================================
-// 3차 베지어 이징 생성. (CSS cubic-bezier 와 같은 제어점, x 는 0 ~ 1)
+/// 3차 베지어 이징 생성. (CSS cubic-bezier 와 같은 제어점, x 는 0 ~ 1)
 //==============================================================================
 pub fn create_bezier_easing(x1: f32, y1: f32, x2: f32, y2: f32) -> impl Fn(f32) -> f32 + Clone {
 	move |progress: f32| evaluate_bezier_easing(x1, y1, x2, y2, progress)
 }
 
 //==============================================================================
-// 계단 이징. (구간 내내 0, 다음 키에서 바뀐다)
+/// 계단 이징. (구간 내내 0, 다음 키에서 바뀐다)
 //==============================================================================
 fn step_easing(_progress: f32) -> f32 {
 	0.0
 }
 
 //==============================================================================
-// 타임라인 이징. (원본에서 resolve_timeline_easing 이 돌려주는 함수 자리)
+/// 타임라인 이징. (원본에서 resolve_timeline_easing 이 돌려주는 함수 자리)
 //==============================================================================
 #[derive(Clone, Copy, Debug)]
 pub enum TimelineEasing {
-	// Tween 이징 함수, linear, step.
+	/// Tween 이징 함수, linear, step.
 	Function(EasingFunction),
-	// 3차 베지어 (x1, y1, x2, y2).
+	/// 3차 베지어 (x1, y1, x2, y2).
 	Bezier(f32, f32, f32, f32),
 }
 
 impl TimelineEasing {
 	//==============================================================================
-	// 진행률(0 ~ 1)의 이징 값.
+	/// 진행률(0 ~ 1)의 이징 값.
 	//==============================================================================
 	pub fn evaluate(&self, progress: f32) -> f32 {
 		match self {
@@ -210,7 +226,7 @@ impl TimelineEasing {
 }
 
 //==============================================================================
-// 이징 반환. (모르는 이름은 linear, "bezier" 는 curve [x1, y1, x2, y2] 를 쓰고 없으면 ease-in-out)
+/// 이징 반환. (모르는 이름은 linear, "bezier" 는 curve [x1, y1, x2, y2] 를 쓰고 없으면 ease-in-out)
 //==============================================================================
 pub fn resolve_timeline_easing(easing_name: &str, curve: Option<&[f32]>) -> TimelineEasing {
 	if easing_name.is_empty() || easing_name == "linear" {
@@ -241,7 +257,7 @@ pub fn resolve_timeline_easing(easing_name: &str, curve: Option<&[f32]>) -> Time
 }
 
 //==============================================================================
-// 원본 parseInt(글, 16) 흉내. (앞 공백, 부호, 0x 를 건너뛰고 16 진 숫자가 이어지는 데까지. 숫자가 없으면 None = NaN)
+/// 원본 parseInt(글, 16) 흉내. (앞 공백, 부호, 0x 를 건너뛰고 16 진 숫자가 이어지는 데까지. 숫자가 없으면 None = NaN)
 //==============================================================================
 fn parse_leading_hexadecimal(text: &str) -> Option<f32> {
 	let trimmed_text = text.trim_start();
@@ -275,7 +291,7 @@ fn parse_leading_hexadecimal(text: &str) -> Option<f32> {
 }
 
 //==============================================================================
-// 색 문자열 → 채널. ("#rrggbb" 또는 "#rrggbbaa", 못 읽는 채널은 1)
+/// 색 문자열 → 채널. ("#rrggbb" 또는 "#rrggbbaa", 못 읽는 채널은 1)
 //==============================================================================
 pub fn parse_timeline_color(hex_text: &str) -> [f32; 4] {
 	let characters: Vec<char> = match hex_text.strip_prefix('#') {
@@ -307,7 +323,7 @@ pub fn parse_timeline_color(hex_text: &str) -> [f32; 4] {
 }
 
 //==============================================================================
-// 채널 → 색 문자열. ("#rrggbbaa", 알파가 없으면 1)
+/// 채널 → 색 문자열. ("#rrggbbaa", 알파가 없으면 1)
 //==============================================================================
 pub fn compose_timeline_color(channels: &[f32]) -> String {
 	let to_byte = |value: f32| -> u32 {
@@ -319,7 +335,7 @@ pub fn compose_timeline_color(channels: &[f32]) -> String {
 }
 
 //==============================================================================
-// 색 문자열 → Color.
+/// 색 문자열 → Color.
 //==============================================================================
 fn create_color_from_text(hex_text: &str) -> Color {
 	let channels = parse_timeline_color(hex_text);
@@ -327,14 +343,14 @@ fn create_color_from_text(hex_text: &str) -> Color {
 }
 
 //==============================================================================
-// 원본 Math.round. (절반은 위로)
+/// 원본 Math.round. (절반은 위로)
 //==============================================================================
 fn round_half_up(value: f32) -> f32 {
 	(value + 0.5).floor()
 }
 
 //==============================================================================
-// 숫자 → 글. (원본 String(숫자) 처럼 정수는 소수점 없이, -0 은 0)
+/// 숫자 → 글. (원본 String(숫자) 처럼 정수는 소수점 없이, -0 은 0)
 //==============================================================================
 fn format_number(value: f32) -> String {
 	if value == 0.0 {
@@ -350,7 +366,7 @@ fn format_number(value: f32) -> String {
 }
 
 //==============================================================================
-// 원본 Number(글) 흉내. (앞뒤 공백을 떼고, 빈 글은 0, 못 읽으면 NaN)
+/// 원본 Number(글) 흉내. (앞뒤 공백을 떼고, 빈 글은 0, 못 읽으면 NaN)
 //==============================================================================
 fn parse_number_text(text: &str) -> f32 {
 	let trimmed_text = text.trim();
@@ -361,7 +377,7 @@ fn parse_number_text(text: &str) -> f32 {
 }
 
 //==============================================================================
-// JSON 값 → 숫자. (원본 Number(값). null 은 0, 없는 값과 객체는 NaN)
+/// JSON 값 → 숫자. (원본 Number(값). null 은 0, 없는 값과 객체는 NaN)
 //==============================================================================
 fn read_json_number(value: Option<&Value>) -> f32 {
 	match value {
@@ -389,11 +405,11 @@ fn read_json_number(value: Option<&Value>) -> f32 {
 }
 
 //==============================================================================
-// 타임라인 값. (원본 키 값: 숫자, 문자열, 참거짓)
+/// 타임라인 값. (원본 키 값: 숫자, 문자열, 참거짓)
 //==============================================================================
 #[derive(Clone, Debug, PartialEq)]
 pub enum TimelineValue {
-	// 값 없음. (원본 null)
+	/// 값 없음. (원본 null)
 	None,
 	Number(f32),
 	String(String),
@@ -402,7 +418,7 @@ pub enum TimelineValue {
 
 impl TimelineValue {
 	//==============================================================================
-	// JSON 값에서 만들기. (배열, 객체는 none)
+	/// JSON 값에서 만들기. (배열, 객체는 none)
 	//==============================================================================
 	pub fn from_json(value: &Value) -> TimelineValue {
 		match value {
@@ -422,7 +438,7 @@ impl TimelineValue {
 	}
 
 	//==============================================================================
-	// JSON 값으로 바꾸기.
+	/// JSON 값으로 바꾸기.
 	//==============================================================================
 	pub fn to_json(&self) -> Value {
 		match self {
@@ -442,7 +458,7 @@ impl TimelineValue {
 	}
 
 	//==============================================================================
-	// 숫자로 읽기. (원본 Number(값). 문자열은 읽고, 참거짓은 1 / 0, 없음은 0)
+	/// 숫자로 읽기. (원본 Number(값). 문자열은 읽고, 참거짓은 1 / 0, 없음은 0)
 	//==============================================================================
 	pub fn as_number(&self) -> f32 {
 		match self {
@@ -467,7 +483,7 @@ impl TimelineValue {
 	}
 
 	//==============================================================================
-	// 글로 읽기. (원본 String(값))
+	/// 글로 읽기. (원본 String(값))
 	//==============================================================================
 	pub fn to_text(&self) -> String {
 		match self {
@@ -487,7 +503,7 @@ impl TimelineValue {
 	}
 
 	//==============================================================================
-	// 참으로 볼지. (원본 visible 속성: true 또는 "true")
+	/// 참으로 볼지. (원본 visible 속성: true 또는 "true")
 	//==============================================================================
 	pub fn is_true(&self) -> bool {
 		match self {
@@ -505,7 +521,7 @@ impl TimelineValue {
 }
 
 //==============================================================================
-// 속성 종류. (number 는 이징 보간, color 는 채널 보간, string / boolean 은 계단)
+/// 속성 종류. (number 는 이징 보간, color 는 채널 보간, string / boolean 은 계단)
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TimelinePropertyKind {
@@ -516,7 +532,7 @@ pub enum TimelinePropertyKind {
 }
 
 //==============================================================================
-// 속성 정의. (이름 → 종류 / 표시 이름 / 노드에 거는 함수)
+/// 속성 정의. (이름 → 종류 / 표시 이름 / 노드에 거는 함수)
 //==============================================================================
 #[derive(Clone, Copy, Debug)]
 pub struct TimelinePropertyDefinition {
@@ -527,7 +543,7 @@ pub struct TimelinePropertyDefinition {
 }
 
 //==============================================================================
-// x 적용.
+/// x 적용.
 //==============================================================================
 fn apply_position_x(node: &mut WorldNode, value: &TimelineValue) {
 	let local_position = node.get_local_position();
@@ -535,7 +551,7 @@ fn apply_position_x(node: &mut WorldNode, value: &TimelineValue) {
 }
 
 //==============================================================================
-// y 적용.
+/// y 적용.
 //==============================================================================
 fn apply_position_y(node: &mut WorldNode, value: &TimelineValue) {
 	let local_position = node.get_local_position();
@@ -543,7 +559,7 @@ fn apply_position_y(node: &mut WorldNode, value: &TimelineValue) {
 }
 
 //==============================================================================
-// width 적용.
+/// width 적용.
 //==============================================================================
 fn apply_width(node: &mut WorldNode, value: &TimelineValue) {
 	let content_size = node.get_content_size();
@@ -551,7 +567,7 @@ fn apply_width(node: &mut WorldNode, value: &TimelineValue) {
 }
 
 //==============================================================================
-// height 적용.
+/// height 적용.
 //==============================================================================
 fn apply_height(node: &mut WorldNode, value: &TimelineValue) {
 	let content_size = node.get_content_size();
@@ -559,7 +575,7 @@ fn apply_height(node: &mut WorldNode, value: &TimelineValue) {
 }
 
 //==============================================================================
-// scale_x 적용.
+/// scale_x 적용.
 //==============================================================================
 fn apply_scale_x(node: &mut WorldNode, value: &TimelineValue) {
 	let local_scale = node.get_local_scale();
@@ -567,7 +583,7 @@ fn apply_scale_x(node: &mut WorldNode, value: &TimelineValue) {
 }
 
 //==============================================================================
-// scale_y 적용.
+/// scale_y 적용.
 //==============================================================================
 fn apply_scale_y(node: &mut WorldNode, value: &TimelineValue) {
 	let local_scale = node.get_local_scale();
@@ -575,35 +591,35 @@ fn apply_scale_y(node: &mut WorldNode, value: &TimelineValue) {
 }
 
 //==============================================================================
-// rotation 적용.
+/// rotation 적용.
 //==============================================================================
 fn apply_rotation(node: &mut WorldNode, value: &TimelineValue) {
 	node.set_local_rotation(value.as_number());
 }
 
 //==============================================================================
-// opacity 적용. (0 ~ 1 로 자른다)
+/// opacity 적용. (0 ~ 1 로 자른다)
 //==============================================================================
 fn apply_opacity(node: &mut WorldNode, value: &TimelineValue) {
 	node.set_local_opacity(value.as_number().clamp(0.0, 1.0));
 }
 
 //==============================================================================
-// visible 적용. (true 또는 "true" 면 켠다)
+/// visible 적용. (true 또는 "true" 면 켠다)
 //==============================================================================
 fn apply_visible(node: &mut WorldNode, value: &TimelineValue) {
 	node.set_active(value.is_true());
 }
 
 //==============================================================================
-// color 적용.
+/// color 적용.
 //==============================================================================
 fn apply_color(node: &mut WorldNode, value: &TimelineValue) {
 	apply_node_color(node, &value.to_text());
 }
 
 //==============================================================================
-// text 적용.
+/// text 적용.
 //==============================================================================
 fn apply_text(node: &mut WorldNode, value: &TimelineValue) {
 	if let Some(text_component) = node.get_component_mut::<Text>() {
@@ -615,7 +631,7 @@ fn apply_text(node: &mut WorldNode, value: &TimelineValue) {
 }
 
 //==============================================================================
-// number 적용. (반올림한 수를 글자로)
+/// number 적용. (반올림한 수를 글자로)
 //==============================================================================
 fn apply_number(node: &mut WorldNode, value: &TimelineValue) {
 	let number_text = format_number(round_half_up(value.as_number()));
@@ -628,8 +644,8 @@ fn apply_number(node: &mut WorldNode, value: &TimelineValue) {
 }
 
 //==============================================================================
-// font_size 적용.
-// - 글자 텍스처는 (문자열, 폰트) 조합마다 굽히므로 정수 픽셀로 맞춰 매 프레임 재굽기를 막는다.
+/// font_size 적용.
+/// - 글자 텍스처는 (문자열, 폰트) 조합마다 굽히므로 정수 픽셀로 맞춰 매 프레임 재굽기를 막는다.
 //==============================================================================
 fn apply_font_size(node: &mut WorldNode, value: &TimelineValue) {
 	let font_size = round_half_up(value.as_number());
@@ -642,7 +658,7 @@ fn apply_font_size(node: &mut WorldNode, value: &TimelineValue) {
 }
 
 //==============================================================================
-// visibleCharacters 적용.
+/// visibleCharacters 적용.
 //==============================================================================
 fn apply_visible_characters(node: &mut WorldNode, value: &TimelineValue) {
 	let visible_character_count = round_half_up(value.as_number()) as i32;
@@ -655,14 +671,14 @@ fn apply_visible_characters(node: &mut WorldNode, value: &TimelineValue) {
 }
 
 //==============================================================================
-// frame 적용. (스프라이트 시트 칸)
+/// frame 적용. (스프라이트 시트 칸)
 //==============================================================================
 fn apply_frame(node: &mut WorldNode, value: &TimelineValue) {
 	apply_sprite_frame(node, round_half_up(value.as_number()) as i64);
 }
 
 //==============================================================================
-// effect 적용. (ShaderSprite 효과 진행률)
+/// effect 적용. (ShaderSprite 효과 진행률)
 //==============================================================================
 fn apply_effect_progress(node: &mut WorldNode, value: &TimelineValue) {
 	if let Some(shader_sprite) = node.get_component_mut::<ShaderSprite>() {
@@ -671,7 +687,7 @@ fn apply_effect_progress(node: &mut WorldNode, value: &TimelineValue) {
 }
 
 //==============================================================================
-// 애니메이션 속성 정의 목록. (원본 TIMELINE_PROPERTY_DEFINITIONS 의 선언 차례)
+/// 애니메이션 속성 정의 목록. (원본 TIMELINE_PROPERTY_DEFINITIONS 의 선언 차례)
 //==============================================================================
 pub const TIMELINE_PROPERTY_DEFINITIONS: [TimelinePropertyDefinition; 17] = [
 	TimelinePropertyDefinition { name: "x", kind: TimelinePropertyKind::Number, label: "X", apply: Some(apply_position_x) },
@@ -694,15 +710,15 @@ pub const TIMELINE_PROPERTY_DEFINITIONS: [TimelinePropertyDefinition; 17] = [
 ];
 
 //==============================================================================
-// 속성 정의 찾기. (원본 TIMELINE_PROPERTY_DEFINITIONS[이름])
+/// 속성 정의 찾기. (원본 `TIMELINE_PROPERTY_DEFINITIONS[이름]`)
 //==============================================================================
 pub fn find_timeline_property_definition(property_name: &str) -> Option<&'static TimelinePropertyDefinition> {
 	TIMELINE_PROPERTY_DEFINITIONS.iter().find(|definition| definition.name == property_name)
 }
 
 //==============================================================================
-// 노드에서 색을 받는 컴포넌트에 색 걸기. (Text 나 RichText → 글자색, 그 밖에 Paint / Sprite / ShaderSprite → 색)
-// - 원본은 Sprite, ShaderSprite 가 Paint 를, RichText 가 Text 를 상속해서 get_component(Paint), get_component(Text) 하나로 찾는다.
+/// 노드에서 색을 받는 컴포넌트에 색 걸기. (Text 나 RichText → 글자색, 그 밖에 Paint / Sprite / ShaderSprite → 색)
+/// - 원본은 Sprite, ShaderSprite 가 Paint 를, RichText 가 Text 를 상속해서 get_component(Paint), get_component(Text) 하나로 찾는다.
 //==============================================================================
 fn apply_node_color(node: &mut WorldNode, hex_text: &str) {
 	let color = create_color_from_text(hex_text);
@@ -728,7 +744,7 @@ fn apply_node_color(node: &mut WorldNode, hex_text: &str) {
 }
 
 //==============================================================================
-// 스프라이트 시트 프레임 적용. (격자로 잘라 image_rect 를 고른다. 격자가 1 x 1 이거나 이미지가 없으면 그대로)
+/// 스프라이트 시트 프레임 적용. (격자로 잘라 image_rect 를 고른다. 격자가 1 x 1 이거나 이미지가 없으면 그대로)
 //==============================================================================
 fn apply_sprite_frame(node: &mut WorldNode, frame_index: i64) {
 	let (grid_columns, grid_rows) = match node.get_component::<TimelineSpriteFrameGrid>() {
@@ -743,7 +759,7 @@ fn apply_sprite_frame(node: &mut WorldNode, frame_index: i64) {
 }
 
 //==============================================================================
-// 격자를 주고 스프라이트 시트 프레임 적용. (격자 컴포넌트가 자기 tick 에서 부를 때, 그때는 노드에서 빠져 있다)
+/// 격자를 주고 스프라이트 시트 프레임 적용. (격자 컴포넌트가 자기 tick 에서 부를 때, 그때는 노드에서 빠져 있다)
 //==============================================================================
 fn apply_sprite_frame_with_grid(node: &mut WorldNode, grid_columns: usize, grid_rows: usize, frame_index: i64) {
 	let shader_sprite = match node.get_component_mut::<ShaderSprite>() {
@@ -775,7 +791,7 @@ fn apply_sprite_frame_with_grid(node: &mut WorldNode, grid_columns: usize, grid_
 }
 
 //==============================================================================
-// 값 보간. (종류별. number 는 선형, color 는 채널별, 그 밖에는 앞 값)
+/// 값 보간. (종류별. number 는 선형, color 는 채널별, 그 밖에는 앞 값)
 //==============================================================================
 fn interpolate_value(kind: TimelinePropertyKind, from_value: &TimelineValue, to_value: &TimelineValue, eased_progress: f32) -> TimelineValue {
 	match kind {
@@ -797,7 +813,7 @@ fn interpolate_value(kind: TimelinePropertyKind, from_value: &TimelineValue, to_
 }
 
 //==============================================================================
-// 색 값의 글. (문자열이 아니면 원본처럼 흰색으로 읽히게 빈 글)
+/// 색 값의 글. (문자열이 아니면 원본처럼 흰색으로 읽히게 빈 글)
 //==============================================================================
 fn color_text_of(value: &TimelineValue) -> String {
 	match value {
@@ -811,7 +827,7 @@ fn color_text_of(value: &TimelineValue) -> String {
 }
 
 //==============================================================================
-// 키 하나. (시간, 값, 그 키에서 다음 키까지의 이징, bezier 제어점)
+/// 키 하나. (시간, 값, 그 키에서 다음 키까지의 이징, bezier 제어점)
 //==============================================================================
 #[derive(Clone, Debug, PartialEq)]
 pub struct TimelineKey {
@@ -823,7 +839,7 @@ pub struct TimelineKey {
 
 impl TimelineKey {
 	//==============================================================================
-	// 생성. (이징 linear)
+	/// 생성. (이징 linear)
 	//==============================================================================
 	pub fn new(time: f32, value: TimelineValue) -> TimelineKey {
 		TimelineKey {
@@ -835,7 +851,7 @@ impl TimelineKey {
 	}
 
 	//==============================================================================
-	// JSON 키에서 만들기. ({ time, value, easing, curve })
+	/// JSON 키에서 만들기. ({ time, value, easing, curve })
 	//==============================================================================
 	pub fn from_json(key_description: &Value) -> TimelineKey {
 		let time = key_description.get("time").and_then(|value| value.as_f64()).unwrap_or(0.0) as f32;
@@ -853,7 +869,7 @@ impl TimelineKey {
 	}
 
 	//==============================================================================
-	// 이 키에서 시작하는 구간의 이징.
+	/// 이 키에서 시작하는 구간의 이징.
 	//==============================================================================
 	pub fn resolve_easing(&self) -> TimelineEasing {
 		resolve_timeline_easing(&self.easing, self.curve.as_deref())
@@ -861,7 +877,7 @@ impl TimelineKey {
 }
 
 //==============================================================================
-// 마커. (시간과 이름. 지나치면 마커 핸들러가 불린다)
+/// 마커. (시간과 이름. 지나치면 마커 핸들러가 불린다)
 //==============================================================================
 #[derive(Clone, Debug, PartialEq)]
 pub struct TimelineMarker {
@@ -870,19 +886,19 @@ pub struct TimelineMarker {
 }
 
 //==============================================================================
-// 트랙 대상. (노드, 또는 노드가 아닌 것)
+/// 트랙 대상. (노드, 또는 노드가 아닌 것)
 //==============================================================================
 #[derive(Clone)]
 pub enum TimelineTarget {
-	// 노드. (정의된 속성은 노드에 바로 건다)
+	/// 노드. (정의된 속성은 노드에 바로 건다)
 	Node(NodeId),
-	// 노드가 아닌 것. (원본 set_timeline_property 를 가진 객체, evaluate 가 그 자리에서 값을 넘긴다)
+	/// 노드가 아닌 것. (원본 set_timeline_property 를 가진 객체, evaluate 가 그 자리에서 값을 넘긴다)
 	External(Rc<RefCell<dyn TimelinePropertyTarget>>),
 }
 
 impl PartialEq for TimelineTarget {
 	//==============================================================================
-	// 같은 대상인지. (노드는 핸들, External 은 같은 객체를 가리키는지)
+	/// 같은 대상인지. (노드는 핸들, External 은 같은 객체를 가리키는지)
 	//==============================================================================
 	fn eq(&self, other: &TimelineTarget) -> bool {
 		match (self, other) {
@@ -901,7 +917,7 @@ impl PartialEq for TimelineTarget {
 
 impl std::fmt::Debug for TimelineTarget {
 	//==============================================================================
-	// 디버그 출력. (External 은 객체 주소만)
+	/// 디버그 출력. (External 은 객체 주소만)
 	//==============================================================================
 	fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		match self {
@@ -916,18 +932,18 @@ impl std::fmt::Debug for TimelineTarget {
 }
 
 //==============================================================================
-// 노드가 아닌 대상이 값을 받는 트레이트. (원본 set_timeline_property(이름, 값))
+/// 노드가 아닌 대상이 값을 받는 트레이트. (원본 set_timeline_property(이름, 값))
 //==============================================================================
 pub trait TimelinePropertyTarget {
 	//==============================================================================
-	// 속성 값 받기.
+	/// 속성 값 받기.
 	//==============================================================================
 	fn set_timeline_property(&mut self, property_name: &str, value: &TimelineValue);
 }
 
 impl TimelinePropertyTarget for ScreenEffect {
 	//==============================================================================
-	// 화면 효과에 값 걸기. (값을 그대로 넘긴다)
+	/// 화면 효과에 값 걸기. (값을 그대로 넘긴다)
 	//==============================================================================
 	fn set_timeline_property(&mut self, property_name: &str, value: &TimelineValue) {
 		ScreenEffect::set_timeline_property(self, property_name, value);
@@ -935,7 +951,7 @@ impl TimelinePropertyTarget for ScreenEffect {
 }
 
 //==============================================================================
-// External 대상에 건 값 하나. (get_external_properties)
+/// External 대상에 건 값 하나. (get_external_properties)
 //==============================================================================
 #[derive(Clone, Debug, PartialEq)]
 pub struct TimelineExternalProperty {
@@ -945,12 +961,12 @@ pub struct TimelineExternalProperty {
 }
 
 //==============================================================================
-// 서술 노드. (원본 무대 노드 서술. TIMELINE_NODE_DEFAULTS 가 기본값)
+/// 서술 노드. (원본 무대 노드 서술. TIMELINE_NODE_DEFAULTS 가 기본값)
 //==============================================================================
 #[derive(Clone, Debug, PartialEq)]
 pub struct TimelineNodeDescription {
 	pub name: String,
-	// 원본 키 type. ("group", "paint", "sprite", "text", "particle", "sound")
+	/// 원본 키 type. ("group", "paint", "sprite", "text", "particle", "sound")
 	pub node_type: String,
 	pub parent: Option<String>,
 	pub x: f32,
@@ -985,7 +1001,7 @@ pub struct TimelineNodeDescription {
 
 impl Default for TimelineNodeDescription {
 	//==============================================================================
-	// 기본값. (원본 TIMELINE_NODE_DEFAULTS)
+	/// 기본값. (원본 TIMELINE_NODE_DEFAULTS)
 	//==============================================================================
 	fn default() -> TimelineNodeDescription {
 		TimelineNodeDescription {
@@ -1026,8 +1042,8 @@ impl Default for TimelineNodeDescription {
 
 impl TimelineNodeDescription {
 	//==============================================================================
-	// JSON 서술에서 만들기. (기본값 위에 준 항목을 덮는다. 원본 Object.assign({}, TIMELINE_NODE_DEFAULTS, 서술))
-	// - 꼴이 맞지 않는 항목은 기본값을 둔다. visible 은 원본처럼 false 일 때만 끈다.
+	/// JSON 서술에서 만들기. (기본값 위에 준 항목을 덮는다. 원본 Object.assign({}, TIMELINE_NODE_DEFAULTS, 서술))
+	/// - 꼴이 맞지 않는 항목은 기본값을 둔다. visible 은 원본처럼 false 일 때만 끈다.
 	//==============================================================================
 	pub fn from_json(node_description: &Value) -> TimelineNodeDescription {
 		let defaults = TimelineNodeDescription::default();
@@ -1070,27 +1086,27 @@ impl TimelineNodeDescription {
 }
 
 //==============================================================================
-// 서술 노드 기본값. (원본 TIMELINE_NODE_DEFAULTS)
+/// 서술 노드 기본값. (원본 TIMELINE_NODE_DEFAULTS)
 //==============================================================================
 pub static TIMELINE_NODE_DEFAULTS: LazyLock<TimelineNodeDescription> = LazyLock::new(TimelineNodeDescription::default);
 
 //==============================================================================
-// 스프라이트 시트 격자. (노드 서술의 frame_columns / frame_rows. 원본 spriteFrameGridTable 자리)
-// - 그리지 않는 표시용 컴포넌트다. frame 속성이 이것을 읽어 칸을 고른다.
-// - 웹에서 "data:" 주소 그림을 브라우저가 푸는 동안만 갱신한다. 다 풀리면 스프라이트에 걸고 서술의 칸을 고른다. (원본 image.onload 의 applySpriteFrame)
+/// 스프라이트 시트 격자. (노드 서술의 frame_columns / frame_rows. 원본 spriteFrameGridTable 자리)
+/// - 그리지 않는 표시용 컴포넌트다. frame 속성이 이것을 읽어 칸을 고른다.
+/// - 웹에서 "data:" 주소 그림을 브라우저가 푸는 동안만 갱신한다. 다 풀리면 스프라이트에 걸고 서술의 칸을 고른다. (원본 image.onload 의 applySpriteFrame)
 //==============================================================================
 pub struct TimelineSpriteFrameGrid {
 	component_base: ComponentBase,
 	columns: usize,
 	rows: usize,
-	// 브라우저가 푸는 중인 "data:" 주소 그림과 다 풀리면 고를 서술의 칸. (데스크탑은 그 자리에서 풀어 늘 None)
+	/// 브라우저가 푸는 중인 "data:" 주소 그림과 다 풀리면 고를 서술의 칸. (데스크탑은 그 자리에서 풀어 늘 None)
 	pending_image_load: Option<(AssetLoadHandle, i64)>,
 }
 
 #[crate::reflect]
 impl TimelineSpriteFrameGrid {
 	//==============================================================================
-	// 생성. (칸 수는 1 이상)
+	/// 생성. (칸 수는 1 이상)
 	//==============================================================================
 	pub fn new(columns: usize, rows: usize) -> TimelineSpriteFrameGrid {
 		TimelineSpriteFrameGrid {
@@ -1102,7 +1118,7 @@ impl TimelineSpriteFrameGrid {
 	}
 
 	//==============================================================================
-	// 격자 설정.
+	/// 격자 설정.
 	//==============================================================================
 	pub fn set_grid(&mut self, columns: usize, rows: usize) {
 		self.columns = columns.max(1);
@@ -1110,14 +1126,14 @@ impl TimelineSpriteFrameGrid {
 	}
 
 	//==============================================================================
-	// 가로 칸 수.
+	/// 가로 칸 수.
 	//==============================================================================
 	pub fn get_columns(&self) -> usize {
 		self.columns
 	}
 
 	//==============================================================================
-	// 세로 칸 수.
+	/// 세로 칸 수.
 	//==============================================================================
 	pub fn get_rows(&self) -> usize {
 		self.rows
@@ -1139,7 +1155,7 @@ impl Component for TimelineSpriteFrameGrid {
 	}
 
 	//==============================================================================
-	// 브라우저가 푸는 "data:" 주소 그림 기다리기. (다 풀리면 스프라이트에 걸고 칸을 고른다, 못 풀었으면 그림 없이 둔다)
+	/// 브라우저가 푸는 "data:" 주소 그림 기다리기. (다 풀리면 스프라이트에 걸고 칸을 고른다, 못 풀었으면 그림 없이 둔다)
 	//==============================================================================
 	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f32) {
 		let (load_handle, frame_index) = match self.pending_image_load.take_if(|(load_handle, _)| load_handle.is_finished()) {
@@ -1167,14 +1183,14 @@ impl Component for TimelineSpriteFrameGrid {
 	}
 
 	//==============================================================================
-	// 웹에서 "data:" 주소 그림을 기다릴 때만 갱신한다.
+	/// 웹에서 "data:" 주소 그림을 기다릴 때만 갱신한다.
 	//==============================================================================
 	fn is_tick_needed(&self) -> bool {
 		self.pending_image_load.is_some()
 	}
 
 	//==============================================================================
-	// 아무것도 그리지 않으니 노드 거르기를 막지 않는다.
+	/// 아무것도 그리지 않으니 노드 거르기를 막지 않는다.
 	//==============================================================================
 	fn is_drawn_inside_content(&self) -> bool {
 		true
@@ -1182,8 +1198,8 @@ impl Component for TimelineSpriteFrameGrid {
 }
 
 //==============================================================================
-// 사운드 노드 상태. (원본 soundPlayerTable 의 { audio_player, audio_asset, audio_source, volume } 자리)
-// - 애셋과 플레이어는 Timeline::load_sounds 가 채운다. 이벤트 키 play / loop / stop 이 플레이어를 부린다.
+/// 사운드 노드 상태. (원본 soundPlayerTable 의 { audio_player, audio_asset, audio_source, volume } 자리)
+/// - 애셋과 플레이어는 Timeline::load_sounds 가 채운다. 이벤트 키 play / loop / stop 이 플레이어를 부린다.
 //==============================================================================
 pub struct TimelineSound {
 	component_base: ComponentBase,
@@ -1196,7 +1212,7 @@ pub struct TimelineSound {
 #[crate::reflect]
 impl TimelineSound {
 	//==============================================================================
-	// 생성. (비어 있음)
+	/// 생성. (비어 있음)
 	//==============================================================================
 	pub fn new() -> TimelineSound {
 		TimelineSound {
@@ -1209,35 +1225,35 @@ impl TimelineSound {
 	}
 
 	//==============================================================================
-	// 소리 주소 반환.
+	/// 소리 주소 반환.
 	//==============================================================================
 	pub fn get_audio_source(&self) -> &str {
 		&self.audio_source
 	}
 
 	//==============================================================================
-	// 음량 반환. (원본처럼 서술 값을 들고만 있다)
+	/// 음량 반환. (원본처럼 서술 값을 들고만 있다)
 	//==============================================================================
 	pub fn get_volume(&self) -> f32 {
 		self.volume
 	}
 
 	//==============================================================================
-	// 오디오 애셋 반환.
+	/// 오디오 애셋 반환.
 	//==============================================================================
 	pub fn get_audio_asset(&self) -> Option<&Rc<AudioAsset>> {
 		self.audio_asset.as_ref()
 	}
 
 	//==============================================================================
-	// 플레이어 반환.
+	/// 플레이어 반환.
 	//==============================================================================
 	pub fn get_audio_player_mut(&mut self) -> Option<&mut AudioPlayer> {
 		self.audio_player.as_mut()
 	}
 
 	//==============================================================================
-	// 멈춤. (플레이어가 있으면)
+	/// 멈춤. (플레이어가 있으면)
 	//==============================================================================
 	pub fn stop(&mut self) {
 		if let Some(audio_player) = self.audio_player.as_mut() {
@@ -1246,7 +1262,7 @@ impl TimelineSound {
 	}
 
 	//==============================================================================
-	// 이벤트 처리. (play / loop 는 애셋이 읽혔으면 처음부터 튼다, stop 은 멈춘다)
+	/// 이벤트 처리. (play / loop 는 애셋이 읽혔으면 처음부터 튼다, stop 은 멈춘다)
 	//==============================================================================
 	fn handle_event(&mut self, event_name: &str) {
 		let audio_player = match self.audio_player.as_mut() {
@@ -1293,7 +1309,7 @@ impl Component for TimelineSound {
 	}
 
 	//==============================================================================
-	// 갱신할 것이 없다.
+	/// 갱신할 것이 없다.
 	//==============================================================================
 	fn is_tick_needed(&self) -> bool {
 		false
@@ -1301,7 +1317,7 @@ impl Component for TimelineSound {
 }
 
 //==============================================================================
-// 노드의 T 컴포넌트를 찾고 없으면 붙인다. (원본 get_or_add_component)
+/// 노드의 T 컴포넌트를 찾고 없으면 붙인다. (원본 get_or_add_component)
 //==============================================================================
 fn get_or_add_component<T: Component + 'static>(node: &mut WorldNode, create: impl FnOnce() -> T) -> &mut T {
 	if !node.has_component::<T>() {
@@ -1311,7 +1327,7 @@ fn get_or_add_component<T: Component + 'static>(node: &mut WorldNode, create: im
 }
 
 //==============================================================================
-// 가로 정렬 이름 읽기. (모르는 이름은 center)
+/// 가로 정렬 이름 읽기. (모르는 이름은 center)
 //==============================================================================
 fn read_text_align(text_align_name: &str) -> TextAlign {
 	match text_align_name {
@@ -1334,7 +1350,7 @@ fn read_text_align(text_align_name: &str) -> TextAlign {
 }
 
 //==============================================================================
-// "data:" 주소 이미지 읽기. (base/dataurl.rs 로 풀고, 형이 image/svg+xml 일 때만 SVG 로 푼다. 브라우저와 같다)
+/// "data:" 주소 이미지 읽기. (base/dataurl.rs 로 풀고, 형이 image/svg+xml 일 때만 SVG 로 푼다. 브라우저와 같다)
 //==============================================================================
 #[cfg(not(target_arch = "wasm32"))]
 fn load_data_url_image(data_url: &str) -> Option<Rc<Image>> {
@@ -1343,7 +1359,7 @@ fn load_data_url_image(data_url: &str) -> Option<Rc<Image>> {
 }
 
 //==============================================================================
-// "data:" 주소 이미지를 브라우저에 풀어 달라고 부탁하기. (웹, fetch 가 주소의 형을 content-type 으로 주고 브라우저가 그 형으로 푼다. 다 풀리면 손잡이의 그림)
+/// "data:" 주소 이미지를 브라우저에 풀어 달라고 부탁하기. (웹, fetch 가 주소의 형을 content-type 으로 주고 브라우저가 그 형으로 푼다. 다 풀리면 손잡이의 그림)
 //==============================================================================
 #[cfg(target_arch = "wasm32")]
 fn request_data_url_image(data_url: &str) -> AssetLoadHandle {
@@ -1353,7 +1369,7 @@ fn request_data_url_image(data_url: &str) -> AssetLoadHandle {
 }
 
 //==============================================================================
-// 컴파일한 트랙. (키를 시간순으로 정렬하고 대상 / 속성 정의를 붙인 것)
+/// 컴파일한 트랙. (키를 시간순으로 정렬하고 대상 / 속성 정의를 붙인 것)
 //==============================================================================
 struct CompiledTimelineTrack {
 	target_name: String,
@@ -1366,14 +1382,14 @@ struct CompiledTimelineTrack {
 }
 
 //==============================================================================
-// 키를 시간순으로 정렬. (같은 시간은 원래 차례를 지킨다)
+/// 키를 시간순으로 정렬. (같은 시간은 원래 차례를 지킨다)
 //==============================================================================
 fn sort_keys_by_time(keys: &mut [TimelineKey]) {
 	keys.sort_by(|left, right| left.time.partial_cmp(&right.time).unwrap_or(std::cmp::Ordering::Equal));
 }
 
 //==============================================================================
-// 서술 트랙의 키 목록 읽기.
+/// 서술 트랙의 키 목록 읽기.
 //==============================================================================
 fn read_track_keys(track: &Value) -> Vec<TimelineKey> {
 	match track.get("keys").and_then(|value| value.as_array()) {
@@ -1386,19 +1402,19 @@ fn read_track_keys(track: &Value) -> Vec<TimelineKey> {
 	}
 }
 
-// 이벤트 핸들러. ((대상 이름, 이벤트 이름, 키, 타임라인, 노드 트리))
+/// 이벤트 핸들러. ((대상 이름, 이벤트 이름, 키, 타임라인, 노드 트리))
 type TimelineEventHandler = Box<dyn FnMut(&str, &str, &TimelineKey, &mut Timeline, &mut NodeTree)>;
-// 마커 핸들러. ((마커 이름, 마커, 타임라인, 노드 트리))
+/// 마커 핸들러. ((마커 이름, 마커, 타임라인, 노드 트리))
 type TimelineMarkerHandler = Box<dyn FnMut(&str, &TimelineMarker, &mut Timeline, &mut NodeTree)>;
-// 완료 핸들러. ((타임라인, 노드 트리))
+/// 완료 핸들러. ((타임라인, 노드 트리))
 type TimelineCompleteHandler = Box<dyn FnMut(&mut Timeline, &mut NodeTree)>;
-// 대상 해석기. (이름 → 대상)
+/// 대상 해석기. (이름 → 대상)
 type TimelineTargetResolver = Box<dyn Fn(&str) -> Option<TimelineTarget>>;
-// 이미지 해석기. (이미지 이름 → 이미지)
+/// 이미지 해석기. (이미지 이름 → 이미지)
 pub type TimelineImageResolver<'a> = &'a dyn Fn(&str) -> Option<Rc<Image>>;
 
 //==============================================================================
-// 타임라인.
+/// 타임라인.
 //==============================================================================
 pub struct Timeline {
 	description: Value,
@@ -1413,17 +1429,17 @@ pub struct Timeline {
 	speed: f32,
 	is_playing: bool,
 	is_dirty: bool,
-	// 타임라인 시간으로 진행하는 파티클이 붙은 노드. (대상 노드에서 모은다)
+	/// 타임라인 시간으로 진행하는 파티클이 붙은 노드. (대상 노드에서 모은다)
 	particle_node_ids: Vec<NodeId>,
-	// 이벤트 트랙이 없는 파티클 노드. (타임라인이 시작하면 바로 도는 것으로 본다)
+	/// 이벤트 트랙이 없는 파티클 노드. (타임라인이 시작하면 바로 도는 것으로 본다)
 	particle_free_run_node_ids: Vec<NodeId>,
-	// 마지막 evaluate 가 External 대상에 건 값. (evaluate 마다 새로 채운다)
+	/// 마지막 evaluate 가 External 대상에 건 값. (evaluate 마다 새로 채운다)
 	external_property_list: Vec<TimelineExternalProperty>,
 }
 
 impl Timeline {
 	//==============================================================================
-	// 생성. (서술이 없으면 빈 서술)
+	/// 생성. (서술이 없으면 빈 서술)
 	//==============================================================================
 	pub fn new(description: Option<Value>) -> Timeline {
 		let mut timeline = Timeline {
@@ -1448,7 +1464,7 @@ impl Timeline {
 	}
 
 	//==============================================================================
-	// 빈 서술 생성. (정적)
+	/// 빈 서술 생성. (정적)
 	//==============================================================================
 	pub fn create_empty_description() -> Value {
 		json!({
@@ -1463,7 +1479,7 @@ impl Timeline {
 	}
 
 	//==============================================================================
-	// JSON 글에서 만들기. (원본 loadFromUrl 의 response.json() 다음 자리)
+	/// JSON 글에서 만들기. (원본 loadFromUrl 의 response.json() 다음 자리)
 	//==============================================================================
 	pub fn load_from_text(text: &str) -> Result<Timeline, String> {
 		let description: Value = serde_json::from_str(text).map_err(|error| format!("Timeline: JSON 을 읽지 못했습니다. ({})", error))?;
@@ -1471,8 +1487,8 @@ impl Timeline {
 	}
 
 	//==============================================================================
-	// 주소에서 읽기. (원본 정적 await Timeline.loadFromUrl(url), 애셋 경로를 받기 부탁하고 엔진 작업 안에서 await 한다)
-	// - 받기나 JSON 읽기에 실패하면 까닭이다. (원본은 Promise 가 거부된다)
+	/// 주소에서 읽기. (원본 정적 await Timeline.loadFromUrl(url), 애셋 경로를 받기 부탁하고 엔진 작업 안에서 await 한다)
+	/// - 받기나 JSON 읽기에 실패하면 까닭이다. (원본은 Promise 가 거부된다)
 	//==============================================================================
 	pub fn load_from_url(engine: &Engine, url: &str) -> impl Future<Output = Result<Timeline, String>> + 'static {
 		let load_handle = engine.request_asset_bytes(url);
@@ -1483,7 +1499,7 @@ impl Timeline {
 	}
 
 	//==============================================================================
-	// 읽은 JsonAsset 에서 만들기. (아직 안 읽혔거나 실패했으면 None)
+	/// 읽은 JsonAsset 에서 만들기. (아직 안 읽혔거나 실패했으면 None)
 	//==============================================================================
 	pub fn create_from_json_asset(json_asset: &mut JsonAsset) -> Option<Timeline> {
 		let description = json_asset.get_data()?.clone();
@@ -1491,7 +1507,7 @@ impl Timeline {
 	}
 
 	//==============================================================================
-	// 서술 설정. (빠진 stage / nodes / tracks / markers 를 채우고 다시 컴파일하게 한다)
+	/// 서술 설정. (빠진 stage / nodes / tracks / markers 를 채우고 다시 컴파일하게 한다)
 	//==============================================================================
 	pub fn set_description(&mut self, description: Value) {
 		self.description = if description.is_object() {
@@ -1519,28 +1535,28 @@ impl Timeline {
 	}
 
 	//==============================================================================
-	// 서술 반환.
+	/// 서술 반환.
 	//==============================================================================
 	pub fn get_description(&self) -> &Value {
 		&self.description
 	}
 
 	//==============================================================================
-	// 서술 반환. (변경용. 트랙 / 키를 고쳤으면 invalidate 를 부른다)
+	/// 서술 반환. (변경용. 트랙 / 키를 고쳤으면 invalidate 를 부른다)
 	//==============================================================================
 	pub fn get_description_mut(&mut self) -> &mut Value {
 		&mut self.description
 	}
 
 	//==============================================================================
-	// 다시 컴파일 요청. (트랙 / 키가 바뀌었을 때)
+	/// 다시 컴파일 요청. (트랙 / 키가 바뀌었을 때)
 	//==============================================================================
 	pub fn invalidate(&mut self) {
 		self.is_dirty = true;
 	}
 
 	//==============================================================================
-	// 서술 배열 반환. (stage.nodes 처럼 경로로)
+	/// 서술 배열 반환. (stage.nodes 처럼 경로로)
 	//==============================================================================
 	fn get_description_array(&self, pointer: &str) -> Vec<Value> {
 		match self.description.pointer(pointer).and_then(|value| value.as_array()) {
@@ -1554,7 +1570,7 @@ impl Timeline {
 	}
 
 	//==============================================================================
-	// 컴파일. (키를 시간순으로 정렬하고 대상 / 속성 정의를 붙인 뒤 파티클을 모은다)
+	/// 컴파일. (키를 시간순으로 정렬하고 대상 / 속성 정의를 붙인 뒤 파티클을 모은다)
 	//==============================================================================
 	pub fn compile(&mut self, node_tree: &mut NodeTree) {
 		let track_descriptions = self.get_description_array("/tracks");
@@ -1606,7 +1622,7 @@ impl Timeline {
 	}
 
 	//==============================================================================
-	// 더러우면 컴파일.
+	/// 더러우면 컴파일.
 	//==============================================================================
 	fn compile_if_dirty(&mut self, node_tree: &mut NodeTree) {
 		if self.is_dirty {
@@ -1615,8 +1631,8 @@ impl Timeline {
 	}
 
 	//==============================================================================
-	// 대상 노드의 파티클 시스템 수집.
-	// - 수동 tick 으로 바꿔 타임라인 시간으로만 진행하고, 씨앗을 줘서 되감을 때마다 같은 결과가 나오게 한다.
+	/// 대상 노드의 파티클 시스템 수집.
+	/// - 수동 tick 으로 바꿔 타임라인 시간으로만 진행하고, 씨앗을 줘서 되감을 때마다 같은 결과가 나오게 한다.
 	//==============================================================================
 	pub fn collect_particle_systems(&mut self, node_tree: &mut NodeTree) {
 		self.particle_node_ids.clear();
@@ -1662,7 +1678,7 @@ impl Timeline {
 	}
 
 	//==============================================================================
-	// 파티클 시간 진행. (재생 중 매 프레임)
+	/// 파티클 시간 진행. (재생 중 매 프레임)
 	//==============================================================================
 	pub fn simulate_particles(&mut self, node_tree: &mut NodeTree, time_delta: f32) {
 		if time_delta <= 0.0 {
@@ -1676,7 +1692,7 @@ impl Timeline {
 	}
 
 	//==============================================================================
-	// 파티클 재시뮬레이션. (스크럽 / 되감기. 비운 뒤 0 초부터 이벤트를 다시 밟으며 진행)
+	/// 파티클 재시뮬레이션. (스크럽 / 되감기. 비운 뒤 0 초부터 이벤트를 다시 밟으며 진행)
 	//==============================================================================
 	pub fn resimulate_particles(&mut self, node_tree: &mut NodeTree, time: f32) {
 		self.compile_if_dirty(node_tree);
@@ -1729,7 +1745,7 @@ impl Timeline {
 	}
 
 	//==============================================================================
-	// 파티클을 step_seconds 씩 target_time 까지 진행. (재시뮬레이션용)
+	/// 파티클을 step_seconds 씩 target_time 까지 진행. (재시뮬레이션용)
 	//==============================================================================
 	fn advance_particles_to(&mut self, node_tree: &mut NodeTree, current_time: &mut f32, target_time: f32, step_seconds: f32) {
 		while *current_time < target_time - 0.000001 {
@@ -1740,7 +1756,7 @@ impl Timeline {
 	}
 
 	//==============================================================================
-	// 대상 해석. (대상 표 → 사용자 해석기)
+	/// 대상 해석. (대상 표 → 사용자 해석기)
 	//==============================================================================
 	pub fn resolve_target(&self, target_name: &str) -> Option<TimelineTarget> {
 		if let Some(target) = self.get_target(target_name) {
@@ -1755,7 +1771,7 @@ impl Timeline {
 	}
 
 	//==============================================================================
-	// 대상 해석기 설정. (이름 → 대상. 노드가 아닌 것은 TimelineTarget::External(객체))
+	/// 대상 해석기 설정. (이름 → 대상. 노드가 아닌 것은 TimelineTarget::External(객체))
 	//==============================================================================
 	pub fn set_target_resolver(&mut self, target_resolver: Option<TimelineTargetResolver>) {
 		self.target_resolver = target_resolver;
@@ -1763,7 +1779,7 @@ impl Timeline {
 	}
 
 	//==============================================================================
-	// 대상 직접 등록. (같은 이름이 있으면 바꾼다)
+	/// 대상 직접 등록. (같은 이름이 있으면 바꾼다)
 	//==============================================================================
 	pub fn set_target(&mut self, target_name: &str, target: TimelineTarget) {
 		match self.target_table.iter_mut().find(|(name, _)| name == target_name) {
@@ -1778,14 +1794,14 @@ impl Timeline {
 	}
 
 	//==============================================================================
-	// 대상 반환. (대상 표에 있는 것만)
+	/// 대상 반환. (대상 표에 있는 것만)
 	//==============================================================================
 	pub fn get_target(&self, target_name: &str) -> Option<TimelineTarget> {
 		self.target_table.iter().find(|(name, _)| name == target_name).map(|(_, target)| target.clone())
 	}
 
 	//==============================================================================
-	// 노드 트리에 이름으로 붙이기. (무대를 직접 만든 경우. 뿌리 자신, 또는 그 자손에서 트랙 대상 이름을 찾는다)
+	/// 노드 트리에 이름으로 붙이기. (무대를 직접 만든 경우. 뿌리 자신, 또는 그 자손에서 트랙 대상 이름을 찾는다)
 	//==============================================================================
 	pub fn bind(&mut self, node_tree: &NodeTree, root_id: NodeId) {
 		let track_descriptions = self.get_description_array("/tracks");
@@ -1809,7 +1825,7 @@ impl Timeline {
 	}
 
 	//==============================================================================
-	// 무대 노드 생성. (서술의 stage.nodes 를 노드 트리로 만들고 대상으로 등록한다. 이름 → 노드 표를 돌려준다)
+	/// 무대 노드 생성. (서술의 stage.nodes 를 노드 트리로 만들고 대상으로 등록한다. 이름 → 노드 표를 돌려준다)
 	//==============================================================================
 	pub fn build_stage(&mut self, node_tree: &mut NodeTree, parent_id: NodeId, image_resolver: Option<TimelineImageResolver>) -> HashMap<String, NodeId> {
 		let node_descriptions = self.get_description_array("/stage/nodes");
@@ -1843,7 +1859,7 @@ impl Timeline {
 	}
 
 	//==============================================================================
-	// 무대 노드 한 개 생성. (정적. 붙이지 않은 노드를 만든다)
+	/// 무대 노드 한 개 생성. (정적. 붙이지 않은 노드를 만든다)
 	//==============================================================================
 	pub fn create_stage_node(node_tree: &mut NodeTree, node_description: &Value, image_resolver: Option<TimelineImageResolver>) -> NodeId {
 		let node_name = node_description.get("name").and_then(|value| value.as_str()).unwrap_or("");
@@ -1853,7 +1869,7 @@ impl Timeline {
 	}
 
 	//==============================================================================
-	// 노드에 서술 반영. (정적. 편집기가 값을 고칠 때도 쓴다)
+	/// 노드에 서술 반영. (정적. 편집기가 값을 고칠 때도 쓴다)
 	//==============================================================================
 	pub fn apply_stage_node_description(node: &mut WorldNode, node_description: &Value, image_resolver: Option<TimelineImageResolver>) {
 		let description = TimelineNodeDescription::from_json(node_description);
@@ -1944,8 +1960,8 @@ impl Timeline {
 	}
 
 	//==============================================================================
-	// 사운드 노드 준비. (원본 setAudioManager + 사운드 노드의 애셋 읽기 자리)
-	// - 대상 노드 가운데 TimelineSound 가 붙은 것마다 아직 없는 오디오 애셋을 읽고 플레이어를 만든다. 새로 읽은 애셋을 돌려준다.
+	/// 사운드 노드 준비. (원본 setAudioManager + 사운드 노드의 애셋 읽기 자리)
+	/// - 대상 노드 가운데 TimelineSound 가 붙은 것마다 아직 없는 오디오 애셋을 읽고 플레이어를 만든다. 새로 읽은 애셋을 돌려준다.
 	//==============================================================================
 	pub fn load_sounds(&mut self, node_tree: &mut NodeTree, engine: &Engine) -> Vec<Rc<AudioAsset>> {
 		let mut loaded_audio_assets: Vec<Rc<AudioAsset>> = Vec::new();
@@ -1988,7 +2004,7 @@ impl Timeline {
 	}
 
 	//==============================================================================
-	// 사운드 노드 정지. (정적. 편집기가 정지 / 되감기 때 부른다)
+	/// 사운드 노드 정지. (정적. 편집기가 정지 / 되감기 때 부른다)
 	//==============================================================================
 	pub fn stop_sound(node: &mut WorldNode) {
 		if let Some(sound) = node.get_component_mut::<TimelineSound>() {
@@ -1997,7 +2013,7 @@ impl Timeline {
 	}
 
 	//==============================================================================
-	// 재생. (반복이 아닌데 끝에 있으면 처음부터)
+	/// 재생. (반복이 아닌데 끝에 있으면 처음부터)
 	//==============================================================================
 	pub fn play(&mut self) {
 		if self.time >= self.get_duration() && !self.is_loop() {
@@ -2007,14 +2023,14 @@ impl Timeline {
 	}
 
 	//==============================================================================
-	// 일시 정지.
+	/// 일시 정지.
 	//==============================================================================
 	pub fn pause(&mut self) {
 		self.is_playing = false;
 	}
 
 	//==============================================================================
-	// 정지. (소리와 파티클을 멈추고 처음으로)
+	/// 정지. (소리와 파티클을 멈추고 처음으로)
 	//==============================================================================
 	pub fn stop(&mut self, node_tree: &mut NodeTree) {
 		self.is_playing = false;
@@ -2034,7 +2050,7 @@ impl Timeline {
 	}
 
 	//==============================================================================
-	// 시간 이동. (이벤트는 발생하지 않는다. 파티클은 그 시간까지 다시 진행한다)
+	/// 시간 이동. (이벤트는 발생하지 않는다. 파티클은 그 시간까지 다시 진행한다)
 	//==============================================================================
 	pub fn seek(&mut self, node_tree: &mut NodeTree, time: f32) {
 		self.time = time.min(self.get_duration()).max(0.0);
@@ -2044,7 +2060,7 @@ impl Timeline {
 	}
 
 	//==============================================================================
-	// 갱신. (시간을 흘리고 값을 적용, 지나친 이벤트 / 마커를 발생)
+	/// 갱신. (시간을 흘리고 값을 적용, 지나친 이벤트 / 마커를 발생)
 	//==============================================================================
 	pub fn tick(&mut self, node_tree: &mut NodeTree, time_delta: f32) {
 		if !self.is_playing {
@@ -2095,7 +2111,7 @@ impl Timeline {
 	}
 
 	//==============================================================================
-	// 구간 안의 이벤트 키 / 마커 발생. (from_time 초과 ~ to_time 이하. 이벤트 트랙 차례, 그다음 마커)
+	/// 구간 안의 이벤트 키 / 마커 발생. (from_time 초과 ~ to_time 이하. 이벤트 트랙 차례, 그다음 마커)
 	//==============================================================================
 	pub fn fire_events_between(&mut self, node_tree: &mut NodeTree, from_time: f32, to_time: f32) {
 		self.compile_if_dirty(node_tree);
@@ -2134,8 +2150,8 @@ impl Timeline {
 	}
 
 	//==============================================================================
-	// 이벤트 키 처리. (파티클 대상은 play / stop / clear / emit:N 을 스스로 처리하고, 사운드 대상은 play / loop / stop, 그 뒤 핸들러)
-	// - is_silent 는 재시뮬레이션용이다. (사운드 / 사용자 핸들러는 부르지 않고 파티클만)
+	/// 이벤트 키 처리. (파티클 대상은 play / stop / clear / emit:N 을 스스로 처리하고, 사운드 대상은 play / loop / stop, 그 뒤 핸들러)
+	/// - is_silent 는 재시뮬레이션용이다. (사운드 / 사용자 핸들러는 부르지 않고 파티클만)
 	//==============================================================================
 	fn dispatch_event(&mut self, node_tree: &mut NodeTree, track_index: usize, key_index: usize, is_silent: bool) {
 		// 앞의 핸들러가 서술을 바꿔 다시 컴파일했으면 없는 트랙일 수 있다.
@@ -2199,7 +2215,7 @@ impl Timeline {
 	}
 
 	//==============================================================================
-	// 시간의 값 적용. (연속 속성만, 이벤트는 tick 에서만 발생. External 대상에는 set_timeline_property 로 넘기고 건 값을 적어 둔다)
+	/// 시간의 값 적용. (연속 속성만, 이벤트는 tick 에서만 발생. External 대상에는 set_timeline_property 로 넘기고 건 값을 적어 둔다)
 	//==============================================================================
 	pub fn evaluate(&mut self, node_tree: &mut NodeTree, time: f32) {
 		self.compile_if_dirty(node_tree);
@@ -2237,14 +2253,14 @@ impl Timeline {
 	}
 
 	//==============================================================================
-	// 마지막 evaluate 가 External 대상에 건 값 반환. (트랙 차례)
+	/// 마지막 evaluate 가 External 대상에 건 값 반환. (트랙 차례)
 	//==============================================================================
 	pub fn get_external_properties(&self) -> &[TimelineExternalProperty] {
 		&self.external_property_list
 	}
 
 	//==============================================================================
-	// 키 목록에서 시간의 값 표본. (정적. 키는 시간순이어야 한다. 편집기의 커브 그리기도 쓴다)
+	/// 키 목록에서 시간의 값 표본. (정적. 키는 시간순이어야 한다. 편집기의 커브 그리기도 쓴다)
 	//==============================================================================
 	pub fn sample_keys(sorted_keys: &[TimelineKey], kind: TimelinePropertyKind, time: f32) -> TimelineValue {
 		let key_count = sorted_keys.len();
@@ -2280,7 +2296,7 @@ impl Timeline {
 	}
 
 	//==============================================================================
-	// 서술 트랙의 시간 값 표본. (정적. 서술 트랙 그대로, 정렬은 여기서. 정의가 없는 속성은 number)
+	/// 서술 트랙의 시간 값 표본. (정적. 서술 트랙 그대로, 정렬은 여기서. 정의가 없는 속성은 number)
 	//==============================================================================
 	pub fn sample_track(track: &Value, time: f32) -> TimelineValue {
 		let property_name = track.get("property").and_then(|value| value.as_str()).unwrap_or("");
@@ -2298,35 +2314,35 @@ impl Timeline {
 	}
 
 	//==============================================================================
-	// 시간 반환.
+	/// 시간 반환.
 	//==============================================================================
 	pub fn get_time(&self) -> f32 {
 		self.time
 	}
 
 	//==============================================================================
-	// 재생 중 여부 반환.
+	/// 재생 중 여부 반환.
 	//==============================================================================
 	pub fn is_playing(&self) -> bool {
 		self.is_playing
 	}
 
 	//==============================================================================
-	// 속도 설정. (1 = 실시간)
+	/// 속도 설정. (1 = 실시간)
 	//==============================================================================
 	pub fn set_speed(&mut self, speed: f32) {
 		self.speed = speed;
 	}
 
 	//==============================================================================
-	// 속도 반환.
+	/// 속도 반환.
 	//==============================================================================
 	pub fn get_speed(&self) -> f32 {
 		self.speed
 	}
 
 	//==============================================================================
-	// 반복 설정. (서술의 loop 를 바꾼다)
+	/// 반복 설정. (서술의 loop 를 바꾼다)
 	//==============================================================================
 	pub fn set_loop(&mut self, is_loop: bool) {
 		if let Some(description_object) = self.description.as_object_mut() {
@@ -2335,14 +2351,14 @@ impl Timeline {
 	}
 
 	//==============================================================================
-	// 반복 여부 반환. (서술의 loop 가 true 일 때만)
+	/// 반복 여부 반환. (서술의 loop 가 true 일 때만)
 	//==============================================================================
 	pub fn is_loop(&self) -> bool {
 		self.description.get("loop") == Some(&Value::Bool(true))
 	}
 
 	//==============================================================================
-	// 길이 반환. (초, 못 읽거나 0 이하면 0)
+	/// 길이 반환. (초, 못 읽거나 0 이하면 0)
 	//==============================================================================
 	pub fn get_duration(&self) -> f32 {
 		let duration = read_json_number(self.description.get("duration"));
@@ -2355,7 +2371,7 @@ impl Timeline {
 	}
 
 	//==============================================================================
-	// 초당 프레임 반환. (못 읽거나 0 이하면 30)
+	/// 초당 프레임 반환. (못 읽거나 0 이하면 30)
 	//==============================================================================
 	pub fn get_frame_rate(&self) -> f32 {
 		let frame_rate = read_json_number(self.description.get("frameRate"));
@@ -2368,21 +2384,21 @@ impl Timeline {
 	}
 
 	//==============================================================================
-	// 이벤트 핸들러 설정. ((대상 이름, 이벤트 이름, 키, 타임라인, 노드 트리))
+	/// 이벤트 핸들러 설정. ((대상 이름, 이벤트 이름, 키, 타임라인, 노드 트리))
 	//==============================================================================
 	pub fn set_event_handler(&mut self, event_handler: Option<TimelineEventHandler>) {
 		self.event_handler = event_handler;
 	}
 
 	//==============================================================================
-	// 마커 핸들러 설정. ((마커 이름, 마커, 타임라인, 노드 트리))
+	/// 마커 핸들러 설정. ((마커 이름, 마커, 타임라인, 노드 트리))
 	//==============================================================================
 	pub fn set_marker_handler(&mut self, marker_handler: Option<TimelineMarkerHandler>) {
 		self.marker_handler = marker_handler;
 	}
 
 	//==============================================================================
-	// 완료 핸들러 설정. (반복이 아닐 때 끝에 닿으면, (타임라인, 노드 트리))
+	/// 완료 핸들러 설정. (반복이 아닐 때 끝에 닿으면, (타임라인, 노드 트리))
 	//==============================================================================
 	pub fn set_complete_handler(&mut self, complete_handler: Option<TimelineCompleteHandler>) {
 		self.complete_handler = complete_handler;
@@ -2401,14 +2417,14 @@ mod tests {
 	use std::cell::RefCell;
 
 	//==============================================================================
-	// 두 수가 오차 안에서 같은지.
+	/// 두 수가 오차 안에서 같은지.
 	//==============================================================================
 	fn assert_near(actual: f32, expected: f64, tolerance: f64, label: &str) {
 		assert!(((actual as f64) - expected).abs() <= tolerance, "{}: {} != {}", label, actual, expected);
 	}
 
 	//==============================================================================
-	// 이징 곡선이 원본과 같은 값을 낸다. (원본 node 실행 값. exponential, elastic 은 원본 수식을 실제 Math 로 계산한 값)
+	/// 이징 곡선이 원본과 같은 값을 낸다. (원본 node 실행 값. exponential, elastic 은 원본 수식을 실제 Math 로 계산한 값)
 	//==============================================================================
 	#[test]
 	fn easing_curves_match_original() {
@@ -2460,7 +2476,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 베지어 이징이 원본과 같은 값을 낸다. (제어점 x 가 0 ~ 1 밖이면 자른다)
+	/// 베지어 이징이 원본과 같은 값을 낸다. (제어점 x 가 0 ~ 1 밖이면 자른다)
 	//==============================================================================
 	#[test]
 	fn bezier_easing_matches_original() {
@@ -2482,7 +2498,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 색 글 읽기가 원본 parseInt 와 같게 읽는다. (못 읽는 채널은 1)
+	/// 색 글 읽기가 원본 parseInt 와 같게 읽는다. (못 읽는 채널은 1)
 	//==============================================================================
 	#[test]
 	fn parse_timeline_color_matches_original() {
@@ -2506,7 +2522,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 채널 → 색 글이 원본과 같다. (0 ~ 1 로 자르고 반올림, 알파가 없으면 ff)
+	/// 채널 → 색 글이 원본과 같다. (0 ~ 1 로 자르고 반올림, 알파가 없으면 ff)
 	//==============================================================================
 	#[test]
 	fn compose_timeline_color_matches_original() {
@@ -2517,7 +2533,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 트랙 표본이 원본과 같다. (정렬, 구간 이징, 베지어, 계단, 색 보간, 문자열 / 참거짓 계단, 같은 시간 키)
+	/// 트랙 표본이 원본과 같다. (정렬, 구간 이징, 베지어, 계단, 색 보간, 문자열 / 참거짓 계단, 같은 시간 키)
 	//==============================================================================
 	#[test]
 	fn sample_track_matches_original() {
@@ -2558,7 +2574,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 값을 받아 적는 external 대상. (시험용)
+	/// 값을 받아 적는 external 대상. (시험용)
 	//==============================================================================
 	struct RecordingTarget {
 		log: Rc<RefCell<Vec<String>>>,
@@ -2566,7 +2582,7 @@ mod tests {
 
 	impl TimelinePropertyTarget for RecordingTarget {
 		//==============================================================================
-		// 받은 값을 적는다.
+		/// 받은 값을 적는다.
 		//==============================================================================
 		fn set_timeline_property(&mut self, property_name: &str, value: &TimelineValue) {
 			self.log.borrow_mut().push(format!("set {}={:.4}", property_name, value.as_number()));
@@ -2574,7 +2590,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 재생이 원본과 같은 차례로 값 / 이벤트 / 마커 / 완료를 낸다. (원본 node 실행 기록과 비교)
+	/// 재생이 원본과 같은 차례로 값 / 이벤트 / 마커 / 완료를 낸다. (원본 node 실행 기록과 비교)
 	//==============================================================================
 	#[test]
 	fn playback_matches_original_event_order() {
@@ -2657,7 +2673,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 핸들러 안에서 타임라인을 멈추고 옮길 수 있다. (원본 핸들러의 마지막 인자, 타임라인 자신)
+	/// 핸들러 안에서 타임라인을 멈추고 옮길 수 있다. (원본 핸들러의 마지막 인자, 타임라인 자신)
 	//==============================================================================
 	#[test]
 	fn handlers_can_control_timeline() {
@@ -2685,7 +2701,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 같은 이름 무대 노드는 모두 붙고 이름 표에는 뒤의 것이 남는다. 자기 자신을 부모로 두면 무대 부모에 붙는다.
+	/// 같은 이름 무대 노드는 모두 붙고 이름 표에는 뒤의 것이 남는다. 자기 자신을 부모로 두면 무대 부모에 붙는다.
 	//==============================================================================
 	#[test]
 	fn build_stage_keeps_same_name_nodes_and_rejects_self_parent() {
@@ -2709,7 +2725,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 무대를 만들고 트랙 값을 노드에 건다. (부모 관계, Paint / Text 색, 글, 보이기, 위치)
+	/// 무대를 만들고 트랙 값을 노드에 건다. (부모 관계, Paint / Text 색, 글, 보이기, 위치)
 	//==============================================================================
 	#[test]
 	fn build_stage_creates_nodes_and_applies_tracks() {
@@ -2768,7 +2784,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// bind 는 이미 있는 노드 트리에서 트랙 대상 이름을 찾아 붙인다.
+	/// bind 는 이미 있는 노드 트리에서 트랙 대상 이름을 찾아 붙인다.
 	//==============================================================================
 	#[test]
 	fn bind_finds_targets_by_name() {
@@ -2792,7 +2808,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 파티클은 타임라인 시간으로만 진행하고, 이벤트 play 로 버스트가 나며, 되감아도 같은 결과가 나온다.
+	/// 파티클은 타임라인 시간으로만 진행하고, 이벤트 play 로 버스트가 나며, 되감아도 같은 결과가 나온다.
 	//==============================================================================
 	#[test]
 	fn particle_events_follow_timeline_time() {
@@ -2833,7 +2849,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// frame 속성은 스프라이트 시트 격자에서 칸을 고른다. (넘치면 감는다)
+	/// frame 속성은 스프라이트 시트 격자에서 칸을 고른다. (넘치면 감는다)
 	//==============================================================================
 	#[test]
 	fn frame_track_selects_sprite_sheet_cell() {
@@ -2874,7 +2890,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 서술을 채우고 길이 / 프레임 / 반복을 원본처럼 읽는다. (data 주소 base64 풀기 포함)
+	/// 서술을 채우고 길이 / 프레임 / 반복을 원본처럼 읽는다. (data 주소 base64 풀기 포함)
 	//==============================================================================
 	#[test]
 	fn description_defaults_and_data_url() {
@@ -2892,7 +2908,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// "data:" 주소: 퍼센트 꼴을 먼저 푼다. (base64 본문의 %3D, base64 가 아닌 본문의 %XX 바이트)
+	/// "data:" 주소: 퍼센트 꼴을 먼저 푼다. (base64 본문의 %3D, base64 가 아닌 본문의 %XX 바이트)
 	//==============================================================================
 	#[test]
 	fn data_url_image_decodes_percent_encoding() {
@@ -2907,7 +2923,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// "data:" 주소의 SVG: 브라우저처럼 형이 image/svg+xml 일 때만 SVG 로 그린다. (퍼센트 꼴과 base64, 다른 형이면 못 푼다) 스프라이트 노드에도 걸린다.
+	/// "data:" 주소의 SVG: 브라우저처럼 형이 image/svg+xml 일 때만 SVG 로 그린다. (퍼센트 꼴과 base64, 다른 형이면 못 푼다) 스프라이트 노드에도 걸린다.
 	//==============================================================================
 	#[test]
 	fn data_url_svg_image_follows_mime_type() {
@@ -2930,7 +2946,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 글 속성은 원본처럼 RichText 노드에도 건다. (원본 get_component(Text) 가 RichText 도 찾는다)
+	/// 글 속성은 원본처럼 RichText 노드에도 건다. (원본 get_component(Text) 가 RichText 도 찾는다)
 	//==============================================================================
 	#[test]
 	fn text_properties_apply_to_rich_text() {

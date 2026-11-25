@@ -1,9 +1,9 @@
 //==============================================================================
-// 바닐라엔진(Vanilla Engine). 크레이트 이름은 vanilla-engine, 코드에서는 vanilla 로 쓴다.
-// - vanilla.js 엔진을 러스트로 옮긴 것이다. 공개 API 는 원본의 쓰임새를 따르고, 이름은 원본 이름을 러스트 규칙으로 바꾼 것이다.
-// - 원본의 WebGL2 렌더러는 OpenGL 3.3 코어(glow)로, 캔버스와 DOM 이벤트는 창(winit)과 GL 컨텍스트(glutin)로 바꿨다.
-//   웹(wasm32)으로 빌드하면 원본처럼 캔버스와 WebGL2, request_animation_frame 으로 돈다. (platform/web.rs)
-// - 이름은 러스트 규칙을 따른다. (함수와 변수는 snake_case, 타입과 열거 값은 UpperCamelCase, 상수는 SCREAMING_SNAKE_CASE, 원본의 setFillColor 는 set_fill_color)
+//! 바닐라엔진(Vanilla Engine). 크레이트 이름은 vanilla-engine, 코드에서는 vanilla 로 쓴다.
+//! - vanilla.js 엔진을 러스트로 옮긴 것이다. 공개 API 는 원본의 쓰임새를 따르고, 이름은 원본 이름을 러스트 규칙으로 바꾼 것이다.
+//! - 원본의 WebGL2 렌더러는 OpenGL 3.3 코어(glow)로, 캔버스와 DOM 이벤트는 창(winit)과 GL 컨텍스트(glutin)로 바꿨다.
+//!   웹(wasm32)으로 빌드하면 원본처럼 캔버스와 WebGL2, request_animation_frame 으로 돈다. (platform/web.rs)
+//! - 이름은 러스트 규칙을 따른다. (함수와 변수는 snake_case, 타입과 열거 값은 UpperCamelCase, 상수는 SCREAMING_SNAKE_CASE, 원본의 setFillColor 는 set_fill_color)
 //==============================================================================
 #![allow(clippy::too_many_arguments)]
 
@@ -239,9 +239,9 @@ pub use crate::graphics3d::toon::toonvfx::ToonBlobShadowOptions;
 pub use crate::base::identifier::create_guid;
 pub use crate::core::component::text::slice_graphemes;
 pub use crate::core::graphic::ImageSmoothingQuality;
-pub use crate::graphics3d::toon::toonlightset::{ToonBandRamp, ToonLightModel, ToonLightSet, ToonPointLight, TOON_MAXIMUM_BAND_STEPS, TOON_MAXIMUM_POINT_LIGHTS};
-pub use crate::graphics3d::toon::toonmaterial::{ToonBlendMode, ToonBufferUsage, ToonInstanceAttribute, ToonInstanceLayout, ToonMaterial, ToonMaterialChunks, TOON_FIRST_INSTANCE_ATTRIBUTE_LOCATION, TOON_INSTANCE_MATRIX_NAME, TOON_INSTANCE_TINT_NAME, TOON_MAXIMUM_INSTANCE_ATTRIBUTES};
-pub use crate::graphics3d::toon::toonrenderer::{compose_toon_program_sources, create_reflection_matrix, read_frame_camera, read_matrix_determinant, ToonBeforeDrawCallback, ToonFrameCamera, ToonInstanceBuffer, ToonProgramKind, ToonProgramSources, ToonTextureOptions, TOON_MAXIMUM_MATERIAL_TEXTURES};
+pub use crate::graphics3d::toon::toonlightset::{ToonLightModel, ToonLightSet, ToonPointLight, ToonRimLight, ToonShade, ToonShadeRamp, ToonSpecular, TOON_MAXIMUM_BAND_STEPS, TOON_MAXIMUM_POINT_LIGHTS};
+pub use crate::graphics3d::toon::toonmaterial::{ToonBlendMode, ToonBufferUsage, ToonMatcapBlend, ToonInstanceAttribute, ToonInstanceLayout, ToonMaterial, ToonMaterialChunks, TOON_FIRST_INSTANCE_ATTRIBUTE_LOCATION, TOON_INSTANCE_MATRIX_NAME, TOON_INSTANCE_TINT_NAME, TOON_MAXIMUM_INSTANCE_ATTRIBUTES};
+pub use crate::graphics3d::toon::toonrenderer::{compose_toon_program_sources, create_reflection_matrix, read_frame_camera, read_matrix_determinant, read_outline_vertex_data, read_view_rotation, ToonBeforeDrawCallback, ToonFrameCamera, ToonInstanceBuffer, ToonProgramKind, ToonProgramSources, ToonTextureOptions, TOON_MAXIMUM_MATERIAL_TEXTURES};
 pub use crate::graphics3d::toon::toondrawqueue::{ToonDrawStage, ToonPassCallback};
 pub use crate::graphics3d::toon::meshbuilder::ToonMaterialRange;
 pub use crate::graphics3d::toon::glbmeshreader::{decode_glb_image, read_glb_images, ToonGlbImage};

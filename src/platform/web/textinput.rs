@@ -1,18 +1,22 @@
 //==============================================================================
-// 웹 글 입력. (숨긴 DOM <input> → 엔진 글 입력 줄, DOM 문맥 메뉴, 캔버스 모드 키, 클립보드)
-// - 원본 UIInputField 의 DOM 쪽을 옮긴 것이다. 원본은 필드가 자기 <input> 을 만들고 리스너를 단다.
-//   러스트 판은 필드가 프레임마다 상태(자리, 값, 선택, 포커스)를 엔진에 올리고, 여기서 attach 한 DOM 입력 필드마다 숨긴 <input> 을 하나씩 맞춘다.
-//   - 값과 선택은 DOM 이 주인이다. input / compositionstart / compositionupdate / compositionend / Enter keydown / focus / blur 를
-//     그 필드 id 로 글 입력 줄에 넣고(replaceValue, 조합, 포커스), 화살표 같은 네이티브 이동은 프레임마다 선택을 폴링해 넣는다. (원본 tick)
-//   - 필드 쪽에서 값이나 커서를 바꾸면(set_text, 누른 자리, 잘라내기) 상태의 value_revision 이 늘고, 여기서 <input> 에 다시 쓴다. (조합 중엔 미룬다)
-//   - iOS 는 사용자 제스처 안에서 focus() 해야 키보드가 뜬다. 원본처럼 캔버스 touchstart / mousedown(설정하면 touchend)에 동기 핸들러를 달아
-//     지난 프레임 필드 자리로 맞춰 보고 그 자리에서 focus / blur 한다.
-//   - 오른쪽 단추 문맥 메뉴는 원본과 같은 모양의 DOM 메뉴다. 항목은 그 필드에 잘라내기 / 복사 키나 붙여 넣을 글로 넣는다.
-//   - use_dominput 이 꺼진 필드는 원본 캔버스 모드처럼 window keydown 을 편집 키와 글자로 바꿔 넣는다.
-// - DOM 이벤트 리스너는 엔진을 빌리지 않는다. 대기 줄(PENDING_EVENT_LIST)에 넣고 다음 프레임 시작에 엔진으로 옮긴다.
-//   (apply_frame 이 부르는 focus() 가 그 자리에서 focus / blur 이벤트를 부르기 때문)
-// - 원본과 다른 것: 숨긴 <input> 은 필드가 tick 을 도는 동안만 있다. (노드를 끄거나 지우면 함께 빠진다) setTimeout 으로 미루는 커서 옮기기와
-//   메뉴 닫기 리스너는 원본과 같다.
+//! 웹 글 입력. (숨긴 DOM <input> → 엔진 글 입력 줄, DOM 문맥 메뉴, 캔버스 모드 키, 클립보드)
+//! - 원본 UIInputField 의 DOM 쪽을 옮긴 것이다. 원본은 필드가 자기 <input> 을 만들고 리스너를 단다.
+//!   러스트 판은 필드가 프레임마다 상태(자리, 값, 선택, 포커스)를 엔진에 올리고, 여기서 attach 한 DOM 입력 필드마다 숨긴 <input> 을 하나씩 맞춘다.
+//!   - 값과 선택은 DOM 이 주인이다. input / compositionstart / compositionupdate / compositionend / Enter keydown / focus / blur 를
+//!   ```text
+//!     그 필드 id 로 글 입력 줄에 넣고(replaceValue, 조합, 포커스), 화살표 같은 네이티브 이동은 프레임마다 선택을 폴링해 넣는다. (원본 tick)
+//!   ```
+//!   - 필드 쪽에서 값이나 커서를 바꾸면(set_text, 누른 자리, 잘라내기) 상태의 value_revision 이 늘고, 여기서 <input> 에 다시 쓴다. (조합 중엔 미룬다)
+//!   - iOS 는 사용자 제스처 안에서 focus() 해야 키보드가 뜬다. 원본처럼 캔버스 touchstart / mousedown(설정하면 touchend)에 동기 핸들러를 달아
+//!   ```text
+//!     지난 프레임 필드 자리로 맞춰 보고 그 자리에서 focus / blur 한다.
+//!   ```
+//!   - 오른쪽 단추 문맥 메뉴는 원본과 같은 모양의 DOM 메뉴다. 항목은 그 필드에 잘라내기 / 복사 키나 붙여 넣을 글로 넣는다.
+//!   - use_dominput 이 꺼진 필드는 원본 캔버스 모드처럼 window keydown 을 편집 키와 글자로 바꿔 넣는다.
+//! - DOM 이벤트 리스너는 엔진을 빌리지 않는다. 대기 줄(PENDING_EVENT_LIST)에 넣고 다음 프레임 시작에 엔진으로 옮긴다.
+//!   (apply_frame 이 부르는 focus() 가 그 자리에서 focus / blur 이벤트를 부르기 때문)
+//! - 원본과 다른 것: 숨긴 <input> 은 필드가 tick 을 도는 동안만 있다. (노드를 끄거나 지우면 함께 빠진다) setTimeout 으로 미루는 커서 옮기기와
+//!   메뉴 닫기 리스너는 원본과 같다.
 //==============================================================================
 use crate::core::engine::Engine;
 use crate::core::textinput::{convert_character_index_to_utf16_index, convert_utf16_index_to_character_index, TextInputEvent, TextInputEventKind, TextInputFieldState, TextInputKey};
@@ -22,13 +26,13 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
 
 //==============================================================================
-// 전역 상수 목록.
+/// 전역 상수 목록.
 //==============================================================================
-// 숨긴 <input> 의 클래스 이름. (원본과 같음)
+/// 숨긴 <input> 의 클래스 이름. (원본과 같음)
 const HIDDEN_INPUT_CLASS_NAME: &str = "uiinputfield-hidden";
-// 한 번만 넣는 전역 스타일 id. (원본 GLOBAL_STYLE_ID)
+/// 한 번만 넣는 전역 스타일 id. (원본 GLOBAL_STYLE_ID)
 const GLOBAL_STYLE_ID: &str = "uiinputfield-hidden-style";
-// 숨긴 <input> 의 선택, 안내 글, 자동 완성 색을 지우는 스타일. (원본 ensure_global_hidden_input_style)
+/// 숨긴 <input> 의 선택, 안내 글, 자동 완성 색을 지우는 스타일. (원본 ensure_global_hidden_input_style)
 const GLOBAL_STYLE_TEXT: &str = "
 input.uiinputfield-hidden::selection { background: transparent; color: transparent; }
 textarea.uiinputfield-hidden::selection { background: transparent; color: transparent; }
@@ -43,7 +47,7 @@ input.uiinputfield-hidden:-webkit-autofill,
 input.uiinputfield-hidden:-webkit-autofill:hover,
 input.uiinputfield-hidden:-webkit-autofill:focus { -webkit-text-fill-color: transparent !important; transition: background-color 9999s ease-in-out 0s; }
 ";
-// 숨긴 <input> 의 처음 스타일. (원본 attachDOMInput)
+/// 숨긴 <input> 의 처음 스타일. (원본 attachDOMInput)
 const HIDDEN_INPUT_STYLE_LIST: [(&str, &str); 20] = [
 	("position", "absolute"),
 	("left", "-9999px"),
@@ -67,7 +71,7 @@ const HIDDEN_INPUT_STYLE_LIST: [(&str, &str); 20] = [
 	// iOS 줌인 방지.
 	("font-size", "16px"),
 ];
-// 문맥 메뉴 스타일. (원본 show_context_menu)
+/// 문맥 메뉴 스타일. (원본 show_context_menu)
 const CONTEXT_MENU_STYLE_LIST: [(&str, &str); 12] = [
 	("position", "absolute"),
 	("z-index", "10000"),
@@ -83,11 +87,11 @@ const CONTEXT_MENU_STYLE_LIST: [(&str, &str); 12] = [
 	("user-select", "none"),
 ];
 
-// DOM 이벤트 리스너.
+/// DOM 이벤트 리스너.
 type EventListener = Closure<dyn FnMut(web_sys::Event)>;
 
 //==============================================================================
-// 필드 하나의 숨긴 <input>.
+/// 필드 하나의 숨긴 <input>.
 //==============================================================================
 struct HiddenInputEntry {
 	field_id: u64,
@@ -216,7 +220,7 @@ impl HiddenTextElement {
 }
 
 //==============================================================================
-// 열린 DOM 문맥 메뉴.
+/// 열린 DOM 문맥 메뉴.
 //==============================================================================
 struct WebContextMenu {
 	menu_serial: u64,
@@ -227,7 +231,7 @@ struct WebContextMenu {
 }
 
 //==============================================================================
-// 웹 글 입력 상태.
+/// 웹 글 입력 상태.
 //==============================================================================
 struct WebTextInputState {
 	canvas: Option<web_sys::HtmlCanvasElement>,
@@ -238,7 +242,7 @@ struct WebTextInputState {
 }
 
 thread_local! {
-	// 웹 글 입력 상태. (apply_frame 과 캔버스 핸들러가 쓴다. DOM 의 focus / blur 를 부르는 동안에는 빌리지 않는다)
+	/// 웹 글 입력 상태. (apply_frame 과 캔버스 핸들러가 쓴다. DOM 의 focus / blur 를 부르는 동안에는 빌리지 않는다)
 	static WEB_TEXT_INPUT: RefCell<WebTextInputState> = const { RefCell::new(WebTextInputState {
 		canvas: None,
 		entry_list: Vec::new(),
@@ -246,18 +250,18 @@ thread_local! {
 		is_canvas_keyboard_focused: false,
 		permanent_listener_list: Vec::new(),
 	}) };
-	// 리스너가 넣는 대기 줄. (다음 프레임 시작에 엔진 글 입력 줄로 옮긴다)
+	/// 리스너가 넣는 대기 줄. (다음 프레임 시작에 엔진 글 입력 줄로 옮긴다)
 	static PENDING_EVENT_LIST: RefCell<Vec<TextInputEvent>> = const { RefCell::new(Vec::new()) };
-	// 열린 문맥 메뉴.
+	/// 열린 문맥 메뉴.
 	static CONTEXT_MENU: RefCell<Option<WebContextMenu>> = const { RefCell::new(None) };
-	// 다 쓴 리스너. (불리는 중에 버리지 않게 다음 프레임에 버린다)
+	/// 다 쓴 리스너. (불리는 중에 버리지 않게 다음 프레임에 버린다)
 	static DISPOSED_LISTENER_LIST: RefCell<Vec<EventListener>> = const { RefCell::new(Vec::new()) };
-	// 문맥 메뉴 번호.
+	/// 문맥 메뉴 번호.
 	static NEXT_MENU_SERIAL: Cell<u64> = const { Cell::new(1) };
 }
 
 //==============================================================================
-// 대기 줄에 이벤트 넣기.
+/// 대기 줄에 이벤트 넣기.
 //==============================================================================
 fn push_pending_event(target_field_id: u64, kind: TextInputEventKind) {
 	PENDING_EVENT_LIST.with(|pending_event_cell| {
@@ -271,21 +275,21 @@ fn push_pending_event(target_field_id: u64, kind: TextInputEventKind) {
 }
 
 //==============================================================================
-// 자바스크립트 오류를 글로.
+/// 자바스크립트 오류를 글로.
 //==============================================================================
 fn describe_js_error(error: JsValue) -> String {
 	format!("{:?}", error)
 }
 
 //==============================================================================
-// 문서.
+/// 문서.
 //==============================================================================
 fn get_document() -> Option<web_sys::Document> {
 	web_sys::window().and_then(|window| window.document())
 }
 
 //==============================================================================
-// 요소가 지금 포커스를 가졌는지.
+/// 요소가 지금 포커스를 가졌는지.
 //==============================================================================
 fn is_active_element(element: &web_sys::Element) -> bool {
 	match get_document().and_then(|document| document.active_element()) {
@@ -299,7 +303,7 @@ fn is_active_element(element: &web_sys::Element) -> bool {
 }
 
 //==============================================================================
-// <input> 의 선택. (문자 자리, 앞 뒤)
+/// <input> 의 선택. (문자 자리, 앞 뒤)
 //==============================================================================
 fn read_input_selection(input_element: &HiddenTextElement) -> Option<(usize, usize)> {
 	let value = input_element.value();
@@ -309,7 +313,7 @@ fn read_input_selection(input_element: &HiddenTextElement) -> Option<(usize, usi
 }
 
 //==============================================================================
-// <input> 의 값 바뀜 이벤트 만들기. (원본 handleDOMInputEvent 에 넘기는 값과 커서)
+/// <input> 의 값 바뀜 이벤트 만들기. (원본 handleDOMInputEvent 에 넘기는 값과 커서)
 //==============================================================================
 fn build_replace_value_event(input_element: &HiddenTextElement) -> TextInputEventKind {
 	let value = input_element.value();
@@ -323,7 +327,7 @@ fn build_replace_value_event(input_element: &HiddenTextElement) -> TextInputEven
 }
 
 //==============================================================================
-// 이 페이지에 사용자 활성화가 한 번이라도 있었는지. (navigator.user_activation 이 없으면 있었던 것으로 본다)
+/// 이 페이지에 사용자 활성화가 한 번이라도 있었는지. (navigator.user_activation 이 없으면 있었던 것으로 본다)
 //==============================================================================
 fn has_sticky_user_activation() -> bool {
 	let navigator = match web_sys::window() {
@@ -342,7 +346,7 @@ fn has_sticky_user_activation() -> bool {
 }
 
 //==============================================================================
-// 0 ms 뒤에 한 번 부르기. (원본 setTimeout(..., 0))
+/// 0 ms 뒤에 한 번 부르기. (원본 setTimeout(..., 0))
 //==============================================================================
 fn run_after_timeout(action: impl FnOnce() + 'static) {
 	let callback = Closure::once_into_js(action);
@@ -352,7 +356,7 @@ fn run_after_timeout(action: impl FnOnce() + 'static) {
 }
 
 //==============================================================================
-// navigator.clipboard. (없으면 None)
+/// navigator.clipboard. (없으면 None)
 //==============================================================================
 fn get_navigator_clipboard() -> Option<JsValue> {
 	let navigator = web_sys::window()?.navigator();
@@ -364,7 +368,7 @@ fn get_navigator_clipboard() -> Option<JsValue> {
 }
 
 //==============================================================================
-// navigator.clipboard 의 함수 부르기. (Promise 를 돌려준다)
+/// navigator.clipboard 의 함수 부르기. (Promise 를 돌려준다)
 //==============================================================================
 fn call_clipboard_function(function_name: &str, argument_list: &js_sys::Array) -> Option<js_sys::Promise> {
 	let clipboard = get_navigator_clipboard()?;
@@ -374,7 +378,7 @@ fn call_clipboard_function(function_name: &str, argument_list: &js_sys::Array) -
 }
 
 //==============================================================================
-// 시스템 클립보드에 글 쓰기. (navigator.clipboard.writeText, 실패는 무시. 원본 writeClipboard)
+/// 시스템 클립보드에 글 쓰기. (navigator.clipboard.writeText, 실패는 무시. 원본 writeClipboard)
 //==============================================================================
 pub fn write_clipboard_text(text: &str) {
 	let argument_list = js_sys::Array::of1(&JsValue::from_str(text));
@@ -386,14 +390,14 @@ pub fn write_clipboard_text(text: &str) {
 }
 
 //==============================================================================
-// 시스템 클립보드 글 읽기. (웹은 비동기라 그 자리에서 읽지 못한다. read_clipboard_text_with_callback 이나 request_clipboard_paste 로 읽는다)
+/// 시스템 클립보드 글 읽기. (웹은 비동기라 그 자리에서 읽지 못한다. read_clipboard_text_with_callback 이나 request_clipboard_paste 로 읽는다)
 //==============================================================================
 pub fn read_clipboard_text() -> Option<String> {
 	None
 }
 
 //==============================================================================
-// 시스템 클립보드 글을 비동기로 읽어 콜백에 넘기기. (원본 readClipboard 의 navigator.clipboard.readText().then, 못 읽거나 거부되면 빈 글)
+/// 시스템 클립보드 글을 비동기로 읽어 콜백에 넘기기. (원본 readClipboard 의 navigator.clipboard.readText().then, 못 읽거나 거부되면 빈 글)
 //==============================================================================
 pub fn read_clipboard_text_with_callback(callback: Box<dyn FnOnce(String)>) {
 	read_optional_clipboard_text_with_callback(Box::new(move |text: Option<String>| {
@@ -402,7 +406,7 @@ pub fn read_clipboard_text_with_callback(callback: Box<dyn FnOnce(String)>) {
 }
 
 //==============================================================================
-// 시스템 클립보드 글을 비동기로 읽어 콜백에 넘기기. (원본 engine.readClipboardText, 클립보드가 없거나 거부되면 원본 null 자리의 None)
+/// 시스템 클립보드 글을 비동기로 읽어 콜백에 넘기기. (원본 engine.readClipboardText, 클립보드가 없거나 거부되면 원본 null 자리의 None)
 //==============================================================================
 pub fn read_optional_clipboard_text_with_callback(callback: Box<dyn FnOnce(Option<String>)>) {
 	let promise = match call_clipboard_function("readText", &js_sys::Array::new()) {
@@ -428,7 +432,7 @@ pub fn read_optional_clipboard_text_with_callback(callback: Box<dyn FnOnce(Optio
 }
 
 //==============================================================================
-// 클립보드를 비동기로 읽어 그 필드에 붙여 넣을 글로 넣기. (원본 paste 의 readClipboard().then, UIInputField.paste 와 문맥 메뉴, 단축키가 부른다)
+/// 클립보드를 비동기로 읽어 그 필드에 붙여 넣을 글로 넣기. (원본 paste 의 readClipboard().then, UIInputField.paste 와 문맥 메뉴, 단축키가 부른다)
 //==============================================================================
 pub(crate) fn request_clipboard_paste(target_field_id: u64) {
 	let promise = match call_clipboard_function("readText", &js_sys::Array::new()) {
@@ -451,7 +455,7 @@ pub(crate) fn request_clipboard_paste(target_field_id: u64) {
 }
 
 //==============================================================================
-// 리스너 달기. (시작할 때. 캔버스 누름 / 문맥 메뉴, window keydown, 전역 스타일)
+/// 리스너 달기. (시작할 때. 캔버스 누름 / 문맥 메뉴, window keydown, 전역 스타일)
 //==============================================================================
 pub(super) fn add_text_input_listeners(canvas: &web_sys::HtmlCanvasElement) -> Result<(), String> {
 	let window = web_sys::window().ok_or_else(|| String::from("window 없음"))?;
@@ -484,7 +488,7 @@ pub(super) fn add_text_input_listeners(canvas: &web_sys::HtmlCanvasElement) -> R
 }
 
 //==============================================================================
-// 전역 스타일 한 번 넣기. (원본 ensure_global_hidden_input_style)
+/// 전역 스타일 한 번 넣기. (원본 ensure_global_hidden_input_style)
 //==============================================================================
 fn ensure_global_hidden_input_style() -> Result<(), String> {
 	let document = get_document().ok_or_else(|| String::from("document 없음"))?;
@@ -500,7 +504,7 @@ fn ensure_global_hidden_input_style() -> Result<(), String> {
 }
 
 //==============================================================================
-// 프레임 시작. (대기 줄을 엔진으로 옮기고, 포커스를 가진 <input> 의 선택을 폴링한다. 원본 tick 의 selection 폴링)
+/// 프레임 시작. (대기 줄을 엔진으로 옮기고, 포커스를 가진 <input> 의 선택을 폴링한다. 원본 tick 의 selection 폴링)
 //==============================================================================
 pub(super) fn begin_frame(engine: &mut Engine) {
 	DISPOSED_LISTENER_LIST.with(|disposed_cell| {
@@ -552,7 +556,7 @@ pub(super) fn begin_frame(engine: &mut Engine) {
 }
 
 //==============================================================================
-// 프레임 끝. (지난 프레임 필드 상태로 숨긴 <input> 을 만들고, 옮기고, 값과 포커스를 맞춘다. 원본 layoutDOMInput)
+/// 프레임 끝. (지난 프레임 필드 상태로 숨긴 <input> 을 만들고, 옮기고, 값과 포커스를 맞춘다. 원본 layoutDOMInput)
 //==============================================================================
 pub(super) fn apply_frame(engine: &Engine) {
 	let field_state_list = engine.get_input_manager().get_text_input().get_published_field_states().to_vec();
@@ -633,7 +637,7 @@ pub(super) fn apply_frame(engine: &Engine) {
 }
 
 //==============================================================================
-// 필드 상태를 숨긴 <input> 에 적용. (자리, 누름 받기, 최대 길이, 필드 쪽에서 바꾼 값과 선택, 포커스 바뀜)
+/// 필드 상태를 숨긴 <input> 에 적용. (자리, 누름 받기, 최대 길이, 필드 쪽에서 바꾼 값과 선택, 포커스 바뀜)
 //==============================================================================
 fn apply_field_state_to_entry(entry: &mut HiddenInputEntry, field_state: &TextInputFieldState, canvas_rect: &web_sys::DomRect, focus_action_list: &mut Vec<(HiddenTextElement, bool)>) {
 	let input_style = entry.input_element.style();
@@ -692,7 +696,7 @@ fn apply_field_state_to_entry(entry: &mut HiddenInputEntry, field_state: &TextIn
 }
 
 //==============================================================================
-// 숨긴 <input> 만들기. (원본 attachDOMInput)
+/// 숨긴 <input> 만들기. (원본 attachDOMInput)
 //==============================================================================
 fn create_hidden_input_entry(field_state: &TextInputFieldState) -> Result<HiddenInputEntry, String> {
 	let document = get_document().ok_or_else(|| String::from("document 없음"))?;
@@ -814,7 +818,7 @@ fn create_hidden_input_entry(field_state: &TextInputFieldState) -> Result<Hidden
 }
 
 //==============================================================================
-// 숨긴 <textarea> 에서 필드가 옮길 이동 키. (위아래, page, 줄 앞과 끝, 글 앞과 끝. 블링크 키 표와 맥 키 묶음, 데스크탑과 같다)
+/// 숨긴 <textarea> 에서 필드가 옮길 이동 키. (위아래, page, 줄 앞과 끝, 글 앞과 끝. 블링크 키 표와 맥 키 묶음, 데스크탑과 같다)
 //==============================================================================
 fn translate_text_area_movement_key(keyboard_event: &web_sys::KeyboardEvent) -> Option<TextInputKey> {
 	let is_mac = is_mac_platform();
@@ -865,14 +869,14 @@ fn translate_text_area_movement_key(keyboard_event: &web_sys::KeyboardEvent) -> 
 }
 
 //==============================================================================
-// 맥인지. (navigator.platform 이 Mac 으로 시작)
+/// 맥인지. (navigator.platform 이 Mac 으로 시작)
 //==============================================================================
 fn is_mac_platform() -> bool {
 	web_sys::window().and_then(|window| window.navigator().platform().ok()).map(|platform| platform.starts_with("Mac")).unwrap_or(false)
 }
 
 //==============================================================================
-// 숨긴 <input> 빼기. (리스너를 먼저 떼서 빼는 동안의 blur 가 오지 않게 한다. 원본 detachDOMInput)
+/// 숨긴 <input> 빼기. (리스너를 먼저 떼서 빼는 동안의 blur 가 오지 않게 한다. 원본 detachDOMInput)
 //==============================================================================
 fn remove_hidden_input_entry(entry: HiddenInputEntry) {
 	for (event_name, listener) in entry.listener_list.iter() {
@@ -884,7 +888,7 @@ fn remove_hidden_input_entry(entry: HiddenInputEntry) {
 }
 
 //==============================================================================
-// 다 쓴 리스너 버리기. (다음 프레임 시작에 버린다)
+/// 다 쓴 리스너 버리기. (다음 프레임 시작에 버린다)
 //==============================================================================
 fn dispose_listeners(listener_list: Vec<EventListener>) {
 	DISPOSED_LISTENER_LIST.with(|disposed_cell| {
@@ -895,7 +899,7 @@ fn dispose_listeners(listener_list: Vec<EventListener>) {
 }
 
 //==============================================================================
-// 포인터 이벤트의 화면 좌표. (터치면 바뀐 첫 손가락)
+/// 포인터 이벤트의 화면 좌표. (터치면 바뀐 첫 손가락)
 //==============================================================================
 fn read_client_position(event: &web_sys::Event) -> Option<(f64, f64)> {
 	if let Some(touch_event) = event.dyn_ref::<web_sys::TouchEvent>() {
@@ -907,7 +911,7 @@ fn read_client_position(event: &web_sys::Event) -> Option<(f64, f64)> {
 }
 
 //==============================================================================
-// 화면 좌표 아래 맨 위의 보이는 필드 상태. (DOM 입력 필드만 보려면 is_dom_input_only)
+/// 화면 좌표 아래 맨 위의 보이는 필드 상태. (DOM 입력 필드만 보려면 is_dom_input_only)
 //==============================================================================
 fn find_field_state_at_client_position(web_text_input_state: &WebTextInputState, client_x: f64, client_y: f64, is_dom_input_only: bool) -> Option<TextInputFieldState> {
 	let canvas_rect = web_text_input_state.canvas.as_ref()?.get_bounding_client_rect();
@@ -921,9 +925,9 @@ fn find_field_state_at_client_position(web_text_input_state: &WebTextInputState,
 }
 
 //==============================================================================
-// 캔버스 누름 처리. (원본 canvasFocusHandler)
-// - 필드 안: 그 자리에서 focus. touchend 는 set_use_touch_end_focus 를 켠 필드만, 활성화 없이 얻은 포커스면 blur 뒤 다시 focus.
-// - 필드 밖(누를 때만): 포커스를 가진 <input> 을 blur.
+/// 캔버스 누름 처리. (원본 canvasFocusHandler)
+/// - 필드 안: 그 자리에서 focus. touchend 는 set_use_touch_end_focus 를 켠 필드만, 활성화 없이 얻은 포커스면 blur 뒤 다시 focus.
+/// - 필드 밖(누를 때만): 포커스를 가진 <input> 을 blur.
 //==============================================================================
 fn handle_canvas_pointer(event: web_sys::Event) {
 	let is_release = event.type_() == "touchend";
@@ -977,7 +981,7 @@ fn handle_canvas_pointer(event: web_sys::Event) {
 }
 
 //==============================================================================
-// 캔버스 문맥 메뉴 처리. (필드 위면 브라우저 메뉴를 막고 포커스를 준 뒤 DOM 메뉴를 연다. 원본 handleContextMenuEvent)
+/// 캔버스 문맥 메뉴 처리. (필드 위면 브라우저 메뉴를 막고 포커스를 준 뒤 DOM 메뉴를 연다. 원본 handleContextMenuEvent)
 //==============================================================================
 fn handle_canvas_context_menu(event: web_sys::Event) {
 	let (client_x, client_y) = match read_client_position(&event) {
@@ -1023,7 +1027,7 @@ fn handle_canvas_context_menu(event: web_sys::Event) {
 }
 
 //==============================================================================
-// DOM 문맥 메뉴 열기. (잘라내기 / 복사 / 붙여넣기. 원본 show_context_menu)
+/// DOM 문맥 메뉴 열기. (잘라내기 / 복사 / 붙여넣기. 원본 show_context_menu)
 //==============================================================================
 fn show_context_menu(field_id: u64, has_selection: bool, client_x: f64, client_y: f64) -> Result<(), String> {
 	hide_context_menu();
@@ -1120,7 +1124,7 @@ fn show_context_menu(field_id: u64, has_selection: bool, client_x: f64, client_y
 }
 
 //==============================================================================
-// 메뉴 밖 누름 리스너 달기. (그 사이 메뉴가 바뀌었으면 달지 않는다)
+/// 메뉴 밖 누름 리스너 달기. (그 사이 메뉴가 바뀌었으면 달지 않는다)
 //==============================================================================
 fn add_context_menu_dismiss_listener(menu_serial: u64) {
 	let document = match get_document() {
@@ -1161,7 +1165,7 @@ fn add_context_menu_dismiss_listener(menu_serial: u64) {
 }
 
 //==============================================================================
-// DOM 문맥 메뉴 닫기. (원본 hide_context_menu. 리스너는 다음 프레임에 버린다)
+/// DOM 문맥 메뉴 닫기. (원본 hide_context_menu. 리스너는 다음 프레임에 버린다)
 //==============================================================================
 fn hide_context_menu() {
 	let context_menu = CONTEXT_MENU.with(|menu_cell| menu_cell.borrow_mut().take());
@@ -1185,7 +1189,7 @@ fn hide_context_menu() {
 }
 
 //==============================================================================
-// 캔버스 모드 키 처리. (use_dominput 이 꺼진 필드가 포커스를 가졌을 때만. 원본 handleCanvasKeydown)
+/// 캔버스 모드 키 처리. (use_dominput 이 꺼진 필드가 포커스를 가졌을 때만. 원본 handleCanvasKeydown)
 //==============================================================================
 fn handle_canvas_key_down(event: web_sys::Event) {
 	let keyboard_event = match event.dyn_ref::<web_sys::KeyboardEvent>() {

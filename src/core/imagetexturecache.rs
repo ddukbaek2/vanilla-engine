@@ -1,10 +1,10 @@
 //==============================================================================
-// 이미지 텍스처 캐시.
-// - 원본은 WeakMap<image, texture> 로 원본 이미지가 수거되면 텍스처도 같이 사라진다.
-// - 여기서는 Weak<Image> 를 들고, sweep() 이 원본이 사라진 텍스처를 지운다.
-// - 올린 뒤에는 이미지의 CPU 픽셀을 놓는다. (Image.set_pixels_retained 로 남기게 한 그림은 둔다)
-// - 놓은 픽셀이 다시 필요하면(Canvas2D 의 drawImage, createPattern) 그림이 기억한 텍스처를 GPU 에서 되읽는다. (restore_image_pixels_from_texture)
-//   크롬이 GPU 에 있는 그림을 CPU 캔버스에 그릴 때 텍스처를 되읽는 것과 같은 길이다. 되읽을 GL 컨텍스트는 Graphic 이 만들 때 건다.
+//! 이미지 텍스처 캐시.
+//! - 원본은 `WeakMap<image, texture>` 로 원본 이미지가 수거되면 텍스처도 같이 사라진다.
+//! - 여기서는 `Weak<Image>` 를 들고, sweep() 이 원본이 사라진 텍스처를 지운다.
+//! - 올린 뒤에는 이미지의 CPU 픽셀을 놓는다. (Image.set_pixels_retained 로 남기게 한 그림은 둔다)
+//! - 놓은 픽셀이 다시 필요하면(Canvas2D 의 drawImage, createPattern) 그림이 기억한 텍스처를 GPU 에서 되읽는다. (restore_image_pixels_from_texture)
+//!   크롬이 GPU 에 있는 그림을 CPU 캔버스에 그릴 때 텍스처를 되읽는 것과 같은 길이다. 되읽을 GL 컨텍스트는 Graphic 이 만들 때 건다.
 //==============================================================================
 use crate::core::graphic::GlTexture;
 use crate::core::image::Image;
@@ -100,7 +100,7 @@ pub struct ImageTextureCache {
 
 impl ImageTextureCache {
 	//==============================================================================
-	// 생성.
+	/// 생성.
 	//==============================================================================
 	pub fn new() -> ImageTextureCache {
 		ImageTextureCache {
@@ -109,7 +109,7 @@ impl ImageTextureCache {
 	}
 
 	//==============================================================================
-	// 이미 올라가 있고 필터 설정도 같은 텍스처 찾기. (GL 을 건드리지 않는다, 없으면 None)
+	/// 이미 올라가 있고 필터 설정도 같은 텍스처 찾기. (GL 을 건드리지 않는다, 없으면 None)
 	//==============================================================================
 	pub(crate) fn find_texture(&self, image: &Image, is_smoothing: bool, is_mipmap: bool) -> Option<crate::core::graphic::GlTexture> {
 		let entry = self.entry_table.get(&image.get_instance_id())?;
@@ -120,14 +120,14 @@ impl ImageTextureCache {
 	}
 
 	//==============================================================================
-	// 이미 올라가 있는 텍스처 찾기. (필터 설정은 보지 않는다, GL 을 건드리지 않는다)
+	/// 이미 올라가 있는 텍스처 찾기. (필터 설정은 보지 않는다, GL 을 건드리지 않는다)
 	//==============================================================================
 	pub(crate) fn find_uploaded_texture(&self, image: &Image) -> Option<crate::core::graphic::GlTexture> {
 		self.entry_table.get(&image.get_instance_id()).map(|entry| entry.texture)
 	}
 
 	//==============================================================================
-	// 이미지의 텍스처 반환. (없으면 올리고 CPU 픽셀을 놓는다, 필터 설정이 바뀌었으면 다시 건다)
+	/// 이미지의 텍스처 반환. (없으면 올리고 CPU 픽셀을 놓는다, 필터 설정이 바뀌었으면 다시 건다)
 	//==============================================================================
 	pub fn get_texture(&mut self, gl: &glow::Context, image: &Rc<Image>, is_smoothing: bool, is_mipmap: bool) -> Option<crate::core::graphic::GlTexture> {
 		let instance_id = image.get_instance_id();
@@ -177,7 +177,7 @@ impl ImageTextureCache {
 	}
 
 	//==============================================================================
-	// 원본 이미지가 사라진 텍스처 지우기.
+	/// 원본 이미지가 사라진 텍스처 지우기.
 	//==============================================================================
 	pub fn sweep(&mut self, gl: &glow::Context) {
 		self.entry_table.retain(|_, entry| {
@@ -192,7 +192,7 @@ impl ImageTextureCache {
 	}
 
 	//==============================================================================
-	// 올라가 있는 텍스처 수.
+	/// 올라가 있는 텍스처 수.
 	//==============================================================================
 	pub fn get_texture_count(&self) -> usize {
 		self.entry_table.len()
@@ -206,7 +206,7 @@ impl Default for ImageTextureCache {
 }
 
 //==============================================================================
-// 텍스처 필터 적용. (스무딩 끄면 도트가 또렷한 NEAREST)
+/// 텍스처 필터 적용. (스무딩 끄면 도트가 또렷한 NEAREST)
 //==============================================================================
 unsafe fn apply_filter(gl: &glow::Context, is_smoothing: bool, is_mipmap: bool) {
 	let magnify_filter = if is_smoothing {

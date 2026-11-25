@@ -1,18 +1,24 @@
 //==============================================================================
-// 윈도우 터치 키보드. (platform/desktop.rs 가 부른다)
-// - 크롬 윈도우가 하는 것을 옮겼다.
-//   (content/browser/renderer_host/virtual_keyboard_controller_win.cc, ui/base/ime/win/on_screen_keyboard_display_manager_input_pane.cc,
-//   ui/base/ime/win/virtual_keyboard_debounce_timer.cc, content/browser/renderer_host/render_widget_host_view_aura.cc)
-//   - 띄우기: 글자 입력칸에 포커스가 가거나 포커스된 입력칸을 누를 때, 마지막 포인터가 손가락이나 펜이면 터치 키보드를 띄운다.
-//     (VirtualKeyboardControllerWin::UpdateTextInputState 의 IsPointerTypeValidForVirtualKeyboard 와 show_ime_if_needed)
-//   - 내리기: 포커스가 글자 입력칸을 떠나면, 엔진이 띄운 키보드만 내린다. (FocusedNodeChanged(false) 의 HideVirtualKeyboard)
-//   - 띄우기와 내리기 요청은 300 밀리초로 고른다. 마지막 실행에서 300 밀리초가 지나야 마지막 요청 하나를 낸다. (VirtualKeyboardDebounceTimer(300))
-//   - 윈도우 10 RS4 부터의 InputPane(IInputPaneInterop::GetForWindow 로 창에 묶은 것)의 TryShow, TryHide 를 COM STA 스레드에서 부르고,
-//     Showing 에서 OccludedRect 를, Hiding 에서 빈 영역을 받는다. (크롬도 메시지를 돌리는 COM STA 작업 스레드에서 부른다)
-//   - 받은 가림 영역의 세로(DIP)를 visualViewport 아래 인셋으로 쓴다. (OnKeyboardVisible 의 SetInsets(0, 0, keyboard_rect.height(), 0),
-//     RenderWidgetHostViewAura::GetVisibleViewportSize 가 창 크기에서 인셋을 뺀다. 창 크기, innerHeight 는 그대로다)
-//   - 사용자가 키보드를 손으로 닫거나 열면 그 상태를 따른다. (OnKeyboardHidden, OnKeyboardVisible 이 virtual_keyboard_shown_ 을 바꾼다)
-// - 크롬의 navigator.virtualKeyboard.overlaysContent(키보드가 화면을 덮게 하는 웹 API)는 원본이 쓰지 않아 옮기지 않았다.
+//! 윈도우 터치 키보드. (platform/desktop.rs 가 부른다)
+//! - 크롬 윈도우가 하는 것을 옮겼다.
+//!   (content/browser/renderer_host/virtual_keyboard_controller_win.cc, ui/base/ime/win/on_screen_keyboard_display_manager_input_pane.cc,
+//!   ui/base/ime/win/virtual_keyboard_debounce_timer.cc, content/browser/renderer_host/render_widget_host_view_aura.cc)
+//!   - 띄우기: 글자 입력칸에 포커스가 가거나 포커스된 입력칸을 누를 때, 마지막 포인터가 손가락이나 펜이면 터치 키보드를 띄운다.
+//!   ```text
+//!     (VirtualKeyboardControllerWin::UpdateTextInputState 의 IsPointerTypeValidForVirtualKeyboard 와 show_ime_if_needed)
+//!   ```
+//!   - 내리기: 포커스가 글자 입력칸을 떠나면, 엔진이 띄운 키보드만 내린다. (FocusedNodeChanged(false) 의 HideVirtualKeyboard)
+//!   - 띄우기와 내리기 요청은 300 밀리초로 고른다. 마지막 실행에서 300 밀리초가 지나야 마지막 요청 하나를 낸다. (VirtualKeyboardDebounceTimer(300))
+//!   - 윈도우 10 RS4 부터의 InputPane(IInputPaneInterop::GetForWindow 로 창에 묶은 것)의 TryShow, TryHide 를 COM STA 스레드에서 부르고,
+//!   ```text
+//!     Showing 에서 OccludedRect 를, Hiding 에서 빈 영역을 받는다. (크롬도 메시지를 돌리는 COM STA 작업 스레드에서 부른다)
+//!   ```
+//!   - 받은 가림 영역의 세로(DIP)를 visualViewport 아래 인셋으로 쓴다. (OnKeyboardVisible 의 SetInsets(0, 0, keyboard_rect.height(), 0),
+//!   ```text
+//!     RenderWidgetHostViewAura::GetVisibleViewportSize 가 창 크기에서 인셋을 뺀다. 창 크기, innerHeight 는 그대로다)
+//!   ```
+//!   - 사용자가 키보드를 손으로 닫거나 열면 그 상태를 따른다. (OnKeyboardHidden, OnKeyboardVisible 이 virtual_keyboard_shown_ 을 바꾼다)
+//! - 크롬의 navigator.virtualKeyboard.overlaysContent(키보드가 화면을 덮게 하는 웹 API)는 원본이 쓰지 않아 옮기지 않았다.
 //==============================================================================
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc;
@@ -25,21 +31,21 @@ use windows_sys::Win32::Foundation::HWND;
 use windows_sys::Win32::System::Threading::GetCurrentThreadId;
 use windows_sys::Win32::UI::WindowsAndMessaging::{DispatchMessageW, GetMessageW, PeekMessageW, PostThreadMessageW, TranslateMessage, MSG, PM_NOREMOVE, WM_APP, WM_USER};
 
-// 띄우기와 내리기 요청을 고르는 시간. (크롬 OnScreenKeyboardDisplayManagerInputPane 의 VirtualKeyboardDebounceTimer(300))
+/// 띄우기와 내리기 요청을 고르는 시간. (크롬 OnScreenKeyboardDisplayManagerInputPane 의 VirtualKeyboardDebounceTimer(300))
 const DEBOUNCE_MILLISECONDS: u64 = 300;
-// 키보드 스레드에 보내는 띄우기, 내리기 메시지.
+/// 키보드 스레드에 보내는 띄우기, 내리기 메시지.
 const SHOW_MESSAGE: u32 = WM_APP + 0x5641;
 const HIDE_MESSAGE: u32 = WM_APP + 0x5642;
 
-// 키보드가 가린 영역의 세로. (DIP, f32 비트, Showing 과 Hiding 이 적는다)
+/// 키보드가 가린 영역의 세로. (DIP, f32 비트, Showing 과 Hiding 이 적는다)
 static OCCLUDED_HEIGHT_BITS: AtomicU32 = AtomicU32::new(0);
-// 키보드가 떠 있는지. (Showing 과 Hiding 이 적는다)
+/// 키보드가 떠 있는지. (Showing 과 Hiding 이 적는다)
 static IS_INPUT_PANE_VISIBLE: AtomicBool = AtomicBool::new(false);
-// Showing, Hiding 이 온 횟수. (주 스레드가 바뀐 것을 알아챈다)
+/// Showing, Hiding 이 온 횟수. (주 스레드가 바뀐 것을 알아챈다)
 static INPUT_PANE_EVENT_COUNT: AtomicU64 = AtomicU64::new(0);
 
 //==============================================================================
-// 띄우기, 내리기 요청.
+/// 띄우기, 내리기 요청.
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum VirtualKeyboardRequest {
@@ -48,27 +54,27 @@ enum VirtualKeyboardRequest {
 }
 
 //==============================================================================
-// 터치 키보드 제어. (주 스레드, 크롬 VirtualKeyboardControllerWin)
+/// 터치 키보드 제어. (주 스레드, 크롬 VirtualKeyboardControllerWin)
 //==============================================================================
 pub(super) struct VirtualKeyboardController {
 	window_handle: HWND,
-	// 키보드 스레드 번호. (처음 띄울 때 만든다)
+	/// 키보드 스레드 번호. (처음 띄울 때 만든다)
 	thread_id: Option<u32>,
-	// 고르는 중인 마지막 요청.
+	/// 고르는 중인 마지막 요청.
 	pending_request: Option<VirtualKeyboardRequest>,
-	// 마지막으로 요청을 낸 때.
+	/// 마지막으로 요청을 낸 때.
 	last_run_instant: Option<Instant>,
-	// 키보드를 띄운 것으로 보는지. (크롬 virtual_keyboard_shown_)
+	/// 키보드를 띄운 것으로 보는지. (크롬 virtual_keyboard_shown_)
 	is_virtual_keyboard_shown: bool,
-	// 지난 프레임에 포커스를 가진 글자 입력칸. (없으면 0)
+	/// 지난 프레임에 포커스를 가진 글자 입력칸. (없으면 0)
 	focused_field_id: u64,
-	// 마지막으로 본 Showing, Hiding 횟수.
+	/// 마지막으로 본 Showing, Hiding 횟수.
 	seen_event_count: u64,
 }
 
 impl VirtualKeyboardController {
 	//==============================================================================
-	// 생성. (winit 창의 HWND, 못 읽으면 None)
+	/// 생성. (winit 창의 HWND, 못 읽으면 None)
 	//==============================================================================
 	pub(super) fn new(window: &winit::window::Window) -> Option<VirtualKeyboardController> {
 		use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -92,7 +98,7 @@ impl VirtualKeyboardController {
 	}
 
 	//==============================================================================
-	// 프레임마다 부르기. (포커스를 가진 플랫폼 입력칸 번호(없으면 0), 지난 프레임 뒤에 그 입력칸을 손가락으로 눌렀는지, 마지막 장치가 손가락인지)
+	/// 프레임마다 부르기. (포커스를 가진 플랫폼 입력칸 번호(없으면 0), 지난 프레임 뒤에 그 입력칸을 손가락으로 눌렀는지, 마지막 장치가 손가락인지)
 	//==============================================================================
 	pub(super) fn update(&mut self, focused_field_id: u64, is_field_touched: bool, is_last_pointer_touch: bool) {
 		// 사용자가 손으로 열고 닫은 것을 따른다. (크롬 OnKeyboardVisible, OnKeyboardHidden)
@@ -119,7 +125,7 @@ impl VirtualKeyboardController {
 	}
 
 	//==============================================================================
-	// 고른 요청 내기. (마지막 실행에서 300 밀리초가 지났을 때 마지막 요청 하나)
+	/// 고른 요청 내기. (마지막 실행에서 300 밀리초가 지났을 때 마지막 요청 하나)
 	//==============================================================================
 	fn run_pending_request(&mut self) {
 		let request = match self.pending_request {
@@ -172,14 +178,14 @@ impl VirtualKeyboardController {
 }
 
 //==============================================================================
-// 키보드가 가린 영역의 세로. (DIP, 떠 있지 않으면 0, visualViewport 아래 인셋)
+/// 키보드가 가린 영역의 세로. (DIP, 떠 있지 않으면 0, visualViewport 아래 인셋)
 //==============================================================================
 pub(super) fn read_occluded_height() -> f32 {
 	f32::from_bits(OCCLUDED_HEIGHT_BITS.load(Ordering::Acquire))
 }
 
 //==============================================================================
-// 키보드 스레드 띄우기. (COM STA 를 열고 메시지를 돌리는 스레드, 메시지 큐가 생긴 뒤의 스레드 번호를 돌려준다)
+/// 키보드 스레드 띄우기. (COM STA 를 열고 메시지를 돌리는 스레드, 메시지 큐가 생긴 뒤의 스레드 번호를 돌려준다)
 //==============================================================================
 fn start_input_pane_thread(window_handle: HWND) -> Option<u32> {
 	let (thread_id_sender, thread_id_receiver) = mpsc::channel();
@@ -194,7 +200,7 @@ fn start_input_pane_thread(window_handle: HWND) -> Option<u32> {
 }
 
 //==============================================================================
-// 키보드 스레드. (띄우기, 내리기 메시지를 받아 InputPane 을 부르고, 그 밖의 메시지는 돌려 WinRT 이벤트가 오게 한다)
+/// 키보드 스레드. (띄우기, 내리기 메시지를 받아 InputPane 을 부르고, 그 밖의 메시지는 돌려 WinRT 이벤트가 오게 한다)
 //==============================================================================
 fn run_input_pane_thread(window_handle: HWND, thread_id_sender: mpsc::Sender<Option<u32>>) {
 	if let Err(error) = unsafe { RoInitialize(RO_INIT_SINGLETHREADED) } {
@@ -236,7 +242,7 @@ fn run_input_pane_thread(window_handle: HWND, thread_id_sender: mpsc::Sender<Opt
 }
 
 //==============================================================================
-// 창에 묶은 InputPane 만들기. (IInputPaneInterop::GetForWindow, Showing 과 Hiding 을 단다. 못 만들면 None)
+/// 창에 묶은 InputPane 만들기. (IInputPaneInterop::GetForWindow, Showing 과 Hiding 을 단다. 못 만들면 None)
 //==============================================================================
 fn create_input_pane(window_handle: HWND) -> Option<InputPane> {
 	let input_pane_interop = windows_core::factory::<InputPane, IInputPaneInterop>().ok()?;

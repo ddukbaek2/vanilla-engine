@@ -469,7 +469,7 @@
   - 섞기: 그리는 영역의 화소마다 가장 가까운 경계까지의 거리로 clamp(굵기 / 2 - 거리 + 0.5, 0, 1) 만큼 덮는다. 줄인 선의 판에서도 선이 끊기지 않는다
   - 모형마다: ToonLineDrawOptions 의 has_screen_outline (false 면 가리기만), has_crease_line, is_mirrored (None 이면 행렬식으로)
   - 옮기는 법 (공개 API 를 바꿨다)
-    - set_crease(각, 진하기, 이어짐 픽셀) → set_crease(각, 굵기, 진하기). 굵기는 set_width 의 단위, 진하기는 0 ~ 1. 이어짐 픽셀은 없어졌다. 옛 set_crease(60.0, 0.5, 2.0) 과 비슷한 모습은 set_crease(60.0, 1.0, 0.8)
+    - set_crease(각, 진하기, 이어짐 픽셀) → set_crease(각, 굵기, 진하기). 굵기는 set_width 의 단위, 진하기는 0 ~ 1. 이어짐 픽셀은 없어졌다. 옛 set_crease(60.0, 0.5, 2.0) 과 비슷한 모습은 픽셀 단위면 set_crease(60.0, 1.0, 0.8), 월드 단위면 굵기를 바깥 선 굵기의 반쯤으로 (set_width(0.022, World) 면 set_crease(60.0, 0.011, 0.8)). 굵기가 set_width 의 단위라 월드 단위에 1 을 주면 1 미터 굵기가 된다
     - set_depth_threshold(깊이 문턱, 맞닿음 문턱) → set_depth_threshold(깊이 문턱). 뜻이 접평면 거리로 바뀌었다. 맞닿음 문턱은 없어졌다
     - set_width 의 뜻: 선 하나의 굵기를 경계 양쪽에 반씩. 기본 1.5 → 2 픽셀
     - set_sample_count, TOON_SCREEN_OUTLINE_MAXIMUM_SAMPLES, TOON_SCREEN_OUTLINE_MAXIMUM_CREASE_SAMPLES 는 없어졌다. 가벼운 길은 set_resolution_scale 만 낮춘다
@@ -507,6 +507,50 @@
   - Canvas2D, Path2D: roundRect 가 타원 모서리를 받는다. (CanvasRadius::Elliptical, (x, y), 원본 DOMPointInit) 웹 Path2D 는 원본처럼 브라우저 Path2D 의 arc, roundRect 같은 함수를 그대로 부른다
   - Canvas2D: GPU 에 올리며 CPU 픽셀을 놓은 엔진 Image 도 그린다. (그림이 기억한 텍스처를 되읽는다, 전에는 알리고 건너뛰었다)
   - 입력 필드(데스크탑, DOM 입력을 직접 누르게 한 필드): 크롬 데스크탑 터치처럼 손가락으로 650ms 길게 누르면(크롬 aura 의 길게 누르기 500 + 누름 표시 150, 허용 거리 15 DIP) 그 자리 낱말을 고르고 터치 선택 손잡이(크롬 벡터 아이콘 꼴, 끌어 선택을 바꾼다)와 빠른 메뉴(잘라내기, 복사, 붙여넣기, "...", 뗀 뒤 100ms, 선택 위 가운데)를 띄운다. 고른 것도 붙여 넣을 것도 없으면 크롬 편집 칸 메뉴다. 윈도우는 뗄 때(블링크 context_menu_on_mouse_up) 정한다. 키, 마우스 누름, 휠은 손잡이와 메뉴를 지운다. "..." 는 선택 위 가운데에 편집 칸 메뉴(크롬 터치 메뉴 자리)
+- 데스크탑이 HE-AAC v1(SBR), v2(PS)와 3 채널 이상 AAC 도 크롬처럼 푼다. (platform/audio/decode/aac.rs)
+  - AAC-LC 2 채널까지는 그대로 symphonia 로 풀고(크롬과 PNS 잡음까지 같다), symphonia 가 받지 않는 것(ASC 에 적힌 SBR, PS, 3 채널 이상)과 몸통에만 SBR 이 실린 것(ADTS 의 HE-AAC 같은, 첫 패킷의 표본율이 두 배가 되는지로 가린다)은 oxideav-aac 로 푼다
+  - oxideav-aac(MIT)는 ISO/IEC 14496-3, 13818-7 명세로 짠 순수 러스트 해석기다. 공개 저장소(OxideAV/oxideav-aac)의 커밋 역사가 명세 조항으로 짠 기록이고 FFmpeg 같은 LGPL 코드를 옮긴 흔적이 없다. 다른 후보 rusty_aac(Apache-2.0)는 해석기 소스의 공개 저장소와 커밋 역사가 없어(크레이트의 저장소 주소는 그것을 쓰는 다른 저장소) 출처를 확인할 수 없어 쓰지 않았다
+  - 정수로 반올림하기 전 실수 출력(set_float_pcm_capture)이 crates.io 판 0.1.7 에 없어 저장소 커밋 eac68f3 으로 묶었다. 다음 판이 나오면 crates.io 로 바꾼다
+  - 시험 소리 6 개(HE-AAC v1 m4a 와 adts, v2 m4a, 5.1 AAC m4a 와 adts, PNS 를 쓴 스테레오 AAC)를 더해 27 파일을 크롬 158 과 견준다. 길이와 채널이 같고 표본은 1.5e-7 안이다
+  - 남은 차이: 3 채널 이상 AAC 에 PNS 가 쓰이면 그 띠의 잡음 표본이 크롬과 다르다. (명세가 난수 생성기를 정하지 않아, 같게 하려면 FFmpeg 의 생성기를 옮겨야 한다)
+  - 늘어난 크레이트 4: oxideav-aac, oxideav-core, thiserror, thiserror-impl
+- 표본율 바꾸기의 x86_64 합 차례(AVX2 와 FMA, SSE)는 크롬과 같게 짰지만, 기대값을 애플 실리콘 맥에서 뽑아 x86 실기에서는 돌려 보지 못했다
+- SoundSystem 의 효과음 줄여 끄기, 앞만 틀기, 배경음악 겹쳐 바꾸기와 버스 크기 따라가기를 원본처럼 AudioParam 자동화로 한다. 지금까지는 웹과 데스크탑 모두 update 마다 같은 식을 셈해 음량을 걸었다
+  - 원본 soundsystem.js 와 같은 호출: 효과음은 gain.value 대입 뒤 setValueAtTime, linearRampToValueAtTime(0), source.stop(when), 줄여 끄기는 지금 gain.value 에서 cancelScheduledValues, setValueAtTime, linearRampToValueAtTime(0), stop(when), 음악은 setValueAtTime(0), linearRampToValueAtTime(크기) 와 지금 값에서 줄여 stop(when), 버스는 setTargetAtTime(크기, 지금, 0.05). 끝난 소리는 원본 onended 자리처럼 update 가 목록에서 뺀다
+  - 웹은 WebAudio AudioParam 과 AudioBufferSourceNode.stop(when)에 그대로 건다. (컨텍스트를 깨우는 동안 받은 stop 은 시작할 때 건다)
+  - 데스크탑 믹서의 GainNode gain 을 AudioParam 으로 바꿨다. (platform/audio/audioparam.rs, 크로미엄 audio_param_handler.cc 의 사건 넣기, 지난 사건 치우기, 새 사건 당기기, 선형과 지수 램프, 목표 따라가기, 목표 뒤 램프, 지우기를 옮겼다. x86_64 는 크롬의 SSE 4 줄 묶음과 같게) 자동화가 있는 퀀텀은 표본마다, 없으면 퀀텀마다 하나로 곱하고, 소스가 없어도 자동화는 흐른다. 소스의 stop(when)은 그 시각을 올림한 프레임에서 끊는다. 시계는 그린 프레임 수 / 표본율이다
+  - AudioPlayer, AudioBus 에 엔진 안에서 쓰는 apply_gain_automation, get_gain_value(원본 gain.value 읽기), stop_at_time 을 더했다. (공개 API 는 그대로다)
+  - 믹서 시험의 크롬 158 OfflineAudioContext 그래프를 다섯에서 아홉으로 늘렸다. (앞만 틀기와 버스 setTargetAtTime, 그리는 도중 suspend 로 멈춰 지금 gain.value 에서 줄여 끄기, 음악 겹쳐 바꾸기, 지수 램프와 목표 뒤 램프와 지우기) 모두 1e-6 안에서 같다
+- BeepPlayer 의 데스크탑 톤을 원본 playTone 의 그래프 그대로 믹서에서 셈한다. 지금까지는 같은 엔벨로프와 파형을 식으로 그려 표본을 섞었다
+  - 그래프: OscillatorNode(type, frequency.setValueAtTime(주파수, 시작)) → GainNode(setValueAtTime(0.0001, 시작), linearRampToValueAtTime(최고, attack 끝), setValueAtTime(최고, release 시작), exponentialRampToValueAtTime(0.0001, 끝)) → 출력, start(시작), stop(끝 + 0.01). 시각은 부른 때의 컨텍스트 시계 + 지연이다 (원본과 같은 차례로 더한다, 웹판도 같은 BeepSchedule 을 쓴다)
+  - OscillatorNode 는 크로미엄 oscillator_handler.cc, periodic_wave_handler.cc 와 CPU 별 커널을 옮겼다. (platform/audio/oscillator.rs) 대역 제한 표(표본율에 따라 2048, 4096, 16384 칸, 1/3 옥타브마다 하나, 첫 표 꼭대기로 정규화), 시작과 정지 프레임(올림, 표본 사이 시작), frequency 가 자동화 중인 퀀텀의 표본마다 걸음(a-rate)과 그 밖의 퀀텀에 하나(k-rate), 두 점, 세 점, 다섯 점 보간을 크롬과 같은 차례, 같은 f32, f64 정밀도로 셈한다. 4 표본 묶음은 aarch64 는 NEON 판, x86 은 SSE2 판, 그 밖은 스칼라 판이다
+  - 자동화 시각은 원본 메인 스레드처럼 부른 때의 시계로 당기고, 그리기 전에 지금 퀀텀으로 한 번 더 당긴다. (AudioParam::apply_automation_at_call_time) 표는 컨텍스트처럼 표본율마다 한 번 지어 둔다
+  - 크롬 158 OfflineAudioContext 의 원본 playTone 그래프 아홉 경우(네 파형, 프리셋 시퀀스, 표본 사이 시작, 그리는 도중 부르기, 표본율 22050, 96000, 3 점과 5 점 보간, 나이퀴스트 가까이)와 표본마다 견주는 시험을 더했다. (tests/assets/mixer/chromebeep.cjs 가 찍은 chrome_beep.json) 모두 1.2e-7 안이다
+  - x86 의 SSE2 판은 크롬과 같게 짰지만 기대값을 애플 실리콘 맥(arm64 크롬)에서 뽑아 x86 크롬과는 견주지 못했다. (시험은 CPU 가 다르면 1e-4 로 본다)
+- 예제 toonfx: 새 set_crease(60.0, 0.011, 0.8) (월드 단위), set_depth_threshold 로 바꿨다
+- 툰 셰이딩을 실시간 툰 렌더링의 정석 꼴로 다시 지었다. (vanilla.js 와 같은 셰이더, 같은 값)
+  - 그늘 램프: 빛을 받는 몫(반 램버트 기본)에 그림자를 곱해 램프에 대어 색을 고른다. 칸마다 자리, 선형 색, 부드러움, 경계는 fwidth 로 계단 없이. 그림자는 그늘 색으로 들어간다
+    - ToonLightSet::set_shade(ToonShade { step, feather, color, second_step, second_feather, second_color, is_half_lambert }), set_shade_ramp(자리, 색, 부드러움, 반 램버트), clear_shade_ramp, set_ramp_texture(Option<GlTexture>, 반 램버트)
+    - set_band_count, set_band_ramp 는 같은 램프로 짓는다
+  - 빛마다: 해는 램프 색을 통째로, 채움 빛, 점광, 스포트라이트는 램프의 밝기 단계를 받는다
+  - 하이라이트: set_specular(세기, 지수, 부드러움, 색), 해와 점광 모두. 림 빛: set_rim_light(색, 거듭제곱, 부드러움, 해 쪽 가림), 바탕색에 곱하지 않고 더한다
+  - 스포트라이트: ToonPointLight 의 direction (Some 이면 스포트라이트), inner_cone_angle, outer_cone_angle (기본 0 과 π/4)
+  - ToonDrawOptions: receives_shadow, shade_offset, specular_scale, rim_scale, matcap_texture, matcap_strength, matcap_blend (ToonMatcapBlend), outline_color, outline_width_scale
+  - 표면 조각에 shadeOffset, specularMask, rimMask, 빛 조각에 rim, sunLevel
+  - 노멀을 역행렬의 전치로 옮긴다. (늘이고 줄인 모형의 빛과 화면 공간 꺾임 선을 바로잡음)
+  - 기본 빛: 해 [0.84, 0.8, 0.74], 하늘 [0.3, 0.33, 0.42], 땅 [0.17, 0.16, 0.15]
+  - 옮기는 법 (공개 API 를 바꿨다)
+    - 부드러운 램버트는 clear_shade_ramp() 나 set_band_count(0)
+    - ToonBandRamp, get_band_ramp, get_band_count, clear_band_ramp 는 없어졌다. ToonShadeRamp, get_shade_ramp, clear_shade_ramp
+    - set_specular(세기, 지수) → set_specular(세기, 지수, 부드러움, 색). 지금까지의 모습은 set_specular(세기, 지수, 1.0, [1.0; 3]). get_specular() 는 ToonSpecular
+    - set_rim_light(색, 거듭제곱) → set_rim_light(색, 거듭제곱, 부드러움, 해 쪽 가림). 지금까지와 같은 부드러운 테는 (색, 거듭제곱, 1.0, 0.0), 바탕색에 곱하지 않는다. get_rim_light() 는 ToonRimLight
+    - ToonPointLight 를 이름으로 지을 때는 ..ToonPointLight::default() 를 붙인다. (새 칸 direction, inner_cone_angle, outer_cone_angle)
+- ToonRenderer: 껍데기 바깥선을 셰이더에서 민다. (바탕 자리와 미는 쪽, outline_color, outline_width_scale, set_outline_distance_scale, get_outline_distance_scale) read_view_rotation, read_outline_vertex_data 를 내보낸다
+- ToonMatcapBlend: 매트캡을 섞는 방식. (Multiply, Add)
+- ToonShade, ToonShadeRamp, ToonRimLight, ToonSpecular 를 크레이트 맨 위에서 내보낸다
+- 예제 toonmaterial: 애버런트 몸 셰이딩 식 대조를 뺐다. (게임 하나의 식이고, 엔진 빛 꼴이 정석으로 바뀌어 같은 값이 나오지 않는다) 바위 정점 조각의 노멀 크기 맞춤을 뺐다
+- 예제 toonstyle: 그늘 셋, 단단한 하이라이트, 해 쪽 림, 스포트라이트, 매트캡, TOON_STYLE_SHELL=1 로 껍데기 바깥선. 원본과 견주면 2560x1440 에서 화소 차이 평균 0.004, 8 넘게 다른 화소 0.018% (껍데기 장면은 0.279%, 기하 가장자리의 MSAA 차이)
+- 툰 폴더 파일의 머리 주석을 채웠다. (모든 함수와 공개 칸)
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.

@@ -1,22 +1,28 @@
 //==============================================================================
-// 확인 창. (vanilla.js 의 ui/uiconfirmwindow.js, UIConfirmWindow)
-// - 제목, 묻는 글, 취소와 확인 두 단추. UIWindow 라 UIWindowLayer 로 띄운다.
-// - 묻는 글은 판의 너비에서 줄을 바꾸고 줄 수에 맞춰 판의 세로가 정해진다. 글이 길어 영역의 세로를 넘으면 글 칸만 스크롤되고 두 단추는 늘 보인다.
-// - 단추는 왼쪽이 취소, 오른쪽이 확인(강조)이다. 오른쪽에서 왼쪽 언어(set_right_to_left)면 차례를 뒤집는다.
-// - 확인을 누르면 확인 알림 뒤 닫힌다. 취소, 바깥 누르기, close_top_window, close_all_windows 로 닫히면 취소 알림이다.
-// - 사용:
-//     let window_id = UIConfirmWindow::create(node_tree, layer_id, "quit", UIConfirmWindowOptions { title: String::from("나가기"), message: String::from("정말 나갈까요?"), ..UIConfirmWindowOptions::default() });
-//     if let Some(confirm_window) = node_tree[window_id].get_component_mut::<UIWindow>().and_then(|window| window.get_behavior_mut::<UIConfirmWindow>()) {
-//         confirm_window.set_confirm_event(Some(Box::new(move || { leave_requested.set(true); })));
-//     }
-//     UIWindowLayer::open_window_in_tree(node_tree, layer_id, window_id);
-// - 원본과 다른 것:
-//   - 원본은 UIWindow 를 상속한다. 러스트 판은 UIWindow 의 덮어쓸 자리(UIWindowBehavior)를 구현한 값이다. (UIWindow::get_behavior_mut 으로 꺼낸다)
-//   - 글 줄 수는 원본처럼 레이아웃 때 바로 잰다. Graphic 이 없는 자리라 등록된 글꼴로 잰다. (UILabel 이 품은 Text 의 wrap_lines_without_graphic)
-//     글꼴이 하나도 없어 잴 수 없을 때만(데스크탑에 글꼴 파일이 없는 경우) 한 줄로 놓고, 글이 한 번 그려져 줄을 나누면 다음 tick 에 다시 놓는다.
-//   - 제목과 묻는 글은 원본처럼 UILabel 이다. 오른쪽에서 왼쪽 언어면 원본처럼 두 글에 Rtl 방향을 걸고(아니면 Inherit) 단추 차례를 뒤집는다.
-//     set_right_to_left 는 창 노드를 받지 않아 글 방향을 다음 놓을 때 건다. 원본처럼 글 방향을 바로 걸려면 set_right_to_left_in_tree 를 부른다. (단추 차례는 원본도 다음 놓을 때)
-//   - 알림은 인자 없는 Box<dyn FnMut()> 다.
+//! 확인 창. (vanilla.js 의 ui/uiconfirmwindow.js, UIConfirmWindow)
+//! - 제목, 묻는 글, 취소와 확인 두 단추. UIWindow 라 UIWindowLayer 로 띄운다.
+//! - 묻는 글은 판의 너비에서 줄을 바꾸고 줄 수에 맞춰 판의 세로가 정해진다. 글이 길어 영역의 세로를 넘으면 글 칸만 스크롤되고 두 단추는 늘 보인다.
+//! - 단추는 왼쪽이 취소, 오른쪽이 확인(강조)이다. 오른쪽에서 왼쪽 언어(set_right_to_left)면 차례를 뒤집는다.
+//! - 확인을 누르면 확인 알림 뒤 닫힌다. 취소, 바깥 누르기, close_top_window, close_all_windows 로 닫히면 취소 알림이다.
+//! - 사용:
+//!   ```text
+//!     let window_id = UIConfirmWindow::create(node_tree, layer_id, "quit", UIConfirmWindowOptions { title: String::from("나가기"), message: String::from("정말 나갈까요?"), ..UIConfirmWindowOptions::default() });
+//!     if let Some(confirm_window) = node_tree[window_id].get_component_mut::<UIWindow>().and_then(|window| window.get_behavior_mut::<UIConfirmWindow>()) {
+//!         confirm_window.set_confirm_event(Some(Box::new(move || { leave_requested.set(true); })));
+//!     }
+//!     UIWindowLayer::open_window_in_tree(node_tree, layer_id, window_id);
+//!   ```
+//! - 원본과 다른 것:
+//!   - 원본은 UIWindow 를 상속한다. 러스트 판은 UIWindow 의 덮어쓸 자리(UIWindowBehavior)를 구현한 값이다. (UIWindow::get_behavior_mut 으로 꺼낸다)
+//!   - 글 줄 수는 원본처럼 레이아웃 때 바로 잰다. Graphic 이 없는 자리라 등록된 글꼴로 잰다. (UILabel 이 품은 Text 의 wrap_lines_without_graphic)
+//!   ```text
+//!     글꼴이 하나도 없어 잴 수 없을 때만(데스크탑에 글꼴 파일이 없는 경우) 한 줄로 놓고, 글이 한 번 그려져 줄을 나누면 다음 tick 에 다시 놓는다.
+//!   ```
+//!   - 제목과 묻는 글은 원본처럼 UILabel 이다. 오른쪽에서 왼쪽 언어면 원본처럼 두 글에 Rtl 방향을 걸고(아니면 Inherit) 단추 차례를 뒤집는다.
+//!   ```text
+//!     set_right_to_left 는 창 노드를 받지 않아 글 방향을 다음 놓을 때 건다. 원본처럼 글 방향을 바로 걸려면 set_right_to_left_in_tree 를 부른다. (단추 차례는 원본도 다음 놓을 때)
+//!   ```
+//!   - 알림은 인자 없는 `Box<dyn FnMut()>` 다.
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::pivot::Pivot;
@@ -30,7 +36,7 @@ use crate::ui::uiscrollview::UIScrollView;
 use crate::ui::uiwindow::{UIWindow, UIWindowBehavior, UIWindowEvent, UIWindowParts};
 use std::any::Any;
 
-// 기본 모양. (판 안쪽 여백, 줄 사이, 제목 높이와 글 크기, 글 크기와 줄 간격, 단추 높이와 사이, 둥근 정도)
+/// 기본 모양. (판 안쪽 여백, 줄 사이, 제목 높이와 글 크기, 글 크기와 줄 간격, 단추 높이와 사이, 둥근 정도)
 const CONFIRM_PADDING: f32 = 24.0;
 const CONFIRM_ROW_GAP: f32 = 16.0;
 const CONFIRM_TITLE_HEIGHT: f32 = 32.0;
@@ -40,15 +46,15 @@ const CONFIRM_LINE_SPACING: f32 = 1.35;
 const CONFIRM_BUTTON_HEIGHT: f32 = 52.0;
 const CONFIRM_BUTTON_GAP: f32 = 12.0;
 const CONFIRM_BUTTON_ROUND_SIZE: f32 = 12.0;
-// 글 칸이 영역에 비해 아무리 좁아도 지키는 세로. (넘는 것은 스크롤)
+/// 글 칸이 영역에 비해 아무리 좁아도 지키는 세로. (넘는 것은 스크롤)
 const CONFIRM_MINIMUM_MESSAGE_HEIGHT: f32 = 40.0;
 
 //==============================================================================
-// 확인 창 설정. (원본 options = { title = "", message = "", cancelText = "취소", confirmText = "확인" })
+/// 확인 창 설정. (원본 options = { title = "", message = "", cancelText = "취소", confirmText = "확인" })
 //==============================================================================
 #[derive(Clone, Debug, PartialEq)]
 pub struct UIConfirmWindowOptions {
-	// 비면 제목 줄을 없앤다.
+	/// 비면 제목 줄을 없앤다.
 	pub title: String,
 	pub message: String,
 	pub cancel_text: String,
@@ -57,7 +63,7 @@ pub struct UIConfirmWindowOptions {
 
 impl Default for UIConfirmWindowOptions {
 	//==============================================================================
-	// 기본값. (원본과 같다)
+	/// 기본값. (원본과 같다)
 	//==============================================================================
 	fn default() -> UIConfirmWindowOptions {
 		UIConfirmWindowOptions {
@@ -70,7 +76,7 @@ impl Default for UIConfirmWindowOptions {
 }
 
 //==============================================================================
-// 확인 창.
+/// 확인 창.
 //==============================================================================
 pub struct UIConfirmWindow {
 	options: UIConfirmWindowOptions,
@@ -81,16 +87,16 @@ pub struct UIConfirmWindow {
 	confirm_button_id: Option<NodeId>,
 	confirm_event: Option<UIWindowEvent>,
 	cancel_event: Option<UIWindowEvent>,
-	// 확인으로 닫히는지. (아니면 닫힐 때 취소 알림)
+	/// 확인으로 닫히는지. (아니면 닫힐 때 취소 알림)
 	is_confirmed: bool,
 	is_right_to_left: bool,
-	// 글 줄 수를 아직 못 재 한 줄로 놓았는지.
+	/// 글 줄 수를 아직 못 재 한 줄로 놓았는지.
 	is_measure_pending: bool,
 }
 
 impl UIConfirmWindow {
 	//==============================================================================
-	// 생성. (UIWindow::create 에 넘긴다, 보통은 UIConfirmWindow::create)
+	/// 생성. (UIWindow::create 에 넘긴다, 보통은 UIConfirmWindow::create)
 	//==============================================================================
 	pub fn create_with_options(options: UIConfirmWindowOptions) -> UIConfirmWindow {
 		UIConfirmWindow {
@@ -109,14 +115,14 @@ impl UIConfirmWindow {
 	}
 
 	//==============================================================================
-	// 확인 창 노드 만들기. (layer_id 창 층 노드 밑에, 띄우는 것은 UIWindowLayer::open_window)
+	/// 확인 창 노드 만들기. (layer_id 창 층 노드 밑에, 띄우는 것은 UIWindowLayer::open_window)
 	//==============================================================================
 	pub fn create(node_tree: &mut NodeTree, layer_id: NodeId, name: &str, options: UIConfirmWindowOptions) -> NodeId {
 		UIWindow::create(node_tree, layer_id, name, Box::new(UIConfirmWindow::create_with_options(options)))
 	}
 
 	//==============================================================================
-	// 확인. (확인 알림을 부르고 닫는다, 떠 있지 않으면 아무 일도 없다. 확인 단추가 부른다)
+	/// 확인. (확인 알림을 부르고 닫는다, 떠 있지 않으면 아무 일도 없다. 확인 단추가 부른다)
 	//==============================================================================
 	pub fn confirm_in_tree(node_tree: &mut NodeTree, window_id: NodeId) {
 		let is_confirmed = node_tree.with_component_mut::<UIWindow, _>(window_id, |window, _tree| {
@@ -138,7 +144,7 @@ impl UIConfirmWindow {
 	}
 
 	//==============================================================================
-	// 떠 있으면 다시 놓기. (원본 refreshIfOpen, 글이나 차례를 바꾼 뒤)
+	/// 떠 있으면 다시 놓기. (원본 refreshIfOpen, 글이나 차례를 바꾼 뒤)
 	//==============================================================================
 	pub fn refresh_if_open_in_tree(node_tree: &mut NodeTree, window_id: NodeId) {
 		let is_open = node_tree.get_node(window_id).and_then(|window_node| window_node.get_component::<UIWindow>()).map(|window| window.get_window_layer_id().is_some()).unwrap_or(false);
@@ -148,7 +154,7 @@ impl UIConfirmWindow {
 	}
 
 	//==============================================================================
-	// 제목 바꾸기. (떠 있으면 다시 놓는다, 원본 setTitle)
+	/// 제목 바꾸기. (떠 있으면 다시 놓는다, 원본 setTitle)
 	//==============================================================================
 	pub fn set_title_in_tree(node_tree: &mut NodeTree, window_id: NodeId, title: &str) {
 		node_tree.with_component_mut::<UIWindow, _>(window_id, |window, tree| {
@@ -160,7 +166,7 @@ impl UIConfirmWindow {
 	}
 
 	//==============================================================================
-	// 묻는 글 바꾸기. (떠 있으면 다시 놓는다, 원본 setMessage)
+	/// 묻는 글 바꾸기. (떠 있으면 다시 놓는다, 원본 setMessage)
 	//==============================================================================
 	pub fn set_message_in_tree(node_tree: &mut NodeTree, window_id: NodeId, message: &str) {
 		node_tree.with_component_mut::<UIWindow, _>(window_id, |window, tree| {
@@ -172,7 +178,7 @@ impl UIConfirmWindow {
 	}
 
 	//==============================================================================
-	// 오른쪽에서 왼쪽 언어인지 설정하고 글 방향을 바로 건다. (원본 setRightToLeft, 단추 차례는 다음 놓을 때부터)
+	/// 오른쪽에서 왼쪽 언어인지 설정하고 글 방향을 바로 건다. (원본 setRightToLeft, 단추 차례는 다음 놓을 때부터)
 	//==============================================================================
 	pub fn set_right_to_left_in_tree(node_tree: &mut NodeTree, window_id: NodeId, is_right_to_left: bool) {
 		node_tree.with_component_mut::<UIWindow, _>(window_id, |window, tree| {
@@ -184,7 +190,7 @@ impl UIConfirmWindow {
 	}
 
 	//==============================================================================
-	// 단추 글 설정. (원본 setButtonTexts)
+	/// 단추 글 설정. (원본 setButtonTexts)
 	//==============================================================================
 	pub fn set_button_texts(&mut self, node_tree: &mut NodeTree, cancel_text: &str, confirm_text: &str) {
 		self.options.cancel_text = cancel_text.to_string();
@@ -197,7 +203,7 @@ impl UIConfirmWindow {
 	}
 
 	//==============================================================================
-	// 확인으로 적고 확인 알림 부르기. (이미 확인했으면 false)
+	/// 확인으로 적고 확인 알림 부르기. (이미 확인했으면 false)
 	//==============================================================================
 	fn mark_confirmed(&mut self) -> bool {
 		if self.is_confirmed {
@@ -211,35 +217,35 @@ impl UIConfirmWindow {
 	}
 
 	//==============================================================================
-	// 확인 알림 설정.
+	/// 확인 알림 설정.
 	//==============================================================================
 	pub fn set_confirm_event(&mut self, confirm_event: Option<UIWindowEvent>) {
 		self.confirm_event = confirm_event;
 	}
 
 	//==============================================================================
-	// 취소 알림 설정. (취소 단추, 바깥 누르기, 창 층이 닫을 때)
+	/// 취소 알림 설정. (취소 단추, 바깥 누르기, 창 층이 닫을 때)
 	//==============================================================================
 	pub fn set_cancel_event(&mut self, cancel_event: Option<UIWindowEvent>) {
 		self.cancel_event = cancel_event;
 	}
 
 	//==============================================================================
-	// 오른쪽에서 왼쪽 언어인지 설정. (참이면 제목과 묻는 글이 Rtl 방향, 취소가 오른쪽, 확인이 왼쪽, 다음 놓을 때부터)
+	/// 오른쪽에서 왼쪽 언어인지 설정. (참이면 제목과 묻는 글이 Rtl 방향, 취소가 오른쪽, 확인이 왼쪽, 다음 놓을 때부터)
 	//==============================================================================
 	pub fn set_right_to_left(&mut self, is_right_to_left: bool) {
 		self.is_right_to_left = is_right_to_left;
 	}
 
 	//==============================================================================
-	// 오른쪽에서 왼쪽 언어인지.
+	/// 오른쪽에서 왼쪽 언어인지.
 	//==============================================================================
 	pub fn is_right_to_left(&self) -> bool {
 		self.is_right_to_left
 	}
 
 	//==============================================================================
-	// 제목 바꾸기. (빈 글이면 제목 줄을 없앤다, 떠 있으면 UIWindow::refresh_layout 으로 다시 놓는다)
+	/// 제목 바꾸기. (빈 글이면 제목 줄을 없앤다, 떠 있으면 UIWindow::refresh_layout 으로 다시 놓는다)
 	//==============================================================================
 	pub fn set_title(&mut self, node_tree: &mut NodeTree, title: &str) {
 		self.options.title = title.to_string();
@@ -252,7 +258,7 @@ impl UIConfirmWindow {
 	}
 
 	//==============================================================================
-	// 묻는 글 바꾸기. (떠 있으면 UIWindow::refresh_layout 으로 다시 놓는다)
+	/// 묻는 글 바꾸기. (떠 있으면 UIWindow::refresh_layout 으로 다시 놓는다)
 	//==============================================================================
 	pub fn set_message(&mut self, node_tree: &mut NodeTree, message: &str) {
 		self.options.message = message.to_string();
@@ -262,7 +268,7 @@ impl UIConfirmWindow {
 	}
 
 	//==============================================================================
-	// 제목과 묻는 글에 글 방향 걸기. (오른쪽에서 왼쪽 언어면 Rtl, 아니면 Inherit. 원본 setRightToLeft 의 "rtl" / "inherit")
+	/// 제목과 묻는 글에 글 방향 걸기. (오른쪽에서 왼쪽 언어면 Rtl, 아니면 Inherit. 원본 setRightToLeft 의 "rtl" / "inherit")
 	//==============================================================================
 	fn apply_text_direction(&self, node_tree: &mut NodeTree) {
 		let text_direction = if self.is_right_to_left {
@@ -281,42 +287,42 @@ impl UIConfirmWindow {
 	}
 
 	//==============================================================================
-	// 제목 노드. (UILabel)
+	/// 제목 노드. (UILabel)
 	//==============================================================================
 	pub fn get_title_node(&self) -> Option<NodeId> {
 		self.title_id
 	}
 
 	//==============================================================================
-	// 묻는 글 노드. (UILabel)
+	/// 묻는 글 노드. (UILabel)
 	//==============================================================================
 	pub fn get_message_node(&self) -> Option<NodeId> {
 		self.message_id
 	}
 
 	//==============================================================================
-	// 묻는 글의 스크롤 칸 노드. (UIScrollView)
+	/// 묻는 글의 스크롤 칸 노드. (UIScrollView)
 	//==============================================================================
 	pub fn get_message_scroll_node(&self) -> Option<NodeId> {
 		self.message_scroll_id
 	}
 
 	//==============================================================================
-	// 취소 단추 노드. (Paint, UIButton, UILabel)
+	/// 취소 단추 노드. (Paint, UIButton, UILabel)
 	//==============================================================================
 	pub fn get_cancel_button_node(&self) -> Option<NodeId> {
 		self.cancel_button_id
 	}
 
 	//==============================================================================
-	// 확인 단추 노드. (Paint, UIButton, UILabel)
+	/// 확인 단추 노드. (Paint, UIButton, UILabel)
 	//==============================================================================
 	pub fn get_confirm_button_node(&self) -> Option<NodeId> {
 		self.confirm_button_id
 	}
 
 	//==============================================================================
-	// 왼쪽 위 피봇의 빈 노드 만들기.
+	/// 왼쪽 위 피봇의 빈 노드 만들기.
 	//==============================================================================
 	fn create_box_node(node_tree: &mut NodeTree, parent_id: NodeId, node_name: &str) -> NodeId {
 		let node_id = node_tree.create_child(parent_id, node_name);
@@ -326,7 +332,7 @@ impl UIConfirmWindow {
 	}
 
 	//==============================================================================
-	// 글 노드 만들기. (UILabel, 흰 글)
+	/// 글 노드 만들기. (UILabel, 흰 글)
 	//==============================================================================
 	fn create_text_node(node_tree: &mut NodeTree, parent_id: NodeId, node_name: &str, text: &str, font_size: f32) -> NodeId {
 		let text_id = UIConfirmWindow::create_box_node(node_tree, parent_id, node_name);
@@ -339,7 +345,7 @@ impl UIConfirmWindow {
 	}
 
 	//==============================================================================
-	// 단추 노드 만들기. (둥근 Paint + UIButton + UILabel)
+	/// 단추 노드 만들기. (둥근 Paint + UIButton + UILabel)
 	//==============================================================================
 	fn create_button_node(node_tree: &mut NodeTree, parent_id: NodeId, node_name: &str, label_text: &str, fill_color: Color) -> NodeId {
 		let button_id = UIConfirmWindow::create_box_node(node_tree, parent_id, node_name);
@@ -358,7 +364,7 @@ impl UIConfirmWindow {
 	}
 
 	//==============================================================================
-	// 단추 클릭 걸기.
+	/// 단추 클릭 걸기.
 	//==============================================================================
 	fn bind_button(node_tree: &mut NodeTree, button_id: NodeId, window_id: NodeId, is_confirm: bool) {
 		if let Some(button) = node_tree[button_id].get_component_mut::<UIButton>() {
@@ -374,7 +380,7 @@ impl UIConfirmWindow {
 	}
 
 	//==============================================================================
-	// 그 너비로 줄을 바꾼 묻는 글의 세로. (글꼴로 재고, 잴 수 없으면 그린 결과를, 그것도 없으면 한 줄과 false)
+	/// 그 너비로 줄을 바꾼 묻는 글의 세로. (글꼴로 재고, 잴 수 없으면 그린 결과를, 그것도 없으면 한 줄과 false)
 	//==============================================================================
 	fn measure_message_height(&self, node_tree: &mut NodeTree, text_width: f32) -> (f32, bool) {
 		let message_label = match self.message_id.and_then(|message_id| node_tree.get_node_mut(message_id)).and_then(|message_node| message_node.get_component_mut::<UILabel>()) {
@@ -412,7 +418,7 @@ impl UIWindowBehavior for UIConfirmWindow {
 	}
 
 	//==============================================================================
-	// 내용 만들기. (제목, 묻는 글 스크롤 칸, 두 단추)
+	/// 내용 만들기. (제목, 묻는 글 스크롤 칸, 두 단추)
 	//==============================================================================
 	fn build(&mut self, node_tree: &mut NodeTree, parts: &UIWindowParts) {
 		let window_name = node_tree[parts.window_id].get_name().to_string();
@@ -450,7 +456,7 @@ impl UIWindowBehavior for UIConfirmWindow {
 	}
 
 	//==============================================================================
-	// 내용 놓기. (제목 → 글 스크롤 칸 → 두 단추, 판의 세로를 돌려준다)
+	/// 내용 놓기. (제목 → 글 스크롤 칸 → 두 단추, 판의 세로를 돌려준다)
 	//==============================================================================
 	fn layout_content(&mut self, node_tree: &mut NodeTree, parts: &UIWindowParts, panel_width: f32) -> f32 {
 		let inner_width = (panel_width - CONFIRM_PADDING * 2.0).max(1.0);
@@ -505,7 +511,7 @@ impl UIWindowBehavior for UIConfirmWindow {
 	}
 
 	//==============================================================================
-	// 창 층에서 내려감. (확인이 아니면 취소 알림)
+	/// 창 층에서 내려감. (확인이 아니면 취소 알림)
 	//==============================================================================
 	fn handle_closed(&mut self) {
 		let is_confirmed = self.is_confirmed;
@@ -518,7 +524,7 @@ impl UIWindowBehavior for UIConfirmWindow {
 	}
 
 	//==============================================================================
-	// 글 줄 수를 못 재 한 줄로 놓았는데 이제 쟀으면 다시 놓는다.
+	/// 글 줄 수를 못 재 한 줄로 놓았는데 이제 쟀으면 다시 놓는다.
 	//==============================================================================
 	fn is_layout_pending(&self, node_tree: &NodeTree, _parts: &UIWindowParts) -> bool {
 		if !self.is_measure_pending {

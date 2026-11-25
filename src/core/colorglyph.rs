@@ -1,28 +1,28 @@
 //==============================================================================
-// 색 글리프 래스터. (이모지 글꼴의 색 글리프를 프리멀티플라이드 RGBA 로)
-// - 원본은 브라우저 Canvas2D 가 색 글리프를 제 색으로 그린다. fillStyle 의 색은 먹지 않고 알파만 먹으며, strokeText 도 색 글리프는 테를 긋지 않고 색 그대로 칠한다.
-//   러스트 판은 글꼴의 색 글리프 자료를 직접 읽어 그린다. 크롬처럼 OT-SVG 글리프는 그리지 않는다.
-// - 비트맵: sbix (애플 컬러 이모지), CBDT/CBLC (노토 컬러 이모지 비트맵 판)의 PNG 와 프리멀티플라이드 BGRA 를 꺼내 풀고 글자 크기에 맞춘다.
-//   판은 그 글리프를 가진 판 가운데 글자 크기 이상인 가장 작은 것, 없으면 가장 큰 것이다. (애플 컬러 이모지는 판마다 빠진 글리프가 있다) 줄일 때는 넓이 평균, 키울 때는 두 점 사이 섞기다.
-//   자리는 판의 픽셀 단위 자리 값(그림의 왼쪽 아래가 펜 원점에서 떨어진 거리)을 글자 크기 비로 옮긴 것이다.
-// - 윤곽: COLR/CPAL v0 (층마다 윤곽 하나를 한 색으로)과 v1 (그라데이션, 변환, 자르기, 합성). ttf-parser 의 Painter 로 받아 직접 칠한다.
-//   윤곽은 곡선을 선분으로 펴서 넓이 누적 방식(font-rs 와 같은 방식, 0 이 아닌 감김)으로 덮인 정도를 셈한다.
-//   칠은 한 색, 선형(세 점), 두 원 사이 방사, 스윕 그라데이션을 픽셀 가운데에서 셈한다. 색 줄의 끝 밖은 Pad, Repeat, Reflect 를 따르고 색은 곧은 알파로 섞는다.
-//   합성은 COLR 의 28 가지(Porter-Duff 와 W3C 섞기)를 프리멀티플라이드 색으로 한다. 팔레트는 0 번, 글자 색(팔레트 번호 0xFFFF)은 흰색이다. (글자는 흰색으로 굽고 그릴 때 색을 곱한다)
-//   v1 의 칠(paint)은 지금 자르기 영역을 칠한다. 자르기가 없으면(v0) 마지막으로 받은 윤곽을 칠한다.
-// - ttf-parser 는 rustybuzz 가 다시 내보내는 것을 쓴다. (모양 짓기 얼굴과 같은 얼굴)
+//! 색 글리프 래스터. (이모지 글꼴의 색 글리프를 프리멀티플라이드 RGBA 로)
+//! - 원본은 브라우저 Canvas2D 가 색 글리프를 제 색으로 그린다. fillStyle 의 색은 먹지 않고 알파만 먹으며, strokeText 도 색 글리프는 테를 긋지 않고 색 그대로 칠한다.
+//!   러스트 판은 글꼴의 색 글리프 자료를 직접 읽어 그린다. 크롬처럼 OT-SVG 글리프는 그리지 않는다.
+//! - 비트맵: sbix (애플 컬러 이모지), CBDT/CBLC (노토 컬러 이모지 비트맵 판)의 PNG 와 프리멀티플라이드 BGRA 를 꺼내 풀고 글자 크기에 맞춘다.
+//!   판은 그 글리프를 가진 판 가운데 글자 크기 이상인 가장 작은 것, 없으면 가장 큰 것이다. (애플 컬러 이모지는 판마다 빠진 글리프가 있다) 줄일 때는 넓이 평균, 키울 때는 두 점 사이 섞기다.
+//!   자리는 판의 픽셀 단위 자리 값(그림의 왼쪽 아래가 펜 원점에서 떨어진 거리)을 글자 크기 비로 옮긴 것이다.
+//! - 윤곽: COLR/CPAL v0 (층마다 윤곽 하나를 한 색으로)과 v1 (그라데이션, 변환, 자르기, 합성). ttf-parser 의 Painter 로 받아 직접 칠한다.
+//!   윤곽은 곡선을 선분으로 펴서 넓이 누적 방식(font-rs 와 같은 방식, 0 이 아닌 감김)으로 덮인 정도를 셈한다.
+//!   칠은 한 색, 선형(세 점), 두 원 사이 방사, 스윕 그라데이션을 픽셀 가운데에서 셈한다. 색 줄의 끝 밖은 Pad, Repeat, Reflect 를 따르고 색은 곧은 알파로 섞는다.
+//!   합성은 COLR 의 28 가지(Porter-Duff 와 W3C 섞기)를 프리멀티플라이드 색으로 한다. 팔레트는 0 번, 글자 색(팔레트 번호 0xFFFF)은 흰색이다. (글자는 흰색으로 굽고 그릴 때 색을 곱한다)
+//!   v1 의 칠(paint)은 지금 자르기 영역을 칠한다. 자르기가 없으면(v0) 마지막으로 받은 윤곽을 칠한다.
+//! - ttf-parser 는 rustybuzz 가 다시 내보내는 것을 쓴다. (모양 짓기 얼굴과 같은 얼굴)
 //==============================================================================
 use rustybuzz::ttf_parser::colr::{ClipBox, CompositeMode, GradientExtend, Paint, Painter};
 use rustybuzz::ttf_parser::{Face, GlyphId, OutlineBuilder, RasterGlyphImage, RasterImageFormat, RgbaColor, Transform};
 
-// 그릴 수 있는 색 글리프의 가로세로 상한. (픽셀, 이상한 글꼴 자료로 큰 판을 잡지 않게)
+/// 그릴 수 있는 색 글리프의 가로세로 상한. (픽셀, 이상한 글꼴 자료로 큰 판을 잡지 않게)
 const MAXIMUM_RASTER_SIZE: i32 = 4096;
 
-// 글자 색. (원본은 흰색으로 굽는다)
+/// 글자 색. (원본은 흰색으로 굽는다)
 const FOREGROUND_COLOR: RgbaColor = RgbaColor { red: 255, green: 255, blue: 255, alpha: 255 };
 
 //==============================================================================
-// 색 글리프 래스터 하나. (프리멀티플라이드 RGBA, 왼쪽 위 자리는 펜 원점에서 오른쪽 left_x, 기준선에서 위로 top_y)
+/// 색 글리프 래스터 하나. (프리멀티플라이드 RGBA, 왼쪽 위 자리는 펜 원점에서 오른쪽 left_x, 기준선에서 위로 top_y)
 //==============================================================================
 pub struct ColorGlyphRaster {
 	pub pixels: Vec<u8>,
@@ -33,7 +33,7 @@ pub struct ColorGlyphRaster {
 }
 
 //==============================================================================
-// 글꼴에 색 글리프 표가 있는지. (sbix, CBDT, COLR)
+/// 글꼴에 색 글리프 표가 있는지. (sbix, CBDT, COLR)
 //==============================================================================
 pub fn has_color_tables(face: &Face) -> bool {
 	let tables = face.tables();
@@ -41,7 +41,7 @@ pub fn has_color_tables(face: &Face) -> bool {
 }
 
 //==============================================================================
-// 글리프가 색 글리프인지. (COLR 에 있거나, PNG / BGRA 비트맵이 있다)
+/// 글리프가 색 글리프인지. (COLR 에 있거나, PNG / BGRA 비트맵이 있다)
 //==============================================================================
 pub fn has_color_glyph(face: &Face, glyph_index: u16) -> bool {
 	if face.is_color_glyph(GlyphId(glyph_index)) {
@@ -58,7 +58,7 @@ pub fn has_color_glyph(face: &Face, glyph_index: u16) -> bool {
 }
 
 //==============================================================================
-// 색 글리프 래스터. (COLR 이 먼저, 없으면 비트맵, 색 글리프가 아니면 None)
+/// 색 글리프 래스터. (COLR 이 먼저, 없으면 비트맵, 색 글리프가 아니면 None)
 //==============================================================================
 pub fn rasterize_color_glyph(face: &Face<'_>, glyph_index: u16, pixel_size: f32) -> Option<ColorGlyphRaster> {
 	if pixel_size <= 0.0 {
@@ -73,7 +73,7 @@ pub fn rasterize_color_glyph(face: &Face<'_>, glyph_index: u16, pixel_size: f32)
 }
 
 //==============================================================================
-// 글리프의 비트맵 그림 찾기. (sbix 는 그 글리프를 가진 판 가운데 글자 크기 이상인 가장 작은 것, 없으면 가장 큰 것. 그 밖은 ttf-parser 가 고른 판)
+/// 글리프의 비트맵 그림 찾기. (sbix 는 그 글리프를 가진 판 가운데 글자 크기 이상인 가장 작은 것, 없으면 가장 큰 것. 그 밖은 ttf-parser 가 고른 판)
 //==============================================================================
 fn read_raster_image<'a>(face: &'a Face, glyph_index: u16, pixels_per_em: u16) -> Option<RasterGlyphImage<'a>> {
 	let sbix_table = match face.tables().sbix {
@@ -115,7 +115,7 @@ fn read_raster_image<'a>(face: &'a Face, glyph_index: u16, pixels_per_em: u16) -
 }
 
 //==============================================================================
-// 비트맵 색 글리프 래스터. (sbix, CBDT 의 그림을 풀어 글자 크기로)
+/// 비트맵 색 글리프 래스터. (sbix, CBDT 의 그림을 풀어 글자 크기로)
 //==============================================================================
 fn rasterize_bitmap_color_glyph(face: &Face, glyph_index: u16, pixel_size: f32) -> Option<ColorGlyphRaster> {
 	let pixels_per_em = (pixel_size.ceil() as u32).clamp(1, u16::MAX as u32) as u16;
@@ -210,8 +210,8 @@ fn rasterize_bitmap_color_glyph(face: &Face, glyph_index: u16, pixel_size: f32) 
 }
 
 //==============================================================================
-// 한 축의 다시 뽑기 무게. (원본 픽셀 j 는 받는 쪽 [offset + j × scale, offset + (j + 1) × scale) 을 덮는다)
-// - 줄일 때(scale <= 1)는 받는 픽셀과 겹친 길이, 키울 때는 받는 픽셀 가운데의 두 점 사이 섞기다. 그림 밖은 투명으로 본다.
+/// 한 축의 다시 뽑기 무게. (원본 픽셀 j 는 받는 쪽 [offset + j × scale, offset + (j + 1) × scale) 을 덮는다)
+/// - 줄일 때(scale <= 1)는 받는 픽셀과 겹친 길이, 키울 때는 받는 픽셀 가운데의 두 점 사이 섞기다. 그림 밖은 투명으로 본다.
 //==============================================================================
 fn build_resample_weights(source_length: usize, offset: f32, scale: f32, destination_length: usize) -> Vec<Vec<(usize, f32)>> {
 	let mut weight_table: Vec<Vec<(usize, f32)>> = Vec::with_capacity(destination_length);
@@ -247,7 +247,7 @@ fn build_resample_weights(source_length: usize, offset: f32, scale: f32, destina
 }
 
 //==============================================================================
-// COLR 색 글리프 래스터. (경계를 먼저 재고, 그 판에 칠한다)
+/// COLR 색 글리프 래스터. (경계를 먼저 재고, 그 판에 칠한다)
 //==============================================================================
 fn rasterize_outline_color_glyph(face: &Face<'_>, glyph_index: u16, pixel_size: f32) -> Option<ColorGlyphRaster> {
 	let scale = pixel_size / face.units_per_em() as f32;
@@ -303,7 +303,7 @@ fn rasterize_outline_color_glyph(face: &Face<'_>, glyph_index: u16, pixel_size: 
 }
 
 //==============================================================================
-// 윤곽이 덮는 픽셀 상자. (윤곽을 그리는 함수와 글꼴 단위 → 픽셀 배율. 펜 원점에서 왼쪽, 기준선에서 위, 너비, 높이. 비었으면 None)
+/// 윤곽이 덮는 픽셀 상자. (윤곽을 그리는 함수와 글꼴 단위 → 픽셀 배율. 펜 원점에서 왼쪽, 기준선에서 위, 너비, 높이. 비었으면 None)
 //==============================================================================
 pub fn read_outline_bounds(draw_outline: &dyn Fn(&mut dyn OutlineBuilder) -> bool, scale: f32) -> Option<(i32, i32, i32, i32)> {
 	let mut bounds_collector = SegmentCollector::new(Transform::new(scale, 0.0, 0.0, scale, 0.0, 0.0));
@@ -330,8 +330,8 @@ pub fn read_outline_bounds(draw_outline: &dyn Fn(&mut dyn OutlineBuilder) -> boo
 }
 
 //==============================================================================
-// 윤곽의 덮인 정도. (가변 글꼴의 글리프, fontdue 가 축 값을 읽지 못하고 맥 SFNS 같은 가변 글꼴의 윤곽을 그리지 못해 여기서 그린다. 비었으면 None)
-// - 돌려주는 것: (덮인 정도, 너비, 높이, 펜 원점에서 왼쪽, 기준선에서 위). 색 글리프와 같은 넓이 누적 래스터다.
+/// 윤곽의 덮인 정도. (가변 글꼴의 글리프, fontdue 가 축 값을 읽지 못하고 맥 SFNS 같은 가변 글꼴의 윤곽을 그리지 못해 여기서 그린다. 비었으면 None)
+/// - 돌려주는 것: (덮인 정도, 너비, 높이, 펜 원점에서 왼쪽, 기준선에서 위). 색 글리프와 같은 넓이 누적 래스터다.
 //==============================================================================
 pub fn rasterize_outline(draw_outline: &dyn Fn(&mut dyn OutlineBuilder) -> bool, scale: f32) -> Option<(Vec<u8>, i32, i32, i32, i32)> {
 	let (left_x, top_y, width, height) = read_outline_bounds(draw_outline, scale)?;
@@ -343,14 +343,14 @@ pub fn rasterize_outline(draw_outline: &dyn Fn(&mut dyn OutlineBuilder) -> bool,
 }
 
 //==============================================================================
-// 점 하나를 변환으로 옮기기.
+/// 점 하나를 변환으로 옮기기.
 //==============================================================================
 fn apply_transform(transform: &Transform, position_x: f32, position_y: f32) -> (f32, f32) {
 	(transform.a * position_x + transform.c * position_y + transform.e, transform.b * position_x + transform.d * position_y + transform.f)
 }
 
 //==============================================================================
-// 경계 재는 그리개. (변환을 건 윤곽 경계 상자들의 합, 윤곽이 없으면 자르기 상자들의 합. 글꼴 단위)
+/// 경계 재는 그리개. (변환을 건 윤곽 경계 상자들의 합, 윤곽이 없으면 자르기 상자들의 합. 글꼴 단위)
 //==============================================================================
 struct BoundsPainter<'face, 'font> {
 	face: &'face Face<'font>,
@@ -361,7 +361,7 @@ struct BoundsPainter<'face, 'font> {
 }
 
 //==============================================================================
-// 상자 네 모서리를 변환해 경계에 더하기.
+/// 상자 네 모서리를 변환해 경계에 더하기.
 //==============================================================================
 fn add_transformed_box(bounds: &mut Option<[f32; 4]>, transform: &Transform, box_bounds: [f32; 4]) {
 	for (corner_x, corner_y) in [(box_bounds[0], box_bounds[1]), (box_bounds[2], box_bounds[1]), (box_bounds[0], box_bounds[3]), (box_bounds[2], box_bounds[3])] {
@@ -382,7 +382,7 @@ fn add_transformed_box(bounds: &mut Option<[f32; 4]>, transform: &Transform, box
 
 impl<'face, 'font> Painter<'font> for BoundsPainter<'face, 'font> {
 	//==============================================================================
-	// 윤곽 받기. (경계 상자만)
+	/// 윤곽 받기. (경계 상자만)
 	//==============================================================================
 	fn outline_glyph(&mut self, glyph_id: GlyphId) {
 		let mut segment_collector = SegmentCollector::new(Transform::default());
@@ -392,39 +392,39 @@ impl<'face, 'font> Painter<'font> for BoundsPainter<'face, 'font> {
 	}
 
 	//==============================================================================
-	// 칠. (경계에는 쓰지 않는다)
+	/// 칠. (경계에는 쓰지 않는다)
 	//==============================================================================
 	fn paint(&mut self, _paint: Paint<'font>) {}
 
 	//==============================================================================
-	// 윤곽 자르기. (경계에는 쓰지 않는다)
+	/// 윤곽 자르기. (경계에는 쓰지 않는다)
 	//==============================================================================
 	fn push_clip(&mut self) {}
 
 	//==============================================================================
-	// 자르기 상자. (윤곽이 하나도 없을 때의 경계)
+	/// 자르기 상자. (윤곽이 하나도 없을 때의 경계)
 	//==============================================================================
 	fn push_clip_box(&mut self, clip_box: ClipBox) {
 		add_transformed_box(&mut self.clip_bounds, &self.transform, [clip_box.x_min, clip_box.y_min, clip_box.x_max, clip_box.y_max]);
 	}
 
 	//==============================================================================
-	// 자르기 빼기. (경계에는 쓰지 않는다)
+	/// 자르기 빼기. (경계에는 쓰지 않는다)
 	//==============================================================================
 	fn pop_clip(&mut self) {}
 
 	//==============================================================================
-	// 층 쌓기. (경계에는 쓰지 않는다)
+	/// 층 쌓기. (경계에는 쓰지 않는다)
 	//==============================================================================
 	fn push_layer(&mut self, _mode: CompositeMode) {}
 
 	//==============================================================================
-	// 층 빼기. (경계에는 쓰지 않는다)
+	/// 층 빼기. (경계에는 쓰지 않는다)
 	//==============================================================================
 	fn pop_layer(&mut self) {}
 
 	//==============================================================================
-	// 변환 쌓기.
+	/// 변환 쌓기.
 	//==============================================================================
 	fn push_transform(&mut self, transform: Transform) {
 		self.transform_stack.push(self.transform);
@@ -432,7 +432,7 @@ impl<'face, 'font> Painter<'font> for BoundsPainter<'face, 'font> {
 	}
 
 	//==============================================================================
-	// 변환 빼기.
+	/// 변환 빼기.
 	//==============================================================================
 	fn pop_transform(&mut self) {
 		if let Some(transform) = self.transform_stack.pop() {
@@ -442,7 +442,7 @@ impl<'face, 'font> Painter<'font> for BoundsPainter<'face, 'font> {
 }
 
 //==============================================================================
-// 윤곽을 선분으로 모으기. (곡선은 펴고, 점은 변환으로 옮긴다)
+/// 윤곽을 선분으로 모으기. (곡선은 펴고, 점은 변환으로 옮긴다)
 //==============================================================================
 struct SegmentCollector {
 	transform: Transform,
@@ -453,7 +453,7 @@ struct SegmentCollector {
 
 impl SegmentCollector {
 	//==============================================================================
-	// 생성. (변환은 글꼴 단위 → 받을 좌표)
+	/// 생성. (변환은 글꼴 단위 → 받을 좌표)
 	//==============================================================================
 	fn new(transform: Transform) -> SegmentCollector {
 		SegmentCollector {
@@ -465,7 +465,7 @@ impl SegmentCollector {
 	}
 
 	//==============================================================================
-	// 옮긴 점까지 선분 하나.
+	/// 옮긴 점까지 선분 하나.
 	//==============================================================================
 	fn push_line(&mut self, end_point: (f32, f32)) {
 		self.segment_list.push([self.current_point.0, self.current_point.1, end_point.0, end_point.1]);
@@ -473,7 +473,7 @@ impl SegmentCollector {
 	}
 
 	//==============================================================================
-	// 곡선을 몇 조각으로 펼지. (font-rs 처럼 굽은 정도의 제곱근의 제곱근)
+	/// 곡선을 몇 조각으로 펼지. (font-rs 처럼 굽은 정도의 제곱근의 제곱근)
 	//==============================================================================
 	fn count_curve_pieces(deviation_squared: f32) -> usize {
 		if deviation_squared < 0.333 {
@@ -485,7 +485,7 @@ impl SegmentCollector {
 
 impl OutlineBuilder for SegmentCollector {
 	//==============================================================================
-	// 새 윤곽 시작.
+	/// 새 윤곽 시작.
 	//==============================================================================
 	fn move_to(&mut self, position_x: f32, position_y: f32) {
 		self.current_point = apply_transform(&self.transform, position_x, position_y);
@@ -493,7 +493,7 @@ impl OutlineBuilder for SegmentCollector {
 	}
 
 	//==============================================================================
-	// 선분.
+	/// 선분.
 	//==============================================================================
 	fn line_to(&mut self, position_x: f32, position_y: f32) {
 		let end_point = apply_transform(&self.transform, position_x, position_y);
@@ -501,7 +501,7 @@ impl OutlineBuilder for SegmentCollector {
 	}
 
 	//==============================================================================
-	// 2 차 곡선. (옮긴 뒤의 점으로 편다)
+	/// 2 차 곡선. (옮긴 뒤의 점으로 편다)
 	//==============================================================================
 	fn quad_to(&mut self, control_x: f32, control_y: f32, position_x: f32, position_y: f32) {
 		let start_point = self.current_point;
@@ -520,7 +520,7 @@ impl OutlineBuilder for SegmentCollector {
 	}
 
 	//==============================================================================
-	// 3 차 곡선. (옮긴 뒤의 점으로 편다)
+	/// 3 차 곡선. (옮긴 뒤의 점으로 편다)
 	//==============================================================================
 	fn curve_to(&mut self, first_control_x: f32, first_control_y: f32, second_control_x: f32, second_control_y: f32, position_x: f32, position_y: f32) {
 		let start_point = self.current_point;
@@ -547,7 +547,7 @@ impl OutlineBuilder for SegmentCollector {
 	}
 
 	//==============================================================================
-	// 윤곽 닫기. (시작점으로)
+	/// 윤곽 닫기. (시작점으로)
 	//==============================================================================
 	fn close(&mut self) {
 		let contour_start_point = self.contour_start_point;
@@ -558,7 +558,7 @@ impl OutlineBuilder for SegmentCollector {
 }
 
 //==============================================================================
-// 선분들의 덮인 정도. (넓이 누적, 0 이 아닌 감김에 가깝게 절댓값을 1 에서 자른다. 선분은 픽셀 좌표, y 는 아래로)
+/// 선분들의 덮인 정도. (넓이 누적, 0 이 아닌 감김에 가깝게 절댓값을 1 에서 자른다. 선분은 픽셀 좌표, y 는 아래로)
 //==============================================================================
 fn rasterize_segments(segment_list: &[[f32; 4]], width: i32, height: i32) -> Vec<f32> {
 	// 한 줄 끝에 셋을 더 두어 판 오른쪽 밖으로 민 값을 받는다. (줄마다 따로 더한다)
@@ -579,7 +579,7 @@ fn rasterize_segments(segment_list: &[[f32; 4]], width: i32, height: i32) -> Vec
 }
 
 //==============================================================================
-// 선분 하나를 넓이로 쌓기. (font-rs 의 draw_line, 판 왼쪽과 오른쪽 밖은 가장자리로 민다)
+/// 선분 하나를 넓이로 쌓기. (font-rs 의 draw_line, 판 왼쪽과 오른쪽 밖은 가장자리로 민다)
 //==============================================================================
 fn accumulate_line(accumulation: &mut [f32], stride: usize, width: i32, height: i32, segment: &[f32; 4]) {
 	let (start_x, start_y, end_x, end_y) = (segment[0], segment[1], segment[2], segment[3]);
@@ -648,7 +648,7 @@ fn accumulate_line(accumulation: &mut [f32], stride: usize, width: i32, height: 
 }
 
 //==============================================================================
-// 그라데이션 색 멈춤 하나. (자리, 곧은 알파 색 0 ~ 1)
+/// 그라데이션 색 멈춤 하나. (자리, 곧은 알파 색 0 ~ 1)
 //==============================================================================
 #[derive(Clone, Copy)]
 struct GradientStop {
@@ -657,7 +657,7 @@ struct GradientStop {
 }
 
 //==============================================================================
-// 색 줄을 멈춤 목록으로. (자리 차례로)
+/// 색 줄을 멈춤 목록으로. (자리 차례로)
 //==============================================================================
 fn collect_gradient_stops(stop_iterator: impl Iterator<Item = rustybuzz::ttf_parser::colr::ColorStop>) -> Vec<GradientStop> {
 	let mut stop_list: Vec<GradientStop> = stop_iterator.map(|color_stop| GradientStop {
@@ -669,7 +669,7 @@ fn collect_gradient_stops(stop_iterator: impl Iterator<Item = rustybuzz::ttf_par
 }
 
 //==============================================================================
-// 색 줄에서 t 의 색. (끝 밖은 Pad, Repeat, Reflect. 곧은 알파로 섞어 프리멀티플라이드로 돌려준다)
+/// 색 줄에서 t 의 색. (끝 밖은 Pad, Repeat, Reflect. 곧은 알파로 섞어 프리멀티플라이드로 돌려준다)
 //==============================================================================
 fn evaluate_color_line(stop_list: &[GradientStop], extend: GradientExtend, t: f32) -> [f32; 4] {
 	let first_stop = match stop_list.first() {
@@ -734,7 +734,7 @@ fn evaluate_color_line(stop_list: &[GradientStop], extend: GradientExtend, t: f3
 }
 
 //==============================================================================
-// 칠 하나를 픽셀마다 셈할 꼴로. (그라데이션은 멈춤을 모아 둔다)
+/// 칠 하나를 픽셀마다 셈할 꼴로. (그라데이션은 멈춤을 모아 둔다)
 //==============================================================================
 enum PreparedPaint {
 	Solid([f32; 4]),
@@ -745,7 +745,7 @@ enum PreparedPaint {
 
 impl PreparedPaint {
 	//==============================================================================
-	// 칠 만들기. (선형은 p0 에서 p1 을 p0p2 에 수직으로 돌린 p3 쪽, COLR 명세의 셈)
+	/// 칠 만들기. (선형은 p0 에서 p1 을 p0p2 에 수직으로 돌린 p3 쪽, COLR 명세의 셈)
 	//==============================================================================
 	fn create(paint: &Paint<'_>) -> PreparedPaint {
 		match paint {
@@ -803,7 +803,7 @@ impl PreparedPaint {
 	}
 
 	//==============================================================================
-	// 칠 공간의 점에서 색. (프리멀티플라이드, 방사는 두 원 사이에서 r(t) >= 0 인 큰 t)
+	/// 칠 공간의 점에서 색. (프리멀티플라이드, 방사는 두 원 사이에서 r(t) >= 0 인 큰 t)
 	//==============================================================================
 	fn evaluate(&self, position_x: f32, position_y: f32) -> [f32; 4] {
 		match self {
@@ -877,7 +877,7 @@ impl PreparedPaint {
 }
 
 //==============================================================================
-// 색 그리개. (글꼴 단위 → 픽셀은 scale 배, y 를 뒤집어 판 왼쪽 위 기준)
+/// 색 그리개. (글꼴 단위 → 픽셀은 scale 배, y 를 뒤집어 판 왼쪽 위 기준)
 //==============================================================================
 struct ColorPainter<'face, 'font> {
 	face: &'face Face<'font>,
@@ -888,18 +888,18 @@ struct ColorPainter<'face, 'font> {
 	top_y: f32,
 	transform_stack: Vec<Transform>,
 	transform: Transform,
-	// 마지막으로 받은 윤곽. (픽셀 좌표 선분)
+	/// 마지막으로 받은 윤곽. (픽셀 좌표 선분)
 	outline_segment_list: Vec<[f32; 4]>,
-	// 자르기 가면. (위의 것은 아래 것과 곱한 것)
+	/// 자르기 가면. (위의 것은 아래 것과 곱한 것)
 	clip_stack: Vec<Vec<f32>>,
-	// 합성할 층. (층 그림과 합성 방식)
+	/// 합성할 층. (층 그림과 합성 방식)
 	layer_stack: Vec<(Vec<[f32; 4]>, CompositeMode)>,
 	canvas: Vec<[f32; 4]>,
 }
 
 impl ColorPainter<'_, '_> {
 	//==============================================================================
-	// 글꼴 단위(지금 변환 앞) → 픽셀 변환.
+	/// 글꼴 단위(지금 변환 앞) → 픽셀 변환.
 	//==============================================================================
 	fn read_pixel_transform(&self) -> Transform {
 		let transform = &self.transform;
@@ -907,7 +907,7 @@ impl ColorPainter<'_, '_> {
 	}
 
 	//==============================================================================
-	// 지금 칠할 층. (층이 없으면 바탕 판)
+	/// 지금 칠할 층. (층이 없으면 바탕 판)
 	//==============================================================================
 	fn read_target_buffer(&mut self) -> &mut Vec<[f32; 4]> {
 		match self.layer_stack.last_mut() {
@@ -921,7 +921,7 @@ impl ColorPainter<'_, '_> {
 	}
 
 	//==============================================================================
-	// 가면을 자르기 쌓기에 얹기. (위의 가면과 곱한다)
+	/// 가면을 자르기 쌓기에 얹기. (위의 가면과 곱한다)
 	//==============================================================================
 	fn push_clip_mask(&mut self, mut mask: Vec<f32>) {
 		if let Some(top_mask) = self.clip_stack.last() {
@@ -935,7 +935,7 @@ impl ColorPainter<'_, '_> {
 
 impl<'face, 'font> Painter<'font> for ColorPainter<'face, 'font> {
 	//==============================================================================
-	// 윤곽 받기. (지금 변환으로 픽셀 좌표 선분에)
+	/// 윤곽 받기. (지금 변환으로 픽셀 좌표 선분에)
 	//==============================================================================
 	fn outline_glyph(&mut self, glyph_id: GlyphId) {
 		let mut segment_collector = SegmentCollector::new(self.read_pixel_transform());
@@ -944,7 +944,7 @@ impl<'face, 'font> Painter<'font> for ColorPainter<'face, 'font> {
 	}
 
 	//==============================================================================
-	// 칠. (자르기가 있으면 자르기 영역, 없으면 마지막 윤곽을 칠 색으로 덮는다. 원본 위에 얹기)
+	/// 칠. (자르기가 있으면 자르기 영역, 없으면 마지막 윤곽을 칠 색으로 덮는다. 원본 위에 얹기)
 	//==============================================================================
 	fn paint(&mut self, paint: Paint<'font>) {
 		let prepared_paint = PreparedPaint::create(&paint);
@@ -987,7 +987,7 @@ impl<'face, 'font> Painter<'font> for ColorPainter<'face, 'font> {
 	}
 
 	//==============================================================================
-	// 마지막 윤곽으로 자르기.
+	/// 마지막 윤곽으로 자르기.
 	//==============================================================================
 	fn push_clip(&mut self) {
 		let mask = rasterize_segments(&self.outline_segment_list, self.width, self.height);
@@ -995,7 +995,7 @@ impl<'face, 'font> Painter<'font> for ColorPainter<'face, 'font> {
 	}
 
 	//==============================================================================
-	// 자르기 상자로 자르기. (지금 변환을 건 사각형)
+	/// 자르기 상자로 자르기. (지금 변환을 건 사각형)
 	//==============================================================================
 	fn push_clip_box(&mut self, clip_box: ClipBox) {
 		let mut segment_collector = SegmentCollector::new(self.read_pixel_transform());
@@ -1009,21 +1009,21 @@ impl<'face, 'font> Painter<'font> for ColorPainter<'face, 'font> {
 	}
 
 	//==============================================================================
-	// 자르기 빼기.
+	/// 자르기 빼기.
 	//==============================================================================
 	fn pop_clip(&mut self) {
 		self.clip_stack.pop();
 	}
 
 	//==============================================================================
-	// 새 층. (빼면 그 방식으로 아래에 합성한다)
+	/// 새 층. (빼면 그 방식으로 아래에 합성한다)
 	//==============================================================================
 	fn push_layer(&mut self, mode: CompositeMode) {
 		self.layer_stack.push((vec![[0.0; 4]; self.canvas.len()], mode));
 	}
 
 	//==============================================================================
-	// 층 빼기. (층을 원본, 아래를 대상으로 합성)
+	/// 층 빼기. (층을 원본, 아래를 대상으로 합성)
 	//==============================================================================
 	fn pop_layer(&mut self) {
 		let (layer_buffer, mode) = match self.layer_stack.pop() {
@@ -1041,7 +1041,7 @@ impl<'face, 'font> Painter<'font> for ColorPainter<'face, 'font> {
 	}
 
 	//==============================================================================
-	// 변환 쌓기.
+	/// 변환 쌓기.
 	//==============================================================================
 	fn push_transform(&mut self, transform: Transform) {
 		self.transform_stack.push(self.transform);
@@ -1049,7 +1049,7 @@ impl<'face, 'font> Painter<'font> for ColorPainter<'face, 'font> {
 	}
 
 	//==============================================================================
-	// 변환 빼기.
+	/// 변환 빼기.
 	//==============================================================================
 	fn pop_transform(&mut self) {
 		if let Some(transform) = self.transform_stack.pop() {
@@ -1059,7 +1059,7 @@ impl<'face, 'font> Painter<'font> for ColorPainter<'face, 'font> {
 }
 
 //==============================================================================
-// 프리멀티플라이드 색 합성. (원본 source 를 대상 destination 위에, COLR 의 합성 방식. W3C Compositing and Blending)
+/// 프리멀티플라이드 색 합성. (원본 source 를 대상 destination 위에, COLR 의 합성 방식. W3C Compositing and Blending)
 //==============================================================================
 fn composite_pixel(source: [f32; 4], destination: [f32; 4], mode: CompositeMode) -> [f32; 4] {
 	let source_alpha = source[3];
@@ -1137,7 +1137,7 @@ fn composite_pixel(source: [f32; 4], destination: [f32; 4], mode: CompositeMode)
 }
 
 //==============================================================================
-// 섞기 함수 B(Cb, Cs). (곧은 색, 나눌 수 있는 것은 채널마다, 색조 넷은 W3C 의 Lum, Sat 셈)
+/// 섞기 함수 B(Cb, Cs). (곧은 색, 나눌 수 있는 것은 채널마다, 색조 넷은 W3C 의 Lum, Sat 셈)
 //==============================================================================
 fn blend_colors(backdrop: [f32; 3], source: [f32; 3], mode: CompositeMode) -> [f32; 3] {
 	let blend_channel = |backdrop_value: f32, source_value: f32| -> f32 {
@@ -1236,14 +1236,14 @@ fn blend_colors(backdrop: [f32; 3], source: [f32; 3], mode: CompositeMode) -> [f
 }
 
 //==============================================================================
-// 밝기. (W3C Lum)
+/// 밝기. (W3C Lum)
 //==============================================================================
 fn read_luminosity(color: [f32; 3]) -> f32 {
 	0.3 * color[0] + 0.59 * color[1] + 0.11 * color[2]
 }
 
 //==============================================================================
-// 밝기 바꾸기. (W3C SetLum 과 ClipColor)
+/// 밝기 바꾸기. (W3C SetLum 과 ClipColor)
 //==============================================================================
 fn set_luminosity(color: [f32; 3], luminosity: f32) -> [f32; 3] {
 	let difference = luminosity - read_luminosity(color);
@@ -1265,14 +1265,14 @@ fn set_luminosity(color: [f32; 3], luminosity: f32) -> [f32; 3] {
 }
 
 //==============================================================================
-// 채도. (W3C Sat, 가장 큰 값 - 가장 작은 값)
+/// 채도. (W3C Sat, 가장 큰 값 - 가장 작은 값)
 //==============================================================================
 fn read_saturation(color: [f32; 3]) -> f32 {
 	color[0].max(color[1]).max(color[2]) - color[0].min(color[1]).min(color[2])
 }
 
 //==============================================================================
-// 채도 바꾸기. (W3C SetSat)
+/// 채도 바꾸기. (W3C SetSat)
 //==============================================================================
 fn set_saturation(color: [f32; 3], saturation: f32) -> [f32; 3] {
 	let mut index_list = [0usize, 1, 2];
@@ -1292,7 +1292,7 @@ mod tests {
 	use super::*;
 
 	//==============================================================================
-	// 넓이 누적: 픽셀 경계에 맞춘 네모는 안이 1, 밖이 0, 반 걸친 열은 반.
+	/// 넓이 누적: 픽셀 경계에 맞춘 네모는 안이 1, 밖이 0, 반 걸친 열은 반.
 	//==============================================================================
 	#[test]
 	fn rasterize_square_covers_inside() {
@@ -1309,7 +1309,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 색 줄: Pad 는 끝 색, Repeat 는 되풀이, Reflect 는 되접기. 프리멀티플라이드로 돌려준다.
+	/// 색 줄: Pad 는 끝 색, Repeat 는 되풀이, Reflect 는 되접기. 프리멀티플라이드로 돌려준다.
 	//==============================================================================
 	#[test]
 	fn color_line_follows_extend() {
@@ -1327,7 +1327,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 합성: SourceOver 와 SourceIn, Multiply 가 W3C 식과 같다.
+	/// 합성: SourceOver 와 SourceIn, Multiply 가 W3C 식과 같다.
 	//==============================================================================
 	#[test]
 	fn composite_matches_w3c() {
@@ -1342,7 +1342,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 다시 뽑기: 반으로 줄이면 두 픽셀이 하나로 평균, 반 픽셀 밀린 끝은 반만 덮인다.
+	/// 다시 뽑기: 반으로 줄이면 두 픽셀이 하나로 평균, 반 픽셀 밀린 끝은 반만 덮인다.
 	//==============================================================================
 	#[test]
 	fn resample_weights_average_and_cover_edges() {

@@ -159,8 +159,9 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
 - 기본 프레임버퍼에 그릴 때는 알파를 쓰지 않는다(`apply_color_mask`, 원본에 없음). 원본과 웹은 캔버스가 `alpha: false` 라 화면 알파가 늘 1 이고, 데스크탑 기본 프레임버퍼도 프레임 첫머리에 알파를 1 로 비운 뒤 그대로 두어 DST_ALPHA 를 쓰는 모드와 셰이더 섞기가 웹과 같게 나온다. 렌더 타겟에는 알파도 쓰고, GL 을 밖에 내줄 때는 모두 쓰는 마스크로 되돌린다.
 - 묶어 그리기와 거르기는 `set_batching_enabled`, `set_culling_enabled` 로 끈다.
 - 3D 렌더 타겟은 멀티샘플(RenderTargetOptions.sample_count, 기기가 받는 수로 줄임)과 깊이 비트(16, 24)를 받는다. 툰 3D 의 HDR 마무리(ToonPostProcess)는 멀티샘플, 실수 판(못 쓰는 기기는 RGBA8 LDR 길), 다단 블룸(MultiLevelBloomEffect), 색 보정을 건다.
+- 툰 셰이딩은 그늘 램프다. (원본과 같은 셰이더) 빛을 받는 몫 x(반 램버트 기본, shade_offset 을 더하고 해는 그림자를 곱함)를 칸마다 자리, 색, 부드러움(fwidth 로 막음)인 램프나 램프 텍스처에 대어, 해는 램프 색을 통째로, 채움 빛과 점광과 스포트라이트는 램프의 밝기 단계를 받는다. 하이라이트와 림은 0.5 를 가른 단단한 꼴에서 부드러운 꼴까지, 림은 더한다. 색 = 바탕색 x irradiance + specular x specularMask + rim x rimMask + 빛남, 그 뒤 매트캡. 노멀은 역행렬의 전치로 옮긴다.
 - 툰 바깥선은 두 가지이고 함께 써도 된다. (원본과 같은 셰이더)
-  - 껍데기(inverted hull): MeshBuilder 가 같은 자리의 노멀을 모아 평균한 쪽으로 민 사본을 짓고, ToonRenderer 가 그 뒷면만 그린다.
+  - 껍데기(inverted hull): MeshBuilder 가 같은 자리의 노멀을 모아 평균한 쪽으로 민 굵기를 짓고, ToonRenderer 가 바탕 자리에서 그리기마다의 굵기 배와 거리 배(set_outline_distance_scale)만큼 밀어 뒷면만 그린다. 색은 그리기마다(outline_color).
   - 화면 공간(ToonScreenOutline): 불투명한 모형을 같은 행렬로 한 번 더 그려 선의 판(노멀 팔면체 접기, 선 번호 14 비트, 꼴 2 비트, 깊이 24)을 짓고, 화소와 바로 이웃 넷 사이 경계마다 한 번 보아 선이면 경계 가운데를 씨앗(RGBA16UI, 반 화소 단위)으로 쓴다. 바깥 선은 빈 곳, 다른 번호, 서로의 접평면에서 깊이 문턱보다 떨어진 같은 번호. 꺾임 선은 같은 번호에서 두 노멀이 꺾임 각보다 벌어진 곳. 씨앗을 점프 플러딩(걸음 k, k/2, ..., 1)으로 퍼뜨리고, 그리는 영역 화소마다 선의 판 2x2 칸의 씨앗까지 거리로 clamp(굵기 / 2 - 거리 + 0.5, 0, 1) 만큼 섞는다. 선이 화소 사이에 서므로 띠와 평행한 둘째 선이 없고, 줄인 선의 판에서도 끊기지 않는다. 그리기 줄(ToonDrawQueue::set_screen_outline)에 맡기면 선의 판은 몸 앞에, 섞기는 바깥선 껍데기 뒤에 한다.
 
 ## 7. 애셋
@@ -170,8 +171,8 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
 - AssetLoader 는 여러 애셋을 동시 수(기본 6)만큼 받고 진행률과 실패 목록을 센다. 다 받은 그림은 원본 img.onload 처럼 풀어 보고, 깨진 것은 실패로 친다. 푼 그림은 읽기 손잡이에 담겨 ImageAsset 이 다시 풀지 않는다.
 - `AudioAsset` 은 오디오 백엔드와 붙어 있어 `engine.load_audio_asset` 으로 읽고 `track_audio_asset` 으로 맡긴다.
 - 그림: 데스크탑은 png, jpeg, webp, gif(첫 장), bmp, ico 를 image 크레이트로, SVG 를 resvg 로, AVIF 를 엔진의 HEIF 상자 읽기와 rav1d 로 푼다. 웹은 원본처럼 브라우저(HTMLImageElement 의 decode)가 푼다. 그림의 형은 원본처럼 응답의 content-type 이다. (SVG 는 형으로, 래스터는 내용으로 가린다. 응답이 없는 데스크탑은 내용으로 고른다)
-- 소리: 웹은 원본처럼 브라우저 decodeAudioData 가 풀고, 데스크탑은 같은 결과가 나오게 platform/audio/decode 가 푼다. 꼴은 내용으로 가리고, symphonia 0.6 으로 디먹스해 FLAC, MP3, PCM, Vorbis 는 크롬과 같은 symphonia 해석기, Opus 는 opus-pure(libopus 를 옮긴 것), AAC 는 symphonia 의 AAC 로 푼다. 크롬이 FFmpeg 디먹스 값으로 버리는 앞뒤(Opus pre-skip 과 webm CodecDelay, DiscardPadding, MP3 LAME 지연, Vorbis granule, m4a 편집 목록과 iTunSMPB)를 같게 버리고, 정수 표본을 크롬 식으로 실수로 바꾸고, 원본 DECODE_SAMPLE_RATE(44100)로 크로미엄 SincResampler 를 옮겨 바꾸고, WebAudio 스피커 규칙으로 1 채널이나 2 채널로 내린다. `tests/assets/audio` 의 21 파일이 크롬 158 과 길이, 채널, 표본까지 같다. (Opus, AAC 는 1e-7 안팎)
-- 소리 내기: 데스크탑은 cpal 로 기본 출력 장치를 열고 그 표본율(원본 AudioContext 의 하드웨어 표본율)로 엔진 믹서를 돌린다. 원본이 짓는 그래프(AudioBufferSourceNode → 플레이어 GainNode → [StereoPannerNode] → 버스 GainNode 또는 출력, 비프 오실레이터 → 출력)를 128 프레임 퀀텀으로 그리고, 소스(시작 위치, 선형 보간과 끝의 외삽, 루프, playbackRate 는 f32), StereoPanner(모노와 스테레오 식), GainNode, 모노를 양쪽에 올리는 섞기, 출력의 -1 ~ 1 자르기를 크로미엄 audio_buffer_source_handler.cc, stereo_panner.cc 와 같게 셈한다. `tests/assets/mixer` 의 그래프 다섯이 크롬 158 OfflineAudioContext 와 1e-6 안에서 같다.
+- 소리: 웹은 원본처럼 브라우저 decodeAudioData 가 풀고, 데스크탑은 같은 결과가 나오게 platform/audio/decode 가 푼다. 꼴은 내용으로 가리고, symphonia 0.6 으로 디먹스해 FLAC, MP3, PCM, Vorbis 는 크롬과 같은 symphonia 해석기, Opus 는 opus-pure(libopus 를 옮긴 것), AAC 는 AAC-LC 2 채널까지 symphonia 의 AAC, HE-AAC(SBR, PS, ASC 에 적혔든 몸통에만 있든)와 3 채널 이상은 oxideav-aac(명세로 짠 해석기)로 푼다. 크롬이 FFmpeg 디먹스 값으로 버리는 앞뒤(Opus pre-skip 과 webm CodecDelay, DiscardPadding, MP3 LAME 지연, Vorbis granule, m4a 편집 목록과 iTunSMPB)를 같게 버리고, 정수 표본을 크롬 식으로 실수로 바꾸고, 원본 DECODE_SAMPLE_RATE(44100)로 크로미엄 SincResampler 를 옮겨 바꾸고, WebAudio 스피커 규칙으로 1 채널이나 2 채널로 내린다. `tests/assets/audio` 의 27 파일이 크롬 158 과 길이, 채널, 표본까지 같다. (Opus, AAC 는 1.5e-7 안팎) 표본율 바꾸기의 합 차례는 크롬처럼 aarch64 는 NEON, x86_64 는 AVX2 와 FMA 또는 SSE 를 따르는데, 기대값은 애플 실리콘 맥의 크롬에서 뽑았고 x86 실기에서는 돌려 보지 못했다.
+- 소리 내기: 데스크탑은 cpal 로 기본 출력 장치를 열고 그 표본율(원본 AudioContext 의 하드웨어 표본율)로 엔진 믹서를 돌린다. 원본이 짓는 그래프(AudioBufferSourceNode → 플레이어 GainNode → [StereoPannerNode] → 버스 GainNode 또는 출력, 비프 OscillatorNode → GainNode → 출력)를 128 프레임 퀀텀으로 그리고, 소스(시작 위치, 선형 보간과 끝의 외삽, 루프, playbackRate 는 f32), StereoPanner(모노와 스테레오 식), GainNode, 모노를 양쪽에 올리는 섞기, 출력의 -1 ~ 1 자르기를 크로미엄 audio_buffer_source_handler.cc, stereo_panner.cc 와 같게 셈한다. GainNode 의 gain 은 AudioParam 이고 자동화를 크로미엄과 같은 셈으로 표본마다 흘린다. `tests/assets/mixer` 의 그래프 아홉(자동화, 예약 정지, 그리는 도중 지금 값에서 줄여 끄기와 겹쳐 바꾸기 포함)이 크롬 158 OfflineAudioContext 와 1e-6 안에서 같다. BeepPlayer 는 원본 playTone 의 그래프를 그대로 짓고, OscillatorNode 는 크로미엄 oscillator_handler.cc 와 CPU 별 커널(arm64 NEON, x86 SSE2)을 옮겨 대역 제한 표, frequency 자동화, 읽기 자리와 보간을 같은 차례로 셈한다. 비프 아홉 경우가 크롬과 표본마다 1.2e-7 안에서 같다. (x86 판은 x86 크롬과 견주지 못했다)
 - "data:" 주소: 데스크탑 애셋 읽기(request_asset_bytes, load_image, load_audio_asset)와 타임라인이 base/dataurl.rs 로 푼다. 웹은 기준 주소를 붙이지 않고 브라우저 fetch 에 맡긴다.
 - 글꼴: ttf, otf, woff, woff2 를 읽는다. 데스크탑은 woff, woff2 를 wuff 로 풀고, 운영체제 글꼴은 글꼴 모음(TTC)에서 이름이나 굵기로 얼굴을 고른다. 웹은 원본처럼 글꼴 바이트를 document.fonts 의 FontFace 로 올린다.
 - 이미지는 GPU 에 올린 뒤 CPU 픽셀을 놓는다. 픽셀을 다시 읽을 그림은 `Image.set_pixels_retained(true)` 로 남긴다. (ShadowImage 는 받은 그림을 스스로 남기고, 이미 놓였으면 텍스처를 프레임버퍼에 붙여 되읽는다. Canvas2D 의 drawImage 와 createPattern 도 놓인 그림은 텍스처에서 되읽는다) GL 컨텍스트를 잃었다 되살리는 길은 아직 없다.
@@ -183,6 +184,8 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
 ## 8. 코드 꼴
 
 이름은 러스트 규칙(Rust API Guidelines C-CASE)을 따른다: 함수, 메서드, 변수, 필드, 모듈은 snake_case, 타입과 트레이트와 열거 값은 UpperCamelCase, 상수는 SCREAMING_SNAKE_CASE. vanilla.js 의 이름은 이 규칙으로 바꿔 옮긴다. (setFillColor → set_fill_color, Colors.white → Colors::WHITE) 나머지는 vanilla.js 지침을 따른다: 이름 줄이지 않기, 중괄호 늘 쓰기, else 는 다음 줄, `//====` 머리 주석에 독백체 설명, 파일 머리에 원본과의 대응과 다른 점. rustfmt 는 else 줄바꿈을 망가뜨려서 돌리지 않는다.
+
+문서 주석: 머리 주석(`//====` 두 줄 사이)의 설명 줄은 rustdoc 의 `///`, 파일 머리는 `//!` 다. 인자는 `# 인자` 절의 `` - `이름`: 설명 ``, 돌려줌은 `# 돌려줌` 절, 예제는 `# 예제` 절의 ```rust 칸(바로 앞 한 줄이 제목)으로 쓴다. 예제는 `cargo test --doc` 이 컴파일하고 돌린다. (창이나 GL 이 있어야 하면 no_run) 이 주석에서 API 문서 자료(docs/api/<판>.json)를 뽑는다. (tools/apidoc) 자세한 꼴은 CLAUDE.md 의 '문서 주석'.
 
 ## 9. 원본과의 대응
 
@@ -208,6 +211,7 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
   - web/Pane(화면 분할 패널)은 웹에서 원본처럼 DOM 요소로, 데스크탑에서 엔진 노드로 짓는다. 크기 셈과 끌기 셈은 두 플랫폼이 같은 함수다. 데스크탑은 컨테이너가 노드이고 노드를 고치는 함수가 NodeTree 를 받는다. (web/pane.rs)
   - 브라우저가 해 주던 것은 엔진이 같은 API 로 한다. 원본과 게임의 캔버스와 2D 컨텍스트는 Canvas2D(웹은 브라우저 캔버스, 데스크탑은 tiny-skia), window.alert, confirm, prompt 는 Engine::alert, confirm, prompt(웹은 브라우저 창, 데스크탑은 엔진이 그린 크롬 탭 모달 같은 창, await 꼴도 있다), html lang 과 meta 는 Document, 직접 누르는 입력 필드의 크롬 편집 칸 메뉴와 DOM 입력 칸의 되돌리기는 데스크탑에서 엔진이 그린다. LocalStorage 와 PersistedStore 는 원본 JS 글의 짝 없는 서로게이트를 원래 단위 그대로 지키고, 짝 없는 서로게이트로만 다른 두 키도 따로 든다. 원래 단위가 필요하면 LocalStorage 의 코드 단위 함수(get_item_code_units, get_keys_code_units, get_item_by_key_code_units, set_item_by_key_code_units 같은 것)로 원본 localStorage 처럼 JS 글 그대로 읽고 쓴다. (misc/storagetext.rs)
   - SoundSystem 의 음악과 효과음 버스는 AudioBus 다. (원본에도 같은 꼴로 넣었다) 데스크탑은 엔진 믹서의 버스 노드, 웹은 GainNode 이고, get_gain_node 는 두 플랫폼 모두 AudioGainNode(웹 GainNode, 데스크탑은 버스 노드를 나눠 드는 Rc<MixerGainNode>)를 돌려준다.
+  - SoundSystem 의 크기 바꾸기와 줄이기는 원본처럼 GainNode 의 AudioParam 자동화(value 대입, setValueAtTime, linearRampToValueAtTime, setTargetAtTime, cancelScheduledValues)와 source.stop(when)이다. 웹은 WebAudio 에 그대로 걸고, 데스크탑 믹서는 크로미엄 audio_param_handler.cc 를 옮긴 platform/audio/audioparam.rs 로 표본마다 같은 셈을 한다. (AudioPlayer, AudioBus 의 pub(crate) apply_gain_automation, get_gain_value, stop_at_time)
   - Cooldown.use(원본 base/timer.js), FullscreenPass.use, ShaderProgram.use 는 use 가 러스트 예약어라 r#use 로 부른다. activate, use_program 은 같은 일을 하는 이름으로 남긴다.
   - 노드 객체를 돌려주는 getParent, getChildren, getSiblings 는 핸들을 돌려주는 get_parent_id, get_child_ids, get_sibling_ids 다.
   - 갈아 끼운 저장소(LocalStorage.get_backend, PersistedStore.get_storage_backend)와 콜백 게터(UIButton.get_click_event 같은 것)는 Rc<RefCell> 에 담아 돌려주고, 부르는 쪽이 빌려 쓴다. SpriteAnimator.findSprite(형제를 쥐기)와 SharedBakeCache 의 놓기(release)는 빌림 규칙과 Rc 참조 수로 갈음한다.
@@ -235,8 +239,8 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
 | 웨이랜드에서 xdg_toplevel 의 suspended 상태는 받지 못한다. 가려짐(페이지 이벤트 Hidden)은 크롬의 다른 갈래인 프레임 콜백 3 초 규칙으로만 본다 | xdg_toplevel 은 winit(sctk)이 리스너를 달아 쥐고 있고 libwayland 는 프록시 하나에 리스너 하나만 단다. winit 0.30.13 은 configure 의 suspended 를 받아 두기만 하고 알리지 않는다 (0.31 베타 4 와 본줄기도 같다). suspended 를 보내면서 프레임 콜백도 계속 보내는 컴포지터에서만 크롬과 달라진다 |
 | DevTools 메모리 칸은 자바스크립트 힙 대신 시스템 할당자의 힙이고, jsHeapSizeLimit 는 (N/A) 다 | 데스크탑에는 V8 힙이 없다. 시스템 할당자에는 V8 처럼 정한 힙 상한이 없다 |
 | 데스크탑의 글자 래스터 픽셀과 도형 가장자리 안티에일리어싱이 크롬과 다르다 (글자 너비는 크롬 measureText 와 맞췄고, 도형 안쪽 색은 같다) | 크롬의 Skia, CoreGraphics 래스터라이저 대신 fontdue, skrifa(맥의 색 이모지와 일부 글꼴은 CoreText)와 GL 이 칠한다 |
-| 데스크탑 Opus 와 AAC 의 표본 끝자리가 크롬과 1e-7 안팎으로 다르다 (길이와 다듬기는 같다) | 크롬은 Opus 를 libopus(C), AAC 를 FFmpeg(LGPL)로 푼다. 데스크탑은 C 빌드 없이 맥에서 윈도우 대상 검사가 되도록 libopus 를 러스트로 옮긴 opus-pure 로, AAC 는 LGPL 코드를 옮기지 않고 symphonia 로 푼다 |
-| 데스크탑은 HE-AAC(SBR, PS)와 3 채널 이상 AAC 를 풀지 못한다 | symphonia 0.6.1 의 AAC 는 AAC-LC 2 채널까지만 받는다 ("aac too complex"). 크롬은 FFmpeg 로 푼다 |
+| 데스크탑 Opus 와 AAC 의 표본 끝자리가 크롬과 1.5e-7 안팎으로 다르다 (길이와 다듬기는 같다) | 크롬은 Opus 를 libopus(C), AAC 를 FFmpeg(LGPL)로 푼다. 데스크탑은 C 빌드 없이 맥에서 윈도우 대상 검사가 되도록 libopus 를 러스트로 옮긴 opus-pure 로, AAC 는 LGPL 코드를 옮기지 않고 symphonia 와 oxideav-aac 로 푼다 |
+| 데스크탑 3 채널 이상 AAC 의 PNS(잡음 대치) 띠는 잡음 표본이 크롬과 다르다 (띠의 에너지는 같다) | 명세는 PNS 난수 생성기를 정하지 않는다. 크롬(FFmpeg)과 같은 잡음 열을 내려면 FFmpeg 의 생성기와 정규화를 옮겨야 한다. (2 채널 이하는 symphonia 로 풀어 크롬과 같다) |
 
 **크롬과 결과가 같아 차이가 아닌 것** (크로미엄 소스로 확인한 것)
 

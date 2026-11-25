@@ -1,24 +1,24 @@
 //==============================================================================
-// 글 입력 줄. (InputManager 가 든다)
-// - 원본에는 이런 층이 없다. 원본 UIInputField 는 DOM <input> 과 document keydown 에 직접 리스너를 단다.
-//   러스트 판은 플랫폼이 창 이벤트(데스크탑 winit 의 KeyboardInput / Ime, 웹 숨긴 <input> 의 input / composition / keydown)를
-//   여기 줄에 넣고, 포커스를 가진 입력 필드가 tick 에서 꺼내 쓴다. (ui/uiinputfield.rs)
-// - 컴포넌트는 &Engine 만 받는다. 그래서 필드가 쓰는 쪽(꺼내기, 상태 올리기)은 RefCell 로 &self 에서 되게 했다.
-//   플랫폼은 &mut Engine 을 쥐므로 넣는 쪽은 &mut self 다.
-// - 프레임 흐름:
-//   1. 플랫폼이 프레임 사이에 이벤트를 넣는다. (push_event)
-//   2. 씬 tick 에서 필드가 자기 몫을 꺼낸다. (take_events_for_field) 붙어 있는(attach) 필드와 포커스를 가진 필드는 상태를 올린다. (register_field_state)
-//   3. 프레임 끝에 엔진이 finish_frame 을 부른다. 남은 이벤트를 버리고, 올라온 상태를 "지난 프레임 상태"로 넘긴다.
-//   4. 플랫폼이 지난 프레임 상태를 읽어 적용한다. (데스크탑: IME 켜고 끄기와 후보 창 자리, 웹: 숨긴 <input> 자리, 값, 포커스)
-// - 글자 자리는 모두 문자(char) 단위다. 원본(자바스크립트 문자열)은 UTF-16 단위다. 한글은 둘이 같고, 이모지 같은 글자에서만 다르다.
-//   웹 플랫폼은 DOM 의 UTF-16 자리를 여기 함수로 바꿔 넣는다.
+//! 글 입력 줄. (InputManager 가 든다)
+//! - 원본에는 이런 층이 없다. 원본 UIInputField 는 DOM <input> 과 document keydown 에 직접 리스너를 단다.
+//!   러스트 판은 플랫폼이 창 이벤트(데스크탑 winit 의 KeyboardInput / Ime, 웹 숨긴 <input> 의 input / composition / keydown)를
+//!   여기 줄에 넣고, 포커스를 가진 입력 필드가 tick 에서 꺼내 쓴다. (ui/uiinputfield.rs)
+//! - 컴포넌트는 &Engine 만 받는다. 그래서 필드가 쓰는 쪽(꺼내기, 상태 올리기)은 RefCell 로 &self 에서 되게 했다.
+//!   플랫폼은 &mut Engine 을 쥐므로 넣는 쪽은 &mut self 다.
+//! - 프레임 흐름:
+//!   1. 플랫폼이 프레임 사이에 이벤트를 넣는다. (push_event)
+//!   2. 씬 tick 에서 필드가 자기 몫을 꺼낸다. (take_events_for_field) 붙어 있는(attach) 필드와 포커스를 가진 필드는 상태를 올린다. (register_field_state)
+//!   3. 프레임 끝에 엔진이 finish_frame 을 부른다. 남은 이벤트를 버리고, 올라온 상태를 "지난 프레임 상태"로 넘긴다.
+//!   4. 플랫폼이 지난 프레임 상태를 읽어 적용한다. (데스크탑: IME 켜고 끄기와 후보 창 자리, 웹: 숨긴 <input> 자리, 값, 포커스)
+//! - 글자 자리는 모두 문자(char) 단위다. 원본(자바스크립트 문자열)은 UTF-16 단위다. 한글은 둘이 같고, 이모지 같은 글자에서만 다르다.
+//!   웹 플랫폼은 DOM 의 UTF-16 자리를 여기 함수로 바꿔 넣는다.
 //==============================================================================
 use crate::base::rect::Rect;
 use crate::base::vector2::Vector2;
 use std::cell::{Cell, RefCell};
 
 //==============================================================================
-// 편집 키. (원본 handleCanvasKeydown 이 보는 키)
+/// 편집 키. (원본 handleCanvasKeydown 이 보는 키)
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TextInputKey {
@@ -39,89 +39,89 @@ pub enum TextInputKey {
 	DocumentStart,
 	DocumentEnd,
 	Enter,
-	// 원본 캔버스 모드처럼 필드는 쓰지 않는다. (게임이 다음 칸으로 옮길 때 보라고 넘긴다)
+	/// 원본 캔버스 모드처럼 필드는 쓰지 않는다. (게임이 다음 칸으로 옮길 때 보라고 넘긴다)
 	Tab,
-	// Ctrl(맥은 Cmd) + A
+	/// Ctrl(맥은 Cmd) + A
 	SelectAll,
-	// Ctrl(맥은 Cmd) + C
+	/// Ctrl(맥은 Cmd) + C
 	Copy,
-	// Ctrl(맥은 Cmd) + X
+	/// Ctrl(맥은 Cmd) + X
 	Cut,
-	// Ctrl(맥은 Cmd) + V
+	/// Ctrl(맥은 Cmd) + V
 	Paste,
-	// 되돌리기. (Ctrl(맥은 Cmd) + Z, 윈도우는 Alt + Backspace 도. 원본 DOM 입력 칸의 브라우저 실행 취소)
+	/// 되돌리기. (Ctrl(맥은 Cmd) + Z, 윈도우는 Alt + Backspace 도. 원본 DOM 입력 칸의 브라우저 실행 취소)
 	Undo,
-	// 다시 하기. (Ctrl(맥은 Cmd) + Shift + Z, 윈도우와 리눅스는 Ctrl + Y, 윈도우는 Alt + Shift + Backspace 도)
+	/// 다시 하기. (Ctrl(맥은 Cmd) + Shift + Z, 윈도우와 리눅스는 Ctrl + Y, 윈도우는 Alt + Shift + Backspace 도)
 	Redo,
 }
 
 //==============================================================================
-// 글 입력 이벤트 내용.
+/// 글 입력 이벤트 내용.
 //==============================================================================
 #[derive(Clone, Debug, PartialEq)]
 pub enum TextInputEventKind {
-	// 확정된 글. (IME 확정, 키로 친 글자)
+	/// 확정된 글. (IME 확정, 키로 친 글자)
 	Commit(String),
-	// 조합 시작. (원본 compositionstart)
+	/// 조합 시작. (원본 compositionstart)
 	CompositionStart,
-	// 조합 중인 글. 커서는 조합 글 안의 문자 자리. (원본 compositionupdate, winit Ime::Preedit)
+	/// 조합 중인 글. 커서는 조합 글 안의 문자 자리. (원본 compositionupdate, winit Ime::Preedit)
 	Preedit {
 		text: String,
 		cursor_index: Option<usize>,
 	},
-	// 조합 끝. (원본 compositionend)
+	/// 조합 끝. (원본 compositionend)
 	CompositionEnd,
-	// 편집 키.
+	/// 편집 키.
 	Key {
 		key: TextInputKey,
 		is_shift: bool,
 	},
-	// 붙여 넣을 글. (웹에서 클립보드를 비동기로 읽은 뒤)
+	/// 붙여 넣을 글. (웹에서 클립보드를 비동기로 읽은 뒤)
 	Paste(String),
-	// 숨긴 <input> 의 값이 바뀜. (웹, 원본 handleDOMInputEvent)
+	/// 숨긴 <input> 의 값이 바뀜. (웹, 원본 handleDOMInputEvent)
 	ReplaceValue {
 		value: String,
 		selection_start: usize,
 		selection_end: usize,
 	},
-	// 숨긴 <input> 의 선택이 바뀜. (웹, 원본 tick 의 selection 폴링)
+	/// 숨긴 <input> 의 선택이 바뀜. (웹, 원본 tick 의 selection 폴링)
 	Selection {
 		start: usize,
 		end: usize,
 	},
-	// 숨긴 <input> 이 포커스를 얻음. (웹, 원본 input focus 이벤트)
+	/// 숨긴 <input> 이 포커스를 얻음. (웹, 원본 input focus 이벤트)
 	FocusGained,
-	// 숨긴 <input> 이 포커스를 잃음. (웹, 원본 input blur 이벤트)
+	/// 숨긴 <input> 이 포커스를 잃음. (웹, 원본 input blur 이벤트)
 	FocusLost,
 }
 
 //==============================================================================
-// 글 입력 이벤트. (받을 필드 + 내용)
+/// 글 입력 이벤트. (받을 필드 + 내용)
 //==============================================================================
 #[derive(Clone, Debug, PartialEq)]
 pub struct TextInputEvent {
-	// 받을 필드 id. 0 이면 지금 포커스를 가진 필드. (데스크탑 키와 IME, 웹 캔버스 모드 키)
+	/// 받을 필드 id. 0 이면 지금 포커스를 가진 필드. (데스크탑 키와 IME, 웹 캔버스 모드 키)
 	pub target_field_id: u64,
 	pub kind: TextInputEventKind,
 }
 
 //==============================================================================
-// 필드가 프레임마다 올리는 상태. (플랫폼이 IME 와 숨긴 <input> 을 맞출 때 읽는다)
-// - 자리는 창 안쪽 논리 좌표(웹은 캔버스 기준 CSS 픽셀)다.
+/// 필드가 프레임마다 올리는 상태. (플랫폼이 IME 와 숨긴 <input> 을 맞출 때 읽는다)
+/// - 자리는 창 안쪽 논리 좌표(웹은 캔버스 기준 CSS 픽셀)다.
 //==============================================================================
 #[derive(Clone, Debug, PartialEq)]
 pub struct TextInputFieldState {
 	pub field_id: u64,
-	// 포커스를 얻은 차례. (클수록 나중. 포커스가 없으면 0)
+	/// 포커스를 얻은 차례. (클수록 나중. 포커스가 없으면 0)
 	pub focus_serial: u64,
 	pub is_focused: bool,
-	// attach() 로 입력을 받기로 했는지.
+	/// attach() 로 입력을 받기로 했는지.
 	pub is_attached: bool,
-	// 플랫폼 글 입력(IME, 시스템 키보드, 웹 숨긴 <input>)을 쓰는지. (원본 set_use_dominput)
+	/// 플랫폼 글 입력(IME, 시스템 키보드, 웹 숨긴 <input>)을 쓰는지. (원본 set_use_dominput)
 	pub use_dominput: bool,
 	pub use_touch_end_focus: bool,
 	pub use_direct_touch: bool,
-	// 노드와 조상이 모두 보이는지.
+	/// 노드와 조상이 모두 보이는지.
 	pub is_visible: bool,
 	pub field_rect: Rect,
 	pub caret_rect: Rect,
@@ -129,14 +129,14 @@ pub struct TextInputFieldState {
 	pub selection_start: usize,
 	pub cursor_index: usize,
 	pub max_length: usize,
-	// 필드 쪽에서 값이나 커서를 바꿀 때마다 는다. (웹이 숨긴 <input> 에 다시 써야 하는지 볼 때)
+	/// 필드 쪽에서 값이나 커서를 바꿀 때마다 는다. (웹이 숨긴 <input> 에 다시 써야 하는지 볼 때)
 	pub value_revision: u64,
 	// 여러 줄 필드인지. (웹은 숨긴 <textarea> 를 쓴다)
 	pub is_multiline: bool,
 }
 
 //==============================================================================
-// 글 입력 줄.
+/// 글 입력 줄.
 //==============================================================================
 pub struct TextInput {
 	event_list: RefCell<Vec<TextInputEvent>>,
@@ -149,7 +149,7 @@ pub struct TextInput {
 
 impl TextInput {
 	//==============================================================================
-	// 생성.
+	/// 생성.
 	//==============================================================================
 	pub fn new() -> TextInput {
 		TextInput {
@@ -163,14 +163,14 @@ impl TextInput {
 	}
 
 	//==============================================================================
-	// 이벤트 넣기. (플랫폼)
+	/// 이벤트 넣기. (플랫폼)
 	//==============================================================================
 	pub fn push_event(&mut self, event: TextInputEvent) {
 		self.event_list.get_mut().push(event);
 	}
 
 	//==============================================================================
-	// 포커스를 가진 필드에 갈 이벤트 넣기. (플랫폼)
+	/// 포커스를 가진 필드에 갈 이벤트 넣기. (플랫폼)
 	//==============================================================================
 	pub fn push_focused_field_event(&mut self, kind: TextInputEventKind) {
 		self.push_event(TextInputEvent {
@@ -180,15 +180,15 @@ impl TextInput {
 	}
 
 	//==============================================================================
-	// 쌓인 이벤트 수.
+	/// 쌓인 이벤트 수.
 	//==============================================================================
 	pub fn get_event_count(&self) -> usize {
 		self.event_list.borrow().len()
 	}
 
 	//==============================================================================
-	// 필드 몫의 이벤트 꺼내기. (자기 id 로 온 것, 그리고 포커스 이벤트를 받을 수 있으면 0 으로 온 것)
-	// - 꺼낸 이벤트는 줄에서 빠진다. 포커스를 가진 필드가 둘이 되는 한 프레임 동안에도 같은 글이 두 번 들어가지 않는다.
+	/// 필드 몫의 이벤트 꺼내기. (자기 id 로 온 것, 그리고 포커스 이벤트를 받을 수 있으면 0 으로 온 것)
+	/// - 꺼낸 이벤트는 줄에서 빠진다. 포커스를 가진 필드가 둘이 되는 한 프레임 동안에도 같은 글이 두 번 들어가지 않는다.
 	//==============================================================================
 	pub fn take_events_for_field(&self, field_id: u64, accepts_focused_field_events: bool) -> Vec<TextInputEventKind> {
 		let mut event_list = self.event_list.borrow_mut();
@@ -211,7 +211,7 @@ impl TextInput {
 	}
 
 	//==============================================================================
-	// 필드 상태 올리기. (필드 tick, 같은 필드가 두 번 올리면 뒤의 것)
+	/// 필드 상태 올리기. (필드 tick, 같은 필드가 두 번 올리면 뒤의 것)
 	//==============================================================================
 	pub fn register_field_state(&self, field_state: TextInputFieldState) {
 		let mut current_field_state_list = self.current_field_state_list.borrow_mut();
@@ -220,14 +220,14 @@ impl TextInput {
 	}
 
 	//==============================================================================
-	// 지난 프레임에 올라온 필드 상태 목록. (올라온 순서 = 트리 순서)
+	/// 지난 프레임에 올라온 필드 상태 목록. (올라온 순서 = 트리 순서)
 	//==============================================================================
 	pub fn get_published_field_states(&self) -> &[TextInputFieldState] {
 		&self.published_field_state_list
 	}
 
 	//==============================================================================
-	// 지난 프레임에 가장 나중에 포커스를 얻은 필드의 포커스 차례. (없으면 0)
+	/// 지난 프레임에 가장 나중에 포커스를 얻은 필드의 포커스 차례. (없으면 0)
 	//==============================================================================
 	pub fn get_latest_focus_serial(&self) -> u64 {
 		let mut latest_focus_serial = 0;
@@ -240,7 +240,7 @@ impl TextInput {
 	}
 
 	//==============================================================================
-	// 글 입력을 받는 필드 상태. (지난 프레임에 포커스를 가진, 붙어 있는 필드 가운데 가장 나중 것)
+	/// 글 입력을 받는 필드 상태. (지난 프레임에 포커스를 가진, 붙어 있는 필드 가운데 가장 나중 것)
 	//==============================================================================
 	pub fn get_active_field_state(&self) -> Option<&TextInputFieldState> {
 		let mut active_field_state: Option<&TextInputFieldState> = None;
@@ -264,29 +264,29 @@ impl TextInput {
 	}
 
 	//==============================================================================
-	// 문맥 메뉴 요청 자리 설정. (데스크탑 오른쪽 단추, 뷰 좌표. 이번 프레임에만 남는다)
+	/// 문맥 메뉴 요청 자리 설정. (데스크탑 오른쪽 단추, 뷰 좌표. 이번 프레임에만 남는다)
 	//==============================================================================
 	pub fn set_context_menu_request_position(&mut self, view_position: Option<Vector2>) {
 		self.context_menu_request_position = view_position;
 	}
 
 	//==============================================================================
-	// 문맥 메뉴 요청 자리.
+	/// 문맥 메뉴 요청 자리.
 	//==============================================================================
 	pub fn get_context_menu_request_position(&self) -> Option<Vector2> {
 		self.context_menu_request_position
 	}
 
 	//==============================================================================
-	// 포커스를 잃으며 필드가 스스로 확정한 조합 글 기록. (필드)
-	// - 데스크탑에서 IME 를 끄면 OS 가 같은 조합 글을 Commit 으로 한 번 더 보낼 수 있다. 플랫폼이 그것을 버리게 한다.
+	/// 포커스를 잃으며 필드가 스스로 확정한 조합 글 기록. (필드)
+	/// - 데스크탑에서 IME 를 끄면 OS 가 같은 조합 글을 Commit 으로 한 번 더 보낼 수 있다. 플랫폼이 그것을 버리게 한다.
 	//==============================================================================
 	pub fn set_ime_commit_guard(&self, committed_text: &str) {
 		*self.ime_commit_guard.borrow_mut() = Some((committed_text.to_string(), 2));
 	}
 
 	//==============================================================================
-	// IME 확정 글이 필드가 이미 확정한 글이면 true 를 돌려주고 기록을 지운다. (플랫폼)
+	/// IME 확정 글이 필드가 이미 확정한 글이면 true 를 돌려주고 기록을 지운다. (플랫폼)
 	//==============================================================================
 	pub fn consume_ime_commit_guard(&mut self, committed_text: &str) -> bool {
 		let ime_commit_guard = self.ime_commit_guard.get_mut();
@@ -305,22 +305,22 @@ impl TextInput {
 	}
 
 	//==============================================================================
-	// IME 조합 끊기 부탁. (필드가 조합 글을 스스로 확정했을 때. 데스크탑 플랫폼이 IME 를 껐다 켠다)
+	/// IME 조합 끊기 부탁. (필드가 조합 글을 스스로 확정했을 때. 데스크탑 플랫폼이 IME 를 껐다 켠다)
 	//==============================================================================
 	pub fn request_ime_reset(&self) {
 		self.is_ime_reset_requested.set(true);
 	}
 
 	//==============================================================================
-	// IME 조합 끊기 부탁 꺼내기. (플랫폼, 꺼내면 지워진다)
+	/// IME 조합 끊기 부탁 꺼내기. (플랫폼, 꺼내면 지워진다)
 	//==============================================================================
 	pub fn take_ime_reset_request(&self) -> bool {
 		self.is_ime_reset_requested.replace(false)
 	}
 
 	//==============================================================================
-	// 프레임 마무리. (엔진이 프레임 끝에 부른다)
-	// - 아무도 꺼내지 않은 이벤트를 버리고, 이번 프레임에 올라온 상태를 지난 프레임 상태로 넘긴다.
+	/// 프레임 마무리. (엔진이 프레임 끝에 부른다)
+	/// - 아무도 꺼내지 않은 이벤트를 버리고, 이번 프레임에 올라온 상태를 지난 프레임 상태로 넘긴다.
 	//==============================================================================
 	pub fn finish_frame(&mut self) {
 		self.event_list.get_mut().clear();
@@ -349,14 +349,14 @@ impl Default for TextInput {
 }
 
 //==============================================================================
-// 문자 수.
+/// 문자 수.
 //==============================================================================
 pub fn count_characters(text: &str) -> usize {
 	text.chars().count()
 }
 
 //==============================================================================
-// 문자 자리 → 바이트 자리. (넘으면 끝)
+/// 문자 자리 → 바이트 자리. (넘으면 끝)
 //==============================================================================
 pub fn convert_character_index_to_byte_index(text: &str, character_index: usize) -> usize {
 	match text.char_indices().nth(character_index) {
@@ -370,14 +370,14 @@ pub fn convert_character_index_to_byte_index(text: &str, character_index: usize)
 }
 
 //==============================================================================
-// 바이트 자리 → 문자 자리. (winit Ime::Preedit 의 커서가 바이트 단위다)
+/// 바이트 자리 → 문자 자리. (winit Ime::Preedit 의 커서가 바이트 단위다)
 //==============================================================================
 pub fn convert_byte_index_to_character_index(text: &str, byte_index: usize) -> usize {
 	text.char_indices().take_while(|(character_byte_index, _)| *character_byte_index < byte_index).count()
 }
 
 //==============================================================================
-// UTF-16 자리 → 문자 자리. (DOM selection_start / selection_end)
+/// UTF-16 자리 → 문자 자리. (DOM selection_start / selection_end)
 //==============================================================================
 pub fn convert_utf16_index_to_character_index(text: &str, utf16_index: usize) -> usize {
 	let mut utf16_count = 0;
@@ -393,7 +393,7 @@ pub fn convert_utf16_index_to_character_index(text: &str, utf16_index: usize) ->
 }
 
 //==============================================================================
-// 문자 자리 → UTF-16 자리. (DOM setSelectionRange)
+/// 문자 자리 → UTF-16 자리. (DOM setSelectionRange)
 //==============================================================================
 pub fn convert_character_index_to_utf16_index(text: &str, character_index: usize) -> usize {
 	text.chars().take(character_index).map(|character| character.len_utf16()).sum()
@@ -404,7 +404,7 @@ mod tests {
 	use super::*;
 
 	//==============================================================================
-	// 자리 바꾸기. (한글과 이모지가 섞인 글)
+	/// 자리 바꾸기. (한글과 이모지가 섞인 글)
 	//==============================================================================
 	#[test]
 	fn index_conversion() {
@@ -420,7 +420,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 필드 몫만 꺼내고, 남은 것은 프레임 끝에 버린다. 상태는 프레임 끝에 넘어간다.
+	/// 필드 몫만 꺼내고, 남은 것은 프레임 끝에 버린다. 상태는 프레임 끝에 넘어간다.
 	//==============================================================================
 	#[test]
 	fn take_events_and_publish() {
@@ -462,7 +462,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 확정 글 가드는 같은 글 한 번만 막고, 두 프레임 뒤에는 사라진다.
+	/// 확정 글 가드는 같은 글 한 번만 막고, 두 프레임 뒤에는 사라진다.
 	//==============================================================================
 	#[test]
 	fn ime_commit_guard() {

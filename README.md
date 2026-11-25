@@ -28,7 +28,7 @@
 - **기본으로 빠른 2D.** 자동 배칭과 화면 밖 컬링이 처음부터 켜져 있습니다. 적 3만 2천 마리가 움직이는 장면에서 드로우 콜이 32,008 번에서 73 번으로 줄어듭니다.
 - **바로 쓰는 UI 위젯.** 버튼, 슬라이더, 스크롤 뷰, 리스트 뷰, 드롭다운, 대화 상자, 토스트, 차트, 진행 고리, 창 쌓기와 확인 창, 단추 반응과 토스트 모션, 누름 자리 넓히기, 제약 기반 오토레이아웃, 그리고 한글 조합까지 되는 입력 필드와 리치텍스트가 들어 있습니다.
 - **연출 도구가 엔진 안에.** 파티클, 셰이더 스프라이트 효과 49종, 화면 효과 58종, 트레일, 아지랑이, 이징 31종을 갖춘 타임라인과 애니메이터, 트윈. 블렌드 모드는 Canvas2D 합성 26 가지를 모두 그립니다.
-- **3D 도 같은 화면에서.** glTF/GLB 와 FBX(순수 러스트 로더) 스키닝 모델, PBR 머티리얼, 사람 피부 렌더러, 그림자, 블룸과 다단 블룸, 멀티샘플 렌더 타겟, 앰비언트 오클루전, 서브서피스 스캐터링. 툰 3D 는 셀 셰이딩과 바깥선(껍데기, 바로 이웃 경계에서 잡고 점프 플러딩으로 넓히는 화면 공간), 빛 묶음(점광, 림, 정반사, 띠 램프), 셰이더 조각을 끼우는 머티리얼, 인스턴스 꼴과 영구 인스턴스 버퍼, 그리기 단계 콜백, HDR 마무리(MSAA, 다단 블룸, 색 보정), GPU 효과(파티클, 불덩이, 충격파, 자국, 빔, 번개)를 갖췄습니다. 3D 장면 위에 2D UI 를 바로 얹고, 노드 사각형 안에도 3D 를 그립니다.
+- **3D 도 같은 화면에서.** glTF/GLB 와 FBX(순수 러스트 로더) 스키닝 모델, PBR 머티리얼, 사람 피부 렌더러, 그림자, 블룸과 다단 블룸, 멀티샘플 렌더 타겟, 앰비언트 오클루전, 서브서피스 스캐터링. 툰 3D 는 그늘 램프 셀 셰이딩(바탕과 1 차, 2 차 그늘의 Step, Feather, 램프 텍스처, 그림자가 그늘 색으로, 단단한 툰 하이라이트와 림, 매트캡)과 바깥선(거리에 따라 굵기를 맞추는 껍데기, 바로 이웃 경계에서 잡고 점프 플러딩으로 넓히는 화면 공간), 빛 묶음(점광, 스포트라이트, 림, 하이라이트), 셰이더 조각을 끼우는 머티리얼, 인스턴스 꼴과 영구 인스턴스 버퍼, 그리기 단계 콜백, HDR 마무리(MSAA, 다단 블룸, 색 보정), GPU 효과(파티클, 불덩이, 충격파, 자국, 빔, 번개)를 갖췄습니다. 3D 장면 위에 2D UI 를 바로 얹고, 노드 사각형 안에도 3D 를 그립니다.
 - **게임 제작에 필요한 기능까지.** 길찾기, 2D 충돌, 스티어링, 플랫포머 캐릭터 물리, 상태 머신(FSM), 오브젝트 풀, 고정 걸음, 시드 기반 난수(vanilla.js 와 비트까지 같은 수열), 다국어와 언어 묶음, 대화 시스템, 타자기 효과, 로컬 저장소, 입력 동작(키, 패드 단추, 축 묶기), 게임패드와 진동, 카메라 손짓, 애셋 함께 받기와 로딩 진행률, 스프라이트 아틀라스, 소리 표와 음악, 효과음 버스, 화질 자동 조절, 웹소켓(wss 포함).
 - **원본처럼 쓰는 async/await.** 엔진이 스레드 하나짜리 실행기를 품습니다. 작업은 원본 async 함수처럼 맡기는 자리에서 첫 await 까지 돌고, 남은 것은 매 프레임 이어 돕니다. `await this.atlas.load(path)` 는 `scene_context.with(|scene, engine| scene.atlas.load(engine, path)).await` 한 줄이고, `wait::seconds(1.0).await`, 씬을 내려도 이어 도는 작업, `await unloadScene` 까지 vanilla.js 와 같습니다. tokio 같은 외부 런타임 없이 데스크탑과 웹이 같은 코드로 돌고, await 없이 손잡이를 맡겨 두는 꼴도 그대로 됩니다.
 
@@ -263,7 +263,7 @@ impl Scene for TitleScene {
 | `new Promise((resolve, reject) => ...)` | `let (promise, resolver) = Promise::create();` (실패는 `Promise<Result<T, E>>` 와 `resolver.reject(까닭)`) |
 
 - 데스크탑은 `EngineConfiguration.asset_directory_paths` 폴더에서 바로 읽고, 웹은 `asset_base_url + 경로` 를 fetch 합니다. 게임 코드는 같습니다.
-- 이미지(png, jpg, webp, gif 첫 장, bmp, ico, svg, avif), 텍스트, JSON, 바이너리, 폰트(ttf, otf, woff, woff2), 오디오(webm, ogg 의 Opus 와 Vorbis, mp3, wav, flac, m4a 와 aac 의 AAC)를 지원합니다. 데스크탑은 엔진이 풀고, 웹은 원본처럼 브라우저가 풉니다. 데스크탑 소리는 크롬 decodeAudioData 와 같은 해석기(FLAC, MP3, PCM, Vorbis 는 크롬이 쓰는 symphonia)로 풀고 앞뒤 다듬기, 44100Hz 로 바꾸기(크로미엄 SincResampler 를 옮긴 것)까지 같게 해 길이와 표본이 크롬과 같습니다. (`tests/assets/audio` 의 21 파일을 크롬 158 의 결과와 견줍니다)
+- 이미지(png, jpg, webp, gif 첫 장, bmp, ico, svg, avif), 텍스트, JSON, 바이너리, 폰트(ttf, otf, woff, woff2), 오디오(webm, ogg 의 Opus 와 Vorbis, mp3, wav, flac, m4a 와 aac 의 AAC)를 지원합니다. 데스크탑은 엔진이 풀고, 웹은 원본처럼 브라우저가 풉니다. 데스크탑 소리는 크롬 decodeAudioData 와 같은 해석기(FLAC, MP3, PCM, Vorbis 는 크롬이 쓰는 symphonia)로 풀고 앞뒤 다듬기, 44100Hz 로 바꾸기(크로미엄 SincResampler 를 옮긴 것)까지 같게 해 길이와 표본이 크롬과 같습니다. (`tests/assets/audio` 의 27 파일을 크롬 158 의 결과와 견줍니다. HE-AAC v1, v2 와 5.1 AAC 도 풉니다)
 - 여러 애셋을 함께 받을 때는 `AssetLoader` 가 동시 수만큼 요청하고 진행률과 실패 목록을 셉니다.
 - 로딩에 실패한 애셋도 완료로 처리해서 씬이 멈추지 않습니다.
 
@@ -347,7 +347,7 @@ VANILLA_CAPTURE_PATH=shots/uigallery_{frame}.png VANILLA_CAPTURE_FRAMES=60 VANIL
 | `toonfx` | 툰 화면 공간 바깥선과 GPU 효과(터짐, 연기 기둥, 흐르는 자국, 빔, 번개, 리본, 빛 점) |
 | `toonpost` | 툰 HDR 마무리 세 판(기본, 멀티샘플 4 와 다단 블룸, LDR 길의 밝기와 밝힌 자리), 새 자국 꼴과 발밑 그늘 |
 | `toonmaterial` | 툰 머티리얼 셰이더 조각, 바탕색 텍스처와 데칼, 점광과 정반사와 림, 반 램버트 띠, 더하기 홀로그램, 평면 거울, 영구 인스턴스 버퍼 |
-| `toonstyle` | 툰 셰이딩과 바깥선 견주기: 각진 상자, 둥근 공, 결정, 비스듬한 판, 그림자, 점광, 화면 공간 바깥선(반 크기 선의 판 TOON_STYLE_SCALE, 모형마다의 꼴 TOON_STYLE_TOGGLES) |
+| `toonstyle` | 툰 셰이딩과 바깥선 견주기: 그늘 셋, 그림자, 점광과 스포트라이트, 단단한 하이라이트, 림, 매트캡, 화면 공간 바깥선(반 크기 선의 판 TOON_STYLE_SCALE, 모형마다의 꼴 TOON_STYLE_TOGGLES), 껍데기 바깥선(TOON_STYLE_SHELL) |
 | `audiotone` | 소리 재생, 효과음 풀, 비프 |
 | `gamepadlist` | 연결된 게임패드 목록 |
 | `uiscenelayout` | UIScene 과 UINode 오토레이아웃(세이프 에어리어 가이드, 여백 가이드, 같은 너비 단추, 글의 자연 크기) |
@@ -447,8 +447,9 @@ cargo run --release --example modelviewer
 | [glutin](https://crates.io/crates/glutin), [glutin-winit](https://crates.io/crates/glutin-winit) | 0.32.3, 0.5.0 | `platform/desktop.rs` | OpenGL 3.3 코어 컨텍스트 생성 (깊이 24, 스텐실 8) | Apache-2.0, MIT |
 | [raw-window-handle](https://crates.io/crates/raw-window-handle) | 0.6.2 | `platform/desktop.rs`, `platform/desktop/windowsplatform.rs` | winit 창을 glutin 과 윈도우 창 서브클래싱에 넘깁니다 | MIT / Apache-2.0 / Zlib |
 | [gilrs](https://crates.io/crates/gilrs) | 0.11.2 | `core/gamepadmanager.rs` | 게임패드 입력과 진동(리눅스, 윈도우). OS 입력을 W3C Standard Gamepad 꼴로 바꿉니다. 웹은 원본처럼 `navigator.getGamepads()` 를 직접 읽습니다 | MIT / Apache-2.0 |
-| [cpal](https://crates.io/crates/cpal) | 0.18.2 | `platform/audio/desktop.rs` | 기본 출력 장치. 그 위의 믹서(소스, GainNode, StereoPannerNode, 버스)는 엔진이 크롬 WebAudio 와 같은 셈으로 짓습니다 (`platform/audio/mixer.rs`). realtime 기능으로 윈도우, 리눅스의 소리 스레드 우선순위를 올립니다 | Apache-2.0 |
+| [cpal](https://crates.io/crates/cpal) | 0.18.2 | `platform/audio/desktop.rs` | 기본 출력 장치. 그 위의 믹서(소스, GainNode, StereoPannerNode, 버스, 비프의 OscillatorNode)는 엔진이 크롬 WebAudio 와 같은 셈으로 짓습니다 (`platform/audio/mixer.rs`, `oscillator.rs`). realtime 기능으로 윈도우, 리눅스의 소리 스레드 우선순위를 올립니다 | Apache-2.0 |
 | [symphonia](https://crates.io/crates/symphonia) | 0.6.1 | `platform/audio/decode/` | 소리 해석. 크롬 decodeAudioData 와 같은 해석기로 FLAC, MP3, PCM, Vorbis 를 풀고(크롬이 켜는 기능과 같게), AAC 와 컨테이너(wav, ogg, mkv(webm), isomp4(m4a), flac, mp3, adts)도 풉니다 | MPL-2.0 |
+| [oxideav-aac](https://github.com/OxideAV/oxideav-aac) | 0.1.7 (저장소 eac68f3) | `platform/audio/decode/aac.rs` | HE-AAC(SBR, PS)와 3 채널 이상 AAC 해석. ISO/IEC 14496-3 명세로 짠 순수 러스트 해석기로, symphonia 의 AAC 가 받지 않는 것을 크롬처럼 풉니다. 정수로 반올림하기 전 실수 출력이 아직 crates.io 판에 없어 저장소 커밋으로 묶습니다 (oxideav-core 0.1.43 을 함께 받습니다) | MIT |
 | [opus-pure](https://crates.io/crates/opus-pure) | 0.2.5 | `platform/audio/decode/opus.rs` | Opus 해석. libopus 를 러스트로 옮긴 것으로 symphonia 코덱 등록표에 엔진 해석기로 넣습니다 (크롬은 libopus 로 풉니다). C 빌드가 없어 맥에서 윈도우 대상 검사가 됩니다 | BSD-3-Clause |
 | [resvg](https://crates.io/crates/resvg) | 0.50.0 | `core/image.rs`, `animation/timeline.rs` | SVG 그림을 usvg 로 읽고 tiny-skia 로 그립니다 | MIT / Apache-2.0 |
 | [tiny-skia](https://crates.io/crates/tiny-skia) | 0.12.0 | `core/canvas2d/desktop_canvas.rs` | 데스크탑 Canvas2D 의 경로, 선, 그라데이션, 패턴, 자르기, 합치기를 칠합니다. 크롬이 쓰는 Skia 의 CPU 래스터라이저를 옮긴 것이고 resvg 가 쓰는 같은 판이라 더 받는 크레이트가 없습니다 | BSD-3-Clause |
