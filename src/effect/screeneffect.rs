@@ -17,9 +17,7 @@
 //!   ```
 //! - 원본과 다른 점:
 //!   - 원본은 생성자에서 Graphic 을 받아 GL 컨텍스트를 든다. 러스트 판은 아무것도 받지 않고 만들며, GL 자원은 처음 end 에서 만들고 함수마다 Graphic 을 받는다.
-//!   ```text
 //!     그래서 destroy 도 Graphic 을 받는다. 씬을 내리기 전에 destroy 를 부르지 않으면 GL 자원은 컨텍스트가 없어질 때까지 남는다.
-//!   ```
 //!   - 효과는 문자열 대신 ScreenEffectType 열거형이다. (원본 문자열 이름은 get_name / from_name)
 //!   - 패스 셰이더 만들기에 실패하면 원본은 예외를 던지고, 러스트 판은 한 번 알리고 그 단계를 건너뛴다.
 //==============================================================================
@@ -40,68 +38,126 @@ type GlRenderbuffer = <glow::Context as glow::HasContext>::Renderbuffer;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ScreenEffectType {
 	/// --- 형태 왜곡 ---
+	/// 배럴 / 핀쿠션 렌즈 왜곡. (parameters = `[세기: 음수면 핀쿠션]`)
 	LensDistortion, // 배럴 / 핀쿠션 렌즈 왜곡. (parameters = [세기: 음수면 핀쿠션])
+	/// 볼록 / 오목. (parameters = `[중심 x, 중심 y, 세기, 반지름]`)
 	Bulge,          // 볼록 / 오목. (parameters = [중심 x, 중심 y, 세기, 반지름])
+	/// 소용돌이. (parameters = `[중심 x, 중심 y, 회전 수, 반지름]`)
 	Swirl,          // 소용돌이. (parameters = [중심 x, 중심 y, 회전 수, 반지름])
+	/// 만화경. (parameters = `[조각 수]`)
 	Kaleidoscope,   // 만화경. (parameters = [조각 수])
+	/// 대칭. (parameters = `[0 가로 / 1 세로]`)
 	Mirror,         // 대칭. (parameters = [0 가로 / 1 세로])
+	/// 물 파문. (parameters = `[중심 x, 중심 y, 빈도, 속도]`)
 	Ripple,         // 물 파문. (parameters = [중심 x, 중심 y, 빈도, 속도])
+	/// 아지랑이. (parameters = `[노이즈 배율, 속도]`)
 	HeatHaze,       // 아지랑이. (parameters = [노이즈 배율, 속도])
+	/// 화면 흔들림. (parameters = `[진폭 픽셀, 초당 변화]`)
 	Jitter,         // 화면 흔들림. (parameters = [진폭 픽셀, 초당 변화])
+	/// 겹쳐 보임. (parameters = `[간격, 흔들리는 속도]`)
 	DoubleVision,   // 겹쳐 보임. (parameters = [간격, 흔들리는 속도])
+	/// 모자이크. (strength 0 → 1, parameters = `[가장 큰 블록 픽셀]`)
 	Pixelate,       // 모자이크. (strength 0 → 1, parameters = [가장 큰 블록 픽셀])
+	/// 충격파 링 왜곡. (parameters = `[중심 x, 중심 y, 반지름 0 ~ 1.5, 폭]`, color = 링 빛)
 	Shockwave,      // 충격파 링 왜곡. (parameters = [중심 x, 중심 y, 반지름 0 ~ 1.5, 폭], color = 링 빛)
+	/// 화면 물결. (parameters = `[빈도, 속도]`)
 	Wave,           // 화면 물결. (parameters = [빈도, 속도])
 	/// --- 흐림 ---
+	/// 방향 블러. (parameters = `[각도 라디안, 길이 픽셀]`)
 	MotionBlur,     // 방향 블러. (parameters = [각도 라디안, 길이 픽셀])
+	/// 중심으로 뻗는 방사 블러. (parameters = `[중심 x, 중심 y, 길이]`)
 	ZoomBlur,       // 중심으로 뻗는 방사 블러. (parameters = [중심 x, 중심 y, 길이])
+	/// 가우시안 블러. (parameters = `[반지름 픽셀]`)
 	Blur,           // 가우시안 블러. (parameters = [반지름 픽셀])
+	/// 틸트 시프트. (parameters = `[초점 y, 초점 폭, 반지름 픽셀]`)
 	TiltShift,      // 틸트 시프트. (parameters = [초점 y, 초점 폭, 반지름 픽셀])
+	/// 빛줄기. (parameters = `[중심 x, 중심 y, 문턱, 감쇠]`, color = 빛 색)
 	GodRays,        // 빛줄기. (parameters = [중심 x, 중심 y, 문턱, 감쇠], color = 빛 색)
+	/// 밝은 곳 번짐. (parameters = `[문턱, 세기 배율, 반지름 픽셀]`)
 	Bloom,          // 밝은 곳 번짐. (parameters = [문턱, 세기 배율, 반지름 픽셀])
+	/// 가로 렌즈 플레어. (parameters = `[문턱, 세기 배율, 폭 픽셀]`, color = 플레어 색)
 	Anamorphic,     // 가로 렌즈 플레어. (parameters = [문턱, 세기 배율, 폭 픽셀], color = 플레어 색)
 	/// --- 글리치 ---
+	/// 가로 줄 어긋남 + 색 분리 + 블록 반전. (parameters = `[줄 수, 초당 변화, 어긋남 폭]`)
 	Glitch,         // 가로 줄 어긋남 + 색 분리 + 블록 반전. (parameters = [줄 수, 초당 변화, 어긋남 폭])
+	/// VHS 테이프. (흔들림 + 색 번짐 + 노이즈 줄, parameters = `[흔들림, 노이즈]`)
 	Vhs,            // VHS 테이프. (흔들림 + 색 번짐 + 노이즈 줄, parameters = [흔들림, 노이즈])
+	/// 색수차. (parameters = `[배율]`)
 	Chromatic,      // 색수차. (parameters = [배율])
 	/// --- 색 ---
+	/// 색온도 / 틴트. (parameters = `[온도 -1 ~ 1, 틴트 -1 ~ 1]`)
 	WhiteBalance,   // 색온도 / 틴트. (parameters = [온도 -1 ~ 1, 틴트 -1 ~ 1])
+	/// 리프트 / 감마 / 게인. (parameters = `[리프트, 감마, 게인]`)
 	LiftGammaGain,  // 리프트 / 감마 / 게인. (parameters = [리프트, 감마, 게인])
+	/// 대비 / 채도 / 밝기 + 틴트. (parameters = `[대비, 채도, 밝기]`, color = 틴트)
 	ColorGrade,     // 대비 / 채도 / 밝기 + 틴트. (parameters = [대비, 채도, 밝기], color = 틴트)
+	/// 색상 회전. (parameters = `[회전 수: strength 와 곱]`)
 	HueShift,       // 색상 회전. (parameters = [회전 수: strength 와 곱])
+	/// 스플릿 토닝. (parameters.xyz = 그림자 색, color = 하이라이트 색, w = 균형)
 	SplitToning,    // 스플릿 토닝. (parameters.xyz = 그림자 색, color = 하이라이트 색, w = 균형)
+	/// ACES 톤매핑. (parameters = `[노출]`)
 	Tonemap,        // ACES 톤매핑. (parameters = [노출])
+	/// 밝기를 두 색 사이로 매핑. (parameters.xyz = 어두운 색, color = 밝은 색)
 	GradientMap,    // 밝기를 두 색 사이로 매핑. (parameters.xyz = 어두운 색, color = 밝은 색)
+	/// 세피아.
 	Sepia,          // 세피아.
+	/// 무채색.
 	Grayscale,      // 무채색.
+	/// 포스터화. (parameters = `[단계 수]`)
 	Posterize,      // 포스터화. (parameters = [단계 수])
+	/// 오더드 디더링. (parameters = `[단계 수, 픽셀 크기]`)
 	Dither,         // 오더드 디더링. (parameters = [단계 수, 픽셀 크기])
+	/// 하프톤 점. (parameters = `[격자 픽셀]`)
 	Halftone,       // 하프톤 점. (parameters = [격자 픽셀])
+	/// 샤픈.
 	Sharpen,        // 샤픈.
+	/// 윤곽 검출. (color = 선 색)
 	EdgeDetect,     // 윤곽 검출. (color = 선 색)
+	/// 낡은 필름. (세피아 + 그레인 + 스크래치 + 깜빡임)
 	OldFilm,        // 낡은 필름. (세피아 + 그레인 + 스크래치 + 깜빡임)
+	/// 야시경. (color = 틴트)
 	NightVision,    // 야시경. (color = 틴트)
+	/// 색 반전.
 	Invert,         // 색 반전.
 	/// --- 무늬 / 마스크 ---
+	/// CRT 곡면 + 주사선 + RGB 마스크. (parameters = `[곡률, 주사선 밀도]`)
 	Scanline,       // CRT 곡면 + 주사선 + RGB 마스크. (parameters = [곡률, 주사선 밀도])
+	/// 필름 그레인.
 	Grain,          // 필름 그레인.
+	/// 빗줄기. (parameters = `[줄 수, 밀도, 속도]`, color = 빗줄기 색)
 	Rain,           // 빗줄기. (parameters = [줄 수, 밀도, 속도], color = 빗줄기 색)
+	/// 세로 안개. (parameters = `[시작 y, 끝 y]`, color = 안개 색)
 	Fog,            // 세로 안개. (parameters = [시작 y, 끝 y], color = 안개 색)
+	/// 비네트. (parameters = `[시작 거리, 끝 거리]`, color = 가장자리 색)
 	Vignette,       // 비네트. (parameters = [시작 거리, 끝 거리], color = 가장자리 색)
+	/// 스포트라이트 바깥 어둡힘. (parameters = `[중심 x, 중심 y, 반지름, 부드러움]`, color = 바깥 색)
 	Spotlight,      // 스포트라이트 바깥 어둡힘. (parameters = [중심 x, 중심 y, 반지름, 부드러움], color = 바깥 색)
+	/// 집중선. (parameters = `[중심 x, 중심 y, 밀도, 속도]`, color = 선 색)
 	SpeedLines,     // 집중선. (parameters = [중심 x, 중심 y, 밀도, 속도], color = 선 색)
+	/// 위아래 / 좌우 검은 띠. (parameters = `[세로 띠 비율, 가로 띠 비율]`, color = 띠 색)
 	Letterbox,      // 위아래 / 좌우 검은 띠. (parameters = [세로 띠 비율, 가로 띠 비율], color = 띠 색)
 	/// --- 전환 (strength 0 → 1 로 color 에 덮인다) ---
+	/// 블록 디졸브. (parameters = `[블록 수]`)
 	PixelDissolve,  // 블록 디졸브. (parameters = [블록 수])
+	/// 방향 와이프. (parameters = `[방향 x, 방향 y, 부드러움]`)
 	Wipe,           // 방향 와이프. (parameters = [방향 x, 방향 y, 부드러움])
+	/// 원형 아이리스. (parameters = `[중심 x, 중심 y, 부드러움]`)
 	IrisWipe,       // 원형 아이리스. (parameters = [중심 x, 중심 y, 부드러움])
+	/// 마름모 와이프. (parameters = `[부드러움]`)
 	DiamondWipe,    // 마름모 와이프. (parameters = [부드러움])
+	/// 시계 와이프. (parameters = `[부드러움]`)
 	ClockWipe,      // 시계 와이프. (parameters = [부드러움])
+	/// 블라인드. (parameters = `[줄 수, 부드러움]`)
 	Blinds,         // 블라인드. (parameters = [줄 수, 부드러움])
+	/// 체커 보드. (parameters = `[칸 수]`)
 	CheckerWipe,    // 체커 보드. (parameters = [칸 수])
+	/// 노이즈 페이드. (parameters = `[노이즈 배율, 부드러움]`)
 	NoiseFade,      // 노이즈 페이드. (parameters = [노이즈 배율, 부드러움])
+	/// 불에 타듯. (parameters = `[노이즈 배율, 띠 폭]`, color = 덮을 색, 띠는 주황)
 	Burn,           // 불에 타듯. (parameters = [노이즈 배율, 띠 폭], color = 덮을 색, 띠는 주황)
+	/// 브라운관 끄기. (세로로 눌리며 밝은 선으로)
 	TvOff,          // 브라운관 끄기. (세로로 눌리며 밝은 선으로)
+	/// 단색으로 페이드. (color = 목표 색)
 	Fade,           // 단색으로 페이드. (color = 목표 색)
 }
 
@@ -831,6 +887,9 @@ const EFFECT_BODY_TABLE: [(&str, &str); 61] = [
 impl ScreenEffectType {
 	//==============================================================================
 	/// 원본 이름 반환. ("vignette" 같은 문자열)
+	///
+	/// # 돌려줌
+	/// 원본 효과 이름. (camelCase, "lensDistortion" 같은)
 	//==============================================================================
 	pub fn get_name(&self) -> &'static str {
 		EFFECT_NAME_TABLE[*self as usize].1
@@ -838,6 +897,24 @@ impl ScreenEffectType {
 
 	//==============================================================================
 	/// 원본 이름으로 찾기. (모르는 이름이면 None)
+	///
+	/// # 인자
+	/// - `name`: 원본 효과 이름. (대소문자를 가린다)
+	///
+	/// # 돌려줌
+	/// 그 이름의 효과. 모르는 이름이면 None.
+	///
+	/// # 예제
+	/// 이름과 효과, 파라미터 이름
+	/// ```rust
+	/// use vanilla::ScreenEffectType;
+	///
+	/// assert_eq!(ScreenEffectType::from_name("shockwave"), Some(ScreenEffectType::Shockwave));
+	/// assert_eq!(ScreenEffectType::Shockwave.get_name(), "shockwave");
+	/// assert_eq!(ScreenEffectType::Shockwave.get_parameter_names(), &["centerX", "centerY", "radius", "width"]);
+	/// assert!(ScreenEffectType::Sepia.get_parameter_names().is_empty());
+	/// assert_eq!(ScreenEffectType::from_name("unknown"), None);
+	/// ```
 	//==============================================================================
 	pub fn from_name(name: &str) -> Option<ScreenEffectType> {
 		EFFECT_NAME_TABLE.iter().find(|(_, effect_name)| *effect_name == name).map(|(effect_type, _)| *effect_type)
@@ -845,6 +922,9 @@ impl ScreenEffectType {
 
 	//==============================================================================
 	/// 파라미터 이름 목록 반환. (SCREEN_EFFECT_PARAMETER_NAMES)
+	///
+	/// # 돌려줌
+	/// 파라미터 x, y, z, w 차례의 이름 목록. (0 ~ 4 개, 파라미터가 없는 효과는 빈 목록)
 	//==============================================================================
 	pub fn get_parameter_names(&self) -> &'static [&'static str] {
 		SCREEN_EFFECT_PARAMETER_NAMES[*self as usize].1
@@ -864,12 +944,30 @@ struct ScreenEffectState {
 
 //==============================================================================
 /// 적용 영역. (캔버스 픽셀, 왼쪽 위 원점)
+///
+/// # 예제
+/// 영역을 정하고 읽고 풀기
+/// ```rust
+/// use vanilla::{ScreenEffect, ScreenEffectRegion};
+///
+/// let mut screen_effect = ScreenEffect::new();
+/// assert_eq!(screen_effect.get_region(), None);
+/// screen_effect.set_region(40.0, 30.0, 320.0, 180.0, -5.0);
+/// let expected_region = ScreenEffectRegion { x: 40.0, y: 30.0, width: 320.0, height: 180.0, corner_radius: 0.0 };
+/// assert_eq!(screen_effect.get_region(), Some(expected_region));
+/// screen_effect.clear_region();
+/// assert!(screen_effect.get_region().is_none());
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ScreenEffectRegion {
+	/// 영역 왼쪽. (캔버스 픽셀)
 	pub x: f32,
+	/// 영역 위. (캔버스 픽셀)
 	pub y: f32,
+	/// 영역 너비. (픽셀, 캔버스 밖으로 나가는 만큼은 잘린다)
 	pub width: f32,
+	/// 영역 높이. (픽셀, 캔버스 밖으로 나가는 만큼은 잘린다)
 	pub height: f32,
 	/// 둥근 모서리 반지름. (픽셀, 0 이면 사각형)
 	pub corner_radius: f32,
@@ -1035,6 +1133,72 @@ fn find_effect_body(pass_name: &str) -> Option<&'static str> {
 	EFFECT_BODY_TABLE.iter().find(|(body_name, _)| *body_name == pass_name).map(|(_, effect_body)| *effect_body)
 }
 
+//==============================================================================
+/// 화면 효과.
+/// - 효과마다 켜기, 세기, 파라미터 넷, 색을 든다. 씬이 pre_draw 첫머리에서 begin, post_draw 끝에서 end, tick 에서 tick 을 부르면 켜진 효과를 적용 차례로 건다.
+///
+/// # 예제
+/// 비네트를 켜고 세기와 파라미터 정하기
+/// ```rust
+/// use vanilla::{Color, ScreenEffect, ScreenEffectType};
+///
+/// let mut screen_effect = ScreenEffect::new();
+/// assert!(!screen_effect.has_active_effect());
+/// screen_effect.set_enabled(ScreenEffectType::Vignette, true);
+/// screen_effect.set_strength(ScreenEffectType::Vignette, 0.8);
+/// screen_effect.set_parameter(ScreenEffectType::Vignette, "outer", 0.9);
+/// screen_effect.set_color(ScreenEffectType::Vignette, Color::create(0.0, 0.0, 0.2, 1.0));
+/// assert!(screen_effect.has_active_effect());
+/// assert_eq!(screen_effect.get_parameters(ScreenEffectType::Vignette), [0.45, 0.9, 0.0, 0.0]);
+/// screen_effect.set_strength(ScreenEffectType::Vignette, 0.0);
+/// assert!(!screen_effect.has_active_effect());
+/// ```
+///
+/// 씬에서 begin, end, tick 부르기
+/// ```rust,no_run
+/// use vanilla::{Engine, EngineConfiguration, Graphic, Scene, SceneBase, ScreenEffect, ScreenEffectType};
+///
+/// struct MainScene {
+/// 	scene_base: SceneBase,
+/// 	screen_effect: ScreenEffect,
+/// }
+///
+/// impl Scene for MainScene {
+/// 	fn get_scene_base(&self) -> &SceneBase {
+/// 		&self.scene_base
+/// 	}
+///
+/// 	fn get_scene_base_mut(&mut self) -> &mut SceneBase {
+/// 		&mut self.scene_base
+/// 	}
+///
+/// 	fn create(&mut self, _engine: &mut Engine) {
+/// 		self.screen_effect.set_enabled(ScreenEffectType::Vignette, true);
+/// 	}
+///
+/// 	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+/// 		self.scene_base.tick(engine, time_delta);
+/// 		self.screen_effect.tick(time_delta);
+/// 	}
+///
+/// 	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+/// 		self.screen_effect.begin(graphic);
+/// 		self.scene_base.draw_scene_background(engine, graphic);
+/// 	}
+///
+/// 	fn post_draw(&mut self, _engine: &mut Engine, graphic: &mut Graphic) {
+/// 		self.screen_effect.end(graphic);
+/// 	}
+/// }
+///
+/// let engine = Engine::new(EngineConfiguration::new());
+/// let main_scene = MainScene {
+/// 	scene_base: SceneBase::new(),
+/// 	screen_effect: ScreenEffect::new(),
+/// };
+/// engine.run(Box::new(main_scene)).unwrap();
+/// ```
+//==============================================================================
 pub struct ScreenEffect {
 	pass_table: HashMap<&'static str, Option<FullscreenPass>>,
 	effect_state_list: Vec<ScreenEffectState>,
@@ -1048,6 +1212,9 @@ pub struct ScreenEffect {
 impl ScreenEffect {
 	//==============================================================================
 	/// 생성. (GL 자원은 처음 end 에서 만든다)
+	///
+	/// # 돌려줌
+	/// 모든 효과가 꺼지고 세기 1, 효과별 기본 파라미터와 색인 화면 효과. (영역 없음, 시간 0)
 	//==============================================================================
 	pub fn new() -> ScreenEffect {
 		let mut screen_effect = ScreenEffect {
@@ -1089,6 +1256,13 @@ impl ScreenEffect {
 
 	//==============================================================================
 	/// 적용 영역 설정. (캔버스 픽셀, 왼쪽 위 원점. corner_radius 는 둥근 모서리 반지름(픽셀), 0 이면 사각형)
+	///
+	/// # 인자
+	/// - `x`: 영역 왼쪽. (캔버스 픽셀, end 에서 반올림하고 0 아래는 0)
+	/// - `y`: 영역 위. (캔버스 픽셀)
+	/// - `width`: 영역 너비. (픽셀, 캔버스 밖은 잘린다)
+	/// - `height`: 영역 높이. (픽셀, 캔버스 밖은 잘린다)
+	/// - `corner_radius`: 둥근 모서리 반지름. (픽셀, 음수는 0, 그 바깥은 원래 화면을 둔다)
 	//==============================================================================
 	pub fn set_region(&mut self, x: f32, y: f32, width: f32, height: f32, corner_radius: f32) {
 		self.region = Some(ScreenEffectRegion {
@@ -1109,6 +1283,9 @@ impl ScreenEffect {
 
 	//==============================================================================
 	/// 적용 영역 반환. (None 이면 화면 전체)
+	///
+	/// # 돌려줌
+	/// 정한 영역. 화면 전체면 None.
 	//==============================================================================
 	pub fn get_region(&self) -> Option<ScreenEffectRegion> {
 		self.region
@@ -1116,6 +1293,9 @@ impl ScreenEffect {
 
 	//==============================================================================
 	/// 갱신. (애니메이션 효과의 시간)
+	///
+	/// # 인자
+	/// - `time_delta`: 지난 프레임에서 흐른 시간. (초, 효과 시간에 더한다)
 	//==============================================================================
 	pub fn tick(&mut self, time_delta: f32) {
 		self.time += time_delta;
@@ -1123,6 +1303,9 @@ impl ScreenEffect {
 
 	//==============================================================================
 	/// 시작. (씬 pre_draw 첫머리. 씬은 화면에 그대로 그린다. 켜진 효과가 있을 때만 end 가 일한다)
+	///
+	/// # 인자
+	/// - `_graphic`: 그래픽. (지금은 쓰지 않는다, end 와 짝을 맞춘 인자)
 	//==============================================================================
 	pub fn begin(&mut self, _graphic: &mut Graphic) {
 		self.is_bound = self.has_active_effect();
@@ -1130,6 +1313,10 @@ impl ScreenEffect {
 
 	//==============================================================================
 	/// 효과 적용. (씬 post_draw 끝. 화면의 영역을 떠 와 효과를 걸고 같은 자리에 되돌려 놓는다)
+	/// - begin 에서 켜진 효과가 없었으면 아무것도 하지 않는다. 렌더 대상과 패스는 처음 필요할 때 만든다.
+	///
+	/// # 인자
+	/// - `graphic`: 씬을 다 그린 그래픽. (묶음을 내보낸 뒤 그 화면을 떠 온다)
 	//==============================================================================
 	pub fn end(&mut self, graphic: &mut Graphic) {
 		if !self.is_bound {
@@ -1355,6 +1542,9 @@ impl ScreenEffect {
 
 	//==============================================================================
 	/// 켜진 효과 여부. (세기 0 은 꺼진 것으로 본다)
+	///
+	/// # 돌려줌
+	/// 켜져 있고 세기가 0 보다 큰 효과가 하나라도 있으면 true.
 	//==============================================================================
 	pub fn has_active_effect(&self) -> bool {
 		self.effect_state_list.iter().any(|effect_state| effect_state.is_enabled && effect_state.strength > 0.0)
@@ -1407,6 +1597,10 @@ impl ScreenEffect {
 
 	//==============================================================================
 	/// 효과 켜기 / 끄기.
+	///
+	/// # 인자
+	/// - `effect_type`: 효과.
+	/// - `is_enabled`: 참이면 켠다.
 	//==============================================================================
 	pub fn set_enabled(&mut self, effect_type: ScreenEffectType, is_enabled: bool) {
 		self.effect_state_list[effect_type as usize].is_enabled = is_enabled;
@@ -1414,6 +1608,12 @@ impl ScreenEffect {
 
 	//==============================================================================
 	/// 효과 켜짐 여부 반환.
+	///
+	/// # 인자
+	/// - `effect_type`: 효과.
+	///
+	/// # 돌려줌
+	/// 켜져 있으면 true. (세기는 보지 않는다)
 	//==============================================================================
 	pub fn is_enabled(&self, effect_type: ScreenEffectType) -> bool {
 		self.effect_state_list[effect_type as usize].is_enabled
@@ -1421,6 +1621,10 @@ impl ScreenEffect {
 
 	//==============================================================================
 	/// 세기 설정. (0 이면 꺼진 것과 같다)
+	///
+	/// # 인자
+	/// - `effect_type`: 효과.
+	/// - `strength`: 세기. (보통 0 ~ 1, 0 이하면 걸지 않는다. 전환 효과는 덮인 정도, 기본 1)
 	//==============================================================================
 	pub fn set_strength(&mut self, effect_type: ScreenEffectType, strength: f32) {
 		self.effect_state_list[effect_type as usize].strength = strength;
@@ -1428,6 +1632,12 @@ impl ScreenEffect {
 
 	//==============================================================================
 	/// 세기 반환.
+	///
+	/// # 인자
+	/// - `effect_type`: 효과.
+	///
+	/// # 돌려줌
+	/// 세기. (기본 1)
 	//==============================================================================
 	pub fn get_strength(&self, effect_type: ScreenEffectType) -> f32 {
 		self.effect_state_list[effect_type as usize].strength
@@ -1435,6 +1645,13 @@ impl ScreenEffect {
 
 	//==============================================================================
 	/// 파라미터 설정. (효과마다 뜻이 다르다. ScreenEffectType 주석 참고, 원본의 y / z / w 기본값 0 은 직접 넘긴다)
+	///
+	/// # 인자
+	/// - `effect_type`: 효과.
+	/// - `x`: 첫째 파라미터.
+	/// - `y`: 둘째 파라미터. (쓰지 않는 효과는 0)
+	/// - `z`: 셋째 파라미터. (쓰지 않는 효과는 0)
+	/// - `w`: 넷째 파라미터. (쓰지 않는 효과는 0)
 	//==============================================================================
 	pub fn set_parameters(&mut self, effect_type: ScreenEffectType, x: f32, y: f32, z: f32, w: f32) {
 		self.effect_state_list[effect_type as usize].parameters = [x, y, z, w];
@@ -1442,6 +1659,11 @@ impl ScreenEffect {
 
 	//==============================================================================
 	/// 파라미터 하나 설정. (이름은 SCREEN_EFFECT_PARAMETER_NAMES)
+	///
+	/// # 인자
+	/// - `effect_type`: 효과.
+	/// - `parameter_name`: 파라미터 이름. (get_parameter_names 의 것, 모르는 이름이면 아무것도 하지 않는다)
+	/// - `value`: 값.
 	//==============================================================================
 	pub fn set_parameter(&mut self, effect_type: ScreenEffectType, parameter_name: &str, value: f32) {
 		let parameter_names = effect_type.get_parameter_names();
@@ -1452,6 +1674,12 @@ impl ScreenEffect {
 
 	//==============================================================================
 	/// 파라미터 반환.
+	///
+	/// # 인자
+	/// - `effect_type`: 효과.
+	///
+	/// # 돌려줌
+	/// 파라미터 [x, y, z, w]. (reset_all 뒤에는 효과별 기본값)
 	//==============================================================================
 	pub fn get_parameters(&self, effect_type: ScreenEffectType) -> [f32; 4] {
 		self.effect_state_list[effect_type as usize].parameters
@@ -1459,6 +1687,10 @@ impl ScreenEffect {
 
 	//==============================================================================
 	/// 색 설정. (Color 또는 "#rrggbb" 같은 문자열)
+	///
+	/// # 인자
+	/// - `effect_type`: 효과.
+	/// - `color`: 효과 색. (뜻은 효과마다 다르다. 가장자리 색, 빛 색, 전환이 덮을 색 같은 것)
 	//==============================================================================
 	pub fn set_color(&mut self, effect_type: ScreenEffectType, color: impl Into<Color>) {
 		self.effect_state_list[effect_type as usize].color = color.into();
@@ -1466,6 +1698,12 @@ impl ScreenEffect {
 
 	//==============================================================================
 	/// 색 반환.
+	///
+	/// # 인자
+	/// - `effect_type`: 효과.
+	///
+	/// # 돌려줌
+	/// 효과 색. (reset_all 뒤에는 효과별 기본 색, 기본 색이 없는 효과는 흰색)
 	//==============================================================================
 	pub fn get_color(&self, effect_type: ScreenEffectType) -> Color {
 		self.effect_state_list[effect_type as usize].color
@@ -1484,6 +1722,27 @@ impl ScreenEffect {
 	/// 타임라인 속성 적용. ("vignette" = 세기(0 이면 끔), "shockwave.radius" = 파라미터, "fade.color" = 색, "fade.enabled" = 켜기)
 	/// - 값은 원본처럼 숫자, 문자열, 참거짓(TimelineValue)이다. 숫자는 원본 Number() 처럼 읽고(참거짓은 1 / 0, 빈 문자열은 0, 못 읽으면 NaN),
 	///   색은 "#rrggbb" 문자열일 때만 바꾸고, 켜기는 true 또는 "true" 다.
+	///
+	/// # 인자
+	/// - `property_name`: "효과" 또는 "효과.멤버". (효과는 원본 이름, 멤버는 color, enabled, 파라미터 이름. 모르는 효과나 파라미터 이름은 무시한다)
+	/// - `value`: 걸 값.
+	///
+	/// # 예제
+	/// 타임라인 속성 이름으로 세기, 파라미터, 색, 켜기 걸기
+	/// ```rust
+	/// use vanilla::{Color, ScreenEffect, ScreenEffectType, TimelineValue};
+	///
+	/// let mut screen_effect = ScreenEffect::new();
+	/// screen_effect.set_timeline_property("vignette", &TimelineValue::Number(0.5));
+	/// assert!(screen_effect.is_enabled(ScreenEffectType::Vignette));
+	/// assert_eq!(screen_effect.get_strength(ScreenEffectType::Vignette), 0.5);
+	/// screen_effect.set_timeline_property("shockwave.radius", &TimelineValue::Number(0.75));
+	/// assert_eq!(screen_effect.get_parameters(ScreenEffectType::Shockwave)[2], 0.75);
+	/// screen_effect.set_timeline_property("fade.color", &TimelineValue::String(String::from("#ff0000")));
+	/// screen_effect.set_timeline_property("fade.enabled", &TimelineValue::Boolean(true));
+	/// assert_eq!(screen_effect.get_color(ScreenEffectType::Fade), Color::create(1.0, 0.0, 0.0, 1.0));
+	/// assert!(screen_effect.is_enabled(ScreenEffectType::Fade));
+	/// ```
 	//==============================================================================
 	pub fn set_timeline_property(&mut self, property_name: &str, value: &TimelineValue) {
 		let (effect_name, member_name) = match property_name.find('.') {
@@ -1524,6 +1783,9 @@ impl ScreenEffect {
 
 	//==============================================================================
 	/// 시간 반환.
+	///
+	/// # 돌려줌
+	/// 효과 시간. (초, tick 으로 쌓인다)
 	//==============================================================================
 	pub fn get_time(&self) -> f32 {
 		self.time
@@ -1531,6 +1793,9 @@ impl ScreenEffect {
 
 	//==============================================================================
 	/// 씬 텍스처 반환. (end 이후, 마지막 프레임에 떠 온 영역 원본)
+	///
+	/// # 돌려줌
+	/// 떠 온 영역의 원본 텍스처. end 가 렌더 대상을 만들기 전이거나 destroy 뒤면 None.
 	//==============================================================================
 	pub fn get_scene_texture(&self) -> Option<GlTexture> {
 		self.render_target_set.as_ref().map(|render_target_set| render_target_set.scene_target.texture)
@@ -1538,6 +1803,9 @@ impl ScreenEffect {
 
 	//==============================================================================
 	/// 적용 차례 반환. (정적)
+	///
+	/// # 돌려줌
+	/// 적용 차례대로의 효과 58 개. (열거 선언 차례와 같다)
 	//==============================================================================
 	pub fn get_effect_order() -> Vec<ScreenEffectType> {
 		EFFECT_ORDER.to_vec()
@@ -1545,6 +1813,10 @@ impl ScreenEffect {
 
 	//==============================================================================
 	/// 파괴. (GL 자원 해제: 렌더 대상과 패스 프로그램)
+	/// - 효과 설정은 그대로 두고, 다시 end 하면 자원을 새로 만든다.
+	///
+	/// # 인자
+	/// - `graphic`: GL 자원을 만든 그래픽.
 	//==============================================================================
 	pub fn destroy(&mut self, graphic: &mut Graphic) {
 		let gl = graphic.get_gl();
@@ -1559,6 +1831,9 @@ impl ScreenEffect {
 }
 
 impl Default for ScreenEffect {
+	//==============================================================================
+	/// 기본값. (new 와 같다)
+	//==============================================================================
 	fn default() -> ScreenEffect {
 		ScreenEffect::new()
 	}

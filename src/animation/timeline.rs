@@ -18,40 +18,26 @@
 //!   ```
 //! - 원본과 다른 점:
 //!   - 대상은 객체 참조 대신 TimelineTarget 이다. 노드는 Node(NodeId), 노드가 아닌 것(화면 효과 같은)은 External(`Rc<RefCell<dyn TimelinePropertyTarget>>`) 이다.
-//!   ```text
 //!     노드에 거는 함수(tick, seek, stop, evaluate, compile, build_stage, bind)는 NodeTree 를 같이 받는다.
-//!   ```
 //!   - External 대상에는 원본처럼 evaluate 가 그 자리에서 set_timeline_property 를 부른다. (씬은 대상을 `Rc<RefCell>` 로 나눠 쥔다)
-//!   ```text
 //!     넘겨받는 쪽은 TimelinePropertyTarget 트레이트를 구현한다. ScreenEffect 는 이 파일에서 구현했다.
 //!     마지막 evaluate 가 External 대상에 건 값은 get_external_properties 로 읽을 수 있다. (편집기와 시험용)
-//!   ```
 //!   - 값은 원본의 숫자 / 문자열 / 참거짓을 TimelineValue 열거형으로 든다. 숫자는 f32 다.
 //!   - 핸들러는 원본처럼 마지막 인자로 타임라인 자신(&mut Timeline)을 받고, 노드에 거는 함수에 넘길 NodeTree 를 그 뒤에 같이 받는다.
-//!   ```text
 //!     부르는 동안 핸들러를 칸에서 꺼내 두므로 핸들러 안에서 pause, seek, set_*_handler 를 부를 수 있다. (새로 건 핸들러가 이긴다)
-//!   ```
 //!   - 글 속성(text, number, fontSize, visibleCharacters, color)은 원본 get_component(Text) 가 Text 를 상속한 RichText 도 찾듯 RichText 노드에도 건다.
 //!   - resolve_timeline_easing 은 함수 대신 TimelineEasing 값을 돌려준다. (evaluate(progress) 로 부른다)
 //!   - TIMELINE_PROPERTY_DEFINITIONS 는 이름 → 정의 객체 대신 정의 배열이고 find_timeline_property_definition 으로 찾는다.
-//!   ```text
 //!     TIMELINE_NODE_DEFAULTS 는 기본값을 채운 TimelineNodeDescription 이다. (원본 키 type 은 node_type)
-//!   ```
 //!   - 원본의 스프라이트 격자 표와 사운드 표(WeakMap)는 노드에 붙는 작은 컴포넌트 TimelineSpriteFrameGrid, TimelineSound 로 바꿨다.
 //!   - 원본 Timeline.setAudioManager(정적)와 사운드 노드의 비동기 읽기는 load_sounds(node_tree, engine) 로 바꿨다.
-//!   ```text
 //!     무대를 만든 뒤 한 번 부르면 사운드 노드마다 오디오 애셋을 읽고 플레이어를 만든다. (돌려준 애셋을 씬이 track_audio_asset 으로 맡겨도 된다)
-//!   ```
 //!   - loadFromUrl(비동기 fetch)은 load_from_url(엔진, 애셋 경로)이다. 엔진의 애셋 받기로 바이트를 부탁하고, 엔진 작업 안에서 await 하면 타임라인이 나온다.
-//!   ```text
 //!     (데스크탑은 애셋 폴더 후보, 웹은 asset_base_url 에서 fetch) await 없이는 JsonAsset 으로 받은 문서를 create_from_json_asset / load_from_text 로 넘긴다.
-//!   ```
 //!   - "data:" 주소 이미지: 웹은 원본처럼 브라우저가 풀어(fetch 와 HTMLImageElement, platform/web.rs) 다 풀리면 스프라이트에 걸고 서술의 칸을 다시 고른다.
-//!   ```text
 //!     (원본 image.onload 의 applySpriteFrame, 그동안 TimelineSpriteFrameGrid 가 기다리며 갱신한다)
 //!     데스크탑은 그 자리에서 푼다. 브라우저처럼 본문의 퍼센트 꼴(%XX)을 먼저 풀고, ;base64 면 base64 를 푼다. 주소의 형이 image/svg+xml 이면 resvg 로 그린 SVG,
 //!     그 밖은 내용으로 가린 래스터(png, jpeg, webp, gif, bmp, ico, avif)다. (Image::load_from_memory_with_mime_type)
-//!   ```
 //! - 이징 곡선 값은 원본과 같다. 같은 이름의 무대 노드가 둘이면 모두 붙이고 이름 표에는 뒤의 것이 남는다(원본과 같다).
 //!   부모가 자기 자신이거나 고리가 되면 무대 부모에 붙인다. load_from_text, create_from_json_asset 은 원본에도 있다.
 //==============================================================================
@@ -186,6 +172,27 @@ fn evaluate_bezier_easing(x1: f32, y1: f32, x2: f32, y2: f32, progress: f32) -> 
 
 //==============================================================================
 /// 3차 베지어 이징 생성. (CSS cubic-bezier 와 같은 제어점, x 는 0 ~ 1)
+///
+/// # 인자
+/// - `x1`: 첫 제어점 x. (0 ~ 1 로 자른다)
+/// - `y1`: 첫 제어점 y. (자르지 않는다, 0 ~ 1 밖이면 넘쳤다 돌아온다)
+/// - `x2`: 둘째 제어점 x. (0 ~ 1 로 자른다)
+/// - `y2`: 둘째 제어점 y. (자르지 않는다)
+///
+/// # 돌려줌
+/// 진행률(0 ~ 1)을 받아 이징 값을 내는 함수. (진행률 0 이하는 0, 1 이상은 1)
+///
+/// # 예제
+/// CSS ease-in-out 곡선
+/// ```rust
+/// use vanilla::create_bezier_easing;
+///
+/// let ease_in_out = create_bezier_easing(0.42, 0.0, 0.58, 1.0);
+/// assert_eq!(ease_in_out(0.0), 0.0);
+/// assert_eq!(ease_in_out(1.0), 1.0);
+/// assert!((ease_in_out(0.5) - 0.5).abs() < 0.001);
+/// assert!(ease_in_out(0.1) < 0.1);
+/// ```
 //==============================================================================
 pub fn create_bezier_easing(x1: f32, y1: f32, x2: f32, y2: f32) -> impl Fn(f32) -> f32 + Clone {
 	move |progress: f32| evaluate_bezier_easing(x1, y1, x2, y2, progress)
@@ -212,6 +219,12 @@ pub enum TimelineEasing {
 impl TimelineEasing {
 	//==============================================================================
 	/// 진행률(0 ~ 1)의 이징 값.
+	///
+	/// # 인자
+	/// - `progress`: 구간 진행률. (0 ~ 1)
+	///
+	/// # 돌려줌
+	/// 이징 값. (보통 0 ~ 1, elastic, back, 베지어 y 처럼 넘치는 곡선은 밖으로 나간다. step 은 늘 0)
 	//==============================================================================
 	pub fn evaluate(&self, progress: f32) -> f32 {
 		match self {
@@ -227,6 +240,28 @@ impl TimelineEasing {
 
 //==============================================================================
 /// 이징 반환. (모르는 이름은 linear, "bezier" 는 curve [x1, y1, x2, y2] 를 쓰고 없으면 ease-in-out)
+///
+/// # 인자
+/// - `easing_name`: 이징 이름. (TIMELINE_EASING_NAMES 의 것, 빈 글은 linear)
+/// - `curve`: "bezier" 의 제어점 [x1, y1, x2, y2]. 없거나 넷보다 적으면 [0.42, 0, 0.58, 1]. "bezier" 가 아니면 보지 않는다.
+///
+/// # 돌려줌
+/// evaluate(progress) 로 부르는 이징 값.
+///
+/// # 예제
+/// 이름으로 이징 고르기
+/// ```rust
+/// use vanilla::resolve_timeline_easing;
+///
+/// let quadratic_in = resolve_timeline_easing("quadratic.in", None);
+/// assert_eq!(quadratic_in.evaluate(0.5), 0.25);
+/// let step = resolve_timeline_easing("step", None);
+/// assert_eq!(step.evaluate(0.9), 0.0);
+/// let curve: [f32; 4] = [0.68, -0.55, 0.265, 1.55];
+/// let overshoot = resolve_timeline_easing("bezier", Some(&curve));
+/// assert!(overshoot.evaluate(0.3) < 0.0);
+/// assert_eq!(resolve_timeline_easing("unknown", None).evaluate(0.3), 0.3);
+/// ```
 //==============================================================================
 pub fn resolve_timeline_easing(easing_name: &str, curve: Option<&[f32]>) -> TimelineEasing {
 	if easing_name.is_empty() || easing_name == "linear" {
@@ -292,6 +327,22 @@ fn parse_leading_hexadecimal(text: &str) -> Option<f32> {
 
 //==============================================================================
 /// 색 문자열 → 채널. ("#rrggbb" 또는 "#rrggbbaa", 못 읽는 채널은 1)
+///
+/// # 인자
+/// - `hex_text`: 색 글. "#" 로 시작하지 않으면 흰색으로 읽는다. 채널은 두 글자씩 원본 parseInt(글, 16) 처럼 앞의 16 진 숫자만 읽는다.
+///
+/// # 돌려줌
+/// [빨강, 초록, 파랑, 알파] 채널. (0 ~ 1, 알파는 여덟 글자일 때만 읽고 아니면 1)
+///
+/// # 예제
+/// 색 글 읽기
+/// ```rust
+/// use vanilla::parse_timeline_color;
+///
+/// assert_eq!(parse_timeline_color("#ff000080"), [1.0, 0.0, 0.0, 128.0 / 255.0]);
+/// assert_eq!(parse_timeline_color("#00ff00"), [0.0, 1.0, 0.0, 1.0]);
+/// assert_eq!(parse_timeline_color("red"), [1.0, 1.0, 1.0, 1.0]);
+/// ```
 //==============================================================================
 pub fn parse_timeline_color(hex_text: &str) -> [f32; 4] {
 	let characters: Vec<char> = match hex_text.strip_prefix('#') {
@@ -324,6 +375,21 @@ pub fn parse_timeline_color(hex_text: &str) -> [f32; 4] {
 
 //==============================================================================
 /// 채널 → 색 문자열. ("#rrggbbaa", 알파가 없으면 1)
+///
+/// # 인자
+/// - `channels`: [빨강, 초록, 파랑, 알파] 채널. (0 ~ 1 로 자르고 반올림한다, 빠진 빨강, 초록, 파랑은 0)
+///
+/// # 돌려줌
+/// 소문자 "#rrggbbaa" 글.
+///
+/// # 예제
+/// 채널을 색 글로
+/// ```rust
+/// use vanilla::compose_timeline_color;
+///
+/// assert_eq!(compose_timeline_color(&[1.0, 0.5, 0.0, 1.0]), "#ff8000ff");
+/// assert_eq!(compose_timeline_color(&[0.2, 0.4, 0.6]), "#336699ff");
+/// ```
 //==============================================================================
 pub fn compose_timeline_color(channels: &[f32]) -> String {
 	let to_byte = |value: f32| -> u32 {
@@ -411,14 +477,34 @@ fn read_json_number(value: Option<&Value>) -> f32 {
 pub enum TimelineValue {
 	/// 값 없음. (원본 null)
 	None,
+	/// 숫자.
 	Number(f32),
+	/// 글. (색 "#rrggbbaa", 이벤트 이름도 이것)
 	String(String),
+	/// 참거짓.
 	Boolean(bool),
 }
 
 impl TimelineValue {
 	//==============================================================================
 	/// JSON 값에서 만들기. (배열, 객체는 none)
+	///
+	/// # 인자
+	/// - `value`: 서술 키의 value 칸.
+	///
+	/// # 돌려줌
+	/// 숫자는 Number(f32), 글은 String, 참거짓은 Boolean, null 과 배열, 객체는 None.
+	///
+	/// # 예제
+	/// JSON 값을 타임라인 값으로
+	/// ```rust
+	/// use serde_json::json;
+	/// use vanilla::TimelineValue;
+	///
+	/// assert_eq!(TimelineValue::from_json(&json!(2.5)), TimelineValue::Number(2.5));
+	/// assert_eq!(TimelineValue::from_json(&json!("hit")), TimelineValue::String(String::from("hit")));
+	/// assert_eq!(TimelineValue::from_json(&json!([1, 2])), TimelineValue::None);
+	/// ```
 	//==============================================================================
 	pub fn from_json(value: &Value) -> TimelineValue {
 		match value {
@@ -439,6 +525,9 @@ impl TimelineValue {
 
 	//==============================================================================
 	/// JSON 값으로 바꾸기.
+	///
+	/// # 돌려줌
+	/// None 은 null, 숫자는 JSON 숫자(NaN 과 무한은 null), 글과 참거짓은 그대로.
 	//==============================================================================
 	pub fn to_json(&self) -> Value {
 		match self {
@@ -459,6 +548,20 @@ impl TimelineValue {
 
 	//==============================================================================
 	/// 숫자로 읽기. (원본 Number(값). 문자열은 읽고, 참거짓은 1 / 0, 없음은 0)
+	///
+	/// # 돌려줌
+	/// 숫자. 글은 앞뒤 공백을 떼고 읽는다. (빈 글은 0, 못 읽으면 NaN)
+	///
+	/// # 예제
+	/// 여러 값을 숫자로
+	/// ```rust
+	/// use vanilla::TimelineValue;
+	///
+	/// assert_eq!(TimelineValue::String(String::from(" 12.5 ")).as_number(), 12.5);
+	/// assert_eq!(TimelineValue::Boolean(true).as_number(), 1.0);
+	/// assert_eq!(TimelineValue::None.as_number(), 0.0);
+	/// assert!(TimelineValue::String(String::from("abc")).as_number().is_nan());
+	/// ```
 	//==============================================================================
 	pub fn as_number(&self) -> f32 {
 		match self {
@@ -484,6 +587,20 @@ impl TimelineValue {
 
 	//==============================================================================
 	/// 글로 읽기. (원본 String(값))
+	///
+	/// # 돌려줌
+	/// 글. None 은 "null", 숫자는 정수면 소수점 없이(-0 은 "0", 무한은 "Infinity" / "-Infinity"), 참거짓은 "true" / "false".
+	///
+	/// # 예제
+	/// 값을 글로
+	/// ```rust
+	/// use vanilla::TimelineValue;
+	///
+	/// assert_eq!(TimelineValue::Number(3.0).to_text(), "3");
+	/// assert_eq!(TimelineValue::Number(0.5).to_text(), "0.5");
+	/// assert_eq!(TimelineValue::None.to_text(), "null");
+	/// assert_eq!(TimelineValue::Boolean(false).to_text(), "false");
+	/// ```
 	//==============================================================================
 	pub fn to_text(&self) -> String {
 		match self {
@@ -504,6 +621,9 @@ impl TimelineValue {
 
 	//==============================================================================
 	/// 참으로 볼지. (원본 visible 속성: true 또는 "true")
+	///
+	/// # 돌려줌
+	/// Boolean(true) 이거나 글 "true" 면 true. 숫자와 None 은 false.
 	//==============================================================================
 	pub fn is_true(&self) -> bool {
 		match self {
@@ -525,20 +645,45 @@ impl TimelineValue {
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TimelinePropertyKind {
+	/// 숫자. (키 사이를 이징으로 보간)
 	Number,
+	/// 색 글. (채널마다 이징으로 보간)
 	Color,
+	/// 글. (계단, 다음 키에서 바뀐다)
 	String,
+	/// 참거짓. (계단)
 	Boolean,
 }
 
 //==============================================================================
 /// 속성 정의. (이름 → 종류 / 표시 이름 / 노드에 거는 함수)
+/// - TIMELINE_PROPERTY_DEFINITIONS 에 든다. 정의가 없는 속성은 노드에 걸지 않고 External 대상에만 넘긴다.
+///
+/// # 예제
+/// opacity 정의를 찾아 노드에 걸기
+/// ```rust
+/// use vanilla::{find_timeline_property_definition, TimelinePropertyKind, TimelineValue, WorldNode};
+///
+/// let definition = find_timeline_property_definition("opacity").expect("opacity");
+/// assert_eq!(definition.kind, TimelinePropertyKind::Number);
+/// assert_eq!(definition.label, "Opacity");
+/// let mut node = WorldNode::new("box");
+/// if let Some(apply) = definition.apply {
+/// 	apply(&mut node, &TimelineValue::Number(1.5));
+/// }
+/// assert_eq!(node.get_local_opacity(), 1.0);
+/// assert!(find_timeline_property_definition("event").is_some_and(|definition| definition.apply.is_none()));
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug)]
 pub struct TimelinePropertyDefinition {
+	/// 서술 트랙의 property 이름. (원본 이름 그대로, "scaleX" 처럼)
 	pub name: &'static str,
+	/// 값 종류. (보간 방식을 정한다)
 	pub kind: TimelinePropertyKind,
+	/// 편집기에 보일 이름.
 	pub label: &'static str,
+	/// 노드에 값을 거는 함수. None 이면 노드에 걸지 않는다. ("event")
 	pub apply: Option<fn(&mut WorldNode, &TimelineValue)>,
 }
 
@@ -711,6 +856,12 @@ pub const TIMELINE_PROPERTY_DEFINITIONS: [TimelinePropertyDefinition; 17] = [
 
 //==============================================================================
 /// 속성 정의 찾기. (원본 `TIMELINE_PROPERTY_DEFINITIONS[이름]`)
+///
+/// # 인자
+/// - `property_name`: 속성 이름. (대소문자를 가린다)
+///
+/// # 돌려줌
+/// 그 이름의 정의. 없으면 None.
 //==============================================================================
 pub fn find_timeline_property_definition(property_name: &str) -> Option<&'static TimelinePropertyDefinition> {
 	TIMELINE_PROPERTY_DEFINITIONS.iter().find(|definition| definition.name == property_name)
@@ -828,18 +979,43 @@ fn color_text_of(value: &TimelineValue) -> String {
 
 //==============================================================================
 /// 키 하나. (시간, 값, 그 키에서 다음 키까지의 이징, bezier 제어점)
+///
+/// # 예제
+/// quadratic.in 으로 0 에서 100 까지 가는 두 키
+/// ```rust
+/// use serde_json::json;
+/// use vanilla::{Timeline, TimelineKey, TimelinePropertyKind, TimelineValue};
+///
+/// let mut start_key = TimelineKey::new(0.0, TimelineValue::Number(0.0));
+/// start_key.easing = String::from("quadratic.in");
+/// let end_key = TimelineKey::from_json(&json!({ "time": 2, "value": 100 }));
+/// let keys = vec![start_key, end_key];
+/// assert_eq!(Timeline::sample_keys(&keys, TimelinePropertyKind::Number, 1.0), TimelineValue::Number(25.0));
+/// assert_eq!(Timeline::sample_keys(&keys, TimelinePropertyKind::Number, 3.0), TimelineValue::Number(100.0));
+/// ```
 //==============================================================================
 #[derive(Clone, Debug, PartialEq)]
 pub struct TimelineKey {
+	/// 키 시간. (초)
 	pub time: f32,
+	/// 키 값.
 	pub value: TimelineValue,
+	/// 이 키에서 다음 키까지 구간의 이징 이름. (빈 글과 모르는 이름은 linear)
 	pub easing: String,
+	/// easing 이 "bezier" 일 때의 제어점 [x1, y1, x2, y2]. (None 이면 ease-in-out)
 	pub curve: Option<Vec<f32>>,
 }
 
 impl TimelineKey {
 	//==============================================================================
 	/// 생성. (이징 linear)
+	///
+	/// # 인자
+	/// - `time`: 키 시간. (초)
+	/// - `value`: 키 값.
+	///
+	/// # 돌려줌
+	/// 이징 "linear", 제어점 없는 키.
 	//==============================================================================
 	pub fn new(time: f32, value: TimelineValue) -> TimelineKey {
 		TimelineKey {
@@ -852,6 +1028,12 @@ impl TimelineKey {
 
 	//==============================================================================
 	/// JSON 키에서 만들기. ({ time, value, easing, curve })
+	///
+	/// # 인자
+	/// - `key_description`: 서술 키 객체. (빠진 time 은 0, value 는 None, easing 은 빈 글, curve 는 None. curve 의 숫자가 아닌 칸은 0)
+	///
+	/// # 돌려줌
+	/// 읽은 키.
 	//==============================================================================
 	pub fn from_json(key_description: &Value) -> TimelineKey {
 		let time = key_description.get("time").and_then(|value| value.as_f64()).unwrap_or(0.0) as f32;
@@ -870,6 +1052,9 @@ impl TimelineKey {
 
 	//==============================================================================
 	/// 이 키에서 시작하는 구간의 이징.
+	///
+	/// # 돌려줌
+	/// easing 과 curve 로 고른 이징. (resolve_timeline_easing 과 같다)
 	//==============================================================================
 	pub fn resolve_easing(&self) -> TimelineEasing {
 		resolve_timeline_easing(&self.easing, self.curve.as_deref())
@@ -878,10 +1063,36 @@ impl TimelineKey {
 
 //==============================================================================
 /// 마커. (시간과 이름. 지나치면 마커 핸들러가 불린다)
+///
+/// # 예제
+/// 1초 재생하며 지난 마커 받기
+/// ```rust
+/// use std::cell::RefCell;
+/// use std::rc::Rc;
+/// use serde_json::json;
+/// use vanilla::{NodeTree, Timeline, TimelineMarker};
+///
+/// let passed_list: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+/// let mut node_tree = NodeTree::new();
+/// let mut timeline = Timeline::new(Some(json!({
+/// 	"duration": 2,
+/// 	"loop": false,
+/// 	"markers": [{ "time": 0.5, "name": "hit" }, { "time": 1.5, "name": "end" }],
+/// })));
+/// let recorded_list = passed_list.clone();
+/// timeline.set_marker_handler(Some(Box::new(move |marker_name: &str, marker: &TimelineMarker, _timeline: &mut Timeline, _node_tree: &mut NodeTree| {
+/// 	recorded_list.borrow_mut().push(format!("{} {}", marker_name, marker.time));
+/// })));
+/// timeline.play();
+/// timeline.tick(&mut node_tree, 1.0);
+/// assert_eq!(*passed_list.borrow(), vec![String::from("hit 0.5")]);
+/// ```
 //==============================================================================
 #[derive(Clone, Debug, PartialEq)]
 pub struct TimelineMarker {
+	/// 마커 시간. (초)
 	pub time: f32,
+	/// 마커 이름.
 	pub name: String,
 }
 
@@ -933,10 +1144,47 @@ impl std::fmt::Debug for TimelineTarget {
 
 //==============================================================================
 /// 노드가 아닌 대상이 값을 받는 트레이트. (원본 set_timeline_property(이름, 값))
+/// - `Rc<RefCell<..>>` 로 쥐고 TimelineTarget::External 로 등록하면 evaluate 가 그 자리에서 부른다.
+///
+/// # 예제
+/// 트랙 값을 받는 페이드 대상
+/// ```rust
+/// use std::cell::RefCell;
+/// use std::rc::Rc;
+/// use serde_json::json;
+/// use vanilla::{NodeTree, Timeline, TimelinePropertyTarget, TimelineTarget, TimelineValue};
+///
+/// struct Fader {
+/// 	alpha: f32,
+/// }
+///
+/// impl TimelinePropertyTarget for Fader {
+/// 	fn set_timeline_property(&mut self, property_name: &str, value: &TimelineValue) {
+/// 		if property_name == "alpha" {
+/// 			self.alpha = value.as_number();
+/// 		}
+/// 	}
+/// }
+///
+/// let fader: Rc<RefCell<Fader>> = Rc::new(RefCell::new(Fader { alpha: 0.0 }));
+/// let fader_target: Rc<RefCell<dyn TimelinePropertyTarget>> = fader.clone();
+/// let mut node_tree = NodeTree::new();
+/// let mut timeline = Timeline::new(Some(json!({
+/// 	"duration": 2,
+/// 	"tracks": [{ "target": "fader", "property": "alpha", "keys": [{ "time": 0, "value": 0 }, { "time": 2, "value": 1 }] }],
+/// })));
+/// timeline.set_target("fader", TimelineTarget::External(fader_target));
+/// timeline.evaluate(&mut node_tree, 1.0);
+/// assert_eq!(fader.borrow().alpha, 0.5);
+/// ```
 //==============================================================================
 pub trait TimelinePropertyTarget {
 	//==============================================================================
 	/// 속성 값 받기.
+	///
+	/// # 인자
+	/// - `property_name`: 서술 트랙의 property 이름.
+	/// - `value`: 그 시간에 표본한 값.
 	//==============================================================================
 	fn set_timeline_property(&mut self, property_name: &str, value: &TimelineValue);
 }
@@ -952,50 +1200,130 @@ impl TimelinePropertyTarget for ScreenEffect {
 
 //==============================================================================
 /// External 대상에 건 값 하나. (get_external_properties)
+///
+/// # 예제
+/// evaluate 뒤 External 대상에 건 값 읽기
+/// ```rust
+/// use std::cell::RefCell;
+/// use std::rc::Rc;
+/// use serde_json::json;
+/// use vanilla::{NodeTree, Timeline, TimelineExternalProperty, TimelinePropertyTarget, TimelineTarget, TimelineValue};
+///
+/// struct Silent;
+///
+/// impl TimelinePropertyTarget for Silent {
+/// 	fn set_timeline_property(&mut self, _property_name: &str, _value: &TimelineValue) {
+/// 	}
+/// }
+///
+/// let screen: Rc<RefCell<dyn TimelinePropertyTarget>> = Rc::new(RefCell::new(Silent));
+/// let mut node_tree = NodeTree::new();
+/// let mut timeline = Timeline::new(Some(json!({
+/// 	"duration": 2,
+/// 	"tracks": [{ "target": "screen", "property": "vignette", "keys": [{ "time": 0, "value": 0 }, { "time": 2, "value": 1 }] }],
+/// })));
+/// timeline.set_target("screen", TimelineTarget::External(screen));
+/// timeline.evaluate(&mut node_tree, 1.0);
+/// let expected_property = TimelineExternalProperty {
+/// 	target_name: String::from("screen"),
+/// 	property_name: String::from("vignette"),
+/// 	value: TimelineValue::Number(0.5),
+/// };
+/// assert_eq!(timeline.get_external_properties(), &[expected_property]);
+/// ```
 //==============================================================================
 #[derive(Clone, Debug, PartialEq)]
 pub struct TimelineExternalProperty {
+	/// 트랙 대상 이름.
 	pub target_name: String,
+	/// 트랙 속성 이름.
 	pub property_name: String,
+	/// 건 값.
 	pub value: TimelineValue,
 }
 
 //==============================================================================
 /// 서술 노드. (원본 무대 노드 서술. TIMELINE_NODE_DEFAULTS 가 기본값)
+/// - 필드 이름은 snake_case 이고 서술 JSON 의 키는 원본 그대로 camelCase 다. (scale_x ← "scaleX")
+///
+/// # 예제
+/// 서술 JSON 을 기본값 위에 읽기
+/// ```rust
+/// use serde_json::json;
+/// use vanilla::{TimelineNodeDescription, TIMELINE_NODE_DEFAULTS};
+///
+/// let description = TimelineNodeDescription::from_json(&json!({ "name": "Box", "type": "paint", "x": 40, "scaleX": 2, "visible": false }));
+/// assert_eq!(description.node_type, "paint");
+/// assert_eq!(description.x, 40.0);
+/// assert_eq!(description.scale_x, 2.0);
+/// assert!(!description.visible);
+/// assert_eq!(description.width, TIMELINE_NODE_DEFAULTS.width);
+/// assert_eq!(description.color, "#ffffffff");
+/// ```
 //==============================================================================
 #[derive(Clone, Debug, PartialEq)]
 pub struct TimelineNodeDescription {
+	/// 노드 이름. (트랙의 target 이 이 이름을 가리킨다, 기본 빈 글)
 	pub name: String,
 	/// 원본 키 type. ("group", "paint", "sprite", "text", "particle", "sound")
 	pub node_type: String,
+	/// 부모 노드 이름. (None 이면 무대 부모에 붙는다)
 	pub parent: Option<String>,
+	/// 로컬 x 위치. (부모 왼쪽 위 기준, 기본 0)
 	pub x: f32,
+	/// 로컬 y 위치. (기본 0)
 	pub y: f32,
+	/// 컨텐츠 너비. (기본 100)
 	pub width: f32,
+	/// 컨텐츠 높이. (기본 100)
 	pub height: f32,
+	/// 가로 배율. (JSON "scaleX", 기본 1)
 	pub scale_x: f32,
+	/// 세로 배율. (JSON "scaleY", 기본 1)
 	pub scale_y: f32,
+	/// 회전. (도, 기본 0)
 	pub rotation: f32,
+	/// 투명도. (0 ~ 1, 기본 1)
 	pub opacity: f32,
+	/// 피봇 x 비율. (JSON "pivotX", 0 ~ 1, 기본 0.5)
 	pub pivot_x: f32,
+	/// 피봇 y 비율. (JSON "pivotY", 0 ~ 1, 기본 0.5)
 	pub pivot_y: f32,
+	/// 보이기. (JSON 이 false 일 때만 끈다, 기본 true)
 	pub visible: bool,
+	/// 색 글. (paint 의 칠하기 색, text 의 글자색, sprite 의 덧칠 색. 기본 "#ffffffff")
 	pub color: String,
+	/// paint 귀퉁이 둥근 크기. (JSON "roundSize", 기본 0)
 	pub round_size: f32,
+	/// sprite 이미지 이름. (이미지 해석기에 넘긴다. "data:" 주소면 그 자리에서 푼다, 기본 빈 글)
 	pub image: String,
+	/// sprite 시트 가로 칸 수. (JSON "frameColumns", 1 보다 작으면 1, 기본 1)
 	pub frame_columns: f32,
+	/// sprite 시트 세로 칸 수. (JSON "frameRows", 1 보다 작으면 1, 기본 1)
 	pub frame_rows: f32,
+	/// sprite 시트 처음 칸 번호. (반올림, 기본 0)
 	pub frame: f32,
+	/// sprite 의 ShaderSprite 효과 이름. (ShaderSpriteEffect::from_name, 모르는 이름은 효과 없음, 기본 "none")
 	pub effect: String,
+	/// sprite 효과 진행률. (JSON "effectProgress", 0 ~ 1, 기본 0)
 	pub effect_progress: f32,
+	/// sprite 효과 색 글. (JSON "effectColor", 빈 글이면 효과 기본 색, 기본 빈 글)
 	pub effect_color: String,
+	/// sprite 섞기 이름. (JSON "blendMode", 캔버스 합성 이름, 모르는 이름은 Normal, 기본 "source-over")
 	pub blend_mode: String,
+	/// text 글. (기본 "Text")
 	pub text: String,
+	/// text 글자 크기. (JSON "fontSize", 픽셀, 기본 32)
 	pub font_size: f32,
+	/// text 굵게. (JSON 이 true 일 때만, 기본 false)
 	pub bold: bool,
+	/// text 가로 정렬 이름. (JSON "textAlign", "left", "right", "start", "end", 그 밖은 가운데. 기본 "center")
 	pub text_align: String,
+	/// particle 서술 객체. (ParticleSystem::apply_description 에 넘긴다, null 이면 None)
 	pub particle: Option<Value>,
+	/// sound 소리 주소. (Timeline::load_sounds 가 읽는다, 기본 빈 글)
 	pub audio: String,
+	/// sound 음량. (들고만 있다, 기본 1)
 	pub volume: f32,
 }
 
@@ -1044,6 +1372,12 @@ impl TimelineNodeDescription {
 	//==============================================================================
 	/// JSON 서술에서 만들기. (기본값 위에 준 항목을 덮는다. 원본 Object.assign({}, TIMELINE_NODE_DEFAULTS, 서술))
 	/// - 꼴이 맞지 않는 항목은 기본값을 둔다. visible 은 원본처럼 false 일 때만 끈다.
+	///
+	/// # 인자
+	/// - `node_description`: 서술 stage.nodes 의 노드 객체.
+	///
+	/// # 돌려줌
+	/// 기본값을 채운 서술 노드.
 	//==============================================================================
 	pub fn from_json(node_description: &Value) -> TimelineNodeDescription {
 		let defaults = TimelineNodeDescription::default();
@@ -1094,6 +1428,31 @@ pub static TIMELINE_NODE_DEFAULTS: LazyLock<TimelineNodeDescription> = LazyLock:
 /// 스프라이트 시트 격자. (노드 서술의 frame_columns / frame_rows. 원본 spriteFrameGridTable 자리)
 /// - 그리지 않는 표시용 컴포넌트다. frame 속성이 이것을 읽어 칸을 고른다.
 /// - 웹에서 "data:" 주소 그림을 브라우저가 푸는 동안만 갱신한다. 다 풀리면 스프라이트에 걸고 서술의 칸을 고른다. (원본 image.onload 의 applySpriteFrame)
+///
+/// # 예제
+/// 4 x 2 시트의 5 번 칸을 고른 스프라이트 노드
+/// ```rust
+/// use std::rc::Rc;
+/// use serde_json::json;
+/// use vanilla::{Image, NodeTree, Rect, ShaderSprite, Timeline, TimelineSpriteFrameGrid};
+///
+/// let sheet_image = Image::create_from_pixels(64, 32, vec![255u8; 64 * 32 * 4]);
+/// let image_resolver = |image_name: &str| -> Option<Rc<Image>> {
+/// 	if image_name == "coin" {
+/// 		Some(sheet_image.clone())
+/// 	}
+/// 	else {
+/// 		None
+/// 	}
+/// };
+/// let mut node_tree = NodeTree::new();
+/// let node_description = json!({ "name": "Coin", "type": "sprite", "image": "coin", "frameColumns": 4, "frameRows": 2, "frame": 5 });
+/// let coin_id = Timeline::create_stage_node(&mut node_tree, &node_description, Some(&image_resolver));
+/// let frame_grid = node_tree[coin_id].get_component::<TimelineSpriteFrameGrid>().expect("grid");
+/// assert_eq!((frame_grid.get_columns(), frame_grid.get_rows()), (4, 2));
+/// let image_rect = node_tree[coin_id].get_component::<ShaderSprite>().expect("sprite").get_sprite().get_image_rect();
+/// assert_eq!(image_rect, Rect::create(16.0, 16.0, 16.0, 16.0));
+/// ```
 //==============================================================================
 pub struct TimelineSpriteFrameGrid {
 	component_base: ComponentBase,
@@ -1107,6 +1466,13 @@ pub struct TimelineSpriteFrameGrid {
 impl TimelineSpriteFrameGrid {
 	//==============================================================================
 	/// 생성. (칸 수는 1 이상)
+	///
+	/// # 인자
+	/// - `columns`: 가로 칸 수. (0 이면 1)
+	/// - `rows`: 세로 칸 수. (0 이면 1)
+	///
+	/// # 돌려줌
+	/// 기다리는 그림이 없는 격자 컴포넌트.
 	//==============================================================================
 	pub fn new(columns: usize, rows: usize) -> TimelineSpriteFrameGrid {
 		TimelineSpriteFrameGrid {
@@ -1119,6 +1485,11 @@ impl TimelineSpriteFrameGrid {
 
 	//==============================================================================
 	/// 격자 설정.
+	/// - 걸린 칸을 다시 고르지는 않는다. 다음 frame 값부터 새 격자로 고른다.
+	///
+	/// # 인자
+	/// - `columns`: 가로 칸 수. (0 이면 1)
+	/// - `rows`: 세로 칸 수. (0 이면 1)
 	//==============================================================================
 	pub fn set_grid(&mut self, columns: usize, rows: usize) {
 		self.columns = columns.max(1);
@@ -1127,6 +1498,9 @@ impl TimelineSpriteFrameGrid {
 
 	//==============================================================================
 	/// 가로 칸 수.
+	///
+	/// # 돌려줌
+	/// 가로 칸 수. (1 이상)
 	//==============================================================================
 	pub fn get_columns(&self) -> usize {
 		self.columns
@@ -1134,6 +1508,9 @@ impl TimelineSpriteFrameGrid {
 
 	//==============================================================================
 	/// 세로 칸 수.
+	///
+	/// # 돌려줌
+	/// 세로 칸 수. (1 이상)
 	//==============================================================================
 	pub fn get_rows(&self) -> usize {
 		self.rows
@@ -1142,14 +1519,23 @@ impl TimelineSpriteFrameGrid {
 
 #[crate::reflect]
 impl Component for TimelineSpriteFrameGrid {
+	//==============================================================================
+	/// 컴포넌트 공통 칸 반환.
+	//==============================================================================
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base
 	}
 
+	//==============================================================================
+	/// 컴포넌트 공통 칸 반환. (변경용)
+	//==============================================================================
 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 		&mut self.component_base
 	}
 
+	//==============================================================================
+	/// 컴포넌트 종류 이름 반환. ("TimelineSpriteFrameGrid")
+	//==============================================================================
 	fn get_component_type(&self) -> &'static str {
 		"TimelineSpriteFrameGrid"
 	}
@@ -1200,6 +1586,21 @@ impl Component for TimelineSpriteFrameGrid {
 //==============================================================================
 /// 사운드 노드 상태. (원본 soundPlayerTable 의 { audio_player, audio_asset, audio_source, volume } 자리)
 /// - 애셋과 플레이어는 Timeline::load_sounds 가 채운다. 이벤트 키 play / loop / stop 이 플레이어를 부린다.
+///
+/// # 예제
+/// 사운드 노드를 만들면 주소와 음량만 들고 있다
+/// ```rust
+/// use serde_json::json;
+/// use vanilla::{NodeTree, Timeline, TimelineSound};
+///
+/// let mut node_tree = NodeTree::new();
+/// let node_description = json!({ "name": "Hit", "type": "sound", "audio": "tests/assets/audio/wav_s16_stereo.wav", "volume": 0.5 });
+/// let sound_id = Timeline::create_stage_node(&mut node_tree, &node_description, None);
+/// let sound = node_tree[sound_id].get_component::<TimelineSound>().expect("sound");
+/// assert_eq!(sound.get_audio_source(), "tests/assets/audio/wav_s16_stereo.wav");
+/// assert_eq!(sound.get_volume(), 0.5);
+/// assert!(sound.get_audio_asset().is_none());
+/// ```
 //==============================================================================
 pub struct TimelineSound {
 	component_base: ComponentBase,
@@ -1213,6 +1614,9 @@ pub struct TimelineSound {
 impl TimelineSound {
 	//==============================================================================
 	/// 생성. (비어 있음)
+	///
+	/// # 돌려줌
+	/// 주소가 빈 글, 음량 1, 애셋과 플레이어가 없는 사운드 컴포넌트.
 	//==============================================================================
 	pub fn new() -> TimelineSound {
 		TimelineSound {
@@ -1226,6 +1630,9 @@ impl TimelineSound {
 
 	//==============================================================================
 	/// 소리 주소 반환.
+	///
+	/// # 돌려줌
+	/// 서술의 audio 주소. (없으면 빈 글)
 	//==============================================================================
 	pub fn get_audio_source(&self) -> &str {
 		&self.audio_source
@@ -1233,6 +1640,9 @@ impl TimelineSound {
 
 	//==============================================================================
 	/// 음량 반환. (원본처럼 서술 값을 들고만 있다)
+	///
+	/// # 돌려줌
+	/// 서술의 volume. (기본 1, 플레이어에 걸지 않는다)
 	//==============================================================================
 	pub fn get_volume(&self) -> f32 {
 		self.volume
@@ -1240,6 +1650,9 @@ impl TimelineSound {
 
 	//==============================================================================
 	/// 오디오 애셋 반환.
+	///
+	/// # 돌려줌
+	/// 읽은 오디오 애셋. load_sounds 전이거나 읽기에 실패했으면 None.
 	//==============================================================================
 	pub fn get_audio_asset(&self) -> Option<&Rc<AudioAsset>> {
 		self.audio_asset.as_ref()
@@ -1247,6 +1660,9 @@ impl TimelineSound {
 
 	//==============================================================================
 	/// 플레이어 반환.
+	///
+	/// # 돌려줌
+	/// 플레이어의 변경 참조. load_sounds 전이면 None.
 	//==============================================================================
 	pub fn get_audio_player_mut(&mut self) -> Option<&mut AudioPlayer> {
 		self.audio_player.as_mut()
@@ -1289,6 +1705,9 @@ impl TimelineSound {
 }
 
 impl Default for TimelineSound {
+	//==============================================================================
+	/// 기본값. (new 와 같다)
+	//==============================================================================
 	fn default() -> TimelineSound {
 		TimelineSound::new()
 	}
@@ -1296,14 +1715,23 @@ impl Default for TimelineSound {
 
 #[crate::reflect]
 impl Component for TimelineSound {
+	//==============================================================================
+	/// 컴포넌트 공통 칸 반환.
+	//==============================================================================
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base
 	}
 
+	//==============================================================================
+	/// 컴포넌트 공통 칸 반환. (변경용)
+	//==============================================================================
 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 		&mut self.component_base
 	}
 
+	//==============================================================================
+	/// 컴포넌트 종류 이름 반환. ("TimelineSound")
+	//==============================================================================
 	fn get_component_type(&self) -> &'static str {
 		"TimelineSound"
 	}
@@ -1415,6 +1843,79 @@ pub type TimelineImageResolver<'a> = &'a dyn Fn(&str) -> Option<Rc<Image>>;
 
 //==============================================================================
 /// 타임라인.
+/// - 서술(JSON)을 들고, 무대를 만들거나(build_stage) 이미 있는 노드에 붙인(bind) 뒤 tick 으로 재생한다.
+///
+/// # 예제
+/// 무대를 만들고 상자를 2초 동안 오른쪽으로 옮기기
+/// ```rust
+/// use serde_json::json;
+/// use vanilla::{NodeTree, Timeline, Vector2};
+///
+/// let description = json!({
+/// 	"duration": 2,
+/// 	"loop": false,
+/// 	"stage": { "nodes": [{ "name": "Box", "type": "paint", "width": 40, "height": 40, "color": "#ff0000ff" }] },
+/// 	"tracks": [{ "target": "Box", "property": "x", "keys": [{ "time": 0, "value": 0 }, { "time": 2, "value": 200 }] }],
+/// });
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.get_root_id();
+/// let mut timeline = Timeline::new(Some(description));
+/// let node_table = timeline.build_stage(&mut node_tree, root_id, None);
+/// let box_id = node_table["Box"];
+/// timeline.play();
+/// timeline.tick(&mut node_tree, 0.5);
+/// assert_eq!(node_tree[box_id].get_local_position(), Vector2::create(50.0, 0.0));
+/// timeline.tick(&mut node_tree, 2.0);
+/// assert!(!timeline.is_playing());
+/// assert_eq!(timeline.get_time(), 2.0);
+/// assert_eq!(node_tree[box_id].get_local_position().x, 200.0);
+/// ```
+///
+/// 씬 initialize 에서 무대를 만들고 tick 에서 재생
+/// ```rust,no_run
+/// use vanilla::{Engine, EngineConfiguration, Scene, SceneBase, Timeline};
+///
+/// const INTRO_TIMELINE: &str = r#"{
+/// 	"duration": 3,
+/// 	"loop": true,
+/// 	"stage": { "nodes": [{ "name": "Logo", "type": "text", "text": "Vanilla" }] },
+/// 	"tracks": [{ "target": "Logo", "property": "opacity", "keys": [{ "time": 0, "value": 0 }, { "time": 1, "value": 1 }] }]
+/// }"#;
+///
+/// struct IntroScene {
+/// 	scene_base: SceneBase,
+/// 	timeline: Timeline,
+/// }
+///
+/// impl Scene for IntroScene {
+/// 	fn get_scene_base(&self) -> &SceneBase {
+/// 		&self.scene_base
+/// 	}
+///
+/// 	fn get_scene_base_mut(&mut self) -> &mut SceneBase {
+/// 		&mut self.scene_base
+/// 	}
+///
+/// 	fn initialize(&mut self, _engine: &mut Engine) {
+/// 		self.timeline = Timeline::load_from_text(INTRO_TIMELINE).unwrap_or_default();
+/// 		let stage_id = self.scene_base.get_root_id();
+/// 		self.timeline.build_stage(self.scene_base.get_node_tree_mut(), stage_id, None);
+/// 		self.timeline.play();
+/// 	}
+///
+/// 	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+/// 		self.scene_base.tick(engine, time_delta);
+/// 		self.timeline.tick(self.scene_base.get_node_tree_mut(), time_delta);
+/// 	}
+/// }
+///
+/// let engine = Engine::new(EngineConfiguration::new());
+/// let intro_scene = IntroScene {
+/// 	scene_base: SceneBase::new(),
+/// 	timeline: Timeline::default(),
+/// };
+/// engine.run(Box::new(intro_scene)).unwrap();
+/// ```
 //==============================================================================
 pub struct Timeline {
 	description: Value,
@@ -1440,6 +1941,12 @@ pub struct Timeline {
 impl Timeline {
 	//==============================================================================
 	/// 생성. (서술이 없으면 빈 서술)
+	///
+	/// # 인자
+	/// - `description`: 서술 JSON. None 이거나 객체가 아니면 빈 서술(create_empty_description)이고, 빠진 stage, stage.nodes, tracks, markers 는 채운다.
+	///
+	/// # 돌려줌
+	/// 멈춘 타임라인. (시간 0, 속도 1, 컴파일은 처음 쓸 때 한다)
 	//==============================================================================
 	pub fn new(description: Option<Value>) -> Timeline {
 		let mut timeline = Timeline {
@@ -1465,6 +1972,9 @@ impl Timeline {
 
 	//==============================================================================
 	/// 빈 서술 생성. (정적)
+	///
+	/// # 돌려줌
+	/// 이름 "Timeline", 길이 3 초, 초당 30 프레임, 반복, 960 x 540 무대(배경 "#101114ff")에 노드, 트랙, 마커가 없는 서술.
 	//==============================================================================
 	pub fn create_empty_description() -> Value {
 		json!({
@@ -1480,6 +1990,23 @@ impl Timeline {
 
 	//==============================================================================
 	/// JSON 글에서 만들기. (원본 loadFromUrl 의 response.json() 다음 자리)
+	///
+	/// # 인자
+	/// - `text`: 서술 JSON 글.
+	///
+	/// # 돌려줌
+	/// 그 서술의 타임라인. JSON 으로 읽지 못하면 까닭을 담은 Err.
+	///
+	/// # 예제
+	/// JSON 글에서 만들기와 실패
+	/// ```rust
+	/// use vanilla::Timeline;
+	///
+	/// let timeline = Timeline::load_from_text(r#"{ "duration": 1.5, "loop": false }"#).expect("timeline");
+	/// assert_eq!(timeline.get_duration(), 1.5);
+	/// assert!(!timeline.is_loop());
+	/// assert!(Timeline::load_from_text("{ broken").is_err());
+	/// ```
 	//==============================================================================
 	pub fn load_from_text(text: &str) -> Result<Timeline, String> {
 		let description: Value = serde_json::from_str(text).map_err(|error| format!("Timeline: JSON 을 읽지 못했습니다. ({})", error))?;
@@ -1489,6 +2016,49 @@ impl Timeline {
 	//==============================================================================
 	/// 주소에서 읽기. (원본 정적 await Timeline.loadFromUrl(url), 애셋 경로를 받기 부탁하고 엔진 작업 안에서 await 한다)
 	/// - 받기나 JSON 읽기에 실패하면 까닭이다. (원본은 Promise 가 거부된다)
+	///
+	/// # 인자
+	/// - `engine`: 바이트 받기를 부탁할 엔진. (부탁은 이 자리에서 바로 한다)
+	/// - `url`: 애셋 폴더 기준 경로나 "data:" 주소.
+	///
+	/// # 돌려줌
+	/// await 하면 타임라인이 나오는 Future. 받기나 JSON 읽기에 실패하면 까닭을 담은 Err. (엔진 작업 안에서 await 한다)
+	///
+	/// # 예제
+	/// 씬 create 에서 읽기를 엔진 작업으로 맡기기
+	/// ```rust,no_run
+	/// use vanilla::{Engine, Scene, SceneBase, Timeline};
+	///
+	/// struct IntroScene {
+	/// 	scene_base: SceneBase,
+	/// 	timeline: Option<Timeline>,
+	/// }
+	///
+	/// impl Scene for IntroScene {
+	/// 	fn get_scene_base(&self) -> &SceneBase {
+	/// 		&self.scene_base
+	/// 	}
+	///
+	/// 	fn get_scene_base_mut(&mut self) -> &mut SceneBase {
+	/// 		&mut self.scene_base
+	/// 	}
+	///
+	/// 	fn create(&mut self, engine: &mut Engine) {
+	/// 		let timeline_future = Timeline::load_from_url(engine, "data:application/json,{\"duration\":2,\"loop\":true}");
+	/// 		let load_task_handle = engine.spawn_scene_task(self, |mut scene_context| async move {
+	/// 			match timeline_future.await {
+	/// 				Ok(timeline) => {
+	/// 					scene_context.with(move |scene, _engine| scene.timeline = Some(timeline));
+	/// 				}
+	/// 				Err(error) => {
+	/// 					eprintln!("{}", error);
+	/// 				}
+	/// 			}
+	/// 		});
+	/// 		self.scene_base.track_task(&load_task_handle);
+	/// 	}
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn load_from_url(engine: &Engine, url: &str) -> impl Future<Output = Result<Timeline, String>> + 'static {
 		let load_handle = engine.request_asset_bytes(url);
@@ -1500,6 +2070,24 @@ impl Timeline {
 
 	//==============================================================================
 	/// 읽은 JsonAsset 에서 만들기. (아직 안 읽혔거나 실패했으면 None)
+	///
+	/// # 인자
+	/// - `json_asset`: 서술 JSON 을 읽은 애셋. (서술은 복제한다)
+	///
+	/// # 돌려줌
+	/// 그 서술의 타임라인. 애셋이 아직 안 읽혔거나 JSON 으로 풀지 못했으면 None.
+	///
+	/// # 예제
+	/// 읽기 전에는 None, 바이트가 들어오면 타임라인
+	/// ```rust
+	/// use vanilla::{JsonAsset, Timeline};
+	///
+	/// let mut timeline_asset = JsonAsset::new();
+	/// assert!(Timeline::create_from_json_asset(&mut timeline_asset).is_none());
+	/// timeline_asset.load_from_bytes("intro.timeline.json", br#"{ "duration": 2, "loop": false }"#.to_vec());
+	/// let timeline = Timeline::create_from_json_asset(&mut timeline_asset).expect("timeline");
+	/// assert_eq!(timeline.get_duration(), 2.0);
+	/// ```
 	//==============================================================================
 	pub fn create_from_json_asset(json_asset: &mut JsonAsset) -> Option<Timeline> {
 		let description = json_asset.get_data()?.clone();
@@ -1508,6 +2096,9 @@ impl Timeline {
 
 	//==============================================================================
 	/// 서술 설정. (빠진 stage / nodes / tracks / markers 를 채우고 다시 컴파일하게 한다)
+	///
+	/// # 인자
+	/// - `description`: 새 서술 JSON. 객체가 아니면 빈 서술(create_empty_description)을 쓴다.
 	//==============================================================================
 	pub fn set_description(&mut self, description: Value) {
 		self.description = if description.is_object() {
@@ -1536,6 +2127,9 @@ impl Timeline {
 
 	//==============================================================================
 	/// 서술 반환.
+	///
+	/// # 돌려줌
+	/// 서술 JSON 의 참조.
 	//==============================================================================
 	pub fn get_description(&self) -> &Value {
 		&self.description
@@ -1543,6 +2137,9 @@ impl Timeline {
 
 	//==============================================================================
 	/// 서술 반환. (변경용. 트랙 / 키를 고쳤으면 invalidate 를 부른다)
+	///
+	/// # 돌려줌
+	/// 서술 JSON 의 변경 참조.
 	//==============================================================================
 	pub fn get_description_mut(&mut self) -> &mut Value {
 		&mut self.description
@@ -1571,6 +2168,10 @@ impl Timeline {
 
 	//==============================================================================
 	/// 컴파일. (키를 시간순으로 정렬하고 대상 / 속성 정의를 붙인 뒤 파티클을 모은다)
+	/// - seek, tick, evaluate 가 서술이 바뀌었으면 스스로 부른다.
+	///
+	/// # 인자
+	/// - `node_tree`: 대상 노드가 든 노드 트리. (대상 노드의 파티클 시스템을 찾는다)
 	//==============================================================================
 	pub fn compile(&mut self, node_tree: &mut NodeTree) {
 		let track_descriptions = self.get_description_array("/tracks");
@@ -1633,6 +2234,9 @@ impl Timeline {
 	//==============================================================================
 	/// 대상 노드의 파티클 시스템 수집.
 	/// - 수동 tick 으로 바꿔 타임라인 시간으로만 진행하고, 씨앗을 줘서 되감을 때마다 같은 결과가 나오게 한다.
+	///
+	/// # 인자
+	/// - `node_tree`: 대상 노드가 든 노드 트리. (대상 표의 노드만 본다, 씨앗이 이미 있으면 두고 없으면 수집 차례로 준다)
 	//==============================================================================
 	pub fn collect_particle_systems(&mut self, node_tree: &mut NodeTree) {
 		self.particle_node_ids.clear();
@@ -1679,6 +2283,10 @@ impl Timeline {
 
 	//==============================================================================
 	/// 파티클 시간 진행. (재생 중 매 프레임)
+	///
+	/// # 인자
+	/// - `node_tree`: 파티클 노드가 든 노드 트리.
+	/// - `time_delta`: 진행할 시간. (초, 0 이하이면 아무것도 하지 않는다)
 	//==============================================================================
 	pub fn simulate_particles(&mut self, node_tree: &mut NodeTree, time_delta: f32) {
 		if time_delta <= 0.0 {
@@ -1693,6 +2301,11 @@ impl Timeline {
 
 	//==============================================================================
 	/// 파티클 재시뮬레이션. (스크럽 / 되감기. 비운 뒤 0 초부터 이벤트를 다시 밟으며 진행)
+	/// - 한 걸음은 1/60 초와 time / 600 가운데 큰 것이다. 이벤트 트랙이 없는 파티클은 0 초에 튼 것으로 본다.
+	///
+	/// # 인자
+	/// - `node_tree`: 파티클 노드가 든 노드 트리.
+	/// - `time`: 맞출 타임라인 시간. (초)
 	//==============================================================================
 	pub fn resimulate_particles(&mut self, node_tree: &mut NodeTree, time: f32) {
 		self.compile_if_dirty(node_tree);
@@ -1757,6 +2370,12 @@ impl Timeline {
 
 	//==============================================================================
 	/// 대상 해석. (대상 표 → 사용자 해석기)
+	///
+	/// # 인자
+	/// - `target_name`: 트랙 대상 이름.
+	///
+	/// # 돌려줌
+	/// 대상 표에 있으면 그것, 없으면 해석기가 준 대상. 둘 다 없으면 None.
 	//==============================================================================
 	pub fn resolve_target(&self, target_name: &str) -> Option<TimelineTarget> {
 		if let Some(target) = self.get_target(target_name) {
@@ -1772,6 +2391,39 @@ impl Timeline {
 
 	//==============================================================================
 	/// 대상 해석기 설정. (이름 → 대상. 노드가 아닌 것은 TimelineTarget::External(객체))
+	///
+	/// # 인자
+	/// - `target_resolver`: 대상 표에 없는 이름을 받아 대상을 주는 함수. (모르는 이름은 None) None 이면 해석기를 뗀다. 컴파일 때 부른다.
+	///
+	/// # 예제
+	/// "screen" 이름을 External 대상으로 풀기
+	/// ```rust
+	/// use std::cell::RefCell;
+	/// use std::rc::Rc;
+	/// use vanilla::{Timeline, TimelinePropertyTarget, TimelineTarget, TimelineValue};
+	///
+	/// struct Silent;
+	///
+	/// impl TimelinePropertyTarget for Silent {
+	/// 	fn set_timeline_property(&mut self, _property_name: &str, _value: &TimelineValue) {
+	/// 	}
+	/// }
+	///
+	/// let screen: Rc<RefCell<dyn TimelinePropertyTarget>> = Rc::new(RefCell::new(Silent));
+	/// let mut timeline = Timeline::default();
+	/// let resolved_screen = screen.clone();
+	/// timeline.set_target_resolver(Some(Box::new(move |target_name: &str| {
+	/// 	if target_name == "screen" {
+	/// 		Some(TimelineTarget::External(resolved_screen.clone()))
+	/// 	}
+	/// 	else {
+	/// 		None
+	/// 	}
+	/// })));
+	/// assert_eq!(timeline.resolve_target("screen"), Some(TimelineTarget::External(screen)));
+	/// assert_eq!(timeline.resolve_target("missing"), None);
+	/// assert_eq!(timeline.get_target("screen"), None);
+	/// ```
 	//==============================================================================
 	pub fn set_target_resolver(&mut self, target_resolver: Option<TimelineTargetResolver>) {
 		self.target_resolver = target_resolver;
@@ -1780,6 +2432,10 @@ impl Timeline {
 
 	//==============================================================================
 	/// 대상 직접 등록. (같은 이름이 있으면 바꾼다)
+	///
+	/// # 인자
+	/// - `target_name`: 트랙 대상 이름.
+	/// - `target`: 그 이름의 대상. (노드 핸들 또는 External 객체)
 	//==============================================================================
 	pub fn set_target(&mut self, target_name: &str, target: TimelineTarget) {
 		match self.target_table.iter_mut().find(|(name, _)| name == target_name) {
@@ -1795,6 +2451,12 @@ impl Timeline {
 
 	//==============================================================================
 	/// 대상 반환. (대상 표에 있는 것만)
+	///
+	/// # 인자
+	/// - `target_name`: 트랙 대상 이름.
+	///
+	/// # 돌려줌
+	/// 대상 표에 등록된 대상의 복제. 없으면 None. (해석기는 묻지 않는다)
 	//==============================================================================
 	pub fn get_target(&self, target_name: &str) -> Option<TimelineTarget> {
 		self.target_table.iter().find(|(name, _)| name == target_name).map(|(_, target)| target.clone())
@@ -1802,6 +2464,31 @@ impl Timeline {
 
 	//==============================================================================
 	/// 노드 트리에 이름으로 붙이기. (무대를 직접 만든 경우. 뿌리 자신, 또는 그 자손에서 트랙 대상 이름을 찾는다)
+	/// - 대상 표에 이미 있는 이름은 건너뛰고, 못 찾은 이름은 등록하지 않는다.
+	///
+	/// # 인자
+	/// - `node_tree`: 노드를 찾을 노드 트리.
+	/// - `root_id`: 찾기를 시작할 뿌리 노드.
+	///
+	/// # 예제
+	/// 이미 있는 Hero 노드에 붙여 배율 트랙 걸기
+	/// ```rust
+	/// use serde_json::json;
+	/// use vanilla::{NodeTree, Timeline, TimelineTarget};
+	///
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let world_id = node_tree.create_child(root_id, "World");
+	/// let hero_id = node_tree.create_child(world_id, "Hero");
+	/// let mut timeline = Timeline::new(Some(json!({
+	/// 	"duration": 1,
+	/// 	"tracks": [{ "target": "Hero", "property": "scaleX", "keys": [{ "time": 0, "value": 1 }, { "time": 1, "value": 3 }] }],
+	/// })));
+	/// timeline.bind(&node_tree, root_id);
+	/// assert_eq!(timeline.get_target("Hero"), Some(TimelineTarget::Node(hero_id)));
+	/// timeline.seek(&mut node_tree, 0.5);
+	/// assert_eq!(node_tree[hero_id].get_local_scale().x, 2.0);
+	/// ```
 	//==============================================================================
 	pub fn bind(&mut self, node_tree: &NodeTree, root_id: NodeId) {
 		let track_descriptions = self.get_description_array("/tracks");
@@ -1826,6 +2513,35 @@ impl Timeline {
 
 	//==============================================================================
 	/// 무대 노드 생성. (서술의 stage.nodes 를 노드 트리로 만들고 대상으로 등록한다. 이름 → 노드 표를 돌려준다)
+	///
+	/// # 인자
+	/// - `node_tree`: 노드를 만들 노드 트리.
+	/// - `parent_id`: 무대 부모 노드. (서술에 parent 가 없거나, 못 찾거나, 자기 자신이나 고리가 되는 노드가 여기 붙는다)
+	/// - `image_resolver`: sprite 노드의 이미지 이름을 이미지로 바꾸는 함수. None 이면 "data:" 주소 이미지만 푼다.
+	///
+	/// # 돌려줌
+	/// 노드 이름 → 만든 노드 표. (같은 이름이 둘이면 뒤의 것)
+	///
+	/// # 예제
+	/// 부모 관계가 있는 무대 만들기
+	/// ```rust
+	/// use serde_json::json;
+	/// use vanilla::{NodeTree, Timeline, TimelineTarget};
+	///
+	/// let mut timeline = Timeline::new(Some(json!({
+	/// 	"duration": 1,
+	/// 	"stage": { "nodes": [
+	/// 		{ "name": "Group", "type": "group", "x": 100 },
+	/// 		{ "name": "Box", "type": "paint", "parent": "Group" },
+	/// 	] },
+	/// })));
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let node_table = timeline.build_stage(&mut node_tree, root_id, None);
+	/// assert_eq!(node_tree.get_parent_id(node_table["Box"]), Some(node_table["Group"]));
+	/// assert_eq!(node_tree.get_parent_id(node_table["Group"]), Some(root_id));
+	/// assert_eq!(timeline.get_target("Box"), Some(TimelineTarget::Node(node_table["Box"])));
+	/// ```
 	//==============================================================================
 	pub fn build_stage(&mut self, node_tree: &mut NodeTree, parent_id: NodeId, image_resolver: Option<TimelineImageResolver>) -> HashMap<String, NodeId> {
 		let node_descriptions = self.get_description_array("/stage/nodes");
@@ -1860,6 +2576,14 @@ impl Timeline {
 
 	//==============================================================================
 	/// 무대 노드 한 개 생성. (정적. 붙이지 않은 노드를 만든다)
+	///
+	/// # 인자
+	/// - `node_tree`: 노드를 만들 노드 트리.
+	/// - `node_description`: 서술 stage.nodes 의 노드 객체. (parent 는 보지 않는다)
+	/// - `image_resolver`: sprite 노드의 이미지 이름을 이미지로 바꾸는 함수. None 이면 "data:" 주소 이미지만 푼다.
+	///
+	/// # 돌려줌
+	/// 만든 노드. (어느 부모에도 붙지 않았고 대상으로 등록하지도 않는다)
 	//==============================================================================
 	pub fn create_stage_node(node_tree: &mut NodeTree, node_description: &Value, image_resolver: Option<TimelineImageResolver>) -> NodeId {
 		let node_name = node_description.get("name").and_then(|value| value.as_str()).unwrap_or("");
@@ -1870,6 +2594,12 @@ impl Timeline {
 
 	//==============================================================================
 	/// 노드에 서술 반영. (정적. 편집기가 값을 고칠 때도 쓴다)
+	/// - 변환, 보이기를 걸고 type 에 맞는 컴포넌트(paint 는 Paint, sprite 는 ShaderSprite 와 격자, text 는 Text, particle 은 ParticleSystem, sound 는 TimelineSound)를 없으면 붙여 값을 건다.
+	///
+	/// # 인자
+	/// - `node`: 값을 걸 노드.
+	/// - `node_description`: 서술 노드 객체. (빠진 항목은 TIMELINE_NODE_DEFAULTS)
+	/// - `image_resolver`: sprite 노드의 이미지 이름을 이미지로 바꾸는 함수. None 이면 "data:" 주소 이미지만 푼다.
 	//==============================================================================
 	pub fn apply_stage_node_description(node: &mut WorldNode, node_description: &Value, image_resolver: Option<TimelineImageResolver>) {
 		let description = TimelineNodeDescription::from_json(node_description);
@@ -1962,6 +2692,62 @@ impl Timeline {
 	//==============================================================================
 	/// 사운드 노드 준비. (원본 setAudioManager + 사운드 노드의 애셋 읽기 자리)
 	/// - 대상 노드 가운데 TimelineSound 가 붙은 것마다 아직 없는 오디오 애셋을 읽고 플레이어를 만든다. 새로 읽은 애셋을 돌려준다.
+	///
+	/// # 인자
+	/// - `node_tree`: 사운드 노드가 든 노드 트리.
+	/// - `engine`: 오디오 애셋을 읽고 플레이어를 만들 엔진.
+	///
+	/// # 돌려줌
+	/// 이번에 새로 읽은 오디오 애셋 목록. (씬이 track_audio_asset 으로 맡겨도 된다, 읽지 못한 것은 빼고 표준 오류에 까닭을 찍는다)
+	///
+	/// # 예제
+	/// 무대를 만든 뒤 소리를 읽고 이벤트 키로 틀기
+	/// ```rust,no_run
+	/// use serde_json::json;
+	/// use vanilla::{Engine, EngineConfiguration, Scene, SceneBase, Timeline};
+	///
+	/// struct SoundScene {
+	/// 	scene_base: SceneBase,
+	/// 	timeline: Timeline,
+	/// }
+	///
+	/// impl Scene for SoundScene {
+	/// 	fn get_scene_base(&self) -> &SceneBase {
+	/// 		&self.scene_base
+	/// 	}
+	///
+	/// 	fn get_scene_base_mut(&mut self) -> &mut SceneBase {
+	/// 		&mut self.scene_base
+	/// 	}
+	///
+	/// 	fn initialize(&mut self, engine: &mut Engine) {
+	/// 		self.timeline = Timeline::new(Some(json!({
+	/// 			"duration": 2,
+	/// 			"stage": { "nodes": [{ "name": "Hit", "type": "sound", "audio": "tests/assets/audio/wav_s16_stereo.wav" }] },
+	/// 			"tracks": [{ "target": "Hit", "property": "event", "keys": [{ "time": 0.5, "value": "play" }] }],
+	/// 		})));
+	/// 		let root_id = self.scene_base.get_root_id();
+	/// 		self.timeline.build_stage(self.scene_base.get_node_tree_mut(), root_id, None);
+	/// 		let audio_asset_list = self.timeline.load_sounds(self.scene_base.get_node_tree_mut(), engine);
+	/// 		for audio_asset in audio_asset_list.iter() {
+	/// 			self.scene_base.track_audio_asset(audio_asset);
+	/// 		}
+	/// 		self.timeline.play();
+	/// 	}
+	///
+	/// 	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	/// 		self.scene_base.tick(engine, time_delta);
+	/// 		self.timeline.tick(self.scene_base.get_node_tree_mut(), time_delta);
+	/// 	}
+	/// }
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let sound_scene = SoundScene {
+	/// 	scene_base: SceneBase::new(),
+	/// 	timeline: Timeline::default(),
+	/// };
+	/// engine.run(Box::new(sound_scene)).unwrap();
+	/// ```
 	//==============================================================================
 	pub fn load_sounds(&mut self, node_tree: &mut NodeTree, engine: &Engine) -> Vec<Rc<AudioAsset>> {
 		let mut loaded_audio_assets: Vec<Rc<AudioAsset>> = Vec::new();
@@ -2005,6 +2791,9 @@ impl Timeline {
 
 	//==============================================================================
 	/// 사운드 노드 정지. (정적. 편집기가 정지 / 되감기 때 부른다)
+	///
+	/// # 인자
+	/// - `node`: 멈출 노드. (TimelineSound 가 없거나 플레이어가 없으면 아무것도 하지 않는다)
 	//==============================================================================
 	pub fn stop_sound(node: &mut WorldNode) {
 		if let Some(sound) = node.get_component_mut::<TimelineSound>() {
@@ -2031,6 +2820,9 @@ impl Timeline {
 
 	//==============================================================================
 	/// 정지. (소리와 파티클을 멈추고 처음으로)
+	///
+	/// # 인자
+	/// - `node_tree`: 대상 노드가 든 노드 트리. (0 초의 값을 다시 건다)
 	//==============================================================================
 	pub fn stop(&mut self, node_tree: &mut NodeTree) {
 		self.is_playing = false;
@@ -2051,6 +2843,10 @@ impl Timeline {
 
 	//==============================================================================
 	/// 시간 이동. (이벤트는 발생하지 않는다. 파티클은 그 시간까지 다시 진행한다)
+	///
+	/// # 인자
+	/// - `node_tree`: 대상 노드가 든 노드 트리.
+	/// - `time`: 옮길 시간. (초, 0 ~ 길이로 자른다)
 	//==============================================================================
 	pub fn seek(&mut self, node_tree: &mut NodeTree, time: f32) {
 		self.time = time.min(self.get_duration()).max(0.0);
@@ -2061,6 +2857,11 @@ impl Timeline {
 
 	//==============================================================================
 	/// 갱신. (시간을 흘리고 값을 적용, 지나친 이벤트 / 마커를 발생)
+	/// - 재생 중이 아니면 아무것도 하지 않는다. 반복이면 끝을 넘을 때 감아 돌고, 아니면 끝에서 멈추고 완료 핸들러를 부른다.
+	///
+	/// # 인자
+	/// - `node_tree`: 대상 노드가 든 노드 트리. (핸들러에도 넘긴다)
+	/// - `time_delta`: 지난 프레임에서 흐른 시간. (초, 속도를 곱해 흘린다)
 	//==============================================================================
 	pub fn tick(&mut self, node_tree: &mut NodeTree, time_delta: f32) {
 		if !self.is_playing {
@@ -2112,6 +2913,11 @@ impl Timeline {
 
 	//==============================================================================
 	/// 구간 안의 이벤트 키 / 마커 발생. (from_time 초과 ~ to_time 이하. 이벤트 트랙 차례, 그다음 마커)
+	///
+	/// # 인자
+	/// - `node_tree`: 대상 노드가 든 노드 트리. (파티클, 사운드 노드가 이벤트를 받고 핸들러에도 넘긴다)
+	/// - `from_time`: 구간 시작. (초, 이 시간의 키는 뺀다. 0 초 키를 넣으려면 음수를 준다)
+	/// - `to_time`: 구간 끝. (초, 이 시간의 키는 넣는다)
 	//==============================================================================
 	pub fn fire_events_between(&mut self, node_tree: &mut NodeTree, from_time: f32, to_time: f32) {
 		self.compile_if_dirty(node_tree);
@@ -2216,6 +3022,11 @@ impl Timeline {
 
 	//==============================================================================
 	/// 시간의 값 적용. (연속 속성만, 이벤트는 tick 에서만 발생. External 대상에는 set_timeline_property 로 넘기고 건 값을 적어 둔다)
+	/// - 꺼진 트랙, 키가 없는 트랙, 대상을 못 찾은 트랙은 건너뛴다. 시간은 자르지 않는다.
+	///
+	/// # 인자
+	/// - `node_tree`: 대상 노드가 든 노드 트리.
+	/// - `time`: 표본할 시간. (초)
 	//==============================================================================
 	pub fn evaluate(&mut self, node_tree: &mut NodeTree, time: f32) {
 		self.compile_if_dirty(node_tree);
@@ -2254,6 +3065,9 @@ impl Timeline {
 
 	//==============================================================================
 	/// 마지막 evaluate 가 External 대상에 건 값 반환. (트랙 차례)
+	///
+	/// # 돌려줌
+	/// External 대상에 건 값 조각. (evaluate 전이면 비어 있다)
 	//==============================================================================
 	pub fn get_external_properties(&self) -> &[TimelineExternalProperty] {
 		&self.external_property_list
@@ -2261,6 +3075,14 @@ impl Timeline {
 
 	//==============================================================================
 	/// 키 목록에서 시간의 값 표본. (정적. 키는 시간순이어야 한다. 편집기의 커브 그리기도 쓴다)
+	///
+	/// # 인자
+	/// - `sorted_keys`: 시간순으로 정렬한 키 목록.
+	/// - `kind`: 값 종류. (Number, Color 는 앞 키의 이징으로 보간, 그 밖은 앞 키 값)
+	/// - `time`: 표본할 시간. (초, 첫 키 앞은 첫 키 값, 마지막 키 뒤는 마지막 키 값)
+	///
+	/// # 돌려줌
+	/// 그 시간의 값. 키가 없으면 Number 는 Number(0), 그 밖은 None.
 	//==============================================================================
 	pub fn sample_keys(sorted_keys: &[TimelineKey], kind: TimelinePropertyKind, time: f32) -> TimelineValue {
 		let key_count = sorted_keys.len();
@@ -2297,6 +3119,26 @@ impl Timeline {
 
 	//==============================================================================
 	/// 서술 트랙의 시간 값 표본. (정적. 서술 트랙 그대로, 정렬은 여기서. 정의가 없는 속성은 number)
+	///
+	/// # 인자
+	/// - `track`: 서술 트랙 객체. ({ property, keys })
+	/// - `time`: 표본할 시간. (초)
+	///
+	/// # 돌려줌
+	/// 그 시간의 값. (sample_keys 와 같다)
+	///
+	/// # 예제
+	/// 색 트랙과 글 트랙 표본
+	/// ```rust
+	/// use serde_json::json;
+	/// use vanilla::{Timeline, TimelineValue};
+	///
+	/// let color_track = json!({ "property": "color", "keys": [{ "time": 0, "value": "#ff0000ff" }, { "time": 2, "value": "#0000ffff" }] });
+	/// assert_eq!(Timeline::sample_track(&color_track, 1.0), TimelineValue::String(String::from("#800080ff")));
+	/// let text_track = json!({ "property": "text", "keys": [{ "time": 1, "value": "B" }, { "time": 0, "value": "A" }] });
+	/// assert_eq!(Timeline::sample_track(&text_track, 0.5).to_text(), "A");
+	/// assert_eq!(Timeline::sample_track(&text_track, 1.0).to_text(), "B");
+	/// ```
 	//==============================================================================
 	pub fn sample_track(track: &Value, time: f32) -> TimelineValue {
 		let property_name = track.get("property").and_then(|value| value.as_str()).unwrap_or("");
@@ -2315,6 +3157,9 @@ impl Timeline {
 
 	//==============================================================================
 	/// 시간 반환.
+	///
+	/// # 돌려줌
+	/// 지금 재생 시간. (초, 0 ~ 길이)
 	//==============================================================================
 	pub fn get_time(&self) -> f32 {
 		self.time
@@ -2322,6 +3167,9 @@ impl Timeline {
 
 	//==============================================================================
 	/// 재생 중 여부 반환.
+	///
+	/// # 돌려줌
+	/// play 뒤 pause, stop, 끝 닿기 전이면 true.
 	//==============================================================================
 	pub fn is_playing(&self) -> bool {
 		self.is_playing
@@ -2329,6 +3177,9 @@ impl Timeline {
 
 	//==============================================================================
 	/// 속도 설정. (1 = 실시간)
+	///
+	/// # 인자
+	/// - `speed`: 시간 배율. (2 는 두 배 빠르기, 음수면 거꾸로 가며 0 에서 더 가지 않고 이벤트는 나지 않는다)
 	//==============================================================================
 	pub fn set_speed(&mut self, speed: f32) {
 		self.speed = speed;
@@ -2336,6 +3187,9 @@ impl Timeline {
 
 	//==============================================================================
 	/// 속도 반환.
+	///
+	/// # 돌려줌
+	/// 시간 배율. (기본 1)
 	//==============================================================================
 	pub fn get_speed(&self) -> f32 {
 		self.speed
@@ -2343,6 +3197,9 @@ impl Timeline {
 
 	//==============================================================================
 	/// 반복 설정. (서술의 loop 를 바꾼다)
+	///
+	/// # 인자
+	/// - `is_loop`: 끝을 넘으면 처음으로 감아 돌지.
 	//==============================================================================
 	pub fn set_loop(&mut self, is_loop: bool) {
 		if let Some(description_object) = self.description.as_object_mut() {
@@ -2352,6 +3209,9 @@ impl Timeline {
 
 	//==============================================================================
 	/// 반복 여부 반환. (서술의 loop 가 true 일 때만)
+	///
+	/// # 돌려줌
+	/// 서술의 loop 가 참거짓 true 면 true. (없거나 다른 꼴이면 false)
 	//==============================================================================
 	pub fn is_loop(&self) -> bool {
 		self.description.get("loop") == Some(&Value::Bool(true))
@@ -2359,6 +3219,9 @@ impl Timeline {
 
 	//==============================================================================
 	/// 길이 반환. (초, 못 읽거나 0 이하면 0)
+	///
+	/// # 돌려줌
+	/// 서술의 duration. (초, 글 "4" 처럼 숫자로 읽히는 글도 받는다. 못 읽거나 0 이하면 0)
 	//==============================================================================
 	pub fn get_duration(&self) -> f32 {
 		let duration = read_json_number(self.description.get("duration"));
@@ -2372,6 +3235,9 @@ impl Timeline {
 
 	//==============================================================================
 	/// 초당 프레임 반환. (못 읽거나 0 이하면 30)
+	///
+	/// # 돌려줌
+	/// 서술의 frameRate. (못 읽거나 0 이하면 30, 재생 시간 계산에는 쓰지 않는다)
 	//==============================================================================
 	pub fn get_frame_rate(&self) -> f32 {
 		let frame_rate = read_json_number(self.description.get("frameRate"));
@@ -2385,6 +3251,38 @@ impl Timeline {
 
 	//==============================================================================
 	/// 이벤트 핸들러 설정. ((대상 이름, 이벤트 이름, 키, 타임라인, 노드 트리))
+	///
+	/// # 인자
+	/// - `event_handler`: tick 이 지나친 event 트랙 키마다 부를 함수. (이벤트 이름은 키 값의 글, 대상을 못 찾은 트랙도 부른다) None 이면 뗀다.
+	///
+	/// # 예제
+	/// 이벤트를 적고 land 에서 멈추기
+	/// ```rust
+	/// use std::cell::RefCell;
+	/// use std::rc::Rc;
+	/// use serde_json::json;
+	/// use vanilla::{NodeTree, Timeline, TimelineKey};
+	///
+	/// let event_list: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+	/// let mut node_tree = NodeTree::new();
+	/// let mut timeline = Timeline::new(Some(json!({
+	/// 	"duration": 2,
+	/// 	"loop": true,
+	/// 	"tracks": [{ "target": "hero", "property": "event", "keys": [{ "time": 0.5, "value": "jump" }, { "time": 1.5, "value": "land" }] }],
+	/// })));
+	/// let recorded_list = event_list.clone();
+	/// timeline.set_event_handler(Some(Box::new(move |target_name: &str, event_name: &str, key: &TimelineKey, timeline: &mut Timeline, _node_tree: &mut NodeTree| {
+	/// 	recorded_list.borrow_mut().push(format!("{} {} {}", target_name, event_name, key.time));
+	/// 	if event_name == "land" {
+	/// 		timeline.pause();
+	/// 	}
+	/// })));
+	/// timeline.play();
+	/// timeline.tick(&mut node_tree, 1.0);
+	/// timeline.tick(&mut node_tree, 1.0);
+	/// assert_eq!(*event_list.borrow(), vec![String::from("hero jump 0.5"), String::from("hero land 1.5")]);
+	/// assert!(!timeline.is_playing());
+	/// ```
 	//==============================================================================
 	pub fn set_event_handler(&mut self, event_handler: Option<TimelineEventHandler>) {
 		self.event_handler = event_handler;
@@ -2392,6 +3290,9 @@ impl Timeline {
 
 	//==============================================================================
 	/// 마커 핸들러 설정. ((마커 이름, 마커, 타임라인, 노드 트리))
+	///
+	/// # 인자
+	/// - `marker_handler`: tick 이 지나친 마커마다 부를 함수. (그 구간의 이벤트 키 뒤에 시간순으로) None 이면 뗀다.
 	//==============================================================================
 	pub fn set_marker_handler(&mut self, marker_handler: Option<TimelineMarkerHandler>) {
 		self.marker_handler = marker_handler;
@@ -2399,6 +3300,31 @@ impl Timeline {
 
 	//==============================================================================
 	/// 완료 핸들러 설정. (반복이 아닐 때 끝에 닿으면, (타임라인, 노드 트리))
+	///
+	/// # 인자
+	/// - `complete_handler`: 반복이 아닌 재생이 끝에 닿은 tick 에 한 번 부를 함수. (끝 값을 건 뒤) None 이면 뗀다.
+	///
+	/// # 예제
+	/// 1초 타임라인이 끝나면 세기
+	/// ```rust
+	/// use std::cell::Cell;
+	/// use std::rc::Rc;
+	/// use serde_json::json;
+	/// use vanilla::{NodeTree, Timeline};
+	///
+	/// let completed_count = Rc::new(Cell::new(0));
+	/// let mut node_tree = NodeTree::new();
+	/// let mut timeline = Timeline::new(Some(json!({ "duration": 1, "loop": false })));
+	/// let counter = completed_count.clone();
+	/// timeline.set_complete_handler(Some(Box::new(move |_timeline: &mut Timeline, _node_tree: &mut NodeTree| {
+	/// 	counter.set(counter.get() + 1);
+	/// })));
+	/// timeline.play();
+	/// timeline.tick(&mut node_tree, 0.6);
+	/// timeline.tick(&mut node_tree, 0.6);
+	/// assert_eq!(completed_count.get(), 1);
+	/// assert_eq!(timeline.get_time(), 1.0);
+	/// ```
 	//==============================================================================
 	pub fn set_complete_handler(&mut self, complete_handler: Option<TimelineCompleteHandler>) {
 		self.complete_handler = complete_handler;
@@ -2406,6 +3332,9 @@ impl Timeline {
 }
 
 impl Default for Timeline {
+	//==============================================================================
+	/// 기본값. (빈 서술의 타임라인, new(None) 과 같다)
+	//==============================================================================
 	fn default() -> Timeline {
 		Timeline::new(None)
 	}
