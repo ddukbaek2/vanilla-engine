@@ -257,7 +257,7 @@ impl Localization {
 	}
 
 	//==============================================================================
-	// index 에서 시작하는 자리 무리 읽기. ({이름} 하나, 또는 빗금(앞뒤 빈칸 허용)으로만 이은 여럿)
+	// index 에서 시작하는 자리 무리 읽기. ({이름} 하나, 또는 빗금(앞뒤 빈칸 허용, 원본 정규식의 \s)으로만 이은 여럿)
 	// - (무리 끝, 채운 글, 하나라도 채웠는지), 자리가 아니면 끝이 index 그대로
 	//==============================================================================
 	fn read_placeholder_group(characters: &[char], index: usize, values: &[(&str, &dyn Display)]) -> (usize, String, bool) {
@@ -291,16 +291,16 @@ impl Localization {
 			}
 			group_end = placeholder_end;
 
-			// 다음이 빈칸, 빗금, 빈칸 뒤 자리면 같은 무리로 잇는다.
+			// 다음이 빈칸(탭, 줄바꿈 포함), 빗금, 빈칸 뒤 자리면 같은 무리로 잇는다.
 			let mut next = group_end;
-			while next < characters.len() && characters[next] == ' ' {
+			while next < characters.len() && is_pattern_whitespace(characters[next]) {
 				next += 1;
 			}
 			if next >= characters.len() || characters[next] != '/' {
 				break;
 			}
 			next += 1;
-			while next < characters.len() && characters[next] == ' ' {
+			while next < characters.len() && is_pattern_whitespace(characters[next]) {
 				next += 1;
 			}
 			if Localization::read_placeholder(characters, next).is_none() {
@@ -524,6 +524,13 @@ fn convert_locale_to_language_tag(locale_name: &str) -> String {
 //==============================================================================
 // 시험. (전역 상태가 스레드마다 따로라 시험끼리 섞이지 않는다)
 //==============================================================================
+//==============================================================================
+// 정규식 \s 에 드는 빈칸인지. (유니코드 빈칸과 BOM)
+//==============================================================================
+fn is_pattern_whitespace(character: char) -> bool {
+	character.is_whitespace() || character == '\u{feff}'
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -610,6 +617,8 @@ mod tests {
 		assert_eq!(Localization::text_named("restart", &[("seconds", &3)]), "اعادة \u{2068}3\u{2069}");
 		assert_eq!(Localization::text_named("count", &[("count", &1), ("limit", &40)]), "\u{2068}1/40\u{2069} عمال");
 		assert_eq!(Localization::text_named("name", &[("who", &"Ann")]), "\u{2068}Ann\u{2069} و {unknown}");
+		Localization::set_table("ar", [("tabbed", "{count}\t/\n{limit}")]);
+		assert_eq!(Localization::text_named("tabbed", &[("count", &1), ("limit", &40)]), "\u{2068}1\t/\n40\u{2069}");
 		Localization::set_language("en");
 		assert!(!Localization::is_right_to_left());
 		assert_eq!(Localization::text_named("{a} / {b}", &[("a", &2), ("b", &5)]), "2 / 5");
