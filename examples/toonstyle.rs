@@ -1,15 +1,17 @@
 //==============================================================================
 // 툰 셰이딩과 바깥선 견주기 예제. (vanilla.js examples/toonstyle 과 같은 장면, 같은 값)
-// - 각진 상자, 둥근 공, 큰 면 결정(팔면체), 잔 면 결정 덩이, 고리, 비스듬한 판, 바닥을 해와 그림자, 점광, 림, 정반사로 칠한다.
+// - 각진 상자, 둥근 공, 큰 면 결정(팔면체), 잔 면 결정 덩이, 고리, 비스듬한 판, 바닥을 해와 그림자, 점광, 스포트라이트, 림, 하이라이트로 칠한다.
+// - 그늘은 바탕, 1 차 그늘(서늘한 보라), 2 차 그늘 셋이고, 그림자는 그늘 색으로 들어간다. 결정은 매트캡을 더한다.
 // - 화면 공간 바깥선은 그리기 줄에 맡긴다. (ToonDrawQueue::set_screen_outline)
 // - TOON_STYLE_SCALE 에 0.25 ~ 1 을 주면 선의 판을 그 몫으로 줄여 그린다. (원본 ?scale=)
 // - TOON_STYLE_TOGGLES=1 이면 바닥은 선 없이 가리기만, 결정 덩이는 꺾임 선 없이 그린다. (원본 ?toggles=1)
+// - TOON_STYLE_SHELL=1 이면 화면 공간 바깥선 대신 껍데기 바깥선(거리 배를 건 inverted hull, 모형마다 색과 굵기 배)으로 그린다. (원본 ?shell=1)
 // - 실행: cargo run --example toonstyle (화면 견주기는 VANILLA_CAPTURE_PATH 로 숨긴 창에서 찍는다)
 //==============================================================================
 use glow::HasContext;
 use vanilla::{
-	create_box_geometry, create_faceted_chunk_geometry, create_octahedron_geometry, create_sphere_geometry, create_torus_geometry, Camera3D, Engine, EngineConfiguration, Graphic, Matrix4, MeshBuilder, Scene, SceneBase, ShadowMap, ToonDrawOptions, ToonDrawQueue, ToonGeometry, ToonMesh, ToonPartOptions, ToonPointLight, ToonRenderer,
-	ToonScreenOutline, Vector2, Vector3,
+	create_box_geometry, create_faceted_chunk_geometry, create_octahedron_geometry, create_sphere_geometry, create_torus_geometry, Camera3D, Engine, EngineConfiguration, Graphic, Matrix4, MeshBuilder, Scene, SceneBase, ShadowMap, ToonDrawOptions, ToonDrawQueue, ToonGeometry, ToonMatcapBlend, ToonMesh, ToonPartOptions, ToonPointLight,
+	ToonRenderer, ToonScreenOutline, ToonShade, ToonTextureOptions, Vector2, Vector3,
 };
 
 // 해가 비추는 방향. (빛이 나아가는 쪽)
@@ -19,12 +21,56 @@ const SUN_DIRECTION: [f32; 3] = [-0.45, -1.0, -0.55];
 const CHUNK_SCALES: [f32; 12] = [1.0, 0.85, 1.1, 0.95, 1.05, 0.9, 1.0, 1.12, 0.88, 1.0, 0.95, 1.08];
 
 //==============================================================================
-// 도형 하나로 지은 모형. (껍데기 바깥선 없이)
+// 도형 하나로 지은 모형. (has_shell 이면 껍데기 바깥선도)
 //==============================================================================
-fn build_mesh(renderer: &ToonRenderer, gl: &glow::Context, geometry: &ToonGeometry, color_text: &str) -> Result<ToonMesh, String> {
+fn build_mesh(renderer: &ToonRenderer, gl: &glow::Context, geometry: &ToonGeometry, color_text: &str, has_shell: bool) -> Result<ToonMesh, String> {
 	let mut builder = MeshBuilder::new();
-	builder.add_part(geometry, &Matrix4::create_identity(), color_text, ToonPartOptions { has_outline: false, ..ToonPartOptions::default() });
+	builder.add_part(geometry, &Matrix4::create_identity(), color_text, ToonPartOptions { has_outline: has_shell, outline_width: 0.025, ..ToonPartOptions::default() });
 	renderer.create_mesh(gl, &builder.read_arrays()).ok_or_else(|| String::from("모형을 짓지 못했다."))
+}
+
+//==============================================================================
+// 매트캡 그림. (64x64, 왼쪽 위의 밝은 점과 둘레로 갈수록 엷어지는 빛, 더하기로 쓴다)
+//==============================================================================
+fn create_matcap_pixels() -> Vec<u8> {
+	let size = 64usize;
+	let mut pixels = vec![0u8; size * size * 4];
+	for pixel_y in 0..size {
+		for pixel_x in 0..size {
+			let normal_x = (pixel_x as f32 + 0.5) / size as f32 * 2.0 - 1.0;
+			let normal_y = 1.0 - (pixel_y as f32 + 0.5) / size as f32 * 2.0;
+			let spot = (1.0 - ((normal_x + 0.35) * (normal_x + 0.35) + (normal_y - 0.4) * (normal_y - 0.4)).sqrt() / 0.32).max(0.0);
+			let glow = (1.0 - (normal_x * normal_x + normal_y * normal_y).sqrt()).max(0.0) * 0.25;
+			let value = ((spot.powf(1.5) + glow) * 255.0).round().min(255.0) as u8;
+			let offset = (pixel_y * size + pixel_x) * 4;
+			pixels[offset..offset + 4].copy_from_slice(&[value, value, value, 255]);
+		}
+	}
+	pixels
+}
+
+//==============================================================================
+// 그릴 것 하나. (모형, 행렬, 그리기 꼴의 값)
+//==============================================================================
+struct StyleItem {
+	mesh: ToonMesh,
+	matrix: Matrix4,
+	line_id: u32,
+	has_screen_outline: bool,
+	has_crease_line: bool,
+	specular_scale: f32,
+	rim_scale: f32,
+	has_matcap: bool,
+	outline_color: Option<[f32; 4]>,
+	outline_width_scale: f32,
+	has_outline: bool,
+}
+
+//==============================================================================
+// 그릴 것 하나 짓기. (그리기 꼴은 기본값)
+//==============================================================================
+fn create_item(mesh: ToonMesh, matrix: Matrix4, line_id: u32) -> StyleItem {
+	StyleItem { mesh, matrix, line_id, has_screen_outline: true, has_crease_line: true, specular_scale: 1.0, rim_scale: 1.0, has_matcap: false, outline_color: None, outline_width_scale: 1.0, has_outline: true }
 }
 
 //==============================================================================
@@ -44,45 +90,73 @@ fn create_placed(translation: [f32; 3], rotation_x: f32, rotation_y: f32, scale:
 struct StyleResources {
 	renderer: ToonRenderer,
 	outline: ToonScreenOutline,
+	is_shell: bool,
 	shadow_map: ShadowMap,
-	item_list: Vec<(ToonMesh, Matrix4, u32, bool, bool)>,
+	matcap_texture: glow::Texture,
+	item_list: Vec<StyleItem>,
 }
 
 impl StyleResources {
 	//==============================================================================
-	// 짓기. (선의 판 몫, 모형마다 바깥선 꼴을 바꿔 보일지)
+	// 짓기. (선의 판 몫, 모형마다 바깥선 꼴을 바꿔 보일지, 껍데기 바깥선으로 그릴지)
 	//==============================================================================
-	fn new(gl: &glow::Context, line_scale: f32, is_toggled: bool) -> Result<StyleResources, String> {
+	fn new(gl: &glow::Context, line_scale: f32, is_toggled: bool, is_shell: bool) -> Result<StyleResources, String> {
 		let mut renderer = ToonRenderer::new(gl)?;
-		renderer.set_light(SUN_DIRECTION, [1.0, 0.95, 0.88], [0.42, 0.48, 0.6], [0.18, 0.16, 0.14]);
-		renderer.set_rim_light([0.35, 0.4, 0.5], 3.0);
-		renderer.set_specular(0.5, 40.0);
-		renderer.set_point_lights(&[ToonPointLight { position: [0.9, 1.2, 2.6], color: [1.0, 0.55, 0.25], intensity: 2.0, range: 3.5, ..ToonPointLight::default() }]);
+		renderer.set_sun_direction(SUN_DIRECTION);
+		renderer.set_shade(ToonShade { step: 0.5, feather: 0.02, color: [0.55, 0.52, 0.72], second_step: 0.2, second_feather: 0.02, second_color: [0.38, 0.35, 0.56], is_half_lambert: true });
+		renderer.set_rim_light([0.42, 0.48, 0.62], 2.6, 0.1, 0.6);
+		renderer.set_specular(0.6, 56.0, 0.0, [1.0; 3]);
+		renderer.set_point_lights(&[
+			ToonPointLight { position: [0.9, 1.2, 2.6], color: [1.0, 0.55, 0.25], intensity: 2.0, range: 3.5, ..ToonPointLight::default() },
+			ToonPointLight { position: [-2.6, 3.4, 2.4], color: [0.45, 0.7, 1.0], intensity: 6.0, range: 7.0, direction: Some([0.25, -1.0, -0.6]), inner_cone_angle: 0.2, outer_cone_angle: 0.38, ..ToonPointLight::default() },
+		]);
+		renderer.set_outline_distance_scale(8.0, 0.5, 3.0);
+		let matcap_texture = renderer.create_texture(gl, 64, 64, &create_matcap_pixels(), ToonTextureOptions { is_mipmapped: false, is_repeated: false, ..ToonTextureOptions::default() })?;
 		let mut outline = ToonScreenOutline::new(gl)?;
 		outline.set_resolution_scale(line_scale);
 		let mut shadow_map = ShadowMap::new(gl, 2048)?;
 		shadow_map.update_light_matrix(Vector3::create(0.0, 0.0, 0.0), Vector3::create(SUN_DIRECTION[0], SUN_DIRECTION[1], SUN_DIRECTION[2]), 7.0, 0.5, 40.0);
 		renderer.set_shadow(Some(&shadow_map), 1.0);
+		let mesh_of = |geometry: ToonGeometry, color_text: &str| build_mesh(&renderer, gl, &geometry, color_text, is_shell);
 		let item_list = vec![
-			(build_mesh(&renderer, gl, &create_box_geometry(14.0, 0.2, 10.0), "#9aa4b4")?, Matrix4::create_translation(0.0, -0.1, 0.0), 1, !is_toggled, true),
-			(build_mesh(&renderer, gl, &create_box_geometry(2.4, 0.1, 3.0), "#86a07e")?, create_placed([-3.4, 0.55, -1.6], 0.5, 0.25, [1.0, 1.0, 1.0]), 2, true, true),
-			(build_mesh(&renderer, gl, &create_box_geometry(1.2, 1.2, 1.2), "#e8a860")?, create_placed([-2.0, 0.6, 0.7], 0.0, 0.55, [1.0, 1.0, 1.0]), 3, true, true),
-			(build_mesh(&renderer, gl, &create_sphere_geometry(0.8, 48, 32, std::f32::consts::PI), "#f2f0ec")?, Matrix4::create_translation(-0.2, 0.8, 0.2), 4, true, true),
-			(build_mesh(&renderer, gl, &create_octahedron_geometry(0.6), "#80c8ff")?, create_placed([1.5, 0.96, 0.6], 0.0, 0.4, [1.0, 1.6, 1.0]), 5, true, true),
-			(build_mesh(&renderer, gl, &create_faceted_chunk_geometry(0.55, &CHUNK_SCALES, [1.0, 0.8, 1.0]), "#b0a0d0")?, Matrix4::create_translation(3.0, 0.45, 0.2), 6, true, !is_toggled),
-			(build_mesh(&renderer, gl, &create_torus_geometry(0.45, 0.17, 16, 40, std::f32::consts::PI * 2.0), "#d06070")?, create_placed([0.9, 0.3, 2.1], 1.2, 0.3, [1.0, 1.0, 1.0]), 7, true, true),
+			StyleItem { has_screen_outline: !is_toggled, has_outline: false, specular_scale: 0.0, rim_scale: 0.0, ..create_item(mesh_of(create_box_geometry(14.0, 0.2, 10.0), "#9aa4b4")?, Matrix4::create_translation(0.0, -0.1, 0.0), 1) },
+			StyleItem { specular_scale: 0.0, ..create_item(mesh_of(create_box_geometry(2.4, 0.1, 3.0), "#86a07e")?, create_placed([-3.4, 0.55, -1.6], 0.5, 0.25, [1.0, 1.0, 1.0]), 2) },
+			create_item(mesh_of(create_box_geometry(1.2, 1.2, 1.2), "#e8a860")?, create_placed([-2.0, 0.6, 0.7], 0.0, 0.55, [1.0, 1.0, 1.0]), 3),
+			create_item(mesh_of(create_sphere_geometry(0.8, 48, 32, std::f32::consts::PI), "#f2f0ec")?, Matrix4::create_translation(-0.2, 0.8, 0.2), 4),
+			StyleItem { has_matcap: true, outline_color: Some([0.1, 0.22, 0.4, 1.0]), ..create_item(mesh_of(create_octahedron_geometry(0.6), "#80c8ff")?, create_placed([1.5, 0.96, 0.6], 0.0, 0.4, [1.0, 1.6, 1.0]), 5) },
+			StyleItem { has_crease_line: !is_toggled, ..create_item(mesh_of(create_faceted_chunk_geometry(0.55, &CHUNK_SCALES, [1.0, 0.8, 1.0]), "#b0a0d0")?, Matrix4::create_translation(3.0, 0.45, 0.2), 6) },
+			StyleItem { outline_color: Some([0.35, 0.08, 0.12, 1.0]), outline_width_scale: 1.4, ..create_item(mesh_of(create_torus_geometry(0.45, 0.17, 16, 40, std::f32::consts::PI * 2.0), "#d06070")?, create_placed([0.9, 0.3, 2.1], 1.2, 0.3, [1.0, 1.0, 1.0]), 7) },
 		];
-		Ok(StyleResources { renderer, outline, shadow_map, item_list })
+		Ok(StyleResources { renderer, outline, is_shell, shadow_map, matcap_texture, item_list })
 	}
 
 	//==============================================================================
-	// 한 프레임 그리기. (그림자 → 그리기 줄, 그리기 줄이 선의 판과 바깥선을 스스로)
+	// 한 프레임 그리기. (그림자 → 그리기 줄, 그리기 줄이 선의 판과 화면 공간 바깥선을 스스로)
 	//==============================================================================
 	fn draw(&mut self, gl: &glow::Context, camera: &Camera3D) {
 		let mut queue = ToonDrawQueue::new();
-		queue.set_screen_outline(Some(&mut self.outline));
-		for (mesh, matrix, line_id, has_screen_outline, has_crease_line) in self.item_list.iter() {
-			queue.add_mesh(mesh, matrix, ToonDrawOptions { line_id: Some(*line_id), has_screen_outline: *has_screen_outline, has_crease_line: *has_crease_line, ..ToonDrawOptions::default() });
+		if !self.is_shell {
+			queue.set_screen_outline(Some(&mut self.outline));
+		}
+		for item in self.item_list.iter() {
+			queue.add_mesh(
+				&item.mesh,
+				&item.matrix,
+				ToonDrawOptions {
+					line_id: Some(item.line_id),
+					has_screen_outline: item.has_screen_outline,
+					has_crease_line: item.has_crease_line,
+					specular_scale: item.specular_scale,
+					rim_scale: item.rim_scale,
+					matcap_texture: if item.has_matcap { Some(self.matcap_texture) } else { None },
+					matcap_strength: 0.7,
+					matcap_blend: ToonMatcapBlend::Add,
+					outline_color: item.outline_color,
+					outline_width_scale: item.outline_width_scale,
+					has_outline: item.has_outline,
+					..ToonDrawOptions::default()
+				},
+			);
 		}
 		queue.draw_shadows(gl, &mut self.renderer, &self.shadow_map);
 		queue.draw(gl, &mut self.renderer, camera);
@@ -98,6 +172,7 @@ struct ToonStyleScene {
 	camera: Camera3D,
 	line_scale: f32,
 	is_toggled: bool,
+	is_shell: bool,
 }
 
 impl ToonStyleScene {
@@ -108,7 +183,7 @@ impl ToonStyleScene {
 		let mut camera = Camera3D::new();
 		camera.set_perspective(0.7, 0.1, 100.0);
 		camera.look_at(Vector3::create(0.0, 3.4, 7.8), Vector3::create(0.0, 0.55, 0.3), Vector3::create(0.0, 1.0, 0.0));
-		ToonStyleScene { scene_base: SceneBase::new(), resources: None, camera, line_scale: read_line_scale(), is_toggled: read_is_toggled() }
+		ToonStyleScene { scene_base: SceneBase::new(), resources: None, camera, line_scale: read_line_scale(), is_toggled: read_environment_flag("TOON_STYLE_TOGGLES"), is_shell: read_environment_flag("TOON_STYLE_SHELL") }
 	}
 }
 
@@ -126,15 +201,15 @@ fn read_line_scale() -> f32 {
 }
 
 //==============================================================================
-// 모형마다 바깥선 꼴을 바꿔 보일지. (데스크탑은 TOON_STYLE_TOGGLES=1, 웹은 끔)
+// 환경 변수 켬. (데스크탑은 이름=1 이면 true, 웹은 끔)
 //==============================================================================
 #[cfg(not(target_arch = "wasm32"))]
-fn read_is_toggled() -> bool {
-	std::env::var("TOON_STYLE_TOGGLES").map(|text| text == "1").unwrap_or(false)
+fn read_environment_flag(name: &str) -> bool {
+	std::env::var(name).map(|text| text == "1").unwrap_or(false)
 }
 
 #[cfg(target_arch = "wasm32")]
-fn read_is_toggled() -> bool {
+fn read_environment_flag(_name: &str) -> bool {
 	false
 }
 
@@ -159,7 +234,7 @@ impl Scene for ToonStyleScene {
 		graphic.flush_batch();
 		let gl = graphic.get_gl();
 		if self.resources.is_none() {
-			match StyleResources::new(gl, self.line_scale, self.is_toggled) {
+			match StyleResources::new(gl, self.line_scale, self.is_toggled, self.is_shell) {
 				Ok(resources) => {
 					self.resources = Some(resources);
 				}
