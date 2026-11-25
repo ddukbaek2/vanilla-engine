@@ -1,9 +1,9 @@
 //==============================================================================
 // 오디오 버스. (원본 core/audiobus.js 의 AudioBus)
 // - 여러 플레이어의 소리를 한 길로 모아 크기와 음소거를 한꺼번에 건다. (SoundSystem 의 배경음악 버스와 효과음 버스)
-// - 만드는 곳은 AudioManager::create_audio_bus() 다. 그 버스로 트는 플레이어는 create_audio_player() 로 만든다.
+// - 만드는 곳은 AudioManager::create_audio_bus() 나 AudioBus::new(매니저) 다. (원본 new AudioBus(audioContext)) 그 버스로 트는 플레이어는 create_audio_player() 로 만든다.
 // - 버스 자리는 백엔드가 채운다. (platform/audio 의 AudioBusBackend)
-//   데스크탑: kira 메인 트랙 아래 하위 트랙 하나. 버스로 만든 플레이어의 트랙은 그 아래에 달린다.
+//   데스크탑: kira 뿌리 트랙(출력 자리) 아래 하위 트랙 하나. 버스로 만든 플레이어의 트랙은 그 아래에 달린다.
 //   웹: 원본처럼 출력에 이은 GainNode 하나. 버스로 만든 플레이어의 GainNode 가 여기에 이어진다.
 // - AudioContext 가 없을 때 만든 버스는 소리가 없고, 그 버스로 만든 플레이어도 소리를 내지 않는다. (원본과 같다)
 // - 크기와 음소거는 AudioPlayer 와 같은 규칙이다. (0 ~ 1 로 자르고, 음소거를 풀면 설정한 크기로 돌아간다)
@@ -11,9 +11,10 @@
 //   - 상태를 Rc<RefCell> 로 나눠 든다. SoundSystem 이 든 버스를 get_music_bus 로 빌려 준 채 크기를 바꾸고 플레이어를 만들 수 있게
 //     메서드는 모두 &self 다. Clone 하면 같은 버스를 보는 손잡이가 하나 더 생긴다.
 //   - 버스로 만든 플레이어는 버스 손잡이를 하나 든다. 손잡이를 모두 버리면 버스가 출력에서 떨어진다. (원본은 이은 노드를 브라우저가 살려 둔다)
-//   - get_gain_node(원본 getGainNode)는 웹(wasm32)에만 있다. 데스크탑 kira 에는 GainNode 가 없고 버스 트랙이 그 자리다.
+//   - get_gain_node(원본 getGainNode)는 웹이 GainNode 를, 데스크탑이 그 자리인 버스 트랙(kira TrackHandle)을 빌려 준다. (빌린 동안 이 버스의 다른 함수를 부르지 않는다)
+//     어느 쪽이든 AudioPlayer::new 의 내보낼 곳으로 넘길 수 있다.
 //==============================================================================
-use crate::core::audiomanager::AudioManagerState;
+use crate::core::audiomanager::{AudioManager, AudioManagerState};
 use crate::core::audioplayer::{clamp_volume, AudioPlayer};
 use crate::platform::audio::AudioBusBackend;
 use std::cell::RefCell;
@@ -41,9 +42,15 @@ pub struct AudioBus {
 
 impl AudioBus {
 	//==============================================================================
-	// 생성. (AudioManager::create_audio_bus 가 백엔드를 만들어 넘긴다)
+	// 생성. (원본 new AudioBus(audioContext), 매니저의 AudioContext 가 없으면 만든다, 만들지 못하면 소리 없는 버스)
 	//==============================================================================
-	pub(crate) fn new(audio_bus_backend: AudioBusBackend, audio_manager_state: Rc<RefCell<AudioManagerState>>) -> AudioBus {
+	pub fn new(audio_manager: &AudioManager) -> AudioBus {
+		let audio_manager_state = audio_manager.get_shared_state();
+		let audio_bus_backend = {
+			let mut state = audio_manager_state.borrow_mut();
+			state.ensure_audio_context();
+			AudioBusBackend::create(&mut state)
+		};
 		AudioBus {
 			state: Rc::new(RefCell::new(AudioBusState {
 				audio_bus_backend,
@@ -59,7 +66,7 @@ impl AudioBus {
 	//==============================================================================
 	pub fn create_audio_player(&self) -> AudioPlayer {
 		let audio_player_backend = self.state.borrow_mut().audio_bus_backend.create_player_backend();
-		let mut audio_player = AudioPlayer::new(audio_player_backend);
+		let mut audio_player = AudioPlayer::from_backend(audio_player_backend);
 		audio_player.set_audio_manager_state(self.audio_manager_state.clone());
 		audio_player.set_audio_bus(self.clone());
 		audio_player
@@ -130,17 +137,28 @@ impl AudioBus {
 	}
 
 	//==============================================================================
-	// 버스의 GainNode. (원본 getGainNode, 웹에만 있다, AudioContext 가 없을 때 만든 버스는 None)
+	// 버스의 GainNode. (원본 getGainNode, 웹, AudioContext 가 없을 때 만든 버스는 None)
 	//==============================================================================
 	#[cfg(target_arch = "wasm32")]
 	pub fn get_gain_node(&self) -> Option<web_sys::GainNode> {
 		self.state.borrow().audio_bus_backend.get_gain_node().cloned()
 	}
+
+	//==============================================================================
+	// 버스의 GainNode 자리인 버스 트랙. (원본 getGainNode, 데스크탑 kira TrackHandle, AudioContext 가 없을 때 만든 버스는 None)
+	// - 빌린 동안 이 버스의 다른 함수를 부르지 않는다. 트랙에 직접 건 크기는 크기 칸과 음소거 칸을 바꾸지 않는다. (원본과 같다)
+	//==============================================================================
+	#[cfg(not(target_arch = "wasm32"))]
+	pub fn get_gain_node(&self) -> Option<std::cell::RefMut<'_, kira::track::TrackHandle>> {
+		std::cell::RefMut::filter_map(self.state.borrow_mut(), |state| state.audio_bus_backend.get_gain_node_mut()).ok()
+	}
 }
 
 #[cfg(test)]
 mod tests {
+	use crate::core::audiobus::AudioBus;
 	use crate::core::audiomanager::AudioManager;
+	use crate::core::audioplayer::AudioPlayer;
 
 	//==============================================================================
 	// 크기는 0 ~ 1 로 잘리고, 음소거는 소리를 모을 수 있는 버스에만 걸린다. 버스로 만든 플레이어는 버스와 같은 컨텍스트를 본다.
@@ -166,5 +184,17 @@ mod tests {
 		let audio_player = audio_bus.create_audio_player();
 		assert_eq!(audio_player.get_audio_context().is_some(), audio_manager.has_audio_context());
 		assert!(!audio_player.is_playing());
+
+		// 원본 new AudioBus(audioContext), new AudioPlayer(audioContext, bus.getGainNode()) 처럼 만든다.
+		let other_audio_bus = AudioBus::new(&audio_manager);
+		let is_bus_available = other_audio_bus.is_available();
+		assert_eq!(is_bus_available, audio_manager.has_audio_context());
+		let has_gain_node = other_audio_bus.get_gain_node().is_some();
+		assert_eq!(has_gain_node, is_bus_available);
+		let mut bus_audio_player = AudioPlayer::new(&audio_manager, other_audio_bus.get_gain_node().as_deref_mut());
+		bus_audio_player.set_volume(0.5);
+		assert_eq!(bus_audio_player.get_volume(), 0.5);
+		bus_audio_player.mute();
+		assert_eq!(bus_audio_player.is_muted(), is_bus_available);
 	}
 }

@@ -8,8 +8,8 @@
 //     node_tree[touch_effect_id].add_component(TouchEffect::new());
 //     // 누를 때: node_tree[touch_effect_id].get_component_mut::<TouchEffect>().unwrap().create_touch_particle(x, y);
 // - 원본과 다른 점:
-//   원본은 WorldNode 를 상속한 노드이고 push_transform / pop_transform 에서 블렌드를 바꿔 자식까지 더하기로 그린다.
-//   러스트 판은 노드에 붙는 컴포넌트라 자기 draw 동안만 블렌드를 바꾸고, 끝나면 앞의 블렌드로 되돌린다. (자식은 원래 블렌드로 그린다)
+//   원본은 WorldNode 를 상속한 노드이고, 러스트 판은 노드에 붙는 컴포넌트다. 블렌드는 원본처럼 push_transform 에서 더하기로 바꾸고
+//   pop_transform 에서 앞의 블렌드로 되돌려 자식까지 더하기로 그린다. (컴포넌트의 노드 출력 상태 앞뒤 훅)
 //   그라디언트는 오프스크린 캔버스 대신 픽셀로 직접 만든 Image 다.
 //==============================================================================
 use crate::base::color::Color;
@@ -102,6 +102,8 @@ impl Default for TouchParticle {
 pub struct TouchEffect {
 	component_base: ComponentBase,
 	touch_particles: Vec<TouchParticle>,
+	// push_transform 앞의 블렌드. (pop_transform 에서 되돌린다)
+	original_blend_mode: BlendMode,
 }
 
 impl TouchEffect {
@@ -112,6 +114,7 @@ impl TouchEffect {
 		TouchEffect {
 			component_base: ComponentBase::new(),
 			touch_particles: Vec::new(),
+			original_blend_mode: BlendMode::Normal,
 		}
 	}
 
@@ -214,16 +217,25 @@ impl Component for TouchEffect {
 	}
 
 	//==============================================================================
-	// 출력. (더하기 블렌드로 그리고 앞의 블렌드로 되돌린다)
+	// 출력 상태 시작. (앞의 블렌드를 기억하고 더하기로, 이 노드와 자식이 모두 더하기로 그려진다)
+	//==============================================================================
+	fn push_transform(&mut self, _transform: &NodeTransform, graphic: &mut Graphic) {
+		self.original_blend_mode = graphic.get_blend_mode();
+		graphic.set_blend_mode(BlendMode::Lighter);
+	}
+
+	//==============================================================================
+	// 출력.
 	//==============================================================================
 	fn draw(&mut self, _transform: &NodeTransform, graphic: &mut Graphic) {
-		if self.touch_particles.is_empty() {
-			return;
-		}
-		let original_blend_mode = graphic.get_blend_mode();
-		graphic.set_blend_mode(BlendMode::Lighter);
 		self.draw_touch_particles(graphic);
-		graphic.set_blend_mode(original_blend_mode);
+	}
+
+	//==============================================================================
+	// 출력 상태 종료. (앞의 블렌드로 되돌린다)
+	//==============================================================================
+	fn pop_transform(&mut self, _transform: &NodeTransform, graphic: &mut Graphic) {
+		graphic.set_blend_mode(self.original_blend_mode);
 	}
 }
 

@@ -2,7 +2,7 @@
 // 오디오 애셋.
 // - 원본 resource/audioasset.js. 소리 파일을 디코딩한 오디오 버퍼를 들고 있다.
 // - 오디오 버퍼 자리는 백엔드가 채운다. (platform/audio 의 AudioBuffer)
-//   데스크탑: kira 의 StaticSoundData. (ogg vorbis, mp3, wav 를 symphonia 로 디코딩한다)
+//   데스크탑: kira 의 StaticSoundData. (ogg vorbis, mp3, wav, flac, m4a(aac) 를 symphonia 로 디코딩한다)
 //   웹: 원본과 같은 WebAudio AudioBuffer. (OfflineAudioContext 로 디코딩한다, 없으면 잠시 쓰는 AudioContext)
 // - 읽기:
 //   데스크탑은 load / load_from_bytes 가 그 자리에서 파일을 읽고 디코딩한 뒤 돌아온다. 실패하면 Err.
@@ -10,7 +10,7 @@
 //   실패하면 get_load_error() 에 까닭이 남는다. 그 전에 플레이어에 실어 둬도 되고, 버퍼가 없는 동안 play 는 아무것도 하지 않는다.
 //   엔진에서는 engine.load_audio_asset("sounds/hit.ogg") 로 애셋 폴더 기준 경로를 읽는다.
 // - 원본과 다른 점:
-//   Asset 기반 클래스(애셋 타입)가 없다. 읽기 실패는 예외 대신 Err 나 get_load_error() 로 알린다.
+//   Asset 기반 클래스(애셋 타입)가 없다. 읽기 실패는 예외 대신 Err 로 알린다. (까닭은 원본 getLoadError 처럼 get_load_error() 에 남는다)
 //   플레이어들이 같이 들 수 있게 Rc<AudioAsset> 로 쓰고, 웹에서 디코딩이 끝난 뒤 채우도록 안쪽을 RefCell 로 둔다.
 //==============================================================================
 use crate::platform::audio::{self as audio_backend, AudioBuffer};

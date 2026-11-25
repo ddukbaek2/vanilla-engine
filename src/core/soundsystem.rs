@@ -4,7 +4,7 @@
 // - 소리 표의 줄마다 SoundRow { id, paths, volume, minimum_interval, is_music, maximum_voices, pitch_variation, play_seconds, fade_out_seconds }.
 //   paths: 같은 소리를 여러 번 녹음한 무리. 낼 때마다 받아 둔 것 가운데 하나를 고르고 바로 앞과 같은 것은 고르지 않는다.
 //   minimum_interval: 같은 소리를 다시 낼 수 있는 간격. (초, 한꺼번에 몰려 시끄럽지 않게)
-//   maximum_voices: 같은 소리가 한꺼번에 날 수 있는 수. (넘으면 가장 오래된 것을 끊는다, 0 이면 효과음 전체의 수까지)
+//   maximum_voices: 같은 소리가 한꺼번에 날 수 있는 수. (넘으면 가장 오래된 것을 끊는다, None 이면 효과음 전체의 수까지, 0 이면 원본처럼 하나)
 //   pitch_variation: 낼 때마다 음 높이를 흔드는 비. (0.05 면 ±5%)
 //   play_seconds, fade_out_seconds: 효과음을 앞의 play_seconds 초만 틀고 fade_out_seconds 초 동안 줄여 끈다. (0 이면 끝까지)
 // - 크기: 배경음악 = 음악 크기 × 음악의 비 × 소리의 크기, 효과음 = 효과음 크기 × 소리의 크기 × 부를 때의 크기.
@@ -32,8 +32,7 @@
 //   - WebAudio 는 크기 바꾸기와 줄이기를 소리 장치가 맡지만, 러스트 판은 같은 식(선형 줄이기, 지수 따라가기)을 update 마다 셈해
 //     소리마다의 크기는 플레이어에, 음악과 효과음의 크기는 버스에 건다. 그래서 update 를 매 프레임 불러야 한다. (원본도 매 프레임 부른다)
 //     버스 크기는 셈한 값이 바뀔 때만 건다. (원본처럼 버스의 set_volume, mute 로 건 값은 SoundSystem 이 크기를 다시 걸 때까지 간다)
-//   - 데스크탑의 AudioContext 멈춤은 kira 에 멈춤이 없어 메인 트랙을 무음으로 둔다. (그동안에도 소리와 컨텍스트 시계는 흐른다)
-//   - 무리에서 고르기와 음 높이 흔들기는 Math.random 대신 SeededRandom 을 쓴다.
+//   - 무리에서 고르기와 음 높이 흔들기는 원본 Math.random 자리인 엔진 math::random(처음 쓸 때 시각으로 씨앗을 정한다)을 쓴다.
 //   - add_sound_asset(파일로 받지 않는 소리 더하기)과 get_effect_voice_count 는 러스트 판에서 먼저 만들었다. (원본에도 같은 이름으로 넣었다)
 //==============================================================================
 use std::cell::RefCell;
@@ -41,7 +40,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use web_time::Instant;
 
-use crate::base::seededrandom::SeededRandom;
+use crate::base::math;
 use crate::core::audiobus::AudioBus;
 use crate::core::audiomanager::{resume_audio_manager_state, AudioManager, AudioManagerState};
 use crate::core::audioplayer::AudioPlayer;
@@ -80,7 +79,7 @@ pub struct SoundRow {
 	pub volume: f32,
 	pub minimum_interval: f32,
 	pub is_music: bool,
-	pub maximum_voices: usize,
+	pub maximum_voices: Option<usize>,
 	pub pitch_variation: f32,
 	pub play_seconds: f32,
 	pub fade_out_seconds: f32,
@@ -97,7 +96,7 @@ impl SoundRow {
 			volume,
 			minimum_interval: 0.0,
 			is_music: false,
-			maximum_voices: 0,
+			maximum_voices: None,
 			pitch_variation: 0.0,
 			play_seconds: 0.0,
 			fade_out_seconds: 0.0,
@@ -362,7 +361,6 @@ pub struct SoundSystem {
 	// 엔진이 약한 참조로 들어 SoundSystem 이 사는 동안만 부른다.
 	_page_event_listener: PageEventListener,
 	clock_origin: Instant,
-	random: SeededRandom,
 	// 시험에서 시계를 앞으로 돌리는 초.
 	#[cfg(test)]
 	test_time_offset: f64,
@@ -422,7 +420,6 @@ impl SoundSystem {
 			mute_state,
 			_page_event_listener: page_event_listener,
 			clock_origin: Instant::now(),
-			random: SeededRandom::new(0x50f7),
 			#[cfg(test)]
 			test_time_offset: 0.0,
 		};
@@ -737,18 +734,13 @@ impl SoundSystem {
 		};
 		self.last_play_time_by_id.insert(String::from(sound_id), now);
 		// 같은 소리가 maximum_voices 를 넘거나 효과음 전체가 EFFECT_VOICE_COUNT 를 넘으면 가장 오래된 것을 끊는다.
-		let maximum_voices = if sound_row.maximum_voices > 0 {
-			sound_row.maximum_voices
-		}
-		else {
-			EFFECT_VOICE_COUNT
-		};
-		self.trim_voices(sound_id, maximum_voices - 1);
+		let maximum_voices = sound_row.maximum_voices.unwrap_or(EFFECT_VOICE_COUNT);
+		self.trim_voices(sound_id, maximum_voices.saturating_sub(1));
 		self.trim_voices("", EFFECT_VOICE_COUNT - 1);
 		let mut audio_player = effect_bus.create_audio_player();
 		audio_player.set_audio_asset(audio_asset);
 		if sound_row.pitch_variation > 0.0 {
-			let pitch_ratio = 1.0 + (self.random.next_value() as f32 * 2.0 - 1.0) * sound_row.pitch_variation;
+			let pitch_ratio = 1.0 + (math::random() * 2.0 - 1.0) * sound_row.pitch_variation;
 			audio_player.set_playback_rate(pitch_ratio as f64);
 		}
 		let clamped_pan = if pan.is_finite() {
@@ -801,7 +793,7 @@ impl SoundSystem {
 			loaded_index_list
 		};
 		let candidate_count = candidate_index_list.len();
-		let picked_index = candidate_index_list[((self.random.next_value() * candidate_count as f64) as usize).min(candidate_count - 1)];
+		let picked_index = candidate_index_list[((math::random() as f64 * candidate_count as f64) as usize).min(candidate_count - 1)];
 		self.last_variant_by_id.insert(String::from(sound_id), picked_index);
 		asset_list[picked_index].clone()
 	}
@@ -1199,7 +1191,7 @@ mod tests {
 		let engine = Engine::new(EngineConfiguration::new());
 		let mut hit_row = SoundRow::create_effect("hit", &[], 1.0);
 		hit_row.minimum_interval = 0.1;
-		hit_row.maximum_voices = 2;
+		hit_row.maximum_voices = Some(2);
 		let mut sound_system = SoundSystem::new(&engine, vec![hit_row]);
 		sound_system.add_sound_asset("hit", create_silent_asset(1.0));
 		sound_system.update();
@@ -1223,6 +1215,15 @@ mod tests {
 		assert_eq!(sound_system.get_effect_voice_count(), voice_count);
 		sound_system.fade_out_effects("", 0.0);
 		assert_eq!(sound_system.get_effect_voice_count(), 0);
+
+		// 0 이면 원본처럼 앞의 것을 모두 끊어 하나만 난다. (keepCount 가 -1 이라 0 으로 친다)
+		let mut single_row = SoundRow::create_effect("single", &[], 1.0);
+		single_row.maximum_voices = Some(0);
+		sound_system.add_sounds(vec![single_row]);
+		sound_system.add_sound_asset("single", create_silent_asset(1.0));
+		sound_system.play_effect("single", 1.0, 0.0);
+		sound_system.play_effect("single", 1.0, 0.0);
+		assert_eq!(sound_system.get_effect_voice_count(), 1);
 	}
 
 	//==============================================================================
@@ -1312,15 +1313,22 @@ mod tests {
 		assert!(!sound_system.is_window_blurred());
 		assert!(!sound_system.read_muted());
 
+		// 가려지면 AudioContext 를 멈추고(원본 suspend, 데스크탑도 소리와 시계가 선다) 다시 보이면 깨운다.
+		let has_audio_context = sound_system.get_audio_manager().has_audio_context();
 		engine.dispatch_page_event(PageEvent::Hidden);
 		assert!(sound_system.is_page_hidden());
 		assert!(sound_system.read_muted());
-		if sound_system.is_context_running() {
+		if has_audio_context {
 			assert!(sound_system.is_context_paused());
+			assert!(!sound_system.is_context_running());
+			let paused_context_time = sound_system.get_audio_manager().get_context_time();
+			std::thread::sleep(std::time::Duration::from_millis(30));
+			assert_eq!(sound_system.get_audio_manager().get_context_time(), paused_context_time);
 		}
 		engine.dispatch_page_event(PageEvent::Visible);
 		assert!(!sound_system.read_muted());
 		assert!(!sound_system.is_context_paused());
+		assert_eq!(sound_system.is_context_running(), has_audio_context);
 
 		sound_system.mute_state.borrow_mut().is_blur_mute_enabled = true;
 		engine.dispatch_page_event(PageEvent::Blurred);

@@ -269,7 +269,7 @@ impl InputManager {
 			mouse_buttons_just_released: [false; 3],
 			touch_points: Vec::new(),
 			ended_touch_points: Vec::new(),
-			is_touch_input: false,
+			is_touch_input: crate::platform::is_coarse_pointer(),
 			is_wheel_with_ctrl: false,
 			last_input_device: if crate::platform::is_coarse_pointer() {
 				InputDevice::Touch
@@ -568,7 +568,7 @@ impl InputManager {
 	}
 
 	//==============================================================================
-	// 마지막 입력이 손가락인지. (마우스면 false)
+	// 마지막 입력이 손가락인지. (마우스면 false, 처음에는 기기가 손가락이 주된 입력인지로. 원본 CameraGestures.isTouchInput 과 같다)
 	//==============================================================================
 	pub fn is_touch_input(&self) -> bool {
 		self.is_touch_input

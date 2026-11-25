@@ -25,3 +25,9 @@ mod web;
 pub(crate) use web::*;
 #[cfg(target_arch = "wasm32")]
 pub use web::{AudioBuffer, AudioContext};
+
+// 플레이어가 소리를 내보낼 곳. (AudioPlayer::new 의 둘째 인자, 원본 outputNode 자리. 데스크탑 kira 의 &mut TrackHandle, 웹 &AudioNode)
+#[cfg(not(target_arch = "wasm32"))]
+pub use desktop::AudioOutputNode;
+#[cfg(target_arch = "wasm32")]
+pub use web::AudioOutputNode;

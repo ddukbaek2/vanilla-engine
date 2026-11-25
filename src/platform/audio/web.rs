@@ -12,12 +12,13 @@
 // - 컨텍스트 멈춤: 원본 SoundSystem.applyContextPause 처럼 "running" 일 때만 suspend() 하고, 거부되면 알리고 넘긴다.
 // - 좌우(pan): 원본 SoundSystem.playEffect 처럼 0 이 아니면 StereoPannerNode 를 GainNode 와 출력 사이에 끼운다. (createStereoPanner 가 없으면 끼우지 않는다)
 // - 버스: 원본 AudioBus 처럼 출력에 이은 GainNode 하나다. 버스로 만든 플레이어는 GainNode 를 출력 대신 버스의 GainNode 에 잇는다.
+// - 플레이어의 내보낼 곳(AudioOutputNode): 원본 AudioPlayer 생성자의 outputNode 처럼 AudioNode 를 받아 플레이어의 GainNode 를 잇는다. (없으면 출력)
+// - fetch 응답이 실패 코드면 원본처럼 디코딩 전에 실패로 친다.
 // - 비동기: 프로미스는 wasm-bindgen-futures 의 spawn_local 과 JsFuture 로 기다린다. (원본 then / await 자리)
 //   콜백은 매니저나 플레이어의 상태를 Weak 로 들어, 그 사이 버려졌으면 아무것도 하지 않는다.
 // - 원본과 다른 점:
 //   플레이어를 버리면 재생 중인 소스 노드를 멈추고 GainNode 를 뗀다. (onended 콜백이 버려진 클로저를 부르지 않게)
 //   일시 중단 상태에서 play 한 뒤 재개를 기다리는 사이 다른 소스가 시작됐으면 그것을 멈추고 튼다. (원본은 둘 다 운다)
-//   fetch 응답이 실패 코드면 디코딩 전에 실패로 친다.
 //==============================================================================
 use crate::core::audiomanager::{resume_audio_manager_state, AudioManagerState};
 use crate::misc::beepplayer::{BeepEnvelope, BeepWaveform, BEEP_FLOOR_VOLUME, BEEP_STOP_MARGIN_SECONDS};
@@ -33,6 +34,8 @@ use wasm_bindgen_futures::{spawn_local, JsFuture};
 pub type AudioContext = web_sys::AudioContext;
 // 디코딩한 소리.
 pub type AudioBuffer = web_sys::AudioBuffer;
+// 플레이어가 소리를 내보낼 곳. (원본 AudioPlayer 생성자의 outputNode, 플레이어의 GainNode 를 거기에 잇는다)
+pub type AudioOutputNode<'a> = &'a web_sys::AudioNode;
 
 // 브라우저는 첫 user gesture 전에 AudioContext 를 만들면 경고를 띄운다.
 pub const HAS_USER_GESTURE_AT_START: bool = false;
@@ -142,10 +145,24 @@ pub fn get_audio_context_time(state: &AudioManagerState) -> f64 {
 }
 
 //==============================================================================
-// 오디오 컨텍스트가 돌고 있는지.
+// 오디오 컨텍스트 상태가 "running" 인지.
 //==============================================================================
-pub fn is_audio_context_running(audio_context: &AudioContext) -> bool {
+fn is_context_state_running(audio_context: &AudioContext) -> bool {
 	get_audio_context_state_name(audio_context) == "running"
+}
+
+//==============================================================================
+// 오디오 컨텍스트가 있고 돌고 있는지. (원본 audio_context !== null && state === "running")
+//==============================================================================
+pub fn is_audio_context_running(state: &AudioManagerState) -> bool {
+	match &state.audio_context {
+		Some(audio_context) => {
+			is_context_state_running(audio_context)
+		}
+		None => {
+			false
+		}
+	}
 }
 
 //==============================================================================
@@ -229,12 +246,18 @@ pub fn resume_audio_context(state_cell: &Rc<RefCell<AudioManagerState>>) {
 		if JsFuture::from(resume_promise).await.is_err() {
 			return;
 		}
-		if is_ios && is_audio_context_running(&audio_context) {
+		if is_ios && is_context_state_running(&audio_context) {
 			if let Some(state_cell) = weak_state_cell.upgrade() {
 				verify_context_clock(&state_cell, audio_context);
 			}
 		}
 	});
+}
+
+//==============================================================================
+// 재생하기 전에 멈춘 컨텍스트 깨우기. (웹은 AudioPlayerBackend::start_playback 이 원본처럼 "suspended" 면 resume() 을 기다렸다 틀어 할 일이 없다)
+//==============================================================================
+pub fn resume_audio_context_before_playback(_state_cell: &Rc<RefCell<AudioManagerState>>) {
 }
 
 //==============================================================================
@@ -249,7 +272,7 @@ pub fn suspend_audio_context(state_cell: &Rc<RefCell<AudioManagerState>>) {
 			return;
 		}
 	};
-	if !is_audio_context_running(&audio_context) {
+	if !is_context_state_running(&audio_context) {
 		return;
 	}
 	let suspend_promise = match audio_context.suspend() {
@@ -299,7 +322,7 @@ fn verify_context_clock(state_cell: &Rc<RefCell<AudioManagerState>>, audio_conte
 			state.platform_state.is_verifying_context_clock = false;
 			state.audio_context.as_ref() == Some(&audio_context)
 		};
-		if !is_current_audio_context || !is_audio_context_running(&audio_context) || !is_document_visible() {
+		if !is_current_audio_context || !is_context_state_running(&audio_context) || !is_document_visible() {
 			return;
 		}
 		let elapsed_time = get_performance_seconds() - start_time;
@@ -312,7 +335,7 @@ fn verify_context_clock(state_cell: &Rc<RefCell<AudioManagerState>>, audio_conte
 		spawn_local(async move {
 			let is_restarted = restart_audio_context(&audio_context).await;
 			if is_restarted {
-				if is_audio_context_running(&audio_context) {
+				if is_context_state_running(&audio_context) {
 					verify_context_clock(&state_cell, audio_context);
 				}
 			}
@@ -395,15 +418,30 @@ pub struct AudioPlayerBackend {
 
 impl AudioPlayerBackend {
 	//==============================================================================
-	// 생성. (컨텍스트가 있으면 GainNode 를 만들어 출력에 잇는다)
+	// 생성. (컨텍스트가 있으면 GainNode 를 만들어 내보낼 곳에 잇는다, 내보낼 곳이 없으면 출력. 원본 AudioPlayer 생성자)
 	//==============================================================================
-	pub fn create(audio_context: Option<&mut AudioContext>) -> AudioPlayerBackend {
-		let audio_context = audio_context.cloned();
-		let output_node = audio_context.as_ref().map(|audio_context| {
-			let destination: web_sys::AudioNode = audio_context.destination().into();
-			destination
-		});
+	pub fn create(state: &mut AudioManagerState, output_node: Option<AudioOutputNode<'_>>) -> AudioPlayerBackend {
+		let audio_context = state.audio_context.clone();
+		let output_node = match output_node {
+			Some(output_node) => {
+				audio_context.as_ref().map(|_| output_node.clone())
+			}
+			None => {
+				audio_context.as_ref().map(|audio_context| {
+					let destination: web_sys::AudioNode = audio_context.destination().into();
+					destination
+				})
+			}
+		};
 		AudioPlayerBackend::create_with_output(audio_context, output_node)
+	}
+
+	//==============================================================================
+	// 소리 없는 플레이어 생성. (시험)
+	//==============================================================================
+	#[cfg(test)]
+	pub fn create_silent() -> AudioPlayerBackend {
+		AudioPlayerBackend::create_with_output(None, None)
 	}
 
 	//==============================================================================
@@ -573,8 +611,8 @@ impl AudioBusBackend {
 	//==============================================================================
 	// 생성. (컨텍스트가 있으면 GainNode 를 만들어 출력에 잇는다)
 	//==============================================================================
-	pub fn create(audio_context: Option<&mut AudioContext>) -> AudioBusBackend {
-		let audio_context = audio_context.cloned();
+	pub fn create(state: &mut AudioManagerState) -> AudioBusBackend {
+		let audio_context = state.audio_context.clone();
 		let mut gain_node = None;
 		if let Some(audio_context) = &audio_context {
 			if let Ok(created_gain_node) = audio_context.create_gain() {
@@ -808,7 +846,15 @@ fn to_oscillator_type(beep_waveform: BeepWaveform) -> web_sys::OscillatorType {
 //==============================================================================
 // 비프 톤 하나 재생. (원본 play_tone 의 OscillatorNode + GainNode 스케줄링)
 //==============================================================================
-pub fn play_beep_tone(audio_context: &mut AudioContext, beep_envelope: &BeepEnvelope) {
+pub fn play_beep_tone(state: &mut AudioManagerState, beep_envelope: &BeepEnvelope) {
+	let audio_context = match &state.audio_context {
+		Some(audio_context) => {
+			audio_context
+		}
+		None => {
+			return;
+		}
+	};
 	let start_time = audio_context.current_time() + beep_envelope.delay_seconds;
 	let end_time = start_time + beep_envelope.duration_seconds;
 	let attack_end_time = start_time + beep_envelope.attack_seconds;

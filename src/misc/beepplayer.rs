@@ -9,10 +9,10 @@
 //     beep_player.play_preset("confirm");
 // - 소리를 내는 곳:
 //   웹: 원본처럼 OscillatorNode + GainNode 를 만들어 오디오 컨텍스트의 출력에 바로 잇는다.
-//   데스크탑: 같은 엔벨로프로 파형을 샘플로 그려 kira 메인 트랙에 바로 튼다. (지연은 kira 의 지연 시작)
+//   데스크탑: 같은 엔벨로프로 파형을 샘플로 그려 kira 뿌리 트랙(출력 자리)에 바로 튼다. (지연은 kira 의 지연 시작)
+//     파형은 크롬 WebAudio 오실레이터처럼 대역을 제한한 푸리에 급수다. (square, sawtooth, triangle 의 높은 배음을 주파수에 따라 덜어 내고 크기를 맞춘다)
 // - 원본과 다른 점:
 //   파형 이름은 문자열 대신 BeepWaveform, 시퀀스의 톤은 BeepTone 이다. 프리셋 이름은 원본처럼 문자열이다.
-//   데스크탑의 파형은 대역 제한 없이 그린 것이라 square, sawtooth 의 높은 배음이 WebAudio 와 조금 다르다.
 //==============================================================================
 use crate::core::audiomanager::{resume_audio_manager_state, AudioManager, AudioManagerState};
 use crate::platform::audio as audio_backend;
@@ -149,19 +149,11 @@ impl BeepPlayer {
 		}
 		resume_audio_manager_state(&self.audio_manager_state);
 		let mut audio_manager_state = self.audio_manager_state.borrow_mut();
-		let audio_context = match audio_manager_state.audio_context.as_mut() {
-			Some(audio_context) => {
-				audio_context
-			}
-			None => {
-				return;
-			}
-		};
-		if !audio_backend::is_audio_context_running(audio_context) {
+		if !audio_manager_state.is_context_running() {
 			return;
 		}
 		let beep_envelope = BeepEnvelope::create(frequency, duration_seconds, waveform, delay_seconds, self.volume, volume_scale);
-		audio_backend::play_beep_tone(audio_context, &beep_envelope);
+		audio_backend::play_beep_tone(&mut audio_manager_state, &beep_envelope);
 	}
 
 	//==============================================================================

@@ -649,6 +649,28 @@ impl WorldNode {
 	}
 
 	//==============================================================================
+	// 컴포넌트의 노드 출력 상태 시작. (push_transform 바로 뒤, 켜진 컴포넌트를 붙인 차례로)
+	//==============================================================================
+	pub fn push_component_transforms(&mut self, graphic: &mut Graphic) {
+		for component in self.components.iter_mut() {
+			if component.is_enable() {
+				component.push_transform(&self.transform, graphic);
+			}
+		}
+	}
+
+	//==============================================================================
+	// 컴포넌트의 노드 출력 상태 끝. (pop_transform 바로 앞, 켜진 컴포넌트를 붙인 차례의 거꾸로)
+	//==============================================================================
+	pub fn pop_component_transforms(&mut self, graphic: &mut Graphic) {
+		for component in self.components.iter_mut().rev() {
+			if component.is_enable() {
+				component.pop_transform(&self.transform, graphic);
+			}
+		}
+	}
+
+	//==============================================================================
 	// 컴포넌트 출력. (자식은 NodeTree 가 그린다)
 	// - 돌려주는 것: (Mask 가 있으면 둥근 크기, 화면 밖이라 건너뛰었는지)
 	// - 켜진 컴포넌트가 모두 그리는 사각형을 알려 주면(calculate_drawn_rect) 그 합을 지금 Graphic 변환으로 화면에 대 보고, 밖이면 그리지 않는다.

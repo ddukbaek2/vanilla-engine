@@ -8,9 +8,9 @@
 //     sound_effect_pool.play(&hitAudioAsset, 1.0);
 //     sound_effect_pool.play(&hitAudioAsset, 0.5);   // 이 재생만 절반 음량.
 //     sound_effect_pool.set_volume(0.8);              // 풀 전체의 음량. (재생 중인 것에도 곱해진다)
+// - 보이스 수가 0 이면 play 는 원본처럼 아무것도 하지 않는다.
 // - 원본과 다른 점:
 //   play 의 음량은 기본값이 없어 늘 넘긴다. (원본 기본 1)
-//   보이스 수가 0 이면 play 는 아무것도 하지 않는다. (원본은 0 으로 나눠 깨진다)
 //==============================================================================
 use crate::core::audiomanager::AudioManager;
 use crate::core::audioplayer::{clamp_volume, AudioPlayer};
@@ -151,7 +151,7 @@ mod tests {
 	fn create_silent_pool(voice_count: usize) -> SoundEffectPool {
 		let mut player_list = Vec::new();
 		for _ in 0..voice_count {
-			player_list.push(AudioPlayer::new(AudioPlayerBackend::create(None)));
+			player_list.push(AudioPlayer::from_backend(AudioPlayerBackend::create_silent()));
 		}
 		SoundEffectPool::create_from_player_list(player_list)
 	}

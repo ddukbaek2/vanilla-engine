@@ -10,10 +10,10 @@
 //     let mut store = PersistedStore::new("game.settings", serde_json::json!({ "volume": 0.8, "is_muted": false }), 1);
 //     store.set(serde_json::json!({ "volume": 0.5 }));
 //     let volume = store.get()["volume"].as_f64();
+// - 섞기는 원본 Object.assign 과 같다. 배열은 번호 키("0", "1" ...)로 섞고(저장된 state 가 배열이어도), 키 차례는 JS 객체처럼 번호 꼴 키를 작은 수부터 앞에 둔다.
 // - 원본과 다른 점:
-//   상태 객체는 serde_json::Value(객체)다. 객체가 아닌 값을 넘기면 빈 객체로 친다.
+//   상태 객체는 serde_json::Value(객체)다. 객체도 배열도 아닌 값을 넘기면 빈 객체로 친다. (원본 Object.assign 은 글을 글자마다 번호 키로 섞는다)
 //   subscribe 는 해지 함수 대신 구독 번호(PersistedStoreSubscription)를 돌려주고, unsubscribe(번호) 로 푼다.
-//   저장된 state 가 배열이면 원본은 번호 키로 섞지만, 러스트 판은 기본값으로 돌아간다.
 //==============================================================================
 use crate::misc::localstorage::{LocalStorage, LocalStorageBackend};
 use serde_json::{Map, Value};
@@ -44,17 +44,81 @@ pub struct PersistedStore {
 }
 
 //==============================================================================
-// 값을 객체 맵으로. (객체가 아니면 빈 맵)
+// 값을 객체 맵으로. (원본 Object.assign({}, 값): 객체는 그대로, 배열은 번호 키로, 그 밖은 빈 맵)
 //==============================================================================
 fn to_object_map(value: Value) -> Map<String, Value> {
-	match value {
+	let mut object_map = Map::new();
+	assign_object_value(&mut object_map, value);
+	order_object_keys(object_map)
+}
+
+//==============================================================================
+// 원본 Object.assign 의 원천 하나를 맵에 덮기. (객체는 키마다, 배열은 번호 키("0", "1" ...)로, 그 밖의 값은 덮을 것이 없다)
+//==============================================================================
+fn assign_object_value(target_map: &mut Map<String, Value>, source_value: Value) {
+	match source_value {
 		Value::Object(object_map) => {
-			object_map
+			for (key, value) in object_map {
+				target_map.insert(key, value);
+			}
+		}
+		Value::Array(value_list) => {
+			for (value_index, value) in value_list.into_iter().enumerate() {
+				target_map.insert(value_index.to_string(), value);
+			}
 		}
 		_ => {
-			Map::new()
 		}
 	}
+}
+
+//==============================================================================
+// 배열 번호 꼴 키인지. (JS 객체가 앞에 두는 키: 앞에 0 이 붙지 않은 십진 정수, 2^32 - 2 까지)
+//==============================================================================
+fn is_array_index_key(key: &str) -> bool {
+	if key.is_empty() || !key.bytes().all(|key_byte| key_byte.is_ascii_digit()) {
+		return false;
+	}
+	if key.len() > 1 && key.starts_with('0') {
+		return false;
+	}
+	match key.parse::<u64>() {
+		Ok(index) => {
+			index < 4294967295
+		}
+		Err(_) => {
+			false
+		}
+	}
+}
+
+//==============================================================================
+// 키를 JS 객체의 차례로. (배열 번호 꼴 키를 작은 수부터 앞에, 나머지는 넣은 차례. JSON.stringify 가 쓰는 차례와 같다)
+//==============================================================================
+fn order_object_keys(object_map: Map<String, Value>) -> Map<String, Value> {
+	if !object_map.keys().any(|key| is_array_index_key(key)) {
+		return object_map;
+	}
+	let mut index_entry_list: Vec<(u64, String, Value)> = Vec::new();
+	let mut other_entry_list: Vec<(String, Value)> = Vec::new();
+	for (key, value) in object_map {
+		if is_array_index_key(&key) {
+			let index = key.parse::<u64>().unwrap_or(0);
+			index_entry_list.push((index, key, value));
+		}
+		else {
+			other_entry_list.push((key, value));
+		}
+	}
+	index_entry_list.sort_by_key(|(index, _, _)| *index);
+	let mut ordered_map = Map::new();
+	for (_, key, value) in index_entry_list {
+		ordered_map.insert(key, value);
+	}
+	for (key, value) in other_entry_list {
+		ordered_map.insert(key, value);
+	}
+	ordered_map
 }
 
 impl PersistedStore {
@@ -87,10 +151,8 @@ impl PersistedStore {
 	//==============================================================================
 	pub fn set(&mut self, partial_state: Value) {
 		let mut merged_state = to_object_map(self.state.clone());
-		for (key, value) in to_object_map(partial_state) {
-			merged_state.insert(key, value);
-		}
-		self.state = Value::Object(merged_state);
+		assign_object_value(&mut merged_state, partial_state);
+		self.state = Value::Object(order_object_keys(merged_state));
 		self.write_to_storage();
 		self.notify();
 	}
@@ -140,6 +202,7 @@ impl PersistedStore {
 
 	//==============================================================================
 	// 저장소에서 읽기. (기본값 위에 저장된 state 를 덮는다. 기본값에 없던 키도 살리고, 새로 생긴 기본 키는 기본값으로 채운다)
+	// - state 가 객체나 배열이 아니면 기본값이다. (원본 typeof state === "object", 배열은 번호 키로 섞는다)
 	//==============================================================================
 	pub fn read_from_storage(&self) -> Value {
 		let default_state = Value::Object(self.default_state.clone());
@@ -160,18 +223,16 @@ impl PersistedStore {
 			return default_state;
 		}
 		let stored_state = match parsed_value.get("state") {
-			Some(Value::Object(stored_state)) => {
-				stored_state
+			Some(stored_state) if stored_state.is_object() || stored_state.is_array() => {
+				stored_state.clone()
 			}
 			_ => {
 				return default_state;
 			}
 		};
 		let mut merged_state = self.default_state.clone();
-		for (key, value) in stored_state {
-			merged_state.insert(key.clone(), value.clone());
-		}
-		Value::Object(merged_state)
+		assign_object_value(&mut merged_state, stored_state);
+		Value::Object(order_object_keys(merged_state))
 	}
 
 	//==============================================================================
@@ -205,7 +266,7 @@ impl PersistedStore {
 	//==============================================================================
 	// 저장된 글 읽기. (없거나 못 읽으면 빈 글)
 	//==============================================================================
-	fn read_stored_text(&self) -> String {
+	pub fn read_stored_text(&self) -> String {
 		match &self.storage_backend {
 			Some(storage_backend) => {
 				let read_result = match storage_backend.try_borrow() {
@@ -366,6 +427,27 @@ mod tests {
 		assert_eq!(item_map.borrow().get("settings").map(|text| text.as_str()), Some("{\"version\":1,\"state\":{\"volume\":0.25}}"));
 		store.set_storage_backend(None);
 		assert_eq!(store.get()["volume"], json!(0.5));
+		let _ = std::fs::remove_dir_all(&storage_directory_path);
+	}
+
+	//==============================================================================
+	// 배열은 원본 Object.assign 처럼 번호 키로 섞고, 번호 키를 앞에 둔다. 저장된 글을 그대로 읽을 수 있다.
+	// - 기대 글은 node 에서 JSON.stringify(Object.assign({}, { b: 1, z: 0 }, ["x", "y"])) 로 찍은 것과 같다.
+	//==============================================================================
+	#[test]
+	fn array_state_merges_with_index_keys() {
+		let storage_directory_path = use_temporary_storage_directory("array");
+		LocalStorage::set_string("game.array", "{\"version\":1,\"state\":[\"x\",\"y\"]}");
+		let mut store = PersistedStore::new("game.array", json!({ "b": 1, "z": 0 }), 1);
+		assert_eq!(store.get().to_string(), "{\"0\":\"x\",\"1\":\"y\",\"b\":1,\"z\":0}");
+		assert_eq!(store.read_stored_text(), "{\"version\":1,\"state\":[\"x\",\"y\"]}");
+		store.set(json!(["w"]));
+		assert_eq!(store.get()["0"], json!("w"));
+		assert_eq!(store.get()["1"], json!("y"));
+		store.set(json!({ "10": true, "2": false, "a": null }));
+		assert_eq!(store.get().to_string(), "{\"0\":\"w\",\"1\":\"y\",\"2\":false,\"10\":true,\"b\":1,\"z\":0,\"a\":null}");
+		store.replace(json!(7));
+		assert_eq!(store.get(), &json!({}));
 		let _ = std::fs::remove_dir_all(&storage_directory_path);
 	}
 }

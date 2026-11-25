@@ -541,7 +541,7 @@ fn count_binary_fraction_digits(value: f64) -> u32 {
 //==============================================================================
 // 원본 String(수). (Number.prototype.toString: 가장 짧은 표기, 1e21 이상과 1e-7 이하는 지수, -0 은 "0")
 //==============================================================================
-fn number_to_string(value: f64) -> String {
+pub(crate) fn number_to_string(value: f64) -> String {
 	if value.is_nan() {
 		return String::from(NOT_A_NUMBER_TEXT);
 	}

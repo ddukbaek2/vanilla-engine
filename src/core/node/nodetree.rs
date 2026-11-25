@@ -936,7 +936,7 @@ impl NodeTree {
 
 	//==============================================================================
 	// 노드 하나와 그 자손 출력.
-	// - push_transform → 컴포넌트 → (Mask 면 클립 시작) → 자식 → (클립 끝) → 기즈모 → pop_transform
+	// - push_transform → 컴포넌트의 push_transform → 컴포넌트 → (Mask 면 클립 시작) → 자식 → (클립 끝) → 기즈모 → 컴포넌트의 pop_transform → pop_transform
 	//==============================================================================
 	pub fn draw_node(&mut self, node_id: NodeId, graphic: &mut Graphic) {
 		let node = match self.nodes.get_mut(node_id) {
@@ -951,6 +951,7 @@ impl NodeTree {
 			return;
 		}
 		node.push_transform(graphic);
+		node.push_component_transforms(graphic);
 
 		if node.is_visible() {
 			// 배율이 움직이는 노드의 글은 묶은 배율로 굽는다. (컴포넌트를 다 그리면 푼다, 자식은 저마다 다시 정한다)
@@ -989,6 +990,7 @@ impl NodeTree {
 		if is_force_gizmos_visible || node.is_gizmo_visible() {
 			node.draw_gizmos(graphic);
 		}
+		node.pop_component_transforms(graphic);
 		node.pop_transform(graphic);
 	}
 

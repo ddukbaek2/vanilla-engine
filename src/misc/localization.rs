@@ -14,8 +14,8 @@
 //   오른쪽에서 왼쪽으로 쓰는 언어(is_right_to_left, set_right_to_left)와 넣는 값을 방향 격리 문자로 묶기(isolate_text),
 //   이름 자리 채우기(text_named, "{seconds}" 꼴, 빗금으로만 이은 값들은 통째로 한 번 묶는다).
 //   배치 뒤집기(mirror_layout_x, read_layout_text_align, 원본 LanguagePack 의 mirrorLayoutX, readLayoutTextAlign).
-//   detect_language 는 웹에서 원본처럼 navigator.languages 를 읽고, 데스크탑에서는 LANGUAGE / LC_ALL / LC_MESSAGES / LANG 환경 변수를 읽는다.
-//     (윈도우는 보통 이 변수가 없어서 기본 언어가 된다)
+//   detect_language 는 웹에서 원본처럼 navigator.languages 를 읽고, 데스크탑에서는 sys-locale 로 시스템의 선호 언어 차례를 읽는다.
+//     (윈도우 GetUserPreferredUILanguages, 맥 CFLocaleCopyPreferredLanguages, 리눅스 LANGUAGE / LC_ALL / LC_MESSAGES / LANG 환경 변수)
 //==============================================================================
 use crate::core::graphic::TextAlign;
 use std::cell::RefCell;
@@ -484,25 +484,17 @@ pub(crate) fn read_preferred_language_tags() -> Vec<String> {
 }
 
 //==============================================================================
-// 사용자 선호 언어 목록. (데스크탑: LANGUAGE(콜론으로 여럿) → LC_ALL → LC_MESSAGES → LANG, "ko_KR.UTF-8" 은 "ko-KR" 로)
+// 사용자 선호 언어 목록. (데스크탑: sys-locale 이 읽은 시스템 선호 언어 차례, 원본 navigator.languages 자리)
+// - 윈도우 GetUserPreferredUILanguages, 맥 CFLocaleCopyPreferredLanguages, 리눅스 LANGUAGE(콜론으로 여럿) → LC_ALL → LC_MESSAGES → LANG.
+// - "ko_KR.UTF-8" 은 "ko-KR" 로 바꾸고, "C" 와 "POSIX" 와 겹친 것은 뺀다.
 //==============================================================================
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn read_preferred_language_tags() -> Vec<String> {
 	let mut candidate_list: Vec<String> = Vec::new();
-	for variable_name in ["LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"] {
-		let variable_value = match std::env::var(variable_name) {
-			Ok(variable_value) => {
-				variable_value
-			}
-			Err(_) => {
-				continue;
-			}
-		};
-		for locale_name in variable_value.split(':') {
-			let language_tag = convert_locale_to_language_tag(locale_name);
-			if !language_tag.is_empty() && !candidate_list.contains(&language_tag) {
-				candidate_list.push(language_tag);
-			}
+	for locale_name in sys_locale::get_locales() {
+		let language_tag = convert_locale_to_language_tag(&locale_name);
+		if !language_tag.is_empty() && !candidate_list.contains(&language_tag) {
+			candidate_list.push(language_tag);
 		}
 	}
 	candidate_list
