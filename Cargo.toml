@@ -33,8 +33,8 @@ unicode-properties = { version = "0.1", default-features = false, features = ["e
 serde_json = { version = "1", features = ["preserve_order"] }
 # FBX 압축 배열(zlib deflate)을 푼다. (원본 DecompressionStream 자리, 순수 러스트 miniz_oxide 기본 백엔드라 wasm32 에서도 돈다)
 flate2 = "1"
-# 이미지 해석. (게임들이 png, jpg, webp 를 쓴다)
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+# 이미지 해석. (원본은 브라우저가 푸는 형식을 모두 받는다. png, jpeg, webp, gif(첫 장), bmp, ico. 웹은 브라우저가 먼저 푼다)
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif", "bmp", "ico"] }
 # 노드 핸들. (세대 번호가 붙은 키로 씬의 노드 저장소를 가리킨다)
 slotmap = "1"
 # performance.now() 를 쓰는 Instant. (네이티브에서는 std::time 그대로)
@@ -52,6 +52,8 @@ glutin-winit = "0.5"
 raw-window-handle = "0.6"
 # 소리. (믹서 트랙, 정적 소리. 기본 기능을 끄고 cpal 출력과 ogg(vorbis), mp3, wav(pcm) 해석만 켠다)
 kira = { version = "0.12", default-features = false, features = ["cpal", "cpal-realtime", "ogg", "vorbis", "mp3", "wav", "pcm"] }
+# SVG 그림. (데스크탑, usvg 로 읽고 tiny-skia 로 그린다. 원본은 브라우저가 SVG 를 그림으로 푼다. 웹은 브라우저가 푼다)
+resvg = "0.50"
 # 낱말 나누기. (공백 없이 쓰는 한중일과 태국어 같은 동남아 글자를 사전으로 나눈다. 크롬의 ICU4C 도 사전이다. 웹은 원본처럼 브라우저 Intl.Segmenter 를 쓴다)
 icu_segmenter = "2"
 # 한중일 사전(cjdict)의 낱말 값을 읽는다. (icu_segmenter 가 쓰는 같은 판, 크롬의 ICU4C 처럼 낱말 값의 합이 가장 작은 나누기를 고른다)
@@ -89,7 +91,7 @@ yeslogic-fontconfig-sys = { version = "6", features = ["dlopen"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
-web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlCanvasElement", "WebGl2RenderingContext", "CssStyleDeclaration", "HtmlElement", "KeyboardEvent", "console", "AudioContext", "BaseAudioContext", "OfflineAudioContext", "AudioBuffer", "AudioBufferSourceNode", "AudioScheduledSourceNode", "AudioNode", "AudioDestinationNode", "AudioParam", "GainNode", "OscillatorNode", "OscillatorType", "Response", "Performance", "Navigator", "VisibilityState", "Storage", "HtmlInputElement", "HtmlHeadElement", "Event", "CompositionEvent", "MouseEvent", "WheelEvent", "MediaQueryList", "TouchEvent", "TouchList", "Touch", "DomRect", "Node", "AddEventListenerOptions", "CanvasRenderingContext2d", "TextMetrics", "ImageData"] }
+web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlCanvasElement", "WebGl2RenderingContext", "CssStyleDeclaration", "HtmlElement", "KeyboardEvent", "console", "AudioContext", "BaseAudioContext", "OfflineAudioContext", "AudioBuffer", "AudioBufferSourceNode", "AudioScheduledSourceNode", "AudioNode", "AudioDestinationNode", "AudioParam", "GainNode", "OscillatorNode", "OscillatorType", "Response", "Performance", "Navigator", "VisibilityState", "Storage", "HtmlInputElement", "HtmlHeadElement", "Event", "CompositionEvent", "MouseEvent", "WheelEvent", "MediaQueryList", "TouchEvent", "TouchList", "Touch", "DomRect", "Node", "AddEventListenerOptions", "CanvasRenderingContext2d", "TextMetrics", "ImageData", "Blob", "BlobPropertyBag", "Url", "HtmlImageElement"] }
 
 # 출시 빌드. (한 덩어리로 묶어 최적화하고 디버그 기호를 뺀다. 이 저장소를 맨 위로 빌드할 때만 쓰인다)
 [profile.release]

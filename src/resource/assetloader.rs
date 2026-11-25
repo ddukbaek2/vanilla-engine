@@ -362,6 +362,10 @@ impl AssetLoader {
 					continue;
 				}
 				*is_decode_checked = true;
+				// 웹은 받을 때 브라우저가 이미 풀어 두었다.
+				if load_handle.get_decoded_image().is_some() {
+					continue;
+				}
 				let bytes = match load_handle.get_bytes() {
 					Some(bytes) => {
 						bytes
