@@ -217,7 +217,7 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
   - 윈도우와 리눅스의 글꼴 갈래(DirectWrite, 메뉴 글꼴, fontconfig, 부모 글꼴 치수)는 그 대상으로 컴파일해 보았고 실행해 크롬과 견주지는 못했다.
   - 데스크탑 AVIF 는 색 프로필 변환과 움직이는 AVIF 를 하지 않는다.
   - 데스크탑 Canvas2D 는 arc, ellipse, arcTo, roundRect 를 3 차 베지어로 잇는다(크롬 Skia 는 원뿔 곡선, 반지름의 0.03% 안쪽), roundRect 모서리는 수 반지름만 받는다(DOMPointInit 타원 모서리는 받지 않는다), 그림자 흐림은 상자 흐림 세 번이다. 엔진 Image 를 그리려면 CPU 픽셀이 남아 있어야 한다. (GPU 에 올린 뒤 놓은 그림은 알리고 건너뛴다)
-  - 데스크탑 PaneStyle 은 프리셋과 원본 도구가 쓰는 CSS(블록과 flex 배치, flex 비율과 세로 flex, min, max, 쪽마다 여백과 테두리, overflow 자르기와 휠, 썸 끌기 스크롤)를 읽는다. flex-wrap 줄넘김과 말줄임(white-space, text-overflow)은 읽지 않고, 스크롤 막대는 자리를 차지하지 않는 얹는 썸이다. textarea 프리셋은 글을 보이기만 한다. (엔진에 여러 줄 입력 필드가 없다)
+  - 데스크탑 PaneStyle 은 프리셋과 원본 도구가 쓰는 CSS(블록과 flex 배치, flex 비율과 세로 flex, min, max, 쪽마다 여백과 테두리, overflow 자르기와 휠, 썸 끌기 스크롤)를 읽는다. flex-wrap 줄넘김과 말줄임(white-space, text-overflow)은 읽지 않고, 스크롤 막대는 자리를 차지하지 않는 얹는 썸이다. (여러 줄 입력 필드도 같다) textarea 는 엔진 여러 줄 입력 필드가 받는다.
   - 데스크탑 질문 창과 브라우저 문맥 메뉴의 치수와 색은 크롬 main 의 값(MessageBoxView 폭 400, 여백 20, 제목 16px, 기본 밝은 팔레트 같은 것)이고, 흐린 그림자는 겹친 둥근 사각형으로 갈음한다. 단추와 입력 칸 높이는 크롬 셈을 기본 글꼴로 갈음한 값이다.
   - 직접 누르는 입력 필드의 크롬 편집 칸 메뉴는 데스크탑에서 오른쪽 단추로 연다. 손가락 길게 누르기로는 열지 않는다.
 

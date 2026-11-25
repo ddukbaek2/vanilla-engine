@@ -17,7 +17,7 @@
 //   panel: 바탕 COLOR_PANEL, 안쪽 여백 10. toolbar: 바탕 COLOR_TOOLBAR, 아래 테두리 1px COLOR_BORDER, 가로로 가운데 모아 10 씩 띄운다(flex).
 //   button: 제 크기(position relative, auto), 안쪽 여백 6 16, 모서리 4, 굵은 글, 바탕 COLOR_RESIZER(accent 면 COLOR_ACCENT, warning 이면 COLOR_WARNING),
 //   올려 두면 밝기 1.2 배와 pointer 커서, 누르고 떼면 set_on_click 의 함수. input: 엔진 입력 필드(UIInputField), 바탕 COLOR_INPUT_BACKGROUND, 안쪽 여백 4.
-//   textarea: 바탕 COLOR_BACKGROUND, 글 #d4d4d4, 고정폭 14px, 안쪽 여백 15. text: 제 크기, 굵은 글.
+//   textarea: 바탕 COLOR_BACKGROUND, 글 #d4d4d4, 고정폭 14px, 안쪽 여백 15, 탭 크기 4 의 여러 줄 입력 필드. text: 제 크기, 굵은 글.
 //   relative 요소는 부모 안쪽 여백 안에서 놓는다. 블록 부모는 세로로 차례로(div 는 폭을 채우고 그 밖은 제 폭), flex 부모는 CSS Flexbox 처럼
 //   주축(flex-direction row, column)으로 기준 크기(flex-basis, 없으면 width 나 height, 그것도 auto 면 제 크기)를 놓고 남는 자리를 flex-grow 비로 나누거나
 //   모자라면 flex-shrink 와 기준 크기를 곱한 비로 줄인다. (min, max 에 걸린 항목은 묶고 다시 나눈다, 넘침이 visible 인 항목의 자동 최소는 제 크기)
@@ -34,7 +34,8 @@
 //     border, border-top, border-right, border-bottom, border-left, border-width, border-color, border-radius, cursor(pointer),
 //     overflow, overflow-x, overflow-y, scrollbar-color. 그 밖(flex-wrap 줄넘김, white-space 와 text-overflow 의 말줄임, user-select, opacity 같은 것)은 읽지 않는다.
 //   - 스크롤 막대는 자리를 차지하지 않고 내용 위에 얹는 두께 8 의 썸이다. (크롬은 운영체제와 scrollbar-width 에 따라 자리를 차지하는 막대일 수 있다)
-//   - textarea 프리셋은 글을 보이기만 한다. 엔진에 여러 줄 입력 필드가 없다.
+//   - textarea 태그는 엔진 여러 줄 입력 필드(UIInputField::set_multiline)가 글을 받는다. 원본 DOM textarea 처럼 줄을 넣고, 폭에 맞춰 나누고, 위아래로 옮기고, 넘치면 휠로 넘긴다.
+//     프리셋의 탭 크기 4 를 쓴다. 글자, 색, 안쪽 여백은 만들 때의 스타일을 받는다. (PaneStyle::apply 로 나중에 바꾼 글꼴은 필드에 옮기지 않는다)
 //   - canvas 태그는 아무것도 그리지 않는 노드다. 원본은 그 자리에 엔진 캔버스가 들어가고, 데스크탑은 창 전체가 엔진 화면이라 게임이 그 노드의 자리를 읽어 쓴다.
 //==============================================================================
 use super::{calculate_pane_layout, calculate_resized_size, calculate_resizer_thickness, PaneDirection, PaneLayoutChild, PaneOptions, PaneResizableEdges, PaneResizeCallback, PaneSize, PaneStyleOptions, PaneTheme};
@@ -2363,9 +2364,19 @@ impl PaneStyle {
 			element.apply_style(property_name, property_value);
 		}
 		let is_input = element.tag_name == "input";
+		let is_text_area = element.tag_name == "textarea";
 		let font_size = element.font_size;
+		let font_family = element.font_family.clone();
 		let text_color = element.color;
 		let padding = element.padding[3];
+		let line_height = element.line_height;
+		// textarea 의 글은 입력 필드가 든다. (원본 innerText 가 textarea 의 처음 값이 된다)
+		let initial_text = if is_text_area {
+			std::mem::take(&mut element.text)
+		}
+		else {
+			String::new()
+		};
 		node_tree.add_component(node_id, element);
 		// input 은 엔진 입력 필드가 글을 받는다. (원본 DOM input, 바탕과 테두리는 PaneElement 가 그린다)
 		if is_input {
@@ -2379,6 +2390,27 @@ impl PaneStyle {
 				field.set_placeholder_color(PaneTheme::COLOR_TEXT_DIM);
 				field.set_focus_border_width(1.0);
 				field.set_focus_border_color(PaneTheme::COLOR_RESIZER_HOVER);
+				field.set_use_dom_input(true);
+				field.attach();
+			}
+		}
+		// textarea 는 엔진 여러 줄 입력 필드가 글을 받는다. (원본 DOM textarea: 프리셋은 테두리와 포커스 테두리가 없고 탭 크기 4, 커서는 글 색)
+		if is_text_area {
+			if let Some(field) = node_tree.add_component(node_id, UIInputField::new()) {
+				field.set_multiline(true);
+				field.set_background_color(Color::create(0.0, 0.0, 0.0, 0.0));
+				field.set_text_color(text_color);
+				field.set_cursor_color(text_color);
+				field.set_font_size(font_size);
+				field.set_font_family(&font_family);
+				field.set_padding(padding);
+				field.set_round_size(0.0);
+				field.set_line_height(line_height);
+				field.set_tab_size(4.0);
+				field.set_placeholder(options.placeholder);
+				field.set_placeholder_color(PaneTheme::COLOR_TEXT_DIM);
+				field.set_focus_border_width(0.0);
+				field.set_text(&initial_text);
 				field.set_use_dom_input(true);
 				field.attach();
 			}

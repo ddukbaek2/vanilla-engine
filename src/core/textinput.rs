@@ -26,8 +26,18 @@ pub enum TextInputKey {
 	Delete,
 	Left,
 	Right,
+	// 줄 앞과 끝. (여러 줄 필드는 보이는 줄, 한 줄 필드는 글 앞과 끝. 맥은 Cmd + 왼쪽, 오른쪽도)
 	Home,
 	End,
+	// 위아래 줄. (여러 줄 필드, 한 줄 DOM 입력 칸은 글 앞과 끝)
+	Up,
+	Down,
+	// 한 화면만큼 위아래. (여러 줄 필드, 맥은 Option 과 함께)
+	PageUp,
+	PageDown,
+	// 글 앞과 끝. (Ctrl + Home, End. 맥은 Cmd + 위, 아래)
+	DocumentStart,
+	DocumentEnd,
 	Enter,
 	// 원본 캔버스 모드처럼 필드는 쓰지 않는다. (게임이 다음 칸으로 옮길 때 보라고 넘긴다)
 	Tab,
@@ -121,6 +131,8 @@ pub struct TextInputFieldState {
 	pub max_length: usize,
 	// 필드 쪽에서 값이나 커서를 바꿀 때마다 는다. (웹이 숨긴 <input> 에 다시 써야 하는지 볼 때)
 	pub value_revision: u64,
+	// 여러 줄 필드인지. (웹은 숨긴 <textarea> 를 쓴다)
+	pub is_multiline: bool,
 }
 
 //==============================================================================
@@ -440,6 +452,7 @@ mod tests {
 			cursor_index: 0,
 			max_length: 0,
 			value_revision: 0,
+			is_multiline: false,
 		});
 		assert!(text_input.get_active_field_state().is_none());
 		text_input.finish_frame();

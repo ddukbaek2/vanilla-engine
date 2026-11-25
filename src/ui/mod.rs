@@ -22,6 +22,7 @@ pub mod uidraggable;
 pub mod uidropdown;
 pub mod uihitarea;
 pub mod uiimageview;
+pub mod textarealayout;
 pub mod uiinputfield;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod uiinputfieldmenu;

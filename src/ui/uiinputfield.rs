@@ -24,6 +24,14 @@
 //   - 데스크탑 문맥 메뉴(오른쪽 단추)는 DOM 이 없어 캔버스에 그린다. 루트의 마지막 자식 노드로 만들어 위에 그린다. 웹은 원본처럼 DOM 메뉴다.
 //     DOM 입력을 직접 누르게 한 필드(use_direct_touch)는 원본에서 크롬이 띄우는 편집 칸 메뉴를 같은 항목과 단축키 글로 그린다. (ui/uiinputfieldmenu.rs)
 //   - 데스크탑 DOM 입력 필드는 원본 DOM 입력 칸처럼 되돌리기와 다시 하기를 한다. (Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y, 맥은 Cmd, 블링크의 묶음 규칙, TextEditBuffer)
+//   - 데스크탑 한 줄 DOM 입력 필드는 블링크 입력 칸처럼 넣는 글의 끝 줄바꿈을 지우고 가운데 줄바꿈을 공백으로 바꾸고, 위와 page 위는 글 앞, 아래와 page 아래는 글 끝으로 옮긴다.
+//   - set_multiline(true) 면 크롬 textarea 같은 여러 줄 입력이다. (원본 엔진에는 없고, 원본은 Pane 의 textarea 프리셋으로 DOM textarea 를 쓴다)
+//     글은 white-space: pre-wrap, overflow-wrap: break-word 처럼 줄바꿈 문자와 폭으로 나눈다. (ui/textarealayout.rs, 줄 나눔 자리는 크롬처럼 유니코드 줄 나누기)
+//     Enter 는 줄을 넣고(글자 넣기 되돌리기 묶음), 위아래는 첫 위아래 이동 때의 가로 자리를 지키며(첫 줄 위는 글 앞, 마지막 줄 아래는 글 끝),
+//     Home 과 End 는 보이는 줄의 앞과 끝(맥은 Cmd + 왼쪽, 오른쪽도), Ctrl + Home, End(맥은 Cmd + 위, 아래)는 글 앞과 끝,
+//     PageUp, PageDown(맥은 Option 과 함께)은 보이는 높이의 87.5%(맥은 높이 - 40 과 견줘 큰 쪽) 안의 가장 먼 줄로 옮겨 그 줄을 맨 위로 올린다.
+//     넣는 글의 CR, CRLF 는 LF 로 바꾼다. 커서는 편집과 이동 뒤 보이게 스크롤하고(맥이 아니면 가장자리, 맥은 가운데), 휠과 얹는 썸 끌기로 넘긴다.
+//     웹 DOM 입력은 숨긴 <textarea> 가 글, 조합, 되돌리기를 맡고, 보이는 줄로 옮기는 키(위아래, page, Home, End)는 필드가 엔진 배치로 옮긴다.
 //   - 노드를 끄거나(set_active(false)) 지우면 tick 이 돌지 않아 포커스와 IME, 웹의 숨긴 <input> 이 함께 사라진다. (원본은 detach 해야 사라진다)
 //   - getRenderState 는 옮기지 않았다. (그리는 컴포넌트가 하나라 넘길 일이 없다)
 //   - UI 문서(UIDocument)는 register_node_type 으로 등록하면 원본 노드 꼴로 쓰고 읽는다. (노드 type "UIInputField", 바탕 Paint, 그리기 층, 안내 글과 값 UILabel 자식,
@@ -42,6 +50,7 @@ use crate::core::graphic::{Graphic, TextAlign, TextBaseline};
 use crate::core::node::nodetree::{ComponentContext, NodeId, NodeTree};
 use crate::core::node::worldnode::NodeTransform;
 use crate::core::textinput::{convert_character_index_to_byte_index, convert_character_index_to_utf16_index, convert_utf16_index_to_character_index, count_characters, TextInputEventKind, TextInputFieldState, TextInputKey};
+use crate::ui::textarealayout::{build_text_area_layout, TextAreaLayout};
 use crate::ui::uicontrol::UIControl;
 use crate::ui::uiview::is_view_position_inside_node;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -51,6 +60,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 //==============================================================================
 // 커서 깜빡임 주기. (초)
 const CURSOR_BLINK_SECONDS: f32 = 0.5;
+// 여러 줄 필드의 탭 크기. (공백 몇 개 폭, CSS tab-size 기본 8)
+const DEFAULT_TAB_SIZE: f32 = 8.0;
+// 여러 줄 필드의 스크롤 막대 썸. (얹는 막대, PaneStyle 과 같다)
+const TEXT_AREA_SCROLLBAR_THICKNESS: f32 = 8.0;
+const TEXT_AREA_SCROLLBAR_MINIMUM_THUMB_LENGTH: f32 = 20.0;
 // 폰트 이름을 정하지 않았을 때 쓰는 이름. (엔진 기본 폰트, 원본 SYSTEM_FONT_STRING 자리)
 const DEFAULT_FONT_FAMILY: &str = "default";
 // 문맥 메뉴 크기. (원본 DOM 메뉴: 최소 폭 140, 위아래 여백 4, 항목 위아래 여백 8, 글자 14px)
@@ -564,6 +578,36 @@ pub struct UIInputField {
 	writing_direction: UIInputFieldWritingDirection,
 	// 글 라벨을 마지막으로 놓은 노드 크기. (원본 refreshTextPositions 가 tick 에서 크기가 있을 때만 놓는다. 처음은 0, UI 문서가 원본 자식 꼴로 적는다)
 	text_layout_size: Vector2,
+	// 커서의 줄 위와 높이. (IME 후보 창 자리, 한 줄 필드는 0 과 노드 높이)
+	caret_local_top: f32,
+	caret_local_height: f32,
+	// 여러 줄인지. (크롬 textarea: Enter 가 줄을 넣고, 폭에 맞춰 나누고, 위아래로 옮기고, 넘치면 스크롤한다)
+	is_multiline: bool,
+	// 여러 줄 배치와 그 열쇠. (보인 글, 폰트, 폭, 줄 높이, 탭 크기)
+	text_area_layout: TextAreaLayout,
+	text_area_layout_key: Option<(String, String, f32, f32, f32)>,
+	// 줄 높이. (None 이면 CSS normal 을 글꼴 크기의 1.2 배로 갈음한다)
+	line_height: Option<f32>,
+	tab_size: f32,
+	// 위로 굴려 넘긴 만큼. (원본 textarea scrollTop)
+	scroll_top: f32,
+	// 위아래 이동이 지키는 가로 자리. (블링크 x_pos_for_vertical_arrow_navigation, 다른 선택 바뀜에 지운다)
+	preferred_caret_x: Option<f32>,
+	// 폭으로 나뉜 자리의 커서를 앞 줄 끝에 보일지. (블링크의 위쪽 친화)
+	is_caret_upstream: bool,
+	// 다음 배치에서 커서가 보이게 스크롤할지. (블링크 RevealSelection)
+	caret_reveal_request: Option<CaretRevealKind>,
+	// 썸을 끄는 중이면 (누른 y, 그때 scroll_top).
+	scrollbar_drag_start: Option<(f32, f32)>,
+}
+
+//==============================================================================
+// 커서가 보이게 스크롤하는 꼴. (블링크 ScrollAlignment: 맥이 아니면 가장자리에 붙이고 page 이동은 맨 위로, 맥은 가운데로)
+//==============================================================================
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CaretRevealKind {
+	IfNeeded,
+	Always,
 }
 
 #[crate::reflect]
@@ -620,6 +664,18 @@ impl UIInputField {
 			pending_menu_action: None,
 			writing_direction: UIInputFieldWritingDirection::LeftToRight,
 			text_layout_size: Vector2::zero(),
+			caret_local_top: 0.0,
+			caret_local_height: 0.0,
+			is_multiline: false,
+			text_area_layout: TextAreaLayout::default(),
+			text_area_layout_key: None,
+			line_height: None,
+			tab_size: DEFAULT_TAB_SIZE,
+			scroll_top: 0.0,
+			preferred_caret_x: None,
+			is_caret_upstream: false,
+			caret_reveal_request: None,
+			scrollbar_drag_start: None,
 		}
 	}
 
@@ -705,6 +761,83 @@ impl UIInputField {
 	//==============================================================================
 	pub fn is_using_direct_touch(&self) -> bool {
 		self.use_direct_touch
+	}
+
+	//==============================================================================
+	// 여러 줄 설정. (크롬 textarea 처럼. 웹 DOM 입력은 숨긴 <textarea> 를 쓴다. 원본 필드의 속성이 아니라 반사에서 뺀다)
+	//==============================================================================
+	#[reflect(skip)]
+	pub fn set_multiline(&mut self, is_multiline: bool) {
+		self.is_multiline = is_multiline;
+		self.text_area_layout_key = None;
+		self.scroll_top = 0.0;
+		self.preferred_caret_x = None;
+		self.is_caret_upstream = false;
+	}
+
+	//==============================================================================
+	// 여러 줄인지.
+	//==============================================================================
+	#[reflect(skip)]
+	pub fn is_multiline(&self) -> bool {
+		self.is_multiline
+	}
+
+	//==============================================================================
+	// 줄 높이 설정. (여러 줄 필드, None 이면 CSS normal 을 글꼴 크기의 1.2 배로 갈음한다)
+	//==============================================================================
+	#[reflect(skip)]
+	pub fn set_line_height(&mut self, line_height: Option<f32>) {
+		self.line_height = line_height;
+		self.text_area_layout_key = None;
+	}
+
+	//==============================================================================
+	// 줄 높이. (여러 줄 필드)
+	//==============================================================================
+	#[reflect(skip)]
+	pub fn get_line_height(&self) -> f32 {
+		match self.line_height {
+			Some(line_height) => {
+				line_height
+			}
+			None => {
+				(self.font_size * 1.2).round()
+			}
+		}
+	}
+
+	//==============================================================================
+	// 탭 크기 설정. (여러 줄 필드, 공백 몇 개 폭. CSS tab-size, 기본 8)
+	//==============================================================================
+	#[reflect(skip)]
+	pub fn set_tab_size(&mut self, tab_size: f32) {
+		self.tab_size = tab_size.max(0.0);
+		self.text_area_layout_key = None;
+	}
+
+	//==============================================================================
+	// 탭 크기.
+	//==============================================================================
+	#[reflect(skip)]
+	pub fn get_tab_size(&self) -> f32 {
+		self.tab_size
+	}
+
+	//==============================================================================
+	// 위로 굴려 넘긴 만큼. (여러 줄 필드, 원본 textarea scrollTop)
+	//==============================================================================
+	#[reflect(skip)]
+	pub fn get_scroll_top(&self) -> f32 {
+		self.scroll_top
+	}
+
+	//==============================================================================
+	// 위로 굴려 넘기기. (여러 줄 필드, 다음 그리기에서 글 끝 안으로 줄인다)
+	//==============================================================================
+	#[reflect(skip)]
+	pub fn set_scroll_top(&mut self, scroll_top: f32) {
+		self.scroll_top = scroll_top.max(0.0);
 	}
 
 	//==============================================================================
@@ -1148,8 +1281,10 @@ impl UIInputField {
 	fn paste_now(&mut self, context: &mut ComponentContext) {
 		let clipboard_text = context.get_engine().read_clipboard_text();
 		if let Some(clipboard_text) = clipboard_text {
+			let clipboard_text = self.sanitize_inserted_text(&clipboard_text);
 			if !clipboard_text.is_empty() {
 				self.replace_selection_with_edit(context, &clipboard_text, TextEditKind::Paste);
+				self.request_caret_reveal(CaretRevealKind::IfNeeded);
 			}
 		}
 	}
@@ -1303,9 +1438,13 @@ impl UIInputField {
 	fn handle_text_input_event(&mut self, context: &mut ComponentContext, event_kind: TextInputEventKind) {
 		match event_kind {
 			TextInputEventKind::Commit(text) => {
+				let text = self.sanitize_inserted_text(&text);
 				if !text.is_empty() {
 					self.replace_selection(context, &text);
 				}
+				self.preferred_caret_x = None;
+				self.is_caret_upstream = false;
+				self.request_caret_reveal(CaretRevealKind::IfNeeded);
 				self.reset_cursor_blink();
 			}
 			TextInputEventKind::CompositionStart => {
@@ -1323,9 +1462,13 @@ impl UIInputField {
 				self.handle_edit_key(context, key, is_shift);
 			}
 			TextInputEventKind::Paste(text) => {
+				let text = self.sanitize_inserted_text(&text);
 				if !text.is_empty() {
 					self.replace_selection_with_edit(context, &text, TextEditKind::Paste);
 				}
+				self.preferred_caret_x = None;
+				self.is_caret_upstream = false;
+				self.request_caret_reveal(CaretRevealKind::IfNeeded);
 				self.reset_cursor_blink();
 			}
 			TextInputEventKind::ReplaceValue { value, selection_end, .. } => {
@@ -1334,6 +1477,9 @@ impl UIInputField {
 					return;
 				}
 				self.edit_buffer.set_value_from_platform(&value, selection_end);
+				self.preferred_caret_x = None;
+				self.is_caret_upstream = false;
+				self.request_caret_reveal(CaretRevealKind::IfNeeded);
 				self.reset_cursor_blink();
 				self.fire_change_event(context);
 			}
@@ -1345,6 +1491,9 @@ impl UIInputField {
 				let current_range = self.edit_buffer.get_selection_range().unwrap_or((self.edit_buffer.get_cursor_index(), self.edit_buffer.get_cursor_index()));
 				if current_range != (start, end) {
 					self.edit_buffer.set_selection(start, end);
+					self.preferred_caret_x = None;
+					self.is_caret_upstream = false;
+					self.request_caret_reveal(CaretRevealKind::IfNeeded);
 					self.reset_cursor_blink();
 				}
 			}
@@ -1362,6 +1511,16 @@ impl UIInputField {
 	//==============================================================================
 	fn handle_edit_key(&mut self, context: &mut ComponentContext, key: TextInputKey, is_shift: bool) {
 		let cursor_index = self.edit_buffer.get_cursor_index();
+		// 위아래 이동이 아니면 지키던 가로 자리를 지우고, 커서가 보이게 스크롤한다. (블링크 FrameSelection)
+		let is_vertical_key = matches!(key, TextInputKey::Up | TextInputKey::Down | TextInputKey::PageUp | TextInputKey::PageDown);
+		let was_caret_upstream = self.is_caret_upstream;
+		if !is_vertical_key {
+			self.preferred_caret_x = None;
+			self.is_caret_upstream = false;
+			if !matches!(key, TextInputKey::Copy | TextInputKey::Tab) {
+				self.request_caret_reveal(CaretRevealKind::IfNeeded);
+			}
+		}
 		match key {
 			TextInputKey::SelectAll => {
 				self.select_all();
@@ -1405,15 +1564,60 @@ impl UIInputField {
 			TextInputKey::Right => {
 				self.move_cursor_to_character(cursor_index + 1, is_shift);
 			}
-			TextInputKey::Home => {
-				self.move_cursor_to_character(0, is_shift);
+			TextInputKey::Home | TextInputKey::End => {
+				let is_end = key == TextInputKey::End;
+				if self.is_multiline {
+					// 보이는 줄의 앞과 끝. (블링크 MoveToBeginningOfLine, MoveToEndOfLine 의 kLineBoundary)
+					let content_width = context.get_transform().get_content_size().x;
+					self.ensure_text_area_layout_without_graphic(content_width);
+					let line_index = self.text_area_layout.find_line_index(cursor_index, was_caret_upstream);
+					let (target_index, is_upstream) = self.text_area_layout.get_line_boundary(line_index, is_end);
+					self.move_cursor_to_character(target_index, is_shift);
+					self.is_caret_upstream = is_upstream;
+				}
+				else if is_end {
+					let character_count = count_characters(self.edit_buffer.get_text());
+					self.move_cursor_to_character(character_count, is_shift);
+				}
+				else {
+					self.move_cursor_to_character(0, is_shift);
+				}
 			}
-			TextInputKey::End => {
-				let character_count = count_characters(self.edit_buffer.get_text());
-				self.move_cursor_to_character(character_count, is_shift);
+			TextInputKey::Up | TextInputKey::Down | TextInputKey::PageUp | TextInputKey::PageDown => {
+				if self.is_multiline {
+					self.move_caret_vertically(context, key, is_shift);
+				}
+				else if self.use_dom_input {
+					// 한 줄 DOM 입력 칸: 앞 줄이 없어 위는 글 앞, 아래는 글 끝. (블링크 selection_modifier_line.cc)
+					let target_index = if matches!(key, TextInputKey::Up | TextInputKey::PageUp) {
+						0
+					}
+					else {
+						count_characters(self.edit_buffer.get_text())
+					};
+					self.move_cursor_to_character(target_index, is_shift);
+				}
+			}
+			TextInputKey::DocumentStart | TextInputKey::DocumentEnd => {
+				// 글 앞과 끝. (블링크 MoveToBeginningOfDocument, MoveToEndOfDocument)
+				if self.is_multiline || self.use_dom_input {
+					let target_index = if key == TextInputKey::DocumentStart {
+						0
+					}
+					else {
+						count_characters(self.edit_buffer.get_text())
+					};
+					self.move_cursor_to_character(target_index, is_shift);
+				}
 			}
 			TextInputKey::Enter => {
-				self.fire_submit_event(context);
+				if self.is_multiline {
+					// 줄 넣기. (블링크 InsertNewline, 글자 넣기 묶음에 붙는다)
+					self.replace_selection_with_edit(context, "\n", TextEditKind::InsertText);
+				}
+				else {
+					self.fire_submit_event(context);
+				}
 			}
 			TextInputKey::Tab => {
 			}
@@ -1590,7 +1794,13 @@ impl UIInputField {
 			Rect::create(minimum_position.x, minimum_position.y, maximum_position.x - minimum_position.x, maximum_position.y - minimum_position.y)
 		};
 		let field_rect = convert_local_rect(Rect::create(0.0, 0.0, content_size.x, content_size.y));
-		let caret_rect = convert_local_rect(Rect::create(self.caret_local_x, 0.0, 1.0, content_size.y));
+		let caret_height = if self.caret_local_height > 0.0 {
+			self.caret_local_height
+		}
+		else {
+			content_size.y
+		};
+		let caret_rect = convert_local_rect(Rect::create(self.caret_local_x, self.caret_local_top, 1.0, caret_height));
 		TextInputFieldState {
 			field_id: self.field_id,
 			focus_serial: self.focus_serial,
@@ -1607,6 +1817,7 @@ impl UIInputField {
 			cursor_index: self.edit_buffer.get_cursor_index(),
 			max_length: self.edit_buffer.get_max_length(),
 			value_revision: self.value_revision,
+			is_multiline: self.is_multiline,
 		}
 	}
 
@@ -1654,6 +1865,305 @@ impl UIInputField {
 impl Default for UIInputField {
 	fn default() -> UIInputField {
 		UIInputField::new()
+	}
+}
+
+//==============================================================================
+// 여러 줄 필드와 넣는 글 다듬기. (반사에 넣지 않는 안쪽 함수)
+//==============================================================================
+impl UIInputField {
+	//==============================================================================
+	// 넣는 글 다듬기. (블링크: textarea 는 CR 과 CRLF 를 LF 로, 한 줄 DOM 입력 칸은 끝 줄바꿈을 지우고 가운데 줄바꿈을 공백으로. 원본 캔버스 모드는 그대로)
+	//==============================================================================
+	fn sanitize_inserted_text(&self, text: &str) -> String {
+		if self.is_multiline {
+			return text.replace("\r\n", "\n").replace('\r', "\n");
+		}
+		if self.use_dom_input && !self.is_dom_synchronized() && text.contains(['\r', '\n']) {
+			let trimmed_text = text.trim_end_matches(['\r', '\n']);
+			return trimmed_text.replace("\r\n", " ").replace(['\r', '\n'], " ");
+		}
+		text.to_string()
+	}
+
+	//==============================================================================
+	// 커서가 보이게 스크롤하기를 부탁. (여러 줄 필드, 다음 배치에서 한다. Always 가 IfNeeded 보다 앞선다)
+	//==============================================================================
+	fn request_caret_reveal(&mut self, reveal_kind: CaretRevealKind) {
+		if !self.is_multiline {
+			return;
+		}
+		if self.caret_reveal_request != Some(CaretRevealKind::Always) {
+			self.caret_reveal_request = Some(reveal_kind);
+		}
+	}
+
+	//==============================================================================
+	// 보이는 글의 커서 자리. (조합 중이면 조합 글 뒤)
+	//==============================================================================
+	fn get_display_cursor_index(&self) -> usize {
+		self.edit_buffer.get_cursor_index() + count_characters(self.edit_buffer.get_composition())
+	}
+
+	//==============================================================================
+	// 여러 줄 배치 맞추기. (보인 글, 폰트, 폭, 줄 높이, 탭 크기가 바뀌었을 때만 다시 짓는다)
+	//==============================================================================
+	fn ensure_text_area_layout(&mut self, content_width: f32, measure_width: &dyn Fn(&str) -> f32) {
+		let display_text = self.edit_buffer.build_display_text();
+		let font_string = self.build_font_string();
+		let wrap_width = (content_width - self.padding * 2.0).max(0.0);
+		let layout_key = (display_text, font_string, wrap_width, self.get_line_height(), self.tab_size);
+		if self.text_area_layout_key.as_ref() == Some(&layout_key) {
+			return;
+		}
+		let tab_width = measure_width(" ") * self.tab_size;
+		self.text_area_layout = build_text_area_layout(&layout_key.0, wrap_width, layout_key.3, tab_width, measure_width);
+		self.text_area_layout_key = Some(layout_key);
+	}
+
+	//==============================================================================
+	// Graphic 없이 여러 줄 배치 맞추기. (tick 의 위아래 이동과 누른 자리, 그릴 때와 같은 글자 캐시로 잰다)
+	//==============================================================================
+	fn ensure_text_area_layout_without_graphic(&mut self, content_width: f32) {
+		let font_string = self.build_font_string();
+		let font_size = self.font_size;
+		let measure_width = move |measured_text: &str| -> f32 {
+			match crate::core::textstringtexturecache::measure_text_without_graphic(&font_string, measured_text) {
+				Some(text_metrics) => {
+					text_metrics.width
+				}
+				None => {
+					measured_text.chars().count() as f32 * font_size * 0.55
+				}
+			}
+		};
+		self.ensure_text_area_layout(content_width, &measure_width);
+	}
+
+	//==============================================================================
+	// 스크롤할 수 있는 끝. (글 높이 + 위아래 안쪽 여백 - 노드 높이)
+	//==============================================================================
+	fn get_maximum_scroll_top(&self, content_height: f32) -> f32 {
+		(self.text_area_layout.get_content_height() + self.padding * 2.0 - content_height).max(0.0)
+	}
+
+	//==============================================================================
+	// 커서가 보이게 스크롤. (블링크 RevealSelection: 맥이 아니면 IfNeeded 는 가장자리, Always 는 맨 위. 맥은 가운데)
+	//==============================================================================
+	fn apply_caret_reveal(&mut self, content_height: f32) {
+		let reveal_kind = match self.caret_reveal_request.take() {
+			Some(reveal_kind) => {
+				reveal_kind
+			}
+			None => {
+				return;
+			}
+		};
+		let (_, line_top) = self.text_area_layout.get_caret_position(self.get_display_cursor_index(), self.is_caret_upstream);
+		let caret_top = self.padding + line_top;
+		let caret_bottom = caret_top + self.text_area_layout.line_height;
+		let is_visible = caret_top >= self.scroll_top && caret_bottom <= self.scroll_top + content_height;
+		let is_center_align = cfg!(target_os = "macos");
+		match (reveal_kind, is_center_align) {
+			(CaretRevealKind::Always, false) => {
+				self.scroll_top = caret_top;
+			}
+			(CaretRevealKind::Always, true) => {
+				self.scroll_top = (caret_top + caret_bottom - content_height) * 0.5;
+			}
+			(CaretRevealKind::IfNeeded, true) => {
+				if !is_visible {
+					self.scroll_top = (caret_top + caret_bottom - content_height) * 0.5;
+				}
+			}
+			(CaretRevealKind::IfNeeded, false) => {
+				if caret_top < self.scroll_top {
+					self.scroll_top = caret_top;
+				}
+				else if caret_bottom > self.scroll_top + content_height {
+					self.scroll_top = caret_bottom - content_height;
+				}
+			}
+		}
+		self.scroll_top = self.scroll_top.clamp(0.0, self.get_maximum_scroll_top(content_height));
+	}
+
+	//==============================================================================
+	// 위아래로 커서 옮기기. (블링크 MoveUp, MoveDown, MovePageUp, MovePageDown)
+	// - 가로 자리는 첫 위아래 이동 때의 커서 x 를 지킨다. 첫 줄 위는 글 앞, 마지막 줄 아래는 글 끝.
+	// - page: 거리는 보이는 높이의 87.5% (맥은 높이 - 40 과 견줘 큰 쪽, cc ScrollUtils::CalculatePageStep), 그 안의 가장 먼 줄로 옮기고 그 줄을 맨 위로 스크롤한다.
+	//==============================================================================
+	fn move_caret_vertically(&mut self, context: &mut ComponentContext, key: TextInputKey, is_shift: bool) {
+		let content_size = context.get_transform().get_content_size();
+		self.ensure_text_area_layout_without_graphic(content_size.x);
+		let cursor_index = self.edit_buffer.get_cursor_index();
+		let (caret_x, _) = self.text_area_layout.get_caret_position(cursor_index, self.is_caret_upstream);
+		let preferred_x = self.preferred_caret_x.unwrap_or(caret_x);
+		let (target_index, is_upstream, reveal_kind) = match key {
+			TextInputKey::Up | TextInputKey::Down => {
+				let line_delta = if key == TextInputKey::Up {
+					-1
+				}
+				else {
+					1
+				};
+				let (target_index, is_upstream) = self.text_area_layout.move_vertically(cursor_index, self.is_caret_upstream, preferred_x, line_delta);
+				(target_index, is_upstream, CaretRevealKind::IfNeeded)
+			}
+			_ => {
+				let page_step = calculate_page_step(content_size.y);
+				let line_height = self.text_area_layout.line_height.max(1.0);
+				let line_count = ((page_step / line_height).floor() as isize).max(1);
+				let line_index = self.text_area_layout.find_line_index(cursor_index, self.is_caret_upstream) as isize;
+				let last_line_index = self.text_area_layout.line_list.len().saturating_sub(1) as isize;
+				let target_line = if key == TextInputKey::PageUp {
+					(line_index - line_count).max(0)
+				}
+				else {
+					(line_index + line_count).min(last_line_index)
+				};
+				let (target_index, is_upstream) = self.text_area_layout.find_character_index_in_line(target_line as usize, preferred_x);
+				(target_index, is_upstream, CaretRevealKind::Always)
+			}
+		};
+		self.move_cursor_to_character(target_index, is_shift);
+		self.is_caret_upstream = is_upstream;
+		self.preferred_caret_x = Some(preferred_x);
+		self.request_caret_reveal(reveal_kind);
+	}
+
+	//==============================================================================
+	// 여러 줄 필드의 누른 자리 → (문자 자리, 위쪽 친화). (노드 좌표)
+	//==============================================================================
+	fn find_text_area_index_at(&mut self, context: &ComponentContext, view_input_position: Vector2) -> (usize, bool) {
+		let content_size = context.get_transform().get_content_size();
+		self.ensure_text_area_layout_without_graphic(content_size.x);
+		let local_position = context.get_node_tree().convert_view_position_to_node_position(context.get_node_id(), view_input_position).unwrap_or(Vector2::zero());
+		self.text_area_layout.find_character_index_at(local_position.x - self.padding, local_position.y - self.padding + self.scroll_top)
+	}
+
+	//==============================================================================
+	// 여러 줄 필드의 스크롤 막대 썸 자리. (노드 좌표, 넘치지 않으면 None)
+	//==============================================================================
+	fn calculate_text_area_thumb_rect(&self, content_size: Vector2) -> Option<Rect> {
+		let scroll_height = self.text_area_layout.get_content_height() + self.padding * 2.0;
+		if scroll_height <= content_size.y + 0.5 || content_size.y <= 0.0 {
+			return None;
+		}
+		let thumb_length = (content_size.y * content_size.y / scroll_height).max(TEXT_AREA_SCROLLBAR_MINIMUM_THUMB_LENGTH).min(content_size.y);
+		let maximum_scroll_top = scroll_height - content_size.y;
+		let thumb_top = (content_size.y - thumb_length) * (self.scroll_top / maximum_scroll_top).clamp(0.0, 1.0);
+		Some(Rect::create(content_size.x - TEXT_AREA_SCROLLBAR_THICKNESS, thumb_top, TEXT_AREA_SCROLLBAR_THICKNESS, thumb_length))
+	}
+
+	//==============================================================================
+	// 여러 줄 그리기. (선택 → 글 → 조합 밑줄 → 커서, 안쪽만 그리게 자른다. 넘치면 썸)
+	//==============================================================================
+	fn draw_multiline(&mut self, content_size: Vector2, graphic: &mut Graphic) {
+		let font_string = self.build_font_string();
+		graphic.push_state();
+		graphic.set_font_string(&font_string);
+		{
+			let graphic_reference: &Graphic = graphic;
+			self.ensure_text_area_layout(content_size.x, &|measured_text: &str| graphic_reference.measure_text(measured_text).width);
+		}
+		self.apply_caret_reveal(content_size.y);
+		self.scroll_top = self.scroll_top.clamp(0.0, self.get_maximum_scroll_top(content_size.y));
+		let padding = self.padding;
+		let origin_y = padding - self.scroll_top;
+		let line_height = self.text_area_layout.line_height;
+		graphic.begin_clip_rect(Rect::create(0.0, 0.0, content_size.x, content_size.y), self.background_paint.get_round_size());
+
+		// 선택. (조합 중엔 그리지 않는다)
+		if self.edit_buffer.get_composition().is_empty() {
+			if let Some((start_index, end_index)) = self.edit_buffer.get_selection_range() {
+				graphic.set_fill_color(self.selection_color);
+				for selection_rect in self.text_area_layout.build_selection_rect_list(start_index, end_index) {
+					graphic.draw_rect(Rect::create(padding + selection_rect.position.x, origin_y + selection_rect.position.y, selection_rect.size.x, selection_rect.size.y));
+				}
+			}
+		}
+
+		// 글. (값이나 조합 글이 있으면 줄마다, 없으면 첫 줄에 안내 글. 탭은 탭 자리에서 이어 그린다)
+		let has_value = !self.edit_buffer.get_text().is_empty() || !self.edit_buffer.get_composition().is_empty();
+		graphic.set_text_align(TextAlign::Left);
+		graphic.set_text_baseline(TextBaseline::Middle);
+		if has_value {
+			let display_text = self.text_area_layout_key.as_ref().map(|layout_key| layout_key.0.clone()).unwrap_or_default();
+			graphic.set_fill_color(self.value_text.get_text_color());
+			let character_byte_list: Vec<usize> = display_text.char_indices().map(|(byte_index, _)| byte_index).chain(std::iter::once(display_text.len())).collect();
+			for line in self.text_area_layout.line_list.iter() {
+				let line_y = origin_y + line.top + line_height * 0.5;
+				if line_y + line_height < 0.0 || line_y - line_height > content_size.y {
+					continue;
+				}
+				let line_text = &display_text[character_byte_list[line.start]..character_byte_list[line.end]];
+				let mut piece_character_offset = 0;
+				for piece in line_text.split('\t') {
+					if !piece.is_empty() {
+						let piece_x = line.offsets.get(piece_character_offset).copied().unwrap_or(0.0);
+						graphic.draw_fill_text(piece, padding + piece_x, line_y);
+					}
+					piece_character_offset += piece.chars().count() + 1;
+				}
+			}
+		}
+		else if !self.placeholder.is_empty() {
+			graphic.set_fill_color(self.placeholder_text.get_text_color());
+			graphic.draw_fill_text(&self.placeholder, padding, origin_y + line_height * 0.5);
+		}
+
+		// 조합 밑줄. (조합 글이 걸친 줄마다)
+		let composition_count = count_characters(self.edit_buffer.get_composition());
+		if composition_count > 0 {
+			let composition_start = self.edit_buffer.get_cursor_index();
+			let composition_end = composition_start + composition_count;
+			graphic.set_stroke_color(self.composition_underline_color);
+			for (line_index, line) in self.text_area_layout.line_list.iter().enumerate() {
+				let segment_start = composition_start.max(line.start);
+				let segment_end = composition_end.min(line.end);
+				if segment_start >= segment_end {
+					continue;
+				}
+				let underline_y = origin_y + line.top + line_height * 0.5 + self.font_size * 0.55;
+				let start_x = padding + self.text_area_layout.get_x_in_line(line_index, segment_start);
+				let end_x = padding + self.text_area_layout.get_x_in_line(line_index, segment_end);
+				graphic.draw_line(&[Vector2::create(start_x, underline_y), Vector2::create(end_x, underline_y)], 2.0);
+			}
+		}
+
+		// 커서.
+		let (caret_x, caret_line_top) = self.text_area_layout.get_caret_position(self.get_display_cursor_index(), self.is_caret_upstream && composition_count == 0);
+		self.caret_local_x = padding + caret_x;
+		self.caret_local_top = origin_y + caret_line_top;
+		self.caret_local_height = line_height;
+		if self.is_focused && self.is_cursor_visible {
+			let caret_center_y = self.caret_local_top + line_height * 0.5;
+			let half_height = self.font_size * 0.6;
+			graphic.set_stroke_color(self.cursor_color);
+			graphic.draw_line(&[Vector2::create(self.caret_local_x, caret_center_y - half_height), Vector2::create(self.caret_local_x, caret_center_y + half_height)], 2.0);
+		}
+		graphic.end_clip_rect();
+
+		// 썸.
+		if let Some(thumb_rect) = self.calculate_text_area_thumb_rect(content_size) {
+			graphic.set_fill_color(Color::create(121.0 / 255.0, 121.0 / 255.0, 121.0 / 255.0, 0.4));
+			graphic.draw_rect(thumb_rect);
+		}
+		graphic.pop_state();
+	}
+}
+
+//==============================================================================
+// page 이동 거리. (블링크 move_commands.cc 와 cc ScrollUtils::CalculatePageStep: 높이의 87.5% 와 높이 - 겹침 상한 가운데 큰 쪽, 겹침 상한은 맥 40, 그 밖은 없음)
+//==============================================================================
+fn calculate_page_step(visible_height: f32) -> f32 {
+	let page_step = visible_height * 0.875;
+	if cfg!(target_os = "macos") {
+		page_step.max(visible_height - 40.0)
+	}
+	else {
+		page_step
 	}
 }
 
@@ -1723,6 +2233,13 @@ impl Component for UIInputField {
 			self.handle_text_input_event(context, event_kind);
 		}
 
+		// 여러 줄: 커서가 보이게 스크롤. (그리기 전에도 스크롤 자리가 맞게 tick 에서 한다)
+		if self.is_multiline && self.caret_reveal_request.is_some() {
+			let content_size = context.get_transform().get_content_size();
+			self.ensure_text_area_layout_without_graphic(content_size.x);
+			self.apply_caret_reveal(content_size.y);
+		}
+
 		// 커서 깜빡임.
 		if self.is_focused {
 			self.blink_timer += time_delta;
@@ -1755,6 +2272,27 @@ impl Component for UIInputField {
 		}
 		self.focus();
 		self.hide_context_menu(context);
+		self.preferred_caret_x = None;
+		self.scrollbar_drag_start = None;
+		if self.is_multiline {
+			// 썸을 누르면 끌어 스크롤한다. (선택은 그대로)
+			let content_size = context.get_transform().get_content_size();
+			if let Some(thumb_rect) = self.calculate_text_area_thumb_rect(content_size) {
+				let local_position = context.get_node_tree().convert_view_position_to_node_position(context.get_node_id(), view_input_position).unwrap_or(Vector2::zero());
+				let is_on_thumb = local_position.x >= thumb_rect.position.x && local_position.y >= thumb_rect.position.y && local_position.y <= thumb_rect.position.y + thumb_rect.size.y;
+				if is_on_thumb {
+					self.scrollbar_drag_start = Some((local_position.y, self.scroll_top));
+					return;
+				}
+			}
+			let (character_index, is_upstream) = self.find_text_area_index_at(context, view_input_position);
+			self.drag_start_index = Some(character_index);
+			self.edit_buffer.set_selection(character_index, character_index);
+			self.is_caret_upstream = is_upstream;
+			self.bump_value_revision();
+			self.reset_cursor_blink();
+			return;
+		}
 		let local_x = self.convert_view_position_to_local_x(context, view_input_position);
 		let character_index = self.measure_character_index_at_local_x(local_x);
 		self.drag_start_index = Some(character_index);
@@ -1764,6 +2302,17 @@ impl Component for UIInputField {
 	}
 
 	fn touch_move(&mut self, context: &mut ComponentContext, view_input_position: Vector2) {
+		if let Some((start_y, start_scroll_top)) = self.scrollbar_drag_start {
+			// 썸을 옮긴 만큼을 글 높이의 비로 넘긴다.
+			let content_size = context.get_transform().get_content_size();
+			let local_position = context.get_node_tree().convert_view_position_to_node_position(context.get_node_id(), view_input_position).unwrap_or(Vector2::zero());
+			let scroll_height = self.text_area_layout.get_content_height() + self.padding * 2.0;
+			let thumb_length = (content_size.y * content_size.y / scroll_height.max(1.0)).max(TEXT_AREA_SCROLLBAR_MINIMUM_THUMB_LENGTH).min(content_size.y);
+			let track_room = (content_size.y - thumb_length).max(1.0);
+			let maximum_scroll_top = self.get_maximum_scroll_top(content_size.y);
+			self.scroll_top = (start_scroll_top + (local_position.y - start_y) / track_room * maximum_scroll_top).clamp(0.0, maximum_scroll_top);
+			return;
+		}
 		let drag_start_index = match self.drag_start_index {
 			Some(drag_start_index) => {
 				drag_start_index
@@ -1772,6 +2321,16 @@ impl Component for UIInputField {
 				return;
 			}
 		};
+		if self.is_multiline {
+			// 끄는 끝이 보이게 스크롤한다. (크롬의 끌기 자동 스크롤 자리)
+			let (character_index, is_upstream) = self.find_text_area_index_at(context, view_input_position);
+			self.edit_buffer.set_selection(drag_start_index, character_index);
+			self.is_caret_upstream = is_upstream;
+			self.request_caret_reveal(CaretRevealKind::IfNeeded);
+			self.bump_value_revision();
+			self.reset_cursor_blink();
+			return;
+		}
 		let local_x = self.convert_view_position_to_local_x(context, view_input_position);
 		let character_index = self.measure_character_index_at_local_x(local_x);
 		self.edit_buffer.set_selection(drag_start_index, character_index);
@@ -1781,10 +2340,31 @@ impl Component for UIInputField {
 
 	fn touch_release(&mut self, _context: &mut ComponentContext, _view_input_position: Vector2) {
 		self.drag_start_index = None;
+		self.scrollbar_drag_start = None;
 	}
 
 	fn touch_cancel(&mut self, _context: &mut ComponentContext, _view_input_position: Vector2) {
 		self.drag_start_index = None;
+		self.scrollbar_drag_start = None;
+	}
+
+	#[reflect(skip)]
+	fn is_wheel_receiver(&self) -> bool {
+		self.is_multiline
+	}
+
+	//==============================================================================
+	// 휠. (여러 줄 필드: 더 넘길 수 있을 때만 받고, 끝이면 부모에게 넘긴다. 원본 textarea 스크롤 상자)
+	//==============================================================================
+	fn wheel(&mut self, context: &mut ComponentContext, wheel_delta: Vector2) -> bool {
+		if !self.is_multiline {
+			return false;
+		}
+		let content_size = context.get_transform().get_content_size();
+		self.ensure_text_area_layout_without_graphic(content_size.x);
+		let previous_scroll_top = self.scroll_top;
+		self.scroll_top = (self.scroll_top + wheel_delta.y).clamp(0.0, self.get_maximum_scroll_top(content_size.y));
+		self.scroll_top != previous_scroll_top
 	}
 
 	fn draw(&mut self, transform: &NodeTransform, graphic: &mut Graphic) {
@@ -1794,6 +2374,19 @@ impl Component for UIInputField {
 		if content_size.x <= 0.0 || content_size.y <= 0.0 {
 			return;
 		}
+		if self.is_multiline {
+			self.draw_multiline(content_size, graphic);
+			if self.is_focused && self.focus_border_width > 0.0 {
+				let border_width = self.focus_border_width;
+				let inset = border_width * 0.5;
+				let round_size = (self.background_paint.get_round_size() - inset).max(0.0);
+				graphic.set_stroke_color(self.focus_border_color);
+				graphic.draw_stroke_round_rect(Rect::create(inset, inset, content_size.x - border_width, content_size.y - border_width), round_size, border_width);
+			}
+			return;
+		}
+		self.caret_local_top = 0.0;
+		self.caret_local_height = content_size.y;
 		let font_string = self.build_font_string();
 		let draw_y = content_size.y * 0.5;
 		let padding = self.padding;
@@ -2593,5 +3186,132 @@ mod tests {
 		engine.get_input_manager_mut().set_touch_pressed(false);
 		assert!(!node_tree.contains(menu_id));
 		assert!(!get_field(&mut node_tree, field_id).is_focused());
+	}
+
+	//==============================================================================
+	// 여러 줄: Enter 는 줄을 넣고(제출 아님), 위아래는 가로 자리를 지키며 첫 줄 위는 글 앞, Home 과 End 는 줄 앞과 끝, 붙여넣기의 CRLF 는 LF, 넘치면 휠과 커서 따라 스크롤.
+	//==============================================================================
+	#[test]
+	fn multiline_field_edits_like_textarea() {
+		let mut engine = Engine::new(EngineConfiguration::new());
+		let (mut node_tree, field_id) = create_field_tree();
+		let submit_count = Rc::new(Cell::new(0));
+		{
+			let field = get_field(&mut node_tree, field_id);
+			field.set_multiline(true);
+			field.set_font_size(14.0);
+			field.set_padding(4.0);
+			let submit_count_for_event = submit_count.clone();
+			field.set_on_submit(Box::new(move |_field: &mut UIInputField, _context: &mut ComponentContext| {
+				submit_count_for_event.set(submit_count_for_event.get() + 1);
+			}));
+		}
+		node_tree.dispatch_touch(field_id, &engine, TouchKind::Press, Vector2::create(150.0, 120.0));
+		node_tree.dispatch_touch(field_id, &engine, TouchKind::Release, Vector2::create(150.0, 120.0));
+		push_event(&mut engine, TextInputEventKind::Commit(String::from("abc")));
+		push_event(&mut engine, key_event(TextInputKey::Enter, false));
+		push_event(&mut engine, TextInputEventKind::Commit(String::from("d")));
+		push_event(&mut engine, key_event(TextInputKey::Enter, false));
+		push_event(&mut engine, TextInputEventKind::Commit(String::from("fghij")));
+		run_frame(&mut node_tree, &mut engine);
+		assert_eq!(get_field(&mut node_tree, field_id).get_text(), "abc\nd\nfghij");
+		assert_eq!(submit_count.get(), 0);
+		// Enter 는 글자 넣기 묶음에 붙어 한 번에 되돌린다.
+		assert!(get_field(&mut node_tree, field_id).can_undo());
+
+		// 끝(셋째 줄 다섯 글자 뒤)에서 위로: 둘째 줄은 짧아 그 끝, 다시 위로: 가로 자리를 지켜 첫째 줄 끝, 아래로 둘: 셋째 줄 다섯 글자 뒤.
+		let cursor_after = |node_tree: &mut NodeTree, engine: &mut Engine, key: TextInputKey| -> usize {
+			push_event(engine, key_event(key, false));
+			run_frame(node_tree, engine);
+			get_field(node_tree, field_id).get_cursor_index()
+		};
+		assert_eq!(cursor_after(&mut node_tree, &mut engine, TextInputKey::Up), 5);
+		assert_eq!(cursor_after(&mut node_tree, &mut engine, TextInputKey::Up), 3);
+		assert_eq!(cursor_after(&mut node_tree, &mut engine, TextInputKey::Down), 5);
+		assert_eq!(cursor_after(&mut node_tree, &mut engine, TextInputKey::Down), 11);
+		// 첫 줄 위는 글 앞, 마지막 줄 아래는 글 끝.
+		assert_eq!(cursor_after(&mut node_tree, &mut engine, TextInputKey::Up), 5);
+		assert_eq!(cursor_after(&mut node_tree, &mut engine, TextInputKey::Up), 3);
+		assert_eq!(cursor_after(&mut node_tree, &mut engine, TextInputKey::Up), 0);
+		assert_eq!(cursor_after(&mut node_tree, &mut engine, TextInputKey::DocumentEnd), 11);
+		assert_eq!(cursor_after(&mut node_tree, &mut engine, TextInputKey::Down), 11);
+		assert_eq!(cursor_after(&mut node_tree, &mut engine, TextInputKey::Home), 6);
+		assert_eq!(cursor_after(&mut node_tree, &mut engine, TextInputKey::End), 11);
+		assert_eq!(cursor_after(&mut node_tree, &mut engine, TextInputKey::DocumentStart), 0);
+
+		// 붙여넣기의 CR, CRLF 는 LF.
+		push_event(&mut engine, TextInputEventKind::Paste(String::from("x\r\ny\rz")));
+		run_frame(&mut node_tree, &mut engine);
+		assert_eq!(get_field(&mut node_tree, field_id).get_text(), "x\ny\nzabc\nd\nfghij");
+
+		// 줄이 높이를 넘치면 휠로 넘기고, 끝이면 부모에게 넘긴다. 글 끝으로 가면 커서가 보이게 스크롤한다.
+		let field_center = Vector2::create(250.0, 130.0);
+		assert_eq!(node_tree.find_wheel_target_node(field_center), Some(field_id));
+		assert!(node_tree.dispatch_wheel_at(field_center, &engine, Vector2::create(0.0, 20.0)));
+		assert!(get_field(&mut node_tree, field_id).get_scroll_top() > 0.0);
+		assert!(node_tree.dispatch_wheel_at(field_center, &engine, Vector2::create(0.0, -1000.0)));
+		assert_eq!(get_field(&mut node_tree, field_id).get_scroll_top(), 0.0);
+		assert!(!node_tree.dispatch_wheel_at(field_center, &engine, Vector2::create(0.0, -10.0)));
+		push_event(&mut engine, key_event(TextInputKey::DocumentEnd, false));
+		run_frame(&mut node_tree, &mut engine);
+		let field = get_field(&mut node_tree, field_id);
+		let line_height = field.get_line_height();
+		let maximum_scroll_top = (line_height * 5.0 + 8.0 - 60.0).max(0.0);
+		assert!((field.get_scroll_top() - maximum_scroll_top).abs() < 0.01);
+	}
+
+	//==============================================================================
+	// 여러 줄: 폭을 넘는 글은 줄로 나뉘고, Home 과 End 는 보이는 줄의 앞과 끝, 폭으로 나뉜 자리의 End 는 그 줄 끝에 남는다.
+	//==============================================================================
+	#[test]
+	fn multiline_field_wraps_visual_lines() {
+		let mut engine = Engine::new(EngineConfiguration::new());
+		let (mut node_tree, field_id) = create_field_tree();
+		{
+			let field = get_field(&mut node_tree, field_id);
+			field.set_multiline(true);
+			field.set_font_size(14.0);
+			field.set_padding(4.0);
+		}
+		node_tree.dispatch_touch(field_id, &engine, TouchKind::Press, Vector2::create(150.0, 120.0));
+		node_tree.dispatch_touch(field_id, &engine, TouchKind::Release, Vector2::create(150.0, 120.0));
+		let long_text = "lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor";
+		push_event(&mut engine, TextInputEventKind::Commit(String::from(long_text)));
+		push_event(&mut engine, key_event(TextInputKey::DocumentStart, false));
+		push_event(&mut engine, key_event(TextInputKey::End, false));
+		run_frame(&mut node_tree, &mut engine);
+		let field = get_field(&mut node_tree, field_id);
+		let line_list = field.text_area_layout.line_list.clone();
+		assert!(line_list.len() >= 2);
+		// 첫 줄은 공백 뒤에서 나뉘고, End 는 그 줄 끝(다음 줄 앞과 같은 자리)에 위쪽 친화로 남는다.
+		assert_eq!(long_text.chars().nth(line_list[0].end - 1), Some(' '));
+		assert_eq!(field.get_cursor_index(), line_list[0].end);
+		assert!(field.is_caret_upstream);
+		// Home 은 그 줄 앞(0), 오른쪽은 다음 줄 앞으로 친화를 푼다.
+		push_event(&mut engine, key_event(TextInputKey::Home, false));
+		run_frame(&mut node_tree, &mut engine);
+		assert_eq!(get_field(&mut node_tree, field_id).get_cursor_index(), 0);
+		push_event(&mut engine, key_event(TextInputKey::Down, false));
+		run_frame(&mut node_tree, &mut engine);
+		assert_eq!(get_field(&mut node_tree, field_id).get_cursor_index(), line_list[1].start);
+	}
+
+	//==============================================================================
+	// 한 줄 DOM 입력 칸의 넣는 글: 끝 줄바꿈은 지우고 가운데 줄바꿈은 공백. (블링크 TextFieldInputType) 위아래는 글 앞과 끝.
+	//==============================================================================
+	#[test]
+	fn single_line_dom_field_sanitizes_line_breaks() {
+		let mut engine = Engine::new(EngineConfiguration::new());
+		let (mut node_tree, field_id) = create_field_tree();
+		node_tree.dispatch_touch(field_id, &engine, TouchKind::Press, Vector2::create(150.0, 120.0));
+		node_tree.dispatch_touch(field_id, &engine, TouchKind::Release, Vector2::create(150.0, 120.0));
+		push_event(&mut engine, TextInputEventKind::Paste(String::from("a\r\nb\nc\n\r\n")));
+		push_event(&mut engine, key_event(TextInputKey::Up, false));
+		run_frame(&mut node_tree, &mut engine);
+		assert_eq!(get_field(&mut node_tree, field_id).get_text(), "a b c");
+		assert_eq!(get_field(&mut node_tree, field_id).get_cursor_index(), 0);
+		push_event(&mut engine, key_event(TextInputKey::Down, false));
+		run_frame(&mut node_tree, &mut engine);
+		assert_eq!(get_field(&mut node_tree, field_id).get_cursor_index(), 5);
 	}
 }

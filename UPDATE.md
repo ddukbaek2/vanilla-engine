@@ -501,6 +501,8 @@
 - 브라우저가 해 주던 것 2차 (남은 차이 가운데 방법이 있는 것)
   - LocalStorage: 짝 없는 서로게이트로만 다른 두 키(원본에서 다른 키)를 따로 든다. 전에는 러스트 쪽에서 한 키가 되어, 데스크탑은 원본이 저장한 그런 두 키 가운데 하나를 읽을 때 잃고 다음 쓰기에 파일에서도 지웠다. 키도 원래 단위로 부르는 get_keys_code_units, get_item_by_key_code_units, set_item_by_key_code_units, remove_item_by_key_code_units, contains_key_code_units 를 더했다. 러스트 글 키는 그 글 그대로의 키가 있으면 그것, 없으면 그 글로 보이는 짝 없는 서로게이트 키의 첫째를 가리킨다. get_keys 는 보인 글이 같은 키를 한 번만 낸다
   - PaneStyle(데스크탑): 원본 도구가 쓰는 CSS 를 읽는다. flex 배치(flex-direction column, flex, flex-grow, flex-shrink, flex-basis 를 CSS Flexbox 의 길이 셈대로, justify-content 의 space-between 같은 것, align-items 기본 stretch), min, max 크기, right 와 bottom, 쪽마다 안쪽과 바깥 여백과 테두리, line-height, text-align, overflow(넘친 자식 자르기, auto 와 scroll 은 휠과 썸 끌기로 넘기고 끝에 닿으면 휠을 부모에게 넘긴다, scrollbar-color). auto 크기 요소는 자식의 크기를 더해 잰다. PaneElement::get_scroll_offset, set_scroll_offset
+  - UIInputField::set_multiline: 크롬 textarea 같은 여러 줄 입력. 줄바꿈 문자와 폭으로 나누고(pre-wrap, break-word, 데스크탑은 ICU4X 유니코드 줄 나누기), Enter 는 줄 넣기, 위아래(가로 자리 지키기), Home 과 End(보이는 줄), Ctrl + Home, End(맥은 Cmd + 위, 아래), PageUp, PageDown(블링크의 87.5% 거리), 탭 자리, 선택과 끌기, 조합 밑줄, 휠과 썸 끌기 스크롤, 커서 따라 스크롤. set_line_height, set_tab_size, get_scroll_top, set_scroll_top. 웹 DOM 입력은 숨긴 <textarea>. 데스크탑 PaneStyle 의 textarea 가 이 필드로 글을 받는다
+  - TextInputKey: Up, Down, PageUp, PageDown, DocumentStart, DocumentEnd. TextInputFieldState.is_multiline. 데스크탑 한 줄 DOM 입력 필드는 블링크처럼 위아래를 글 앞과 끝으로 옮기고, 넣는 글의 줄바꿈을 공백으로 바꾼다(끝 줄바꿈은 지운다). 맥 Cmd + 왼쪽, 오른쪽은 줄 앞과 끝
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.

@@ -493,7 +493,7 @@ mod desktop_dialog {
 				TextInputKey::Redo => {
 					self.edit_buffer.redo();
 				}
-				TextInputKey::Enter | TextInputKey::Tab => {
+				TextInputKey::Enter | TextInputKey::Tab | TextInputKey::Up | TextInputKey::Down | TextInputKey::PageUp | TextInputKey::PageDown | TextInputKey::DocumentStart | TextInputKey::DocumentEnd => {
 				}
 			}
 			self.bump_value_revision();
@@ -750,6 +750,7 @@ mod desktop_dialog {
 						cursor_index: dialog.edit_buffer.get_cursor_index(),
 						max_length: DEFAULT_PROMPT_MAXIMUM_LENGTH,
 						value_revision: dialog.value_revision,
+						is_multiline: false,
 					});
 				}
 				engine.put_back_front_modal_dialog(dialog);

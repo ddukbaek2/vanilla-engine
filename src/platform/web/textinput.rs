@@ -31,6 +31,8 @@ const GLOBAL_STYLE_ID: &str = "uiinputfield-hidden-style";
 // 숨긴 <input> 의 선택, 안내 글, 자동 완성 색을 지우는 스타일. (원본 ensure_global_hidden_input_style)
 const GLOBAL_STYLE_TEXT: &str = "
 input.uiinputfield-hidden::selection { background: transparent; color: transparent; }
+textarea.uiinputfield-hidden::selection { background: transparent; color: transparent; }
+textarea.uiinputfield-hidden { resize: none; overflow: hidden; }
 input.uiinputfield-hidden::-moz-selection { background: transparent; color: transparent; }
 input.uiinputfield-hidden::placeholder { color: transparent; }
 input.uiinputfield-hidden::-webkit-input-placeholder { color: transparent; }
@@ -89,7 +91,7 @@ type EventListener = Closure<dyn FnMut(web_sys::Event)>;
 //==============================================================================
 struct HiddenInputEntry {
 	field_id: u64,
-	input_element: web_sys::HtmlInputElement,
+	input_element: HiddenTextElement,
 	listener_list: Vec<(&'static str, EventListener)>,
 	applied_revision: Option<u64>,
 	applied_max_length: usize,
@@ -99,6 +101,118 @@ struct HiddenInputEntry {
 	is_composing: bool,
 	use_direct_touch: Rc<Cell<bool>>,
 	is_focused_without_activation: Rc<Cell<bool>>,
+	// 숨긴 것이 <textarea> 인지.
+	is_multiline: bool,
+}
+
+//==============================================================================
+// 숨긴 글 칸. (한 줄은 <input>, 여러 줄은 <textarea>. 둘이 다른 값과 선택 함수만 감싸고 나머지는 HtmlElement 로 쓴다)
+//==============================================================================
+#[derive(Clone)]
+enum HiddenTextElement {
+	Input(web_sys::HtmlInputElement),
+	TextArea(web_sys::HtmlTextAreaElement),
+}
+
+impl std::ops::Deref for HiddenTextElement {
+	type Target = web_sys::HtmlElement;
+
+	fn deref(&self) -> &web_sys::HtmlElement {
+		match self {
+			HiddenTextElement::Input(input_element) => {
+				input_element
+			}
+			HiddenTextElement::TextArea(text_area_element) => {
+				text_area_element
+			}
+		}
+	}
+}
+
+impl HiddenTextElement {
+	//==============================================================================
+	// 값.
+	//==============================================================================
+	fn value(&self) -> String {
+		match self {
+			HiddenTextElement::Input(input_element) => {
+				input_element.value()
+			}
+			HiddenTextElement::TextArea(text_area_element) => {
+				text_area_element.value()
+			}
+		}
+	}
+
+	//==============================================================================
+	// 값 넣기.
+	//==============================================================================
+	fn set_value(&self, value: &str) {
+		match self {
+			HiddenTextElement::Input(input_element) => {
+				input_element.set_value(value);
+			}
+			HiddenTextElement::TextArea(text_area_element) => {
+				text_area_element.set_value(value);
+			}
+		}
+	}
+
+	//==============================================================================
+	// 선택 앞. (UTF-16 자리)
+	//==============================================================================
+	fn selection_start(&self) -> Result<Option<u32>, JsValue> {
+		match self {
+			HiddenTextElement::Input(input_element) => {
+				input_element.selection_start()
+			}
+			HiddenTextElement::TextArea(text_area_element) => {
+				text_area_element.selection_start()
+			}
+		}
+	}
+
+	//==============================================================================
+	// 선택 뒤. (UTF-16 자리)
+	//==============================================================================
+	fn selection_end(&self) -> Result<Option<u32>, JsValue> {
+		match self {
+			HiddenTextElement::Input(input_element) => {
+				input_element.selection_end()
+			}
+			HiddenTextElement::TextArea(text_area_element) => {
+				text_area_element.selection_end()
+			}
+		}
+	}
+
+	//==============================================================================
+	// 선택 넣기. (UTF-16 자리)
+	//==============================================================================
+	fn set_selection_range(&self, start: u32, end: u32) -> Result<(), JsValue> {
+		match self {
+			HiddenTextElement::Input(input_element) => {
+				input_element.set_selection_range(start, end)
+			}
+			HiddenTextElement::TextArea(text_area_element) => {
+				text_area_element.set_selection_range(start, end)
+			}
+		}
+	}
+
+	//==============================================================================
+	// 최대 길이 넣기.
+	//==============================================================================
+	fn set_max_length(&self, max_length: i32) {
+		match self {
+			HiddenTextElement::Input(input_element) => {
+				input_element.set_max_length(max_length);
+			}
+			HiddenTextElement::TextArea(text_area_element) => {
+				text_area_element.set_max_length(max_length);
+			}
+		}
+	}
 }
 
 //==============================================================================
@@ -187,7 +301,7 @@ fn is_active_element(element: &web_sys::Element) -> bool {
 //==============================================================================
 // <input> 의 선택. (문자 자리, 앞 뒤)
 //==============================================================================
-fn read_input_selection(input_element: &web_sys::HtmlInputElement) -> Option<(usize, usize)> {
+fn read_input_selection(input_element: &HiddenTextElement) -> Option<(usize, usize)> {
 	let value = input_element.value();
 	let selection_start = input_element.selection_start().ok().flatten()?;
 	let selection_end = input_element.selection_end().ok().flatten()?;
@@ -197,7 +311,7 @@ fn read_input_selection(input_element: &web_sys::HtmlInputElement) -> Option<(us
 //==============================================================================
 // <input> 의 값 바뀜 이벤트 만들기. (원본 handleDOMInputEvent 에 넘기는 값과 커서)
 //==============================================================================
-fn build_replace_value_event(input_element: &web_sys::HtmlInputElement) -> TextInputEventKind {
+fn build_replace_value_event(input_element: &HiddenTextElement) -> TextInputEventKind {
 	let value = input_element.value();
 	let character_count = value.chars().count();
 	let (selection_start, selection_end) = read_input_selection(input_element).unwrap_or((character_count, character_count));
@@ -442,7 +556,7 @@ pub(super) fn begin_frame(engine: &mut Engine) {
 //==============================================================================
 pub(super) fn apply_frame(engine: &Engine) {
 	let field_state_list = engine.get_input_manager().get_text_input().get_published_field_states().to_vec();
-	let mut focus_action_list: Vec<(web_sys::HtmlInputElement, bool)> = Vec::new();
+	let mut focus_action_list: Vec<(HiddenTextElement, bool)> = Vec::new();
 	let mut removed_entry_list: Vec<HiddenInputEntry> = Vec::new();
 	WEB_TEXT_INPUT.with(|state_cell| {
 		let mut web_text_input_state = state_cell.borrow_mut();
@@ -458,7 +572,7 @@ pub(super) fn apply_frame(engine: &Engine) {
 		// 더는 올라오지 않는 필드의 <input> 은 뺀다.
 		let entry_list = std::mem::take(&mut web_text_input_state.entry_list);
 		for entry in entry_list {
-			let is_still_registered = field_state_list.iter().any(|field_state| field_state.field_id == entry.field_id && field_state.is_attached && field_state.use_dominput);
+			let is_still_registered = field_state_list.iter().any(|field_state| field_state.field_id == entry.field_id && field_state.is_attached && field_state.use_dominput && field_state.is_multiline == entry.is_multiline);
 			if is_still_registered {
 				web_text_input_state.entry_list.push(entry);
 			}
@@ -521,7 +635,7 @@ pub(super) fn apply_frame(engine: &Engine) {
 //==============================================================================
 // 필드 상태를 숨긴 <input> 에 적용. (자리, 누름 받기, 최대 길이, 필드 쪽에서 바꾼 값과 선택, 포커스 바뀜)
 //==============================================================================
-fn apply_field_state_to_entry(entry: &mut HiddenInputEntry, field_state: &TextInputFieldState, canvas_rect: &web_sys::DomRect, focus_action_list: &mut Vec<(web_sys::HtmlInputElement, bool)>) {
+fn apply_field_state_to_entry(entry: &mut HiddenInputEntry, field_state: &TextInputFieldState, canvas_rect: &web_sys::DomRect, focus_action_list: &mut Vec<(HiddenTextElement, bool)>) {
 	let input_style = entry.input_element.style();
 	let field_rect = field_state.field_rect;
 	let _ = input_style.set_property("left", &format!("{}px", canvas_rect.left() + field_rect.position.x as f64));
@@ -582,14 +696,24 @@ fn apply_field_state_to_entry(entry: &mut HiddenInputEntry, field_state: &TextIn
 //==============================================================================
 fn create_hidden_input_entry(field_state: &TextInputFieldState) -> Result<HiddenInputEntry, String> {
 	let document = get_document().ok_or_else(|| String::from("document 없음"))?;
-	let input_element = document.create_element("input").map_err(describe_js_error)?.dyn_into::<web_sys::HtmlInputElement>().map_err(|_| String::from("input 변환 실패"))?;
-	input_element.set_type("text");
+	// 여러 줄 필드는 <textarea>. (원본 Pane 의 textarea 프리셋처럼 브라우저 textarea 가 값, 조합, 되돌리기를 맡는다)
+	let input_element = if field_state.is_multiline {
+		let text_area_element = document.create_element("textarea").map_err(describe_js_error)?.dyn_into::<web_sys::HtmlTextAreaElement>().map_err(|_| String::from("textarea 변환 실패"))?;
+		text_area_element.set_spellcheck(false);
+		let _ = text_area_element.set_attribute("autocomplete", "off");
+		HiddenTextElement::TextArea(text_area_element)
+	}
+	else {
+		let html_input_element = document.create_element("input").map_err(describe_js_error)?.dyn_into::<web_sys::HtmlInputElement>().map_err(|_| String::from("input 변환 실패"))?;
+		html_input_element.set_type("text");
+		html_input_element.set_autocomplete("off");
+		html_input_element.set_spellcheck(false);
+		HiddenTextElement::Input(html_input_element)
+	};
 	input_element.set_value(&field_state.value);
 	if field_state.max_length > 0 {
 		input_element.set_max_length(field_state.max_length as i32);
 	}
-	input_element.set_autocomplete("off");
-	input_element.set_spellcheck(false);
 	input_element.set_class_name(HIDDEN_INPUT_CLASS_NAME);
 	let input_style = input_element.style();
 	for (property_name, property_value) in HIDDEN_INPUT_STYLE_LIST {
@@ -638,9 +762,28 @@ fn create_hidden_input_entry(field_state: &TextInputFieldState) -> Result<Hidden
 		push_pending_event(field_id, TextInputEventKind::CompositionEnd);
 		push_pending_event(field_id, build_replace_value_event(&input_for_composition_end));
 	})));
+	let is_multiline = field_state.is_multiline;
 	listener_list.push(("keydown", Closure::new(move |event: web_sys::Event| {
-		let is_enter = event.dyn_ref::<web_sys::KeyboardEvent>().map(|keyboard_event| keyboard_event.key() == "Enter").unwrap_or(false);
-		if is_enter {
+		let keyboard_event = match event.dyn_ref::<web_sys::KeyboardEvent>() {
+			Some(keyboard_event) => {
+				keyboard_event
+			}
+			None => {
+				return;
+			}
+		};
+		// 여러 줄은 Enter 를 브라우저가 줄로 넣고, 보이는 줄로 옮기는 키는 필드가 엔진 배치로 옮긴다. (숨긴 <textarea> 의 줄은 캔버스 글과 다르다)
+		if is_multiline {
+			if let Some(movement_key) = translate_text_area_movement_key(keyboard_event) {
+				event.prevent_default();
+				push_pending_event(field_id, TextInputEventKind::Key {
+					key: movement_key,
+					is_shift: keyboard_event.shift_key(),
+				});
+			}
+			return;
+		}
+		if keyboard_event.key() == "Enter" {
 			event.prevent_default();
 			push_pending_event(field_id, TextInputEventKind::Key {
 				key: TextInputKey::Enter,
@@ -666,7 +809,66 @@ fn create_hidden_input_entry(field_state: &TextInputFieldState) -> Result<Hidden
 		is_composing: false,
 		use_direct_touch,
 		is_focused_without_activation,
+		is_multiline: field_state.is_multiline,
 	})
+}
+
+//==============================================================================
+// 숨긴 <textarea> 에서 필드가 옮길 이동 키. (위아래, page, 줄 앞과 끝, 글 앞과 끝. 블링크 키 표와 맥 키 묶음, 데스크탑과 같다)
+//==============================================================================
+fn translate_text_area_movement_key(keyboard_event: &web_sys::KeyboardEvent) -> Option<TextInputKey> {
+	let is_mac = is_mac_platform();
+	let is_control = keyboard_event.ctrl_key();
+	let is_meta = keyboard_event.meta_key();
+	let is_alt = keyboard_event.alt_key();
+	match keyboard_event.key().as_str() {
+		"ArrowUp" if is_mac && is_meta => {
+			Some(TextInputKey::DocumentStart)
+		}
+		"ArrowDown" if is_mac && is_meta => {
+			Some(TextInputKey::DocumentEnd)
+		}
+		"ArrowLeft" if is_mac && is_meta => {
+			Some(TextInputKey::Home)
+		}
+		"ArrowRight" if is_mac && is_meta => {
+			Some(TextInputKey::End)
+		}
+		"ArrowUp" if !is_control && !is_meta && !is_alt => {
+			Some(TextInputKey::Up)
+		}
+		"ArrowDown" if !is_control && !is_meta && !is_alt => {
+			Some(TextInputKey::Down)
+		}
+		"PageUp" if !is_mac || is_alt => {
+			Some(TextInputKey::PageUp)
+		}
+		"PageDown" if !is_mac || is_alt => {
+			Some(TextInputKey::PageDown)
+		}
+		"Home" if !is_mac && is_control => {
+			Some(TextInputKey::DocumentStart)
+		}
+		"End" if !is_mac && is_control => {
+			Some(TextInputKey::DocumentEnd)
+		}
+		"Home" if !is_control && !is_meta => {
+			Some(TextInputKey::Home)
+		}
+		"End" if !is_control && !is_meta => {
+			Some(TextInputKey::End)
+		}
+		_ => {
+			None
+		}
+	}
+}
+
+//==============================================================================
+// 맥인지. (navigator.platform 이 Mac 으로 시작)
+//==============================================================================
+fn is_mac_platform() -> bool {
+	web_sys::window().and_then(|window| window.navigator().platform().ok()).map(|platform| platform.starts_with("Mac")).unwrap_or(false)
 }
 
 //==============================================================================
@@ -734,8 +936,8 @@ fn handle_canvas_pointer(event: web_sys::Event) {
 		}
 	};
 	// 빌린 동안 할 일을 정하고, 놓은 뒤에 DOM 을 바꾼다.
-	let mut focus_target: Option<(web_sys::HtmlInputElement, bool)> = None;
-	let mut blur_target_list: Vec<web_sys::HtmlInputElement> = Vec::new();
+	let mut focus_target: Option<(HiddenTextElement, bool)> = None;
+	let mut blur_target_list: Vec<HiddenTextElement> = Vec::new();
 	WEB_TEXT_INPUT.with(|state_cell| {
 		let mut web_text_input_state = state_cell.borrow_mut();
 		let hit_field_state = find_field_state_at_client_position(&web_text_input_state, client_x, client_y, true);
@@ -786,7 +988,7 @@ fn handle_canvas_context_menu(event: web_sys::Event) {
 			return;
 		}
 	};
-	let mut focus_element: Option<web_sys::HtmlInputElement> = None;
+	let mut focus_element: Option<HiddenTextElement> = None;
 	let hit_field_state = WEB_TEXT_INPUT.with(|state_cell| {
 		let mut web_text_input_state = state_cell.borrow_mut();
 		let hit_field_state = find_field_state_at_client_position(&web_text_input_state, client_x, client_y, false)?;
