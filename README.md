@@ -263,7 +263,7 @@ impl Scene for TitleScene {
 | `new Promise((resolve, reject) => ...)` | `let (promise, resolver) = Promise::create();` (실패는 `Promise<Result<T, E>>` 와 `resolver.reject(까닭)`) |
 
 - 데스크탑은 `EngineConfiguration.asset_directory_paths` 폴더에서 바로 읽고, 웹은 `asset_base_url + 경로` 를 fetch 합니다. 게임 코드는 같습니다.
-- 이미지(png, jpg, webp, gif 첫 장, bmp, ico, svg, avif), 텍스트, JSON, 바이너리, 폰트(ttf, otf, woff, woff2), 오디오(webm, ogg 의 Opus 와 Vorbis, mp3, wav, flac, m4a 와 aac 의 AAC)를 지원합니다. 데스크탑은 엔진이 풀고, 웹은 원본처럼 브라우저가 풉니다. 데스크탑 소리는 크롬 decodeAudioData 와 같은 해석기(FLAC, MP3, PCM, Vorbis 는 크롬이 쓰는 symphonia)로 풀고 앞뒤 다듬기, 44100Hz 로 바꾸기(크로미엄 SincResampler 를 옮긴 것)까지 같게 해 길이와 표본이 크롬과 같습니다. (`tests/assets/audio` 의 27 파일을 크롬 158 의 결과와 견줍니다. HE-AAC v1, v2 와 5.1 AAC 도 풉니다)
+- 이미지(png, jpg, webp, gif 첫 장, bmp, ico, svg, avif), 텍스트, JSON, 바이너리, 폰트(ttf, otf, woff, woff2), 오디오(webm, ogg 의 Opus 와 Vorbis, mp3, wav, flac, m4a 와 aac 의 AAC)를 지원합니다. 데스크탑은 엔진이 풀고, 웹은 원본처럼 브라우저가 풉니다. 데스크탑 그림은 박힌 색 프로필(PNG 의 cICP, iCCP, gAMA 와 cHRM, JPEG 의 ICC, WebP 의 ICCP, AVIF 의 ICC 와 nclx)을 크롬처럼 sRGB 로 바꾸고(PNG, WebP 는 크롬 158 과 비트까지 같습니다), 움직이는 AVIF 는 크롬처럼 첫 장을 씁니다. 데스크탑 소리는 크롬 decodeAudioData 와 같은 해석기(FLAC, MP3, PCM, Vorbis 는 크롬이 쓰는 symphonia)로 풀고 앞뒤 다듬기, 44100Hz 로 바꾸기(크로미엄 SincResampler 를 옮긴 것)까지 같게 해 길이와 표본이 크롬과 같습니다. (`tests/assets/audio` 의 27 파일을 크롬 158 의 결과와 견줍니다. HE-AAC v1, v2 와 5.1 AAC 도 풉니다)
 - 여러 애셋을 함께 받을 때는 `AssetLoader` 가 동시 수만큼 요청하고 진행률과 실패 목록을 셉니다.
 - 로딩에 실패한 애셋도 완료로 처리해서 씬이 멈추지 않습니다.
 
@@ -419,12 +419,13 @@ cargo run --release --example modelviewer
 | [skrifa](https://crates.io/crates/skrifa) | 0.50.0 | `core/textshaping.rs` | 가변 글꼴의 축 값을 건 글리프 윤곽. fontdue 와 ttf-parser 가 그리지 못하는 맥 SFNS 같은 글꼴을 그립니다 (크롬도 skrifa 를 씁니다) | MIT / Apache-2.0 |
 | [self_cell](https://crates.io/crates/self_cell) | 1.3.0 | `core/textshaping.rs` | 글꼴 바이트와 그 바이트를 빌리는 rustybuzz 얼굴을 한 값에 들어, 글꼴을 내리면 바이트도 돌려줍니다 | Apache-2.0 / GPL-2.0 |
 | [wuff](https://crates.io/crates/wuff) | 0.2.10 | `core/textstringtexturecache.rs` | WOFF, WOFF2 웹 폰트 디코딩 | MIT |
-| [rustybuzz](https://crates.io/crates/rustybuzz) | 0.20.1 | `core/textshaping.rs`, `core/colorglyph.rs` | 글자 모양 짓기(HarfBuzz 를 옮긴 것). 아랍어 글자 잇기, 합자, 커닝, 결합 부호 자리를 브라우저처럼 잡습니다. 다시 내보내는 ttf-parser 로 색 글리프 표(sbix, CBDT, COLR)를 읽습니다 | MIT |
+| [rustybuzz](https://crates.io/crates/rustybuzz) | 0.20.1 | `core/textshaping.rs`, `core/colorglyph.rs` | 글자 모양 짓기(HarfBuzz 를 옮긴 것). 아랍어 글자 잇기, 합자, 커닝, 결합 부호 자리를 브라우저처럼 잡습니다. 크롬처럼 16.16 배율에서 자리를 셈하려고 배율과 축 값 정규화를 더한 판을 저장소의 `third_party/rustybuzz` 에 두고, 그 판이 쓰는 ttf-parser 0.25.1 도 짝 커닝 장치 표를 바로잡아 `third_party/ttf-parser` 에 둡니다(MIT, ttf-parser 는 MIT / Apache-2.0). 다시 내보내는 ttf-parser 로 색 글리프 표(sbix, CBDT, COLR)를 읽습니다 | MIT |
 | [unicode-bidi](https://crates.io/crates/unicode-bidi) | 0.3.18 | `core/textshaping.rs` | 양방향 정렬(UAX #9). 오른쪽에서 왼쪽 글과 섞인 글의 그리는 차례 | MIT / Apache-2.0 |
 | [unicode-properties](https://crates.io/crates/unicode-properties) | 0.1.5 | `core/textshaping.rs` | 이모지 성질(UTS #51 Emoji_Presentation)과 일반 범주. 글자 묶음을 색 이모지 글꼴로 그릴지 가리고, 크롬 캔버스처럼 낱말마다 모양 지을 때 결합 부호를 앞 글자에 붙입니다 | MIT / Apache-2.0, Unicode-3.0 |
 | [unicode-script](https://crates.io/crates/unicode-script) | 0.5.9 | `core/textshaping.rs` | 글자의 문자(Script). 크롬 캔버스처럼 낱말을 나눌 때 씁니다 | MIT / Apache-2.0 |
 | [unicode-segmentation](https://crates.io/crates/unicode-segmentation) | 1.13.3 | `core/component/text.rs`, `core/textshaping.rs`, `misc/typewriter.rs`, `misc/dynamicfont.rs` | 글자 묶음 나누기(UAX #29). 줄바꿈과 표시 글자 수가 받침, 결합 부호, 이모지 묶음을 쪼개지 않습니다 | MIT / Apache-2.0 |
 | [image](https://crates.io/crates/image) | 0.25.10 | `core/image.rs`, `graphics3d/material.rs`, `graphics3d/toon/glbmeshreader.rs`, `core/colorglyph.rs`, 창 아이콘, 화면 저장 | png, jpeg, webp, gif, bmp, ico 디코딩과 PNG 저장 (이 여섯 형식만 켭니다). 색 이모지 글꼴(sbix, CBDT)의 PNG 글리프도 풉니다 | MIT / Apache-2.0 |
+| [png](https://crates.io/crates/png) | 0.18.1 | `core/colorprofile.rs` | PNG 의 색 청크(cICP, iCCP, sRGB, gAMA, cHRM) 읽기. image 가 이미 쓰는 같은 판이고, 크롬의 스키아 SkPngRustCodec 도 같은 png 0.18 로 읽습니다 | MIT / Apache-2.0 |
 | [slotmap](https://crates.io/crates/slotmap) | 1.1.1 | `core/node/nodetree.rs` | 노드 저장소. 제너레이셔널 핸들 `NodeId` 를 만듭니다 | Zlib |
 | [serde_json](https://crates.io/crates/serde_json) | 1.0.154 | JSON 애셋, 타임라인, 애니메이터, 파티클 설정, 다국어, 로컬 저장소, 애니메이션 클립, 아틀라스, 웹소켓 메시지, UI 문서(씬 파일) | JSON 파싱과 저장. 객체 키는 적힌 차례를 지킵니다 (preserve_order) | MIT / Apache-2.0 |
 | [flate2](https://crates.io/crates/flate2) | 1.1.11 | `graphics3d/fbxloader.rs` | FBX 의 압축 배열(zlib) 해제. 순수 러스트 백엔드라 wasm 에서도 돕니다 | MIT / Apache-2.0 |
@@ -532,7 +533,18 @@ cargo run --release --example modelviewer
 
 ## 라이선스
 
-[MIT](LICENSE) © ddukbaek2
+[MIT](LICENSE) © vanillapunch
 
+- 제3자 라이선스 고지는 [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) 한 파일에 모았습니다. 엔진이 쓰는 크레이트(직접과 간접, 데스크탑 세 OS 와 wasm 대상, 일반과 빌드 의존)의 이름, 판, 라이선스 식, 고른 라이선스, 저작권 줄, 전문이 들어 있고, 크레이트가 아닌 실린 자료(HRTF 자료, 옮겨 온 셈)는 그 파일의 '실린 자료' 절에 손으로 적습니다. 표기 의무가 없는 라이선스(CC0-1.0, Unlicense, 0BSD, MIT-0)로 쓰는 크레이트는 끝에 한 줄씩만 둡니다.
+- 의존을 바꾸면 `cargo run -p vanilla-engine-licenses` 로 다시 짓고, `cargo run -p vanilla-engine-licenses -- --check` 로 파일이 지금 의존과 같은지 봅니다. (도구는 [tools/TOOLS.md](tools/TOOLS.md) 의 licenses)
+- 게임을 낼 때는 게임의 의존까지 모은 고지 파일을 지어 실행 파일과 함께 냅니다. 게임 자신의 라이선스는 게임의 몫이고, 이 파일은 제3자 고지만 담습니다. 엔진이 실은 자료의 절도 엔진 크레이트에서 읽어 함께 들어갑니다.
+  ```bash
+  # 엔진 저장소를 받아 둔 자리에서 (게임이 엔진을 경로나 git 으로 의존할 때)
+  cargo run --manifest-path <엔진 저장소>/Cargo.toml -p vanilla-engine-licenses -- --manifest-path <게임>/Cargo.toml --out <게임>/dist/THIRD_PARTY_LICENSES.txt
+  # 또는 도구를 한 번 깔아 두고
+  cargo install --git https://github.com/ddukbaek2/vanilla-engine vanilla-engine-licenses
+  vanilla-engine-licenses --manifest-path Cargo.toml --out dist/THIRD_PARTY_LICENSES.txt
+  ```
+  `--out` 의 확장자가 `.md` 면 마크다운, 그 밖이면 글 파일로 씁니다. 게임에 켜고 끄는 기능이 있으면 `--all-features` 로 모든 기능의 의존을 모읍니다.
 - 데스크탑 실행 파일에 싣는 HRTF 자료 `src/platform/audio/hrtf/resources/Composite.flac` 은 크롬이 싣는 파일 그대로이고, IRCAM 의 LISTEN HRTF 데이터베이스에서 나온 응답입니다. 출처와 IRCAM 의 저작권 고지, 이용 조건은 그 폴더의 [README.md](src/platform/audio/hrtf/resources/README.md) 에 있습니다. IRCAM 은 상업 제품에 쓰면 서면으로 알려 달라고 요청합니다. (조건이 아니라 부탁입니다)
-- 크로미엄(BSD-3-Clause)에서 옮긴 셈은 파일 머리에 그 원본을 적었고, fdlibm 을 옮긴 `src/platform/audio/hrtf/fdlibm.rs` 는 Sun Microsystems 의 고지를 그대로 둡니다.
+- 크로미엄과 블링크(BSD-3-Clause, WebKit 시절 파일은 그 BSD 머리), 스키아, ICU4C 와 CLDR, fdlibm, font-rs, Kiwi, tween.js, gl-matrix, Separable SSS, 초안의 libtiled 와 Box2D 에서 옮긴 셈과 표는 엔진 파일과 원본 파일, 고지 원문을 THIRD_PARTY_LICENSES.md 의 실린 자료 절에 적었습니다. fdlibm 을 옮긴 `src/platform/audio/hrtf/fdlibm.rs` 는 Sun Microsystems 의 고지를 소스에도 그대로 둡니다.

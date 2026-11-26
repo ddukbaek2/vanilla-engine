@@ -3,6 +3,8 @@ name = "vanilla-engine"
 version = "0.3.2"
 description = "바닐라엔진(Vanilla Engine). vanilla.js 를 러스트로 옮긴 게임 엔진. 데스크탑과 웹(wasm)에서 돈다"
 edition = "2021"
+# 저작권자. (LICENSE 의 Copyright 줄과 같다, 라이선스 파일이 없는 크레이트 꾸러미의 고지에 쓰인다)
+authors = ["vanillapunch"]
 license = "MIT"
 repository = "https://github.com/ddukbaek2/vanilla-engine"
 keywords = ["gamedev", "engine", "2d", "3d", "wasm"]
@@ -19,9 +21,11 @@ default = ["tls"]
 # 암호 공급자 ring 이 C 를 빌드해서, 그 대상의 C 헤더가 없는 맥에서 윈도우 대상을 검사할 때는 끈다. (cargo check --target x86_64-pc-windows-msvc --no-default-features)
 tls = ["ewebsock/tls", "dep:rustls"]
 
-# 워크스페이스. (엔진과 절차 매크로 크레이트 macros/, API 문서 자료 뽑기 tools/apidoc. 게임은 엔진 하나만 의존하고 매크로는 엔진이 다시 내보낸 vanilla::reflect 로 쓴다)
+# 워크스페이스. (엔진과 절차 매크로 크레이트 macros/, API 문서 자료 뽑기 tools/apidoc, 제3자 라이선스 모음 짓기 tools/licenses. 게임은 엔진 하나만 의존하고 매크로는 엔진이 다시 내보낸 vanilla::reflect 로 쓴다)
 [workspace]
-members = ["macros", "tools/apidoc"]
+members = ["macros", "tools/apidoc", "tools/licenses"]
+# 저장소에 둔 남의 크레이트는 워크스페이스 시험과 문서에서 뺀다. (엔진이 경로로 의존한다)
+exclude = ["third_party/rustybuzz", "third_party/ttf-parser"]
 
 [dependencies]
 # 반사 매크로. (#[reflect], 원본 vanilla.js 의 실행 중 반사를 컴파일 때 지은 코드로 한다)
@@ -31,7 +35,8 @@ fontdue = "0.9"
 # 웹 글꼴(WOFF, WOFF2)을 TTF 로 푼다. (원본 기본 글꼴 DOSGothic 이 .woff)
 wuff = "0.2"
 # 글자 모양 짓기. (HarfBuzz 를 옮긴 것. 아랍어 글자 잇기, 합자, 커닝, 결합 부호 자리. 원본은 브라우저 Canvas2D 가 HarfBuzz 로 한다)
-rustybuzz = "0.20"
+# 크롬(HarfBuzz)처럼 글자 자리를 16.16 배율로 셈하려고 hb_font_set_scale 을 더한 판을 저장소에 둔다. (third_party/rustybuzz, rustybuzz 0.20.1 그대로에 배율만 더했다)
+rustybuzz = { version = "0.20.1", path = "third_party/rustybuzz" }
 # 양방향 정렬. (UAX #9, 오른쪽에서 왼쪽 글자와 섞인 글의 그리는 차례. 원본은 Canvas2D direction)
 unicode-bidi = "0.3"
 # 가변 글꼴의 윤곽. (축 값을 건 글리프 윤곽, ttf-parser 는 글리프마다 변형이 32 개를 넘는 가변 글꼴(맥 SFNS 같은)의 윤곽을 읽지 못한다. 원본 크롬도 fontations 의 skrifa 를 쓴다)
@@ -51,6 +56,8 @@ serde_json = { version = "1", features = ["preserve_order"] }
 flate2 = "1"
 # 이미지 해석. (원본은 브라우저가 푸는 형식을 모두 받는다. png, jpeg, webp, gif(첫 장), bmp, ico. 웹은 브라우저가 먼저 푼다)
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif", "bmp", "ico"] }
+# PNG 의 색 청크(cICP, iCCP, sRGB, gAMA, cHRM) 읽기. (크롬의 스키아 SkPngRustCodec 도 같은 png 0.18 로 읽는다. image 가 이미 쓰는 같은 판이라 더 받는 크레이트가 없다)
+png = "0.18"
 # 노드 핸들. (세대 번호가 붙은 키로 씬의 노드 저장소를 가리킨다)
 slotmap = "1"
 # performance.now() 를 쓰는 Instant. (네이티브에서는 std::time 그대로)
@@ -150,3 +157,7 @@ panic = "abort"
 [profile.wasm-release]
 inherits = "release"
 strip = false
+
+# 고친 ttf-parser 하나로 모은다. (rustybuzz 말고도 fontdue, owned_ttf_parser 가 같은 0.25.1 을 쓴다. 짝 커닝 장치 표 기준을 바로 읽는 판 하나만 빌드되게. 이 저장소를 뿌리로 빌드할 때만 걸리고, 엔진을 의존으로 받는 게임은 rustybuzz 쪽만 고친 판을 쓴다)
+[patch.crates-io]
+ttf-parser = { path = "third_party/ttf-parser" }

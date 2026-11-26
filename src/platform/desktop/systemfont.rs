@@ -3,13 +3,14 @@
 //! - 원본에 없는 파일이다. 원본은 브라우저가 CSS 글꼴 이름을 운영체제 글꼴로 찾고, 글꼴 목록에 없는 글자는 운영체제의 대체 글꼴로 그린다.
 //!   크롬은 맥에서 CoreText, 윈도우에서 DirectWrite, 리눅스에서 fontconfig 로 찾는다. 러스트 판 데스크탑도 같은 API 로 파일을 찾아 글자 캐시에 올린다.
 //! - find_family_font_file: 글꼴 이름, 굵기, 기울기로 파일과 얼굴을 찾는다. 그 이름의 글꼴이 없으면 None 이다. (CSS 처럼 다른 글꼴로 바꿔 주지 않는다)
-//!   - 맥: system-ui, BlinkMacSystemFont 는 시스템 UI 글꼴(CTFontCreateUIFontForLanguage, 크롬 font_matcher_mac.mm 의 MatchSystemUIFont),
+//!   - 맥: system-ui, BlinkMacSystemFont 는 시스템 UI 글꼴(CTFontCreateUIFontForLanguage, 기울이면 CTFontCreateCopyWithSymbolicTraits 의 기울임 특성, 크롬 font_matcher_mac.mm 의 MatchSystemUIFont),
 //!     그 밖은 이름과 굵기 특성으로 지은 글꼴 서술자. -apple-system 과 ui-serif, ui-sans-serif, ui-monospace, ui-rounded 는 크롬이 모르는 이름이라 None 이다.
 //!     (사파리만 안다. 맥 크롬 158 의 Canvas2D 에서 "16px -apple-system" 은 기본 글꼴로 그려진다)
 //!   - 윈도우: system-ui 는 크롬처럼 메뉴 글꼴(NONCLIENTMETRICS 의 lfMenuFont, 읽지 못하면 Segoe UI), 그 밖은 시스템 글꼴 모음의 이름(FindFamilyName)과 GetFirstMatchingFont.
 //!   - 리눅스: fontconfig 의 FcFontMatch. 크롬(Skia SkFontConfigInterface_direct.cpp 의 isAcceptableMatch)처럼 찾은 글꼴의 이름이 청한 이름이나 설정을 거친 이름과 같거나,
 //!     치수가 같은 대체 글꼴(Arial 과 Liberation Sans 같은 표)이거나, 청한 이름이 sans, serif, monospace 일 때만 받는다.
-//! - 일반 이름(serif, sans-serif, monospace, cursive, fantasy, math)은 크롬의 기본 글꼴 표대로 글꼴 이름으로 바꾼 뒤 찾는다. (resolve_generic_family_name)
+//! - 일반 이름(serif, sans-serif, monospace, cursive, fantasy, math, -webkit-body 는 표준 글꼴)은 크롬의 기본 글꼴 표대로 글꼴 이름으로 바꾼 뒤 찾는다. (resolve_generic_family_name)
+//!   큰따옴표로 감싼 이름("\"monospace\"")은 크롬처럼 바꾸지 않고 그 글자의 글꼴을 찾는다. (맥과 윈도우에는 그 이름의 글꼴이 없고, 리눅스 fontconfig 는 monospace 를 받는다)
 //!   표는 크로미엄 chrome/app/resources/`locale_settings_<운영체제>`.grd 의 IDS_*_FONT_FAMILY 와 그 언어 번역(platform_locale_settings/*.xtb)이다.
 //!   크롬은 브라우저 언어(화면 언어)로 Common(Zyyy) 스크립트 값을 정하고, 문서 lang 이 없는 캔버스는 기본 로캘(브라우저 언어)의 스크립트로 글꼴을 고른다.
 //!   그 스크립트의 따로 정한 값은 브라우저 언어의 스크립트라 등록하지 않으므로(prefs_tab_helper.cc 의 RegisterProfilePrefs) 결국 Common 값을 쓴다.
@@ -89,9 +90,10 @@ pub fn is_overlay_scrollbar_preferred() -> bool {
 
 //==============================================================================
 /// 글꼴 이름으로 파일 찾기. (CSS 글꼴 이름 하나, 일반 이름은 크롬 기본 글꼴 표의 이름으로 바꿔 찾는다. 없으면 None)
+/// - 큰따옴표로 감싼 이름은 일반 이름과 같은 글자라도 바꾸지 않고 그 이름의 글꼴을 찾는다. (크롬 FontSelector::FamilyNameFromSettings 는 따옴표 친 이름을 기본 글꼴 표로 바꾸지 않고, FontCache 가 그 글자로 찾는다)
 ///
 /// # 인자
-/// - `family_name`: 글꼴 이름 하나. (앞뒤 빈칸은 뗀다)
+/// - `family_name`: 글꼴 이름 하나. (앞뒤 빈칸은 뗀다, "\"monospace\"" 처럼 큰따옴표로 감싸면 글꼴 이름)
 /// - `weight`: 굵기. (CSS font-weight, 100 ~ 900, 400 이 보통)
 /// - `is_italic`: 기울인 얼굴을 찾으려면 true.
 ///
@@ -108,12 +110,19 @@ pub fn is_overlay_scrollbar_preferred() -> bool {
 /// 	assert!(source.path.exists());
 /// }
 /// assert!(find_family_font_file("  ", 400, false).is_none());
+/// assert!(find_family_font_file("\"monospace\"", 400, false).is_none() || find_family_font_file("monospace", 400, false).is_some());
 /// ```
 //==============================================================================
 pub fn find_family_font_file(family_name: &str, weight: u16, is_italic: bool) -> Option<FontFileSource> {
 	let family_name = family_name.trim();
 	if family_name.is_empty() {
 		return None;
+	}
+	if let Some(quoted_family_name) = family_name.strip_prefix('"').and_then(|family_name| family_name.strip_suffix('"')) {
+		if quoted_family_name.is_empty() {
+			return None;
+		}
+		return platform_font::find_family_font_file(quoted_family_name, weight, is_italic);
 	}
 	if let Some(generic_family) = GenericFamily::from_family_name(family_name) {
 		let resolved_family_name = resolve_generic_family_name(generic_family)?;
@@ -180,7 +189,7 @@ pub fn read_last_resort_family_name() -> Option<String> {
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GenericFamily {
-	/// 기본 글꼴. (표의 첫 칸, 일반 이름이 없어 from_family_name 은 돌려주지 않는다)
+	/// 기본 글꼴. (표의 첫 칸, 일반 이름 -webkit-body 가 이것이다. 크롬 FontBuilder::GenericFontFamilyName 이 표준 글꼴 이름을 준다)
 	Standard,
 	/// serif.
 	Serif,
@@ -198,7 +207,7 @@ pub enum GenericFamily {
 
 impl GenericFamily {
 	//==============================================================================
-	/// 일반 이름 → 종류. (serif, sans-serif, monospace, cursive, fantasy, math, 대소문자를 가리지 않는다. 크롬 font_selector.cc 가 아는 이름만, 아니면 None)
+	/// 일반 이름 → 종류. (serif, sans-serif, monospace, cursive, fantasy, math, -webkit-body 는 Standard, 대소문자를 가리지 않는다. 크롬 font_selector.cc 가 아는 이름만, 아니면 None)
 	///
 	/// # 인자
 	/// - `family_name`: CSS 글꼴 이름 하나. (앞뒤 빈칸은 뗀다)
@@ -225,6 +234,9 @@ impl GenericFamily {
 			}
 			"math" => {
 				Some(GenericFamily::Math)
+			}
+			"-webkit-body" => {
+				Some(GenericFamily::Standard)
 			}
 			_ => {
 				None
@@ -436,16 +448,21 @@ mod platform_font {
 	}
 
 	//==============================================================================
-	/// 시스템 UI 글꼴. (굵기가 600 이상이면 굵은 시스템 글꼴)
+	/// 시스템 UI 글꼴. (굵기가 600 이상이면 굵은 시스템 글꼴, 기울이면 기울인 시스템 글꼴)
+	/// - 크롬 MatchSystemUIFont 처럼 기울인 얼굴은 CTFontCreateCopyWithSymbolicTraits 의 기울임 특성으로 고른다. (맥 SFNSItalic, 고르지 못하면 None)
 	//==============================================================================
-	fn create_system_ui_font(weight: u16) -> Option<CFRetained<CTFont>> {
+	fn create_system_ui_font(weight: u16, is_italic: bool) -> Option<CFRetained<CTFont>> {
 		let ui_font_type = if weight >= 600 {
 			CTFontUIFontType::EmphasizedSystem
 		}
 		else {
 			CTFontUIFontType::System
 		};
-		unsafe { CTFont::new_ui_font_for_language(ui_font_type, LOOKUP_FONT_SIZE, None) }
+		let font = unsafe { CTFont::new_ui_font_for_language(ui_font_type, LOOKUP_FONT_SIZE, None) }?;
+		if !is_italic {
+			return Some(font);
+		}
+		unsafe { font.copy_with_symbolic_traits(LOOKUP_FONT_SIZE, std::ptr::null(), CTFontSymbolicTraits::ItalicTrait, CTFontSymbolicTraits::ItalicTrait) }
 	}
 
 	//==============================================================================
@@ -485,7 +502,7 @@ mod platform_font {
 		let lowercase_family_name = family_name.to_lowercase();
 		let font = match lowercase_family_name.as_str() {
 			"system-ui" | "blinkmacsystemfont" => {
-				create_system_ui_font(weight)?
+				create_system_ui_font(weight, is_italic)?
 			}
 			_ => {
 				create_family_font(family_name, weight, is_italic)?
@@ -520,7 +537,7 @@ mod platform_font {
 				return read_font_file(&font);
 			}
 		}
-		let base_font = create_system_ui_font(weight)?;
+		let base_font = create_system_ui_font(weight, false)?;
 		let text_string = CFString::from_str(text);
 		let range = CFRange {
 			location: 0,

@@ -2445,8 +2445,6 @@ checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 [[package]]
 name = "rustybuzz"
 version = "0.20.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd3c7c96f8a08ee34eff8857b11b49b07d71d1c3f4e88f8a88d4c9e9f90b1702"
 dependencies = [
  "bitflags 2.13.2",
  "bytemuck",
@@ -3132,8 +3130,6 @@ dependencies = [
 [[package]]
 name = "ttf-parser"
 version = "0.25.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2df906b07856748fa3f6e0ad0cbaa047052d4a7dd609e231c4f72cee8c36f31"
 dependencies = [
  "core_maths",
 ]
@@ -3315,6 +3311,7 @@ dependencies = [
  "objc2-game-controller",
  "opus-pure",
  "oxideav-aac",
+ "png",
  "rav1d",
  "raw-window-handle",
  "resvg",
@@ -3357,6 +3354,13 @@ dependencies = [
  "serde_json",
  "syn 2.0.119",
  "vanilla-engine",
+]
+
+[[package]]
+name = "vanilla-engine-licenses"
+version = "0.3.2"
+dependencies = [
+ "serde_json",
 ]
 
 [[package]]

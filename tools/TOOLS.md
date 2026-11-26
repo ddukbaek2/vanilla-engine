@@ -59,3 +59,20 @@ GitHub Actions 의 `.github/workflows/platforms.yml` 이 dev, release, `ci-*` �
 - 웹: `cargo build --target wasm32-unknown-unknown --examples`
 - `.github/scripts/captureexamples.cjs <저장 폴더> <이름표> [예제,...]`: 빌드한 `target/debug/examples` 를 찍기 모드(VANILLA_CAPTURE_PATH, VANILLA_CAPTURE_FRAMES, VANILLA_CAPTURE_EXIT)로 돌려 그림과 로그, `<이름표>_capture.json` 을 남긴다. 원본과 같은 장면의 예제는 원본 쿼리와 같은 값의 환경 변수를 준다. (PHYSICS2D_PRESTEP 같은) VANILLA_CI_CAPTURE_TIMEOUT 은 예제마다의 제한 시간 상한(초)이다.
 - `.github/scripts/chromecompare.cjs <vanilla.js 폴더> <그림 폴더> <이름표>`: 원본 예제 다섯(toonstyle, toonmaterial, skeleton2d, physics2d, tilemapshowcase)을 같은 크기와 기기 배율로 찍어 RGB 평균 절대 차이(0 ~ 1), 가장 큰 차이, 2 와 16 을 넘는 화소 몫, 차이 그림(4 배)을 남긴다. puppeteer-core 와 pngjs 를 NODE_PATH 로 준다.
+
+## licenses
+제3자 라이선스 고지 모음 THIRD_PARTY_LICENSES.md 를 짓는 도구. (워크스페이스 크레이트 vanilla-engine-licenses, serde_json 만 씀, cargo-about 같은 바깥 도구 없이 cargo metadata 와 각 크레이트의 라이선스 파일을 읽는다)
+```bash
+cargo run -p vanilla-engine-licenses                                   # 이 저장소의 THIRD_PARTY_LICENSES.md 쓰기
+cargo run -p vanilla-engine-licenses -- --check                        # 파일이 지금 의존과 같은지 (다르면 끝 코드 1)
+cargo run -p vanilla-engine-licenses -- --manifest-path <Cargo.toml> --out <파일> [--all-features]   # 그 패키지(게임)의 의존을 모은 파일
+```
+- 대상: x86_64-pc-windows-msvc, aarch64-pc-windows-msvc, x86_64-apple-darwin, aarch64-apple-darwin, x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu, wasm32-unknown-unknown 마다 `cargo metadata --filter-platform` 을 읽어 합친다. 뿌리 패키지(가상 워크스페이스면 기본 멤버)에서 일반 의존과 빌드 의존으로 닿는 크레이트를 모으고, 개발 의존과 뿌리 워크스페이스의 멤버는 뺀다.
+- 라이선스 파일: 크레이트 폴더 뿌리의 LICENSE, LICENCE, COPYING, COPYRIGHT, NOTICE, UNLICENSE 가 든 이름의 파일, LICENSES 폴더, Cargo.toml 의 license-file. 갈래는 파일 이름(LICENSE-MIT, LICENSE-APACHE 같은)으로, 이름에 없으면 글의 표준 문구로 읽는다.
+- 라이선스 식: SPDX 식을 읽어 OR 는 하나를 고른다. 크레이트에 그 전문 파일이 있는 것을 먼저, 그 가운데 표기 의무가 가벼운 차례(CC0-1.0, Unlicense, 0BSD, MIT-0, MIT, ISC, BSD-2-Clause, BSD-3-Clause, Zlib, BSL-1.0, Apache-2.0, Unicode, CDLA-Permissive-2.0, MPL-2.0, 그 밖, GPL 계열)로 고른다. AND 는 모두, WITH 는 예외 이름을 함께 적는다. 옛 꼴의 `MIT/Apache-2.0` 은 OR 다.
+- 싣는 것: 고른 라이선스의 전문 파일, NOTICE 와 COPYRIGHT 파일(늘). 갈래를 읽지 못한 파일은 OR 가 없는 식이거나 고른 라이선스의 전문을 못 찾았을 때 싣는다. 같은 글은 한 번만 싣고 크레이트마다 T 번호로 가리킨다. 저작권 줄은 실은 파일에서 읽고, 없으면 Cargo.toml 의 authors 를 적는다.
+- 크레이트에 고른 라이선스의 파일이 없으면 SPDX 표준 전문(tools/licenses/texts 의 MIT, Apache-2.0, BSL-1.0, BSD-2-Clause, BSD-3-Clause, ISC, Zlib)을 싣고, 틀이 있는 라이선스는 authors 로 지은 저작권 줄을 붙이고 그렇게 했다고 적는다. 표준 전문도 없으면 알림을 찍는다.
+- MPL-2.0, GPL 계열처럼 실행 파일로 내도 소스를 받을 곳을 알려야 하는 라이선스는 crates.io 판 주소와 저장소를 적는다. (MPL-2.0 3.2 절 (a))
+- 표기 의무가 없는 라이선스(CC0-1.0, Unlicense, 0BSD, MIT-0)로 쓰는 크레이트는 끝 절에 한 줄씩만 둔다.
+- 실린 자료 절: 크레이트가 아닌 제3자 자료(소스에 옮겨 온 셈, 자료 파일)는 THIRD_PARTY_LICENSES.md 의 두 표시 줄(`<!-- vanilla-engine-licenses: bundled materials begin -->`, `end -->`) 사이에 손으로 쓴다. 다시 지을 때 그 사이는 그대로 남는다. (짓는 파일이 .md 면 그 파일에서, 아니면 워크스페이스 뿌리의 THIRD_PARTY_LICENSES.md 에서 읽는다) 의존 크레이트 폴더의 THIRD_PARTY_LICENSES.md 에 그 절이 있으면(게임이 쓰는 vanilla-engine 같은) "Materials bundled in <크레이트> <판>" 아래 싣는다.
+- 개인 경로(~/.cargo 같은)와 시각은 쓰지 않는다. 의존이 같으면 같은 파일이 나와 --check 로 견줄 수 있다.
