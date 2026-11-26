@@ -246,7 +246,7 @@ impl RenderTarget {
 	/// - `height`: 새 세로 크기. (픽셀)
 	///
 	/// # 돌려줌
-	/// 다시 지었거나 같은 크기면 Ok. GL 객체를 못 만들면 Err(GL 의 오류 글).
+	/// 다시 지었거나 같은 크기면 Ok. GL 객체를 못 만들면 Err(GL 의 오류 글, 그때까지 지은 것은 지우고 크기는 0 이다).
 	//==============================================================================
 	pub fn resize(&mut self, gl: &glow::Context, width: i32, height: i32) -> Result<(), String> {
 		if width == self.width && height == self.height {
@@ -254,7 +254,25 @@ impl RenderTarget {
 		}
 
 		self.destroy(gl);
+		let create_result = self.create_resources(gl, width, height);
+		if create_result.is_err() {
+			self.destroy(gl);
+		}
+		create_result
+	}
 
+	//==============================================================================
+	/// 리소스 짓기. (resize 의 몸통, 짓는 대로 필드에 담아 중간에 실패해도 destroy 로 지울 수 있다)
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트.
+	/// - `width`: 가로 크기. (픽셀)
+	/// - `height`: 세로 크기. (픽셀)
+	///
+	/// # 돌려줌
+	/// 다 지었으면 Ok. GL 객체를 못 만들면 Err(GL 의 오류 글).
+	//==============================================================================
+	fn create_resources(&mut self, gl: &glow::Context, width: i32, height: i32) -> Result<(), String> {
 		let internal_format = if self.use_float_color {
 			glow::RGBA16F
 		}
@@ -319,6 +337,7 @@ impl RenderTarget {
 		unsafe {
 			let framebuffer = gl.create_framebuffer()?;
 			gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
+			self.framebuffer = Some(framebuffer);
 
 			// 컬러 어태치먼트. (개수만큼 텍스처 생성, 실수 컬러는 RGBA16F)
 			let component_type = if self.use_float_color {
@@ -327,10 +346,10 @@ impl RenderTarget {
 			else {
 				glow::UNSIGNED_BYTE
 			};
-			let mut color_texture_list = Vec::new();
 			let mut draw_buffer_list = Vec::new();
 			for attachment_index in 0..self.color_attachment_count {
 				let color_texture = gl.create_texture()?;
+				self.color_texture_list.push(color_texture);
 				gl.bind_texture(glow::TEXTURE_2D, Some(color_texture));
 				gl.tex_image_2d(glow::TEXTURE_2D, 0, internal_format as i32, width, height, 0, glow::RGBA, component_type, glow::PixelUnpackData::Slice(None));
 				gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::LINEAR as i32);
@@ -339,7 +358,6 @@ impl RenderTarget {
 				gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
 				let attachment_point = glow::COLOR_ATTACHMENT0 + attachment_index as u32;
 				gl.framebuffer_texture_2d(glow::FRAMEBUFFER, attachment_point, glow::TEXTURE_2D, Some(color_texture), 0);
-				color_texture_list.push(color_texture);
 				draw_buffer_list.push(attachment_point);
 			}
 			if self.color_attachment_count > 1 {
@@ -347,11 +365,10 @@ impl RenderTarget {
 			}
 
 			// 깊이 어태치먼트. (텍스처, 이후 패스에서 샘플링 가능 / 렌더버퍼, 깊이 테스트 전용, 멀티샘플이면 깊이 시험은 멀티샘플 쪽이 맡아 렌더버퍼는 짓지 않는다)
-			let mut depth_renderbuffer = None;
-			let mut depth_texture = None;
 			if self.use_depth && (self.use_depth_texture || sample_count == 0) {
 				if self.use_depth_texture {
 					let created_depth_texture = gl.create_texture()?;
+					self.depth_texture = Some(created_depth_texture);
 					gl.bind_texture(glow::TEXTURE_2D, Some(created_depth_texture));
 					gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::DEPTH_COMPONENT24 as i32, width, height, 0, glow::DEPTH_COMPONENT, glow::UNSIGNED_INT, glow::PixelUnpackData::Slice(None));
 					gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
@@ -359,23 +376,17 @@ impl RenderTarget {
 					gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
 					gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
 					gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::DEPTH_ATTACHMENT, glow::TEXTURE_2D, Some(created_depth_texture), 0);
-					depth_texture = Some(created_depth_texture);
 				}
 				else {
 					let created_depth_renderbuffer = gl.create_renderbuffer()?;
+					self.depth_renderbuffer = Some(created_depth_renderbuffer);
 					gl.bind_renderbuffer(glow::RENDERBUFFER, Some(created_depth_renderbuffer));
 					gl.renderbuffer_storage(glow::RENDERBUFFER, depth_renderbuffer_format, width, height);
 					gl.framebuffer_renderbuffer(glow::FRAMEBUFFER, glow::DEPTH_ATTACHMENT, glow::RENDERBUFFER, Some(created_depth_renderbuffer));
-					depth_renderbuffer = Some(created_depth_renderbuffer);
 				}
 			}
 
 			gl.bind_framebuffer(glow::FRAMEBUFFER, None);
-
-			self.framebuffer = Some(framebuffer);
-			self.color_texture_list = color_texture_list;
-			self.depth_renderbuffer = depth_renderbuffer;
-			self.depth_texture = depth_texture;
 		}
 		self.width = width;
 		self.height = height;
@@ -603,5 +614,46 @@ impl RenderTarget {
 	//==============================================================================
 	pub fn get_height(&self) -> i32 {
 		self.height
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::core::imagetexturecache::fake_gl::{self, FakeGlObject};
+
+	//==============================================================================
+	/// 살아 있는 가짜 GL 텍스처, 프레임버퍼, 렌더버퍼 수.
+	//==============================================================================
+	fn read_live_counts() -> [usize; 3] {
+		[fake_gl::get_live_count(FakeGlObject::Texture), fake_gl::get_live_count(FakeGlObject::Framebuffer), fake_gl::get_live_count(FakeGlObject::Renderbuffer)]
+	}
+
+	//==============================================================================
+	/// 짓다가 실패하면 그때까지 지은 GL 객체를 지운다. (new 와 resize, 크기는 0 이라 다시 resize 로 지을 수 있다)
+	//==============================================================================
+	#[test]
+	fn failed_resize_deletes_created_objects() {
+		let gl = fake_gl::create_context();
+		fake_gl::fail_after(FakeGlObject::Texture, 1);
+		let options = RenderTargetOptions {
+			color_attachment_count: 2,
+			..Default::default()
+		};
+		assert!(RenderTarget::new(&gl, 64, 32, true, Some(options)).is_err());
+		assert_eq!(read_live_counts(), [0, 0, 0]);
+
+		let gl = fake_gl::create_context();
+		let mut render_target = RenderTarget::new(&gl, 64, 32, true, None).expect("render target");
+		assert_eq!(read_live_counts(), [1, 1, 1]);
+		fake_gl::fail_after(FakeGlObject::Renderbuffer, 0);
+		assert!(render_target.resize(&gl, 128, 64).is_err());
+		assert_eq!(read_live_counts(), [0, 0, 0]);
+		assert_eq!(render_target.get_width(), 0);
+		fake_gl::fail_after(FakeGlObject::Renderbuffer, u32::MAX);
+		render_target.resize(&gl, 128, 64).expect("resize");
+		assert_eq!(read_live_counts(), [1, 1, 1]);
+		render_target.destroy(&gl);
+		assert_eq!(read_live_counts(), [0, 0, 0]);
 	}
 }
