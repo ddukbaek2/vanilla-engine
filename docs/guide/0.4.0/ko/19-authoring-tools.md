@@ -424,7 +424,7 @@ assert!(node_tree[coin_ids[2]].get_component::<Paint>().is_some());
 assert_eq!(node_tree[coin_ids[2]].get_local_position().x, 440.0);
 ```
 
-`VisualAsset` 과 `Visual` 은 원본 experimental 폴더의 뼈대를 그대로 옮긴 것입니다. `VisualAsset::load` 는 경로만 적고 파일을 읽지 않으며 읽힌 것으로 치지 않습니다. (`is_loaded()` 는 늘 거짓) `Visual` 은 위치 하나만 드는 컴포넌트로 그리지도 갱신하지도 않습니다. Visual Editor 의 씬과 프리팹은 이 둘이 아니라 `UIDocument` 로 읽습니다.
+`VisualAsset` 은 Visual Editor 가 저장한 씬과 프리팹(`.scene.json`, `.prefab.json`, `UIDocument` 꼴)을 읽어 그 문서를 든 `Visual` 을 담습니다. `VisualAsset::load(engine, path)` 는 기다릴 수 있는 읽기 손잡이를 돌려주고, 받기에 실패하거나 문서 꼴(JSON 객체와 root)이 틀리면 읽히지 않은 것으로 남습니다. 받은 바이트는 `load_from_bytes`, 글은 `VisualAsset::create_visual_from_text` 로도 됩니다. `Visual::create_node(&mut document, &mut node_tree)` 가 문서의 노드 트리를 새로 지어 뿌리의 로컬 위치를 `location` 으로 두고 그 뿌리를 돌려줍니다. (문서가 없으면 `Ok(None)`, 문서 꼴이 틀리면 `Err`, 부르는 쪽이 원하는 부모에 붙입니다) 원본 `VisualAsset`, `Visual.createNode` 와 같습니다.
 
 ## 두 엔진이 같이 쓰는 다른 파일
 
@@ -492,7 +492,7 @@ vanilla.js 의 명령줄 도구는 Node.js 로 실행하고, 결과물 가운데
 - 게임 컴포넌트를 문서로 쓰고 읽으려면 `#[vanilla::reflect]` 를 붙이고 등록합니다.
 - `Timeline` 은 매 프레임 `tick` 을 불러야 움직입니다. 소리가 있는 문서는 무대를 만든 뒤 `load_sounds` 를 부릅니다.
 - `.vfx.json` 의 `imageDataUrl` 은 `apply_description` 이 읽지 않습니다. 그림은 직접 읽어 `set_image` 로 줍니다.
-- `VisualAsset` 은 파일을 읽지 않는 뼈대입니다. 씬 파일은 `UIDocument` 로 읽습니다.
+- `Visual::create_node` 는 넘긴 `UIDocument` 의 표로 짓습니다. 편집기가 저장한 문서면 그 문서에 `register_editor_types()` 를 먼저 부릅니다.
 
 ## 관련 타입
 

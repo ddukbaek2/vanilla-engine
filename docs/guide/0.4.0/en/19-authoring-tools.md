@@ -424,7 +424,7 @@ assert!(node_tree[coin_ids[2]].get_component::<Paint>().is_some());
 assert_eq!(node_tree[coin_ids[2]].get_local_position().x, 440.0);
 ```
 
-`VisualAsset` and `Visual` are straight ports of skeletons from the original's experimental folder. `VisualAsset::load` only records the path, does not read the file, and does not count as loaded (`is_loaded()` is always false). `Visual` is a component that holds only a location and neither draws nor updates. Visual Editor scenes and prefabs are read with `UIDocument`, not with these two.
+`VisualAsset` reads scenes and prefabs saved by the Visual Editor (`.scene.json`, `.prefab.json`, in `UIDocument` form) and holds a `Visual` that carries the document. `VisualAsset::load(engine, path)` returns a load handle you can await; if the download fails or the document form (a JSON object with root) is wrong, it stays not loaded. Downloaded bytes also work with `load_from_bytes`, and text with `VisualAsset::create_visual_from_text`. `Visual::create_node(&mut document, &mut node_tree)` builds a new node tree from the document, sets the root's local position to `location`, and returns that root. (`Ok(None)` without a document, `Err` for a wrong document form; the caller attaches it to the parent it wants) This is the same as the original `VisualAsset` and `Visual.createNode`.
 
 ## Other files shared by both engines
 
@@ -492,7 +492,7 @@ The vanilla.js command-line tools run on Node.js, and of their outputs the Rust 
 - To write and read game components in documents, add `#[vanilla::reflect]` and register them.
 - A `Timeline` moves only if you call `tick` every frame. For documents with sound, call `load_sounds` after building the stage.
 - `apply_description` does not read `imageDataUrl` in a `.vfx.json`. Load the image yourself and pass it with `set_image`.
-- `VisualAsset` is a skeleton that does not read files. Read scene files with `UIDocument`.
+- `Visual::create_node` builds with the tables of the `UIDocument` you pass. For documents saved by the editor, call `register_editor_types()` on that document first.
 
 ## Related types
 

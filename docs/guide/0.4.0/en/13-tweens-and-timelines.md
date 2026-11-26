@@ -664,44 +664,57 @@ assert_eq!(resolve_timeline_easing("unknown", None).evaluate(0.3), 0.3);
 
 ## Animator
 
-`Animator`, `AnimationState`, `AnimationTransition` and `AnimationClip` are an experimental skeleton in the original too, and the Rust version ports only that scope. For now they are containers that hold states, transitions and properties.
+`Animator`, `AnimationState`, `AnimationTransition` and `AnimationClip` form a state machine that attaches a frame clip to each state, moves between states by parameter conditions, and blends two states. (the same API and arithmetic as the original, the same structure as Unity's Animator state machine)
 
-- `animator.add_state(state)` and `add_transition(transition)` add to the lists and return an index (`usize`). `get_states()` and `get_transitions()` return slices (`&[..]`).
-- `AnimationState::set_clip(Some(clip))` attaches a clip to a state. `AnimationTransition` links two state indices with `set_from(Some(state_index))` and `set_to(Some(state_index))`.
-- `set_property(name, value)`, `get_property(name)` and `get_properties()` hold named values. A value is anything that converts to `serde_json::Value` (numbers, booleans, strings), and a missing one is `None`.
-- This `AnimationClip` shares its name with the 3D `AnimationClip`, so it is used as `vanilla::resource::animationclip::AnimationClip`. It holds a list of frame regions (`Rect`), a duration (seconds) and whether it loops. `AnimationClip::from_atlas(&atlas_json, &frame_ids, fps, is_loop)` extracts regions from an atlas table (TexturePacker style or array style) and sets the duration to the frame count divided by frames per second.
-- `animator.tick(time_delta)` only updates the inner `Animation` (`get_animation()`, `get_animation_mut()`). Transitions have no place for conditions, and the animator never changes state by itself.
+- `animator.add_state(state)` and `add_transition(transition)` add to the lists and return an index (`usize`). `get_states()` and `get_transitions()` return slices (`&[..]`). It starts in the first state added.
+- `AnimationState` holds a clip (`set_clip(Some(clip))`), a speed (`set_speed`), and looping (`set_loop`, `None` follows the clip).
+- `AnimationTransition` links two states with `set_from(Some(state_index))` and `set_to(Some(state_index))`. With `set_from(None)` it can be taken from any state (Any State). Add conditions with `add_condition(name, AnimationConditionMode, threshold)`; with `set_exit_time(Some(normalized_time))` it is taken only when that time is passed, and the two states blend for `set_duration(seconds)`.
+- Parameters are set with `set_float`, `set_integer`, `set_bool` and `set_trigger`. A trigger used in a condition is reset when the transition is taken.
+- `animator.tick(time_delta)` advances the state time, checks Any State transitions first and then the rest in the order added, and takes the first one that matches. No new transition is checked while blending.
+- Read the chosen frame with `get_current_frame()`, and while blending with `get_next_frame()` and `get_transition_weight()`.
+- This `AnimationClip` shares its name with the 3D `AnimationClip`, so it is used as `vanilla::resource::animationclip::AnimationClip`. It holds a list of frame regions (`Rect`), a duration (seconds) and a loop flag. `AnimationClip::from_atlas(&atlas_json, &frame_ids, fps, is_loop)` takes regions from an atlas table (TexturePacker form or array form) and sets the duration to the frame count divided by frames per second.
 
 ```rust
 use serde_json::json;
 use vanilla::resource::animationclip::AnimationClip;
-use vanilla::{AnimationState, AnimationTransition, Animator};
+use vanilla::{AnimationConditionMode, AnimationState, AnimationTransition, Animator, Rect};
+
+let mut walk_clip = AnimationClip::new();
+walk_clip.set_frames(vec![Rect::create(0.0, 0.0, 32.0, 32.0), Rect::create(32.0, 0.0, 32.0, 32.0)]);
+walk_clip.set_duration(1.0);
+walk_clip.set_loop(true);
+let run_clip = AnimationClip::from_atlas(&json!({ "frames": { "run0": { "frame": { "x": 0, "y": 32, "w": 32, "h": 32 } }, "run1": { "frame": { "x": 32, "y": 32, "w": 32, "h": 32 } } } }), &["run0", "run1"], 4.0, true);
 
 let mut animator = Animator::new();
-let idle_clip = AnimationClip::from_atlas(&json!({ "frames": { "idle0": { "frame": { "x": 0, "y": 0, "w": 200, "h": 200 } } } }), &["idle0"], 10.0, true);
-let mut run_clip = AnimationClip::new();
-run_clip.set_loop(true);
-let mut idle_state = AnimationState::new();
-idle_state.set_clip(Some(idle_clip));
+let mut walk_state = AnimationState::new();
+walk_state.set_clip(Some(walk_clip));
 let mut run_state = AnimationState::new();
 run_state.set_clip(Some(run_clip));
-let idle_index = animator.add_state(idle_state);
+let walk_index = animator.add_state(walk_state);
 let run_index = animator.add_state(run_state);
-let mut transition = AnimationTransition::new();
-transition.set_from(Some(idle_index));
-transition.set_to(Some(run_index));
-animator.add_transition(transition);
-animator.set_property("speed", 2);
-animator.tick(1.0 / 60.0);
+let mut to_run = AnimationTransition::new();
+to_run.set_from(Some(walk_index));
+to_run.set_to(Some(run_index));
+to_run.set_duration(0.25);
+to_run.add_condition("speed", AnimationConditionMode::Greater, 3.0);
+animator.add_transition(to_run);
+let mut to_walk = AnimationTransition::new();
+to_walk.set_from(Some(run_index));
+to_walk.set_to(Some(walk_index));
+to_walk.add_condition("speed", AnimationConditionMode::Less, 1.0);
+animator.add_transition(to_walk);
 
-let states = animator.get_states();
-assert_eq!(states.len(), 2);
-assert_eq!(states[idle_index].get_clip().unwrap().get_duration(), 0.1);
-assert_eq!(animator.get_transitions()[0].get_to(), Some(run_index));
-assert_eq!(animator.get_property("speed").and_then(|value| value.as_i64()), Some(2));
+animator.set_float("speed", 5.0);
+animator.tick(0.125);
+assert!(animator.is_in_transition());
+assert_eq!(animator.get_next_state_index(), Some(run_index));
+animator.tick(0.25);
+assert_eq!(animator.get_current_state_index(), Some(run_index));
+assert!(!animator.is_in_transition());
+assert_eq!(animator.get_current_frame().map(|frame| frame.position.y), Some(32.0));
 ```
 
-For now, switching clips by character state is done by using `FiniteStateMachine` and `SpriteAnimator` together. State handlers in the Rust version cannot borrow the node tree, so update the machine in the scene's `tick` and then call `play_on_node` with the current state name. `play` does not restart a clip that is already playing, so calling it every frame is fine. To change state inside a handler, ask through the `change_state` of the handle obtained from `get_state_change_requester()`.
+`Animator` only picks frame regions and does not draw, so the game puts the chosen region on a `Sprite`. For the simple case of only switching clips by character state, you can also combine `FiniteStateMachine` and `SpriteAnimator`. State handlers in the Rust version cannot borrow the node tree, so update the machine in the scene's `tick` and then call `play_on_node` with the current state name. `play` does not restart a clip that is already playing, so calling it every frame is fine. To change state inside a handler, ask through the `change_state` of the handle obtained from `get_state_change_requester()`.
 
 ```rust,no_run
 use vanilla::{Engine, EngineConfiguration, FiniteStateMachine, ImageAsset, NodeId, Rect, Scene, SceneBase, Sprite, SpriteAnimator, SpriteAnimatorPlayOptions, StateHandlers, Vector2};

@@ -664,44 +664,57 @@ assert_eq!(resolve_timeline_easing("unknown", None).evaluate(0.3), 0.3);
 
 ## Animator
 
-`Animator`, `AnimationState`, `AnimationTransition`, `AnimationClip` 은 원본에서도 실험 단계의 뼈대이고, 러스트 판도 그 범위만 옮겼습니다. 지금은 상태와 전환, 프로퍼티를 담아 두는 그릇입니다.
+`Animator`, `AnimationState`, `AnimationTransition`, `AnimationClip` 은 상태마다 프레임 클립을 달고, 매개변수 조건으로 상태를 옮기며 두 상태를 섞는 상태 기계입니다. (원본과 같은 API 와 셈, 유니티 Animator 의 상태 기계와 같은 뼈대)
 
-- `animator.add_state(state)` 와 `add_transition(transition)` 은 목록에 넣고 번호(`usize`)를 돌려줍니다. `get_states()`, `get_transitions()` 는 조각(`&[..]`)을 돌려줍니다.
-- `AnimationState::set_clip(Some(clip))` 은 상태에 클립을 답니다. `AnimationTransition` 은 `set_from(Some(state_index))`, `set_to(Some(state_index))` 로 두 상태 번호를 잇습니다.
-- `set_property(name, value)`, `get_property(name)`, `get_properties()` 는 이름 붙은 값을 담습니다. 값은 `serde_json::Value` 로 바뀌는 것(숫자, 참거짓, 글)이고 없으면 `None` 입니다.
+- `animator.add_state(state)` 와 `add_transition(transition)` 은 목록에 넣고 번호(`usize`)를 돌려줍니다. `get_states()`, `get_transitions()` 는 조각(`&[..]`)을 돌려줍니다. 처음 더한 상태에서 시작합니다.
+- `AnimationState` 는 클립(`set_clip(Some(clip))`), 속도(`set_speed`), 되풀이(`set_loop`, `None` 이면 클립을 따름)를 담습니다.
+- `AnimationTransition` 은 `set_from(Some(state_index))`, `set_to(Some(state_index))` 로 두 상태를 잇습니다. `set_from(None)` 이면 어느 상태에서나 탑니다(Any State). `add_condition(이름, AnimationConditionMode, 기준 값)` 으로 조건을 더하고, `set_exit_time(Some(정규화 시간))` 이면 그 시각을 지날 때만, `set_duration(초)` 동안 두 상태를 섞습니다.
+- 매개변수는 `set_float`, `set_integer`, `set_bool`, `set_trigger` 로 넣습니다. 조건에 쓴 트리거는 전이를 타면 풀립니다.
+- `animator.tick(time_delta)` 가 상태 시간을 흘리고, Any State 전이부터 넣은 차례로 보아 처음 맞는 하나를 탑니다. 섞는 동안에는 새 전이를 보지 않습니다.
+- 고른 프레임은 `get_current_frame()`, 섞는 중이면 `get_next_frame()` 과 `get_transition_weight()` 로 읽습니다.
 - 이 `AnimationClip` 은 3D 의 `AnimationClip` 과 이름이 같아서 `vanilla::resource::animationclip::AnimationClip` 으로 씁니다. 프레임 영역(`Rect`) 목록, 길이(초), 반복 여부를 담습니다. `AnimationClip::from_atlas(&atlas_json, &frame_ids, fps, is_loop)` 는 아틀라스 표(TexturePacker 꼴이나 배열 꼴)에서 영역을 뽑고 길이를 프레임 수 나누기 초당 프레임 수로 정합니다.
-- `animator.tick(time_delta)` 는 안의 `Animation`(`get_animation()`, `get_animation_mut()`)만 갱신합니다. 전환에는 조건을 거는 자리가 없고, 상태를 스스로 바꾸지도 않습니다.
 
 ```rust
 use serde_json::json;
 use vanilla::resource::animationclip::AnimationClip;
-use vanilla::{AnimationState, AnimationTransition, Animator};
+use vanilla::{AnimationConditionMode, AnimationState, AnimationTransition, Animator, Rect};
+
+let mut walk_clip = AnimationClip::new();
+walk_clip.set_frames(vec![Rect::create(0.0, 0.0, 32.0, 32.0), Rect::create(32.0, 0.0, 32.0, 32.0)]);
+walk_clip.set_duration(1.0);
+walk_clip.set_loop(true);
+let run_clip = AnimationClip::from_atlas(&json!({ "frames": { "run0": { "frame": { "x": 0, "y": 32, "w": 32, "h": 32 } }, "run1": { "frame": { "x": 32, "y": 32, "w": 32, "h": 32 } } } }), &["run0", "run1"], 4.0, true);
 
 let mut animator = Animator::new();
-let idle_clip = AnimationClip::from_atlas(&json!({ "frames": { "idle0": { "frame": { "x": 0, "y": 0, "w": 200, "h": 200 } } } }), &["idle0"], 10.0, true);
-let mut run_clip = AnimationClip::new();
-run_clip.set_loop(true);
-let mut idle_state = AnimationState::new();
-idle_state.set_clip(Some(idle_clip));
+let mut walk_state = AnimationState::new();
+walk_state.set_clip(Some(walk_clip));
 let mut run_state = AnimationState::new();
 run_state.set_clip(Some(run_clip));
-let idle_index = animator.add_state(idle_state);
+let walk_index = animator.add_state(walk_state);
 let run_index = animator.add_state(run_state);
-let mut transition = AnimationTransition::new();
-transition.set_from(Some(idle_index));
-transition.set_to(Some(run_index));
-animator.add_transition(transition);
-animator.set_property("speed", 2);
-animator.tick(1.0 / 60.0);
+let mut to_run = AnimationTransition::new();
+to_run.set_from(Some(walk_index));
+to_run.set_to(Some(run_index));
+to_run.set_duration(0.25);
+to_run.add_condition("speed", AnimationConditionMode::Greater, 3.0);
+animator.add_transition(to_run);
+let mut to_walk = AnimationTransition::new();
+to_walk.set_from(Some(run_index));
+to_walk.set_to(Some(walk_index));
+to_walk.add_condition("speed", AnimationConditionMode::Less, 1.0);
+animator.add_transition(to_walk);
 
-let states = animator.get_states();
-assert_eq!(states.len(), 2);
-assert_eq!(states[idle_index].get_clip().unwrap().get_duration(), 0.1);
-assert_eq!(animator.get_transitions()[0].get_to(), Some(run_index));
-assert_eq!(animator.get_property("speed").and_then(|value| value.as_i64()), Some(2));
+animator.set_float("speed", 5.0);
+animator.tick(0.125);
+assert!(animator.is_in_transition());
+assert_eq!(animator.get_next_state_index(), Some(run_index));
+animator.tick(0.25);
+assert_eq!(animator.get_current_state_index(), Some(run_index));
+assert!(!animator.is_in_transition());
+assert_eq!(animator.get_current_frame().map(|frame| frame.position.y), Some(32.0));
 ```
 
-캐릭터의 상태에 따라 클립을 바꾸는 일은 지금은 `FiniteStateMachine` 과 `SpriteAnimator` 를 함께 써서 합니다. 러스트 판의 상태 처리 함수는 노드 트리를 빌릴 수 없으므로, 씬의 `tick` 에서 기계를 갱신한 뒤 지금 상태 이름으로 `play_on_node` 를 부릅니다. 같은 클립이 이미 돌고 있으면 `play` 는 다시 시작하지 않으므로 매 프레임 불러도 됩니다. 처리 함수 안에서 상태를 바꿀 때는 `get_state_change_requester()` 로 받은 손잡이의 `change_state` 로 부탁합니다.
+`Animator` 는 프레임 영역만 고르고 그리지 않으므로, 고른 영역은 게임이 `Sprite` 에 겁니다. 캐릭터의 상태에 따라 클립만 바꾸는 간단한 일은 `FiniteStateMachine` 과 `SpriteAnimator` 를 함께 써도 됩니다. 러스트 판의 상태 처리 함수는 노드 트리를 빌릴 수 없으므로, 씬의 `tick` 에서 기계를 갱신한 뒤 지금 상태 이름으로 `play_on_node` 를 부릅니다. 같은 클립이 이미 돌고 있으면 `play` 는 다시 시작하지 않으므로 매 프레임 불러도 됩니다. 처리 함수 안에서 상태를 바꿀 때는 `get_state_change_requester()` 로 받은 손잡이의 `change_state` 로 부탁합니다.
 
 ```rust,no_run
 use vanilla::{Engine, EngineConfiguration, FiniteStateMachine, ImageAsset, NodeId, Rect, Scene, SceneBase, Sprite, SpriteAnimator, SpriteAnimatorPlayOptions, StateHandlers, Vector2};

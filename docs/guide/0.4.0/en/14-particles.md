@@ -514,7 +514,7 @@ A post-processing chain applied to the whole scene. The scene draws to the scree
 - `set_region(x, y, width, height, corner_radius)` applies effects only to a region in canvas pixels (top left origin). Outside the rounded corners the original screen is kept. `clear_region()` goes back to the whole screen.
 - The order effects are applied in is fixed (shape distortion, blur, glitch, color, patterns, transitions; `ScreenEffect::get_effect_order()`, the same as the enum declaration order).
 - It implements `TimelinePropertyTarget`, so it can be an `External` target of a `Timeline`. In `set_timeline_property(name, value)`, `"vignette"` is the strength (0 turns it off), `"shockwave.radius"` is a parameter, `"fade.color"` is a color, and `"fade.enabled"` turns it on.
-- It uses GL resources, so call `destroy(graphic)` when you are done. Unlike the original it takes a `Graphic`, so call it from a draw function that receives a `Graphic` (such as `post_draw`). If you never call it, the GL resources stay until the context goes away. Effect settings remain, and the next `end` creates the resources again.
+- It uses GL resources, so call `destroy()` when you are done. Like the original it holds the GL context that created the resources (a weak handle), so it takes no argument, and it also releases them by itself when the effect is dropped (when the scene is unloaded or the node is destroyed). Effect settings remain, and the next `end` creates the resources again.
 - If building a pass shader fails, the original throws, but the Rust version reports it once and skips that pass.
 
 ```rust
@@ -632,7 +632,7 @@ Grabs what was drawn on the screen before its node, over the node's area, and re
 
 - Because it grabs what was drawn before, the effect is only visible on the node drawn last in the scene. Children of that node are drawn on top of the effect.
 - `set_amplitude(pixels)` (sway width, default 3), `set_frequency(value)` (frequency multiplied by row position, default 0.05), `set_speed(value)` (speed multiplied by time, default 2). The sway of one row can be checked with `calculate_row_offset(local_y)`.
-- If the area goes outside the screen, the screen's edge pixels are stretched. The grabbed texture is a GL resource, so call `destroy(graphic)` when you are done (it takes a `Graphic` like `ScreenEffect`).
+- If the area goes outside the screen, the screen's edge pixels are stretched. The grabbed texture is a GL resource, so call `destroy()` when you are done. (like `ScreenEffect` it takes no argument, and the component also releases it by itself when dropped)
 
 ```rust,no_run
 use vanilla::{Color, Engine, EngineConfiguration, HeatHazeEffect, Paint, Scene, SceneBase, Vector2};
@@ -692,7 +692,7 @@ fn main() {
 - Screen coordinates have +y pointing down, so gravity that pulls upward is negative.
 - In a world space system, `emit` uses the node position recorded at the last node update. To emit right after moving the node, use `ParticleSystem::emit_in_tree`.
 - `ShaderSprite` is not a `Sprite`, so `get_component::<Sprite>()` does not find it. Use `get_component::<ShaderSprite>()`.
-- `HeatHazeEffect` and `ScreenEffect` grab what has already been drawn. The draw order (which node comes last, where `begin` and `end` are called) decides the result. Both need a `Graphic` passed to `destroy` to release their GL resources.
+- `HeatHazeEffect` and `ScreenEffect` grab what has already been drawn. The draw order (which node comes last, where `begin` and `end` are called) decides the result. Both release their GL resources on `destroy()` or when they are dropped.
 
 ## Related types
 
