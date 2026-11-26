@@ -3315,6 +3315,7 @@ dependencies = [
  "objc2-game-controller",
  "opus-pure",
  "oxideav-aac",
+ "png",
  "rav1d",
  "raw-window-handle",
  "resvg",
