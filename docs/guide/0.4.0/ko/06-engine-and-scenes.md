@@ -86,7 +86,7 @@ engine_configuration.view_scale_mode = ViewScaleMode::StretchShortExpandLong;
 engine_configuration.asset_directory_paths = vec![PathBuf::from("assets")];
 let mut engine = Engine::new(engine_configuration);
 assert_eq!(engine.get_frame_number(), 1);
-assert!(engine.get_canvas().is_none());
+assert_eq!(engine.get_canvas().is_some(), engine.get_graphic().is_some());
 let view_manager = engine.get_view_manager();
 assert_eq!(view_manager.get_reference_resolution_size(), Vector2::create(1920.0, 1080.0));
 assert_eq!(view_manager.get_view_scale_mode(), ViewScaleMode::StretchShortExpandLong);
