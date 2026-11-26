@@ -11,27 +11,31 @@
 //! - 공개 API 는 Skeleton2DData::create_from_dragon_bones 이다. 원본과 같은 꼴, 같은 오류 글이다.
 //==============================================================================
 use crate::base::color::Color;
+use crate::base::trigonometry;
 use crate::core::graphic::BlendMode;
 use crate::experimental::skeleton2d::skeleton2danimation::{Skeleton2DAnimation, Skeleton2DCurveType, Skeleton2DEvent, Skeleton2DTimeline, Skeleton2DTimelineType};
 use crate::experimental::skeleton2d::skeleton2ddata::{Skeleton2DAttachment, Skeleton2DBoneData, Skeleton2DData, Skeleton2DIkConstraintData, Skeleton2DMeshAttachment, Skeleton2DRegionAttachment, Skeleton2DSkin, Skeleton2DSlotData};
 use serde_json::{Map, Value};
 
+// 도를 라디안으로. (원본 DEGREE_TO_RADIAN = Math.PI / 180)
+const DEGREE_TO_RADIAN: f64 = std::f64::consts::PI / 180.0;
+
 /// 읽기 결과. (실패는 오류 글)
 type ReadResult<T> = Result<T, String>;
 
 /// 키프레임 곡선. (종류, 베지어 제어점)
-type FrameCurve = (Skeleton2DCurveType, Option<[f32; 4]>);
+type FrameCurve = (Skeleton2DCurveType, Option<[f64; 4]>);
 
 //==============================================================================
 /// 뼈 transform. (도)
 //==============================================================================
 struct DragonBonesTransform {
-	x: f32,
-	y: f32,
-	rotation: f32,
-	shear_y: f32,
-	scale_x: f32,
-	scale_y: f32,
+	x: f64,
+	y: f64,
+	rotation: f64,
+	shear_y: f64,
+	scale_x: f64,
+	scale_y: f64,
 }
 
 //==============================================================================
@@ -44,10 +48,10 @@ fn create_read_error(message: &str) -> String {
 //==============================================================================
 /// 숫자 칸 읽기. (없거나 숫자가 아니면 기본값)
 //==============================================================================
-fn read_number(source: &Map<String, Value>, key: &str, default_value: f32) -> f32 {
+fn read_number(source: &Map<String, Value>, key: &str, default_value: f64) -> f64 {
 	match source.get(key).and_then(|value| value.as_f64()) {
 		Some(number) => {
-			number as f32
+			number as f64
 		}
 		None => {
 			default_value
@@ -79,8 +83,8 @@ fn read_array<'a>(source: &'a Map<String, Value>, key: &str) -> &'a [Value] {
 //==============================================================================
 /// 숫자 배열 칸 읽기. (없으면 빈 배열, 숫자가 아닌 값은 0)
 //==============================================================================
-fn read_number_array(source: &Map<String, Value>, key: &str) -> Vec<f32> {
-	read_array(source, key).iter().map(|value| value.as_f64().unwrap_or(0.0) as f32).collect()
+fn read_number_array(source: &Map<String, Value>, key: &str) -> Vec<f64> {
+	read_array(source, key).iter().map(|value| value.as_f64().unwrap_or(0.0) as f64).collect()
 }
 
 //==============================================================================
@@ -129,20 +133,15 @@ fn read_transform(transform_json: Option<&Value>) -> DragonBonesTransform {
 }
 
 //==============================================================================
-/// 색 변환의 곱 읽기. (aM, rM, gM, bM 은 0 ~ 100, 더하기 aO 등은 읽지 않는다)
+/// 색 변환의 곱 읽기. (aM, rM, gM, bM 은 0 ~ 100, 더하기 aO 등은 읽지 않는다, 빨강, 초록, 파랑, 알파를 원본처럼 f64 로)
 //==============================================================================
-fn read_color_transform(color_json: Option<&Value>) -> Color {
+fn read_color_transform(color_json: Option<&Value>) -> [f64; 4] {
 	match color_json.and_then(|value| value.as_object()) {
 		Some(color_object) => {
-			Color::create(
-				read_number(color_object, "rM", 100.0) * 0.01,
-				read_number(color_object, "gM", 100.0) * 0.01,
-				read_number(color_object, "bM", 100.0) * 0.01,
-				read_number(color_object, "aM", 100.0) * 0.01,
-			)
+			[read_number(color_object, "rM", 100.0) * 0.01, read_number(color_object, "gM", 100.0) * 0.01, read_number(color_object, "bM", 100.0) * 0.01, read_number(color_object, "aM", 100.0) * 0.01]
 		}
 		None => {
-			Color::create(1.0, 1.0, 1.0, 1.0)
+			[1.0, 1.0, 1.0, 1.0]
 		}
 	}
 }
@@ -155,14 +154,14 @@ fn read_color_transform(color_json: Option<&Value>) -> Color {
 fn read_frame_curve(frame_json: &Map<String, Value>) -> FrameCurve {
 	if let Some(Value::Array(curve_values)) = frame_json.get("curve") {
 		if curve_values.len() == 4 {
-			let read_value = |value_index: usize| -> f32 { curve_values[value_index].as_f64().unwrap_or(0.0) as f32 };
+			let read_value = |value_index: usize| -> f64 { curve_values[value_index].as_f64().unwrap_or(0.0) as f64 };
 			return (Skeleton2DCurveType::Bezier, Some([read_value(0), read_value(1), read_value(2), read_value(3)]));
 		}
 		return (Skeleton2DCurveType::Linear, None);
 	}
 	let tween_easing = match frame_json.get("tweenEasing").and_then(|value| value.as_f64()) {
 		Some(tween_easing) => {
-			tween_easing as f32
+			tween_easing as f64
 		}
 		None => {
 			return (Skeleton2DCurveType::Stepped, None);
@@ -246,12 +245,12 @@ fn read_mesh_display(skeleton_data: &Skeleton2DData, attachment_name: &str, fram
 	if weights.is_empty() {
 		// 무게 없는 꼭짓점은 display transform 을 걸어 슬롯 뼈 기준으로 담는다.
 		let transform = read_transform(display_json.get("transform"));
-		let x_axis_radian = transform.rotation.to_radians();
-		let y_axis_radian = (transform.rotation + transform.shear_y).to_radians();
-		let local_a = x_axis_radian.cos() * transform.scale_x;
-		let local_b = x_axis_radian.sin() * transform.scale_x;
-		let local_c = -y_axis_radian.sin() * transform.scale_y;
-		let local_d = y_axis_radian.cos() * transform.scale_y;
+		let x_axis_radian = transform.rotation * DEGREE_TO_RADIAN;
+		let y_axis_radian = (transform.rotation + transform.shear_y) * DEGREE_TO_RADIAN;
+		let local_a = trigonometry::cos(x_axis_radian) * transform.scale_x;
+		let local_b = trigonometry::sin(x_axis_radian) * transform.scale_x;
+		let local_c = -trigonometry::sin(y_axis_radian) * transform.scale_y;
+		let local_d = trigonometry::cos(y_axis_radian) * transform.scale_y;
 		let mut bone_local_vertices = Vec::with_capacity(vertex_count * 2);
 		for vertex_index in 0..vertex_count {
 			let vertex_x = vertices[vertex_index * 2];
@@ -269,7 +268,7 @@ fn read_mesh_display(skeleton_data: &Skeleton2DData, attachment_name: &str, fram
 		return Err(create_read_error(&format!("{} 의 무게는 slotPose 와 bonePose 가 있어야 한다.", place)));
 	}
 	let bone_count = skeleton_data.get_bones().len();
-	let pose_bone_indices: Vec<f32> = bone_pose.chunks_exact(7).map(|pose| pose[0]).collect();
+	let pose_bone_indices: Vec<f64> = bone_pose.chunks_exact(7).map(|pose| pose[0]).collect();
 	let mut influence_counts = Vec::with_capacity(vertex_count);
 	let mut influence_bone_indices = Vec::new();
 	let mut influence_values = Vec::new();
@@ -323,9 +322,9 @@ fn read_mesh_display(skeleton_data: &Skeleton2DData, attachment_name: &str, fram
 //==============================================================================
 /// 시간줄 키프레임 시각 목록. (프레임 수를 쌓아 초로, duration 기본 1)
 //==============================================================================
-fn read_frame_times(frame_json_list: &[Value], frame_rate: f32) -> Vec<f32> {
+fn read_frame_times(frame_json_list: &[Value], frame_rate: f64) -> Vec<f64> {
 	let mut frame_times = Vec::with_capacity(frame_json_list.len());
-	let mut frame_start = 0.0f32;
+	let mut frame_start = 0.0f64;
 	for frame_json in frame_json_list {
 		frame_times.push(frame_start / frame_rate);
 		let duration = match frame_json.as_object() {
@@ -344,7 +343,7 @@ fn read_frame_times(frame_json_list: &[Value], frame_rate: f32) -> Vec<f32> {
 //==============================================================================
 /// 그리기 차례 오프셋 풀기. ([슬롯 번호, 옮김, ...] → 그리는 차례의 슬롯 번호 모두, 비었으면 None)
 //==============================================================================
-fn read_z_order(z_order_values: &[f32], slot_count: usize, place: &str) -> ReadResult<Option<Vec<usize>>> {
+fn read_z_order(z_order_values: &[f64], slot_count: usize, place: &str) -> ReadResult<Option<Vec<usize>>> {
 	if z_order_values.is_empty() {
 		return Ok(None);
 	}
@@ -353,7 +352,7 @@ fn read_z_order(z_order_values: &[f32], slot_count: usize, place: &str) -> ReadR
 	let mut original_index = 0usize;
 	for pair in z_order_values.chunks_exact(2) {
 		let slot_value = pair[0];
-		if slot_value < original_index as f32 || slot_value >= slot_count as f32 {
+		if slot_value < original_index as f64 || slot_value >= slot_count as f64 {
 			return Err(create_read_error(&format!("{} 의 zOrder 슬롯 번호 {} 가 차례가 아니거나 없다.", place, slot_value)));
 		}
 		let slot_index = slot_value as usize;
@@ -361,8 +360,8 @@ fn read_z_order(z_order_values: &[f32], slot_count: usize, place: &str) -> ReadR
 			unchanged_slots.push(original_index);
 			original_index += 1;
 		}
-		let order_value = original_index as f32 + pair[1];
-		if order_value < 0.0 || order_value >= slot_count as f32 || draw_order[order_value as usize].is_some() {
+		let order_value = original_index as f64 + pair[1];
+		if order_value < 0.0 || order_value >= slot_count as f64 || draw_order[order_value as usize].is_some() {
 			return Err(create_read_error(&format!("{} 의 zOrder 옮김이 자리를 벗어나거나 겹친다.", place)));
 		}
 		draw_order[order_value as usize] = Some(original_index);
@@ -396,7 +395,7 @@ fn read_frame_object(frame_json: &Value) -> &Map<String, Value> {
 //==============================================================================
 /// 회전 키를 앞 키에서 이어지는 값으로 펴기. (clockwise 0 은 가까운 쪽, 양수는 시계 방향, 음수는 반시계 방향으로 그 바퀴 수)
 //==============================================================================
-fn unwrap_rotation(rotation: f32, previous_rotation: f32, previous_clockwise: &mut f32) -> f32 {
+fn unwrap_rotation(rotation: f64, previous_rotation: f64, previous_clockwise: &mut f64) -> f64 {
 	if *previous_clockwise == 0.0 {
 		let mut difference = (rotation - previous_rotation) % 360.0;
 		if difference > 180.0 {
@@ -417,7 +416,7 @@ fn unwrap_rotation(rotation: f32, previous_rotation: f32, previous_clockwise: &m
 //==============================================================================
 /// 클립 하나 읽기.
 //==============================================================================
-fn read_animation(skeleton_data: &Skeleton2DData, animation_json: &Map<String, Value>, frame_rate: f32, slot_display_names: &[Vec<Option<String>>]) -> ReadResult<Skeleton2DAnimation> {
+fn read_animation(skeleton_data: &Skeleton2DData, animation_json: &Map<String, Value>, frame_rate: f64, slot_display_names: &[Vec<Option<String>>]) -> ReadResult<Skeleton2DAnimation> {
 	let mut animation_name = read_string(animation_json, "name", "default");
 	if animation_name.is_empty() {
 		animation_name = "default";
@@ -450,8 +449,8 @@ fn read_animation(skeleton_data: &Skeleton2DData, animation_json: &Map<String, V
 			let mut rotate_timeline = Skeleton2DTimeline::new(Skeleton2DTimelineType::Rotate, Some(bone_index));
 			let mut shear_timeline = Skeleton2DTimeline::new(Skeleton2DTimelineType::Shear, Some(bone_index));
 			let frame_times = read_frame_times(rotate_frame_list, frame_rate);
-			let mut previous_rotation = 0.0f32;
-			let mut previous_clockwise = 0.0f32;
+			let mut previous_rotation = 0.0f64;
+			let mut previous_clockwise = 0.0f64;
 			let mut has_skew = false;
 			for (frame_index, (frame_json, frame_time)) in rotate_frame_list.iter().zip(frame_times.iter()).enumerate() {
 				let frame_object = read_frame_object(frame_json);
@@ -517,7 +516,7 @@ fn read_animation(skeleton_data: &Skeleton2DData, animation_json: &Map<String, V
 				let (curve_type, curve_values) = read_frame_curve(frame_object);
 				let color_json = if frame_object.contains_key("value") { frame_object.get("value") } else { frame_object.get("color") };
 				let color = read_color_transform(color_json);
-				timeline.add_value_frame(*frame_time, &[color.red, color.green, color.blue, color.alpha], curve_type, curve_values);
+				timeline.add_value_frame(*frame_time, &color, curve_type, curve_values);
 			}
 			animation.add_timeline(timeline);
 		}
@@ -556,7 +555,7 @@ fn read_animation(skeleton_data: &Skeleton2DData, animation_json: &Map<String, V
 				};
 				let name = read_string(event_object, "name", "");
 				let int_value = read_array(event_object, "ints").first().and_then(|value| value.as_f64()).unwrap_or(0.0) as i32;
-				let float_value = read_array(event_object, "floats").first().and_then(|value| value.as_f64()).unwrap_or(0.0) as f32;
+				let float_value = read_array(event_object, "floats").first().and_then(|value| value.as_f64()).unwrap_or(0.0) as f64;
 				let string_value = read_array(event_object, "strings").first().and_then(|value| value.as_str()).unwrap_or("");
 				timeline.add_event_frame(Skeleton2DEvent::new(name, *frame_time, int_value, float_value, string_value));
 			}
@@ -682,7 +681,7 @@ pub(crate) fn read_dragon_bones_json(json: &Value, armature_name: Option<&str>) 
 
 	// 슬롯. (처음 붙임은 스킨을 읽은 뒤 displayIndex 로 정하고 그 뒤에 자료에 넣는다)
 	let mut slot_data_list: Vec<Skeleton2DSlotData> = Vec::new();
-	let mut display_index_list: Vec<f32> = Vec::new();
+	let mut display_index_list: Vec<f64> = Vec::new();
 	for slot_json in read_array(armature_json, "slot") {
 		let slot_object = match slot_json.as_object() {
 			Some(slot_object) => {
@@ -703,7 +702,8 @@ pub(crate) fn read_dragon_bones_json(json: &Value, armature_name: Option<&str>) 
 			}
 		};
 		let mut slot_data = Skeleton2DSlotData::new(slot_data_list.len(), slot_name, bone_index);
-		slot_data.set_color(read_color_transform(slot_object.get("color")));
+		let color = read_color_transform(slot_object.get("color"));
+		slot_data.set_color(Color::create(color[0] as f32, color[1] as f32, color[2] as f32, color[3] as f32));
 		slot_data.set_blend_mode(read_blend_mode(read_string(slot_object, "blendMode", "normal")));
 		slot_data_list.push(slot_data);
 		display_index_list.push(read_number(slot_object, "displayIndex", 0.0));

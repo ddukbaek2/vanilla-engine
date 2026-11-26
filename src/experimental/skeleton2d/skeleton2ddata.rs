@@ -29,17 +29,19 @@
 //! ```
 //==============================================================================
 use crate::base::color::Color;
+use crate::base::trigonometry;
 use crate::core::graphic::BlendMode;
 use crate::experimental::skeleton2d::dragonbonesreader::read_dragon_bones_json;
 use crate::experimental::skeleton2d::skeleton2danimation::Skeleton2DAnimation;
 use crate::experimental::skeleton2d::skeleton2djsonreader::read_skeleton2d_json;
+use std::f64::consts::PI;
 use std::rc::Rc;
 
 /// 처음 스킨 이름.
 const DEFAULT_SKIN_NAME: &str = "default";
 
 /// 네모 붙임의 꼭짓점 UV. (조각 안 0 ~ 1, 왼쪽 위, 오른쪽 위, 오른쪽 아래, 왼쪽 아래)
-const REGION_UVS: [f32; 8] = [0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0];
+const REGION_UVS: [f64; 8] = [0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0];
 
 /// 네모 붙임의 삼각형 둘.
 const REGION_TRIANGLES: [usize; 6] = [0, 1, 2, 0, 2, 3];
@@ -75,14 +77,14 @@ pub struct Skeleton2DBoneData {
 	index: usize,
 	name: String,
 	parent_index: Option<usize>,
-	x: f32,
-	y: f32,
-	rotation: f32,
-	scale_x: f32,
-	scale_y: f32,
-	shear_x: f32,
-	shear_y: f32,
-	length: f32,
+	x: f64,
+	y: f64,
+	rotation: f64,
+	scale_x: f64,
+	scale_y: f64,
+	shear_x: f64,
+	shear_y: f64,
+	length: f64,
 }
 
 impl Skeleton2DBoneData {
@@ -155,7 +157,7 @@ impl Skeleton2DBoneData {
 	/// - `shear_x`: 기울임 x. (도, x 축만 더 돈다)
 	/// - `shear_y`: 기울임 y. (도, y 축만 더 돈다)
 	//==============================================================================
-	pub fn set_transform(&mut self, x: f32, y: f32, rotation: f32, scale_x: f32, scale_y: f32, shear_x: f32, shear_y: f32) {
+	pub fn set_transform(&mut self, x: f64, y: f64, rotation: f64, scale_x: f64, scale_y: f64, shear_x: f64, shear_y: f64) {
 		self.x = x;
 		self.y = y;
 		self.rotation = rotation;
@@ -171,7 +173,7 @@ impl Skeleton2DBoneData {
 	/// # 돌려줌
 	/// 부모 기준 x.
 	//==============================================================================
-	pub fn get_x(&self) -> f32 {
+	pub fn get_x(&self) -> f64 {
 		self.x
 	}
 
@@ -181,7 +183,7 @@ impl Skeleton2DBoneData {
 	/// # 돌려줌
 	/// 부모 기준 y.
 	//==============================================================================
-	pub fn get_y(&self) -> f32 {
+	pub fn get_y(&self) -> f64 {
 		self.y
 	}
 
@@ -191,7 +193,7 @@ impl Skeleton2DBoneData {
 	/// # 돌려줌
 	/// 회전. (도)
 	//==============================================================================
-	pub fn get_rotation(&self) -> f32 {
+	pub fn get_rotation(&self) -> f64 {
 		self.rotation
 	}
 
@@ -201,7 +203,7 @@ impl Skeleton2DBoneData {
 	/// # 돌려줌
 	/// 크기 x.
 	//==============================================================================
-	pub fn get_scale_x(&self) -> f32 {
+	pub fn get_scale_x(&self) -> f64 {
 		self.scale_x
 	}
 
@@ -211,7 +213,7 @@ impl Skeleton2DBoneData {
 	/// # 돌려줌
 	/// 크기 y.
 	//==============================================================================
-	pub fn get_scale_y(&self) -> f32 {
+	pub fn get_scale_y(&self) -> f64 {
 		self.scale_y
 	}
 
@@ -221,7 +223,7 @@ impl Skeleton2DBoneData {
 	/// # 돌려줌
 	/// 기울임 x. (도)
 	//==============================================================================
-	pub fn get_shear_x(&self) -> f32 {
+	pub fn get_shear_x(&self) -> f64 {
 		self.shear_x
 	}
 
@@ -231,7 +233,7 @@ impl Skeleton2DBoneData {
 	/// # 돌려줌
 	/// 기울임 y. (도)
 	//==============================================================================
-	pub fn get_shear_y(&self) -> f32 {
+	pub fn get_shear_y(&self) -> f64 {
 		self.shear_y
 	}
 
@@ -241,7 +243,7 @@ impl Skeleton2DBoneData {
 	/// # 인자
 	/// - `length`: 뼈 길이. (지역 x 축 쪽)
 	//==============================================================================
-	pub fn set_length(&mut self, length: f32) {
+	pub fn set_length(&mut self, length: f64) {
 		self.length = length;
 	}
 
@@ -251,7 +253,7 @@ impl Skeleton2DBoneData {
 	/// # 돌려줌
 	/// 뼈 길이.
 	//==============================================================================
-	pub fn get_length(&self) -> f32 {
+	pub fn get_length(&self) -> f64 {
 		self.length
 	}
 }
@@ -419,7 +421,7 @@ pub struct Skeleton2DIkConstraintData {
 	bone_indices: Vec<usize>,
 	target_index: usize,
 	is_bend_positive: bool,
-	mix: f32,
+	mix: f64,
 }
 
 impl Skeleton2DIkConstraintData {
@@ -512,7 +514,7 @@ impl Skeleton2DIkConstraintData {
 	/// # 인자
 	/// - `mix`: 세기. (0 이면 걸지 않고 1 이면 끝까지)
 	//==============================================================================
-	pub fn set_mix(&mut self, mix: f32) {
+	pub fn set_mix(&mut self, mix: f64) {
 		self.mix = mix;
 	}
 
@@ -522,7 +524,7 @@ impl Skeleton2DIkConstraintData {
 	/// # 돌려줌
 	/// 세기. (0 ~ 1)
 	//==============================================================================
-	pub fn get_mix(&self) -> f32 {
+	pub fn get_mix(&self) -> f64 {
 		self.mix
 	}
 }
@@ -547,15 +549,15 @@ impl Skeleton2DIkConstraintData {
 pub struct Skeleton2DRegionAttachment {
 	name: String,
 	frame_name: String,
-	x: f32,
-	y: f32,
-	rotation: f32,
-	scale_x: f32,
-	scale_y: f32,
-	width: f32,
-	height: f32,
-	pivot_x: f32,
-	pivot_y: f32,
+	x: f64,
+	y: f64,
+	rotation: f64,
+	scale_x: f64,
+	scale_y: f64,
+	width: f64,
+	height: f64,
+	pivot_x: f64,
+	pivot_y: f64,
 }
 
 impl Skeleton2DRegionAttachment {
@@ -615,7 +617,7 @@ impl Skeleton2DRegionAttachment {
 	/// - `scale_x`: 크기 x.
 	/// - `scale_y`: 크기 y.
 	//==============================================================================
-	pub fn set_transform(&mut self, x: f32, y: f32, rotation: f32, scale_x: f32, scale_y: f32) {
+	pub fn set_transform(&mut self, x: f64, y: f64, rotation: f64, scale_x: f64, scale_y: f64) {
 		self.x = x;
 		self.y = y;
 		self.rotation = rotation;
@@ -629,7 +631,7 @@ impl Skeleton2DRegionAttachment {
 	/// # 돌려줌
 	/// 뼈 기준 x.
 	//==============================================================================
-	pub fn get_x(&self) -> f32 {
+	pub fn get_x(&self) -> f64 {
 		self.x
 	}
 
@@ -639,7 +641,7 @@ impl Skeleton2DRegionAttachment {
 	/// # 돌려줌
 	/// 뼈 기준 y.
 	//==============================================================================
-	pub fn get_y(&self) -> f32 {
+	pub fn get_y(&self) -> f64 {
 		self.y
 	}
 
@@ -649,7 +651,7 @@ impl Skeleton2DRegionAttachment {
 	/// # 돌려줌
 	/// 회전. (도)
 	//==============================================================================
-	pub fn get_rotation(&self) -> f32 {
+	pub fn get_rotation(&self) -> f64 {
 		self.rotation
 	}
 
@@ -659,7 +661,7 @@ impl Skeleton2DRegionAttachment {
 	/// # 돌려줌
 	/// 크기 x.
 	//==============================================================================
-	pub fn get_scale_x(&self) -> f32 {
+	pub fn get_scale_x(&self) -> f64 {
 		self.scale_x
 	}
 
@@ -669,7 +671,7 @@ impl Skeleton2DRegionAttachment {
 	/// # 돌려줌
 	/// 크기 y.
 	//==============================================================================
-	pub fn get_scale_y(&self) -> f32 {
+	pub fn get_scale_y(&self) -> f64 {
 		self.scale_y
 	}
 
@@ -680,7 +682,7 @@ impl Skeleton2DRegionAttachment {
 	/// - `width`: 너비.
 	/// - `height`: 높이.
 	//==============================================================================
-	pub fn set_size(&mut self, width: f32, height: f32) {
+	pub fn set_size(&mut self, width: f64, height: f64) {
 		self.width = width;
 		self.height = height;
 	}
@@ -691,7 +693,7 @@ impl Skeleton2DRegionAttachment {
 	/// # 돌려줌
 	/// 너비. (0 이면 조각 너비)
 	//==============================================================================
-	pub fn get_width(&self) -> f32 {
+	pub fn get_width(&self) -> f64 {
 		self.width
 	}
 
@@ -701,7 +703,7 @@ impl Skeleton2DRegionAttachment {
 	/// # 돌려줌
 	/// 높이. (0 이면 조각 높이)
 	//==============================================================================
-	pub fn get_height(&self) -> f32 {
+	pub fn get_height(&self) -> f64 {
 		self.height
 	}
 
@@ -712,7 +714,7 @@ impl Skeleton2DRegionAttachment {
 	/// - `pivot_x`: 축점 x 몫.
 	/// - `pivot_y`: 축점 y 몫.
 	//==============================================================================
-	pub fn set_pivot(&mut self, pivot_x: f32, pivot_y: f32) {
+	pub fn set_pivot(&mut self, pivot_x: f64, pivot_y: f64) {
 		self.pivot_x = pivot_x;
 		self.pivot_y = pivot_y;
 	}
@@ -723,7 +725,7 @@ impl Skeleton2DRegionAttachment {
 	/// # 돌려줌
 	/// 축점 x 몫.
 	//==============================================================================
-	pub fn get_pivot_x(&self) -> f32 {
+	pub fn get_pivot_x(&self) -> f64 {
 		self.pivot_x
 	}
 
@@ -733,7 +735,7 @@ impl Skeleton2DRegionAttachment {
 	/// # 돌려줌
 	/// 축점 y 몫.
 	//==============================================================================
-	pub fn get_pivot_y(&self) -> f32 {
+	pub fn get_pivot_y(&self) -> f64 {
 		self.pivot_y
 	}
 }
@@ -760,12 +762,12 @@ impl Skeleton2DRegionAttachment {
 pub struct Skeleton2DMeshAttachment {
 	name: String,
 	frame_name: String,
-	uvs: Vec<f32>,
+	uvs: Vec<f64>,
 	triangles: Vec<usize>,
-	vertices: Vec<f32>,
+	vertices: Vec<f64>,
 	influence_counts: Vec<usize>,
 	influence_bone_indices: Vec<usize>,
-	influence_values: Vec<f32>,
+	influence_values: Vec<f64>,
 }
 
 impl Skeleton2DMeshAttachment {
@@ -819,7 +821,7 @@ impl Skeleton2DMeshAttachment {
 	/// - `uvs`: 꼭짓점마다 u, v. (조각 안 0 ~ 1)
 	/// - `triangles`: 삼각형마다 꼭짓점 번호 셋.
 	//==============================================================================
-	pub fn set_geometry(&mut self, uvs: Vec<f32>, triangles: Vec<usize>) {
+	pub fn set_geometry(&mut self, uvs: Vec<f64>, triangles: Vec<usize>) {
 		self.uvs = uvs;
 		self.triangles = triangles;
 	}
@@ -830,7 +832,7 @@ impl Skeleton2DMeshAttachment {
 	/// # 돌려줌
 	/// 꼭짓점마다 u, v.
 	//==============================================================================
-	pub fn get_uvs(&self) -> &[f32] {
+	pub fn get_uvs(&self) -> &[f64] {
 		&self.uvs
 	}
 
@@ -860,7 +862,7 @@ impl Skeleton2DMeshAttachment {
 	/// # 인자
 	/// - `vertices`: 꼭짓점마다 x, y.
 	//==============================================================================
-	pub fn set_vertices(&mut self, vertices: Vec<f32>) {
+	pub fn set_vertices(&mut self, vertices: Vec<f64>) {
 		self.vertices = vertices;
 		self.influence_counts.clear();
 		self.influence_bone_indices.clear();
@@ -873,7 +875,7 @@ impl Skeleton2DMeshAttachment {
 	/// # 돌려줌
 	/// 꼭짓점마다 x, y. (무게 있는 메시는 빈 배열)
 	//==============================================================================
-	pub fn get_vertices(&self) -> &[f32] {
+	pub fn get_vertices(&self) -> &[f64] {
 		&self.vertices
 	}
 
@@ -885,7 +887,7 @@ impl Skeleton2DMeshAttachment {
 	/// - `influence_bone_indices`: 영향마다 뼈 번호.
 	/// - `influence_values`: 영향마다 그 뼈 기준 묶은 자리 x, y 와 무게.
 	//==============================================================================
-	pub fn set_weights(&mut self, influence_counts: Vec<usize>, influence_bone_indices: Vec<usize>, influence_values: Vec<f32>) {
+	pub fn set_weights(&mut self, influence_counts: Vec<usize>, influence_bone_indices: Vec<usize>, influence_values: Vec<f64>) {
 		self.vertices.clear();
 		self.influence_counts = influence_counts;
 		self.influence_bone_indices = influence_bone_indices;
@@ -928,7 +930,7 @@ impl Skeleton2DMeshAttachment {
 	/// # 돌려줌
 	/// 영향마다 x, y, 무게.
 	//==============================================================================
-	pub fn get_influence_values(&self) -> &[f32] {
+	pub fn get_influence_values(&self) -> &[f64] {
 		&self.influence_values
 	}
 }
@@ -1013,7 +1015,7 @@ impl Skeleton2DAttachment {
 	/// # 돌려줌
 	/// 꼭짓점마다 u, v. (네모는 왼쪽 위부터 시계 방향 넷)
 	//==============================================================================
-	pub fn get_uvs(&self) -> &[f32] {
+	pub fn get_uvs(&self) -> &[f64] {
 		match self {
 			Skeleton2DAttachment::Region(_) => {
 				&REGION_UVS
@@ -1186,7 +1188,7 @@ impl Skeleton2DSkin {
 #[derive(Clone, Debug)]
 pub struct Skeleton2DData {
 	name: String,
-	frame_rate: f32,
+	frame_rate: f64,
 	bones: Vec<Skeleton2DBoneData>,
 	slots: Vec<Skeleton2DSlotData>,
 	ik_constraints: Vec<Skeleton2DIkConstraintData>,
@@ -1232,7 +1234,7 @@ impl Skeleton2DData {
 	/// # 인자
 	/// - `frame_rate`: 초당 프레임.
 	//==============================================================================
-	pub fn set_frame_rate(&mut self, frame_rate: f32) {
+	pub fn set_frame_rate(&mut self, frame_rate: f64) {
 		self.frame_rate = frame_rate;
 	}
 
@@ -1242,7 +1244,7 @@ impl Skeleton2DData {
 	/// # 돌려줌
 	/// 초당 프레임.
 	//==============================================================================
-	pub fn get_frame_rate(&self) -> f32 {
+	pub fn get_frame_rate(&self) -> f64 {
 		self.frame_rate
 	}
 
@@ -1491,15 +1493,15 @@ impl Skeleton2DData {
 	/// # 돌려줌
 	/// 뼈마다 월드 행렬 a, b, c, d, x, y 여섯 값.
 	//==============================================================================
-	pub fn compute_setup_world_matrices(bone_data_list: &[Skeleton2DBoneData]) -> Vec<f32> {
-		let mut world_matrices = vec![0.0f32; bone_data_list.len() * 6];
+	pub fn compute_setup_world_matrices(bone_data_list: &[Skeleton2DBoneData]) -> Vec<f64> {
+		let mut world_matrices = vec![0.0f64; bone_data_list.len() * 6];
 		for (bone_index, bone_data) in bone_data_list.iter().enumerate() {
-			let x_axis_radian = (bone_data.get_rotation() + bone_data.get_shear_x()).to_radians();
-			let y_axis_radian = (bone_data.get_rotation() + bone_data.get_shear_y()).to_radians();
-			let local_a = x_axis_radian.cos() * bone_data.get_scale_x();
-			let local_b = x_axis_radian.sin() * bone_data.get_scale_x();
-			let local_c = -y_axis_radian.sin() * bone_data.get_scale_y();
-			let local_d = y_axis_radian.cos() * bone_data.get_scale_y();
+			let x_axis_radian = (bone_data.get_rotation() + bone_data.get_shear_x()) * PI / 180.0;
+			let y_axis_radian = (bone_data.get_rotation() + bone_data.get_shear_y()) * PI / 180.0;
+			let local_a = trigonometry::cos(x_axis_radian) * bone_data.get_scale_x();
+			let local_b = trigonometry::sin(x_axis_radian) * bone_data.get_scale_x();
+			let local_c = -trigonometry::sin(y_axis_radian) * bone_data.get_scale_y();
+			let local_d = trigonometry::cos(y_axis_radian) * bone_data.get_scale_y();
 			let x = bone_data.get_x();
 			let y = bone_data.get_y();
 			let offset = bone_index * 6;
