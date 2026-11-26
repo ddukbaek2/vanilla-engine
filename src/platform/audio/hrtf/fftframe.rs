@@ -8,8 +8,9 @@
 //!   엔진은 커널이 값만 들고 FFT(RealFft)는 셈하는 쪽이 든다. (값은 같다)
 //! - 크기 보간(InterpolateFrequencyComponents)은 크롬처럼 log10 과 pow 를 fdlibm 으로, 크기와 위상(std::abs, std::arg)과 극좌표(std::polar)는
 //!   시스템 libm 의 hypot, atan2, cos, sin 으로 셈한다.
-//! - 곱하기(Zvmul): 크롬 맥은 vDSP_zvmul 이고, 애플 실리콘에서 재 보니 실수 = fma(-ai, bi, ar br), 허수 = fma(ai, br, ar bi) 로 곱셈과 덧셈을 합친다.
-//!   그 밖의 크롬(x86 SSE, AVX 와 NEON)은 따로 곱해 더한다. 엔진도 애플 실리콘 맥만 합친다. (인텔 맥의 vDSP 는 재 보지 못해 따로 한다)
+//! - 곱하기(Zvmul)와 곱해 더하기(Vsma): 크롬 맥은 mac/vector_math_mac.h 가 Accelerate 의 vDSP_zvmul, vDSP_vsma 를 배열 통째로 부른다.
+//!   (x86_64 도 vDSP, ::zvmul 은 32 비트 x86 만) 엔진도 맥에서는 같은 vDSP 함수를 같은 배열에 부른다. vDSP 가 곱셈과 덧셈을 합치는지는
+//!   CPU 마다 다르기 때문이다. (애플 실리콘은 합치고, 인텔 맥은 CPU 와 Accelerate 판이 고른다) 그 밖의 크롬(x86 SSE, AVX 와 NEON)은 따로 곱해 더한다.
 //==============================================================================
 use super::fdlibm;
 use rustfft::num_complex::Complex;
@@ -256,6 +257,18 @@ impl FftFrame {
 	pub(super) fn multiply(&mut self, frame: &FftFrame) {
 		let real0 = self.real_data[0];
 		let imag0 = self.imag_data[0];
+		#[cfg(target_os = "macos")]
+		{
+			assert_eq!(frame.real_data.len(), self.real_data.len());
+			let length = self.real_data.len();
+			let destination = accelerate::DspSplitComplex { realp: self.real_data.as_mut_ptr(), imagp: self.imag_data.as_mut_ptr() };
+			let kernel = accelerate::DspSplitComplex { realp: frame.real_data.as_ptr() as *mut f32, imagp: frame.imag_data.as_ptr() as *mut f32 };
+			// 크롬처럼 제자리에 쓴다. (Zvmul(real1, imag1, real2, imag2, real1, imag1))
+			unsafe {
+				accelerate::vDSP_zvmul(&destination, 1, &kernel, 1, &destination, 1, length, 1);
+			}
+		}
+		#[cfg(not(target_os = "macos"))]
 		for index in 0..self.real_data.len() {
 			let (real, imag) = multiply_complex(self.real_data[index], self.imag_data[index], frame.real_data[index], frame.imag_data[index]);
 			self.real_data[index] = real;
@@ -304,23 +317,6 @@ fn polar(magnitude: f64, phase: f64) -> (f64, f64) {
 }
 
 //==============================================================================
-/// 복소 곱 하나. (vector_math::Zvmul, 애플 실리콘 맥은 vDSP_zvmul 처럼 곱셈과 덧셈을 합친다)
-///
-/// # 인자
-/// - `real1`: 왼쪽 실수.
-/// - `imag1`: 왼쪽 허수.
-/// - `real2`: 오른쪽 실수.
-/// - `imag2`: 오른쪽 허수.
-///
-/// # 돌려줌
-/// (실수, 허수).
-//==============================================================================
-#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-fn multiply_complex(real1: f32, imag1: f32, real2: f32, imag2: f32) -> (f32, f32) {
-	((-imag1).mul_add(imag2, real1 * real2), imag1.mul_add(real2, real1 * imag2))
-}
-
-//==============================================================================
 /// 복소 곱 하나. (vector_math::Zvmul 의 SSE, AVX, NEON 과 스칼라 판, 따로 곱해 더한다)
 ///
 /// # 인자
@@ -332,41 +328,51 @@ fn multiply_complex(real1: f32, imag1: f32, real2: f32, imag2: f32) -> (f32, f32
 /// # 돌려줌
 /// (실수, 허수).
 //==============================================================================
-#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+#[cfg(not(target_os = "macos"))]
 fn multiply_complex(real1: f32, imag1: f32, real2: f32, imag2: f32) -> (f32, f32) {
 	(real1 * real2 - imag1 * imag2, real1 * imag2 + imag1 * real2)
 }
 
 //==============================================================================
-/// 곱해 더하기 하나. (vector_math::Vsma 의 dest + scale x source, 애플 실리콘 맥은 vDSP_vsma 처럼 합친다)
+/// 곱해 더하기. (vector_math::Vsma, destination[k] = destination[k] + scale x source[k])
+/// - 맥은 크롬처럼 vDSP_vsma 를 배열 통째로 부른다. 그 밖은 크롬의 SSE, AVX, NEON 과 스칼라 판처럼 따로 곱해 더한다.
 ///
 /// # 인자
 /// - `source`: 곱할 값.
 /// - `scale`: 배율.
-/// - `destination`: 더할 값.
-///
-/// # 돌려줌
-/// destination + scale x source.
+/// - `destination`: 더할 값이자 결과. (source 와 길이가 같다)
 //==============================================================================
-#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-pub(super) fn multiply_add(source: f32, scale: f32, destination: f32) -> f32 {
-	scale.mul_add(source, destination)
+pub(super) fn multiply_add(source: &[f32], scale: f32, destination: &mut [f32]) {
+	assert_eq!(source.len(), destination.len());
+	#[cfg(target_os = "macos")]
+	unsafe {
+		accelerate::vDSP_vsma(source.as_ptr(), 1, &scale, destination.as_ptr(), 1, destination.as_mut_ptr(), 1, destination.len());
+	}
+	#[cfg(not(target_os = "macos"))]
+	for (source_value, destination_value) in source.iter().zip(destination.iter_mut()) {
+		*destination_value += scale * *source_value;
+	}
 }
 
 //==============================================================================
-/// 곱해 더하기 하나. (vector_math::Vsma 의 SSE, AVX, NEON 과 스칼라 판, 따로 곱해 더한다)
-///
-/// # 인자
-/// - `source`: 곱할 값.
-/// - `scale`: 배율.
-/// - `destination`: 더할 값.
-///
-/// # 돌려줌
-/// destination + scale x source.
+/// 애플 Accelerate 의 vDSP. (크롬 mac/vector_math_mac.h 가 부르는 함수, 운영체제 API)
 //==============================================================================
-#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
-pub(super) fn multiply_add(source: f32, scale: f32, destination: f32) -> f32 {
-	destination + scale * source
+#[cfg(target_os = "macos")]
+mod accelerate {
+	/// vDSP 의 DSPSplitComplex. (실수 배열과 허수 배열)
+	#[repr(C)]
+	pub(super) struct DspSplitComplex {
+		pub(super) realp: *mut f32,
+		pub(super) imagp: *mut f32,
+	}
+
+	#[link(name = "Accelerate", kind = "framework")]
+	extern "C" {
+		/// c = a x b (복소, conjugate 1 이면 그냥 곱, -1 이면 a 의 켤레와 곱).
+		pub(super) fn vDSP_zvmul(a: *const DspSplitComplex, ia: isize, b: *const DspSplitComplex, ib: isize, c: *const DspSplitComplex, ic: isize, n: usize, conjugate: i32);
+		/// d = a x b + c. (b 는 배율 하나)
+		pub(super) fn vDSP_vsma(a: *const f32, ia: isize, b: *const f32, c: *const f32, ic: isize, d: *mut f32, id: isize, n: usize);
+	}
 }
 
 //==============================================================================

@@ -14,17 +14,20 @@
 //!     주 그림이 prem 으로 알파를 가리키면 색이 이미 알파로 곱해진 것이라 그대로 프리멀티플라이드 픽셀로 쓴다.
 //!   - 크롬 AVIFImageDecoder 처럼 clap(깨끗한 테두리)은 자른 자리의 원점이 (0, 0) 일 때만 오른쪽과 아래를 자르고, 아니면 그림 전체를 쓴다.
 //!     그다음 irot(반시계 angle x 90 도), imir(axis 0 은 위아래, 1 은 좌우를 바꾼다) 차례로 건다. (MIAF 7.3.6.7 의 차례)
-//! - YUV 를 RGB 로 바꾸는 셈은 libavif(src/reformat.c, src/colr.c)의 기준 셈을 따른다.
-//!   - 색 계수(Kr, Kb)는 matrix_coefficients 로 고른다. (BT.709, FCC, BT.470BG, BT.601, SMPTE 240, BT.2020 NCL, 그 밖과 미지정은 BT.601)
-//!     Identity 는 G = Y, B = Cb, R = Cr 이고 YCgCo 는 H.273 식 47~50 이다.
-//!   - 범위: 제한 범위면 Y 는 (v - 16 x 2^(깊이-8)) / (219 x 2^(깊이-8)), Cb, Cr 은 (v - 2^(깊이-1)) / (224 x 2^(깊이-8)). 전체 범위면 최댓값으로 나눈다.
-//!   - 4:2:0, 4:2:2 의 크로마는 libavif 의 양선형(가장 가까운 것 9/16, 같은 줄과 같은 칸의 이웃 3/16 씩, 대각 1/16)으로 늘린다. 가장자리는 가장 가까운 것을 되풀이한다.
-//!   - 알파 그림은 전체 범위로 읽는다.
-//! - 원본(크롬)과 다른 것: YUV 를 RGB 로 바꾸는 셈이 libavif 의 기준 실수 셈이다. (크롬의 WebGL 과 CPU 캔버스 길은 libyuv 의 정수 셈이라 8 비트에서 한두 단계 다르고, GPU 캔버스 길과는 같다)
+//! - YUV 를 RGB 로 바꾸는 셈은 크롬 158 의 길(AVIFImageDecoder::RenderImage 가 부르는 CrabbyAvif crabby_avifImageYUVToRGB, libyuv 기능을 켠 빌드)을 따른다.
+//!   - 8 비트 RGBA 로 풀 때 CrabbyAvif 는 libyuv 가 받는 꼴(src/reformat/libyuv.rs find_constants, find_conversion_function)이면 libyuv 의 정수 셈을 쓴다. (libyuv source/row_common.cc YuvPixel, YPixel, scale_any.cc ScaleRowUp2_Linear_Any, ScaleRowUp2_Bilinear_Any)
+//!     상수는 행렬(BT.601, 미지정, BT.709, BT.2020 NCL, 크로마 NCL 은 원색으로)과 범위로 I601, JPEG, H709, F709, 2020, V2020 가운데 고른다. 크롬 빌드는 LIBYUV_UNLIMITED_DATA 를 정하지 않아 제한 범위의 UB 는 128 이다.
+//!     4:2:0, 4:2:2 의 크로마는 libyuv 의 두 배 늘리기(가장자리는 가까운 것, 안쪽은 3:1, 4:2:0 은 9:3:3:1 을 한 번에 16 으로 나눔)로, 10 비트는 10 비트 그대로 늘린 뒤 2 비트 내리고 12 비트 4:2:0 은 거르지 않는다.
+//!   - 그 밖(Identity, YCgCo, FCC, SMPTE 240 같은 행렬)은 libavif(src/reformat.c)의 기준 실수 셈이다. 색 계수(Kr, Kb)는 matrix_coefficients 로 고르고(그 밖과 미지정은 BT.601), 값마다 (v - bias) / range 로 나눈 뒤 크로마를 9/16, 3/16, 3/16, 1/16 로 섞는다.
+//!     Identity 는 G = Y, B = Cb, R = Cr 이고 YCgCo 는 H.273 식 47~50 이다. 제한 범위면 Y 는 (v - 16 x 2^(깊이-8)) / (219 x 2^(깊이-8)), Cb, Cr 은 (v - 2^(깊이-1)) / (224 x 2^(깊이-8)).
+//!   - 높은 비트 깊이 그림은 크롬 WebGL 처럼 반정밀로 푼다. (CrabbyAvif 의 실수 셈 값을 0.5 + 값 x 65535 를 자른 16 비트로 담고 libyuv HalfFloatPlane 이 가수를 잘라 반정밀로 바꾼다, 그다음 x 255 반올림이나 색 프로필 바꾸기)
+//!   - 알파 그림은 전체 범위로 읽는다. 크롬 WebGL(UNPACK_PREMULTIPLY_ALPHA_WEBGL)처럼 곧은 알파로 푼 뒤 알파를 반올림으로 곱한다.
+//! - 크롬 158 의 WebGL texImage2D 와 시험 그림 19 장(8, 10 비트, 4:2:0, 알파, grid, ICC, nclx, PQ, HLG)이 비트까지 같다.
+//! - 원본(크롬)과 다른 것: 크롬 Canvas2D 는 길마다 다르다. CPU 캔버스는 알파를 libyuv ARGBAttenuate((값 x 알파 + 255) >> 8)로 곱하고 높은 비트 깊이를 8 비트 libyuv 길로 풀며, GPU 캔버스는 YUV 평면을 GPU 에서 바꾼다. 엔진은 한 픽셀 묶음을 WebGL 과 Canvas2D 에 같이 쓴다.
 //!   색이 알파로 곱해진(prem) 그림의 색 프로필은 바꾸지 않는다. 게인 맵(HDR)과 줄인 꼴(mif3 의 mini 상자)은 쓰지 않는다.
 //! - rav1d 의 asm 은 끈 채 쓴다. (Cargo.toml)
 //==============================================================================
-use crate::core::colorprofile::{get_avif_color_space, round_to_half, EmbeddedColorProfile};
+use crate::core::colorprofile::{get_avif_color_space, EmbeddedColorProfile};
 use crate::core::image::Image;
 use rav1d::include::dav1d::data::Dav1dData;
 use rav1d::include::dav1d::dav1d::{Dav1dContext, Dav1dSettings};
@@ -823,14 +826,20 @@ fn create_avif_image(frame: DecodedAvifFrame) -> Result<Rc<Image>, String> {
 	let (mut pixels, is_pixels_premultiplied) = match color_profile.filter(|color_profile| color_profile.needs_conversion() && !is_color_premultiplied) {
 		Some(color_profile) => {
 			if color_picture.bit_depth > 8 {
-				let half_float_pixels: Vec<f32> = convert_to_rgba_float_pixels(&color_picture, alpha_picture.as_ref()).into_iter().map(round_to_half).collect();
+				let half_float_pixels = convert_to_half_float_pixels(&color_picture, alpha_picture.as_ref());
 				(color_profile.convert_half_float_to_srgb_premultiplied(&half_float_pixels), true)
 			}
 			else {
 				(color_profile.convert_to_srgb_premultiplied(&convert_to_rgba_pixels(&color_picture, alpha_picture.as_ref())), true)
 			}
 		}
+		None if color_picture.bit_depth > 8 => {
+			// 크롬 WebGL 은 높은 비트 깊이 그림을 반정밀로 풀어(decode_to_half_float_) 8 비트로 담는다. (CPU 캔버스는 8 비트 libyuv 길)
+			let pixels: Vec<u8> = convert_to_half_float_pixels(&color_picture, alpha_picture.as_ref()).into_iter().map(|value| (value * 255.0).round() as u8).collect();
+			(pixels, is_color_premultiplied)
+		}
 		None => {
+			// 크롬 WebGL(UNPACK_PREMULTIPLY_ALPHA_WEBGL)은 곧은 알파로 푼 그림에 알파를 반올림으로 곱한다. (Image::create_from_pixels 와 같은 셈, CPU 캔버스는 libyuv ARGBAttenuate 라 한 단계 다를 수 있다)
 			(convert_to_rgba_pixels(&color_picture, alpha_picture.as_ref()), is_color_premultiplied)
 		}
 	};
@@ -1411,15 +1420,15 @@ fn read_luma_coefficients(matrix_coefficients: u32) -> (f32, f32) {
 }
 
 //==============================================================================
-/// 4:2:0, 4:2:2 의 크로마 하나 읽기. (libavif 의 양선형 9/16, 3/16, 3/16, 1/16, 4:4:4 는 그 자리 값)
+/// 4:2:0, 4:2:2 의 크로마 하나 읽기. (libavif, CrabbyAvif 처럼 값마다 (값 - bias) / range 로 먼저 나눈 뒤 양선형 9/16, 3/16, 3/16, 1/16, 4:4:4 는 그 자리 값)
 /// - 가장 가까운 크로마 칸의 이웃은 홀수 칸이면 오른쪽(아래), 짝수 칸이면 왼쪽(위)이다. 첫 칸과 마지막 홀수 칸은 이웃 대신 자기를 쓴다. 4:2:2 는 세로 이웃이 없다.
 //==============================================================================
-fn read_upsampled_chroma(picture: &DecodedAv1Picture, plane: &[u16], column: usize, row: usize) -> f32 {
+fn read_upsampled_chroma(picture: &DecodedAv1Picture, plane: &[u16], column: usize, row: usize, bias: f32, range: f32) -> f32 {
 	let (chroma_width, _) = picture.get_chroma_size();
 	let chroma_column = column >> picture.chroma_shift.0;
 	let chroma_row = row >> picture.chroma_shift.1;
 	let read_value = |read_column: usize, read_row: usize| -> f32 {
-		plane[read_row * chroma_width + read_column] as f32
+		(plane[read_row * chroma_width + read_column] as f32 - bias) / range
 	};
 	if picture.chroma_shift == (0, 0) {
 		return read_value(chroma_column, chroma_row);
@@ -1446,9 +1455,240 @@ fn read_upsampled_chroma(picture: &DecodedAv1Picture, plane: &[u16], column: usi
 }
 
 //==============================================================================
-/// YUV 를 8 비트 RGBA 로. (0 과 1 사이로 자른 값을 반올림한다)
+/// libyuv 의 YUV 를 RGB 로 바꾸는 상수 한 벌. (libyuv source/row_common.cc 의 MAKEYUVCONSTANTS 에 넣는 YG, YB, UB, UG, VG, VR)
+/// - 크롬 빌드는 LIBYUV_UNLIMITED_DATA 를 정하지 않아 제한 범위의 UB 는 128 로 잘린다.
+//==============================================================================
+#[derive(Clone, Copy)]
+struct LibyuvConstants {
+	y_gain: i32,
+	y_bias: i32,
+	u_to_blue: i32,
+	u_to_green: i32,
+	v_to_green: i32,
+	v_to_red: i32,
+}
+
+/// BT.601 제한 범위. (libyuv kYuvI601Constants)
+const LIBYUV_I601_CONSTANTS: LibyuvConstants = LibyuvConstants { y_gain: 18997, y_bias: -1160, u_to_blue: 128, u_to_green: 25, v_to_green: 52, v_to_red: 102 };
+/// BT.601 전체 범위. (libyuv kYuvJPEGConstants)
+const LIBYUV_JPEG_CONSTANTS: LibyuvConstants = LibyuvConstants { y_gain: 16320, y_bias: 32, u_to_blue: 113, u_to_green: 22, v_to_green: 46, v_to_red: 90 };
+/// BT.709 제한 범위. (libyuv kYuvH709Constants)
+const LIBYUV_H709_CONSTANTS: LibyuvConstants = LibyuvConstants { y_gain: 18997, y_bias: -1160, u_to_blue: 128, u_to_green: 14, v_to_green: 34, v_to_red: 115 };
+/// BT.709 전체 범위. (libyuv kYuvF709Constants)
+const LIBYUV_F709_CONSTANTS: LibyuvConstants = LibyuvConstants { y_gain: 16320, y_bias: 32, u_to_blue: 119, u_to_green: 12, v_to_green: 30, v_to_red: 101 };
+/// BT.2020 제한 범위. (libyuv kYuv2020Constants)
+const LIBYUV_2020_CONSTANTS: LibyuvConstants = LibyuvConstants { y_gain: 19003, y_bias: -1160, u_to_blue: 128, u_to_green: 12, v_to_green: 42, v_to_red: 107 };
+/// BT.2020 전체 범위. (libyuv kYuvV2020Constants)
+const LIBYUV_V2020_CONSTANTS: LibyuvConstants = LibyuvConstants { y_gain: 16320, y_bias: 32, u_to_blue: 120, u_to_green: 11, v_to_green: 37, v_to_red: 94 };
+/// 행렬 계수 12(크로마에서 얻은 NCL). (CrabbyAvif 는 원색으로 고른다)
+const AVIF_MATRIX_CHROMA_DERIVED_NCL: u32 = 12;
+
+//==============================================================================
+/// libyuv 상수 고르기. (CrabbyAvif src/reformat/libyuv.rs find_constants, libyuv 가 받지 않는 행렬은 없음)
+//==============================================================================
+fn find_libyuv_constants(picture: &DecodedAv1Picture) -> Option<LibyuvConstants> {
+	let matrix_coefficients = if picture.is_monochrome && picture.matrix_coefficients == DAV1D_MC_IDENTITY {
+		DAV1D_MC_BT601
+	}
+	else {
+		picture.matrix_coefficients
+	};
+	// 원색 1(BT.709), 2(미지정), 5(BT.470BG), 6(BT.601), 9(BT.2020) 만 크로마 행렬을 고를 수 있다.
+	let family = match matrix_coefficients {
+		DAV1D_MC_BT709 => 709,
+		DAV1D_MC_BT470BG | DAV1D_MC_BT601 | 2 => 601,
+		DAV1D_MC_BT2020_NCL => 2020,
+		AVIF_MATRIX_CHROMA_DERIVED_NCL => match picture.color_primaries {
+			1 | 2 => 709,
+			5 | 6 => 601,
+			9 => 2020,
+			_ => return None,
+		},
+		_ => return None,
+	};
+	Some(match (family, picture.is_full_range) {
+		(709, true) => LIBYUV_F709_CONSTANTS,
+		(709, false) => LIBYUV_H709_CONSTANTS,
+		(2020, true) => LIBYUV_V2020_CONSTANTS,
+		(2020, false) => LIBYUV_2020_CONSTANTS,
+		(_, true) => LIBYUV_JPEG_CONSTANTS,
+		(_, false) => LIBYUV_I601_CONSTANTS,
+	})
+}
+
+//==============================================================================
+/// libyuv 의 픽셀 하나. (row_common.cc YuvPixel 과 YuvPixel10_16 의 CALC_RGB16, 16 비트로 늘린 Y 와 8 비트 U, V 에서 R, G, B)
+//==============================================================================
+fn convert_libyuv_pixel(constants: &LibyuvConstants, y16: u32, u: i32, v: i32) -> [u8; 3] {
+	let luma = ((y16 * constants.y_gain as u32) >> 16) as i32;
+	let blue = luma + u * constants.u_to_blue - (constants.u_to_blue * 128 - constants.y_bias);
+	let green = luma + (constants.u_to_green * 128 + constants.v_to_green * 128 + constants.y_bias) - (u * constants.u_to_green + v * constants.v_to_green);
+	let red = luma + v * constants.v_to_red - (constants.v_to_red * 128 - constants.y_bias);
+	[(red >> 6).clamp(0, 255) as u8, (green >> 6).clamp(0, 255) as u8, (blue >> 6).clamp(0, 255) as u8]
+}
+
+//==============================================================================
+/// libyuv 의 두 배 늘린 크로마 하나. (scale_any.cc 의 ScaleRowUp2_Linear_Any, ScaleRowUp2_Bilinear_Any 와 convert_argb.cc I420ToARGBMatrixBilinear 의 줄 차례)
+/// - 가로: 첫 칸과 마지막 칸은 가장 가까운 것, 그 밖은 가까운 것 3 과 먼 것 1 (홀수 칸은 오른쪽, 짝수 칸은 왼쪽 이웃).
+/// - 세로(4:2:0): 첫 줄과 짝수 높이의 마지막 줄은 가로만, 그 밖은 9, 3, 3, 1 을 한 번에 16 으로 나눈다.
+/// - 4:4:4 와 가장 가까운 것 고르기(nearest)는 그 자리 값이다.
+//==============================================================================
+fn read_libyuv_chroma(picture: &DecodedAv1Picture, plane: &[u16], column: usize, row: usize, is_filtered: bool) -> u32 {
+	let (chroma_width, _) = picture.get_chroma_size();
+	let chroma_column = column >> picture.chroma_shift.0;
+	let chroma_row = row >> picture.chroma_shift.1;
+	let read_value = |read_column: usize, read_row: usize| -> u32 {
+		plane[read_row * chroma_width + read_column] as u32
+	};
+	if !is_filtered || picture.chroma_shift == (0, 0) {
+		return read_value(chroma_column, chroma_row);
+	}
+	let far_column = if picture.chroma_shift.0 == 0 || column == 0 || column == picture.width - 1 {
+		None
+	}
+	else if column % 2 != 0 {
+		Some(chroma_column + 1)
+	}
+	else {
+		Some(chroma_column - 1)
+	};
+	let far_row = if picture.chroma_shift.1 == 0 || row == 0 || (row == picture.height - 1 && row % 2 != 0) {
+		None
+	}
+	else if row % 2 != 0 {
+		Some(chroma_row + 1)
+	}
+	else {
+		Some(chroma_row - 1)
+	};
+	let near = read_value(chroma_column, chroma_row);
+	match (far_column, far_row) {
+		(Some(far_column), Some(far_row)) => {
+			(near * 9 + read_value(far_column, chroma_row) * 3 + read_value(chroma_column, far_row) * 3 + read_value(far_column, far_row) + 8) >> 4
+		}
+		(Some(far_column), None) => {
+			(near * 3 + read_value(far_column, chroma_row) + 2) >> 2
+		}
+		(None, Some(far_row)) => {
+			(near * 3 + read_value(chroma_column, far_row) + 2) >> 2
+		}
+		(None, None) => {
+			near
+		}
+	}
+}
+
+//==============================================================================
+/// 높은 비트 깊이 평면을 8 비트로 내린 그림. (libyuv Convert16To8Plane, scale = 1 << (24 - 깊이) 라 값 x scale >> 16 을 255 에서 자른다)
+/// - 알파를 색과 같이 받지 않는 길의 알파는 CrabbyAvif rescale_alpha_value 처럼 실수로 나눠 반올림한다.
+//==============================================================================
+fn downshift_picture_to_8_bit(picture: &DecodedAv1Picture, is_rounded_rescale: bool) -> DecodedAv1Picture {
+	let scale = 1u32 << (24 - picture.bit_depth);
+	let maximum_value = ((1u32 << picture.bit_depth) - 1) as f32;
+	let convert_value = |value: &u16| -> u16 {
+		if is_rounded_rescale {
+			((0.5 + (*value as f32 / maximum_value) * 255.0) as u32).min(255) as u16
+		}
+		else {
+			((*value as u32 * scale) >> 16).min(255) as u16
+		}
+	};
+	DecodedAv1Picture {
+		width: picture.width,
+		height: picture.height,
+		bit_depth: 8,
+		chroma_shift: picture.chroma_shift,
+		is_monochrome: picture.is_monochrome,
+		color_primaries: picture.color_primaries,
+		transfer_characteristics: picture.transfer_characteristics,
+		matrix_coefficients: picture.matrix_coefficients,
+		is_full_range: picture.is_full_range,
+		plane_list: [picture.plane_list[0].iter().map(convert_value).collect(), picture.plane_list[1].iter().map(convert_value).collect(), picture.plane_list[2].iter().map(convert_value).collect()],
+	}
+}
+
+//==============================================================================
+/// 크롬(CrabbyAvif 가 libyuv 로 바꾸는 길)처럼 YUV 를 곧은 알파 8 비트 RGBA 로. (libyuv 가 받지 않는 꼴이면 None, CrabbyAvif 도 그때는 libavif 의 셈으로 넘어간다)
+/// - 고르기는 CrabbyAvif src/reformat/libyuv.rs find_conversion_function 과 같다. 크롬은 크로마 늘리기를 기본(Automatic)으로 둬서 4:2:0, 4:2:2 는 양선형 거르기를 쓴다.
+///   - 8 비트: I400, I420(Alpha)Filter, I422(Alpha)Filter, I444(Alpha).
+///   - 10 비트 4:2:0, 4:2:2, 4:4:4: I010(Alpha)Filter, I210(Alpha)Filter, I410(Alpha). 10 비트 그대로 크로마를 늘린 뒤 U, V 는 2 비트 내리고 Y 는 16 비트로 늘린다. (YuvPixel10) 알파는 2 비트 내린다.
+///   - 12 비트 4:2:0: 거르기 없는 I012. (YuvPixel12) 알파는 따로 옮긴다.
+///   - 그 밖의 높은 비트 깊이(흑백, 12 비트 4:2:2, 4:4:4)는 8 비트로 내린 뒤 8 비트 길이다.
+///   - 흑백(I400)은 알파를 같이 받지 않아 알파를 따로 옮긴다. (같은 깊이는 그대로, 높은 깊이는 CrabbyAvif rescale_alpha_value 의 반올림)
+//==============================================================================
+fn convert_with_libyuv(picture: &DecodedAv1Picture, alpha_picture: Option<&DecodedAv1Picture>) -> Option<Vec<u8>> {
+	let constants = find_libyuv_constants(picture)?;
+	if picture.matrix_coefficients == DAV1D_MC_IDENTITY && !picture.is_monochrome {
+		return None;
+	}
+	let bit_depth = picture.bit_depth;
+	if bit_depth != 8 && bit_depth != 10 && bit_depth != 12 {
+		return None;
+	}
+	if let Some(alpha_picture) = alpha_picture {
+		if alpha_picture.bit_depth != bit_depth {
+			return None;
+		}
+	}
+	let is_high_bit_depth_function = !picture.is_monochrome && (bit_depth == 10 || (bit_depth == 12 && picture.chroma_shift == (1, 1)));
+	if bit_depth > 8 && !is_high_bit_depth_function {
+		let downshifted_picture = downshift_picture_to_8_bit(picture, false);
+		let downshifted_alpha_picture = alpha_picture.map(|alpha_picture| downshift_picture_to_8_bit(alpha_picture, picture.is_monochrome));
+		return convert_with_libyuv(&downshifted_picture, downshifted_alpha_picture.as_ref());
+	}
+	let is_filtered = bit_depth != 12;
+	let alpha_maximum_value = ((1u32 << bit_depth) - 1) as f32;
+	let mut pixels: Vec<u8> = Vec::with_capacity(picture.width * picture.height * 4);
+	for row in 0..picture.height {
+		for column in 0..picture.width {
+			let luma = picture.plane_list[0][row * picture.width + column] as u32;
+			let rgb = if picture.is_monochrome {
+				// YPixel: Y 를 16 비트로 늘려 곱하고 바탕을 더한 뒤 6 비트 내린다.
+				let scaled = ((luma * 0x0101 * constants.y_gain as u32) >> 16) as i32;
+				let gray = ((scaled + constants.y_bias) >> 6).clamp(0, 255) as u8;
+				[gray, gray, gray]
+			}
+			else {
+				let chroma_blue = read_libyuv_chroma(picture, &picture.plane_list[1], column, row, is_filtered);
+				let chroma_red = read_libyuv_chroma(picture, &picture.plane_list[2], column, row, is_filtered);
+				match bit_depth {
+					10 => {
+						convert_libyuv_pixel(&constants, (luma << 6) | (luma >> 4), (chroma_blue >> 2).min(255) as i32, (chroma_red >> 2).min(255) as i32)
+					}
+					12 => {
+						convert_libyuv_pixel(&constants, (luma << 4) | (luma >> 8), (chroma_blue >> 4).min(255) as i32, (chroma_red >> 4).min(255) as i32)
+					}
+					_ => {
+						convert_libyuv_pixel(&constants, luma * 0x0101, chroma_blue as i32, chroma_red as i32)
+					}
+				}
+			};
+			let alpha = match alpha_picture {
+				Some(alpha_picture) => {
+					let value = alpha_picture.plane_list[0][row * alpha_picture.width + column];
+					match bit_depth {
+						10 => (value >> 2).min(255) as u8,
+						12 => ((0.5 + (value as f32 / alpha_maximum_value) * 255.0) as u32).min(255) as u8,
+						_ => value as u8,
+					}
+				}
+				None => {
+					255
+				}
+			};
+			pixels.extend_from_slice(&[rgb[0], rgb[1], rgb[2], alpha]);
+		}
+	}
+	Some(pixels)
+}
+
+//==============================================================================
+/// YUV 를 곧은 알파 8 비트 RGBA 로. (크롬처럼 libyuv 가 받는 꼴은 libyuv 의 정수 셈, 그 밖은 libavif 기준 실수 셈을 0 과 1 사이로 잘라 반올림)
 //==============================================================================
 fn convert_to_rgba_pixels(picture: &DecodedAv1Picture, alpha_picture: Option<&DecodedAv1Picture>) -> Vec<u8> {
+	if let Some(pixels) = convert_with_libyuv(picture, alpha_picture) {
+		return pixels;
+	}
 	let mut pixels: Vec<u8> = Vec::with_capacity(picture.width * picture.height * 4);
 	visit_rgba_values(picture, alpha_picture, |value| {
 		pixels.push((value * 255.0).round() as u8);
@@ -1457,14 +1697,30 @@ fn convert_to_rgba_pixels(picture: &DecodedAv1Picture, alpha_picture: Option<&De
 }
 
 //==============================================================================
-/// YUV 를 0 과 1 사이 실수 RGBA 로. (높은 비트 깊이 그림의 색 프로필 바꾸기, 크롬은 반정밀로 푼다)
+/// 높은 비트 깊이 YUV 를 크롬처럼 반정밀 RGBA 로. (CrabbyAvif 가 libavif 실수 셈 값을 0.5 + 값 x 65535 를 자른 16 비트로 담고 libyuv HalfFloatPlane(scale 1/65535)으로 바꾼다)
 //==============================================================================
-fn convert_to_rgba_float_pixels(picture: &DecodedAv1Picture, alpha_picture: Option<&DecodedAv1Picture>) -> Vec<f32> {
+fn convert_to_half_float_pixels(picture: &DecodedAv1Picture, alpha_picture: Option<&DecodedAv1Picture>) -> Vec<f32> {
 	let mut pixels: Vec<f32> = Vec::with_capacity(picture.width * picture.height * 4);
 	visit_rgba_values(picture, alpha_picture, |value| {
-		pixels.push(value);
+		pixels.push(convert_to_libyuv_half_float((0.5 + value * 65535.0) as u16, 1.0 / 65535.0));
 	});
 	pixels
+}
+
+//==============================================================================
+/// libyuv HalfFloatRow 의 반정밀 값. (값 x scale x 2^-112 의 32 비트 실수 비트를 13 비트 내려 반정밀 비트로 쓴다, 곧 가수를 잘라 버린다)
+//==============================================================================
+fn convert_to_libyuv_half_float(value: u16, scale: f32) -> f32 {
+	let multiplier = 1.9259299444e-34f32 * scale;
+	let half_bits = ((value as f32 * multiplier).to_bits() >> 13).min(0x7bff);
+	let exponent = (half_bits >> 10) & 0x1f;
+	let mantissa = (half_bits & 0x3ff) as f32;
+	if exponent == 0 {
+		mantissa * (1.0 / 16777216.0)
+	}
+	else {
+		(1.0 + mantissa * (1.0 / 1024.0)) * f32::from_bits((exponent + 112) << 23)
+	}
 }
 
 //==============================================================================
@@ -1492,15 +1748,13 @@ fn visit_rgba_values(picture: &DecodedAv1Picture, alpha_picture: Option<&Decoded
 				(luma, luma, luma)
 			}
 			else {
-				let raw_chroma_blue = read_upsampled_chroma(picture, &picture.plane_list[1], column, row);
-				let raw_chroma_red = read_upsampled_chroma(picture, &picture.plane_list[2], column, row);
 				if is_identity {
 					// Identity(GBR) 는 크로마도 Y 의 범위로 읽는다.
-					(((raw_chroma_red - bias_y) / range_y), luma, ((raw_chroma_blue - bias_y) / range_y))
+					(read_upsampled_chroma(picture, &picture.plane_list[2], column, row, bias_y, range_y), luma, read_upsampled_chroma(picture, &picture.plane_list[1], column, row, bias_y, range_y))
 				}
 				else {
-					let chroma_blue = (raw_chroma_blue - bias_uv) / range_uv;
-					let chroma_red = (raw_chroma_red - bias_uv) / range_uv;
+					let chroma_blue = read_upsampled_chroma(picture, &picture.plane_list[1], column, row, bias_uv, range_uv);
+					let chroma_red = read_upsampled_chroma(picture, &picture.plane_list[2], column, row, bias_uv, range_uv);
 					if is_ycgco {
 						let base = luma - chroma_blue;
 						(base + chroma_red, luma + chroma_blue, base - chroma_red)
@@ -1611,6 +1865,34 @@ mod tests {
 	//==============================================================================
 	/// 알파 보조 형이 hevc 꼴(맥)이어도 알파를 읽고, grid 는 타일을 이어 출력 크기로 자른다.
 	//==============================================================================
+	#[test]
+	fn libyuv_integer_conversion() {
+		// libyuv YuvPixel: 제한 범위 BT.601 의 검정과 흰색, 전체 범위의 가운데 회색, 전체 범위 BT.709 의 빨강 쪽.
+		assert_eq!(convert_libyuv_pixel(&LIBYUV_I601_CONSTANTS, 16 * 0x0101, 128, 128), [0, 0, 0]);
+		assert_eq!(convert_libyuv_pixel(&LIBYUV_I601_CONSTANTS, 235 * 0x0101, 128, 128), [255, 255, 255]);
+		assert_eq!(convert_libyuv_pixel(&LIBYUV_JPEG_CONSTANTS, 128 * 0x0101, 128, 128), [128, 128, 128]);
+		assert_eq!(convert_libyuv_pixel(&LIBYUV_F709_CONSTANTS, 54 * 0x0101, 99, 255), [254, 0, 0]);
+		// libyuv HalfFloatRow: 1.0 은 그대로, 가수는 반올림하지 않고 자른다.
+		assert_eq!(convert_to_libyuv_half_float(65535, 1.0 / 65535.0), 1.0);
+		assert_eq!(convert_to_libyuv_half_float(0, 1.0 / 65535.0), 0.0);
+		let half_value = convert_to_libyuv_half_float(40000, 1.0 / 65535.0);
+		assert!(half_value <= 40000.0 / 65535.0 && 40000.0 / 65535.0 - half_value < 1.0 / 2048.0);
+	}
+
+	#[test]
+	fn libyuv_chroma_upsampling() {
+		// 4 x 4 의 4:2:0, 크로마 2 x 2 가 0, 64 / 128, 192. 가장자리는 가까운 것, 안쪽은 9, 3, 3, 1 을 한 번에 16 으로 나눈다.
+		let picture = DecodedAv1Picture { width: 4, height: 4, bit_depth: 8, chroma_shift: (1, 1), is_monochrome: false, color_primaries: 1, transfer_characteristics: 13, matrix_coefficients: DAV1D_MC_BT601, is_full_range: true, plane_list: [vec![0; 16], vec![0, 64, 128, 192], vec![0, 64, 128, 192]] };
+		let plane = &picture.plane_list[1];
+		assert_eq!(read_libyuv_chroma(&picture, plane, 0, 0, true), 0);
+		assert_eq!(read_libyuv_chroma(&picture, plane, 1, 0, true), 16);
+		assert_eq!(read_libyuv_chroma(&picture, plane, 3, 0, true), 64);
+		assert_eq!(read_libyuv_chroma(&picture, plane, 0, 1, true), 32);
+		assert_eq!(read_libyuv_chroma(&picture, plane, 1, 1, true), (0 * 9 + 64 * 3 + 128 * 3 + 192 + 8) >> 4);
+		assert_eq!(read_libyuv_chroma(&picture, plane, 2, 3, true), (192 * 3 + 128 + 2) >> 2);
+		assert_eq!(read_libyuv_chroma(&picture, plane, 2, 3, false), 192);
+	}
+
 	#[test]
 	fn decode_alpha_and_grid() {
 		let alpha_bytes = decode_hex(TINY_ALPHA_AVIF_HEX);
