@@ -21,6 +21,7 @@
 //!     차례를 보지 않는 제약, 변수, 편집 변수 맵은 HashMap 이다.
 //!   - 원본 LayoutTag 의 null 심볼은 무효 심볼(LayoutSymbol::invalid)이다. (Kiwi 와 같다)
 //==============================================================================
+// 옮긴 원문: Kiwi(Nucleic Development Team) 의 dual simplex 솔버에서 옮김, BSD-3-Clause, THIRD_PARTY_LICENSES.md
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;

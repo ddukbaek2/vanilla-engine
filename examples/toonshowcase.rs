@@ -1,7 +1,7 @@
 //==============================================================================
 // 툰 3D 예제. (MeshBuilder 의 기본 도형, GLB 모형과 뼈대 움직임을 ToonRenderer 로 그린다)
 // - 바닥판 위에 상자, 둥근 상자, 구, 원뿔, 캡슐, 고리, 팔면체를 짓고 셀 셰이딩과 바깥선으로 그린다.
-// - vanilla.js 예제의 soldier.glb 를 read_glb_arrays 로 읽어 첫 움직임을 write_skin_pose 로 돌린다. (텍스처는 쓰지 않고 재질 색만)
+// - vanilla.js 예제의 mannequin_female.glb(Quaternius CC0)를 read_glb_arrays 로 읽어 첫 움직임을 write_skin_pose 로 돌린다. (텍스처는 쓰지 않고 재질 색만)
 // - 둘레에 작은 바위 2 천 개를 GPU 인스턴싱 한 번으로 그리고, 화면 밖 바위는 거른다. (그린 수와 거른 수를 표준 출력에)
 // - 엔진 ShadowMap 으로 그림자를 드리우고 받는다. HDR 실수 렌더 타겟에 그려 빛나는 공에 블룸을 걸고 톤매핑한다. (ToonPostProcess)
 //   그림자 패스는 HDR 타겟을 건 뒤에 한다. end_shadow_pass 가 앞의 프레임버퍼(HDR 타겟)와 뷰포트로 돌린다. (데스크탑과 웹 같음)
@@ -30,7 +30,7 @@ struct PlacedToon {
 
 struct ToonShowcaseScene {
 	scene_base: SceneBase,
-	soldier_asset: BlobAsset,
+	mannequin_asset: BlobAsset,
 	renderer: Option<ToonRenderer>,
 	shadow_map: Option<ShadowMap>,
 	post_process: Option<ToonPostProcess>,
@@ -45,7 +45,7 @@ impl ToonShowcaseScene {
 	fn new() -> ToonShowcaseScene {
 		ToonShowcaseScene {
 			scene_base: SceneBase::new(),
-			soldier_asset: BlobAsset::new(),
+			mannequin_asset: BlobAsset::new(),
 			renderer: None,
 			shadow_map: None,
 			post_process: None,
@@ -111,8 +111,8 @@ impl ToonShowcaseScene {
 		}
 		let outline_options = ToonOutlineOptions { width: 0.02, ..ToonOutlineOptions::default() };
 		let mut model_byte_list: Vec<(Vec<u8>, [f32; 3], f32)> = Vec::new();
-		if let Some(soldier_bytes) = self.soldier_asset.get_blob() {
-			model_byte_list.push(((*soldier_bytes).clone(), [-1.2, 0.0, 1.2], 1.0));
+		if let Some(mannequin_bytes) = self.mannequin_asset.get_blob() {
+			model_byte_list.push(((*mannequin_bytes).clone(), [-1.2, 0.0, 1.2], 1.0));
 		}
 		#[cfg(not(target_arch = "wasm32"))]
 		{
@@ -166,8 +166,8 @@ impl Scene for ToonShowcaseScene {
 
 	fn create(&mut self, engine: &mut Engine) {
 		self.scene_base.set_scene_background_color("#14171e");
-		self.soldier_asset.load(engine, "soldier.glb");
-		self.scene_base.track_asset(&self.soldier_asset);
+		self.mannequin_asset.load(engine, "mannequin_female.glb");
+		self.scene_base.track_asset(&self.mannequin_asset);
 	}
 
 	fn tick(&mut self, _engine: &mut Engine, time_delta: f32) {

@@ -1,6 +1,6 @@
 //==============================================================================
 // 3D 모델 보기 예제. (데스크탑, 원본 examples/ancientmountain 의 3D 경로를 엔진 루프 안에서 돌린다)
-// - 원본 예제의 soldier.glb, fox.glb(노멀 없음), Remy.fbx + anims/idle.fbx, walk.fbx 를 원본처럼 URL 함수로 받는다.
+// - 원본 예제의 mannequin_female.glb, fox.glb(노멀 없음), mannequin.fbx + anims/idle.fbx, walk.fbx 를 원본처럼 URL 함수로 받는다. (마네킹은 Quaternius CC0)
 //   (SkinnedModel::load_from_url, load_from_fbx_url 의 받기 손잡이를 씬에 맡기고, 애니메이션은 add_animations_from_fbx_url)
 //   애셋 폴더 후보에 원본 저장소의 절대 경로를 넣는다. (읽기만 한다)
 // - 땅은 코드로 만든 GLB 다. (정적 메시 → 합성 스킨 경로)
@@ -32,9 +32,9 @@ const EXIT_SECONDS: f32 = 10.0;
 // 갱신 걸음. (화면 저장이 프레임 번호로 같은 장면을 잡도록 프레임마다 1/60초씩 고정으로 나아간다)
 const FIXED_TIME_STEP: f32 = 1.0 / 60.0;
 
-// 병사 클립 순서와 바꾸는 간격. (초)
-const SOLDIER_CLIP_NAMES: [&str; 3] = ["Idle", "Walk", "Run"];
-const SOLDIER_CLIP_SECONDS: f32 = 2.5;
+// 여자 마네킹 클립 순서와 바꾸는 간격. (초)
+const FEMALE_MANNEQUIN_CLIP_NAMES: [&str; 4] = ["Idle", "Walk", "Run", "Dance"];
+const FEMALE_MANNEQUIN_CLIP_SECONDS: f32 = 2.5;
 
 // 합성 패스. (씬 + 블룸 가산 + 약한 비네트)
 const COMPOSITE_FRAGMENTSHADER_SOURCE: &str = "#version 300 es
@@ -97,14 +97,14 @@ struct ViewerResources {
 //==============================================================================
 struct ModelViewerScene {
 	scene_base: SceneBase,
-	soldier_load_handle: Option<SkinnedModelLoadHandle>,
+	female_mannequin_load_handle: Option<SkinnedModelLoadHandle>,
 	fox_load_handle: Option<SkinnedModelLoadHandle>,
-	remy_load_handle: Option<SkinnedModelLoadHandle>,
+	mannequin_load_handle: Option<SkinnedModelLoadHandle>,
 	resources: Option<ViewerResources>,
 	load_error_message: Option<String>,
 	elapsed_time: f32,
-	soldier_clip_index: usize,
-	remy_clip_name: String,
+	female_mannequin_clip_index: usize,
+	mannequin_clip_name: String,
 	load_seconds: f32,
 }
 
@@ -115,14 +115,14 @@ impl ModelViewerScene {
 	fn new() -> ModelViewerScene {
 		ModelViewerScene {
 			scene_base: SceneBase::new(),
-			soldier_load_handle: None,
+			female_mannequin_load_handle: None,
 			fox_load_handle: None,
-			remy_load_handle: None,
+			mannequin_load_handle: None,
 			resources: None,
 			load_error_message: None,
 			elapsed_time: 0.0,
-			soldier_clip_index: 0,
-			remy_clip_name: String::from("Idle"),
+			female_mannequin_clip_index: 0,
+			mannequin_clip_name: String::from("Idle"),
 			load_seconds: 0.0,
 		}
 	}
@@ -149,22 +149,22 @@ impl ModelViewerScene {
 		};
 		let mut placed_model_list = Vec::new();
 
-		// 병사. (GLB, 인덱스 + 노멀맵)
-		let mut soldier_model = create_model(&self.soldier_load_handle, "soldier.glb")?;
-		soldier_model.play_animation(SOLDIER_CLIP_NAMES[0], 0.0);
-		placed_model_list.push(PlacedModel { scale: measure_model_scale(&mut soldier_model, 1.8), skinned_model: soldier_model, position_x: -1.0, position_z: 0.0, rotation_y: std::f32::consts::PI + 0.4, label: String::from("soldier.glb") });
+		// 여자 마네킹. (GLB, 인덱스)
+		let mut female_mannequin_model = create_model(&self.female_mannequin_load_handle, "mannequin_female.glb")?;
+		female_mannequin_model.play_animation(FEMALE_MANNEQUIN_CLIP_NAMES[0], 0.0);
+		placed_model_list.push(PlacedModel { scale: measure_model_scale(&mut female_mannequin_model, 1.8), skinned_model: female_mannequin_model, position_x: -1.0, position_z: 0.0, rotation_y: 0.4, label: String::from("mannequin_female.glb") });
 
 		// 여우. (GLB, 노멀 없음 → 스무스 노멀, 인덱스 없음)
 		let mut fox_model = create_model(&self.fox_load_handle, "fox.glb")?;
 		fox_model.play_animation("Walk", 0.0);
 		placed_model_list.push(PlacedModel { scale: measure_model_scale(&mut fox_model, 0.7), skinned_model: fox_model, position_x: 0.1, position_z: 1.1, rotation_y: 1.2, label: String::from("fox.glb") });
 
-		// 레미. (FBX + 애니메이션 FBX 두 개를 본 이름으로 붙인다)
-		let mut remy_model = create_model(&self.remy_load_handle, "Remy.fbx")?;
-		remy_model.add_animations_from_fbx_url(engine, "anims/idle.fbx", "Idle", false);
-		remy_model.add_animations_from_fbx_url(engine, "anims/walk.fbx", "Walk", true);
-		remy_model.play_animation("Idle", 0.0);
-		placed_model_list.push(PlacedModel { scale: measure_model_scale(&mut remy_model, 1.75), skinned_model: remy_model, position_x: 1.0, position_z: -0.2, rotation_y: -0.4, label: String::from("Remy.fbx") });
+		// 마네킹. (FBX + 애니메이션 FBX 두 개를 본 이름으로 붙인다)
+		let mut mannequin_model = create_model(&self.mannequin_load_handle, "mannequin.fbx")?;
+		mannequin_model.add_animations_from_fbx_url(engine, "anims/idle.fbx", "Idle", false);
+		mannequin_model.add_animations_from_fbx_url(engine, "anims/walk.fbx", "Walk", true);
+		mannequin_model.play_animation("Idle", 0.0);
+		placed_model_list.push(PlacedModel { scale: measure_model_scale(&mut mannequin_model, 1.75), skinned_model: mannequin_model, position_x: 1.0, position_z: -0.2, rotation_y: -0.4, label: String::from("mannequin.fbx") });
 
 		// 땅. (코드로 만든 GLB, 스킨 없는 정적 메시)
 		let mut ground_model = SkinnedModel::load_from_bytes(gl, &build_ground_glb(6.0, [0.46, 0.52, 0.4]), &skinned_model_renderer)?;
@@ -302,15 +302,15 @@ impl Scene for ModelViewerScene {
 	// 생성. (모델 받기 부탁, 데스크탑은 그 자리에서 읽힌다. 받기 손잡이를 맡겨 다 받은 뒤 initialize)
 	//==============================================================================
 	fn create(&mut self, engine: &mut Engine) {
-		let soldier_load_handle = SkinnedModel::load_from_url(engine, "soldier.glb");
+		let female_mannequin_load_handle = SkinnedModel::load_from_url(engine, "mannequin_female.glb");
 		let fox_load_handle = SkinnedModel::load_from_url(engine, "fox.glb");
-		let remy_load_handle = SkinnedModel::load_from_fbx_url(engine, "Remy.fbx");
-		for load_handle in [&soldier_load_handle, &fox_load_handle, &remy_load_handle] {
+		let mannequin_load_handle = SkinnedModel::load_from_fbx_url(engine, "mannequin.fbx");
+		for load_handle in [&female_mannequin_load_handle, &fox_load_handle, &mannequin_load_handle] {
 			self.scene_base.track_load_handle(load_handle.get_load_handle());
 		}
-		self.soldier_load_handle = Some(soldier_load_handle);
+		self.female_mannequin_load_handle = Some(female_mannequin_load_handle);
 		self.fox_load_handle = Some(fox_load_handle);
-		self.remy_load_handle = Some(remy_load_handle);
+		self.mannequin_load_handle = Some(mannequin_load_handle);
 	}
 
 	//==============================================================================
@@ -359,20 +359,20 @@ impl Scene for ModelViewerScene {
 				return;
 			}
 		};
-		let soldier_clip_index = ((self.elapsed_time / SOLDIER_CLIP_SECONDS) as usize) % SOLDIER_CLIP_NAMES.len();
-		if soldier_clip_index != self.soldier_clip_index {
-			self.soldier_clip_index = soldier_clip_index;
-			resources.placed_model_list[0].skinned_model.play_animation(SOLDIER_CLIP_NAMES[soldier_clip_index], 0.3);
+		let female_mannequin_clip_index = ((self.elapsed_time / FEMALE_MANNEQUIN_CLIP_SECONDS) as usize) % FEMALE_MANNEQUIN_CLIP_NAMES.len();
+		if female_mannequin_clip_index != self.female_mannequin_clip_index {
+			self.female_mannequin_clip_index = female_mannequin_clip_index;
+			resources.placed_model_list[0].skinned_model.play_animation(FEMALE_MANNEQUIN_CLIP_NAMES[female_mannequin_clip_index], 0.3);
 		}
-		let remy_clip_name = if ((self.elapsed_time / 2.0) as usize).is_multiple_of(2) {
+		let mannequin_clip_name = if ((self.elapsed_time / 2.0) as usize).is_multiple_of(2) {
 			"Idle"
 		}
 		else {
 			"Walk"
 		};
-		if remy_clip_name != self.remy_clip_name {
-			self.remy_clip_name = remy_clip_name.to_string();
-			resources.placed_model_list[2].skinned_model.play_animation(remy_clip_name, 0.3);
+		if mannequin_clip_name != self.mannequin_clip_name {
+			self.mannequin_clip_name = mannequin_clip_name.to_string();
+			resources.placed_model_list[2].skinned_model.play_animation(mannequin_clip_name, 0.3);
 		}
 		for placed_model in resources.placed_model_list.iter_mut() {
 			placed_model.skinned_model.update(delta_time);
@@ -402,9 +402,9 @@ impl Scene for ModelViewerScene {
 		let mut line_list = vec![String::from("바닐라엔진 graphics3d modelviewer")];
 		match &self.resources {
 			Some(resources) => {
-				line_list.push(format!("soldier.glb  {}", SOLDIER_CLIP_NAMES[self.soldier_clip_index]));
+				line_list.push(format!("mannequin_female.glb  {}", FEMALE_MANNEQUIN_CLIP_NAMES[self.female_mannequin_clip_index]));
 				line_list.push(String::from("fox.glb  Walk (smooth normals)"));
-				line_list.push(format!("Remy.fbx  {} (anims/*.fbx retarget)", self.remy_clip_name));
+				line_list.push(format!("mannequin.fbx  {} (anims/*.fbx retarget)", self.mannequin_clip_name));
 				line_list.push(format!("shadow {} + bloom, load {:.1}s, t {:.1}s", resources.shadow_map.get_resolution(), self.load_seconds, self.elapsed_time));
 			}
 			None => {

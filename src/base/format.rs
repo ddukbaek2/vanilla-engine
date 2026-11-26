@@ -28,6 +28,7 @@
 //! assert_eq!(format::format_minutes_seconds(75.0), "1:15");
 //! ```
 //==============================================================================
+// 옮긴 원문: ICU4C, CLDR 의 숫자 꼴 자료에서 옮김, Unicode-3.0, THIRD_PARTY_LICENSES.md
 
 /// 라틴 숫자 모양.
 const LATIN_DIGITS: &str = "0123456789";

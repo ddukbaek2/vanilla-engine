@@ -50,6 +50,7 @@
 //! assert!(!is_emoji_presentation("A"));
 //! ```
 //==============================================================================
+// 옮긴 원문: 크로미엄 third_party/blink/renderer/platform/text/character_property_data.h 의 표, 스키아 src/core/SkTextFormatParams.h 의 가짜 굵게 표에서 옮김, BSD-3-Clause, THIRD_PARTY_LICENSES.md
 use crate::core::colorglyph;
 use std::rc::Rc;
 use unicode_bidi::{BidiInfo, Level};

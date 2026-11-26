@@ -12,6 +12,7 @@
 //!   블록의 DiscardPadding 을 그 패킷 뒤에서. (matroskadec, OpusAudioDecoder 의 discard_helper_, FinalizeDecodedBuffer)
 //! - MP4(AAC): 편집 목록(elst)의 media_time 을 앞에서, 마지막 패킷 길이나 컨테이너 길이로 끝을. (mov.c, MaybeTrimAacFinalBuffer)
 //==============================================================================
+// 옮긴 원문: 크로미엄 media/filters/audio_file_reader.cc, media/base/audio_discard_helper.cc 의 버리기 셈을 옮김, BSD-3-Clause, THIRD_PARTY_LICENSES.md
 use super::RawDecode;
 
 //==============================================================================

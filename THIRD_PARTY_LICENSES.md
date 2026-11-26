@@ -43,12 +43,12 @@ is preserved.
 
 ### Chromium and Blink
 
-- Web Audio (desktop mixer, `src/platform/audio/`: audioparam.rs, panner.rs, pannermath.rs, oscillator.rs, mixer.rs, decode/resample.rs, decode/opus.rs, hrtf/): third_party/blink/renderer/modules/webaudio/ (audio_param_handler.cc, panner_handler.cc, audio_listener_handler.cc, oscillator_handler.cc, periodic_wave_handler.cc, audio_scheduled_source_handler.cc, audio_buffer_source_handler.cc, cpu/arm/oscillator_kernel_neon.cc, cpu/x86/oscillator_kernel_sse2.cc), media/base/sinc_resampler.cc, ui/gfx/geometry/vector3d_f.cc, and the platform audio files listed below.
+- Web Audio (desktop mixer, `src/platform/audio/`: audioparam.rs, panner.rs, pannermath.rs, oscillator.rs, mixer.rs, decode/resample.rs, decode/opus.rs, decode/trim.rs, hrtf/): third_party/blink/renderer/modules/webaudio/ (audio_param_handler.cc, panner_handler.cc, audio_listener_handler.cc, oscillator_handler.cc, periodic_wave_handler.cc, audio_scheduled_source_handler.cc, audio_buffer_source_handler.cc, cpu/arm/oscillator_kernel_neon.cc, cpu/x86/oscillator_kernel_sse2.cc), media/base/sinc_resampler.cc, ui/gfx/geometry/vector3d_f.cc, and the platform audio files listed below. Decoding (`src/platform/audio/decode/`): media/filters/opus_audio_decoder.cc and media/formats/common/opus_constants.h (opus.rs), media/filters/audio_file_reader.cc and media/base/audio_discard_helper.cc (trim.rs).
 - Text editing (`src/core/textinput.rs`): third_party/blink/renderer/core/editing/state_machines/backspace_state_machine.cc and position_units_word.cc.
 - Canvas 2D paths (`src/core/canvas2d.rs`): third_party/blink/renderer/modules/canvas/canvas2d/canvas_path.cc (with Skia, below).
 - Text (`src/core/textshaping.rs`): tables of third_party/blink/renderer/platform/text/character_property_data.h.
 - UI strings (`src/core/browseruitext.json`, desktop builds): translations from Chromium's generated_resources, ui_strings and components_strings .xtb files.
-- Desktop platform (`src/platform/desktop/`): the font family tables of Chromium's locale_settings resources and platform behavior.
+- Desktop platform (`src/platform/desktop/`): the font family tables of Chromium's locale_settings resources and platform behavior (linuxplatform.rs: ui/base/pointer/pointer_device_linux.cc).
 
 Files under "Copyright The Chromium Authors" are covered by the Chromium license:
 
@@ -208,7 +208,7 @@ SUCH DAMAGE.
 
 ### Skia
 
-- `src/core/canvas2d.rs` (SkPathBuilder, SkGeometry conic and arc math, SkRRect, SkScalar and SkGeometry constants, SkSwizzler_opts.inc), `src/core/textshaping.rs` (fake bold tables), `src/platform/desktop/systemfont.rs` (kFontEquivMap of SkFontConfigInterface_direct.cpp).
+- `src/core/canvas2d.rs` (SkPathBuilder, SkGeometry conic and arc math, SkRRect, SkScalar and SkGeometry constants, SkSwizzler_opts.inc), `src/core/textshaping.rs` (fake bold tables of src/core/SkTextFormatParams.h), `src/platform/desktop/systemfont.rs` (kFontEquivMap of SkFontConfigInterface_direct.cpp), `src/core/maskgamma.rs` (src/core/SkMaskGamma.cpp, SkMaskGamma.h, SkColorData.h, SkScalerContext.cpp), `src/platform/desktop/coretextglyph.rs` (src/ports/SkScalerContext_mac_ct.cpp, src/utils/mac/SkCTFont.cpp).
 
 ````text
 Copyright (c) 2011 Google Inc. All rights reserved.
@@ -505,6 +505,13 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ````
+### Public domain and CC0 code
+
+No notice is required for these. They are listed so that the origin of the code is clear.
+
+- `src/effect/screeneffect.rs`, `src/effect/shadersprite.rs`, `src/graphics3d/toon/toonvfx.rs` (hash21, hashPoint): the fmix32 finalizer of MurmurHash3 by Austin Appleby (https://github.com/aappleby/smhasher/blob/master/src/MurmurHash3.cpp): "MurmurHash3 was written by Austin Appleby, and is placed in the public domain. The author hereby disclaims copyright to this source code."
+- `src/effect/screeneffect.rs` (tonemap), `src/graphics3d/toon/toonpostprocess.rs`: the ACES filmic curve fit by Krzysztof Narkowicz (https://knarkowicz.wordpress.com/2016/01/06/aces-filmic-tone-mapping-curve/): "Fitted curve's HLSL source code (free to use under public domain CC0 or MIT license)". Used under CC0.
+- The environment BRDF fit of `src/graphics3d/humanskinrenderer.rs` and the shader hash above are written for this engine. (The split sum integral is fitted by the engine's own least squares, not taken from another fit)
 <!-- vanilla-engine-licenses: bundled materials end -->
 
 ## Crates

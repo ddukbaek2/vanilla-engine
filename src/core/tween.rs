@@ -16,6 +16,7 @@
 //!   원본은 트윈 객체를 들고 stop_tween(tween) 으로 가리키지만, 러스트 판은 씬이 트윈을 가져가므로(소유권이 넘어간다)
 //!   start_tween 이 돌려준 TweenId 로 가리킨다. get_tween / get_tween_mut 은 그 때문에 있다.
 //==============================================================================
+// 옮긴 원문: tween.js 와 Robert Penner 의 이징 식에서 옮김, MIT 와 BSD-3-Clause, THIRD_PARTY_LICENSES.md
 use crate::base::identifier;
 use crate::base::math;
 use crate::base::vector2::Vector2;

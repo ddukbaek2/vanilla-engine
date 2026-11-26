@@ -4,6 +4,7 @@
 //! - 자리는 몸의 원점, 속도는 질량 중심의 속도다. (Box2D, 유니티 Rigidbody2D 와 같다)
 //! - 원본과 다른 점: 사용자 값은 u64 다. 벡터는 f64 의 PhysicsVector2 다.
 //==============================================================================
+// 옮긴 원문: Box2D 3 의 셈에서 옮김, MIT, THIRD_PARTY_LICENSES.md
 use super::physicsid2d::{BodyId2D, ShapeId2D};
 use super::physicsmath2d::{PhysicsMath2D, Rotation2D};
 use super::physicsvector2::PhysicsVector2;

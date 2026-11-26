@@ -3,6 +3,7 @@
 //! - 초안: 0.4.0 뒤 기능, API 가 바뀔 수 있다. 원본 src/experimental/physics2d/joint2d.js 와 같은 API, 같은 셈이다.
 //! - 원본과 다른 점: 정의의 몸 아이디는 Option 이다. (원본은 null) 사용자 값은 u64 다.
 //==============================================================================
+// 옮긴 원문: Box2D 3 의 셈에서 옮김, MIT, THIRD_PARTY_LICENSES.md
 use super::body2d::{Body2D, NO_INDEX};
 use super::physicsid2d::{BodyId2D, JointId2D};
 use super::physicsmath2d::PhysicsMath2D;

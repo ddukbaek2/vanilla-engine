@@ -5,6 +5,7 @@
 //! - 캡슐과 선분은 꼭짓점 2 개짜리 둥근 다각형으로 보고, 다각형끼리는 분리축(SAT)으로 기준 변을 고른 뒤 맞은편 변을 잘라 닿음점을 낸다.
 //!   떨어진 채 꼭짓점끼리 가장 가까우면 선분 거리로 꼭짓점과 꼭짓점 사이 법선을 쓴다. (Erin Catto, GDC 2007 Contact Manifolds 와 Box2D 3 의 방식)
 //==============================================================================
+// 옮긴 원문: Box2D 3 의 셈에서 옮김, MIT, THIRD_PARTY_LICENSES.md
 use super::geometry2d::ShapeType2D;
 use super::shape2d::Shape2D;
 

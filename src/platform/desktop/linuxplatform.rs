@@ -13,6 +13,7 @@
 //! - 라이브러리(libX11, libXi)는 빌드할 때 잇지 않고 실행할 때 연다. (x11-dl, glutin 이 쓰는 같은 판) 웨이랜드는 wayland-client(winit 과 같은 판)다.
 //! - 가르는 함수(classify_x11_input_devices, PointerDevicePresence)는 다른 OS 에서도 시험으로 돈다.
 //==============================================================================
+// 옮긴 원문: 크로미엄 ui/base/pointer/pointer_device_linux.cc 의 판정을 옮김, BSD-3-Clause, THIRD_PARTY_LICENSES.md
 #[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
 use std::cell::Cell;
 #[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]

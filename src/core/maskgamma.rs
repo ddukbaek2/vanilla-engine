@@ -7,6 +7,7 @@
 //! - 감마 값 0 은 sRGB 곡선, 1 은 선형(표가 그대로라 고치지 않는다), 그 밖은 거듭제곱이다. (SkColorSpaceLuminance::Fetch)
 //!   크롬의 플랫폼별 값(크로미엄 skia/BUILD.gn 의 SK_GAMMA_EXPONENT, SK_GAMMA_CONTRAST): 맥 sRGB 와 대비 0, 리눅스 1.2 와 0.2, 윈도우 sRGB 와 대비 1(시스템 값이 있으면 그것).
 //==============================================================================
+// 옮긴 원문: 스키아 src/core/SkMaskGamma.cpp, SkMaskGamma.h, SkColorData.h, SkScalerContext.cpp 에서 옮김, BSD-3-Clause, THIRD_PARTY_LICENSES.md
 use std::cell::RefCell;
 use std::collections::HashMap;
 

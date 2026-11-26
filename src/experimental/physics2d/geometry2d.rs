@@ -4,6 +4,7 @@
 //! - 원본과 다른 점: createShape 가 받는 모양 하나를 ShapeGeometry2D 열거로 묶었다. (원본은 네 클래스 가운데 하나)
 //!   make_polygon 은 null 대신 None 을 돌려준다.
 //==============================================================================
+// 옮긴 원문: Box2D 3 의 셈에서 옮김, MIT, THIRD_PARTY_LICENSES.md
 use super::physicsmath2d::PhysicsMath2D;
 use super::physicsvector2::PhysicsVector2;
 

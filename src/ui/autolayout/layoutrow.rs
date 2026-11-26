@@ -8,6 +8,7 @@
 //!   - 생략할 수 있던 coefficient(기본 1)는 꼭 받는다.
 //!   - 원본이 행과 솔버에 따로 둔 0 근접 판정은 near_zero 하나를 같이 쓴다.
 //==============================================================================
+// 옮긴 원문: Kiwi(Nucleic Development Team) 의 Row 에서 옮김, BSD-3-Clause, THIRD_PARTY_LICENSES.md
 use crate::ui::autolayout::layoutsymbol::{LayoutSymbol, LayoutSymbolMap};
 
 /// 0 근접 판정의 문턱. (Kiwi 의 EPS 와 같다)

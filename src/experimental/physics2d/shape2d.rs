@@ -3,6 +3,7 @@
 //! - 초안: 0.4.0 뒤 기능, API 가 바뀔 수 있다. 원본 src/experimental/physics2d/shape2d.js 와 같은 API, 같은 셈이다.
 //! - 원본과 다른 점: 사용자 값(user_data)은 u64 다. (원본은 아무 값) 거르기 비트는 u32, 무리 번호는 i32 다.
 //==============================================================================
+// 옮긴 원문: Box2D 3 의 셈에서 옮김, MIT, THIRD_PARTY_LICENSES.md
 use super::geometry2d::{Capsule2D, Circle2D, Polygon2D, Segment2D, ShapeGeometry2D, ShapeType2D};
 use super::physicsid2d::{BodyId2D, ShapeId2D};
 use super::physicsvector2::PhysicsVector2;

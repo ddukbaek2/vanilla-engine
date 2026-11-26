@@ -23,6 +23,7 @@
 //! assert!(!read_browser_ui_locale().is_empty());
 //! ```
 //==============================================================================
+// 옮긴 원문: 크로미엄 generated_resources, ui_strings, components_strings 의 .xtb 번역에서 옮김, BSD-3-Clause, THIRD_PARTY_LICENSES.md
 use serde_json::{Map, Value};
 use std::cell::RefCell;
 
