@@ -24,9 +24,10 @@
 //!     맥 GameController 의 GCDualSenseGamepad.touchpadButton 도 있지만, GameController 는 패드의 제조사, 제품 번호를 내주지 않아 gilrs 패드와 짝짓지 못해 쓰지 않는다.
 //!   - Gamepad.index 는 데스크탑에서는 gilrs 의 GamepadId 번호다. (처음 붙은 순서로 0 부터, 브라우저 index 와 같은 쓰임) 웹은 브라우저 index 다.
 //!   - Gamepad.id 는 웹에서는 브라우저 id 그대로, 데스크탑에서는 크롬 꼴 "이름 (STANDARD GAMEPAD Vendor: 054c Product: 0ce6)" 로 만든다.
-//!   - get_all_connected_gamepads / get_connected_gamepad 는 마지막 갱신(tick)에 읽은 사본을 돌려준다. (원본은 부를 때마다 새로 읽는다)
 //!   - 콜백의 button 값은 bool 대신 1.0(눌림) / 0.0(뗌) 이다.
-//!   - gilrs(웹은 연결 리스너)는 처음 갱신할 때 만든다. (갱신하지 않는 엔진과 시험에서는 장치를 열지 않는다)
+//!   - gilrs(웹은 연결 리스너)는 처음 부를 때(갱신, 진동, 패드 목록 읽기) 만든다. (부르지 않는 엔진과 시험에서는 장치를 열지 않는다)
+//! - get_all_connected_gamepads / get_connected_gamepad 는 원본 navigator.getGamepads() 처럼 부를 때 그 자리에서 읽는다. (데스크탑은 gilrs 사건을 비워 지금 상태,
+//!   그 사이의 연결과 해제는 다음 갱신이 받는다) update_all_gamepads_with_list 로 목록을 넣은 관리자(시험, 다른 입력원)는 넣은 목록을 돌려준다.
 //!   - 더한 것: set_log_enabled (로그 켜고 끄기),
 //!     update_all_gamepads_with_list (gilrs 없이 목록을 넣는 길. 시험이나 다른 입력원)
 //!   - 배터리 정보는 원본에 없어 옮기지 않는다.
@@ -36,7 +37,7 @@
 //!     데스크탑은 gilrs force feedback(리눅스 evdev, 윈도우 XInput 과 Windows.Gaming.Input)으로 떨고, gilrs 가 진동을 대지 않는 macOS 는
 //!     플랫폼 층(platform/desktop/gamepadhaptics.rs)이 GameController 와 CoreHaptics 로 gilrs 패드와 짝인 컨트롤러를 떤다. (macOS 는 길이나 세기가 0 이면 앞 진동을 멈춘다)
 //!     그래서 gilrs 를 진동을 켠 채 만든다. (데스크탑에서 gilrs 의 진동 스레드 하나가 돈다) 웹은 원본처럼 navigator.getGamepads() 의 vibrationActuator 에 dual-rumble 을 건다.
-//!     첫 갱신(tick) 전에 부르면 gilrs 가 아직 없어 데스크탑에서는 떨지 않는다.
+//!     첫 갱신(tick) 전에 불러도 그 자리에서 gilrs 를 만들어 떤다. (원본처럼)
 //==============================================================================
 #[cfg(not(target_arch = "wasm32"))]
 use gilrs::{Axis, Button, GilrsBuilder};
@@ -469,6 +470,8 @@ pub struct GamepadManager {
 	gamepad_reader: Option<GamepadReader>,
 	/// gilrs 를 만들어 봤는지.
 	is_gamepad_reader_creation_tried: bool,
+	/// update_all_gamepads_with_list 로 목록을 넣었는지. (그러면 장치 대신 넣은 목록을 읽는다)
+	is_external_list_used: bool,
 	/// 로그를 내는지.
 	is_log_enabled: bool,
 	/// 단추와 축이 바뀔 때마다 로그를 내는지.
@@ -480,7 +483,7 @@ pub struct GamepadManager {
 impl GamepadManager {
 	//==============================================================================
 	/// 생성.
-	/// - 로그는 켜고 입력 로그는 끈 채 시작한다. 장치(gilrs)는 첫 갱신 때 연다.
+	/// - 로그는 켜고 입력 로그는 끈 채 시작한다. 장치(gilrs)는 처음 부를 때 연다.
 	///
 	/// # 돌려줌
 	/// 연결된 패드가 없는 관리자.
@@ -493,6 +496,7 @@ impl GamepadManager {
 			gamepad_list: Vec::new(),
 			gamepad_reader: None,
 			is_gamepad_reader_creation_tried: false,
+			is_external_list_used: false,
 			is_log_enabled: true,
 			is_input_log_enabled: false,
 			active_gamepad_id: None,
@@ -657,6 +661,7 @@ impl GamepadManager {
 		}
 		#[cfg(not(target_arch = "wasm32"))]
 		{
+			self.ensure_gamepad_reader();
 			if let Some(gamepad_reader) = self.gamepad_reader.as_mut() {
 				gamepad_reader.vibrate(clamped_strong_magnitude, clamped_weak_magnitude, duration_milliseconds);
 			}
@@ -667,10 +672,7 @@ impl GamepadManager {
 	/// 모든 게임패드 갱신. (gilrs 를 읽어 update_all_gamepads_with_list 로 넘긴다)
 	//==============================================================================
 	pub fn update_all_gamepads(&mut self) {
-		if !self.is_gamepad_reader_creation_tried {
-			self.is_gamepad_reader_creation_tried = true;
-			self.gamepad_reader = GamepadReader::create();
-		}
+		self.ensure_gamepad_reader();
 		let read_result = match self.gamepad_reader.as_mut() {
 			Some(gamepad_reader) => {
 				gamepad_reader.read_gamepads()
@@ -707,7 +709,30 @@ impl GamepadManager {
 			}
 		}
 
-		self.update_all_gamepads_with_list(read_result.gamepad_list);
+		self.apply_gamepad_list(read_result.gamepad_list);
+	}
+
+	//==============================================================================
+	/// 장치 입력원(gilrs, 웹은 연결 리스너)을 처음 부를 때 만든다.
+	//==============================================================================
+	fn ensure_gamepad_reader(&mut self) {
+		if !self.is_gamepad_reader_creation_tried {
+			self.is_gamepad_reader_creation_tried = true;
+			self.gamepad_reader = GamepadReader::create();
+		}
+	}
+
+	//==============================================================================
+	/// 패드 목록을 그 자리에서 다시 읽는다. (원본 navigator.getGamepads(), 목록을 넣은 관리자는 그대로)
+	//==============================================================================
+	fn refresh_gamepad_list(&mut self) {
+		if self.is_external_list_used {
+			return;
+		}
+		self.ensure_gamepad_reader();
+		if let Some(gamepad_reader) = self.gamepad_reader.as_mut() {
+			self.gamepad_list = gamepad_reader.read_gamepad_list();
+		}
 	}
 
 	//==============================================================================
@@ -734,6 +759,14 @@ impl GamepadManager {
 	/// ```
 	//==============================================================================
 	pub fn update_all_gamepads_with_list(&mut self, gamepad_list: Vec<Option<Gamepad>>) {
+		self.is_external_list_used = true;
+		self.apply_gamepad_list(gamepad_list);
+	}
+
+	//==============================================================================
+	/// 목록으로 갱신하는 본문. (원본 updateAllGamepads 의 본문)
+	//==============================================================================
+	fn apply_gamepad_list(&mut self, gamepad_list: Vec<Option<Gamepad>>) {
 		// 목록에 있는데 아직 맞이하지 않은 패드를 여기서 붙인다.
 		// (원본: gamepadconnected 이벤트를 놓쳐도 매 갱신마다 훑어 보완한다)
 		for gamepad in gamepad_list.iter().flatten() {
@@ -1002,12 +1035,13 @@ impl GamepadManager {
 	}
 
 	//==============================================================================
-	/// 연결된 모든 게임패드 반환. (마지막 갱신의 사본)
+	/// 연결된 모든 게임패드 반환. (원본처럼 그 자리에서 읽은 지금 상태)
 	///
 	/// # 돌려줌
 	/// 붙은 차례의 패드 목록. 없으면 빈 목록.
 	//==============================================================================
-	pub fn get_all_connected_gamepads(&self) -> Vec<&Gamepad> {
+	pub fn get_all_connected_gamepads(&mut self) -> Vec<&Gamepad> {
+		self.refresh_gamepad_list();
 		let mut connected_gamepad_list = Vec::new();
 		for hardware_index in self.connected_gamepad_indices.iter() {
 			if let Some(Some(gamepad)) = self.gamepad_list.get(*hardware_index) {
@@ -1034,9 +1068,13 @@ impl GamepadManager {
 	/// - `gamepad_index`: 연결 목록의 순번. (붙은 차례, Gamepad.index 가 아니다)
 	///
 	/// # 돌려줌
-	/// 마지막 갱신의 패드 사본. 순번이 범위를 넘거나 그 패드가 마지막 목록에 없으면 None.
+	/// 그 자리에서 읽은 패드. 순번이 범위를 넘거나 그 패드가 지금 목록에 없으면 None.
 	//==============================================================================
-	pub fn get_connected_gamepad(&self, gamepad_index: usize) -> Option<&Gamepad> {
+	pub fn get_connected_gamepad(&mut self, gamepad_index: usize) -> Option<&Gamepad> {
+		if gamepad_index >= self.connected_gamepad_indices.len() {
+			return None;
+		}
+		self.refresh_gamepad_list();
 		let hardware_index = *self.connected_gamepad_indices.get(gamepad_index)?;
 		match self.gamepad_list.get(hardware_index) {
 			Some(Some(gamepad)) => {
@@ -1370,6 +1408,8 @@ struct GamepadReader {
 	extra_button_code_table: HashMap<usize, Vec<gilrs::ev::Code>>,
 	/// 패드 index 마다 표준 축 뒤에 붙인 축 코드. (처음 움직인 차례, 번호가 4 부터의 축 번호)
 	extra_axis_code_table: HashMap<usize, Vec<gilrs::ev::Code>>,
+	/// 다음 갱신에 넘길 연결과 해제. (목록을 그 자리에서 읽을 때 비운 사건)
+	pending_read_result: GamepadReadResult,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1403,6 +1443,7 @@ impl GamepadReader {
 			vibration_effect_list: Vec::new(),
 			extra_button_code_table: HashMap::new(),
 			extra_axis_code_table: HashMap::new(),
+			pending_read_result: GamepadReadResult::default(),
 		}
 	}
 
@@ -1455,20 +1496,19 @@ impl GamepadReader {
 	}
 
 	//==============================================================================
-	/// 읽기. (이벤트를 비워야 gilrs 의 상태가 갱신된다, 끝난 진동은 놓는다)
+	/// 지금 목록 읽기. (이벤트를 비워야 gilrs 의 상태가 갱신된다, 연결과 해제는 다음 read_gamepads 에 넘긴다, 끝난 진동은 놓는다)
 	//==============================================================================
-	fn read_gamepads(&mut self) -> GamepadReadResult {
+	fn read_gamepad_list(&mut self) -> Vec<Option<Gamepad>> {
 		let now = web_time::Instant::now();
 		self.vibration_effect_list.retain(|(_, end_instant)| *end_instant > now);
-		let mut read_result = GamepadReadResult::default();
 		while let Some(event) = self.gilrs.next_event() {
 			let hardware_index = usize::from(event.id);
 			match event.event {
 				gilrs::EventType::Connected => {
-					read_result.connected_gamepad_index_list.push(hardware_index);
+					self.pending_read_result.connected_gamepad_index_list.push(hardware_index);
 				}
 				gilrs::EventType::Disconnected => {
-					read_result.disconnected_gamepad_index_list.push(hardware_index);
+					self.pending_read_result.disconnected_gamepad_index_list.push(hardware_index);
 					self.extra_button_code_table.remove(&hardware_index);
 					self.extra_axis_code_table.remove(&hardware_index);
 					#[cfg(target_os = "macos")]
@@ -1480,15 +1520,26 @@ impl GamepadReader {
 				}
 			}
 		}
+		let mut gamepad_list: Vec<Option<Gamepad>> = Vec::new();
 		for (gamepad_id, gilrs_gamepad) in self.gilrs.gamepads() {
 			let mut gamepad = create_gamepad_from_gilrs(gamepad_id, &gilrs_gamepad);
 			let hardware_index = gamepad.index;
 			append_extra_elements(&mut self.extra_button_code_table, &mut self.extra_axis_code_table, &mut gamepad, &gilrs_gamepad);
-			if read_result.gamepad_list.len() <= hardware_index {
-				read_result.gamepad_list.resize(hardware_index + 1, None);
+			if gamepad_list.len() <= hardware_index {
+				gamepad_list.resize(hardware_index + 1, None);
 			}
-			read_result.gamepad_list[hardware_index] = Some(gamepad);
+			gamepad_list[hardware_index] = Some(gamepad);
 		}
+		gamepad_list
+	}
+
+	//==============================================================================
+	/// 갱신 읽기. (지금 목록과, 지난 갱신 뒤의 연결과 해제)
+	//==============================================================================
+	fn read_gamepads(&mut self) -> GamepadReadResult {
+		let gamepad_list = self.read_gamepad_list();
+		let mut read_result = std::mem::take(&mut self.pending_read_result);
+		read_result.gamepad_list = gamepad_list;
 		read_result
 	}
 }
@@ -1642,14 +1693,23 @@ impl GamepadReader {
 				read_result.disconnected_gamepad_index_list.push(hardware_index);
 			}
 		}
+		read_result.gamepad_list = self.read_gamepad_list();
+		read_result
+	}
+
+	//==============================================================================
+	/// 지금 목록 읽기. (navigator.getGamepads(), 번호가 index)
+	//==============================================================================
+	fn read_gamepad_list(&mut self) -> Vec<Option<Gamepad>> {
+		let mut gamepad_list: Vec<Option<Gamepad>> = Vec::new();
 		for gamepad in read_browser_gamepads().into_iter().flatten() {
 			let hardware_index = gamepad.index;
-			if read_result.gamepad_list.len() <= hardware_index {
-				read_result.gamepad_list.resize(hardware_index + 1, None);
+			if gamepad_list.len() <= hardware_index {
+				gamepad_list.resize(hardware_index + 1, None);
 			}
-			read_result.gamepad_list[hardware_index] = Some(gamepad);
+			gamepad_list[hardware_index] = Some(gamepad);
 		}
-		read_result
+		gamepad_list
 	}
 }
 
@@ -2098,6 +2158,27 @@ mod tests {
 		assert_eq!(read_gamepad_kind("045e-02fd-Xbox Wireless Controller"), GamepadKind::Xbox);
 		assert_eq!(read_gamepad_kind("Pro Controller (STANDARD GAMEPAD Vendor: 057e Product: 2009)"), GamepadKind::Nintendo);
 		assert_eq!(read_gamepad_kind("Steam Virtual Gamepad"), GamepadKind::Other);
+	}
+
+	//==============================================================================
+	/// 패드 목록 읽기: 범위 밖은 장치를 열지 않고 None, 목록을 넣은 관리자는 넣은 목록.
+	//==============================================================================
+	#[test]
+	fn connected_gamepad_reads_given_list_without_device() {
+		let mut gamepad_manager = GamepadManager::new();
+		gamepad_manager.set_log_enabled(false);
+		// 연결 목록 밖의 순번은 장치를 열지 않고 None. (원본 getConnectedGamepad 의 범위 검사)
+		assert!(gamepad_manager.get_connected_gamepad(0).is_none());
+		assert!(!gamepad_manager.is_gamepad_reader_creation_tried);
+		// 목록을 넣은 관리자는 그 자리에서 읽어도 넣은 목록을 돌려준다.
+		let mut gamepad = Gamepad::create(0, "Pad");
+		gamepad.axes = vec![0.25, 0.0, 0.0, 0.0];
+		gamepad_manager.update_all_gamepads_with_list(vec![Some(gamepad.clone())]);
+		gamepad.axes[0] = 0.5;
+		gamepad_manager.update_all_gamepads_with_list(vec![Some(gamepad)]);
+		assert_eq!(gamepad_manager.get_connected_gamepad(0).map(|gamepad| gamepad.axes[0]), Some(0.5));
+		assert_eq!(gamepad_manager.get_all_connected_gamepads().len(), 1);
+		assert!(!gamepad_manager.is_gamepad_reader_creation_tried);
 	}
 
 	//==============================================================================

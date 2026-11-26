@@ -1,6 +1,8 @@
 # 업데이트 기록
 
 # 아직 release 에 합치지 않은 것 (release 에 합칠 때 패치 판을 하나 올려 매긴다)
+- GamepadManager: get_all_connected_gamepads, get_connected_gamepad 가 원본 navigator.getGamepads() 처럼 부를 때 그 자리에서 읽는다(데스크탑은 gilrs 사건을 비워 지금 상태, 그 사이 연결과 해제는 다음 갱신이 받음, 웹은 navigator.getGamepads()). 그래서 &mut self 를 받는다. gilrs 는 처음 부를 때(갱신, 진동, 목록 읽기) 만들어 첫 tick 전 vibrate 도 데스크탑에서 떤다. update_all_gamepads_with_list 로 목록을 넣은 관리자는 넣은 목록을 돌려준다.
+  - 옮기는 법: get_gamepad_manager() 로 빌려 목록을 읽던 코드는 get_gamepad_manager_mut() 로 빌린다.
 - AudioPlayer 버리기: 플레이어를 버려도 트는 소리는 원본 WebAudio 소스 노드처럼 끝까지 운다. 데스크탑은 믹서가 소스가 끝날 때까지 플레이어 노드(와 그리로 내는 버스 노드)를 들고 끝나면 뺀다. 웹은 onended 를 스스로 풀리는 콜백으로 바꿔 소스가 끝까지 울고, 끝나면 GainNode 를 뗀다. 컨텍스트 재개를 기다리던 재생도 원본처럼 재개 뒤에 튼다. (지금까지는 버리면 소리가 멈췄다)
   - 옮기는 법: 플레이어를 버려 소리를 끄던 코드는 버리기 전에 stop() 을 부른다. 루프 소리는 stop 하지 않으면 원본처럼 계속 운다.
 - 사인, 코사인, 탄젠트: math::sin, cos, tan 과 트윈 감속 함수(sinusoidal, elastic)가 시스템 libm 대신 크롬 Math.sin, cos, tan 과 같은 셈(바르게 반올림한 f64, src/base/trigonometry.rs, 2/π 비트 표 Payne-Hanek 줄이기와 두 배 정밀도 급수, fma 없이)을 하고 f32 로 담는다. 크롬 158 과 22,000 입력에서 sin, cos, tan 이 모두 같은 비트였다. (맥 시스템 libm 은 sin 896, tan 8,719 곳이 달랐다) 시스템 libm 은 맥, 윈도우, 리눅스, wasm 마다 끝자리가 달랐다. math::tan 은 sin / cos 가 아니라 바로 셈한다. 셈이 표준 함수보다 느리다(호출 한 번 0.5 마이크로초 안팎).
