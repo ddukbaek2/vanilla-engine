@@ -927,6 +927,8 @@ pub struct UIInputField {
 	caret_local_x: f32,
 	value_revision: u64,
 	context_menu_node_id: Option<NodeId>,
+	/// 이번 tick 에 문맥 메뉴 요청으로 메뉴를 열었는지. (그 요청을 낸 오른쪽 누름이 같은 프레임의 touch_press 로 메뉴를 닫고 선택을 지우지 않게)
+	is_context_menu_opened_this_tick: bool,
 	pending_menu_action: Option<UIInputFieldMenuAction>,
 	/// 글 라벨을 마지막으로 놓은 노드 크기. (원본 refreshTextPositions 가 tick 에서 크기가 있을 때만 놓는다. 처음은 0, UI 문서가 원본 자식 꼴로 적는다)
 	text_layout_size: Vector2,
@@ -1067,6 +1069,7 @@ impl UIInputField {
 			caret_local_x: 16.0,
 			value_revision: 0,
 			context_menu_node_id: None,
+			is_context_menu_opened_this_tick: false,
 			pending_menu_action: None,
 			text_layout_size: Vector2::zero(),
 			caret_local_top: 0.0,
@@ -3474,17 +3477,6 @@ impl Component for UIInputField {
 		}
 		self.blur_on_outside_press(context);
 
-		// 문맥 메뉴 요청. (데스크탑 오른쪽 단추, 웹 필드 위의 오른쪽 클릭. 그 자리 맨 위가 이 필드일 때)
-		let context_menu_request_position = context.get_engine().get_input_manager().get_text_input().get_context_menu_request_position();
-		if let Some(context_menu_request_position) = context_menu_request_position {
-			let node_id = context.get_node_id();
-			let topmost_node_id = context.get_node_tree().find_topmost_interactable_node(context_menu_request_position);
-			if self.is_attached && topmost_node_id == Some(node_id) {
-				self.handle_focus();
-				self.show_context_menu(context, context_menu_request_position);
-			}
-		}
-
 		// 글 입력 줄에서 이 필드 몫 꺼내기.
 		let accepts_focused_field_events = self.is_focused && self.is_attached;
 		let event_kind_list = context.get_engine().get_input_manager().get_text_input().take_events_for_field(self.field_id, accepts_focused_field_events);
@@ -3495,6 +3487,20 @@ impl Component for UIInputField {
 		}
 		for event_kind in event_kind_list {
 			self.handle_text_input_event(context, event_kind);
+		}
+
+		// 문맥 메뉴 요청. (데스크탑 오른쪽 단추, 웹 필드 위의 오른쪽 클릭. 그 자리 맨 위가 이 필드일 때)
+		// 글 입력 줄의 포커스 이벤트 뒤에 연다. (웹 오른쪽 클릭은 그 mousedown 이 숨긴 입력의 blur 와 focus 를 함께 넣어, 앞에 열면 blur 가 메뉴를 닫는다)
+		self.is_context_menu_opened_this_tick = false;
+		let context_menu_request_position = context.get_engine().get_input_manager().get_text_input().get_context_menu_request_position();
+		if let Some(context_menu_request_position) = context_menu_request_position {
+			let node_id = context.get_node_id();
+			let topmost_node_id = context.get_node_tree().find_topmost_interactable_node(context_menu_request_position);
+			if self.is_attached && topmost_node_id == Some(node_id) {
+				self.handle_focus();
+				self.show_context_menu(context, context_menu_request_position);
+				self.is_context_menu_opened_this_tick = true;
+			}
 		}
 
 		// 손가락 길게 누르기와 빠른 메뉴. (데스크탑)
@@ -3550,6 +3556,10 @@ impl Component for UIInputField {
 			text_input.set_ime_commit_guard(&composition);
 			text_input.request_ime_reset();
 			self.replace_selection(context, &composition);
+		}
+		// 이번 tick 에 연 문맥 메뉴의 오른쪽 누름은 메뉴를 닫지 않고 커서와 선택도 그대로 둔다. (그 메뉴가 고른 글을 잘라내고 복사한다)
+		if self.is_context_menu_opened_this_tick {
+			return;
 		}
 		self.focus();
 		self.hide_context_menu(context);

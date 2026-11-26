@@ -239,8 +239,9 @@ thread_local! {
 	}) };
 	/// 리스너가 넣는 대기 줄. (다음 프레임 시작에 엔진 글 입력 줄로 옮긴다)
 	static PENDING_EVENT_LIST: RefCell<Vec<TextInputEvent>> = const { RefCell::new(Vec::new()) };
-	/// 엔진 문맥 메뉴를 띄울 캔버스 자리. (CSS 픽셀, 다음 프레임 시작에 뷰 좌표로 바꿔 글 입력 줄의 문맥 메뉴 요청으로 넣는다)
-	static PENDING_CONTEXT_MENU_POSITION: Cell<Option<(f64, f64)>> = const { Cell::new(None) };
+	/// 엔진 문맥 메뉴 부탁. (다음 프레임 시작에 글 입력 줄의 문맥 메뉴 요청으로 넣는다. 안의 None 은 캔버스 오른쪽 클릭이라 데스크탑처럼 마우스 자리,
+	/// Some 은 캔버스가 mousedown 을 받지 않는 직접 누름 입력의 캔버스 CSS 픽셀 자리)
+	static PENDING_CONTEXT_MENU_REQUEST: Cell<Option<Option<(f64, f64)>>> = const { Cell::new(None) };
 	/// 다 쓴 리스너. (불리는 중에 버리지 않게 다음 프레임에 버린다)
 	static DISPOSED_LISTENER_LIST: RefCell<Vec<EventListener>> = const { RefCell::new(Vec::new()) };
 	/// 캔버스 mousedown 을 브라우저가 센 수. (detail, 다음 프레임 시작에 글 입력 줄로 옮긴다. 입력 필드의 두 번, 세 번 누르기)
@@ -531,8 +532,16 @@ pub(super) fn begin_frame(engine: &mut Engine) {
 		text_input.set_pointer_click_count(pointer_click_count);
 	}
 	// 오른쪽 클릭한 필드 자리. (데스크탑 오른쪽 단추처럼 엔진 문맥 메뉴 요청, 필드가 tick 에서 연다)
-	if let Some((canvas_x, canvas_y)) = PENDING_CONTEXT_MENU_POSITION.with(|position_cell| position_cell.take()) {
-		let view_position = engine.get_view_manager().canvas_position_to_view_position(crate::base::vector2::Vector2::create(canvas_x as f32, canvas_y as f32));
+	// 캔버스 오른쪽 클릭은 데스크탑처럼 그 mousedown 의 뷰 자리다. (메뉴 왼쪽 위가 누른 자리라 같은 프레임의 누름이 메뉴에 가고 필드에 가지 않는다)
+	if let Some(context_menu_request) = PENDING_CONTEXT_MENU_REQUEST.with(|request_cell| request_cell.take()) {
+		let view_position = match context_menu_request {
+			Some((canvas_x, canvas_y)) => {
+				engine.get_view_manager().canvas_position_to_view_position(crate::base::vector2::Vector2::create(canvas_x as f32, canvas_y as f32))
+			}
+			None => {
+				engine.get_input_manager().get_view_input_position()
+			}
+		};
 		engine.get_input_manager_mut().get_text_input_mut().set_context_menu_request_position(Some(view_position));
 	}
 	let text_input = engine.get_input_manager_mut().get_text_input_mut();
@@ -838,7 +847,7 @@ fn create_hidden_input_entry(field_state: &TextInputFieldState) -> Result<Hidden
 		event.prevent_default();
 		event.stop_propagation();
 		let _ = input_for_context_menu.focus();
-		request_engine_context_menu(client_x, client_y);
+		request_engine_context_menu(Some((client_x, client_y)));
 	})));
 	for (event_name, listener) in listener_list.iter() {
 		input_element.add_event_listener_with_callback(event_name, listener.as_ref().unchecked_ref()).map_err(describe_js_error)?;
@@ -1105,21 +1114,35 @@ fn handle_canvas_context_menu(event: web_sys::Event) {
 			push_pending_event(hit_field_state.field_id, TextInputEventKind::FocusGained);
 		}
 	}
-	request_engine_context_menu(client_x, client_y);
+	request_engine_context_menu(None);
 }
 
 //==============================================================================
-/// 엔진 문맥 메뉴 부탁. (뷰포트 좌표를 캔버스 CSS 픽셀로 바꿔 두고, 다음 프레임 시작에 글 입력 줄의 문맥 메뉴 요청으로 넣는다)
+/// 엔진 문맥 메뉴 부탁. (다음 프레임 시작에 글 입력 줄의 문맥 메뉴 요청으로 넣는다)
+/// - client_position 이 None 이면 캔버스 오른쪽 클릭이라 그 mousedown 의 마우스 자리, 있으면 뷰포트 좌표를 캔버스 CSS 픽셀로 바꿔 둔다.
 //==============================================================================
-fn request_engine_context_menu(client_x: f64, client_y: f64) {
-	let canvas_position = WEB_TEXT_INPUT.with(|state_cell| {
-		let web_text_input_state = state_cell.borrow();
-		let canvas_rect = web_text_input_state.canvas.as_ref()?.get_bounding_client_rect();
-		Some((client_x - canvas_rect.left(), client_y - canvas_rect.top()))
-	});
-	if let Some(canvas_position) = canvas_position {
-		PENDING_CONTEXT_MENU_POSITION.with(|position_cell| position_cell.set(Some(canvas_position)));
-	}
+fn request_engine_context_menu(client_position: Option<(f64, f64)>) {
+	let context_menu_request = match client_position {
+		Some((client_x, client_y)) => {
+			let canvas_position = WEB_TEXT_INPUT.with(|state_cell| {
+				let web_text_input_state = state_cell.borrow();
+				let canvas_rect = web_text_input_state.canvas.as_ref()?.get_bounding_client_rect();
+				Some((client_x - canvas_rect.left(), client_y - canvas_rect.top()))
+			});
+			match canvas_position {
+				Some(canvas_position) => {
+					Some(canvas_position)
+				}
+				None => {
+					return;
+				}
+			}
+		}
+		None => {
+			None
+		}
+	};
+	PENDING_CONTEXT_MENU_REQUEST.with(|request_cell| request_cell.set(Some(context_menu_request)));
 }
 
 //==============================================================================
