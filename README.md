@@ -419,7 +419,7 @@ cargo run --release --example modelviewer
 | [skrifa](https://crates.io/crates/skrifa) | 0.50.0 | `core/textshaping.rs` | 가변 글꼴의 축 값을 건 글리프 윤곽. fontdue 와 ttf-parser 가 그리지 못하는 맥 SFNS 같은 글꼴을 그립니다 (크롬도 skrifa 를 씁니다) | MIT / Apache-2.0 |
 | [self_cell](https://crates.io/crates/self_cell) | 1.3.0 | `core/textshaping.rs` | 글꼴 바이트와 그 바이트를 빌리는 rustybuzz 얼굴을 한 값에 들어, 글꼴을 내리면 바이트도 돌려줍니다 | Apache-2.0 / GPL-2.0 |
 | [wuff](https://crates.io/crates/wuff) | 0.2.10 | `core/textstringtexturecache.rs` | WOFF, WOFF2 웹 폰트 디코딩 | MIT |
-| [rustybuzz](https://crates.io/crates/rustybuzz) | 0.20.1 | `core/textshaping.rs`, `core/colorglyph.rs` | 글자 모양 짓기(HarfBuzz 를 옮긴 것). 아랍어 글자 잇기, 합자, 커닝, 결합 부호 자리를 브라우저처럼 잡습니다. 다시 내보내는 ttf-parser 로 색 글리프 표(sbix, CBDT, COLR)를 읽습니다 | MIT |
+| [rustybuzz](https://crates.io/crates/rustybuzz) | 0.20.1 | `core/textshaping.rs`, `core/colorglyph.rs` | 글자 모양 짓기(HarfBuzz 를 옮긴 것). 아랍어 글자 잇기, 합자, 커닝, 결합 부호 자리를 브라우저처럼 잡습니다. 크롬처럼 16.16 배율에서 자리를 셈하려고 배율과 축 값 정규화를 더한 판을 저장소의 `third_party/rustybuzz` 에 두고, 그 판이 쓰는 ttf-parser 0.25.1 도 짝 커닝 장치 표를 바로잡아 `third_party/ttf-parser` 에 둡니다(MIT, ttf-parser 는 MIT / Apache-2.0). 다시 내보내는 ttf-parser 로 색 글리프 표(sbix, CBDT, COLR)를 읽습니다 | MIT |
 | [unicode-bidi](https://crates.io/crates/unicode-bidi) | 0.3.18 | `core/textshaping.rs` | 양방향 정렬(UAX #9). 오른쪽에서 왼쪽 글과 섞인 글의 그리는 차례 | MIT / Apache-2.0 |
 | [unicode-properties](https://crates.io/crates/unicode-properties) | 0.1.5 | `core/textshaping.rs` | 이모지 성질(UTS #51 Emoji_Presentation)과 일반 범주. 글자 묶음을 색 이모지 글꼴로 그릴지 가리고, 크롬 캔버스처럼 낱말마다 모양 지을 때 결합 부호를 앞 글자에 붙입니다 | MIT / Apache-2.0, Unicode-3.0 |
 | [unicode-script](https://crates.io/crates/unicode-script) | 0.5.9 | `core/textshaping.rs` | 글자의 문자(Script). 크롬 캔버스처럼 낱말을 나눌 때 씁니다 | MIT / Apache-2.0 |

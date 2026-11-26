@@ -22,6 +22,8 @@ tls = ["ewebsock/tls", "dep:rustls"]
 # 워크스페이스. (엔진과 절차 매크로 크레이트 macros/, API 문서 자료 뽑기 tools/apidoc. 게임은 엔진 하나만 의존하고 매크로는 엔진이 다시 내보낸 vanilla::reflect 로 쓴다)
 [workspace]
 members = ["macros", "tools/apidoc"]
+# 저장소에 둔 남의 크레이트는 워크스페이스 시험과 문서에서 뺀다. (엔진이 경로로 의존한다)
+exclude = ["third_party/rustybuzz", "third_party/ttf-parser"]
 
 [dependencies]
 # 반사 매크로. (#[reflect], 원본 vanilla.js 의 실행 중 반사를 컴파일 때 지은 코드로 한다)
@@ -31,7 +33,8 @@ fontdue = "0.9"
 # 웹 글꼴(WOFF, WOFF2)을 TTF 로 푼다. (원본 기본 글꼴 DOSGothic 이 .woff)
 wuff = "0.2"
 # 글자 모양 짓기. (HarfBuzz 를 옮긴 것. 아랍어 글자 잇기, 합자, 커닝, 결합 부호 자리. 원본은 브라우저 Canvas2D 가 HarfBuzz 로 한다)
-rustybuzz = "0.20"
+# 크롬(HarfBuzz)처럼 글자 자리를 16.16 배율로 셈하려고 hb_font_set_scale 을 더한 판을 저장소에 둔다. (third_party/rustybuzz, rustybuzz 0.20.1 그대로에 배율만 더했다)
+rustybuzz = { version = "0.20.1", path = "third_party/rustybuzz" }
 # 양방향 정렬. (UAX #9, 오른쪽에서 왼쪽 글자와 섞인 글의 그리는 차례. 원본은 Canvas2D direction)
 unicode-bidi = "0.3"
 # 가변 글꼴의 윤곽. (축 값을 건 글리프 윤곽, ttf-parser 는 글리프마다 변형이 32 개를 넘는 가변 글꼴(맥 SFNS 같은)의 윤곽을 읽지 못한다. 원본 크롬도 fontations 의 skrifa 를 쓴다)

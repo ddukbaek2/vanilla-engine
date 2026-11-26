@@ -50,6 +50,9 @@ src/platform/        창, GL 컨텍스트, 입력 이벤트, 프레임 루프, �
   framelimiter.rs    웹 최대 FPS 의 프레임 세기
   audio/             데스크탑 cpal 위의 엔진 믹서(mixer.rs, 크롬 WebAudio 와 같은 노드 그래프와 셈), 웹 WebAudio
     decode/          데스크탑 소리 해석 (크롬 decodeAudioData 와 같게: symphonia 0.6, Opus 는 opus-pure, 앞뒤 다듬기, SincResampler, 내리기)
+third_party/         고쳐 쓰는 남의 크레이트 (워크스페이스 밖, 엔진이 경로로 의존한다)
+  rustybuzz/         rustybuzz 0.20.1 에 크롬 HarfBuzz 처럼 자리 배율(Face::set_scale, 16.16)과 축 값 정규화를 더한 판
+  ttf-parser/        ttf-parser 0.25.1 에서 짝 커닝(PairPos 꼴 1)의 장치 표 기준을 HarfBuzz 처럼 바로잡은 판 (fontdue 는 crates.io 판을 쓴다)
 ```
 
 레이어 방향은 원본처럼 아래에서 위로만 의존한다: base ← core ← (resource, effect, misc). platform 은 core 밑에서 창과 GL 과 입력을 대 준다. 엔진 본체(core::engine::EngineRunner)는 플랫폼을 모른다.
@@ -220,7 +223,7 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
   - 갈아 끼운 저장소(LocalStorage.get_backend, PersistedStore.get_storage_backend)와 콜백 게터(UIButton.get_click_event 같은 것)는 Rc<RefCell> 에 담아 돌려주고, 부르는 쪽이 빌려 쓴다. SpriteAnimator.findSprite(형제를 쥐기)와 SharedBakeCache 의 놓기(release)는 빌림 규칙과 Rc 참조 수로 갈음한다.
 - 글자는 원본(브라우저 Canvas2D)과 맞췄다. 오른쪽에서 왼쪽 글(양방향 정렬과 글자 모양 짓기, core/textshaping.rs), CSS 같은 글꼴 얼굴 고르기, 가짜 기울임과 굵게(Chromium 과 Skia 의 값), 크롬 캔버스처럼 낱말마다 모양 짓기, 폰트 문자열의 CSS 단위와 calc(), 낱말 나누기(데스크탑은 ICU4X 사전에 ICU4C CjkBreakEngine 의 셈을 옮겨 크롬 Intl.Segmenter 와 같게), 색 이모지(sbix, CBDT, COLR v0/v1, 맥은 CoreText 로 크롬처럼 작은 크기에서 키우고 내림), 맥 시스템 UI 글꼴의 opsz 축과 trak 자간(HarfBuzz 15 처럼).
 - 작게 남은 차이:
-  - rustybuzz 는 글리프 위치를 글꼴 단위 정수로 들어 GPOS 가변 델타를 반올림한다. HarfBuzz 15 는 소수로 든다. 맥 SFNS 18, 20, 21, 24px 의 "Hello World Wifi" 너비가 크롬과 0.002 ~ 0.004px 다르다.
+  - 글자 자리는 크롬 HarfBuzz 처럼 16.16 배율에서 셈한다(third_party/rustybuzz). 맥 SFNS(system-ui) 8 ~ 128px, 굵기 300, 400, 700 과 기울임의 세 글 228 개 가운데 222 개가 크롬 158 measureText 와 끝자리까지 같고, 나머지 6 개는 커닝 짝 하나에서 HarfBuzz 위치 단위 1(1/65536px)이 드물게 달라 6.1e-5px 안이다. (그 한 단위의 까닭은 찾지 못했다)
   - 윈도우와 리눅스의 글꼴 갈래(DirectWrite, 메뉴 글꼴, fontconfig, 부모 글꼴 치수)는 그 대상으로 컴파일해 보았고 실행해 크롬과 견주지는 못했다.
   - 데스크탑 AVIF 는 색 프로필 변환과 움직이는 AVIF 를 하지 않는다.
   - 데스크탑 Canvas2D 의 그림자 흐림은 상자 흐림 세 번이다. 경로의 arc, ellipse, arcTo, roundRect 는 크롬과 같은 스키아 원뿔 곡선 점과 무게이고(블링크 canvas_path.cc, 스키아 SkPathBuilder 의 셈), 칠할 때는 스키아 CPU 래스터처럼 기기 픽셀 0.25 안의 2 차 곡선으로 나눈다. 크롬이 GPU 로 칠하는 캔버스의 곡선 나누기와는 가장자리 픽셀이 다를 수 있다. font 는 블링크 Font::ParseShorthand 와 font 게터대로 읽고 직렬화하는데(desktop_font.rs), 윈도우 크롬의 small-caption, menu, status-bar 는 운영체제 글꼴이라 다를 수 있다. getImageData 의 프리멀티플라이 풀기는 크롬 CPU 캔버스의 스키아 셈이라 크롬 GPU 캔버스의 되읽기와는 반이 딱 떨어지는 값에서 1 다를 수 있다.

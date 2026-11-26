@@ -3,7 +3,7 @@
 //! - 원본에 없는 파일이다. 원본은 브라우저가 CSS 글꼴 이름을 운영체제 글꼴로 찾고, 글꼴 목록에 없는 글자는 운영체제의 대체 글꼴로 그린다.
 //!   크롬은 맥에서 CoreText, 윈도우에서 DirectWrite, 리눅스에서 fontconfig 로 찾는다. 러스트 판 데스크탑도 같은 API 로 파일을 찾아 글자 캐시에 올린다.
 //! - find_family_font_file: 글꼴 이름, 굵기, 기울기로 파일과 얼굴을 찾는다. 그 이름의 글꼴이 없으면 None 이다. (CSS 처럼 다른 글꼴로 바꿔 주지 않는다)
-//!   - 맥: system-ui, BlinkMacSystemFont 는 시스템 UI 글꼴(CTFontCreateUIFontForLanguage, 크롬 font_matcher_mac.mm 의 MatchSystemUIFont),
+//!   - 맥: system-ui, BlinkMacSystemFont 는 시스템 UI 글꼴(CTFontCreateUIFontForLanguage, 기울이면 CTFontCreateCopyWithSymbolicTraits 의 기울임 특성, 크롬 font_matcher_mac.mm 의 MatchSystemUIFont),
 //!     그 밖은 이름과 굵기 특성으로 지은 글꼴 서술자. -apple-system 과 ui-serif, ui-sans-serif, ui-monospace, ui-rounded 는 크롬이 모르는 이름이라 None 이다.
 //!     (사파리만 안다. 맥 크롬 158 의 Canvas2D 에서 "16px -apple-system" 은 기본 글꼴로 그려진다)
 //!   - 윈도우: system-ui 는 크롬처럼 메뉴 글꼴(NONCLIENTMETRICS 의 lfMenuFont, 읽지 못하면 Segoe UI), 그 밖은 시스템 글꼴 모음의 이름(FindFamilyName)과 GetFirstMatchingFont.
@@ -448,16 +448,21 @@ mod platform_font {
 	}
 
 	//==============================================================================
-	/// 시스템 UI 글꼴. (굵기가 600 이상이면 굵은 시스템 글꼴)
+	/// 시스템 UI 글꼴. (굵기가 600 이상이면 굵은 시스템 글꼴, 기울이면 기울인 시스템 글꼴)
+	/// - 크롬 MatchSystemUIFont 처럼 기울인 얼굴은 CTFontCreateCopyWithSymbolicTraits 의 기울임 특성으로 고른다. (맥 SFNSItalic, 고르지 못하면 None)
 	//==============================================================================
-	fn create_system_ui_font(weight: u16) -> Option<CFRetained<CTFont>> {
+	fn create_system_ui_font(weight: u16, is_italic: bool) -> Option<CFRetained<CTFont>> {
 		let ui_font_type = if weight >= 600 {
 			CTFontUIFontType::EmphasizedSystem
 		}
 		else {
 			CTFontUIFontType::System
 		};
-		unsafe { CTFont::new_ui_font_for_language(ui_font_type, LOOKUP_FONT_SIZE, None) }
+		let font = unsafe { CTFont::new_ui_font_for_language(ui_font_type, LOOKUP_FONT_SIZE, None) }?;
+		if !is_italic {
+			return Some(font);
+		}
+		unsafe { font.copy_with_symbolic_traits(LOOKUP_FONT_SIZE, std::ptr::null(), CTFontSymbolicTraits::ItalicTrait, CTFontSymbolicTraits::ItalicTrait) }
 	}
 
 	//==============================================================================
@@ -497,7 +502,7 @@ mod platform_font {
 		let lowercase_family_name = family_name.to_lowercase();
 		let font = match lowercase_family_name.as_str() {
 			"system-ui" | "blinkmacsystemfont" => {
-				create_system_ui_font(weight)?
+				create_system_ui_font(weight, is_italic)?
 			}
 			_ => {
 				create_family_font(family_name, weight, is_italic)?
@@ -532,7 +537,7 @@ mod platform_font {
 				return read_font_file(&font);
 			}
 		}
-		let base_font = create_system_ui_font(weight)?;
+		let base_font = create_system_ui_font(weight, false)?;
 		let text_string = CFString::from_str(text);
 		let range = CFRange {
 			location: 0,
