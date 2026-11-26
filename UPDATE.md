@@ -1,6 +1,10 @@
 # 업데이트 기록
 
 # 아직 release 에 합치지 않은 것 (release 에 합칠 때 패치 판을 하나 올려 매긴다)
+- 입력 필드 문맥 메뉴: 직접 누르는 필드(set_use_direct_touch)의 오른쪽 단추도 다른 필드와 같은 엔진 문맥 메뉴다. 두 엔진 모두 원본처럼 잘라내기, 복사, 붙여넣기에 모두 선택(글이 있을 때)을 더한 네 항목이고, 원본도 직접 누름 필드에서 브라우저 편집 칸 메뉴를 막는다. 데스크탑이 따로 그리던 크롬 편집 칸 메뉴(실행 취소, 다시 실행, 일반 텍스트로 붙여넣기, 그림 이모티콘, 쓰기 방향, 검사)는 지웠다. 손가락 길게 누르기의 빠른 메뉴는 그대로이고, 고른 것도 붙여 넣을 것도 없을 때와 "..." 는 엔진 문맥 메뉴다
+  - 옮기는 법: UIInputFieldMenuAction 에 SelectAll 이 생기고 Undo, Redo, PasteAsPlainText, Emoji, WritingDirectionDefault, WritingDirectionLeftToRight, WritingDirectionRightToLeft, Inspect 는 없다. 되돌리기는 키(Ctrl+Z, Ctrl+Shift+Z)로 한다. UIInputFieldWritingDirection 과 UIInputField::set_writing_direction, get_writing_direction 은 지웠다(엔진이 그린 글에 영향이 없던 값이다)
+- 여러 줄 입력 필드의 줄 나누기: 데스크탑과 웹 캔버스 모드가 같은 셈이다. 크롬 textarea 처럼 블링크 줄 나누기(LazyLineBreakIterator 의 빠른 표: 아스키 짝은 여는 괄호 앞과 '-', '?' 뒤에서만, '-' 뒤 숫자는 앞이 영숫자일 때만, 라틴 1 짝은 두 글자 ICU 값)에 ICU4X LineSegmenter 사전판을 normal 엄격도(작은 가나와 장음 부호 앞에서 나눔)로 쓴다. 크롬 158 의 textarea 에서 뜬 30 글(영어, 주소, 문장 부호, 한국어, 일본어, 중국어, 태국어, 러시아어, 라틴 1)의 나눔 자리가 모두 같다. (지금까지 데스크탑은 순수 UAX #14 strict 라 '/' 뒤와 작은 가나 앞이 크롬과 달랐고, 웹 캔버스 모드는 낱말 경계로 갈음했다) icu_segmenter 가 웹 의존에도 들어간다
+  - 옮기는 법: 없다. 줄이 나뉘는 자리가 크롬과 같게 바뀐다.
 - 컴포넌트 찾기: get_component, get_components, has_component, get_or_add_component, remove_component, NodeTree.with_component_mut 이 원본 instanceof 처럼 품은 기반 타입으로도 찾는다. Component::get_base_component(_mut) 가 품은 기반(원본 상위 클래스)을 알리고, ShaderSprite 는 Sprite 와 Paint 로, UIButton 은 UIControl 과 UIView 로, RichText 는 Text 로 찾힌다. (그 밖에 Sprite, UIControl, UIDraggable, UISlider, UIToggleButton, UIScrollView, UISnapScrollView, UIImageView, UIProgressView, UILabel) `dyn Component` 에 is_instance_of, as_instance_of(_mut) 을 둔다.
   - 옮기는 법: get_component::<Sprite>() 가 ShaderSprite 도, get_component::<UIView>() 가 위젯의 품은 UIView 도 돌려준다. 정확히 그 타입만 찾던 코드는 as_any().downcast_ref 로 본다. remove_component::<Paint>() 는 Sprite 같은 하위 타입도 뗀다.
 - DevTools: 트리의 Type 칸과 인스펙터 type 이 원본 constructor.name 처럼 노드 종류 이름(FloatingText, UIWindow 같은)이다. UIDocument.get_node_type_name(node) 를 둔다. DevTools 가 처음 드는 문서에 register_editor_types 를 부른다.
@@ -17,6 +21,15 @@
 - TouchEffect: 입자 그라디언트를 원본처럼 엔진 Canvas2D 의 방사 그라디언트(create_radial_gradient, fill_rect)로 굽는다. 헤드리스 크롬의 같은 캔버스 코드와 64x64 알파가 모두 같다.
 - PersistedStore: get_string_code_units(path), set_string_code_units(path, code_units) 로 상태 안 글을 JS 글 단위(UTF-16)로 읽고 쓴다. 원본이 저장한 짝 없는 서로게이트를 원본 글 그대로 받는다. (LocalStorage 의 *_code_units 와 같은 꼴)
 - 셰이더 짓기 실패: ShaderSprite, ScreenEffect 가 짓기에 실패하면 원본도 러스트 판처럼 한 번 알리고 건너뛴다. (원본은 예외로 프레임이 멈췄다) 두 엔진이 같다.
+- 대체 글꼴 고르기(데스크탑)를 크롬 FontCache::PlatformFallbackFontForCharacter 처럼: measureText 217 글이 맥 크롬 158(arm64, 로제타 x86_64) 과 리눅스 크롬 158 에서 모두 같다. (전에는 맥 144, 리눅스 216)
+  - 기본 글꼴 사슬(원본 SYSTEM_FONT_STRING)은 기본 글꼴 이름 default 를 청했을 때만 잇는다. "16px Arial" 처럼 다른 이름이면 사슬 없이 운영체제 대체로 간다. (원본도 기본 글꼴일 때만 폰트 문자열이 그 사슬이다)
+  - 대체는 첫 글꼴(빈칸을 가진 첫 얼굴)과 폰트 문자열마다 따로 묻고, 대체 얼굴은 운영체제가 그 얼굴을 고른 글자만 그린다. 굵게를 청하면 굵은 얼굴(Helvetica.ttc 의 Helvetica-Bold, GeezaPro-Bold, 윈도우 tahomabd.ttf)도 따로 읽고, 대체 얼굴은 글꼴 이름 표의 무리 이름으로 묶어 굵기를 고른다. (굵기마다 파일이 다른 Tahoma 도 굵게면 Tahoma Bold)
+  - 이름 목록의 얼굴이 합친 글자(ï)가 없어도 정준 분해한 글자(i, U+0308)가 있으면 HarfBuzz 처럼 그 얼굴로 그린다. (third_party/rustybuzz 에 decompose_character 를 더했다)
+  - 맥: 첫 글꼴의 CTFont(올린 글꼴은 바이트로 지은 것)에서 CTFontCreateForString 을 묻고, 특성이나 굵기가 다르면 같은 이름에서 다시 고른다. (지금까지는 시스템 UI 글꼴에서 물어 아랍어가 다른 글꼴로 그려졌다)
+  - 윈도우: 굵게나 기울임이면 첫 이름의 보통 얼굴, 블링크 font_fallback_win.cc 의 블록과 문자별 표(태국어 Tahoma, monospace 아랍어 Courier New, 한자는 화면 언어), 넓은 글꼴 목록, 첫 이름을 바탕으로 한 DirectWrite 차례. (지금까지는 Segoe UI 바탕의 DirectWrite 만 물어 태국어가 Leelawadee UI 였다)
+  - 모든 글자가 U+00FF 이하인 글은 크롬(HarfBuzzShaper 의 8 비트 글)처럼 라틴 문자로 모양 짓는다. 숫자처럼 Common 뿐인 낱말도 글꼴의 latn 기능을 쓴다. (리눅스 Norasi 는 DFLT 에만 숫자 커닝이 있어 16px "0123456789" 가 3.8px 좁았다)
+  - 웹도 같게: 브라우저에 넘기는 글꼴 목록 끝의 원본 SYSTEM_FONT_STRING 을 default 를 청했을 때만 붙인다.
+  - 옮기는 법: 바꿀 것 없다. 폰트 문자열에 이름을 준 글이 기본 글꼴 사슬의 글꼴(맥 Apple SD Gothic Neo, 윈도우 Segoe UI, 맑은 고딕)로 그려지던 글자는 이제 크롬처럼 운영체제 대체 글꼴로 그려진다. 사슬을 쓰려면 이름 목록 끝에 default 를 둔다.
 - AVIF 의 YUV 를 RGB 로 바꾸는 셈(데스크탑): 크롬 158 처럼(AVIFImageDecoder 가 부르는 CrabbyAvif crabby_avifImageYUVToRGB, libyuv 기능) libyuv 가 받는 꼴(BT.601, 미지정, BT.709, BT.2020 NCL, 크로마 NCL 행렬의 8, 10, 12 비트)은 libyuv 의 정수 셈(YuvPixel, YPixel, 두 배 크로마 늘리기)으로, 그 밖은 libavif 실수 셈(값마다 나눈 뒤 크로마를 섞는 차례로 고침)으로 바꾼다. 높은 비트 깊이는 크롬 WebGL 처럼 16 비트로 담아 libyuv HalfFloatPlane 이 가수를 자른 반정밀로 푼다. 알파는 곧은 알파로 푼 뒤 반올림으로 곱한다. 크롬 158 WebGL texImage2D 와 시험 그림 19 장이 비트까지 같다. (지금까지는 libavif 실수 셈이라 1~23 단계 달랐다) 그림 픽셀이 한두 단계 바뀐다
 - 초안 2D 뼈대(experimental::skeleton2d): Skeleton2D.find_ik_constraint_index 를 더했고(원본 findIkConstraintIndex), apply_ik_constraint 는 범위 밖 번호에 panic 하지 않고 돌아간다. skeleton2djsonreader, dragonbonesreader 모듈은 안이 모두 crate 안 함수라 pub(crate) mod 로 감췄다(읽기는 Skeleton2DData::create_from_json, create_from_dragon_bones_json)
   - 옮기는 법: vanilla::experimental::skeleton2d::skeleton2djsonreader 나 dragonbonesreader 경로를 쓰던 코드는 없다(안이 비어 있었다).
@@ -68,7 +81,7 @@
   - 옮기는 법: 바뀌어 컴파일이 깨지는 공개 API 는 없다. 그리기에서 처음 그릴 때 GL 자원을 짓던 코드는 그대로 돈다. 원본처럼 create, initialize 에서 지으려면 `if let Some(graphic) = engine.get_graphic() { ... graphic.get_gl() ... }` 로 옮긴다. 그리기 함수 안에서 engine.get_graphic() 을 부르면 None 이니 인자의 graphic 을 쓴다
 - ToonRenderer::create_mesh: GL 버퍼나 버텍스 어레이를 짓다 실패하면 그때까지 지은 버퍼와 버텍스 어레이를 지우고 None 을 돌려준다. (지금까지는 앞서 지은 것이 남아 샜다) 인스턴스 버퍼와 함께 묶는 버텍스 어레이도 바깥선 쪽을 짓지 못하면 몸 쪽을 지운다. (원본은 크롬의 createBuffer, createVertexArray 가 늘 객체를 돌려줘 중간에 실패하는 길이 없다)
 - Canvas2D(데스크탑): set_font 이 크롬처럼 CSS font 줄임 꼴로 읽어 틀린 글(크기나 이름 없음, inherit 같은 CSS 전역 낱말, 틀린 줄높이 등)은 무시하고, get_font 는 크롬이 직렬화한 글을 돌려준다(낱말 소문자, 상대 크기는 px, 줄높이와 너비 빠짐, 이름 따옴표, 시스템 글꼴 낱말). put_image_data 는 폭 x 높이 x 4 가 아닌 픽셀 묶음을 쓰지 않고, 더러운 사각형 꼴 put_image_data_region 을 더했다(두 판). get_image_data 의 프리멀티플라이 풀기가 크롬 CPU 캔버스와 같은 스키아 셈이 됐다(반이 딱 떨어지는 값에서 1 다르던 것). (블링크 base_rendering_context_2d.cc 의 font 게터와 putImageData, shorthands_custom.cc ConsumeFont, 스키아 SkSwizzler_opts.inc, 크롬 158 에서 잰 글 225 개와 65536 짝)
-- UIInputField::set_use_direct_touch 설명을 사실대로 고쳤다. 웹 전용이 아니고, 데스크탑은 원본에서 크롬이 그 DOM 입력에 하는 일(크롬 편집 칸 메뉴, 손가락 길게 누르기의 낱말 고르기와 터치 손잡이)을 한다
+- UIInputField::set_use_direct_touch 설명을 사실대로 고쳤다. 웹 전용이 아니고, 데스크탑은 원본에서 크롬이 그 DOM 입력에 하는 일(손가락 길게 누르기의 낱말 고르기와 터치 손잡이, 오른쪽 단추는 엔진 문맥 메뉴)을 한다
 - Scene 터치: 원본 vanilla.js 의 Scene 도 씬 꼴과 상관없이 씬의 TouchRaycaster 로 노드에 터치를 넘기게 바꿔, 두 엔진이 같다. (러스트 판 SceneBase.tick 은 그대로, 문서의 "원본 기본 씬은 넘기지 않는다" 글을 고쳤다)
 - FbxLoader: 노드(Model)와 애니메이션 스택 name 에서 바이너리 FBX 의 종류 꼬리("\u{0}\u{1}Model", "\u{0}\u{1}AnimStack")를 뗀다. 클립 이름은 "Take 001\u{0}\u{1}AnimStack" 이 아니라 "Take 001", 본 이름은 "mixamorig:Hips" 다. (three.js FBXLoader 는 BinaryReader.getString 이 첫 널 바이트에서 자르고, Assimp 는 "AnimStack::Take 001" 로 바꾼 뒤 FBXConverter 가 "AnimStack::", "Model::" 를 뗀다, 원본도 같이 바꿨다) glTF 로 읽은 모델에 FBX 애니메이션을 더할 때(add_animations_from_fbx_*)의 본 이름 맞추기도 이 이름으로 맞는다.
   - 옮기는 법: 꼬리가 붙은 이름으로 play_animation 하거나 노드를 찾던 코드는 꼬리를 뗀 이름을 쓴다.
@@ -654,7 +667,7 @@
   - Canvas2D, Path2D: arc, ellipse, arcTo, roundRect 를 크롬처럼 스키아 원뿔 곡선으로 담는다. (블링크 canvas_path.cc 의 각 다듬기와 납작한 타원, 스키아 SkPathBuilder::arcTo, SkConic::BuildUnitArc, SkRRect 반지름 줄이기와 addRRect 점 차례) 데스크탑은 칠할 때 스키아 CPU 래스터처럼 기기 픽셀 0.25 안의 2 차 곡선으로 나눈다. (전에는 3 차 베지어 근사)
   - Canvas2D, Path2D: roundRect 가 타원 모서리를 받는다. (CanvasRadius::Elliptical, (x, y), 원본 DOMPointInit) 웹 Path2D 는 원본처럼 브라우저 Path2D 의 arc, roundRect 같은 함수를 그대로 부른다
   - Canvas2D: GPU 에 올리며 CPU 픽셀을 놓은 엔진 Image 도 그린다. (그림이 기억한 텍스처를 되읽는다, 전에는 알리고 건너뛰었다)
-  - 입력 필드(데스크탑, DOM 입력을 직접 누르게 한 필드): 크롬 데스크탑 터치처럼 손가락으로 650ms 길게 누르면(크롬 aura 의 길게 누르기 500 + 누름 표시 150, 허용 거리 15 DIP) 그 자리 낱말을 고르고 터치 선택 손잡이(크롬 벡터 아이콘 꼴, 끌어 선택을 바꾼다)와 빠른 메뉴(잘라내기, 복사, 붙여넣기, "...", 뗀 뒤 100ms, 선택 위 가운데)를 띄운다. 고른 것도 붙여 넣을 것도 없으면 크롬 편집 칸 메뉴다. 윈도우는 뗄 때(블링크 context_menu_on_mouse_up) 정한다. 키, 마우스 누름, 휠은 손잡이와 메뉴를 지운다. "..." 는 선택 위 가운데에 편집 칸 메뉴(크롬 터치 메뉴 자리)
+  - 입력 필드(데스크탑, DOM 입력을 직접 누르게 한 필드): 크롬 데스크탑 터치처럼 손가락으로 650ms 길게 누르면(크롬 aura 의 길게 누르기 500 + 누름 표시 150, 허용 거리 15 DIP) 그 자리 낱말을 고르고 터치 선택 손잡이(크롬 벡터 아이콘 꼴, 끌어 선택을 바꾼다)와 빠른 메뉴(잘라내기, 복사, 붙여넣기, "...", 뗀 뒤 100ms, 선택 위 가운데)를 띄운다. 고른 것도 붙여 넣을 것도 없으면 엔진 문맥 메뉴다. 윈도우는 뗄 때(블링크 context_menu_on_mouse_up) 정한다. 키, 마우스 누름, 휠은 손잡이와 메뉴를 지운다. "..." 는 선택 위 가운데에 엔진 문맥 메뉴
 - 데스크탑이 HE-AAC v1(SBR), v2(PS)와 3 채널 이상 AAC 도 크롬처럼 푼다. (platform/audio/decode/aac.rs)
   - AAC-LC 2 채널까지는 그대로 symphonia 로 풀고(크롬과 PNS 잡음까지 같다), symphonia 가 받지 않는 것(ASC 에 적힌 SBR, PS, 3 채널 이상)과 몸통에만 SBR 이 실린 것(ADTS 의 HE-AAC 같은, 첫 패킷의 표본율이 두 배가 되는지로 가린다)은 oxideav-aac 로 푼다
   - oxideav-aac(MIT)는 ISO/IEC 14496-3, 13818-7 명세로 짠 순수 러스트 해석기다. 공개 저장소(OxideAV/oxideav-aac)의 커밋 역사가 명세 조항으로 짠 기록이고 FFmpeg 같은 LGPL 코드를 옮긴 흔적이 없다. 다른 후보 rusty_aac(Apache-2.0)는 해석기 소스의 공개 저장소와 커밋 역사가 없어(크레이트의 저장소 주소는 그것을 쓰는 다른 저장소) 출처를 확인할 수 없어 쓰지 않았다
