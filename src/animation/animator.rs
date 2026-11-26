@@ -20,6 +20,29 @@ use std::collections::HashMap;
 /// 전이 조건의 견주는 법.
 /// - If, IfNot 은 참 거짓 매개변수를 본다. (If 는 트리거가 걸려 있는 것도 본다)
 /// - Greater, Less, Equals, NotEqual 은 실수와 정수 매개변수를 기준 값과 견준다.
+/// - 매개변수가 없거나 견줄 수 없는 종류면(참 거짓에 Greater 같은) 맞지 않은 것이다.
+///
+/// # 예제
+/// 견주는 법마다 매개변수를 보는 결과
+/// ```rust
+/// use vanilla::{AnimationCondition, AnimationConditionMode, Animator};
+///
+/// let mut animator = Animator::new();
+/// animator.set_integer("combo", 3);
+/// animator.set_bool("isGrounded", false);
+/// animator.set_trigger("jump");
+/// let check = |parameter_name: &str, mode: AnimationConditionMode, threshold: f32| {
+/// 	animator.is_condition_satisfied(&AnimationCondition { parameter_name: parameter_name.to_string(), mode, threshold })
+/// };
+/// assert!(check("jump", AnimationConditionMode::If, 0.0));
+/// assert!(check("isGrounded", AnimationConditionMode::IfNot, 0.0));
+/// assert!(check("combo", AnimationConditionMode::Greater, 2.0));
+/// assert!(!check("combo", AnimationConditionMode::Less, 3.0));
+/// assert!(check("combo", AnimationConditionMode::Equals, 3.0));
+/// assert!(!check("combo", AnimationConditionMode::NotEqual, 3.0));
+/// assert!(!check("isGrounded", AnimationConditionMode::Greater, 0.0));
+/// assert!(!check("missing", AnimationConditionMode::If, 0.0));
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AnimationConditionMode {
@@ -39,6 +62,27 @@ pub enum AnimationConditionMode {
 
 //==============================================================================
 /// 전이 조건. (원본 { parameterName, mode, threshold })
+/// - AnimationTransition::add_condition 이 만들어 넣고 get_conditions 로 읽는다. Animator::is_condition_satisfied 가 지금 매개변수로 본다.
+///
+/// # 예제
+/// 전이에 넣은 조건을 읽어 애니메이터로 보기
+/// ```rust
+/// use vanilla::{AnimationCondition, AnimationConditionMode, AnimationTransition, Animator};
+///
+/// let mut transition = AnimationTransition::new();
+/// transition.add_condition("speed", AnimationConditionMode::Greater, 0.5);
+/// let condition = &transition.get_conditions()[0];
+/// assert_eq!(condition.parameter_name, "speed");
+/// assert_eq!(condition.mode, AnimationConditionMode::Greater);
+/// assert_eq!(condition.threshold, 0.5);
+///
+/// let mut animator = Animator::new();
+/// assert!(!animator.is_condition_satisfied(condition));
+/// animator.set_float("speed", 1.0);
+/// assert!(animator.is_condition_satisfied(condition));
+/// let slow = AnimationCondition { parameter_name: String::from("speed"), mode: AnimationConditionMode::Less, threshold: 0.5 };
+/// assert!(!animator.is_condition_satisfied(&slow));
+/// ```
 //==============================================================================
 #[derive(Clone, Debug, PartialEq)]
 pub struct AnimationCondition {
@@ -66,6 +110,26 @@ enum AnimatorParameter {
 /// - 상태 시간은 들어온 뒤 흐른 초에 속도를 곱해 쌓은 것이다. 정규화 시간은 상태 시간을 클립 길이로 나눈 것이다. (1 이면 한 바퀴)
 /// - 되풀이는 set_loop 로 정하지 않으면(None) 클립의 is_loop 를 따른다.
 /// - 클립이 없거나 길이가 0 이면 정규화 시간은 시간이 흐르기 전 0, 흐른 뒤 1 이다.
+///
+/// # 예제
+/// 상태에 클립 달고 시간에 맞는 프레임 보기
+/// ```rust
+/// use vanilla::{AnimationState, Rect};
+/// use vanilla::resource::animationclip::AnimationClip;
+///
+/// let mut clip = AnimationClip::new();
+/// clip.set_frames(vec![Rect::create(0.0, 0.0, 32.0, 32.0), Rect::create(32.0, 0.0, 32.0, 32.0)]);
+/// clip.set_duration(0.5);
+/// clip.set_loop(false);
+/// let mut state = AnimationState::new();
+/// state.set_clip(Some(clip));
+/// state.set_speed(2.0);
+/// assert!(!state.is_loop());
+/// state.set_loop(Some(true));
+/// assert!(state.is_loop());
+/// assert_eq!(state.get_normalized_time(0.75), 1.5);
+/// assert_eq!(state.get_frame_index(0.75), Some(1));
+/// ```
 //==============================================================================
 #[derive(Clone, Debug, PartialEq)]
 pub struct AnimationState {
@@ -77,6 +141,9 @@ pub struct AnimationState {
 impl AnimationState {
 	//==============================================================================
 	/// 생성. (클립 없음, 속도 1, 되풀이는 클립을 따름)
+	///
+	/// # 돌려줌
+	/// 클립이 없고 속도가 1 인 상태. (길이 0, 되풀이하지 않음)
 	//==============================================================================
 	pub fn new() -> AnimationState {
 		AnimationState {
@@ -201,6 +268,25 @@ impl AnimationState {
 	/// # 돌려줌
 	/// 그 시간에 보일 클립 프레임의 번호. (0 부터, 되풀이하면 바퀴마다 처음부터, 아니면 끝 프레임에 머문다. 길이가 0 이면 0)
 	/// 클립이나 프레임이 없으면 None.
+	///
+	/// # 예제
+	/// 되풀이하는 상태와 끝에 머무는 상태
+	/// ```rust
+	/// use vanilla::{AnimationState, Rect};
+	/// use vanilla::resource::animationclip::AnimationClip;
+	///
+	/// let mut clip = AnimationClip::new();
+	/// clip.set_frames(vec![Rect::create(0.0, 0.0, 16.0, 16.0), Rect::create(16.0, 0.0, 16.0, 16.0), Rect::create(32.0, 0.0, 16.0, 16.0), Rect::create(48.0, 0.0, 16.0, 16.0)]);
+	/// clip.set_duration(1.0);
+	/// let mut state = AnimationState::new();
+	/// assert_eq!(state.get_frame_index(0.5), None);
+	/// state.set_clip(Some(clip));
+	/// state.set_loop(Some(true));
+	/// assert_eq!(state.get_frame_index(0.5), Some(2));
+	/// assert_eq!(state.get_frame_index(1.25), Some(1));
+	/// state.set_loop(Some(false));
+	/// assert_eq!(state.get_frame_index(1.25), Some(3));
+	/// ```
 	//==============================================================================
 	pub fn get_frame_index(&self, time: f32) -> Option<usize> {
 		let clip = self.clip.as_ref()?;
@@ -224,6 +310,9 @@ impl AnimationState {
 }
 
 impl Default for AnimationState {
+	//==============================================================================
+	/// 클립이 없고 속도가 1 인 상태. (new 와 같다)
+	//==============================================================================
 	fn default() -> AnimationState {
 		AnimationState::new()
 	}
@@ -237,6 +326,31 @@ impl Default for AnimationState {
 /// - 조건은 모두 맞아야 한다. 종료 시각도 조건도 없는 전이는 쓰지 않는다.
 /// - 섞는 시간(duration, 초)이 0 보다 크면 그동안 두 상태가 함께 흐르며 가중치가 선형으로 옮겨 간다. (크로스페이드)
 /// - 어느 상태에서나 넘어가는 전이가 지금 상태로 가는 경우는 can_transition_to_self 가 참일 때만 탄다. (기본 참, 다시 처음부터 튼다)
+///
+/// # 예제
+/// 걷기에서 달리기로 가는 전이
+/// ```rust
+/// use vanilla::{AnimationConditionMode, AnimationState, AnimationTransition, Animator};
+///
+/// let mut animator = Animator::new();
+/// let walk_index = animator.add_state(AnimationState::new());
+/// let run_index = animator.add_state(AnimationState::new());
+/// let mut transition = AnimationTransition::new();
+/// assert_eq!(transition.get_from(), None);
+/// transition.set_from(Some(walk_index));
+/// transition.set_to(Some(run_index));
+/// transition.set_duration(0.2);
+/// transition.add_condition("speed", AnimationConditionMode::Greater, 3.0);
+/// let transition_index = animator.add_transition(transition);
+///
+/// let transition = &animator.get_transitions()[transition_index];
+/// assert_eq!(transition.get_from(), Some(0));
+/// assert_eq!(transition.get_to(), Some(1));
+/// assert_eq!(transition.get_exit_time(), None);
+/// assert_eq!(transition.get_duration(), 0.2);
+/// assert!(transition.can_transition_to_self());
+/// assert_eq!(transition.get_conditions()[0].mode, AnimationConditionMode::Greater);
+/// ```
 //==============================================================================
 #[derive(Clone, Debug, PartialEq)]
 pub struct AnimationTransition {
@@ -251,6 +365,9 @@ pub struct AnimationTransition {
 impl AnimationTransition {
 	//==============================================================================
 	/// 생성. (어느 상태에서나, 들어가는 상태 없음, 종료 시각 없음, 섞는 시간 0, 지금 상태로도 감)
+	///
+	/// # 돌려줌
+	/// 조건이 없는 빈 전이. (들어가는 상태를 정하고 종료 시각이나 조건을 넣어야 쓰인다)
 	//==============================================================================
 	pub fn new() -> AnimationTransition {
 		AnimationTransition {
@@ -399,6 +516,29 @@ impl AnimationTransition {
 	///
 	/// # 돌려줌
 	/// 종료 시각이 없거나, 이번 갱신에서 종료 시각을 지났으면 참. (길이가 0 인 상태는 들어온 뒤 첫 갱신에서 지난다)
+	///
+	/// # 예제
+	/// 되풀이하는 상태에서 바퀴마다 보는 종료 시각
+	/// ```rust
+	/// use vanilla::{AnimationState, AnimationTransition, Rect};
+	/// use vanilla::resource::animationclip::AnimationClip;
+	///
+	/// let mut clip = AnimationClip::new();
+	/// clip.set_frames(vec![Rect::create(0.0, 0.0, 32.0, 32.0)]);
+	/// clip.set_duration(2.0);
+	/// clip.set_loop(true);
+	/// let mut state = AnimationState::new();
+	/// state.set_clip(Some(clip));
+	///
+	/// let mut transition = AnimationTransition::new();
+	/// assert!(transition.is_exit_time_reached(&state, 0.0, 0.5));
+	/// transition.set_exit_time(Some(0.5));
+	/// assert!(!transition.is_exit_time_reached(&state, 0.0, 0.5));
+	/// assert!(transition.is_exit_time_reached(&state, 0.5, 1.5));
+	/// assert!(transition.is_exit_time_reached(&state, 2.5, 3.5));
+	/// state.set_loop(Some(false));
+	/// assert!(!transition.is_exit_time_reached(&state, 2.5, 3.5));
+	/// ```
 	//==============================================================================
 	pub fn is_exit_time_reached(&self, state: &AnimationState, previous_time: f32, current_time: f32) -> bool {
 		let exit_time = match self.exit_time {
@@ -429,6 +569,9 @@ impl AnimationTransition {
 }
 
 impl Default for AnimationTransition {
+	//==============================================================================
+	/// 조건이 없는 빈 전이. (new 와 같다)
+	//==============================================================================
 	fn default() -> AnimationTransition {
 		AnimationTransition::new()
 	}
@@ -444,8 +587,7 @@ impl Default for AnimationTransition {
 /// # 예제
 /// 속도로 걷기와 달리기를 오가는 애니메이터
 /// ```rust
-/// use vanilla::animation::animator::{AnimationConditionMode, AnimationState, AnimationTransition, Animator};
-/// use vanilla::base::rect::Rect;
+/// use vanilla::{AnimationConditionMode, AnimationState, AnimationTransition, Animator, Rect};
 /// use vanilla::resource::animationclip::AnimationClip;
 ///
 /// let mut walk_clip = AnimationClip::new();
@@ -478,12 +620,70 @@ impl Default for AnimationTransition {
 ///
 /// animator.set_float("speed", 5.0);
 /// animator.tick(0.125);
-/// println!("{:?} {:?} {}", animator.get_current_state_index(), animator.get_next_state_index(), animator.get_transition_weight());
+/// assert_eq!(animator.get_current_state_index(), Some(walk_index));
+/// assert_eq!(animator.get_next_state_index(), Some(run_index));
+/// assert_eq!(animator.get_transition_weight(), 0.0);
 /// animator.tick(0.125);
-/// println!("{:?} {}", animator.get_next_state_index(), animator.get_transition_weight());
+/// assert_eq!(animator.get_next_state_index(), Some(run_index));
+/// assert_eq!(animator.get_transition_weight(), 0.5);
 /// animator.tick(0.125);
 /// let frame = animator.get_current_frame().expect("frame");
-/// println!("{:?} {} {}", animator.get_current_state_index(), animator.is_in_transition(), frame.position.y);
+/// assert_eq!(animator.get_current_state_index(), Some(run_index));
+/// assert!(!animator.is_in_transition());
+/// assert_eq!(frame.position.y, 32.0);
+/// ```
+///
+/// 트리거로 어느 상태에서나(Any State) 넘어가는 피격과 종료 시각으로 돌아오기
+/// ```rust
+/// use vanilla::{AnimationConditionMode, AnimationState, AnimationTransition, Animator, Rect};
+/// use vanilla::resource::animationclip::AnimationClip;
+///
+/// fn create_state(duration: f32, is_loop: bool) -> AnimationState {
+/// 	let mut clip = AnimationClip::new();
+/// 	clip.set_frames(vec![Rect::create(0.0, 0.0, 32.0, 32.0), Rect::create(32.0, 0.0, 32.0, 32.0)]);
+/// 	clip.set_duration(duration);
+/// 	clip.set_loop(is_loop);
+/// 	let mut state = AnimationState::new();
+/// 	state.set_clip(Some(clip));
+/// 	state
+/// }
+///
+/// let mut animator = Animator::new();
+/// let idle_index = animator.add_state(create_state(1.0, true));
+/// let run_index = animator.add_state(create_state(0.5, true));
+/// let hit_index = animator.add_state(create_state(0.5, false));
+/// let mut to_run = AnimationTransition::new();
+/// to_run.set_from(Some(idle_index));
+/// to_run.set_to(Some(run_index));
+/// to_run.add_condition("isRunning", AnimationConditionMode::If, 0.0);
+/// animator.add_transition(to_run);
+/// let mut any_to_hit = AnimationTransition::new();
+/// any_to_hit.set_to(Some(hit_index));
+/// any_to_hit.set_can_transition_to_self(false);
+/// any_to_hit.add_condition("hit", AnimationConditionMode::If, 0.0);
+/// animator.add_transition(any_to_hit);
+/// let mut hit_to_idle = AnimationTransition::new();
+/// hit_to_idle.set_from(Some(hit_index));
+/// hit_to_idle.set_to(Some(idle_index));
+/// hit_to_idle.set_exit_time(Some(1.0));
+/// animator.add_transition(hit_to_idle);
+///
+/// animator.set_bool("isRunning", true);
+/// animator.tick(0.1);
+/// assert_eq!(animator.get_current_state_index(), Some(run_index));
+/// animator.set_trigger("hit");
+/// animator.tick(0.1);
+/// assert_eq!(animator.get_current_state_index(), Some(hit_index));
+/// assert!(!animator.get_trigger("hit"));
+///
+/// animator.set_trigger("hit");
+/// animator.tick(0.1);
+/// assert_eq!(animator.get_current_state_index(), Some(hit_index));
+/// assert!(animator.get_trigger("hit"));
+/// animator.reset_trigger("hit");
+/// animator.set_bool("isRunning", false);
+/// animator.tick(0.5);
+/// assert_eq!(animator.get_current_state_index(), Some(idle_index));
 /// ```
 //==============================================================================
 pub struct Animator {
@@ -505,6 +705,9 @@ pub struct Animator {
 impl Animator {
 	//==============================================================================
 	/// 생성. (상태 없음)
+	///
+	/// # 돌려줌
+	/// 상태, 전이, 매개변수가 없는 애니메이터. (지금 상태가 None 이라 tick 이 아무것도 하지 않는다)
 	//==============================================================================
 	pub fn new() -> Animator {
 		Animator {
@@ -570,6 +773,32 @@ impl Animator {
 	///
 	/// # 인자
 	/// - `state_index`: 틀 상태의 번호. (add_state 가 돌려준 것, 목록 밖이면 무시한다)
+	///
+	/// # 예제
+	/// 섞는 중에도 바로 옮기고, 목록 밖 번호는 무시
+	/// ```rust
+	/// use vanilla::{AnimationConditionMode, AnimationState, AnimationTransition, Animator};
+	///
+	/// let mut animator = Animator::new();
+	/// let idle_index = animator.add_state(AnimationState::new());
+	/// let jump_index = animator.add_state(AnimationState::new());
+	/// let mut transition = AnimationTransition::new();
+	/// transition.set_from(Some(idle_index));
+	/// transition.set_to(Some(jump_index));
+	/// transition.set_duration(0.5);
+	/// transition.add_condition("jump", AnimationConditionMode::If, 0.0);
+	/// animator.add_transition(transition);
+	/// animator.set_trigger("jump");
+	/// animator.tick(0.1);
+	/// assert!(animator.is_in_transition());
+	///
+	/// animator.play(idle_index);
+	/// assert_eq!(animator.get_current_state_index(), Some(idle_index));
+	/// assert!(!animator.is_in_transition());
+	/// assert_eq!(animator.get_current_normalized_time(), 0.0);
+	/// animator.play(99);
+	/// assert_eq!(animator.get_current_state_index(), Some(idle_index));
+	/// ```
 	//==============================================================================
 	pub fn play(&mut self, state_index: usize) {
 		if state_index >= self.states.len() {
@@ -736,6 +965,29 @@ impl Animator {
 	/// # 인자
 	/// - `name`: 매개변수 이름.
 	/// - `value`: 값. (같은 이름이 있으면 종류째 바꾼다)
+	///
+	/// # 예제
+	/// 종류별 매개변수 넣고 읽기
+	/// ```rust
+	/// use vanilla::Animator;
+	///
+	/// let mut animator = Animator::new();
+	/// animator.set_float("speed", 1.5);
+	/// animator.set_integer("combo", 3);
+	/// animator.set_bool("isGrounded", true);
+	/// animator.set_trigger("jump");
+	/// assert_eq!(animator.get_float("speed"), 1.5);
+	/// assert_eq!(animator.get_integer("combo"), 3);
+	/// assert!(animator.get_bool("isGrounded"));
+	/// assert!(animator.get_trigger("jump"));
+	///
+	/// assert_eq!(animator.get_float("combo"), 0.0);
+	/// assert_eq!(animator.get_float("missing"), 0.0);
+	/// animator.set_bool("speed", false);
+	/// assert_eq!(animator.get_float("speed"), 0.0);
+	/// animator.reset_trigger("jump");
+	/// assert!(!animator.get_trigger("jump"));
+	/// ```
 	//==============================================================================
 	pub fn set_float(&mut self, name: &str, value: f32) {
 		self.parameters.insert(name.to_string(), AnimatorParameter::Float(value));
@@ -994,6 +1246,44 @@ impl Animator {
 	///
 	/// # 돌려줌
 	/// 섞은 시간 / 섞는 시간. (0 ~ 1, 지금 상태의 가중치는 1 - 이 값, 섞는 중이 아니면 0)
+	///
+	/// # 예제
+	/// 0.5 초 동안 두 상태를 섞는 크로스페이드
+	/// ```rust
+	/// use vanilla::{AnimationConditionMode, AnimationState, AnimationTransition, Animator, Rect};
+	/// use vanilla::resource::animationclip::AnimationClip;
+	///
+	/// let mut animator = Animator::new();
+	/// let walk_index = animator.add_state(AnimationState::new());
+	/// let mut run_clip = AnimationClip::new();
+	/// run_clip.set_frames(vec![Rect::create(0.0, 32.0, 32.0, 32.0), Rect::create(32.0, 32.0, 32.0, 32.0)]);
+	/// run_clip.set_duration(1.0);
+	/// run_clip.set_loop(true);
+	/// let mut run_state = AnimationState::new();
+	/// run_state.set_clip(Some(run_clip));
+	/// let run_index = animator.add_state(run_state);
+	/// let mut transition = AnimationTransition::new();
+	/// transition.set_from(Some(walk_index));
+	/// transition.set_to(Some(run_index));
+	/// transition.set_duration(0.5);
+	/// transition.add_condition("speed", AnimationConditionMode::Greater, 1.0);
+	/// animator.add_transition(transition);
+	///
+	/// animator.set_float("speed", 2.0);
+	/// animator.tick(0.1);
+	/// assert!(animator.is_in_transition());
+	/// assert_eq!(animator.get_transition_weight(), 0.0);
+	/// animator.tick(0.25);
+	/// let next_weight = animator.get_transition_weight();
+	/// assert_eq!(next_weight, 0.5);
+	/// assert_eq!(1.0 - next_weight, 0.5);
+	/// assert_eq!(animator.get_next_normalized_time(), 0.25);
+	/// assert_eq!(animator.get_next_frame().map(|frame| frame.position.x), Some(0.0));
+	/// animator.tick(0.25);
+	/// assert_eq!(animator.get_current_state_index(), Some(run_index));
+	/// assert_eq!(animator.get_transition_weight(), 0.0);
+	/// assert_eq!(animator.get_current_frame().map(|frame| frame.position.x), Some(32.0));
+	/// ```
 	//==============================================================================
 	pub fn get_transition_weight(&self) -> f32 {
 		if self.next_state_index.is_none() || self.transition_duration <= 0.0 {
@@ -1004,6 +1294,9 @@ impl Animator {
 }
 
 impl Default for Animator {
+	//==============================================================================
+	/// 상태가 없는 애니메이터. (new 와 같다)
+	//==============================================================================
 	fn default() -> Animator {
 		Animator::new()
 	}

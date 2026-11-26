@@ -16,6 +16,26 @@ use std::cell::OnceCell;
 
 //==============================================================================
 /// 비주얼 애셋.
+/// - 비주얼 에디터 문서 파일을 읽어 그 글을 든 Visual 을 담는다. 문서 꼴(JSON 객체, root 객체)이 아니면 읽히지 않은 것이다.
+///
+/// # 예제
+/// 비주얼 에디터 프리팹을 읽어 노드 짓기
+/// ```rust
+/// use vanilla::{Asset, AssetType, NodeTree, UIDocument, VisualAsset};
+///
+/// let document_text = r#"{"version":1,"root":{"type":"WorldNode","name":"Panel","contentSize":[200,120],"components":[],"children":[]},"frameSize":[960,540]}"#;
+/// let mut visual_asset = VisualAsset::new();
+/// assert!(!visual_asset.is_loaded());
+/// visual_asset.load_from_bytes("panel.prefab.json", document_text.as_bytes().to_vec());
+/// assert!(visual_asset.is_loaded());
+/// assert_eq!(visual_asset.get_asset_base().get_asset_type(), AssetType::Visual);
+///
+/// let visual = visual_asset.get_visual().expect("visual");
+/// let mut document = UIDocument::new();
+/// let mut node_tree = NodeTree::new();
+/// let panel_id = visual.create_node(&mut document, &mut node_tree).expect("document").expect("root");
+/// assert_eq!(node_tree[panel_id].get_name(), "Panel");
+/// ```
 //==============================================================================
 pub struct VisualAsset {
 	asset_base: AssetBase,
@@ -28,6 +48,9 @@ pub struct VisualAsset {
 impl VisualAsset {
 	//==============================================================================
 	/// 생성. (애셋 타입 visual)
+	///
+	/// # 돌려줌
+	/// 요청 전의 빈 비주얼 애셋. (읽히지 않았고 담긴 비주얼이 없다)
 	//==============================================================================
 	pub fn new() -> VisualAsset {
 		VisualAsset {
@@ -46,6 +69,23 @@ impl VisualAsset {
 	///
 	/// # 돌려줌
 	/// 읽기 손잡이. (바이트가 오면 끝난다, 문서 꼴은 is_loaded 와 get_visual 이 본다)
+	///
+	/// # 예제
+	/// data: 주소로 문서 받기
+	/// ```rust
+	/// use vanilla::{Asset, Engine, EngineConfiguration, VisualAsset};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let mut visual_asset = VisualAsset::new();
+	/// visual_asset.load(&engine, r#"data:application/json,{"version":1,"root":{"type":"WorldNode","name":"Icon","components":[],"children":[]}}"#);
+	/// assert!(visual_asset.is_loaded());
+	/// assert!(visual_asset.get_visual().is_some());
+	///
+	/// let mut broken_asset = VisualAsset::new();
+	/// broken_asset.load(&engine, r#"data:application/json,{"version":1}"#);
+	/// assert!(!broken_asset.is_loaded());
+	/// assert!(broken_asset.get_visual().is_none());
+	/// ```
 	//==============================================================================
 	pub fn load(&mut self, engine: &Engine, asset_path: &str) -> AssetLoadHandle {
 		self.document_text = OnceCell::new();
@@ -83,6 +123,24 @@ impl VisualAsset {
 	///
 	/// # 돌려줌
 	/// 그 글을 든 Visual. JSON 객체가 아니거나 root 객체가 없으면 Err.
+	///
+	/// # 예제
+	/// 문서 글에서 바로 만들기
+	/// ```rust
+	/// use vanilla::{NodeTree, UIDocument, VisualAsset};
+	///
+	/// let document_text = r#"{"version":1,"root":{"type":"WorldNode","name":"Icon","components":[],"children":[]}}"#;
+	/// let visual = VisualAsset::create_visual_from_text(document_text).expect("visual");
+	/// assert_eq!(visual.get_document_text(), Some(document_text));
+	/// let mut document = UIDocument::new();
+	/// let mut node_tree = NodeTree::new();
+	/// let icon_id = visual.create_node(&mut document, &mut node_tree).expect("document").expect("root");
+	/// assert_eq!(node_tree[icon_id].get_name(), "Icon");
+	///
+	/// assert!(VisualAsset::create_visual_from_text("not json").is_err());
+	/// assert!(VisualAsset::create_visual_from_text("[1, 2]").is_err());
+	/// assert!(VisualAsset::create_visual_from_text(r#"{"version":1,"root":[1, 2]}"#).is_err());
+	/// ```
 	//==============================================================================
 	pub fn create_visual_from_text(document_text: &str) -> Result<Visual, String> {
 		let document_data: serde_json::Value = serde_json::from_str(document_text).map_err(|error| format!("VisualAsset: {}", error))?;
@@ -131,6 +189,29 @@ impl VisualAsset {
 	///
 	/// # 돌려줌
 	/// 담긴 비주얼. (읽은 문서를 든 것이거나 set_visual 로 넣은 것) 아직 읽히지 않았거나 문서 꼴이 아니고 넣은 것도 없으면 None.
+	///
+	/// # 예제
+	/// 비주얼을 직접 넣고 비우기, 내리기
+	/// ```rust
+	/// use vanilla::{Asset, Vector2, Visual, VisualAsset};
+	///
+	/// let mut visual_asset = VisualAsset::new();
+	/// assert!(visual_asset.get_visual().is_none());
+	/// let mut visual = Visual::new();
+	/// visual.set_location(Vector2::create(10.0, 20.0));
+	/// visual_asset.set_visual(Some(visual));
+	/// assert_eq!(visual_asset.get_visual().map(|visual| visual.get_location()), Some(Vector2::create(10.0, 20.0)));
+	/// assert!(!visual_asset.is_loaded());
+	///
+	/// visual_asset.load_from_bytes("coin.prefab.json", br#"{"version":1,"root":{"name":"Coin"}}"#.to_vec());
+	/// assert!(visual_asset.get_visual().is_some_and(|visual| visual.get_document_text().is_some()));
+	/// visual_asset.set_visual(None);
+	/// assert!(visual_asset.get_visual().is_none());
+	/// assert!(visual_asset.is_loaded());
+	/// visual_asset.unload();
+	/// assert!(!visual_asset.is_loaded());
+	/// assert!(visual_asset.get_visual().is_none());
+	/// ```
 	//==============================================================================
 	pub fn get_visual(&self) -> Option<&Visual> {
 		if let Some(visual) = self.visual.get() {
@@ -146,16 +227,25 @@ impl VisualAsset {
 }
 
 impl Default for VisualAsset {
+	//==============================================================================
+	/// 요청 전의 빈 비주얼 애셋. (new 와 같다)
+	//==============================================================================
 	fn default() -> VisualAsset {
 		VisualAsset::new()
 	}
 }
 
 impl Asset for VisualAsset {
+	//==============================================================================
+	/// 공통 상태.
+	//==============================================================================
 	fn get_asset_base(&self) -> &AssetBase {
 		&self.asset_base
 	}
 
+	//==============================================================================
+	/// 공통 상태. (변경용)
+	//==============================================================================
 	fn get_asset_base_mut(&mut self) -> &mut AssetBase {
 		&mut self.asset_base
 	}

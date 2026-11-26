@@ -14,6 +14,28 @@ use crate::ui::uidocument::UIDocument;
 
 //==============================================================================
 /// 비주얼 컴포넌트.
+/// - 비주얼 에디터 문서 글과 위치를 든다. create_node 가 그 문서로 새 노드 트리를 짓는다. 그리지도 갱신하지도 않는다. (is_tick_needed 가 false)
+///
+/// # 예제
+/// 문서를 든 비주얼로 노드 트리 짓기
+/// ```rust
+/// use vanilla::{Component, NodeTree, UIDocument, Vector2, Visual};
+///
+/// let document_text = r#"{"version":1,"root":{"type":"WorldNode","name":"Badge","position":[300,200],"contentSize":[64,64],"components":[],"children":[]}}"#;
+/// let mut visual = Visual::new();
+/// visual.set_document_text(Some(document_text.to_string()));
+/// visual.set_location(Vector2::create(40.0, 20.0));
+///
+/// let mut document = UIDocument::new();
+/// let mut node_tree = NodeTree::new();
+/// let parent_id = node_tree.create_node("parent");
+/// let badge_id = visual.create_node(&mut document, &mut node_tree).expect("document").expect("root");
+/// assert!(node_tree.add_child(parent_id, badge_id));
+/// assert_eq!(node_tree[badge_id].get_name(), "Badge");
+/// assert_eq!(node_tree[badge_id].get_local_position(), Vector2::create(40.0, 20.0));
+/// assert_eq!(node_tree.get_parent_id(badge_id), Some(parent_id));
+/// assert_eq!(visual.get_component_type(), "Visual");
+/// ```
 //==============================================================================
 pub struct Visual {
 	component_base: ComponentBase,
@@ -25,6 +47,9 @@ pub struct Visual {
 impl Visual {
 	//==============================================================================
 	/// 생성. (위치 0)
+	///
+	/// # 돌려줌
+	/// 문서 글이 없고 위치가 (0, 0) 인 비주얼.
 	//==============================================================================
 	pub fn new() -> Visual {
 		Visual {
@@ -83,6 +108,29 @@ impl Visual {
 	///
 	/// # 돌려줌
 	/// 새로 지은 뿌리 노드. (어느 부모에도 붙지 않았고 로컬 위치가 location 이다) 문서가 없으면 Ok(None), 문서 꼴이 틀리면 Err.
+	///
+	/// # 예제
+	/// 문서가 없을 때, 꼴이 틀릴 때, 같은 문서로 두 벌 짓기
+	/// ```rust
+	/// use vanilla::{NodeTree, UIDocument, Vector2, Visual};
+	///
+	/// let mut document = UIDocument::new();
+	/// let mut node_tree = NodeTree::new();
+	/// let mut visual = Visual::new();
+	/// assert_eq!(visual.create_node(&mut document, &mut node_tree), Ok(None));
+	/// visual.set_document_text(Some(String::from(r#"{"version":1}"#)));
+	/// assert!(visual.create_node(&mut document, &mut node_tree).is_err());
+	///
+	/// visual.set_document_text(Some(String::from(r#"{"version":1,"root":{"type":"WorldNode","name":"Coin","contentSize":[32,32],"components":[],"children":[]}}"#)));
+	/// let first_id = visual.create_node(&mut document, &mut node_tree).expect("document").expect("root");
+	/// visual.set_location(Vector2::create(48.0, 0.0));
+	/// let second_id = visual.create_node(&mut document, &mut node_tree).expect("document").expect("root");
+	/// assert_ne!(first_id, second_id);
+	/// assert_eq!(node_tree[second_id].get_name(), "Coin");
+	/// assert_eq!(node_tree[first_id].get_local_position().x, 0.0);
+	/// assert_eq!(node_tree[second_id].get_local_position().x, 48.0);
+	/// assert!(node_tree.get_parent_id(second_id).is_none());
+	/// ```
 	//==============================================================================
 	pub fn create_node(&self, document: &mut UIDocument, node_tree: &mut NodeTree) -> Result<Option<NodeId>, String> {
 		let document_text = match self.document_text.as_deref() {
@@ -102,6 +150,9 @@ impl Visual {
 }
 
 impl Default for Visual {
+	//==============================================================================
+	/// 문서 글이 없고 위치가 0 인 비주얼. (new 와 같다)
+	//==============================================================================
 	fn default() -> Visual {
 		Visual::new()
 	}
@@ -109,14 +160,23 @@ impl Default for Visual {
 
 #[crate::reflect]
 impl Component for Visual {
+	//==============================================================================
+	/// 공통 상태 반환.
+	//==============================================================================
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base
 	}
 
+	//==============================================================================
+	/// 공통 상태 반환. (변경용)
+	//==============================================================================
 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 		&mut self.component_base
 	}
 
+	//==============================================================================
+	/// 컴포넌트 타입 이름. ("Visual")
+	//==============================================================================
 	fn get_component_type(&self) -> &'static str {
 		"Visual"
 	}
