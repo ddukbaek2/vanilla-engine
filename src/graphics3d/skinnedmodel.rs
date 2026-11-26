@@ -2307,6 +2307,9 @@ impl SkinnedModel {
 			let local_material_index = triangle_count_by_material.first().map(|(index, _count)| *index).unwrap_or(0);
 			return vec![(local_material_index, corner_arrays)];
 		}
+		//==============================================================================
+		/// 원천 배열에서 주어진 재질의 삼각형 조각만 모아 새 배열로 만든다. (삼각형마다 성분 수 x 3 개를 가져온다)
+		//==============================================================================
 		fn gather<T: Copy>(source_array: &[T], component_count: usize, material_index_per_triangle: &[i32], local_material_index: usize, triangle_count: usize) -> Vec<T> {
 			let triangle_stride = component_count * 3;
 			let mut target_array = Vec::with_capacity(triangle_count * triangle_stride);
