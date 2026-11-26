@@ -21,7 +21,7 @@
 //!   - 데스크탑에서는 use_dom_input 이 켜진 필드도 원본 DOM 모드처럼 필드 밖을 누르면 포커스를 잃는다. 포커스는 엔진에 하나뿐이다.
 //!     (원본 캔버스 모드는 다른 필드를 눌러도 앞 필드가 포커스를 쥐고 있다. 러스트 판은 나중에 포커스를 얻은 필드만 남긴다)
 //!   - 포커스를 잃을 때 조합 중이던 글은 확정해 값에 넣는다. (브라우저가 DOM 입력에 하는 일과 같다)
-//!   - 데스크탑 문맥 메뉴(오른쪽 단추)는 DOM 이 없어 캔버스에 그린다. 루트의 마지막 자식 노드로 만들어 위에 그린다. 웹은 원본처럼 DOM 메뉴다.
+//!   - 문맥 메뉴(오른쪽 단추)는 원본처럼 엔진이 그린다. (UIInputFieldContextMenu, 웹과 데스크탑 같다) 루트의 마지막 자식 노드로 만들어 위에 그린다.
 //!     항목은 원본처럼 잘라내기, 복사, 붙여넣기, 모두 선택이다. DOM 입력을 직접 누르게 한 필드(use_direct_touch)도 원본처럼 브라우저 편집 칸 메뉴 대신 같은 메뉴다.
 //!     그 필드는 크롬 데스크탑 터치처럼 손가락 길게 누르기(650ms, 15 DIP 안)로 낱말을 고르고 터치 손잡이와 빠른 메뉴를 띄운다. (윈도우는 뗄 때 메뉴를 정한다)
 //!   - 데스크탑 DOM 입력 필드는 원본 DOM 입력 칸처럼 되돌리기와 다시 하기를 한다. (Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y, 맥은 Cmd, 블링크의 묶음 규칙, TextEditBuffer)
@@ -112,7 +112,7 @@ const TEXT_AREA_SCROLLBAR_THICKNESS: f32 = 8.0;
 const TEXT_AREA_SCROLLBAR_MINIMUM_THUMB_LENGTH: f32 = 20.0;
 /// 폰트 이름을 정하지 않았을 때 쓰는 이름. (엔진 기본 폰트, 원본 SYSTEM_FONT_STRING 자리)
 const DEFAULT_FONT_FAMILY: &str = "default";
-/// 문맥 메뉴 크기. (원본 DOM 메뉴: 최소 폭 140, 위아래 여백 4, 항목 위아래 여백 8, 글자 14px)
+/// 문맥 메뉴 크기. (원본 UIInputFieldContextMenu 와 같다: 폭 140, 위아래 여백 4, 항목 위아래 여백 8, 글자 14px)
 const CONTEXT_MENU_WIDTH: f32 = 140.0;
 const CONTEXT_MENU_PADDING_Y: f32 = 4.0;
 const CONTEXT_MENU_ITEM_HEIGHT: f32 = 34.0;
@@ -927,6 +927,8 @@ pub struct UIInputField {
 	caret_local_x: f32,
 	value_revision: u64,
 	context_menu_node_id: Option<NodeId>,
+	/// 이번 tick 에 문맥 메뉴 요청으로 메뉴를 열었는지. (그 요청을 낸 오른쪽 누름이 같은 프레임의 touch_press 로 메뉴를 닫고 선택을 지우지 않게)
+	is_context_menu_opened_this_tick: bool,
 	pending_menu_action: Option<UIInputFieldMenuAction>,
 	/// 글 라벨을 마지막으로 놓은 노드 크기. (원본 refreshTextPositions 가 tick 에서 크기가 있을 때만 놓는다. 처음은 0, UI 문서가 원본 자식 꼴로 적는다)
 	text_layout_size: Vector2,
@@ -1067,6 +1069,7 @@ impl UIInputField {
 			caret_local_x: 16.0,
 			value_revision: 0,
 			context_menu_node_id: None,
+			is_context_menu_opened_this_tick: false,
 			pending_menu_action: None,
 			text_layout_size: Vector2::zero(),
 			caret_local_top: 0.0,
@@ -3373,6 +3376,22 @@ impl UIInputField {
 }
 
 //==============================================================================
+/// 노드의 뷰 사각형. (컨텐트 크기의 네 귀퉁이를 감싼다, 트리에 없으면 None)
+//==============================================================================
+fn read_node_view_rect(node_tree: &NodeTree, node_id: NodeId) -> Option<Rect> {
+	let content_size = node_tree.get_node(node_id)?.get_content_size();
+	let world_matrix = node_tree.calculate_world_matrix(node_id);
+	let mut minimum_position = Vector2::create(f32::MAX, f32::MAX);
+	let mut maximum_position = Vector2::create(f32::MIN, f32::MIN);
+	for (corner_x, corner_y) in [(0.0, 0.0), (content_size.x, 0.0), (0.0, content_size.y), (content_size.x, content_size.y)] {
+		let view_point = world_matrix.transform_point(corner_x, corner_y);
+		minimum_position = Vector2::create(minimum_position.x.min(view_point.x), minimum_position.y.min(view_point.y));
+		maximum_position = Vector2::create(maximum_position.x.max(view_point.x), maximum_position.y.max(view_point.y));
+	}
+	Some(Rect::create(minimum_position.x, minimum_position.y, maximum_position.x - minimum_position.x, maximum_position.y - minimum_position.y))
+}
+
+//==============================================================================
 /// page 이동 거리. (블링크 move_commands.cc 와 cc ScrollUtils::CalculatePageStep: 높이의 87.5% 와 높이 - 겹침 상한 가운데 큰 쪽, 겹침 상한은 맥 40, 그 밖은 없음)
 //==============================================================================
 fn calculate_page_step(visible_height: f32) -> f32 {
@@ -3444,23 +3463,19 @@ impl Component for UIInputField {
 			}
 		}
 
+		// 떠 있는 메뉴 자리 올리기. (웹은 그 위의 오른쪽 클릭에서 브라우저 메뉴를 막는다)
+		for menu_node_id in [self.context_menu_node_id, self.quick_menu_node_id].into_iter().flatten() {
+			if let Some(menu_rect) = read_node_view_rect(context.get_node_tree(), menu_node_id) {
+				context.get_engine().get_input_manager().get_text_input().register_menu_rect(menu_rect);
+			}
+		}
+
 		// 다른 필드가 나중에 포커스를 얻었으면 포커스를 내준다. (엔진에 포커스는 하나)
 		let latest_focus_serial = context.get_engine().get_input_manager().get_text_input().get_latest_focus_serial();
 		if self.is_focused && latest_focus_serial > self.focus_serial {
 			self.handle_blur(context);
 		}
 		self.blur_on_outside_press(context);
-
-		// 문맥 메뉴 요청. (데스크탑 오른쪽 단추. 그 자리 맨 위가 이 필드일 때)
-		let context_menu_request_position = context.get_engine().get_input_manager().get_text_input().get_context_menu_request_position();
-		if let Some(context_menu_request_position) = context_menu_request_position {
-			let node_id = context.get_node_id();
-			let topmost_node_id = context.get_node_tree().find_topmost_interactable_node(context_menu_request_position);
-			if self.is_attached && topmost_node_id == Some(node_id) {
-				self.handle_focus();
-				self.show_context_menu(context, context_menu_request_position);
-			}
-		}
 
 		// 글 입력 줄에서 이 필드 몫 꺼내기.
 		let accepts_focused_field_events = self.is_focused && self.is_attached;
@@ -3472,6 +3487,20 @@ impl Component for UIInputField {
 		}
 		for event_kind in event_kind_list {
 			self.handle_text_input_event(context, event_kind);
+		}
+
+		// 문맥 메뉴 요청. (데스크탑 오른쪽 단추, 웹 필드 위의 오른쪽 클릭. 그 자리 맨 위가 이 필드일 때)
+		// 글 입력 줄의 포커스 이벤트 뒤에 연다. (웹 오른쪽 클릭은 그 mousedown 이 숨긴 입력의 blur 와 focus 를 함께 넣어, 앞에 열면 blur 가 메뉴를 닫는다)
+		self.is_context_menu_opened_this_tick = false;
+		let context_menu_request_position = context.get_engine().get_input_manager().get_text_input().get_context_menu_request_position();
+		if let Some(context_menu_request_position) = context_menu_request_position {
+			let node_id = context.get_node_id();
+			let topmost_node_id = context.get_node_tree().find_topmost_interactable_node(context_menu_request_position);
+			if self.is_attached && topmost_node_id == Some(node_id) {
+				self.handle_focus();
+				self.show_context_menu(context, context_menu_request_position);
+				self.is_context_menu_opened_this_tick = true;
+			}
 		}
 
 		// 손가락 길게 누르기와 빠른 메뉴. (데스크탑)
@@ -3527,6 +3556,10 @@ impl Component for UIInputField {
 			text_input.set_ime_commit_guard(&composition);
 			text_input.request_ime_reset();
 			self.replace_selection(context, &composition);
+		}
+		// 이번 tick 에 연 문맥 메뉴의 오른쪽 누름은 메뉴를 닫지 않고 커서와 선택도 그대로 둔다. (그 메뉴가 고른 글을 잘라내고 복사한다)
+		if self.is_context_menu_opened_this_tick {
+			return;
 		}
 		self.focus();
 		self.hide_context_menu(context);
@@ -3844,7 +3877,7 @@ const CONTEXT_MENU_ITEM_LIST: [(&str, UIInputFieldMenuAction); 4] = [
 ];
 
 //==============================================================================
-/// 캔버스 문맥 메뉴. (데스크탑. 원본 showContextMenu 의 DOM 메뉴를 같은 모양으로 그린다)
+/// 캔버스 문맥 메뉴. (원본 UIInputFieldContextMenu 와 같은 모양, 웹과 데스크탑 같다)
 /// - 루트의 자식 노드에 붙는다. 항목을 누르면 주인 필드에 항목을 부탁하고(다음 tick 에 한다) 스스로 지운다.
 /// - 메뉴 밖을 누르거나, 다른 자리에 문맥 메뉴를 부르거나, 주인 필드가 포커스를 잃거나 없어지면 스스로 지운다.
 //==============================================================================

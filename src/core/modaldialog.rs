@@ -1,35 +1,32 @@
 //==============================================================================
-//! 모달 질문 창. (원본과 게임이 부르는 브라우저 window.alert, window.confirm, window.prompt 자리)
-//! - 원본 DevTools 의 Local Storage 탭이 window.prompt, window.confirm 으로 키와 값을 묻고 지울지 묻는다. 게임도 같은 브라우저 함수를 부른다.
-//!   러스트 판은 엔진 함수 Engine::alert, Engine::confirm, Engine::prompt 로 같은 일을 한다.
-//! - 웹은 원본처럼 브라우저 함수를 부른다. 브라우저가 창을 띄우고 답할 때까지 페이지를 멈춘 뒤 돌려준 값을 손잡이에 넣는다. (그 자리에서 끝난다)
-//! - 데스크탑은 엔진이 창 위에 크롬 탭 모달 대화 상자(JavaScriptTabModalDialogViewViews)와 같은 질문 창을 그린다.
-//!   - 자리: 창 안쪽 가로 가운데, 위 끝. (크롬은 탭 내용 영역 가로 가운데에서 툴바 아래 끝과 3px 겹친다. 데스크탑 창에는 툴바가 없어 위 끝이다)
-//!   - 제목: "이 페이지 내용:" (크롬이 출처가 없는 페이지(file:, data:)에 쓰는 제목, 데스크탑 앱에는 출처가 없다) 닫기 X 는 없다.
+//! 모달 질문 창. (게임이 부르던 브라우저 window.alert, window.confirm, window.prompt 자리, 원본 core/modaldialog.js 와 같다)
+//! - 러스트 판은 엔진 함수 Engine::alert, Engine::confirm, Engine::prompt, 원본은 engine.alert, confirm, prompt 다. DevTools 의 Local Storage 탭도 이 창으로 키와 값을 묻고 지울지 묻는다.
+//! - 두 엔진 모두, 웹과 데스크탑 모두 엔진이 캔버스 위에 크롬 탭 모달 대화 상자(JavaScriptTabModalDialogViewViews)와 같은 질문 창을 그린다. (브라우저 창을 띄우지 않는다)
+//!   - 자리: 캔버스(창) 안쪽 가로 가운데, 위 끝. (크롬은 탭 내용 영역 가로 가운데에서 툴바 아래 끝과 3px 겹친다. 캔버스에는 툴바가 없어 위 끝이다)
+//!   - 제목: "이 페이지 내용:" (크롬이 출처가 없는 페이지(file:, data:)에 쓰는 제목) 닫기 X 는 없다.
 //!   - alert 는 확인만, confirm 과 prompt 는 확인과 취소. 기본 단추는 확인이다. 단추 차례는 크롬처럼 윈도우 `[확인][취소]`, 맥과 리눅스 `[취소][확인]`.
 //!   - prompt 입력 칸은 기본값을 넣고 모두 고른 채로 초점을 받는다. Enter 는 확인, Escape 는 취소.
 //!   - 글(제목, 확인, 취소)은 브라우저 화면 언어 자리인 시스템 언어로 고른다. (core/browseruitext.rs)
-//!   - 떠 있는 동안 원본에서 자바스크립트가 멈추듯 씬과 async 작업을 갱신하지 않고(그리기는 멈춘 화면 그대로), 입력은 창만 받는다. 닫히면 눌린 키와 단추를 비운다.
-//!     (원본은 창이 포커스를 가져가 페이지에 키가 오지 않는다)
-//!   - 입력 칸은 글 입력 줄(core/textinput.rs)에서 IME 와 편집 키를 받는다. 누르고 끌어 커서와 선택을 정한다. 되돌리기와 다시 하기도 된다. (크롬 Textfield 처럼)
-//!   - 여러 개를 한 프레임에 부르면 차례로 띄운다. (원본은 창이 떠 있는 동안 자바스크립트가 멈춰 겹쳐 부를 수 없다)
-//! - 원본 prompt 는 답할 때까지 막고 값을 돌려준다. 러스트 판은 엔진 루프를 막을 수 없어 ModalDialogHandle 을 돌려주고, 답하면 끝난다. (is_finished)
+//!   - 떠 있는 동안 원본처럼 씬과 async 작업을 갱신하지 않고(그리기는 멈춘 화면 그대로), 입력은 창만 받는다. 닫히면 눌린 키와 단추를 비운다.
+//!   - 입력 칸은 글 입력 줄(core/textinput.rs)에서 IME 와 편집 키를 받는다. 웹은 원본처럼 숨긴 DOM 입력이 글을 받는다. 누르고 끌어 커서와 선택을 정한다.
+//!   - 여러 개를 한 프레임에 부르면 차례로 띄운다.
+//! - 러스트 판은 ModalDialogHandle 을 돌려주고, 답하면 끝난다. (is_finished, 원본은 Promise)
 //!   끝난 뒤 부를 함수는 set_callback 으로 건다. 엔진 작업 안에서는 Engine::alert_async, confirm_async, prompt_async 의 Promise 를 await 한다.
-//!   (떠 있는 동안은 async 작업도 원본 자바스크립트처럼 멈춘다)
+//!   (떠 있는 동안은 async 작업도 멈춘다)
 //==============================================================================
 use std::cell::RefCell;
 use std::rc::Rc;
 
 //==============================================================================
-/// 질문 창 종류. (원본 window.alert, window.confirm, window.prompt)
+/// 질문 창 종류. (원본 ModalDialogKind 의 alert, confirm, prompt)
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ModalDialogKind {
-	/// 알림 창. (원본 window.alert, 확인만 있다)
+	/// 알림 창. (window.alert 자리, 확인만 있다)
 	Alert,
-	/// 확인 창. (원본 window.confirm, 확인과 취소)
+	/// 확인 창. (window.confirm 자리, 확인과 취소)
 	Confirm,
-	/// 입력 창. (원본 window.prompt, 입력 칸과 확인과 취소)
+	/// 입력 창. (window.prompt 자리, 입력 칸과 확인과 취소)
 	Prompt,
 }
 
@@ -60,7 +57,7 @@ struct ModalDialogHandleState {
 /// - Engine::alert, confirm, prompt 가 돌려준다. 답하면 끝나고(is_finished), 답은 get_result, is_confirmed, get_prompt_text 로 읽는다.
 ///
 /// # 예제
-/// 데스크탑에서 확인 창을 띄우고 답 기다리기 (웹은 브라우저 창이 닫힌 뒤 끝난 손잡이를 돌려준다)
+/// 확인 창을 띄우고 답 기다리기
 /// ```rust
 /// use vanilla::{Engine, EngineConfiguration, ModalDialogResult};
 ///
@@ -198,55 +195,12 @@ impl ModalDialogHandle {
 	}
 }
 
-//==============================================================================
-/// 웹. (브라우저 함수를 불러 그 자리에서 끝낸다)
-//==============================================================================
-#[cfg(target_arch = "wasm32")]
-pub(crate) fn show_browser_dialog(kind: ModalDialogKind, message: &str, default_value: &str) -> ModalDialogHandle {
-	let handle = ModalDialogHandle::create_pending();
-	let result = match web_sys::window() {
-		Some(window) => {
-			match kind {
-				ModalDialogKind::Alert => {
-					let _ = window.alert_with_message(message);
-					ModalDialogResult::Confirmed(String::new())
-				}
-				ModalDialogKind::Confirm => {
-					if window.confirm_with_message(message).unwrap_or(false) {
-						ModalDialogResult::Confirmed(String::new())
-					}
-					else {
-						ModalDialogResult::Cancelled
-					}
-				}
-				ModalDialogKind::Prompt => {
-					match window.prompt_with_message_and_default(message, default_value).ok().flatten() {
-						Some(text) => {
-							ModalDialogResult::Confirmed(text)
-						}
-						None => {
-							ModalDialogResult::Cancelled
-						}
-					}
-				}
-			}
-		}
-		None => {
-			ModalDialogResult::Cancelled
-		}
-	};
-	handle.finish(result);
-	handle
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) use desktop_dialog::{draw_modal_dialog, measure_field_text_width, tick_modal_dialog, ModalDialog};
+pub(crate) use engine_dialog::{draw_modal_dialog, measure_field_text_width, tick_modal_dialog, ModalDialog};
 
 //==============================================================================
-/// 데스크탑. (엔진이 그리는 질문 창)
+/// 엔진이 그리는 질문 창. (데스크탑과 웹)
 //==============================================================================
-#[cfg(not(target_arch = "wasm32"))]
-mod desktop_dialog {
+mod engine_dialog {
 	use super::{ModalDialogHandle, ModalDialogKind, ModalDialogResult};
 	use crate::base::color::Color;
 	use crate::base::rect::Rect;
@@ -468,6 +422,21 @@ mod desktop_dialog {
 				}
 				TextInputEventKind::Key { key, is_shift } => {
 					return self.handle_edit_key(engine, key, is_shift);
+				}
+				// 웹은 숨긴 DOM 입력이 값과 선택의 주인이다. (입력 필드와 같다, 조합 중이거나 같은 값이면 무시)
+				TextInputEventKind::ReplaceValue { value, selection_end, .. } => {
+					if self.kind == ModalDialogKind::Prompt && self.edit_buffer.get_composition().is_empty() && value != self.edit_buffer.get_text() {
+						self.edit_buffer.set_value_from_platform(&value, selection_end);
+						self.reset_cursor_blink();
+					}
+				}
+				TextInputEventKind::Selection { start, end } => {
+					let cursor_index = self.edit_buffer.get_cursor_index();
+					let current_range = self.edit_buffer.get_selection_range().unwrap_or((cursor_index, cursor_index));
+					if self.kind == ModalDialogKind::Prompt && self.drag_start_index.is_none() && current_range != (start, end) {
+						self.edit_buffer.set_selection(start, end);
+						self.reset_cursor_blink();
+					}
 				}
 				_ => {
 				}
@@ -736,6 +705,10 @@ mod desktop_dialog {
 		if engine.get_input_manager().is_key_just_pressed(KeyCode::ESCAPE) {
 			answer = Some(false);
 		}
+		// 입력 칸이 없는 창의 Enter. (입력 칸 글이 없어 글 입력 줄로 오지 않는 웹도 같게)
+		if dialog.kind != ModalDialogKind::Prompt && engine.get_input_manager().is_key_just_pressed(KeyCode::ENTER) {
+			answer = Some(true);
+		}
 
 		// 누르기. (단추는 눌렀다 그 위에서 떼면, 입력 칸은 눌러 커서를 두고 끌어 고른다)
 		let input_manager = engine.get_input_manager();
@@ -795,7 +768,7 @@ mod desktop_dialog {
 				handle.finish(result);
 			}
 			None => {
-				// prompt 는 입력 칸 상태를 올려 데스크탑 IME 를 켠다. (답한 프레임에는 올리지 않아 페이지의 필드가 포커스를 그대로 돌려받는다)
+				// prompt 는 입력 칸 상태를 올려 IME 를 켠다. (웹은 숨긴 DOM 입력이 붙는다) (답한 프레임에는 올리지 않아 페이지의 필드가 포커스를 그대로 돌려받는다)
 				if let (ModalDialogKind::Prompt, Some(field_rect)) = (dialog.kind, dialog.layout.as_ref().and_then(|layout| layout.field_rect)) {
 					engine.get_input_manager().get_text_input().register_field_state(TextInputFieldState {
 						field_id: DIALOG_FIELD_ID,
@@ -943,7 +916,7 @@ mod desktop_dialog {
 }
 
 //==============================================================================
-/// 시험. (데스크탑 질문 창)
+/// 시험. (질문 창)
 //==============================================================================
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {

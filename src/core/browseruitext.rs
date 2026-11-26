@@ -1,15 +1,14 @@
 //==============================================================================
-//! 브라우저 화면 글. (러스트 판에만 있다, 원본은 브라우저가 제 화면 언어로 그린다)
-//! - 원본 페이지 위에 브라우저가 그리는 것(자바스크립트 질문 창의 제목과 단추, 편집 칸 문맥 메뉴의 항목)의 글이다.
-//!   데스크탑은 엔진이 그것을 그리므로 같은 글이 필요하다. (core/modaldialog.rs, ui/uiinputfield.rs)
+//! 브라우저 화면 글. (원본 core/browseruitext.js 와 같은 표와 같은 로케일 고르기)
+//! - 브라우저가 페이지 위에 그리던 것(자바스크립트 질문 창의 제목과 단추, 편집 칸 문맥 메뉴와 터치 빠른 메뉴의 항목)의 글이다.
+//!   두 엔진 모두, 웹과 데스크탑 모두 엔진이 그것을 그리므로 같은 글이 필요하다. (core/modaldialog.rs, ui/uiinputfield.rs, ui/uiinputfieldmenu.rs)
 //! - 글은 크로미엄의 번역(chrome/app/resources/generated_resources_*.xtb, ui/strings/translations/ui_strings_*.xtb,
 //!   components/strings/components_strings_*.xtb)을 grit 의 메시지 번호로 찾아 화면 꼴로 옮긴 표다. (browseruitext.json, 데스크탑 로케일 82 개)
 //!   크롬 Views 메뉴는 단축 글자 표시 "(&U)" 와 "&" 를 지워 그리고(gfx RemoveAcceleratorChar), 맥은 FixUpWindowsStyleLabel 로 지운다. 표는 지운 글이다.
-//! - 크롬은 제 화면 언어로 그린다. 데스크탑은 그 자리인 시스템 선호 언어(sys-locale) 차례에서 크롬 규칙으로 로케일을 고른다.
+//! - 크롬은 제 화면 언어로 그린다. 그 자리인 선호 언어(데스크탑은 시스템 선호 언어 sys-locale, 웹은 원본처럼 navigator.languages) 차례에서 크롬 규칙으로 로케일을 고른다.
 //!   (l10n_util 의 GetApplicationLocale 과 language_tag_matcher: 같은 이름이 있으면 그것, es-* 는 es-419, pt 는 pt-BR, zh 는 zh-CN, zh-Hant 는 zh-TW,
 //!   en 과 en-PH, en-LR 은 en-US, en-CA 와 그 밖의 en-* 는 en-GB, 옛 이름 iw, no, tl, in 은 he, nb, fil, id. 맞는 것이 없으면 en-US)
 //!   zh-MO 는 CLDR 의 부모 로케일 zh-Hant-HK 를 따라 zh-HK, zh-SG 는 zh-CN 으로 본다. (크롬의 ICU4X 데이터로 돌려 보지는 않았다)
-//!   웹은 브라우저가 그리므로 이 표를 쓰지 않는다.
 //!
 //! # 예제
 //! 질문 창 단추 글과 고른 로케일 읽기 (데스크탑)
