@@ -11,13 +11,16 @@
 //! - 충돌 모양은 물리에 기대지 않는다. read_cell_collision_shapes 가 칸마다 뒤집기, 돌리기, 오프셋을 건 지도 좌표 모양(TileCollisionShape)을 돌려준다.
 //! - 원본과 다른 점: 타일셋과 층을 값으로 가진다. (원본은 객체 참조라 여러 지도가 같은 타일셋을 나눠 쓴다, 러스트는 Tileset 을 clone 한다)
 //!   타일셋, 층 번호를 못 찾으면 None 이다. (원본은 -1, null) 애니메이션 시계는 f64 다.
-//! - 칸 크기, 육각 변 길이, 배치 셈(칸 자리, 칸을 감싸는 사각형, 칸 그리는 자리)은 원본처럼 f64 이고 Tiled 값을 자르지 않는다. (16.5 는 16.5, 반 나누기는 원본 Math.trunc 처럼 0 쪽으로)
-//!   엔진 Vector2, Rect, 그리기에 넘기는 곳에서만 f32 로 바꾼다. 타일셋 격자 크기, 충돌 모양, 층 오프셋은 아직 f32 와 u32 다.
+//! - 칸 크기, 육각 변 길이, 배치 셈(칸 자리, 칸을 감싸는 사각형, 칸 그리는 자리), 타일셋 격자 크기(타일 크기, 여백, 간격), 충돌 모양,
+//!   층 오프셋과 불투명도는 원본처럼 f64 이고 Tiled 값을 자르지 않는다. (16.5 는 16.5, 반 나누기는 원본 Math.trunc 처럼 0 쪽으로)
+//!   f64 2D 값(충돌 꼭짓점, 층 오프셋)은 초안 물리와 같은 PhysicsVector2 다. 엔진 Vector2, Rect, Color, 그리기에 넘기는 곳에서만 f32 로 바꾼다.
+//!   회전의 사인, 코사인, 아크 탄젠트 둘은 base::trigonometry 로 크롬 Math 와 같은 비트다.
 //==============================================================================
 // 옮긴 원문: libtiled 의 렌더러 셈에서 옮김, BSD-2-Clause, THIRD_PARTY_LICENSES.md
 use crate::base::color::Color;
 use crate::base::rect::Rect;
 use crate::base::transformmatrix::TransformMatrix;
+use crate::base::trigonometry;
 use crate::base::vector2::Vector2;
 use crate::core::component::{Component, ComponentBase};
 use crate::core::graphic::{BlendMode, GlTexture, Graphic, FLOATS_PER_VERTEX};
@@ -27,6 +30,7 @@ use crate::core::node::worldnode::NodeTransform;
 use crate::experimental::tilemap::tilemaplayer::{TilemapChunk, TilemapLayer, DEFAULT_CHUNK_SIZE};
 use crate::experimental::tilemap::tileset::{TileCollisionShape, TileFillMode, TileRenderSize, Tileset};
 use crate::misc::grid::GridCell;
+use std::f64::consts::PI;
 use std::rc::Rc;
 
 /// 타일 값에서 gid 만 남기는 비트.
@@ -401,9 +405,9 @@ impl TilePlacement {
 		let mut cos_rotation = 1.0f64;
 		let mut sin_rotation = 0.0f64;
 		if self.rotation != 0.0 {
-			let radian = self.rotation.to_radians();
-			cos_rotation = radian.cos();
-			sin_rotation = radian.sin();
+			let radian = self.rotation * PI / 180.0;
+			cos_rotation = trigonometry::cos(radian);
+			sin_rotation = trigonometry::sin(radian);
 		}
 		let center_x = self.center_x;
 		let center_y = self.center_y;
@@ -462,7 +466,7 @@ struct TilemapDrawState {
 /// assert_eq!((center.x, center.y, cell.column, cell.row), (288.0, 96.0, 2, 3));
 ///
 /// let mut tileset = Tileset::new();
-/// tileset.set_tile_size(64, 32);
+/// tileset.set_tile_size(64.0, 32.0);
 /// tileset.set_columns(4);
 /// tileset.set_tile_count(16);
 /// tileset.set_tile_collision_shapes(0, &[TileCollisionShape::create_rectangle(0.0, 0.0, 64.0, 32.0)]);
@@ -494,7 +498,7 @@ struct TilemapDrawState {
 /// 		let image = Image::load(std::path::Path::new("terrain.png")).expect("terrain image");
 /// 		let mut tilemap = Tilemap::new();
 /// 		tilemap.set_tile_size(16.0, 16.0);
-/// 		tilemap.add_tileset(Tileset::create_grid(image, 16, 16, 1, 2), 0);
+/// 		tilemap.add_tileset(Tileset::create_grid(image, 16.0, 16.0, 1.0, 2.0), 0);
 /// 		let layer = tilemap.create_layer("ground");
 /// 		for row in 0..6 {
 /// 			for column in 0..10 {
@@ -1458,8 +1462,8 @@ impl Tilemap {
 			let tile_height = tileset.get_tile_height();
 			let margin = tileset.get_margin();
 			let spacing = tileset.get_spacing();
-			source_x = (margin + (tile_id % columns) * (tile_width + spacing)) as f64;
-			source_y = (margin + (tile_id / columns) * (tile_height + spacing)) as f64;
+			source_x = margin + (tile_id % columns) as f64 * (tile_width + spacing);
+			source_y = margin + (tile_id / columns) as f64 * (tile_height + spacing);
 			source_width = tile_width as f64;
 			source_height = tile_height as f64;
 		}
@@ -1622,7 +1626,7 @@ impl Tilemap {
 		};
 		let mut transform_matrix = TransformMatrix::identity();
 		transform_matrix.translate((layer_offset.x as f64 + placement.center_x) as f32, (layer_offset.y as f64 + placement.center_y) as f32);
-		transform_matrix.rotate(placement.rotation.to_radians() as f32);
+		transform_matrix.rotate((placement.rotation * PI / 180.0) as f32);
 		transform_matrix.scale((placement.scale_x * horizontal_sign as f64) as f32, (placement.scale_y * vertical_sign as f64) as f32);
 		transform_matrix.translate((-placement.source_width / 2.0) as f32, (-placement.source_height / 2.0) as f32);
 		for collision_shape in collision_shapes.iter() {
@@ -1733,12 +1737,12 @@ impl Tilemap {
 			let layer_color = layer.get_color();
 			let layer_offset = layer.get_offset();
 			let chunk_size = layer.get_chunk_size();
-			draw_state.color = Color::create(layer_color.red, layer_color.green, layer_color.blue, layer_color.alpha * layer.get_opacity());
+			draw_state.color = Color::create(layer_color.red, layer_color.green, layer_color.blue, (layer_color.alpha as f64 * layer.get_opacity()) as f32);
 			draw_state.image = None;
 			draw_state.texture = None;
 			draw_state.float_offset = 0;
 			graphic.push_state();
-			graphic.translate(layer_offset.x, layer_offset.y);
+			graphic.translate(layer_offset.x as f32, layer_offset.y as f32);
 			graphic.set_blend_mode(layer.get_blend_mode());
 
 			// 화면에 걸치는 덩이 고르기.
@@ -1894,18 +1898,19 @@ impl Component for Tilemap {
 mod tests {
 	use super::*;
 	use crate::experimental::tilemap::tileset::{TileAnimationFrame, TileCollisionShapeKind};
+	use crate::experimental::physics2d::PhysicsVector2;
 
 	//==============================================================================
 	/// 소수 넷째 자리까지 같은지.
 	//==============================================================================
-	fn assert_near(actual_value: f32, expected_value: f32) {
+	fn assert_near(actual_value: f64, expected_value: f64) {
 		assert!((actual_value - expected_value).abs() < 0.0001, "{} != {}", actual_value, expected_value);
 	}
 
 	//==============================================================================
 	/// 모양을 견줄 수 있는 값으로. (종류, x, y, 너비, 높이, 회전, 꼭짓점)
 	//==============================================================================
-	fn assert_shape(shape: &TileCollisionShape, kind: TileCollisionShapeKind, values: [f32; 6], points: &[(f32, f32)]) {
+	fn assert_shape(shape: &TileCollisionShape, kind: TileCollisionShapeKind, values: [f64; 6], points: &[(f64, f64)]) {
 		assert_eq!(shape.kind, kind);
 		assert_near(shape.x, values[0]);
 		assert_near(shape.y, values[1]);
@@ -1925,9 +1930,9 @@ mod tests {
 	#[test]
 	fn tileset_grid() {
 		let mut tileset = Tileset::new();
-		tileset.set_tile_size(16, 16);
-		tileset.set_margin(1);
-		tileset.set_spacing(2);
+		tileset.set_tile_size(16.0, 16.0);
+		tileset.set_margin(1.0);
+		tileset.set_spacing(2.0);
 		tileset.fit_grid_to_image_size(144, 54);
 		let image_rect = tileset.read_tile_image_rect(21);
 		assert_eq!((tileset.get_columns(), tileset.get_tile_count()), (8, 24));
@@ -2035,7 +2040,7 @@ mod tests {
 		let image = Image::create_from_pixels(144, 54, vec![0; 144 * 54 * 4]);
 		let mut draw_map = Tilemap::new();
 		draw_map.set_tile_size(16.0, 16.0);
-		draw_map.add_tileset(Tileset::create_grid(image, 16, 16, 1, 2), 0);
+		draw_map.add_tileset(Tileset::create_grid(image, 16.0, 16.0, 1.0, 2.0), 0);
 		let layer = draw_map.create_layer("ground");
 		for row in 0..4 {
 			for column in 0..4 {
@@ -2063,9 +2068,9 @@ mod tests {
 	#[test]
 	fn rotated_quad() {
 		let mut tileset = Tileset::new();
-		tileset.set_tile_size(16, 16);
-		tileset.set_margin(1);
-		tileset.set_spacing(2);
+		tileset.set_tile_size(16.0, 16.0);
+		tileset.set_margin(1.0);
+		tileset.set_spacing(2.0);
 		tileset.fit_grid_to_image_size(144, 54);
 		let mut tilemap = Tilemap::new();
 		tilemap.set_tile_size(16.0, 16.0);
@@ -2075,7 +2080,7 @@ mod tests {
 		let quad_values = placement.write_quad(144.0, 54.0);
 		let expected_values = [48.0, 16.0, 37.0 / 144.0, 19.0 / 54.0, 48.0, 32.0, 53.0 / 144.0, 19.0 / 54.0, 32.0, 16.0, 37.0 / 144.0, 35.0 / 54.0];
 		for (actual_value, expected_value) in quad_values.iter().zip(expected_values.iter()) {
-			assert_near(*actual_value, *expected_value);
+			assert_near(*actual_value as f64, *expected_value);
 		}
 	}
 
@@ -2085,11 +2090,11 @@ mod tests {
 	#[test]
 	fn collision_shapes() {
 		let mut collision_tileset = Tileset::new();
-		collision_tileset.set_tile_size(16, 16);
+		collision_tileset.set_tile_size(16.0, 16.0);
 		collision_tileset.set_columns(8);
 		collision_tileset.set_tile_count(24);
 		collision_tileset.set_tile_collision_shapes(11, &[TileCollisionShape::create_rectangle(0.0, 5.0, 16.0, 7.0)]);
-		collision_tileset.set_tile_collision_shapes(12, &[TileCollisionShape::create_polygon(0.0, 16.0, &[Vector2::create(0.0, 0.0), Vector2::create(16.0, -16.0), Vector2::create(16.0, 0.0)])]);
+		collision_tileset.set_tile_collision_shapes(12, &[TileCollisionShape::create_polygon(0.0, 16.0, &[PhysicsVector2::create(0.0, 0.0), PhysicsVector2::create(16.0, -16.0), PhysicsVector2::create(16.0, 0.0)])]);
 		let mut ellipse_shape = TileCollisionShape::create_ellipse(2.0, 3.0, 12.0, 6.0);
 		ellipse_shape.rotation = 30.0;
 		collision_tileset.set_tile_collision_shapes(9, &[ellipse_shape]);

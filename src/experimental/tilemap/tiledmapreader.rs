@@ -18,6 +18,7 @@ use crate::base::vector2::Vector2;
 use crate::core::graphic::BlendMode;
 use crate::core::image::Image;
 use crate::core::task::Promise;
+use crate::experimental::physics2d::PhysicsVector2;
 use crate::misc::localstorage::parse_number;
 use crate::experimental::tilemap::tilemap::{Tilemap, TilemapOrientation, TilemapRenderOrder, TilemapStaggerAxis, TilemapStaggerIndex};
 use crate::experimental::tilemap::tilemaplayer::TilemapLayer;
@@ -112,9 +113,9 @@ pub struct TiledObjectLayer {
 	/// 보이는지. (묶음 층의 보이기를 곱한 것)
 	pub is_visible: bool,
 	/// 불투명도. (묶음 층의 불투명도를 곱한 것)
-	pub opacity: f32,
+	pub opacity: f64,
 	/// 자리 오프셋. (픽셀, 묶음 층의 오프셋을 더한 것)
-	pub offset: Vector2,
+	pub offset: PhysicsVector2,
 	/// 속성.
 	pub properties: Map<String, Value>,
 	/// 물체 목록. (파일 차례)
@@ -133,7 +134,7 @@ impl TiledObjectLayer {
 			name: String::new(),
 			is_visible: true,
 			opacity: 1.0,
-			offset: Vector2::zero(),
+			offset: PhysicsVector2::zero(),
 			properties: Map::new(),
 			objects: Vec::new(),
 		}
@@ -201,9 +202,9 @@ impl Default for TiledMap {
 //==============================================================================
 #[derive(Clone, Copy, Debug)]
 struct GroupState {
-	offset_x: f32,
-	offset_y: f32,
-	opacity: f32,
+	offset_x: f64,
+	offset_y: f64,
+	opacity: f64,
 	is_visible: bool,
 	color: Color,
 }
@@ -385,9 +386,9 @@ impl TiledMapReader {
 		Box::pin(async move {
 			for layer_entry in layer_entry_list.iter() {
 				let layer_type = TiledMapReader::read_string(layer_entry, "type", "");
-				let offset_x = group_state.offset_x + TiledMapReader::read_number(layer_entry, "offsetx", 0.0) as f32;
-				let offset_y = group_state.offset_y + TiledMapReader::read_number(layer_entry, "offsety", 0.0) as f32;
-				let opacity = group_state.opacity * TiledMapReader::read_number(layer_entry, "opacity", 1.0) as f32;
+				let offset_x = group_state.offset_x + TiledMapReader::read_number(layer_entry, "offsetx", 0.0);
+				let offset_y = group_state.offset_y + TiledMapReader::read_number(layer_entry, "offsety", 0.0);
+				let opacity = group_state.opacity * TiledMapReader::read_number(layer_entry, "opacity", 1.0);
 				let is_visible = group_state.is_visible && layer_entry.get("visible").and_then(Value::as_bool) != Some(false);
 				let mut color = group_state.color;
 				if let Some(tint_color) = TiledMapReader::parse_color(TiledMapReader::read_string(layer_entry, "tintcolor", "")) {
@@ -401,7 +402,7 @@ impl TiledMapReader {
 						layer.set_visible(is_visible);
 						layer.set_opacity(opacity);
 						layer.set_color(color);
-						layer.set_offset(Vector2::create(offset_x, offset_y));
+						layer.set_offset(PhysicsVector2::create(offset_x, offset_y));
 						let mode_name = TiledMapReader::read_string(layer_entry, "mode", "normal");
 						let blend_mode_name = match mode_name {
 							"normal" => {
@@ -445,7 +446,7 @@ impl TiledMapReader {
 						object_layer.name = String::from(name);
 						object_layer.is_visible = is_visible;
 						object_layer.opacity = opacity;
-						object_layer.offset = Vector2::create(offset_x, offset_y);
+						object_layer.offset = PhysicsVector2::create(offset_x, offset_y);
 						object_layer.properties = properties;
 						if let Some(object_entry_list) = layer_entry.get("objects").and_then(Value::as_array) {
 							for object_entry in object_entry_list.iter() {
@@ -489,9 +490,9 @@ impl TiledMapReader {
 		tileset.set_name(TiledMapReader::read_string(tileset_data, "name", ""));
 		let tile_width = TiledMapReader::read_number(tileset_data, "tilewidth", 0.0);
 		let tile_height = TiledMapReader::read_number(tileset_data, "tileheight", 0.0);
-		tileset.set_tile_size(tile_width as u32, tile_height as u32);
-		tileset.set_margin(TiledMapReader::read_number(tileset_data, "margin", 0.0) as u32);
-		tileset.set_spacing(TiledMapReader::read_number(tileset_data, "spacing", 0.0) as u32);
+		tileset.set_tile_size(tile_width, tile_height);
+		tileset.set_margin(TiledMapReader::read_number(tileset_data, "margin", 0.0));
+		tileset.set_spacing(TiledMapReader::read_number(tileset_data, "spacing", 0.0));
 		tileset.set_columns(TiledMapReader::read_number(tileset_data, "columns", 0.0) as u32);
 		tileset.set_tile_count(TiledMapReader::read_number(tileset_data, "tilecount", 0.0) as u32);
 		let image_name = TiledMapReader::read_string(tileset_data, "image", "");
@@ -597,11 +598,11 @@ impl TiledMapReader {
 			TileCollisionShapeKind::Rectangle
 		};
 		let mut shape = TileCollisionShape::new(kind);
-		shape.x = TiledMapReader::read_number(object_entry, "x", 0.0) as f32;
-		shape.y = TiledMapReader::read_number(object_entry, "y", 0.0) as f32;
-		shape.width = TiledMapReader::read_number(object_entry, "width", 0.0) as f32;
-		shape.height = TiledMapReader::read_number(object_entry, "height", 0.0) as f32;
-		shape.rotation = TiledMapReader::read_number(object_entry, "rotation", 0.0) as f32;
+		shape.x = TiledMapReader::read_number(object_entry, "x", 0.0);
+		shape.y = TiledMapReader::read_number(object_entry, "y", 0.0);
+		shape.width = TiledMapReader::read_number(object_entry, "width", 0.0);
+		shape.height = TiledMapReader::read_number(object_entry, "height", 0.0);
+		shape.rotation = TiledMapReader::read_number(object_entry, "rotation", 0.0);
 		let point_entry_list = match kind {
 			TileCollisionShapeKind::Polygon => {
 				polygon_list
@@ -615,7 +616,7 @@ impl TiledMapReader {
 		};
 		if let Some(point_entry_list) = point_entry_list {
 			for point_entry in point_entry_list.iter() {
-				shape.points.push(Vector2::create(TiledMapReader::read_number(point_entry, "x", 0.0) as f32, TiledMapReader::read_number(point_entry, "y", 0.0) as f32));
+				shape.points.push(PhysicsVector2::create(TiledMapReader::read_number(point_entry, "x", 0.0), TiledMapReader::read_number(point_entry, "y", 0.0)));
 			}
 		}
 		tiled_object.shape = shape;
@@ -947,7 +948,7 @@ mod tests {
 		assert_eq!(props_tileset.get_tile_image_path(0), "assets/chest.png");
 		assert_eq!(props_tileset.get_tile_property(0, "gold"), Some(&serde_json::json!(30)));
 		assert_eq!(orthogonal_tiled_map.properties["title"], "meadow");
-		let object_list: Vec<(String, TileCollisionShapeKind, f32, f32)> = orthogonal_tiled_map.object_layers[0].objects.iter().map(|tiled_object| (tiled_object.name.clone(), tiled_object.shape.kind, tiled_object.shape.x, tiled_object.shape.y)).collect();
+		let object_list: Vec<(String, TileCollisionShapeKind, f64, f64)> = orthogonal_tiled_map.object_layers[0].objects.iter().map(|tiled_object| (tiled_object.name.clone(), tiled_object.shape.kind, tiled_object.shape.x, tiled_object.shape.y)).collect();
 		assert_eq!(object_list, vec![(String::from("player"), TileCollisionShapeKind::Point, 40.0, 104.0), (String::from("pond"), TileCollisionShapeKind::Ellipse, 168.0, 80.0)]);
 		assert_eq!(TiledMapReader::collect_image_paths(&orthogonal_tilemap), vec!["assets/terrain.png", "assets/trees.png", "assets/chest.png", "assets/sign.png"]);
 
