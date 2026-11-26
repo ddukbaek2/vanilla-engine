@@ -44,3 +44,4 @@ pub(crate) mod avifimage;
 #[cfg(target_os = "macos")]
 pub(crate) mod maskgamma;
 pub(crate) mod colorprofile;
+pub(crate) mod jpegimage;
