@@ -9,6 +9,7 @@
 //!   load_audio_file, load_audio_bytes, get_audio_buffer_duration, play_beep_tone
 //!   suspend_audio_context(컨텍스트 멈춤), get_audio_context_time(컨텍스트 시계), AudioPlayerBackend::set_pan(좌우)
 //! - 데스크탑: cpal 출력 위의 엔진 믹서. (desktop.rs, mixer.rs. 노드 그래프와 셈이 크롬 WebAudio 와 같다) 소리 파일 해석은 크롬 decodeAudioData 와 같게 decode/ 가 한다. (symphonia 0.6, Opus 는 opus-pure)
+//!   PannerNode(초안, panner.rs)의 HRTF 는 크롬의 HRTFPanner 와 IRCAM 자료(Composite.flac)를 옮긴 hrtf/ 가 셈한다. (FFT 는 크롬과 같은 rustfft)
 //! - 웹: 원본과 같은 WebAudio 를 web-sys 로 직접 부른다. (web.rs)
 //! - 게임 코드가 이름을 부를 수 있게 AudioContext, AudioBuffer 두 타입만 밖으로 낸다. 나머지는 엔진 안에서만 쓴다.
 //==============================================================================
@@ -18,6 +19,8 @@ mod audioparam;
 mod decode;
 #[cfg(not(target_arch = "wasm32"))]
 mod desktop;
+#[cfg(not(target_arch = "wasm32"))]
+mod hrtf;
 #[cfg(not(target_arch = "wasm32"))]
 mod mixer;
 #[cfg(not(target_arch = "wasm32"))]

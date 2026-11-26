@@ -72,6 +72,8 @@ cpal = { version = "0.18", features = ["realtime"] }
 # 소리 해석. (크롬 decodeAudioData 와 같은 해석기. 크롬은 FLAC, MP3, PCM, Vorbis 를 symphonia 0.6 으로 풀고 이 기능들을 켠다(third_party/rust/chromium_crates_io/Cargo.toml).
 # 크롬이 FFmpeg 로 푸는 AAC 는 symphonia 의 aac 를 더 켠다. 컨테이너도 symphonia 의 풀기(wav, ogg, mkv(webm), isomp4(m4a), 그리고 flac, mp3, adts)를 쓴다)
 symphonia = { version = "0.6", default-features = false, features = ["all-meta", "flac", "mpa", "ogg", "wav", "mkv", "pcm", "isomp4", "vorbis", "aac", "opt-simd"] }
+# PannerNode HRTF 의 FFT. (크롬 158 의 FFTFrame 도 rustfft 6.4 를 avx, sse, neon 기능으로 부른다(rustfft_ffi.rs). symphonia 의 opt-simd 가 이미 받는 같은 판이다)
+rustfft = "6.4"
 # Opus 해석. (크롬은 libopus 로 푼다. libopus 를 러스트로 옮긴 것으로 symphonia 코덱 등록표에 엔진 해석기로 넣는다. C 빌드가 없어 맥에서 윈도우 대상 검사가 된다)
 opus-pure = "0.2"
 # AAC 의 HE-AAC(SBR, PS)와 3 채널 이상. (ISO/IEC 14496-3 명세로 짠 순수 러스트 해석기, symphonia 의 AAC 가 받지 않는 것을 크롬처럼 푼다. AAC-LC 2 채널까지는 symphonia)

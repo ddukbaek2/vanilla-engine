@@ -11,7 +11,7 @@
 //==============================================================================
 mod aac;
 mod opus;
-mod resample;
+pub(crate) mod resample;
 mod trim;
 
 use opus::OpusPacketDecoder;
@@ -72,9 +72,9 @@ pub(crate) fn decode_audio_data(bytes: &[u8]) -> Result<DecodedAudio, String> {
 }
 
 //==============================================================================
-/// 크롬 AudioBuffer 와 같은 채널들. (내리기 전, DECODE_SAMPLE_RATE)
+/// 크롬 AudioBuffer 와 같은 채널들. (내리기 전, DECODE_SAMPLE_RATE, HRTF 자료 Composite.flac 도 이 길로 푼다)
 //==============================================================================
-fn decode_audio_channels(bytes: &[u8]) -> Result<Vec<Vec<f32>>, String> {
+pub(crate) fn decode_audio_channels(bytes: &[u8]) -> Result<Vec<Vec<f32>>, String> {
 	let raw = decode_raw(bytes)?;
 	let trimmed_channel_list = trim::trim_like_chrome(&raw, bytes);
 	if trimmed_channel_list.first().map(|channel| channel.is_empty()).unwrap_or(true) {
