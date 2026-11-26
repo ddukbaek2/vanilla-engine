@@ -472,6 +472,42 @@ impl AccessorArray {
 }
 
 //==============================================================================
+/// FBX 코너 배열. (원본 splitFbxCornersByMaterial 의 cornerArrays, 비인덱스 코너마다 값)
+///
+/// # 예제
+/// 삼각형 하나의 코너 배열 (재질 번호가 하나뿐이면 그대로 돌아온다)
+/// ```rust
+/// use vanilla::SkinnedModel;
+/// use vanilla::graphics3d::skinnedmodel::FbxCornerArrays;
+///
+/// let corner_arrays = FbxCornerArrays {
+/// 	positions: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+/// 	normals: vec![0.0; 9],
+/// 	texture_coordinates: vec![0.0; 6],
+/// 	joints: vec![0; 12],
+/// 	weights: vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
+/// };
+/// let sub_mesh_list = SkinnedModel::split_fbx_corners_by_material(&[3], corner_arrays);
+/// assert_eq!(sub_mesh_list.len(), 1);
+/// assert_eq!(sub_mesh_list[0].0, 3);
+/// assert_eq!(sub_mesh_list[0].1.positions.len(), 9);
+/// ```
+//==============================================================================
+#[derive(Clone, Debug, Default)]
+pub struct FbxCornerArrays {
+	/// 코너 위치. (코너마다 x, y, z)
+	pub positions: Vec<f32>,
+	/// 코너 노멀. (코너마다 3개)
+	pub normals: Vec<f32>,
+	/// 코너 UV. (코너마다 2개)
+	pub texture_coordinates: Vec<f32>,
+	/// 코너마다 조인트 4개. (스킨 joint_node_indices 안의 자리)
+	pub joints: Vec<u16>,
+	/// 코너마다 조인트 가중치 4개.
+	pub weights: Vec<f32>,
+}
+
+//==============================================================================
 /// 중립 메시 서술. (원본 meshDescription, 순수 CPU 배열)
 /// - joints / weights 는 정점마다 4개, material_index 가 None 이면 기본 머티리얼, node_index 는 모프 가중치 채널의 대상 노드.
 ///
@@ -519,7 +555,7 @@ pub struct MeshDescription {
 	pub skin_index: usize,
 	/// 머티리얼 서술 인덱스. (None 이면 기본 머티리얼)
 	pub material_index: Option<usize>,
-	/// 머티리얼 이름. (glTF materials 의 name, FBX 는 빈 문자열)
+	/// 머티리얼 이름. (glTF materials 의 name, FBX 는 Material 이름, 없으면 빈 문자열)
 	pub material_name: String,
 	/// 이 메시를 가진 노드 인덱스. (모프 가중치 채널의 대상, 없으면 None)
 	pub node_index: Option<usize>,
@@ -1735,7 +1771,7 @@ impl SkinnedModel {
 	/// - `scene_data`: FbxLoader 가 낸 중간 표현.
 	///
 	/// # 돌려줌
-	/// (메시 서술 목록, 머티리얼 서술 목록). (지오메트리가 이어진 스킨 디포머마다 메시 하나, 지금은 Err 를 내지 않는다)
+	/// (메시 서술 목록, 머티리얼 서술 목록). (지오메트리가 이어진 스킨 디포머마다, 그 지오메트리가 쓰는 머티리얼마다 메시 하나, 지금은 Err 를 내지 않는다)
 	//==============================================================================
 	pub fn interpret_fbx_content(&mut self, scene_data: &FbxSceneData) -> Result<(Vec<MeshDescription>, Vec<MaterialDescription>), String> {
 		// 노드 구성. (오일러 도 → 쿼터니언, 사전회전 우측 누적)
@@ -1901,24 +1937,49 @@ impl SkinnedModel {
 				corner_weight_array[corner_index * 4..corner_index * 4 + 4].copy_from_slice(&vertex_weight_array[source_offset..source_offset + 4]);
 			}
 
-			// 머티리얼 인덱스 조회. (지오메트리 소유 노드의 첫 머티리얼)
+			// 머티리얼별 부분 메시. (삼각형의 머티리얼 번호는 소유 노드 material_ids 안의 자리, 번호마다 드로어블 하나)
 			let owner_node_index = scene_data.node_list.iter().position(|fbx_node| fbx_node.geometry_id.is_some() && fbx_node.geometry_id == skin_deformer.geometry_id);
-			let material_index = owner_node_index.and_then(|owner_node_index| scene_data.node_list[owner_node_index].material_ids.first().copied()).and_then(|material_id| scene_data.material_by_id.index_of(material_id));
-
-			mesh_description_list.push(MeshDescription {
+			let owner_material_ids: &[i64] = match owner_node_index {
+				Some(owner_node_index) => {
+					&scene_data.node_list[owner_node_index].material_ids
+				}
+				None => {
+					&[]
+				}
+			};
+			let sub_mesh_list = SkinnedModel::split_fbx_corners_by_material(&geometry.material_index_per_triangle, FbxCornerArrays {
 				positions: geometry.positions.clone(),
-				normals: Some(geometry.normals.clone()),
-				texture_coordinates: Some(geometry.texture_coordinates.clone()),
+				normals: geometry.normals.clone(),
+				texture_coordinates: geometry.texture_coordinates.clone(),
 				joints: corner_joint_array,
 				weights: corner_weight_array,
-				indices: None,
-				skin_index: skin_list_index,
-				material_index,
-				material_name: String::new(),
-				node_index: owner_node_index,
-				morph_targets: Vec::new(),
-				morph_weights: Vec::new(),
 			});
+			for (local_material_index, corner_arrays) in sub_mesh_list {
+				let material_id = owner_material_ids.get(local_material_index).copied();
+				let material_index = material_id.and_then(|material_id| scene_data.material_by_id.index_of(material_id));
+				let material_name = match material_id.and_then(|material_id| scene_data.material_by_id.get(material_id)) {
+					Some(fbx_material) => {
+						fbx_material.name.clone()
+					}
+					None => {
+						String::new()
+					}
+				};
+				mesh_description_list.push(MeshDescription {
+					positions: corner_arrays.positions,
+					normals: Some(corner_arrays.normals),
+					texture_coordinates: Some(corner_arrays.texture_coordinates),
+					joints: corner_arrays.joints,
+					weights: corner_arrays.weights,
+					indices: None,
+					skin_index: skin_list_index,
+					material_index,
+					material_name,
+					node_index: owner_node_index,
+					morph_targets: Vec::new(),
+					morph_weights: Vec::new(),
+				});
+			}
 		}
 
 		// 애니메이션 구성. (회전 채널은 오일러 도 → 사전회전 합성 쿼터니언 4성분으로 변환)
@@ -2193,6 +2254,79 @@ impl SkinnedModel {
 		drawable.wireframe_index_count = wireframe_indices.len();
 		drawable.wireframe_index_component_type = wireframe_indices.get_gl_component_type();
 		Ok(())
+	}
+
+	//==============================================================================
+	/// FBX 코너를 머티리얼별로 나누기. (GL 무관, 비인덱스 코너 배열)
+	/// - 메시 하나에 머티리얼이 여럿이면 머티리얼마다 부분 메시로 나눠 그린다. (three.js FBXLoader 의 그룹, 유니티와 언리얼의 서브메시)
+	/// - 부분 메시는 머티리얼 번호가 작은 것부터, 삼각형 차례는 원래대로. 번호가 하나뿐이면 배열을 그대로 쓴다.
+	///
+	/// # 인자
+	/// - `material_index_per_triangle`: 삼각형마다 머티리얼 번호. (소유 노드 material_ids 안의 자리, 음수는 0)
+	/// - `corner_arrays`: 코너마다 위치 3, 노멀 3, UV 2, 조인트 4, 가중치 4.
+	///
+	/// # 돌려줌
+	/// (머티리얼 번호, 그 번호의 코너 배열) 목록.
+	///
+	/// # 예제
+	/// 삼각형 셋 가운데 가운데 것만 재질 1 (부분 메시 둘, 삼각형 2개와 1개)
+	/// ```rust
+	/// use vanilla::SkinnedModel;
+	/// use vanilla::graphics3d::skinnedmodel::FbxCornerArrays;
+	///
+	/// let corner_count = 9;
+	/// let corner_arrays = FbxCornerArrays {
+	/// 	positions: (0..corner_count * 3).map(|index| index as f32).collect(),
+	/// 	normals: vec![0.0; corner_count * 3],
+	/// 	texture_coordinates: vec![0.0; corner_count * 2],
+	/// 	joints: vec![0; corner_count * 4],
+	/// 	weights: vec![0.0; corner_count * 4],
+	/// };
+	/// let sub_mesh_list = SkinnedModel::split_fbx_corners_by_material(&[0, 1, 0], corner_arrays);
+	/// assert_eq!(sub_mesh_list.len(), 2);
+	/// assert_eq!(sub_mesh_list[0].0, 0);
+	/// assert_eq!(sub_mesh_list[0].1.positions.len() / 9, 2);
+	/// assert_eq!(sub_mesh_list[1].1.positions[0], 9.0);
+	/// ```
+	//==============================================================================
+	pub fn split_fbx_corners_by_material(material_index_per_triangle: &[i32], corner_arrays: FbxCornerArrays) -> Vec<(usize, FbxCornerArrays)> {
+		let mut triangle_count_by_material: Vec<(usize, usize)> = Vec::new();
+		for &material_index in material_index_per_triangle.iter() {
+			let local_material_index = material_index.max(0) as usize;
+			match triangle_count_by_material.iter_mut().find(|(index, _count)| *index == local_material_index) {
+				Some((_index, count)) => {
+					*count += 1;
+				}
+				None => {
+					triangle_count_by_material.push((local_material_index, 1));
+				}
+			}
+		}
+		triangle_count_by_material.sort_by_key(|(index, _count)| *index);
+		if triangle_count_by_material.len() <= 1 {
+			let local_material_index = triangle_count_by_material.first().map(|(index, _count)| *index).unwrap_or(0);
+			return vec![(local_material_index, corner_arrays)];
+		}
+		fn gather<T: Copy>(source_array: &[T], component_count: usize, material_index_per_triangle: &[i32], local_material_index: usize, triangle_count: usize) -> Vec<T> {
+			let triangle_stride = component_count * 3;
+			let mut target_array = Vec::with_capacity(triangle_count * triangle_stride);
+			for (triangle_index, &material_index) in material_index_per_triangle.iter().enumerate() {
+				if material_index.max(0) as usize != local_material_index {
+					continue;
+				}
+				target_array.extend_from_slice(&source_array[triangle_index * triangle_stride..(triangle_index + 1) * triangle_stride]);
+			}
+			target_array
+		}
+		triangle_count_by_material.iter().map(|&(local_material_index, sub_triangle_count)| {
+			(local_material_index, FbxCornerArrays {
+				positions: gather(&corner_arrays.positions, 3, material_index_per_triangle, local_material_index, sub_triangle_count),
+				normals: gather(&corner_arrays.normals, 3, material_index_per_triangle, local_material_index, sub_triangle_count),
+				texture_coordinates: gather(&corner_arrays.texture_coordinates, 2, material_index_per_triangle, local_material_index, sub_triangle_count),
+				joints: gather(&corner_arrays.joints, 4, material_index_per_triangle, local_material_index, sub_triangle_count),
+				weights: gather(&corner_arrays.weights, 4, material_index_per_triangle, local_material_index, sub_triangle_count),
+			})
+		}).collect()
 	}
 
 	//==============================================================================

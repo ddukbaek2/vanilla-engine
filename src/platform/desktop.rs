@@ -689,6 +689,11 @@ impl DesktopApplication {
 		if gl_version.is_embedded || (gl_version.major, gl_version.minor) < (3, 3) {
 			return Err(format!("OpenGL 3.3 코어가 없다: {}.{} {} (그래픽 드라이버를 깔거나, GPU 가 없는 기계는 메사 llvmpipe 같은 소프트웨어 GL 을 둔다)", gl_version.major, gl_version.minor, gl_version.vendor_info));
 		}
+		// 찍기 모드는 GL 렌더러를 남긴다. (CI 기계가 하드웨어 GL 인지 소프트웨어 GL 인지 기록에서 가른다)
+		if std::env::var("VANILLA_CAPTURE_PATH").is_ok() {
+			let (renderer, version_text) = unsafe { (glow::HasContext::get_parameter_string(&gl, glow::RENDERER), glow::HasContext::get_parameter_string(&gl, glow::VERSION)) };
+			eprintln!("Engine: 찍기 GL 렌더러 {}, 판 {}", renderer, version_text);
+		}
 		let graphic = Graphic::new(gl, engine_configuration.preserve_drawing_buffer)?;
 
 		#[cfg(target_os = "windows")]
