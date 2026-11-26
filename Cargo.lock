@@ -3318,6 +3318,7 @@ dependencies = [
  "rav1d",
  "raw-window-handle",
  "resvg",
+ "rustfft",
  "rustls",
  "rustybuzz",
  "self_cell",
