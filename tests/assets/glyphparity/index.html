@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!-- 글리프 래스터 견주기 장면. (러스트 examples/glyphparity.rs 와 같은 장면, .github/scripts/glyphcompare.cjs 가 vanilla.js 와 엔진의 윗 폴더를 뿌리로 열어 찍는다) -->
+<meta charset="utf-8">
+<style>html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; } #mainCanvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; display: block; }</style>
+</head>
+<body>
+<canvas id="mainCanvas"></canvas>
+<script type="module">
+const engineModule = await import("/vanilla.js/build/vanilla.js");
+const { Engine, EngineConfiguration, Scene, Vector2, Color, Rect } = engineModule;
+const VIEW_WIDTH = 960;
+const VIEW_HEIGHT = 720;
+const SIZE_LIST = [10, 12, 13, 14, 16, 18, 20, 24, 32, 48];
+const SAMPLE_TEXT = "Hamburgefonstiv 0123 Ag";
+function drawHalf(graphic, topY, textColor) {
+	graphic.setFillColor(textColor);
+	let baselineY = topY + 4;
+	for (const size of SIZE_LIST) {
+		baselineY += size * 1.2 + 2;
+		graphic.setFontString(`${size}px sans-serif`);
+		graphic.drawFillText(SAMPLE_TEXT, 10, baselineY);
+	}
+	const lineList = [
+		["16px serif", "Serif Hamburgefonstiv 0123", 545],
+		["bold 16px sans-serif", "Bold Hamburgefonstiv 0123", 545],
+		["italic 16px sans-serif", "Italic Hamburgefonstiv", 545],
+		["16px sans-serif", "다람쥐 헌 쳇바퀴에 타고파", 545],
+		["24px sans-serif", "다람쥐 헌 쳇바퀴", 545],
+		["24px sans-serif", "😀🎮👍❤️", 545],
+		["16px sans-serif", "Subpixel 0.37 offset", 545.37],
+		["15px sans-serif", "Subpixel 0.62 offset", 545.62],
+		["13px sans-serif", "The quick brown fox jumps", 545],
+	];
+	let lineY = topY + 24;
+	for (const [fontString, text, x] of lineList) {
+		graphic.setFontString(fontString);
+		graphic.drawFillText(text, x, lineY);
+		lineY += 34;
+	}
+	graphic.setFillColor(Color.createFromBytes(220, 40, 40, 255));
+	graphic.setFontString("18px sans-serif");
+	graphic.drawFillText("Red Hamburgefonstiv", 545, lineY);
+	graphic.setFillColor(textColor);
+}
+class ParityScene extends Scene {
+	draw(graphic) {
+		graphic.setTextBaseline("alphabetic");
+		graphic.setTextAlign("left");
+		graphic.setFillColor(Color.createFromBytes(255, 255, 255, 255));
+		graphic.drawRect(Rect.create(0, 0, VIEW_WIDTH, VIEW_HEIGHT / 2));
+		graphic.setFillColor(Color.createFromBytes(32, 32, 32, 255));
+		graphic.drawRect(Rect.create(0, VIEW_HEIGHT / 2, VIEW_WIDTH, VIEW_HEIGHT / 2));
+		drawHalf(graphic, 0, Color.createFromBytes(0, 0, 0, 255));
+		drawHalf(graphic, VIEW_HEIGHT / 2, Color.createFromBytes(255, 255, 255, 255));
+	}
+}
+const engineConfiguration = new EngineConfiguration();
+engineConfiguration.referenceResolutionSize = Vector2.create(VIEW_WIDTH, VIEW_HEIGHT);
+engineConfiguration.defaultFontUrl = "";
+engineConfiguration.useDevTools = false;
+engineConfiguration.canvasId = "mainCanvas";
+engineConfiguration.autoResizeOnWindowResize = true;
+const engine = new Engine(engineConfiguration);
+engine.getViewManager().setMaxRenderPixelRatio(1);
+engine.requestFrameCapture(20).then((dataUrl) => { window.__captureDataUrl = dataUrl; });
+engine.run(new ParityScene());
+</script>
+</body>
+</html>

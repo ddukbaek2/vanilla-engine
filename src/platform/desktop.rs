@@ -94,6 +94,8 @@ pub mod gamepadhaptics;
 pub mod systemfont;
 #[cfg(target_os = "macos")]
 pub mod coretextglyph;
+#[cfg(target_os = "windows")]
+pub mod directwriteglyph;
 pub mod emojipanel;
 
 /// 엔진이 들고 있는 창 손잡이. (커서, 제목을 바꿀 때)

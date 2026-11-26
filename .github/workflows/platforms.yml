@@ -3,6 +3,7 @@
 # - 그림: GPU 가 없는 기계라 메사 llvmpipe 소프트웨어 GL 로 그린다. (리눅스는 Xvfb 의 GLX 와 weston headless 의 EGL, 윈도우는 메사 opengl32.dll 을 예제 옆에 둔 WGL)
 #   예제는 찍기 모드(VANILLA_CAPTURE_PATH)로 돌려 그림을 아티팩트로 올린다. (.github/scripts/captureexamples.cjs)
 # - 크롬 견주기: 원본 vanilla.js 를 옆에 받아 같은 장면의 예제 페이지를 헤드리스 크롬으로 찍어 화소 차이를 낸다. (.github/scripts/chromecompare.cjs)
+# - 글리프 견주기: 글자 장면(examples/glyphparity.rs, tests/assets/glyphparity/index.html)을 같은 기계의 크롬과 견줘 글자 구역의 화소 차이를 낸다. (.github/scripts/glyphcompare.cjs)
 #   소리 해석, 믹서, 비프, PannerNode 의 크롬 기대값(tests/assets/*/chrome*.cjs)을 같은 기계의 크롬으로 다시 찍어 견준다. (x86 크롬)
 #   크롬은 러너에 깔린 것을 쓰지 않고 browser-actions/setup-chrome 으로 Chrome for Testing 판을 고정해 세 기계가 같은 판을 쓴다. (CHROME_PATH)
 #   러너에 깔린 크롬은 기계마다 판이 달랐다. (2026-11-26 인텔 맥 151, 리눅스 157, 윈도우 158) 151 은 decodeAudioData 가 158 과 달라
@@ -237,6 +238,15 @@ jobs:
             tag=linux-x11
           fi
           node .github/scripts/chromecompare.cjs ../vanilla.js "$OUT/shots" "$tag"
+
+      - name: 글리프 래스터 크롬 견주기 (글자 구역 화소 차이)
+        if: success() || failure()
+        run: |
+          tag=${{ matrix.tag }}
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            tag=linux-x11
+          fi
+          node .github/scripts/glyphcompare.cjs "$OUT/shots/${tag}_glyphparity_20.png" "$OUT/shots" "$tag" 2>&1 | tee "$OUT/logs/${tag}_glyphcompare.log"
 
       - name: 결과 올리기
         if: always()

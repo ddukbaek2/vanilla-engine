@@ -1264,6 +1264,66 @@ mod platform_font {
 	}
 
 	//==============================================================================
+	/// 글꼴의 렌더 설정. ((안티에일리어스, 힌팅 단계 0 없음 1 가볍게 2 보통 3 꽉, 자동 힌팅 강제), 크롬 ui/gfx/font_render_params_linux.cc 의 QueryFontconfig 와 fontconfig_util.cc 의 GetFontRenderParamsFromFcPattern)
+	/// - 이름, 픽셀 크기, 기울기, 굵기로 패턴을 짓고 설정과 기본값을 채워 FcFontMatch 로 고른 패턴의 antialias, autohint, hinting, hintstyle 을 읽는다.
+	///   값이 없으면 크롬 FontRenderParams 기본(안티에일리어스 켬, 힌팅 보통, 자동 힌팅 끔)이다. hinting 이 거짓이면 힌팅 없음이다.
+	//==============================================================================
+	pub fn read_font_render_style(family_name: &str, pixel_size: f32, weight: u16, is_italic: bool) -> (bool, u8, bool) {
+		use fontconfig_sys::constants::{FC_ANTIALIAS, FC_AUTOHINT, FC_HINTING, FC_HINT_STYLE, FC_PIXEL_SIZE};
+		let mut render_style = (true, 2u8, false);
+		let library = match read_library() {
+			Some(library) => {
+				library
+			}
+			None => {
+				return render_style;
+			}
+		};
+		let pattern = match create_pattern(library, family_name, weight, is_italic) {
+			Some(pattern) => {
+				pattern
+			}
+			None => {
+				return render_style;
+			}
+		};
+		unsafe {
+			(library.FcPatternAddDouble)(pattern, FC_PIXEL_SIZE.as_ptr(), pixel_size as f64);
+		}
+		substitute_pattern(library, pattern);
+		let mut match_result = 0;
+		let matched_pattern = unsafe { (library.FcFontMatch)(std::ptr::null_mut(), pattern, &mut match_result) };
+		unsafe { (library.FcPatternDestroy)(pattern) };
+		if matched_pattern.is_null() {
+			return render_style;
+		}
+		let mut bool_value = 0;
+		if unsafe { (library.FcPatternGetBool)(matched_pattern, FC_ANTIALIAS.as_ptr(), 0, &mut bool_value) } == FcResultMatch {
+			render_style.0 = bool_value != 0;
+		}
+		if unsafe { (library.FcPatternGetBool)(matched_pattern, FC_AUTOHINT.as_ptr(), 0, &mut bool_value) } == FcResultMatch {
+			render_style.2 = bool_value != 0;
+		}
+		if unsafe { (library.FcPatternGetBool)(matched_pattern, FC_HINTING.as_ptr(), 0, &mut bool_value) } == FcResultMatch {
+			let mut hint_style = 0;
+			if bool_value != 0 {
+				unsafe {
+					(library.FcPatternGetInteger)(matched_pattern, FC_HINT_STYLE.as_ptr(), 0, &mut hint_style);
+				}
+			}
+			// FC_HINT_NONE 0, SLIGHT 1, MEDIUM 2, FULL 3. (그 밖은 없음)
+			render_style.1 = if (1..=3).contains(&hint_style) {
+				hint_style as u8
+			}
+			else {
+				0
+			};
+		}
+		unsafe { (library.FcPatternDestroy)(matched_pattern) };
+		render_style
+	}
+
+	//==============================================================================
 	/// 패턴에 설정과 기본값 채우기.
 	//==============================================================================
 	fn substitute_pattern(library: &Fc, pattern: *mut FcPattern) {
@@ -1693,4 +1753,12 @@ mod tests {
 			assert!(sans_serif_font_file.path.exists());
 		}
 	}
+}
+
+//==============================================================================
+/// 리눅스 글꼴의 렌더 설정. ((안티에일리어스, 힌팅 단계 0 ~ 3, 자동 힌팅 강제), 크롬처럼 fontconfig 로 묻는다)
+//==============================================================================
+#[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
+pub(crate) fn read_font_render_style(family_name: &str, pixel_size: f32, weight: u16, is_italic: bool) -> (bool, u8, bool) {
+	platform_font::read_font_render_style(family_name, pixel_size, weight, is_italic)
 }

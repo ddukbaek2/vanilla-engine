@@ -117,7 +117,7 @@ rustls = { version = "0.23", default-features = false, features = ["ring"], opti
 # 편집 칸 문맥 메뉴의 그림 이모티콘은 크롬처럼 SendInput 으로 윈도우 키 + '.' 을 보낸다.
 # 터치 키보드 스레드의 메시지 큐(GetCurrentThreadId, PostThreadMessageW)와 개발자 도구의 힙 사용량(HeapSummary)도 읽는다. (winit 과 같은 판, 쓰는 기능만 켠다)
 [target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_Devices_Display", "Win32_Globalization", "Win32_Graphics_Gdi", "Win32_System_Memory", "Win32_System_Power", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_Devices_Display", "Win32_Globalization", "Win32_Graphics_Gdi", "Win32_System_Memory", "Win32_System_Power", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 # 윈도우: 시스템 글꼴. (DirectWrite 로 글꼴 이름의 파일을 찾고, 글꼴에 없는 글자의 대체 글꼴을 IDWriteFontFallback 으로 고른다. 원본 크롬 윈도우도 DirectWrite 로 고른다. 마이크로소프트의 windows 크레이트로 cpal, gilrs 가 쓰는 같은 판이라 더 받는 크레이트가 없다. windows-core 는 #[implement] 가 지은 코드가 부른다)
 # 터치 키보드는 크롬 윈도우처럼 창에 묶은 WinRT InputPane(IInputPaneInterop)으로 띄우고 내리며 가린 영역을 받는다.
 windows = { version = "0.62", features = ["Foundation", "UI_ViewManagement", "Win32_Foundation", "Win32_Graphics_DirectWrite", "Win32_System_WinRT"] }

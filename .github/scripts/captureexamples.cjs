@@ -21,6 +21,7 @@ const executableSuffix = process.platform === "win32" ? ".exe" : "";
 // 예제마다 찍을 프레임과 환경 변수, 제한 시간(초).
 const EXAMPLE_LIST = [
 	{ name: "quickstart", frames: "60" },
+	{ name: "glyphparity", frames: "20" },
 	{ name: "nodebasics", frames: "60" },
 	{ name: "textshaping", frames: "60" },
 	{ name: "textnodeextras", frames: "60" },
