@@ -4039,7 +4039,7 @@ mod tests {
 	//==============================================================================
 	/// 맥 시스템 UI 글꼴(SFNS)의 광학 크기와 자간 표, 크롬이 모르는 이름: 맥 크롬 158 Canvas2D 의 measureText 값과 같다. (맥만, SFNS 가 있을 때)
 	/// - system-ui 와 BlinkMacSystemFont 는 opsz 축을 글자 크기로 걸고(17 ~ 96 으로 자른다) trak 표의 자간을 더한다. 8 ~ 128px, 굵기 300, 400, 700.
-	/// - -apple-system 은 크롬이 모르는 이름이라 다음 이름으로 넘어간다. (사슬에서는 Apple SD Gothic Neo, 표준 글꼴과 같은 값)
+	/// - -apple-system 은 크롬이 모르는 이름이라 다음 이름으로 넘어간다. (사슬에서는 Apple SD Gothic Neo, 하나뿐이면 화면 언어의 표준 글꼴)
 	//==============================================================================
 	#[cfg(target_os = "macos")]
 	#[test]
@@ -4068,8 +4068,11 @@ mod tests {
 			text_string_texture_cache.measure_text(font_string, "Hello World Wifi").width
 		};
 		assert!((measure_width("16px BlinkMacSystemFont") - 115.867).abs() < 0.01);
+		// -apple-system 하나뿐이면 맞는 이름이 없어 화면 언어의 표준 글꼴이다. (한국어 Apple SD Gothic Neo, 영어 Times)
+		if let Some(standard_family_name) = crate::platform::desktop::systemfont::resolve_generic_family_name(crate::platform::desktop::systemfont::GenericFamily::Standard) {
+			assert!((measure_width("16px -apple-system") - measure_width(&format!("16px '{}'", standard_family_name))).abs() < 0.001);
+		}
 		if crate::platform::find_family_font_file("Apple SD Gothic Neo", 400, false).is_some() {
-			assert!((measure_width("16px -apple-system") - measure_width("16px 'Apple SD Gothic Neo'")).abs() < 0.001);
 			assert!((measure_width("16px default") - 109.072).abs() < 0.01);
 		}
 	}

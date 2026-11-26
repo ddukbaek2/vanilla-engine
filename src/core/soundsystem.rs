@@ -1707,10 +1707,12 @@ mod tests {
 		// 0.1 초 겹쳐 바꾸면, 앞 음악은 다 줄어든 때의 자리를 기억한다. (튼 뒤 흐른 시간 + 0.1 초) 다 줄어 멈추면 치운다.
 		let start_time = sound_system.playing_music.as_ref().map(|music_voice| music_voice.start_time).unwrap_or(0.0);
 		std::thread::sleep(std::time::Duration::from_millis(50));
+		// 소리 장치 시각은 버퍼 단위로 뛰어, 부르기 앞뒤에 읽은 시각 사이에 드는지로 본다. (느린 기계에서 뒤에 한 번 읽은 값과 견주면 어긋난다)
+		let elapsed_seconds_before = sound_system.read_context_time() - start_time;
 		sound_system.play_music("battle", 0.1, false);
-		let elapsed_seconds = sound_system.read_context_time() - start_time;
+		let elapsed_seconds_after = sound_system.read_context_time() - start_time;
 		let stored_position = sound_system.music_position_by_id.get("field").copied().unwrap_or(-1.0);
-		assert!((stored_position - (elapsed_seconds + 0.1)).abs() < 0.02);
+		assert!(stored_position >= elapsed_seconds_before + 0.1 - 1e-6 && stored_position <= elapsed_seconds_after + 0.1 + 1e-6, "기억한 자리 {} / 흐른 시간 {} ~ {} + 0.1", stored_position, elapsed_seconds_before, elapsed_seconds_after);
 		assert_eq!(sound_system.fading_music_list.len(), 1);
 		std::thread::sleep(std::time::Duration::from_millis(400));
 		sound_system.update();
