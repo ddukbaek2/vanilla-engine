@@ -147,10 +147,16 @@ jobs:
         if: success() || failure()
         run: |
           tag=${{ matrix.tag }}
+          name_list=""
           if [ "$RUNNER_OS" = "Linux" ]; then
             tag=linux-x11
           fi
-          node .github/scripts/captureexamples.cjs "$OUT/shots" "$tag"
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            # 맥 가상 기계는 GPU 없이 애플 소프트웨어 렌더러로 그려 느려서, 몇 개만 짧은 제한 시간으로 찍는다.
+            name_list="quickstart,textshaping,inputgallery,uigallery,toonstyle,physics2d"
+            export VANILLA_CI_CAPTURE_TIMEOUT=120
+          fi
+          node .github/scripts/captureexamples.cjs "$OUT/shots" "$tag" "$name_list"
 
       - name: 웨이랜드 예제 찍기 (weston headless)
         if: runner.os == 'Linux' && (success() || failure())

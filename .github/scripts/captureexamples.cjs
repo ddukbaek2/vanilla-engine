@@ -6,6 +6,7 @@
 //   제한 시간 안에 끝나는지, 끝 코드가 0 인지, 청한 프레임의 그림이 모두 나왔는지 본다. 표준 출력과 오류는 <이름표>_<예제>.log 에 남긴다.
 // - 원본 vanilla.js 페이지와 같은 장면을 그리는 예제는 원본 쿼리와 같은 값을 준다. (chromecompare.cjs 가 같은 값으로 원본을 찍는다)
 // - 하나라도 실패하면 끝 코드 1. 결과는 <이름표>_capture.json 에도 쓴다.
+// - 환경 변수 VANILLA_CI_CAPTURE_TIMEOUT 에 초를 주면 예제마다의 제한 시간을 그 값 아래로 줄인다. (그림이 나오지 않아 매달리는 기계에서 오래 기다리지 않게)
 //==============================================================================
 const childProcess = require("child_process");
 const fs = require("fs");
@@ -69,11 +70,12 @@ function runExample(example, outputDirectory, tag) {
 		VANILLA_CAPTURE_FRAMES: example.frames,
 		VANILLA_CAPTURE_EXIT: "1",
 	});
+	const timeoutLimitSeconds = Number(process.env.VANILLA_CI_CAPTURE_TIMEOUT) || Infinity;
 	const startTime = Date.now();
 	const processResult = childProcess.spawnSync(executablePath, [], {
 		cwd: engineDirectory,
 		env: environment,
-		timeout: (example.timeoutSeconds || DEFAULT_TIMEOUT_SECONDS) * 1000,
+		timeout: Math.min(example.timeoutSeconds || DEFAULT_TIMEOUT_SECONDS, timeoutLimitSeconds) * 1000,
 		maxBuffer: 64 * 1024 * 1024,
 	});
 	result.seconds = (Date.now() - startTime) / 1000;
