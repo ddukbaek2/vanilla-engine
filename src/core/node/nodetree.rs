@@ -1443,7 +1443,7 @@ impl NodeTree {
 
 	//==============================================================================
 	/// 노드 하나와 그 자손 출력.
-	/// - push_transform → 컴포넌트의 push_transform → 컴포넌트 → (Mask 면 클립 시작) → 자식 → (클립 끝) → 기즈모 → 컴포넌트의 pop_transform → pop_transform
+	/// - push_transform → 컴포넌트의 push_transform → (투명도 층 시작) → 컴포넌트 → (Mask 면 클립 시작) → 자식 → (클립 끝) → (투명도 층 끝) → 기즈모 → 컴포넌트의 pop_transform → pop_transform
 	///
 	/// # 인자
 	/// - `node_id`: 그릴 노드. (없거나 비활성이면 그리지 않는다)
@@ -1465,6 +1465,12 @@ impl NodeTree {
 		node.push_component_transforms(graphic);
 
 		if node.is_visible() {
+			// 투명도 층이면 이 노드와 자손을 층에 모아 그렸다가 한 번에 얹는다. (CSS opacity)
+			let is_opacity_layer = node.is_opacity_layer() && graphic.get_global_alpha() < 1.0;
+			if is_opacity_layer {
+				graphic.begin_opacity_layer();
+			}
+
 			// 배율이 움직이는 노드의 글은 묶은 배율로 굽는다. (컴포넌트를 다 그리면 푼다, 자식은 저마다 다시 정한다)
 			let last_drawn_maximum_scale = node.get_last_drawn_maximum_scale();
 			let drawn_maximum_scale = graphic.update_text_bake_scale_moving(last_drawn_maximum_scale);
@@ -1493,6 +1499,10 @@ impl NodeTree {
 			// 마스크가 있으면 클리핑 종료.
 			if clip_round_size.is_some() {
 				Mask::end_clip(graphic);
+			}
+
+			if is_opacity_layer {
+				graphic.end_opacity_layer();
 			}
 		}
 

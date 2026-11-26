@@ -382,6 +382,7 @@ pub struct WorldNode {
 	is_active: bool,
 	is_interactable: bool,
 	is_gizmo_visible: bool,
+	is_opacity_layer: bool,
 	transform: NodeTransform,
 	pub(crate) components: Vec<Box<dyn Component>>,
 	pub(crate) parent_id: Option<NodeId>,
@@ -407,6 +408,7 @@ impl WorldNode {
 			is_active: true,
 			is_interactable: false,
 			is_gizmo_visible: false,
+			is_opacity_layer: false,
 			transform: NodeTransform::new(),
 			components: Vec::new(),
 			parent_id: None,
@@ -602,6 +604,41 @@ impl WorldNode {
 	//==============================================================================
 	pub fn is_gizmo_visible(&self) -> bool {
 		self.is_gizmo_visible
+	}
+
+	//==============================================================================
+	/// 투명도 층 설정. (CSS opacity 처럼 투명도를 노드와 자손에 묶어 한 번에 얹을지)
+	/// - 켜고 투명도(부모의 것을 곱한 값)가 1 보다 작으면 NodeTree 가 이 노드와 자손을 층에 모아 그렸다가 그 투명도로 한 번에 얹는다. (Graphic::begin_opacity_layer)
+	///   겹친 자식끼리 비치지 않는다. 끄면(처음) 노드마다 투명도를 곱해 따로 얹는다.
+	///
+	/// # 인자
+	/// - `is_opacity_layer`: 투명도를 묶어 얹을지.
+	///
+	/// # 예제
+	/// 반투명한 묶음 노드 (겹친 자식이 서로 비치지 않는다)
+	/// ```rust
+	/// use vanilla::NodeTree;
+	///
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let group_id = node_tree.create_child(root_id, "group");
+	/// node_tree[group_id].set_local_opacity(0.5);
+	/// node_tree[group_id].set_opacity_layer(true);
+	/// assert!(node_tree[group_id].is_opacity_layer());
+	/// ```
+	//==============================================================================
+	pub fn set_opacity_layer(&mut self, is_opacity_layer: bool) {
+		self.is_opacity_layer = is_opacity_layer;
+	}
+
+	//==============================================================================
+	/// 투명도 층 여부.
+	///
+	/// # 돌려줌
+	/// 투명도를 노드와 자손에 묶어 얹으면 true.
+	//==============================================================================
+	pub fn is_opacity_layer(&self) -> bool {
+		self.is_opacity_layer
 	}
 
 	//==============================================================================

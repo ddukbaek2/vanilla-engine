@@ -36,8 +36,9 @@
 //!     display(flex, block, none), flex-direction, flex, flex-grow, flex-shrink, flex-basis, justify-content, align-items, gap,
 //!     padding, margin(1 ~ 4 값과 쪽마다), background, background-color, color, font-size, font-weight, font-family, line-height, text-align,
 //!     border, border-top, border-right, border-bottom, border-left, border-width, border-color, border-radius, cursor(pointer),
-//!     overflow, overflow-x, overflow-y, scrollbar-color, scrollbar-width, flex-wrap, flex-flow, align-content, row-gap, column-gap, white-space, text-overflow.
-//!     그 밖(user-select, opacity 같은 것)은 읽지 않는다. 글은 줄바꿈하지 않는다. (white-space: nowrap 과 text-overflow: ellipsis 에 overflow 가 visible 이 아니면 넘친 끝을 말줄임표로)
+//!     overflow, overflow-x, overflow-y, scrollbar-color, scrollbar-width, flex-wrap, flex-flow, align-content, row-gap, column-gap, white-space, text-overflow, opacity.
+//!     opacity 는 크롬처럼 요소와 자손을 묶어 한 번에 얹는다. (노드 투명도와 투명도 층, WorldNode::set_opacity_layer)
+//!     그 밖(user-select 같은 것)은 읽지 않는다. 글은 줄바꿈하지 않는다. (white-space: nowrap 과 text-overflow: ellipsis 에 overflow 가 visible 이 아니면 넘친 끝을 말줄임표로)
 //!   - 스크롤 막대는 크롬처럼 운영체제를 따른다. 윈도우와 리눅스는 자리를 차지하는 Fluent 막대(두께 15, thin 10), 맥은 시스템 설정이 얹는 막대면 두께 8 의 얹는 썸,
 //!     클래식이면 자리를 차지하는 막대(두께 15, thin 11)다. 자리를 차지하는 막대는 테두리 안, 안쪽 여백 밖에서 overflow: scroll 은 늘, auto 는 넘칠 때만 내용 폭을 던다.
 //!     (web/pane.rs 의 read_classic_scrollbar_metrics, 단추 화살표는 그리지 않고 길은 scrollbar-color 의 둘째 값이 있을 때만 칠한다)
@@ -1074,6 +1075,8 @@ pub struct PaneElement {
 	text: String,
 	is_button: bool,
 	is_pointer_cursor: bool,
+	/// CSS opacity. (준 적이 없으면 None, 노드 투명도와 투명도 층으로 옮긴다)
+	opacity: Option<f32>,
 	is_hovered: bool,
 	click_callback: Option<PaneClickCallback>,
 }
@@ -1134,6 +1137,7 @@ impl PaneElement {
 			text: String::new(),
 			is_button: false,
 			is_pointer_cursor: false,
+			opacity: None,
 			is_hovered: false,
 			click_callback: None,
 		}
@@ -1485,6 +1489,9 @@ impl PaneElement {
 			}
 			"cursor" => {
 				self.is_pointer_cursor = value == "pointer";
+			}
+			"opacity" => {
+				self.opacity = parse_opacity(value);
 			}
 			"overflow" => {
 				let mut part_list = value.split_whitespace();
@@ -2049,6 +2056,34 @@ fn parse_flex_wrap(value: &str) -> PaneFlexWrap {
 //==============================================================================
 /// 값을 min, max 안으로. (max 가 min 보다 작으면 min 이 이긴다, CSS 와 같다)
 //==============================================================================
+//==============================================================================
+/// CSS opacity 값 읽기. (수나 백분율, 0 ~ 1 로 자른다. 못 읽으면 None)
+//==============================================================================
+fn parse_opacity(value: &str) -> Option<f32> {
+	let value = value.trim();
+	let opacity = match value.strip_suffix('%') {
+		Some(percent_text) => {
+			percent_text.trim().parse::<f32>().ok()? / 100.0
+		}
+		None => {
+			value.parse::<f32>().ok()?
+		}
+	};
+	Some(opacity.clamp(0.0, 1.0))
+}
+
+//==============================================================================
+/// 요소의 CSS opacity 를 노드로 옮기기. (크롬처럼 요소와 자손을 묶어 한 번에 얹는다: 노드 투명도와 투명도 층)
+//==============================================================================
+fn apply_element_opacity(node_tree: &mut NodeTree, node_id: NodeId, opacity: Option<f32>) {
+	if let Some(opacity) = opacity {
+		if let Some(node) = node_tree.get_node_mut(node_id) {
+			node.set_local_opacity(opacity);
+			node.set_opacity_layer(true);
+		}
+	}
+}
+
 fn clamp_length(value: f32, minimum: f32, maximum: f32) -> f32 {
 	value.min(maximum).max(minimum)
 }
@@ -2983,11 +3018,14 @@ impl PaneStyle {
 	/// - `styles`: (CSS 속성 이름, 값) 목록.
 	//==============================================================================
 	pub fn apply(node_tree: &mut NodeTree, node_id: NodeId, styles: &[(&str, &str)]) {
+		let mut opacity = None;
 		if let Some(element) = node_tree.get_node_mut(node_id).and_then(|node| node.get_component_mut::<PaneElement>()) {
 			for (property_name, property_value) in styles {
 				element.apply_style(property_name, property_value);
 			}
+			opacity = element.opacity;
 		}
+		apply_element_opacity(node_tree, node_id, opacity);
 	}
 
 	//==============================================================================
@@ -3079,6 +3117,7 @@ impl PaneStyle {
 		for (property_name, property_value) in options.style {
 			element.apply_style(property_name, property_value);
 		}
+		apply_element_opacity(node_tree, node_id, element.opacity);
 		let is_input = element.tag_name == "input";
 		let is_text_area = element.tag_name == "textarea";
 		let font_size = element.font_size;
