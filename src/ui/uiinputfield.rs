@@ -70,6 +70,7 @@ use crate::base::color::Color;
 use crate::base::pivot::Pivot;
 use crate::base::rect::Rect;
 use crate::base::vector2::Vector2;
+use crate::core::blurshadow::{css_blur_radius_to_sigma, BlurredRoundRectShadow};
 use crate::core::component::paint::Paint;
 use crate::core::component::text::Text;
 use crate::core::component::{Component, ComponentBase};
@@ -3854,6 +3855,8 @@ struct UIInputFieldContextMenu {
 	is_text_available: bool,
 	hovered_item_index: Option<usize>,
 	is_first_tick: bool,
+	/// 그림자의 구운 그림.
+	shadow: BlurredRoundRectShadow,
 }
 
 #[crate::reflect]
@@ -3869,6 +3872,7 @@ impl UIInputFieldContextMenu {
 			is_text_available,
 			hovered_item_index: None,
 			is_first_tick: true,
+			shadow: BlurredRoundRectShadow::default(),
 		}
 	}
 
@@ -4018,8 +4022,8 @@ impl Component for UIInputFieldContextMenu {
 		let content_size = transform.get_content_size();
 		let menu_rect = Rect::create(0.0, 0.0, content_size.x, content_size.y);
 		graphic.push_state();
-		graphic.set_fill_color(Color::create(0.0, 0.0, 0.0, 0.12));
-		graphic.draw_round_rect(Rect::create(0.0, 4.0, content_size.x, content_size.y), 8.0);
+		// 원본 CSS box-shadow 0 4px 16px rgba(0, 0, 0, 0.18) 을 블링크처럼 시그마 8 의 가우스로. (테두리 상자 모양)
+		self.shadow.draw(graphic, menu_rect, 8.0, Vector2::create(0.0, 4.0), css_blur_radius_to_sigma(16.0), Color::create(0.0, 0.0, 0.0, 0.18));
 		graphic.set_fill_color("#ffffff");
 		graphic.draw_round_rect(menu_rect, 8.0);
 		graphic.set_stroke_color("#cccccc");

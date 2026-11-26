@@ -251,6 +251,7 @@ mod desktop_dialog {
 	use crate::base::color::Color;
 	use crate::base::rect::Rect;
 	use crate::base::vector2::Vector2;
+	use crate::core::blurshadow::{views_shadow_blur_to_sigma, BlurredRoundRectShadow};
 	use crate::core::browseruitext::{read_browser_ui_text, BrowserUiText};
 	use crate::core::engine::Engine;
 	use crate::core::graphic::{Graphic, TextAlign, TextBaseline};
@@ -307,7 +308,9 @@ mod desktop_dialog {
 	const COLOR_PRIMARY_BUTTON_TEXT: &str = "#ffffff";
 	const COLOR_SECONDARY_BUTTON_BORDER: &str = "#a8c7fa";
 	const COLOR_SECONDARY_BUTTON_TEXT: &str = "#0b57d0";
-	/// 그림자. (bubble_border.cc 의 두 겹: 아래로 2, 흐림 8 과 12, kGoogleGrey800 #3C4043 의 알파 0x33 과 0x1A. 맥은 운영체제가 그린다)
+	/// 그림자. (bubble_border.cc 의 두 겹: 아래로 2, 흐림 8 과 12(gfx::ShadowValue, 시그마는 RadiusToSigma(blur / 2)), kGoogleGrey800 #3C4043 의 알파 0x33 과 0x1A. 맥은 운영체제가 그린다)
+	const SHADOW_LAYER_LIST: [(i32, u8); 2] = [(8, 0x33), (12, 0x1A)];
+	const SHADOW_OFFSET_Y: f32 = 2.0;
 	const SHADOW_COLOR_RED: f32 = 60.0 / 255.0;
 	const SHADOW_COLOR_GREEN: f32 = 64.0 / 255.0;
 	const SHADOW_COLOR_BLUE: f32 = 67.0 / 255.0;
@@ -354,6 +357,8 @@ mod desktop_dialog {
 		caret_rect: Rect,
 		blink_timer: f32,
 		is_cursor_visible: bool,
+		/// 그림자 두 겹의 구운 그림.
+		shadow_list: [BlurredRoundRectShadow; 2],
 	}
 
 	impl ModalDialog {
@@ -385,6 +390,7 @@ mod desktop_dialog {
 				caret_rect: Rect::create(0.0, 0.0, 1.0, 1.0),
 				blink_timer: 0.0,
 				is_cursor_visible: true,
+				shadow_list: Default::default(),
 			}
 		}
 
@@ -831,15 +837,11 @@ mod desktop_dialog {
 		let layout = calculate_layout(dialog, graphic, canvas_native_size);
 		graphic.push_state();
 
-		// 그림자와 바탕. (흐림은 겹친 둥근 사각형으로 갈음한다, 윈도우와 리눅스는 1px 테두리)
+		// 그림자와 바탕. (bubble_border.cc 의 두 겹을 views 시그마의 가우스로, 윈도우와 리눅스는 1px 테두리)
 		let box_rect = layout.box_rect;
-		for (blur_size, layer_alpha) in [(8.0f32, 0x33 as f32 / 255.0), (12.0f32, 0x1A as f32 / 255.0)] {
-			let step_count = 4;
-			for step_index in 0..step_count {
-				let spread = blur_size * 0.5 * (step_index as f32 + 1.0) / step_count as f32;
-				graphic.set_fill_color(Color::create(SHADOW_COLOR_RED, SHADOW_COLOR_GREEN, SHADOW_COLOR_BLUE, layer_alpha / step_count as f32));
-				graphic.draw_round_rect(Rect::create(box_rect.position.x - spread, box_rect.position.y + 2.0 - spread, box_rect.size.x + spread * 2.0, box_rect.size.y + spread * 2.0), DIALOG_CORNER_RADIUS + spread);
-			}
+		for (shadow_index, (shadow_blur, shadow_alpha)) in SHADOW_LAYER_LIST.iter().enumerate() {
+			let shadow_color = Color::create(SHADOW_COLOR_RED, SHADOW_COLOR_GREEN, SHADOW_COLOR_BLUE, *shadow_alpha as f32 / 255.0);
+			dialog.shadow_list[shadow_index].draw(graphic, box_rect, DIALOG_CORNER_RADIUS, Vector2::create(0.0, SHADOW_OFFSET_Y), views_shadow_blur_to_sigma(*shadow_blur), shadow_color);
 		}
 		graphic.set_fill_color(COLOR_DIALOG_BACKGROUND);
 		graphic.draw_round_rect(box_rect, DIALOG_CORNER_RADIUS);
