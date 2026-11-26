@@ -44,7 +44,8 @@
 //!     (web/pane.rs 의 read_classic_scrollbar_metrics, 단추 화살표는 그리지 않고 길은 scrollbar-color 의 둘째 값이 있을 때만 칠한다)
 //!   - textarea 태그는 엔진 여러 줄 입력 필드(UIInputField::set_multiline)가 글을 받는다. 원본 DOM textarea 처럼 줄을 넣고, 폭에 맞춰 나누고, 위아래로 옮기고, 넘치면 휠로 넘긴다.
 //!     프리셋의 탭 크기 4 를 쓴다. 글자, 색, 안쪽 여백은 만들 때의 스타일을 받는다. (PaneStyle::apply 로 나중에 바꾼 글꼴은 필드에 옮기지 않는다)
-//!   - canvas 태그는 아무것도 그리지 않는 노드다. 원본은 그 자리에 엔진 캔버스가 들어가고, 데스크탑은 창 전체가 엔진 화면이라 게임이 그 노드의 자리를 읽어 쓴다.
+//!   - canvas 태그는 원본에서 미리보기 엔진의 캔버스가 들어가는 자리다. 데스크탑은 미리보기 장면을 렌더 타겟에 그려 PaneElement::set_canvas_texture 로 넣으면
+//!     그 요소의 안쪽 상자에 그 화면을 그린다. (상자 크기는 calculate_canvas_box_size, 기기 픽셀 비를 곱해 렌더 타겟 크기를 맞춘다) 넣지 않으면 바탕과 테두리만 그린다.
 //==============================================================================
 use super::{calculate_pane_layout, calculate_resized_size, calculate_resizer_thickness, PaneDirection, PaneLayoutChild, PaneOptions, PaneResizableEdges, PaneResizeCallback, PaneSize, PaneStyleOptions, PaneTheme};
 use crate::base::color::Color;
@@ -53,7 +54,7 @@ use crate::base::rect::Rect;
 use crate::base::vector2::Vector2;
 use crate::core::component::mask::Mask;
 use crate::core::component::{Component, ComponentBase};
-use crate::core::graphic::{Graphic, TextAlign, TextBaseline};
+use crate::core::graphic::{GlTexture, Graphic, TextAlign, TextBaseline, FLOATS_PER_VERTEX};
 use crate::core::node::nodetree::{ComponentContext, NodeId, NodeTree};
 use crate::core::node::worldnode::NodeTransform;
 use crate::core::textstringtexturecache::measure_text_without_graphic;
@@ -1077,6 +1078,8 @@ pub struct PaneElement {
 	is_pointer_cursor: bool,
 	/// CSS opacity. (준 적이 없으면 None, 노드 투명도와 투명도 층으로 옮긴다)
 	opacity: Option<f32>,
+	/// canvas 태그가 내용 상자에 그릴 렌더 타겟 색 텍스처. (원본은 그 자리에 미리보기 엔진의 캔버스가 들어간다)
+	canvas_texture: Option<GlTexture>,
 	is_hovered: bool,
 	click_callback: Option<PaneClickCallback>,
 }
@@ -1138,9 +1141,58 @@ impl PaneElement {
 			is_button: false,
 			is_pointer_cursor: false,
 			opacity: None,
+			canvas_texture: None,
 			is_hovered: false,
 			click_callback: None,
 		}
+	}
+
+	//==============================================================================
+	/// canvas 태그가 그릴 화면 넣기. (원본 도구가 canvas 요소에 미리보기 엔진을 돌리는 자리, 데스크탑은 미리보기 장면을 그린 렌더 타겟의 색 텍스처를 넣는다)
+	/// - canvas 태그 요소는 바탕과 테두리 위, 안쪽 여백과 테두리 안의 상자에 이 텍스처를 늘여 그린다. 렌더 타겟 텍스처처럼 아래가 0 행인 텍스처로 본다.
+	/// - 렌더 타겟 크기는 원본 캔버스처럼 그 상자 크기에 기기 픽셀 비를 곱해 맞추면 1:1 로 그려진다. (calculate_canvas_box_size)
+	///
+	/// # 인자
+	/// - `canvas_texture`: 그릴 색 텍스처. (None 이면 바탕과 테두리만 그린다)
+	///
+	/// # 예제
+	/// 미리보기를 그린 렌더 타겟을 Pane 의 canvas 요소에 넣기
+	/// ```rust,no_run
+	/// use vanilla::{NodeId, NodeTree, PaneElement, RenderTarget};
+	///
+	/// fn show_preview(node_tree: &mut NodeTree, canvas_id: NodeId, render_target: &RenderTarget) {
+	/// 	if let Some(element) = node_tree[canvas_id].get_component_mut::<PaneElement>() {
+	/// 		element.set_canvas_texture(render_target.get_color_texture(0));
+	/// 	}
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn set_canvas_texture(&mut self, canvas_texture: Option<GlTexture>) {
+		self.canvas_texture = canvas_texture;
+	}
+
+	//==============================================================================
+	/// canvas 태그가 그릴 화면.
+	///
+	/// # 돌려줌
+	/// set_canvas_texture 로 넣은 색 텍스처. (없으면 None)
+	//==============================================================================
+	pub fn get_canvas_texture(&self) -> Option<GlTexture> {
+		self.canvas_texture
+	}
+
+	//==============================================================================
+	/// canvas 태그가 화면을 그릴 상자 크기. (내용 크기에서 안쪽 여백과 테두리를 뺀 것, 노드 좌표이고 원본 canvas 요소의 clientWidth, clientHeight 자리)
+	///
+	/// # 인자
+	/// - `content_size`: 요소 노드의 내용 크기. (node_tree[노드].get_content_size())
+	///
+	/// # 돌려줌
+	/// 그릴 상자의 가로, 세로. (기기 픽셀 비를 곱하면 렌더 타겟 크기)
+	//==============================================================================
+	pub fn calculate_canvas_box_size(&self, content_size: Vector2) -> Vector2 {
+		let frame_size = self.read_frame_size();
+		Vector2::create((content_size.x - frame_size.x).max(0.0), (content_size.y - frame_size.y).max(0.0))
 	}
 
 	//==============================================================================
@@ -2431,6 +2483,18 @@ impl Component for PaneElement {
 			}
 		}
 		self.draw_border(content_size, graphic);
+		// canvas 태그: 넣은 렌더 타겟 화면을 안쪽 상자에 늘여 그린다. (아래가 0 행인 텍스처라 위아래를 뒤집어 짚는다)
+		if let Some(canvas_texture) = self.canvas_texture {
+			if self.tag_name == "canvas" {
+				let frame_left = self.padding[3] + self.border_width_list[3];
+				let frame_top = self.padding[0] + self.border_width_list[0];
+				let box_size = self.calculate_canvas_box_size(content_size);
+				if box_size.x > 0.0 && box_size.y > 0.0 {
+					let vertex_count = graphic.write_quad(0, frame_left, frame_top, frame_left + box_size.x, frame_top + box_size.y, 0.0, 1.0, 1.0, 0.0) / FLOATS_PER_VERTEX;
+					graphic.draw_vertices(vertex_count, canvas_texture, Color::create(1.0, 1.0, 1.0, 1.0));
+				}
+			}
+		}
 		if !self.text.is_empty() {
 			graphic.set_font_string(&self.build_font_string());
 			graphic.set_fill_color(scale_brightness(self.color, brightness));
