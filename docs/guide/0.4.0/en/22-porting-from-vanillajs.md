@@ -297,6 +297,11 @@ The original gets the engine from anywhere with `Engine.getEngine()` or `this.ge
 
 This is why the original `Component.getEngine` is missing from the inspector's getter list, and `Engine` is missing from the reflected property list.
 
+The original `engine.getGraphic()` is `engine.get_graphic()` (`get_graphic_mut()` to change it). You build GL resources in any of the places above that receive the engine. Two things differ.
+
+- The scene's drawing hooks (`pre_draw`, `draw`, `post_draw`, `draw_on_load`, `draw_gizmos`) receive `graphic: &mut Graphic` as an argument. It is the engine's graphic taken out for a moment and passed in, so inside them `engine.get_graphic()` is `None` and you use the `graphic` argument. To use the engine and the graphic together as `&mut` outside drawing, call `engine.with_graphic(|engine, graphic| ...)`.
+- A component's `attach`, which does not receive the engine, cannot reach the graphic either. Build GL resources where you create the component (the scene's `create`) or in the component's `tick`.
+
 ## Callbacks and Rc<RefCell>
 
 The original's arrow functions capture `this` and outer variables freely. Vanilla Engine takes callbacks as `Box<dyn FnMut(...)>` and the component keeps them, so they cannot capture borrowed values such as the scene's `&mut self`. Capture a `NodeId` and reach other nodes through the context the callback receives, and put values shared with the scene in an `Rc<Cell>` or `Rc<RefCell>`.

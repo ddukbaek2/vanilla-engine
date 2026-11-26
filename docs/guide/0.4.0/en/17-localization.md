@@ -459,7 +459,7 @@ These are the rules `uifont` follows when picking slices.
 
 `Text` bakes the whole text into a texture for each string. For text that changes often and repeats the same characters a lot, such as scores, damage numbers, and clocks, use `DynamicFont`. It bakes the chosen characters in one font and size into one image (1024 pixels wide, with 2 pixels of padding between glyphs) and draws characters by cutting them out of the atlas. Because they share one image, batching is not broken.
 
-In the Rust version, baking and drawing use the text cache of `Graphic`, so `build_atlas` and `draw_text` take a `Graphic`. That is why baking happens in the scene's `draw`. The example below draws on top of the view coordinate system that `draw_scene_background` in `pre_draw` has set up.
+In the Rust version, baking and drawing use the text cache of `Graphic`, so `build_atlas` and `draw_text` take a `Graphic`. Just as the original bakes once while the scene loads, bake in `initialize` with `engine.get_graphic_mut()`. The example below draws on top of the view coordinate system that `draw_scene_background` in `pre_draw` has set up.
 
 ```rust,no_run
 use vanilla::{DynamicFont, Engine, EngineConfiguration, Graphic, Scene, SceneBase, Vector2};
@@ -479,6 +479,12 @@ impl Scene for ScoreScene {
 		&mut self.scene_base
 	}
 
+	fn initialize(&mut self, engine: &mut Engine) {
+		if let Some(graphic) = engine.get_graphic_mut() {
+			self.dynamic_font.build_atlas(graphic, "0123456789SCORE ");
+		}
+	}
+
 	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
 		self.scene_base.tick(engine, time_delta);
 		self.score += (time_delta * 1000.0) as u64;
@@ -490,7 +496,6 @@ impl Scene for ScoreScene {
 
 	fn draw(&mut self, _engine: &mut Engine, graphic: &mut Graphic) {
 		self.scene_base.draw(graphic);
-		self.dynamic_font.build_atlas(graphic, "0123456789SCORE ");
 		let score_text = format!("SCORE {}", self.score);
 		let text_width = self.dynamic_font.measure_text(&score_text);
 		let position = Vector2::create(640.0 - text_width * 0.5, 360.0);

@@ -73,11 +73,11 @@ EngineRunner
 │   ├── PointerCursor
 │   ├── AudioManager
 │   ├── Platform
-│   └── TaskExecutor
-├── Graphic
-│   ├── ShaderProgram
-│   ├── ImageTextureCache
-│   └── TextStringTextureCache
+│   ├── TaskExecutor
+│   └── Graphic
+│       ├── ShaderProgram
+│       ├── ImageTextureCache
+│       └── TextStringTextureCache
 └── Vec<Box<dyn Scene>>
     └── SceneBase
         ├── NodeTree
@@ -88,7 +88,7 @@ EngineRunner
 ```
 
 - 플랫폼이 엔진 실행자(`EngineRunner`)를 들고 프레임마다 부릅니다. `Engine::run` 이 이 실행자를 만들어 플랫폼에 넘깁니다. 게임 코드가 실행자를 직접 다룰 일은 없습니다.
-- `Graphic` 은 `Engine` 안이 아니라 실행자가 듭니다. 플랫폼이 GL 컨텍스트를 만든 뒤 넘겨주고, 씬의 그리기 훅(`draw_on_load`, `pre_draw`, `draw`, `post_draw`, `draw_gizmos`)이 `&mut Graphic` 으로 따로 받습니다.
+- `Graphic` 은 `Engine` 이 듭니다. 플랫폼이 GL 컨텍스트를 만든 뒤 넘겨주고, 원본 `getGraphic()` 처럼 `engine.get_graphic()`, `engine.get_graphic_mut()` 로 씬의 `create`, `initialize`, `tick` 이나 컴포넌트의 `tick`(`context.get_engine()`)에서 꺼냅니다. 씬의 그리기 훅(`draw_on_load`, `pre_draw`, `draw`, `post_draw`, `draw_gizmos`)은 `&mut Graphic` 을 인자로 받습니다. 엔진이 그래픽을 잠깐 꺼내 넘기는 것이라 그 안에서는 `engine.get_graphic()` 이 `None` 이고 인자의 `graphic` 을 씁니다. (`&mut Engine` 과 `&mut Graphic` 을 함께 넘기는 러스트 빌림 꼴, 그리기 밖에서 둘을 함께 쓰려면 `engine.with_graphic(|engine, graphic| ...)`)
 - 씬은 엔진이 `Box<dyn Scene>` 으로 소유합니다. 다른 씬을 가리킬 때는 씬 값 대신 `Engine::load_scene` 이 돌려준 `SceneId` 를 씁니다. 원본의 `SceneManager` 는 엔진에 합쳤습니다.
 - 내리는 중인 씬(unload 에서 맡긴 작업을 기다리는 씬)은 원본처럼 목록에 남아 `tick` 과 `draw` 를 받습니다. 목록에서 뺀 뒤에도 그 씬의 async 작업이 남았으면 작업이 끝날 때까지 씬 값을 살려 두고, 다 끝나면 `destroy` 를 부르고 버립니다.
 - 애셋은 원본처럼 중앙 매니저 없이 씬이 멤버로 듭니다. 같은 그림을 여러 번 그려도 GPU 텍스처는 `Graphic` 의 캐시가 하나만 만듭니다. 여럿을 함께 받을 때는 `AssetLoader` 가 동시 수만큼 요청하고 진행률을 셉니다.

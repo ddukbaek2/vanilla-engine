@@ -73,11 +73,11 @@ EngineRunner
 │   ├── PointerCursor
 │   ├── AudioManager
 │   ├── Platform
-│   └── TaskExecutor
-├── Graphic
-│   ├── ShaderProgram
-│   ├── ImageTextureCache
-│   └── TextStringTextureCache
+│   ├── TaskExecutor
+│   └── Graphic
+│       ├── ShaderProgram
+│       ├── ImageTextureCache
+│       └── TextStringTextureCache
 └── Vec<Box<dyn Scene>>
     └── SceneBase
         ├── NodeTree
@@ -88,7 +88,7 @@ EngineRunner
 ```
 
 - The platform holds the engine runner (`EngineRunner`) and calls it every frame. `Engine::run` creates this runner and hands it to the platform. Game code never handles the runner directly.
-- `Graphic` is held by the runner, not inside `Engine`. The platform passes it in after creating the GL context, and the scene's drawing hooks (`draw_on_load`, `pre_draw`, `draw`, `post_draw`, `draw_gizmos`) receive it separately as `&mut Graphic`.
+- `Graphic` is held by `Engine`. The platform passes it in after creating the GL context, and like the original `getGraphic()` you take it with `engine.get_graphic()` and `engine.get_graphic_mut()` in the scene's `create`, `initialize` and `tick` or in a component's `tick` (`context.get_engine()`). The scene's drawing hooks (`draw_on_load`, `pre_draw`, `draw`, `post_draw`, `draw_gizmos`) receive `&mut Graphic` as an argument. The engine takes the graphic out for a moment to pass it, so inside them `engine.get_graphic()` is `None` and you use the `graphic` argument. (This is the Rust borrowing form for passing `&mut Engine` and `&mut Graphic` together; to use both together outside drawing, call `engine.with_graphic(|engine, graphic| ...)`)
 - The engine owns scenes as `Box<dyn Scene>`. To refer to another scene, use the `SceneId` returned by `Engine::load_scene` instead of the scene value. The original's `SceneManager` is merged into the engine.
 - A scene being unloaded (waiting for the tasks it handed over in unload) stays in the list and receives `tick` and `draw`, as in the original. If the scene's async tasks remain after it leaves the list, the scene value is kept alive until they finish, then `destroy` is called and it is dropped.
 - As in the original, assets are held as members by the scene, with no central manager. Drawing the same image many times creates only one GPU texture, in `Graphic`'s cache. To load several together, `AssetLoader` requests them up to a concurrency limit and counts progress.

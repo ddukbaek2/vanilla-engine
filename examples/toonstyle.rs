@@ -288,8 +288,21 @@ impl Scene for ToonStyleScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, _engine: &mut Engine) {
+	//==============================================================================
+	// 생성. (원본 생성자처럼 렌더러, 그림자, 모형을 엔진의 그래픽으로 짓는다)
+	//==============================================================================
+	fn create(&mut self, engine: &mut Engine) {
 		self.scene_base.set_scene_background_color("#202633");
+		if let Some(graphic) = engine.get_graphic() {
+			match StyleResources::new(graphic.get_gl(), self.line_scale, self.is_toggled, self.is_shell) {
+				Ok(resources) => {
+					self.resources = Some(resources);
+				}
+				Err(error) => {
+					eprintln!("toonstyle: {}", error);
+				}
+			}
+		}
 	}
 
 	//==============================================================================
@@ -299,16 +312,6 @@ impl Scene for ToonStyleScene {
 		self.scene_base.draw_scene_background(engine, graphic);
 		graphic.flush_batch();
 		let gl = graphic.get_gl();
-		if self.resources.is_none() {
-			match StyleResources::new(gl, self.line_scale, self.is_toggled, self.is_shell) {
-				Ok(resources) => {
-					self.resources = Some(resources);
-				}
-				Err(error) => {
-					eprintln!("toonstyle: {}", error);
-				}
-			}
-		}
 		let canvas_pixel_size = engine.get_view_manager().get_canvas_pixel_size();
 		self.camera.set_aspect_ratio(canvas_pixel_size.x / canvas_pixel_size.y.max(1.0));
 		if let Some(resources) = self.resources.as_mut() {

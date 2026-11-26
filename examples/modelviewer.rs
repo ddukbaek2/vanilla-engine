@@ -6,7 +6,7 @@
 // - 땅은 코드로 만든 GLB 다. (정적 메시 → 합성 스킨 경로)
 // - 원본 3D 씬은 자체 rAF 를 돌리지만, 여기서는 씬의 pre_draw 에서 그린다:
 //   섀도우 깊이 패스 → 씬 패스(RenderTarget) → 블룸 → 합성(화면) → graphic.restore_render_state() → draw 에서 2D HUD.
-// - 모델은 tick 에서 update 한다. (update 는 GL 을 쓰지 않는다) GL 리소스는 첫 pre_draw 에서 만든다. (create 에는 GL 이 없다)
+// - 모델은 tick 에서 update 한다. (update 는 GL 을 쓰지 않는다) GL 리소스는 모델을 다 받은 뒤 initialize 에서 엔진의 그래픽(engine.get_graphic)으로 만든다.
 // - 실행: cargo run --release --example modelviewer (갱신 600번 뒤 스스로 끝난다, 60fps 면 10초)
 //   화면 저장: VANILLA_CAPTURE_PATH=shots/model_{frame}.png VANILLA_CAPTURE_FRAMES=60,180 VANILLA_CAPTURE_EXIT=1
 //==============================================================================
@@ -77,7 +77,7 @@ impl PlacedModel {
 }
 
 //==============================================================================
-// 첫 pre_draw 에서 만드는 GL 리소스.
+// initialize 에서 만드는 GL 리소스.
 //==============================================================================
 struct ViewerResources {
 	skinned_model_renderer: SkinnedModelRenderer,
@@ -314,6 +314,35 @@ impl Scene for ModelViewerScene {
 	}
 
 	//==============================================================================
+	// 초기화. (맡긴 모델을 다 받은 뒤, GL 리소스와 모델을 엔진의 그래픽으로 만든다)
+	//==============================================================================
+	fn initialize(&mut self, engine: &mut Engine) {
+		let graphic = match engine.get_graphic() {
+			Some(graphic) => {
+				graphic
+			}
+			None => {
+				return;
+			}
+		};
+		let load_start_instant = std::time::Instant::now();
+		match self.create_resources(engine, graphic.get_gl()) {
+			Ok(resources) => {
+				self.load_seconds = load_start_instant.elapsed().as_secs_f32();
+				println!("modelviewer: 모델 준비 {:.2}초", self.load_seconds);
+				for placed_model in resources.placed_model_list.iter() {
+					println!("modelviewer: {} 드로어블 {} 노드 {} 클립 {:?} 배율 {:.4}", placed_model.label, placed_model.skinned_model.get_drawable_list().len(), placed_model.skinned_model.get_node_list().len(), placed_model.skinned_model.get_animation_name_list(), placed_model.scale);
+				}
+				self.resources = Some(resources);
+			}
+			Err(error) => {
+				eprintln!("modelviewer: {}", error);
+				self.load_error_message = Some(error);
+			}
+		}
+	}
+
+	//==============================================================================
 	// 갱신. (클립 바꾸기 + 모델 포즈 계산, 정해진 시각에 끝내기)
 	//==============================================================================
 	fn tick(&mut self, engine: &mut Engine, _time_delta: f32) {
@@ -355,23 +384,6 @@ impl Scene for ModelViewerScene {
 	//==============================================================================
 	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
 		graphic.flush_batch();
-		if self.resources.is_none() && self.load_error_message.is_none() {
-			let load_start_instant = std::time::Instant::now();
-			match self.create_resources(engine, graphic.get_gl()) {
-				Ok(resources) => {
-					self.load_seconds = load_start_instant.elapsed().as_secs_f32();
-					println!("modelviewer: 모델 준비 {:.2}초", self.load_seconds);
-					for placed_model in resources.placed_model_list.iter() {
-						println!("modelviewer: {} 드로어블 {} 노드 {} 클립 {:?} 배율 {:.4}", placed_model.label, placed_model.skinned_model.get_drawable_list().len(), placed_model.skinned_model.get_node_list().len(), placed_model.skinned_model.get_animation_name_list(), placed_model.scale);
-					}
-					self.resources = Some(resources);
-				}
-				Err(error) => {
-					eprintln!("modelviewer: {}", error);
-					self.load_error_message = Some(error);
-				}
-			}
-		}
 		let canvas_pixel_size = engine.get_view_manager().get_canvas_pixel_size();
 		let elapsed_time = self.elapsed_time;
 		if let Some(resources) = &mut self.resources {

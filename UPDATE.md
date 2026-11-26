@@ -1,6 +1,13 @@
 # 업데이트 기록
 
 # 아직 release 에 합치지 않은 것 (release 에 합칠 때 패치 판을 하나 올려 매긴다)
+- Engine: 그래픽을 어디서나 쓴다. Graphic 을 EngineRunner 대신 Engine 이 들고, 원본 getGraphic 처럼 engine.get_graphic(), get_graphic_mut() 로 씬의 create, initialize, tick, 컴포넌트의 tick(context.get_engine()), async 작업의 첫 구간과 await 다음 줄에서 GL 자원(텍스처, 렌더 타겟, 셰이더 프로그램, 툰 렌더러 같은)을 짓는다. (지금까지는 그리기 함수에서만 graphic 인자로 받았다) 그리기 함수는 지금처럼 graphic 인자를 받는다. 엔진이 든 그래픽을 Option::take 로 잠깐 꺼내 넘긴 것이라 그 안에서는 engine.get_graphic() 이 None 이고 인자의 graphic 을 쓴다. (RefCell 도 unsafe 도 쓰지 않아 이중 빌림으로 터질 길이 없다) 그리기 밖에서 엔진과 그래픽을 함께 &mut 로 쓰려면 새 engine.with_graphic(|engine, graphic| ...) 이다
+  - EngineContext::with_graphic, SceneContext::with_graphic 이 맡기는 자리의 첫 구간에서도 그래픽을 준다. (지금까지 None) 그리기 함수 안에서 맡긴 작업의 첫 구간만 엔진이 그래픽을 그 함수에 내어 준 동안이라 None 이다
+  - DevTools: 모든 기즈모 강제 표시(원본 setForceGizmosVisible)를 tick 끝에 엔진의 그래픽에 건다. 원본처럼 F2 와 Settings 칸을 누른 그 프레임의 그리기부터 보인다. (지금까지는 post_draw 의 draw 에서 걸어 한 프레임 늦었다)
+  - 예제: toonstyle, toonmaterial 은 원본 생성자처럼 create 에서, oldface, modelviewer 는 애셋을 다 받은 뒤 initialize 에서 GL 자원을 짓는다. 가이드의 DynamicFont 예제도 원본처럼 initialize 에서 한 번 굽는다
+  - 옮기는 법: 바뀌어 컴파일이 깨지는 공개 API 는 없다. 그리기에서 처음 그릴 때 GL 자원을 짓던 코드는 그대로 돈다. 원본처럼 create, initialize 에서 지으려면 `if let Some(graphic) = engine.get_graphic() { ... graphic.get_gl() ... }` 로 옮긴다. 그리기 함수 안에서 engine.get_graphic() 을 부르면 None 이니 인자의 graphic 을 쓴다
+- ToonRenderer::create_mesh: GL 버퍼나 버텍스 어레이를 짓다 실패하면 그때까지 지은 버퍼와 버텍스 어레이를 지우고 None 을 돌려준다. (지금까지는 앞서 지은 것이 남아 샜다) 인스턴스 버퍼와 함께 묶는 버텍스 어레이도 바깥선 쪽을 짓지 못하면 몸 쪽을 지운다. (원본은 크롬의 createBuffer, createVertexArray 가 늘 객체를 돌려줘 중간에 실패하는 길이 없다)
+- UIInputField::set_use_direct_touch 설명을 사실대로 고쳤다. 웹 전용이 아니고, 데스크탑은 원본에서 크롬이 그 DOM 입력에 하는 일(크롬 편집 칸 메뉴, 손가락 길게 누르기의 낱말 고르기와 터치 손잡이)을 한다
 - Scene 터치: 원본 vanilla.js 의 Scene 도 씬 꼴과 상관없이 씬의 TouchRaycaster 로 노드에 터치를 넘기게 바꿔, 두 엔진이 같다. (러스트 판 SceneBase.tick 은 그대로, 문서의 "원본 기본 씬은 넘기지 않는다" 글을 고쳤다)
 - FbxLoader: 노드(Model)와 애니메이션 스택 name 에서 바이너리 FBX 의 종류 꼬리("\u{0}\u{1}Model", "\u{0}\u{1}AnimStack")를 뗀다. 클립 이름은 "Take 001\u{0}\u{1}AnimStack" 이 아니라 "Take 001", 본 이름은 "mixamorig:Hips" 다. (three.js FBXLoader 는 BinaryReader.getString 이 첫 널 바이트에서 자르고, Assimp 는 "AnimStack::Take 001" 로 바꾼 뒤 FBXConverter 가 "AnimStack::", "Model::" 를 뗀다, 원본도 같이 바꿨다) glTF 로 읽은 모델에 FBX 애니메이션을 더할 때(add_animations_from_fbx_*)의 본 이름 맞추기도 이 이름으로 맞는다.
   - 옮기는 법: 꼬리가 붙은 이름으로 play_animation 하거나 노드를 찾던 코드는 꼬리를 뗀 이름을 쓴다.

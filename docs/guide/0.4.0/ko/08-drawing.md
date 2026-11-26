@@ -651,7 +651,7 @@ fn main() {
 
 ## 그리기 설정
 
-원본은 `engine.getGraphic()` 으로 `Graphic` 을 얻지만, 러스트 판의 `Graphic` 은 `Engine` 안에 들어 있지 않고 씬의 그리기 함수(`pre_draw`, `draw`, `post_draw`, `draw_on_load`)에만 넘어옵니다. 아래 설정은 매 프레임 되돌아가지 않으므로 그 자리에서 한 번 정하면 됩니다.
+원본처럼 `engine.get_graphic_mut()` 으로 `Graphic` 을 얻어 씬의 `create`, `initialize`, `tick` 에서 정합니다. 씬의 그리기 함수(`pre_draw`, `draw`, `post_draw`, `draw_on_load`) 안에서는 인자로 받은 `graphic` 에 정합니다. (그 안에서는 엔진이 그래픽을 인자로 내어 주어 `engine.get_graphic_mut()` 이 `None` 입니다) 아래 설정은 매 프레임 되돌아가지 않으므로 한 번 정하면 됩니다.
 
 - `set_image_smoothing_enabled(false)`: 그림을 가장 가까운 픽셀로 늘입니다. 도트 그림 게임이 씁니다. (처음 켬)
 - `set_image_mipmap_enabled(true)`: 큰 그림을 크게 줄여 그릴 때 자글거림을 줄입니다. (처음 끔)

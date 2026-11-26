@@ -256,7 +256,7 @@ void main() {
 }";
 
 //==============================================================================
-// 첫 pre_draw 에서 만드는 GL 리소스.
+// initialize 에서 만드는 GL 리소스.
 //==============================================================================
 struct FaceResources {
 	skin_renderer: HumanSkinRenderer,
@@ -893,6 +893,32 @@ impl Scene for OldFaceScene {
 	}
 
 	//==============================================================================
+	// 초기화. (맡긴 애셋을 다 받은 뒤, 원본 예제의 초기화처럼 GL 리소스와 모델을 엔진의 그래픽으로 만든다)
+	//==============================================================================
+	fn initialize(&mut self, engine: &mut Engine) {
+		let graphic = match engine.get_graphic() {
+			Some(graphic) => {
+				graphic
+			}
+			None => {
+				return;
+			}
+		};
+		let load_start_instant = web_time::Instant::now();
+		match self.create_resources(graphic.get_gl()) {
+			Ok(resources) => {
+				self.load_seconds = load_start_instant.elapsed().as_secs_f32();
+				println!("oldface: 준비 {:.2}초, 머리 드로어블 {}, 머리카락 드로어블 {}", self.load_seconds, resources.head_model.get_drawable_list().len(), resources.hair_model.get_drawable_list().len());
+				self.resources = Some(resources);
+			}
+			Err(error) => {
+				eprintln!("oldface: {}", error);
+				self.load_error_message = Some(error);
+			}
+		}
+	}
+
+	//==============================================================================
 	// 갱신. (원본 renderFrame 의 카메라, 표정, 머리 방향, 주름, 파라미터, 스키닝 갱신)
 	//==============================================================================
 	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
@@ -936,20 +962,6 @@ impl Scene for OldFaceScene {
 	//==============================================================================
 	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
 		graphic.flush_batch();
-		if self.resources.is_none() && self.load_error_message.is_none() {
-			let load_start_instant = web_time::Instant::now();
-			match self.create_resources(graphic.get_gl()) {
-				Ok(resources) => {
-					self.load_seconds = load_start_instant.elapsed().as_secs_f32();
-					println!("oldface: 준비 {:.2}초, 머리 드로어블 {}, 머리카락 드로어블 {}", self.load_seconds, resources.head_model.get_drawable_list().len(), resources.hair_model.get_drawable_list().len());
-					self.resources = Some(resources);
-				}
-				Err(error) => {
-					eprintln!("oldface: {}", error);
-					self.load_error_message = Some(error);
-				}
-			}
-		}
 		let canvas_pixel_size = engine.get_view_manager().get_canvas_pixel_size();
 		if let Err(error) = self.render_scene(graphic.get_gl(), canvas_pixel_size.x as i32, canvas_pixel_size.y as i32) {
 			eprintln!("oldface: {}", error);

@@ -117,7 +117,7 @@ fn create_decal_pixels() -> Vec<u8> {
 
 
 //==============================================================================
-// 장면의 메시와 텍스처. (처음 그릴 때 한 번)
+// 장면의 메시와 텍스처. (씬을 만들 때 한 번)
 //==============================================================================
 struct MaterialResources {
 	renderer: ToonRenderer,
@@ -282,8 +282,21 @@ impl Scene for ToonMaterialScene {
 		&mut self.scene_base
 	}
 
-	fn create(&mut self, _engine: &mut Engine) {
+	//==============================================================================
+	// 생성. (원본 생성자처럼 렌더러, 메시, 텍스처를 엔진의 그래픽으로 짓는다)
+	//==============================================================================
+	fn create(&mut self, engine: &mut Engine) {
 		self.scene_base.set_scene_background_color("#10121a");
+		if let Some(graphic) = engine.get_graphic() {
+			match MaterialResources::new(graphic.get_gl()) {
+				Ok(resources) => {
+					self.resources = Some(resources);
+				}
+				Err(error) => {
+					eprintln!("toonmaterial: {}", error);
+				}
+			}
+		}
 	}
 
 	//==============================================================================
@@ -293,16 +306,6 @@ impl Scene for ToonMaterialScene {
 		self.scene_base.draw_scene_background(engine, graphic);
 		graphic.flush_batch();
 		let gl = graphic.get_gl();
-		if self.resources.is_none() {
-			match MaterialResources::new(gl) {
-				Ok(resources) => {
-					self.resources = Some(resources);
-				}
-				Err(error) => {
-					eprintln!("toonmaterial: {}", error);
-				}
-			}
-		}
 		let canvas_pixel_size = engine.get_view_manager().get_canvas_pixel_size();
 		self.camera.set_aspect_ratio(canvas_pixel_size.x / canvas_pixel_size.y.max(1.0));
 		let frame = self.fixed_frame.unwrap_or(self.frame_index);

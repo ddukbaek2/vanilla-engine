@@ -80,13 +80,13 @@ EngineRunner (플랫폼이 들고 프레임마다 부른다)
 │   ├── Platform (플랫폼, 브라우저 정보)
 │   ├── TaskExecutor (async 작업, 씬 작업은 씬 핸들로 그 씬을 가리킨다)
 │   ├── platform_window (창 손잡이: 데스크탑 winit Window, 웹 캔버스)
+│   ├── Graphic (플랫폼이 GL 컨텍스트를 만든 뒤 attach_graphic 으로 넘김. 원본 getGraphic 처럼 get_graphic, get_graphic_mut 로 어느 훅에서나 꺼낸다)
+│   │   ├── ShaderProgram (기본), 묶음, 파티클, 블렌드 섞기 셰이더, 바꿔 낄 프로그램 표
+│   │   ├── ImageTextureCache
+│   │   ├── TextStringTextureCache (데스크탑: rustybuzz 모양 짓기, fontdue 와 skrifa 래스터, 색 글리프 colorglyph, 맥 색 이모지는 CoreText,
+│   │   │                           시스템 글꼴 사슬과 운영체제 대체 글꼴 / 웹: 브라우저 Canvas2D)
+│   │   └── 묶음 버퍼, 클립 스택, 블렌드 섞기용 바탕 칸
 │   ├── pending_scene_list, pending_font_registration_list, 페이지 이벤트 리스너
-├── Graphic (플랫폼이 GL 컨텍스트를 만든 뒤 attach_graphic 으로 넘김)
-│   ├── ShaderProgram (기본), 묶음, 파티클, 블렌드 섞기 셰이더, 바꿔 낄 프로그램 표
-│   ├── ImageTextureCache
-│   ├── TextStringTextureCache (데스크탑: rustybuzz 모양 짓기, fontdue 와 skrifa 래스터, 색 글리프 colorglyph, 맥 색 이모지는 CoreText,
-│   │                           시스템 글꼴 사슬과 운영체제 대체 글꼴 / 웹: 브라우저 Canvas2D)
-│   └── 묶음 버퍼, 클립 스택, 블렌드 섞기용 바탕 칸
 ├── Scene[] (Box<dyn Scene>, 불러온 씬. unload 가 맡긴 작업을 기다리는 내리는 중인 씬도 원본처럼 여기 남는다)
 │   └── SceneBase
 │       ├── NodeTree ── slotmap<NodeId, WorldNode>, 루트 노드
@@ -98,6 +98,8 @@ EngineRunner (플랫폼이 들고 프레임마다 부른다)
 ```
 
 애셋은 원본처럼 중앙 매니저 없이 씬이 멤버로 든다. 같은 그림을 여러 번 그려도 GPU 텍스처는 Graphic 의 캐시가 하나만 만든다. 여럿을 함께 받을 때는 AssetLoader 가 동시 수만큼 요청하고 진행률을 센다.
+
+그래픽 빌림: 씬의 그리기 함수(pre_draw, draw, post_draw, draw_on_load, draw_gizmos)는 &mut Engine 과 &mut Graphic 을 함께 받는다. 그래픽이 엔진 안에 있으면 둘을 함께 &mut 로 넘길 수 없어서, EngineRunner 는 Engine::with_graphic 으로 그래픽을 엔진에서 잠깐 꺼내(Option::take) 넘기고 그리기가 끝나면 돌려 넣는다. (씬 목록을 std::mem::take 로 꺼내 씬마다 &mut Engine 을 넘기는 것과 같은 꼴) 그동안 engine.get_graphic() 은 None 이고 인자의 graphic 이 곧 그 그래픽이다. RefCell 도 unsafe 도 쓰지 않아 이중 빌림으로 터질 길이 없다. 그리기 밖(create, initialize, tick, 컴포넌트 tick 의 context.get_engine(), 작업의 첫 구간과 await 다음 줄)에서는 그래픽이 엔진에 들어 있다.
 
 ## 4. 노드와 컴포넌트
 
@@ -124,7 +126,7 @@ EngineRunner (플랫폼이 들고 프레임마다 부른다)
    - 맡긴 애셋과 작업을 기다리는 씬: 다 끝나고 0.3초가 지났으면 initialize 와 resize(그리고 load_scene_async 의 Promise 를 푼다), 아니면 draw_on_load 만
    - scene.tick → SceneBase.tick: 노드 tick(컴포넌트 → 자식) → 휠, 터치 전달 → 트윈
    - 씬의 터치 훅(touch_press, 뗌 또는 누르고 있음 또는 취소, touch_wheel, 원본 Scene.tickTouch 차례)
-   - pre_draw → draw(NodeTree.draw 재귀) → post_draw → (기즈모)
+   - pre_draw → draw(NodeTree.draw 재귀) → post_draw → (기즈모)   그래픽은 Engine::with_graphic 으로 엔진에서 잠깐 꺼내 인자로 넘긴다 (3 장 그래픽 빌림)
 6. 통계 출력(옵션: FPS, DrawCall, Vertex, Culled) → 마우스 커서(PointerCursor) → 1회성 입력 플래그 지우기
 7. graphic.end_frame() (묶음 내보내기) → 검증용 화면 저장(request_frame_capture, 데스크탑 VANILLA_CAPTURE_*, 웹 ?capture=) → 프레임 번호 증가 (첫 프레임 1)
 8. 씬 목록 바꾸기 (apply_pending_scenes: 내릴 씬 finalize, unload 와 내리기 마무리, 불러온 씬 create. create 와 unload 에서 맡긴 작업은 그 자리에서 첫 await 까지 돈다)
@@ -138,9 +140,9 @@ EngineRunner (플랫폼이 들고 프레임마다 부른다)
 씬 내리기는 원본 SceneManager.unloadScene 처럼 finalize, unload 를 부르고 unload 가 track_task 로 맡긴 작업(원본 await scene.unload)이 끝날 때까지 씬을 목록에 둔다. (원본처럼 그동안 tick, draw 를 받는다) 끝나면 목록에서 빼고 unload_scene_async, unload_all_scenes_async 의 Promise 를 푼다. 그 씬의 작업이 남았거나 불러오기가 덜 끝났으면 원본의 Promise 사슬처럼 씬 값을 살려 두고(tick, draw 없이), 불러오기가 끝나면 원본 loadScene 처럼 initialize 까지 부른다. 다 끝나면 destroy 를 부르고 버린다.
 
 async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(core/task.rs)를 품는다. 퓨처는 Send 가 아니어도 되고 데스크탑과 웹이 같은 코드로 돈다.
-- 맡기기: spawn_task(&mut Engine), spawn_scene_task(&mut Engine, &mut 씬)는 원본 async 함수를 부를 때처럼 그 자리에서 첫 await 까지 한 번 폴링한다. 받은 &mut 로 칸을 세우고 폴링이 끝나면 앞의 값으로 되돌린다. (그 자리에는 그래픽이 없어 첫 구간의 with_graphic 은 None) &Engine 만 있는 자리는 spawn_deferred_task, spawn_deferred_scene_task 로 맡기고 다음 폴링 차례에 처음 돈다.
+- 맡기기: spawn_task(&mut Engine), spawn_scene_task(&mut Engine, &mut 씬)는 원본 async 함수를 부를 때처럼 그 자리에서 첫 await 까지 한 번 폴링한다. 받은 &mut 로 칸을 세우고 폴링이 끝나면 앞의 값으로 되돌린다. (그래픽은 엔진이 들어 첫 구간의 with_graphic 도 그래픽을 받는다. 그리기 함수 안에서 맡기면 엔진이 그래픽을 그 함수에 내어 준 동안이라 None) &Engine 만 있는 자리는 spawn_deferred_task, spawn_deferred_scene_task 로 맡기고 다음 폴링 차례에 처음 돈다.
 - 깨우기: 원본 마이크로태스크 줄처럼 깨운 차례대로 줄에 넣고(Waker 는 std::task::Wake, 줄은 Arc 와 Mutex), 폴링 차례에 줄이 빌 때까지 앞에서부터 폴링한다. 한 작업이 Promise 를 풀거나 끝나면 기다리던 작업은 같은 차례에 풀린 차례대로 이어 간다. 폴링되는 도중에 스스로를 깨운 작업(엔진 상태를 보는 퓨처: 애셋 손잡이, wait::seconds, wait::next_frame)은 다음 프레임 줄에 들어간다. Promise 는 resolve 가, TaskHandle 은 그 작업이 끝날 때, 웹 Promise 는 JsFuture 가 깨운다. 내리기 마무리가 푼 Promise 를 기다리던 작업도 같은 차례에 이어 간다.
-- 엔진과 씬에 닿기: 퓨처는 &mut 를 await 너머로 쥘 수 없어서, 작업은 컨텍스트의 with(|씬, 엔진| ...) 클로저 안에서만 빌린다. 폴링하는 동안만 스레드 지역 칸에 엔진, 그래픽, 그 작업의 씬을 가리키는 포인터를 두고, with 는 그것을 꺼내 쓰고 되돌린다. 포인터는 실행기가 &mut 로 쥔 서로 다른 값(EngineRunner 의 엔진, 그래픽, 씬 목록의 한 칸)에서 만들고 폴링이 끝날 때까지 실행기는 그 &mut 를 쓰지 않는다. 폴링하는 작업 목록은 엔진에서 꺼내 둔 지역 값이다. with 가 쓰는 동안 칸이 비어 있어 두 번째 &mut 가 생길 길이 없고, 컨텍스트는 복제할 수 없고 with 가 &mut self 를 받아 겹친 with 는 컴파일되지 않는다. 클로저 인자의 수명은 클로저마다 새로 매겨져 참조가 밖으로 새지 않는다. 씬은 Any 로 컨텍스트의 타입인지 보고, 씬 핸들로 그 작업의 씬인지 본다. (빼돌린 컨텍스트를 작업 바깥이나 다른 씬에서 쓰면 이중 빌림 대신 까닭을 적은 패닉)
+- 엔진과 씬에 닿기: 퓨처는 &mut 를 await 너머로 쥘 수 없어서, 작업은 컨텍스트의 with(|씬, 엔진| ...) 클로저 안에서만 빌린다. 폴링하는 동안만 스레드 지역 칸에 엔진과 그 작업의 씬을 가리키는 포인터를 두고, with 는 그것을 꺼내 쓰고 되돌린다. (with_graphic 은 그 엔진의 Engine::with_graphic 으로 그래픽을 잠깐 꺼내 넘긴다) 포인터는 실행기가 &mut 로 쥔 서로 다른 값(EngineRunner 의 엔진, 씬 목록의 한 칸)에서 만들고 폴링이 끝날 때까지 실행기는 그 &mut 를 쓰지 않는다. 폴링하는 작업 목록은 엔진에서 꺼내 둔 지역 값이다. with 가 쓰는 동안 칸이 비어 있어 두 번째 &mut 가 생길 길이 없고, 컨텍스트는 복제할 수 없고 with 가 &mut self 를 받아 겹친 with 는 컴파일되지 않는다. 클로저 인자의 수명은 클로저마다 새로 매겨져 참조가 밖으로 새지 않는다. 씬은 Any 로 컨텍스트의 타입인지 보고, 씬 핸들로 그 작업의 씬인지 본다. (빼돌린 컨텍스트를 작업 바깥이나 다른 씬에서 쓰면 이중 빌림 대신 까닭을 적은 패닉)
 - 원본에서 Promise 를 돌려주는 load 들은 애셋이나 씬을 빌리지 않는 나눠 든 상태의 손잡이(IntoFuture)를 돌려준다. 그래서 원본 await this.atlas.load(경로) 가 scene_context.with(|씬, 엔진| 씬.atlas.load(엔진, 경로)).await 한 줄이다.
 - 엔진을 빌려 이어 가는 퓨처(AssetLoader, SpriteAtlas, LanguagePack, UIFont 의 손잡이, 모델 짓기)는 같은 칸을 crate 안에서 잠깐 꺼내 update 를 부르거나 GL 을 쓴다.
 - 화면 페이드(fade_screen_async)는 다 어두워진 tick 에서 game_scene! 이 on_dark 를 씬 작업으로 맡겨 그 자리에서 첫 await 까지 돌린다. (원본 onDark 를 부르는 자리)
@@ -240,6 +242,7 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
 | 웨이랜드에서 xdg_toplevel 의 suspended 상태는 받지 못한다. 가려짐(페이지 이벤트 Hidden)은 크롬의 다른 갈래인 프레임 콜백 3 초 규칙으로만 본다 | xdg_toplevel 은 winit(sctk)이 리스너를 달아 쥐고 있고 libwayland 는 프록시 하나에 리스너 하나만 단다. winit 0.30.13 은 configure 의 suspended 를 받아 두기만 하고 알리지 않는다 (0.31 베타 4 와 본줄기도 같다). suspended 를 보내면서 프레임 콜백도 계속 보내는 컴포지터에서만 크롬과 달라진다 |
 | DevTools 메모리 칸은 자바스크립트 힙 대신 시스템 할당자의 힙이고, jsHeapSizeLimit 는 (N/A) 다 | 데스크탑에는 V8 힙이 없다. 시스템 할당자에는 V8 처럼 정한 힙 상한이 없다 |
 | 데스크탑의 글자 래스터 픽셀과 도형 가장자리 안티에일리어싱이 크롬과 다르다 (글자 너비는 크롬 measureText 와 맞췄고, 도형 안쪽 색은 같다) | 크롬의 Skia, CoreGraphics 래스터라이저 대신 fontdue, skrifa(맥의 색 이모지와 일부 글꼴은 CoreText)와 GL 이 칠한다 |
+| 엔진을 만든 뒤 run 이 창을 열기 전에는 그래픽이 없다 (engine.get_graphic() 이 None, 원본은 Engine 생성자에서 Graphic 을 만든다). run 뒤에는 씬의 create 부터 늘 있다 | GL 컨텍스트는 창(표면)이 있어야 만든다. winit 은 이벤트 루프가 돈 뒤(resumed)에야 창을 만들 수 있다 |
 | 데스크탑 Opus 와 AAC 의 표본 끝자리가 크롬과 1.5e-7 안팎으로 다르다 (길이와 다듬기는 같다) | 크롬은 Opus 를 libopus(C), AAC 를 FFmpeg(LGPL)로 푼다. 데스크탑은 C 빌드 없이 맥에서 윈도우 대상 검사가 되도록 libopus 를 러스트로 옮긴 opus-pure 로, AAC 는 LGPL 코드를 옮기지 않고 symphonia 와 oxideav-aac 로 푼다 |
 | 데스크탑 3 채널 이상 AAC 의 PNS(잡음 대치) 띠는 잡음 표본이 크롬과 다르다 (띠의 에너지는 같다) | 명세는 PNS 난수 생성기를 정하지 않는다. 크롬(FFmpeg)과 같은 잡음 열을 내려면 FFmpeg 의 생성기와 정규화를 옮겨야 한다. (2 채널 이하는 symphonia 로 풀어 크롬과 같다) |
 
@@ -258,11 +261,12 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
 
 | 차이 | 까닭 |
 | --- | --- |
-| 전역 엔진이 없다 (Engine.getEngine, Scene.getEngine 대신 씬 함수와 ComponentContext 로 넘긴다. 그래서 인스펙터 게터 목록에 원본 Component.getEngine 이, 반사 속성 목록에 Engine 이 없다) | 전역 가변 상태는 빌림 검사를 비켜 가서, 엔진을 쓰는 곳이 인자로 드러나게 했다 |
+| 전역 엔진이 없다 (Engine.getEngine, Scene.getEngine 대신 씬 함수와 ComponentContext 로 넘긴다. 그래서 인스펙터 게터 목록에 원본 Component.getEngine 이, 반사 속성 목록에 Engine 이 없다. 엔진을 받지 않는 컴포넌트 훅(attach, detach, attach_to_tree)은 그래픽에도 닿지 않아, GL 자원은 컴포넌트를 짓는 자리나 tick 의 context.get_engine().get_graphic() 으로 짓는다. 원본 엔진 컴포넌트에도 attach 에서 그래픽을 쓰는 것은 없다) | 전역 가변 상태는 빌림 검사를 비켜 가서, 엔진을 쓰는 곳이 인자로 드러나게 했다 |
 | 노드는 NodeTree 안에 있고 NodeId 핸들로 가리킨다 | 부모와 자식을 Rc<RefCell> 로 서로 가리키면 순환 참조와 실행 중 빌림 검사가 생긴다. 지운 노드의 핸들은 None 이 된다 |
 | 노드 종류는 WorldNode 하나다 (원본 Node, ComponentNode, TransformNode, WorldNode 를 합침, 원본에서 노드인 위젯과 UINode 는 컴포넌트) | 러스트에 클래스 상속이 없어 노드 꼴을 하나로 두고 기능을 컴포넌트로 붙였다 |
 | 상속 대신 트레이트와 품기 (Scene + SceneBase, Component + ComponentBase, ShaderSprite 는 Sprite 를 품고 Deref) | 러스트에 클래스 상속이 없어 공통 상태는 구조체로, 덮어쓰기는 트레이트 함수로 둔다 |
 | 반사는 원본 상위 클래스 몫을 품은 필드로 잇는다 (#[reflect(base = 필드)], 결과 목록과 차례는 원본과 같다). &mut self 게터는 &mut 로 트리를 받는 갈래(UIDocument::to_json_text_mut, serialize_node_mut, 인스펙터는 tick 에서 읽어 둔다)로 읽는다. &NodeTree 만 받는 to_json_text 는 &mut self 게터를 읽지 못한다 | 상속이 없다. &self 로 &mut self 함수를 부를 수 없다 (엔진 컴포넌트의 저장 속성에는 &mut self 게터가 없어 두 갈래 결과가 같다) |
+| 그리기 함수와 with_graphic 의 클로저 안에서는 engine.get_graphic() 이 None 이고 인자로 받은 graphic 을 쓴다 (원본 getGraphic 은 어디서나 같은 그래픽) | &mut Engine 과 &mut Graphic 을 함께 넘기려면 그동안 그래픽이 엔진 밖에 있어야 한다. 엔진이 그래픽을 Option::take 로 잠깐 꺼내 넘기고 돌려 넣어 RefCell 이나 unsafe 없이 이중 빌림을 막는다 (3 장 그래픽 빌림) |
 | 수는 f32 다 (Format, LocalStorage 처럼 JS 수의 글을 그대로 내야 하는 곳은 f64) | GL 에 올리는 값과 같은 정밀도로 들고 메모리를 아낀다. 원본 Matrix4 는 f32 로 담고 f64 로 셈해 끝자리가 조금 다를 수 있다 |
 | GL 을 쓰는 객체는 컨텍스트를 들지 않고 함수마다 gl 을 받는다 (FullscreenPass, RenderTarget, 툰 렌더러 같은 것) | 컨텍스트는 Graphic 이 들고, 객체마다 나눠 쥐면 수명과 빌림이 엮인다 |
 | 트리를 받는 `*_in_tree` 함수를 따로 둔 곳 15 개 (UIScrollView::set_shows_vertical_scroll_bar_in_tree, UIWindow::close_in_tree, ParticleSystem::emit_in_tree 같은 것) | 씬 코드가 컴포넌트를 쥔 동안 같은 트리의 다른 노드를 함께 빌릴 수 없다 |

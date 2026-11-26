@@ -1269,10 +1269,10 @@ mod tests {
 		let mut scene_list: Vec<Box<dyn crate::core::scene::Scene>> = Vec::new();
 		assert_eq!(*handler_called_texts.borrow(), "en Hello");
 		assert!(is_loading());
-		crate::core::task::poll_tasks(&mut engine, &mut scene_list, &mut Vec::new(), None);
+		crate::core::task::poll_tasks(&mut engine, &mut scene_list, &mut Vec::new());
 		assert!(!is_applied.get());
 		handler_resolver.resolve(());
-		crate::core::task::poll_tasks(&mut engine, &mut scene_list, &mut Vec::new(), None);
+		crate::core::task::poll_tasks(&mut engine, &mut scene_list, &mut Vec::new());
 		assert!(is_applied.get());
 		assert!(!is_loading());
 		set_language_loaded_async_handler(None);

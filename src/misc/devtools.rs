@@ -12,8 +12,9 @@
 //!   - 전역 엔진이 없어 원본 setEngine 이 없다. tick, draw, is_pointer_inside_panel 이 엔진을 받는다.
 //!   - 노드 대신 NodeId 로 가리킨다. 루트 목록은 set_root_nodes(`Vec<NodeId>`) 이고, 펼친 노드는 NodeId 집합, 접은 컴포넌트는 (NodeId, 컴포넌트 차례) 집합이다.
 //!     지운 노드는 트리와 인스펙터에서 빠지고, 고른 노드가 지워지면 고르지 않은 것으로 돌아간다.
-//!   - Graphic 은 엔진이 아니라 EngineRunner 가 들어서 tick 에서는 만질 수 없다. 원본이 tick 과 눌림에서 부르는 setForceGizmosVisible 은
-//!     바랄 값만 적어 두었다가 다음 draw 첫머리에 Graphic 에 건다. (원본 setEngine 이 거는 false 도 첫 draw 에 건다)
+//!   - 원본이 tick 과 눌림에서 부르는 setForceGizmosVisible 은 눌림 처리와 set_visible 이 &Engine 만 받아 Graphic 을 바꿀 수 없어, 바랄 값을 적어 두었다가
+//!     tick 끝에 엔진의 그래픽(get_graphic_mut)에 건다. 그래서 원본처럼 그 프레임의 그리기부터 보인다. (tick 밖에서 set_visible 을 부른 것은 draw 첫머리에 건다)
+//!     원본 setEngine 이 거는 false 는 첫 tick 에 건다. (DevTools::new 는 엔진을 받지 않는다)
 //!   - 노드 종류는 WorldNode 하나뿐이라 트리의 Type 칸과 인스펙터의 type 은 늘 "WorldNode" 다.
 //!   - 인스펙터의 컴포넌트 속성은 원본 getComponentProperties 처럼 그 컴포넌트의 get*, is* 게터를 모두 불러 보인다.
 //!     원본은 실행 중에 프로토타입을 훑고, 러스트 판은 `#[reflect]` 매크로가 컴파일 때 지은 목록을 쓴다. (core/reflection.rs, 엔진 컴포넌트는 모두 붙였다)
@@ -420,7 +421,7 @@ pub struct DevTools {
 	statistics_scroll_drag_start_scroll_y: f32,
 	/// 인스펙터의 컴포넌트 속성을 읽는 문서. (처음은 엔진 컴포넌트만 등록된 것, set_ui_document 로 게임 문서를 건다)
 	ui_document: UIDocument,
-	/// 다음 draw 에 Graphic 에 걸 모든 기즈모 강제 표시 값.
+	/// tick 끝이나 다음 draw 첫머리에 Graphic 에 걸 모든 기즈모 강제 표시 값.
 	pending_force_gizmos_visible: Option<bool>,
 	/// 띄울 질문과 답을 기다리는 질문.
 	local_storage_dialog_request: Option<LocalStorageDialogRequest>,
@@ -523,7 +524,7 @@ impl DevTools {
 
 	//==============================================================================
 	/// 보이기와 숨기기. (F2 와 같다. 보일 때 패널을 창 오른쪽 아래에 붙이고, 모든 기즈모 설정을 건다)
-	/// - 모든 기즈모 강제 표시는 다음 draw 첫머리에 Graphic 에 건다. 숨길 때는 기다리던 로컬 스토리지 질문을 닫는다.
+	/// - 모든 기즈모 강제 표시는 tick 끝이나 다음 draw 첫머리 가운데 먼저 오는 때에 Graphic 에 건다. 숨길 때는 기다리던 로컬 스토리지 질문을 닫는다.
 	///
 	/// # 인자
 	/// - `engine`: 창 안쪽 논리 크기를 읽을 엔진.
@@ -668,6 +669,7 @@ impl DevTools {
 	/// 갱신. (F2 토글, 트리 목록, 터치)
 	/// - 검사 부탁(입력 필드 문맥 메뉴의 검사)이 있으면 먼저 그 노드를 검사한다. 숨겨 있으면 F2 만 본다.
 	/// - 보일 때는 지운 노드를 고른 것에서 빼고, 트리 목록과 &mut self 게터 값을 다시 읽고, 로컬 스토리지 질문의 답을 받고, 누름, 끌기, 뗌을 처리한다.
+	/// - 끝에 바뀐 모든 기즈모 강제 표시를 엔진의 그래픽에 건다. (원본처럼 그 프레임의 그리기부터 보인다, 그래픽이 없으면 다음 draw 첫머리에 건다)
 	///
 	/// # 인자
 	/// - `engine`: 입력과 뷰를 읽고 질문 창을 띄울 엔진.
@@ -675,6 +677,25 @@ impl DevTools {
 	/// - `_time_delta`: 지난 프레임부터 흐른 시간. (초, 쓰지 않는다. 원본처럼 시간 배율을 거치지 않은 값을 넘긴다)
 	//==============================================================================
 	pub fn tick(&mut self, engine: &mut Engine, node_tree: &mut NodeTree, _time_delta: f32) {
+		self.tick_panel(engine, node_tree);
+		if let Some(graphic) = engine.get_graphic_mut() {
+			self.apply_pending_force_gizmos_visible(graphic);
+		}
+	}
+
+	//==============================================================================
+	/// 모든 기즈모 강제 표시 걸기. (기다리던 값이 있으면 Graphic 에 건다)
+	//==============================================================================
+	fn apply_pending_force_gizmos_visible(&mut self, graphic: &mut Graphic) {
+		if let Some(is_force_gizmos_visible) = self.pending_force_gizmos_visible.take() {
+			graphic.set_force_gizmos_visible(is_force_gizmos_visible);
+		}
+	}
+
+	//==============================================================================
+	/// 패널 갱신. (tick 의 몸, F2 토글, 트리 목록, 터치)
+	//==============================================================================
+	fn tick_panel(&mut self, engine: &mut Engine, node_tree: &mut NodeTree) {
 		// 검사 부탁. (입력 필드 문맥 메뉴의 검사, 크롬이 개발자 도구를 열어 그 요소를 고르는 자리)
 		if let Some(inspect_node_id) = engine.take_dev_tools_inspect_request(node_tree) {
 			self.inspect_node(engine, node_tree, inspect_node_id);
@@ -1476,7 +1497,7 @@ impl DevTools {
 
 	//==============================================================================
 	/// 출력. (창 안쪽 논리 좌표로 그리고, 끝나면 들어올 때의 그리기 상태로 돌린다)
-	/// - 기다리던 모든 기즈모 강제 표시 값을 먼저 Graphic 에 건다. 숨겨 있으면 그것만 하고 돌아간다.
+	/// - tick 밖에서 바꿔 아직 걸지 않은 모든 기즈모 강제 표시 값을 먼저 Graphic 에 건다. 숨겨 있으면 FPS 표시만 그리고 돌아간다.
 	///
 	/// # 인자
 	/// - `engine`: 통계와 뷰 정보를 읽을 엔진.
@@ -1484,9 +1505,7 @@ impl DevTools {
 	/// - `graphic`: 그릴 그래픽. (씬의 post_draw 처럼 다른 것을 다 그린 뒤)
 	//==============================================================================
 	pub fn draw(&mut self, engine: &Engine, node_tree: &NodeTree, graphic: &mut Graphic) {
-		if let Some(is_force_gizmos_visible) = self.pending_force_gizmos_visible.take() {
-			graphic.set_force_gizmos_visible(is_force_gizmos_visible);
-		}
+		self.apply_pending_force_gizmos_visible(graphic);
 
 		if !self.is_visible {
 			// 패널을 닫아도 FPS 표시는 그린다.
@@ -2940,7 +2959,7 @@ mod tests {
 		LocalStorage::set_string(SETTINGS_STORAGE_KEY, "{broken");
 		assert_eq!(DevTools::new().get_setting_values(), [false, true, false, false, false]);
 
-		// 세팅 탭의 칸을 누르면 바뀌고 저장된다. (모든 기즈모는 다음 draw 에 걸 값도 적는다)
+		// 세팅 탭의 칸을 누르면 바뀌고 저장된다. (모든 기즈모는 tick 끝에 걸 값도 적는다)
 		let mut pressed_dev_tools = DevTools::new();
 		let checkbox_rect = DevTools::calculate_setting_checkbox_rect(1, 0.0, 0.0);
 		pressed_dev_tools.handle_settings_press(checkbox_rect.position.x + 1.0, checkbox_rect.position.y + 1.0, 0.0, 0.0);

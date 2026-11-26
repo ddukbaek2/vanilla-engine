@@ -2878,7 +2878,7 @@ mod tests {
 		let mut step_scene_frame = |engine: &mut Engine, scene_list: &mut Vec<Box<dyn Scene>>| -> (f32, u32) {
 			current_seconds += 0.06;
 			engine.get_time_manager_mut().update(current_seconds);
-			task::poll_tasks(engine, scene_list, &mut Vec::new(), None);
+			task::poll_tasks(engine, scene_list, &mut Vec::new());
 			scene_list[0].tick(engine, 0.06);
 			let scene = scene_list[0].as_scene_any_mut().downcast_mut::<LayoutCountScene>().expect("시험용 씬");
 			(scene.game_scene_base.get_screen_fade_alpha(), scene.layout_count)
@@ -2921,7 +2921,7 @@ mod tests {
 		assert!(!started.get());
 		scene.game_scene_base.tick(&mut engine, 0.06);
 		let mut moved_scene_list: Vec<Box<dyn Scene>> = vec![scene_list.remove(0)];
-		task::poll_tasks(&mut engine, &mut moved_scene_list, &mut Vec::new(), None);
+		task::poll_tasks(&mut engine, &mut moved_scene_list, &mut Vec::new());
 		assert!(started.get());
 	}
 }

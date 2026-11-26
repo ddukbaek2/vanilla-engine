@@ -651,7 +651,7 @@ The example above draws the node tree with `self.scene_base.draw(graphic)` after
 
 ## Drawing settings
 
-The original gets `Graphic` from `engine.getGraphic()`, but in the Rust version `Graphic` is not inside `Engine`; it is passed only to the scene's drawing functions (`pre_draw`, `draw`, `post_draw`, `draw_on_load`). The settings below are not reset every frame, so setting them once there is enough.
+Like the original, get `Graphic` from `engine.get_graphic_mut()` and set these in the scene's `create`, `initialize` or `tick`. Inside the scene's drawing functions (`pre_draw`, `draw`, `post_draw`, `draw_on_load`), set them on the `graphic` argument. (There the engine has lent the graphic as the argument, so `engine.get_graphic_mut()` is `None`) The settings below are not reset every frame, so setting them once is enough.
 
 - `set_image_smoothing_enabled(false)`: stretches images with the nearest pixel. Pixel art games use this. (on by default)
 - `set_image_mipmap_enabled(true)`: reduces shimmering when large images are drawn much smaller. (off by default)

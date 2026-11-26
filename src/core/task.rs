@@ -15,13 +15,15 @@
 //!   with(|씬, 엔진| ...) 클로저 안에서만 엔진과 씬을 빌린다. 클로저는 동기라 그 안에서 await 할 수 없고, 클로저가 받는 참조의 수명은
 //!   클로저마다 새로 매겨져(`for<'a>`) 돌려주는 값(R)에 담을 수 없으니 참조가 클로저 밖으로 새지 못한다.
 //!   컨텍스트는 복제할 수 없고 with 가 &mut self 를 받아서, 한 작업 안에서 with 를 겹쳐 부르는 코드는 컴파일되지 않는다.
-//! - 건전성: 폴링하는 동안만 스레드 지역 칸(TASK_ACCESS)에 엔진, 그래픽, 그 작업의 씬을 가리키는 포인터를 둔다.
-//!   1. 포인터는 실행기가 &mut 로 쥔 엔진, 그래픽, 씬 목록의 한 칸에서 만든다. 폴링이 끝날 때까지 실행기는 그 &mut 를 다시 쓰지 않고,
+//! - 건전성: 폴링하는 동안만 스레드 지역 칸(TASK_ACCESS)에 엔진과 그 작업의 씬을 가리키는 포인터를 둔다.
+//!   1. 포인터는 실행기가 &mut 로 쥔 엔진과 씬 목록의 한 칸에서 만든다. 폴링이 끝날 때까지 실행기는 그 &mut 를 다시 쓰지 않고,
 //!      폴링이 끝나면(패닉으로 풀릴 때도) 칸을 앞의 값으로 되돌린다. 그래서 포인터는 쓰는 동안 늘 살아 있고, 실행기 쪽 빌림과 겹치지 않는다.
-//!      맡기는 자리의 첫 폴링은 spawn 이 받은 &mut Engine 과 &mut 씬에서 만든다. (그래픽은 그 자리에 없어 with_graphic 이 None)
+//!      맡기는 자리의 첫 폴링은 spawn 이 받은 &mut Engine 과 &mut 씬에서 만든다.
 //!      &mut Engine 은 with 안에서만 얻으므로 그때 칸은 비어 있고, 첫 폴링이 끝나면 다시 빈 칸으로 돌린다.
-//!   2. 엔진(EngineRunner.engine), 그래픽(EngineRunner.graphic), 씬(EngineRunner 의 씬 목록 한 칸)은 서로 다른 값이라 겹치지 않는다.
+//!   2. 엔진(EngineRunner.engine)과 씬(EngineRunner 의 씬 목록 한 칸)은 서로 다른 값이라 겹치지 않는다.
 //!      (spawn 이 받은 씬과 엔진도 빌림 검사기가 서로 다른 값임을 보장한다)
+//!      그래픽은 엔진이 들어 따로 포인터를 두지 않는다. with_graphic 은 Engine::with_graphic 으로 그래픽을 엔진에서 잠깐 꺼내 넘기고 돌려 넣는다.
+//!      (그래서 맡기는 자리의 첫 구간도 그래픽을 받는다. 엔진이 그리기 함수에 그래픽을 내어 준 동안 맡긴 작업은 그래픽이 엔진에 없어 None)
 //!      폴링하는 작업 목록은 엔진에서 꺼내 둔 지역 값이라 엔진을 빌려도 닿지 않는다. (그동안 맡긴 새 작업은 엔진의 따로 둔 목록에 쌓인다)
 //!   3. with 는 칸에서 포인터를 꺼내(take) 쓰고 끝나면 되돌린다. 그동안 칸이 비어 있어서, 어떤 길로든 두 번째 &mut 를 만들 수 없다.
 //!      (작업 바깥에서 부르거나, 안에서 겹쳐 부르거나, 다른 씬의 컨텍스트를 몰래 넘겨 부르면 이중 빌림 대신 까닭을 적은 패닉이 난다)
@@ -392,12 +394,11 @@ impl TaskExecutor {
 }
 
 //==============================================================================
-/// 폴링하는 동안 작업이 닿는 것. (엔진, 그래픽, 그 작업의 씬을 가리키는 포인터)
+/// 폴링하는 동안 작업이 닿는 것. (엔진과 그 작업의 씬을 가리키는 포인터, 그래픽은 엔진이 든다)
 //==============================================================================
 #[derive(Clone, Copy)]
 struct TaskAccess {
 	engine: NonNull<Engine>,
-	graphic: Option<NonNull<Graphic>>,
 	scene: Option<NonNull<dyn Scene>>,
 	scene_id: Option<SceneId>,
 }
@@ -480,28 +481,16 @@ impl TaskAccessLease {
 	//==============================================================================
 	/// 그 작업의 씬과 엔진 빌리기. (scene_id 의 씬이 아니면 None)
 	//==============================================================================
-	fn get_scene_and_engine_mut(&mut self, scene_id: SceneId) -> Option<(&mut dyn Scene, &mut Engine, Option<&mut Graphic>)> {
+	fn get_scene_and_engine_mut(&mut self, scene_id: SceneId) -> Option<(&mut dyn Scene, &mut Engine)> {
 		if self.task_access.scene_id != Some(scene_id) {
 			return None;
 		}
 		let scene_pointer = self.task_access.scene?;
-		// SAFETY: 셋 모두 poll_tasks 가 &mut 에서 만든 포인터이고 서로 다른 값(씬 목록의 한 칸, 엔진, 그래픽)을 가리킨다.
+		// SAFETY: 둘 모두 poll_tasks 가 &mut 에서 만든 포인터이고 서로 다른 값(씬 목록의 한 칸, 엔진)을 가리킨다.
 		// 칸에서 꺼내 둔 동안은 이 값 말고는 닿을 길이 없고, 돌려주는 참조는 &mut self 에 묶여 이 값보다 오래 살지 못한다.
 		let scene = unsafe { &mut *scene_pointer.as_ptr() };
 		let engine = unsafe { &mut *self.task_access.engine.as_ptr() };
-		let graphic = self.task_access.graphic.map(|graphic_pointer| unsafe { &mut *graphic_pointer.as_ptr() });
-		Some((scene, engine, graphic))
-	}
-
-	//==============================================================================
-	/// 엔진과 그래픽 빌리기. (그래픽이 없으면 None)
-	//==============================================================================
-	fn get_engine_and_graphic_mut(&mut self) -> Option<(&mut Engine, &mut Graphic)> {
-		let graphic_pointer = self.task_access.graphic?;
-		// SAFETY: get_engine_mut 와 같다. 엔진과 그래픽은 EngineRunner 의 서로 다른 칸이다.
-		let engine = unsafe { &mut *self.task_access.engine.as_ptr() };
-		let graphic = unsafe { &mut *graphic_pointer.as_ptr() };
-		Some((engine, graphic))
+		Some((scene, engine))
 	}
 }
 
@@ -525,11 +514,11 @@ pub(crate) fn with_polling_engine<R>(engine_function: impl FnOnce(&mut Engine) -
 }
 
 //==============================================================================
-/// 폴링하는 작업 안에서 그래픽 빌리기. (GL 이 있어야 끝나는 퓨처가 쓴다. 작업 바깥이거나 with 안이거나 그래픽이 없으면 None)
+/// 폴링하는 작업 안에서 그래픽 빌리기. (GL 이 있어야 끝나는 퓨처가 쓴다. 작업 바깥이거나 with 안이거나 엔진에 그래픽이 없으면 None)
 //==============================================================================
 pub(crate) fn with_polling_graphic<R>(graphic_function: impl FnOnce(&mut Graphic) -> R) -> Option<R> {
 	let mut task_access_lease = TaskAccessLease::try_take()?;
-	let result = task_access_lease.get_engine_and_graphic_mut().map(|(_, graphic)| graphic_function(graphic));
+	let result = task_access_lease.get_engine_mut().get_graphic_mut().map(graphic_function);
 	drop(task_access_lease);
 	result
 }
@@ -591,19 +580,20 @@ impl EngineContext {
 	}
 
 	//==============================================================================
-	/// 엔진과 그래픽 빌리기. (GL 이 있어야 하는 일, 그래픽을 붙이기 전이면 None)
-	/// - with 처럼 엔진이 이 작업을 폴링하는 동안에만 부를 수 있다. (다른 곳에서 부르면 패닉)
+	/// 엔진과 그래픽 빌리기. (GL 이 있어야 하는 일, Engine::with_graphic 처럼 그래픽을 엔진에서 잠깐 꺼내 넘긴다)
+	/// - with 처럼 엔진이 이 작업을 폴링하는 동안에만 부를 수 있다. (다른 곳에서 부르면 패닉) 맡기는 자리의 첫 구간도 그래픽을 받는다.
+	/// - 클로저 안에서는 engine.get_graphic() 이 None 이고, 인자로 받은 graphic 을 쓴다.
 	///
 	/// # 인자
 	/// - `graphic_function`: 엔진과 그래픽을 받아 일하는 클로저.
 	///
 	/// # 돌려줌
-	/// 클로저가 돌려준 값. (그래픽이 없어 클로저를 부르지 않았으면 None, 맡기는 자리의 첫 구간도 None)
+	/// 클로저가 돌려준 값. (그래픽을 붙이기 전이거나, 그리기 함수 안에서 맡겨 엔진이 그래픽을 그 함수에 내어 준 동안이면 클로저를 부르지 않고 None)
 	//==============================================================================
 	#[track_caller]
 	pub fn with_graphic<R>(&mut self, graphic_function: impl FnOnce(&mut Engine, &mut Graphic) -> R) -> Option<R> {
 		let mut task_access_lease = TaskAccessLease::take("EngineContext::with_graphic");
-		let result = task_access_lease.get_engine_and_graphic_mut().map(|(engine, graphic)| graphic_function(engine, graphic));
+		let result = task_access_lease.get_engine_mut().with_graphic(graphic_function);
 		drop(task_access_lease);
 		result
 	}
@@ -683,7 +673,7 @@ impl<S: Scene + 'static> SceneContext<S> {
 	#[track_caller]
 	pub fn with<R>(&mut self, scene_function: impl FnOnce(&mut S, &mut Engine) -> R) -> R {
 		let mut task_access_lease = TaskAccessLease::take("SceneContext::with");
-		let (scene, engine, _) = match task_access_lease.get_scene_and_engine_mut(self.scene_id) {
+		let (scene, engine) = match task_access_lease.get_scene_and_engine_mut(self.scene_id) {
 			Some(scene_and_engine) => {
 				scene_and_engine
 			}
@@ -705,19 +695,20 @@ impl<S: Scene + 'static> SceneContext<S> {
 	}
 
 	//==============================================================================
-	/// 씬과 엔진과 그래픽 빌리기. (GL 이 있어야 하는 일, 그래픽을 붙이기 전이면 None)
-	/// - with 처럼 엔진이 이 작업을 폴링하는 동안에만 부를 수 있다. (다른 곳에서 부르면 패닉)
+	/// 씬과 엔진과 그래픽 빌리기. (GL 이 있어야 하는 일, Engine::with_graphic 처럼 그래픽을 엔진에서 잠깐 꺼내 넘긴다)
+	/// - with 처럼 엔진이 이 작업을 폴링하는 동안에만 부를 수 있다. (다른 곳에서 부르면 패닉) 맡기는 자리의 첫 구간도 그래픽을 받는다.
+	/// - 클로저 안에서는 engine.get_graphic() 이 None 이고, 인자로 받은 graphic 을 쓴다.
 	///
 	/// # 인자
 	/// - `graphic_function`: 그 씬과 엔진과 그래픽을 받아 일하는 클로저.
 	///
 	/// # 돌려줌
-	/// 클로저가 돌려준 값. (그래픽이 없어 클로저를 부르지 않았으면 None, 맡기는 자리의 첫 구간도 None)
+	/// 클로저가 돌려준 값. (그래픽을 붙이기 전이거나, 그리기 함수 안에서 맡겨 엔진이 그래픽을 그 함수에 내어 준 동안이면 클로저를 부르지 않고 None)
 	//==============================================================================
 	#[track_caller]
 	pub fn with_graphic<R>(&mut self, graphic_function: impl FnOnce(&mut S, &mut Engine, &mut Graphic) -> R) -> Option<R> {
 		let mut task_access_lease = TaskAccessLease::take("SceneContext::with_graphic");
-		let (scene, engine, graphic) = match task_access_lease.get_scene_and_engine_mut(self.scene_id) {
+		let (scene, engine) = match task_access_lease.get_scene_and_engine_mut(self.scene_id) {
 			Some(scene_and_engine) => {
 				scene_and_engine
 			}
@@ -733,7 +724,7 @@ impl<S: Scene + 'static> SceneContext<S> {
 				panic!("SceneContext::with_graphic: 씬이 컨텍스트의 타입이 아닙니다");
 			}
 		};
-		let result = graphic.map(|graphic| graphic_function(scene, engine, graphic));
+		let result = engine.with_graphic(|engine, graphic| graphic_function(scene, engine, graphic));
 		drop(task_access_lease);
 		result
 	}
@@ -746,7 +737,6 @@ impl<S: Scene + 'static> SceneContext<S> {
 fn poll_spawned_task(engine: &mut Engine, scene_pointer: Option<NonNull<dyn Scene>>, mut task: Task) {
 	let task_access = TaskAccess {
 		engine: NonNull::from(&mut *engine),
-		graphic: None,
 		scene: scene_pointer,
 		scene_id: task.scene_id,
 	};
@@ -834,7 +824,7 @@ pub(crate) fn begin_poll_frame(engine: &mut Engine) {
 /// - 작업 표를 엔진에서 꺼내 돌리고, 그동안 맡긴 새 작업은 작업 하나를 폴링할 때마다 표에 넣는다.
 /// - 씬 작업의 씬은 불러온 씬 목록과 내렸지만 살려 둔 씬 목록에서 찾는다. 어디에도 없으면(씬을 버렸으면) 작업을 버린다.
 //==============================================================================
-pub(crate) fn poll_woken_tasks(engine: &mut Engine, scene_list: &mut [Box<dyn Scene>], detached_scene_list: &mut [Box<dyn Scene>], mut graphic: Option<&mut Graphic>) {
+pub(crate) fn poll_woken_tasks(engine: &mut Engine, scene_list: &mut [Box<dyn Scene>], detached_scene_list: &mut [Box<dyn Scene>]) {
 	let mut task_map = std::mem::take(&mut engine.task_executor.task_map);
 	TaskExecutor::merge_spawned_tasks(&mut task_map, engine.task_executor.spawned_task_list.get_mut());
 	let wake_queue = engine.task_executor.wake_queue.clone();
@@ -866,7 +856,6 @@ pub(crate) fn poll_woken_tasks(engine: &mut Engine, scene_list: &mut [Box<dyn Sc
 		};
 		let task_access = TaskAccess {
 			engine: NonNull::from(&mut *engine),
-			graphic: graphic.as_deref_mut().map(NonNull::from),
 			scene: scene_pointer,
 			scene_id: task.scene_id,
 		};
@@ -882,9 +871,9 @@ pub(crate) fn poll_woken_tasks(engine: &mut Engine, scene_list: &mut [Box<dyn Sc
 /// 프레임 하나의 폴링. (차례 시작과 깨운 작업 폴링, 시험이 쓴다. 엔진은 그 사이에 내리기 마무리를 끼운다)
 //==============================================================================
 #[cfg(test)]
-pub(crate) fn poll_tasks(engine: &mut Engine, scene_list: &mut [Box<dyn Scene>], detached_scene_list: &mut [Box<dyn Scene>], graphic: Option<&mut Graphic>) {
+pub(crate) fn poll_tasks(engine: &mut Engine, scene_list: &mut [Box<dyn Scene>], detached_scene_list: &mut [Box<dyn Scene>]) {
 	begin_poll_frame(engine);
-	poll_woken_tasks(engine, scene_list, detached_scene_list, graphic);
+	poll_woken_tasks(engine, scene_list, detached_scene_list);
 }
 
 //==============================================================================
@@ -1121,7 +1110,7 @@ mod tests {
 	/// 프레임 하나의 폴링 차례. (살려 둔 씬 없이)
 	//==============================================================================
 	fn poll_frame(engine: &mut Engine, scene_list: &mut [Box<dyn Scene>]) {
-		poll_tasks(engine, scene_list, &mut Vec::new(), None);
+		poll_tasks(engine, scene_list, &mut Vec::new());
 	}
 
 	//==============================================================================
@@ -1394,6 +1383,7 @@ mod tests {
 				engine.get_frame_number()
 			});
 			assert_eq!(frame_number, 1);
+			// 창 없는 시험이라 엔진에 그래픽이 없다.
 			assert!(scene_context.with_graphic(|_scene, _engine, _graphic| ()).is_none());
 			wait::next_frame().await;
 			scene_context.with(|scene, engine| {

@@ -4,7 +4,9 @@
 //!   러스트 판은 창, GL 컨텍스트, 입력 이벤트, 화면 넘기기를 플랫폼 층(crate::platform)이 맡고,
 //!   여기 EngineRunner 는 플랫폼을 모른 채 씬과 프레임 흐름만 돈다. (데스크탑: platform/desktop.rs, 웹: platform/web.rs)
 //! - 씬에는 &mut Engine 을 넘긴다. 씬은 여기서 매니저(시간, 뷰, 입력)를 꺼내 쓴다. (원본 Engine.getEngine() 자리)
-//! - Graphic 은 플랫폼이 GL 컨텍스트를 만든 뒤 attach_graphic 으로 넘겨받고, 씬의 draw 계열에 따로 넘긴다.
+//! - Graphic 은 플랫폼이 GL 컨텍스트를 만든 뒤 attach_graphic 으로 넘겨받아 엔진이 든다. 원본 getGraphic 처럼 씬의 어느 훅에서나 get_graphic, get_graphic_mut 로 꺼낸다.
+//!   씬의 draw 계열은 지금처럼 graphic 인자를 받는다. 그 인자는 엔진이 든 그래픽을 Option::take 로 잠깐 꺼내 넘긴 것이다. (&mut Engine 과 &mut Graphic 을 함께 넘기려면
+//!   그래픽이 엔진 밖에 있어야 해서, 그동안 engine.get_graphic() 은 None 이고 인자의 graphic 이 곧 그 그래픽이다. with_graphic 도 같다. RefCell 도 unsafe 도 쓰지 않는다)
 //! - 오디오 매니저를 원본처럼 생성할 때 만들어 든다. AudioContext(소리 장치)는 처음 쓸 때 만든다. 프레임마다 하는 오디오 일은 없다.
 //!   웹은 플랫폼이 click / touchstart / keydown 에서 resume_on_user_gesture, focus / visibilitychange 에서 resume 을 부른다.
 //! - 원본 SceneManager.getAllLoadedScenes 는 get_all_loaded_scenes 로, 씬 객체 대신 핸들(SceneId)을 돌려준다. (씬마다 &mut Engine 을 받아 도는 동안 다른 씬을 빌릴 수 없다)
@@ -250,7 +252,7 @@ enum PendingFontOperation {
 
 //==============================================================================
 /// 엔진.
-/// - 설정으로 만들고 run 에 첫 씬을 넘겨 돌린다. 씬의 훅은 &mut Engine 을 받아 매니저(시간, 뷰, 입력, 오디오, 커서)를 꺼내 쓴다.
+/// - 설정으로 만들고 run 에 첫 씬을 넘겨 돌린다. 씬의 훅은 &mut Engine 을 받아 매니저(시간, 뷰, 입력, 오디오, 커서)와 그래픽(get_graphic, run 이 창을 연 뒤)을 꺼내 쓴다.
 ///
 /// # 예제
 /// 첫 씬으로 엔진 돌리기 (examples/quickstart.rs)
@@ -309,6 +311,8 @@ pub struct Engine {
 	frame_number: u64,
 	version: Version,
 	is_exit_requested: bool,
+	/// 그래픽. (플랫폼이 GL 컨텍스트를 만든 뒤 attach_graphic 으로 넣는다. 그리기 함수와 with_graphic 에 내어 준 동안은 비어 있다)
+	graphic: Option<Graphic>,
 	/// 프레임 번호마다 화면 저장을 받을 함수. (request_frame_capture)
 	frame_capture_handler_map: std::collections::HashMap<u64, Vec<FrameCaptureHandler>>,
 	/// 다음 프레임 첫머리에 캔버스와 뷰 영역을 다시 맞춰 달라고 했는지. (resize)
@@ -360,6 +364,7 @@ impl Engine {
 			pointer_cursor: PointerCursor::new(),
 			audio_manager: AudioManager::new(),
 			platform_window: None,
+			graphic: None,
 			frame_number: 1,
 			version: ENGINE_VERSION,
 			is_exit_requested: false,
@@ -754,7 +759,7 @@ impl Engine {
 	//==============================================================================
 	/// 씬 작업 맡기기. (그 씬의 async 작업, 작업 함수가 받은 SceneContext 의 with 안에서 그 씬(S 타입)과 엔진을 빌린다)
 	/// - 원본 async 함수 안에서 this 를 쓰는 자리다. 원본처럼 이 자리에서 첫 await 까지 돌고, 남은 것은 깨어날 때마다 프레임의 폴링 차례에 돈다.
-	///   (이 자리의 첫 구간에서는 그래픽이 없어 with_graphic 이 None 이다)
+	///   (첫 구간의 with_graphic 도 엔진의 그래픽을 준다. 그리기 함수 안에서 맡기면 그 함수가 인자로 그래픽을 쥐고 있어 None 이다)
 	/// - 씬을 내려도 원본처럼 이어 돈다. (씬 값은 작업이 다 끝날 때까지 산다) load_scene 전의 씬이면 첫 구간만 돌고 버린다.
 	/// - 불러오기 작업이면 create 에서 씬의 track_task 로 맡겨 끝날 때까지 initialize 를 미룬다. (unload 에서 맡기면 내리기 끝을 미룬다)
 	///
@@ -1218,6 +1223,161 @@ impl Engine {
 	//==============================================================================
 	pub fn get_canvas(&self) -> Option<&PlatformWindow> {
 		self.platform_window.as_ref()
+	}
+
+	//==============================================================================
+	/// 그래픽. (원본 getGraphic, 씬의 create, initialize, tick 이나 컴포넌트의 tick 에서 GL 자원(텍스처, 렌더 타겟, 셰이더 프로그램, 툰 렌더러 같은)을 짓는다)
+	/// - 플랫폼이 GL 컨텍스트를 만들기 전(run 전, 창 없는 시험)에는 None 이다.
+	/// - 그리기 함수(pre_draw, draw, post_draw, draw_on_load, draw_gizmos)와 with_graphic 의 클로저 안에서는 그래픽을 인자로 내어 주어 None 이다. (그 자리에서는 인자로 받은 graphic 이 이 그래픽이다)
+	///
+	/// # 돌려줌
+	/// 엔진의 그래픽. (붙이기 전이거나 인자로 내어 준 동안은 None)
+	///
+	/// # 예제
+	/// 씬을 만들 때 셰이더 프로그램 짓기
+	/// ```rust,no_run
+	/// use vanilla::{Engine, Scene, SceneBase, ShaderProgram};
+	///
+	/// const VERTEX_SHADER_SOURCE: &str = "#version 300 es
+	/// in vec2 vertexPosition;
+	/// void main() {
+	/// 	gl_Position = vec4(vertexPosition, 0.0, 1.0);
+	/// }
+	/// ";
+	///
+	/// const FRAGMENT_SHADER_SOURCE: &str = "#version 300 es
+	/// precision highp float;
+	/// out vec4 outputColor;
+	/// void main() {
+	/// 	outputColor = vec4(1.0);
+	/// }
+	/// ";
+	///
+	/// struct MainScene {
+	/// 	scene_base: SceneBase,
+	/// 	shader_program: Option<ShaderProgram>,
+	/// }
+	///
+	/// impl Scene for MainScene {
+	/// 	fn get_scene_base(&self) -> &SceneBase {
+	/// 		&self.scene_base
+	/// 	}
+	///
+	/// 	fn get_scene_base_mut(&mut self) -> &mut SceneBase {
+	/// 		&mut self.scene_base
+	/// 	}
+	///
+	/// 	fn create(&mut self, engine: &mut Engine) {
+	/// 		if let Some(graphic) = engine.get_graphic() {
+	/// 			self.shader_program = ShaderProgram::new(graphic.get_gl(), VERTEX_SHADER_SOURCE, FRAGMENT_SHADER_SOURCE).ok();
+	/// 		}
+	/// 	}
+	/// }
+	/// ```
+	///
+	/// 창 없이 만든 엔진에는 그래픽이 없다
+	/// ```rust
+	/// use vanilla::{Engine, EngineConfiguration};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// assert!(engine.get_graphic().is_none());
+	/// ```
+	//==============================================================================
+	pub fn get_graphic(&self) -> Option<&Graphic> {
+		self.graphic.as_ref()
+	}
+
+	//==============================================================================
+	/// 그래픽. (변경용, 글꼴 캐시, 기즈모 강제 표시, 묶어 그리기 같은 설정을 그리기 밖에서 바꾼다)
+	/// - get_graphic 처럼 붙이기 전과 인자로 내어 준 동안은 None 이다.
+	///
+	/// # 돌려줌
+	/// 엔진의 그래픽. (붙이기 전이거나 인자로 내어 준 동안은 None)
+	///
+	/// # 예제
+	/// 씬의 tick 에서 모든 기즈모 보이기
+	/// ```rust,no_run
+	/// use vanilla::{Engine, KeyCode, Scene, SceneBase};
+	///
+	/// struct MainScene {
+	/// 	scene_base: SceneBase,
+	/// }
+	///
+	/// impl Scene for MainScene {
+	/// 	fn get_scene_base(&self) -> &SceneBase {
+	/// 		&self.scene_base
+	/// 	}
+	///
+	/// 	fn get_scene_base_mut(&mut self) -> &mut SceneBase {
+	/// 		&mut self.scene_base
+	/// 	}
+	///
+	/// 	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+	/// 		self.scene_base.tick(engine, time_delta);
+	/// 		let is_key_g = engine.get_input_manager().is_key_pressed(KeyCode::G);
+	/// 		if let Some(graphic) = engine.get_graphic_mut() {
+	/// 			graphic.set_force_gizmos_visible(is_key_g);
+	/// 		}
+	/// 	}
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn get_graphic_mut(&mut self) -> Option<&mut Graphic> {
+		self.graphic.as_mut()
+	}
+
+	//==============================================================================
+	/// 엔진과 그래픽을 함께 빌리기. (그래픽과 엔진을 둘 다 &mut 로 받는 함수를 그리기 밖에서 부를 때)
+	/// - 그래픽을 엔진에서 잠깐 꺼내(Option::take) 클로저에 넘기고, 클로저가 끝나면 돌려 넣는다. 엔진이 그리기 함수에 그래픽을 넘기는 것과 같은 길이다.
+	///   클로저 안에서는 engine.get_graphic() 이 None 이고, 인자로 받은 graphic 을 쓴다.
+	///
+	/// # 인자
+	/// - `graphic_function`: 엔진과 그래픽을 받아 일하는 클로저.
+	///
+	/// # 돌려줌
+	/// 클로저가 돌려준 값. (그래픽이 없거나 이미 내어 준 동안이면 클로저를 부르지 않고 None)
+	///
+	/// # 예제
+	/// 그래픽이 없으면 클로저를 부르지 않는다
+	/// ```rust
+	/// use vanilla::{Engine, EngineConfiguration};
+	///
+	/// let mut engine = Engine::new(EngineConfiguration::new());
+	/// let result = engine.with_graphic(|_engine, graphic| graphic.get_global_alpha());
+	/// assert!(result.is_none());
+	/// ```
+	///
+	/// 씬의 initialize 에서 엔진의 시계와 그래픽을 함께 쓰기
+	/// ```rust,no_run
+	/// use vanilla::{Engine, Scene, SceneBase};
+	///
+	/// struct MainScene {
+	/// 	scene_base: SceneBase,
+	/// }
+	///
+	/// impl Scene for MainScene {
+	/// 	fn get_scene_base(&self) -> &SceneBase {
+	/// 		&self.scene_base
+	/// 	}
+	///
+	/// 	fn get_scene_base_mut(&mut self) -> &mut SceneBase {
+	/// 		&mut self.scene_base
+	/// 	}
+	///
+	/// 	fn initialize(&mut self, engine: &mut Engine) {
+	/// 		engine.with_graphic(|engine, graphic| {
+	/// 			engine.get_time_manager_mut().set_time_scale(1.0);
+	/// 			graphic.set_force_gizmos_visible(false);
+	/// 		});
+	/// 	}
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn with_graphic<R>(&mut self, graphic_function: impl FnOnce(&mut Engine, &mut Graphic) -> R) -> Option<R> {
+		let mut graphic = self.graphic.take()?;
+		let result = graphic_function(self, &mut graphic);
+		self.graphic = Some(graphic);
+		Some(result)
 	}
 
 	//==============================================================================
@@ -1705,7 +1865,6 @@ impl CaptureRequest {
 //==============================================================================
 pub struct EngineRunner {
 	pub(crate) engine: Engine,
-	graphic: Option<Graphic>,
 	scene_list: Vec<Box<dyn Scene>>,
 	/// 내리는 중인 씬. (finalize, unload 를 불렀고 unload 가 맡긴 작업을 기다린다. 원본처럼 목록에 남아 tick 과 draw 를 받는다)
 	unloading_scene_id_list: Vec<SceneId>,
@@ -1725,7 +1884,6 @@ impl EngineRunner {
 		engine.load_scene(scene);
 		EngineRunner {
 			engine,
-			graphic: None,
 			scene_list: Vec::new(),
 			unloading_scene_id_list: Vec::new(),
 			detached_scene_list: Vec::new(),
@@ -1736,7 +1894,7 @@ impl EngineRunner {
 	}
 
 	//==============================================================================
-	/// 그래픽 넘겨받기. (플랫폼이 GL 컨텍스트를 만든 뒤 한 번. 기본 폰트도 이때 읽는다)
+	/// 그래픽 넘겨받기. (플랫폼이 GL 컨텍스트를 만든 뒤 한 번. 기본 폰트를 읽고 엔진에 넣는다)
 	//==============================================================================
 	pub(crate) fn attach_graphic(&mut self, mut graphic: Graphic) {
 		let is_rebake_text_on_font_load = self.engine.engine_configuration.rebake_text_on_font_load;
@@ -1754,7 +1912,7 @@ impl EngineRunner {
 				self.engine.pending_default_font_handle = Some(load_handle);
 			}
 		}
-		self.graphic = Some(graphic);
+		self.engine.graphic = Some(graphic);
 	}
 
 	//==============================================================================
@@ -1762,7 +1920,7 @@ impl EngineRunner {
 	//==============================================================================
 	#[cfg(target_arch = "wasm32")]
 	pub(crate) fn invalidate_render_state_cache(&self) {
-		if let Some(graphic) = &self.graphic {
+		if let Some(graphic) = &self.engine.graphic {
 			graphic.invalidate_render_state_cache();
 		}
 	}
@@ -1772,7 +1930,7 @@ impl EngineRunner {
 	//==============================================================================
 	#[cfg(not(target_arch = "wasm32"))]
 	pub(crate) fn get_graphic(&self) -> Option<&Graphic> {
-		self.graphic.as_ref()
+		self.engine.graphic.as_ref()
 	}
 
 	//==============================================================================
@@ -1782,7 +1940,7 @@ impl EngineRunner {
 		let frame_number = self.engine.frame_number;
 		// request_frame_capture 로 건 함수들. (PNG 바이트)
 		if let Some(capture_handler_list) = self.engine.frame_capture_handler_map.remove(&frame_number) {
-			if let Some(graphic) = &self.graphic {
+			if let Some(graphic) = &self.engine.graphic {
 				let (width, height, pixels) = graphic.read_framebuffer_pixels();
 				match encode_png(&pixels, width, height) {
 					Ok(png_bytes) => {
@@ -1807,7 +1965,7 @@ impl EngineRunner {
 		if !capture_request.frame_numbers.contains(&frame_number) {
 			return;
 		}
-		let graphic = match &self.graphic {
+		let graphic = match &self.engine.graphic {
 			Some(graphic) => {
 				graphic
 			}
@@ -1914,7 +2072,7 @@ impl EngineRunner {
 		if self.engine.pending_font_registration_list.is_empty() && self.engine.pending_font_operation_list.is_empty() {
 			return;
 		}
-		let graphic = match self.graphic.as_mut() {
+		let graphic = match self.engine.graphic.as_mut() {
 			Some(graphic) => {
 				graphic
 			}
@@ -1997,7 +2155,7 @@ impl EngineRunner {
 				return;
 			}
 		};
-		let graphic = match self.graphic.as_mut() {
+		let graphic = match self.engine.graphic.as_mut() {
 			Some(graphic) => {
 				graphic
 			}
@@ -2047,13 +2205,13 @@ impl EngineRunner {
 	}
 
 	//==============================================================================
-	/// 깨어난 작업 폴링. (그래픽 없이, 시험에서 프레임 하나를 흉내 낼 때)
+	/// 깨어난 작업 폴링. (시험에서 프레임 하나를 흉내 낼 때, 창 없는 시험이라 그래픽은 없다)
 	//==============================================================================
 	#[cfg(test)]
 	pub(crate) fn poll_tasks(&mut self) {
 		task::begin_poll_frame(&mut self.engine);
 		loop {
-			task::poll_woken_tasks(&mut self.engine, &mut self.scene_list, &mut self.detached_scene_list, None);
+			task::poll_woken_tasks(&mut self.engine, &mut self.scene_list, &mut self.detached_scene_list);
 			self.finish_scene_unloads();
 			if !self.engine.task_executor.has_woken_tasks() {
 				break;
@@ -2141,7 +2299,7 @@ impl EngineRunner {
 	pub(crate) fn update_engine(&mut self) {
 		// 바이트가 온 글꼴 등록.
 		self.register_pending_fonts();
-		let graphic = match self.graphic.as_mut() {
+		let graphic = match self.engine.graphic.as_mut() {
 			Some(graphic) => {
 				graphic
 			}
@@ -2167,17 +2325,19 @@ impl EngineRunner {
 		#[cfg(not(target_arch = "wasm32"))]
 		{
 			if is_modal_dialog_open {
-				let measure_graphic: &Graphic = graphic;
-				crate::core::modaldialog::tick_modal_dialog(&mut self.engine, &|text: &str| crate::core::modaldialog::measure_field_text_width(measure_graphic, text), time_delta);
+				self.engine.with_graphic(|engine, graphic| {
+					let measure_graphic: &Graphic = graphic;
+					crate::core::modaldialog::tick_modal_dialog(engine, &|text: &str| crate::core::modaldialog::measure_field_text_width(measure_graphic, text), time_delta);
+				});
 			}
 		}
 
-		// 깨어난 작업 폴링. (await 다음 줄이 이번 프레임의 시간과 입력을 보고, 바꾼 것이 이번 프레임에 그려진다)
+		// 깨어난 작업 폴링. (await 다음 줄이 이번 프레임의 시간과 입력을 보고, 바꾼 것이 이번 프레임에 그려진다. 그래픽은 엔진에 있어 with_graphic 이 받는다)
 		if !is_modal_dialog_open {
 			// unload 가 맡긴 작업이 끝난 씬은 원본처럼 이번 프레임부터 목록에서 빠지고, 내리기를 기다리던 작업도 원본 마이크로태스크처럼 같은 차례에 이어 간다.
 			task::begin_poll_frame(&mut self.engine);
 			loop {
-				task::poll_woken_tasks(&mut self.engine, &mut self.scene_list, &mut self.detached_scene_list, Some(&mut *graphic));
+				task::poll_woken_tasks(&mut self.engine, &mut self.scene_list, &mut self.detached_scene_list);
 				finish_scene_unloads(&mut self.engine, &mut self.scene_list, &mut self.unloading_scene_id_list, &mut self.detached_scene_list, &mut self.unload_waiting_list, seconds_since_startup);
 				if !self.engine.task_executor.has_woken_tasks() {
 					break;
@@ -2186,9 +2346,12 @@ impl EngineRunner {
 		}
 
 		// 그리기 통계. (지난 프레임 값을 넘겨 두고 이번 프레임을 새로 센다)
-		graphic.begin_frame_statistics();
+		if let Some(graphic) = self.engine.graphic.as_mut() {
+			graphic.begin_frame_statistics();
+		}
 
 		// 씬 처리.
+		// - tick 은 그래픽이 엔진에 든 채로 받고(engine.get_graphic), 그리기 함수는 엔진이 내어 준 그래픽을 인자로 받는다. (with_graphic)
 		// - 씬마다 그리기 앞에 뷰 좌표를 걸어 둔다. (씬이 받는 터치 좌표와 같은 좌표, 기기 픽셀 배율이 1 이 아닌 화면에서도 같은 크기와 자리로 그린다, 원본과 같다)
 		//   캔버스의 실제 픽셀로 그리려면 씬에서 graphic.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0) 을 부른다.
 		let mut scene_list = std::mem::take(&mut self.scene_list);
@@ -2198,8 +2361,10 @@ impl EngineRunner {
 				initialize_scene_if_ready(&mut self.engine, scene.as_mut(), seconds_since_startup);
 			}
 			if !scene.get_scene_base().is_loaded() {
-				self.engine.view_manager.apply_view_rect(graphic);
-				scene.draw_on_load(&mut self.engine, graphic);
+				self.engine.with_graphic(|engine, graphic| {
+					engine.view_manager.apply_view_rect(graphic);
+					scene.draw_on_load(engine, graphic);
+				});
 				continue;
 			}
 
@@ -2210,30 +2375,36 @@ impl EngineRunner {
 			}
 
 			// 출력.
-			self.engine.view_manager.apply_view_rect(graphic);
-			scene.pre_draw(&mut self.engine, graphic);
-			scene.draw(&mut self.engine, graphic);
-			scene.post_draw(&mut self.engine, graphic);
+			self.engine.with_graphic(|engine, graphic| {
+				engine.view_manager.apply_view_rect(graphic);
+				scene.pre_draw(engine, graphic);
+				scene.draw(engine, graphic);
+				scene.post_draw(engine, graphic);
 
-			let is_gizmo_visible = scene.get_scene_base().is_gizmo_visible();
-			if is_gizmo_visible {
-				scene.draw_gizmos(&mut self.engine, graphic);
-			}
+				let is_gizmo_visible = scene.get_scene_base().is_gizmo_visible();
+				if is_gizmo_visible {
+					scene.draw_gizmos(engine, graphic);
+				}
+			});
 		}
 		scene_list.append(&mut self.scene_list);
 		self.scene_list = scene_list;
 
 		// 개발 정보 출력.
 		if self.engine.engine_configuration.use_statistics {
-			draw_statistics(&self.engine, graphic);
+			self.engine.with_graphic(|engine, graphic| {
+				draw_statistics(engine, graphic);
+			});
 		}
 
 		// 질문 창. (모든 것 위에, 창 안쪽 논리 좌표)
 		#[cfg(not(target_arch = "wasm32"))]
 		{
 			if self.engine.is_modal_dialog_open() {
-				self.engine.view_manager.apply_canvas_native_rect(graphic);
-				crate::core::modaldialog::draw_modal_dialog(&mut self.engine, graphic);
+				self.engine.with_graphic(|engine, graphic| {
+					engine.view_manager.apply_canvas_native_rect(graphic);
+					crate::core::modaldialog::draw_modal_dialog(engine, graphic);
+				});
 			}
 		}
 
@@ -2253,7 +2424,9 @@ impl EngineRunner {
 		input_manager.get_text_input_mut().finish_frame();
 
 		// 프레임 마무리. (묶음을 내보내고, 검증용 화면 저장은 플랫폼이 화면을 넘기기 전에 한다)
-		graphic.end_frame();
+		if let Some(graphic) = self.engine.graphic.as_mut() {
+			graphic.end_frame();
+		}
 		self.capture_frame_if_requested();
 		self.engine.frame_number += 1;
 

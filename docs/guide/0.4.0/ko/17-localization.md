@@ -459,7 +459,7 @@ let engine = Engine::new(engine_configuration);
 
 `Text` 는 문자열마다 글 전체를 텍스처로 굽습니다. 점수, 피해 숫자, 시계처럼 글이 자주 바뀌고 같은 글자를 많이 그리는 곳에는 `DynamicFont` 를 씁니다. 정한 글자들을 한 글꼴, 한 크기로 그림 한 장(가로 1024 픽셀, 글리프 사이 2 픽셀 여백)에 모아 굽고, 그릴 때 아틀라스에서 글자를 잘라 그립니다. 같은 그림을 쓰므로 묶어 그리기가 끊기지 않습니다.
 
-러스트 판에서 굽기와 그리기는 `Graphic` 의 글자 캐시를 쓰므로, `build_atlas` 와 `draw_text` 는 `Graphic` 을 받습니다. 그래서 씬의 `draw` 에서 굽습니다. 아래 예제는 `pre_draw` 의 `draw_scene_background` 가 뷰 좌표계를 걸어 둔 위에 그립니다.
+러스트 판에서 굽기와 그리기는 `Graphic` 의 글자 캐시를 쓰므로, `build_atlas` 와 `draw_text` 는 `Graphic` 을 받습니다. 원본이 씬을 불러올 때 한 번 굽는 것처럼 `initialize` 에서 `engine.get_graphic_mut()` 으로 굽습니다. 아래 예제는 `pre_draw` 의 `draw_scene_background` 가 뷰 좌표계를 걸어 둔 위에 그립니다.
 
 ```rust,no_run
 use vanilla::{DynamicFont, Engine, EngineConfiguration, Graphic, Scene, SceneBase, Vector2};
@@ -479,6 +479,12 @@ impl Scene for ScoreScene {
 		&mut self.scene_base
 	}
 
+	fn initialize(&mut self, engine: &mut Engine) {
+		if let Some(graphic) = engine.get_graphic_mut() {
+			self.dynamic_font.build_atlas(graphic, "0123456789SCORE ");
+		}
+	}
+
 	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
 		self.scene_base.tick(engine, time_delta);
 		self.score += (time_delta * 1000.0) as u64;
@@ -490,7 +496,6 @@ impl Scene for ScoreScene {
 
 	fn draw(&mut self, _engine: &mut Engine, graphic: &mut Graphic) {
 		self.scene_base.draw(graphic);
-		self.dynamic_font.build_atlas(graphic, "0123456789SCORE ");
 		let score_text = format!("SCORE {}", self.score);
 		let text_width = self.dynamic_font.measure_text(&score_text);
 		let position = Vector2::create(640.0 - text_width * 0.5, 360.0);

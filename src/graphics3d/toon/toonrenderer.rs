@@ -2212,6 +2212,7 @@ impl ToonRenderer {
 
 	//==============================================================================
 	/// 모형 올리기. (몸이 비면 None)
+	/// - GL 버퍼나 버텍스 어레이를 짓다 실패하면 그때까지 지은 것을 지우고 None 을 돌려준다.
 	///
 	/// # 인자
 	/// - `gl`: 모형을 올릴 GL 컨텍스트.
@@ -2221,9 +2222,39 @@ impl ToonRenderer {
 	/// GPU 에 올린 모형. (몸의 꼭짓점 번호가 비거나 GL 버퍼를 짓지 못하면 None)
 	//==============================================================================
 	pub fn create_mesh(&self, gl: &glow::Context, arrays: &ToonMeshArrays) -> Option<ToonMesh> {
+		ToonRenderer::create_mesh_objects(gl, arrays)
+	}
+
+	//==============================================================================
+	/// 모형의 GL 객체 짓기. (create_mesh 의 몸, 짓다 실패하면 그때까지 지은 버퍼와 버텍스 어레이를 지운다)
+	//==============================================================================
+	fn create_mesh_objects(gl: &glow::Context, arrays: &ToonMeshArrays) -> Option<ToonMesh> {
 		if arrays.index_data.is_empty() {
 			return None;
 		}
+		let mut created_buffer_list = Vec::new();
+		let mut created_vertex_array_list = Vec::new();
+		let mesh = unsafe {
+			ToonRenderer::build_mesh_objects(gl, arrays, &mut created_buffer_list, &mut created_vertex_array_list)
+		};
+		if mesh.is_none() {
+			unsafe {
+				gl.bind_vertex_array(None);
+				for vertex_array in created_vertex_array_list {
+					gl.delete_vertex_array(vertex_array);
+				}
+				for buffer in created_buffer_list {
+					gl.delete_buffer(buffer);
+				}
+			}
+		}
+		mesh
+	}
+
+	//==============================================================================
+	/// 모형의 버퍼와 버텍스 어레이 짓기. (지은 것을 차례로 created_* 에 적는다, 하나라도 짓지 못하면 None)
+	//==============================================================================
+	unsafe fn build_mesh_objects(gl: &glow::Context, arrays: &ToonMeshArrays, created_buffer_list: &mut Vec<GlBuffer>, created_vertex_array_list: &mut Vec<GlVertexArray>) -> Option<ToonMesh> {
 		let is_skinned = !arrays.skin_data.is_empty();
 		let vertex_count = arrays.vertex_data.len() / VERTEX_FLOAT_COUNT;
 		let has_uv = vertex_count > 0 && arrays.uv_data.len() >= vertex_count * 2;
@@ -2233,70 +2264,92 @@ impl ToonRenderer {
 			bounding_radius *= 1.5;
 		}
 		let mut buffer_list = Vec::new();
-		unsafe {
-			// 인스턴스 버퍼. (보통 그리기에서도 인스턴스 어트리뷰트가 켜져 있으므로 한 인스턴스 분량을 늘 채워 둔다, 비면 드라이버가 버퍼 밖을 읽는다)
-			let mut default_instance = Matrix4::default().elements.to_vec();
-			default_instance.extend_from_slice(&[1.0; 4]);
-			let instance_buffer = ToonRenderer::create_array_buffer(gl, &default_instance, glow::DYNAMIC_DRAW)?;
 
-			// 몸.
-			let vertex_buffer = ToonRenderer::create_array_buffer(gl, &arrays.vertex_data, glow::STATIC_DRAW)?;
-			buffer_list.push(vertex_buffer);
-			let skin_buffer = if is_skinned { Some(ToonRenderer::create_array_buffer(gl, &arrays.skin_data, glow::STATIC_DRAW)?) } else { None };
-			let uv_buffer = if has_uv { Some(ToonRenderer::create_array_buffer(gl, &read_uv_data(&arrays.uv_data, if has_second_uv { Some(&arrays.uv1_data) } else { None }, vertex_count), glow::STATIC_DRAW)?) } else { None };
-			buffer_list.extend(skin_buffer.iter().chain(uv_buffer.iter()));
-			let body_vertex_array = gl.create_vertex_array().ok()?;
-			gl.bind_vertex_array(Some(body_vertex_array));
-			let body_index_buffer = ToonRenderer::create_index_buffer(gl, &arrays.index_data)?;
-			buffer_list.push(body_index_buffer);
-			let mut mesh = ToonMesh {
-				mesh_id: NEXT_MESH_ID.fetch_add(1, Ordering::Relaxed),
-				body_vertex_array,
-				body_index_count: arrays.index_data.len() as i32,
-				outline_vertex_array: None,
-				outline_index_count: 0,
-				instance_buffer,
-				buffer_list: Vec::new(),
-				is_skinned,
-				has_uv,
-				has_second_uv,
-				bounding_center,
-				bounding_radius,
-				vertex_buffer,
-				skin_buffer,
-				uv_buffer,
-				body_index_buffer,
-				outline_buffer: None,
-				outline_skin_buffer: None,
-				outline_index_buffer: None,
-			};
-			ToonRenderer::attach_body_attributes(gl, &mesh);
-			ToonRenderer::attach_instance_attributes(gl, instance_buffer);
+		// 인스턴스 버퍼. (보통 그리기에서도 인스턴스 어트리뷰트가 켜져 있으므로 한 인스턴스 분량을 늘 채워 둔다, 비면 드라이버가 버퍼 밖을 읽는다)
+		let mut default_instance = Matrix4::default().elements.to_vec();
+		default_instance.extend_from_slice(&[1.0; 4]);
+		let instance_buffer = ToonRenderer::create_array_buffer(gl, &default_instance, glow::DYNAMIC_DRAW)?;
+		created_buffer_list.push(instance_buffer);
 
-			// 바깥선 껍데기. (바탕 자리 3 과 미는 쪽 3, 미는 쪽은 지은 굵기의 사본 자리 - 바탕 자리, 바탕이 없으면 0)
-			if !arrays.outline_index_data.is_empty() {
-				let outline_buffer = ToonRenderer::create_array_buffer(gl, &read_outline_vertex_data(&arrays.outline_vertex_data, &arrays.outline_base_data), glow::STATIC_DRAW)?;
-				buffer_list.push(outline_buffer);
-				if is_skinned && !arrays.outline_skin_data.is_empty() {
-					let outline_skin_buffer = ToonRenderer::create_array_buffer(gl, &arrays.outline_skin_data, glow::STATIC_DRAW)?;
-					buffer_list.push(outline_skin_buffer);
-					mesh.outline_skin_buffer = Some(outline_skin_buffer);
-				}
-				let outline_vertex_array = gl.create_vertex_array().ok()?;
-				gl.bind_vertex_array(Some(outline_vertex_array));
-				let outline_index_buffer = ToonRenderer::create_index_buffer(gl, &arrays.outline_index_data)?;
-				buffer_list.push(outline_index_buffer);
-				mesh.outline_buffer = Some(outline_buffer);
-				mesh.outline_index_buffer = Some(outline_index_buffer);
-				ToonRenderer::attach_outline_attributes(gl, &mesh);
-				ToonRenderer::attach_instance_attributes(gl, instance_buffer);
-				mesh.outline_vertex_array = Some(outline_vertex_array);
-				mesh.outline_index_count = arrays.outline_index_data.len() as i32;
-			}
-			gl.bind_vertex_array(None);
-			mesh.buffer_list = buffer_list;
-			Some(mesh)
+		// 몸.
+		let vertex_buffer = ToonRenderer::create_array_buffer(gl, &arrays.vertex_data, glow::STATIC_DRAW)?;
+		created_buffer_list.push(vertex_buffer);
+		buffer_list.push(vertex_buffer);
+		let skin_buffer = if is_skinned {
+			let skin_buffer = ToonRenderer::create_array_buffer(gl, &arrays.skin_data, glow::STATIC_DRAW)?;
+			created_buffer_list.push(skin_buffer);
+			buffer_list.push(skin_buffer);
+			Some(skin_buffer)
 		}
+		else {
+			None
+		};
+		let uv_buffer = if has_uv {
+			let uv_buffer = ToonRenderer::create_array_buffer(gl, &read_uv_data(&arrays.uv_data, if has_second_uv { Some(&arrays.uv1_data) } else { None }, vertex_count), glow::STATIC_DRAW)?;
+			created_buffer_list.push(uv_buffer);
+			buffer_list.push(uv_buffer);
+			Some(uv_buffer)
+		}
+		else {
+			None
+		};
+		let body_vertex_array = gl.create_vertex_array().ok()?;
+		created_vertex_array_list.push(body_vertex_array);
+		gl.bind_vertex_array(Some(body_vertex_array));
+		let body_index_buffer = ToonRenderer::create_index_buffer(gl, &arrays.index_data)?;
+		created_buffer_list.push(body_index_buffer);
+		buffer_list.push(body_index_buffer);
+		let mut mesh = ToonMesh {
+			mesh_id: NEXT_MESH_ID.fetch_add(1, Ordering::Relaxed),
+			body_vertex_array,
+			body_index_count: arrays.index_data.len() as i32,
+			outline_vertex_array: None,
+			outline_index_count: 0,
+			instance_buffer,
+			buffer_list: Vec::new(),
+			is_skinned,
+			has_uv,
+			has_second_uv,
+			bounding_center,
+			bounding_radius,
+			vertex_buffer,
+			skin_buffer,
+			uv_buffer,
+			body_index_buffer,
+			outline_buffer: None,
+			outline_skin_buffer: None,
+			outline_index_buffer: None,
+		};
+		ToonRenderer::attach_body_attributes(gl, &mesh);
+		ToonRenderer::attach_instance_attributes(gl, instance_buffer);
+
+		// 바깥선 껍데기. (바탕 자리 3 과 미는 쪽 3, 미는 쪽은 지은 굵기의 사본 자리 - 바탕 자리, 바탕이 없으면 0)
+		if !arrays.outline_index_data.is_empty() {
+			let outline_buffer = ToonRenderer::create_array_buffer(gl, &read_outline_vertex_data(&arrays.outline_vertex_data, &arrays.outline_base_data), glow::STATIC_DRAW)?;
+			created_buffer_list.push(outline_buffer);
+			buffer_list.push(outline_buffer);
+			if is_skinned && !arrays.outline_skin_data.is_empty() {
+				let outline_skin_buffer = ToonRenderer::create_array_buffer(gl, &arrays.outline_skin_data, glow::STATIC_DRAW)?;
+				created_buffer_list.push(outline_skin_buffer);
+				buffer_list.push(outline_skin_buffer);
+				mesh.outline_skin_buffer = Some(outline_skin_buffer);
+			}
+			let outline_vertex_array = gl.create_vertex_array().ok()?;
+			created_vertex_array_list.push(outline_vertex_array);
+			gl.bind_vertex_array(Some(outline_vertex_array));
+			let outline_index_buffer = ToonRenderer::create_index_buffer(gl, &arrays.outline_index_data)?;
+			created_buffer_list.push(outline_index_buffer);
+			buffer_list.push(outline_index_buffer);
+			mesh.outline_buffer = Some(outline_buffer);
+			mesh.outline_index_buffer = Some(outline_index_buffer);
+			ToonRenderer::attach_outline_attributes(gl, &mesh);
+			ToonRenderer::attach_instance_attributes(gl, instance_buffer);
+			mesh.outline_vertex_array = Some(outline_vertex_array);
+			mesh.outline_index_count = arrays.outline_index_data.len() as i32;
+		}
+		gl.bind_vertex_array(None);
+		mesh.buffer_list = buffer_list;
+		Some(mesh)
 	}
 
 	//==============================================================================
@@ -2401,7 +2454,17 @@ impl ToonRenderer {
 			ToonRenderer::attach_layout_attributes(gl, &instance_buffer.layout, instance_buffer.buffer);
 			let mut outline_vertex_array = None;
 			if mesh.outline_vertex_array.is_some() {
-				let vertex_array = gl.create_vertex_array().ok()?;
+				// 바깥선 쪽을 짓지 못하면 먼저 지은 몸 쪽을 지운다.
+				let vertex_array = match gl.create_vertex_array() {
+					Ok(vertex_array) => {
+						vertex_array
+					}
+					Err(_) => {
+						gl.bind_vertex_array(None);
+						gl.delete_vertex_array(body_vertex_array);
+						return None;
+					}
+				};
 				gl.bind_vertex_array(Some(vertex_array));
 				ToonRenderer::attach_outline_attributes(gl, mesh);
 				ToonRenderer::attach_layout_attributes(gl, &instance_buffer.layout, instance_buffer.buffer);
@@ -3636,6 +3699,46 @@ impl ToonRenderer {
 mod tests {
 	use super::*;
 	use crate::base::vector3::Vector3;
+
+	//==============================================================================
+	/// 모형을 짓다 버퍼나 버텍스 어레이에서 실패하면 그때까지 지은 GL 객체를 모두 지우고 None. (몸, 뼈대, UV, 바깥선, 바깥선 뼈대가 다 있는 모형, 가짜 GL)
+	//==============================================================================
+	#[cfg(not(target_arch = "wasm32"))]
+	#[test]
+	fn failed_mesh_creation_deletes_created_objects() {
+		use crate::core::imagetexturecache::fake_gl::{self, FakeGlObject};
+		let arrays = ToonMeshArrays {
+			vertex_data: vec![0.0; VERTEX_FLOAT_COUNT * 3],
+			index_data: vec![0, 1, 2],
+			outline_vertex_data: vec![0.0; 9],
+			outline_index_data: vec![0, 1, 2],
+			skin_data: vec![0.0; SKIN_FLOAT_COUNT * 3],
+			outline_skin_data: vec![0.0; SKIN_FLOAT_COUNT * 3],
+			uv_data: vec![0.0; 6],
+			..ToonMeshArrays::default()
+		};
+		// 다 지으면 버퍼 일곱(인스턴스, 몸, 뼈대, UV, 몸 번호, 바깥선, 바깥선 뼈대, 바깥선 번호 가운데 인스턴스 뺀 것은 buffer_list)과 버텍스 어레이 둘.
+		let gl = fake_gl::create_context();
+		let mesh = ToonRenderer::create_mesh_objects(&gl, &arrays).expect("mesh");
+		assert_eq!(fake_gl::get_live_count(FakeGlObject::Buffer), 8);
+		assert_eq!(fake_gl::get_live_count(FakeGlObject::VertexArray), 2);
+		assert_eq!(mesh.buffer_list.len(), 7);
+		assert!(mesh.outline_vertex_array.is_some());
+		for success_count in 0..8 {
+			let gl = fake_gl::create_context();
+			fake_gl::fail_after(FakeGlObject::Buffer, success_count);
+			assert!(ToonRenderer::create_mesh_objects(&gl, &arrays).is_none());
+			assert_eq!(fake_gl::get_live_count(FakeGlObject::Buffer), 0);
+			assert_eq!(fake_gl::get_live_count(FakeGlObject::VertexArray), 0);
+		}
+		for success_count in 0..2 {
+			let gl = fake_gl::create_context();
+			fake_gl::fail_after(FakeGlObject::VertexArray, success_count);
+			assert!(ToonRenderer::create_mesh_objects(&gl, &arrays).is_none());
+			assert_eq!(fake_gl::get_live_count(FakeGlObject::Buffer), 0);
+			assert_eq!(fake_gl::get_live_count(FakeGlObject::VertexArray), 0);
+		}
+	}
 
 	//==============================================================================
 	/// 카메라 기울임을 되돌리는 각과 껍데기 바깥선에 곱할 해의 색 보기. (기운 카메라, 바로 아래를 볼 때 0, 세기 1 이상이면 세기로 나눔)

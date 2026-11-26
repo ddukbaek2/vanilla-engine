@@ -341,6 +341,7 @@ pub(crate) mod fake_gl {
 		Shader,
 		Program,
 		VertexArray,
+		Buffer,
 	}
 
 	/// 가짜 GL 상태. (다음 번호, 종류별 살아 있는 번호, 종류별 남은 성공 수)
@@ -515,6 +516,36 @@ pub(crate) mod fake_gl {
 	}
 
 	//==============================================================================
+	/// glGenBuffers 자리.
+	//==============================================================================
+	extern "system" fn gen_buffers(count: i32, names: *mut u32) {
+		unsafe {
+			generate_objects(FakeGlObject::Buffer, count, names);
+		}
+	}
+
+	//==============================================================================
+	/// glDeleteBuffers 자리.
+	//==============================================================================
+	extern "system" fn delete_buffers(count: i32, names: *const u32) {
+		unsafe {
+			delete_objects(FakeGlObject::Buffer, count, names);
+		}
+	}
+
+	//==============================================================================
+	/// glBufferData 자리. (아무것도 하지 않는다)
+	//==============================================================================
+	extern "system" fn buffer_data(_target: u32, _size: isize, _data: *const c_void, _usage: u32) {
+	}
+
+	//==============================================================================
+	/// glVertexAttribPointer 자리. (아무것도 하지 않는다)
+	//==============================================================================
+	extern "system" fn vertex_attrib_pointer(_index: u32, _size: i32, _component_type: u32, _normalized: u8, _stride: i32, _pointer: *const c_void) {
+	}
+
+	//==============================================================================
 	/// glCreateShader 자리.
 	//==============================================================================
 	extern "system" fn create_shader(_shader_type: u32) -> u32 {
@@ -641,6 +672,10 @@ pub(crate) mod fake_gl {
 			b"glDeleteRenderbuffers" => delete_renderbuffers as *const c_void,
 			b"glGenVertexArrays" => gen_vertex_arrays as *const c_void,
 			b"glDeleteVertexArrays" => delete_vertex_arrays as *const c_void,
+			b"glGenBuffers" => gen_buffers as *const c_void,
+			b"glDeleteBuffers" => delete_buffers as *const c_void,
+			b"glBufferData" => buffer_data as *const c_void,
+			b"glVertexAttribPointer" => vertex_attrib_pointer as *const c_void,
 			b"glCreateShader" => create_shader as *const c_void,
 			b"glDeleteShader" => delete_shader as *const c_void,
 			b"glCreateProgram" => create_program as *const c_void,
@@ -654,8 +689,8 @@ pub(crate) mod fake_gl {
 			b"glFramebufferRenderbuffer" => framebuffer_renderbuffer as *const c_void,
 			b"glPixelStorei" => set_enum_integer as *const c_void,
 			b"glTexParameteri" => set_enum_enum_integer as *const c_void,
-			b"glBindTexture" | b"glBindFramebuffer" | b"glBindRenderbuffer" | b"glAttachShader" | b"glDetachShader" => set_name_pair as *const c_void,
-			b"glCompileShader" | b"glLinkProgram" | b"glGenerateMipmap" => set_name as *const c_void,
+			b"glBindTexture" | b"glBindFramebuffer" | b"glBindRenderbuffer" | b"glAttachShader" | b"glDetachShader" | b"glBindBuffer" | b"glVertexAttribDivisor" => set_name_pair as *const c_void,
+			b"glCompileShader" | b"glLinkProgram" | b"glGenerateMipmap" | b"glBindVertexArray" | b"glEnableVertexAttribArray" => set_name as *const c_void,
 			b"glGetIntegerv" => get_integer as *const c_void,
 			b"glReadPixels" => read_pixels as *const c_void,
 			_ => std::ptr::null(),

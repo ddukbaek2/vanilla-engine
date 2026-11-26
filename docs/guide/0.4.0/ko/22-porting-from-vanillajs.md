@@ -297,6 +297,11 @@ assert!(node_tree.get_node(label_id).is_some());
 
 그래서 인스펙터의 게터 목록에 원본 `Component.getEngine` 이 없고, 반사 속성 목록에 `Engine` 이 없습니다.
 
+원본 `engine.getGraphic()` 은 `engine.get_graphic()`(변경은 `get_graphic_mut()`)입니다. 엔진을 받는 위 자리 어디서나 GL 자원을 짓습니다. 다른 것은 둘입니다.
+
+- 씬의 그리기 훅(`pre_draw`, `draw`, `post_draw`, `draw_on_load`, `draw_gizmos`)은 `graphic: &mut Graphic` 을 인자로 받습니다. 엔진이 든 그래픽을 잠깐 꺼내 넘긴 것이라 그 안에서는 `engine.get_graphic()` 이 `None` 이고 인자의 `graphic` 을 씁니다. 그리기 밖에서 엔진과 그래픽을 함께 `&mut` 로 쓰려면 `engine.with_graphic(|engine, graphic| ...)` 입니다.
+- 엔진을 받지 않는 컴포넌트의 `attach` 는 그래픽에도 닿지 않습니다. GL 자원은 컴포넌트를 짓는 자리(씬의 `create`)나 컴포넌트의 `tick` 에서 짓습니다.
+
 ## 콜백과 Rc<RefCell>
 
 원본의 화살표 함수는 `this` 와 바깥 변수를 마음대로 붙잡습니다. 바닐라엔진의 콜백은 `Box<dyn FnMut(...)>` 로 받아 컴포넌트가 들고 있으므로, 씬의 `&mut self` 같은 빌린 값을 붙잡을 수 없습니다. 다른 노드는 `NodeId` 를 붙잡아 콜백이 받는 문맥으로 찾고, 씬과 나눠 써야 하는 값은 `Rc<Cell>` 이나 `Rc<RefCell>` 에 담습니다.
