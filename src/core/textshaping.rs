@@ -1849,6 +1849,11 @@ pub fn shape_text(face_list: &[ResolvedFontFace], text: &str, pixel_size: f32, d
 				else {
 					rustybuzz::Direction::LeftToRight
 				});
+				// 크롬은 8 비트 글(모든 글자가 U+00FF 이하)을 문자 나누기 없이 라틴 문자로 모양 짓는다. (harfbuzz_shaper.cc 의 HarfBuzzShaper::Shape, "8-bit text is guaranteed to be horizontal latin-1")
+				// 숫자처럼 Common 뿐인 낱말도 GSUB, GPOS 의 latn 을 쓴다. (리눅스 Norasi 는 DFLT 에만 숫자 커닝이 있어 16px "0123456789" 가 3.8px 좁았다)
+				if is_latin1 {
+					unicode_buffer.set_script(rustybuzz::script::LATIN);
+				}
 				unicode_buffer.guess_segment_properties();
 				// 크롬 HarfBuzzFace::GetScaledFont 처럼 자리 배율을 글자 크기의 16.16 고정 소수로 건다. (SkiaScalarToHarfBuzzPosition)
 				// 글꼴 단위 값은 HarfBuzz 의 em_scale 로, 가변 글꼴의 GPOS 델타는 em_scalef 로 이 배율에서 반올림된다.

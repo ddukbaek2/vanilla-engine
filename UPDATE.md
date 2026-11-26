@@ -7,6 +7,7 @@
   - 이름 목록의 얼굴이 합친 글자(ï)가 없어도 정준 분해한 글자(i, U+0308)가 있으면 HarfBuzz 처럼 그 얼굴로 그린다. (third_party/rustybuzz 에 decompose_character 를 더했다)
   - 맥: 첫 글꼴의 CTFont(올린 글꼴은 바이트로 지은 것)에서 CTFontCreateForString 을 묻고, 특성이나 굵기가 다르면 같은 이름에서 다시 고른다. (지금까지는 시스템 UI 글꼴에서 물어 아랍어가 다른 글꼴로 그려졌다)
   - 윈도우: 굵게나 기울임이면 첫 이름의 보통 얼굴, 블링크 font_fallback_win.cc 의 블록과 문자별 표(태국어 Tahoma, monospace 아랍어 Courier New, 한자는 화면 언어), 넓은 글꼴 목록, 첫 이름을 바탕으로 한 DirectWrite 차례. (지금까지는 Segoe UI 바탕의 DirectWrite 만 물어 태국어가 Leelawadee UI 였다)
+  - 모든 글자가 U+00FF 이하인 글은 크롬(HarfBuzzShaper 의 8 비트 글)처럼 라틴 문자로 모양 짓는다. 숫자처럼 Common 뿐인 낱말도 글꼴의 latn 기능을 쓴다. (리눅스 Norasi 는 DFLT 에만 숫자 커닝이 있어 16px "0123456789" 가 3.8px 좁았다)
   - 웹도 같게: 브라우저에 넘기는 글꼴 목록 끝의 원본 SYSTEM_FONT_STRING 을 default 를 청했을 때만 붙인다.
   - 옮기는 법: 바꿀 것 없다. 폰트 문자열에 이름을 준 글이 기본 글꼴 사슬의 글꼴(맥 Apple SD Gothic Neo, 윈도우 Segoe UI, 맑은 고딕)로 그려지던 글자는 이제 크롬처럼 운영체제 대체 글꼴로 그려진다. 사슬을 쓰려면 이름 목록 끝에 default 를 둔다.
 - SceneBase.set_touch_dispatch_enabled(is_enabled), is_touch_dispatch_enabled(): 원본 Scene.setTouchRaycaster(null)(와 새 setTouchDispatchEnabled) 처럼 씬 기본 터치 넘기기를 끈다. 끄면 tick_touch 가 노드에 누름, 이동, 뗌, 휠을 넘기지 않고(첫 터치 콜백도) 씬의 터치 훅만 불려 훅에서 가로채 직접 넘길 수 있다.

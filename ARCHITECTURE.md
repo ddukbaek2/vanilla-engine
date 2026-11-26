@@ -235,6 +235,7 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
     - 맥: 첫 글꼴의 CTFont(이름으로 찾은 글꼴은 청한 굵기와 기울기, 올린 글꼴은 바이트로 지은 것)에서 CTFontCreateForString, 고른 글꼴의 특성이나 굵기가 다르면 같은 이름에서 청한 특성과 굵기로 다시 고른다. (font_cache_mac.mm 의 GetSubstituteFont, GetAlternateFontPlatformData)
     - 윈도우: 굵게나 기울임이면 첫 이름의 보통 얼굴, 블링크 font_fallback_win.cc 의 블록과 문자별 표(태국어 Tahoma, monospace 의 아랍어와 히브리어 Courier New, 한자는 화면 언어), 넓은 글꼴 목록, 폰트 문자열의 첫 이름을 바탕으로 한 DirectWrite 대체 차례. (font_cache_skia_win.cc)
     - 리눅스: 첫 글꼴과 상관없이 fontconfig 에 글자로 묻는다. (font_cache_linux.cc)
+  - 모든 글자가 U+00FF 이하인 글은 크롬 HarfBuzzShaper 처럼(8 비트 글) 라틴 문자로 모양 짓는다. 숫자처럼 Common 뿐인 낱말도 latn 기능을 쓴다. (리눅스 Norasi 의 DFLT 에만 있는 숫자 커닝을 걸지 않는다)
   - 실제로 닿는 상자(actualBoundingBox)는 찍기만 하고 견주지 않는다. (리눅스 "Hello World Wifi" 의 아래가 엔진 1, 크롬 0 처럼 1px 안팎으로 다르다) 부모 글꼴 치수(ex, ch 단위의 글꼴)는 윈도우, 리눅스 크롬과 견주지 못했다.
   - 데스크탑 그림의 색 프로필은 크롬 WebGL texImage2D 길과 같게 sRGB 로 바꾼다(core/colorprofile.rs, PNG, WebP 는 비트까지 같다). AVIF 는 YUV 를 RGB 로 바꾸는 셈이 libavif 의 실수 셈이라 크롬의 WebGL, CPU 캔버스 길(libyuv)과 한두 단계 다르고, 색 프로필이 붙으면 몇 단계까지 벌어진다. JPEG 은 해독기(zune-jpeg 와 libjpeg-turbo) 차이로 한두 단계 다르다. 크롬 Canvas2D 는 알파 그림을 알파를 곱한 뒤 바꾸고 PQ, HLG 를 더 어둡게 그려, 그 둘은 Canvas2D 에서 다르다. (엔진은 한 픽셀 묶음을 두 길에 같이 써 WebGL 길에 맞췄다) CMYK JPEG, BMP 와 ICO 안의 프로필, prem AVIF 의 프로필, mini 상자 AVIF 는 다루지 않는다.
   - 움직이는 AVIF 는 첫 장만 푼다. 원본 그림은 HTMLImageElement 이고, 크롬은 그것을 drawImage 와 texImage2D 로 그릴 때 늘 첫 장을 쓴다(bitmap_image.cc ImageForDefaultFrame, image_extractor.cc 의 DecodeFrameBufferAtIndex(0), 문서에 붙여 화면에서 움직이는 동안에도 같다). 어느 첫 장인지는 크롬 CrabbyAvif 처럼 주 상표 avis 면 트랙, avif 면 주 그림 항목, 그 밖은 트랙이 있으면 트랙이다.
