@@ -5,6 +5,7 @@
 //! - 공개 API 는 Skeleton2DData::create_from_json 이다. 이 모듈의 함수는 크레이트 안에서만 쓴다.
 //==============================================================================
 use crate::base::color::Color;
+use crate::experimental::jsmath::js_max;
 use crate::core::graphic::BlendMode;
 use crate::experimental::skeleton2d::skeleton2danimation::{Skeleton2DAnimation, Skeleton2DCurveType, Skeleton2DEvent, Skeleton2DTimeline, Skeleton2DTimelineType};
 use crate::experimental::skeleton2d::skeleton2ddata::{Skeleton2DAttachment, Skeleton2DBoneData, Skeleton2DData, Skeleton2DIkConstraintData, Skeleton2DMeshAttachment, Skeleton2DRegionAttachment, Skeleton2DSkin, Skeleton2DSlotData};
@@ -23,10 +24,10 @@ fn create_read_error(message: &str) -> String {
 //==============================================================================
 /// 숫자 칸 읽기. (없거나 숫자가 아니면 기본값)
 //==============================================================================
-fn read_number(source: &Map<String, Value>, key: &str, default_value: f32) -> f32 {
+fn read_number(source: &Map<String, Value>, key: &str, default_value: f64) -> f64 {
 	match source.get(key).and_then(|value| value.as_f64()) {
 		Some(number) => {
-			number as f32
+			number as f64
 		}
 		None => {
 			default_value
@@ -61,13 +62,13 @@ fn read_array<'a>(source: &'a Map<String, Value>, key: &str, place: &str) -> Rea
 //==============================================================================
 /// 숫자 배열 칸 읽기. (없으면 빈 배열, 숫자가 아닌 것이 있으면 오류)
 //==============================================================================
-fn read_number_array(source: &Map<String, Value>, key: &str, place: &str) -> ReadResult<Vec<f32>> {
+fn read_number_array(source: &Map<String, Value>, key: &str, place: &str) -> ReadResult<Vec<f64>> {
 	let values = read_array(source, key, place)?;
 	let mut numbers = Vec::with_capacity(values.len());
 	for value in values {
 		match value.as_f64() {
 			Some(number) => {
-				numbers.push(number as f32);
+				numbers.push(number as f64);
 			}
 			None => {
 				return Err(create_read_error(&format!("{} 의 {} 에 숫자가 아닌 값이 있다.", place, key)));
@@ -78,23 +79,23 @@ fn read_number_array(source: &Map<String, Value>, key: &str, place: &str) -> Rea
 }
 
 //==============================================================================
-/// 색 글 읽기. ("#rrggbb" 나 "#rrggbbaa", 0 ~ 1 의 Color)
+/// 색 글 읽기. ("#rrggbb" 나 "#rrggbbaa", 0 ~ 1 의 빨강, 초록, 파랑, 알파, 원본처럼 f64)
 //==============================================================================
-fn read_skeleton2d_color(color_text: &str, place: &str) -> ReadResult<Color> {
+fn read_skeleton2d_color(color_text: &str, place: &str) -> ReadResult<[f64; 4]> {
 	let hex_text = color_text.strip_prefix('#').unwrap_or(color_text);
 	let is_valid = (hex_text.len() == 6 || hex_text.len() == 8) && hex_text.chars().all(|character| character.is_ascii_hexdigit());
 	if !is_valid {
 		return Err(create_read_error(&format!("{} 의 색 \"{}\" 을 읽지 못했다.", place, color_text)));
 	}
-	let read_channel = |start: usize| -> f32 { u8::from_str_radix(&hex_text[start..start + 2], 16).unwrap_or(0) as f32 / 255.0 };
+	let read_channel = |start: usize| -> f64 { u8::from_str_radix(&hex_text[start..start + 2], 16).unwrap_or(0) as f64 / 255.0 };
 	let alpha = if hex_text.len() == 8 { read_channel(6) } else { 1.0 };
-	Ok(Color::create(read_channel(0), read_channel(2), read_channel(4), alpha))
+	Ok([read_channel(0), read_channel(2), read_channel(4), alpha])
 }
 
 //==============================================================================
 /// 키의 곡선 읽기. ((곡선 종류, 베지어 제어점))
 //==============================================================================
-fn read_curve(key_json: &Map<String, Value>, place: &str) -> ReadResult<(Skeleton2DCurveType, Option<[f32; 4]>)> {
+fn read_curve(key_json: &Map<String, Value>, place: &str) -> ReadResult<(Skeleton2DCurveType, Option<[f64; 4]>)> {
 	match key_json.get("curve") {
 		None | Some(Value::Null) => {
 			Ok((Skeleton2DCurveType::Linear, None))
@@ -106,7 +107,7 @@ fn read_curve(key_json: &Map<String, Value>, place: &str) -> ReadResult<(Skeleto
 			Ok((Skeleton2DCurveType::Stepped, None))
 		}
 		Some(Value::Array(curve_values)) if curve_values.len() == 4 && curve_values.iter().all(|value| value.is_number()) => {
-			let read_value = |value_index: usize| -> f32 { curve_values[value_index].as_f64().unwrap_or(0.0) as f32 };
+			let read_value = |value_index: usize| -> f64 { curve_values[value_index].as_f64().unwrap_or(0.0) as f64 };
 			Ok((Skeleton2DCurveType::Bezier, Some([read_value(0), read_value(1), read_value(2), read_value(3)])))
 		}
 		Some(_) => {
@@ -118,7 +119,7 @@ fn read_curve(key_json: &Map<String, Value>, place: &str) -> ReadResult<(Skeleto
 //==============================================================================
 /// 키 시각 읽기. (앞 키보다 이르면 오류, 키 객체도 돌려준다)
 //==============================================================================
-fn read_key_time<'a>(key_json: &'a Value, previous_time: f32, place: &str) -> ReadResult<(&'a Map<String, Value>, f32)> {
+fn read_key_time<'a>(key_json: &'a Value, previous_time: f64, place: &str) -> ReadResult<(&'a Map<String, Value>, f64)> {
 	let key_object = match key_json.as_object() {
 		Some(key_object) => {
 			key_object
@@ -225,7 +226,7 @@ fn read_slots(skeleton_data: &mut Skeleton2DData, json: &Map<String, Value>) -> 
 		let mut slot_data = Skeleton2DSlotData::new(skeleton_data.get_slots().len(), name, bone_index);
 		if let Some(color_text) = read_string(slot_object, "color") {
 			let color = read_skeleton2d_color(color_text, &format!("슬롯 \"{}\"", name))?;
-			slot_data.set_color(color);
+			slot_data.set_color(Color::create(color[0] as f32, color[1] as f32, color[2] as f32, color[3] as f32));
 		}
 		slot_data.set_attachment_name(read_string(slot_object, "attachment"));
 		let blend_mode = read_string(slot_object, "blendMode").and_then(BlendMode::from_name).unwrap_or(BlendMode::Normal);
@@ -288,7 +289,7 @@ fn read_ik_constraints(skeleton_data: &mut Skeleton2DData, json: &Map<String, Va
 //==============================================================================
 /// 메시 붙임 읽기. (무게가 있으면 처음 자세의 월드 행렬로 묶은 자리를 셈한다)
 //==============================================================================
-fn read_mesh_attachment(skeleton_data: &Skeleton2DData, world_matrices: &[f32], slot_index: usize, attachment_name: &str, attachment_json: &Map<String, Value>) -> ReadResult<Skeleton2DMeshAttachment> {
+fn read_mesh_attachment(skeleton_data: &Skeleton2DData, world_matrices: &[f64], slot_index: usize, attachment_name: &str, attachment_json: &Map<String, Value>) -> ReadResult<Skeleton2DMeshAttachment> {
 	let place = format!("메시 \"{}\"", attachment_name);
 	let frame_name = read_string(attachment_json, "frame").unwrap_or(attachment_name);
 	let mut mesh_attachment = Skeleton2DMeshAttachment::new(attachment_name, frame_name);
@@ -338,7 +339,7 @@ fn read_mesh_attachment(skeleton_data: &Skeleton2DData, world_matrices: &[f32], 
 				return Err(create_read_error(&format!("{} 의 꼭짓점 {} 무게는 [뼈 이름, 무게, ...] 꼴이어야 한다.", place, vertex_index)));
 			}
 		};
-		let total_weight: f32 = weight_values.iter().skip(1).step_by(2).map(|value| value.as_f64().unwrap_or(0.0) as f32).sum();
+		let total_weight: f64 = weight_values.iter().skip(1).step_by(2).map(|value| value.as_f64().unwrap_or(0.0) as f64).sum();
 		if total_weight <= 0.0 {
 			return Err(create_read_error(&format!("{} 의 꼭짓점 {} 무게 합이 0 이다.", place, vertex_index)));
 		}
@@ -366,7 +367,7 @@ fn read_mesh_attachment(skeleton_data: &Skeleton2DData, world_matrices: &[f32], 
 			let difference_y = world_y - world_matrices[bone_offset + 5];
 			let bind_x = (bone_d * difference_x - bone_c * difference_y) / determinant;
 			let bind_y = (bone_a * difference_y - bone_b * difference_x) / determinant;
-			let weight = pair[1].as_f64().unwrap_or(0.0) as f32;
+			let weight = pair[1].as_f64().unwrap_or(0.0) as f64;
 			influence_bone_indices.push(bone_index);
 			influence_values.extend_from_slice(&[bind_x, bind_y, weight / total_weight]);
 		}
@@ -461,7 +462,7 @@ fn read_skins(skeleton_data: &mut Skeleton2DData, json: &Map<String, Value>) -> 
 //==============================================================================
 /// 뼈 시간줄 읽기. (rotate, translate, scale, shear, 마지막 키 시각을 돌려준다)
 //==============================================================================
-fn read_bone_timeline(animation: &mut Skeleton2DAnimation, bone_index: usize, timeline_name: &str, key_json_list: &Value, place: &str) -> ReadResult<f32> {
+fn read_bone_timeline(animation: &mut Skeleton2DAnimation, bone_index: usize, timeline_name: &str, key_json_list: &Value, place: &str) -> ReadResult<f64> {
 	let timeline_type = match timeline_name {
 		"rotate" => {
 			Skeleton2DTimelineType::Rotate
@@ -489,7 +490,7 @@ fn read_bone_timeline(animation: &mut Skeleton2DAnimation, bone_index: usize, ti
 	};
 	let mut timeline = Skeleton2DTimeline::new(timeline_type, Some(bone_index));
 	let default_value = if timeline_type == Skeleton2DTimelineType::Scale { 1.0 } else { 0.0 };
-	let mut previous_time = 0.0f32;
+	let mut previous_time = 0.0f64;
 	for key_json in key_values {
 		let (key_object, time) = read_key_time(key_json, previous_time, place)?;
 		let (curve_type, curve_values) = read_curve(key_object, place)?;
@@ -521,7 +522,7 @@ fn read_animation(skeleton_data: &Skeleton2DData, animation_name: &str, animatio
 		}
 	};
 	let mut animation = Skeleton2DAnimation::new(animation_name, 0.0);
-	let mut last_time = 0.0f32;
+	let mut last_time = 0.0f64;
 
 	// 뼈 시간줄.
 	if let Some(bones_object) = animation_object.get("bones").and_then(|value| value.as_object()) {
@@ -545,7 +546,7 @@ fn read_animation(skeleton_data: &Skeleton2DData, animation_name: &str, animatio
 			let bone_place = format!("{} 뼈 \"{}\"", place, bone_name);
 			for (timeline_name, key_json_list) in timelines_object {
 				let timeline_last_time = read_bone_timeline(&mut animation, bone_index, timeline_name, key_json_list, &bone_place)?;
-				last_time = last_time.max(timeline_last_time);
+				last_time = js_max(last_time, timeline_last_time);
 			}
 		}
 	}
@@ -572,7 +573,7 @@ fn read_animation(skeleton_data: &Skeleton2DData, animation_name: &str, animatio
 			let slot_place = format!("{} 슬롯 \"{}\"", place, slot_name);
 			for timeline_name in timelines_object.keys() {
 				let key_json_list = read_array(timelines_object, timeline_name, &slot_place)?;
-				let mut previous_time = 0.0f32;
+				let mut previous_time = 0.0f64;
 				match timeline_name.as_str() {
 					"color" => {
 						let mut timeline = Skeleton2DTimeline::new(Skeleton2DTimelineType::Color, Some(slot_index));
@@ -580,7 +581,7 @@ fn read_animation(skeleton_data: &Skeleton2DData, animation_name: &str, animatio
 							let (key_object, time) = read_key_time(key_json, previous_time, &slot_place)?;
 							let (curve_type, curve_values) = read_curve(key_object, &slot_place)?;
 							let color = read_skeleton2d_color(read_string(key_object, "color").unwrap_or("#ffffffff"), &slot_place)?;
-							timeline.add_value_frame(time, &[color.red, color.green, color.blue, color.alpha], curve_type, curve_values);
+							timeline.add_value_frame(time, &color, curve_type, curve_values);
 							previous_time = time;
 						}
 						animation.add_timeline(timeline);
@@ -598,7 +599,7 @@ fn read_animation(skeleton_data: &Skeleton2DData, animation_name: &str, animatio
 						return Err(create_read_error(&format!("{} 의 시간줄 \"{}\" 를 모른다. (color, attachment)", slot_place, timeline_name)));
 					}
 				}
-				last_time = last_time.max(previous_time);
+				last_time = js_max(last_time, previous_time);
 			}
 		}
 	}
@@ -608,7 +609,7 @@ fn read_animation(skeleton_data: &Skeleton2DData, animation_name: &str, animatio
 	if !draw_order_json_list.is_empty() {
 		let slot_count = skeleton_data.get_slots().len();
 		let mut timeline = Skeleton2DTimeline::new(Skeleton2DTimelineType::DrawOrder, None);
-		let mut previous_time = 0.0f32;
+		let mut previous_time = 0.0f64;
 		let draw_order_place = format!("{} drawOrder", place);
 		for key_json in draw_order_json_list {
 			let (key_object, time) = read_key_time(key_json, previous_time, &draw_order_place)?;
@@ -643,14 +644,14 @@ fn read_animation(skeleton_data: &Skeleton2DData, animation_name: &str, animatio
 			previous_time = time;
 		}
 		animation.add_timeline(timeline);
-		last_time = last_time.max(previous_time);
+		last_time = js_max(last_time, previous_time);
 	}
 
 	// 사건 시간줄.
 	let event_json_list = read_array(animation_object, "events", &place)?;
 	if !event_json_list.is_empty() {
 		let mut timeline = Skeleton2DTimeline::new(Skeleton2DTimelineType::Event, None);
-		let mut previous_time = 0.0f32;
+		let mut previous_time = 0.0f64;
 		let event_place = format!("{} events", place);
 		for key_json in event_json_list {
 			let (key_object, time) = read_key_time(key_json, previous_time, &event_place)?;
@@ -662,7 +663,7 @@ fn read_animation(skeleton_data: &Skeleton2DData, animation_name: &str, animatio
 			previous_time = time;
 		}
 		animation.add_timeline(timeline);
-		last_time = last_time.max(previous_time);
+		last_time = js_max(last_time, previous_time);
 	}
 
 	animation.set_duration(read_number(animation_object, "duration", last_time));
