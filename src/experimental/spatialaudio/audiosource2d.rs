@@ -61,6 +61,7 @@ pub struct AudioSource2D {
 	pixels_per_unit: f64,
 }
 
+#[crate::reflect]
 impl AudioSource2D {
 	//==============================================================================
 	/// 생성. (플레이어 없음, 한 단위 1 픽셀)
@@ -151,6 +152,7 @@ impl Default for AudioSource2D {
 	}
 }
 
+#[crate::reflect]
 impl Component for AudioSource2D {
 	//==============================================================================
 	/// 공통 상태 반환.

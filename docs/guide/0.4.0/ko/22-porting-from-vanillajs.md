@@ -194,6 +194,7 @@ struct Spin {
 	degrees_per_second: f32,
 }
 
+#[vanilla::reflect]
 impl Spin {
 	pub fn new() -> Spin {
 		Spin {
@@ -207,6 +208,7 @@ impl Spin {
 	}
 }
 
+#[vanilla::reflect]
 impl Component for Spin {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base

@@ -2,7 +2,7 @@
 
 원본 vanilla.js 는 자바스크립트라 실행 중에 객체의 `get`, `is`, `set` 함수를 훑어 씁니다. UI 문서(`UIDocument`)가 등록한 쓰기 함수가 없는 컴포넌트를 저장하고 읽을 때(`saveByReflection`, `loadByReflection`), 개발자 도구 인스펙터가 컴포넌트의 값을 보일 때(`getComponentProperties`)가 그렇습니다. 러스트에는 실행 중에 함수 목록을 읽는 길이 없어서, 바닐라엔진은 절차 매크로 `#[vanilla::reflect]` 가 컴파일 때 같은 목록과 부르는 코드를 짓습니다. 언리얼의 UHT, Qt 의 moc 와 같은 방식입니다.
 
-이 장에서는 컴포넌트에 매크로를 붙이는 법, 게터와 세터를 고르는 규칙, 반사 값의 꼴, 함수와 블록에 붙이는 옵션, 원본 상위 클래스 자리를 잇는 `base`, 반사를 쓰는 곳(UI 문서와 개발자 도구), 붙이지 않았을 때 무엇이 안 되는지를 차례로 봅니다. 이 장은 러스트 판에만 있습니다.
+이 장에서는 컴포넌트에 매크로를 붙이는 법, 게터와 세터를 고르는 규칙, 반사 값의 꼴, 함수와 블록에 붙이는 옵션, 원본 상위 클래스 자리를 잇는 `base`, 반사를 쓰는 곳(UI 문서와 개발자 도구), 빠뜨리면 어떻게 막히는지를 차례로 봅니다. 이 장은 러스트 판에만 있습니다.
 
 ## 컴포넌트에 붙이기
 
@@ -53,17 +53,17 @@ impl Component for Spin {
 let mut spin = Spin::new();
 let property_names: Vec<&str> = collect_reflected_properties(&spin).iter().map(|property| property.name).collect();
 assert_eq!(property_names, ["DegreesPerSecond", "GizmoVisible", "Enable", "ComponentType"]);
-let getter_names: Vec<&str> = collect_reflected_getters(&spin).expect("reflection").iter().map(|getter| getter.name).collect();
+let getter_names: Vec<&str> = collect_reflected_getters(&spin).iter().map(|getter| getter.name).collect();
 assert_eq!(getter_names, ["getDegreesPerSecond"]);
 assert_eq!(read_reflected_property(&spin, "DegreesPerSecond"), Some(ReflectValue::Number(90.0)));
 assert!(write_reflected_property(&mut spin, "DegreesPerSecond", &ReflectValue::Number(45.0)));
 assert_eq!(spin.get_degrees_per_second(), 45.0);
 ```
 
-- `impl` 블록의 매크로는 그 블록의 게터와 세터를 모아 `Reflect` 구현을 짓습니다. `impl Component` 블록의 매크로는 `get_reflection`, `get_reflection_mut` 을 넣어 엔진이 `&dyn Component` 에서 반사를 꺼낼 수 있게 하고, 그 블록에서 다시 정의한 게터를 인스펙터용으로 모읍니다.
-- 한쪽 블록에만 붙이면 컴파일 에러가 나머지 블록에 붙이라고 알려 줍니다. 반사는 그래서 `Component` 를 구현한 타입에만 붙일 수 있습니다.
+- `impl` 블록의 매크로는 그 블록의 게터와 세터를 모아 `Reflect` 구현을 짓습니다. `impl Component` 블록의 매크로는 그 블록에서 다시 정의한 게터를 인스펙터용으로 모읍니다.
+- `Reflect` 가 `Component` 의 상위 트레이트라 어느 쪽을 빠뜨려도 컴파일 에러가 붙일 블록을 알려 줍니다. 게터가 없는 타입은 빈 블록 `#[vanilla::reflect] impl 타입 {}` 에 붙입니다. 반사는 `Component` 를 구현한 타입에만 붙일 수 있습니다.
 - 반사로 볼 함수는 매크로를 붙인 `impl` 블록 하나에 모읍니다. 매크로를 붙이지 않은 다른 `impl` 블록의 함수는 보지 않습니다. 같은 타입의 `impl` 블록 두 곳에 붙이면 `Reflect` 구현이 둘이 되어 컴파일되지 않습니다.
-- `impl Component` 블록에 `get_reflection` 을 직접 쓰면 매크로가 에러를 냅니다. (매크로가 넣는 함수입니다) 트레이트 `impl` 가운데 `Component` 가 아닌 것에는 붙일 수 없습니다.
+- 트레이트 `impl` 가운데 `Component` 가 아닌 것에는 붙일 수 없습니다.
 - 저장 속성 목록 끝에는 원본 `Component` 기반 클래스의 공통 속성 `GizmoVisible`, `Enable`, `ComponentType` 이 붙습니다. `ComponentType` 은 러스트에 세터가 없어(종류는 타입이 정합니다) 쓰기만 합니다.
 
 ## 게터와 세터를 고르는 규칙
@@ -170,7 +170,7 @@ let mut badge = Badge::new();
 let property_names: Vec<&str> = collect_reflected_properties(&badge).iter().map(|property| property.name).collect();
 assert_eq!(property_names, ["Label", "Tint", "Offset", "Blinking", "GizmoVisible", "Enable", "ComponentType"]);
 
-let getter_list = collect_reflected_getters(&badge).expect("reflection");
+let getter_list = collect_reflected_getters(&badge);
 let getter_names: Vec<&str> = getter_list.iter().map(|getter| getter.name).collect();
 assert_eq!(getter_names, ["getLabel", "getTint", "getOffset", "isBlinking", "getPointCount", "getPoints"]);
 assert_eq!(getter_list[4].value, ReflectValue::Number(2.0));
@@ -399,7 +399,7 @@ assert_eq!(property_names, ["UIScale", "FontFace", "GizmoVisible", "Enable", "Co
 assert!(property_list[0].is_saved);
 assert!(!property_list[1].is_saved);
 
-let getter_names: Vec<&str> = collect_reflected_getters(&gauge).expect("reflection").iter().map(|getter| getter.name).collect();
+let getter_names: Vec<&str> = collect_reflected_getters(&gauge).iter().map(|getter| getter.name).collect();
 assert_eq!(getter_names, ["isDrawnInsideContent", "getUIScale", "getFillRatio", "getFontFace"]);
 assert_eq!(gauge.get_debug_text(), "1 0.5");
 ```
@@ -494,7 +494,7 @@ let mut hero = Hero::new();
 assert_eq!(hero.get_reflected_type_name(), "Hero");
 let property_names: Vec<&str> = collect_reflected_properties(&hero).iter().map(|property| property.name).collect();
 assert_eq!(property_names, ["Title", "Speed", "GizmoVisible", "Enable", "ComponentType"]);
-let getter_names: Vec<&str> = collect_reflected_getters(&hero).expect("reflection").iter().map(|getter| getter.name).collect();
+let getter_names: Vec<&str> = collect_reflected_getters(&hero).iter().map(|getter| getter.name).collect();
 assert_eq!(getter_names, ["getTitle", "getSpeed"]);
 assert_eq!(read_reflected_property(&hero, "Speed"), Some(ReflectValue::Number(100.0)));
 assert!(write_reflected_property(&mut hero, "Speed", &ReflectValue::Number(150.0)));
@@ -557,6 +557,10 @@ struct Marker {
 	component_base: ComponentBase,
 }
 
+#[vanilla::reflect]
+impl Marker {}
+
+#[vanilla::reflect]
 impl Component for Marker {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base
@@ -583,7 +587,7 @@ node_tree[root_id].add_component(Marker {
 let json_text = document.to_json_text(&node_tree, root_id, false);
 assert!(json_text.contains("\"DegreesPerSecond\":45"));
 assert!(json_text.contains("\"type\":\"Spin\""));
-assert!(!json_text.contains("Marker"));
+assert!(json_text.contains("\"type\":\"Marker\""));
 
 let loaded_id = document.from_json_text(&mut node_tree, &json_text).expect("document");
 let loaded_spin = node_tree[loaded_id].get_component::<Spin>().expect("spin");
@@ -591,7 +595,7 @@ assert_eq!(loaded_spin.get_degrees_per_second(), 45.0);
 ```
 
 - 등록하지 않은 컴포넌트도 반사가 있으면 원본처럼 반사로 적고, `type` 은 타입 이름입니다. 읽을 때는 등록한 종류만 짓고 나머지는 경고를 내고 건너뜁니다.
-- 반사도 등록도 없는 컴포넌트(위의 `Marker`)는 적을 수 없어 표준 에러에 경고를 내고 뺍니다.
+- 게터가 없는 컴포넌트(위의 `Marker`)도 반사가 있어 원본처럼 공통 속성과 `type`(타입 이름)으로 적힙니다. 반사 없는 컴포넌트는 컴파일되지 않아 빠지는 컴포넌트가 없습니다.
 - 원본 `REFLECTED_PROPERTY_EXCLUDE_NAMES` 처럼 키가 `Parent`, `Node`, `Owner`, `Scene`, `Content`, `Children`, `AllComponents`, `Component`, `Components`, `Root`, `Graphic`, `Camera`, `Target` 인 속성은 저장하지 않습니다. 게임 컴포넌트의 `get_target`, `set_target` 도 저장되지 않으니 다른 이름을 씁니다.
 - `to_json_text` 는 `&NodeTree` 만 받아 `&mut self` 게터를 읽지 못합니다. 그런 게터가 저장 속성이면 `&mut NodeTree` 를 받는 `to_json_text_mut`, `serialize_node_mut` 로 씁니다.
 - 트리와 값을 받는 세터는 문서를 읽을 때 컴포넌트를 트리에서 잠깐 꺼내 그 자리에서 부릅니다. (원본과 같은 차례)
@@ -606,7 +610,7 @@ assert_eq!(loaded_spin.get_degrees_per_second(), 45.0);
 - 이름은 원본 `formatMethodName` 꼴입니다. `getDegreesPerSecond` 는 `degreesPerSecond`, `is` 로 시작하면 `isBlinking` 그대로입니다.
 - 값은 원본 `formatPropertyValue` 꼴입니다. 수는 소수 둘째 자리, `Vector2` 는 `(x, y)`, `Rect` 는 `(x, y, 너비, 높이)` 소수 첫째 자리, `Color` 는 `rgba(...)`, `Null` 은 `null`, 노드는 `[WorldNode]`, 배열은 `[Array]`, 그 밖은 `[종류 이름]` 입니다.
 - 트리를 받는 게터는 그릴 때 트리를 넘겨 부르고, `&mut self` 게터가 있는 컴포넌트는 `tick` 이 트리를 쥐고 읽어 둔 값을 보입니다.
-- 반사가 없는 컴포넌트는 개발자 도구의 UI 문서(`set_ui_document` 로 걸거나 `get_ui_document_mut` 로 등록)에 쓰기 함수로 등록되어 있으면 그 저장 키와 값을, 아니면 매크로를 붙이라는 "반사 없음" 줄을 보입니다.
+- 모든 컴포넌트가 반사되어 원본처럼 모든 컴포넌트의 게터를 보입니다. 게터가 없는 컴포넌트는 "(프로퍼티 없음)" 줄입니다.
 
 예제 `examples/devtoolsshowcase.rs` 의 `Spin` 이 매크로를 붙여 인스펙터에 `degreesPerSecond` 를 보입니다.
 
@@ -619,21 +623,19 @@ assert_eq!(loaded_spin.get_degrees_per_second(), 45.0);
 | `collect_reflected_properties(component)` | 저장 속성 목록 (`ReflectedProperty { name, getter_name, setter_name, is_saved }`, 공통 속성 포함) |
 | `read_reflected_property(component, 키)`, `read_reflected_property_mut` | 속성 값 읽기. `_mut` 은 `&mut self` 게터까지 |
 | `write_reflected_property(component, 키, 값)`, `write_reflected_property_in_tree` | 속성 값 넣기. `_in_tree` 는 트리를 받는 세터까지 (컴포넌트는 `NodeTree::with_component_at_mut` 로 꺼낸 채로) |
-| `collect_reflected_getters(component)`, `collect_reflected_getters_in_tree`, `collect_reflected_getters_mut` | 인스펙터용 게터 이름과 값 (`ReflectedGetter { name, value }`). 반사가 없으면 `None` |
+| `collect_reflected_getters(component)`, `collect_reflected_getters_in_tree`, `collect_reflected_getters_mut` | 인스펙터용 게터 이름과 값 (`ReflectedGetter { name, value }` 목록) |
 | `has_mutable_getters(component)` | `&mut self` 게터가 있는지 |
 
-## 붙이지 않았을 때
+## 빠뜨릴 수 없다
 
-원본은 모든 객체가 반사되지만 러스트 판은 매크로를 붙인 타입만 반사됩니다. 엔진 컴포넌트는 모두 붙어 있고, 게임 컴포넌트는 직접 붙입니다. 빠뜨렸을 때는 이렇게 됩니다.
+원본은 모든 객체가 반사됩니다. 러스트 판도 같게, `Reflect` 가 `Component` 의 상위 트레이트라 매크로를 빠뜨린 컴포넌트는 컴파일되지 않습니다. 엔진 컴포넌트도 모두 같은 길로 만듭니다.
 
 | 빠뜨린 곳 | 결과 |
 | --- | --- |
-| 한쪽 블록만 | 컴파일 에러가 붙일 블록을 알려 줍니다 |
-| 두 블록 모두, `register_component_type` 으로 등록함 | UI 문서가 공통 속성(`GizmoVisible`, `Enable`, `ComponentType`)만 쓰고 읽습니다. 게임 값은 저장되지 않습니다 |
-| 두 블록 모두, 등록하지 않음 | UI 문서가 쓸 때 경고를 내고 그 컴포넌트를 뺍니다 |
-| 두 블록 모두 | 개발자 도구 인스펙터가 게터 대신 "반사 없음" 줄을 보입니다 (쓰기 함수로 등록했으면 그 저장 키) |
+| `impl` 블록 | 컴파일 에러 "반사 구현이 없다" 가 `impl 타입` 블록에 붙이라고 알려 줍니다. 게터가 없는 타입은 빈 블록 `#[vanilla::reflect] impl 타입 {}` 에 붙입니다 |
+| `impl Component` 블록 | 컴파일 에러가 `impl Component for 타입` 블록에 붙이라고 알려 줍니다 |
 
-반사가 없어도 컴포넌트의 `tick`, `draw`, 터치 같은 동작은 그대로입니다. 반사는 이름으로 값을 찾아 쓰는 쪽(문서와 인스펙터)에만 쓰입니다.
+그래서 UI 문서는 등록하지 않은 컴포넌트도 원본처럼 반사로 쓰고, 개발자 도구 인스펙터는 모든 컴포넌트의 게터를 보입니다. 엔진은 `&dyn Component` 를 `&dyn Reflect` 로 올려(트레이트 업캐스팅) 반사를 부릅니다.
 
 ## 관련 타입
 
@@ -641,6 +643,6 @@ assert_eq!(loaded_spin.get_degrees_per_second(), 45.0);
 - `Reflect`, `ReflectComponentGetters`, `ReflectValue`, `ReflectedProperty`, `ReflectedGetter`
 - `ToReflectValue`, `FromReflectValue`
 - `vanilla::core::reflection` 의 `collect_reflected_properties`, `read_reflected_property`, `read_reflected_property_mut`, `write_reflected_property`, `write_reflected_property_in_tree`, `collect_reflected_getters`, `collect_reflected_getters_in_tree`, `collect_reflected_getters_mut`, `has_mutable_getters`, `COMPONENT_REFLECTED_PROPERTIES`
-- `Component::get_reflection`, `Component::get_reflection_mut`
+- `Component` (상위 트레이트 `Reflect`)
 - `UIDocument` (`register_component_type`, `register_component_type_with_handler`, `save_by_reflection`, `load_by_reflection`, `get_reflected_properties`, `to_json_text_mut`)
 - `DevTools` (`set_ui_document`, `get_ui_document_mut`)

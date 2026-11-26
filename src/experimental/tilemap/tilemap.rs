@@ -131,6 +131,32 @@ pub enum TilemapRenderMode {
 	Individual,
 }
 
+// 타일맵 열거의 반사 값. (원본 TilemapOrientation, TilemapStaggerAxis, TilemapStaggerIndex, TilemapRenderOrder, TilemapRenderMode 의 글, UIDocument 저장 값이 원본과 같다)
+crate::core::reflection::impl_reflect_names!(TilemapOrientation, [
+	(TilemapOrientation::Orthogonal, "orthogonal"),
+	(TilemapOrientation::Isometric, "isometric"),
+	(TilemapOrientation::Staggered, "staggered"),
+	(TilemapOrientation::Hexagonal, "hexagonal"),
+]);
+crate::core::reflection::impl_reflect_names!(TilemapStaggerAxis, [
+	(TilemapStaggerAxis::X, "x"),
+	(TilemapStaggerAxis::Y, "y"),
+]);
+crate::core::reflection::impl_reflect_names!(TilemapStaggerIndex, [
+	(TilemapStaggerIndex::Odd, "odd"),
+	(TilemapStaggerIndex::Even, "even"),
+]);
+crate::core::reflection::impl_reflect_names!(TilemapRenderOrder, [
+	(TilemapRenderOrder::RightDown, "right-down"),
+	(TilemapRenderOrder::RightUp, "right-up"),
+	(TilemapRenderOrder::LeftDown, "left-down"),
+	(TilemapRenderOrder::LeftUp, "left-up"),
+]);
+crate::core::reflection::impl_reflect_names!(TilemapRenderMode, [
+	(TilemapRenderMode::Chunk, "chunk"),
+	(TilemapRenderMode::Individual, "individual"),
+]);
+
 //==============================================================================
 /// 배치 셈(f64)의 사각형을 엔진 Rect(f32)로. (엔진 그리기에 넘기는 경계에서만 f32 로 바꾼다)
 //==============================================================================
@@ -542,6 +568,7 @@ pub struct Tilemap {
 	last_culled_chunk_count: u32,
 }
 
+#[crate::reflect]
 impl Tilemap {
 	//==============================================================================
 	/// 생성. (정사각, 칸 32 x 32)
@@ -1859,6 +1886,7 @@ impl Default for Tilemap {
 	}
 }
 
+#[crate::reflect]
 impl Component for Tilemap {
 	//==============================================================================
 	/// 공통 상태 반환.

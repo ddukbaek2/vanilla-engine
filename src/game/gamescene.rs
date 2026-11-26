@@ -30,10 +30,12 @@
 //!   - 원본 load(비동기)의 "load_assets 를 기다린 뒤 최소 시간 / 터치까지 기다림"은 러스트 애셋 흐름으로 옮겼다.
 //!     create 에서 "로딩 문" 읽기 손잡이 하나를 맡겨 두고, draw_on_load 가 최소 시간이 지나거나 화면을 누르면 문을 연다.
 //!     엔진은 맡긴 애셋이 모두(문 포함) 끝나야 initialize 를 부르므로 결과는 원본과 같다. (애셋 다 읽힘 + (최소 시간 또는 터치))
-//!   - 시간은 원본 Date.now() 대신 엔진 시작 뒤 실제 경과 시간(get_realtime_since_startup)으로 잰다.
-//!   - 화면 누름은 원본 window pointerdown 대신 입력 매니저의 is_touch_pressed 로 본다.
-//!   - 원본은 TouchRecognizer 를 initialize 에서 만든다. 러스트 판은 생성할 때 만든다. 터치는 원본 touchPress 같은 함수 대신 tick 이 넘긴다.
-//!     (SceneBase 의 터치 레이캐스터와 첫 터치 콜백은 쓰지 않는다)
+//! - 두 엔진이 같게 하는 것:
+//!   - 로딩 시간은 엔진 시계(get_realtime_since_startup)로 잰다. 엔진 시계가 아직 돌지 않았으면(첫 프레임 전, 0) 첫 로딩 화면 프레임의 시각부터 잰다.
+//!   - 로딩 화면 누름은 엔진 입력(is_touch_pressed)으로 draw_on_load 가 프레임마다 본다.
+//!   - TouchRecognizer 는 원본처럼 initialize 에서 만든다. (그 전에는 get_touch_recognizer 가 None, 원본 undefined)
+//!     터치는 원본 touchPress 같은 함수 대신 tick 이 넘긴다. (SceneBase 의 터치 레이캐스터와 첫 터치 콜백은 쓰지 않는다)
+//! - 그 밖에 원본과 다른 점:
 //!   - 세이프 에어리어: 웹은 원본처럼 CSS env(safe-area-inset-*) 를 읽는다. 데스크탑은 크롬 데스크탑처럼 0 이고,
 //!     set_safe_area_insets 로 정해 줄 수 있다. (정하면 웹에서도 그 값을 쓴다)
 //!   - set_view_scale_mode 는 엔진을 같이 받는다. (전역 엔진이 없다) 엔진을 주면 원본처럼 바로 뷰 영역을 다시 계산한다.
@@ -376,7 +378,7 @@ pub enum PlayInput {
 //==============================================================================
 pub struct GameSceneBase {
 	scene_base: SceneBase,
-	touch_recognizer: TouchRecognizer,
+	touch_recognizer: Option<TouchRecognizer>,
 	safe_area_node_id: Option<NodeId>,
 	last_safe_area_rect: Rect,
 	last_view_size_x: f32,
@@ -387,6 +389,8 @@ pub struct GameSceneBase {
 	load_start_time: f64,
 	load_min_duration_ms: f32,
 	load_touched_to_skip: bool,
+	/// 첫 프레임 전에 로딩을 시작해 시작 시각을 첫 로딩 화면 프레임에서 잡을지.
+	is_load_start_time_pending: bool,
 	load_gate_handle: Option<AssetLoadHandle>,
 	view_scale_mode: ViewScaleMode,
 	/// 세이프 에어리어 인셋. (CSS 픽셀, 위 / 오른쪽 / 아래 / 왼쪽. 없으면 뷰 매니저에서 읽는다)
@@ -440,7 +444,7 @@ impl GameSceneBase {
 		scene_base.set_scene_background_color(Color::black());
 		GameSceneBase {
 			scene_base,
-			touch_recognizer: TouchRecognizer::new(),
+			touch_recognizer: None,
 			safe_area_node_id: None,
 			last_safe_area_rect: Rect::zero(),
 			last_view_size_x: 0.0,
@@ -450,6 +454,7 @@ impl GameSceneBase {
 			load_start_time: 0.0,
 			load_min_duration_ms: DEFAULT_LOAD_MIN_DURATION_MS,
 			load_touched_to_skip: false,
+			is_load_start_time_pending: false,
 			load_gate_handle: None,
 			view_scale_mode: ViewScaleMode::None,
 			safe_area_insets: None,
@@ -528,23 +533,23 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	/// 터치 인식기 반환.
+	/// 터치 인식기 반환. (원본 getTouchRaycaster, initialize 에서 만든다)
 	///
 	/// # 돌려줌
-	/// tick 이 터치를 넘기는 인식기.
+	/// tick 이 터치를 넘기는 인식기. initialize 전에는 None. (원본 undefined)
 	//==============================================================================
-	pub fn get_touch_recognizer(&self) -> &TouchRecognizer {
-		&self.touch_recognizer
+	pub fn get_touch_recognizer(&self) -> Option<&TouchRecognizer> {
+		self.touch_recognizer.as_ref()
 	}
 
 	//==============================================================================
 	/// 터치 인식기 반환. (변경용)
 	///
 	/// # 돌려줌
-	/// tick 이 터치를 넘기는 인식기. (변경용)
+	/// tick 이 터치를 넘기는 인식기. (변경용) initialize 전에는 None.
 	//==============================================================================
-	pub fn get_touch_recognizer_mut(&mut self) -> &mut TouchRecognizer {
-		&mut self.touch_recognizer
+	pub fn get_touch_recognizer_mut(&mut self) -> Option<&mut TouchRecognizer> {
+		self.touch_recognizer.as_mut()
 	}
 
 	//==============================================================================
@@ -857,6 +862,8 @@ impl GameSceneBase {
 	pub fn create(&mut self, engine: &mut Engine) {
 		let current_time = engine.get_time_manager().get_realtime_since_startup();
 		self.begin_loading(current_time);
+		// 엔진 시계가 아직 돌지 않았으면(첫 프레임 전) 첫 로딩 화면 프레임의 시각부터 잰다. (원본 load 와 같은 규칙)
+		self.is_load_start_time_pending = current_time <= 0.0;
 		self.load_assets(engine);
 	}
 
@@ -870,6 +877,7 @@ impl GameSceneBase {
 	pub fn begin_loading(&mut self, current_time: f64) {
 		self.load_start_time = current_time;
 		self.load_touched_to_skip = false;
+		self.is_load_start_time_pending = false;
 		let load_gate_handle = AssetLoadHandle::create_pending(LOADING_GATE_PATH);
 		self.scene_base.track_load_handle(&load_gate_handle);
 		if self.load_min_duration_ms <= 0.0 {
@@ -987,6 +995,10 @@ impl GameSceneBase {
 	//==============================================================================
 	pub fn draw_on_load(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
 		let current_time = engine.get_time_manager().get_realtime_since_startup();
+		if self.is_load_start_time_pending {
+			self.load_start_time = current_time;
+			self.is_load_start_time_pending = false;
+		}
 		let is_touch_pressed = engine.get_input_manager().is_touch_pressed();
 		self.update_loading(current_time, is_touch_pressed);
 
@@ -1063,6 +1075,8 @@ impl GameSceneBase {
 	pub fn initialize(&mut self, engine: &mut Engine) {
 		self.apply_view_scale_mode(engine);
 		self.apply_play_area_reference(engine);
+		// 터치 인식기. (원본처럼 initialize 에서 만든다)
+		self.touch_recognizer = Some(TouchRecognizer::new());
 		// 개발자 도구. (EngineConfiguration::use_dev_tools 가 꺼져 있으면 만들지 않는다)
 		self.dev_tools = None;
 		if engine.get_engine_configuration().use_dev_tools {
@@ -1295,16 +1309,16 @@ impl GameSceneBase {
 			if is_touch_pressed {
 				self.is_play_press_active = false;
 			}
-			if self.touch_recognizer.is_touching() {
+			if let Some(touch_recognizer) = self.touch_recognizer.as_mut().filter(|touch_recognizer| touch_recognizer.is_touching()) {
 				let node_tree = self.scene_base.get_node_tree_mut();
 				if is_touch_moved {
-					self.touch_recognizer.touch_move(node_tree, engine, view_input_position);
+					touch_recognizer.touch_move(node_tree, engine, view_input_position);
 				}
 				if input_manager.is_touch_released() {
-					self.touch_recognizer.touch_release(node_tree, engine, view_input_position);
+					touch_recognizer.touch_release(node_tree, engine, view_input_position);
 				}
 				else if input_manager.is_touch_cancelled() {
-					self.touch_recognizer.touch_cancel(node_tree, engine, view_input_position);
+					touch_recognizer.touch_cancel(node_tree, engine, view_input_position);
 				}
 			}
 		}
@@ -1317,18 +1331,22 @@ impl GameSceneBase {
 				match window_layer_id {
 					Some(window_layer_id) => {
 						UIWindowLayer::scroll_window_at(self.scene_base.get_node_tree_mut(), engine, window_layer_id, view_input_position, wheel_delta);
-						self.touch_recognizer.mark_wheel_handled();
+						if let Some(touch_recognizer) = self.touch_recognizer.as_mut() {
+							touch_recognizer.mark_wheel_handled();
+						}
 					}
 					None => {
-						let is_wheel_handled = self.touch_recognizer.tick_wheel(self.scene_base.get_node_tree_mut(), engine);
+						let is_wheel_handled = self.touch_recognizer.as_mut().is_some_and(|touch_recognizer| touch_recognizer.tick_wheel(self.scene_base.get_node_tree_mut(), engine));
 						is_play_wheel = !is_wheel_handled && hit_node_id.is_none();
 					}
 				}
 			}
-			else {
-				self.touch_recognizer.tick_wheel(self.scene_base.get_node_tree_mut(), engine);
+			else if let Some(touch_recognizer) = self.touch_recognizer.as_mut() {
+				touch_recognizer.tick_wheel(self.scene_base.get_node_tree_mut(), engine);
 			}
-			self.touch_recognizer.tick_pointer(self.scene_base.get_node_tree_mut(), engine);
+			if let Some(touch_recognizer) = self.touch_recognizer.as_mut() {
+				touch_recognizer.tick_pointer(self.scene_base.get_node_tree_mut(), engine);
+			}
 			if is_play_wheel && is_play_input_wanted {
 				let play_area_position = self.convert_view_to_play_area(view_input_position);
 				self.dispatch_play_input(PlayInput::Wheel(play_area_position, wheel_delta));
@@ -1373,7 +1391,7 @@ impl GameSceneBase {
 	/// 이번 프레임의 휠을 스크롤 칸이나 창이 받아 썼으면 true.
 	//==============================================================================
 	pub fn is_wheel_handled(&self) -> bool {
-		self.touch_recognizer.is_wheel_handled()
+		self.touch_recognizer.as_ref().is_some_and(|touch_recognizer| touch_recognizer.is_wheel_handled())
 	}
 
 	//==============================================================================

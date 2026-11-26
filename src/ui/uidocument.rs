@@ -18,7 +18,7 @@
 //!   - 종류 등록: register_component_type(이름, 짓는 함수)은 원본 registerComponentType 이다. (반사로 쓰고 읽는다) 쓰기, 읽기 함수가 따로 있는 종류는
 //!     register_component_type_with_handler 로, 위젯(content 노드를 만드는 컴포넌트)은 register_widget_type, register_widget_type_with_handler 로 등록한다.
 //!   - 등록하지 않은 종류는 원본처럼 읽을 때 건너뛰고(노드 종류는 WorldNode 로 읽고) 경고를 낸다. 쓸 때 type 은 원본처럼 등록한 이름이고, 등록하지 않은 종류는 반사로 적고 type 은 타입 이름이다. (원본 constructor.name)
-//!     반사가 없는 컴포넌트(`#[reflect]` 를 붙이지 않은 게임 컴포넌트)는 적을 수 없어 경고를 내고 뺀다.
+//!     원본처럼 모든 컴포넌트가 반사된다. (Reflect 가 Component 의 상위 트레이트라 `#[reflect]` 를 빠뜨린 컴포넌트는 컴파일되지 않는다)
 //!   - 쓰기, 읽기 함수가 있는 종류도 원본처럼 노드를 가리키는 반사 속성은 따로 { "$nodeRef": 경로 } 로 얹고 읽는다. (saveNodeReferences, loadNodeReferences)
 //!   - ShadowImage 는 원본 표의 끝에도 같은 꼴(imagePath 뒤에 반사 저장 꼴)로 넣어 두 엔진이 같다.
 //!   - 원본 UIImageView 는 붙을 때 호스트에 Sprite 를 붙여 문서에 UIImageView 다음 Sprite 가 적힌다. 러스트 판은 Sprite 를 품어서, 품은 Sprite 를 그 자리에 Sprite 로 적고
@@ -64,7 +64,7 @@ use crate::core::image::Image;
 use crate::core::node::nodetree::{NodeId, NodeTree};
 use crate::core::node::worldnode::WorldNode;
 use crate::misc::storagetext::{self, JsonSurrogateTable};
-use crate::core::reflection::{collect_reflected_properties, has_mutable_getters, read_reflected_property, read_reflected_property_mut, read_shortest_number, write_reflected_property, write_reflected_property_in_tree, ReflectValue, ReflectedProperty};
+use crate::core::reflection::{collect_reflected_properties, has_mutable_getters, read_reflected_property, read_reflected_property_mut, read_shortest_number, write_reflected_property, write_reflected_property_in_tree, Reflect, ReflectValue, ReflectedProperty};
 use crate::resource::imageasset::ImageAsset;
 use crate::effect::heathazeeffect::HeatHazeEffect;
 use crate::effect::particlesystem::ParticleSystem;
@@ -292,6 +292,10 @@ impl Default for UIDocumentNodeParts {
 /// 	color: Color,
 /// }
 ///
+/// #[vanilla::reflect]
+/// impl Badge {}
+///
+/// #[vanilla::reflect]
 /// impl Component for Badge {
 /// 	fn get_component_base(&self) -> &ComponentBase {
 /// 		&self.component_base
@@ -458,6 +462,10 @@ enum ImageLookup {
 /// 	target: Option<NodeId>,
 /// }
 ///
+/// #[vanilla::reflect]
+/// impl Follow {}
+///
+/// #[vanilla::reflect]
 /// impl Component for Follow {
 /// 	fn get_component_base(&self) -> &ComponentBase {
 /// 		&self.component_base
@@ -592,6 +600,10 @@ impl<'a> UIDocumentSaveContext<'a> {
 /// 	target: Option<NodeId>,
 /// }
 ///
+/// #[vanilla::reflect]
+/// impl Follow {}
+///
+/// #[vanilla::reflect]
 /// impl Component for Follow {
 /// 	fn get_component_base(&self) -> &ComponentBase {
 /// 		&self.component_base
@@ -984,6 +996,10 @@ impl UIDocument {
 	/// 	degrees_per_second: f32,
 	/// }
 	///
+	/// #[vanilla::reflect]
+	/// impl Spin {}
+	///
+	/// #[vanilla::reflect]
 	/// impl Component for Spin {
 	/// 	fn get_component_base(&self) -> &ComponentBase {
 	/// 		&self.component_base
@@ -1750,19 +1766,12 @@ impl UIDocument {
 				}
 				None => {
 					// 등록하지 않은 종류도 원본처럼 반사로 적는다. (읽을 때는 등록한 종류만 짓는다)
-					match component_reference.get_reflection() {
-						Some(reflection) => {
-							let reflected_type_name = reflection.get_reflected_type_name();
-							if generated_type_set.contains(reflected_type_name) {
-								continue;
-							}
-							(reflected_type_name, UIDocument::save_by_reflection(component_reference, &save_context))
-						}
-						None => {
-							eprintln!("UIDocument: 반사도 등록도 없는 컴포넌트라 적지 않습니다 ({}, 노드 {}). impl 블록과 impl Component 블록에 #[vanilla::reflect] 를 붙이거나 register_component_type_with_handler 로 등록합니다", component_reference.get_component_type(), node.get_name());
-							continue;
-						}
+					let reflection: &dyn Reflect = component_reference;
+					let reflected_type_name = reflection.get_reflected_type_name();
+					if generated_type_set.contains(reflected_type_name) {
+						continue;
 					}
+					(reflected_type_name, UIDocument::save_by_reflection(component_reference, &save_context))
 				}
 			};
 			write_value(&mut component_data, "type", Value::from(type_name));
@@ -1793,7 +1802,7 @@ impl UIDocument {
 	}
 
 	//==============================================================================
-	/// 컴포넌트 하나 → 문서 데이터. ("type" 은 더하지 않는다. 등록한 종류면 그 꼴로, 등록하지 않았어도 반사가 있으면 반사로. 둘 다 없으면 경고 없이 None)
+	/// 컴포넌트 하나 → 문서 데이터. ("type" 은 더하지 않는다. 등록한 종류면 그 꼴로, 등록하지 않았으면 반사로. 원본처럼 모든 컴포넌트가 반사된다)
 	/// - 노드 참조는 root_id 기준 경로로 적는다.
 	/// # 인자
 	/// - `node_tree`: 노드 참조를 찾을 트리.
@@ -1801,7 +1810,7 @@ impl UIDocument {
 	/// - `component`: 쓸 컴포넌트.
 	///
 	/// # 돌려줌
-	/// 컴포넌트 문서 값. ("type" 없음) 등록하지 않았고 반사도 없으면 None.
+	/// 컴포넌트 문서 값. ("type" 없음)
 	///
 	/// # 예제
 	/// Paint 하나의 문서 값
@@ -1812,12 +1821,12 @@ impl UIDocument {
 	/// let mut paint = Paint::new();
 	/// paint.set_round_size(8.0);
 	/// let document = UIDocument::new();
-	/// let paint_data = document.serialize_component(&node_tree, node_tree.get_root_id(), &paint).expect("paint data");
+	/// let paint_data = document.serialize_component(&node_tree, node_tree.get_root_id(), &paint);
 	/// assert_eq!(paint_data["roundSize"], 8);
 	/// assert!(paint_data.get("type").is_none());
 	/// ```
 	//==============================================================================
-	pub fn serialize_component(&self, node_tree: &NodeTree, root_id: NodeId, component: &dyn Component) -> Option<Map<String, Value>> {
+	pub fn serialize_component(&self, node_tree: &NodeTree, root_id: NodeId, component: &dyn Component) -> Map<String, Value> {
 		let save_context = UIDocumentSaveContext {
 			node_tree,
 			root_id,
@@ -1831,16 +1840,15 @@ impl UIDocument {
 					Some(save_component) => {
 						let mut component_data = save_component(component, &save_context);
 						UIDocument::save_node_references(component, &mut component_data, &save_context);
-						Some(component_data)
+						component_data
 					}
 					None => {
-						Some(UIDocument::save_by_reflection(component, &save_context))
+						UIDocument::save_by_reflection(component, &save_context)
 					}
 				}
 			}
 			None => {
-				component.get_reflection()?;
-				Some(UIDocument::save_by_reflection(component, &save_context))
+				UIDocument::save_by_reflection(component, &save_context)
 			}
 		}
 	}
@@ -1851,7 +1859,7 @@ impl UIDocument {
 	/// - `component`: 속성을 볼 컴포넌트.
 	///
 	/// # 돌려줌
-	/// 반사 속성 목록. (반사 매크로가 지은 차례 뒤에 Component 공통 속성 GizmoVisible, Enable, ComponentType. 반사가 없는 컴포넌트는 공통 속성만)
+	/// 반사 속성 목록. (반사 매크로가 지은 차례 뒤에 Component 공통 속성 GizmoVisible, Enable, ComponentType. 게터가 없는 컴포넌트는 공통 속성만)
 	//==============================================================================
 	pub fn get_reflected_properties(component: &dyn Component) -> Vec<ReflectedProperty> {
 		collect_reflected_properties(component).into_iter().filter(|property| !REFLECTED_PROPERTY_EXCLUDE_NAMES.contains(&property.name)).collect()
@@ -3690,6 +3698,10 @@ mod tests {
 			component_base: crate::core::component::ComponentBase,
 			degrees_per_second: f32,
 		}
+		#[crate::reflect]
+		impl Spin {}
+
+		#[crate::reflect]
 		impl Component for Spin {
 			//==============================================================================
 			/// 컴포넌트 공통 상태 반환.
@@ -4183,7 +4195,7 @@ mod tests {
 		let loaded_component: &dyn Component = loaded_tree[loaded_follower_id].get_all_components()[0].as_ref();
 		let property_names: Vec<&str> = UIDocument::get_reflected_properties(loaded_component).iter().map(|property| property.name).collect();
 		assert_eq!(property_names, ["Speed", "Label", "Tint", "Offset", "TextAlign", "Leader", "Slot", "CachedArea", "GizmoVisible", "Enable", "ComponentType"]);
-		let getter_names: Vec<&str> = crate::core::reflection::collect_reflected_getters(loaded_component).expect("getters").iter().map(|getter| getter.name).collect();
+		let getter_names: Vec<&str> = crate::core::reflection::collect_reflected_getters(loaded_component).iter().map(|getter| getter.name).collect();
 		assert_eq!(getter_names, ["isTickNeeded", "getSpeed", "getLabel", "getTint", "getOffset", "getTextAlign", "getLeader", "getSlot", "getCacheCount", "isFollowing"]);
 	}
 
@@ -4432,7 +4444,7 @@ mod tests {
 			let node_id = node_tree.create_node(type_name);
 			let component_index = document.create_component(&mut node_tree, node_id, type_name).expect("component");
 			let component: &dyn Component = node_tree[node_id].get_all_components()[component_index].as_ref();
-			let getter_names: Vec<&str> = crate::core::reflection::collect_reflected_getters_in_tree(component, &node_tree).expect("getters").iter().map(|getter| getter.name).collect();
+			let getter_names: Vec<&str> = crate::core::reflection::collect_reflected_getters_in_tree(component, &node_tree).iter().map(|getter| getter.name).collect();
 			let expected_getter_names: Vec<&str> = expected_names.as_array().expect("names").iter().filter_map(|name| name.as_str()).filter(|name| *name != "getEngine").collect();
 			assert_eq!(getter_names, expected_getter_names, "{}", type_name);
 		}
@@ -4505,12 +4517,12 @@ mod tests {
 
 		// 인스펙터: 트리 갈래는 트리를 받는 게터까지, &mut 갈래는 &mut self 게터까지 보인다.
 		let shared_component: &dyn Component = node_tree[follower_id].get_all_components()[0].as_ref();
-		let shared_getter_names: Vec<&str> = crate::core::reflection::collect_reflected_getters(shared_component).expect("getters").iter().map(|getter| getter.name).collect();
+		let shared_getter_names: Vec<&str> = crate::core::reflection::collect_reflected_getters(shared_component).iter().map(|getter| getter.name).collect();
 		assert!(!shared_getter_names.contains(&"getLeaderName") && !shared_getter_names.contains(&"getCachedArea"));
-		let in_tree_getter_list = crate::core::reflection::collect_reflected_getters_in_tree(shared_component, &node_tree).expect("getters");
+		let in_tree_getter_list = crate::core::reflection::collect_reflected_getters_in_tree(shared_component, &node_tree);
 		assert!(in_tree_getter_list.iter().any(|getter| getter.name == "getLeaderName" && getter.value == ReflectValue::String(String::from("leader"))));
 		assert!(crate::core::reflection::has_mutable_getters(shared_component));
-		let mutable_getter_list = node_tree.with_component_at_mut(follower_id, 0, |component, tree| crate::core::reflection::collect_reflected_getters_mut(component, tree)).flatten().expect("getters");
+		let mutable_getter_list = node_tree.with_component_at_mut(follower_id, 0, |component, tree| crate::core::reflection::collect_reflected_getters_mut(component, tree)).expect("follower");
 		let mutable_getter_names: Vec<&str> = mutable_getter_list.iter().map(|getter| getter.name).collect();
 		assert_eq!(mutable_getter_names, ["isTickNeeded", "getSpeed", "getLabel", "getTint", "getOffset", "getTextAlign", "getLeader", "getLeaderName", "getSlot", "getCachedArea", "getCacheCount", "isFollowing"]);
 	}

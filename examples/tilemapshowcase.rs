@@ -44,6 +44,10 @@ struct CollisionOverlay {
 	shape_list: Vec<TileCollisionShape>,
 }
 
+#[vanilla::reflect]
+impl CollisionOverlay {}
+
+#[vanilla::reflect]
 impl Component for CollisionOverlay {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base

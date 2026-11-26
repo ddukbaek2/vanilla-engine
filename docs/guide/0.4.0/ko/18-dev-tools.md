@@ -81,7 +81,7 @@ fn main() {
 
 - 트리의 A 칸을 누르면 그 노드의 켜짐이, G 칸을 누르면 기즈모 표시가 바뀝니다. 인스펙터의 컴포넌트 머리를 누르면 그 컴포넌트의 값 목록을 접고 폅니다.
 - 러스트 판의 노드는 `WorldNode` 한 가지라서 종류 칸은 늘 `WorldNode` 입니다.
-- 인스펙터의 컴포넌트 값은 원본이 실행 중에 객체를 훑던 자리를 `#[vanilla::reflect]` 매크로가 컴파일 때 지은 목록으로 대신합니다. 엔진 컴포넌트는 모두 붙어 있고, 게임 컴포넌트는 매크로를 붙여야 값이 보입니다. 붙이지 않은 컴포넌트는 "반사 없음" 줄이 나옵니다. ("반사 매크로" 장)
+- 인스펙터의 컴포넌트 값은 원본이 실행 중에 객체를 훑던 자리를 `#[vanilla::reflect]` 매크로가 컴파일 때 지은 목록으로 대신합니다. `Reflect` 가 `Component` 의 상위 트레이트라 매크로를 빠뜨린 컴포넌트는 컴파일되지 않고, 원본처럼 모든 컴포넌트의 값이 보입니다. ("반사 매크로" 장)
 - Local Storage 탭의 더하기, 고치기, 지우기는 원본 `prompt`, `confirm` 자리인 `Engine::prompt`, `Engine::confirm` 으로 묻습니다. 웹은 브라우저 창이, 데스크탑은 엔진이 그린 같은 질문 창이 뜹니다. Clear 는 `LocalStorage::clear()` 라서 그 저장소의 값을 모두 지웁니다.
 - Settings 의 Dim Background 는 패널 밖의 화면을 어둡게 덮습니다. Show All Gizmos(처음 켜짐)는 패널이 열려 있는 동안 모든 노드의 기즈모를 그립니다. 두 비율 안내선은 뷰 배율 모드가 늘이는 모드(`StretchWidth`, `StretchHeight`, `StretchShort` 와 그 `Expand` 갈래)일 때만 화면 가운데에 사각형을 그립니다. Show FPS 는 원본처럼 값만 저장하고 패널이 그리지 않습니다. (`is_frame_per_second_visible()` 로 읽습니다)
 - Settings 의 값은 `LocalStorage` 의 `hierarchy.settings` 키에 원본과 같은 JSON 으로 저장되어 다음에 켤 때도 남습니다.
@@ -204,6 +204,10 @@ struct SightGizmo {
 	radius: f32,
 }
 
+#[vanilla::reflect]
+impl SightGizmo {}
+
+#[vanilla::reflect]
 impl Component for SightGizmo {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base

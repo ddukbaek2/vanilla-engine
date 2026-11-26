@@ -94,6 +94,7 @@ pub(crate) struct UIInputFieldQuickMenu {
 	shadow_list: [BlurredRoundRectShadow; 2],
 }
 
+#[crate::reflect]
 impl UIInputFieldQuickMenu {
 	//==============================================================================
 	/// 만들기. (단추 폭을 잰다)
@@ -166,6 +167,7 @@ impl UIInputFieldQuickMenu {
 	}
 }
 
+#[crate::reflect]
 impl Component for UIInputFieldQuickMenu {
 	//==============================================================================
 	/// 컴포넌트 공통 칸 반환.

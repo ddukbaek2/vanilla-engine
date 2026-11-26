@@ -2,7 +2,7 @@
 
 The original vanilla.js is JavaScript, so it scans an object's `get`, `is`, and `set` functions at run time. It does this when the UI document (`UIDocument`) saves and loads a component that has no registered save and load functions (`saveByReflection`, `loadByReflection`), and when the developer tools inspector shows a component's values (`getComponentProperties`). Rust has no way to read a list of functions at run time, so in Vanilla Engine the procedural macro `#[vanilla::reflect]` generates the same list and the code that calls it at compile time. This is the same approach as Unreal's UHT and Qt's moc.
 
-This chapter covers how to attach the macro to a component, the rules that pick getters and setters, the types of reflected values, the options for functions and blocks, `base` for the place of an original superclass, where reflection is used (the UI document and the developer tools), and what stops working when the macro is missing. This chapter exists only in the Rust edition.
+This chapter covers how to attach the macro to a component, the rules that pick getters and setters, the types of reflected values, the options for functions and blocks, `base` for the place of an original superclass, where reflection is used (the UI document and the developer tools), and how leaving it out is stopped. This chapter exists only in the Rust edition.
 
 ## Attaching It to a Component
 
@@ -53,17 +53,17 @@ impl Component for Spin {
 let mut spin = Spin::new();
 let property_names: Vec<&str> = collect_reflected_properties(&spin).iter().map(|property| property.name).collect();
 assert_eq!(property_names, ["DegreesPerSecond", "GizmoVisible", "Enable", "ComponentType"]);
-let getter_names: Vec<&str> = collect_reflected_getters(&spin).expect("reflection").iter().map(|getter| getter.name).collect();
+let getter_names: Vec<&str> = collect_reflected_getters(&spin).iter().map(|getter| getter.name).collect();
 assert_eq!(getter_names, ["getDegreesPerSecond"]);
 assert_eq!(read_reflected_property(&spin, "DegreesPerSecond"), Some(ReflectValue::Number(90.0)));
 assert!(write_reflected_property(&mut spin, "DegreesPerSecond", &ReflectValue::Number(45.0)));
 assert_eq!(spin.get_degrees_per_second(), 45.0);
 ```
 
-- The macro on the `impl` block collects that block's getters and setters and generates a `Reflect` implementation. The macro on the `impl Component` block inserts `get_reflection` and `get_reflection_mut` so the engine can get the reflection from a `&dyn Component`, and collects the getters redefined in that block for the inspector.
-- If only one block has the macro, a compile error tells you to add it to the other block. This is also why reflection can only be attached to types that implement `Component`.
+- The macro on the `impl` block collects that block's getters and setters and generates a `Reflect` implementation. The macro on the `impl Component` block collects the getters redefined in that block for the inspector.
+- `Reflect` is a supertrait of `Component`, so leaving out either block gives a compile error that points at the block that needs it. A type without getters takes the macro on an empty block, `#[vanilla::reflect] impl Type {}`. Reflection can only be attached to types that implement `Component`.
 - Keep the functions you want reflected in the one `impl` block that has the macro. Functions in other `impl` blocks without the macro are not seen. Putting the macro on two `impl` blocks of the same type produces two `Reflect` implementations and does not compile.
-- Writing `get_reflection` yourself in an `impl Component` block with the macro is an error (the macro inserts it). Trait `impl` blocks other than `Component` cannot take the macro.
+- Trait `impl` blocks other than `Component` cannot take the macro.
 - The common properties of the original `Component` base class, `GizmoVisible`, `Enable`, and `ComponentType`, are appended to the end of the property list. `ComponentType` has no setter in Rust (the type decides the kind), so it is only written.
 
 ## Rules for Picking Getters and Setters
@@ -170,7 +170,7 @@ let mut badge = Badge::new();
 let property_names: Vec<&str> = collect_reflected_properties(&badge).iter().map(|property| property.name).collect();
 assert_eq!(property_names, ["Label", "Tint", "Offset", "Blinking", "GizmoVisible", "Enable", "ComponentType"]);
 
-let getter_list = collect_reflected_getters(&badge).expect("reflection");
+let getter_list = collect_reflected_getters(&badge);
 let getter_names: Vec<&str> = getter_list.iter().map(|getter| getter.name).collect();
 assert_eq!(getter_names, ["getLabel", "getTint", "getOffset", "isBlinking", "getPointCount", "getPoints"]);
 assert_eq!(getter_list[4].value, ReflectValue::Number(2.0));
@@ -399,7 +399,7 @@ assert_eq!(property_names, ["UIScale", "FontFace", "GizmoVisible", "Enable", "Co
 assert!(property_list[0].is_saved);
 assert!(!property_list[1].is_saved);
 
-let getter_names: Vec<&str> = collect_reflected_getters(&gauge).expect("reflection").iter().map(|getter| getter.name).collect();
+let getter_names: Vec<&str> = collect_reflected_getters(&gauge).iter().map(|getter| getter.name).collect();
 assert_eq!(getter_names, ["isDrawnInsideContent", "getUIScale", "getFillRatio", "getFontFace"]);
 assert_eq!(gauge.get_debug_text(), "1 0.5");
 ```
@@ -494,7 +494,7 @@ let mut hero = Hero::new();
 assert_eq!(hero.get_reflected_type_name(), "Hero");
 let property_names: Vec<&str> = collect_reflected_properties(&hero).iter().map(|property| property.name).collect();
 assert_eq!(property_names, ["Title", "Speed", "GizmoVisible", "Enable", "ComponentType"]);
-let getter_names: Vec<&str> = collect_reflected_getters(&hero).expect("reflection").iter().map(|getter| getter.name).collect();
+let getter_names: Vec<&str> = collect_reflected_getters(&hero).iter().map(|getter| getter.name).collect();
 assert_eq!(getter_names, ["getTitle", "getSpeed"]);
 assert_eq!(read_reflected_property(&hero, "Speed"), Some(ReflectValue::Number(100.0)));
 assert!(write_reflected_property(&mut hero, "Speed", &ReflectValue::Number(150.0)));
@@ -557,6 +557,10 @@ struct Marker {
 	component_base: ComponentBase,
 }
 
+#[vanilla::reflect]
+impl Marker {}
+
+#[vanilla::reflect]
 impl Component for Marker {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base
@@ -583,7 +587,7 @@ node_tree[root_id].add_component(Marker {
 let json_text = document.to_json_text(&node_tree, root_id, false);
 assert!(json_text.contains("\"DegreesPerSecond\":45"));
 assert!(json_text.contains("\"type\":\"Spin\""));
-assert!(!json_text.contains("Marker"));
+assert!(json_text.contains("\"type\":\"Marker\""));
 
 let loaded_id = document.from_json_text(&mut node_tree, &json_text).expect("document");
 let loaded_spin = node_tree[loaded_id].get_component::<Spin>().expect("spin");
@@ -591,7 +595,7 @@ assert_eq!(loaded_spin.get_degrees_per_second(), 45.0);
 ```
 
 - An unregistered component that has reflection is still written through reflection, like the original, with the type name as its `type`. When loading, only registered kinds are created; the rest are skipped with a warning.
-- A component with neither reflection nor registration (`Marker` above) cannot be written, so a warning goes to standard error and it is left out.
+- A component without getters (`Marker` above) is reflected too, so like the original it is written with the common properties and `type` (the type name). A component without reflection does not compile, so no component is left out.
 - Like the original `REFLECTED_PROPERTY_EXCLUDE_NAMES`, properties whose key is `Parent`, `Node`, `Owner`, `Scene`, `Content`, `Children`, `AllComponents`, `Component`, `Components`, `Root`, `Graphic`, `Camera`, or `Target` are not saved. A game component's `get_target` and `set_target` are not saved either, so use another name.
 - `to_json_text` takes only `&NodeTree` and cannot read `&mut self` getters. If such a getter is a saved property, write with `to_json_text_mut` or `serialize_node_mut`, which take `&mut NodeTree`.
 - Setters that take the tree and a value are called on the spot while loading, with the component taken out of the tree for a moment (the same order as the original).
@@ -606,7 +610,7 @@ Like the original `getComponentProperties`, the inspector calls every getter of 
 - Names follow the original `formatMethodName`: `getDegreesPerSecond` becomes `degreesPerSecond`, and names starting with `is` stay as they are, such as `isBlinking`.
 - Values follow the original `formatPropertyValue`: numbers with two decimal places, `Vector2` as `(x, y)`, `Rect` as `(x, y, width, height)` with one decimal place, `Color` as `rgba(...)`, `Null` as `null`, nodes as `[WorldNode]`, arrays as `[Array]`, and anything else as `[type name]`.
 - Getters that take the tree are called with the tree while drawing, and for components with `&mut self` getters the inspector shows the values that `tick` read while holding the tree.
-- For a component without reflection, if it is registered with save functions in the developer tools' UI document (set with `set_ui_document` or registered through `get_ui_document_mut`), the inspector shows those saved keys and values; otherwise it shows a "no reflection" line asking you to add the macro.
+- Every component is reflected, so like the original the inspector shows the getters of every component. A component without getters shows a "no properties" line.
 
 The `Spin` in the example `examples/devtoolsshowcase.rs` has the macro, so the inspector shows `degreesPerSecond`.
 
@@ -619,21 +623,19 @@ Game code can use the same lists through the functions in `vanilla::core::reflec
 | `collect_reflected_properties(component)` | The saved property list (`ReflectedProperty { name, getter_name, setter_name, is_saved }`, including the common properties) |
 | `read_reflected_property(component, key)`, `read_reflected_property_mut` | Reads a property value. `_mut` also covers `&mut self` getters |
 | `write_reflected_property(component, key, value)`, `write_reflected_property_in_tree` | Writes a property value. `_in_tree` also covers setters that take the tree (with the component taken out by `NodeTree::with_component_at_mut`) |
-| `collect_reflected_getters(component)`, `collect_reflected_getters_in_tree`, `collect_reflected_getters_mut` | Getter names and values for the inspector (`ReflectedGetter { name, value }`). `None` without reflection |
+| `collect_reflected_getters(component)`, `collect_reflected_getters_in_tree`, `collect_reflected_getters_mut` | Getter names and values for the inspector (a list of `ReflectedGetter { name, value }`) |
 | `has_mutable_getters(component)` | Whether there are `&mut self` getters |
 
-## When the Macro Is Missing
+## It Cannot Be Left Out
 
-In the original every object is reflected, but in the Rust edition only types with the macro are. Every engine component has it; game components need it added by hand. When it is missing:
+In the original every object is reflected. The Rust edition matches: `Reflect` is a supertrait of `Component`, so a component without the macro does not compile. Engine components are built the same way.
 
 | What is missing | Result |
 | --- | --- |
-| One block only | A compile error points at the block that needs it |
-| Both blocks, registered with `register_component_type` | The UI document saves and loads only the common properties (`GizmoVisible`, `Enable`, `ComponentType`). Game values are not saved |
-| Both blocks, not registered | The UI document warns while writing and leaves the component out |
-| Both blocks | The developer tools inspector shows a "no reflection" line instead of getters (or the saved keys, if registered with save functions) |
+| The `impl` block | The compile error "has no reflection implementation" tells you to add it to the `impl Type` block. A type without getters takes it on an empty block, `#[vanilla::reflect] impl Type {}` |
+| The `impl Component` block | A compile error tells you to add it to the `impl Component for Type` block |
 
-Without reflection, the component's behavior such as `tick`, `draw`, and touch stays the same. Reflection is only used by the side that finds values by name (documents and the inspector).
+So the UI document writes unregistered components by reflection like the original, and the developer tools inspector shows the getters of every component. The engine calls reflection by upcasting `&dyn Component` to `&dyn Reflect` (trait upcasting).
 
 ## Related Types
 
@@ -641,6 +643,6 @@ Without reflection, the component's behavior such as `tick`, `draw`, and touch s
 - `Reflect`, `ReflectComponentGetters`, `ReflectValue`, `ReflectedProperty`, `ReflectedGetter`
 - `ToReflectValue`, `FromReflectValue`
 - In `vanilla::core::reflection`: `collect_reflected_properties`, `read_reflected_property`, `read_reflected_property_mut`, `write_reflected_property`, `write_reflected_property_in_tree`, `collect_reflected_getters`, `collect_reflected_getters_in_tree`, `collect_reflected_getters_mut`, `has_mutable_getters`, `COMPONENT_REFLECTED_PROPERTIES`
-- `Component::get_reflection`, `Component::get_reflection_mut`
+- `Component` (supertrait `Reflect`)
 - `UIDocument` (`register_component_type`, `register_component_type_with_handler`, `save_by_reflection`, `load_by_reflection`, `get_reflected_properties`, `to_json_text_mut`)
 - `DevTools` (`set_ui_document`, `get_ui_document_mut`)

@@ -57,6 +57,10 @@ struct AliasedText {
 	text: Text,
 }
 
+#[vanilla::reflect]
+impl AliasedText {}
+
+#[vanilla::reflect]
 impl Component for AliasedText {
 	fn get_component_base(&self) -> &ComponentBase {
 		self.text.get_component_base()
