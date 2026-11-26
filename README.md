@@ -448,6 +448,7 @@ cargo run --release --example modelviewer
 | [raw-window-handle](https://crates.io/crates/raw-window-handle) | 0.6.2 | `platform/desktop.rs`, `platform/desktop/windowsplatform.rs` | winit 창을 glutin 과 윈도우 창 서브클래싱에 넘깁니다 | MIT / Apache-2.0 / Zlib |
 | [gilrs](https://crates.io/crates/gilrs) | 0.11.2 | `core/gamepadmanager.rs` | 게임패드 입력과 진동(리눅스, 윈도우). OS 입력을 W3C Standard Gamepad 꼴로 바꿉니다. 웹은 원본처럼 `navigator.getGamepads()` 를 직접 읽습니다 | MIT / Apache-2.0 |
 | [cpal](https://crates.io/crates/cpal) | 0.18.2 | `platform/audio/desktop.rs` | 기본 출력 장치. 그 위의 믹서(소스, GainNode, StereoPannerNode, 버스, 비프의 OscillatorNode)는 엔진이 크롬 WebAudio 와 같은 셈으로 짓습니다 (`platform/audio/mixer.rs`, `oscillator.rs`). realtime 기능으로 윈도우, 리눅스의 소리 스레드 우선순위를 올립니다 | Apache-2.0 |
+| [rustfft](https://crates.io/crates/rustfft) | 6.4.1 | `platform/audio/hrtf/fftframe.rs` | 공간 소리 PannerNode 의 HRTF 합성곱과 커널 보간의 FFT. 크롬 158 의 FFTFrame 도 같은 판을 같은 기능(avx, sse, neon)으로 불러 값이 같습니다. symphonia 가 이미 받던 판이라 더 받는 크레이트가 없습니다 | MIT / Apache-2.0 |
 | [symphonia](https://crates.io/crates/symphonia) | 0.6.1 | `platform/audio/decode/` | 소리 해석. 크롬 decodeAudioData 와 같은 해석기로 FLAC, MP3, PCM, Vorbis 를 풀고(크롬이 켜는 기능과 같게), AAC 와 컨테이너(wav, ogg, mkv(webm), isomp4(m4a), flac, mp3, adts)도 풉니다 | MPL-2.0 |
 | [oxideav-aac](https://github.com/OxideAV/oxideav-aac) | 0.1.7 (저장소 eac68f3) | `platform/audio/decode/aac.rs` | HE-AAC(SBR, PS)와 3 채널 이상 AAC 해석. ISO/IEC 14496-3 명세로 짠 순수 러스트 해석기로, symphonia 의 AAC 가 받지 않는 것을 크롬처럼 풉니다. 정수로 반올림하기 전 실수 출력이 아직 crates.io 판에 없어 저장소 커밋으로 묶습니다 (oxideav-core 0.1.43 을 함께 받습니다) | MIT |
 | [opus-pure](https://crates.io/crates/opus-pure) | 0.2.5 | `platform/audio/decode/opus.rs` | Opus 해석. libopus 를 러스트로 옮긴 것으로 symphonia 코덱 등록표에 엔진 해석기로 넣습니다 (크롬은 libopus 로 풉니다). C 빌드가 없어 맥에서 윈도우 대상 검사가 됩니다 | BSD-3-Clause |
@@ -525,3 +526,6 @@ cargo run --release --example modelviewer
 ## 라이선스
 
 [MIT](LICENSE) © ddukbaek2
+
+- 데스크탑 실행 파일에 싣는 HRTF 자료 `src/platform/audio/hrtf/resources/Composite.flac` 은 크롬이 싣는 파일 그대로이고, IRCAM 의 LISTEN HRTF 데이터베이스에서 나온 응답입니다. 출처와 IRCAM 의 저작권 고지, 이용 조건은 그 폴더의 [README.md](src/platform/audio/hrtf/resources/README.md) 에 있습니다. IRCAM 은 상업 제품에 쓰면 서면으로 알려 달라고 요청합니다. (조건이 아니라 부탁입니다)
+- 크로미엄(BSD-3-Clause)에서 옮긴 셈은 파일 머리에 그 원본을 적었고, fdlibm 을 옮긴 `src/platform/audio/hrtf/fdlibm.rs` 는 Sun Microsystems 의 고지를 그대로 둡니다.

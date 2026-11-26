@@ -11,7 +11,9 @@
 //!   크롬과 같은 셈이라 들리기 전에 음량을 어림하거나(멀어 안 들리는 소리 거르기) 시험에 쓴다.
 //! - 도플러는 없다. WebAudio 가 명세에서 뺐다. (web-platform-tests webaudio/historical.html 이 AudioListener 의 dopplerFactor, speedOfSound, setVelocity 와
 //!   PannerNode 의 setVelocity 가 없어야 한다고 본다) 필요하면 게임이 재생 빠르기로 흉내 낸다.
-//! - HRTF: 웹은 브라우저가 IRCAM 자료로 셈한다. 데스크탑은 아직 등력으로 셈한다. (자료 이용 조건은 상업 이용을 허락하나 옮기는 일이 커서 다음으로 미뤘다)
+//! - HRTF: 웹은 브라우저가, 데스크탑은 엔진 믹서가 크롬 HRTFPanner 와 같은 셈과 크롬이 싣는 IRCAM 자료(Composite.flac)로 낸다.
+//!   데스크탑은 처음 고를 때 그 표본율의 자료를 따로 스레드에서 짓고, 다 지을 때까지 크롬 실시간 컨텍스트처럼 좌우 없이 낸다.
+//!   자료의 출처와 IRCAM 고지는 엔진 저장소의 src/platform/audio/hrtf/resources/README.md 에 있다.
 //! # 예제
 //! ```
 //! use vanilla::experimental::spatialaudio::{DistanceModel, PannerSettings, SpatialAudioListener, SpatialAudioPlayer};
