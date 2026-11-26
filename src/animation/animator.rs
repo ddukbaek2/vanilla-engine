@@ -8,7 +8,7 @@
 //!   섞는 동안에는 새 전이를 보지 않는다. 조건으로 쓴 트리거는 그 전이가 타면 풀린다.
 //! - 종료 시각은 나가는 상태의 정규화 시간이다. 그 시각을 지나는 갱신에서만 넘어갈 수 있고, 되풀이하는 상태에서 1 보다 작은 종료 시각은 바퀴마다 본다.
 //! - 원본과 다른 점:
-//!   - 원본 getStates / get_transitions 는 List 를, 러스트 판은 조각(&`[..]`)을 돌려준다. 원본 getParameters 의 사전은 러스트 판에 없다. (종류별 게터로 읽는다)
+//!   - 원본 getStates / get_transitions 는 List 를, 러스트 판은 조각(&`[..]`)을 돌려준다. 원본 getParameters 의 사전은 get_parameters 가 이름과 AnimatorParameter 목록(넣은 차례)으로 돌려준다.
 //!   - 원본 조건은 { parameterName, mode, threshold } 객체이고 러스트 판은 같은 필드의 AnimationCondition 이다. 원본 AnimationConditionMode 의 글 값은 열거 값이다.
 //!   - 정수 매개변수는 i32, 실수와 기준 값은 f32 다. (원본은 모두 수) 정수를 기준 값과 견줄 때는 f32 로 바꿔 견준다.
 //==============================================================================
@@ -95,13 +95,27 @@ pub struct AnimationCondition {
 }
 
 //==============================================================================
-/// 애니메이터 매개변수. (원본 { type, value }, 트리거는 걸려 있는지)
+/// 애니메이터 매개변수. (원본 { type, value }, 트리거는 걸려 있는지, Animator::get_parameters 가 돌려준다)
+///
+/// # 예제
+/// 종류와 값 꺼내기
+/// ```rust
+/// use vanilla::{Animator, AnimatorParameter};
+///
+/// let mut animator = Animator::new();
+/// animator.set_integer("combo", 2);
+/// assert_eq!(animator.get_parameters(), vec![("combo", AnimatorParameter::Int(2))]);
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum AnimatorParameter {
+pub enum AnimatorParameter {
+	/// 실수. (원본 type "float")
 	Float(f32),
+	/// 정수. (원본 type "int")
 	Int(i32),
+	/// 참 거짓. (원본 type "bool")
 	Bool(bool),
+	/// 트리거. (원본 type "trigger", 값은 걸려 있는지)
 	Trigger(bool),
 }
 
@@ -690,6 +704,7 @@ pub struct Animator {
 	states: Vec<AnimationState>,
 	transitions: Vec<AnimationTransition>,
 	parameters: HashMap<String, AnimatorParameter>,
+	parameter_names: Vec<String>,
 	current_state_index: Option<usize>,
 	/// 지금 상태 시간. (초, 속도를 곱해 쌓은 것)
 	current_time: f32,
@@ -714,6 +729,7 @@ impl Animator {
 			states: Vec::new(),
 			transitions: Vec::new(),
 			parameters: HashMap::new(),
+			parameter_names: Vec::new(),
 			current_state_index: None,
 			current_time: 0.0,
 			next_state_index: None,
@@ -990,7 +1006,7 @@ impl Animator {
 	/// ```
 	//==============================================================================
 	pub fn set_float(&mut self, name: &str, value: f32) {
-		self.parameters.insert(name.to_string(), AnimatorParameter::Float(value));
+		self.insert_parameter(name, AnimatorParameter::Float(value));
 	}
 
 	//==============================================================================
@@ -1021,7 +1037,7 @@ impl Animator {
 	/// - `value`: 값. (같은 이름이 있으면 종류째 바꾼다)
 	//==============================================================================
 	pub fn set_integer(&mut self, name: &str, value: i32) {
-		self.parameters.insert(name.to_string(), AnimatorParameter::Int(value));
+		self.insert_parameter(name, AnimatorParameter::Int(value));
 	}
 
 	//==============================================================================
@@ -1052,7 +1068,7 @@ impl Animator {
 	/// - `value`: 값. (같은 이름이 있으면 종류째 바꾼다)
 	//==============================================================================
 	pub fn set_bool(&mut self, name: &str, value: bool) {
-		self.parameters.insert(name.to_string(), AnimatorParameter::Bool(value));
+		self.insert_parameter(name, AnimatorParameter::Bool(value));
 	}
 
 	//==============================================================================
@@ -1075,7 +1091,7 @@ impl Animator {
 	/// - `name`: 매개변수 이름. (같은 이름이 있으면 종류째 바꾼다)
 	//==============================================================================
 	pub fn set_trigger(&mut self, name: &str) {
-		self.parameters.insert(name.to_string(), AnimatorParameter::Trigger(true));
+		self.insert_parameter(name, AnimatorParameter::Trigger(true));
 	}
 
 	//==============================================================================
@@ -1085,7 +1101,7 @@ impl Animator {
 	/// - `name`: 매개변수 이름. (같은 이름이 있으면 종류째 바꾼다)
 	//==============================================================================
 	pub fn reset_trigger(&mut self, name: &str) {
-		self.parameters.insert(name.to_string(), AnimatorParameter::Trigger(false));
+		self.insert_parameter(name, AnimatorParameter::Trigger(false));
 	}
 
 	//==============================================================================
@@ -1099,6 +1115,37 @@ impl Animator {
 	//==============================================================================
 	pub fn get_trigger(&self, name: &str) -> bool {
 		matches!(self.parameters.get(name), Some(AnimatorParameter::Trigger(true)))
+	}
+
+	//==============================================================================
+	/// 모든 매개변수 반환. (원본 getParameters 의 사전, 처음 넣은 차례)
+	///
+	/// # 돌려줌
+	/// 이름과 매개변수(종류와 값) 목록. (처음 넣은 차례, 같은 이름을 다시 넣어도 자리는 그대로)
+	///
+	/// # 예제
+	/// 넣은 차례로 이름과 값 보기
+	/// ```rust
+	/// use vanilla::{Animator, AnimatorParameter};
+	///
+	/// let mut animator = Animator::new();
+	/// animator.set_float("speed", 1.5);
+	/// animator.set_trigger("jump");
+	/// animator.set_bool("speed", true);
+	/// assert_eq!(animator.get_parameters(), vec![("speed", AnimatorParameter::Bool(true)), ("jump", AnimatorParameter::Trigger(true))]);
+	/// ```
+	//==============================================================================
+	pub fn get_parameters(&self) -> Vec<(&str, AnimatorParameter)> {
+		self.parameter_names.iter().filter_map(|name| self.parameters.get(name).map(|parameter| (name.as_str(), *parameter))).collect()
+	}
+
+	//==============================================================================
+	/// 매개변수 넣기. (처음 넣는 이름이면 차례 목록 끝에 더한다, 원본 Map.set 의 차례)
+	//==============================================================================
+	fn insert_parameter(&mut self, name: &str, parameter: AnimatorParameter) {
+		if self.parameters.insert(name.to_string(), parameter).is_none() {
+			self.parameter_names.push(name.to_string());
+		}
 	}
 
 	//==============================================================================

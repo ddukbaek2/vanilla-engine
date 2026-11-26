@@ -15,7 +15,7 @@
 //!   - 원본이 tick 과 눌림에서 부르는 setForceGizmosVisible 은 눌림 처리와 set_visible 이 &Engine 만 받아 Graphic 을 바꿀 수 없어, 바랄 값을 적어 두었다가
 //!     tick 끝에 엔진의 그래픽(get_graphic_mut)에 건다. 그래서 원본처럼 그 프레임의 그리기부터 보인다. (tick 밖에서 set_visible 을 부른 것은 draw 첫머리에 건다)
 //!     원본 setEngine 이 거는 false 는 첫 tick 에 건다. (DevTools::new 는 엔진을 받지 않는다)
-//!   - 노드 종류는 WorldNode 하나뿐이라 트리의 Type 칸과 인스펙터의 type 은 늘 "WorldNode" 다.
+//!   - 노드 종류는 WorldNode 하나뿐이라 트리의 Type 칸과 인스펙터의 type 은 들고 있는 UIDocument 의 노드 종류 이름(UIDocument::get_node_type_name)이다. (원본 constructor.name 자리, 처음 문서에 등록된 FloatingText 같은 엔진 노드 종류와 게임이 등록한 종류, 그 밖은 "WorldNode")
 //!   - 인스펙터의 컴포넌트 속성은 원본 getComponentProperties 처럼 그 컴포넌트의 get*, is* 게터를 모두 불러 보인다.
 //!     원본은 실행 중에 프로토타입을 훑고, 러스트 판은 `#[reflect]` 매크로가 컴파일 때 지은 목록을 쓴다. (core/reflection.rs, 엔진 컴포넌트는 모두 붙였다)
 //!     트리를 받는 게터(원본은 이웃 컴포넌트를 바로 쥐는 것)는 그리기에서 트리를 넘겨 부르고, &mut self 게터가 있는 컴포넌트는 tick 이 트리를 쥐고 읽어 둔 값을 보인다.
@@ -420,7 +420,7 @@ pub struct DevTools {
 	is_statistics_scroll_dragging: bool,
 	statistics_scroll_drag_start_mouse_y: f32,
 	statistics_scroll_drag_start_scroll_y: f32,
-	/// 인스펙터의 컴포넌트 속성을 읽는 문서. (처음은 엔진 컴포넌트만 등록된 것, set_ui_document 로 게임 문서를 건다)
+	/// 인스펙터의 컴포넌트 속성과 노드 종류 이름을 읽는 문서. (처음은 엔진 컴포넌트와 에디터 종류가 등록된 것, set_ui_document 로 게임 문서를 건다)
 	ui_document: UIDocument,
 	/// tick 끝이나 다음 draw 첫머리에 Graphic 에 걸 모든 기즈모 강제 표시 값.
 	pending_force_gizmos_visible: Option<bool>,
@@ -491,7 +491,7 @@ impl DevTools {
 			is_statistics_scroll_dragging: false,
 			statistics_scroll_drag_start_mouse_y: 0.0,
 			statistics_scroll_drag_start_scroll_y: 0.0,
-			ui_document: UIDocument::new(),
+			ui_document: create_engine_ui_document(),
 			pending_force_gizmos_visible: Some(false),
 			local_storage_dialog_request: None,
 			local_storage_dialog_wait: None,
@@ -631,7 +631,7 @@ impl DevTools {
 	/// 인스펙터가 컴포넌트 속성을 읽는 문서. (변경용, 컴포넌트 종류를 더 등록할 때)
 	///
 	/// # 돌려줌
-	/// 들고 있는 문서의 가변 참조. (처음은 엔진 컴포넌트만 등록된 UIDocument::new())
+	/// 들고 있는 문서의 가변 참조. (처음은 UIDocument::new() 에 register_editor_types 를 부른 것)
 	//==============================================================================
 	pub fn get_ui_document_mut(&mut self) -> &mut UIDocument {
 		&mut self.ui_document
@@ -1417,7 +1417,8 @@ impl DevTools {
 			COLOR_FALSE
 		};
 		lines.push(InspectorLine::new(Some("name"), node_name, COLOR_TEXT, false, false, false, None, false));
-		lines.push(InspectorLine::new(Some("type"), NODE_TYPE_NAME, COLOR_ACCENT, false, false, false, None, false));
+		let node_type_name = self.ui_document.get_node_type_name(node);
+		lines.push(InspectorLine::new(Some("type"), node_type_name, COLOR_ACCENT, false, false, false, None, false));
 		lines.push(InspectorLine::new(Some("active"), format_boolean(is_active), active_color, false, false, false, None, false));
 		lines.push(InspectorLine::new(Some("children"), &child_count.to_string(), COLOR_TEXT, false, false, false, None, false));
 
@@ -1823,7 +1824,7 @@ impl DevTools {
 
 			// 노드 타입 텍스트. (액티브 체크박스 왼쪽에 오른쪽 정렬)
 			graphic.set_fill_color(COLOR_TEXT_DIM);
-			graphic.draw_fill_text(NODE_TYPE_NAME, active_checkbox_x - GIZMO_CHECKBOX_MARGIN, item_middle_y);
+			graphic.draw_fill_text(self.ui_document.get_node_type_name(node), active_checkbox_x - GIZMO_CHECKBOX_MARGIN, item_middle_y);
 		}
 
 		graphic.end_clip_rect();
@@ -2704,6 +2705,15 @@ fn format_quoted_text(text: &str) -> String {
 }
 
 //==============================================================================
+/// DevTools 가 처음 드는 문서. (엔진 컴포넌트에 에디터 종류를 더 등록해, 엔진 노드 종류(FloatingText 같은)가 원본 constructor.name 처럼 그 이름으로 보인다)
+//==============================================================================
+fn create_engine_ui_document() -> UIDocument {
+	let mut ui_document = UIDocument::new();
+	ui_document.register_editor_types();
+	ui_document
+}
+
+//==============================================================================
 /// 문서 값을 문자열로 포맷. (반사가 없는 컴포넌트의 UIDocument 저장 값, 원본 formatPropertyValue 를 JSON 값에 맞춘 것)
 /// - 수 둘 배열은 벡터, 이름에 color 가 든 수 넷 배열은 rgba, 그 밖의 수 넷 배열은 사각형으로 본다.
 //==============================================================================
@@ -3021,6 +3031,19 @@ mod tests {
 		assert_eq!(format_document_value("target", &serde_json::json!({ "$nodeRef": "a/b" })), "[WorldNode]");
 		assert_eq!(format_document_value("other", &serde_json::json!({ "x": 1 })), "[Object]");
 		assert_eq!(format_document_value("nothing", &Value::Null), "null");
+	}
+
+	//==============================================================================
+	/// 인스펙터의 type 은 원본 constructor.name 처럼 엔진 노드 종류 이름이다. (FloatingText 를 붙인 노드)
+	//==============================================================================
+	#[test]
+	fn inspector_type_shows_engine_node_type_name() {
+		let mut node_tree = NodeTree::new();
+		let root_id = node_tree.get_root_id();
+		let floating_text_id = crate::misc::floatingtext::FloatingText::create(&mut node_tree, root_id);
+		let mut dev_tools = DevTools::new();
+		dev_tools.build_inspector_lines(&node_tree, floating_text_id);
+		assert!(dev_tools.cached_inspector_lines.iter().any(|line| line.text.as_deref() == Some("type") && line.value == "FloatingText"));
 	}
 
 	//==============================================================================

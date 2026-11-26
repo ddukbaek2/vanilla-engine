@@ -63,7 +63,7 @@ tests/               데스크탑 플랫폼 시험 desktopplatform.rs (#[ignore]
 
 ## 2. 설계 원칙 (원본과 다른 것)
 
-1. **노드는 핸들로 가리킨다.** 원본은 부모가 children[] 으로 자식 객체를 들고 자식이 parent 로 거꾸로 가리킨다. 러스트 판은 씬의 NodeTree 가 노드를 slotmap 저장소 하나에 담고, 부모와 자식을 NodeId 로 잇는다. NodeId 는 칸 번호와 세대 번호라서 지운 노드의 핸들은 get_node 가 None 을 돌려준다(원본 isDestroyed 의 공백을 메움). Rc<RefCell> 은 쓰지 않는다.
+1. **노드는 핸들로 가리킨다.** 원본은 부모가 children[] 으로 자식 객체를 들고 자식이 parent 로 거꾸로 가리킨다. 러스트 판은 씬의 NodeTree 가 노드를 slotmap 저장소 하나에 담고, 부모와 자식을 NodeId 로 잇는다. NodeId 는 칸 번호와 세대 번호라서 지운 노드의 핸들은 get_node 가 None 을 돌려준다. (원본은 늘 false 이던 isDestroyed 를 0.4.0 에서 뺐다) Rc<RefCell> 은 쓰지 않는다.
 2. **전역 엔진이 없다.** 원본의 Engine.getEngine() 대신 씬 함수와 컴포넌트 문맥으로 Engine 을 넘긴다. async 작업도 폴링하는 동안 컨텍스트의 with 로 받는다.
 3. **상속 대신 트레이트와 공통 상태 구조체.** Scene 트레이트 + SceneBase, Component 트레이트 + ComponentBase, Asset 트레이트 + AssetBase. 원본의 Node, ComponentNode, TransformNode, WorldNode 상속 넷은 WorldNode 하나로 합쳤다.
 4. **플랫폼 층을 뗐다.** 창, GL, 입력, 루프, 애셋 바이트, 오디오는 platform 아래에만 있다. 안드로이드, iOS 는 여기에 모듈을 더하면 된다.
@@ -278,7 +278,7 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
 | 전역 엔진이 없다 (Engine.getEngine, Scene.getEngine 대신 씬 함수와 ComponentContext 로 넘긴다. 그래서 인스펙터 게터 목록에 원본 Component.getEngine 이, 반사 속성 목록에 Engine 이 없다. 엔진을 받지 않는 컴포넌트 훅(attach, detach, attach_to_tree)은 그래픽에도 닿지 않아, GL 자원은 컴포넌트를 짓는 자리나 tick 의 context.get_engine().get_graphic() 으로 짓는다. 원본 엔진 컴포넌트에도 attach 에서 그래픽을 쓰는 것은 없다) | 전역 가변 상태는 빌림 검사를 비켜 가서, 엔진을 쓰는 곳이 인자로 드러나게 했다 |
 | 노드는 NodeTree 안에 있고 NodeId 핸들로 가리킨다 | 부모와 자식을 Rc<RefCell> 로 서로 가리키면 순환 참조와 실행 중 빌림 검사가 생긴다. 지운 노드의 핸들은 None 이 된다 |
 | 노드 종류는 WorldNode 하나다 (원본 Node, ComponentNode, TransformNode, WorldNode 를 합침, 원본에서 노드인 위젯과 UINode 는 컴포넌트) | 러스트에 클래스 상속이 없어 노드 꼴을 하나로 두고 기능을 컴포넌트로 붙였다 |
-| 상속 대신 트레이트와 품기 (Scene + SceneBase, Component + ComponentBase, ShaderSprite 는 Sprite 를 품고 Deref) | 러스트에 클래스 상속이 없어 공통 상태는 구조체로, 덮어쓰기는 트레이트 함수로 둔다 |
+| 상속 대신 트레이트와 품기 (Scene + SceneBase, Component + ComponentBase, ShaderSprite 는 Sprite 를 품고 Deref) | 러스트에 클래스 상속이 없어 공통 상태는 구조체로, 덮어쓰기는 트레이트 함수로 둔다. 원본 상위 클래스를 품은 컴포넌트는 Component::get_base_component 로 그것을 알려, get_component::<Sprite>() 가 ShaderSprite 도 찾는다(원본 instanceof 와 같음) |
 | 반사는 원본 상위 클래스 몫을 품은 필드로 잇는다 (#[reflect(base = 필드)], 결과 목록과 차례는 원본과 같다). &mut self 게터는 &mut 로 트리를 받는 갈래(UIDocument::to_json_text_mut, serialize_node_mut, 인스펙터는 tick 에서 읽어 둔다)로 읽는다. &NodeTree 만 받는 to_json_text 는 &mut self 게터를 읽지 못한다 | 상속이 없다. &self 로 &mut self 함수를 부를 수 없다 (엔진 컴포넌트의 저장 속성에는 &mut self 게터가 없어 두 갈래 결과가 같다) |
 | 그리기 함수와 with_graphic 의 클로저 안에서는 engine.get_graphic() 이 None 이고 인자로 받은 graphic 을 쓴다 (원본 getGraphic 은 어디서나 같은 그래픽) | &mut Engine 과 &mut Graphic 을 함께 넘기려면 그동안 그래픽이 엔진 밖에 있어야 한다. 엔진이 그래픽을 Option::take 로 잠깐 꺼내 넘기고 돌려 넣어 RefCell 이나 unsafe 없이 이중 빌림을 막는다 (3 장 그래픽 빌림) |
 | 수는 f32 다 (Format, LocalStorage 처럼 JS 수의 글을 그대로 내야 하는 곳은 f64) | GL 에 올리는 값과 같은 정밀도로 들고 메모리를 아낀다. 원본 Matrix4 는 f32 로 담고 f64 로 셈해 끝자리가 조금 다를 수 있다 |
@@ -286,7 +286,7 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
 | 트리를 받는 `*_in_tree` 함수를 따로 둔 곳 15 개 (UIScrollView::set_shows_vertical_scroll_bar_in_tree, UIWindow::close_in_tree, ParticleSystem::emit_in_tree 같은 것) | 씬 코드가 컴포넌트를 쥔 동안 같은 트리의 다른 노드를 함께 빌릴 수 없다 |
 | 선택 인자 객체 대신 기본값을 가진 옵션 구조체 (ToonDrawOptions, ToonParticleOptions, RenderTargetOptions, ToonPostProcessOptions, UIConfirmWindowOptions 같은 것) | 러스트에는 이름 붙은 선택 인자가 없다. 필드를 더해도 `..Default::default()` 로 지은 코드는 그대로 돈다 |
 | 콜백은 Box<dyn FnMut> 로 받고, 콜백 게터와 갈아 끼운 저장소는 Rc<RefCell> 로 돌려준다 | 엔진과 부르는 쪽이 같은 함수를 나눠 쥐고 부르는 동안 다시 부르는 것을 막는다 |
-| 예외 대신 Result 와 Option, 셰이더를 짓지 못하면 한 번 알리고 건너뛴다 | 러스트는 예외를 던지지 않는다. 한 효과가 실패해도 프레임이 멈추지 않게 했다 |
+| 예외 대신 Result 와 Option, 셰이더를 짓지 못하면 한 번 알리고 건너뛴다 | 러스트는 예외를 던지지 않는다. 한 효과가 실패해도 프레임이 멈추지 않게 했다 (ShaderSprite, ScreenEffect 의 짓기 실패는 원본도 0.4.0 부터 같이 한 번 알리고 건너뛴다) |
 | 이름은 러스트 규칙(snake_case, UpperCamelCase, SCREAMING_SNAKE_CASE)이다 | Rust API Guidelines C-CASE 를 따른다 |
 | async 작업은 컨텍스트의 with(\|씬, 엔진\| ...) 안에서만 씬과 엔진을 만진다 (원본은 await 다음 줄에서 this 와 엔진을 바로 쓴다) | 전역 엔진이 없고 노드를 NodeId 로 가리키는 것과 같은 러스트 빌림 꼴이다. 러스트 퓨처는 &mut 를 await 너머로 쥘 수 없어, 폴링하는 동안만 빌려 주어 이중 빌림이 생기지 않게 했다 |
 | 원본 reject 는 Promise<Result<T, E>> 의 reject(까닭)이고, 실패할 수 있는 손잡이의 await 는 Result 로 끝난다 | 예외 대신 Result 를 쓰는 것과 같다 |

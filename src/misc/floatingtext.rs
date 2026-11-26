@@ -10,17 +10,16 @@
 //! - 원본과 다른 점:
 //!   원본은 WorldNode 를 상속한 노드다. 러스트 판은 노드에 붙는 컴포넌트이고, create 가 노드를 만들어 붙여 준다.
 //!   spawn / clear 는 라벨 노드를 만들고 바꿔야 해서 트리와 노드 핸들을 받는 연관 함수다. (컴포넌트가 없으면 아무것도 하지 않는다)
-//!   라벨은 UILabel 대신 Text 컴포넌트로 그린다. (설정은 같다: 글, 크기, 색, 굵게)
 //!   options 객체는 FloatingTextOptions 구조체다.
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::math;
 use crate::base::pivot::Pivot;
 use crate::base::vector2::Vector2;
-use crate::core::component::text::Text;
 use crate::core::component::{Component, ComponentBase};
 use crate::core::node::nodetree::{ComponentContext, NodeId, NodeTree};
 use crate::core::node::worldnode::NodeTransform;
+use crate::ui::uilabel::UILabel;
 
 //==============================================================================
 /// 띄우기 설정. (원본 options = { color?, font_size = 22, rise = 46, duration = 0.8, jitter = 10, bold = true })
@@ -91,7 +90,7 @@ struct FloatingTextItem {
 /// # 예제
 /// 데미지 숫자 띄우기
 /// ```rust
-/// use vanilla::{Color, Engine, EngineConfiguration, FloatingText, FloatingTextOptions, NodeTree, Text, Vector2};
+/// use vanilla::{Color, Engine, EngineConfiguration, FloatingText, FloatingTextOptions, NodeTree, UILabel, Vector2};
 ///
 /// let engine = Engine::new(EngineConfiguration::new());
 /// let mut node_tree = NodeTree::new();
@@ -102,7 +101,7 @@ struct FloatingTextItem {
 /// 	..FloatingTextOptions::default()
 /// };
 /// let label_id = FloatingText::spawn(&mut node_tree, floating_text_id, "-120", Vector2::create(100.0, 200.0), options).unwrap();
-/// assert_eq!(node_tree[label_id].get_component::<Text>().unwrap().get_text(), "-120");
+/// assert_eq!(node_tree[label_id].get_component::<UILabel>().unwrap().get_text(), "-120");
 ///
 /// node_tree.tick(&engine, 1.0);
 /// assert!(!node_tree[label_id].is_active());
@@ -199,7 +198,7 @@ impl FloatingText {
 				created_node.set_pivot(Pivot::MIDDLE_CENTER);
 				created_node.set_anchor(Pivot::TOP_LEFT);
 				created_node.set_content_size(Vector2::create(240.0, 40.0));
-				node_tree.add_component(created_node_id, Text::new());
+				node_tree.add_component(created_node_id, UILabel::new());
 				created_node_id
 			}
 		};
@@ -210,7 +209,7 @@ impl FloatingText {
 		label_node.set_active(true);
 		label_node.set_local_opacity(1.0);
 		label_node.set_local_position(start_position);
-		if let Some(label_text) = label_node.get_component_mut::<Text>() {
+		if let Some(label_text) = label_node.get_component_mut::<UILabel>() {
 			label_text.set_text(text);
 			label_text.set_font_size(options.font_size);
 			label_text.set_text_color(options.color);
@@ -367,7 +366,7 @@ mod tests {
 			..FloatingTextOptions::default()
 		};
 		let label_id = FloatingText::spawn(&mut node_tree, floating_text_id, "-120", Vector2::create(100.0, 200.0), options).expect("label");
-		assert_eq!(node_tree[label_id].get_component::<Text>().expect("text").get_text(), "-120");
+		assert_eq!(node_tree[label_id].get_component::<UILabel>().expect("text").get_text(), "-120");
 		assert_eq!(node_tree[floating_text_id].get_component::<FloatingText>().expect("floating text").get_active_count(), 1);
 
 		node_tree.tick(&engine, 0.5);

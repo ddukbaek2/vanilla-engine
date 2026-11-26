@@ -1223,6 +1223,20 @@ fn set_color_entry_color(node_tree: &mut NodeTree, color_entry: &ColorEntry, col
 #[crate::reflect]
 impl Component for UIButton {
 	//==============================================================================
+	/// 품은 기반 컴포넌트. (원본 상위 클래스 UIControl 자리, get_component::<UIControl>() 로도 찾힌다)
+	//==============================================================================
+	fn get_base_component(&self) -> Option<&dyn Component> {
+		Some(&self.ui_control)
+	}
+
+	//==============================================================================
+	/// 품은 기반 컴포넌트. (변경용)
+	//==============================================================================
+	fn get_base_component_mut(&mut self) -> Option<&mut dyn Component> {
+		Some(&mut self.ui_control)
+	}
+
+	//==============================================================================
 	/// 컴포넌트 공통 칸 반환. (품은 컨트롤의 것)
 	//==============================================================================
 	fn get_component_base(&self) -> &ComponentBase {

@@ -173,6 +173,84 @@ impl<T: Component + 'static> AsAny for T {
 	}
 }
 
+impl<'a> dyn Component + 'a {
+	//==============================================================================
+	/// 그 타입이거나 그 타입을 기반으로 품었는지. (원본 `component instanceof T`)
+	/// - 자기 타입부터 get_base_component 사슬을 따라 본다.
+	///
+	/// # 돌려줌
+	/// 자기나 품은 기반 가운데 T 가 있으면 true.
+	///
+	/// # 예제
+	/// ShaderSprite 는 Sprite 이고 Paint 다
+	/// ```rust
+	/// use vanilla::{Component, Paint, ShaderSprite, Sprite, Text};
+	///
+	/// let component: Box<dyn Component> = Box::new(ShaderSprite::new());
+	/// assert!(component.is_instance_of::<ShaderSprite>());
+	/// assert!(component.is_instance_of::<Sprite>());
+	/// assert!(component.is_instance_of::<Paint>());
+	/// assert!(!component.is_instance_of::<Text>());
+	/// ```
+	//==============================================================================
+	pub fn is_instance_of<T: Component + 'static>(&self) -> bool {
+		self.as_instance_of::<T>().is_some()
+	}
+
+	//==============================================================================
+	/// 그 타입으로 보기. (자기 타입이 아니면 품은 기반 사슬에서 찾는다, 원본 instanceof 로 맞은 객체)
+	///
+	/// # 돌려줌
+	/// 자기나 품은 기반 가운데 처음 맞는 T. 없으면 None.
+	///
+	/// # 예제
+	/// ShaderSprite 를 Sprite 로 보기
+	/// ```rust
+	/// use vanilla::{Color, Component, ShaderSprite, Sprite};
+	///
+	/// let mut shader_sprite = ShaderSprite::new();
+	/// shader_sprite.set_color(Color::create(1.0, 0.0, 0.0, 1.0));
+	/// let component: Box<dyn Component> = Box::new(shader_sprite);
+	/// assert_eq!(component.as_instance_of::<Sprite>().expect("sprite").get_color(), Color::create(1.0, 0.0, 0.0, 1.0));
+	/// ```
+	//==============================================================================
+	pub fn as_instance_of<T: Component + 'static>(&self) -> Option<&T> {
+		if let Some(found) = self.as_any().downcast_ref::<T>() {
+			return Some(found);
+		}
+		match self.get_base_component() {
+			Some(base_component) => base_component.as_instance_of::<T>(),
+			None => None,
+		}
+	}
+
+	//==============================================================================
+	/// 그 타입으로 보기. (변경용)
+	///
+	/// # 돌려줌
+	/// 자기나 품은 기반 가운데 처음 맞는 T. (변경용) 없으면 None.
+	///
+	/// # 예제
+	/// ShaderSprite 의 Sprite 값 바꾸기
+	/// ```rust
+	/// use vanilla::{Color, Component, ShaderSprite, Sprite};
+	///
+	/// let mut component: Box<dyn Component> = Box::new(ShaderSprite::new());
+	/// component.as_instance_of_mut::<Sprite>().expect("sprite").set_color(Color::create(0.0, 0.0, 1.0, 1.0));
+	/// assert_eq!(component.as_instance_of::<ShaderSprite>().expect("shader sprite").get_color(), Color::create(0.0, 0.0, 1.0, 1.0));
+	/// ```
+	//==============================================================================
+	pub fn as_instance_of_mut<T: Component + 'static>(&mut self) -> Option<&mut T> {
+		if self.as_any().is::<T>() {
+			return self.as_any_mut().downcast_mut::<T>();
+		}
+		match self.get_base_component_mut() {
+			Some(base_component) => base_component.as_instance_of_mut::<T>(),
+			None => None,
+		}
+	}
+}
+
 //==============================================================================
 /// 컴포넌트 공통 상태.
 /// - 켜짐(기본 true)과 기즈모 표시(기본 false)를 든다. 구현체가 필드로 들고 get_component_base 로 돌려준다.
@@ -646,6 +724,28 @@ pub trait Component: AsAny {
 	/// 반사 구현. (변경용) `#[reflect]` 를 붙이지 않은 컴포넌트는 None.
 	//==============================================================================
 	fn get_reflection_mut(&mut self) -> Option<&mut dyn Reflect> {
+		None
+	}
+
+	//==============================================================================
+	/// 품은 기반 컴포넌트. (원본 상위 클래스 자리, ShaderSprite 의 Sprite 나 UIButton 의 UIControl 처럼)
+	/// - get_component, get_components, has_component, remove_component 가 이 사슬을 따라 원본 instanceof 처럼 기반 타입으로도 찾는다.
+	/// - 다른 컴포넌트를 품어 원본 상속을 옮긴 컴포넌트만 덮어쓴다.
+	///
+	/// # 돌려줌
+	/// 품은 기반 컴포넌트. 기반이 없으면 None. (기본)
+	//==============================================================================
+	fn get_base_component(&self) -> Option<&dyn Component> {
+		None
+	}
+
+	//==============================================================================
+	/// 품은 기반 컴포넌트. (변경용)
+	///
+	/// # 돌려줌
+	/// 품은 기반 컴포넌트. (변경용) 기반이 없으면 None. (기본)
+	//==============================================================================
+	fn get_base_component_mut(&mut self) -> Option<&mut dyn Component> {
 		None
 	}
 

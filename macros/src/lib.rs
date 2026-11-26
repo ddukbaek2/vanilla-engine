@@ -82,8 +82,8 @@ use syn::spanned::Spanned;
 use syn::visit_mut::VisitMut;
 use syn::{Attribute, FnArg, GenericParam, Ident, ImplItem, ImplItemFn, ItemImpl, Lifetime, LitStr, Path, ReturnType, Type};
 
-/// 인스펙터에도 보이지 않는 Component 트레이트의 게터. (공통 상태와 종류 이름은 원본 Component 기반 클래스 몫이다)
-const COMPONENT_BASE_GETTER_NAMES: [&str; 2] = ["get_component_base", "get_component_type"];
+/// 인스펙터에도 보이지 않는 Component 트레이트의 게터. (공통 상태와 종류 이름은 원본 Component 기반 클래스 몫이고, 품은 기반 컴포넌트는 원본 상위 클래스 자리다)
+const COMPONENT_BASE_GETTER_NAMES: [&str; 3] = ["get_component_base", "get_component_type", "get_base_component"];
 
 //==============================================================================
 /// 블록 옵션. (#[reflect(base = 필드, crate = 경로)])

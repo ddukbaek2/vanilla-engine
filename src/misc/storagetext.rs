@@ -213,7 +213,7 @@ impl JsonSurrogateTable {
 	//==============================================================================
 	/// 글 하나 남기기. (대체 문자가 든 글만, 자리가 있으면 값 글이고 없으면 키)
 	//==============================================================================
-	fn record(&mut self, path: Option<&[JsonPathSegment]>, preserved_text: PreservedText) {
+	pub(crate) fn record(&mut self, path: Option<&[JsonPathSegment]>, preserved_text: PreservedText) {
 		if !preserved_text.get_lossy_text().contains('\u{fffd}') {
 			return;
 		}

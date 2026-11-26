@@ -62,6 +62,7 @@ use crate::core::engine::Engine;
 use crate::core::graphic::{BlendMode, TextAlign, TextBaseline};
 use crate::core::image::Image;
 use crate::core::node::nodetree::{NodeId, NodeTree};
+use crate::core::node::worldnode::WorldNode;
 use crate::core::reflection::{collect_reflected_properties, has_mutable_getters, read_reflected_property, read_reflected_property_mut, read_shortest_number, write_reflected_property, write_reflected_property_in_tree, ReflectValue, ReflectedProperty};
 use crate::resource::imageasset::ImageAsset;
 use crate::effect::heathazeeffect::HeatHazeEffect;
@@ -1328,6 +1329,33 @@ impl UIDocument {
 			}
 		});
 		matched_type.or_else(|| self.node_type_list.iter().rev().find(|registered_type| registered_type.match_component.is_none() && registered_type.type_id == component_type_id))
+	}
+
+	//==============================================================================
+	/// 노드 종류 이름. (원본 node.constructor.name 자리, 저장할 때 적는 type 과 같다)
+	/// - 등록한 노드 종류(register_node_type, 엔진 종류는 register_editor_types 가 등록)의 컴포넌트가 붙은 노드면 그 이름(앞에 붙은 것), 아니면 "WorldNode".
+	///
+	/// # 인자
+	/// - `node`: 볼 노드.
+	///
+	/// # 돌려줌
+	/// 노드 종류 이름.
+	///
+	/// # 예제
+	/// 등록한 엔진 노드 종류는 그 이름, 맨 노드는 WorldNode
+	/// ```rust
+	/// use vanilla::{FloatingText, UIDocument, WorldNode};
+	///
+	/// let mut ui_document = UIDocument::new();
+	/// ui_document.register_editor_types();
+	/// let mut node = WorldNode::new("node");
+	/// assert_eq!(ui_document.get_node_type_name(&node), "WorldNode");
+	/// node.add_component(FloatingText::new());
+	/// assert_eq!(ui_document.get_node_type_name(&node), "FloatingText");
+	/// ```
+	//==============================================================================
+	pub fn get_node_type_name(&self, node: &WorldNode) -> &str {
+		node.get_all_components().iter().find_map(|component| self.find_node_type(component.as_ref())).map(|node_type| node_type.type_name.as_str()).unwrap_or(NODE_TYPE_NAME)
 	}
 
 	//==============================================================================

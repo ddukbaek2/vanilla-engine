@@ -547,7 +547,7 @@ assert_eq!(node_tree.get_child_count(enemies_id), 1);
 
 - `node_tree[node_id]` 는 지운 노드면 패닉합니다. 지워졌을지 모르는 노드는 `get_node`, `get_node_mut` 의 `Option` 으로 꺼내거나 `contains(node_id)` 로 먼저 봅니다.
 - `get_local_position()`, `get_local_scale()`, `get_pivot()`, `get_content_size()` 는 `Vector2` 값(복사본)을 돌려줍니다. 받은 벡터를 고쳐도 노드는 그대로이므로 고친 값을 다시 `set` 합니다.
-- `get_component::<T>()` 는 정확히 그 타입만 찾습니다. 러스트 판에는 상속이 없어서, 원본에서 `Paint` 를 이어받던 `Sprite` 도 `get_component::<Paint>()` 로는 찾지 못합니다.
+- `get_component::<T>()` 는 원본 `instanceof` 처럼 그 타입과, 그 타입을 기반으로 품은 컴포넌트를 찾습니다. 러스트 판에는 상속이 없어 원본 상위 클래스를 품고 `Component::get_base_component` 로 알리므로, 원본에서 `Paint` 를 이어받던 `Sprite` 도 `get_component::<Paint>()` 로 찾힙니다. 정확히 그 타입만 보려면 `as_any().downcast_ref::<T>()` 를 씁니다.
 - `remove_component::<T>()` 는 원본처럼 인스턴스 하나가 아니라 그 타입의 컴포넌트를 모두 뗍니다.
 - `set_enable(false)` 인 컴포넌트는 그리기뿐 아니라 `tick`, 터치, 휠에서도 빠집니다. 원본은 그리기만 멈추고 `tick` 은 계속 불렀습니다.
 - `WorldNode::add_component` 는 `attach_to_tree` 를 부르지 않고, `NodeTree::add_component` 는 `require()` 를 붙이지 않습니다. 붙을 때 자식 노드를 만드는 컴포넌트는 `NodeTree::add_component` 로 붙입니다.

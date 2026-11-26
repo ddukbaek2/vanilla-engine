@@ -26,7 +26,7 @@
 //!   - Gamepad.id 는 웹에서는 브라우저 id 그대로, 데스크탑에서는 크롬 꼴 "이름 (STANDARD GAMEPAD Vendor: 054c Product: 0ce6)" 로 만든다.
 //!   - 콜백의 button 값은 bool 대신 1.0(눌림) / 0.0(뗌) 이다.
 //!   - gilrs(웹은 연결 리스너)는 처음 부를 때(갱신, 진동, 패드 목록 읽기) 만든다. (부르지 않는 엔진과 시험에서는 장치를 열지 않는다)
-//! - get_all_connected_gamepads / get_connected_gamepad 는 원본 navigator.getGamepads() 처럼 부를 때 그 자리에서 읽는다. (데스크탑은 gilrs 사건을 비워 지금 상태,
+//! - get_all_connected_gamepads / get_connected_gamepad 는 원본 navigator.getGamepads() 처럼 부를 때 그 자리에서 읽은 사본을 돌려준다(&self). (데스크탑은 gilrs 사건을 비워 지금 상태,
 //!   그 사이의 연결과 해제는 다음 갱신이 받는다) update_all_gamepads_with_list 로 목록을 넣은 관리자(시험, 다른 입력원)는 넣은 목록을 돌려준다.
 //!   - 더한 것: set_log_enabled (로그 켜고 끄기),
 //!     update_all_gamepads_with_list (gilrs 없이 목록을 넣는 길. 시험이나 다른 입력원)
@@ -41,6 +41,7 @@
 //==============================================================================
 #[cfg(not(target_arch = "wasm32"))]
 use gilrs::{Axis, Button, GilrsBuilder};
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 
 /// W3C Standard Gamepad 의 버튼 수. (0~16)
@@ -466,10 +467,10 @@ pub struct GamepadManager {
 	input_event_callback: Option<GamepadInputCallback>,
 	/// 마지막 갱신에 읽은 목록. (navigator.getGamepads() 자리, 번호가 index)
 	gamepad_list: Vec<Option<Gamepad>>,
-	/// gilrs 입력원. (처음 갱신할 때 만든다)
-	gamepad_reader: Option<GamepadReader>,
+	/// gilrs 입력원. (처음 부를 때 만든다. 패드 목록 읽기가 &self 라 RefCell)
+	gamepad_reader: RefCell<Option<GamepadReader>>,
 	/// gilrs 를 만들어 봤는지.
-	is_gamepad_reader_creation_tried: bool,
+	is_gamepad_reader_creation_tried: Cell<bool>,
 	/// update_all_gamepads_with_list 로 목록을 넣었는지. (그러면 장치 대신 넣은 목록을 읽는다)
 	is_external_list_used: bool,
 	/// 로그를 내는지.
@@ -494,8 +495,8 @@ impl GamepadManager {
 			connected_gamepad_states: HashMap::new(),
 			input_event_callback: None,
 			gamepad_list: Vec::new(),
-			gamepad_reader: None,
-			is_gamepad_reader_creation_tried: false,
+			gamepad_reader: RefCell::new(None),
+			is_gamepad_reader_creation_tried: Cell::new(false),
 			is_external_list_used: false,
 			is_log_enabled: true,
 			is_input_log_enabled: false,
@@ -662,7 +663,7 @@ impl GamepadManager {
 		#[cfg(not(target_arch = "wasm32"))]
 		{
 			self.ensure_gamepad_reader();
-			if let Some(gamepad_reader) = self.gamepad_reader.as_mut() {
+			if let Some(gamepad_reader) = self.gamepad_reader.borrow_mut().as_mut() {
 				gamepad_reader.vibrate(clamped_strong_magnitude, clamped_weak_magnitude, duration_milliseconds);
 			}
 		}
@@ -673,7 +674,7 @@ impl GamepadManager {
 	//==============================================================================
 	pub fn update_all_gamepads(&mut self) {
 		self.ensure_gamepad_reader();
-		let read_result = match self.gamepad_reader.as_mut() {
+		let read_result = match self.gamepad_reader.get_mut().as_mut() {
 			Some(gamepad_reader) => {
 				gamepad_reader.read_gamepads()
 			}
@@ -715,23 +716,28 @@ impl GamepadManager {
 	//==============================================================================
 	/// 장치 입력원(gilrs, 웹은 연결 리스너)을 처음 부를 때 만든다.
 	//==============================================================================
-	fn ensure_gamepad_reader(&mut self) {
-		if !self.is_gamepad_reader_creation_tried {
-			self.is_gamepad_reader_creation_tried = true;
-			self.gamepad_reader = GamepadReader::create();
+	fn ensure_gamepad_reader(&self) {
+		if !self.is_gamepad_reader_creation_tried.get() {
+			self.is_gamepad_reader_creation_tried.set(true);
+			*self.gamepad_reader.borrow_mut() = GamepadReader::create();
 		}
 	}
 
 	//==============================================================================
-	/// 패드 목록을 그 자리에서 다시 읽는다. (원본 navigator.getGamepads(), 목록을 넣은 관리자는 그대로)
+	/// 패드 목록을 그 자리에서 읽은 사본. (원본 navigator.getGamepads(), 목록을 넣은 관리자는 넣은 목록의 사본)
 	//==============================================================================
-	fn refresh_gamepad_list(&mut self) {
+	fn read_current_gamepad_list(&self) -> Vec<Option<Gamepad>> {
 		if self.is_external_list_used {
-			return;
+			return self.gamepad_list.clone();
 		}
 		self.ensure_gamepad_reader();
-		if let Some(gamepad_reader) = self.gamepad_reader.as_mut() {
-			self.gamepad_list = gamepad_reader.read_gamepad_list();
+		match self.gamepad_reader.borrow_mut().as_mut() {
+			Some(gamepad_reader) => {
+				gamepad_reader.read_gamepad_list()
+			}
+			None => {
+				self.gamepad_list.clone()
+			}
 		}
 	}
 
@@ -1035,17 +1041,19 @@ impl GamepadManager {
 	}
 
 	//==============================================================================
-	/// 연결된 모든 게임패드 반환. (원본처럼 그 자리에서 읽은 지금 상태)
+	/// 연결된 모든 게임패드 반환. (원본 navigator.getGamepads() 처럼 그 자리에서 읽은 지금 상태의 사본)
 	///
 	/// # 돌려줌
-	/// 붙은 차례의 패드 목록. 없으면 빈 목록.
+	/// 붙은 차례의 패드 사본 목록. 없으면 빈 목록.
 	//==============================================================================
-	pub fn get_all_connected_gamepads(&mut self) -> Vec<&Gamepad> {
-		self.refresh_gamepad_list();
+	pub fn get_all_connected_gamepads(&self) -> Vec<Gamepad> {
+		let mut current_gamepad_list = self.read_current_gamepad_list();
 		let mut connected_gamepad_list = Vec::new();
 		for hardware_index in self.connected_gamepad_indices.iter() {
-			if let Some(Some(gamepad)) = self.gamepad_list.get(*hardware_index) {
-				connected_gamepad_list.push(gamepad);
+			if let Some(gamepad_slot) = current_gamepad_list.get_mut(*hardware_index) {
+				if let Some(gamepad) = gamepad_slot.take() {
+					connected_gamepad_list.push(gamepad);
+				}
 			}
 		}
 		connected_gamepad_list
@@ -1068,22 +1076,15 @@ impl GamepadManager {
 	/// - `gamepad_index`: 연결 목록의 순번. (붙은 차례, Gamepad.index 가 아니다)
 	///
 	/// # 돌려줌
-	/// 그 자리에서 읽은 패드. 순번이 범위를 넘거나 그 패드가 지금 목록에 없으면 None.
+	/// 그 자리에서 읽은 패드의 사본. 순번이 범위를 넘거나 그 패드가 지금 목록에 없으면 None.
 	//==============================================================================
-	pub fn get_connected_gamepad(&mut self, gamepad_index: usize) -> Option<&Gamepad> {
+	pub fn get_connected_gamepad(&self, gamepad_index: usize) -> Option<Gamepad> {
 		if gamepad_index >= self.connected_gamepad_indices.len() {
 			return None;
 		}
-		self.refresh_gamepad_list();
 		let hardware_index = *self.connected_gamepad_indices.get(gamepad_index)?;
-		match self.gamepad_list.get(hardware_index) {
-			Some(Some(gamepad)) => {
-				Some(gamepad)
-			}
-			_ => {
-				None
-			}
-		}
+		let mut current_gamepad_list = self.read_current_gamepad_list();
+		current_gamepad_list.get_mut(hardware_index).and_then(|gamepad_slot| gamepad_slot.take())
 	}
 
 	//==============================================================================
@@ -2169,7 +2170,7 @@ mod tests {
 		gamepad_manager.set_log_enabled(false);
 		// 연결 목록 밖의 순번은 장치를 열지 않고 None. (원본 getConnectedGamepad 의 범위 검사)
 		assert!(gamepad_manager.get_connected_gamepad(0).is_none());
-		assert!(!gamepad_manager.is_gamepad_reader_creation_tried);
+		assert!(!gamepad_manager.is_gamepad_reader_creation_tried.get());
 		// 목록을 넣은 관리자는 그 자리에서 읽어도 넣은 목록을 돌려준다.
 		let mut gamepad = Gamepad::create(0, "Pad");
 		gamepad.axes = vec![0.25, 0.0, 0.0, 0.0];
@@ -2178,7 +2179,7 @@ mod tests {
 		gamepad_manager.update_all_gamepads_with_list(vec![Some(gamepad)]);
 		assert_eq!(gamepad_manager.get_connected_gamepad(0).map(|gamepad| gamepad.axes[0]), Some(0.5));
 		assert_eq!(gamepad_manager.get_all_connected_gamepads().len(), 1);
-		assert!(!gamepad_manager.is_gamepad_reader_creation_tried);
+		assert!(!gamepad_manager.is_gamepad_reader_creation_tried.get());
 	}
 
 	//==============================================================================
