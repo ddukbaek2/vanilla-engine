@@ -1,42 +1,44 @@
 //==============================================================================
-// 엔진 노드 화면 분할 패널. (원본 web/pane.js 의 PaneStyle, Pane 을 데스크탑에서 노드로 짓는 판, 공통 형과 셈은 web/pane.rs)
-// - 원본의 DOM 요소 자리가 노드다. 컨테이너는 노드(get_container)이고, 내용은 node_tree.add_child 로 그 자식에 붙인다. (원본 appendChild)
-//   데스크탑에는 전역 document 가 없어 노드를 만들고 고치는 함수는 NodeTree 를 받는다. 길이 단위는 원본의 CSS 픽셀 자리인 노드 좌표다.
-//     let main_pane = Pane::new(node_tree, PaneOptions { direction: PaneDirection::Horizontal, ..Default::default() });
-//     let left_pane = Pane::new(node_tree, PaneOptions { size: PaneSize::Fixed(240.0), min_size: 170.0, ..Default::default() });
-//     main_pane.add_pane(node_tree, &left_pane);
-//     let panel_id = PaneStyle::create(node_tree, "div", "panel", &PaneStyleOptions::default());
-//     node_tree.add_child(left_pane.get_container(), panel_id);
-//     main_pane.attach_to(node_tree, root_id);
-// - 컨테이너는 원본처럼 바탕을 COLOR_BACKGROUND 로 칠하고 넘치는 자식을 자른다. (overflow: hidden, Mask)
-// - 리사이저는 원본처럼 끌 수 있으면 두께 5, 아니면 1 의 선이고 COLOR_RESIZER 로, 올려 두거나 끄는 동안 COLOR_RESIZER_HOVER 로 칠한다.
-//   눌러 끌면 잡은 자리와 경계 사이 간격을 지켜 앞이나 뒤 자식의 고정 크기를 바꾸고 뿌리부터 다시 놓는다. 올려 두거나 끄는 동안 col-resize, row-resize 커서다.
-// - attach_to 한 뿌리 패널은 부모 노드 크기가 바뀌면 다시 놓는다. (원본 창 resize 리스너와 다음 프레임의 refresh)
-// - PaneStyle::create 는 원본 프리셋과 같은 모양의 노드를 짓는다. (PaneElement 컴포넌트)
-//   공통: 왼쪽 위에 놓고 부모 크기를 채운다(position absolute, 100%), 글꼴 13px sans-serif, 글 색 COLOR_TEXT.
-//   panel: 바탕 COLOR_PANEL, 안쪽 여백 10. toolbar: 바탕 COLOR_TOOLBAR, 아래 테두리 1px COLOR_BORDER, 가로로 가운데 모아 10 씩 띄운다(flex).
-//   button: 제 크기(position relative, auto), 안쪽 여백 6 16, 모서리 4, 굵은 글, 바탕 COLOR_RESIZER(accent 면 COLOR_ACCENT, warning 이면 COLOR_WARNING),
-//   올려 두면 밝기 1.2 배와 pointer 커서, 누르고 떼면 set_on_click 의 함수. input: 엔진 입력 필드(UIInputField), 바탕 COLOR_INPUT_BACKGROUND, 안쪽 여백 4.
-//   textarea: 바탕 COLOR_BACKGROUND, 글 #d4d4d4, 고정폭 14px, 안쪽 여백 15, 탭 크기 4 의 여러 줄 입력 필드. text: 제 크기, 굵은 글.
-//   relative 요소는 부모 안쪽 여백 안에서 놓는다. 블록 부모는 세로로 차례로(div 는 폭을 채우고 그 밖은 제 폭), flex 부모는 CSS Flexbox 처럼
-//   주축(flex-direction row, column)으로 기준 크기(flex-basis, 없으면 width 나 height, 그것도 auto 면 제 크기)를 놓고 남는 자리를 flex-grow 비로 나누거나
-//   모자라면 flex-shrink 와 기준 크기를 곱한 비로 줄인다. (min, max 에 걸린 항목은 묶고 다시 나눈다, 넘침이 visible 인 항목의 자동 최소는 제 크기)
-//   교차축은 align-items(기본 stretch, flex-start, center, flex-end), 주축 늘어놓기는 justify-content(flex-start, center, flex-end, space-between, space-around, space-evenly)와 gap.
-//   auto 크기 요소의 제 크기는 글과 자식(블록은 세로 합, 가로 flex 는 가로 합)에 안쪽 여백과 테두리를 더한 것이다.
-// - overflow(overflow-x, overflow-y)가 visible 이 아니면 넘친 자식을 자르고(모서리 border-radius), auto, scroll 이면 휠로 넘기고 썸을 끌어 넘긴다.
-//   원본 스크롤 상자처럼 그 쪽으로 더 넘길 수 없으면 휠을 부모에게 넘긴다. 썸은 scrollbar-color 의 썸 색(원본 에디터의 rgba(121, 121, 121, 0.4))이다.
-// - 원본과 다른 점:
-//   - 원본 요소에 addEventListener("click") 으로 다는 것은 PaneElement::set_on_click 이다.
-//   - options.style 과 PaneStyle::apply 가 읽는 CSS 는 프리셋과 원본 도구(파티클, 타임라인, UI 에디터)가 쓰는 것이다:
-//     position(absolute, relative), left, top, right, bottom, width, height, min-width, min-height, max-width, max-height(px, %, auto),
-//     display(flex, block, none), flex-direction, flex, flex-grow, flex-shrink, flex-basis, justify-content, align-items, gap,
-//     padding, margin(1 ~ 4 값과 쪽마다), background, background-color, color, font-size, font-weight, font-family, line-height, text-align,
-//     border, border-top, border-right, border-bottom, border-left, border-width, border-color, border-radius, cursor(pointer),
-//     overflow, overflow-x, overflow-y, scrollbar-color. 그 밖(flex-wrap 줄넘김, white-space 와 text-overflow 의 말줄임, user-select, opacity 같은 것)은 읽지 않는다.
-//   - 스크롤 막대는 자리를 차지하지 않고 내용 위에 얹는 두께 8 의 썸이다. (크롬은 운영체제와 scrollbar-width 에 따라 자리를 차지하는 막대일 수 있다)
-//   - textarea 태그는 엔진 여러 줄 입력 필드(UIInputField::set_multiline)가 글을 받는다. 원본 DOM textarea 처럼 줄을 넣고, 폭에 맞춰 나누고, 위아래로 옮기고, 넘치면 휠로 넘긴다.
-//     프리셋의 탭 크기 4 를 쓴다. 글자, 색, 안쪽 여백은 만들 때의 스타일을 받는다. (PaneStyle::apply 로 나중에 바꾼 글꼴은 필드에 옮기지 않는다)
-//   - canvas 태그는 아무것도 그리지 않는 노드다. 원본은 그 자리에 엔진 캔버스가 들어가고, 데스크탑은 창 전체가 엔진 화면이라 게임이 그 노드의 자리를 읽어 쓴다.
+//! 엔진 노드 화면 분할 패널. (원본 web/pane.js 의 PaneStyle, Pane 을 데스크탑에서 노드로 짓는 판, 공통 형과 셈은 web/pane.rs)
+//! - 원본의 DOM 요소 자리가 노드다. 컨테이너는 노드(get_container)이고, 내용은 node_tree.add_child 로 그 자식에 붙인다. (원본 appendChild)
+//!   데스크탑에는 전역 document 가 없어 노드를 만들고 고치는 함수는 NodeTree 를 받는다. 길이 단위는 원본의 CSS 픽셀 자리인 노드 좌표다.
+//!   ```text
+//!     let main_pane = Pane::new(node_tree, PaneOptions { direction: PaneDirection::Horizontal, ..Default::default() });
+//!     let left_pane = Pane::new(node_tree, PaneOptions { size: PaneSize::Fixed(240.0), min_size: 170.0, ..Default::default() });
+//!     main_pane.add_pane(node_tree, &left_pane);
+//!     let panel_id = PaneStyle::create(node_tree, "div", "panel", &PaneStyleOptions::default());
+//!     node_tree.add_child(left_pane.get_container(), panel_id);
+//!     main_pane.attach_to(node_tree, root_id);
+//!   ```
+//! - 컨테이너는 원본처럼 바탕을 COLOR_BACKGROUND 로 칠하고 넘치는 자식을 자른다. (overflow: hidden, Mask)
+//! - 리사이저는 원본처럼 끌 수 있으면 두께 5, 아니면 1 의 선이고 COLOR_RESIZER 로, 올려 두거나 끄는 동안 COLOR_RESIZER_HOVER 로 칠한다.
+//!   눌러 끌면 잡은 자리와 경계 사이 간격을 지켜 앞이나 뒤 자식의 고정 크기를 바꾸고 뿌리부터 다시 놓는다. 올려 두거나 끄는 동안 col-resize, row-resize 커서다.
+//! - attach_to 한 뿌리 패널은 부모 노드 크기가 바뀌면 다시 놓는다. (원본 창 resize 리스너와 다음 프레임의 refresh)
+//! - PaneStyle::create 는 원본 프리셋과 같은 모양의 노드를 짓는다. (PaneElement 컴포넌트)
+//!   공통: 왼쪽 위에 놓고 부모 크기를 채운다(position absolute, 100%), 글꼴 13px sans-serif, 글 색 COLOR_TEXT.
+//!   panel: 바탕 COLOR_PANEL, 안쪽 여백 10. toolbar: 바탕 COLOR_TOOLBAR, 아래 테두리 1px COLOR_BORDER, 가로로 가운데 모아 10 씩 띄운다(flex).
+//!   button: 제 크기(position relative, auto), 안쪽 여백 6 16, 모서리 4, 굵은 글, 바탕 COLOR_RESIZER(accent 면 COLOR_ACCENT, warning 이면 COLOR_WARNING),
+//!   올려 두면 밝기 1.2 배와 pointer 커서, 누르고 떼면 set_on_click 의 함수. input: 엔진 입력 필드(UIInputField), 바탕 COLOR_INPUT_BACKGROUND, 안쪽 여백 4.
+//!   textarea: 바탕 COLOR_BACKGROUND, 글 #d4d4d4, 고정폭 14px, 안쪽 여백 15, 탭 크기 4 의 여러 줄 입력 필드. text: 제 크기, 굵은 글.
+//!   relative 요소는 부모 안쪽 여백 안에서 놓는다. 블록 부모는 세로로 차례로(div 는 폭을 채우고 그 밖은 제 폭), flex 부모는 CSS Flexbox 처럼
+//!   주축(flex-direction row, column)으로 기준 크기(flex-basis, 없으면 width 나 height, 그것도 auto 면 제 크기)를 놓고 남는 자리를 flex-grow 비로 나누거나
+//!   모자라면 flex-shrink 와 기준 크기를 곱한 비로 줄인다. (min, max 에 걸린 항목은 묶고 다시 나눈다, 넘침이 visible 인 항목의 자동 최소는 제 크기)
+//!   교차축은 align-items(기본 stretch, flex-start, center, flex-end), 주축 늘어놓기는 justify-content(flex-start, center, flex-end, space-between, space-around, space-evenly)와 gap.
+//!   auto 크기 요소의 제 크기는 글과 자식(블록은 세로 합, 가로 flex 는 가로 합)에 안쪽 여백과 테두리를 더한 것이다.
+//! - overflow(overflow-x, overflow-y)가 visible 이 아니면 넘친 자식을 자르고(모서리 border-radius), auto, scroll 이면 휠로 넘기고 썸을 끌어 넘긴다.
+//!   원본 스크롤 상자처럼 그 쪽으로 더 넘길 수 없으면 휠을 부모에게 넘긴다. 썸은 scrollbar-color 의 썸 색(원본 에디터의 rgba(121, 121, 121, 0.4))이다.
+//! - 원본과 다른 점:
+//!   - 원본 요소에 addEventListener("click") 으로 다는 것은 PaneElement::set_on_click 이다.
+//!   - options.style 과 PaneStyle::apply 가 읽는 CSS 는 프리셋과 원본 도구(파티클, 타임라인, UI 에디터)가 쓰는 것이다:
+//!     position(absolute, relative), left, top, right, bottom, width, height, min-width, min-height, max-width, max-height(px, %, auto),
+//!     display(flex, block, none), flex-direction, flex, flex-grow, flex-shrink, flex-basis, justify-content, align-items, gap,
+//!     padding, margin(1 ~ 4 값과 쪽마다), background, background-color, color, font-size, font-weight, font-family, line-height, text-align,
+//!     border, border-top, border-right, border-bottom, border-left, border-width, border-color, border-radius, cursor(pointer),
+//!     overflow, overflow-x, overflow-y, scrollbar-color. 그 밖(flex-wrap 줄넘김, white-space 와 text-overflow 의 말줄임, user-select, opacity 같은 것)은 읽지 않는다.
+//!   - 스크롤 막대는 자리를 차지하지 않고 내용 위에 얹는 두께 8 의 썸이다. (크롬은 운영체제와 scrollbar-width 에 따라 자리를 차지하는 막대일 수 있다)
+//!   - textarea 태그는 엔진 여러 줄 입력 필드(UIInputField::set_multiline)가 글을 받는다. 원본 DOM textarea 처럼 줄을 넣고, 폭에 맞춰 나누고, 위아래로 옮기고, 넘치면 휠로 넘긴다.
+//!     프리셋의 탭 크기 4 를 쓴다. 글자, 색, 안쪽 여백은 만들 때의 스타일을 받는다. (PaneStyle::apply 로 나중에 바꾼 글꼴은 필드에 옮기지 않는다)
+//!   - canvas 태그는 아무것도 그리지 않는 노드다. 원본은 그 자리에 엔진 캔버스가 들어가고, 데스크탑은 창 전체가 엔진 화면이라 게임이 그 노드의 자리를 읽어 쓴다.
 //==============================================================================
 use super::{calculate_pane_layout, calculate_resized_size, calculate_resizer_thickness, PaneDirection, PaneLayoutChild, PaneOptions, PaneResizableEdges, PaneResizeCallback, PaneSize, PaneStyleOptions, PaneTheme};
 use crate::base::color::Color;
@@ -58,7 +60,7 @@ use std::rc::{Rc, Weak};
 pub type PaneClickCallback = Box<dyn FnMut(&mut ComponentContext)>;
 
 //==============================================================================
-// 자식 사이 리사이저 하나.
+/// 자식 사이 리사이저 하나.
 //==============================================================================
 #[derive(Clone, Copy)]
 struct PaneResizer {
@@ -67,7 +69,7 @@ struct PaneResizer {
 }
 
 //==============================================================================
-// 패널 상태. (Pane 손잡이들과 컨테이너, 리사이저 노드의 컴포넌트가 나눠 든다)
+/// 패널 상태. (Pane 손잡이들과 컨테이너, 리사이저 노드의 컴포넌트가 나눠 든다)
 //==============================================================================
 struct PaneState {
 	container_id: NodeId,
@@ -83,18 +85,18 @@ struct PaneState {
 	is_visible: bool,
 	resize_callback: Option<PaneResizeCallback>,
 	parent_pane: Weak<RefCell<PaneState>>,
-	// 마지막으로 놓인 자리. ([x, y, 폭, 높이], 부모 컨테이너 기준)
+	/// 마지막으로 놓인 자리. ([x, y, 폭, 높이], 부모 컨테이너 기준)
 	layout_rect: [f64; 4],
-	// attach_to 한 뿌리인지와 그때 부모 크기. (바뀌면 다시 놓는다)
+	/// attach_to 한 뿌리인지와 그때 부모 크기. (바뀌면 다시 놓는다)
 	is_attached: bool,
 	attached_parent_size: Option<Vector2>,
-	// 리사이저 끌기.
+	/// 리사이저 끌기.
 	active_resizer_index: Option<usize>,
 	resize_grab_offset: f64,
 }
 
 //==============================================================================
-// 화면 분할 패널. (원본 Pane, clone 은 같은 패널을 가리킨다)
+/// 화면 분할 패널. (원본 Pane, clone 은 같은 패널을 가리킨다)
 //==============================================================================
 #[derive(Clone)]
 pub struct Pane {
@@ -103,7 +105,7 @@ pub struct Pane {
 
 impl Pane {
 	//==============================================================================
-	// 생성. (떨어진 컨테이너 노드를 만든다. 바탕과 자르기)
+	/// 생성. (떨어진 컨테이너 노드를 만든다. 바탕과 자르기)
 	//==============================================================================
 	pub fn new(node_tree: &mut NodeTree, options: PaneOptions) -> Pane {
 		let fixed_size = match options.size {
@@ -149,7 +151,7 @@ impl Pane {
 	}
 
 	//==============================================================================
-	// 자식 추가. (앞 자식이 있으면 그 사이에 리사이저 노드를 둔다)
+	/// 자식 추가. (앞 자식이 있으면 그 사이에 리사이저 노드를 둔다)
 	//==============================================================================
 	pub fn add_pane(&self, node_tree: &mut NodeTree, pane: &Pane) {
 		pane.state.borrow_mut().parent_pane = Rc::downgrade(&self.state);
@@ -190,7 +192,7 @@ impl Pane {
 	}
 
 	//==============================================================================
-	// 배치. (자기 자리를 놓고, 같은 셈으로 자식과 리사이저를 놓는다. 원본 updateLayout)
+	/// 배치. (자기 자리를 놓고, 같은 셈으로 자식과 리사이저를 놓는다. 원본 updateLayout)
 	//==============================================================================
 	pub fn update_layout(&self, node_tree: &mut NodeTree, x: f64, y: f64, width: f64, height: f64) {
 		let (container_id, direction, children, resizer_list) = {
@@ -249,7 +251,7 @@ impl Pane {
 	}
 
 	//==============================================================================
-	// 배치 콜백 부르기. (콜백 안에서 이 패널을 다시 불러도 되게 빼 두었다가 돌려놓는다)
+	/// 배치 콜백 부르기. (콜백 안에서 이 패널을 다시 불러도 되게 빼 두었다가 돌려놓는다)
 	//==============================================================================
 	fn fire_resize_callback(&self) {
 		let resize_callback = self.state.borrow_mut().resize_callback.take();
@@ -263,7 +265,7 @@ impl Pane {
 	}
 
 	//==============================================================================
-	// 배치 초기화. (끌어서 바꾼 크기를 지운다, 자식까지)
+	/// 배치 초기화. (끌어서 바꾼 크기를 지운다, 자식까지)
 	//==============================================================================
 	pub fn reset_layout(&self) {
 		let children = {
@@ -277,7 +279,7 @@ impl Pane {
 	}
 
 	//==============================================================================
-	// 부모 노드 크기에 맞춰 다시 놓는다. (부모가 없으면 아무것도 하지 않는다)
+	/// 부모 노드 크기에 맞춰 다시 놓는다. (부모가 없으면 아무것도 하지 않는다)
 	//==============================================================================
 	pub fn refresh(&self, node_tree: &mut NodeTree) {
 		let parent_id = match node_tree.get_parent_id(self.get_container()) {
@@ -294,7 +296,7 @@ impl Pane {
 	}
 
 	//==============================================================================
-	// 노드에 단다. (그 자리에서 놓고, 뒤로 부모 크기가 바뀌면 다시 놓는다. 원본 attachTo 의 창 resize 리스너)
+	/// 노드에 단다. (그 자리에서 놓고, 뒤로 부모 크기가 바뀌면 다시 놓는다. 원본 attachTo 의 창 resize 리스너)
 	//==============================================================================
 	pub fn attach_to(&self, node_tree: &mut NodeTree, parent_id: NodeId) {
 		node_tree.add_child(parent_id, self.get_container());
@@ -303,7 +305,7 @@ impl Pane {
 	}
 
 	//==============================================================================
-	// 보이기 / 숨기기. (숨긴 패널은 자리를 차지하지 않고, 맞닿은 리사이저도 숨는다)
+	/// 보이기 / 숨기기. (숨긴 패널은 자리를 차지하지 않고, 맞닿은 리사이저도 숨는다)
 	//==============================================================================
 	pub fn set_visible(&self, node_tree: &mut NodeTree, is_visible: bool) {
 		let container_id = {
@@ -318,7 +320,7 @@ impl Pane {
 	}
 
 	//==============================================================================
-	// 뿌리 패널. (부모를 따라 끝까지 올라간다)
+	/// 뿌리 패널. (부모를 따라 끝까지 올라간다)
 	//==============================================================================
 	fn find_root_pane(&self) -> Pane {
 		let mut root_pane = self.clone();
@@ -336,84 +338,84 @@ impl Pane {
 	}
 
 	//==============================================================================
-	// 보이는지.
+	/// 보이는지.
 	//==============================================================================
 	pub fn is_visible(&self) -> bool {
 		self.state.borrow().is_visible
 	}
 
 	//==============================================================================
-	// flex 인지. (처음 크기가 Flex)
+	/// flex 인지. (처음 크기가 Flex)
 	//==============================================================================
 	pub fn is_flex(&self) -> bool {
 		self.state.borrow().initial_size == PaneSize::Flex
 	}
 
 	//==============================================================================
-	// 처음 크기.
+	/// 처음 크기.
 	//==============================================================================
 	pub fn get_initial_size(&self) -> PaneSize {
 		self.state.borrow().initial_size
 	}
 
 	//==============================================================================
-	// 고정 크기. (픽셀, 0 이면 처음 크기로 잰다)
+	/// 고정 크기. (픽셀, 0 이면 처음 크기로 잰다)
 	//==============================================================================
 	pub fn get_fixed_size(&self) -> f64 {
 		self.state.borrow().fixed_size
 	}
 
 	//==============================================================================
-	// 고정 크기 설정. (다음 배치부터 쓴다. flex 패널에는 쓰이지 않는다)
+	/// 고정 크기 설정. (다음 배치부터 쓴다. flex 패널에는 쓰이지 않는다)
 	//==============================================================================
 	pub fn set_fixed_size(&self, fixed_size: f64) {
 		self.state.borrow_mut().fixed_size = fixed_size;
 	}
 
 	//==============================================================================
-	// 최소 크기.
+	/// 최소 크기.
 	//==============================================================================
 	pub fn get_min_size(&self) -> f64 {
 		self.state.borrow().min_size
 	}
 
 	//==============================================================================
-	// 최대 크기.
+	/// 최대 크기.
 	//==============================================================================
 	pub fn get_max_size(&self) -> f64 {
 		self.state.borrow().max_size
 	}
 
 	//==============================================================================
-	// 컨테이너 노드. (내용을 여기의 자식으로 붙인다)
+	/// 컨테이너 노드. (내용을 여기의 자식으로 붙인다)
 	//==============================================================================
 	pub fn get_container(&self) -> NodeId {
 		self.state.borrow().container_id
 	}
 
 	//==============================================================================
-	// 배치 콜백 설정. (update_layout 이 끝날 때마다 부른다. None 이면 비운다)
+	/// 배치 콜백 설정. (update_layout 이 끝날 때마다 부른다. None 이면 비운다)
 	//==============================================================================
 	pub fn set_callback(&self, resize_callback: Option<PaneResizeCallback>) {
 		self.state.borrow_mut().resize_callback = resize_callback;
 	}
 
 	//==============================================================================
-	// 리사이저로 끌 수 있는지.
+	/// 리사이저로 끌 수 있는지.
 	//==============================================================================
 	pub fn is_resizable(&self) -> bool {
 		self.state.borrow().is_resizable
 	}
 
 	//==============================================================================
-	// 끌 수 있는 가장자리.
+	/// 끌 수 있는 가장자리.
 	//==============================================================================
 	pub fn get_resizable_edges(&self) -> PaneResizableEdges {
 		self.state.borrow().resizable_edges
 	}
 
 	//==============================================================================
-	// 리사이저 끌기 시작. (잡은 자리와 경계 사이 간격을 기억해 두어야 처음 끌 때 크기가 튀지 않는다)
+	/// 리사이저 끌기 시작. (잡은 자리와 경계 사이 간격을 기억해 두어야 처음 끌 때 크기가 튀지 않는다)
 	//==============================================================================
 	fn begin_resize(&self, resizer_index: usize, pointer: f64) {
 		let mut state = self.state.borrow_mut();
@@ -440,7 +442,7 @@ impl Pane {
 	}
 
 	//==============================================================================
-	// 리사이저 끌기. (같은 셈으로 앞이나 뒤 자식의 고정 크기를 바꾸고 뿌리부터 다시 놓는다. 원본 onMouseMove)
+	/// 리사이저 끌기. (같은 셈으로 앞이나 뒤 자식의 고정 크기를 바꾸고 뿌리부터 다시 놓는다. 원본 onMouseMove)
 	//==============================================================================
 	fn move_resize(&self, node_tree: &mut NodeTree, pointer: f64) {
 		let (direction, previous_pane, next_pane, thickness, grab_offset) = {
@@ -483,7 +485,7 @@ impl Pane {
 	}
 
 	//==============================================================================
-	// 리사이저 끌기 끝.
+	/// 리사이저 끌기 끝.
 	//==============================================================================
 	fn end_resize(&self) {
 		self.state.borrow_mut().active_resizer_index = None;
@@ -491,7 +493,7 @@ impl Pane {
 }
 
 //==============================================================================
-// 컨테이너 노드의 컴포넌트. (바탕을 칠하고, attach_to 한 뿌리는 부모 크기가 바뀌면 다시 놓는다)
+/// 컨테이너 노드의 컴포넌트. (바탕을 칠하고, attach_to 한 뿌리는 부모 크기가 바뀌면 다시 놓는다)
 //==============================================================================
 struct PaneContainer {
 	component_base: ComponentBase,
@@ -549,7 +551,7 @@ impl Component for PaneContainer {
 }
 
 //==============================================================================
-// 리사이저 노드의 컴포넌트. (올려 두면 색과 커서, 눌러 끌면 크기 바꾸기)
+/// 리사이저 노드의 컴포넌트. (올려 두면 색과 커서, 눌러 끌면 크기 바꾸기)
 //==============================================================================
 struct PaneResizerHandle {
 	component_base: ComponentBase,
@@ -561,7 +563,7 @@ struct PaneResizerHandle {
 
 impl PaneResizerHandle {
 	//==============================================================================
-	// 포인터의 부모 컨테이너 좌표. (나누는 방향 쪽)
+	/// 포인터의 부모 컨테이너 좌표. (나누는 방향 쪽)
 	//==============================================================================
 	fn read_pointer(&self, context: &ComponentContext, view_input_position: Vector2, direction: PaneDirection) -> Option<f64> {
 		let node_id = context.get_node_id();
@@ -578,7 +580,7 @@ impl PaneResizerHandle {
 	}
 
 	//==============================================================================
-	// 끄는 중인지.
+	/// 끄는 중인지.
 	//==============================================================================
 	fn is_dragging(&self) -> bool {
 		match self.state.upgrade() {
@@ -693,7 +695,7 @@ impl Component for PaneResizerHandle {
 }
 
 //==============================================================================
-// 요소 표시. (원본 display)
+/// 요소 표시. (원본 display)
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PaneDisplay {
@@ -703,7 +705,7 @@ enum PaneDisplay {
 }
 
 //==============================================================================
-// 크기 값. (px, %, auto)
+/// 크기 값. (px, %, auto)
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum PaneLength {
@@ -714,7 +716,7 @@ enum PaneLength {
 
 impl PaneLength {
 	//==============================================================================
-	// 길이 셈. (auto 면 None, %는 부모 길이에 대고)
+	/// 길이 셈. (auto 면 None, %는 부모 길이에 대고)
 	//==============================================================================
 	fn resolve(self, parent_length: f32) -> Option<f32> {
 		match self {
@@ -732,7 +734,7 @@ impl PaneLength {
 }
 
 //==============================================================================
-// flex 주축. (원본 flex-direction)
+/// flex 주축. (원본 flex-direction)
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PaneFlexDirection {
@@ -741,7 +743,7 @@ enum PaneFlexDirection {
 }
 
 //==============================================================================
-// 주축 늘어놓기. (원본 justify-content)
+/// 주축 늘어놓기. (원본 justify-content)
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PaneJustifyContent {
@@ -754,7 +756,7 @@ enum PaneJustifyContent {
 }
 
 //==============================================================================
-// 교차축 맞추기. (원본 align-items, 기본 stretch)
+/// 교차축 맞추기. (원본 align-items, 기본 stretch)
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PaneAlignItems {
@@ -765,7 +767,7 @@ enum PaneAlignItems {
 }
 
 //==============================================================================
-// 넘침. (원본 overflow, overflow-x, overflow-y)
+/// 넘침. (원본 overflow, overflow-x, overflow-y)
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PaneOverflow {
@@ -777,7 +779,7 @@ enum PaneOverflow {
 
 impl PaneOverflow {
 	//==============================================================================
-	// 읽기. (clip 은 hidden 과 같이 자른다, 모르는 값은 visible)
+	/// 읽기. (clip 은 hidden 과 같이 자른다, 모르는 값은 visible)
 	//==============================================================================
 	fn parse(value: &str) -> PaneOverflow {
 		match value {
@@ -797,7 +799,7 @@ impl PaneOverflow {
 	}
 
 	//==============================================================================
-	// 굴려 넘길 수 있는지. (auto, scroll)
+	/// 굴려 넘길 수 있는지. (auto, scroll)
 	//==============================================================================
 	fn is_scrollable(self) -> bool {
 		matches!(self, PaneOverflow::Auto | PaneOverflow::Scroll)
@@ -805,7 +807,7 @@ impl PaneOverflow {
 }
 
 //==============================================================================
-// 글 가로 맞춤. (원본 text-align)
+/// 글 가로 맞춤. (원본 text-align)
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PaneTextAlign {
@@ -814,20 +816,20 @@ enum PaneTextAlign {
 	Right,
 }
 
-// 스크롤 막대 두께와 가장 짧은 썸 길이. (얹는 막대)
+/// 스크롤 막대 두께와 가장 짧은 썸 길이. (얹는 막대)
 const SCROLLBAR_THICKNESS: f32 = 8.0;
 const SCROLLBAR_MINIMUM_THUMB_LENGTH: f32 = 20.0;
-// 스크롤 막대 썸 기본 색. (원본 에디터의 scrollbar-color 썸)
+/// 스크롤 막대 썸 기본 색. (원본 에디터의 scrollbar-color 썸)
 const SCROLLBAR_DEFAULT_THUMB_COLOR: &str = "rgba(121, 121, 121, 0.4)";
 
 //==============================================================================
-// PaneStyle 이 지은 요소. (원본 DOM 요소의 스타일과 글, 블록과 flex 배치, 넘침 자르기와 스크롤, 단추 누르기)
+/// PaneStyle 이 지은 요소. (원본 DOM 요소의 스타일과 글, 블록과 flex 배치, 넘침 자르기와 스크롤, 단추 누르기)
 //==============================================================================
 pub struct PaneElement {
 	component_base: ComponentBase,
 	tag_name: String,
 	is_absolute: bool,
-	// 자리. (absolute 요소, None 이면 auto)
+	/// 자리. (absolute 요소, None 이면 auto)
 	left: Option<f32>,
 	top: Option<f32>,
 	right: Option<f32>,
@@ -846,7 +848,7 @@ pub struct PaneElement {
 	flex_grow: f32,
 	flex_shrink: f32,
 	flex_basis: PaneLength,
-	// 위, 오른쪽, 아래, 왼쪽.
+	/// 위, 오른쪽, 아래, 왼쪽.
 	padding: [f32; 4],
 	margin: [f32; 4],
 	border_width_list: [f32; 4],
@@ -862,7 +864,7 @@ pub struct PaneElement {
 	overflow_x: PaneOverflow,
 	overflow_y: PaneOverflow,
 	scrollbar_thumb_color: Color,
-	// 굴려 넘긴 만큼과 내용 끝. (안쪽 여백 상자 기준)
+	/// 굴려 넘긴 만큼과 내용 끝. (안쪽 여백 상자 기준)
 	scroll_offset: Vector2,
 	scroll_extent: Vector2,
 	scroll_drag_start: Option<(Vector2, Vector2, bool)>,
@@ -875,7 +877,7 @@ pub struct PaneElement {
 
 impl PaneElement {
 	//==============================================================================
-	// 생성. (원본 PaneStyle.create 의 공통 기본 스타일: absolute, 왼쪽 위, 100%, 13px sans-serif, COLOR_TEXT)
+	/// 생성. (원본 PaneStyle.create 의 공통 기본 스타일: absolute, 왼쪽 위, 100%, 13px sans-serif, COLOR_TEXT)
 	//==============================================================================
 	fn new(tag_name: &str) -> PaneElement {
 		PaneElement {
@@ -927,49 +929,49 @@ impl PaneElement {
 	}
 
 	//==============================================================================
-	// 누르고 떼면 부를 함수. (원본 요소의 addEventListener("click"))
+	/// 누르고 떼면 부를 함수. (원본 요소의 addEventListener("click"))
 	//==============================================================================
 	pub fn set_on_click(&mut self, click_callback: Option<PaneClickCallback>) {
 		self.click_callback = click_callback;
 	}
 
 	//==============================================================================
-	// 글 설정. (원본 innerText)
+	/// 글 설정. (원본 innerText)
 	//==============================================================================
 	pub fn set_text(&mut self, text: &str) {
 		self.text = text.to_string();
 	}
 
 	//==============================================================================
-	// 글.
+	/// 글.
 	//==============================================================================
 	pub fn get_text(&self) -> &str {
 		&self.text
 	}
 
 	//==============================================================================
-	// 태그 이름. (소문자)
+	/// 태그 이름. (소문자)
 	//==============================================================================
 	pub fn get_tag_name(&self) -> &str {
 		&self.tag_name
 	}
 
 	//==============================================================================
-	// 굴려 넘긴 만큼. (원본 scrollLeft, scrollTop)
+	/// 굴려 넘긴 만큼. (원본 scrollLeft, scrollTop)
 	//==============================================================================
 	pub fn get_scroll_offset(&self) -> Vector2 {
 		self.scroll_offset
 	}
 
 	//==============================================================================
-	// 굴려 넘기기. (원본 scrollLeft, scrollTop 넣기. 다음 배치에서 내용 끝 안으로 줄인다)
+	/// 굴려 넘기기. (원본 scrollLeft, scrollTop 넣기. 다음 배치에서 내용 끝 안으로 줄인다)
 	//==============================================================================
 	pub fn set_scroll_offset(&mut self, scroll_offset: Vector2) {
 		self.scroll_offset = Vector2::create(scroll_offset.x.max(0.0), scroll_offset.y.max(0.0));
 	}
 
 	//==============================================================================
-	// CSS 속성 하나 넣기. (머리 주석의 속성만 읽는다, 그 밖은 무시)
+	/// CSS 속성 하나 넣기. (머리 주석의 속성만 읽는다, 그 밖은 무시)
 	//==============================================================================
 	pub fn apply_style(&mut self, property_name: &str, property_value: &str) {
 		let value = property_value.trim();
@@ -1223,7 +1225,7 @@ impl PaneElement {
 	}
 
 	//==============================================================================
-	// flex 줄임 꼴. (원본 flex: none, auto, 수 하나(grow, basis 0%), grow shrink, grow shrink basis, 길이 하나(basis))
+	/// flex 줄임 꼴. (원본 flex: none, auto, 수 하나(grow, basis 0%), grow shrink, grow shrink basis, 길이 하나(basis))
 	//==============================================================================
 	fn apply_flex_shorthand(&mut self, value: &str) {
 		match value {
@@ -1276,7 +1278,7 @@ impl PaneElement {
 	}
 
 	//==============================================================================
-	// 한 축만 visible 이면 auto 로. (CSS: 다른 축이 visible 이 아니면 visible 은 auto 로 계산된다)
+	/// 한 축만 visible 이면 auto 로. (CSS: 다른 축이 visible 이 아니면 visible 은 auto 로 계산된다)
 	//==============================================================================
 	fn normalize_overflow(&mut self) {
 		if self.overflow_x == PaneOverflow::Visible && self.overflow_y != PaneOverflow::Visible {
@@ -1288,14 +1290,14 @@ impl PaneElement {
 	}
 
 	//==============================================================================
-	// 넘친 자식을 자르는지. (overflow 가 visible 이 아님)
+	/// 넘친 자식을 자르는지. (overflow 가 visible 이 아님)
 	//==============================================================================
 	fn is_clipping(&self) -> bool {
 		self.overflow_x != PaneOverflow::Visible || self.overflow_y != PaneOverflow::Visible
 	}
 
 	//==============================================================================
-	// 폰트 문자열.
+	/// 폰트 문자열.
 	//==============================================================================
 	fn build_font_string(&self) -> String {
 		let weight = if self.is_bold {
@@ -1308,7 +1310,7 @@ impl PaneElement {
 	}
 
 	//==============================================================================
-	// 줄 높이. (line-height 가 없으면 CSS normal 을 글꼴 크기의 1.2 배로 갈음한다)
+	/// 줄 높이. (line-height 가 없으면 CSS normal 을 글꼴 크기의 1.2 배로 갈음한다)
 	//==============================================================================
 	fn read_line_height(&self) -> f32 {
 		match self.line_height {
@@ -1322,7 +1324,7 @@ impl PaneElement {
 	}
 
 	//==============================================================================
-	// 글 크기. (글 폭과 줄 높이, 입력 칸은 원본 input 의 size 20 처럼 글자 스무 개 폭)
+	/// 글 크기. (글 폭과 줄 높이, 입력 칸은 원본 input 의 size 20 처럼 글자 스무 개 폭)
 	//==============================================================================
 	fn measure_text_size(&self) -> Vector2 {
 		let text_width = if self.tag_name == "input" {
@@ -1351,21 +1353,21 @@ impl PaneElement {
 	}
 
 	//==============================================================================
-	// 안쪽 여백과 테두리를 더한 둘레. (가로 합, 세로 합)
+	/// 안쪽 여백과 테두리를 더한 둘레. (가로 합, 세로 합)
 	//==============================================================================
 	fn read_frame_size(&self) -> Vector2 {
 		Vector2::create(self.padding[1] + self.padding[3] + self.border_width_list[1] + self.border_width_list[3], self.padding[0] + self.padding[2] + self.border_width_list[0] + self.border_width_list[2])
 	}
 
 	//==============================================================================
-	// 폭을 채우는 요소인지. (div 같은 블록 요소, 단추와 입력과 span 은 제 폭)
+	/// 폭을 채우는 요소인지. (div 같은 블록 요소, 단추와 입력과 span 은 제 폭)
 	//==============================================================================
 	fn is_block_level(&self) -> bool {
 		!matches!(self.tag_name.as_str(), "button" | "span" | "input" | "label" | "a" | "img" | "canvas")
 	}
 
 	//==============================================================================
-	// 스크롤 막대 썸 자리. (노드 좌표, 세로 막대면 is_vertical, 넘치지 않으면 None)
+	/// 스크롤 막대 썸 자리. (노드 좌표, 세로 막대면 is_vertical, 넘치지 않으면 None)
 	//==============================================================================
 	fn calculate_scrollbar_thumb_rect(&self, content_size: Vector2, is_vertical: bool) -> Option<Rect> {
 		let (overflow, viewport_length, extent_length, offset) = if is_vertical {
@@ -1390,7 +1392,7 @@ impl PaneElement {
 	}
 
 	//==============================================================================
-	// 굴려 넘긴 만큼을 내용 끝 안으로. (넘길 수 없는 축은 0, 바뀌었는지)
+	/// 굴려 넘긴 만큼을 내용 끝 안으로. (넘길 수 없는 축은 0, 바뀌었는지)
 	//==============================================================================
 	fn clamp_scroll_offset(&mut self, viewport_size: Vector2) -> bool {
 		let maximum_x = if self.overflow_x.is_scrollable() {
@@ -1413,8 +1415,8 @@ impl PaneElement {
 }
 
 //==============================================================================
-// 요소 제 크기 재기. (원본 max-content 크기: 글, 자식 블록과 flex 의 합, 안쪽 여백과 테두리. 명시한 px 폭과 높이, min, max 를 따른다)
-// - %는 부모를 알 수 없어 auto 로 본다. absolute 와 display none 자식은 넣지 않는다.
+/// 요소 제 크기 재기. (원본 max-content 크기: 글, 자식 블록과 flex 의 합, 안쪽 여백과 테두리. 명시한 px 폭과 높이, min, max 를 따른다)
+/// - %는 부모를 알 수 없어 auto 로 본다. absolute 와 display none 자식은 넣지 않는다.
 //==============================================================================
 fn measure_element_size(node_tree: &NodeTree, node_id: NodeId) -> Vector2 {
 	let element = match node_tree[node_id].get_component::<PaneElement>() {
@@ -1485,11 +1487,11 @@ fn measure_element_size(node_tree: &NodeTree, node_id: NodeId) -> Vector2 {
 }
 
 //==============================================================================
-// flex 항목 하나. (배치 셈 동안)
+/// flex 항목 하나. (배치 셈 동안)
 //==============================================================================
 struct PaneFlexItem {
 	node_id: NodeId,
-	// 주축과 교차축의 바깥 여백. (앞, 뒤)
+	/// 주축과 교차축의 바깥 여백. (앞, 뒤)
 	main_margin: (f32, f32),
 	cross_margin: (f32, f32),
 	base_size: f32,
@@ -1502,21 +1504,21 @@ struct PaneFlexItem {
 }
 
 //==============================================================================
-// 값을 min, max 안으로. (max 가 min 보다 작으면 min 이 이긴다, CSS 와 같다)
+/// 값을 min, max 안으로. (max 가 min 보다 작으면 min 이 이긴다, CSS 와 같다)
 //==============================================================================
 fn clamp_length(value: f32, minimum: f32, maximum: f32) -> f32 {
 	value.min(maximum).max(minimum)
 }
 
 //==============================================================================
-// "12px" 같은 값 읽기. (단위 없는 수도 받는다)
+/// "12px" 같은 값 읽기. (단위 없는 수도 받는다)
 //==============================================================================
 fn parse_pixel(value: &str) -> Option<f32> {
 	value.trim().trim_end_matches("px").trim().parse::<f32>().ok()
 }
 
 //==============================================================================
-// 크기 값 읽기. (px, %, auto)
+/// 크기 값 읽기. (px, %, auto)
 //==============================================================================
 fn parse_length(value: &str) -> PaneLength {
 	let value = value.trim();
@@ -1534,7 +1536,7 @@ fn parse_length(value: &str) -> PaneLength {
 }
 
 //==============================================================================
-// 여백 줄임 꼴 읽기. (1 ~ 4 값 → 위, 오른쪽, 아래, 왼쪽)
+/// 여백 줄임 꼴 읽기. (1 ~ 4 값 → 위, 오른쪽, 아래, 왼쪽)
 //==============================================================================
 fn parse_box_values(value: &str) -> [f32; 4] {
 	let value_list: Vec<f32> = value.split_whitespace().map(|part| parse_pixel(part).unwrap_or(0.0)).collect();
@@ -1558,7 +1560,7 @@ fn parse_box_values(value: &str) -> [f32; 4] {
 }
 
 //==============================================================================
-// CSS 값 나누기. (빈칸으로 나누되 괄호 안의 빈칸은 두고, "rgba(1, 2, 3, 0.4) transparent" → 둘)
+/// CSS 값 나누기. (빈칸으로 나누되 괄호 안의 빈칸은 두고, "rgba(1, 2, 3, 0.4) transparent" → 둘)
 //==============================================================================
 fn split_css_values(value: &str) -> Vec<String> {
 	let mut part_list: Vec<String> = Vec::new();
@@ -1591,7 +1593,7 @@ fn split_css_values(value: &str) -> Vec<String> {
 }
 
 //==============================================================================
-// 테두리 줄임 꼴 읽기. ("1px solid #444" → 굵기와 색, none 이면 0)
+/// 테두리 줄임 꼴 읽기. ("1px solid #444" → 굵기와 색, none 이면 0)
 //==============================================================================
 fn parse_border(value: &str) -> (f32, Option<Color>) {
 	if value.trim() == "none" || value.trim() == "0" {
@@ -1611,7 +1613,7 @@ fn parse_border(value: &str) -> (f32, Option<Color>) {
 }
 
 //==============================================================================
-// 밝기 바꾼 색. (원본 filter: brightness)
+/// 밝기 바꾼 색. (원본 filter: brightness)
 //==============================================================================
 fn scale_brightness(color: Color, brightness: f32) -> Color {
 	Color::create((color.red * brightness).min(1.0), (color.green * brightness).min(1.0), (color.blue * brightness).min(1.0), color.alpha)
@@ -1765,7 +1767,7 @@ impl Component for PaneElement {
 	}
 
 	//==============================================================================
-	// 휠. (원본 스크롤 상자처럼 그 축으로 더 넘길 수 있을 때만 받고, 아니면 부모에게 넘긴다)
+	/// 휠. (원본 스크롤 상자처럼 그 축으로 더 넘길 수 있을 때만 받고, 아니면 부모에게 넘긴다)
 	//==============================================================================
 	fn wheel(&mut self, context: &mut ComponentContext, wheel_delta: Vector2) -> bool {
 		if !self.is_wheel_receiver() {
@@ -1858,7 +1860,7 @@ impl Component for PaneElement {
 	}
 
 	//==============================================================================
-	// 자식을 그린 뒤 스크롤 막대. (자르기가 끝난 뒤라 막대가 내용 위에 얹힌다)
+	/// 자식을 그린 뒤 스크롤 막대. (자르기가 끝난 뒤라 막대가 내용 위에 얹힌다)
 	//==============================================================================
 	fn pop_transform(&mut self, transform: &NodeTransform, graphic: &mut Graphic) {
 		if self.display == PaneDisplay::None || !self.is_clipping() {
@@ -1876,7 +1878,7 @@ impl Component for PaneElement {
 
 impl PaneElement {
 	//==============================================================================
-	// absolute 요소의 자리와 크기. (부모 크기에 대고, left 와 right 가 다 있고 폭이 auto 면 그 사이를 채운다)
+	/// absolute 요소의 자리와 크기. (부모 크기에 대고, left 와 right 가 다 있고 폭이 auto 면 그 사이를 채운다)
 	//==============================================================================
 	fn place_absolute(&self, parent_size: Vector2, intrinsic_size: Vector2) -> (Vector2, Vector2) {
 		let resolve_axis = |start: Option<f32>, end: Option<f32>, length: PaneLength, minimum: PaneLength, maximum: PaneLength, parent_length: f32, intrinsic_length: f32| -> (f32, f32) {
@@ -1911,7 +1913,7 @@ impl PaneElement {
 	}
 
 	//==============================================================================
-	// 자식 배치. (absolute 는 부모 크기에, 그 밖은 안쪽 여백 안에서 블록(세로로 차례) 또는 flex 로. 넘침을 굴려 넘긴 만큼 옮긴다)
+	/// 자식 배치. (absolute 는 부모 크기에, 그 밖은 안쪽 여백 안에서 블록(세로로 차례) 또는 flex 로. 넘침을 굴려 넘긴 만큼 옮긴다)
 	//==============================================================================
 	fn lay_out_children(&mut self, context: &mut ComponentContext) {
 		let node_id = context.get_node_id();
@@ -2142,7 +2144,7 @@ impl PaneElement {
 	}
 
 	//==============================================================================
-	// flex 길이 정하기. (CSS Flexbox 9.7: 남는 자리는 grow 비로 나누고, 모자라면 shrink 와 기준 크기를 곱한 비로 줄인다. min, max 에 걸린 항목은 묶고 다시 나눈다)
+	/// flex 길이 정하기. (CSS Flexbox 9.7: 남는 자리는 grow 비로 나누고, 모자라면 shrink 와 기준 크기를 곱한 비로 줄인다. min, max 에 걸린 항목은 묶고 다시 나눈다)
 	//==============================================================================
 	fn resolve_flexible_lengths(&self, item_list: &mut [PaneFlexItem], content_main: f32) {
 		let gap_total = self.gap * (item_list.len() as f32 - 1.0);
@@ -2228,7 +2230,7 @@ impl PaneElement {
 	}
 
 	//==============================================================================
-	// 테두리. (네 쪽이 같으면 둥근 사각형 선, 아니면 쪽마다 띠)
+	/// 테두리. (네 쪽이 같으면 둥근 사각형 선, 아니면 쪽마다 띠)
 	//==============================================================================
 	fn draw_border(&self, content_size: Vector2, graphic: &mut Graphic) {
 		let is_uniform = self.border_width_list.iter().all(|width| *width == self.border_width_list[0]) && self.border_color_list.iter().all(|color| *color == self.border_color_list[0]);
@@ -2257,7 +2259,7 @@ impl PaneElement {
 }
 
 //==============================================================================
-// 화면 자리 → 노드 좌표. (거꿀 행렬이 없으면 None)
+/// 화면 자리 → 노드 좌표. (거꿀 행렬이 없으면 None)
 //==============================================================================
 fn convert_view_to_local(node_tree: &NodeTree, node_id: NodeId, view_position: Vector2) -> Option<Vector2> {
 	let world_matrix = node_tree.calculate_world_matrix(node_id);
@@ -2267,13 +2269,13 @@ fn convert_view_to_local(node_tree: &NodeTree, node_id: NodeId, view_position: V
 }
 
 //==============================================================================
-// 스타일 및 요소 생성 유틸리티. (원본 PaneStyle)
+/// 스타일 및 요소 생성 유틸리티. (원본 PaneStyle)
 //==============================================================================
 pub struct PaneStyle;
 
 impl PaneStyle {
 	//==============================================================================
-	// 요소에 여러 스타일을 한꺼번에 넣는다. ((CSS 속성 이름, 값) 목록, PaneElement 가 없는 노드면 아무것도 하지 않는다)
+	/// 요소에 여러 스타일을 한꺼번에 넣는다. ((CSS 속성 이름, 값) 목록, PaneElement 가 없는 노드면 아무것도 하지 않는다)
 	//==============================================================================
 	pub fn apply(node_tree: &mut NodeTree, node_id: NodeId, styles: &[(&str, &str)]) {
 		if let Some(element) = node_tree.get_node_mut(node_id).and_then(|node| node.get_component_mut::<PaneElement>()) {
@@ -2284,8 +2286,8 @@ impl PaneStyle {
 	}
 
 	//==============================================================================
-	// 스타일 프리셋을 넣은 요소 노드를 만든다. (떨어진 노드, node_tree.add_child 로 붙인다)
-	// (preset: "panel" | "toolbar" | "button" | "input" | "textarea" | "text", 그 밖은 공통 스타일만)
+	/// 스타일 프리셋을 넣은 요소 노드를 만든다. (떨어진 노드, node_tree.add_child 로 붙인다)
+	/// (preset: "panel" | "toolbar" | "button" | "input" | "textarea" | "text", 그 밖은 공통 스타일만)
 	//==============================================================================
 	pub fn create(node_tree: &mut NodeTree, tag_name: &str, preset: &str, options: &PaneStyleOptions) -> NodeId {
 		let node_name = if options.id.is_empty() {
@@ -2420,7 +2422,7 @@ impl PaneStyle {
 }
 
 //==============================================================================
-// 시험.
+/// 시험.
 //==============================================================================
 #[cfg(test)]
 mod tests {
@@ -2429,7 +2431,7 @@ mod tests {
 	use crate::core::node::nodetree::TouchKind;
 
 	//==============================================================================
-	// 노드로 지은 패널: 붙이면 부모 크기로 놓이고, 숨기면 리사이저와 함께 빠지고, 끌면 앞 자식 크기가 바뀐다. 부모 크기가 바뀌면 다시 놓는다.
+	/// 노드로 지은 패널: 붙이면 부모 크기로 놓이고, 숨기면 리사이저와 함께 빠지고, 끌면 앞 자식 크기가 바뀐다. 부모 크기가 바뀌면 다시 놓는다.
 	//==============================================================================
 	#[test]
 	fn node_pane_layout_visibility_and_drag() {
@@ -2480,7 +2482,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// PaneStyle 프리셋: 도구 막대는 단추를 가로 가운데에 모으고, 패널은 안쪽 여백 안에 차례로, 단추를 누르고 떼면 함수를 부른다.
+	/// PaneStyle 프리셋: 도구 막대는 단추를 가로 가운데에 모으고, 패널은 안쪽 여백 안에 차례로, 단추를 누르고 떼면 함수를 부른다.
 	//==============================================================================
 	#[test]
 	fn pane_style_presets_lay_out_like_css() {
@@ -2548,7 +2550,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 원본 에디터의 꼴: 세로 flex 패널(제목 + flex 1 의 스크롤 목록), 가로 flex 머리줄(flex 1 의 빈칸이 오른쪽 아이콘을 민다). 휠과 끌기로 목록을 넘긴다.
+	/// 원본 에디터의 꼴: 세로 flex 패널(제목 + flex 1 의 스크롤 목록), 가로 flex 머리줄(flex 1 의 빈칸이 오른쪽 아이콘을 민다). 휠과 끌기로 목록을 넘긴다.
 	//==============================================================================
 	#[test]
 	fn pane_style_reads_flex_and_overflow() {
@@ -2618,7 +2620,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// flex 길이 셈: grow 비, shrink 와 기준 크기의 비, max 에 걸린 항목은 묶고 나머지에 다시 나눈다. justify-content space-between.
+	/// flex 길이 셈: grow 비, shrink 와 기준 크기의 비, max 에 걸린 항목은 묶고 나머지에 다시 나눈다. justify-content space-between.
 	//==============================================================================
 	#[test]
 	fn pane_flex_lengths_follow_css() {

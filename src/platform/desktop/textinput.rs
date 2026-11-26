@@ -377,10 +377,15 @@ fn translate_shortcut_key(logical_key: &Key, physical_key: PhysicalKey, is_shift
 	}
 }
 
+/// 클립보드를 여는 차례. (스레드마다 든 클립보드를 한 번에 하나씩 쓴다)
+static CLIPBOARD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 //==============================================================================
 /// 클립보드를 열어 일 하기. (열 수 없으면 None)
 //==============================================================================
 fn with_clipboard<R>(action: impl FnOnce(&mut arboard::Clipboard) -> R) -> Option<R> {
+	// 시스템 클립보드는 프로세스에 하나라 스레드가 여럿이어도 한 번에 하나씩 연다. (맥 NSPasteboard 를 여러 스레드가 함께 만지면 예외가 난다)
+	let _clipboard_guard = CLIPBOARD_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
 	CLIPBOARD.with(|clipboard_cell| {
 		let mut clipboard_slot = clipboard_cell.borrow_mut();
 		if clipboard_slot.is_none() {

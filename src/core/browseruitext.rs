@@ -68,7 +68,7 @@ pub enum BrowserUiText {
 	PeriodKey,
 	/// 단축키 글의 윈도우 키 이름.
 	WindowsKey,
-	// 터치 빠른 메뉴의 잘라내기, 복사, 붙여넣기. (ui_strings 의 IDS_APP_CUT, IDS_APP_COPY, IDS_APP_PASTE)
+	/// 터치 빠른 메뉴의 잘라내기, 복사, 붙여넣기. (ui_strings 의 IDS_APP_CUT, IDS_APP_COPY, IDS_APP_PASTE)
 	TouchCut,
 	TouchCopy,
 	TouchPaste,

@@ -1,22 +1,24 @@
 //==============================================================================
-// DOM 화면 분할 패널. (원본 web/pane.js 의 PaneStyle, Pane 을 DOM 그대로 옮긴 웹 판, 공통 형과 셈은 web/pane.rs)
-//     let main_pane = Pane::new(PaneOptions { direction: PaneDirection::Horizontal, ..Default::default() });
-//     let left_pane = Pane::new(PaneOptions { size: PaneSize::Fixed(240.0), min_size: 170.0, ..Default::default() });
-//     let view_pane = Pane::new(PaneOptions { min_size: 200.0, ..Default::default() });
-//     main_pane.add_pane(&left_pane);
-//     main_pane.add_pane(&view_pane);
-//     left_pane.get_container().append_child(&PaneStyle::create("div", "panel", &PaneStyleOptions::default()));
-//     main_pane.attach_to(&body);
-// - 원본과 다른 점:
-//   - PaneStyle::apply 의 스타일은 (CSS 속성 이름, 값) 목록이다. 이름은 원본 객체 키(backgroundColor)가 아니라 CSS 이름(background-color)이다.
-//     (러스트에는 Object.assign 이 없어서 style.setProperty 로 넣는다)
-//     태그 이름이 틀리면 원본처럼 그 자리에서 멈춘다. (원본은 예외, 러스트 판은 panic)
-//   - Pane 은 상태를 Rc<RefCell> 로 나눠 드는 손잡이다. clone 은 같은 패널을 가리킨다. 자식은 부모를 Weak 로 가리킨다.
-//     attach_to 가 단 창 resize 리스너가 뿌리 패널을 끝까지 붙든다. (원본과 같다) attach_to 하지 않은 패널은 손잡이를 모두 놓으면 풀리고, 리사이저를 끌어도 아무것도 하지 않는다.
-//   - 리사이저 두께는 원본처럼 data-thickness 속성에 적되, 계산은 러스트 쪽에 든 값으로 한다.
-//   - 리스너는 wasm-bindgen Closure 다. 요소에 다는 것은 into_js_value 로 JS 가비지 컬렉터에 넘기고, 요소는 사건의 currentTarget 으로 읽는다.
-//     (요소를 잡아 두면 러스트 쪽이 요소를 붙들어 DOM 에서 빼도 풀리지 않는다)
-//   - set_callback 은 None 으로 비울 수 있다. 콜백 안에서 패널을 다시 불러도 된다. (부르는 동안 빼 두었다가 돌려놓는다)
+//! DOM 화면 분할 패널. (원본 web/pane.js 의 PaneStyle, Pane 을 DOM 그대로 옮긴 웹 판, 공통 형과 셈은 web/pane.rs)
+//!   ```text
+//!     let main_pane = Pane::new(PaneOptions { direction: PaneDirection::Horizontal, ..Default::default() });
+//!     let left_pane = Pane::new(PaneOptions { size: PaneSize::Fixed(240.0), min_size: 170.0, ..Default::default() });
+//!     let view_pane = Pane::new(PaneOptions { min_size: 200.0, ..Default::default() });
+//!     main_pane.add_pane(&left_pane);
+//!     main_pane.add_pane(&view_pane);
+//!     left_pane.get_container().append_child(&PaneStyle::create("div", "panel", &PaneStyleOptions::default()));
+//!     main_pane.attach_to(&body);
+//!   ```
+//! - 원본과 다른 점:
+//!   - PaneStyle::apply 의 스타일은 (CSS 속성 이름, 값) 목록이다. 이름은 원본 객체 키(backgroundColor)가 아니라 CSS 이름(background-color)이다.
+//!     (러스트에는 Object.assign 이 없어서 style.setProperty 로 넣는다)
+//!     태그 이름이 틀리면 원본처럼 그 자리에서 멈춘다. (원본은 예외, 러스트 판은 panic)
+//!   - Pane 은 상태를 `Rc<RefCell>` 로 나눠 드는 손잡이다. clone 은 같은 패널을 가리킨다. 자식은 부모를 Weak 로 가리킨다.
+//!     attach_to 가 단 창 resize 리스너가 뿌리 패널을 끝까지 붙든다. (원본과 같다) attach_to 하지 않은 패널은 손잡이를 모두 놓으면 풀리고, 리사이저를 끌어도 아무것도 하지 않는다.
+//!   - 리사이저 두께는 원본처럼 data-thickness 속성에 적되, 계산은 러스트 쪽에 든 값으로 한다.
+//!   - 리스너는 wasm-bindgen Closure 다. 요소에 다는 것은 into_js_value 로 JS 가비지 컬렉터에 넘기고, 요소는 사건의 currentTarget 으로 읽는다.
+//!     (요소를 잡아 두면 러스트 쪽이 요소를 붙들어 DOM 에서 빼도 풀리지 않는다)
+//!   - set_callback 은 None 으로 비울 수 있다. 콜백 안에서 패널을 다시 불러도 된다. (부르는 동안 빼 두었다가 돌려놓는다)
 //==============================================================================
 use super::{calculate_pane_layout, calculate_resized_size, calculate_resizer_thickness, PaneDirection, PaneLayoutChild, PaneOptions, PaneResizableEdges, PaneResizeCallback, PaneSize, PaneStyleOptions, PaneTheme};
 use std::cell::RefCell;
@@ -26,13 +28,13 @@ use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{Document, Element, Event, HtmlElement, MouseEvent, Window};
 
 //==============================================================================
-// 스타일 및 요소 생성 유틸리티. (원본 PaneStyle)
+/// 스타일 및 요소 생성 유틸리티. (원본 PaneStyle)
 //==============================================================================
 pub struct PaneStyle;
 
 impl PaneStyle {
 	//==============================================================================
-	// 요소에 여러 스타일을 한꺼번에 넣는다. ((CSS 속성 이름, 값) 목록)
+	/// 요소에 여러 스타일을 한꺼번에 넣는다. ((CSS 속성 이름, 값) 목록)
 	//==============================================================================
 	pub fn apply(element: &HtmlElement, styles: &[(&str, &str)]) {
 		let style = element.style();
@@ -42,8 +44,8 @@ impl PaneStyle {
 	}
 
 	//==============================================================================
-	// 스타일 프리셋을 넣은 요소를 만든다.
-	// (preset: "panel" | "toolbar" | "button" | "input" | "textarea" | "text", 그 밖은 공통 스타일만)
+	/// 스타일 프리셋을 넣은 요소를 만든다.
+	/// (preset: "panel" | "toolbar" | "button" | "input" | "textarea" | "text", 그 밖은 공통 스타일만)
 	//==============================================================================
 	pub fn create(tag_name: &str, preset: &str, options: &PaneStyleOptions) -> HtmlElement {
 		let element = create_html_element(tag_name);
@@ -169,7 +171,7 @@ impl PaneStyle {
 }
 
 //==============================================================================
-// 자식 사이 리사이저 하나.
+/// 자식 사이 리사이저 하나.
 //==============================================================================
 #[derive(Clone)]
 struct PaneResizer {
@@ -178,7 +180,7 @@ struct PaneResizer {
 }
 
 //==============================================================================
-// 패널 상태. (Pane 손잡이들과 DOM 리스너가 나눠 든다)
+/// 패널 상태. (Pane 손잡이들과 DOM 리스너가 나눠 든다)
 //==============================================================================
 struct PaneState {
 	container: HtmlElement,
@@ -199,7 +201,7 @@ struct PaneState {
 	resize_callback: Option<PaneResizeCallback>,
 	parent_pane: Weak<RefCell<PaneState>>,
 
-	// 리사이즈 끌기.
+	/// 리사이즈 끌기.
 	is_resizing: bool,
 	active_previous_pane: Option<Pane>,
 	active_next_pane: Option<Pane>,
@@ -208,7 +210,7 @@ struct PaneState {
 }
 
 //==============================================================================
-// 화면 분할 패널. (원본 Pane, clone 은 같은 패널을 가리킨다)
+/// 화면 분할 패널. (원본 Pane, clone 은 같은 패널을 가리킨다)
 //==============================================================================
 #[derive(Clone)]
 pub struct Pane {
@@ -217,7 +219,7 @@ pub struct Pane {
 
 impl Pane {
 	//==============================================================================
-	// 생성. (컨테이너 div 를 만들고, 문서에 다는 끌기 리스너를 지어 둔다)
+	/// 생성. (컨테이너 div 를 만들고, 문서에 다는 끌기 리스너를 지어 둔다)
 	//==============================================================================
 	pub fn new(options: PaneOptions) -> Pane {
 		let fixed_size = match options.size {
@@ -278,7 +280,7 @@ impl Pane {
 	}
 
 	//==============================================================================
-	// 자식 추가. (앞 자식이 있으면 그 사이에 리사이저를 둔다)
+	/// 자식 추가. (앞 자식이 있으면 그 사이에 리사이저를 둔다)
 	//==============================================================================
 	pub fn add_pane(&self, pane: &Pane) {
 		pane.state.borrow_mut().parent_pane = Rc::downgrade(&self.state);
@@ -298,7 +300,7 @@ impl Pane {
 	}
 
 	//==============================================================================
-	// 두 자식 사이 리사이저를 만든다. (끌 수 없으면 두께 1 의 선이다)
+	/// 두 자식 사이 리사이저를 만든다. (끌 수 없으면 두께 1 의 선이다)
 	//==============================================================================
 	fn create_resizer(&self, previous_pane: &Pane, next_pane: &Pane) -> PaneResizer {
 		let (is_resizable, direction) = {
@@ -407,7 +409,7 @@ impl Pane {
 	}
 
 	//==============================================================================
-	// 리사이저 끌기 시작. (잡은 자리를 적고 문서에 이동, 뗌 리스너를 단다)
+	/// 리사이저 끌기 시작. (잡은 자리를 적고 문서에 이동, 뗌 리스너를 단다)
 	//==============================================================================
 	fn begin_resize(&self, previous_pane: Pane, next_pane: Pane, resizer_element: &HtmlElement, mouse_event: &MouseEvent) {
 		let mut state = self.state.borrow_mut();
@@ -441,7 +443,7 @@ impl Pane {
 	}
 
 	//==============================================================================
-	// 마우스 이동. (끄는 중이면 앞 자식이나 뒤 자식의 고정 크기를 바꾸고 뿌리부터 다시 놓는다)
+	/// 마우스 이동. (끄는 중이면 앞 자식이나 뒤 자식의 고정 크기를 바꾸고 뿌리부터 다시 놓는다)
 	//==============================================================================
 	fn handle_mouse_move(&self, mouse_event: &MouseEvent) {
 		let (direction, previous_pane, next_pane, thickness, resize_grab_offset) = {
@@ -491,7 +493,7 @@ impl Pane {
 	}
 
 	//==============================================================================
-	// 마우스 뗌. (끌기를 끝내고 문서 리스너를 뗀다)
+	/// 마우스 뗌. (끌기를 끝내고 문서 리스너를 뗀다)
 	//==============================================================================
 	fn handle_mouse_up(&self) {
 		let mut state = self.state.borrow_mut();
@@ -513,7 +515,7 @@ impl Pane {
 	}
 
 	//==============================================================================
-	// 배치. (자기 자리를 놓고, 고정 크기 자식을 먼저 재고 남은 자리를 flex 자식끼리 나눈 뒤 자식과 리사이저를 차례로 놓는다)
+	/// 배치. (자기 자리를 놓고, 고정 크기 자식을 먼저 재고 남은 자리를 flex 자식끼리 나눈 뒤 자식과 리사이저를 차례로 놓는다)
 	//==============================================================================
 	pub fn update_layout(&self, x: f64, y: f64, width: f64, height: f64) {
 		let (container, direction, children, resizer_list) = {
@@ -575,7 +577,7 @@ impl Pane {
 	}
 
 	//==============================================================================
-	// 배치 초기화. (끌어서 바꾼 크기를 지운다, 자식까지)
+	/// 배치 초기화. (끌어서 바꾼 크기를 지운다, 자식까지)
 	//==============================================================================
 	pub fn reset_layout(&self) {
 		let children = {
@@ -589,7 +591,7 @@ impl Pane {
 	}
 
 	//==============================================================================
-	// 부모 요소 크기에 맞춰 다시 놓는다. (부모 크기가 0 이면 창 크기, 부모가 없으면 아무것도 하지 않는다)
+	/// 부모 요소 크기에 맞춰 다시 놓는다. (부모 크기가 0 이면 창 크기, 부모가 없으면 아무것도 하지 않는다)
 	//==============================================================================
 	pub fn refresh(&self) {
 		let parent_element = match self.get_container().parent_element() {
@@ -617,7 +619,7 @@ impl Pane {
 	}
 
 	//==============================================================================
-	// 요소에 단다. (창 크기가 바뀔 때와 다음 프레임에 다시 놓는다. 창 리스너가 이 패널을 끝까지 붙든다)
+	/// 요소에 단다. (창 크기가 바뀔 때와 다음 프레임에 다시 놓는다. 창 리스너가 이 패널을 끝까지 붙든다)
 	//==============================================================================
 	pub fn attach_to(&self, parent_element: &Element) {
 		let _ = parent_element.append_child(&self.get_container());
@@ -637,7 +639,7 @@ impl Pane {
 	}
 
 	//==============================================================================
-	// 보이기 / 숨기기. (숨긴 패널은 자리를 차지하지 않고, 맞닿은 리사이저도 숨는다)
+	/// 보이기 / 숨기기. (숨긴 패널은 자리를 차지하지 않고, 맞닿은 리사이저도 숨는다)
 	//==============================================================================
 	pub fn set_visible(&self, is_visible: bool) {
 		{
@@ -655,7 +657,7 @@ impl Pane {
 	}
 
 	//==============================================================================
-	// 뿌리 패널. (부모를 따라 끝까지 올라간다)
+	/// 뿌리 패널. (부모를 따라 끝까지 올라간다)
 	//==============================================================================
 	fn find_root_pane(&self) -> Pane {
 		let mut root_pane = self.clone();
@@ -673,77 +675,77 @@ impl Pane {
 	}
 
 	//==============================================================================
-	// 보이는지.
+	/// 보이는지.
 	//==============================================================================
 	pub fn is_visible(&self) -> bool {
 		self.state.borrow().is_visible
 	}
 
 	//==============================================================================
-	// flex 인지. (처음 크기가 Flex)
+	/// flex 인지. (처음 크기가 Flex)
 	//==============================================================================
 	pub fn is_flex(&self) -> bool {
 		self.state.borrow().initial_size == PaneSize::Flex
 	}
 
 	//==============================================================================
-	// 처음 크기.
+	/// 처음 크기.
 	//==============================================================================
 	pub fn get_initial_size(&self) -> PaneSize {
 		self.state.borrow().initial_size
 	}
 
 	//==============================================================================
-	// 고정 크기. (픽셀, 0 이면 처음 크기로 잰다)
+	/// 고정 크기. (픽셀, 0 이면 처음 크기로 잰다)
 	//==============================================================================
 	pub fn get_fixed_size(&self) -> f64 {
 		self.state.borrow().fixed_size
 	}
 
 	//==============================================================================
-	// 고정 크기 설정. (다음 배치부터 쓴다. flex 패널에는 쓰이지 않는다)
+	/// 고정 크기 설정. (다음 배치부터 쓴다. flex 패널에는 쓰이지 않는다)
 	//==============================================================================
 	pub fn set_fixed_size(&self, fixed_size: f64) {
 		self.state.borrow_mut().fixed_size = fixed_size;
 	}
 
 	//==============================================================================
-	// 최소 크기.
+	/// 최소 크기.
 	//==============================================================================
 	pub fn get_min_size(&self) -> f64 {
 		self.state.borrow().min_size
 	}
 
 	//==============================================================================
-	// 최대 크기.
+	/// 최대 크기.
 	//==============================================================================
 	pub fn get_max_size(&self) -> f64 {
 		self.state.borrow().max_size
 	}
 
 	//==============================================================================
-	// 컨테이너 요소. (내용을 여기에 붙인다)
+	/// 컨테이너 요소. (내용을 여기에 붙인다)
 	//==============================================================================
 	pub fn get_container(&self) -> HtmlElement {
 		self.state.borrow().container.clone()
 	}
 
 	//==============================================================================
-	// 배치 콜백 설정. (update_layout 이 끝날 때마다 부른다. None 이면 비운다)
+	/// 배치 콜백 설정. (update_layout 이 끝날 때마다 부른다. None 이면 비운다)
 	//==============================================================================
 	pub fn set_callback(&self, resize_callback: Option<PaneResizeCallback>) {
 		self.state.borrow_mut().resize_callback = resize_callback;
 	}
 
 	//==============================================================================
-	// 리사이저로 끌 수 있는지.
+	/// 리사이저로 끌 수 있는지.
 	//==============================================================================
 	pub fn is_resizable(&self) -> bool {
 		self.state.borrow().is_resizable
 	}
 
 	//==============================================================================
-	// 끌 수 있는 가장자리.
+	/// 끌 수 있는 가장자리.
 	//==============================================================================
 	pub fn get_resizable_edges(&self) -> PaneResizableEdges {
 		self.state.borrow().resizable_edges
@@ -751,21 +753,21 @@ impl Pane {
 }
 
 //==============================================================================
-// 브라우저 창. (웹 빌드에는 늘 있다)
+/// 브라우저 창. (웹 빌드에는 늘 있다)
 //==============================================================================
 fn read_window() -> Window {
 	web_sys::window().expect("Pane: window 없음")
 }
 
 //==============================================================================
-// 문서. (웹 빌드에는 늘 있다)
+/// 문서. (웹 빌드에는 늘 있다)
 //==============================================================================
 fn read_document() -> Document {
 	read_window().document().expect("Pane: document 없음")
 }
 
 //==============================================================================
-// HTML 요소 생성. (태그 이름이 틀리면 원본의 예외처럼 멈춘다)
+/// HTML 요소 생성. (태그 이름이 틀리면 원본의 예외처럼 멈춘다)
 //==============================================================================
 fn create_html_element(tag_name: &str) -> HtmlElement {
 	let element = read_document().create_element(tag_name).expect("Pane: 요소를 만들 수 없는 태그 이름");
@@ -773,28 +775,28 @@ fn create_html_element(tag_name: &str) -> HtmlElement {
 }
 
 //==============================================================================
-// 스타일 하나 넣기. (빈 값이면 그 속성을 지운다)
+/// 스타일 하나 넣기. (빈 값이면 그 속성을 지운다)
 //==============================================================================
 fn set_style(element: &HtmlElement, property_name: &str, property_value: &str) {
 	let _ = element.style().set_property(property_name, property_value);
 }
 
 //==============================================================================
-// 요소의 JS 속성 하나 넣기. (원본이 요소의 type, placeholder 에 바로 넣는 것)
+/// 요소의 JS 속성 하나 넣기. (원본이 요소의 type, placeholder 에 바로 넣는 것)
 //==============================================================================
 fn set_element_property(element: &HtmlElement, property_name: &str, property_value: &str) {
 	let _ = js_sys::Reflect::set(element, &JsValue::from_str(property_name), &JsValue::from_str(property_value));
 }
 
 //==============================================================================
-// 요소에 리스너 달기. (into_js_value 로 넘긴 함수)
+/// 요소에 리스너 달기. (into_js_value 로 넘긴 함수)
 //==============================================================================
 fn add_element_listener(element: &HtmlElement, event_name: &str, listener: JsValue) {
 	let _ = element.add_event_listener_with_callback(event_name, listener.unchecked_ref());
 }
 
 //==============================================================================
-// 사건의 currentTarget 요소. (리스너를 단 요소)
+/// 사건의 currentTarget 요소. (리스너를 단 요소)
 //==============================================================================
 fn read_current_target_element(event: &Event) -> Option<HtmlElement> {
 	event.current_target()?.dyn_into::<HtmlElement>().ok()

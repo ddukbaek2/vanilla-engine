@@ -1,35 +1,35 @@
 //==============================================================================
-// 로컬 스토리지.
-// - 원본 misc/localstorage.js 를 옮긴 것이다. 문자열 키에 문자열 값을 영구 저장하는 정적 함수 묶음이다.
-// - 저장하는 곳:
-//   웹(wasm32): 원본처럼 window.localStorage. (출처(origin)마다 따로, 키를 그대로 쓴다)
-//   데스크탑: 앱 폴더의 localstorage.json 하나. (키 → 문자열 값의 JSON 객체, 쓸 때마다 바로 저장한다)
-//     윈도우   %APPDATA%\{앱 이름}\localstorage.json
-//     맥       $HOME/Library/Application Support/{앱 이름}/localstorage.json
-//     리눅스   $XDG_DATA_HOME/{앱 이름}/localstorage.json (없으면 $HOME/.local/share/{앱 이름}/...)
-//     환경 변수를 못 읽으면 임시 폴더(std::env::temp_dir) 아래에 둔다.
-//   앱 이름은 기본으로 실행 파일 이름이다. set_application_name 이나 set_application_name_from_engine(EngineConfiguration.title)로 바꾼다.
-//   set_storage_directory 로 폴더를 직접 정할 수도 있다. (시험, 들고 다니는 게임)
-// - 원본과 다른 점:
-//   숫자는 원본(JS number)처럼 f64 다. 글로 바꾸기는 원본 String(number) 그대로다. (가장 짧은 표기, 1e21 이상과 1e-7 이하는 1e+21 같은 지수, NaN, Infinity, -0 → "0")
-//     읽기는 원본 Number(text) 그대로다. (JS 빈칸을 떼고, 빈 글은 0, 0x, 0o, 0b 표기, "1.", ".5", 지수, Infinity, 그 밖은 NaN)
-//   데스크탑 저장은 스레드마다 따로 들고 있다가 파일에 쓴다. (엔진은 한 스레드에서 돈다)
-// - 저장소 갈아 끼우기: set_backend 에 LocalStorageBackend 를 넘기면 위 기본 저장소 대신 그것을 쓴다. (플랫폼 SDK 의 저장소 같은 것)
-//   원본 setBackend 의 객체({ getItem, setItem, removeItem, getKeys, clear }) 자리가 트레이트다. 원본의 예외는 Err 로 알린다.
-//   넘긴 저장소는 Rc<RefCell> 에 담는다. get_backend 는 그 Rc 를 돌려주고, 부르는 쪽은 borrow / borrow_mut 로 빌려 쓴다.
-// - 막혀도 죽지 않는다: 저장소가 없거나(웹의 막힌 localStorage) 쓰기가 실패하면(가득 참, 폴더를 못 만듦, 바꿔 낀 저장소의 Err)
-//   이 실행이 살아 있는 동안 메모리에 대신 둔다. (is_memory_fallback, 다시 켜면 없다)
-// - 읽기(get_string, get_boolean, get_number, get_json)는 없는 키에 기본값을 써 넣지 않는다. (원본과 같다)
-// - 짝 없는 서로게이트: 원본 localStorage 는 JS 글(UTF-16)이라 짝 없는 서로게이트가 든 값(잘린 이모지 같은 것)과
-//   그것을 \ud83d 꼴로 쓴 JSON 을 담는다. 러스트 String 은 그런 글을 담지 못해 러스트 쪽에는 대체 문자(U+FFFD)로 보이고,
-//   읽은 값을 고치지 않고 다시 쓰면(set_item, set_string, set_json) 원래 UTF-16 단위 그대로 쓴다. (misc/storagetext.rs)
-//   원래 단위가 필요하면 get_item_code_units, set_item_code_units 로 JS 글 그대로 읽고 쓴다.
-//   키도 같다. 짝 없는 서로게이트로만 다른 두 키(원본에서 다른 키)는 러스트 글로는 같은 글로 보이지만 저장소 안에서는 따로 든다.
-//   get_keys_code_units 로 모든 키를 원래 단위로 받고, get_item_by_key_code_units, set_item_by_key_code_units,
-//   remove_item_by_key_code_units, contains_key_code_units 로 키와 값을 모두 원래 단위로 가려 부른다. (원본 localStorage 함수 그대로)
-//   러스트 글 키는 그 글 그대로의 키가 있으면 그것, 없으면 그 글로 보이는 짝 없는 서로게이트 키의 첫째를 가리킨다. (get_keys 로 받은 키로 부를 수 있다)
-//   웹은 브라우저 localStorage 에 JS 글 그대로 쓰고, 데스크탑 파일은 그런 값과 키를 원본 JSON.stringify 처럼 \udXXX 로 적는다.
-//   바꿔 낀 저장소(LocalStorageBackend)는 러스트 글로 주고받아 그 저장소가 든 글 그대로다. (키도 보인 글로 준다)
+//! 로컬 스토리지.
+//! - 원본 misc/localstorage.js 를 옮긴 것이다. 문자열 키에 문자열 값을 영구 저장하는 정적 함수 묶음이다.
+//! - 저장하는 곳:
+//!   웹(wasm32): 원본처럼 window.localStorage. (출처(origin)마다 따로, 키를 그대로 쓴다)
+//!   데스크탑: 앱 폴더의 localstorage.json 하나. (키 → 문자열 값의 JSON 객체, 쓸 때마다 바로 저장한다)
+//!     윈도우   %APPDATA%\{앱 이름}\localstorage.json
+//!     맥       $HOME/Library/Application Support/{앱 이름}/localstorage.json
+//!     리눅스   $XDG_DATA_HOME/{앱 이름}/localstorage.json (없으면 $HOME/.local/share/{앱 이름}/...)
+//!     환경 변수를 못 읽으면 임시 폴더(std::env::temp_dir) 아래에 둔다.
+//!   앱 이름은 기본으로 실행 파일 이름이다. set_application_name 이나 set_application_name_from_engine(EngineConfiguration.title)로 바꾼다.
+//!   set_storage_directory 로 폴더를 직접 정할 수도 있다. (시험, 들고 다니는 게임)
+//! - 원본과 다른 점:
+//!   숫자는 원본(JS number)처럼 f64 다. 글로 바꾸기는 원본 String(number) 그대로다. (가장 짧은 표기, 1e21 이상과 1e-7 이하는 1e+21 같은 지수, NaN, Infinity, -0 → "0")
+//!     읽기는 원본 Number(text) 그대로다. (JS 빈칸을 떼고, 빈 글은 0, 0x, 0o, 0b 표기, "1.", ".5", 지수, Infinity, 그 밖은 NaN)
+//!   데스크탑 저장은 스레드마다 따로 들고 있다가 파일에 쓴다. (엔진은 한 스레드에서 돈다)
+//! - 저장소 갈아 끼우기: set_backend 에 LocalStorageBackend 를 넘기면 위 기본 저장소 대신 그것을 쓴다. (플랫폼 SDK 의 저장소 같은 것)
+//!   원본 setBackend 의 객체({ getItem, setItem, removeItem, getKeys, clear }) 자리가 트레이트다. 원본의 예외는 Err 로 알린다.
+//!   넘긴 저장소는 `Rc<RefCell>` 에 담는다. get_backend 는 그 Rc 를 돌려주고, 부르는 쪽은 borrow / borrow_mut 로 빌려 쓴다.
+//! - 막혀도 죽지 않는다: 저장소가 없거나(웹의 막힌 localStorage) 쓰기가 실패하면(가득 참, 폴더를 못 만듦, 바꿔 낀 저장소의 Err)
+//!   이 실행이 살아 있는 동안 메모리에 대신 둔다. (is_memory_fallback, 다시 켜면 없다)
+//! - 읽기(get_string, get_boolean, get_number, get_json)는 없는 키에 기본값을 써 넣지 않는다. (원본과 같다)
+//! - 짝 없는 서로게이트: 원본 localStorage 는 JS 글(UTF-16)이라 짝 없는 서로게이트가 든 값(잘린 이모지 같은 것)과
+//!   그것을 \ud83d 꼴로 쓴 JSON 을 담는다. 러스트 String 은 그런 글을 담지 못해 러스트 쪽에는 대체 문자(U+FFFD)로 보이고,
+//!   읽은 값을 고치지 않고 다시 쓰면(set_item, set_string, set_json) 원래 UTF-16 단위 그대로 쓴다. (misc/storagetext.rs)
+//!   원래 단위가 필요하면 get_item_code_units, set_item_code_units 로 JS 글 그대로 읽고 쓴다.
+//!   키도 같다. 짝 없는 서로게이트로만 다른 두 키(원본에서 다른 키)는 러스트 글로는 같은 글로 보이지만 저장소 안에서는 따로 든다.
+//!   get_keys_code_units 로 모든 키를 원래 단위로 받고, get_item_by_key_code_units, set_item_by_key_code_units,
+//!   remove_item_by_key_code_units, contains_key_code_units 로 키와 값을 모두 원래 단위로 가려 부른다. (원본 localStorage 함수 그대로)
+//!   러스트 글 키는 그 글 그대로의 키가 있으면 그것, 없으면 그 글로 보이는 짝 없는 서로게이트 키의 첫째를 가리킨다. (get_keys 로 받은 키로 부를 수 있다)
+//!   웹은 브라우저 localStorage 에 JS 글 그대로 쓰고, 데스크탑 파일은 그런 값과 키를 원본 JSON.stringify 처럼 \udXXX 로 적는다.
+//!   바꿔 낀 저장소(LocalStorageBackend)는 러스트 글로 주고받아 그 저장소가 든 글 그대로다. (키도 보인 글로 준다)
 //==============================================================================
 use crate::base::format::number_to_string;
 use crate::core::engine::Engine;
@@ -40,37 +40,37 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 //==============================================================================
-// 바꿔 끼우는 저장소. (원본 setBackend 에 넘기는 객체)
-// - get_keys 와 clear 는 없어도 된다. get_keys 가 없으면 키 목록(get_keys, clear_by_prefix)은 메모리에 대신 둔 것만 보이고,
-//   clear 가 없으면 get_keys 의 키를 하나씩 지운다.
-// - 이 함수들 안에서 LocalStorage 를 다시 부르면 기본 저장소를 쓴다. (바꿔 낀 저장소는 부르는 동안 빌려 있다)
-//   get_backend 로 꺼낸 저장소를 빌린 채로 LocalStorage 를 불러도 기본 저장소를 쓴다.
+/// 바꿔 끼우는 저장소. (원본 setBackend 에 넘기는 객체)
+/// - get_keys 와 clear 는 없어도 된다. get_keys 가 없으면 키 목록(get_keys, clear_by_prefix)은 메모리에 대신 둔 것만 보이고,
+///   clear 가 없으면 get_keys 의 키를 하나씩 지운다.
+/// - 이 함수들 안에서 LocalStorage 를 다시 부르면 기본 저장소를 쓴다. (바꿔 낀 저장소는 부르는 동안 빌려 있다)
+///   get_backend 로 꺼낸 저장소를 빌린 채로 LocalStorage 를 불러도 기본 저장소를 쓴다.
 //==============================================================================
 pub trait LocalStorageBackend {
 	//==============================================================================
-	// 값 읽기. (없으면 Ok(None))
+	/// 값 읽기. (없으면 Ok(None))
 	//==============================================================================
 	fn get_item(&self, key: &str) -> Result<Option<String>, String>;
 
 	//==============================================================================
-	// 값 쓰기.
+	/// 값 쓰기.
 	//==============================================================================
 	fn set_item(&mut self, key: &str, value: &str) -> Result<(), String>;
 
 	//==============================================================================
-	// 값 지우기.
+	/// 값 지우기.
 	//==============================================================================
 	fn remove_item(&mut self, key: &str) -> Result<(), String>;
 
 	//==============================================================================
-	// 모든 키. (기본은 빈 목록)
+	/// 모든 키. (기본은 빈 목록)
 	//==============================================================================
 	fn get_keys(&self) -> Result<Vec<String>, String> {
 		Ok(Vec::new())
 	}
 
 	//==============================================================================
-	// 전부 지우기. (기본은 get_keys 의 키를 하나씩 지운다)
+	/// 전부 지우기. (기본은 get_keys 의 키를 하나씩 지운다)
 	//==============================================================================
 	fn clear(&mut self) -> Result<(), String> {
 		let keys = self.get_keys()?;
@@ -82,7 +82,7 @@ pub trait LocalStorageBackend {
 }
 
 //==============================================================================
-// 바꿔 낀 저장소와 메모리 대신 둔 값.
+/// 바꿔 낀 저장소와 메모리 대신 둔 값.
 //==============================================================================
 struct StorageOverrideState {
 	backend: Option<Rc<RefCell<Box<dyn LocalStorageBackend>>>>,
@@ -91,7 +91,7 @@ struct StorageOverrideState {
 }
 
 //==============================================================================
-// 기본 저장소가 든 글. (짝 없는 서로게이트가 있으면 원래 UTF-16 단위)
+/// 기본 저장소가 든 글. (짝 없는 서로게이트가 있으면 원래 UTF-16 단위)
 //==============================================================================
 enum StoredText {
 	Text(String),
@@ -99,21 +99,21 @@ enum StoredText {
 }
 
 //==============================================================================
-// 저장 키. (원본 JS 글 그대로의 키)
-// - 짝 없는 서로게이트가 있으면 원래 UTF-16 단위를 함께 든다. 대체 문자로 보이는 글이 같아도 원래 단위가 다르면 다른 키다. (원본에서 다른 두 키)
-// - 차례는 보인 글 차례, 보인 글이 같으면 러스트 글인 키가 먼저고 그다음은 원래 단위 차례다.
+/// 저장 키. (원본 JS 글 그대로의 키)
+/// - 짝 없는 서로게이트가 있으면 원래 UTF-16 단위를 함께 든다. 대체 문자로 보이는 글이 같아도 원래 단위가 다르면 다른 키다. (원본에서 다른 두 키)
+/// - 차례는 보인 글 차례, 보인 글이 같으면 러스트 글인 키가 먼저고 그다음은 원래 단위 차례다.
 //==============================================================================
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 struct StorageKey {
-	// 보인 글. (짝 없는 서로게이트는 대체 문자)
+	/// 보인 글. (짝 없는 서로게이트는 대체 문자)
 	lossy_text: String,
-	// 짝 없는 서로게이트가 든 키의 원래 단위. (러스트 글로 담기는 키면 None)
+	/// 짝 없는 서로게이트가 든 키의 원래 단위. (러스트 글로 담기는 키면 None)
 	lone_code_units: Option<Vec<u16>>,
 }
 
 impl StorageKey {
 	//==============================================================================
-	// 러스트 글 키.
+	/// 러스트 글 키.
 	//==============================================================================
 	fn from_text(text: &str) -> StorageKey {
 		StorageKey {
@@ -123,7 +123,7 @@ impl StorageKey {
 	}
 
 	//==============================================================================
-	// UTF-16 단위 키. (짝 없는 서로게이트가 없으면 러스트 글 키와 같다)
+	/// UTF-16 단위 키. (짝 없는 서로게이트가 없으면 러스트 글 키와 같다)
 	//==============================================================================
 	fn from_code_units(code_units: &[u16]) -> StorageKey {
 		let lone_code_units = if has_lone_surrogate(code_units) {
@@ -139,21 +139,21 @@ impl StorageKey {
 	}
 
 	//==============================================================================
-	// 보인 글.
+	/// 보인 글.
 	//==============================================================================
 	fn get_lossy_text(&self) -> &str {
 		&self.lossy_text
 	}
 
 	//==============================================================================
-	// 짝 없는 서로게이트가 든 키의 원래 단위. (러스트 글 키면 None)
+	/// 짝 없는 서로게이트가 든 키의 원래 단위. (러스트 글 키면 None)
 	//==============================================================================
 	fn get_lone_code_units(&self) -> Option<&[u16]> {
 		self.lone_code_units.as_deref()
 	}
 
 	//==============================================================================
-	// 원래 UTF-16 단위.
+	/// 원래 UTF-16 단위.
 	//==============================================================================
 	fn to_code_units(&self) -> Vec<u16> {
 		match &self.lone_code_units {
@@ -168,12 +168,12 @@ impl StorageKey {
 }
 
 //==============================================================================
-// 짝 없는 서로게이트가 든 값. (읽을 때 남기고, 고치지 않고 다시 쓸 때 원래 단위로 쓴다)
+/// 짝 없는 서로게이트가 든 값. (읽을 때 남기고, 고치지 않고 다시 쓸 때 원래 단위로 쓴다)
 //==============================================================================
 struct PreservedItemState {
-	// 키 → 그 키에서 마지막으로 읽은 원래 글.
+	/// 키 → 그 키에서 마지막으로 읽은 원래 글.
 	value_map: HashMap<StorageKey, PreservedText>,
-	// 키 → get_json 이 읽은 JSON 의 표.
+	/// 키 → get_json 이 읽은 JSON 의 표.
 	json_table_map: HashMap<StorageKey, JsonSurrogateTable>,
 }
 
@@ -192,14 +192,14 @@ thread_local! {
 }
 
 //==============================================================================
-// 남긴 원래 글 만지기.
+/// 남긴 원래 글 만지기.
 //==============================================================================
 fn with_preserved_item_state<R>(worker: impl FnOnce(&mut PreservedItemState) -> R) -> R {
 	PRESERVED_ITEM_STATE.with(|state_cell| worker(&mut state_cell.borrow_mut()))
 }
 
 //==============================================================================
-// 저장된 글 읽기. (메모리에 대신 둔 값 > 바꿔 낀 저장소 > 기본 저장소, 없거나 못 읽으면 None)
+/// 저장된 글 읽기. (메모리에 대신 둔 값 > 바꿔 낀 저장소 > 기본 저장소, 없거나 못 읽으면 None)
 //==============================================================================
 fn read_stored_text(key: &StorageKey) -> Option<StoredText> {
 	if let Some(memory_value) = with_memory_item_map(|memory_item_map| memory_item_map.get(key).cloned()) {
@@ -228,7 +228,7 @@ fn read_stored_text(key: &StorageKey) -> Option<StoredText> {
 }
 
 //==============================================================================
-// 읽은 글을 러스트 글로. (짝 없는 서로게이트가 있으면 원래 글을 남기고 대체 문자로 보인다)
+/// 읽은 글을 러스트 글로. (짝 없는 서로게이트가 있으면 원래 글을 남기고 대체 문자로 보인다)
 //==============================================================================
 fn convert_stored_text(key: &StorageKey, stored_text: StoredText) -> String {
 	match stored_text {
@@ -250,7 +250,7 @@ fn convert_stored_text(key: &StorageKey, stored_text: StoredText) -> String {
 }
 
 //==============================================================================
-// 값 하나 쓰기. (원래 단위가 있으면 기본 저장소에는 그것으로, 바꿔 낀 저장소에는 러스트 글로. 저장소에 썼는지)
+/// 값 하나 쓰기. (원래 단위가 있으면 기본 저장소에는 그것으로, 바꿔 낀 저장소에는 러스트 글로. 저장소에 썼는지)
 //==============================================================================
 fn write_stored_text(key: &StorageKey, value: &str, code_units: Option<&[u16]>) -> bool {
 	let is_written = match with_backend(|backend| backend.set_item(key.get_lossy_text(), value)) {
@@ -286,7 +286,7 @@ fn write_stored_text(key: &StorageKey, value: &str, code_units: Option<&[u16]>) 
 }
 
 //==============================================================================
-// 키의 남긴 원래 글과 JSON 표 지우기.
+/// 키의 남긴 원래 글과 JSON 표 지우기.
 //==============================================================================
 fn forget_preserved_item(key: &StorageKey) {
 	with_preserved_item_state(|state| {
@@ -296,7 +296,7 @@ fn forget_preserved_item(key: &StorageKey) {
 }
 
 //==============================================================================
-// 값 하나를 러스트 글로 읽기.
+/// 값 하나를 러스트 글로 읽기.
 //==============================================================================
 fn read_item_text(key: &StorageKey) -> Option<String> {
 	let stored_text = read_stored_text(key)?;
@@ -304,7 +304,7 @@ fn read_item_text(key: &StorageKey) -> Option<String> {
 }
 
 //==============================================================================
-// 값 하나를 원래 UTF-16 단위로 읽기.
+/// 값 하나를 원래 UTF-16 단위로 읽기.
 //==============================================================================
 fn read_item_code_units(key: &StorageKey) -> Option<Vec<u16>> {
 	match read_stored_text(key)? {
@@ -318,7 +318,7 @@ fn read_item_code_units(key: &StorageKey) -> Option<Vec<u16>> {
 }
 
 //==============================================================================
-// 값 하나를 러스트 글로 쓰기. (이 키에서 읽은 짝 없는 서로게이트가 든 값을 고치지 않고 다시 쓰면 원래 단위로)
+/// 값 하나를 러스트 글로 쓰기. (이 키에서 읽은 짝 없는 서로게이트가 든 값을 고치지 않고 다시 쓰면 원래 단위로)
 //==============================================================================
 fn write_item_text(key: &StorageKey, value: &str) -> bool {
 	let preserved_code_units = with_preserved_item_state(|state| {
@@ -333,7 +333,7 @@ fn write_item_text(key: &StorageKey, value: &str) -> bool {
 }
 
 //==============================================================================
-// 값 하나를 UTF-16 단위로 쓰기.
+/// 값 하나를 UTF-16 단위로 쓰기.
 //==============================================================================
 fn write_item_code_units(key: &StorageKey, code_units: &[u16]) -> bool {
 	let preserved_text = PreservedText::from_code_units(code_units);
@@ -357,7 +357,7 @@ fn write_item_code_units(key: &StorageKey, code_units: &[u16]) -> bool {
 }
 
 //==============================================================================
-// 값 하나 지우기. (메모리에 대신 둔 값도 지운다)
+/// 값 하나 지우기. (메모리에 대신 둔 값도 지운다)
 //==============================================================================
 fn remove_stored_item(key: &StorageKey) {
 	forget_preserved_item(key);
@@ -377,7 +377,7 @@ fn remove_stored_item(key: &StorageKey) {
 }
 
 //==============================================================================
-// 모든 키. (정렬해서, 메모리에 대신 둔 키도 넣는다. is_reporting_error 면 바꿔 낀 저장소가 목록을 못 줄 때 알린다)
+/// 모든 키. (정렬해서, 메모리에 대신 둔 키도 넣는다. is_reporting_error 면 바꿔 낀 저장소가 목록을 못 줄 때 알린다)
 //==============================================================================
 fn collect_storage_keys(is_reporting_error: bool) -> Vec<StorageKey> {
 	let mut key_list: Vec<StorageKey> = match with_backend(|backend| backend.get_keys()) {
@@ -403,9 +403,9 @@ fn collect_storage_keys(is_reporting_error: bool) -> Vec<StorageKey> {
 }
 
 //==============================================================================
-// 러스트 글 키가 가리키는 저장 키.
-// - 대체 문자가 든 키는 그 글 그대로의 키가 있으면 그것, 없으면 그 글로 보이는 짝 없는 서로게이트 키(get_keys 가 그렇게 보인 키)의 첫째다.
-//   그래서 get_keys 로 받은 키로 읽고 쓰고 지울 수 있다. 보인 글이 같은 키가 둘 이상이면 코드 단위 함수(get_item_by_key_code_units 같은 것)로 가려 부른다.
+/// 러스트 글 키가 가리키는 저장 키.
+/// - 대체 문자가 든 키는 그 글 그대로의 키가 있으면 그것, 없으면 그 글로 보이는 짝 없는 서로게이트 키(get_keys 가 그렇게 보인 키)의 첫째다.
+///   그래서 get_keys 로 받은 키로 읽고 쓰고 지울 수 있다. 보인 글이 같은 키가 둘 이상이면 코드 단위 함수(get_item_by_key_code_units 같은 것)로 가려 부른다.
 //==============================================================================
 fn resolve_key(key: &str) -> StorageKey {
 	let text_key = StorageKey::from_text(key);
@@ -427,7 +427,7 @@ fn resolve_key(key: &str) -> StorageKey {
 }
 
 //==============================================================================
-// 바꿔 낀 저장소로 일하기. (바꿔 낀 것이 없거나 이미 빌려 있으면 None. 안에서 LocalStorage 를 다시 부르면 빌려 있어 기본 저장소를 쓴다)
+/// 바꿔 낀 저장소로 일하기. (바꿔 낀 것이 없거나 이미 빌려 있으면 None. 안에서 LocalStorage 를 다시 부르면 빌려 있어 기본 저장소를 쓴다)
 //==============================================================================
 fn with_backend<R>(worker: impl FnOnce(&mut dyn LocalStorageBackend) -> R) -> Option<R> {
 	let backend = STORAGE_OVERRIDE_STATE.with(|state_cell| state_cell.borrow().backend.clone())?;
@@ -437,27 +437,27 @@ fn with_backend<R>(worker: impl FnOnce(&mut dyn LocalStorageBackend) -> R) -> Op
 }
 
 //==============================================================================
-// 메모리에 대신 둔 값 만지기.
+/// 메모리에 대신 둔 값 만지기.
 //==============================================================================
 fn with_memory_item_map<R>(worker: impl FnOnce(&mut BTreeMap<StorageKey, String>) -> R) -> R {
 	STORAGE_OVERRIDE_STATE.with(|state_cell| worker(&mut state_cell.borrow_mut().memory_item_map))
 }
 
 //==============================================================================
-// 로컬 스토리지. (정적 함수 묶음)
+/// 로컬 스토리지. (정적 함수 묶음)
 //==============================================================================
 pub struct LocalStorage;
 
 impl LocalStorage {
 	//==============================================================================
-	// 앱 이름 설정. (데스크탑 저장 폴더 이름. 웹은 출처마다 따로라 쓰지 않는다)
+	/// 앱 이름 설정. (데스크탑 저장 폴더 이름. 웹은 출처마다 따로라 쓰지 않는다)
 	//==============================================================================
 	pub fn set_application_name(application_name: &str) {
 		storage_backend::set_application_name(application_name);
 	}
 
 	//==============================================================================
-	// 엔진 설정의 창 제목을 앱 이름으로 쓴다. (EngineConfiguration.title)
+	/// 엔진 설정의 창 제목을 앱 이름으로 쓴다. (EngineConfiguration.title)
 	//==============================================================================
 	pub fn set_application_name_from_engine(engine: &Engine) {
 		let engine_configuration = engine.get_engine_configuration();
@@ -465,21 +465,21 @@ impl LocalStorage {
 	}
 
 	//==============================================================================
-	// 저장 폴더 직접 설정. (None 이면 앱 이름으로 정한 기본 폴더. 웹은 쓰지 않는다)
+	/// 저장 폴더 직접 설정. (None 이면 앱 이름으로 정한 기본 폴더. 웹은 쓰지 않는다)
 	//==============================================================================
 	pub fn set_storage_directory(storage_directory_path: Option<PathBuf>) {
 		storage_backend::set_storage_directory(storage_directory_path);
 	}
 
 	//==============================================================================
-	// 저장 파일 경로. (데스크탑만, 웹은 None)
+	/// 저장 파일 경로. (데스크탑만, 웹은 None)
 	//==============================================================================
 	pub fn get_storage_file_path() -> Option<PathBuf> {
 		storage_backend::get_storage_file_path()
 	}
 
 	//==============================================================================
-	// 저장소 갈아 끼우기. (None 이면 기본 저장소로 돌아간다. 메모리에 대신 둔 값은 버린다)
+	/// 저장소 갈아 끼우기. (None 이면 기본 저장소로 돌아간다. 메모리에 대신 둔 값은 버린다)
 	//==============================================================================
 	pub fn set_backend(backend: Option<Box<dyn LocalStorageBackend>>) {
 		STORAGE_OVERRIDE_STATE.with(|state_cell| {
@@ -491,85 +491,85 @@ impl LocalStorage {
 	}
 
 	//==============================================================================
-	// 갈아 끼운 저장소 반환. (없으면 None, 빌릴 때는 borrow / borrow_mut)
+	/// 갈아 끼운 저장소 반환. (없으면 None, 빌릴 때는 borrow / borrow_mut)
 	//==============================================================================
 	pub fn get_backend() -> Option<Rc<RefCell<Box<dyn LocalStorageBackend>>>> {
 		STORAGE_OVERRIDE_STATE.with(|state_cell| state_cell.borrow().backend.clone())
 	}
 
 	//==============================================================================
-	// 저장소를 못 써서 메모리에 대신 둔 적이 있는지.
+	/// 저장소를 못 써서 메모리에 대신 둔 적이 있는지.
 	//==============================================================================
 	pub fn is_memory_fallback() -> bool {
 		STORAGE_OVERRIDE_STATE.with(|state_cell| state_cell.borrow().is_memory_fallback)
 	}
 
 	//==============================================================================
-	// 값 하나 읽기. (없거나 못 읽으면 None. 메모리에 대신 둔 값이 앞선다. 짝 없는 서로게이트는 대체 문자로 보인다)
+	/// 값 하나 읽기. (없거나 못 읽으면 None. 메모리에 대신 둔 값이 앞선다. 짝 없는 서로게이트는 대체 문자로 보인다)
 	//==============================================================================
 	pub fn get_item(key: &str) -> Option<String> {
 		read_item_text(&resolve_key(key))
 	}
 
 	//==============================================================================
-	// 값 하나를 원래 UTF-16 단위로 읽기. (원본 JS 글 그대로, 짝 없는 서로게이트도 담는다)
+	/// 값 하나를 원래 UTF-16 단위로 읽기. (원본 JS 글 그대로, 짝 없는 서로게이트도 담는다)
 	//==============================================================================
 	pub fn get_item_code_units(key: &str) -> Option<Vec<u16>> {
 		read_item_code_units(&resolve_key(key))
 	}
 
 	//==============================================================================
-	// 값 하나 쓰기. (저장소에 썼으면 true, 못 써서 메모리에 대신 뒀으면 false)
-	// - 이 키에서 읽은 짝 없는 서로게이트가 든 값을 고치지 않고 다시 쓰면 원래 단위로 쓴다.
+	/// 값 하나 쓰기. (저장소에 썼으면 true, 못 써서 메모리에 대신 뒀으면 false)
+	/// - 이 키에서 읽은 짝 없는 서로게이트가 든 값을 고치지 않고 다시 쓰면 원래 단위로 쓴다.
 	//==============================================================================
 	pub fn set_item(key: &str, value: &str) -> bool {
 		write_item_text(&resolve_key(key), value)
 	}
 
 	//==============================================================================
-	// 값 하나를 UTF-16 단위로 쓰기. (원본 JS 글 그대로, 짝 없는 서로게이트도 그대로 쓴다)
+	/// 값 하나를 UTF-16 단위로 쓰기. (원본 JS 글 그대로, 짝 없는 서로게이트도 그대로 쓴다)
 	//==============================================================================
 	pub fn set_item_code_units(key: &str, code_units: &[u16]) -> bool {
 		write_item_code_units(&resolve_key(key), code_units)
 	}
 
 	//==============================================================================
-	// 값 하나 지우기. (메모리에 대신 둔 값도 지운다)
+	/// 값 하나 지우기. (메모리에 대신 둔 값도 지운다)
 	//==============================================================================
 	pub fn remove_item(key: &str) {
 		remove_stored_item(&resolve_key(key));
 	}
 
 	//==============================================================================
-	// 키와 값을 모두 UTF-16 단위로 읽기. (원본 localStorage.getItem 그대로, 짝 없는 서로게이트로만 다른 두 키도 가린다)
+	/// 키와 값을 모두 UTF-16 단위로 읽기. (원본 localStorage.getItem 그대로, 짝 없는 서로게이트로만 다른 두 키도 가린다)
 	//==============================================================================
 	pub fn get_item_by_key_code_units(key_code_units: &[u16]) -> Option<Vec<u16>> {
 		read_item_code_units(&StorageKey::from_code_units(key_code_units))
 	}
 
 	//==============================================================================
-	// 키와 값을 모두 UTF-16 단위로 쓰기. (원본 localStorage.setItem 그대로, 저장소에 썼으면 true)
+	/// 키와 값을 모두 UTF-16 단위로 쓰기. (원본 localStorage.setItem 그대로, 저장소에 썼으면 true)
 	//==============================================================================
 	pub fn set_item_by_key_code_units(key_code_units: &[u16], value_code_units: &[u16]) -> bool {
 		write_item_code_units(&StorageKey::from_code_units(key_code_units), value_code_units)
 	}
 
 	//==============================================================================
-	// UTF-16 단위 키로 지우기. (원본 localStorage.removeItem 그대로)
+	/// UTF-16 단위 키로 지우기. (원본 localStorage.removeItem 그대로)
 	//==============================================================================
 	pub fn remove_item_by_key_code_units(key_code_units: &[u16]) {
 		remove_stored_item(&StorageKey::from_code_units(key_code_units));
 	}
 
 	//==============================================================================
-	// UTF-16 단위 키가 있는지.
+	/// UTF-16 단위 키가 있는지.
 	//==============================================================================
 	pub fn contains_key_code_units(key_code_units: &[u16]) -> bool {
 		read_stored_text(&StorageKey::from_code_units(key_code_units)).is_some()
 	}
 
 	//==============================================================================
-	// 전체 제거.
+	/// 전체 제거.
 	//==============================================================================
 	pub fn clear() {
 		with_preserved_item_state(|state| {
@@ -592,14 +592,14 @@ impl LocalStorage {
 	}
 
 	//==============================================================================
-	// 문자열 값 설정.
+	/// 문자열 값 설정.
 	//==============================================================================
 	pub fn set_string(key: &str, string_value: &str) {
 		LocalStorage::set_item(key, string_value);
 	}
 
 	//==============================================================================
-	// 논리 값 설정. ("true" / "false" 로 저장한다)
+	/// 논리 값 설정. ("true" / "false" 로 저장한다)
 	//==============================================================================
 	pub fn set_boolean(key: &str, boolean_value: bool) {
 		let string_value = if boolean_value {
@@ -612,7 +612,7 @@ impl LocalStorage {
 	}
 
 	//==============================================================================
-	// 숫자 값 설정. (원본 String(number) 꼴로 저장한다)
+	/// 숫자 값 설정. (원본 String(number) 꼴로 저장한다)
 	//==============================================================================
 	pub fn set_number(key: &str, number_value: f64) {
 		let string_value = format_number(number_value);
@@ -620,14 +620,14 @@ impl LocalStorage {
 	}
 
 	//==============================================================================
-	// 값 제거.
+	/// 값 제거.
 	//==============================================================================
 	pub fn remove(key: &str) {
 		LocalStorage::remove_item(key);
 	}
 
 	//==============================================================================
-	// 문자열 값 반환. (없으면 기본값. 저장소에는 쓰지 않는다)
+	/// 문자열 값 반환. (없으면 기본값. 저장소에는 쓰지 않는다)
 	//==============================================================================
 	pub fn get_string(key: &str, default_string_value: &str) -> String {
 		match LocalStorage::get_item(key) {
@@ -641,7 +641,7 @@ impl LocalStorage {
 	}
 
 	//==============================================================================
-	// 논리 값 반환. (없거나 빈 글이면 기본값, 저장소에는 쓰지 않는다. "true" 만 참)
+	/// 논리 값 반환. (없거나 빈 글이면 기본값, 저장소에는 쓰지 않는다. "true" 만 참)
 	//==============================================================================
 	pub fn get_boolean(key: &str, default_boolean_value: bool) -> bool {
 		let string_value = LocalStorage::get_string(key, "");
@@ -654,7 +654,7 @@ impl LocalStorage {
 	}
 
 	//==============================================================================
-	// 숫자 값 반환. (없거나 빈 글이면 기본값, 저장소에는 쓰지 않는다. 숫자가 아니면 NaN, 원본 Number(text))
+	/// 숫자 값 반환. (없거나 빈 글이면 기본값, 저장소에는 쓰지 않는다. 숫자가 아니면 NaN, 원본 Number(text))
 	//==============================================================================
 	pub fn get_number(key: &str, default_number_value: f64) -> f64 {
 		let string_value = LocalStorage::get_string(key, "");
@@ -667,8 +667,8 @@ impl LocalStorage {
 	}
 
 	//==============================================================================
-	// 접두사로 시작하는 키 한꺼번에 지우기. (게임 네임스페이스의 저장을 통째로 지울 때, 지운 키 수)
-	// - 보인 글로 견준다. 짝 없는 서로게이트로만 다른 키도 따로 센다.
+	/// 접두사로 시작하는 키 한꺼번에 지우기. (게임 네임스페이스의 저장을 통째로 지울 때, 지운 키 수)
+	/// - 보인 글로 견준다. 짝 없는 서로게이트로만 다른 키도 따로 센다.
 	//==============================================================================
 	pub fn clear_by_prefix(prefix: &str) -> usize {
 		if prefix.is_empty() {
@@ -682,15 +682,15 @@ impl LocalStorage {
 	}
 
 	//==============================================================================
-	// 키가 있는지.
+	/// 키가 있는지.
 	//==============================================================================
 	pub fn contains_key(key: &str) -> bool {
 		read_stored_text(&resolve_key(key)).is_some()
 	}
 
 	//==============================================================================
-	// 모든 키 반환. (정렬해서, 메모리에 대신 둔 키도 넣는다)
-	// - 짝 없는 서로게이트가 든 키는 대체 문자로 보인다. 보인 글이 같은 키는 하나만 나오니, 모두 가려 보려면 get_keys_code_units.
+	/// 모든 키 반환. (정렬해서, 메모리에 대신 둔 키도 넣는다)
+	/// - 짝 없는 서로게이트가 든 키는 대체 문자로 보인다. 보인 글이 같은 키는 하나만 나오니, 모두 가려 보려면 get_keys_code_units.
 	//==============================================================================
 	pub fn get_keys() -> Vec<String> {
 		let mut keys: Vec<String> = collect_storage_keys(true).into_iter().map(|key| key.lossy_text).collect();
@@ -699,15 +699,15 @@ impl LocalStorage {
 	}
 
 	//==============================================================================
-	// 모든 키를 UTF-16 단위로 반환. (원본 localStorage.key(i) 의 글 그대로, 정렬해서)
+	/// 모든 키를 UTF-16 단위로 반환. (원본 localStorage.key(i) 의 글 그대로, 정렬해서)
 	//==============================================================================
 	pub fn get_keys_code_units() -> Vec<Vec<u16>> {
 		collect_storage_keys(true).iter().map(|key| key.to_code_units()).collect()
 	}
 
 	//==============================================================================
-	// JSON 값 반환. (없거나 풀 수 없으면 기본값, 저장소에는 쓰지 않는다)
-	// - 짝 없는 서로게이트가 든 글(원본 JSON.stringify 의 \ud83d 같은 것)은 대체 문자로 읽고, 그 자리를 남겨 set_json 이 원래대로 쓴다.
+	/// JSON 값 반환. (없거나 풀 수 없으면 기본값, 저장소에는 쓰지 않는다)
+	/// - 짝 없는 서로게이트가 든 글(원본 JSON.stringify 의 \ud83d 같은 것)은 대체 문자로 읽고, 그 자리를 남겨 set_json 이 원래대로 쓴다.
 	//==============================================================================
 	pub fn get_json(key: &str, default_value: serde_json::Value) -> serde_json::Value {
 		let storage_key = resolve_key(key);
@@ -750,8 +750,8 @@ impl LocalStorage {
 	}
 
 	//==============================================================================
-	// JSON 값 설정. (JSON 글로 바꿔 쓴다. 저장소에 썼으면 true)
-	// - get_json 으로 읽은 짝 없는 서로게이트가 든 글을 고치지 않았으면 원본 JSON.stringify 처럼 \udXXX 로 쓴다.
+	/// JSON 값 설정. (JSON 글로 바꿔 쓴다. 저장소에 썼으면 true)
+	/// - get_json 으로 읽은 짝 없는 서로게이트가 든 글을 고치지 않았으면 원본 JSON.stringify 처럼 \udXXX 로 쓴다.
 	//==============================================================================
 	pub fn set_json(key: &str, value: &serde_json::Value) -> bool {
 		let storage_key = resolve_key(key);
@@ -775,21 +775,21 @@ impl LocalStorage {
 }
 
 //==============================================================================
-// 숫자 → 글. (원본 String(number), Number.prototype.toString 꼴)
+/// 숫자 → 글. (원본 String(number), Number.prototype.toString 꼴)
 //==============================================================================
 fn format_number(number_value: f64) -> String {
 	number_to_string(number_value)
 }
 
 //==============================================================================
-// JS 빈칸인지. (원본 Number(text) 가 앞뒤에서 떼는 WhiteSpace 와 LineTerminator: 탭, VT, FF, BOM, Zs 빈칸, LF, CR, LS, PS)
+/// JS 빈칸인지. (원본 Number(text) 가 앞뒤에서 떼는 WhiteSpace 와 LineTerminator: 탭, VT, FF, BOM, Zs 빈칸, LF, CR, LS, PS)
 //==============================================================================
 fn is_java_script_whitespace(character: char) -> bool {
 	matches!(character, '\u{9}' | '\u{a}' | '\u{b}' | '\u{c}' | '\u{d}' | '\u{20}' | '\u{a0}' | '\u{1680}' | '\u{2000}'..='\u{200a}' | '\u{2028}' | '\u{2029}' | '\u{202f}' | '\u{205f}' | '\u{3000}' | '\u{feff}')
 }
 
 //==============================================================================
-// 글 → 숫자. (원본 Number(text): 앞뒤 JS 빈칸을 떼고, 빈 글은 0, 0x / 0o / 0b 정수, 부호 붙은 십진 표기와 Infinity, 그 밖은 NaN)
+/// 글 → 숫자. (원본 Number(text): 앞뒤 JS 빈칸을 떼고, 빈 글은 0, 0x / 0o / 0b 정수, 부호 붙은 십진 표기와 Infinity, 그 밖은 NaN)
 //==============================================================================
 fn parse_number(text: &str) -> f64 {
 	let trimmed_text = text.trim_matches(is_java_script_whitespace);
@@ -837,7 +837,7 @@ fn parse_number(text: &str) -> f64 {
 }
 
 //==============================================================================
-// 부호 없는 십진 표기인지. (원본 StrUnsignedDecimalLiteral: 숫자들 [. 숫자들] [지수] 또는 . 숫자들 [지수], 지수는 e 나 E 뒤 [+ -] 숫자들)
+/// 부호 없는 십진 표기인지. (원본 StrUnsignedDecimalLiteral: 숫자들 [. 숫자들] [지수] 또는 . 숫자들 [지수], 지수는 e 나 E 뒤 [+ -] 숫자들)
 //==============================================================================
 fn is_unsigned_decimal_literal(text: &str) -> bool {
 	let text_bytes = text.as_bytes();
@@ -874,7 +874,7 @@ fn is_unsigned_decimal_literal(text: &str) -> bool {
 }
 
 //==============================================================================
-// 2, 8, 16 진 정수 글 → 숫자. (원본처럼 정확한 값을 가장 가까운 f64 로, 딱 가운데면 짝수 쪽, 숫자가 아닌 글자가 있거나 비었으면 NaN)
+/// 2, 8, 16 진 정수 글 → 숫자. (원본처럼 정확한 값을 가장 가까운 f64 로, 딱 가운데면 짝수 쪽, 숫자가 아닌 글자가 있거나 비었으면 NaN)
 //==============================================================================
 fn parse_power_of_two_radix_integer(digit_text: &str, radix: u32) -> f64 {
 	if digit_text.is_empty() {
@@ -922,7 +922,7 @@ fn parse_power_of_two_radix_integer(digit_text: &str, radix: u32) -> f64 {
 }
 
 //==============================================================================
-// 데스크탑 저장소. (앱 폴더의 JSON 파일 하나)
+/// 데스크탑 저장소. (앱 폴더의 JSON 파일 하나)
 //==============================================================================
 #[cfg(not(target_arch = "wasm32"))]
 mod storage_backend {
@@ -932,22 +932,22 @@ mod storage_backend {
 	use std::collections::BTreeMap;
 	use std::path::{Path, PathBuf};
 
-	// 저장 파일 이름.
+	/// 저장 파일 이름.
 	const STORAGE_FILE_NAME: &str = "localstorage.json";
 
 	//==============================================================================
-	// 저장 내용. (키 → 값, 짝 없는 서로게이트가 든 값은 원래 UTF-16 단위를 함께 든다. 키는 StorageKey 라 원래 단위로 가른다)
+	/// 저장 내용. (키 → 값, 짝 없는 서로게이트가 든 값은 원래 UTF-16 단위를 함께 든다. 키는 StorageKey 라 원래 단위로 가른다)
 	//==============================================================================
 	#[derive(Default)]
 	struct DesktopEntries {
-		// 키 → 값. (러스트 글, 짝 없는 서로게이트는 대체 문자로 보인다)
+		/// 키 → 값. (러스트 글, 짝 없는 서로게이트는 대체 문자로 보인다)
 		item_map: BTreeMap<StorageKey, String>,
-		// 짝 없는 서로게이트가 든 값의 원래 단위. (키 → 단위, 값을 러스트 글로 다시 쓰면 지운다)
+		/// 짝 없는 서로게이트가 든 값의 원래 단위. (키 → 단위, 값을 러스트 글로 다시 쓰면 지운다)
 		code_unit_map: BTreeMap<StorageKey, Vec<u16>>,
 	}
 
 	//==============================================================================
-	// 데스크탑 저장소 상태. (entries 는 처음 쓸 때 파일에서 읽는다)
+	/// 데스크탑 저장소 상태. (entries 는 처음 쓸 때 파일에서 읽는다)
 	//==============================================================================
 	struct DesktopStorageState {
 		application_name: Option<String>,
@@ -966,7 +966,7 @@ mod storage_backend {
 	}
 
 	//==============================================================================
-	// 폴더 이름에 못 쓰는 글자를 '_' 로 바꾼다. (비면 "vanilla")
+	/// 폴더 이름에 못 쓰는 글자를 '_' 로 바꾼다. (비면 "vanilla")
 	//==============================================================================
 	fn sanitize_folder_name(name: &str) -> String {
 		let sanitized_name: String = name
@@ -989,7 +989,7 @@ mod storage_backend {
 	}
 
 	//==============================================================================
-	// 기본 앱 이름. (실행 파일 이름, 못 읽으면 "vanilla")
+	/// 기본 앱 이름. (실행 파일 이름, 못 읽으면 "vanilla")
 	//==============================================================================
 	fn get_default_application_name() -> String {
 		let executable_path = match std::env::current_exe() {
@@ -1011,7 +1011,7 @@ mod storage_backend {
 	}
 
 	//==============================================================================
-	// 환경 변수 경로. (비었거나 상대 경로면 None)
+	/// 환경 변수 경로. (비었거나 상대 경로면 None)
 	//==============================================================================
 	fn read_directory_variable(variable_name: &str) -> Option<PathBuf> {
 		let variable_value = std::env::var_os(variable_name)?;
@@ -1023,7 +1023,7 @@ mod storage_backend {
 	}
 
 	//==============================================================================
-	// 운영체제별 앱 데이터 폴더. (앱 이름을 붙이기 전)
+	/// 운영체제별 앱 데이터 폴더. (앱 이름을 붙이기 전)
 	//==============================================================================
 	fn get_application_data_directory() -> PathBuf {
 		#[cfg(target_os = "windows")]
@@ -1043,7 +1043,7 @@ mod storage_backend {
 	}
 
 	//==============================================================================
-	// 저장 파일 경로 계산.
+	/// 저장 파일 경로 계산.
 	//==============================================================================
 	fn resolve_storage_file_path(state: &DesktopStorageState) -> PathBuf {
 		if let Some(storage_directory_path) = &state.storage_directory_path {
@@ -1063,9 +1063,9 @@ mod storage_backend {
 	}
 
 	//==============================================================================
-	// 파일에서 읽기. (없거나 깨졌으면 빈 저장소. 문자열이 아닌 값은 JSON 글로 바꿔 둔다)
-	// - 짝 없는 서로게이트를 원본 JSON.stringify 처럼 \udXXX 로 적은 값은 원래 단위를 함께 들고, 그런 키는 원래 단위로 가른다.
-	// - 같은 키가 또 나오면 JSON.parse 처럼 뒤의 값이 이긴다.
+	/// 파일에서 읽기. (없거나 깨졌으면 빈 저장소. 문자열이 아닌 값은 JSON 글로 바꿔 둔다)
+	/// - 짝 없는 서로게이트를 원본 JSON.stringify 처럼 \udXXX 로 적은 값은 원래 단위를 함께 들고, 그런 키는 원래 단위로 가른다.
+	/// - 같은 키가 또 나오면 JSON.parse 처럼 뒤의 값이 이긴다.
 	//==============================================================================
 	fn read_entries_from_file(storage_file_path: &Path) -> DesktopEntries {
 		let mut entries = DesktopEntries::default();
@@ -1106,7 +1106,7 @@ mod storage_backend {
 	}
 
 	//==============================================================================
-	// 파일 글 짓기. (serde_json 의 보기 좋은 꼴과 같고, 원래 단위를 든 값과 키는 원본 JSON.stringify 처럼 \udXXX 로)
+	/// 파일 글 짓기. (serde_json 의 보기 좋은 꼴과 같고, 원래 단위를 든 값과 키는 원본 JSON.stringify 처럼 \udXXX 로)
 	//==============================================================================
 	fn compose_file_text(entries: &DesktopEntries) -> String {
 		if entries.item_map.is_empty() {
@@ -1141,7 +1141,7 @@ mod storage_backend {
 	}
 
 	//==============================================================================
-	// 파일에 쓰기. (임시 파일에 쓰고 바꿔치기해서 중간에 꺼져도 깨지지 않게 한다)
+	/// 파일에 쓰기. (임시 파일에 쓰고 바꿔치기해서 중간에 꺼져도 깨지지 않게 한다)
 	//==============================================================================
 	fn write_entries_to_file(storage_file_path: &Path, entries: &DesktopEntries) -> bool {
 		if let Some(parent_directory_path) = storage_file_path.parent() {
@@ -1161,7 +1161,7 @@ mod storage_backend {
 	}
 
 	//==============================================================================
-	// 저장 내용을 (필요하면 읽어 와서) 읽는다.
+	/// 저장 내용을 (필요하면 읽어 와서) 읽는다.
 	//==============================================================================
 	fn with_entries<R>(reader: impl FnOnce(&DesktopEntries) -> R) -> R {
 		DESKTOP_STORAGE_STATE.with(|state_cell| {
@@ -1176,7 +1176,7 @@ mod storage_backend {
 	}
 
 	//==============================================================================
-	// 저장 내용을 바꾸고, 바뀌었으면 파일에 쓴다. (writer 가 바뀌었는지를 돌려준다. 파일에 못 썼으면 false)
+	/// 저장 내용을 바꾸고, 바뀌었으면 파일에 쓴다. (writer 가 바뀌었는지를 돌려준다. 파일에 못 썼으면 false)
 	//==============================================================================
 	fn modify_entries(writer: impl FnOnce(&mut DesktopEntries) -> bool) -> bool {
 		DESKTOP_STORAGE_STATE.with(|state_cell| {
@@ -1195,7 +1195,7 @@ mod storage_backend {
 	}
 
 	//==============================================================================
-	// 앱 이름 설정. (읽어 둔 내용은 버리고 다음에 새 폴더에서 읽는다)
+	/// 앱 이름 설정. (읽어 둔 내용은 버리고 다음에 새 폴더에서 읽는다)
 	//==============================================================================
 	pub fn set_application_name(application_name: &str) {
 		DESKTOP_STORAGE_STATE.with(|state_cell| {
@@ -1206,7 +1206,7 @@ mod storage_backend {
 	}
 
 	//==============================================================================
-	// 저장 폴더 직접 설정. (읽어 둔 내용은 버린다)
+	/// 저장 폴더 직접 설정. (읽어 둔 내용은 버린다)
 	//==============================================================================
 	pub fn set_storage_directory(storage_directory_path: Option<PathBuf>) {
 		DESKTOP_STORAGE_STATE.with(|state_cell| {
@@ -1217,7 +1217,7 @@ mod storage_backend {
 	}
 
 	//==============================================================================
-	// 저장 파일 경로.
+	/// 저장 파일 경로.
 	//==============================================================================
 	pub fn get_storage_file_path() -> Option<PathBuf> {
 		DESKTOP_STORAGE_STATE.with(|state_cell| {
@@ -1227,7 +1227,7 @@ mod storage_backend {
 	}
 
 	//==============================================================================
-	// 값 읽기. (짝 없는 서로게이트가 든 값은 원래 단위)
+	/// 값 읽기. (짝 없는 서로게이트가 든 값은 원래 단위)
 	//==============================================================================
 	pub fn get_item(key: &StorageKey) -> Option<StoredText> {
 		with_entries(|entries| {
@@ -1239,7 +1239,7 @@ mod storage_backend {
 	}
 
 	//==============================================================================
-	// 값 쓰기. (파일에 썼는지)
+	/// 값 쓰기. (파일에 썼는지)
 	//==============================================================================
 	pub fn set_item(key: &StorageKey, value: &str) -> bool {
 		modify_entries(|entries| {
@@ -1250,7 +1250,7 @@ mod storage_backend {
 	}
 
 	//==============================================================================
-	// 값을 UTF-16 단위로 쓰기. (짝 없는 서로게이트가 있으면 원래 단위를 든다, 파일에 썼는지)
+	/// 값을 UTF-16 단위로 쓰기. (짝 없는 서로게이트가 있으면 원래 단위를 든다, 파일에 썼는지)
 	//==============================================================================
 	pub fn set_item_code_units(key: &StorageKey, code_units: &[u16]) -> bool {
 		if !has_lone_surrogate(code_units) {
@@ -1264,7 +1264,7 @@ mod storage_backend {
 	}
 
 	//==============================================================================
-	// 값 지우기.
+	/// 값 지우기.
 	//==============================================================================
 	pub fn remove_item(key: &StorageKey) {
 		modify_entries(|entries| {
@@ -1274,7 +1274,7 @@ mod storage_backend {
 	}
 
 	//==============================================================================
-	// 전부 지우기.
+	/// 전부 지우기.
 	//==============================================================================
 	pub fn clear_all() {
 		modify_entries(|entries| {
@@ -1284,7 +1284,7 @@ mod storage_backend {
 	}
 
 	//==============================================================================
-	// 모든 키. (저장 순서)
+	/// 모든 키. (저장 순서)
 	//==============================================================================
 	pub fn get_all_keys() -> Vec<StorageKey> {
 		with_entries(|entries| entries.item_map.keys().cloned().collect())
@@ -1292,7 +1292,7 @@ mod storage_backend {
 }
 
 //==============================================================================
-// 웹 저장소. (window.localStorage)
+/// 웹 저장소. (window.localStorage)
 //==============================================================================
 #[cfg(target_arch = "wasm32")]
 mod storage_backend {
@@ -1302,7 +1302,7 @@ mod storage_backend {
 	use wasm_bindgen::{JsCast, JsValue};
 
 	//==============================================================================
-	// window.localStorage. (막혀 있으면 None)
+	/// window.localStorage. (막혀 있으면 None)
 	//==============================================================================
 	fn get_storage() -> Option<web_sys::Storage> {
 		let window = web_sys::window()?;
@@ -1310,26 +1310,26 @@ mod storage_backend {
 	}
 
 	//==============================================================================
-	// 앱 이름 설정. (웹은 출처마다 따로라 쓰지 않는다)
+	/// 앱 이름 설정. (웹은 출처마다 따로라 쓰지 않는다)
 	//==============================================================================
 	pub fn set_application_name(_application_name: &str) {
 	}
 
 	//==============================================================================
-	// 저장 폴더 직접 설정. (웹은 쓰지 않는다)
+	/// 저장 폴더 직접 설정. (웹은 쓰지 않는다)
 	//==============================================================================
 	pub fn set_storage_directory(_storage_directory_path: Option<PathBuf>) {
 	}
 
 	//==============================================================================
-	// 저장 파일 경로. (웹은 없다)
+	/// 저장 파일 경로. (웹은 없다)
 	//==============================================================================
 	pub fn get_storage_file_path() -> Option<PathBuf> {
 		None
 	}
 
 	//==============================================================================
-	// 키를 JS 글로. (짝 없는 서로게이트가 든 키는 그 원래 단위)
+	/// 키를 JS 글로. (짝 없는 서로게이트가 든 키는 그 원래 단위)
 	//==============================================================================
 	fn convert_key(key: &StorageKey) -> JsValue {
 		match key.get_lone_code_units() {
@@ -1343,7 +1343,7 @@ mod storage_backend {
 	}
 
 	//==============================================================================
-	// localStorage 함수 부르기. (getItem, setItem, removeItem, key 를 JS 글 그대로 주고받으려 web-sys 의 &str 꼴 대신 부른다)
+	/// localStorage 함수 부르기. (getItem, setItem, removeItem, key 를 JS 글 그대로 주고받으려 web-sys 의 &str 꼴 대신 부른다)
 	//==============================================================================
 	fn call_storage_function(storage: &web_sys::Storage, function_name: &str, argument_list: &[JsValue]) -> Result<JsValue, JsValue> {
 		let function_value = js_sys::Reflect::get(storage, &JsValue::from_str(function_name))?;
@@ -1356,7 +1356,7 @@ mod storage_backend {
 	}
 
 	//==============================================================================
-	// 값 읽기. (짝 없는 서로게이트가 든 값은 원래 단위)
+	/// 값 읽기. (짝 없는 서로게이트가 든 값은 원래 단위)
 	//==============================================================================
 	pub fn get_item(key: &StorageKey) -> Option<StoredText> {
 		let storage = get_storage()?;
@@ -1369,7 +1369,7 @@ mod storage_backend {
 	}
 
 	//==============================================================================
-	// 값 쓰기. (썼는지, 막혀 있거나 용량이 넘치면 false)
+	/// 값 쓰기. (썼는지, 막혀 있거나 용량이 넘치면 false)
 	//==============================================================================
 	pub fn set_item(key: &StorageKey, value: &str) -> bool {
 		match get_storage() {
@@ -1383,7 +1383,7 @@ mod storage_backend {
 	}
 
 	//==============================================================================
-	// 값을 UTF-16 단위로 쓰기. (JS 글 그대로, 썼는지)
+	/// 값을 UTF-16 단위로 쓰기. (JS 글 그대로, 썼는지)
 	//==============================================================================
 	pub fn set_item_code_units(key: &StorageKey, code_units: &[u16]) -> bool {
 		match get_storage() {
@@ -1397,7 +1397,7 @@ mod storage_backend {
 	}
 
 	//==============================================================================
-	// 값 지우기.
+	/// 값 지우기.
 	//==============================================================================
 	pub fn remove_item(key: &StorageKey) {
 		if let Some(storage) = get_storage() {
@@ -1406,7 +1406,7 @@ mod storage_backend {
 	}
 
 	//==============================================================================
-	// 전부 지우기.
+	/// 전부 지우기.
 	//==============================================================================
 	pub fn clear_all() {
 		if let Some(storage) = get_storage() {
@@ -1415,7 +1415,7 @@ mod storage_backend {
 	}
 
 	//==============================================================================
-	// 모든 키. (브라우저가 주는 순서, 짝 없는 서로게이트가 든 키는 원래 단위를 든다)
+	/// 모든 키. (브라우저가 주는 순서, 짝 없는 서로게이트가 든 키는 원래 단위를 든다)
 	//==============================================================================
 	pub fn get_all_keys() -> Vec<StorageKey> {
 		let mut keys: Vec<StorageKey> = Vec::new();
@@ -1457,14 +1457,14 @@ mod storage_backend {
 }
 
 //==============================================================================
-// 시험. (데스크탑, 임시 폴더에 쓴다)
+/// 시험. (데스크탑, 임시 폴더에 쓴다)
 //==============================================================================
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
 	use super::*;
 
 	//==============================================================================
-	// 시험마다 다른 임시 폴더를 저장 폴더로 정한다.
+	/// 시험마다 다른 임시 폴더를 저장 폴더로 정한다.
 	//==============================================================================
 	fn use_temporary_storage_directory(test_name: &str) -> PathBuf {
 		let unique_suffix = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|duration| duration.as_nanos()).unwrap_or(0);
@@ -1474,7 +1474,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 숫자 글 바꾸기는 원본 String / Number 와 같다.
+	/// 숫자 글 바꾸기는 원본 String / Number 와 같다.
 	//==============================================================================
 	#[test]
 	fn number_text_matches_java_script() {
@@ -1523,7 +1523,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 쓰고, 파일에서 다시 읽고, 기본값 저장, 접두사 지우기, 키 목록.
+	/// 쓰고, 파일에서 다시 읽고, 기본값 저장, 접두사 지우기, 키 목록.
 	//==============================================================================
 	#[test]
 	fn storage_round_trip_through_file() {
@@ -1566,7 +1566,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// JSON 읽기와 쓰기. (깨진 글은 기본값)
+	/// JSON 읽기와 쓰기. (깨진 글은 기본값)
 	//==============================================================================
 	#[test]
 	fn json_round_trip() {
@@ -1580,7 +1580,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 짝 없는 서로게이트: 날 단위 값과 JSON 의 \udXXX 는 대체 문자로 보이고, 고치지 않고 다시 쓰면 원래대로 남는다. 파일도 원본 JSON.stringify 꼴.
+	/// 짝 없는 서로게이트: 날 단위 값과 JSON 의 \udXXX 는 대체 문자로 보이고, 고치지 않고 다시 쓰면 원래대로 남는다. 파일도 원본 JSON.stringify 꼴.
 	//==============================================================================
 	#[test]
 	fn keeps_lone_surrogate() {
@@ -1625,7 +1625,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 짝 없는 서로게이트로만 다른 두 키: 따로 들고, 파일에서 다시 읽어도 둘 다 남는다. 러스트 글 키는 그 글 그대로의 키가 먼저다.
+	/// 짝 없는 서로게이트로만 다른 두 키: 따로 들고, 파일에서 다시 읽어도 둘 다 남는다. 러스트 글 키는 그 글 그대로의 키가 먼저다.
 	//==============================================================================
 	#[test]
 	fn keeps_keys_that_differ_only_by_lone_surrogate() {
@@ -1664,7 +1664,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 시험용 바꿔 끼우는 저장소. (값은 나눠 든 맵, is_blocked 면 모두 Err)
+	/// 시험용 바꿔 끼우는 저장소. (값은 나눠 든 맵, is_blocked 면 모두 Err)
 	//==============================================================================
 	struct TestBackend {
 		item_map: std::rc::Rc<RefCell<BTreeMap<String, String>>>,
@@ -1704,7 +1704,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 저장소 갈아 끼우기와 막혔을 때 메모리로 대신하기.
+	/// 저장소 갈아 끼우기와 막혔을 때 메모리로 대신하기.
 	//==============================================================================
 	#[test]
 	fn backend_and_memory_fallback() {

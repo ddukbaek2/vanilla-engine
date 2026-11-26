@@ -14,12 +14,12 @@ use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
 thread_local! {
-	// 그림 텍스처를 되읽을 GL 컨텍스트. (Graphic 이 만들 때 건다, Graphic 이 사라지면 비어 있다)
+	/// 그림 텍스처를 되읽을 GL 컨텍스트. (Graphic 이 만들 때 건다, Graphic 이 사라지면 비어 있다)
 	static PIXEL_READ_CONTEXT: RefCell<Weak<glow::Context>> = RefCell::new(Weak::new());
 }
 
 //==============================================================================
-// 그림 텍스처를 되읽을 GL 컨텍스트 걸기. (Graphic::new)
+/// 그림 텍스처를 되읽을 GL 컨텍스트 걸기. (Graphic::new)
 //==============================================================================
 pub(crate) fn register_pixel_read_context(gl: &Rc<glow::Context>) {
 	PIXEL_READ_CONTEXT.with(|context_cell| {
@@ -28,8 +28,8 @@ pub(crate) fn register_pixel_read_context(gl: &Rc<glow::Context>) {
 }
 
 //==============================================================================
-// 텍스처 픽셀 읽기. (올린 그대로의 프리멀티플라이드 RGBA, 위에서 아래 차례. 못 읽으면 None)
-// - 텍스처를 잠깐 만든 프레임버퍼에 붙여 읽고, 그 전에 묶여 있던 프레임버퍼로 되돌린다. 묶인 텍스처는 바꾸지 않는다.
+/// 텍스처 픽셀 읽기. (올린 그대로의 프리멀티플라이드 RGBA, 위에서 아래 차례. 못 읽으면 None)
+/// - 텍스처를 잠깐 만든 프레임버퍼에 붙여 읽고, 그 전에 묶여 있던 프레임버퍼로 되돌린다. 묶인 텍스처는 바꾸지 않는다.
 //==============================================================================
 pub(crate) fn read_texture_pixels(gl: &glow::Context, texture: GlTexture, width: u32, height: u32) -> Option<Vec<u8>> {
 	let mut pixels = vec![0u8; width as usize * height as usize * 4];
@@ -53,8 +53,8 @@ pub(crate) fn read_texture_pixels(gl: &glow::Context, texture: GlTexture, width:
 }
 
 //==============================================================================
-// GPU 에 올리며 놓은 그림의 CPU 픽셀을 그림이 기억한 텍스처에서 되읽어 되돌린다. (픽셀이 있으면 그대로 true)
-// - 올린 적이 없거나, Graphic 이 없거나, 읽지 못하면 false. 되돌린 픽셀은 그림이 계속 든다. (다음에 또 되읽지 않는다)
+/// GPU 에 올리며 놓은 그림의 CPU 픽셀을 그림이 기억한 텍스처에서 되읽어 되돌린다. (픽셀이 있으면 그대로 true)
+/// - 올린 적이 없거나, Graphic 이 없거나, 읽지 못하면 false. 되돌린 픽셀은 그림이 계속 든다. (다음에 또 되읽지 않는다)
 //==============================================================================
 pub(crate) fn restore_image_pixels_from_texture(image: &Image) -> bool {
 	if image.has_pixels() {
