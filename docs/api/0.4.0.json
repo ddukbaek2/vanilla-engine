@@ -83047,8 +83047,8 @@
 		{
 			"name": "graphics3d/shadowmap",
 			"summary": {
-				"ko": "섀도우 맵. (원본 experimental/graphics/shadowmap.js)\n- 방향광 실시간 그림자, 깊이 텍스처(하드웨어 비교 샘플링, sampler2DShadow) + 직교 광원 행렬.\n- begin_render() 로 깊이 패스를 시작하고, 결과 텍스처를 본 패스에서 샘플링한다.\n- 광원 행렬은 텍셀 단위로 스냅해 이동 시 그림자 가장자리 떨림을 줄인다.\n- 텍셀 스냅의 반올림은 원본 Math.round 와 같이 0.5 를 위로 올린다. (러스트 round 는 0 에서 먼 쪽이라 음수에서 다르다)\n- 원본 해상도 기본값 인자 2048 은 DEFAULT_SHADOWMAP_RESOLUTION 으로 둔다. (러스트에 기본값 인자가 없다)",
-				"en": "Shadow map. (the original experimental/graphics/shadowmap.js)\n- Directional light real-time shadows, depth texture (hardware comparison sampling, sampler2DShadow) + orthographic light matrix.\n- Starts the depth pass with begin_render(), and the result texture is sampled in the main pass.\n- The light matrix snaps to texel units to reduce shadow edge shimmering when moving.\n- Rounding in the texel snap rounds 0.5 up, like the original Math.round. (Rust round goes away from 0, so it differs for negative numbers)\n- The original default resolution argument 2048 is kept as DEFAULT_SHADOWMAP_RESOLUTION. (Rust has no default arguments)"
+				"ko": "섀도우 맵. (원본 experimental/graphics/shadowmap.js)\n- 방향광 실시간 그림자, 깊이 텍스처(하드웨어 비교 샘플링, sampler2DShadow) + 직교 광원 행렬.\n- begin_render() 로 깊이 패스를 시작하고, 결과 텍스처를 본 패스에서 샘플링한다.\n- 광원 행렬은 텍셀 단위로 스냅해 이동 시 그림자 가장자리 떨림을 줄인다. 빛이 거의 바로 위나 아래로 나아가면 위쪽을 z 축으로 잡아 행렬이 깨지지 않게 한다.\n- 지을 때 앞의 텍스처와 프레임버퍼 묶음을 돌린다. (모형을 지은 뒤에 지어도 깊이 텍스처가 텍스처 유닛에 남아 그리기가 INVALID_OPERATION 이 되지 않게)\n- ShadowAtlas: 점광과 스포트라이트의 그림자를 깊이 텍스처 한 장에 칸으로 나눠 담는다. (원본 ShadowAtlas, 유니티 URP 의 추가 빛 그림자 아틀라스 꼴)\n  툰 셰이더는 받는 자리를 노멀 쪽으로 그 거리의 칸 텍셀 (1 + 3 x (1 - dot(N, L))) 개만큼 밀어 견준다. (빛에 비스듬한 면일수록 크게, 그림자 여드름을 막는다)\n- 텍셀 스냅의 반올림은 원본 Math.round 와 같이 0.5 를 위로 올린다. (러스트 round 는 0 에서 먼 쪽이라 음수에서 다르다)\n- 원본 해상도 기본값 인자 2048 은 DEFAULT_SHADOWMAP_RESOLUTION 으로 둔다. (러스트에 기본값 인자가 없다)",
+				"en": "Shadow map. (the original experimental/graphics/shadowmap.js)\n- Directional light real-time shadows, depth texture (hardware comparison sampling, sampler2DShadow) + orthographic light matrix.\n- Starts the depth pass with begin_render(), and the result texture is sampled in the main pass.\n- The light matrix snaps to texel units to reduce shadow edge shimmering when moving. When the light travels almost straight up or down, the up direction becomes the z axis so the matrix does not break.\n- Restores the previous texture and framebuffer bindings when built. (So that building it after models does not leave the depth texture on a texture unit and turn drawing into INVALID_OPERATION)\n- ShadowAtlas: stores the shadows of point lights and spotlights as tiles in one depth texture. (the original ShadowAtlas, in the form of the additional light shadow atlas of Unity URP)\n  The toon shader pushes the receiving position toward the normal by (1 + 3 x (1 - dot(N, L))) tile texels at that distance before comparing. (Larger the more the surface is slanted to the light, prevents shadow acne)\n- Rounding in the texel snap rounds 0.5 up, like the original Math.round. (Rust round goes away from 0, so it differs for negative numbers)\n- The original default resolution argument 2048 is kept as DEFAULT_SHADOWMAP_RESOLUTION. (Rust has no default arguments)"
 			},
 			"classes": [
 				{
@@ -83095,8 +83095,8 @@
 								}
 							},
 							"description": {
-								"ko": "생성. (깊이 텍스처 + 컬러 없는 프레임버퍼)\n- 광원 행렬은 단위 행렬로 시작한다. (update_light_matrix 로 채운다)",
-								"en": "Constructor. (depth texture + framebuffer without color)\n- The light matrix starts as the identity matrix. (filled by update_light_matrix)"
+								"ko": "생성. (깊이 텍스처 + 컬러 없는 프레임버퍼, 앞의 텍스처와 프레임버퍼 묶음은 돌린다)\n- 광원 행렬은 단위 행렬로 시작한다. (update_light_matrix 로 채운다)",
+								"en": "Constructor. (depth texture + framebuffer without color, restores the previous texture and framebuffer bindings)\n- The light matrix starts as the identity matrix. (filled by update_light_matrix)"
 							},
 							"since": "0.3.2",
 							"source": "src/graphics3d/shadowmap.rs",
@@ -83154,8 +83154,8 @@
 								}
 							],
 							"description": {
-								"ko": "광원 행렬 갱신. (초점 주변을 덮는 직교 투영, 텍셀 스냅)\n- light_direction 은 빛이 나아가는 방향, extent 는 초점 기준 절반 커버 범위다.\n- 광원 눈은 초점에서 빛 반대쪽으로 (near_distance + far_distance) / 2 만큼 떨어지고, 위쪽은 Vector3::up() 이다.\n  그래서 빛이 y 축과 나란하면(바로 위나 아래로) 위쪽과 겹쳐 행렬이 망가진다. (원본과 같음)",
-								"en": "Updates the light matrix. (orthographic projection covering the area around the focus, texel snapping)\n- light_direction is the direction the light travels, extent is the half coverage range around the focus.\n- The light eye is placed (near_distance + far_distance) / 2 away from the focus on the side opposite the light, and up is Vector3::up().\n  So if the light is parallel to the y axis (straight up or down), it overlaps with up and the matrix breaks. (same as the original)"
+								"ko": "광원 행렬 갱신. (초점 주변을 덮는 직교 투영, 텍셀 스냅, 빛이 거의 바로 위나 아래로 나아가면 위쪽을 z 축으로)\n- light_direction 은 빛이 나아가는 방향, extent 는 초점 기준 절반 커버 범위다.\n- 광원 눈은 초점에서 빛 반대쪽으로 (near_distance + far_distance) / 2 만큼 떨어지고, 위쪽은 Vector3::up() 이다.\n  빛 방향의 y 성분 절댓값이 0.99 를 넘으면(거의 바로 위나 아래로) 위쪽을 z 축(0, 0, 1)으로 바꾼다.",
+								"en": "Updates the light matrix. (orthographic projection covering the area around the focus, texel snapping, the up direction becomes the z axis when the light travels almost straight up or down)\n- light_direction is the direction the light travels, extent is the half coverage range around the focus.\n- The light eye is placed (near_distance + far_distance) / 2 away from the focus on the side opposite the light, and up is Vector3::up().\n  If the absolute value of the y component of the light direction exceeds 0.99 (almost straight up or down), up is switched to the z axis (0, 0, 1)."
 							},
 							"since": "0.3.2",
 							"source": "src/graphics3d/shadowmap.rs",
@@ -83341,6 +83341,821 @@
 							"language": "rust"
 						}
 					]
+				},
+				{
+					"name": "ShadowAtlasLight",
+					"kind": "struct",
+					"summary": {
+						"ko": "그림자 아틀라스의 빛 하나. (셰이더에 올릴 값)",
+						"en": "One light of the shadow atlas. (Values to upload to the shader)"
+					},
+					"traits": [
+						"Clone",
+						"Copy",
+						"Debug",
+						"PartialEq"
+					],
+					"source": "src/graphics3d/shadowmap.rs",
+					"members": [
+						{
+							"kind": "field",
+							"name": "light_index",
+							"signature": "pub light_index: usize",
+							"params": [],
+							"returns": {
+								"type": "usize",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "빛 목록에서의 차례. (ToonRenderer 가 그 점광에 이 그림자를 붙인다)",
+								"en": "Order in the light list. (ToonRenderer attaches this shadow to that point light)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/shadowmap.rs"
+						},
+						{
+							"kind": "field",
+							"name": "position",
+							"signature": "pub position: [f32; 3]",
+							"params": [],
+							"returns": {
+								"type": "[f32; 3]",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "빛의 자리.",
+								"en": "Light position."
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/shadowmap.rs"
+						},
+						{
+							"kind": "field",
+							"name": "forward",
+							"signature": "pub forward: [f32; 3]",
+							"params": [],
+							"returns": {
+								"type": "[f32; 3]",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "보는 쪽. (스포트라이트만)",
+								"en": "Forward direction. (Spotlights only)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/shadowmap.rs"
+						},
+						{
+							"kind": "field",
+							"name": "up",
+							"signature": "pub up: [f32; 3]",
+							"params": [],
+							"returns": {
+								"type": "[f32; 3]",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "위쪽. (스포트라이트만)",
+								"en": "Up direction. (Spotlights only)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/shadowmap.rs"
+						},
+						{
+							"kind": "field",
+							"name": "tangent",
+							"signature": "pub tangent: f32",
+							"params": [],
+							"returns": {
+								"type": "f32",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "반각의 탄젠트. (0 이면 점광)",
+								"en": "Tangent of the half angle. (0 for a point light)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/shadowmap.rs"
+						},
+						{
+							"kind": "field",
+							"name": "near",
+							"signature": "pub near: f32",
+							"params": [],
+							"returns": {
+								"type": "f32",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "가까운 거리.",
+								"en": "Near distance."
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/shadowmap.rs"
+						},
+						{
+							"kind": "field",
+							"name": "far",
+							"signature": "pub far: f32",
+							"params": [],
+							"returns": {
+								"type": "f32",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "먼 거리.",
+								"en": "Far distance."
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/shadowmap.rs"
+						},
+						{
+							"kind": "field",
+							"name": "first_tile",
+							"signature": "pub first_tile: usize",
+							"params": [],
+							"returns": {
+								"type": "usize",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "첫 칸 번호.",
+								"en": "First tile number."
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/shadowmap.rs"
+						}
+					],
+					"examples": [
+						{
+							"title": {
+								"ko": "아틀라스가 고른 빛과 그 첫 칸 읽기",
+								"en": "Read the lights the atlas picked and their first tiles"
+							},
+							"code": "use vanilla::ShadowAtlas;\n\nfn print_shadow_lights(shadow_atlas: &ShadowAtlas) {\n\tfor light in shadow_atlas.get_lights() {\n\t\tlet tile_count = if light.tangent > 0.0 {\n\t\t\t1\n\t\t}\n\t\telse {\n\t\t\t6\n\t\t};\n\t\tprintln!(\"light {} uses tiles {}..{}\", light.light_index, light.first_tile, light.first_tile + tile_count);\n\t}\n}",
+							"language": "rust"
+						}
+					]
+				},
+				{
+					"name": "ShadowAtlasTile",
+					"kind": "struct",
+					"summary": {
+						"ko": "그림자 아틀라스의 칸 하나.",
+						"en": "One tile of the shadow atlas."
+					},
+					"traits": [
+						"Clone",
+						"Copy",
+						"Debug"
+					],
+					"source": "src/graphics3d/shadowmap.rs",
+					"members": [
+						{
+							"kind": "field",
+							"name": "view_projection_matrix",
+							"signature": "pub view_projection_matrix: Matrix4",
+							"params": [],
+							"returns": {
+								"type": "Matrix4",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "칸의 보기와 투영.",
+								"en": "View and projection of the tile."
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/shadowmap.rs"
+						},
+						{
+							"kind": "field",
+							"name": "x",
+							"signature": "pub x: i32",
+							"params": [],
+							"returns": {
+								"type": "i32",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "칸의 왼쪽 아래 x. (픽셀)",
+								"en": "Bottom-left x of the tile. (Pixels)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/shadowmap.rs"
+						},
+						{
+							"kind": "field",
+							"name": "y",
+							"signature": "pub y: i32",
+							"params": [],
+							"returns": {
+								"type": "i32",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "칸의 왼쪽 아래 y. (픽셀)",
+								"en": "Bottom-left y of the tile. (Pixels)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/shadowmap.rs"
+						},
+						{
+							"kind": "field",
+							"name": "size",
+							"signature": "pub size: i32",
+							"params": [],
+							"returns": {
+								"type": "i32",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "칸 한 변. (픽셀)",
+								"en": "Side of a tile. (Pixels)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/shadowmap.rs"
+						}
+					],
+					"examples": [
+						{
+							"title": {
+								"ko": "칸마다 뷰포트 자리 읽기",
+								"en": "Read the viewport position of each tile"
+							},
+							"code": "use vanilla::ShadowAtlas;\n\nfn print_tiles(shadow_atlas: &ShadowAtlas) {\n\tfor tile_index in 0..shadow_atlas.get_tile_count() {\n\t\tlet tile = shadow_atlas.get_tile(tile_index);\n\t\tprintln!(\"tile {} at ({}, {}) size {}\", tile_index, tile.x, tile.y, tile.size);\n\t}\n}",
+							"language": "rust"
+						}
+					]
+				},
+				{
+					"name": "ShadowAtlasLightSource",
+					"kind": "struct",
+					"summary": {
+						"ko": "그림자 아틀라스가 받는 빛 꼴. (원본 updateLights 의 객체 하나, ToonPointLight 에서 짓는다)",
+						"en": "Light description the shadow atlas takes. (One object of the original updateLights, built from ToonPointLight)"
+					},
+					"traits": [
+						"Clone",
+						"Copy",
+						"Debug",
+						"PartialEq"
+					],
+					"source": "src/graphics3d/shadowmap.rs",
+					"members": [
+						{
+							"kind": "field",
+							"name": "position",
+							"signature": "pub position: [f32; 3]",
+							"params": [],
+							"returns": {
+								"type": "[f32; 3]",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "빛의 자리.",
+								"en": "Light position."
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/shadowmap.rs"
+						},
+						{
+							"kind": "field",
+							"name": "direction",
+							"signature": "pub direction: Option<[f32; 3]>",
+							"params": [],
+							"returns": {
+								"type": "Option<[f32; 3]>",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "빛이 나아가는 쪽. (Some 이면 스포트라이트)",
+								"en": "Direction the light travels. (spotlight if Some)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/shadowmap.rs"
+						},
+						{
+							"kind": "field",
+							"name": "outer_cone_angle",
+							"signature": "pub outer_cone_angle: f32",
+							"params": [],
+							"returns": {
+								"type": "f32",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "스포트라이트 바깥 원뿔 반각. (라디안)",
+								"en": "Outer cone half angle of the spotlight. (Radians)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/shadowmap.rs"
+						},
+						{
+							"kind": "field",
+							"name": "range",
+							"signature": "pub range: f32",
+							"params": [],
+							"returns": {
+								"type": "f32",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "먼 거리. (0 이면 30)",
+								"en": "Far distance. (30 if 0)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/shadowmap.rs"
+						},
+						{
+							"kind": "field",
+							"name": "shadow_near",
+							"signature": "pub shadow_near: f32",
+							"params": [],
+							"returns": {
+								"type": "f32",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "가까운 거리.",
+								"en": "Near distance."
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/shadowmap.rs"
+						},
+						{
+							"kind": "field",
+							"name": "casts_shadow",
+							"signature": "pub casts_shadow: bool",
+							"params": [],
+							"returns": {
+								"type": "bool",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "그림자를 드리울지.",
+								"en": "Whether it casts a shadow."
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/shadowmap.rs"
+						}
+					],
+					"examples": [
+						{
+							"title": {
+								"ko": "점광 하나와 스포트라이트 하나",
+								"en": "One point light and one spotlight"
+							},
+							"code": "use vanilla::ShadowAtlasLightSource;\n\nlet point_light = ShadowAtlasLightSource {\n\tposition: [0.0, 2.0, 0.0],\n\tdirection: None,\n\touter_cone_angle: 0.0,\n\trange: 10.0,\n\tshadow_near: 0.05,\n\tcasts_shadow: true,\n};\nlet spot_light = ShadowAtlasLightSource {\n\tposition: [3.0, 4.0, 0.0],\n\tdirection: Some([0.0, -1.0, 0.0]),\n\touter_cone_angle: std::f32::consts::FRAC_PI_4,\n\t..point_light\n};\nassert!(point_light.direction.is_none());\nassert!(spot_light.direction.is_some());",
+							"language": "rust"
+						}
+					]
+				},
+				{
+					"name": "ShadowAtlas",
+					"kind": "struct",
+					"summary": {
+						"ko": "그림자 아틀라스. (점광과 스포트라이트의 실시간 그림자를 깊이 텍스처 한 장에 칸으로 나눠 담는다, 원본 ShadowAtlas)\n- 스포트라이트는 원근 그림자 맵 한 칸, 점광은 큐브 여섯 면을 칸 여섯에 (면마다 90 도 원근) 그린다.\n- update_lights(빛 목록) 이 casts_shadow 가 true 인 빛을 SHADOW_ATLAS_MAXIMUM_LIGHTS 까지 골라 칸을 나누고 칸마다 보기와 투영을 셈한다.\n- 칸은 한 변 grid_size 의 격자다. (grid_size = 올림(칸 수의 제곱근), 칸 한 변 = 내림(해상도 / grid_size))\n- 그리기: begin_render 로 판을 비우고, 칸마다 begin_tile 로 뷰포트를 건 뒤 그 칸의 보기와 투영으로 깊이를 그린다. (ToonRenderer::begin_shadow_atlas_pass, set_shadow_atlas_tile)",
+						"en": "Shadow atlas. (Stores real-time shadows of point lights and spotlights as tiles in one depth texture, the original ShadowAtlas)\n- A spotlight is drawn into one perspective shadow map tile, a point light draws the six cube faces into six tiles (90 degree perspective per face).\n- update_lights(light list) picks lights with casts_shadow true up to SHADOW_ATLAS_MAXIMUM_LIGHTS, divides the tiles and computes view and projection per tile.\n- Tiles form a grid of grid_size per side. (grid_size = ceil(square root of the tile count), tile side = floor(resolution / grid_size))\n- Drawing: begin_render clears the target, then per tile begin_tile sets the viewport and depth is drawn with that tile's view and projection. (ToonRenderer::begin_shadow_atlas_pass, set_shadow_atlas_tile)"
+					},
+					"counterpart": {
+						"engine": "vanilla.js",
+						"module": "experimental/graphics/shadowmap",
+						"class": "ShadowAtlas"
+					},
+					"source": "src/graphics3d/shadowmap.rs",
+					"members": [
+						{
+							"kind": "constructor",
+							"name": "new",
+							"signature": "pub fn new(gl: &glow::Context, resolution: i32) -> Result<ShadowAtlas, String>",
+							"params": [
+								{
+									"name": "gl",
+									"type": "&glow::Context",
+									"description": {
+										"ko": "GL 컨텍스트.",
+										"en": "GL context."
+									}
+								},
+								{
+									"name": "resolution",
+									"type": "i32",
+									"description": {
+										"ko": "깊이 텍스처 한 변의 텍셀 수. (정사각형)",
+										"en": "Number of texels per side of the depth texture. (Square)"
+									}
+								}
+							],
+							"returns": {
+								"type": "Result<ShadowAtlas, String>",
+								"description": {
+									"ko": "새 그림자 아틀라스. 텍스처나 프레임버퍼를 못 만들면 Err(GL 의 오류 글).",
+									"en": "New shadow atlas. Err(GL error message) if the texture or framebuffer cannot be created."
+								}
+							},
+							"description": {
+								"ko": "생성. (깊이 텍스처와 컬러 없는 프레임버퍼, 앞의 묶음은 돌린다)\n- 칸이 없는 상태로 시작한다. (격자 한 변 1, 칸 한 변은 해상도, update_lights 로 나눈다)",
+								"en": "Constructor. (Depth texture and framebuffer without color, restores the previous bindings)\n- Starts with no tiles. (Grid side 1, tile side equal to the resolution, divided by update_lights)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/shadowmap.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "experimental/graphics/shadowmap",
+								"class": "ShadowAtlas",
+								"name": "constructor"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "update_lights",
+							"signature": "pub fn update_lights(&mut self, light_source_list: &[ShadowAtlasLightSource])",
+							"params": [
+								{
+									"name": "light_source_list",
+									"type": "&[ShadowAtlasLightSource]",
+									"description": {
+										"ko": "빛 목록. (차례가 ShadowAtlasLight::light_index 가 된다, ToonLightSet::read_shadow_light_sources 로 짓는다)",
+										"en": "Light list. (The order becomes ShadowAtlasLight::light_index, built with ToonLightSet::read_shadow_light_sources)"
+									}
+								}
+							],
+							"description": {
+								"ko": "빛 목록으로 칸 나누기. (casts_shadow 가 true 인 것을 SHADOW_ATLAS_MAXIMUM_LIGHTS 까지, 스포트라이트 한 칸, 점광 여섯 칸)\n- 가까운 거리는 0.001 아래로, 먼 거리는 가까운 거리 + 0.01 아래로 내려가지 않는다. (range 가 0 이하면 30)\n- 스포트라이트의 원근 반각은 바깥 원뿔 반각(0.01 이상)에 0.05 라디안을 더하고 1.45 라디안에서 자른다.",
+								"en": "Divides tiles from the light list. (Ones with casts_shadow true up to SHADOW_ATLAS_MAXIMUM_LIGHTS, one tile per spotlight, six per point light)\n- The near distance does not go below 0.001, and the far distance does not go below the near distance + 0.01. (30 if range is 0 or less)\n- The perspective half angle of a spotlight is the outer cone half angle (at least 0.01) plus 0.05 radians, clamped at 1.45 radians."
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/shadowmap.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "experimental/graphics/shadowmap",
+								"class": "ShadowAtlas",
+								"name": "updateLights"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "begin_render",
+							"signature": "pub fn begin_render(&self, gl: &glow::Context)",
+							"params": [
+								{
+									"name": "gl",
+									"type": "&glow::Context",
+									"description": {
+										"ko": "GL 컨텍스트.",
+										"en": "GL context."
+									}
+								}
+							],
+							"description": {
+								"ko": "깊이 패스 시작. (프레임버퍼를 묶고 판 전체를 비운다, 칸마다 begin_tile)\n- 뷰포트를 판 전체로, 가위 시험을 끄고, 깊이 시험과 깊이 쓰기를 켠다.",
+								"en": "Begins the depth pass. (Binds the framebuffer and clears the whole target, begin_tile per tile)\n- Sets the viewport to the whole target, turns off the scissor test, and turns on the depth test and depth writes."
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/shadowmap.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "experimental/graphics/shadowmap",
+								"class": "ShadowAtlas",
+								"name": "beginRender"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "begin_tile",
+							"signature": "pub fn begin_tile(&self, gl: &glow::Context, tile_index: usize)",
+							"params": [
+								{
+									"name": "gl",
+									"type": "&glow::Context",
+									"description": {
+										"ko": "GL 컨텍스트.",
+										"en": "GL context."
+									}
+								},
+								{
+									"name": "tile_index",
+									"type": "usize",
+									"description": {
+										"ko": "칸 번호. (0 ~ get_tile_count() - 1, 밖이면 패닉)",
+										"en": "Tile number. (0 ~ get_tile_count() - 1, panics if out of range)"
+									}
+								}
+							],
+							"description": {
+								"ko": "칸 하나에 뷰포트 걸기.",
+								"en": "Set the viewport to one tile."
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/shadowmap.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "experimental/graphics/shadowmap",
+								"class": "ShadowAtlas",
+								"name": "beginTile"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "get_lights",
+							"signature": "pub fn get_lights(&self) -> &[ShadowAtlasLight]",
+							"params": [],
+							"returns": {
+								"type": "&[ShadowAtlasLight]",
+								"description": {
+									"ko": "마지막 update_lights 가 고른 빛 목록. (SHADOW_ATLAS_MAXIMUM_LIGHTS 개까지)",
+									"en": "List of lights picked by the last update_lights. (Up to SHADOW_ATLAS_MAXIMUM_LIGHTS)"
+								}
+							},
+							"description": {
+								"ko": "그림자를 받는 빛 반환.",
+								"en": "Returns the lights whose shadows are received."
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/shadowmap.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "experimental/graphics/shadowmap",
+								"class": "ShadowAtlas",
+								"name": "getLights"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "get_tile_count",
+							"signature": "pub fn get_tile_count(&self) -> usize",
+							"params": [],
+							"returns": {
+								"type": "usize",
+								"description": {
+									"ko": "칸 수. (스포트라이트 1, 점광 6 씩 더한 것)",
+									"en": "Tile count. (1 per spotlight plus 6 per point light)"
+								}
+							},
+							"description": {
+								"ko": "칸 수 반환.",
+								"en": "Return the tile count."
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/shadowmap.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "experimental/graphics/shadowmap",
+								"class": "ShadowAtlas",
+								"name": "getTileCount"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "get_tile",
+							"signature": "pub fn get_tile(&self, tile_index: usize) -> &ShadowAtlasTile",
+							"params": [
+								{
+									"name": "tile_index",
+									"type": "usize",
+									"description": {
+										"ko": "칸 번호. (0 ~ get_tile_count() - 1, 밖이면 패닉)",
+										"en": "Tile number. (0 ~ get_tile_count() - 1, panics if out of range)"
+									}
+								}
+							],
+							"returns": {
+								"type": "&ShadowAtlasTile",
+								"description": {
+									"ko": "그 칸의 보기와 투영, 자리, 크기.",
+									"en": "The tile's view and projection, position and size."
+								}
+							},
+							"description": {
+								"ko": "칸 반환.",
+								"en": "Return a tile."
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/shadowmap.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "experimental/graphics/shadowmap",
+								"class": "ShadowAtlas",
+								"name": "getTile"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "get_grid_size",
+							"signature": "pub fn get_grid_size(&self) -> i32",
+							"params": [],
+							"returns": {
+								"type": "i32",
+								"description": {
+									"ko": "격자 한 변의 칸 수. (올림(칸 수의 제곱근), 1 이상)",
+									"en": "Number of tiles per side of the grid. (ceil(square root of the tile count), at least 1)"
+								}
+							},
+							"description": {
+								"ko": "격자 한 변의 칸 수 반환.",
+								"en": "Return the number of tiles per side of the grid."
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/shadowmap.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "experimental/graphics/shadowmap",
+								"class": "ShadowAtlas",
+								"name": "getGridSize"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "get_tile_size",
+							"signature": "pub fn get_tile_size(&self) -> i32",
+							"params": [],
+							"returns": {
+								"type": "i32",
+								"description": {
+									"ko": "칸 한 변의 픽셀 수. (내림(해상도 / 격자 한 변))",
+									"en": "Number of pixels per side of a tile. (floor(resolution / grid side))"
+								}
+							},
+							"description": {
+								"ko": "칸 한 변 반환. (픽셀)",
+								"en": "Return the side of a tile. (Pixels)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/shadowmap.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "experimental/graphics/shadowmap",
+								"class": "ShadowAtlas",
+								"name": "getTileSize"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "get_resolution",
+							"signature": "pub fn get_resolution(&self) -> i32",
+							"params": [],
+							"returns": {
+								"type": "i32",
+								"description": {
+									"ko": "깊이 텍스처 한 변의 텍셀 수.",
+									"en": "Number of texels per side of the depth texture."
+								}
+							},
+							"description": {
+								"ko": "해상도 반환.",
+								"en": "Returns the resolution."
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/shadowmap.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "experimental/graphics/shadowmap",
+								"class": "ShadowAtlas",
+								"name": "getResolution"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "get_depth_texture",
+							"signature": "pub fn get_depth_texture(&self) -> GlTexture",
+							"params": [],
+							"returns": {
+								"type": "GlTexture",
+								"description": {
+									"ko": "아틀라스 깊이 텍스처의 GL 손잡이.",
+									"en": "GL handle of the atlas depth texture."
+								}
+							},
+							"description": {
+								"ko": "깊이 텍스처 반환. (비교 샘플링 sampler2DShadow)",
+								"en": "Return the depth texture. (Comparison sampling with sampler2DShadow)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/shadowmap.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "experimental/graphics/shadowmap",
+								"class": "ShadowAtlas",
+								"name": "getDepthTexture"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "get_framebuffer",
+							"signature": "pub fn get_framebuffer(&self) -> GlFramebuffer",
+							"params": [],
+							"returns": {
+								"type": "GlFramebuffer",
+								"description": {
+									"ko": "깊이만 붙은 프레임버퍼의 GL 손잡이.",
+									"en": "GL handle of the depth-only framebuffer."
+								}
+							},
+							"description": {
+								"ko": "프레임버퍼 반환.",
+								"en": "Returns the framebuffer."
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/shadowmap.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "experimental/graphics/shadowmap",
+								"class": "ShadowAtlas",
+								"name": "getFramebuffer"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "destroy",
+							"signature": "pub fn destroy(&self, gl: &glow::Context)",
+							"params": [
+								{
+									"name": "gl",
+									"type": "&glow::Context",
+									"description": {
+										"ko": "이 아틀라스를 지은 GL 컨텍스트.",
+										"en": "GL context this atlas was built in."
+									}
+								}
+							],
+							"description": {
+								"ko": "파괴. (GL 리소스 해제)",
+								"en": "Destroy. (Releases GL resources)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/shadowmap.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "experimental/graphics/shadowmap",
+								"class": "ShadowAtlas",
+								"name": "destroy"
+							}
+						}
+					],
+					"examples": [
+						{
+							"title": {
+								"ko": "빛 목록으로 칸을 나누고 칸마다 깊이 그리기",
+								"en": "Divide tiles from the light list and draw depth per tile"
+							},
+							"code": "use vanilla::{ShadowAtlas, ShadowAtlasLightSource};\n\nfn render_shadows(gl: &glow::Context, shadow_atlas: &mut ShadowAtlas, light_source_list: &[ShadowAtlasLightSource]) {\n\tshadow_atlas.update_lights(light_source_list);\n\tshadow_atlas.begin_render(gl);\n\tfor tile_index in 0..shadow_atlas.get_tile_count() {\n\t\tshadow_atlas.begin_tile(gl, tile_index);\n\t\tlet _view_projection_matrix = shadow_atlas.get_tile(tile_index).view_projection_matrix;\n\t}\n}",
+							"language": "rust"
+						}
+					]
 				}
 			],
 			"functions": [
@@ -83362,6 +84177,30 @@
 					},
 					"since": "0.3.2",
 					"source": "src/graphics3d/shadowmap.rs"
+				},
+				{
+					"kind": "field",
+					"name": "SHADOW_ATLAS_MAXIMUM_LIGHTS",
+					"signature": "pub const SHADOW_ATLAS_MAXIMUM_LIGHTS: usize = 4",
+					"params": [],
+					"returns": {
+						"type": "usize",
+						"description": {
+							"ko": "",
+							"en": ""
+						}
+					},
+					"description": {
+						"ko": "그림자 아틀라스가 받는 점광과 스포트라이트 수의 상한. (셰이더의 유니폼 배열 크기)",
+						"en": "Upper limit of point lights and spotlights the shadow atlas receives. (Size of the uniform arrays in the shader)"
+					},
+					"since": "0.4.0",
+					"source": "src/graphics3d/shadowmap.rs",
+					"counterpart": {
+						"engine": "vanilla.js",
+						"module": "experimental/graphics/shadowmap",
+						"name": "SHADOW_ATLAS_MAXIMUM_LIGHTS"
+					}
 				}
 			],
 			"enums": []
@@ -89891,6 +90730,25 @@
 							},
 							"since": "0.4.0",
 							"source": "src/graphics3d/toon/meshbuilder.rs"
+						},
+						{
+							"kind": "field",
+							"name": "uvs1",
+							"signature": "pub uvs1: Vec<f32>",
+							"params": [],
+							"returns": {
+								"type": "Vec<f32>",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "점마다 2 번 텍스처 좌표 둘. (비면 없음)",
+								"en": "Two second UV texture coordinates per point. (none if empty)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/meshbuilder.rs"
 						}
 					]
 				},
@@ -90260,6 +91118,25 @@
 							"description": {
 								"ko": "꼭짓점마다 텍스처 좌표 둘. (UV 를 준 꼭짓점이 없으면 빈 것)",
 								"en": "Two texture coordinates per vertex. (empty if no vertex was given UVs)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/meshbuilder.rs"
+						},
+						{
+							"kind": "field",
+							"name": "uv1_data",
+							"signature": "pub uv1_data: Vec<f32>",
+							"params": [],
+							"returns": {
+								"type": "Vec<f32>",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "꼭짓점마다 2 번 텍스처 좌표 둘. (2 번 UV 를 준 꼭짓점이 없으면 빈 것)",
+								"en": "Two second UV texture coordinates per vertex. (Empty if no vertex was given a second UV)"
 							},
 							"since": "0.4.0",
 							"source": "src/graphics3d/toon/meshbuilder.rs"
@@ -90966,7 +91843,7 @@
 						{
 							"kind": "method",
 							"name": "add_triangles_with_uvs",
-							"signature": "pub fn add_triangles_with_uvs(&mut self, positions: &[f32], normals: &[f32], indices: &[u32], matrix: &Matrix4, color: [f32; 3], glow: f32, is_unlit: bool, joints: Option<&[f32]>, weights: Option<&[f32]>, uvs: Option<&[f32]>)",
+							"signature": "pub fn add_triangles_with_uvs(&mut self, positions: &[f32], normals: &[f32], indices: &[u32], matrix: &Matrix4, color: [f32; 3], glow: f32, is_unlit: bool, joints: Option<&[f32]>, weights: Option<&[f32]>, uvs: Option<&[f32]>, uvs1: Option<&[f32]>)",
 							"params": [
 								{
 									"name": "positions",
@@ -91047,11 +91924,19 @@
 										"ko": "",
 										"en": ""
 									}
+								},
+								{
+									"name": "uvs1",
+									"type": "Option<&[f32]>",
+									"description": {
+										"ko": "",
+										"en": ""
+									}
 								}
 							],
 							"description": {
-								"ko": "받은 모형의 삼각형을 텍스처 좌표와 함께 담기. (uvs 는 꼭짓점마다 둘, 원본 addTriangles 의 마지막 선택 인자)",
-								"en": "Stores the triangles of a loaded model along with texture coordinates. (uvs are two per vertex, the last optional argument of the original addTriangles)"
+								"ko": "받은 모형의 삼각형을 텍스처 좌표와 함께 담기. (uvs, uvs1 은 꼭짓점마다 둘, 원본 addTriangles 의 마지막 두 선택 인자)",
+								"en": "Stores the triangles of a loaded model along with texture coordinates. (uvs, uvs1 are two per vertex, the last two optional arguments of the original addTriangles)"
 							},
 							"since": "0.4.0",
 							"source": "src/graphics3d/toon/meshbuilder.rs"
@@ -94212,6 +95097,120 @@
 						},
 						{
 							"kind": "field",
+							"name": "outline_offset_z",
+							"signature": "pub outline_offset_z: f32",
+							"params": [],
+							"returns": {
+								"type": "f32",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "껍데기 바깥선을 카메라에서 먼 쪽으로 밀 거리. (월드 길이, 몸 앞으로 비치지 않게, 유니티 툰 셰이더의 Offset Z 꼴)",
+								"en": "Distance to push the shell outline away from the camera. (World length, so it does not show through in front of the body, the form of Offset Z of the Unity Toon Shader)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonrenderer.rs"
+						},
+						{
+							"kind": "field",
+							"name": "angel_ring_texture",
+							"signature": "pub angel_ring_texture: Option<GlTexture>",
+							"params": [],
+							"returns": {
+								"type": "Option<GlTexture>",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "천사 고리 텍스처. (보기 공간 노멀의 x 와 2 번 UV 의 y 로 읽는 머리카락 반사 띠, None 이면 없음, 유니티 툰 셰이더의 Angel Ring)",
+								"en": "Angel ring texture. (A hair reflection band read with the x of the view-space normal and the y of the second UV, none if None, Angel Ring of the Unity Toon Shader)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonrenderer.rs"
+						},
+						{
+							"kind": "field",
+							"name": "angel_ring_color",
+							"signature": "pub angel_ring_color: [f32; 3]",
+							"params": [],
+							"returns": {
+								"type": "[f32; 3]",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "천사 고리 색. (선형 배)",
+								"en": "Angel ring color. (Linear multiplier)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonrenderer.rs"
+						},
+						{
+							"kind": "field",
+							"name": "angel_ring_offset_u",
+							"signature": "pub angel_ring_offset_u: f32",
+							"params": [],
+							"returns": {
+								"type": "f32",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "천사 고리 u 를 화면 가운데 쪽으로 당기는 몫. (0 ~ 0.5, AR_OffsetU)",
+								"en": "Amount that pulls the angel ring u toward the screen center. (0 ~ 0.5, AR_OffsetU)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonrenderer.rs"
+						},
+						{
+							"kind": "field",
+							"name": "angel_ring_offset_v",
+							"signature": "pub angel_ring_offset_v: f32",
+							"params": [],
+							"returns": {
+								"type": "f32",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "천사 고리 v 를 2 번 UV 에서 보기 노멀 쪽으로 옮기는 몫. (0 ~ 1, AR_OffsetV, 기본 0.3)",
+								"en": "Amount that shifts the angel ring v from the second UV toward the view normal. (0 ~ 1, AR_OffsetV, default 0.3)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonrenderer.rs"
+						},
+						{
+							"kind": "field",
+							"name": "is_angel_ring_alpha",
+							"signature": "pub is_angel_ring_alpha: bool",
+							"params": [],
+							"returns": {
+								"type": "bool",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "천사 고리를 텍스처 알파로 덮을지. (false 면 더한다, ARSampler_AlphaOn)",
+								"en": "Whether the angel ring covers by texture alpha. (Adds if false, ARSampler_AlphaOn)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonrenderer.rs"
+						},
+						{
+							"kind": "field",
 							"name": "line_id",
 							"signature": "pub line_id: Option<u32>",
 							"params": [],
@@ -95492,6 +96491,84 @@
 						},
 						{
 							"kind": "method",
+							"name": "begin_shadow_atlas_pass",
+							"signature": "pub fn begin_shadow_atlas_pass(&mut self, gl: &glow::Context, shadow_atlas: &ShadowAtlas)",
+							"params": [
+								{
+									"name": "gl",
+									"type": "&glow::Context",
+									"description": {
+										"ko": "",
+										"en": ""
+									}
+								},
+								{
+									"name": "shadow_atlas",
+									"type": "&ShadowAtlas",
+									"description": {
+										"ko": "",
+										"en": ""
+									}
+								}
+							],
+							"description": {
+								"ko": "그림자 아틀라스 깊이 패스 시작. (아틀라스를 묶어 비우고 앞의 상태를 적어 둔다, 칸마다 set_shadow_atlas_tile 뒤에 draw_mesh 가 깊이만 그린다, 끝은 end_shadow_pass)",
+								"en": "Begins the shadow atlas depth pass. (Binds and clears the atlas and notes the previous state, per tile draw_mesh draws only depth after set_shadow_atlas_tile, end with end_shadow_pass)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonrenderer.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "experimental/graphics/toon/toonrenderer",
+								"class": "ToonRenderer",
+								"name": "beginShadowAtlasPass"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "set_shadow_atlas_tile",
+							"signature": "pub fn set_shadow_atlas_tile(&mut self, gl: &glow::Context, shadow_atlas: &ShadowAtlas, tile_index: usize)",
+							"params": [
+								{
+									"name": "gl",
+									"type": "&glow::Context",
+									"description": {
+										"ko": "",
+										"en": ""
+									}
+								},
+								{
+									"name": "shadow_atlas",
+									"type": "&ShadowAtlas",
+									"description": {
+										"ko": "",
+										"en": ""
+									}
+								},
+								{
+									"name": "tile_index",
+									"type": "usize",
+									"description": {
+										"ko": "",
+										"en": ""
+									}
+								}
+							],
+							"description": {
+								"ko": "그림자 아틀라스의 칸 고르기. (그 칸의 보기와 투영과 절두체, 뷰포트를 건다, begin_shadow_atlas_pass 와 end_shadow_pass 사이)",
+								"en": "Selects a tile of the shadow atlas. (Sets that tile's view, projection, frustum and viewport, between begin_shadow_atlas_pass and end_shadow_pass)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonrenderer.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "experimental/graphics/toon/toonrenderer",
+								"class": "ToonRenderer",
+								"name": "setShadowAtlasTile"
+							}
+						},
+						{
+							"kind": "method",
 							"name": "end_shadow_pass",
 							"signature": "pub fn end_shadow_pass(&mut self, gl: &glow::Context)",
 							"params": [
@@ -96365,6 +97442,163 @@
 						},
 						{
 							"kind": "method",
+							"name": "set_outline_fade_distance",
+							"signature": "pub fn set_outline_fade_distance(&mut self, near_distance: f32, far_distance: f32)",
+							"params": [
+								{
+									"name": "near_distance",
+									"type": "f32",
+									"description": {
+										"ko": "",
+										"en": ""
+									}
+								},
+								{
+									"name": "far_distance",
+									"type": "f32",
+									"description": {
+										"ko": "",
+										"en": ""
+									}
+								}
+							],
+							"description": {
+								"ko": "껍데기 바깥선이 멀면 사라지는 거리 설정. (가까운 거리 이하는 지은 굵기, 먼 거리 이상은 0, 사이는 smoothstep, 먼 거리가 가까운 거리 이하면 끔, 유니티 툰 셰이더의 Nearest, Farthest Distance)",
+								"en": "Sets the distance at which the shell outline fades when far. (Built width up to the near distance, 0 from the far distance, smoothstep in between, off if the far distance is not above the near distance, Nearest and Farthest Distance of the Unity Toon Shader)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonrenderer.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "experimental/graphics/toon/toonrenderer",
+								"class": "ToonRenderer",
+								"name": "setOutlineFadeDistance"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "get_outline_fade_distance",
+							"signature": "pub fn get_outline_fade_distance(&self) -> [f32; 2]",
+							"params": [],
+							"returns": {
+								"type": "[f32; 2]",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "껍데기 바깥선이 사라지는 거리 반환. ([가까운 거리, 먼 거리])",
+								"en": "Returns the distance at which the shell outline fades. ([near distance, far distance])"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonrenderer.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "experimental/graphics/toon/toonrenderer",
+								"class": "ToonRenderer",
+								"name": "getOutlineFadeDistance"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "set_local_shadows",
+							"signature": "pub fn set_local_shadows(&mut self, shadow_atlas: Option<&ShadowAtlas>, strength: f32)",
+							"params": [
+								{
+									"name": "shadow_atlas",
+									"type": "Option<&ShadowAtlas>",
+									"description": {
+										"ko": "",
+										"en": ""
+									}
+								},
+								{
+									"name": "strength",
+									"type": "f32",
+									"description": {
+										"ko": "",
+										"en": ""
+									}
+								}
+							],
+							"description": {
+								"ko": "받을 점광과 스포트라이트 그림자 설정. (ShadowAtlas 나 None, 세기 0 ~ 1, 아틀라스는 기본 빛 묶음의 점광 목록으로 지은 것)",
+								"en": "Sets the point light and spotlight shadows to receive. (ShadowAtlas or None, strength 0 ~ 1, the atlas is the one built from the point light list of the default light set)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonrenderer.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "experimental/graphics/toon/toonrenderer",
+								"class": "ToonRenderer",
+								"name": "setLocalShadows"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "set_light_color_usage",
+							"signature": "pub fn set_light_color_usage(&mut self, light_color_usage: ToonLightColorUsage)",
+							"params": [
+								{
+									"name": "light_color_usage",
+									"type": "ToonLightColorUsage",
+									"description": {
+										"ko": "",
+										"en": ""
+									}
+								}
+							],
+							"description": {
+								"ko": "빛 색 쓰기 설정. (ToonLightSet::set_light_color_usage)",
+								"en": "Sets the light color usage. (ToonLightSet::set_light_color_usage)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonrenderer.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "experimental/graphics/toon/toonrenderer",
+								"class": "ToonRenderer",
+								"name": "setLightColorUsage"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "set_shade_rim_light",
+							"signature": "pub fn set_shade_rim_light(&mut self, shade_rim_color: [f32; 3], shade_rim_power: f32)",
+							"params": [
+								{
+									"name": "shade_rim_color",
+									"type": "[f32; 3]",
+									"description": {
+										"ko": "",
+										"en": ""
+									}
+								},
+								{
+									"name": "shade_rim_power",
+									"type": "f32",
+									"description": {
+										"ko": "",
+										"en": ""
+									}
+								}
+							],
+							"description": {
+								"ko": "그늘 쪽 림 빛 설정. (ToonLightSet::set_shade_rim_light)",
+								"en": "Sets the shade-side rim light. (ToonLightSet::set_shade_rim_light)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonrenderer.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "experimental/graphics/toon/toonrenderer",
+								"class": "ToonRenderer",
+								"name": "setShadeRimLight"
+							}
+						},
+						{
+							"kind": "method",
 							"name": "get_outline_distance_scale",
 							"signature": "pub fn get_outline_distance_scale(&self) -> [f32; 3]",
 							"params": [],
@@ -96649,7 +97883,7 @@
 				{
 					"kind": "field",
 					"name": "TOON_MAXIMUM_MATERIAL_TEXTURES",
-					"signature": "pub const TOON_MAXIMUM_MATERIAL_TEXTURES: usize = 9",
+					"signature": "pub const TOON_MAXIMUM_MATERIAL_TEXTURES: usize = 8",
 					"params": [],
 					"returns": {
 						"type": "usize",
@@ -96659,8 +97893,8 @@
 						}
 					},
 					"description": {
-						"ko": "머티리얼이 그리기마다 묶을 수 있는 텍스처 수의 상한. (유닛 7 ~ 15)",
-						"en": "Upper limit on the number of textures a material can bind per draw. (units 7 ~ 15)"
+						"ko": "머티리얼이 그리기마다 묶을 수 있는 텍스처 수의 상한. (유닛 8 ~ 15)",
+						"en": "Upper limit of textures a material can bind per draw. (Units 8 ~ 15)"
 					},
 					"since": "0.4.0",
 					"source": "src/graphics3d/toon/toonrenderer.rs",
@@ -96873,6 +98107,55 @@
 						"engine": "vanilla.js",
 						"module": "experimental/graphics/toon/toonrenderer",
 						"name": "readViewRotation"
+					}
+				},
+				{
+					"kind": "method",
+					"name": "read_uv_data",
+					"signature": "pub fn read_uv_data(uv_data: &[f32], uv1_data: Option<&[f32]>, vertex_count: usize) -> Vec<f32>",
+					"params": [
+						{
+							"name": "uv_data",
+							"type": "&[f32]",
+							"description": {
+								"ko": "",
+								"en": ""
+							}
+						},
+						{
+							"name": "uv1_data",
+							"type": "Option<&[f32]>",
+							"description": {
+								"ko": "",
+								"en": ""
+							}
+						},
+						{
+							"name": "vertex_count",
+							"type": "usize",
+							"description": {
+								"ko": "",
+								"en": ""
+							}
+						}
+					],
+					"returns": {
+						"type": "Vec<f32>",
+						"description": {
+							"ko": "",
+							"en": ""
+						}
+					},
+					"description": {
+						"ko": "UV 꼭짓점 배열 짓기. (2 번 UV 가 없으면 점마다 UV 2, 있으면 UV 와 2 번 UV 를 섞어 4, 셰이더의 vertexUv 는 vec4 라 2 개만 올리면 zw 는 (0, 1))",
+						"en": "Builds the UV vertex array. (UV 2 per point without a second UV, UV and second UV interleaved as 4 with one, vertexUv in the shader is a vec4, so if only 2 are uploaded zw is (0, 1))"
+					},
+					"since": "0.4.0",
+					"source": "src/graphics3d/toon/toonrenderer.rs",
+					"counterpart": {
+						"engine": "vanilla.js",
+						"module": "experimental/graphics/toon/toonrenderer",
+						"name": "readUvData"
 					}
 				},
 				{
@@ -97315,6 +98598,49 @@
 								"module": "experimental/graphics/toon/toondrawqueue",
 								"class": "ToonDrawQueue",
 								"name": "drawShadows"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "draw_local_shadows",
+							"signature": "pub fn draw_local_shadows(&self, gl: &glow::Context, renderer: &mut ToonRenderer, shadow_atlas: &ShadowAtlas)",
+							"params": [
+								{
+									"name": "gl",
+									"type": "&glow::Context",
+									"description": {
+										"ko": "",
+										"en": ""
+									}
+								},
+								{
+									"name": "renderer",
+									"type": "&mut ToonRenderer",
+									"description": {
+										"ko": "",
+										"en": ""
+									}
+								},
+								{
+									"name": "shadow_atlas",
+									"type": "&ShadowAtlas",
+									"description": {
+										"ko": "",
+										"en": ""
+									}
+								}
+							],
+							"description": {
+								"ko": "점광과 스포트라이트 그림자 깊이 그리기. (불투명하고 casts_shadow 가 true 인 것을 아틀라스의 칸마다, 앞의 프레임버퍼와 뷰포트는 되돌린다)",
+								"en": "Draws point light and spotlight shadow depth. (Opaque ones with casts_shadow true, per atlas tile, the previous framebuffer and viewport are restored)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toondrawqueue.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "experimental/graphics/toon/toondrawqueue",
+								"class": "ToonDrawQueue",
+								"name": "drawLocalShadows"
 							}
 						},
 						{
@@ -98034,8 +99360,8 @@
 					"name": "ToonLineTarget",
 					"kind": "struct",
 					"summary": {
-						"ko": "선의 판. (노멀과 번호 RGBA8 과 깊이 24, 씨앗 RGBA16UI 둘, seed_index 는 넓히기를 마친 쪽)",
-						"en": "Line target. (normal and ID RGBA8 with depth 24, two RGBA16UI seed textures, seed_index is the one that finished expanding)"
+						"ko": "선의 판. (그리는 영역 해상도의 노멀과 번호 RGBA8, 깊이 24, 씨앗 RGBA16UI, 넓히기 판 RGBA16UI 둘, jump_flood_index 는 넓히기를 마친 쪽)",
+						"en": "Line target. (Normal and ID RGBA8 at drawing area resolution, depth 24, seeds RGBA16UI, two widening targets RGBA16UI, jump_flood_index is the side where widening finished)"
 					},
 					"source": "src/graphics3d/toon/toonscreenoutline.rs",
 					"members": [
@@ -98098,8 +99424,46 @@
 						},
 						{
 							"kind": "field",
-							"name": "seed_framebuffers",
-							"signature": "pub seed_framebuffers: [GlFramebuffer; 2]",
+							"name": "seed_framebuffer",
+							"signature": "pub seed_framebuffer: GlFramebuffer",
+							"params": [],
+							"returns": {
+								"type": "GlFramebuffer",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "",
+								"en": ""
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonscreenoutline.rs"
+						},
+						{
+							"kind": "field",
+							"name": "seed_texture",
+							"signature": "pub seed_texture: GlTexture",
+							"params": [],
+							"returns": {
+								"type": "GlTexture",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "",
+								"en": ""
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonscreenoutline.rs"
+						},
+						{
+							"kind": "field",
+							"name": "jump_flood_framebuffers",
+							"signature": "pub jump_flood_framebuffers: [GlFramebuffer; 2]",
 							"params": [],
 							"returns": {
 								"type": "[GlFramebuffer; 2]",
@@ -98117,8 +99481,8 @@
 						},
 						{
 							"kind": "field",
-							"name": "seed_textures",
-							"signature": "pub seed_textures: [GlTexture; 2]",
+							"name": "jump_flood_textures",
+							"signature": "pub jump_flood_textures: [GlTexture; 2]",
 							"params": [],
 							"returns": {
 								"type": "[GlTexture; 2]",
@@ -98136,8 +99500,8 @@
 						},
 						{
 							"kind": "field",
-							"name": "seed_index",
-							"signature": "pub seed_index: usize",
+							"name": "jump_flood_index",
+							"signature": "pub jump_flood_index: usize",
 							"params": [],
 							"returns": {
 								"type": "usize",
@@ -98190,6 +99554,44 @@
 							},
 							"since": "0.4.0",
 							"source": "src/graphics3d/toon/toonscreenoutline.rs"
+						},
+						{
+							"kind": "field",
+							"name": "jump_flood_width",
+							"signature": "pub jump_flood_width: i32",
+							"params": [],
+							"returns": {
+								"type": "i32",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "넓히기 판 크기. (픽셀)",
+								"en": "Size of the widening targets. (Pixels)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonscreenoutline.rs"
+						},
+						{
+							"kind": "field",
+							"name": "jump_flood_height",
+							"signature": "pub jump_flood_height: i32",
+							"params": [],
+							"returns": {
+								"type": "i32",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "",
+								"en": ""
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonscreenoutline.rs"
 						}
 					]
 				},
@@ -98210,10 +99612,10 @@
 						{
 							"kind": "static",
 							"name": "read_program_sources",
-							"signature": "pub fn read_program_sources() -> [(&'static str, &'static str); 4]",
+							"signature": "pub fn read_program_sources() -> [(&'static str, &'static str); 5]",
 							"params": [],
 							"returns": {
-								"type": "[(&'static str, &'static str); 4]",
+								"type": "[(&'static str, &'static str); 5]",
 								"description": {
 									"ko": "",
 									"en": ""
@@ -98440,8 +99842,8 @@
 								}
 							],
 							"description": {
-								"ko": "선의 판 해상도 몫 설정. (그리는 영역에 대한 몫 0.25 ~ 1, 선은 그리는 영역에서 거리로 섞어 끊기지 않는다)",
-								"en": "Sets the line target resolution fraction. (fraction of the drawing area 0.25 ~ 1, lines are blended in the drawing area by distance so they do not break)"
+								"ko": "넓히기 판의 해상도 몫 설정. (그리는 영역에 대한 몫 0.25 ~ 1, 선의 판과 씨앗은 그리는 영역 해상도로 잡고 점프 플러딩만 줄인 판에서 해서, 줄여도 계단과 점선이 없다)",
+								"en": "Sets the resolution fraction of the widening target. (Fraction of the drawing area 0.25 ~ 1, the line target and seeds are at drawing area resolution and only the jump flooding runs on the reduced target, so there are no stairs or dotted lines even when reduced)"
 							},
 							"since": "0.4.0",
 							"source": "src/graphics3d/toon/toonscreenoutline.rs",
@@ -103787,6 +105189,270 @@
 							},
 							"since": "0.4.0",
 							"source": "src/graphics3d/toon/toonlightset.rs"
+						},
+						{
+							"kind": "field",
+							"name": "casts_shadow",
+							"signature": "pub casts_shadow: bool",
+							"params": [],
+							"returns": {
+								"type": "bool",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "그림자를 드리울지. (ShadowAtlas 가 칸을 준다)",
+								"en": "Whether it casts a shadow. (ShadowAtlas gives it tiles)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonlightset.rs"
+						},
+						{
+							"kind": "field",
+							"name": "shadow_near",
+							"signature": "pub shadow_near: f32",
+							"params": [],
+							"returns": {
+								"type": "f32",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "그림자의 가까운 거리. (먼 거리는 range, 0 이면 30)",
+								"en": "Near distance of the shadow. (The far distance is range, 30 if 0)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonlightset.rs"
+						}
+					]
+				},
+				{
+					"name": "ToonLightColorUsage",
+					"kind": "struct",
+					"summary": {
+						"ko": "색마다 빛 색을 곱할지. (유니티 툰 셰이더의 Is_LightColor_*, 기본 모두 true)\n- 바탕, 그늘, 하이라이트는 끄면 빛의 휘도(회색)를 받고, 나머지는 끄면 빛을 받지 않는다.",
+						"en": "Whether to multiply the light color per color. (Is_LightColor_* of the Unity Toon Shader, all true by default)\n- Base, shade and highlight receive the light's luminance (gray) when off, and the rest receive no light when off."
+					},
+					"traits": [
+						"Clone",
+						"Copy",
+						"Debug",
+						"PartialEq",
+						"Eq",
+						"Default"
+					],
+					"source": "src/graphics3d/toon/toonlightset.rs",
+					"members": [
+						{
+							"kind": "field",
+							"name": "base",
+							"signature": "pub base: bool",
+							"params": [],
+							"returns": {
+								"type": "bool",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "바탕.",
+								"en": "Base."
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonlightset.rs"
+						},
+						{
+							"kind": "field",
+							"name": "shade",
+							"signature": "pub shade: bool",
+							"params": [],
+							"returns": {
+								"type": "bool",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "그늘.",
+								"en": "Shade."
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonlightset.rs"
+						},
+						{
+							"kind": "field",
+							"name": "highlight",
+							"signature": "pub highlight: bool",
+							"params": [],
+							"returns": {
+								"type": "bool",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "하이라이트.",
+								"en": "Highlight."
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonlightset.rs"
+						},
+						{
+							"kind": "field",
+							"name": "rim",
+							"signature": "pub rim: bool",
+							"params": [],
+							"returns": {
+								"type": "bool",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "림.",
+								"en": "Rim."
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonlightset.rs"
+						},
+						{
+							"kind": "field",
+							"name": "shade_rim",
+							"signature": "pub shade_rim: bool",
+							"params": [],
+							"returns": {
+								"type": "bool",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "그늘 쪽 림.",
+								"en": "Shade-side rim."
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonlightset.rs"
+						},
+						{
+							"kind": "field",
+							"name": "matcap",
+							"signature": "pub matcap: bool",
+							"params": [],
+							"returns": {
+								"type": "bool",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "매트캡.",
+								"en": "Matcap."
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonlightset.rs"
+						},
+						{
+							"kind": "field",
+							"name": "angel_ring",
+							"signature": "pub angel_ring: bool",
+							"params": [],
+							"returns": {
+								"type": "bool",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "천사 고리.",
+								"en": "Angel ring."
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonlightset.rs"
+						},
+						{
+							"kind": "field",
+							"name": "outline",
+							"signature": "pub outline: bool",
+							"params": [],
+							"returns": {
+								"type": "bool",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "껍데기 바깥선.",
+								"en": "Shell outline."
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonlightset.rs"
+						}
+					]
+				},
+				{
+					"name": "ToonShadeRimLight",
+					"kind": "struct",
+					"summary": {
+						"ko": "그늘 쪽 림 빛. (선형 색과 거듭제곱, 거듭제곱이 0 이하면 없음)",
+						"en": "Shade-side rim light. (Linear color and power, none if the power is 0 or less)"
+					},
+					"traits": [
+						"Clone",
+						"Copy",
+						"Debug",
+						"PartialEq"
+					],
+					"source": "src/graphics3d/toon/toonlightset.rs",
+					"members": [
+						{
+							"kind": "field",
+							"name": "color",
+							"signature": "pub color: [f32; 3]",
+							"params": [],
+							"returns": {
+								"type": "[f32; 3]",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "",
+								"en": ""
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonlightset.rs"
+						},
+						{
+							"kind": "field",
+							"name": "power",
+							"signature": "pub power: f32",
+							"params": [],
+							"returns": {
+								"type": "f32",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "",
+								"en": ""
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonlightset.rs"
 						}
 					]
 				},
@@ -104667,6 +106333,118 @@
 						},
 						{
 							"kind": "method",
+							"name": "set_shade_rim_light",
+							"signature": "pub fn set_shade_rim_light(&mut self, shade_rim_color: [f32; 3], shade_rim_power: f32)",
+							"params": [
+								{
+									"name": "shade_rim_color",
+									"type": "[f32; 3]",
+									"description": {
+										"ko": "",
+										"en": ""
+									}
+								},
+								{
+									"name": "shade_rim_power",
+									"type": "f32",
+									"description": {
+										"ko": "",
+										"en": ""
+									}
+								}
+							],
+							"description": {
+								"ko": "그늘 쪽 림 빛 설정. (해와 등진 쪽의 테, 선형 색, 거듭제곱, 부드러움은 set_rim_light 의 것을 같이 쓴다, 거듭제곱이 0 이하면 없음)",
+								"en": "Sets the shade-side rim light. (Rim on the side facing away from the sun, linear color, power, softness is shared with set_rim_light, none if the power is 0 or less)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonlightset.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "experimental/graphics/toon/toonlightset",
+								"class": "ToonLightSet",
+								"name": "setShadeRimLight"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "get_shade_rim_light",
+							"signature": "pub fn get_shade_rim_light(&self) -> ToonShadeRimLight",
+							"params": [],
+							"returns": {
+								"type": "ToonShadeRimLight",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "그늘 쪽 림 빛 반환.",
+								"en": "Return the shade-side rim light."
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonlightset.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "experimental/graphics/toon/toonlightset",
+								"class": "ToonLightSet",
+								"name": "getShadeRimLight"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "set_light_color_usage",
+							"signature": "pub fn set_light_color_usage(&mut self, light_color_usage: ToonLightColorUsage)",
+							"params": [
+								{
+									"name": "light_color_usage",
+									"type": "ToonLightColorUsage",
+									"description": {
+										"ko": "",
+										"en": ""
+									}
+								}
+							],
+							"description": {
+								"ko": "빛 색 쓰기 설정. (색마다 빛 색을 곱할지)",
+								"en": "Sets the light color usage. (Whether to multiply the light color per color)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonlightset.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "experimental/graphics/toon/toonlightset",
+								"class": "ToonLightSet",
+								"name": "setLightColorUsage"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "get_light_color_usage",
+							"signature": "pub fn get_light_color_usage(&self) -> ToonLightColorUsage",
+							"params": [],
+							"returns": {
+								"type": "ToonLightColorUsage",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "빛 색 쓰기 반환.",
+								"en": "Return the light color usage."
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonlightset.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "experimental/graphics/toon/toonlightset",
+								"class": "ToonLightSet",
+								"name": "getLightColorUsage"
+							}
+						},
+						{
+							"kind": "method",
 							"name": "set_specular",
 							"signature": "pub fn set_specular(&mut self, specular_strength: f32, specular_exponent: f32, specular_feather: f32, specular_color: [f32; 3])",
 							"params": [
@@ -104792,6 +106570,25 @@
 								"class": "ToonLightSet",
 								"name": "getPointLights"
 							}
+						},
+						{
+							"kind": "method",
+							"name": "read_shadow_light_sources",
+							"signature": "pub fn read_shadow_light_sources(&self) -> Vec<ShadowAtlasLightSource>",
+							"params": [],
+							"returns": {
+								"type": "Vec<ShadowAtlasLightSource>",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "그림자 아틀라스에 줄 빛 꼴 읽기. (점광 목록 차례 그대로, ShadowAtlas::update_lights 에 넘긴다)",
+								"en": "Reads the light descriptions to give to the shadow atlas. (In the same order as the point light list, passed to ShadowAtlas::update_lights)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonlightset.rs"
 						},
 						{
 							"kind": "method",

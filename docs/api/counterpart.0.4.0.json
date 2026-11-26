@@ -15899,6 +15899,182 @@
 		},
 		{
 			"vanilla-engine": {
+				"module": "graphics3d/shadowmap",
+				"class": "ShadowAtlas"
+			},
+			"vanilla.js": {
+				"module": "experimental/graphics/shadowmap",
+				"class": "ShadowAtlas"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/shadowmap",
+				"class": "ShadowAtlas",
+				"name": "new"
+			},
+			"vanilla.js": {
+				"module": "experimental/graphics/shadowmap",
+				"class": "ShadowAtlas",
+				"name": "constructor"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/shadowmap",
+				"class": "ShadowAtlas",
+				"name": "update_lights"
+			},
+			"vanilla.js": {
+				"module": "experimental/graphics/shadowmap",
+				"class": "ShadowAtlas",
+				"name": "updateLights"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/shadowmap",
+				"class": "ShadowAtlas",
+				"name": "begin_render"
+			},
+			"vanilla.js": {
+				"module": "experimental/graphics/shadowmap",
+				"class": "ShadowAtlas",
+				"name": "beginRender"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/shadowmap",
+				"class": "ShadowAtlas",
+				"name": "begin_tile"
+			},
+			"vanilla.js": {
+				"module": "experimental/graphics/shadowmap",
+				"class": "ShadowAtlas",
+				"name": "beginTile"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/shadowmap",
+				"class": "ShadowAtlas",
+				"name": "get_lights"
+			},
+			"vanilla.js": {
+				"module": "experimental/graphics/shadowmap",
+				"class": "ShadowAtlas",
+				"name": "getLights"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/shadowmap",
+				"class": "ShadowAtlas",
+				"name": "get_tile_count"
+			},
+			"vanilla.js": {
+				"module": "experimental/graphics/shadowmap",
+				"class": "ShadowAtlas",
+				"name": "getTileCount"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/shadowmap",
+				"class": "ShadowAtlas",
+				"name": "get_tile"
+			},
+			"vanilla.js": {
+				"module": "experimental/graphics/shadowmap",
+				"class": "ShadowAtlas",
+				"name": "getTile"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/shadowmap",
+				"class": "ShadowAtlas",
+				"name": "get_grid_size"
+			},
+			"vanilla.js": {
+				"module": "experimental/graphics/shadowmap",
+				"class": "ShadowAtlas",
+				"name": "getGridSize"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/shadowmap",
+				"class": "ShadowAtlas",
+				"name": "get_tile_size"
+			},
+			"vanilla.js": {
+				"module": "experimental/graphics/shadowmap",
+				"class": "ShadowAtlas",
+				"name": "getTileSize"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/shadowmap",
+				"class": "ShadowAtlas",
+				"name": "get_resolution"
+			},
+			"vanilla.js": {
+				"module": "experimental/graphics/shadowmap",
+				"class": "ShadowAtlas",
+				"name": "getResolution"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/shadowmap",
+				"class": "ShadowAtlas",
+				"name": "get_depth_texture"
+			},
+			"vanilla.js": {
+				"module": "experimental/graphics/shadowmap",
+				"class": "ShadowAtlas",
+				"name": "getDepthTexture"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/shadowmap",
+				"class": "ShadowAtlas",
+				"name": "get_framebuffer"
+			},
+			"vanilla.js": {
+				"module": "experimental/graphics/shadowmap",
+				"class": "ShadowAtlas",
+				"name": "getFramebuffer"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/shadowmap",
+				"class": "ShadowAtlas",
+				"name": "destroy"
+			},
+			"vanilla.js": {
+				"module": "experimental/graphics/shadowmap",
+				"class": "ShadowAtlas",
+				"name": "destroy"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/shadowmap",
+				"name": "SHADOW_ATLAS_MAXIMUM_LIGHTS"
+			},
+			"vanilla.js": {
+				"module": "experimental/graphics/shadowmap",
+				"name": "SHADOW_ATLAS_MAXIMUM_LIGHTS"
+			}
+		},
+		{
+			"vanilla-engine": {
 				"module": "graphics3d/skinnedmodel",
 				"class": "AnimationClip"
 			},
@@ -17825,6 +18001,30 @@
 			"vanilla-engine": {
 				"module": "graphics3d/toon/toonrenderer",
 				"class": "ToonRenderer",
+				"name": "begin_shadow_atlas_pass"
+			},
+			"vanilla.js": {
+				"module": "experimental/graphics/toon/toonrenderer",
+				"class": "ToonRenderer",
+				"name": "beginShadowAtlasPass"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/toon/toonrenderer",
+				"class": "ToonRenderer",
+				"name": "set_shadow_atlas_tile"
+			},
+			"vanilla.js": {
+				"module": "experimental/graphics/toon/toonrenderer",
+				"class": "ToonRenderer",
+				"name": "setShadowAtlasTile"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/toon/toonrenderer",
+				"class": "ToonRenderer",
 				"name": "end_shadow_pass"
 			},
 			"vanilla.js": {
@@ -18101,6 +18301,66 @@
 			"vanilla-engine": {
 				"module": "graphics3d/toon/toonrenderer",
 				"class": "ToonRenderer",
+				"name": "set_outline_fade_distance"
+			},
+			"vanilla.js": {
+				"module": "experimental/graphics/toon/toonrenderer",
+				"class": "ToonRenderer",
+				"name": "setOutlineFadeDistance"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/toon/toonrenderer",
+				"class": "ToonRenderer",
+				"name": "get_outline_fade_distance"
+			},
+			"vanilla.js": {
+				"module": "experimental/graphics/toon/toonrenderer",
+				"class": "ToonRenderer",
+				"name": "getOutlineFadeDistance"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/toon/toonrenderer",
+				"class": "ToonRenderer",
+				"name": "set_local_shadows"
+			},
+			"vanilla.js": {
+				"module": "experimental/graphics/toon/toonrenderer",
+				"class": "ToonRenderer",
+				"name": "setLocalShadows"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/toon/toonrenderer",
+				"class": "ToonRenderer",
+				"name": "set_light_color_usage"
+			},
+			"vanilla.js": {
+				"module": "experimental/graphics/toon/toonrenderer",
+				"class": "ToonRenderer",
+				"name": "setLightColorUsage"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/toon/toonrenderer",
+				"class": "ToonRenderer",
+				"name": "set_shade_rim_light"
+			},
+			"vanilla.js": {
+				"module": "experimental/graphics/toon/toonrenderer",
+				"class": "ToonRenderer",
+				"name": "setShadeRimLight"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/toon/toonrenderer",
+				"class": "ToonRenderer",
 				"name": "get_outline_distance_scale"
 			},
 			"vanilla.js": {
@@ -18284,6 +18544,16 @@
 		{
 			"vanilla-engine": {
 				"module": "graphics3d/toon/toonrenderer",
+				"name": "read_uv_data"
+			},
+			"vanilla.js": {
+				"module": "experimental/graphics/toon/toonrenderer",
+				"name": "readUvData"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/toon/toonrenderer",
 				"name": "read_outline_vertex_data"
 			},
 			"vanilla.js": {
@@ -18405,6 +18675,18 @@
 				"module": "experimental/graphics/toon/toondrawqueue",
 				"class": "ToonDrawQueue",
 				"name": "drawShadows"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/toon/toondrawqueue",
+				"class": "ToonDrawQueue",
+				"name": "draw_local_shadows"
+			},
+			"vanilla.js": {
+				"module": "experimental/graphics/toon/toondrawqueue",
+				"class": "ToonDrawQueue",
+				"name": "drawLocalShadows"
 			}
 		},
 		{
@@ -19577,6 +19859,54 @@
 				"module": "experimental/graphics/toon/toonlightset",
 				"class": "ToonLightSet",
 				"name": "getRimLight"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/toon/toonlightset",
+				"class": "ToonLightSet",
+				"name": "set_shade_rim_light"
+			},
+			"vanilla.js": {
+				"module": "experimental/graphics/toon/toonlightset",
+				"class": "ToonLightSet",
+				"name": "setShadeRimLight"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/toon/toonlightset",
+				"class": "ToonLightSet",
+				"name": "get_shade_rim_light"
+			},
+			"vanilla.js": {
+				"module": "experimental/graphics/toon/toonlightset",
+				"class": "ToonLightSet",
+				"name": "getShadeRimLight"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/toon/toonlightset",
+				"class": "ToonLightSet",
+				"name": "set_light_color_usage"
+			},
+			"vanilla.js": {
+				"module": "experimental/graphics/toon/toonlightset",
+				"class": "ToonLightSet",
+				"name": "setLightColorUsage"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/toon/toonlightset",
+				"class": "ToonLightSet",
+				"name": "get_light_color_usage"
+			},
+			"vanilla.js": {
+				"module": "experimental/graphics/toon/toonlightset",
+				"class": "ToonLightSet",
+				"name": "getLightColorUsage"
 			}
 		},
 		{
