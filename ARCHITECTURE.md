@@ -228,7 +228,7 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
 - 글자는 원본(브라우저 Canvas2D)과 맞췄다. 오른쪽에서 왼쪽 글(양방향 정렬과 글자 모양 짓기, core/textshaping.rs), CSS 같은 글꼴 얼굴 고르기, 가짜 기울임과 굵게(Chromium 과 Skia 의 값), 크롬 캔버스처럼 낱말마다 모양 짓기, 폰트 문자열의 CSS 단위와 calc(), 낱말 나누기(데스크탑은 ICU4X 사전에 ICU4C CjkBreakEngine 의 셈을 옮겨 크롬 Intl.Segmenter 와 같게), 색 이모지(sbix, CBDT, COLR v0/v1, 맥은 CoreText 로 크롬처럼 작은 크기에서 키우고 내림), 맥 시스템 UI 글꼴의 opsz 축과 trak 자간(HarfBuzz 15 처럼).
 - 작게 남은 차이:
   - 글자 자리는 크롬 HarfBuzz 처럼 16.16 배율에서 셈한다(third_party/rustybuzz). 맥 SFNS(system-ui) 8 ~ 128px, 굵기 300, 400, 700 과 기울임의 세 글 228 개 가운데 222 개가 크롬 158 measureText 와 끝자리까지 같고, 나머지 6 개는 커닝 짝 하나에서 HarfBuzz 위치 단위 1(1/65536px)이 드물게 달라 6.1e-5px 안이다. (그 한 단위의 까닭은 찾지 못했다)
-  - 윈도우, 리눅스, 맥의 글꼴 갈래(DirectWrite, fontconfig, CoreText)는 CI 에서 같은 기계의 크롬 measureText 와 전진폭, 글꼴 위아래 길이를 217 글로 견준다. (tests/desktopplatform.rs) 맥 26 arm64(한국어 화면) 크롬 158 은 217 이 모두 같다. 윈도우 system-ui 의 메뉴 글꼴(NONCLIENTMETRICS)은 크롬과 같은 글꼴이다. 대체 글꼴은 크롬 FontCache::PlatformFallbackFontForCharacter 의 운영체제별 차례를 따른다:
+  - 윈도우, 리눅스, 맥의 글꼴 갈래(DirectWrite, fontconfig, CoreText)는 CI 에서 같은 기계의 크롬 measureText 와 전진폭, 글꼴 위아래 길이를 217 글로 견준다. (tests/desktopplatform.rs) 맥 26(한국어 화면) 크롬 158 은 arm64 와 로제타 x86_64 모두, 리눅스(영어 화면) 크롬 158 은 217 이 모두 같다. 윈도우 system-ui 의 메뉴 글꼴(NONCLIENTMETRICS)은 크롬과 같은 글꼴이다. 대체 글꼴은 크롬 FontCache::PlatformFallbackFontForCharacter 의 운영체제별 차례를 따른다:
     - 기본 글꼴 사슬(원본 SYSTEM_FONT_STRING)은 기본 글꼴 이름 default 를 청했을 때만 잇는다. 원본도 기본 글꼴일 때만 폰트 문자열이 그 사슬이고, 다른 이름이면 크롬은 사슬 없이 시스템 대체로 간다.
     - 대체는 첫 글꼴(빈칸을 가진 첫 얼굴, FontFallbackList::PrimarySimpleFontDataWithSpace)과 폰트 문자열마다 따로 묻고, 대체 얼굴은 운영체제가 그 얼굴을 고른 글자만 그린다. (다른 글자를 위해 읽은 Geeza Pro 가 é 를 가로채지 않는다)
     - 이름 목록의 얼굴이 합친 글자(ï)를 갖지 않아도 정준 분해한 글자(i, U+0308)를 가지면 그 얼굴로 그린다. (HarfBuzz 정규화의 decompose, 크롬은 .notdef 가 남은 글자만 대체로 넘긴다)

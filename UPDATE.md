@@ -1,7 +1,7 @@
 # 업데이트 기록
 
 # 아직 release 에 합치지 않은 것 (release 에 합칠 때 패치 판을 하나 올려 매긴다)
-- 대체 글꼴 고르기(데스크탑)를 크롬 FontCache::PlatformFallbackFontForCharacter 처럼: 맥 크롬 158 과 measureText 217 글이 모두 같다. (전에는 144)
+- 대체 글꼴 고르기(데스크탑)를 크롬 FontCache::PlatformFallbackFontForCharacter 처럼: measureText 217 글이 맥 크롬 158(arm64, 로제타 x86_64) 과 리눅스 크롬 158 에서 모두 같다. (전에는 맥 144, 리눅스 216)
   - 기본 글꼴 사슬(원본 SYSTEM_FONT_STRING)은 기본 글꼴 이름 default 를 청했을 때만 잇는다. "16px Arial" 처럼 다른 이름이면 사슬 없이 운영체제 대체로 간다. (원본도 기본 글꼴일 때만 폰트 문자열이 그 사슬이다)
   - 대체는 첫 글꼴(빈칸을 가진 첫 얼굴)과 폰트 문자열마다 따로 묻고, 대체 얼굴은 운영체제가 그 얼굴을 고른 글자만 그린다. 굵게를 청하면 같은 파일의 굵은 얼굴(Helvetica.ttc 의 Helvetica-Bold, GeezaPro-Bold)도 따로 읽는다.
   - 이름 목록의 얼굴이 합친 글자(ï)가 없어도 정준 분해한 글자(i, U+0308)가 있으면 HarfBuzz 처럼 그 얼굴로 그린다. (third_party/rustybuzz 에 decompose_character 를 더했다)
