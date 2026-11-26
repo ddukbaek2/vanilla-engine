@@ -11,7 +11,7 @@ vanilla.js 를 러스트로 옮긴 엔진의 구성과 소유 구조를 정리�
 Cargo.toml           워크스페이스 (엔진 크레이트와 macros/)
 macros/              반사 절차 매크로 #[reflect] (vanilla-engine-macros, 엔진이 vanilla::reflect 로 다시 내보낸다)
 src/lib.rs           공개 API 를 다시 내보낸다 (원본 import.js 자리)
-src/animation/       Timeline, Animator, Action (원본 experimental/animation, experimental/action)
+src/animation/       Timeline, Animator, Action
 src/base/            엔진을 모르는 기반 타입 (수학, 색, 식별자, 플랫폼 정보, Format, FiniteStateMachine, ObjectPool, SeededRandom, Timer, Version, wait(Wait.seconds, nextFrame))
 src/core/            엔진 본체 (Engine, 매니저, Scene, 노드 트리, Graphic, Component, reflection(반사 값과 트레이트), 애셋 꼴, 트윈, Animation, Frame)
                      async: task(스레드 하나짜리 실행기, EngineContext, SceneContext, TaskHandle, Promise)
@@ -37,6 +37,7 @@ src/ui/              UIView, UIControl, UILabel, UIButton, UIToggleButton, UISli
                      UIDialog, UIToast, UISpinner, UIContextMenu, UIChart, UIDraggable, UIHitArea, PopupMotion, ButtonMotion, ToastMotion, UIScale,
                      UIWindow, UIWindowLayer, UIConfirmWindow, UIDocument, UINode, UIScene(UISceneBase), autolayout(LayoutSolver 등)
 src/game/            GameSceneBase, GameScene 트레이트와 game_scene! (원본 GameScene: 로딩 화면, 터치 라우팅, 세이프 에어리어, 크기 바뀌면 다시 놓기, 페이드, 놀이 입력, 개발자 도구)
+src/experimental/    0.4.0 뒤 기능의 초안 (원본 import.js 의 Experimental 이름 공간 자리, API 가 바뀔 수 있다)
 src/web/             WebSocketClient (ewebsock, 데스크탑과 웹), Pane (화면 분할 패널, 웹은 DOM 요소 pane/dompane, 데스크탑은 엔진 노드 pane/nodepane)
 src/platform/        창, GL 컨텍스트, 입력 이벤트, 프레임 루프, 화면 넘기기, 애셋 바이트 읽기, 오디오 백엔드
   desktop.rs         winit 0.30 + glutin 0.32 (OpenGL 3.3 코어)
@@ -189,9 +190,9 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
 
 ## 9. 원본과의 대응
 
-2026-11-26 dev 기준으로 원본 `src/` 의 .js 200 파일 가운데 182 파일을 옮겼고, 18 파일은 일부러 옮기지 않았다. (원본 파일마다 같은 이름의 .rs 가 있는지 보고, 없는 것은 러스트 파일 머리 주석의 원본 경로로 찾아 셌다)
+2026-11-26 dev 기준으로 원본 `src/` 의 .js 200 파일 가운데 182 파일을 옮겼고, 18 파일은 일부러 옮기지 않았다. (원본 파일마다 같은 이름의 .rs 가 있는지 보고, 없는 것은 러스트 파일 머리 주석의 원본 경로로 찾아 셌다. 0.4.0 뒤 기능의 초안 자리 src/experimental 은 두 엔진에 같이 두고 셈에서 뺀다)
 
-- 같은 이름으로 옮긴 것 176 파일. 폴더는 러스트 판에 맞게 바꾼 곳이 있다. (core/graphic/* 는 core/, experimental/graphics 는 graphics3d/, experimental/animation 과 action.js 는 animation/, experimental/indicator.js 와 visual/visual.js 는 misc/, experimental/bunchasset.js 와 visual/visualasset.js 는 resource/, experimental/graphics/fullscreenpass.js 는 core/)
+- 같은 이름으로 옮긴 것 176 파일. 폴더는 원본과 같다. (graphics3d/, graphics3d/toon/, animation/, misc/, resource/, core/fullscreenpass) 원본 core/graphic/* 만 러스트 판에서 core/ 바로 아래에 있다.
 - 다른 파일에 합친 것 6 파일:
   - base/node.js, core/node/componentnode.js, core/node/transformnode.js: 노드 종류가 하나라 core/node/worldnode.rs 와 nodetree.rs 에 합쳤다.
   - core/scenemanager.js: 엔진이 씬을 들고 있어 core/engine.rs 와 core/scene.rs 에 합쳤다. (load_scene, unload_scene, get_all_loaded_scenes)
@@ -199,9 +200,9 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
   - resource/jsonasset.js: resource/textasset.rs 에 TextAsset 과 함께 둔다.
 - 일부러 옮기지 않은 것 18 파일:
   - 빈 파일이거나 아무 일도 하지 않는 것 4: base/calculator.js(0 을 돌려주는 빈 함수), core/layer.js(빈 스텁), core/resources.js(0 바이트), misc/uibuilder.js(NodeLayout 으로 대체됐다는 주석 한 줄)
-  - 죽은 코드 5: experimental/aabb.js, experimental/transform2d.js(파일 전체가 주석), experimental/graphics/gl2d.js(내보내는 것 없음), experimental/graphics/webgl2.js(import 경로가 깨져 쓰이지 않음), deprecated/anchoredworldmnode.js(폐기, import.js 에서도 막아 둠)
-  - 러스트 언어와 표준이 맡는 것 8: base/object.js, base/reflection.js(createGUID 만 base/identifier.rs 의 create_guid 로 옮겼다), base/singleton.js, experimental/collection 의 dictionary.js, list.js, queue.js, set.js, stack.js. 트레이트, Any, enum, Vec, HashMap 이 같은 일을 한다.
-  - 다른 기능이 덮는 것 1: experimental/camera.js. 회전과 begin/end 를 Camera2D(misc/camera2d.rs)에 넣어 그 기능을 모두 덮는다.
+  - 죽은 코드 5: deprecated/aabb.js, deprecated/transform2d.js(파일 전체가 주석), deprecated/gl2d.js(내보내는 것 없음), deprecated/webgl2.js(내보내지 않아 쓰이지 않음), deprecated/anchoredworldmnode.js(폐기, import.js 에서도 막아 둠)
+  - 러스트 언어와 표준이 맡는 것 8: base/object.js, base/reflection.js(createGUID 만 base/identifier.rs 의 create_guid 로 옮겼다), base/singleton.js, base/collection 의 dictionary.js, list.js, queue.js, set.js, stack.js. 트레이트, Any, enum, Vec, HashMap 이 같은 일을 한다.
+  - 다른 기능이 덮는 것 1: deprecated/camera.js. (원본도 폐기 예정) 회전과 begin/end 를 Camera2D(misc/camera2d.rs)에 넣어 그 기능을 모두 덮는다.
 - 러스트에만 있는 파일은 플랫폼 층(platform/ 아래 23 파일, mod.rs 빼고), 글자 모양 짓기와 색 글리프(core/textshaping.rs, core/colorglyph.rs), 그림 풀기(core/image.rs, core/avifimage.rs), 글 입력 줄(core/textinput.rs), 노드 저장소(core/node/nodetree.rs), async 실행기(core/task.rs), 브라우저 자리(core/canvas2d.rs 와 그 아래 둘, core/modaldialog.rs, core/browseruitext.rs, misc/storagetext.rs, ui/uiinputfieldmenu.rs)다. 원본에서는 브라우저가 하는 일이다. (web/pane.js 는 web/pane.rs 와 그 아래 dompane.rs, nodepane.rs 로 나눴다)
 - 옮기며 바꾼 쓰임새:
   - GameScene, UIScene 의 덮어쓰기는 GameScene, UIScene 트레이트와 game_scene!, ui_scene! 매크로다. 바탕이 resize, layout, post_draw 를 스스로 부른다. (game/gamescene.rs)

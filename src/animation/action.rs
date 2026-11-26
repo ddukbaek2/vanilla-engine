@@ -1,6 +1,6 @@
 //==============================================================================
 //! 액션. (차례로 스텝을 실행하는 스크립트 꼴 연출)
-//! - 원본 experimental/action.js 를 옮긴 것이다. wait / condition / call / repeat / forever / loop 스텝을 쌓고,
+//! - 원본 animation/action.js 를 옮긴 것이다. wait / condition / call / repeat / forever / loop 스텝을 쌓고,
 //!   start 뒤 매 프레임 step 을 부르면 차례로 돈다.
 //! - 사용:
 //!   ```text

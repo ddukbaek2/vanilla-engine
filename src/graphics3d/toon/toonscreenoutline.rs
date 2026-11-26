@@ -1,5 +1,5 @@
 //==============================================================================
-// 툰 화면 공간 바깥선. (vanilla.js experimental/graphics/toon/toonscreenoutline.js 의 ToonScreenOutline)
+// 툰 화면 공간 바깥선. (vanilla.js graphics3d/toon/toonscreenoutline.js 의 ToonScreenOutline)
 // - 노멀, 선 번호, 깊이를 선의 판에 그리고, 바로 이웃 사이의 경계에서 선을 잡아 점프 플러딩으로 넓힌 뒤 거리로 덮는 몫을 셈해 섞는다.
 // - 선의 판: ToonRenderer 의 create_mesh 결과를 같은 행렬로 한 번 더 그려 노멀(팔면체 접기), 선 번호(14 비트), 꼴(바깥 선, 꺾임 선을 켤지)과 깊이를 쓴다.
 // - 잡기: 화소와 바로 이웃 넷 사이의 경계마다 한 번 본다. 선은 화소가 아니라 화소 사이의 경계 가운데에 선다. (같은 경계를 두 번 긋지 않는다)

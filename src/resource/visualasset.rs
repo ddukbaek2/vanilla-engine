@@ -1,5 +1,5 @@
 //==============================================================================
-//! 비주얼 애셋. (원본 experimental/visual/visualasset.js 의 VisualAsset)
+//! 비주얼 애셋. (원본 resource/visualasset.js 의 VisualAsset)
 //! - 원본 load 가 하는 일을 다 옮겼다. 원본 load 는 이미 읽혔으면 바로 끝나고, 아니면 경로를 적고(기본 Asset.load) 곧바로 풀리는 Promise 를 기다린다.
 //!   그림 읽기 줄은 원본에서 주석으로 막혀 있어 아무것도 받지 않고, 읽힌 것으로 바꾸지도 않으며(isLoaded 는 늘 false), Visual 도 만들지 않는다.
 //!   러스트 판도 같다: load 는 경로를 적고 바로 끝난 읽기 손잡이를 돌려주어 await 가 바로 끝난다. (wait_for_load 도) is_loaded 는 늘 false 이고,

@@ -59,6 +59,7 @@ pub mod animation;
 pub mod base;
 pub mod core;
 pub mod effect;
+pub mod experimental;
 pub mod game;
 pub mod graphics3d;
 pub mod misc;

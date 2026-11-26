@@ -2,7 +2,7 @@
 //! 2D 카메라.
 //! - 원본 misc/camera2d.js 를 옮긴 것이다. 추적, 월드 경계 클램프, 드래그 팬, 커서 고정 줌, 관성, 이동 트윈을 한 곳에 모았다.
 //! - position 은 카메라가 바라보는 월드 좌표(화면 가운데), zoom 은 확대 배율, rotation 은 화면 가운데를 축으로 도는 각도(도)다.
-//!   rotation 만큼 월드가 화면에서 돈다. (원본 experimental/camera.js 의 begin 이 scale 뒤 rotate 를 거는 것과 같은 방향)
+//!   rotation 만큼 월드가 화면에서 돈다. (원본 deprecated/camera.js 의 begin 이 scale 뒤 rotate 를 거는 것과 같은 방향)
 //! - 원본처럼 컴포넌트가 아니라 그냥 값이다. 들고 있는 쪽(씬 등)이 tick 을 부르고, 월드를 그리기 전에 apply_transform 을 건다.
 //! - 사용:
 //!   ```text
@@ -353,7 +353,7 @@ impl Camera2D {
 	}
 
 	//==============================================================================
-	/// 그리기 시작. (상태를 쌓고 변환을 건다, 원본 experimental/camera.js 의 begin)
+	/// 그리기 시작. (상태를 쌓고 변환을 건다, 원본 deprecated/camera.js 의 begin)
 	/// - 월드를 다 그린 뒤 end 를 짝으로 부른다.
 	///
 	/// # 인자
@@ -365,7 +365,7 @@ impl Camera2D {
 	}
 
 	//==============================================================================
-	/// 그리기 끝. (begin 이 쌓은 상태를 되돌린다, 원본 experimental/camera.js 의 end)
+	/// 그리기 끝. (begin 이 쌓은 상태를 되돌린다, 원본 deprecated/camera.js 의 end)
 	///
 	/// # 인자
 	/// - `graphic`: begin 에 넘긴 그래픽.

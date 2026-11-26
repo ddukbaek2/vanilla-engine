@@ -1,5 +1,5 @@
 //==============================================================================
-// 툰 HDR 마무리. (vanilla.js experimental/graphics/toon/toonpostprocess.js 의 ToonPostProcess)
+// 툰 HDR 마무리. (vanilla.js graphics3d/toon/toonpostprocess.js 의 ToonPostProcess)
 // - 실수 렌더 타겟에 그린 선형 색을 블룸, 노출, 톤매핑, 감마로 화면에 낸다.
 // - 엔진의 RenderTarget(반정밀 실수 색, 깊이), BloomEffect(또는 MultiLevelBloomEffect), FullscreenPass 를 엮는다.
 // - 사용: ToonRenderer::set_hdr_output(true) 뒤

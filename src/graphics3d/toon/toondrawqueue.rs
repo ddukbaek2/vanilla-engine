@@ -1,5 +1,5 @@
 //==============================================================================
-// 툰 그리기 줄. (vanilla.js experimental/graphics/toon/toondrawqueue.js 의 ToonDrawQueue)
+// 툰 그리기 줄. (vanilla.js graphics3d/toon/toondrawqueue.js 의 ToonDrawQueue)
 // - 한 프레임에 그릴 모형을 담아 두었다가 ToonRenderer 로 차례를 맞춰 그린다.
 // - 차례: (화면 공간 바깥선의 선의 판) → 단계 BeforeOpaque → 불투명한 몸 → AfterOpaque → 불투명한 것의 바깥선 껍데기 → 화면 공간 바깥선 → AfterOutline
 //   → 비치는 것(카메라에서 먼 것부터, 깊이는 쓰지 않음) → AfterTransparent.

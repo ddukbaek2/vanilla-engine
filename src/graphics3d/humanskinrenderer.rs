@@ -1,5 +1,5 @@
 //==============================================================================
-//! 인체 피부 렌더러. (원본 experimental/graphics/humanskinrenderer.js)
+//! 인체 피부 렌더러. (원본 graphics3d/humanskinrenderer.js)
 //! - SkinnedModelRenderer 의 스키닝/모프 버텍스 경로 위에 피부 / 눈 / 머리카락 셰이딩 템플릿을 세운다.
 //! - 선형 HDR 로 조도 / 알베도 / 스펙큘러 / 노멀을 MRT 로 나눠 출력하고, 합성은 SubsurfaceScatteringEffect 이후 호출자가 한다.
 //! - 머티리얼마다 셰이딩 모드를 등록한다(set_material_shading). 불투명 패스(draw)는 피부 / 눈 / 머리카락 컷아웃,

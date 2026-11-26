@@ -1,5 +1,5 @@
 //==============================================================================
-// 툰 렌더러. (vanilla.js experimental/graphics/toon/toonrenderer.js 의 ToonRenderer)
+// 툰 렌더러. (vanilla.js graphics3d/toon/toonrenderer.js 의 ToonRenderer)
 // - MeshBuilder 의 배열이나 read_glb_arrays 로 읽은 모형을 한 색 재질과 바깥선으로 그린다.
 // - 빛: ToonLightSet 하나를 기본으로 든다. 해(방향과 색, 그림자), 하늘색과 땅색의 바탕빛, 채움 빛, 점광과 스포트라이트(TOON_MAXIMUM_POINT_LIGHTS 까지), 림 빛, 하이라이트, 빛 꼴(÷π).
 //   셀 셰이딩은 그늘 램프다. (유니티 툰 셰이더의 바탕, 1 차 그늘, 2 차 그늘과 Step, Feather, 그림자는 그늘 색으로 들어간다, 경계는 fwidth 로 계단 없이, 램프 텍스처도 된다)

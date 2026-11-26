@@ -1,5 +1,5 @@
 //==============================================================================
-// 툰 머티리얼과 인스턴스 꼴. (vanilla.js experimental/graphics/toon/toonmaterial.js)
+// 툰 머티리얼과 인스턴스 꼴. (vanilla.js graphics3d/toon/toonmaterial.js)
 // - ToonMaterial: ToonRenderer 의 몸 셰이더에 끼울 셰이더 조각, 게임마다의 확장 자리.
 //   엔진의 표준 기능(텍스처, 빛, 틴트, 섞기)으로 되지 않는 무늬나 연출만 조각으로 넣는다. 조각이 없는 칸은 엔진의 빈 함수가 들어간다.
 //   - uniform_chunk: 조각 셰이더의 맨 위 칸에 들어간다. 유니폼, 상수, 함수, 정점 조각이 내보낸 in 을 적는다.

@@ -1,5 +1,5 @@
 //==============================================================================
-// 툰 빛 묶음. (vanilla.js experimental/graphics/toon/toonlightset.js 의 ToonLightSet)
+// 툰 빛 묶음. (vanilla.js graphics3d/toon/toonlightset.js 의 ToonLightSet)
 // - ToonRenderer 가 몸을 칠할 빛과 툰 빛 반응을 한 덩어리로 든다. 렌더러는 기본 묶음 하나를 들고, set_light 같은 렌더러의 빛 설정은 그 묶음을 고친다.
 //   그리기마다 ToonDrawOptions 의 light_set 으로 다른 묶음을 줄 수 있다. (재질마다 그늘 색이 다를 때)
 // - 해(주광): 방향(sun_direction)은 빛이 나아가는 쪽이다. 면에서 해 쪽을 가리키는 방향의 반대다. (위에서 내리쬐면 [0, -1, 0]) 그림자를 받는다.
