@@ -83,7 +83,7 @@ EngineRunner (플랫폼이 들고 프레임마다 부른다)
 │   ├── Graphic (플랫폼이 GL 컨텍스트를 만든 뒤 attach_graphic 으로 넘김. 원본 getGraphic 처럼 get_graphic, get_graphic_mut 로 어느 훅에서나 꺼낸다)
 │   │   ├── ShaderProgram (기본), 묶음, 파티클, 블렌드 섞기 셰이더, 바꿔 낄 프로그램 표
 │   │   ├── ImageTextureCache
-│   │   ├── TextStringTextureCache (데스크탑: rustybuzz 모양 짓기, fontdue 와 skrifa 래스터, 색 글리프 colorglyph, 맥 색 이모지는 CoreText,
+│   │   ├── TextStringTextureCache (데스크탑: rustybuzz 모양 짓기, fontdue 와 skrifa 래스터(맥은 크롬처럼 CoreText), 색 글리프 colorglyph, 맥 색 이모지는 CoreText,
 │   │   │                           시스템 글꼴 사슬과 운영체제 대체 글꼴 / 웹: 브라우저 Canvas2D)
 │   │   └── 묶음 버퍼, 클립 스택, 블렌드 섞기용 바탕 칸
 │   ├── pending_scene_list, pending_font_registration_list, 페이지 이벤트 리스너
@@ -241,7 +241,8 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
 | 데스크탑에서 뜻이 없는 set_no_cache | 데스크탑에는 브라우저 캐시가 없다 (파일을 늘 그 자리에서 읽는다) |
 | 웨이랜드에서 xdg_toplevel 의 suspended 상태는 받지 못한다. 가려짐(페이지 이벤트 Hidden)은 크롬의 다른 갈래인 프레임 콜백 3 초 규칙으로만 본다 | xdg_toplevel 은 winit(sctk)이 리스너를 달아 쥐고 있고 libwayland 는 프록시 하나에 리스너 하나만 단다. winit 0.30.13 은 configure 의 suspended 를 받아 두기만 하고 알리지 않는다 (0.31 베타 4 와 본줄기도 같다). suspended 를 보내면서 프레임 콜백도 계속 보내는 컴포지터에서만 크롬과 달라진다 |
 | DevTools 메모리 칸은 자바스크립트 힙 대신 시스템 할당자의 힙이고, jsHeapSizeLimit 는 (N/A) 다 | 데스크탑에는 V8 힙이 없다. 시스템 할당자에는 V8 처럼 정한 힙 상한이 없다 |
-| 데스크탑의 글자 래스터 픽셀과 도형 가장자리 안티에일리어싱이 크롬과 다르다 (글자 너비는 크롬 measureText 와 맞췄고, 도형 안쪽 색은 같다) | 크롬의 Skia, CoreGraphics 래스터라이저 대신 fontdue, skrifa(맥의 색 이모지와 일부 글꼴은 CoreText)와 GL 이 칠한다 |
+| 윈도우와 리눅스 데스크탑의 글자 래스터 픽셀이 크롬과 다르다 (글자 너비는 크롬 measureText 와 맞췄다. 맥은 같은 장면의 글자 픽셀이 크롬과 같다) | 맥은 크롬처럼 CoreText 로 스키아 SkScalerContext_Mac 과 같은 설정으로 칠한다. 윈도우(크롬은 DirectWrite)와 리눅스(크롬은 FreeType)는 아직 fontdue 와 skrifa 가 칠하고 서브픽셀 자리와 감마 전보정이 없다. 같은 길(SkScalerContext_DW, SkScalerContext_FreeType 의 설정)로 옮길 일이 남았다 |
+| 맥 데스크탑의 도형 가장자리 일부 화소가 크롬과 표본 하나(덮인 정도 1/4)만큼 다르다 (둘 다 4 표본 MSAA 이고 안쪽 색과 가장자리 대부분은 같다) | 같은 회전 격자 표본이 맥 OpenGL(아래가 원점)에서는 크롬 ANGLE Metal 과 위아래로 뒤집혀 놓인다. 엔진이 화면을 위아래로 뒤집어 그리고 내보낼 때 되뒤집으면 같아지지만, 기본 프레임버퍼 좌표를 쓰는 곳(화면 복사, 자르기, 3D 패스, 찍기)을 모두 바꿔야 해 아직 하지 않았다 |
 | 엔진을 만든 뒤 run 이 창을 열기 전에는 그래픽이 없다 (engine.get_graphic() 이 None, 원본은 Engine 생성자에서 Graphic 을 만든다). run 뒤에는 씬의 create 부터 늘 있다 | GL 컨텍스트는 창(표면)이 있어야 만든다. winit 은 이벤트 루프가 돈 뒤(resumed)에야 창을 만들 수 있다 |
 | 데스크탑 Opus 와 AAC 의 표본 끝자리가 크롬과 1.5e-7 안팎으로 다르다 (길이와 다듬기는 같다) | 크롬은 Opus 를 libopus(C), AAC 를 FFmpeg(LGPL)로 푼다. 데스크탑은 C 빌드 없이 맥에서 윈도우 대상 검사가 되도록 libopus 를 러스트로 옮긴 opus-pure 로, AAC 는 LGPL 코드를 옮기지 않고 symphonia 와 oxideav-aac 로 푼다 |
 | 데스크탑 3 채널 이상 AAC 의 PNS(잡음 대치) 띠는 잡음 표본이 크롬과 다르다 (띠의 에너지는 같다) | 명세는 PNS 난수 생성기를 정하지 않는다. 크롬(FFmpeg)과 같은 잡음 열을 내려면 FFmpeg 의 생성기와 정규화를 옮겨야 한다. (2 채널 이하는 symphonia 로 풀어 크롬과 같다) |
