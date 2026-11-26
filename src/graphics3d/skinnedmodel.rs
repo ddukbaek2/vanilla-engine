@@ -22,8 +22,10 @@
 //!     upload_wireframe_indices / upload_morph_targets 는 원본의 드로어블 객체 대신 드로어블 인덱스를 받는다. (모델을 &mut 로 빌린 채 드로어블을 넘길 수 없어서다)
 //!   - 드로어블의 mesh_description 은 모프 타깃을 morph_target_list 로 옮긴 뒤라 morph_targets 가 비어 있다. (큰 델타 배열을 두 벌 들지 않는다)
 //!   - 원본처럼 노드 matrix 와 CUBICSPLINE 보간, 프리미티브 mode 는 보지 않는다. FBX 는 원본처럼 스킨이 붙은 메시만 그린다.
-//!   - destroy 가 지우는 머티리얼: 원본은 이 모델이 업로드에서 지은 것을 지운다. 러스트 판은 그 가운데 다른 곳에서 Rc 로 쥐지 않은 것만 지운다.
-//!     (참조 수를 셀 수 있어서다, 자바스크립트에는 참조 수가 없다)
+//! - 올린 버퍼, 머티리얼 원형, 모프 텍스처, 노드와 스킨 원형, 클립은 SkinnedModelAsset 이 한 벌 들고, 모델은 그 인스턴스다. (원본과 같다)
+//!   create_instance, create_from_asset 은 GPU 업로드 없이 인스턴스를 짓고, 받기(create_model, load_from_url_async)는 자산 캐시를 쓴다.
+//!   destroy 는 이 인스턴스 것(와이어프레임 버퍼, 갈라진 모프 텍스처, get_material 로 갈라진 머티리얼)을 지우고 자산을 놓는다.
+//!   set_material 로 바깥에서 넣은 머티리얼은 지우지 않는다. (원본과 같다)
 //!
 //! # 예제
 //! GL 없이 glTF 내용을 해석하고 포즈 계산하기 (스킨 없는 메시는 노드 자신이 조인트인 합성 스킨으로)
@@ -58,6 +60,7 @@ use crate::core::shaderprogram::ShaderProgram;
 use crate::core::task;
 use crate::graphics3d::fbxloader::{FbxAnimation, FbxLoadHandle, FbxLoader, FbxSceneData};
 use crate::graphics3d::material::{ImageDescription, Material, MaterialDescription};
+use crate::graphics3d::skinnedmodelasset::{SkinnedModelAsset, SkinnedModelAssetContent};
 use crate::graphics3d::skinnedmodelrenderer::SkinnedModelRenderer;
 use glow::HasContext;
 use serde_json::Value;
@@ -581,6 +584,7 @@ pub struct MeshDescription {
 /// assert_eq!(find_drawable_index(&skinned_model, "Body"), None);
 /// ```
 //==============================================================================
+#[derive(Clone)]
 pub struct Drawable {
 	/// 버텍스 어레이. (정점 버퍼와 인덱스 버퍼를 묶은 것)
 	pub vertex_array: GlVertexArray,
@@ -612,10 +616,10 @@ pub struct Drawable {
 	pub skin_index: usize,
 	/// 메시를 가진 노드 인덱스. (모프 가중치 채널의 대상)
 	pub node_index: Option<usize>,
-	/// 업로드한 메시 서술. (모프 타깃은 morph_target_list 로 옮겨 비어 있다)
-	pub mesh_description: MeshDescription,
-	/// 모프 타깃 목록. (MORPH_TARGET_MAXIMUM 개까지)
-	pub morph_target_list: Vec<MorphTarget>,
+	/// 업로드한 메시 서술. (모프 타깃은 morph_target_list 로 옮겨 비어 있다, 같은 자산의 인스턴스들이 나눠 든다)
+	pub mesh_description: Rc<MeshDescription>,
+	/// 모프 타깃 목록. (MORPH_TARGET_MAXIMUM 개까지, 자산과 나눠 들고 add_morph_target 하면 이 드로어블 것으로 갈라진다)
+	pub morph_target_list: Rc<Vec<MorphTarget>>,
 	/// 타깃마다 가중치. (morph_target_list 와 같은 자리)
 	pub morph_weights: Vec<f32>,
 	/// 모프 델타 텍스처. (RGBA32F, 타깃이 없거나 올리기 전이면 None)
@@ -624,8 +628,93 @@ pub struct Drawable {
 	pub morph_rows_per_target: i32,
 	/// 모프 텍스처 가로. (텍셀, 정점 수를 1 ~ 2048 로 자른 값)
 	pub morph_texture_width: i32,
+	/// 모프 텍스처를 자산과 나눠 쓰는지. (true 면 destroy 가 지우지 않고, 다시 올릴 때 이 드로어블 것을 새로 짓는다)
+	pub is_morph_texture_shared: bool,
 	/// 모프 타깃을 다시 올려야 하는지. (렌더러가 그리기 전에 upload_pending_morph_targets 로 올린다)
 	pub is_morph_dirty: bool,
+}
+
+//==============================================================================
+/// 인스턴스 드로어블 만들기. (버퍼, 버텍스 어레이, 메시 서술, 모프 타깃, 머티리얼 원형은 나눠 쓰고 모프 가중치와 와이어프레임 버퍼는 따로)
+//==============================================================================
+fn create_instance_drawable(template_drawable: &Drawable) -> Drawable {
+	let mut drawable = template_drawable.clone();
+	drawable.wireframe_index_buffer = None;
+	drawable.wireframe_index_count = 0;
+	drawable.wireframe_index_component_type = 0;
+	drawable.is_morph_texture_shared = template_drawable.morph_texture.is_some();
+	drawable.is_morph_dirty = false;
+	drawable
+}
+
+//==============================================================================
+/// 인스턴스 스킨 만들기. (조인트와 역바인드 행렬을 베끼고 조인트 행렬 배열은 0 으로 따로)
+//==============================================================================
+fn create_instance_skin(template_skin: &Skin) -> Skin {
+	let mut skin = template_skin.clone();
+	skin.joint_matrix_array = vec![0.0; template_skin.joint_matrix_array.len()];
+	skin
+}
+
+//==============================================================================
+/// 클립 더하기. (같은 이름 클립은 그 자리를 바꾼다, 클립 목록은 자산의 인스턴스들이 나눠 써 인스턴스마다 더해도 한 벌만 남는다)
+//==============================================================================
+fn merge_animation_clips(animation_list: &mut Vec<AnimationClip>, added_clip_list: Vec<AnimationClip>) {
+	for added_clip in added_clip_list {
+		match animation_list.iter().position(|animation| animation.name == added_clip.name) {
+			Some(same_name_index) => {
+				animation_list[same_name_index] = added_clip;
+			}
+			None => {
+				animation_list.push(added_clip);
+			}
+		}
+	}
+}
+
+//==============================================================================
+/// 드로어블 모프 타깃 업로드. (upload_morph_targets 본문, 자산과 나눠 쓰던 텍스처면 건드리지 않고 이 드로어블 것을 새로 짓는다)
+//==============================================================================
+fn upload_drawable_morph_targets(gl: &glow::Context, drawable: &mut Drawable) -> Result<(), String> {
+	if drawable.is_morph_texture_shared {
+		drawable.morph_texture = None;
+		drawable.is_morph_texture_shared = false;
+	}
+	let target_count = drawable.morph_target_list.len();
+	let vertex_count = drawable.vertex_count;
+	if target_count == 0 || vertex_count == 0 {
+		if let Some(morph_texture) = drawable.morph_texture.take() {
+			unsafe {
+				gl.delete_texture(morph_texture);
+			}
+		}
+		drawable.is_morph_dirty = false;
+		return Ok(());
+	}
+	let (texture_width, rows_per_target, texel_data) = SkinnedModel::build_morph_texel_data(&drawable.morph_target_list, vertex_count);
+	let texture_height = rows_per_target * 2 * target_count;
+	unsafe {
+		let morph_texture = match drawable.morph_texture {
+			Some(morph_texture) => {
+				morph_texture
+			}
+			None => {
+				gl.create_texture()?
+			}
+		};
+		drawable.morph_texture = Some(morph_texture);
+		gl.bind_texture(glow::TEXTURE_2D, Some(morph_texture));
+		gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::RGBA32F as i32, texture_width as i32, texture_height as i32, 0, glow::RGBA, glow::FLOAT, glow::PixelUnpackData::Slice(Some(slice_to_bytes(&texel_data))));
+		gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
+		gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
+		gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
+		gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
+		gl.bind_texture(glow::TEXTURE_2D, None);
+	}
+	drawable.morph_rows_per_target = rows_per_target as i32;
+	drawable.morph_texture_width = texture_width as i32;
+	drawable.is_morph_dirty = false;
+	Ok(())
 }
 
 //==============================================================================
@@ -762,6 +851,10 @@ pub struct SkinnedModel {
 	joint_rotation_offsets: Vec<(usize, Quaternion)>,
 	/// 받는 중인 애니메이션 FBX. (add_animations_from_fbx_url)
 	pending_animation_load_list: Vec<AnimationLoadHandle>,
+	/// 나눠 쓰는 자산. (올리기 전이나 destroy 뒤에는 None)
+	asset: Option<Rc<SkinnedModelAsset>>,
+	/// get_material 로 갈라진 이 인스턴스의 머티리얼. (destroy 가 지운다)
+	instance_material_list: Vec<Rc<Material>>,
 }
 
 //==============================================================================
@@ -789,7 +882,7 @@ impl AnimationLoad {
 			Ok(scene_data) => {
 				let mut added_clip_list = convert_fbx_scene_animations(&self.node_index_by_name, &scene_data, &self.clip_name, self.ignore_translation);
 				let mut animation_list = self.animation_list.try_borrow_mut().ok()?;
-				animation_list.append(&mut added_clip_list);
+				merge_animation_clips(&mut animation_list, std::mem::take(&mut added_clip_list));
 				Ok(())
 			}
 			Err(error_message) => {
@@ -973,6 +1066,41 @@ enum SkinnedModelFileFormat {
 	Fbx,
 }
 
+thread_local! {
+	/// 받는 중인 모델 바이트. (정규화한 자산 키 → 받기 손잡이, 같은 파일을 함께 받으면 한 번만 읽는다. 원본 pendingAssetLoadTable 자리)
+	static PENDING_MODEL_LOAD_TABLE: RefCell<HashMap<String, AssetLoadHandle>> = RefCell::new(HashMap::new());
+}
+
+//==============================================================================
+/// 모델 바이트 부탁. (같은 키를 받는 중이면 그 손잡이를 나눠 들고, 끝난 것은 표에서 뺀다)
+//==============================================================================
+fn request_model_bytes(engine: &Engine, url: &str) -> AssetLoadHandle {
+	let asset_key = SkinnedModelAsset::normalize_key(url);
+	PENDING_MODEL_LOAD_TABLE.with(|pending_model_load_table| {
+		let mut pending_model_load_table = pending_model_load_table.borrow_mut();
+		pending_model_load_table.retain(|_, load_handle| !load_handle.is_finished());
+		if let Some(load_handle) = pending_model_load_table.get(&asset_key) {
+			return load_handle.clone();
+		}
+		let load_handle = engine.request_asset_bytes(url);
+		if !load_handle.is_finished() {
+			pending_model_load_table.insert(asset_key, load_handle.clone());
+		}
+		load_handle
+	})
+}
+
+//==============================================================================
+/// 지은 모델의 자산을 캐시에 넣기. (받기가 지은 모델, 실패는 그대로)
+//==============================================================================
+fn register_loaded_model(asset_key: &str, model_result: Result<SkinnedModel, String>) -> Result<SkinnedModel, String> {
+	let skinned_model = model_result?;
+	if let Some(skinned_model_asset) = skinned_model.get_asset() {
+		SkinnedModelAsset::register(asset_key, skinned_model_asset)?;
+	}
+	Ok(skinned_model)
+}
+
 //==============================================================================
 /// 모델 받기 손잡이. (SkinnedModel::load_from_url, load_from_fbx_url 이 돌려준다. 원본 loadFromUrl, loadFromFbxUrl 의 Promise 자리)
 /// - 씬은 get_load_handle 을 SceneBase::track_load_handle 로 맡겨 다 받을 때까지 initialize 를 미룰 수 있다.
@@ -1069,7 +1197,9 @@ impl SkinnedModelLoadHandle {
 
 	//==============================================================================
 	/// 받은 바이트로 모델 짓기. (받는 중이면 None, 받기나 해석에 실패하면 Err. 원본 문구 "SkinnedModel load failed: url")
-	/// - 끝난 뒤에는 부를 때마다 받은 바이트로 모델을 새로 짓는다. (GL 객체도 새로 만든다)
+	/// - 자산 캐시를 쓴다. 같은 셰이더 프로그램으로 같은 주소(SkinnedModelAsset::normalize_key)의 자산이 있으면 풀지도 올리지도 않고
+	///   그 자산을 나눠 쓰는 새 인스턴스를 돌려준다. 없으면 받은 바이트로 지어 캐시에 넣는다. (끝난 뒤 다시 불러도 인스턴스가 하나 더 생긴다)
+	/// - 손잡이는 부탁할 때 렌더러를 모르므로 바이트는 읽는다. (같은 파일을 함께 받는 중이면 한 번만 읽는다)
 	///
 	/// # 인자
 	/// - `gl`: 모델을 지을 GL 컨텍스트. (graphic.get_gl())
@@ -1079,8 +1209,19 @@ impl SkinnedModelLoadHandle {
 	/// 받는 중이면 None. 끝났으면 지은 모델, 받기에 실패하면 Err("SkinnedModel load failed: 경로", FBX 는 "FbxLoader load failed: 경로"), 해석이나 업로드에 실패하면 그 Err.
 	//==============================================================================
 	pub fn create_model(&self, gl: &glow::Context, skinned_model_renderer: &SkinnedModelRenderer) -> Option<Result<SkinnedModel, String>> {
+		self.create_model_with_shader_program(gl, skinned_model_renderer.get_shader_program())
+	}
+
+	//==============================================================================
+	/// 받은 바이트로 모델 짓기 본문. (create_model 과 같고 렌더러 대신 셰이더 프로그램을 받는다)
+	//==============================================================================
+	fn create_model_with_shader_program(&self, gl: &glow::Context, shader_program: Rc<ShaderProgram>) -> Option<Result<SkinnedModel, String>> {
 		if !self.load_handle.is_finished() {
 			return None;
+		}
+		let asset_key = SkinnedModelAsset::normalize_key(self.load_handle.get_asset_path());
+		if let Some(cached_asset) = SkinnedModelAsset::find(&asset_key, &shader_program) {
+			return Some(SkinnedModel::create_from_asset(&cached_asset));
 		}
 		let bytes = match self.load_handle.get_bytes() {
 			Some(bytes) => {
@@ -1098,14 +1239,15 @@ impl SkinnedModelLoadHandle {
 				return Some(Err(format!("{} load failed: {}", error_label, self.load_handle.get_asset_path())));
 			}
 		};
-		match self.file_format {
+		let model_result = match self.file_format {
 			SkinnedModelFileFormat::Glb => {
-				Some(SkinnedModel::load_from_bytes(gl, &bytes, skinned_model_renderer))
+				SkinnedModel::load_from_bytes_with_shader_program(gl, &bytes, shader_program)
 			}
 			SkinnedModelFileFormat::Fbx => {
-				Some(SkinnedModel::load_from_fbx_bytes(gl, &bytes, skinned_model_renderer))
+				SkinnedModel::load_from_fbx_bytes_with_shader_program(gl, &bytes, shader_program)
 			}
-		}
+		};
+		Some(register_loaded_model(&asset_key, model_result))
 	}
 
 	//==============================================================================
@@ -1113,7 +1255,13 @@ impl SkinnedModelLoadHandle {
 	//==============================================================================
 	fn create_model_when_loaded(self, shader_program: Rc<ShaderProgram>) -> impl Future<Output = Result<SkinnedModel, String>> + 'static {
 		async move {
-			let bytes = match (&self.load_handle).await {
+			let asset_key = SkinnedModelAsset::normalize_key(self.load_handle.get_asset_path());
+			let bytes_result = (&self.load_handle).await;
+			// 함께 받던 다른 쪽이 먼저 지었으면 나눠 쓴다.
+			if let Some(cached_asset) = SkinnedModelAsset::find(&asset_key, &shader_program) {
+				return SkinnedModel::create_from_asset(&cached_asset);
+			}
+			let bytes = match bytes_result {
 				Ok(bytes) => {
 					bytes
 				}
@@ -1130,7 +1278,7 @@ impl SkinnedModelLoadHandle {
 				}
 			};
 			let file_format = self.file_format;
-			let model_result = task::with_polling_graphic(|graphic| {
+			let model_result = task::with_polling_graphic(|graphic| -> Result<SkinnedModel, String> {
 				let gl = graphic.get_gl();
 				match file_format {
 					SkinnedModelFileFormat::Glb => {
@@ -1143,7 +1291,7 @@ impl SkinnedModelLoadHandle {
 			});
 			match model_result {
 				Some(model_result) => {
-					model_result
+					register_loaded_model(&asset_key, model_result)
 				}
 				None => {
 					Err(String::from("SkinnedModel: 그래픽을 붙인 엔진의 작업 안에서만 모델을 지을 수 있습니다"))
@@ -1192,6 +1340,8 @@ impl SkinnedModel {
 			time_scale: 1.0,
 			joint_rotation_offsets: Vec::new(),
 			pending_animation_load_list: Vec::new(),
+			asset: None,
+			instance_material_list: Vec::new(),
 		}
 	}
 
@@ -1281,7 +1431,7 @@ impl SkinnedModel {
 	//==============================================================================
 	pub fn load_from_url(engine: &Engine, url: &str) -> SkinnedModelLoadHandle {
 		SkinnedModelLoadHandle {
-			load_handle: engine.request_asset_bytes(url),
+			load_handle: request_model_bytes(engine, url),
 			file_format: SkinnedModelFileFormat::Glb,
 		}
 	}
@@ -1298,7 +1448,7 @@ impl SkinnedModel {
 	//==============================================================================
 	pub fn load_from_fbx_url(engine: &Engine, url: &str) -> SkinnedModelLoadHandle {
 		SkinnedModelLoadHandle {
-			load_handle: engine.request_asset_bytes(url),
+			load_handle: request_model_bytes(engine, url),
 			file_format: SkinnedModelFileFormat::Fbx,
 		}
 	}
@@ -1338,7 +1488,39 @@ impl SkinnedModel {
 	/// ```
 	//==============================================================================
 	pub fn load_from_url_async(engine: &Engine, url: &str, skinned_model_renderer: &SkinnedModelRenderer) -> impl Future<Output = Result<SkinnedModel, String>> + 'static {
-		SkinnedModel::load_from_url(engine, url).create_model_when_loaded(skinned_model_renderer.get_shader_program())
+		SkinnedModel::load_cached_async(engine, url, skinned_model_renderer, SkinnedModelFileFormat::Glb)
+	}
+
+	//==============================================================================
+	/// 자산 캐시를 거쳐 받기. (캐시에 있으면 받지 않고 인스턴스, 받는 중이면 그 받기를 나눠 들고, 없으면 받아 지어 캐시에 넣는다)
+	//==============================================================================
+	fn load_cached_async(engine: &Engine, url: &str, skinned_model_renderer: &SkinnedModelRenderer, file_format: SkinnedModelFileFormat) -> impl Future<Output = Result<SkinnedModel, String>> + 'static {
+		let shader_program = skinned_model_renderer.get_shader_program();
+		let cached_asset = SkinnedModelAsset::find(url, &shader_program);
+		let load_handle = match cached_asset {
+			Some(_) => {
+				None
+			}
+			None => {
+				Some(SkinnedModelLoadHandle {
+					load_handle: request_model_bytes(engine, url),
+					file_format,
+				})
+			}
+		};
+		async move {
+			match (cached_asset, load_handle) {
+				(Some(cached_asset), _) => {
+					SkinnedModel::create_from_asset(&cached_asset)
+				}
+				(None, Some(load_handle)) => {
+					load_handle.create_model_when_loaded(shader_program).await
+				}
+				(None, None) => {
+					Err(String::from("SkinnedModel: no load handle."))
+				}
+			}
+		}
 	}
 
 	//==============================================================================
@@ -1353,7 +1535,7 @@ impl SkinnedModel {
 	/// 엔진 작업 안에서 await 하는 퓨처. 받기에 실패하면 Err("FbxLoader load failed: 경로"), 그래픽이 붙은 엔진의 작업 밖에서 폴링하면 Err, 파싱, 해석, 업로드에 실패하면 그 Err.
 	//==============================================================================
 	pub fn load_from_fbx_url_async(engine: &Engine, url: &str, skinned_model_renderer: &SkinnedModelRenderer) -> impl Future<Output = Result<SkinnedModel, String>> + 'static {
-		SkinnedModel::load_from_fbx_url(engine, url).create_model_when_loaded(skinned_model_renderer.get_shader_program())
+		SkinnedModel::load_cached_async(engine, url, skinned_model_renderer, SkinnedModelFileFormat::Fbx)
 	}
 
 	//==============================================================================
@@ -1741,7 +1923,7 @@ impl SkinnedModel {
 			}
 		}
 		let has_animation = !animation_list.is_empty();
-		*self.animation_list.borrow_mut() = animation_list;
+		self.replace_animation_list(animation_list);
 		if has_animation {
 			self.current_animation_index = Some(0);
 		}
@@ -1992,7 +2174,7 @@ impl SkinnedModel {
 			}
 		}).collect();
 		let has_animation = !animation_list.is_empty();
-		*self.animation_list.borrow_mut() = animation_list;
+		self.replace_animation_list(animation_list);
 		if has_animation {
 			self.current_animation_index = Some(0);
 		}
@@ -2012,7 +2194,20 @@ impl SkinnedModel {
 	//==============================================================================
 	pub fn add_animations_from_fbx_scene_data(&mut self, scene_data: &FbxSceneData, clip_name: &str, ignore_translation: bool) {
 		let mut added_clip_list = convert_fbx_scene_animations(&self.create_node_index_by_name(), scene_data, clip_name, ignore_translation);
-		self.animation_list.borrow_mut().append(&mut added_clip_list);
+		merge_animation_clips(&mut self.animation_list.borrow_mut(), std::mem::take(&mut added_clip_list));
+	}
+
+	//==============================================================================
+	/// 클립 목록 바꾸기. (해석할 때, 자산과 나눠 쓰던 목록이면 새 목록으로 떨어지고 아니면 그 자리에서 바꾼다)
+	/// - 자산을 쓰는 다른 인스턴스의 클립은 그대로다. 자산 없이 받는 중인 애니메이션 FBX 는 바뀐 목록에 더한다.
+	//==============================================================================
+	fn replace_animation_list(&mut self, animation_list: Vec<AnimationClip>) {
+		if self.asset.is_some() {
+			self.animation_list = Rc::new(RefCell::new(animation_list));
+		}
+		else {
+			*self.animation_list.borrow_mut() = animation_list;
+		}
 	}
 
 	//==============================================================================
@@ -2093,7 +2288,8 @@ impl SkinnedModel {
 
 	//==============================================================================
 	/// 중립 메시/머티리얼 서술 업로드. (공용, Material 생성 + 버텍스 어레이/드로어블 구성)
-	/// - 예전 드로어블의 GL 리소스와 다른 곳에서 쓰지 않는 머티리얼은 먼저 지운다. (destroy, 다시 불러도 새지 않는다)
+	/// - 예전 자산은 먼저 놓는다. (destroy, 다시 불러도 새지 않는다)
+	/// - 올린 버퍼, 머티리얼, 모프 텍스처와 지금 노드, 스킨, 클립을 새 자산(SkinnedModelAsset, 참조 수 1)으로 묶고 이 모델이 그 첫 인스턴스가 된다.
 	///
 	/// # 인자
 	/// - `gl`: 업로드할 GL 컨텍스트.
@@ -2121,7 +2317,8 @@ impl SkinnedModel {
 		let default_description = Material::create_default_description();
 		let default_material = Rc::new(Material::create_from_description(gl, shader_program.clone(), &default_description)?);
 
-		self.drawable_list = Vec::with_capacity(mesh_description_list.len());
+		let mut buffer_byte_count = 0;
+		let mut template_drawable_list = Vec::with_capacity(mesh_description_list.len());
 		for mut mesh_description in mesh_description_list.into_iter() {
 			let generated_normals;
 			let normals = match &mesh_description.normals {
@@ -2142,20 +2339,25 @@ impl SkinnedModel {
 			}
 			if let Some(vertex_buffer) = SkinnedModel::bind_float_attribute(gl, &shader_program, "vertexPosition", &mesh_description.positions, 3)? {
 				vertex_buffer_list.push(vertex_buffer);
+				buffer_byte_count += std::mem::size_of_val(mesh_description.positions.as_slice());
 			}
 			if let Some(vertex_buffer) = SkinnedModel::bind_float_attribute(gl, &shader_program, "vertexNormal", normals, 3)? {
 				vertex_buffer_list.push(vertex_buffer);
+				buffer_byte_count += std::mem::size_of_val(normals.as_slice());
 			}
 			if let Some(texture_coordinates) = &mesh_description.texture_coordinates {
 				if let Some(vertex_buffer) = SkinnedModel::bind_float_attribute(gl, &shader_program, "vertexTextureCoordinate", texture_coordinates, 2)? {
 					vertex_buffer_list.push(vertex_buffer);
+					buffer_byte_count += std::mem::size_of_val(texture_coordinates.as_slice());
 				}
 			}
 			if let Some(vertex_buffer) = SkinnedModel::bind_integer_attribute(gl, &shader_program, "vertexJoints", &mesh_description.joints, 4)? {
 				vertex_buffer_list.push(vertex_buffer);
+				buffer_byte_count += std::mem::size_of_val(mesh_description.joints.as_slice());
 			}
 			if let Some(vertex_buffer) = SkinnedModel::bind_float_attribute(gl, &shader_program, "vertexWeights", &mesh_description.weights, 4)? {
 				vertex_buffer_list.push(vertex_buffer);
+				buffer_byte_count += std::mem::size_of_val(mesh_description.weights.as_slice());
 			}
 
 			// 인덱스. (없는 메시는 drawArrays 로 출력)
@@ -2172,6 +2374,7 @@ impl SkinnedModel {
 				}
 				index_count = indices.len();
 				index_component_type = indices.get_gl_component_type();
+				buffer_byte_count += indices.as_bytes().len();
 			}
 			unsafe {
 				gl.bind_vertex_array(None);
@@ -2188,7 +2391,7 @@ impl SkinnedModel {
 			let morph_target_list = std::mem::take(&mut mesh_description.morph_targets);
 			let morph_weights = mesh_description.morph_weights.clone();
 			let is_morph_dirty = !morph_target_list.is_empty();
-			self.drawable_list.push(Drawable {
+			template_drawable_list.push(Drawable {
 				vertex_array,
 				vertex_buffer_list,
 				is_indexed,
@@ -2204,16 +2407,129 @@ impl SkinnedModel {
 				material_name: mesh_description.material_name.clone(),
 				skin_index: mesh_description.skin_index,
 				node_index: mesh_description.node_index,
-				mesh_description,
-				morph_target_list,
+				mesh_description: Rc::new(mesh_description),
+				morph_target_list: Rc::new(morph_target_list),
 				morph_weights,
 				morph_texture: None,
 				morph_rows_per_target: 0,
 				morph_texture_width: 0,
+				is_morph_texture_shared: false,
 				is_morph_dirty,
 			});
 		}
+
+		// 모프 텍스처는 원형에 한 번 올려 인스턴스들이 나눠 쓴다.
+		for template_drawable in template_drawable_list.iter_mut() {
+			if template_drawable.is_morph_dirty {
+				upload_drawable_morph_targets(gl, template_drawable)?;
+				if template_drawable.morph_texture.is_some() {
+					buffer_byte_count += (template_drawable.morph_texture_width as usize) * (template_drawable.morph_rows_per_target as usize) * 2 * template_drawable.morph_target_list.len() * 16;
+				}
+			}
+		}
+
+		// 자산으로 묶고 첫 인스턴스로 붙는다.
+		let mut asset_material_list = material_list;
+		asset_material_list.push(default_material);
+		let skinned_model_asset = Rc::new(SkinnedModelAsset::new(shader_program, SkinnedModelAssetContent {
+			drawable_list: template_drawable_list,
+			material_list: asset_material_list,
+			node_list: self.node_list.clone(),
+			root_node_indices: self.root_node_indices.clone(),
+			skin_list: self.skin_list.iter().map(create_instance_skin).collect(),
+			animation_list: self.animation_list.clone(),
+			buffer_byte_count,
+		}));
+		self.attach_asset(skinned_model_asset);
 		Ok(())
+	}
+
+	//==============================================================================
+	/// 자산 붙이기. (자산의 원형에서 노드, 스킨, 드로어블을 베끼고 클립 목록은 나눠 쓴다, 참조 수는 부른 쪽이 늘린다)
+	//==============================================================================
+	fn attach_asset(&mut self, skinned_model_asset: Rc<SkinnedModelAsset>) {
+		self.node_list = skinned_model_asset.get_node_list().to_vec();
+		self.root_node_indices = skinned_model_asset.get_root_node_indices().to_vec();
+		self.skin_list = skinned_model_asset.get_skin_list().iter().map(create_instance_skin).collect();
+		self.drawable_list = skinned_model_asset.get_drawable_list().iter().map(create_instance_drawable).collect();
+		self.animation_list = skinned_model_asset.get_animation_list().clone();
+		// 해석할 때처럼 첫 클립을 돌린다.
+		self.current_animation_index = if self.animation_list.borrow().is_empty() {
+			None
+		}
+		else {
+			Some(0)
+		};
+		self.previous_animation_index = None;
+		self.asset = Some(skinned_model_asset);
+	}
+
+	//==============================================================================
+	/// 자산으로부터 인스턴스 짓기. (자산의 버퍼, 머티리얼 원형, 클립을 나눠 쓰고 포즈와 재생 상태는 따로, GPU 업로드 없음)
+	///
+	/// # 인자
+	/// - `skinned_model_asset`: 나눠 쓸 자산.
+	///
+	/// # 돌려줌
+	/// 자산의 참조 수를 하나 늘린 새 인스턴스. (노드는 자산을 올릴 때의 원형에서 베낀다) 지워진 자산이면 Err.
+	//==============================================================================
+	pub fn create_from_asset(skinned_model_asset: &Rc<SkinnedModelAsset>) -> Result<SkinnedModel, String> {
+		skinned_model_asset.retain()?;
+		let mut skinned_model = SkinnedModel::new(skinned_model_asset.get_shader_program().clone());
+		skinned_model.attach_asset(skinned_model_asset.clone());
+		Ok(skinned_model)
+	}
+
+	//==============================================================================
+	/// 인스턴스 짓기. (이 모델과 같은 자산을 나눠 쓰는 새 모델, 유니티의 Instantiate 처럼 GPU 자원을 다시 올리지 않는다)
+	///
+	/// # 돌려줌
+	/// 새 인스턴스. (노드는 자산을 올릴 때의 원형에서 베끼고 재생 상태는 처음부터) 올리기 전이면 Err.
+	///
+	/// # 예제
+	/// 여우 하나를 받아 열 마리 띄우기
+	/// ```rust,no_run
+	/// use vanilla::SkinnedModel;
+	///
+	/// fn spawn_foxes(source_model: &SkinnedModel) -> Result<Vec<SkinnedModel>, String> {
+	/// 	let mut model_list = Vec::new();
+	/// 	for model_index in 1..10 {
+	/// 		let mut instance_model = source_model.create_instance()?;
+	/// 		instance_model.play_animation(if model_index % 2 == 0 { "Walk" } else { "Run" }, 0.0);
+	/// 		model_list.push(instance_model);
+	/// 	}
+	/// 	Ok(model_list)
+	/// }
+	///
+	/// fn destroy_foxes(gl: &glow::Context, source_model: &mut SkinnedModel, model_list: &mut Vec<SkinnedModel>) {
+	/// 	let skinned_model_asset = source_model.get_asset().cloned();
+	/// 	for model in model_list.iter_mut() {
+	/// 		model.destroy(gl);
+	/// 	}
+	/// 	source_model.destroy(gl);
+	/// 	assert!(skinned_model_asset.is_some_and(|skinned_model_asset| skinned_model_asset.is_destroyed()));
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn create_instance(&self) -> Result<SkinnedModel, String> {
+		match &self.asset {
+			Some(skinned_model_asset) => {
+				SkinnedModel::create_from_asset(skinned_model_asset)
+			}
+			None => {
+				Err(String::from("SkinnedModel: no asset to instance (upload first)."))
+			}
+		}
+	}
+
+	//==============================================================================
+	/// 자산 반환.
+	///
+	/// # 돌려줌
+	/// 나눠 쓰는 자산. (올리기 전이나 destroy 뒤에는 None)
+	//==============================================================================
+	pub fn get_asset(&self) -> Option<&Rc<SkinnedModelAsset>> {
+		self.asset.as_ref()
 	}
 
 	//==============================================================================
@@ -2397,41 +2713,7 @@ impl SkinnedModel {
 	//==============================================================================
 	pub fn upload_morph_targets(&mut self, gl: &glow::Context, drawable_index: usize) -> Result<(), String> {
 		let drawable = self.drawable_list.get_mut(drawable_index).ok_or_else(|| format!("SkinnedModel: drawable {} not found.", drawable_index))?;
-		let target_count = drawable.morph_target_list.len();
-		let vertex_count = drawable.vertex_count;
-		if target_count == 0 || vertex_count == 0 {
-			if let Some(morph_texture) = drawable.morph_texture.take() {
-				unsafe {
-					gl.delete_texture(morph_texture);
-				}
-			}
-			drawable.is_morph_dirty = false;
-			return Ok(());
-		}
-		let (texture_width, rows_per_target, texel_data) = SkinnedModel::build_morph_texel_data(&drawable.morph_target_list, vertex_count);
-		let texture_height = rows_per_target * 2 * target_count;
-		unsafe {
-			let morph_texture = match drawable.morph_texture {
-				Some(morph_texture) => {
-					morph_texture
-				}
-				None => {
-					gl.create_texture()?
-				}
-			};
-			drawable.morph_texture = Some(morph_texture);
-			gl.bind_texture(glow::TEXTURE_2D, Some(morph_texture));
-			gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::RGBA32F as i32, texture_width as i32, texture_height as i32, 0, glow::RGBA, glow::FLOAT, glow::PixelUnpackData::Slice(Some(slice_to_bytes(&texel_data))));
-			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
-			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
-			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
-			gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
-			gl.bind_texture(glow::TEXTURE_2D, None);
-		}
-		drawable.morph_rows_per_target = rows_per_target as i32;
-		drawable.morph_texture_width = texture_width as i32;
-		drawable.is_morph_dirty = false;
-		Ok(())
+		upload_drawable_morph_targets(gl, drawable)
 	}
 
 	//==============================================================================
@@ -2527,7 +2809,8 @@ impl SkinnedModel {
 		if position_deltas.len() != drawable.vertex_count * 3 {
 			return Err(format!("SkinnedModel: morph target \"{}\" delta count mismatch.", target_name));
 		}
-		drawable.morph_target_list.push(MorphTarget { name: target_name.to_string(), position_deltas, normal_deltas });
+		// 타깃 목록은 자산과 나눠 쓰므로 갈라진 뒤 더한다. (이 인스턴스만 갈라진다)
+		Rc::make_mut(&mut drawable.morph_target_list).push(MorphTarget { name: target_name.to_string(), position_deltas, normal_deltas });
 		drawable.morph_weights.resize(drawable.morph_target_list.len(), 0.0);
 		drawable.is_morph_dirty = true;
 		Ok(())
@@ -2584,6 +2867,55 @@ impl SkinnedModel {
 		let drawable = self.drawable_list.get_mut(drawable_index).ok_or_else(|| format!("SkinnedModel: drawable {} not found.", drawable_index))?;
 		drawable.material = material;
 		Ok(())
+	}
+
+	//==============================================================================
+	/// 이 인스턴스의 머티리얼 반환. (유니티 Renderer.material, 처음 부르면 지금 머티리얼의 사본으로 갈라져 이 드로어블에 낀다)
+	/// - 사본은 텍스처를 빌려 쓰고 값만 따로다. 값을 바꿔도 같은 자산을 쓰는 다른 인스턴스는 그대로다. 사본은 이 모델의 destroy 가 지운다.
+	/// - 이미 이 인스턴스의 사본이면 그것을 돌려준다.
+	///
+	/// # 인자
+	/// - `drawable_index`: 드로어블 자리.
+	///
+	/// # 돌려줌
+	/// 이 인스턴스만 쓰는 머티리얼. 드로어블이 없으면 Err.
+	///
+	/// # 예제
+	/// 여러 마리 가운데 한 마리만 붉게
+	/// ```rust,no_run
+	/// use vanilla::SkinnedModel;
+	///
+	/// fn tint_red(blue_fox: &SkinnedModel) -> Result<SkinnedModel, String> {
+	/// 	let mut red_fox = blue_fox.create_instance()?;
+	/// 	red_fox.get_material(0)?.set_base_color_factor([1.0, 0.3, 0.3]);
+	/// 	assert_ne!(blue_fox.get_shared_material(0)?.get_base_color_factor(), red_fox.get_shared_material(0)?.get_base_color_factor());
+	/// 	Ok(red_fox)
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn get_material(&mut self, drawable_index: usize) -> Result<Rc<Material>, String> {
+		let drawable = self.drawable_list.get_mut(drawable_index).ok_or_else(|| format!("SkinnedModel: drawable {} not found.", drawable_index))?;
+		let is_instance_material = self.instance_material_list.iter().any(|instance_material| Rc::ptr_eq(instance_material, &drawable.material));
+		if !is_instance_material {
+			let instance_material = Rc::new(drawable.material.create_instance());
+			self.instance_material_list.push(instance_material.clone());
+			drawable.material = instance_material;
+		}
+		Ok(drawable.material.clone())
+	}
+
+	//==============================================================================
+	/// 낀 머티리얼 반환. (유니티 Renderer.sharedMaterial, 갈라지지 않는다. 자산의 원형이면 값을 바꿀 때 그 자산을 쓰는 모든 인스턴스가 바뀐다)
+	///
+	/// # 인자
+	/// - `drawable_index`: 드로어블 자리.
+	///
+	/// # 돌려줌
+	/// 지금 드로어블에 낀 머티리얼. (get_material 로 갈라졌으면 그 사본, set_material 로 바꿨으면 그것) 드로어블이 없으면 Err.
+	//==============================================================================
+	pub fn get_shared_material(&self, drawable_index: usize) -> Result<Rc<Material>, String> {
+		let drawable = self.drawable_list.get(drawable_index).ok_or_else(|| format!("SkinnedModel: drawable {} not found.", drawable_index))?;
+		Ok(drawable.material.clone())
 	}
 
 	//==============================================================================
@@ -3026,37 +3358,31 @@ impl SkinnedModel {
 	}
 
 	//==============================================================================
-	/// 파괴. (GL 리소스 해제, 다른 곳에서도 쓰는 머티리얼은 남긴다)
+	/// 파괴. (이 인스턴스 것을 지우고 자산을 놓는다, 마지막 인스턴스면 자산이 버퍼, 버텍스 어레이, 모프 텍스처, 머티리얼 원형을 지운다)
+	/// - 이 인스턴스 것: 와이어프레임 버퍼, add_morph_target 으로 갈라진 모프 텍스처, get_material 로 갈라진 머티리얼.
+	/// - set_material 로 바깥에서 넣은 머티리얼은 지우지 않는다. 자산의 머티리얼 원형을 다른 모델에 넣어 썼다면 자산이 지워질 때 함께 지워진다.
 	///
 	/// # 인자
 	/// - `gl`: 드로어블을 지은 GL 컨텍스트.
 	//==============================================================================
 	pub fn destroy(&mut self, gl: &glow::Context) {
-		let mut destroyed_material_list: Vec<*const Material> = Vec::new();
 		for drawable in self.drawable_list.drain(..) {
 			unsafe {
-				gl.delete_vertex_array(drawable.vertex_array);
-				for vertex_buffer in drawable.vertex_buffer_list.iter() {
-					gl.delete_buffer(*vertex_buffer);
-				}
-				if let Some(index_buffer) = drawable.index_buffer {
-					gl.delete_buffer(index_buffer);
-				}
 				if let Some(wireframe_index_buffer) = drawable.wireframe_index_buffer {
 					gl.delete_buffer(wireframe_index_buffer);
 				}
-				if let Some(morph_texture) = drawable.morph_texture {
-					gl.delete_texture(morph_texture);
+				if !drawable.is_morph_texture_shared {
+					if let Some(morph_texture) = drawable.morph_texture {
+						gl.delete_texture(morph_texture);
+					}
 				}
 			}
-			let material_pointer = Rc::as_ptr(&drawable.material);
-			if destroyed_material_list.contains(&material_pointer) {
-				continue;
-			}
-			destroyed_material_list.push(material_pointer);
-			if Rc::strong_count(&drawable.material) == 1 {
-				drawable.material.destroy(gl);
-			}
+		}
+		for instance_material in self.instance_material_list.drain(..) {
+			instance_material.destroy(gl);
+		}
+		if let Some(skinned_model_asset) = self.asset.take() {
+			skinned_model_asset.release(gl);
 		}
 	}
 }
@@ -3888,5 +4214,150 @@ mod tests {
 		assert_eq!(skinned_model.get_animation_name_list(), vec!["Walk/Take 001", "Walk/1", "Run"]);
 		assert_eq!(create_fbx_clip_name("", "Idle", 0, 2), "Idle");
 		assert_eq!(create_fbx_clip_name("Jump", "Take", 0, 1), "Jump");
+	}
+	//==============================================================================
+	/// 자산 캐시. (원본 tests/graphics3d/skinnedmodelasset.test.mjs 와 같은 값, 가짜 GL 로 GL 객체 수를 센다)
+	/// - 같은 자산 두 번 읽기에 올리기 한 번, 인스턴스 포즈 따로, 머티리얼 갈라짐, 모프 타깃 갈라짐, 해제 차례, 캐시 비우기, 이름으로 넣고 찾기.
+	//==============================================================================
+	#[test]
+	fn asset_cache_shares_resources_and_releases_by_reference_count() {
+		use crate::core::imagetexturecache::fake_gl::{self, FakeGlObject};
+		let gl = fake_gl::create_context();
+		let shader_program = Rc::new(ShaderProgram::new(&gl, "", "").expect("shader program"));
+		SkinnedModelAsset::clear_cache();
+
+		// 삼각형 하나, 인덱스, 머티리얼 하나, 모프 타깃 하나, 클립 하나. (원본 시험 GLB 와 같다)
+		let float_values: [f32; 26] = [
+			0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0,
+			0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0,
+			0.0, 1.0,
+			0.0, 0.0, 0.0, 0.0, 2.0, 0.0,
+		];
+		let mut binary_bytes: Vec<u8> = float_values.iter().flat_map(|value| value.to_le_bytes()).collect();
+		for index in [0u16, 1, 2, 0] {
+			binary_bytes.extend_from_slice(&index.to_le_bytes());
+		}
+		let json = json!({
+			"asset": { "version": "2.0" },
+			"scenes": [{ "nodes": [0] }],
+			"nodes": [{ "name": "Triangle", "mesh": 0 }],
+			"meshes": [{ "primitives": [{ "attributes": { "POSITION": 0 }, "indices": 4, "material": 0, "targets": [{ "POSITION": 1 }] }], "extras": { "targetNames": ["Lift"] } }],
+			"materials": [{ "name": "Body", "pbrMetallicRoughness": { "baseColorFactor": [0.25, 0.5, 0.75, 1.0] } }],
+			"accessors": [
+				{ "bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3" },
+				{ "bufferView": 1, "componentType": 5126, "count": 3, "type": "VEC3" },
+				{ "bufferView": 2, "componentType": 5126, "count": 2, "type": "SCALAR" },
+				{ "bufferView": 3, "componentType": 5126, "count": 2, "type": "VEC3" },
+				{ "bufferView": 4, "componentType": 5123, "count": 3, "type": "SCALAR" }
+			],
+			"bufferViews": [
+				{ "buffer": 0, "byteOffset": 0, "byteLength": 36 },
+				{ "buffer": 0, "byteOffset": 36, "byteLength": 36 },
+				{ "buffer": 0, "byteOffset": 72, "byteLength": 8 },
+				{ "buffer": 0, "byteOffset": 80, "byteLength": 24 },
+				{ "buffer": 0, "byteOffset": 104, "byteLength": 6 }
+			],
+			"buffers": [{ "byteLength": binary_bytes.len() }],
+			"animations": [{ "name": "Rise", "samplers": [{ "input": 2, "output": 3 }], "channels": [{ "sampler": 0, "target": { "node": 0, "path": "translation" } }] }]
+		});
+		let glb_bytes = wrap_glb(&json, &binary_bytes);
+		let create_handle = |path: &str| SkinnedModelLoadHandle {
+			load_handle: AssetLoadHandle::create_loaded(path, glb_bytes.clone()),
+			file_format: SkinnedModelFileFormat::Glb,
+		};
+		let live_count = |object: FakeGlObject| fake_gl::get_live_count(object);
+
+		// 1. 같은 자산을 다르게 적어 세 번 지으면 올리기 한 번.
+		let mut first_model = create_handle("models/../models/triangle.glb").create_model_with_shader_program(&gl, shader_program.clone()).expect("finished").expect("first model");
+		let mut second_model = create_handle("./models/triangle.glb").create_model_with_shader_program(&gl, shader_program.clone()).expect("finished").expect("second model");
+		let mut third_model = create_handle("models\\triangle.glb").create_model_with_shader_program(&gl, shader_program.clone()).expect("finished").expect("third model");
+		let asset = first_model.get_asset().expect("asset").clone();
+		assert!(Rc::ptr_eq(&asset, second_model.get_asset().expect("asset")) && Rc::ptr_eq(&asset, third_model.get_asset().expect("asset")));
+		assert_eq!(asset.get_key().as_deref(), Some("models/triangle.glb"));
+		assert_eq!(asset.get_reference_count(), 3);
+		assert_eq!(SkinnedModelAsset::get_cached_count(), 1);
+		assert_eq!(live_count(FakeGlObject::VertexArray), 1);
+		assert_eq!(live_count(FakeGlObject::Buffer), 5);
+		assert_eq!(live_count(FakeGlObject::Texture), 17);
+		// 위치 36 + 노멀 36 + 조인트 24 + 가중치 48 + 인덱스 6 + 모프 텍스처 3 x 2 x 16 + 머티리얼 텍스처 16 x 4
+		assert_eq!(asset.get_gpu_byte_count(), 36 + 36 + 24 + 48 + 6 + 3 * 2 * 16 + 16 * 4);
+
+		// 인스턴스는 포즈와 재생 상태가 따로다. (첫 클립을 돌리고 한 쪽만 움직인다)
+		first_model.update(0.5);
+		assert_eq!(first_model.get_node_list()[0].current_translation[1], 1.0);
+		assert_eq!(second_model.get_node_list()[0].current_translation[1], 0.0);
+		assert!(Rc::ptr_eq(&first_model.animation_list, &second_model.animation_list));
+
+		// 2. 머티리얼 갈라짐. (텍스처는 새로 짓지 않고 값만 따로)
+		let shared_material = second_model.get_shared_material(0).expect("shared material");
+		assert!(Rc::ptr_eq(&shared_material, &asset.get_material_list()[0]));
+		let instance_material = second_model.get_material(0).expect("instance material");
+		assert!(!Rc::ptr_eq(&instance_material, &shared_material));
+		assert!(Rc::ptr_eq(&second_model.get_material(0).expect("instance material"), &instance_material));
+		instance_material.set_base_color_factor([1.0, 0.0, 0.0]);
+		assert_eq!(shared_material.get_base_color_factor(), [0.25, 0.5, 0.75]);
+		assert!(Rc::ptr_eq(&first_model.get_shared_material(0).expect("shared material"), &shared_material));
+		assert_eq!(live_count(FakeGlObject::Texture), 17);
+		assert_eq!(instance_material.get_texture_bindings()[0].2, shared_material.get_texture_bindings()[0].2);
+
+		// 3. 모프 타깃 갈라짐. (더한 인스턴스만 제 텍스처를 짓는다)
+		let shared_morph_texture = third_model.get_drawable_list()[0].morph_texture;
+		third_model.add_morph_target(0, "Push", vec![0.0; 9], None).expect("morph target");
+		third_model.upload_pending_morph_targets(&gl);
+		assert_ne!(third_model.get_drawable_list()[0].morph_texture, shared_morph_texture);
+		assert_eq!(live_count(FakeGlObject::Texture), 18);
+		assert_eq!(first_model.get_drawable_list()[0].morph_target_list.len(), 1);
+		assert_eq!(third_model.get_drawable_list()[0].morph_target_list.len(), 2);
+
+		// 4. 해제 차례. (마지막 인스턴스가 지울 때까지 자산 자원은 남는다)
+		third_model.destroy(&gl);
+		assert_eq!(live_count(FakeGlObject::Texture), 17);
+		assert_eq!(asset.get_reference_count(), 2);
+		first_model.destroy(&gl);
+		assert_eq!((live_count(FakeGlObject::VertexArray), live_count(FakeGlObject::Buffer), live_count(FakeGlObject::Texture)), (1, 5, 17));
+		assert_eq!(asset.get_reference_count(), 1);
+		assert!(!asset.is_destroyed());
+		let mut fourth_model = second_model.create_instance().expect("fourth model");
+		assert_eq!(asset.get_reference_count(), 2);
+		assert_eq!(live_count(FakeGlObject::Buffer), 5);
+		fourth_model.destroy(&gl);
+		second_model.destroy(&gl);
+		assert!(asset.is_destroyed());
+		assert_eq!(asset.get_reference_count(), 0);
+		assert_eq!((live_count(FakeGlObject::VertexArray), live_count(FakeGlObject::Buffer), live_count(FakeGlObject::Texture)), (0, 0, 0));
+		assert_eq!(SkinnedModelAsset::get_cached_count(), 0);
+		assert_eq!(asset.get_key(), None);
+		assert!(SkinnedModel::create_from_asset(&asset).is_err());
+
+		// 5. 다 지운 뒤 다시 지으면 새 자산. 캐시를 비우면 다음 받기는 새 자산, 쓰던 인스턴스는 그대로.
+		let mut reloaded_model = create_handle("models/triangle.glb").create_model_with_shader_program(&gl, shader_program.clone()).expect("finished").expect("reloaded model");
+		assert!(!Rc::ptr_eq(reloaded_model.get_asset().expect("asset"), &asset));
+		SkinnedModelAsset::clear_cache();
+		assert_eq!(SkinnedModelAsset::get_cached_count(), 0);
+		assert_eq!(reloaded_model.get_asset().expect("asset").get_key(), None);
+		let mut fresh_model = create_handle("models/triangle.glb").create_model_with_shader_program(&gl, shader_program.clone()).expect("finished").expect("fresh model");
+		assert!(!Rc::ptr_eq(fresh_model.get_asset().expect("asset"), reloaded_model.get_asset().expect("asset")));
+		assert!(!reloaded_model.get_asset().expect("asset").is_destroyed());
+		reloaded_model.destroy(&gl);
+		fresh_model.destroy(&gl);
+		assert_eq!((live_count(FakeGlObject::VertexArray), live_count(FakeGlObject::Buffer), live_count(FakeGlObject::Texture)), (0, 0, 0));
+
+		// 6. 이름으로 넣고 찾기. (바이트로 지은 모델)
+		let mut bytes_model = SkinnedModel::load_from_bytes_with_shader_program(&gl, &glb_bytes, shader_program.clone()).expect("bytes model");
+		assert_eq!(bytes_model.get_asset().expect("asset").get_key(), None);
+		SkinnedModelAsset::register("Triangle", bytes_model.get_asset().expect("asset")).expect("register");
+		let found_asset = SkinnedModelAsset::find("./Triangle", &shader_program).expect("found asset");
+		assert!(Rc::ptr_eq(&found_asset, bytes_model.get_asset().expect("asset")));
+		let other_shader_program = Rc::new(ShaderProgram::new(&gl, "", "").expect("shader program"));
+		assert!(SkinnedModelAsset::find("Triangle", &other_shader_program).is_none());
+		bytes_model.destroy(&gl);
+		assert!(SkinnedModelAsset::find("Triangle", &shader_program).is_none());
+
+		// 7. 키 정규화.
+		assert_eq!(SkinnedModelAsset::normalize_key("./a/b/../c.glb"), "a/c.glb");
+		assert_eq!(SkinnedModelAsset::normalize_key("a\\\\b//c.glb"), "a/b/c.glb");
+		assert_eq!(SkinnedModelAsset::normalize_key("/a/./b.glb"), "/a/b.glb");
+		assert_eq!(SkinnedModelAsset::normalize_key("../a.glb"), "../a.glb");
+		assert_eq!(SkinnedModelAsset::normalize_key("https://example.com/a/./b/../c.glb?v=1#x"), "https://example.com/a/c.glb?v=1#x");
 	}
 }

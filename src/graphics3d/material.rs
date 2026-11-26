@@ -334,7 +334,7 @@ pub struct MaterialDescription {
 //==============================================================================
 pub struct Material {
 	shader_program: Rc<ShaderProgram>,
-	base_color_factor: [f32; 3],
+	base_color_factor: Cell<[f32; 3]>,
 	metallic_factor: f32,
 	roughness_factor: f32,
 	emissive_factor: [f32; 3],
@@ -350,6 +350,10 @@ pub struct Material {
 	opacity_texture: Option<GlTexture>,
 	extra_texture_bindings: RefCell<Vec<(String, u32, Option<GlTexture>)>>,
 	subsurface_factor: Cell<f32>,
+	/// 기본 슬롯 텍스처를 이 머티리얼이 지었는지. (create_instance 로 갈라진 사본은 원본 것을 빌려 쓴다)
+	owns_textures: bool,
+	/// 이 머티리얼이 지은 기본 슬롯 텍스처의 GPU 바이트 수. (밉맵 포함)
+	texture_byte_count: usize,
 }
 
 impl Material {
@@ -365,7 +369,7 @@ impl Material {
 	pub fn new(shader_program: Rc<ShaderProgram>) -> Material {
 		Material {
 			shader_program,
-			base_color_factor: [1.0, 1.0, 1.0],
+			base_color_factor: Cell::new([1.0, 1.0, 1.0]),
 			metallic_factor: 1.0,
 			roughness_factor: 1.0,
 			emissive_factor: [0.0, 0.0, 0.0],
@@ -381,6 +385,8 @@ impl Material {
 			opacity_texture: None,
 			extra_texture_bindings: RefCell::new(Vec::new()),
 			subsurface_factor: Cell::new(1.0),
+			owns_textures: true,
+			texture_byte_count: 0,
 		}
 	}
 
@@ -422,7 +428,7 @@ impl Material {
 	//==============================================================================
 	pub fn create_from_description(gl: &glow::Context, shader_program: Rc<ShaderProgram>, description: &MaterialDescription) -> Result<Material, String> {
 		let mut material = Material::new(shader_program);
-		material.base_color_factor = description.base_color_factor;
+		material.base_color_factor.set(description.base_color_factor);
 		material.metallic_factor = description.metallic_factor;
 		material.roughness_factor = description.roughness_factor;
 		material.emissive_factor = description.emissive_factor;
@@ -442,14 +448,14 @@ impl Material {
 	/// 하나라도 못 지으면 그 오류. (그때까지 지은 텍스처는 슬롯에 남아 있다, 부른 쪽이 destroy 로 지운다)
 	//==============================================================================
 	fn create_description_textures(&mut self, gl: &glow::Context, description: &MaterialDescription) -> Result<(), String> {
-		self.base_color_texture = Some(Material::create_texture(gl, description.base_color_image.as_ref(), [255, 255, 255, 255])?);
-		self.normal_texture = Some(Material::create_texture(gl, description.normal_image.as_ref(), [128, 128, 255, 255])?);
-		self.metallic_roughness_texture = Some(Material::create_texture(gl, description.metallic_roughness_image.as_ref(), [255, 255, 255, 255])?);
-		self.glossiness_texture = Some(Material::create_texture(gl, description.glossiness_image.as_ref(), [255, 255, 255, 255])?);
-		self.occlusion_texture = Some(Material::create_texture(gl, description.occlusion_image.as_ref(), [255, 255, 255, 255])?);
-		self.emissive_texture = Some(Material::create_texture(gl, description.emissive_image.as_ref(), [255, 255, 255, 255])?);
-		self.specular_texture = Some(Material::create_texture(gl, description.specular_image.as_ref(), [255, 255, 255, 255])?);
-		self.opacity_texture = Some(Material::create_texture(gl, description.opacity_image.as_ref(), [255, 255, 255, 255])?);
+		self.base_color_texture = Some(self.create_owned_texture(gl, description.base_color_image.as_ref(), [255, 255, 255, 255])?);
+		self.normal_texture = Some(self.create_owned_texture(gl, description.normal_image.as_ref(), [128, 128, 255, 255])?);
+		self.metallic_roughness_texture = Some(self.create_owned_texture(gl, description.metallic_roughness_image.as_ref(), [255, 255, 255, 255])?);
+		self.glossiness_texture = Some(self.create_owned_texture(gl, description.glossiness_image.as_ref(), [255, 255, 255, 255])?);
+		self.occlusion_texture = Some(self.create_owned_texture(gl, description.occlusion_image.as_ref(), [255, 255, 255, 255])?);
+		self.emissive_texture = Some(self.create_owned_texture(gl, description.emissive_image.as_ref(), [255, 255, 255, 255])?);
+		self.specular_texture = Some(self.create_owned_texture(gl, description.specular_image.as_ref(), [255, 255, 255, 255])?);
+		self.opacity_texture = Some(self.create_owned_texture(gl, description.opacity_image.as_ref(), [255, 255, 255, 255])?);
 		Ok(())
 	}
 
@@ -480,6 +486,23 @@ impl Material {
 	/// ```
 	//==============================================================================
 	pub fn create_texture(gl: &glow::Context, image_description: Option<&ImageDescription>, fallback_color: [u8; 4]) -> Result<GlTexture, String> {
+		let (texture, _) = Material::create_texture_with_byte_count(gl, image_description, fallback_color)?;
+		Ok(texture)
+	}
+
+	//==============================================================================
+	/// 기본 슬롯 텍스처 생성. (create_texture 와 같고, 지은 GPU 바이트를 이 머티리얼의 텍스처 바이트 수에 더한다)
+	//==============================================================================
+	fn create_owned_texture(&mut self, gl: &glow::Context, image_description: Option<&ImageDescription>, fallback_color: [u8; 4]) -> Result<GlTexture, String> {
+		let (texture, byte_count) = Material::create_texture_with_byte_count(gl, image_description, fallback_color)?;
+		self.texture_byte_count += byte_count;
+		Ok(texture)
+	}
+
+	//==============================================================================
+	/// 텍스처 생성 본문. (GL 텍스처와 GPU 바이트 수, 단색은 1x1 4 바이트, 그림은 밉맵까지)
+	//==============================================================================
+	fn create_texture_with_byte_count(gl: &glow::Context, image_description: Option<&ImageDescription>, fallback_color: [u8; 4]) -> Result<(GlTexture, usize), String> {
 		let has_bytes = image_description.map(|description| !description.bytes.is_empty()).unwrap_or(false);
 		let has_source = image_description.map(|description| description.source.is_some()).unwrap_or(false);
 		let image_description = match image_description {
@@ -491,7 +514,7 @@ impl Material {
 					let texture = gl.create_texture()?;
 					gl.bind_texture(glow::TEXTURE_2D, Some(texture));
 					gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::RGBA8 as i32, 1, 1, 0, glow::RGBA, glow::UNSIGNED_BYTE, glow::PixelUnpackData::Slice(Some(&fallback_color)));
-					Ok(texture)
+					Ok((texture, 4))
 				};
 			}
 		};
@@ -535,7 +558,7 @@ impl Material {
 					gl.tex_parameter_f32(glow::TEXTURE_2D, glow::TEXTURE_MAX_ANISOTROPY_EXT, anisotropy);
 				}
 			}
-			Ok(texture)
+			Ok((texture, compute_mipmap_byte_count(width, height)))
 		}
 	}
 
@@ -681,7 +704,7 @@ impl Material {
 		let use_glossiness_location = shader_program.get_uniform_location(gl, "useGlossiness");
 		let use_alpha_cutout_location = shader_program.get_uniform_location(gl, "useAlphaCutout");
 		let subsurface_factor_location = shader_program.get_uniform_location(gl, "subsurfaceFactor");
-		let base_color_factor = self.base_color_factor;
+		let base_color_factor = self.base_color_factor.get();
 		let emissive_factor = self.emissive_factor;
 		unsafe {
 			gl.uniform_3_f32(base_color_factor_location.as_ref(), base_color_factor[0], base_color_factor[1], base_color_factor[2]);
@@ -724,7 +747,80 @@ impl Material {
 	/// 베이스 컬러 배율. (선형 rgb)
 	//==============================================================================
 	pub fn get_base_color_factor(&self) -> [f32; 3] {
-		self.base_color_factor
+		self.base_color_factor.get()
+	}
+
+	//==============================================================================
+	/// 베이스 컬러 팩터 설정. (선형 rgb 배율, 나눠 쓰는 머티리얼이면 그것을 쓰는 모든 모델이 바뀐다)
+	///
+	/// # 인자
+	/// - `base_color_factor`: 베이스 컬러 배율. (선형 rgb)
+	///
+	/// # 예제
+	/// 머티리얼 사본만 붉게 물들이기
+	/// ```rust
+	/// use std::rc::Rc;
+	/// use vanilla::{Material, ShaderProgram};
+	///
+	/// fn tint_instance(shared_material: &Rc<Material>) -> Material {
+	/// 	let instance_material = shared_material.create_instance();
+	/// 	instance_material.set_base_color_factor([1.0, 0.4, 0.4]);
+	/// 	instance_material
+	/// }
+	///
+	/// fn check(shader_program: Rc<ShaderProgram>) {
+	/// 	let shared_material = Rc::new(Material::new(shader_program));
+	/// 	let instance_material = tint_instance(&shared_material);
+	/// 	assert_eq!(shared_material.get_base_color_factor(), [1.0, 1.0, 1.0]);
+	/// 	assert_eq!(instance_material.get_base_color_factor(), [1.0, 0.4, 0.4]);
+	/// }
+	/// let _ = check;
+	/// ```
+	//==============================================================================
+	pub fn set_base_color_factor(&self, base_color_factor: [f32; 3]) {
+		self.base_color_factor.set(base_color_factor);
+	}
+
+	//==============================================================================
+	/// 머티리얼 사본 만들기. (유니티의 material 과 sharedMaterial 처럼 값만 갈라지고 텍스처는 원본 것을 빌려 쓴다)
+	/// - 팩터, 플래그, 기본 슬롯 텍스처, set_texture 로 넣은 추가 텍스처를 그대로 베낀다. GPU 텍스처는 새로 올리지 않는다.
+	/// - 사본의 destroy 는 빌린 텍스처를 지우지 않는다. 원본(텍스처를 지은 머티리얼)을 지우기 전에 사본을 다 쓴다.
+	///
+	/// # 돌려줌
+	/// 같은 셰이더와 텍스처를 쓰고 값은 따로 바꿀 수 있는 사본. (텍스처 바이트 수는 0)
+	//==============================================================================
+	pub fn create_instance(&self) -> Material {
+		Material {
+			shader_program: self.shader_program.clone(),
+			base_color_factor: Cell::new(self.base_color_factor.get()),
+			metallic_factor: self.metallic_factor,
+			roughness_factor: self.roughness_factor,
+			emissive_factor: self.emissive_factor,
+			use_glossiness: self.use_glossiness,
+			use_alpha_cutout: Cell::new(self.use_alpha_cutout.get()),
+			base_color_texture: self.base_color_texture,
+			normal_texture: self.normal_texture,
+			metallic_roughness_texture: self.metallic_roughness_texture,
+			glossiness_texture: self.glossiness_texture,
+			occlusion_texture: self.occlusion_texture,
+			emissive_texture: self.emissive_texture,
+			specular_texture: self.specular_texture,
+			opacity_texture: self.opacity_texture,
+			extra_texture_bindings: RefCell::new(self.extra_texture_bindings.borrow().clone()),
+			subsurface_factor: Cell::new(self.subsurface_factor.get()),
+			owns_textures: false,
+			texture_byte_count: 0,
+		}
+	}
+
+	//==============================================================================
+	/// 텍스처 바이트 수 반환. (이 머티리얼이 지은 기본 슬롯 텍스처의 GPU 바이트, 밉맵 포함, 사본은 0)
+	///
+	/// # 돌려줌
+	/// GPU 텍스처 바이트 수. (RGBA8 로 셈, 단색 1x1 은 4)
+	//==============================================================================
+	pub fn get_texture_byte_count(&self) -> usize {
+		self.texture_byte_count
 	}
 
 	//==============================================================================
@@ -837,6 +933,9 @@ impl Material {
 	/// - `gl`: 만들 때 쓴 GL 컨텍스트.
 	//==============================================================================
 	pub fn destroy(&self, gl: &glow::Context) {
+		if !self.owns_textures {
+			return;
+		}
 		let owned_texture_list = [self.base_color_texture, self.normal_texture, self.metallic_roughness_texture, self.glossiness_texture, self.occlusion_texture, self.emissive_texture, self.specular_texture, self.opacity_texture];
 		for texture in owned_texture_list.into_iter().flatten() {
 			unsafe {
@@ -844,6 +943,24 @@ impl Material {
 			}
 		}
 	}
+}
+
+//==============================================================================
+/// 밉맵까지 든 RGBA8 텍스처 바이트 수. (바닥 단계부터 1x1 까지 가로, 세로를 반씩 줄여 더한다)
+//==============================================================================
+fn compute_mipmap_byte_count(width: u32, height: u32) -> usize {
+	let mut byte_count = 0;
+	let mut level_width = width.max(1) as usize;
+	let mut level_height = height.max(1) as usize;
+	loop {
+		byte_count += level_width * level_height * 4;
+		if level_width == 1 && level_height == 1 {
+			break;
+		}
+		level_width = (level_width / 2).max(1);
+		level_height = (level_height / 2).max(1);
+	}
+	byte_count
 }
 
 //==============================================================================

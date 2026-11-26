@@ -85441,6 +85441,93 @@
 						},
 						{
 							"kind": "method",
+							"name": "set_base_color_factor",
+							"signature": "pub fn set_base_color_factor(&self, base_color_factor: [f32; 3])",
+							"params": [
+								{
+									"name": "base_color_factor",
+									"type": "[f32; 3]",
+									"description": {
+										"ko": "베이스 컬러 배율. (선형 rgb)",
+										"en": "Base color factor. (linear rgb)"
+									}
+								}
+							],
+							"description": {
+								"ko": "베이스 컬러 팩터 설정. (선형 rgb 배율, 나눠 쓰는 머티리얼이면 그것을 쓰는 모든 모델이 바뀐다)",
+								"en": "Set the base color factor. (linear rgb multiplier; on a shared material every model using it changes)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/material.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "graphics3d/material",
+								"class": "Material",
+								"name": "setBaseColorFactor"
+							},
+							"examples": [
+								{
+									"title": {
+										"ko": "머티리얼 사본만 붉게 물들이기",
+										"en": "Tint only the material copy red"
+									},
+									"code": "use std::rc::Rc;\nuse vanilla::{Material, ShaderProgram};\n\nfn tint_instance(shared_material: &Rc<Material>) -> Material {\n\tlet instance_material = shared_material.create_instance();\n\tinstance_material.set_base_color_factor([1.0, 0.4, 0.4]);\n\tinstance_material\n}\n\nfn check(shader_program: Rc<ShaderProgram>) {\n\tlet shared_material = Rc::new(Material::new(shader_program));\n\tlet instance_material = tint_instance(&shared_material);\n\tassert_eq!(shared_material.get_base_color_factor(), [1.0, 1.0, 1.0]);\n\tassert_eq!(instance_material.get_base_color_factor(), [1.0, 0.4, 0.4]);\n}\nlet _ = check;",
+									"language": "rust"
+								}
+							]
+						},
+						{
+							"kind": "method",
+							"name": "create_instance",
+							"signature": "pub fn create_instance(&self) -> Material",
+							"params": [],
+							"returns": {
+								"type": "Material",
+								"description": {
+									"ko": "같은 셰이더와 텍스처를 쓰고 값은 따로 바꿀 수 있는 사본. (텍스처 바이트 수는 0)",
+									"en": "Copy that uses the same shader and textures with values that can change separately. (texture byte count 0)"
+								}
+							},
+							"description": {
+								"ko": "머티리얼 사본 만들기. (유니티의 material 과 sharedMaterial 처럼 값만 갈라지고 텍스처는 원본 것을 빌려 쓴다)\n- 팩터, 플래그, 기본 슬롯 텍스처, set_texture 로 넣은 추가 텍스처를 그대로 베낀다. GPU 텍스처는 새로 올리지 않는다.\n- 사본의 destroy 는 빌린 텍스처를 지우지 않는다. 원본(텍스처를 지은 머티리얼)을 지우기 전에 사본을 다 쓴다.",
+								"en": "Create a material copy. (like Unity's material and sharedMaterial, only the values fork and the textures are borrowed from the original)\n- Copies the factors, flags, default slot textures and extra textures added with set_texture. No GPU texture is uploaded again.\n- The copy's destroy does not delete the borrowed textures. Finish using the copies before destroying the original (the material that created the textures)."
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/material.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "graphics3d/material",
+								"class": "Material",
+								"name": "createInstance"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "get_texture_byte_count",
+							"signature": "pub fn get_texture_byte_count(&self) -> usize",
+							"params": [],
+							"returns": {
+								"type": "usize",
+								"description": {
+									"ko": "GPU 텍스처 바이트 수. (RGBA8 로 셈, 단색 1x1 은 4)",
+									"en": "GPU texture byte count. (counted as RGBA8, a solid 1x1 is 4)"
+								}
+							},
+							"description": {
+								"ko": "텍스처 바이트 수 반환. (이 머티리얼이 지은 기본 슬롯 텍스처의 GPU 바이트, 밉맵 포함, 사본은 0)",
+								"en": "Return the texture byte count. (GPU bytes of the default slot textures this material created, including mipmaps; 0 for a copy)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/material.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "graphics3d/material",
+								"class": "Material",
+								"name": "getTextureByteCount"
+							}
+						},
+						{
+							"kind": "method",
 							"name": "get_metallic_factor",
 							"signature": "pub fn get_metallic_factor(&self) -> f32",
 							"params": [],
@@ -87915,8 +88002,8 @@
 		{
 			"name": "graphics3d/skinnedmodel",
 			"summary": {
-				"ko": "스킨드 모델. (원본 graphics3d/skinnedmodel.js)\n- 모델 인스턴스, 메시/본/스킨/머티리얼/애니메이션 데이터 + 포즈 상태. 렌더링은 SkinnedModelRenderer 가 맡는다.\n- GLB(바이너리 glTF)와 바이너리 FBX 를 공통 중립 스키마(MeshDescription + MaterialDescription)로 해석해 GL 리소스를 구성한다.\n  (임포터는 파싱만 → 중립 스키마 → 공용 GL 업로드 upload_meshes_and_materials)\n- 스킨 없는 정적 메시는 합성 스킨(조인트 1개)으로, 모프 타깃은 실수 텍스처로 올려 같은 스키닝 경로로 그린다.\n- 애니메이션 크로스페이드와 조인트 회전 오프셋(절차 포즈 가공), 모프 가중치(glTF weights / 프로그램)를 원본처럼 지원한다.\n- 원본과 다른 것:\n  - 원본은 async 이고 URL 을 fetch 한다(loadFromUrl, 바이트는 loadFromBytes). 러스트 판의 바이트 함수\n    load_from_bytes / load_from_fbx_bytes / add_animations_from_fbx_bytes 는 그 자리에서 끝난다.\n    URL 함수 load_from_url / load_from_fbx_url 은 ImageAsset 처럼 엔진의 애셋 받기(데스크탑은 애셋 폴더 후보, 웹은 asset_base_url 에서 fetch)로\n    바이트를 부탁하고 받기 손잡이(SkinnedModelLoadHandle)를 돌려준다. 다 받으면 손잡이의 create_model(gl, 렌더러)이 모델을 짓는다. (await 없는 꼴)\n    원본 await SkinnedModel.loadFromUrl(gl, url, renderer) 자리는 엔진 작업 안에서 load_from_url_async(엔진, 경로, 렌더러).await 다. (fbx 는 load_from_fbx_url_async)\n    다 받으면 작업을 폴링하는 엔진의 GL 로 모델을 짓는다. (렌더러는 부를 때 셰이더 프로그램만 나눠 들어 빌리지 않는다)\n    add_animations_from_fbx_url 은 받기를 부탁하고 await 할 수 있는 AnimationLoadHandle 을 돌려준다. 원본처럼 await 가 끝날 때는 클립이 이미 더해져 있다.\n    (클립 목록을 손잡이와 나눠 들어, 다 받으면 await 하는 퓨처나 다음 update, play_animation 가운데 먼저 닿는 쪽이 더한다. 원본처럼 받은 차례로 더한다)\n  - GL 을 쓰는 함수는 gl 을 받는다. update(delta_time) 는 GL 을 쓰지 않는다. 원본 update 6단계(바뀐 모프 타깃 업로드)는\n    렌더러의 draw / draw_depth / draw_wireframe 가 upload_pending_morph_targets 로 대신한다. (그래서 그리기 함수가 &mut 모델을 받는다)\n    덕분에 씬의 tick 에서 update 를 부를 수 있다.\n  - 원본 노드 / 드로어블 / 스킨 / 클립 객체는 SkinnedModelNode / Drawable / Skin / AnimationClip 구조체다.\n    드로어블의 머티리얼은 `Rc<Material>` 이다. 클립은 인덱스로 가리키고, sample_animation 도 클립 인덱스를 받는다.\n    upload_wireframe_indices / upload_morph_targets 는 원본의 드로어블 객체 대신 드로어블 인덱스를 받는다. (모델을 &mut 로 빌린 채 드로어블을 넘길 수 없어서다)\n  - 드로어블의 mesh_description 은 모프 타깃을 morph_target_list 로 옮긴 뒤라 morph_targets 가 비어 있다. (큰 델타 배열을 두 벌 들지 않는다)\n  - 원본처럼 노드 matrix 와 CUBICSPLINE 보간, 프리미티브 mode 는 보지 않는다. FBX 는 원본처럼 스킨이 붙은 메시만 그린다.\n  - destroy 가 지우는 머티리얼: 원본은 이 모델이 업로드에서 지은 것을 지운다. 러스트 판은 그 가운데 다른 곳에서 Rc 로 쥐지 않은 것만 지운다.\n    (참조 수를 셀 수 있어서다, 자바스크립트에는 참조 수가 없다)",
-				"en": "Skinned model. (the original graphics3d/skinnedmodel.js)\n- Model instance, mesh/bone/skin/material/animation data + pose state. Rendering is handled by SkinnedModelRenderer.\n- Interprets GLB (binary glTF) and binary FBX into a common neutral schema (MeshDescription + MaterialDescription) and builds GL resources.\n  (importers only parse → neutral schema → shared GL upload upload_meshes_and_materials)\n- Static meshes without a skin use a synthetic skin (1 joint), and morph targets are uploaded as float textures, so they draw through the same skinning path.\n- Supports animation cross-fades, joint rotation offsets (procedural pose adjustment) and morph weights (glTF weights / code) like the original.\n- Differences from the original:\n  - The original is async and fetches URLs (loadFromUrl, loadFromBytes for bytes). The byte functions of the Rust version\n    load_from_bytes / load_from_fbx_bytes / add_animations_from_fbx_bytes finish on the spot.\n    The URL functions load_from_url / load_from_fbx_url, like ImageAsset, use the engine's asset loading (asset folder candidates on desktop, fetch from asset_base_url on the web)\n    to request the bytes and return a load handle (SkinnedModelLoadHandle). Once loaded, the handle's create_model(gl, renderer) builds the model. (the form without await)\n    The original await SkinnedModel.loadFromUrl(gl, url, renderer) becomes load_from_url_async(engine, path, renderer).await inside an engine task. (load_from_fbx_url_async for fbx)\n    Once loaded, the model is built with the GL of the engine polling the task. (the renderer only shares its shader program at the call and is not borrowed)\n    add_animations_from_fbx_url requests the load and returns an awaitable AnimationLoadHandle. Like the original, the clips are already added when await finishes.\n    (the clip list is shared with the handle, and once loaded, whichever comes first among the awaiting future, the next update or play_animation adds them. They are added in load order like the original)\n  - Functions that use GL take gl. update(delta_time) does not use GL. Step 6 of the original update (uploading changed morph targets) is\n    done instead by the renderer's draw / draw_depth / draw_wireframe through upload_pending_morph_targets. (that is why the draw functions take a &mut model)\n    Thanks to this, update can be called in the scene's tick.\n  - The original node / drawable / skin / clip objects are the SkinnedModelNode / Drawable / Skin / AnimationClip structs.\n    A drawable's material is `Rc<Material>`. Clips are referred to by index, and sample_animation also takes a clip index.\n    upload_wireframe_indices / upload_morph_targets take a drawable index instead of the original drawable object. (a drawable cannot be passed while the model is borrowed as &mut)\n  - A drawable's mesh_description has empty morph_targets because the morph targets were moved to morph_target_list. (the large delta arrays are not held twice)\n  - Like the original, node matrix, CUBICSPLINE interpolation and primitive mode are ignored. Like the original, FBX draws only meshes with a skin attached.\n  - Materials deleted by destroy: the original deletes the ones this model built during upload. The Rust version deletes only those among them not held elsewhere with Rc.\n    (because reference counts can be checked, JavaScript has no reference counts)"
+				"ko": "스킨드 모델. (원본 graphics3d/skinnedmodel.js)\n- 모델 인스턴스, 메시/본/스킨/머티리얼/애니메이션 데이터 + 포즈 상태. 렌더링은 SkinnedModelRenderer 가 맡는다.\n- GLB(바이너리 glTF)와 바이너리 FBX 를 공통 중립 스키마(MeshDescription + MaterialDescription)로 해석해 GL 리소스를 구성한다.\n  (임포터는 파싱만 → 중립 스키마 → 공용 GL 업로드 upload_meshes_and_materials)\n- 스킨 없는 정적 메시는 합성 스킨(조인트 1개)으로, 모프 타깃은 실수 텍스처로 올려 같은 스키닝 경로로 그린다.\n- 애니메이션 크로스페이드와 조인트 회전 오프셋(절차 포즈 가공), 모프 가중치(glTF weights / 프로그램)를 원본처럼 지원한다.\n- 원본과 다른 것:\n  - 원본은 async 이고 URL 을 fetch 한다(loadFromUrl, 바이트는 loadFromBytes). 러스트 판의 바이트 함수\n    load_from_bytes / load_from_fbx_bytes / add_animations_from_fbx_bytes 는 그 자리에서 끝난다.\n    URL 함수 load_from_url / load_from_fbx_url 은 ImageAsset 처럼 엔진의 애셋 받기(데스크탑은 애셋 폴더 후보, 웹은 asset_base_url 에서 fetch)로\n    바이트를 부탁하고 받기 손잡이(SkinnedModelLoadHandle)를 돌려준다. 다 받으면 손잡이의 create_model(gl, 렌더러)이 모델을 짓는다. (await 없는 꼴)\n    원본 await SkinnedModel.loadFromUrl(gl, url, renderer) 자리는 엔진 작업 안에서 load_from_url_async(엔진, 경로, 렌더러).await 다. (fbx 는 load_from_fbx_url_async)\n    다 받으면 작업을 폴링하는 엔진의 GL 로 모델을 짓는다. (렌더러는 부를 때 셰이더 프로그램만 나눠 들어 빌리지 않는다)\n    add_animations_from_fbx_url 은 받기를 부탁하고 await 할 수 있는 AnimationLoadHandle 을 돌려준다. 원본처럼 await 가 끝날 때는 클립이 이미 더해져 있다.\n    (클립 목록을 손잡이와 나눠 들어, 다 받으면 await 하는 퓨처나 다음 update, play_animation 가운데 먼저 닿는 쪽이 더한다. 원본처럼 받은 차례로 더한다)\n  - GL 을 쓰는 함수는 gl 을 받는다. update(delta_time) 는 GL 을 쓰지 않는다. 원본 update 6단계(바뀐 모프 타깃 업로드)는\n    렌더러의 draw / draw_depth / draw_wireframe 가 upload_pending_morph_targets 로 대신한다. (그래서 그리기 함수가 &mut 모델을 받는다)\n    덕분에 씬의 tick 에서 update 를 부를 수 있다.\n  - 원본 노드 / 드로어블 / 스킨 / 클립 객체는 SkinnedModelNode / Drawable / Skin / AnimationClip 구조체다.\n    드로어블의 머티리얼은 `Rc<Material>` 이다. 클립은 인덱스로 가리키고, sample_animation 도 클립 인덱스를 받는다.\n    upload_wireframe_indices / upload_morph_targets 는 원본의 드로어블 객체 대신 드로어블 인덱스를 받는다. (모델을 &mut 로 빌린 채 드로어블을 넘길 수 없어서다)\n  - 드로어블의 mesh_description 은 모프 타깃을 morph_target_list 로 옮긴 뒤라 morph_targets 가 비어 있다. (큰 델타 배열을 두 벌 들지 않는다)\n  - 원본처럼 노드 matrix 와 CUBICSPLINE 보간, 프리미티브 mode 는 보지 않는다. FBX 는 원본처럼 스킨이 붙은 메시만 그린다.\n- 올린 버퍼, 머티리얼 원형, 모프 텍스처, 노드와 스킨 원형, 클립은 SkinnedModelAsset 이 한 벌 들고, 모델은 그 인스턴스다. (원본과 같다)\n  create_instance, create_from_asset 은 GPU 업로드 없이 인스턴스를 짓고, 받기(create_model, load_from_url_async)는 자산 캐시를 쓴다.\n  destroy 는 이 인스턴스 것(와이어프레임 버퍼, 갈라진 모프 텍스처, get_material 로 갈라진 머티리얼)을 지우고 자산을 놓는다.\n  set_material 로 바깥에서 넣은 머티리얼은 지우지 않는다. (원본과 같다)",
+				"en": "Skinned model. (the original graphics3d/skinnedmodel.js)\n- Model instance, mesh/bone/skin/material/animation data + pose state. Rendering is handled by SkinnedModelRenderer.\n- Interprets GLB (binary glTF) and binary FBX into a common neutral schema (MeshDescription + MaterialDescription) and builds GL resources.\n  (importers only parse → neutral schema → shared GL upload upload_meshes_and_materials)\n- Static meshes without a skin use a synthetic skin (1 joint), and morph targets are uploaded as float textures, so they draw through the same skinning path.\n- Supports animation cross-fades, joint rotation offsets (procedural pose adjustment) and morph weights (glTF weights / code) like the original.\n- Differences from the original:\n  - The original is async and fetches URLs (loadFromUrl, loadFromBytes for bytes). The byte functions of the Rust version\n    load_from_bytes / load_from_fbx_bytes / add_animations_from_fbx_bytes finish on the spot.\n    The URL functions load_from_url / load_from_fbx_url, like ImageAsset, use the engine's asset loading (asset folder candidates on desktop, fetch from asset_base_url on the web)\n    to request the bytes and return a load handle (SkinnedModelLoadHandle). Once loaded, the handle's create_model(gl, renderer) builds the model. (the form without await)\n    The original await SkinnedModel.loadFromUrl(gl, url, renderer) becomes load_from_url_async(engine, path, renderer).await inside an engine task. (load_from_fbx_url_async for fbx)\n    Once loaded, the model is built with the GL of the engine polling the task. (the renderer only shares its shader program at the call and is not borrowed)\n    add_animations_from_fbx_url requests the load and returns an awaitable AnimationLoadHandle. Like the original, the clips are already added when await finishes.\n    (the clip list is shared with the handle, and once loaded, whichever comes first among the awaiting future, the next update or play_animation adds them. They are added in load order like the original)\n  - Functions that use GL take gl. update(delta_time) does not use GL. Step 6 of the original update (uploading changed morph targets) is\n    done instead by the renderer's draw / draw_depth / draw_wireframe through upload_pending_morph_targets. (that is why the draw functions take a &mut model)\n    Thanks to this, update can be called in the scene's tick.\n  - The original node / drawable / skin / clip objects are the SkinnedModelNode / Drawable / Skin / AnimationClip structs.\n    A drawable's material is `Rc<Material>`. Clips are referred to by index, and sample_animation also takes a clip index.\n    upload_wireframe_indices / upload_morph_targets take a drawable index instead of the original drawable object. (a drawable cannot be passed while the model is borrowed as &mut)\n  - A drawable's mesh_description has empty morph_targets because the morph targets were moved to morph_target_list. (the large delta arrays are not held twice)\n  - Like the original, node matrix, CUBICSPLINE interpolation and primitive mode are ignored. Like the original, FBX draws only meshes with a skin attached.\n- The uploaded buffers, material prototypes, morph textures, node and skin prototypes and clips are held once by SkinnedModelAsset, and the model is its instance. (same as the original)\n  create_instance and create_from_asset build instances without a GPU upload, and loads (create_model, load_from_url_async) use the asset cache.\n  destroy deletes this instance's resources (wireframe buffers, forked morph textures, materials forked by get_material) and releases the asset.\n  Materials given from outside with set_material are not deleted. (same as the original)"
 			},
 			"examples": [
 				{
@@ -88709,6 +88796,9 @@
 						"ko": "드로어블. (원본 drawableList 원소, 버텍스 어레이, 인덱스, 스킨, 머티리얼 참조, 모프 상태)",
 						"en": "Drawable. (an element of the original drawableList, vertex array, indices, skin, material reference, morph state)"
 					},
+					"traits": [
+						"Clone"
+					],
 					"source": "src/graphics3d/skinnedmodel.rs",
 					"members": [
 						{
@@ -88999,18 +89089,18 @@
 						{
 							"kind": "field",
 							"name": "mesh_description",
-							"signature": "pub mesh_description: MeshDescription",
+							"signature": "pub mesh_description: Rc<MeshDescription>",
 							"params": [],
 							"returns": {
-								"type": "MeshDescription",
+								"type": "Rc<MeshDescription>",
 								"description": {
 									"ko": "",
 									"en": ""
 								}
 							},
 							"description": {
-								"ko": "업로드한 메시 서술. (모프 타깃은 morph_target_list 로 옮겨 비어 있다)",
-								"en": "Uploaded mesh description. (the morph targets were moved to morph_target_list, so it is empty)"
+								"ko": "업로드한 메시 서술. (모프 타깃은 morph_target_list 로 옮겨 비어 있다, 같은 자산의 인스턴스들이 나눠 든다)",
+								"en": "Uploaded mesh description. (empty morph targets because they were moved to morph_target_list; shared by the instances of the same asset)"
 							},
 							"since": "0.3.2",
 							"source": "src/graphics3d/skinnedmodel.rs"
@@ -89018,18 +89108,18 @@
 						{
 							"kind": "field",
 							"name": "morph_target_list",
-							"signature": "pub morph_target_list: Vec<MorphTarget>",
+							"signature": "pub morph_target_list: Rc<Vec<MorphTarget>>",
 							"params": [],
 							"returns": {
-								"type": "Vec<MorphTarget>",
+								"type": "Rc<Vec<MorphTarget>>",
 								"description": {
 									"ko": "",
 									"en": ""
 								}
 							},
 							"description": {
-								"ko": "모프 타깃 목록. (MORPH_TARGET_MAXIMUM 개까지)",
-								"en": "Morph target list. (up to MORPH_TARGET_MAXIMUM)"
+								"ko": "모프 타깃 목록. (MORPH_TARGET_MAXIMUM 개까지, 자산과 나눠 들고 add_morph_target 하면 이 드로어블 것으로 갈라진다)",
+								"en": "Morph target list. (up to MORPH_TARGET_MAXIMUM, shared with the asset and forked into this drawable's own on add_morph_target)"
 							},
 							"since": "0.3.2",
 							"source": "src/graphics3d/skinnedmodel.rs"
@@ -89108,6 +89198,25 @@
 								"en": "Morph texture width. (texels, the vertex count clamped to 1 ~ 2048)"
 							},
 							"since": "0.3.2",
+							"source": "src/graphics3d/skinnedmodel.rs"
+						},
+						{
+							"kind": "field",
+							"name": "is_morph_texture_shared",
+							"signature": "pub is_morph_texture_shared: bool",
+							"params": [],
+							"returns": {
+								"type": "bool",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "모프 텍스처를 자산과 나눠 쓰는지. (true 면 destroy 가 지우지 않고, 다시 올릴 때 이 드로어블 것을 새로 짓는다)",
+								"en": "Whether the morph texture is shared with the asset. (if true, destroy does not delete it, and uploading again creates this drawable's own)"
+							},
+							"since": "0.4.0",
 							"source": "src/graphics3d/skinnedmodel.rs"
 						},
 						{
@@ -90188,8 +90297,8 @@
 								}
 							},
 							"description": {
-								"ko": "중립 메시/머티리얼 서술 업로드. (공용, Material 생성 + 버텍스 어레이/드로어블 구성)\n- 예전 드로어블의 GL 리소스와 다른 곳에서 쓰지 않는 머티리얼은 먼저 지운다. (destroy, 다시 불러도 새지 않는다)",
-								"en": "Uploads neutral mesh/material descriptions. (shared, creates Material + builds vertex arrays/drawables)\n- First deletes the GL resources of the old drawables and materials not used elsewhere. (destroy, loading again does not leak)"
+								"ko": "중립 메시/머티리얼 서술 업로드. (공용, Material 생성 + 버텍스 어레이/드로어블 구성)\n- 예전 자산은 먼저 놓는다. (destroy, 다시 불러도 새지 않는다)\n- 올린 버퍼, 머티리얼, 모프 텍스처와 지금 노드, 스킨, 클립을 새 자산(SkinnedModelAsset, 참조 수 1)으로 묶고 이 모델이 그 첫 인스턴스가 된다.",
+								"en": "Upload neutral mesh/material descriptions. (shared path, creates Materials and builds vertex arrays/drawables)\n- Releases the previous asset first. (destroy, so calling it again does not leak)\n- Bundles the uploaded buffers, materials and morph textures with the current nodes, skins and clips into a new asset (SkinnedModelAsset, reference count 1), and this model becomes its first instance."
 							},
 							"since": "0.3.2",
 							"source": "src/graphics3d/skinnedmodel.rs",
@@ -90198,6 +90307,100 @@
 								"module": "graphics3d/skinnedmodel",
 								"class": "SkinnedModel",
 								"name": "uploadMeshesAndMaterials"
+							}
+						},
+						{
+							"kind": "static",
+							"name": "create_from_asset",
+							"signature": "pub fn create_from_asset(skinned_model_asset: &Rc<SkinnedModelAsset>) -> Result<SkinnedModel, String>",
+							"params": [
+								{
+									"name": "skinned_model_asset",
+									"type": "&Rc<SkinnedModelAsset>",
+									"description": {
+										"ko": "나눠 쓸 자산.",
+										"en": "Asset to share."
+									}
+								}
+							],
+							"returns": {
+								"type": "Result<SkinnedModel, String>",
+								"description": {
+									"ko": "자산의 참조 수를 하나 늘린 새 인스턴스. (노드는 자산을 올릴 때의 원형에서 베낀다) 지워진 자산이면 Err.",
+									"en": "New instance that added one to the asset's reference count. (nodes are copied from the prototypes taken when the asset was uploaded) Err if the asset was destroyed."
+								}
+							},
+							"description": {
+								"ko": "자산으로부터 인스턴스 짓기. (자산의 버퍼, 머티리얼 원형, 클립을 나눠 쓰고 포즈와 재생 상태는 따로, GPU 업로드 없음)",
+								"en": "Create an instance from an asset. (shares the asset's buffers, material prototypes and clips, keeps its own pose and playback state, no GPU upload)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/skinnedmodel.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "graphics3d/skinnedmodel",
+								"class": "SkinnedModel",
+								"name": "createFromAsset"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "create_instance",
+							"signature": "pub fn create_instance(&self) -> Result<SkinnedModel, String>",
+							"params": [],
+							"returns": {
+								"type": "Result<SkinnedModel, String>",
+								"description": {
+									"ko": "새 인스턴스. (노드는 자산을 올릴 때의 원형에서 베끼고 재생 상태는 처음부터) 올리기 전이면 Err.",
+									"en": "New instance. (nodes copied from the prototypes taken when the asset was uploaded, playback starts fresh) Err before upload."
+								}
+							},
+							"description": {
+								"ko": "인스턴스 짓기. (이 모델과 같은 자산을 나눠 쓰는 새 모델, 유니티의 Instantiate 처럼 GPU 자원을 다시 올리지 않는다)",
+								"en": "Create an instance. (a new model sharing this model's asset; like Unity's Instantiate, GPU resources are not uploaded again)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/skinnedmodel.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "graphics3d/skinnedmodel",
+								"class": "SkinnedModel",
+								"name": "createInstance"
+							},
+							"examples": [
+								{
+									"title": {
+										"ko": "여우 하나를 받아 열 마리 띄우기",
+										"en": "Load one fox and spawn ten"
+									},
+									"code": "use vanilla::SkinnedModel;\n\nfn spawn_foxes(source_model: &SkinnedModel) -> Result<Vec<SkinnedModel>, String> {\n\tlet mut model_list = Vec::new();\n\tfor model_index in 1..10 {\n\t\tlet mut instance_model = source_model.create_instance()?;\n\t\tinstance_model.play_animation(if model_index % 2 == 0 { \"Walk\" } else { \"Run\" }, 0.0);\n\t\tmodel_list.push(instance_model);\n\t}\n\tOk(model_list)\n}\n\nfn destroy_foxes(gl: &glow::Context, source_model: &mut SkinnedModel, model_list: &mut Vec<SkinnedModel>) {\n\tlet skinned_model_asset = source_model.get_asset().cloned();\n\tfor model in model_list.iter_mut() {\n\t\tmodel.destroy(gl);\n\t}\n\tsource_model.destroy(gl);\n\tassert!(skinned_model_asset.is_some_and(|skinned_model_asset| skinned_model_asset.is_destroyed()));\n}",
+									"language": "rust"
+								}
+							]
+						},
+						{
+							"kind": "method",
+							"name": "get_asset",
+							"signature": "pub fn get_asset(&self) -> Option<&Rc<SkinnedModelAsset>>",
+							"params": [],
+							"returns": {
+								"type": "Option<&Rc<SkinnedModelAsset>>",
+								"description": {
+									"ko": "나눠 쓰는 자산. (올리기 전이나 destroy 뒤에는 None)",
+									"en": "Shared asset. (None before upload or after destroy)"
+								}
+							},
+							"description": {
+								"ko": "자산 반환.",
+								"en": "Return the asset."
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/skinnedmodel.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "graphics3d/skinnedmodel",
+								"class": "SkinnedModel",
+								"name": "getAsset"
 							}
 						},
 						{
@@ -90628,6 +90831,84 @@
 								"module": "graphics3d/skinnedmodel",
 								"class": "SkinnedModel",
 								"name": "setMaterial"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "get_material",
+							"signature": "pub fn get_material(&mut self, drawable_index: usize) -> Result<Rc<Material>, String>",
+							"params": [
+								{
+									"name": "drawable_index",
+									"type": "usize",
+									"description": {
+										"ko": "드로어블 자리.",
+										"en": "Drawable index."
+									}
+								}
+							],
+							"returns": {
+								"type": "Result<Rc<Material>, String>",
+								"description": {
+									"ko": "이 인스턴스만 쓰는 머티리얼. 드로어블이 없으면 Err.",
+									"en": "Material used only by this instance. Err if the drawable does not exist."
+								}
+							},
+							"description": {
+								"ko": "이 인스턴스의 머티리얼 반환. (유니티 Renderer.material, 처음 부르면 지금 머티리얼의 사본으로 갈라져 이 드로어블에 낀다)\n- 사본은 텍스처를 빌려 쓰고 값만 따로다. 값을 바꿔도 같은 자산을 쓰는 다른 인스턴스는 그대로다. 사본은 이 모델의 destroy 가 지운다.\n- 이미 이 인스턴스의 사본이면 그것을 돌려준다.",
+								"en": "Return this instance's material. (Unity Renderer.material: the first call forks a copy of the current material and puts it on this drawable)\n- The copy borrows the textures and keeps its own values. Changing them leaves other instances of the same asset as they are. This model's destroy deletes the copy.\n- If it is already this instance's copy, returns it."
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/skinnedmodel.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "graphics3d/skinnedmodel",
+								"class": "SkinnedModel",
+								"name": "getMaterial"
+							},
+							"examples": [
+								{
+									"title": {
+										"ko": "여러 마리 가운데 한 마리만 붉게",
+										"en": "Tint only one of several in red"
+									},
+									"code": "use vanilla::SkinnedModel;\n\nfn tint_red(blue_fox: &SkinnedModel) -> Result<SkinnedModel, String> {\n\tlet mut red_fox = blue_fox.create_instance()?;\n\tred_fox.get_material(0)?.set_base_color_factor([1.0, 0.3, 0.3]);\n\tassert_ne!(blue_fox.get_shared_material(0)?.get_base_color_factor(), red_fox.get_shared_material(0)?.get_base_color_factor());\n\tOk(red_fox)\n}",
+									"language": "rust"
+								}
+							]
+						},
+						{
+							"kind": "method",
+							"name": "get_shared_material",
+							"signature": "pub fn get_shared_material(&self, drawable_index: usize) -> Result<Rc<Material>, String>",
+							"params": [
+								{
+									"name": "drawable_index",
+									"type": "usize",
+									"description": {
+										"ko": "드로어블 자리.",
+										"en": "Drawable index."
+									}
+								}
+							],
+							"returns": {
+								"type": "Result<Rc<Material>, String>",
+								"description": {
+									"ko": "지금 드로어블에 낀 머티리얼. (get_material 로 갈라졌으면 그 사본, set_material 로 바꿨으면 그것) 드로어블이 없으면 Err.",
+									"en": "Material currently on the drawable. (the copy if get_material forked it, or the one given to set_material) Err if the drawable does not exist."
+								}
+							},
+							"description": {
+								"ko": "낀 머티리얼 반환. (유니티 Renderer.sharedMaterial, 갈라지지 않는다. 자산의 원형이면 값을 바꿀 때 그 자산을 쓰는 모든 인스턴스가 바뀐다)",
+								"en": "Return the material on the drawable. (Unity Renderer.sharedMaterial, does not fork. If it is the asset's prototype, changing it changes every instance of that asset)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/skinnedmodel.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "graphics3d/skinnedmodel",
+								"class": "SkinnedModel",
+								"name": "getSharedMaterial"
 							}
 						},
 						{
@@ -91249,8 +91530,8 @@
 								}
 							],
 							"description": {
-								"ko": "파괴. (GL 리소스 해제, 다른 곳에서도 쓰는 머티리얼은 남긴다)",
-								"en": "Destroy. (releases GL resources, keeps materials that are also used elsewhere)"
+								"ko": "파괴. (이 인스턴스 것을 지우고 자산을 놓는다, 마지막 인스턴스면 자산이 버퍼, 버텍스 어레이, 모프 텍스처, 머티리얼 원형을 지운다)\n- 이 인스턴스 것: 와이어프레임 버퍼, add_morph_target 으로 갈라진 모프 텍스처, get_material 로 갈라진 머티리얼.\n- set_material 로 바깥에서 넣은 머티리얼은 지우지 않는다. 자산의 머티리얼 원형을 다른 모델에 넣어 썼다면 자산이 지워질 때 함께 지워진다.",
+								"en": "Destroy. (deletes this instance's resources and releases the asset; for the last instance the asset deletes its buffers, vertex arrays, morph textures and material prototypes)\n- This instance's resources: wireframe buffers, morph textures forked by add_morph_target, materials forked by get_material.\n- Materials given from outside with set_material are not deleted. If the asset's material prototypes were put on another model, they are deleted together when the asset is destroyed."
 							},
 							"since": "0.3.2",
 							"source": "src/graphics3d/skinnedmodel.rs",
@@ -91442,8 +91723,8 @@
 								}
 							},
 							"description": {
-								"ko": "받은 바이트로 모델 짓기. (받는 중이면 None, 받기나 해석에 실패하면 Err. 원본 문구 \"SkinnedModel load failed: url\")\n- 끝난 뒤에는 부를 때마다 받은 바이트로 모델을 새로 짓는다. (GL 객체도 새로 만든다)",
-								"en": "Builds a model from the loaded bytes. (None while loading, Err when loading or interpretation fails. The original message is \"SkinnedModel load failed: url\")\n- Once finished, every call builds a new model from the loaded bytes. (GL objects are created anew too)"
+								"ko": "받은 바이트로 모델 짓기. (받는 중이면 None, 받기나 해석에 실패하면 Err. 원본 문구 \"SkinnedModel load failed: url\")\n- 자산 캐시를 쓴다. 같은 셰이더 프로그램으로 같은 주소(SkinnedModelAsset::normalize_key)의 자산이 있으면 풀지도 올리지도 않고\n  그 자산을 나눠 쓰는 새 인스턴스를 돌려준다. 없으면 받은 바이트로 지어 캐시에 넣는다. (끝난 뒤 다시 불러도 인스턴스가 하나 더 생긴다)\n- 손잡이는 부탁할 때 렌더러를 모르므로 바이트는 읽는다. (같은 파일을 함께 받는 중이면 한 번만 읽는다)",
+								"en": "Builds a model from the loaded bytes. (None while loading, Err when loading or interpretation fails. The original message is \"SkinnedModel load failed: url\")\n- Uses the asset cache. If an asset for the same path (SkinnedModelAsset::normalize_key) exists with the same shader program, returns a new instance sharing it without parsing or uploading.\n  Otherwise builds from the loaded bytes and adds it to the cache. (calling again after it finished creates one more instance)\n- A handle does not know the renderer when the load is requested, so it reads the bytes. (concurrent loads of the same file read once)"
 							},
 							"since": "0.4.0",
 							"source": "src/graphics3d/skinnedmodel.rs"
@@ -92030,6 +92311,764 @@
 					]
 				}
 			]
+		},
+		{
+			"name": "graphics3d/skinnedmodelasset",
+			"summary": {
+				"ko": "스킨드 모델 자산. (원본 graphics3d/skinnedmodelasset.js)\n- 같은 파일에서 지은 모델 인스턴스들이 나눠 쓰는 풀린 자료와 GPU 자원이다. 메시 버퍼와 버텍스 어레이, 머티리얼 원형과 그 텍스처,\n  모프 텍스처, 노드와 스킨 원형, 애니메이션 클립을 한 벌만 든다. (유니티의 메시와 sharedMaterial, three.js 의 BufferGeometry 와 Material 을\n  복제본들이 나눠 쓰는 것과 같다)\n- 인스턴스(SkinnedModel)는 이것을 참조 수로 나눠 쓴다. 인스턴스마다 따로 갖는 것은 포즈, 애니메이션 재생 상태, 모프 가중치,\n  갈라진 머티리얼(get_material), 와이어프레임 버퍼, add_morph_target 으로 갈라진 모프 텍스처다.\n- 마지막 인스턴스가 destroy 하면(참조 수 0) GPU 자원을 지우고 캐시에서 빠진다. 참조 수는 Rc 의 수가 아니라 retain / release 로 센다.\n  (원본과 같은 수, get_asset 으로 Rc 를 더 쥐어도 자원 수명은 인스턴스 수를 따른다)\n- 캐시는 셰이더 프로그램과 자산 키(normalize_key 로 정규화한 주소나 자산 이름)로 찾는다. 받기 손잡이의 create_model,\n  load_from_url_async 같은 받기가 이것을 쓴다. 캐시는 스레드마다 하나다. (GL 컨텍스트가 스레드에 묶여서다)",
+				"en": "Skinned model asset. (original graphics3d/skinnedmodelasset.js)\n- Decoded data and GPU resources shared by the model instances built from the same file. Holds one copy of the mesh buffers and vertex arrays, the material prototypes and their textures,\n  the morph textures, the node and skin prototypes and the animation clips. (the same as clones sharing Unity's mesh and sharedMaterial, or three.js BufferGeometry and Material)\n- Instances (SkinnedModel) share it by reference count. Each instance keeps its own pose, animation playback state, morph weights,\n  forked materials (get_material), wireframe buffers and morph textures forked by add_morph_target.\n- When the last instance calls destroy (reference count 0), the GPU resources are deleted and the asset leaves the cache. The reference count is kept by retain / release, not by the Rc count.\n  (the same count as the original; holding more Rc through get_asset does not extend the resource lifetime beyond the instances)\n- The cache is looked up by shader program and asset key (a path or asset name normalized with normalize_key). Loads such as the load handle's create_model\n  and load_from_url_async use it. There is one cache per thread. (because a GL context is bound to a thread)"
+			},
+			"examples": [
+				{
+					"title": {
+						"ko": "키 정규화와 빈 캐시",
+						"en": "Key normalization and an empty cache"
+					},
+					"code": "use vanilla::SkinnedModelAsset;\n\nassert_eq!(SkinnedModelAsset::normalize_key(\"./assets/models/../fox.glb\"), \"assets/fox.glb\");\nSkinnedModelAsset::clear_cache();\nassert_eq!(SkinnedModelAsset::get_cached_count(), 0);",
+					"language": "rust"
+				}
+			],
+			"classes": [
+				{
+					"name": "SkinnedModelAssetContent",
+					"kind": "struct",
+					"summary": {
+						"ko": "자산에 넣을 자료. (SkinnedModel::upload_meshes_and_materials 가 올린 뒤 채운다, 원본 생성자의 content 객체)",
+						"en": "Data to put in an asset. (filled by SkinnedModel::upload_meshes_and_materials after uploading, the original constructor's content object)"
+					},
+					"source": "src/graphics3d/skinnedmodelasset.rs",
+					"members": [
+						{
+							"kind": "field",
+							"name": "drawable_list",
+							"signature": "pub drawable_list: Vec<Drawable>",
+							"params": [],
+							"returns": {
+								"type": "Vec<Drawable>",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "원형 드로어블 목록. (인스턴스는 이것을 베껴 버퍼와 머티리얼 원형을 나눠 쓴다)",
+								"en": "Prototype drawable list. (instances copy it to share the buffers and material prototypes)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/skinnedmodelasset.rs"
+						},
+						{
+							"kind": "field",
+							"name": "material_list",
+							"signature": "pub material_list: Vec<Rc<Material>>",
+							"params": [],
+							"returns": {
+								"type": "Vec<Rc<Material>>",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "머티리얼 원형 목록. (기본 머티리얼이 마지막, 마지막 인스턴스가 destroy 할 때 지운다)",
+								"en": "Material prototype list. (the default material is last, deleted when the last instance calls destroy)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/skinnedmodelasset.rs"
+						},
+						{
+							"kind": "field",
+							"name": "node_list",
+							"signature": "pub node_list: Vec<SkinnedModelNode>",
+							"params": [],
+							"returns": {
+								"type": "Vec<SkinnedModelNode>",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "노드 원형 목록. (올릴 때의 노드)",
+								"en": "Node prototype list. (the nodes at upload)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/skinnedmodelasset.rs"
+						},
+						{
+							"kind": "field",
+							"name": "root_node_indices",
+							"signature": "pub root_node_indices: Vec<usize>",
+							"params": [],
+							"returns": {
+								"type": "Vec<usize>",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "루트 노드 번호 목록.",
+								"en": "Root node index list."
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/skinnedmodelasset.rs"
+						},
+						{
+							"kind": "field",
+							"name": "skin_list",
+							"signature": "pub skin_list: Vec<Skin>",
+							"params": [],
+							"returns": {
+								"type": "Vec<Skin>",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "스킨 원형 목록.",
+								"en": "Skin prototype list."
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/skinnedmodelasset.rs"
+						},
+						{
+							"kind": "field",
+							"name": "animation_list",
+							"signature": "pub animation_list: Rc<RefCell<Vec<AnimationClip>>>",
+							"params": [],
+							"returns": {
+								"type": "Rc<RefCell<Vec<AnimationClip>>>",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "애니메이션 클립 목록. (인스턴스가 모두 같은 목록을 나눠 쓴다)",
+								"en": "Animation clip list. (all instances share the same list)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/skinnedmodelasset.rs"
+						},
+						{
+							"kind": "field",
+							"name": "buffer_byte_count",
+							"signature": "pub buffer_byte_count: usize",
+							"params": [],
+							"returns": {
+								"type": "usize",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "정점, 인덱스 버퍼와 모프 텍스처의 GPU 바이트 수.",
+								"en": "GPU bytes of the vertex and index buffers and morph textures."
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/skinnedmodelasset.rs"
+						}
+					]
+				},
+				{
+					"name": "SkinnedModelAsset",
+					"kind": "struct",
+					"summary": {
+						"ko": "스킨드 모델 자산. (같은 파일에서 지은 모델 인스턴스들이 나눠 쓰는 풀린 자료와 GPU 자원, 참조 수로 수명을 센다)",
+						"en": "Skinned model asset. (decoded data and GPU resources shared by the model instances built from the same file, lifetime counted by reference count)"
+					},
+					"counterpart": {
+						"engine": "vanilla.js",
+						"module": "graphics3d/skinnedmodelasset",
+						"class": "SkinnedModelAsset"
+					},
+					"source": "src/graphics3d/skinnedmodelasset.rs",
+					"members": [
+						{
+							"kind": "constructor",
+							"name": "new",
+							"signature": "pub fn new(shader_program: Rc<ShaderProgram>, content: SkinnedModelAssetContent) -> SkinnedModelAsset",
+							"params": [
+								{
+									"name": "shader_program",
+									"type": "Rc<ShaderProgram>",
+									"description": {
+										"ko": "버텍스 어레이와 머티리얼이 쓰는 셰이더 프로그램.",
+										"en": "Shader program used by the vertex arrays and materials."
+									}
+								},
+								{
+									"name": "content",
+									"type": "SkinnedModelAssetContent",
+									"description": {
+										"ko": "나눠 쓸 자료. (드로어블은 원형으로 두고 인스턴스가 베낀다)",
+										"en": "Data to share. (drawables stay as prototypes that instances copy)"
+									}
+								}
+							],
+							"returns": {
+								"type": "SkinnedModelAsset",
+								"description": {
+									"ko": "참조 수 1, 캐시 밖의 자산.",
+									"en": "Asset with reference count 1, outside the cache."
+								}
+							},
+							"description": {
+								"ko": "생성. (SkinnedModel::upload_meshes_and_materials 가 올린 뒤 짓는다, 참조 수 1)",
+								"en": "Constructor. (built by SkinnedModel::upload_meshes_and_materials after uploading, reference count 1)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/skinnedmodelasset.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "graphics3d/skinnedmodelasset",
+								"class": "SkinnedModelAsset",
+								"name": "constructor"
+							}
+						},
+						{
+							"kind": "static",
+							"name": "normalize_key",
+							"signature": "pub fn normalize_key(path: &str) -> String",
+							"params": [
+								{
+									"name": "path",
+									"type": "&str",
+									"description": {
+										"ko": "자산 주소나 이름.",
+										"en": "Asset path or name."
+									}
+								}
+							],
+							"returns": {
+								"type": "String",
+								"description": {
+									"ko": "정규화한 키.",
+									"en": "Normalized key."
+								}
+							},
+							"description": {
+								"ko": "자산 키 정규화. (역슬래시를 / 로, \".\" 과 \"..\" 마디를 풀고 빈 마디를 줄인다, 앞의 \"주소틀://\" 과 뒤의 ?, # 은 그대로)\n- 같은 파일을 \"./a/b.glb\", \"a/c/../b.glb\" 처럼 다르게 적어도 같은 키가 되게 한다. 기준 주소로 절대 주소를 만들지는 않는다.",
+								"en": "Normalize an asset key. (backslashes become /, \".\" and \"..\" segments are resolved and empty segments dropped; a leading \"scheme://\" and a trailing ? or # part stay as they are)\n- The same file written differently, such as \"./a/b.glb\" and \"a/c/../b.glb\", gets the same key. It does not resolve against a base URL into an absolute one."
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/skinnedmodelasset.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "graphics3d/skinnedmodelasset",
+								"class": "SkinnedModelAsset",
+								"name": "normalizeKey"
+							},
+							"examples": [
+								{
+									"title": {
+										"ko": "다르게 적은 같은 경로",
+										"en": "The same path written differently"
+									},
+									"code": "use vanilla::SkinnedModelAsset;\n\nassert_eq!(SkinnedModelAsset::normalize_key(\"./assets/models/../fox.glb\"), \"assets/fox.glb\");\nassert_eq!(SkinnedModelAsset::normalize_key(\"assets\\\\fox.glb\"), \"assets/fox.glb\");\nassert_eq!(SkinnedModelAsset::normalize_key(\"https://example.com/a/./b/../fox.glb?v=2\"), \"https://example.com/a/fox.glb?v=2\");",
+									"language": "rust"
+								}
+							]
+						},
+						{
+							"kind": "static",
+							"name": "find",
+							"signature": "pub fn find(asset_key: &str, shader_program: &Rc<ShaderProgram>) -> Option<Rc<SkinnedModelAsset>>",
+							"params": [
+								{
+									"name": "asset_key",
+									"type": "&str",
+									"description": {
+										"ko": "자산 키. (normalize_key 로 정규화한다)",
+										"en": "Asset key. (normalized with normalize_key)"
+									}
+								},
+								{
+									"name": "shader_program",
+									"type": "&Rc<ShaderProgram>",
+									"description": {
+										"ko": "모델을 그릴 셰이더 프로그램. (렌더러의 get_shader_program)",
+										"en": "Shader program the model is drawn with. (the renderer's get_shader_program)"
+									}
+								}
+							],
+							"returns": {
+								"type": "Option<Rc<SkinnedModelAsset>>",
+								"description": {
+									"ko": "찾은 자산. (없으면 None)",
+									"en": "Asset found. (None if none)"
+								}
+							},
+							"description": {
+								"ko": "캐시에서 찾기. (셰이더 프로그램과 키가 같고 살아 있는 자산)",
+								"en": "Find in the cache. (a live asset with the same shader program and key)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/skinnedmodelasset.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "graphics3d/skinnedmodelasset",
+								"class": "SkinnedModelAsset",
+								"name": "find"
+							}
+						},
+						{
+							"kind": "static",
+							"name": "register",
+							"signature": "pub fn register(asset_key: &str, asset: &Rc<SkinnedModelAsset>) -> Result<(), String>",
+							"params": [
+								{
+									"name": "asset_key",
+									"type": "&str",
+									"description": {
+										"ko": "자산 키. (normalize_key 로 정규화한다)",
+										"en": "Asset key. (normalized with normalize_key)"
+									}
+								},
+								{
+									"name": "asset",
+									"type": "&Rc<SkinnedModelAsset>",
+									"description": {
+										"ko": "넣을 자산.",
+										"en": "Asset to add."
+									}
+								}
+							],
+							"returns": {
+								"type": "Result<(), String>",
+								"description": {
+									"ko": "넣었으면 Ok. 지워진 자산이면 Err.",
+									"en": "Ok if added. Err if the asset was destroyed."
+								}
+							},
+							"description": {
+								"ko": "캐시에 넣기. (자산에 키를 붙인다. 같은 자리에 있던 자산은 캐시에서만 빠지고 쓰던 인스턴스는 그대로 쓴다)",
+								"en": "Add to the cache. (gives the asset the key. An asset that held the same slot only leaves the cache, and instances using it keep working)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/skinnedmodelasset.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "graphics3d/skinnedmodelasset",
+								"class": "SkinnedModelAsset",
+								"name": "register"
+							},
+							"examples": [
+								{
+									"title": {
+										"ko": "번들에서 꺼낸 바이트로 지은 모델을 이름으로 나눠 쓰기",
+										"en": "Share a model built from bundled bytes by name"
+									},
+									"code": "use vanilla::{SkinnedModel, SkinnedModelAsset, SkinnedModelRenderer};\n\nfn load_named_model(gl: &glow::Context, bytes: &[u8], skinned_model_renderer: &SkinnedModelRenderer) -> Result<SkinnedModel, String> {\n\tif let Some(found_asset) = SkinnedModelAsset::find(\"fox\", &skinned_model_renderer.get_shader_program()) {\n\t\treturn SkinnedModel::create_from_asset(&found_asset);\n\t}\n\tlet skinned_model = SkinnedModel::load_from_bytes(gl, bytes, skinned_model_renderer)?;\n\tSkinnedModelAsset::register(\"fox\", skinned_model.get_asset().ok_or(\"no asset\")?)?;\n\tOk(skinned_model)\n}",
+									"language": "rust"
+								}
+							]
+						},
+						{
+							"kind": "static",
+							"name": "clear_cache",
+							"signature": "pub fn clear_cache()",
+							"params": [],
+							"description": {
+								"ko": "캐시 비우기. (모든 자산을 캐시에서 뺀다. 쓰던 인스턴스는 그대로 그리고, 마지막 인스턴스가 destroy 할 때 GPU 자원이 지워진다)\n- 다음 받기는 파일을 새로 풀어 새 자산을 짓는다.",
+								"en": "Clear the cache. (removes every asset from the cache. Instances in use keep drawing, and the GPU resources are deleted when the last instance calls destroy)\n- The next load parses the file again into a new asset."
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/skinnedmodelasset.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "graphics3d/skinnedmodelasset",
+								"class": "SkinnedModelAsset",
+								"name": "clearCache"
+							},
+							"examples": [
+								{
+									"title": {
+										"ko": "판을 바꿀 때 캐시를 비우기",
+										"en": "Clear the cache when switching stages"
+									},
+									"code": "use vanilla::SkinnedModelAsset;\n\nSkinnedModelAsset::clear_cache();\nassert_eq!(SkinnedModelAsset::get_cached_count(), 0);",
+									"language": "rust"
+								}
+							]
+						},
+						{
+							"kind": "static",
+							"name": "get_cached_count",
+							"signature": "pub fn get_cached_count() -> usize",
+							"params": [],
+							"returns": {
+								"type": "usize",
+								"description": {
+									"ko": "캐시에 든 자산 수.",
+									"en": "Number of assets in the cache."
+								}
+							},
+							"description": {
+								"ko": "캐시에 든 자산 수. (모든 셰이더 프로그램 합)",
+								"en": "Number of assets in the cache. (sum over all shader programs)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/skinnedmodelasset.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "graphics3d/skinnedmodelasset",
+								"class": "SkinnedModelAsset",
+								"name": "getCachedCount"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "retain",
+							"signature": "pub fn retain(&self) -> Result<(), String>",
+							"params": [],
+							"returns": {
+								"type": "Result<(), String>",
+								"description": {
+									"ko": "늘렸으면 Ok. 지워진 자산이면 Err.",
+									"en": "Ok if added. Err if the asset was destroyed."
+								}
+							},
+							"description": {
+								"ko": "참조 늘리기. (인스턴스가 자산을 나눠 쓰기 시작할 때, SkinnedModel::create_from_asset 이 부른다)",
+								"en": "Add a reference. (when an instance starts sharing the asset, called by SkinnedModel::create_from_asset)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/skinnedmodelasset.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "graphics3d/skinnedmodelasset",
+								"class": "SkinnedModelAsset",
+								"name": "retain"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "release",
+							"signature": "pub fn release(&self, gl: &glow::Context) -> bool",
+							"params": [
+								{
+									"name": "gl",
+									"type": "&glow::Context",
+									"description": {
+										"ko": "자원을 지은 GL 컨텍스트.",
+										"en": "GL context the resources were created with."
+									}
+								}
+							],
+							"returns": {
+								"type": "bool",
+								"description": {
+									"ko": "이번에 자원을 지웠으면 true.",
+									"en": "true if this call deleted the resources."
+								}
+							},
+							"description": {
+								"ko": "참조 줄이기. (인스턴스가 destroy 할 때, 0 이 되면 GPU 자원을 지우고 캐시에서 빠진다)",
+								"en": "Remove a reference. (when an instance calls destroy; at 0 the GPU resources are deleted and the asset leaves the cache)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/skinnedmodelasset.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "graphics3d/skinnedmodelasset",
+								"class": "SkinnedModelAsset",
+								"name": "release"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "get_key",
+							"signature": "pub fn get_key(&self) -> Option<String>",
+							"params": [],
+							"returns": {
+								"type": "Option<String>",
+								"description": {
+									"ko": "캐시에 넣은 키. (넣지 않았거나 캐시에서 빠졌으면 None)",
+									"en": "Key added to the cache. (None if never added or removed from the cache)"
+								}
+							},
+							"description": {
+								"ko": "자산 키 반환.",
+								"en": "Return the asset key."
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/skinnedmodelasset.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "graphics3d/skinnedmodelasset",
+								"class": "SkinnedModelAsset",
+								"name": "getKey"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "get_reference_count",
+							"signature": "pub fn get_reference_count(&self) -> usize",
+							"params": [],
+							"returns": {
+								"type": "usize",
+								"description": {
+									"ko": "참조 수. (지워졌으면 0)",
+									"en": "Reference count. (0 once destroyed)"
+								}
+							},
+							"description": {
+								"ko": "참조 수 반환. (이 자산을 나눠 쓰는 살아 있는 인스턴스 수)",
+								"en": "Return the reference count. (number of live instances sharing this asset)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/skinnedmodelasset.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "graphics3d/skinnedmodelasset",
+								"class": "SkinnedModelAsset",
+								"name": "getReferenceCount"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "is_destroyed",
+							"signature": "pub fn is_destroyed(&self) -> bool",
+							"params": [],
+							"returns": {
+								"type": "bool",
+								"description": {
+									"ko": "마지막 인스턴스가 destroy 해 GPU 자원을 지웠으면 true.",
+									"en": "true if the last instance called destroy and the GPU resources were deleted."
+								}
+							},
+							"description": {
+								"ko": "지워졌는지.",
+								"en": "Whether destroyed."
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/skinnedmodelasset.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "graphics3d/skinnedmodelasset",
+								"class": "SkinnedModelAsset",
+								"name": "isDestroyed"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "get_gpu_byte_count",
+							"signature": "pub fn get_gpu_byte_count(&self) -> usize",
+							"params": [],
+							"returns": {
+								"type": "usize",
+								"description": {
+									"ko": "이 자산이 GPU 에 올린 바이트 수. (지워졌으면 0)",
+									"en": "Bytes this asset uploaded to the GPU. (0 once destroyed)"
+								}
+							},
+							"description": {
+								"ko": "GPU 바이트 수. (정점, 인덱스 버퍼와 모프 텍스처와 머티리얼 원형 텍스처, 밉맵 포함, 인스턴스 수와 상관없이 한 벌)",
+								"en": "GPU byte count. (vertex and index buffers, morph textures and material prototype textures including mipmaps, one copy regardless of the instance count)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/skinnedmodelasset.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "graphics3d/skinnedmodelasset",
+								"class": "SkinnedModelAsset",
+								"name": "getGpuByteCount"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "get_shader_program",
+							"signature": "pub fn get_shader_program(&self) -> &Rc<ShaderProgram>",
+							"params": [],
+							"returns": {
+								"type": "&Rc<ShaderProgram>",
+								"description": {
+									"ko": "버텍스 어레이와 머티리얼이 쓰는 셰이더 프로그램.",
+									"en": "Shader program used by the vertex arrays and materials."
+								}
+							},
+							"description": {
+								"ko": "셰이더 프로그램 반환.",
+								"en": "Returns the shader program."
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/skinnedmodelasset.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "graphics3d/skinnedmodelasset",
+								"class": "SkinnedModelAsset",
+								"name": "getShaderProgram"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "get_drawable_list",
+							"signature": "pub fn get_drawable_list(&self) -> Ref<'_, Vec<Drawable>>",
+							"params": [],
+							"returns": {
+								"type": "Ref<'_, Vec<Drawable>>",
+								"description": {
+									"ko": "원형 드로어블 목록. (지워졌으면 비어 있다)",
+									"en": "Prototype drawable list. (empty once destroyed)"
+								}
+							},
+							"description": {
+								"ko": "원형 드로어블 목록 반환. (인스턴스는 이것을 베껴 버퍼와 머티리얼 원형을 나눠 쓴다)",
+								"en": "Return the prototype drawable list. (instances copy it to share the buffers and material prototypes)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/skinnedmodelasset.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "graphics3d/skinnedmodelasset",
+								"class": "SkinnedModelAsset",
+								"name": "getDrawableList"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "get_material_list",
+							"signature": "pub fn get_material_list(&self) -> Ref<'_, Vec<Rc<Material>>>",
+							"params": [],
+							"returns": {
+								"type": "Ref<'_, Vec<Rc<Material>>>",
+								"description": {
+									"ko": "머티리얼 원형 목록. (sharedMaterial, 값을 바꾸면 이 자산을 쓰는 모든 인스턴스가 바뀐다)",
+									"en": "Material prototype list. (sharedMaterial; changing a value changes every instance using this asset)"
+								}
+							},
+							"description": {
+								"ko": "머티리얼 원형 목록 반환. (기본 머티리얼이 마지막, 이 자산이 지었고 마지막 인스턴스가 destroy 할 때 지운다)",
+								"en": "Return the material prototype list. (the default material is last; this asset created them and deletes them when the last instance calls destroy)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/skinnedmodelasset.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "graphics3d/skinnedmodelasset",
+								"class": "SkinnedModelAsset",
+								"name": "getMaterialList"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "get_node_list",
+							"signature": "pub fn get_node_list(&self) -> &[SkinnedModelNode]",
+							"params": [],
+							"returns": {
+								"type": "&[SkinnedModelNode]",
+								"description": {
+									"ko": "노드 원형 목록.",
+									"en": "Node prototype list."
+								}
+							},
+							"description": {
+								"ko": "노드 원형 목록 반환. (올릴 때의 노드, 인스턴스는 이것을 베껴 포즈를 따로 든다)",
+								"en": "Return the node prototype list. (the nodes at upload; instances copy them and keep their own pose)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/skinnedmodelasset.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "graphics3d/skinnedmodelasset",
+								"class": "SkinnedModelAsset",
+								"name": "getNodeList"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "get_root_node_indices",
+							"signature": "pub fn get_root_node_indices(&self) -> &[usize]",
+							"params": [],
+							"returns": {
+								"type": "&[usize]",
+								"description": {
+									"ko": "루트 노드 번호 목록.",
+									"en": "Root node index list."
+								}
+							},
+							"description": {
+								"ko": "루트 노드 목록 반환.",
+								"en": "Return the root node list."
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/skinnedmodelasset.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "graphics3d/skinnedmodelasset",
+								"class": "SkinnedModelAsset",
+								"name": "getRootNodeIndices"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "get_skin_list",
+							"signature": "pub fn get_skin_list(&self) -> &[Skin]",
+							"params": [],
+							"returns": {
+								"type": "&[Skin]",
+								"description": {
+									"ko": "스킨 원형 목록.",
+									"en": "Skin prototype list."
+								}
+							},
+							"description": {
+								"ko": "스킨 원형 목록 반환. (조인트와 역바인드 행렬을 인스턴스가 베낀다)",
+								"en": "Return the skin prototype list. (instances copy the joints and inverse bind matrices)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/skinnedmodelasset.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "graphics3d/skinnedmodelasset",
+								"class": "SkinnedModelAsset",
+								"name": "getSkinList"
+							}
+						},
+						{
+							"kind": "method",
+							"name": "get_animation_list",
+							"signature": "pub fn get_animation_list(&self) -> &Rc<RefCell<Vec<AnimationClip>>>",
+							"params": [],
+							"returns": {
+								"type": "&Rc<RefCell<Vec<AnimationClip>>>",
+								"description": {
+									"ko": "나눠 든 클립 목록.",
+									"en": "Shared clip list."
+								}
+							},
+							"description": {
+								"ko": "애니메이션 클립 목록 반환. (인스턴스가 모두 같은 목록을 나눠 쓴다, add_animations_from_fbx_* 로 더한 클립도 모두에게 보인다)",
+								"en": "Return the animation clip list. (all instances share the same list; clips added with add_animations_from_fbx_* are visible to all)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/skinnedmodelasset.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "graphics3d/skinnedmodelasset",
+								"class": "SkinnedModelAsset",
+								"name": "getAnimationList"
+							}
+						}
+					],
+					"examples": [
+						{
+							"title": {
+								"ko": "받은 모델을 열 마리로 늘리고 자산 하나를 나눠 쓰는지 보기",
+								"en": "Spawn ten from a loaded model and check that they share one asset"
+							},
+							"code": "use vanilla::{SkinnedModel, SkinnedModelAsset};\n\nfn spawn_herd(gl: &glow::Context, source_model: &SkinnedModel) -> Result<Vec<SkinnedModel>, String> {\n\tlet mut model_list = Vec::new();\n\tfor _ in 0..10 {\n\t\tmodel_list.push(source_model.create_instance()?);\n\t}\n\tlet skinned_model_asset = source_model.get_asset().ok_or(\"no asset\")?;\n\tassert_eq!(skinned_model_asset.get_reference_count(), 11);\n\tprintln!(\"{} bytes on GPU\", skinned_model_asset.get_gpu_byte_count());\n\tlet _ = gl;\n\tOk(model_list)\n}",
+							"language": "rust"
+						}
+					]
+				}
+			],
+			"functions": [],
+			"enums": []
 		},
 		{
 			"name": "graphics3d/skinnedmodelrenderer",

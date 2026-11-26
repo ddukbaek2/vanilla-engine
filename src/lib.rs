@@ -140,6 +140,7 @@ pub use crate::graphics3d::material::{ImageDescription, ImageDescriptionLoadFutu
 pub use crate::graphics3d::rendertarget::{RenderTarget, RenderTargetOptions};
 pub use crate::graphics3d::shadowmap::{ShadowAtlas, ShadowAtlasLight, ShadowAtlasLightSource, ShadowAtlasTile, ShadowMap, DEFAULT_SHADOW_ATLAS_RESOLUTION, DEFAULT_SHADOW_ATLAS_TILE_RESOLUTION, SHADOW_ATLAS_MAXIMUM_LIGHTS};
 pub use crate::graphics3d::skinnedmodel::{AnimationClip, AnimationPath, Drawable, MeshDescription, MorphTarget, Skin, SkinnedModel, SkinnedModelNode, MORPH_TARGET_MAXIMUM};
+pub use crate::graphics3d::skinnedmodelasset::{SkinnedModelAsset, SkinnedModelAssetContent};
 pub use crate::graphics3d::skinnedmodelrenderer::{SkinnedModelRenderer, MORPH_GLSL};
 pub use crate::graphics3d::subsurfacescatteringeffect::SubsurfaceScatteringEffect;
 pub use crate::graphics3d::toon::glbmeshreader::{read_animation_swing, read_glb_arrays, read_glb_node_arrays, read_glb_node_infos, write_skin_pose, ToonAnimation, ToonAnimationChannel, ToonChannelPath, ToonNodeInfo, ToonOutlineOptions, ToonPartArrays, ToonPoseBlend, ToonSkeleton, ToonSkeletonNode, ToonSwingScales};

@@ -141,13 +141,13 @@ jobs:
         timeout-minutes: 90
         run: cargo test --workspace --no-fail-fast 2>&1 | tee "$OUT/logs/${{ matrix.tag }}_test.log"
 
-      - name: 초안 두 엔진 견주기 (원본 물리 장면이 러스트 comparison.txt 와 비트까지 같은지, 원본 초안 시험)
+      - name: 초안 두 엔진 견주기 (원본 물리 장면이 러스트 comparison.txt 와 비트까지 같은지, 원본 초안 시험과 3D 자산 캐시 시험)
         if: always()
         working-directory: vanilla.js
         shell: bash
         run: |
           node tools/physics2dcompare.mjs --check ../vanilla-engine/src/experimental/physics2d/comparison.txt
-          for test_file in tests/experimental/*.test.mjs; do node "$test_file"; done
+          for test_file in tests/experimental/*.test.mjs tests/graphics3d/*.test.mjs; do node "$test_file"; done
 
       - name: 리눅스 라이브러리 시험이 죽으면 gdb 로 다시 돌려 죽은 스레드 보기
         if: runner.os == 'Linux' && steps.tests.outcome == 'failure'

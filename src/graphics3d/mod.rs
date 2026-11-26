@@ -27,6 +27,7 @@ pub mod material;
 pub mod rendertarget;
 pub mod shadowmap;
 pub mod skinnedmodel;
+pub mod skinnedmodelasset;
 pub mod skinnedmodelrenderer;
 pub mod subsurfacescatteringeffect;
 pub mod toon;

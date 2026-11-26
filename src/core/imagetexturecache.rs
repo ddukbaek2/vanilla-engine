@@ -546,6 +546,19 @@ pub(crate) mod fake_gl {
 	}
 
 	//==============================================================================
+	/// glVertexAttribIPointer 자리. (아무것도 하지 않는다)
+	//==============================================================================
+	extern "system" fn vertex_attrib_integer_pointer(_index: u32, _size: i32, _component_type: u32, _stride: i32, _pointer: *const c_void) {
+	}
+
+	//==============================================================================
+	/// glGetAttribLocation 자리. (어트리뷰트는 모두 0 자리에 있는 셈)
+	//==============================================================================
+	extern "system" fn get_attrib_location(_program: u32, _name: *const c_char) -> i32 {
+		0
+	}
+
+	//==============================================================================
 	/// glCreateShader 자리.
 	//==============================================================================
 	extern "system" fn create_shader(_shader_type: u32) -> u32 {
@@ -676,6 +689,8 @@ pub(crate) mod fake_gl {
 			b"glDeleteBuffers" => delete_buffers as *const c_void,
 			b"glBufferData" => buffer_data as *const c_void,
 			b"glVertexAttribPointer" => vertex_attrib_pointer as *const c_void,
+			b"glVertexAttribIPointer" => vertex_attrib_integer_pointer as *const c_void,
+			b"glGetAttribLocation" => get_attrib_location as *const c_void,
 			b"glCreateShader" => create_shader as *const c_void,
 			b"glDeleteShader" => delete_shader as *const c_void,
 			b"glCreateProgram" => create_program as *const c_void,
