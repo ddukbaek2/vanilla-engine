@@ -9,7 +9,7 @@
 //!
 //! ```text
 //! let mut tilemap = Tilemap::new();
-//! TiledMapReader::read_map(&map_json, &mut tilemap, "orthogonal.tmj", Some(&read_tileset))?;
+//! TiledMapReader::read_map(&map_json, &mut tilemap, "orthogonal.tmj", Some(&read_tileset)).await?; // 엔진 작업 안에서, read_tileset 은 Promise 를 돌려준다
 //! TiledMapReader::attach_images(&mut tilemap, &read_image);
 //! node.add_component(tilemap);
 //! ```

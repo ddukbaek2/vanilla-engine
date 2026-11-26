@@ -1,12 +1,13 @@
 //==============================================================================
 //! 2D 물리의 모양 정의, 거르기, 모양.
 //! - 초안: 0.4.0 뒤 기능, API 가 바뀔 수 있다. 원본 src/experimental/physics2d/shape2d.js 와 같은 API, 같은 셈이다.
-//! - 원본과 다른 점: 사용자 값(user_data)은 u64 다. (원본은 아무 값) 거르기 비트는 u32, 무리 번호는 i32 다.
+//! - 원본과 다른 점: 사용자 값(user_data)은 PhysicsUserData2D(Rc<dyn Any>, 견줌은 같은 값을 가리키는지)다. 거르기 비트는 u32, 무리 번호는 i32 다.
 //==============================================================================
 // 옮긴 원문: Box2D 3 의 셈에서 옮김, MIT, THIRD_PARTY_LICENSES.md
 use crate::experimental::jsmath::{js_max, js_min};
 use super::geometry2d::{Capsule2D, Circle2D, Polygon2D, Segment2D, ShapeGeometry2D, ShapeType2D};
 use super::physicsid2d::{BodyId2D, ShapeId2D};
+use super::physicsuserdata2d::PhysicsUserData2D;
 use super::physicsvector2::PhysicsVector2;
 use crate::experimental::spatial::aabb2d::AABB2D;
 
@@ -149,7 +150,7 @@ impl QueryFilter2D {
 /// assert!(!shape_definition.is_sensor);
 /// ```
 //==============================================================================
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ShapeDefinition2D {
 	/// 밀도. (넓이당 질량, 기본 1)
 	pub density: f64,
@@ -166,7 +167,7 @@ pub struct ShapeDefinition2D {
 	/// 닿기 시작과 끝 사건을 낼지. (기본 true)
 	pub enable_contact_events: bool,
 	/// 사용자 값.
-	pub user_data: u64,
+	pub user_data: PhysicsUserData2D,
 }
 
 impl Default for ShapeDefinition2D {
@@ -194,7 +195,7 @@ impl ShapeDefinition2D {
 			is_sensor: false,
 			enable_sensor_events: true,
 			enable_contact_events: true,
-			user_data: 0,
+			user_data: PhysicsUserData2D::default(),
 		}
 	}
 }
@@ -227,7 +228,7 @@ pub struct ChainDefinition2D {
 	/// 충돌 거르기.
 	pub filter: CollisionFilter2D,
 	/// 사용자 값. (선분마다 같은 값)
-	pub user_data: u64,
+	pub user_data: PhysicsUserData2D,
 }
 
 impl Default for ChainDefinition2D {
@@ -253,7 +254,7 @@ impl ChainDefinition2D {
 			friction: 0.6,
 			restitution: 0.0,
 			filter: CollisionFilter2D::new(),
-			user_data: 0,
+			user_data: PhysicsUserData2D::default(),
 		}
 	}
 }
@@ -300,7 +301,7 @@ pub struct Shape2D {
 	pub(crate) is_sensor: bool,
 	pub(crate) enable_sensor_events: bool,
 	pub(crate) enable_contact_events: bool,
-	pub(crate) user_data: u64,
+	pub(crate) user_data: PhysicsUserData2D,
 	pub(crate) proxy_id: usize,
 	pub(crate) aabb: AABB2D,
 	pub(crate) fat_aabb: AABB2D,
@@ -334,7 +335,7 @@ impl Shape2D {
 			is_sensor: false,
 			enable_sensor_events: true,
 			enable_contact_events: true,
-			user_data: 0,
+			user_data: PhysicsUserData2D::default(),
 			proxy_id: usize::MAX,
 			aabb: AABB2D::new(),
 			fat_aabb: AABB2D::new(),
@@ -494,7 +495,7 @@ impl Shape2D {
 	/// # 인자
 	/// - `user_data`: 사용자 값.
 	//==============================================================================
-	pub fn set_user_data(&mut self, user_data: u64) {
+	pub fn set_user_data(&mut self, user_data: PhysicsUserData2D) {
 		self.user_data = user_data;
 	}
 
@@ -504,8 +505,8 @@ impl Shape2D {
 	/// # 돌려줌
 	/// 사용자 값.
 	//==============================================================================
-	pub fn get_user_data(&self) -> u64 {
-		self.user_data
+	pub fn get_user_data(&self) -> &PhysicsUserData2D {
+		&self.user_data
 	}
 
 	//==============================================================================
