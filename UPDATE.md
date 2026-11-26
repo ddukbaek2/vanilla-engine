@@ -551,6 +551,17 @@
 - 예제 toonmaterial: 애버런트 몸 셰이딩 식 대조를 뺐다. (게임 하나의 식이고, 엔진 빛 꼴이 정석으로 바뀌어 같은 값이 나오지 않는다) 바위 정점 조각의 노멀 크기 맞춤을 뺐다
 - 예제 toonstyle: 그늘 셋, 단단한 하이라이트, 해 쪽 림, 스포트라이트, 매트캡, TOON_STYLE_SHELL=1 로 껍데기 바깥선. 원본과 견주면 2560x1440 에서 화소 차이 평균 0.004, 8 넘게 다른 화소 0.018% (껍데기 장면은 0.279%, 기하 가장자리의 MSAA 차이)
 - 툰 폴더 파일의 머리 주석을 채웠다. (모든 함수와 공개 칸)
+- 툰을 유니티와 언리얼이 기본으로 갖춘 수준까지 채웠다. (vanilla.js 와 같은 셰이더, 같은 값)
+  - ShadowMap: 지을 때 앞의 텍스처와 프레임버퍼 묶음을 돌린다. (모형 뒤에 지으면 깊이 텍스처가 유닛에 남아 INVALID_OPERATION 이던 것) 빛이 거의 바로 아래나 위로 나아가면 위쪽을 z 축으로 잡는다. (광원 행렬이 깨지던 것)
+  - ShadowAtlas, ShadowAtlasLight, ShadowAtlasLightSource, ShadowAtlasTile, SHADOW_ATLAS_MAXIMUM_LIGHTS: 점광(큐브 여섯 면)과 스포트라이트(원근 한 칸)의 그림자를 깊이 텍스처 한 장에 칸으로. update_lights(&light_set.read_shadow_light_sources()). 받는 자리는 노멀 쪽으로 칸 텍셀 (1 + 3 x (1 - dot(N, L))) 개만큼 밀어 그림자 여드름을 막는다
+  - ToonRenderer: set_local_shadows(Option<&ShadowAtlas>, 세기), begin_shadow_atlas_pass, set_shadow_atlas_tile, set_outline_fade_distance, get_outline_fade_distance, set_light_color_usage, set_shade_rim_light. ToonDrawQueue::draw_local_shadows
+  - ToonPointLight: casts_shadow, shadow_near (기본 false, 0.05). 이름으로 지을 때는 ..ToonPointLight::default()
+  - ToonLightSet: set_light_color_usage(ToonLightColorUsage), set_shade_rim_light, get_shade_rim_light (ToonShadeRimLight), read_shadow_light_sources. 림, 매트캡, 껍데기 바깥선도 기본으로 해의 색을 곱한다. 지금까지 모습은 ToonLightColorUsage { rim: false, matcap: false, outline: false, ..Default }
+  - ToonDrawOptions: outline_offset_z, angel_ring_texture, angel_ring_color, angel_ring_offset_u, angel_ring_offset_v, is_angel_ring_alpha
+  - 2 번 UV: ToonGeometry.uvs1, ToonMeshArrays.uv1_data, add_triangles_with_uvs 의 마지막 인자 uvs1 (공개 API 를 바꿨다, 2 번 UV 가 없으면 None), read_glb_arrays 가 TEXCOORD_1 을 읽는다. read_uv_data
+  - 텍스처 유닛: 점광 그림자 0, 천사 고리 7, 머티리얼 8 ~ 15. TOON_MAXIMUM_MATERIAL_TEXTURES 9 → 8. 유닛 0 은 begin_frame 이 적어 두고 end_frame 이 돌린다
+- ToonScreenOutline: 반 크기 판의 계단을 없앴다. 선의 판과 씨앗은 그리는 영역 해상도, 점프 플러딩만 줄인 판(모으기 패스로 씨앗을 모음), 씨앗 자리는 그리는 영역 화소 좌표. set_resolution_scale 은 넓히기 판의 몫이다. ToonLineTarget: seed_framebuffer, seed_texture, jump_flood_framebuffers, jump_flood_textures, jump_flood_index, jump_flood_width, jump_flood_height. read_program_sources 가 다섯을 준다
+- 예제 toonstyle: 점광과 스포트라이트 그림자, 그늘 쪽 림, 천사 고리, 껍데기 바깥선 사라지기와 카메라 쪽 밀기. 원본과 견주면 화소 차이 평균 0.005 (반 크기 판 0.008, 껍데기 0.163 은 MSAA 차이)
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.
