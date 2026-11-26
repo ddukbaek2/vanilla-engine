@@ -837,6 +837,31 @@ fn create_hidden_input_entry(field_state: &TextInputFieldState) -> Result<Hidden
 			});
 		}
 	})));
+	// 직접 누름이면 오른쪽 클릭이 이 숨긴 입력에 온다. 원본 handleDOMInputContextMenuEvent 처럼 브라우저 편집 칸 메뉴를 막고 엔진 문맥 메뉴를 연다.
+	let input_for_context_menu = input_element.clone();
+	let use_direct_touch_for_context_menu = use_direct_touch.clone();
+	listener_list.push(("contextmenu", Closure::new(move |event: web_sys::Event| {
+		if !use_direct_touch_for_context_menu.get() {
+			return;
+		}
+		let (client_x, client_y) = match read_client_position(&event) {
+			Some(client_position) => {
+				client_position
+			}
+			None => {
+				return;
+			}
+		};
+		event.prevent_default();
+		event.stop_propagation();
+		let _ = input_for_context_menu.focus();
+		let selection_start = input_for_context_menu.selection_start().ok().flatten().unwrap_or(0);
+		let selection_end = input_for_context_menu.selection_end().ok().flatten().unwrap_or(0);
+		let is_text_available = !input_for_context_menu.value().is_empty();
+		if let Err(error) = show_context_menu(field_id, selection_start != selection_end, is_text_available, client_x, client_y) {
+			web_sys::console::error_1(&JsValue::from_str(&format!("Engine: 문맥 메뉴 열기 실패: {}", error)));
+		}
+	})));
 	for (event_name, listener) in listener_list.iter() {
 		input_element.add_event_listener_with_callback(event_name, listener.as_ref().unchecked_ref()).map_err(describe_js_error)?;
 	}
@@ -1089,15 +1114,16 @@ fn handle_canvas_context_menu(event: web_sys::Event) {
 		}
 	}
 	let has_selection = hit_field_state.selection_start != hit_field_state.cursor_index;
-	if let Err(error) = show_context_menu(hit_field_state.field_id, has_selection, client_x, client_y) {
+	let is_text_available = !hit_field_state.value.is_empty();
+	if let Err(error) = show_context_menu(hit_field_state.field_id, has_selection, is_text_available, client_x, client_y) {
 		web_sys::console::error_1(&JsValue::from_str(&format!("Engine: 문맥 메뉴 열기 실패: {}", error)));
 	}
 }
 
 //==============================================================================
-/// DOM 문맥 메뉴 열기. (잘라내기 / 복사 / 붙여넣기. 원본 showContextMenu, body 의 absolute 라 뷰포트 좌표 clientX, clientY 에 문서 스크롤을 더해 놓는다)
+/// DOM 문맥 메뉴 열기. (잘라내기 / 복사 / 붙여넣기 / 모두 선택. 원본 showContextMenu, body 의 absolute 라 뷰포트 좌표 clientX, clientY 에 문서 스크롤을 더해 놓는다)
 //==============================================================================
-fn show_context_menu(field_id: u64, has_selection: bool, client_x: f64, client_y: f64) -> Result<(), String> {
+fn show_context_menu(field_id: u64, has_selection: bool, is_text_available: bool, client_x: f64, client_y: f64) -> Result<(), String> {
 	hide_context_menu();
 	let document = get_document().ok_or_else(|| String::from("document 없음"))?;
 	let menu_element = document.create_element("div").map_err(describe_js_error)?.dyn_into::<web_sys::HtmlElement>().map_err(|_| String::from("div 변환 실패"))?;
@@ -1109,7 +1135,7 @@ fn show_context_menu(field_id: u64, has_selection: bool, client_x: f64, client_y
 	let _ = menu_style.set_property("left", &format!("{}px", client_x + scroll_x));
 	let _ = menu_style.set_property("top", &format!("{}px", client_y + scroll_y));
 
-	let item_list = [("잘라내기", has_selection, TextInputKey::Cut), ("복사", has_selection, TextInputKey::Copy), ("붙여넣기", true, TextInputKey::Paste)];
+	let item_list = [("잘라내기", has_selection, TextInputKey::Cut), ("복사", has_selection, TextInputKey::Copy), ("붙여넣기", true, TextInputKey::Paste), ("모두 선택", is_text_available, TextInputKey::SelectAll)];
 	let mut listener_list: Vec<EventListener> = Vec::new();
 	for (item_text, is_enabled, item_key) in item_list {
 		let item_element = document.create_element("div").map_err(describe_js_error)?.dyn_into::<web_sys::HtmlElement>().map_err(|_| String::from("div 변환 실패"))?;

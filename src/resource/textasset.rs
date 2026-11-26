@@ -4,7 +4,7 @@
 //! - 러스트 판은 바이트가 다 오면 처음 꺼낼 때 UTF-8 글로 풀고, JsonAsset 은 serde_json::Value 로 푼다.
 //! - JsonAsset 은 원본처럼 TextAsset 의 글(get_text)도 들고, 풀지 못한 JSON 은 읽히지 않은 것(is_loaded 거짓, get_data None)이다.
 //!   AssetLoader 로 받으면 원본처럼 실패 목록에 든다. (푼 자료는 AssetLoader 의 목록 칸과 나눠 들어 한 번만 푼다)
-//! - set_no_cache: 참이면 웹 fetch 에 cache: "no-cache" 를 붙여 배포 뒤 옛 자료를 쓰지 않게 한다. (원본과 같다, 데스크탑 파일 읽기에는 캐시가 없다)
+//! - set_no_cache: 참이면 웹 fetch 에 cache: "no-cache" 를 붙여 배포 뒤 옛 자료를 쓰지 않게 한다. (원본과 같다, 데스크탑은 늘 파일을 새로 읽어 켠 것과 결과가 같다)
 //! - load 는 원본처럼 await 할 수 있는 읽기 손잡이를 돌려준다. (원본 JsonAsset.load 처럼 받기나 JSON 해석이 실패하면 await 가 실패로 끝나고 get_data 가 None 이다)
 //==============================================================================
 use crate::core::asset::{Asset, AssetBase, AssetLoadHandle, AssetType};
@@ -76,7 +76,7 @@ impl TextAsset {
 	/// 캐시 무효화 로드 여부 설정. (참이면 웹 fetch 에 cache: "no-cache" 를 붙인다, 데이터 표 JSON 등)
 	///
 	/// # 인자
-	/// - `is_no_cache`: true 면 웹에서 브라우저 캐시를 쓰지 않는다. (load 전에 정한다, 데스크탑은 보지 않는다)
+	/// - `is_no_cache`: true 면 웹에서 브라우저 캐시를 쓰지 않는다. (load 전에 정한다, 데스크탑은 늘 파일을 새로 읽어 켠 것과 같다)
 	//==============================================================================
 	pub fn set_no_cache(&mut self, is_no_cache: bool) {
 		self.is_no_cache = is_no_cache;
@@ -227,7 +227,7 @@ impl JsonAsset {
 	/// 캐시 무효화 로드 여부 설정. (참이면 웹 fetch 에 cache: "no-cache" 를 붙인다, 데이터 표 JSON 등)
 	///
 	/// # 인자
-	/// - `is_no_cache`: true 면 웹에서 브라우저 캐시를 쓰지 않는다. (load 전에 정한다, 데스크탑은 보지 않는다)
+	/// - `is_no_cache`: true 면 웹에서 브라우저 캐시를 쓰지 않는다. (load 전에 정한다, 데스크탑은 늘 파일을 새로 읽어 켠 것과 같다)
 	//==============================================================================
 	pub fn set_no_cache(&mut self, is_no_cache: bool) {
 		self.is_no_cache = is_no_cache;

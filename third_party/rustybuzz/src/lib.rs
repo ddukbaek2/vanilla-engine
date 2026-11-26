@@ -23,6 +23,14 @@ pub use hb::face::hb_font_t as Face;
 pub use hb::ot_shape_plan::hb_ot_shape_plan_t as ShapePlan;
 pub use hb::shape::{shape, shape_with_plan};
 
+/// Canonical decomposition of one character used by the normalizer (HarfBuzz `hb_ucd_decompose`, Hangul syllables included).
+/// Returns `(a, b)` where `b` is `'\0'` for a singleton decomposition, or `None` if the character does not decompose.
+///
+/// vanilla-engine change: exposed so font fallback can tell that a face shapes a precomposed character through its decomposition, as HarfBuzz does.
+pub fn decompose_character(ab: char) -> Option<(char, char)> {
+    hb::decompose_unicode_character(ab)
+}
+
 bitflags::bitflags! {
     /// Flags for buffers.
     #[derive(Default, Debug, Clone, Copy)]
