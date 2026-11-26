@@ -5,7 +5,7 @@
 //! - 러스트 판 웹도 원본처럼 글자를 늘 여기서 굽고 잰다. 글꼴 바이트(default_font_bytes, default_font_url, FontAsset, UIFont 조각)는
 //!   원본 new FontFace(이름, 바이트, 서술자) 와 같이 document.fonts 에 올려 브라우저가 고르고 그리게 한다. (sync_font_faces)
 //!   기본 폰트는 VanillaEngineDefault, 대체 폰트는 VanillaEngineFallback1, 2 … 이름으로 올린다.
-//! - 글꼴 목록은 폰트 문자열의 이름들, 기본 폰트와 대체 폰트의 이름, 원본 SYSTEM_FONT_STRING 차례다.
+//! - 글꼴 목록은 폰트 문자열의 이름들, 기본 폰트와 대체 폰트의 이름, (default 를 청했으면) 원본 SYSTEM_FONT_STRING 차례다.
 //!   (CSS @font-face 나 FontFace 로 문서에 올린 글꼴 이름이면 그 글꼴이, 아니면 시스템 글꼴이 나온다)
 //! - 올린 글꼴이 다 받아지면(loadingdone) 바뀐 횟수를 늘린다. 글자 캐시가 프레임 시작에 보고 구운 글을 버린다. (원본 textstringtexturecache.js 와 같다)
 //! - 그림자 글(bake_shadow_text)과 그림자 그림(bake_shadow_image)도 원본 ShadowText, ShadowImage 처럼 캔버스의 shadowBlur 와 drawImage(imageSmoothingQuality high)로 굽는다.
@@ -639,7 +639,8 @@ pub fn rasterize_piece(font_description: &FontDescription, pixel_size: f32, text
 
 //==============================================================================
 /// CSS 폰트 문자열 만들기. ("italic bold 32px "이름", 시스템 글꼴 목록")
-/// - 이름 목록을 차례로 앞에 두고 기본 폰트와 대체 폰트의 이름(sync_font_faces), 시스템 글꼴 목록을 뒤에 붙인다. 비었거나 "default" 인 이름은 빼고, 일반 글꼴 이름(sans-serif 등)은 따옴표 없이 둔다.
+/// - 이름 목록을 차례로 앞에 두고 기본 폰트와 대체 폰트의 이름(sync_font_faces)을 뒤에 붙인다. 시스템 글꼴 목록(SYSTEM_FONT_STRING)은 default 를 청했을 때(목록이 비면 그때도)만 맨 뒤에 붙인다.
+///   비었거나 "default" 인 이름은 빼고, 일반 글꼴 이름(sans-serif 등)은 따옴표 없이 둔다.
 //==============================================================================
 fn build_css_font_string(font_description: &FontDescription, bake_scale: f32) -> String {
 	let style_text = if font_description.is_italic {
@@ -673,7 +674,11 @@ fn build_css_font_string(font_description: &FontDescription, bake_scale: f32) ->
 			family_text_list.push(format!("\"{}\"", extra_family_name));
 		}
 	});
-	family_text_list.push(SYSTEM_FONT_STRING.to_string());
+	// 원본 SYSTEM_FONT_STRING 은 기본 글꼴 이름 default 를 청했을 때만. (원본도 기본 글꼴일 때만 폰트 문자열이 그 목록이고, 다른 이름은 브라우저가 그 목록 없이 시스템 대체로 간다. 데스크탑 사슬과 같다)
+	let is_default_requested = font_description.family_name_list.iter().any(|family_name| family_name.trim().eq_ignore_ascii_case("default"));
+	if is_default_requested || family_text_list.is_empty() {
+		family_text_list.push(SYSTEM_FONT_STRING.to_string());
+	}
 	format!("{}{}{}px {}", style_text, weight_text, pixel_size, family_text_list.join(", "))
 }
 

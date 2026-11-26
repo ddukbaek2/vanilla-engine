@@ -129,7 +129,7 @@ objc2-game-controller = { version = "0.3", default-features = false, features = 
 objc2-core-haptics = { version = "0.3", default-features = false, features = ["std", "block2", "CHHapticEngine", "CHHapticEvent", "CHHapticParameter", "CHHapticPattern", "CHHapticPatternPlayer"] }
 block2 = "0.6"
 # 맥: 시스템 글꼴. (CoreText 로 글꼴 이름과 시스템 UI 글꼴의 파일을 찾고, 글꼴에 없는 글자의 대체 글꼴을 CTFontCreateForString 으로 고른다. 원본 크롬 맥도 CoreText 로 고른다)
-objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFString", "CFURL", "CFDictionary", "CFNumber", "CFArray", "CFData", "CFCGTypes"] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFString", "CFURL", "CFDictionary", "CFNumber", "CFArray", "CFData", "CFCGTypes", "CFCharacterSet"] }
 objc2-core-text = { version = "0.3", default-features = false, features = ["std", "objc2-core-graphics", "CTFont", "CTFontDescriptor", "CTFontTraits", "CTFontManager"] }
 # 맥: 색 이모지와 열린 해석기가 없는 글꼴(PingFang 의 hvgl)의 글리프를 CoreText 로 그린다. (원본 크롬 맥도 CoreGraphics 로 그린다)
 objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGBitmapContext", "CGColorSpace", "CGContext", "CGFont", "CGImage"] }
