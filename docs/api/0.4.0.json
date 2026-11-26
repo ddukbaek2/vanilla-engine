@@ -16,8 +16,8 @@
 		{
 			"name": "animation/action",
 			"summary": {
-				"ko": "액션. (차례로 스텝을 실행하는 스크립트 꼴 연출)\n- 원본 animation/action.js 를 옮긴 것이다. wait / condition / call / repeat / forever / loop 스텝을 쌓고,\n  start 뒤 매 프레임 step 을 부르면 차례로 돈다.\n- 사용:\n  ```text\n    let mut action: Action<WorldNode> = Action::new()\n        .wait(1.0, ActionCallbacks::new().updated(|progress, node: &mut WorldNode| node.set_local_opacity(progress)))\n        .condition(|node: &WorldNode| node.is_active(), ActionConditionCallbacks::new())\n        .call(|node: &mut WorldNode| node.set_local_scale(Vector2::create(2.0, 2.0)))\n        .repeat(3, Action::new().wait(0.5, ActionCallbacks::new()))\n        .forever(Action::new().wait(2.0, ActionCallbacks::new()));\n    action.start(&mut node_tree[node_id]);\n    // 매 프레임:\n    action.step(&mut node_tree[node_id], time_delta);\n  ```\n- 원본과 다른 점:\n  - 원본은 start(target) 에서 대상을 들고 있다가 step 마다 콜백에 넘긴다. 러스트는 대상을 빌려 들 수 없어서\n    start 와 step 이 대상(&mut T)을 받아 콜백에 넘긴다. 그래서 get_target 과 start() 의 \"대상을 안 주면 이전 대상\" 은 없다.\n    T 는 기본 WorldNode 이고, 노드 여럿이나 게임 상태를 다루려면 그것을 T 로 쓴다.\n  - 콜백 객체({ started, updated, completed })는 wait 스텝이 ActionCallbacks(updated 가 (진행률, 대상)),\n    condition 스텝이 ActionConditionCallbacks(updated 가 (대상))다. 원본은 한 객체 꼴에 인자 수만 다르지만,\n    러스트는 콜백의 인자 꼴을 타입으로 정해야 해서 둘로 나눴다.\n  - loop 는 러스트 예약어라 r#loop 로 부른다. (Tween 의 r#in 과 같다)\n  - call 스텝이 이어지면 원본은 재귀로, 러스트 판은 반복문으로 넘긴다. (결과는 같다)\n- 조건 함수는 원본처럼 대상을 받는다(러스트는 &T). wait 은 duration 이 0 이하이면 진행률 1 로 끝낸다.\n  repeat 은 횟수가 0 이면 돌지 않고 넘어간다. (원본과 같다)",
-				"en": "Action. (script-style sequencing that runs steps in order)\n- A port of the original animation/action.js. Stack wait / condition / call / repeat / forever / loop steps,\n  and after start, calling step every frame runs them in order.\n- Usage:\n  ```text\n    let mut action: Action<WorldNode> = Action::new()\n        .wait(1.0, ActionCallbacks::new().updated(|progress, node: &mut WorldNode| node.set_local_opacity(progress)))\n        .condition(|node: &WorldNode| node.is_active(), ActionConditionCallbacks::new())\n        .call(|node: &mut WorldNode| node.set_local_scale(Vector2::create(2.0, 2.0)))\n        .repeat(3, Action::new().wait(0.5, ActionCallbacks::new()))\n        .forever(Action::new().wait(2.0, ActionCallbacks::new()));\n    action.start(&mut node_tree[node_id]);\n    // Every frame:\n    action.step(&mut node_tree[node_id], time_delta);\n  ```\n- Differences from the original:\n  - The original holds the target from start(target) and passes it to the callbacks on every step. Rust cannot hold a borrowed target, so\n    start and step take the target (&mut T) and pass it to the callbacks. So get_target and start()'s \"previous target when none is given\" do not exist.\n    T defaults to WorldNode; to handle several nodes or game state, use that as T.\n  - The callback objects ({ started, updated, completed }) are ActionCallbacks for wait steps (updated takes (progress, target)),\n    and ActionConditionCallbacks for condition steps (updated takes (target)). The original uses one object shape with only the argument count differing,\n    but Rust has to fix the callback argument types as types, so they are split in two.\n  - loop is a Rust keyword, so it is called as r#loop. (same as Tween's r#in)\n  - When call steps follow one another, the original moves on recursively and the Rust version with a loop. (same result)\n- The condition function takes the target as in the original (&T in Rust). wait ends with progress 1 if duration is 0 or less.\n  repeat moves on without running if the count is 0. (same as the original)"
+				"ko": "액션. (차례로 스텝을 실행하는 스크립트 꼴 연출)\n- 원본 animation/action.js 를 옮긴 것이다. wait / condition / call / repeat / forever / loop 스텝을 쌓고,\n  start 뒤 매 프레임 step 을 부르면 차례로 돈다.\n- 사용:\n  ```text\n    let mut action: Action<WorldNode> = Action::new()\n        .wait(1.0, ActionCallbacks::new().updated(|progress, node: &mut WorldNode| node.set_local_opacity(progress)))\n        .condition(|node: &WorldNode| node.is_active(), ActionConditionCallbacks::new())\n        .call(|node: &mut WorldNode| node.set_local_scale(Vector2::create(2.0, 2.0)))\n        .repeat(3, Action::new().wait(0.5, ActionCallbacks::new()))\n        .forever(Action::new().wait(2.0, ActionCallbacks::new()));\n    action.start(&mut node_tree[node_id]);\n    // 매 프레임:\n    action.step(&mut node_tree[node_id], time_delta);\n  ```\n- 원본과 다른 점:\n  - 원본은 start(target) 에서 대상을 들고 있다가 step 마다 콜백에 넘긴다. 러스트는 대상을 빌려 들 수 없어서\n    노드 대상은 핸들로 든다: start_on_node(트리, Some(노드)) 가 대상을 들고 step_on_node(트리, 시간) 이 그 노드를 콜백에 넘기며,\n    get_target 이 그 노드를 돌려주고 start_on_node(트리, None) 이 원본 start() 처럼 이전 대상으로 다시 시작한다.\n    노드가 아닌 대상(노드 여럿, 게임 상태)은 T 로 쓰고 start, step 이 대상(&mut T)을 받아 콜백에 넘긴다. (T 의 기본은 WorldNode)\n  - 콜백 객체({ started, updated, completed })는 wait 스텝이 ActionCallbacks(updated 가 (진행률, 대상)),\n    condition 스텝이 ActionConditionCallbacks(updated 가 (대상))다. 원본은 한 객체 꼴에 인자 수만 다르지만,\n    러스트는 콜백의 인자 꼴을 타입으로 정해야 해서 둘로 나눴다.\n  - loop 는 러스트 예약어라 r#loop 로 부른다. (Tween 의 r#in 과 같다)\n  - call 스텝이 이어지면 원본은 재귀로, 러스트 판은 반복문으로 넘긴다. (결과는 같다)\n- 조건 함수는 원본처럼 대상을 받는다(러스트는 &T). wait 은 duration 이 0 이하이면 진행률 1 로 끝낸다.\n  repeat 은 횟수가 0 이면 돌지 않고 넘어간다. (원본과 같다)",
+				"en": "Action. (script-style sequencing that runs steps in order)\n- A port of the original animation/action.js. Stack wait / condition / call / repeat / forever / loop steps,\n  and after start, calling step every frame runs them in order.\n- Usage:\n  ```text\n    let mut action: Action<WorldNode> = Action::new()\n        .wait(1.0, ActionCallbacks::new().updated(|progress, node: &mut WorldNode| node.set_local_opacity(progress)))\n        .condition(|node: &WorldNode| node.is_active(), ActionConditionCallbacks::new())\n        .call(|node: &mut WorldNode| node.set_local_scale(Vector2::create(2.0, 2.0)))\n        .repeat(3, Action::new().wait(0.5, ActionCallbacks::new()))\n        .forever(Action::new().wait(2.0, ActionCallbacks::new()));\n    action.start(&mut node_tree[node_id]);\n    // Every frame:\n    action.step(&mut node_tree[node_id], time_delta);\n  ```\n- Differences from the original:\n  - The original holds the target from start(target) and passes it to the callbacks on every step. Rust cannot hold a borrowed target, so\n    So a node target is held as a handle: start_on_node(tree, Some(node)) holds the target, step_on_node(tree, time) passes that node to the callbacks,\n    get_target returns that node, and start_on_node(tree, None) restarts with the previous target like the original start().\n    A target that is not a node (several nodes, game state) is used as T, and start and step take the target (&mut T) and pass it to the callbacks. (T defaults to WorldNode)\n  - The callback objects ({ started, updated, completed }) are ActionCallbacks for wait steps (updated takes (progress, target)),\n    and ActionConditionCallbacks for condition steps (updated takes (target)). The original uses one object shape with only the argument count differing,\n    but Rust has to fix the callback argument types as types, so they are split in two.\n  - loop is a Rust keyword, so it is called as r#loop. (same as Tween's r#in)\n  - When call steps follow one another, the original moves on recursively and the Rust version with a loop. (same result)\n- The condition function takes the target as in the original (&T in Rust). wait ends with progress 1 if duration is 0 or less.\n  repeat moves on without running if the count is 0. (same as the original)"
 			},
 			"classes": [
 				{
@@ -705,6 +705,106 @@
 								"class": "Action",
 								"name": "isRunning"
 							}
+						},
+						{
+							"kind": "method",
+							"name": "start_on_node",
+							"signature": "pub fn start_on_node(&mut self, node_tree: &mut NodeTree, node_id: Option<NodeId>) -> bool",
+							"params": [
+								{
+									"name": "node_tree",
+									"type": "&mut NodeTree",
+									"description": {
+										"ko": "대상 노드가 든 트리.",
+										"en": "The tree that holds the target node."
+									}
+								},
+								{
+									"name": "node_id",
+									"type": "Option<NodeId>",
+									"description": {
+										"ko": "대상 노드. (None 이면 이전 대상)",
+										"en": "The target node. (None means the previous target)"
+									}
+								}
+							],
+							"returns": {
+								"type": "bool",
+								"description": {
+									"ko": "시작했으면 true. 대상이 없거나 그 노드가 지워졌으면 false. (그때는 시작하지 않는다)",
+									"en": "true if it started. false if there is no target or that node was removed. (it does not start then)"
+								}
+							},
+							"description": {
+								"ko": "노드를 대상으로 실행 시작. (원본 start(target), 처음 스텝부터)\n- 대상을 노드 핸들로 들어, step_on_node 가 그 노드를 콜백에 넘기고 get_target 이 돌려준다.\n- `node_id` 가 None 이면 원본처럼 이전 대상(앞서 start_on_node 에 넘긴 노드)으로 다시 시작한다.",
+								"en": "Starts running with a node as the target. (the original start(target), from the first step)\n- Holds the target as a node handle, so step_on_node passes that node to the callbacks and get_target returns it.\n- If `node_id` is None, it restarts with the previous target (the node given to an earlier start_on_node), like the original."
+							},
+							"since": "0.4.0",
+							"source": "src/animation/action.rs",
+							"examples": [
+								{
+									"title": {
+										"ko": "노드 대상으로 돌리고, 대상을 안 주고 다시 시작하기",
+										"en": "Run with a node target, then restart without giving a target"
+									},
+									"code": "use vanilla::{Action, ActionCallbacks, NodeTree, WorldNode};\n\nlet mut node_tree = NodeTree::new();\nlet root_id = node_tree.get_root_id();\nlet logo_id = node_tree.create_child(root_id, \"logo\");\nlet mut action: Action = Action::new().wait(2.0, ActionCallbacks::new().updated(|progress, node: &mut WorldNode| node.set_local_opacity(progress)));\nassert!(action.start_on_node(&mut node_tree, Some(logo_id)));\nassert_eq!(action.get_target(), Some(logo_id));\naction.step_on_node(&mut node_tree, 1.0);\nassert_eq!(node_tree[logo_id].get_local_opacity(), 0.5);\n\nassert!(action.start_on_node(&mut node_tree, None));\naction.step_on_node(&mut node_tree, 0.5);\nassert_eq!(node_tree[logo_id].get_local_opacity(), 0.25);",
+									"language": "rust"
+								}
+							]
+						},
+						{
+							"kind": "method",
+							"name": "step_on_node",
+							"signature": "pub fn step_on_node(&mut self, node_tree: &mut NodeTree, time_delta: f32)",
+							"params": [
+								{
+									"name": "node_tree",
+									"type": "&mut NodeTree",
+									"description": {
+										"ko": "대상 노드가 든 트리.",
+										"en": "The tree that holds the target node."
+									}
+								},
+								{
+									"name": "time_delta",
+									"type": "f32",
+									"description": {
+										"ko": "지난 프레임에서 흐른 시간. (초)",
+										"en": "Time elapsed since the last frame. (seconds)"
+									}
+								}
+							],
+							"description": {
+								"ko": "대상 노드로 갱신. (원본 step(timeDelta), 매 프레임 호출)\n- start_on_node 로 넘긴 노드를 콜백에 넘긴다. 대상이 없거나 그 노드가 지워졌으면 아무것도 하지 않는다.",
+								"en": "Updates with the target node. (the original step(timeDelta), call every frame)\n- Passes the node given to start_on_node to the callbacks. Does nothing if there is no target or that node was removed."
+							},
+							"since": "0.4.0",
+							"source": "src/animation/action.rs"
+						},
+						{
+							"kind": "method",
+							"name": "get_target",
+							"signature": "pub fn get_target(&self) -> Option<NodeId>",
+							"params": [],
+							"returns": {
+								"type": "Option<NodeId>",
+								"description": {
+									"ko": "start_on_node 에 넘긴 대상 노드. 없으면 None. (start(&mut 노드) 로 빌려 준 대상은 들지 않는다)",
+									"en": "The target node given to start_on_node. None if there is none. (a target lent with start(&mut node) is not held)"
+								}
+							},
+							"description": {
+								"ko": "대상 반환. (원본 getTarget)",
+								"en": "Returns the target. (the original getTarget)"
+							},
+							"since": "0.4.0",
+							"source": "src/animation/action.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "animation/action",
+								"class": "Action",
+								"name": "getTarget"
+							}
 						}
 					],
 					"examples": [
@@ -725,8 +825,8 @@
 		{
 			"name": "animation/animator",
 			"summary": {
-				"ko": "애니메이터. (상태 기계로 스프라이트 클립을 고르고 섞는다)\n- 원본 animation/animator.js 를 옮긴 것이다. 상태(클립, 속도, 되풀이), 매개변수(실수, 정수, 참 거짓, 트리거),\n  전이(조건 목록, 종료 시각, 섞는 시간, 어느 상태에서나 넘어가는 전이), 매 프레임 tick 의 전이 판정과 크로스페이드 가중치가 원본과 같다.\n- 처음 더한 상태에서 시작한다. play 로 아무 상태로나 바로 옮길 수 있다. 전이의 from, to 는 Animator 상태 목록의 번호이고 from 이 None 이면 어느 상태에서나(Any State) 넘어간다.\n- tick 차례: 상태 시간을 흘린다(섞는 중이면 두 상태 모두) → 섞는 중이면 섞는 시간을 다 채웠을 때 다음 상태로 넘어간다\n  → 섞는 중이 아니면 어느 상태에서나 넘어가는 전이, 지금 상태에서 나가는 전이 차례로 넣은 순서대로 보고 처음 맞는 하나를 탄다.\n  섞는 동안에는 새 전이를 보지 않는다. 조건으로 쓴 트리거는 그 전이가 타면 풀린다.\n- 종료 시각은 나가는 상태의 정규화 시간이다. 그 시각을 지나는 갱신에서만 넘어갈 수 있고, 되풀이하는 상태에서 1 보다 작은 종료 시각은 바퀴마다 본다.\n- 원본과 다른 점:\n  - 원본 getStates / get_transitions 는 List 를, 러스트 판은 조각(&`[..]`)을 돌려준다. 원본 getParameters 의 사전은 러스트 판에 없다. (종류별 게터로 읽는다)\n  - 원본 조건은 { parameterName, mode, threshold } 객체이고 러스트 판은 같은 필드의 AnimationCondition 이다. 원본 AnimationConditionMode 의 글 값은 열거 값이다.\n  - 정수 매개변수는 i32, 실수와 기준 값은 f32 다. (원본은 모두 수) 정수를 기준 값과 견줄 때는 f32 로 바꿔 견준다.",
-				"en": "Animator. (Picks and blends sprite clips with a state machine)\n- A port of the original animation/animator.js. States (clip, speed, loop), parameters (float, integer, boolean, trigger),\n  transitions (condition list, exit time, blend time, transitions from any state), the transition check in each frame's tick, and the crossfade weights match the original.\n- It starts in the first added state. play moves to any state immediately. A transition's from and to are indices in the Animator state list, and a None from moves from any state (Any State).\n- tick order: advance the state time (both states while blending) → while blending, move to the next state once the blend time is filled\n  → when not blending, check transitions from any state, then transitions leaving the current state, each in the order added, and take the first one that holds.\n  No new transition is checked while blending. A trigger used as a condition is cleared when that transition is taken.\n- The exit time is the normalized time of the leaving state. The transition can only happen on the update that passes that time, and for a looping state an exit time below 1 is checked every cycle.\n- Differences from the original:\n  - The original getStates / get_transitions return a List, the Rust version returns a slice (&`[..]`). The Rust version has no dictionary like the original getParameters. (Read with the per-kind getters)\n  - An original condition is a { parameterName, mode, threshold } object, the Rust version is an AnimationCondition with the same fields. The string values of the original AnimationConditionMode are enum values.\n  - Integer parameters are i32, floats and thresholds are f32. (All numbers in the original) An integer is converted to f32 when compared with a threshold."
+				"ko": "애니메이터. (상태 기계로 스프라이트 클립을 고르고 섞는다)\n- 원본 animation/animator.js 를 옮긴 것이다. 상태(클립, 속도, 되풀이), 매개변수(실수, 정수, 참 거짓, 트리거),\n  전이(조건 목록, 종료 시각, 섞는 시간, 어느 상태에서나 넘어가는 전이), 매 프레임 tick 의 전이 판정과 크로스페이드 가중치가 원본과 같다.\n- 처음 더한 상태에서 시작한다. play 로 아무 상태로나 바로 옮길 수 있다. 전이의 from, to 는 Animator 상태 목록의 번호이고 from 이 None 이면 어느 상태에서나(Any State) 넘어간다.\n- tick 차례: 상태 시간을 흘린다(섞는 중이면 두 상태 모두) → 섞는 중이면 섞는 시간을 다 채웠을 때 다음 상태로 넘어간다\n  → 섞는 중이 아니면 어느 상태에서나 넘어가는 전이, 지금 상태에서 나가는 전이 차례로 넣은 순서대로 보고 처음 맞는 하나를 탄다.\n  섞는 동안에는 새 전이를 보지 않는다. 조건으로 쓴 트리거는 그 전이가 타면 풀린다.\n- 종료 시각은 나가는 상태의 정규화 시간이다. 그 시각을 지나는 갱신에서만 넘어갈 수 있고, 되풀이하는 상태에서 1 보다 작은 종료 시각은 바퀴마다 본다.\n- 원본과 다른 점:\n  - 원본 getStates / get_transitions 는 List 를, 러스트 판은 조각(&`[..]`)을 돌려준다. 원본 getParameters 의 사전은 get_parameters 가 이름과 AnimatorParameter 목록(넣은 차례)으로 돌려준다.\n  - 원본 조건은 { parameterName, mode, threshold } 객체이고 러스트 판은 같은 필드의 AnimationCondition 이다. 원본 AnimationConditionMode 의 글 값은 열거 값이다.\n  - 정수 매개변수는 i32, 실수와 기준 값은 f32 다. (원본은 모두 수) 정수를 기준 값과 견줄 때는 f32 로 바꿔 견준다.",
+				"en": "Animator. (Picks and blends sprite clips with a state machine)\n- A port of the original animation/animator.js. States (clip, speed, loop), parameters (float, integer, boolean, trigger),\n  transitions (condition list, exit time, blend time, transitions from any state), the transition check in each frame's tick, and the crossfade weights match the original.\n- It starts in the first added state. play moves to any state immediately. A transition's from and to are indices in the Animator state list, and a None from moves from any state (Any State).\n- tick order: advance the state time (both states while blending) → while blending, move to the next state once the blend time is filled\n  → when not blending, check transitions from any state, then transitions leaving the current state, each in the order added, and take the first one that holds.\n  No new transition is checked while blending. A trigger used as a condition is cleared when that transition is taken.\n- The exit time is the normalized time of the leaving state. The transition can only happen on the update that passes that time, and for a looping state an exit time below 1 is checked every cycle.\n- Differences from the original:\n  - The original getStates / get_transitions return a List, the Rust version returns a slice (&`[..]`). The dictionary of the original getParameters is returned by get_parameters as a list of names and AnimatorParameter (in insertion order).\n  - An original condition is a { parameterName, mode, threshold } object, the Rust version is an AnimationCondition with the same fields. The string values of the original AnimationConditionMode are enum values.\n  - Integer parameters are i32, floats and thresholds are f32. (All numbers in the original) An integer is converted to f32 when compared with a threshold."
 			},
 			"classes": [
 				{
@@ -2081,6 +2181,41 @@
 						},
 						{
 							"kind": "method",
+							"name": "get_parameters",
+							"signature": "pub fn get_parameters(&self) -> Vec<(&str, AnimatorParameter)>",
+							"params": [],
+							"returns": {
+								"type": "Vec<(&str, AnimatorParameter)>",
+								"description": {
+									"ko": "이름과 매개변수(종류와 값) 목록. (처음 넣은 차례, 같은 이름을 다시 넣어도 자리는 그대로)",
+									"en": "List of names and parameters (kind and value). (in first insertion order, setting the same name again keeps its place)"
+								}
+							},
+							"description": {
+								"ko": "모든 매개변수 반환. (원본 getParameters 의 사전, 처음 넣은 차례)",
+								"en": "Returns all parameters. (the dictionary of the original getParameters, in first insertion order)"
+							},
+							"since": "0.4.0",
+							"source": "src/animation/animator.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "animation/animator",
+								"class": "Animator",
+								"name": "getParameters"
+							},
+							"examples": [
+								{
+									"title": {
+										"ko": "넣은 차례로 이름과 값 보기",
+										"en": "See names and values in insertion order"
+									},
+									"code": "use vanilla::{Animator, AnimatorParameter};\n\nlet mut animator = Animator::new();\nanimator.set_float(\"speed\", 1.5);\nanimator.set_trigger(\"jump\");\nanimator.set_bool(\"speed\", true);\nassert_eq!(animator.get_parameters(), vec![(\"speed\", AnimatorParameter::Bool(true)), (\"jump\", AnimatorParameter::Trigger(true))]);",
+									"language": "rust"
+								}
+							]
+						},
+						{
+							"kind": "method",
 							"name": "add_state",
 							"signature": "pub fn add_state(&mut self, state: AnimationState) -> usize",
 							"params": [
@@ -2500,6 +2635,64 @@
 								"en": "What each comparison mode gives for the parameters"
 							},
 							"code": "use vanilla::{AnimationCondition, AnimationConditionMode, Animator};\n\nlet mut animator = Animator::new();\nanimator.set_integer(\"combo\", 3);\nanimator.set_bool(\"isGrounded\", false);\nanimator.set_trigger(\"jump\");\nlet check = |parameter_name: &str, mode: AnimationConditionMode, threshold: f32| {\n\tanimator.is_condition_satisfied(&AnimationCondition { parameter_name: parameter_name.to_string(), mode, threshold })\n};\nassert!(check(\"jump\", AnimationConditionMode::If, 0.0));\nassert!(check(\"isGrounded\", AnimationConditionMode::IfNot, 0.0));\nassert!(check(\"combo\", AnimationConditionMode::Greater, 2.0));\nassert!(!check(\"combo\", AnimationConditionMode::Less, 3.0));\nassert!(check(\"combo\", AnimationConditionMode::Equals, 3.0));\nassert!(!check(\"combo\", AnimationConditionMode::NotEqual, 3.0));\nassert!(!check(\"isGrounded\", AnimationConditionMode::Greater, 0.0));\nassert!(!check(\"missing\", AnimationConditionMode::If, 0.0));",
+							"language": "rust"
+						}
+					]
+				},
+				{
+					"name": "AnimatorParameter",
+					"summary": {
+						"ko": "애니메이터 매개변수. (원본 { type, value }, 트리거는 걸려 있는지, Animator::get_parameters 가 돌려준다)",
+						"en": "Animator parameter. (the original { type, value }, for a trigger whether it is set, returned by Animator::get_parameters)"
+					},
+					"traits": [
+						"Clone",
+						"Copy",
+						"Debug",
+						"PartialEq"
+					],
+					"source": "src/animation/animator.rs",
+					"values": [
+						{
+							"name": "Float",
+							"value": "Float(f32)",
+							"description": {
+								"ko": "실수. (원본 type \"float\")",
+								"en": "Float. (the original type \"float\")"
+							}
+						},
+						{
+							"name": "Int",
+							"value": "Int(i32)",
+							"description": {
+								"ko": "정수. (원본 type \"int\")",
+								"en": "Integer. (the original type \"int\")"
+							}
+						},
+						{
+							"name": "Bool",
+							"value": "Bool(bool)",
+							"description": {
+								"ko": "참 거짓. (원본 type \"bool\")",
+								"en": "Boolean. (the original type \"bool\")"
+							}
+						},
+						{
+							"name": "Trigger",
+							"value": "Trigger(bool)",
+							"description": {
+								"ko": "트리거. (원본 type \"trigger\", 값은 걸려 있는지)",
+								"en": "Trigger. (the original type \"trigger\", the value is whether it is set)"
+							}
+						}
+					],
+					"examples": [
+						{
+							"title": {
+								"ko": "종류와 값 꺼내기",
+								"en": "Read the kind and value"
+							},
+							"code": "use vanilla::{Animator, AnimatorParameter};\n\nlet mut animator = Animator::new();\nanimator.set_integer(\"combo\", 2);\nassert_eq!(animator.get_parameters(), vec![(\"combo\", AnimatorParameter::Int(2))]);",
 							"language": "rust"
 						}
 					]
@@ -14430,6 +14623,11 @@
 						"PartialEq",
 						"Default"
 					],
+					"counterpart": {
+						"engine": "vanilla.js",
+						"module": "base/transformmatrix",
+						"class": "TransformMatrix"
+					},
 					"source": "src/base/transformmatrix.rs",
 					"members": [
 						{
@@ -14449,7 +14647,13 @@
 								"en": "x of the x axis vector. (new x = a * x + c * y + e)"
 							},
 							"since": "0.3.2",
-							"source": "src/base/transformmatrix.rs"
+							"source": "src/base/transformmatrix.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "base/transformmatrix",
+								"class": "TransformMatrix",
+								"name": "a"
+							}
 						},
 						{
 							"kind": "field",
@@ -14468,7 +14672,13 @@
 								"en": "y of the x axis vector. (new y = b * x + d * y + f)"
 							},
 							"since": "0.3.2",
-							"source": "src/base/transformmatrix.rs"
+							"source": "src/base/transformmatrix.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "base/transformmatrix",
+								"class": "TransformMatrix",
+								"name": "b"
+							}
 						},
 						{
 							"kind": "field",
@@ -14487,7 +14697,13 @@
 								"en": "x of the y axis vector."
 							},
 							"since": "0.3.2",
-							"source": "src/base/transformmatrix.rs"
+							"source": "src/base/transformmatrix.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "base/transformmatrix",
+								"class": "TransformMatrix",
+								"name": "c"
+							}
 						},
 						{
 							"kind": "field",
@@ -14506,7 +14722,13 @@
 								"en": "y of the y axis vector."
 							},
 							"since": "0.3.2",
-							"source": "src/base/transformmatrix.rs"
+							"source": "src/base/transformmatrix.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "base/transformmatrix",
+								"class": "TransformMatrix",
+								"name": "d"
+							}
 						},
 						{
 							"kind": "field",
@@ -14525,7 +14747,13 @@
 								"en": "Translation x."
 							},
 							"since": "0.3.2",
-							"source": "src/base/transformmatrix.rs"
+							"source": "src/base/transformmatrix.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "base/transformmatrix",
+								"class": "TransformMatrix",
+								"name": "e"
+							}
 						},
 						{
 							"kind": "field",
@@ -14544,7 +14772,13 @@
 								"en": "Translation y."
 							},
 							"since": "0.3.2",
-							"source": "src/base/transformmatrix.rs"
+							"source": "src/base/transformmatrix.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "base/transformmatrix",
+								"class": "TransformMatrix",
+								"name": "f"
+							}
 						},
 						{
 							"kind": "static",
@@ -14575,7 +14809,13 @@
 								"en": "Resets to the identity matrix."
 							},
 							"since": "0.3.2",
-							"source": "src/base/transformmatrix.rs"
+							"source": "src/base/transformmatrix.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "base/transformmatrix",
+								"class": "TransformMatrix",
+								"name": "setIdentity"
+							}
 						},
 						{
 							"kind": "method",
@@ -14636,7 +14876,13 @@
 								"en": "Sets the values directly."
 							},
 							"since": "0.3.2",
-							"source": "src/base/transformmatrix.rs"
+							"source": "src/base/transformmatrix.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "base/transformmatrix",
+								"class": "TransformMatrix",
+								"name": "setTransform"
+							}
 						},
 						{
 							"kind": "method",
@@ -14657,7 +14903,13 @@
 								"en": "Copies the values of another matrix."
 							},
 							"since": "0.4.0",
-							"source": "src/base/transformmatrix.rs"
+							"source": "src/base/transformmatrix.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "base/transformmatrix",
+								"class": "TransformMatrix",
+								"name": "copyFrom"
+							}
 						},
 						{
 							"kind": "method",
@@ -14686,7 +14938,13 @@
 								"en": "Accumulates a translation. (multiplies on the right)"
 							},
 							"since": "0.3.2",
-							"source": "src/base/transformmatrix.rs"
+							"source": "src/base/transformmatrix.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "base/transformmatrix",
+								"class": "TransformMatrix",
+								"name": "translate"
+							}
 						},
 						{
 							"kind": "method",
@@ -14708,6 +14966,12 @@
 							},
 							"since": "0.3.2",
 							"source": "src/base/transformmatrix.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "base/transformmatrix",
+								"class": "TransformMatrix",
+								"name": "rotate"
+							},
 							"examples": [
 								{
 									"title": {
@@ -14746,7 +15010,13 @@
 								"en": "Accumulates a scale. (multiplies on the right)"
 							},
 							"since": "0.3.2",
-							"source": "src/base/transformmatrix.rs"
+							"source": "src/base/transformmatrix.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "base/transformmatrix",
+								"class": "TransformMatrix",
+								"name": "scale"
+							}
 						},
 						{
 							"kind": "method",
@@ -14775,6 +15045,12 @@
 							},
 							"since": "0.3.2",
 							"source": "src/base/transformmatrix.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "base/transformmatrix",
+								"class": "TransformMatrix",
+								"name": "multiply"
+							},
 							"examples": [
 								{
 									"title": {
@@ -14804,6 +15080,12 @@
 							},
 							"since": "0.3.2",
 							"source": "src/base/transformmatrix.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "base/transformmatrix",
+								"class": "TransformMatrix",
+								"name": "invert"
+							},
 							"examples": [
 								{
 									"title": {
@@ -14849,7 +15131,13 @@
 								"en": "Transforms a point."
 							},
 							"since": "0.3.2",
-							"source": "src/base/transformmatrix.rs"
+							"source": "src/base/transformmatrix.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "base/transformmatrix",
+								"class": "TransformMatrix",
+								"name": "transformPoint"
+							}
 						},
 						{
 							"kind": "method",
@@ -14868,7 +15156,13 @@
 								"en": "Scale factor of the larger of the two axes."
 							},
 							"since": "0.3.2",
-							"source": "src/base/transformmatrix.rs"
+							"source": "src/base/transformmatrix.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "base/transformmatrix",
+								"class": "TransformMatrix",
+								"name": "getMaximumScale"
+							}
 						},
 						{
 							"kind": "method",
@@ -14890,6 +15184,12 @@
 							},
 							"since": "0.4.0",
 							"source": "src/base/transformmatrix.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "base/transformmatrix",
+								"class": "TransformMatrix",
+								"name": "writeToFloat32Array"
+							},
 							"examples": [
 								{
 									"title": {
@@ -19008,6 +19308,11 @@
 						"PartialEq",
 						"Eq"
 					],
+					"counterpart": {
+						"engine": "vanilla.js",
+						"module": "core/asset",
+						"class": "AssetType"
+					},
 					"source": "src/core/asset.rs",
 					"values": [
 						{
@@ -21488,6 +21793,44 @@
 							"description": {
 								"ko": "반사 구현. (변경용)",
 								"en": "Reflection implementation. (mutable)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/component.rs"
+						},
+						{
+							"kind": "method",
+							"name": "get_base_component",
+							"signature": "fn get_base_component(&self) -> Option<&dyn Component>",
+							"params": [],
+							"returns": {
+								"type": "Option<&dyn Component>",
+								"description": {
+									"ko": "품은 기반 컴포넌트. 기반이 없으면 None. (기본)",
+									"en": "The embedded base component. None if there is no base. (default)"
+								}
+							},
+							"description": {
+								"ko": "품은 기반 컴포넌트. (원본 상위 클래스 자리, ShaderSprite 의 Sprite 나 UIButton 의 UIControl 처럼)\n- get_component, get_components, has_component, remove_component 가 이 사슬을 따라 원본 instanceof 처럼 기반 타입으로도 찾는다.\n- 다른 컴포넌트를 품어 원본 상속을 옮긴 컴포넌트만 덮어쓴다.",
+								"en": "The embedded base component. (in place of the original superclass, like the Sprite of ShaderSprite or the UIControl of UIButton)\n- get_component, get_components, has_component and remove_component follow this chain and also find base types, like the original instanceof.\n- Only components that embed another component to port the original inheritance override it."
+							},
+							"since": "0.4.0",
+							"source": "src/core/component.rs"
+						},
+						{
+							"kind": "method",
+							"name": "get_base_component_mut",
+							"signature": "fn get_base_component_mut(&mut self) -> Option<&mut dyn Component>",
+							"params": [],
+							"returns": {
+								"type": "Option<&mut dyn Component>",
+								"description": {
+									"ko": "품은 기반 컴포넌트. (변경용) 기반이 없으면 None. (기본)",
+									"en": "The embedded base component. (mutable) None if there is no base. (default)"
+								}
+							},
+							"description": {
+								"ko": "품은 기반 컴포넌트. (변경용)",
+								"en": "The embedded base component. (mutable)"
 							},
 							"since": "0.4.0",
 							"source": "src/core/component.rs"
@@ -26010,6 +26353,11 @@
 						"en": "The original's SpriteBlendMode has the same values as the Graphic's blend mode."
 					},
 					"signature": "pub type SpriteBlendMode = BlendMode",
+					"counterpart": {
+						"engine": "vanilla.js",
+						"module": "core/component/sprite",
+						"class": "SpriteBlendMode"
+					},
 					"source": "src/core/component/sprite.rs",
 					"members": []
 				},
@@ -26720,6 +27068,11 @@
 						"PartialEq",
 						"Eq"
 					],
+					"counterpart": {
+						"engine": "vanilla.js",
+						"module": "core/component/sprite",
+						"class": "SpriteDrawMode"
+					},
 					"source": "src/core/component/sprite.rs",
 					"values": [
 						{
@@ -39746,8 +40099,8 @@
 		{
 			"name": "core/gamepadmanager",
 			"summary": {
-				"ko": "게임패드 관리자.\n- 원본 core/gamepadmanager.js 를 옮겼다. 공개 이름(GamepadButtonCode, GamepadAnalogStickCode, GamepadTriggerCode,\n  connect, disconnect, set_callback, update_all_gamepads, is_button_pressed, get_button_value, get_axis_value,\n  get_all_connected_gamepads, get_connected_gamepad_count, get_connected_gamepad)과 갱신 규칙은 원본 그대로다.\n  (값은 소수점 둘째 자리로 반올림, 축은 0.01 넘게 바뀔 때만 받기, 아날로그 값은 0 보다 클 때만 알리기, 로그 문구)\n- 원본은 navigator.getGamepads() 를 읽는다. 웹(wasm32)은 원본처럼 navigator.getGamepads() 를 직접 읽어 브라우저가 주는 버튼과 축을 모두 받고,\n  연결과 해제는 원본 engine.js 처럼 gamepadconnected / gamepaddisconnected 로 받는다.\n  데스크탑은 gilrs 가 OS 입력(윈도우는 Windows.Gaming.Input)을 읽고, 원본과 같은 W3C Standard Gamepad 꼴\n  (버튼 0~16, 축 0~3, 축 Y 는 아래가 양수)의 Gamepad 목록으로 바꾼 뒤 같은 규칙을 돌린다.\n- 원본과 다른 점:\n  - gilrs 기본 필터(데드존, 떨림 거르기)는 끈다. 브라우저처럼 날값을 받고, 데드존은 원본처럼 게임이 건다.\n  - 아날로그 버튼(트리거)의 눌림은 크로미엄과 같이 값이 30/255 를 넘을 때다. (gilrs 기본은 0.75 에 눌림, 0.65 에 뗌)\n  - 축(햇 스위치)으로 오는 십자키는 버튼 12~15 로 바꾼다. (브라우저가 하는 일)\n  - 데스크탑의 버튼은 표준 17개 뒤에 gilrs 가 표준 버튼으로 잇지 못한 단추(매핑에 없는 단추, gilrs 의 C, Z)를, 축은 표준 4개 뒤에\n    매핑에 없는 축을 처음 움직인 차례로 붙인다. gilrs 가 장치의 단추 목록을 내주지 않고 한 번이라도 움직인 단추만 알려서, 그 단추를 처음 누른 뒤에야 생긴다.\n    버튼이나 축 수가 늘면 그 패드의 상태 칸도 늘린다.\n  - 플레이스테이션 패드(소니 054c 의 듀얼쇼크4 05c4, 09cc, 0ba0 와 듀얼센스 0ce6, 0df2, 0e5f)는 크롬(device/gamepad 의 MapperDualshock4, MapperDualSense)처럼\n    버튼 18개이고 원시 단추 13번(HID 단추 14)이 TOUCHPAD(17)다. 누르기 전에도 늘 있고, 그 밖의 단추(듀얼센스 마이크 단추)와 축은 붙이지 않는다.\n    gilrs 가 SDL 매핑의 touchpad:b13 을 이름 없는 단추(Button::Unknown, misc1 과 같은 이름)로 잇기만 해서, 그 단추의 원시 코드를 플랫폼마다 정해 찾는다.\n    (맥 IOKit 단추 쪽의 쓰임 14, 윈도우 Windows.Gaming.Input 의 단추 13번, 리눅스 hid-generic 의 BTN_GAMEPAD + 13)\n    리눅스의 hid-sony(커널 4.10 부터), hid-playstation(5.12 부터) 드라이버는 터치패드를 따로 장치로 내고 bcdHID 에 0x8000 을 붙인다.\n    그때는 크롬(MapperPs4Ps5)처럼 버튼 17개다. (gilrs 의 uuid 13, 14번째 바이트가 그 판 번호다)\n    맥 GameController 의 GCDualSenseGamepad.touchpadButton 도 있지만, GameController 는 패드의 제조사, 제품 번호를 내주지 않아 gilrs 패드와 짝짓지 못해 쓰지 않는다.\n  - Gamepad.index 는 데스크탑에서는 gilrs 의 GamepadId 번호다. (처음 붙은 순서로 0 부터, 브라우저 index 와 같은 쓰임) 웹은 브라우저 index 다.\n  - Gamepad.id 는 웹에서는 브라우저 id 그대로, 데스크탑에서는 크롬 꼴 \"이름 (STANDARD GAMEPAD Vendor: 054c Product: 0ce6)\" 로 만든다.\n  - 콜백의 button 값은 bool 대신 1.0(눌림) / 0.0(뗌) 이다.\n  - gilrs(웹은 연결 리스너)는 처음 부를 때(갱신, 진동, 패드 목록 읽기) 만든다. (부르지 않는 엔진과 시험에서는 장치를 열지 않는다)\n- get_all_connected_gamepads / get_connected_gamepad 는 원본 navigator.getGamepads() 처럼 부를 때 그 자리에서 읽는다. (데스크탑은 gilrs 사건을 비워 지금 상태,\n  그 사이의 연결과 해제는 다음 갱신이 받는다) update_all_gamepads_with_list 로 목록을 넣은 관리자(시험, 다른 입력원)는 넣은 목록을 돌려준다.\n  - 더한 것: set_log_enabled (로그 켜고 끄기),\n    update_all_gamepads_with_list (gilrs 없이 목록을 넣는 길. 시험이나 다른 입력원)\n  - 배터리 정보는 원본에 없어 옮기지 않는다.\n  - 단추와 축이 바뀔 때마다 찍는 로그는 원본처럼 set_input_log_enabled 로 켜고, 기본은 끔이다. set_log_enabled 는 연결과 해제를 포함한 모든 로그의 큰 스위치다.\n  - GamepadKind, read_gamepad_kind: 패드 이름으로 종류(엑스박스, 플레이스테이션, 닌텐도, 그 밖)를 가른다. get_active_gamepad_id 는 마지막 갱신에 단추를 누르거나 축을 크게 기울인 패드다.\n  - vibrate(strong_magnitude, weak_magnitude, seconds): 연결된 패드를 모두 떤다.\n    데스크탑은 gilrs force feedback(리눅스 evdev, 윈도우 XInput 과 Windows.Gaming.Input)으로 떨고, gilrs 가 진동을 대지 않는 macOS 는\n    플랫폼 층(platform/desktop/gamepadhaptics.rs)이 GameController 와 CoreHaptics 로 gilrs 패드와 짝인 컨트롤러를 떤다. (macOS 는 길이나 세기가 0 이면 앞 진동을 멈춘다)\n    그래서 gilrs 를 진동을 켠 채 만든다. (데스크탑에서 gilrs 의 진동 스레드 하나가 돈다) 웹은 원본처럼 navigator.getGamepads() 의 vibrationActuator 에 dual-rumble 을 건다.\n    첫 갱신(tick) 전에 불러도 그 자리에서 gilrs 를 만들어 떤다. (원본처럼)",
-				"en": "Gamepad manager.\n- A port of the original core/gamepadmanager.js. The public names (GamepadButtonCode, GamepadAnalogStickCode, GamepadTriggerCode,\n  connect, disconnect, set_callback, update_all_gamepads, is_button_pressed, get_button_value, get_axis_value,\n  get_all_connected_gamepads, get_connected_gamepad_count, get_connected_gamepad) and the update rules are the same as the original.\n  (values are rounded to two decimal places, axes are taken only when they change by more than 0.01, analog values are reported only when greater than 0, log messages)\n- The original reads navigator.getGamepads(). The web (wasm32) reads navigator.getGamepads() directly like the original and takes all buttons and axes the browser gives,\n  and takes connection and disconnection through gamepadconnected / gamepaddisconnected like the original engine.js.\n  On desktop, gilrs reads OS input (Windows.Gaming.Input on Windows), converts it to a Gamepad list in the same W3C Standard Gamepad form as the original\n  (buttons 0~16, axes 0~3, axis Y is positive downward), then runs the same rules.\n- Differences from the original:\n  - The gilrs default filters (deadzone, jitter filtering) are turned off. Raw values are taken like a browser, and the game applies the deadzone like the original.\n  - An analog button (trigger) counts as pressed when its value exceeds 30/255, as in Chromium. (gilrs default presses at 0.75 and releases at 0.65)\n  - A D-pad coming in as an axis (hat switch) is converted to buttons 12~15. (what the browser does)\n  - On desktop, buttons that gilrs could not map to standard buttons (buttons missing from the mapping, gilrs C, Z) are appended after the 17 standard buttons, and axes missing from the mapping\n    after the 4 standard axes, in the order they first move. gilrs does not give the device's button list and reports only buttons that have moved at least once, so such a button appears only after it is first pressed.\n    When the number of buttons or axes grows, that pad's state slots grow too.\n  - PlayStation pads (Sony 054c DualShock 4 05c4, 09cc, 0ba0 and DualSense 0ce6, 0df2, 0e5f) have 18 buttons like Chrome (MapperDualshock4, MapperDualSense in device/gamepad),\n    and raw button 13 (HID button 14) is TOUCHPAD (17). It is always there even before being pressed, and other buttons (the DualSense mic button) and axes are not appended.\n    gilrs only maps touchpad:b13 of the SDL mapping to an unnamed button (Button::Unknown, the same name as misc1), so the raw code of that button is found per platform.\n    (usage 14 on the macOS IOKit button page, button 13 on Windows Windows.Gaming.Input, BTN_GAMEPAD + 13 on Linux hid-generic)\n    The Linux hid-sony (from kernel 4.10) and hid-playstation (from 5.12) drivers expose the touchpad as a separate device and add 0x8000 to bcdHID.\n    In that case it has 17 buttons like Chrome (MapperPs4Ps5). (the 13th and 14th bytes of the gilrs uuid are that version number)\n    macOS GameController also has GCDualSenseGamepad.touchpadButton, but GameController does not give the pad's vendor and product numbers so it cannot be paired with a gilrs pad, and it is not used.\n  - Gamepad.index on desktop is the gilrs GamepadId number. (from 0 in the order first connected, used like the browser index) On the web it is the browser index.\n  - Gamepad.id on the web is the browser id as is, and on desktop it is built in Chrome form \"name (STANDARD GAMEPAD Vendor: 054c Product: 0ce6)\".\n  - The button value of the callback is 1.0 (pressed) / 0.0 (released) instead of bool.\n  - gilrs (on the web, the connection listeners) is created on the first call (update, vibration, pad list read). (engines and tests that never call it do not open devices)\n- get_all_connected_gamepads / get_connected_gamepad read in place when called, like the original navigator.getGamepads(). (desktop drains the gilrs events for the current state,\n  and the next update receives the connects and disconnects in between) A manager fed with update_all_gamepads_with_list (tests, other input sources) returns the list it was given.\n  - Added: set_log_enabled (turns logs on and off),\n    update_all_gamepads_with_list (a way to feed a list without gilrs. For tests or other input sources)\n  - Battery info is not in the original, so it is not ported.\n  - The log printed whenever buttons and axes change is turned on with set_input_log_enabled like the original, and is off by default. set_log_enabled is the master switch for all logs including connection and disconnection.\n  - GamepadKind, read_gamepad_kind: tells the kind (Xbox, PlayStation, Nintendo, other) from the pad name. get_active_gamepad_id is the pad that pressed a button or tilted an axis far at the last update.\n  - vibrate(strong_magnitude, weak_magnitude, seconds): vibrates all connected pads.\n    On desktop it vibrates with gilrs force feedback (Linux evdev, Windows XInput and Windows.Gaming.Input), and on macOS, where gilrs does not support rumble,\n    the platform layer (platform/desktop/gamepadhaptics.rs) vibrates the controller paired with the gilrs pad using GameController and CoreHaptics. (on macOS, a duration or strength of 0 stops the previous vibration)\n    So gilrs is created with rumble enabled. (one gilrs rumble thread runs on desktop) On the web, like the original, it applies dual-rumble to the vibrationActuator of navigator.getGamepads().\n    Called before the first update (tick), it creates gilrs on the spot and rumbles. (as in the original)"
+				"ko": "게임패드 관리자.\n- 원본 core/gamepadmanager.js 를 옮겼다. 공개 이름(GamepadButtonCode, GamepadAnalogStickCode, GamepadTriggerCode,\n  connect, disconnect, set_callback, update_all_gamepads, is_button_pressed, get_button_value, get_axis_value,\n  get_all_connected_gamepads, get_connected_gamepad_count, get_connected_gamepad)과 갱신 규칙은 원본 그대로다.\n  (값은 소수점 둘째 자리로 반올림, 축은 0.01 넘게 바뀔 때만 받기, 아날로그 값은 0 보다 클 때만 알리기, 로그 문구)\n- 원본은 navigator.getGamepads() 를 읽는다. 웹(wasm32)은 원본처럼 navigator.getGamepads() 를 직접 읽어 브라우저가 주는 버튼과 축을 모두 받고,\n  연결과 해제는 원본 engine.js 처럼 gamepadconnected / gamepaddisconnected 로 받는다.\n  데스크탑은 gilrs 가 OS 입력(윈도우는 Windows.Gaming.Input)을 읽고, 원본과 같은 W3C Standard Gamepad 꼴\n  (버튼 0~16, 축 0~3, 축 Y 는 아래가 양수)의 Gamepad 목록으로 바꾼 뒤 같은 규칙을 돌린다.\n- 원본과 다른 점:\n  - gilrs 기본 필터(데드존, 떨림 거르기)는 끈다. 브라우저처럼 날값을 받고, 데드존은 원본처럼 게임이 건다.\n  - 아날로그 버튼(트리거)의 눌림은 크로미엄과 같이 값이 30/255 를 넘을 때다. (gilrs 기본은 0.75 에 눌림, 0.65 에 뗌)\n  - 축(햇 스위치)으로 오는 십자키는 버튼 12~15 로 바꾼다. (브라우저가 하는 일)\n  - 데스크탑의 버튼은 표준 17개 뒤에 gilrs 가 표준 버튼으로 잇지 못한 단추(매핑에 없는 단추, gilrs 의 C, Z)를, 축은 표준 4개 뒤에\n    매핑에 없는 축을 처음 움직인 차례로 붙인다. gilrs 가 장치의 단추 목록을 내주지 않고 한 번이라도 움직인 단추만 알려서, 그 단추를 처음 누른 뒤에야 생긴다.\n    버튼이나 축 수가 늘면 그 패드의 상태 칸도 늘린다.\n  - 플레이스테이션 패드(소니 054c 의 듀얼쇼크4 05c4, 09cc, 0ba0 와 듀얼센스 0ce6, 0df2, 0e5f)는 크롬(device/gamepad 의 MapperDualshock4, MapperDualSense)처럼\n    버튼 18개이고 원시 단추 13번(HID 단추 14)이 TOUCHPAD(17)다. 누르기 전에도 늘 있고, 그 밖의 단추(듀얼센스 마이크 단추)와 축은 붙이지 않는다.\n    gilrs 가 SDL 매핑의 touchpad:b13 을 이름 없는 단추(Button::Unknown, misc1 과 같은 이름)로 잇기만 해서, 그 단추의 원시 코드를 플랫폼마다 정해 찾는다.\n    (맥 IOKit 단추 쪽의 쓰임 14, 윈도우 Windows.Gaming.Input 의 단추 13번, 리눅스 hid-generic 의 BTN_GAMEPAD + 13)\n    리눅스의 hid-sony(커널 4.10 부터), hid-playstation(5.12 부터) 드라이버는 터치패드를 따로 장치로 내고 bcdHID 에 0x8000 을 붙인다.\n    그때는 크롬(MapperPs4Ps5)처럼 버튼 17개다. (gilrs 의 uuid 13, 14번째 바이트가 그 판 번호다)\n    맥 GameController 의 GCDualSenseGamepad.touchpadButton 도 있지만, GameController 는 패드의 제조사, 제품 번호를 내주지 않아 gilrs 패드와 짝짓지 못해 쓰지 않는다.\n  - Gamepad.index 는 데스크탑에서는 gilrs 의 GamepadId 번호다. (처음 붙은 순서로 0 부터, 브라우저 index 와 같은 쓰임) 웹은 브라우저 index 다.\n  - Gamepad.id 는 웹에서는 브라우저 id 그대로, 데스크탑에서는 크롬 꼴 \"이름 (STANDARD GAMEPAD Vendor: 054c Product: 0ce6)\" 로 만든다.\n  - 콜백의 button 값은 bool 대신 1.0(눌림) / 0.0(뗌) 이다.\n  - gilrs(웹은 연결 리스너)는 처음 부를 때(갱신, 진동, 패드 목록 읽기) 만든다. (부르지 않는 엔진과 시험에서는 장치를 열지 않는다)\n- get_all_connected_gamepads / get_connected_gamepad 는 원본 navigator.getGamepads() 처럼 부를 때 그 자리에서 읽은 사본을 돌려준다(&self). (데스크탑은 gilrs 사건을 비워 지금 상태,\n  그 사이의 연결과 해제는 다음 갱신이 받는다) update_all_gamepads_with_list 로 목록을 넣은 관리자(시험, 다른 입력원)는 넣은 목록을 돌려준다.\n  - 더한 것: set_log_enabled (로그 켜고 끄기),\n    update_all_gamepads_with_list (gilrs 없이 목록을 넣는 길. 시험이나 다른 입력원)\n  - 배터리 정보는 원본에 없어 옮기지 않는다.\n  - 단추와 축이 바뀔 때마다 찍는 로그는 원본처럼 set_input_log_enabled 로 켜고, 기본은 끔이다. set_log_enabled 는 연결과 해제를 포함한 모든 로그의 큰 스위치다.\n  - GamepadKind, read_gamepad_kind: 패드 이름으로 종류(엑스박스, 플레이스테이션, 닌텐도, 그 밖)를 가른다. get_active_gamepad_id 는 마지막 갱신에 단추를 누르거나 축을 크게 기울인 패드다.\n  - vibrate(strong_magnitude, weak_magnitude, seconds): 연결된 패드를 모두 떤다.\n    데스크탑은 gilrs force feedback(리눅스 evdev, 윈도우 XInput 과 Windows.Gaming.Input)으로 떨고, gilrs 가 진동을 대지 않는 macOS 는\n    플랫폼 층(platform/desktop/gamepadhaptics.rs)이 GameController 와 CoreHaptics 로 gilrs 패드와 짝인 컨트롤러를 떤다. (macOS 는 길이나 세기가 0 이면 앞 진동을 멈춘다)\n    그래서 gilrs 를 진동을 켠 채 만든다. (데스크탑에서 gilrs 의 진동 스레드 하나가 돈다) 웹은 원본처럼 navigator.getGamepads() 의 vibrationActuator 에 dual-rumble 을 건다.\n    첫 갱신(tick) 전에 불러도 그 자리에서 gilrs 를 만들어 떤다. (원본처럼)",
+				"en": "Gamepad manager.\n- A port of the original core/gamepadmanager.js. The public names (GamepadButtonCode, GamepadAnalogStickCode, GamepadTriggerCode,\n  connect, disconnect, set_callback, update_all_gamepads, is_button_pressed, get_button_value, get_axis_value,\n  get_all_connected_gamepads, get_connected_gamepad_count, get_connected_gamepad) and the update rules are the same as the original.\n  (values are rounded to two decimal places, axes are taken only when they change by more than 0.01, analog values are reported only when greater than 0, log messages)\n- The original reads navigator.getGamepads(). The web (wasm32) reads navigator.getGamepads() directly like the original and takes all buttons and axes the browser gives,\n  and takes connection and disconnection through gamepadconnected / gamepaddisconnected like the original engine.js.\n  On desktop, gilrs reads OS input (Windows.Gaming.Input on Windows), converts it to a Gamepad list in the same W3C Standard Gamepad form as the original\n  (buttons 0~16, axes 0~3, axis Y is positive downward), then runs the same rules.\n- Differences from the original:\n  - The gilrs default filters (deadzone, jitter filtering) are turned off. Raw values are taken like a browser, and the game applies the deadzone like the original.\n  - An analog button (trigger) counts as pressed when its value exceeds 30/255, as in Chromium. (gilrs default presses at 0.75 and releases at 0.65)\n  - A D-pad coming in as an axis (hat switch) is converted to buttons 12~15. (what the browser does)\n  - On desktop, buttons that gilrs could not map to standard buttons (buttons missing from the mapping, gilrs C, Z) are appended after the 17 standard buttons, and axes missing from the mapping\n    after the 4 standard axes, in the order they first move. gilrs does not give the device's button list and reports only buttons that have moved at least once, so such a button appears only after it is first pressed.\n    When the number of buttons or axes grows, that pad's state slots grow too.\n  - PlayStation pads (Sony 054c DualShock 4 05c4, 09cc, 0ba0 and DualSense 0ce6, 0df2, 0e5f) have 18 buttons like Chrome (MapperDualshock4, MapperDualSense in device/gamepad),\n    and raw button 13 (HID button 14) is TOUCHPAD (17). It is always there even before being pressed, and other buttons (the DualSense mic button) and axes are not appended.\n    gilrs only maps touchpad:b13 of the SDL mapping to an unnamed button (Button::Unknown, the same name as misc1), so the raw code of that button is found per platform.\n    (usage 14 on the macOS IOKit button page, button 13 on Windows Windows.Gaming.Input, BTN_GAMEPAD + 13 on Linux hid-generic)\n    The Linux hid-sony (from kernel 4.10) and hid-playstation (from 5.12) drivers expose the touchpad as a separate device and add 0x8000 to bcdHID.\n    In that case it has 17 buttons like Chrome (MapperPs4Ps5). (the 13th and 14th bytes of the gilrs uuid are that version number)\n    macOS GameController also has GCDualSenseGamepad.touchpadButton, but GameController does not give the pad's vendor and product numbers so it cannot be paired with a gilrs pad, and it is not used.\n  - Gamepad.index on desktop is the gilrs GamepadId number. (from 0 in the order first connected, used like the browser index) On the web it is the browser index.\n  - Gamepad.id on the web is the browser id as is, and on desktop it is built in Chrome form \"name (STANDARD GAMEPAD Vendor: 054c Product: 0ce6)\".\n  - The button value of the callback is 1.0 (pressed) / 0.0 (released) instead of bool.\n  - gilrs (on the web, the connection listeners) is created on the first call (update, vibration, pad list read). (engines and tests that never call it do not open devices)\n- get_all_connected_gamepads / get_connected_gamepad return copies read in place when called (&self), like the original navigator.getGamepads(). (desktop drains the gilrs events for the current state,\n  and the next update receives the connects and disconnects in between) A manager fed with update_all_gamepads_with_list (tests, other input sources) returns the list it was given.\n  - Added: set_log_enabled (turns logs on and off),\n    update_all_gamepads_with_list (a way to feed a list without gilrs. For tests or other input sources)\n  - Battery info is not in the original, so it is not ported.\n  - The log printed whenever buttons and axes change is turned on with set_input_log_enabled like the original, and is off by default. set_log_enabled is the master switch for all logs including connection and disconnection.\n  - GamepadKind, read_gamepad_kind: tells the kind (Xbox, PlayStation, Nintendo, other) from the pad name. get_active_gamepad_id is the pad that pressed a button or tilted an axis far at the last update.\n  - vibrate(strong_magnitude, weak_magnitude, seconds): vibrates all connected pads.\n    On desktop it vibrates with gilrs force feedback (Linux evdev, Windows XInput and Windows.Gaming.Input), and on macOS, where gilrs does not support rumble,\n    the platform layer (platform/desktop/gamepadhaptics.rs) vibrates the controller paired with the gilrs pad using GameController and CoreHaptics. (on macOS, a duration or strength of 0 stops the previous vibration)\n    So gilrs is created with rumble enabled. (one gilrs rumble thread runs on desktop) On the web, like the original, it applies dual-rumble to the vibrationActuator of navigator.getGamepads().\n    Called before the first update (tick), it creates gilrs on the spot and rumbles. (as in the original)"
 			},
 			"classes": [
 				{
@@ -39756,6 +40109,11 @@
 					"summary": {
 						"ko": "게임패드 아날로그 스틱 식별자. (W3C Standard Gamepad 매핑 규격)\n- 값은 Gamepad.axes 의 번호이고 get_axis_value 의 axis_index 로 쓴다.",
 						"en": "Gamepad analog stick identifier. (W3C Standard Gamepad mapping spec)\n- The value is an index into Gamepad.axes and is used as axis_index of get_axis_value."
+					},
+					"counterpart": {
+						"engine": "vanilla.js",
+						"module": "core/gamepadmanager",
+						"class": "GamepadAnalogStickCode"
 					},
 					"source": "src/core/gamepadmanager.rs",
 					"members": [
@@ -39776,7 +40134,13 @@
 								"en": "Left stick horizontal axis. (-1 left ~ 1 right)"
 							},
 							"since": "0.3.2",
-							"source": "src/core/gamepadmanager.rs"
+							"source": "src/core/gamepadmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/gamepadmanager",
+								"class": "GamepadAnalogStickCode",
+								"name": "LEFT_X"
+							}
 						},
 						{
 							"kind": "static",
@@ -39795,7 +40159,13 @@
 								"en": "Left stick vertical axis. (-1 up ~ 1 down)"
 							},
 							"since": "0.3.2",
-							"source": "src/core/gamepadmanager.rs"
+							"source": "src/core/gamepadmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/gamepadmanager",
+								"class": "GamepadAnalogStickCode",
+								"name": "LEFT_Y"
+							}
 						},
 						{
 							"kind": "static",
@@ -39814,7 +40184,13 @@
 								"en": "Right stick horizontal axis. (-1 left ~ 1 right)"
 							},
 							"since": "0.3.2",
-							"source": "src/core/gamepadmanager.rs"
+							"source": "src/core/gamepadmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/gamepadmanager",
+								"class": "GamepadAnalogStickCode",
+								"name": "RIGHT_X"
+							}
 						},
 						{
 							"kind": "static",
@@ -39833,7 +40209,13 @@
 								"en": "Right stick vertical axis. (-1 up ~ 1 down)"
 							},
 							"since": "0.3.2",
-							"source": "src/core/gamepadmanager.rs"
+							"source": "src/core/gamepadmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/gamepadmanager",
+								"class": "GamepadAnalogStickCode",
+								"name": "RIGHT_Y"
+							}
 						}
 					],
 					"examples": [
@@ -39854,6 +40236,11 @@
 						"ko": "게임패드 트리거 식별자. (W3C Standard Gamepad 매핑 규격)\n- 값은 버튼 번호다. (GamepadButtonCode::L2, R2 와 같다) 아날로그 값은 get_button_value 로 읽는다.",
 						"en": "Gamepad trigger identifier. (W3C Standard Gamepad mapping spec)\n- The value is a button index. (same as GamepadButtonCode::L2, R2) The analog value is read with get_button_value."
 					},
+					"counterpart": {
+						"engine": "vanilla.js",
+						"module": "core/gamepadmanager",
+						"class": "GamepadTriggerCode"
+					},
 					"source": "src/core/gamepadmanager.rs",
 					"members": [
 						{
@@ -39873,7 +40260,13 @@
 								"en": "Left trigger. (button 6, value 0 ~ 1)"
 							},
 							"since": "0.3.2",
-							"source": "src/core/gamepadmanager.rs"
+							"source": "src/core/gamepadmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/gamepadmanager",
+								"class": "GamepadTriggerCode",
+								"name": "L2"
+							}
 						},
 						{
 							"kind": "static",
@@ -39892,7 +40285,13 @@
 								"en": "Right trigger. (button 7, value 0 ~ 1)"
 							},
 							"since": "0.3.2",
-							"source": "src/core/gamepadmanager.rs"
+							"source": "src/core/gamepadmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/gamepadmanager",
+								"class": "GamepadTriggerCode",
+								"name": "R2"
+							}
 						}
 					],
 					"examples": [
@@ -39913,6 +40312,11 @@
 						"ko": "게임패드 버튼 식별자. (W3C Standard Gamepad 매핑 규격)\n- 값은 Gamepad.buttons 의 번호이고 is_button_pressed 들의 button_index 로 쓴다. 앞면 버튼은 자리로 정한다. (아래 0, 오른쪽 1, 왼쪽 2, 위 3)",
 						"en": "Gamepad button identifier. (W3C Standard Gamepad mapping spec)\n- The value is an index into Gamepad.buttons and is used as button_index of the is_button_pressed functions. Face buttons are defined by position. (bottom 0, right 1, left 2, top 3)"
 					},
+					"counterpart": {
+						"engine": "vanilla.js",
+						"module": "core/gamepadmanager",
+						"class": "GamepadButtonCode"
+					},
 					"source": "src/core/gamepadmanager.rs",
 					"members": [
 						{
@@ -39932,7 +40336,13 @@
 								"en": "Face buttons."
 							},
 							"since": "0.3.2",
-							"source": "src/core/gamepadmanager.rs"
+							"source": "src/core/gamepadmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/gamepadmanager",
+								"class": "GamepadButtonCode",
+								"name": "A_CROSS"
+							}
 						},
 						{
 							"kind": "static",
@@ -39951,7 +40361,13 @@
 								"en": "Right face button. (Xbox B, PlayStation circle)"
 							},
 							"since": "0.3.2",
-							"source": "src/core/gamepadmanager.rs"
+							"source": "src/core/gamepadmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/gamepadmanager",
+								"class": "GamepadButtonCode",
+								"name": "B_CIRCLE"
+							}
 						},
 						{
 							"kind": "static",
@@ -39970,7 +40386,13 @@
 								"en": "Left face button. (Xbox X, PlayStation square)"
 							},
 							"since": "0.3.2",
-							"source": "src/core/gamepadmanager.rs"
+							"source": "src/core/gamepadmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/gamepadmanager",
+								"class": "GamepadButtonCode",
+								"name": "X_SQUARE"
+							}
 						},
 						{
 							"kind": "static",
@@ -39989,7 +40411,13 @@
 								"en": "Top face button. (Xbox Y, PlayStation triangle)"
 							},
 							"since": "0.3.2",
-							"source": "src/core/gamepadmanager.rs"
+							"source": "src/core/gamepadmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/gamepadmanager",
+								"class": "GamepadButtonCode",
+								"name": "Y_TRIANGLE"
+							}
 						},
 						{
 							"kind": "static",
@@ -40008,7 +40436,13 @@
 								"en": "Bumpers."
 							},
 							"since": "0.3.2",
-							"source": "src/core/gamepadmanager.rs"
+							"source": "src/core/gamepadmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/gamepadmanager",
+								"class": "GamepadButtonCode",
+								"name": "L1"
+							}
 						},
 						{
 							"kind": "static",
@@ -40027,7 +40461,13 @@
 								"en": "Right bumper."
 							},
 							"since": "0.3.2",
-							"source": "src/core/gamepadmanager.rs"
+							"source": "src/core/gamepadmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/gamepadmanager",
+								"class": "GamepadButtonCode",
+								"name": "R1"
+							}
 						},
 						{
 							"kind": "static",
@@ -40046,7 +40486,13 @@
 								"en": "Triggers. (also recognized as buttons)"
 							},
 							"since": "0.3.2",
-							"source": "src/core/gamepadmanager.rs"
+							"source": "src/core/gamepadmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/gamepadmanager",
+								"class": "GamepadButtonCode",
+								"name": "L2"
+							}
 						},
 						{
 							"kind": "static",
@@ -40065,7 +40511,13 @@
 								"en": "Right trigger. (value 0 ~ 1)"
 							},
 							"since": "0.3.2",
-							"source": "src/core/gamepadmanager.rs"
+							"source": "src/core/gamepadmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/gamepadmanager",
+								"class": "GamepadButtonCode",
+								"name": "R2"
+							}
 						},
 						{
 							"kind": "static",
@@ -40084,7 +40536,13 @@
 								"en": "System."
 							},
 							"since": "0.3.2",
-							"source": "src/core/gamepadmanager.rs"
+							"source": "src/core/gamepadmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/gamepadmanager",
+								"class": "GamepadButtonCode",
+								"name": "SHARE_VIEW"
+							}
 						},
 						{
 							"kind": "static",
@@ -40103,7 +40561,13 @@
 								"en": "Right system button. (Xbox Menu, PlayStation Options)"
 							},
 							"since": "0.3.2",
-							"source": "src/core/gamepadmanager.rs"
+							"source": "src/core/gamepadmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/gamepadmanager",
+								"class": "GamepadButtonCode",
+								"name": "OPTIONS_MENU"
+							}
 						},
 						{
 							"kind": "static",
@@ -40122,7 +40586,13 @@
 								"en": "Stick press."
 							},
 							"since": "0.3.2",
-							"source": "src/core/gamepadmanager.rs"
+							"source": "src/core/gamepadmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/gamepadmanager",
+								"class": "GamepadButtonCode",
+								"name": "L3"
+							}
 						},
 						{
 							"kind": "static",
@@ -40141,7 +40611,13 @@
 								"en": "Right stick press."
 							},
 							"since": "0.3.2",
-							"source": "src/core/gamepadmanager.rs"
+							"source": "src/core/gamepadmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/gamepadmanager",
+								"class": "GamepadButtonCode",
+								"name": "R3"
+							}
 						},
 						{
 							"kind": "static",
@@ -40160,7 +40636,13 @@
 								"en": "D-pad."
 							},
 							"since": "0.3.2",
-							"source": "src/core/gamepadmanager.rs"
+							"source": "src/core/gamepadmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/gamepadmanager",
+								"class": "GamepadButtonCode",
+								"name": "DPAD_UP"
+							}
 						},
 						{
 							"kind": "static",
@@ -40179,7 +40661,13 @@
 								"en": "D-pad down."
 							},
 							"since": "0.3.2",
-							"source": "src/core/gamepadmanager.rs"
+							"source": "src/core/gamepadmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/gamepadmanager",
+								"class": "GamepadButtonCode",
+								"name": "DPAD_DOWN"
+							}
 						},
 						{
 							"kind": "static",
@@ -40198,7 +40686,13 @@
 								"en": "D-pad left."
 							},
 							"since": "0.3.2",
-							"source": "src/core/gamepadmanager.rs"
+							"source": "src/core/gamepadmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/gamepadmanager",
+								"class": "GamepadButtonCode",
+								"name": "DPAD_LEFT"
+							}
 						},
 						{
 							"kind": "static",
@@ -40217,7 +40711,13 @@
 								"en": "D-pad right."
 							},
 							"since": "0.3.2",
-							"source": "src/core/gamepadmanager.rs"
+							"source": "src/core/gamepadmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/gamepadmanager",
+								"class": "GamepadButtonCode",
+								"name": "DPAD_RIGHT"
+							}
 						},
 						{
 							"kind": "static",
@@ -40236,7 +40736,13 @@
 								"en": "Center."
 							},
 							"since": "0.3.2",
-							"source": "src/core/gamepadmanager.rs"
+							"source": "src/core/gamepadmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/gamepadmanager",
+								"class": "GamepadButtonCode",
+								"name": "HOME_PS"
+							}
 						},
 						{
 							"kind": "static",
@@ -40255,7 +40761,13 @@
 								"en": "PlayStation touchpad press. (a button after the 17 standard ones, DualShock 4 and DualSense only)"
 							},
 							"since": "0.3.2",
-							"source": "src/core/gamepadmanager.rs"
+							"source": "src/core/gamepadmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/gamepadmanager",
+								"class": "GamepadButtonCode",
+								"name": "TOUCHPAD"
+							}
 						}
 					],
 					"examples": [
@@ -41066,18 +41578,18 @@
 						{
 							"kind": "method",
 							"name": "get_all_connected_gamepads",
-							"signature": "pub fn get_all_connected_gamepads(&mut self) -> Vec<&Gamepad>",
+							"signature": "pub fn get_all_connected_gamepads(&self) -> Vec<Gamepad>",
 							"params": [],
 							"returns": {
-								"type": "Vec<&Gamepad>",
+								"type": "Vec<Gamepad>",
 								"description": {
-									"ko": "붙은 차례의 패드 목록. 없으면 빈 목록.",
-									"en": "Pad list in attach order. Empty list if none."
+									"ko": "붙은 차례의 패드 사본 목록. 없으면 빈 목록.",
+									"en": "List of pad copies in connection order. An empty list if there are none."
 								}
 							},
 							"description": {
-								"ko": "연결된 모든 게임패드 반환. (원본처럼 그 자리에서 읽은 지금 상태)",
-								"en": "Returns all connected gamepads. (the current state read in place, as in the original)"
+								"ko": "연결된 모든 게임패드 반환. (원본 navigator.getGamepads() 처럼 그 자리에서 읽은 지금 상태의 사본)",
+								"en": "Returns all connected gamepads. (a copy of the current state read in place, like the original navigator.getGamepads())"
 							},
 							"since": "0.3.2",
 							"source": "src/core/gamepadmanager.rs",
@@ -41116,7 +41628,7 @@
 						{
 							"kind": "method",
 							"name": "get_connected_gamepad",
-							"signature": "pub fn get_connected_gamepad(&mut self, gamepad_index: usize) -> Option<&Gamepad>",
+							"signature": "pub fn get_connected_gamepad(&self, gamepad_index: usize) -> Option<Gamepad>",
 							"params": [
 								{
 									"name": "gamepad_index",
@@ -41128,10 +41640,10 @@
 								}
 							],
 							"returns": {
-								"type": "Option<&Gamepad>",
+								"type": "Option<Gamepad>",
 								"description": {
-									"ko": "그 자리에서 읽은 패드. 순번이 범위를 넘거나 그 패드가 지금 목록에 없으면 None.",
-									"en": "The pad read in place. None if the position is out of range or that pad is not in the current list."
+									"ko": "그 자리에서 읽은 패드의 사본. 순번이 범위를 넘거나 그 패드가 지금 목록에 없으면 None.",
+									"en": "A copy of the pad read in place. None if the number is out of range or that pad is not in the current list."
 								}
 							},
 							"description": {
@@ -46324,6 +46836,11 @@
 						"ko": "키 이름. (원본 KeyCode)\n- 값은 KeyboardEvent.code 문자열이다. 상수에 없는 키는 그 이름 문자열(\"ShiftRight\", \"ControlRight\" 같은)을 그대로 쓴다.",
 						"en": "Key name. (the original KeyCode)\n- The value is a KeyboardEvent.code string. Keys not among the constants use their name string (like \"ShiftRight\", \"ControlRight\") as is."
 					},
+					"counterpart": {
+						"engine": "vanilla.js",
+						"module": "core/inputmanager",
+						"class": "KeyCode"
+					},
 					"source": "src/core/inputmanager.rs",
 					"members": [
 						{
@@ -46343,7 +46860,13 @@
 								"en": "A key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "a"
+							}
 						},
 						{
 							"kind": "static",
@@ -46362,7 +46885,13 @@
 								"en": "B key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "b"
+							}
 						},
 						{
 							"kind": "static",
@@ -46381,7 +46910,13 @@
 								"en": "C key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "c"
+							}
 						},
 						{
 							"kind": "static",
@@ -46400,7 +46935,13 @@
 								"en": "D key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "d"
+							}
 						},
 						{
 							"kind": "static",
@@ -46419,7 +46960,13 @@
 								"en": "E key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "e"
+							}
 						},
 						{
 							"kind": "static",
@@ -46438,7 +46985,13 @@
 								"en": "F key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "f"
+							}
 						},
 						{
 							"kind": "static",
@@ -46457,7 +47010,13 @@
 								"en": "G key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "g"
+							}
 						},
 						{
 							"kind": "static",
@@ -46476,7 +47035,13 @@
 								"en": "H key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "h"
+							}
 						},
 						{
 							"kind": "static",
@@ -46495,7 +47060,13 @@
 								"en": "I key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "i"
+							}
 						},
 						{
 							"kind": "static",
@@ -46514,7 +47085,13 @@
 								"en": "J key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "j"
+							}
 						},
 						{
 							"kind": "static",
@@ -46533,7 +47110,13 @@
 								"en": "K key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "k"
+							}
 						},
 						{
 							"kind": "static",
@@ -46552,7 +47135,13 @@
 								"en": "L key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "l"
+							}
 						},
 						{
 							"kind": "static",
@@ -46571,7 +47160,13 @@
 								"en": "M key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "m"
+							}
 						},
 						{
 							"kind": "static",
@@ -46590,7 +47185,13 @@
 								"en": "N key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "n"
+							}
 						},
 						{
 							"kind": "static",
@@ -46609,7 +47210,13 @@
 								"en": "O key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "o"
+							}
 						},
 						{
 							"kind": "static",
@@ -46628,7 +47235,13 @@
 								"en": "P key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "p"
+							}
 						},
 						{
 							"kind": "static",
@@ -46647,7 +47260,13 @@
 								"en": "Q key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "q"
+							}
 						},
 						{
 							"kind": "static",
@@ -46666,7 +47285,13 @@
 								"en": "R key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "r"
+							}
 						},
 						{
 							"kind": "static",
@@ -46685,7 +47310,13 @@
 								"en": "S key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "s"
+							}
 						},
 						{
 							"kind": "static",
@@ -46704,7 +47335,13 @@
 								"en": "T key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "t"
+							}
 						},
 						{
 							"kind": "static",
@@ -46723,7 +47360,13 @@
 								"en": "U key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "u"
+							}
 						},
 						{
 							"kind": "static",
@@ -46742,7 +47385,13 @@
 								"en": "V key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "v"
+							}
 						},
 						{
 							"kind": "static",
@@ -46761,7 +47410,13 @@
 								"en": "W key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "w"
+							}
 						},
 						{
 							"kind": "static",
@@ -46780,7 +47435,13 @@
 								"en": "X key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "x"
+							}
 						},
 						{
 							"kind": "static",
@@ -46799,7 +47460,13 @@
 								"en": "Y key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "y"
+							}
 						},
 						{
 							"kind": "static",
@@ -46818,7 +47485,13 @@
 								"en": "Z key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "z"
+							}
 						},
 						{
 							"kind": "static",
@@ -47027,7 +47700,13 @@
 								"en": "Backspace key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "backspace"
+							}
 						},
 						{
 							"kind": "static",
@@ -47046,7 +47725,13 @@
 								"en": "Tab key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "tab"
+							}
 						},
 						{
 							"kind": "static",
@@ -47065,7 +47750,13 @@
 								"en": "Enter key. (main keyboard, the numpad Enter is NUMPAD_ENTER)"
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "enter"
+							}
 						},
 						{
 							"kind": "static",
@@ -47084,7 +47775,13 @@
 								"en": "Left Shift key. (the right one is \"ShiftRight\")"
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "shift"
+							}
 						},
 						{
 							"kind": "static",
@@ -47103,7 +47800,13 @@
 								"en": "Left Control key. (the right one is \"ControlRight\")"
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "ctrl"
+							}
 						},
 						{
 							"kind": "static",
@@ -47122,7 +47825,13 @@
 								"en": "Left Alt key. (the right one is \"AltRight\")"
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "alt"
+							}
 						},
 						{
 							"kind": "static",
@@ -47141,7 +47850,13 @@
 								"en": "Caps Lock key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "capslock"
+							}
 						},
 						{
 							"kind": "static",
@@ -47160,7 +47875,13 @@
 								"en": "Escape key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "escape"
+							}
 						},
 						{
 							"kind": "static",
@@ -47179,7 +47900,13 @@
 								"en": "Space bar."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "space"
+							}
 						},
 						{
 							"kind": "static",
@@ -47198,7 +47925,13 @@
 								"en": "Page Up key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "pageup"
+							}
 						},
 						{
 							"kind": "static",
@@ -47217,7 +47950,13 @@
 								"en": "Page Down key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "pagedown"
+							}
 						},
 						{
 							"kind": "static",
@@ -47236,7 +47975,13 @@
 								"en": "End key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "end"
+							}
 						},
 						{
 							"kind": "static",
@@ -47255,7 +48000,13 @@
 								"en": "Home key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "home"
+							}
 						},
 						{
 							"kind": "static",
@@ -47350,7 +48101,13 @@
 								"en": "Insert key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "insert"
+							}
 						},
 						{
 							"kind": "static",
@@ -47369,7 +48126,13 @@
 								"en": "Delete key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "delete"
+							}
 						},
 						{
 							"kind": "static",
@@ -47388,7 +48151,13 @@
 								"en": "F1 key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "f1"
+							}
 						},
 						{
 							"kind": "static",
@@ -47407,7 +48176,13 @@
 								"en": "F2 key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "f2"
+							}
 						},
 						{
 							"kind": "static",
@@ -47426,7 +48201,13 @@
 								"en": "F3 key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "f3"
+							}
 						},
 						{
 							"kind": "static",
@@ -47445,7 +48226,13 @@
 								"en": "F4 key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "f4"
+							}
 						},
 						{
 							"kind": "static",
@@ -47464,7 +48251,13 @@
 								"en": "F5 key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "f5"
+							}
 						},
 						{
 							"kind": "static",
@@ -47483,7 +48276,13 @@
 								"en": "F6 key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "f6"
+							}
 						},
 						{
 							"kind": "static",
@@ -47502,7 +48301,13 @@
 								"en": "F7 key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "f7"
+							}
 						},
 						{
 							"kind": "static",
@@ -47521,7 +48326,13 @@
 								"en": "F8 key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "f8"
+							}
 						},
 						{
 							"kind": "static",
@@ -47540,7 +48351,13 @@
 								"en": "F9 key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "f9"
+							}
 						},
 						{
 							"kind": "static",
@@ -47559,7 +48376,13 @@
 								"en": "F10 key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "f10"
+							}
 						},
 						{
 							"kind": "static",
@@ -47578,7 +48401,13 @@
 								"en": "F11 key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "f11"
+							}
 						},
 						{
 							"kind": "static",
@@ -47597,7 +48426,13 @@
 								"en": "F12 key."
 							},
 							"since": "0.3.2",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "f12"
+							}
 						},
 						{
 							"kind": "static",
@@ -47616,7 +48451,13 @@
 								"en": "Left arrow key."
 							},
 							"since": "0.4.0",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "arrowleft"
+							}
 						},
 						{
 							"kind": "static",
@@ -47635,7 +48476,13 @@
 								"en": "Up arrow key."
 							},
 							"since": "0.4.0",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "arrowup"
+							}
 						},
 						{
 							"kind": "static",
@@ -47654,7 +48501,13 @@
 								"en": "Right arrow key."
 							},
 							"since": "0.4.0",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "arrowright"
+							}
 						},
 						{
 							"kind": "static",
@@ -47673,7 +48526,13 @@
 								"en": "Down arrow key."
 							},
 							"since": "0.4.0",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "arrowdown"
+							}
 						},
 						{
 							"kind": "static",
@@ -47692,7 +48551,13 @@
 								"en": "Scroll Lock key."
 							},
 							"since": "0.4.0",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "scrolllock"
+							}
 						},
 						{
 							"kind": "static",
@@ -47711,7 +48576,13 @@
 								"en": "Semicolon key. (`;`)"
 							},
 							"since": "0.4.0",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "semicolon"
+							}
 						},
 						{
 							"kind": "static",
@@ -47730,7 +48601,13 @@
 								"en": "Equal key. (`=`)"
 							},
 							"since": "0.4.0",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "equal"
+							}
 						},
 						{
 							"kind": "static",
@@ -47749,7 +48626,13 @@
 								"en": "Comma key. (`,`)"
 							},
 							"since": "0.4.0",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "comma"
+							}
 						},
 						{
 							"kind": "static",
@@ -47768,7 +48651,13 @@
 								"en": "Minus key. (`-`)"
 							},
 							"since": "0.4.0",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "minus"
+							}
 						},
 						{
 							"kind": "static",
@@ -47787,7 +48676,13 @@
 								"en": "Period key. (`.`)"
 							},
 							"since": "0.4.0",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "period"
+							}
 						},
 						{
 							"kind": "static",
@@ -47806,7 +48701,13 @@
 								"en": "Slash key. (`/`)"
 							},
 							"since": "0.4.0",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "slash"
+							}
 						},
 						{
 							"kind": "static",
@@ -47825,7 +48726,13 @@
 								"en": "Backquote key. (the key left of digit 1)"
 							},
 							"since": "0.4.0",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "backquote"
+							}
 						},
 						{
 							"kind": "static",
@@ -47844,7 +48751,13 @@
 								"en": "Left bracket key. (`[`)"
 							},
 							"since": "0.4.0",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "bracketleft"
+							}
 						},
 						{
 							"kind": "static",
@@ -47863,7 +48776,13 @@
 								"en": "Backslash key. (`\\`)"
 							},
 							"since": "0.4.0",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "backslash"
+							}
 						},
 						{
 							"kind": "static",
@@ -47882,7 +48801,13 @@
 								"en": "Right bracket key. (`]`)"
 							},
 							"since": "0.4.0",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "bracketright"
+							}
 						},
 						{
 							"kind": "static",
@@ -47901,7 +48826,13 @@
 								"en": "Quote key. (`'`)"
 							},
 							"since": "0.4.0",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "quote"
+							}
 						},
 						{
 							"kind": "static",
@@ -47920,7 +48851,13 @@
 								"en": "Left Meta key. (the Windows key, the Command key on Mac)"
 							},
 							"since": "0.4.0",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "meta"
+							}
 						},
 						{
 							"kind": "static",
@@ -47939,7 +48876,13 @@
 								"en": "Left Command key on Mac. (same value as META)"
 							},
 							"since": "0.4.0",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "command"
+							}
 						},
 						{
 							"kind": "static",
@@ -47958,7 +48901,13 @@
 								"en": "Pause key."
 							},
 							"since": "0.4.0",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "pause"
+							}
 						},
 						{
 							"kind": "static",
@@ -47977,7 +48926,13 @@
 								"en": "Volume up key."
 							},
 							"since": "0.4.0",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "audiovolumeup"
+							}
 						},
 						{
 							"kind": "static",
@@ -47996,7 +48951,13 @@
 								"en": "Volume down key."
 							},
 							"since": "0.4.0",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "audiovolumedown"
+							}
 						},
 						{
 							"kind": "static",
@@ -48015,7 +48976,13 @@
 								"en": "Mute. (AudioVolumeMute, its name in the W3C code table)"
 							},
 							"since": "0.4.0",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "audiomute"
+							}
 						},
 						{
 							"kind": "static",
@@ -48034,7 +49001,13 @@
 								"en": "Play/pause. (MediaPlayPause, its name in the W3C code table, the table has no MediaPlay)"
 							},
 							"since": "0.4.0",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "audioplay"
+							}
 						},
 						{
 							"kind": "static",
@@ -48053,7 +49026,13 @@
 								"en": "Media stop key."
 							},
 							"since": "0.4.0",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "audiostop"
+							}
 						},
 						{
 							"kind": "static",
@@ -48072,7 +49051,13 @@
 								"en": "Previous track key."
 							},
 							"since": "0.4.0",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "audioprev"
+							}
 						},
 						{
 							"kind": "static",
@@ -48091,7 +49076,13 @@
 								"en": "Next track key."
 							},
 							"since": "0.4.0",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "audionext"
+							}
 						},
 						{
 							"kind": "static",
@@ -48110,7 +49101,13 @@
 								"en": "Num Lock key."
 							},
 							"since": "0.4.0",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "numLock"
+							}
 						},
 						{
 							"kind": "static",
@@ -48129,7 +49126,13 @@
 								"en": "Numpad divide."
 							},
 							"since": "0.4.0",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "numpadDivide"
+							}
 						},
 						{
 							"kind": "static",
@@ -48148,7 +49151,13 @@
 								"en": "Numpad multiply."
 							},
 							"since": "0.4.0",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "numpadMultiply"
+							}
 						},
 						{
 							"kind": "static",
@@ -48167,7 +49176,13 @@
 								"en": "Numpad subtract."
 							},
 							"since": "0.4.0",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "numpadSubtract"
+							}
 						},
 						{
 							"kind": "static",
@@ -48186,7 +49201,13 @@
 								"en": "Numpad decimal point."
 							},
 							"since": "0.4.0",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "numpadDecimal"
+							}
 						},
 						{
 							"kind": "static",
@@ -48205,7 +49226,13 @@
 								"en": "Numpad add."
 							},
 							"since": "0.4.0",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "numpadAdd"
+							}
 						},
 						{
 							"kind": "static",
@@ -48224,7 +49251,13 @@
 								"en": "Numpad Enter."
 							},
 							"since": "0.4.0",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "numpadEnter"
+							}
 						},
 						{
 							"kind": "static",
@@ -48243,7 +49276,13 @@
 								"en": "Numpad 0."
 							},
 							"since": "0.4.0",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "numpad0"
+							}
 						},
 						{
 							"kind": "static",
@@ -48262,7 +49301,13 @@
 								"en": "Numpad 1."
 							},
 							"since": "0.4.0",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "numpad1"
+							}
 						},
 						{
 							"kind": "static",
@@ -48281,7 +49326,13 @@
 								"en": "Numpad 2."
 							},
 							"since": "0.4.0",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "numpad2"
+							}
 						},
 						{
 							"kind": "static",
@@ -48300,7 +49351,13 @@
 								"en": "Numpad 3."
 							},
 							"since": "0.4.0",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "numpad3"
+							}
 						},
 						{
 							"kind": "static",
@@ -48319,7 +49376,13 @@
 								"en": "Numpad 4."
 							},
 							"since": "0.4.0",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "numpad4"
+							}
 						},
 						{
 							"kind": "static",
@@ -48338,7 +49401,13 @@
 								"en": "Numpad 5."
 							},
 							"since": "0.4.0",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "numpad5"
+							}
 						},
 						{
 							"kind": "static",
@@ -48357,7 +49426,13 @@
 								"en": "Numpad 6."
 							},
 							"since": "0.4.0",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "numpad6"
+							}
 						},
 						{
 							"kind": "static",
@@ -48376,7 +49451,13 @@
 								"en": "Numpad 7."
 							},
 							"since": "0.4.0",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "numpad7"
+							}
 						},
 						{
 							"kind": "static",
@@ -48395,7 +49476,13 @@
 								"en": "Numpad 8."
 							},
 							"since": "0.4.0",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "numpad8"
+							}
 						},
 						{
 							"kind": "static",
@@ -48414,7 +49501,13 @@
 								"en": "Numpad 9."
 							},
 							"since": "0.4.0",
-							"source": "src/core/inputmanager.rs"
+							"source": "src/core/inputmanager.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "core/inputmanager",
+								"class": "KeyCode",
+								"name": "numpad9"
+							}
 						}
 					],
 					"examples": [
@@ -74328,8 +75421,8 @@
 		{
 			"name": "effect/screeneffect",
 			"summary": {
-				"ko": "화면 효과. (씬 후처리 사슬)\n- 원본 effect/screeneffect.js 를 옮긴 것이다. 효과 이름, 적용 차례, 기본 파라미터, 파라미터 이름, 기본 색, GLSL 본문은 원본 표를 그대로 옮겼다.\n- 씬은 화면에 그대로 그리고, end() 에서 화면(또는 set_region 으로 정한 영역)을 떠 와 켜진 효과를 차례로 건 뒤 같은 자리에 되돌려 놓는다.\n  화면은 copyTexSubImage2D 로 RGB8 텍스처에 떠 오고, 효과는 핑퐁 / 절반 크기 프레임버퍼를 오가며 FullscreenPass 로 건다. 마지막 단계는 기본 프레임버퍼에 그린다.\n- 영역은 캔버스 픽셀 좌표(왼쪽 위 원점)이며 둥근 모서리 반지름을 주면 그 바깥은 원본을 유지한다.\n- 셰이더는 GLSL ES 3.00 이다. 데스크탑(GL 3.3 코어)은 ShaderProgram 이 머리만 #version 330 core 로 바꾸고, 웹(WebGL2)은 그대로 쓴다.\n- 엔진은 고치지 않는다. 원본처럼 씬이 pre_draw 첫머리에서 begin, post_draw 끝에서 end, tick 에서 tick 을 부른다:\n  ```text\n    // 씬 create 에서\n    self.screen_effect = ScreenEffect::new();\n    self.screen_effect.set_enabled(ScreenEffectType::Vignette, true);\n    // pre_draw 처음 / post_draw 끝에서\n    self.screen_effect.begin(graphic);  ...  self.screen_effect.end(graphic);\n    // tick 에서\n    self.screen_effect.tick(time_delta);\n  ```\n- 원본과 다른 점:\n  - 원본은 생성자에서 Graphic 을 받아 GL 컨텍스트를 든다. 러스트 판은 아무것도 받지 않고 만들며, GL 자원은 처음 end 에서 만들고 함수마다 Graphic 을 받는다.\n    그때 GL 컨텍스트의 약한 손잡이를 쥐어, destroy() 는 원본처럼 인자 없이 풀고, 버려질 때(Drop, 씬을 내릴 때)도 스스로 푼다.\n  - 효과는 문자열 대신 ScreenEffectType 열거형이다. (원본 문자열 이름은 get_name / from_name)\n  - 패스 셰이더 만들기에 실패하면 원본은 예외를 던지고, 러스트 판은 한 번 알리고 그 단계를 건너뛴다.",
-				"en": "Screen effect. (scene post-processing chain)\n- Ported from the original effect/screeneffect.js. Effect names, apply order, default parameters, parameter names, default colors and GLSL bodies are copied from the original tables as they are.\n- The scene is drawn to the screen as is, and end() copies the screen (or the area set with set_region), applies the enabled effects in order and puts it back in the same place.\n  The screen is copied into an RGB8 texture with copyTexSubImage2D, and effects are applied with FullscreenPass going back and forth between ping-pong / half size framebuffers. The last step draws to the default framebuffer.\n- The area is in canvas pixel coordinates (top left origin), and with a rounded corner radius the outside of it keeps the original.\n- Shaders are GLSL ES 3.00. On desktop (GL 3.3 core) ShaderProgram changes only the header to #version 330 core, and the web (WebGL2) uses them as they are.\n- The engine is not modified. Like the original, the scene calls begin at the start of pre_draw, end at the end of post_draw, and tick in tick:\n  ```text\n    // in the scene create\n    self.screen_effect = ScreenEffect::new();\n    self.screen_effect.set_enabled(ScreenEffectType::Vignette, true);\n    // at the start of pre_draw / at the end of post_draw\n    self.screen_effect.begin(graphic);  ...  self.screen_effect.end(graphic);\n    // in tick\n    self.screen_effect.tick(time_delta);\n  ```\n- Differences from the original:\n  - The original takes a Graphic in the constructor and holds the GL context. The Rust version is made taking nothing, makes GL resources at the first end, and each function takes a Graphic.\n    At that time it holds a weak handle to the GL context, so destroy() releases without arguments like the original, and it also releases by itself when dropped (Drop, when the scene is unloaded).\n  - Effects are the ScreenEffectType enum instead of strings. (the original string names are get_name / from_name)\n  - When building a pass shader fails, the original throws an exception, and the Rust version reports once and skips that step."
+				"ko": "화면 효과. (씬 후처리 사슬)\n- 원본 effect/screeneffect.js 를 옮긴 것이다. 효과 이름, 적용 차례, 기본 파라미터, 파라미터 이름, 기본 색, GLSL 본문은 원본 표를 그대로 옮겼다.\n- 씬은 화면에 그대로 그리고, end() 에서 화면(또는 set_region 으로 정한 영역)을 떠 와 켜진 효과를 차례로 건 뒤 같은 자리에 되돌려 놓는다.\n  화면은 copyTexSubImage2D 로 RGB8 텍스처에 떠 오고, 효과는 핑퐁 / 절반 크기 프레임버퍼를 오가며 FullscreenPass 로 건다. 마지막 단계는 기본 프레임버퍼에 그린다.\n- 영역은 캔버스 픽셀 좌표(왼쪽 위 원점)이며 둥근 모서리 반지름을 주면 그 바깥은 원본을 유지한다.\n- 셰이더는 GLSL ES 3.00 이다. 데스크탑(GL 3.3 코어)은 ShaderProgram 이 머리만 #version 330 core 로 바꾸고, 웹(WebGL2)은 그대로 쓴다.\n- 엔진은 고치지 않는다. 원본처럼 씬이 pre_draw 첫머리에서 begin, post_draw 끝에서 end, tick 에서 tick 을 부른다:\n  ```text\n    // 씬 create 에서\n    self.screen_effect = ScreenEffect::new();\n    self.screen_effect.set_enabled(ScreenEffectType::Vignette, true);\n    // pre_draw 처음 / post_draw 끝에서\n    self.screen_effect.begin(graphic);  ...  self.screen_effect.end(graphic);\n    // tick 에서\n    self.screen_effect.tick(time_delta);\n  ```\n- 패스 셰이더 만들기에 실패하면 두 엔진 모두 한 번 알리고 그 단계를 건너뛴다. (한 효과 실패로 프레임이 멈추지 않는다)\n- 원본과 다른 점:\n  - 원본은 생성자에서 Graphic 을 받아 GL 컨텍스트를 든다. 러스트 판은 아무것도 받지 않고 만들며, GL 자원은 처음 end 에서 만들고 함수마다 Graphic 을 받는다.\n    그때 GL 컨텍스트의 약한 손잡이를 쥐어, destroy() 는 원본처럼 인자 없이 풀고, 버려질 때(Drop, 씬을 내릴 때)도 스스로 푼다.\n  - 효과는 문자열 대신 ScreenEffectType 열거형이다. (원본 문자열 이름은 get_name / from_name)",
+				"en": "Screen effect. (scene post-processing chain)\n- Ported from the original effect/screeneffect.js. Effect names, apply order, default parameters, parameter names, default colors and GLSL bodies are copied from the original tables as they are.\n- The scene is drawn to the screen as is, and end() copies the screen (or the area set with set_region), applies the enabled effects in order and puts it back in the same place.\n  The screen is copied into an RGB8 texture with copyTexSubImage2D, and effects are applied with FullscreenPass going back and forth between ping-pong / half size framebuffers. The last step draws to the default framebuffer.\n- The area is in canvas pixel coordinates (top left origin), and with a rounded corner radius the outside of it keeps the original.\n- Shaders are GLSL ES 3.00. On desktop (GL 3.3 core) ShaderProgram changes only the header to #version 330 core, and the web (WebGL2) uses them as they are.\n- The engine is not modified. Like the original, the scene calls begin at the start of pre_draw, end at the end of post_draw, and tick in tick:\n  ```text\n    // in the scene create\n    self.screen_effect = ScreenEffect::new();\n    self.screen_effect.set_enabled(ScreenEffectType::Vignette, true);\n    // at the start of pre_draw / at the end of post_draw\n    self.screen_effect.begin(graphic);  ...  self.screen_effect.end(graphic);\n    // in tick\n    self.screen_effect.tick(time_delta);\n  ```\n- When building a pass shader fails, both engines report once and skip that step. (one failing effect does not stop the frame)\n- Differences from the original:\n  - The original takes a Graphic in the constructor and holds the GL context. The Rust version is made taking nothing, makes GL resources at the first end, and each function takes a Graphic.\n    At that time it holds a weak handle to the GL context, so destroy() releases without arguments like the original, and it also releases by itself when dropped (Drop, when the scene is unloaded).\n  - Effects are the ScreenEffectType enum instead of strings. (the original string names are get_name / from_name)"
 			},
 			"classes": [
 				{
@@ -75784,8 +76877,8 @@
 		{
 			"name": "effect/shadersprite",
 			"summary": {
-				"ko": "셰이더 스프라이트 컴포넌트.\n- 원본 effect/shadersprite.js 를 옮긴 것이다. Sprite 와 같지만 프래그먼트 셰이더 효과(디졸브 / 섬광 / 외곽선 / 홀로그램 / 물결 / 모자이크 / 글리치 / 광택 / 실루엣 / 무채색 / 색상 회전 / 와이프 / 아이리스 / 색수차)를 건다.\n- 효과의 시간은 스스로 흐르고(tick), 진행도(progress)는 트윈 / 타임라인이 밀어 넣는다.\n- 효과 이름, 기본 파라미터, 기본 색, GLSL 본문은 원본 표를 그대로 옮겼다. 셰이더는 GLSL ES 3.00 이고, 데스크탑은 ShaderProgram 이 머리만 #version 330 core 로 바꾼다.\n- 그리기: 효과가 있으면 Graphic.set_shader_program_override 로 효과 프로그램을 바꿔 끼우고 효과 유니폼을 올린 뒤 Sprite 출력 경로를 그대로 탄다.\n  바꿔 끼운 동안은 묶어 그리지 않는다. (효과 없는 ShaderSprite 는 Sprite 와 같이 묶인다)\n- 사용:\n  ```text\n    let shader_sprite = node.add_component(ShaderSprite::create_with_image(image));\n    shader_sprite.set_effect(ShaderSpriteEffect::Dissolve);\n    shader_sprite.set_effect_progress(0.5);\n  ```\n- 원본과 다른 점:\n  - 원본은 Sprite 를 상속한다. 러스트 판은 Sprite 를 품고 Deref / DerefMut 로 Sprite 함수(set_image, set_image_rect, set_color ...)를 그대로 부르게 한다.\n    그래서 `get_component::<Sprite>()` 로는 찾지 못하고 `get_component::<ShaderSprite>()` 로 찾는다.\n  - 효과는 문자열 대신 ShaderSpriteEffect 열거형이다. (원본 문자열 이름은 get_name / from_name)\n  - 효과 프로그램 캐시는 원본의 컨텍스트별 WeakMap 대신 Graphic.resolve_shader_program 이 든다.\n  - 프로그램 만들기에 실패하면 원본은 예외를 던지고, 러스트 판은 한 번 알리고 효과 없이 Sprite 로 그린다.",
-				"en": "Shader sprite component.\n- A port of the original effect/shadersprite.js. Same as Sprite but applies fragment shader effects (dissolve / flash / outline / hologram / wave / mosaic / glitch / shine / silhouette / grayscale / hue rotation / wipe / iris / chromatic aberration).\n- The effect time runs by itself (tick), and the progress is pushed in by tweens / timelines.\n- Effect names, default parameters, default colors and GLSL bodies are carried over from the original table as they are. Shaders are GLSL ES 3.00, and on desktop ShaderProgram changes only the header to #version 330 core.\n- Drawing: if there is an effect, it swaps in the effect program with Graphic.set_shader_program_override, uploads the effect uniforms, and then follows the Sprite output path as is.\n  While swapped in, it is not batched. (a ShaderSprite without an effect is batched together with Sprites)\n- Usage:\n  ```text\n    let shader_sprite = node.add_component(ShaderSprite::create_with_image(image));\n    shader_sprite.set_effect(ShaderSpriteEffect::Dissolve);\n    shader_sprite.set_effect_progress(0.5);\n  ```\n- Differences from the original:\n  - The original inherits from Sprite. The Rust version contains a Sprite and lets Sprite functions (set_image, set_image_rect, set_color ...) be called as is through Deref / DerefMut.\n    So it cannot be found with `get_component::<Sprite>()`, only with `get_component::<ShaderSprite>()`.\n  - Effects are the ShaderSpriteEffect enum instead of strings. (the original string names via get_name / from_name)\n  - The effect program cache is held by Graphic.resolve_shader_program instead of the original's per-context WeakMap.\n  - If creating a program fails, the original throws an exception, and the Rust version reports it once and draws as a Sprite without the effect."
+				"ko": "셰이더 스프라이트 컴포넌트.\n- 원본 effect/shadersprite.js 를 옮긴 것이다. Sprite 와 같지만 프래그먼트 셰이더 효과(디졸브 / 섬광 / 외곽선 / 홀로그램 / 물결 / 모자이크 / 글리치 / 광택 / 실루엣 / 무채색 / 색상 회전 / 와이프 / 아이리스 / 색수차)를 건다.\n- 효과의 시간은 스스로 흐르고(tick), 진행도(progress)는 트윈 / 타임라인이 밀어 넣는다.\n- 효과 이름, 기본 파라미터, 기본 색, GLSL 본문은 원본 표를 그대로 옮겼다. 셰이더는 GLSL ES 3.00 이고, 데스크탑은 ShaderProgram 이 머리만 #version 330 core 로 바꾼다.\n- 그리기: 효과가 있으면 Graphic.set_shader_program_override 로 효과 프로그램을 바꿔 끼우고 효과 유니폼을 올린 뒤 Sprite 출력 경로를 그대로 탄다.\n  바꿔 끼운 동안은 묶어 그리지 않는다. (효과 없는 ShaderSprite 는 Sprite 와 같이 묶인다)\n- 사용:\n  ```text\n    let shader_sprite = node.add_component(ShaderSprite::create_with_image(image));\n    shader_sprite.set_effect(ShaderSpriteEffect::Dissolve);\n    shader_sprite.set_effect_progress(0.5);\n  ```\n- 원본과 다른 점:\n  - 원본은 Sprite 를 상속한다. 러스트 판은 Sprite 를 품고 Deref / DerefMut 로 Sprite 함수(set_image, set_image_rect, set_color ...)를 그대로 부르게 한다.\n    Component::get_base_component 로 품은 Sprite 를 알려 `get_component::<Sprite>()` 로도 찾힌다. (원본 instanceof 와 같다)\n  - 효과는 문자열 대신 ShaderSpriteEffect 열거형이다. (원본 문자열 이름은 get_name / from_name)\n  - 효과 프로그램 캐시는 원본의 컨텍스트별 WeakMap 대신 Graphic.resolve_shader_program 이 든다.\n- 프로그램 만들기에 실패하면 두 엔진 모두 한 번 알리고 효과 없이 Sprite 로 그린다. (한 효과 실패로 프레임이 멈추지 않는다)",
+				"en": "Shader sprite component.\n- A port of the original effect/shadersprite.js. Same as Sprite but applies fragment shader effects (dissolve / flash / outline / hologram / wave / mosaic / glitch / shine / silhouette / grayscale / hue rotation / wipe / iris / chromatic aberration).\n- The effect time runs by itself (tick), and the progress is pushed in by tweens / timelines.\n- Effect names, default parameters, default colors and GLSL bodies are carried over from the original table as they are. Shaders are GLSL ES 3.00, and on desktop ShaderProgram changes only the header to #version 330 core.\n- Drawing: if there is an effect, it swaps in the effect program with Graphic.set_shader_program_override, uploads the effect uniforms, and then follows the Sprite output path as is.\n  While swapped in, it is not batched. (a ShaderSprite without an effect is batched together with Sprites)\n- Usage:\n  ```text\n    let shader_sprite = node.add_component(ShaderSprite::create_with_image(image));\n    shader_sprite.set_effect(ShaderSpriteEffect::Dissolve);\n    shader_sprite.set_effect_progress(0.5);\n  ```\n- Differences from the original:\n  - The original inherits from Sprite. The Rust version contains a Sprite and lets Sprite functions (set_image, set_image_rect, set_color ...) be called as is through Deref / DerefMut.\n    It reports the embedded Sprite with Component::get_base_component, so it is also found with `get_component::<Sprite>()`. (same as the original instanceof)\n  - Effects are the ShaderSpriteEffect enum instead of strings. (the original string names via get_name / from_name)\n  - The effect program cache is held by Graphic.resolve_shader_program instead of the original's per-context WeakMap.\n- If creating a program fails, both engines report it once and draw as a Sprite without the effect. (one failing effect does not stop the frame)"
 			},
 			"classes": [
 				{
@@ -90450,7 +91543,12 @@
 						"en": "Maximum morph targets per drawable. (matches the shader uniform array size)"
 					},
 					"since": "0.3.2",
-					"source": "src/graphics3d/skinnedmodel.rs"
+					"source": "src/graphics3d/skinnedmodel.rs",
+					"counterpart": {
+						"engine": "vanilla.js",
+						"module": "graphics3d/skinnedmodel",
+						"name": "MORPH_TARGET_MAXIMUM"
+					}
 				},
 				{
 					"kind": "method",
@@ -114032,7 +115130,12 @@
 						"en": "Wrinkle mask channel count. (4x4 atlas x RGBA, a vec3 of wrinkle map 1 / 2 / 3 contribution weights per channel)"
 					},
 					"since": "0.4.0",
-					"source": "src/graphics3d/humanskinrenderer.rs"
+					"source": "src/graphics3d/humanskinrenderer.rs",
+					"counterpart": {
+						"engine": "vanilla.js",
+						"module": "graphics3d/humanskinrenderer",
+						"name": "WRINKLE_CHANNEL_COUNT"
+					}
 				},
 				{
 					"kind": "field",
@@ -116912,8 +118015,8 @@
 		{
 			"name": "misc/devtools",
 			"summary": {
-				"ko": "개발자 도구. (원본 misc/devtools.js 의 DEVTools)\n- F2 키로 보이고 숨긴다. 패널은 뷰 스케일 모드와 상관없이 창 안쪽 논리 좌표(canvas native)로 오른쪽 아래에 붙어 나온다.\n- 탭 넷: Statistics(엔진, 화면, 시간 정보), Node Hierarchy(왼쪽 트리 + 오른쪽 인스펙터), Local Storage(키와 값 보기, 더하기, 고치기, 지우기),\n  Settings(바탕 어둡게, 모든 기즈모, 화면 비율 가이드, FPS 표시. 로컬 스토리지 \"hierarchy.settings\" 에 원본과 같은 JSON 으로 남긴다)\n- 타이틀바를 끌어 옮기고, 모서리와 꼭짓점을 끌어 크기를 바꾸고, 가운데 구분선을 끌어 좌우 비율을 바꾼다.\n- 트리: 펼치기와 접기, 액티브(A)와 기즈모(G) 칸, 고르기, 끌어 스크롤. 인스펙터: 컴포넌트 머리를 눌러 속성을 펼치고 접는다. (기본 펼침)\n- 러스트 판은 씬이 DevTools 를 품고 함수마다 부른다:\n    tick 에서 dev_tools.tick(engine, node_tree, unscaled_time_delta), post_draw 에서 dev_tools.draw(engine, node_tree, graphic).\n    is_visible() && is_pointer_inside_panel(engine) 이면 씬은 그 입력을 노드에 넘기지 않는다. (원본 GameScene.isDevToolsCapturingInput)\n- 원본과 다른 점:\n  - 전역 엔진이 없어 원본 setEngine 이 없다. tick, draw, is_pointer_inside_panel 이 엔진을 받는다.\n  - 노드 대신 NodeId 로 가리킨다. 루트 목록은 set_root_nodes(`Vec<NodeId>`) 이고, 펼친 노드는 NodeId 집합, 접은 컴포넌트는 (NodeId, 컴포넌트 차례) 집합이다.\n    지운 노드는 트리와 인스펙터에서 빠지고, 고른 노드가 지워지면 고르지 않은 것으로 돌아간다.\n  - 원본이 tick 과 눌림에서 부르는 setForceGizmosVisible 은 눌림 처리와 set_visible 이 &Engine 만 받아 Graphic 을 바꿀 수 없어, 바랄 값을 적어 두었다가\n    tick 끝에 엔진의 그래픽(get_graphic_mut)에 건다. 그래서 원본처럼 그 프레임의 그리기부터 보인다. (tick 밖에서 set_visible 을 부른 것은 draw 첫머리에 건다)\n    원본 setEngine 이 거는 false 는 첫 tick 에 건다. (DevTools::new 는 엔진을 받지 않는다)\n  - 노드 종류는 WorldNode 하나뿐이라 트리의 Type 칸과 인스펙터의 type 은 늘 \"WorldNode\" 다.\n  - 인스펙터의 컴포넌트 속성은 원본 getComponentProperties 처럼 그 컴포넌트의 get*, is* 게터를 모두 불러 보인다.\n    원본은 실행 중에 프로토타입을 훑고, 러스트 판은 `#[reflect]` 매크로가 컴파일 때 지은 목록을 쓴다. (core/reflection.rs, 엔진 컴포넌트는 모두 붙였다)\n    트리를 받는 게터(원본은 이웃 컴포넌트를 바로 쥐는 것)는 그리기에서 트리를 넘겨 부르고, &mut self 게터가 있는 컴포넌트는 tick 이 트리를 쥐고 읽어 둔 값을 보인다.\n    이름은 원본 formatMethodName(getTextColor → textColor, is 로 시작하면 그대로), 값은 원본 formatPropertyValue 꼴이다.\n    (수는 toFixed(2), Vector2 는 (x, y), Rect 는 (x, y, 너비, 높이) toFixed(1), Color 는 rgba, null, 노드는 `[WorldNode]`, 배열은 `[Array]`, 그 밖은 [종류 이름])\n    목록과 차례는 원본과 같다. (원본 클래스에 없는 러스트 판의 다시 정의는 빼고, 원본과 이름이 다른 게터는 원본 이름으로 보인다) 원본 getEngine 은 전역 엔진이 없어 없다.\n  - 반사가 없는 컴포넌트(`#[reflect]` 를 붙이지 않은 게임 컴포넌트)는 UIDocument 에 쓰기 함수로 등록했으면 그 저장 키와 값을 보이고,\n    아니면 종류 이름 아래에 매크로를 붙이라는 \"반사 없음\" 줄을 보인다. (빠뜨린 것을 알 수 있게)\n    게임이 자기 컴포넌트를 등록한 문서는 set_ui_document 로 건다. (또는 get_ui_document_mut 로 등록한다) 이 때 수 넷 배열은 이름에 color 가 들면 rgba, 아니면 사각형으로 본다.\n  - Local Storage 탭의 키 입력, 값 고치기, 지울지 묻기는 원본 window.prompt, window.confirm 자리인 Engine::prompt, Engine::confirm 이다. (core/modaldialog.rs)\n    웹은 원본처럼 브라우저 창이 그 자리에서 답한다. 데스크탑은 엔진이 그린 같은 질문 창이 떠서 답할 때까지 씬이 멈추고, 답은 다음 tick 에 받는다.\n  - Statistics 의 clientNativeSize 는 ViewManager::get_client_native_size(웹은 페이지 전체 크기, 데스크탑은 창 안쪽 논리 크기)다.\n    메모리는 웹에서 원본처럼 Chrome 의 performance.memory 를 읽고, 없는 브라우저는 \"(N/A)\" 다.\n    데스크탑은 자바스크립트 힙이 없어 같은 칸에 러스트가 쓰는 시스템 할당자의 힙(쓰는 중, 잡아 둔 것)을 적는다. (platform/desktop.rs read_heap_usage)\n    jsHeapSizeLimit 는 V8 이 정한 힙 상한인데 시스템 할당자에는 그런 상한이 없어 \"(N/A)\" 다. 힙을 못 읽는 OS 는 셋 다 \"(N/A)\" 다.\n    viewScaleMode 는 러스트 열거 이름(StretchHeight 등)으로 적는다.\n  - 화면 비율 가이드는 원본처럼 그때의 좌표계에 기대지 않고 스스로 뷰 좌표계(apply_view_rect)를 걸고 그린다. (원본 GameScene 에서 같은 결과)\n- Settings 의 Show FPS 를 켜면 패널을 닫아도 창 왼쪽 위에 지난 1 초의 프레임 수를 그린다. (원본과 같다, canvas native 좌표, 패널이 보이면 패널 위에)\n- 옮기지 않은 것: 없음. (원본에서 아무도 부르지 않는 그리기 오류 무시 try/catch 는 러스트에서 필요 없다)",
-				"en": "Developer tools. (DEVTools of the original misc/devtools.js)\n- Shown and hidden with the F2 key. The panel appears docked at the bottom right in the window's inner logical coordinates (canvas native), regardless of the view scale mode.\n- Four tabs: Statistics (engine, screen and time info), Node Hierarchy (tree on the left + inspector on the right), Local Storage (view, add, edit and remove keys and values),\n  Settings (dim background, all gizmos, aspect ratio guide, FPS display. Saved to the local storage \"hierarchy.settings\" as the same JSON as the original)\n- Drag the title bar to move, drag the edges and corners to resize, and drag the center divider to change the left and right ratio.\n- Tree: expand and collapse, active (A) and gizmo (G) columns, selection, drag to scroll. Inspector: click a component header to expand and collapse its properties. (expanded by default)\n- In the Rust version the scene holds DevTools and calls it in each function:\n    dev_tools.tick(engine, node_tree, unscaled_time_delta) in tick, dev_tools.draw(engine, node_tree, graphic) in post_draw.\n    If is_visible() && is_pointer_inside_panel(engine), the scene does not pass that input to the nodes. (original GameScene.isDevToolsCapturingInput)\n- Differences from the original:\n  - There is no global engine, so there is no original setEngine. tick, draw and is_pointer_inside_panel take the engine.\n  - Nodes are referred to by NodeId. The root list is set_root_nodes(`Vec<NodeId>`), expanded nodes are a set of NodeId, and collapsed components are a set of (NodeId, component index).\n    Removed nodes drop out of the tree and the inspector, and if the selected node is removed it goes back to nothing selected.\n  - setForceGizmosVisible, which the original calls in tick and on presses: press handling and set_visible take only &Engine and cannot change Graphic, so they record the desired value\n    and tick applies it to the engine's graphic (get_graphic_mut) at its end. So, as in the original, it shows from that frame's drawing. (set_visible called outside tick is applied at the start of draw)\n    The false applied by the original setEngine is applied on the first tick. (DevTools::new does not take the engine)\n  - The only node type is WorldNode, so the tree's Type column and the inspector's type are always \"WorldNode\".\n  - The inspector's component properties call and show all get* and is* getters of the component, like the original getComponentProperties.\n    The original scans prototypes at run time, and the Rust version uses the list built at compile time by the `#[reflect]` macro. (core/reflection.rs, attached to all engine components)\n    Getters that take the tree (the original holds neighbor components directly) are called with the tree passed in drawing, and for components with &mut self getters, tick holds the tree and the values read there are shown.\n    Names follow the original formatMethodName (getTextColor → textColor, kept as is if it starts with is), and values follow the original formatPropertyValue form.\n    (numbers toFixed(2), Vector2 as (x, y), Rect as (x, y, width, height) toFixed(1), Color as rgba, null, nodes as `[WorldNode]`, arrays as `[Array]`, others as [type name])\n    The list and order are the same as the original. (redefinitions in the Rust version not in the original class are left out, and getters named differently from the original are shown with the original name) The original getEngine does not exist since there is no global engine.\n  - Components without reflection (game components without `#[reflect]`) show their saved keys and values if registered with a write function in UIDocument,\n    otherwise a \"no reflection\" line asking to add the macro is shown under the type name. (so omissions can be noticed)\n    A document in which the game registered its own components is set with set_ui_document. (or registered via get_ui_document_mut) Here an array of four numbers is treated as rgba if the name contains color, otherwise as a rectangle.\n  - Key input, value editing and the remove confirmation in the Local Storage tab use Engine::prompt and Engine::confirm in place of the original window.prompt and window.confirm. (core/modaldialog.rs)\n    On the web the browser dialog answers on the spot like the original. On desktop the same question window drawn by the engine appears, the scene pauses until it is answered, and the answer is received on the next tick.\n  - clientNativeSize in Statistics is ViewManager::get_client_native_size (the whole page size on the web, the window's inner logical size on desktop).\n    Memory reads Chrome's performance.memory on the web like the original, and is \"(N/A)\" in browsers without it.\n    Desktop has no JavaScript heap, so the same fields show the heap of the system allocator used by Rust (in use, reserved). (platform/desktop.rs read_heap_usage)\n    jsHeapSizeLimit is the heap limit set by V8, but the system allocator has no such limit, so it is \"(N/A)\". On an OS where the heap cannot be read, all three are \"(N/A)\".\n    viewScaleMode is written with the Rust enum name (StretchHeight and so on).\n  - The aspect ratio guide does not rely on the coordinate system at the time like the original, but applies the view coordinate system (apply_view_rect) itself and draws. (same result as in the original GameScene)\n- Turning on Show FPS in Settings draws the frame count of the last second at the top left of the window even when the panel is closed. (same as the original, canvas native coordinates, over the panel if the panel is visible)\n- Not ported: none. (the try/catch ignoring draw errors, which nobody calls in the original, is not needed in Rust)"
+				"ko": "개발자 도구. (원본 misc/devtools.js 의 DEVTools)\n- F2 키로 보이고 숨긴다. 패널은 뷰 스케일 모드와 상관없이 창 안쪽 논리 좌표(canvas native)로 오른쪽 아래에 붙어 나온다.\n- 탭 넷: Statistics(엔진, 화면, 시간 정보), Node Hierarchy(왼쪽 트리 + 오른쪽 인스펙터), Local Storage(키와 값 보기, 더하기, 고치기, 지우기),\n  Settings(바탕 어둡게, 모든 기즈모, 화면 비율 가이드, FPS 표시. 로컬 스토리지 \"hierarchy.settings\" 에 원본과 같은 JSON 으로 남긴다)\n- 타이틀바를 끌어 옮기고, 모서리와 꼭짓점을 끌어 크기를 바꾸고, 가운데 구분선을 끌어 좌우 비율을 바꾼다.\n- 트리: 펼치기와 접기, 액티브(A)와 기즈모(G) 칸, 고르기, 끌어 스크롤. 인스펙터: 컴포넌트 머리를 눌러 속성을 펼치고 접는다. (기본 펼침)\n- 러스트 판은 씬이 DevTools 를 품고 함수마다 부른다:\n    tick 에서 dev_tools.tick(engine, node_tree, unscaled_time_delta), post_draw 에서 dev_tools.draw(engine, node_tree, graphic).\n    is_visible() && is_pointer_inside_panel(engine) 이면 씬은 그 입력을 노드에 넘기지 않는다. (원본 GameScene.isDevToolsCapturingInput)\n- 원본과 다른 점:\n  - 전역 엔진이 없어 원본 setEngine 이 없다. tick, draw, is_pointer_inside_panel 이 엔진을 받는다.\n  - 노드 대신 NodeId 로 가리킨다. 루트 목록은 set_root_nodes(`Vec<NodeId>`) 이고, 펼친 노드는 NodeId 집합, 접은 컴포넌트는 (NodeId, 컴포넌트 차례) 집합이다.\n    지운 노드는 트리와 인스펙터에서 빠지고, 고른 노드가 지워지면 고르지 않은 것으로 돌아간다.\n  - 원본이 tick 과 눌림에서 부르는 setForceGizmosVisible 은 눌림 처리와 set_visible 이 &Engine 만 받아 Graphic 을 바꿀 수 없어, 바랄 값을 적어 두었다가\n    tick 끝에 엔진의 그래픽(get_graphic_mut)에 건다. 그래서 원본처럼 그 프레임의 그리기부터 보인다. (tick 밖에서 set_visible 을 부른 것은 draw 첫머리에 건다)\n    원본 setEngine 이 거는 false 는 첫 tick 에 건다. (DevTools::new 는 엔진을 받지 않는다)\n  - 노드 종류는 WorldNode 하나뿐이라 트리의 Type 칸과 인스펙터의 type 은 들고 있는 UIDocument 의 노드 종류 이름(UIDocument::get_node_type_name)이다. (원본 constructor.name 자리, 처음 문서에 등록된 FloatingText 같은 엔진 노드 종류와 게임이 등록한 종류, 그 밖은 \"WorldNode\")\n  - 인스펙터의 컴포넌트 속성은 원본 getComponentProperties 처럼 그 컴포넌트의 get*, is* 게터를 모두 불러 보인다.\n    원본은 실행 중에 프로토타입을 훑고, 러스트 판은 `#[reflect]` 매크로가 컴파일 때 지은 목록을 쓴다. (core/reflection.rs, 엔진 컴포넌트는 모두 붙였다)\n    트리를 받는 게터(원본은 이웃 컴포넌트를 바로 쥐는 것)는 그리기에서 트리를 넘겨 부르고, &mut self 게터가 있는 컴포넌트는 tick 이 트리를 쥐고 읽어 둔 값을 보인다.\n    이름은 원본 formatMethodName(getTextColor → textColor, is 로 시작하면 그대로), 값은 원본 formatPropertyValue 꼴이다.\n    (수는 toFixed(2), Vector2 는 (x, y), Rect 는 (x, y, 너비, 높이) toFixed(1), Color 는 rgba, null, 노드는 `[WorldNode]`, 배열은 `[Array]`, 그 밖은 [종류 이름])\n    목록과 차례는 원본과 같다. (원본 클래스에 없는 러스트 판의 다시 정의는 빼고, 원본과 이름이 다른 게터는 원본 이름으로 보인다) 원본 getEngine 은 전역 엔진이 없어 없다.\n  - 반사가 없는 컴포넌트(`#[reflect]` 를 붙이지 않은 게임 컴포넌트)는 UIDocument 에 쓰기 함수로 등록했으면 그 저장 키와 값을 보이고,\n    아니면 종류 이름 아래에 매크로를 붙이라는 \"반사 없음\" 줄을 보인다. (빠뜨린 것을 알 수 있게)\n    게임이 자기 컴포넌트를 등록한 문서는 set_ui_document 로 건다. (또는 get_ui_document_mut 로 등록한다) 이 때 수 넷 배열은 이름에 color 가 들면 rgba, 아니면 사각형으로 본다.\n  - Local Storage 탭의 키 입력, 값 고치기, 지울지 묻기는 원본 window.prompt, window.confirm 자리인 Engine::prompt, Engine::confirm 이다. (core/modaldialog.rs)\n    웹은 원본처럼 브라우저 창이 그 자리에서 답한다. 데스크탑은 엔진이 그린 같은 질문 창이 떠서 답할 때까지 씬이 멈추고, 답은 다음 tick 에 받는다.\n  - Statistics 의 clientNativeSize 는 ViewManager::get_client_native_size(웹은 페이지 전체 크기, 데스크탑은 창 안쪽 논리 크기)다.\n    메모리는 웹에서 원본처럼 Chrome 의 performance.memory 를 읽고, 없는 브라우저는 \"(N/A)\" 다.\n    데스크탑은 자바스크립트 힙이 없어 같은 칸에 러스트가 쓰는 시스템 할당자의 힙(쓰는 중, 잡아 둔 것)을 적는다. (platform/desktop.rs read_heap_usage)\n    jsHeapSizeLimit 는 V8 이 정한 힙 상한인데 시스템 할당자에는 그런 상한이 없어 \"(N/A)\" 다. 힙을 못 읽는 OS 는 셋 다 \"(N/A)\" 다.\n    viewScaleMode 는 러스트 열거 이름(StretchHeight 등)으로 적는다.\n  - 화면 비율 가이드는 원본처럼 그때의 좌표계에 기대지 않고 스스로 뷰 좌표계(apply_view_rect)를 걸고 그린다. (원본 GameScene 에서 같은 결과)\n- Settings 의 Show FPS 를 켜면 패널을 닫아도 창 왼쪽 위에 지난 1 초의 프레임 수를 그린다. (원본과 같다, canvas native 좌표, 패널이 보이면 패널 위에)\n- 옮기지 않은 것: 없음. (원본에서 아무도 부르지 않는 그리기 오류 무시 try/catch 는 러스트에서 필요 없다)",
+				"en": "Developer tools. (DEVTools of the original misc/devtools.js)\n- Shown and hidden with the F2 key. The panel appears docked at the bottom right in the window's inner logical coordinates (canvas native), regardless of the view scale mode.\n- Four tabs: Statistics (engine, screen and time info), Node Hierarchy (tree on the left + inspector on the right), Local Storage (view, add, edit and remove keys and values),\n  Settings (dim background, all gizmos, aspect ratio guide, FPS display. Saved to the local storage \"hierarchy.settings\" as the same JSON as the original)\n- Drag the title bar to move, drag the edges and corners to resize, and drag the center divider to change the left and right ratio.\n- Tree: expand and collapse, active (A) and gizmo (G) columns, selection, drag to scroll. Inspector: click a component header to expand and collapse its properties. (expanded by default)\n- In the Rust version the scene holds DevTools and calls it in each function:\n    dev_tools.tick(engine, node_tree, unscaled_time_delta) in tick, dev_tools.draw(engine, node_tree, graphic) in post_draw.\n    If is_visible() && is_pointer_inside_panel(engine), the scene does not pass that input to the nodes. (original GameScene.isDevToolsCapturingInput)\n- Differences from the original:\n  - There is no global engine, so there is no original setEngine. tick, draw and is_pointer_inside_panel take the engine.\n  - Nodes are referred to by NodeId. The root list is set_root_nodes(`Vec<NodeId>`), expanded nodes are a set of NodeId, and collapsed components are a set of (NodeId, component index).\n    Removed nodes drop out of the tree and the inspector, and if the selected node is removed it goes back to nothing selected.\n  - setForceGizmosVisible, which the original calls in tick and on presses: press handling and set_visible take only &Engine and cannot change Graphic, so they record the desired value\n    and tick applies it to the engine's graphic (get_graphic_mut) at its end. So, as in the original, it shows from that frame's drawing. (set_visible called outside tick is applied at the start of draw)\n    The false applied by the original setEngine is applied on the first tick. (DevTools::new does not take the engine)\n  - The only node type is WorldNode, so the tree's Type column and the inspector's type are the node type name from the held UIDocument (UIDocument::get_node_type_name). (in place of the original constructor.name: engine node types such as FloatingText registered in the initial document and types the game registered, otherwise \"WorldNode\")\n  - The inspector's component properties call and show all get* and is* getters of the component, like the original getComponentProperties.\n    The original scans prototypes at run time, and the Rust version uses the list built at compile time by the `#[reflect]` macro. (core/reflection.rs, attached to all engine components)\n    Getters that take the tree (the original holds neighbor components directly) are called with the tree passed in drawing, and for components with &mut self getters, tick holds the tree and the values read there are shown.\n    Names follow the original formatMethodName (getTextColor → textColor, kept as is if it starts with is), and values follow the original formatPropertyValue form.\n    (numbers toFixed(2), Vector2 as (x, y), Rect as (x, y, width, height) toFixed(1), Color as rgba, null, nodes as `[WorldNode]`, arrays as `[Array]`, others as [type name])\n    The list and order are the same as the original. (redefinitions in the Rust version not in the original class are left out, and getters named differently from the original are shown with the original name) The original getEngine does not exist since there is no global engine.\n  - Components without reflection (game components without `#[reflect]`) show their saved keys and values if registered with a write function in UIDocument,\n    otherwise a \"no reflection\" line asking to add the macro is shown under the type name. (so omissions can be noticed)\n    A document in which the game registered its own components is set with set_ui_document. (or registered via get_ui_document_mut) Here an array of four numbers is treated as rgba if the name contains color, otherwise as a rectangle.\n  - Key input, value editing and the remove confirmation in the Local Storage tab use Engine::prompt and Engine::confirm in place of the original window.prompt and window.confirm. (core/modaldialog.rs)\n    On the web the browser dialog answers on the spot like the original. On desktop the same question window drawn by the engine appears, the scene pauses until it is answered, and the answer is received on the next tick.\n  - clientNativeSize in Statistics is ViewManager::get_client_native_size (the whole page size on the web, the window's inner logical size on desktop).\n    Memory reads Chrome's performance.memory on the web like the original, and is \"(N/A)\" in browsers without it.\n    Desktop has no JavaScript heap, so the same fields show the heap of the system allocator used by Rust (in use, reserved). (platform/desktop.rs read_heap_usage)\n    jsHeapSizeLimit is the heap limit set by V8, but the system allocator has no such limit, so it is \"(N/A)\". On an OS where the heap cannot be read, all three are \"(N/A)\".\n    viewScaleMode is written with the Rust enum name (StretchHeight and so on).\n  - The aspect ratio guide does not rely on the coordinate system at the time like the original, but applies the view coordinate system (apply_view_rect) itself and draws. (same result as in the original GameScene)\n- Turning on Show FPS in Settings draws the frame count of the last second at the top left of the window even when the panel is closed. (same as the original, canvas native coordinates, over the panel if the panel is visible)\n- Not ported: none. (the try/catch ignoring draw errors, which nobody calls in the original, is not needed in Rust)"
 			},
 			"examples": [
 				{
@@ -117193,8 +118296,8 @@
 							"returns": {
 								"type": "&mut UIDocument",
 								"description": {
-									"ko": "들고 있는 문서의 가변 참조. (처음은 엔진 컴포넌트만 등록된 UIDocument::new())",
-									"en": "Mutable reference to the held document. (initially UIDocument::new() with only engine components registered)"
+									"ko": "들고 있는 문서의 가변 참조. (처음은 UIDocument::new() 에 register_editor_types 를 부른 것)",
+									"en": "Mutable reference to the held document. (at first UIDocument::new() with register_editor_types called)"
 								}
 							},
 							"description": {
@@ -117846,8 +118949,8 @@
 		{
 			"name": "misc/floatingtext",
 			"summary": {
-				"ko": "떠오르는 텍스트 관리 컴포넌트. (데미지 숫자 / +코인 등)\n- 원본 misc/floatingtext.js 를 옮긴 것이다. spawn 으로 띄우면 위로 떠오르며 사라지고, 끝난 라벨 노드는 다시 쓴다.\n- 씬 뿌리 밑에 노드 하나를 만들어 두고 월드 좌표로 띄운다.\n- 사용:\n  ```text\n    let floating_text_id = FloatingText::create(node_tree, root_id);\n    FloatingText::spawn(node_tree, floating_text_id, \"-120\", position, FloatingTextOptions { color: Color::create(1.0, 0.4, 0.4, 1.0), ..FloatingTextOptions::default() });\n  ```\n- 원본과 다른 점:\n  원본은 WorldNode 를 상속한 노드다. 러스트 판은 노드에 붙는 컴포넌트이고, create 가 노드를 만들어 붙여 준다.\n  spawn / clear 는 라벨 노드를 만들고 바꿔야 해서 트리와 노드 핸들을 받는 연관 함수다. (컴포넌트가 없으면 아무것도 하지 않는다)\n  라벨은 UILabel 대신 Text 컴포넌트로 그린다. (설정은 같다: 글, 크기, 색, 굵게)\n  options 객체는 FloatingTextOptions 구조체다.",
-				"en": "Floating text manager component. (damage numbers / +coins, etc.)\n- A port of the original misc/floatingtext.js. Text spawned with spawn rises and fades out, and finished label nodes are reused.\n- Create one node under the scene root and spawn in world coordinates.\n- Usage:\n  ```text\n    let floating_text_id = FloatingText::create(node_tree, root_id);\n    FloatingText::spawn(node_tree, floating_text_id, \"-120\", position, FloatingTextOptions { color: Color::create(1.0, 0.4, 0.4, 1.0), ..FloatingTextOptions::default() });\n  ```\n- Differences from the original:\n  The original is a node that inherits WorldNode. The Rust version is a component attached to a node, and create makes the node and attaches it.\n  spawn / clear are associated functions that take the tree and a node handle because they must create and change label nodes. (they do nothing if the component is missing)\n  Labels are drawn with a Text component instead of UILabel. (same settings: text, size, color, bold)\n  The options object is the FloatingTextOptions struct."
+				"ko": "떠오르는 텍스트 관리 컴포넌트. (데미지 숫자 / +코인 등)\n- 원본 misc/floatingtext.js 를 옮긴 것이다. spawn 으로 띄우면 위로 떠오르며 사라지고, 끝난 라벨 노드는 다시 쓴다.\n- 씬 뿌리 밑에 노드 하나를 만들어 두고 월드 좌표로 띄운다.\n- 사용:\n  ```text\n    let floating_text_id = FloatingText::create(node_tree, root_id);\n    FloatingText::spawn(node_tree, floating_text_id, \"-120\", position, FloatingTextOptions { color: Color::create(1.0, 0.4, 0.4, 1.0), ..FloatingTextOptions::default() });\n  ```\n- 원본과 다른 점:\n  원본은 WorldNode 를 상속한 노드다. 러스트 판은 노드에 붙는 컴포넌트이고, create 가 노드를 만들어 붙여 준다.\n  spawn / clear 는 라벨 노드를 만들고 바꿔야 해서 트리와 노드 핸들을 받는 연관 함수다. (컴포넌트가 없으면 아무것도 하지 않는다)\n  options 객체는 FloatingTextOptions 구조체다.",
+				"en": "Floating text manager component. (damage numbers / +coins, etc.)\n- A port of the original misc/floatingtext.js. Text spawned with spawn rises and fades out, and finished label nodes are reused.\n- Create one node under the scene root and spawn in world coordinates.\n- Usage:\n  ```text\n    let floating_text_id = FloatingText::create(node_tree, root_id);\n    FloatingText::spawn(node_tree, floating_text_id, \"-120\", position, FloatingTextOptions { color: Color::create(1.0, 0.4, 0.4, 1.0), ..FloatingTextOptions::default() });\n  ```\n- Differences from the original:\n  The original is a node that inherits WorldNode. The Rust version is a component attached to a node, and create makes the node and attaches it.\n  spawn / clear are associated functions that take the tree and a node handle because they must create and change label nodes. (they do nothing if the component is missing)\n  The options object is the FloatingTextOptions struct."
 			},
 			"classes": [
 				{
@@ -118205,7 +119308,7 @@
 								"ko": "데미지 숫자 띄우기",
 								"en": "Spawn a damage number"
 							},
-							"code": "use vanilla::{Color, Engine, EngineConfiguration, FloatingText, FloatingTextOptions, NodeTree, Text, Vector2};\n\nlet engine = Engine::new(EngineConfiguration::new());\nlet mut node_tree = NodeTree::new();\nlet root_id = node_tree.get_root_id();\nlet floating_text_id = FloatingText::create(&mut node_tree, root_id);\nlet options = FloatingTextOptions {\n\tcolor: Color::create(1.0, 0.4, 0.4, 1.0),\n\t..FloatingTextOptions::default()\n};\nlet label_id = FloatingText::spawn(&mut node_tree, floating_text_id, \"-120\", Vector2::create(100.0, 200.0), options).unwrap();\nassert_eq!(node_tree[label_id].get_component::<Text>().unwrap().get_text(), \"-120\");\n\nnode_tree.tick(&engine, 1.0);\nassert!(!node_tree[label_id].is_active());\nassert_eq!(node_tree[floating_text_id].get_component::<FloatingText>().unwrap().get_active_count(), 0);",
+							"code": "use vanilla::{Color, Engine, EngineConfiguration, FloatingText, FloatingTextOptions, NodeTree, UILabel, Vector2};\n\nlet engine = Engine::new(EngineConfiguration::new());\nlet mut node_tree = NodeTree::new();\nlet root_id = node_tree.get_root_id();\nlet floating_text_id = FloatingText::create(&mut node_tree, root_id);\nlet options = FloatingTextOptions {\n\tcolor: Color::create(1.0, 0.4, 0.4, 1.0),\n\t..FloatingTextOptions::default()\n};\nlet label_id = FloatingText::spawn(&mut node_tree, floating_text_id, \"-120\", Vector2::create(100.0, 200.0), options).unwrap();\nassert_eq!(node_tree[label_id].get_component::<UILabel>().unwrap().get_text(), \"-120\");\n\nnode_tree.tick(&engine, 1.0);\nassert!(!node_tree[label_id].is_active());\nassert_eq!(node_tree[floating_text_id].get_component::<FloatingText>().unwrap().get_active_count(), 0);",
 							"language": "rust"
 						}
 					]
@@ -123647,8 +124750,8 @@
 		{
 			"name": "misc/persistedstore",
 			"summary": {
-				"ko": "지속 저장소.\n- 원본 misc/persistedstore.js 를 옮긴 것이다. 키 하나에 상태 객체를 JSON 으로 저장하고, 바뀔 때 구독자에게 알린다.\n- 판 번호(version)가 다르거나 해석에 실패하면 기본값으로 돌아간다.\n- 저장은 LocalStorage 를 쓴다. 저장 꼴({\"version\":1,\"state\":{...}})이 원본과 같아서 웹에서는 원본 게임의 저장을 그대로 읽는다.\n  set_storage_backend 로 이 저장소만 다른 곳(LocalStorageBackend, 플랫폼의 저장소 같은 것)에 둘 수 있다.\n  넘긴 저장소는 `Rc<RefCell>` 에 담는다. get_storage_backend 는 그 Rc 를 돌려주고, 부르는 쪽은 borrow / borrow_mut 로 빌려 쓴다.\n  (빌린 채로 이 저장소를 읽거나 쓰면 읽기는 빈 글, 쓰기는 알리고 넘어간다)\n- 사용:\n  ```text\n    let mut store = PersistedStore::new(\"game.settings\", serde_json::json!({ \"volume\": 0.8, \"is_muted\": false }), 1);\n    store.set(serde_json::json!({ \"volume\": 0.5 }));\n    let volume = store.get()[\"volume\"].as_f64();\n  ```\n- 섞기는 원본 Object.assign 과 같다. 배열은 번호 키(\"0\", \"1\" ...)로 섞고(저장된 state 가 배열이어도), 키 차례는 JS 객체처럼 번호 꼴 키를 작은 수부터 앞에 둔다.\n- 원본과 다른 점:\n  상태 객체는 serde_json::Value(객체)다. 객체도 배열도 아닌 값을 넘기면 빈 객체로 친다. (원본 Object.assign 은 글을 글자마다 번호 키로 섞는다)\n  subscribe 는 해지 함수 대신 구독 번호(PersistedStoreSubscription)를 돌려주고, unsubscribe(번호) 로 푼다.\n  러스트 String 은 짝 없는 서로게이트를 담지 못해, 원본이 저장한 그런 글(JSON.stringify 의 \\ud83d 같은 것)은 상태에서 대체 문자(U+FFFD)로 보인다.\n  읽을 때 그 글의 자리를 남겨 두고, 고치지 않고 다시 쓰면 원본처럼 \\udXXX 로 쓴다. (misc/storagetext.rs, 원본 판의 저장을 읽고 다시 써도 잃지 않는다)",
-				"en": "Persistent store.\n- A port of the original misc/persistedstore.js. Saves a state object as JSON under one key and notifies subscribers when it changes.\n- If the version number (version) differs or parsing fails, it falls back to the defaults.\n- Saving uses LocalStorage. The save format ({\"version\":1,\"state\":{...}}) is the same as the original, so on the web it reads the original game's saves as is.\n  set_storage_backend can put only this store somewhere else (LocalStorageBackend, such as a platform's storage).\n  The passed storage is put in `Rc<RefCell>`. get_storage_backend returns that Rc, and the caller borrows it with borrow / borrow_mut.\n  (reading or writing this store while it is borrowed gives empty text for reads, and writes report it and move on)\n- Usage:\n  ```text\n    let mut store = PersistedStore::new(\"game.settings\", serde_json::json!({ \"volume\": 0.8, \"is_muted\": false }), 1);\n    store.set(serde_json::json!({ \"volume\": 0.5 }));\n    let volume = store.get()[\"volume\"].as_f64();\n  ```\n- Merging is the same as the original Object.assign. Arrays are merged by index keys (\"0\", \"1\" ...) (even if the saved state is an array), and the key order puts index-like keys first from the smallest number, like JS objects.\n- Differences from the original:\n  The state object is serde_json::Value (an object). Values that are neither objects nor arrays are treated as an empty object. (the original Object.assign merges a string by character index keys)\n  subscribe returns a subscription number (PersistedStoreSubscription) instead of an unsubscribe function, and unsubscribe(number) removes it.\n  Rust String cannot hold unpaired surrogates, so such text saved by the original (like \\ud83d from JSON.stringify) appears as the replacement character (U+FFFD) in the state.\n  Their places are remembered when reading, and writing back unmodified writes \\udXXX like the original. (misc/storagetext.rs, saves from the original version are not lost when read and rewritten)"
+				"ko": "지속 저장소.\n- 원본 misc/persistedstore.js 를 옮긴 것이다. 키 하나에 상태 객체를 JSON 으로 저장하고, 바뀔 때 구독자에게 알린다.\n- 판 번호(version)가 다르거나 해석에 실패하면 기본값으로 돌아간다.\n- 저장은 LocalStorage 를 쓴다. 저장 꼴({\"version\":1,\"state\":{...}})이 원본과 같아서 웹에서는 원본 게임의 저장을 그대로 읽는다.\n  set_storage_backend 로 이 저장소만 다른 곳(LocalStorageBackend, 플랫폼의 저장소 같은 것)에 둘 수 있다.\n  넘긴 저장소는 `Rc<RefCell>` 에 담는다. get_storage_backend 는 그 Rc 를 돌려주고, 부르는 쪽은 borrow / borrow_mut 로 빌려 쓴다.\n  (빌린 채로 이 저장소를 읽거나 쓰면 읽기는 빈 글, 쓰기는 알리고 넘어간다)\n- 사용:\n  ```text\n    let mut store = PersistedStore::new(\"game.settings\", serde_json::json!({ \"volume\": 0.8, \"is_muted\": false }), 1);\n    store.set(serde_json::json!({ \"volume\": 0.5 }));\n    let volume = store.get()[\"volume\"].as_f64();\n  ```\n- 섞기는 원본 Object.assign 과 같다. 배열은 번호 키(\"0\", \"1\" ...)로 섞고(저장된 state 가 배열이어도), 키 차례는 JS 객체처럼 번호 꼴 키를 작은 수부터 앞에 둔다.\n- 원본과 다른 점:\n  상태 객체는 serde_json::Value(객체)다. 객체도 배열도 아닌 값을 넘기면 빈 객체로 친다. (원본 Object.assign 은 글을 글자마다 번호 키로 섞는다)\n  subscribe 는 해지 함수 대신 구독 번호(PersistedStoreSubscription)를 돌려주고, unsubscribe(번호) 로 푼다.\n  러스트 String 은 짝 없는 서로게이트를 담지 못해, 원본이 저장한 그런 글(JSON.stringify 의 \\ud83d 같은 것)은 get 의 상태에서 대체 문자(U+FFFD)로 보인다.\n  그 글의 원래 JS 글 단위는 get_string_code_units 로 읽고 set_string_code_units 로 쓴다. (LocalStorage 의 *_code_units 와 같은 꼴, 원본 글과 같은 값)\n  읽을 때 그 글의 자리를 남겨 두고, 고치지 않고 다시 쓰면 원본처럼 \\udXXX 로 쓴다. (misc/storagetext.rs, 원본 판의 저장을 읽고 다시 써도 잃지 않는다)",
+				"en": "Persistent store.\n- A port of the original misc/persistedstore.js. Saves a state object as JSON under one key and notifies subscribers when it changes.\n- If the version number (version) differs or parsing fails, it falls back to the defaults.\n- Saving uses LocalStorage. The save format ({\"version\":1,\"state\":{...}}) is the same as the original, so on the web it reads the original game's saves as is.\n  set_storage_backend can put only this store somewhere else (LocalStorageBackend, such as a platform's storage).\n  The passed storage is put in `Rc<RefCell>`. get_storage_backend returns that Rc, and the caller borrows it with borrow / borrow_mut.\n  (reading or writing this store while it is borrowed gives empty text for reads, and writes report it and move on)\n- Usage:\n  ```text\n    let mut store = PersistedStore::new(\"game.settings\", serde_json::json!({ \"volume\": 0.8, \"is_muted\": false }), 1);\n    store.set(serde_json::json!({ \"volume\": 0.5 }));\n    let volume = store.get()[\"volume\"].as_f64();\n  ```\n- Merging is the same as the original Object.assign. Arrays are merged by index keys (\"0\", \"1\" ...) (even if the saved state is an array), and the key order puts index-like keys first from the smallest number, like JS objects.\n- Differences from the original:\n  The state object is serde_json::Value (an object). Values that are neither objects nor arrays are treated as an empty object. (the original Object.assign merges a string by character index keys)\n  subscribe returns a subscription number (PersistedStoreSubscription) instead of an unsubscribe function, and unsubscribe(number) removes it.\n  Rust String cannot hold unpaired surrogates, so such text saved by the original (like \\ud83d from JSON.stringify) appears as the replacement character (U+FFFD) in the state from get.\n  The original JS code units of that text are read with get_string_code_units and written with set_string_code_units. (the same form as LocalStorage *_code_units, the same value as the original string)\n  Their places are remembered when reading, and writing back unmodified writes \\udXXX like the original. (misc/storagetext.rs, saves from the original version are not lost when read and rewritten)"
 			},
 			"classes": [
 				{
@@ -123794,6 +124897,80 @@
 								"class": "PersistedStore",
 								"name": "set"
 							}
+						},
+						{
+							"kind": "method",
+							"name": "get_string_code_units",
+							"signature": "pub fn get_string_code_units(&self, path: &[JsonPathSegment]) -> Option<Vec<u16>>",
+							"params": [
+								{
+									"name": "path",
+									"type": "&[JsonPathSegment]",
+									"description": {
+										"ko": "상태에서부터의 글 자리. (키와 배열 차례)",
+										"en": "The string's place from the state. (keys and array indices)"
+									}
+								}
+							],
+							"returns": {
+								"type": "Option<Vec<u16>>",
+								"description": {
+									"ko": "그 자리 글의 UTF-16 단위. (원본이 저장한 짝 없는 서로게이트가 있으면 그것, 아니면 글을 UTF-16 으로 편 것) 그 자리가 글이 아니면 None.",
+									"en": "The UTF-16 units of the string at that place. (with the unpaired surrogates saved by the original if any, otherwise the string expanded to UTF-16) None if that place is not a string."
+								}
+							},
+							"description": {
+								"ko": "상태 안 글의 JS 글 단위. (UTF-16, 짝 없는 서로게이트도 원본 글 그대로, LocalStorage::get_item_code_units 와 같은 꼴)",
+								"en": "The JS code units of a string in the state. (UTF-16, unpaired surrogates exactly as in the original string, the same form as LocalStorage::get_item_code_units)"
+							},
+							"since": "0.4.0",
+							"source": "src/misc/persistedstore.rs",
+							"examples": [
+								{
+									"title": {
+										"ko": "글 자리의 JS 글 단위 읽고 쓰기",
+										"en": "Read and write JS code units at a string place"
+									},
+									"code": "use serde_json::json;\nuse vanilla::misc::storagetext::JsonPathSegment;\nuse vanilla::{LocalStorage, PersistedStore};\n\nLocalStorage::set_storage_directory(Some(std::env::temp_dir().join(\"vanilla_doctest_persistedstore_code_units\")));\nlet mut store = PersistedStore::new(\"doctest.code_units\", json!({ \"name\": \"\" }), 1);\nlet name_path = [JsonPathSegment::Key(String::from(\"name\"))];\nstore.set_string_code_units(&name_path, &[0x61, 0xD83D]);\nassert_eq!(store.get()[\"name\"], json!(\"a\\u{fffd}\"));\nassert_eq!(store.get_string_code_units(&name_path), Some(vec![0x61, 0xD83D]));\nassert_eq!(store.read_stored_text(), r#\"{\"version\":1,\"state\":{\"name\":\"a\\ud83d\"}}\"#);",
+									"language": "rust"
+								}
+							]
+						},
+						{
+							"kind": "method",
+							"name": "set_string_code_units",
+							"signature": "pub fn set_string_code_units(&mut self, path: &[JsonPathSegment], code_units: &[u16]) -> bool",
+							"params": [
+								{
+									"name": "path",
+									"type": "&[JsonPathSegment]",
+									"description": {
+										"ko": "상태에서부터의 글 자리. (키와 배열 차례, 비면 쓰지 않는다)",
+										"en": "The string's place from the state. (keys and array indices, nothing is written if empty)"
+									}
+								},
+								{
+									"name": "code_units",
+									"type": "&[u16]",
+									"description": {
+										"ko": "쓸 UTF-16 단위.",
+										"en": "The UTF-16 units to write."
+									}
+								}
+							],
+							"returns": {
+								"type": "bool",
+								"description": {
+									"ko": "썼으면 true.",
+									"en": "true if it wrote."
+								}
+							},
+							"description": {
+								"ko": "상태 안 글을 JS 글 단위로 쓰기. (짝 없는 서로게이트도 원본처럼 \\udXXX 로 저장한다, 저장하고 구독자에게 알린다)\n- 없는 키는 객체로 만들며 내려간다. 배열 차례가 없거나 객체도 배열도 아닌 값을 지나야 하면 쓰지 않는다.",
+								"en": "Writes a string in the state as JS code units. (unpaired surrogates are saved as \\udXXX like the original, then it saves and notifies subscribers)\n- Missing keys are created as objects on the way down. It does not write if an array index is missing or it would pass through a value that is neither an object nor an array."
+							},
+							"since": "0.4.0",
+							"source": "src/misc/persistedstore.rs"
 						},
 						{
 							"kind": "method",
@@ -126098,8 +127275,8 @@
 		{
 			"name": "misc/toucheffect",
 			"summary": {
-				"ko": "터치 효과 컴포넌트.\n- 원본 misc/toucheffect.js 를 옮긴 것이다. 누른 자리에 하늘색 빛 입자를 흩뿌리고 0.4 초 동안 흐려지며 퍼지게 한다.\n- 입자는 흰색 방사형 그라디언트 그림(64x64, 한 번만 만든다)을 하늘색(rgb 100, 200, 255)으로 틴트하고 더하기(lighter) 블렌드로 그린다.\n- 사용:\n  ```text\n    let touch_effect_id = node_tree.create_child(root_id, \"TouchEffect\");\n    node_tree[touch_effect_id].set_pivot(Pivot::TOP_LEFT);\n    node_tree[touch_effect_id].add_component(TouchEffect::new());\n    // 누를 때: node_tree[touch_effect_id].get_component_mut::<TouchEffect>().unwrap().create_touch_particle(x, y);\n  ```\n- 원본과 다른 점:\n  원본은 WorldNode 를 상속한 노드이고, 러스트 판은 노드에 붙는 컴포넌트다. 블렌드는 원본처럼 push_transform 에서 더하기로 바꾸고\n  pop_transform 에서 앞의 블렌드로 되돌려 자식까지 더하기로 그린다. (컴포넌트의 노드 출력 상태 앞뒤 훅)\n  그라디언트는 오프스크린 캔버스 대신 픽셀로 직접 만든 Image 다.",
-				"en": "Touch effect component.\n- A port of the original misc/toucheffect.js. Scatters sky blue light particles at the press point that fade and spread over 0.4 seconds.\n- Particles draw a white radial gradient image (64x64, made only once) tinted sky blue (rgb 100, 200, 255) with additive (lighter) blending.\n- Usage:\n  ```text\n    let touch_effect_id = node_tree.create_child(root_id, \"TouchEffect\");\n    node_tree[touch_effect_id].set_pivot(Pivot::TOP_LEFT);\n    node_tree[touch_effect_id].add_component(TouchEffect::new());\n    // on press: node_tree[touch_effect_id].get_component_mut::<TouchEffect>().unwrap().create_touch_particle(x, y);\n  ```\n- Differences from the original:\n  The original is a node that inherits WorldNode, and the Rust version is a component attached to a node. As in the original, the blend is switched to additive in push_transform\n  and restored to the previous blend in pop_transform, so children are drawn additively too. (the component's hooks around the node draw state)\n  The gradient is an Image built directly from pixels instead of an offscreen canvas."
+				"ko": "터치 효과 컴포넌트.\n- 원본 misc/toucheffect.js 를 옮긴 것이다. 누른 자리에 하늘색 빛 입자를 흩뿌리고 0.4 초 동안 흐려지며 퍼지게 한다.\n- 입자는 흰색 방사형 그라디언트 그림(64x64, 한 번만 만든다)을 하늘색(rgb 100, 200, 255)으로 틴트하고 더하기(lighter) 블렌드로 그린다.\n- 사용:\n  ```text\n    let touch_effect_id = node_tree.create_child(root_id, \"TouchEffect\");\n    node_tree[touch_effect_id].set_pivot(Pivot::TOP_LEFT);\n    node_tree[touch_effect_id].add_component(TouchEffect::new());\n    // 누를 때: node_tree[touch_effect_id].get_component_mut::<TouchEffect>().unwrap().create_touch_particle(x, y);\n  ```\n- 원본과 다른 점:\n  원본은 WorldNode 를 상속한 노드이고, 러스트 판은 노드에 붙는 컴포넌트다. 블렌드는 원본처럼 push_transform 에서 더하기로 바꾸고\n  pop_transform 에서 앞의 블렌드로 되돌려 자식까지 더하기로 그린다. (컴포넌트의 노드 출력 상태 앞뒤 훅)\n  그라디언트는 원본처럼 오프스크린 캔버스(엔진 Canvas2D)의 방사 그라디언트로 구운 Image 다.",
+				"en": "Touch effect component.\n- A port of the original misc/toucheffect.js. Scatters sky blue light particles at the press point that fade and spread over 0.4 seconds.\n- Particles draw a white radial gradient image (64x64, made only once) tinted sky blue (rgb 100, 200, 255) with additive (lighter) blending.\n- Usage:\n  ```text\n    let touch_effect_id = node_tree.create_child(root_id, \"TouchEffect\");\n    node_tree[touch_effect_id].set_pivot(Pivot::TOP_LEFT);\n    node_tree[touch_effect_id].add_component(TouchEffect::new());\n    // on press: node_tree[touch_effect_id].get_component_mut::<TouchEffect>().unwrap().create_touch_particle(x, y);\n  ```\n- Differences from the original:\n  The original is a node that inherits WorldNode, and the Rust version is a component attached to a node. As in the original, the blend is switched to additive in push_transform\n  and restored to the previous blend in pop_transform, so children are drawn additively too. (the component's hooks around the node draw state)\n  The gradient is an Image baked with the radial gradient of an offscreen canvas (the engine Canvas2D), like the original."
 			},
 			"classes": [
 				{
@@ -141217,6 +142394,11 @@
 						"Eq",
 						"crate::core::reflection::ToReflectValue"
 					],
+					"counterpart": {
+						"engine": "vanilla.js",
+						"module": "ui/uibutton",
+						"class": "ButtonState"
+					},
 					"source": "src/ui/uibutton.rs",
 					"values": [
 						{
@@ -150696,6 +151878,11 @@
 						"PartialEq",
 						"Eq"
 					],
+					"counterpart": {
+						"engine": "vanilla.js",
+						"module": "ui/uiprogressview",
+						"class": "ProgressDirection"
+					},
 					"source": "src/ui/uiprogressview.rs",
 					"values": [
 						{
@@ -152724,6 +153911,11 @@
 						"PartialEq",
 						"Eq"
 					],
+					"counterpart": {
+						"engine": "vanilla.js",
+						"module": "ui/uiscrollview",
+						"class": "ScrollMode"
+					},
 					"source": "src/ui/uiscrollview.rs",
 					"values": [
 						{
@@ -156861,6 +158053,44 @@
 							},
 							"since": "0.4.0",
 							"source": "src/ui/uidocument.rs"
+						},
+						{
+							"kind": "method",
+							"name": "get_node_type_name",
+							"signature": "pub fn get_node_type_name(&self, node: &WorldNode) -> &str",
+							"params": [
+								{
+									"name": "node",
+									"type": "&WorldNode",
+									"description": {
+										"ko": "볼 노드.",
+										"en": "Node to look at."
+									}
+								}
+							],
+							"returns": {
+								"type": "&str",
+								"description": {
+									"ko": "노드 종류 이름.",
+									"en": "Node type name."
+								}
+							},
+							"description": {
+								"ko": "노드 종류 이름. (원본 node.constructor.name 자리, 저장할 때 적는 type 과 같다)\n- 등록한 노드 종류(register_node_type, 엔진 종류는 register_editor_types 가 등록)의 컴포넌트가 붙은 노드면 그 이름(앞에 붙은 것), 아니면 \"WorldNode\".",
+								"en": "Node type name. (in place of the original node.constructor.name, the same as the type written when saving)\n- The name of a registered node type (register_node_type; register_editor_types registers the engine types) if its component is on the node (the earlier one), otherwise \"WorldNode\"."
+							},
+							"since": "0.4.0",
+							"source": "src/ui/uidocument.rs",
+							"examples": [
+								{
+									"title": {
+										"ko": "등록한 엔진 노드 종류는 그 이름, 맨 노드는 WorldNode",
+										"en": "A registered engine node type shows its name, a plain node shows WorldNode"
+									},
+									"code": "use vanilla::{FloatingText, UIDocument, WorldNode};\n\nlet mut ui_document = UIDocument::new();\nui_document.register_editor_types();\nlet mut node = WorldNode::new(\"node\");\nassert_eq!(ui_document.get_node_type_name(&node), \"WorldNode\");\nnode.add_component(FloatingText::new());\nassert_eq!(ui_document.get_node_type_name(&node), \"FloatingText\");",
+									"language": "rust"
+								}
+							]
 						},
 						{
 							"kind": "method",

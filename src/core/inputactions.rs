@@ -517,7 +517,7 @@ impl InputActions {
 		let mut source_gamepad_kind: Option<GamepadKind> = None;
 
 		// 연결된 패드의 축. (read_gamepad_stick 이 읽는다)
-		let gamepad_manager = input_manager.get_gamepad_manager_mut();
+		let gamepad_manager = input_manager.get_gamepad_manager();
 		let gamepad_index_list: Vec<usize> = gamepad_manager.get_all_connected_gamepads().iter().map(|gamepad| gamepad.index).collect();
 		let mut gamepad_axis_list = Vec::new();
 		for gamepad_index in gamepad_index_list.iter() {

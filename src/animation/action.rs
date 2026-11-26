@@ -16,8 +16,9 @@
 //!   ```
 //! - 원본과 다른 점:
 //!   - 원본은 start(target) 에서 대상을 들고 있다가 step 마다 콜백에 넘긴다. 러스트는 대상을 빌려 들 수 없어서
-//!     start 와 step 이 대상(&mut T)을 받아 콜백에 넘긴다. 그래서 get_target 과 start() 의 "대상을 안 주면 이전 대상" 은 없다.
-//!     T 는 기본 WorldNode 이고, 노드 여럿이나 게임 상태를 다루려면 그것을 T 로 쓴다.
+//!     노드 대상은 핸들로 든다: start_on_node(트리, Some(노드)) 가 대상을 들고 step_on_node(트리, 시간) 이 그 노드를 콜백에 넘기며,
+//!     get_target 이 그 노드를 돌려주고 start_on_node(트리, None) 이 원본 start() 처럼 이전 대상으로 다시 시작한다.
+//!     노드가 아닌 대상(노드 여럿, 게임 상태)은 T 로 쓰고 start, step 이 대상(&mut T)을 받아 콜백에 넘긴다. (T 의 기본은 WorldNode)
 //!   - 콜백 객체({ started, updated, completed })는 wait 스텝이 ActionCallbacks(updated 가 (진행률, 대상)),
 //!     condition 스텝이 ActionConditionCallbacks(updated 가 (대상))다. 원본은 한 객체 꼴에 인자 수만 다르지만,
 //!     러스트는 콜백의 인자 꼴을 타입으로 정해야 해서 둘로 나눴다.
@@ -26,6 +27,7 @@
 //! - 조건 함수는 원본처럼 대상을 받는다(러스트는 &T). wait 은 duration 이 0 이하이면 진행률 1 로 끝낸다.
 //!   repeat 은 횟수가 0 이면 돌지 않고 넘어간다. (원본과 같다)
 //==============================================================================
+use crate::core::node::nodetree::{NodeId, NodeTree};
 use crate::core::node::worldnode::WorldNode;
 
 /// 시작 / 완료 콜백. ((대상))
@@ -360,6 +362,8 @@ pub struct Action<T = WorldNode> {
 	completed_count: u32,
 	is_running: bool,
 	is_done: bool,
+	// start_on_node 로 넘긴 대상 노드. (원본 #target 자리, 대상을 안 주면 이 노드)
+	target_id: Option<NodeId>,
 }
 
 impl<T> Action<T> {
@@ -377,6 +381,7 @@ impl<T> Action<T> {
 			completed_count: 0,
 			is_running: false,
 			is_done: false,
+			target_id: None,
 		}
 	}
 
@@ -710,6 +715,92 @@ impl<T> Action<T> {
 	//==============================================================================
 	pub fn is_running(&self) -> bool {
 		self.is_running
+	}
+}
+
+impl Action<WorldNode> {
+	//==============================================================================
+	/// 노드를 대상으로 실행 시작. (원본 start(target), 처음 스텝부터)
+	/// - 대상을 노드 핸들로 들어, step_on_node 가 그 노드를 콜백에 넘기고 get_target 이 돌려준다.
+	/// - `node_id` 가 None 이면 원본처럼 이전 대상(앞서 start_on_node 에 넘긴 노드)으로 다시 시작한다.
+	///
+	/// # 인자
+	/// - `node_tree`: 대상 노드가 든 트리.
+	/// - `node_id`: 대상 노드. (None 이면 이전 대상)
+	///
+	/// # 돌려줌
+	/// 시작했으면 true. 대상이 없거나 그 노드가 지워졌으면 false. (그때는 시작하지 않는다)
+	///
+	/// # 예제
+	/// 노드 대상으로 돌리고, 대상을 안 주고 다시 시작하기
+	/// ```rust
+	/// use vanilla::{Action, ActionCallbacks, NodeTree, WorldNode};
+	///
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let logo_id = node_tree.create_child(root_id, "logo");
+	/// let mut action: Action = Action::new().wait(2.0, ActionCallbacks::new().updated(|progress, node: &mut WorldNode| node.set_local_opacity(progress)));
+	/// assert!(action.start_on_node(&mut node_tree, Some(logo_id)));
+	/// assert_eq!(action.get_target(), Some(logo_id));
+	/// action.step_on_node(&mut node_tree, 1.0);
+	/// assert_eq!(node_tree[logo_id].get_local_opacity(), 0.5);
+	///
+	/// assert!(action.start_on_node(&mut node_tree, None));
+	/// action.step_on_node(&mut node_tree, 0.5);
+	/// assert_eq!(node_tree[logo_id].get_local_opacity(), 0.25);
+	/// ```
+	//==============================================================================
+	pub fn start_on_node(&mut self, node_tree: &mut NodeTree, node_id: Option<NodeId>) -> bool {
+		let target_id = match node_id.or(self.target_id) {
+			Some(target_id) => {
+				target_id
+			}
+			None => {
+				return false;
+			}
+		};
+		self.target_id = Some(target_id);
+		match node_tree.get_node_mut(target_id) {
+			Some(target_node) => {
+				self.start(target_node);
+				true
+			}
+			None => {
+				false
+			}
+		}
+	}
+
+	//==============================================================================
+	/// 대상 노드로 갱신. (원본 step(timeDelta), 매 프레임 호출)
+	/// - start_on_node 로 넘긴 노드를 콜백에 넘긴다. 대상이 없거나 그 노드가 지워졌으면 아무것도 하지 않는다.
+	///
+	/// # 인자
+	/// - `node_tree`: 대상 노드가 든 트리.
+	/// - `time_delta`: 지난 프레임에서 흐른 시간. (초)
+	//==============================================================================
+	pub fn step_on_node(&mut self, node_tree: &mut NodeTree, time_delta: f32) {
+		let target_id = match self.target_id {
+			Some(target_id) => {
+				target_id
+			}
+			None => {
+				return;
+			}
+		};
+		if let Some(target_node) = node_tree.get_node_mut(target_id) {
+			self.step(target_node, time_delta);
+		}
+	}
+
+	//==============================================================================
+	/// 대상 반환. (원본 getTarget)
+	///
+	/// # 돌려줌
+	/// start_on_node 에 넘긴 대상 노드. 없으면 None. (start(&mut 노드) 로 빌려 준 대상은 들지 않는다)
+	//==============================================================================
+	pub fn get_target(&self) -> Option<NodeId> {
+		self.target_id
 	}
 }
 

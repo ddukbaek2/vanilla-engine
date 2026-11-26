@@ -13,10 +13,10 @@
 //!   ```
 //! - 원본과 다른 점:
 //!   - 원본은 Sprite 를 상속한다. 러스트 판은 Sprite 를 품고 Deref / DerefMut 로 Sprite 함수(set_image, set_image_rect, set_color ...)를 그대로 부르게 한다.
-//!     그래서 `get_component::<Sprite>()` 로는 찾지 못하고 `get_component::<ShaderSprite>()` 로 찾는다.
+//!     Component::get_base_component 로 품은 Sprite 를 알려 `get_component::<Sprite>()` 로도 찾힌다. (원본 instanceof 와 같다)
 //!   - 효과는 문자열 대신 ShaderSpriteEffect 열거형이다. (원본 문자열 이름은 get_name / from_name)
 //!   - 효과 프로그램 캐시는 원본의 컨텍스트별 WeakMap 대신 Graphic.resolve_shader_program 이 든다.
-//!   - 프로그램 만들기에 실패하면 원본은 예외를 던지고, 러스트 판은 한 번 알리고 효과 없이 Sprite 로 그린다.
+//! - 프로그램 만들기에 실패하면 두 엔진 모두 한 번 알리고 효과 없이 Sprite 로 그린다. (한 효과 실패로 프레임이 멈추지 않는다)
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::math;
@@ -1116,6 +1116,20 @@ impl DerefMut for ShaderSprite {
 
 #[crate::reflect]
 impl Component for ShaderSprite {
+	//==============================================================================
+	/// 품은 기반 컴포넌트. (원본 상위 클래스 Sprite 자리, get_component::<Sprite>() 로도 찾힌다)
+	//==============================================================================
+	fn get_base_component(&self) -> Option<&dyn Component> {
+		Some(&self.sprite)
+	}
+
+	//==============================================================================
+	/// 품은 기반 컴포넌트. (변경용)
+	//==============================================================================
+	fn get_base_component_mut(&mut self) -> Option<&mut dyn Component> {
+		Some(&mut self.sprite)
+	}
+
 	//==============================================================================
 	/// 컴포넌트 공통 칸 반환. (품은 Sprite 의 것)
 	//==============================================================================

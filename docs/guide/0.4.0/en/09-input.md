@@ -475,7 +475,7 @@ Get it with `input_manager.get_gamepad_manager()` (or `get_gamepad_manager_mut()
 
 | Function | Description |
 | --- | --- |
-| `get_all_connected_gamepads()`, `get_connected_gamepad_count()`, `get_connected_gamepad(index)` | The list and count of connected pads (`Gamepad`, copies from the last update), one by number |
+| `get_all_connected_gamepads()`, `get_connected_gamepad_count()`, `get_connected_gamepad(index)` | The list and count of connected pads (`Gamepad`, copies read in place when called), one by number |
 | `is_button_pressed(gamepad_index, button_index)` | Whether a button is held |
 | `is_button_just_pressed(gamepad_index, button_index)`, `is_button_just_released(...)` | Whether it was pressed or released in this update |
 | `get_button_value(gamepad_index, button_index)` | Button and trigger value (0 to 1, rounded to two decimal places) |
@@ -532,8 +532,8 @@ impl Scene for GamepadScene {
 		self.scene_base.tick(engine, time_delta);
 		let gamepad_manager = engine.get_input_manager_mut().get_gamepad_manager_mut();
 		let mut is_confirm_pressed = false;
-		// The list is read in place when called (like the original navigator.getGamepads()), so borrow it with &mut and keep copies.
-		let gamepad_list: Vec<Gamepad> = gamepad_manager.get_all_connected_gamepads().into_iter().cloned().collect();
+		// The list is a copy read in place when called (like the original navigator.getGamepads()).
+		let gamepad_list: Vec<Gamepad> = gamepad_manager.get_all_connected_gamepads();
 		for gamepad in gamepad_list.iter() {
 			if !gamepad_manager.is_button_just_pressed(gamepad.index, GamepadButtonCode::A_CROSS) {
 				continue;
