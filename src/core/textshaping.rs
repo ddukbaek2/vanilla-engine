@@ -115,7 +115,7 @@ pub struct FontFaceDescriptors {
 	pub unicode_range_list: Vec<(u32, u32)>,
 	/// 얼굴 열쇠. (기본 빈 글)
 	pub source_key: String,
-	/// 운영체제가 고른 대체 글꼴의 얼굴인지. (글자마다 이름 목록의 얼굴을 다 본 뒤에 보는 대체 단계, 이모지 표시는 이 단계에서 색 글리프 얼굴을 먼저 고른다. 기본 false)
+	/// 운영체제가 고른 대체 글꼴의 얼굴인지. (대체 폰트와 마지막 대체 글꼴도, 글자마다 이름 목록의 얼굴을 다 본 뒤에 보는 대체 단계, 이모지 표시는 이 단계에서 색 글리프 얼굴을 먼저 고른다. 기본 false)
 	pub is_system_fallback: bool,
 }
 

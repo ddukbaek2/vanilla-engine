@@ -1970,7 +1970,12 @@ impl TextStringTextureCache {
 			}
 			if let Some(last_resort_family_name) = crate::platform::desktop::systemfont::read_last_resort_family_name() {
 				let family_key = last_resort_family_name.to_lowercase();
+				let first_face_index = face_list.len();
 				self.append_system_family_faces(&family_key, font_description.font_weight, font_description.is_italic, face_list);
+				// 마지막 대체 글꼴은 대체 단계다. (이름 목록처럼 먼저 고르면 리눅스 DejaVu Sans 의 흑백 😀 가 색 이모지보다 앞선다)
+				for face in face_list[first_face_index..].iter_mut() {
+					face.descriptors.is_system_fallback = true;
+				}
 			}
 		}
 		#[cfg(target_arch = "wasm32")]

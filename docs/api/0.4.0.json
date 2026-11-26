@@ -70057,8 +70057,8 @@
 								}
 							},
 							"description": {
-								"ko": "운영체제가 고른 대체 글꼴의 얼굴인지. (글자마다 이름 목록의 얼굴을 다 본 뒤에 보는 대체 단계, 이모지 표시는 이 단계에서 색 글리프 얼굴을 먼저 고른다. 기본 false)",
-								"en": "Whether this is a face of a fallback font chosen by the operating system. (the fallback stage looked at after all faces of the name list for each character; emoji presentation picks a color glyph face first in this stage. Default false)"
+								"ko": "운영체제가 고른 대체 글꼴의 얼굴인지. (대체 폰트와 마지막 대체 글꼴도, 글자마다 이름 목록의 얼굴을 다 본 뒤에 보는 대체 단계, 이모지 표시는 이 단계에서 색 글리프 얼굴을 먼저 고른다. 기본 false)",
+								"en": "Whether this is a face of a fallback font chosen by the operating system. (also fallback fonts and the last resort font; the fallback stage looked at after all faces of the name list for each character, where emoji presentation picks a color glyph face first. Default false)"
 							},
 							"since": "0.4.0",
 							"source": "src/core/textshaping.rs"

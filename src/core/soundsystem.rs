@@ -1510,6 +1510,17 @@ mod tests {
 	}
 
 	//==============================================================================
+	/// 소리 장치 시각이 그 시각을 넘을 때까지 기다리기. (3 초까지)
+	/// - 가상 소리 장치(CI 의 PulseAudio 같은)는 시작이 늦거나 버퍼 단위로 흘러, 벽시계로 정한 만큼 자면 소리 시각이 모자랄 수 있다.
+	//==============================================================================
+	fn wait_for_context_time(sound_system: &SoundSystem, context_time: f64) {
+		let start_instant = std::time::Instant::now();
+		while sound_system.read_context_time() < context_time && start_instant.elapsed() < std::time::Duration::from_secs(3) {
+			std::thread::sleep(std::time::Duration::from_millis(10));
+		}
+	}
+
+	//==============================================================================
 	/// 읽힌 무음 소리 애셋. (seconds 초)
 	//==============================================================================
 	fn create_silent_asset(seconds: f32) -> Rc<AudioAsset> {
@@ -1581,12 +1592,13 @@ mod tests {
 		}
 		sound_system.play_effect("short", 0.8, 0.0);
 		assert_eq!(sound_system.voice_list[0].audio_player.get_gain_value(), 0.8);
+		let fade_start_time = sound_system.read_context_time();
 		sound_system.fade_out_effects("short", 0.05);
 		assert_eq!(sound_system.get_effect_voice_count(), 0);
 		assert_eq!(sound_system.releasing_voice_list.len(), 1);
 		sound_system.stop_effects();
 		assert_eq!(sound_system.releasing_voice_list.len(), 1);
-		std::thread::sleep(std::time::Duration::from_millis(300));
+		wait_for_context_time(&sound_system, fade_start_time + 0.15);
 		sound_system.update();
 		assert!(sound_system.releasing_voice_list.is_empty());
 	}
@@ -1714,7 +1726,7 @@ mod tests {
 		let stored_position = sound_system.music_position_by_id.get("field").copied().unwrap_or(-1.0);
 		assert!(stored_position >= elapsed_seconds_before + 0.1 - 1e-6 && stored_position <= elapsed_seconds_after + 0.1 + 1e-6, "기억한 자리 {} / 흐른 시간 {} ~ {} + 0.1", stored_position, elapsed_seconds_before, elapsed_seconds_after);
 		assert_eq!(sound_system.fading_music_list.len(), 1);
-		std::thread::sleep(std::time::Duration::from_millis(400));
+		wait_for_context_time(&sound_system, start_time + elapsed_seconds_after + 0.2);
 		sound_system.update();
 		assert!(sound_system.fading_music_list.is_empty());
 		assert_eq!(sound_system.playing_music.as_ref().map(|music_voice| music_voice.sound_id.as_str()), Some("battle"));
