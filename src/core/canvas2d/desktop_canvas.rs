@@ -19,6 +19,7 @@
 //! assert_eq!(canvas.get_image_data(6, 1, 1, 1).data, vec![0, 0, 255, 255]);
 //! ```
 //==============================================================================
+use super::desktop_font::{parse_canvas_font, CanvasFont};
 use super::{convert_conic_to_quads, evaluate_conic, is_composite_operation_name, normalize_line_dash, premultiply_pixels, unpremultiply_pixels, CanvasFillRule, CanvasGradient, CanvasGradientKind, CanvasImageSource, CanvasLineCap, CanvasLineJoin, CanvasMatrix, CanvasPattern, CanvasPatternRepetition, CanvasRadius, CanvasStyle, CanvasTextAlign, CanvasTextBaseline, ImageData, Path2D, PathSegment};
 use crate::base::color::Color;
 use crate::core::image::Image;
@@ -28,8 +29,6 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use tiny_skia::{BlendMode, FillRule, FilterQuality, GradientStop, LineCap, LineJoin, Mask, Paint, PathBuilder, Pixmap, PixmapPaint, Point, Shader, SpreadMode, Stroke, StrokeDash, Transform};
 
-/// 기본 글꼴. (원본 font 의 처음 값)
-const DEFAULT_FONT: &str = "10px sans-serif";
 /// 글을 굽는 배율 한계.
 const MINIMUM_TEXT_SCALE: f32 = 0.25;
 const MAXIMUM_TEXT_SCALE: f32 = 8.0;
@@ -54,7 +53,8 @@ struct CanvasState {
 	shadow_blur: f32,
 	shadow_offset_x: f32,
 	shadow_offset_y: f32,
-	font: String,
+	/// 글꼴. (크롬처럼 읽은 것, desktop_font.rs)
+	font: CanvasFont,
 	text_align: CanvasTextAlign,
 	text_baseline: CanvasTextBaseline,
 	is_image_smoothing_enabled: bool,
@@ -83,7 +83,7 @@ impl CanvasState {
 			shadow_blur: 0.0,
 			shadow_offset_x: 0.0,
 			shadow_offset_y: 0.0,
-			font: String::from(DEFAULT_FONT),
+			font: CanvasFont::create_default(),
 			text_align: CanvasTextAlign::Start,
 			text_baseline: CanvasTextBaseline::Alphabetic,
 			is_image_smoothing_enabled: true,
@@ -771,14 +771,33 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	/// 글꼴 설정. (원본 font, CSS font 줄임 꼴. 엔진 글자 캐시가 읽는다)
+	/// 글꼴 설정. (원본 font, CSS font 줄임 꼴. 크롬처럼 틀린 글은 무시하고, 엔진 글자 캐시가 읽는다)
+	/// - 크기는 이때 픽셀로 센다. 상대 크기(em, %, larger 같은)는 문서에 붙이지 않은 캔버스처럼 10px sans-serif 에 댄다.
+	/// - CSS 전역 낱말(inherit 같은), 줄높이만 있는 글, 크기나 이름이 없는 글은 틀린 글이다. 시스템 글꼴 낱말(caption 같은)은 받는다.
 	///
 	/// # 인자
 	/// - `font`: 글꼴. (CSS font 줄임 꼴, "bold 16px sans-serif" 같은 것, 처음 "10px sans-serif")
+	///
+	/// # 예제
+	/// 받은 글꼴은 크롬이 직렬화한 꼴로 읽히고, 틀린 글은 앞 값을 남긴다
+	/// ```rust
+	/// use vanilla::Canvas2D;
+	///
+	/// let mut canvas = Canvas2D::new(8, 8);
+	/// canvas.set_font("BOLD 12pt 'Noto Sans', SANS-SERIF");
+	/// assert_eq!(canvas.get_font(), "bold 16px \"Noto Sans\", sans-serif");
+	/// canvas.set_font("italic 2em/1.5 serif");
+	/// assert_eq!(canvas.get_font(), "italic 20px serif");
+	/// canvas.set_font("inherit");
+	/// assert_eq!(canvas.get_font(), "italic 20px serif");
+	/// ```
 	//==============================================================================
 	pub fn set_font(&mut self, font: &str) {
-		if !font.trim().is_empty() {
-			self.state.font = font.to_string();
+		if font == self.state.font.source_font {
+			return;
+		}
+		if let Some(canvas_font) = parse_canvas_font(font) {
+			self.state.font = canvas_font;
 		}
 	}
 
@@ -786,10 +805,10 @@ impl Canvas2D {
 	/// 글꼴.
 	///
 	/// # 돌려줌
-	/// 글꼴. (CSS font 줄임 꼴, 처음 "10px sans-serif")
+	/// 글꼴. (크롬 font 게터의 직렬화: "italic ", "bold " 나 굵기 수, "small-caps ", 크기 px, 이름 목록. 처음 "10px sans-serif")
 	//==============================================================================
 	pub fn get_font(&self) -> String {
-		self.state.font.clone()
+		self.state.font.serialized_font.clone()
 	}
 
 	//==============================================================================
@@ -1230,7 +1249,7 @@ impl Canvas2D {
 	/// 잰 값. (폭, 글꼴의 위아래 높이, 실제로 칠하는 상자)
 	//==============================================================================
 	pub fn measure_text(&self, text: &str) -> TextMetrics {
-		measure_text_without_graphic(&self.state.font, text).unwrap_or_default()
+		measure_text_without_graphic(&self.state.font.drawing_font, text).unwrap_or_default()
 	}
 
 	//==============================================================================
@@ -1414,6 +1433,8 @@ impl Canvas2D {
 
 	//==============================================================================
 	/// 픽셀 쓰기. (원본 putImageData: 자르기, 투명도, 합치기, 그림자 없이 그대로 바꾼다)
+	/// - 곧은 RGBA 를 크롬처럼 (색 x 알파 + 127) / 255 로 프리멀티플라이해 담는다.
+	/// - 폭이나 높이가 0 이거나 i32 를 넘거나, data 가 폭 x 높이 x 4 바이트가 아니면 쓰지 않는다. (원본 new ImageData 가 받지 않는 픽셀 묶음)
 	///
 	/// # 인자
 	/// - `image_data`: 쓸 픽셀 묶음. (프리멀티플라이하지 않은 RGBA)
@@ -1421,8 +1442,51 @@ impl Canvas2D {
 	/// - `destination_y`: 쓸 자리 위. (캔버스 픽셀, 변환을 받지 않는다)
 	//==============================================================================
 	pub fn put_image_data(&mut self, image_data: &ImageData, destination_x: i32, destination_y: i32) {
-		let canvas_width = self.width as i32;
-		let canvas_height = self.height as i32;
+		let width = i32::try_from(image_data.width).unwrap_or(i32::MAX);
+		let height = i32::try_from(image_data.height).unwrap_or(i32::MAX);
+		self.put_image_data_region(image_data, destination_x, destination_y, 0, 0, width, height);
+	}
+
+	//==============================================================================
+	/// 픽셀 묶음의 한 사각형만 쓰기. (원본 putImageData 의 dirtyX, dirtyY, dirtyWidth, dirtyHeight 꼴, 크롬 base_rendering_context_2d.cc 의 셈)
+	/// - 폭 x 높이가 i32 를 넘으면 쓰지 않는다. 음수 폭과 높이는 시작을 그만큼 옮겨 뒤집고(시작이 음수였으면 0), 픽셀 묶음과 캔버스 밖은 자른다.
+	///
+	/// # 인자
+	/// - `image_data`: 쓸 픽셀 묶음. (프리멀티플라이하지 않은 RGBA)
+	/// - `destination_x`: 픽셀 묶음 왼쪽이 놓일 자리. (캔버스 픽셀, 변환을 받지 않는다)
+	/// - `destination_y`: 픽셀 묶음 위가 놓일 자리. (캔버스 픽셀, 변환을 받지 않는다)
+	/// - `dirty_x`: 쓸 사각형 왼쪽. (픽셀 묶음 픽셀)
+	/// - `dirty_y`: 쓸 사각형 위. (픽셀 묶음 픽셀)
+	/// - `dirty_width`: 쓸 사각형 폭. (음수면 왼쪽으로)
+	/// - `dirty_height`: 쓸 사각형 높이. (음수면 위로)
+	///
+	/// # 예제
+	/// 2 x 2 픽셀 묶음의 오른쪽 아래 한 픽셀만 쓰기
+	/// ```rust
+	/// use vanilla::{Canvas2D, ImageData};
+	///
+	/// let mut image_data = ImageData::new(2, 2);
+	/// image_data.data.copy_from_slice(&[255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255]);
+	///
+	/// let mut canvas = Canvas2D::new(4, 4);
+	/// canvas.put_image_data_region(&image_data, 1, 1, 2, 2, -1, -1);
+	/// assert_eq!(canvas.get_image_data(2, 2, 1, 1).data, vec![255, 255, 255, 255]);
+	/// assert_eq!(canvas.get_image_data(1, 1, 1, 1).data, vec![0, 0, 0, 0]);
+	/// ```
+	//==============================================================================
+	pub fn put_image_data_region(&mut self, image_data: &ImageData, destination_x: i32, destination_y: i32, dirty_x: i32, dirty_y: i32, dirty_width: i32, dirty_height: i32) {
+		if image_data.width == 0 || image_data.height == 0 || image_data.width > i32::MAX as u32 || image_data.height > i32::MAX as u32 {
+			return;
+		}
+		let data_width = image_data.width as usize;
+		if image_data.data.len() as u64 != image_data.width as u64 * image_data.height as u64 * 4 {
+			return;
+		}
+		if dirty_width.checked_mul(dirty_height).is_none() {
+			return;
+		}
+		let canvas_width = self.width as i64;
+		let canvas_height = self.height as i64;
 		let pixmap = match self.pixmap.as_mut() {
 			Some(pixmap) => {
 				pixmap
@@ -1431,25 +1495,45 @@ impl Canvas2D {
 				return;
 			}
 		};
-		if image_data.data.len() < image_data.width as usize * image_data.height as usize * 4 {
+		// 음수 폭과 높이 뒤집기. (크롬은 절댓값을 i32 최댓값으로 포화한다)
+		let normalize_span = |start: i32, length: i32| -> (i64, i64) {
+			if length >= 0 {
+				(start as i64, length as i64)
+			}
+			else if start < 0 {
+				(0, 0)
+			}
+			else {
+				(start as i64 + length as i64, (-(length as i64)).min(i32::MAX as i64))
+			}
+		};
+		let (dirty_left, dirty_width) = normalize_span(dirty_x, dirty_width);
+		let (dirty_top, dirty_height) = normalize_span(dirty_y, dirty_height);
+		// 픽셀 묶음 안으로 자르고, 캔버스 자리로 옮겨 캔버스 안으로 자른다.
+		let source_left = dirty_left.max(0);
+		let source_top = dirty_top.max(0);
+		let source_right = (dirty_left + dirty_width).min(image_data.width as i64);
+		let source_bottom = (dirty_top + dirty_height).min(image_data.height as i64);
+		if source_left >= source_right || source_top >= source_bottom {
 			return;
 		}
-		let premultiplied_pixels = premultiply_pixels(&image_data.data);
+		let left = (source_left + destination_x as i64).max(0);
+		let top = (source_top + destination_y as i64).max(0);
+		let right = (source_right + destination_x as i64).min(canvas_width);
+		let bottom = (source_bottom + destination_y as i64).min(canvas_height);
+		if left >= right || top >= bottom {
+			return;
+		}
 		let canvas_pixels = pixmap.data_mut();
-		for row_index in 0..image_data.height as i32 {
-			let canvas_y = destination_y + row_index;
-			if canvas_y < 0 || canvas_y >= canvas_height {
-				continue;
-			}
-			for column_index in 0..image_data.width as i32 {
-				let canvas_x = destination_x + column_index;
-				if canvas_x < 0 || canvas_x >= canvas_width {
-					continue;
-				}
-				let canvas_offset = (canvas_y as usize * canvas_width as usize + canvas_x as usize) * 4;
-				let data_offset = (row_index as usize * image_data.width as usize + column_index as usize) * 4;
-				canvas_pixels[canvas_offset..canvas_offset + 4].copy_from_slice(&premultiplied_pixels[data_offset..data_offset + 4]);
-			}
+		for canvas_y in top..bottom {
+			let data_y = (canvas_y - destination_y as i64) as usize;
+			let data_left = (left - destination_x as i64) as usize;
+			let data_right = (right - destination_x as i64) as usize;
+			let data_offset = (data_y * data_width + data_left) * 4;
+			let data_end = (data_y * data_width + data_right) * 4;
+			let canvas_offset = (canvas_y as usize * canvas_width as usize + left as usize) * 4;
+			let premultiplied_row = premultiply_pixels(&image_data.data[data_offset..data_end]);
+			canvas_pixels[canvas_offset..canvas_offset + premultiplied_row.len()].copy_from_slice(&premultiplied_row);
 		}
 		self.revision += 1;
 	}
@@ -1680,7 +1764,7 @@ impl Canvas2D {
 			0.0
 		};
 		let padding = stroke_radius.ceil() as i32 + 1;
-		let text_raster = match rasterize_text_without_graphic(text, &self.state.font, text_scale, padding, ShapingDirection::LeftToRight) {
+		let text_raster = match rasterize_text_without_graphic(text, &self.state.font.drawing_font, text_scale, padding, ShapingDirection::LeftToRight) {
 			Some(text_raster) => {
 				text_raster
 			}
@@ -2579,5 +2663,170 @@ mod tests {
 		narrow_canvas.fill_text("Hello", 0.0, 30.0, Some(20.0));
 		let narrow_data = narrow_canvas.get_image_data(24, 0, 96, 40);
 		assert_eq!(narrow_data.data.chunks_exact(4).filter(|pixel| pixel[3] > 0).count(), 0);
+	}
+
+	//==============================================================================
+	/// FNV-1a 64 비트 해시. (크롬에서 읽은 큰 픽셀 묶음을 견주려고)
+	//==============================================================================
+	fn hash_fnv1a(bytes: &[u8]) -> u64 {
+		let mut hash: u64 = 0xcbf29ce484222325;
+		for byte in bytes {
+			hash ^= *byte as u64;
+			hash = hash.wrapping_mul(0x100000001b3);
+		}
+		hash
+	}
+
+	//==============================================================================
+	/// 픽셀 쓰기와 읽기: 모든 (색, 알파) 짝이 크롬 158 CPU 캔버스와 같다.
+	/// - 픽셀 (x = 색, y = 알파) 에 [색, 255 - 색, (색 x 37 + 11) & 255, 알파] 를 쓴 256 x 256 묶음. 해시는 헤드리스 크롬(--disable-gpu)에서 읽은 값이다.
+	/// - 프리멀티플라이 값은 크롬에서 불투명한 검정 위에 drawImage 로 그려 읽었다. (알파 255)
+	//==============================================================================
+	#[test]
+	fn put_and_get_image_data_match_chrome_for_every_alpha() {
+		let mut image_data = ImageData::new(256, 256);
+		for alpha in 0..256usize {
+			for color in 0..256usize {
+				let offset = (alpha * 256 + color) * 4;
+				image_data.data[offset] = color as u8;
+				image_data.data[offset + 1] = (255 - color) as u8;
+				image_data.data[offset + 2] = ((color * 37 + 11) & 255) as u8;
+				image_data.data[offset + 3] = alpha as u8;
+			}
+		}
+		let mut canvas = Canvas2D::new(256, 256);
+		canvas.put_image_data(&image_data, 0, 0);
+		let mut premultiplied_pixels = canvas.read_premultiplied_pixels();
+		for pixel in premultiplied_pixels.chunks_exact_mut(4) {
+			pixel[3] = 255;
+		}
+		assert_eq!(hash_fnv1a(&premultiplied_pixels), 0xbea87602868fe237);
+		assert_eq!(hash_fnv1a(&canvas.get_image_data(0, 0, 256, 256).data), 0x78ee1ba1c57a4355);
+		// 반이 딱 떨어지는 값: 크롬은 f32 로 셈해 짝수 쪽(42.5 → 42)이거나 오차로 올라간다(76.5 → 77).
+		let mut tie_canvas = Canvas2D::new(2, 1);
+		let mut tie_data = ImageData::new(2, 1);
+		tie_data.data.copy_from_slice(&[43, 213, 0, 6, 77, 179, 0, 10]);
+		tie_canvas.put_image_data(&tie_data, 0, 0);
+		assert_eq!(tie_canvas.read_premultiplied_pixels(), vec![1, 5, 0, 6, 3, 7, 0, 10]);
+		assert_eq!(tie_canvas.get_image_data(0, 0, 2, 1).data, vec![42, 212, 0, 6, 77, 179, 0, 10]);
+	}
+
+	//==============================================================================
+	/// 더러운 사각형: 헤드리스 크롬 158 의 putImageData 와 같은 칸에 쓴다.
+	/// - 6 x 5 캔버스를 (10, 20, 30) 으로 칠하고 4 x 3 묶음(빨강 100 + 차례)을 쓴 뒤 칸마다 묶음 차례(16진)나 '.'(그대로)를 적었다.
+	//==============================================================================
+	#[test]
+	fn put_image_data_dirty_rect_matches_chrome() {
+		const CHROME_DIRTY_TABLE: &[(&[i32], &str)] = &[
+			(&[0, 0], "0123..4567..89ab.............."),
+			(&[1, 1], ".......0123..4567..89ab......."),
+			(&[-1, -1], "567...9ab....................."),
+			(&[4, 3], "......................01....45"),
+			(&[-3, 0], "3.....7.....b................."),
+			(&[5, 4], ".............................0"),
+			(&[6, 0], ".............................."),
+			(&[0, 5], ".............................."),
+			(&[-4, 0], ".............................."),
+			(&[i32::MAX, 0], ".............................."),
+			(&[i32::MIN, 0], ".............................."),
+			(&[0, 0, 1, 1, 2, 1], ".......56....................."),
+			(&[1, 1, 1, 0, 2, 2], "........12....56.............."),
+			(&[0, 0, 3, 2, -2, -1], ".......56....................."),
+			(&[0, 0, -1, -1, 2, 2], "0............................."),
+			(&[0, 0, -1, 0, -2, 2], ".............................."),
+			(&[2, 1, 0, 0, 0, 0], ".............................."),
+			(&[0, 0, 0, 0, -3, 3], ".............................."),
+			(&[0, 0, 2, 2, 10, 10], "..............ab.............."),
+			(&[0, 0, 5, 0, -3, 3], "..23....67....ab.............."),
+			(&[3, 2, -10, -10, 100, 100], "...............012...456...89a"),
+			(&[0, 0, 1, 1, -1, -1], "0............................."),
+			(&[0, 0, 4, 3, -5, -5], "0123..4567..89ab.............."),
+			(&[1, 0, 2, 0, i32::MIN, 3], ".............................."),
+			(&[0, 0, i32::MAX, 0, i32::MAX, 3], ".............................."),
+			(&[0, 0, 0, 0, 100000, 100000], ".............................."),
+			(&[0, 0, 0, 0, 65536, 32768], ".............................."),
+			(&[0, 0, 0, 0, 65535, 32768], "0123..4567..89ab.............."),
+			(&[0, 0, 2, 0, i32::MIN, 1], "0............................."),
+			(&[0, 0, -2, 0, i32::MIN, 1], ".............................."),
+			(&[0, 0, 3, 0, -2147483647, 1], "012..........................."),
+			(&[1, 1, 3, 2, i32::MIN, 1], "...................89........."),
+			(&[0, 0, 1, 2, 2, i32::MIN], ".............................."),
+		];
+		for (argument_list, expected_cell_text) in CHROME_DIRTY_TABLE {
+			let mut canvas = Canvas2D::new(6, 5);
+			canvas.set_fill_style("rgb(10, 20, 30)");
+			canvas.fill_rect(0.0, 0.0, 6.0, 5.0);
+			let mut image_data = canvas.create_image_data(4, 3);
+			for index in 0..12 {
+				image_data.data[index * 4..index * 4 + 4].copy_from_slice(&[100 + index as u8, 200, index as u8, 255]);
+			}
+			if argument_list.len() == 2 {
+				canvas.put_image_data(&image_data, argument_list[0], argument_list[1]);
+			}
+			else {
+				canvas.put_image_data_region(&image_data, argument_list[0], argument_list[1], argument_list[2], argument_list[3], argument_list[4], argument_list[5]);
+			}
+			let pixels = canvas.get_image_data(0, 0, 6, 5).data;
+			let cell_text: String = pixels.chunks_exact(4).map(|pixel| {
+				if pixel[0] == 10 {
+					'.'
+				}
+				else {
+					char::from_digit((pixel[0] - 100) as u32, 16).unwrap()
+				}
+			}).collect();
+			assert_eq!(&cell_text, expected_cell_text, "{:?}", argument_list);
+		}
+	}
+
+	//==============================================================================
+	/// 브라우저 new ImageData 가 받지 않는 픽셀 묶음은 쓰지 않는다. (data 길이가 폭 x 높이 x 4 가 아닌 것, 폭이나 높이 0)
+	//==============================================================================
+	#[test]
+	fn put_image_data_skips_invalid_image_data() {
+		let mut canvas = Canvas2D::new(2, 1);
+		let revision = canvas.revision;
+		let long_data = ImageData {
+			width: 1,
+			height: 1,
+			data: vec![255, 0, 0, 255, 0, 255, 0, 255],
+		};
+		canvas.put_image_data(&long_data, 0, 0);
+		let short_data = ImageData {
+			width: 2,
+			height: 1,
+			data: vec![255, 0, 0, 255],
+		};
+		canvas.put_image_data(&short_data, 0, 0);
+		canvas.put_image_data(&ImageData::new(0, 1), 0, 0);
+		assert_eq!(canvas.get_image_data(0, 0, 2, 1).data, vec![0; 8]);
+		assert_eq!(canvas.revision, revision);
+		// 자리가 캔버스 밖이면 바뀐 것이 없다.
+		canvas.put_image_data(&ImageData::new(1, 1), 5, 0);
+		assert_eq!(canvas.revision, revision);
+	}
+
+	//==============================================================================
+	/// 글꼴 상태: 틀린 글은 앞 값을 남기고, save 와 restore 를 따르고, reset 은 처음 값. (헤드리스 크롬 158 과 같은 차례)
+	//==============================================================================
+	#[test]
+	fn font_state_follows_chrome() {
+		let mut canvas = Canvas2D::new(4, 4);
+		assert_eq!(canvas.get_font(), "10px sans-serif");
+		canvas.set_font("bogus");
+		assert_eq!(canvas.get_font(), "10px sans-serif");
+		canvas.set_font("20px a");
+		canvas.set_font("bogus");
+		assert_eq!(canvas.get_font(), "20px a");
+		canvas.save();
+		canvas.set_font("30px b");
+		assert_eq!(canvas.get_font(), "30px b");
+		canvas.restore();
+		assert_eq!(canvas.get_font(), "20px a");
+		canvas.set_font("oblique 10deg 12px a");
+		assert_eq!(canvas.get_font(), "12px a");
+		assert_eq!(canvas.state.font.drawing_font, "oblique 12px a");
+		canvas.reset();
+		assert_eq!(canvas.get_font(), "10px sans-serif");
 	}
 }

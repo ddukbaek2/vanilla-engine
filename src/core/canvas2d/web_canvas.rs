@@ -816,7 +816,7 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	/// 글꼴 설정. (원본 font)
+	/// 글꼴 설정. (원본 font, CSS font 줄임 꼴. 브라우저가 읽고 틀린 글은 무시한다)
 	///
 	/// # 인자
 	/// - `font`: 글꼴. (CSS font 줄임 꼴, "bold 16px sans-serif" 같은 것, 처음 "10px sans-serif")
@@ -829,7 +829,7 @@ impl Canvas2D {
 	/// 글꼴.
 	///
 	/// # 돌려줌
-	/// 글꼴. (CSS font 줄임 꼴, 처음 "10px sans-serif")
+	/// 글꼴. (브라우저 font 게터의 직렬화: "italic ", "bold " 나 굵기 수, "small-caps ", 크기 px, 이름 목록. 처음 "10px sans-serif")
 	//==============================================================================
 	pub fn get_font(&self) -> String {
 		self.context.font()
@@ -1434,6 +1434,7 @@ impl Canvas2D {
 
 	//==============================================================================
 	/// 픽셀 쓰기. (원본 putImageData: 자르기, 투명도, 합치기, 그림자 없이 그대로 바꾼다)
+	/// - 폭이나 높이가 0 이거나 i32 를 넘거나, data 가 폭 x 높이 x 4 바이트가 아니면 쓰지 않는다. (브라우저 new ImageData 가 받지 않는다)
 	///
 	/// # 인자
 	/// - `image_data`: 쓸 픽셀 묶음. (프리멀티플라이하지 않은 RGBA)
@@ -1443,6 +1444,26 @@ impl Canvas2D {
 	pub fn put_image_data(&mut self, image_data: &ImageData, destination_x: i32, destination_y: i32) {
 		if let Ok(browser_image_data) = web_sys::ImageData::new_with_u8_clamped_array_and_sh(Clamped(&image_data.data), image_data.width, image_data.height) {
 			let _ = self.context.put_image_data(&browser_image_data, destination_x as f64, destination_y as f64);
+			self.revision += 1;
+		}
+	}
+
+	//==============================================================================
+	/// 픽셀 묶음의 한 사각형만 쓰기. (원본 putImageData 의 dirtyX, dirtyY, dirtyWidth, dirtyHeight 꼴)
+	/// - 폭 x 높이가 i32 를 넘으면 쓰지 않는다. 음수 폭과 높이는 시작을 그만큼 옮겨 뒤집고(시작이 음수였으면 0), 픽셀 묶음과 캔버스 밖은 자른다.
+	///
+	/// # 인자
+	/// - `image_data`: 쓸 픽셀 묶음. (프리멀티플라이하지 않은 RGBA)
+	/// - `destination_x`: 픽셀 묶음 왼쪽이 놓일 자리. (캔버스 픽셀, 변환을 받지 않는다)
+	/// - `destination_y`: 픽셀 묶음 위가 놓일 자리. (캔버스 픽셀, 변환을 받지 않는다)
+	/// - `dirty_x`: 쓸 사각형 왼쪽. (픽셀 묶음 픽셀)
+	/// - `dirty_y`: 쓸 사각형 위. (픽셀 묶음 픽셀)
+	/// - `dirty_width`: 쓸 사각형 폭. (음수면 왼쪽으로)
+	/// - `dirty_height`: 쓸 사각형 높이. (음수면 위로)
+	//==============================================================================
+	pub fn put_image_data_region(&mut self, image_data: &ImageData, destination_x: i32, destination_y: i32, dirty_x: i32, dirty_y: i32, dirty_width: i32, dirty_height: i32) {
+		if let Ok(browser_image_data) = web_sys::ImageData::new_with_u8_clamped_array_and_sh(Clamped(&image_data.data), image_data.width, image_data.height) {
+			let _ = self.context.put_image_data_with_dirty_x_and_dirty_y_and_dirty_width_and_dirty_height(&browser_image_data, destination_x as f64, destination_y as f64, dirty_x as f64, dirty_y as f64, dirty_width as f64, dirty_height as f64);
 			self.revision += 1;
 		}
 	}
