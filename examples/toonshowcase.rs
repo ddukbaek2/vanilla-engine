@@ -147,6 +147,8 @@ impl ToonShowcaseScene {
 		}
 		renderer.set_hdr_output(true);
 		renderer.set_light([-0.5, -1.0, -0.4], [1.6, 1.5, 1.4], [0.35, 0.4, 0.5], [0.15, 0.13, 0.12]);
+		// HDR 블룸에 1 을 넘는 해를 쓰므로 빛 세기 막기(기본 켬, 유니티 툰 셰이더의 Limit Light Intensity)를 끈다.
+		renderer.set_light_intensity_limited(false);
 		self.shadow_map = Some(ShadowMap::new(gl, 2048)?);
 		self.renderer = Some(renderer);
 		Ok(())

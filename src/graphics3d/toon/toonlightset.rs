@@ -16,7 +16,9 @@
 //   해와 점광, 스포트라이트 모두에 선다. 기본 세기 0 이면 없다.
 // - 림 빛(rim): pow(1 - max(dot(N, V), 0), power) 를 0.5 에서 가른 단단한 테(부드러움 0)에서 부드러운 테(1)까지. light_mask 가 1 이면 해를 받는 쪽에만. 바탕색과 상관없이 더한다.
 //   그늘 쪽 림(set_shade_rim_light)은 같은 테를 해와 등진 쪽에 (테 - (dot(N, L) x 0.5 + 0.5)) 만큼 더한다. (유니티 툰 셰이더의 Antipodean(Ap) Rim Light)
-// - 빛 색 쓰기(set_light_color_usage): 색마다 빛 색을 곱할지 고른다. 끄면 바탕, 그늘, 하이라이트는 빛의 휘도만, 림과 매트캡과 천사 고리와 바깥선은 빛을 받지 않는다. (유니티 툰 셰이더의 Is_LightColor_*, 기본 모두 켬)
+// - 빛 색 쓰기(set_light_color_usage): 색마다 빛 색을 곱할지 고른다. 끄면 바탕, 그늘, 하이라이트는 빛의 세기(0.299 R + 0.587 G + 0.114 B)만, 림과 매트캡과 천사 고리와 바깥선은 빛을 받지 않는다. (유니티 툰 셰이더의 Is_LightColor_*, 기본 모두 켬)
+// - 빛 세기 막기(set_light_intensity_limited): 빛마다 받은 몫을 1 로 막는다. 해와 채움 빛은 채널마다 1 로 자르고, 점광과 스포트라이트는 감쇠까지 곱한 색의 세기가 1 을 넘으면 세기로 나눈다.
+//   (유니티 툰 셰이더의 Limit Light Intensity, 기본 켬) HDR 블룸에 센 빛을 쓰려면 끈다.
 // - 점광과 스포트라이트: TOON_MAXIMUM_POINT_LIGHTS 까지. (ToonPointLight)
 //   감쇠는 창 x 거리 감쇠다. 창은 range 가 0 보다 크면 (1 - (거리 / range)^range_exponent) 를 0 ~ 1 로 막아 제곱, 0 이면 1. 거리 감쇠는 decay 가 0 보다 크면 1 / max(거리^decay, 0.01), 0 이면 1.
 //   casts_shadow 가 true 인 빛은 ShadowAtlas::update_lights(read_shadow_light_sources()) 가 그림자 칸을 준다. (점광은 큐브 여섯 면, 스포트라이트는 원근 한 칸)
@@ -220,6 +222,8 @@ pub struct ToonLightSet {
 	rim_light: ToonRimLight,
 	shade_rim_light: ToonShadeRimLight,
 	light_color_usage: ToonLightColorUsage,
+	/// 빛마다 받은 몫을 1 로 막는지.
+	is_light_intensity_limited: bool,
 	specular: ToonSpecular,
 	point_light_list: Vec<ToonPointLight>,
 	point_light_limit: usize,
@@ -257,6 +261,7 @@ impl Clone for ToonLightSet {
 			rim_light: self.rim_light,
 			shade_rim_light: self.shade_rim_light,
 			light_color_usage: self.light_color_usage,
+			is_light_intensity_limited: self.is_light_intensity_limited,
 			specular: self.specular,
 			point_light_list: self.point_light_list.clone(),
 			point_light_limit: self.point_light_limit,
@@ -284,6 +289,7 @@ impl ToonLightSet {
 			rim_light: ToonRimLight { color: [0.0; 3], power: 0.0, feather: 1.0, light_mask: 0.0 },
 			shade_rim_light: ToonShadeRimLight { color: [0.0; 3], power: 0.0 },
 			light_color_usage: ToonLightColorUsage::default(),
+			is_light_intensity_limited: true,
 			specular: ToonSpecular { strength: 0.0, exponent: 48.0, feather: 0.0, color: [1.0; 3] },
 			point_light_list: Vec::new(),
 			point_light_limit: TOON_MAXIMUM_POINT_LIGHTS,
@@ -422,6 +428,24 @@ impl ToonLightSet {
 	//==============================================================================
 	pub fn get_light_color_usage(&self) -> ToonLightColorUsage {
 		self.light_color_usage
+	}
+
+	//==============================================================================
+	/// 빛 세기 막기 설정. (true 면 빛마다 받은 몫을 1 로 막아 하얗게 날지 않게 한다, 기본 true, 유니티 툰 셰이더의 Limit Light Intensity)
+	/// - 해와 채움 빛은 색의 채널마다 1 로 자른다. (주광의 saturate)
+	/// - 점광과 스포트라이트는 감쇠까지 곱한 색의 세기(0.299 R + 0.587 G + 0.114 B)가 1 을 넘으면 세기로 나눈다. (추가 빛의 min(색, 색 / 세기))
+	/// - 빛 꼴이 is_energy_normalized 면 π 로 나눈 뒤의 몫을 1 로 막는다.
+	//==============================================================================
+	pub fn set_light_intensity_limited(&mut self, is_limited: bool) {
+		self.is_light_intensity_limited = is_limited;
+		self.mark_changed();
+	}
+
+	//==============================================================================
+	/// 빛 세기를 막는지 반환.
+	//==============================================================================
+	pub fn is_light_intensity_limited(&self) -> bool {
+		self.is_light_intensity_limited
 	}
 
 	//==============================================================================
@@ -633,6 +657,10 @@ mod tests {
 		assert!(!light_set.get_light_color_usage().outline);
 		light_set.set_shade_rim_light([0.2, 0.3, 0.6], 2.5);
 		assert_eq!(light_set.get_shade_rim_light().power, 2.5);
+		assert!(light_set.is_light_intensity_limited());
+		light_set.set_light_intensity_limited(false);
+		assert!(!light_set.is_light_intensity_limited());
+		assert!(!light_set.clone().is_light_intensity_limited());
 	}
 
 	#[test]

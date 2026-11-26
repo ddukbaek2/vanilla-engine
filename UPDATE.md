@@ -566,6 +566,10 @@
 - tools/apidoc(워크스페이스 크레이트 vanilla-engine-apidoc, syn 과 serde_json 만 쓴다): 문서 주석에서 API 문서 자료 docs/api/<판>.json 을 뽑는다. vanilla.js tools/apidoc.cjs 와 같은 자료 꼴에 클래스의 kind(struct, trait, type), traits, counterpart 를 더했다. --check(꼴 검사와 수 세기, 가이드 ko 와 en 대조), --missing(번역 표에 없는 ko 글), --gaps(문서가 빈 곳), --counterpart(vanilla.js 자료와 이름으로 짝 짓기). since 는 v0.3.2 태그의 소스와 대어 정한다. 쓰는 법은 tools/TOOLS.md
 - docs/api/0.4.0.json(모듈 216, 클래스 496, 멤버 4930, 함수와 상수 354, 열거 89), 영어 번역 표 docs/api/translation.en.json, vanilla.js 와 같은 항목의 짝 표 docs/api/counterpart.0.4.0.json(vanilla.js 쪽 자료가 러스트 짝을 채울 때도 쓴다)
 - 가이드 docs/guide/0.4.0/ko, en: 개요, 빠른 시작, 구조, 도구와 05 프로젝트 시작부터 19 저작 도구까지(원본 vanilla.js 가이드와 같은 장), 러스트 판만의 20 반사 매크로, 21 async/await, 22 원본에서 옮겨 오기. 코드 칸 216 개 가운데 rust 칸은 tools/apidoc 의 라이브러리 자리가 doctest 로 컴파일하고 돌린다. (장 목록 tools/apidoc/src/guide.rs 는 apidoc 이 장 파일마다 include_str 문서 속성으로 다시 쓴다) 업데이트 문서 docs/update/0.4.0.ko.md, .en.md
+- 천사 고리: 카메라 기울임만큼 UV 를 되돌려 돌린다. (vanilla.js 와 같은 셈, read_camera_roll) 카메라를 기울여도 고리가 머리에 붙어 있다
+- 빛 세기 막기: ToonLightSet::set_light_intensity_limited, is_light_intensity_limited (렌더러에도 set_light_intensity_limited). 유니티 툰 셰이더의 Limit Light Intensity 와 같은 셈, 기본 켬. 지금까지 모습은 set_light_intensity_limited(false). 빛 색 쓰기를 끈 색의 세기와 껍데기 바깥선의 해 색도 유니티 툰 셰이더와 같게
+- ShadowAtlas::new(gl, 해상도, 칸 해상도): 칸 크기를 유니티 URP 기본과 같게 칸마다 1024 를 바라고 다 들어가지 않으면 반씩 줄인다. DEFAULT_SHADOW_ATLAS_RESOLUTION (2048), DEFAULT_SHADOW_ATLAS_TILE_RESOLUTION (1024), get_tile_resolution. (new 에 인자가 하나 늘었다)
+- 예제 toonstyle: TOON_STYLE_ROLL 로 카메라를 기울인다. 원본과 견주면 화소 차이 평균 0.005 (기울인 장면 0.005)
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.

@@ -83047,8 +83047,8 @@
 		{
 			"name": "graphics3d/shadowmap",
 			"summary": {
-				"ko": "섀도우 맵. (원본 experimental/graphics/shadowmap.js)\n- 방향광 실시간 그림자, 깊이 텍스처(하드웨어 비교 샘플링, sampler2DShadow) + 직교 광원 행렬.\n- begin_render() 로 깊이 패스를 시작하고, 결과 텍스처를 본 패스에서 샘플링한다.\n- 광원 행렬은 텍셀 단위로 스냅해 이동 시 그림자 가장자리 떨림을 줄인다. 빛이 거의 바로 위나 아래로 나아가면 위쪽을 z 축으로 잡아 행렬이 깨지지 않게 한다.\n- 지을 때 앞의 텍스처와 프레임버퍼 묶음을 돌린다. (모형을 지은 뒤에 지어도 깊이 텍스처가 텍스처 유닛에 남아 그리기가 INVALID_OPERATION 이 되지 않게)\n- ShadowAtlas: 점광과 스포트라이트의 그림자를 깊이 텍스처 한 장에 칸으로 나눠 담는다. (원본 ShadowAtlas, 유니티 URP 의 추가 빛 그림자 아틀라스 꼴)\n  툰 셰이더는 받는 자리를 노멀 쪽으로 그 거리의 칸 텍셀 (1 + 3 x (1 - dot(N, L))) 개만큼 밀어 견준다. (빛에 비스듬한 면일수록 크게, 그림자 여드름을 막는다)\n- 텍셀 스냅의 반올림은 원본 Math.round 와 같이 0.5 를 위로 올린다. (러스트 round 는 0 에서 먼 쪽이라 음수에서 다르다)\n- 원본 해상도 기본값 인자 2048 은 DEFAULT_SHADOWMAP_RESOLUTION 으로 둔다. (러스트에 기본값 인자가 없다)",
-				"en": "Shadow map. (the original experimental/graphics/shadowmap.js)\n- Directional light real-time shadows, depth texture (hardware comparison sampling, sampler2DShadow) + orthographic light matrix.\n- Starts the depth pass with begin_render(), and the result texture is sampled in the main pass.\n- The light matrix snaps to texel units to reduce shadow edge shimmering when moving. When the light travels almost straight up or down, the up direction becomes the z axis so the matrix does not break.\n- Restores the previous texture and framebuffer bindings when built. (So that building it after models does not leave the depth texture on a texture unit and turn drawing into INVALID_OPERATION)\n- ShadowAtlas: stores the shadows of point lights and spotlights as tiles in one depth texture. (the original ShadowAtlas, in the form of the additional light shadow atlas of Unity URP)\n  The toon shader pushes the receiving position toward the normal by (1 + 3 x (1 - dot(N, L))) tile texels at that distance before comparing. (Larger the more the surface is slanted to the light, prevents shadow acne)\n- Rounding in the texel snap rounds 0.5 up, like the original Math.round. (Rust round goes away from 0, so it differs for negative numbers)\n- The original default resolution argument 2048 is kept as DEFAULT_SHADOWMAP_RESOLUTION. (Rust has no default arguments)"
+				"ko": "섀도우 맵. (원본 experimental/graphics/shadowmap.js)\n- 방향광 실시간 그림자, 깊이 텍스처(하드웨어 비교 샘플링, sampler2DShadow) + 직교 광원 행렬.\n- begin_render() 로 깊이 패스를 시작하고, 결과 텍스처를 본 패스에서 샘플링한다.\n- 광원 행렬은 텍셀 단위로 스냅해 이동 시 그림자 가장자리 떨림을 줄인다. 빛이 거의 바로 위나 아래로 나아가면 위쪽을 z 축으로 잡아 행렬이 깨지지 않게 한다.\n- 지을 때 앞의 텍스처와 프레임버퍼 묶음을 돌린다. (모형을 지은 뒤에 지어도 깊이 텍스처가 텍스처 유닛에 남아 그리기가 INVALID_OPERATION 이 되지 않게)\n- ShadowAtlas: 점광과 스포트라이트의 그림자를 깊이 텍스처 한 장에 칸으로 나눠 담는다. (원본 ShadowAtlas, 유니티 URP 의 추가 빛 그림자 아틀라스 꼴)\n  칸 크기는 URP 기본과 같이 정한다. 칸마다 tile_resolution 을 바라고, 아틀라스에 다 들어가지 않으면 다 들어갈 때까지 칸 한 변을 반씩 줄인다. (점광 하나면 512, 스포트라이트 하나면 1024)\n  툰 셰이더는 받는 자리를 노멀 쪽으로 그 거리의 칸 텍셀 (1 + 3 x (1 - dot(N, L))) 개만큼 밀어 견준다. (빛에 비스듬한 면일수록 크게, 그림자 여드름을 막는다)\n- 텍셀 스냅의 반올림은 원본 Math.round 와 같이 0.5 를 위로 올린다. (러스트 round 는 0 에서 먼 쪽이라 음수에서 다르다)\n- 원본 해상도 기본값 인자 2048 은 DEFAULT_SHADOWMAP_RESOLUTION 으로 둔다. (러스트에 기본값 인자가 없다)",
+				"en": "Shadow map. (original experimental/graphics/shadowmap.js)\n- Real-time directional light shadows, a depth texture (hardware compare sampling, sampler2DShadow) and an orthographic light matrix.\n- begin_render() starts the depth pass, and the main pass samples the resulting texture.\n- The light matrix snaps to texel units to reduce shadow edge shimmer while moving. When the light points almost straight up or down, the up axis is taken as z so the matrix does not break.\n- Construction restores the previous texture and framebuffer bindings. (so building it after models does not leave the depth texture on a texture unit and make drawing INVALID_OPERATION)\n- ShadowAtlas: stores point light and spot light shadows as tiles in one depth texture. (original ShadowAtlas, the form of Unity URP's additional light shadow atlas)\n  Tile size follows the URP default. Each tile asks for tile_resolution, and if they do not all fit in the atlas, the tile side is halved until they fit. (512 for one point light, 1024 for one spot light)\n  The toon shader pushes the receiving position toward the normal by (1 + 3 x (1 - dot(N, L))) tile texels at that distance before comparing. (larger for surfaces at a grazing angle to the light, prevents shadow acne)\n- Texel snapping rounds 0.5 up, like the original Math.round. (Rust round goes away from zero, so it differs for negative numbers)\n- The original default resolution argument 2048 is DEFAULT_SHADOWMAP_RESOLUTION. (Rust has no default arguments)"
 			},
 			"classes": [
 				{
@@ -83781,7 +83781,7 @@
 						{
 							"kind": "constructor",
 							"name": "new",
-							"signature": "pub fn new(gl: &glow::Context, resolution: i32) -> Result<ShadowAtlas, String>",
+							"signature": "pub fn new(gl: &glow::Context, resolution: i32, tile_resolution: i32) -> Result<ShadowAtlas, String>",
 							"params": [
 								{
 									"name": "gl",
@@ -83798,13 +83798,21 @@
 										"ko": "깊이 텍스처 한 변의 텍셀 수. (정사각형)",
 										"en": "Number of texels per side of the depth texture. (Square)"
 									}
+								},
+								{
+									"name": "tile_resolution",
+									"type": "i32",
+									"description": {
+										"ko": "",
+										"en": ""
+									}
 								}
 							],
 							"returns": {
 								"type": "Result<ShadowAtlas, String>",
 								"description": {
-									"ko": "새 그림자 아틀라스. 텍스처나 프레임버퍼를 못 만들면 Err(GL 의 오류 글).",
-									"en": "New shadow atlas. Err(GL error message) if the texture or framebuffer cannot be created."
+									"ko": "새 그림자 아틀라스. 텍스처나 프레임버퍼를 못 만들면 Err(GL 의 오류 글).\n- resolution 은 아틀라스 한 변, tile_resolution 은 칸마다 바라는 한 변이다. (원본 기본값은 DEFAULT_SHADOW_ATLAS_RESOLUTION, DEFAULT_SHADOW_ATLAS_TILE_RESOLUTION)",
+									"en": "Creates a shadow atlas. Err(the GL error text) if the texture or framebuffer cannot be created.\n- resolution is one side of the atlas, tile_resolution is the side each tile asks for. (the original defaults are DEFAULT_SHADOW_ATLAS_RESOLUTION, DEFAULT_SHADOW_ATLAS_TILE_RESOLUTION)"
 								}
 							},
 							"description": {
@@ -83933,6 +83941,25 @@
 								"class": "ShadowAtlas",
 								"name": "getLights"
 							}
+						},
+						{
+							"kind": "method",
+							"name": "get_tile_resolution",
+							"signature": "pub fn get_tile_resolution(&self) -> i32",
+							"params": [],
+							"returns": {
+								"type": "i32",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "칸마다 바라는 한 변 반환. (픽셀, 생성 때 준 값)",
+								"en": "Returns the side each tile asks for. (pixels, the value given at creation)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/shadowmap.rs"
 						},
 						{
 							"kind": "method",
@@ -84176,6 +84203,44 @@
 						"en": "Default resolution. (the original constructor's default argument)"
 					},
 					"since": "0.3.2",
+					"source": "src/graphics3d/shadowmap.rs"
+				},
+				{
+					"kind": "field",
+					"name": "DEFAULT_SHADOW_ATLAS_RESOLUTION",
+					"signature": "pub const DEFAULT_SHADOW_ATLAS_RESOLUTION: i32 = 2048",
+					"params": [],
+					"returns": {
+						"type": "i32",
+						"description": {
+							"ko": "",
+							"en": ""
+						}
+					},
+					"description": {
+						"ko": "그림자 아틀라스 한 변의 기본값. (원본 ShadowAtlas 의 기본값 인자, 유니티 URP 의 추가 빛 그림자 아틀라스 기본 2048)",
+						"en": "Default side of the shadow atlas. (the original ShadowAtlas default argument, Unity URP's additional light shadow atlas default 2048)"
+					},
+					"since": "0.4.0",
+					"source": "src/graphics3d/shadowmap.rs"
+				},
+				{
+					"kind": "field",
+					"name": "DEFAULT_SHADOW_ATLAS_TILE_RESOLUTION",
+					"signature": "pub const DEFAULT_SHADOW_ATLAS_TILE_RESOLUTION: i32 = 1024",
+					"params": [],
+					"returns": {
+						"type": "i32",
+						"description": {
+							"ko": "",
+							"en": ""
+						}
+					},
+					"description": {
+						"ko": "그림자 아틀라스 칸마다 바라는 한 변의 기본값. (원본 ShadowAtlas 의 기본값 인자, 유니티 URP 의 추가 빛 그림자 해상도 단계 High 기본 1024, 빛의 기본 단계가 High)",
+						"en": "Default side each shadow atlas tile asks for. (the original ShadowAtlas default argument, Unity URP's additional light shadow resolution tier High default 1024, the light's default tier is High)"
+					},
+					"since": "0.4.0",
 					"source": "src/graphics3d/shadowmap.rs"
 				},
 				{
@@ -97564,6 +97629,27 @@
 						},
 						{
 							"kind": "method",
+							"name": "set_light_intensity_limited",
+							"signature": "pub fn set_light_intensity_limited(&mut self, is_limited: bool)",
+							"params": [
+								{
+									"name": "is_limited",
+									"type": "bool",
+									"description": {
+										"ko": "",
+										"en": ""
+									}
+								}
+							],
+							"description": {
+								"ko": "빛 세기 막기 설정. (ToonLightSet::set_light_intensity_limited, 기본 true)",
+								"en": "Sets light intensity limiting. (ToonLightSet::set_light_intensity_limited, default true)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonrenderer.rs"
+						},
+						{
+							"kind": "method",
 							"name": "set_shade_rim_light",
 							"signature": "pub fn set_shade_rim_light(&mut self, shade_rim_color: [f32; 3], shade_rim_power: f32)",
 							"params": [
@@ -98108,6 +98194,42 @@
 						"module": "experimental/graphics/toon/toonrenderer",
 						"name": "readViewRotation"
 					}
+				},
+				{
+					"kind": "method",
+					"name": "read_camera_roll",
+					"signature": "pub fn read_camera_roll(view_rotation: &[f32; 9], is_mirrored: bool) -> f32",
+					"params": [
+						{
+							"name": "view_rotation",
+							"type": "&[f32; 9]",
+							"description": {
+								"ko": "",
+								"en": ""
+							}
+						},
+						{
+							"name": "is_mirrored",
+							"type": "bool",
+							"description": {
+								"ko": "",
+								"en": ""
+							}
+						}
+					],
+					"returns": {
+						"type": "f32",
+						"description": {
+							"ko": "",
+							"en": ""
+						}
+					},
+					"description": {
+						"ko": "카메라 기울임을 되돌리는 각 읽기. (유니티 툰 셰이더의 천사 고리 Camera Rolling Stabilizer 와 같은 셈, 원본 readCameraRoll)\n- 카메라 오른쪽(보기 돌림의 행 0)과 수평 오른쪽 축이 이루는 각 roll, 오른쪽의 y 가 음수면 쪽 dir 이 -1, 돌려주는 각은 -(dir x roll) 이다.\n- 유니티는 왼손 좌표라 수평 오른쪽 축이 cross(뒤, 위) 이고, 엔진은 오른손 좌표라 같은 쪽이 cross(앞, 위) 다. 거울에 비친 프레임이면 축을 뒤집는다. (유니티 툰 셰이더의 mirrorFlag)\n- 바로 위나 아래를 보면 수평 축이 없어 0 이다.",
+						"en": "Reads the angle that undoes camera roll. (the same computation as the Unity Toon Shader angel ring Camera Rolling Stabilizer, original readCameraRoll)\n- roll is the angle between the camera right (row 0 of the view rotation) and the horizontal right axis, dir is -1 if the right's y is negative, and the returned angle is -(dir x roll).\n- Unity is left-handed so its horizontal right axis is cross(back, up), and the engine is right-handed so the same side is cross(forward, up). For a mirrored frame the axis is flipped. (the Unity Toon Shader mirrorFlag)\n- Looking straight up or down there is no horizontal axis, so it is 0."
+					},
+					"since": "0.4.0",
+					"source": "src/graphics3d/toon/toonrenderer.rs"
 				},
 				{
 					"kind": "method",
@@ -106442,6 +106564,46 @@
 								"class": "ToonLightSet",
 								"name": "getLightColorUsage"
 							}
+						},
+						{
+							"kind": "method",
+							"name": "set_light_intensity_limited",
+							"signature": "pub fn set_light_intensity_limited(&mut self, is_limited: bool)",
+							"params": [
+								{
+									"name": "is_limited",
+									"type": "bool",
+									"description": {
+										"ko": "",
+										"en": ""
+									}
+								}
+							],
+							"description": {
+								"ko": "빛 세기 막기 설정. (true 면 빛마다 받은 몫을 1 로 막아 하얗게 날지 않게 한다, 기본 true, 유니티 툰 셰이더의 Limit Light Intensity)\n- 해와 채움 빛은 색의 채널마다 1 로 자른다. (주광의 saturate)\n- 점광과 스포트라이트는 감쇠까지 곱한 색의 세기(0.299 R + 0.587 G + 0.114 B)가 1 을 넘으면 세기로 나눈다. (추가 빛의 min(색, 색 / 세기))\n- 빛 꼴이 is_energy_normalized 면 π 로 나눈 뒤의 몫을 1 로 막는다.",
+								"en": "Sets light intensity limiting. (if true, each light's received share is limited to 1 so it does not blow out to white, default true, the Unity Toon Shader Limit Light Intensity)\n- The sun and fill light clamp each color channel to 1. (saturate on the main light)\n- Point lights and spot lights divide by the intensity when the intensity of the color including attenuation (0.299 R + 0.587 G + 0.114 B) exceeds 1. (min(color, color / intensity) for additional lights)\n- If the light model is is_energy_normalized, the share after dividing by pi is limited to 1."
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonlightset.rs"
+						},
+						{
+							"kind": "method",
+							"name": "is_light_intensity_limited",
+							"signature": "pub fn is_light_intensity_limited(&self) -> bool",
+							"params": [],
+							"returns": {
+								"type": "bool",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "빛 세기를 막는지 반환.",
+								"en": "Returns whether light intensity is limited."
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/toon/toonlightset.rs"
 						},
 						{
 							"kind": "method",
