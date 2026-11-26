@@ -505,9 +505,19 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ````
-### ICT FaceKit (example assets read from vanilla.js, not in the crate)
+### ICT FaceKit and the Infinite head scan (example assets read from vanilla.js, not in the crate)
 
-- `examples/oldface.rs` reads `character_lod1.glb` from the vanilla.js repository (`examples/oldface/assets`). Its face, eyes, teeth, eyelashes, eye occlusion and expression shapes come from ICT FaceKit (FaceXModel), https://github.com/USC-ICT/ICT-FaceKit . The skin, wrinkle, eye, teeth and hair textures and the hair cards beside it are baked procedurally for vanilla.js and are under its MIT License.
+- `examples/oldface.rs` reads `character_lod1.glb` and its textures from the vanilla.js repository (`examples/oldface/assets`). The face topology, UVs, eyes, teeth, eyelashes, eye occlusion and expression shapes come from ICT FaceKit (FaceXModel), https://github.com/USC-ICT/ICT-FaceKit (MIT, below).
+- The head shape and the skin textures (`head_albedo.jpg`, `head_normal.jpg`, `skin_detail.jpg`, `head_roughness.jpg`, `head_specular.jpg`) come from "Infinite, 3D Head Scan" by Lee Perry-Smith (Infinite-Realities, I-R Entertainment Ltd.), based on a work at www.triplegangers.com, CC BY 3.0, https://creativecommons.org/licenses/by/3.0/ . Changed: the ICT head is reshaped to the scan and the colour and displacement are re-baked onto the ICT UVs, stubble and brows removed, beard shadow lifted, tone shifted. The example shows this credit on screen.
+- The wrinkle, eye, teeth and hair textures and the hair cards are baked procedurally for vanilla.js and are under its MIT License.
+
+````text
+Creative Commons Licence
+Infinite, 3D Head Scan by Lee Perry-Smith is licensed under a Creative Commons Attribution 3.0 Unported License.
+Based on a work at www.triplegangers.com.
+Permissions beyond the scope of this license may be available at http://www.ir-ltd.net/
+Please remember: Do what you want with the files, but always mention where you got them from...
+````
 
 ````text
 MIT License
