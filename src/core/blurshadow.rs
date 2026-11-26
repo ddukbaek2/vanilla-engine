@@ -1,7 +1,7 @@
 //==============================================================================
-//! 흐린 둥근 사각형 그림자. (데스크탑 엔진이 그리는 질문 창, 문맥 메뉴, 빠른 메뉴가 쓴다)
-//! - 원본에 없는 파일이다. 원본은 크롬이 그린다. 문맥 메뉴는 CSS box-shadow, 질문 창과 터치 빠른 메뉴는 크롬 views 의 BubbleBorder 그림자다.
-//!   러스트 판은 같은 모양(둥근 사각형의 덮인 정도)을 같은 시그마의 가우스로 흐린 그림을 CPU 로 구워 그린다.
+//! 흐린 둥근 사각형 그림자. (엔진이 그리는 질문 창, 문맥 메뉴, 빠른 메뉴가 쓴다, 원본 core/blurshadow.js 와 같은 셈)
+//! - 브라우저의 CSS box-shadow 나 크롬 views 의 BubbleBorder 그림자를 쓰지 않고, 둥근 사각형의 덮인 정도를 같은 시그마의 가우스로 흐린 그림을 CPU 로 구워 엔진 Graphic 으로 그린다.
+//!   두 엔진이 같은 셈으로 같은 그림을 굽는다. (웹과 데스크탑 같다)
 //! - 흐림 반경을 시그마로 바꾸는 셈은 크롬 원문 그대로다.
 //!   CSS box-shadow 와 Canvas2D shadowBlur 는 블링크 shadow_data.h 의 BlurRadiusToStdDev (반경 x 0.5, 명세 그대로),
 //!   views 그림자(gfx::ShadowValue)는 ui/gfx/skia_paint_util.cc 의 RadiusToSigma(blur / 2) (0.288675 x 반경 + 0.5).
@@ -37,7 +37,6 @@ pub(crate) fn css_blur_radius_to_sigma(blur_radius: f32) -> f32 {
 /// # 돌려줌
 /// 시그마. (DIP)
 //==============================================================================
-#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn views_shadow_blur_to_sigma(shadow_blur: i32) -> f32 {
 	// blur() / 2 는 정수 나눗셈이고, 0.288675f 는 float 를 double 로 넓혀 셈한 뒤 float 로 돌린다.
 	let radius = (shadow_blur / 2) as f64;

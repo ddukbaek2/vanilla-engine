@@ -262,6 +262,9 @@ pub struct TextInput {
 	current_field_state_list: RefCell<Vec<TextInputFieldState>>,
 	published_field_state_list: Vec<TextInputFieldState>,
 	context_menu_request_position: Option<Vector2>,
+	/// 이번 프레임과 지난 프레임에 떠 있는 엔진 메뉴 자리. (뷰 좌표, 웹은 그 위의 오른쪽 클릭에서 브라우저 메뉴를 막는다)
+	current_menu_rect_list: RefCell<Vec<crate::base::rect::Rect>>,
+	published_menu_rect_list: Vec<crate::base::rect::Rect>,
 	ime_commit_guard: RefCell<Option<(String, u32)>>,
 	is_ime_reset_requested: Cell<bool>,
 	/// 마지막 마우스 누름을 브라우저가 센 수. (웹 mousedown 의 detail, 입력 필드의 두 번, 세 번 누르기)
@@ -281,6 +284,8 @@ impl TextInput {
 			current_field_state_list: RefCell::new(Vec::new()),
 			published_field_state_list: Vec::new(),
 			context_menu_request_position: None,
+			current_menu_rect_list: RefCell::new(Vec::new()),
+			published_menu_rect_list: Vec::new(),
 			ime_commit_guard: RefCell::new(None),
 			is_ime_reset_requested: Cell::new(false),
 			pointer_click_count: Cell::new(1),
@@ -468,13 +473,34 @@ impl TextInput {
 	}
 
 	//==============================================================================
-	/// 문맥 메뉴 요청 자리 설정. (데스크탑 오른쪽 단추, 뷰 좌표. 이번 프레임에만 남는다)
+	/// 문맥 메뉴 요청 자리 설정. (데스크탑 오른쪽 단추, 웹 필드 위의 오른쪽 클릭, 뷰 좌표. 이번 프레임에만 남는다)
 	///
 	/// # 인자
 	/// - `view_position`: 요청 자리. (뷰 좌표, None 이면 요청 없음. finish_frame 이 None 으로 돌린다)
 	//==============================================================================
 	pub fn set_context_menu_request_position(&mut self, view_position: Option<Vector2>) {
 		self.context_menu_request_position = view_position;
+	}
+
+	//==============================================================================
+	/// 떠 있는 엔진 메뉴 자리 올리기. (입력 필드의 문맥 메뉴와 빠른 메뉴가 tick 에서 올린다)
+	///
+	/// # 인자
+	/// - `menu_rect`: 메뉴 자리. (뷰 좌표, finish_frame 뒤 get_published_menu_rects 로 보인다)
+	//==============================================================================
+	pub(crate) fn register_menu_rect(&self, menu_rect: crate::base::rect::Rect) {
+		self.current_menu_rect_list.borrow_mut().push(menu_rect);
+	}
+
+	//==============================================================================
+	/// 지난 프레임에 떠 있던 엔진 메뉴 자리 목록.
+	///
+	/// # 돌려줌
+	/// 뷰 좌표 목록. (웹은 그 위의 오른쪽 클릭에서 브라우저 메뉴를 막는다, 원본 handleContextMenuEvent)
+	//==============================================================================
+	#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+	pub(crate) fn get_published_menu_rects(&self) -> &[crate::base::rect::Rect] {
+		&self.published_menu_rect_list
 	}
 
 	//==============================================================================
@@ -580,6 +606,7 @@ impl TextInput {
 		self.event_list.get_mut().clear();
 		self.published_field_state_list = std::mem::take(self.current_field_state_list.get_mut());
 		self.context_menu_request_position = None;
+		self.published_menu_rect_list = std::mem::take(self.current_menu_rect_list.get_mut());
 		let ime_commit_guard = self.ime_commit_guard.get_mut();
 		let is_expired = match ime_commit_guard {
 			Some((_, remain_frame_count)) => {

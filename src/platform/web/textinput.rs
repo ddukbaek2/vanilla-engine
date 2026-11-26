@@ -1,5 +1,5 @@
 //==============================================================================
-//! 웹 글 입력. (숨긴 DOM <input> → 엔진 글 입력 줄, DOM 문맥 메뉴, 캔버스 모드 키, 클립보드)
+//! 웹 글 입력. (숨긴 DOM <input> → 엔진 글 입력 줄, 오른쪽 클릭, 캔버스 모드 키, 클립보드)
 //! - 원본 UIInputField 의 DOM 쪽을 옮긴 것이다. 원본은 필드가 자기 <input> 을 만들고 리스너를 단다.
 //!   러스트 판은 필드가 프레임마다 상태(자리, 값, 선택, 포커스)를 엔진에 올리고, 여기서 attach 한 DOM 입력 필드마다 숨긴 <input> 을 하나씩 맞춘다.
 //!   - 값과 선택은 DOM 이 주인이다. input / compositionstart / compositionupdate / compositionend / Enter keydown / focus / blur 를
@@ -7,12 +7,12 @@
 //!   - 필드 쪽에서 값이나 커서를 바꾸면(set_text, 누른 자리, 잘라내기) 상태의 value_revision 이 늘고, 여기서 <input> 에 다시 쓴다. (조합 중엔 미룬다)
 //!   - iOS 는 사용자 제스처 안에서 focus() 해야 키보드가 뜬다. 원본처럼 캔버스 touchstart / mousedown(설정하면 touchend)에 동기 핸들러를 달아
 //!     지난 프레임 필드 자리로 맞춰 보고 그 자리에서 focus / blur 한다.
-//!   - 오른쪽 단추 문맥 메뉴는 원본과 같은 모양의 DOM 메뉴다. 항목은 그 필드에 잘라내기 / 복사 키나 붙여 넣을 글로 넣는다.
+//!   - 필드 위의 오른쪽 클릭은 원본처럼 브라우저 메뉴를 막고, 데스크탑 오른쪽 단추와 같은 문맥 메뉴 요청(set_context_menu_request_position)으로 넣는다.
+//!     필드가 엔진이 그린 메뉴(UIInputFieldContextMenu)를 연다. 그 메뉴 위의 오른쪽 클릭도 브라우저 메뉴를 막는다.
 //!   - use_dominput 이 꺼진 필드는 원본 캔버스 모드처럼 window keydown 을 편집 키와 글자로 바꿔 넣는다.
 //! - DOM 이벤트 리스너는 엔진을 빌리지 않는다. 대기 줄(PENDING_EVENT_LIST)에 넣고 다음 프레임 시작에 엔진으로 옮긴다.
 //!   (apply_frame 이 부르는 focus() 가 그 자리에서 focus / blur 이벤트를 부르기 때문)
-//! - 원본과 다른 것: 숨긴 <input> 은 필드가 tick 을 도는 동안만 있다. (노드를 끄거나 지우면 함께 빠진다) setTimeout 으로 미루는 커서 옮기기와
-//!   메뉴 닫기 리스너는 원본과 같다.
+//! - 원본과 다른 것: 숨긴 <input> 은 필드가 tick 을 도는 동안만 있다. (노드를 끄거나 지우면 함께 빠진다) setTimeout 으로 미루는 커서 옮기기는 원본과 같다.
 //!
 //! # 예제
 //! 클립보드에 쓰고 비동기로 읽기 (웹은 그 자리에서 읽지 못해 콜백으로 받는다)
@@ -77,21 +77,6 @@ const HIDDEN_INPUT_STYLE_LIST: [(&str, &str); 20] = [
 	("-webkit-tap-highlight-color", "transparent"),
 	// iOS 줌인 방지.
 	("font-size", "16px"),
-];
-/// 문맥 메뉴 스타일. (원본 showContextMenu)
-const CONTEXT_MENU_STYLE_LIST: [(&str, &str); 12] = [
-	("position", "absolute"),
-	("z-index", "10000"),
-	("background", "#ffffff"),
-	("color", "#222222"),
-	("border", "1px solid #cccccc"),
-	("border-radius", "8px"),
-	("box-shadow", "0 4px 16px rgba(0, 0, 0, 0.18)"),
-	("padding", "4px 0"),
-	("font-family", "system-ui, -apple-system, sans-serif"),
-	("font-size", "14px"),
-	("min-width", "140px"),
-	("user-select", "none"),
 ];
 
 /// DOM 이벤트 리스너.
@@ -230,17 +215,6 @@ impl HiddenTextElement {
 }
 
 //==============================================================================
-/// 열린 DOM 문맥 메뉴.
-//==============================================================================
-struct WebContextMenu {
-	menu_serial: u64,
-	field_id: u64,
-	menu_element: web_sys::HtmlElement,
-	listener_list: Vec<EventListener>,
-	dismiss_listener: Option<EventListener>,
-}
-
-//==============================================================================
 /// 웹 글 입력 상태.
 //==============================================================================
 struct WebTextInputState {
@@ -248,6 +222,8 @@ struct WebTextInputState {
 	entry_list: Vec<HiddenInputEntry>,
 	field_state_list: Vec<TextInputFieldState>,
 	is_canvas_keyboard_focused: bool,
+	/// 지난 프레임에 떠 있던 엔진 메뉴(문맥 메뉴, 빠른 메뉴)의 캔버스 자리. (CSS 픽셀, 그 위의 오른쪽 클릭은 브라우저 메뉴를 막는다)
+	menu_canvas_rect_list: Vec<crate::base::rect::Rect>,
 	permanent_listener_list: Vec<EventListener>,
 }
 
@@ -258,16 +234,15 @@ thread_local! {
 		entry_list: Vec::new(),
 		field_state_list: Vec::new(),
 		is_canvas_keyboard_focused: false,
+		menu_canvas_rect_list: Vec::new(),
 		permanent_listener_list: Vec::new(),
 	}) };
 	/// 리스너가 넣는 대기 줄. (다음 프레임 시작에 엔진 글 입력 줄로 옮긴다)
 	static PENDING_EVENT_LIST: RefCell<Vec<TextInputEvent>> = const { RefCell::new(Vec::new()) };
-	/// 열린 문맥 메뉴.
-	static CONTEXT_MENU: RefCell<Option<WebContextMenu>> = const { RefCell::new(None) };
+	/// 엔진 문맥 메뉴를 띄울 캔버스 자리. (CSS 픽셀, 다음 프레임 시작에 뷰 좌표로 바꿔 글 입력 줄의 문맥 메뉴 요청으로 넣는다)
+	static PENDING_CONTEXT_MENU_POSITION: Cell<Option<(f64, f64)>> = const { Cell::new(None) };
 	/// 다 쓴 리스너. (불리는 중에 버리지 않게 다음 프레임에 버린다)
 	static DISPOSED_LISTENER_LIST: RefCell<Vec<EventListener>> = const { RefCell::new(Vec::new()) };
-	/// 문맥 메뉴 번호.
-	static NEXT_MENU_SERIAL: Cell<u64> = const { Cell::new(1) };
 	/// 캔버스 mousedown 을 브라우저가 센 수. (detail, 다음 프레임 시작에 글 입력 줄로 옮긴다. 입력 필드의 두 번, 세 번 누르기)
 	static PENDING_POINTER_CLICK_COUNT: Cell<Option<u32>> = const { Cell::new(None) };
 }
@@ -555,6 +530,12 @@ pub(super) fn begin_frame(engine: &mut Engine) {
 	if let Some(pointer_click_count) = PENDING_POINTER_CLICK_COUNT.with(|click_count_cell| click_count_cell.take()) {
 		text_input.set_pointer_click_count(pointer_click_count);
 	}
+	// 오른쪽 클릭한 필드 자리. (데스크탑 오른쪽 단추처럼 엔진 문맥 메뉴 요청, 필드가 tick 에서 연다)
+	if let Some((canvas_x, canvas_y)) = PENDING_CONTEXT_MENU_POSITION.with(|position_cell| position_cell.take()) {
+		let view_position = engine.get_view_manager().canvas_position_to_view_position(crate::base::vector2::Vector2::create(canvas_x as f32, canvas_y as f32));
+		engine.get_input_manager_mut().get_text_input_mut().set_context_menu_request_position(Some(view_position));
+	}
+	let text_input = engine.get_input_manager_mut().get_text_input_mut();
 	WEB_TEXT_INPUT.with(|state_cell| {
 		let mut web_text_input_state = state_cell.borrow_mut();
 		for pending_event in pending_event_list {
@@ -667,14 +648,16 @@ pub(super) fn apply_frame(engine: &Engine) {
 		}
 	}
 
-	// 문맥 메뉴의 필드가 포커스를 잃었으면 닫는다. (원본 handleBlur 의 hide_context_menu)
-	let menu_field_id = CONTEXT_MENU.with(|menu_cell| menu_cell.borrow().as_ref().map(|context_menu| context_menu.field_id));
-	if let Some(menu_field_id) = menu_field_id {
-		let is_menu_field_focused = field_state_list.iter().any(|field_state| field_state.field_id == menu_field_id && field_state.is_focused);
-		if !is_menu_field_focused {
-			hide_context_menu();
-		}
-	}
+	// 엔진 메뉴 자리. (뷰 좌표 → 캔버스 CSS 픽셀, canvas_position_to_view_position 의 거꾸로)
+	let view_manager = engine.get_view_manager();
+	let target_resolution_scale = view_manager.get_target_resolution_scale();
+	let view_native_rect = view_manager.get_view_native_rect();
+	let menu_canvas_rect_list: Vec<crate::base::rect::Rect> = engine.get_input_manager().get_text_input().get_published_menu_rects().iter().map(|menu_rect| {
+		crate::base::rect::Rect::create(menu_rect.position.x * target_resolution_scale + view_native_rect.position.x, menu_rect.position.y * target_resolution_scale + view_native_rect.position.y, menu_rect.size.x * target_resolution_scale, menu_rect.size.y * target_resolution_scale)
+	}).collect();
+	WEB_TEXT_INPUT.with(|state_cell| {
+		state_cell.borrow_mut().menu_canvas_rect_list = menu_canvas_rect_list;
+	});
 }
 
 //==============================================================================
@@ -837,7 +820,7 @@ fn create_hidden_input_entry(field_state: &TextInputFieldState) -> Result<Hidden
 			});
 		}
 	})));
-	// 직접 누름이면 오른쪽 클릭이 이 숨긴 입력에 온다. 원본 handleDOMInputContextMenuEvent 처럼 브라우저 편집 칸 메뉴를 막고 엔진 문맥 메뉴를 연다.
+	// 직접 누름이면 오른쪽 클릭이 이 숨긴 입력에 온다. 원본 handleDOMInputContextMenuEvent 처럼 브라우저 편집 칸 메뉴를 막고 엔진 문맥 메뉴를 연다. (필드가 다음 tick 에 연다)
 	let input_for_context_menu = input_element.clone();
 	let use_direct_touch_for_context_menu = use_direct_touch.clone();
 	listener_list.push(("contextmenu", Closure::new(move |event: web_sys::Event| {
@@ -855,12 +838,7 @@ fn create_hidden_input_entry(field_state: &TextInputFieldState) -> Result<Hidden
 		event.prevent_default();
 		event.stop_propagation();
 		let _ = input_for_context_menu.focus();
-		let selection_start = input_for_context_menu.selection_start().ok().flatten().unwrap_or(0);
-		let selection_end = input_for_context_menu.selection_end().ok().flatten().unwrap_or(0);
-		let is_text_available = !input_for_context_menu.value().is_empty();
-		if let Err(error) = show_context_menu(field_id, selection_start != selection_end, is_text_available, client_x, client_y) {
-			web_sys::console::error_1(&JsValue::from_str(&format!("Engine: 문맥 메뉴 열기 실패: {}", error)));
-		}
+		request_engine_context_menu(client_x, client_y);
 	})));
 	for (event_name, listener) in listener_list.iter() {
 		input_element.add_event_listener_with_callback(event_name, listener.as_ref().unchecked_ref()).map_err(describe_js_error)?;
@@ -1074,7 +1052,7 @@ fn handle_canvas_pointer(event: web_sys::Event) {
 }
 
 //==============================================================================
-/// 캔버스 문맥 메뉴 처리. (필드 위면 브라우저 메뉴를 막고 포커스를 준 뒤 DOM 메뉴를 연다. 원본 handleContextMenuEvent)
+/// 캔버스 문맥 메뉴 처리. (필드 위면 브라우저 메뉴를 막고 포커스를 준 뒤 엔진 문맥 메뉴를 부탁한다. 엔진 메뉴 위면 막기만 한다. 원본 handleContextMenuEvent)
 //==============================================================================
 fn handle_canvas_context_menu(event: web_sys::Event) {
 	let (client_x, client_y) = match read_client_position(&event) {
@@ -1086,8 +1064,18 @@ fn handle_canvas_context_menu(event: web_sys::Event) {
 		}
 	};
 	let mut focus_element: Option<HiddenTextElement> = None;
+	let mut is_inside_menu = false;
 	let hit_field_state = WEB_TEXT_INPUT.with(|state_cell| {
 		let mut web_text_input_state = state_cell.borrow_mut();
+		if let Some(canvas) = &web_text_input_state.canvas {
+			let canvas_rect = canvas.get_bounding_client_rect();
+			let canvas_x = (client_x - canvas_rect.left()) as f32;
+			let canvas_y = (client_y - canvas_rect.top()) as f32;
+			is_inside_menu = web_text_input_state.menu_canvas_rect_list.iter().any(|menu_rect| canvas_x >= menu_rect.position.x && canvas_x <= menu_rect.position.x + menu_rect.size.x && canvas_y >= menu_rect.position.y && canvas_y <= menu_rect.position.y + menu_rect.size.y);
+		}
+		if is_inside_menu {
+			return None;
+		}
 		let hit_field_state = find_field_state_at_client_position(&web_text_input_state, client_x, client_y, false)?;
 		if let Some(entry) = web_text_input_state.entry_list.iter_mut().find(|entry| entry.field_id == hit_field_state.field_id) {
 			entry.is_focus_applied = true;
@@ -1095,6 +1083,10 @@ fn handle_canvas_context_menu(event: web_sys::Event) {
 		}
 		Some(hit_field_state)
 	});
+	if is_inside_menu {
+		event.prevent_default();
+		return;
+	}
 	let hit_field_state = match hit_field_state {
 		Some(hit_field_state) => {
 			hit_field_state
@@ -1113,174 +1105,21 @@ fn handle_canvas_context_menu(event: web_sys::Event) {
 			push_pending_event(hit_field_state.field_id, TextInputEventKind::FocusGained);
 		}
 	}
-	let has_selection = hit_field_state.selection_start != hit_field_state.cursor_index;
-	let is_text_available = !hit_field_state.value.is_empty();
-	if let Err(error) = show_context_menu(hit_field_state.field_id, has_selection, is_text_available, client_x, client_y) {
-		web_sys::console::error_1(&JsValue::from_str(&format!("Engine: 문맥 메뉴 열기 실패: {}", error)));
-	}
+	request_engine_context_menu(client_x, client_y);
 }
 
 //==============================================================================
-/// DOM 문맥 메뉴 열기. (잘라내기 / 복사 / 붙여넣기 / 모두 선택. 원본 showContextMenu, body 의 absolute 라 뷰포트 좌표 clientX, clientY 에 문서 스크롤을 더해 놓는다)
+/// 엔진 문맥 메뉴 부탁. (뷰포트 좌표를 캔버스 CSS 픽셀로 바꿔 두고, 다음 프레임 시작에 글 입력 줄의 문맥 메뉴 요청으로 넣는다)
 //==============================================================================
-fn show_context_menu(field_id: u64, has_selection: bool, is_text_available: bool, client_x: f64, client_y: f64) -> Result<(), String> {
-	hide_context_menu();
-	let document = get_document().ok_or_else(|| String::from("document 없음"))?;
-	let menu_element = document.create_element("div").map_err(describe_js_error)?.dyn_into::<web_sys::HtmlElement>().map_err(|_| String::from("div 변환 실패"))?;
-	let menu_style = menu_element.style();
-	for (property_name, property_value) in CONTEXT_MENU_STYLE_LIST {
-		let _ = menu_style.set_property(property_name, property_value);
+fn request_engine_context_menu(client_x: f64, client_y: f64) {
+	let canvas_position = WEB_TEXT_INPUT.with(|state_cell| {
+		let web_text_input_state = state_cell.borrow();
+		let canvas_rect = web_text_input_state.canvas.as_ref()?.get_bounding_client_rect();
+		Some((client_x - canvas_rect.left(), client_y - canvas_rect.top()))
+	});
+	if let Some(canvas_position) = canvas_position {
+		PENDING_CONTEXT_MENU_POSITION.with(|position_cell| position_cell.set(Some(canvas_position)));
 	}
-	let (scroll_x, scroll_y) = read_document_scroll();
-	let _ = menu_style.set_property("left", &format!("{}px", client_x + scroll_x));
-	let _ = menu_style.set_property("top", &format!("{}px", client_y + scroll_y));
-
-	let item_list = [("잘라내기", has_selection, TextInputKey::Cut), ("복사", has_selection, TextInputKey::Copy), ("붙여넣기", true, TextInputKey::Paste), ("모두 선택", is_text_available, TextInputKey::SelectAll)];
-	let mut listener_list: Vec<EventListener> = Vec::new();
-	for (item_text, is_enabled, item_key) in item_list {
-		let item_element = document.create_element("div").map_err(describe_js_error)?.dyn_into::<web_sys::HtmlElement>().map_err(|_| String::from("div 변환 실패"))?;
-		item_element.set_text_content(Some(item_text));
-		let item_style = item_element.style();
-		let _ = item_style.set_property("padding", "8px 16px");
-		let _ = item_style.set_property("cursor", if is_enabled {
-			"pointer"
-		}
-		else {
-			"default"
-		});
-		let _ = item_style.set_property("color", if is_enabled {
-			"#222222"
-		}
-		else {
-			"#aaaaaa"
-		});
-		if is_enabled {
-			let item_for_enter = item_element.clone();
-			let mouse_enter_listener: EventListener = Closure::new(move |_event: web_sys::Event| {
-				let _ = item_for_enter.style().set_property("background", "#eef2ff");
-			});
-			let item_for_leave = item_element.clone();
-			let mouse_leave_listener: EventListener = Closure::new(move |_event: web_sys::Event| {
-				let _ = item_for_leave.style().set_property("background", "transparent");
-			});
-			let mouse_down_listener: EventListener = Closure::new(move |event: web_sys::Event| {
-				event.prevent_default();
-				event.stop_propagation();
-			});
-			let click_listener: EventListener = Closure::new(move |event: web_sys::Event| {
-				event.prevent_default();
-				event.stop_propagation();
-				match item_key {
-					TextInputKey::Paste => {
-						request_clipboard_paste(field_id);
-					}
-					_ => {
-						push_pending_event(field_id, TextInputEventKind::Key {
-							key: item_key,
-							is_shift: false,
-						});
-					}
-				}
-				hide_context_menu();
-			});
-			for (event_name, listener) in [("mouseenter", &mouse_enter_listener), ("mouseleave", &mouse_leave_listener), ("mousedown", &mouse_down_listener), ("click", &click_listener)] {
-				item_element.add_event_listener_with_callback(event_name, listener.as_ref().unchecked_ref()).map_err(describe_js_error)?;
-			}
-			listener_list.push(mouse_enter_listener);
-			listener_list.push(mouse_leave_listener);
-			listener_list.push(mouse_down_listener);
-			listener_list.push(click_listener);
-		}
-		menu_element.append_child(&item_element).map_err(describe_js_error)?;
-	}
-	let body = document.body().ok_or_else(|| String::from("body 없음"))?;
-	body.append_child(&menu_element).map_err(describe_js_error)?;
-
-	let menu_serial = NEXT_MENU_SERIAL.with(|serial_cell| {
-		let menu_serial = serial_cell.get();
-		serial_cell.set(menu_serial + 1);
-		menu_serial
-	});
-	CONTEXT_MENU.with(|menu_cell| {
-		*menu_cell.borrow_mut() = Some(WebContextMenu {
-			menu_serial,
-			field_id,
-			menu_element,
-			listener_list,
-			dismiss_listener: None,
-		});
-	});
-
-	// 메뉴 밖 누름으로 닫기. 다음 차례부터. (지금 누름이 닫기로 처리되지 않게)
-	run_after_timeout(move || {
-		add_context_menu_dismiss_listener(menu_serial);
-	});
-	Ok(())
-}
-
-//==============================================================================
-/// 메뉴 밖 누름 리스너 달기. (그 사이 메뉴가 바뀌었으면 달지 않는다)
-//==============================================================================
-fn add_context_menu_dismiss_listener(menu_serial: u64) {
-	let document = match get_document() {
-		Some(document) => {
-			document
-		}
-		None => {
-			return;
-		}
-	};
-	let dismiss_listener: EventListener = Closure::new(move |event: web_sys::Event| {
-		let target_node = event.target().and_then(|target| target.dyn_into::<web_sys::Node>().ok());
-		let is_inside_menu = CONTEXT_MENU.with(|menu_cell| {
-			match menu_cell.borrow().as_ref() {
-				Some(context_menu) => {
-					context_menu.menu_element.contains(target_node.as_ref())
-				}
-				None => {
-					true
-				}
-			}
-		});
-		if !is_inside_menu {
-			hide_context_menu();
-		}
-	});
-	CONTEXT_MENU.with(|menu_cell| {
-		let mut context_menu_slot = menu_cell.borrow_mut();
-		if let Some(context_menu) = context_menu_slot.as_mut() {
-			if context_menu.menu_serial != menu_serial {
-				return;
-			}
-			if document.add_event_listener_with_callback_and_bool("pointerdown", dismiss_listener.as_ref().unchecked_ref(), true).is_ok() {
-				context_menu.dismiss_listener = Some(dismiss_listener);
-			}
-		}
-	});
-}
-
-//==============================================================================
-/// DOM 문맥 메뉴 닫기. (원본 hideContextMenu. 리스너는 다음 프레임에 버린다)
-//==============================================================================
-fn hide_context_menu() {
-	let context_menu = CONTEXT_MENU.with(|menu_cell| menu_cell.borrow_mut().take());
-	let context_menu = match context_menu {
-		Some(context_menu) => {
-			context_menu
-		}
-		None => {
-			return;
-		}
-	};
-	context_menu.menu_element.remove();
-	let mut listener_list = context_menu.listener_list;
-	if let Some(dismiss_listener) = context_menu.dismiss_listener {
-		if let Some(document) = get_document() {
-			let _ = document.remove_event_listener_with_callback_and_bool("pointerdown", dismiss_listener.as_ref().unchecked_ref(), true);
-		}
-		listener_list.push(dismiss_listener);
-	}
-	dispose_listeners(listener_list);
 }
 
 //==============================================================================

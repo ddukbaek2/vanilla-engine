@@ -9,8 +9,7 @@ pub mod audioplayer;
 pub mod colorglyph;
 pub mod component;
 pub mod engine;
-// 브라우저 화면 글. (데스크탑이 그리는 질문 창과 문맥 메뉴의 글)
-#[cfg(not(target_arch = "wasm32"))]
+// 브라우저 화면 글. (엔진이 그리는 질문 창과 문맥 메뉴의 글)
 pub mod browseruitext;
 pub mod modaldialog;
 // 2D 그리기 대상. (원본 브라우저 캔버스와 2D 컨텍스트 자리)

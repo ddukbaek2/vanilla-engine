@@ -25,8 +25,8 @@
 //!   - 반사가 없는 컴포넌트(`#[reflect]` 를 붙이지 않은 게임 컴포넌트)는 UIDocument 에 쓰기 함수로 등록했으면 그 저장 키와 값을 보이고,
 //!     아니면 종류 이름 아래에 매크로를 붙이라는 "반사 없음" 줄을 보인다. (빠뜨린 것을 알 수 있게)
 //!     게임이 자기 컴포넌트를 등록한 문서는 set_ui_document 로 건다. (또는 get_ui_document_mut 로 등록한다) 이 때 수 넷 배열은 이름에 color 가 들면 rgba, 아니면 사각형으로 본다.
-//!   - Local Storage 탭의 키 입력, 값 고치기, 지울지 묻기는 원본 window.prompt, window.confirm 자리인 Engine::prompt, Engine::confirm 이다. (core/modaldialog.rs)
-//!     웹은 원본처럼 브라우저 창이 그 자리에서 답한다. 데스크탑은 엔진이 그린 같은 질문 창이 떠서 답할 때까지 씬이 멈추고, 답은 다음 tick 에 받는다.
+//!   - Local Storage 탭의 키 입력, 값 고치기, 지울지 묻기는 두 엔진 모두 엔진 질문 창 Engine::prompt, Engine::confirm 이다. (원본 engine.prompt, engine.confirm) (core/modaldialog.rs)
+//!     엔진이 그린 질문 창이 떠서 답할 때까지 씬이 멈추고, 답은 다음 tick 에 받는다. (웹과 데스크탑 같다)
 //!   - Statistics 의 clientNativeSize 는 ViewManager::get_client_native_size(웹은 페이지 전체 크기, 데스크탑은 창 안쪽 논리 크기)다.
 //!     메모리는 웹에서 원본처럼 Chrome 의 performance.memory 를 읽고, 없는 브라우저는 "(N/A)" 다.
 //!     데스크탑은 자바스크립트 힙이 없어 같은 칸에 러스트가 쓰는 시스템 할당자의 힙(쓰는 중, 잡아 둔 것)을 적는다. (platform/desktop.rs read_heap_usage)
@@ -327,7 +327,7 @@ enum LocalStorageDialogAction {
 }
 
 //==============================================================================
-/// 로컬 스토리지 질문 부탁. (원본이 그 자리에서 부르는 window.prompt, window.confirm. 엔진을 받는 tick 에서 띄운다)
+/// 로컬 스토리지 질문 부탁. (원본 engine.prompt, engine.confirm 자리. 엔진을 받는 tick 에서 띄운다)
 //==============================================================================
 struct LocalStorageDialogRequest {
 	kind: ModalDialogKind,
@@ -1239,7 +1239,7 @@ impl DevTools {
 	}
 
 	//==============================================================================
-	/// 글을 묻는다. (원본 window.prompt, 엔진을 받는 tick 에서 Engine::prompt 로 띄운다)
+	/// 글을 묻는다. (원본 engine.prompt, 엔진을 받는 tick 에서 Engine::prompt 로 띄운다)
 	//==============================================================================
 	fn open_local_storage_prompt(&mut self, message: &str, default_value: &str, action: LocalStorageDialogAction) {
 		self.local_storage_dialog_request = Some(LocalStorageDialogRequest {
@@ -1251,7 +1251,7 @@ impl DevTools {
 	}
 
 	//==============================================================================
-	/// 확인을 묻는다. (원본 window.confirm, 엔진을 받는 tick 에서 Engine::confirm 으로 띄운다)
+	/// 확인을 묻는다. (원본 engine.confirm, 엔진을 받는 tick 에서 Engine::confirm 으로 띄운다)
 	//==============================================================================
 	fn open_local_storage_confirm(&mut self, message: &str, action: LocalStorageDialogAction) {
 		self.local_storage_dialog_request = Some(LocalStorageDialogRequest {
