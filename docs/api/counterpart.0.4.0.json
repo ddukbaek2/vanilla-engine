@@ -17993,6 +17993,42 @@
 			"vanilla-engine": {
 				"module": "graphics3d/toon/toonrenderer",
 				"class": "ToonRenderer",
+				"name": "set_shade"
+			},
+			"vanilla.js": {
+				"module": "experimental/graphics/toon/toonrenderer",
+				"class": "ToonRenderer",
+				"name": "setShade"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/toon/toonrenderer",
+				"class": "ToonRenderer",
+				"name": "set_shade_ramp"
+			},
+			"vanilla.js": {
+				"module": "experimental/graphics/toon/toonrenderer",
+				"class": "ToonRenderer",
+				"name": "setShadeRamp"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/toon/toonrenderer",
+				"class": "ToonRenderer",
+				"name": "clear_shade_ramp"
+			},
+			"vanilla.js": {
+				"module": "experimental/graphics/toon/toonrenderer",
+				"class": "ToonRenderer",
+				"name": "clearShadeRamp"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/toon/toonrenderer",
+				"class": "ToonRenderer",
 				"name": "set_band_count"
 			},
 			"vanilla.js": {
@@ -18017,6 +18053,18 @@
 			"vanilla-engine": {
 				"module": "graphics3d/toon/toonrenderer",
 				"class": "ToonRenderer",
+				"name": "set_ramp_texture"
+			},
+			"vanilla.js": {
+				"module": "experimental/graphics/toon/toonrenderer",
+				"class": "ToonRenderer",
+				"name": "setRampTexture"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/toon/toonrenderer",
+				"class": "ToonRenderer",
 				"name": "set_light_model"
 			},
 			"vanilla.js": {
@@ -18035,6 +18083,30 @@
 				"module": "experimental/graphics/toon/toonrenderer",
 				"class": "ToonRenderer",
 				"name": "setOutlineColor"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/toon/toonrenderer",
+				"class": "ToonRenderer",
+				"name": "set_outline_distance_scale"
+			},
+			"vanilla.js": {
+				"module": "experimental/graphics/toon/toonrenderer",
+				"class": "ToonRenderer",
+				"name": "setOutlineDistanceScale"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/toon/toonrenderer",
+				"class": "ToonRenderer",
+				"name": "get_outline_distance_scale"
+			},
+			"vanilla.js": {
+				"module": "experimental/graphics/toon/toonrenderer",
+				"class": "ToonRenderer",
+				"name": "getOutlineDistanceScale"
 			}
 		},
 		{
@@ -18197,6 +18269,26 @@
 			"vanilla.js": {
 				"module": "experimental/graphics/toon/toonrenderer",
 				"name": "readFrameCamera"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/toon/toonrenderer",
+				"name": "read_view_rotation"
+			},
+			"vanilla.js": {
+				"module": "experimental/graphics/toon/toonrenderer",
+				"name": "readViewRotation"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/toon/toonrenderer",
+				"name": "read_outline_vertex_data"
+			},
+			"vanilla.js": {
+				"module": "experimental/graphics/toon/toonrenderer",
+				"name": "readOutlineVertexData"
 			}
 		},
 		{
@@ -19563,6 +19655,54 @@
 			"vanilla-engine": {
 				"module": "graphics3d/toon/toonlightset",
 				"class": "ToonLightSet",
+				"name": "set_shade"
+			},
+			"vanilla.js": {
+				"module": "experimental/graphics/toon/toonlightset",
+				"class": "ToonLightSet",
+				"name": "setShade"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/toon/toonlightset",
+				"class": "ToonLightSet",
+				"name": "set_shade_ramp"
+			},
+			"vanilla.js": {
+				"module": "experimental/graphics/toon/toonlightset",
+				"class": "ToonLightSet",
+				"name": "setShadeRamp"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/toon/toonlightset",
+				"class": "ToonLightSet",
+				"name": "clear_shade_ramp"
+			},
+			"vanilla.js": {
+				"module": "experimental/graphics/toon/toonlightset",
+				"class": "ToonLightSet",
+				"name": "clearShadeRamp"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/toon/toonlightset",
+				"class": "ToonLightSet",
+				"name": "get_shade_ramp"
+			},
+			"vanilla.js": {
+				"module": "experimental/graphics/toon/toonlightset",
+				"class": "ToonLightSet",
+				"name": "getShadeRamp"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/toon/toonlightset",
+				"class": "ToonLightSet",
 				"name": "set_band_count"
 			},
 			"vanilla.js": {
@@ -19581,6 +19721,30 @@
 				"module": "experimental/graphics/toon/toonlightset",
 				"class": "ToonLightSet",
 				"name": "setBandRamp"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/toon/toonlightset",
+				"class": "ToonLightSet",
+				"name": "set_ramp_texture"
+			},
+			"vanilla.js": {
+				"module": "experimental/graphics/toon/toonlightset",
+				"class": "ToonLightSet",
+				"name": "setRampTexture"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/toon/toonlightset",
+				"class": "ToonLightSet",
+				"name": "get_ramp_texture"
+			},
+			"vanilla.js": {
+				"module": "experimental/graphics/toon/toonlightset",
+				"class": "ToonLightSet",
+				"name": "getRampTexture"
 			}
 		},
 		{
@@ -19823,6 +19987,16 @@
 			"vanilla.js": {
 				"module": "experimental/graphics/toon/toonmaterial",
 				"class": "ToonBlendMode"
+			}
+		},
+		{
+			"vanilla-engine": {
+				"module": "graphics3d/toon/toonmaterial",
+				"class": "ToonMatcapBlend"
+			},
+			"vanilla.js": {
+				"module": "experimental/graphics/toon/toonmaterial",
+				"class": "ToonMatcapBlend"
 			}
 		},
 		{

@@ -128,6 +128,9 @@ enum HiddenTextElement {
 impl std::ops::Deref for HiddenTextElement {
 	type Target = web_sys::HtmlElement;
 
+	//==============================================================================
+	/// 감싼 글 칸을 HtmlElement 로 빌리기. (값과 선택 함수 밖의 공통 일은 이것으로 한다)
+	//==============================================================================
 	fn deref(&self) -> &web_sys::HtmlElement {
 		match self {
 			HiddenTextElement::Input(input_element) => {

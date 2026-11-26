@@ -9,7 +9,7 @@
 //! - counterpart 는 docs/api/counterpart.<판>.json 의 짝(vanilla.js 의 같은 항목)이다. `--counterpart <vanilla.js 의 docs/api/<판>.json>` 으로 그 표를 다시 짓는다.
 //! - 사용:
 //!   ```text
-//!   cargo run -p vanilla-engine-apidoc -- <판> [--date YYYY-MM-DD] [--counterpart <vanilla.js 자료>]   자료 쓰기
+//!   cargo run -p vanilla-engine-apidoc -- <판> [--date YYYY-MM-DD] [--counterpart <vanilla.js 자료>]   자료 쓰기 (가이드 doctest 장 목록 tools/apidoc/src/guide.rs 도)
 //!   cargo run -p vanilla-engine-apidoc -- <판> --check                                         자료 꼴 검사와 수 세기, 가이드 ko 와 en 대조
 //!   cargo run -p vanilla-engine-apidoc -- <판> --missing [--only <경로 앞>]                     번역 표에 없는 ko 글 (JSON 배열)
 //!   cargo run -p vanilla-engine-apidoc -- <판> --gaps [--only <경로 앞>] [--exclude <경로 앞>]   소스에서 문서가 빈 곳
@@ -2473,6 +2473,40 @@ fn find_forbidden_characters(text: &str) -> Vec<usize> {
 }
 
 //==============================================================================
+/// 파일 이름을 가이드 doctest 구조체 이름으로. ("08-drawing" → "Guide08Drawing")
+//==============================================================================
+fn create_guide_struct_name(file_stem: &str) -> String {
+	let mut name = String::from("Guide");
+	for part in file_stem.split(|character: char| !character.is_ascii_alphanumeric()) {
+		let mut characters = part.chars();
+		if let Some(first) = characters.next() {
+			name.push(first.to_ascii_uppercase());
+			name.push_str(characters.as_str());
+		}
+	}
+	name
+}
+
+//==============================================================================
+/// 가이드 doctest 장 목록 글. (tools/apidoc/src/guide.rs, ko 장마다 include_str 를 문서 속성으로 붙인 빈 구조체)
+//==============================================================================
+fn create_guide_test_source(repository_root: &Path, version: &str) -> String {
+	let korean_directory = repository_root.join("docs/guide").join(version).join("ko");
+	let mut names: Vec<String> = fs::read_dir(&korean_directory).map(|entries| entries.flatten().map(|entry| entry.file_name().to_string_lossy().to_string()).filter(|name| name.ends_with(".md")).collect()).unwrap_or_default();
+	names.sort();
+	let mut source = String::new();
+	source.push_str("//==============================================================================\n");
+	source.push_str("//! 가이드 doctest 장 목록. (`cargo run -p vanilla-engine-apidoc -- <판>` 이 docs/guide/<판>/ko 에서 다시 쓴다, 손으로 고치지 않는다)\n");
+	source.push_str("//==============================================================================\n");
+	for name in names {
+		let file_stem = name.trim_end_matches(".md");
+		source.push_str(&format!("#[doc = include_str!(\"../../../docs/guide/{}/ko/{}\")]\n", version, name));
+		source.push_str(&format!("pub struct {};\n", create_guide_struct_name(file_stem)));
+	}
+	source
+}
+
+//==============================================================================
 /// --check: 자료 꼴 검사와 수 세기, 가이드와 업데이트 문서 대조.
 //==============================================================================
 fn run_check(options: &Options, repository_root: &Path, output_path: &Path) -> bool {
@@ -2674,6 +2708,10 @@ fn run_check(options: &Options, repository_root: &Path, output_path: &Path) -> b
 			errors.push(format!("가이드 en/{}: 본문에 한글", name));
 		}
 	}
+	let guide_test_path = repository_root.join("tools/apidoc/src/guide.rs");
+	if fs::read_to_string(&guide_test_path).unwrap_or_default() != create_guide_test_source(repository_root, &options.version) {
+		errors.push(String::from("가이드 doctest 장 목록(tools/apidoc/src/guide.rs)이 장 파일과 다름. (자료를 다시 뽑으면 다시 쓴다)"));
+	}
 	for language in ["ko", "en"] {
 		let update_path = repository_root.join("docs/update").join(format!("{}.{}.md", options.version, language));
 		match fs::read_to_string(&update_path) {
@@ -2831,6 +2869,7 @@ fn main() {
 	let document = create_document_value(&modules, &options.version, &date, &mut translator);
 	fs::create_dir_all(&api_directory).unwrap();
 	fs::write(&output_path, write_json_text(&document)).unwrap();
+	fs::write(repository_root.join("tools/apidoc/src/guide.rs"), create_guide_test_source(&repository_root, &options.version)).unwrap();
 	let class_count: usize = modules.iter().map(|module| module.classes.len()).sum();
 	let member_count: usize = modules.iter().map(|module| module.classes.iter().map(|class| class.members.len()).sum::<usize>() + module.enums.iter().map(|entry| entry.members.len()).sum::<usize>()).sum();
 	let function_count: usize = modules.iter().map(|module| module.functions.len()).sum();

@@ -82,7 +82,9 @@ pub enum BrowserUiText {
 	WindowsKey,
 	/// 터치 빠른 메뉴의 잘라내기, 복사, 붙여넣기. (ui_strings 의 IDS_APP_CUT, IDS_APP_COPY, IDS_APP_PASTE)
 	TouchCut,
+	/// 터치 빠른 메뉴의 복사. (IDS_APP_COPY)
 	TouchCopy,
+	/// 터치 빠른 메뉴의 붙여넣기. (IDS_APP_PASTE)
 	TouchPaste,
 }
 

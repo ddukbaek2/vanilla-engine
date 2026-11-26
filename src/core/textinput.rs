@@ -167,6 +167,7 @@ pub struct TextInputEvent {
 /// 	cursor_index: 3,
 /// 	max_length: 0,
 /// 	value_revision: 0,
+/// 	is_multiline: false,
 /// });
 /// text_input.finish_frame();
 /// assert_eq!(text_input.get_published_field_states().len(), 1);
@@ -408,6 +409,7 @@ impl TextInput {
 	/// 		cursor_index: 0,
 	/// 		max_length: 0,
 	/// 		value_revision: 0,
+	/// 		is_multiline: false,
 	/// 	}
 	/// }
 	///

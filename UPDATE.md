@@ -551,6 +551,10 @@
 - 예제 toonmaterial: 애버런트 몸 셰이딩 식 대조를 뺐다. (게임 하나의 식이고, 엔진 빛 꼴이 정석으로 바뀌어 같은 값이 나오지 않는다) 바위 정점 조각의 노멀 크기 맞춤을 뺐다
 - 예제 toonstyle: 그늘 셋, 단단한 하이라이트, 해 쪽 림, 스포트라이트, 매트캡, TOON_STYLE_SHELL=1 로 껍데기 바깥선. 원본과 견주면 2560x1440 에서 화소 차이 평균 0.004, 8 넘게 다른 화소 0.018% (껍데기 장면은 0.279%, 기하 가장자리의 MSAA 차이)
 - 툰 폴더 파일의 머리 주석을 채웠다. (모든 함수와 공개 칸)
+- 문서: 함수와 타입의 머리 주석(`//====` 두 줄 사이) 설명 줄을 rustdoc 문서 주석(`///`, 파일 머리는 `//!`, 필드와 열거 값은 바로 위 `///`)으로 바꾸고, 공개 API 모두에 설명, `# 인자`, `# 돌려줌`, `# 예제` 를 채웠다. 머리 주석이 없던 함수에도 달았다. 예제 865 개(모듈 44, 구조체와 트레이트 373, 멤버 384, 함수 64)는 `cargo test --doc` 이 컴파일하고 돌린다. (창이나 GL 이 있어야 하는 것은 no_run 으로 컴파일만) 꼴은 CLAUDE.md 의 '문서 주석'. 입력 필드, Pane, Canvas2D, LocalStorage, PersistedStore, storagetext, 툰 3D 는 주석 꼴만 바뀌었고 인자, 돌려줌, 예제는 나중에 채운다
+- tools/apidoc(워크스페이스 크레이트 vanilla-engine-apidoc, syn 과 serde_json 만 쓴다): 문서 주석에서 API 문서 자료 docs/api/<판>.json 을 뽑는다. vanilla.js tools/apidoc.cjs 와 같은 자료 꼴에 클래스의 kind(struct, trait, type), traits, counterpart 를 더했다. --check(꼴 검사와 수 세기, 가이드 ko 와 en 대조), --missing(번역 표에 없는 ko 글), --gaps(문서가 빈 곳), --counterpart(vanilla.js 자료와 이름으로 짝 짓기). since 는 v0.3.2 태그의 소스와 대어 정한다. 쓰는 법은 tools/TOOLS.md
+- docs/api/0.4.0.json(모듈 216, 클래스 490, 멤버 4862, 함수와 상수 352, 열거 89), 영어 번역 표 docs/api/translation.en.json, vanilla.js 와 같은 항목의 짝 표 docs/api/counterpart.0.4.0.json(vanilla.js 쪽 자료가 러스트 짝을 채울 때도 쓴다)
+- 가이드 docs/guide/0.4.0/ko, en: 개요, 빠른 시작, 구조, 도구와 05 프로젝트 시작부터 19 저작 도구까지(원본 vanilla.js 가이드와 같은 장), 러스트 판만의 20 반사 매크로, 21 async/await, 22 원본에서 옮겨 오기. 코드 칸 216 개 가운데 rust 칸은 tools/apidoc 의 라이브러리 자리가 doctest 로 컴파일하고 돌린다. (장 목록 tools/apidoc/src/guide.rs 는 apidoc 이 장 파일마다 include_str 문서 속성으로 다시 쓴다) 업데이트 문서 docs/update/0.4.0.ko.md, .en.md
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.
