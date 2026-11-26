@@ -63,6 +63,8 @@ fn main() {
 cargo run
 ```
 
+![첫 씬을 돌린 화면: 검은 바탕에 흰 사각형 하나](../images/quickstart.webp)
+
 엔진 저장소 안에서는 같은 코드가 `examples/quickstart.rs` 에 있습니다. (`cargo run --example quickstart`, 창 제목만 다릅니다)
 
 - 씬은 `Scene` 트레이트를 구현합니다. 꼭 구현할 것은 씬 공통 상태(`SceneBase`)를 내주는 `get_scene_base`, `get_scene_base_mut` 둘이고, 나머지 훅(`create`, `initialize`, `tick`, `pre_draw`, `draw` 같은 것)은 필요한 것만 덮어씁니다.

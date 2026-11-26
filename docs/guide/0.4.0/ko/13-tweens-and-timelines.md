@@ -414,6 +414,8 @@ fn main() {
 
 `Timeline` 은 타임라인 편집기가 저장한 문서(`*.timeline.json`)를 재생합니다. 문서는 무대 노드 목록, 트랙(대상 이름, 속성, 키), 마커로 이루어진 JSON 이고, 키 이름은 원본과 같은 camelCase 입니다.
 
+![timelineshowcase 예제가 타임라인 문서 TITLE REVEAL 을 재생하는 화면: 글자와 금빛 줄이 나타나고 불티가 흩어진다](../images/timeline.webp)
+
 ```json
 {
 	"name": "Title Reveal",
@@ -810,7 +812,7 @@ fn main() {
 
 ## Action
 
-`Action` 은 스텝을 쌓아 두고 차례로 도는 연출 스크립트입니다(원본 `experimental/action.js`). 대상 꼴 `T` 는 기본 `WorldNode` 이고, 게임 상태나 노드 여럿을 다루려면 그것을 `T` 로 씁니다. 러스트는 대상을 붙잡아 둘 수 없어서 `start(&mut target)` 과 `step(&mut target, time_delta)` 가 대상을 받아 콜백에 넘깁니다.
+`Action` 은 스텝을 쌓아 두고 차례로 도는 연출 스크립트입니다(원본 `animation/action.js`). 대상 꼴 `T` 는 기본 `WorldNode` 이고, 게임 상태나 노드 여럿을 다루려면 그것을 `T` 로 씁니다. 러스트는 대상을 붙잡아 둘 수 없어서 `start(&mut target)` 과 `step(&mut target, time_delta)` 가 대상을 받아 콜백에 넘깁니다.
 
 - `wait(duration, ActionCallbacks::new().started(..).updated(|progress, target| ..).completed(..))`: 정한 시간(초) 동안 기다리며 진행률(0 ~ 1)을 넘깁니다. 0 이하면 첫 `step` 에서 진행률 1 로 끝납니다.
 - `condition(|target| bool, ActionConditionCallbacks::new())`: 조건이 참이 될 때까지 기다립니다.

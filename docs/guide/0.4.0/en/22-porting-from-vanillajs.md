@@ -450,9 +450,9 @@ Original `src/` files with no Rust file of the same name were either merged into
 | `core/scenemanager.js` | `Engine`'s `load_scene`, `unload_scene`, `get_all_loaded_scenes` (`SceneId` instead of scene objects) |
 | `core/touchraycaster.js` | Merged into `SceneBase::tick_touch`, `NodeTree`'s press test, and `TouchRecognizer` |
 | `resource/jsonasset.js` | `JsonAsset` in the same file as `TextAsset` |
-| `base/object.js`, `base/singleton.js`, `Dictionary`, `List`, `Queue`, `Set`, `Stack` in `experimental/collection` | The Rust language and standard library (traits, `Any`, `enum`, `Vec`, `HashMap`, and so on) do the same job |
+| `base/object.js`, `base/singleton.js`, `Dictionary`, `List`, `Queue`, `Set`, `Stack` in `base/collection` | The Rust language and standard library (traits, `Any`, `enum`, `Vec`, `HashMap`, and so on) do the same job |
 | `base/reflection.js` | Run-time reflection is `#[vanilla::reflect]`; `createGUID` is `create_guid` |
-| `experimental/camera.js` | `Camera2D` covers it, including rotation and `begin`/`end` |
+| `deprecated/camera.js` | `Camera2D` covers it, including rotation and `begin`/`end` |
 | Work the browser did (2D canvas, `window.alert`, `confirm`, `prompt`, html lang and meta) | `Canvas2D`, `Engine::alert`, `confirm`, `prompt` (and `_async`), `Document` |
 
 ## Related Types

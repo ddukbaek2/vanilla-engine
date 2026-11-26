@@ -59,6 +59,7 @@
 //! 	Ok(())
 //! }
 //! ```
+//! <!-- image: toon-material.webp -->
 //==============================================================================
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicU32, Ordering};

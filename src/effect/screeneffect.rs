@@ -1172,6 +1172,7 @@ fn find_effect_body(pass_name: &str) -> Option<&'static str> {
 /// screen_effect.set_strength(ScreenEffectType::Vignette, 0.0);
 /// assert!(!screen_effect.has_active_effect());
 /// ```
+/// <!-- image: screen-effect.webp -->
 ///
 /// 씬에서 begin, end, tick 부르기
 /// ```rust,no_run

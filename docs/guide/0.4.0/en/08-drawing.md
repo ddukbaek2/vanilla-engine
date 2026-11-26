@@ -89,6 +89,8 @@ Inside a component's `draw(transform, graphic)` you use the same functions. Ther
 
 ## Drawing components
 
+![nodebasics example: a title drawn with Text and three Paint squares turned by a Spin component](../images/node-basics.webp)
+
 | Component | What it draws |
 | --- | --- |
 | `Paint` | A single color rectangle the size of the content (`set_color`, `set_round_size`, white by default) |
@@ -214,6 +216,8 @@ assert!(plain.get_image().is_none());
 ```
 
 ## Text
+
+![textshaping example: right-to-left text, synthetic italic and bold, underlined and shadowed text, CJK word wrapping, color emoji](../images/text-shaping.webp)
 
 ```rust,no_run
 use vanilla::{Color, Engine, EngineConfiguration, Graphic, Paint, RichText, Scene, SceneBase, Text, TextAlign, TextBaseline, Vector2};
@@ -366,6 +370,8 @@ A `RichText` with segments draws them on one line from the left. Alignment and b
 ## Blend modes
 
 Blend modes are the `BlendMode` enum, which covers all 26 Canvas2D composite operations. Components use `Sprite::set_sprite_blend_mode(mode)` (`SpriteBlendMode` is another name for `BlendMode`), and direct drawing uses `graphic.set_blend_mode(mode)`. The default is `BlendMode::Normal` ("source-over").
+
+![All 26 blend modes, one per cell: a translucent image and shapes over stripes and white, gray, black and purple backgrounds](../images/blend-modes.webp)
 
 - Fixed function blending: `Normal`, `SourceIn`, `SourceOut`, `SourceAtop`, `DestinationOver`, `DestinationIn`, `DestinationOut`, `DestinationAtop`, `Lighter`, `Copy`, `Xor`, `Multiply`, `Screen`
 - Shader blending: `Overlay`, `Darken`, `Lighten`, `ColorDodge`, `ColorBurn`, `HardLight`, `SoftLight`, `Difference`, `Exclusion`, `Hue`, `Saturation`, `Color`, `Luminosity`
@@ -525,6 +531,8 @@ fn main() {
 ## Camera2D
 
 `Camera2D` is not a component but a value the scene holds and uses. It has the world position it looks at (shown at the center of the screen), a zoom (default 1, clamped to the `set_zoom_range` range, which defaults to 0.1 to 8) and a rotation (degrees, around the center of the screen), and it applies that transform to whatever you draw between `begin(graphic)` and `end(graphic)`.
+
+![misctour example: a world grid tilted and turned by Camera2D, a path-finding route, floating numbers, a virtual joystick and a dialogue box](../images/misc-tour.webp)
 
 | Function | Description |
 | --- | --- |

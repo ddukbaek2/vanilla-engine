@@ -1916,6 +1916,7 @@ pub type TimelineImageResolver<'a> = &'a dyn Fn(&str) -> Option<Rc<Image>>;
 /// };
 /// engine.run(Box::new(intro_scene)).unwrap();
 /// ```
+/// <!-- image: timeline.webp -->
 //==============================================================================
 pub struct Timeline {
 	description: Value,

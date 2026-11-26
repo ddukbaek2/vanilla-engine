@@ -414,6 +414,8 @@ fn main() {
 
 `Timeline` plays documents (`*.timeline.json`) saved by the Timeline Editor. A document is JSON made of a list of stage nodes, tracks (target name, property, keys) and markers, and its keys are camelCase as in the original.
 
+![The timelineshowcase example playing the TITLE REVEAL timeline document: text and a gold line appear and sparks scatter](../images/timeline.webp)
+
 ```json
 {
 	"name": "Title Reveal",
@@ -810,7 +812,7 @@ fn main() {
 
 ## Action
 
-`Action` is a staging script that stacks steps and runs them in order (the original `experimental/action.js`). The target type `T` defaults to `WorldNode`; to work with game state or several nodes, use that as `T`. Rust cannot hold on to the target, so `start(&mut target)` and `step(&mut target, time_delta)` take the target and pass it to the callbacks.
+`Action` is a staging script that stacks steps and runs them in order (the original `animation/action.js`). The target type `T` defaults to `WorldNode`; to work with game state or several nodes, use that as `T`. Rust cannot hold on to the target, so `start(&mut target)` and `step(&mut target, time_delta)` take the target and pass it to the callbacks.
 
 - `wait(duration, ActionCallbacks::new().started(..).updated(|progress, target| ..).completed(..))`: waits for the given time (seconds), passing progress (0 to 1). At 0 or less it ends on the first `step` with progress 1.
 - `condition(|target| bool, ActionConditionCallbacks::new())`: waits until the condition becomes true.

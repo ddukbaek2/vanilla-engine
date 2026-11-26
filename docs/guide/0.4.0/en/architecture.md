@@ -147,7 +147,7 @@ Scene loading maps the original's create, async load, initialize onto `create`, 
 
 ## Mapping to the Original
 
-Of the 200 .js files in the original `src/`, 182 were ported. (176 under the same name, 6 merged into other files) The remaining 18 were left out on purpose: empty files, dead code, things the Rust language and standard library cover (object model helpers, collections), and what another feature covers (experimental/camera.js, covered by `Camera2D`).
+Of the 200 .js files in the original `src/`, 182 were ported. (176 under the same name, 6 merged into other files) The remaining 18 were left out on purpose: empty files, dead code, things the Rust language and standard library cover (object model helpers, collections), and what another feature covers (deprecated/camera.js, covered by `Camera2D`).
 
 What exists only in the Rust port is the work the browser does in the original: the platform layer, text shaping and color emoji, image decoding, the text input line, node storage, the async executor, and browser stand-ins (`Canvas2D`, dialogs, translations of text the browser draws).
 

@@ -67,6 +67,7 @@ pub type UIWindowChangeEvent = Box<dyn FnMut(usize)>;
 /// assert_eq!(window_layer.get_top_window(), Some(window_id));
 /// assert_eq!(window_layer.find_window(&node_tree, "quit"), Some(window_id));
 /// ```
+/// <!-- image: window-stack.webp -->
 //==============================================================================
 pub struct UIWindowLayer {
 	component_base: ComponentBase,

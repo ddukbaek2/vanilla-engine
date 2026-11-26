@@ -52,6 +52,7 @@ struct TrailPoint {
 /// }
 /// assert_eq!(node_tree[comet_id].get_component::<TrailRenderer>().map(|trail| trail.get_point_count()), Some(5));
 /// ```
+/// <!-- image: trail.webp -->
 //==============================================================================
 pub struct TrailRenderer {
 	component_base: ComponentBase,

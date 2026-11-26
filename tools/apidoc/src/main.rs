@@ -4,13 +4,18 @@
 //!   syn 으로 읽어 docs/api/<판>.json 을 쓴다. 다시 내보낸 반사 매크로(vanilla::reflect)는 macros/src/lib.rs 에서 읽는다.
 //! - 설명은 rustdoc 문서 주석(///, //!)에서 읽는다. 첫 절이 설명, `# 인자` 는 `` - `이름`: 설명 `` 목록, `# 돌려줌` 은 돌려주는 값,
 //!   `# 예제` 는 코드 칸(바로 앞 글이 제목)이다. 문서 주석이 없으면 `//====` 머리 주석의 글을 쓴다. (다른 작업자가 고치는 중이라 아직 바꾸지 않은 파일)
+//! - `# 예제` 의 코드 칸 바로 뒤 줄 `<!-- image: 파일 이름 -->` 은 그 예제의 image 칸이다. (HTML 주석이라 rustdoc 에서 보이지 않는다)
+//!   그림은 docs/guide/<판>/images/<파일 이름> 에 두고 `--check` 가 있는지 본다.
 //! - ko 는 문서 주석 글 그대로(긴 줄표와 가운뎃점만 쉼표로), en 은 docs/api/translation.en.json(ko 원문 → en) 표에서 온다. 한글이 없는 글은 그대로 en 이 된다.
 //! - since 는 v0.3.2 태그(러스트 첫 판)의 소스에서 같은 타입에 같은 이름(밑줄과 대소문자를 빼고 비교, 0.3.2 는 camelCase 였다)이 있으면 "0.3.2", 아니면 만들려는 판.
 //! - counterpart 는 docs/api/counterpart.<판>.json 의 짝(vanilla.js 의 같은 항목)이다. `--counterpart <vanilla.js 의 docs/api/<판>.json>` 으로 그 표를 다시 짓는다.
+//! - 초안 모듈(이름이 experimental 이거나 experimental/ 로 시작하는 것)은 자료와 짝 표에 넣지 않는다. 초안을 가리키는 짝도 뺀다.
+//!   밖에서 닿지 않는 모듈의 아이템을 초안 모듈에서만 다시 내보냈으면 그것도 초안이다. (split_draft_modules)
+//!   `--check`(초안은 메모리에서 지어 따로 본다), `--gaps`, `--missing`, doctest 는 초안도 본다.
 //! - 사용:
 //!   ```text
 //!   cargo run -p vanilla-engine-apidoc -- <판> [--date YYYY-MM-DD] [--counterpart <vanilla.js 자료>]   자료 쓰기 (가이드 doctest 장 목록 tools/apidoc/src/guide.rs 도)
-//!   cargo run -p vanilla-engine-apidoc -- <판> --check                                         자료 꼴 검사와 수 세기, 가이드 ko 와 en 대조
+//!   cargo run -p vanilla-engine-apidoc -- <판> --check                                         자료 꼴 검사와 수 세기, 가이드 ko 와 en 대조, 예제 그림과 가이드 그림 파일 검사
 //!   cargo run -p vanilla-engine-apidoc -- <판> --missing [--only <경로 앞>]                     번역 표에 없는 ko 글 (JSON 배열)
 //!   cargo run -p vanilla-engine-apidoc -- <판> --gaps [--only <경로 앞>] [--exclude <경로 앞>]   소스에서 문서가 빈 곳
 //!   ```
@@ -47,15 +52,26 @@ const MEMBER_KINDS: [&str; 5] = ["method", "property", "constructor", "static", 
 const COUNTERPART_CLASS_ALIASES: [(&str, &[&str]); 3] = [("Engine", &["SceneManager"]), ("SceneBase", &["SceneManager", "TouchRaycaster"]), ("NodeTree", &["WorldNode", "TransformNode", "ComponentNode", "Node"])];
 /// 클래스 자리에 두는 것의 종류. (러스트 struct, trait, 꼴 별칭)
 const CLASS_KINDS: [&str; 3] = ["struct", "trait", "type"];
+/// 초안 모듈 이름. (이 이름이거나 "이름/" 으로 시작하는 모듈은 자료에 넣지 않는다, 두 엔진 같음)
+const DRAFT_MODULE_NAME: &str = "experimental";
+/// 예제 그림 표시의 앞과 뒤. (`# 예제` 의 코드 칸 바로 뒤 줄 `<!-- image: blend-modes.webp -->`)
+const IMAGE_MARKER_PREFIX: &str = "<!-- image:";
+const IMAGE_MARKER_SUFFIX: &str = "-->";
+/// 그림 파일의 확장자. (사이트와 정한 꼴, docs/guide/<판>/images/ 에 둔다)
+const IMAGE_EXTENSIONS: [&str; 4] = [".webp", ".png", ".jpg", ".gif"];
+
+/// 놓인 자리가 틀린 그림 표시. (예제 코드 칸 바로 뒤가 아님, 자료를 쓸 때 알린다)
+static MISPLACED_IMAGE_MARKERS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
 
 //==============================================================================
-/// 예제 하나. (제목은 예제 칸 바로 앞 글, 코드는 rustdoc 이 숨기는 줄을 뺀 것)
+/// 예제 하나. (제목은 예제 칸 바로 앞 글, 코드는 rustdoc 이 숨기는 줄을 뺀 것, 그림은 코드 칸 바로 뒤의 그림 표시로 빈 글이면 없다)
 //==============================================================================
 #[derive(Clone, Default)]
 struct Example {
 	title: String,
 	code: String,
 	language: String,
+	image: String,
 }
 
 //==============================================================================
@@ -163,6 +179,8 @@ struct ModuleEntry {
 	is_reachable: bool,
 	exported_names: HashSet<String>,
 	is_all_exported: bool,
+	public_exported_names: HashSet<String>,
+	is_all_exported_from_public: bool,
 }
 
 //==============================================================================
@@ -191,7 +209,7 @@ struct Collector {
 	repository_root: PathBuf,
 	modules: Vec<ModuleEntry>,
 	pending_implementations: Vec<PendingImplementation>,
-	pending_exports: Vec<(String, String)>,
+	pending_exports: Vec<(String, String, String)>,
 	source_texts: HashMap<String, Vec<String>>,
 }
 
@@ -351,6 +369,77 @@ fn join_trimmed_lines(lines: &[String]) -> String {
 }
 
 //==============================================================================
+/// 초안 모듈인지. (experimental 이거나 experimental/ 로 시작, 두 엔진의 모듈 이름에 같이 쓴다)
+//==============================================================================
+fn is_draft_module_name(module_name: &str) -> bool {
+	module_name == DRAFT_MODULE_NAME || module_name.strip_prefix(DRAFT_MODULE_NAME).map(|rest| rest.starts_with('/')).unwrap_or(false)
+}
+
+//==============================================================================
+/// 모듈 목록을 자료에 넣을 것과 초안으로 가르기. ((넣을 것, 초안))
+/// - 이름이 초안인 모듈은 통째로 초안이다.
+/// - 밖에서 닿지 않는 모듈의 아이템은 초안 아닌 모듈이 다시 내보낸 것만 자료에 넣고, 초안 모듈에서만 다시 내보낸 것은 초안으로 친다.
+///   (platform/audio/pannermath 처럼 experimental::spatialaudio 로만 내보낸 것)
+//==============================================================================
+fn split_draft_modules(modules: Vec<ModuleEntry>) -> (Vec<ModuleEntry>, Vec<ModuleEntry>) {
+	let mut document_modules = Vec::new();
+	let mut draft_modules = Vec::new();
+	for mut module in modules {
+		if is_draft_module_name(&module.name) {
+			draft_modules.push(module);
+			continue;
+		}
+		if module.is_reachable || module.is_all_exported_from_public {
+			document_modules.push(module);
+			continue;
+		}
+		let public_names = module.public_exported_names.clone();
+		let (classes, draft_classes): (Vec<ClassEntry>, Vec<ClassEntry>) = std::mem::take(&mut module.classes).into_iter().partition(|class| public_names.contains(&class.name));
+		let (enums, draft_enums): (Vec<EnumEntry>, Vec<EnumEntry>) = std::mem::take(&mut module.enums).into_iter().partition(|entry| public_names.contains(&entry.name));
+		let (functions, draft_functions): (Vec<Member>, Vec<Member>) = std::mem::take(&mut module.functions).into_iter().partition(|function| public_names.contains(&function.name));
+		if !draft_classes.is_empty() || !draft_enums.is_empty() || !draft_functions.is_empty() {
+			draft_modules.push(ModuleEntry {
+				name: module.name.clone(),
+				source: module.source.clone(),
+				summary: module.summary.clone(),
+				examples: module.examples.clone(),
+				classes: draft_classes,
+				functions: draft_functions,
+				enums: draft_enums,
+				is_reachable: false,
+				exported_names: module.exported_names.clone(),
+				is_all_exported: module.is_all_exported,
+				public_exported_names: HashSet::new(),
+				is_all_exported_from_public: false,
+			});
+		}
+		if !classes.is_empty() || !enums.is_empty() || !functions.is_empty() {
+			module.classes = classes;
+			module.enums = enums;
+			module.functions = functions;
+			document_modules.push(module);
+		}
+	}
+	(document_modules, draft_modules)
+}
+
+//==============================================================================
+/// 그림 표시 줄에서 파일 이름 읽기. (`<!-- image: blend-modes.webp -->` 면 Some("blend-modes.webp"), 표시가 아니면 None)
+//==============================================================================
+fn read_image_marker(trimmed_line: &str) -> Option<String> {
+	let rest = trimmed_line.strip_prefix(IMAGE_MARKER_PREFIX)?;
+	let name = rest.strip_suffix(IMAGE_MARKER_SUFFIX).unwrap_or(rest).trim();
+	Some(name.to_string())
+}
+
+//==============================================================================
+/// 그림 파일 이름이 꼴에 맞는지. (영문 소문자, 숫자, 점, 밑줄, 하이픈과 .webp, .png, .jpg, .gif)
+//==============================================================================
+fn is_image_name_valid(name: &str) -> bool {
+	!name.is_empty() && name.chars().all(|character| character.is_ascii_lowercase() || character.is_ascii_digit() || matches!(character, '.' | '_' | '-')) && IMAGE_EXTENSIONS.iter().any(|extension| name.len() > extension.len() && name.ends_with(extension))
+}
+
+//==============================================================================
 /// 예제 코드에서 rustdoc 이 숨기는 줄 빼기. ("# " 로 시작하거나 "#" 뿐인 줄, "##" 은 "#" 로)
 //==============================================================================
 fn remove_hidden_example_lines(lines: &[String]) -> String {
@@ -393,8 +482,19 @@ fn parse_document(raw_lines: Vec<String>) -> DocumentText {
 	let mut example_title_lines: Vec<String> = Vec::new();
 	let mut example_code_lines: Vec<String> = Vec::new();
 	let mut example_language = String::new();
+	let mut is_after_example = false;
 	for line in &lines {
 		let trimmed = line.trim();
+		if !is_in_fence {
+			if let Some(image_name) = read_image_marker(trimmed) {
+				match document.examples.last_mut() {
+					Some(example) if section == Section::Examples && is_after_example && example.image.is_empty() => example.image = image_name,
+					_ => MISPLACED_IMAGE_MARKERS.lock().unwrap().push(image_name),
+				}
+				is_after_example = false;
+				continue;
+			}
+		}
 		if !is_in_fence && line.starts_with('#') {
 			let heading = line.trim_end();
 			if heading == SECTION_PARAMETERS {
@@ -477,8 +577,10 @@ fn parse_document(raw_lines: Vec<String>) -> DocumentText {
 							title: join_trimmed_lines(&example_title_lines).replace('\n', " "),
 							code: code,
 							language: example_language.clone(),
+							image: String::new(),
 						});
 						example_title_lines.clear();
+						is_after_example = true;
 					}
 					continue;
 				}
@@ -489,6 +591,7 @@ fn parse_document(raw_lines: Vec<String>) -> DocumentText {
 					example_title_lines.clear();
 				}
 				else {
+					is_after_example = false;
 					example_title_lines.push(trimmed.to_string());
 				}
 			}
@@ -839,6 +942,8 @@ impl Collector {
 			is_reachable: is_reachable,
 			exported_names: HashSet::new(),
 			is_all_exported: false,
+			public_exported_names: HashSet::new(),
+			is_all_exported_from_public: false,
 		});
 		self.process_items(&file.items, module_index, module_name, child_directory, is_reachable, &source);
 	}
@@ -876,6 +981,8 @@ impl Collector {
 							is_reachable: is_child_reachable,
 							exported_names: HashSet::new(),
 							is_all_exported: false,
+							public_exported_names: HashSet::new(),
+							is_all_exported_from_public: false,
 						});
 						self.process_items(inner_items, inner_index, &child_module_name, &next_directory, is_child_reachable, source);
 					}
@@ -1118,7 +1225,7 @@ impl Collector {
 					collect_use_paths(&item_use.tree, Vec::new(), &mut paths);
 					for segments in paths {
 						if let Some((module_path, item_name)) = resolve_use_path(module_name, &segments) {
-							self.pending_exports.push((module_path, item_name));
+							self.pending_exports.push((module_path, item_name, module_name.to_string()));
 						}
 					}
 				}
@@ -1181,6 +1288,8 @@ impl Collector {
 			is_reachable: true,
 			exported_names: HashSet::new(),
 			is_all_exported: false,
+			public_exported_names: HashSet::new(),
+			is_all_exported_from_public: false,
 		});
 	}
 
@@ -1226,12 +1335,17 @@ impl Collector {
 			}
 		}
 		let exports = std::mem::take(&mut self.pending_exports);
-		for (module_path, item_name) in exports {
+		for (module_path, item_name, exporter_module_name) in exports {
 			if let Some(module) = self.modules.iter_mut().find(|module| module.name == module_path) {
+				let is_public_exporter = !is_draft_module_name(&exporter_module_name);
 				if item_name == "*" {
 					module.is_all_exported = true;
+					module.is_all_exported_from_public |= is_public_exporter;
 				}
 				else {
+					if is_public_exporter {
+						module.public_exported_names.insert(item_name.clone());
+					}
 					module.exported_names.insert(item_name);
 				}
 			}
@@ -1241,7 +1355,7 @@ impl Collector {
 	//==============================================================================
 	/// 밖에서 닿는 것만 남긴 모듈 목록. (닿는 모듈은 공개 아이템 모두, 닿지 않는 모듈은 다시 내보낸 이름만)
 	/// - 빈 모듈은 뺀다. 다만 pub mod 사슬로 밖에서 닿는 묶음 모듈(아래 모듈을 둔 모듈)은 아이템이 없어도 모듈 설명이나 예제가 있으면 둔다.
-	///   (vanilla::experimental, vanilla::experimental::tilemap 같은 것, 원본 자료의 experimental/experimental 자리)
+	///   (vanilla::ui, vanilla::graphics3d::toon 같은 것)
 	/// - 크레이트 뿌리(lib.rs)는 두지 않는다. (원본 자료도 진입점 import.js 를 모듈로 두지 않는다)
 	//==============================================================================
 	fn take_public_modules(&mut self) -> Vec<ModuleEntry> {
@@ -1555,7 +1669,7 @@ fn create_counterpart_lookup_key(module: &str, class: &str, name: &str) -> Strin
 }
 
 //==============================================================================
-/// 짝 표 읽기. (docs/api/counterpart.<판>.json 의 items)
+/// 짝 표 읽기. (docs/api/counterpart.<판>.json 의 items, 어느 쪽이든 초안 모듈인 짝은 뺀다)
 //==============================================================================
 fn load_counterpart_table(path: &Path) -> HashMap<String, CounterpartKey> {
 	let mut table = HashMap::new();
@@ -1583,6 +1697,9 @@ fn load_counterpart_table(path: &Path) -> HashMap<String, CounterpartKey> {
 		for item in items {
 			let own = read_key(&item[ENGINE_NAME]);
 			let other = read_key(&item[COUNTERPART_ENGINE_NAME]);
+			if is_draft_module_name(&own.module) || is_draft_module_name(&other.module) {
+				continue;
+			}
 			table.insert(create_counterpart_lookup_key(&own.module, &own.class, &own.name), other);
 		}
 	}
@@ -1608,7 +1725,7 @@ struct CounterpartIndex {
 }
 
 //==============================================================================
-/// 짝 엔진 자료(vanilla.js docs/api/<판>.json)를 찾기 표로.
+/// 짝 엔진 자료(vanilla.js docs/api/<판>.json)를 찾기 표로. (초안 모듈은 뺀다)
 //==============================================================================
 fn build_counterpart_index(document: &Value) -> CounterpartIndex {
 	let mut index = CounterpartIndex {
@@ -1619,6 +1736,9 @@ fn build_counterpart_index(document: &Value) -> CounterpartIndex {
 	};
 	for module in document["modules"].as_array().into_iter().flatten() {
 		let module_name = module["name"].as_str().unwrap_or("").to_string();
+		if is_draft_module_name(&module_name) {
+			continue;
+		}
 		for class in module["classes"].as_array().into_iter().flatten() {
 			let class_name = class["name"].as_str().unwrap_or("").to_string();
 			let members = class["members"].as_array().into_iter().flatten().map(|member| CounterpartMember {
@@ -1897,6 +2017,9 @@ fn create_examples_value(examples: &[Example], translator: &mut Translator) -> V
 		object.insert(String::from("title"), translator.create_text(&example.title));
 		object.insert(String::from("code"), Value::from(example.code.clone()));
 		object.insert(String::from("language"), Value::from(example.language.clone()));
+		if !example.image.is_empty() {
+			object.insert(String::from("image"), Value::from(example.image.clone()));
+		}
 		Value::Object(object)
 	}).collect())
 }
@@ -2193,7 +2316,7 @@ fn collect_modules(repository_root: &Path, version: &str) -> Vec<ModuleEntry> {
 	let mut collector = Collector::new(repository_root.to_path_buf());
 	let source_directory = repository_root.join("src");
 	collector.load_module(&source_directory.join("lib.rs"), "", &source_directory, true);
-	let macro_names: HashSet<String> = collector.pending_exports.iter().filter(|(module, _)| module == "macros").map(|(_, name)| name.clone()).collect();
+	let macro_names: HashSet<String> = collector.pending_exports.iter().filter(|(module, _, _)| module == "macros").map(|(_, name, _)| name.clone()).collect();
 	collector.load_macro_crate(&macro_names);
 	collector.resolve();
 	let mut modules = collector.take_public_modules();
@@ -2516,7 +2639,7 @@ fn create_guide_test_source(repository_root: &Path, version: &str) -> String {
 //==============================================================================
 /// --check: 자료 꼴 검사와 수 세기, 가이드와 업데이트 문서 대조.
 //==============================================================================
-fn run_check(options: &Options, repository_root: &Path, output_path: &Path) -> bool {
+fn run_check(options: &Options, repository_root: &Path, output_path: &Path, is_draft_only: bool) -> bool {
 	let mut errors: Vec<String> = Vec::new();
 	let text = match fs::read_to_string(output_path) {
 		Ok(text) => text,
@@ -2628,6 +2751,9 @@ fn run_check(options: &Options, repository_root: &Path, output_path: &Path) -> b
 	};
 	for module in document["modules"].as_array().into_iter().flatten() {
 		let module_name = module["name"].as_str().unwrap_or("?").to_string();
+		if !is_draft_only && is_draft_module_name(&module_name) {
+			errors.push(format!("{}: 초안 모듈이 자료에 있음", module_name));
+		}
 		count("모듈", 1);
 		check_text(&module["summary"], &module_name, "모듈 요약", true, &mut errors, &mut korean_empty, &mut english_empty);
 		let module_examples = check_examples(module, &module_name, &mut errors, &mut korean_empty, &mut english_empty);
@@ -2679,6 +2805,20 @@ fn run_check(options: &Options, repository_root: &Path, output_path: &Path) -> b
 			count("열거 예제", enum_examples);
 		}
 	}
+	if is_draft_only {
+		let korean_empty_count: usize = korean_empty.iter().map(|(_, amount)| amount).sum();
+		println!("초안 모듈(자료에 넣지 않음) {}, ko 빈 칸 {}, en 빈 칸 {}", counts.iter().find(|(name, _)| name == "모듈").map(|(_, amount)| *amount).unwrap_or(0), korean_empty_count, english_empty);
+		for error in &errors {
+			println!("오류(초안): {}", error);
+		}
+		println!("초안 오류 {} 개", errors.len());
+		return errors.is_empty();
+	}
+	let mut draft_counterpart_places: Vec<String> = Vec::new();
+	collect_draft_counterparts(&document, "", &mut draft_counterpart_places);
+	for place in &draft_counterpart_places {
+		errors.push(format!("{}: 초안 모듈을 가리키는 짝", place));
+	}
 	let guide_directory = repository_root.join("docs/guide").join(&options.version);
 	let mut guide_files: Vec<String> = Vec::new();
 	let mut code_block_count = 0;
@@ -2715,6 +2855,52 @@ fn run_check(options: &Options, repository_root: &Path, output_path: &Path) -> b
 			errors.push(format!("가이드 en/{}: 본문에 한글", name));
 		}
 	}
+	let image_directory = guide_directory.join("images");
+	let mut used_images: HashSet<String> = HashSet::new();
+	let mut check_image = |name: &str, place: &str, errors: &mut Vec<String>| {
+		if !is_image_name_valid(name) {
+			errors.push(format!("{}: 그림 파일 이름 꼴 {:?} (영문 소문자, 숫자, 점, 밑줄, 하이픈과 .webp, .png, .jpg, .gif)", place, name));
+		}
+		else if !image_directory.join(name).is_file() {
+			errors.push(format!("{}: 그림 파일 없음 docs/guide/{}/images/{}", place, options.version, name));
+		}
+		used_images.insert(name.to_string());
+	};
+	let mut example_images: Vec<(String, String)> = Vec::new();
+	collect_example_images(&document, "", &mut example_images);
+	for (place, name) in &example_images {
+		check_image(name, place, &mut errors);
+	}
+	let mut guide_image_count = 0;
+	for name in &guide_files {
+		let korean_images = read_guide_images(&fs::read_to_string(guide_directory.join("ko").join(name)).unwrap_or_default());
+		let english_images = read_guide_images(&fs::read_to_string(guide_directory.join("en").join(name)).unwrap_or_default());
+		if korean_images != english_images {
+			errors.push(format!("가이드 {}: ko 와 en 의 그림이 다름 (ko {:?}, en {:?})", name, korean_images, english_images));
+		}
+		for image in &korean_images {
+			check_image(image, &format!("가이드 ko/{}", name), &mut errors);
+		}
+		guide_image_count += korean_images.len();
+	}
+	let mut source_files = Vec::new();
+	list_rust_files(&repository_root.join("src"), &mut source_files);
+	list_rust_files(&repository_root.join("macros/src"), &mut source_files);
+	for source_file in &source_files {
+		let source_text = fs::read_to_string(source_file).unwrap_or_default();
+		for (line_index, line) in source_text.lines().enumerate() {
+			let comment = line.trim_start().trim_start_matches("///").trim_start_matches("//!").trim();
+			if let Some(image_name) = read_image_marker(comment) {
+				if !example_images.iter().any(|(_, name)| *name == image_name) {
+					errors.push(format!("{}:{}: 그림 표시 {} 가 자료에 없음 (# 예제 의 코드 칸 바로 뒤에 둔다)", source_file.strip_prefix(repository_root).unwrap_or(source_file).display(), line_index + 1, image_name));
+				}
+			}
+		}
+	}
+	let unused_image_count = fs::read_dir(&image_directory).map(|entries| entries.flatten().filter(|entry| {
+		let file_name = entry.file_name().to_string_lossy().to_string();
+		!file_name.starts_with('.') && !used_images.contains(&file_name)
+	}).count()).unwrap_or(0);
 	let guide_test_path = repository_root.join("tools/apidoc/src/guide.rs");
 	if fs::read_to_string(&guide_test_path).unwrap_or_default() != create_guide_test_source(repository_root, &options.version) {
 		errors.push(String::from("가이드 doctest 장 목록(tools/apidoc/src/guide.rs)이 장 파일과 다름. (자료를 다시 뽑으면 다시 쓴다)"));
@@ -2742,11 +2928,115 @@ fn run_check(options: &Options, repository_root: &Path, output_path: &Path) -> b
 	}
 	println!("en 빈 칸 {}", english_empty);
 	println!("가이드 장 {}, 코드 칸 {}", guide_files.len(), code_block_count);
+	println!("그림: 예제 {}, 가이드(ko) {}, 아무도 쓰지 않는 그림 파일 {} (docs/guide/{}/images)", example_images.len(), guide_image_count, unused_image_count, options.version);
 	for error in &errors {
 		println!("오류: {}", error);
 	}
 	println!("오류 {} 개", errors.len());
 	errors.is_empty()
+}
+
+//==============================================================================
+/// 자료에서 예제 그림 모으기. ([(자리, 파일 이름)], 모듈, 클래스, 멤버, 함수, 열거의 examples[].image)
+//==============================================================================
+fn collect_example_images(value: &Value, place: &str, images: &mut Vec<(String, String)>) {
+	match value {
+		Value::Object(object) => {
+			let name = object.get("name").and_then(Value::as_str).unwrap_or("");
+			let here = if name.is_empty() {
+				place.to_string()
+			}
+			else if place.is_empty() {
+				name.to_string()
+			}
+			else {
+				format!("{}::{}", place, name)
+			};
+			if let Some(Value::Array(examples)) = object.get("examples") {
+				for (index, example) in examples.iter().enumerate() {
+					match example.get("image") {
+						Some(Value::String(image)) => images.push((format!("{} 예제 {}", here, index + 1), image.clone())),
+						Some(_) => images.push((format!("{} 예제 {}", here, index + 1), String::new())),
+						None => {}
+					}
+				}
+			}
+			for (key, child) in object {
+				if key != "examples" {
+					collect_example_images(child, &here, images);
+				}
+			}
+		}
+		Value::Array(items) => {
+			for item in items {
+				collect_example_images(item, place, images);
+			}
+		}
+		_ => {}
+	}
+}
+
+//==============================================================================
+/// 자료에서 초안 모듈을 가리키는 짝 모으기. (자리 목록)
+//==============================================================================
+fn collect_draft_counterparts(value: &Value, place: &str, places: &mut Vec<String>) {
+	match value {
+		Value::Object(object) => {
+			let name = object.get("name").and_then(Value::as_str).unwrap_or("");
+			let here = if name.is_empty() {
+				place.to_string()
+			}
+			else if place.is_empty() {
+				name.to_string()
+			}
+			else {
+				format!("{}::{}", place, name)
+			};
+			if let Some(counterpart_module) = object.get("counterpart").and_then(|counterpart| counterpart.get("module")).and_then(Value::as_str) {
+				if is_draft_module_name(counterpart_module) {
+					places.push(here.clone());
+				}
+			}
+			for (key, child) in object {
+				if key != "counterpart" {
+					collect_draft_counterparts(child, &here, places);
+				}
+			}
+		}
+		Value::Array(items) => {
+			for item in items {
+				collect_draft_counterparts(item, place, places);
+			}
+		}
+		_ => {}
+	}
+}
+
+//==============================================================================
+/// 가이드 본문의 그림 파일 이름. (`![설명](../images/<이름>)`, 나온 차례, 코드 칸 안은 뺀다)
+//==============================================================================
+fn read_guide_images(text: &str) -> Vec<String> {
+	let mut images = Vec::new();
+	let mut is_in_fence = false;
+	for line in text.lines() {
+		if line.trim_start().starts_with("```") {
+			is_in_fence = !is_in_fence;
+			continue;
+		}
+		if is_in_fence {
+			continue;
+		}
+		let mut rest = line;
+		while let Some(start) = rest.find("](../images/") {
+			let after = &rest[start + "](../images/".len()..];
+			let end = after.find(|character: char| character == ')' || character.is_whitespace()).unwrap_or(after.len());
+			if rest[..start].contains("![") {
+				images.push(after[..end].to_string());
+			}
+			rest = &after[end..];
+		}
+	}
+	images
 }
 
 //==============================================================================
@@ -2825,7 +3115,19 @@ fn main() {
 	let translation_path = api_directory.join("translation.en.json");
 	let counterpart_path = api_directory.join(format!("counterpart.{}.json", options.version));
 	if options.is_check {
-		let is_passed = run_check(&options, &repository_root, &output_path);
+		let mut is_passed = run_check(&options, &repository_root, &output_path, false);
+		let (_, draft_modules) = split_draft_modules(collect_modules(&repository_root, &options.version));
+		if !draft_modules.is_empty() {
+			let mut draft_translator = Translator {
+				table: fs::read_to_string(&translation_path).ok().and_then(|text| serde_json::from_str(&text).ok()).unwrap_or_default(),
+				missing: Vec::new(),
+			};
+			let draft_document = create_document_value(&draft_modules, &options.version, "2000-01-01", &mut draft_translator);
+			let draft_path = std::env::temp_dir().join(format!("vanilla-engine-apidoc-draft-{}.json", std::process::id()));
+			fs::write(&draft_path, write_json_text(&draft_document)).unwrap();
+			is_passed &= run_check(&options, &repository_root, &draft_path, true);
+			let _ = fs::remove_file(&draft_path);
+		}
 		std::process::exit(if is_passed {
 			0
 		}
@@ -2838,13 +3140,14 @@ fn main() {
 		return;
 	}
 	let translation_table: Map<String, Value> = fs::read_to_string(&translation_path).ok().and_then(|text| serde_json::from_str(&text).ok()).unwrap_or_default();
-	let mut modules = collect_modules(&repository_root, &options.version);
+	let all_modules = collect_modules(&repository_root, &options.version);
 	if options.is_missing {
 		let mut seen = HashSet::new();
-		let missing: Vec<Value> = collect_korean_texts(&modules, &options).into_iter().filter(|text| !text.is_empty() && has_hangul(text) && !translation_table.contains_key(text) && seen.insert(text.clone())).map(Value::from).collect();
+		let missing: Vec<Value> = collect_korean_texts(&all_modules, &options).into_iter().filter(|text| !text.is_empty() && has_hangul(text) && !translation_table.contains_key(text) && seen.insert(text.clone())).map(Value::from).collect();
 		print!("{}", write_json_text(&Value::Array(missing)));
 		return;
 	}
+	let (mut modules, draft_modules) = split_draft_modules(all_modules);
 	if !options.counterpart_source_path.is_empty() {
 		let counterpart_text = match fs::read_to_string(&options.counterpart_source_path) {
 			Ok(text) => text,
@@ -2883,5 +3186,12 @@ fn main() {
 	let enum_count: usize = modules.iter().map(|module| module.enums.len()).sum();
 	let mut seen = HashSet::new();
 	let missing_count = translator.missing.iter().filter(|text| seen.insert((*text).clone())).count();
-	println!("{} 를 썼다. 모듈 {}, 클래스 {}, 멤버 {}, 함수와 상수 {}, 열거 {}, en 빈 칸 {} (서로 다른 글 {})", output_path.strip_prefix(&repository_root).unwrap_or(&output_path).display(), modules.len(), class_count, member_count, function_count, enum_count, translator.missing.len(), missing_count);
+	println!("{} 를 썼다. 모듈 {}, 클래스 {}, 멤버 {}, 함수와 상수 {}, 열거 {}, en 빈 칸 {} (서로 다른 글 {}), 넣지 않은 초안 모듈 {}", output_path.strip_prefix(&repository_root).unwrap_or(&output_path).display(), modules.len(), class_count, member_count, function_count, enum_count, translator.missing.len(), missing_count, draft_modules.len());
+	let mut misplaced_images = MISPLACED_IMAGE_MARKERS.lock().unwrap().clone();
+	misplaced_images.sort();
+	misplaced_images.dedup();
+	if !misplaced_images.is_empty() {
+		println!("# 예제 의 코드 칸 바로 뒤가 아니라 그림을 붙이지 못한 그림 표시 {} 개: {}", misplaced_images.len(), misplaced_images.join(", "));
+		std::process::exit(1);
+	}
 }

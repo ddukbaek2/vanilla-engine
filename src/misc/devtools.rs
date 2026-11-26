@@ -82,6 +82,7 @@
 //! };
 //! engine.run(Box::new(main_scene)).unwrap();
 //! ```
+//! <!-- image: dev-tools.webp -->
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::rect::Rect;

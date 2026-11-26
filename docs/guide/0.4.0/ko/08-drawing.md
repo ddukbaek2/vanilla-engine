@@ -89,6 +89,8 @@ fn main() {
 
 ## 그리기 컴포넌트
 
+![nodebasics 예제: Text 로 쓴 제목과 Spin 컴포넌트로 도는 Paint 사각형 셋](../images/node-basics.webp)
+
 | 컴포넌트 | 그리는 것 |
 | --- | --- |
 | `Paint` | 내용 크기만큼 한 색 사각형 (`set_color`, `set_round_size`, 처음 색 흰색) |
@@ -214,6 +216,8 @@ assert!(plain.get_image().is_none());
 ```
 
 ## Text
+
+![textshaping 예제: 오른쪽에서 왼쪽 글, 가짜 기울임과 굵게, 밑줄과 그림자 글, 한중일 낱말 줄바꿈, 색 이모지](../images/text-shaping.webp)
 
 ```rust,no_run
 use vanilla::{Color, Engine, EngineConfiguration, Graphic, Paint, RichText, Scene, SceneBase, Text, TextAlign, TextBaseline, Vector2};
@@ -366,6 +370,8 @@ assert!(!markup.has_segments());
 ## 블렌드 모드
 
 블렌드 모드는 Canvas2D 의 합성 26 가지를 모두 받는 `BlendMode` 열거입니다. 컴포넌트는 `Sprite::set_sprite_blend_mode(mode)` (`SpriteBlendMode` 는 `BlendMode` 의 다른 이름입니다), 바로 그릴 때는 `graphic.set_blend_mode(mode)` 를 씁니다. 처음 값은 `BlendMode::Normal`("source-over") 입니다.
+
+![블렌드 모드 26 가지를 칸마다 하나씩 건 장면: 줄무늬와 흰색, 회색, 검정, 보라 바탕 위의 반투명 그림과 도형](../images/blend-modes.webp)
 
 - 고정 블렌딩: `Normal`, `SourceIn`, `SourceOut`, `SourceAtop`, `DestinationOver`, `DestinationIn`, `DestinationOut`, `DestinationAtop`, `Lighter`, `Copy`, `Xor`, `Multiply`, `Screen`
 - 셰이더로 섞기: `Overlay`, `Darken`, `Lighten`, `ColorDodge`, `ColorBurn`, `HardLight`, `SoftLight`, `Difference`, `Exclusion`, `Hue`, `Saturation`, `Color`, `Luminosity`
@@ -525,6 +531,8 @@ fn main() {
 ## Camera2D
 
 `Camera2D` 는 컴포넌트가 아니라 씬이 들고 쓰는 값입니다. 바라보는 월드 좌표(자리, 화면 가운데에 옵니다), 확대 배율(처음 1, `set_zoom_range` 의 범위 안으로 자르며 처음 범위는 0.1 ~ 8), 회전(도, 화면 가운데가 축)을 갖고, `begin(graphic)` 과 `end(graphic)` 사이에서 그린 것에 그 변환을 겁니다.
+
+![misctour 예제: Camera2D 로 기울여 도는 월드 격자와 길찾기 경로, 떠오르는 숫자, 가상 조이스틱, 대사 상자](../images/misc-tour.webp)
 
 | 함수 | 내용 |
 | --- | --- |
