@@ -544,7 +544,7 @@
 - 툰 폴더 파일의 머리 주석을 채웠다. (모든 함수와 공개 칸)
 - 툰을 유니티와 언리얼이 기본으로 갖춘 수준까지 채웠다. (vanilla.js 와 같은 셰이더, 같은 값)
   - ShadowMap: 지을 때 앞의 텍스처와 프레임버퍼 묶음을 돌린다. (모형 뒤에 지으면 깊이 텍스처가 유닛에 남아 INVALID_OPERATION 이던 것) 빛이 거의 바로 아래나 위로 나아가면 위쪽을 z 축으로 잡는다. (광원 행렬이 깨지던 것)
-  - ShadowAtlas, ShadowAtlasLight, ShadowAtlasLightSource, ShadowAtlasTile, SHADOW_ATLAS_MAXIMUM_LIGHTS: 점광(큐브 여섯 면)과 스포트라이트(원근 한 칸)의 그림자를 깊이 텍스처 한 장에 칸으로. update_lights(&light_set.read_shadow_light_sources())
+  - ShadowAtlas, ShadowAtlasLight, ShadowAtlasLightSource, ShadowAtlasTile, SHADOW_ATLAS_MAXIMUM_LIGHTS: 점광(큐브 여섯 면)과 스포트라이트(원근 한 칸)의 그림자를 깊이 텍스처 한 장에 칸으로. update_lights(&light_set.read_shadow_light_sources()). 받는 자리는 노멀 쪽으로 칸 텍셀 (1 + 3 x (1 - dot(N, L))) 개만큼 밀어 그림자 여드름을 막는다
   - ToonRenderer: set_local_shadows(Option<&ShadowAtlas>, 세기), begin_shadow_atlas_pass, set_shadow_atlas_tile, set_outline_fade_distance, get_outline_fade_distance, set_light_color_usage, set_shade_rim_light. ToonDrawQueue::draw_local_shadows
   - ToonPointLight: casts_shadow, shadow_near (기본 false, 0.05). 이름으로 지을 때는 ..ToonPointLight::default()
   - ToonLightSet: set_light_color_usage(ToonLightColorUsage), set_shade_rim_light, get_shade_rim_light (ToonShadeRimLight), read_shadow_light_sources. 림, 매트캡, 껍데기 바깥선도 기본으로 해의 색을 곱한다. 지금까지 모습은 ToonLightColorUsage { rim: false, matcap: false, outline: false, ..Default }
