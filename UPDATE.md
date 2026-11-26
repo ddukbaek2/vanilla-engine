@@ -15,9 +15,9 @@
 - TouchEffect: 입자 그라디언트를 원본처럼 엔진 Canvas2D 의 방사 그라디언트(create_radial_gradient, fill_rect)로 굽는다. 헤드리스 크롬의 같은 캔버스 코드와 64x64 알파가 모두 같다.
 - PersistedStore: get_string_code_units(path), set_string_code_units(path, code_units) 로 상태 안 글을 JS 글 단위(UTF-16)로 읽고 쓴다. 원본이 저장한 짝 없는 서로게이트를 원본 글 그대로 받는다. (LocalStorage 의 *_code_units 와 같은 꼴)
 - 셰이더 짓기 실패: ShaderSprite, ScreenEffect 가 짓기에 실패하면 원본도 러스트 판처럼 한 번 알리고 건너뛴다. (원본은 예외로 프레임이 멈췄다) 두 엔진이 같다.
-- 대체 글꼴 고르기(데스크탑)를 크롬 FontCache::PlatformFallbackFontForCharacter 처럼: measureText 217 글이 맥 크롬 158(arm64, 로제타 x86_64) 과 리눅스 크롬 158 에서 모두 같다. (전에는 맥 144, 리눅스 216)
+- 대체 글꼴 고르기(데스크탑)를 크롬 FontCache::PlatformFallbackFontForCharacter 처럼: measureText 217 글이 맥 크롬 158(arm64, 로제타 x86_64), 윈도우 크롬 158, 리눅스 크롬 158 에서 모두 같다. (전에는 맥 144, 윈도우 181, 리눅스 216)
   - 기본 글꼴 사슬(원본 SYSTEM_FONT_STRING)은 기본 글꼴 이름 default 를 청했을 때만 잇는다. "16px Arial" 처럼 다른 이름이면 사슬 없이 운영체제 대체로 간다. (원본도 기본 글꼴일 때만 폰트 문자열이 그 사슬이다)
-  - 대체는 첫 글꼴(빈칸을 가진 첫 얼굴)과 폰트 문자열마다 따로 묻고, 대체 얼굴은 운영체제가 그 얼굴을 고른 글자만 그린다. 굵게를 청하면 굵은 얼굴(Helvetica.ttc 의 Helvetica-Bold, GeezaPro-Bold, 윈도우 tahomabd.ttf)도 따로 읽고, 대체 얼굴은 글꼴 이름 표의 무리 이름으로 묶어 굵기를 고른다. (굵기마다 파일이 다른 Tahoma 도 굵게면 Tahoma Bold)
+  - 대체는 첫 글꼴(빈칸을 가진 첫 얼굴)과 폰트 문자열마다 따로 묻고, 대체 얼굴은 운영체제가 그 얼굴을 고른 글자만 그린다. 굵게를 청하면 굵은 얼굴(Helvetica.ttc 의 Helvetica-Bold, GeezaPro-Bold, 윈도우 tahomabd.ttf)도 따로 읽고, 맥과 윈도우의 대체 얼굴은 글꼴 이름 표의 무리 이름으로 묶어 굵기를 고른다. (굵기마다 파일이 다른 Tahoma 도 굵게면 Tahoma Bold) 리눅스는 크롬처럼 굵기와 기울기 없이 fontconfig 에 묻고 고른 파일을 그대로 써 가짜 굵게, 가짜 기울임으로 그리며, 굵게나 기울임이면 첫 이름의 보통 얼굴부터 본다. (굵은 아랍어가 DejaVuSans.ttf 의 가짜 굵게)
   - 이름 목록의 얼굴이 합친 글자(ï)가 없어도 정준 분해한 글자(i, U+0308)가 있으면 HarfBuzz 처럼 그 얼굴로 그린다. (third_party/rustybuzz 에 decompose_character 를 더했다)
   - 맥: 첫 글꼴의 CTFont(올린 글꼴은 바이트로 지은 것)에서 CTFontCreateForString 을 묻고, 특성이나 굵기가 다르면 같은 이름에서 다시 고른다. (지금까지는 시스템 UI 글꼴에서 물어 아랍어가 다른 글꼴로 그려졌다)
   - 윈도우: 굵게나 기울임이면 첫 이름의 보통 얼굴, 블링크 font_fallback_win.cc 의 블록과 문자별 표(태국어 Tahoma, monospace 아랍어 Courier New, 한자는 화면 언어), 넓은 글꼴 목록, 첫 이름을 바탕으로 한 DirectWrite 차례. (지금까지는 Segoe UI 바탕의 DirectWrite 만 물어 태국어가 Leelawadee UI 였다)
