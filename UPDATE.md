@@ -11,6 +11,10 @@
   - src/experimental/collection/*.js → src/base/collection/*.js (러스트는 표준 Vec, HashMap 같은 것이 맡아 없다)
   - src/experimental/camera.js → src/deprecated/camera.js (원본도 폐기 예정, 러스트는 Camera2D 가 덮어 없다)
   - src/experimental/aabb.js, transform2d.js, graphics/gl2d.js, graphics/webgl2.js (죽은 코드) → src/deprecated/ (러스트에는 없다)
+- Engine: 씬마다 그리기 앞(pre_draw, 로딩 중이면 draw_on_load 앞)에 뷰 좌표(view_manager.apply_view_rect)를 걸어 둔다. (원본과 같이 고쳤다) 지금까지는 pre_draw 에서 draw_scene_background 나 apply_view_rect 를 부르지 않는 씬이 그리기 버퍼의 물리 픽셀로 그려, 기기 픽셀 배율이 2 인 화면(레티나 맥, 웹 고밀도 화면)에서 캔버스 왼쪽 위 1/4 에만 그려졌다. 옮기는 법: 물리 픽셀로 그리던 씬은 pre_draw 에서 graphic.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0) 을 부른다
+- UIInputField 낱말 이동과 지우기: 원본처럼 윈도우와 리눅스는 Ctrl, 맥은 Option 과 왼쪽, 오른쪽(Shift 와 함께면 고르기를 넓힌다), Backspace, Delete 로 낱말 단위로 옮기고 지운다. (맥은 키 묶음의 Option + Ctrl + Backspace, B, F 도) 자리는 블링크 NextWordPosition, PreviousWordPosition 대로, 오른쪽은 윈도우만 다음 낱말 앞(맥과 리눅스는 지금 낱말 끝), 맥은 넓히던 고르기가 고정 끝을 넘지 않고, 여러 줄은 크롬 textarea 처럼 글자가 있는 줄 앞에서 앞 줄로 넘지 않는다. 고른 것이 있으면 고른 것만 따로 한 되돌리기 묶음으로 지우고, 낱말 지우기는 새 묶음을 열어 뒤따른 지우기와 글자 넣기가 붙는다. (헤드리스 크롬 158 textarea 에서 잰 2309 자리와 같다)
+- TextInputKey 에 WordLeft, WordRight, DeleteWordBackward, DeleteWordForward 를 더했다. TextEditKind 에 DeleteWordBackward, DeleteWordForward 를 더했다. (TextInputKey, TextEditKind 를 빠짐없이 match 하는 코드는 새 갈래를 넣는다)
+- core::textinput 에 collect_word_boundaries, find_next_word_position, find_previous_word_position 를 더했다. 낱말 경계는 크롬처럼 마침표를 숫자 사이에서만 잇고 쌍점은 잇지 않는다. (크로미엄 ICU wordbrk.patch) 데스크탑 두 번 누르기 낱말 고르기도 이 경계를 쓴다. ("www.example.com" 을 두 번 누르면 전에는 통째로, 이제 크롬처럼 누른 조각만)
 - format_compact_number: 반올림한 글이 1000 이 되면 다음 단위로 올린다. (999999 는 "1000K" 가 아니라 "1M", 원본도 같이 고쳤다)
 - Platform::get_safe_area_rect: 너비와 높이를 0 이상으로 자른다. area_size 는 CSS 픽셀 크기다. (원본 getSafeAreaRect 를 CSS 픽셀로 고친 것과 같다)
 - UIDocument: 등록하지 않은 노드 종류를 읽으면 WorldNode 로 읽고 경고를 낸다. (컴포넌트처럼, 원본도 같이) 원본에 registerEditorTypes 와 다시 읽을 때 생성자가 만든 것에 채우기가 생겨 두 엔진의 문서 읽기가 같다
