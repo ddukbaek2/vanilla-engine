@@ -38,6 +38,9 @@
 //! - 맥: 글리프를 원본 크롬 맥처럼 CoreText 로 그린다. (platform/desktop/coretextglyph.rs) 색이 아닌 글리프는 크롬 Canvas2D 와 같은 설정의 A8 마스크(글꼴 부드럽게,
 //!   CoreGraphics 감마 풀기, 글자 색 밝기의 감마 전보정, 1/4 픽셀 서브픽셀 자리)이고, 파일에서 읽은 색 이모지 글꼴(sbix)은 CoreText 색 그림이다. (rasterize_glyph_at)
 //!   색 이모지의 전진폭은 CoreText 가 작은 크기에서 키워 그리는 비를 곱하고 정수 픽셀로 반올림한다. (16px 에서 20, 13px 에서 16, 크롬 measureText 와 같다)
+//! - 윈도우: 색이 아닌 글리프를 크롬 윈도우처럼 DirectWrite 로 그린다. (platform/desktop/directwriteglyph.rs, 스키아 SkScalerContext_DW 의 그레이스케일 A8 과 감마 전보정, 1/4 픽셀 서브픽셀 자리)
+//! - 리눅스: 크롬 158 리눅스는 글꼴을 FreeType 이 아니라 스키아 Fontations(skrifa)로 그린다. 러스트 판도 skrifa 윤곽에 fontconfig 의 힌팅 단계로 힌팅을 걸고
+//!   감마 1.2, 대비 0.2 로 전보정하며 1/4 픽셀 서브픽셀 자리를 쓴다. (rasterize_hinted_outline_mask)
 //!
 //! # 예제
 //! 이모지 표시인지 글 표시인지 가리기
@@ -52,7 +55,7 @@
 //! assert!(!is_emoji_presentation("A"));
 //! ```
 //==============================================================================
-// 옮긴 원문: 크로미엄 third_party/blink/renderer/platform/text/character_property_data.h 의 표, 스키아 src/core/SkTextFormatParams.h 의 가짜 굵게 표에서 옮김, BSD-3-Clause, THIRD_PARTY_LICENSES.md
+// 옮긴 원문: 크로미엄 third_party/blink/renderer/platform/text/character_property_data.h 의 표, 스키아 src/core/SkTextFormatParams.h 의 가짜 굵게 표, src/ports/SkScalerContext_win_dw.cpp 의 DirectWrite 렌더링 고르기, src/ports/SkTypeface_fontations.cpp 와 src/ports/fontations/src/hinting.rs 의 힌팅 고르기에서 옮김, BSD-3-Clause, THIRD_PARTY_LICENSES.md
 use crate::core::colorglyph;
 use std::rc::Rc;
 use unicode_bidi::{BidiInfo, Level};
@@ -2025,11 +2028,14 @@ pub fn rasterize_glyph(face: &ResolvedFontFace, glyph_index: u16, pixel_size: f3
 }
 
 //==============================================================================
-/// 서브픽셀 자리와 글자 색 밝기로 글리프 래스터. (맥은 크롬처럼 CoreText 로 그리고, 그 밖은 rasterize_glyph 와 같다)
+/// 서브픽셀 자리와 글자 색 밝기로 글리프 래스터. (맥은 CoreText, 윈도우는 DirectWrite, 리눅스는 skrifa 힌팅 윤곽으로 크롬처럼 그린다)
 /// - 맥: 색이 아닌 글리프는 크롬 맥 Canvas2D 와 같은 길로 그린다. (스키아 SkScalerContext_Mac 의 A8 마스크: 글꼴 부드럽게, CoreGraphics 감마 풀기, 글자 색 밝기의 감마 전보정)
 ///   글자 색 밝기는 맥 스키아처럼 글꼴 부드럽게가 회색이면 1/2 을 곱한 색의 3 비트 단계이고, 감마는 크롬 맥의 sRGB, 대비는 0 이다. (SkTypeface_Mac::onFilterRec, 크로미엄 skia/BUILD.gn)
 ///   가짜 기울임은 CoreText 의 글자 행렬 기울기로 그린다. 색 글리프는 rasterize_glyph 와 같다.
-/// - 그 밖의 데스크탑은 서브픽셀 자리와 밝기를 쓰지 않는다.
+/// - 윈도우: 색이 아닌 글리프는 크롬 윈도우 Canvas2D 와 같은 길로 DirectWrite 가 그린다. (스키아 SkScalerContext_DW 의 A8: 격자 맞춤, gasp 로 고른 렌더링 모드, ClearType 이 켜졌으면 크롬처럼 3x1 텍스처의 세 채널 평균, 꺼졌으면 그레이스케일)
+///   감마 전보정은 글자 색 밝기 단계의 표로, 대비와 감마는 크롬처럼 Avalon.Graphics 키가 있으면 시스템 값, 없으면 대비 1, sRGB 다. 가짜 기울임은 DirectWrite 글자 행렬의 기울기다.
+/// - 리눅스: 색이 아닌 글리프는 크롬 리눅스처럼 skrifa 윤곽에 fontconfig 의 힌팅 단계로 힌팅을 걸어 칠하고 감마 1.2, 대비 0.2 로 전보정한다. (스키아 SkTypeface_Fontations)
+/// - 그 밖은 서브픽셀 자리와 밝기를 쓰지 않는다.
 ///
 /// # 인자
 /// - `face`: 그릴 얼굴. (가짜 굵게, 가짜 기울임을 입힐지 함께)
@@ -2078,7 +2084,25 @@ pub fn rasterize_glyph_at(face: &ResolvedFontFace, glyph_index: u16, pixel_size:
 			}
 		}
 	}
-	#[cfg(not(target_os = "macos"))]
+	#[cfg(target_os = "windows")]
+	{
+		let is_color_glyph = face.font.has_color_tables && colorglyph::has_color_glyph(face.font.get_shaping_face(), glyph_index);
+		if !is_color_glyph {
+			if let Some(glyph_raster) = rasterize_direct_write_mask(face, glyph_index, pixel_size, subpixel_x, luminance_color) {
+				return glyph_raster;
+			}
+		}
+	}
+	#[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
+	{
+		let is_color_glyph = face.font.has_color_tables && colorglyph::has_color_glyph(face.font.get_shaping_face(), glyph_index);
+		if !is_color_glyph {
+			if let Some(glyph_raster) = rasterize_hinted_outline_mask(face, glyph_index, pixel_size, subpixel_x, luminance_color) {
+				return glyph_raster;
+			}
+		}
+	}
+	#[cfg(not(any(target_os = "macos", target_os = "windows", all(unix, not(target_os = "ios"), not(target_os = "android")))))]
 	{
 		let _ = (subpixel_x, luminance_color);
 	}
@@ -2303,6 +2327,495 @@ fn rasterize_core_text_mask(face: &ResolvedFontFace, glyph_index: u16, pixel_siz
 	}
 	Some(glyph_raster)
 }
+
+//==============================================================================
+/// 가짜 굵게 입히기. (덮인 정도를 반지름만큼 넓히고 그만큼 상자를 키운다, 맥 CoreText 마스크와 같은 셈)
+//==============================================================================
+#[cfg(any(target_os = "windows", all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android"))))]
+fn apply_synthetic_bold(glyph_raster: &mut GlyphRaster, pixel_size: f32) {
+	if glyph_raster.width == 0 || glyph_raster.height == 0 {
+		return;
+	}
+	let radius = calculate_synthetic_bold_radius(pixel_size);
+	let margin = radius.ceil() as i32 + 1;
+	let width = glyph_raster.width + margin * 2;
+	let height = glyph_raster.height + margin * 2;
+	let mut padded = vec![0u8; (width * height) as usize];
+	for position_y in 0..glyph_raster.height {
+		for position_x in 0..glyph_raster.width {
+			padded[((position_y + margin) * width + position_x + margin) as usize] = glyph_raster.coverage[(position_y * glyph_raster.width + position_x) as usize];
+		}
+	}
+	glyph_raster.coverage = dilate_coverage(&padded, width, height, radius);
+	glyph_raster.width = width;
+	glyph_raster.height = height;
+	glyph_raster.left_x -= margin;
+	glyph_raster.top_y += margin;
+}
+
+/// DirectWrite 렌더링 고르기. (스키아 SkScalerContext_DW 생성자가 고르는 렌더링 모드, 측정 모드, 그릴 글자 크기)
+#[cfg(any(test, target_os = "windows"))]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct DirectWriteRenderChoice {
+	/// DWRITE_RENDERING_MODE 값. (1 ALIASED, 2 GDI_CLASSIC, 4 NATURAL, 5 NATURAL_SYMMETRIC)
+	pub rendering_mode: i32,
+	/// DWRITE_MEASURING_MODE 값. (0 NATURAL, 1 GDI_CLASSIC)
+	pub measuring_mode: i32,
+	/// 그릴 글자 크기. (gdi 호환이면 1/64 로 반올림한 크기)
+	pub render_size: f32,
+}
+
+//==============================================================================
+/// 글꼴 표의 큰 끝 u16, u32 읽기. (모자라면 None)
+//==============================================================================
+#[cfg(any(test, target_os = "windows"))]
+fn read_table_u16(table: &[u8], offset: usize) -> Option<u16> {
+	Some(u16::from_be_bytes([*table.get(offset)?, *table.get(offset + 1)?]))
+}
+
+#[cfg(any(test, target_os = "windows"))]
+fn read_table_u32(table: &[u8], offset: usize) -> Option<u32> {
+	Some(u32::from_be_bytes([*table.get(offset)?, *table.get(offset + 1)?, *table.get(offset + 2)?, *table.get(offset + 3)?]))
+}
+
+//==============================================================================
+/// gasp 표에서 크기의 범위 찾기. ((가장 작은 ppem, 가장 큰 ppem, 판, 깃발), 스키아 SkScalerContext_win_dw.cpp 의 get_gasp_range)
+//==============================================================================
+#[cfg(any(test, target_os = "windows"))]
+fn find_gasp_range(face: &rustybuzz::Face<'_>, size: i32) -> Option<(i32, i32, u16, u16)> {
+	let gasp = face.raw_face().table(rustybuzz::ttf_parser::Tag::from_bytes(b"gasp"))?;
+	let version = read_table_u16(gasp, 0)?;
+	if version > 1 {
+		return None;
+	}
+	let range_count = read_table_u16(gasp, 2)? as usize;
+	if range_count > 1024 || gasp.len() < 4 + range_count * 4 {
+		return None;
+	}
+	let mut minimum_ppem = -1i32;
+	for range_index in 0..range_count {
+		let maximum_ppem = read_table_u16(gasp, 4 + range_index * 4)? as i32;
+		if minimum_ppem < size && size <= maximum_ppem {
+			return Some((minimum_ppem + 1, maximum_ppem, version, read_table_u16(gasp, 6 + range_index * 4)?));
+		}
+		minimum_ppem = maximum_ppem;
+	}
+	None
+}
+
+//==============================================================================
+/// 범위 안의 비트맵 글리프가 있는지. (스키아 has_bitmap_strike: EBLC 의 같은 가로세로 ppem 에 글리프가 넷 넘게, 없으면 EBSC 의 같은 ppem)
+//==============================================================================
+#[cfg(any(test, target_os = "windows"))]
+fn has_bitmap_strike(face: &rustybuzz::Face<'_>, minimum_ppem: i32, maximum_ppem: i32) -> bool {
+	let raw_face = face.raw_face();
+	let eblc = match raw_face.table(rustybuzz::ttf_parser::Tag::from_bytes(b"EBLC")) {
+		Some(eblc) => {
+			eblc
+		}
+		None => {
+			return false;
+		}
+	};
+	if read_table_u32(eblc, 0) != Some(0x0002_0000) {
+		return false;
+	}
+	let size_count = read_table_u32(eblc, 4).unwrap_or(0) as usize;
+	if size_count > 1024 || eblc.len() < 8 + size_count * 48 {
+		return false;
+	}
+	for size_index in 0..size_count {
+		let record = &eblc[8 + size_index * 48..8 + size_index * 48 + 48];
+		let (ppem_x, ppem_y) = (record[44] as i32, record[45] as i32);
+		let start_glyph = read_table_u16(record, 40).unwrap_or(0) as u32;
+		let end_glyph = read_table_u16(record, 42).unwrap_or(0) as u32;
+		if ppem_x == ppem_y && minimum_ppem <= ppem_x && ppem_x <= maximum_ppem && end_glyph >= start_glyph + 3 {
+			return true;
+		}
+	}
+	let ebsc = match raw_face.table(rustybuzz::ttf_parser::Tag::from_bytes(b"EBSC")) {
+		Some(ebsc) => {
+			ebsc
+		}
+		None => {
+			return false;
+		}
+	};
+	if read_table_u32(ebsc, 0) != Some(0x0002_0000) {
+		return false;
+	}
+	let scale_count = read_table_u32(ebsc, 4).unwrap_or(0) as usize;
+	if scale_count > 1024 || ebsc.len() < 8 + scale_count * 28 {
+		return false;
+	}
+	(0..scale_count).any(|scale_index| {
+		let (ppem_x, ppem_y) = (ebsc[8 + scale_index * 28 + 24] as i32, ebsc[8 + scale_index * 28 + 25] as i32);
+		ppem_x == ppem_y && minimum_ppem <= ppem_x && ppem_x <= maximum_ppem
+	})
+}
+
+//==============================================================================
+/// DirectWrite 렌더링 고르기. (스키아 SkScalerContext_DW 생성자의 A8 길: 비트맵 글꼴, gasp 판 1, 20 픽셀 넘거나 바이트코드 힌트 없음, 그 밖)
+/// - 크롬은 글꼴에 비트맵을 허락하고(setEmbeddedBitmaps), 힌팅은 kNormal(격자 맞춤 켬), 선형 측정은 끈다. CBDT 가 있으면 측정은 NATURAL 이다.
+/// - `is_axis_aligned`: 기울임이 없는지. (가짜 기울임은 fPreSkewX 라 아니다)
+//==============================================================================
+#[cfg(any(test, target_os = "windows"))]
+fn choose_direct_write_render(face: &rustybuzz::Face<'_>, pixel_size: f32, is_axis_aligned: bool) -> DirectWriteRenderChoice {
+	const ALIASED_MODE: i32 = 1;
+	const GDI_CLASSIC_MODE: i32 = 2;
+	const NATURAL_MODE: i32 = 4;
+	const NATURAL_SYMMETRIC_MODE: i32 = 5;
+	const NATURAL_MEASURE: i32 = 0;
+	const GDI_CLASSIC_MEASURE: i32 = 1;
+	let _ = ALIASED_MODE;
+	let real_size = pixel_size;
+	let mut gdi_size = (real_size * 64.0).round() / 64.0;
+	if gdi_size == 0.0 {
+		gdi_size = 1.0;
+	}
+	let bitmap_ppem = gdi_size.trunc() as i32;
+	let (mut minimum_ppem, mut maximum_ppem) = (bitmap_ppem, bitmap_ppem);
+	if let Some((range_minimum, range_maximum, _, flags)) = find_gasp_range(face, bitmap_ppem) {
+		// 격자 맞춤만 켠 범위면 그 범위를 통째로 비트맵 범위로 본다. (is_gridfit_only)
+		if flags == 0x0001 {
+			minimum_ppem = range_minimum;
+			maximum_ppem = range_maximum;
+		}
+	}
+	let is_bitmap_like = has_bitmap_strike(face, minimum_ppem, maximum_ppem);
+	let is_hinted = face
+		.raw_face()
+		.table(rustybuzz::ttf_parser::Tag::from_bytes(b"maxp"))
+		.filter(|maxp| maxp.len() >= 32 && read_table_u32(maxp, 0) == Some(0x0001_0000))
+		.and_then(|maxp| read_table_u16(maxp, 26))
+		.is_some_and(|instruction_size| instruction_size != 0);
+	let mut choice = if is_bitmap_like && is_axis_aligned {
+		DirectWriteRenderChoice {
+			rendering_mode: GDI_CLASSIC_MODE,
+			measuring_mode: GDI_CLASSIC_MEASURE,
+			render_size: gdi_size,
+		}
+	}
+	else if is_bitmap_like {
+		DirectWriteRenderChoice {
+			rendering_mode: NATURAL_SYMMETRIC_MODE,
+			measuring_mode: GDI_CLASSIC_MEASURE,
+			render_size: gdi_size,
+		}
+	}
+	else if let Some((_, _, 1, flags)) = find_gasp_range(face, gdi_size.round() as i32) {
+		// gasp 판 1 의 SymmetricSmoothing(비트 3).
+		DirectWriteRenderChoice {
+			rendering_mode: if flags & 0x0008 != 0 {
+				NATURAL_SYMMETRIC_MODE
+			}
+			else {
+				NATURAL_MODE
+			},
+			measuring_mode: NATURAL_MEASURE,
+			render_size: real_size,
+		}
+	}
+	else if real_size > 20.0 || !is_hinted {
+		DirectWriteRenderChoice {
+			rendering_mode: NATURAL_SYMMETRIC_MODE,
+			measuring_mode: NATURAL_MEASURE,
+			render_size: real_size,
+		}
+	}
+	else {
+		DirectWriteRenderChoice {
+			rendering_mode: NATURAL_MODE,
+			measuring_mode: NATURAL_MEASURE,
+			render_size: gdi_size,
+		}
+	};
+	if choice.measuring_mode != NATURAL_MEASURE && face.raw_face().table(rustybuzz::ttf_parser::Tag::from_bytes(b"CBDT")).is_some() {
+		choice.measuring_mode = NATURAL_MEASURE;
+	}
+	choice
+}
+
+//==============================================================================
+/// 윈도우 DirectWrite 로 글리프 마스크 그리기. (크롬 윈도우 Canvas2D 와 같은 길, DirectWrite 가 그리지 못하면 None)
+/// - 감마 전보정: 글자 색의 A8 밝기 단계 표, 대비와 감마는 크롬처럼 Avalon.Graphics 키가 있을 때만 시스템 값이고 없으면 대비 1, sRGB 다.
+/// - 가짜 굵게는 맥처럼 덮인 정도를 넓힌다. (스키아는 경로 획으로 그린다)
+//==============================================================================
+#[cfg(target_os = "windows")]
+fn rasterize_direct_write_mask(face: &ResolvedFontFace, glyph_index: u16, pixel_size: f32, subpixel_x: f32, luminance_color: [u8; 3]) -> Option<GlyphRaster> {
+	use crate::core::maskgamma;
+	use crate::platform::desktop::directwriteglyph;
+	let (contrast, gamma) = directwriteglyph::read_text_contrast_and_gamma();
+	let luminance = maskgamma::resolve_a8_luminance(luminance_color[0], luminance_color[1], luminance_color[2]);
+	let correcting_table = maskgamma::find_a8_correcting_table(luminance, contrast, gamma);
+	let skew_x = if face.is_synthetic_italic {
+		-SYNTHETIC_ITALIC_SKEW
+	}
+	else {
+		0.0
+	};
+	let render_choice = choose_direct_write_render(face.font.get_shaping_face(), pixel_size, !face.is_synthetic_italic);
+	let variation_list: Vec<(u32, f32)> = if face.font.is_outline_raster() {
+		face.font.read_sized_variation_list(pixel_size).iter().map(|variation| (variation.tag.0, variation.value)).collect()
+	}
+	else {
+		Vec::new()
+	};
+	let glyph_mask = directwriteglyph::rasterize_glyph_mask(face.font.get_font_bytes(), face.font.source_path.as_deref(), face.font.face_index, &variation_list, glyph_index, render_choice.rendering_mode, render_choice.measuring_mode, render_choice.render_size, subpixel_x, skew_x, correcting_table.as_ref())?;
+	let mut glyph_raster = GlyphRaster {
+		coverage: glyph_mask.coverage,
+		width: glyph_mask.width,
+		height: glyph_mask.height,
+		left_x: glyph_mask.left_x,
+		top_y: glyph_mask.top_y,
+		color_pixels: None,
+	};
+	if face.is_synthetic_bold {
+		apply_synthetic_bold(&mut glyph_raster, pixel_size);
+	}
+	Some(glyph_raster)
+}
+
+/// 리눅스 힌팅 캐시 열쇠. (글꼴 바이트 자리, 얼굴 번호, 크기 비트, 축 값, 힌팅 단계, 자동 힌팅 강제)
+#[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
+type HintingCacheKey = (usize, u32, u32, Vec<(u32, u32)>, u8, bool);
+
+#[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
+thread_local! {
+	/// 힌팅 인스턴스 캐시. (바이트를 붙잡은 Rc 와 함께, None 은 힌팅 없음)
+	static HINTING_INSTANCE_CACHE: std::cell::RefCell<std::collections::HashMap<HintingCacheKey, (Rc<[u8]>, Option<skrifa::outline::HintingInstance>)>> = std::cell::RefCell::new(std::collections::HashMap::new());
+	/// 자동 힌팅 글리프 모양 캐시. ((글꼴 바이트 자리, 얼굴 번호) → 모양, 스키아 BridgeGlyphStyles 처럼 글꼴마다 한 번)
+	static GLYPH_STYLES_CACHE: std::cell::RefCell<std::collections::HashMap<(usize, u32), (Rc<[u8]>, skrifa::outline::GlyphStyles)>> = std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// 리눅스 힌팅 캐시 상한. (넘으면 비운다)
+#[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
+const MAXIMUM_HINTING_INSTANCE_COUNT: usize = 256;
+
+//==============================================================================
+/// skrifa 윤곽을 옮겨 ttf-parser 윤곽 받개로 넘기는 펜. (x' = x + 기울기 * y + 서브픽셀 자리, 픽셀 단위 위가 양수)
+//==============================================================================
+#[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
+struct ShiftedOutlinePen<'builder> {
+	outline_builder: &'builder mut dyn rustybuzz::ttf_parser::OutlineBuilder,
+	skew_x: f32,
+	shift_x: f32,
+}
+
+#[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
+impl ShiftedOutlinePen<'_> {
+	//==============================================================================
+	/// 점 옮기기.
+	//==============================================================================
+	fn shift(&self, position_x: f32, position_y: f32) -> f32 {
+		position_x + self.skew_x * position_y + self.shift_x
+	}
+}
+
+#[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
+impl skrifa::outline::OutlinePen for ShiftedOutlinePen<'_> {
+	//==============================================================================
+	/// 새 윤곽 시작.
+	//==============================================================================
+	fn move_to(&mut self, position_x: f32, position_y: f32) {
+		let shifted_x = self.shift(position_x, position_y);
+		self.outline_builder.move_to(shifted_x, position_y);
+	}
+
+	//==============================================================================
+	/// 곧은 선.
+	//==============================================================================
+	fn line_to(&mut self, position_x: f32, position_y: f32) {
+		let shifted_x = self.shift(position_x, position_y);
+		self.outline_builder.line_to(shifted_x, position_y);
+	}
+
+	//==============================================================================
+	/// 2 차 곡선.
+	//==============================================================================
+	fn quad_to(&mut self, control_x: f32, control_y: f32, position_x: f32, position_y: f32) {
+		let (shifted_control_x, shifted_x) = (self.shift(control_x, control_y), self.shift(position_x, position_y));
+		self.outline_builder.quad_to(shifted_control_x, control_y, shifted_x, position_y);
+	}
+
+	//==============================================================================
+	/// 3 차 곡선.
+	//==============================================================================
+	fn curve_to(&mut self, first_control_x: f32, first_control_y: f32, second_control_x: f32, second_control_y: f32, position_x: f32, position_y: f32) {
+		let (shifted_first_x, shifted_second_x, shifted_x) = (self.shift(first_control_x, first_control_y), self.shift(second_control_x, second_control_y), self.shift(position_x, position_y));
+		self.outline_builder.curve_to(shifted_first_x, first_control_y, shifted_second_x, second_control_y, shifted_x, position_y);
+	}
+
+	//==============================================================================
+	/// 윤곽 닫기.
+	//==============================================================================
+	fn close(&mut self) {
+		self.outline_builder.close();
+	}
+}
+
+//==============================================================================
+/// 글꼴의 이름 표 가족 이름. (fontconfig 에 렌더 설정을 물을 이름, 없으면 빈 글)
+//==============================================================================
+#[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
+fn read_family_name(face: &rustybuzz::Face<'_>) -> String {
+	face.names()
+		.into_iter()
+		.find(|name| name.name_id == rustybuzz::ttf_parser::name_id::FAMILY && name.is_unicode())
+		.and_then(|name| name.to_string())
+		.unwrap_or_default()
+}
+
+//==============================================================================
+/// 리눅스: 크롬처럼 skrifa 윤곽에 힌팅을 걸어 그리기. (크롬 158 리눅스는 시스템 글꼴과 보통 웹 글꼴도 스키아 SkTypeface_Fontations 로 그린다)
+/// - 크롬 skia/ext/font_utils.cc 의 SkFontMgr_New_FCI(SkFontScanner_Make_Fontations()) 라 서체가 Fontations 이고, 글리프는 skrifa 윤곽을 스키아 경로로 칠한다. (SkScalerContext_Fontations::generateImage 의 generateImageFromPath)
+/// - 힌팅: fontconfig 의 hintstyle 을 크롬처럼 읽어(QueryFontconfig) 없음은 힌팅 없음, 가볍게는 Light 에 glyf 자동 힌팅, 보통과 꽉은(LCD 가 아니면 꽉을 보통으로) Normal 에 자동 힌팅 대체다.
+///   skrifa 의 Target::Smooth 에 symmetric_rendering 참, preserve_linear_metrics 거짓. 힌팅이 꼭 있어야 하는 글꼴은 Strong. (스키아 src/ports/fontations/src/hinting.rs, SkTypeface_fontations.cpp)
+/// - 서브픽셀 자리: 블링크는 힌팅이 꽉이 아니면 서브픽셀 자리를 켠다. (WebFontRenderStyle::ApplyToSkFont)
+/// - 감마 전보정: 크롬 리눅스의 감마 1.2, 대비 0.2. (크로미엄 skia/BUILD.gn, Fontations 의 onFilterRec 은 FreeType 과 달리 A8 의 전보정을 끄지 않는다)
+/// - 칠하기는 엔진의 면적 덮개 래스터라이저다. (스키아는 해석적 AA SkScan_AAAPath 라 끝자리가 조금 다를 수 있다)
+//==============================================================================
+#[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
+fn rasterize_hinted_outline_mask(face: &ResolvedFontFace, glyph_index: u16, pixel_size: f32, subpixel_x: f32, luminance_color: [u8; 3]) -> Option<GlyphRaster> {
+	use crate::core::maskgamma;
+	use skrifa::outline::{DrawSettings, Engine, HintingInstance, HintingMode, HintingOptions, OutlineGlyphFormat, SmoothMode, Target};
+	use skrifa::MetadataProvider;
+	let font = &face.font;
+	let shaping_face = font.get_shaping_face();
+	let (_, mut hint_level, is_autohint_forced) = crate::platform::desktop::systemfont::read_font_render_style(&read_family_name(shaping_face), pixel_size, shaping_face.weight().to_number(), shaping_face.is_italic());
+	// 기울임은 축에 맞지 않아 힌팅을 끈다. (onFilterRec 의 isAxisAligned) 꽉은 LCD 가 아니라 보통으로.
+	if face.is_synthetic_italic {
+		hint_level = 0;
+	}
+	if hint_level == 3 {
+		hint_level = 2;
+	}
+	let font_bytes = font.get_font_bytes();
+	let font_ref = skrifa::FontRef::from_index(font_bytes, font.face_index).ok()?;
+	let sized_variation_list = font.read_sized_variation_list(pixel_size);
+	let location = font_ref.axes().location(sized_variation_list.iter().map(|variation| (skrifa::Tag::new(&variation.tag.to_bytes()), variation.value)));
+	let outline_glyph_collection = font_ref.outline_glyphs();
+	let outline_glyph = outline_glyph_collection.get(skrifa::GlyphId::new(glyph_index as u32))?;
+	let key: HintingCacheKey = (font_bytes.as_ptr() as usize, font.face_index, pixel_size.to_bits(), sized_variation_list.iter().map(|variation| (variation.tag.0, variation.value.to_bits())).collect(), hint_level, is_autohint_forced);
+	let cached_instance = HINTING_INSTANCE_CACHE.with(|cache| cache.borrow().get(&key).map(|(_, hinting_instance)| hinting_instance.clone()));
+	let hinting_instance = match cached_instance {
+		Some(hinting_instance) => {
+			hinting_instance
+		}
+		None => {
+			let size = skrifa::instance::Size::new(pixel_size);
+			let hinting_instance = if outline_glyph_collection.require_interpreter() {
+				HintingInstance::new(&outline_glyph_collection, size, &location, HintingMode::Strong).ok()
+			}
+			else if hint_level == 0 {
+				None
+			}
+			else {
+				let is_glyf = outline_glyph_collection.format() == Some(OutlineGlyphFormat::Glyf);
+				let is_auto = is_autohint_forced || (hint_level == 1 && is_glyf);
+				let engine = if is_auto {
+					let glyph_styles = GLYPH_STYLES_CACHE.with(|cache| {
+						let mut cache = cache.borrow_mut();
+						cache.entry((font_bytes.as_ptr() as usize, font.face_index)).or_insert_with(|| (font_bytes.clone(), skrifa::outline::GlyphStyles::new(&outline_glyph_collection))).1.clone()
+					});
+					Engine::Auto(Some(glyph_styles))
+				}
+				else {
+					Engine::AutoFallback
+				};
+				let target = Target::Smooth {
+					mode: if hint_level == 1 {
+						SmoothMode::Light
+					}
+					else {
+						SmoothMode::Normal
+					},
+					symmetric_rendering: true,
+					preserve_linear_metrics: false,
+				};
+				HintingInstance::new(
+					&outline_glyph_collection,
+					size,
+					&location,
+					HintingOptions {
+						engine,
+						target,
+					},
+				)
+				.ok()
+			};
+			HINTING_INSTANCE_CACHE.with(|cache| {
+				let mut cache = cache.borrow_mut();
+				if cache.len() >= MAXIMUM_HINTING_INSTANCE_COUNT {
+					cache.clear();
+				}
+				cache.insert(key, (font_bytes.clone(), hinting_instance.clone()));
+			});
+			hinting_instance
+		}
+	};
+	let skew_x = if face.is_synthetic_italic {
+		SYNTHETIC_ITALIC_SKEW
+	}
+	else {
+		0.0
+	};
+	let draw_outline = |outline_builder: &mut dyn rustybuzz::ttf_parser::OutlineBuilder| -> bool {
+		let mut outline_pen = ShiftedOutlinePen {
+			outline_builder,
+			skew_x,
+			shift_x: subpixel_x,
+		};
+		let settings = match &hinting_instance {
+			Some(hinting_instance) => {
+				DrawSettings::hinted(hinting_instance, false)
+			}
+			None => {
+				DrawSettings::unhinted(skrifa::instance::Size::new(pixel_size), &location)
+			}
+		};
+		outline_glyph.draw(settings, &mut outline_pen).is_ok()
+	};
+	let mut glyph_raster = match colorglyph::rasterize_outline(&draw_outline, 1.0) {
+		Some((coverage, width, height, left_x, top_y)) => {
+			GlyphRaster {
+				coverage,
+				width,
+				height,
+				left_x,
+				top_y,
+				color_pixels: None,
+			}
+		}
+		None => {
+			GlyphRaster {
+				coverage: Vec::new(),
+				width: 0,
+				height: 0,
+				left_x: 0,
+				top_y: 0,
+				color_pixels: None,
+			}
+		}
+	};
+	let luminance = maskgamma::resolve_a8_luminance(luminance_color[0], luminance_color[1], luminance_color[2]);
+	if let Some(correcting_table) = maskgamma::find_a8_correcting_table(luminance, LINUX_TEXT_CONTRAST, LINUX_TEXT_GAMMA) {
+		for value in glyph_raster.coverage.iter_mut() {
+			*value = correcting_table[*value as usize];
+		}
+	}
+	if face.is_synthetic_bold {
+		apply_synthetic_bold(&mut glyph_raster, pixel_size);
+	}
+	Some(glyph_raster)
+}
+
+/// 크롬 리눅스의 글자 대비. (크로미엄 skia/BUILD.gn 의 SK_GAMMA_CONTRAST=0.2)
+#[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
+const LINUX_TEXT_CONTRAST: f32 = 0.2;
+/// 크롬 리눅스의 글자 감마. (크로미엄 skia/BUILD.gn 의 SK_GAMMA_EXPONENT=1.2)
+#[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
+const LINUX_TEXT_GAMMA: f32 = 1.2;
 
 //==============================================================================
 /// 가짜 기울임 입히기. (기준선 위는 오른쪽, 아래는 왼쪽으로 밀고 그만큼 넓힌다. 색 그림이 있으면 채널마다 같이 민다)
@@ -2662,5 +3175,40 @@ mod tests {
 		};
 		assert!((find_center_x(9) - 5.25).abs() < 0.05);
 		assert!((find_center_x(0) - 9.75).abs() < 0.05);
+	}
+
+	//==============================================================================
+	/// DirectWrite 렌더링 고르기가 스키아 SkScalerContext_DW 의 차례를 따르는지. (비트맵 글꼴이 아니면 20 픽셀 넘는 글은 gasp 판 1 의 깃발이나 NATURAL_SYMMETRIC 에 실제 크기)
+	//==============================================================================
+	#[test]
+	fn direct_write_render_choice_follows_skia_rules() {
+		let source = match crate::platform::find_fallback_font_file("A", 400, false, false) {
+			Some(source) => {
+				source
+			}
+			None => {
+				return;
+			}
+		};
+		let font = LoadedFont::create_from_bytes(std::fs::read(&source.path).expect("font file")).expect("font");
+		let face = font.get_shaping_face();
+		if !has_bitmap_strike(face, 48, 48) && find_gasp_range(face, 48).is_none_or(|(_, _, _, flags)| flags != 0x0001) {
+			let choice = choose_direct_write_render(face, 48.3, true);
+			let expected_mode = match find_gasp_range(face, 48) {
+				Some((_, _, 1, flags)) => {
+					if flags & 0x0008 != 0 {
+						5
+					}
+					else {
+						4
+					}
+				}
+				_ => {
+					5
+				}
+			};
+			assert_eq!(choice, DirectWriteRenderChoice { rendering_mode: expected_mode, measuring_mode: 0, render_size: 48.3 });
+		}
+		assert!(choose_direct_write_render(face, 12.3, false).render_size > 0.0);
 	}
 }

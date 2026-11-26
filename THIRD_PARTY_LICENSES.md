@@ -234,7 +234,7 @@ SUCH DAMAGE.
 
 ### Skia
 
-- `src/core/canvas2d.rs` (SkPathBuilder, SkGeometry conic and arc math, SkRRect, SkScalar and SkGeometry constants, SkSwizzler_opts.inc), `src/core/textshaping.rs` (fake bold tables of src/core/SkTextFormatParams.h), `src/platform/desktop/systemfont.rs` (kFontEquivMap of SkFontConfigInterface_direct.cpp), `src/core/maskgamma.rs` (src/core/SkMaskGamma.cpp, SkMaskGamma.h, SkColorData.h, SkScalerContext.cpp), `src/platform/desktop/coretextglyph.rs` (src/ports/SkScalerContext_mac_ct.cpp, src/utils/mac/SkCTFont.cpp).
+- `src/core/canvas2d.rs` (SkPathBuilder, SkGeometry conic and arc math, SkRRect, SkScalar and SkGeometry constants, SkSwizzler_opts.inc), `src/core/textshaping.rs` (fake bold tables of src/core/SkTextFormatParams.h), `src/platform/desktop/systemfont.rs` (kFontEquivMap of SkFontConfigInterface_direct.cpp), `src/platform/desktop/directwriteglyph.rs` and the DirectWrite render choice in `src/core/textshaping.rs` (src/ports/SkScalerContext_win_dw.cpp: rendering mode, gasp range and bitmap strike selection, grayscale A8 copy), the Linux hinting choice in `src/core/textshaping.rs` (src/ports/SkTypeface_fontations.cpp and src/ports/fontations/src/hinting.rs), `src/core/maskgamma.rs` (src/core/SkMaskGamma.cpp, SkMaskGamma.h, SkColorData.h, SkScalerContext.cpp), `src/platform/desktop/coretextglyph.rs` (src/ports/SkScalerContext_mac_ct.cpp, src/utils/mac/SkCTFont.cpp).
 
 ````text
 Copyright (c) 2011 Google Inc. All rights reserved.

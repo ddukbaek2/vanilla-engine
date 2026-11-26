@@ -43,7 +43,7 @@ src/platform/        창, GL 컨텍스트, 입력 이벤트, 프레임 루프, �
   desktop.rs         winit 0.30 + glutin 0.32 (OpenGL 3.3 코어)
   document.rs        문서(html lang, head 의 meta): 웹은 브라우저 문서, 데스크탑은 엔진이 든 값 (Document, EngineConfiguration.document_language, document_meta_list)
   desktop/           renderscaler(렌더 배율 상한), preserveddrawingbuffer(드로잉 버퍼 남기기), textinput(IME, 클립보드), systemfont(운영체제 글꼴과 대체 글꼴), emojipanel(운영체제 이모티콘 창),
-                     coretextglyph(맥 CoreText 글리프), gamepadhaptics(맥 패드 진동), windowsplatform(윈도우 잠자기 깸, 손가락 판정),
+                     coretextglyph(맥 CoreText 글리프), directwriteglyph(윈도우 DirectWrite 글리프), gamepadhaptics(맥 패드 진동), windowsplatform(윈도우 잠자기 깸, 손가락 판정),
                      windowsinputpane(윈도우 터치 키보드), linuxplatform(리눅스 손가락 판정), waylandframecallback(웨이랜드 가려짐과 수직 동기)
   web.rs             캔버스 + WebGL2 + request_animation_frame + fetch
   web/               systemfont(브라우저 Canvas2D 로 글자 굽기와 재기), textinput(숨긴 DOM input, 클립보드)
@@ -90,7 +90,7 @@ EngineRunner (플랫폼이 들고 프레임마다 부른다)
 │   ├── Graphic (플랫폼이 GL 컨텍스트를 만든 뒤 attach_graphic 으로 넘김. 원본 getGraphic 처럼 get_graphic, get_graphic_mut 로 어느 훅에서나 꺼낸다)
 │   │   ├── ShaderProgram (기본), 묶음, 파티클, 블렌드 섞기 셰이더, 바꿔 낄 프로그램 표
 │   │   ├── ImageTextureCache
-│   │   ├── TextStringTextureCache (데스크탑: rustybuzz 모양 짓기, fontdue 와 skrifa 래스터(맥은 크롬처럼 CoreText), 색 글리프 colorglyph, 맥 색 이모지는 CoreText,
+│   │   ├── TextStringTextureCache (데스크탑: rustybuzz 모양 짓기, fontdue 와 skrifa 래스터(맥은 크롬처럼 CoreText, 윈도우는 DirectWrite, 리눅스는 skrifa 힌팅), 색 글리프 colorglyph, 맥 색 이모지는 CoreText,
 │   │   │                           시스템 글꼴 사슬과 운영체제 대체 글꼴 / 웹: 브라우저 Canvas2D)
 │   │   └── 묶음 버퍼, 클립 스택, 블렌드 섞기용 바탕 칸
 │   ├── pending_scene_list, pending_font_registration_list, 페이지 이벤트 리스너
@@ -256,6 +256,8 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
 | 웨이랜드에서 xdg_toplevel 의 suspended 상태는 받지 못한다. 가려짐(페이지 이벤트 Hidden)은 크롬의 다른 갈래인 프레임 콜백 3 초 규칙으로만 본다 | xdg_toplevel 은 winit(sctk)이 리스너를 달아 쥐고 있고 libwayland 는 프록시 하나에 리스너 하나만 단다. winit 0.30.13 은 configure 의 suspended 를 받아 두기만 하고 알리지 않는다 (0.31 베타 4 와 본줄기도 같다). suspended 를 보내면서 프레임 콜백도 계속 보내는 컴포지터에서만 크롬과 달라진다 |
 | DevTools 메모리 칸은 데스크탑에서 자바스크립트 힙 대신 같은 뜻의 값을 운영체제 API 로 읽는다: 쓰는 중과 잡아 둔 것은 시스템 할당자의 힙, jsHeapSizeLimit 는 운영체제가 이 프로세스의 힙에 허락하는 상한 (RLIMIT_DATA 나 물리 메모리, 윈도우는 GlobalMemoryStatusEx). 못 구한 칸은 두 엔진 모두 칸마다 (N/A) | 데스크탑에는 V8 힙이 없다 |
 | 윈도우와 리눅스 데스크탑의 글자 래스터 픽셀이 크롬과 다르다 (글자 너비는 크롬 measureText 와 맞췄다. 맥은 같은 장면의 글자 픽셀이 크롬과 같다) | 맥은 크롬처럼 CoreText 로 스키아 SkScalerContext_Mac 과 같은 설정으로 칠한다. 윈도우(크롬은 DirectWrite)와 리눅스(크롬은 FreeType)는 아직 fontdue 와 skrifa 가 칠하고 서브픽셀 자리와 감마 전보정이 없다. 같은 길(SkScalerContext_DW, SkScalerContext_FreeType 의 설정)로 옮길 일이 남았다 |
+| DevTools 메모리 칸은 자바스크립트 힙 대신 시스템 할당자의 힙이고, jsHeapSizeLimit 는 (N/A) 다 | 데스크탑에는 V8 힙이 없다. 시스템 할당자에는 V8 처럼 정한 힙 상한이 없다 |
+| 리눅스 데스크탑의 글자 래스터 픽셀이 크롬과 끝자리가 다를 수 있고, 윈도우와 리눅스의 가짜 굵게는 크롬과 칠하는 길이 다르다 (맥은 같은 장면의 글자 픽셀이 크롬과 같다. 글자 너비는 세 운영체제 모두 크롬 measureText 와 맞췄다) | 윈도우는 크롬처럼 DirectWrite 로 스키아 SkScalerContext_DW 와 같은 설정(ClearType 이면 3x1 텍스처의 세 채널 평균, 아니면 그레이스케일 A8, 격자 맞춤, gasp 와 크기로 고른 렌더링 모드, 대비 1 과 sRGB 감마 전보정, 1/4 픽셀 서브픽셀 자리)으로 칠한다(platform/desktop/directwriteglyph.rs). 크롬 158 리눅스는 FreeType 이 아니라 스키아 Fontations(skrifa)로 그려, 러스트도 skrifa 윤곽에 fontconfig 의 힌팅 단계로 같은 힌팅(Light 는 glyf 자동 힌팅)을 걸고 감마 1.2, 대비 0.2 로 전보정한다. 다만 칠하기가 스키아의 해석적 AA(SkScan_AAAPath)가 아니라 엔진의 면적 덮개 래스터라이저라 끝자리가 다를 수 있다. 가짜 굵게는 스키아가 경로 획으로 그리는데 엔진은 덮인 정도를 넓힌다. 리눅스 hintfull 글꼴의 서브픽셀 자리 끄기는 아직 없다. 차이는 CI 의 글리프 견주기(.github/scripts/glyphcompare.cjs)로 잰다 |
 | 맥 데스크탑의 도형 가장자리 일부 화소가 크롬과 표본 하나(덮인 정도 1/4)만큼 다르다 (둘 다 4 표본 MSAA 이고 안쪽 색과 가장자리 대부분은 같다) | 같은 회전 격자 표본이 맥 OpenGL(아래가 원점)에서는 크롬 ANGLE Metal 과 위아래로 뒤집혀 놓인다. 엔진이 화면을 위아래로 뒤집어 그리고 내보낼 때 되뒤집으면 같아지지만, 기본 프레임버퍼 좌표를 쓰는 곳(화면 복사, 자르기, 3D 패스, 찍기)을 모두 바꿔야 해 아직 하지 않았다 |
 | 데스크탑에서 GL 을 지을 수 없는 기계(화면 없는 CI)와 주 스레드가 아닌 곳(단위 시험)에서 만든 엔진은 run 이 창을 열 때까지 그래픽이 없다. 웹 판은 run 이 캔버스를 잡을 때까지 없다 (원본은 Engine 생성자에서 Graphic 을 만든다. 데스크탑 주 스레드는 Engine::new 가 숨긴 창과 GL 컨텍스트로 바로 짓는다) | winit 이벤트 루프는 주 스레드에서 프로세스에 하나만 짓는다. Engine::new 가 그 루프로 창을 숨긴 채 지어 GL 컨텍스트와 Graphic 을 만들고 run 은 같은 창을 보인다 (창 없는 컨텍스트를 따로 짓는 길은 윈도우 WGL 이 확장을 읽으려면 창이 있어야 하고, 리눅스 EGL 은 winit 연결과 같은 디스플레이여야 해 네 갈래가 같지 않다) |
 | 데스크탑 Opus 와 AAC 의 표본 끝자리가 크롬과 1.5e-7 안팎으로 다르다 (길이와 다듬기는 같다) | 크롬은 Opus 를 libopus(C), AAC 를 FFmpeg(LGPL)로 푼다. 데스크탑은 C 빌드 없이 맥에서 윈도우 대상 검사가 되도록 libopus 를 러스트로 옮긴 opus-pure 로, AAC 는 LGPL 코드를 옮기지 않고 symphonia 와 oxideav-aac 로 푼다 |

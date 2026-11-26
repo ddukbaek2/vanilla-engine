@@ -215,10 +215,10 @@ pub(crate) fn rasterize_text_without_graphic(text: &str, font_string: &str, bake
 /// 흰 글자 색. (원본처럼 흰색으로 굽고 그릴 때 색을 곱하는 글의 감마 전보정 밝기)
 const WHITE_LUMINANCE_COLOR: [u8; 3] = [255, 255, 255];
 /// 서브픽셀 자리 반올림 몫. (스키아 SkPackedGlyphID::kSubpixelRound, 1/8)
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows", all(unix, not(target_os = "ios"), not(target_os = "android"), not(target_arch = "wasm32"))))]
 const SUBPIXEL_ROUND: f32 = 0.125;
 /// 서브픽셀 자리의 단계 수. (스키아 kSubPixelPosLen 2 비트)
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows", all(unix, not(target_os = "ios"), not(target_os = "android"), not(target_arch = "wasm32"))))]
 const SUBPIXEL_STEP_COUNT: f32 = 4.0;
 /// 캐시 상한. (원본과 같음)
 const MAXIMUM_ENTRY_COUNT: usize = 512;
@@ -2320,12 +2320,13 @@ fn blend_coverage(destination: u8, source: u8) -> u8 {
 
 //==============================================================================
 /// 글리프 자리를 정수 자리와 서브픽셀 몫으로 나누기. ((정수 x, 서브픽셀 x, 정수 y), y 는 위가 양수)
-/// - 맥: 크롬 스키아처럼 x 에 1/8 을 더해 내린 것이 정수 자리이고 나머지를 1/4 단위로 내린 것이 서브픽셀 몫이다. y 는 아래가 양수인 기기 좌표에서 1/2 을 더해 내린다.
+/// - 맥, 윈도우, 리눅스: 크롬 스키아처럼 x 에 1/8 을 더해 내린 것이 정수 자리이고 나머지를 1/4 단위로 내린 것이 서브픽셀 몫이다. y 는 아래가 양수인 기기 좌표에서 1/2 을 더해 내린다.
 ///   (SkGlyphPositionRoundingSpec 의 가로 정렬 글: halfAxisSampleFreq (1/8, 1/2), SkPackedGlyphID 의 서브픽셀 2 비트, SubRunContainer 의 floor)
-/// - 그 밖의 데스크탑은 둘 다 반올림하고 서브픽셀 몫이 없다.
+///   블링크는 윈도우에서 안티에일리어스면(font_platform_data_win.cc), 리눅스에서 힌팅이 꽉이 아니면(WebFontRenderStyle::ApplyToSkFont) 서브픽셀 자리를 켠다.
+/// - 그 밖은 둘 다 반올림하고 서브픽셀 몫이 없다.
 //==============================================================================
 fn split_glyph_position(position_x: f32, position_y: f32) -> (i32, f32, i32) {
-	#[cfg(target_os = "macos")]
+	#[cfg(any(target_os = "macos", target_os = "windows", all(unix, not(target_os = "ios"), not(target_os = "android"), not(target_arch = "wasm32"))))]
 	{
 		let rounded_x = position_x + SUBPIXEL_ROUND;
 		let integer_x = rounded_x.floor();
@@ -2333,7 +2334,7 @@ fn split_glyph_position(position_x: f32, position_y: f32) -> (i32, f32, i32) {
 		let integer_y = -((-position_y + 0.5).floor());
 		(integer_x as i32, subpixel_x, integer_y as i32)
 	}
-	#[cfg(not(target_os = "macos"))]
+	#[cfg(not(any(target_os = "macos", target_os = "windows", all(unix, not(target_os = "ios"), not(target_os = "android"), not(target_arch = "wasm32")))))]
 	{
 		(position_x.round() as i32, 0.0, position_y.round() as i32)
 	}

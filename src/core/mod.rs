@@ -41,7 +41,7 @@ pub mod sharedbakecache;
 pub mod textshaping;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod avifimage;
-#[cfg(target_os = "macos")]
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod maskgamma;
 pub(crate) mod blurshadow;
 pub(crate) mod colorprofile;
