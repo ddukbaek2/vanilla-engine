@@ -15,7 +15,8 @@
 //! - 셈의 꼴: 크롬 맥(arm64)처럼 래스터 파이프라인의 mad 는 융합 곱셈 덧셈(vfmaq_f32), 반올림은 짝수 쪽(vcvtnq), skcms 는 융합 없이(-ffp-contract=off) 반올림을 +0.5 버림으로 한다.
 //! - 그림 하나의 픽셀을 WebGL 과 Canvas2D 가 함께 쓰므로 WebGL 길에 맞춘다. 크롬 Canvas2D drawImage 는 알파가 있는 그림을 알파를 곱한 8 비트로 푼 뒤 바꾸고,
 //!   PQ, HLG 그림은 캔버스에 더 어둡게 그려(크롬 158 에서 PQ 의 회색 128 이 WebGL 181, Canvas2D 132) 그 둘은 Canvas2D 에서 다르다.
-//! - 원본과 다른 것: CMYK 프로필(인쇄용 JPEG)은 바꾸지 않는다. (image 크레이트가 CMYK 를 스스로 RGB 로 푼다) BMP 와 ICO 안의 색 프로필은 읽지 않는다.
+//! - CMYK JPEG 의 CMYK 프로필: 블링크처럼 화소를 R = C x K / 255 로 먼저 바꾼 RGBA 를 skcms_Transform 처럼 CMYK 로 읽어(Op::invert 로 네 값을 1 에서 뺀다, 알파 자리가 K) A2B 로 바꾼다. (core/jpegimage.rs)
+//! - 원본과 다른 것: BMP 와 ICO 안의 색 프로필은 읽지 않는다.
 //==============================================================================
 
 /// 전달 함수. (skcms_TransferFunction, 늘어선 차례 g a b c d e f)
@@ -1700,6 +1701,8 @@ enum TransformCurve<'a> {
 #[derive(Clone, Copy)]
 enum TransformOperation<'a> {
 	Curve(usize, TransformCurve<'a>),
+	/// 네 값을 1 에서 뺀다. (CMYK 원천, skcms Op::invert)
+	Invert,
 	Clamp,
 	LookupTable(&'a LookupTransform),
 	Matrix3x3(Matrix3x3),
@@ -1902,6 +1905,11 @@ fn apply_transform_operation(operation: &TransformOperation, rgba: &mut [f32; 4]
 		TransformOperation::Curve(channel, curve) => {
 			rgba[*channel] = apply_transform_curve(curve, rgba[*channel]);
 		}
+		TransformOperation::Invert => {
+			for value in rgba.iter_mut() {
+				*value = 1.0 - *value;
+			}
+		}
 		TransformOperation::Clamp => {
 			for value in rgba.iter_mut() {
 				*value = value.min(1.0).max(0.0);
@@ -2013,6 +2021,10 @@ fn build_transform_program<'a>(source: &'a IccProfile, destination: &IccProfile,
 		}
 	}
 	let destination_from_xyz = destination_from_xyz?;
+	if source.data_color_space == SIGNATURE_CMYK {
+		// 포토샵이 만드는 뒤집힌 CMYK 로 본다. (skcms_Transform 의 Op::invert, 알파는 곱하지 않는다)
+		operation_list.push(TransformOperation::Invert);
+	}
 	let source_cicp_transfer = source.coding_independent_code_points.map(|cicp| cicp[1]);
 	let mut is_source_lookup = false;
 	let mut is_source_hlg_ootf = false;
@@ -2473,6 +2485,13 @@ impl EmbeddedColorProfile {
 	}
 
 	//==============================================================================
+	/// CMYK 프로필인지. (블링크는 성분 4 개 JPEG 에 CMYK 프로필만 쓴다)
+	//==============================================================================
+	pub(crate) fn is_cmyk(&self) -> bool {
+		self.profile.data_color_space == SIGNATURE_CMYK
+	}
+
+	//==============================================================================
 	/// 픽셀을 바꿔야 하는지. (sRGB 로 꼭 같으면 바꿀 것이 없다)
 	///
 	/// # 돌려줌
@@ -2695,7 +2714,7 @@ pub(crate) fn read_jpeg_color_profile(bytes: &[u8]) -> Option<EmbeddedColorProfi
 			profile.is_gray() || profile.is_rgb()
 		}
 		4 => {
-			false
+			profile.is_cmyk()
 		}
 		_ => {
 			profile.is_rgb()

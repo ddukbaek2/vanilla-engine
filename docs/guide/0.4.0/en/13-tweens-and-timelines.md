@@ -812,7 +812,7 @@ fn main() {
 
 ## Action
 
-`Action` is a staging script that stacks steps and runs them in order (the original `animation/action.js`). The target type `T` defaults to `WorldNode`; to work with game state or several nodes, use that as `T`. Rust cannot hold on to the target, so `start(&mut target)` and `step(&mut target, time_delta)` take the target and pass it to the callbacks.
+`Action` is a staging script that stacks steps and runs them in order (the original `animation/action.js`). The target type `T` defaults to `WorldNode`; to work with game state or several nodes, use that as `T`. To hold a node as the target, run it with `start(&mut node_tree, Some(node_id))` and `step(&mut node_tree, time_delta)` (the original `start(target)`, `step(timeDelta)`); to pass the target every time without holding it, both engines use `start_with(&mut target)` and `step_with(&mut target, time_delta)` (the original `startWith`, `stepWith`).
 
 - `wait(duration, ActionCallbacks::new().started(..).updated(|progress, target| ..).completed(..))`: waits for the given time (seconds), passing progress (0 to 1). At 0 or less it ends on the first `step` with progress 1.
 - `condition(|target| bool, ActionConditionCallbacks::new())`: waits until the condition becomes true.
@@ -828,14 +828,14 @@ let mut action: Action<WorldNode> = Action::new()
 	.wait(1.0, ActionCallbacks::new().updated(|progress, node: &mut WorldNode| node.set_local_opacity(progress)))
 	.call(|node: &mut WorldNode| node.set_local_scale(Vector2::create(1.2, 1.2)))
 	.repeat(2, Action::new().wait(0.5, ActionCallbacks::new().completed(|node: &mut WorldNode| node.set_local_rotation(node.get_local_rotation() + 90.0))));
-action.start(&mut node);
-action.step(&mut node, 0.5);
+action.start_with(&mut node);
+action.step_with(&mut node, 0.5);
 assert_eq!(node.get_local_opacity(), 0.5);
-action.step(&mut node, 0.5);
+action.step_with(&mut node, 0.5);
 assert_eq!(node.get_local_opacity(), 1.0);
 assert_eq!(node.get_local_scale(), Vector2::create(1.2, 1.2));
 for _ in 0..4 {
-	action.step(&mut node, 0.5);
+	action.step_with(&mut node, 0.5);
 }
 assert_eq!(node.get_local_rotation(), 180.0);
 assert!(action.is_done());

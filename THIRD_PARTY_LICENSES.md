@@ -268,6 +268,49 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ````
 
+### libjpeg-turbo (Independent JPEG Group's software)
+
+- `src/core/jpegimage.rs`: the JPEG decoder is written from ITU-T T.81, JFIF 1.02 and the Adobe APP14 marker. To produce the same pixels as Chromium, it follows the integer constants and the order of operations of libjpeg-turbo 3.1.0 (Chromium 158 `third_party/libjpeg_turbo`): jidctint.c (jpeg_idct_islow), jdsample.c (fancy upsampling selection and filters), jdcolor.c (YCbCr and YCCK tables), jdapimin.c (color space defaults), jdlossls.c and jddiffct.c (lossless predictors). No source code was copied. Those files are copyright (C) 1991-1998 Thomas G. Lane, Guido Vollbeding, and libjpeg-turbo modifications copyright (C) 2009-2024 D. R. Commander and others.
+
+This software is based in part on the work of the Independent JPEG Group.
+
+````text
+The authors make NO WARRANTY or representation, either express or implied,
+with respect to this software, its quality, accuracy, merchantability, or
+fitness for a particular purpose.  This software is provided "AS IS", and you,
+its user, assume the entire risk as to its quality and accuracy.
+
+This software is copyright (C) 1991-2020, Thomas G. Lane, Guido Vollbeding.
+All Rights Reserved except as specified below.
+
+Permission is hereby granted to use, copy, modify, and distribute this
+software (or portions thereof) for any purpose, without fee, subject to these
+conditions:
+(1) If any part of the source code for this software is distributed, then this
+README file must be included, with this copyright and no-warranty notice
+unaltered; and any additions, deletions, or changes to the original files
+must be clearly indicated in accompanying documentation.
+(2) If only executable code is distributed, then the accompanying
+documentation must state that "this software is based in part on the work of
+the Independent JPEG Group".
+(3) Permission for use of this software is granted only if the user accepts
+full responsibility for any undesirable consequences; the authors accept
+NO LIABILITY for damages of any kind.
+
+These conditions apply to any software derived from or based on the IJG code,
+not just to the unmodified library.  If you use our work, you ought to
+acknowledge us.
+
+Permission is NOT granted for the use of any IJG author's name or company name
+in advertising or publicity relating to this software or products derived from
+it.  This software may be referred to only as "the Independent JPEG Group's
+software".
+
+We specifically permit and encourage the use of this software as the basis of
+commercial products, provided that all warranty or liability claims are
+assumed by the product vendor.
+````
+
 ### ICU4C and CLDR (Unicode License V3)
 
 - `src/core/component/text.rs` (desktop builds): the dictionary segmentation of ICU4C `CjkBreakEngine::divideUpDictionaryRange` (dictbe.cpp) with its katakana cost values.
