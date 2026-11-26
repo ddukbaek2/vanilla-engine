@@ -151,10 +151,10 @@ impl Delay {
 			let read_index2 = (read_index1 + 1) % buffer_length;
 			copy_from_circular_buffer(&self.buffer, read_index2, &mut self.temp_buffer);
 			// dest[k] = dest[k] + f (temp[k] - dest[k]) (Vsub 뒤 Vsma)
-			for (temp, output) in self.temp_buffer.iter_mut().zip(destination.iter_mut()) {
+			for (temp, output) in self.temp_buffer.iter_mut().zip(destination.iter()) {
 				*temp -= *output;
-				*output = multiply_add(*temp, interpolation_factor, *output);
 			}
+			multiply_add(&self.temp_buffer[..destination.len()], interpolation_factor, destination);
 		}
 	}
 }

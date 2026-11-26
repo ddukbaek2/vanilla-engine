@@ -4,6 +4,9 @@
 #   예제는 찍기 모드(VANILLA_CAPTURE_PATH)로 돌려 그림을 아티팩트로 올린다. (.github/scripts/captureexamples.cjs)
 # - 크롬 견주기: 원본 vanilla.js 를 옆에 받아 같은 장면의 예제 페이지를 헤드리스 크롬으로 찍어 화소 차이를 낸다. (.github/scripts/chromecompare.cjs)
 #   소리 해석, 믹서, 비프, PannerNode 의 크롬 기대값(tests/assets/*/chrome*.cjs)을 같은 기계의 크롬으로 다시 찍어 견준다. (x86 크롬)
+#   크롬은 러너에 깔린 것을 쓰지 않고 browser-actions/setup-chrome 으로 Chrome for Testing 판을 고정해 세 기계가 같은 판을 쓴다. (CHROME_PATH)
+#   러너에 깔린 크롬은 기계마다 판이 달랐다. (2026-11-26 인텔 맥 151, 리눅스 157, 윈도우 158) 151 은 decodeAudioData 가 158 과 달라
+#   (AAC 끝 remainder 를 안 자르고 HE-AAC, webm Opus 길이와 5.1 Opus 채널 차례가 다르다) 기대값이 맞지 않았다. 판은 기대값을 찍은 크롬과 같게 올린다.
 # - 소리: 소리 장치가 없는 기계라 가상 장치를 깐다. (LABSN/sound-ci-helpers: 리눅스 PulseAudio, 윈도우 VB-CABLE, 맥 Background Music)
 # - 웹: wasm32 로 예제를 빌드한다.
 name: 플랫폼 확인
@@ -103,6 +106,31 @@ jobs:
           npm install --no-save --no-package-lock --prefix "$temporary_path/npm" puppeteer-core@25.17.0 pngjs@7.0.0
           echo "NODE_PATH=$temporary_path/npm/node_modules" >> "$GITHUB_ENV"
 
+      - name: 크롬 (Chrome for Testing 158.0.8127.88, 세 기계가 같은 판)
+        id: chrome
+        uses: browser-actions/setup-chrome@v2
+        with:
+          chrome-version: 158.0.8127.88
+          install-dependencies: true
+      - name: 크롬 경로 (견주기 스크립트가 CHROME_PATH 로 읽는다)
+        run: |
+          echo "CHROME_PATH=${{ steps.chrome.outputs.chrome-path }}" >> "$GITHUB_ENV"
+          echo "크롬 ${{ steps.chrome.outputs.chrome-version }}: ${{ steps.chrome.outputs.chrome-path }}"
+
+      - name: 소리 크롬 견주기 (같은 기계의 크롬으로 기대값을 다시 찍는다)
+        if: success() || failure()
+        run: |
+          node tests/assets/audio/chromedecode.cjs
+          node tests/assets/mixer/chromemixer.cjs
+          node tests/assets/mixer/chromebeep.cjs
+          node tests/assets/spatialaudio/chromespatial.cjs
+          mkdir -p "$OUT/chrome/${{ matrix.tag }}_audio"
+          cp tests/assets/audio/chrome_decode.json tests/assets/mixer/chrome_mixer.json tests/assets/mixer/chrome_beep.json tests/assets/spatialaudio/chrome_spatial.json tests/assets/spatialaudio/chrome_spatial_hrtf.json "$OUT/chrome/${{ matrix.tag }}_audio/"
+          status=0
+          cargo test --lib matches_chrome -- --nocapture 2>&1 | tee "$OUT/logs/${{ matrix.tag }}_chromeaudio.log" || status=$?
+          git checkout -- tests/assets
+          exit $status
+
       - name: 시험 (cargo test --workspace)
         timeout-minutes: 90
         run: cargo test --workspace --no-fail-fast 2>&1 | tee "$OUT/logs/${{ matrix.tag }}_test.log"
@@ -186,20 +214,6 @@ jobs:
           "./target/debug/examples/gamepadlist$suffix" 2>&1 | tee "$OUT/logs/${{ matrix.tag }}_gamepadlist.log"
           grep -qF "소리 장치 true" "$OUT/logs/${{ matrix.tag }}_audiotone.log"
           grep -qF "재생 중 true (0.1초 뒤)" "$OUT/logs/${{ matrix.tag }}_audiotone.log"
-
-      - name: 소리 크롬 견주기 (같은 기계의 크롬으로 기대값을 다시 찍는다)
-        if: success() || failure()
-        run: |
-          node tests/assets/audio/chromedecode.cjs
-          node tests/assets/mixer/chromemixer.cjs
-          node tests/assets/mixer/chromebeep.cjs
-          node tests/assets/spatialaudio/chromespatial.cjs
-          mkdir -p "$OUT/chrome/${{ matrix.tag }}_audio"
-          cp tests/assets/audio/chrome_decode.json tests/assets/mixer/chrome_mixer.json tests/assets/mixer/chrome_beep.json tests/assets/spatialaudio/chrome_spatial.json tests/assets/spatialaudio/chrome_spatial_hrtf.json "$OUT/chrome/${{ matrix.tag }}_audio/"
-          status=0
-          cargo test --lib matches_chrome -- --nocapture 2>&1 | tee "$OUT/logs/${{ matrix.tag }}_chromeaudio.log" || status=$?
-          git checkout -- tests/assets
-          exit $status
 
       - name: 원본 예제 크롬 견주기 (화소 차이)
         if: success() || failure()

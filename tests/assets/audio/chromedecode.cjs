@@ -13,7 +13,9 @@ const puppeteer = require("puppeteer-core");
 const assetDirectory = __dirname;
 const outputPath = path.join(assetDirectory, "chrome_decode.json");
 const audioExtensionList = [".wav", ".ogg", ".webm", ".mp3", ".flac", ".m4a", ".aac"];
+// CHROME_PATH 가 있으면 그 크롬을 먼저 쓴다. (CI 는 browser-actions/setup-chrome 으로 판을 고정한 Chrome for Testing 을 넘긴다)
 const chromePathList = [
+	...(process.env.CHROME_PATH ? [process.env.CHROME_PATH] : []),
 	"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
 	"C:/Program Files/Google/Chrome/Application/chrome.exe",
 	"/usr/bin/google-chrome",
