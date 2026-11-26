@@ -16,7 +16,7 @@ pub enum PanningModel {
 	/// 등력 좌우. (WebAudio "equalpower", 기본) 방위각만 쓰고 높이는 쓰지 않는다.
 	#[default]
 	EqualPower,
-	/// 머리 전달 함수. (WebAudio "HRTF") 웹은 브라우저가 IRCAM 자료로 셈하고, 데스크탑은 아직 등력 좌우로 셈한다.
+	/// 머리 전달 함수. (WebAudio "HRTF") 웹은 브라우저가, 데스크탑은 엔진 믹서가 크롬과 같은 IRCAM 자료와 셈으로 방위와 높이를 낸다.
 	Hrtf,
 }
 
@@ -231,7 +231,7 @@ fn angle_between_vectors_in_degrees(base: Vector3F, other: Vector3F) -> f32 {
 //==============================================================================
 // 값 자르기. (wtf ClampTo: 최대 이상이면 최대, 최소 이하면 최소, NaN 은 그대로)
 //==============================================================================
-fn clamp_to(value: f64, minimum: f64, maximum: f64) -> f64 {
+pub(crate) fn clamp_to(value: f64, minimum: f64, maximum: f64) -> f64 {
 	if value >= maximum {
 		return maximum;
 	}

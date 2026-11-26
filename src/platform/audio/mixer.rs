@@ -14,7 +14,8 @@
 //! - 섞기: 모노를 스테레오 입력에 섞을 때는 스피커 규칙으로 양쪽에 같게 올린다. 출력에 내보낼 때 크롬처럼 -1 ~ 1 로 자른다.
 //! - 컨텍스트 멈춤(suspend) 동안은 그리지 않고 시계도 서며, 장치에는 0 을 낸다.
 //! - PannerNode(초안): 플레이어에 공간 소리를 걸면 GainNode(와 StereoPannerNode) 뒤에 크롬 PannerHandler 를 옮긴 노드를 끼운다. (panner.rs)
-//!   리스너는 컨텍스트에 하나이고, 퀀텀마다 그리기 전에 상태를 읽는다.
+//!   리스너는 컨텍스트에 하나이고, 퀀텀마다 그리기 전에 상태를 읽는다. 입력이 조용해도 PannerNode 가 침묵을 넘기기 전(HRTF 는 꼬리와 늦음 동안)에는
+//!   셈한 출력을 내보낼 곳에 섞는다.
 //==============================================================================
 use super::audioparam::{AudioParam, ParamAutomation};
 use super::oscillator::{OscillatorNode, PeriodicWave};
@@ -659,20 +660,26 @@ impl MixerRenderer {
 				}
 			}
 			// GainNode. (소스가 없으면 자동화만 흘린다)
-			if channel_count == 0 {
+			let has_sound = if channel_count == 0 {
 				player.gain.calculate_sample_accurate_values(&mut self.gain_value_list, current_frame, sample_rate);
-				player.gain_value.store(player.gain.get_intrinsic_value().to_bits(), Ordering::Release);
-				// PannerNode 는 조용한 입력으로 돈다. (AudioParam 은 흐른다)
-				if let Some(panner) = player.panner.as_mut() {
-					panner.process(&mut self.source_quantum, 1, true, &mut self.listener, current_frame, sample_rate);
-				}
-				continue;
+				false
 			}
-			let has_sound = apply_gain_param(&mut player.gain, &mut self.source_quantum, channel_count, &mut self.gain_value_list, current_frame, sample_rate);
+			else {
+				apply_gain_param(&mut player.gain, &mut self.source_quantum, channel_count, &mut self.gain_value_list, current_frame, sample_rate)
+			};
 			player.gain_value.store(player.gain.get_intrinsic_value().to_bits(), Ordering::Release);
 			if !has_sound {
-				if let Some(panner) = player.panner.as_mut() {
-					panner.process(&mut self.source_quantum, channel_count, true, &mut self.listener, current_frame, sample_rate);
+				// PannerNode 는 조용한 입력으로 돈다. (AudioParam 은 흐르고, 침묵을 넘기기 전까지는 셈한다. HRTF 는 꼬리와 늦음 동안 소리가 난다)
+				let has_panner_output = match player.panner.as_mut() {
+					Some(panner) => {
+						panner.process(&mut self.source_quantum, channel_count.max(1), true, &mut self.listener, current_frame, sample_rate)
+					}
+					None => {
+						false
+					}
+				};
+				if has_panner_output {
+					mix_player_output(&mut self.bus_list, &mut self.output_quantum, &self.source_quantum, player.output_bus_id, 2);
 				}
 				continue;
 			}
@@ -719,23 +726,7 @@ impl MixerRenderer {
 				}
 			};
 			// 내보낼 곳에 섞기. (모노는 양쪽에 같게)
-			let target = match player.output_bus_id {
-				Some(bus_id) => {
-					match self.bus_list.iter_mut().find(|bus| bus.bus_id == bus_id) {
-						Some(bus) => {
-							bus.has_sound_input = true;
-							&mut bus.input
-						}
-						None => {
-							continue;
-						}
-					}
-				}
-				None => {
-					&mut self.output_quantum
-				}
-			};
-			mix_into(target, &self.source_quantum, output_channel_count);
+			mix_player_output(&mut self.bus_list, &mut self.output_quantum, &self.source_quantum, player.output_bus_id, output_channel_count);
 		}
 		for bus in self.bus_list.iter_mut() {
 			if !bus.has_sound_input {
@@ -803,6 +794,36 @@ impl MixerRenderer {
 			}
 		}
 	}
+}
+
+//==============================================================================
+/// 플레이어 출력을 내보낼 곳에 섞기. (버스가 있으면 그 버스 입력에 소리를 냈다고 표시하고, 없는 버스면 버린다. 없으면 출력)
+///
+/// # 인자
+/// - `bus_list`: 버스들.
+/// - `output_quantum`: 출력 퀀텀.
+/// - `source_quantum`: 플레이어 출력.
+/// - `output_bus_id`: 내보낼 버스.
+/// - `channel_count`: 플레이어 출력 채널 수.
+//==============================================================================
+fn mix_player_output(bus_list: &mut [BusNode], output_quantum: &mut [[f32; RENDER_QUANTUM_FRAMES]; 2], source_quantum: &[[f32; RENDER_QUANTUM_FRAMES]; 2], output_bus_id: Option<u64>, channel_count: usize) {
+	let target = match output_bus_id {
+		Some(bus_id) => {
+			match bus_list.iter_mut().find(|bus| bus.bus_id == bus_id) {
+				Some(bus) => {
+					bus.has_sound_input = true;
+					&mut bus.input
+				}
+				None => {
+					return;
+				}
+			}
+		}
+		None => {
+			output_quantum
+		}
+	};
+	mix_into(target, source_quantum, channel_count);
 }
 
 //==============================================================================
