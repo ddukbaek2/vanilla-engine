@@ -148,7 +148,8 @@ jobs:
         shell: bash
         run: |
           node tools/physics2dcompare.mjs --check ../vanilla-engine/src/experimental/physics2d/comparison.txt
-          for test_file in tests/experimental/*.test.mjs tests/graphics3d/*.test.mjs; do node "$test_file"; done
+          node tests/run.mjs
+          diff -r ../vanilla-engine/src/ui/testdata/uidocument tests/ui/testdata/uidocument
 
       - name: 리눅스 라이브러리 시험이 죽으면 gdb 로 다시 돌려 죽은 스레드 보기
         if: runner.os == 'Linux' && steps.tests.outcome == 'failure'
