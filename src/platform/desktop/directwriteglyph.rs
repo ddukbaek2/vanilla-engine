@@ -67,6 +67,9 @@ fn create_in_memory_loader() -> Option<IDWriteInMemoryFontFileLoader> {
 //==============================================================================
 /// 크롬 윈도우의 글자 대비와 감마. ((대비, 감마), 감마 0 은 sRGB)
 /// - 크롬처럼 주 화면 장치의 Avalon.Graphics 키가 있을 때만 DirectWrite 렌더링 값을 쓰고, 없으면 스키아 기본 대비 1, sRGB 다.
+///
+/// # 돌려줌
+/// (대비, 감마). 감마 0 은 sRGB 다.
 //==============================================================================
 pub fn read_text_contrast_and_gamma() -> (f32, f32) {
 	TEXT_CONTRAST_AND_GAMMA.with(|value| *value)
@@ -157,6 +160,9 @@ fn read_text_settings_registry() -> (bool, Option<u32>) {
 /// - 크롬 font_render_params_win.cc: SPI_GETFONTSMOOTHING 이 켜졌고 SPI_GETFONTSMOOTHINGTYPE 이 ClearType 이면 GetSubpixelRenderingGeometry 가
 ///   Avalon.Graphics 의 PixelStructure(0 없음, 1 RGB, 2 BGR, 그 밖은 없음), 그 값이 없으면 SPI_GETFONTSMOOTHINGORIENTATION(RGB, BGR, 그 밖은 없음)이다.
 ///   렌더러는 이 값이 없음이 아니면 LCD 글자를 켠다. (web_view_impl.cc 의 SetLCDTextEnabled)
+///
+/// # 돌려줌
+/// LCD 글자를 켜면 true.
 //==============================================================================
 pub fn is_lcd_text_enabled() -> bool {
 	IS_LCD_TEXT_ENABLED.with(|value| *value)
