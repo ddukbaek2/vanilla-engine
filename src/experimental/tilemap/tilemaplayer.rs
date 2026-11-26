@@ -8,8 +8,8 @@
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::rect::Rect;
-use crate::base::vector2::Vector2;
 use crate::core::graphic::BlendMode;
+use crate::experimental::physics2d::PhysicsVector2;
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 
@@ -48,9 +48,9 @@ pub(crate) struct TilemapChunk {
 pub struct TilemapLayer {
 	name: String,
 	is_visible: bool,
-	opacity: f32,
+	opacity: f64,
 	color: Color,
-	offset: Vector2,
+	offset: PhysicsVector2,
 	blend_mode: BlendMode,
 	properties: Map<String, Value>,
 	chunk_size: i32,
@@ -87,7 +87,7 @@ impl TilemapLayer {
 			is_visible: true,
 			opacity: 1.0,
 			color: Color::white(),
-			offset: Vector2::zero(),
+			offset: PhysicsVector2::zero(),
 			blend_mode: BlendMode::Normal,
 			properties: Map::new(),
 			chunk_size: chunk_size.max(1),
@@ -141,7 +141,7 @@ impl TilemapLayer {
 	/// # 인자
 	/// - `opacity`: 불투명도. (0 ~ 1, 색의 알파에 곱한다)
 	//==============================================================================
-	pub fn set_opacity(&mut self, opacity: f32) {
+	pub fn set_opacity(&mut self, opacity: f64) {
 		self.opacity = opacity;
 	}
 
@@ -151,7 +151,7 @@ impl TilemapLayer {
 	/// # 돌려줌
 	/// 불투명도. (처음은 1)
 	//==============================================================================
-	pub fn get_opacity(&self) -> f32 {
+	pub fn get_opacity(&self) -> f64 {
 		self.opacity
 	}
 
@@ -181,8 +181,8 @@ impl TilemapLayer {
 	/// # 인자
 	/// - `offset`: 오프셋. (픽셀)
 	//==============================================================================
-	pub fn set_offset(&mut self, offset: Vector2) {
-		self.offset = offset;
+	pub fn set_offset(&mut self, offset: impl Into<PhysicsVector2>) {
+		self.offset = offset.into();
 	}
 
 	//==============================================================================
@@ -191,7 +191,7 @@ impl TilemapLayer {
 	/// # 돌려줌
 	/// 오프셋. (픽셀, 처음은 0, 0)
 	//==============================================================================
-	pub fn get_offset(&self) -> Vector2 {
+	pub fn get_offset(&self) -> PhysicsVector2 {
 		self.offset
 	}
 

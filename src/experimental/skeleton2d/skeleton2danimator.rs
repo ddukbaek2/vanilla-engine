@@ -93,8 +93,8 @@ pub struct Skeleton2DAnimator {
 	skeleton: Option<Skeleton2D>,
 	animation_state: Option<Skeleton2DAnimationState>,
 	frame_table: HashMap<String, Frame>,
-	time_scale: f32,
-	vertex_positions: Vec<f32>,
+	time_scale: f64,
+	vertex_positions: Vec<f64>,
 }
 
 impl Skeleton2DAnimator {
@@ -112,7 +112,7 @@ impl Skeleton2DAnimator {
 			animation_state: None,
 			frame_table: HashMap::new(),
 			time_scale: 1.0,
-			vertex_positions: vec![0.0f32; 64],
+			vertex_positions: vec![0.0f64; 64],
 		}
 	}
 
@@ -247,7 +247,7 @@ impl Skeleton2DAnimator {
 	/// # 돌려줌
 	/// 걸었으면 true. (자료가 없거나 클립이 없으면 false)
 	//==============================================================================
-	pub fn set_animation(&mut self, track_index: usize, animation_name: &str, is_loop: bool, mix_duration: f32) -> bool {
+	pub fn set_animation(&mut self, track_index: usize, animation_name: &str, is_loop: bool, mix_duration: f64) -> bool {
 		match self.animation_state.as_mut() {
 			Some(animation_state) => {
 				animation_state.set_animation(track_index, animation_name, is_loop, mix_duration)
@@ -265,7 +265,7 @@ impl Skeleton2DAnimator {
 	/// - `track_index`: 트랙 번호.
 	/// - `alpha`: 층 몫. (0 ~ 1)
 	//==============================================================================
-	pub fn set_track_alpha(&mut self, track_index: usize, alpha: f32) {
+	pub fn set_track_alpha(&mut self, track_index: usize, alpha: f64) {
 		if let Some(animation_state) = self.animation_state.as_mut() {
 			animation_state.set_track_alpha(track_index, alpha);
 		}
@@ -303,7 +303,7 @@ impl Skeleton2DAnimator {
 	/// # 인자
 	/// - `time_scale`: 빠르기.
 	//==============================================================================
-	pub fn set_time_scale(&mut self, time_scale: f32) {
+	pub fn set_time_scale(&mut self, time_scale: f64) {
 		self.time_scale = time_scale;
 	}
 
@@ -313,7 +313,7 @@ impl Skeleton2DAnimator {
 	/// # 돌려줌
 	/// 빠르기.
 	//==============================================================================
-	pub fn get_time_scale(&self) -> f32 {
+	pub fn get_time_scale(&self) -> f64 {
 		self.time_scale
 	}
 
@@ -323,7 +323,7 @@ impl Skeleton2DAnimator {
 	/// # 인자
 	/// - `time_delta`: 흐른 시간. (초)
 	//==============================================================================
-	pub fn update(&mut self, time_delta: f32) {
+	pub fn update(&mut self, time_delta: f64) {
 		if let (Some(animation_state), Some(skeleton)) = (self.animation_state.as_mut(), self.skeleton.as_mut()) {
 			animation_state.update(time_delta);
 			animation_state.apply(skeleton);
@@ -348,12 +348,12 @@ impl Skeleton2DAnimator {
 	}
 
 	//==============================================================================
-	/// 뼈대 원점 읽기. (노드 내용 영역 안의 축점 자리)
+	/// 뼈대 원점 읽기. (노드 내용 영역 안의 축점 자리, 원본처럼 f64 로 곱함)
 	//==============================================================================
-	fn read_origin(transform: &NodeTransform) -> Vector2 {
+	fn read_origin(transform: &NodeTransform) -> (f64, f64) {
 		let pivot = transform.get_pivot();
 		let content_size = transform.get_content_size();
-		Vector2::create(content_size.x * pivot.x, content_size.y * pivot.y)
+		(content_size.x as f64 * pivot.x as f64, content_size.y as f64 * pivot.y as f64)
 	}
 }
 
@@ -393,7 +393,7 @@ impl Component for Skeleton2DAnimator {
 	//==============================================================================
 	fn tick(&mut self, _context: &mut ComponentContext, time_delta: f32) {
 		let time_scale = self.time_scale;
-		self.update(time_delta * time_scale);
+		self.update(time_delta as f64 * time_scale);
 	}
 
 	//==============================================================================
@@ -429,11 +429,11 @@ impl Component for Skeleton2DAnimator {
 			if self.vertex_positions.len() < vertex_count * 2 {
 				self.vertex_positions.resize(vertex_count * 2, 0.0);
 			}
-			skeleton.compute_attachment_vertices(slot_index, &mut self.vertex_positions, image_rect.size.x, image_rect.size.y);
+			skeleton.compute_attachment_vertices(slot_index, &mut self.vertex_positions, image_rect.size.x as f64, image_rect.size.y as f64);
 			let uvs = attachment.get_uvs();
 			let triangles = attachment.get_triangles();
-			let image_width = image.get_width() as f32;
-			let image_height = image.get_height() as f32;
+			let image_width = image.get_width() as f64;
+			let image_height = image.get_height() as f64;
 			graphic.set_blend_mode(slot.get_data().get_blend_mode());
 
 			// 삼각형을 정점 자리에 담을 만큼씩 나눠 그린다.
@@ -445,10 +445,10 @@ impl Component for Skeleton2DAnimator {
 					let vertex_data = graphic.get_vertex_data();
 					let mut offset = 0usize;
 					for &vertex_index in &triangles[first_triangle * 3..(first_triangle + chunk_triangle_count) * 3] {
-						vertex_data[offset] = self.vertex_positions[vertex_index * 2] + origin.x;
-						vertex_data[offset + 1] = self.vertex_positions[vertex_index * 2 + 1] + origin.y;
-						vertex_data[offset + 2] = (image_rect.position.x + uvs[vertex_index * 2] * image_rect.size.x) / image_width;
-						vertex_data[offset + 3] = (image_rect.position.y + uvs[vertex_index * 2 + 1] * image_rect.size.y) / image_height;
+						vertex_data[offset] = (self.vertex_positions[vertex_index * 2] + origin.0) as f32;
+						vertex_data[offset + 1] = (self.vertex_positions[vertex_index * 2 + 1] + origin.1) as f32;
+						vertex_data[offset + 2] = ((image_rect.position.x as f64 + uvs[vertex_index * 2] * image_rect.size.x as f64) / image_width) as f32;
+						vertex_data[offset + 3] = ((image_rect.position.y as f64 + uvs[vertex_index * 2 + 1] * image_rect.size.y as f64) / image_height) as f32;
 						offset += FLOATS_PER_VERTEX;
 					}
 				}
@@ -474,10 +474,10 @@ impl Component for Skeleton2DAnimator {
 		graphic.set_fill_color(GIZMO_JOINT_COLOR);
 		for bone in skeleton.get_bones() {
 			let length = bone.get_data().get_length();
-			let start = Vector2::create(bone.get_world_x() + origin.x, bone.get_world_y() + origin.y);
+			let start = Vector2::create((bone.get_world_x() + origin.0) as f32, (bone.get_world_y() + origin.1) as f32);
 			if length > 0.0 {
 				let tip = bone.local_to_world(length, 0.0);
-				graphic.draw_line(&[start, Vector2::create(tip.x + origin.x, tip.y + origin.y)], 2.0);
+				graphic.draw_line(&[start, Vector2::create(tip.x + origin.0 as f32, tip.y + origin.1 as f32)], 2.0);
 			}
 			graphic.draw_circle(start, 3.0);
 		}

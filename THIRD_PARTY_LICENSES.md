@@ -41,6 +41,32 @@ software is freely granted, provided that this notice
 is preserved.
 ````
 
+### LLVM libc
+
+- `src/base/trigonometry.rs` (`atan2` and its helpers `ordered_two_sum`, `ordered_add`, `fused_two_product`, `fused_divide`, `atan_small`): the order of operations of the double precision `atan2` of LLVM libc (`src/__support/math/atan2.h`, `atan_utils.h`, `FPUtil/double_double.h`), which Chrome's V8 calls for `Math.atan2`, so the engine returns the same bits as Chrome. Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions (Apache 2.0 full text in License Texts below, or https://www.apache.org/licenses/LICENSE-2.0).
+
+````text
+The LLVM Project is under the Apache License v2.0 with LLVM Exceptions.
+See https://llvm.org/LICENSE.txt for license information.
+SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+---- LLVM Exceptions to the Apache 2.0 License ----
+
+As an exception, if, as a result of your compiling your source code, portions
+of this Software are embedded into an Object form of such source code, you
+may redistribute such embedded portions in such Object form without complying
+with the conditions of Sections 4(a), 4(b) and 4(d) of the License.
+
+In addition, if you combine or link compiled forms of this Software with
+software that is licensed under the GPLv2 ("Combined Software") and if a
+court of competent jurisdiction determines that the patent provision (Section
+3), the indemnity provision (Section 9) or other Section of the License
+conflicts with the conditions of the GPLv2, you may retroactively and
+prospectively choose to deem waived or otherwise exclude such Section(s) of
+the License, but only in their entirety and only with respect to the Combined
+Software.
+````
+
 ### Chromium and Blink
 
 - Web Audio (desktop mixer, `src/platform/audio/`: audioparam.rs, panner.rs, pannermath.rs, oscillator.rs, mixer.rs, decode/resample.rs, decode/opus.rs, decode/trim.rs, hrtf/): third_party/blink/renderer/modules/webaudio/ (audio_param_handler.cc, panner_handler.cc, audio_listener_handler.cc, oscillator_handler.cc, periodic_wave_handler.cc, audio_scheduled_source_handler.cc, audio_buffer_source_handler.cc, cpu/arm/oscillator_kernel_neon.cc, cpu/x86/oscillator_kernel_sse2.cc), media/base/sinc_resampler.cc, ui/gfx/geometry/vector3d_f.cc, and the platform audio files listed below. Decoding (`src/platform/audio/decode/`): media/filters/opus_audio_decoder.cc and media/formats/common/opus_constants.h (opus.rs), media/filters/audio_file_reader.cc and media/base/audio_discard_helper.cc (trim.rs).

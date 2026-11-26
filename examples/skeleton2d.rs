@@ -28,7 +28,7 @@ const CHARACTER_SCALE: f32 = 2.0;
 const CHARACTER_X_LIST: [f32; 4] = [120.0, 360.0, 600.0, 840.0];
 const TIME_STEP: f32 = 1.0 / 60.0;
 const CROSSFADE_PERIOD_FRAMES: u64 = 120;
-const CROSSFADE_MIX_SECONDS: f32 = 0.6;
+const CROSSFADE_MIX_SECONDS: f64 = 0.6;
 const BACKGROUND_COLOR: Color = Color::create(0.11, 0.133, 0.188, 1.0);
 const GROUND_COLOR: Color = Color::create(0.165, 0.192, 0.259, 1.0);
 const LABEL_COLOR: Color = Color::create(0.82, 0.85, 0.9, 1.0);
@@ -130,7 +130,7 @@ impl Skeleton2DScene {
 					skeleton_animator.set_animation(0, "walk", true, CROSSFADE_MIX_SECONDS);
 				}
 			}
-			skeleton_animator.update(TIME_STEP);
+			skeleton_animator.update(TIME_STEP as f64);
 			let fired_events = skeleton_animator.take_events();
 			if character_index == 0 {
 				self.step_count += fired_events.iter().filter(|fired_event| fired_event.get_event().get_name() == "step").count() as u32;
@@ -138,7 +138,7 @@ impl Skeleton2DScene {
 			if character_index == 3 {
 				let target_position = Self::read_target_position(frame_index + 1);
 				if let Some(target_bone) = skeleton_animator.find_bone_mut("handTarget") {
-					target_bone.set_position(target_position.x, target_position.y);
+					target_bone.set_position(target_position.x as f64, target_position.y as f64);
 				}
 			}
 		}

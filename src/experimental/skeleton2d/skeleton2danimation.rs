@@ -5,7 +5,7 @@
 //! - 뼈 시간줄의 값은 처음 자세에 대한 몫이다. 회전, 이동, 기울임은 더하고 크기는 곱한다. (Spine, DragonBones 와 같은 꼴)
 //! - 슬롯 색은 그 값 그대로, 붙임과 그리기 차례는 계단, 사건은 그 시각에 한 번이다.
 //! - 자세(Skeleton2DPose)는 뼈 지역 값과 슬롯 상태만 든 배열이다. 클립은 자세에 값을 쓰고, 섞기는 자세끼리 섞는다.
-//! - 원본과 다른 점: 시간줄 대상 번호는 `Option<usize>` 다. (원본의 -1 은 None) 베지어 제어점은 `Option<[f32; 4]>` 이다.
+//! - 원본과 다른 점: 시간줄 대상 번호는 `Option<usize>` 다. (원본의 -1 은 None) 베지어 제어점은 `Option<[f64; 4]>` 이다.
 //!
 //! # 예제
 //! 베지어 곡선과 회전 시간줄 하나를 자세에 걸기
@@ -73,7 +73,7 @@ pub enum Skeleton2DTimelineType {
 //==============================================================================
 /// 3 차 베지어 한 축의 값. (끝점 0 과 1, 제어점 first_control, second_control)
 //==============================================================================
-fn evaluate_bezier_component(first_control: f32, second_control: f32, parameter: f32) -> f32 {
+fn evaluate_bezier_component(first_control: f64, second_control: f64, parameter: f64) -> f64 {
 	let inverse = 1.0 - parameter;
 	3.0 * inverse * inverse * parameter * first_control + 3.0 * inverse * parameter * parameter * second_control + parameter * parameter * parameter
 }
@@ -102,7 +102,7 @@ fn evaluate_bezier_component(first_control: f32, second_control: f32, parameter:
 /// assert!((bezier_value - 0.8024).abs() < 0.001);
 /// ```
 //==============================================================================
-pub fn evaluate_skeleton2d_curve(curve_type: Skeleton2DCurveType, curve_values: Option<[f32; 4]>, percent: f32) -> f32 {
+pub fn evaluate_skeleton2d_curve(curve_type: Skeleton2DCurveType, curve_values: Option<[f64; 4]>, percent: f64) -> f64 {
 	if curve_type == Skeleton2DCurveType::Stepped {
 		return if percent >= 1.0 { 1.0 } else { 0.0 };
 	}
@@ -114,8 +114,8 @@ pub fn evaluate_skeleton2d_curve(curve_type: Skeleton2DCurveType, curve_values: 
 			return percent;
 		}
 	};
-	let mut low_parameter = 0.0f32;
-	let mut high_parameter = 1.0f32;
+	let mut low_parameter = 0.0f64;
+	let mut high_parameter = 1.0f64;
 	for _ in 0..BEZIER_BISECTION_COUNT {
 		let middle_parameter = (low_parameter + high_parameter) * 0.5;
 		let middle_x = evaluate_bezier_component(curve_values[0], curve_values[2], middle_parameter);
@@ -133,7 +133,7 @@ pub fn evaluate_skeleton2d_curve(curve_type: Skeleton2DCurveType, curve_values: 
 //==============================================================================
 /// 각도 차를 -180 ~ 180 도로 접기.
 //==============================================================================
-pub(crate) fn wrap_degree(degree: f32) -> f32 {
+pub(crate) fn wrap_degree(degree: f64) -> f64 {
 	let mut wrapped_degree = degree % 360.0;
 	if wrapped_degree > 180.0 {
 		wrapped_degree -= 360.0;
@@ -161,9 +161,9 @@ pub(crate) fn wrap_degree(degree: f32) -> f32 {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Skeleton2DEvent {
 	name: String,
-	time: f32,
+	time: f64,
 	int_value: i32,
-	float_value: f32,
+	float_value: f64,
 	string_value: String,
 }
 
@@ -181,7 +181,7 @@ impl Skeleton2DEvent {
 	/// # 돌려줌
 	/// 사건.
 	//==============================================================================
-	pub fn new(name: &str, time: f32, int_value: i32, float_value: f32, string_value: &str) -> Skeleton2DEvent {
+	pub fn new(name: &str, time: f64, int_value: i32, float_value: f64, string_value: &str) -> Skeleton2DEvent {
 		Skeleton2DEvent {
 			name: name.to_string(),
 			time,
@@ -207,7 +207,7 @@ impl Skeleton2DEvent {
 	/// # 돌려줌
 	/// 클립 안의 시각. (초)
 	//==============================================================================
-	pub fn get_time(&self) -> f32 {
+	pub fn get_time(&self) -> f64 {
 		self.time
 	}
 
@@ -227,7 +227,7 @@ impl Skeleton2DEvent {
 	/// # 돌려줌
 	/// 실수 값.
 	//==============================================================================
-	pub fn get_float_value(&self) -> f32 {
+	pub fn get_float_value(&self) -> f64 {
 		self.float_value
 	}
 
@@ -263,8 +263,8 @@ impl Skeleton2DEvent {
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct Skeleton2DPose {
-	bone_values: Vec<f32>,
-	slot_colors: Vec<f32>,
+	bone_values: Vec<f64>,
+	slot_colors: Vec<f64>,
 	slot_attachment_names: Vec<Option<String>>,
 	draw_order: Vec<usize>,
 }
@@ -281,14 +281,14 @@ impl Skeleton2DPose {
 	/// 자세.
 	//==============================================================================
 	pub fn new(bone_count: usize, slot_count: usize) -> Skeleton2DPose {
-		let mut bone_values = vec![0.0f32; bone_count * SKELETON2D_BONE_VALUE_COUNT];
+		let mut bone_values = vec![0.0f64; bone_count * SKELETON2D_BONE_VALUE_COUNT];
 		for bone_index in 0..bone_count {
 			bone_values[bone_index * SKELETON2D_BONE_VALUE_COUNT + 3] = 1.0;
 			bone_values[bone_index * SKELETON2D_BONE_VALUE_COUNT + 4] = 1.0;
 		}
 		Skeleton2DPose {
 			bone_values,
-			slot_colors: vec![1.0f32; slot_count * 4],
+			slot_colors: vec![1.0f64; slot_count * 4],
 			slot_attachment_names: vec![None; slot_count],
 			draw_order: (0..slot_count).collect(),
 		}
@@ -300,7 +300,7 @@ impl Skeleton2DPose {
 	/// # 돌려줌
 	/// 뼈 값 배열.
 	//==============================================================================
-	pub fn get_bone_values(&self) -> &[f32] {
+	pub fn get_bone_values(&self) -> &[f64] {
 		&self.bone_values
 	}
 
@@ -310,7 +310,7 @@ impl Skeleton2DPose {
 	/// # 돌려줌
 	/// 뼈 값 배열.
 	//==============================================================================
-	pub fn get_bone_values_mut(&mut self) -> &mut [f32] {
+	pub fn get_bone_values_mut(&mut self) -> &mut [f64] {
 		&mut self.bone_values
 	}
 
@@ -320,7 +320,7 @@ impl Skeleton2DPose {
 	/// # 돌려줌
 	/// 슬롯 색 배열.
 	//==============================================================================
-	pub fn get_slot_colors(&self) -> &[f32] {
+	pub fn get_slot_colors(&self) -> &[f64] {
 		&self.slot_colors
 	}
 
@@ -330,7 +330,7 @@ impl Skeleton2DPose {
 	/// # 돌려줌
 	/// 슬롯 색 배열.
 	//==============================================================================
-	pub fn get_slot_colors_mut(&mut self) -> &mut [f32] {
+	pub fn get_slot_colors_mut(&mut self) -> &mut [f64] {
 		&mut self.slot_colors
 	}
 
@@ -399,7 +399,7 @@ impl Skeleton2DPose {
 	/// - `target_pose`: 섞을 대상 자세.
 	/// - `alpha`: 대상의 몫. (0 ~ 1)
 	//==============================================================================
-	pub fn blend(&mut self, target_pose: &Skeleton2DPose, alpha: f32) {
+	pub fn blend(&mut self, target_pose: &Skeleton2DPose, alpha: f64) {
 		if alpha <= 0.0 {
 			return;
 		}
@@ -451,10 +451,10 @@ impl Skeleton2DPose {
 	pub fn reset_slot_to_setup(&mut self, slot_data: &Skeleton2DSlotData) {
 		let slot_index = slot_data.get_index();
 		let color = slot_data.get_color();
-		self.slot_colors[slot_index * 4] = color.red;
-		self.slot_colors[slot_index * 4 + 1] = color.green;
-		self.slot_colors[slot_index * 4 + 2] = color.blue;
-		self.slot_colors[slot_index * 4 + 3] = color.alpha;
+		self.slot_colors[slot_index * 4] = color.red as f64;
+		self.slot_colors[slot_index * 4 + 1] = color.green as f64;
+		self.slot_colors[slot_index * 4 + 2] = color.blue as f64;
+		self.slot_colors[slot_index * 4 + 3] = color.alpha as f64;
 		self.slot_attachment_names[slot_index] = slot_data.get_attachment_name().map(|name| name.to_string());
 	}
 }
@@ -462,7 +462,7 @@ impl Skeleton2DPose {
 //==============================================================================
 /// 뼈 자료의 처음 값을 뼈 값 배열에 적기.
 //==============================================================================
-fn write_setup_bone_values(bone_data: &Skeleton2DBoneData, bone_values: &mut [f32], offset: usize) {
+fn write_setup_bone_values(bone_data: &Skeleton2DBoneData, bone_values: &mut [f64], offset: usize) {
 	bone_values[offset] = bone_data.get_x();
 	bone_values[offset + 1] = bone_data.get_y();
 	bone_values[offset + 2] = bone_data.get_rotation();
@@ -485,7 +485,7 @@ fn write_setup_bone_values(bone_data: &Skeleton2DBoneData, bone_values: &mut [f3
 /// let mut timeline = Skeleton2DTimeline::new(Skeleton2DTimelineType::Translate, Some(0));
 /// timeline.add_value_frame(0.0, &[0.0, 0.0], Skeleton2DCurveType::Linear, None);
 /// timeline.add_value_frame(1.0, &[10.0, -20.0], Skeleton2DCurveType::Linear, None);
-/// let mut values = [0.0f32; 2];
+/// let mut values = [0.0f64; 2];
 /// assert!(timeline.sample_values(0.5, &mut values));
 /// assert_eq!(values, [5.0, -10.0]);
 /// ```
@@ -494,10 +494,10 @@ fn write_setup_bone_values(bone_data: &Skeleton2DBoneData, bone_values: &mut [f3
 pub struct Skeleton2DTimeline {
 	timeline_type: Skeleton2DTimelineType,
 	target_index: Option<usize>,
-	frame_times: Vec<f32>,
-	frame_values: Vec<f32>,
+	frame_times: Vec<f64>,
+	frame_values: Vec<f64>,
 	curve_types: Vec<Skeleton2DCurveType>,
-	curve_values: Vec<[f32; 4]>,
+	curve_values: Vec<[f64; 4]>,
 	attachment_names: Vec<Option<String>>,
 	draw_orders: Vec<Option<Vec<usize>>>,
 	events: Vec<Skeleton2DEvent>,
@@ -590,7 +590,7 @@ impl Skeleton2DTimeline {
 	/// # 돌려줌
 	/// 그 키의 시각. (초)
 	//==============================================================================
-	pub fn get_frame_time(&self, frame_index: usize) -> f32 {
+	pub fn get_frame_time(&self, frame_index: usize) -> f64 {
 		self.frame_times[frame_index]
 	}
 
@@ -600,7 +600,7 @@ impl Skeleton2DTimeline {
 	/// # 돌려줌
 	/// 마지막 키의 시각. (초, 키가 없으면 0)
 	//==============================================================================
-	pub fn get_last_frame_time(&self) -> f32 {
+	pub fn get_last_frame_time(&self) -> f64 {
 		self.frame_times.last().copied().unwrap_or(0.0)
 	}
 
@@ -613,7 +613,7 @@ impl Skeleton2DTimeline {
 	/// - `curve_type`: 다음 키까지의 곡선.
 	/// - `curve_values`: 베지어 제어점 [x1, y1, x2, y2]. (x 는 0 ~ 1 로 자른다, 베지어가 아니면 None)
 	//==============================================================================
-	pub fn add_value_frame(&mut self, time: f32, values: &[f32], curve_type: Skeleton2DCurveType, curve_values: Option<[f32; 4]>) {
+	pub fn add_value_frame(&mut self, time: f64, values: &[f64], curve_type: Skeleton2DCurveType, curve_values: Option<[f64; 4]>) {
 		let value_stride = self.get_value_stride();
 		self.frame_times.push(time);
 		self.frame_values.extend_from_slice(&values[..value_stride]);
@@ -636,7 +636,7 @@ impl Skeleton2DTimeline {
 	/// - `time`: 시각. (초, 앞 키보다 늦어야 한다)
 	/// - `attachment_name`: 그 시각부터 보일 붙임 이름. (None 이면 숨긴다)
 	//==============================================================================
-	pub fn add_attachment_frame(&mut self, time: f32, attachment_name: Option<&str>) {
+	pub fn add_attachment_frame(&mut self, time: f64, attachment_name: Option<&str>) {
 		self.frame_times.push(time);
 		self.attachment_names.push(attachment_name.map(|name| name.to_string()));
 	}
@@ -648,7 +648,7 @@ impl Skeleton2DTimeline {
 	/// - `time`: 시각. (초, 앞 키보다 늦어야 한다)
 	/// - `draw_order`: 그리는 차례의 슬롯 번호 모두. (None 이면 처음 차례)
 	//==============================================================================
-	pub fn add_draw_order_frame(&mut self, time: f32, draw_order: Option<Vec<usize>>) {
+	pub fn add_draw_order_frame(&mut self, time: f64, draw_order: Option<Vec<usize>>) {
 		self.frame_times.push(time);
 		self.draw_orders.push(draw_order);
 	}
@@ -683,7 +683,7 @@ impl Skeleton2DTimeline {
 	/// # 돌려줌
 	/// 시각이 그 키 이상인 마지막 키. (처음 키 앞이면 0, 키가 없으면 None)
 	//==============================================================================
-	pub fn find_frame_index(&self, time: f32) -> Option<usize> {
+	pub fn find_frame_index(&self, time: f64) -> Option<usize> {
 		if self.frame_times.is_empty() {
 			return None;
 		}
@@ -711,7 +711,7 @@ impl Skeleton2DTimeline {
 	/// # 돌려줌
 	/// 적었으면 true. (키가 없으면 적지 않고 false)
 	//==============================================================================
-	pub fn sample_values(&self, time: f32, output: &mut [f32]) -> bool {
+	pub fn sample_values(&self, time: f64, output: &mut [f64]) -> bool {
 		let frame_index = match self.find_frame_index(time) {
 			Some(frame_index) => {
 				frame_index
@@ -749,7 +749,7 @@ impl Skeleton2DTimeline {
 	/// - `skeleton_data`: 뼈대 자료. (처음 값을 읽는다)
 	/// - `time`: 클립 안의 시각. (초)
 	//==============================================================================
-	pub fn apply(&self, pose: &mut Skeleton2DPose, skeleton_data: &Skeleton2DData, time: f32) {
+	pub fn apply(&self, pose: &mut Skeleton2DPose, skeleton_data: &Skeleton2DData, time: f64) {
 		match self.timeline_type {
 			Skeleton2DTimelineType::Rotate | Skeleton2DTimelineType::Translate | Skeleton2DTimelineType::Scale | Skeleton2DTimelineType::Shear => {
 				let target_index = match self.target_index {
@@ -760,7 +760,7 @@ impl Skeleton2DTimeline {
 						return;
 					}
 				};
-				let mut values = [0.0f32; 2];
+				let mut values = [0.0f64; 2];
 				if !self.sample_values(time, &mut values) {
 					return;
 				}
@@ -794,7 +794,7 @@ impl Skeleton2DTimeline {
 						return;
 					}
 				};
-				let mut values = [1.0f32; 4];
+				let mut values = [1.0f64; 4];
 				if !self.sample_values(time, &mut values) {
 					return;
 				}
@@ -870,7 +870,7 @@ impl Skeleton2DTimeline {
 					return;
 				};
 				let color = skeleton_data.get_slots()[target_index].get_color();
-				pose.get_slot_colors_mut()[target_index * 4..target_index * 4 + 4].copy_from_slice(&[color.red, color.green, color.blue, color.alpha]);
+				pose.get_slot_colors_mut()[target_index * 4..target_index * 4 + 4].copy_from_slice(&[color.red as f64, color.green as f64, color.blue as f64, color.alpha as f64]);
 			}
 			Skeleton2DTimelineType::Attachment => {
 				let Some(target_index) = self.target_index else {
@@ -914,7 +914,7 @@ impl Skeleton2DTimeline {
 #[derive(Clone, Debug)]
 pub struct Skeleton2DAnimation {
 	name: String,
-	duration: f32,
+	duration: f64,
 	timelines: Vec<Skeleton2DTimeline>,
 }
 
@@ -929,7 +929,7 @@ impl Skeleton2DAnimation {
 	/// # 돌려줌
 	/// 시간줄 없는 클립.
 	//==============================================================================
-	pub fn new(name: &str, duration: f32) -> Skeleton2DAnimation {
+	pub fn new(name: &str, duration: f64) -> Skeleton2DAnimation {
 		Skeleton2DAnimation {
 			name: name.to_string(),
 			duration,
@@ -953,7 +953,7 @@ impl Skeleton2DAnimation {
 	/// # 돌려줌
 	/// 길이. (초)
 	//==============================================================================
-	pub fn get_duration(&self) -> f32 {
+	pub fn get_duration(&self) -> f64 {
 		self.duration
 	}
 
@@ -963,7 +963,7 @@ impl Skeleton2DAnimation {
 	/// # 인자
 	/// - `duration`: 길이. (초)
 	//==============================================================================
-	pub fn set_duration(&mut self, duration: f32) {
+	pub fn set_duration(&mut self, duration: f64) {
 		self.duration = duration;
 	}
 
@@ -995,7 +995,7 @@ impl Skeleton2DAnimation {
 	/// - `skeleton_data`: 뼈대 자료.
 	/// - `time`: 클립 안의 시각. (초)
 	//==============================================================================
-	pub fn apply(&self, pose: &mut Skeleton2DPose, skeleton_data: &Skeleton2DData, time: f32) {
+	pub fn apply(&self, pose: &mut Skeleton2DPose, skeleton_data: &Skeleton2DData, time: f64) {
 		for timeline in &self.timelines {
 			timeline.apply(pose, skeleton_data, time);
 		}
@@ -1022,7 +1022,7 @@ impl Skeleton2DAnimation {
 	/// - `to_time`: 뒤 시각. (초, 이 시각의 사건은 든다)
 	/// - `output`: 사건을 덧붙일 목록. (복사해 담는다)
 	//==============================================================================
-	pub fn collect_events(&self, from_time: f32, to_time: f32, output: &mut Vec<Skeleton2DEvent>) {
+	pub fn collect_events(&self, from_time: f64, to_time: f64, output: &mut Vec<Skeleton2DEvent>) {
 		for timeline in &self.timelines {
 			if timeline.get_timeline_type() != Skeleton2DTimelineType::Event {
 				continue;

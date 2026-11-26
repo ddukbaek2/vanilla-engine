@@ -31,13 +31,18 @@
 //! ```
 //==============================================================================
 use crate::base::color::Color;
+use crate::base::trigonometry;
 use crate::base::vector2::Vector2;
 use crate::experimental::skeleton2d::skeleton2danimation::{wrap_degree, Skeleton2DPose, SKELETON2D_BONE_VALUE_COUNT};
 use crate::experimental::skeleton2d::skeleton2ddata::{Skeleton2DAttachment, Skeleton2DBoneData, Skeleton2DData, Skeleton2DIkConstraintData, Skeleton2DSlotData};
 use std::rc::Rc;
 
 /// IK 가 길이 0 으로 보는 값.
-const IK_EPSILON: f32 = 0.00001;
+const IK_EPSILON: f64 = 0.00001;
+
+// 도를 라디안으로, 라디안을 도로. (원본 DEGREE_TO_RADIAN = Math.PI / 180, RADIAN_TO_DEGREE = 180 / Math.PI)
+const DEGREE_TO_RADIAN: f64 = std::f64::consts::PI / 180.0;
+const RADIAN_TO_DEGREE: f64 = 180.0 / std::f64::consts::PI;
 
 //==============================================================================
 /// 뼈. (지역 값, IK 가 건 회전, 월드 행렬)
@@ -55,7 +60,7 @@ const IK_EPSILON: f32 = 0.00001;
 /// skeleton.update_world_transform();
 /// let arm_bone = skeleton.find_bone("arm").expect("arm");
 /// let tip = arm_bone.local_to_world(20.0, 0.0);
-/// let local = arm_bone.world_to_local(tip.x, tip.y);
+/// let local = arm_bone.world_to_local(tip.x as f64, tip.y as f64);
 /// assert!((arm_bone.get_world_rotation() - 90.0).abs() < 0.001);
 /// assert!((tip.x - 10.0).abs() < 0.001 && (tip.y - 20.0).abs() < 0.001);
 /// assert!((local.x - 20.0).abs() < 0.001);
@@ -64,20 +69,20 @@ const IK_EPSILON: f32 = 0.00001;
 #[derive(Clone, Debug)]
 pub struct Skeleton2DBone {
 	data: Skeleton2DBoneData,
-	x: f32,
-	y: f32,
-	rotation: f32,
-	scale_x: f32,
-	scale_y: f32,
-	shear_x: f32,
-	shear_y: f32,
-	applied_rotation: f32,
-	world_a: f32,
-	world_b: f32,
-	world_c: f32,
-	world_d: f32,
-	world_x: f32,
-	world_y: f32,
+	x: f64,
+	y: f64,
+	rotation: f64,
+	scale_x: f64,
+	scale_y: f64,
+	shear_x: f64,
+	shear_y: f64,
+	applied_rotation: f64,
+	world_a: f64,
+	world_b: f64,
+	world_c: f64,
+	world_d: f64,
+	world_x: f64,
+	world_y: f64,
 }
 
 impl Skeleton2DBone {
@@ -172,7 +177,7 @@ impl Skeleton2DBone {
 	/// # 돌려줌
 	/// 부모 기준 x.
 	//==============================================================================
-	pub fn get_x(&self) -> f32 {
+	pub fn get_x(&self) -> f64 {
 		self.x
 	}
 
@@ -182,7 +187,7 @@ impl Skeleton2DBone {
 	/// # 돌려줌
 	/// 부모 기준 y.
 	//==============================================================================
-	pub fn get_y(&self) -> f32 {
+	pub fn get_y(&self) -> f64 {
 		self.y
 	}
 
@@ -193,7 +198,7 @@ impl Skeleton2DBone {
 	/// - `x`: 부모 기준 x.
 	/// - `y`: 부모 기준 y.
 	//==============================================================================
-	pub fn set_position(&mut self, x: f32, y: f32) {
+	pub fn set_position(&mut self, x: f64, y: f64) {
 		self.x = x;
 		self.y = y;
 	}
@@ -204,7 +209,7 @@ impl Skeleton2DBone {
 	/// # 돌려줌
 	/// 회전. (도)
 	//==============================================================================
-	pub fn get_rotation(&self) -> f32 {
+	pub fn get_rotation(&self) -> f64 {
 		self.rotation
 	}
 
@@ -214,7 +219,7 @@ impl Skeleton2DBone {
 	/// # 인자
 	/// - `rotation`: 회전. (도)
 	//==============================================================================
-	pub fn set_rotation(&mut self, rotation: f32) {
+	pub fn set_rotation(&mut self, rotation: f64) {
 		self.rotation = rotation;
 	}
 
@@ -224,7 +229,7 @@ impl Skeleton2DBone {
 	/// # 돌려줌
 	/// 크기 x.
 	//==============================================================================
-	pub fn get_scale_x(&self) -> f32 {
+	pub fn get_scale_x(&self) -> f64 {
 		self.scale_x
 	}
 
@@ -234,7 +239,7 @@ impl Skeleton2DBone {
 	/// # 돌려줌
 	/// 크기 y.
 	//==============================================================================
-	pub fn get_scale_y(&self) -> f32 {
+	pub fn get_scale_y(&self) -> f64 {
 		self.scale_y
 	}
 
@@ -245,7 +250,7 @@ impl Skeleton2DBone {
 	/// - `scale_x`: 크기 x.
 	/// - `scale_y`: 크기 y.
 	//==============================================================================
-	pub fn set_scale(&mut self, scale_x: f32, scale_y: f32) {
+	pub fn set_scale(&mut self, scale_x: f64, scale_y: f64) {
 		self.scale_x = scale_x;
 		self.scale_y = scale_y;
 	}
@@ -256,7 +261,7 @@ impl Skeleton2DBone {
 	/// # 돌려줌
 	/// 기울임 x. (도)
 	//==============================================================================
-	pub fn get_shear_x(&self) -> f32 {
+	pub fn get_shear_x(&self) -> f64 {
 		self.shear_x
 	}
 
@@ -266,7 +271,7 @@ impl Skeleton2DBone {
 	/// # 돌려줌
 	/// 기울임 y. (도)
 	//==============================================================================
-	pub fn get_shear_y(&self) -> f32 {
+	pub fn get_shear_y(&self) -> f64 {
 		self.shear_y
 	}
 
@@ -277,7 +282,7 @@ impl Skeleton2DBone {
 	/// - `shear_x`: 기울임 x. (도)
 	/// - `shear_y`: 기울임 y. (도)
 	//==============================================================================
-	pub fn set_shear(&mut self, shear_x: f32, shear_y: f32) {
+	pub fn set_shear(&mut self, shear_x: f64, shear_y: f64) {
 		self.shear_x = shear_x;
 		self.shear_y = shear_y;
 	}
@@ -288,7 +293,7 @@ impl Skeleton2DBone {
 	/// # 돌려줌
 	/// 걸린 회전. (도)
 	//==============================================================================
-	pub fn get_applied_rotation(&self) -> f32 {
+	pub fn get_applied_rotation(&self) -> f64 {
 		self.applied_rotation
 	}
 
@@ -298,7 +303,7 @@ impl Skeleton2DBone {
 	/// # 인자
 	/// - `applied_rotation`: 걸린 회전. (도)
 	//==============================================================================
-	pub fn set_applied_rotation(&mut self, applied_rotation: f32) {
+	pub fn set_applied_rotation(&mut self, applied_rotation: f64) {
 		self.applied_rotation = applied_rotation;
 	}
 
@@ -313,7 +318,7 @@ impl Skeleton2DBone {
 	/// - `world_x`: 월드 x 자리.
 	/// - `world_y`: 월드 y 자리.
 	//==============================================================================
-	pub fn set_world_transform(&mut self, world_a: f32, world_b: f32, world_c: f32, world_d: f32, world_x: f32, world_y: f32) {
+	pub fn set_world_transform(&mut self, world_a: f64, world_b: f64, world_c: f64, world_d: f64, world_x: f64, world_y: f64) {
 		self.world_a = world_a;
 		self.world_b = world_b;
 		self.world_c = world_c;
@@ -328,7 +333,7 @@ impl Skeleton2DBone {
 	/// # 돌려줌
 	/// 월드 행렬 a.
 	//==============================================================================
-	pub fn get_world_a(&self) -> f32 {
+	pub fn get_world_a(&self) -> f64 {
 		self.world_a
 	}
 
@@ -338,7 +343,7 @@ impl Skeleton2DBone {
 	/// # 돌려줌
 	/// 월드 행렬 b.
 	//==============================================================================
-	pub fn get_world_b(&self) -> f32 {
+	pub fn get_world_b(&self) -> f64 {
 		self.world_b
 	}
 
@@ -348,7 +353,7 @@ impl Skeleton2DBone {
 	/// # 돌려줌
 	/// 월드 행렬 c.
 	//==============================================================================
-	pub fn get_world_c(&self) -> f32 {
+	pub fn get_world_c(&self) -> f64 {
 		self.world_c
 	}
 
@@ -358,7 +363,7 @@ impl Skeleton2DBone {
 	/// # 돌려줌
 	/// 월드 행렬 d.
 	//==============================================================================
-	pub fn get_world_d(&self) -> f32 {
+	pub fn get_world_d(&self) -> f64 {
 		self.world_d
 	}
 
@@ -368,7 +373,7 @@ impl Skeleton2DBone {
 	/// # 돌려줌
 	/// 월드 x 자리. (뼈대 기준)
 	//==============================================================================
-	pub fn get_world_x(&self) -> f32 {
+	pub fn get_world_x(&self) -> f64 {
 		self.world_x
 	}
 
@@ -378,7 +383,7 @@ impl Skeleton2DBone {
 	/// # 돌려줌
 	/// 월드 y 자리. (뼈대 기준)
 	//==============================================================================
-	pub fn get_world_y(&self) -> f32 {
+	pub fn get_world_y(&self) -> f64 {
 		self.world_y
 	}
 
@@ -388,8 +393,8 @@ impl Skeleton2DBone {
 	/// # 돌려줌
 	/// 월드 회전. (도, -180 ~ 180)
 	//==============================================================================
-	pub fn get_world_rotation(&self) -> f32 {
-		self.world_b.atan2(self.world_a).to_degrees()
+	pub fn get_world_rotation(&self) -> f64 {
+		trigonometry::atan2(self.world_b, self.world_a) * RADIAN_TO_DEGREE
 	}
 
 	//==============================================================================
@@ -398,8 +403,8 @@ impl Skeleton2DBone {
 	/// # 돌려줌
 	/// 월드 크기 x.
 	//==============================================================================
-	pub fn get_world_scale_x(&self) -> f32 {
-		self.world_a.hypot(self.world_b)
+	pub fn get_world_scale_x(&self) -> f64 {
+		trigonometry::hypot(self.world_a, self.world_b)
 	}
 
 	//==============================================================================
@@ -408,8 +413,8 @@ impl Skeleton2DBone {
 	/// # 돌려줌
 	/// 월드 크기 y.
 	//==============================================================================
-	pub fn get_world_scale_y(&self) -> f32 {
-		self.world_c.hypot(self.world_d)
+	pub fn get_world_scale_y(&self) -> f64 {
+		trigonometry::hypot(self.world_c, self.world_d)
 	}
 
 	//==============================================================================
@@ -420,10 +425,10 @@ impl Skeleton2DBone {
 	/// - `local_y`: 뼈 기준 y.
 	///
 	/// # 돌려줌
-	/// 월드 자리. (뼈대 기준)
+	/// 월드 자리. (뼈대 기준, f64 로 셈해 엔진 Vector2 의 f32 로 담는다)
 	//==============================================================================
-	pub fn local_to_world(&self, local_x: f32, local_y: f32) -> Vector2 {
-		Vector2::create(self.world_a * local_x + self.world_c * local_y + self.world_x, self.world_b * local_x + self.world_d * local_y + self.world_y)
+	pub fn local_to_world(&self, local_x: f64, local_y: f64) -> Vector2 {
+		Vector2::create((self.world_a * local_x + self.world_c * local_y + self.world_x) as f32, (self.world_b * local_x + self.world_d * local_y + self.world_y) as f32)
 	}
 
 	//==============================================================================
@@ -434,16 +439,16 @@ impl Skeleton2DBone {
 	/// - `world_y`: 월드 y. (뼈대 기준)
 	///
 	/// # 돌려줌
-	/// 뼈 기준 자리. (행렬을 되돌릴 수 없으면 0, 0)
+	/// 뼈 기준 자리. (행렬을 되돌릴 수 없으면 0, 0, f64 로 셈해 엔진 Vector2 의 f32 로 담는다)
 	//==============================================================================
-	pub fn world_to_local(&self, world_x: f32, world_y: f32) -> Vector2 {
+	pub fn world_to_local(&self, world_x: f64, world_y: f64) -> Vector2 {
 		let determinant = self.world_a * self.world_d - self.world_b * self.world_c;
 		if determinant == 0.0 {
 			return Vector2::create(0.0, 0.0);
 		}
 		let difference_x = world_x - self.world_x;
 		let difference_y = world_y - self.world_y;
-		Vector2::create((self.world_d * difference_x - self.world_c * difference_y) / determinant, (self.world_a * difference_y - self.world_b * difference_x) / determinant)
+		Vector2::create(((self.world_d * difference_x - self.world_c * difference_y) / determinant) as f32, ((self.world_a * difference_y - self.world_b * difference_x) / determinant) as f32)
 	}
 }
 
@@ -604,7 +609,7 @@ impl Skeleton2DSlot {
 #[derive(Clone, Debug)]
 pub struct Skeleton2DIkConstraint {
 	data: Skeleton2DIkConstraintData,
-	mix: f32,
+	mix: f64,
 	is_bend_positive: bool,
 }
 
@@ -652,7 +657,7 @@ impl Skeleton2DIkConstraint {
 	/// # 돌려줌
 	/// 세기. (0 ~ 1)
 	//==============================================================================
-	pub fn get_mix(&self) -> f32 {
+	pub fn get_mix(&self) -> f64 {
 		self.mix
 	}
 
@@ -662,7 +667,7 @@ impl Skeleton2DIkConstraint {
 	/// # 인자
 	/// - `mix`: 세기. (0 이면 걸지 않고 1 이면 끝까지)
 	//==============================================================================
-	pub fn set_mix(&mut self, mix: f32) {
+	pub fn set_mix(&mut self, mix: f64) {
 		self.mix = mix;
 	}
 
@@ -715,7 +720,7 @@ impl Skeleton2DIkConstraint {
 /// let mut skeleton = Skeleton2D::new(Rc::new(Skeleton2DData::create_from_json(&json).expect("skeleton")));
 /// assert!(skeleton.set_attachment("head", Some("mask")));
 /// skeleton.update_world_transform();
-/// let mut positions = [0.0f32; 8];
+/// let mut positions = [0.0f64; 8];
 /// assert_eq!(skeleton.compute_attachment_vertices(0, &mut positions, 0.0, 0.0), 4);
 /// assert_eq!((positions[0], positions[1]), (-12.0, -60.0));
 /// ```
@@ -1102,7 +1107,7 @@ impl Skeleton2D {
 		}
 		let slot_colors = pose.get_slot_colors_mut();
 		for (slot_index, slot) in self.slots.iter().enumerate() {
-			slot_colors[slot_index * 4..slot_index * 4 + 4].copy_from_slice(&[slot.color.red, slot.color.green, slot.color.blue, slot.color.alpha]);
+			slot_colors[slot_index * 4..slot_index * 4 + 4].copy_from_slice(&[slot.color.red as f64, slot.color.green as f64, slot.color.blue as f64, slot.color.alpha as f64]);
 		}
 		let slot_attachment_names = pose.get_slot_attachment_names_mut();
 		for (slot_index, slot) in self.slots.iter().enumerate() {
@@ -1132,7 +1137,7 @@ impl Skeleton2D {
 		let slot_colors = pose.get_slot_colors();
 		let slot_attachment_names = pose.get_slot_attachment_names();
 		for (slot_index, slot) in self.slots.iter_mut().enumerate() {
-			slot.color = Color::create(slot_colors[slot_index * 4], slot_colors[slot_index * 4 + 1], slot_colors[slot_index * 4 + 2], slot_colors[slot_index * 4 + 3]);
+			slot.color = Color::create(slot_colors[slot_index * 4] as f32, slot_colors[slot_index * 4 + 1] as f32, slot_colors[slot_index * 4 + 2] as f32, slot_colors[slot_index * 4 + 3] as f32);
 			slot.attachment_name.clone_from(&slot_attachment_names[slot_index]);
 		}
 		self.draw_order.copy_from_slice(pose.get_draw_order());
@@ -1146,12 +1151,12 @@ impl Skeleton2D {
 	//==============================================================================
 	pub fn update_bone_world_transform(&mut self, bone_index: usize) {
 		let bone = &self.bones[bone_index];
-		let x_axis_radian = (bone.applied_rotation + bone.shear_x).to_radians();
-		let y_axis_radian = (bone.applied_rotation + bone.shear_y).to_radians();
-		let local_a = x_axis_radian.cos() * bone.scale_x;
-		let local_b = x_axis_radian.sin() * bone.scale_x;
-		let local_c = -y_axis_radian.sin() * bone.scale_y;
-		let local_d = y_axis_radian.cos() * bone.scale_y;
+		let x_axis_radian = (bone.applied_rotation + bone.shear_x) * DEGREE_TO_RADIAN;
+		let y_axis_radian = (bone.applied_rotation + bone.shear_y) * DEGREE_TO_RADIAN;
+		let local_a = trigonometry::cos(x_axis_radian) * bone.scale_x;
+		let local_b = trigonometry::sin(x_axis_radian) * bone.scale_x;
+		let local_c = -trigonometry::sin(y_axis_radian) * bone.scale_y;
+		let local_d = trigonometry::cos(y_axis_radian) * bone.scale_y;
 		let x = bone.x;
 		let y = bone.y;
 		let world_values = match bone.get_parent_index() {
@@ -1180,18 +1185,18 @@ impl Skeleton2D {
 	/// - `bone_index`: 뼈 번호.
 	/// - `world_rotation`: 바라는 월드 회전. (도)
 	//==============================================================================
-	pub fn set_bone_world_rotation(&mut self, bone_index: usize, world_rotation: f32) {
+	pub fn set_bone_world_rotation(&mut self, bone_index: usize, world_rotation: f64) {
 		let mut local_rotation = world_rotation;
 		if let Some(parent_index) = self.bones[bone_index].get_parent_index() {
 			let parent = &self.bones[parent_index];
 			let determinant = parent.world_a * parent.world_d - parent.world_b * parent.world_c;
-			let radian = world_rotation.to_radians();
-			let direction_x = radian.cos();
-			let direction_y = radian.sin();
+			let radian = world_rotation * DEGREE_TO_RADIAN;
+			let direction_x = trigonometry::cos(radian);
+			let direction_y = trigonometry::sin(radian);
 			if determinant != 0.0 {
 				let local_direction_x = (parent.world_d * direction_x - parent.world_c * direction_y) / determinant;
 				let local_direction_y = (parent.world_a * direction_y - parent.world_b * direction_x) / determinant;
-				local_rotation = local_direction_y.atan2(local_direction_x).to_degrees();
+				local_rotation = trigonometry::atan2(local_direction_y, local_direction_x) * RADIAN_TO_DEGREE;
 			}
 			else {
 				local_rotation = world_rotation - parent.get_world_rotation();
@@ -1250,7 +1255,7 @@ impl Skeleton2D {
 			let bone_index = bone_indices[0];
 			let bone = &self.bones[bone_index];
 			let current_rotation = bone.get_world_rotation();
-			let mut desired_rotation = (target_y - bone.world_y).atan2(target_x - bone.world_x).to_degrees();
+			let mut desired_rotation = trigonometry::atan2(target_y - bone.world_y, target_x - bone.world_x) * RADIAN_TO_DEGREE;
 			if bone.scale_x < 0.0 {
 				desired_rotation += 180.0;
 			}
@@ -1269,14 +1274,14 @@ impl Skeleton2D {
 		let parent_x = parent.world_x;
 		let parent_y = parent.world_y;
 		let child_length_world = child.get_data().get_length() * child.get_world_scale_x();
-		let upper_length = (child.world_x - parent_x).hypot(child.world_y - parent_y);
-		let target_distance = (target_x - parent_x).hypot(target_y - parent_y);
-		let current_elbow_rotation = (child.world_y - parent_y).atan2(child.world_x - parent_x).to_degrees();
-		let target_rotation = (target_y - parent_y).atan2(target_x - parent_x).to_degrees();
+		let upper_length = trigonometry::hypot(child.world_x - parent_x, child.world_y - parent_y);
+		let target_distance = trigonometry::hypot(target_x - parent_x, target_y - parent_y);
+		let current_elbow_rotation = trigonometry::atan2(child.world_y - parent_y, child.world_x - parent_x) * RADIAN_TO_DEGREE;
+		let target_rotation = trigonometry::atan2(target_y - parent_y, target_x - parent_x) * RADIAN_TO_DEGREE;
 		let mut desired_elbow_rotation = target_rotation;
 		if upper_length > IK_EPSILON && child_length_world > IK_EPSILON && target_distance > IK_EPSILON {
 			let cosine = (upper_length * upper_length + target_distance * target_distance - child_length_world * child_length_world) / (2.0 * upper_length * target_distance);
-			let elbow_angle = cosine.clamp(-1.0, 1.0).acos().to_degrees();
+			let elbow_angle = trigonometry::acos(cosine.clamp(-1.0, 1.0)) * RADIAN_TO_DEGREE;
 			let mut is_bend_positive = is_bend_positive_setting;
 			if let Some(grandparent_index) = parent.get_parent_index() {
 				let grandparent = &self.bones[grandparent_index];
@@ -1294,7 +1299,7 @@ impl Skeleton2D {
 
 		let child = &self.bones[child_index];
 		let child_world_rotation = child.get_world_rotation();
-		let mut desired_child_rotation = (target_y - child.world_y).atan2(target_x - child.world_x).to_degrees();
+		let mut desired_child_rotation = trigonometry::atan2(target_y - child.world_y, target_x - child.world_x) * RADIAN_TO_DEGREE;
 		if child.scale_x < 0.0 {
 			desired_child_rotation += 180.0;
 		}
@@ -1331,7 +1336,7 @@ impl Skeleton2D {
 	/// # 돌려줌
 	/// 적은 꼭짓점 수. (붙임이 없으면 0)
 	//==============================================================================
-	pub fn compute_attachment_vertices(&self, slot_index: usize, output: &mut [f32], frame_width: f32, frame_height: f32) -> usize {
+	pub fn compute_attachment_vertices(&self, slot_index: usize, output: &mut [f64], frame_width: f64, frame_height: f64) -> usize {
 		let Some(attachment) = self.get_slot_attachment(slot_index) else {
 			return 0;
 		};
@@ -1340,9 +1345,9 @@ impl Skeleton2D {
 			Skeleton2DAttachment::Region(region_attachment) => {
 				let width = if region_attachment.get_width() > 0.0 { region_attachment.get_width() } else { frame_width };
 				let height = if region_attachment.get_height() > 0.0 { region_attachment.get_height() } else { frame_height };
-				let radian = region_attachment.get_rotation().to_radians();
-				let cosine = radian.cos();
-				let sine = radian.sin();
+				let radian = region_attachment.get_rotation() * DEGREE_TO_RADIAN;
+				let cosine = trigonometry::cos(radian);
+				let sine = trigonometry::sin(radian);
 				let local_a = cosine * region_attachment.get_scale_x();
 				let local_b = sine * region_attachment.get_scale_x();
 				let local_c = -sine * region_attachment.get_scale_y();
@@ -1377,8 +1382,8 @@ impl Skeleton2D {
 				let influence_values = mesh_attachment.get_influence_values();
 				let mut influence_index = 0usize;
 				for vertex_index in 0..vertex_count {
-					let mut world_x = 0.0f32;
-					let mut world_y = 0.0f32;
+					let mut world_x = 0.0f64;
+					let mut world_y = 0.0f64;
 					for _ in 0..influence_counts[vertex_index] {
 						let influence_bone = &self.bones[influence_bone_indices[influence_index]];
 						let bind_x = influence_values[influence_index * 3];
@@ -1404,12 +1409,12 @@ impl Skeleton2D {
 mod tests {
 	use super::*;
 
-	const TOLERANCE: f32 = 0.0005;
+	const TOLERANCE: f64 = 0.0005;
 
 	//==============================================================================
 	/// 기댓값과 견주기.
 	//==============================================================================
-	fn assert_near(label: &str, actual: f32, expected: f32) {
+	fn assert_near(label: &str, actual: f64, expected: f64) {
 		assert!((actual - expected).abs() <= TOLERANCE, "{}: {} (기댓값 {})", label, actual, expected);
 	}
 
@@ -1444,9 +1449,9 @@ mod tests {
 		assert_near("월드 sheared c", sheared.get_world_c(), -0.5);
 		assert_near("월드 sheared d", sheared.get_world_d(), 1.7320508);
 		let local = sheared.world_to_local(110.0, 80.0);
-		let back = sheared.local_to_world(local.x, local.y);
-		assert_near("월드 되돌림 x", back.x, 110.0);
-		assert_near("월드 되돌림 y", back.y, 80.0);
+		let back = sheared.local_to_world(local.x as f64, local.y as f64);
+		assert_near("월드 되돌림 x", back.x as f64, 110.0);
+		assert_near("월드 되돌림 y", back.y as f64, 80.0);
 	}
 
 	//==============================================================================
@@ -1454,7 +1459,7 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn ik_two_bone_and_one_bone() {
-		let create_arm = |is_bend_positive: bool, target_x: f32, target_y: f32| -> Skeleton2D {
+		let create_arm = |is_bend_positive: bool, target_x: f64, target_y: f64| -> Skeleton2D {
 			create_skeleton(serde_json::json!({
 				"bones": [
 					{ "name": "root" },
@@ -1469,8 +1474,8 @@ mod tests {
 		positive_skeleton.update_world_transform();
 		let lower = positive_skeleton.find_bone("lower").expect("lower");
 		let tip = lower.local_to_world(50.0, 0.0);
-		assert_near("IK 둘 끝 x", tip.x, 60.0);
-		assert_near("IK 둘 끝 y", tip.y, 40.0);
+		assert_near("IK 둘 끝 x", tip.x as f64, 60.0);
+		assert_near("IK 둘 끝 y", tip.y as f64, 40.0);
 		assert_near("IK 둘 팔꿈치 x", lower.get_world_x(), 49.2153785);
 		assert_near("IK 둘 팔꿈치 y", lower.get_world_y(), -8.8230677);
 		assert_near("IK 둘 걸린 회전", lower.get_applied_rotation(), 87.7075572);
@@ -1479,15 +1484,15 @@ mod tests {
 		negative_skeleton.update_world_transform();
 		let lower = negative_skeleton.find_bone("lower").expect("lower");
 		let tip = lower.local_to_world(50.0, 0.0);
-		assert_near("IK 반대 꺾임 끝 x", tip.x, 60.0);
-		assert_near("IK 반대 꺾임 끝 y", tip.y, 40.0);
+		assert_near("IK 반대 꺾임 끝 x", tip.x as f64, 60.0);
+		assert_near("IK 반대 꺾임 끝 y", tip.y as f64, 40.0);
 		assert_near("IK 반대 꺾임 팔꿈치 x", lower.get_world_x(), 10.7846215);
 		assert_near("IK 반대 꺾임 팔꿈치 y", lower.get_world_y(), 48.8230677);
 		let mut far_skeleton = create_arm(true, 0.0, 300.0);
 		far_skeleton.update_world_transform();
 		let tip = far_skeleton.find_bone("lower").expect("lower").local_to_world(50.0, 0.0);
-		assert_near("IK 닿지 않음 x", tip.x, 0.0);
-		assert_near("IK 닿지 않음 y", tip.y, 100.0);
+		assert_near("IK 닿지 않음 x", tip.x as f64, 0.0);
+		assert_near("IK 닿지 않음 y", tip.y as f64, 100.0);
 		let mut aim_skeleton = create_skeleton(serde_json::json!({
 			"bones": [{ "name": "root", "rotation": 30 }, { "name": "arm", "parent": "root", "length": 10 }, { "name": "target", "parent": "root", "x": 0, "y": 10 }],
 			"ik": [{ "name": "aim", "bones": ["arm"], "target": "target", "mix": 0.5 }]
@@ -1519,7 +1524,7 @@ mod tests {
 		}));
 		skeleton.find_bone_mut("boneB").expect("boneB").set_rotation(90.0);
 		skeleton.update_world_transform();
-		let mut positions = [0.0f32; 6];
+		let mut positions = [0.0f64; 6];
 		assert_eq!(skeleton.compute_attachment_vertices(0, &mut positions, 0.0, 0.0), 3);
 		assert_near("스킨 0 x", positions[0], 0.0);
 		assert_near("스킨 1 x", positions[2], 95.0);
@@ -1532,7 +1537,7 @@ mod tests {
 			"skins": [{ "name": "default", "attachments": { "head": { "face": { "type": "region", "x": 5, "width": 20, "height": 10, "pivotX": 0, "pivotY": 0.5 } } } }]
 		}));
 		region_skeleton.update_world_transform();
-		let mut region_positions = [0.0f32; 8];
+		let mut region_positions = [0.0f64; 8];
 		region_skeleton.compute_attachment_vertices(0, &mut region_positions, 0.0, 0.0);
 		assert_near("네모 왼쪽 위 x", region_positions[0], 15.0);
 		assert_near("네모 왼쪽 위 y", region_positions[1], 5.0);
