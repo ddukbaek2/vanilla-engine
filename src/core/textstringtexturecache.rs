@@ -1236,7 +1236,7 @@ impl TextStringTextureCache {
 			}
 			match load_system_font_face(&mut state.shared_bytes_table, &source, font_description.font_weight, font_description.is_italic) {
 				Ok(mut registered_font_face) => {
-					registered_font_face.descriptors.source_key = read_fallback_source_key(&source);
+					registered_font_face.descriptors.source_key = read_fallback_source_key(&source, &registered_font_face);
 					registered_font_face.descriptors.is_system_fallback = true;
 					// 같은 바탕에서 이미 읽은 같은 얼굴이면 그 얼굴의 글자 범위에 더한다.
 					let loaded_position = state.fallback_face_list.iter().zip(state.fallback_base_key_list.iter()).position(|(face, base_key)| {
@@ -2614,10 +2614,22 @@ struct FallbackBaseInfo {
 }
 
 //==============================================================================
-/// 운영체제 대체 글꼴을 한 이름으로 묶는 열쇠. (파일 경로, 같은 파일의 굵기 얼굴들이 함께 고른다)
+/// 운영체제 대체 글꼴을 한 이름으로 묶는 열쇠. (글꼴 이름 표의 무리 이름, 없으면 파일 경로. 같은 무리의 굵기 얼굴들이 함께 고른다)
+/// - 윈도우 Tahoma(tahoma.ttf, tahomabd.ttf)나 리눅스 DejaVu Sans 처럼 굵기마다 파일이 다른 글꼴도 한 무리로 묶어, 굵게를 청하면 굵은 얼굴을 고른다.
 //==============================================================================
-fn read_fallback_source_key(source: &FontFileSource) -> String {
-	source.path.to_string_lossy().into_owned()
+fn read_fallback_source_key(source: &FontFileSource, registered_font_face: &RegisteredFontFace) -> String {
+	let family_name = rustybuzz::ttf_parser::Face::parse(registered_font_face.font.get_font_bytes(), registered_font_face.font.get_face_index()).ok().and_then(|face| {
+		let read_name = |name_id: u16| face.names().into_iter().filter(|name| name.name_id == name_id).find_map(|name| name.to_string());
+		read_name(rustybuzz::ttf_parser::name_id::TYPOGRAPHIC_FAMILY).or_else(|| read_name(rustybuzz::ttf_parser::name_id::FAMILY))
+	});
+	match family_name {
+		Some(family_name) => {
+			format!("family:{}", family_name.to_lowercase())
+		}
+		None => {
+			source.path.to_string_lossy().into_owned()
+		}
+	}
 }
 
 //==============================================================================
