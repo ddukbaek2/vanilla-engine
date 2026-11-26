@@ -15,6 +15,7 @@ use crate::base::rect::Rect;
 use crate::base::vector2::Vector2;
 use crate::core::graphic::BlendMode;
 use crate::core::image::Image;
+use crate::misc::localstorage::parse_number;
 use crate::experimental::tilemap::tilemap::{Tilemap, TilemapOrientation, TilemapRenderOrder, TilemapStaggerAxis, TilemapStaggerIndex};
 use crate::experimental::tilemap::tilemaplayer::TilemapLayer;
 use crate::experimental::tilemap::tileset::{TileAnimationFrame, TileCollisionShape, TileCollisionShapeKind, TileFillMode, TileRenderSize, Tileset};
@@ -200,6 +201,24 @@ struct GroupState {
 	opacity: f32,
 	is_visible: bool,
 	color: Color,
+}
+
+//==============================================================================
+// 층 자료의 타일 값 읽기. (0 ~ 2^32 - 1 의 정수만, 아니면 0. 원본 readTileValue 와 같은 규칙)
+///
+/// # 인자
+/// - `value`: 읽은 수. (원본 JSON 수나 Number(text), 수가 아니면 NaN)
+///
+/// # 돌려줌
+/// 타일 값.
+//==============================================================================
+fn read_tile_value(value: f64) -> u32 {
+	if value.is_finite() && value.fract() == 0.0 && (0.0..=f64::from(u32::MAX)).contains(&value) {
+		value as u32
+	}
+	else {
+		0
+	}
 }
 
 //==============================================================================
@@ -594,7 +613,7 @@ impl TiledMapReader {
 		let mut tile_list = vec![0u32; tile_count];
 		if let Some(value_list) = data.as_array() {
 			for (tile_index, value) in value_list.iter().take(tile_count).enumerate() {
-				tile_list[tile_index] = value.as_f64().map(|number| number as u32).unwrap_or(0);
+				tile_list[tile_index] = read_tile_value(value.as_f64().unwrap_or(f64::NAN));
 			}
 			return Ok(tile_list);
 		}
@@ -615,7 +634,7 @@ impl TiledMapReader {
 			return Ok(tile_list);
 		}
 		for (tile_index, value_text) in data_text.split(',').take(tile_count).enumerate() {
-			tile_list[tile_index] = value_text.trim().parse::<f64>().map(|number| number as u32).unwrap_or(0);
+			tile_list[tile_index] = read_tile_value(parse_number(value_text));
 		}
 		Ok(tile_list)
 	}
@@ -663,8 +682,8 @@ impl TiledMapReader {
 			Ok(_) => {
 				Ok(decompressed_bytes)
 			}
-			Err(error) => {
-				Err(format!("TiledMapReader: cannot decompress {} ({})", compression, error))
+			Err(_) => {
+				Err(format!("TiledMapReader: cannot decompress {}", compression))
 			}
 		}
 	}
@@ -843,16 +862,10 @@ mod tests {
 	use std::path::PathBuf;
 
 	//==============================================================================
-	/// 예제 자산 폴더. (원본 저장소의 examples/tilemapshowcase/assets, 없으면 None 으로 시험을 건너뛴다)
+	/// 예제 자산 폴더. (tests/assets/tilemap, 원본 저장소 examples/tilemapshowcase/assets 의 지도와 타일셋 JSON 사본, 원본을 고치면 같이 옮긴다)
 	//==============================================================================
-	fn find_asset_directory() -> Option<PathBuf> {
-		let asset_directory_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../vanilla.js/examples/tilemapshowcase/assets");
-		if asset_directory_path.is_dir() {
-			Some(asset_directory_path)
-		}
-		else {
-			None
-		}
+	fn find_asset_directory() -> PathBuf {
+		PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/assets/tilemap")
 	}
 
 	//==============================================================================
@@ -868,15 +881,7 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn read_example_maps() {
-		let asset_directory_path = match find_asset_directory() {
-			Some(asset_directory_path) => {
-				asset_directory_path
-			}
-			None => {
-				eprintln!("tilemap: vanilla.js 저장소가 옆에 없어 예제 지도 시험을 건너뛴다");
-				return;
-			}
-		};
+		let asset_directory_path = find_asset_directory();
 		let read_tileset = |tileset_path: &str| -> Option<Value> {
 			let file_name = tileset_path.rsplit('/').next().unwrap_or(tileset_path);
 			Some(read_asset_json(&asset_directory_path, file_name))
@@ -983,5 +988,31 @@ mod tests {
 		assert_eq!(TiledMapReader::resolve_path("", "./a.tsj"), "a.tsj");
 		assert_eq!(TiledMapReader::resolve_path("a/b.tmj", "/abs/c.png"), "/abs/c.png");
 		assert_eq!(TiledMapReader::resolve_path("a/b.tmj", "../../c.png"), "../c.png");
+	}
+
+	//==============================================================================
+	/// 층 자료 수 읽기, 섞기 이름, 오류 글, 덩이 크기가 원본과 같다. (원본 tests/experimental/tilemap.test.mjs 와 같은 값)
+	//==============================================================================
+	#[test]
+	fn layer_values_blend_and_errors_match_original() {
+		let array_tiles = TiledMapReader::read_layer_data(&serde_json::json!([1.5, -1, 4294967296u64, "5", 7, 4294967295u64]), "csv", "", 7).expect("array");
+		assert_eq!(array_tiles, vec![0, 0, 0, 0, 7, 4294967295, 0]);
+		let text_tiles = TiledMapReader::read_layer_data(&Value::String(" 0x10 ,1e1,-3,2.5,abc,,\t9\n".to_string()), "csv", "", 7).expect("csv");
+		assert_eq!(text_tiles, vec![16, 10, 0, 0, 0, 0, 9]);
+		assert_eq!(TiledMapReader::decode_base64("@@@@"), Err("TiledMapReader: invalid base64".to_string()));
+		assert_eq!(TiledMapReader::decompress(&[1, 2, 3, 4], "zlib"), Err("TiledMapReader: cannot decompress zlib".to_string()));
+		let blend_map = serde_json::json!({ "orientation": "orthogonal", "width": 1, "height": 1, "tilewidth": 16, "tileheight": 16, "layers": [
+			{ "type": "tilelayer", "name": "a", "width": 1, "height": 1, "data": [0], "mode": "unknown-mode" },
+			{ "type": "tilelayer", "name": "b", "width": 1, "height": 1, "data": [0], "mode": "add" },
+			{ "type": "tilelayer", "name": "c", "width": 1, "height": 1, "data": [0], "mode": "multiply" },
+		], "tilesets": [] });
+		let mut blend_tilemap = Tilemap::new();
+		TiledMapReader::read_map(&blend_map, &mut blend_tilemap, "blend.tmj", None).expect("blend map");
+		let blend_name_list: Vec<&str> = (0..3).map(|layer_index| blend_tilemap.get_layer(layer_index).expect("layer").get_blend_mode().get_name()).collect();
+		assert_eq!(blend_name_list, vec!["source-over", "lighter", "multiply"]);
+		let mut chunk_tilemap = Tilemap::new();
+		assert_eq!(chunk_tilemap.create_layer("a").get_chunk_size(), 16);
+		assert_eq!(chunk_tilemap.create_layer_with_chunk_size("b", 8).get_chunk_size(), 8);
+		assert_eq!(chunk_tilemap.create_layer_with_chunk_size("c", 0).get_chunk_size(), 1);
 	}
 }
