@@ -250,7 +250,6 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
 | 차이 | 까닭 |
 | --- | --- |
 | 반사(UIDocument 의 반사 저장과 읽기, DevTools 인스펙터의 게터 목록)는 #[vanilla::reflect] 를 붙인 타입만 된다. 엔진 컴포넌트는 모두 붙였고, 게임 컴포넌트는 impl 블록과 impl Component 블록에 붙인다 (원본은 모든 객체). 빠뜨린 것은 알 수 있다: 한쪽만 붙이면 컴파일 에러가 붙일 곳을 알려 주고, 둘 다 빠뜨리면 UIDocument 가 쓸 때 경고를 내고 인스펙터가 "반사 없음" 줄을 보인다 | 러스트에는 실행 중에 필드와 메서드를 훑는 길이 없다. C++ 엔진(언리얼 UCLASS 와 UHT, Qt moc)처럼 컴파일 때 절차 매크로가 함수 목록과 부르는 코드를 짓는다 |
-| 데스크탑에서 뜻이 없는 set_no_cache | 데스크탑에는 브라우저 캐시가 없다 (파일을 늘 그 자리에서 읽는다) |
 | 웨이랜드에서 xdg_toplevel 의 suspended 상태는 받지 못한다. 가려짐(페이지 이벤트 Hidden)은 크롬의 다른 갈래인 프레임 콜백 3 초 규칙으로만 본다 | xdg_toplevel 은 winit(sctk)이 리스너를 달아 쥐고 있고 libwayland 는 프록시 하나에 리스너 하나만 단다. winit 0.30.13 은 configure 의 suspended 를 받아 두기만 하고 알리지 않는다 (0.31 베타 4 와 본줄기도 같다). suspended 를 보내면서 프레임 콜백도 계속 보내는 컴포지터에서만 크롬과 달라진다 |
 | DevTools 메모리 칸은 자바스크립트 힙 대신 시스템 할당자의 힙이고, jsHeapSizeLimit 는 (N/A) 다 | 데스크탑에는 V8 힙이 없다. 시스템 할당자에는 V8 처럼 정한 힙 상한이 없다 |
 | 윈도우와 리눅스 데스크탑의 글자 래스터 픽셀이 크롬과 다르다 (글자 너비는 크롬 measureText 와 맞췄다. 맥은 같은 장면의 글자 픽셀이 크롬과 같다) | 맥은 크롬처럼 CoreText 로 스키아 SkScalerContext_Mac 과 같은 설정으로 칠한다. 윈도우(크롬은 DirectWrite)와 리눅스(크롬은 FreeType)는 아직 fontdue 와 skrifa 가 칠하고 서브픽셀 자리와 감마 전보정이 없다. 같은 길(SkScalerContext_DW, SkScalerContext_FreeType 의 설정)로 옮길 일이 남았다 |
@@ -269,6 +268,7 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
 - auto_resize_on_window_resize: 데스크탑 창은 캔버스가 창을 가득 채운 페이지(캔버스 CSS 100%)와 같다고 본다. 켜면 원본처럼 visualViewport(창에서 화면 키보드가 가린 아래를 뺀 것)에 맞추고 캔버스 비 상한을 건다. 끄면 원본처럼 페이지가 정한 캔버스 크기(창 크기)를 쓰고 화면 키보드에 줄지 않으며 캔버스 비 상한도 걸지 않는다.
 - set_prevented_keys 와 오른쪽 클릭 메뉴 막기: 크롬에서 막는 것은 브라우저 기본 동작(Tab 의 포커스 옮기기, Space 와 화살표의 스크롤, F5 새로 고침, 브라우저 문맥 메뉴)이다. 데스크탑 창에는 그런 기본 동작이 없어 막은 것과 결과가 같다. (winit 은 윈도우에서 메뉴가 없는 창의 WM_SYSKEYUP 을 DefWindowProc 에 넘기지 않아 Alt, F10 이 시스템 메뉴로 들어가지도 않는다)
 - 브라우저 이름: 원본은 Platform 의 브라우저 이름을 개발자 도구와 통계 글에 보이기만 한다. 데스크탑 판은 크롬 위의 원본과 같은 결과를 내도록 맞췄으므로 브라우저는 Chrome 이고, 게임 코드의 브라우저 분기도 크롬 갈래로 간다.
+- set_no_cache: 원본 TextAsset.setNoCache 는 fetch 에 cache: "no-cache" 를 붙인다. Fetch 명세의 no-cache 는 HTTP 캐시에 응답이 있으면 조건부 요청으로 서버에 다시 확인하고 없으면 보통 요청이라, 받는 것은 늘 서버의 지금 내용이다. 데스크탑은 애셋을 읽을 때마다 엔진 캐시 없이 파일에서 새로 읽고(platform/desktop.rs request_asset_bytes, std::fs::read) 네트워크 읽기는 없어, 켜든 끄든 늘 지금 파일 내용이다. 켠 결과가 두 엔진에서 같다. 웹(러스트 wasm)은 원본처럼 fetch 에 붙인다.
 
 **일부러 정한 꼴**
 

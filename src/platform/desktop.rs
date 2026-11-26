@@ -519,12 +519,12 @@ pub fn set_title(platform_window: Option<&PlatformWindow>, title: &str) {
 }
 
 //==============================================================================
-/// 애셋 바이트 읽기. (파일을 그 자리에서 읽고 끝낸다, 파일에는 캐시가 없어 is_no_cache 는 쓰지 않는다. 읽은 파일은 리소스 사용량에 적는다)
+/// 애셋 바이트 읽기. (파일을 그 자리에서 읽고 끝낸다. 엔진 캐시 없이 늘 새로 읽어 is_no_cache 를 켠 웹 fetch 처럼 지금 내용이다. 읽은 파일은 리소스 사용량에 적는다)
 ///
 /// # 인자
 /// - `asset_location`: 읽을 파일 경로. (엔진이 애셋 경로로 만든 것)
 /// - `load_handle`: 다 읽으면 바이트나 오류 글로 끝낼 손잡이.
-/// - `_is_no_cache`: 캐시를 거르지 않고 읽을지. (데스크탑은 쓰지 않는다)
+/// - `_is_no_cache`: 캐시를 거르지 않고 읽을지. (데스크탑은 늘 거르지 않아 보지 않아도 같다)
 //==============================================================================
 pub fn request_asset_bytes(asset_location: String, load_handle: AssetLoadHandle, _is_no_cache: bool) {
 	let result = std::fs::read(&asset_location).map_err(|error| format!("애셋 읽기 실패 ({}): {}", asset_location, error));
