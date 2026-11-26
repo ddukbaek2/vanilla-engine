@@ -8,11 +8,13 @@
 // - TOON_STYLE_SCALE 에 0.25 ~ 1 을 주면 선의 판을 그 몫으로 줄여 그린다. (원본 ?scale=)
 // - TOON_STYLE_TOGGLES=1 이면 바닥은 선 없이 가리기만, 결정 덩이는 꺾임 선 없이 그린다. (원본 ?toggles=1)
 // - TOON_STYLE_SHELL=1 이면 화면 공간 바깥선 대신 껍데기 바깥선(거리 배를 건 inverted hull, 모형마다 색과 굵기 배)으로 그린다. (원본 ?shell=1)
+// - TOON_STYLE_ROLL 에 라디안을 주면 카메라를 그만큼 기울인다. 천사 고리는 머리에 붙어 있다. (원본 ?roll=)
+// - 빛 세기 막기(유니티 툰 셰이더의 Limit Light Intensity)는 기본대로 켠다.
 // - 실행: cargo run --example toonstyle (화면 견주기는 VANILLA_CAPTURE_PATH 로 숨긴 창에서 찍는다)
 //==============================================================================
 use glow::HasContext;
 use vanilla::{
-	create_box_geometry, create_faceted_chunk_geometry, create_octahedron_geometry, create_sphere_geometry, create_torus_geometry, Camera3D, Engine, EngineConfiguration, Graphic, Matrix4, MeshBuilder, Scene, SceneBase, ShadowAtlas, ShadowMap, ToonDrawOptions, ToonDrawQueue, ToonGeometry, ToonMatcapBlend, ToonMesh, ToonPartOptions, ToonPointLight,
+	create_box_geometry, create_faceted_chunk_geometry, create_octahedron_geometry, create_sphere_geometry, create_torus_geometry, Camera3D, Engine, EngineConfiguration, Graphic, Matrix4, MeshBuilder, Scene, SceneBase, ShadowAtlas, ShadowMap, ToonDrawOptions, DEFAULT_SHADOW_ATLAS_RESOLUTION, DEFAULT_SHADOW_ATLAS_TILE_RESOLUTION, ToonDrawQueue, ToonGeometry, ToonMatcapBlend, ToonMesh, ToonPartOptions, ToonPointLight,
 	ToonRenderer, ToonScreenOutline, ToonShade, ToonTextureOptions, Vector2, Vector3,
 };
 
@@ -143,7 +145,7 @@ impl StyleResources {
 		]);
 		renderer.set_outline_distance_scale(8.0, 0.5, 3.0);
 		renderer.set_outline_fade_distance(9.0, 16.0);
-		let mut shadow_atlas = ShadowAtlas::new(gl, 2048)?;
+		let mut shadow_atlas = ShadowAtlas::new(gl, DEFAULT_SHADOW_ATLAS_RESOLUTION, DEFAULT_SHADOW_ATLAS_TILE_RESOLUTION)?;
 		shadow_atlas.update_lights(&renderer.get_light_set().read_shadow_light_sources());
 		renderer.set_local_shadows(Some(&shadow_atlas), 1.0);
 		let angel_ring_texture = renderer.create_texture(gl, 64, 64, &create_angel_ring_pixels(), ToonTextureOptions { is_mipmapped: false, is_repeated: false, ..ToonTextureOptions::default() })?;
@@ -223,7 +225,7 @@ impl ToonStyleScene {
 	fn new() -> ToonStyleScene {
 		let mut camera = Camera3D::new();
 		camera.set_perspective(0.7, 0.1, 100.0);
-		camera.look_at(Vector3::create(0.0, 3.4, 7.8), Vector3::create(0.0, 0.55, 0.3), Vector3::create(0.0, 1.0, 0.0));
+		camera.look_at(Vector3::create(0.0, 3.4, 7.8), Vector3::create(0.0, 0.55, 0.3), create_rolled_up([0.0, 3.4, 7.8], [0.0, 0.55, 0.3], read_environment_number("TOON_STYLE_ROLL", 0.0)));
 		ToonStyleScene { scene_base: SceneBase::new(), resources: None, camera, line_scale: read_line_scale(), is_toggled: read_environment_flag("TOON_STYLE_TOGGLES"), is_shell: read_environment_flag("TOON_STYLE_SHELL") }
 	}
 }
@@ -231,14 +233,37 @@ impl ToonStyleScene {
 //==============================================================================
 // 선의 판 몫. (데스크탑은 TOON_STYLE_SCALE, 웹은 1)
 //==============================================================================
-#[cfg(not(target_arch = "wasm32"))]
 fn read_line_scale() -> f32 {
-	std::env::var("TOON_STYLE_SCALE").ok().and_then(|text| text.parse::<f32>().ok()).unwrap_or(1.0)
+	read_environment_number("TOON_STYLE_SCALE", 1.0)
+}
+
+//==============================================================================
+// 환경 변수의 수. (데스크탑만, 없거나 웹이면 기본값)
+//==============================================================================
+#[cfg(not(target_arch = "wasm32"))]
+fn read_environment_number(name: &str, default_value: f32) -> f32 {
+	std::env::var(name).ok().and_then(|text| text.parse::<f32>().ok()).unwrap_or(default_value)
 }
 
 #[cfg(target_arch = "wasm32")]
-fn read_line_scale() -> f32 {
-	1.0
+fn read_environment_number(_name: &str, default_value: f32) -> f32 {
+	default_value
+}
+
+//==============================================================================
+// 기울인 카메라의 위쪽. (보는 쪽 둘레로 위쪽을 roll 만큼 돌린다, 오른쪽이 위로 들린다, 원본 createRolledUp)
+//==============================================================================
+fn create_rolled_up(eye: [f32; 3], target: [f32; 3], roll: f32) -> Vector3 {
+	let forward = [target[0] - eye[0], target[1] - eye[1], target[2] - eye[2]];
+	let forward_length = (forward[0] * forward[0] + forward[1] * forward[1] + forward[2] * forward[2]).sqrt();
+	let front = [forward[0] / forward_length, forward[1] / forward_length, forward[2] / forward_length];
+	let right_raw = [-front[2], 0.0, front[0]];
+	let right_length = (right_raw[0] * right_raw[0] + right_raw[2] * right_raw[2]).sqrt();
+	let right = [right_raw[0] / right_length, right_raw[1] / right_length, right_raw[2] / right_length];
+	let up = [right[1] * front[2] - right[2] * front[1], right[2] * front[0] - right[0] * front[2], right[0] * front[1] - right[1] * front[0]];
+	let cosine = roll.cos();
+	let sine = roll.sin();
+	Vector3::create(up[0] * cosine - right[0] * sine, up[1] * cosine - right[1] * sine, up[2] * cosine - right[2] * sine)
 }
 
 //==============================================================================

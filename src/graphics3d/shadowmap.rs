@@ -5,6 +5,7 @@
 //! - 광원 행렬은 텍셀 단위로 스냅해 이동 시 그림자 가장자리 떨림을 줄인다. 빛이 거의 바로 위나 아래로 나아가면 위쪽을 z 축으로 잡아 행렬이 깨지지 않게 한다.
 //! - 지을 때 앞의 텍스처와 프레임버퍼 묶음을 돌린다. (모형을 지은 뒤에 지어도 깊이 텍스처가 텍스처 유닛에 남아 그리기가 INVALID_OPERATION 이 되지 않게)
 //! - ShadowAtlas: 점광과 스포트라이트의 그림자를 깊이 텍스처 한 장에 칸으로 나눠 담는다. (원본 ShadowAtlas, 유니티 URP 의 추가 빛 그림자 아틀라스 꼴)
+//!   칸 크기는 URP 기본과 같이 정한다. 칸마다 tile_resolution 을 바라고, 아틀라스에 다 들어가지 않으면 다 들어갈 때까지 칸 한 변을 반씩 줄인다. (점광 하나면 512, 스포트라이트 하나면 1024)
 //!   툰 셰이더는 받는 자리를 노멀 쪽으로 그 거리의 칸 텍셀 (1 + 3 x (1 - dot(N, L))) 개만큼 밀어 견준다. (빛에 비스듬한 면일수록 크게, 그림자 여드름을 막는다)
 //! - 텍셀 스냅의 반올림은 원본 Math.round 와 같이 0.5 를 위로 올린다. (러스트 round 는 0 에서 먼 쪽이라 음수에서 다르다)
 //! - 원본 해상도 기본값 인자 2048 은 DEFAULT_SHADOWMAP_RESOLUTION 으로 둔다. (러스트에 기본값 인자가 없다)
@@ -20,6 +21,12 @@ use glow::HasContext;
 //==============================================================================
 /// 해상도 기본값. (원본 생성자 기본 인자)
 pub const DEFAULT_SHADOWMAP_RESOLUTION: i32 = 2048;
+
+/// 그림자 아틀라스 한 변의 기본값. (원본 ShadowAtlas 의 기본값 인자, 유니티 URP 의 추가 빛 그림자 아틀라스 기본 2048)
+pub const DEFAULT_SHADOW_ATLAS_RESOLUTION: i32 = 2048;
+
+/// 그림자 아틀라스 칸마다 바라는 한 변의 기본값. (원본 ShadowAtlas 의 기본값 인자, 유니티 URP 의 추가 빛 그림자 해상도 단계 High 기본 1024, 빛의 기본 단계가 High)
+pub const DEFAULT_SHADOW_ATLAS_TILE_RESOLUTION: i32 = 1024;
 
 /// 그림자 아틀라스가 받는 점광과 스포트라이트 수의 상한. (셰이더의 유니폼 배열 크기)
 pub const SHADOW_ATLAS_MAXIMUM_LIGHTS: usize = 4;
@@ -261,6 +268,8 @@ pub struct ShadowAtlas {
 	framebuffer: GlFramebuffer,
 	depth_texture: GlTexture,
 	resolution: i32,
+	/// 칸마다 바라는 한 변. (픽셀)
+	tile_resolution: i32,
 	grid_size: i32,
 	tile_size: i32,
 	light_list: Vec<ShadowAtlasLight>,
@@ -271,9 +280,10 @@ impl ShadowAtlas {
 	//==============================================================================
 	/// 생성. (깊이 텍스처와 컬러 없는 프레임버퍼, 앞의 묶음은 돌린다)
 	//==============================================================================
-	pub fn new(gl: &glow::Context, resolution: i32) -> Result<ShadowAtlas, String> {
+	/// - resolution 은 아틀라스 한 변, tile_resolution 은 칸마다 바라는 한 변이다. (원본 기본값은 DEFAULT_SHADOW_ATLAS_RESOLUTION, DEFAULT_SHADOW_ATLAS_TILE_RESOLUTION)
+	pub fn new(gl: &glow::Context, resolution: i32, tile_resolution: i32) -> Result<ShadowAtlas, String> {
 		let (framebuffer, depth_texture) = create_depth_target(gl, resolution)?;
-		Ok(ShadowAtlas { framebuffer, depth_texture, resolution, grid_size: 1, tile_size: resolution, light_list: Vec::new(), tile_list: Vec::new() })
+		Ok(ShadowAtlas { framebuffer, depth_texture, resolution, tile_resolution: tile_resolution.min(resolution).max(1), grid_size: 1, tile_size: resolution, light_list: Vec::new(), tile_list: Vec::new() })
 	}
 
 	//==============================================================================
@@ -305,8 +315,8 @@ impl ShadowAtlas {
 			}
 			self.light_list.push(light);
 		}
-		self.grid_size = ((tile_count as f32).sqrt().ceil() as i32).max(1);
-		self.tile_size = self.resolution / self.grid_size;
+		self.tile_size = read_shadow_atlas_tile_size(self.resolution, self.tile_resolution, tile_count);
+		self.grid_size = (self.resolution / self.tile_size).max(1);
 		self.tile_list.clear();
 		for light_position in 0..self.light_list.len() {
 			let light = self.light_list[light_position];
@@ -361,6 +371,13 @@ impl ShadowAtlas {
 	//==============================================================================
 	pub fn get_lights(&self) -> &[ShadowAtlasLight] {
 		&self.light_list
+	}
+
+	//==============================================================================
+	/// 칸마다 바라는 한 변 반환. (픽셀, 생성 때 준 값)
+	//==============================================================================
+	pub fn get_tile_resolution(&self) -> i32 {
+		self.tile_resolution
 	}
 
 	//==============================================================================
@@ -424,6 +441,17 @@ impl ShadowAtlas {
 }
 
 //==============================================================================
+/// 아틀라스 칸 한 변 읽기. (칸마다 바라는 한 변에서 시작해, 칸이 다 들어가지 않으면 다 들어갈 때까지 반씩 줄인다, 유니티 URP 의 shadowSlicesScaleFactor 를 두 배씩)
+//==============================================================================
+fn read_shadow_atlas_tile_size(resolution: i32, tile_resolution: i32, tile_count: usize) -> i32 {
+	let mut tile_size = tile_resolution.min(resolution).max(1);
+	while tile_size > 1 && tile_count as i32 > (resolution / tile_size) * (resolution / tile_size) {
+		tile_size /= 2;
+	}
+	tile_size
+}
+
+//==============================================================================
 /// 광원 보기의 위쪽 읽기. (빛이 거의 바로 위나 아래로 나아가면 위쪽이 빛과 나란해 보기 행렬이 깨지므로 z 축)
 //==============================================================================
 fn read_light_up_direction(normalized_direction: Vector3) -> Vector3 {
@@ -444,13 +472,16 @@ mod tests {
 	use super::*;
 
 	//==============================================================================
-	/// 아틀라스 칸 수와 큐브 면 보기. (칸 7 개면 3 x 3, 보기 행렬이 앞쪽을 -z 로)
+	/// 아틀라스 칸 한 변과 큐브 면 보기. (URP 기본처럼 1024 에서 반씩, 칸 7 개면 512, 보기 행렬이 앞쪽을 -z 로)
 	//==============================================================================
 	#[test]
 	fn shadow_atlas_tiles_cover_lights() {
-		let tile = |tile_count: usize| ((tile_count as f32).sqrt().ceil() as i32).max(1);
-		assert_eq!(tile(7), 3);
-		assert_eq!(tile(1), 1);
+		assert_eq!(read_shadow_atlas_tile_size(2048, 1024, 1), 1024);
+		assert_eq!(read_shadow_atlas_tile_size(2048, 1024, 4), 1024);
+		assert_eq!(read_shadow_atlas_tile_size(2048, 1024, 6), 512);
+		assert_eq!(read_shadow_atlas_tile_size(2048, 1024, 7), 512);
+		assert_eq!(read_shadow_atlas_tile_size(2048, 1024, 24), 256);
+		assert_eq!(read_shadow_atlas_tile_size(1024, 4096, 1), 1024);
 		let view_matrix = create_basis_view_matrix([1.0, 2.0, 3.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
 		let point = view_matrix.transform_point(2.0, 2.0, 3.0);
 		assert!((point.z + 1.0).abs() < 0.0001);

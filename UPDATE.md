@@ -562,6 +562,10 @@
   - 텍스처 유닛: 점광 그림자 0, 천사 고리 7, 머티리얼 8 ~ 15. TOON_MAXIMUM_MATERIAL_TEXTURES 9 → 8. 유닛 0 은 begin_frame 이 적어 두고 end_frame 이 돌린다
 - ToonScreenOutline: 반 크기 판의 계단을 없앴다. 선의 판과 씨앗은 그리는 영역 해상도, 점프 플러딩만 줄인 판(모으기 패스로 씨앗을 모음), 씨앗 자리는 그리는 영역 화소 좌표. set_resolution_scale 은 넓히기 판의 몫이다. ToonLineTarget: seed_framebuffer, seed_texture, jump_flood_framebuffers, jump_flood_textures, jump_flood_index, jump_flood_width, jump_flood_height. read_program_sources 가 다섯을 준다
 - 예제 toonstyle: 점광과 스포트라이트 그림자, 그늘 쪽 림, 천사 고리, 껍데기 바깥선 사라지기와 카메라 쪽 밀기. 원본과 견주면 화소 차이 평균 0.005 (반 크기 판 0.008, 껍데기 0.163 은 MSAA 차이)
+- 천사 고리: 카메라 기울임만큼 UV 를 되돌려 돌린다. (vanilla.js 와 같은 셈, read_camera_roll) 카메라를 기울여도 고리가 머리에 붙어 있다
+- 빛 세기 막기: ToonLightSet::set_light_intensity_limited, is_light_intensity_limited (렌더러에도 set_light_intensity_limited). 유니티 툰 셰이더의 Limit Light Intensity 와 같은 셈, 기본 켬. 지금까지 모습은 set_light_intensity_limited(false). 빛 색 쓰기를 끈 색의 세기와 껍데기 바깥선의 해 색도 유니티 툰 셰이더와 같게
+- ShadowAtlas::new(gl, 해상도, 칸 해상도): 칸 크기를 유니티 URP 기본과 같게 칸마다 1024 를 바라고 다 들어가지 않으면 반씩 줄인다. DEFAULT_SHADOW_ATLAS_RESOLUTION (2048), DEFAULT_SHADOW_ATLAS_TILE_RESOLUTION (1024), get_tile_resolution. (new 에 인자가 하나 늘었다)
+- 예제 toonstyle: TOON_STYLE_ROLL 로 카메라를 기울인다. 원본과 견주면 화소 차이 평균 0.005 (기울인 장면 0.005)
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.
