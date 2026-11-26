@@ -5098,7 +5098,7 @@ mod tests {
 		let field = get_field(&mut node_tree, field_id);
 		let line_height = field.get_line_height();
 		let maximum_scroll_top = (line_height * 5.0 + 8.0 - 60.0).max(0.0);
-		assert!((field.get_scroll_top() - maximum_scroll_top).abs() < 0.01);
+		assert!((field.get_scroll_top() - maximum_scroll_top).abs() < 0.01, "스크롤 {} / 끝 {} (줄 높이 {})", field.get_scroll_top(), maximum_scroll_top, line_height);
 	}
 
 	//==============================================================================

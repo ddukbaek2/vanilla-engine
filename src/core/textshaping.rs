@@ -658,6 +658,21 @@ impl LoadedFont {
 	}
 
 	//==============================================================================
+	/// 비트맵 그림만 있는 색 글꼴인지. (CBDT 나 sbix 가 있고 윤곽 표(glyf, CFF, CFF2)가 없는 글꼴, 맥 CoreText 로 그리는 글꼴은 아니다)
+	/// - 크롬 리눅스(FreeType 과 스키아)처럼 전진폭과 픽셀 상자를 판의 글리프 수치와 그림 상자로 셈한다. (colorglyph::read_bitmap_glyph_advance, read_bitmap_glyph_bounds)
+	///
+	/// # 돌려줌
+	/// 비트맵만 있으면 true.
+	//==============================================================================
+	pub fn is_bitmap_only_font(&self) -> bool {
+		if self.is_core_text_raster {
+			return false;
+		}
+		let tables = self.get_shaping_face().tables();
+		(tables.cbdt.is_some() || tables.sbix.is_some()) && tables.glyf.is_none() && tables.cff.is_none() && tables.cff2.is_none()
+	}
+
+	//==============================================================================
 	/// 전진폭을 정수 픽셀로 반올림하는지. (맥 색 이모지, 크롬 measureText 가 13px 에서 16, 17px 에서 21 처럼 정수를 준다)
 	///
 	/// # 돌려줌
@@ -703,11 +718,58 @@ impl LoadedFont {
 	/// 줄 높이. (px, 정수)
 	//==============================================================================
 	pub fn calculate_normal_line_height(&self, pixel_size: f32) -> f32 {
-		let shaping_face = self.get_shaping_face();
 		let scale = pixel_size / self.units_per_em.max(1.0);
+		let (ascender, descender, line_gap) = self.read_vertical_metric_units();
+		let mut ascent = (ascender * scale).round();
+		let descent = (-descender * scale).round();
+		let line_gap = (line_gap * scale).round();
+		if self.is_ascent_adjusted_family() {
+			ascent += ((ascent + descent) * 0.15 + 0.5).floor();
+		}
+		ascent + descent + line_gap
+	}
+
+	//==============================================================================
+	/// 캔버스의 글꼴 위아래 길이. (크롬 FontMetrics::AscentDescentWithHacks 에 캔버스가 켜는 subpixel_ascent_descent 를 준 값, TextMetrics 의 fontBoundingBoxAscent, fontBoundingBoxDescent)
+	/// - 운영체제마다 읽는 표는 calculate_normal_line_height 와 같다.
+	/// - 위아래 길이를 각각 반올림한다. 위가 3px 보다 작거나 위 + 아래가 2px 보다 작은 작은 글꼴은 반올림하지 않는다. (crbug.com/338908, 글자 기준선 종류마다 기준선이 같아지지 않게)
+	/// - 맥은 Times, Helvetica, Courier 의 위 길이에 (위 + 아래) 의 15% 를 반올림해 더한다.
+	/// - 리눅스의 VDMX 표와 서브픽셀 자리의 아래 길이 빌리기는 FreeType 바이트코드 힌팅(full, normal)과 서브픽셀 자리를 켰을 때만이라, 크롬 리눅스 기본(slight 힌팅, 서브픽셀 자리 꺼짐)처럼 보지 않는다.
+	///
+	/// # 인자
+	/// - `pixel_size`: 글자 크기. (px)
+	///
+	/// # 돌려줌
+	/// (위 길이, 아래 길이). (px, 둘 다 양수, 글자 크기가 0 이면 둘 다 0)
+	//==============================================================================
+	pub fn calculate_font_bounding_box(&self, pixel_size: f32) -> (f32, f32) {
+		if pixel_size <= 0.0 {
+			return (0.0, 0.0);
+		}
+		let scale = pixel_size / self.units_per_em.max(1.0);
+		let (ascender, descender, _) = self.read_vertical_metric_units();
+		let raw_ascent = ascender * scale;
+		let raw_descent = -descender * scale;
+		let (mut ascent, descent) = if raw_ascent < 3.0 || raw_ascent + raw_descent < 2.0 {
+			(raw_ascent, raw_descent)
+		}
+		else {
+			(raw_ascent.round(), raw_descent.round())
+		};
+		if self.is_ascent_adjusted_family() {
+			ascent += ((ascent + descent) * 0.15 + 0.5).floor();
+		}
+		(ascent, descent)
+	}
+
+	//==============================================================================
+	/// 크롬이 Skia 에서 받는 글꼴 세로 수치. (글꼴 단위의 위, 아래(음수), 줄 사이. 운영체제마다 읽는 표는 calculate_normal_line_height 의 설명)
+	//==============================================================================
+	fn read_vertical_metric_units(&self) -> (f32, f32, f32) {
+		let shaping_face = self.get_shaping_face();
 		let font_tables = shaping_face.tables();
 		let horizontal_header = font_tables.hhea;
-		let (ascender, descender, line_gap) = if cfg!(target_os = "macos") && (horizontal_header.ascender != 0 || horizontal_header.descender != 0) {
+		if cfg!(target_os = "macos") && (horizontal_header.ascender != 0 || horizontal_header.descender != 0) {
 			(horizontal_header.ascender as f32, horizontal_header.descender as f32, horizontal_header.line_gap as f32)
 		}
 		else if cfg!(target_os = "windows") {
@@ -725,32 +787,32 @@ impl LoadedFont {
 		}
 		else {
 			(shaping_face.ascender() as f32, shaping_face.descender() as f32, shaping_face.line_gap() as f32)
-		};
-		let mut ascent = (ascender * scale).round();
-		let descent = (-descender * scale).round();
-		let line_gap = (line_gap * scale).round();
-		if cfg!(target_os = "macos") {
-			// 이름 표의 글꼴 모음 이름. (맥 글꼴은 맥 로먼 글자만 있기도 해 그 바이트를 그대로 견준다)
-			let is_adjusted_family = shaping_face.names().into_iter().any(|name| {
-				if name.name_id != rustybuzz::ttf_parser::name_id::FAMILY {
-					return false;
-				}
-				let family_name = if name.is_unicode() {
-					name.to_string()
-				}
-				else if name.platform_id == rustybuzz::ttf_parser::PlatformId::Macintosh && name.encoding_id == 0 {
-					String::from_utf8(name.name.to_vec()).ok()
-				}
-				else {
-					None
-				};
-				matches!(family_name.as_deref(), Some("Times") | Some("Helvetica") | Some("Courier"))
-			});
-			if is_adjusted_family {
-				ascent += ((ascent + descent) * 0.15 + 0.5).floor();
-			}
 		}
-		ascent + descent + line_gap
+	}
+
+	//==============================================================================
+	/// 맥 크롬이 위 길이를 고치는 글꼴인지. (이름 표의 글꼴 모음 이름이 Times, Helvetica, Courier, 맥이 아니면 늘 false)
+	//==============================================================================
+	fn is_ascent_adjusted_family(&self) -> bool {
+		if !cfg!(target_os = "macos") {
+			return false;
+		}
+		// 이름 표의 글꼴 모음 이름. (맥 글꼴은 맥 로먼 글자만 있기도 해 그 바이트를 그대로 견준다)
+		self.get_shaping_face().names().into_iter().any(|name| {
+			if name.name_id != rustybuzz::ttf_parser::name_id::FAMILY {
+				return false;
+			}
+			let family_name = if name.is_unicode() {
+				name.to_string()
+			}
+			else if name.platform_id == rustybuzz::ttf_parser::PlatformId::Macintosh && name.encoding_id == 0 {
+				String::from_utf8(name.name.to_vec()).ok()
+			}
+			else {
+				None
+			};
+			matches!(family_name.as_deref(), Some("Times") | Some("Helvetica") | Some("Courier"))
+		})
 	}
 
 	//==============================================================================
@@ -833,6 +895,9 @@ impl LoadedFont {
 					(0, 0, 0, 0)
 				}
 			};
+		}
+		if self.is_bitmap_only_font() {
+			return colorglyph::read_bitmap_glyph_bounds(self.get_shaping_face(), glyph_index, pixel_size).unwrap_or((0, 0, 0, 0));
 		}
 		let metrics = self.raster_font.metrics_indexed(glyph_index, pixel_size);
 		(metrics.xmin, metrics.ymin, metrics.width as i32, metrics.height as i32)
@@ -1732,6 +1797,7 @@ pub fn shape_text(face_list: &[ResolvedFontFace], text: &str, pixel_size: f32, d
 				let glyph_buffer = rustybuzz::shape(&sized_shaping_face, &[], unicode_buffer);
 				let scale = pixel_size / face.font.units_per_em * face.font.read_advance_scale(pixel_size);
 				let is_integer_advance = face.font.is_integer_advance();
+				let is_bitmap_only_font = face.font.is_bitmap_only_font();
 				// trak 자간. (글자 묶음의 첫 글리프에 더한다, HarfBuzz 의 foreach_grapheme 자리를 묶음 번호(cluster)가 바뀌는 글리프로 본다)
 				let tracking = face.font.read_horizontal_tracking(pixel_size) * scale;
 				let mut previous_cluster: Option<u32> = None;
@@ -1752,6 +1818,14 @@ pub fn shape_text(face_list: &[ResolvedFontFace], text: &str, pixel_size: f32, d
 					else {
 						glyph_position.x_advance as f32 * scale
 					};
+					// 비트맵만 있는 글꼴은 판의 글리프 수치 전진폭에 모양 짓기가 더한 몫(GPOS)을 얹는다. (크롬의 HarfBuzz 는 스키아가 준 전진폭에서 시작한다)
+					if is_bitmap_only_font {
+						let shaping_face = face.font.get_shaping_face();
+						let glyph_id = rustybuzz::ttf_parser::GlyphId(glyph_info.glyph_id as u16);
+						if let (Some(bitmap_advance), Some(font_advance)) = (colorglyph::read_bitmap_glyph_advance(shaping_face, glyph_id.0, pixel_size), shaping_face.glyph_hor_advance(glyph_id)) {
+							advance = bitmap_advance + (glyph_position.x_advance - font_advance as i32) as f32 * scale;
+						}
+					}
 					if previous_cluster != Some(glyph_info.cluster) {
 						advance += tracking;
 						previous_cluster = Some(glyph_info.cluster);

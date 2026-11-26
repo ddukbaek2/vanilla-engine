@@ -40,6 +40,17 @@ const fontList = [
 	"16px \"Liberation Sans\"",
 	"16px \"Noto Sans CJK KR\"",
 	"16px NoSuchFamily",
+	// 대체 글꼴 후보. (크롬이 아랍어, 태국어를 어느 글꼴로 그렸는지 폭으로 가려 본다)
+	"16px Tahoma",
+	"16px \"Leelawadee UI\"",
+	"16px \"Microsoft Sans Serif\"",
+	"16px \"Segoe UI Historic\"",
+	"16px Loma",
+	"16px Garuda",
+	"16px Norasi",
+	"16px Waree",
+	"16px \"Noto Sans Arabic\"",
+	"16px \"Noto Naskh Arabic\"",
 ];
 const textList = [
 	"Hello World Wifi",

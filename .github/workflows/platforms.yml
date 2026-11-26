@@ -1,6 +1,6 @@
 # 플랫폼 확인. (윈도우, 리눅스 X11 과 웨이랜드, 인텔 맥에서 시험을 돌리고 예제를 찍어 같은 기계의 크롬과 견준다)
 # - 시험: cargo test --workspace (doctest 포함), 데스크탑 플랫폼 시험(tests/desktopplatform.rs 의 #[ignore] 시험: 시스템 글꼴, 대체 글꼴, 색 이모지, 클립보드, 크롬 measureText 견주기)
-# - 그림: GPU 가 없는 기계라 메사 llvmpipe 소프트웨어 GL 로 그린다. (리눅스는 Xvfb 의 GLX 와 weston headless 의 EGL, 윈도우는 mesa-dist-win 의 WGL)
+# - 그림: GPU 가 없는 기계라 메사 llvmpipe 소프트웨어 GL 로 그린다. (리눅스는 Xvfb 의 GLX 와 weston headless 의 EGL, 윈도우는 mesa-dist-win 의 opengl32.dll 을 예제 옆에 둔 WGL)
 #   예제는 찍기 모드(VANILLA_CAPTURE_PATH)로 돌려 그림을 아티팩트로 올린다. (.github/scripts/captureexamples.cjs)
 # - 크롬 견주기: 원본 vanilla.js 를 옆에 받아 같은 장면의 예제 페이지를 헤드리스 크롬으로 찍어 화소 차이를 낸다. (.github/scripts/chromecompare.cjs)
 #   소리 해석, 믹서, 비프, PannerNode 의 크롬 기대값(tests/assets/*/chrome*.cjs)을 같은 기계의 크롬으로 다시 찍어 견준다. (x86 크롬)
@@ -75,16 +75,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends pkg-config libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev \
             libxkbcommon-x11-0 libx11-xcb1 libxcursor1 libxrandr2 libxi6 libgl1-mesa-dri libegl1 libegl-mesa0 libglx-mesa0 mesa-utils \
-            xvfb weston fontconfig fonts-dejavu-core fonts-liberation fonts-noto-cjk fonts-noto-color-emoji
+            xvfb weston gdb jq fontconfig fonts-dejavu-core fonts-liberation fonts-noto-cjk fonts-noto-color-emoji fonts-thai-tlwg
           fc-match sans-serif
           fc-match serif
           fc-match monospace
-
-      - name: 윈도우 소프트웨어 GL (mesa-dist-win 의 llvmpipe)
-        if: runner.os == 'Windows'
-        uses: ssciwr/setup-mesa-dist-win@v3
-        with:
-          version: '26.2.6'
 
       - name: 가상 소리 장치
         uses: LABSN/sound-ci-helpers@v1
@@ -113,9 +107,39 @@ jobs:
         timeout-minutes: 90
         run: cargo test --workspace --no-fail-fast 2>&1 | tee "$OUT/logs/${{ matrix.tag }}_test.log"
 
+      - name: 리눅스 라이브러리 시험이 죽으면 gdb 로 다시 돌려 죽은 스레드 보기
+        if: failure() && runner.os == 'Linux'
+        run: |
+          test_binary=$(cargo test --lib --no-run --message-format=json 2>/dev/null | jq -r 'select(.reason == "compiler-artifact" and .profile.test == true and (.target.kind | index("lib"))) | .executable' | head -n 1)
+          echo "시험 실행 파일: $test_binary"
+          for attempt in 1 2 3; do
+            gdb -q -batch -ex "set pagination off" -ex "handle SIGPIPE nostop noprint pass" -ex run -ex "info threads" -ex "bt 40" -ex "thread apply all bt 6" --args "$test_binary" > "$OUT/logs/linux_gdb_$attempt.log" 2>&1 || true
+            if grep -q "SIGSEGV\|SIGBUS\|SIGABRT" "$OUT/logs/linux_gdb_$attempt.log"; then
+              grep -n -A 80 "received signal" "$OUT/logs/linux_gdb_$attempt.log" | head -n 160
+              break
+            fi
+            echo "시도 $attempt: 죽지 않음"
+            tail -n 3 "$OUT/logs/linux_gdb_$attempt.log"
+          done
+
       - name: 예제 빌드
         if: success() || failure()
         run: cargo build --examples
+
+      - name: 윈도우 소프트웨어 GL (mesa-dist-win 의 llvmpipe 를 예제 실행 파일 옆에 둔다)
+        if: runner.os == 'Windows' && (success() || failure())
+        run: |
+          # 드라이버가 없는 윈도우의 opengl32.dll 은 GDI 의 GL 1.1 이라, 메사의 opengl32.dll 을 실행 파일 옆에 두어 먼저 읽게 한다. (mesa-dist-win 의 앱별 배치)
+          temporary_path=$(cygpath -m "$RUNNER_TEMP")
+          curl -sSfL -o "$temporary_path/mesa.7z" https://github.com/pal1000/mesa-dist-win/releases/download/26.2.6/mesa3d-26.2.6-release-msvc.7z
+          7z x -y -o"$temporary_path/mesa" "$temporary_path/mesa.7z" "x64/*" > /dev/null
+          ls "$temporary_path/mesa/x64"
+          for dll_name in opengl32.dll libgallium_wgl.dll libglapi.dll; do
+            if [ -f "$temporary_path/mesa/x64/$dll_name" ]; then
+              cp "$temporary_path/mesa/x64/$dll_name" target/debug/examples/
+            fi
+          done
+          echo "GALLIUM_DRIVER=llvmpipe" >> "$GITHUB_ENV"
 
       - name: 데스크탑 플랫폼 시험 (시스템 글꼴, 대체 글꼴, 클립보드, 크롬 measureText)
         if: success() || failure()
