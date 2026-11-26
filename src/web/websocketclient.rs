@@ -23,6 +23,7 @@
 //!     엔진의 tls 기능(기본으로 켜짐)일 때만이다. 끄면 데스크탑은 ws:// 만 열린다.
 //!   - 바이너리 메시지도 UTF-8 JSON 이면 받는다. (원본에도 넣었다)
 //==============================================================================
+use crate::misc::storagetext::{self, JsonSurrogateTable};
 use ewebsock::{WsEvent, WsMessage, WsReceiver, WsSender};
 use serde_json::Value;
 use std::cell::RefCell;
@@ -166,15 +167,7 @@ impl WebSocketClient {
 		if !self.is_connected() {
 			return;
 		}
-		let json = match serde_json::to_string(value) {
-			Ok(json) => {
-				json
-			}
-			Err(error) => {
-				eprintln!("WebSocketClient: {}", error);
-				return;
-			}
-		};
+		let json = storagetext::stringify_json(value, &JsonSurrogateTable::new());
 		if let Some(web_socket) = self.web_socket.as_mut() {
 			web_socket.send(WsMessage::Text(json));
 		}

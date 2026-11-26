@@ -17,7 +17,7 @@
 //! - 클라우드: set_cloud_provider 로 SaveCloudProvider 를 꽂으면 저장마다 올리고, pull_from_cloud 로 더 새 것을 받아 들인다. (인터페이스만)
 //==============================================================================
 use super::savestorage::{LocalSaveStorage, SaveCloudProvider, SaveStorage};
-use crate::base::format::number_to_string;
+use crate::misc::storagetext::{self, JsonSurrogateTable};
 use serde::Serialize;
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
@@ -141,10 +141,7 @@ impl Default for SaveSlotOptions {
 }
 
 //==============================================================================
-// JSON 쓰기. (원본 JSON.stringify 와 글자까지 같다)
-// - 수는 원본 String(number) 꼴이다. (1.0 → "1", -0 → "0", 1e21 → "1e+21", 정수도 f64 로 바꿔 쓴다)
-// - 객체 칸 차례는 원본 JS 객체처럼 배열 번호 꼴 이름("0" ~ "4294967294")을 수 차례로 먼저, 나머지는 넣은 차례.
-// - 글 이스케이프는 serde_json 과 원본이 같다. (", \\, \b \f \n \r \t, 그 밖의 U+0000 ~ U+001F 는 \u00xx)
+// JSON 쓰기. (원본 JSON.stringify 와 글자까지 같다, 엔진 공용 storagetext::stringify_json)
 ///
 /// # 인자
 /// - `value`: 쓸 값.
@@ -153,95 +150,7 @@ impl Default for SaveSlotOptions {
 /// JSON 글.
 //==============================================================================
 fn stringify_json(value: &Value) -> String {
-	let mut json_text = String::new();
-	write_json_value(&mut json_text, value);
-	json_text
-}
-
-//==============================================================================
-// 배열 번호 꼴 이름이면 그 번호. (원본 객체가 먼저 수 차례로 두는 이름, 0 ~ 2^32 - 2 의 맨 꼴)
-///
-/// # 인자
-/// - `key`: 칸 이름.
-///
-/// # 돌려줌
-/// 번호. (아니면 None)
-//==============================================================================
-fn read_array_index_key(key: &str) -> Option<u32> {
-	if key.is_empty() || (key.len() > 1 && key.starts_with('0')) || !key.bytes().all(|byte| byte.is_ascii_digit()) {
-		return None;
-	}
-	let index: u64 = key.parse().ok()?;
-	if index < u64::from(u32::MAX) {
-		Some(index as u32)
-	}
-	else {
-		None
-	}
-}
-
-//==============================================================================
-// 값 하나 쓰기.
-///
-/// # 인자
-/// - `json_text`: 덧붙일 글.
-/// - `value`: 쓸 값.
-//==============================================================================
-fn write_json_value(json_text: &mut String, value: &Value) {
-	match value {
-		Value::Null => {
-			json_text.push_str("null");
-		}
-		Value::Bool(boolean_value) => {
-			json_text.push_str(if *boolean_value { "true" } else { "false" });
-		}
-		Value::Number(number_value) => {
-			match number_value.as_f64() {
-				Some(float_value) if float_value.is_finite() => {
-					json_text.push_str(&number_to_string(float_value));
-				}
-				_ => {
-					json_text.push_str("null");
-				}
-			}
-		}
-		Value::String(string_value) => {
-			json_text.push_str(&serde_json::to_string(string_value).unwrap_or_default());
-		}
-		Value::Array(array_value) => {
-			json_text.push('[');
-			for (item_index, item_value) in array_value.iter().enumerate() {
-				if item_index > 0 {
-					json_text.push(',');
-				}
-				write_json_value(json_text, item_value);
-			}
-			json_text.push(']');
-		}
-		Value::Object(object_value) => {
-			let mut index_entries: Vec<(u32, &String, &Value)> = Vec::new();
-			let mut other_entries: Vec<(&String, &Value)> = Vec::new();
-			for (key, item_value) in object_value {
-				match read_array_index_key(key) {
-					Some(index) => index_entries.push((index, key, item_value)),
-					None => other_entries.push((key, item_value)),
-				}
-			}
-			index_entries.sort_by_key(|entry| entry.0);
-			json_text.push('{');
-			let mut is_first = true;
-			for (key, item_value) in index_entries.iter().map(|entry| (entry.1, entry.2)).chain(other_entries.into_iter()) {
-				if !is_first {
-					json_text.push(',');
-				}
-				is_first = false;
-				json_text.push_str(&serde_json::to_string(key).unwrap_or_default());
-				json_text.push(':');
-				write_json_value(json_text, item_value);
-			}
-			json_text.push('}');
-		}
-	}
+	storagetext::stringify_json(value, &JsonSurrogateTable::new())
 }
 
 //==============================================================================

@@ -95,6 +95,7 @@ use crate::core::node::nodetree::{NodeId, NodeTree};
 use crate::core::reflection::{collect_reflected_getters_in_tree, collect_reflected_getters_mut, has_mutable_getters, ReflectValue, ReflectedGetter};
 use crate::core::viewmanager::ViewScaleMode;
 use crate::misc::localstorage::LocalStorage;
+use crate::misc::storagetext::{self, JsonSurrogateTable};
 use crate::ui::uidocument::UIDocument;
 use serde_json::Value;
 use std::collections::HashSet;
@@ -1446,6 +1447,13 @@ impl DevTools {
 		}
 		else {
 			let reference_root_id = node_tree.get_root_id();
+			// 노드를 가리키는 값은 원본 constructor.name 처럼 그 노드의 종류 이름으로 보인다. (지워진 노드면 WorldNode)
+			let read_node_type_name = |target_id: NodeId| -> String {
+				node_tree.get_node(target_id).map_or(NODE_TYPE_NAME, |target_node| self.ui_document.get_node_type_name(target_node)).to_string()
+			};
+			let read_reference_type_name = |reference_path: &str| -> String {
+				UIDocument::find_node_by_path(node_tree, reference_root_id, reference_path).map_or_else(|| NODE_TYPE_NAME.to_string(), read_node_type_name)
+			};
 			for (component_index, component) in components.iter().enumerate() {
 				let component_reference = (node_id, component_index);
 				// 기본 펼침: collapsed_components 에 없으면 펼쳐진 상태.
@@ -1466,7 +1474,7 @@ impl DevTools {
 					}
 					for getter in getter_list.iter() {
 						let property_name = format_method_name(getter.name);
-						let property_text = format_property_value(&getter.value);
+						let property_text = format_property_value(&getter.value, &read_node_type_name);
 						lines.push(InspectorLine::new(Some(&property_name), &property_text, COLOR_PROPERTY_VALUE, false, false, false, None, true));
 					}
 					continue;
@@ -1486,7 +1494,7 @@ impl DevTools {
 				}
 				else {
 					for (property_name, property_value) in component_properties.iter() {
-						let property_text = format_document_value(property_name, property_value);
+						let property_text = format_document_value(property_name, property_value, &read_reference_type_name);
 						lines.push(InspectorLine::new(Some(property_name), &property_text, COLOR_PROPERTY_VALUE, false, false, false, None, true));
 					}
 				}
@@ -2293,7 +2301,7 @@ impl DevTools {
 			"widthAspectGuideVisible": self.is_width_aspect_guide_visible,
 			"framePerSecondVisible": self.is_frame_per_second_visible,
 		});
-		LocalStorage::set_string(SETTINGS_STORAGE_KEY, &settings_object.to_string());
+		LocalStorage::set_string(SETTINGS_STORAGE_KEY, &storagetext::stringify_json(&settings_object, &JsonSurrogateTable::new()));
 	}
 
 	//==============================================================================
@@ -2651,8 +2659,9 @@ fn format_method_name(method_name: &str) -> String {
 
 //==============================================================================
 /// 게터 값을 문자열로 포맷. (원본 formatPropertyValue, 수는 원본 toFixed 와 같이 반올림한다)
+/// - 노드는 원본 constructor.name 처럼 read_node_type_name 이 돌려준 그 노드의 종류 이름이다. ([UILabel] 같은)
 //==============================================================================
-fn format_property_value(value: &ReflectValue) -> String {
+fn format_property_value(value: &ReflectValue, read_node_type_name: &dyn Fn(NodeId) -> String) -> String {
 	match value {
 		ReflectValue::Null => {
 			String::from("null")
@@ -2678,8 +2687,8 @@ fn format_property_value(value: &ReflectValue) -> String {
 			let blue = (color.blue as f64 * 255.0).round();
 			format!("rgba({}, {}, {}, {})", red, green, blue, format_fixed(color.alpha as f64, 2))
 		}
-		ReflectValue::Node(_) => {
-			format!("[{}]", NODE_TYPE_NAME)
+		ReflectValue::Node(node_id) => {
+			format!("[{}]", read_node_type_name(*node_id))
 		}
 		ReflectValue::List(_) => {
 			String::from("[Array]")
@@ -2715,9 +2724,10 @@ fn create_engine_ui_document() -> UIDocument {
 
 //==============================================================================
 /// 문서 값을 문자열로 포맷. (반사가 없는 컴포넌트의 UIDocument 저장 값, 원본 formatPropertyValue 를 JSON 값에 맞춘 것)
-/// - 수 둘 배열은 벡터, 이름에 color 가 든 수 넷 배열은 rgba, 그 밖의 수 넷 배열은 사각형으로 본다.
+/// - 수 둘 배열은 벡터, 이름에 color 가 든 수 넷 배열은 rgba, 그 밖의 수 넷 배열은 사각형으로 본다. 수는 원본 toFixed 와 같이 반올림한다.
+/// - 노드 참조({ "$nodeRef": 경로 })는 read_reference_type_name 이 돌려준 그 노드의 종류 이름이다. (원본 constructor.name)
 //==============================================================================
-fn format_document_value(property_name: &str, value: &Value) -> String {
+fn format_document_value(property_name: &str, value: &Value, read_reference_type_name: &dyn Fn(&str) -> String) -> String {
 	match value {
 		Value::Null => {
 			String::from("null")
@@ -2726,7 +2736,7 @@ fn format_document_value(property_name: &str, value: &Value) -> String {
 			String::from(format_boolean(*boolean_value))
 		}
 		Value::Number(number_value) => {
-			format!("{:.2}", number_value.as_f64().unwrap_or(0.0))
+			format_fixed(number_value.as_f64().unwrap_or(0.0), 2)
 		}
 		Value::String(string_value) => {
 			format_quoted_text(string_value)
@@ -2735,16 +2745,16 @@ fn format_document_value(property_name: &str, value: &Value) -> String {
 			let numbers: Option<Vec<f64>> = item_values.iter().map(Value::as_f64).collect();
 			match numbers {
 				Some(numbers) if numbers.len() == 2 => {
-					format!("({:.2}, {:.2})", numbers[0], numbers[1])
+					format!("({}, {})", format_fixed(numbers[0], 2), format_fixed(numbers[1], 2))
 				}
 				Some(numbers) if numbers.len() == 4 && property_name.to_lowercase().contains("color") => {
 					let red = (numbers[0] * 255.0).round();
 					let green = (numbers[1] * 255.0).round();
 					let blue = (numbers[2] * 255.0).round();
-					format!("rgba({}, {}, {}, {:.2})", red, green, blue, numbers[3])
+					format!("rgba({}, {}, {}, {})", red, green, blue, format_fixed(numbers[3], 2))
 				}
 				Some(numbers) if numbers.len() == 4 => {
-					format!("({:.1}, {:.1}, {:.1}, {:.1})", numbers[0], numbers[1], numbers[2], numbers[3])
+					format!("({}, {}, {}, {})", format_fixed(numbers[0], 1), format_fixed(numbers[1], 1), format_fixed(numbers[2], 1), format_fixed(numbers[3], 1))
 				}
 				_ => {
 					String::from("[Array]")
@@ -2752,8 +2762,8 @@ fn format_document_value(property_name: &str, value: &Value) -> String {
 			}
 		}
 		Value::Object(object_value) => {
-			if object_value.contains_key(NODE_REFERENCE_KEY) {
-				format!("[{}]", NODE_TYPE_NAME)
+			if let Some(reference_path) = object_value.get(NODE_REFERENCE_KEY).and_then(Value::as_str) {
+				format!("[{}]", read_reference_type_name(reference_path))
 			}
 			else {
 				String::from("[Object]")
@@ -2996,19 +3006,19 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn property_values_are_formatted_like_original() {
-		assert_eq!(format_property_value(&ReflectValue::Boolean(true)), "true");
-		assert_eq!(format_property_value(&ReflectValue::Number(4.0)), "4.00");
-		assert_eq!(format_property_value(&ReflectValue::Number(12.345)), "12.35");
-		assert_eq!(format_property_value(&ReflectValue::Number(0.125)), "0.13");
-		assert_eq!(format_property_value(&ReflectValue::String(String::from("hello"))), "\"hello\"");
-		assert_eq!(format_property_value(&ReflectValue::String(String::from("abcdefghijklmnopqrstuvwxyz0123"))), "\"abcdefghijklmnopqrstuvwxy...\"");
-		assert_eq!(format_property_value(&ReflectValue::Vector2(Vector2::create(0.5, 1.0))), "(0.50, 1.00)");
-		assert_eq!(format_property_value(&ReflectValue::Rect(Rect::create(1.0, 2.0, 3.5, 4.0))), "(1.0, 2.0, 3.5, 4.0)");
-		assert_eq!(format_property_value(&ReflectValue::Color(Color::create(1.0, 0.5, 0.0, 0.25))), "rgba(255, 128, 0, 0.25)");
-		assert_eq!(format_property_value(&ReflectValue::Node(NodeTree::new().get_root_id())), "[WorldNode]");
-		assert_eq!(format_property_value(&ReflectValue::List(Vec::new())), "[Array]");
-		assert_eq!(format_property_value(&ReflectValue::Object(String::from("Image"))), "[Image]");
-		assert_eq!(format_property_value(&ReflectValue::Null), "null");
+		assert_eq!(format_property_value(&ReflectValue::Boolean(true), &|_| String::from("WorldNode")), "true");
+		assert_eq!(format_property_value(&ReflectValue::Number(4.0), &|_| String::from("WorldNode")), "4.00");
+		assert_eq!(format_property_value(&ReflectValue::Number(12.345), &|_| String::from("WorldNode")), "12.35");
+		assert_eq!(format_property_value(&ReflectValue::Number(0.125), &|_| String::from("WorldNode")), "0.13");
+		assert_eq!(format_property_value(&ReflectValue::String(String::from("hello")), &|_| String::from("WorldNode")), "\"hello\"");
+		assert_eq!(format_property_value(&ReflectValue::String(String::from("abcdefghijklmnopqrstuvwxyz0123")), &|_| String::from("WorldNode")), "\"abcdefghijklmnopqrstuvwxy...\"");
+		assert_eq!(format_property_value(&ReflectValue::Vector2(Vector2::create(0.5, 1.0)), &|_| String::from("WorldNode")), "(0.50, 1.00)");
+		assert_eq!(format_property_value(&ReflectValue::Rect(Rect::create(1.0, 2.0, 3.5, 4.0)), &|_| String::from("WorldNode")), "(1.0, 2.0, 3.5, 4.0)");
+		assert_eq!(format_property_value(&ReflectValue::Color(Color::create(1.0, 0.5, 0.0, 0.25)), &|_| String::from("WorldNode")), "rgba(255, 128, 0, 0.25)");
+		assert_eq!(format_property_value(&ReflectValue::Node(NodeTree::new().get_root_id()), &|_| String::from("UILabel")), "[UILabel]");
+		assert_eq!(format_property_value(&ReflectValue::List(Vec::new()), &|_| String::from("WorldNode")), "[Array]");
+		assert_eq!(format_property_value(&ReflectValue::Object(String::from("Image")), &|_| String::from("WorldNode")), "[Image]");
+		assert_eq!(format_property_value(&ReflectValue::Null, &|_| String::from("WorldNode")), "null");
 		assert_eq!(format_method_name("getTextColor"), "textColor");
 		assert_eq!(format_method_name("isCircle"), "isCircle");
 		assert_eq!(format_method_name("get"), "get");
@@ -3021,16 +3031,17 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn document_values_are_formatted_like_original() {
-		assert_eq!(format_document_value("enable", &serde_json::json!(true)), "true");
-		assert_eq!(format_document_value("roundSize", &serde_json::json!(4)), "4.00");
-		assert_eq!(format_document_value("text", &serde_json::json!("hello")), "\"hello\"");
-		assert_eq!(format_document_value("anchor", &serde_json::json!([0.5, 1])), "(0.50, 1.00)");
-		assert_eq!(format_document_value("textColor", &serde_json::json!([1, 0.5, 0, 0.25])), "rgba(255, 128, 0, 0.25)");
-		assert_eq!(format_document_value("nineSlice", &serde_json::json!([1, 2, 3.5, 4])), "(1.0, 2.0, 3.5, 4.0)");
-		assert_eq!(format_document_value("list", &serde_json::json!(["a"])), "[Array]");
-		assert_eq!(format_document_value("target", &serde_json::json!({ "$nodeRef": "a/b" })), "[WorldNode]");
-		assert_eq!(format_document_value("other", &serde_json::json!({ "x": 1 })), "[Object]");
-		assert_eq!(format_document_value("nothing", &Value::Null), "null");
+		assert_eq!(format_document_value("enable", &serde_json::json!(true), &|_| String::from("WorldNode")), "true");
+		assert_eq!(format_document_value("roundSize", &serde_json::json!(4), &|_| String::from("WorldNode")), "4.00");
+		assert_eq!(format_document_value("roundSize", &serde_json::json!(0.125), &|_| String::from("WorldNode")), "0.13");
+		assert_eq!(format_document_value("text", &serde_json::json!("hello"), &|_| String::from("WorldNode")), "\"hello\"");
+		assert_eq!(format_document_value("anchor", &serde_json::json!([0.5, 1]), &|_| String::from("WorldNode")), "(0.50, 1.00)");
+		assert_eq!(format_document_value("textColor", &serde_json::json!([1, 0.5, 0, 0.25]), &|_| String::from("WorldNode")), "rgba(255, 128, 0, 0.25)");
+		assert_eq!(format_document_value("nineSlice", &serde_json::json!([1, 2, 3.5, 4]), &|_| String::from("WorldNode")), "(1.0, 2.0, 3.5, 4.0)");
+		assert_eq!(format_document_value("list", &serde_json::json!(["a"]), &|_| String::from("WorldNode")), "[Array]");
+		assert_eq!(format_document_value("target", &serde_json::json!({ "$nodeRef": "a/b" }), &|reference_path| format!("UILabel {}", reference_path)), "[UILabel a/b]");
+		assert_eq!(format_document_value("other", &serde_json::json!({ "x": 1 }), &|_| String::from("WorldNode")), "[Object]");
+		assert_eq!(format_document_value("nothing", &Value::Null, &|_| String::from("WorldNode")), "null");
 	}
 
 	//==============================================================================
@@ -3044,6 +3055,23 @@ mod tests {
 		let mut dev_tools = DevTools::new();
 		dev_tools.build_inspector_lines(&node_tree, floating_text_id);
 		assert!(dev_tools.cached_inspector_lines.iter().any(|line| line.text.as_deref() == Some("type") && line.value == "FloatingText"));
+	}
+
+	//==============================================================================
+	/// 노드를 가리키는 속성 값은 원본 constructor.name 처럼 그 노드의 종류 이름이다. (UIHitArea.targetNode 가 FloatingText 노드)
+	//==============================================================================
+	#[test]
+	fn inspector_node_value_shows_target_node_type_name() {
+		let mut node_tree = NodeTree::new();
+		let root_id = node_tree.get_root_id();
+		let floating_text_id = crate::misc::floatingtext::FloatingText::create(&mut node_tree, root_id);
+		let hit_area_id = node_tree.create_child(root_id, "hit");
+		let mut hit_area = crate::ui::uihitarea::UIHitArea::new();
+		hit_area.set_target(floating_text_id);
+		node_tree[hit_area_id].add_component(hit_area);
+		let mut dev_tools = DevTools::new();
+		dev_tools.build_inspector_lines(&node_tree, hit_area_id);
+		assert!(dev_tools.cached_inspector_lines.iter().any(|line| line.text.as_deref() == Some("targetNode") && line.value == "[FloatingText]"), "{:?}", dev_tools.cached_inspector_lines.iter().map(|line| (line.text.clone(), line.value.clone())).collect::<Vec<_>>());
 	}
 
 	//==============================================================================
