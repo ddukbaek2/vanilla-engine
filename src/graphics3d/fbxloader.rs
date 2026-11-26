@@ -869,6 +869,8 @@ pub struct FbxTexture {
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct FbxMaterial {
+	/// 머티리얼 이름. (FBX 이름에서 종류 꼬리를 뗀 것, 없으면 빈 문자열)
+	pub name: String,
 	/// 난반사 색. (RGB, DiffuseColor 나 Diffuse, 없으면 1, 1, 1)
 	pub diffuse_color: [f64; 3],
 	/// 정반사 색. (RGB, SpecularColor 나 Specular, 없으면 0.5, 0.5, 0.5)
@@ -1781,9 +1783,10 @@ impl FbxLoader {
 		let positions = geometry_node.find_child("Vertices")?.get_property(0)?;
 		let polygon_vertex_indices = geometry_node.find_child("PolygonVertexIndex")?.get_property(0)?.to_integer_list();
 
-		// 폴리곤 → 팬 삼각화. (코너: 원본 정점 인덱스 + 폴리곤 정점 순번)
+		// 폴리곤 → 팬 삼각화. (코너: 원본 정점 인덱스 + 폴리곤 정점 순번, 삼각형: 폴리곤 순번)
 		let mut corner_vertex_indices: Vec<i64> = Vec::new();
 		let mut corner_polygon_vertex_positions: Vec<usize> = Vec::new();
+		let mut triangle_polygon_indices: Vec<usize> = Vec::new();
 		let decode_vertex_index = |raw_index: i64| -> i64 {
 			if raw_index < 0 {
 				-raw_index - 1
@@ -1793,6 +1796,7 @@ impl FbxLoader {
 			}
 		};
 		let mut polygon_start = 0;
+		let mut polygon_index = 0;
 		for polygon_vertex_position in 0..polygon_vertex_indices.len() {
 			let is_polygon_end = polygon_vertex_indices[polygon_vertex_position] < 0;
 			if is_polygon_end {
@@ -1807,8 +1811,10 @@ impl FbxLoader {
 					corner_polygon_vertex_positions.push(triangle_corner);
 					corner_vertex_indices.push(third_vertex_index);
 					corner_polygon_vertex_positions.push(triangle_corner + 1);
+					triangle_polygon_indices.push(polygon_index);
 				}
 				polygon_start = polygon_vertex_position + 1;
+				polygon_index += 1;
 			}
 		}
 
@@ -1846,8 +1852,7 @@ impl FbxLoader {
 		}
 
 		for (triangle_index, material_index) in material_index_per_triangle.iter_mut().enumerate() {
-			let first_corner_polygon_vertex_position = corner_polygon_vertex_positions[triangle_index * 3];
-			*material_index = material_layer(first_corner_polygon_vertex_position);
+			*material_index = material_layer(triangle_polygon_indices[triangle_index]);
 		}
 
 		Some(FbxGeometry {
@@ -1899,7 +1904,9 @@ impl FbxLoader {
 	}
 
 	//==============================================================================
-	/// 머티리얼 레이어 구성. (폴리곤 정점 순번 → 머티리얼 인덱스, 원본처럼 순번으로 바로 찾는다)
+	/// 머티리얼 레이어 구성. (폴리곤 순번 → 머티리얼 인덱스)
+	/// - LayerElementMaterial 의 Materials 는 폴리곤마다(ByPolygon) 하나, 또는 전체에 하나(AllSame) 있다. (FBX SDK FbxLayerElementMaterial)
+	/// - 값은 지오메트리를 가진 모델에 이어진 머티리얼 목록(커넥션 순서) 안의 자리다. 레이어가 없으면 모두 0.
 	//==============================================================================
 	fn build_material_layer<'a>(&self, geometry_node: &'a FbxNodeRecord) -> Box<dyn Fn(usize) -> i32 + 'a> {
 		let layer_node = match geometry_node.find_child("LayerElementMaterial") {
@@ -1907,12 +1914,12 @@ impl FbxLoader {
 				layer_node
 			}
 			None => {
-				return Box::new(|_polygon_vertex_position| 0);
+				return Box::new(|_polygon_index| 0);
 			}
 		};
 		let mapping_type = layer_node.find_child("MappingInformationType").map(|mapping_node| mapping_node.get_string_property(0)).unwrap_or_default();
 		let material_array = layer_node.find_child("Materials").and_then(|materials_node| materials_node.get_property(0));
-		Box::new(move |polygon_vertex_position| {
+		Box::new(move |polygon_index| {
 			let material_array = match material_array {
 				Some(material_array) => {
 					material_array
@@ -1921,10 +1928,13 @@ impl FbxLoader {
 					return 0;
 				}
 			};
-			if mapping_type == "AllSame" {
-				return material_array.get_integer_at(0).unwrap_or(0) as i32;
+			let material_index = if mapping_type == "AllSame" {
+				material_array.get_integer_at(0)
 			}
-			material_array.get_integer_at(polygon_vertex_position).unwrap_or(0) as i32
+			else {
+				material_array.get_integer_at(polygon_index)
+			};
+			material_index.unwrap_or(0).max(0) as i32
 		})
 	}
 
@@ -2100,6 +2110,7 @@ impl FbxLoader {
 				}
 			};
 			let mut material = FbxMaterial {
+				name: read_fbx_object_name(&object_node.get_string_property(1)),
 				diffuse_color: [1.0, 1.0, 1.0],
 				specular_color: [0.5, 0.5, 0.5],
 				shininess: 20.0,
@@ -2888,6 +2899,94 @@ mod tests {
 		assert_eq!(animation_list.len(), 3);
 		assert_eq!(animation_list[1].channels.len(), 1);
 		assert!(animation_list[2].channels.is_empty());
+	}
+
+	//==============================================================================
+	/// 재질 여럿인 메시. (LayerElementMaterial ByPolygon → 폴리곤 순번으로 재질, 재질마다 부분 메시 하나)
+	//==============================================================================
+	#[test]
+	fn multiple_materials_split_by_polygon() {
+		fn record(name: &str, properties: Vec<FbxPropertyValue>, children: Vec<FbxNodeRecord>) -> FbxNodeRecord {
+			FbxNodeRecord {
+				name: String::from(name),
+				properties,
+				children,
+			}
+		}
+		fn text(value: &str) -> FbxPropertyValue {
+			FbxPropertyValue::String(String::from(value))
+		}
+		fn connect(source_id: i64, destination_id: i64) -> FbxNodeRecord {
+			record("C", vec![text("OO"), FbxPropertyValue::Int64(source_id), FbxPropertyValue::Int64(destination_id)], Vec::new())
+		}
+		let geometry = record("Geometry", vec![FbxPropertyValue::Int64(100)], vec![
+			record("Vertices", vec![FbxPropertyValue::Float64array(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0, 2.0, 0.0, 0.0])], Vec::new()),
+			record("PolygonVertexIndex", vec![FbxPropertyValue::Int32array(vec![0, 1, 2, -4, 1, 4, -3])], Vec::new()),
+			record("LayerElementMaterial", Vec::new(), vec![
+				record("MappingInformationType", vec![text("ByPolygon")], Vec::new()),
+				record("ReferenceInformationType", vec![text("IndexToDirect")], Vec::new()),
+				record("Materials", vec![FbxPropertyValue::Int32array(vec![1, 0])], Vec::new()),
+			]),
+		]);
+		let mesh_model = record("Model", vec![FbxPropertyValue::Int64(201), text("Mesh\u{0}\u{1}Model"), text("Mesh")], Vec::new());
+		let bone_model = record("Model", vec![FbxPropertyValue::Int64(200), text("Bone\u{0}\u{1}Model"), text("LimbNode")], Vec::new());
+		let skin = record("Deformer", vec![FbxPropertyValue::Int64(300), text("Skin"), text("Skin")], Vec::new());
+		let cluster = record("Deformer", vec![FbxPropertyValue::Int64(301), text("Cluster"), text("Cluster")], vec![
+			record("Indexes", vec![FbxPropertyValue::Int32array(vec![0, 1, 2, 3, 4])], Vec::new()),
+			record("Weights", vec![FbxPropertyValue::Float64array(vec![1.0; 5])], Vec::new()),
+		]);
+		let first_material = record("Material", vec![FbxPropertyValue::Int64(600), text("M_First\u{0}\u{1}Material"), text("")], Vec::new());
+		let second_material = record("Material", vec![FbxPropertyValue::Int64(601), text("M_Second\u{0}\u{1}Material"), text("")], Vec::new());
+		let objects = record("Objects", Vec::new(), vec![geometry, mesh_model, bone_model, skin, cluster, first_material, second_material]);
+		let connections = record("Connections", Vec::new(), vec![
+			connect(200, 0),
+			connect(201, 0),
+			connect(100, 201),
+			connect(300, 100),
+			connect(301, 300),
+			connect(200, 301),
+			connect(600, 201),
+			connect(601, 201),
+		]);
+		let scene_data = FbxLoader::new().interpret(&[objects, connections]).expect("scene");
+		assert_eq!(scene_data.geometry_by_id.get(100).expect("geometry").material_index_per_triangle, vec![1, 1, 0]);
+		assert_eq!(scene_data.material_by_id.get(601).expect("material").name, "M_Second");
+
+		let mut skinned_model = SkinnedModel::create_without_shader_program();
+		let (mesh_description_list, material_description_list) = skinned_model.interpret_fbx_content(&scene_data).expect("interpret");
+		assert_eq!(material_description_list.len(), 2);
+		assert_eq!(mesh_description_list.len(), 2);
+		assert_eq!(mesh_description_list[0].material_index, Some(0));
+		assert_eq!(mesh_description_list[0].material_name, "M_First");
+		assert_eq!(mesh_description_list[0].positions, vec![1.0, 0.0, 0.0, 2.0, 0.0, 0.0, 1.0, 1.0, 0.0]);
+		assert_eq!(mesh_description_list[1].material_index, Some(1));
+		assert_eq!(mesh_description_list[1].material_name, "M_Second");
+		assert_eq!(mesh_description_list[1].positions.len(), 18);
+		assert_eq!(mesh_description_list[1].joints.len(), 24);
+		assert_eq!(mesh_description_list[0].node_index, mesh_description_list[1].node_index);
+	}
+
+	//==============================================================================
+	/// 예제 마네킹. (재질 M_Main, M_Joints 둘, 원본과 같은 삼각형 수로 나뉜다)
+	//==============================================================================
+	#[test]
+	fn mannequin_fbx_materials_from_examples() {
+		let mannequin_path = std::path::Path::new(EXAMPLE_ASSET_DIRECTORY).join("mannequin.fbx");
+		let file_bytes = match std::fs::read(&mannequin_path) {
+			Ok(file_bytes) => {
+				file_bytes
+			}
+			Err(_) => {
+				eprintln!("mannequin.fbx 없음, 건너뜀");
+				return;
+			}
+		};
+		let scene_data = FbxLoader::new().parse(&file_bytes).expect("scene");
+		let mut skinned_model = SkinnedModel::create_without_shader_program();
+		let (mesh_description_list, material_description_list) = skinned_model.interpret_fbx_content(&scene_data).expect("interpret");
+		assert_eq!(material_description_list.len(), 2);
+		let summary: Vec<(String, usize)> = mesh_description_list.iter().map(|mesh_description| (mesh_description.material_name.clone(), mesh_description.positions.len() / 9)).collect();
+		assert_eq!(summary, vec![(String::from("M_Main"), 5732), (String::from("M_Joints"), 8012)]);
 	}
 
 	//==============================================================================

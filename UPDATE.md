@@ -1,6 +1,9 @@
 # 업데이트 기록
 
 # 아직 release 에 합치지 않은 것 (release 에 합칠 때 패치 판을 하나 올려 매긴다)
+- FBX 재질 여럿: 메시 하나에 재질이 여럿인 FBX(LayerElementMaterial 의 Materials, MappingInformationType ByPolygon 이나 AllSame)를 폴리곤의 재질 번호대로 부분 메시로 나눠 재질마다 드로어블 하나로 그린다. (three.js FBXLoader 의 그룹, 유니티와 언리얼의 서브메시) 지금까지는 재질 번호를 폴리곤 순번이 아니라 폴리곤 정점 순번으로 찾았고, 메시마다 소유 노드의 첫 재질 하나로만 그려 Quaternius 마네킹(M_Main, M_Joints)이 온통 주황이었다. 새 SkinnedModel::split_fbx_corners_by_material 과 FbxCornerArrays, FBX MeshDescription 과 드로어블의 material_name 이 FBX Material 이름(glb 처럼), FbxMaterial.name. 원본과 같다. 단위 시험 multiple_materials_split_by_polygon, mannequin_fbx_materials_from_examples(원본과 같은 삼각형 수 5732, 8012). 문서 그림 model-viewer, 셰이더 해시를 바꾼 뒤의 effect-gallery, shader-sprite, screen-effect 다시 찍음(같은 크기, cwebp -q 85).
+  - 옮기는 법: FBX 모델의 드로어블 목록이 재질 수만큼 늘어난다. 드로어블 0 하나가 메시 전체라고 기대하던 코드는 material_name 이나 material_index 로 찾는다.
+- 크레이트 라이선스 파일: vanilla-engine-macros, vanilla-engine-apidoc, vanilla-engine-licenses 에도 뿌리와 같은 LICENSE(저작권자 vanillapunch)를 두고 include 에 넣어 cargo package 꾸러미에 실린다. apidoc, licenses 에 authors 를 적고, licenses 는 SPDX 전문 texts 도 싣는다.
 - SceneBase.set_touch_dispatch_enabled(is_enabled), is_touch_dispatch_enabled(): 원본 Scene.setTouchRaycaster(null)(와 새 setTouchDispatchEnabled) 처럼 씬 기본 터치 넘기기를 끈다. 끄면 tick_touch 가 노드에 누름, 이동, 뗌, 휠을 넘기지 않고(첫 터치 콜백도) 씬의 터치 훅만 불려 훅에서 가로채 직접 넘길 수 있다.
 - SpriteAnimator.play: 원본 play 처럼 그 자리에서 Sprite 에 첫 프레임을 넣는 노드를 받는 꼴이 기본이다. SpriteAnimator::play(&mut node, clip_name, options) (옛 play_on_node). 애니메이터만 받던 옛 play(&mut self, ...) 는 play_clip 이고, 노드가 없을 때(완료 콜백 안) 쓴다. 완료 콜백 뒤에는 같은 tick 에 프레임을 넣어 바로 바뀐다.
   - 옮기는 법: SpriteAnimator::play_on_node(node, ...) 는 SpriteAnimator::play(node, ...) 로, animator.play(...) 는 노드가 있으면 SpriteAnimator::play(node, ...), 완료 콜백 안이면 animator.play_clip(...) 으로 바꾼다.

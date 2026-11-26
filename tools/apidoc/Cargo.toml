@@ -3,8 +3,12 @@ name = "vanilla-engine-apidoc"
 version = "0.3.2"
 description = "바닐라엔진(Vanilla Engine)의 API 문서 자료 뽑기. 엔진 소스의 문서 주석에서 docs/api/<판>.json 을 쓴다"
 edition = "2021"
+# 저작권자. (LICENSE 의 Copyright 줄과 같다)
+authors = ["vanillapunch"]
 license = "MIT"
 publish = false
+# cargo package 에 싣는 파일. (소스와 라이선스, LICENSE 는 뿌리 LICENSE 와 같은 글)
+include = ["/src/**/*", "/LICENSE"]
 
 # 가이드 문서(docs/guide/<판>/ko)의 rust 코드 칸을 doctest 로 검사하는 자리. (cargo test --doc -p vanilla-engine-apidoc)
 [lib]
