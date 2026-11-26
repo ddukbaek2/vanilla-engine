@@ -110,7 +110,7 @@ pub struct ImageDescription {
 }
 
 //==============================================================================
-/// 이미지 서술 옵션. (원본 load_image_description 의 options { flip_y, is_color_data, anisotropy })
+/// 이미지 서술 옵션. (원본 loadImageDescription 의 options { flip_y, is_color_data, anisotropy })
 ///
 /// # 예제
 /// 기본값은 모두 끈 것이고, 옵션을 None 으로 주면 기본값과 같다
@@ -264,7 +264,7 @@ impl IntoFuture for ImageDescriptionLoadHandle {
 }
 
 //==============================================================================
-/// 중립 머티리얼 서술. (원본 create_default_description 이 만드는 객체, 팩터 + 이미지, GL 무관)
+/// 중립 머티리얼 서술. (원본 createDefaultDescription 이 만드는 객체, 팩터 + 이미지, GL 무관)
 ///
 /// # 예제
 /// 기본 서술에 색과 거칠기를 바꾸고 노멀 맵 이미지 넣기
@@ -409,6 +409,7 @@ impl Material {
 
 	//==============================================================================
 	/// 중립 머티리얼 서술로부터 생성. (이미지 바이트 → GL 텍스처, 못 풀면 오류)
+	/// - 중간에 실패하면 그때까지 지은 텍스처를 지우고 오류를 돌려준다.
 	///
 	/// # 인자
 	/// - `gl`: GL 컨텍스트. (Graphic::get_gl 로 꺼낸다)
@@ -427,15 +428,29 @@ impl Material {
 		material.emissive_factor = description.emissive_factor;
 		material.use_glossiness = description.glossiness_image.is_some();
 		material.use_alpha_cutout.set(description.opacity_image.is_some());
-		material.base_color_texture = Some(Material::create_texture(gl, description.base_color_image.as_ref(), [255, 255, 255, 255])?);
-		material.normal_texture = Some(Material::create_texture(gl, description.normal_image.as_ref(), [128, 128, 255, 255])?);
-		material.metallic_roughness_texture = Some(Material::create_texture(gl, description.metallic_roughness_image.as_ref(), [255, 255, 255, 255])?);
-		material.glossiness_texture = Some(Material::create_texture(gl, description.glossiness_image.as_ref(), [255, 255, 255, 255])?);
-		material.occlusion_texture = Some(Material::create_texture(gl, description.occlusion_image.as_ref(), [255, 255, 255, 255])?);
-		material.emissive_texture = Some(Material::create_texture(gl, description.emissive_image.as_ref(), [255, 255, 255, 255])?);
-		material.specular_texture = Some(Material::create_texture(gl, description.specular_image.as_ref(), [255, 255, 255, 255])?);
-		material.opacity_texture = Some(Material::create_texture(gl, description.opacity_image.as_ref(), [255, 255, 255, 255])?);
+		if let Err(error) = material.create_description_textures(gl, description) {
+			material.destroy(gl);
+			return Err(error);
+		}
 		Ok(material)
+	}
+
+	//==============================================================================
+	/// 서술의 이미지 여덟 칸을 기본 슬롯 텍스처로 짓는다.
+	///
+	/// # 돌려줌
+	/// 하나라도 못 지으면 그 오류. (그때까지 지은 텍스처는 슬롯에 남아 있다, 부른 쪽이 destroy 로 지운다)
+	//==============================================================================
+	fn create_description_textures(&mut self, gl: &glow::Context, description: &MaterialDescription) -> Result<(), String> {
+		self.base_color_texture = Some(Material::create_texture(gl, description.base_color_image.as_ref(), [255, 255, 255, 255])?);
+		self.normal_texture = Some(Material::create_texture(gl, description.normal_image.as_ref(), [128, 128, 255, 255])?);
+		self.metallic_roughness_texture = Some(Material::create_texture(gl, description.metallic_roughness_image.as_ref(), [255, 255, 255, 255])?);
+		self.glossiness_texture = Some(Material::create_texture(gl, description.glossiness_image.as_ref(), [255, 255, 255, 255])?);
+		self.occlusion_texture = Some(Material::create_texture(gl, description.occlusion_image.as_ref(), [255, 255, 255, 255])?);
+		self.emissive_texture = Some(Material::create_texture(gl, description.emissive_image.as_ref(), [255, 255, 255, 255])?);
+		self.specular_texture = Some(Material::create_texture(gl, description.specular_image.as_ref(), [255, 255, 255, 255])?);
+		self.opacity_texture = Some(Material::create_texture(gl, description.opacity_image.as_ref(), [255, 255, 255, 255])?);
+		Ok(())
 	}
 
 	//==============================================================================
@@ -525,7 +540,7 @@ impl Material {
 	}
 
 	//==============================================================================
-	/// 바이트로 이미지 서술 생성. (원본 load_image_description 의 fetch 뒤 부분, 웹은 BlobAsset 바이트를 넘긴다)
+	/// 바이트로 이미지 서술 생성. (원본 loadImageDescription 의 fetch 뒤 부분, 웹은 BlobAsset 바이트를 넘긴다)
 	///
 	/// # 인자
 	/// - `bytes`: 이미지 파일 내용. (png, jpeg, webp, gif, bmp, ico)
@@ -935,7 +950,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	/// 기본 서술. (원본 create_default_description 값)
+	/// 기본 서술. (원본 createDefaultDescription 값)
 	//==============================================================================
 	#[test]
 	fn default_description_matches_original() {
@@ -945,5 +960,23 @@ mod tests {
 		assert_eq!(description.roughness_factor, 1.0);
 		assert_eq!(description.emissive_factor, [0.0, 0.0, 0.0]);
 		assert!(description.base_color_image.is_none() && description.opacity_image.is_none());
+	}
+
+	//==============================================================================
+	/// 서술로 짓다가 중간 이미지를 못 풀면 앞에서 지은 텍스처를 지우고 오류를 돌려준다. (가짜 GL)
+	//==============================================================================
+	#[test]
+	fn failed_description_deletes_created_textures() {
+		use crate::core::imagetexturecache::fake_gl::{self, FakeGlObject};
+		let gl = fake_gl::create_context();
+		let shader_program = Rc::new(ShaderProgram::new(&gl, "", "").expect("shader program"));
+		let mut description = Material::create_default_description();
+		description.metallic_roughness_image = Some(Material::create_image_description(vec![1, 2, 3], None, None));
+		assert!(Material::create_from_description(&gl, shader_program.clone(), &description).is_err());
+		assert_eq!(fake_gl::get_live_count(FakeGlObject::Texture), 0);
+		let material = Material::create_from_description(&gl, shader_program, &Material::create_default_description()).expect("material");
+		assert_eq!(fake_gl::get_live_count(FakeGlObject::Texture), 8);
+		material.destroy(&gl);
+		assert_eq!(fake_gl::get_live_count(FakeGlObject::Texture), 0);
 	}
 }

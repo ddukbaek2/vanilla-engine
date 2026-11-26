@@ -151,6 +151,7 @@ impl UISpinner {
 
 	//==============================================================================
 	/// 점 투명도 계산. (점 순서 비율에서 위상을 뺀 꼬리 비율이 작을수록 밝다)
+	/// - 점이 없으면(dot_count 0) 순서 비율을 0 으로 본다.
 	///
 	/// # 인자
 	/// - `dot_index`: 점 번호. (0 부터, 0 번은 원의 오른쪽이고 번호가 늘수록 시계 방향)
@@ -169,7 +170,12 @@ impl UISpinner {
 	/// ```
 	//==============================================================================
 	pub fn calculate_dot_opacity(&self, dot_index: usize) -> f32 {
-		let order_ratio = dot_index as f32 / self.options.dot_count as f32;
+		let order_ratio = if self.options.dot_count > 0 {
+			dot_index as f32 / self.options.dot_count as f32
+		}
+		else {
+			0.0
+		};
 		let mut tail_ratio = (order_ratio - self.phase) % 1.0;
 		if tail_ratio < 0.0 {
 			tail_ratio += 1.0;
@@ -357,5 +363,22 @@ mod tests {
 		assert_eq!(node_tree[dot_ids[2]].get_component::<Paint>().expect("paint").get_color(), Color::white());
 		node_tree.tick(&engine, 0.016);
 		assert_eq!(node_tree[dot_ids[2]].get_component::<Paint>().expect("paint").get_color(), Color::create(1.0, 0.0, 0.0, 1.0));
+	}
+
+	//==============================================================================
+	/// 점이 없는 스피너도 점 투명도가 0 나누기로 NaN 이 되지 않는다.
+	//==============================================================================
+	#[test]
+	fn zero_dot_count_opacity_is_finite() {
+		let mut node_tree = NodeTree::new();
+		let root_id = node_tree.get_root_id();
+		let options = UISpinnerOptions {
+			dot_count: 0,
+			..UISpinnerOptions::default()
+		};
+		let spinner_id = UISpinner::create(&mut node_tree, root_id, options);
+		let spinner = node_tree[spinner_id].get_component::<UISpinner>().expect("spinner");
+		assert!(spinner.get_dot_nodes().is_empty());
+		assert_eq!(spinner.calculate_dot_opacity(0), 1.0);
 	}
 }

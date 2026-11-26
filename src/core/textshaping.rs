@@ -685,6 +685,74 @@ impl LoadedFont {
 	}
 
 	//==============================================================================
+	/// CSS line-height normal 의 줄 높이. (크롬 SimpleFontData::PlatformInit 의 LineSpacing)
+	/// - 크롬은 Skia 가 주는 위아래 길이(fAscent, fDescent)를 각각 반올림하고(FontMetrics::AscentDescentWithHacks), 줄 높이는 lroundf(위) + lroundf(아래) + lroundf(줄 사이 fLeading)다.
+	/// - Skia 가 읽는 표는 운영체제마다 다르다.
+	///   - 리눅스(SkFontHost_FreeType.cpp): OS/2 의 USE_TYPO_METRICS 가 켜져 있으면 typo 값, 아니면 FreeType 의 hhea 값(hhea 가 0 이면 typo, 그것도 0 이면 win 값).
+	///     ttf-parser 의 ascender, descender, line_gap 이 이 차례로 읽는다.
+	///   - 맥(CoreText): USE_TYPO_METRICS 를 보지 않고 hhea 값이다. (헤드리스 크롬 맥에서 그 비트를 켠 글꼴의 줄 높이가 그대로인 것으로 확인)
+	///   - 윈도우(DirectWrite 의 DWRITE_FONT_METRICS): USE_TYPO_METRICS 면 typo 값, 아니면 win 값과 hhea 줄 높이가 win 높이를 넘는 만큼의 줄 사이로 본다.
+	///     (DirectWrite 는 고르는 표를 밝히지 않아, 글꼴 세로 수치 안내에 알려진 셈을 쓴다)
+	/// - 맥 크롬은 Times, Helvetica, Courier 의 위 길이에 (위 + 아래) 의 15% 를 반올림해 더한다. (사파리의 SimpleFontDataMac 과 맞춘 값)
+	///
+	/// # 인자
+	/// - `pixel_size`: 글자 크기. (px)
+	///
+	/// # 돌려줌
+	/// 줄 높이. (px, 정수)
+	//==============================================================================
+	pub fn calculate_normal_line_height(&self, pixel_size: f32) -> f32 {
+		let shaping_face = self.get_shaping_face();
+		let scale = pixel_size / self.units_per_em.max(1.0);
+		let font_tables = shaping_face.tables();
+		let horizontal_header = font_tables.hhea;
+		let (ascender, descender, line_gap) = if cfg!(target_os = "macos") && (horizontal_header.ascender != 0 || horizontal_header.descender != 0) {
+			(horizontal_header.ascender as f32, horizontal_header.descender as f32, horizontal_header.line_gap as f32)
+		}
+		else if cfg!(target_os = "windows") {
+			match font_tables.os2 {
+				Some(os2_table) if !os2_table.use_typographic_metrics() => {
+					let windows_ascender = os2_table.windows_ascender() as f32;
+					let windows_descender = os2_table.windows_descender() as f32;
+					let header_height = horizontal_header.ascender as f32 - horizontal_header.descender as f32 + horizontal_header.line_gap as f32;
+					(windows_ascender, windows_descender, (header_height - (windows_ascender - windows_descender)).max(0.0))
+				}
+				_ => {
+					(shaping_face.ascender() as f32, shaping_face.descender() as f32, shaping_face.line_gap() as f32)
+				}
+			}
+		}
+		else {
+			(shaping_face.ascender() as f32, shaping_face.descender() as f32, shaping_face.line_gap() as f32)
+		};
+		let mut ascent = (ascender * scale).round();
+		let descent = (-descender * scale).round();
+		let line_gap = (line_gap * scale).round();
+		if cfg!(target_os = "macos") {
+			// 이름 표의 글꼴 모음 이름. (맥 글꼴은 맥 로먼 글자만 있기도 해 그 바이트를 그대로 견준다)
+			let is_adjusted_family = shaping_face.names().into_iter().any(|name| {
+				if name.name_id != rustybuzz::ttf_parser::name_id::FAMILY {
+					return false;
+				}
+				let family_name = if name.is_unicode() {
+					name.to_string()
+				}
+				else if name.platform_id == rustybuzz::ttf_parser::PlatformId::Macintosh && name.encoding_id == 0 {
+					String::from_utf8(name.name.to_vec()).ok()
+				}
+				else {
+					None
+				};
+				matches!(family_name.as_deref(), Some("Times") | Some("Helvetica") | Some("Courier"))
+			});
+			if is_adjusted_family {
+				ascent += ((ascent + descent) * 0.15 + 0.5).floor();
+			}
+		}
+		ascent + descent + line_gap
+	}
+
+	//==============================================================================
 	/// 글꼴 바이트. (같은 파일의 다른 얼굴이 나눠 든다)
 	///
 	/// # 돌려줌
@@ -2138,6 +2206,49 @@ mod tests {
 	use super::*;
 
 	//==============================================================================
+	/// line-height normal 의 줄 높이: 맥 크롬이 놓은 값과 같다. (헤드리스 크롬 맥에서 같은 글꼴 파일을 @font-face 로 올린 div 한 줄의 높이)
+	/// - Geneva 13, 14, 16, 20px 은 17, 19, 21, 27, Arial 은 15, 16, 18, 23, Verdana 는 16, 17, 19, 24, Helvetica(맥 크롬의 15% 보정)는 15, 16, 18, 23.
+	/// - USE_TYPO_METRICS 를 켠 Geneva 도 맥에서는 hhea 값이라 같다. 리눅스는 typo 값을 쓴다.
+	//==============================================================================
+	#[test]
+	#[cfg(target_os = "macos")]
+	fn normal_line_height_matches_chrome_mac() {
+		let case_list: [(&str, u32, [f32; 4]); 4] = [
+			("/System/Library/Fonts/Geneva.ttf", 0, [17.0, 19.0, 21.0, 27.0]),
+			("/System/Library/Fonts/Supplemental/Arial.ttf", 0, [15.0, 16.0, 18.0, 23.0]),
+			("/System/Library/Fonts/Supplemental/Verdana.ttf", 0, [16.0, 17.0, 19.0, 24.0]),
+			("/System/Library/Fonts/Helvetica.ttc", 0, [15.0, 16.0, 18.0, 23.0]),
+		];
+		for (font_path, face_index, expected_list) in case_list {
+			let font_bytes = match std::fs::read(font_path) {
+				Ok(font_bytes) => {
+					font_bytes
+				}
+				Err(_) => {
+					continue;
+				}
+			};
+			let loaded_font = LoadedFont::create_from_shared_bytes(Rc::from(font_bytes), face_index, &[]).expect("font");
+			for (pixel_size, expected) in [13.0, 14.0, 16.0, 20.0].into_iter().zip(expected_list) {
+				assert_eq!(loaded_font.calculate_normal_line_height(pixel_size), expected, "{} {}", font_path, pixel_size);
+			}
+		}
+		// USE_TYPO_METRICS 를 켠 Geneva. (OS/2 fsSelection 의 7 번 비트)
+		if let Ok(mut font_bytes) = std::fs::read("/System/Library/Fonts/Geneva.ttf") {
+			let table_count = u16::from_be_bytes([font_bytes[4], font_bytes[5]]) as usize;
+			for table_index in 0..table_count {
+				let record = 12 + table_index * 16;
+				if &font_bytes[record..record + 4] == b"OS/2" {
+					let table_offset = u32::from_be_bytes([font_bytes[record + 8], font_bytes[record + 9], font_bytes[record + 10], font_bytes[record + 11]]) as usize;
+					font_bytes[table_offset + 63] |= 0x80;
+				}
+			}
+			let loaded_font = LoadedFont::create_from_shared_bytes(Rc::from(font_bytes), 0, &[]).expect("font");
+			assert_eq!(loaded_font.calculate_normal_line_height(13.0), 17.0);
+		}
+	}
+
+	//==============================================================================
 	/// unicode-range 글 읽기. (원본 parseUnicodeRange 와 같은 결과)
 	//==============================================================================
 	#[test]
@@ -2164,7 +2275,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	/// 기울이면 기준선 위는 오른쪽으로 아래는 왼쪽으로 밀린다.
+	/// 덮인 정도 넓히기: 반지름 0.5 면 막대 양옆 열이 반쯤 덮이고 먼 곳은 비어 있다.
 	//==============================================================================
 	#[test]
 	fn dilate_moves_edge_by_radius() {

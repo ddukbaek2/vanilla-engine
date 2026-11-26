@@ -6,17 +6,17 @@
 //!   create... 정적 함수는 원본처럼 새 행렬을 돌려준다.
 //! - 좌표계는 원본과 같이 오른손이다. create_perspective 는 OpenGL 식(카메라는 -Z 를 보고, 깊이는 -1 ~ 1),
 //!   create_look_at 은 눈에서 대상 반대쪽이 +Z(뒤쪽 축)인 뷰 행렬, 회전은 라디안이고 축을 바라볼 때 반시계가 양수다.
-//! - 원본 get_elements() 는 Float32Array 를 내주고 호출자가 그 안을 직접 고친다. 러스트 판은 elements 를 공개 필드로 두고,
+//! - 원본 getElements() 는 Float32Array 를 내주고 호출자가 그 안을 직접 고친다. 러스트 판은 elements 를 공개 필드로 두고,
 //!   get_elements() 는 읽기 참조를, write_to_array / write_to_slice 는 유니폼 배열에 옮겨 쓰는 일을 맡는다.
 //! - 원본은 Float32Array(f32)에 담되 계산은 f64 로 한다. 러스트 판은 담기와 계산 모두 f32 라 끝자리가 조금 다를 수 있다.
-//! - 원본 transform_point 의 { x, y, z, w } 는 TransformedPoint 로, transform_direction 의 { x, y, z } 는 Vector3 로 돌려준다.
+//! - 원본 transformPoint 의 { x, y, z, w } 는 TransformedPoint 로, transform_direction 의 { x, y, z } 는 Vector3 로 돌려준다.
 //! - 원본 clone 은 Copy 로 갈음한다. 원본에 없는 전치(transpose)는 만들지 않았다.
 //==============================================================================
 use crate::base::quaternion::Quaternion;
 use crate::base::vector3::Vector3;
 
 //==============================================================================
-/// 동차 좌표 점. (원본 transform_point 가 돌려주는 { x, y, z, w }, 원근 나누기는 호출자가 한다)
+/// 동차 좌표 점. (원본 transformPoint 가 돌려주는 { x, y, z, w }, 원근 나누기는 호출자가 한다)
 ///
 /// # 예제
 /// 원근 투영 뒤 깊이 구하기
@@ -258,7 +258,7 @@ impl Matrix4 {
 	}
 
 	//==============================================================================
-	/// 큰 배열의 offset 자리부터 16 개를 기록한다. (원본 joint_matrix_array.set(elements, joint_index * 16) 자리)
+	/// 큰 배열의 offset 자리부터 16 개를 기록한다. (원본 jointMatrixArray.set(elements, joint_index * 16) 자리)
 	///
 	/// # 인자
 	/// - `array`: 옮겨 쓸 큰 배열. (길이가 offset + 16 보다 짧으면 패닉)

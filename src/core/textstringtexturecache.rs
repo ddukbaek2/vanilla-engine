@@ -53,6 +53,13 @@ thread_local! {
 }
 
 //==============================================================================
+/// 글꼴 이름의 열쇠. (앞뒤 빈칸과 감싼 따옴표를 떼고 소문자, 폰트 문자열 "'My Font', serif" 의 이름을 읽은 것과 맞춘다)
+//==============================================================================
+fn create_family_key(family_name: &str) -> String {
+	family_name.trim().trim_matches(|character| character == '"' || character == '\'').to_lowercase()
+}
+
+//==============================================================================
 /// 이름의 얼굴이 없는 글자 지켜보기 시작. (원본 브라우저는 FontFace 를 document.fonts 에 올려 두면 캔버스가 그 글꼴로 글을 그릴 때 그 글자의 범위에 든 얼굴을 받기 시작한다)
 /// - 러스트 판은 얼굴을 받은 뒤에 올리므로, 지켜보는 이름으로 재거나 구운 글에서 올린 얼굴의 글자 범위에 들지 않은 글자를 모아 받는 쪽(UIFont)이 꺼내 받는다.
 ///
@@ -60,7 +67,7 @@ thread_local! {
 /// - `family_name`: 지켜볼 이름. (앞뒤 빈칸은 떼고 대소문자는 가리지 않는다)
 //==============================================================================
 pub fn watch_unresolved_family_characters(family_name: &str) {
-	let family_key = family_name.trim().to_lowercase();
+	let family_key = create_family_key(family_name);
 	UNRESOLVED_FAMILY_CHARACTER_TABLE.with(|table_cell| {
 		table_cell.borrow_mut().entry(family_key).or_default();
 	});
@@ -89,7 +96,7 @@ pub fn watch_unresolved_family_characters(family_name: &str) {
 /// ```
 //==============================================================================
 pub fn take_unresolved_family_characters(family_name: &str) -> String {
-	let family_key = family_name.trim().to_lowercase();
+	let family_key = create_family_key(family_name);
 	UNRESOLVED_FAMILY_CHARACTER_TABLE.with(|table_cell| {
 		match table_cell.borrow_mut().get_mut(&family_key) {
 			Some(character_set) => {
@@ -100,6 +107,28 @@ pub fn take_unresolved_family_characters(family_name: &str) -> String {
 			}
 		}
 	})
+}
+
+//==============================================================================
+/// Graphic 없이 CSS line-height normal 의 줄 높이 재기. (폰트 문자열, 크롬은 첫째로 쓸 수 있는 글꼴(primary font)의 LineSpacing)
+/// - 데스크탑은 그릴 때와 같은 얼굴 고르기의 첫 얼굴로 셈한다. (LoadedFont::calculate_normal_line_height) 글꼴이 하나도 없으면 None 이다.
+/// - 웹은 브라우저가 놓은 줄 높이를 읽는다. (platform/web/systemfont.rs)
+//==============================================================================
+pub fn measure_normal_line_height_without_graphic(font_string: &str) -> Option<f32> {
+	let font_description = parse_font_string(font_string);
+	#[cfg(target_arch = "wasm32")]
+	{
+		crate::platform::web::systemfont::measure_normal_line_height(&font_description)
+	}
+	#[cfg(not(target_arch = "wasm32"))]
+	{
+		SHARED_MEASURE_CACHE.with(|shared_measure_cache_cell| {
+			let shared_measure_cache = shared_measure_cache_cell.borrow();
+			let face_list = shared_measure_cache.as_ref()?.resolve_face_list(&font_description);
+			let primary_face = face_list.first()?;
+			Some(primary_face.font.calculate_normal_line_height(font_description.font_size))
+		})
+	}
 }
 
 //==============================================================================
@@ -632,7 +661,7 @@ impl TextStringTextureCache {
 	//==============================================================================
 	pub fn register_font_face(&mut self, family_name: &str, font_face_descriptors: FontFaceDescriptors, font_bytes: Vec<u8>) -> Result<(), String> {
 		let font = Rc::new(load_font(font_bytes)?);
-		let family_key = family_name.trim().trim_matches(|character| character == '"' || character == '\'').to_lowercase();
+		let family_key = create_family_key(family_name);
 		self.face_order_number += 1;
 		let order_number = self.face_order_number;
 		let face_list = self.font_family_table.entry(family_key.clone()).or_default();
@@ -662,7 +691,7 @@ impl TextStringTextureCache {
 	/// 지운 얼굴이 있으면 true.
 	//==============================================================================
 	pub fn unregister_font_face(&mut self, family_name: &str, source_key: &str) -> bool {
-		let family_key = family_name.trim().to_lowercase();
+		let family_key = create_family_key(family_name);
 		let mut removed_descriptor_list: Vec<FontFaceDescriptors> = Vec::new();
 		if let Some(face_list) = self.font_family_table.get_mut(&family_key) {
 			face_list.retain(|face| {
@@ -694,7 +723,7 @@ impl TextStringTextureCache {
 	/// - `source_key_list`: 얼굴 열쇠 목록. (뒤가 먼저 그린다)
 	//==============================================================================
 	pub fn set_font_face_order(&mut self, family_name: &str, source_key_list: &[String]) {
-		let family_key = family_name.trim().to_lowercase();
+		let family_key = create_family_key(family_name);
 		self.font_face_order_table.insert(family_key.clone(), source_key_list.to_vec());
 		self.apply_font_face_order(&family_key);
 		let all_descriptors = FontFaceDescriptors::new();
@@ -1280,7 +1309,7 @@ impl TextStringTextureCache {
 	/// 얼굴 수.
 	//==============================================================================
 	pub fn get_font_face_count(&self, family_name: &str) -> usize {
-		self.font_family_table.get(&family_name.trim().to_lowercase()).map(|face_list| face_list.len()).unwrap_or(0)
+		self.font_family_table.get(&create_family_key(family_name)).map(|face_list| face_list.len()).unwrap_or(0)
 	}
 
 	//==============================================================================
@@ -3992,6 +4021,33 @@ mod tests {
 		assert_eq!(take_unresolved_family_characters("watchedfamily"), "가나");
 		assert_eq!(take_unresolved_family_characters("WatchedFamily"), "");
 		assert_eq!(take_unresolved_family_characters("OtherFamily"), "");
+	}
+
+	//==============================================================================
+	/// 글꼴 이름 열쇠: 따옴표로 감싸 올린 이름도 올리기, 세기, 차례, 지우기가 같은 이름으로 찾는다.
+	/// (얼굴을 올리는 부분은 엔진 기본 글꼴 후보 가운데 이 PC 에 있는 것으로 본다, 하나도 없으면 열쇠만 본다)
+	//==============================================================================
+	#[test]
+	fn quoted_family_name_matches_everywhere() {
+		assert_eq!(create_family_key(" \"My Font\" "), "my font");
+		assert_eq!(create_family_key("'My Font'"), "my font");
+		assert_eq!(create_family_key("My Font"), "my font");
+		let font_bytes = match crate::platform::find_fallback_font_file("가", 400, false, false).and_then(|source| std::fs::read(source.path).ok()) {
+			Some(font_bytes) => {
+				font_bytes
+			}
+			None => {
+				return;
+			}
+		};
+		let mut text_string_texture_cache = TextStringTextureCache::new();
+		text_string_texture_cache.register_font_face("\"Quoted Family\"", FontFaceDescriptors::new(), font_bytes).expect("quoted face");
+		assert_eq!(text_string_texture_cache.get_font_face_count("Quoted Family"), 1);
+		assert_eq!(text_string_texture_cache.get_font_face_count("'Quoted Family'"), 1);
+		text_string_texture_cache.set_font_face_order("'Quoted Family'", &[String::new()]);
+		assert_eq!(text_string_texture_cache.font_face_order_table.get("quoted family").map(|source_key_list| source_key_list.len()), Some(1));
+		assert!(text_string_texture_cache.unregister_font_face("\"Quoted Family\"", ""));
+		assert_eq!(text_string_texture_cache.get_font_face_count("Quoted Family"), 0);
 	}
 
 	//==============================================================================

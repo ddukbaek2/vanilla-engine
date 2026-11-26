@@ -25,7 +25,7 @@
 //!   - 값은 원본의 숫자 / 문자열 / 참거짓을 TimelineValue 열거형으로 든다. 숫자는 f32 다.
 //!   - 핸들러는 원본처럼 마지막 인자로 타임라인 자신(&mut Timeline)을 받고, 노드에 거는 함수에 넘길 NodeTree 를 그 뒤에 같이 받는다.
 //!     부르는 동안 핸들러를 칸에서 꺼내 두므로 핸들러 안에서 pause, seek, set_*_handler 를 부를 수 있다. (새로 건 핸들러가 이긴다)
-//!   - 글 속성(text, number, fontSize, visibleCharacters, color)은 원본 get_component(Text) 가 Text 를 상속한 RichText 도 찾듯 RichText 노드에도 건다.
+//!   - 글 속성(text, number, fontSize, visibleCharacters, color)은 원본 getComponent(Text) 가 Text 를 상속한 RichText 도 찾듯 RichText 노드에도 건다.
 //!   - resolve_timeline_easing 은 함수 대신 TimelineEasing 값을 돌려준다. (evaluate(progress) 로 부른다)
 //!   - TIMELINE_PROPERTY_DEFINITIONS 는 이름 → 정의 객체 대신 정의 배열이고 find_timeline_property_definition 으로 찾는다.
 //!     TIMELINE_NODE_DEFAULTS 는 기본값을 채운 TimelineNodeDescription 이다. (원본 키 type 은 node_type)
@@ -71,7 +71,7 @@ use std::rc::Rc;
 use std::sync::LazyLock;
 
 //==============================================================================
-/// 이징 이름 목록. ("linear" / "step" / "bezier" / "<종류>.<in|out|in_out>")
+/// 이징 이름 목록. ("linear" / "step" / "bezier" / "<종류>.<in|out|inOut>")
 //==============================================================================
 pub const TIMELINE_EASING_NAMES: [&str; 33] = [
 	"linear", "step", "bezier",
@@ -1103,7 +1103,7 @@ pub struct TimelineMarker {
 pub enum TimelineTarget {
 	/// 노드. (정의된 속성은 노드에 바로 건다)
 	Node(NodeId),
-	/// 노드가 아닌 것. (원본 set_timeline_property 를 가진 객체, evaluate 가 그 자리에서 값을 넘긴다)
+	/// 노드가 아닌 것. (원본 setTimelineProperty 를 가진 객체, evaluate 가 그 자리에서 값을 넘긴다)
 	External(Rc<RefCell<dyn TimelinePropertyTarget>>),
 }
 
@@ -1143,7 +1143,7 @@ impl std::fmt::Debug for TimelineTarget {
 }
 
 //==============================================================================
-/// 노드가 아닌 대상이 값을 받는 트레이트. (원본 set_timeline_property(이름, 값))
+/// 노드가 아닌 대상이 값을 받는 트레이트. (원본 setTimelineProperty(이름, 값))
 /// - `Rc<RefCell<..>>` 로 쥐고 TimelineTarget::External 로 등록하면 evaluate 가 그 자리에서 부른다.
 ///
 /// # 예제
@@ -1745,7 +1745,7 @@ impl Component for TimelineSound {
 }
 
 //==============================================================================
-/// 노드의 T 컴포넌트를 찾고 없으면 붙인다. (원본 get_or_add_component)
+/// 노드의 T 컴포넌트를 찾고 없으면 붙인다. (원본 getOrAddComponent)
 //==============================================================================
 fn get_or_add_component<T: Component + 'static>(node: &mut WorldNode, create: impl FnOnce() -> T) -> &mut T {
 	if !node.has_component::<T>() {
@@ -1831,13 +1831,13 @@ fn read_track_keys(track: &Value) -> Vec<TimelineKey> {
 }
 
 /// 이벤트 핸들러. ((대상 이름, 이벤트 이름, 키, 타임라인, 노드 트리))
-type TimelineEventHandler = Box<dyn FnMut(&str, &str, &TimelineKey, &mut Timeline, &mut NodeTree)>;
+pub type TimelineEventHandler = Box<dyn FnMut(&str, &str, &TimelineKey, &mut Timeline, &mut NodeTree)>;
 /// 마커 핸들러. ((마커 이름, 마커, 타임라인, 노드 트리))
-type TimelineMarkerHandler = Box<dyn FnMut(&str, &TimelineMarker, &mut Timeline, &mut NodeTree)>;
+pub type TimelineMarkerHandler = Box<dyn FnMut(&str, &TimelineMarker, &mut Timeline, &mut NodeTree)>;
 /// 완료 핸들러. ((타임라인, 노드 트리))
-type TimelineCompleteHandler = Box<dyn FnMut(&mut Timeline, &mut NodeTree)>;
+pub type TimelineCompleteHandler = Box<dyn FnMut(&mut Timeline, &mut NodeTree)>;
 /// 대상 해석기. (이름 → 대상)
-type TimelineTargetResolver = Box<dyn Fn(&str) -> Option<TimelineTarget>>;
+pub type TimelineTargetResolver = Box<dyn Fn(&str) -> Option<TimelineTarget>>;
 /// 이미지 해석기. (이미지 이름 → 이미지)
 pub type TimelineImageResolver<'a> = &'a dyn Fn(&str) -> Option<Rc<Image>>;
 
@@ -3875,7 +3875,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	/// 글 속성은 원본처럼 RichText 노드에도 건다. (원본 get_component(Text) 가 RichText 도 찾는다)
+	/// 글 속성은 원본처럼 RichText 노드에도 건다. (원본 getComponent(Text) 가 RichText 도 찾는다)
 	//==============================================================================
 	#[test]
 	fn text_properties_apply_to_rich_text() {
@@ -3900,5 +3900,27 @@ mod tests {
 		assert_eq!(rich_text.get_font_size(), 30.0);
 		assert_eq!(rich_text.get_text_color(), Color::create(1.0, 0.0, 0.0, 1.0));
 		assert_eq!(rich_text.get_visible_character_count(), 1);
+	}
+
+	//==============================================================================
+	/// 핸들러 꼴 별칭은 공개라 크레이트 밖에서도 이름으로 지어 건다. (lib.rs 에서도 내보낸다)
+	//==============================================================================
+	#[test]
+	fn handler_aliases_are_public() {
+		let complete_handler: crate::TimelineCompleteHandler = Box::new(|timeline: &mut Timeline, _node_tree: &mut NodeTree| {
+			timeline.set_speed(3.0);
+		});
+		let event_handler: crate::TimelineEventHandler = Box::new(|_target_name: &str, _event_name: &str, _key: &TimelineKey, _timeline: &mut Timeline, _node_tree: &mut NodeTree| {});
+		let marker_handler: crate::TimelineMarkerHandler = Box::new(|_marker_name: &str, _marker: &TimelineMarker, _timeline: &mut Timeline, _node_tree: &mut NodeTree| {});
+		let target_resolver: crate::TimelineTargetResolver = Box::new(|_target_name: &str| None);
+		let mut node_tree = NodeTree::new();
+		let mut timeline = Timeline::new(Some(json!({ "duration": 0.5, "loop": false })));
+		timeline.set_complete_handler(Some(complete_handler));
+		timeline.set_event_handler(Some(event_handler));
+		timeline.set_marker_handler(Some(marker_handler));
+		timeline.set_target_resolver(Some(target_resolver));
+		timeline.play();
+		timeline.tick(&mut node_tree, 1.0);
+		assert_eq!(timeline.get_speed(), 3.0);
 	}
 }

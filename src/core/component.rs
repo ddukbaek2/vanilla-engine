@@ -326,7 +326,7 @@ pub trait Component: AsAny {
 	fn get_component_base_mut(&mut self) -> &mut ComponentBase;
 
 	//==============================================================================
-	/// 컴포넌트 이름. (원본 get_component_type)
+	/// 컴포넌트 이름. (원본 getComponentType)
 	///
 	/// # 돌려줌
 	/// 종류 이름. (보통 구조체 이름 그대로, 반사의 ComponentType 값)

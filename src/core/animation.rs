@@ -6,7 +6,7 @@
 //!   get_current_image / get_current_rect 로 지금 프레임을 꺼내 Sprite 에 넣는다.
 //! - 원본의 set_frames 계열은 배열이 아니거나 비면 그냥 돌아간다. 러스트 판은 타입이 정해져 있어서 빈 목록만 거른다.
 //!   (set_frames 는 원본처럼 빈 목록도 받는다)
-//! - 프레임 번호는 usize 다. 원본 goto_and_play(-1) 처럼 음수를 0 으로 맞추는 일은 타입이 대신한다.
+//! - 프레임 번호는 usize 다. 원본 gotoAndPlay(-1) 처럼 음수를 0 으로 맞추는 일은 타입이 대신한다.
 //==============================================================================
 use crate::base::rect::Rect;
 use crate::core::frame::Frame;

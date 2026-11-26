@@ -11,7 +11,7 @@
 //!     impl GameScene for TitleScene {
 //!         fn get_game_scene_base(&self) -> &GameSceneBase { &self.game_scene_base }
 //!         fn get_game_scene_base_mut(&mut self) -> &mut GameSceneBase { &mut self.game_scene_base }
-//!         fn load_assets(&mut self, engine: &mut Engine) {                       // 원본 load_assets 재정의 자리 (바탕의 로딩 이미지 요청 뒤)
+//!         fn load_assets(&mut self, engine: &mut Engine) {                       // 원본 loadAssets 재정의 자리 (바탕의 로딩 이미지 요청 뒤)
 //!             self.logo_asset.load(engine, "logo.png");
 //!             self.game_scene_base.get_scene_base_mut().track_asset(&self.logo_asset);
 //!         }
@@ -32,7 +32,7 @@
 //!     엔진은 맡긴 애셋이 모두(문 포함) 끝나야 initialize 를 부르므로 결과는 원본과 같다. (애셋 다 읽힘 + (최소 시간 또는 터치))
 //!   - 시간은 원본 Date.now() 대신 엔진 시작 뒤 실제 경과 시간(get_realtime_since_startup)으로 잰다.
 //!   - 화면 누름은 원본 window pointerdown 대신 입력 매니저의 is_touch_pressed 로 본다.
-//!   - 원본은 TouchRecognizer 를 initialize 에서 만든다. 러스트 판은 생성할 때 만든다. 터치는 원본 touch_press 같은 함수 대신 tick 이 넘긴다.
+//!   - 원본은 TouchRecognizer 를 initialize 에서 만든다. 러스트 판은 생성할 때 만든다. 터치는 원본 touchPress 같은 함수 대신 tick 이 넘긴다.
 //!     (SceneBase 의 터치 레이캐스터와 첫 터치 콜백은 쓰지 않는다)
 //!   - 세이프 에어리어: 웹은 원본처럼 CSS env(safe-area-inset-*) 를 읽는다. 데스크탑은 크롬 데스크탑처럼 0 이고,
 //!     set_safe_area_insets 로 정해 줄 수 있다. (정하면 웹에서도 그 값을 쓴다)
@@ -585,7 +585,7 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	/// 뷰 매니저에 ViewScaleMode 반영. (바뀌었으면 지금 캔버스 크기로 뷰 영역을 다시 계산한다. 원본 view_manager.set_view_scale_mode)
+	/// 뷰 매니저에 ViewScaleMode 반영. (바뀌었으면 지금 캔버스 크기로 뷰 영역을 다시 계산한다. 원본 viewManager.set_view_scale_mode)
 	//==============================================================================
 	fn apply_view_scale_mode(&self, engine: &mut Engine) {
 		let view_manager = engine.get_view_manager_mut();
@@ -879,7 +879,7 @@ impl GameSceneBase {
 	}
 
 	//==============================================================================
-	/// 자산 읽기. (원본 load_assets 의 기본 부분: 로딩 이미지. 씬의 자체 애셋은 씬 create 에서 요청하고 track_asset 으로 맡긴다)
+	/// 자산 읽기. (원본 loadAssets 의 기본 부분: 로딩 이미지. 씬의 자체 애셋은 씬 create 에서 요청하고 track_asset 으로 맡긴다)
 	/// - 로딩 이미지 경로가 비었으면 아무것도 하지 않는다.
 	///
 	/// # 인자
@@ -2737,9 +2737,7 @@ mod tests {
 		assert_eq!(reported_scene_base.get_loading_progress_state().get_progress(), 1.0);
 		assert!(!reported_scene_base.get_scene_base().are_tracked_assets_finished());
 	}
-	//==============================================================================
-	/// game_scene! 으로 만든 씬: 바탕이 resize 에서 게임 영역 기준과 레이아웃을 하고 씬의 layout 을 부른다. 첫 tick 에도 layout 이 불린다.
-	//==============================================================================
+
 	struct LayoutCountScene {
 		game_scene_base: GameSceneBase,
 		layout_count: u32,

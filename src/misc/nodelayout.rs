@@ -21,7 +21,7 @@
 //!   노드 클래스가 없으므로 create(nodeClass) 대신 create() 다.
 //!   component(type, callback) 은 component(값) 과 component_with(값, 콜백) 둘로 나눴다. (러스트는 생략 인자가 없다)
 //!   children(...layouts) 의 가변 인자는 배열이나 Vec 하나로 받는다.
-//!   anchored_position 은 build 때 부모 content_size 기준으로 건다. 원본은 부모가 붙기 전에 불려서 사실상 local_position 과 같았다.
+//!   anchored_position 은 원본처럼 build 때 부모에 붙인 뒤 부모 content_size 의 앵커 점 기준으로 건다. (앵커는 그 설정을 걸 때의 앵커, 나중에 건 local_position 이 이긴다)
 //!   mask_enabled(false) 는 원본처럼 첫 마스크만이 아니라 그 노드의 Mask 를 모두 뗀다.
 //==============================================================================
 use crate::base::math;
@@ -600,6 +600,28 @@ mod tests {
 		let unmasked_id = NodeLayout::create().mask_enabled(true).mask_enabled(false).build(&mut node_tree, None);
 		assert!(!node_tree[unmasked_id].has_component::<Mask>());
 		assert_eq!(node_tree.get_parent_id(unmasked_id), None);
+	}
+
+	//==============================================================================
+	/// 앵커 기준 위치는 부모에 붙인 뒤 그때의 앵커로 걸고, 나중에 건 local_position 이 이긴다. 부모가 없으면 로컬 위치 그대로다.
+	//==============================================================================
+	#[test]
+	fn anchored_position_follows_call_order() {
+		let mut node_tree = NodeTree::new();
+		let root_id = node_tree.get_root_id();
+		let panel_id = NodeLayout::create()
+			.content_size(400.0, 200.0)
+			.children([
+				NodeLayout::create().name("later_local").anchor(1.0, 0.0).anchored_position(-10.0, 5.0).local_position(30.0, 40.0),
+				NodeLayout::create().name("later_anchor").anchored_position(-10.0, 5.0).anchor(0.0, 0.0),
+			])
+			.build(&mut node_tree, Some(root_id));
+		let later_local_id = node_tree.find_child_by_name(panel_id, "later_local").expect("later_local");
+		assert_eq!(node_tree[later_local_id].get_local_position(), Vector2::create(30.0, 40.0));
+		let later_anchor_id = node_tree.find_child_by_name(panel_id, "later_anchor").expect("later_anchor");
+		assert_eq!(node_tree[later_anchor_id].get_local_position(), Vector2::create(190.0, 105.0));
+		let orphan_id = NodeLayout::create().anchor(1.0, 1.0).anchored_position(12.0, 34.0).build(&mut node_tree, None);
+		assert_eq!(node_tree[orphan_id].get_local_position(), Vector2::create(12.0, 34.0));
 	}
 
 	//==============================================================================

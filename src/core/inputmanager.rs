@@ -1013,8 +1013,7 @@ impl InputManager {
 	}
 
 	//==============================================================================
-	/// 터치 상태. (Pressed / Released / Cancelled / Moved 는 그 프레임에만 켜진다)
-	/// - 이번 프레임에 눌렀는지 설정. (플랫폼이 켜고 엔진이 프레임 끝에 끈다)
+	/// 터치 상태. (Pressed / Released / Cancelled 는 그 프레임에만 켜진다, Moved 는 누른 동안 켜진다 set_touch_moved)
 	///
 	/// # 인자
 	/// - `value`: 이번 프레임에 눌렀으면 true.
@@ -1489,5 +1488,29 @@ mod tests {
 		input_manager.begin_touch_point(7, Vector2::create(1.0, 2.0), Vector2::create(3.0, 4.0));
 		assert_eq!(input_manager.find_touch_point(7).map(|touch_point| touch_point.view_position), Some(Vector2::create(3.0, 4.0)));
 		assert!(input_manager.find_touch_point(8).is_none());
+	}
+
+	//==============================================================================
+	/// 창이 포커스를 잃을 때(웹 blur, 데스크탑 Focused(false))처럼 비우면 키, 마우스 단추, 터치 눌림이 모두 풀리는지. (keyup 이 오지 않아도 눌린 채 남지 않는다)
+	//==============================================================================
+	#[test]
+	fn clear_releases_held_input_on_focus_lost() {
+		let mut input_manager = InputManager::new();
+		input_manager.push_key("KeyW");
+		input_manager.push_key("ShiftLeft");
+		input_manager.set_mouse_button_down(MouseButton::Left, true);
+		input_manager.set_touch_down(true);
+		input_manager.update_frame_snapshot();
+		assert!(input_manager.is_key_pressed("KeyW"));
+		input_manager.clear();
+		input_manager.set_touch_released(true);
+		assert!(!input_manager.is_key_pressed("KeyW"));
+		assert!(!input_manager.is_key_pressed("ShiftLeft"));
+		assert!(!input_manager.is_mouse_button_down(MouseButton::Left));
+		assert!(!input_manager.is_touch_down());
+		assert!(input_manager.is_touch_released());
+		// 다시 누르면 새 누름으로 본다.
+		input_manager.push_key("KeyW");
+		assert!(input_manager.is_key_just_pressed("KeyW"));
 	}
 }

@@ -1,8 +1,10 @@
 //==============================================================================
 //! 색상. (각 성분 0 ~ 1, 원본 base/color.js)
 //! - 원본의 red, green, blue, alpha 프로퍼티는 공개 필드로, clone 은 복사(Copy)로 갈음한다.
-//! - to_rgba_string, to_hex_string 은 원본처럼 알파가 1 보다 작을 때만 알파를 붙인다. 원본처럼 0 ~ 1 밖의 값을 자르지 않아
-//!   두 자리가 넘거나 음수인 16진수도 원본과 같은 글로 나온다. (예: 1.5 → "17f", -0.2 → "-33", NaN → "NaN")
+//! - 성분은 0 ~ 1 이 보통이지만 원본처럼 밖의 값도 자르지 않고 담는다. (빛나는 색처럼 1 을 넘는 HDR 색, 유니티 Color 와 같다)
+//! - to_rgba_string, to_hex_string 은 원본처럼 알파가 1 보다 작을 때만 알파를 붙이고, 성분은 0 ~ 255 로, rgba 의 알파는 0 ~ 1 로 잘라 적는다.
+//!   (유니티 Color32 로 바꿀 때와 같다, NaN 은 원본처럼 "NaN")
+//! - create_from_rgba 는 원본 createFromRGBA 의 정규식과 같은 것을 읽는다. (소문자로 바꿔 rgb 로 시작해야 하고, 그 안의 첫 rgb(정수, 정수, 정수[, 알파]))
 //! - create_from_hex 는 원본 createFromHEX 처럼 # 으로 시작해야 하고 "#rgb", "#rgba", "#rrggbb", "#rrggbbaa" 를 읽는다.
 //!   두 자리씩 원본 parseInt(글, 16) 처럼 읽어, 그 밖의 길이나 16진수가 아닌 글자도 원본과 같은 값(못 읽은 성분은 NaN)이 된다.
 //! - from_hex_cached, from_cache 는 Color 가 Copy 라 나눠 쓰는 인스턴스 대신 캐시에 든 값을 복사해 준다.
@@ -235,12 +237,13 @@ impl Color {
 
 	//==============================================================================
 	/// "rgb(r, g, b)" / "rgba(r, g, b, a)" 문자열로 생성. (r, g, b 는 0 ~ 255, a 는 0 ~ 1)
+	/// - 원본 정규식 `rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([\d.]+))?\s*\)` 의 첫 일치를 읽는다. r, g, b 는 정수, 알파는 원본 parseFloat 처럼 앞에서 읽히는 데까지.
 	///
 	/// # 인자
-	/// - `rgba_string`: "rgb(r, g, b)" 나 "rgba(r, g, b, a)" 글. (괄호 안을 쉼표로 나눠 수로 읽히는 것만 차례로 쓴다)
+	/// - `rgba_string`: "rgb(r, g, b)" 나 "rgba(r, g, b, a)" 글. (앞뒤 공백과 대소문자는 가리지 않는다)
 	///
 	/// # 돌려줌
-	/// 읽은 색. 괄호가 없거나 수로 읽힌 값이 셋보다 적으면 흰색, 알파가 없으면 1.
+	/// 읽은 색. rgb 로 시작하지 않거나 맞는 꼴이 없으면 흰색, 알파가 없으면 1.
 	///
 	/// # 예제
 	/// rgba 글과 값이 모자란 글
@@ -252,20 +255,14 @@ impl Color {
 	/// ```
 	//==============================================================================
 	pub fn create_from_rgba(rgba_string: &str) -> Color {
-		let trimmed_string = rgba_string.trim();
-		let open_index = trimmed_string.find('(');
-		let close_index = trimmed_string.rfind(')');
-		if let (Some(open_index), Some(close_index)) = (open_index, close_index) {
-			let inner = &trimmed_string[open_index + 1..close_index];
-			let values: Vec<f32> = inner.split(',').filter_map(|part| part.trim().parse::<f32>().ok()).collect();
-			if values.len() >= 3 {
-				let alpha = if values.len() >= 4 {
-					values[3]
-				}
-				else {
-					1.0
-				};
-				return Color::create(values[0] / 255.0, values[1] / 255.0, values[2] / 255.0, alpha);
+		let lowered_string = rgba_string.trim().to_lowercase();
+		if !lowered_string.starts_with("rgb") {
+			return Color::white();
+		}
+		let character_list: Vec<char> = lowered_string.chars().collect();
+		for start_index in 0..character_list.len() {
+			if let Some((red, green, blue, alpha)) = match_rgba_function(&character_list, start_index) {
+				return Color::create(red / 255.0, green / 255.0, blue / 255.0, alpha.unwrap_or(1.0));
 			}
 		}
 		Color::white()
@@ -275,14 +272,14 @@ impl Color {
 	/// "rgb(r, g, b)" 또는 "rgba(r, g, b, a)" 문자열로 변환. (알파가 1 보다 작을 때만 rgba)
 	///
 	/// # 돌려줌
-	/// "rgb(r, g, b)", 알파가 1 보다 작으면 "rgba(r, g, b, a)". (r, g, b 는 성분 x 255 를 반올림한 정수, a 는 알파 그대로)
+	/// "rgb(r, g, b)", 알파가 1 보다 작으면 "rgba(r, g, b, a)". (r, g, b 는 성분 x 255 를 반올림해 0 ~ 255 로 자른 정수, a 는 0 ~ 1 로 자른 알파)
 	//==============================================================================
 	pub fn to_rgba_string(&self) -> String {
 		let red = format_component_number(self.red, 10);
 		let green = format_component_number(self.green, 10);
 		let blue = format_component_number(self.blue, 10);
 		if self.alpha < 1.0 {
-			format!("rgba({}, {}, {}, {})", red, green, blue, self.alpha)
+			format!("rgba({}, {}, {}, {})", red, green, blue, math::clamp(self.alpha, 0.0, 1.0))
 		}
 		else {
 			format!("rgb({}, {}, {})", red, green, blue)
@@ -293,7 +290,7 @@ impl Color {
 	/// "#rrggbb" 또는 "#rrggbbaa" 문자열로 변환. (알파가 1 보다 작을 때만 aa)
 	///
 	/// # 돌려줌
-	/// "#rrggbb", 알파가 1 보다 작으면 "#rrggbbaa". (소문자 16진수)
+	/// "#rrggbb", 알파가 1 보다 작으면 "#rrggbbaa". (소문자 16진수, 성분마다 0 ~ 255 로 자른 두 자리)
 	///
 	/// # 예제
 	/// 알파가 1 이면 붙이지 않는다
@@ -352,7 +349,7 @@ impl Color {
 }
 
 //==============================================================================
-/// 문자열 → 색상. ("#..." 또는 "rgb(...)", 그 외는 흰색. 원본 parse_color_value 와 같다)
+/// 문자열 → 색상. ("#..." 또는 "rgb(...)", 그 외는 흰색. 원본 parseColorValue 와 같다)
 //==============================================================================
 impl Color {
 	//==============================================================================
@@ -443,12 +440,11 @@ fn parse_color_string(color_string: &str) -> Color {
 }
 
 //==============================================================================
-/// 성분(0 ~ 1)을 원본처럼 math.round(성분 * 255) 의 글로. (범위 밖도 자르지 않는다)
-/// - 원본 Number.toString(16) 과 padStart(2, "0") 처럼 16진수는 두 자리가 안 되면 앞에 0 을 채우고, 음수는 앞에 - 를 붙인다.
-///   NaN 과 무한대는 원본처럼 "NaN", "Infinity", "-Infinity" 다.
+/// 성분(0 ~ 1)을 원본처럼 math.clamp(math.round(성분 * 255), 0, 255) 의 글로. (원본 toByteComponent)
+/// - 원본 Number.toString(16) 과 padStart(2, "0") 처럼 16진수는 두 자리가 안 되면 앞에 0 을 채운다. NaN 은 원본처럼 "NaN" 이다.
 //==============================================================================
 fn format_component_number(value: f32, radix: u32) -> String {
-	let rounded_value = math::round(value * 255.0);
+	let rounded_value = math::clamp(math::round(value * 255.0), 0.0, 255.0);
 	if rounded_value.is_nan() {
 		return String::from("NaN");
 	}
@@ -470,6 +466,106 @@ fn format_component_number(value: f32, radix: u32) -> String {
 		digit_text
 	};
 	format!("{:0>2}", signed_text)
+}
+
+//==============================================================================
+/// 원본 createFromRGBA 정규식이 그 자리에서 맞는지 보고 맞으면 (r, g, b, 알파) 를 돌려준다.
+/// - `rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([\d.]+))?\s*\)`: 알파 묶음이 맞지 않으면 묶음 없이 닫는 괄호를 본다. (정규식의 되짚기와 같다)
+//==============================================================================
+fn match_rgba_function(character_list: &[char], start_index: usize) -> Option<(f32, f32, f32, Option<f32>)> {
+	let mut index = start_index;
+	for expected_character in ['r', 'g', 'b'] {
+		if character_list.get(index) != Some(&expected_character) {
+			return None;
+		}
+		index += 1;
+	}
+	if character_list.get(index) == Some(&'a') {
+		index += 1;
+	}
+	if character_list.get(index) != Some(&'(') {
+		return None;
+	}
+	index += 1;
+	let mut component_list = [0.0f32; 3];
+	for (component_index, component) in component_list.iter_mut().enumerate() {
+		if component_index > 0 {
+			index = skip_regex_whitespace(character_list, index);
+			if character_list.get(index) != Some(&',') {
+				return None;
+			}
+			index += 1;
+		}
+		index = skip_regex_whitespace(character_list, index);
+		let digit_start_index = index;
+		while character_list.get(index).is_some_and(|character| character.is_ascii_digit()) {
+			index += 1;
+		}
+		if index == digit_start_index {
+			return None;
+		}
+		let digit_text: String = character_list[digit_start_index..index].iter().collect();
+		*component = digit_text.parse::<f64>().unwrap_or(f64::NAN) as f32;
+	}
+
+	// 알파 묶음. (\s*,\s*[\d.]+ 뒤에 \s*\) 가 와야 맞는다)
+	let alpha_start_index = skip_regex_whitespace(character_list, index);
+	if character_list.get(alpha_start_index) == Some(&',') {
+		let alpha_text_start_index = skip_regex_whitespace(character_list, alpha_start_index + 1);
+		let mut alpha_end_index = alpha_text_start_index;
+		while character_list.get(alpha_end_index).is_some_and(|character| character.is_ascii_digit() || *character == '.') {
+			alpha_end_index += 1;
+		}
+		if alpha_end_index > alpha_text_start_index {
+			let close_index = skip_regex_whitespace(character_list, alpha_end_index);
+			if character_list.get(close_index) == Some(&')') {
+				let alpha_text: String = character_list[alpha_text_start_index..alpha_end_index].iter().collect();
+				return Some((component_list[0], component_list[1], component_list[2], Some(parse_float_prefix(&alpha_text))));
+			}
+		}
+	}
+	let close_index = skip_regex_whitespace(character_list, index);
+	if character_list.get(close_index) == Some(&')') {
+		return Some((component_list[0], component_list[1], component_list[2], None));
+	}
+	None
+}
+
+//==============================================================================
+/// 정규식 \s* 처럼 공백 건너뛰기. (건너뛴 다음 자리)
+//==============================================================================
+fn skip_regex_whitespace(character_list: &[char], start_index: usize) -> usize {
+	let mut index = start_index;
+	while character_list.get(index).is_some_and(|character| character.is_whitespace()) {
+		index += 1;
+	}
+	index
+}
+
+//==============================================================================
+/// 숫자와 점으로 된 글을 원본 parseFloat 처럼 앞에서 읽히는 데까지 읽기. ("0.5.7" 은 0.5, "." 은 NaN)
+//==============================================================================
+fn parse_float_prefix(number_text: &str) -> f32 {
+	let mut prefix_text = String::new();
+	let mut has_point = false;
+	let mut has_digit = false;
+	for character in number_text.chars() {
+		if character.is_ascii_digit() {
+			has_digit = true;
+			prefix_text.push(character);
+		}
+		else if character == '.' && !has_point {
+			has_point = true;
+			prefix_text.push(character);
+		}
+		else {
+			break;
+		}
+	}
+	if !has_digit {
+		return f32::NAN;
+	}
+	prefix_text.trim_end_matches('.').parse::<f64>().unwrap_or(f64::NAN) as f32
 }
 
 //==============================================================================
@@ -579,9 +675,56 @@ mod tests {
 		let partial_color = Color::create_from_hex("#1zz");
 		assert_eq!(partial_color.red, 17.0 / 255.0);
 		assert!(partial_color.green.is_nan());
-		assert_eq!(Color::create(1.5, -0.2, 0.0, 1.0).to_hex_string(), "#17f-3300");
-		assert_eq!(Color::create(1.5, -0.2, 0.0, 1.0).to_rgba_string(), "rgb(383, -51, 0)");
+		assert_eq!(Color::create(1.5, -0.2, 0.0, 1.0).to_hex_string(), "#ff0000");
+		assert_eq!(Color::create(1.5, -0.2, 0.0, 1.0).to_rgba_string(), "rgb(255, 0, 0)");
 		assert_eq!(partial_color.to_hex_string(), "#11NaNNaN");
+	}
+
+	//==============================================================================
+	/// 0 ~ 1 밖 성분은 담고(HDR), 0 ~ 255 글로 낼 때만 자른다. (원본 toByteComponent, 같은 입력을 원본 node 로 돌린 값)
+	//==============================================================================
+	#[test]
+	fn out_of_range_components_are_kept_and_clamped_in_text() {
+		let bright_color = Color::create(1.5, -0.2, 0.5, 1.2);
+		assert_eq!(bright_color.red, 1.5);
+		assert_eq!(bright_color.alpha, 1.2);
+		assert_eq!(bright_color.to_rgba_string(), "rgb(255, 0, 128)");
+		assert_eq!(bright_color.to_hex_string(), "#ff0080");
+		let negative_alpha_color = Color::create(0.5, 0.5, 0.5, -0.5);
+		assert_eq!(negative_alpha_color.to_rgba_string(), "rgba(128, 128, 128, 0)");
+		assert_eq!(negative_alpha_color.to_hex_string(), "#80808000");
+		let not_a_number_color = Color::create(f32::NAN, 1.5, -0.2, f32::NAN);
+		assert_eq!(not_a_number_color.to_hex_string(), "#NaNff00");
+		assert_eq!(not_a_number_color.to_rgba_string(), "rgb(NaN, 255, 0)");
+	}
+
+	//==============================================================================
+	/// rgb 글은 원본 createFromRGBA 의 정규식처럼 읽는다. (같은 글을 원본 node 로 돌린 값, ")(" 처럼 괄호가 뒤집혀도 흰색)
+	//==============================================================================
+	#[test]
+	fn rgba_strings_match_original_regex() {
+		let byte = |value: f32| value / 255.0;
+		let case_list: [(&str, (f32, f32, f32, f32)); 14] = [
+			("rgba(255, 0, 0, 0.5)", (1.0, 0.0, 0.0, 0.5)),
+			("rgb(0, 255)", (1.0, 1.0, 1.0, 1.0)),
+			("RGB(10,20,30)", (byte(10.0), byte(20.0), byte(30.0), 1.0)),
+			("rgb(10.5, 0, 0)", (1.0, 1.0, 1.0, 1.0)),
+			("rgba(1,2,3,0.5.7)", (byte(1.0), byte(2.0), byte(3.0), 0.5)),
+			("x rgb(1,2,3)", (1.0, 1.0, 1.0, 1.0)),
+			("rgbx rgb(1,2,3)", (byte(1.0), byte(2.0), byte(3.0), 1.0)),
+			("rgb)(", (1.0, 1.0, 1.0, 1.0)),
+			("rgb(1,2,3,)", (1.0, 1.0, 1.0, 1.0)),
+			("rgb( 1 , 2 , 3 )", (byte(1.0), byte(2.0), byte(3.0), 1.0)),
+			("rgba(300, 0, 0, 2)", (byte(300.0), 0.0, 0.0, 2.0)),
+			("rgb(1,2,3) rgb(4,5,6)", (byte(1.0), byte(2.0), byte(3.0), 1.0)),
+			("rgba(1,2,3,4", (1.0, 1.0, 1.0, 1.0)),
+			("rgb(1,2,3 , 0.5 )", (byte(1.0), byte(2.0), byte(3.0), 0.5)),
+		];
+		for (rgba_string, (red, green, blue, alpha)) in case_list {
+			assert_eq!(Color::create_from_rgba(rgba_string), Color::create(red, green, blue, alpha), "{}", rgba_string);
+		}
+		assert!(Color::create_from_rgba("rgba(1,2,3,.)").alpha.is_nan());
+		assert_eq!(Color::from("rgb)("), Color::white());
 	}
 
 	//==============================================================================

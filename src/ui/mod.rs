@@ -7,7 +7,7 @@
 //! - UIInputField 는 엔진 글 입력 줄(core/textinput.rs)에서 키, IME, 웹 숨긴 DOM 입력의 이벤트를 받는다.
 //! - 원본에서 WorldNode 를 상속한 위젯(UIDropdown, UIDialog, UIToast, UISpinner, UIContextMenu)도 호스트 노드에 붙는 컴포넌트다.
 //!   붙을 때 원본 생성자처럼 호스트를 꾸미고 자식 노드를 만든다. 각 위젯의 create(node_tree, parent_id, options) 가 new + add_child 자리다.
-//! - 옮기지 않은 것: UINode / 오토레이아웃 / UIScene 노선. (UIDocument 는 리플렉션 대신 종류 이름 표로 옮겼다)
+//! - UINode, 오토레이아웃(autolayout), UIScene 노선도 옮겼다. (UIDocument 는 리플렉션 대신 종류 이름 표로 옮겼다)
 //==============================================================================
 pub mod buttonmotion;
 pub mod popupmotion;

@@ -488,7 +488,7 @@ pub fn resume_audio_context(state_cell: &Rc<RefCell<AudioManagerState>>) {
 }
 
 //==============================================================================
-/// 오디오 컨텍스트 멈춤. (돌고 있을 때만 그리기와 시계를 세운다, 원본 audio_context.suspend() 자리)
+/// 오디오 컨텍스트 멈춤. (돌고 있을 때만 그리기와 시계를 세운다, 원본 audioContext.suspend() 자리)
 //==============================================================================
 pub fn suspend_audio_context(state_cell: &Rc<RefCell<AudioManagerState>>) {
 	let state = &mut *state_cell.borrow_mut();
@@ -517,7 +517,7 @@ pub fn is_audio_context_running(state: &AudioManagerState) -> bool {
 }
 
 //==============================================================================
-/// 오디오 컨텍스트 시계. (초, 원본 audio_context.currentTime 자리, 그린 프레임 수 / 표본율, 없으면 0)
+/// 오디오 컨텍스트 시계. (초, 원본 audioContext.currentTime 자리, 그린 프레임 수 / 표본율, 없으면 0)
 //==============================================================================
 pub fn get_audio_context_time(state: &AudioManagerState) -> f64 {
 	state.platform_state.mixer_link.as_ref().map(|mixer_link| mixer_link.get_current_time()).unwrap_or(0.0)
@@ -640,7 +640,7 @@ impl AudioPlayerBackend {
 	}
 
 	//==============================================================================
-	/// 소리를 낼 수 있는지. (원본 audio_context && gain_node)
+	/// 소리를 낼 수 있는지. (원본 audioContext && gain_node)
 	//==============================================================================
 	pub fn is_available(&self) -> bool {
 		self.mixer_link.is_some()
@@ -787,7 +787,7 @@ impl AudioBusBackend {
 	}
 
 	//==============================================================================
-	/// 소리를 모을 수 있는지. (원본 audio_context && gain_node)
+	/// 소리를 모을 수 있는지. (원본 audioContext && gain_node)
 	//==============================================================================
 	pub fn is_available(&self) -> bool {
 		self.gain_node.is_some()

@@ -189,8 +189,8 @@ impl AudioBus {
 	}
 
 	//==============================================================================
-	/// 버스의 GainNode. (원본 getGainNode, 웹 GainNode, 데스크탑 버스 트랙을 나눠 드는 `Rc<RefCell<TrackHandle>>`, AudioContext 가 없을 때 만든 버스는 None)
-	/// - 노드에 직접 건 크기는 크기 칸과 음소거 칸을 바꾸지 않는다. (원본과 같다) 데스크탑은 트랙을 borrow_mut 로 빌린 동안 이 버스의 함수를 부르지 않는다.
+	/// 버스의 GainNode. (원본 getGainNode, 웹 GainNode, 데스크탑 버스의 믹서 크기 노드를 나눠 드는 `Rc<MixerGainNode>`, AudioContext 가 없을 때 만든 버스는 None)
+	/// - 노드에 직접 건 크기는 크기 칸과 음소거 칸을 바꾸지 않는다. (원본과 같다)
 	///
 	/// # 돌려줌
 	/// 버스 노드를 나눠 드는 손잡이. (as_deref() 가 AudioPlayer::new 의 내보낼 곳이다, 소리 없는 버스는 None)

@@ -1342,7 +1342,7 @@ mod tests {
 
 	//==============================================================================
 	/// 엔진을 빌려 이어 가는 손잡이: AssetLoader::load 의 손잡이는 기다리는 동안 update 를 불러 실패 목록으로 끝나고,
-	/// Timeline::load_from_url 은 받지 못하면 까닭으로 끝난다. VisualAsset::load 는 원본처럼 바로 끝난다.
+	/// Timeline::load_from_url 과 VisualAsset::load 는 받지 못하면 까닭으로 끝난다. (데스크탑 파일 읽기는 그 자리에서 끝난다)
 	//==============================================================================
 	#[test]
 	fn engine_driven_load_handles_finish() {
@@ -1359,17 +1359,18 @@ mod tests {
 		let task_asset_loader = asset_loader.clone();
 		engine.spawn_task(move |mut engine_context| async move {
 			let mut visual_asset = VisualAsset::new();
-			task_result_list.borrow_mut().push(format!("visual {} {}", visual_asset.load("hero.visual").await.is_ok(), visual_asset.is_loaded()));
+			let visual_load_handle = engine_context.with(|engine| visual_asset.load(engine, "missing-visual.scene.json"));
+			task_result_list.borrow_mut().push(format!("visual {} {}", visual_load_handle.await.is_ok(), visual_asset.is_loaded()));
 			let failed_list = engine_context.with(|engine| task_asset_loader.load(engine)).await;
 			task_result_list.borrow_mut().push(format!("loader {}", failed_list.len()));
 			let timeline_result = engine_context.with(|engine| Timeline::load_from_url(engine, "missing-timeline.json")).await;
 			task_result_list.borrow_mut().push(format!("timeline {}", timeline_result.is_err()));
 		});
-		assert_eq!(*result_list.borrow(), vec![String::from("visual true false")]);
+		assert_eq!(*result_list.borrow(), vec![String::from("visual false false")]);
 		assert!(!asset_loader.is_finished());
 		external_handle.finish(Ok(Vec::new()));
 		poll_frame(&mut engine, &mut scene_list);
-		assert_eq!(*result_list.borrow(), vec![String::from("visual true false"), String::from("loader 0"), String::from("timeline true")]);
+		assert_eq!(*result_list.borrow(), vec![String::from("visual false false"), String::from("loader 0"), String::from("timeline true")]);
 		assert_eq!(asset_loader.get_finished_count(), 1);
 	}
 

@@ -29,7 +29,7 @@ use crate::base::vector2::Vector2;
 pub struct Steering2D;
 
 impl Steering2D {
-	/// orbit_at_range 의 기본 선회 파형 각속도. (원본 strafe_rate = 1.7)
+	/// orbit_at_range 의 기본 선회 파형 각속도. (원본 strafeRate = 1.7)
 	pub const DEFAULT_STRAFE_RATE: f32 = 1.7;
 
 	//==============================================================================

@@ -680,7 +680,7 @@ impl RichText {
 	}
 
 	//==============================================================================
-	/// 조각 배치. (합친 폭과 가장 큰 글자 크기로 정렬, 기준선은 Text 와 같은 규칙. 원본 draw_segments 의 자리 계산)
+	/// 조각 배치. (합친 폭과 가장 큰 글자 크기로 정렬, 기준선은 Text 와 같은 규칙. 원본 drawSegments 의 자리 계산)
 	/// - measure_width(폰트 문자열, 글) 은 글 폭을 돌려준다.
 	/// - text_direction 은 실제 문단 방향이다. (Ltr 또는 Rtl, Rtl 이면 조각을 오른쪽부터 놓고 Start 는 오른쪽 정렬)
 	///
@@ -941,7 +941,7 @@ impl RichText {
 	}
 
 	//==============================================================================
-	/// 조각 그리기. (원본 draw_segments)
+	/// 조각 그리기. (원본 drawSegments)
 	///
 	/// # 인자
 	/// - `graphic`: 그릴 Graphic. (문단 방향, 정렬, 기준선, 폰트 문자열, 색을 바꿔 가며 그린다)
@@ -1082,7 +1082,7 @@ pub fn build_font_string(font_family: &str, font_size: f32, is_bold: bool, is_it
 }
 
 //==============================================================================
-/// 색 값(#RRGGBB / #RRGGBBAA / 이름) 풀기. (원본 parse_color_value)
+/// 색 값(#RRGGBB / #RRGGBBAA / 이름) 풀기. (원본 parseColorValue)
 //==============================================================================
 fn parse_color_value(value: Option<&str>) -> Option<Color> {
 	let trimmed_value = value?.trim();
@@ -1120,7 +1120,7 @@ fn parse_leading_integer(text: &str) -> Option<i64> {
 }
 
 //==============================================================================
-/// 태그 하나 → 속성. (모르는 태그나 값이 틀리면 None. 원본 build_attributes_for_tag)
+/// 태그 하나 → 속성. (모르는 태그나 값이 틀리면 None. 원본 buildAttributesForTag)
 //==============================================================================
 fn build_attributes_for_tag(tag_name: &str, tag_value: Option<&str>) -> Option<RichTextAttributes> {
 	let mut attributes = RichTextAttributes::new();
@@ -1193,7 +1193,7 @@ fn match_tag_at(input: &str, start_byte_index: usize) -> Option<(usize, bool, St
 }
 
 //==============================================================================
-/// 마크업 → 조각 목록. (알려진 태그가 하나도 없으면 None. 원본 parse_markup_to_segments)
+/// 마크업 → 조각 목록. (알려진 태그가 하나도 없으면 None. 원본 parseMarkupToSegments)
 /// - 모르는 여는 태그는 글로 남긴다. 닫는 태그는 짝이 없어도 글에서 빠진다. (원본과 같음)
 ///
 /// # 인자

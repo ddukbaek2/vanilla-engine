@@ -154,15 +154,14 @@ impl Image {
 	//==============================================================================
 	/// 프리멀티플라이드 RGBA 픽셀로 생성. (SVG 를 그린 판처럼 이미 알파를 곱한 픽셀)
 	///
-	/// # 인자
-	/// - `width`: 너비. (픽셀)
-	/// - `height`: 높이. (픽셀)
-	/// - `pixels`: 프리멀티플라이드 RGBA 바이트. (위 줄부터 width x height x 4 바이트, 길이는 보지 않는다)
+	/// # 패닉
+	/// `pixels` 길이가 `width * height * 4` 가 아니면. (원본 `ImageData` 가 길이가 틀리면 예외를 던지는 것과 같다)
 	///
 	/// # 돌려줌
 	/// 새 그림. (새 인스턴스 식별자)
 	//==============================================================================
 	pub fn create_from_premultiplied_pixels(width: u32, height: u32, pixels: Vec<u8>) -> Rc<Image> {
+		assert_pixel_length(width, height, pixels.len());
 		Rc::new(Image {
 			instance_id: identifier::create_instance_id(),
 			width,
@@ -176,15 +175,14 @@ impl Image {
 	//==============================================================================
 	/// 스트레이트 알파 RGBA 픽셀로 생성. (코드로 만든 그림)
 	///
-	/// # 인자
-	/// - `width`: 너비. (픽셀)
-	/// - `height`: 높이. (픽셀)
-	/// - `straight_pixels`: 스트레이트 알파 RGBA 바이트. (위 줄부터 width x height x 4 바이트, 색에 알파를 곱해 프리멀티플라이드로 바꾼다)
+	/// # 패닉
+	/// `straight_pixels` 길이가 `width * height * 4` 가 아니면.
 	///
 	/// # 돌려줌
 	/// 새 그림. (새 인스턴스 식별자)
 	//==============================================================================
 	pub fn create_from_pixels(width: u32, height: u32, straight_pixels: Vec<u8>) -> Rc<Image> {
+		assert_pixel_length(width, height, straight_pixels.len());
 		let mut pixels = straight_pixels;
 		for pixel in pixels.as_chunks_mut::<4>().0 {
 			let alpha = pixel[3] as u32;
@@ -297,6 +295,14 @@ impl Image {
 	pub(crate) fn restore_pixels(&self, pixels: Vec<u8>) {
 		*self.pixels.borrow_mut() = pixels;
 	}
+}
+
+//==============================================================================
+/// RGBA 픽셀 길이가 너비x높이x4 인지 확인한다. (아니면 패닉)
+//==============================================================================
+fn assert_pixel_length(width: u32, height: u32, pixel_length: usize) {
+	let expected_length = width as usize * height as usize * 4;
+	assert!(pixel_length == expected_length, "Image: pixel length {} does not match {}x{} RGBA ({})", pixel_length, width, height, expected_length);
 }
 
 //==============================================================================
@@ -424,6 +430,24 @@ mod tests {
 		image.restore_pixels(vec![1, 2, 3, 4, 5, 6, 7, 8]);
 		assert!(image.has_pixels());
 		assert_eq!(image.get_pixels()[4], 5);
+	}
+
+	//==============================================================================
+	/// 픽셀 길이가 너비x높이x4 가 아니면 만들지 않는다.
+	//==============================================================================
+	#[test]
+	#[should_panic(expected = "pixel length 4 does not match 2x1")]
+	fn create_rejects_wrong_pixel_length() {
+		Image::create_from_premultiplied_pixels(2, 1, vec![0; 4]);
+	}
+
+	//==============================================================================
+	/// 스트레이트 알파 픽셀도 길이가 틀리면 만들지 않는다.
+	//==============================================================================
+	#[test]
+	#[should_panic(expected = "pixel length 9 does not match 1x2")]
+	fn create_from_pixels_rejects_wrong_pixel_length() {
+		Image::create_from_pixels(1, 2, vec![0; 9]);
 	}
 
 	//==============================================================================

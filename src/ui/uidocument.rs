@@ -17,12 +17,12 @@
 //!   - &mut self 게터가 있는 컴포넌트는 to_json_text_mut, serialize_node_mut 가 &mut 갈래로 읽어 적는다. (원본 게터에는 &self, &mut self 구별이 없다)
 //!   - 종류 등록: register_component_type(이름, 짓는 함수)은 원본 registerComponentType 이다. (반사로 쓰고 읽는다) 쓰기, 읽기 함수가 따로 있는 종류는
 //!     register_component_type_with_handler 로, 위젯(content 노드를 만드는 컴포넌트)은 register_widget_type, register_widget_type_with_handler 로 등록한다.
-//!   - 등록하지 않은 종류는 원본처럼 읽을 때 건너뛰고 경고를 낸다. 쓸 때는 원본처럼 반사로 적고 type 은 타입 이름이다. (원본 constructor.name)
+//!   - 등록하지 않은 종류는 원본처럼 읽을 때 건너뛰고(노드 종류는 WorldNode 로 읽고) 경고를 낸다. 쓸 때 type 은 원본처럼 등록한 이름이고, 등록하지 않은 종류는 반사로 적고 type 은 타입 이름이다. (원본 constructor.name)
 //!     반사가 없는 컴포넌트(`#[reflect]` 를 붙이지 않은 게임 컴포넌트)는 적을 수 없어 경고를 내고 뺀다.
 //!   - 쓰기, 읽기 함수가 있는 종류도 원본처럼 노드를 가리키는 반사 속성은 따로 { "$nodeRef": 경로 } 로 얹고 읽는다. (saveNodeReferences, loadNodeReferences)
 //!   - ShadowImage 는 원본 표의 끝에도 같은 꼴(imagePath 뒤에 반사 저장 꼴)로 넣어 두 엔진이 같다.
 //!   - 원본 UIImageView 는 붙을 때 호스트에 Sprite 를 붙여 문서에 UIImageView 다음 Sprite 가 적힌다. 러스트 판은 Sprite 를 품어서, 품은 Sprite 를 그 자리에 Sprite 로 적고
-//!     읽을 때는 뒤따르는 Sprite 를 품은 Sprite 에 읽는다. (set_component_companions, 원본은 다시 읽으면 Sprite 가 겹쳐 붙는다)
+//!     읽을 때는 뒤따르는 Sprite 를 품은 Sprite 에 읽는다. (set_component_companions, 원본은 UIImageView 가 붙을 때 붙인 Sprite 에 읽는다)
 //!   - 원본 노드 종류(WorldNode 하위 클래스, registerNodeType)는 러스트 판에서 노드에 붙는 컴포넌트다. register_node_type 으로 등록하면 원본 문서와 같은 꼴로 쓰고 읽는다:
 //!     그 컴포넌트가 붙은 노드의 type 이 그 이름이고 컴포넌트 목록에는 적지 않는다.
 //!     - 원본 노드 생성자처럼 붙을 때 자식과 컴포넌트를 실제로 짓는 종류(UIWindow, UIConfirmWindow, UIDialog, UIDropdown, UIToast, UISpinner, UIContextMenu 등)는
@@ -30,9 +30,9 @@
 //!     - 스스로 그리는 종류(UIInputField, UIScrollBar)는 UIDocumentNode 가 원본 생성자의 몫을 원본 꼴로 적고, 읽을 때는 그 몫을 설정으로 읽는다.
 //!     - 원본은 숨을 때 노드를 끄지만 러스트 판은 tick 이 돌아야 해서 숨기기만 하는 종류(UIToast)는 UIDocumentNode 가 active 를 원본 뜻으로 바꿔 쓰고 읽는다.
 //!   - 읽을 때 노드에 이미 있는 컴포넌트와 자식(노드 종류나 위젯이 붙을 때 지은 것, require 로 함께 붙은 것)은 문서의 앞에서부터 차례와 종류(자식은 이름)가 맞으면
-//!     그것에 문서 값을 넣고 다시 짓지 않는다. 원본은 다시 읽으면 생성자가 만든 것과 문서의 것이 겹친다. 러스트 판은 겹치지 않고 다시 쓰면 같은 문서다.
-//!   - 원본 에디터(tools/uieditor)는 엔진이 내보내는 모든 Component 와 WorldNode 하위 클래스를 등록해 문서에 적는다. 원본 런타임처럼 기본 표에는 없고,
-//!     게임이 register_editor_types 한 줄로 같은 종류(컴포넌트 35, 노드 종류 12)를 등록한다. (종류마다 한 줄로도 된다)
+//!     그것에 문서 값을 넣고 다시 짓지 않는다. (원본 fillNode 와 같다) 다시 쓰면 같은 문서다.
+//!   - 원본 에디터(tools/uieditor)는 엔진이 내보내는 모든 Component 와 WorldNode 하위 클래스를 등록해 문서에 적는다. 원본처럼 기본 표에는 없고,
+//!     게임이 register_editor_types(원본 registerEditorTypes) 한 줄로 같은 종류(컴포넌트 35, 노드 종류 12)를 등록한다. (종류마다 한 줄로도 된다)
 //!   - 러스트 판의 노드는 WorldNode 하나다. 노드 종류로 등록한 컴포넌트가 없는 노드의 type 은 늘 "WorldNode" 로 적고, 등록하지 않은 type 은 WorldNode 로 읽는다.
 //!   - 원본 getComponentType(이름 → 생성자)은 생성자를 값으로 돌려줄 수 없어(노드 트리는 구체 타입으로 붙인다) create_component(트리, 노드, 이름)가
 //!     그 이름의 컴포넌트를 지어 노드에 붙이고 컴포넌트 차례 번호를 돌려준다. (원본에서 생성자를 받아 addComponent 하는 자리)
@@ -820,9 +820,9 @@ impl UIDocument {
 	}
 
 	//==============================================================================
-	/// 원본 에디터가 등록하는 종류 모두 등록. (원본 tools/uieditor/uieditor.js 는 엔진이 내보내는 모든 Component 를 registerComponentType, WorldNode 하위 클래스를 registerNodeType 한다)
+	/// 원본 에디터가 등록하는 종류 모두 등록. (원본 registerEditorTypes, 원본 tools/uieditor/uieditor.js 는 엔진이 내보내는 모든 Component 를 registerComponentType, WorldNode 하위 클래스를 registerNodeType 한다)
 	/// - 원본처럼 내보낸 이름 차례(abc)로 등록한다. 이미 등록한 이름(원본 기본 표)은 원본처럼 쓰기, 읽기 함수를 그대로 둔다.
-	/// - 원본 런타임도 기본 표에는 없어 게임이 등록해야 읽는다. 에디터가 저장한 문서를 읽는 게임은 이것을 한 번 부른다.
+	/// - 원본도 기본 표에는 없어 게임이 등록해야 읽는다. 에디터가 저장한 문서를 읽는 게임은 이것을 한 번 부른다.
 	//==============================================================================
 	pub fn register_editor_types(&mut self) {
 		self.register_editor_component_type("ButtonMotion", ButtonMotion::new);
@@ -1998,6 +1998,9 @@ impl UIDocument {
 				(self.node_type_list[node_type_index].add_component)(node_tree, node_id).map(|component_index| (node_type_index, component_index))
 			}
 			None => {
+				if node_type_name != NODE_TYPE_NAME {
+					eprintln!("UIDocument: 등록되지 않은 노드 종류를 WorldNode 로 읽습니다 ({}). 에디터가 저장한 문서는 register_editor_types 를 먼저 부릅니다", node_type_name);
+				}
 				None
 			}
 		};
@@ -2009,8 +2012,8 @@ impl UIDocument {
 	/// 문서 값을 노드 하나에 넣기. (재귀)
 	/// - 노드에 이미 있는 컴포넌트와 자식(노드 종류 컴포넌트나 위젯이 붙을 때 지은 것, 원본 노드 생성자가 만든 몫)은 문서의 앞에서부터
 	///   차례와 종류(자식은 이름)가 맞으면 그것에 문서 값을 넣고 다시 짓지 않는다. 맞지 않는 데부터는 새로 짓는다.
-	///   (원본은 다시 읽으면 생성자가 만든 것과 문서의 것이 겹친다. 러스트 판은 겹치지 않고 문서 값이 들어간 꼴이다)
-	/// - require 로 함께 붙은 컴포넌트도 다음 문서 값을 받을 자리다. (원본은 겹쳐 붙는다)
+	///   (원본 fillNode 와 같다)
+	/// - require 로 함께 붙은 컴포넌트도 다음 문서 값을 받을 자리다. (원본도 같다)
 	//==============================================================================
 	fn fill_node(&mut self, node_tree: &mut NodeTree, node_id: NodeId, node_object: &Map<String, Value>, node_type_entry: Option<(usize, usize)>, pending_node_reference_list: &mut Vec<PendingNodeReference>) {
 		{
@@ -2447,7 +2450,8 @@ impl UIDocument {
 	}
 
 	//==============================================================================
-	/// 배열 → 색. (원본 arrayToColor, 수 넷이 아니면 None)
+	/// 배열 → 색. (원본 arrayToColor, 원소가 넷보다 적거나 앞 넷 가운데 수가 아닌 것이 있으면 None)
+	///
 	/// # 인자
 	/// - `value`: [r, g, b, a] 꼴 문서 값.
 	///
@@ -2491,7 +2495,7 @@ impl UIDocument {
 	}
 
 	//==============================================================================
-	/// 배열 → 벡터. (수 둘이 아니면 None)
+	/// 배열 → 벡터. (원소가 둘보다 적거나 앞 둘 가운데 수가 아닌 것이 있으면 None)
 	/// # 인자
 	/// - `value`: [x, y] 꼴 문서 값.
 	///
@@ -2917,7 +2921,7 @@ fn save_image_view_companions(image_view: &UIImageView, save_context: &UIDocumen
 }
 
 //==============================================================================
-/// UIImageView 가 품은 Sprite 읽기. (바로 뒤가 Sprite 면 그것을 품은 Sprite 에 읽는다. 원본은 다시 읽으면 Sprite 가 겹쳐 붙는다)
+/// UIImageView 가 품은 Sprite 읽기. (바로 뒤가 Sprite 면 그것을 품은 Sprite 에 읽는다. 원본은 UIImageView 가 붙을 때 붙인 Sprite 에 읽는다)
 //==============================================================================
 fn load_image_view_companions(image_view: &mut UIImageView, following_component_data_list: &[Value], load_context: &mut UIDocumentLoadContext) -> usize {
 	let sprite_data = match find_part_component(following_component_data_list.first(), "Sprite") {

@@ -207,24 +207,24 @@ ui_document.register_component_type("Spin", || Spin {
 ```rust
 struct GameScene {
 	scene_base: SceneBase,
-	logoAsset: ImageAsset,
+	logo_asset: ImageAsset,
 }
 
 impl Scene for GameScene {
 	// ...
 
 	fn create(&mut self, engine: &mut Engine) {
-		self.logoAsset.load(engine, "images/logo.png");
-		self.scene_base.track_asset(&self.logoAsset);
+		self.logo_asset.load(engine, "images/logo.png");
+		self.scene_base.track_asset(&self.logo_asset);
 	}
 
 	fn initialize(&mut self, _engine: &mut Engine) {
 		let root_id = self.scene_base.get_root_id();
-		let logoImage = self.logoAsset.get_image();
+		let logo_image = self.logo_asset.get_image();
 		let node_tree = self.scene_base.get_node_tree_mut();
-		if let Some(logoImage) = logoImage {
-			let logoId = node_tree.create_child(root_id, "logo");
-			node_tree[logoId].add_component(Sprite::create_with_image(logoImage));
+		if let Some(logo_image) = logo_image {
+			let logo_id = node_tree.create_child(root_id, "logo");
+			node_tree[logo_id].add_component(Sprite::create_with_image(logo_image));
 		}
 	}
 }

@@ -9,7 +9,7 @@
 //! - 원본과 다른 것:
 //!   원본 setFontAsset(FontAsset) 은 set_font_family(올린 글꼴 이름) 다. (FontAsset.get_family 를 넘긴다)
 //!   원본 getAtlasCanvas 는 get_atlas_image (`Rc<Image>`) 다. 데스크탑은 글리프를 글자 캐시의 글꼴 얼굴(모양 짓기, 가짜 굵게와 기울임 포함)로 굽고,
-//!   글자를 덮는 얼굴이 하나도 없으면 굽지 못한다. 웹은 원본처럼 브라우저 Canvas2D 로 굽는다.
+//!   글자를 덮는 얼굴이 하나도 없으면 그 글자는 굽지 못한다. (나머지 글자는 굽는다) 웹은 원본처럼 브라우저 Canvas2D 로 굽는다.
 //!   build_atlas 와 draw_text 는 Graphic 을 받는다. (글꼴은 Graphic 의 글자 캐시에 있다)
 //==============================================================================
 use crate::base::rect::Rect;
@@ -17,6 +17,7 @@ use crate::base::vector2::Vector2;
 use crate::core::component::richtext::build_font_string;
 use crate::core::graphic::Graphic;
 use crate::core::image::Image;
+use crate::core::textshaping::GlyphRaster;
 use crate::core::textstringtexturecache::compose_text_pixels;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -217,8 +218,7 @@ impl DynamicFont {
 	//==============================================================================
 	/// 아틀라스 굽기. (charset 의 글자 가운데 아직 없는 글자를 더하고, 아틀라스를 모든 글자로 다시 굽는다)
 	/// - 든 글자를 모두 다시 놓는다. (원본도 같다, 새 글자만 새 캔버스에 놓아 앞서 구운 글자가 어긋나던 것은 원본에서도 고쳤다)
-	/// - 데스크탑에서 글자를 덮는 얼굴이 하나도 없으면 굽지 못하고 그대로 둔다. (웹은 브라우저 Canvas2D 로 굽는다)
-	/// - 새 글자가 없고 아틀라스가 이미 있으면 아무것도 하지 않는다.
+	/// - 데스크탑에서 글자를 덮는 얼굴이 하나도 없으면 그 글자는 건너뛰고, 하나도 굽지 못하면 그대로 둔다. (웹은 브라우저 Canvas2D 로 굽는다)
 	///
 	/// # 인자
 	/// - `graphic`: 글자 캐시를 쓸 그래픽.
@@ -241,6 +241,8 @@ impl DynamicFont {
 
 	//==============================================================================
 	/// 든 글자를 모두 다시 굽기. (글꼴, 크기, 자간을 바꾼 뒤 부른다)
+	/// - 굽지 못하는 글자는 건너뛰고 나머지를 굽는다. (건너뛴 글자는 아틀라스에 없는 글자처럼 그린다)
+	/// - 하나도 굽지 못하면 아틀라스를 그대로 둔다.
 	///
 	/// # 인자
 	/// - `graphic`: 글자 캐시를 쓸 그래픽.
@@ -248,14 +250,24 @@ impl DynamicFont {
 	pub fn rebuild_atlas(&mut self, graphic: &mut Graphic) {
 		let font_string = build_font_string(&self.font_family, self.font_size, false, false);
 		let text_string_texture_cache = graphic.get_text_string_texture_cache();
+		self.rebuild_atlas_with(|character| text_string_texture_cache.rasterize_character(character, &font_string));
+	}
+
+	//==============================================================================
+	/// 글자 래스터 함수로 든 글자를 모두 다시 굽기. (rebuild_atlas 의 몸통)
+	///
+	/// # 인자
+	/// - `rasterize_character`: 글자 → (래스터, 전진폭, 글꼴 위 길이, 글꼴 아래 길이). 굽지 못하면 None.
+	//==============================================================================
+	fn rebuild_atlas_with(&mut self, rasterize_character: impl Fn(&str) -> Option<(GlyphRaster, f32, f32, f32)>) {
 		let mut atlas_glyph_list: Vec<AtlasGlyph> = Vec::new();
 		for character in &self.character_list {
-			let (glyph_raster, advance_width, _, _) = match text_string_texture_cache.rasterize_character(character, &font_string) {
+			let (glyph_raster, advance_width, _, _) = match rasterize_character(character) {
 				Some(rasterized) => {
 					rasterized
 				}
 				None => {
-					return;
+					continue;
 				}
 			};
 			atlas_glyph_list.push(AtlasGlyph {
@@ -270,6 +282,9 @@ impl DynamicFont {
 				atlas_x: 0,
 				atlas_y: 0,
 			});
+		}
+		if atlas_glyph_list.is_empty() && !self.character_list.is_empty() {
+			return;
 		}
 
 		// 줄 단위로 놓기. (원본과 같은 차례)
@@ -424,5 +439,51 @@ impl Default for DynamicFont {
 	//==============================================================================
 	fn default() -> DynamicFont {
 		DynamicFont::new()
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	//==============================================================================
+	/// 시험용 글자 래스터. (가로 width, 세로 2 를 꽉 채운 글리프, "?" 는 굽지 못한다)
+	//==============================================================================
+	fn rasterize_test_character(character: &str) -> Option<(GlyphRaster, f32, f32, f32)> {
+		if character == "?" {
+			return None;
+		}
+		let width = character.chars().count() as i32 + 1;
+		let glyph_raster = GlyphRaster {
+			coverage: vec![255; (width * 2) as usize],
+			width,
+			height: 2,
+			left_x: 0,
+			top_y: 2,
+			color_pixels: None,
+		};
+		Some((glyph_raster, width as f32, 2.0, 0.0))
+	}
+
+	//==============================================================================
+	/// 굽지 못하는 글자가 섞여도 나머지 글자는 굽고, 하나도 굽지 못하면 아틀라스를 그대로 둔다.
+	//==============================================================================
+	#[test]
+	fn rebuild_skips_unbakable_character() {
+		let mut dynamic_font = DynamicFont::new();
+		dynamic_font.character_list = vec![String::from("?")];
+		dynamic_font.rebuild_atlas_with(rasterize_test_character);
+		assert!(dynamic_font.get_atlas_image().is_none());
+		dynamic_font.character_list = vec![String::from("A"), String::from("?"), String::from("B")];
+		dynamic_font.rebuild_atlas_with(rasterize_test_character);
+		assert!(dynamic_font.get_atlas_image().is_some());
+		assert!(dynamic_font.get_glyph("A").is_some());
+		assert!(dynamic_font.get_glyph("B").is_some());
+		assert!(dynamic_font.get_glyph("?").is_none());
+		assert_eq!(dynamic_font.measure_text("A?B"), 2.0 + dynamic_font.get_font_size() * 0.5 + 2.0);
+		let atlas_image = dynamic_font.get_atlas_image().expect("atlas").clone();
+		dynamic_font.character_list = vec![String::from("?")];
+		dynamic_font.rebuild_atlas_with(rasterize_test_character);
+		assert!(Rc::ptr_eq(dynamic_font.get_atlas_image().expect("atlas"), &atlas_image));
 	}
 }

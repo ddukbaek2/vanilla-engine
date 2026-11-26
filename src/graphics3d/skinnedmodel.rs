@@ -138,7 +138,7 @@ impl AnimationPath {
 }
 
 //==============================================================================
-/// 모델 노드. (본 계층 + 포즈 상태, 원본 node_list 원소)
+/// 모델 노드. (본 계층 + 포즈 상태, 원본 nodeList 원소)
 ///
 /// # 예제
 /// 이름으로 노드를 찾아 월드 위치 읽기 (update 뒤의 값)
@@ -336,7 +336,7 @@ impl IndexArray {
 }
 
 //==============================================================================
-/// 접근자 배열. (원본 read_accessor_array 가 돌려주는 타입 배열, 컴포넌트 타입 그대로)
+/// 접근자 배열. (원본 readAccessorArray 가 돌려주는 타입 배열, 컴포넌트 타입 그대로)
 //==============================================================================
 #[derive(Clone, Debug, PartialEq)]
 pub enum AccessorArray {
@@ -472,7 +472,7 @@ impl AccessorArray {
 }
 
 //==============================================================================
-/// 중립 메시 서술. (원본 mesh_description, 순수 CPU 배열)
+/// 중립 메시 서술. (원본 meshDescription, 순수 CPU 배열)
 /// - joints / weights 는 정점마다 4개, material_index 가 None 이면 기본 머티리얼, node_index 는 모프 가중치 채널의 대상 노드.
 ///
 /// # 예제
@@ -530,7 +530,7 @@ pub struct MeshDescription {
 }
 
 //==============================================================================
-/// 드로어블. (원본 drawable_list 원소, 버텍스 어레이, 인덱스, 스킨, 머티리얼 참조, 모프 상태)
+/// 드로어블. (원본 drawableList 원소, 버텍스 어레이, 인덱스, 스킨, 머티리얼 참조, 모프 상태)
 ///
 /// # 예제
 /// 머티리얼 이름으로 드로어블 자리 찾기 (set_material 에 넘길 자리)
@@ -881,14 +881,45 @@ impl IntoFuture for AnimationLoadHandle {
 }
 
 //==============================================================================
+/// 애니메이션 FBX 의 클립 이름. (채널이 있는 스택이 하나면 받은 이름 그대로, 여럿이면 "받은 이름/스택 이름")
+/// - 스택 이름은 FBX 이름에서 "\u{0}\u{1}AnimStack" 같은 종류 꼬리를 뗀 것이다. (비었으면 채널 있는 스택 사이의 차례 번호)
+/// - 받은 이름이 비었으면 스택 이름만 쓴다.
+//==============================================================================
+fn create_fbx_clip_name(clip_name: &str, stack_name: &str, stack_index: usize, stack_count: usize) -> String {
+	if stack_count <= 1 {
+		return clip_name.to_string();
+	}
+	let display_name = match stack_name.find('\u{0}') {
+		Some(separator_index) => {
+			&stack_name[..separator_index]
+		}
+		None => {
+			stack_name
+		}
+	};
+	let stack_label = if display_name.is_empty() {
+		stack_index.to_string()
+	}
+	else {
+		display_name.to_string()
+	};
+	if clip_name.is_empty() {
+		stack_label
+	}
+	else {
+		format!("{}/{}", clip_name, stack_label)
+	}
+}
+
+//==============================================================================
 /// FBX 의 애니메이션들을 모델의 클립으로 바꾸기. (노드는 이름으로 맞추고, 이동 무시면 이동 채널을 뺀다. 채널이 없는 것은 뺀다)
+/// - 채널이 있는 스택이 여럿이면 스택마다 제 이름의 클립이다. (create_fbx_clip_name)
 //==============================================================================
 fn convert_fbx_scene_animations(node_index_by_name: &HashMap<String, usize>, scene_data: &FbxSceneData, clip_name: &str, ignore_translation: bool) -> Vec<AnimationClip> {
 	let mut added_clip_list = Vec::new();
-	for fbx_animation in scene_data.animation_list.iter() {
-		if fbx_animation.channels.is_empty() {
-			continue;
-		}
+	let channel_animation_list: Vec<_> = scene_data.animation_list.iter().filter(|fbx_animation| !fbx_animation.channels.is_empty()).collect();
+	let stack_count = channel_animation_list.len();
+	for (stack_index, fbx_animation) in channel_animation_list.into_iter().enumerate() {
 		let mut channels = convert_fbx_animation_channels(scene_data, fbx_animation, |node_index| {
 			let source_name = scene_data.node_list.get(node_index)?.name.as_str();
 			node_index_by_name.get(source_name).copied()
@@ -897,7 +928,7 @@ fn convert_fbx_scene_animations(node_index_by_name: &HashMap<String, usize>, sce
 			channels.retain(|channel| channel.path != AnimationPath::Translation);
 		}
 		added_clip_list.push(AnimationClip {
-			name: clip_name.to_string(),
+			name: create_fbx_clip_name(clip_name, &fbx_animation.name, stack_index, stack_count),
 			duration: fbx_animation.duration,
 			channels,
 		});
@@ -1919,7 +1950,7 @@ impl SkinnedModel {
 	/// 애니메이션 FBX 추가. (본 이름 매칭 리타게팅, Mixamo 애니메이션 전용 FBX 의 중간 표현)
 	/// - 동일 스켈레톤을 전제로, 채널을 현재 모델의 노드 인덱스로 재지정해 클립을 추가한다.
 	/// - ignore_translation: 루트 모션이 박힌 클립에서 이동 채널을 버린다. (게임 로직이 위치를 제어할 때)
-	/// - 이 모델에 같은 이름의 노드가 없는 채널은 버린다.
+	/// - clip_name: 채널이 있는 스택이 하나면 이 이름, 여럿이면 스택마다 "이 이름/스택 이름" 이다.
 	///
 	/// # 인자
 	/// - `scene_data`: 애니메이션 FBX 의 중간 표현.
@@ -2009,7 +2040,7 @@ impl SkinnedModel {
 
 	//==============================================================================
 	/// 중립 메시/머티리얼 서술 업로드. (공용, Material 생성 + 버텍스 어레이/드로어블 구성)
-	/// - 드로어블 목록을 새로 바꾼다. (메시 서술마다 드로어블 하나, 머티리얼 서술마다 머티리얼 하나와 기본 머티리얼 하나)
+	/// - 예전 드로어블의 GL 리소스와 다른 곳에서 쓰지 않는 머티리얼은 먼저 지운다. (destroy, 다시 불러도 새지 않는다)
 	///
 	/// # 인자
 	/// - `gl`: 업로드할 GL 컨텍스트.
@@ -2028,6 +2059,7 @@ impl SkinnedModel {
 				return Err(String::from("SkinnedModel: no shader program to upload with."));
 			}
 		};
+		self.destroy(gl);
 		let mut material_list = Vec::with_capacity(material_description_list.len());
 		for material_description in material_description_list.iter() {
 			let material = Material::create_from_description(gl, shader_program.clone(), material_description)?;
@@ -2134,6 +2166,7 @@ impl SkinnedModel {
 	//==============================================================================
 	/// 와이어프레임 인덱스 업로드. (삼각형 인덱스 → 중복 없는 모서리 선 인덱스, 비인덱스 메시는 삼각형별 3변)
 	/// - 드로어블의 버텍스 어레이와 무관한 별도 엘리먼트 버퍼. 렌더러가 선 출력 시 잠시 바꿔 끼운다.
+	/// - 이미 올린 선 버퍼가 있으면 지우고 새로 올린다.
 	///
 	/// # 인자
 	/// - `gl`: 업로드할 GL 컨텍스트.
@@ -2144,6 +2177,11 @@ impl SkinnedModel {
 	//==============================================================================
 	pub fn upload_wireframe_indices(&mut self, gl: &glow::Context, drawable_index: usize) -> Result<(), String> {
 		let drawable = self.drawable_list.get_mut(drawable_index).ok_or_else(|| format!("SkinnedModel: drawable {} not found.", drawable_index))?;
+		if let Some(wireframe_index_buffer) = drawable.wireframe_index_buffer.take() {
+			unsafe {
+				gl.delete_buffer(wireframe_index_buffer);
+			}
+		}
 		let edge_list = SkinnedModel::build_wireframe_edge_list(drawable.mesh_description.indices.as_ref(), drawable.vertex_count);
 		let use_unsigned_int = drawable.vertex_count > 65535;
 		let wireframe_indices = if use_unsigned_int {
@@ -2562,7 +2600,7 @@ impl SkinnedModel {
 	}
 
 	//==============================================================================
-	/// 애니메이션 재생. (크로스페이드, 같은 이름이 여럿이면 원본처럼 마지막 것, 원본 fade_duration 기본값 0.25. 다 받은 애니메이션 FBX 의 클립을 먼저 더한다)
+	/// 애니메이션 재생. (크로스페이드, 같은 이름이 여럿이면 원본처럼 마지막 것, 원본 fadeDuration 기본값 0.25. 다 받은 애니메이션 FBX 의 클립을 먼저 더한다)
 	///
 	/// # 인자
 	/// - `animation_name`: 틀 클립 이름. (없는 이름이거나 지금 클립과 같으면 무시)
@@ -2898,7 +2936,7 @@ impl SkinnedModel {
 }
 
 //==============================================================================
-/// 애니메이션 클립 샘플링. (현재 노드 포즈에 가중 블렌딩, 원본 sample_animation 본문)
+/// 애니메이션 클립 샘플링. (현재 노드 포즈에 가중 블렌딩, 원본 sampleAnimation 본문)
 //==============================================================================
 fn sample_animation_clip(animation: &mut AnimationClip, node_list: &mut [SkinnedModelNode], drawable_list: &mut [Drawable], time: f32, blend_weight: f32) {
 	let looped_time = if animation.duration > 0.0 {
@@ -3703,5 +3741,26 @@ mod tests {
 		let walk_matrix_array = &skinned_model.get_skin_list()[0].joint_matrix_array;
 		assert!(walk_matrix_array.iter().all(|value| value.is_finite()));
 		assert!(rest_matrix_array.iter().zip(walk_matrix_array.iter()).any(|(rest_value, walk_value)| (rest_value - walk_value).abs() > 1.0e-3));
+	}
+
+	//==============================================================================
+	/// 애니메이션 FBX 의 스택이 여럿이면 스택마다 "클립 이름/스택 이름" 클립이 된다. (하나면 받은 이름 그대로, 채널 없는 스택은 빠진다)
+	//==============================================================================
+	#[test]
+	fn fbx_animation_stacks_become_named_clips() {
+		let create_animation = |name: &str, channel_count: usize| {
+			let channels = (0..channel_count).map(|_| crate::graphics3d::fbxloader::FbxAnimationChannel { node_index: 0, path: AnimationPath::Translation, times: vec![0.0, 1.0], values: vec![0.0; 6] }).collect();
+			FbxAnimation { name: name.to_string(), duration: 1.0, channels }
+		};
+		let mut scene_data = FbxSceneData::default();
+		scene_data.animation_list = vec![create_animation("Take 001\u{0}\u{1}AnimStack", 1), create_animation("Empty\u{0}\u{1}AnimStack", 0), create_animation("\u{0}\u{1}AnimStack", 1)];
+		let mut skinned_model = SkinnedModel::create_without_shader_program();
+		skinned_model.add_animations_from_fbx_scene_data(&scene_data, "Walk", false);
+		assert_eq!(skinned_model.get_animation_name_list(), vec!["Walk/Take 001", "Walk/1"]);
+		scene_data.animation_list.truncate(2);
+		skinned_model.add_animations_from_fbx_scene_data(&scene_data, "Run", false);
+		assert_eq!(skinned_model.get_animation_name_list(), vec!["Walk/Take 001", "Walk/1", "Run"]);
+		assert_eq!(create_fbx_clip_name("", "Idle\u{0}\u{1}AnimStack", 0, 2), "Idle");
+		assert_eq!(create_fbx_clip_name("Jump", "Take\u{0}\u{1}AnimStack", 0, 1), "Jump");
 	}
 }

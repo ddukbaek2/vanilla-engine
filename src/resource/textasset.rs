@@ -5,7 +5,7 @@
 //! - JsonAsset 은 원본처럼 TextAsset 의 글(get_text)도 들고, 풀지 못한 JSON 은 읽히지 않은 것(is_loaded 거짓, get_data None)이다.
 //!   AssetLoader 로 받으면 원본처럼 실패 목록에 든다. (푼 자료는 AssetLoader 의 목록 칸과 나눠 들어 한 번만 푼다)
 //! - set_no_cache: 참이면 웹 fetch 에 cache: "no-cache" 를 붙여 배포 뒤 옛 자료를 쓰지 않게 한다. (원본과 같다, 데스크탑 파일 읽기에는 캐시가 없다)
-//! - load 는 원본처럼 await 할 수 있는 읽기 손잡이를 돌려준다. (원본 JsonAsset.load 처럼 풀지 못한 JSON 도 받기만 끝나면 끝나고 get_data 가 None 이다)
+//! - load 는 원본처럼 await 할 수 있는 읽기 손잡이를 돌려준다. (원본 JsonAsset.load 처럼 받기나 JSON 해석이 실패하면 await 가 실패로 끝나고 get_data 가 None 이다)
 //==============================================================================
 use crate::core::asset::{Asset, AssetBase, AssetLoadHandle, AssetType};
 use crate::core::engine::Engine;
@@ -244,8 +244,7 @@ impl JsonAsset {
 	}
 
 	//==============================================================================
-	/// 읽기 요청. (원본 load, await 할 수 있는 읽기 손잡이를 돌려준다. 원본처럼 풀지 못한 JSON 도 받기만 끝나면 끝나고 get_data 가 None 이다)
-	/// - 이미 요청했으면 다시 하지 않고 처음 손잡이를 돌려준다.
+	/// 읽기 요청. (원본 load, await 할 수 있는 읽기 손잡이를 돌려준다. 원본처럼 받기나 JSON 해석이 실패하면 await 가 실패로 끝나고 get_data 가 None 이다)
 	///
 	/// # 인자
 	/// - `engine`: 바이트를 부탁할 엔진.
@@ -255,7 +254,9 @@ impl JsonAsset {
 	/// 읽기 손잡이. (데스크탑은 그 자리에서 읽혀 끝나 있다. 못 읽으면 실패로 끝난다)
 	//==============================================================================
 	pub fn load(&mut self, engine: &Engine, asset_path: &str) -> AssetLoadHandle {
-		self.asset_base.request_load_with_cache(engine, asset_path, self.is_no_cache)
+		let load_handle = self.asset_base.request_load_with_cache(engine, asset_path, self.is_no_cache);
+		load_handle.request_json_parse();
+		load_handle
 	}
 
 	//==============================================================================
@@ -357,6 +358,7 @@ impl Asset for JsonAsset {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use std::future::{Future, IntoFuture};
 
 	//==============================================================================
 	/// 깨진 JSON 은 원본처럼 읽히지 않은 것이고 글은 남는다. 다시 읽으면 새로 푼다.
@@ -376,5 +378,36 @@ mod tests {
 		assert_eq!(json_asset.get_text(), Some("{\"count\": 3}"));
 		json_asset.unload();
 		assert!(!json_asset.is_loaded());
+	}
+
+	//==============================================================================
+	/// await 하는 읽기 손잡이: 풀리지 않는 JSON 은 받기가 끝나도 실패로 끝나고(원본 JsonAsset.load 의 거부), 풀리는 JSON 은 바이트로 끝난다.
+	//==============================================================================
+	#[test]
+	fn awaiting_broken_json_fails() {
+		let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+		let broken_load_handle = AssetLoadHandle::create_loaded("broken.json", b"{\"count\": ".to_vec());
+		broken_load_handle.request_json_parse();
+		let mut broken_future = std::pin::pin!(broken_load_handle.clone().into_future());
+		match broken_future.as_mut().poll(&mut context) {
+			std::task::Poll::Ready(Err(error_message)) => {
+				assert!(error_message.contains("broken.json"));
+			}
+			_ => {
+				panic!("broken json must fail");
+			}
+		}
+		// 받은 글은 남는다. (원본 TextAsset 의 text)
+		assert!(broken_load_handle.is_loaded());
+
+		let good_load_handle = AssetLoadHandle::create_loaded("good.json", b"{\"count\": 3}".to_vec());
+		good_load_handle.request_json_parse();
+		let mut good_future = std::pin::pin!(good_load_handle.into_future());
+		assert!(matches!(good_future.as_mut().poll(&mut context), std::task::Poll::Ready(Ok(_))));
+
+		// JSON 을 묻지 않은 손잡이(글 애셋)는 그대로 바이트로 끝난다.
+		let text_load_handle = AssetLoadHandle::create_loaded("note.txt", b"{\"count\": ".to_vec());
+		let mut text_future = std::pin::pin!(text_load_handle.into_future());
+		assert!(matches!(text_future.as_mut().poll(&mut context), std::task::Poll::Ready(Ok(_))));
 	}
 }

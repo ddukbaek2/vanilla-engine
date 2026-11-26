@@ -3,7 +3,7 @@
 //! - 원본 misc/imagescroller.js 를 옮긴 것이다. 이미지 한 장을 보이는 영역(view_rect) 안에 타일처럼 깔고, 속도에 맞춰 흘려 그린다. (무한 배경)
 //! - 원본처럼 컴포넌트가 아니라 그냥 값이다. 들고 있는 쪽이 tick 과 draw 를 불러 준다.
 //! - 원본과 다른 점:
-//!   이미지는 `Rc<Image>` 다. 원본 set_image 가 받던 ImageAsset 은 set_image_asset 으로 넘긴다.
+//!   이미지는 `Rc<Image>` 다. 원본 setImage 가 받던 ImageAsset 은 set_image_asset 으로 넘긴다.
 //!   get_scroll_position / get_scroll_speed 는 원본처럼 고칠 수 있는 참조가 아니라 값을 돌려준다. (tick 은 안에서 바로 더한다)
 //==============================================================================
 use crate::base::rect::Rect;
@@ -280,6 +280,27 @@ mod tests {
 		assert_eq!(image_scroller.calculate_tile_start(100.0, 100.0), Vector2::create(-40.0, -50.0));
 		image_scroller.set_scroll_position(Vector2::create(250.5, 0.0));
 		assert_eq!(image_scroller.calculate_tile_start(100.0, 100.0), Vector2::create(10.0 + 50.0 - 100.0, 20.0));
+		assert!(image_scroller.get_image().is_none());
+	}
+
+	//==============================================================================
+	/// 이미지 애셋을 넘기면 그 애셋의 이미지를 쥔다. (원본 setImage(ImageAsset) 자리, 읽기 전 애셋이면 None)
+	//==============================================================================
+	#[test]
+	fn image_asset_gives_its_image() {
+		let mut image_scroller = ImageScroller::new();
+		let mut empty_image_asset = ImageAsset::new();
+		image_scroller.set_image_asset(&mut empty_image_asset);
+		assert!(image_scroller.get_image().is_none());
+		let mut png_bytes: Vec<u8> = Vec::new();
+		image::RgbaImage::from_pixel(3, 2, image::Rgba([255, 0, 0, 255])).write_to(&mut std::io::Cursor::new(&mut png_bytes), image::ImageFormat::Png).expect("png");
+		let mut image_asset = ImageAsset::new();
+		let _load_handle = image_asset.load_from_bytes("red.png", png_bytes);
+		image_scroller.set_image_asset(&mut image_asset);
+		let image = image_scroller.get_image().expect("image").clone();
+		assert_eq!((image.get_width(), image.get_height()), (3, 2));
+		assert!(Rc::ptr_eq(&image, &image_asset.get_image().expect("asset image")));
+		image_scroller.set_image(None);
 		assert!(image_scroller.get_image().is_none());
 	}
 }

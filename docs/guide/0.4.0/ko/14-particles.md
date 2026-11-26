@@ -514,7 +514,7 @@ fn main() {
 - `set_region(x, y, width, height, corner_radius)` 는 캔버스 픽셀(왼쪽 위 원점) 영역에만 겁니다. 둥근 모서리 바깥은 원래 화면을 둡니다. `clear_region()` 으로 화면 전체로 돌아갑니다.
 - 효과를 거는 차례는 정해져 있습니다(형태 왜곡, 흐림, 글리치, 색, 무늬, 전환 차례, `ScreenEffect::get_effect_order()`, 열거 선언 차례와 같음).
 - `TimelinePropertyTarget` 을 구현해 `Timeline` 의 `External` 대상이 될 수 있습니다. `set_timeline_property(name, value)` 에서 `"vignette"` 는 세기(0 이면 끔), `"shockwave.radius"` 는 파라미터, `"fade.color"` 는 색, `"fade.enabled"` 는 켜기입니다.
-- GL 자원을 쓰므로 다 쓰면 `destroy(graphic)` 를 부릅니다. 원본과 달리 `Graphic` 을 받으므로 `Graphic` 을 받는 그리기 함수(`post_draw` 같은)에서 부릅니다. 부르지 않으면 GL 자원은 컨텍스트가 없어질 때까지 남습니다. 효과 설정은 남고, 다시 `end` 하면 자원을 새로 만듭니다.
+- GL 자원을 쓰므로 다 쓰면 `destroy()` 를 부릅니다. 원본처럼 자원을 만든 GL 컨텍스트(약한 손잡이)를 쥐고 있어 인자가 없고, 효과가 버려질 때(씬을 내리거나 노드를 지울 때)도 스스로 풉니다. 효과 설정은 남고, 다시 `end` 하면 자원을 새로 만듭니다.
 - 패스 셰이더 만들기에 실패하면 원본은 예외를 던지지만 러스트 판은 한 번 알리고 그 단계를 건너뜁니다.
 
 ```rust
@@ -632,7 +632,7 @@ fn main() {
 
 - 앞서 그린 것을 떠 오므로 씬에서 가장 나중에 그려지는 노드에 붙여야 효과가 보입니다. 그 노드의 자식은 효과 위에 그려집니다.
 - `set_amplitude(pixels)`(흔들림 폭, 기본 3), `set_frequency(value)`(줄 위치에 곱하는 빈도, 기본 0.05), `set_speed(value)`(시간에 곱하는 빠르기, 기본 2). 줄 하나의 흔들림은 `calculate_row_offset(local_y)` 로 볼 수 있습니다.
-- 영역이 화면 밖으로 나가면 화면 가장자리 픽셀을 늘입니다. 떠 온 텍스처는 GL 자원이라 다 쓰면 `destroy(graphic)` 를 부릅니다(`ScreenEffect` 와 같이 `Graphic` 을 받습니다).
+- 영역이 화면 밖으로 나가면 화면 가장자리 픽셀을 늘입니다. 떠 온 텍스처는 GL 자원이라 다 쓰면 `destroy()` 를 부릅니다. (`ScreenEffect` 와 같이 인자가 없고, 컴포넌트가 버려질 때도 스스로 풉니다)
 
 ```rust,no_run
 use vanilla::{Color, Engine, EngineConfiguration, HeatHazeEffect, Paint, Scene, SceneBase, Vector2};
@@ -692,7 +692,7 @@ fn main() {
 - 화면 좌표는 아래가 +y 라서 위로 끌어올리는 중력은 음수입니다.
 - 월드 공간 시스템에서 `emit` 은 마지막 노드 갱신에서 읽어 둔 노드 위치를 씁니다. 노드를 옮긴 직후에 뿜으려면 `ParticleSystem::emit_in_tree` 를 씁니다.
 - `ShaderSprite` 는 `Sprite` 가 아니므로 `get_component::<Sprite>()` 로 찾지 못합니다. `get_component::<ShaderSprite>()` 를 씁니다.
-- `HeatHazeEffect` 와 `ScreenEffect` 는 이미 그린 화면을 떠 오는 효과입니다. 그리는 차례(어느 노드가 나중인지, `begin` 과 `end` 를 어디서 부르는지)가 결과를 정합니다. 둘 다 `destroy` 에 `Graphic` 을 넘겨야 GL 자원이 풀립니다.
+- `HeatHazeEffect` 와 `ScreenEffect` 는 이미 그린 화면을 떠 오는 효과입니다. 그리는 차례(어느 노드가 나중인지, `begin` 과 `end` 를 어디서 부르는지)가 결과를 정합니다. 둘 다 `destroy()` 나 버려질 때 GL 자원을 풉니다.
 
 ## 관련 타입
 

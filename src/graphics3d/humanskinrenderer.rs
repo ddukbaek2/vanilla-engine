@@ -46,7 +46,7 @@ pub const SKIN_SHADING_FACIALHAIR: i32 = 5;
 
 /// 추가 텍스처 유닛. (머티리얼 기본 슬롯 0 / 2~8 과 섀도우 1, 모프 15 를 피한 9~14)
 /// - 피부: 9 높이 디테일, 10 마이크로(노멀 rgb + 캐비티 a), 11 주름 마스크 아틀라스(4x4), 12 주름 노멀 아틀라스(2x2), 13 주름 색 아틀라스(2x2)
-/// - 눈: 12 홍채 색, 13 홍채 노멀 / 머리카락: 12 카드 탄젠트(rgb) + 가닥 좌표(a)
+/// - 눈: 12 홍채 노멀, 13 홍채 색 / 머리카락: 12 카드 탄젠트(rgb) + 가닥 좌표(a)
 pub const SKIN_TEXTURE_UNIT_DETAILHEIGHT: u32 = 9;
 /// 마이크로 노멀(rgb) + 캐비티(a) 유닛. (유니폼 microTexture, set_micro_detail 의 횟수만큼 반복)
 pub const SKIN_TEXTURE_UNIT_MICRO: u32 = 10;
@@ -368,7 +368,7 @@ void shadeSkin(vec2 textureCoordinate, vec3 geometryNormal, vec3 viewDirection, 
 }
 
 //==============================================================================
-// 눈. (기본 색 = 공막, 12 = 홍채 색, 13 = 홍채 노멀, 노멀 맵 = 공막 정맥, UV 중심이 동공)
+// 눈. (기본 색 = 공막, 12 = 홍채 노멀, 13 = 홍채 색, 노멀 맵 = 공막 정맥, UV 중심이 동공)
 //==============================================================================
 void shadeEye(vec2 textureCoordinate, vec3 geometryNormal, vec3 viewDirection, mat3 tangentFrame) {
 	vec2 centered = textureCoordinate - vec2(0.5);
@@ -1667,5 +1667,17 @@ mod tests {
 		let unit_list = [SKIN_TEXTURE_UNIT_DETAILHEIGHT, SKIN_TEXTURE_UNIT_MICRO, SKIN_TEXTURE_UNIT_MASKATLAS, SKIN_TEXTURE_UNIT_LAYERNORMAL, SKIN_TEXTURE_UNIT_LAYERCOLOR, SKIN_TEXTURE_UNIT_AUXILIARY];
 		assert_eq!(unit_list, [9, 10, 11, 12, 13, 14]);
 		assert!(unit_list.iter().all(|unit| *unit != crate::graphics3d::skinnedmodelrenderer::MORPH_TEXTURE_UNIT && *unit > crate::graphics3d::material::TEXTURE_UNIT_OPACITY));
+	}
+
+	//==============================================================================
+	/// 눈 셰이딩은 홍채 색을 13 번(layerColorTexture), 홍채 노멀을 12 번(layerNormalTexture)에서 읽는다. (예제 oldface 가 묶는 차례와 같다)
+	//==============================================================================
+	#[test]
+	fn eye_iris_reads_color_from_layer_color_unit() {
+		assert_eq!(SKIN_TEXTURE_UNIT_LAYERNORMAL, 12);
+		assert_eq!(SKIN_TEXTURE_UNIT_LAYERCOLOR, 13);
+		let fragment_source = SKIN_FRAGMENTSHADER_SOURCE;
+		assert!(fragment_source.contains("vec4 irisSample = texture(layerColorTexture, irisTextureCoordinate);"));
+		assert!(fragment_source.contains("vec3 irisNormal = texture(layerNormalTexture, irisTextureCoordinate).xyz * 2.0 - 1.0;"));
 	}
 }

@@ -1,6 +1,6 @@
 //==============================================================================
 //! 마스크 컴포넌트. (붙은 노드의 content_size 영역으로 자식 출력을 자른다)
-//! - 실제 자르기는 WorldNode::draw 가 자식을 그리기 전후로 begin_clip / end_clip 을 부른다.
+//! - 실제 자르기는 NodeTree::draw_node 가 자식을 그리기 전후로 begin_clip / end_clip 을 부른다.
 //==============================================================================
 use crate::base::rect::Rect;
 use crate::core::component::{Component, ComponentBase};

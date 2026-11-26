@@ -44,7 +44,7 @@ impl AudioManagerState {
 	}
 
 	//==============================================================================
-	/// AudioContext 가 있고 돌고 있는지. (원본 audio_context !== null && state === "running", 데스크탑은 멈춰 두지 않았으면)
+	/// AudioContext 가 있고 돌고 있는지. (원본 audioContext !== null && state === "running", 데스크탑은 멈춰 두지 않았으면)
 	//==============================================================================
 	pub(crate) fn is_context_running(&self) -> bool {
 		audio_backend::is_audio_context_running(self)
@@ -215,7 +215,7 @@ impl AudioManager {
 	}
 
 	//==============================================================================
-	/// AudioContext 시계. (초, 원본 audio_context.currentTime, AudioContext 가 없으면 0)
+	/// AudioContext 시계. (초, 원본 audioContext.currentTime, AudioContext 가 없으면 0)
 	///
 	/// # 돌려줌
 	/// AudioContext 를 만든 뒤 흐른 소리 시간. (초, AudioContext 가 없으면 0)

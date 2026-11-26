@@ -16,7 +16,7 @@
 //!   - setFont(FontFace) 는 set_font_family(등록한 폰트 이름) 로 바꿨다. setEngine 은 옮기지 않았다. (엔진은 문맥으로 받는다)
 //!   - 공개 함수의 글자 자리(get_cursor_index, get_selection_start, get_selection_range, move_cursor, measure_index_at_local_x)와 max_length 는
 //!     원본처럼 UTF-16 단위로 센다. 안에서는 문자(char) 단위로 들어 서로게이트 쌍(이모지 같은 글자)을 쪼개지 않는다.
-//!     그래서 UTF-16 자리가 서로게이트 쌍 가운데면 그 글자 뒤로 본다. max_length 로 자를 때도 글자를 쪼개지 않는 데까지 자른다. (원본은 쌍을 쪼갤 수 있다)
+//!     그래서 UTF-16 자리가 서로게이트 쌍 가운데면 그 글자 뒤로 본다. (원본도 같다) max_length 가 있으면 블링크 입력 칸처럼 넣는 글을 남은 길이까지만 넣는다.
 //!   - 누른 자리 → 글자 자리는 draw 때 재 둔 글자 경계로 찾는다. (원본은 오프스크린 2D 캔버스로 그때그때 잰다)
 //!   - 데스크탑에서는 use_dom_input 이 켜진 필드도 원본 DOM 모드처럼 필드 밖을 누르면 포커스를 잃는다. 포커스는 엔진에 하나뿐이다.
 //!     (원본 캔버스 모드는 다른 필드를 눌러도 앞 필드가 포커스를 쥐고 있다. 러스트 판은 나중에 포커스를 얻은 필드만 남긴다)
@@ -31,7 +31,12 @@
 //!     Enter 는 줄을 넣고(글자 넣기 되돌리기 묶음), 위아래는 첫 위아래 이동 때의 가로 자리를 지키며(첫 줄 위는 글 앞, 마지막 줄 아래는 글 끝),
 //!     Home 과 End 는 보이는 줄의 앞과 끝(맥은 Cmd + 왼쪽, 오른쪽도), Ctrl + Home, End(맥은 Cmd + 위, 아래)는 글 앞과 끝,
 //!     PageUp, PageDown(맥은 Option 과 함께)은 보이는 높이의 87.5%(맥은 높이 - 40 과 견줘 큰 쪽) 안의 가장 먼 줄로 옮겨 그 줄을 맨 위로 올린다.
-//!     넣는 글의 CR, CRLF 는 LF 로 바꾼다. 커서는 편집과 이동 뒤 보이게 스크롤하고(맥이 아니면 가장자리, 맥은 가운데), 휠과 얹는 썸 끌기로 넘긴다.
+//!     넣는 글의 CR, CRLF 는 LF 로 바꾼다. 커서는 편집과 이동 뒤 보이게 스크롤하고(맥이 아니면 가장자리, 맥은 가운데), 휠과 썸 끌기로 넘긴다.
+//!     줄 높이의 normal 은 크롬처럼 첫째 글꼴의 위아래 길이와 줄 사이로 셈한다. 스크롤 막대는 크롬처럼 클래식 막대(윈도우, 리눅스, 맥 클래식 설정)면 넘칠 때 글 폭을 던다.
+//!     맥 Home, End 는 크롬 맥처럼 커서를 두고 처음과 끝으로 넘기고(넘길 것이 없으면 줄 앞과 끝), PageUp, PageDown 은 커서를 두고 한 화면만큼 넘긴다.
+//!   - DOM 입력을 흉내 내는 필드(use_dom_input, 여러 줄)는 크롬처럼 마우스로 두 번 누르면 낱말(윈도우는 뒤 공백까지), 세 번 누르면 문단을 고르고 끌면 그 단위로 넓힌다.
+//!     이어 누르기는 크롬 aura 처럼 500ms(맥은 시스템의 두 번 클릭 시간) 안, 가로 세로 2 DIP 안이다. 웹은 브라우저가 센 mousedown 의 detail 을 쓴다.
+//!   - 커서 이동과 Delete 는 크롬처럼 글자 묶음(확장 자소 묶음) 단위, 뒤로 지우기는 블링크 BackspaceStateMachine(코드 포인트 하나, 이모지 묶음은 통째로)이다.
 //!     웹 DOM 입력은 숨긴 `<textarea>` 가 글, 조합, 되돌리기를 맡고, 보이는 줄로 옮기는 키(위아래, page, Home, End)는 필드가 엔진 배치로 옮긴다.
 //!   - 노드를 끄거나(set_active(false)) 지우면 tick 이 돌지 않아 포커스와 IME, 웹의 숨긴 <input> 이 함께 사라진다. (원본은 detach 해야 사라진다)
 //!   - getRenderState 는 옮기지 않았다. (그리는 컴포넌트가 하나라 넘길 일이 없다)
@@ -50,7 +55,7 @@ use crate::core::engine::Engine;
 use crate::core::graphic::{Graphic, TextAlign, TextBaseline};
 use crate::core::node::nodetree::{ComponentContext, NodeId, NodeTree};
 use crate::core::node::worldnode::NodeTransform;
-use crate::core::textinput::{convert_character_index_to_byte_index, convert_character_index_to_utf16_index, convert_utf16_index_to_character_index, count_characters, TextInputEventKind, TextInputFieldState, TextInputKey};
+use crate::core::textinput::{collect_grapheme_boundaries, convert_character_index_to_byte_index, convert_character_index_to_utf16_index, convert_utf16_index_to_character_index, count_characters, find_backward_deletion_boundary, find_next_grapheme_boundary, find_previous_grapheme_boundary, TextInputEventKind, TextInputFieldState, TextInputKey};
 use crate::ui::textarealayout::{build_text_area_layout, TextAreaLayout};
 use crate::ui::uicontrol::UIControl;
 use crate::ui::uiview::is_view_position_inside_node;
@@ -74,9 +79,12 @@ const TOUCH_HANDLE_SIZE: f32 = 32.0;
 const TOUCH_CENTER_HANDLE_SIZE: f32 = 39.0;
 const TOUCH_HANDLE_PADDING: f32 = 6.0;
 const TOUCH_HANDLE_COLOR: Color = Color::create(11.0 / 255.0, 87.0 / 255.0, 208.0 / 255.0, 0.8);
+/// 이어 누르기 거리. (크롬 aura ui/events/event.cc 의 MouseEvent::IsRepeatedClickEvent: kDoubleClickWidth, kDoubleClickHeight 4 의 반, DIP)
+#[cfg(not(target_arch = "wasm32"))]
+const REPEATED_CLICK_SLOP: f32 = 2.0;
 /// 여러 줄 필드의 탭 크기. (공백 몇 개 폭, CSS tab-size 기본 8)
 const DEFAULT_TAB_SIZE: f32 = 8.0;
-/// 여러 줄 필드의 스크롤 막대 썸. (얹는 막대, PaneStyle 과 같다)
+/// 여러 줄 필드의 얹는 스크롤 막대 썸. (맥 얹는 막대 설정, PaneStyle 과 같다. 클래식 막대는 web/pane.rs 의 크롬 치수)
 const TEXT_AREA_SCROLLBAR_THICKNESS: f32 = 8.0;
 const TEXT_AREA_SCROLLBAR_MINIMUM_THUMB_LENGTH: f32 = 20.0;
 /// 폰트 이름을 정하지 않았을 때 쓰는 이름. (엔진 기본 폰트, 원본 SYSTEM_FONT_STRING 자리)
@@ -190,7 +198,7 @@ impl TextEditBuffer {
 	}
 
 	//==============================================================================
-	/// 값 설정. (max_length 로 자르고 커서는 끝에. 원본 set_text)
+	/// 값 설정. (max_length 로 자르고 커서는 끝에. 원본 setText)
 	//==============================================================================
 	pub fn set_text(&mut self, text: &str) {
 		self.value = text.to_string();
@@ -426,40 +434,66 @@ impl TextEditBuffer {
 	}
 
 	//==============================================================================
-	/// 선택을 글로 바꾸기. (선택이 없으면 커서 자리에 끼운다. max_length 로 자른다. 원본 replace_selection)
+	/// 선택을 글로 바꾸기. (선택이 없으면 커서 자리에 끼운다. 원본 replaceSelection)
+	/// - max_length 가 있으면 블링크 입력 칸(text_field_input_type.cc 의 FilterBeforeTextInserted)처럼 넣는 글을 남은 UTF-16 길이까지만 넣는다. (글자는 쪼개지 않는다)
 	//==============================================================================
 	pub fn replace_selection(&mut self, text: &str) {
 		let (start_index, end_index) = self.get_selection_range().unwrap_or((self.cursor_index, self.cursor_index));
 		let start_byte_index = convert_character_index_to_byte_index(&self.value, start_index);
 		let end_byte_index = convert_character_index_to_byte_index(&self.value, end_index);
-		let mut next_value = String::with_capacity(self.value.len() + text.len());
+		let mut inserted_text = text;
+		if self.max_length > 0 {
+			let value_length = self.value.encode_utf16().count();
+			let selection_length = self.value[start_byte_index..end_byte_index].encode_utf16().count();
+			let appendable_length = self.max_length.saturating_sub(value_length - selection_length);
+			let mut utf16_count = 0;
+			for (byte_index, character) in text.char_indices() {
+				utf16_count += character.len_utf16();
+				if utf16_count > appendable_length {
+					inserted_text = &text[..byte_index];
+					break;
+				}
+			}
+		}
+		let mut next_value = String::with_capacity(self.value.len() + inserted_text.len());
 		next_value.push_str(&self.value[..start_byte_index]);
-		next_value.push_str(text);
+		next_value.push_str(inserted_text);
 		next_value.push_str(&self.value[end_byte_index..]);
 		self.value = next_value;
-		self.truncate_to_max_length();
-		self.cursor_index = (start_index + count_characters(text)).min(count_characters(&self.value));
+		self.cursor_index = (start_index + count_characters(inserted_text)).min(count_characters(&self.value));
 		self.selection_start = self.cursor_index;
 	}
 
 	//==============================================================================
-	/// 글자 하나 지우기. (원본 deleteCharAt)
+	/// 글자 하나 지우기. (그 자리부터 글자 묶음 하나, 크롬 Delete 키처럼 이모지나 결합 부호를 쪼개지 않는다. 원본 deleteCharAt)
 	//==============================================================================
 	pub fn delete_character_at(&mut self, character_index: usize) {
-		if character_index >= count_characters(&self.value) {
+		let end_index = find_next_grapheme_boundary(&self.value, character_index);
+		self.delete_range(character_index, end_index);
+	}
+
+	//==============================================================================
+	/// 글 범위 지우기. (문자 자리, 커서는 지운 자리로 당기고 선택은 접는다. 원본 deleteRange)
+	//==============================================================================
+	pub fn delete_range(&mut self, start_index: usize, end_index: usize) {
+		let end_index = end_index.min(count_characters(&self.value));
+		if end_index <= start_index {
 			return;
 		}
-		let start_byte_index = convert_character_index_to_byte_index(&self.value, character_index);
-		let end_byte_index = convert_character_index_to_byte_index(&self.value, character_index + 1);
+		let start_byte_index = convert_character_index_to_byte_index(&self.value, start_index);
+		let end_byte_index = convert_character_index_to_byte_index(&self.value, end_index);
 		self.value.replace_range(start_byte_index..end_byte_index, "");
-		if self.cursor_index > character_index {
-			self.cursor_index -= 1;
+		if self.cursor_index >= end_index {
+			self.cursor_index -= end_index - start_index;
+		}
+		else if self.cursor_index > start_index {
+			self.cursor_index = start_index;
 		}
 		self.selection_start = self.cursor_index;
 	}
 
 	//==============================================================================
-	/// 뒤로 지우기. (선택이 있으면 선택을, 없으면 커서 앞 글자. 바뀌었으면 true)
+	/// 뒤로 지우기. (선택이 있으면 선택을, 없으면 블링크 BackspaceStateMachine 이 정한 커서 앞 범위. 바뀌었으면 true)
 	//==============================================================================
 	pub fn delete_backward(&mut self) -> bool {
 		if self.has_selection() {
@@ -467,14 +501,15 @@ impl TextEditBuffer {
 			return true;
 		}
 		if self.cursor_index > 0 {
-			self.delete_character_at(self.cursor_index - 1);
+			let start_index = find_backward_deletion_boundary(&self.value, self.cursor_index);
+			self.delete_range(start_index, self.cursor_index);
 			return true;
 		}
 		false
 	}
 
 	//==============================================================================
-	/// 앞으로 지우기. (선택이 있으면 선택을, 없으면 커서 뒤 글자. 바뀌었으면 true)
+	/// 앞으로 지우기. (선택이 있으면 선택을, 없으면 커서 뒤 글자 묶음. 바뀌었으면 true)
 	//==============================================================================
 	pub fn delete_forward(&mut self) -> bool {
 		if self.has_selection() {
@@ -489,7 +524,7 @@ impl TextEditBuffer {
 	}
 
 	//==============================================================================
-	/// 커서 옮기기. (글 안으로 자른다. 선택을 늘리지 않으면 선택을 접는다. 원본 move_cursor)
+	/// 커서 옮기기. (글 안으로 자른다. 선택을 늘리지 않으면 선택을 접는다. 원본 moveCursor)
 	//==============================================================================
 	pub fn move_cursor(&mut self, new_index: usize, is_selection_extended: bool) {
 		self.cursor_index = new_index.min(count_characters(&self.value));
@@ -500,7 +535,7 @@ impl TextEditBuffer {
 	}
 
 	//==============================================================================
-	/// 모두 선택. (원본 select_all)
+	/// 모두 선택. (원본 selectAll)
 	//==============================================================================
 	pub fn select_all(&mut self) {
 		self.selection_start = 0;
@@ -530,7 +565,7 @@ impl TextEditBuffer {
 }
 
 //==============================================================================
-/// 글자 경계 x 목록에서 누른 x 에 가까운 글자 자리 찾기. (원본 measure_index_at_local_x 의 비교)
+/// 글자 경계 x 목록에서 누른 x 에 가까운 글자 자리 찾기. (원본 measureIndexAtLocalX 의 비교)
 /// - `character_offsets[i]` 는 앞 i 글자의 폭이다. (0 번은 0)
 //==============================================================================
 pub fn find_character_index_at_offset(character_offsets: &[f32], target_x: f32) -> usize {
@@ -549,6 +584,148 @@ pub fn find_character_index_at_offset(character_offsets: &[f32], target_x: f32) 
 		}
 	}
 	character_count
+}
+
+//==============================================================================
+/// 글자 묶음 경계 가운데 누른 x 에 가까운 자리 찾기. (크롬처럼 커서는 글자 묶음 경계에만 선다)
+/// - `character_offsets[i]` 는 앞 i 글자의 폭이다. `boundary_list` 는 0 과 글자 수를 넣은 경계 자리 목록이다. (오름차순)
+//==============================================================================
+pub(crate) fn find_boundary_index_at_offset(character_offsets: &[f32], boundary_list: &[usize], target_x: f32) -> usize {
+	let last_boundary = boundary_list.last().copied().unwrap_or(0);
+	if boundary_list.len() < 2 || target_x <= 0.0 {
+		return 0;
+	}
+	let read_offset = |boundary: usize| -> f32 {
+		match character_offsets.get(boundary) {
+			Some(character_offset) => {
+				*character_offset
+			}
+			None => {
+				character_offsets.last().copied().unwrap_or(0.0)
+			}
+		}
+	};
+	for boundary_pair in boundary_list.windows(2) {
+		let width = read_offset(boundary_pair[1]);
+		if width >= target_x {
+			let previous_width = read_offset(boundary_pair[0]);
+			if target_x - previous_width < width - target_x {
+				return boundary_pair[0];
+			}
+			return boundary_pair[1];
+		}
+	}
+	last_boundary
+}
+
+//==============================================================================
+/// 이어 누른 수 세기. (크롬 aura ui/events/event.cc 의 MouseEvent::GetRepeatCount 와 IsRepeatedClickEvent)
+/// - 앞 누름에서 시간이 interval_seconds 를 넘지 않고, 가로와 세로가 각각 slop 을 넘지 않으면 앞 수에 하나 더한다. 셋을 넘지 않는다.
+///
+/// # 인자
+/// - `previous_click`: (앞 누름에서 지난 초, 앞 누름 자리, 앞 누름의 수). 없으면 None.
+/// - `position`: 이번 누름 자리. (DIP)
+/// - `interval_seconds`: 이어 누르기로 볼 시간. (초)
+/// - `slop`: 이어 누르기로 볼 가로, 세로 거리. (DIP)
+///
+/// # 돌려줌
+/// 이번 누름의 수. (1 ~ 3)
+//==============================================================================
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+fn count_repeated_clicks(previous_click: Option<(f32, Vector2, u32)>, position: Vector2, interval_seconds: f32, slop: f32) -> u32 {
+	match previous_click {
+		Some((elapsed_seconds, previous_position, previous_count)) => {
+			let is_repeated = elapsed_seconds <= interval_seconds && (position.x - previous_position.x).abs() <= slop && (position.y - previous_position.y).abs() <= slop;
+			if is_repeated {
+				(previous_count + 1).min(3)
+			}
+			else {
+				1
+			}
+		}
+		None => {
+			1
+		}
+	}
+}
+
+//==============================================================================
+/// 자리의 낱말 범위. (문자 자리, 블링크 selection_adjuster.cc 의 ExpandWithGranularity kWord)
+/// - 낱말 경계는 ICU 낱말 나누기(segment_words)다. 공백 덩어리와 줄바꿈도 한 조각이라, 공백을 누르면 공백을 고른다.
+/// - 자리가 경계면 ChooseWordSide 대로 뒤 조각을 고르고, 글 끝이거나 폭으로 나뉜 줄의 끝(is_upstream)이면 앞 조각을 고른다.
+///   그래서 문단 끝(줄바꿈 앞) 자리는 줄바꿈 하나를 고른다.
+//==============================================================================
+fn find_word_range_at(text: &str, character_index: usize, is_upstream: bool) -> (usize, usize) {
+	let character_count = count_characters(text);
+	let character_index = character_index.min(character_count);
+	let is_previous_side = character_index == character_count || is_upstream;
+	let mut segment_start = 0;
+	for (segment, _) in crate::core::component::text::segment_words(text) {
+		let segment_end = segment_start + segment.chars().count();
+		let is_hit = if is_previous_side {
+			segment_start < character_index && character_index <= segment_end
+		}
+		else {
+			segment_start <= character_index && character_index < segment_end
+		};
+		if is_hit {
+			return (segment_start, segment_end);
+		}
+		segment_start = segment_end;
+	}
+	(character_index, character_index)
+}
+
+//==============================================================================
+/// 자리의 문단 범위. (문자 자리, 블링크 ExpandWithGranularity kParagraph: 문단 끝의 줄바꿈까지 넣는다. 글 끝의 빈 줄이면 앞 문단)
+//==============================================================================
+fn find_paragraph_range_at(text: &str, character_index: usize) -> (usize, usize) {
+	let character_list: Vec<char> = text.chars().collect();
+	let character_count = character_list.len();
+	let character_index = character_index.min(character_count);
+	let mut start_probe = character_index;
+	if character_index == character_count && character_index > 0 && character_list[character_index - 1] == '\n' {
+		start_probe = character_index - 1;
+	}
+	let start_index = match character_list[..start_probe].iter().rposition(|character| *character == '\n') {
+		Some(line_break_index) => {
+			line_break_index + 1
+		}
+		None => {
+			0
+		}
+	};
+	let end_index = match character_list[character_index..].iter().position(|character| *character == '\n') {
+		Some(line_break_offset) => {
+			character_index + line_break_offset + 1
+		}
+		None => {
+			character_count
+		}
+	};
+	(start_index, end_index)
+}
+
+//==============================================================================
+/// 윈도우인지. (데스크탑은 빌드 대상, 웹은 원본처럼 navigator.platform 이 Win 으로 시작하는지)
+//==============================================================================
+fn is_windows_platform() -> bool {
+	#[cfg(target_arch = "wasm32")]
+	{
+		web_sys::window().and_then(|window| window.navigator().platform().ok()).map(|platform| platform.starts_with("Win")).unwrap_or(false)
+	}
+	#[cfg(not(target_arch = "wasm32"))]
+	{
+		cfg!(target_os = "windows")
+	}
+}
+
+//==============================================================================
+/// 뒤 공백 건너뛰기. (블링크 visible_units.cc 의 SkipWhitespace: 공백과 NBSP 는 넘고 줄바꿈에서 멈춘다)
+//==============================================================================
+fn skip_trailing_whitespace(text: &str, character_index: usize) -> usize {
+	let skipped_count = text.chars().skip(character_index).take_while(|character| *character != '\n' && (character.is_whitespace() || *character == '\u{A0}')).count();
+	character_index + skipped_count
 }
 
 //==============================================================================
@@ -600,11 +777,13 @@ pub struct UIInputField {
 	/// 여러 줄 배치와 그 열쇠. (보인 글, 폰트, 폭, 줄 높이, 탭 크기)
 	text_area_layout: TextAreaLayout,
 	text_area_layout_key: Option<(String, String, f32, f32, f32)>,
-	/// 줄 높이. (None 이면 CSS normal 을 글꼴 크기의 1.2 배로 갈음한다)
+	/// 줄 높이. (None 이면 CSS normal, 크롬처럼 첫째 글꼴의 위아래 길이와 줄 사이로 셈한다)
 	line_height: Option<f32>,
 	tab_size: f32,
 	/// 위로 굴려 넘긴 만큼. (원본 textarea scrollTop)
 	scroll_top: f32,
+	/// 클래식 스크롤 막대가 차지한 폭. (여러 줄 필드, 얹는 막대거나 넘치지 않으면 0)
+	text_area_scrollbar_gutter: f32,
 	/// 위아래 이동이 지키는 가로 자리. (블링크 x_pos_for_vertical_arrow_navigation, 다른 선택 바뀜에 지운다)
 	preferred_caret_x: Option<f32>,
 	/// 폭으로 나뉜 자리의 커서를 앞 줄 끝에 보일지. (블링크의 위쪽 친화)
@@ -627,6 +806,20 @@ pub struct UIInputField {
 	pending_quick_menu_command: Option<crate::ui::uiinputfieldmenu::QuickMenuCommand>,
 	/// 노드 한 단위의 창 픽셀. (손잡이와 빠른 메뉴 크기)
 	window_pixel_per_unit: f32,
+	/// 지난 마우스 누름. ((시각, 창 DIP 자리, 이어 누른 수), 데스크탑이 이어 누른 수를 센다)
+	#[cfg(not(target_arch = "wasm32"))]
+	last_click: Option<(web_time::Instant, Vector2, u32)>,
+	/// 두 번, 세 번 누른 뒤 끌기의 단위와 처음 고른 범위. (블링크 SelectionController 의 낱말, 문단 단위 끌기)
+	drag_granularity: Option<(SelectionGranularity, usize, usize)>,
+}
+
+//==============================================================================
+/// 끌어 넓히는 단위. (두 번 누르면 낱말, 세 번 누르면 문단)
+//==============================================================================
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SelectionGranularity {
+	Word,
+	Paragraph,
 }
 
 //==============================================================================
@@ -721,6 +914,7 @@ impl UIInputField {
 			line_height: None,
 			tab_size: DEFAULT_TAB_SIZE,
 			scroll_top: 0.0,
+			text_area_scrollbar_gutter: 0.0,
 			preferred_caret_x: None,
 			is_caret_upstream: false,
 			caret_reveal_request: None,
@@ -735,6 +929,9 @@ impl UIInputField {
 			#[cfg(not(target_arch = "wasm32"))]
 			pending_quick_menu_command: None,
 			window_pixel_per_unit: 1.0,
+			#[cfg(not(target_arch = "wasm32"))]
+			last_click: None,
+			drag_granularity: None,
 		}
 	}
 
@@ -843,7 +1040,7 @@ impl UIInputField {
 	}
 
 	//==============================================================================
-	/// 줄 높이 설정. (여러 줄 필드, None 이면 CSS normal 을 글꼴 크기의 1.2 배로 갈음한다)
+	/// 줄 높이 설정. (여러 줄 필드, None 이면 CSS normal 이다. 크롬 SimpleFontData 처럼 첫째 글꼴의 위아래 길이와 줄 사이를 반올림해 더한다)
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn set_line_height(&mut self, line_height: Option<f32>) {
@@ -861,7 +1058,8 @@ impl UIInputField {
 				line_height
 			}
 			None => {
-				(self.font_size * 1.2).round()
+				// 글꼴을 하나도 읽지 못했으면(글자 캐시가 없는 시험 같은 때) 글꼴 크기의 1.2 배로 갈음한다.
+				crate::core::textstringtexturecache::measure_normal_line_height_without_graphic(&self.build_font_string()).unwrap_or_else(|| (self.font_size * 1.2).round())
 			}
 		}
 	}
@@ -930,7 +1128,7 @@ impl UIInputField {
 	}
 
 	//==============================================================================
-	/// 값 설정. (max_length 로 자르고 커서는 끝에. 바뀜 이벤트는 부르지 않는다. 원본 set_text)
+	/// 값 설정. (max_length 로 자르고 커서는 끝에. 바뀜 이벤트는 부르지 않는다. 원본 setText)
 	//==============================================================================
 	pub fn set_text(&mut self, text: &str) {
 		self.edit_buffer.set_text(text);
@@ -1134,14 +1332,14 @@ impl UIInputField {
 	}
 
 	//==============================================================================
-	/// 바뀜 이벤트 설정. (사용자 입력으로 값이 바뀔 때. 원본 set_on_change)
+	/// 바뀜 이벤트 설정. (사용자 입력으로 값이 바뀔 때. 원본 setOnChange)
 	//==============================================================================
 	pub fn set_on_change(&mut self, change_event: UIInputFieldEvent) {
 		self.change_event = Some(change_event);
 	}
 
 	//==============================================================================
-	/// 제출 이벤트 설정. (Enter. 원본 set_on_submit)
+	/// 제출 이벤트 설정. (Enter. 원본 setOnSubmit)
 	//==============================================================================
 	pub fn set_on_submit(&mut self, submit_event: UIInputFieldEvent) {
 		self.submit_event = Some(submit_event);
@@ -1241,7 +1439,7 @@ impl UIInputField {
 	}
 
 	//==============================================================================
-	/// 커서 옮기기. (원본 move_cursor, 자리는 UTF-16 단위)
+	/// 커서 옮기기. (원본 moveCursor, 자리는 UTF-16 단위)
 	//==============================================================================
 	pub fn move_cursor(&mut self, new_index: usize, is_selection_extended: bool) {
 		let character_index = convert_utf16_index_to_character_index(self.edit_buffer.get_text(), new_index);
@@ -1264,7 +1462,7 @@ impl UIInputField {
 	}
 
 	//==============================================================================
-	/// 선택을 글로 바꾸고 바뀜 이벤트 부르기. (원본 replace_selection)
+	/// 선택을 글로 바꾸고 바뀜 이벤트 부르기. (원본 replaceSelection)
 	//==============================================================================
 	pub fn replace_selection(&mut self, context: &mut ComponentContext, text: &str) {
 		self.replace_selection_with_edit(context, text, TextEditKind::InsertText);
@@ -1378,7 +1576,7 @@ impl UIInputField {
 	}
 
 	//==============================================================================
-	/// 포커스 얻음. (원본 handle_focus)
+	/// 포커스 얻음. (원본 handleFocus)
 	//==============================================================================
 	fn handle_focus(&mut self) {
 		self.is_focused = true;
@@ -1387,7 +1585,7 @@ impl UIInputField {
 	}
 
 	//==============================================================================
-	/// 포커스 잃음. (조합 글을 확정했으면 그 글을 돌려준다. 원본 handle_blur)
+	/// 포커스 잃음. (조합 글을 확정했으면 그 글을 돌려준다. 원본 handleBlur)
 	/// - 웹 DOM 입력은 브라우저가 확정해 값으로 보내므로 조합 글만 비운다.
 	//==============================================================================
 	fn apply_blur(&mut self) -> Option<String> {
@@ -1475,7 +1673,8 @@ impl UIInputField {
 		if self.measured_value != value || self.character_offsets.is_empty() {
 			return count_characters(value);
 		}
-		find_character_index_at_offset(&self.character_offsets, local_x - self.padding)
+		let boundary_list = collect_grapheme_boundaries(value);
+		find_boundary_index_at_offset(&self.character_offsets, &boundary_list, local_x - self.padding)
 	}
 
 	//==============================================================================
@@ -1573,9 +1772,11 @@ impl UIInputField {
 	fn handle_edit_key(&mut self, context: &mut ComponentContext, key: TextInputKey, is_shift: bool) {
 		let cursor_index = self.edit_buffer.get_cursor_index();
 		// 위아래 이동이 아니면 지키던 가로 자리를 지우고, 커서가 보이게 스크롤한다. (블링크 FrameSelection)
+		// 맥 스크롤 키는 넘기기만 하면 선택이 그대로라 가로 자리를 지키고, 옮기게 되면 그 갈래에서 지운다.
 		let is_vertical_key = matches!(key, TextInputKey::Up | TextInputKey::Down | TextInputKey::PageUp | TextInputKey::PageDown);
+		let is_scroll_key = matches!(key, TextInputKey::ScrollToDocumentStart | TextInputKey::ScrollToDocumentEnd | TextInputKey::ScrollPageUp | TextInputKey::ScrollPageDown);
 		let was_caret_upstream = self.is_caret_upstream;
-		if !is_vertical_key {
+		if !is_vertical_key && !is_scroll_key {
 			self.preferred_caret_x = None;
 			self.is_caret_upstream = false;
 			if !matches!(key, TextInputKey::Copy | TextInputKey::Tab) {
@@ -1619,18 +1820,35 @@ impl UIInputField {
 					self.apply_edit_history(context, key == TextInputKey::Redo);
 				}
 			}
-			TextInputKey::Left => {
-				self.move_cursor_to_character(cursor_index.saturating_sub(1), is_shift);
-			}
-			TextInputKey::Right => {
-				self.move_cursor_to_character(cursor_index + 1, is_shift);
+			TextInputKey::Left | TextInputKey::Right => {
+				// 글자 묶음 단위로 옮긴다. 선택이 있으면 선택을 늘리지 않을 때 그 앞이나 뒤로 접는다. (블링크 SelectionModifier 의 kCharacter)
+				let is_right = key == TextInputKey::Right;
+				let target_index = match (self.edit_buffer.get_selection_range(), is_shift) {
+					(Some((start_index, end_index)), false) => {
+						if is_right {
+							end_index
+						}
+						else {
+							start_index
+						}
+					}
+					_ => {
+						if is_right {
+							find_next_grapheme_boundary(self.edit_buffer.get_text(), cursor_index)
+						}
+						else {
+							find_previous_grapheme_boundary(self.edit_buffer.get_text(), cursor_index)
+						}
+					}
+				};
+				self.move_cursor_to_character(target_index, is_shift);
 			}
 			TextInputKey::Home | TextInputKey::End => {
 				let is_end = key == TextInputKey::End;
 				if self.is_multiline {
 					// 보이는 줄의 앞과 끝. (블링크 MoveToBeginningOfLine, MoveToEndOfLine 의 kLineBoundary)
-					let content_width = context.get_transform().get_content_size().x;
-					self.ensure_text_area_layout_without_graphic(content_width);
+					let content_size = context.get_transform().get_content_size();
+					self.ensure_text_area_layout_without_graphic(content_size);
 					let line_index = self.text_area_layout.find_line_index(cursor_index, was_caret_upstream);
 					let (target_index, is_upstream) = self.text_area_layout.get_line_boundary(line_index, is_end);
 					self.move_cursor_to_character(target_index, is_shift);
@@ -1669,6 +1887,75 @@ impl UIInputField {
 						count_characters(self.edit_buffer.get_text())
 					};
 					self.move_cursor_to_character(target_index, is_shift);
+				}
+			}
+			TextInputKey::ScrollToDocumentStart | TextInputKey::ScrollToDocumentEnd => {
+				// 맥 Home, End. (크롬 맥: scrollToBeginningOfDocument 를 ScrollToBeginningOfDocument 편집 명령으로 넘겨 커서를 두고 넘기고,
+				// 넘길 것이 없어 명령이 거짓이면 블링크 키 표의 MoveToBeginningOfLine, MoveToEndOfLine 으로 옮긴다. Shift 와 함께면 글 앞과 끝까지 고른다)
+				// 원본 캔버스 모드는 keydown 의 Home, End 를 그대로 받는다.
+				let is_end = key == TextInputKey::ScrollToDocumentEnd;
+				let is_canvas_mode = !self.is_multiline && !self.use_dom_input;
+				let mut is_scrolled = false;
+				if self.is_multiline && !is_shift {
+					let content_size = context.get_transform().get_content_size();
+					self.ensure_text_area_layout_without_graphic(content_size);
+					let maximum_scroll_top = self.get_maximum_scroll_top(content_size.y);
+					let target_scroll_top = if is_end {
+						maximum_scroll_top
+					}
+					else {
+						0.0
+					};
+					if (target_scroll_top - self.scroll_top).abs() > 0.0 {
+						self.scroll_top = target_scroll_top;
+						is_scrolled = true;
+					}
+				}
+				if !is_scrolled {
+					self.preferred_caret_x = None;
+					self.is_caret_upstream = false;
+					self.request_caret_reveal(CaretRevealKind::IfNeeded);
+					if is_shift && !is_canvas_mode {
+						let target_index = if is_end {
+							count_characters(self.edit_buffer.get_text())
+						}
+						else {
+							0
+						};
+						self.move_cursor_to_character(target_index, true);
+					}
+					else if self.is_multiline {
+						let content_size = context.get_transform().get_content_size();
+						self.ensure_text_area_layout_without_graphic(content_size);
+						let line_index = self.text_area_layout.find_line_index(cursor_index, was_caret_upstream);
+						let (target_index, is_upstream) = self.text_area_layout.get_line_boundary(line_index, is_end);
+						self.move_cursor_to_character(target_index, is_shift);
+						self.is_caret_upstream = is_upstream;
+					}
+					else {
+						let target_index = if is_end {
+							count_characters(self.edit_buffer.get_text())
+						}
+						else {
+							0
+						};
+						self.move_cursor_to_character(target_index, is_shift);
+					}
+				}
+			}
+			TextInputKey::ScrollPageUp | TextInputKey::ScrollPageDown => {
+				// 맥 PageUp, PageDown. (크롬 맥: scrollPageUp 은 블링크 명령이 아니라 키 기본 동작이 한 화면만큼 넘긴다, cc ScrollUtils::CalculatePageStep. 커서는 그대로)
+				if self.is_multiline {
+					let content_size = context.get_transform().get_content_size();
+					self.ensure_text_area_layout_without_graphic(content_size);
+					let page_step = calculate_page_step(content_size.y);
+					let direction = if key == TextInputKey::ScrollPageUp {
+						-1.0
+					}
+					else {
+						1.0
+					};
+					self.scroll_top = (self.scroll_top + page_step * direction).clamp(0.0, self.get_maximum_scroll_top(content_size.y));
 				}
 			}
 			TextInputKey::Enter => {
@@ -1732,7 +2019,7 @@ impl UIInputField {
 	}
 
 	//==============================================================================
-	/// 문맥 메뉴 열기. (루트의 마지막 자식 노드로 만들어 위에 그린다. 원본 show_context_menu)
+	/// 문맥 메뉴 열기. (루트의 마지막 자식 노드로 만들어 위에 그린다. 원본 showContextMenu)
 	//==============================================================================
 	fn show_context_menu(&mut self, context: &mut ComponentContext, view_position: Vector2) {
 		self.hide_context_menu(context);
@@ -1790,7 +2077,7 @@ impl UIInputField {
 	}
 
 	//==============================================================================
-	/// 문맥 메뉴 닫기. (원본 hide_context_menu)
+	/// 문맥 메뉴 닫기. (원본 hideContextMenu)
 	//==============================================================================
 	fn hide_context_menu(&mut self, context: &mut ComponentContext) {
 		if let Some(context_menu_node_id) = self.context_menu_node_id.take() {
@@ -1977,24 +2264,48 @@ impl UIInputField {
 
 	//==============================================================================
 	/// 여러 줄 배치 맞추기. (보인 글, 폰트, 폭, 줄 높이, 탭 크기가 바뀌었을 때만 다시 짓는다)
+	/// - 크롬 textarea 는 overflow: auto 라, 클래식 스크롤 막대(윈도우, 리눅스, 맥 클래식 설정)는 넘칠 때 테두리 안쪽의 막대 두께만큼 글 폭을 줄인다.
+	///   막대 없이 지어 보고 넘치면 막대 자리를 덜고 다시 짓는다. (crate::web::pane::read_classic_scrollbar_metrics)
 	//==============================================================================
-	fn ensure_text_area_layout(&mut self, content_width: f32, measure_width: &dyn Fn(&str) -> f32) {
+	fn ensure_text_area_layout(&mut self, content_size: Vector2, measure_width: &dyn Fn(&str) -> f32) {
 		let display_text = self.edit_buffer.build_display_text();
 		let font_string = self.build_font_string();
-		let wrap_width = (content_width - self.padding * 2.0).max(0.0);
-		let layout_key = (display_text, font_string, wrap_width, self.get_line_height(), self.tab_size);
-		if self.text_area_layout_key.as_ref() == Some(&layout_key) {
-			return;
+		let scrollbar_thickness = crate::web::pane::read_classic_scrollbar_metrics(false).map(|metrics| metrics.thickness).unwrap_or(0.0);
+		let line_height = self.get_line_height();
+		// 폭이 좁으면 글이 길어질 뿐이라, 막대를 둬도 넘치지 않으면 막대 없이도 넘치지 않고, 막대 없이 넘치면 막대를 둬도 넘친다. 지난 칸부터 본다.
+		let mut scrollbar_gutter = if self.text_area_scrollbar_gutter > 0.0 {
+			scrollbar_thickness
 		}
-		let tab_width = measure_width(" ") * self.tab_size;
-		self.text_area_layout = build_text_area_layout(&layout_key.0, wrap_width, layout_key.3, tab_width, measure_width);
-		self.text_area_layout_key = Some(layout_key);
+		else {
+			0.0
+		};
+		for _ in 0..2 {
+			let wrap_width = (content_size.x - self.padding * 2.0 - scrollbar_gutter).max(0.0);
+			let layout_key = (display_text.clone(), font_string.clone(), wrap_width, line_height, self.tab_size);
+			if self.text_area_layout_key.as_ref() != Some(&layout_key) {
+				let tab_width = measure_width(" ") * self.tab_size;
+				self.text_area_layout = build_text_area_layout(&layout_key.0, wrap_width, line_height, tab_width, measure_width);
+				self.text_area_layout_key = Some(layout_key);
+			}
+			self.text_area_scrollbar_gutter = scrollbar_gutter;
+			let is_overflowing = self.text_area_layout.get_content_height() + self.padding * 2.0 > content_size.y + 0.5;
+			let wanted_gutter = if is_overflowing {
+				scrollbar_thickness
+			}
+			else {
+				0.0
+			};
+			if wanted_gutter == scrollbar_gutter {
+				return;
+			}
+			scrollbar_gutter = wanted_gutter;
+		}
 	}
 
 	//==============================================================================
 	/// Graphic 없이 여러 줄 배치 맞추기. (tick 의 위아래 이동과 누른 자리, 그릴 때와 같은 글자 캐시로 잰다)
 	//==============================================================================
-	fn ensure_text_area_layout_without_graphic(&mut self, content_width: f32) {
+	fn ensure_text_area_layout_without_graphic(&mut self, content_size: Vector2) {
 		let font_string = self.build_font_string();
 		let font_size = self.font_size;
 		let measure_width = move |measured_text: &str| -> f32 {
@@ -2007,7 +2318,7 @@ impl UIInputField {
 				}
 			}
 		};
-		self.ensure_text_area_layout(content_width, &measure_width);
+		self.ensure_text_area_layout(content_size, &measure_width);
 	}
 
 	//==============================================================================
@@ -2065,7 +2376,7 @@ impl UIInputField {
 	//==============================================================================
 	fn move_caret_vertically(&mut self, context: &mut ComponentContext, key: TextInputKey, is_shift: bool) {
 		let content_size = context.get_transform().get_content_size();
-		self.ensure_text_area_layout_without_graphic(content_size.x);
+		self.ensure_text_area_layout_without_graphic(content_size);
 		let cursor_index = self.edit_buffer.get_cursor_index();
 		let (caret_x, _) = self.text_area_layout.get_caret_position(cursor_index, self.is_caret_upstream);
 		let preferred_x = self.preferred_caret_x.unwrap_or(caret_x);
@@ -2107,7 +2418,7 @@ impl UIInputField {
 	//==============================================================================
 	fn find_text_area_index_at(&mut self, context: &ComponentContext, view_input_position: Vector2) -> (usize, bool) {
 		let content_size = context.get_transform().get_content_size();
-		self.ensure_text_area_layout_without_graphic(content_size.x);
+		self.ensure_text_area_layout_without_graphic(content_size);
 		let local_position = context.get_node_tree().convert_view_position_to_node_position(context.get_node_id(), view_input_position).unwrap_or(Vector2::zero());
 		self.text_area_layout.find_character_index_at(local_position.x - self.padding, local_position.y - self.padding + self.scroll_top)
 	}
@@ -2119,6 +2430,13 @@ impl UIInputField {
 		let scroll_height = self.text_area_layout.get_content_height() + self.padding * 2.0;
 		if scroll_height <= content_size.y + 0.5 || content_size.y <= 0.0 {
 			return None;
+		}
+		// 클래식 막대: 막대 칸 안, 양끝 단추 사이의 크롬 치수 썸. (그린 썸 자리)
+		if self.text_area_scrollbar_gutter > 0.0 {
+			let metrics = crate::web::pane::read_classic_scrollbar_metrics(false)?;
+			let (thumb_start, thumb_length) = crate::web::pane::calculate_classic_thumb_span(&metrics, content_size.y, content_size.y, scroll_height, self.scroll_top)?;
+			let track_left = content_size.x - self.text_area_scrollbar_gutter;
+			return Some(Rect::create(track_left + metrics.thumb_cross_offset, thumb_start + metrics.thumb_length_inset, metrics.thumb_thickness, (thumb_length - metrics.thumb_length_inset * 2.0).max(0.0)));
 		}
 		let thumb_length = (content_size.y * content_size.y / scroll_height).max(TEXT_AREA_SCROLLBAR_MINIMUM_THUMB_LENGTH).min(content_size.y);
 		let maximum_scroll_top = scroll_height - content_size.y;
@@ -2135,7 +2453,7 @@ impl UIInputField {
 		graphic.set_font_string(&font_string);
 		{
 			let graphic_reference: &Graphic = graphic;
-			self.ensure_text_area_layout(content_size.x, &|measured_text: &str| graphic_reference.measure_text(measured_text).width);
+			self.ensure_text_area_layout(content_size, &|measured_text: &str| graphic_reference.measure_text(measured_text).width);
 		}
 		self.apply_caret_reveal(content_size.y);
 		self.scroll_top = self.scroll_top.clamp(0.0, self.get_maximum_scroll_top(content_size.y));
@@ -2301,10 +2619,96 @@ impl UIInputField {
 	fn find_character_index_at_local(&mut self, context: &ComponentContext, local_position: Vector2) -> (usize, bool) {
 		if self.is_multiline {
 			let content_size = context.get_transform().get_content_size();
-			self.ensure_text_area_layout_without_graphic(content_size.x);
+			self.ensure_text_area_layout_without_graphic(content_size);
 			return self.text_area_layout.find_character_index_at(local_position.x - self.padding, local_position.y - self.padding + self.scroll_top);
 		}
 		(self.measure_character_index_at_local_x(local_position.x), false)
+	}
+
+	//==============================================================================
+	/// 마우스로 이어 누른 수. (원본 DOM 입력 칸과 textarea 를 흉내 내는 필드만, 손가락과 캔버스 모드 필드는 1)
+	/// - 데스크탑: 크롬 aura(윈도우, 리눅스)의 MouseEvent::GetRepeatCount 처럼 앞 누름에서 시간(read_double_click_seconds) 안,
+	///   가로와 세로 2 DIP 안이면 하나 더 세고 셋을 넘지 않는다. 맥 크롬은 NSEvent clickCount 를 쓰고 시간은 같은 운영체제 설정이다.
+	/// - 웹: 브라우저가 센 mousedown 의 detail. (플랫폼이 글 입력 줄에 넣는다)
+	//==============================================================================
+	fn count_mouse_clicks(&mut self, context: &ComponentContext, view_input_position: Vector2) -> u32 {
+		let input_manager = context.get_engine().get_input_manager();
+		if input_manager.is_touch_input() || (!self.use_dom_input && !self.is_multiline) {
+			#[cfg(not(target_arch = "wasm32"))]
+			{
+				self.last_click = None;
+			}
+			return 1;
+		}
+		#[cfg(target_arch = "wasm32")]
+		{
+			let _ = view_input_position;
+			input_manager.get_text_input().get_pointer_click_count().max(1)
+		}
+		#[cfg(not(target_arch = "wasm32"))]
+		{
+			let view_scale = UIInputField::read_view_scale(context);
+			let window_position = Vector2::create(view_input_position.x * view_scale.x, view_input_position.y * view_scale.y);
+			let now = web_time::Instant::now();
+			let interval_seconds = crate::platform::desktop::systemfont::read_double_click_seconds();
+			let previous_click = self.last_click.map(|(time, position, click_count)| (now.duration_since(time).as_secs_f32(), position, click_count));
+			let click_count = count_repeated_clicks(previous_click, window_position, interval_seconds, REPEATED_CLICK_SLOP);
+			self.last_click = Some((now, window_position, click_count));
+			click_count
+		}
+	}
+
+	//==============================================================================
+	/// 이어 누른 수대로 고르기. (블링크 SelectionController: 두 번은 낱말(윈도우는 뒤 공백까지), 세 번 넘게는 문단, 끌면 그 단위로 넓힌다)
+	//==============================================================================
+	fn select_by_click_count(&mut self, click_count: u32, character_index: usize, is_upstream: bool) {
+		if click_count < 2 {
+			return;
+		}
+		let text = self.edit_buffer.get_text().to_string();
+		let (granularity, (start_index, mut end_index)) = if click_count == 2 {
+			(SelectionGranularity::Word, find_word_range_at(&text, character_index, is_upstream))
+		}
+		else {
+			(SelectionGranularity::Paragraph, find_paragraph_range_at(&text, character_index))
+		};
+		// 윈도우 크롬은 두 번 누른 낱말에 뒤 공백을 붙인다. (settings.json5 selectTrailingWhitespaceEnabled 의 Win true, visible_units.cc 의 SkipWhitespace)
+		if granularity == SelectionGranularity::Word && is_windows_platform() && end_index > start_index {
+			end_index = skip_trailing_whitespace(&text, end_index);
+		}
+		self.edit_buffer.set_selection(start_index, end_index);
+		self.drag_granularity = Some((granularity, start_index, end_index));
+		self.is_caret_upstream = false;
+	}
+
+	//==============================================================================
+	/// 끌어 고르기. (단위가 있으면 블링크 ExtendSelectionAsDirectional 처럼 처음 범위를 지키고 끄는 자리의 낱말이나 문단 끝까지 넓힌다)
+	//==============================================================================
+	fn extend_drag_selection(&mut self, drag_start_index: usize, character_index: usize, is_upstream: bool) {
+		let (granularity, start_index, end_index) = match self.drag_granularity {
+			Some(drag_granularity) => {
+				drag_granularity
+			}
+			None => {
+				self.edit_buffer.set_selection(drag_start_index, character_index);
+				return;
+			}
+		};
+		let text = self.edit_buffer.get_text().to_string();
+		let (unit_start, unit_end) = match granularity {
+			SelectionGranularity::Word => {
+				find_word_range_at(&text, character_index, is_upstream)
+			}
+			SelectionGranularity::Paragraph => {
+				find_paragraph_range_at(&text, character_index)
+			}
+		};
+		if character_index < start_index {
+			self.edit_buffer.set_selection(end_index, unit_start);
+		}
+		else {
+			self.edit_buffer.set_selection(start_index, unit_end.max(end_index));
+		}
 	}
 
 	//==============================================================================
@@ -2726,7 +3130,7 @@ impl Component for UIInputField {
 		// 여러 줄: 커서가 보이게 스크롤. (그리기 전에도 스크롤 자리가 맞게 tick 에서 한다)
 		if self.is_multiline && self.caret_reveal_request.is_some() {
 			let content_size = context.get_transform().get_content_size();
-			self.ensure_text_area_layout_without_graphic(content_size.x);
+			self.ensure_text_area_layout_without_graphic(content_size);
 			self.apply_caret_reveal(content_size.y);
 		}
 
@@ -2788,6 +3192,8 @@ impl Component for UIInputField {
 			self.hide_touch_selection(context);
 			self.long_press_state = None;
 		}
+		self.drag_granularity = None;
+		let click_count = self.count_mouse_clicks(context, view_input_position);
 		if self.is_multiline {
 			// 썸을 누르면 끌어 스크롤한다. (선택은 그대로)
 			let content_size = context.get_transform().get_content_size();
@@ -2803,6 +3209,7 @@ impl Component for UIInputField {
 			self.drag_start_index = Some(character_index);
 			self.edit_buffer.set_selection(character_index, character_index);
 			self.is_caret_upstream = is_upstream;
+			self.select_by_click_count(click_count, character_index, is_upstream);
 			self.bump_value_revision();
 			self.reset_cursor_blink();
 			return;
@@ -2811,6 +3218,7 @@ impl Component for UIInputField {
 		let character_index = self.measure_character_index_at_local_x(local_x);
 		self.drag_start_index = Some(character_index);
 		self.edit_buffer.set_selection(character_index, character_index);
+		self.select_by_click_count(click_count, character_index, false);
 		self.bump_value_revision();
 		self.reset_cursor_blink();
 	}
@@ -2837,8 +3245,23 @@ impl Component for UIInputField {
 			let content_size = context.get_transform().get_content_size();
 			let local_position = context.get_node_tree().convert_view_position_to_node_position(context.get_node_id(), view_input_position).unwrap_or(Vector2::zero());
 			let scroll_height = self.text_area_layout.get_content_height() + self.padding * 2.0;
-			let thumb_length = (content_size.y * content_size.y / scroll_height.max(1.0)).max(TEXT_AREA_SCROLLBAR_MINIMUM_THUMB_LENGTH).min(content_size.y);
-			let track_room = (content_size.y - thumb_length).max(1.0);
+			let classic_metrics = if self.text_area_scrollbar_gutter > 0.0 {
+				crate::web::pane::read_classic_scrollbar_metrics(false)
+			}
+			else {
+				None
+			};
+			let track_room = match classic_metrics {
+				Some(metrics) => {
+					let thumb_room = (content_size.y - metrics.button_length * 2.0).max(1.0);
+					let thumb_length = (thumb_room * content_size.y / scroll_height.max(1.0)).round().max(metrics.thumb_minimum_length).min(thumb_room);
+					(thumb_room - thumb_length).max(1.0)
+				}
+				None => {
+					let thumb_length = (content_size.y * content_size.y / scroll_height.max(1.0)).max(TEXT_AREA_SCROLLBAR_MINIMUM_THUMB_LENGTH).min(content_size.y);
+					(content_size.y - thumb_length).max(1.0)
+				}
+			};
 			let maximum_scroll_top = self.get_maximum_scroll_top(content_size.y);
 			self.scroll_top = (start_scroll_top + (local_position.y - start_y) / track_room * maximum_scroll_top).clamp(0.0, maximum_scroll_top);
 			return;
@@ -2854,7 +3277,7 @@ impl Component for UIInputField {
 		if self.is_multiline {
 			// 끄는 끝이 보이게 스크롤한다. (크롬의 끌기 자동 스크롤 자리)
 			let (character_index, is_upstream) = self.find_text_area_index_at(context, view_input_position);
-			self.edit_buffer.set_selection(drag_start_index, character_index);
+			self.extend_drag_selection(drag_start_index, character_index, is_upstream);
 			self.is_caret_upstream = is_upstream;
 			self.request_caret_reveal(CaretRevealKind::IfNeeded);
 			self.bump_value_revision();
@@ -2863,7 +3286,7 @@ impl Component for UIInputField {
 		}
 		let local_x = self.convert_view_position_to_local_x(context, view_input_position);
 		let character_index = self.measure_character_index_at_local_x(local_x);
-		self.edit_buffer.set_selection(drag_start_index, character_index);
+		self.extend_drag_selection(drag_start_index, character_index, false);
 		self.bump_value_revision();
 		self.reset_cursor_blink();
 	}
@@ -2904,7 +3327,7 @@ impl Component for UIInputField {
 			return false;
 		}
 		let content_size = context.get_transform().get_content_size();
-		self.ensure_text_area_layout_without_graphic(content_size.x);
+		self.ensure_text_area_layout_without_graphic(content_size);
 		let previous_scroll_top = self.scroll_top;
 		self.scroll_top = (self.scroll_top + wheel_delta.y).clamp(0.0, self.get_maximum_scroll_top(content_size.y));
 		self.scroll_top != previous_scroll_top
@@ -3045,7 +3468,7 @@ const CONTEXT_MENU_ITEM_LIST: [(&str, UIInputFieldMenuAction); 3] = [
 ];
 
 //==============================================================================
-/// 캔버스 문맥 메뉴. (데스크탑. 원본 show_context_menu 의 DOM 메뉴를 같은 모양으로 그린다)
+/// 캔버스 문맥 메뉴. (데스크탑. 원본 showContextMenu 의 DOM 메뉴를 같은 모양으로 그린다)
 /// - 루트의 자식 노드에 붙는다. 항목을 누르면 주인 필드에 항목을 부탁하고(다음 tick 에 한다) 스스로 지운다.
 /// - 메뉴 밖을 누르거나, 다른 자리에 문맥 메뉴를 부르거나, 주인 필드가 포커스를 잃거나 없어지면 스스로 지운다.
 //==============================================================================
@@ -3492,11 +3915,14 @@ mod tests {
 		assert!(edit_buffer.delete_backward());
 		assert_eq!(edit_buffer.get_text(), "");
 
-		// 최대 길이: set_text 와 끼우기 모두 자르고, 커서는 글 끝을 넘지 않는다.
+		// 최대 길이: set_text 는 값을 자르고, 끼우기는 블링크 입력 칸처럼 남은 길이만큼만 넣는다. (서로게이트 쌍은 쪼개지 않는다)
 		edit_buffer.set_max_length(4);
 		edit_buffer.set_text("가나다라마바");
 		assert_eq!(edit_buffer.get_text(), "가나다라");
 		edit_buffer.move_cursor(2, false);
+		edit_buffer.replace_selection("XYZ");
+		assert_eq!(edit_buffer.get_text(), "가나다라");
+		edit_buffer.set_selection(2, 4);
 		edit_buffer.replace_selection("XYZ");
 		assert_eq!(edit_buffer.get_text(), "가나XY");
 		assert_eq!(edit_buffer.get_cursor_index(), 4);
@@ -3506,6 +3932,10 @@ mod tests {
 		edit_buffer.set_composition("한");
 		assert_eq!(edit_buffer.build_display_text(), "가한나XY");
 		assert_eq!(edit_buffer.get_text_before_cursor(), "가");
+		edit_buffer.set_composition("");
+		edit_buffer.set_text("abc");
+		edit_buffer.replace_selection("\u{1F600}");
+		assert_eq!(edit_buffer.get_text(), "abc");
 	}
 
 	//==============================================================================
@@ -3544,6 +3974,11 @@ mod tests {
 		assert_eq!(find_character_index_at_offset(&character_offsets, 24.0), 2);
 		assert_eq!(find_character_index_at_offset(&character_offsets, 99.0), 3);
 		assert_eq!(find_character_index_at_offset(&[0.0], 50.0), 0);
+		// 글자 묶음 가운데(결합 부호 앞)에는 서지 않는다. ("e\u{301}b": 경계 0, 2, 3)
+		let combining_offsets = [0.0, 10.0, 10.0, 20.0];
+		assert_eq!(find_boundary_index_at_offset(&combining_offsets, &[0, 2, 3], 6.0), 2);
+		assert_eq!(find_boundary_index_at_offset(&combining_offsets, &[0, 2, 3], 4.0), 0);
+		assert_eq!(find_boundary_index_at_offset(&combining_offsets, &[0, 2, 3], 99.0), 3);
 	}
 
 	//==============================================================================
@@ -3824,6 +4259,160 @@ mod tests {
 		engine.get_input_manager_mut().set_touch_pressed(false);
 		assert!(!node_tree.contains(menu_id));
 		assert!(!get_field(&mut node_tree, field_id).is_focused());
+	}
+
+	//==============================================================================
+	/// 이어 누른 수: 크롬 aura 처럼 시간과 가로, 세로 2 DIP 안이면 하나 더, 셋을 넘지 않는다.
+	//==============================================================================
+	#[test]
+	fn repeated_clicks_count_like_chrome_aura() {
+		let origin = Vector2::create(10.0, 10.0);
+		assert_eq!(count_repeated_clicks(None, origin, 0.5, 2.0), 1);
+		assert_eq!(count_repeated_clicks(Some((0.3, origin, 1)), Vector2::create(12.0, 8.0), 0.5, 2.0), 2);
+		assert_eq!(count_repeated_clicks(Some((0.3, origin, 2)), origin, 0.5, 2.0), 3);
+		assert_eq!(count_repeated_clicks(Some((0.3, origin, 3)), origin, 0.5, 2.0), 3);
+		assert_eq!(count_repeated_clicks(Some((0.6, origin, 1)), origin, 0.5, 2.0), 1);
+		assert_eq!(count_repeated_clicks(Some((0.1, origin, 1)), Vector2::create(12.5, 10.0), 0.5, 2.0), 1);
+	}
+
+	//==============================================================================
+	/// 낱말과 문단 범위: 블링크 ExpandWithGranularity 처럼 공백을 누르면 공백, 문단 끝 자리는 줄바꿈, 글 끝은 앞 낱말, 문단은 줄바꿈까지.
+	//==============================================================================
+	#[test]
+	fn word_and_paragraph_ranges_like_blink() {
+		let text = "hello  world\nnext line";
+		assert_eq!(find_word_range_at(text, 1, false), (0, 5));
+		assert_eq!(find_word_range_at(text, 5, false), (5, 7));
+		assert_eq!(find_word_range_at(text, 7, false), (7, 12));
+		assert_eq!(find_word_range_at(text, 12, false), (12, 13));
+		assert_eq!(find_word_range_at(text, 22, false), (18, 22));
+		assert_eq!(find_word_range_at(text, 5, true), (0, 5));
+		assert_eq!(skip_trailing_whitespace(text, 5), 7);
+		assert_eq!(skip_trailing_whitespace(text, 12), 12);
+		assert_eq!(find_paragraph_range_at(text, 3), (0, 13));
+		assert_eq!(find_paragraph_range_at(text, 15), (13, 22));
+		assert_eq!(find_paragraph_range_at("abc\n", 4), (0, 4));
+		assert_eq!(find_paragraph_range_at("", 0), (0, 0));
+	}
+
+	//==============================================================================
+	/// 두 번 누르면 낱말(윈도우는 뒤 공백까지), 세 번 누르면 문단(한 줄 필드는 글 전체), 두 번 누른 뒤 끌면 낱말 단위로 넓힌다. 캔버스 모드 필드는 원본처럼 커서만.
+	//==============================================================================
+	#[test]
+	fn double_and_triple_click_select_word_and_paragraph() {
+		let engine = Engine::new(EngineConfiguration::new());
+		let (mut node_tree, field_id) = create_field_tree();
+		{
+			let field = get_field(&mut node_tree, field_id);
+			field.set_text("hello world again");
+			let value = field.edit_buffer.get_text().to_string();
+			field.character_offsets = (0..=value.chars().count()).map(|character_index| character_index as f32 * 10.0).collect();
+			field.measured_value = value;
+			field.measured_font_string = field.build_font_string();
+		}
+		// "world" 의 'o'. (padding 16, 글자 폭 10)
+		let press_position = Vector2::create(100.0 + 16.0 + 74.0, 130.0);
+		let click = |node_tree: &mut NodeTree| {
+			node_tree.dispatch_touch(field_id, &engine, TouchKind::Press, press_position);
+			node_tree.dispatch_touch(field_id, &engine, TouchKind::Release, press_position);
+		};
+		click(&mut node_tree);
+		assert_eq!(get_field(&mut node_tree, field_id).get_selection_range(), None);
+		click(&mut node_tree);
+		let word_end = if cfg!(target_os = "windows") {
+			12
+		}
+		else {
+			11
+		};
+		assert_eq!(get_field(&mut node_tree, field_id).get_selection_range(), Some((6, word_end)));
+		click(&mut node_tree);
+		assert_eq!(get_field(&mut node_tree, field_id).get_selection_range(), Some((0, 17)));
+
+		// 두 번 누른 뒤 "again" 쪽으로 끌면 그 낱말 끝까지.
+		get_field(&mut node_tree, field_id).last_click = None;
+		click(&mut node_tree);
+		node_tree.dispatch_touch(field_id, &engine, TouchKind::Press, press_position);
+		node_tree.dispatch_touch(field_id, &engine, TouchKind::Moved, Vector2::create(100.0 + 16.0 + 143.0, 130.0));
+		assert_eq!(get_field(&mut node_tree, field_id).get_selection_range(), Some((6, 17)));
+		node_tree.dispatch_touch(field_id, &engine, TouchKind::Release, press_position);
+
+		// 캔버스 모드는 원본처럼 누를 때마다 커서만 둔다.
+		get_field(&mut node_tree, field_id).set_use_dom_input(false);
+		click(&mut node_tree);
+		click(&mut node_tree);
+		assert_eq!(get_field(&mut node_tree, field_id).get_selection_range(), None);
+	}
+
+	//==============================================================================
+	/// 글자 묶음: 화살표는 묶음 단위, 선택이 있으면 접기, 뒤로 지우기는 블링크 BackspaceStateMachine, Delete 는 묶음 하나.
+	//==============================================================================
+	#[test]
+	fn edit_keys_follow_grapheme_clusters() {
+		let mut engine = Engine::new(EngineConfiguration::new());
+		let (mut node_tree, field_id) = create_field_tree();
+		{
+			let field = get_field(&mut node_tree, field_id);
+			field.focus();
+			field.set_text("a\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}e\u{301}");
+		}
+		run_frame(&mut node_tree, &mut engine);
+		let press = |node_tree: &mut NodeTree, engine: &mut Engine, key: TextInputKey, is_shift: bool| -> (usize, usize) {
+			push_event(engine, key_event(key, is_shift));
+			run_frame(node_tree, engine);
+			let field = get_field(node_tree, field_id);
+			(field.edit_buffer.get_selection_start(), field.edit_buffer.get_cursor_index())
+		};
+		assert_eq!(press(&mut node_tree, &mut engine, TextInputKey::Left, false), (6, 6));
+		assert_eq!(press(&mut node_tree, &mut engine, TextInputKey::Left, true), (6, 1));
+		assert_eq!(press(&mut node_tree, &mut engine, TextInputKey::Right, false), (6, 6));
+		assert_eq!(press(&mut node_tree, &mut engine, TextInputKey::Left, true), (6, 1));
+		assert_eq!(press(&mut node_tree, &mut engine, TextInputKey::Left, false), (1, 1));
+		push_event(&mut engine, key_event(TextInputKey::Delete, false));
+		run_frame(&mut node_tree, &mut engine);
+		assert_eq!(get_field(&mut node_tree, field_id).get_text(), "ae\u{301}");
+		push_event(&mut engine, key_event(TextInputKey::End, false));
+		push_event(&mut engine, key_event(TextInputKey::Backspace, false));
+		run_frame(&mut node_tree, &mut engine);
+		assert_eq!(get_field(&mut node_tree, field_id).get_text(), "ae");
+	}
+
+	//==============================================================================
+	/// 맥 Home, End, PageUp, PageDown: 여러 줄은 커서를 두고 넘기고, 넘길 것이 없으면 줄 앞과 끝으로 옮긴다. Shift 와 함께면 글 앞과 끝까지 고른다.
+	//==============================================================================
+	#[test]
+	fn mac_scroll_keys_scroll_like_chrome() {
+		let mut engine = Engine::new(EngineConfiguration::new());
+		let (mut node_tree, field_id) = create_field_tree();
+		{
+			let field = get_field(&mut node_tree, field_id);
+			field.set_multiline(true);
+			field.set_font_size(14.0);
+			field.set_padding(4.0);
+			field.set_line_height(Some(17.0));
+			field.focus();
+			field.set_text("line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8");
+		}
+		run_frame(&mut node_tree, &mut engine);
+		let press = |node_tree: &mut NodeTree, engine: &mut Engine, key: TextInputKey, is_shift: bool| -> (usize, usize, f32) {
+			push_event(engine, key_event(key, is_shift));
+			run_frame(node_tree, engine);
+			let field = get_field(node_tree, field_id);
+			(field.edit_buffer.get_selection_start(), field.edit_buffer.get_cursor_index(), field.get_scroll_top())
+		};
+		// 글 끝의 커서가 보이게 넘겨 둔 상태에서 Home: 커서는 그대로, 맨 위로.
+		let (_, _, scroll_top_at_end) = press(&mut node_tree, &mut engine, TextInputKey::DocumentEnd, false);
+		assert!(scroll_top_at_end > 0.0);
+		assert_eq!(press(&mut node_tree, &mut engine, TextInputKey::ScrollToDocumentStart, false), (47, 47, 0.0));
+		// 넘길 것이 없으면 줄 앞으로. (블링크 키 표 MoveToBeginningOfLine)
+		assert_eq!(press(&mut node_tree, &mut engine, TextInputKey::ScrollToDocumentStart, false).1, 42);
+		// page 넘기기는 커서를 두고 한 화면만큼.
+		let (_, cursor_index, scroll_top) = press(&mut node_tree, &mut engine, TextInputKey::ScrollPageUp, false);
+		assert_eq!(cursor_index, 42);
+		assert!(scroll_top < scroll_top_at_end);
+		// Shift + Home 은 글 앞까지 고른다.
+		assert_eq!(press(&mut node_tree, &mut engine, TextInputKey::ScrollToDocumentStart, true).0, 42);
+		assert_eq!(get_field(&mut node_tree, field_id).edit_buffer.get_cursor_index(), 0);
 	}
 
 	//==============================================================================

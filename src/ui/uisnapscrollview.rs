@@ -2,8 +2,9 @@
 //! 스냅 스크롤 뷰. (원본 ui/uisnapscrollview.js 의 UISnapScrollView)
 //! - 드래그를 놓으면 content 자식(아이템) 하나의 가운데가 보이는 영역 가운데에 오도록 미끄러진다. 아이템 크기가 달라도 된다.
 //! - 가로 스냅: set_horizontal(true), set_vertical(false) (기본). 세로 스냅: set_horizontal(false), set_vertical(true).
-//! - 한 번 끌면 최대 한 칸만 움직인다. 끈 거리가 다음 아이템 크기의 set_page_change_threshold 비율(기본 0.35) 이상이면 넘어간다.
-//!   끄는 동안에는 오프셋이 지금 칸 ±1 칸 범위를 넘지 않는다.
+//! - 한 번 끌면 최대 한 칸만 움직인다. 놓을 때 드래그 속도가 set_velocity_threshold(기본 200, 오프셋의 초당 픽셀) 이상이면 그 방향으로 한 칸 넘기고,
+//!   아니면 끈 거리가 다음 아이템 크기의 set_page_change_threshold 비율(기본 0.35) 이상일 때 넘어간다. 끄는 동안에는 오프셋이 지금 칸 ±1 칸 범위를 넘지 않는다.
+//! - set_snap_to_nearest(true) 면 끄는 동안 칸 범위를 자르지 않고, 놓으면 스냅 오프셋이 지금 오프셋과 가장 가까운 아이템으로 간다.
 //! - page_to(node_tree, index, smooth): 지정 칸으로 이동. smooth 면 0.3 초 cubic.out 으로 미끄러지고, 아니면 바로 옮긴다.
 //! - 원본은 UIScrollView 를 상속한다. 러스트 판은 UIScrollView 를 품고(scroll_view 필드) 터치, 휠, 그리기, 붙기를 넘겨준다.
 //!   스크롤 뷰 설정은 get_scroll_view_mut 로 품은 뷰에 한다. 자주 쓰는 것(콘텐트 크기, 오프셋, 축)은 이 위젯에도 있다.
@@ -14,7 +15,6 @@
 //!   - 스냅 미끄러짐은 원본 Tween 객체 대신 같은 계산(0.3 초, cubic.out, 만든 tick 에 첫 걸음)을 이 위젯 안에서 한다.
 //!     (원본 트윈의 갱신 콜백이 스크롤 뷰 자신을 부르는데, 러스트 트윈 콜백은 트리만 받아 tick 중에 꺼내진 이 위젯에 닿지 않는다)
 //!   - 미끄러지는 동안 content 노드는 그 tick 안에서 바로 옮긴다. (품은 뷰의 반영은 다음 tick 이라 한 프레임 늦지 않게)
-//!   - set_snap_to_nearest, set_velocity_threshold 는 원본처럼 값만 든다. (원본 play_snap_tween 도 이 값을 읽지 않는다)
 //!   - 원본은 스냅 뷰가 UIScrollView 이기도 해서 TouchRecognizer, UIScrollBar, UIListView 가 그대로 알아본다.
 //!     러스트 판은 TouchRecognizer 와 UIListView 가 find_scroll_view 로 알아본다. UIScrollBar 는 UIScrollView 컴포넌트만 찾아서
 //!     스냅 뷰에는 스크롤바를 붙일 수 없다. (setShows...ScrollBar 는 품은 뷰에 값만 들어간다)
@@ -90,6 +90,8 @@ pub struct UISnapScrollView {
 	is_snap_to_nearest: bool,
 	velocity_threshold: f32,
 	page_change_threshold: f32,
+	drag_velocity: f32,
+	previous_drag_axis_offset: f32,
 }
 
 #[crate::reflect(base = scroll_view)]
@@ -115,6 +117,8 @@ impl UISnapScrollView {
 			is_snap_to_nearest: false,
 			velocity_threshold: 200.0,
 			page_change_threshold: 0.35,
+			drag_velocity: 0.0,
+			previous_drag_axis_offset: 0.0,
 		}
 	}
 
@@ -248,9 +252,10 @@ impl UISnapScrollView {
 	}
 
 	//==============================================================================
-	/// 스냅 모드 설정. (원본처럼 값만 든다)
+	/// 스냅 모드 설정. (true 면 끄는 동안 칸 범위를 자르지 않고, 놓으면 가장 가까운 아이템으로 간다)
+	///
 	/// # 인자
-	/// - `is_snap_to_nearest`: 가장 가까운 칸으로 스냅할지. (기본 false, 지금 스냅 계산은 이 값을 읽지 않는다)
+	/// - `is_snap_to_nearest`: 가장 가까운 칸으로 스냅할지. (기본 false)
 	//==============================================================================
 	pub fn set_snap_to_nearest(&mut self, is_snap_to_nearest: bool) {
 		self.is_snap_to_nearest = is_snap_to_nearest;
@@ -266,9 +271,10 @@ impl UISnapScrollView {
 	}
 
 	//==============================================================================
-	/// 방향성 스냅 최소 속도 설정. (px/s, 원본처럼 값만 든다)
+	/// 방향성 스냅 최소 속도 설정. (오프셋의 초당 픽셀, 한 칸 모드에서 놓을 때 드래그 속도가 이 이상이면 끈 거리와 상관없이 그 방향으로 한 칸 넘긴다)
+	///
 	/// # 인자
-	/// - `velocity_threshold`: 방향성 스냅 최소 속도. (픽셀/초, 기본 200, 지금 스냅 계산은 이 값을 읽지 않는다)
+	/// - `velocity_threshold`: 방향성 스냅 최소 속도. (픽셀/초, 기본 200)
 	//==============================================================================
 	pub fn set_velocity_threshold(&mut self, velocity_threshold: f32) {
 		self.velocity_threshold = velocity_threshold;
@@ -299,6 +305,13 @@ impl UISnapScrollView {
 	//==============================================================================
 	pub fn get_page_change_threshold(&self) -> f32 {
 		self.page_change_threshold
+	}
+
+	//==============================================================================
+	/// 드래그 속도 반환. (끄는 동안 진행 축 오프셋이 움직인 초당 픽셀, 다음 칸 쪽이 음수. 마지막으로 끈 tick 의 값이고 끌기를 시작하면 0)
+	//==============================================================================
+	pub fn get_drag_velocity(&self) -> f32 {
+		self.drag_velocity
 	}
 
 	//==============================================================================
@@ -457,8 +470,9 @@ impl UISnapScrollView {
 	}
 
 	//==============================================================================
-	/// 지금 오프셋으로 목표 칸을 정하고 미끄러짐을 시작한다. (끈 방향으로 최대 한 칸, 다음 칸이 비율 이상 드러나면 넘김)
-	/// - tick 이 드래그를 놓은 때 부른다. 칸이 없으면 아무것도 하지 않는다.
+	/// 지금 오프셋으로 목표 칸을 정하고 미끄러짐을 시작한다.
+	/// - 가장 가까운 아이템 모드: 스냅 오프셋이 지금 오프셋과 가장 가까운 칸. (같으면 앞 칸)
+	/// - 한 칸 모드: 드래그 속도가 최소 속도 이상이면 속도 방향으로 한 칸, 아니면 끈 방향으로 최대 한 칸. (다음 칸이 비율 이상 드러나면 넘김)
 	///
 	/// # 인자
 	/// - `node_tree`: 이 스냅 뷰가 붙은 노드 트리. (content 자식을 읽는다)
@@ -466,6 +480,20 @@ impl UISnapScrollView {
 	pub fn play_snap_tween(&mut self, node_tree: &mut NodeTree) {
 		let snap_offsets = self.compute_snap_offsets(node_tree);
 		if snap_offsets.is_empty() {
+			return;
+		}
+		if self.is_snap_to_nearest {
+			let current_axis_offset = self.select_axis(self.get_scroll_offset());
+			let mut nearest_index = 0;
+			let mut nearest_distance = (snap_offsets[0] - current_axis_offset).abs();
+			for (snap_offset_index, snap_offset) in snap_offsets.iter().enumerate().skip(1) {
+				let distance = (snap_offset - current_axis_offset).abs();
+				if distance < nearest_distance {
+					nearest_distance = distance;
+					nearest_index = snap_offset_index;
+				}
+			}
+			self.set_snap_current_index(node_tree, nearest_index);
 			return;
 		}
 		let content_id = match self.get_content() {
@@ -481,7 +509,14 @@ impl UISnapScrollView {
 		let snap_current_index = self.snap_current_index.min(maximum_index);
 		let current_snap_offset = snap_offsets[snap_current_index];
 		let drag_amount = current_axis_offset - current_snap_offset;
-		let direction: i64 = if drag_amount < 0.0 {
+		let is_fling = self.drag_velocity.abs() >= self.velocity_threshold && self.drag_velocity != 0.0;
+		let direction_amount = if is_fling {
+			self.drag_velocity
+		}
+		else {
+			drag_amount
+		};
+		let direction: i64 = if direction_amount < 0.0 {
 			1
 		}
 		else {
@@ -492,7 +527,7 @@ impl UISnapScrollView {
 			let candidate_child_id = node_tree.get_child_ids(content_id)[candidate_index];
 			let candidate_child_content_size = node_tree[candidate_child_id].get_content_size();
 			let target_item_size = self.select_axis(candidate_child_content_size);
-			if drag_amount.abs() >= target_item_size * self.get_page_change_threshold() {
+			if is_fling || drag_amount.abs() >= target_item_size * self.get_page_change_threshold() {
 				candidate_index
 			}
 			else {
@@ -677,7 +712,7 @@ impl Component for UISnapScrollView {
 	}
 
 	//==============================================================================
-	/// 갱신. (품은 뷰 → 드래그 시작이면 미끄러짐 취소 → 끄는 중 칸 범위 자르기 → 놓았으면 스냅 시작 → 미끄러짐)
+	/// 갱신. (품은 뷰 → 드래그 시작이면 미끄러짐 취소 → 드래그 속도 → 끄는 중 칸 범위 자르기 → 놓았으면 스냅 시작 → 미끄러짐)
 	//==============================================================================
 	fn tick(&mut self, context: &mut ComponentContext, time_delta: f32) {
 		self.node_id = Some(context.get_node_id());
@@ -691,10 +726,24 @@ impl Component for UISnapScrollView {
 			self.snap_tween = None;
 		}
 
-		// 끄는 중에는 지금 칸 앞뒤 범위로 자른다.
+		// 드래그 속도. (칸 범위로 자르기 전 오프셋이 tick 사이에 움직인 거리, 끌기를 시작한 tick 은 0)
+		if current_is_dragging {
+			let drag_axis_offset = self.select_axis(self.get_scroll_offset());
+			if previous_is_dragging && time_delta > 0.0 {
+				self.drag_velocity = (drag_axis_offset - self.previous_drag_axis_offset) / time_delta;
+			}
+			else if !previous_is_dragging {
+				self.drag_velocity = 0.0;
+			}
+			self.previous_drag_axis_offset = drag_axis_offset;
+		}
+
+		// 끄는 중에는 지금 칸 앞뒤 범위로 자른다. (가장 가까운 아이템 모드는 자르지 않는다)
 		let mut is_offset_changed = false;
 		if current_is_dragging {
-			self.clamp_scroll_offset_to_adjacent_pages(context.get_node_tree_mut());
+			if !self.is_snap_to_nearest {
+				self.clamp_scroll_offset_to_adjacent_pages(context.get_node_tree_mut());
+			}
 			is_offset_changed = true;
 		}
 
@@ -911,6 +960,92 @@ mod tests {
 		// 오른쪽으로 끌면 앞 칸.
 		drag_and_release(&mut node_tree, &engine, snap_id, 50.0, 150.0);
 		assert_eq!(get_snap_view(&mut node_tree, snap_id).get_snap_current_index(), 1);
+	}
+
+	//==============================================================================
+	/// 짧게 빨리 튕기면 끈 거리가 비율보다 짧아도 그 방향으로 한 칸 넘긴다. 최소 속도를 올리면 같은 끌기는 제자리로 돌아온다.
+	//==============================================================================
+	#[test]
+	fn fast_short_drag_flings_one_page() {
+		let engine = Engine::new(EngineConfiguration::new());
+		let (mut node_tree, snap_id) = create_snap_tree();
+
+		// 20 픽셀을 두 tick 에 나눠 끈다. (끌기 시작 tick 은 0, 다음 tick 은 -10 / 0.016)
+		node_tree.dispatch_touch(snap_id, &engine, TouchKind::Press, Vector2::create(150.0, 50.0));
+		node_tree.dispatch_touch(snap_id, &engine, TouchKind::Moved, Vector2::create(140.0, 50.0));
+		node_tree.tick(&engine, 0.016);
+		assert_eq!(get_snap_view(&mut node_tree, snap_id).get_drag_velocity(), 0.0);
+		node_tree.dispatch_touch(snap_id, &engine, TouchKind::Moved, Vector2::create(130.0, 50.0));
+		node_tree.tick(&engine, 0.016);
+		assert!((get_snap_view(&mut node_tree, snap_id).get_drag_velocity() + 625.0).abs() < 0.01);
+		node_tree.dispatch_touch(snap_id, &engine, TouchKind::Release, Vector2::create(130.0, 50.0));
+		for _ in 0..30 {
+			node_tree.tick(&engine, 0.016);
+		}
+		assert_eq!(get_snap_view(&mut node_tree, snap_id).get_snap_current_index(), 1);
+		assert_eq!(get_snap_view(&mut node_tree, snap_id).get_scroll_offset(), Vector2::create(-200.0, 0.0));
+
+		// 최소 속도 1000 이면 같은 끌기(625)는 튕김이 아니고, 20 픽셀은 비율(70) 아래라 제자리.
+		get_snap_view(&mut node_tree, snap_id).set_velocity_threshold(1000.0);
+		node_tree.dispatch_touch(snap_id, &engine, TouchKind::Press, Vector2::create(150.0, 50.0));
+		node_tree.dispatch_touch(snap_id, &engine, TouchKind::Moved, Vector2::create(140.0, 50.0));
+		node_tree.tick(&engine, 0.016);
+		node_tree.dispatch_touch(snap_id, &engine, TouchKind::Moved, Vector2::create(130.0, 50.0));
+		node_tree.tick(&engine, 0.016);
+		node_tree.dispatch_touch(snap_id, &engine, TouchKind::Release, Vector2::create(130.0, 50.0));
+		for _ in 0..30 {
+			node_tree.tick(&engine, 0.016);
+		}
+		assert_eq!(get_snap_view(&mut node_tree, snap_id).get_snap_current_index(), 1);
+		assert_eq!(get_snap_view(&mut node_tree, snap_id).get_scroll_offset(), Vector2::create(-200.0, 0.0));
+
+		// 끈 방향과 반대로 튕기면 튕긴 방향이 이긴다. (왼쪽으로 30 끌다가 마지막 tick 에 오른쪽으로 10)
+		get_snap_view(&mut node_tree, snap_id).set_velocity_threshold(200.0);
+		node_tree.dispatch_touch(snap_id, &engine, TouchKind::Press, Vector2::create(150.0, 50.0));
+		node_tree.dispatch_touch(snap_id, &engine, TouchKind::Moved, Vector2::create(110.0, 50.0));
+		node_tree.tick(&engine, 0.016);
+		node_tree.dispatch_touch(snap_id, &engine, TouchKind::Moved, Vector2::create(120.0, 50.0));
+		node_tree.tick(&engine, 0.016);
+		node_tree.dispatch_touch(snap_id, &engine, TouchKind::Release, Vector2::create(120.0, 50.0));
+		for _ in 0..30 {
+			node_tree.tick(&engine, 0.016);
+		}
+		assert_eq!(get_snap_view(&mut node_tree, snap_id).get_snap_current_index(), 0);
+	}
+
+	//==============================================================================
+	/// 가장 가까운 아이템 모드: 끄는 동안 칸 범위를 자르지 않고, 놓으면 가장 가까운 칸으로 간다. 튕김은 보지 않는다.
+	//==============================================================================
+	#[test]
+	fn snap_to_nearest_crosses_pages() {
+		let engine = Engine::new(EngineConfiguration::new());
+		let (mut node_tree, snap_id) = create_snap_tree();
+		get_snap_view(&mut node_tree, snap_id).set_snap_to_nearest(true);
+		assert!(get_snap_view(&mut node_tree, snap_id).get_snap_to_nearest());
+
+		// 490 픽셀 → -490 에서 막히지 않고, 가장 가까운 -400(2 번 칸)으로.
+		node_tree.dispatch_touch(snap_id, &engine, TouchKind::Press, Vector2::create(190.0, 50.0));
+		node_tree.dispatch_touch(snap_id, &engine, TouchKind::Moved, Vector2::create(-300.0, 50.0));
+		node_tree.tick(&engine, 0.016);
+		assert_eq!(get_snap_view(&mut node_tree, snap_id).get_scroll_offset(), Vector2::create(-490.0, 0.0));
+		node_tree.dispatch_touch(snap_id, &engine, TouchKind::Release, Vector2::create(-300.0, 50.0));
+		for _ in 0..30 {
+			node_tree.tick(&engine, 0.016);
+		}
+		assert_eq!(get_snap_view(&mut node_tree, snap_id).get_snap_current_index(), 2);
+		assert_eq!(get_snap_view(&mut node_tree, snap_id).get_scroll_offset(), Vector2::create(-400.0, 0.0));
+
+		// 짧게 빨리 튕겨도 가장 가까운 칸은 제자리.
+		node_tree.dispatch_touch(snap_id, &engine, TouchKind::Press, Vector2::create(150.0, 50.0));
+		node_tree.dispatch_touch(snap_id, &engine, TouchKind::Moved, Vector2::create(140.0, 50.0));
+		node_tree.tick(&engine, 0.016);
+		node_tree.dispatch_touch(snap_id, &engine, TouchKind::Moved, Vector2::create(130.0, 50.0));
+		node_tree.tick(&engine, 0.016);
+		node_tree.dispatch_touch(snap_id, &engine, TouchKind::Release, Vector2::create(130.0, 50.0));
+		for _ in 0..30 {
+			node_tree.tick(&engine, 0.016);
+		}
+		assert_eq!(get_snap_view(&mut node_tree, snap_id).get_snap_current_index(), 2);
 	}
 
 	//==============================================================================

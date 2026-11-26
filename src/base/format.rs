@@ -43,6 +43,8 @@ const PRIMARY_GROUP_SIZE: usize = 3;
 const FALLBACK_LOCALE_TAG: &str = "en";
 /// 가장 짧은 표기가 딱 가운데일 수 있는 이진 소수 자릿수의 끝. (5^25 가 10^18 보다 작다)
 const MAXIMUM_TIE_BINARY_FRACTION_DIGITS: u32 = 25;
+/// 큰 수를 줄이는 단위의 나눌 수와 붙일 글. (작은 것부터, 원본 COMPACT_UNIT_LIST)
+const COMPACT_UNIT_LIST: [(f64, &str); 3] = [(1000.0, "K"), (1000000.0, "M"), (1000000000.0, "B")];
 
 //==============================================================================
 /// 로캘 하나의 숫자 표기. (Intl.NumberFormat 기본 옵션의 결과)
@@ -245,6 +247,7 @@ pub fn format_number_with_unit(value: f64, unit_suffix: &str, locale: &str) -> S
 
 //==============================================================================
 /// 큰 수를 짧게 줄여 반환. (1234 -> "1.2K", 5600000 -> "5.6M", 원본 기본 fraction_digits 는 1)
+/// - 반올림한 글이 1000 이 되면 Intl 의 compact 표기처럼 다음 단위로 올린다. (999999 -> "1M")
 ///
 /// # 인자
 /// - `value`: 표기할 수. (음수는 절대값을 줄여 앞에 - 를 붙인다)
@@ -252,7 +255,7 @@ pub fn format_number_with_unit(value: f64, unit_suffix: &str, locale: &str) -> S
 ///
 /// # 돌려줌
 /// 절대값이 1000 이상이면 K, 1000000 이상이면 M, 1000000000 이상이면 B 를 붙여 줄인 글. 1000 미만은 String(수) 꼴 그대로다.
-/// (반올림은 toFixed 꼴이라 999999 는 "1000K", NaN 은 "NaN")
+/// (반올림은 toFixed 꼴이고, 반올림해 1000 이 되면 다음 단위로 올려 999999 는 "1M", NaN 은 "NaN")
 ///
 /// # 예제
 /// 단위 경계와 반올림
@@ -263,7 +266,7 @@ pub fn format_number_with_unit(value: f64, unit_suffix: &str, locale: &str) -> S
 /// assert_eq!(format::format_compact_number(1234567890.0, 2), "1.23B");
 /// assert_eq!(format::format_compact_number(-1234.0, 1), "-1.2K");
 /// assert_eq!(format::format_compact_number(999.5, 1), "999.5");
-/// assert_eq!(format::format_compact_number(999999.0, 1), "1000K");
+/// assert_eq!(format::format_compact_number(999999.0, 1), "1M");
 /// ```
 //==============================================================================
 pub fn format_compact_number(value: f64, fraction_digits: usize) -> String {
@@ -274,16 +277,21 @@ pub fn format_compact_number(value: f64, fraction_digits: usize) -> String {
 	else {
 		""
 	};
-	if absolute_value >= 1000000000.0 {
-		return format!("{}{}B", sign_text, trim_trailing_zero(&format_fixed(absolute_value / 1000000000.0, fraction_digits)));
+	let mut unit_index = match COMPACT_UNIT_LIST.iter().rposition(|(divisor, _)| absolute_value >= *divisor) {
+		Some(unit_index) => {
+			unit_index
+		}
+		None => {
+			return format!("{}{}", sign_text, number_to_string(absolute_value));
+		}
+	};
+	let mut compact_text = format_fixed(absolute_value / COMPACT_UNIT_LIST[unit_index].0, fraction_digits);
+	let rounded_value = compact_text.parse::<f64>().unwrap_or(0.0);
+	if rounded_value >= 1000.0 && unit_index < COMPACT_UNIT_LIST.len() - 1 {
+		unit_index += 1;
+		compact_text = format_fixed(absolute_value / COMPACT_UNIT_LIST[unit_index].0, fraction_digits);
 	}
-	if absolute_value >= 1000000.0 {
-		return format!("{}{}M", sign_text, trim_trailing_zero(&format_fixed(absolute_value / 1000000.0, fraction_digits)));
-	}
-	if absolute_value >= 1000.0 {
-		return format!("{}{}K", sign_text, trim_trailing_zero(&format_fixed(absolute_value / 1000.0, fraction_digits)));
-	}
-	format!("{}{}", sign_text, number_to_string(absolute_value))
+	format!("{}{}{}", sign_text, trim_trailing_zero(&compact_text), COMPACT_UNIT_LIST[unit_index].1)
 }
 
 //==============================================================================
@@ -779,11 +787,11 @@ mod tests {
 	}
 
 	//==============================================================================
-	/// format_compact_number: 단위 경계, toFixed 의 딱 반 올림(1250 → 1.3K)과 실제 값 반올림(1005 → 1K), 음수, 지수 꼴.
+	/// format_compact_number: 단위 경계, toFixed 의 딱 반 올림(1250 → 1.3K)과 실제 값 반올림(1005 → 1K), 반올림해 1000 이 되면 다음 단위(999999 → 1M), 음수, 지수 꼴.
 	//==============================================================================
 	#[test]
 	fn format_compact_number_matches_original() {
-		let case_list: [(f64, usize, &str); 30] = [
+		let case_list: [(f64, usize, &str); 35] = [
 			(1234.0, 1, "1.2K"),
 			(5600000.0, 1, "5.6M"),
 			(999.0, 1, "999"),
@@ -793,8 +801,13 @@ mod tests {
 			(1350.0, 1, "1.4K"),
 			(1050.0, 1, "1.1K"),
 			(1000000.0, 1, "1M"),
-			(999999.0, 1, "1000K"),
-			(999950.0, 1, "1000K"),
+			(999999.0, 1, "1M"),
+			(999950.0, 1, "1M"),
+			(999949.0, 1, "999.9K"),
+			(999999999.0, 1, "1B"),
+			(-999999.0, 1, "-1M"),
+			(999500.0, 0, "1M"),
+			(999499.0, 0, "999K"),
 			(-1234.0, 1, "-1.2K"),
 			(-0.0, 1, "0"),
 			(0.0, 1, "0"),

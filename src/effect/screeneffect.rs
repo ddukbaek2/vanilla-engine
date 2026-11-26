@@ -17,7 +17,7 @@
 //!   ```
 //! - 원본과 다른 점:
 //!   - 원본은 생성자에서 Graphic 을 받아 GL 컨텍스트를 든다. 러스트 판은 아무것도 받지 않고 만들며, GL 자원은 처음 end 에서 만들고 함수마다 Graphic 을 받는다.
-//!     그래서 destroy 도 Graphic 을 받는다. 씬을 내리기 전에 destroy 를 부르지 않으면 GL 자원은 컨텍스트가 없어질 때까지 남는다.
+//!     그때 GL 컨텍스트의 약한 손잡이를 쥐어, destroy() 는 원본처럼 인자 없이 풀고, 버려질 때(Drop, 씬을 내릴 때)도 스스로 푼다.
 //!   - 효과는 문자열 대신 ScreenEffectType 열거형이다. (원본 문자열 이름은 get_name / from_name)
 //!   - 패스 셰이더 만들기에 실패하면 원본은 예외를 던지고, 러스트 판은 한 번 알리고 그 단계를 건너뛴다.
 //==============================================================================
@@ -27,6 +27,7 @@ use crate::core::fullscreenpass::FullscreenPass;
 use crate::core::graphic::{GlTexture, Graphic};
 use glow::HasContext;
 use std::collections::HashMap;
+use std::rc::Weak;
 
 /// GL 객체 타입. (데스크탑은 glow::Native*, 웹은 WebGL 객체)
 type GlFramebuffer = <glow::Context as glow::HasContext>::Framebuffer;
@@ -1080,12 +1081,30 @@ fn create_color_texture(gl: &glow::Context, width: i32, height: i32, is_opaque: 
 fn create_render_target(gl: &glow::Context, width: i32, height: i32, use_stencil: bool, is_opaque: bool) -> Result<RenderTarget, String> {
 	let texture = create_color_texture(gl, width, height, is_opaque)?;
 	unsafe {
-		let framebuffer = gl.create_framebuffer()?;
+		let framebuffer = match gl.create_framebuffer() {
+			Ok(framebuffer) => {
+				framebuffer
+			}
+			Err(error) => {
+				gl.delete_texture(texture);
+				return Err(error);
+			}
+		};
 		gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
 		gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(texture), 0);
 		let mut stencil_renderbuffer = None;
 		if use_stencil {
-			let renderbuffer = gl.create_renderbuffer()?;
+			let renderbuffer = match gl.create_renderbuffer() {
+				Ok(renderbuffer) => {
+					renderbuffer
+				}
+				Err(error) => {
+					gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+					gl.delete_framebuffer(framebuffer);
+					gl.delete_texture(texture);
+					return Err(error);
+				}
+			};
 			gl.bind_renderbuffer(glow::RENDERBUFFER, Some(renderbuffer));
 			gl.renderbuffer_storage(glow::RENDERBUFFER, glow::DEPTH24_STENCIL8, width, height);
 			gl.framebuffer_renderbuffer(glow::FRAMEBUFFER, glow::DEPTH_STENCIL_ATTACHMENT, glow::RENDERBUFFER, Some(renderbuffer));
@@ -1207,6 +1226,8 @@ pub struct ScreenEffect {
 	time: f32,
 	is_bound: bool,
 	region: Option<ScreenEffectRegion>,
+	/// GL 자원을 만든 컨텍스트의 약한 손잡이. (destroy 와 Drop 이 쓴다)
+	gl_context: Weak<glow::Context>,
 }
 
 impl ScreenEffect {
@@ -1225,6 +1246,7 @@ impl ScreenEffect {
 			time: 0.0,
 			is_bound: false,
 			region: None,
+			gl_context: Weak::new(),
 		};
 		screen_effect.reset_all();
 		screen_effect
@@ -1351,6 +1373,9 @@ impl ScreenEffect {
 		let width = region_width;
 		let height = region_height;
 		let gl = graphic.get_gl();
+		if let Some(gl_context) = crate::core::imagetexturecache::find_gl_context_handle(gl) {
+			self.gl_context = gl_context;
+		}
 		if let Err(error) = self.ensure_targets(gl, width, height) {
 			eprintln!("ScreenEffect: render target failed: {}", error);
 			return;
@@ -1563,14 +1588,32 @@ impl ScreenEffect {
 		}
 		let half_width = ((width as f32 / 2.0).round() as i32).max(1);
 		let half_height = ((height as f32 / 2.0).round() as i32).max(1);
-		let render_target_set = RenderTargetSet {
-			scene_target: create_render_target(gl, width, height, false, true)?,
-			ping_target: create_render_target(gl, width, height, false, false)?,
-			pong_target: create_render_target(gl, width, height, false, false)?,
-			half_target_a: create_render_target(gl, half_width, half_height, false, false)?,
-			half_target_b: create_render_target(gl, half_width, half_height, false, false)?,
+		// 씬 사본, 핑, 퐁, 절반 크기 둘. (하나라도 못 지으면 먼저 지은 것을 지운다)
+		let target_size_list = [(width, height, true), (width, height, false), (width, height, false), (half_width, half_height, false), (half_width, half_height, false)];
+		let mut created_target_list: Vec<RenderTarget> = Vec::with_capacity(target_size_list.len());
+		for (target_width, target_height, is_opaque) in target_size_list {
+			match create_render_target(gl, target_width, target_height, false, is_opaque) {
+				Ok(render_target) => {
+					created_target_list.push(render_target);
+				}
+				Err(error) => {
+					for render_target in &created_target_list {
+						destroy_render_target(gl, render_target);
+					}
+					return Err(error);
+				}
+			}
+		}
+		let Ok([scene_target, ping_target, pong_target, half_target_a, half_target_b]) = <[RenderTarget; 5]>::try_from(created_target_list) else {
+			unreachable!("five render targets");
 		};
-		self.render_target_set = Some(render_target_set);
+		self.render_target_set = Some(RenderTargetSet {
+			scene_target,
+			ping_target,
+			pong_target,
+			half_target_a,
+			half_target_b,
+		});
 		Ok(())
 	}
 
@@ -1812,21 +1855,30 @@ impl ScreenEffect {
 	}
 
 	//==============================================================================
-	/// 파괴. (GL 자원 해제: 렌더 대상과 패스 프로그램)
-	/// - 효과 설정은 그대로 두고, 다시 end 하면 자원을 새로 만든다.
+	/// 파괴. (GL 자원 해제: 렌더 대상과 패스 프로그램, 원본 destroy)
+	/// - 버려질 때(Drop)도 스스로 부른다. 다시 end 를 부르면 자원을 새로 만든다.
+	/// - GL 컨텍스트가 이미 사라졌으면 그 자원도 같이 사라졌으므로 목록만 비운다.
 	///
 	/// # 인자
 	/// - `graphic`: GL 자원을 만든 그래픽.
 	//==============================================================================
-	pub fn destroy(&mut self, graphic: &mut Graphic) {
-		let gl = graphic.get_gl();
-		if let Some(render_target_set) = self.render_target_set.take() {
-			destroy_render_target_set(gl, &render_target_set);
+	pub fn destroy(&mut self) {
+		let render_target_set = self.render_target_set.take();
+		let pass_list: Vec<FullscreenPass> = self.pass_table.drain().filter_map(|(_, pass)| pass).collect();
+		let gl = match self.gl_context.upgrade() {
+			Some(gl) => {
+				gl
+			}
+			None => {
+				return;
+			}
+		};
+		if let Some(render_target_set) = render_target_set {
+			destroy_render_target_set(&gl, &render_target_set);
 		}
-		for pass in self.pass_table.values().flatten() {
-			pass.destroy(gl);
+		for pass in pass_list {
+			pass.destroy(&gl);
 		}
-		self.pass_table.clear();
 	}
 }
 
@@ -1836,6 +1888,15 @@ impl Default for ScreenEffect {
 	//==============================================================================
 	fn default() -> ScreenEffect {
 		ScreenEffect::new()
+	}
+}
+
+impl Drop for ScreenEffect {
+	//==============================================================================
+	/// 버려질 때 GL 자원 해제. (destroy)
+	//==============================================================================
+	fn drop(&mut self) {
+		self.destroy();
 	}
 }
 
@@ -1855,6 +1916,37 @@ mod tests {
 			assert_eq!(SCREEN_EFFECT_PARAMETER_NAMES[effect_index].0, *effect_type);
 			assert_eq!(ScreenEffectType::from_name(effect_type.get_name()), Some(*effect_type));
 		}
+	}
+
+	//==============================================================================
+	/// 렌더 대상과 패스는 destroy() 와 버려질 때(Drop) 지운다. (Graphic 없이, 씬을 내릴 때 같이 풀린다) 렌더 대상을 짓다 실패하면 먼저 지은 것을 지운다. (가짜 GL)
+	//==============================================================================
+	#[test]
+	fn resources_are_released_on_destroy_and_drop() {
+		use crate::core::imagetexturecache::fake_gl::{self, FakeGlObject};
+		let gl = fake_gl::create_context();
+		crate::core::imagetexturecache::register_pixel_read_context(&gl);
+		let live_object_count = || -> usize {
+			[FakeGlObject::Texture, FakeGlObject::Framebuffer, FakeGlObject::Program, FakeGlObject::VertexArray].iter().map(|object| fake_gl::get_live_count(*object)).sum()
+		};
+		let mut screen_effect = ScreenEffect::new();
+		screen_effect.gl_context = crate::core::imagetexturecache::find_gl_context_handle(&gl).expect("handle");
+		screen_effect.ensure_targets(&gl, 64, 32).expect("targets");
+		screen_effect.ensure_pass(&gl, "copy");
+		assert_eq!(live_object_count(), 12);
+		screen_effect.destroy();
+		assert_eq!(live_object_count(), 0);
+		screen_effect.ensure_targets(&gl, 64, 32).expect("targets");
+		screen_effect.ensure_pass(&gl, "vignette");
+		drop(screen_effect);
+		assert_eq!(live_object_count(), 0);
+		let mut failing_effect = ScreenEffect::new();
+		fake_gl::fail_after(FakeGlObject::Framebuffer, 3);
+		assert!(failing_effect.ensure_targets(&gl, 64, 32).is_err());
+		assert_eq!(live_object_count(), 0);
+		fake_gl::fail_after(FakeGlObject::Framebuffer, 5);
+		failing_effect.ensure_targets(&gl, 64, 32).expect("targets");
+		assert_eq!(live_object_count(), 10);
 	}
 
 	//==============================================================================

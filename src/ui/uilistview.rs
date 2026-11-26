@@ -104,6 +104,8 @@ pub struct UIListView {
 	free_item_list: Vec<NodeId>,
 	is_scroll_content_size_pending: bool,
 	is_refresh_pending: bool,
+	/// 진행 방향이 바뀌어 보이는 항목을 다음 tick 에 회수하고 새 축에 다시 놓을지.
+	is_item_layout_pending: bool,
 }
 
 #[crate::reflect]
@@ -132,6 +134,7 @@ impl UIListView {
 			free_item_list: Vec::new(),
 			is_scroll_content_size_pending: false,
 			is_refresh_pending: false,
+			is_item_layout_pending: false,
 		}
 	}
 
@@ -362,13 +365,18 @@ impl UIListView {
 
 	//==============================================================================
 	/// 가로 진행 설정. (기본 세로)
-	/// - 스크롤 영역은 바로 다시 셈하지 않는다. (원본처럼, 항목 수나 크기, 간격을 정할 때 다시 셈한다)
+	/// - 바뀌면 다음 tick 에 스크롤 영역을 다시 재고, 보이는 항목을 새 축에 다시 놓는다. (항목 크기를 읽기 전에 정한다, 스크롤 뷰의 축은 따로 정한다)
 	///
 	/// # 인자
 	/// - `is_horizontal`: true 면 항목을 x 축으로 늘어놓는다.
 	//==============================================================================
 	pub fn set_horizontal(&mut self, is_horizontal: bool) {
+		if self.is_horizontal == is_horizontal {
+			return;
+		}
 		self.is_horizontal = is_horizontal;
+		self.is_scroll_content_size_pending = true;
+		self.is_item_layout_pending = true;
 	}
 
 	//==============================================================================
@@ -574,6 +582,18 @@ impl Component for UIListView {
 				return;
 			}
 		};
+
+		// 진행 방향이 바뀌었으면 보이는 항목을 모두 회수해 새 축에 다시 놓는다.
+		if self.is_item_layout_pending {
+			self.is_item_layout_pending = false;
+			let node_tree = context.get_node_tree_mut();
+			for (_, item_node_id) in self.active_item_list.drain(..) {
+				if let Some(item_node) = node_tree.get_node_mut(item_node_id) {
+					item_node.set_active(false);
+					self.free_item_list.push(item_node_id);
+				}
+			}
+		}
 
 		// 항목 크기를 정하지 않았으면 처음 만든 항목에서 읽는다.
 		if self.item_size <= 0.0 {
@@ -832,5 +852,32 @@ mod tests {
 		assert_eq!(get_list_view(&mut node_tree, list_id).get_active_item_count(), 5);
 		let second_id = get_list_view(&mut node_tree, list_id).get_item_node(2).expect("item 2");
 		assert_eq!(node_tree[second_id].get_local_position(), Vector2::create(120.0, 0.0));
+	}
+
+	//==============================================================================
+	/// 붙은 뒤 진행 방향을 바꾸면 스크롤 영역을 다시 재고 보이는 항목을 새 축에 다시 놓는다.
+	//==============================================================================
+	#[test]
+	fn switching_direction_updates_scroll_area_and_items() {
+		let engine = Engine::new(EngineConfiguration::new());
+		let created_count = Rc::new(Cell::new(0));
+		let bound_index_list = Rc::new(RefCell::new(Vec::new()));
+		let (mut node_tree, list_id) = create_list_tree(&created_count, &bound_index_list);
+		{
+			let list_view = get_list_view(&mut node_tree, list_id);
+			list_view.set_item_size(50.0);
+			list_view.set_item_count(10);
+		}
+		node_tree.tick(&engine, 0.016);
+		assert_eq!(node_tree[list_id].get_component::<UIScrollView>().expect("scroll view").get_scroll_content_size(), Vector2::create(200.0, 500.0));
+		let vertical_created_count = created_count.get();
+		get_list_view(&mut node_tree, list_id).set_horizontal(true);
+		node_tree.tick(&engine, 0.016);
+		assert_eq!(node_tree[list_id].get_component::<UIScrollView>().expect("scroll view").get_scroll_content_size(), Vector2::create(500.0, 100.0));
+		assert_eq!(get_list_view(&mut node_tree, list_id).get_active_item_count(), 5);
+		let second_id = get_list_view(&mut node_tree, list_id).get_item_node(2).expect("item 2");
+		assert_eq!(node_tree[second_id].get_local_position(), Vector2::create(100.0, 0.0));
+		assert!(node_tree[second_id].is_active());
+		assert_eq!(created_count.get(), vertical_created_count.max(5));
 	}
 }
