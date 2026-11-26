@@ -12,6 +12,7 @@
 //! - 원본과 다른 점: 타일셋과 층을 값으로 가진다. (원본은 객체 참조라 여러 지도가 같은 타일셋을 나눠 쓴다, 러스트는 Tileset 을 clone 한다)
 //!   타일셋, 층 번호를 못 찾으면 None 이다. (원본은 -1, null) 애니메이션 시계는 f64 다.
 //==============================================================================
+// 옮긴 원문: libtiled 의 렌더러 셈에서 옮김, BSD-2-Clause, THIRD_PARTY_LICENSES.md
 use crate::base::color::Color;
 use crate::base::rect::Rect;
 use crate::base::transformmatrix::TransformMatrix;

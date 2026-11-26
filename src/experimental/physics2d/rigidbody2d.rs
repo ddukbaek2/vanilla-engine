@@ -8,6 +8,7 @@
 //! - 원본과 다른 점: 월드는 씬과 컴포넌트가 함께 쓰도록 `Rc<RefCell<PhysicsWorld2D>>` 로 받는다.
 //!   원본 setBody 는 붙은 노드를 바로 몸 자리에 두고, 러스트는 노드에 붙을 때(attach)와 tick 에서 둔다.
 //==============================================================================
+// 옮긴 원문: Box2D 3 의 셈에서 옮김, MIT, THIRD_PARTY_LICENSES.md
 use std::cell::RefCell;
 use std::rc::Rc;
 

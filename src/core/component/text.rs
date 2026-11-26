@@ -29,6 +29,7 @@
 //! assert_eq!(slice_graphemes(text, 9), text);
 //! ```
 //==============================================================================
+// 옮긴 원문: ICU4C, CLDR 의 자료에서 옮김, Unicode-3.0, THIRD_PARTY_LICENSES.md
 use crate::base::color::Color;
 use crate::base::math;
 use crate::base::rect::Rect;

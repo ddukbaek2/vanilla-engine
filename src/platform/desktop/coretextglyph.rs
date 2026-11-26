@@ -29,6 +29,7 @@
 //! }
 //! ```
 //==============================================================================
+// 옮긴 원문: 스키아 src/ports/SkScalerContext_mac_ct.cpp(SkScalerContext_Mac), src/utils/mac/SkCTFont.cpp(SkCTFontGetSmoothBehavior) 의 셈을 옮김, BSD-3-Clause, THIRD_PARTY_LICENSES.md
 use objc2_core_foundation::{CFArray, CFData, CFDictionary, CFNumber, CFRetained, CFString, CFType, CFURL, CGAffineTransform, CGPoint, CGRect};
 use objc2_core_graphics::{kCGColorSpaceSRGB, CGBitmapContextCreate, CGColorSpace, CGContext, CGImageAlphaInfo, CGImageByteOrderInfo, CGTextDrawingMode};
 use objc2_core_text::{kCTFontNameAttribute, kCTFontURLAttribute, kCTFontVariationAttribute, CTFont, CTFontDescriptor, CTFontManagerCreateFontDescriptorsFromData, CTFontManagerCreateFontDescriptorsFromURL, CTFontOrientation};

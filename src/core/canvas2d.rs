@@ -36,6 +36,7 @@
 //! assert_eq!((image.get_width(), image.get_height()), (64, 64));
 //! ```
 //==============================================================================
+// 옮긴 원문: 크로미엄 third_party/blink/renderer/modules/canvas/canvas2d/canvas_path.cc, 스키아 SkPathBuilder, SkGeometry, SkRRect, SkScalar.h, SkSwizzler_opts.inc 에서 옮김, BSD-3-Clause, THIRD_PARTY_LICENSES.md
 use crate::base::color::Color;
 use std::f32::consts::PI;
 

@@ -2942,7 +2942,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	/// 실제 FBX. (원본 예제 anims/walk.fbx, Mixamo 7.7 형식, 압축 배열, 본 계층, 걷기 스택, 파일이 없으면 건너뛴다)
+	/// 실제 FBX. (원본 예제 anims/walk.fbx, 블렌더가 쓴 7.4 형식, 압축 배열, 본 계층, 걷기 스택, 파일이 없으면 건너뛴다)
 	//==============================================================================
 	#[test]
 	fn walk_fbx_from_examples() {
@@ -2956,7 +2956,7 @@ mod tests {
 				return;
 			}
 		};
-		assert_eq!(FbxLoader::read_version(&file_bytes), Ok(7700));
+		assert_eq!(FbxLoader::read_version(&file_bytes), Ok(7400));
 		let top_node_list = FbxLoader::new().parse_node_records(&file_bytes).expect("records");
 		let top_node_names: Vec<&str> = top_node_list.iter().map(|node| node.name.as_str()).collect();
 		assert!(top_node_names.contains(&"FBXHeaderExtension"));
@@ -2964,7 +2964,7 @@ mod tests {
 		assert!(top_node_names.contains(&"Connections"));
 
 		let scene_data = FbxLoader::new().interpret(&top_node_list).expect("scene");
-		let hips_index = scene_data.node_list.iter().position(|node| node.name.starts_with("mixamorig:Hips")).expect("hips");
+		let hips_index = scene_data.node_list.iter().position(|node| node.name == "pelvis").expect("hips");
 		assert!(scene_data.node_list[hips_index].is_bone);
 		assert!(!scene_data.animation_list.is_empty());
 		let walk_animation = scene_data.animation_list.iter().max_by_key(|animation| animation.channels.len()).expect("walk");

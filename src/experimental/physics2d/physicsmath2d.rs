@@ -5,6 +5,7 @@
 //!   러스트의 f64::sin 은 운영체제의 수학 라이브러리를 불러 플랫폼마다, 그리고 브라우저의 Math.sin 과 끝자리가 달라 물리가 갈라진다.
 //!   Box2D 도 같은 까닭으로 b2ComputeCosSin, b2Atan2 를 직접 짰다. (box2d.org/posts/2024/08/determinism)
 //==============================================================================
+// 옮긴 원문: Box2D 3 의 셈에서 옮김, MIT, THIRD_PARTY_LICENSES.md
 use std::f64::consts::PI;
 
 /// 2 파이.

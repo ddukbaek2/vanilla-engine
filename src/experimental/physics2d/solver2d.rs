@@ -6,6 +6,7 @@
 //!   하위 걸음이 끝나면 반발을 한 번 주고 충격을 다음 걸음의 웜 스타트로 남긴다. (box2d.org/posts/2024/02/solver2d)
 //! - 부드러운 구속은 고유 진동수(헤르츠)와 감쇠비로 정한다. (Erin Catto, GDC 2011 Soft Constraints)
 //==============================================================================
+// 옮긴 원문: Box2D 3 의 셈에서 옮김, MIT, THIRD_PARTY_LICENSES.md
 use super::body2d::{Body2D, NO_INDEX};
 use super::narrowphase2d::Manifold;
 

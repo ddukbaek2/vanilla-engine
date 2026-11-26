@@ -11,6 +11,7 @@
 //!   advance 의 고정 걸음 누적은 원본 FixedStepper 와 같은 셈을 f64 로 월드 안에 둔다. (러스트 FixedStepper 는 f32 라 걸음 시간이 원본과 달라진다)
 //! - 아직 없는 것: 연속 충돌(빠른 총알이 얇은 벽을 뚫지 않게 하는 TOI), 한쪽 면 사슬, 프리즘, 모터, 마우스 관절, 몸 종류 바꾸기, 여러 스레드.
 //==============================================================================
+// 옮긴 원문: Box2D 3 의 셈에서 옮김, MIT, THIRD_PARTY_LICENSES.md
 use std::collections::HashMap;
 use std::ops::{Index, IndexMut};
 

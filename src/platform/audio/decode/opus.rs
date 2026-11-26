@@ -6,6 +6,7 @@
 //!   pre-skip 과 끝 버리기는 여기서 하지 않고 크롬처럼 바깥(trim.rs 의 AudioDiscardHelper 자리)이 한다.
 //! - OpusHead 는 symphonia 의 ogg, mkv 풀기가 extra_data 로 준다. (ogg 는 첫 패킷, mkv 는 CodecPrivate)
 //==============================================================================
+// 옮긴 원문: 크로미엄 media/filters/opus_audio_decoder.cc, media/formats/common/opus_constants.h 에서 옮김, BSD-3-Clause, THIRD_PARTY_LICENSES.md
 use opus_pure::{OpusDecoder, OpusMSDecoder, MAX_PACKET_SAMPLES};
 use symphonia::core::audio::{AsGenericAudioBufferRef, AudioBuffer, AudioMut, AudioSpec, Channels, GenericAudioBufferRef, Position};
 use symphonia::core::codecs::audio::well_known::CODEC_ID_OPUS;

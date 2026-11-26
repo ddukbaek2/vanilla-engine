@@ -32,6 +32,7 @@
 //! assert!(coverage.iter().all(|value| *value == 255));
 //! ```
 //==============================================================================
+// 옮긴 원문: font-rs 의 draw_line 누적 래스터를 고쳐 옮김, Apache-2.0, THIRD_PARTY_LICENSES.md
 use rustybuzz::ttf_parser::colr::{ClipBox, CompositeMode, GradientExtend, Paint, Painter};
 use rustybuzz::ttf_parser::{Face, GlyphId, OutlineBuilder, RasterGlyphImage, RasterImageFormat, RgbaColor, Transform};
 

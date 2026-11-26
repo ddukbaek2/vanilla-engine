@@ -40,16 +40,16 @@ const LOOP_ONCE: &str = "once";
 ///   inner_parts 와 그 위에 얹힌 inner_over_parts 의 몸이 든 자리는 inner_body_ranges 로 돌려준다. (유리 같은 부위를 둘레의 가는 선과 함께 한 번 더 그릴 때)
 ///
 /// # 예제
-/// 바이저만 가늘게, 짝이 없는 부품에도 바깥선 껍데기 짓기
+/// 부품 하나만 가늘게, 짝이 없는 부품에도 바깥선 껍데기 짓기
 /// ```rust,no_run
 /// use std::collections::HashMap;
 /// use vanilla::{read_glb_arrays, ToonMeshArrays, ToonOutlineOptions};
 ///
-/// fn read_soldier(bytes: &[u8]) -> Result<ToonMeshArrays, String> {
+/// fn read_mannequin(bytes: &[u8]) -> Result<ToonMeshArrays, String> {
 /// 	let outline_options = ToonOutlineOptions {
 /// 		width: 1.5,
-/// 		part_widths: HashMap::from([(String::from("vanguard_visor"), 0.8)]),
-/// 		added_parts: vec![String::from("vanguard_Mesh"), String::from("vanguard_visor")],
+/// 		part_widths: HashMap::from([(String::from("Mannequin_F"), 0.8)]),
+/// 		added_parts: vec![String::from("Mannequin_F")],
 /// 		..ToonOutlineOptions::default()
 /// 	};
 /// 	read_glb_arrays(bytes, Some(&outline_options))

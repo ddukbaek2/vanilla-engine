@@ -7,6 +7,7 @@
 //!   원본 ${KERNEL_SAMPLE_COUNT} / ${KERNEL_RANGE} 는 숫자 17 / 3 으로 옮겼다.
 //! - GL 을 쓰는 함수는 gl 을 받고, 생성과 크기 변경은 GL 객체를 못 만들면 오류(Result)를 돌려준다.
 //==============================================================================
+// 옮긴 원문: Separable SSS(Jorge Jimenez, Diego Gutierrez) 의 커널에서 옮김, BSD-2-Clause 꼴(표기 조건 있음), THIRD_PARTY_LICENSES.md
 use crate::core::graphic::GlTexture;
 use crate::graphics3d::fullscreenpass::FullscreenPass;
 use crate::graphics3d::rendertarget::{RenderTarget, RenderTargetOptions};

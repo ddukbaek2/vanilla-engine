@@ -26,6 +26,7 @@
 //! assert_eq!(convert_utf16_index_to_character_index(text, 4), 3);
 //! ```
 //==============================================================================
+// 옮긴 원문: 크로미엄 third_party/blink/renderer/core/editing/state_machines/backspace_state_machine.cc, third_party/blink/renderer/core/editing/position_units_word.cc 에서 옮김, BSD-3-Clause, THIRD_PARTY_LICENSES.md
 use crate::base::rect::Rect;
 use crate::base::vector2::Vector2;
 use std::cell::{Cell, RefCell};

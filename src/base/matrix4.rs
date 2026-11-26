@@ -12,6 +12,7 @@
 //! - 원본 transformPoint 의 { x, y, z, w } 는 TransformedPoint 로, transform_direction 의 { x, y, z } 는 Vector3 로 돌려준다.
 //! - 원본 clone 은 Copy 로 갈음한다. 원본에 없는 전치(transpose)는 만들지 않았다.
 //==============================================================================
+// 옮긴 원문: gl-matrix 에서 옮김, MIT, THIRD_PARTY_LICENSES.md
 use crate::base::quaternion::Quaternion;
 use crate::base::vector3::Vector3;
 

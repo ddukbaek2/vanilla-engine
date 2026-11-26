@@ -7,6 +7,7 @@
 //!   같은 차례로 만들고 같은 step 을 부르면 결과가 비트까지 같다. (시험 comparison_matches_vanilla_js 가 원본이 쓴 덤프와 견준다)
 //! - 원본과 다른 점: 벡터는 f64 의 PhysicsVector2 다. (러스트 엔진 Vector2 는 f32) 사용자 값은 u64 다.
 //==============================================================================
+// 옮긴 원문: Box2D 3 의 셈에서 옮김, MIT, THIRD_PARTY_LICENSES.md
 
 pub mod body2d;
 pub mod geometry2d;

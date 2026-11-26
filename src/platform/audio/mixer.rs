@@ -17,6 +17,7 @@
 //!   리스너는 컨텍스트에 하나이고, 퀀텀마다 그리기 전에 상태를 읽는다. 입력이 조용해도 PannerNode 가 침묵을 넘기기 전(HRTF 는 꼬리와 늦음 동안)에는
 //!   셈한 출력을 내보낼 곳에 섞는다.
 //==============================================================================
+// 옮긴 원문: 크로미엄 third_party/blink/renderer/modules/webaudio/audio_buffer_source_handler.cc, audio_scheduled_source_handler.cc, third_party/blink/renderer/platform/audio/stereo_panner.cc 에서 옮김, BSD-3-Clause, THIRD_PARTY_LICENSES.md
 use super::audioparam::{AudioParam, ParamAutomation};
 use super::oscillator::{OscillatorNode, PeriodicWave};
 use super::panner::{ListenerState, PannerNode};

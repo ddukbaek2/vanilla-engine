@@ -9,6 +9,8 @@ license = "MIT"
 repository = "https://github.com/ddukbaek2/vanilla-engine"
 keywords = ["gamedev", "engine", "2d", "3d", "wasm"]
 categories = ["game-engines"]
+# cargo package 에 싣는 파일. (소스와 그 안의 자료, 라이선스 두 파일, README. 문서, 예제, 시험과 시험 자산, 도구는 저장소에만 둔다)
+include = ["/src/**/*", "/LICENSE", "/THIRD_PARTY_LICENSES.md", "/README.md"]
 
 # 코드에서 쓰는 이름. (use vanilla::...) 크레이트 이름은 vanilla-engine 이고, 고도(godotengine → godot), 베비(bevyengine → bevy)처럼 코드에서는 짧게 부른다
 [lib]

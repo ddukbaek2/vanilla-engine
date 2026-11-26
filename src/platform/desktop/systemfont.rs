@@ -37,6 +37,7 @@
 //! }
 //! ```
 //==============================================================================
+// 옮긴 원문: 스키아 src/ports/SkFontConfigInterface_direct.cpp 의 kFontEquivMap, 크로미엄 locale_settings_*.grd 의 글꼴 표에서 옮김, BSD-3-Clause, THIRD_PARTY_LICENSES.md
 use crate::core::textstringtexturecache::FontFileSource;
 
 //==============================================================================
