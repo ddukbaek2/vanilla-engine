@@ -263,6 +263,7 @@ impl Platform {
 
 	//==============================================================================
 	/// 세이프 에어리어. (area_size 크기에서 env(safe-area-inset-*) 를 뺀 사각형, 인셋은 원본 parseInt 처럼 정수로 자른다)
+	/// - 인셋이 CSS 픽셀이므로 area_size 도 CSS 픽셀 크기로 준다. (원본처럼 캔버스의 CSS 크기 clientWidth, clientHeight 이고 그리기 버퍼 크기가 아니다) 너비와 높이는 0 이상이다.
 	//==============================================================================
 	pub fn get_safe_area_rect(&self, area_size: Vector2) -> Rect {
 		let insets = crate::platform::read_safe_area_insets();
@@ -270,7 +271,7 @@ impl Platform {
 		let right = insets[1].trunc();
 		let bottom = insets[2].trunc();
 		let left = insets[3].trunc();
-		Rect::create(left, top, area_size.x - left - right, area_size.y - top - bottom)
+		Rect::create(left, top, (area_size.x - left - right).max(0.0), (area_size.y - top - bottom).max(0.0))
 	}
 
 	//==============================================================================
@@ -539,6 +540,7 @@ mod tests {
 		let platform = Platform::new();
 		assert_eq!(platform.get_browser_name(), BrowserType::Chrome);
 		assert_eq!(platform.get_safe_area_rect(Vector2::create(800.0, 600.0)), Rect::create(0.0, 0.0, 800.0, 600.0));
+		assert_eq!(platform.get_safe_area_rect(Vector2::create(-4.0, -2.0)), Rect::create(0.0, 0.0, 0.0, 0.0));
 		assert!(!platform.is_coarse_pointer());
 		assert_eq!(platform.get_resource_usage(), ResourceUsage::default());
 		record_loaded_file("assets/images/logo.png", 1200);
