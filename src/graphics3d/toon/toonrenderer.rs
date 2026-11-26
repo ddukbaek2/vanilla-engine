@@ -1,9 +1,12 @@
 //==============================================================================
 // 툰 렌더러. (vanilla.js experimental/graphics/toon/toonrenderer.js 의 ToonRenderer)
 // - MeshBuilder 의 배열이나 read_glb_arrays 로 읽은 모형을 한 색 재질과 바깥선으로 그린다.
-// - 빛: ToonLightSet 하나를 기본으로 든다. 해(방향과 색), 하늘색과 땅색의 바탕빛, 채움 빛, 림 빛, 정반사, 점광(TOON_MAXIMUM_POINT_LIGHTS 까지), 띠(칸 수나 램프), 빛 꼴(÷π).
-//   set_light, set_sun_direction, set_fill_light, set_rim_light, set_specular, set_point_lights, set_point_light_limit, set_band_count, set_band_ramp, set_light_model 은 기본 묶음을 고친다.
-//   그리기마다 ToonDrawOptions 의 light_set 으로 다른 묶음(create_light_set)을 줄 수 있다. 해 방향의 뜻(빛이 나아가는 쪽)은 toonlightset.rs 머리말에 있다.
+// - 빛: ToonLightSet 하나를 기본으로 든다. 해(방향과 색, 그림자), 하늘색과 땅색의 바탕빛, 채움 빛, 점광과 스포트라이트(TOON_MAXIMUM_POINT_LIGHTS 까지), 림 빛, 하이라이트, 빛 꼴(÷π).
+//   셀 셰이딩은 그늘 램프다. (유니티 툰 셰이더의 바탕, 1 차 그늘, 2 차 그늘과 Step, Feather, 그림자는 그늘 색으로 들어간다, 경계는 fwidth 로 계단 없이, 램프 텍스처도 된다)
+//   해는 램프 색을 통째로, 채움 빛과 점광과 스포트라이트는 램프의 밝기 단계를 받는다. 하이라이트와 림은 단단한 툰 꼴에서 부드러운 꼴까지. 셈은 toonlightset.rs 머리말에 있다.
+//   set_light, set_sun_direction, set_fill_light, set_shade, set_shade_ramp, clear_shade_ramp, set_band_count, set_band_ramp, set_ramp_texture, set_rim_light, set_specular, set_point_lights,
+//   set_point_light_limit, set_light_model 은 기본 묶음을 고친다. 그리기마다 ToonDrawOptions 의 light_set 으로 다른 묶음(create_light_set)을 줄 수 있다.
+// - 노멀: 모형 행렬과 본 행렬의 왼쪽 위 3x3 의 역행렬의 전치로 옮긴다. (늘이고 줄인 모형도 빛이 맞다, 정점 조각이 고친 행렬도 같다)
 // - 재질: 꼭짓점의 색(sRGB), 빛남(바탕색에 곱해 더함), 빛을 받지 않음. 꼭짓점 UV(arrays.uv_data, 2 씩)가 있으면 텍스처를 읽는다.
 // - 그리기 꼴(ToonDrawOptions, 기본값이면 지금까지와 같은 화면):
 //   tint_color [r, g, b, a] sRGB 와 alpha. tint_amount 를 주면(0 ~ 1) 틴트를 곱하지 않고 sRGB 로 섞는다. (맞은 번쩍임, 고장 빨강)
@@ -17,7 +20,13 @@
 //   index_start, index_count 는 몸의 꼭짓점 번호 가운데 그 자리만 그린다. (0 이면 끝까지, GLB 재질 범위, 숨긴 부분) outline_index_start, outline_index_count 는 바깥선 껍데기.
 //   material(ToonMaterial), textures([(유니폼 이름, 텍스처)]), on_before_draw(program, gl, ToonProgramKind) 는 확장 자리다. (toonmaterial.rs 머리말)
 //   light_set(ToonLightSet) 은 그 그리기의 빛 묶음이다. group, is_depth_prepassed 는 ToonDrawQueue 만 읽는다.
-// - 바깥선: MeshBuilder 가 지은 껍데기를 뒷면만 그린다.
+//   receives_shadow (기본 true) 가 false 면 해의 그림자를 보지 않는다. shade_offset 은 빛을 받는 몫에 더해 그늘 경계를 옮긴다. (길티기어 Xrd 의 꼭짓점 색 문턱, 유니티 툰 셰이더의 Shading Grade Map 꼴)
+//   specular_scale, rim_scale (기본 1) 은 그 그리기의 하이라이트와 림 배다. (0 이면 없음, 재질마다의 세기)
+//   matcap_texture 는 보기 공간 노멀로 읽는 매트캡이다. matcap_strength (기본 1), matcap_blend (ToonMatcapBlend::Multiply 기본, Add)
+//   outline_color [r, g, b, a] sRGB 는 그 그리기의 껍데기 바깥선 색 (None 이면 set_outline_color), outline_width_scale (기본 1) 은 지은 굵기의 배다.
+//   line_id, has_screen_outline, has_crease_line 은 ToonDrawQueue 가 화면 공간 바깥선에 넘기는 값이다. (렌더러는 읽지 않는다)
+// - 바깥선 껍데기(inverted hull): MeshBuilder 가 지은 껍데기의 바탕 자리와 미는 쪽(지은 굵기, 같은 자리의 노멀을 평균한 쪽)을 올리고, 셰이더가 outline_width_scale 만큼 밀어 뒷면만 그린다.
+//   set_outline_distance_scale(기준 거리, 가장 작은 배, 가장 큰 배) 를 주면 카메라까지의 거리 / 기준 거리 를 굵기에 곱해 화면 굵기를 맞춘다. (원근만)
 // - 뼈대: write_skin_pose 가 셈한 본 행렬을 draw_mesh 에 넘긴다. (TOON_MAXIMUM_JOINTS 까지, 엔진 SkinnedModelRenderer 와 같은 96)
 // - GPU 인스턴싱: draw_mesh_instanced 로 같은 모형 여럿을 인스턴스마다 행렬과 틴트로 한 번에 그린다. (몸과 바깥선 모두, 그릴 때마다 걸러서 올림)
 //   오래 두는 인스턴스는 create_instance_layout 과 create_instance_buffer 로 영구 버퍼를 짓고 draw_mesh_instance_buffer 로 그린다. (거르지 않음, 머티리얼 정점 조각이 사용자 어트리뷰트를 읽음)
@@ -28,7 +37,7 @@
 // - 사용: create_mesh(gl, arrays) → 매 프레임 begin_frame(gl, 보기와 투영) → draw_mesh / draw_mesh_instanced → end_frame(gl) → 다 쓰면 delete_mesh.
 //   begin_frame 이 앞의 그리기 상태(섞기, 깊이, 면 가리기, 프로그램, 버텍스 어레이)를 적어 두고 깊이 시험과 면 가리기를 켜며, end_frame 이 적어 둔 상태로 돌린다.
 //   (엔진 2D 그리기 사이에 끼울 때, 그 전에 Graphic 의 묶음을 내보낸다)
-//   begin_frame_with_matrices(gl, 보기, 투영) 는 두 행렬로 시작한다. (직교 원 행렬 카메라) 카메라의 자리(정반사, 림, 소프트 엣지)는 보기와 투영에서 읽는다.
+//   begin_frame_with_matrices(gl, 보기, 투영) 는 두 행렬로 시작한다. (직교 원 행렬 카메라) 카메라의 자리와 보기 돌림(하이라이트, 림, 소프트 엣지, 매트캡)은 보기와 투영에서 읽는다.
 // - 프로그램마다 프레임 값(보기와 투영, 카메라, 그림자, HDR)과 빛 묶음은 바뀔 때만 올린다. 그리기마다 바뀌는 값(모형 행렬, 틴트, 텍스처)만 매번 올린다.
 // - read_program_sources 로 ShaderWarmer 에 넘길 기본 소스를, read_material_program_sources(머티리얼, 인스턴스 꼴) 로 그 프로그램의 소스를 준다. (원본은 한 함수에 선택 인자)
 // - 노드 사각형 안에 그리기: set_screen_rect(x, y, 너비, 높이) 를 주면 begin_frame 이 보기와 투영의 클립 공간을 그 사각형으로 옮기고 가위로 밖을 자른다.
@@ -53,8 +62,8 @@ use crate::graphics3d::GlFramebuffer;
 use crate::core::shaderprogram::ShaderProgram;
 use crate::graphics3d::shadowmap::ShadowMap;
 use crate::graphics3d::toon::meshbuilder::{ToonMeshArrays, SKIN_FLOAT_COUNT, VERTEX_FLOAT_COUNT};
-use crate::graphics3d::toon::toonlightset::{ToonLightModel, ToonLightSet, ToonPointLight, TOON_MAXIMUM_BAND_STEPS, TOON_MAXIMUM_POINT_LIGHTS};
-use crate::graphics3d::toon::toonmaterial::{ToonBlendMode, ToonBufferUsage, ToonInstanceLayout, ToonMaterial, ToonMaterialChunks, TOON_INSTANCE_MATRIX_NAME, TOON_INSTANCE_TINT_NAME};
+use crate::graphics3d::toon::toonlightset::{ToonLightModel, ToonLightSet, ToonPointLight, ToonShade, TOON_MAXIMUM_BAND_STEPS, TOON_MAXIMUM_POINT_LIGHTS};
+use crate::graphics3d::toon::toonmaterial::{ToonBlendMode, ToonBufferUsage, ToonMatcapBlend, ToonInstanceLayout, ToonMaterial, ToonMaterialChunks, TOON_INSTANCE_MATRIX_NAME, TOON_INSTANCE_TINT_NAME};
 
 // 한 모형이 쓰는 뼈대 수의 상한. (셰이더의 유니폼 배열 크기)
 pub const TOON_MAXIMUM_JOINTS: usize = 96;
@@ -62,7 +71,9 @@ pub const TOON_MAXIMUM_JOINTS: usize = 96;
 // 인스턴스 하나의 수 개수. (행렬 16, 틴트 4)
 pub const TOON_INSTANCE_FLOAT_COUNT: usize = 20;
 
-// 텍스처 유닛. (그림자, 바탕색, 빛남, 데칼, 머티리얼 텍스처는 7 부터 15 까지)
+// 텍스처 유닛. (램프, 매트캡, 그림자, 바탕색, 빛남, 데칼, 머티리얼 텍스처는 7 부터 15 까지)
+const RAMP_TEXTURE_UNIT: u32 = 1;
+const MATCAP_TEXTURE_UNIT: u32 = 2;
 const SHADOW_TEXTURE_UNIT: u32 = 3;
 const BASE_COLOR_TEXTURE_UNIT: u32 = 4;
 const EMISSIVE_TEXTURE_UNIT: u32 = 5;
@@ -208,7 +219,7 @@ void main() {
 	vec4 position = objectMatrix * skinMatrix * vec4(vertex.localPosition, 1.0);
 	worldPosition = position.xyz;
 	localPosition = vertex.localPosition;
-	worldNormal = normalize(mat3(objectMatrix) * mat3(skinMatrix) * vertex.localNormal);
+	worldNormal = normalize(transpose(inverse(mat3(objectMatrix) * mat3(skinMatrix))) * vertex.localNormal);
 	surfaceColor = vertex.color;
 	surfaceMaterial = vertex.material;
 	surfaceDetail = vertex.detail;
@@ -239,19 +250,26 @@ uniform vec3 groundColor;
 uniform vec3 fillDirection;
 uniform vec3 fillColor;
 uniform vec4 rimLight;
-uniform vec2 specularLight;
+uniform vec2 rimShape;
+uniform vec3 specularLight;
+uniform vec3 specularColor;
 uniform float energyNormalized;
-uniform float bandCount;
-uniform int bandRampCount;
-uniform float bandRampHalfLambert;
-uniform float bandRampThresholds[7];
-uniform float bandRampValues[8];
+uniform int shadeStopCount;
+uniform float shadeStopPositions[8];
+uniform float shadeStopFeathers[8];
+uniform vec3 shadeStopColors[8];
+uniform float shadeHalfLambert;
+uniform float rampTextureEnabled;
+uniform sampler2D rampTexture;
 uniform int pointLightCount;
 uniform vec4 pointLightPositions[8];
 uniform vec3 pointLightColors[8];
 uniform vec3 pointLightShapes[8];
+uniform vec4 pointLightSpots[8];
+uniform vec2 pointLightCones[8];
 uniform vec4 cameraPosition;
 uniform vec3 cameraForward;
+uniform mat3 viewRotation;
 uniform vec4 tintColor;
 uniform float tintAmount;
 uniform float alpha;
@@ -269,6 +287,11 @@ uniform sampler2D decalTexture;
 uniform vec4 uvTransform;
 uniform vec4 decalUvTransform;
 uniform vec4 decalColor;
+uniform float receivesShadow;
+uniform float shadeOffset;
+uniform vec2 highlightScale;
+uniform vec3 matcapSettings;
+uniform sampler2D matcapTexture;
 uniform float shadowEnabled;
 uniform float shadowStrength;
 uniform float shadowTexelSize;
@@ -287,11 +310,16 @@ struct ToonSurface {
 	vec3 localPosition;
 	vec3 worldPosition;
 	vec3 viewDirection;
+	float shadeOffset;
+	float specularMask;
+	float rimMask;
 };
 struct ToonLighting {
 	vec3 irradiance;
 	vec3 specular;
+	vec3 rim;
 	float shadow;
+	float sunLevel;
 };
 vec3 toLinear(vec3 color) {
 	return pow(color, vec3(2.2));
@@ -301,6 +329,9 @@ vec3 toOutput(vec3 color) {
 		return max(color, vec3(0.0));
 	}
 	return pow(clamp(color, 0.0, 1.0), vec3(1.0 / 2.2));
+}
+float readLuminance(vec3 color) {
+	return dot(color, vec3(0.2126, 0.7152, 0.0722));
 }
 float readShadow() {
 	if (shadowEnabled < 0.5) {
@@ -318,27 +349,48 @@ float readShadow() {
 	}
 	return mix(1.0, lit / 9.0, shadowStrength);
 }
-float readBandRamp(float cosine) {
-	float coordinate = bandRampHalfLambert > 0.5 ? cosine * 0.5 + 0.5 : max(cosine, 0.0);
-	for (int index = 0; index < 7; ++index) {
-		if (index >= bandRampCount - 1) {
+float readToonCoordinate(float cosine, float offset) {
+	return (shadeHalfLambert > 0.5 ? cosine * 0.5 + 0.5 : max(cosine, 0.0)) + offset;
+}
+vec3 readShadeRamp(float coordinate) {
+	if (rampTextureEnabled > 0.5) {
+		return toLinear(textureLod(rampTexture, vec2(clamp(coordinate, 0.0, 1.0), 0.5), 0.0).rgb);
+	}
+	if (shadeStopCount < 2) {
+		return vec3(clamp(coordinate, 0.0, 1.0));
+	}
+	float edgeWidth = max(fwidth(coordinate), 0.0001);
+	vec3 color = shadeStopColors[0];
+	for (int index = 1; index < 8; ++index) {
+		if (index >= shadeStopCount) {
 			break;
 		}
-		if (coordinate < bandRampThresholds[index]) {
-			return bandRampValues[index];
-		}
+		float feather = max(shadeStopFeathers[index], edgeWidth);
+		color = mix(color, shadeStopColors[index], clamp((coordinate - shadeStopPositions[index] + feather) / feather, 0.0, 1.0));
 	}
-	return bandRampValues[max(bandRampCount - 1, 0)];
+	return color;
 }
-float readDirectFacing(float cosine) {
-	if (bandRampCount > 0) {
-		return readBandRamp(cosine);
+float readShadeLevel(vec3 rampColor, float cosine) {
+	float bottom;
+	float top;
+	if (rampTextureEnabled > 0.5) {
+		bottom = readLuminance(toLinear(textureLod(rampTexture, vec2(0.0, 0.5), 0.0).rgb));
+		top = readLuminance(toLinear(textureLod(rampTexture, vec2(1.0, 0.5), 0.0).rgb));
 	}
-	float facing = max(cosine, 0.0);
-	if (bandCount > 0.5) {
-		facing = floor(facing * bandCount + 0.5) / bandCount;
+	else if (shadeStopCount < 2) {
+		return clamp(cosine, 0.0, 1.0);
 	}
-	return facing;
+	else {
+		bottom = readLuminance(shadeStopColors[0]);
+		top = readLuminance(shadeStopColors[shadeStopCount - 1]);
+	}
+	return clamp((readLuminance(rampColor) - bottom) / max(top - bottom, 0.0001), 0.0, 1.0);
+}
+float readToonSpecular(vec3 normal, vec3 toLight, vec3 viewDirection) {
+	vec3 halfway = normalize(toLight + viewDirection);
+	float blinn = pow(max(dot(normal, halfway), 0.0), specularLight.y);
+	float edgeWidth = max(fwidth(blinn), 0.0001);
+	return mix(smoothstep(0.5 - edgeWidth, 0.5 + edgeWidth, blinn), blinn, specularLight.z);
 }
 vec3 readViewDirection() {
 	if (cameraPosition.w > 0.5) {
@@ -380,35 +432,37 @@ const SOLID_FRAGMENT_BODY: &str = "ToonSurface readSurface() {
 	surface.localPosition = localPosition;
 	surface.worldPosition = worldPosition;
 	surface.viewDirection = readViewDirection();
+	surface.shadeOffset = shadeOffset;
+	surface.specularMask = highlightScale.x;
+	surface.rimMask = highlightScale.y;
 	return surface;
 }
 ToonLighting readLighting(ToonSurface surface) {
 	ToonLighting lighting;
 	vec3 normal = surface.normal;
-	float shadow = readShadow();
+	vec3 viewDirection = surface.viewDirection;
+	float shadow = receivesShadow > 0.5 ? readShadow() : 1.0;
+	float specularNormalization = energyNormalized > 0.5 ? (specularLight.y + 8.0) * RECIPROCAL_PI / 8.0 : 1.0;
+	bool hasSpecular = specularLight.x > 0.0;
+	vec3 specularSum = vec3(0.0);
 	vec3 toSun = -normalize(sunDirection);
 	float sunCosine = dot(normal, toSun);
-	float sunFacing;
-	if (bandRampCount > 0) {
-		sunFacing = readBandRamp(sunCosine) * shadow;
+	vec3 sunRamp = readShadeRamp(readToonCoordinate(sunCosine, surface.shadeOffset) * shadow);
+	float sunLevel = readShadeLevel(sunRamp, sunCosine * shadow);
+	vec3 irradiance = sunColor * sunRamp + mix(groundColor, skyColor, normal.y * 0.5 + 0.5);
+	if (hasSpecular) {
+		specularSum += sunColor * readToonSpecular(normal, toSun, viewDirection) * sunLevel;
 	}
-	else {
-		sunFacing = max(sunCosine, 0.0) * shadow;
-		if (bandCount > 0.5) {
-			sunFacing = floor(sunFacing * bandCount + 0.5) / bandCount;
-		}
-	}
-	vec3 irradiance = sunColor * sunFacing + mix(groundColor, skyColor, normal.y * 0.5 + 0.5);
-	irradiance += fillColor * max(dot(normal, -normalize(fillDirection)), 0.0);
-	if (rimLight.a > 0.0) {
-		irradiance += rimLight.rgb * pow(1.0 - clamp(dot(normal, surface.viewDirection), 0.0, 1.0), rimLight.a);
-	}
+	vec3 toFill = -normalize(fillDirection);
+	float fillCosine = dot(normal, toFill);
+	irradiance += fillColor * readShadeLevel(readShadeRamp(readToonCoordinate(fillCosine, surface.shadeOffset)), fillCosine);
 	for (int index = 0; index < 8; ++index) {
 		if (index >= pointLightCount) {
 			break;
 		}
 		vec3 toLight = pointLightPositions[index].xyz - surface.worldPosition;
 		float lightDistance = length(toLight);
+		vec3 lightDirection = toLight / max(lightDistance, 0.0001);
 		float lightRange = pointLightPositions[index].w;
 		vec3 shape = pointLightShapes[index];
 		float window = 1.0;
@@ -417,17 +471,30 @@ ToonLighting readLighting(ToonSurface surface) {
 			window *= window;
 		}
 		float falloff = shape.x > 0.0 ? window / max(pow(lightDistance, shape.x), 0.01) : window;
-		float cosine = dot(normal, toLight / max(lightDistance, 0.0001));
-		irradiance += pointLightColors[index] * readDirectFacing((cosine + shape.z) / (1.0 + shape.z)) * falloff;
+		vec4 spot = pointLightSpots[index];
+		if (spot.w > 0.5) {
+			vec2 cone = pointLightCones[index];
+			float angular = clamp(dot(spot.xyz, -lightDirection) * cone.x + cone.y, 0.0, 1.0);
+			falloff *= angular * angular;
+		}
+		float cosine = (dot(normal, lightDirection) + shape.z) / (1.0 + shape.z);
+		float level = readShadeLevel(readShadeRamp(readToonCoordinate(cosine, surface.shadeOffset)), cosine);
+		irradiance += pointLightColors[index] * level * falloff;
+		if (hasSpecular) {
+			specularSum += pointLightColors[index] * readToonSpecular(normal, lightDirection, viewDirection) * level * falloff;
+		}
 	}
 	lighting.irradiance = irradiance;
-	lighting.specular = vec3(0.0);
-	if (specularLight.x > 0.0) {
-		vec3 halfway = normalize(toSun + surface.viewDirection);
-		float specularNormalization = energyNormalized > 0.5 ? (specularLight.y + 8.0) * RECIPROCAL_PI / 8.0 : 1.0;
-		lighting.specular = sunColor * pow(max(dot(normal, halfway), 0.0), specularLight.y) * specularLight.x * specularNormalization * shadow;
+	lighting.specular = hasSpecular ? specularSum * specularColor * specularLight.x * specularNormalization : vec3(0.0);
+	lighting.rim = vec3(0.0);
+	if (rimLight.a > 0.0) {
+		float rimTerm = pow(1.0 - clamp(dot(normal, viewDirection), 0.0, 1.0), rimLight.a);
+		float edgeWidth = max(fwidth(rimTerm), 0.0001);
+		float rim = mix(smoothstep(0.5 - edgeWidth, 0.5 + edgeWidth, rimTerm), rimTerm, rimShape.x);
+		lighting.rim = rimLight.rgb * rim * mix(1.0, sunLevel, rimShape.y);
 	}
 	lighting.shadow = shadow;
+	lighting.sunLevel = sunLevel;
 	return lighting;
 }
 void main() {
@@ -447,7 +514,12 @@ void main() {
 		ToonLighting lighting = readLighting(surface);
 		applyLight(surface, lighting);
 		float diffuseScale = energyNormalized > 0.5 ? RECIPROCAL_PI : 1.0;
-		color = albedo * lighting.irradiance * diffuseScale + lighting.specular + emission;
+		color = albedo * lighting.irradiance * diffuseScale + lighting.specular * surface.specularMask + lighting.rim * surface.rimMask + emission;
+	}
+	if (matcapSettings.x > 0.5) {
+		vec3 viewNormal = normalize(viewRotation * surface.normal);
+		vec3 matcap = toLinear(texture(matcapTexture, vec2(viewNormal.x * 0.5 + 0.5, 0.5 - viewNormal.y * 0.5)).rgb);
+		color = matcapSettings.z > 0.5 ? color + matcap * matcapSettings.y : color * mix(vec3(1.0), matcap, matcapSettings.y);
 	}
 	float opacity = surface.alpha;
 	if (softEdge > 0.0) {
@@ -462,13 +534,22 @@ void main() {
 ";
 
 // 바깥선 껍데기를 그리는 셰이더. (껍데기는 뒷면만 그려 몸 둘레에 테로 보인다)
-const OUTLINE_VERTEX_BODY: &str = "out float outlineTint;
+const OUTLINE_VERTEX_BODY: &str = "uniform float outlineWidthScale;
+uniform vec3 outlineDistanceScale;
+uniform vec4 cameraPosition;
+out float outlineTint;
 void main() {
 	ToonVertex vertex = readVertex();
 	applyVertex(vertex);
-	mat4 skinMatrix = readSkinMatrix();
+	mat4 objectMatrix = vertex.modelMatrix * readSkinMatrix();
+	vec3 basePosition = (objectMatrix * vec4(vertex.localPosition, 1.0)).xyz;
+	vec3 offset = mat3(objectMatrix) * vertex.localNormal;
+	float scale = outlineWidthScale;
+	if (outlineDistanceScale.x > 0.0 && cameraPosition.w > 0.5) {
+		scale *= clamp(distance(cameraPosition.xyz, basePosition) / outlineDistanceScale.x, outlineDistanceScale.y, outlineDistanceScale.z);
+	}
 	outlineTint = vertex.tint.a;
-	gl_Position = viewProjectionMatrix * vertex.modelMatrix * skinMatrix * vec4(vertex.localPosition, 1.0);
+	gl_Position = viewProjectionMatrix * vec4(basePosition + offset * scale, 1.0);
 }
 ";
 
@@ -677,6 +758,9 @@ pub struct ToonTextureOptions {
 }
 
 impl Default for ToonTextureOptions {
+	//==============================================================================
+	// 기본값. (원본의 기본 꼴과 같다)
+	//==============================================================================
 	fn default() -> Self {
 		ToonTextureOptions { is_mipmapped: true, is_repeated: true, is_filtered: true }
 	}
@@ -725,6 +809,24 @@ pub struct ToonDrawOptions<'a> {
 	pub light_set: Option<&'a ToonLightSet>,
 	pub group: Option<u32>,
 	pub is_depth_prepassed: bool,
+	// 그림자를 받을지. (false 면 해의 그림자를 보지 않는다)
+	pub receives_shadow: bool,
+	// 빛을 받는 몫 x 에 더할 값. (그늘 경계를 옮긴다, 길티기어 Xrd 의 꼭짓점 색 문턱, 유니티 툰 셰이더의 Shading Grade Map 꼴, 표면 조각이 surface.shadeOffset 으로 더 고칠 수 있다)
+	pub shade_offset: f32,
+	// 하이라이트 배. (0 이면 이 그리기는 하이라이트가 없다, 재질마다의 세기)
+	pub specular_scale: f32,
+	// 림 빛 배. (0 이면 이 그리기는 림 빛이 없다)
+	pub rim_scale: f32,
+	// 매트캡 텍스처. (보기 공간 노멀로 읽는 공 그림, None 이면 없음)
+	pub matcap_texture: Option<GlTexture>,
+	// 매트캡 세기.
+	pub matcap_strength: f32,
+	// 매트캡 섞기. (곱하기나 더하기)
+	pub matcap_blend: ToonMatcapBlend,
+	// 껍데기 바깥선 색. (sRGB 와 알파, None 이면 렌더러의 set_outline_color)
+	pub outline_color: Option<[f32; 4]>,
+	// 껍데기 바깥선 굵기 배. (지은 굵기에 곱한다)
+	pub outline_width_scale: f32,
 	// 화면 공간 바깥선의 선 번호. (ToonDrawQueue 가 선의 판에 그릴 때, None 이면 담은 차례 + 1)
 	pub line_id: Option<u32>,
 	// 화면 공간 바깥선을 낼지. (false 면 선은 내지 않고 뒤의 선만 가린다)
@@ -734,6 +836,9 @@ pub struct ToonDrawOptions<'a> {
 }
 
 impl Default for ToonDrawOptions<'_> {
+	//==============================================================================
+	// 기본값. (원본의 기본 꼴과 같다)
+	//==============================================================================
 	fn default() -> Self {
 		ToonDrawOptions {
 			tint_color: [1.0; 4],
@@ -769,6 +874,15 @@ impl Default for ToonDrawOptions<'_> {
 			light_set: None,
 			group: None,
 			is_depth_prepassed: false,
+			receives_shadow: true,
+			shade_offset: 0.0,
+			specular_scale: 1.0,
+			rim_scale: 1.0,
+			matcap_texture: None,
+			matcap_strength: 1.0,
+			matcap_blend: ToonMatcapBlend::Multiply,
+			outline_color: None,
+			outline_width_scale: 1.0,
 			line_id: None,
 			has_screen_outline: true,
 			has_crease_line: true,
@@ -780,6 +894,9 @@ impl Default for ToonDrawOptions<'_> {
 // 꼴 글로 보이기. (콜백은 있는지만)
 //==============================================================================
 impl std::fmt::Debug for ToonDrawOptions<'_> {
+	//==============================================================================
+	// 디버그 출력. (GL 객체는 이름만)
+	//==============================================================================
 	fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		formatter.debug_struct("ToonDrawOptions")
 			.field("tint_color", &self.tint_color)
@@ -821,6 +938,9 @@ pub struct ToonInstance {
 }
 
 impl Default for ToonInstance {
+	//==============================================================================
+	// 기본값. (원본의 기본 꼴과 같다)
+	//==============================================================================
 	fn default() -> Self {
 		ToonInstance { model_matrix: Matrix4::create_identity(), tint_color: [1.0, 1.0, 1.0, 1.0], line_id: None }
 	}
@@ -887,6 +1007,9 @@ struct ToonProgramEntry {
 }
 
 impl ToonProgramEntry {
+	//==============================================================================
+	// 프로그램 칸 짓기. (올린 프레임 번호와 빛 묶음은 비운 채로)
+	//==============================================================================
 	fn new(program: ShaderProgram, kind: ToonProgramKind) -> ToonProgramEntry {
 		ToonProgramEntry { program, kind, frame_serial: Cell::new(0), light_set_id: Cell::new(0), light_version: Cell::new(u64::MAX) }
 	}
@@ -901,6 +1024,9 @@ struct ToonProgramSet {
 	depth: ToonProgramEntry,
 }
 
+//==============================================================================
+// 툰 렌더러. (머리말 참고)
+//==============================================================================
 pub struct ToonRenderer {
 	// (머티리얼 번호, 인스턴스 꼴 번호) → 세 프로그램. (짓지 못했으면 None, 다시 짓지 않는다)
 	program_set_table: HashMap<(u32, u32), Option<ToonProgramSet>>,
@@ -925,6 +1051,10 @@ pub struct ToonRenderer {
 	frame_statistics: ToonFrameStatistics,
 	screen_rect: Option<Rect>,
 	is_scissor_applied: bool,
+	// 이번 프레임의 보기 돌림 3x3. (열 차례, 매트캡의 보기 공간 노멀)
+	view_rotation: [f32; 9],
+	// 껍데기 바깥선의 거리 배. ([기준 거리 (0 이면 끔), 가장 작은 배, 가장 큰 배])
+	outline_distance_scale: [f32; 3],
 }
 
 //==============================================================================
@@ -936,6 +1066,9 @@ fn float_slice_to_bytes(values: &[f32]) -> &[u8] {
 	}
 }
 
+//==============================================================================
+// u32 배열을 바이트로 본다. (번호 버퍼 업로드용)
+//==============================================================================
 fn index_slice_to_bytes(values: &[u32]) -> &[u8] {
 	unsafe {
 		std::slice::from_raw_parts(values.as_ptr() as *const u8, std::mem::size_of_val(values))
@@ -1012,6 +1145,49 @@ pub fn read_frame_camera(matrix: &Matrix4) -> ToonFrameCamera {
 	let position_y = read_determinant([row0[0], constant[0], row0[2]], [row1[0], constant[1], row1[2]], [row3[0], constant[2], row3[2]]) / determinant;
 	let position_z = read_determinant([row0[0], row0[1], constant[0]], [row1[0], row1[1], constant[1]], [row3[0], row3[1], constant[2]]) / determinant;
 	ToonFrameCamera { position: [position_x, position_y, position_z, 1.0], forward, is_mirrored }
+}
+
+//==============================================================================
+// 보기와 투영 행렬에서 보기 돌림 3x3 읽기. (열 차례, 행이 오른쪽, 위, 뒤, 매트캡의 보기 공간 노멀을 셀 때)
+// - 오른쪽은 행 0 의 xyz 에서 보는 방향 몫을 뺀 것이다. (대칭 원근과 직교, 화면 사각형으로 옮긴 투영 모두)
+//==============================================================================
+pub fn read_view_rotation(view_projection_matrix: &Matrix4, forward: [f32; 3]) -> [f32; 9] {
+	let elements = &view_projection_matrix.elements;
+	let row_x = [elements[0], elements[4], elements[8]];
+	let along = row_x[0] * forward[0] + row_x[1] * forward[1] + row_x[2] * forward[2];
+	let mut right = [row_x[0] - forward[0] * along, row_x[1] - forward[1] * along, row_x[2] - forward[2] * along];
+	let right_length = (right[0] * right[0] + right[1] * right[1] + right[2] * right[2]).sqrt();
+	right = if right_length > 0.000001 { [right[0] / right_length, right[1] / right_length, right[2] / right_length] } else { [1.0, 0.0, 0.0] };
+	let up = [right[1] * forward[2] - right[2] * forward[1], right[2] * forward[0] - right[0] * forward[2], right[0] * forward[1] - right[1] * forward[0]];
+	[right[0], up[0], -forward[0], right[1], up[1], -forward[1], right[2], up[2], -forward[2]]
+}
+
+//==============================================================================
+// 껍데기 꼭짓점 배열 짓기. (점마다 바탕 자리 3 과 미는 쪽 3, 미는 쪽은 사본 자리 - 바탕 자리)
+// - 바탕 자리가 없거나 길이가 다르면(GLB 에 지어 둔 껍데기) 사본 자리를 바탕으로 두고 미는 쪽은 0 이다. (굵기 배를 걸지 않는다)
+//==============================================================================
+pub fn read_outline_vertex_data(outline_vertex_data: &[f32], outline_base_data: &[f32]) -> Vec<f32> {
+	let point_count = outline_vertex_data.len() / 3;
+	let has_base = outline_base_data.len() == outline_vertex_data.len();
+	let mut data = vec![0.0f32; point_count * 6];
+	for point_index in 0..point_count {
+		for axis in 0..3 {
+			let outline_value = outline_vertex_data[point_index * 3 + axis];
+			let base_value = if has_base { outline_base_data[point_index * 3 + axis] } else { outline_value };
+			data[point_index * 6 + axis] = base_value;
+			data[point_index * 6 + 3 + axis] = outline_value - base_value;
+		}
+	}
+	data
+}
+
+//==============================================================================
+// 스포트라이트 원뿔의 각 감쇠 배와 덧셈. (glTF KHR_lights_punctual, 각 감쇠는 clamp(cos 각 x 배 + 덧셈, 0, 1) 의 제곱)
+//==============================================================================
+fn read_spot_cone(inner_cone_angle: f32, outer_cone_angle: f32) -> (f32, f32) {
+	let outer_cosine = outer_cone_angle.cos();
+	let cone_scale = 1.0 / (inner_cone_angle.min(outer_cone_angle).cos() - outer_cosine).max(0.001);
+	(cone_scale, -outer_cosine * cone_scale)
 }
 
 //==============================================================================
@@ -1155,6 +1331,8 @@ impl ToonRenderer {
 			frame_statistics: ToonFrameStatistics::default(),
 			screen_rect: None,
 			is_scissor_applied: false,
+			view_rotation: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+			outline_distance_scale: [0.0, 0.5, 4.0],
 		})
 	}
 
@@ -1191,7 +1369,7 @@ impl ToonRenderer {
 		unsafe {
 			let previous_program = crate::graphics3d::read_program_binding(gl);
 			solid_program.use_program(gl);
-			for (name, unit) in [("shadowTexture", SHADOW_TEXTURE_UNIT), ("baseColorTexture", BASE_COLOR_TEXTURE_UNIT), ("emissiveTexture", EMISSIVE_TEXTURE_UNIT), ("decalTexture", DECAL_TEXTURE_UNIT)] {
+			for (name, unit) in [("shadowTexture", SHADOW_TEXTURE_UNIT), ("baseColorTexture", BASE_COLOR_TEXTURE_UNIT), ("emissiveTexture", EMISSIVE_TEXTURE_UNIT), ("decalTexture", DECAL_TEXTURE_UNIT), ("rampTexture", RAMP_TEXTURE_UNIT), ("matcapTexture", MATCAP_TEXTURE_UNIT)] {
 				gl.uniform_1_i32(solid_program.get_uniform_location(gl, name).as_ref(), unit as i32);
 			}
 			gl.use_program(previous_program);
@@ -1465,9 +1643,9 @@ impl ToonRenderer {
 			ToonRenderer::attach_body_attributes(gl, &mesh);
 			ToonRenderer::attach_instance_attributes(gl, instance_buffer);
 
-			// 바깥선 껍데기. (자리만)
+			// 바깥선 껍데기. (바탕 자리 3 과 미는 쪽 3, 미는 쪽은 지은 굵기의 사본 자리 - 바탕 자리, 바탕이 없으면 0)
 			if !arrays.outline_index_data.is_empty() {
-				let outline_buffer = ToonRenderer::create_array_buffer(gl, &arrays.outline_vertex_data, glow::STATIC_DRAW)?;
+				let outline_buffer = ToonRenderer::create_array_buffer(gl, &read_outline_vertex_data(&arrays.outline_vertex_data, &arrays.outline_base_data), glow::STATIC_DRAW)?;
 				buffer_list.push(outline_buffer);
 				if is_skinned && !arrays.outline_skin_data.is_empty() {
 					let outline_skin_buffer = ToonRenderer::create_array_buffer(gl, &arrays.outline_skin_data, glow::STATIC_DRAW)?;
@@ -1513,12 +1691,14 @@ impl ToonRenderer {
 	}
 
 	//==============================================================================
-	// 바깥선 껍데기의 자리, 뼈대 어트리뷰트와 번호 버퍼를 지금 묶인 버텍스 어레이에 붙이기.
+	// 바깥선 껍데기의 바탕 자리와 미는 쪽(노멀 자리), 뼈대 어트리뷰트와 번호 버퍼를 지금 묶인 버텍스 어레이에 붙이기.
 	//==============================================================================
 	unsafe fn attach_outline_attributes(gl: &glow::Context, mesh: &ToonMesh) {
 		gl.bind_buffer(glow::ARRAY_BUFFER, mesh.outline_buffer);
 		gl.enable_vertex_attrib_array(0);
-		gl.vertex_attrib_pointer_f32(0, 3, glow::FLOAT, false, 12, 0);
+		gl.vertex_attrib_pointer_f32(0, 3, glow::FLOAT, false, 24, 0);
+		gl.enable_vertex_attrib_array(1);
+		gl.vertex_attrib_pointer_f32(1, 3, glow::FLOAT, false, 24, 12);
 		if let Some(outline_skin_buffer) = mesh.outline_skin_buffer {
 			ToonRenderer::attach_skin_attributes(gl, outline_skin_buffer);
 		}
@@ -1704,6 +1884,7 @@ impl ToonRenderer {
 		self.camera_position = frame_camera.position;
 		self.camera_forward = frame_camera.forward;
 		self.is_frame_mirrored = frame_camera.is_mirrored;
+		self.view_rotation = read_view_rotation(view_projection_matrix, frame_camera.forward);
 		self.frame_statistics = ToonFrameStatistics::default();
 		self.is_shadow_pass = false;
 		self.frame_serial += 1;
@@ -1919,7 +2100,7 @@ impl ToonRenderer {
 	}
 
 	//==============================================================================
-	// 프로그램의 프레임 값 올리기. (보기와 투영, 카메라, HDR, 그림자, 바깥선 색, 이번 프레임에 이미 올렸으면 건너뛴다)
+	// 프로그램의 프레임 값 올리기. (보기와 투영, 카메라, 보기 돌림, HDR, 그림자, 껍데기 거리 배, 이번 프레임에 이미 올렸으면 건너뛴다)
 	//==============================================================================
 	fn upload_frame_uniforms(&self, gl: &glow::Context, entry: &ToonProgramEntry) {
 		if entry.frame_serial.get() == self.frame_serial {
@@ -1932,8 +2113,10 @@ impl ToonRenderer {
 			gl.uniform_matrix_4_f32_slice(program.get_uniform_location(gl, "viewProjectionMatrix").as_ref(), false, &self.view_projection_matrix.elements);
 			match entry.kind {
 				ToonProgramKind::Outline => {
-					let outline_color = self.outline_color;
-					gl.uniform_4_f32(program.get_uniform_location(gl, "outlineColor").as_ref(), outline_color[0], outline_color[1], outline_color[2], outline_color[3]);
+					let camera_position = self.camera_position;
+					let outline_distance_scale = self.outline_distance_scale;
+					gl.uniform_4_f32(program.get_uniform_location(gl, "cameraPosition").as_ref(), camera_position[0], camera_position[1], camera_position[2], camera_position[3]);
+					gl.uniform_3_f32(program.get_uniform_location(gl, "outlineDistanceScale").as_ref(), outline_distance_scale[0], outline_distance_scale[1], outline_distance_scale[2]);
 					gl.uniform_1_f32(program.get_uniform_location(gl, "hdrOutput").as_ref(), hdr_output);
 				}
 				ToonProgramKind::Solid => {
@@ -1941,6 +2124,7 @@ impl ToonRenderer {
 					let camera_forward = self.camera_forward;
 					gl.uniform_4_f32(program.get_uniform_location(gl, "cameraPosition").as_ref(), camera_position[0], camera_position[1], camera_position[2], camera_position[3]);
 					gl.uniform_3_f32(program.get_uniform_location(gl, "cameraForward").as_ref(), camera_forward[0], camera_forward[1], camera_forward[2]);
+					gl.uniform_matrix_3_f32_slice(program.get_uniform_location(gl, "viewRotation").as_ref(), false, &self.view_rotation);
 					gl.uniform_1_f32(program.get_uniform_location(gl, "hdrOutput").as_ref(), hdr_output);
 					match self.shadow_input {
 						Some(shadow_input) => {
@@ -1974,25 +2158,33 @@ impl ToonRenderer {
 		let sky_color = light_set.get_sky_color();
 		let ground_color = light_set.get_ground_color();
 		let (fill_direction, fill_color) = light_set.get_fill_light();
-		let (rim_color, rim_power) = light_set.get_rim_light();
-		let (specular_strength, specular_exponent) = light_set.get_specular();
-		let band_ramp = light_set.get_band_ramp();
-		let mut threshold_values = [0.0f32; TOON_MAXIMUM_BAND_STEPS - 1];
-		let mut band_values = [0.0f32; TOON_MAXIMUM_BAND_STEPS];
-		for (index, threshold) in band_ramp.thresholds.iter().take(threshold_values.len()).enumerate() {
-			threshold_values[index] = *threshold;
-		}
-		for (index, value) in band_ramp.values.iter().take(band_values.len()).enumerate() {
-			band_values[index] = *value;
+		let rim_light = light_set.get_rim_light();
+		let specular = light_set.get_specular();
+		let shade_ramp = light_set.get_shade_ramp();
+		let mut shade_position_values = [0.0f32; TOON_MAXIMUM_BAND_STEPS];
+		let mut shade_feather_values = [0.0f32; TOON_MAXIMUM_BAND_STEPS];
+		let mut shade_color_values = [0.0f32; TOON_MAXIMUM_BAND_STEPS * 3];
+		let shade_stop_count = shade_ramp.positions.len().min(TOON_MAXIMUM_BAND_STEPS);
+		for stop_index in 0..shade_stop_count {
+			shade_position_values[stop_index] = shade_ramp.positions[stop_index];
+			shade_feather_values[stop_index] = shade_ramp.feathers[stop_index];
+			shade_color_values[stop_index * 3..stop_index * 3 + 3].copy_from_slice(&shade_ramp.colors[stop_index]);
 		}
 		let point_light_count = light_set.get_point_light_count();
 		let mut position_values = [0.0f32; TOON_MAXIMUM_POINT_LIGHTS * 4];
 		let mut color_values = [0.0f32; TOON_MAXIMUM_POINT_LIGHTS * 3];
 		let mut shape_values = [0.0f32; TOON_MAXIMUM_POINT_LIGHTS * 3];
+		let mut spot_values = [0.0f32; TOON_MAXIMUM_POINT_LIGHTS * 4];
+		let mut cone_values = [0.0f32; TOON_MAXIMUM_POINT_LIGHTS * 2];
 		for (light_index, point_light) in light_set.get_point_lights().iter().take(point_light_count).enumerate() {
 			position_values[light_index * 4..light_index * 4 + 4].copy_from_slice(&[point_light.position[0], point_light.position[1], point_light.position[2], point_light.range]);
 			color_values[light_index * 3..light_index * 3 + 3].copy_from_slice(&[point_light.color[0] * point_light.intensity, point_light.color[1] * point_light.intensity, point_light.color[2] * point_light.intensity]);
 			shape_values[light_index * 3..light_index * 3 + 3].copy_from_slice(&[point_light.decay, point_light.range_exponent, point_light.wrap]);
+			if let Some(direction) = point_light.direction {
+				let (cone_scale, cone_offset) = read_spot_cone(point_light.inner_cone_angle, point_light.outer_cone_angle);
+				spot_values[light_index * 4..light_index * 4 + 4].copy_from_slice(&[direction[0], direction[1], direction[2], 1.0]);
+				cone_values[light_index * 2..light_index * 2 + 2].copy_from_slice(&[cone_scale, cone_offset]);
+			}
 		}
 		unsafe {
 			gl.uniform_3_f32(program.get_uniform_location(gl, "sunDirection").as_ref(), sun_direction[0], sun_direction[1], sun_direction[2]);
@@ -2001,18 +2193,23 @@ impl ToonRenderer {
 			gl.uniform_3_f32(program.get_uniform_location(gl, "groundColor").as_ref(), ground_color[0], ground_color[1], ground_color[2]);
 			gl.uniform_3_f32(program.get_uniform_location(gl, "fillDirection").as_ref(), fill_direction[0], fill_direction[1], fill_direction[2]);
 			gl.uniform_3_f32(program.get_uniform_location(gl, "fillColor").as_ref(), fill_color[0], fill_color[1], fill_color[2]);
-			gl.uniform_4_f32(program.get_uniform_location(gl, "rimLight").as_ref(), rim_color[0], rim_color[1], rim_color[2], rim_power);
-			gl.uniform_2_f32(program.get_uniform_location(gl, "specularLight").as_ref(), specular_strength, specular_exponent);
+			gl.uniform_4_f32(program.get_uniform_location(gl, "rimLight").as_ref(), rim_light.color[0], rim_light.color[1], rim_light.color[2], rim_light.power);
+			gl.uniform_2_f32(program.get_uniform_location(gl, "rimShape").as_ref(), rim_light.feather, rim_light.light_mask);
+			gl.uniform_3_f32(program.get_uniform_location(gl, "specularLight").as_ref(), specular.strength, specular.exponent, specular.feather);
+			gl.uniform_3_f32(program.get_uniform_location(gl, "specularColor").as_ref(), specular.color[0], specular.color[1], specular.color[2]);
 			gl.uniform_1_f32(program.get_uniform_location(gl, "energyNormalized").as_ref(), if light_set.get_light_model().is_energy_normalized { 1.0 } else { 0.0 });
-			gl.uniform_1_f32(program.get_uniform_location(gl, "bandCount").as_ref(), light_set.get_band_count() as f32);
-			gl.uniform_1_i32(program.get_uniform_location(gl, "bandRampCount").as_ref(), band_ramp.values.len() as i32);
-			gl.uniform_1_f32(program.get_uniform_location(gl, "bandRampHalfLambert").as_ref(), if band_ramp.is_half_lambert { 1.0 } else { 0.0 });
-			gl.uniform_1_f32_slice(program.get_uniform_location(gl, "bandRampThresholds").as_ref(), &threshold_values);
-			gl.uniform_1_f32_slice(program.get_uniform_location(gl, "bandRampValues").as_ref(), &band_values);
+			gl.uniform_1_i32(program.get_uniform_location(gl, "shadeStopCount").as_ref(), shade_stop_count as i32);
+			gl.uniform_1_f32_slice(program.get_uniform_location(gl, "shadeStopPositions").as_ref(), &shade_position_values);
+			gl.uniform_1_f32_slice(program.get_uniform_location(gl, "shadeStopFeathers").as_ref(), &shade_feather_values);
+			gl.uniform_3_f32_slice(program.get_uniform_location(gl, "shadeStopColors").as_ref(), &shade_color_values);
+			gl.uniform_1_f32(program.get_uniform_location(gl, "shadeHalfLambert").as_ref(), if shade_ramp.is_half_lambert { 1.0 } else { 0.0 });
+			gl.uniform_1_f32(program.get_uniform_location(gl, "rampTextureEnabled").as_ref(), if light_set.get_ramp_texture().is_some() { 1.0 } else { 0.0 });
 			gl.uniform_1_i32(program.get_uniform_location(gl, "pointLightCount").as_ref(), point_light_count as i32);
 			gl.uniform_4_f32_slice(program.get_uniform_location(gl, "pointLightPositions").as_ref(), &position_values);
 			gl.uniform_3_f32_slice(program.get_uniform_location(gl, "pointLightColors").as_ref(), &color_values);
 			gl.uniform_3_f32_slice(program.get_uniform_location(gl, "pointLightShapes").as_ref(), &shape_values);
+			gl.uniform_4_f32_slice(program.get_uniform_location(gl, "pointLightSpots").as_ref(), &spot_values);
+			gl.uniform_2_f32_slice(program.get_uniform_location(gl, "pointLightCones").as_ref(), &cone_values);
 		}
 	}
 
@@ -2154,7 +2351,10 @@ impl ToonRenderer {
 			outline_program.use_program(gl);
 			self.upload_frame_uniforms(gl, outline_entry);
 			ToonRenderer::upload_draw_uniforms(gl, outline_program, model_matrix, is_skinned, instanced_mode, options.joint_matrices);
+			let outline_color = options.outline_color.unwrap_or(self.outline_color);
 			unsafe {
+				gl.uniform_4_f32(outline_program.get_uniform_location(gl, "outlineColor").as_ref(), outline_color[0], outline_color[1], outline_color[2], outline_color[3]);
+				gl.uniform_1_f32(outline_program.get_uniform_location(gl, "outlineWidthScale").as_ref(), options.outline_width_scale.max(0.0));
 				gl.uniform_1_f32(outline_program.get_uniform_location(gl, "alpha").as_ref(), options.alpha);
 				gl.uniform_1_f32(outline_program.get_uniform_location(gl, "premultipliedOutput").as_ref(), premultiplied_output);
 			}
@@ -2184,7 +2384,9 @@ impl ToonRenderer {
 		let solid_program = &solid_entry.program;
 		solid_program.use_program(gl);
 		self.upload_frame_uniforms(gl, solid_entry);
-		ToonRenderer::upload_light_uniforms(gl, solid_entry, options.light_set.unwrap_or(&self.light_set));
+		let light_set = options.light_set.unwrap_or(&self.light_set);
+		ToonRenderer::upload_light_uniforms(gl, solid_entry, light_set);
+		let ramp_texture = light_set.get_ramp_texture();
 		ToonRenderer::upload_draw_uniforms(gl, solid_program, model_matrix, is_skinned, instanced_mode, options.joint_matrices);
 		let tint_color = options.tint_color;
 		let emissive_color = options.emissive_color;
@@ -2206,12 +2408,18 @@ impl ToonRenderer {
 			gl.uniform_4_f32(solid_program.get_uniform_location(gl, "uvTransform").as_ref(), uv_transform[0], uv_transform[1], uv_transform[2], uv_transform[3]);
 			gl.uniform_4_f32(solid_program.get_uniform_location(gl, "decalUvTransform").as_ref(), decal_uv_transform[0], decal_uv_transform[1], decal_uv_transform[2], decal_uv_transform[3]);
 			gl.uniform_4_f32(solid_program.get_uniform_location(gl, "decalColor").as_ref(), decal_color[0], decal_color[1], decal_color[2], options.decal_emission);
+			gl.uniform_1_f32(solid_program.get_uniform_location(gl, "receivesShadow").as_ref(), if options.receives_shadow { 1.0 } else { 0.0 });
+			gl.uniform_1_f32(solid_program.get_uniform_location(gl, "shadeOffset").as_ref(), options.shade_offset);
+			gl.uniform_2_f32(solid_program.get_uniform_location(gl, "highlightScale").as_ref(), options.specular_scale.max(0.0), options.rim_scale.max(0.0));
+			gl.uniform_3_f32(solid_program.get_uniform_location(gl, "matcapSettings").as_ref(), enabled(options.matcap_texture), options.matcap_strength, if options.matcap_blend == ToonMatcapBlend::Add { 1.0 } else { 0.0 });
 			gl.active_texture(glow::TEXTURE0 + SHADOW_TEXTURE_UNIT);
 			gl.bind_texture(glow::TEXTURE_2D, Some(self.shadow_input.map(|shadow_input| shadow_input.depth_texture).unwrap_or(self.empty_shadow_texture)));
 		}
 		self.bind_texture_unit(gl, BASE_COLOR_TEXTURE_UNIT, options.base_color_texture);
 		self.bind_texture_unit(gl, EMISSIVE_TEXTURE_UNIT, options.emissive_texture);
 		self.bind_texture_unit(gl, DECAL_TEXTURE_UNIT, options.decal_texture);
+		self.bind_texture_unit(gl, RAMP_TEXTURE_UNIT, ramp_texture);
+		self.bind_texture_unit(gl, MATCAP_TEXTURE_UNIT, options.matcap_texture);
 		for (texture_index, (uniform_name, texture)) in options.textures.iter().take(TOON_MAXIMUM_MATERIAL_TEXTURES).enumerate() {
 			let unit = FIRST_MATERIAL_TEXTURE_UNIT + texture_index as u32;
 			self.bind_texture_unit(gl, unit, Some(*texture));
@@ -2268,52 +2476,73 @@ impl ToonRenderer {
 	}
 
 	//==============================================================================
-	// 림 빛 설정. (선형 색과 거듭제곱)
+	// 림 빛 설정. (ToonLightSet::set_rim_light, 선형 색, 거듭제곱, 부드러움 0 ~ 1, 해를 받는 쪽에만 둘 몫 0 ~ 1)
 	//==============================================================================
-	pub fn set_rim_light(&mut self, rim_color: [f32; 3], rim_power: f32) {
-		self.light_set.set_rim_light(rim_color, rim_power);
+	pub fn set_rim_light(&mut self, rim_color: [f32; 3], rim_power: f32, rim_feather: f32, rim_light_mask: f32) {
+		self.light_set.set_rim_light(rim_color, rim_power, rim_feather, rim_light_mask);
 	}
 
 	//==============================================================================
-	// 정반사 설정. (세기와 지수, 원본 지수 기본 48)
+	// 하이라이트 설정. (ToonLightSet::set_specular, 세기, 지수, 부드러움 0 ~ 1, 선형 색)
 	//==============================================================================
-	pub fn set_specular(&mut self, specular_strength: f32, specular_exponent: f32) {
-		self.light_set.set_specular(specular_strength, specular_exponent);
+	pub fn set_specular(&mut self, specular_strength: f32, specular_exponent: f32, specular_feather: f32, specular_color: [f32; 3]) {
+		self.light_set.set_specular(specular_strength, specular_exponent, specular_feather, specular_color);
 	}
 
 	//==============================================================================
-	// 점광 설정. (ToonLightSet::set_point_lights)
+	// 점광과 스포트라이트 설정. (ToonLightSet::set_point_lights)
 	//==============================================================================
 	pub fn set_point_lights(&mut self, point_light_list: &[ToonPointLight]) {
 		self.light_set.set_point_lights(point_light_list);
 	}
 
 	//==============================================================================
-	// 점광 수의 한도 설정.
+	// 점광 수의 한도 설정. (ToonLightSet::set_point_light_limit)
 	//==============================================================================
 	pub fn set_point_light_limit(&mut self, point_light_limit: usize) {
 		self.light_set.set_point_light_limit(point_light_limit);
 	}
 
 	//==============================================================================
-	// 셀 셰이딩 칸 수 설정. (0 이면 부드럽게)
+	// 그늘 셋 설정. (ToonLightSet::set_shade, 유니티 툰 셰이더의 바탕, 1 차 그늘, 2 차 그늘)
+	//==============================================================================
+	pub fn set_shade(&mut self, shade: ToonShade) {
+		self.light_set.set_shade(shade);
+	}
+
+	//==============================================================================
+	// 그늘 램프 설정. (ToonLightSet::set_shade_ramp)
+	//==============================================================================
+	pub fn set_shade_ramp(&mut self, positions: &[f32], colors: &[[f32; 3]], feathers: &[f32], is_half_lambert: bool) {
+		self.light_set.set_shade_ramp(positions, colors, feathers, is_half_lambert);
+	}
+
+	//==============================================================================
+	// 그늘 램프 끄기. (부드러운 램버트)
+	//==============================================================================
+	pub fn clear_shade_ramp(&mut self) {
+		self.light_set.clear_shade_ramp();
+	}
+
+	//==============================================================================
+	// 고른 칸 설정. (ToonLightSet::set_band_count, 0 이면 부드럽게)
 	//==============================================================================
 	pub fn set_band_count(&mut self, band_count: u32) {
 		self.light_set.set_band_count(band_count);
 	}
 
 	//==============================================================================
-	// 띠 램프 설정. (ToonLightSet::set_band_ramp)
+	// 회색 칸 램프 설정. (ToonLightSet::set_band_ramp)
 	//==============================================================================
 	pub fn set_band_ramp(&mut self, thresholds: &[f32], values: &[f32], is_half_lambert: bool) {
 		self.light_set.set_band_ramp(thresholds, values, is_half_lambert);
 	}
 
 	//==============================================================================
-	// 띠 램프 끄기.
+	// 램프 텍스처 설정. (ToonLightSet::set_ramp_texture, None 이면 칸으로)
 	//==============================================================================
-	pub fn clear_band_ramp(&mut self) {
-		self.light_set.clear_band_ramp();
+	pub fn set_ramp_texture(&mut self, ramp_texture: Option<GlTexture>, is_half_lambert: bool) {
+		self.light_set.set_ramp_texture(ramp_texture, is_half_lambert);
 	}
 
 	//==============================================================================
@@ -2329,6 +2558,23 @@ impl ToonRenderer {
 	pub fn set_outline_color(&mut self, outline_color: [f32; 4]) {
 		self.outline_color = outline_color;
 		self.frame_serial += 1;
+	}
+
+	//==============================================================================
+	// 껍데기 바깥선의 거리 배 설정. (기준 거리에서 지은 굵기, 멀면 그만큼 굵게 밀어 화면 굵기를 맞춘다, 배는 가장 작은 것과 큰 것 사이, 기준 거리 0 이면 끔)
+	// - 원근 카메라에서만 건다. 꼭짓점마다 카메라까지의 거리 / 기준 거리 를 굵기에 곱한다. (길티기어 Xrd 처럼 거리와 상관없이 비슷한 화면 굵기)
+	//==============================================================================
+	pub fn set_outline_distance_scale(&mut self, reference_distance: f32, minimum_scale: f32, maximum_scale: f32) {
+		let minimum_scale = minimum_scale.max(0.0);
+		self.outline_distance_scale = [reference_distance.max(0.0), minimum_scale, maximum_scale.max(minimum_scale)];
+		self.frame_serial += 1;
+	}
+
+	//==============================================================================
+	// 껍데기 바깥선의 거리 배 반환. ([기준 거리, 가장 작은 배, 가장 큰 배])
+	//==============================================================================
+	pub fn get_outline_distance_scale(&self) -> [f32; 3] {
+		self.outline_distance_scale
 	}
 
 	//==============================================================================

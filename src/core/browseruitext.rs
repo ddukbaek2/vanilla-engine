@@ -80,6 +80,10 @@ pub enum BrowserUiText {
 	PeriodKey,
 	/// 단축키 글의 윈도우 키 이름.
 	WindowsKey,
+	/// 터치 빠른 메뉴의 잘라내기, 복사, 붙여넣기. (ui_strings 의 IDS_APP_CUT, IDS_APP_COPY, IDS_APP_PASTE)
+	TouchCut,
+	TouchCopy,
+	TouchPaste,
 }
 
 impl BrowserUiText {
@@ -156,6 +160,15 @@ impl BrowserUiText {
 			}
 			BrowserUiText::WindowsKey => {
 				"windows_key"
+			}
+			BrowserUiText::TouchCut => {
+				"touch_cut"
+			}
+			BrowserUiText::TouchCopy => {
+				"touch_copy"
+			}
+			BrowserUiText::TouchPaste => {
+				"touch_paste"
 			}
 		}
 	}
@@ -353,7 +366,7 @@ mod tests {
 		assert_eq!(select_locale(&locale_map, &[String::from("ja-JP")]), "ja");
 		assert_eq!(locale_map.len(), 82);
 		let english_map = locale_map.get("en-US").and_then(|text_map| text_map.as_object()).expect("en-US");
-		for text in [BrowserUiText::Undo, BrowserUiText::Redo, BrowserUiText::Cut, BrowserUiText::Copy, BrowserUiText::Paste, BrowserUiText::PasteMac, BrowserUiText::PastePlainText, BrowserUiText::PasteMatchStyle, BrowserUiText::SelectAll, BrowserUiText::SelectAllMac, BrowserUiText::Emoji, BrowserUiText::EmojiMac, BrowserUiText::WritingDirection, BrowserUiText::WritingDirectionDefault, BrowserUiText::WritingDirectionLeftToRight, BrowserUiText::WritingDirectionRightToLeft, BrowserUiText::Inspect, BrowserUiText::PageSays, BrowserUiText::Ok, BrowserUiText::Cancel, BrowserUiText::PeriodKey, BrowserUiText::WindowsKey] {
+		for text in [BrowserUiText::Undo, BrowserUiText::Redo, BrowserUiText::Cut, BrowserUiText::Copy, BrowserUiText::Paste, BrowserUiText::PasteMac, BrowserUiText::PastePlainText, BrowserUiText::PasteMatchStyle, BrowserUiText::SelectAll, BrowserUiText::SelectAllMac, BrowserUiText::Emoji, BrowserUiText::EmojiMac, BrowserUiText::WritingDirection, BrowserUiText::WritingDirectionDefault, BrowserUiText::WritingDirectionLeftToRight, BrowserUiText::WritingDirectionRightToLeft, BrowserUiText::Inspect, BrowserUiText::PageSays, BrowserUiText::Ok, BrowserUiText::Cancel, BrowserUiText::PeriodKey, BrowserUiText::WindowsKey, BrowserUiText::TouchCut, BrowserUiText::TouchCopy, BrowserUiText::TouchPaste] {
 			assert!(english_map.contains_key(text.get_key()), "{:?}", text);
 		}
 		assert!(!read_browser_ui_text(BrowserUiText::Ok).is_empty());

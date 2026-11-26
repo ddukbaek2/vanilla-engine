@@ -159,8 +159,9 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
 - 기본 프레임버퍼에 그릴 때는 알파를 쓰지 않는다(`apply_color_mask`, 원본에 없음). 원본과 웹은 캔버스가 `alpha: false` 라 화면 알파가 늘 1 이고, 데스크탑 기본 프레임버퍼도 프레임 첫머리에 알파를 1 로 비운 뒤 그대로 두어 DST_ALPHA 를 쓰는 모드와 셰이더 섞기가 웹과 같게 나온다. 렌더 타겟에는 알파도 쓰고, GL 을 밖에 내줄 때는 모두 쓰는 마스크로 되돌린다.
 - 묶어 그리기와 거르기는 `set_batching_enabled`, `set_culling_enabled` 로 끈다.
 - 3D 렌더 타겟은 멀티샘플(RenderTargetOptions.sample_count, 기기가 받는 수로 줄임)과 깊이 비트(16, 24)를 받는다. 툰 3D 의 HDR 마무리(ToonPostProcess)는 멀티샘플, 실수 판(못 쓰는 기기는 RGBA8 LDR 길), 다단 블룸(MultiLevelBloomEffect), 색 보정을 건다.
+- 툰 셰이딩은 그늘 램프다. (원본과 같은 셰이더) 빛을 받는 몫 x(반 램버트 기본, shade_offset 을 더하고 해는 그림자를 곱함)를 칸마다 자리, 색, 부드러움(fwidth 로 막음)인 램프나 램프 텍스처에 대어, 해는 램프 색을 통째로, 채움 빛과 점광과 스포트라이트는 램프의 밝기 단계를 받는다. 하이라이트와 림은 0.5 를 가른 단단한 꼴에서 부드러운 꼴까지, 림은 더한다. 색 = 바탕색 x irradiance + specular x specularMask + rim x rimMask + 빛남, 그 뒤 매트캡. 노멀은 역행렬의 전치로 옮긴다.
 - 툰 바깥선은 두 가지이고 함께 써도 된다. (원본과 같은 셰이더)
-  - 껍데기(inverted hull): MeshBuilder 가 같은 자리의 노멀을 모아 평균한 쪽으로 민 사본을 짓고, ToonRenderer 가 그 뒷면만 그린다.
+  - 껍데기(inverted hull): MeshBuilder 가 같은 자리의 노멀을 모아 평균한 쪽으로 민 굵기를 짓고, ToonRenderer 가 바탕 자리에서 그리기마다의 굵기 배와 거리 배(set_outline_distance_scale)만큼 밀어 뒷면만 그린다. 색은 그리기마다(outline_color).
   - 화면 공간(ToonScreenOutline): 불투명한 모형을 같은 행렬로 한 번 더 그려 선의 판(노멀 팔면체 접기, 선 번호 14 비트, 꼴 2 비트, 깊이 24)을 짓고, 화소와 바로 이웃 넷 사이 경계마다 한 번 보아 선이면 경계 가운데를 씨앗(RGBA16UI, 반 화소 단위)으로 쓴다. 바깥 선은 빈 곳, 다른 번호, 서로의 접평면에서 깊이 문턱보다 떨어진 같은 번호. 꺾임 선은 같은 번호에서 두 노멀이 꺾임 각보다 벌어진 곳. 씨앗을 점프 플러딩(걸음 k, k/2, ..., 1)으로 퍼뜨리고, 그리는 영역 화소마다 선의 판 2x2 칸의 씨앗까지 거리로 clamp(굵기 / 2 - 거리 + 0.5, 0, 1) 만큼 섞는다. 선이 화소 사이에 서므로 띠와 평행한 둘째 선이 없고, 줄인 선의 판에서도 끊기지 않는다. 그리기 줄(ToonDrawQueue::set_screen_outline)에 맡기면 선의 판은 몸 앞에, 섞기는 바깥선 껍데기 뒤에 한다.
 
 ## 7. 애셋
@@ -174,7 +175,7 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
 - 소리 내기: 데스크탑은 cpal 로 기본 출력 장치를 열고 그 표본율(원본 AudioContext 의 하드웨어 표본율)로 엔진 믹서를 돌린다. 원본이 짓는 그래프(AudioBufferSourceNode → 플레이어 GainNode → [StereoPannerNode] → 버스 GainNode 또는 출력, 비프 OscillatorNode → GainNode → 출력)를 128 프레임 퀀텀으로 그리고, 소스(시작 위치, 선형 보간과 끝의 외삽, 루프, playbackRate 는 f32), StereoPanner(모노와 스테레오 식), GainNode, 모노를 양쪽에 올리는 섞기, 출력의 -1 ~ 1 자르기를 크로미엄 audio_buffer_source_handler.cc, stereo_panner.cc 와 같게 셈한다. GainNode 의 gain 은 AudioParam 이고 자동화를 크로미엄과 같은 셈으로 표본마다 흘린다. `tests/assets/mixer` 의 그래프 아홉(자동화, 예약 정지, 그리는 도중 지금 값에서 줄여 끄기와 겹쳐 바꾸기 포함)이 크롬 158 OfflineAudioContext 와 1e-6 안에서 같다. BeepPlayer 는 원본 playTone 의 그래프를 그대로 짓고, OscillatorNode 는 크로미엄 oscillator_handler.cc 와 CPU 별 커널(arm64 NEON, x86 SSE2)을 옮겨 대역 제한 표, frequency 자동화, 읽기 자리와 보간을 같은 차례로 셈한다. 비프 아홉 경우가 크롬과 표본마다 1.2e-7 안에서 같다. (x86 판은 x86 크롬과 견주지 못했다)
 - "data:" 주소: 데스크탑 애셋 읽기(request_asset_bytes, load_image, load_audio_asset)와 타임라인이 base/dataurl.rs 로 푼다. 웹은 기준 주소를 붙이지 않고 브라우저 fetch 에 맡긴다.
 - 글꼴: ttf, otf, woff, woff2 를 읽는다. 데스크탑은 woff, woff2 를 wuff 로 풀고, 운영체제 글꼴은 글꼴 모음(TTC)에서 이름이나 굵기로 얼굴을 고른다. 웹은 원본처럼 글꼴 바이트를 document.fonts 의 FontFace 로 올린다.
-- 이미지는 GPU 에 올린 뒤 CPU 픽셀을 놓는다. 픽셀을 다시 읽을 그림은 `Image.set_pixels_retained(true)` 로 남긴다. (ShadowImage 는 받은 그림을 스스로 남기고, 이미 놓였으면 텍스처를 프레임버퍼에 붙여 되읽는다) GL 컨텍스트를 잃었다 되살리는 길은 아직 없다.
+- 이미지는 GPU 에 올린 뒤 CPU 픽셀을 놓는다. 픽셀을 다시 읽을 그림은 `Image.set_pixels_retained(true)` 로 남긴다. (ShadowImage 는 받은 그림을 스스로 남기고, 이미 놓였으면 텍스처를 프레임버퍼에 붙여 되읽는다. Canvas2D 의 drawImage 와 createPattern 도 놓인 그림은 텍스처에서 되읽는다) GL 컨텍스트를 잃었다 되살리는 길은 아직 없다.
 - 기본 글꼴은 엔진에 넣지 않는다. 둘 다 시스템 글꼴이 기본이다.
   - 데스크탑: `default_font_paths` 가 비었으면(기본) 원본 SYSTEM_FONT_STRING 의 이름 차례로 운영체제 글꼴을 찾아 사슬로 잇는다. 맥은 크롬처럼 -apple-system 을 모르는 이름으로 넘겨 Apple SD Gothic Neo, 윈도우는 Segoe UI 와 맑은 고딕이다. 폰트 문자열의 올리지 않은 이름도 운영체제 글꼴에서 찾고, 일반 이름(serif, sans-serif, monospace 등)은 크롬의 기본 글꼴 표대로 고른다. 글꼴 목록에 없는 글자는 운영체제가 고른 대체 글꼴(맥 CoreText, 윈도우 DirectWrite, 리눅스 fontconfig)로 그린다. (platform/desktop/systemfont.rs)
   - 웹: 원본처럼 늘 브라우저 Canvas2D 로 굽고 잰다. (platform/web/systemfont.rs)
@@ -208,7 +209,7 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
   - 원본의 실행 중 반사(uidocument.js 의 collectReflectedProperties, saveByReflection, loadByReflection, devtools.js 의 getComponentProperties)는 절차 매크로 #[reflect](macros/ 크레이트, 엔진이 vanilla::reflect 로 다시 내보낸다)가 컴파일 때 지은 코드로 한다. 저장소는 엔진과 매크로 두 크레이트의 워크스페이스다. 엔진 컴포넌트는 모두 붙였고, 원본 상위 클래스는 품은 필드를 #[reflect(base = 필드)] 로 잇는다. &self 게터, 트리를 받는 게터, &mut self 게터, 값 하나를 받는 세터, 트리와 값을 받는 세터를 모두 반사로 부른다. (core/reflection.rs)
   - UIDocument 는 원본처럼 쓰기, 읽기 함수가 없는 종류를 반사로 쓰고 읽는다. 원본 노드 종류(WorldNode 하위 클래스, UIInputField, UIScrollBar 같은 것)는 러스트 판의 컴포넌트를 register_node_type 으로 등록해 원본 문서의 노드 type 과 생성자가 만든 컴포넌트, 자식 꼴 그대로 쓰고 읽는다. 원본 에디터(tools/uieditor)가 등록하는 종류(컴포넌트 35, 노드 종류 12)는 register_editor_types 한 줄이다. DevTools 인스펙터는 원본처럼 게터를 모두 불러 보인다. 컴포넌트마다의 문서, 노드 종류마다의 문서, 에디터 팔레트 15 종으로 지은 문서(tick 전후), 인스펙터 게터 목록, 반사 속성 목록과 반사 저장이 원본을 node 로 돌려 뽑은 기대값(src/ui/testdata/uidocument)과 같은지 시험한다. (ui/uidocument.rs, misc/devtools.rs)
   - web/Pane(화면 분할 패널)은 웹에서 원본처럼 DOM 요소로, 데스크탑에서 엔진 노드로 짓는다. 크기 셈과 끌기 셈은 두 플랫폼이 같은 함수다. 데스크탑은 컨테이너가 노드이고 노드를 고치는 함수가 NodeTree 를 받는다. (web/pane.rs)
-  - 브라우저가 해 주던 것은 엔진이 같은 API 로 한다. 원본과 게임의 캔버스와 2D 컨텍스트는 Canvas2D(웹은 브라우저 캔버스, 데스크탑은 tiny-skia), window.alert, confirm, prompt 는 Engine::alert, confirm, prompt(웹은 브라우저 창, 데스크탑은 엔진이 그린 크롬 탭 모달 같은 창, await 꼴도 있다), html lang 과 meta 는 Document, 직접 누르는 입력 필드의 크롬 편집 칸 메뉴와 DOM 입력 칸의 되돌리기는 데스크탑에서 엔진이 그린다. LocalStorage 와 PersistedStore 는 원본 JS 글의 짝 없는 서로게이트를 원래 단위 그대로 지킨다. (misc/storagetext.rs)
+  - 브라우저가 해 주던 것은 엔진이 같은 API 로 한다. 원본과 게임의 캔버스와 2D 컨텍스트는 Canvas2D(웹은 브라우저 캔버스, 데스크탑은 tiny-skia), window.alert, confirm, prompt 는 Engine::alert, confirm, prompt(웹은 브라우저 창, 데스크탑은 엔진이 그린 크롬 탭 모달 같은 창, await 꼴도 있다), html lang 과 meta 는 Document, 직접 누르는 입력 필드의 크롬 편집 칸 메뉴와 DOM 입력 칸의 되돌리기는 데스크탑에서 엔진이 그린다. LocalStorage 와 PersistedStore 는 원본 JS 글의 짝 없는 서로게이트를 원래 단위 그대로 지키고, 짝 없는 서로게이트로만 다른 두 키도 따로 든다. 원래 단위가 필요하면 LocalStorage 의 코드 단위 함수(get_item_code_units, get_keys_code_units, get_item_by_key_code_units, set_item_by_key_code_units 같은 것)로 원본 localStorage 처럼 JS 글 그대로 읽고 쓴다. (misc/storagetext.rs)
   - SoundSystem 의 음악과 효과음 버스는 AudioBus 다. (원본에도 같은 꼴로 넣었다) 데스크탑은 엔진 믹서의 버스 노드, 웹은 GainNode 이고, get_gain_node 는 두 플랫폼 모두 AudioGainNode(웹 GainNode, 데스크탑은 버스 노드를 나눠 드는 Rc<MixerGainNode>)를 돌려준다.
   - SoundSystem 의 크기 바꾸기와 줄이기는 원본처럼 GainNode 의 AudioParam 자동화(value 대입, setValueAtTime, linearRampToValueAtTime, setTargetAtTime, cancelScheduledValues)와 source.stop(when)이다. 웹은 WebAudio 에 그대로 걸고, 데스크탑 믹서는 크로미엄 audio_param_handler.cc 를 옮긴 platform/audio/audioparam.rs 로 표본마다 같은 셈을 한다. (AudioPlayer, AudioBus 의 pub(crate) apply_gain_automation, get_gain_value, stop_at_time)
   - Cooldown.use(원본 base/timer.js), FullscreenPass.use, ShaderProgram.use 는 use 가 러스트 예약어라 r#use 로 부른다. activate, use_program 은 같은 일을 하는 이름으로 남긴다.
@@ -219,10 +220,10 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
   - rustybuzz 는 글리프 위치를 글꼴 단위 정수로 들어 GPOS 가변 델타를 반올림한다. HarfBuzz 15 는 소수로 든다. 맥 SFNS 18, 20, 21, 24px 의 "Hello World Wifi" 너비가 크롬과 0.002 ~ 0.004px 다르다.
   - 윈도우와 리눅스의 글꼴 갈래(DirectWrite, 메뉴 글꼴, fontconfig, 부모 글꼴 치수)는 그 대상으로 컴파일해 보았고 실행해 크롬과 견주지는 못했다.
   - 데스크탑 AVIF 는 색 프로필 변환과 움직이는 AVIF 를 하지 않는다.
-  - 데스크탑 Canvas2D 는 arc, ellipse, arcTo, roundRect 를 3 차 베지어로 잇는다(크롬 Skia 는 원뿔 곡선, 반지름의 0.03% 안쪽), roundRect 모서리는 수 반지름만 받는다(DOMPointInit 타원 모서리는 받지 않는다), 그림자 흐림은 상자 흐림 세 번이다. 엔진 Image 를 그리려면 CPU 픽셀이 남아 있어야 한다. (GPU 에 올린 뒤 놓은 그림은 알리고 건너뛴다)
-  - 데스크탑 PaneStyle 은 프리셋과 그 둘레의 CSS 만 읽는다. (flex 비율, 세로 flex, 스크롤 overflow 같은 것은 읽지 않는다) textarea 프리셋은 글을 보이기만 한다. (엔진에 여러 줄 입력 필드가 없다)
+  - 데스크탑 Canvas2D 의 그림자 흐림은 상자 흐림 세 번이다. 경로의 arc, ellipse, arcTo, roundRect 는 크롬과 같은 스키아 원뿔 곡선 점과 무게이고(블링크 canvas_path.cc, 스키아 SkPathBuilder 의 셈), 칠할 때는 스키아 CPU 래스터처럼 기기 픽셀 0.25 안의 2 차 곡선으로 나눈다. 크롬이 GPU 로 칠하는 캔버스의 곡선 나누기와는 가장자리 픽셀이 다를 수 있다.
+  - 데스크탑 PaneStyle 은 프리셋과 원본 도구가 쓰는 CSS(블록과 flex 배치, flex 비율과 세로 flex, min, max, 쪽마다 여백과 테두리, overflow 자르기와 휠, 썸 끌기 스크롤)를 읽는다. flex-wrap 줄넘김과 말줄임(white-space, text-overflow)은 읽지 않고, 스크롤 막대는 자리를 차지하지 않는 얹는 썸이다. (여러 줄 입력 필드도 같다) textarea 는 엔진 여러 줄 입력 필드가 받는다.
   - 데스크탑 질문 창과 브라우저 문맥 메뉴의 치수와 색은 크롬 main 의 값(MessageBoxView 폭 400, 여백 20, 제목 16px, 기본 밝은 팔레트 같은 것)이고, 흐린 그림자는 겹친 둥근 사각형으로 갈음한다. 단추와 입력 칸 높이는 크롬 셈을 기본 글꼴로 갈음한 값이다.
-  - 직접 누르는 입력 필드의 크롬 편집 칸 메뉴는 데스크탑에서 오른쪽 단추로 연다. 손가락 길게 누르기로는 열지 않는다.
+  - 직접 누르는 입력 필드는 데스크탑에서 크롬 데스크탑 터치처럼 손가락으로 650ms 길게 누르면(15 DIP 안) 낱말을 고르고 손잡이와 빠른 메뉴(잘라내기, 복사, 붙여넣기, ...)를 띄운다. 고른 것도 붙여 넣을 것도 없으면 크롬 편집 칸 메뉴다. (윈도우는 뗄 때 정한다) 손잡이 그림의 자리(크롬 그림 창의 6 여백 다루기)와 빠른 메뉴의 흐린 그림자는 갈음한 값이다. 크롬 안드로이드의 떠 있는 빠른 메뉴(안드로이드 ActionMode)는 데스크탑 대상이 없어 넣지 않았다.
 
 ## 10. 두 엔진의 차이
 
@@ -238,7 +239,6 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
 | 웨이랜드에서 xdg_toplevel 의 suspended 상태는 받지 못한다. 가려짐(페이지 이벤트 Hidden)은 크롬의 다른 갈래인 프레임 콜백 3 초 규칙으로만 본다 | xdg_toplevel 은 winit(sctk)이 리스너를 달아 쥐고 있고 libwayland 는 프록시 하나에 리스너 하나만 단다. winit 0.30.13 은 configure 의 suspended 를 받아 두기만 하고 알리지 않는다 (0.31 베타 4 와 본줄기도 같다). suspended 를 보내면서 프레임 콜백도 계속 보내는 컴포지터에서만 크롬과 달라진다 |
 | DevTools 메모리 칸은 자바스크립트 힙 대신 시스템 할당자의 힙이고, jsHeapSizeLimit 는 (N/A) 다 | 데스크탑에는 V8 힙이 없다. 시스템 할당자에는 V8 처럼 정한 힙 상한이 없다 |
 | 데스크탑의 글자 래스터 픽셀과 도형 가장자리 안티에일리어싱이 크롬과 다르다 (글자 너비는 크롬 measureText 와 맞췄고, 도형 안쪽 색은 같다) | 크롬의 Skia, CoreGraphics 래스터라이저 대신 fontdue, skrifa(맥의 색 이모지와 일부 글꼴은 CoreText)와 GL 이 칠한다 |
-| LocalStorage 의 키 가운데 짝 없는 서로게이트로만 다른 둘은 러스트 쪽에서 한 키로 보인다 (값과 키의 원래 UTF-16 단위는 지키고, 러스트 쪽에는 대체 문자로 보인다) | 러스트 &str 키로는 대체 문자로 같아지는 서로 다른 JS 키를 가려 부를 길이 없다. 원래 단위로 읽고 쓰는 get_item_code_units, set_item_code_units 도 키는 &str 이다 |
 | 데스크탑 Opus 와 AAC 의 표본 끝자리가 크롬과 1.5e-7 안팎으로 다르다 (길이와 다듬기는 같다) | 크롬은 Opus 를 libopus(C), AAC 를 FFmpeg(LGPL)로 푼다. 데스크탑은 C 빌드 없이 맥에서 윈도우 대상 검사가 되도록 libopus 를 러스트로 옮긴 opus-pure 로, AAC 는 LGPL 코드를 옮기지 않고 symphonia 와 oxideav-aac 로 푼다 |
 | 데스크탑 3 채널 이상 AAC 의 PNS(잡음 대치) 띠는 잡음 표본이 크롬과 다르다 (띠의 에너지는 같다) | 명세는 PNS 난수 생성기를 정하지 않는다. 크롬(FFmpeg)과 같은 잡음 열을 내려면 FFmpeg 의 생성기와 정규화를 옮겨야 한다. (2 채널 이하는 symphonia 로 풀어 크롬과 같다) |
 

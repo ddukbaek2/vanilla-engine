@@ -5,9 +5,11 @@
 //   - uniform_chunk: 조각 셰이더의 맨 위 칸에 들어간다. 유니폼, 상수, 함수, 정점 조각이 내보낸 in 을 적는다.
 //   - surface_chunk: void applySurface(inout ToonSurface surface) 를 정의한다. 엔진이 꼭짓점 색, 텍스처, 데칼을 셈한 뒤, 틴트와 빛 전에 부른다.
 //     ToonSurface { vec3 baseColor (sRGB), float alpha, vec3 emission (선형), vec3 normal (월드, 단위), float glow (꼭짓점 빛남), bool isUnlit,
-//                   vec4 detail (꼭짓점 무늬 번호와 무늬 색), vec2 uv, vec3 localPosition (모형 좌표), vec3 worldPosition, vec3 viewDirection (면에서 카메라 쪽, 단위) }
-//   - light_chunk: void applyLight(ToonSurface surface, inout ToonLighting lighting) 를 정의한다. 엔진이 해, 바탕빛, 채움, 림, 점광, 정반사를 모은 뒤 합치기 전에 부른다.
-//     ToonLighting { vec3 irradiance (바탕색에 곱할 빛), vec3 specular (더할 빛), float shadow (0 ~ 1) }
+//                   vec4 detail (꼭짓점 무늬 번호와 무늬 색), vec2 uv, vec3 localPosition (모형 좌표), vec3 worldPosition, vec3 viewDirection (면에서 카메라 쪽, 단위),
+//                 float shadeOffset (빛을 받는 몫에 더할 값, 그늘 경계를 옮김), float specularMask (하이라이트 배), float rimMask (림 빛 배) }
+//   - light_chunk: void applyLight(ToonSurface surface, inout ToonLighting lighting) 를 정의한다. 엔진이 해, 바탕빛, 채움, 점광과 스포트라이트, 하이라이트, 림을 모은 뒤 합치기 전에 부른다.
+//     ToonLighting { vec3 irradiance (바탕색에 곱할 빛, 그늘 램프를 거친 것), vec3 specular (더할 하이라이트), vec3 rim (더할 림 빛), float shadow (0 ~ 1), float sunLevel (해를 받는 밝기 단계 0 ~ 1) }
+//   합치기는 바탕색 x irradiance + specular x specularMask + rim x rimMask + 빛남 이다.
 //   - vertex_chunk: 정점 셰이더(몸, 바깥선, 그림자 깊이 셋 모두)의 맨 위 칸에 들어가고 void applyVertex(inout ToonVertex vertex) 를 정의한다. 월드로 옮기기 전에 부른다.
 //     ToonVertex { vec3 localPosition, vec3 localNormal, vec3 color, vec2 material, vec4 detail, vec2 uv, vec4 tint, mat4 modelMatrix }
 //     인스턴스 꼴(ToonInstanceLayout)의 사용자 어트리뷰트는 그 이름의 in 으로 읽는다. 셋 모두에 들어가므로 몸에만 있는 out 은 쓰지 않는다. (꼭짓점 어트리뷰트 이름 대신 vertex 의 칸을 쓴다)
@@ -50,6 +52,16 @@ pub enum ToonBlendMode {
 }
 
 //==============================================================================
+// 매트캡을 섞는 방식. (Multiply 는 색에 곱함, Add 는 색에 더함, 유니티 툰 셰이더의 MatCap 섞기와 같다)
+//==============================================================================
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ToonMatcapBlend {
+	#[default]
+	Multiply,
+	Add,
+}
+
+//==============================================================================
 // 인스턴스 버퍼의 쓰임. (Static 은 한 번 올리고 오래 그림, Dynamic 은 자주 고침)
 //==============================================================================
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -71,6 +83,9 @@ pub struct ToonMaterialChunks {
 	pub vertex_chunk: String,
 }
 
+//==============================================================================
+// 툰 머티리얼. (머리말 참고, 셰이더 조각과 번호)
+//==============================================================================
 #[derive(Clone, Debug)]
 pub struct ToonMaterial {
 	id: u32,
@@ -139,6 +154,9 @@ pub struct ToonInstanceAttribute {
 	pub location: Option<u32>,
 }
 
+//==============================================================================
+// 인스턴스 꼴. (머리말 참고, 어트리뷰트 이름과 크기의 차례)
+//==============================================================================
 #[derive(Clone, Debug)]
 pub struct ToonInstanceLayout {
 	id: u32,

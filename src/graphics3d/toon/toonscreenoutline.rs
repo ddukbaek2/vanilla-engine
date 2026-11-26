@@ -62,6 +62,9 @@ pub struct ToonLineDrawOptions<'a> {
 }
 
 impl Default for ToonLineDrawOptions<'_> {
+	//==============================================================================
+	// 기본값. (거르기 켬, 몸 전체, 바깥 선과 꺾임 선 켬)
+	//==============================================================================
 	fn default() -> Self {
 		ToonLineDrawOptions { joint_matrices: None, is_culled: true, index_start: 0, index_count: None, is_mirrored: None, has_screen_outline: true, has_crease_line: true }
 	}
@@ -874,7 +877,7 @@ mat4 readSkinMatrix() {
 void main() {
 	mat4 skinMatrix = readSkinMatrix();
 	mat4 objectMatrix = instanced > 0.5 ? mat4(instanceMatrix0, instanceMatrix1, instanceMatrix2, instanceMatrix3) : modelMatrix;
-	worldNormal = mat3(objectMatrix) * mat3(skinMatrix) * vertexNormal;
+	worldNormal = transpose(inverse(mat3(objectMatrix) * mat3(skinMatrix))) * vertexNormal;
 	surfaceLineId = instanced > 0.5 && instanceLineIds > 0.5 ? instanceTint.x : lineId;
 	gl_Position = viewProjectionMatrix * objectMatrix * skinMatrix * vec4(vertexPosition, 1.0);
 }

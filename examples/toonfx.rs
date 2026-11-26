@@ -93,7 +93,7 @@ impl ToonFxScene {
 		screen_outline.set_color([0.078, 0.086, 0.11, 1.0]);
 		screen_outline.set_width(0.022, ToonOutlineWidthUnit::World);
 		screen_outline.set_depth_threshold(0.08);
-		screen_outline.set_crease(60.0, 1.0, 0.8);
+		screen_outline.set_crease(60.0, 0.011, 0.8);
 		self.screen_outline = Some(screen_outline);
 		// 효과. (예제의 램프 넷, 바닥은 판 윗면 0 이고 판 밖은 -1)
 		let mut vfx = ToonVfx::new(gl, TOON_VFX_DEFAULT_PARTICLE_CAPACITY)?;

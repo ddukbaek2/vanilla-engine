@@ -1012,7 +1012,7 @@ pub enum ImageSmoothingQuality {
 /// ```
 //==============================================================================
 pub struct Graphic {
-	gl: glow::Context,
+	gl: Rc<glow::Context>,
 	is_force_gizmos_visible: bool,
 	is_image_smoothing_enabled: bool,
 	image_smoothing_quality: ImageSmoothingQuality,
@@ -1141,6 +1141,9 @@ impl Graphic {
 	/// 만든 그래픽. 기본 셰이더의 컴파일이나 링크, GL 객체(버텍스 어레이, 버퍼, 텍스처) 만들기에 실패하면 그 오류 글을 담은 Err.
 	//==============================================================================
 	pub fn new(gl: glow::Context, preserve_drawing_buffer: bool) -> Result<Graphic, String> {
+		// 그림 텍스처를 되읽는 쪽(Canvas2D 의 drawImage)도 같은 컨텍스트를 쓴다.
+		let gl = Rc::new(gl);
+		crate::core::imagetexturecache::register_pixel_read_context(&gl);
 		// 셰이더 프로그램.
 		let shader_program = ShaderProgram::new(&gl, VERTEXSHADER_SOURCE, FRAGMENTSHADER_SOURCE)?;
 
@@ -3002,35 +3005,15 @@ impl Graphic {
 			}
 		};
 		self.flush_batch();
-		let width = image.get_width() as i32;
-		let height = image.get_height() as i32;
-		let mut pixels = vec![0u8; (width * height * 4) as usize];
-		let is_read = unsafe {
-			let previous_framebuffer = read_framebuffer_binding(&self.gl);
-			let framebuffer = match self.gl.create_framebuffer() {
-				Ok(framebuffer) => {
-					framebuffer
-				}
-				Err(_) => {
-					return false;
-				}
-			};
-			self.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
-			self.gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(texture), 0);
-			let is_complete = self.gl.check_framebuffer_status(glow::FRAMEBUFFER) == glow::FRAMEBUFFER_COMPLETE;
-			if is_complete {
-				self.gl.pixel_store_i32(glow::PACK_ALIGNMENT, 1);
-				self.gl.read_pixels(0, 0, width, height, glow::RGBA, glow::UNSIGNED_BYTE, glow::PixelPackData::Slice(Some(&mut pixels)));
+		match crate::core::imagetexturecache::read_texture_pixels(&self.gl, texture, image.get_width(), image.get_height()) {
+			Some(pixels) => {
+				image.restore_pixels(pixels);
+				true
 			}
-			self.gl.bind_framebuffer(glow::FRAMEBUFFER, previous_framebuffer);
-			self.gl.delete_framebuffer(framebuffer);
-			is_complete
-		};
-		if !is_read {
-			return false;
+			None => {
+				false
+			}
 		}
-		image.restore_pixels(pixels);
-		true
 	}
 
 	//==============================================================================

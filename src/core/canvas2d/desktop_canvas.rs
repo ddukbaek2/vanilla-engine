@@ -1,7 +1,7 @@
 //==============================================================================
-// 2D 그리기 대상의 데스크탑 판. (tiny-skia 로 칠한다, core/canvas2d.rs 머리 주석)
+//! 2D 그리기 대상의 데스크탑 판. (tiny-skia 로 칠한다, core/canvas2d.rs 머리 주석)
 //==============================================================================
-use super::{is_composite_operation_name, normalize_line_dash, premultiply_pixels, unpremultiply_pixels, CanvasFillRule, CanvasGradient, CanvasGradientKind, CanvasImageSource, CanvasLineCap, CanvasLineJoin, CanvasMatrix, CanvasPattern, CanvasPatternRepetition, CanvasStyle, CanvasTextAlign, CanvasTextBaseline, ImageData, Path2D, PathSegment};
+use super::{convert_conic_to_quads, evaluate_conic, is_composite_operation_name, normalize_line_dash, premultiply_pixels, unpremultiply_pixels, CanvasFillRule, CanvasGradient, CanvasGradientKind, CanvasImageSource, CanvasLineCap, CanvasLineJoin, CanvasMatrix, CanvasPattern, CanvasPatternRepetition, CanvasRadius, CanvasStyle, CanvasTextAlign, CanvasTextBaseline, ImageData, Path2D, PathSegment};
 use crate::base::color::Color;
 use crate::core::image::Image;
 use crate::core::textshaping::ShapingDirection;
@@ -10,14 +10,14 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use tiny_skia::{BlendMode, FillRule, FilterQuality, GradientStop, LineCap, LineJoin, Mask, Paint, PathBuilder, Pixmap, PixmapPaint, Point, Shader, SpreadMode, Stroke, StrokeDash, Transform};
 
-// 기본 글꼴. (원본 font 의 처음 값)
+/// 기본 글꼴. (원본 font 의 처음 값)
 const DEFAULT_FONT: &str = "10px sans-serif";
-// 글을 굽는 배율 한계.
+/// 글을 굽는 배율 한계.
 const MINIMUM_TEXT_SCALE: f32 = 0.25;
 const MAXIMUM_TEXT_SCALE: f32 = 8.0;
 
 //==============================================================================
-// 그리기 상태. (원본 save / restore 가 쌓는 것)
+/// 그리기 상태. (원본 save / restore 가 쌓는 것)
 //==============================================================================
 #[derive(Clone)]
 struct CanvasState {
@@ -40,13 +40,13 @@ struct CanvasState {
 	text_align: CanvasTextAlign,
 	text_baseline: CanvasTextBaseline,
 	is_image_smoothing_enabled: bool,
-	// 자르기. (캔버스 크기의 덮인 정도, 없으면 자르지 않는다)
+	/// 자르기. (캔버스 크기의 덮인 정도, 없으면 자르지 않는다)
 	clip_mask: Option<Rc<Mask>>,
 }
 
 impl CanvasState {
 	//==============================================================================
-	// 처음 상태. (원본 기본값)
+	/// 처음 상태. (원본 기본값)
 	//==============================================================================
 	fn new() -> CanvasState {
 		CanvasState {
@@ -75,22 +75,22 @@ impl CanvasState {
 }
 
 //==============================================================================
-// 칠할 모양.
+/// 칠할 모양.
 //==============================================================================
 enum CanvasShape {
-	// 채운 경로. (변환은 경로 좌표 → 캔버스 좌표)
+	/// 채운 경로. (변환은 경로 좌표 → 캔버스 좌표)
 	Fill {
 		path: tiny_skia::Path,
 		fill_rule: FillRule,
 		transform: Transform,
 	},
-	// 그은 경로. (경로와 선 굵기는 그때의 사용자 좌표)
+	/// 그은 경로. (경로와 선 굵기는 그때의 사용자 좌표)
 	Stroke {
 		path: tiny_skia::Path,
 		stroke: Stroke,
 		transform: Transform,
 	},
-	// 그림. (그림 좌표 → 캔버스 좌표, 자를 띠가 있으면 그 밖은 칠하지 않는다)
+	/// 그림. (그림 좌표 → 캔버스 좌표, 자를 띠가 있으면 그 밖은 칠하지 않는다)
 	Picture {
 		pixmap: Pixmap,
 		transform: Transform,
@@ -99,25 +99,25 @@ enum CanvasShape {
 }
 
 //==============================================================================
-// 2D 그리기 대상. (원본 캔버스와 그 2D 컨텍스트)
+/// 2D 그리기 대상. (원본 캔버스와 그 2D 컨텍스트)
 //==============================================================================
 pub struct Canvas2D {
 	width: u32,
 	height: u32,
-	// 그림. (폭이나 높이가 0 이면 None)
+	/// 그림. (폭이나 높이가 0 이면 None)
 	pixmap: Option<Pixmap>,
 	state: CanvasState,
 	state_stack: Vec<CanvasState>,
-	// 지금 경로. (캔버스 좌표, 더할 때의 변환으로 옮겨 담는다)
+	/// 지금 경로. (캔버스 좌표, 더할 때의 변환으로 옮겨 담는다)
 	path: Path2D,
-	// 그릴 때마다 는다. (to_image 가 같은 그림을 돌려줄지 본다)
+	/// 그릴 때마다 는다. (to_image 가 같은 그림을 돌려줄지 본다)
 	revision: u64,
 	cached_image: RefCell<Option<(u64, Rc<Image>)>>,
 }
 
 impl Canvas2D {
 	//==============================================================================
-	// 만들기. (원본 document.createElement("canvas") 에 width, height 를 준 것, 투명한 검정)
+	/// 만들기. (원본 document.createElement("canvas") 에 width, height 를 준 것, 투명한 검정)
 	//==============================================================================
 	pub fn new(width: u32, height: u32) -> Canvas2D {
 		Canvas2D {
@@ -133,35 +133,35 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 폭.
+	/// 폭.
 	//==============================================================================
 	pub fn get_width(&self) -> u32 {
 		self.width
 	}
 
 	//==============================================================================
-	// 높이.
+	/// 높이.
 	//==============================================================================
 	pub fn get_height(&self) -> u32 {
 		self.height
 	}
 
 	//==============================================================================
-	// 폭 설정. (원본처럼 그림을 비우고 상태를 처음으로 돌린다, 같은 값이어도)
+	/// 폭 설정. (원본처럼 그림을 비우고 상태를 처음으로 돌린다, 같은 값이어도)
 	//==============================================================================
 	pub fn set_width(&mut self, width: u32) {
 		self.resize(width, self.height);
 	}
 
 	//==============================================================================
-	// 높이 설정. (원본처럼 그림을 비우고 상태를 처음으로 돌린다)
+	/// 높이 설정. (원본처럼 그림을 비우고 상태를 처음으로 돌린다)
 	//==============================================================================
 	pub fn set_height(&mut self, height: u32) {
 		self.resize(self.width, height);
 	}
 
 	//==============================================================================
-	// 크기 바꾸기. (그림과 상태를 처음으로)
+	/// 크기 바꾸기. (그림과 상태를 처음으로)
 	//==============================================================================
 	fn resize(&mut self, width: u32, height: u32) {
 		self.width = width;
@@ -171,7 +171,7 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 상태를 처음으로. (상태 더미, 경로도)
+	/// 상태를 처음으로. (상태 더미, 경로도)
 	//==============================================================================
 	fn reset_state(&mut self) {
 		self.state = CanvasState::new();
@@ -181,7 +181,7 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 처음으로 돌리기. (원본 reset: 그림을 비우고 상태와 경로를 처음으로)
+	/// 처음으로 돌리기. (원본 reset: 그림을 비우고 상태와 경로를 처음으로)
 	//==============================================================================
 	pub fn reset(&mut self) {
 		if let Some(pixmap) = self.pixmap.as_mut() {
@@ -191,14 +191,14 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 상태 쌓기. (원본 save)
+	/// 상태 쌓기. (원본 save)
 	//==============================================================================
 	pub fn save(&mut self) {
 		self.state_stack.push(self.state.clone());
 	}
 
 	//==============================================================================
-	// 상태 꺼내기. (원본 restore, 쌓은 것이 없으면 아무것도 하지 않는다)
+	/// 상태 꺼내기. (원본 restore, 쌓은 것이 없으면 아무것도 하지 않는다)
 	//==============================================================================
 	pub fn restore(&mut self) {
 		if let Some(state) = self.state_stack.pop() {
@@ -207,28 +207,28 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 늘이기. (원본 scale)
+	/// 늘이기. (원본 scale)
 	//==============================================================================
 	pub fn scale(&mut self, x: f32, y: f32) {
 		self.transform(x, 0.0, 0.0, y, 0.0, 0.0);
 	}
 
 	//==============================================================================
-	// 돌리기. (원본 rotate, 라디안. 양수는 화면에서 시계 방향)
+	/// 돌리기. (원본 rotate, 라디안. 양수는 화면에서 시계 방향)
 	//==============================================================================
 	pub fn rotate(&mut self, angle: f32) {
 		self.transform(angle.cos(), angle.sin(), -angle.sin(), angle.cos(), 0.0, 0.0);
 	}
 
 	//==============================================================================
-	// 옮기기. (원본 translate)
+	/// 옮기기. (원본 translate)
 	//==============================================================================
 	pub fn translate(&mut self, x: f32, y: f32) {
 		self.transform(1.0, 0.0, 0.0, 1.0, x, y);
 	}
 
 	//==============================================================================
-	// 변환 곱하기. (원본 transform, 유한하지 않은 값이면 무시)
+	/// 변환 곱하기. (원본 transform, 유한하지 않은 값이면 무시)
 	//==============================================================================
 	pub fn transform(&mut self, a: f32, b: f32, c: f32, d: f32, e: f32, f: f32) {
 		let matrix = CanvasMatrix::create(a, b, c, d, e, f);
@@ -239,14 +239,14 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 변환 바꾸기. (원본 setTransform(a, b, c, d, e, f))
+	/// 변환 바꾸기. (원본 setTransform(a, b, c, d, e, f))
 	//==============================================================================
 	pub fn set_transform(&mut self, a: f32, b: f32, c: f32, d: f32, e: f32, f: f32) {
 		self.set_transform_matrix(CanvasMatrix::create(a, b, c, d, e, f));
 	}
 
 	//==============================================================================
-	// 변환 바꾸기. (원본 setTransform(DOMMatrix))
+	/// 변환 바꾸기. (원본 setTransform(DOMMatrix))
 	//==============================================================================
 	pub fn set_transform_matrix(&mut self, matrix: CanvasMatrix) {
 		if matrix.is_finite() {
@@ -255,21 +255,21 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 변환 지우기. (원본 resetTransform)
+	/// 변환 지우기. (원본 resetTransform)
 	//==============================================================================
 	pub fn reset_transform(&mut self) {
 		self.state.transform = CanvasMatrix::IDENTITY;
 	}
 
 	//==============================================================================
-	// 지금 변환. (원본 getTransform)
+	/// 지금 변환. (원본 getTransform)
 	//==============================================================================
 	pub fn get_transform(&self) -> CanvasMatrix {
 		self.state.transform
 	}
 
 	//==============================================================================
-	// 전체 투명도 설정. (원본 globalAlpha, 0 ~ 1 밖이나 유한하지 않으면 무시)
+	/// 전체 투명도 설정. (원본 globalAlpha, 0 ~ 1 밖이나 유한하지 않으면 무시)
 	//==============================================================================
 	pub fn set_global_alpha(&mut self, global_alpha: f32) {
 		if global_alpha.is_finite() && (0.0..=1.0).contains(&global_alpha) {
@@ -278,14 +278,14 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 전체 투명도.
+	/// 전체 투명도.
 	//==============================================================================
 	pub fn get_global_alpha(&self) -> f32 {
 		self.state.global_alpha
 	}
 
 	//==============================================================================
-	// 합치기 설정. (원본 globalCompositeOperation, 모르는 이름은 무시)
+	/// 합치기 설정. (원본 globalCompositeOperation, 모르는 이름은 무시)
 	//==============================================================================
 	pub fn set_global_composite_operation(&mut self, operation_name: &str) {
 		if is_composite_operation_name(operation_name) {
@@ -294,56 +294,56 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 합치기.
+	/// 합치기.
 	//==============================================================================
 	pub fn get_global_composite_operation(&self) -> String {
 		self.state.global_composite_operation.clone()
 	}
 
 	//==============================================================================
-	// 그림 매끄럽게 설정. (원본 imageSmoothingEnabled, 끄면 가장 가까운 픽셀)
+	/// 그림 매끄럽게 설정. (원본 imageSmoothingEnabled, 끄면 가장 가까운 픽셀)
 	//==============================================================================
 	pub fn set_image_smoothing_enabled(&mut self, is_enabled: bool) {
 		self.state.is_image_smoothing_enabled = is_enabled;
 	}
 
 	//==============================================================================
-	// 그림 매끄럽게 하는지.
+	/// 그림 매끄럽게 하는지.
 	//==============================================================================
 	pub fn is_image_smoothing_enabled(&self) -> bool {
 		self.state.is_image_smoothing_enabled
 	}
 
 	//==============================================================================
-	// 채울 것 설정. (원본 fillStyle)
+	/// 채울 것 설정. (원본 fillStyle)
 	//==============================================================================
 	pub fn set_fill_style(&mut self, style: impl Into<CanvasStyle>) {
 		self.state.fill_style = style.into();
 	}
 
 	//==============================================================================
-	// 채울 것.
+	/// 채울 것.
 	//==============================================================================
 	pub fn get_fill_style(&self) -> &CanvasStyle {
 		&self.state.fill_style
 	}
 
 	//==============================================================================
-	// 그을 것 설정. (원본 strokeStyle)
+	/// 그을 것 설정. (원본 strokeStyle)
 	//==============================================================================
 	pub fn set_stroke_style(&mut self, style: impl Into<CanvasStyle>) {
 		self.state.stroke_style = style.into();
 	}
 
 	//==============================================================================
-	// 그을 것.
+	/// 그을 것.
 	//==============================================================================
 	pub fn get_stroke_style(&self) -> &CanvasStyle {
 		&self.state.stroke_style
 	}
 
 	//==============================================================================
-	// 곧은 그라데이션. (원본 createLinearGradient)
+	/// 곧은 그라데이션. (원본 createLinearGradient)
 	//==============================================================================
 	pub fn create_linear_gradient(&self, start_x: f32, start_y: f32, end_x: f32, end_y: f32) -> CanvasGradient {
 		CanvasGradient::new(CanvasGradientKind::Linear {
@@ -355,7 +355,7 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 둥근 그라데이션. (원본 createRadialGradient, 반지름이 음수면 원본의 예외처럼 None)
+	/// 둥근 그라데이션. (원본 createRadialGradient, 반지름이 음수면 원본의 예외처럼 None)
 	//==============================================================================
 	pub fn create_radial_gradient(&self, start_x: f32, start_y: f32, start_radius: f32, end_x: f32, end_y: f32, end_radius: f32) -> Option<CanvasGradient> {
 		if start_radius < 0.0 || end_radius < 0.0 {
@@ -372,7 +372,7 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 원뿔 그라데이션. (원본 createConicGradient, 시작 각은 오른쪽에서 시계 방향 라디안)
+	/// 원뿔 그라데이션. (원본 createConicGradient, 시작 각은 오른쪽에서 시계 방향 라디안)
 	//==============================================================================
 	pub fn create_conic_gradient(&self, start_angle: f32, center_x: f32, center_y: f32) -> CanvasGradient {
 		CanvasGradient::new(CanvasGradientKind::Conic {
@@ -383,7 +383,7 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 패턴. (원본 createPattern, 그림 픽셀을 읽지 못하거나 크기가 0 이면 None)
+	/// 패턴. (원본 createPattern, 그림 픽셀을 읽지 못하거나 크기가 0 이면 None)
 	//==============================================================================
 	pub fn create_pattern<'a>(&self, source: impl Into<CanvasImageSource<'a>>, repetition: CanvasPatternRepetition) -> Option<CanvasPattern> {
 		let source = source.into();
@@ -402,21 +402,21 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 그림자 색 설정. (원본 shadowColor)
+	/// 그림자 색 설정. (원본 shadowColor)
 	//==============================================================================
 	pub fn set_shadow_color(&mut self, color: impl Into<Color>) {
 		self.state.shadow_color = color.into();
 	}
 
 	//==============================================================================
-	// 그림자 색.
+	/// 그림자 색.
 	//==============================================================================
 	pub fn get_shadow_color(&self) -> Color {
 		self.state.shadow_color
 	}
 
 	//==============================================================================
-	// 그림자 흐림 설정. (원본 shadowBlur, 음수나 유한하지 않으면 무시)
+	/// 그림자 흐림 설정. (원본 shadowBlur, 음수나 유한하지 않으면 무시)
 	//==============================================================================
 	pub fn set_shadow_blur(&mut self, shadow_blur: f32) {
 		if shadow_blur.is_finite() && shadow_blur >= 0.0 {
@@ -425,14 +425,14 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 그림자 흐림.
+	/// 그림자 흐림.
 	//==============================================================================
 	pub fn get_shadow_blur(&self) -> f32 {
 		self.state.shadow_blur
 	}
 
 	//==============================================================================
-	// 그림자 가로 밀림 설정. (원본 shadowOffsetX, 변환을 받지 않는다)
+	/// 그림자 가로 밀림 설정. (원본 shadowOffsetX, 변환을 받지 않는다)
 	//==============================================================================
 	pub fn set_shadow_offset_x(&mut self, offset_x: f32) {
 		if offset_x.is_finite() {
@@ -441,14 +441,14 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 그림자 가로 밀림.
+	/// 그림자 가로 밀림.
 	//==============================================================================
 	pub fn get_shadow_offset_x(&self) -> f32 {
 		self.state.shadow_offset_x
 	}
 
 	//==============================================================================
-	// 그림자 세로 밀림 설정. (원본 shadowOffsetY)
+	/// 그림자 세로 밀림 설정. (원본 shadowOffsetY)
 	//==============================================================================
 	pub fn set_shadow_offset_y(&mut self, offset_y: f32) {
 		if offset_y.is_finite() {
@@ -457,14 +457,14 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 그림자 세로 밀림.
+	/// 그림자 세로 밀림.
 	//==============================================================================
 	pub fn get_shadow_offset_y(&self) -> f32 {
 		self.state.shadow_offset_y
 	}
 
 	//==============================================================================
-	// 선 굵기 설정. (원본 lineWidth, 0 이하나 유한하지 않으면 무시)
+	/// 선 굵기 설정. (원본 lineWidth, 0 이하나 유한하지 않으면 무시)
 	//==============================================================================
 	pub fn set_line_width(&mut self, line_width: f32) {
 		if line_width.is_finite() && line_width > 0.0 {
@@ -473,42 +473,42 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 선 굵기.
+	/// 선 굵기.
 	//==============================================================================
 	pub fn get_line_width(&self) -> f32 {
 		self.state.line_width
 	}
 
 	//==============================================================================
-	// 선 끝 설정. (원본 lineCap)
+	/// 선 끝 설정. (원본 lineCap)
 	//==============================================================================
 	pub fn set_line_cap(&mut self, line_cap: CanvasLineCap) {
 		self.state.line_cap = line_cap;
 	}
 
 	//==============================================================================
-	// 선 끝.
+	/// 선 끝.
 	//==============================================================================
 	pub fn get_line_cap(&self) -> CanvasLineCap {
 		self.state.line_cap
 	}
 
 	//==============================================================================
-	// 선 이음 설정. (원본 lineJoin)
+	/// 선 이음 설정. (원본 lineJoin)
 	//==============================================================================
 	pub fn set_line_join(&mut self, line_join: CanvasLineJoin) {
 		self.state.line_join = line_join;
 	}
 
 	//==============================================================================
-	// 선 이음.
+	/// 선 이음.
 	//==============================================================================
 	pub fn get_line_join(&self) -> CanvasLineJoin {
 		self.state.line_join
 	}
 
 	//==============================================================================
-	// 뾰족 이음 한계 설정. (원본 miterLimit, 0 이하나 유한하지 않으면 무시)
+	/// 뾰족 이음 한계 설정. (원본 miterLimit, 0 이하나 유한하지 않으면 무시)
 	//==============================================================================
 	pub fn set_miter_limit(&mut self, miter_limit: f32) {
 		if miter_limit.is_finite() && miter_limit > 0.0 {
@@ -517,14 +517,14 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 뾰족 이음 한계.
+	/// 뾰족 이음 한계.
 	//==============================================================================
 	pub fn get_miter_limit(&self) -> f32 {
 		self.state.miter_limit
 	}
 
 	//==============================================================================
-	// 점선 설정. (원본 setLineDash, 음수나 유한하지 않은 값이 있으면 무시, 홀수 개면 두 번 잇는다)
+	/// 점선 설정. (원본 setLineDash, 음수나 유한하지 않은 값이 있으면 무시, 홀수 개면 두 번 잇는다)
 	//==============================================================================
 	pub fn set_line_dash(&mut self, dash_list: &[f32]) {
 		if let Some(normalized_list) = normalize_line_dash(dash_list) {
@@ -533,14 +533,14 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 점선. (원본 getLineDash)
+	/// 점선. (원본 getLineDash)
 	//==============================================================================
 	pub fn get_line_dash(&self) -> Vec<f32> {
 		self.state.line_dash.clone()
 	}
 
 	//==============================================================================
-	// 점선 시작 밀림 설정. (원본 lineDashOffset)
+	/// 점선 시작 밀림 설정. (원본 lineDashOffset)
 	//==============================================================================
 	pub fn set_line_dash_offset(&mut self, line_dash_offset: f32) {
 		if line_dash_offset.is_finite() {
@@ -549,14 +549,14 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 점선 시작 밀림.
+	/// 점선 시작 밀림.
 	//==============================================================================
 	pub fn get_line_dash_offset(&self) -> f32 {
 		self.state.line_dash_offset
 	}
 
 	//==============================================================================
-	// 글꼴 설정. (원본 font, CSS font 줄임 꼴. 엔진 글자 캐시가 읽는다)
+	/// 글꼴 설정. (원본 font, CSS font 줄임 꼴. 엔진 글자 캐시가 읽는다)
 	//==============================================================================
 	pub fn set_font(&mut self, font: &str) {
 		if !font.trim().is_empty() {
@@ -565,42 +565,42 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 글꼴.
+	/// 글꼴.
 	//==============================================================================
 	pub fn get_font(&self) -> String {
 		self.state.font.clone()
 	}
 
 	//==============================================================================
-	// 글 가로 정렬 설정. (원본 textAlign)
+	/// 글 가로 정렬 설정. (원본 textAlign)
 	//==============================================================================
 	pub fn set_text_align(&mut self, text_align: CanvasTextAlign) {
 		self.state.text_align = text_align;
 	}
 
 	//==============================================================================
-	// 글 가로 정렬.
+	/// 글 가로 정렬.
 	//==============================================================================
 	pub fn get_text_align(&self) -> CanvasTextAlign {
 		self.state.text_align
 	}
 
 	//==============================================================================
-	// 글 기준선 설정. (원본 textBaseline)
+	/// 글 기준선 설정. (원본 textBaseline)
 	//==============================================================================
 	pub fn set_text_baseline(&mut self, text_baseline: CanvasTextBaseline) {
 		self.state.text_baseline = text_baseline;
 	}
 
 	//==============================================================================
-	// 글 기준선.
+	/// 글 기준선.
 	//==============================================================================
 	pub fn get_text_baseline(&self) -> CanvasTextBaseline {
 		self.state.text_baseline
 	}
 
 	//==============================================================================
-	// 사각형 지우기. (원본 clearRect: 그 자리를 투명한 검정으로, 자르기는 따르고 그림자, 투명도, 합치기는 받지 않는다)
+	/// 사각형 지우기. (원본 clearRect: 그 자리를 투명한 검정으로, 자르기는 따르고 그림자, 투명도, 합치기는 받지 않는다)
 	//==============================================================================
 	pub fn clear_rect(&mut self, x: f32, y: f32, width: f32, height: f32) {
 		let path = match build_rect_path(x, y, width, height) {
@@ -623,7 +623,7 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 사각형 채우기. (원본 fillRect, 지금 경로를 바꾸지 않는다)
+	/// 사각형 채우기. (원본 fillRect, 지금 경로를 바꾸지 않는다)
 	//==============================================================================
 	pub fn fill_rect(&mut self, x: f32, y: f32, width: f32, height: f32) {
 		if let Some(path) = build_rect_path(x, y, width, height) {
@@ -638,7 +638,7 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 사각형 긋기. (원본 strokeRect)
+	/// 사각형 긋기. (원본 strokeRect)
 	//==============================================================================
 	pub fn stroke_rect(&mut self, x: f32, y: f32, width: f32, height: f32) {
 		let mut rect_path = Path2D::new();
@@ -647,21 +647,21 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 경로 비우기. (원본 beginPath)
+	/// 경로 비우기. (원본 beginPath)
 	//==============================================================================
 	pub fn begin_path(&mut self) {
 		self.path.clear();
 	}
 
 	//==============================================================================
-	// 조각 닫기. (원본 closePath)
+	/// 조각 닫기. (원본 closePath)
 	//==============================================================================
 	pub fn close_path(&mut self) {
 		self.path.close_path();
 	}
 
 	//==============================================================================
-	// 새 조각. (원본 moveTo)
+	/// 새 조각. (원본 moveTo)
 	//==============================================================================
 	pub fn move_to(&mut self, x: f32, y: f32) {
 		let matrix = self.state.transform;
@@ -669,7 +669,7 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 곧은 선. (원본 lineTo)
+	/// 곧은 선. (원본 lineTo)
 	//==============================================================================
 	pub fn line_to(&mut self, x: f32, y: f32) {
 		let matrix = self.state.transform;
@@ -677,7 +677,7 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 2 차 곡선. (원본 quadraticCurveTo)
+	/// 2 차 곡선. (원본 quadraticCurveTo)
 	//==============================================================================
 	pub fn quadratic_curve_to(&mut self, control_x: f32, control_y: f32, x: f32, y: f32) {
 		let matrix = self.state.transform;
@@ -685,7 +685,7 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 3 차 곡선. (원본 bezierCurveTo)
+	/// 3 차 곡선. (원본 bezierCurveTo)
 	//==============================================================================
 	pub fn bezier_curve_to(&mut self, first_control_x: f32, first_control_y: f32, second_control_x: f32, second_control_y: f32, x: f32, y: f32) {
 		let matrix = self.state.transform;
@@ -693,15 +693,15 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 원호. (원본 arc, 반지름이 음수면 원본의 예외처럼 아무것도 하지 않고 false)
+	/// 원호. (원본 arc, 반지름이 음수면 원본의 예외처럼 아무것도 하지 않고 false)
 	//==============================================================================
 	pub fn arc(&mut self, x: f32, y: f32, radius: f32, start_angle: f32, end_angle: f32, is_counterclockwise: bool) -> bool {
 		let matrix = self.state.transform;
-		self.path.ellipse_with(&matrix, x, y, radius, radius, 0.0, start_angle, end_angle, is_counterclockwise)
+		self.path.arc_with(&matrix, x, y, radius, start_angle, end_angle, is_counterclockwise)
 	}
 
 	//==============================================================================
-	// 두 접선 사이 원호. (원본 arcTo)
+	/// 두 접선 사이 원호. (원본 arcTo)
 	//==============================================================================
 	pub fn arc_to(&mut self, first_x: f32, first_y: f32, second_x: f32, second_y: f32, radius: f32) -> bool {
 		let matrix = self.state.transform;
@@ -709,7 +709,7 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 타원호. (원본 ellipse)
+	/// 타원호. (원본 ellipse)
 	//==============================================================================
 	pub fn ellipse(&mut self, x: f32, y: f32, radius_x: f32, radius_y: f32, rotation: f32, start_angle: f32, end_angle: f32, is_counterclockwise: bool) -> bool {
 		let matrix = self.state.transform;
@@ -717,7 +717,7 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 사각형 조각. (원본 rect)
+	/// 사각형 조각. (원본 rect)
 	//==============================================================================
 	pub fn rect(&mut self, x: f32, y: f32, width: f32, height: f32) {
 		let matrix = self.state.transform;
@@ -725,18 +725,19 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 둥근 사각형 조각. (원본 roundRect)
+	/// 둥근 사각형 조각. (원본 roundRect, 반지름은 수(f32)나 타원 모서리((x, y), CanvasRadius::Elliptical))
 	//==============================================================================
-	pub fn round_rect(&mut self, x: f32, y: f32, width: f32, height: f32, radius_list: &[f32]) -> bool {
+	pub fn round_rect<R: Into<CanvasRadius> + Copy>(&mut self, x: f32, y: f32, width: f32, height: f32, radius_list: &[R]) -> bool {
 		let matrix = self.state.transform;
-		self.path.round_rect_with(&matrix, x, y, width, height, radius_list)
+		let radius_list: Vec<CanvasRadius> = radius_list.iter().map(|radius| (*radius).into()).collect();
+		self.path.round_rect_with(&matrix, x, y, width, height, &radius_list)
 	}
 
 	//==============================================================================
-	// 지금 경로 채우기. (원본 fill(fillRule))
+	/// 지금 경로 채우기. (원본 fill(fillRule))
 	//==============================================================================
 	pub fn fill(&mut self, fill_rule: CanvasFillRule) {
-		if let Some(path) = build_skia_path(&self.path) {
+		if let Some(path) = build_skia_path(&self.path, CONIC_TOLERANCE) {
 			let shape = CanvasShape::Fill {
 				path,
 				fill_rule: convert_fill_rule(fill_rule),
@@ -748,10 +749,10 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 경로 채우기. (원본 fill(path, fillRule), 경로는 지금 변환으로 옮겨 칠한다)
+	/// 경로 채우기. (원본 fill(path, fillRule), 경로는 지금 변환으로 옮겨 칠한다)
 	//==============================================================================
 	pub fn fill_path(&mut self, path: &Path2D, fill_rule: CanvasFillRule) {
-		if let Some(skia_path) = build_skia_path(path) {
+		if let Some(skia_path) = build_skia_path(path, CONIC_TOLERANCE / calculate_resolution_scale(&self.state.transform)) {
 			let shape = CanvasShape::Fill {
 				path: skia_path,
 				fill_rule: convert_fill_rule(fill_rule),
@@ -763,7 +764,7 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 지금 경로 긋기. (원본 stroke(), 선 굵기는 지금 변환을 받는다)
+	/// 지금 경로 긋기. (원본 stroke(), 선 굵기는 지금 변환을 받는다)
 	//==============================================================================
 	pub fn stroke(&mut self) {
 		let inverse_matrix = match self.state.transform.invert() {
@@ -780,10 +781,10 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 경로 긋기. (원본 stroke(path))
+	/// 경로 긋기. (원본 stroke(path))
 	//==============================================================================
 	pub fn stroke_path(&mut self, path: &Path2D) {
-		let skia_path = match build_skia_path(path) {
+		let skia_path = match build_skia_path(path, CONIC_TOLERANCE / calculate_resolution_scale(&self.state.transform)) {
 			Some(skia_path) => {
 				skia_path
 			}
@@ -801,7 +802,7 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 지금 경로로 자르기. (원본 clip(fillRule), 이미 자른 영역과 겹친 곳만 남는다)
+	/// 지금 경로로 자르기. (원본 clip(fillRule), 이미 자른 영역과 겹친 곳만 남는다)
 	//==============================================================================
 	pub fn clip(&mut self, fill_rule: CanvasFillRule) {
 		let path = self.path.clone();
@@ -809,7 +810,7 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 경로로 자르기. (원본 clip(path, fillRule))
+	/// 경로로 자르기. (원본 clip(path, fillRule))
 	//==============================================================================
 	pub fn clip_path(&mut self, path: &Path2D, fill_rule: CanvasFillRule) {
 		let transform = convert_matrix(&self.state.transform);
@@ -817,7 +818,7 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 자르기. (빈 경로면 모두 잘라 낸다)
+	/// 자르기. (빈 경로면 모두 잘라 낸다)
 	//==============================================================================
 	fn clip_with(&mut self, path: &Path2D, transform: Transform, fill_rule: CanvasFillRule) {
 		let mut clip_mask = match &self.state.clip_mask {
@@ -836,7 +837,8 @@ impl Canvas2D {
 				}
 			}
 		};
-		match build_skia_path(path) {
+		let resolution_scale = calculate_resolution_scale(&CanvasMatrix::create(transform.sx, transform.ky, transform.kx, transform.sy, transform.tx, transform.ty));
+		match build_skia_path(path, CONIC_TOLERANCE / resolution_scale) {
 			Some(skia_path) => {
 				clip_mask.intersect_path(&skia_path, convert_fill_rule(fill_rule), true, transform);
 			}
@@ -848,42 +850,42 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 점이 지금 경로 안에 있는지. (원본 isPointInPath(x, y, fillRule), 점은 변환을 받지 않는 캔버스 좌표)
+	/// 점이 지금 경로 안에 있는지. (원본 isPointInPath(x, y, fillRule), 점은 변환을 받지 않는 캔버스 좌표)
 	//==============================================================================
 	pub fn is_point_in_path(&self, x: f32, y: f32, fill_rule: CanvasFillRule) -> bool {
 		is_point_inside(&self.path, &CanvasMatrix::IDENTITY, x, y, fill_rule)
 	}
 
 	//==============================================================================
-	// 점이 경로 안에 있는지. (원본 isPointInPath(path, x, y, fillRule), 경로는 지금 변환으로 옮겨 본다)
+	/// 점이 경로 안에 있는지. (원본 isPointInPath(path, x, y, fillRule), 경로는 지금 변환으로 옮겨 본다)
 	//==============================================================================
 	pub fn is_point_in_path2d(&self, path: &Path2D, x: f32, y: f32, fill_rule: CanvasFillRule) -> bool {
 		is_point_inside(path, &self.state.transform, x, y, fill_rule)
 	}
 
 	//==============================================================================
-	// 글 재기. (원본 measureText, 엔진 글자 캐시로 잰다. 글꼴이 하나도 없으면 0)
+	/// 글 재기. (원본 measureText, 엔진 글자 캐시로 잰다. 글꼴이 하나도 없으면 0)
 	//==============================================================================
 	pub fn measure_text(&self, text: &str) -> TextMetrics {
 		measure_text_without_graphic(&self.state.font, text).unwrap_or_default()
 	}
 
 	//==============================================================================
-	// 글 채우기. (원본 fillText(text, x, y, maxWidth), 글이 maxWidth 보다 넓으면 가로로 좁힌다)
+	/// 글 채우기. (원본 fillText(text, x, y, maxWidth), 글이 maxWidth 보다 넓으면 가로로 좁힌다)
 	//==============================================================================
 	pub fn fill_text(&mut self, text: &str, x: f32, y: f32, maximum_width: Option<f32>) {
 		self.draw_text(text, x, y, maximum_width, false);
 	}
 
 	//==============================================================================
-	// 글 긋기. (원본 strokeText, 선은 lineWidth 굵기로 윤곽선 가운데에 긋는다)
+	/// 글 긋기. (원본 strokeText, 선은 lineWidth 굵기로 윤곽선 가운데에 긋는다)
 	//==============================================================================
 	pub fn stroke_text(&mut self, text: &str, x: f32, y: f32, maximum_width: Option<f32>) {
 		self.draw_text(text, x, y, maximum_width, true);
 	}
 
 	//==============================================================================
-	// 그림 그리기. (원본 drawImage(image, dx, dy))
+	/// 그림 그리기. (원본 drawImage(image, dx, dy))
 	//==============================================================================
 	pub fn draw_image<'a>(&mut self, source: impl Into<CanvasImageSource<'a>>, destination_x: f32, destination_y: f32) {
 		let source = source.into();
@@ -892,7 +894,7 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 그림 늘여 그리기. (원본 drawImage(image, dx, dy, dw, dh))
+	/// 그림 늘여 그리기. (원본 drawImage(image, dx, dy, dw, dh))
 	//==============================================================================
 	pub fn draw_image_scaled<'a>(&mut self, source: impl Into<CanvasImageSource<'a>>, destination_x: f32, destination_y: f32, destination_width: f32, destination_height: f32) {
 		let source = source.into();
@@ -901,7 +903,7 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 그림 일부 그리기. (원본 drawImage(image, sx, sy, sw, sh, dx, dy, dw, dh), 음수 폭과 높이는 원본처럼 뒤집어 맞춘다)
+	/// 그림 일부 그리기. (원본 drawImage(image, sx, sy, sw, sh, dx, dy, dw, dh), 음수 폭과 높이는 원본처럼 뒤집어 맞춘다)
 	//==============================================================================
 	pub fn draw_image_region<'a>(&mut self, source: impl Into<CanvasImageSource<'a>>, source_x: f32, source_y: f32, source_width: f32, source_height: f32, destination_x: f32, destination_y: f32, destination_width: f32, destination_height: f32) {
 		let source = source.into();
@@ -957,14 +959,14 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 빈 픽셀 묶음. (원본 createImageData)
+	/// 빈 픽셀 묶음. (원본 createImageData)
 	//==============================================================================
 	pub fn create_image_data(&self, width: u32, height: u32) -> ImageData {
 		ImageData::new(width, height)
 	}
 
 	//==============================================================================
-	// 픽셀 읽기. (원본 getImageData, 프리멀티플라이하지 않은 RGBA. 캔버스 밖은 투명한 검정)
+	/// 픽셀 읽기. (원본 getImageData, 프리멀티플라이하지 않은 RGBA. 캔버스 밖은 투명한 검정)
 	//==============================================================================
 	pub fn get_image_data(&self, source_x: i32, source_y: i32, width: u32, height: u32) -> ImageData {
 		let mut image_data = ImageData::new(width, height);
@@ -997,7 +999,7 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 픽셀 쓰기. (원본 putImageData: 자르기, 투명도, 합치기, 그림자 없이 그대로 바꾼다)
+	/// 픽셀 쓰기. (원본 putImageData: 자르기, 투명도, 합치기, 그림자 없이 그대로 바꾼다)
 	//==============================================================================
 	pub fn put_image_data(&mut self, image_data: &ImageData, destination_x: i32, destination_y: i32) {
 		let canvas_width = self.width as i32;
@@ -1034,7 +1036,7 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 엔진 그림으로. (Graphic, UIImageView 에 쓴다. 그 뒤로 그리지 않았으면 같은 Image)
+	/// 엔진 그림으로. (Graphic, UIImageView 에 쓴다. 그 뒤로 그리지 않았으면 같은 Image)
 	//==============================================================================
 	pub fn to_image(&self) -> Rc<Image> {
 		if let Some((cached_revision, cached_image)) = self.cached_image.borrow().as_ref() {
@@ -1048,7 +1050,7 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 프리멀티플라이드 RGBA 픽셀. (다른 캔버스에 그릴 때)
+	/// 프리멀티플라이드 RGBA 픽셀. (다른 캔버스에 그릴 때)
 	//==============================================================================
 	pub(crate) fn read_premultiplied_pixels(&self) -> Vec<u8> {
 		match &self.pixmap {
@@ -1062,7 +1064,7 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 지금 선 설정.
+	/// 지금 선 설정.
 	//==============================================================================
 	fn build_stroke(&self) -> Stroke {
 		let dash = if self.state.line_dash.is_empty() {
@@ -1101,14 +1103,14 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 그림자를 그리는지. (색이 보이고 흐림이나 밀림이 있을 때, 원본 규칙)
+	/// 그림자를 그리는지. (색이 보이고 흐림이나 밀림이 있을 때, 원본 규칙)
 	//==============================================================================
 	fn has_shadow(&self) -> bool {
 		self.state.shadow_color.alpha > 0.0 && (self.state.shadow_blur > 0.0 || self.state.shadow_offset_x != 0.0 || self.state.shadow_offset_y != 0.0)
 	}
 
 	//==============================================================================
-	// 모양 칠하기. (그림자, 모양 밖도 지우는 합치기, 자르기, 전체 투명도)
+	/// 모양 칠하기. (그림자, 모양 밖도 지우는 합치기, 자르기, 전체 투명도)
 	//==============================================================================
 	fn draw_shape(&mut self, shape: CanvasShape, style: Option<&CanvasStyle>) {
 		if self.pixmap.is_none() {
@@ -1166,7 +1168,7 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 칠할 영역의 덮인 정도. (자르기와, 한 방향만 되풀이하는 패턴의 띠를 겹친 것. 둘 다 없으면 None)
+	/// 칠할 영역의 덮인 정도. (자르기와, 한 방향만 되풀이하는 패턴의 띠를 겹친 것. 둘 다 없으면 None)
 	//==============================================================================
 	fn build_drawing_mask(&self, style: Option<&CanvasStyle>) -> Option<Rc<Mask>> {
 		let pattern = match style {
@@ -1203,7 +1205,7 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 그림 칠하기. (자를 사각형이 있으면 그 밖은 칠하지 않는다)
+	/// 그림 칠하기. (자를 사각형이 있으면 그 밖은 칠하지 않는다)
 	//==============================================================================
 	fn draw_picture(&mut self, pixmap: Pixmap, transform: Transform, quality: FilterQuality, destination_rect_path: Option<tiny_skia::Path>) {
 		let saved_clip_mask = self.state.clip_mask.clone();
@@ -1236,7 +1238,7 @@ impl Canvas2D {
 	}
 
 	//==============================================================================
-	// 글 칠하기. (엔진 글자 캐시의 덮인 정도를 그때의 배율로 받아 칠할 것으로 채운 그림을 만들고, 색 글리프는 제 색으로 얹는다)
+	/// 글 칠하기. (엔진 글자 캐시의 덮인 정도를 그때의 배율로 받아 칠할 것으로 채운 그림을 만들고, 색 글리프는 제 색으로 얹는다)
 	//==============================================================================
 	fn draw_text(&mut self, text: &str, x: f32, y: f32, maximum_width: Option<f32>, is_stroke: bool) {
 		if text.is_empty() || !x.is_finite() || !y.is_finite() {
@@ -1386,14 +1388,14 @@ impl Canvas2D {
 }
 
 //==============================================================================
-// 행렬 → tiny-skia 변환.
+/// 행렬 → tiny-skia 변환.
 //==============================================================================
 fn convert_matrix(matrix: &CanvasMatrix) -> Transform {
 	Transform::from_row(matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f)
 }
 
 //==============================================================================
-// 채우기 규칙 → tiny-skia.
+/// 채우기 규칙 → tiny-skia.
 //==============================================================================
 fn convert_fill_rule(fill_rule: CanvasFillRule) -> FillRule {
 	match fill_rule {
@@ -1407,7 +1409,7 @@ fn convert_fill_rule(fill_rule: CanvasFillRule) -> FillRule {
 }
 
 //==============================================================================
-// 합치기 이름 → tiny-skia 섞기. (lighter 는 더하기, copy 는 바꾸기)
+/// 합치기 이름 → tiny-skia 섞기. (lighter 는 더하기, copy 는 바꾸기)
 //==============================================================================
 fn convert_blend_mode(operation_name: &str) -> BlendMode {
 	match operation_name {
@@ -1493,14 +1495,14 @@ fn convert_blend_mode(operation_name: &str) -> BlendMode {
 }
 
 //==============================================================================
-// 엔진 색 → tiny-skia 색. (알파에 곱하기)
+/// 엔진 색 → tiny-skia 색. (알파에 곱하기)
 //==============================================================================
 fn convert_color(color: Color, alpha_scale: f32) -> tiny_skia::Color {
 	tiny_skia::Color::from_rgba(color.red.clamp(0.0, 1.0), color.green.clamp(0.0, 1.0), color.blue.clamp(0.0, 1.0), (color.alpha * alpha_scale).clamp(0.0, 1.0)).unwrap_or(tiny_skia::Color::TRANSPARENT)
 }
 
 //==============================================================================
-// 음수 폭을 뒤집어 맞추기. (시작, 폭) → (작은 끝, 양의 폭)
+/// 음수 폭을 뒤집어 맞추기. (시작, 폭) → (작은 끝, 양의 폭)
 //==============================================================================
 fn normalize_span(start: f32, length: f32) -> (f32, f32) {
 	if length < 0.0 {
@@ -1512,7 +1514,7 @@ fn normalize_span(start: f32, length: f32) -> (f32, f32) {
 }
 
 //==============================================================================
-// 사각형 경로. (폭이나 높이가 0 이어도 원본처럼 빈 모양이 된다)
+/// 사각형 경로. (폭이나 높이가 0 이어도 원본처럼 빈 모양이 된다)
 //==============================================================================
 fn build_rect_path(x: f32, y: f32, width: f32, height: f32) -> Option<tiny_skia::Path> {
 	if ![x, y, width, height].iter().all(|value| value.is_finite()) {
@@ -1527,27 +1529,62 @@ fn build_rect_path(x: f32, y: f32, width: f32, height: f32) -> Option<tiny_skia:
 	path_builder.finish()
 }
 
+///==============================================================================
+/// 원뿔 곡선을 2 차 곡선으로 나누는 허용 오차. (스키아 CPU 래스터 SkEdgeBuilder 의 kConicTol, 기기 픽셀)
+///==============================================================================
+const CONIC_TOLERANCE: f32 = 0.25;
+
 //==============================================================================
-// 엔진 경로 → tiny-skia 경로. (비었으면 None)
+/// 변환의 배율. (스키아 SkMatrixPriv::ComputeResScaleForStroking: 두 열 길이 가운데 큰 쪽, 유한하지 않거나 0 이면 1)
 //==============================================================================
-fn build_skia_path(path: &Path2D) -> Option<tiny_skia::Path> {
+fn calculate_resolution_scale(matrix: &CanvasMatrix) -> f32 {
+	let scale_x = (matrix.a * matrix.a + matrix.b * matrix.b).sqrt();
+	let scale_y = (matrix.c * matrix.c + matrix.d * matrix.d).sqrt();
+	if scale_x.is_finite() && scale_y.is_finite() {
+		let scale = scale_x.max(scale_y);
+		if scale > 0.0 {
+			return scale;
+		}
+	}
+	1.0
+}
+
+//==============================================================================
+/// 엔진 경로 → tiny-skia 경로. (비었으면 None, 원뿔 곡선은 conic_tolerance 안의 2 차 곡선들로)
+//==============================================================================
+fn build_skia_path(path: &Path2D, conic_tolerance: f32) -> Option<tiny_skia::Path> {
 	let mut path_builder = PathBuilder::new();
+	let mut last_point = (0.0, 0.0);
+	let mut subpath_start_point = (0.0, 0.0);
 	for segment in path.get_segment_list() {
 		match *segment {
 			PathSegment::MoveTo(x, y) => {
 				path_builder.move_to(x, y);
+				last_point = (x, y);
+				subpath_start_point = (x, y);
 			}
 			PathSegment::LineTo(x, y) => {
 				path_builder.line_to(x, y);
+				last_point = (x, y);
 			}
 			PathSegment::QuadraticTo(control_x, control_y, x, y) => {
 				path_builder.quad_to(control_x, control_y, x, y);
+				last_point = (x, y);
 			}
 			PathSegment::CubicTo(first_control_x, first_control_y, second_control_x, second_control_y, x, y) => {
 				path_builder.cubic_to(first_control_x, first_control_y, second_control_x, second_control_y, x, y);
+				last_point = (x, y);
+			}
+			PathSegment::ConicTo(control_x, control_y, x, y, weight) => {
+				let point_list = convert_conic_to_quads(last_point, (control_x, control_y), (x, y), weight, conic_tolerance);
+				for quad_points in point_list[1..].chunks_exact(2) {
+					path_builder.quad_to(quad_points[0].0, quad_points[0].1, quad_points[1].0, quad_points[1].1);
+				}
+				last_point = (x, y);
 			}
 			PathSegment::Close => {
 				path_builder.close();
+				last_point = subpath_start_point;
 			}
 		}
 	}
@@ -1555,7 +1592,7 @@ fn build_skia_path(path: &Path2D) -> Option<tiny_skia::Path> {
 }
 
 //==============================================================================
-// 점이 경로 안에 있는지. (곡선은 잘게 나눈 선으로, 감김 수나 홀짝)
+/// 점이 경로 안에 있는지. (곡선은 잘게 나눈 선으로, 감김 수나 홀짝)
 //==============================================================================
 fn is_point_inside(path: &Path2D, matrix: &CanvasMatrix, x: f32, y: f32, fill_rule: CanvasFillRule) -> bool {
 	if !x.is_finite() || !y.is_finite() {
@@ -1567,6 +1604,15 @@ fn is_point_inside(path: &Path2D, matrix: &CanvasMatrix, x: f32, y: f32, fill_ru
 	let curve_step_count = 16;
 	for segment in path.get_segment_list() {
 		match *segment {
+			PathSegment::ConicTo(control_x, control_y, point_x, point_y, weight) => {
+				let control = matrix.transform_point(control_x, control_y);
+				let end = matrix.transform_point(point_x, point_y);
+				for step_index in 1..=curve_step_count {
+					let time = step_index as f32 / curve_step_count as f32;
+					current_polygon.push(evaluate_conic(last_point, control, end, weight, time));
+				}
+				last_point = end;
+			}
 			PathSegment::MoveTo(point_x, point_y) => {
 				if current_polygon.len() > 1 {
 					polygon_list.push(std::mem::take(&mut current_polygon));
@@ -1643,7 +1689,7 @@ fn is_point_inside(path: &Path2D, matrix: &CanvasMatrix, x: f32, y: f32, fill_ru
 }
 
 //==============================================================================
-// 프리멀티플라이드 RGBA 의 일부를 그림으로. (범위가 틀리면 None)
+/// 프리멀티플라이드 RGBA 의 일부를 그림으로. (범위가 틀리면 None)
 //==============================================================================
 fn crop_pixels(pixels: &[u8], image_width: u32, left: u32, top: u32, width: u32, height: u32) -> Option<Pixmap> {
 	let mut pixmap = Pixmap::new(width, height)?;
@@ -1657,7 +1703,7 @@ fn crop_pixels(pixels: &[u8], image_width: u32, left: u32, top: u32, width: u32,
 }
 
 //==============================================================================
-// 패턴 그림. (패턴이 아니면 None, 되풀이하지 않는 패턴은 투명한 테를 둘러 늘인 끝이 투명하게)
+/// 패턴 그림. (패턴이 아니면 None, 되풀이하지 않는 패턴은 투명한 테를 둘러 늘인 끝이 투명하게)
 //==============================================================================
 fn build_pattern_pixmap(style: &CanvasStyle) -> Option<Pixmap> {
 	let pattern = match style {
@@ -1678,7 +1724,7 @@ fn build_pattern_pixmap(style: &CanvasStyle) -> Option<Pixmap> {
 }
 
 //==============================================================================
-// 칠할 것 → tiny-skia 칠. (색, 그라데이션, 패턴. 사용자 좌표 → 칠하는 그림 좌표 행렬과 투명도를 받는다)
+/// 칠할 것 → tiny-skia 칠. (색, 그라데이션, 패턴. 사용자 좌표 → 칠하는 그림 좌표 행렬과 투명도를 받는다)
 //==============================================================================
 fn build_paint<'a>(style: Option<&CanvasStyle>, style_matrix: &CanvasMatrix, alpha: f32, blend_mode: BlendMode, pattern_pixmap: Option<&'a Pixmap>) -> Paint<'a> {
 	let mut paint = Paint {
@@ -1724,7 +1770,7 @@ fn build_paint<'a>(style: Option<&CanvasStyle>, style_matrix: &CanvasMatrix, alp
 }
 
 //==============================================================================
-// 그라데이션 칠. (멈춤이 없으면 투명, 하나면 그 색. 원본처럼 같은 자리 멈춤은 날카롭게 바뀐다)
+/// 그라데이션 칠. (멈춤이 없으면 투명, 하나면 그 색. 원본처럼 같은 자리 멈춤은 날카롭게 바뀐다)
 //==============================================================================
 fn build_gradient_shader(gradient: &CanvasGradient, style_transform: Transform, alpha: f32) -> Shader<'static> {
 	let stop_list: Vec<GradientStop> = gradient.get_color_stops().iter().map(|(offset, color)| GradientStop::new(*offset, convert_color(*color, alpha))).collect();
@@ -1748,7 +1794,7 @@ fn build_gradient_shader(gradient: &CanvasGradient, style_transform: Transform, 
 }
 
 //==============================================================================
-// 모양 하나 칠하기.
+/// 모양 하나 칠하기.
 //==============================================================================
 fn render_shape(target: &mut Pixmap, shape: &CanvasShape, paint: &Paint, alpha: f32, blend_mode: BlendMode, mask: Option<&Mask>) {
 	match shape {
@@ -1770,7 +1816,7 @@ fn render_shape(target: &mut Pixmap, shape: &CanvasShape, paint: &Paint, alpha: 
 }
 
 //==============================================================================
-// 따로 칠한 층을 캔버스 전체에 합치기. (모양 밖의 투명한 곳도 합치기를 받는다)
+/// 따로 칠한 층을 캔버스 전체에 합치기. (모양 밖의 투명한 곳도 합치기를 받는다)
 //==============================================================================
 fn composite_layer(target: &mut Pixmap, layer: &Pixmap, alpha: f32, blend_mode: BlendMode, mask: Option<&Mask>) {
 	let pixmap_paint = PixmapPaint {
@@ -1782,7 +1828,7 @@ fn composite_layer(target: &mut Pixmap, layer: &Pixmap, alpha: f32, blend_mode: 
 }
 
 //==============================================================================
-// 그림자 층. (모양의 알파를 흐리고 그림자 색으로 칠해 밀림만큼 옮긴다. 흐림 시그마는 shadowBlur / 2)
+/// 그림자 층. (모양의 알파를 흐리고 그림자 색으로 칠해 밀림만큼 옮긴다. 흐림 시그마는 shadowBlur / 2)
 //==============================================================================
 fn build_shadow_layer(layer: &Pixmap, shadow_color: Color, shadow_blur: f32, offset_x: f32, offset_y: f32) -> Option<Pixmap> {
 	let width = layer.width() as usize;
@@ -1825,7 +1871,7 @@ fn build_shadow_layer(layer: &Pixmap, shadow_color: Color, shadow_blur: f32, off
 }
 
 //==============================================================================
-// 알파 흐리기. (가우스를 상자 흐림 세 번으로, 가로 다음 세로)
+/// 알파 흐리기. (가우스를 상자 흐림 세 번으로, 가로 다음 세로)
 //==============================================================================
 fn blur_alpha_plane(alpha_plane: &mut [f32], width: usize, height: usize, sigma: f32) {
 	let box_size_list = compute_box_sizes(sigma, 3);
@@ -1838,7 +1884,7 @@ fn blur_alpha_plane(alpha_plane: &mut [f32], width: usize, height: usize, sigma:
 }
 
 //==============================================================================
-// 가우스를 닮은 상자 크기들. (홀수, 셋을 이어 시그마가 되게)
+/// 가우스를 닮은 상자 크기들. (홀수, 셋을 이어 시그마가 되게)
 //==============================================================================
 fn compute_box_sizes(sigma: f32, box_count: usize) -> Vec<usize> {
 	let ideal_width = ((12.0 * sigma * sigma / box_count as f32) + 1.0).sqrt();
@@ -1854,7 +1900,7 @@ fn compute_box_sizes(sigma: f32, box_count: usize) -> Vec<usize> {
 }
 
 //==============================================================================
-// 가로 상자 흐림. (밖은 0)
+/// 가로 상자 흐림. (밖은 0)
 //==============================================================================
 fn box_blur_horizontal(source: &[f32], target: &mut [f32], width: usize, height: usize, radius: usize) {
 	let window_size = (radius * 2 + 1) as f32;
@@ -1874,7 +1920,7 @@ fn box_blur_horizontal(source: &[f32], target: &mut [f32], width: usize, height:
 }
 
 //==============================================================================
-// 세로 상자 흐림. (밖은 0)
+/// 세로 상자 흐림. (밖은 0)
 //==============================================================================
 fn box_blur_vertical(source: &[f32], target: &mut [f32], width: usize, height: usize, radius: usize) {
 	let window_size = (radius * 2 + 1) as f32;
@@ -1893,14 +1939,14 @@ fn box_blur_vertical(source: &[f32], target: &mut [f32], width: usize, height: u
 }
 
 //==============================================================================
-// 시험. (픽셀은 크롬 Canvas2D 와 같은 꼴로 나오는지 본다)
+/// 시험. (픽셀은 크롬 Canvas2D 와 같은 꼴로 나오는지 본다)
 //==============================================================================
 #[cfg(test)]
 mod tests {
 	use super::*;
 
 	//==============================================================================
-	// 한 픽셀의 곧은 RGBA.
+	/// 한 픽셀의 곧은 RGBA.
 	//==============================================================================
 	fn read_pixel(canvas: &Canvas2D, x: i32, y: i32) -> [u8; 4] {
 		let image_data = canvas.get_image_data(x, y, 1, 1);
@@ -1908,7 +1954,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 사각형, 투명도, 지우기, 변환, 픽셀 읽고 쓰기, 엔진 그림.
+	/// 사각형, 투명도, 지우기, 변환, 픽셀 읽고 쓰기, 엔진 그림.
 	//==============================================================================
 	#[test]
 	fn rect_alpha_transform_and_pixels() {
@@ -1956,7 +2002,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 경로: 원, 짝홀 채우기, 점 안에 있는지, 자르기, 긋기와 점선.
+	/// 경로: 원, 짝홀 채우기, 점 안에 있는지, 자르기, 긋기와 점선.
 	//==============================================================================
 	#[test]
 	fn path_fill_clip_and_stroke() {
@@ -2013,7 +2059,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 그라데이션, 그림자, 모양 밖도 지우는 합치기, 그림 그리기와 패턴.
+	/// 그라데이션, 그림자, 모양 밖도 지우는 합치기, 그림 그리기와 패턴.
 	//==============================================================================
 	#[test]
 	fn gradient_shadow_composite_and_image() {
@@ -2087,7 +2133,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 글: 엔진 글자 캐시로 칠하고 잰다. (맥에서 시스템 글꼴이 있을 때)
+	/// 글: 엔진 글자 캐시로 칠하고 잰다. (맥에서 시스템 글꼴이 있을 때)
 	//==============================================================================
 	#[cfg(target_os = "macos")]
 	#[test]

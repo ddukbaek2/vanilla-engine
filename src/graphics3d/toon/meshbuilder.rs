@@ -31,27 +31,39 @@ const DEGENERATE_AREA: f32 = 1e-12;
 
 //==============================================================================
 // 기본 도형. (가운데가 원점인 자리, 노멀, 꼭짓점 번호)
-//==============================================================================
 // - uvs 는 점마다 텍스처 좌표 둘이다. (상자와 구만 짓는다, 비면 없음)
+//==============================================================================
 #[derive(Clone, Debug, Default)]
 pub struct ToonGeometry {
+	// 점마다 자리 셋.
 	pub positions: Vec<f32>,
+	// 점마다 단위 노멀 셋.
 	pub normals: Vec<f32>,
+	// 삼각형마다 점 번호 셋.
 	pub indices: Vec<u32>,
 	pub uvs: Vec<f32>,
 }
 
 impl ToonGeometry {
+	//==============================================================================
+	// 점 하나 담기. (자리와 노멀)
+	//==============================================================================
 	fn push_point(&mut self, position: [f32; 3], normal: [f32; 3]) {
 		self.positions.extend_from_slice(&position);
 		self.normals.extend_from_slice(&normal);
 	}
 
+	//==============================================================================
+	// 점 하나의 텍스처 좌표 담기.
+	//==============================================================================
 	fn push_uv(&mut self, u: f32, v: f32) {
 		self.uvs.push(u);
 		self.uvs.push(v);
 	}
 
+	//==============================================================================
+	// 지금까지 담은 점 수. (다음에 담을 점의 번호)
+	//==============================================================================
 	fn get_point_count(&self) -> u32 {
 		(self.positions.len() / 3) as u32
 	}
@@ -62,13 +74,20 @@ impl ToonGeometry {
 //==============================================================================
 #[derive(Clone, Copy, Debug)]
 pub struct ToonPartOptions {
+	// 빛남의 세기. (꼭짓점의 재질 첫 칸, 0 이면 빛나지 않음)
 	pub glow: f32,
+	// 빛을 받지 않음. (꼭짓점의 재질 둘째 칸, 그늘 없이 제 색)
 	pub is_unlit: bool,
+	// 바깥선 껍데기를 담을지.
 	pub has_outline: bool,
+	// 바깥선 굵기. (기본 DEFAULT_OUTLINE_WIDTH)
 	pub outline_width: f32,
 }
 
 impl Default for ToonPartOptions {
+	//==============================================================================
+	// 기본 꼴. (빛남 0, 빛을 받음, 바깥선 기본 굵기)
+	//==============================================================================
 	fn default() -> ToonPartOptions {
 		ToonPartOptions { glow: 0.0, is_unlit: false, has_outline: true, outline_width: DEFAULT_OUTLINE_WIDTH }
 	}
@@ -88,13 +107,19 @@ pub struct ToonQuad {
 //==============================================================================
 #[derive(Clone, Debug, Default)]
 pub struct ToonMeshArrays {
+	// 몸의 꼭짓점. (VERTEX_FLOAT_COUNT 씩)
 	pub vertex_data: Vec<f32>,
 	pub index_data: Vec<u32>,
+	// 바깥선 껍데기의 자리. (3 씩)
 	pub outline_vertex_data: Vec<f32>,
 	pub outline_index_data: Vec<u32>,
+	// 바깥선 껍데기의 점마다 밀기 전 몸의 자리. (3 씩, 받은 껍데기는 그 자리 그대로)
 	pub outline_base_data: Vec<f32>,
+	// 꼭짓점마다 뼈대 번호 넷과 무게 넷. (뼈대가 있는 모형만, SKIN_FLOAT_COUNT 씩)
 	pub skin_data: Vec<f32>,
+	// 바깥선 껍데기의 점마다 뼈대 번호 넷과 무게 넷.
 	pub outline_skin_data: Vec<f32>,
+	// 뼈대. (read_glb_arrays 가 채운다, MeshBuilder 는 None)
 	pub skeleton: Option<ToonSkeleton>,
 	// GLB 의 안쪽 껍데기와 안쪽 몸이 든 자리. ((시작, 개수) 들, read_glb_arrays 가 채운다)
 	pub inner_outline_ranges: Vec<(usize, usize)>,
@@ -125,6 +150,7 @@ pub struct ToonMaterialRange {
 	pub emissive_factor: [f32; 3],
 	pub base_color_image: Option<usize>,
 	pub emissive_image: Option<usize>,
+	// 이 프리미티브에 텍스처 좌표가 있는지.
 	pub has_uv: bool,
 }
 
@@ -517,11 +543,17 @@ fn read_face_normal(first: [f32; 3], second: [f32; 3], third: [f32; 3]) -> [f32;
 	[first_edge[1] * second_edge[2] - first_edge[2] * second_edge[1], first_edge[2] * second_edge[0] - first_edge[0] * second_edge[2], first_edge[0] * second_edge[1] - first_edge[1] * second_edge[0]]
 }
 
+//==============================================================================
+// 배열에서 점 하나의 세 수 읽기.
+//==============================================================================
 fn read_point(values: &[f32], point_index: u32) -> [f32; 3] {
 	let offset = point_index as usize * 3;
 	[values[offset], values[offset + 1], values[offset + 2]]
 }
 
+//==============================================================================
+// 세 수 벡터의 내적.
+//==============================================================================
 fn dot(first: [f32; 3], second: [f32; 3]) -> f32 {
 	first[0] * second[0] + first[1] * second[1] + first[2] * second[2]
 }
@@ -533,6 +565,9 @@ fn read_point_key(point: [f32; 3]) -> (i64, i64, i64) {
 	((point[0] * 10000.0).round() as i64, (point[1] * 10000.0).round() as i64, (point[2] * 10000.0).round() as i64)
 }
 
+//==============================================================================
+// 노멀을 1e-3 으로 반올림한 열쇠. (같은 자리에 같은 법선을 두 번 더하지 않는다)
+//==============================================================================
 fn read_normal_key(normal: [f32; 3]) -> (i64, i64, i64) {
 	((normal[0] * 1000.0).round() as i64, (normal[1] * 1000.0).round() as i64, (normal[2] * 1000.0).round() as i64)
 }
@@ -542,15 +577,20 @@ fn read_normal_key(normal: [f32; 3]) -> (i64, i64, i64) {
 //==============================================================================
 #[derive(Default)]
 pub struct MeshBuilder {
+	// 꼭짓점의 수. (VERTEX_FLOAT_COUNT 씩)
 	vertices: Vec<f32>,
 	indices: Vec<u32>,
+	// 바깥선 껍데기의 자리. (3 씩)
 	outline_positions: Vec<f32>,
+	// 바깥선 껍데기의 점마다 밀기 전 몸의 자리. (3 씩, 받은 껍데기는 그 자리 그대로)
 	outline_base_positions: Vec<f32>,
 	outline_indices: Vec<u32>,
+	// 꼭짓점마다 뼈대 번호 넷과 무게 넷. (뼈대가 있는 모형만, SKIN_FLOAT_COUNT 씩)
 	skin_values: Vec<f32>,
 	outline_skin_values: Vec<f32>,
 	// 꼭짓점마다 텍스처 좌표 둘. (UV 를 준 꼭짓점이 있을 때만, 없는 꼭짓점은 0)
 	uv_values: Vec<f32>,
+	// 재질 범위. (add_material_range 로 담은 차례)
 	material_ranges: Vec<ToonMaterialRange>,
 }
 
@@ -583,10 +623,16 @@ impl MeshBuilder {
 		self.outline_indices.len()
 	}
 
+	//==============================================================================
+	// 지금까지 담은 몸의 꼭짓점 수. (다음에 담을 꼭짓점의 번호)
+	//==============================================================================
 	fn get_vertex_count(&self) -> u32 {
 		(self.vertices.len() / VERTEX_FLOAT_COUNT) as u32
 	}
 
+	//==============================================================================
+	// 지금까지 담은 바깥선 껍데기의 점 수. (다음에 담을 점의 번호)
+	//==============================================================================
 	fn get_outline_point_count(&self) -> u32 {
 		(self.outline_positions.len() / 3) as u32
 	}
@@ -630,6 +676,9 @@ impl MeshBuilder {
 		MeshBuilder::push_quad_indices(&mut self.indices, start_index, is_flipped);
 	}
 
+	//==============================================================================
+	// 네모 면 하나의 삼각형 둘 담기. (뒤집으면 감기를 거꾸로)
+	//==============================================================================
 	fn push_quad_indices(target: &mut Vec<u32>, start_index: u32, is_flipped: bool) {
 		if is_flipped {
 			target.extend_from_slice(&[start_index, start_index + 2, start_index + 1, start_index, start_index + 3, start_index + 2]);

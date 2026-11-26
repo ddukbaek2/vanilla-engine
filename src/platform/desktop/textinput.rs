@@ -184,6 +184,12 @@ fn translate_key(logical_key: &Key, physical_key: PhysicalKey, text: Option<&str
 	let is_control = modifiers_state.control_key() || modifiers_state.super_key();
 	let is_alt = modifiers_state.alt_key();
 	if is_control && !is_alt {
+		if let Some(movement_key) = translate_modified_movement_key(logical_key, modifiers_state) {
+			return Some(TextInputEventKind::Key {
+				key: movement_key,
+				is_shift,
+			});
+		}
 		let shortcut_key = translate_shortcut_key(logical_key, physical_key, is_shift)?;
 		return Some(TextInputEventKind::Key {
 			key: shortcut_key,
@@ -222,6 +228,19 @@ fn translate_key(logical_key: &Key, physical_key: PhysicalKey, text: Option<&str
 			NamedKey::End => {
 				Some(TextInputKey::End)
 			}
+			NamedKey::ArrowUp => {
+				Some(TextInputKey::Up)
+			}
+			NamedKey::ArrowDown => {
+				Some(TextInputKey::Down)
+			}
+			// 블링크 키 표: 맥이 아니면 PageUp, PageDown 이 MovePageUp, MovePageDown, 맥은 Option 과 함께일 때.
+			NamedKey::PageUp if !cfg!(target_os = "macos") || is_alt => {
+				Some(TextInputKey::PageUp)
+			}
+			NamedKey::PageDown if !cfg!(target_os = "macos") || is_alt => {
+				Some(TextInputKey::PageDown)
+			}
 			NamedKey::Enter => {
 				Some(TextInputKey::Enter)
 			}
@@ -247,6 +266,60 @@ fn translate_key(logical_key: &Key, physical_key: PhysicalKey, text: Option<&str
 		return None;
 	}
 	Some(TextInputEventKind::Commit(text.to_string()))
+}
+
+//==============================================================================
+/// Ctrl/Cmd 와 함께 누른 이동 키. (없으면 None)
+/// - 맥이 아니면 블링크 키 표의 Ctrl + Home, End(MoveToBeginningOfDocument, MoveToEndOfDocument).
+/// - 맥은 Cmd + 왼쪽, 오른쪽이 줄 앞과 끝, Cmd + 위, 아래가 글 앞과 끝이다. (맥 기본 키 묶음. 크롬은 맥 키 묶음이 내는 Cocoa 명령을 블링크가 받는다)
+//==============================================================================
+fn translate_modified_movement_key(logical_key: &Key, modifiers_state: ModifiersState) -> Option<TextInputKey> {
+	let named_key = match logical_key {
+		Key::Named(named_key) => {
+			named_key
+		}
+		_ => {
+			return None;
+		}
+	};
+	if cfg!(target_os = "macos") {
+		if !modifiers_state.super_key() {
+			return None;
+		}
+		match named_key {
+			NamedKey::ArrowLeft => {
+				Some(TextInputKey::Home)
+			}
+			NamedKey::ArrowRight => {
+				Some(TextInputKey::End)
+			}
+			NamedKey::ArrowUp => {
+				Some(TextInputKey::DocumentStart)
+			}
+			NamedKey::ArrowDown => {
+				Some(TextInputKey::DocumentEnd)
+			}
+			_ => {
+				None
+			}
+		}
+	}
+	else {
+		if !modifiers_state.control_key() {
+			return None;
+		}
+		match named_key {
+			NamedKey::Home => {
+				Some(TextInputKey::DocumentStart)
+			}
+			NamedKey::End => {
+				Some(TextInputKey::DocumentEnd)
+			}
+			_ => {
+				None
+			}
+		}
+	}
 }
 
 //==============================================================================
@@ -314,10 +387,15 @@ fn translate_shortcut_key(logical_key: &Key, physical_key: PhysicalKey, is_shift
 	}
 }
 
+/// 클립보드를 여는 차례. (스레드마다 든 클립보드를 한 번에 하나씩 쓴다)
+static CLIPBOARD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 //==============================================================================
 /// 클립보드를 열어 일 하기. (열 수 없으면 None)
 //==============================================================================
 fn with_clipboard<R>(action: impl FnOnce(&mut arboard::Clipboard) -> R) -> Option<R> {
+	// 시스템 클립보드는 프로세스에 하나라 스레드가 여럿이어도 한 번에 하나씩 연다. (맥 NSPasteboard 를 여러 스레드가 함께 만지면 예외가 난다)
+	let _clipboard_guard = CLIPBOARD_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
 	CLIPBOARD.with(|clipboard_cell| {
 		let mut clipboard_slot = clipboard_cell.borrow_mut();
 		if clipboard_slot.is_none() {
@@ -445,6 +523,31 @@ mod tests {
 		assert_eq!(escape, None);
 		let other_shortcut = translate_key(&Key::Character("q".into()), PhysicalKey::Code(KeyCode::KeyQ), None, ModifiersState::CONTROL);
 		assert_eq!(other_shortcut, None);
+
+		// 여러 줄 이동 키. (블링크 키 표, 맥은 기본 키 묶음)
+		let translate_named = |named_key: NamedKey, key_code: KeyCode, modifiers_state: ModifiersState| -> Option<TextInputKey> {
+			match translate_key(&Key::Named(named_key), PhysicalKey::Code(key_code), None, modifiers_state) {
+				Some(TextInputEventKind::Key { key, .. }) => {
+					Some(key)
+				}
+				_ => {
+					None
+				}
+			}
+		};
+		assert_eq!(translate_named(NamedKey::ArrowUp, KeyCode::ArrowUp, no_modifiers), Some(TextInputKey::Up));
+		assert_eq!(translate_named(NamedKey::ArrowDown, KeyCode::ArrowDown, ModifiersState::SHIFT), Some(TextInputKey::Down));
+		assert_eq!(translate_named(NamedKey::PageDown, KeyCode::PageDown, ModifiersState::ALT), Some(TextInputKey::PageDown));
+		if cfg!(target_os = "macos") {
+			assert_eq!(translate_named(NamedKey::PageDown, KeyCode::PageDown, no_modifiers), None);
+			assert_eq!(translate_named(NamedKey::ArrowLeft, KeyCode::ArrowLeft, ModifiersState::SUPER), Some(TextInputKey::Home));
+			assert_eq!(translate_named(NamedKey::ArrowDown, KeyCode::ArrowDown, ModifiersState::SUPER), Some(TextInputKey::DocumentEnd));
+		}
+		else {
+			assert_eq!(translate_named(NamedKey::PageUp, KeyCode::PageUp, no_modifiers), Some(TextInputKey::PageUp));
+			assert_eq!(translate_named(NamedKey::Home, KeyCode::Home, ModifiersState::CONTROL), Some(TextInputKey::DocumentStart));
+			assert_eq!(translate_named(NamedKey::End, KeyCode::End, ModifiersState::CONTROL | ModifiersState::SHIFT), Some(TextInputKey::DocumentEnd));
+		}
 	}
 
 	//==============================================================================

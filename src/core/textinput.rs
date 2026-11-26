@@ -43,11 +43,23 @@ pub enum TextInputKey {
 	Left,
 	/// 커서를 한 글자 오른쪽으로. (is_shift 면 선택을 늘린다)
 	Right,
-	/// 커서를 맨 앞으로. (is_shift 면 선택을 늘린다)
+	/// 줄 앞. (여러 줄 필드는 보이는 줄의 앞, 한 줄 필드는 글 앞. 맥은 Cmd + 왼쪽도, is_shift 면 선택을 늘린다)
 	Home,
-	/// 커서를 맨 끝으로. (is_shift 면 선택을 늘린다)
+	/// 줄 끝. (여러 줄 필드는 보이는 줄의 끝, 한 줄 필드는 글 끝. 맥은 Cmd + 오른쪽도, is_shift 면 선택을 늘린다)
 	End,
-	/// 입력 마치기. (필드가 제출 이벤트를 낸다)
+	/// 위 줄. (여러 줄 필드, 한 줄 DOM 입력 칸은 글 앞)
+	Up,
+	/// 아래 줄. (여러 줄 필드, 한 줄 DOM 입력 칸은 글 끝)
+	Down,
+	/// 한 화면만큼 위. (여러 줄 필드, 맥은 Option 과 함께)
+	PageUp,
+	/// 한 화면만큼 아래. (여러 줄 필드, 맥은 Option 과 함께)
+	PageDown,
+	/// 글 앞. (Ctrl + Home, 맥은 Cmd + 위)
+	DocumentStart,
+	/// 글 끝. (Ctrl + End, 맥은 Cmd + 아래)
+	DocumentEnd,
+	/// 엔터. (한 줄 필드는 제출 이벤트를 내고, 여러 줄 필드는 줄을 넣는다)
 	Enter,
 	/// 원본 캔버스 모드처럼 필드는 쓰지 않는다. (게임이 다음 칸으로 옮길 때 보라고 넘긴다)
 	Tab,
@@ -193,6 +205,8 @@ pub struct TextInputFieldState {
 	pub max_length: usize,
 	/// 필드 쪽에서 값이나 커서를 바꿀 때마다 는다. (웹이 숨긴 <input> 에 다시 써야 하는지 볼 때)
 	pub value_revision: u64,
+	/// 여러 줄 필드인지. (웹은 숨긴 `<textarea>` 를 쓴다)
+	pub is_multiline: bool,
 }
 
 //==============================================================================
@@ -695,6 +709,7 @@ mod tests {
 			cursor_index: 0,
 			max_length: 0,
 			value_revision: 0,
+			is_multiline: false,
 		});
 		assert!(text_input.get_active_field_state().is_none());
 		text_input.finish_frame();
