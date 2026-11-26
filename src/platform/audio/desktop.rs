@@ -427,6 +427,7 @@ fn open_output_stream(renderer: &Arc<std::sync::Mutex<MixerRenderer>>, needs_res
 //==============================================================================
 /// 꼴 하나로 스트림 짓기. (믹서가 실수로 채운 것을 장치 꼴로 바꾼다. 장치가 빠지면 다시 열라고 알리고, 그 밖의 오류는 한 번만 알린다)
 /// - 믹서는 스트림을 다시 열 때만 잠깐 잠긴다. 소리 스레드는 기다리지 않고 그 동안 0 을 낸다.
+/// - 콜백 스레드의 첫 부름에서 크롬의 소리 스레드와 같은 우선순위로 올린다. (threadpriority.rs)
 //==============================================================================
 fn build_output_stream<T>(device: &cpal::Device, stream_config: cpal::StreamConfig, renderer: &Arc<std::sync::Mutex<MixerRenderer>>, needs_restart: &Arc<AtomicBool>) -> Result<cpal::Stream, String>
 where
@@ -437,9 +438,15 @@ where
 	let is_error_reported = Arc::new(AtomicBool::new(false));
 	let callback_renderer = renderer.clone();
 	let error_needs_restart = needs_restart.clone();
+	let sample_rate = stream_config.sample_rate;
+	let mut is_thread_promoted = false;
 	device.build_output_stream::<T, _, _>(
 		stream_config,
 		move |output: &mut [T], _: &cpal::OutputCallbackInfo| {
+			if !is_thread_promoted {
+				is_thread_promoted = true;
+				super::threadpriority::promote_current_thread(output.len() / channel_count.max(1), sample_rate);
+			}
 			if float_output.len() < output.len() {
 				float_output.resize(output.len(), 0.0);
 			}
