@@ -1764,7 +1764,22 @@ impl Canvas2D {
 			0.0
 		};
 		let padding = stroke_radius.ceil() as i32 + 1;
-		let text_raster = match rasterize_text_without_graphic(text, &self.state.font.drawing_font, text_scale, padding, ShapingDirection::LeftToRight) {
+		// 글자 색 밝기. (크롬 스키아 SkPaintPriv::ComputeLuminanceColor: 한 색이면 그 색, 그라데이션이나 패턴이면 회색 0.5)
+		let paint_style = if is_stroke {
+			&self.state.stroke_style
+		}
+		else {
+			&self.state.fill_style
+		};
+		let luminance_color = match paint_style {
+			CanvasStyle::Color(color) => {
+				*color
+			}
+			_ => {
+				Color::create(0.5, 0.5, 0.5, 1.0)
+			}
+		};
+		let text_raster = match rasterize_text_without_graphic(text, &self.state.font.drawing_font, text_scale, padding, ShapingDirection::LeftToRight, luminance_color) {
 			Some(text_raster) => {
 				text_raster
 			}
