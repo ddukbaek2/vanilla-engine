@@ -290,3 +290,22 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
 | 이름은 러스트 규칙(snake_case, UpperCamelCase, SCREAMING_SNAKE_CASE)이다 | Rust API Guidelines C-CASE 를 따른다 |
 | async 작업은 컨텍스트의 with(\|씬, 엔진\| ...) 안에서만 씬과 엔진을 만진다 (원본은 await 다음 줄에서 this 와 엔진을 바로 쓴다) | 전역 엔진이 없고 노드를 NodeId 로 가리키는 것과 같은 러스트 빌림 꼴이다. 러스트 퓨처는 &mut 를 await 너머로 쥘 수 없어, 폴링하는 동안만 빌려 주어 이중 빌림이 생기지 않게 했다 |
 | 원본 reject 는 Promise<Result<T, E>> 의 reject(까닭)이고, 실패할 수 있는 손잡이의 await 는 Result 로 끝난다 | 예외 대신 Result 를 쓰는 것과 같다 |
+
+**초안(experimental)의 꼴** (0.4.0 뒤 기능의 초안, 문서에는 넣지 않는다. 기능과 동작은 두 엔진이 같고 아래는 언어 꼴만 다르다)
+
+| 차이 | 까닭 |
+| --- | --- |
+| 원본의 선택 인자는 기본값을 가진 옵션 구조체(SaveSlotOptions, BodyDefinition2D, ShapeDefinition2D 같은 것)나 `_with_` 함수(Tilemap::create_layer_with_chunk_size 가 원본 createLayer(name, chunkSize))다 | 러스트에는 선택 인자가 없다. 기본값은 원본과 같다 |
+| 원본의 null 과 -1(없음)은 Option 이다 (find_ik_constraint_index, get_listener, find_layer_index 같은 것) | 러스트 관례. 없을 때의 뜻은 같다 |
+| 원본의 예외와 결과 객체({ isSuccess, error, detail, info })는 Result 다 (SaveGameManager 의 save, load 는 Result<_, SaveGameError>, TiledMapReader 는 Err(글) 이고 글은 원본 Error 글과 같다) | 예외 대신 Result 를 쓰는 엔진 꼴과 같다. 실패 까닭의 이름과 글은 두 엔진이 같다 |
+| 원본이 { azimuth, elevation }, { column, row } 객체로 돌려주는 곳은 튜플이나 GridCell 같은 작은 구조체다 | 러스트 관례. 값은 같다 |
+| 러스트에만 있는 꼴 타입: ShapeGeometry2D(원본은 모양 객체 아무거나), Skeleton2DAttachment(원본은 붙임 객체 아무거나), DynamicTree<T>(원본은 사용자 값 아무거나) | 원본의 '아무 객체' 자리를 열거형과 제네릭으로 적는다 |
+| 원본 게터가 돌려준 객체를 고쳐 쓰는 자리는 `_mut` 게터다 (get_player_mut, get_listener_mut, get_tileset_mut, find_bone_mut 같은 것). 원본 setPlayer(null), setListener(null) 자리는 take_player, take_listener 다 | 러스트는 값을 옮겨 담는다. 원본 게터 가운데 안쪽 상태가 어긋날 수 있는 것(Tilemap.getTilesets, getLayers, 타일 오프셋, 층 색과 오프셋 같은 것)은 원본도 사본이나 얼린 배열을 돌려준다 |
+| 넣은 타일셋, 층, 플레이어, 리스너는 넣은 곳이 가진다. 러스트는 값을 옮기고(add_tileset(tileset), set_player(player)), 원본은 같은 객체를 담아 넣은 뒤에도 그 객체로 고칠 수 있다(러스트는 get_tileset_mut 같은 `_mut` 게터로 같은 일을 한다). 한 타일셋을 두 지도에 쓰려면 두 엔진 모두 사본을 넣는다(러스트 clone) | 러스트 옮김을 원본에 맞추려 넣을 때 복사하면 원본의 흔한 꼴(넣은 뒤 그 객체로 고치기)이 말없이 안 먹는다. 그래서 '넣은 곳이 가진다' 를 두 엔진의 약속으로 둔다. 원본에서 같은 객체를 두 지도에 넣는 것은 이 약속 밖이다 |
+| 원본 RigidBody2D.setBody 의 '바로 노드를 몸 자리에' 는 RigidBody2D::set_body_on_node(node, ..) 이고, getBody 는 with_body, with_body_mut 다 | 컴포넌트는 붙은 노드를 쥐지 않는다 (SpriteAnimator::play(node, ..) 와 같은 꼴). 월드는 Rc<RefCell> 라 빌린 동안 몸을 넘긴다 |
+| 원본 아이디(BodyId2D, ShapeId2D 같은 것)는 같은 객체인지(===)로, 러스트는 값(번호와 세대)으로 견준다 | 러스트 아이디는 Copy 값이다. 같은 몸을 가리키면 두 엔진 모두 같다고 본다 |
+| 원본 Component 의 tick, draw 덮어쓰기는 Component 트레이트 함수다 | 엔진 꼴(상속 대신 트레이트)과 같다 |
+| 질의 콜백은 돌려줌이 정해져 있다 (광선은 f64 몫, 겹침은 bool). 원본은 false 일 때만 멈추고 undefined 는 이어 간다 | 러스트 함수는 돌려줌을 빼먹을 수 없다. 같은 값을 돌려주면 같게 돈다 |
+| 정수 꼴: 타일 값 u32, 덩이 크기 i32, 세이브 판 u32 와 순번 u64, 거르기 비트 u32, 무리 번호 i32 (원본은 number) | 받는 값의 범위는 두 엔진이 같게 검사한다 (타일 값은 0 ~ 2^32 - 1 의 정수만, 세이브 판은 u32 안, 덩이 크기는 1 이상) |
+| 초안의 실수는 원본 number 처럼 f64 다 (물리, 공간 나누기, 세이브, 공간 소리의 배율과 깊이). 엔진 본체와 닿는 값(노드 자리, 엔진 Vector2)은 f32 로 반올림해 넘긴다 | 두 엔진이 비트까지 같은 결과를 내려고. 물리의 실수 고르기도 원본 Math.max, min 과 같은 뜻(experimental::jsmath)이다 |
+| 원본의 문서상 비공개(@private)는 러스트에서 pub(crate) 나 비공개다 (skeleton2djsonreader, dragonbonesreader 모듈, collect_track_events 같은 것) | 공개 API 를 두 엔진이 같게 둔다 |
