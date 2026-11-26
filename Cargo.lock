@@ -3366,6 +3366,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "vanilla-engine-licenses"
+version = "0.3.2"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "vanilla-engine-macros"
 version = "0.3.2"
 dependencies = [

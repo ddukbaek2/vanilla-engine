@@ -82,4 +82,4 @@ It has not yet been run on real mobile devices.
 
 ## License
 
-[MIT](https://github.com/ddukbaek2/vanilla-engine/blob/release/LICENSE) © ddukbaek2
+[MIT](https://github.com/ddukbaek2/vanilla-engine/blob/release/LICENSE) © vanillapunch

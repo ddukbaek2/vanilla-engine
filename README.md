@@ -526,7 +526,18 @@ cargo run --release --example modelviewer
 
 ## 라이선스
 
-[MIT](LICENSE) © ddukbaek2
+[MIT](LICENSE) © vanillapunch
 
+- 제3자 라이선스 고지는 [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) 한 파일에 모았습니다. 엔진이 쓰는 크레이트(직접과 간접, 데스크탑 세 OS 와 wasm 대상, 일반과 빌드 의존)의 이름, 판, 라이선스 식, 고른 라이선스, 저작권 줄, 전문이 들어 있고, 크레이트가 아닌 실린 자료(HRTF 자료, 옮겨 온 셈)는 그 파일의 '실린 자료' 절에 손으로 적습니다. 표기 의무가 없는 라이선스(CC0-1.0, Unlicense, 0BSD, MIT-0)로 쓰는 크레이트는 끝에 한 줄씩만 둡니다.
+- 의존을 바꾸면 `cargo run -p vanilla-engine-licenses` 로 다시 짓고, `cargo run -p vanilla-engine-licenses -- --check` 로 파일이 지금 의존과 같은지 봅니다. (도구는 [tools/TOOLS.md](tools/TOOLS.md) 의 licenses)
+- 게임을 낼 때는 게임의 의존까지 모은 고지 파일을 지어 실행 파일과 함께 냅니다. 게임 자신의 라이선스는 게임의 몫이고, 이 파일은 제3자 고지만 담습니다. 엔진이 실은 자료의 절도 엔진 크레이트에서 읽어 함께 들어갑니다.
+  ```bash
+  # 엔진 저장소를 받아 둔 자리에서 (게임이 엔진을 경로나 git 으로 의존할 때)
+  cargo run --manifest-path <엔진 저장소>/Cargo.toml -p vanilla-engine-licenses -- --manifest-path <게임>/Cargo.toml --out <게임>/dist/THIRD_PARTY_LICENSES.txt
+  # 또는 도구를 한 번 깔아 두고
+  cargo install --git https://github.com/ddukbaek2/vanilla-engine vanilla-engine-licenses
+  vanilla-engine-licenses --manifest-path Cargo.toml --out dist/THIRD_PARTY_LICENSES.txt
+  ```
+  `--out` 의 확장자가 `.md` 면 마크다운, 그 밖이면 글 파일로 씁니다. 게임에 켜고 끄는 기능이 있으면 `--all-features` 로 모든 기능의 의존을 모읍니다.
 - 데스크탑 실행 파일에 싣는 HRTF 자료 `src/platform/audio/hrtf/resources/Composite.flac` 은 크롬이 싣는 파일 그대로이고, IRCAM 의 LISTEN HRTF 데이터베이스에서 나온 응답입니다. 출처와 IRCAM 의 저작권 고지, 이용 조건은 그 폴더의 [README.md](src/platform/audio/hrtf/resources/README.md) 에 있습니다. IRCAM 은 상업 제품에 쓰면 서면으로 알려 달라고 요청합니다. (조건이 아니라 부탁입니다)
-- 크로미엄(BSD-3-Clause)에서 옮긴 셈은 파일 머리에 그 원본을 적었고, fdlibm 을 옮긴 `src/platform/audio/hrtf/fdlibm.rs` 는 Sun Microsystems 의 고지를 그대로 둡니다.
+- 크로미엄과 블링크(BSD-3-Clause, WebKit 시절 파일은 그 BSD 머리), 스키아, ICU4C 와 CLDR, fdlibm, font-rs, Kiwi, tween.js, gl-matrix, Separable SSS, 초안의 libtiled 와 Box2D 에서 옮긴 셈과 표는 엔진 파일과 원본 파일, 고지 원문을 THIRD_PARTY_LICENSES.md 의 실린 자료 절에 적었습니다. fdlibm 을 옮긴 `src/platform/audio/hrtf/fdlibm.rs` 는 Sun Microsystems 의 고지를 소스에도 그대로 둡니다.

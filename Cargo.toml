@@ -3,6 +3,8 @@ name = "vanilla-engine"
 version = "0.3.2"
 description = "바닐라엔진(Vanilla Engine). vanilla.js 를 러스트로 옮긴 게임 엔진. 데스크탑과 웹(wasm)에서 돈다"
 edition = "2021"
+# 저작권자. (LICENSE 의 Copyright 줄과 같다, 라이선스 파일이 없는 크레이트 꾸러미의 고지에 쓰인다)
+authors = ["vanillapunch"]
 license = "MIT"
 repository = "https://github.com/ddukbaek2/vanilla-engine"
 keywords = ["gamedev", "engine", "2d", "3d", "wasm"]
@@ -19,9 +21,9 @@ default = ["tls"]
 # 암호 공급자 ring 이 C 를 빌드해서, 그 대상의 C 헤더가 없는 맥에서 윈도우 대상을 검사할 때는 끈다. (cargo check --target x86_64-pc-windows-msvc --no-default-features)
 tls = ["ewebsock/tls", "dep:rustls"]
 
-# 워크스페이스. (엔진과 절차 매크로 크레이트 macros/, API 문서 자료 뽑기 tools/apidoc. 게임은 엔진 하나만 의존하고 매크로는 엔진이 다시 내보낸 vanilla::reflect 로 쓴다)
+# 워크스페이스. (엔진과 절차 매크로 크레이트 macros/, API 문서 자료 뽑기 tools/apidoc, 제3자 라이선스 모음 짓기 tools/licenses. 게임은 엔진 하나만 의존하고 매크로는 엔진이 다시 내보낸 vanilla::reflect 로 쓴다)
 [workspace]
-members = ["macros", "tools/apidoc"]
+members = ["macros", "tools/apidoc", "tools/licenses"]
 # 저장소에 둔 남의 크레이트는 워크스페이스 시험과 문서에서 뺀다. (엔진이 경로로 의존한다)
 exclude = ["third_party/rustybuzz", "third_party/ttf-parser"]
 

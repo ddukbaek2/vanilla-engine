@@ -82,4 +82,4 @@
 
 ## 라이선스
 
-[MIT](https://github.com/ddukbaek2/vanilla-engine/blob/release/LICENSE) © ddukbaek2
+[MIT](https://github.com/ddukbaek2/vanilla-engine/blob/release/LICENSE) © vanillapunch
