@@ -686,6 +686,29 @@ struct OffscreenTarget {
 }
 
 //==============================================================================
+/// 투명도 층 칸. (화면과 같은 크기의 RGBA8 색 텍스처와 스텐실, begin_opacity_layer 가 쓰고 다 쓰면 모아 두었다 다시 쓴다)
+//==============================================================================
+struct OpacityLayerTarget {
+	texture: GlTexture,
+	framebuffer: GlFramebuffer,
+	stencil_renderbuffer: glow::Renderbuffer,
+	width: i32,
+	height: i32,
+}
+
+//==============================================================================
+/// 쌓인 투명도 층 하나. (end_opacity_layer 가 꺼내 앞 프레임버퍼에 얹는다)
+//==============================================================================
+struct OpacityLayer {
+	/// 층 칸. (못 지었으면 None 이고, 그동안은 층 없이 그대로 그린다)
+	target: Option<OpacityLayerTarget>,
+	/// 층을 열기 전에 그리던 프레임버퍼.
+	previous_framebuffer: Option<GlFramebuffer>,
+	/// 층을 얹을 투명도. (층을 열 때의 전역 알파)
+	global_alpha: f32,
+}
+
+//==============================================================================
 /// 떠 올 영역. (GL 픽셀, 왼쪽 아래 원점)
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1066,6 +1089,10 @@ pub struct Graphic {
 	framebuffer_format_table: HashMap<Option<GlFramebuffer>, OffscreenFormat>,
 	/// 바꿔 끼운 셰이더로 먼저 그려 둘 덧그림 칸. (처음 쓸 때 만든다)
 	layer_target: Option<OffscreenTarget>,
+	/// 열린 투명도 층. (begin_opacity_layer 가 쌓는다)
+	opacity_layer_stack: Vec<OpacityLayer>,
+	/// 다 쓴 투명도 층 칸. (다시 쓴다)
+	opacity_layer_target_pool: Vec<OpacityLayerTarget>,
 	/// 셰이더 섞기로 함께 그릴 파티클 쿼드의 영역. (저장소를 다시 쓴다)
 	particle_group_rect_list: Vec<BackdropRect>,
 	fill_color: Color,
@@ -1238,6 +1265,8 @@ impl Graphic {
 			backdrop_target_table: HashMap::new(),
 			framebuffer_format_table: HashMap::new(),
 			layer_target: None,
+			opacity_layer_stack: Vec::new(),
+			opacity_layer_target_pool: Vec::new(),
 			particle_group_rect_list: Vec::with_capacity(SHADER_BLEND_PARTICLE_GROUP_CAPACITY),
 			fill_color: Color::black(),
 			stroke_color: Color::black(),
@@ -4109,6 +4138,168 @@ impl Graphic {
 			self.gl.color_mask(true, true, true, true);
 			self.gl.stencil_op(glow::KEEP, glow::KEEP, glow::KEEP);
 			self.gl.stencil_func(glow::EQUAL, previous_clip_depth + 1, 0xFF);
+		}
+	}
+
+	//==============================================================================
+	/// 투명도 층 시작. (CSS opacity, 어도비 투명도 묶음처럼 end_opacity_layer 까지 그린 것을 따로 칸에 모았다가 지금 전역 알파로 한 번에 얹는다)
+	/// - 층 안의 그림은 서로 겹친 자리가 비치지 않는다. (노드마다 투명도를 곱해 따로 얹으면 겹친 자리에서 아래 그림이 비친다)
+	/// - 층 안은 전역 알파 1 에서 시작한다. 층 칸은 화면과 같은 크기의 RGBA8 이고 스텐실을 지금 자르기 깊이로 채워 둬 층 안의 자르기도 그대로 된다.
+	///   바깥 자르기는 얹을 때 걸린다. 층은 겹쳐 열 수 있다. 칸을 지을 수 없으면 층 없이 그대로 그린다.
+	/// - NodeTree 는 set_opacity_layer 를 켠 노드의 투명도가 1 보다 작으면 그 노드와 자손을 층으로 그린다.
+	///
+	/// # 예제
+	/// 겹친 두 사각형을 묶어 반투명하게 (겹친 자리에서 아래 사각형이 비치지 않는다)
+	/// ```rust,no_run
+	/// use vanilla::{Graphic, Rect};
+	///
+	/// fn draw(graphic: &mut Graphic) {
+	/// 	graphic.push_state();
+	/// 	graphic.set_global_alpha(0.5);
+	/// 	graphic.begin_opacity_layer();
+	/// 	graphic.set_fill_color("#ff0000");
+	/// 	graphic.draw_rect(Rect::create(100.0, 100.0, 200.0, 100.0));
+	/// 	graphic.set_fill_color("#0000ff");
+	/// 	graphic.draw_rect(Rect::create(200.0, 150.0, 200.0, 100.0));
+	/// 	graphic.end_opacity_layer();
+	/// 	graphic.pop_state();
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn begin_opacity_layer(&mut self) {
+		self.flush_batch();
+		let previous_framebuffer = read_framebuffer_binding(&self.gl);
+		let global_alpha = self.global_alpha;
+		let target = match self.acquire_opacity_layer_target(previous_framebuffer) {
+			Ok(target) => {
+				Some(target)
+			}
+			Err(error) => {
+				eprintln!("Graphic: opacity layer failed: {}", error);
+				None
+			}
+		};
+		if let Some(target) = &target {
+			let clip_depth = self.clip_stack.len() as i32;
+			unsafe {
+				self.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(target.framebuffer));
+				self.gl.color_mask(true, true, true, true);
+				self.gl.stencil_mask(0xFF);
+				self.gl.clear_buffer_f32_slice(glow::COLOR, 0, &[0.0, 0.0, 0.0, 0.0]);
+				self.gl.clear_buffer_i32_slice(glow::STENCIL, 0, &[clip_depth]);
+			}
+			self.is_color_mask_known.set(false);
+			self.global_alpha = 1.0;
+		}
+		self.opacity_layer_stack.push(OpacityLayer {
+			target,
+			previous_framebuffer,
+			global_alpha,
+		});
+	}
+
+	//==============================================================================
+	/// 투명도 층 끝. (begin_opacity_layer 뒤에 그린 것을 앞 프레임버퍼에 층을 열 때의 전역 알파로 얹는다)
+	//==============================================================================
+	pub fn end_opacity_layer(&mut self) {
+		let opacity_layer = match self.opacity_layer_stack.pop() {
+			Some(opacity_layer) => {
+				opacity_layer
+			}
+			None => {
+				return;
+			}
+		};
+		self.flush_batch();
+		self.global_alpha = opacity_layer.global_alpha;
+		let target = match opacity_layer.target {
+			Some(target) => {
+				target
+			}
+			None => {
+				return;
+			}
+		};
+		unsafe {
+			self.gl.bind_framebuffer(glow::FRAMEBUFFER, opacity_layer.previous_framebuffer);
+		}
+
+		// 층 칸을 단위 행렬, 흰색, 틴트 없이 source-over 로 얹는다. (칸은 화면과 같은 크기라 디바이스 픽셀 그대로 짚는다, 텍스처는 아래가 0 행)
+		let viewport_width = self.applied_viewport_width as f32;
+		let viewport_height = self.applied_viewport_height as f32;
+		let transform_matrix = self.transform_matrix;
+		let image_tint_color = self.image_tint_color;
+		let blend_mode = self.blend_mode;
+		self.transform_matrix = TransformMatrix::identity();
+		self.image_tint_color = None;
+		self.set_blend_mode(BlendMode::Normal);
+		let vertex_count = self.write_quad(0, 0.0, 0.0, viewport_width, viewport_height, 0.0, 1.0, 1.0, 0.0) / FLOATS_PER_VERTEX;
+		let white_color = self.white_color;
+		self.batch_suspend_depth += 1;
+		self.draw_vertices(vertex_count, target.texture, white_color);
+		self.batch_suspend_depth -= 1;
+		self.set_blend_mode(blend_mode);
+		self.transform_matrix = transform_matrix;
+		self.image_tint_color = image_tint_color;
+		self.opacity_layer_target_pool.push(target);
+	}
+
+	//==============================================================================
+	/// 투명도 층 칸 꺼내기. (모아 둔 것에서 화면 크기와 같은 것, 없으면 짓는다)
+	//==============================================================================
+	fn acquire_opacity_layer_target(&mut self, framebuffer: Option<GlFramebuffer>) -> Result<OpacityLayerTarget, String> {
+		let viewport_width = self.applied_viewport_width;
+		let viewport_height = self.applied_viewport_height;
+		while let Some(target) = self.opacity_layer_target_pool.pop() {
+			if target.width == viewport_width && target.height == viewport_height {
+				return Ok(target);
+			}
+			self.destroy_opacity_layer_target(target);
+		}
+		unsafe {
+			let texture = self.gl.create_texture()?;
+			self.bind_main_texture(texture);
+			self.gl.tex_image_2d(glow::TEXTURE_2D, 0, glow::RGBA8 as i32, viewport_width, viewport_height, 0, glow::RGBA, glow::UNSIGNED_BYTE, glow::PixelUnpackData::Slice(None));
+			self.gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
+			self.gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
+			self.gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
+			self.gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
+			let stencil_renderbuffer = self.gl.create_renderbuffer()?;
+			self.gl.bind_renderbuffer(glow::RENDERBUFFER, Some(stencil_renderbuffer));
+			self.gl.renderbuffer_storage(glow::RENDERBUFFER, glow::DEPTH24_STENCIL8, viewport_width, viewport_height);
+			self.gl.bind_renderbuffer(glow::RENDERBUFFER, None);
+			let target_framebuffer = self.gl.create_framebuffer()?;
+			self.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(target_framebuffer));
+			self.gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(texture), 0);
+			self.gl.framebuffer_renderbuffer(glow::FRAMEBUFFER, glow::DEPTH_STENCIL_ATTACHMENT, glow::RENDERBUFFER, Some(stencil_renderbuffer));
+			let status = self.gl.check_framebuffer_status(glow::FRAMEBUFFER);
+			self.gl.bind_framebuffer(glow::FRAMEBUFFER, framebuffer);
+			let target = OpacityLayerTarget {
+				texture,
+				framebuffer: target_framebuffer,
+				stencil_renderbuffer,
+				width: viewport_width,
+				height: viewport_height,
+			};
+			if status != glow::FRAMEBUFFER_COMPLETE {
+				self.destroy_opacity_layer_target(target);
+				return Err(format!("framebuffer status 0x{:X}", status));
+			}
+			Ok(target)
+		}
+	}
+
+	//==============================================================================
+	/// 투명도 층 칸 지우기.
+	//==============================================================================
+	fn destroy_opacity_layer_target(&self, target: OpacityLayerTarget) {
+		if self.bound_texture.get() == Some(target.texture) {
+			self.bound_texture.set(None);
+		}
+		unsafe {
+			self.gl.delete_framebuffer(target.framebuffer);
+			self.gl.delete_renderbuffer(target.stencil_renderbuffer);
+			self.gl.delete_texture(target.texture);
 		}
 	}
 
