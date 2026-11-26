@@ -23,6 +23,10 @@ mod mixer;
 #[cfg(not(target_arch = "wasm32"))]
 mod oscillator;
 #[cfg(not(target_arch = "wasm32"))]
+mod panner;
+/// PannerNode 셈. (초안, 데스크탑 믹서와 experimental::spatialaudio 가 같이 쓴다)
+pub(crate) mod pannermath;
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) use desktop::*;
 #[cfg(not(target_arch = "wasm32"))]
 pub use desktop::{AudioBuffer, AudioContext};
@@ -59,6 +63,31 @@ pub(crate) enum GainAutomation {
 	CancelScheduledValues {
 		time: f64,
 	},
+}
+
+/// PannerNode 의 자리와 방향 AudioParam. (초안, positionX ~ orientationZ 차례)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PannerParam {
+	PositionX = 0,
+	PositionY = 1,
+	PositionZ = 2,
+	OrientationX = 3,
+	OrientationY = 4,
+	OrientationZ = 5,
+}
+
+/// AudioListener 의 AudioParam. (초안, positionX ~ upZ 차례)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ListenerParam {
+	PositionX = 0,
+	PositionY = 1,
+	PositionZ = 2,
+	ForwardX = 3,
+	ForwardY = 4,
+	ForwardZ = 5,
+	UpX = 6,
+	UpY = 7,
+	UpZ = 8,
 }
 
 // 플레이어가 소리를 내보낼 곳과 버스의 GainNode. (AudioPlayer::new 의 둘째 인자, 원본 outputNode 자리와 AudioBus.getGainNode)
