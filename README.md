@@ -263,7 +263,7 @@ impl Scene for TitleScene {
 | `new Promise((resolve, reject) => ...)` | `let (promise, resolver) = Promise::create();` (실패는 `Promise<Result<T, E>>` 와 `resolver.reject(까닭)`) |
 
 - 데스크탑은 `EngineConfiguration.asset_directory_paths` 폴더에서 바로 읽고, 웹은 `asset_base_url + 경로` 를 fetch 합니다. 게임 코드는 같습니다.
-- 이미지(png, jpg, webp, gif 첫 장, bmp, ico, svg, avif), 텍스트, JSON, 바이너리, 폰트(ttf, otf, woff, woff2), 오디오(webm, ogg 의 Opus 와 Vorbis, mp3, wav, flac, m4a 와 aac 의 AAC)를 지원합니다. 데스크탑은 엔진이 풀고, 웹은 원본처럼 브라우저가 풉니다. 데스크탑 소리는 크롬 decodeAudioData 와 같은 해석기(FLAC, MP3, PCM, Vorbis 는 크롬이 쓰는 symphonia)로 풀고 앞뒤 다듬기, 44100Hz 로 바꾸기(크로미엄 SincResampler 를 옮긴 것)까지 같게 해 길이와 표본이 크롬과 같습니다. (`tests/assets/audio` 의 27 파일을 크롬 158 의 결과와 견줍니다. HE-AAC v1, v2 와 5.1 AAC 도 풉니다)
+- 이미지(png, jpg, webp, gif 첫 장, bmp, ico, svg, avif), 텍스트, JSON, 바이너리, 폰트(ttf, otf, woff, woff2), 오디오(webm, ogg 의 Opus 와 Vorbis, mp3, wav, flac, m4a 와 aac 의 AAC)를 지원합니다. 데스크탑은 엔진이 풀고, 웹은 원본처럼 브라우저가 풉니다. 데스크탑 그림은 박힌 색 프로필(PNG 의 cICP, iCCP, gAMA 와 cHRM, JPEG 의 ICC, WebP 의 ICCP, AVIF 의 ICC 와 nclx)을 크롬처럼 sRGB 로 바꾸고(PNG, WebP 는 크롬 158 과 비트까지 같습니다), 움직이는 AVIF 는 크롬처럼 첫 장을 씁니다. 데스크탑 소리는 크롬 decodeAudioData 와 같은 해석기(FLAC, MP3, PCM, Vorbis 는 크롬이 쓰는 symphonia)로 풀고 앞뒤 다듬기, 44100Hz 로 바꾸기(크로미엄 SincResampler 를 옮긴 것)까지 같게 해 길이와 표본이 크롬과 같습니다. (`tests/assets/audio` 의 27 파일을 크롬 158 의 결과와 견줍니다. HE-AAC v1, v2 와 5.1 AAC 도 풉니다)
 - 여러 애셋을 함께 받을 때는 `AssetLoader` 가 동시 수만큼 요청하고 진행률과 실패 목록을 셉니다.
 - 로딩에 실패한 애셋도 완료로 처리해서 씬이 멈추지 않습니다.
 
@@ -425,6 +425,7 @@ cargo run --release --example modelviewer
 | [unicode-script](https://crates.io/crates/unicode-script) | 0.5.9 | `core/textshaping.rs` | 글자의 문자(Script). 크롬 캔버스처럼 낱말을 나눌 때 씁니다 | MIT / Apache-2.0 |
 | [unicode-segmentation](https://crates.io/crates/unicode-segmentation) | 1.13.3 | `core/component/text.rs`, `core/textshaping.rs`, `misc/typewriter.rs`, `misc/dynamicfont.rs` | 글자 묶음 나누기(UAX #29). 줄바꿈과 표시 글자 수가 받침, 결합 부호, 이모지 묶음을 쪼개지 않습니다 | MIT / Apache-2.0 |
 | [image](https://crates.io/crates/image) | 0.25.10 | `core/image.rs`, `graphics3d/material.rs`, `graphics3d/toon/glbmeshreader.rs`, `core/colorglyph.rs`, 창 아이콘, 화면 저장 | png, jpeg, webp, gif, bmp, ico 디코딩과 PNG 저장 (이 여섯 형식만 켭니다). 색 이모지 글꼴(sbix, CBDT)의 PNG 글리프도 풉니다 | MIT / Apache-2.0 |
+| [png](https://crates.io/crates/png) | 0.18.1 | `core/colorprofile.rs` | PNG 의 색 청크(cICP, iCCP, sRGB, gAMA, cHRM) 읽기. image 가 이미 쓰는 같은 판이고, 크롬의 스키아 SkPngRustCodec 도 같은 png 0.18 로 읽습니다 | MIT / Apache-2.0 |
 | [slotmap](https://crates.io/crates/slotmap) | 1.1.1 | `core/node/nodetree.rs` | 노드 저장소. 제너레이셔널 핸들 `NodeId` 를 만듭니다 | Zlib |
 | [serde_json](https://crates.io/crates/serde_json) | 1.0.154 | JSON 애셋, 타임라인, 애니메이터, 파티클 설정, 다국어, 로컬 저장소, 애니메이션 클립, 아틀라스, 웹소켓 메시지, UI 문서(씬 파일) | JSON 파싱과 저장. 객체 키는 적힌 차례를 지킵니다 (preserve_order) | MIT / Apache-2.0 |
 | [flate2](https://crates.io/crates/flate2) | 1.1.11 | `graphics3d/fbxloader.rs` | FBX 의 압축 배열(zlib) 해제. 순수 러스트 백엔드라 wasm 에서도 돕니다 | MIT / Apache-2.0 |
