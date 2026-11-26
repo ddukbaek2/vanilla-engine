@@ -12,6 +12,7 @@ use std::collections::BTreeMap;
 //==============================================================================
 /// 세이브 기록을 글로 두는 곳.
 /// - 한 키에 쓰기는 다 되거나 안 되거나여야 한다. (localStorage.setItem, 임시 파일 뒤 이름 바꾸기) SaveGameManager 는 그 위에서 두 키를 번갈아 쓴다.
+/// - 기본 구현은 아무것도 두지 않는다. (원본 SaveStorage 의 기본 메서드와 같다) 구현하는 쪽이 필요한 함수만 다시 정의한다.
 /// # 예제
 /// ```
 /// use vanilla::experimental::savegame::SaveStorage;
@@ -19,16 +20,9 @@ use std::collections::BTreeMap;
 /// struct PrintSaveStorage;
 ///
 /// impl SaveStorage for PrintSaveStorage {
-/// 	fn read_text(&self, _key: &str) -> Option<String> {
-/// 		None
-/// 	}
 /// 	fn write_text(&mut self, key: &str, text: &str) -> bool {
 /// 		println!("{} {}", key, text.len());
 /// 		true
-/// 	}
-/// 	fn remove_text(&mut self, _key: &str) {}
-/// 	fn list_keys(&self, _prefix: &str) -> Vec<String> {
-/// 		Vec::new()
 /// 	}
 /// }
 ///
@@ -47,7 +41,9 @@ pub trait SaveStorage {
 	/// # 돌려줌
 	/// 저장된 글. (없거나 못 읽으면 None)
 	//==============================================================================
-	fn read_text(&self, key: &str) -> Option<String>;
+	fn read_text(&self, _key: &str) -> Option<String> {
+		None
+	}
 
 	//==============================================================================
 	/// 쓰기.
@@ -59,7 +55,9 @@ pub trait SaveStorage {
 	/// # 돌려줌
 	/// 오래 남는 곳에 썼으면 true.
 	//==============================================================================
-	fn write_text(&mut self, key: &str, text: &str) -> bool;
+	fn write_text(&mut self, _key: &str, _text: &str) -> bool {
+		false
+	}
 
 	//==============================================================================
 	/// 지우기.
@@ -67,7 +65,7 @@ pub trait SaveStorage {
 	/// # 인자
 	/// - `key`: 지울 키.
 	//==============================================================================
-	fn remove_text(&mut self, key: &str);
+	fn remove_text(&mut self, _key: &str) {}
 
 	//==============================================================================
 	/// 앞머리가 같은 키를 모두 읽기.
@@ -78,7 +76,9 @@ pub trait SaveStorage {
 	/// # 돌려줌
 	/// 정렬한 키 목록.
 	//==============================================================================
-	fn list_keys(&self, prefix: &str) -> Vec<String>;
+	fn list_keys(&self, _prefix: &str) -> Vec<String> {
+		Vec::new()
+	}
 }
 
 //==============================================================================
@@ -244,6 +244,7 @@ impl SaveStorage for MemorySaveStorage {
 //==============================================================================
 /// 클라우드 저장을 꽂을 자리. (인터페이스만, 스팀 클라우드 같은 것을 게임이나 플랫폼 묶음이 구현한다)
 /// - 주고받는 글은 SaveGameManager::export_slot 의 JSON 이다. (체크섬이 들어 있어 받은 쪽이 깨졌는지 본다)
+/// - 기본 구현은 아무것도 하지 않는다. (원본 SaveCloudProvider 의 기본 메서드와 같다, 올리기 false, 받기 None, 목록은 빈 것)
 /// # 예제
 /// ```
 /// use vanilla::experimental::savegame::SaveCloudProvider;
@@ -285,7 +286,9 @@ pub trait SaveCloudProvider {
 	/// # 돌려줌
 	/// 올렸으면 true.
 	//==============================================================================
-	fn upload(&mut self, slot_id: &str, exported_text: &str) -> bool;
+	fn upload(&mut self, _slot_id: &str, _exported_text: &str) -> bool {
+		false
+	}
 
 	//==============================================================================
 	/// 내려받기.
@@ -296,7 +299,9 @@ pub trait SaveCloudProvider {
 	/// # 돌려줌
 	/// export_slot 의 JSON. (없으면 None)
 	//==============================================================================
-	fn download(&mut self, slot_id: &str) -> Option<String>;
+	fn download(&mut self, _slot_id: &str) -> Option<String> {
+		None
+	}
 
 	//==============================================================================
 	/// 지우기. (칸을 지울 때 부른다)
@@ -304,7 +309,7 @@ pub trait SaveCloudProvider {
 	/// # 인자
 	/// - `slot_id`: 칸 이름.
 	//==============================================================================
-	fn remove(&mut self, slot_id: &str);
+	fn remove(&mut self, _slot_id: &str) {}
 
 	//==============================================================================
 	/// 클라우드에 있는 칸 이름을 모두 읽기.
@@ -312,5 +317,7 @@ pub trait SaveCloudProvider {
 	/// # 돌려줌
 	/// 칸 이름 목록.
 	//==============================================================================
-	fn list_slot_ids(&mut self) -> Vec<String>;
+	fn list_slot_ids(&mut self) -> Vec<String> {
+		Vec::new()
+	}
 }

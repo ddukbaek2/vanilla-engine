@@ -12,6 +12,7 @@
 //! - 아직 없는 것: 연속 충돌(빠른 총알이 얇은 벽을 뚫지 않게 하는 TOI), 한쪽 면 사슬, 프리즘, 모터, 마우스 관절, 몸 종류 바꾸기, 여러 스레드.
 //==============================================================================
 // 옮긴 원문: Box2D 3 의 셈에서 옮김, MIT, THIRD_PARTY_LICENSES.md
+use crate::experimental::jsmath::{js_max, js_min};
 use std::collections::HashMap;
 use std::ops::{Index, IndexMut};
 
@@ -21,6 +22,7 @@ use super::joint2d::{prepare_joint, solve_joint, warm_start_joint, DistanceJoint
 use super::narrowphase2d::{collide_shapes, fill_world_shape, ray_cast_world_shape, test_point_in_world_shape, Manifold, WorldShape};
 use super::physicsid2d::{BodyId2D, JointId2D, ShapeId2D};
 use super::physicsmath2d::PhysicsMath2D;
+use super::physicsuserdata2d::PhysicsUserData2D;
 use super::physicsvector2::PhysicsVector2;
 use super::shape2d::{compute_shape_aabb, compute_shape_extent, compute_shape_mass, set_shape_geometry, should_filters_collide, ChainDefinition2D, QueryFilter2D, Shape2D, ShapeDefinition2D};
 use super::solver2d::{apply_contact_restitution, integrate_rotation, make_softness, prepare_contact, solve_contact, warm_start_contact, Contact, SolverBody, StepContext, STATIC_SOLVER_BODY};
@@ -290,13 +292,13 @@ impl PhysicsWorld2D {
 			gravity_x: world_definition.gravity.x,
 			gravity_y: world_definition.gravity.y,
 			enable_sleep: world_definition.enable_sleep,
-			contact_hertz: world_definition.contact_hertz.max(0.0),
-			contact_damping_ratio: world_definition.contact_damping_ratio.max(0.0),
-			joint_hertz: world_definition.joint_hertz.max(0.0),
-			joint_damping_ratio: world_definition.joint_damping_ratio.max(0.0),
-			restitution_threshold: world_definition.restitution_threshold.max(0.0),
-			maximum_contact_push_speed: world_definition.maximum_contact_push_speed.max(0.0),
-			maximum_linear_speed: world_definition.maximum_linear_speed.max(0.0),
+			contact_hertz: js_max(world_definition.contact_hertz, 0.0),
+			contact_damping_ratio: js_max(world_definition.contact_damping_ratio, 0.0),
+			joint_hertz: js_max(world_definition.joint_hertz, 0.0),
+			joint_damping_ratio: js_max(world_definition.joint_damping_ratio, 0.0),
+			restitution_threshold: js_max(world_definition.restitution_threshold, 0.0),
+			maximum_contact_push_speed: js_max(world_definition.maximum_contact_push_speed, 0.0),
+			maximum_linear_speed: js_max(world_definition.maximum_linear_speed, 0.0),
 			linear_slop,
 			speculative_distance: 4.0 * linear_slop,
 			aabb_margin: 0.05 * units_per_meter,
@@ -444,13 +446,13 @@ impl PhysicsWorld2D {
 				body_definition.angular_velocity
 			};
 		}
-		data.linear_damping = body_definition.linear_damping.max(0.0);
-		data.angular_damping = body_definition.angular_damping.max(0.0);
+		data.linear_damping = js_max(body_definition.linear_damping, 0.0);
+		data.angular_damping = js_max(body_definition.angular_damping, 0.0);
 		data.gravity_scale = body_definition.gravity_scale;
 		data.enable_sleep = body_definition.enable_sleep;
 		data.is_awake = data.body_type != BodyType2D::Static && body_definition.is_awake;
 		data.is_fixed_rotation = body_definition.is_fixed_rotation;
-		data.user_data = body_definition.user_data;
+		data.user_data = body_definition.user_data.clone();
 		let body_id = data.id;
 		self.body_list[index] = Some(data);
 		self.update_body_mass(index);
@@ -554,7 +556,7 @@ impl PhysicsWorld2D {
 			data.update_center();
 			for shape_id in data.shape_id_list.iter() {
 				let shape_data = shape_list[shape_id.get_index()].as_ref().expect("모양");
-				data.maximum_extent = data.maximum_extent.max(compute_shape_extent(shape_data, 0.0, 0.0));
+				data.maximum_extent = js_max(data.maximum_extent, compute_shape_extent(shape_data, 0.0, 0.0));
 			}
 			return;
 		}
@@ -602,7 +604,7 @@ impl PhysicsWorld2D {
 		data.linear_velocity_y += data.angular_velocity * (data.center_x - old_center_x);
 		for shape_id in data.shape_id_list.iter() {
 			let shape_data = shape_list[shape_id.get_index()].as_ref().expect("모양");
-			data.maximum_extent = data.maximum_extent.max(compute_shape_extent(shape_data, local_center_x, local_center_y));
+			data.maximum_extent = js_max(data.maximum_extent, compute_shape_extent(shape_data, local_center_x, local_center_y));
 		}
 	}
 
@@ -641,16 +643,16 @@ impl PhysicsWorld2D {
 		data.id = ShapeId2D::new(index, generation);
 		data.body_id = body_id;
 		data.body_index = body_index;
-		data.density = shape_definition.density.max(0.0);
-		data.friction = shape_definition.friction.max(0.0);
-		data.restitution = shape_definition.restitution.max(0.0);
+		data.density = js_max(shape_definition.density, 0.0);
+		data.friction = js_max(shape_definition.friction, 0.0);
+		data.restitution = js_max(shape_definition.restitution, 0.0);
 		data.category_bits = shape_definition.filter.category_bits;
 		data.mask_bits = shape_definition.filter.mask_bits;
 		data.group_index = shape_definition.filter.group_index;
 		data.is_sensor = shape_definition.is_sensor;
 		data.enable_sensor_events = shape_definition.enable_sensor_events;
 		data.enable_contact_events = shape_definition.enable_contact_events;
-		data.user_data = shape_definition.user_data;
+		data.user_data = shape_definition.user_data.clone();
 		let mut aabb = AABB2D::new();
 		compute_shape_aabb(&data, position_x, position_y, rotation_cosine, rotation_sine, &mut aabb);
 		data.aabb = aabb;
@@ -692,7 +694,7 @@ impl PhysicsWorld2D {
 		shape_definition.friction = chain_definition.friction;
 		shape_definition.restitution = chain_definition.restitution;
 		shape_definition.filter = chain_definition.filter;
-		shape_definition.user_data = chain_definition.user_data;
+		shape_definition.user_data = chain_definition.user_data.clone();
 		let segment_count = if chain_definition.is_loop && point_count > 2 {
 			point_count
 		}
@@ -820,7 +822,7 @@ impl PhysicsWorld2D {
 	//==============================================================================
 	/// 관절 만들기. (공통, 새 관절 칸 번호)
 	//==============================================================================
-	fn create_joint_internal(&mut self, joint_type: JointType2D, body_id_a: Option<BodyId2D>, body_id_b: Option<BodyId2D>, local_anchor_a: PhysicsVector2, local_anchor_b: PhysicsVector2, collide_connected: bool, user_data: u64) -> Option<usize> {
+	fn create_joint_internal(&mut self, joint_type: JointType2D, body_id_a: Option<BodyId2D>, body_id_b: Option<BodyId2D>, local_anchor_a: PhysicsVector2, local_anchor_b: PhysicsVector2, collide_connected: bool, user_data: PhysicsUserData2D) -> Option<usize> {
 		let body_index_a = self.resolve_body_index(body_id_a?)?;
 		let body_index_b = self.resolve_body_index(body_id_b?)?;
 		if body_index_a == body_index_b {
@@ -874,15 +876,15 @@ impl PhysicsWorld2D {
 	/// 새 관절 아이디. (몸이 없으면 None)
 	//==============================================================================
 	pub fn create_distance_joint(&mut self, definition: &DistanceJointDefinition2D) -> Option<JointId2D> {
-		let index = self.create_joint_internal(JointType2D::Distance, definition.body_id_a, definition.body_id_b, definition.local_anchor_a, definition.local_anchor_b, definition.collide_connected, definition.user_data)?;
+		let index = self.create_joint_internal(JointType2D::Distance, definition.body_id_a, definition.body_id_b, definition.local_anchor_a, definition.local_anchor_b, definition.collide_connected, definition.user_data.clone())?;
 		let linear_slop = self.linear_slop;
 		let data = self.joint_list[index].as_mut().expect("관절");
-		data.length = linear_slop.max(definition.length);
-		data.min_length = 0.0f64.max(definition.min_length.min(definition.max_length));
-		data.max_length = definition.min_length.max(definition.max_length);
+		data.length = js_max(linear_slop, definition.length);
+		data.min_length = js_max(0.0, js_min(definition.min_length, definition.max_length));
+		data.max_length = js_max(definition.min_length, definition.max_length);
 		data.enable_spring = definition.enable_spring;
-		data.hertz = definition.hertz.max(0.0);
-		data.damping_ratio = definition.damping_ratio.max(0.0);
+		data.hertz = js_max(definition.hertz, 0.0);
+		data.damping_ratio = js_max(definition.damping_ratio, 0.0);
 		data.enable_limit = definition.enable_limit;
 		Some(data.id)
 	}
@@ -897,18 +899,18 @@ impl PhysicsWorld2D {
 	/// 새 관절 아이디. (몸이 없으면 None)
 	//==============================================================================
 	pub fn create_revolute_joint(&mut self, definition: &RevoluteJointDefinition2D) -> Option<JointId2D> {
-		let index = self.create_joint_internal(JointType2D::Revolute, definition.body_id_a, definition.body_id_b, definition.local_anchor_a, definition.local_anchor_b, definition.collide_connected, definition.user_data)?;
+		let index = self.create_joint_internal(JointType2D::Revolute, definition.body_id_a, definition.body_id_b, definition.local_anchor_a, definition.local_anchor_b, definition.collide_connected, definition.user_data.clone())?;
 		let data = self.joint_list[index].as_mut().expect("관절");
 		data.reference_angle = PhysicsMath2D::unwind_angle(definition.reference_angle);
 		data.enable_spring = definition.enable_spring;
-		data.hertz = definition.hertz.max(0.0);
-		data.damping_ratio = definition.damping_ratio.max(0.0);
+		data.hertz = js_max(definition.hertz, 0.0);
+		data.damping_ratio = js_max(definition.damping_ratio, 0.0);
 		data.enable_motor = definition.enable_motor;
-		data.max_motor_torque = definition.max_motor_torque.max(0.0);
+		data.max_motor_torque = js_max(definition.max_motor_torque, 0.0);
 		data.motor_speed = definition.motor_speed;
 		data.enable_limit = definition.enable_limit;
-		data.lower_limit = definition.lower_angle.min(definition.upper_angle);
-		data.upper_limit = definition.lower_angle.max(definition.upper_angle);
+		data.lower_limit = js_min(definition.lower_angle, definition.upper_angle);
+		data.upper_limit = js_max(definition.lower_angle, definition.upper_angle);
 		Some(data.id)
 	}
 
@@ -922,13 +924,13 @@ impl PhysicsWorld2D {
 	/// 새 관절 아이디. (몸이 없으면 None)
 	//==============================================================================
 	pub fn create_weld_joint(&mut self, definition: &WeldJointDefinition2D) -> Option<JointId2D> {
-		let index = self.create_joint_internal(JointType2D::Weld, definition.body_id_a, definition.body_id_b, definition.local_anchor_a, definition.local_anchor_b, definition.collide_connected, definition.user_data)?;
+		let index = self.create_joint_internal(JointType2D::Weld, definition.body_id_a, definition.body_id_b, definition.local_anchor_a, definition.local_anchor_b, definition.collide_connected, definition.user_data.clone())?;
 		let data = self.joint_list[index].as_mut().expect("관절");
 		data.reference_angle = PhysicsMath2D::unwind_angle(definition.reference_angle);
-		data.linear_hertz = definition.linear_hertz.max(0.0);
-		data.linear_damping_ratio = definition.linear_damping_ratio.max(0.0);
-		data.angular_hertz = definition.angular_hertz.max(0.0);
-		data.angular_damping_ratio = definition.angular_damping_ratio.max(0.0);
+		data.linear_hertz = js_max(definition.linear_hertz, 0.0);
+		data.linear_damping_ratio = js_max(definition.linear_damping_ratio, 0.0);
+		data.angular_hertz = js_max(definition.angular_hertz, 0.0);
+		data.angular_damping_ratio = js_max(definition.angular_damping_ratio, 0.0);
 		Some(data.id)
 	}
 
@@ -946,19 +948,19 @@ impl PhysicsWorld2D {
 		if axis_length <= 0.0 || axis_length.is_nan() {
 			return None;
 		}
-		let index = self.create_joint_internal(JointType2D::Wheel, definition.body_id_a, definition.body_id_b, definition.local_anchor_a, definition.local_anchor_b, definition.collide_connected, definition.user_data)?;
+		let index = self.create_joint_internal(JointType2D::Wheel, definition.body_id_a, definition.body_id_b, definition.local_anchor_a, definition.local_anchor_b, definition.collide_connected, definition.user_data.clone())?;
 		let data = self.joint_list[index].as_mut().expect("관절");
 		data.local_axis_a_x = definition.local_axis_a.x / axis_length;
 		data.local_axis_a_y = definition.local_axis_a.y / axis_length;
 		data.enable_spring = definition.enable_spring;
-		data.hertz = definition.hertz.max(0.0);
-		data.damping_ratio = definition.damping_ratio.max(0.0);
+		data.hertz = js_max(definition.hertz, 0.0);
+		data.damping_ratio = js_max(definition.damping_ratio, 0.0);
 		data.enable_motor = definition.enable_motor;
-		data.max_motor_torque = definition.max_motor_torque.max(0.0);
+		data.max_motor_torque = js_max(definition.max_motor_torque, 0.0);
 		data.motor_speed = definition.motor_speed;
 		data.enable_limit = definition.enable_limit;
-		data.lower_limit = definition.lower_translation.min(definition.upper_translation);
-		data.upper_limit = definition.lower_translation.max(definition.upper_translation);
+		data.lower_limit = js_min(definition.lower_translation, definition.upper_translation);
+		data.upper_limit = js_max(definition.lower_translation, definition.upper_translation);
 		Some(data.id)
 	}
 
@@ -1199,7 +1201,7 @@ impl PhysicsWorld2D {
 			self.accumulated_seconds = 0.0;
 		}
 		let alpha = self.accumulated_seconds / step_seconds;
-		self.interpolation_alpha = 0.0f64.max(1.0f64.min(alpha));
+		self.interpolation_alpha = js_max(0.0, js_min(1.0, alpha));
 		self.interpolation_alpha
 	}
 
@@ -1241,8 +1243,8 @@ impl PhysicsWorld2D {
 		let inverse_time_step = 1.0 / time_step;
 		let sub_step_time = time_step / step_count as f64;
 		let inverse_sub_step_time = step_count as f64 * inverse_time_step;
-		let contact_hertz = self.contact_hertz.min(0.25 * inverse_sub_step_time);
-		let joint_hertz = self.joint_hertz.min(0.125 * inverse_sub_step_time);
+		let contact_hertz = js_min(self.contact_hertz, 0.25 * inverse_sub_step_time);
+		let joint_hertz = js_min(self.joint_hertz, 0.125 * inverse_sub_step_time);
 		let context = StepContext {
 			time_step,
 			inverse_time_step,
@@ -1711,7 +1713,7 @@ impl PhysicsWorld2D {
 			let shape_a = self.shape_list[contact.shape_index_a].as_ref().expect("모양");
 			let shape_b = self.shape_list[contact.shape_index_b].as_ref().expect("모양");
 			contact.friction = (shape_a.friction * shape_b.friction).sqrt();
-			contact.restitution = shape_a.restitution.max(shape_b.restitution);
+			contact.restitution = js_max(shape_a.restitution, shape_b.restitution);
 			prepare_contact(contact, body_a, body_b, &self.solver_body_list, context);
 			active_contact_list.push(contact_index);
 		}
@@ -1797,7 +1799,7 @@ impl PhysicsWorld2D {
 				let delta_length = (solver_body.delta_position_x * solver_body.delta_position_x + solver_body.delta_position_y * solver_body.delta_position_y).sqrt();
 				let maximum_delta_position = delta_length + solver_body.delta_rotation_sine.abs() * data.maximum_extent;
 				// 밀어내기로 움직인 것도 본다. (다른 구속이 계속 밀고 있을 수 있다)
-				let sleep_velocity = maximum_velocity.max(0.5 * inverse_time_step * maximum_delta_position);
+				let sleep_velocity = js_max(maximum_velocity, 0.5 * inverse_time_step * maximum_delta_position);
 				if !self.enable_sleep || !data.enable_sleep || sleep_velocity > self.sleep_threshold {
 					data.sleep_time = 0.0;
 				}
@@ -1822,7 +1824,7 @@ impl PhysicsWorld2D {
 				_ => continue,
 			};
 			let root = find_island_root(&mut self.body_list, body_index);
-			island_sleep_time_list[root] = island_sleep_time_list[root].min(sleep_time);
+			island_sleep_time_list[root] = js_min(island_sleep_time_list[root], sleep_time);
 		}
 		for body_index in 0..body_count {
 			let is_awake_member = match self.body_list[body_index].as_ref() {

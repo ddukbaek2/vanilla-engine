@@ -15,7 +15,7 @@
 //!   - 원본이 tick 과 눌림에서 부르는 setForceGizmosVisible 은 눌림 처리와 set_visible 이 &Engine 만 받아 Graphic 을 바꿀 수 없어, 바랄 값을 적어 두었다가
 //!     tick 끝에 엔진의 그래픽(get_graphic_mut)에 건다. 그래서 원본처럼 그 프레임의 그리기부터 보인다. (tick 밖에서 set_visible 을 부른 것은 draw 첫머리에 건다)
 //!     원본 setEngine 이 거는 false 는 첫 tick 에 건다. (DevTools::new 는 엔진을 받지 않는다)
-//!   - 노드 종류는 WorldNode 하나뿐이라 트리의 Type 칸과 인스펙터의 type 은 늘 "WorldNode" 다.
+//!   - 노드 종류는 WorldNode 하나뿐이라 트리의 Type 칸과 인스펙터의 type 은 들고 있는 UIDocument 의 노드 종류 이름(UIDocument::get_node_type_name)이다. (원본 constructor.name 자리, 처음 문서에 등록된 FloatingText 같은 엔진 노드 종류와 게임이 등록한 종류, 그 밖은 "WorldNode")
 //!   - 인스펙터의 컴포넌트 속성은 원본 getComponentProperties 처럼 그 컴포넌트의 get*, is* 게터를 모두 불러 보인다.
 //!     원본은 실행 중에 프로토타입을 훑고, 러스트 판은 `#[reflect]` 매크로가 컴파일 때 지은 목록을 쓴다. (core/reflection.rs, 엔진 컴포넌트는 모두 붙였다)
 //!     트리를 받는 게터(원본은 이웃 컴포넌트를 바로 쥐는 것)는 그리기에서 트리를 넘겨 부르고, &mut self 게터가 있는 컴포넌트는 tick 이 트리를 쥐고 읽어 둔 값을 보인다.
@@ -95,6 +95,7 @@ use crate::core::node::nodetree::{NodeId, NodeTree};
 use crate::core::reflection::{collect_reflected_getters_in_tree, collect_reflected_getters_mut, has_mutable_getters, ReflectValue, ReflectedGetter};
 use crate::core::viewmanager::ViewScaleMode;
 use crate::misc::localstorage::LocalStorage;
+use crate::misc::storagetext::{self, JsonSurrogateTable};
 use crate::ui::uidocument::UIDocument;
 use serde_json::Value;
 use std::collections::HashSet;
@@ -420,7 +421,7 @@ pub struct DevTools {
 	is_statistics_scroll_dragging: bool,
 	statistics_scroll_drag_start_mouse_y: f32,
 	statistics_scroll_drag_start_scroll_y: f32,
-	/// 인스펙터의 컴포넌트 속성을 읽는 문서. (처음은 엔진 컴포넌트만 등록된 것, set_ui_document 로 게임 문서를 건다)
+	/// 인스펙터의 컴포넌트 속성과 노드 종류 이름을 읽는 문서. (처음은 엔진 컴포넌트와 에디터 종류가 등록된 것, set_ui_document 로 게임 문서를 건다)
 	ui_document: UIDocument,
 	/// tick 끝이나 다음 draw 첫머리에 Graphic 에 걸 모든 기즈모 강제 표시 값.
 	pending_force_gizmos_visible: Option<bool>,
@@ -491,7 +492,7 @@ impl DevTools {
 			is_statistics_scroll_dragging: false,
 			statistics_scroll_drag_start_mouse_y: 0.0,
 			statistics_scroll_drag_start_scroll_y: 0.0,
-			ui_document: UIDocument::new(),
+			ui_document: create_engine_ui_document(),
 			pending_force_gizmos_visible: Some(false),
 			local_storage_dialog_request: None,
 			local_storage_dialog_wait: None,
@@ -631,7 +632,7 @@ impl DevTools {
 	/// 인스펙터가 컴포넌트 속성을 읽는 문서. (변경용, 컴포넌트 종류를 더 등록할 때)
 	///
 	/// # 돌려줌
-	/// 들고 있는 문서의 가변 참조. (처음은 엔진 컴포넌트만 등록된 UIDocument::new())
+	/// 들고 있는 문서의 가변 참조. (처음은 UIDocument::new() 에 register_editor_types 를 부른 것)
 	//==============================================================================
 	pub fn get_ui_document_mut(&mut self) -> &mut UIDocument {
 		&mut self.ui_document
@@ -1417,7 +1418,8 @@ impl DevTools {
 			COLOR_FALSE
 		};
 		lines.push(InspectorLine::new(Some("name"), node_name, COLOR_TEXT, false, false, false, None, false));
-		lines.push(InspectorLine::new(Some("type"), NODE_TYPE_NAME, COLOR_ACCENT, false, false, false, None, false));
+		let node_type_name = self.ui_document.get_node_type_name(node);
+		lines.push(InspectorLine::new(Some("type"), node_type_name, COLOR_ACCENT, false, false, false, None, false));
 		lines.push(InspectorLine::new(Some("active"), format_boolean(is_active), active_color, false, false, false, None, false));
 		lines.push(InspectorLine::new(Some("children"), &child_count.to_string(), COLOR_TEXT, false, false, false, None, false));
 
@@ -1445,6 +1447,13 @@ impl DevTools {
 		}
 		else {
 			let reference_root_id = node_tree.get_root_id();
+			// 노드를 가리키는 값은 원본 constructor.name 처럼 그 노드의 종류 이름으로 보인다. (지워진 노드면 WorldNode)
+			let read_node_type_name = |target_id: NodeId| -> String {
+				node_tree.get_node(target_id).map_or(NODE_TYPE_NAME, |target_node| self.ui_document.get_node_type_name(target_node)).to_string()
+			};
+			let read_reference_type_name = |reference_path: &str| -> String {
+				UIDocument::find_node_by_path(node_tree, reference_root_id, reference_path).map_or_else(|| NODE_TYPE_NAME.to_string(), read_node_type_name)
+			};
 			for (component_index, component) in components.iter().enumerate() {
 				let component_reference = (node_id, component_index);
 				// 기본 펼침: collapsed_components 에 없으면 펼쳐진 상태.
@@ -1465,7 +1474,7 @@ impl DevTools {
 					}
 					for getter in getter_list.iter() {
 						let property_name = format_method_name(getter.name);
-						let property_text = format_property_value(&getter.value);
+						let property_text = format_property_value(&getter.value, &read_node_type_name);
 						lines.push(InspectorLine::new(Some(&property_name), &property_text, COLOR_PROPERTY_VALUE, false, false, false, None, true));
 					}
 					continue;
@@ -1485,7 +1494,7 @@ impl DevTools {
 				}
 				else {
 					for (property_name, property_value) in component_properties.iter() {
-						let property_text = format_document_value(property_name, property_value);
+						let property_text = format_document_value(property_name, property_value, &read_reference_type_name);
 						lines.push(InspectorLine::new(Some(property_name), &property_text, COLOR_PROPERTY_VALUE, false, false, false, None, true));
 					}
 				}
@@ -1823,7 +1832,7 @@ impl DevTools {
 
 			// 노드 타입 텍스트. (액티브 체크박스 왼쪽에 오른쪽 정렬)
 			graphic.set_fill_color(COLOR_TEXT_DIM);
-			graphic.draw_fill_text(NODE_TYPE_NAME, active_checkbox_x - GIZMO_CHECKBOX_MARGIN, item_middle_y);
+			graphic.draw_fill_text(self.ui_document.get_node_type_name(node), active_checkbox_x - GIZMO_CHECKBOX_MARGIN, item_middle_y);
 		}
 
 		graphic.end_clip_rect();
@@ -2292,7 +2301,7 @@ impl DevTools {
 			"widthAspectGuideVisible": self.is_width_aspect_guide_visible,
 			"framePerSecondVisible": self.is_frame_per_second_visible,
 		});
-		LocalStorage::set_string(SETTINGS_STORAGE_KEY, &settings_object.to_string());
+		LocalStorage::set_string(SETTINGS_STORAGE_KEY, &storagetext::stringify_json(&settings_object, &JsonSurrogateTable::new()));
 	}
 
 	//==============================================================================
@@ -2650,8 +2659,9 @@ fn format_method_name(method_name: &str) -> String {
 
 //==============================================================================
 /// 게터 값을 문자열로 포맷. (원본 formatPropertyValue, 수는 원본 toFixed 와 같이 반올림한다)
+/// - 노드는 원본 constructor.name 처럼 read_node_type_name 이 돌려준 그 노드의 종류 이름이다. ([UILabel] 같은)
 //==============================================================================
-fn format_property_value(value: &ReflectValue) -> String {
+fn format_property_value(value: &ReflectValue, read_node_type_name: &dyn Fn(NodeId) -> String) -> String {
 	match value {
 		ReflectValue::Null => {
 			String::from("null")
@@ -2677,8 +2687,8 @@ fn format_property_value(value: &ReflectValue) -> String {
 			let blue = (color.blue as f64 * 255.0).round();
 			format!("rgba({}, {}, {}, {})", red, green, blue, format_fixed(color.alpha as f64, 2))
 		}
-		ReflectValue::Node(_) => {
-			format!("[{}]", NODE_TYPE_NAME)
+		ReflectValue::Node(node_id) => {
+			format!("[{}]", read_node_type_name(*node_id))
 		}
 		ReflectValue::List(_) => {
 			String::from("[Array]")
@@ -2704,10 +2714,20 @@ fn format_quoted_text(text: &str) -> String {
 }
 
 //==============================================================================
-/// 문서 값을 문자열로 포맷. (반사가 없는 컴포넌트의 UIDocument 저장 값, 원본 formatPropertyValue 를 JSON 값에 맞춘 것)
-/// - 수 둘 배열은 벡터, 이름에 color 가 든 수 넷 배열은 rgba, 그 밖의 수 넷 배열은 사각형으로 본다.
+/// DevTools 가 처음 드는 문서. (엔진 컴포넌트에 에디터 종류를 더 등록해, 엔진 노드 종류(FloatingText 같은)가 원본 constructor.name 처럼 그 이름으로 보인다)
 //==============================================================================
-fn format_document_value(property_name: &str, value: &Value) -> String {
+fn create_engine_ui_document() -> UIDocument {
+	let mut ui_document = UIDocument::new();
+	ui_document.register_editor_types();
+	ui_document
+}
+
+//==============================================================================
+/// 문서 값을 문자열로 포맷. (반사가 없는 컴포넌트의 UIDocument 저장 값, 원본 formatPropertyValue 를 JSON 값에 맞춘 것)
+/// - 수 둘 배열은 벡터, 이름에 color 가 든 수 넷 배열은 rgba, 그 밖의 수 넷 배열은 사각형으로 본다. 수는 원본 toFixed 와 같이 반올림한다.
+/// - 노드 참조({ "$nodeRef": 경로 })는 read_reference_type_name 이 돌려준 그 노드의 종류 이름이다. (원본 constructor.name)
+//==============================================================================
+fn format_document_value(property_name: &str, value: &Value, read_reference_type_name: &dyn Fn(&str) -> String) -> String {
 	match value {
 		Value::Null => {
 			String::from("null")
@@ -2716,7 +2736,7 @@ fn format_document_value(property_name: &str, value: &Value) -> String {
 			String::from(format_boolean(*boolean_value))
 		}
 		Value::Number(number_value) => {
-			format!("{:.2}", number_value.as_f64().unwrap_or(0.0))
+			format_fixed(number_value.as_f64().unwrap_or(0.0), 2)
 		}
 		Value::String(string_value) => {
 			format_quoted_text(string_value)
@@ -2725,16 +2745,16 @@ fn format_document_value(property_name: &str, value: &Value) -> String {
 			let numbers: Option<Vec<f64>> = item_values.iter().map(Value::as_f64).collect();
 			match numbers {
 				Some(numbers) if numbers.len() == 2 => {
-					format!("({:.2}, {:.2})", numbers[0], numbers[1])
+					format!("({}, {})", format_fixed(numbers[0], 2), format_fixed(numbers[1], 2))
 				}
 				Some(numbers) if numbers.len() == 4 && property_name.to_lowercase().contains("color") => {
 					let red = (numbers[0] * 255.0).round();
 					let green = (numbers[1] * 255.0).round();
 					let blue = (numbers[2] * 255.0).round();
-					format!("rgba({}, {}, {}, {:.2})", red, green, blue, numbers[3])
+					format!("rgba({}, {}, {}, {})", red, green, blue, format_fixed(numbers[3], 2))
 				}
 				Some(numbers) if numbers.len() == 4 => {
-					format!("({:.1}, {:.1}, {:.1}, {:.1})", numbers[0], numbers[1], numbers[2], numbers[3])
+					format!("({}, {}, {}, {})", format_fixed(numbers[0], 1), format_fixed(numbers[1], 1), format_fixed(numbers[2], 1), format_fixed(numbers[3], 1))
 				}
 				_ => {
 					String::from("[Array]")
@@ -2742,8 +2762,8 @@ fn format_document_value(property_name: &str, value: &Value) -> String {
 			}
 		}
 		Value::Object(object_value) => {
-			if object_value.contains_key(NODE_REFERENCE_KEY) {
-				format!("[{}]", NODE_TYPE_NAME)
+			if let Some(reference_path) = object_value.get(NODE_REFERENCE_KEY).and_then(Value::as_str) {
+				format!("[{}]", read_reference_type_name(reference_path))
 			}
 			else {
 				String::from("[Object]")
@@ -2986,19 +3006,19 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn property_values_are_formatted_like_original() {
-		assert_eq!(format_property_value(&ReflectValue::Boolean(true)), "true");
-		assert_eq!(format_property_value(&ReflectValue::Number(4.0)), "4.00");
-		assert_eq!(format_property_value(&ReflectValue::Number(12.345)), "12.35");
-		assert_eq!(format_property_value(&ReflectValue::Number(0.125)), "0.13");
-		assert_eq!(format_property_value(&ReflectValue::String(String::from("hello"))), "\"hello\"");
-		assert_eq!(format_property_value(&ReflectValue::String(String::from("abcdefghijklmnopqrstuvwxyz0123"))), "\"abcdefghijklmnopqrstuvwxy...\"");
-		assert_eq!(format_property_value(&ReflectValue::Vector2(Vector2::create(0.5, 1.0))), "(0.50, 1.00)");
-		assert_eq!(format_property_value(&ReflectValue::Rect(Rect::create(1.0, 2.0, 3.5, 4.0))), "(1.0, 2.0, 3.5, 4.0)");
-		assert_eq!(format_property_value(&ReflectValue::Color(Color::create(1.0, 0.5, 0.0, 0.25))), "rgba(255, 128, 0, 0.25)");
-		assert_eq!(format_property_value(&ReflectValue::Node(NodeTree::new().get_root_id())), "[WorldNode]");
-		assert_eq!(format_property_value(&ReflectValue::List(Vec::new())), "[Array]");
-		assert_eq!(format_property_value(&ReflectValue::Object(String::from("Image"))), "[Image]");
-		assert_eq!(format_property_value(&ReflectValue::Null), "null");
+		assert_eq!(format_property_value(&ReflectValue::Boolean(true), &|_| String::from("WorldNode")), "true");
+		assert_eq!(format_property_value(&ReflectValue::Number(4.0), &|_| String::from("WorldNode")), "4.00");
+		assert_eq!(format_property_value(&ReflectValue::Number(12.345), &|_| String::from("WorldNode")), "12.35");
+		assert_eq!(format_property_value(&ReflectValue::Number(0.125), &|_| String::from("WorldNode")), "0.13");
+		assert_eq!(format_property_value(&ReflectValue::String(String::from("hello")), &|_| String::from("WorldNode")), "\"hello\"");
+		assert_eq!(format_property_value(&ReflectValue::String(String::from("abcdefghijklmnopqrstuvwxyz0123")), &|_| String::from("WorldNode")), "\"abcdefghijklmnopqrstuvwxy...\"");
+		assert_eq!(format_property_value(&ReflectValue::Vector2(Vector2::create(0.5, 1.0)), &|_| String::from("WorldNode")), "(0.50, 1.00)");
+		assert_eq!(format_property_value(&ReflectValue::Rect(Rect::create(1.0, 2.0, 3.5, 4.0)), &|_| String::from("WorldNode")), "(1.0, 2.0, 3.5, 4.0)");
+		assert_eq!(format_property_value(&ReflectValue::Color(Color::create(1.0, 0.5, 0.0, 0.25)), &|_| String::from("WorldNode")), "rgba(255, 128, 0, 0.25)");
+		assert_eq!(format_property_value(&ReflectValue::Node(NodeTree::new().get_root_id()), &|_| String::from("UILabel")), "[UILabel]");
+		assert_eq!(format_property_value(&ReflectValue::List(Vec::new()), &|_| String::from("WorldNode")), "[Array]");
+		assert_eq!(format_property_value(&ReflectValue::Object(String::from("Image")), &|_| String::from("WorldNode")), "[Image]");
+		assert_eq!(format_property_value(&ReflectValue::Null, &|_| String::from("WorldNode")), "null");
 		assert_eq!(format_method_name("getTextColor"), "textColor");
 		assert_eq!(format_method_name("isCircle"), "isCircle");
 		assert_eq!(format_method_name("get"), "get");
@@ -3011,16 +3031,47 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn document_values_are_formatted_like_original() {
-		assert_eq!(format_document_value("enable", &serde_json::json!(true)), "true");
-		assert_eq!(format_document_value("roundSize", &serde_json::json!(4)), "4.00");
-		assert_eq!(format_document_value("text", &serde_json::json!("hello")), "\"hello\"");
-		assert_eq!(format_document_value("anchor", &serde_json::json!([0.5, 1])), "(0.50, 1.00)");
-		assert_eq!(format_document_value("textColor", &serde_json::json!([1, 0.5, 0, 0.25])), "rgba(255, 128, 0, 0.25)");
-		assert_eq!(format_document_value("nineSlice", &serde_json::json!([1, 2, 3.5, 4])), "(1.0, 2.0, 3.5, 4.0)");
-		assert_eq!(format_document_value("list", &serde_json::json!(["a"])), "[Array]");
-		assert_eq!(format_document_value("target", &serde_json::json!({ "$nodeRef": "a/b" })), "[WorldNode]");
-		assert_eq!(format_document_value("other", &serde_json::json!({ "x": 1 })), "[Object]");
-		assert_eq!(format_document_value("nothing", &Value::Null), "null");
+		assert_eq!(format_document_value("enable", &serde_json::json!(true), &|_| String::from("WorldNode")), "true");
+		assert_eq!(format_document_value("roundSize", &serde_json::json!(4), &|_| String::from("WorldNode")), "4.00");
+		assert_eq!(format_document_value("roundSize", &serde_json::json!(0.125), &|_| String::from("WorldNode")), "0.13");
+		assert_eq!(format_document_value("text", &serde_json::json!("hello"), &|_| String::from("WorldNode")), "\"hello\"");
+		assert_eq!(format_document_value("anchor", &serde_json::json!([0.5, 1]), &|_| String::from("WorldNode")), "(0.50, 1.00)");
+		assert_eq!(format_document_value("textColor", &serde_json::json!([1, 0.5, 0, 0.25]), &|_| String::from("WorldNode")), "rgba(255, 128, 0, 0.25)");
+		assert_eq!(format_document_value("nineSlice", &serde_json::json!([1, 2, 3.5, 4]), &|_| String::from("WorldNode")), "(1.0, 2.0, 3.5, 4.0)");
+		assert_eq!(format_document_value("list", &serde_json::json!(["a"]), &|_| String::from("WorldNode")), "[Array]");
+		assert_eq!(format_document_value("target", &serde_json::json!({ "$nodeRef": "a/b" }), &|reference_path| format!("UILabel {}", reference_path)), "[UILabel a/b]");
+		assert_eq!(format_document_value("other", &serde_json::json!({ "x": 1 }), &|_| String::from("WorldNode")), "[Object]");
+		assert_eq!(format_document_value("nothing", &Value::Null, &|_| String::from("WorldNode")), "null");
+	}
+
+	//==============================================================================
+	/// 인스펙터의 type 은 원본 constructor.name 처럼 엔진 노드 종류 이름이다. (FloatingText 를 붙인 노드)
+	//==============================================================================
+	#[test]
+	fn inspector_type_shows_engine_node_type_name() {
+		let mut node_tree = NodeTree::new();
+		let root_id = node_tree.get_root_id();
+		let floating_text_id = crate::misc::floatingtext::FloatingText::create(&mut node_tree, root_id);
+		let mut dev_tools = DevTools::new();
+		dev_tools.build_inspector_lines(&node_tree, floating_text_id);
+		assert!(dev_tools.cached_inspector_lines.iter().any(|line| line.text.as_deref() == Some("type") && line.value == "FloatingText"));
+	}
+
+	//==============================================================================
+	/// 노드를 가리키는 속성 값은 원본 constructor.name 처럼 그 노드의 종류 이름이다. (UIHitArea.targetNode 가 FloatingText 노드)
+	//==============================================================================
+	#[test]
+	fn inspector_node_value_shows_target_node_type_name() {
+		let mut node_tree = NodeTree::new();
+		let root_id = node_tree.get_root_id();
+		let floating_text_id = crate::misc::floatingtext::FloatingText::create(&mut node_tree, root_id);
+		let hit_area_id = node_tree.create_child(root_id, "hit");
+		let mut hit_area = crate::ui::uihitarea::UIHitArea::new();
+		hit_area.set_target(floating_text_id);
+		node_tree[hit_area_id].add_component(hit_area);
+		let mut dev_tools = DevTools::new();
+		dev_tools.build_inspector_lines(&node_tree, hit_area_id);
+		assert!(dev_tools.cached_inspector_lines.iter().any(|line| line.text.as_deref() == Some("targetNode") && line.value == "[FloatingText]"), "{:?}", dev_tools.cached_inspector_lines.iter().map(|line| (line.text.clone(), line.value.clone())).collect::<Vec<_>>());
 	}
 
 	//==============================================================================

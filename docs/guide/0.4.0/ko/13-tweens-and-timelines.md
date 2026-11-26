@@ -812,7 +812,7 @@ fn main() {
 
 ## Action
 
-`Action` 은 스텝을 쌓아 두고 차례로 도는 연출 스크립트입니다(원본 `animation/action.js`). 대상 꼴 `T` 는 기본 `WorldNode` 이고, 게임 상태나 노드 여럿을 다루려면 그것을 `T` 로 씁니다. 러스트는 대상을 붙잡아 둘 수 없어서 `start(&mut target)` 과 `step(&mut target, time_delta)` 가 대상을 받아 콜백에 넘깁니다.
+`Action` 은 스텝을 쌓아 두고 차례로 도는 연출 스크립트입니다(원본 `animation/action.js`). 대상 꼴 `T` 는 기본 `WorldNode` 이고, 게임 상태나 노드 여럿을 다루려면 그것을 `T` 로 씁니다. 노드를 대상으로 들면 `start(&mut node_tree, Some(node_id))` 와 `step(&mut node_tree, time_delta)` 로 돌리고(원본 `start(target)`, `step(timeDelta)`), 대상을 들지 않고 매번 넘기면 두 엔진 다 `start_with(&mut target)` 과 `step_with(&mut target, time_delta)` 를 씁니다(원본 `startWith`, `stepWith`).
 
 - `wait(duration, ActionCallbacks::new().started(..).updated(|progress, target| ..).completed(..))`: 정한 시간(초) 동안 기다리며 진행률(0 ~ 1)을 넘깁니다. 0 이하면 첫 `step` 에서 진행률 1 로 끝납니다.
 - `condition(|target| bool, ActionConditionCallbacks::new())`: 조건이 참이 될 때까지 기다립니다.
@@ -828,14 +828,14 @@ let mut action: Action<WorldNode> = Action::new()
 	.wait(1.0, ActionCallbacks::new().updated(|progress, node: &mut WorldNode| node.set_local_opacity(progress)))
 	.call(|node: &mut WorldNode| node.set_local_scale(Vector2::create(1.2, 1.2)))
 	.repeat(2, Action::new().wait(0.5, ActionCallbacks::new().completed(|node: &mut WorldNode| node.set_local_rotation(node.get_local_rotation() + 90.0))));
-action.start(&mut node);
-action.step(&mut node, 0.5);
+action.start_with(&mut node);
+action.step_with(&mut node, 0.5);
 assert_eq!(node.get_local_opacity(), 0.5);
-action.step(&mut node, 0.5);
+action.step_with(&mut node, 0.5);
 assert_eq!(node.get_local_opacity(), 1.0);
 assert_eq!(node.get_local_scale(), Vector2::create(1.2, 1.2));
 for _ in 0..4 {
-	action.step(&mut node, 0.5);
+	action.step_with(&mut node, 0.5);
 }
 assert_eq!(node.get_local_rotation(), 180.0);
 assert!(action.is_done());

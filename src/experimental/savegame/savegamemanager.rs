@@ -4,6 +4,9 @@
 //! - 칸(slot)마다 JSON 자료 하나와 머리(이름, 저장 시각, 판, 미리보기 그림, 크기, 게임이 정한 metadata)를 둔다.
 //! - 기록 꼴: `"VSAVE1 <CRC-32 16진 8자>\n<머리 JSON>\n<자료 JSON>"`. CRC-32(IEEE 802.3, zlib 과 같은 다항식)는 둘째 줄부터 끝까지의 UTF-8 에 대해 셈한다.
 //!   원본(JS)과 같은 꼴이라 두 엔진이 서로의 세이브를 읽는다. (같은 키를 쓰는 저장소일 때)
+//!   머리와 자료 JSON 은 원본 JSON.stringify 와 글자까지 같다. (수는 원본 String(number) 꼴, 1.0 → 1, -0 → 0, 1e21 → 1e+21, NaN 과 Infinity 는 null, 객체 칸은 배열 번호 꼴 이름을 먼저)
+//!   그래서 같은 자료면 byteSize 와 CRC 도 같다. 머리의 savedTime, byteSize, sequence 는 0 이상 정수, version 은 u32 안의 0 이상 정수여야 받는다. (원본과 같은 검사)
+//! - save 는 Serialize 를 받는다. (Value, 게임의 구조체) 바꾸지 못하면 InvalidData. (원본은 순환, BigInt, 맨 위 undefined)
 //! - 원자적 쓰기: 칸마다 키 두 개(`<이름공간>.slot.<칸>.0` 과 `.1`)를 번갈아 쓴다. 새 기록은 앞 기록이 없는 쪽 키에 순번을 하나 올려 쓰고,
 //!   읽을 때는 체크섬이 맞는 것 가운데 순번이 가장 큰 것을 고른다. 쓰다 끊기거나(앱이 죽음, 저장소가 가득 참) 기록이 깨져도 앞 저장이 남는다.
 //!   한 키 쓰기는 저장소가 다 되거나 안 되게 한다. (웹 localStorage.setItem, 데스크탑 LocalStorage 는 임시 파일에 쓴 뒤 이름을 바꿔 끼운다)
@@ -14,6 +17,8 @@
 //! - 클라우드: set_cloud_provider 로 SaveCloudProvider 를 꽂으면 저장마다 올리고, pull_from_cloud 로 더 새 것을 받아 들인다. (인터페이스만)
 //==============================================================================
 use super::savestorage::{LocalSaveStorage, SaveCloudProvider, SaveStorage};
+use crate::misc::storagetext::{self, JsonSurrogateTable};
+use serde::Serialize;
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 
@@ -136,6 +141,76 @@ impl Default for SaveSlotOptions {
 }
 
 //==============================================================================
+// JSON 쓰기. (원본 JSON.stringify 와 글자까지 같다, 엔진 공용 storagetext::stringify_json)
+///
+/// # 인자
+/// - `value`: 쓸 값.
+///
+/// # 돌려줌
+/// JSON 글.
+//==============================================================================
+fn stringify_json(value: &Value) -> String {
+	storagetext::stringify_json(value, &JsonSurrogateTable::new())
+}
+
+//==============================================================================
+// 머리의 0 이상 정수 읽기. (원본 Number.isInteger(value) && value >= 0 과 같다)
+///
+/// # 인자
+/// - `value`: 머리 칸.
+///
+/// # 돌려줌
+/// 수. (아니면 None)
+//==============================================================================
+fn read_header_integer(value: &Value) -> Option<f64> {
+	let number_value = value.as_f64()?;
+	if number_value.is_finite() && number_value >= 0.0 && number_value.fract() == 0.0 {
+		Some(number_value)
+	}
+	else {
+		None
+	}
+}
+
+//==============================================================================
+// 머리의 판 읽기. (0 이상 정수이고 u32 안이어야 한다, 원본도 같은 검사)
+///
+/// # 인자
+/// - `value`: 머리 칸.
+///
+/// # 돌려줌
+/// 판. (아니면 None)
+//==============================================================================
+fn read_header_version(value: &Value) -> Option<u32> {
+	let number_value = read_header_integer(value)?;
+	if number_value <= f64::from(u32::MAX) {
+		Some(number_value as u32)
+	}
+	else {
+		None
+	}
+}
+
+//==============================================================================
+// 저장 시각 정하기. (내림, 유한한 0 이상이 아니면 0. 원본과 같다)
+///
+/// # 인자
+/// - `time`: 시각을 주는 함수의 값. (밀리초)
+///
+/// # 돌려줌
+/// 머리에 쓸 저장 시각.
+//==============================================================================
+fn read_saved_time(time: f64) -> f64 {
+	let saved_time = time.floor();
+	if saved_time.is_finite() && saved_time > 0.0 {
+		saved_time
+	}
+	else {
+		0.0
+	}
+}
+
+//==============================================================================
 /// 세이브 실패 까닭. (원본 SaveGameError 의 이름과 같다)
 //==============================================================================
 #[derive(Clone, Debug, PartialEq)]
@@ -169,6 +244,8 @@ pub enum SaveGameError {
 	WriteFailed,
 	/// 들여올 글이 내보낸 꼴이 아니거나 깨졌다.
 	InvalidImport,
+	/// 자료를 JSON 으로 바꿀 수 없다. (Serialize 가 실패함: 글이 아닌 맵 키, 구현이 낸 오류. 원본은 순환, BigInt, 맨 위 undefined)
+	InvalidData,
 }
 
 //==============================================================================
@@ -261,12 +338,12 @@ fn build_header_text(info: &SaveSlotInfo) -> String {
 	header.insert("slotId".to_string(), json!(info.slot_id));
 	header.insert("sequence".to_string(), json!(info.sequence));
 	header.insert("name".to_string(), json!(info.name));
-	header.insert("savedTime".to_string(), json!(info.saved_time as u64));
+	header.insert("savedTime".to_string(), json!(info.saved_time));
 	header.insert("version".to_string(), json!(info.version));
 	header.insert("previewImage".to_string(), json!(info.preview_image));
 	header.insert("byteSize".to_string(), json!(info.byte_size));
 	header.insert("metadata".to_string(), info.metadata.clone());
-	Value::Object(header).to_string()
+	stringify_json(&Value::Object(header))
 }
 
 //==============================================================================
@@ -318,11 +395,11 @@ fn parse_record_text(record_text: &str, expected_slot_id: Option<&str>) -> Optio
 	let info = SaveSlotInfo {
 		slot_id,
 		name: header["name"].as_str()?.to_string(),
-		saved_time: header["savedTime"].as_f64()?,
-		version: u32::try_from(header["version"].as_u64()?).ok()?,
+		saved_time: read_header_integer(&header["savedTime"])?,
+		version: read_header_version(&header["version"])?,
 		preview_image: header["previewImage"].as_str()?.to_string(),
-		byte_size: header["byteSize"].as_u64()? as usize,
-		sequence: header["sequence"].as_u64()?,
+		byte_size: read_header_integer(&header["byteSize"])? as usize,
+		sequence: read_header_integer(&header["sequence"])? as u64,
 		metadata: header.get("metadata").cloned().unwrap_or_else(|| json!({})),
 		is_corrupted: false,
 	};
@@ -522,14 +599,15 @@ impl SaveGameManager {
 	/// - `options`: 이름, 미리보기 그림, metadata.
 	///
 	/// # 돌려줌
-	/// 쓴 기록의 머리. 칸 이름이 틀리면 InvalidSlotId, 저장소에 쓰지 못하면 WriteFailed.
+	/// 쓴 기록의 머리. 칸 이름이 틀리면 InvalidSlotId, 자료를 JSON 으로 못 바꾸면 InvalidData, 저장소에 쓰지 못하면 WriteFailed.
 	//==============================================================================
-	pub fn save(&mut self, slot_id: &str, data: &Value, options: &SaveSlotOptions) -> Result<SaveSlotInfo, SaveGameError> {
+	pub fn save<T: Serialize + ?Sized>(&mut self, slot_id: &str, data: &T, options: &SaveSlotOptions) -> Result<SaveSlotInfo, SaveGameError> {
 		if !is_valid_slot_id(slot_id) {
 			return Err(SaveGameError::InvalidSlotId);
 		}
-		let body_text = data.to_string();
-		let saved_time = self.read_time().floor();
+		let data_value = serde_json::to_value(data).map_err(|_| SaveGameError::InvalidData)?;
+		let body_text = stringify_json(&data_value);
+		let saved_time = read_saved_time(self.read_time());
 		let metadata = if options.metadata.is_object() { options.metadata.clone() } else { json!({}) };
 		let info = SaveSlotInfo {
 			slot_id: slot_id.to_string(),
@@ -857,7 +935,7 @@ fn build_export_text(record_text: &str) -> String {
 	export.insert("format".to_string(), json!(EXPORT_FORMAT));
 	export.insert("formatVersion".to_string(), json!(FORMAT_VERSION));
 	export.insert("record".to_string(), json!(record_text));
-	Value::Object(export).to_string()
+	stringify_json(&Value::Object(export))
 }
 
 //==============================================================================
@@ -1185,5 +1263,42 @@ mod tests {
 		assert_eq!(save_game_manager.load("slot2"), Err(SaveGameError::Corrupted));
 		let result = save_game_manager.load("slot1").expect("load");
 		assert_eq!(result.data["items"][1], 0.5);
+	}
+
+	// 원본(JS)이 수 글꼴, 객체 칸 차례, 음수 시각을 담아 쓴 기록. (vanilla.js tests/experimental/savegame.test.mjs 의 NUMBER_RECORD_TEXT 와 같은 글)
+	const NUMBER_RECORD_TEXT: &str = "VSAVE1 7e16634d\n{\"format\":\"vanilla-save\",\"formatVersion\":1,\"slotId\":\"slot1\",\"sequence\":1,\"name\":\"수\",\"savedTime\":0,\"version\":2,\"previewImage\":\"\",\"byteSize\":144,\"metadata\":{\"2\":3,\"10\":2,\"b\":1}}\n{\"7\":\"seven\",\"whole\":1,\"negativeZero\":0,\"large\":1e+21,\"small\":1.5e-7,\"big\":123456789012345680000,\"01\":\"zero one\",\"fraction\":0.30000000000000004}";
+
+	// 기록 머리 한 군데를 바꾸고 체크섬을 다시 셈한다.
+	fn replace_record_header(record_text: &str, from_text: &str, to_text: &str) -> String {
+		let content = record_text.split_once('\n').expect("first line").1.replacen(from_text, to_text, 1);
+		format!("VSAVE1 {:08x}\n{}", calculate_crc32(content.as_bytes()), content)
+	}
+
+	//==============================================================================
+	// 수 글꼴(원본 String(number)), 객체 칸 차례, 음수 시각, 머리 검사가 원본과 같다.
+	//==============================================================================
+	#[test]
+	fn number_format_and_header_checks_match_original() {
+		let state = Rc::new(RefCell::new(SharedStorageState::default()));
+		let mut save_game_manager = SaveGameManager::new("numbers", 2);
+		save_game_manager.set_storage(Box::new(SharedStorage { state: state.clone() }));
+		save_game_manager.set_time_provider(Some(Box::new(|| -5.5)));
+		let options = SaveSlotOptions { name: "수".to_string(), preview_image: String::new(), metadata: json!({ "b": 1.0, "10": 2, "2": 3 }) };
+		let data = json!({ "whole": 1.0, "negativeZero": -0.0, "large": 1e21, "small": 1.5e-7, "big": 123456789012345678901.0, "7": "seven", "01": "zero one", "fraction": 0.1 + 0.2 });
+		let info = save_game_manager.save("slot1", &data, &options).expect("save");
+		assert_eq!(info.saved_time, 0.0);
+		assert_eq!(state.borrow().storage.read_text("numbers.slot.slot1.0").expect("record"), NUMBER_RECORD_TEXT);
+		assert_eq!(save_game_manager.load("slot1").expect("load").data["large"], 1e21);
+		let fraction_time = replace_record_header(NUMBER_RECORD_TEXT, "\"savedTime\":0", "\"savedTime\":1.5").replace("\"slotId\":\"slot1\"", "\"slotId\":\"fraction\"");
+		state.borrow_mut().storage.write_text("numbers.slot.fraction.0", &fraction_time);
+		assert_eq!(save_game_manager.load("fraction"), Err(SaveGameError::Corrupted));
+		let big_version = replace_record_header(&replace_record_header(NUMBER_RECORD_TEXT, "\"version\":2", "\"version\":4294967296"), "\"sequence\":1", "\"sequence\":2");
+		state.borrow_mut().storage.write_text("numbers.slot.slot1.1", &big_version);
+		assert_eq!(save_game_manager.load("slot1").expect("load").info.sequence, 1);
+		save_game_manager.save("slot5", &json!({ "value": f64::NAN, "list": [f64::INFINITY] }), &SaveSlotOptions::default()).expect("save");
+		assert!(state.borrow().storage.read_text("numbers.slot.slot5.0").expect("record").ends_with("{\"value\":null,\"list\":[null]}"));
+		let mut non_text_keys = std::collections::HashMap::new();
+		non_text_keys.insert(vec![1u8], 1);
+		assert_eq!(save_game_manager.save("slot6", &non_text_keys, &SaveSlotOptions::default()), Err(SaveGameError::InvalidData));
 	}
 }

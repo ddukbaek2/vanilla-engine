@@ -1,5 +1,5 @@
 //==============================================================================
-//! 저장 글의 짝 없는 서로게이트 보존. (러스트 판에만 있다, LocalStorage 와 PersistedStore 가 쓴다)
+//! 엔진의 JSON 글 쓰기와 저장 글의 짝 없는 서로게이트 보존. (엔진이 JSON 을 쓰는 길 모두가 쓴다, 서로게이트 표는 LocalStorage 와 PersistedStore 가 쓴다)
 //! - 원본 localStorage 와 JSON 은 JS 글(UTF-16)이라 짝 없는 서로게이트(짝을 잃은 U+D800 ~ U+DFFF)를 담는다.
 //!   잘린 이모지처럼 사용자 입력에서 생기고, JSON.stringify 는 그것을 \ud83d 같은 이스케이프로 쓴다. (ES2019 의 잘 짜인 JSON.stringify)
 //! - 러스트 String 은 UTF-8 이라 그런 글을 담지 못한다. 그래서 러스트 쪽에는 대체 문자(U+FFFD)로 보이고,
@@ -7,10 +7,11 @@
 //! - PreservedText: 원래 UTF-16 단위와 대체 문자로 보인 글.
 //! - parse_json, parse_json_code_units: JSON.parse 처럼 읽되 짝 없는 서로게이트(이스케이프와 날 단위 모두)를 대체 문자로 읽고,
 //!   그런 글이 있던 자리(JSON 경로)와 원래 단위를 JsonSurrogateTable 에 남긴다. 수는 serde_json 이 읽은 것과 같다.
-//! - stringify_json: serde_json 의 짧은 꼴(Value::to_string)과 같은 글을 쓰되, 표의 자리에 대체 문자로 보인 글이 그대로 있으면 원래 단위를,
+//! - stringify_json, stringify_json_with_space: 원본 JSON.stringify 와 글자까지 같은 글을 쓰되(엔진이 JSON 을 쓰는 길 모두가 쓴다), 표의 자리에 대체 문자로 보인 글이 그대로 있으면 원래 단위를,
 //!   다른 자리라도 같은 글이면(원본에서 글을 옮겨 담은 것과 같다) 원래 단위를 JSON.stringify 처럼 \udXXX 로 쓴다.
 //!   대체 문자로 보이는 글이 같은데 원래 단위가 서로 다른 글이 둘 이상이면 자리가 맞는 것만 원래 단위로 쓴다.
 //==============================================================================
+use crate::base::format::number_to_string;
 use serde_json::{Map, Number, Value};
 use std::collections::HashMap;
 
@@ -213,7 +214,7 @@ impl JsonSurrogateTable {
 	//==============================================================================
 	/// 글 하나 남기기. (대체 문자가 든 글만, 자리가 있으면 값 글이고 없으면 키)
 	//==============================================================================
-	fn record(&mut self, path: Option<&[JsonPathSegment]>, preserved_text: PreservedText) {
+	pub(crate) fn record(&mut self, path: Option<&[JsonPathSegment]>, preserved_text: PreservedText) {
 		if !preserved_text.get_lossy_text().contains('\u{fffd}') {
 			return;
 		}
@@ -376,14 +377,27 @@ pub fn parse_json_object_entries(text: &str) -> Result<Vec<JsonObjectEntry>, Str
 }
 
 //==============================================================================
-/// JSON 쓰기. (serde_json 의 짧은 꼴과 같고, 표에 남은 글은 원래 단위로)
+/// JSON 쓰기. (원본 JSON.stringify(value) 와 글자까지 같다, 표에 남은 글은 원래 단위로)
+/// - 수는 원본 String(수) 꼴이다. (1.0 → 1, -0 → 0, 1e21 → 1e+21, 큰 정수도 f64 로 바꿔 쓴다)
+/// - 객체 칸 차례는 원본 JS 객체처럼 배열 번호 꼴 이름("0" ~ "4294967294")을 수 차례로 먼저, 나머지는 넣은 차례다.
+/// - 글은 원본 QuoteJSONString 꼴이다. (quote_json_text)
+/// - 엔진이 JSON 을 쓰는 길(LocalStorage, PersistedStore, UIDocument, WebSocketClient, 초안 세이브)이 모두 이것을 쓴다.
 ///
 /// # 인자
 /// - `value`: 쓸 값.
-/// - `surrogate_table`: parse_json 이 남긴 표. (빈 표면 serde_json 의 짧은 꼴과 같다)
+/// - `surrogate_table`: parse_json 이 남긴 표. (따로 읽은 글이 없으면 JsonSurrogateTable::new())
 ///
 /// # 돌려줌
 /// JSON 글.
+///
+/// # 예제
+/// 원본 JSON.stringify 와 같은 글
+/// ```rust
+/// use vanilla::misc::storagetext::{self, JsonSurrogateTable};
+///
+/// let value = serde_json::json!({ "b": 1.0, "2": -0.0, "a": [1e21, 0.1, 1e-7], "1": "x\ny" });
+/// assert_eq!(storagetext::stringify_json(&value, &JsonSurrogateTable::new()), r#"{"1":"x\ny","2":0,"b":1,"a":[1e+21,0.1,1e-7]}"#);
+/// ```
 //==============================================================================
 pub fn stringify_json(value: &Value, surrogate_table: &JsonSurrogateTable) -> String {
 	stringify_json_at(value, &[], surrogate_table)
@@ -403,75 +417,259 @@ pub fn stringify_json(value: &Value, surrogate_table: &JsonSurrogateTable) -> St
 pub fn stringify_json_at(value: &Value, base_path: &[JsonPathSegment], surrogate_table: &JsonSurrogateTable) -> String {
 	let mut json_text = String::new();
 	let mut path = base_path.to_vec();
-	write_json_value(&mut json_text, value, &mut path, surrogate_table);
+	let mut json_writer = JsonWriter { json_text: &mut json_text, path: &mut path, surrogate_table, space: "", depth: 0 };
+	json_writer.write_value(value);
 	json_text
 }
 
 //==============================================================================
-/// 값 하나 쓰기.
+/// 들여 쓴 JSON 쓰기. (원본 JSON.stringify(value, null, space) 와 글자까지 같다)
+/// - 빈 배열과 빈 객체는 [] 와 {}, 그 밖에는 한 칸에 한 줄씩 space 를 깊이만큼 앞에 둔다. 객체 칸은 "이름": 값 꼴이다.
+/// - 원본처럼 space 는 앞 10 글자까지만 쓴다. (빈 글이면 stringify_json 과 같다)
+///
+/// # 인자
+/// - `value`: 쓸 값.
+/// - `space`: 들여쓰기 글. (원본 JSON.stringify 의 셋째 인자, 예: "\t", "  ")
+/// - `surrogate_table`: parse_json 이 남긴 표. (따로 읽은 글이 없으면 JsonSurrogateTable::new())
+///
+/// # 돌려줌
+/// JSON 글.
+///
+/// # 예제
+/// 탭으로 들여 쓰기
+/// ```rust
+/// use vanilla::misc::storagetext::{self, JsonSurrogateTable};
+///
+/// let value = serde_json::json!({ "version": 1, "root": { "list": [2.5, []], "empty": {} } });
+/// let json_text = storagetext::stringify_json_with_space(&value, "\t", &JsonSurrogateTable::new());
+/// assert_eq!(json_text, "{\n\t\"version\": 1,\n\t\"root\": {\n\t\t\"list\": [\n\t\t\t2.5,\n\t\t\t[]\n\t\t],\n\t\t\"empty\": {}\n\t}\n}");
+/// ```
 //==============================================================================
-fn write_json_value(json_text: &mut String, value: &Value, path: &mut Vec<JsonPathSegment>, surrogate_table: &JsonSurrogateTable) {
-	match value {
-		Value::Null => {
+pub fn stringify_json_with_space(value: &Value, space: &str, surrogate_table: &JsonSurrogateTable) -> String {
+	let space_end = space.char_indices().nth(10).map_or(space.len(), |(byte_index, _)| byte_index);
+	let mut json_text = String::new();
+	let mut path = Vec::new();
+	let mut json_writer = JsonWriter { json_text: &mut json_text, path: &mut path, surrogate_table, space: &space[..space_end], depth: 0 };
+	json_writer.write_value(value);
+	json_text
+}
+
+//==============================================================================
+/// JSON.stringify 의 글 따옴표. (원본 JSON.stringify(text) 와 같다, 앞뒤 따옴표까지)
+///
+/// # 인자
+/// - `text`: 쓸 글.
+///
+/// # 돌려줌
+/// JSON 글.
+///
+/// # 예제
+/// 이스케이프
+/// ```rust
+/// use vanilla::misc::storagetext;
+///
+/// assert_eq!(storagetext::quote_json_text("a\"b\\\n\u{1}"), r#""a\"b\\\n\u0001""#);
+/// ```
+//==============================================================================
+pub fn quote_json_text(text: &str) -> String {
+	let mut quoted_text = String::with_capacity(text.len() + 2);
+	push_quoted_text(&mut quoted_text, text);
+	quoted_text
+}
+
+//==============================================================================
+/// 글 따옴표 붙여 덧붙이기. (QuoteJSONString)
+//==============================================================================
+fn push_quoted_text(json_text: &mut String, text: &str) {
+	json_text.push('"');
+	for character in text.chars() {
+		match character {
+			'"' => {
+				json_text.push_str("\\\"");
+			}
+			'\\' => {
+				json_text.push_str("\\\\");
+			}
+			'\u{8}' => {
+				json_text.push_str("\\b");
+			}
+			'\u{c}' => {
+				json_text.push_str("\\f");
+			}
+			'\n' => {
+				json_text.push_str("\\n");
+			}
+			'\r' => {
+				json_text.push_str("\\r");
+			}
+			'\t' => {
+				json_text.push_str("\\t");
+			}
+			_ if (character as u32) < 0x20 => {
+				json_text.push_str(&format!("\\u{:04x}", character as u32));
+			}
+			_ => {
+				json_text.push(character);
+			}
+		}
+	}
+	json_text.push('"');
+}
+
+//==============================================================================
+/// JSON 수 쓰기. (원본 String(수), 수가 아니면 null)
+//==============================================================================
+fn push_json_number(json_text: &mut String, number_value: &Number) {
+	match number_value.as_f64() {
+		Some(float_value) if float_value.is_finite() => {
+			json_text.push_str(&number_to_string(float_value));
+		}
+		_ => {
 			json_text.push_str("null");
-		}
-		Value::Bool(boolean_value) => {
-			if *boolean_value {
-				json_text.push_str("true");
-			}
-			else {
-				json_text.push_str("false");
-			}
-		}
-		Value::Number(number_value) => {
-			json_text.push_str(&serde_json::to_string(number_value).unwrap_or_else(|_| String::from("null")));
-		}
-		Value::String(string_value) => {
-			let code_units = if surrogate_table.is_empty() {
-				None
-			}
-			else {
-				surrogate_table.find_value_code_units(path, string_value)
-			};
-			write_json_string(json_text, string_value, code_units);
-		}
-		Value::Array(array_value) => {
-			json_text.push('[');
-			for (item_index, item_value) in array_value.iter().enumerate() {
-				if item_index > 0 {
-					json_text.push(',');
-				}
-				path.push(JsonPathSegment::Index(item_index));
-				write_json_value(json_text, item_value, path, surrogate_table);
-				path.pop();
-			}
-			json_text.push(']');
-		}
-		Value::Object(object_map) => {
-			json_text.push('{');
-			for (entry_index, (key, item_value)) in object_map.iter().enumerate() {
-				if entry_index > 0 {
-					json_text.push(',');
-				}
-				let key_code_units = if surrogate_table.is_empty() {
-					None
-				}
-				else {
-					surrogate_table.find_text_code_units(key)
-				};
-				write_json_string(json_text, key, key_code_units);
-				json_text.push(':');
-				path.push(JsonPathSegment::Key(key.clone()));
-				write_json_value(json_text, item_value, path, surrogate_table);
-				path.pop();
-			}
-			json_text.push('}');
 		}
 	}
 }
 
 //==============================================================================
-/// 글 하나 쓰기. (원래 단위가 있으면 그것을 JSON.stringify 꼴로, 없으면 serde_json 꼴로. 짝 없는 서로게이트가 없으면 두 꼴이 같다)
+/// 배열 번호 꼴 이름이면 그 번호. (원본 객체가 먼저 수 차례로 두는 이름, 0 ~ 2^32 - 2 의 맨 꼴)
+//==============================================================================
+fn read_array_index_key(key: &str) -> Option<u32> {
+	if key.is_empty() || (key.len() > 1 && key.starts_with('0')) || !key.bytes().all(|byte| byte.is_ascii_digit()) {
+		return None;
+	}
+	let index: u64 = key.parse().ok()?;
+	if index < u64::from(u32::MAX) {
+		Some(index as u32)
+	}
+	else {
+		None
+	}
+}
+
+//==============================================================================
+/// JSON 쓰개. (stringify_json, stringify_json_with_space 가 쓴다)
+//==============================================================================
+struct JsonWriter<'a> {
+	json_text: &'a mut String,
+	path: &'a mut Vec<JsonPathSegment>,
+	surrogate_table: &'a JsonSurrogateTable,
+	space: &'a str,
+	depth: usize,
+}
+
+impl JsonWriter<'_> {
+	//==============================================================================
+	/// 들여 쓴 꼴이면 줄을 바꾸고 깊이만큼 들여쓰기.
+	//==============================================================================
+	fn write_line_break(&mut self) {
+		if self.space.is_empty() {
+			return;
+		}
+		self.json_text.push('\n');
+		for _ in 0..self.depth {
+			self.json_text.push_str(self.space);
+		}
+	}
+
+	//==============================================================================
+	/// 값 하나 쓰기.
+	//==============================================================================
+	fn write_value(&mut self, value: &Value) {
+		match value {
+			Value::Null => {
+				self.json_text.push_str("null");
+			}
+			Value::Bool(boolean_value) => {
+				if *boolean_value {
+					self.json_text.push_str("true");
+				}
+				else {
+					self.json_text.push_str("false");
+				}
+			}
+			Value::Number(number_value) => {
+				push_json_number(self.json_text, number_value);
+			}
+			Value::String(string_value) => {
+				let code_units = if self.surrogate_table.is_empty() {
+					None
+				}
+				else {
+					self.surrogate_table.find_value_code_units(self.path, string_value)
+				};
+				write_json_string(self.json_text, string_value, code_units);
+			}
+			Value::Array(array_value) => {
+				if array_value.is_empty() {
+					self.json_text.push_str("[]");
+					return;
+				}
+				self.json_text.push('[');
+				self.depth += 1;
+				for (item_index, item_value) in array_value.iter().enumerate() {
+					if item_index > 0 {
+						self.json_text.push(',');
+					}
+					self.write_line_break();
+					self.path.push(JsonPathSegment::Index(item_index));
+					self.write_value(item_value);
+					self.path.pop();
+				}
+				self.depth -= 1;
+				self.write_line_break();
+				self.json_text.push(']');
+			}
+			Value::Object(object_map) => {
+				if object_map.is_empty() {
+					self.json_text.push_str("{}");
+					return;
+				}
+				let mut index_entries: Vec<(u32, &String, &Value)> = Vec::new();
+				let mut other_entries: Vec<(&String, &Value)> = Vec::new();
+				for (key, item_value) in object_map {
+					match read_array_index_key(key) {
+						Some(index) => {
+							index_entries.push((index, key, item_value));
+						}
+						None => {
+							other_entries.push((key, item_value));
+						}
+					}
+				}
+				index_entries.sort_by_key(|entry| entry.0);
+				self.json_text.push('{');
+				self.depth += 1;
+				let ordered_entries = index_entries.iter().map(|entry| (entry.1, entry.2)).chain(other_entries);
+				for (entry_index, (key, item_value)) in ordered_entries.enumerate() {
+					if entry_index > 0 {
+						self.json_text.push(',');
+					}
+					self.write_line_break();
+					let key_code_units = if self.surrogate_table.is_empty() {
+						None
+					}
+					else {
+						self.surrogate_table.find_text_code_units(key)
+					};
+					write_json_string(self.json_text, key, key_code_units);
+					self.json_text.push(':');
+					if !self.space.is_empty() {
+						self.json_text.push(' ');
+					}
+					self.path.push(JsonPathSegment::Key(key.clone()));
+					self.write_value(item_value);
+					self.path.pop();
+				}
+				self.depth -= 1;
+				self.write_line_break();
+				self.json_text.push('}');
+			}
+		}
+	}
+}
+
+//==============================================================================
+/// 글 하나 쓰기. (원래 단위가 있으면 그것을, 없으면 글을 JSON.stringify 꼴로. 짝 없는 서로게이트가 없으면 두 꼴이 같다)
 //==============================================================================
 fn write_json_string(json_text: &mut String, text: &str, code_units: Option<&[u16]>) {
 	match code_units {
@@ -479,7 +677,7 @@ fn write_json_string(json_text: &mut String, text: &str, code_units: Option<&[u1
 			json_text.push_str(&quote_json_code_units(code_units));
 		}
 		None => {
-			json_text.push_str(&serde_json::to_string(text).unwrap_or_else(|_| String::from("\"\"")));
+			push_quoted_text(json_text, text);
 		}
 	}
 }
@@ -832,7 +1030,26 @@ mod tests {
 	use super::*;
 
 	//==============================================================================
-	/// 짝 없는 서로게이트가 없으면 serde_json 과 같은 값과 같은 글이다.
+	/// 원본 JSON.stringify 와 글자까지 같은 글. (두 엔진 같은 글)
+	//==============================================================================
+	#[test]
+	fn stringifies_like_js_json_stringify() {
+		// 기대 글은 원본 JSON.stringify(JSON.parse(글)), JSON.stringify(값, null, "\t"), JSON.stringify(값, null, "12345678901234") 를 node 로 뽑은 것이다.
+		let number_text = r#"{"b":1.0,"10":2,"2":-0.0,"a":[1e21,1e-7,123456789012345680000,0.000001,1.5e-7,5e-324,1.7976931348623157e308,100,1e16],"01":"x","4294967295":0,"4294967294":1}"#;
+		let (number_value, number_table) = parse_json(number_text).expect("parse");
+		assert_eq!(stringify_json(&number_value, &number_table), r#"{"2":0,"10":2,"4294967294":1,"b":1,"a":[1e+21,1e-7,123456789012345680000,0.000001,1.5e-7,5e-324,1.7976931348623157e+308,100,10000000000000000],"01":"x","4294967295":0}"#);
+		assert_eq!(stringify_json_with_space(&number_value, "\t", &number_table), "{\n\t\"2\": 0,\n\t\"10\": 2,\n\t\"4294967294\": 1,\n\t\"b\": 1,\n\t\"a\": [\n\t\t1e+21,\n\t\t1e-7,\n\t\t123456789012345680000,\n\t\t0.000001,\n\t\t1.5e-7,\n\t\t5e-324,\n\t\t1.7976931348623157e+308,\n\t\t100,\n\t\t10000000000000000\n\t],\n\t\"01\": \"x\",\n\t\"4294967295\": 0\n}");
+		let nested_text = r#"[[],{},[{}],{"k":[1,{"z":null}]},"\u001f\u007f\u2028"]"#;
+		let (nested_value, nested_table) = parse_json(nested_text).expect("parse");
+		assert_eq!(stringify_json(&nested_value, &nested_table), "[[],{},[{}],{\"k\":[1,{\"z\":null}]},\"\\u001f\u{7f}\u{2028}\"]");
+		assert_eq!(stringify_json_with_space(&nested_value, "\t", &nested_table), "[\n\t[],\n\t{},\n\t[\n\t\t{}\n\t],\n\t{\n\t\t\"k\": [\n\t\t\t1,\n\t\t\t{\n\t\t\t\t\"z\": null\n\t\t\t}\n\t\t]\n\t},\n\t\"\\u001f\u{7f}\u{2028}\"\n]");
+		assert_eq!(stringify_json_with_space(&nested_value, "12345678901234", &nested_table), "[\n1234567890[],\n1234567890{},\n1234567890[\n12345678901234567890{}\n1234567890],\n1234567890{\n12345678901234567890\"k\": [\n1234567890123456789012345678901,\n123456789012345678901234567890{\n1234567890123456789012345678901234567890\"z\": null\n123456789012345678901234567890}\n12345678901234567890]\n1234567890},\n1234567890\"\\u001f\u{7f}\u{2028}\"\n]");
+		assert_eq!(stringify_json_with_space(&nested_value, "", &nested_table), stringify_json(&nested_value, &nested_table));
+		assert_eq!(quote_json_text("a\"b\\\n\u{1}\u{7f}"), "\"a\\\"b\\\\\\n\\u0001\u{7f}\"");
+	}
+
+	//==============================================================================
+	/// 짝 없는 서로게이트가 없으면 serde_json 과 같은 값을 읽는다.
 	//==============================================================================
 	#[test]
 	fn matches_serde_json_without_lone_surrogate() {
@@ -841,7 +1058,8 @@ mod tests {
 		let serde_value: Value = serde_json::from_str(json_text).expect("serde parse");
 		assert_eq!(value, serde_value);
 		assert!(surrogate_table.is_empty());
-		assert_eq!(stringify_json(&value, &surrogate_table), serde_value.to_string());
+		// 원본 JSON.stringify(JSON.parse(json_text)) 의 글. (node 로 뽑음, 수는 String(수) 꼴)
+		assert_eq!(stringify_json(&value, &surrogate_table), "{\"name\":\"가나 😀 \\\"q\\\" \\n\\t\\u0001//\",\"list\":[1,-2.5,300,0.1,true,false,null,{\"a\":[]}],\"empty\":{},\"big\":12345678901234567000}");
 		for broken_text in ["", "{", "[1,]", "{\"a\":1,}", "01", "1.", ".5", "\"a\nb\"", "\"\\x\"", "nul", "[1] 2", "\u{feff}{}", "+1"] {
 			assert!(parse_json(broken_text).is_err(), "{:?} 는 틀린 JSON", broken_text);
 			assert!(serde_json::from_str::<Value>(broken_text).is_err(), "{:?} 는 serde 도 틀린 JSON", broken_text);

@@ -6,6 +6,7 @@
 //!   Box2D 도 같은 까닭으로 b2ComputeCosSin, b2Atan2 를 직접 짰다. (box2d.org/posts/2024/08/determinism)
 //==============================================================================
 // 옮긴 원문: Box2D 3 의 셈에서 옮김, MIT, THIRD_PARTY_LICENSES.md
+use crate::experimental::jsmath::{js_max, js_min};
 use std::f64::consts::PI;
 
 /// 2 파이.
@@ -106,8 +107,8 @@ impl PhysicsMath2D {
 		}
 		let absolute_x = x.abs();
 		let absolute_y = y.abs();
-		let maximum = absolute_x.max(absolute_y);
-		let minimum = absolute_x.min(absolute_y);
+		let maximum = js_max(absolute_x, absolute_y);
+		let minimum = js_min(absolute_x, absolute_y);
 		let ratio = minimum / maximum;
 		let mut reduced = ratio;
 		let mut offset = 0.0;

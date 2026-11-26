@@ -62,6 +62,8 @@ use crate::core::engine::Engine;
 use crate::core::graphic::{BlendMode, TextAlign, TextBaseline};
 use crate::core::image::Image;
 use crate::core::node::nodetree::{NodeId, NodeTree};
+use crate::core::node::worldnode::WorldNode;
+use crate::misc::storagetext::{self, JsonSurrogateTable};
 use crate::core::reflection::{collect_reflected_properties, has_mutable_getters, read_reflected_property, read_reflected_property_mut, read_shortest_number, write_reflected_property, write_reflected_property_in_tree, ReflectValue, ReflectedProperty};
 use crate::resource::imageasset::ImageAsset;
 use crate::effect::heathazeeffect::HeatHazeEffect;
@@ -1331,6 +1333,33 @@ impl UIDocument {
 	}
 
 	//==============================================================================
+	/// 노드 종류 이름. (원본 node.constructor.name 자리, 저장할 때 적는 type 과 같다)
+	/// - 등록한 노드 종류(register_node_type, 엔진 종류는 register_editor_types 가 등록)의 컴포넌트가 붙은 노드면 그 이름(앞에 붙은 것), 아니면 "WorldNode".
+	///
+	/// # 인자
+	/// - `node`: 볼 노드.
+	///
+	/// # 돌려줌
+	/// 노드 종류 이름.
+	///
+	/// # 예제
+	/// 등록한 엔진 노드 종류는 그 이름, 맨 노드는 WorldNode
+	/// ```rust
+	/// use vanilla::{FloatingText, UIDocument, WorldNode};
+	///
+	/// let mut ui_document = UIDocument::new();
+	/// ui_document.register_editor_types();
+	/// let mut node = WorldNode::new("node");
+	/// assert_eq!(ui_document.get_node_type_name(&node), "WorldNode");
+	/// node.add_component(FloatingText::new());
+	/// assert_eq!(ui_document.get_node_type_name(&node), "FloatingText");
+	/// ```
+	//==============================================================================
+	pub fn get_node_type_name(&self, node: &WorldNode) -> &str {
+		node.get_all_components().iter().find_map(|component| self.find_node_type(component.as_ref())).map(|node_type| node_type.type_name.as_str()).unwrap_or(NODE_TYPE_NAME)
+	}
+
+	//==============================================================================
 	/// 지원 컴포넌트 종류 이름 목록. (원본 getComponentTypeNames, 등록 차례)
 	/// # 돌려줌
 	/// 등록한 컴포넌트 종류 이름. (등록 차례, 노드 종류 이름은 들지 않는다)
@@ -2286,11 +2315,10 @@ impl UIDocument {
 		write_value(&mut document_data, "root", root_data);
 		let document_value = Value::Object(document_data);
 		if is_pretty {
-			let pretty_text = serde_json::to_string_pretty(&document_value).unwrap_or_default();
-			indent_with_tabs(&pretty_text)
+			storagetext::stringify_json_with_space(&document_value, "\t", &JsonSurrogateTable::new())
 		}
 		else {
-			serde_json::to_string(&document_value).unwrap_or_default()
+			storagetext::stringify_json(&document_value, &JsonSurrogateTable::new())
 		}
 	}
 
@@ -2637,25 +2665,6 @@ fn collect_image_paths(value: &Value, image_path_list: &mut Vec<String>) {
 		_ => {
 		}
 	}
-}
-
-//==============================================================================
-/// 두 칸 들여쓰기를 탭으로. (serde_json 의 보기 좋은 글은 두 칸이다. JSON 글 안에는 줄바꿈 글자가 없어 줄 머리의 빈칸은 모두 들여쓰기다)
-//==============================================================================
-fn indent_with_tabs(pretty_text: &str) -> String {
-	let mut tab_text = String::with_capacity(pretty_text.len());
-	for (line_index, line) in pretty_text.split('\n').enumerate() {
-		if line_index > 0 {
-			tab_text.push('\n');
-		}
-		let content = line.trim_start_matches(' ');
-		let indent_count = (line.len() - content.len()) / 2;
-		for _ in 0..indent_count {
-			tab_text.push('\t');
-		}
-		tab_text.push_str(content);
-	}
-	tab_text
 }
 
 //==============================================================================

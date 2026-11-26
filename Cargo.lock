@@ -3317,6 +3317,7 @@ dependencies = [
  "rustls",
  "rustybuzz",
  "self_cell",
+ "serde",
  "serde_json",
  "skrifa 0.50.0",
  "slotmap",

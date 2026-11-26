@@ -4,6 +4,7 @@ rustybuzz 0.20.1 (crates.io) 그대로에 아래만 더했다. 고친 자리에�
 
 - `Face::set_scale`: HarfBuzz `hb_font_set_scale` 처럼 자리 배율을 둔다. 글꼴 단위 정수는 `em_scale`(16.16 곱 `(v * mult + 32768) >> 16`), 가변 GPOS 델타는 `em_scalef`(실수 곱의 반올림)로 그 배율에서 넣는다. 전진폭, 원점, 글리프 범위(`scale_glyph_extents`), GPOS 값과 앵커, kern, kerx, trak, 대체 빈칸과 표시 자리. 기본 배율은 upem 이라 그대로 쓰면 0.20.1 과 같은 값이다.
 - `Face::set_variation`, `Face::variation_coordinates`: 축 값을 HarfBuzz `hb_ot_var_normalize_coords` 처럼 정규화해 든다. (16.16 정규화, avar 를 실수로 사상, 2.14 로 반올림) HVAR 전진폭도 그 좌표로 `advance + roundf(delta)` 다.
+- `decompose_character`: 정규화가 쓰는 정준 분해(한글 음절 포함)를 밖에 낸다. 글꼴에 합친 글자(ï)가 없어도 분해한 글자(i, U+0308)가 있으면 HarfBuzz 가 그 글꼴로 그리므로, 대체 글꼴을 고를 때 같은 셈을 한다.
 - ttf-parser 는 옆의 `../ttf-parser` 고친 판을 쓴다.
 - 새 rustc 경고 둘(`unstable_name_collisions`, 쓰지 않는 `full`)을 그 자리에서 끈다.
 

@@ -937,7 +937,7 @@ impl WorldNode {
 	pub fn get_components<T: Component + 'static>(&self) -> Vec<&T> {
 		self.components.iter().filter_map(|component| {
 			let component_reference: &dyn Component = component.as_ref();
-			component_reference.as_any().downcast_ref::<T>()
+			component_reference.as_instance_of::<T>()
 		}).collect()
 	}
 
@@ -950,7 +950,7 @@ impl WorldNode {
 	pub fn get_component<T: Component + 'static>(&self) -> Option<&T> {
 		for component in self.components.iter() {
 			let component_reference: &dyn Component = component.as_ref();
-			if let Some(found) = component_reference.as_any().downcast_ref::<T>() {
+			if let Some(found) = component_reference.as_instance_of::<T>() {
 				return Some(found);
 			}
 		}
@@ -966,7 +966,7 @@ impl WorldNode {
 	pub fn get_component_mut<T: Component + 'static>(&mut self) -> Option<&mut T> {
 		for component in self.components.iter_mut() {
 			let component_reference: &mut dyn Component = component.as_mut();
-			if let Some(found) = component_reference.as_any_mut().downcast_mut::<T>() {
+			if let Some(found) = component_reference.as_instance_of_mut::<T>() {
 				return Some(found);
 			}
 		}
@@ -1008,7 +1008,7 @@ impl WorldNode {
 		let transform = &mut self.transform;
 		self.components.retain_mut(|component| {
 			let component_reference: &dyn Component = component.as_ref();
-			if !component_reference.as_any().is::<T>() {
+			if !component_reference.is_instance_of::<T>() {
 				return true;
 			}
 			component.detach(transform);

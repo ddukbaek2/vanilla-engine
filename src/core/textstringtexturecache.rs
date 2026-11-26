@@ -14,9 +14,10 @@
 //!   고르기는 CSS 의 차례를 따르고, 기울인 얼굴이 없으면 가짜 기울임(기울기 1/4), 굵은 얼굴이 없으면 가짜 굵게를 글리프마다 입힌다. (textshaping.rs)
 //! - 이름의 얼굴들에 없는 글자는 기본 폰트, 시스템 글꼴 사슬, 표준 글꼴(데스크탑, 크롬의 -webkit-standard), 대체 폰트 순으로 찾는다. (브라우저의 글꼴 대체와 같은 자리)
 //!   이름 목록에서 얼굴을 하나도 찾지 못하면(default 가 아닌 없는 이름뿐이면) 크롬처럼 표준 글꼴을 기본 폰트보다 먼저 둔다.
-//!   데스크탑 시스템 글꼴 사슬(set_system_font_chain)은 원본 SYSTEM_FONT_STRING 의 이름을 운영체제 글꼴에서 찾은 것이고, 켜면 폰트 문자열의 올리지 않은 이름도
-//!   운영체제 글꼴에서 찾는다. 얼굴은 그 굵기와 기울기의 글자를 처음 쓸 때 읽는다. (platform/desktop/systemfont.rs)
-//!   대체 글꼴은 운영체제가 고른다. (set_system_font_fallback_enabled, 굵게를 청하면 굵은 얼굴을 따로 묻는다) 후보 파일을 주면(add_fallback_font_candidate) 그것을 먼저 쓴다.
+//!   데스크탑 시스템 글꼴 사슬(set_system_font_chain)은 원본 SYSTEM_FONT_STRING 의 이름을 운영체제 글꼴에서 찾은 것이고, 기본 글꼴 이름 default 를 청했을 때만 기본 폰트 뒤에 잇는다.
+//!   켜면 폰트 문자열의 올리지 않은 이름도 운영체제 글꼴에서 찾는다. 얼굴은 그 굵기와 기울기의 글자를 처음 쓸 때 읽는다. (platform/desktop/systemfont.rs)
+//!   대체 글꼴은 운영체제가 고른다. (set_system_font_fallback_enabled, 굵게를 청하면 굵은 얼굴을 따로 묻는다) 크롬처럼 첫 글꼴(빈칸을 가진 첫 얼굴)과 폰트 문자열마다 따로 묻고,
+//!   대체 얼굴은 운영체제가 그 얼굴을 고른 글자만 그린다. 이름 목록의 얼굴이 정준 분해로 그리는 글자(ï 를 i 와 U+0308 로)는 묻지 않는다. 후보 파일을 주면(add_fallback_font_candidate) 그것을 먼저 쓴다.
 //!   후보 파일은 쓸 때 읽는다. 이모지 표시 글자는 색 글리프 표가 있는 후보를, 그 밖의 글자는 색 글리프 표가 없는 후보를 먼저 읽는다. (표 목록만 먼저 엿본다)
 //! - 글꼴 얼굴을 새로 올리면 그 이름을 쓰는 폰트 문자열로 구웠고 그 얼굴의 글자 범위에 든 글자가 있는 문자열만 버린다. (원본 invalidateFontFaces)
 //!   원본처럼 set_rebake_text_on_font_load 로 켰을 때만 한다. (엔진이 EngineConfiguration.rebake_text_on_font_load 로 켠다, 기본 끔)
@@ -452,14 +453,18 @@ struct SystemFontState {
 	is_lookup_enabled: bool,
 	/// 글꼴에 없는 글자를 운영체제가 고른 대체 글꼴로 그리는지.
 	is_fallback_enabled: bool,
-	/// 기본 글꼴 사슬. (원본 SYSTEM_FONT_STRING 의 이름 차례, 기본 폰트 뒤에 찾는다)
+	/// 기본 글꼴 사슬. (원본 SYSTEM_FONT_STRING 의 이름 차례, default 를 청하면 기본 폰트 뒤에 찾는다)
 	chain_name_list: Vec<String>,
 	/// 이름(소문자) → 찾은 글꼴. (None 은 운영체제에 없는 이름)
 	family_table: HashMap<String, Option<SystemFontFamily>>,
-	/// 이미 물어본 대체 글꼴. (글자, 굵게, 기울임, 색)
-	fallback_query_set: std::collections::HashSet<(char, bool, bool, bool)>,
+	/// 이미 물어본 대체 글꼴. (바탕 열쇠, 글자, 굵게, 기울임, 색)
+	fallback_query_set: std::collections::HashSet<(String, char, bool, bool, bool)>,
 	/// 운영체제가 고른 대체 글꼴 얼굴. (source_key 가 같은 것끼리 한 이름으로 고른다)
 	fallback_face_list: Vec<RegisteredFontFace>,
+	/// 대체 글꼴 얼굴마다 물은 바탕의 열쇠. (fallback_face_list 와 같은 차례, 크롬은 첫 글꼴과 폰트 문자열마다 대체를 따로 고른다)
+	fallback_base_key_list: Vec<String>,
+	/// 운영체제가 준 파일과 얼굴을 읽은 자리. (바탕 열쇠, 준 파일과 얼굴, 굵기, 기울임, fallback_face_list 의 차례. 같은 답이면 다시 읽지 않고 글자 범위만 더한다)
+	fallback_source_memo_list: Vec<(String, FontFileSource, u16, bool, usize)>,
 	/// 읽은 파일 바이트. (같은 파일의 여러 얼굴이 나눠 든다)
 	shared_bytes_table: HashMap<std::path::PathBuf, std::rc::Weak<[u8]>>,
 }
@@ -958,7 +963,7 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
-	/// 시스템 글꼴 사슬 정하기. (데스크탑, 원본 SYSTEM_FONT_STRING 처럼 기본 폰트 뒤에 이름 차례로 찾는다)
+	/// 시스템 글꼴 사슬 정하기. (데스크탑, 원본 SYSTEM_FONT_STRING 처럼 기본 글꼴 이름 default 를 청한 폰트 문자열에서 기본 폰트 뒤에 이름 차례로 찾는다)
 	/// - 켜면 폰트 문자열의 올리지 않은 이름도 운영체제 글꼴에서 찾는다. ("16px Arial" 이 시스템의 Arial 로 그려진다, 브라우저와 같다)
 	/// - 얼굴은 그 굵기와 기울기의 글자를 처음 그리거나 잴 때 읽는다.
 	///
@@ -1100,6 +1105,53 @@ impl TextStringTextureCache {
 	}
 
 	//==============================================================================
+	/// 운영체제 대체 글꼴을 물을 바탕 읽기. (첫 글꼴은 대체 단계가 아닌 얼굴 가운데 빈칸을 가진 첫 것, 크롬 FontFallbackList::PrimarySimpleFontDataWithSpace)
+	//==============================================================================
+	fn read_fallback_base_info(&self, font_description: &FontDescription, face_list: &[ResolvedFontFace]) -> FallbackBaseInfo {
+		let first_family_name = font_description.family_name_list.first().cloned().unwrap_or_default();
+		let last_generic_family = font_description.family_name_list.iter().rev().find(|family_name| matches!(family_name.to_ascii_lowercase().as_str(), "serif" | "sans-serif" | "cursive" | "fantasy" | "monospace" | "-webkit-body"));
+		let is_monospace = last_generic_family.is_some_and(|family_name| family_name.eq_ignore_ascii_case("monospace"));
+		let primary_face = face_list.iter().find(|face| !face.descriptors.is_system_fallback && face.descriptors.contains_character(' '));
+		let mut primary_family_name: Option<String> = None;
+		let mut primary_font: Option<Rc<LoadedFont>> = None;
+		if let Some(primary_face) = primary_face {
+			let system_font_state = self.system_font_state.borrow();
+			primary_family_name = system_font_state.family_table.iter().find(|(_, system_font_family)| system_font_family.as_ref().is_some_and(|system_font_family| system_font_family.face_list.iter().any(|face| Rc::ptr_eq(&face.font, &primary_face.font)))).map(|(family_key, _)| family_key.clone());
+			if primary_family_name.is_none() {
+				primary_font = Some(primary_face.font.clone());
+			}
+		}
+		let primary_identity = match (&primary_family_name, &primary_font) {
+			(Some(family_name), _) => {
+				family_name.clone()
+			}
+			(None, Some(font)) => {
+				format!("@{:p}", Rc::as_ptr(font))
+			}
+			(None, None) => {
+				String::new()
+			}
+		};
+		// 대체가 무엇에 따라 달라지는지가 운영체제마다 다르다. (맥은 첫 글꼴, 윈도우는 폰트 문자열의 첫 이름과 monospace, 리눅스는 글자만. 같은 답을 다시 묻지 않는다)
+		let key = if cfg!(target_os = "macos") {
+			primary_identity
+		}
+		else if cfg!(target_os = "windows") {
+			format!("{}\u{1f}{}", first_family_name.to_lowercase(), is_monospace)
+		}
+		else {
+			String::new()
+		};
+		FallbackBaseInfo {
+			key,
+			primary_family_name,
+			primary_font,
+			first_family_name,
+			is_monospace,
+		}
+	}
+
+	//==============================================================================
 	/// 글의 글자가 운영체제 대체 글꼴로 그려지게 하기. (어느 얼굴에도 없는 글자를 운영체제에 묻는다, 같은 물음은 한 번)
 	/// - 굵게를 청했는데 그 글자를 가진 대체 얼굴이 모두 600 아래면 굵은 대체 얼굴을 따로 묻는다. (크롬도 굵기를 주고 대체 글꼴을 고른다)
 	//==============================================================================
@@ -1108,6 +1160,7 @@ impl TextStringTextureCache {
 			return;
 		}
 		let is_bold_desired = font_description.font_weight >= textshaping::BOLD_WEIGHT_THRESHOLD;
+		let fallback_base_info = self.read_fallback_base_info(font_description, resolved_face_list);
 		for grapheme in text.graphemes(true) {
 			let is_emoji_grapheme = textshaping::is_emoji_presentation(grapheme);
 			let character = match grapheme.chars().next() {
@@ -1129,31 +1182,35 @@ impl TextStringTextureCache {
 					face.font.has_character(character) && !face.font.has_color_character(character)
 				}
 			};
+			// 이름 목록의 얼굴이 그리면 묻지 않는다. (정준 분해로 그리는 것도, 운영체제 대체 얼굴은 아래에서 굵기까지 본다)
 			let is_resolved_covered = resolved_face_list.iter().any(|face| {
+				if face.descriptors.is_system_fallback {
+					return false;
+				}
 				let has_character = if is_emoji_grapheme {
 					face.font.has_color_character(character)
 				}
 				else {
-					face.font.has_character(character) && !face.font.has_color_character(character)
+					textshaping::has_character_or_decomposition(&face.font, character) && !face.font.has_color_character(character)
 				};
 				face.descriptors.contains_character(character) && has_character
 			});
 			if is_resolved_covered {
 				continue;
 			}
-			let query_key = (character, is_bold_desired, font_description.is_italic, is_emoji_grapheme);
+			let query_key = (fallback_base_info.key.clone(), character, is_bold_desired, font_description.is_italic, is_emoji_grapheme);
 			{
 				let system_font_state = self.system_font_state.borrow();
 				if system_font_state.fallback_query_set.contains(&query_key) {
 					continue;
 				}
-				let covering_face_list: Vec<&RegisteredFontFace> = system_font_state.fallback_face_list.iter().filter(|face| is_covered_by_face(face)).collect();
+				let covering_face_list: Vec<&RegisteredFontFace> = system_font_state.fallback_face_list.iter().zip(system_font_state.fallback_base_key_list.iter()).filter(|(face, base_key)| **base_key == fallback_base_info.key && face.descriptors.contains_character(character) && is_covered_by_face(face)).map(|(face, _)| face).collect();
 				if !covering_face_list.is_empty() && (!is_bold_desired || covering_face_list.iter().any(|face| face.descriptors.maximum_weight >= textshaping::BOLD_WEIGHT_THRESHOLD)) {
 					continue;
 				}
 			}
 			self.system_font_state.borrow_mut().fallback_query_set.insert(query_key);
-			let source = match find_system_fallback_font(grapheme, font_description.font_weight, font_description.is_italic, is_emoji_grapheme) {
+			let source = match find_system_fallback_font(grapheme, font_description.font_weight, font_description.is_italic, is_emoji_grapheme, &fallback_base_info) {
 				Some(source) => {
 					source
 				}
@@ -1161,20 +1218,43 @@ impl TextStringTextureCache {
 					continue;
 				}
 			};
+			// 대체 얼굴은 운영체제가 그 얼굴을 고른 글자만 그린다. (글자 범위로 든다, 크롬도 글자마다 대체를 묻고 다른 글자를 위해 고른 글꼴을 넘겨 쓰지 않는다)
+			let grapheme_range_list: Vec<(u32, u32)> = grapheme.chars().map(|grapheme_character| (grapheme_character as u32, grapheme_character as u32)).collect();
 			let mut system_font_state = self.system_font_state.borrow_mut();
 			let state = &mut *system_font_state;
-			let is_loaded_already = state.fallback_face_list.iter().any(|face| face.descriptors.source_key == read_fallback_source_key(&source) && face.descriptors.minimum_weight == font_description.font_weight.clamp(face.descriptors.minimum_weight, face.descriptors.maximum_weight) && face.descriptors.is_italic == font_description.is_italic);
-			if is_loaded_already {
+			let add_range_list = |face: &mut RegisteredFontFace, range_list: &[(u32, u32)]| {
+				for range in range_list {
+					if !face.descriptors.unicode_range_list.contains(range) {
+						face.descriptors.unicode_range_list.push(*range);
+					}
+				}
+			};
+			let memo_position = state.fallback_source_memo_list.iter().find(|(base_key, memo_source, weight, is_italic, _)| *base_key == fallback_base_info.key && *memo_source == source && *weight == font_description.font_weight && *is_italic == font_description.is_italic).map(|memo| memo.4);
+			if let Some(face_position) = memo_position {
+				add_range_list(&mut state.fallback_face_list[face_position], &grapheme_range_list);
 				continue;
 			}
 			match load_system_font_face(&mut state.shared_bytes_table, &source, font_description.font_weight, font_description.is_italic) {
 				Ok(mut registered_font_face) => {
-					registered_font_face.descriptors.source_key = read_fallback_source_key(&source);
+					registered_font_face.descriptors.source_key = read_fallback_source_key(&source, &registered_font_face);
 					registered_font_face.descriptors.is_system_fallback = true;
-					let is_duplicate = state.fallback_face_list.iter().any(|face| Rc::ptr_eq(face.font.get_font_bytes(), registered_font_face.font.get_font_bytes()) && face.font.get_face_index() == registered_font_face.font.get_face_index() && face.descriptors == registered_font_face.descriptors);
-					if !is_duplicate {
-						state.fallback_face_list.push(registered_font_face);
-					}
+					// 같은 바탕에서 이미 읽은 같은 얼굴이면 그 얼굴의 글자 범위에 더한다.
+					let loaded_position = state.fallback_face_list.iter().zip(state.fallback_base_key_list.iter()).position(|(face, base_key)| {
+						*base_key == fallback_base_info.key && Rc::ptr_eq(face.font.get_font_bytes(), registered_font_face.font.get_font_bytes()) && face.font.get_face_index() == registered_font_face.font.get_face_index() && face.descriptors.minimum_weight == registered_font_face.descriptors.minimum_weight && face.descriptors.maximum_weight == registered_font_face.descriptors.maximum_weight && face.descriptors.is_italic == registered_font_face.descriptors.is_italic
+					});
+					let face_position = match loaded_position {
+						Some(face_position) => {
+							add_range_list(&mut state.fallback_face_list[face_position], &grapheme_range_list);
+							face_position
+						}
+						None => {
+							registered_font_face.descriptors.unicode_range_list = grapheme_range_list;
+							state.fallback_face_list.push(registered_font_face);
+							state.fallback_base_key_list.push(fallback_base_info.key.clone());
+							state.fallback_face_list.len() - 1
+						}
+					};
+					state.fallback_source_memo_list.push((fallback_base_info.key.clone(), source, font_description.font_weight, font_description.is_italic, face_position));
 				}
 				Err(error) => {
 					eprintln!("TextStringTextureCache: {} ({})", error, source.path.display());
@@ -1870,8 +1950,14 @@ impl TextStringTextureCache {
 		}
 		let default_face_reference_list: Vec<&RegisteredFontFace> = self.default_face_list.iter().collect();
 		textshaping::select_font_faces(&default_face_reference_list, font_description.font_weight, font_description.is_italic, &mut face_list);
-		// 기본 글꼴 사슬. (원본 SYSTEM_FONT_STRING 의 차례)
-		let chain_name_list = self.system_font_state.borrow().chain_name_list.clone();
+		// 기본 글꼴 사슬. (원본 SYSTEM_FONT_STRING 의 차례, 기본 글꼴 이름 default 를 청했을 때만. 원본도 기본 글꼴일 때만 폰트 문자열이 그 사슬이고, 다른 이름은 크롬이 사슬 없이 운영체제 대체로 간다)
+		let is_default_requested = font_description.family_name_list.iter().any(|family_name| family_name.eq_ignore_ascii_case("default"));
+		let chain_name_list = if is_default_requested {
+			self.system_font_state.borrow().chain_name_list.clone()
+		}
+		else {
+			Vec::new()
+		};
 		for family_key in chain_name_list {
 			if used_system_family_list.contains(&family_key) {
 				continue;
@@ -1885,16 +1971,20 @@ impl TextStringTextureCache {
 			let fallback_face_reference_list = [fallback_face];
 			textshaping::select_font_faces(&fallback_face_reference_list, font_description.font_weight, font_description.is_italic, &mut face_list);
 		}
-		// 운영체제가 고른 대체 글꼴. (같은 글꼴의 굵기들은 한 이름으로 고른다)
+		// 운영체제가 고른 대체 글꼴. (이 첫 글꼴과 폰트 문자열로 물은 것만, 같은 글꼴의 굵기들은 한 이름으로 고른다)
+		let fallback_base_key = self.read_fallback_base_info(font_description, &face_list).key;
 		let system_font_state = self.system_font_state.borrow();
 		let mut grouped_key_list: Vec<&str> = Vec::new();
-		for fallback_face in system_font_state.fallback_face_list.iter() {
+		for (fallback_face, base_key) in system_font_state.fallback_face_list.iter().zip(system_font_state.fallback_base_key_list.iter()) {
+			if *base_key != fallback_base_key {
+				continue;
+			}
 			let source_key = fallback_face.descriptors.source_key.as_str();
 			if grouped_key_list.contains(&source_key) {
 				continue;
 			}
 			grouped_key_list.push(source_key);
-			let group_face_list: Vec<&RegisteredFontFace> = system_font_state.fallback_face_list.iter().filter(|face| face.descriptors.source_key == source_key).collect();
+			let group_face_list: Vec<&RegisteredFontFace> = system_font_state.fallback_face_list.iter().zip(system_font_state.fallback_base_key_list.iter()).filter(|(face, base_key)| **base_key == fallback_base_key && face.descriptors.source_key == source_key).map(|(face, _)| face).collect();
 			textshaping::select_font_faces(&group_face_list, font_description.font_weight, font_description.is_italic, &mut face_list);
 		}
 		face_list
@@ -2488,23 +2578,58 @@ fn find_system_font_family(family_key: &str) -> Option<SystemFontFamily> {
 //==============================================================================
 /// 운영체제가 고른 대체 글꼴 파일. (데스크탑만, 웹은 None)
 //==============================================================================
-fn find_system_fallback_font(grapheme: &str, weight: u16, is_italic: bool, is_color_wanted: bool) -> Option<FontFileSource> {
+fn find_system_fallback_font(grapheme: &str, weight: u16, is_italic: bool, is_color_wanted: bool, fallback_base_info: &FallbackBaseInfo) -> Option<FontFileSource> {
 	#[cfg(not(target_arch = "wasm32"))]
 	{
-		crate::platform::find_fallback_font_file(grapheme, weight, is_italic, is_color_wanted)
+		let fallback_base = crate::platform::desktop::systemfont::FallbackBase {
+			primary_family_name: fallback_base_info.primary_family_name.as_deref(),
+			primary_font_bytes: fallback_base_info.primary_font.as_ref().map(|font| (&font.get_font_bytes()[..], font.get_face_index())),
+			first_family_name: &fallback_base_info.first_family_name,
+			is_monospace: fallback_base_info.is_monospace,
+		};
+		crate::platform::desktop::systemfont::find_fallback_font_file_for_base(grapheme, weight, is_italic, is_color_wanted, &fallback_base)
 	}
 	#[cfg(target_arch = "wasm32")]
 	{
-		let _ = (grapheme, weight, is_italic, is_color_wanted);
+		let _ = (grapheme, weight, is_italic, is_color_wanted, fallback_base_info);
 		None
 	}
 }
 
 //==============================================================================
-/// 운영체제 대체 글꼴을 한 이름으로 묶는 열쇠. (파일 경로, 같은 파일의 굵기 얼굴들이 함께 고른다)
+/// 운영체제 대체 글꼴을 물을 바탕. (크롬 PlatformFallbackFontForCharacter 의 FontDescription 과 첫 글꼴)
 //==============================================================================
-fn read_fallback_source_key(source: &FontFileSource) -> String {
-	source.path.to_string_lossy().into_owned()
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+struct FallbackBaseInfo {
+	/// 같은 대체를 나눠 쓰는 열쇠. (맥은 첫 글꼴, 윈도우는 첫 이름과 monospace, 리눅스는 빈 글)
+	key: String,
+	/// 첫 글꼴을 운영체제에서 찾은 이름. (시스템 글꼴 이름표의 열쇠, 올린 글꼴이면 None)
+	primary_family_name: Option<String>,
+	/// 첫 글꼴이 올린 글꼴이면 그 글꼴.
+	primary_font: Option<Rc<LoadedFont>>,
+	/// 폰트 문자열의 첫 이름.
+	first_family_name: String,
+	/// 마지막 일반 이름이 monospace 인지.
+	is_monospace: bool,
+}
+
+//==============================================================================
+/// 운영체제 대체 글꼴을 한 이름으로 묶는 열쇠. (글꼴 이름 표의 무리 이름, 없으면 파일 경로. 같은 무리의 굵기 얼굴들이 함께 고른다)
+/// - 윈도우 Tahoma(tahoma.ttf, tahomabd.ttf)나 리눅스 DejaVu Sans 처럼 굵기마다 파일이 다른 글꼴도 한 무리로 묶어, 굵게를 청하면 굵은 얼굴을 고른다.
+//==============================================================================
+fn read_fallback_source_key(source: &FontFileSource, registered_font_face: &RegisteredFontFace) -> String {
+	let family_name = rustybuzz::ttf_parser::Face::parse(registered_font_face.font.get_font_bytes(), registered_font_face.font.get_face_index()).ok().and_then(|face| {
+		let read_name = |name_id: u16| face.names().into_iter().filter(|name| name.name_id == name_id).find_map(|name| name.to_string());
+		read_name(rustybuzz::ttf_parser::name_id::TYPOGRAPHIC_FAMILY).or_else(|| read_name(rustybuzz::ttf_parser::name_id::FAMILY))
+	});
+	match family_name {
+		Some(family_name) => {
+			format!("family:{}", family_name.to_lowercase())
+		}
+		None => {
+			source.path.to_string_lossy().into_owned()
+		}
+	}
 }
 
 //==============================================================================

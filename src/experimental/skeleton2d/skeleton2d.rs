@@ -5,7 +5,9 @@
 //! - IK 는 지역 값을 바꾸지 않고 '걸린 회전'(get_applied_rotation)만 바꾼다. 다음 셈은 다시 지역 값에서 시작해 쌓이지 않는다.
 //! - 뼈 하나 IK 는 뼈 x 축이 목표를 보게 돌린다. 뼈 둘 IK 는 코사인 법칙으로 부모를 돌려 팔꿈치를 놓고 자식이 목표를 보게 돌린다.
 //!   닿지 않으면 곧게 편다. 세기(mix)로 원래 회전과 섞는다. 할아버지 뼈가 뒤집혀 있으면(행렬식 음수) 꺾임 쪽을 뒤집는다. (DragonBones 와 같다)
-//! - 원본과 다른 점: 뼈, 슬롯, IK 인스턴스는 제 자료를 복사해 든다. 고른 스킨은 번호로 든다. IK 걸기는 제약 번호로 부른다.
+//! - 자료(Skeleton2DData)는 인스턴스들이 나눠 쓰는 처음 자세라 지은 뒤에는 고치지 않는다. 러스트는 Rc 로 나눠 들어 인스턴스가 있는 동안 &mut 가 막히고, 원본은 인스턴스를 지을 때 자료를 얼린다(세터가 던짐).
+//!   그래서 뼈, 슬롯, IK 인스턴스가 제 자료를 복사해 들어도 원본의 참조와 결과가 같다.
+//! - 원본과 다른 점: 고른 스킨은 번호로 든다. IK 걸기는 제약 번호로 부른다.
 //!
 //! # 예제
 //! 팔 두 뼈를 IK 로 목표에 닿게 하기
@@ -952,6 +954,19 @@ impl Skeleton2D {
 	}
 
 	//==============================================================================
+	/// IK 제약 번호 찾기. (apply_ik_constraint 에 넘길 번호, 원본 findIkConstraintIndex)
+	///
+	/// # 인자
+	/// - `ik_constraint_name`: 제약 이름.
+	///
+	/// # 돌려줌
+	/// 제약 번호. (없으면 None)
+	//==============================================================================
+	pub fn find_ik_constraint_index(&self, ik_constraint_name: &str) -> Option<usize> {
+		self.ik_constraints.iter().position(|ik_constraint| ik_constraint.get_name() == ik_constraint_name)
+	}
+
+	//==============================================================================
 	/// 스킨 고르기. (고른 스킨에 없는 붙임은 처음 스킨에서 찾는다)
 	///
 	/// # 인자
@@ -1211,13 +1226,15 @@ impl Skeleton2D {
 	}
 
 	//==============================================================================
-	/// IK 제약 하나 걸기.
+	/// IK 제약 하나 걸기. (원본 applyIkConstraint(제약) 자리, 번호는 find_ik_constraint_index 로 찾는다)
 	///
 	/// # 인자
-	/// - `ik_constraint_index`: 제약 번호.
+	/// - `ik_constraint_index`: 제약 번호. (범위 밖이면 아무것도 하지 않는다)
 	//==============================================================================
 	pub fn apply_ik_constraint(&mut self, ik_constraint_index: usize) {
-		let ik_constraint = &self.ik_constraints[ik_constraint_index];
+		let Some(ik_constraint) = self.ik_constraints.get(ik_constraint_index) else {
+			return;
+		};
 		let mix = ik_constraint.get_mix();
 		if mix <= 0.0 {
 			return;
@@ -1478,6 +1495,10 @@ mod tests {
 		aim_skeleton.update_world_transform();
 		assert_near("IK 하나 세기 반", aim_skeleton.find_bone("arm").expect("arm").get_world_rotation(), 75.0);
 		assert_near("IK 하나 걸린 회전", aim_skeleton.find_bone("arm").expect("arm").get_applied_rotation(), 45.0);
+		// 번호 찾기와 범위 밖 번호. (원본 findIkConstraintIndex, 범위 밖은 아무것도 하지 않는다)
+		assert_eq!(aim_skeleton.find_ik_constraint_index("aim"), Some(0));
+		assert_eq!(aim_skeleton.find_ik_constraint_index("none"), None);
+		aim_skeleton.apply_ik_constraint(5);
 	}
 
 	//==============================================================================

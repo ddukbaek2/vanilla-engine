@@ -10,3 +10,4 @@ pub mod savegame;
 pub mod skeleton2d;
 pub mod physics2d;
 pub mod spatial;
+pub(crate) mod jsmath;

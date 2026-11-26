@@ -989,7 +989,7 @@ impl LocalStorage {
 				storagetext::stringify_json(value, surrogate_table)
 			}
 			None => {
-				value.to_string()
+				storagetext::stringify_json(value, &JsonSurrogateTable::new())
 			}
 		};
 		let is_written = write_item_text(&storage_key, &string_value);
@@ -1019,7 +1019,7 @@ fn is_java_script_whitespace(character: char) -> bool {
 //==============================================================================
 /// 글 → 숫자. (원본 Number(text): 앞뒤 JS 빈칸을 떼고, 빈 글은 0, 0x / 0o / 0b 정수, 부호 붙은 십진 표기와 Infinity, 그 밖은 NaN)
 //==============================================================================
-fn parse_number(text: &str) -> f64 {
+pub(crate) fn parse_number(text: &str) -> f64 {
 	let trimmed_text = text.trim_matches(is_java_script_whitespace);
 	if trimmed_text.is_empty() {
 		return 0.0;
@@ -1351,7 +1351,7 @@ mod storage_backend {
 					file_text.push_str(&quote_json_code_units(key_code_units));
 				}
 				None => {
-					file_text.push_str(&serde_json::to_string(key.get_lossy_text()).unwrap_or_default());
+					file_text.push_str(&storagetext::quote_json_text(key.get_lossy_text()));
 				}
 			}
 			file_text.push_str(": ");
@@ -1360,7 +1360,7 @@ mod storage_backend {
 					file_text.push_str(&quote_json_code_units(code_units));
 				}
 				None => {
-					file_text.push_str(&serde_json::to_string(value).unwrap_or_default());
+					file_text.push_str(&storagetext::quote_json_text(value));
 				}
 			}
 		}

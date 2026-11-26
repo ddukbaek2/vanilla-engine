@@ -72,6 +72,11 @@ mod tag;
 mod tag_table;
 mod text_parser;
 mod unicode;
+
+// vanilla-engine change: canonical decomposition for lib.rs decompose_character.
+pub(crate) fn decompose_unicode_character(ab: char) -> Option<(char, char)> {
+    unicode::decompose(ab)
+}
 mod unicode_norm;
 
 use ttf_parser::Tag as hb_tag_t;

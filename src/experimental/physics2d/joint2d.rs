@@ -1,12 +1,14 @@
 //==============================================================================
 //! 2D 물리의 관절. (거리, 회전, 용접, 바퀴)
 //! - 초안: 0.4.0 뒤 기능, API 가 바뀔 수 있다. 원본 src/experimental/physics2d/joint2d.js 와 같은 API, 같은 셈이다.
-//! - 원본과 다른 점: 정의의 몸 아이디는 Option 이다. (원본은 null) 사용자 값은 u64 다.
+//! - 원본과 다른 점: 정의의 몸 아이디는 Option 이다. (원본은 null) 사용자 값은 PhysicsUserData2D(Rc<dyn Any>, 견줌은 같은 값을 가리키는지)다.
 //==============================================================================
 // 옮긴 원문: Box2D 3 의 셈에서 옮김, MIT, THIRD_PARTY_LICENSES.md
+use crate::experimental::jsmath::{js_max, js_min};
 use super::body2d::{Body2D, NO_INDEX};
 use super::physicsid2d::{BodyId2D, JointId2D};
 use super::physicsmath2d::PhysicsMath2D;
+use super::physicsuserdata2d::PhysicsUserData2D;
 use super::physicsvector2::PhysicsVector2;
 use super::solver2d::{make_softness, read_solver_body, write_solver_velocity, Softness, SolverBody, StepContext};
 
@@ -55,7 +57,7 @@ pub enum JointType2D {
 /// assert!((world[bob_id].get_position().length() - 3.0).abs() < 0.01);
 /// ```
 //==============================================================================
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct DistanceJointDefinition2D {
 	/// 첫 몸.
 	pub body_id_a: Option<BodyId2D>,
@@ -82,7 +84,7 @@ pub struct DistanceJointDefinition2D {
 	/// 두 몸끼리 부딪힐지. (기본 false)
 	pub collide_connected: bool,
 	/// 사용자 값.
-	pub user_data: u64,
+	pub user_data: PhysicsUserData2D,
 }
 
 impl Default for DistanceJointDefinition2D {
@@ -115,7 +117,7 @@ impl DistanceJointDefinition2D {
 			min_length: 0.0,
 			max_length: HUGE_LENGTH,
 			collide_connected: false,
-			user_data: 0,
+			user_data: PhysicsUserData2D::default(),
 		}
 	}
 }
@@ -148,7 +150,7 @@ impl DistanceJointDefinition2D {
 /// assert!((world[wheel_id].get_angular_velocity() - 2.0).abs() < 1e-6);
 /// ```
 //==============================================================================
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct RevoluteJointDefinition2D {
 	/// 첫 몸.
 	pub body_id_a: Option<BodyId2D>,
@@ -181,7 +183,7 @@ pub struct RevoluteJointDefinition2D {
 	/// 두 몸끼리 부딪힐지. (기본 false)
 	pub collide_connected: bool,
 	/// 사용자 값.
-	pub user_data: u64,
+	pub user_data: PhysicsUserData2D,
 }
 
 impl Default for RevoluteJointDefinition2D {
@@ -217,7 +219,7 @@ impl RevoluteJointDefinition2D {
 			lower_angle: 0.0,
 			upper_angle: 0.0,
 			collide_connected: false,
-			user_data: 0,
+			user_data: PhysicsUserData2D::default(),
 		}
 	}
 }
@@ -250,7 +252,7 @@ impl RevoluteJointDefinition2D {
 /// assert!(world[second_id].get_position().y.abs() < 0.01);
 /// ```
 //==============================================================================
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct WeldJointDefinition2D {
 	/// 첫 몸.
 	pub body_id_a: Option<BodyId2D>,
@@ -273,7 +275,7 @@ pub struct WeldJointDefinition2D {
 	/// 두 몸끼리 부딪힐지. (기본 false)
 	pub collide_connected: bool,
 	/// 사용자 값.
-	pub user_data: u64,
+	pub user_data: PhysicsUserData2D,
 }
 
 impl Default for WeldJointDefinition2D {
@@ -304,7 +306,7 @@ impl WeldJointDefinition2D {
 			angular_hertz: 0.0,
 			angular_damping_ratio: 0.0,
 			collide_connected: false,
-			user_data: 0,
+			user_data: PhysicsUserData2D::default(),
 		}
 	}
 }
@@ -326,7 +328,7 @@ impl WeldJointDefinition2D {
 /// assert!(joint_definition.enable_spring);
 /// ```
 //==============================================================================
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct WheelJointDefinition2D {
 	/// 차체 몸.
 	pub body_id_a: Option<BodyId2D>,
@@ -359,7 +361,7 @@ pub struct WheelJointDefinition2D {
 	/// 두 몸끼리 부딪힐지. (기본 false)
 	pub collide_connected: bool,
 	/// 사용자 값.
-	pub user_data: u64,
+	pub user_data: PhysicsUserData2D,
 }
 
 impl Default for WheelJointDefinition2D {
@@ -395,7 +397,7 @@ impl WheelJointDefinition2D {
 			lower_translation: 0.0,
 			upper_translation: 0.0,
 			collide_connected: false,
-			user_data: 0,
+			user_data: PhysicsUserData2D::default(),
 		}
 	}
 }
@@ -441,7 +443,7 @@ pub struct Joint2D {
 	pub(crate) local_anchor_b_y: f64,
 	pub(crate) reference_angle: f64,
 	pub(crate) collide_connected: bool,
-	pub(crate) user_data: u64,
+	pub(crate) user_data: PhysicsUserData2D,
 	pub(crate) is_wake_requested: bool,
 	pub(crate) length: f64,
 	pub(crate) min_length: f64,
@@ -512,7 +514,7 @@ impl Joint2D {
 			local_anchor_b_y: 0.0,
 			reference_angle: 0.0,
 			collide_connected: false,
-			user_data: 0,
+			user_data: PhysicsUserData2D::default(),
 			is_wake_requested: false,
 			length: 1.0,
 			min_length: 0.0,
@@ -633,7 +635,7 @@ impl Joint2D {
 	/// - `length`: 쉬는 길이.
 	//==============================================================================
 	pub fn set_length(&mut self, length: f64) {
-		self.length = length.max(0.0);
+		self.length = js_max(length, 0.0);
 		self.is_wake_requested = true;
 	}
 
@@ -675,7 +677,7 @@ impl Joint2D {
 	/// - `hertz`: 진동수.
 	//==============================================================================
 	pub fn set_spring_hertz(&mut self, hertz: f64) {
-		self.hertz = hertz.max(0.0);
+		self.hertz = js_max(hertz, 0.0);
 		self.is_wake_requested = true;
 	}
 
@@ -686,7 +688,7 @@ impl Joint2D {
 	/// - `damping_ratio`: 감쇠비.
 	//==============================================================================
 	pub fn set_spring_damping_ratio(&mut self, damping_ratio: f64) {
-		self.damping_ratio = damping_ratio.max(0.0);
+		self.damping_ratio = js_max(damping_ratio, 0.0);
 		self.is_wake_requested = true;
 	}
 
@@ -739,7 +741,7 @@ impl Joint2D {
 	/// - `max_motor_torque`: 가장 큰 돌림힘.
 	//==============================================================================
 	pub fn set_max_motor_torque(&mut self, max_motor_torque: f64) {
-		self.max_motor_torque = max_motor_torque.max(0.0);
+		self.max_motor_torque = js_max(max_motor_torque, 0.0);
 		self.is_wake_requested = true;
 	}
 
@@ -785,10 +787,10 @@ impl Joint2D {
 	/// - `upper`: 위 한도. (lower 보다 작으면 둘을 바꾼다)
 	//==============================================================================
 	pub fn set_limits(&mut self, lower: f64, upper: f64) {
-		let minimum = lower.min(upper);
-		let maximum = lower.max(upper);
+		let minimum = js_min(lower, upper);
+		let maximum = js_max(lower, upper);
 		if self.joint_type == JointType2D::Distance {
-			self.min_length = minimum.max(0.0);
+			self.min_length = js_max(minimum, 0.0);
 			self.max_length = maximum;
 		}
 		else {
@@ -832,8 +834,8 @@ impl Joint2D {
 	/// - `damping_ratio`: 감쇠비.
 	//==============================================================================
 	pub fn set_linear_spring(&mut self, hertz: f64, damping_ratio: f64) {
-		self.linear_hertz = hertz.max(0.0);
-		self.linear_damping_ratio = damping_ratio.max(0.0);
+		self.linear_hertz = js_max(hertz, 0.0);
+		self.linear_damping_ratio = js_max(damping_ratio, 0.0);
 		self.is_wake_requested = true;
 	}
 
@@ -845,8 +847,8 @@ impl Joint2D {
 	/// - `damping_ratio`: 감쇠비.
 	//==============================================================================
 	pub fn set_angular_spring(&mut self, hertz: f64, damping_ratio: f64) {
-		self.angular_hertz = hertz.max(0.0);
-		self.angular_damping_ratio = damping_ratio.max(0.0);
+		self.angular_hertz = js_max(hertz, 0.0);
+		self.angular_damping_ratio = js_max(damping_ratio, 0.0);
 		self.is_wake_requested = true;
 	}
 
@@ -856,7 +858,7 @@ impl Joint2D {
 	/// # 인자
 	/// - `user_data`: 사용자 값.
 	//==============================================================================
-	pub fn set_user_data(&mut self, user_data: u64) {
+	pub fn set_user_data(&mut self, user_data: PhysicsUserData2D) {
 		self.user_data = user_data;
 	}
 
@@ -866,8 +868,8 @@ impl Joint2D {
 	/// # 돌려줌
 	/// 사용자 값.
 	//==============================================================================
-	pub fn get_user_data(&self) -> u64 {
-		self.user_data
+	pub fn get_user_data(&self) -> &PhysicsUserData2D {
+		&self.user_data
 	}
 }
 
@@ -1187,7 +1189,7 @@ pub(crate) fn solve_joint(joint: &mut Joint2D, solver_body_list: &mut [SolverBod
 							joint.upper_impulse
 						};
 						let mut impulse = -mass_scale * axial_mass * (speed + bias) - impulse_scale * old_impulse;
-						let new_impulse = (old_impulse + impulse).max(0.0);
+						let new_impulse = js_max(old_impulse + impulse, 0.0);
 						impulse = new_impulse - old_impulse;
 						if side == 0 {
 							joint.lower_impulse = new_impulse;
@@ -1248,7 +1250,7 @@ pub(crate) fn solve_joint(joint: &mut Joint2D, solver_body_list: &mut [SolverBod
 					let mut impulse = -joint.axial_mass * angular_speed;
 					let old_impulse = joint.motor_impulse;
 					let maximum_impulse = sub_step_time * joint.max_motor_torque;
-					joint.motor_impulse = (-maximum_impulse).max((old_impulse + impulse).min(maximum_impulse));
+					joint.motor_impulse = js_max(-maximum_impulse, js_min(old_impulse + impulse, maximum_impulse));
 					impulse = joint.motor_impulse - old_impulse;
 					angular_velocity_a -= inverse_inertia_a * impulse;
 					angular_velocity_b += inverse_inertia_b * impulse;
@@ -1288,7 +1290,7 @@ pub(crate) fn solve_joint(joint: &mut Joint2D, solver_body_list: &mut [SolverBod
 							joint.upper_impulse
 						};
 						let mut impulse = -joint.axial_mass * mass_scale * (angular_speed + bias) - impulse_scale * old_impulse;
-						let new_impulse = (old_impulse + impulse).max(0.0);
+						let new_impulse = js_max(old_impulse + impulse, 0.0);
 						impulse = new_impulse - old_impulse;
 						if side == 0 {
 							joint.lower_impulse = new_impulse;
@@ -1371,7 +1373,7 @@ pub(crate) fn solve_joint(joint: &mut Joint2D, solver_body_list: &mut [SolverBod
 				let mut impulse = -joint.motor_mass * angular_speed;
 				let old_impulse = joint.motor_impulse;
 				let maximum_impulse = sub_step_time * joint.max_motor_torque;
-				joint.motor_impulse = (-maximum_impulse).max((old_impulse + impulse).min(maximum_impulse));
+				joint.motor_impulse = js_max(-maximum_impulse, js_min(old_impulse + impulse, maximum_impulse));
 				impulse = joint.motor_impulse - old_impulse;
 				angular_velocity_a -= inverse_inertia_a * impulse;
 				angular_velocity_b += inverse_inertia_b * impulse;
@@ -1424,7 +1426,7 @@ pub(crate) fn solve_joint(joint: &mut Joint2D, solver_body_list: &mut [SolverBod
 						joint.upper_impulse
 					};
 					let mut impulse = -joint.axial_mass * mass_scale * (speed + bias) - impulse_scale * old_impulse;
-					let new_impulse = (old_impulse + impulse).max(0.0);
+					let new_impulse = js_max(old_impulse + impulse, 0.0);
 					impulse = new_impulse - old_impulse;
 					if side == 0 {
 						joint.lower_impulse = new_impulse;

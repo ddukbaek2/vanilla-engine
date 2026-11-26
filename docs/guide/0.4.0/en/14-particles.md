@@ -389,7 +389,7 @@ A sprite that applies fragment shader effects. `ShaderSpriteEffect` has 49 effec
 
 ![A grid of 50 ShaderSprite effects, one per cell on the same image](../images/shader-sprite.webp)
 
-- The original inherits from `Sprite`, but the Rust version wraps a `Sprite` and calls `Sprite` functions (`set_image`, `set_image_rect`, `set_color` and so on) directly through `Deref`. So on a node you find it with `get_component::<ShaderSprite>()`, not `get_component::<Sprite>()`. `get_sprite()` and `get_sprite_mut()` also give the wrapped `Sprite`.
+- The original inherits from `Sprite`, but the Rust version wraps a `Sprite` and calls `Sprite` functions (`set_image`, `set_image_rect`, `set_color` and so on) directly through `Deref`. It reports the wrapped `Sprite` with `Component::get_base_component`, so on a node it is found with `get_component::<ShaderSprite>()` and, like the original, with `get_component::<Sprite>()`. `get_sprite()` and `get_sprite_mut()` also give the wrapped `Sprite`.
 - Create one with `ShaderSprite::new()` or `ShaderSprite::create_with_image(image)`.
 - `set_effect(effect)` switches the effect and resets to that effect's default parameters and color (progress and effect time stay). Change parameters or color after it. With `None` or no image, it draws the same as `Sprite`.
 - `set_effect_progress(progress)` (clamped to 0 to 1) is the progress pushed in by a tween or timeline. The effect time (`set_effect_time`) advances by itself on node updates.
@@ -701,7 +701,7 @@ fn main() {
 - Rotation and cone angles are in radians (node rotation is in degrees).
 - Screen coordinates have +y pointing down, so gravity that pulls upward is negative.
 - In a world space system, `emit` uses the node position recorded at the last node update. To emit right after moving the node, use `ParticleSystem::emit_in_tree`.
-- `ShaderSprite` is not a `Sprite`, so `get_component::<Sprite>()` does not find it. Use `get_component::<ShaderSprite>()`.
+- Like the original, `get_component::<Sprite>()` also finds a `ShaderSprite`. To use the effect functions, find it with `get_component::<ShaderSprite>()`.
 - `HeatHazeEffect` and `ScreenEffect` grab what has already been drawn. The draw order (which node comes last, where `begin` and `end` are called) decides the result. Both release their GL resources on `destroy()` or when they are dropped.
 
 ## Related types
