@@ -4,6 +4,7 @@
 //! - 원본과 다른 점: 사용자 값(user_data)은 u64 다. (원본은 아무 값) 거르기 비트는 u32, 무리 번호는 i32 다.
 //==============================================================================
 // 옮긴 원문: Box2D 3 의 셈에서 옮김, MIT, THIRD_PARTY_LICENSES.md
+use crate::experimental::jsmath::{js_max, js_min};
 use super::geometry2d::{Capsule2D, Circle2D, Polygon2D, Segment2D, ShapeGeometry2D, ShapeType2D};
 use super::physicsid2d::{BodyId2D, ShapeId2D};
 use super::physicsvector2::PhysicsVector2;
@@ -417,7 +418,7 @@ impl Shape2D {
 	/// - `friction`: 마찰 계수. (0 이상)
 	//==============================================================================
 	pub fn set_friction(&mut self, friction: f64) {
-		self.friction = friction.max(0.0);
+		self.friction = js_max(friction, 0.0);
 	}
 
 	//==============================================================================
@@ -437,7 +438,7 @@ impl Shape2D {
 	/// - `restitution`: 반발 계수. (0 이상, 1 이면 튄 속력을 거의 그대로 돌려준다)
 	//==============================================================================
 	pub fn set_restitution(&mut self, restitution: f64) {
-		self.restitution = restitution.max(0.0);
+		self.restitution = js_max(restitution, 0.0);
 	}
 
 	//==============================================================================
@@ -679,10 +680,10 @@ pub(crate) fn compute_shape_aabb(data: &Shape2D, position_x: f64, position_y: f6
 	for index in 0..data.count {
 		let vertex_x = cosine * data.vertex_x[index] - sine * data.vertex_y[index] + position_x;
 		let vertex_y = sine * data.vertex_x[index] + cosine * data.vertex_y[index] + position_y;
-		minimum_x = minimum_x.min(vertex_x);
-		minimum_y = minimum_y.min(vertex_y);
-		maximum_x = maximum_x.max(vertex_x);
-		maximum_y = maximum_y.max(vertex_y);
+		minimum_x = js_min(minimum_x, vertex_x);
+		minimum_y = js_min(minimum_y, vertex_y);
+		maximum_x = js_max(maximum_x, vertex_x);
+		maximum_y = js_max(maximum_y, vertex_y);
 	}
 	aabb.set(minimum_x - data.radius, minimum_y - data.radius, maximum_x + data.radius, maximum_y + data.radius);
 }
@@ -700,7 +701,7 @@ pub(crate) fn compute_shape_extent(data: &Shape2D, local_center_x: f64, local_ce
 	for index in 0..data.count {
 		let difference_x = data.vertex_x[index] - local_center_x;
 		let difference_y = data.vertex_y[index] - local_center_y;
-		maximum_distance_squared = maximum_distance_squared.max(difference_x * difference_x + difference_y * difference_y);
+		maximum_distance_squared = js_max(maximum_distance_squared, difference_x * difference_x + difference_y * difference_y);
 	}
 	maximum_distance_squared.sqrt() + data.radius
 }

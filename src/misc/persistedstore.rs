@@ -16,11 +16,12 @@
 //! - 원본과 다른 점:
 //!   상태 객체는 serde_json::Value(객체)다. 객체도 배열도 아닌 값을 넘기면 빈 객체로 친다. (원본 Object.assign 은 글을 글자마다 번호 키로 섞는다)
 //!   subscribe 는 해지 함수 대신 구독 번호(PersistedStoreSubscription)를 돌려주고, unsubscribe(번호) 로 푼다.
-//!   러스트 String 은 짝 없는 서로게이트를 담지 못해, 원본이 저장한 그런 글(JSON.stringify 의 \ud83d 같은 것)은 상태에서 대체 문자(U+FFFD)로 보인다.
+//!   러스트 String 은 짝 없는 서로게이트를 담지 못해, 원본이 저장한 그런 글(JSON.stringify 의 \ud83d 같은 것)은 get 의 상태에서 대체 문자(U+FFFD)로 보인다.
+//!   그 글의 원래 JS 글 단위는 get_string_code_units 로 읽고 set_string_code_units 로 쓴다. (LocalStorage 의 *_code_units 와 같은 꼴, 원본 글과 같은 값)
 //!   읽을 때 그 글의 자리를 남겨 두고, 고치지 않고 다시 쓰면 원본처럼 \udXXX 로 쓴다. (misc/storagetext.rs, 원본 판의 저장을 읽고 다시 써도 잃지 않는다)
 //==============================================================================
 use crate::misc::localstorage::{LocalStorage, LocalStorageBackend};
-use crate::misc::storagetext::{self, JsonSurrogateTable};
+use crate::misc::storagetext::{self, JsonPathSegment, JsonSurrogateTable, PreservedText};
 use serde_json::{Map, Value};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -104,6 +105,16 @@ pub struct PersistedStore {
 	storage_backend: Option<Rc<RefCell<Box<dyn LocalStorageBackend>>>>,
 	/// 마지막으로 읽은 저장 글의 짝 없는 서로게이트 표. (읽기가 &self 라 RefCell)
 	surrogate_table: RefCell<JsonSurrogateTable>,
+}
+
+//==============================================================================
+/// 저장 글 안의 상태 자리. (맨 위 {"version", "state"} 에서부터의 경로, 서로게이트 표의 자리)
+//==============================================================================
+fn create_state_path(path: &[JsonPathSegment]) -> Vec<JsonPathSegment> {
+	let mut state_path = Vec::with_capacity(path.len() + 1);
+	state_path.push(JsonPathSegment::Key(String::from("state")));
+	state_path.extend_from_slice(path);
+	state_path
 }
 
 //==============================================================================
@@ -233,6 +244,128 @@ impl PersistedStore {
 		self.state = Value::Object(order_object_keys(merged_state));
 		self.write_to_storage();
 		self.notify();
+	}
+
+	//==============================================================================
+	/// 상태 안 글의 JS 글 단위. (UTF-16, 짝 없는 서로게이트도 원본 글 그대로, LocalStorage::get_item_code_units 와 같은 꼴)
+	///
+	/// # 인자
+	/// - `path`: 상태에서부터의 글 자리. (키와 배열 차례)
+	///
+	/// # 돌려줌
+	/// 그 자리 글의 UTF-16 단위. (원본이 저장한 짝 없는 서로게이트가 있으면 그것, 아니면 글을 UTF-16 으로 편 것) 그 자리가 글이 아니면 None.
+	///
+	/// # 예제
+	/// 글 자리의 JS 글 단위 읽고 쓰기
+	/// ```rust
+	/// use serde_json::json;
+	/// use vanilla::misc::storagetext::JsonPathSegment;
+	/// use vanilla::{LocalStorage, PersistedStore};
+	///
+	/// LocalStorage::set_storage_directory(Some(std::env::temp_dir().join("vanilla_doctest_persistedstore_code_units")));
+	/// let mut store = PersistedStore::new("doctest.code_units", json!({ "name": "" }), 1);
+	/// let name_path = [JsonPathSegment::Key(String::from("name"))];
+	/// store.set_string_code_units(&name_path, &[0x61, 0xD83D]);
+	/// assert_eq!(store.get()["name"], json!("a\u{fffd}"));
+	/// assert_eq!(store.get_string_code_units(&name_path), Some(vec![0x61, 0xD83D]));
+	/// assert_eq!(store.read_stored_text(), r#"{"version":1,"state":{"name":"a\ud83d"}}"#);
+	/// ```
+	//==============================================================================
+	pub fn get_string_code_units(&self, path: &[JsonPathSegment]) -> Option<Vec<u16>> {
+		let mut value = &self.state;
+		for segment in path {
+			value = match segment {
+				JsonPathSegment::Key(key) => value.get(key.as_str())?,
+				JsonPathSegment::Index(index) => value.get(*index)?,
+			};
+		}
+		let text = value.as_str()?;
+		let state_path = create_state_path(path);
+		match self.surrogate_table.borrow().find_value_code_units(&state_path, text) {
+			Some(code_units) => {
+				Some(code_units.to_vec())
+			}
+			None => {
+				Some(text.encode_utf16().collect())
+			}
+		}
+	}
+
+	//==============================================================================
+	/// 상태 안 글을 JS 글 단위로 쓰기. (짝 없는 서로게이트도 원본처럼 \udXXX 로 저장한다, 저장하고 구독자에게 알린다)
+	/// - 없는 키는 객체로 만들며 내려간다. 배열 차례가 없거나 객체도 배열도 아닌 값을 지나야 하면 쓰지 않는다.
+	///
+	/// # 인자
+	/// - `path`: 상태에서부터의 글 자리. (키와 배열 차례, 비면 쓰지 않는다)
+	/// - `code_units`: 쓸 UTF-16 단위.
+	///
+	/// # 돌려줌
+	/// 썼으면 true.
+	//==============================================================================
+	pub fn set_string_code_units(&mut self, path: &[JsonPathSegment], code_units: &[u16]) -> bool {
+		let preserved_text = PreservedText::from_code_units(code_units);
+		let lossy_text = preserved_text.get_lossy_text().to_string();
+		let (last_segment, parent_path) = match path.split_last() {
+			Some(split_path) => {
+				split_path
+			}
+			None => {
+				return false;
+			}
+		};
+		let mut value = &mut self.state;
+		for segment in parent_path {
+			let next_value = match segment {
+				JsonPathSegment::Key(key) => {
+					match value.as_object_mut() {
+						Some(object_map) => {
+							object_map.entry(key.clone()).or_insert_with(|| Value::Object(Map::new()))
+						}
+						None => {
+							return false;
+						}
+					}
+				}
+				JsonPathSegment::Index(index) => {
+					match value.get_mut(*index) {
+						Some(element_value) => {
+							element_value
+						}
+						None => {
+							return false;
+						}
+					}
+				}
+			};
+			value = next_value;
+		}
+		match last_segment {
+			JsonPathSegment::Key(key) => {
+				match value.as_object_mut() {
+					Some(object_map) => {
+						object_map.insert(key.clone(), Value::String(lossy_text));
+					}
+					None => {
+						return false;
+					}
+				}
+			}
+			JsonPathSegment::Index(index) => {
+				match value.get_mut(*index) {
+					Some(element_value) => {
+						*element_value = Value::String(lossy_text);
+					}
+					None => {
+						return false;
+					}
+				}
+			}
+		}
+		let state_path = create_state_path(path);
+		self.surrogate_table.borrow_mut().record(Some(&state_path), preserved_text);
+		self.write_to_storage();
+		self.notify();
+		true
 	}
 
 	//==============================================================================

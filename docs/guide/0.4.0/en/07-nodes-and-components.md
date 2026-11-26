@@ -547,7 +547,7 @@ assert_eq!(node_tree.get_child_count(enemies_id), 1);
 
 - `node_tree[node_id]` panics for a destroyed node. For nodes that may have been destroyed, take them out as an `Option` with `get_node` or `get_node_mut`, or check `contains(node_id)` first.
 - `get_local_position()`, `get_local_scale()`, `get_pivot()` and `get_content_size()` return `Vector2` values (copies). Changing the returned vector leaves the node unchanged, so `set` the changed value back.
-- `get_component::<T>()` finds exactly that type only. The Rust version has no inheritance, so even `Sprite`, which derived from `Paint` in the original, is not found by `get_component::<Paint>()`.
+- `get_component::<T>()` finds that type and components that embed it as a base, like the original `instanceof`. The Rust version has no inheritance, so a component embeds the original superclass and reports it with `Component::get_base_component`; `Sprite`, which derived from `Paint` in the original, is found by `get_component::<Paint>()` too. To look for that exact type only, use `as_any().downcast_ref::<T>()`.
 - `remove_component::<T>()` detaches every component of that type, not a single instance as in the original.
 - A component with `set_enable(false)` is left out not only of drawing but also of `tick`, touches and the wheel. The original stopped only drawing and kept calling `tick`.
 - `WorldNode::add_component` does not call `attach_to_tree`, and `NodeTree::add_component` does not attach `require()`. Attach components that create child nodes with `NodeTree::add_component`.

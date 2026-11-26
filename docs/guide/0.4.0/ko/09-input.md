@@ -475,7 +475,7 @@ fn main() {
 
 | 함수 | 내용 |
 | --- | --- |
-| `get_all_connected_gamepads()`, `get_connected_gamepad_count()`, `get_connected_gamepad(index)` | 연결된 패드(`Gamepad`, 마지막 갱신의 사본) 목록과 수, 번호로 하나 |
+| `get_all_connected_gamepads()`, `get_connected_gamepad_count()`, `get_connected_gamepad(index)` | 연결된 패드(`Gamepad`, 부를 때 그 자리에서 읽은 사본) 목록과 수, 번호로 하나 |
 | `is_button_pressed(gamepad_index, button_index)` | 단추가 눌려 있는지 |
 | `is_button_just_pressed(gamepad_index, button_index)`, `is_button_just_released(...)` | 이번 갱신에 눌렸는지, 떼어졌는지 |
 | `get_button_value(gamepad_index, button_index)` | 단추와 트리거 값 (0 ~ 1, 소수점 둘째 자리로 반올림) |
@@ -532,8 +532,8 @@ impl Scene for GamepadScene {
 		self.scene_base.tick(engine, time_delta);
 		let gamepad_manager = engine.get_input_manager_mut().get_gamepad_manager_mut();
 		let mut is_confirm_pressed = false;
-		// The list is read in place when called (like the original navigator.getGamepads()), so borrow it with &mut and keep copies.
-		let gamepad_list: Vec<Gamepad> = gamepad_manager.get_all_connected_gamepads().into_iter().cloned().collect();
+		// The list is a copy read in place when called (like the original navigator.getGamepads()).
+		let gamepad_list: Vec<Gamepad> = gamepad_manager.get_all_connected_gamepads();
 		for gamepad in gamepad_list.iter() {
 			if !gamepad_manager.is_button_just_pressed(gamepad.index, GamepadButtonCode::A_CROSS) {
 				continue;

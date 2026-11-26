@@ -28,13 +28,13 @@
 //! assert!((tip.y - 30.0).abs() < 0.001);
 //! ```
 //==============================================================================
-pub mod dragonbonesreader;
+pub(crate) mod dragonbonesreader;
 pub mod skeleton2d;
 pub mod skeleton2danimation;
 pub mod skeleton2danimationstate;
 pub mod skeleton2danimator;
 pub mod skeleton2ddata;
-pub mod skeleton2djsonreader;
+pub(crate) mod skeleton2djsonreader;
 
 pub use self::skeleton2d::{Skeleton2D, Skeleton2DBone, Skeleton2DIkConstraint, Skeleton2DSlot};
 pub use self::skeleton2danimation::{evaluate_skeleton2d_curve, Skeleton2DAnimation, Skeleton2DCurveType, Skeleton2DEvent, Skeleton2DPose, Skeleton2DTimeline, Skeleton2DTimelineType, SKELETON2D_BONE_VALUE_COUNT};

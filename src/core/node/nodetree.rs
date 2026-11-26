@@ -1338,14 +1338,14 @@ impl NodeTree {
 	pub fn with_component_mut<T: Component + 'static, R>(&mut self, node_id: NodeId, action: impl FnOnce(&mut T, &mut NodeTree) -> R) -> Option<R> {
 		let component_index = self.nodes.get(node_id)?.components.iter().position(|candidate| {
 			let candidate_reference: &dyn Component = candidate.as_ref();
-			candidate_reference.as_any().is::<T>()
+			candidate_reference.is_instance_of::<T>()
 		})?;
 		let placeholder = self.take_placeholder();
 		let mut component = std::mem::replace(&mut self.nodes[node_id].components[component_index], placeholder);
 		self.traversal_depth += 1;
 		let result = {
 			let component_reference: &mut dyn Component = component.as_mut();
-			let typed_component = component_reference.as_any_mut().downcast_mut::<T>().expect("component type");
+			let typed_component = component_reference.as_instance_of_mut::<T>().expect("component type");
 			action(typed_component, self)
 		};
 		self.traversal_depth -= 1;

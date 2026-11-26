@@ -42,6 +42,10 @@ step 98 events 0 1 0 0
 step 99 events 1 1 0 0
 step 99 ray 2 3fbeb851eb851eb8 c036cccccccccccd bfcf0b6848d2af1c 3fef0b6848d2af1c
 step 99 awake 45 contacts 70
+step 99 rays 15:3fd3ff15831c1aa8:c001c049470737ac:bfeffffce0c3c40d 16:3fd6e299d0466b48:c000d92feee9fe7a:bfefffffc74a2432 17:3fd9c1c3b56364c8:bfffe6e5aea1e103:bfefffffba80334d 18:3fdca1b2bbff14f3:bffe1af04a8092e8:bfeffffd0612457f 27:3fe84d3d78e87113:bff19f7328dd72a8:bfe68d532e228db6
+step 99 aabb 10 12 11 6 5 4 45 8 9 7 13 14 15 16 19 22 24 23 20 21 17 18 0
+step 99 point 7
+step 99 shape 10 12 11 6
 step 104 events 1 0 0 0
 step 106 events 0 1 0 0
 step 112 events 1 0 0 0
@@ -64,6 +68,10 @@ step 172 events 1 0 0 0
 step 173 events 0 1 0 0
 step 199 ray 2 3fbeb851eb851eb8 c036cccccccccccd bfcf0b6848d2af1c 3fef0b6848d2af1c
 step 199 awake 17 contacts 73
+step 199 rays 42:3fefeea55fa229a5:bfe02b6290ea97e4:bfeca8622acb5a77 41:3fedf056a159bd9d:bfe527276c9fa5f4:bfdd31821fcb3c81 15:3fd3ff173c01b51a:c001c048bd3f7768:bfeffffcde69d174 16:3fd6e29b184d39a6:c000d92f8867ddfc:bfefffffc5a2028e 17:3fd9c1c49496da21:bfffe6e52321b7ab:bfefffffbca66fd7 18:3fdca1b2eac8b5a2:bffe1af02d428e7b:bfeffffd11732bd5
+step 199 aabb 10 12 11 6 5 4 45 8 9 7 13 14 19 22 15 16 24 23 20 21 17 18 0
+step 199 point 7
+step 199 shape 10 12 11 6
 step 201 events 1 0 0 0
 step 202 events 1 0 0 0
 step 203 events 0 1 0 0
@@ -78,6 +86,10 @@ step 276 events 1 0 0 0
 step 281 events 1 0 0 0
 step 299 ray 2 3fbeb851eb851eb8 c036cccccccccccd bfcf0b6848d2af1c 3fef0b6848d2af1c
 step 299 awake 21 contacts 77
+step 299 rays 40:3fea527b90f123ff:bfee31cb15a52604:bfeffdcb95d292c0 15:3fd3ff173c01b51a:c001c048bd3f7768:bfeffffcde69d174 16:3fd6e29b184d39a6:c000d92f8867ddfc:bfefffffc5a2028e 17:3fd9c1c49496da21:bfffe6e52321b7ab:bfefffffbca66fd7 18:3fdca1b2eac8b5a2:bffe1af02d428e7b:bfeffffd11732bd5
+step 299 aabb 10 12 11 6 5 4 45 8 9 7 13 14 19 22 15 16 24 23 20 21 17 18 0
+step 299 point 7
+step 299 shape 10 12 11 6
 step 317 events 0 0 1 0
 step 321 events 0 0 0 1
 step 331 events 1 0 0 0
@@ -86,6 +98,10 @@ step 337 events 0 1 0 0
 step 347 events 1 0 0 0
 step 399 ray 2 3fbeb851eb851eb8 c036cccccccccccd bfcf0b6848d2af1c 3fef0b6848d2af1c
 step 399 awake 41 contacts 77
+step 399 rays 40:3fe87214d4b17f1e:bff17165f622211a:bfeffd777e5054ce 15:3fd3ff135b3821a0:c001c049f37e757e:bfeffffce7126f30 16:3fd6e2968f7548ce:c000d930f32b5940:bfefffffc7f9bdb9 17:3fd9c1be8f475646:bfffe6e8e6736a14:bfefffffba8dbe6c 18:3fdca1aa0890e64d:bffe1af5baa57010:bfeffffd1ed422a3
+step 399 aabb 10 12 11 6 5 4 19 22 15 16 24 23 20 21 17 18 13 7 14 9 8 45 0
+step 399 point 7
+step 399 shape 10 12 11 6
 step 416 events 1 0 0 0
 step 418 events 0 1 0 0
 step 419 events 0 1 0 0
@@ -95,8 +111,16 @@ step 437 events 1 0 0 0
 step 438 events 1 0 0 0
 step 499 ray 2 3fbeb851eb851eb8 c036cccccccccccd bfcf0b6848d2af1c 3fef0b6848d2af1c
 step 499 awake 41 contacts 78
+step 499 rays 40:3fe7ff112273c43d:bff2012a94ef4ab4:bfeffe40badcdf96 15:3fd3ff095fc438ce:c001c04d1212ae40:bfeffffd05a40f2b 16:3fd6e28d9bfde7ee:c000d933bf40a786:bfefffffd64eff3c 17:3fd9c1b5e12f4669:bfffe6ee534273fe:bfefffff93155042 18:3fdca18cb274253c:bffe1b08107768ba:bfeffffded95bfc0
+step 499 aabb 10 12 11 6 5 4 19 22 15 16 24 23 20 21 17 18 45 9 14 8 13 7 0
+step 499 point 7
+step 499 shape 10 12 11 6
 step 599 ray 2 3fbeb851eb851eb8 c036cccccccccccd bfcf0b6848d2af1c 3fef0b6848d2af1c
 step 599 awake 41 contacts 78
+step 599 rays 40:3fe7ff0751ae02f3:bff20136d9e67c50:bfeffe404c454065 15:3fd3ff094c0c0a65:c001c04d183c3cc0:bfeffffd05ca9b81 16:3fd6e28d85666cd7:c000d933c64ffdfd:bfefffffd6575f9b 17:3fd9c1b5c3a5d8b7:bfffe6ee65b8588e:bfefffff93101938 18:3fdca18c7df1c620:bffe1b083148e42c:bfeffffdee2a42f5
+step 599 aabb 10 12 11 6 5 4 19 22 15 16 24 23 20 21 17 18 45 9 14 8 13 7 0
+step 599 point 7
+step 599 shape 10 12 11 6
 body 0 0000000000000000 0000000000000000 3ff0000000000000 0000000000000000 0000000000000000 0000000000000000 0000000000000000 0
 body 1 c0021ce943d5e507 bfd99781f6bf37e6 3feffffffb9e6c0e 3f20beb73f52eb20 be986ca0f57a0034 3e9a69e525675add bea6e2b2282cbf8c 1
 body 2 bff59646a7ab18b7 bfd9945a4c6d2452 3feffffffe1be9f5 3f16008046e85ca3 3e72f3443bc0fc51 3e9b1f11d32f382a 3e99c0393a2054e4 1

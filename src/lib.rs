@@ -201,7 +201,7 @@ pub use crate::ui::uitoast::{UIToast, UIToastOptions};
 pub use crate::ui::uitogglebutton::{UIToggleButton, UIToggleButtonEvent};
 pub use crate::ui::uiview::UIView;
 pub use crate::animation::action::{Action, ActionCallbacks};
-pub use crate::animation::animator::{AnimationCondition, AnimationConditionMode, AnimationState, AnimationTransition, Animator};
+pub use crate::animation::animator::{AnimationCondition, AnimationConditionMode, AnimationState, AnimationTransition, Animator, AnimatorParameter};
 pub use crate::animation::timeline::{compose_timeline_color, create_bezier_easing, find_timeline_property_definition, parse_timeline_color, resolve_timeline_easing, Timeline, TimelineCompleteHandler, TimelineEasing, TimelineEventHandler, TimelineExternalProperty, TimelineKey, TimelineMarker, TimelineMarkerHandler, TimelineNodeDescription, TimelinePropertyDefinition, TimelinePropertyKind, TimelinePropertyTarget, TimelineSound, TimelineSpriteFrameGrid, TimelineTarget, TimelineTargetResolver, TimelineValue, TIMELINE_EASING_NAMES, TIMELINE_NODE_DEFAULTS, TIMELINE_PROPERTY_DEFINITIONS};
 pub use crate::effect::heathazeeffect::HeatHazeEffect;
 pub use crate::game::gamescene::GameSceneBase;

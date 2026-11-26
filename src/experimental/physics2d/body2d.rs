@@ -5,6 +5,7 @@
 //! - 원본과 다른 점: 사용자 값은 u64 다. 벡터는 f64 의 PhysicsVector2 다.
 //==============================================================================
 // 옮긴 원문: Box2D 3 의 셈에서 옮김, MIT, THIRD_PARTY_LICENSES.md
+use crate::experimental::jsmath::js_max;
 use super::physicsid2d::{BodyId2D, ShapeId2D};
 use super::physicsmath2d::{PhysicsMath2D, Rotation2D};
 use super::physicsvector2::PhysicsVector2;
@@ -547,7 +548,7 @@ impl Body2D {
 	/// - `linear_damping`: 선속도 감쇠. (0 이상)
 	//==============================================================================
 	pub fn set_linear_damping(&mut self, linear_damping: f64) {
-		self.linear_damping = linear_damping.max(0.0);
+		self.linear_damping = js_max(linear_damping, 0.0);
 	}
 
 	//==============================================================================
@@ -567,7 +568,7 @@ impl Body2D {
 	/// - `angular_damping`: 각속도 감쇠. (0 이상)
 	//==============================================================================
 	pub fn set_angular_damping(&mut self, angular_damping: f64) {
-		self.angular_damping = angular_damping.max(0.0);
+		self.angular_damping = js_max(angular_damping, 0.0);
 	}
 
 	//==============================================================================

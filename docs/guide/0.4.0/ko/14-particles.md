@@ -389,7 +389,7 @@ fn main() {
 
 ![ShaderSprite 효과 50 가지를 같은 그림에 칸마다 하나씩 건 격자](../images/shader-sprite.webp)
 
-- 원본은 `Sprite` 를 이어받지만 러스트 판은 `Sprite` 를 품고 `Deref` 로 `Sprite` 의 함수(`set_image`, `set_image_rect`, `set_color` 같은)를 그대로 부릅니다. 그래서 노드에서는 `get_component::<Sprite>()` 가 아니라 `get_component::<ShaderSprite>()` 로 찾습니다. `get_sprite()`, `get_sprite_mut()` 로 품은 `Sprite` 를 꺼낼 수도 있습니다.
+- 원본은 `Sprite` 를 이어받지만 러스트 판은 `Sprite` 를 품고 `Deref` 로 `Sprite` 의 함수(`set_image`, `set_image_rect`, `set_color` 같은)를 그대로 부릅니다. 품은 `Sprite` 를 `Component::get_base_component` 로 알리므로 노드에서 `get_component::<ShaderSprite>()` 로도, 원본처럼 `get_component::<Sprite>()` 로도 찾힙니다. `get_sprite()`, `get_sprite_mut()` 로 품은 `Sprite` 를 꺼낼 수도 있습니다.
 - `ShaderSprite::new()` 나 `ShaderSprite::create_with_image(image)` 로 만듭니다.
 - `set_effect(effect)` 는 효과를 바꾸고 그 효과의 기본 파라미터와 색으로 되돌립니다(진행도와 효과 시간은 그대로). 파라미터나 색은 그다음에 바꿉니다. `None` 이거나 그림이 없으면 `Sprite` 와 같게 그립니다.
 - `set_effect_progress(progress)`(0 ~ 1 로 자름)는 트윈이나 타임라인이 밀어 넣는 진행도입니다. 효과 시간(`set_effect_time`)은 노드 갱신에서 스스로 흐릅니다.
@@ -701,7 +701,7 @@ fn main() {
 - 회전과 원뿔 각은 라디안입니다(노드의 회전은 도입니다).
 - 화면 좌표는 아래가 +y 라서 위로 끌어올리는 중력은 음수입니다.
 - 월드 공간 시스템에서 `emit` 은 마지막 노드 갱신에서 읽어 둔 노드 위치를 씁니다. 노드를 옮긴 직후에 뿜으려면 `ParticleSystem::emit_in_tree` 를 씁니다.
-- `ShaderSprite` 는 `Sprite` 가 아니므로 `get_component::<Sprite>()` 로 찾지 못합니다. `get_component::<ShaderSprite>()` 를 씁니다.
+- `get_component::<Sprite>()` 는 원본처럼 `ShaderSprite` 도 찾습니다. 효과 함수를 쓰려면 `get_component::<ShaderSprite>()` 로 찾습니다.
 - `HeatHazeEffect` 와 `ScreenEffect` 는 이미 그린 화면을 떠 오는 효과입니다. 그리는 차례(어느 노드가 나중인지, `begin` 과 `end` 를 어디서 부르는지)가 결과를 정합니다. 둘 다 `destroy()` 나 버려질 때 GL 자원을 풉니다.
 
 ## 관련 타입

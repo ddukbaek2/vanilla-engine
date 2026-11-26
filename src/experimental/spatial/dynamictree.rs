@@ -10,6 +10,7 @@
 //! - 원본과 다른 점: 사용자 값은 제네릭 T 다. 프록시 번호는 usize 다. 잘못된 번호의 사용자 값은 None 이다.
 //==============================================================================
 // 옮긴 원문: Box2D 의 b2DynamicTree 에서 옮김, MIT, THIRD_PARTY_LICENSES.md
+use crate::experimental::jsmath::{js_max, js_min};
 use super::aabb2d::AABB2D;
 
 /// 비어 있는 노드 번호.
@@ -66,7 +67,7 @@ impl<T> TreeNode<T> {
 /// 두 노드를 감싼 상자의 둘레.
 //==============================================================================
 fn combined_perimeter<T>(first: &TreeNode<T>, second: &TreeNode<T>) -> f64 {
-	2.0 * ((first.max_x.max(second.max_x) - first.min_x.min(second.min_x)) + (first.max_y.max(second.max_y) - first.min_y.min(second.min_y)))
+	2.0 * ((js_max(first.max_x, second.max_x) - js_min(first.min_x, second.min_x)) + (js_max(first.max_y, second.max_y) - js_min(first.min_y, second.min_y)))
 }
 
 //==============================================================================
@@ -401,10 +402,10 @@ impl<T> DynamicTree<T> {
 			let new_parent_node = &mut self.nodes[new_parent];
 			new_parent_node.parent = old_parent;
 			new_parent_node.user_data = None;
-			new_parent_node.min_x = leaf_min_x.min(sibling_min_x);
-			new_parent_node.min_y = leaf_min_y.min(sibling_min_y);
-			new_parent_node.max_x = leaf_max_x.max(sibling_max_x);
-			new_parent_node.max_y = leaf_max_y.max(sibling_max_y);
+			new_parent_node.min_x = js_min(leaf_min_x, sibling_min_x);
+			new_parent_node.min_y = js_min(leaf_min_y, sibling_min_y);
+			new_parent_node.max_x = js_max(leaf_max_x, sibling_max_x);
+			new_parent_node.max_y = js_max(leaf_max_y, sibling_max_y);
 			new_parent_node.category_bits = leaf_category_bits | sibling_category_bits;
 			new_parent_node.height = sibling_height + 1;
 			new_parent_node.child1 = sibling;
@@ -492,10 +493,10 @@ impl<T> DynamicTree<T> {
 			(child_node.min_x, child_node.min_y, child_node.max_x, child_node.max_y, child_node.category_bits, child_node.height)
 		};
 		let node = &mut self.nodes[index];
-		node.min_x = child1_min_x.min(child2_min_x);
-		node.min_y = child1_min_y.min(child2_min_y);
-		node.max_x = child1_max_x.max(child2_max_x);
-		node.max_y = child1_max_y.max(child2_max_y);
+		node.min_x = js_min(child1_min_x, child2_min_x);
+		node.min_y = js_min(child1_min_y, child2_min_y);
+		node.max_x = js_max(child1_max_x, child2_max_x);
+		node.max_y = js_max(child1_max_y, child2_max_y);
 		node.category_bits = child1_category_bits | child2_category_bits;
 		node.height = 1 + child1_height.max(child2_height);
 	}
@@ -677,10 +678,10 @@ impl<T> DynamicTree<T> {
 		let mut maximum_fraction = 1.0;
 		let mut end_x = origin_x + maximum_fraction * translation_x;
 		let mut end_y = origin_y + maximum_fraction * translation_y;
-		let mut segment_min_x = origin_x.min(end_x);
-		let mut segment_min_y = origin_y.min(end_y);
-		let mut segment_max_x = origin_x.max(end_x);
-		let mut segment_max_y = origin_y.max(end_y);
+		let mut segment_min_x = js_min(origin_x, end_x);
+		let mut segment_min_y = js_min(origin_y, end_y);
+		let mut segment_max_x = js_max(origin_x, end_x);
+		let mut segment_max_y = js_max(origin_y, end_y);
 
 		let mut stack = vec![self.root];
 		while let Some(index) = stack.pop() {
@@ -708,10 +709,10 @@ impl<T> DynamicTree<T> {
 					maximum_fraction = value;
 					end_x = origin_x + maximum_fraction * translation_x;
 					end_y = origin_y + maximum_fraction * translation_y;
-					segment_min_x = origin_x.min(end_x);
-					segment_min_y = origin_y.min(end_y);
-					segment_max_x = origin_x.max(end_x);
-					segment_max_y = origin_y.max(end_y);
+					segment_min_x = js_min(origin_x, end_x);
+					segment_min_y = js_min(origin_y, end_y);
+					segment_max_x = js_max(origin_x, end_x);
+					segment_max_y = js_max(origin_y, end_y);
 				}
 			}
 			else {
@@ -750,10 +751,10 @@ impl<T> DynamicTree<T> {
 			if node.height != 1 + child1_node.height.max(child2_node.height) {
 				return false;
 			}
-			if node.min_x != child1_node.min_x.min(child2_node.min_x) || node.min_y != child1_node.min_y.min(child2_node.min_y) {
+			if node.min_x != js_min(child1_node.min_x, child2_node.min_x) || node.min_y != js_min(child1_node.min_y, child2_node.min_y) {
 				return false;
 			}
-			if node.max_x != child1_node.max_x.max(child2_node.max_x) || node.max_y != child1_node.max_y.max(child2_node.max_y) {
+			if node.max_x != js_max(child1_node.max_x, child2_node.max_x) || node.max_y != js_max(child1_node.max_y, child2_node.max_y) {
 				return false;
 			}
 			if node.category_bits != (child1_node.category_bits | child2_node.category_bits) {

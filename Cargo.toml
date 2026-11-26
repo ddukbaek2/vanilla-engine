@@ -57,6 +57,8 @@ unicode-script = "0.5"
 icu_segmenter = "2"
 # JsonAsset 이 JSON 을 푼다. (원본 JSON.parse 자리) 객체 키는 적힌 차례를 지킨다. (UIDocument 가 원본 JSON.stringify 와 같은 차례로 쓴다)
 serde_json = { version = "1", features = ["preserve_order"] }
+# 초안 SaveGameManager::save 가 Serialize 를 받는다. (serde_json 이 이미 쓰는 크레이트, derive 는 켜지 않는다)
+serde = { version = "1", default-features = false, features = ["std"] }
 # FBX 압축 배열(zlib deflate)을 푼다. (원본 DecompressionStream 자리, 순수 러스트 miniz_oxide 기본 백엔드라 wasm32 에서도 돈다)
 flate2 = "1"
 # 이미지 해석. (원본은 브라우저가 푸는 형식을 모두 받는다. png, jpeg, webp, gif(첫 장), bmp, ico. 웹은 브라우저가 먼저 푼다)
@@ -128,7 +130,7 @@ objc2-game-controller = { version = "0.3", default-features = false, features = 
 objc2-core-haptics = { version = "0.3", default-features = false, features = ["std", "block2", "CHHapticEngine", "CHHapticEvent", "CHHapticParameter", "CHHapticPattern", "CHHapticPatternPlayer"] }
 block2 = "0.6"
 # 맥: 시스템 글꼴. (CoreText 로 글꼴 이름과 시스템 UI 글꼴의 파일을 찾고, 글꼴에 없는 글자의 대체 글꼴을 CTFontCreateForString 으로 고른다. 원본 크롬 맥도 CoreText 로 고른다)
-objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFString", "CFURL", "CFDictionary", "CFNumber", "CFArray", "CFData", "CFCGTypes"] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFString", "CFURL", "CFDictionary", "CFNumber", "CFArray", "CFData", "CFCGTypes", "CFCharacterSet"] }
 objc2-core-text = { version = "0.3", default-features = false, features = ["std", "objc2-core-graphics", "CTFont", "CTFontDescriptor", "CTFontTraits", "CTFontManager"] }
 # 맥: 색 이모지와 열린 해석기가 없는 글꼴(PingFang 의 hvgl)의 글리프를 CoreText 로 그린다. (원본 크롬 맥도 CoreGraphics 로 그린다)
 objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGBitmapContext", "CGColorSpace", "CGContext", "CGFont", "CGImage"] }

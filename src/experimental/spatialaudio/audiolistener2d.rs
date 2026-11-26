@@ -33,8 +33,8 @@ use crate::core::node::nodetree::ComponentContext;
 pub struct AudioListener2D {
 	component_base: ComponentBase,
 	listener: Option<SpatialAudioListener>,
-	pixels_per_unit: f32,
-	depth: f32,
+	pixels_per_unit: f64,
+	depth: f64,
 }
 
 impl AudioListener2D {
@@ -74,12 +74,32 @@ impl AudioListener2D {
 	}
 
 	//==============================================================================
+	/// 리스너. (변경용, 원본 getListener 가 돌려준 참조로 고치는 자리)
+	///
+	/// # 돌려줌
+	/// 넣은 리스너. (없으면 None)
+	//==============================================================================
+	pub fn get_listener_mut(&mut self) -> Option<&mut SpatialAudioListener> {
+		self.listener.as_mut()
+	}
+
+	//==============================================================================
+	/// 리스너 떼기. (원본 setListener(null), 뗀 리스너를 돌려준다)
+	///
+	/// # 돌려줌
+	/// 넣었던 리스너. (없으면 None)
+	//==============================================================================
+	pub fn take_listener(&mut self) -> Option<SpatialAudioListener> {
+		self.listener.take()
+	}
+
+	//==============================================================================
 	/// WebAudio 한 단위의 픽셀 수 설정. (0 보다 크고 유한해야 받는다, AudioSource2D 와 같은 값을 쓴다)
 	///
 	/// # 인자
 	/// - `pixels_per_unit`: 한 단위가 몇 픽셀인지. (기본 1)
 	//==============================================================================
-	pub fn set_pixels_per_unit(&mut self, pixels_per_unit: f32) {
+	pub fn set_pixels_per_unit(&mut self, pixels_per_unit: f64) {
 		if pixels_per_unit.is_finite() && pixels_per_unit > 0.0 {
 			self.pixels_per_unit = pixels_per_unit;
 		}
@@ -91,7 +111,7 @@ impl AudioListener2D {
 	/// # 돌려줌
 	/// 한 단위가 몇 픽셀인지. (기본 1)
 	//==============================================================================
-	pub fn get_pixels_per_unit(&self) -> f32 {
+	pub fn get_pixels_per_unit(&self) -> f64 {
 		self.pixels_per_unit
 	}
 
@@ -101,7 +121,7 @@ impl AudioListener2D {
 	/// # 인자
 	/// - `depth`: 리스너의 Z. (기본 0, 소리는 Z 0 에 있다)
 	//==============================================================================
-	pub fn set_depth(&mut self, depth: f32) {
+	pub fn set_depth(&mut self, depth: f64) {
 		if depth.is_finite() {
 			self.depth = depth;
 		}
@@ -113,7 +133,7 @@ impl AudioListener2D {
 	/// # 돌려줌
 	/// 리스너의 Z. (기본 0)
 	//==============================================================================
-	pub fn get_depth(&self) -> f32 {
+	pub fn get_depth(&self) -> f64 {
 		self.depth
 	}
 }

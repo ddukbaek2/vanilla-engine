@@ -65,6 +65,8 @@ const chromePathList = [
 			createCase("static_stereo_linear_cone", 44100, true, { channels: "stereo", gain: 0.9 }, { distanceModel: "linear", refDistance: 2, maxDistance: 20, rolloffFactor: 0.8, coneInnerAngle: 60, coneOuterAngle: 180, coneOuterGain: 0.2, position: [-5, 1, 3], orientation: [1, 0, 0.5] }, {}, []),
 			createCase("static_exponential_listener_turned", 44100, true, { gain: 0.7 }, { distanceModel: "exponential", refDistance: 1.5, rolloffFactor: 1.5, position: [0.5, 4, -1] }, { position: [1, 0, 1], forward: [1, 0, -1], up: [0, 1, 0] }, []),
 			createCase("static_same_position", 44100, true, { gain: 0.5 }, { coneInnerAngle: 30, coneOuterAngle: 90, coneOuterGain: 0.1, orientation: [0, 0, 0] }, {}, []),
+			// 같은 자리에 방향 있는 원뿔: 크롬 AngleBetweenVectorsInDegrees 의 fmin(NaN, 1) 이 1 이라 각 0, 원뿔 이득 1.
+			createCase("static_same_position_cone", 44100, true, { gain: 0.5 }, { coneInnerAngle: 30, coneOuterAngle: 90, coneOuterGain: 0.1, orientation: [1, 0, 0] }, {}, []),
 			createCase("static_linear_equal_distances_bus", 44100, true, { channels: "stereo", gain: 0.6, busGain: 0.6 }, { distanceModel: "linear", refDistance: 5, maxDistance: 5, rolloffFactor: 0.25, position: [2, 0, 2] }, {}, []),
 			createCase("automated_panner_ramp", 48000, false, { gain: 0.9, rate: 1.2, loop: true }, { position: [-10, 0, -1], automation: [
 				{ param: "positionX", type: "setValueAtTime", value: -10, time: 0 },
@@ -122,6 +124,8 @@ const chromePathList = [
 			createCase("hrtf_elevation_96000", 96000, false, { gain: 0.8 }, { panningModel: "HRTF", position: [0, 4, 0] }, {}, [
 				{ frame: 3072, actions: [{ kind: "pannerValue", param: "positionY", value: -3 }, { kind: "pannerValue", param: "positionX", value: 1 }] },
 			]),
+			// 리스너 앞과 위가 나란함: 오른쪽 축이 0 이라 크롬 높이는 90 (사이 각의 fmin(NaN, 1) 이 1).
+			createCase("hrtf_listener_forward_parallel_up_44100", 44100, true, { gain: 0.8 }, { panningModel: "HRTF", position: [2, 1, -1] }, { forward: [0, 1, 0], up: [0, 1, 0] }, []),
 			createCase("hrtf_bus_linear_32000", 32000, true, { channels: "stereo", gain: 0.6, busGain: 0.5 }, { panningModel: "HRTF", distanceModel: "linear", refDistance: 1, maxDistance: 15, rolloffFactor: 0.7, position: [4, -1, 3] }, {}, []),
 		];
 		// 경계 시각은 frame 으로 적는다. (러스트 시험의 JSON 읽기가 실수 끝자리를 어긋내지 않게, 시각은 frame / 표본율)

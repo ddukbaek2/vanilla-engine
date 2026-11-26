@@ -12,11 +12,12 @@
 //! - 원본과 다른 점:
 //!   원본은 WorldNode 를 상속한 노드이고, 러스트 판은 노드에 붙는 컴포넌트다. 블렌드는 원본처럼 push_transform 에서 더하기로 바꾸고
 //!   pop_transform 에서 앞의 블렌드로 되돌려 자식까지 더하기로 그린다. (컴포넌트의 노드 출력 상태 앞뒤 훅)
-//!   그라디언트는 오프스크린 캔버스 대신 픽셀로 직접 만든 Image 다.
+//!   그라디언트는 원본처럼 오프스크린 캔버스(엔진 Canvas2D)의 방사 그라디언트로 구운 Image 다.
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::math;
 use crate::base::vector2::Vector2;
+use crate::core::canvas2d::Canvas2D;
 use crate::core::component::{Component, ComponentBase};
 use crate::core::graphic::{BlendMode, Graphic};
 use crate::core::image::Image;
@@ -34,29 +35,22 @@ thread_local! {
 }
 
 //==============================================================================
-/// 방사형 그라디언트 그림 반환. (가운데 불투명 흰색 → 가장자리 투명, 직선 보간. 없으면 한 번 만든다)
+/// 방사형 그라디언트 그림 반환. (가운데 불투명 흰색 → 가장자리 투명. 원본처럼 엔진 Canvas2D 의 방사 그라디언트로 한 번 굽는다)
 //==============================================================================
 fn get_particle_gradient_image() -> Rc<Image> {
 	PARTICLE_GRADIENT_IMAGE.with(|image_cell| {
 		let mut image_option = image_cell.borrow_mut();
 		let gradient_image = image_option.get_or_insert_with(|| {
-			let image_size = PARTICLE_GRADIENT_IMAGE_SIZE as usize;
-			let half_size = image_size as f32 * 0.5;
-			let mut pixels = vec![0u8; image_size * image_size * 4];
-			for pixel_y in 0..image_size {
-				for pixel_x in 0..image_size {
-					let delta_x = pixel_x as f32 + 0.5 - half_size;
-					let delta_y = pixel_y as f32 + 0.5 - half_size;
-					let distance_ratio = (delta_x * delta_x + delta_y * delta_y).sqrt() / half_size;
-					let alpha = math::clamp01(1.0 - distance_ratio);
-					let pixel_index = (pixel_y * image_size + pixel_x) * 4;
-					pixels[pixel_index] = 255;
-					pixels[pixel_index + 1] = 255;
-					pixels[pixel_index + 2] = 255;
-					pixels[pixel_index + 3] = (alpha * 255.0).round() as u8;
-				}
+			let canvas_size = PARTICLE_GRADIENT_IMAGE_SIZE as f32;
+			let half_size = canvas_size * 0.5;
+			let mut canvas = Canvas2D::new(PARTICLE_GRADIENT_IMAGE_SIZE, PARTICLE_GRADIENT_IMAGE_SIZE);
+			if let Some(mut radial_gradient) = canvas.create_radial_gradient(half_size, half_size, 0.0, half_size, half_size, half_size) {
+				radial_gradient.add_color_stop(0.0, Color::create(1.0, 1.0, 1.0, 1.0));
+				radial_gradient.add_color_stop(1.0, Color::create(1.0, 1.0, 1.0, 0.0));
+				canvas.set_fill_style(radial_gradient);
 			}
-			Image::create_from_pixels(PARTICLE_GRADIENT_IMAGE_SIZE, PARTICLE_GRADIENT_IMAGE_SIZE, pixels)
+			canvas.fill_rect(0.0, 0.0, canvas_size, canvas_size);
+			canvas.to_image()
 		});
 		gradient_image.clone()
 	})
@@ -331,6 +325,7 @@ mod tests {
 
 	//==============================================================================
 	/// 그라디언트 그림은 가운데가 불투명하고 모서리는 투명하며, 한 번만 만든다.
+	/// - 헤드리스 크롬의 같은 캔버스 코드(createRadialGradient, fillRect)와 64x64 알파가 모두 같았다. (2026-11-27, 색은 흰색이라 곱한 값이 알파와 같다)
 	//==============================================================================
 	#[test]
 	fn gradient_image_is_radial() {
@@ -341,6 +336,9 @@ mod tests {
 		let center_index = 32 * row_stride + 32 * 4;
 		assert!(pixels[center_index + 3] >= 245);
 		assert_eq!(pixels[3], 0);
+		// 크롬이 같은 캔버스 코드로 낸 가운데 줄 알파. (x = 0, 16, 48, 63)
+		let middle_row_alphas: Vec<u8> = [0usize, 16, 48, 63].iter().map(|pixel_x| pixels[32 * row_stride + pixel_x * 4 + 3]).collect();
+		assert_eq!(middle_row_alphas, vec![4, 131, 123, 4]);
 		assert!(Rc::ptr_eq(&gradient_image, &get_particle_gradient_image()));
 	}
 }
