@@ -2032,7 +2032,7 @@ pub fn rasterize_glyph(face: &ResolvedFontFace, glyph_index: u16, pixel_size: f3
 /// - 맥: 색이 아닌 글리프는 크롬 맥 Canvas2D 와 같은 길로 그린다. (스키아 SkScalerContext_Mac 의 A8 마스크: 글꼴 부드럽게, CoreGraphics 감마 풀기, 글자 색 밝기의 감마 전보정)
 ///   글자 색 밝기는 맥 스키아처럼 글꼴 부드럽게가 회색이면 1/2 을 곱한 색의 3 비트 단계이고, 감마는 크롬 맥의 sRGB, 대비는 0 이다. (SkTypeface_Mac::onFilterRec, 크로미엄 skia/BUILD.gn)
 ///   가짜 기울임은 CoreText 의 글자 행렬 기울기로 그린다. 색 글리프는 rasterize_glyph 와 같다.
-/// - 윈도우: 색이 아닌 글리프는 크롬 윈도우 Canvas2D 와 같은 길로 DirectWrite 가 그린다. (스키아 SkScalerContext_DW 의 A8: 그레이스케일, 격자 맞춤, gasp 로 고른 렌더링 모드)
+/// - 윈도우: 색이 아닌 글리프는 크롬 윈도우 Canvas2D 와 같은 길로 DirectWrite 가 그린다. (스키아 SkScalerContext_DW 의 A8: 격자 맞춤, gasp 로 고른 렌더링 모드, ClearType 이 켜졌으면 크롬처럼 3x1 텍스처의 세 채널 평균, 꺼졌으면 그레이스케일)
 ///   감마 전보정은 글자 색 밝기 단계의 표로, 대비와 감마는 크롬처럼 Avalon.Graphics 키가 있으면 시스템 값, 없으면 대비 1, sRGB 다. 가짜 기울임은 DirectWrite 글자 행렬의 기울기다.
 /// - 리눅스: 색이 아닌 글리프는 크롬 리눅스처럼 skrifa 윤곽에 fontconfig 의 힌팅 단계로 힌팅을 걸어 칠하고 감마 1.2, 대비 0.2 로 전보정한다. (스키아 SkTypeface_Fontations)
 /// - 그 밖은 서브픽셀 자리와 밝기를 쓰지 않는다.

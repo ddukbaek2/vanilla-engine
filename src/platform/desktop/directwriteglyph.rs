@@ -4,6 +4,7 @@
 //!   러스트 판도 같은 DirectWrite 호출로 칠한다. (크롬 158 의 스키아 3279352f, src/ports/SkScalerContext_win_dw.cpp, SkTypeface_win_dw.cpp)
 //! - A8 마스크: IDWriteFactory2::CreateGlyphRunAnalysis 에 렌더링 모드(gasp 표, 크기, 바이트코드 힌트, 비트맵 글꼴로 고름), 측정 모드,
 //!   격자 맞춤 켬(힌팅 kNormal), 안티에일리어스 그레이스케일을 주고 DWRITE_TEXTURE_ALIASED_1x1 의 알파 텍스처를 받는다.
+//!   ClearType 이 켜진 기계는 크롬이 글자를 LCD 로 두어 캔버스에서 kGenA8FromLCD 가 걸리므로, IDWriteFactory 로 ClearType 3x1 텍스처를 받아 세 채널 평균을 낸다. (RGBToA8)
 //!   서브픽셀 자리는 글자 행렬의 dx, 가짜 기울임은 글자 행렬의 m21(-1/4)이다. 그 뒤 스키아처럼 감마 전보정 표로 고친다. (GrayscaleToA8)
 //! - 글자 대비와 감마: 크롬 158 은 HKCU\SOFTWARE\Microsoft\Avalon.Graphics\<주 화면 장치> 키가 있을 때만 IDWriteRenderingParams 의 값을,
 //!   없으면 스키아 기본(대비 1, sRGB)을 쓴다. (ui/gfx/font_util_win.cc GetTextParameters, font_render_params_win.cc, skia/ext/legacy_display_globals.cc 의 SetCachedParams)
@@ -17,7 +18,7 @@ use windows::core::{Interface, BOOL, PCWSTR};
 use windows::Win32::Foundation::RECT;
 use windows::Win32::Graphics::DirectWrite::{
 	DWriteCreateFactory, IDWriteFactory, IDWriteFactory2, IDWriteFactory5, IDWriteFactory6, IDWriteFontFace, IDWriteFontFile, IDWriteInMemoryFontFileLoader, DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_AXIS_TAG, DWRITE_FONT_AXIS_VALUE, DWRITE_FONT_FACE_TYPE, DWRITE_FONT_FILE_TYPE, DWRITE_FONT_SIMULATIONS_NONE, DWRITE_GLYPH_OFFSET, DWRITE_GLYPH_RUN,
-	DWRITE_GRID_FIT_MODE_ENABLED, DWRITE_MATRIX, DWRITE_MEASURING_MODE, DWRITE_RENDERING_MODE, DWRITE_TEXTURE_ALIASED_1x1, DWRITE_TEXT_ANTIALIAS_MODE_GRAYSCALE,
+	DWRITE_GRID_FIT_MODE_ENABLED, DWRITE_MATRIX, DWRITE_MEASURING_MODE, DWRITE_RENDERING_MODE, DWRITE_TEXTURE_ALIASED_1x1, DWRITE_TEXTURE_CLEARTYPE_3x1, DWRITE_TEXT_ANTIALIAS_MODE_GRAYSCALE,
 };
 
 /// 글꼴 얼굴 캐시 상한. (넘으면 비운다)
@@ -32,6 +33,8 @@ thread_local! {
 	static FONT_FACE_CACHE: RefCell<HashMap<(usize, u32, Vec<(u32, u32)>), (Rc<[u8]>, IDWriteFontFace)>> = RefCell::new(HashMap::new());
 	/// 글자 대비와 감마. (한 번 읽는다)
 	static TEXT_CONTRAST_AND_GAMMA: (f32, f32) = read_registry_text_contrast_and_gamma();
+	/// 크롬이 글자를 LCD 로 다루는지. (한 번 읽는다)
+	static IS_LCD_TEXT_ENABLED: bool = read_lcd_text_enabled();
 }
 
 /// 글리프 마스크. (덮인 정도와 상자, 위가 양수인 top_y)
@@ -103,14 +106,21 @@ fn read_registry_text_contrast_and_gamma() -> (f32, f32) {
 /// 주 화면 장치의 글자 설정 레지스트리 키가 있는지. (FontUtilWin::GetTextSettingsRegistryKey: HKCU\SOFTWARE\Microsoft\Avalon.Graphics\<장치 이름의 끝 이름>)
 //==============================================================================
 fn has_text_settings_registry_key() -> bool {
+	read_text_settings_registry().0
+}
+
+//==============================================================================
+/// 글자 설정 레지스트리 키 읽기. ((키가 있는지, PixelStructure 값))
+//==============================================================================
+fn read_text_settings_registry() -> (bool, Option<u32>) {
 	use windows_sys::Win32::Graphics::Gdi::{EnumDisplayDevicesW, DISPLAY_DEVICEW, DISPLAY_DEVICE_PRIMARY_DEVICE};
-	use windows_sys::Win32::System::Registry::{RegCloseKey, RegOpenKeyExW, HKEY, HKEY_CURRENT_USER, KEY_READ};
+	use windows_sys::Win32::System::Registry::{RegCloseKey, RegOpenKeyExW, RegQueryValueExW, HKEY, HKEY_CURRENT_USER, KEY_READ, REG_DWORD};
 	let mut device_index = 0u32;
 	loop {
 		let mut display_device: DISPLAY_DEVICEW = unsafe { std::mem::zeroed() };
 		display_device.cb = std::mem::size_of::<DISPLAY_DEVICEW>() as u32;
 		if unsafe { EnumDisplayDevicesW(std::ptr::null(), device_index, &mut display_device, 0) } == 0 {
-			return false;
+			return (false, None);
 		}
 		if display_device.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE != 0 {
 			let name_length = display_device.DeviceName.iter().position(|value| *value == 0).unwrap_or(display_device.DeviceName.len());
@@ -119,17 +129,60 @@ fn has_text_settings_registry_key() -> bool {
 			let base_name = device_name.rsplit('\\').next().unwrap_or("").to_string();
 			let key_path: Vec<u16> = format!("SOFTWARE\\Microsoft\\Avalon.Graphics\\{}", base_name).encode_utf16().chain(std::iter::once(0)).collect();
 			let mut key: HKEY = 0;
-			let status = unsafe { RegOpenKeyExW(HKEY_CURRENT_USER, key_path.as_ptr(), 0, KEY_READ, &mut key) };
-			if status == 0 {
-				unsafe {
-					RegCloseKey(key);
-				}
-				return true;
+			if unsafe { RegOpenKeyExW(HKEY_CURRENT_USER, key_path.as_ptr(), 0, KEY_READ, &mut key) } != 0 {
+				return (false, None);
 			}
-			return false;
+			let value_name: Vec<u16> = "PixelStructure".encode_utf16().chain(std::iter::once(0)).collect();
+			let mut value_type = 0u32;
+			let mut value = 0u32;
+			let mut value_size = std::mem::size_of::<u32>() as u32;
+			let status = unsafe { RegQueryValueExW(key, value_name.as_ptr(), std::ptr::null(), &mut value_type, &mut value as *mut u32 as *mut u8, &mut value_size) };
+			unsafe {
+				RegCloseKey(key);
+			}
+			let pixel_structure = if status == 0 && value_type == REG_DWORD {
+				Some(value)
+			}
+			else {
+				None
+			};
+			return (true, pixel_structure);
 		}
 		device_index += 1;
 	}
+}
+
+//==============================================================================
+/// 크롬 윈도우가 글자를 LCD 로 다루는지. (ClearType 이면 블링크가 kSubpixelAntiAlias 로 두고, 캔버스는 화소 배열을 모르니 스키아가 A8 에 kGenA8FromLCD 를 건다)
+/// - 크롬 font_render_params_win.cc: SPI_GETFONTSMOOTHING 이 켜졌고 SPI_GETFONTSMOOTHINGTYPE 이 ClearType 이면 GetSubpixelRenderingGeometry 가
+///   Avalon.Graphics 의 PixelStructure(0 없음, 1 RGB, 2 BGR, 그 밖은 없음), 그 값이 없으면 SPI_GETFONTSMOOTHINGORIENTATION(RGB, BGR, 그 밖은 없음)이다.
+///   렌더러는 이 값이 없음이 아니면 LCD 글자를 켠다. (web_view_impl.cc 의 SetLCDTextEnabled)
+//==============================================================================
+pub fn is_lcd_text_enabled() -> bool {
+	IS_LCD_TEXT_ENABLED.with(|value| *value)
+}
+
+//==============================================================================
+/// 시스템 설정으로 LCD 글자 여부 셈. (is_lcd_text_enabled)
+//==============================================================================
+fn read_lcd_text_enabled() -> bool {
+	use windows_sys::Win32::UI::WindowsAndMessaging::{SystemParametersInfoW, FE_FONTSMOOTHINGCLEARTYPE, FE_FONTSMOOTHINGORIENTATIONBGR, FE_FONTSMOOTHINGORIENTATIONRGB, SPI_GETFONTSMOOTHING, SPI_GETFONTSMOOTHINGORIENTATION, SPI_GETFONTSMOOTHINGTYPE};
+	let mut is_enabled = 0i32;
+	if unsafe { SystemParametersInfoW(SPI_GETFONTSMOOTHING, 0, &mut is_enabled as *mut i32 as *mut std::ffi::c_void, 0) } == 0 || is_enabled == 0 {
+		return false;
+	}
+	let mut smoothing_type = 0u32;
+	if unsafe { SystemParametersInfoW(SPI_GETFONTSMOOTHINGTYPE, 0, &mut smoothing_type as *mut u32 as *mut std::ffi::c_void, 0) } == 0 || smoothing_type != FE_FONTSMOOTHINGCLEARTYPE {
+		return false;
+	}
+	if let (true, Some(pixel_structure)) = read_text_settings_registry() {
+		return pixel_structure == 1 || pixel_structure == 2;
+	}
+	let mut orientation = 0u32;
+	if unsafe { SystemParametersInfoW(SPI_GETFONTSMOOTHINGORIENTATION, 0, &mut orientation as *mut u32 as *mut std::ffi::c_void, 0) } != 0 {
+		return orientation == FE_FONTSMOOTHINGORIENTATIONRGB || orientation == FE_FONTSMOOTHINGORIENTATIONBGR;
+	}
+	false
 }
 
 //==============================================================================
@@ -239,11 +292,24 @@ pub fn rasterize_glyph_mask(font_bytes: &Rc<[u8]>, source_path: Option<&Path>, f
 		dx: subpixel_x,
 		dy: 0.0,
 	};
-	let analysis_result = unsafe { factory_2.CreateGlyphRunAnalysis(&glyph_run, Some(&transform), DWRITE_RENDERING_MODE(rendering_mode), DWRITE_MEASURING_MODE(measuring_mode), DWRITE_GRID_FIT_MODE_ENABLED, DWRITE_TEXT_ANTIALIAS_MODE_GRAYSCALE, 0.0, 0.0) };
+	// LCD 글자면 스키아는 그레이스케일로 바꾸지 않고(kGenA8FromLCD) IDWriteFactory 의 ClearType 3x1 텍스처를 받아 세 채널의 평균을 낸다. (RGBToA8)
+	let is_lcd = is_lcd_text_enabled();
+	let texture_type = if is_lcd {
+		DWRITE_TEXTURE_CLEARTYPE_3x1
+	}
+	else {
+		DWRITE_TEXTURE_ALIASED_1x1
+	};
+	let analysis_result = if is_lcd {
+		unsafe { factory.CreateGlyphRunAnalysis(&glyph_run, 1.0, Some(&transform), DWRITE_RENDERING_MODE(rendering_mode), DWRITE_MEASURING_MODE(measuring_mode), 0.0, 0.0) }
+	}
+	else {
+		unsafe { factory_2.CreateGlyphRunAnalysis(&glyph_run, Some(&transform), DWRITE_RENDERING_MODE(rendering_mode), DWRITE_MEASURING_MODE(measuring_mode), DWRITE_GRID_FIT_MODE_ENABLED, DWRITE_TEXT_ANTIALIAS_MODE_GRAYSCALE, 0.0, 0.0) }
+	};
 	// 글리프 런이 든 얼굴을 놓는다. (ManuallyDrop 이라 직접)
 	drop(std::mem::ManuallyDrop::into_inner(glyph_run.fontFace));
 	let glyph_run_analysis = analysis_result.ok()?;
-	let bounds: RECT = unsafe { glyph_run_analysis.GetAlphaTextureBounds(DWRITE_TEXTURE_ALIASED_1x1).ok()? };
+	let bounds: RECT = unsafe { glyph_run_analysis.GetAlphaTextureBounds(texture_type).ok()? };
 	// 비었거나 크게 깨진 상자는 그리지 않는다. (스키아도 left >= right 면 빈 것으로 본다)
 	if bounds.left >= bounds.right || bounds.top >= bounds.bottom {
 		return Some(DirectWriteGlyphMask {
@@ -257,8 +323,19 @@ pub fn rasterize_glyph_mask(font_bytes: &Rc<[u8]>, source_path: Option<&Path>, f
 	let width = bounds.right - bounds.left;
 	let height = bounds.bottom - bounds.top;
 	let mut coverage = vec![0u8; (width * height) as usize];
-	unsafe {
-		glyph_run_analysis.CreateAlphaTexture(DWRITE_TEXTURE_ALIASED_1x1, &bounds, &mut coverage).ok()?;
+	if is_lcd {
+		let mut rgb_coverage = vec![0u8; (width * height * 3) as usize];
+		unsafe {
+			glyph_run_analysis.CreateAlphaTexture(DWRITE_TEXTURE_CLEARTYPE_3x1, &bounds, &mut rgb_coverage).ok()?;
+		}
+		for (value, rgb) in coverage.iter_mut().zip(rgb_coverage.chunks_exact(3)) {
+			*value = ((rgb[0] as u32 + rgb[1] as u32 + rgb[2] as u32) / 3) as u8;
+		}
+	}
+	else {
+		unsafe {
+			glyph_run_analysis.CreateAlphaTexture(DWRITE_TEXTURE_ALIASED_1x1, &bounds, &mut coverage).ok()?;
+		}
 	}
 	if let Some(correcting_table) = correcting_table {
 		for value in coverage.iter_mut() {
