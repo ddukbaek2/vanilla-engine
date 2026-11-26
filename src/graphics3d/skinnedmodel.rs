@@ -1,5 +1,5 @@
 //==============================================================================
-//! 스킨드 모델. (원본 experimental/graphics/skinnedmodel.js)
+//! 스킨드 모델. (원본 graphics3d/skinnedmodel.js)
 //! - 모델 인스턴스, 메시/본/스킨/머티리얼/애니메이션 데이터 + 포즈 상태. 렌더링은 SkinnedModelRenderer 가 맡는다.
 //! - GLB(바이너리 glTF)와 바이너리 FBX 를 공통 중립 스키마(MeshDescription + MaterialDescription)로 해석해 GL 리소스를 구성한다.
 //!   (임포터는 파싱만 → 중립 스키마 → 공용 GL 업로드 upload_meshes_and_materials)

@@ -1,6 +1,17 @@
 # 업데이트 기록
 
 # 아직 release 에 합치지 않은 것 (release 에 합칠 때 패치 판을 하나 올려 매긴다)
+- 폴더: 원본 vanilla.js 가 src/experimental 에 있던 다 자란 기능을 제자리로 옮겨, 두 엔진의 폴더가 같아졌다. 러스트 판은 이미 이 자리였고 모듈 경로(vanilla::graphics3d 같은)는 그대로다. 원본에서 import.js 로 쓰던 게임은 그대로, 파일 경로로 직접 import 하던 게임은 새 경로로 바꾼다. 파일 머리 주석과 ARCHITECTURE 9장의 원본 경로를 새 경로로 고쳤다. (원본의 옛 경로 → 새 경로)
+  - src/experimental/graphics/*.js (3D) → src/graphics3d/*.js (러스트 graphics3d/)
+  - src/experimental/graphics/toon/*.js (툰 3D) → src/graphics3d/toon/*.js (러스트 graphics3d/toon/)
+  - src/experimental/graphics/fullscreenpass.js → src/core/fullscreenpass.js (러스트 core/fullscreenpass.rs)
+  - src/experimental/animation/animator.js, timeline.js, src/experimental/action.js → src/animation/ (러스트 animation/)
+  - src/experimental/indicator.js, visual/visual.js → src/misc/ (러스트 misc/)
+  - src/experimental/bunchasset.js, visual/visualasset.js → src/resource/ (러스트 resource/)
+  - src/experimental/collection/*.js → src/base/collection/*.js (러스트는 표준 Vec, HashMap 같은 것이 맡아 없다)
+  - src/experimental/camera.js → src/deprecated/camera.js (원본도 폐기 예정, 러스트는 Camera2D 가 덮어 없다)
+  - src/experimental/aabb.js, transform2d.js, graphics/gl2d.js, graphics/webgl2.js (죽은 코드) → src/deprecated/ (러스트에는 없다)
+- experimental: vanilla::experimental 모듈(src/experimental/mod.rs)을 새로 두었다. 0.4.0 뒤 기능의 초안 자리다. (원본 import.js 의 Experimental 이름 공간 자리) 초안은 API 가 바뀔 수 있다. 지금은 비어 있다
 - 이름을 러스트 규칙(Rust API Guidelines C-CASE)으로 바꿨다. 함수, 메서드, 변수, 필드, 모듈은 snake_case, 열거 값은 UpperCamelCase, 연관 상수는 SCREAMING_SNAKE_CASE. (setFillColor → set_fill_color, Colors::white → Colors::WHITE, Pivot::topLeft → Pivot::TOP_LEFT, ButtonState::normal → ButtonState::Normal) 이름 경고를 끄던 #![allow(non_snake_case)] 등을 lib.rs 와 예제에서 뺐다. 엔진을 쓰는 코드는 같은 규칙으로 이름을 바꿔야 한다. (공개 API 를 바꾸는 일이다) 바꾼 곳 11,071 군데, 동작은 같다. (cargo test 252 통과, 데스크탑과 웹 빌드 경고 0, 예제 화면이 전과 같음)
 - README: macOS(애플 실리콘) 데스크탑에서 확인함을 적었다
 - 외계행성 광부 키우기가 게임 쪽에 따로 만들어 쓰던 범용 기능을 엔진으로 옮긴다. (vanilla.js 에 먼저 넣은 것과 같은 기능, 게임의 콘텐츠 구현은 가져오지 않는다)

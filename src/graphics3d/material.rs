@@ -1,5 +1,5 @@
 //==============================================================================
-//! 머티리얼. (원본 experimental/graphics/material.js)
+//! 머티리얼. (원본 graphics3d/material.js)
 //! - 셰이더 템플릿 참조 + metallic-roughness PBR 파라미터/텍스처, 포맷 중립. 모델은 머티리얼 인스턴스를 적용만 한다.
 //! - 임포터가 만든 중립 머티리얼 서술(팩터 + 이미지 바이트, MaterialDescription)로부터 GL 텍스처를 만든다.
 //! - FBX 의 스펙큘러/글로스 맵은 glossiness 경로로 러프니스를 근사한다.

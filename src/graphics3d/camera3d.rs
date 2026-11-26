@@ -1,5 +1,5 @@
 //==============================================================================
-//! 3D 카메라. (vanilla.js experimental/graphics/camera3d.js 의 Camera3D)
+//! 3D 카메라. (vanilla.js graphics3d/camera3d.js 의 Camera3D)
 //! - 원근이나 직교 투영과 보는 자리를 들고, 보기와 투영 행렬을 바뀔 때만 다시 셈한다.
 //! - 좌표는 엔진 Matrix4 와 같은 y 가 위인 오른손 좌표다. 카메라는 -Z 를 본다. (create_look_at, create_perspective)
 //! - 원근: set_perspective(시야각, 가까운 거리, 먼 거리), 직교: set_orthographic(보이는 높이, 가까운 거리, 먼 거리).

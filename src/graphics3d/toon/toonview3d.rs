@@ -1,5 +1,5 @@
 //==============================================================================
-// 툰 3D 를 노드 사각형 안에 그리는 컴포넌트. (vanilla.js experimental/graphics/toon/toonview3d.js 의 ToonView3D)
+// 툰 3D 를 노드 사각형 안에 그리는 컴포넌트. (vanilla.js graphics3d/toon/toonview3d.js 의 ToonView3D)
 // - draw 에서: 노드의 내용 영역(0, 0, 내용 크기)을 지금 변환으로 드로잉 버퍼 픽셀의 사각형으로 옮기고(돌았으면 감싸는 사각형),
 //   Graphic::run_external_pass 로 앞의 2D 묶음을 내보내고 상태 기억을 잊고 깊이를 비운 뒤, 렌더러의 화면 사각형(set_screen_rect)을 걸고 그리기 함수를 부른다.
 //   끝나면 화면 사각형을 풀고 restore_render_state 로 2D 상태를 되돌린다. (그리기 함수가 패닉해도 둘 다 되돌린다)

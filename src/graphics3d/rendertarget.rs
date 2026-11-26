@@ -1,5 +1,5 @@
 //==============================================================================
-//! 렌더 타겟. (원본 experimental/graphics/rendertarget.js)
+//! 렌더 타겟. (원본 graphics3d/rendertarget.js)
 //! - 오프스크린 프레임버퍼 + 컬러 텍스처 [+ 깊이 렌더버퍼 / 깊이 텍스처]. 포스트 프로세싱 체인의 기본 단위다.
 //! - 옵션으로 다중 컬러 어태치먼트(MRT) / 반정밀 실수 컬러(HDR) / 깊이 텍스처 / 멀티샘플 / 깊이 비트를 켤 수 있다.
 //!   원본 옵션 객체 { colorAttachmentCount, useFloatColor, useDepthTexture, sampleCount, depthBits } 는 RenderTargetOptions 로 옮겼다.

@@ -1,5 +1,5 @@
 //==============================================================================
-// 점토 모형(GLB) 읽기와 뼈대 자세. (vanilla.js experimental/graphics/toon/glbmeshreader.js)
+// 점토 모형(GLB) 읽기와 뼈대 자세. (vanilla.js graphics3d/toon/glbmeshreader.js)
 // - 재질 색으로 칠하는 모형을 툰 3D 의 MeshBuilder 꼭짓점 배열로 읽는다. 텍스처 좌표와 재질 텍스처가 있으면 그것도 읽는다. (외계행성 광부 키우기에서 왔다)
 //   - 부품 하나가 노드 하나이고, 노드의 메시는 색마다 프리미티브 하나다. 꼭짓점은 위치와 노멀, 뼈대가 있으면 본 번호와 무게다.
 //   - 재질의 baseColorFactor 는 선형 색이라 sRGB 로 바꿔 담고, emissiveFactor 가 있으면 빛남으로 담는다. (emissiveTexture 가 있으면 빛남은 재질 범위로만 넘긴다)
