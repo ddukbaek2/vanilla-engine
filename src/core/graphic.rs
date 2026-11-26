@@ -2648,70 +2648,17 @@ impl Graphic {
 			return;
 		}
 
+		// 정점 버퍼가 차면 쌓인 것을 그리고 비운 뒤 이어 적는다. (점이 많아도 선분을 버리지 않는다)
 		let half_size = size / 2.0;
-		let segment_count = if is_closed {
-			positions.len()
-		}
-		else {
-			positions.len() - 1
-		};
-		let mut offset = 0;
-		let mut vertex_count = 0;
-		for segment_index in 0..segment_count {
-			let start_position = positions[segment_index];
-			let end_position = positions[(segment_index + 1) % positions.len()];
-			let delta_x = end_position.x - start_position.x;
-			let delta_y = end_position.y - start_position.y;
-			let length = (delta_x * delta_x + delta_y * delta_y).sqrt();
-			if length <= 0.0 {
-				continue;
-			}
-
-			let direction_x = delta_x / length;
-			let direction_y = delta_y / length;
-			let normal_x = -direction_y * half_size;
-			let normal_y = direction_x * half_size;
-
-			// 내부 조인트 이음새 메움. (열린 선의 양 끝은 연장하지 않음)
-			let has_start_joint = is_closed || segment_index > 0;
-			let has_end_joint = is_closed || segment_index < segment_count - 1;
-			let start_extension = if has_start_joint {
-				half_size
-			}
-			else {
-				0.0
-			};
-			let end_extension = if has_end_joint {
-				half_size
-			}
-			else {
-				0.0
-			};
-			let extended_start_x = start_position.x - direction_x * start_extension;
-			let extended_start_y = start_position.y - direction_y * start_extension;
-			let extended_end_x = end_position.x + direction_x * end_extension;
-			let extended_end_y = end_position.y + direction_y * end_extension;
-
-			// 쿼드(삼각형 2개) 기록.
-			if (vertex_count + 6) * FLOATS_PER_VERTEX > self.vertex_data.len() {
-				break;
-			}
-			let segment_values: [f32; 24] = [
-				extended_start_x + normal_x, extended_start_y + normal_y, 0.5, 0.5,
-				extended_end_x + normal_x, extended_end_y + normal_y, 0.5, 0.5,
-				extended_start_x - normal_x, extended_start_y - normal_y, 0.5, 0.5,
-				extended_start_x - normal_x, extended_start_y - normal_y, 0.5, 0.5,
-				extended_end_x + normal_x, extended_end_y + normal_y, 0.5, 0.5,
-				extended_end_x - normal_x, extended_end_y - normal_y, 0.5, 0.5,
-			];
-			self.vertex_data[offset..offset + 24].copy_from_slice(&segment_values);
-			offset += 24;
-			vertex_count += 6;
-		}
-
+		let segment_count = read_polyline_segment_count(positions.len(), is_closed);
 		let stroke_color = self.get_stroke_color();
 		let white_texture = self.get_white_texture();
-		self.draw_vertices(vertex_count, white_texture, stroke_color);
+		let mut segment_index = 0;
+		while segment_index < segment_count {
+			let (vertex_count, next_segment_index) = write_polyline_vertices(&mut self.vertex_data, positions, half_size, is_closed, segment_index);
+			self.draw_vertices(vertex_count, white_texture, stroke_color);
+			segment_index = next_segment_index;
+		}
 	}
 
 	//==============================================================================
@@ -2779,18 +2726,22 @@ impl Graphic {
 
 	//==============================================================================
 	/// 볼록 다각형 채움 출력. (첫 점 기준 팬 분할)
+	/// - 정점 버퍼가 차면 쌓인 삼각형을 그리고 비운 뒤 이어 적는다. (점이 많아도 삼각형을 버리지 않는다)
 	//==============================================================================
 	pub fn draw_convex_polygon(&mut self, positions: &[Vector2], color: Color) {
 		if positions.len() < 3 {
 			return;
 		}
 
+		let white_texture = self.get_white_texture();
 		let mut offset = 0;
 		let mut vertex_count = 0;
 		let first_position = positions[0];
 		for position_index in 1..positions.len() - 1 {
 			if (vertex_count + 3) * FLOATS_PER_VERTEX > self.vertex_data.len() {
-				break;
+				self.draw_vertices(vertex_count, white_texture, color);
+				offset = 0;
+				vertex_count = 0;
 			}
 			let second_position = positions[position_index];
 			let third_position = positions[position_index + 1];
@@ -2804,7 +2755,6 @@ impl Graphic {
 			vertex_count += 3;
 		}
 
-		let white_texture = self.get_white_texture();
 		self.draw_vertices(vertex_count, white_texture, color);
 	}
 
@@ -3793,6 +3743,105 @@ pub(crate) fn read_vertex_array_binding(gl: &glow::Context) -> Option<GlVertexAr
 }
 
 //==============================================================================
+/// 폴리라인의 선분 수. (닫힌 선은 마지막 점과 첫 점을 잇는 선분 하나가 더 있다)
+///
+/// # 인자
+/// - `position_count`: 점 수.
+/// - `is_closed`: 닫힌 선인지.
+///
+/// # 돌려줌
+/// 선분 수. (점이 2 개보다 적으면 0)
+//==============================================================================
+fn read_polyline_segment_count(position_count: usize, is_closed: bool) -> usize {
+	if position_count < 2 {
+		return 0;
+	}
+	if is_closed {
+		position_count
+	}
+	else {
+		position_count - 1
+	}
+}
+
+//==============================================================================
+/// 폴리라인의 선분을 정점 버퍼에 들어가는 만큼 적는다. (세그먼트별 두께 확장 쿼드, draw_polyline 이 버퍼가 찰 때마다 그리고 이어 부른다)
+/// - 내부 조인트는 반두께 연장으로 이음새를 메운다. 길이가 0 인 선분은 건너뛴다.
+///
+/// # 인자
+/// - `vertex_data`: 적을 정점 버퍼. (정점마다 x, y, u, v, 처음부터 적는다)
+/// - `positions`: 선이 지날 점 목록.
+/// - `half_size`: 선 굵기의 반.
+/// - `is_closed`: 참이면 마지막 점과 첫 점을 잇는다.
+/// - `first_segment_index`: 이번에 처음 적을 선분 번호.
+///
+/// # 돌려줌
+/// (적은 정점 수, 다음에 이어 적을 선분 번호). 다음 선분 번호가 선분 수와 같으면 다 적은 것이다.
+//==============================================================================
+fn write_polyline_vertices(vertex_data: &mut [f32], positions: &[Vector2], half_size: f32, is_closed: bool, first_segment_index: usize) -> (usize, usize) {
+	let segment_count = read_polyline_segment_count(positions.len(), is_closed);
+	let mut offset = 0;
+	let mut vertex_count = 0;
+	let mut segment_index = first_segment_index;
+	while segment_index < segment_count {
+		let start_position = positions[segment_index];
+		let end_position = positions[(segment_index + 1) % positions.len()];
+		let delta_x = end_position.x - start_position.x;
+		let delta_y = end_position.y - start_position.y;
+		let length = (delta_x * delta_x + delta_y * delta_y).sqrt();
+		if length <= 0.0 {
+			segment_index += 1;
+			continue;
+		}
+
+		// 쿼드(삼각형 2개)가 들어갈 자리가 없으면 여기까지.
+		if (vertex_count + 6) * FLOATS_PER_VERTEX > vertex_data.len() {
+			break;
+		}
+
+		let direction_x = delta_x / length;
+		let direction_y = delta_y / length;
+		let normal_x = -direction_y * half_size;
+		let normal_y = direction_x * half_size;
+
+		// 내부 조인트 이음새 메움. (열린 선의 양 끝은 연장하지 않음)
+		let has_start_joint = is_closed || segment_index > 0;
+		let has_end_joint = is_closed || segment_index < segment_count - 1;
+		let start_extension = if has_start_joint {
+			half_size
+		}
+		else {
+			0.0
+		};
+		let end_extension = if has_end_joint {
+			half_size
+		}
+		else {
+			0.0
+		};
+		let extended_start_x = start_position.x - direction_x * start_extension;
+		let extended_start_y = start_position.y - direction_y * start_extension;
+		let extended_end_x = end_position.x + direction_x * end_extension;
+		let extended_end_y = end_position.y + direction_y * end_extension;
+
+		// 쿼드(삼각형 2개) 기록.
+		let segment_values: [f32; 24] = [
+			extended_start_x + normal_x, extended_start_y + normal_y, 0.5, 0.5,
+			extended_end_x + normal_x, extended_end_y + normal_y, 0.5, 0.5,
+			extended_start_x - normal_x, extended_start_y - normal_y, 0.5, 0.5,
+			extended_start_x - normal_x, extended_start_y - normal_y, 0.5, 0.5,
+			extended_end_x + normal_x, extended_end_y + normal_y, 0.5, 0.5,
+			extended_end_x - normal_x, extended_end_y - normal_y, 0.5, 0.5,
+		];
+		vertex_data[offset..offset + 24].copy_from_slice(&segment_values);
+		offset += 24;
+		vertex_count += 6;
+		segment_index += 1;
+	}
+	(vertex_count, segment_index)
+}
+
+//==============================================================================
 /// 정점들이 덮는 영역을 떠 올 영역으로. (원본 measureBackdropRect)
 /// - 변환으로 옮긴 경계 상자를 픽셀 경계로 넓히고 화면으로 자른 GL 픽셀(왼쪽 아래 원점) 영역이다. 화면에 걸치지 않으면 None.
 //==============================================================================
@@ -4133,5 +4182,43 @@ mod tests {
 		assert!(!left_rect.is_overlapping(&touching_rect));
 		assert!(left_rect.is_overlapping(&overlapping_rect));
 		assert_eq!(left_rect.union(&overlapping_rect), BackdropRect { x: 0, y: 0, width: 13, height: 13 });
+	}
+
+	//==============================================================================
+	/// 폴리라인 정점이 버퍼보다 많아도 선분을 버리지 않고 이어 적는지. (버퍼가 찰 때마다 그 자리에서 끊고 다음 선분부터 잇는다)
+	//==============================================================================
+	#[test]
+	fn polyline_keeps_segments_past_vertex_capacity() {
+		// 점 10 개, 열린 선은 선분 9 개. 버퍼는 쿼드 4 개(정점 24 개)만 들어간다.
+		let mut positions = Vec::new();
+		for position_index in 0..10 {
+			positions.push(Vector2::create(position_index as f32 * 10.0, 0.0));
+		}
+		let segment_count = read_polyline_segment_count(positions.len(), false);
+		assert_eq!(segment_count, 9);
+		let mut vertex_data = vec![0.0f32; 24 * FLOATS_PER_VERTEX];
+		let mut written_vertex_count_list = Vec::new();
+		let mut last_end_x = 0.0;
+		let mut segment_index = 0;
+		while segment_index < segment_count {
+			let (vertex_count, next_segment_index) = write_polyline_vertices(&mut vertex_data, &positions, 1.0, false, segment_index);
+			assert!(next_segment_index > segment_index);
+			written_vertex_count_list.push(vertex_count);
+			// 이번에 적은 마지막 쿼드의 끝 x. (쿼드의 다섯째 정점이 끝 쪽 + 노멀)
+			last_end_x = vertex_data[(vertex_count - 2) * FLOATS_PER_VERTEX];
+			segment_index = next_segment_index;
+		}
+		assert_eq!(written_vertex_count_list, vec![24, 24, 6]);
+		assert_eq!(written_vertex_count_list.iter().sum::<usize>(), segment_count * 6);
+		// 마지막 선분은 마지막 점(90, 0)에서 끝난다. (열린 선의 끝은 늘이지 않는다)
+		assert_eq!(last_end_x, 90.0);
+
+		// 닫힌 선은 마지막 점과 첫 점을 잇는 선분이 하나 더 있고, 길이 0 인 선분은 건너뛴다.
+		let closed_positions = [Vector2::create(0.0, 0.0), Vector2::create(0.0, 0.0), Vector2::create(10.0, 0.0), Vector2::create(10.0, 10.0)];
+		let closed_segment_count = read_polyline_segment_count(closed_positions.len(), true);
+		assert_eq!(closed_segment_count, 4);
+		let (closed_vertex_count, closed_next_segment_index) = write_polyline_vertices(&mut vertex_data, &closed_positions, 1.0, true, 0);
+		assert_eq!(closed_vertex_count, 3 * 6);
+		assert_eq!(closed_next_segment_index, closed_segment_count);
 	}
 }

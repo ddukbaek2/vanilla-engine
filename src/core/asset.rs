@@ -56,6 +56,8 @@ pub struct AssetLoadHandle {
 	content_type: Rc<RefCell<Option<String>>>,
 	/// 그림으로 풀어야 끝나는지. (ImageAsset 이 건다, await 가 다 받은 뒤 풀어 보고 풀지 못하면 실패로 끝낸다)
 	is_image_decode_requested: Rc<Cell<bool>>,
+	/// JSON 으로 풀려야 끝나는지. (JsonAsset 이 건다, await 가 다 받은 뒤 JSON 인지 보고 아니면 실패로 끝낸다)
+	is_json_parse_requested: Rc<Cell<bool>>,
 }
 
 impl std::fmt::Debug for AssetLoadHandle {
@@ -78,6 +80,7 @@ impl AssetLoadHandle {
 			decoded_image: Rc::new(RefCell::new(None)),
 			content_type: Rc::new(RefCell::new(None)),
 			is_image_decode_requested: Rc::new(Cell::new(false)),
+			is_json_parse_requested: Rc::new(Cell::new(false)),
 		}
 	}
 
@@ -91,6 +94,7 @@ impl AssetLoadHandle {
 			decoded_image: Rc::new(RefCell::new(None)),
 			content_type: Rc::new(RefCell::new(None)),
 			is_image_decode_requested: Rc::new(Cell::new(false)),
+			is_json_parse_requested: Rc::new(Cell::new(false)),
 		}
 	}
 
@@ -187,6 +191,13 @@ impl AssetLoadHandle {
 	}
 
 	//==============================================================================
+	/// JSON 으로 풀려야 끝나는 손잡이로 하기. (JsonAsset 이 부른다, 원본 JsonAsset.load 처럼 받기나 해석이 실패하면 await 가 실패로 끝난다)
+	//==============================================================================
+	pub fn request_json_parse(&self) {
+		self.is_json_parse_requested.set(true);
+	}
+
+	//==============================================================================
 	/// 읽기 끝냄. (읽는 쪽이 부른다)
 	//==============================================================================
 	pub fn finish(&self, result: Result<Vec<u8>, String>) {
@@ -256,6 +267,12 @@ impl Future for AssetLoadFuture {
 							load_handle.finish(Err(error_message.clone()));
 							return Poll::Ready(Err(error_message));
 						}
+					}
+				}
+				// JSON 손잡이: 풀리지 않는 JSON 은 받기가 끝나도 실패다. (원본 JsonAsset.load 의 거부, 받은 글은 원본처럼 남긴다)
+				if load_handle.is_json_parse_requested.get() {
+					if let Err(error) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+						return Poll::Ready(Err(format!("Error loading json: {} ({})", load_handle.get_asset_path(), error)));
 					}
 				}
 				Poll::Ready(Ok(bytes))

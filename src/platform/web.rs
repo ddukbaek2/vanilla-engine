@@ -10,10 +10,13 @@
 //!   문서 resume 과 pageshow(persisted) 면 on_page_process_restored 를 부른다. (원본 setupAllDocumentEvents)
 //! - 최대 FPS 는 원본처럼 세기 시작한 뒤 처리한 프레임 수로 차례를 정한다. (platform/framelimiter.rs, 90 Hz 에서 60 FPS 도 평균 60)
 //! - 캔버스의 webglcontextlost, webglcontextrestored 에서 원본 Graphic 처럼 묶음 기억을 잊는다.
+//! - 키, 마우스, 손가락, 페이지 사건은 프레임 콜백 안에서 다시 들어와도(게임 코드의 dispatchEvent, focus() 같은 것) 겹쳐 빌리지 않는다.
+//!   바로 빌릴 수 있으면 그 자리에서 처리하고, 못 빌리면 줄에 쌓았다가 프레임 콜백 끝에 온 차례대로 처리한다. (platform/eventqueue.rs)
 //! - exit_application: 원본처럼 Capacitor 의 App.exitApp, 없으면 window.close 를 시도한다.
 //==============================================================================
 use crate::core::asset::AssetLoadHandle;
 use crate::core::engine::{EngineRunner, PageEvent};
+use crate::platform::eventqueue::EventQueue;
 use crate::platform::framelimiter::FrameLimiter;
 use crate::core::graphic::Graphic;
 use crate::core::inputmanager::{InputDevice, MouseButton};
@@ -179,6 +182,17 @@ thread_local! {
 	static SAFE_AREA_PROBE_ELEMENT: RefCell<Option<web_sys::HtmlElement>> = const { RefCell::new(None) };
 	/// 엔진의 WebGL2 컨텍스트. (glow 가 감싼 것과 같은 컨텍스트, is_gl_binding_present 가 묶인 것을 읽는다)
 	static ENGINE_GL_CONTEXT: RefCell<Option<web_sys::WebGl2RenderingContext>> = const { RefCell::new(None) };
+	/// 웹 실행자를 빌리지 못해(프레임 콜백 안) 쌓아 둔 사건. (프레임 콜백 끝에 처리한다)
+	static WEB_EVENT_QUEUE: EventQueue<WebApplication> = EventQueue::new();
+}
+
+//==============================================================================
+/// 사건을 웹 실행자에 보내기. (바로 빌릴 수 있으면 쌓인 것부터 처리하고 그 자리에서, 프레임 콜백 안이라 못 빌리면 줄에 쌓는다)
+//==============================================================================
+fn dispatch_web_event(web_application_cell: &RefCell<WebApplication>, handler: impl FnOnce(&mut WebApplication) + 'static) {
+	WEB_EVENT_QUEUE.with(|web_event_queue| {
+		web_event_queue.dispatch(web_application_cell, handler);
+	});
 }
 
 //==============================================================================
@@ -486,6 +500,10 @@ pub fn run(engine_runner: EngineRunner) -> Result<(), String> {
 			web_application.engine_runner.update_engine();
 			textinput::apply_frame(&web_application.engine_runner.engine);
 		}
+		// 프레임 안에서 들어와 쌓인 사건을 온 차례대로 처리한다. (프레임 끝의 입력 정리 뒤라 다음 프레임에 방금 누름으로 보인다)
+		WEB_EVENT_QUEUE.with(|web_event_queue| {
+			web_event_queue.drain(&mut web_application);
+		});
 		if web_application.engine_runner.engine.is_exit_requested() {
 			return;
 		}
@@ -515,31 +533,35 @@ fn add_keyboard_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) ->
 	let window = web_sys::window().ok_or_else(|| String::from("window 없음"))?;
 	let web_application_cell_for_key_down = web_application_cell.clone();
 	let key_down_callback: Closure<dyn FnMut(web_sys::KeyboardEvent)> = Closure::new(move |keyboard_event: web_sys::KeyboardEvent| {
-		let key_code = keyboard_event.code();
-		let mut web_application = web_application_cell_for_key_down.borrow_mut();
-		let input_manager = web_application.engine_runner.engine.get_input_manager_mut();
-		// 막을 키의 브라우저 기본 동작. (되풀이도 막는다, 글자 입력칸에 쓰는 중이면 그대로)
-		if input_manager.is_key_prevented(&key_code) && !input_manager.is_typing_in_text_field() {
-			keyboard_event.prevent_default();
-		}
-		if keyboard_event.repeat() {
-			return;
-		}
-		input_manager.push_key(&key_code);
-		input_manager.set_last_input_device(InputDevice::Keyboard);
+		dispatch_web_event(&web_application_cell_for_key_down, move |web_application| {
+			let key_code = keyboard_event.code();
+			let input_manager = web_application.engine_runner.engine.get_input_manager_mut();
+			// 막을 키의 브라우저 기본 동작. (되풀이도 막는다, 글자 입력칸에 쓰는 중이면 그대로)
+			if input_manager.is_key_prevented(&key_code) && !input_manager.is_typing_in_text_field() {
+				keyboard_event.prevent_default();
+			}
+			if keyboard_event.repeat() {
+				return;
+			}
+			input_manager.push_key(&key_code);
+			input_manager.set_last_input_device(InputDevice::Keyboard);
+		});
 	});
 	let web_application_cell_for_key_up = web_application_cell.clone();
 	let key_up_callback: Closure<dyn FnMut(web_sys::KeyboardEvent)> = Closure::new(move |keyboard_event: web_sys::KeyboardEvent| {
-		let key_code = keyboard_event.code();
-		web_application_cell_for_key_up.borrow_mut().engine_runner.engine.get_input_manager_mut().pop_key(&key_code);
+		dispatch_web_event(&web_application_cell_for_key_up, move |web_application| {
+			let key_code = keyboard_event.code();
+			web_application.engine_runner.engine.get_input_manager_mut().pop_key(&key_code);
+		});
 	});
 	let web_application_cell_for_blur = web_application_cell.clone();
 	let blur_callback: Closure<dyn FnMut()> = Closure::new(move || {
-		// 원본처럼 창이 포커스를 잃으면 누르던 것을 뗀 것으로 넘긴다.
-		let mut web_application = web_application_cell_for_blur.borrow_mut();
-		let input_manager = web_application.engine_runner.engine.get_input_manager_mut();
-		input_manager.clear();
-		input_manager.set_touch_released(true);
+		// 원본처럼 창이 포커스를 잃으면 키, 마우스 단추, 손가락 눌림을 모두 놓고 터치는 뗀 것으로 넘긴다. (keyup, mouseup 이 오지 않는다)
+		dispatch_web_event(&web_application_cell_for_blur, |web_application| {
+			let input_manager = web_application.engine_runner.engine.get_input_manager_mut();
+			input_manager.clear();
+			input_manager.set_touch_released(true);
+		});
 	});
 	window.add_event_listener_with_callback("keydown", key_down_callback.as_ref().unchecked_ref()).map_err(describe_js_error)?;
 	window.add_event_listener_with_callback("keyup", key_up_callback.as_ref().unchecked_ref()).map_err(describe_js_error)?;
@@ -550,6 +572,11 @@ fn add_keyboard_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) ->
 	Ok(())
 }
 
+/// 손가락을 뗀 바로 뒤 브라우저가 흉내 내 보내는 마우스 사건으로 보는 시간. (밀리초, 원본 engine.js 의 800)
+const COMPATIBILITY_MOUSE_MILLISECONDS: f64 = 800.0;
+/// 마우스가 이만큼(CSS 픽셀) 넘게 움직여야 마지막 장치를 마우스로 본다.
+const MOUSE_DEVICE_MOVE_THRESHOLD: i32 = 6;
+
 //==============================================================================
 /// 마우스와 손가락 입력. (원본 engine.js 의 mousedown, mousemove, mouseup, wheel, touchstart, touchmove, touchend, touchcancel)
 /// - 마우스 단추(원본처럼 어느 것이든, set_touch_from_left_button_only 면 왼쪽만)와 첫 손가락을 엔진의 터치로 넘기고, 단추 셋과 손가락 목록, 휠의 Ctrl 을 입력 매니저에 적는다.
@@ -557,12 +584,8 @@ fn add_keyboard_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) ->
 ///   단추와 자리, 터치는 원본처럼 그대로 넘긴다. (손가락 사건의 기본 동작을 막아 브라우저는 흉내 낸 마우스 사건을 보내지 않는다)
 ///   CameraGestures 처럼 자기 문턱(set_thresholds 의 넷째 인자)으로 거르는 쪽이 원본처럼 사건을 모두 보고 거르게 하려는 것이다.
 /// - 캔버스 위의 손가락은 기본 동작(스크롤, 확대)을 막는다. 오른쪽 클릭 메뉴는 set_context_menu_prevented 가 참(처음)이면 막는다.
-/// - 프레임 안에서 사건이 바로 불려도 겹쳐 빌리지 않게 try_borrow_mut 로 본다. (못 빌리면 그 사건은 버린다)
+/// - 프레임 안에서 사건이 바로 불려도 겹쳐 빌리지 않게 dispatch_web_event 로 보낸다. (못 빌리면 줄에 쌓았다가 프레임 끝에 처리한다)
 //==============================================================================
-const COMPATIBILITY_MOUSE_MILLISECONDS: f64 = 800.0;
-/// 마우스가 이만큼(CSS 픽셀) 넘게 움직여야 마지막 장치를 마우스로 본다.
-const MOUSE_DEVICE_MOVE_THRESHOLD: i32 = 6;
-
 fn add_pointer_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> Result<(), String> {
 	let window = web_sys::window().ok_or_else(|| String::from("window 없음"))?;
 	let canvas = web_application_cell.borrow().engine_runner.engine.platform_window.clone().ok_or_else(|| String::from("캔버스 없음"))?;
@@ -573,7 +596,7 @@ fn add_pointer_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> 
 	let last_touch_time_for_mouse_down = last_touch_time.clone();
 	let mouse_down_callback: Closure<dyn FnMut(web_sys::MouseEvent)> = Closure::new(move |mouse_event: web_sys::MouseEvent| {
 		let is_compatibility_mouse_event = is_compatibility_mouse(last_touch_time_for_mouse_down.get());
-		if let Ok(mut web_application) = web_application_cell_for_mouse_down.try_borrow_mut() {
+		dispatch_web_event(&web_application_cell_for_mouse_down, move |web_application| {
 			web_application.update_pointer_position(mouse_event.client_x() as f64, mouse_event.client_y() as f64);
 			let input_manager = web_application.engine_runner.engine.get_input_manager_mut();
 			if !is_compatibility_mouse_event {
@@ -592,7 +615,7 @@ fn add_pointer_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> 
 			if mouse_button == Some(MouseButton::Middle) {
 				mouse_event.prevent_default();
 			}
-		}
+		});
 	});
 
 	// 마우스 움직임과 뗌. (캔버스 밖으로 끌고 나가도 받게 창에 단다)
@@ -600,7 +623,7 @@ fn add_pointer_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> 
 	let last_touch_time_for_mouse_move = last_touch_time.clone();
 	let mouse_move_callback: Closure<dyn FnMut(web_sys::MouseEvent)> = Closure::new(move |mouse_event: web_sys::MouseEvent| {
 		let is_compatibility_mouse_event = is_compatibility_mouse(last_touch_time_for_mouse_move.get());
-		if let Ok(mut web_application) = web_application_cell_for_mouse_move.try_borrow_mut() {
+		dispatch_web_event(&web_application_cell_for_mouse_move, move |web_application| {
 			web_application.update_pointer_position(mouse_event.client_x() as f64, mouse_event.client_y() as f64);
 			if is_compatibility_mouse_event {
 				return;
@@ -612,11 +635,11 @@ fn add_pointer_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> 
 			if movement >= MOUSE_DEVICE_MOVE_THRESHOLD {
 				input_manager.set_last_input_device(InputDevice::Mouse);
 			}
-		}
+		});
 	});
 	let web_application_cell_for_mouse_up = web_application_cell.clone();
 	let mouse_up_callback: Closure<dyn FnMut(web_sys::MouseEvent)> = Closure::new(move |mouse_event: web_sys::MouseEvent| {
-		if let Ok(mut web_application) = web_application_cell_for_mouse_up.try_borrow_mut() {
+		dispatch_web_event(&web_application_cell_for_mouse_up, move |web_application| {
 			web_application.update_pointer_position(mouse_event.client_x() as f64, mouse_event.client_y() as f64);
 			let input_manager = web_application.engine_runner.engine.get_input_manager_mut();
 			let mouse_button = read_mouse_button(mouse_event.button());
@@ -629,20 +652,20 @@ fn add_pointer_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> 
 				input_manager.set_touch_released(true);
 				input_manager.set_touch_down(false);
 			}
-		}
+		});
 	});
 
 	// 휠. (Ctrl 을 함께 눌렀는지 적고, 페이지가 스크롤되지 않게 막는다)
 	let web_application_cell_for_wheel = web_application_cell.clone();
 	let wheel_callback: Closure<dyn FnMut(web_sys::WheelEvent)> = Closure::new(move |wheel_event: web_sys::WheelEvent| {
 		wheel_event.prevent_default();
-		if let Ok(mut web_application) = web_application_cell_for_wheel.try_borrow_mut() {
+		dispatch_web_event(&web_application_cell_for_wheel, move |web_application| {
 			web_application.update_pointer_position(wheel_event.client_x() as f64, wheel_event.client_y() as f64);
 			let input_manager = web_application.engine_runner.engine.get_input_manager_mut();
 			input_manager.add_wheel_delta(wheel_event.delta_x() as f32, wheel_event.delta_y() as f32);
 			input_manager.set_wheel_with_ctrl(wheel_event.ctrl_key());
 			input_manager.set_last_input_device(InputDevice::Mouse);
-		}
+		});
 	});
 
 	// 손가락. (닿은 손가락 목록을 통째로 새로 쓰고, 첫 손가락의 누름과 뗌을 터치로 넘긴다)
@@ -652,9 +675,9 @@ fn add_pointer_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> 
 		touch_event.prevent_default();
 		let now = read_now_milliseconds();
 		last_touch_time_for_touch.set(now);
-		if let Ok(mut web_application) = web_application_cell_for_touch.try_borrow_mut() {
+		dispatch_web_event(&web_application_cell_for_touch, move |web_application| {
 			web_application.handle_touch_event(&touch_event);
-		}
+		});
 	});
 
 	// 오른쪽 클릭 메뉴 막기. (막게 해 두었을 때)
@@ -781,7 +804,7 @@ fn add_audio_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> Re
 
 //==============================================================================
 /// 페이지 이벤트와 복원. (원본 setupAllDocumentEvents 의 resume, pageshow, visibilitychange 와 SoundSystem 의 blur, focus, pointerdown)
-/// - 엔진을 고쳐 써야 해서 try_borrow_mut 로 본다. (이 이벤트들은 프레임 콜백 안에서 겹쳐 불리지 않는다)
+/// - 엔진을 고쳐 써야 해서 dispatch_web_event 로 보낸다. (프레임 콜백 안에서 겹쳐 불려도 줄에 쌓았다가 프레임 끝에 처리한다)
 //==============================================================================
 fn add_page_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> Result<(), String> {
 	let window = web_sys::window().ok_or_else(|| String::from("window 없음"))?;
@@ -799,7 +822,7 @@ fn add_page_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> Res
 			.and_then(|window| window.document())
 			.map(|document| document.visibility_state() == web_sys::VisibilityState::Visible)
 			.unwrap_or(false);
-		if let Ok(mut web_application) = web_application_cell_for_visibility.try_borrow_mut() {
+		dispatch_web_event(&web_application_cell_for_visibility, move |web_application| {
 			if is_visible {
 				web_application.engine_runner.engine.dispatch_page_event(PageEvent::Visible);
 				web_application.engine_runner.notify_page_visibility_restored();
@@ -807,15 +830,15 @@ fn add_page_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> Res
 			else {
 				web_application.engine_runner.engine.dispatch_page_event(PageEvent::Hidden);
 			}
-		}
+		});
 	});
 
 	// 페이지 프로세스 복원. (Chromium freeze 뒤 문서 resume, bfcache 에서 돌아온 pageshow 의 persisted)
 	let web_application_cell_for_resume = web_application_cell.clone();
 	let resume_callback: Closure<dyn FnMut()> = Closure::new(move || {
-		if let Ok(mut web_application) = web_application_cell_for_resume.try_borrow_mut() {
+		dispatch_web_event(&web_application_cell_for_resume, |web_application| {
 			web_application.engine_runner.notify_page_process_restored();
-		}
+		});
 	});
 	let web_application_cell_for_page_show = web_application_cell.clone();
 	let page_show_callback: Closure<dyn FnMut(web_sys::Event)> = Closure::new(move |event: web_sys::Event| {
@@ -823,9 +846,9 @@ fn add_page_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> Res
 		if !is_persisted {
 			return;
 		}
-		if let Ok(mut web_application) = web_application_cell_for_page_show.try_borrow_mut() {
+		dispatch_web_event(&web_application_cell_for_page_show, |web_application| {
 			web_application.engine_runner.notify_page_process_restored();
-		}
+		});
 	});
 
 	// 창 포커스와 누름.
@@ -833,9 +856,9 @@ fn add_page_listeners(web_application_cell: &Rc<RefCell<WebApplication>>) -> Res
 	for (event_name, page_event) in page_event_callback_list {
 		let web_application_cell_for_page_event = web_application_cell.clone();
 		let page_event_callback: Closure<dyn FnMut()> = Closure::new(move || {
-			if let Ok(mut web_application) = web_application_cell_for_page_event.try_borrow_mut() {
+			dispatch_web_event(&web_application_cell_for_page_event, move |web_application| {
 				web_application.engine_runner.engine.dispatch_page_event(page_event);
-			}
+			});
 		});
 		window.add_event_listener_with_callback(event_name, page_event_callback.as_ref().unchecked_ref()).map_err(describe_js_error)?;
 		page_event_callback.forget();
@@ -1025,6 +1048,12 @@ impl WebApplication {
 	fn create_canvas(&mut self) -> Result<(), String> {
 		let window = web_sys::window().ok_or_else(|| String::from("window 없음"))?;
 		let document = window.document().ok_or_else(|| String::from("document 없음"))?;
+
+		// 이름 설정. (원본처럼 비어 있지 않으면 문서 제목에 쓴다, 데스크탑 창 제목의 기본값이면 페이지의 제목을 그대로 둔다)
+		let title = &self.engine_runner.engine.get_engine_configuration().title;
+		if !title.is_empty() && title != crate::core::engine::DEFAULT_ENGINE_TITLE {
+			document.set_title(title);
+		}
 		let canvas_id = self.engine_runner.engine.get_engine_configuration().canvas_id.clone();
 		let canvas: web_sys::HtmlCanvasElement = match document.get_element_by_id(&canvas_id) {
 			Some(element) => {

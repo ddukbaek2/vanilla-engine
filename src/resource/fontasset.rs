@@ -6,6 +6,7 @@
 //! - 원본 descriptors(굵기, 기울기, 글자 범위)는 FontFaceDescriptors 로 받는다. (load_font_with_descriptors, 굵기만이면 load_font_with_bold)
 //!   같은 이름에 굵기나 기울기가 다른 파일을 여러 개 올리면 글자 캐시가 CSS 처럼 골라 그린다. 진짜 기울인 얼굴이 있으면 가짜 기울임 대신 그것을 쓴다.
 //! - unload 는 원본처럼 그 얼굴을 글꼴 목록에서 뺀다. (document.fonts.delete)
+//! - load: 원본 load(assetPath) 처럼 파일 이름에서 확장자를 뗀 것을 패밀리 이름으로 load_font 한다. ("assets/DOSGothic.woff" 면 "DOSGothic")
 //! - load_font_from_bytes: 이미 가진 글꼴 바이트로 읽는다. (원본 loadFontFromBytes, 서술자의 source_key 가 비면 이름을 쓴다)
 //! - load_font 들은 원본처럼 await 할 수 있는 FontLoadHandle 을 돌려준다. 바이트가 오고 엔진이 글꼴 목록에 올리면 끝난다.
 //!   (원본 await fontFace.load() 와 document.fonts.add 뒤, 그 뒤로 그 이름으로 그린다) 받기나 올리기에 실패하면 까닭으로 끝난다.
@@ -128,6 +129,21 @@ impl FontAsset {
 	}
 
 	//==============================================================================
+	/// 글꼴 읽기 요청. (원본 load(assetPath), 파일 이름에서 확장자를 뗀 것을 패밀리 이름으로 load_font 한다)
+	///
+	/// # 인자
+	/// - `engine`: 글꼴을 받아 등록할 엔진.
+	/// - `asset_path`: 글꼴 파일 경로. ("assets/DOSGothic.woff" 면 패밀리 이름은 "DOSGothic")
+	///
+	/// # 돌려줌
+	/// await 할 수 있는 글꼴 받기 손잡이. (받기나 올리기에 실패하면 까닭으로 끝난다)
+	//==============================================================================
+	pub fn load(&mut self, engine: &mut Engine, asset_path: &str) -> FontLoadHandle {
+		let family = read_font_family_from_path(asset_path);
+		self.load_font(engine, &family, asset_path)
+	}
+
+	//==============================================================================
 	/// 글꼴 읽기 요청. (원본 load_font(family, asset_path). 다 오면 엔진이 family 이름으로 등록한다)
 	//==============================================================================
 	pub fn load_font(&mut self, engine: &mut Engine, family: &str, asset_path: &str) -> FontLoadHandle {
@@ -235,10 +251,55 @@ impl Asset for FontAsset {
 	}
 }
 
+//==============================================================================
+/// 글꼴 파일 경로의 패밀리 이름. (쿼리와 조각을 떼고 마지막 경로 조각에서 확장자를 뗀다, 원본 readFontFamilyFromPath)
+///
+/// # 인자
+/// - `asset_path`: 글꼴 파일 경로.
+///
+/// # 돌려줌
+/// 패밀리 이름.
+//==============================================================================
+fn read_font_family_from_path(asset_path: &str) -> String {
+	let path = asset_path.split('?').next().unwrap_or("");
+	let path = path.split('#').next().unwrap_or("");
+	let file_name = match path.rfind('/') {
+		Some(slash_index) => {
+			&path[slash_index + 1..]
+		}
+		None => {
+			path
+		}
+	};
+	match file_name.rfind('.') {
+		Some(dot_index) if dot_index > 0 => {
+			String::from(&file_name[..dot_index])
+		}
+		_ => {
+			String::from(file_name)
+		}
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
 	use crate::core::engine::EngineConfiguration;
+
+	//==============================================================================
+	/// load 는 파일 이름에서 확장자를 뗀 것을 패밀리 이름으로 글꼴을 읽는다. (원본 load)
+	//==============================================================================
+	#[test]
+	fn load_uses_file_name_as_family() {
+		assert_eq!(read_font_family_from_path("examples/assets/DOSGothic.woff"), "DOSGothic");
+		assert_eq!(read_font_family_from_path("fonts/Pixel.Bold.ttf?v=2#x"), "Pixel.Bold");
+		assert_eq!(read_font_family_from_path("Plain"), "Plain");
+		assert_eq!(read_font_family_from_path(".hidden"), ".hidden");
+		let mut engine = Engine::new(EngineConfiguration::new());
+		let mut font_asset = FontAsset::new();
+		font_asset.load(&mut engine, "examples/assets/DOSGothic.woff");
+		assert_eq!(font_asset.get_family(), "DOSGothic");
+	}
 
 	//==============================================================================
 	/// 바이트로 읽으면 바로 읽힌 것이고, 내리면 읽히지 않은 것이 된다. 두 번째 읽기는 무시한다.

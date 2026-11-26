@@ -41,6 +41,9 @@ pub use desktop::gamepadhaptics::{release_disconnected_gamepad_haptics, vibrate_
 // 최대 FPS 제한의 프레임 세기. (웹이 쓴다, 원본 engine.js 의 프레임 세기)
 #[cfg(any(target_arch = "wasm32", test))]
 pub(crate) mod framelimiter;
+// 다시 들어와도 안전한 사건 보내기. (웹 리스너가 쓴다, 프레임 안에서 온 사건은 쌓았다가 프레임 끝에 처리한다)
+#[cfg(any(target_arch = "wasm32", test))]
+pub(crate) mod eventqueue;
 // 응용 프로그램 종료. (원본 exitApplication, 웹은 Capacitor App.exitApp 이나 window.close, 데스크탑은 이벤트 루프가 끝난다)
 #[cfg(not(target_arch = "wasm32"))]
 pub use desktop::exit_application;

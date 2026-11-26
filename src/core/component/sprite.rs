@@ -19,6 +19,32 @@ use std::rc::Rc;
 pub type SpriteBlendMode = BlendMode;
 
 //==============================================================================
+/// 뒤집어 그릴 때 먼저 옮길 거리. (뒤집은 축은 내용 크기만큼 옮긴 뒤 -1 배로 거울처럼 뒤집어 내용 영역 안에 남긴다)
+///
+/// # 인자
+/// - `content_size`: 노드의 내용 크기.
+/// - `flip`: 뒤집기 배율. (뒤집은 축은 -1, 아니면 1)
+///
+/// # 돌려줌
+/// 옮길 거리. (뒤집은 축은 내용 크기, 아니면 0)
+//==============================================================================
+fn read_flip_offset(content_size: Vector2, flip: Vector2) -> Vector2 {
+	let offset_x = if flip.x < 0.0 {
+		content_size.x
+	}
+	else {
+		0.0
+	};
+	let offset_y = if flip.y < 0.0 {
+		content_size.y
+	}
+	else {
+		0.0
+	};
+	Vector2::create(offset_x, offset_y)
+}
+
+//==============================================================================
 /// 스프라이트 출력 방식.
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -283,10 +309,9 @@ impl Component for Sprite {
 		false
 	}
 
-	/// 뒤집으면 content_size 반대쪽으로 그려질 수 있어서, 뒤집지 않았을 때만 영역 안으로 친다.
+	/// 조각, 나인 슬라이스, 타일 모두 내용 영역 안에 그리고, 뒤집어도 영역 안에서 뒤집으므로 늘 영역 안이다.
 	fn is_drawn_inside_content(&self) -> bool {
-		let flip = self.get_flip();
-		flip.x >= 0.0 && flip.y >= 0.0
+		true
 	}
 
 	fn draw(&mut self, transform: &NodeTransform, graphic: &mut Graphic) {
@@ -306,7 +331,7 @@ impl Component for Sprite {
 		let position = Vector2::zero();
 		let content_size = transform.get_content_size();
 		let flip = self.get_flip();
-		let image_size = content_size.multiply(flip);
+		let is_flipped = flip.x < 0.0 || flip.y < 0.0;
 		let sprite_blend_mode = self.get_sprite_blend_mode();
 		let sprite_draw_mode = self.get_sprite_draw_mode();
 
@@ -330,15 +355,23 @@ impl Component for Sprite {
 			graphic.set_image_tint_color(Some(color));
 		}
 
+		// 뒤집기는 내용 영역의 가운데를 축으로 거울처럼 뒤집는다. (그림은 내용 영역 안에 남고, 조각, 나인 슬라이스, 타일 모두 같다)
+		if is_flipped {
+			let flip_offset = read_flip_offset(content_size, flip);
+			graphic.push_state();
+			graphic.translate(flip_offset.x, flip_offset.y);
+			graphic.scale(flip.x, flip.y);
+		}
+
 		// 드로우 모드에 따라 이미지 출력.
 		match sprite_draw_mode {
 			SpriteDrawMode::Simple => {
 				let image_rect = self.get_image_rect();
-				graphic.draw_image_with_image_rect(&image, position, image_size, image_rect);
+				graphic.draw_image_with_image_rect(&image, position, content_size, image_rect);
 			}
 			SpriteDrawMode::Sliced => {
 				let nine_slice = self.get_nine_slice();
-				graphic.draw_image_with_nine_slice(&image, position, image_size, nine_slice);
+				graphic.draw_image_with_nine_slice(&image, position, content_size, nine_slice);
 			}
 			SpriteDrawMode::Tiled => {
 				let mut image_rect = self.get_image_rect();
@@ -348,8 +381,8 @@ impl Component for Sprite {
 
 				let tile_width = image_rect.get_width().ceil().max(1.0);
 				let tile_height = image_rect.get_height().ceil().max(1.0);
-				let fill_width = image_size.x.abs();
-				let fill_height = image_size.y.abs();
+				let fill_width = content_size.x.abs();
+				let fill_height = content_size.y.abs();
 
 				// 클리핑 후 수동 타일 반복.
 				graphic.push_state();
@@ -369,6 +402,10 @@ impl Component for Sprite {
 			}
 		}
 
+		if is_flipped {
+			graphic.pop_state();
+		}
+
 		// 컬러 틴트 해제.
 		if color.alpha > 0.0 {
 			graphic.set_image_tint_color(None);
@@ -376,5 +413,51 @@ impl Component for Sprite {
 
 		// 블렌드 모드 복원.
 		graphic.set_blend_mode(BlendMode::Normal);
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	//==============================================================================
+	/// 뒤집어도 내용 영역의 두 모서리가 영역 안에 남는지. (옮긴 뒤 뒤집기 배율을 곱한 자리)
+	//==============================================================================
+	#[test]
+	fn flipped_sprite_stays_inside_content() {
+		let content_size = Vector2::create(120.0, 80.0);
+		let flip_list = [Vector2::create(1.0, 1.0), Vector2::create(-1.0, 1.0), Vector2::create(1.0, -1.0), Vector2::create(-1.0, -1.0)];
+		for flip in flip_list {
+			let flip_offset = read_flip_offset(content_size, flip);
+			let corner_list = [Vector2::create(0.0, 0.0), content_size];
+			let mut mapped_x_list = Vec::new();
+			let mut mapped_y_list = Vec::new();
+			for corner in corner_list {
+				let mapped_x = flip_offset.x + corner.x * flip.x;
+				let mapped_y = flip_offset.y + corner.y * flip.y;
+				assert!(mapped_x >= 0.0 && mapped_x <= content_size.x);
+				assert!(mapped_y >= 0.0 && mapped_y <= content_size.y);
+				mapped_x_list.push(mapped_x);
+				mapped_y_list.push(mapped_y);
+			}
+			// 뒤집은 축은 왼쪽 위 모서리가 오른쪽 아래로 간다.
+			if flip.x < 0.0 {
+				assert_eq!(mapped_x_list[0], content_size.x);
+			}
+			if flip.y < 0.0 {
+				assert_eq!(mapped_y_list[0], content_size.y);
+			}
+		}
+	}
+
+	//==============================================================================
+	/// 뒤집어도 내용 영역 안에서만 그린다고 알리는지. (화면 밖 거르기가 내용 영역으로 본다)
+	//==============================================================================
+	#[test]
+	fn flipped_sprite_is_drawn_inside_content() {
+		let mut sprite = Sprite::new();
+		sprite.set_horizontal_flip(true);
+		sprite.set_vertical_flip(true);
+		assert!(sprite.is_drawn_inside_content());
 	}
 }

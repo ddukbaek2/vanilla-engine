@@ -17,6 +17,7 @@
 //   get_audio_context 는 만든 매니저의 AudioContext 를 빌려 준다. (웹 WebAudio AudioContext, 데스크탑 엔진 믹서의 AudioContext, 매니저 없이 만든 플레이어는 None)
 //   set_playback_rate 는 원본에 없던 것을 러스트 판에서 먼저 만들었다. (원본에도 넣었다)
 //   AudioBus::create_audio_player 로 만든 플레이어는 출력 대신 그 버스로 소리를 낸다. (원본 AudioPlayer 의 출력 노드 인자) 버스 손잡이를 하나 들어 버스를 살려 둔다.
+// - get_time 은 원본처럼 재생 중이면 시작 위치에 오디오 컨텍스트 시계로 흐른 시간을 더한 지금 위치다. (웹 currentTime, 데스크탑 믹서 시계)
 //==============================================================================
 use crate::core::audiobus::AudioBus;
 use crate::core::audiomanager::{AudioManager, AudioManagerState};
@@ -38,6 +39,29 @@ pub(crate) fn clamp_volume(volume: f32) -> f32 {
 }
 
 //==============================================================================
+/// 재생 위치 셈. (시작 위치에 흐른 시간을 더하고, 루프면 길이로 되감고 아니면 길이에서 멈춘다, 원본 readPlaybackPosition)
+///
+/// # 인자
+/// - `start_time`: 시작 위치. (초)
+/// - `elapsed_seconds`: 시작한 뒤 재생한 길이. (초, 재생 빠르기를 곱한 것)
+/// - `duration`: 버퍼 길이. (초, 0 이하면 시작 위치에 흐른 시간을 더한 그대로)
+/// - `is_loop`: 루프인지.
+///
+/// # 돌려줌
+/// 재생 위치. (초)
+//==============================================================================
+fn read_playback_position(start_time: f64, elapsed_seconds: f64, duration: f64, is_loop: bool) -> f64 {
+	let position = start_time + elapsed_seconds;
+	if !(duration > 0.0) {
+		return position;
+	}
+	if is_loop {
+		return position % duration;
+	}
+	position.min(duration)
+}
+
+//==============================================================================
 // 오디오 플레이어.
 //==============================================================================
 pub struct AudioPlayer {
@@ -54,6 +78,14 @@ pub struct AudioPlayer {
 	is_loop: bool,
 	// 재생 위치. (초, play() 를 부르면 이 위치부터 재생)
 	time: f64,
+	/// 재생 빠르기. (다음 play 부터, 백엔드에 넘긴 값과 같다)
+	playback_rate: f64,
+	/// 지금 소리를 시작한 오디오 컨텍스트 시각. (초)
+	start_context_time: f64,
+	/// 지금 소리를 시작할 때의 재생 빠르기.
+	start_playback_rate: f64,
+	/// 지금 소리의 버퍼 길이. (초)
+	start_duration: f64,
 }
 
 impl AudioPlayer {
@@ -85,6 +117,10 @@ impl AudioPlayer {
 			volume: 1.0,
 			is_loop: false,
 			time: 0.0,
+			playback_rate: 1.0,
+			start_context_time: 0.0,
+			start_playback_rate: 1.0,
+			start_duration: 0.0,
 		}
 	}
 
@@ -112,6 +148,7 @@ impl AudioPlayer {
 				return;
 			}
 		};
+		let start_duration = audio_asset.get_duration();
 
 		// 재생 중일 경우 정지.
 		self.audio_player_backend.stop_source();
@@ -124,6 +161,23 @@ impl AudioPlayer {
 		// 내부 재생 시작.
 		self.is_loop = is_loop;
 		self.audio_player_backend.start_playback(&audio_buffer, is_loop, self.time);
+		self.start_context_time = self.read_audio_context_time();
+		self.start_playback_rate = self.playback_rate;
+		self.start_duration = start_duration;
+	}
+
+	//==============================================================================
+	/// 오디오 컨텍스트 시계. (초, 만든 매니저가 없으면 0)
+	//==============================================================================
+	fn read_audio_context_time(&self) -> f64 {
+		match &self.audio_manager_state {
+			Some(audio_manager_state) => {
+				audio_backend::get_audio_context_time(&audio_manager_state.borrow())
+			}
+			None => {
+				0.0
+			}
+		}
 	}
 
 	//==============================================================================
@@ -131,6 +185,7 @@ impl AudioPlayer {
 	//==============================================================================
 	pub fn set_playback_rate(&mut self, playback_rate: f64) {
 		let playback_rate = if playback_rate.is_finite() && playback_rate > 0.0 { playback_rate } else { 1.0 };
+		self.playback_rate = playback_rate;
 		self.audio_player_backend.set_playback_rate(playback_rate);
 	}
 
@@ -247,10 +302,16 @@ impl AudioPlayer {
 	}
 
 	//==============================================================================
-	// 재생 위치 반환. (초, set_time 으로 정한 값. 원본처럼 재생 중에 흐르지 않는다)
+	/// 재생 위치 반환. (초, 재생 중이면 흐르는 지금 위치, 멈췄거나 끝났으면 다음 play 가 시작할 set_time 의 위치)
+	/// - 재생 중이면 시작 위치에 오디오 컨텍스트 시계로 흐른 시간과 재생 빠르기를 곱해 더한다. (컨텍스트가 멈춰 있으면 같이 멈춘다)
+	/// - 루프면 길이로 되감고, 아니면 길이에서 멈춘다.
 	//==============================================================================
 	pub fn get_time(&self) -> f64 {
-		self.time
+		if !self.is_playing() || self.audio_manager_state.is_none() {
+			return self.time;
+		}
+		let elapsed_seconds = (self.read_audio_context_time() - self.start_context_time).max(0.0) * self.start_playback_rate;
+		read_playback_position(self.time, elapsed_seconds, self.start_duration, self.is_loop)
 	}
 
 	//==============================================================================
@@ -323,5 +384,18 @@ mod tests {
 		assert_eq!(audio_player.get_duration(), 0.0);
 		audio_player.set_time(1.5);
 		assert_eq!(audio_player.get_time(), 1.5);
+	}
+
+	//==============================================================================
+	/// 재생 위치는 시작 위치에 흐른 시간을 더하고, 루프면 길이로 되감고 아니면 길이에서 멈춘다. (원본 getTime 과 같다)
+	//==============================================================================
+	#[test]
+	fn playback_position_flows_and_wraps() {
+		assert_eq!(read_playback_position(2.0, 0.0, 10.0, false), 2.0);
+		assert_eq!(read_playback_position(2.0, 3.0, 10.0, false), 5.0);
+		assert_eq!(read_playback_position(2.0, 30.0, 10.0, false), 10.0);
+		assert!((read_playback_position(2.0, 9.0, 10.0, true) - 1.0).abs() < 1e-9);
+		assert!((read_playback_position(0.0, 25.0, 10.0, true) - 5.0).abs() < 1e-9);
+		assert_eq!(read_playback_position(1.0, 2.0, 0.0, false), 3.0);
 	}
 }

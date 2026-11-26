@@ -16,11 +16,14 @@
 //!     (Timeline 의 emit 이벤트는 그 자리의 노드 위치를 넣고 낸다)
 //!   ```
 //!   - 정점 색 쿼드는 한 번에 그릴 수 있는 정점 수(Graphic 한도)씩 나눠 그린다. 원본은 배열을 늘려 한 번에 그린다.
+//!   - 서술의 imageDataUrl(파티클 편집기가 고른 그림의 data: 주소)은 데스크탑이 그 자리에서 풀고, 웹은 원본처럼 브라우저가 풀어 다 풀리면 그린다.
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::math;
 use crate::base::seededrandom::SeededRandom;
 use crate::base::vector2::Vector2;
+#[cfg(target_arch = "wasm32")]
+use crate::core::asset::AssetLoadHandle;
 use crate::core::component::{Component, ComponentBase};
 use crate::core::graphic::{BlendMode, Graphic, PARTICLE_FLOATS_PER_VERTEX};
 use crate::core::image::Image;
@@ -99,6 +102,42 @@ struct ParticleBurst {
 }
 
 //==============================================================================
+/// 버스트가 이번 시간 구간에 터질 횟수. (원본 countBurstFires)
+/// - 구간은 (previous_time, current_time] 이다. 재생 뒤 처음이면 [previous_time, current_time] 이라 0 초의 버스트도 든다.
+/// - 루프면 `burst_time + duration * k` (k = 0, 1, 2, ...) 가 모두 버스트 시각이다. (루프 이음매를 건너는 프레임에서도 터지고, 한 프레임에 여러 주기를 건너면 그 수만큼)
+///
+/// # 인자
+/// - `burst_time`: 버스트 시각. (초, 재생 시작부터)
+/// - `previous_time`: 지난 프레임의 재생 경과. (초)
+/// - `current_time`: 이번 재생 경과. (초)
+/// - `is_start_included`: 구간의 시작 시각도 드는지. (재생 뒤 처음)
+/// - `loop_duration`: 루프 주기. (초, 0 이하면 루프가 아니라 한 번)
+///
+/// # 돌려줌
+/// 터질 횟수.
+//==============================================================================
+fn count_burst_fires(burst_time: f32, previous_time: f32, current_time: f32, is_start_included: bool, loop_duration: f32) -> usize {
+	if !(loop_duration > 0.0) {
+		let is_after_start = if is_start_included {
+			burst_time >= previous_time
+		}
+		else {
+			burst_time > previous_time
+		};
+		if is_after_start && burst_time <= current_time {
+			return 1;
+		}
+		return 0;
+	}
+	let mut first_cycle = 0.0;
+	if !is_start_included {
+		first_cycle = (((previous_time - burst_time) / loop_duration).floor() + 1.0).max(0.0);
+	}
+	let last_cycle = ((current_time - burst_time) / loop_duration).floor();
+	(last_cycle - first_cycle + 1.0).max(0.0) as usize
+}
+
+//==============================================================================
 /// 입자 하나. (원본 입자 객체의 칸)
 //==============================================================================
 struct Particle {
@@ -172,6 +211,9 @@ pub struct ParticleSystem {
 	/// 렌더.
 	render_shape: ParticleRenderShape,
 	image: Option<Rc<Image>>,
+	/// 브라우저가 푸는 중인 서술의 그림. (웹, 다 풀리면 그릴 때 image 로 건다)
+	#[cfg(target_arch = "wasm32")]
+	pending_image_load: Option<AssetLoadHandle>,
 	blend_mode: BlendMode,
 	streak_scale: f32,
 	is_world_space: bool,
@@ -228,6 +270,8 @@ impl ParticleSystem {
 			wobble_frequency: 4.0,
 			render_shape: ParticleRenderShape::Circle,
 			image: None,
+			#[cfg(target_arch = "wasm32")]
+			pending_image_load: None,
 			blend_mode: BlendMode::Normal,
 			streak_scale: 0.06,
 			is_world_space: false,
@@ -322,22 +366,21 @@ impl ParticleSystem {
 				}
 			}
 
-			// 버스트. (루프면 duration 주기로 반복)
+			// 버스트. (이번에 지난 시간 구간에 든 버스트 시각마다 터뜨린다, 루프면 duration 주기로 되풀이한 시각마다, 루프 이음매에서도)
+			let loop_duration = if self.is_looping {
+				self.duration
+			}
+			else {
+				0.0
+			};
 			for burst_index in 0..self.burst_list.len() {
 				let burst_time = self.burst_list[burst_index].time;
-				let mut current_time = self.play_elapsed_seconds;
-				let mut previous_time = previous_elapsed;
-				if self.is_looping && self.duration > 0.0 {
-					current_time = self.play_elapsed_seconds % self.duration;
-					previous_time = previous_elapsed % self.duration;
-					if current_time < previous_time {
-						self.burst_list[burst_index].is_fired = false;
-					}
-				}
-				if !self.burst_list[burst_index].is_fired && previous_time <= burst_time && current_time >= burst_time {
+				let is_start_included = previous_elapsed <= 0.0 && !self.burst_list[burst_index].is_fired;
+				let fire_count = count_burst_fires(burst_time, previous_elapsed, self.play_elapsed_seconds, is_start_included, loop_duration);
+				if fire_count > 0 {
 					self.burst_list[burst_index].is_fired = true;
 					let burst_count = self.burst_list[burst_index].count;
-					self.emit(burst_count, None);
+					self.emit(burst_count * fire_count, None);
 				}
 			}
 		}
@@ -598,7 +641,48 @@ impl ParticleSystem {
 	/// 입자 이미지. (렌더 모양이 image 일 때 쓴다)
 	//==============================================================================
 	pub fn set_image(&mut self, image: Option<Rc<Image>>) {
+		#[cfg(target_arch = "wasm32")]
+		{
+			self.pending_image_load = None;
+		}
 		self.image = image;
+	}
+
+	//==============================================================================
+	/// 그림 주소로 입자 이미지 걸기. (서술의 imageDataUrl, 원본 applyDescription 이 Image 의 src 로 넣는 자리)
+	/// - 데스크탑은 data: 주소를 그 자리에서 풀고, 풀지 못하면 그림을 비운다.
+	/// - 웹은 원본처럼 브라우저가 풀게 하고 그동안은 그림 없이 둔다. 다 풀리면 그릴 때 건다.
+	///
+	/// # 인자
+	/// - `image_data_url`: 그림의 data: 주소.
+	//==============================================================================
+	fn load_image_data_url(&mut self, image_data_url: &str) {
+		#[cfg(not(target_arch = "wasm32"))]
+		{
+			let image = crate::base::dataurl::parse_data_url(image_data_url).and_then(|data_url| Image::load_from_memory_with_mime_type(&data_url.bytes, &data_url.mime_type).ok());
+			self.set_image(image);
+		}
+		#[cfg(target_arch = "wasm32")]
+		{
+			self.set_image(None);
+			let load_handle = AssetLoadHandle::create_pending(image_data_url);
+			crate::platform::request_asset_bytes(image_data_url.to_string(), load_handle.clone(), false);
+			self.pending_image_load = Some(load_handle);
+		}
+	}
+
+	//==============================================================================
+	/// 브라우저가 다 푼 서술의 그림 걸기. (웹, 못 풀었으면 그림 없이 둔다)
+	//==============================================================================
+	#[cfg(target_arch = "wasm32")]
+	fn apply_pending_image(&mut self) {
+		let is_finished = self.pending_image_load.as_ref().map(|load_handle| load_handle.is_finished()).unwrap_or(false);
+		if !is_finished {
+			return;
+		}
+		if let Some(load_handle) = self.pending_image_load.take() {
+			self.image = load_handle.get_decoded_image();
+		}
 	}
 
 	//==============================================================================
@@ -673,6 +757,7 @@ impl ParticleSystem {
 	//==============================================================================
 	/// 서술(JSON) 적용. (원본 applyDescription. vfx 애셋 로드, 파티클 편집기 공용. 준 항목만 반영한다. 색은 [r, g, b, a] 배열)
 	/// - attractor 는 { x, y, strength, swirl } 이고 null 이면 끌개를 푼다. wobble 은 [폭, 각속도] 이고 각속도를 빼면 4 다.
+	/// - imageDataUrl 은 파티클 편집기가 고른 그림의 data: 주소다. 그 그림을 입자 이미지로 걸고, 비었거나 null 이면 그림을 비운다.
 	/// - [최소, 최대] 쌍에서 최대를 빼면 원본 기본 인자처럼 최소와 같다.
 	//==============================================================================
 	pub fn apply_description(&mut self, description: &serde_json::Value) {
@@ -787,6 +872,17 @@ impl ParticleSystem {
 		if let Some(is_world_space) = description.get("worldSpace").and_then(|value| value.as_bool()) {
 			self.set_world_space(is_world_space);
 		}
+		// 파티클 편집기가 고른 그림. (비었거나 글이 아니면 그림을 비운다)
+		if let Some(image_data_url) = description.get("imageDataUrl") {
+			match image_data_url.as_str() {
+				Some(image_data_url) if !image_data_url.is_empty() => {
+					self.load_image_data_url(image_data_url);
+				}
+				_ => {
+					self.set_image(None);
+				}
+			}
+		}
 	}
 
 	pub fn get_particle_count(&self) -> usize {
@@ -891,6 +987,14 @@ impl Component for ParticleSystem {
 	/// 출력. (정점 색 배치. circle 은 부드러운 원, rect / streak 은 흰 텍스처, image 는 그림 텍스처)
 	//==============================================================================
 	fn draw(&mut self, transform: &NodeTransform, graphic: &mut Graphic) {
+		#[cfg(target_arch = "wasm32")]
+		{
+			self.apply_pending_image();
+			// 원본처럼 그림이 다 풀리기 전에는 image 입자를 그리지 않는다. (풀리기 전의 Image 는 크기가 0 이라 그려지지 않는다)
+			if self.render_shape == ParticleRenderShape::Image && self.pending_image_load.is_some() {
+				return;
+			}
+		}
 		if self.particle_list.is_empty() {
 			return;
 		}
@@ -1265,5 +1369,68 @@ mod tests {
 		assert_eq!(particle_system.attractor_position, None);
 		assert_eq!((particle_system.wobble_amplitude, particle_system.wobble_frequency), (6.0, 4.0));
 		assert_eq!(particle_system.emitter_shape, ParticleEmitterShape::Box);
+	}
+
+	//==============================================================================
+	/// 루프 이음매(되풀이 경계)의 버스트가 첫 주기만이 아니라 주기마다 터지는지. (0 초 버스트와 경계 바로 앞 버스트)
+	//==============================================================================
+	#[test]
+	fn looping_burst_fires_every_cycle_at_seam() {
+		let mut particle_system = ParticleSystem::new();
+		particle_system.set_random_seed(3);
+		particle_system.set_looping(true);
+		particle_system.set_duration(1.0);
+		particle_system.set_emission_rate(0.0);
+		particle_system.set_start_lifetime(100.0, 100.0);
+		particle_system.set_burst_list(vec![(0.0, 2), (0.98, 1)]);
+		// 0.25 초씩 3 초. (0 초 버스트는 0, 1, 2, 3 초에, 0.98 초 버스트는 0.98, 1.98, 2.98 초에)
+		for _ in 0..12 {
+			particle_system.simulate(0.25);
+		}
+		assert_eq!(particle_system.get_particle_count(), 2 * 4 + 3);
+
+		// 한 프레임에 여러 주기를 건너면 그 수만큼.
+		let mut long_frame_particle_system = ParticleSystem::new();
+		long_frame_particle_system.set_random_seed(3);
+		long_frame_particle_system.set_looping(true);
+		long_frame_particle_system.set_duration(1.0);
+		long_frame_particle_system.set_emission_rate(0.0);
+		long_frame_particle_system.set_start_lifetime(100.0, 100.0);
+		long_frame_particle_system.set_burst_list(vec![(0.5, 1)]);
+		long_frame_particle_system.simulate(3.2);
+		assert_eq!(long_frame_particle_system.get_particle_count(), 3);
+	}
+
+	//==============================================================================
+	/// 버스트 구간 셈: 재생 뒤 처음만 시작 시각이 들고, 시간이 멈춘 프레임(0 초)에는 다시 터지지 않는다.
+	//==============================================================================
+	#[test]
+	fn burst_fire_count_uses_half_open_window() {
+		assert_eq!(count_burst_fires(0.0, 0.0, 0.0, true, 1.0), 1);
+		assert_eq!(count_burst_fires(0.0, 0.0, 0.0, false, 1.0), 0);
+		assert_eq!(count_burst_fires(0.0, 0.75, 1.0, false, 1.0), 1);
+		assert_eq!(count_burst_fires(0.0, 1.0, 1.25, false, 1.0), 0);
+		assert_eq!(count_burst_fires(0.5, 0.25, 0.5, false, 0.0), 1);
+		assert_eq!(count_burst_fires(0.5, 0.5, 0.75, false, 0.0), 0);
+		assert_eq!(count_burst_fires(0.0, 0.0, 0.1, true, 0.0), 1);
+	}
+	//==============================================================================
+	/// 서술의 imageDataUrl(파티클 편집기가 넣는 그림)을 읽어 입자 이미지로 거는지. (비우면 그림을 뗀다)
+	//==============================================================================
+	#[test]
+	fn description_reads_image_data_url() {
+		let png_base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+		let mut particle_system = ParticleSystem::new();
+		particle_system.apply_description(&serde_json::json!({
+			"renderShape": "image",
+			"imageDataUrl": format!("data:image/png;base64,{}", png_base64),
+		}));
+		assert_eq!(particle_system.render_shape, ParticleRenderShape::Image);
+		let image = particle_system.image.as_ref().expect("image");
+		assert_eq!((image.get_width(), image.get_height()), (1, 1));
+		particle_system.apply_description(&serde_json::json!({ "emissionRate": 5 }));
+		assert!(particle_system.image.is_some());
+		particle_system.apply_description(&serde_json::json!({ "imageDataUrl": null }));
+		assert!(particle_system.image.is_none());
 	}
 }

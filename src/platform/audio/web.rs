@@ -390,6 +390,8 @@ struct PlaybackState {
 	// 지금 소스의 onended 콜백. (소스를 바꾸거나 멈출 때 떼고 버린다)
 	ended_callback: Option<Closure<dyn FnMut()>>,
 	is_playing: bool,
+	/// 재생 요청 번호. (재생과 정지마다 늘려, 컨텍스트를 깨우는 동안 늦게 끝난 지난 요청이 소리를 내지 않게 한다)
+	play_request_id: u64,
 }
 
 impl PlaybackState {
@@ -470,6 +472,7 @@ impl AudioPlayerBackend {
 				audio_source: None,
 				ended_callback: None,
 				is_playing: false,
+				play_request_id: 0,
 			})),
 			playback_rate: 1.0,
 		}
@@ -494,12 +497,15 @@ impl AudioPlayerBackend {
 	//==============================================================================
 	pub fn stop(&mut self) {
 		let mut playback_state = self.playback_state.borrow_mut();
+		// 컨텍스트를 깨우는 중인 재생 요청도 틀지 않게 한다.
+		playback_state.play_request_id += 1;
 		playback_state.stop_source();
 		playback_state.is_playing = false;
 	}
 
 	//==============================================================================
 	// 재생 시작. (컨텍스트가 일시 중단돼 있으면 재개한 뒤에 튼다)
+	// - 깨우는 동안 stop 이나 다른 재생이 오면 요청 번호가 바뀌어 이 요청은 틀지 않는다. (재개를 거부하면 틀지 않는다)
 	//==============================================================================
 	pub fn start_playback(&mut self, audio_buffer: &AudioBuffer, is_loop: bool, time: f64) {
 		let (audio_context, gain_node) = match (&self.audio_context, &self.gain_node) {
@@ -509,6 +515,11 @@ impl AudioPlayerBackend {
 			_ => {
 				return;
 			}
+		};
+		let play_request_id = {
+			let mut playback_state = self.playback_state.borrow_mut();
+			playback_state.play_request_id += 1;
+			playback_state.play_request_id
 		};
 		if get_audio_context_state_name(&audio_context) == "suspended" {
 			let resume_promise = match audio_context.resume() {
@@ -527,6 +538,9 @@ impl AudioPlayerBackend {
 					return;
 				}
 				if let Some(playback_state_cell) = weak_playback_state.upgrade() {
+					if playback_state_cell.borrow().play_request_id != play_request_id {
+						return;
+					}
 					start_source(&playback_state_cell, &audio_context, &gain_node, &audio_buffer, is_loop, time, playback_rate);
 				}
 			});

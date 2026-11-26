@@ -15,7 +15,7 @@
 //! - 페이지 이벤트(PageEvent): 원본은 모듈마다 document / window 에 리스너를 단다. 러스트 판은 플랫폼이 엔진에 알리고
 //!   엔진이 add_page_event_listener 로 받은 리스너에 그 자리에서 넘긴다. (SoundSystem 이 가려짐과 포커스를 이것으로 받는다)
 //!   웹: visibilitychange(Hidden, Visible), blur(Blurred), focus(Focused), pointerdown(PointerDown).
-//!   데스크탑: 창 가림(Occluded, 맥과 X11 만 winit 이 알린다, 윈도우와 웨이랜드는 오지 않는다), 포커스, 마우스 단추와 손가락 누름.
+//!   데스크탑: 창 가림(Occluded, 맥과 X11 이 알린다), 최소화(윈도우가 이것으로 알린다), 앱 멈춤(모바일), 웨이랜드 프레임 콜백이 3 초 넘게 오지 않음은 Hidden, 포커스, 마우스 단추와 손가락 누름.
 //! - 페이지 복원 훅: 원본 setupAllDocumentEvents 처럼 소리를 다시 깨우고 입력을 비운 뒤 씬마다 부른다.
 //!   웹: visibilitychange 의 visible → on_page_visibility_restored, 문서 resume 과 pageshow(persisted) → on_page_process_restored.
 //!   pageshow 는 resume 과 같은 복구를 한다. (원본이 정의되지 않은 dispatchPageProcessRestored 를 불러 예외가 나던 것은 원본에서도 같게 고쳤다)
@@ -69,6 +69,9 @@ use web_time::Instant;
 /// 엔진 판. (원본 vanilla.js 0.3.2 를 옮긴 첫 판)
 const ENGINE_VERSION: Version = Version::create(0, 3, 2);
 
+/// 설정의 기본 창 제목. (데스크탑 창 제목, 웹은 이 기본값이면 원본처럼 문서 제목을 바꾸지 않는다. 원본 기본값은 빈 글)
+pub(crate) const DEFAULT_ENGINE_TITLE: &str = "바닐라엔진";
+
 /// 씬이 맡긴 애셋이 다 끝난 뒤에도 로딩 화면을 더 보이는 시간. (초, 원본 SceneManager.loadScene 의 setTimeout 300)
 const SCENE_LOAD_EXTRA_WAIT_SECONDS: f64 = 0.3;
 
@@ -80,7 +83,7 @@ pub struct EngineConfiguration {
 	pub reference_resolution_size: Vector2,
 	/// 뷰 스케일 모드.
 	pub view_scale_mode: ViewScaleMode,
-	/// 창 제목.
+	/// 창 제목. (데스크탑 창 제목, 웹은 비어 있지 않고 기본값이 아니면 원본처럼 시작할 때 문서 제목(document.title)에 쓴다)
 	pub title: String,
 	/// 처음 창 크기. (논리 크기, 0 이면 기준 해상도)
 	pub window_size: Vector2,
@@ -151,7 +154,7 @@ impl EngineConfiguration {
 		EngineConfiguration {
 			reference_resolution_size: Vector2::create(1280.0, 720.0),
 			view_scale_mode: ViewScaleMode::StretchShort,
-			title: String::from("바닐라엔진"),
+			title: String::from(DEFAULT_ENGINE_TITLE),
 			window_size: Vector2::zero(),
 			is_resizable: true,
 			use_statistics: false,
@@ -476,7 +479,7 @@ impl Engine {
 
 	//==============================================================================
 	/// 씬 불러오기. (원본 await SceneManager.loadScene(scene), initialize 까지 끝나면 그 씬의 핸들로 풀리는 Promise 를 돌려준다)
-	/// - 불러오기는 load_scene 과 같다. 다 불러오기 전에 그 씬을 내리면 풀리지 않는다.
+	/// - 불러오기는 load_scene 과 같다. 같은 프레임에 create 전에 그 씬을 내리면 풀리지 않는다. (create 뒤에 내리면 initialize 까지 마치고 풀린다)
 	//==============================================================================
 	pub fn load_scene_async(&mut self, mut scene: Box<dyn Scene>) -> Promise<SceneId> {
 		let (load_promise, load_resolver) = Promise::create();
@@ -930,7 +933,7 @@ impl Engine {
 	}
 
 	//==============================================================================
-	/// 페이지가 가려져 있는지. (다른 탭, 앱 전환, 창이 가려짐. 데스크탑은 winit 이 가림을 알리는 맥과 X11 만)
+	/// 페이지가 가려져 있는지. (다른 탭, 앱 전환, 창이 가려짐. 데스크탑은 창 가림(맥, X11), 최소화(윈도우), 앱 멈춤, 웨이랜드 프레임 콜백이 3 초 넘게 오지 않음)
 	//==============================================================================
 	pub fn is_page_hidden(&self) -> bool {
 		self.is_page_hidden
