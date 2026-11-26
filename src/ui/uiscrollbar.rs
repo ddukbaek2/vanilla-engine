@@ -10,7 +10,6 @@
 //!   ```
 //!   - 대상은 스크롤 뷰 컴포넌트 대신 UIScrollView 가 붙은 노드의 핸들이다. (set_scroll_view / get_scroll_view)
 //!   - 트랙 누름 자리와 썸 안 판정은 노드 행렬의 역으로 바꾼 로컬 좌표로 한다. (원본은 월드 위치를 뺀다. 회전 / 크기가 없으면 같다)
-//!   - 썸 색은 원본이 0 ~ 255 를 섞어 쓴 Color(255, 255, 255, 0.6) 이다. 러스트 판은 같은 뜻의 (1, 1, 1, 0.6) 으로 둔다.
 //! - UI 문서(UIDocument)는 register_node_type 으로 등록하면 원본 노드 꼴로 쓰고 읽는다. (노드 type "UIScrollBar", 트랙 Paint, 썸 노드, uidocument.rs 의 UIDocumentNode)
 //! - 보통은 UIScrollView::set_shows_vertical_scroll_bar 가 만든다. 직접 만들 때는 node_tree.add_component 로 붙인다. (피봇 / 앵커 왼쪽 위, interactable)
 //==============================================================================

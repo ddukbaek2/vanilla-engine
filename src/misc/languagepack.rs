@@ -869,6 +869,26 @@ mod tests {
 	}
 
 	//==============================================================================
+	/// 목록 파일에 aliases 가 없는 줄은 빈 별칭이고, 별칭은 소문자로 맞춘다. code 가 없는 줄은 뺀다. (원본 loadLanguageList, setLanguageList 와 같다)
+	//==============================================================================
+	#[test]
+	fn language_list_without_aliases_is_accepted() {
+		assert!(set_language_list_from_json(r#"{ "fallbackLanguage": "en", "languages": [
+			{ "code": "en", "name": "English", "file": "en.json" },
+			{ "code": "pt", "name": "Portugues", "aliases": ["PT-BR", 3], "file": "pt.json" },
+			{ "name": "No Code", "file": "none.json" }
+		] }"#));
+		let languages = read_languages();
+		assert_eq!(languages.len(), 2);
+		assert!(languages[0].aliases.is_empty());
+		assert!(languages[0].countries.is_empty());
+		assert_eq!(languages[1].aliases, vec![String::from("pt-br")]);
+		assert_eq!(match_language_tag("en-US").map(|language| language.code), Some(String::from("en")));
+		assert_eq!(match_language_tag("pt_BR").map(|language| language.code), Some(String::from("pt")));
+		assert!(match_language_tag("fr").is_none());
+	}
+
+	//==============================================================================
 	/// 언어를 불러오면 문서 언어가 그 언어다. (원본 applyDocumentLanguage 의 html lang, 데스크탑은 엔진이 든 문서 언어)
 	//==============================================================================
 	#[cfg(not(target_arch = "wasm32"))]

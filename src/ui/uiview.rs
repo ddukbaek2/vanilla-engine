@@ -6,6 +6,7 @@
 //!   그래서 원본의 node.get_component(UIView) 로 하위 위젯까지 한 번에 찾는 쓰임은 없다. (`get_component::<UIButton>()` 처럼 구체 타입으로 찾는다)
 //! - content 노드는 attach_to_tree 에서 만든다. node_tree.add_component(node_id, UIView::new()) 로 붙여야 한다.
 //! - 원본의 setEngine / get_engine 은 옮기지 않았다. 엔진은 tick / 터치 때 ComponentContext::get_engine 으로 얻는다.
+//! - 원본 setBackgroundColor(null) 은 배경을 지운다. (처음 값인 알파 0 흰색으로 돌린다) 러스트 판은 None 자리가 없어 알파 0 색(처음 값이나 Color::transparent())을 준다.
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::pivot::Pivot;
@@ -63,7 +64,7 @@ impl UIView {
 	}
 
 	//==============================================================================
-	/// 배경색 설정.
+	/// 배경색 설정. (알파가 0 이면 그리지 않는다. 원본 null 처럼 배경을 지우려면 알파 0 색을 준다)
 	//==============================================================================
 	pub fn set_background_color(&mut self, background_color: impl Into<Color>) {
 		self.background_color = background_color.into();
@@ -177,6 +178,22 @@ mod tests {
 		let content_id = node_tree[host_id].add_component(UIView::new()).get_content();
 		assert!(content_id.is_none());
 		assert_eq!(node_tree.get_child_count(host_id), 0);
+	}
+
+	//==============================================================================
+	/// 배경색은 처음에 알파 0 흰색(그리지 않음)이고, 칠한 뒤 알파 0 색을 주면 다시 지워진다. (원본 setBackgroundColor(null) 자리)
+	//==============================================================================
+	#[test]
+	fn background_color_can_be_cleared() {
+		let mut view = UIView::new();
+		let initial_color = view.get_background_color();
+		assert_eq!(initial_color, Color::create(1.0, 1.0, 1.0, 0.0));
+		view.set_background_color(Color::create(0.1, 0.12, 0.16, 1.0));
+		assert_eq!(view.get_background_color().alpha, 1.0);
+		view.set_background_color(initial_color);
+		assert_eq!(view.get_background_color(), Color::create(1.0, 1.0, 1.0, 0.0));
+		view.set_background_color(Color::transparent());
+		assert!(view.get_background_color().alpha <= 0.0);
 	}
 
 	//==============================================================================

@@ -2,7 +2,7 @@
 //! 식의 한 항. (원본 ui/autolayout/layoutterm.js 의 LayoutTerm, coefficient * variable)
 //! - LayoutExpression 을 이루는 값이다. 바뀌지 않는다.
 //! - 원본과 다른 것:
-//!   - 원본은 변수 없이(null) 만들 수 있지만 솔버가 그런 항을 받으면 망가진다. 러스트 판은 늘 변수를 받는다.
+//!   - 원본은 변수 없이(null, 값 0) 만들 수 있고 솔버는 그런 항을 건너뛴다. 러스트 판은 늘 변수를 받아 그런 항이 없다.
 //!   - 생략할 수 있던 coefficient(기본 1)는 꼭 받는다.
 //==============================================================================
 use crate::ui::autolayout::layoutvariable::LayoutVariable;

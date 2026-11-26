@@ -117,10 +117,14 @@ impl UILineChart {
 	}
 
 	//==============================================================================
-	/// 최대 표본 수 설정. (2 보다 작게 하지 않는다)
+	/// 최대 표본 수 설정. (2 보다 작게 하지 않는다. 이미 든 표본이 새 상한보다 많으면 오래된 것부터 버린다)
 	//==============================================================================
 	pub fn set_max_sample_count(&mut self, max_sample_count: usize) {
 		self.max_sample_count = max_sample_count.max(2);
+		if self.value_list.len() > self.max_sample_count {
+			let excess_count = self.value_list.len() - self.max_sample_count;
+			self.value_list.drain(..excess_count);
+		}
 	}
 
 	//==============================================================================
@@ -439,6 +443,24 @@ mod tests {
 		assert_eq!(line_chart.get_value_list(), &[7.0, 6.0, 5.0, 4.0, 3.0]);
 		line_chart.set_max_sample_count(1);
 		assert_eq!(line_chart.get_max_sample_count(), 2);
+	}
+
+	//==============================================================================
+	/// 라인 차트: 최대 표본 수를 줄이면 오래된 표본부터 버려, 점이 그래프 폭을 넘지 않는다.
+	//==============================================================================
+	#[test]
+	fn line_chart_max_sample_count_trims_oldest() {
+		let mut line_chart = UILineChart::new();
+		line_chart.set_value_list(&[1.0, 2.0, 3.0, 4.0, 5.0]);
+		line_chart.set_max_sample_count(3);
+		assert_eq!(line_chart.get_value_list(), &[3.0, 4.0, 5.0]);
+		let points = line_chart.calculate_points(100.0, 54.0);
+		assert_eq!(points.len(), 3);
+		assert_eq!(points[2].x, 100.0);
+		line_chart.set_max_sample_count(1);
+		assert_eq!(line_chart.get_value_list(), &[4.0, 5.0]);
+		line_chart.set_max_sample_count(10);
+		assert_eq!(line_chart.get_value_list(), &[4.0, 5.0]);
 	}
 
 	//==============================================================================

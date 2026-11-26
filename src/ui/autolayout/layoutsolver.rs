@@ -838,6 +838,7 @@ fn any_pivotable_symbol(row: &LayoutRow) -> LayoutSymbol {
 mod tests {
 	use super::*;
 	use crate::ui::autolayout::layoutpriority::LayoutPriority;
+	use crate::ui::autolayout::layoutterm::LayoutTerm;
 
 	//==============================================================================
 	/// 두 값이 거의 같은지 본다.
@@ -903,6 +904,29 @@ mod tests {
 		solver.update_variables();
 		assert_near(x.get_value(), 10.0);
 		assert_near(y.get_value(), 30.0);
+	}
+
+	//==============================================================================
+	/// 값이 늘 0 인 항(계수 0)은 식에 아무것도 더하지 않아 건너뛴다. 그런 항만 남은 등식은 상수끼리의 비교다.
+	/// - 원본은 변수 없는 항(null)도 같게 건너뛴다. 러스트 판은 항이 늘 변수를 가져 그런 항이 없다.
+	//==============================================================================
+	#[test]
+	fn zero_value_terms_add_nothing() {
+		let solver = LayoutSolver::new();
+		let x = LayoutVariable::new("x");
+		let unused = LayoutVariable::new("unused");
+		unused.set_value(7.0);
+		let zero_term = LayoutTerm::new(unused.clone(), 0.0);
+		let x_term = LayoutTerm::new(x.clone(), 1.0);
+		let x_expression = LayoutExpression::new(vec![zero_term.clone(), x_term], 0.0);
+		solver.add_constraint(&x_expression.equal_to(10)).unwrap();
+		solver.update_variables();
+		assert_near(x.get_value(), 10.0);
+		assert_near(unused.get_value(), 7.0);
+		let zero_only_expression = LayoutExpression::new(vec![zero_term.clone()], 5.0);
+		assert_eq!(solver.add_constraint(&zero_only_expression.equal_to(0)), Err(LayoutError::UnsatisfiableConstraint));
+		let zero_only_equal_expression = LayoutExpression::new(vec![zero_term], 0.0);
+		assert!(solver.add_constraint(&zero_only_equal_expression.equal_to(0)).is_ok());
 	}
 
 	//==============================================================================

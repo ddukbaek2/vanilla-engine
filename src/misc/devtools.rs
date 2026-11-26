@@ -46,7 +46,7 @@
 //!     viewScaleMode 는 러스트 열거 이름(StretchHeight 등)으로 적는다.
 //!   ```
 //!   - 화면 비율 가이드는 원본처럼 그때의 좌표계에 기대지 않고 스스로 뷰 좌표계(apply_view_rect)를 걸고 그린다. (원본 GameScene 에서 같은 결과)
-//!   - 원본은 FPS 표시 설정을 is_frame_per_second_visible 로 알려 주기만 하고 스스로 그리지 않는다. 러스트 판도 같다.
+//! - Settings 의 Show FPS 를 켜면 패널을 닫아도 창 왼쪽 위에 지난 1 초의 프레임 수를 그린다. (원본과 같다, canvas native 좌표, 패널이 보이면 패널 위에)
 //! - 옮기지 않은 것: 없음. (원본에서 아무도 부르지 않는 그리기 오류 무시 try/catch 는 러스트에서 필요 없다)
 //==============================================================================
 use crate::base::color::Color;
@@ -1360,6 +1360,8 @@ impl DevTools {
 		}
 
 		if !self.is_visible {
+			// 패널을 닫아도 FPS 표시는 그린다.
+			self.draw_frame_per_second(engine, graphic);
 			return;
 		}
 
@@ -1491,6 +1493,52 @@ impl DevTools {
 		};
 		graphic.draw_stroke_rect(Rect::create(panel_x + 0.5, panel_y + 0.5, panel_width - 1.0, panel_height - 1.0), border_width);
 
+		graphic.pop_state();
+
+		// FPS 표시. (패널 위에)
+		self.draw_frame_per_second(engine, graphic);
+	}
+
+	//==============================================================================
+	/// FPS 표시 글. (원본 `FPS ${framePerSecond}`)
+	//==============================================================================
+	fn format_frame_per_second_text(frame_per_second: u32) -> String {
+		format!("FPS {}", frame_per_second)
+	}
+
+	//==============================================================================
+	/// FPS 표시 상자. (창 왼쪽 위에서 여백만큼 띄우고, 너비는 글 너비에 좌우 여백, 높이는 줄 높이)
+	//==============================================================================
+	fn calculate_frame_per_second_rect(text_width: f32) -> Rect {
+		let box_width = text_width.ceil() + PADDING * 2.0;
+		Rect::create(PADDING, PADDING, box_width, ITEM_HEIGHT)
+	}
+
+	//==============================================================================
+	/// FPS 표시 출력. (Settings 의 Show FPS 를 켜면 패널을 닫아도 창 왼쪽 위에 지난 1 초의 프레임 수를 그린다)
+	/// - 패널처럼 뷰 스케일 모드와 상관없이 canvas native 좌표로 그리고, 끝나면 들어올 때의 그리기 상태로 돌린다.
+	//==============================================================================
+	fn draw_frame_per_second(&self, engine: &Engine, graphic: &mut Graphic) {
+		if !self.is_frame_per_second_visible {
+			return;
+		}
+		let time_manager = engine.get_time_manager();
+		let frame_per_second_text = DevTools::format_frame_per_second_text(time_manager.get_frame_per_second());
+
+		graphic.push_state();
+		let view_manager = engine.get_view_manager();
+		view_manager.apply_canvas_native_rect(graphic);
+		graphic.set_font_string(FONT_STRING);
+		graphic.set_text_align(TextAlign::Left);
+		graphic.set_text_baseline(TextBaseline::Middle);
+		let text_width = graphic.measure_text(&frame_per_second_text).width;
+		let box_rect = DevTools::calculate_frame_per_second_rect(text_width);
+		graphic.set_fill_color(COLOR_BACKGROUND);
+		graphic.draw_rect(box_rect);
+		graphic.set_stroke_color(COLOR_BORDER_NORMAL);
+		graphic.draw_stroke_rect(Rect::create(box_rect.position.x + 0.5, box_rect.position.y + 0.5, box_rect.size.x - 1.0, box_rect.size.y - 1.0), 1.0);
+		graphic.set_fill_color(COLOR_TRUE);
+		graphic.draw_fill_text(&frame_per_second_text, PADDING * 2.0, PADDING + ITEM_HEIGHT * 0.5);
 		graphic.pop_state();
 	}
 
@@ -2099,7 +2147,7 @@ impl DevTools {
 	}
 
 	//==============================================================================
-	/// FPS 표시 여부 반환.
+	/// FPS 표시 여부 반환. (Settings 의 Show FPS, 켜지면 draw 가 패널을 닫아도 창 왼쪽 위에 FPS 를 그린다)
 	//==============================================================================
 	pub fn is_frame_per_second_visible(&self) -> bool {
 		self.is_frame_per_second_visible
@@ -2756,6 +2804,17 @@ mod tests {
 		assert_eq!(pressed_dev_tools.pending_force_gizmos_visible, Some(false));
 		assert_eq!(DevTools::new().get_setting_values()[1], false);
 		let _ = std::fs::remove_dir_all(&storage_directory_path);
+	}
+
+	//==============================================================================
+	/// FPS 표시는 원본처럼 "FPS 값" 글이고, 상자는 창 왼쪽 위에서 여백만큼 띄워 글 너비(올림)에 좌우 여백을 더한다.
+	//==============================================================================
+	#[test]
+	fn frame_per_second_overlay_text_and_box() {
+		assert_eq!(DevTools::format_frame_per_second_text(60), "FPS 60");
+		assert_eq!(DevTools::format_frame_per_second_text(0), "FPS 0");
+		let box_rect = DevTools::calculate_frame_per_second_rect(43.2);
+		assert_eq!(box_rect, Rect::create(PADDING, PADDING, 44.0 + PADDING * 2.0, ITEM_HEIGHT));
 	}
 
 	//==============================================================================
