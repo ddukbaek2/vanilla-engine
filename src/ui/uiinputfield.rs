@@ -38,6 +38,8 @@
 //!     이어 누르기는 크롬 aura 처럼 500ms(맥은 시스템의 두 번 클릭 시간) 안, 가로 세로 2 DIP 안이다. 웹은 브라우저가 센 mousedown 의 detail 을 쓴다.
 //!   - 커서 이동과 Delete 는 크롬처럼 글자 묶음(확장 자소 묶음) 단위, 뒤로 지우기는 블링크 BackspaceStateMachine(코드 포인트 하나, 이모지 묶음은 통째로)이다.
 //!     웹 DOM 입력은 숨긴 `<textarea>` 가 글, 조합, 되돌리기를 맡고, 보이는 줄로 옮기는 키(위아래, page, Home, End)는 필드가 엔진 배치로 옮긴다.
+//!   - 낱말 이동과 지우기(윈도우와 리눅스 Ctrl, 맥 Option 과 왼쪽, 오른쪽, Backspace, Delete)는 크롬 textarea 처럼 블링크 NextWordPosition, PreviousWordPosition 대로다.
+//!     (오른쪽은 윈도우만 다음 낱말 앞, 맥과 리눅스는 지금 낱말 끝. 맥은 넓히던 고르기가 고정 끝을 넘지 않는다) 웹 DOM 입력은 브라우저가 한다.
 //!   - 노드를 끄거나(set_active(false)) 지우면 tick 이 돌지 않아 포커스와 IME, 웹의 숨긴 <input> 이 함께 사라진다. (원본은 detach 해야 사라진다)
 //!   - getRenderState 는 옮기지 않았다. (그리는 컴포넌트가 하나라 넘길 일이 없다)
 //!   - UI 문서(UIDocument)는 register_node_type 으로 등록하면 원본 노드 꼴로 쓰고 읽는다. (노드 type "UIInputField", 바탕 Paint, 그리기 층, 안내 글과 값 UILabel 자식,
@@ -55,7 +57,7 @@ use crate::core::engine::Engine;
 use crate::core::graphic::{Graphic, TextAlign, TextBaseline};
 use crate::core::node::nodetree::{ComponentContext, NodeId, NodeTree};
 use crate::core::node::worldnode::NodeTransform;
-use crate::core::textinput::{collect_grapheme_boundaries, convert_character_index_to_byte_index, convert_character_index_to_utf16_index, convert_utf16_index_to_character_index, count_characters, find_backward_deletion_boundary, find_next_grapheme_boundary, find_previous_grapheme_boundary, TextInputEventKind, TextInputFieldState, TextInputKey};
+use crate::core::textinput::{collect_grapheme_boundaries, convert_character_index_to_byte_index, convert_character_index_to_utf16_index, convert_utf16_index_to_character_index, count_characters, collect_word_boundaries, find_backward_deletion_boundary, find_next_grapheme_boundary, find_next_word_position, find_previous_grapheme_boundary, find_previous_word_position, TextInputEventKind, TextInputFieldState, TextInputKey};
 use crate::ui::textarealayout::{build_text_area_layout, TextAreaLayout};
 use crate::ui::uicontrol::UIControl;
 use crate::ui::uiview::is_view_position_inside_node;
@@ -153,8 +155,12 @@ pub enum TextEditKind {
 	DeleteBackward,
 	/// 앞으로 지우기. (열린 묶음이 앞으로 지우기일 때만 붙고, 아니면 새 묶음)
 	DeleteForward,
-	/// 붙여넣기와 잘라내기. (늘 따로 한 묶음이고, 그 뒤 글자 넣기도 새 묶음)
+	/// 붙여넣기와 잘라내기, 낱말 지우기 키로 고른 것 지우기. (블링크 ReplaceSelectionCommand, DeleteSelectionCommand 라 늘 따로 한 묶음이고, 그 뒤 글자 넣기도 새 묶음)
 	Paste,
+	/// 낱말 뒤로 지우기. (블링크는 늘 새 TypingCommand 를 열어 새 묶음이고, 그 뒤 뒤로 지우기와 글자 넣기는 이 묶음에 붙는다)
+	DeleteWordBackward,
+	/// 낱말 앞으로 지우기. (늘 새 묶음이고, 그 뒤 앞으로 지우기와 글자 넣기는 이 묶음에 붙는다)
+	DeleteWordForward,
 }
 
 //==============================================================================
@@ -230,11 +236,19 @@ impl TextEditBuffer {
 			self.undo_list.remove(0);
 		}
 		self.redo_list.clear();
-		self.open_edit_kind = if edit_kind == TextEditKind::Paste {
-			None
-		}
-		else {
-			Some(edit_kind)
+		self.open_edit_kind = match edit_kind {
+			TextEditKind::Paste => {
+				None
+			}
+			TextEditKind::DeleteWordBackward => {
+				Some(TextEditKind::DeleteBackward)
+			}
+			TextEditKind::DeleteWordForward => {
+				Some(TextEditKind::DeleteForward)
+			}
+			_ => {
+				Some(edit_kind)
+			}
 		};
 	}
 
@@ -651,7 +665,7 @@ fn count_repeated_clicks(previous_click: Option<(f32, Vector2, u32)>, position: 
 
 //==============================================================================
 /// 자리의 낱말 범위. (문자 자리, 블링크 selection_adjuster.cc 의 ExpandWithGranularity kWord)
-/// - 낱말 경계는 ICU 낱말 나누기(segment_words)다. 공백 덩어리와 줄바꿈도 한 조각이라, 공백을 누르면 공백을 고른다.
+/// - 낱말 경계는 크롬 낱말 나누기(collect_word_boundaries)다. 공백 덩어리와 줄바꿈도 한 조각이라, 공백을 누르면 공백을 고른다.
 /// - 자리가 경계면 ChooseWordSide 대로 뒤 조각을 고르고, 글 끝이거나 폭으로 나뉜 줄의 끝(is_upstream)이면 앞 조각을 고른다.
 ///   그래서 문단 끝(줄바꿈 앞) 자리는 줄바꿈 하나를 고른다.
 //==============================================================================
@@ -659,9 +673,8 @@ fn find_word_range_at(text: &str, character_index: usize, is_upstream: bool) -> 
 	let character_count = count_characters(text);
 	let character_index = character_index.min(character_count);
 	let is_previous_side = character_index == character_count || is_upstream;
-	let mut segment_start = 0;
-	for (segment, _) in crate::core::component::text::segment_words(text) {
-		let segment_end = segment_start + segment.chars().count();
+	for boundary_pair in collect_word_boundaries(text).windows(2) {
+		let (segment_start, segment_end) = (boundary_pair[0], boundary_pair[1]);
 		let is_hit = if is_previous_side {
 			segment_start < character_index && character_index <= segment_end
 		}
@@ -671,7 +684,6 @@ fn find_word_range_at(text: &str, character_index: usize, is_upstream: bool) -> 
 		if is_hit {
 			return (segment_start, segment_end);
 		}
-		segment_start = segment_end;
 	}
 	(character_index, character_index)
 }
@@ -717,6 +729,20 @@ fn is_windows_platform() -> bool {
 	#[cfg(not(target_arch = "wasm32"))]
 	{
 		cfg!(target_os = "windows")
+	}
+}
+
+//==============================================================================
+/// 맥인지. (데스크탑은 빌드 대상, 웹은 navigator.platform 이 Mac 으로 시작하는지)
+//==============================================================================
+fn is_mac_platform() -> bool {
+	#[cfg(target_arch = "wasm32")]
+	{
+		web_sys::window().and_then(|window| window.navigator().platform().ok()).map(|platform| platform.starts_with("Mac")).unwrap_or(false)
+	}
+	#[cfg(not(target_arch = "wasm32"))]
+	{
+		cfg!(target_os = "macos")
 	}
 }
 
@@ -1767,6 +1793,41 @@ impl UIInputField {
 	}
 
 	//==============================================================================
+	/// 낱말 지우기. (블링크 DeleteWithDirection 의 kWord, 바뀌었으면 true)
+	/// - 고른 것이 있으면 고른 것만 지운다. (DeleteSelectionCommand, 따로 한 되돌리기 묶음)
+	/// - 없으면 커서에서 낱말 자리까지 지운다. 낱말 자리가 커서와 같으면(글자가 있는 줄의 앞) 글자 묶음 하나를 지운다. (TypingCommand 의 킬 링 지우기)
+	//==============================================================================
+	fn delete_word(&mut self, is_forward: bool) -> bool {
+		if self.edit_buffer.has_selection() {
+			self.edit_buffer.begin_edit(TextEditKind::Paste);
+			self.edit_buffer.replace_selection("");
+			return true;
+		}
+		let text = self.edit_buffer.get_text();
+		let cursor_index = self.edit_buffer.get_cursor_index();
+		let (start_index, end_index, edit_kind) = if is_forward {
+			let mut end_index = find_next_word_position(text, cursor_index, is_windows_platform());
+			if end_index == cursor_index {
+				end_index = find_next_grapheme_boundary(text, cursor_index);
+			}
+			(cursor_index, end_index, TextEditKind::DeleteWordForward)
+		}
+		else {
+			let mut start_index = find_previous_word_position(text, cursor_index);
+			if start_index == cursor_index {
+				start_index = find_previous_grapheme_boundary(text, cursor_index);
+			}
+			(start_index, cursor_index, TextEditKind::DeleteWordBackward)
+		};
+		if end_index <= start_index {
+			return false;
+		}
+		self.edit_buffer.begin_edit(edit_kind);
+		self.edit_buffer.delete_range(start_index, end_index);
+		true
+	}
+
+	//==============================================================================
 	/// 편집 키 처리. (원본 handleCanvasKeydown)
 	//==============================================================================
 	fn handle_edit_key(&mut self, context: &mut ComponentContext, key: TextInputKey, is_shift: bool) {
@@ -1842,6 +1903,28 @@ impl UIInputField {
 					}
 				};
 				self.move_cursor_to_character(target_index, is_shift);
+			}
+			TextInputKey::WordLeft | TextInputKey::WordRight => {
+				// 낱말 단위로 옮긴다. 선택이 있어도 커서(focus) 자리에서 찾는다. (블링크 SelectionModifier 의 kWord)
+				// 맥은 넓히던 고르기가 고정 끝을 넘으면 고정 끝에서 멈춘다. (editing_behavior.h 의 ShouldExtendSelectionByWordOrLineAcrossCaret)
+				let text = self.edit_buffer.get_text();
+				let mut target_index = if key == TextInputKey::WordRight {
+					find_next_word_position(text, cursor_index, is_windows_platform())
+				}
+				else {
+					find_previous_word_position(text, cursor_index)
+				};
+				let anchor_index = self.edit_buffer.get_selection_start();
+				if is_shift && is_mac_platform() && anchor_index != cursor_index && (anchor_index <= cursor_index) != (anchor_index <= target_index) {
+					target_index = anchor_index;
+				}
+				self.move_cursor_to_character(target_index, is_shift);
+			}
+			TextInputKey::DeleteWordBackward | TextInputKey::DeleteWordForward => {
+				if self.delete_word(key == TextInputKey::DeleteWordForward) {
+					self.bump_value_revision();
+					self.fire_change_event(context);
+				}
 			}
 			TextInputKey::Home | TextInputKey::End => {
 				let is_end = key == TextInputKey::End;
@@ -4375,6 +4458,103 @@ mod tests {
 		push_event(&mut engine, key_event(TextInputKey::Backspace, false));
 		run_frame(&mut node_tree, &mut engine);
 		assert_eq!(get_field(&mut node_tree, field_id).get_text(), "ae");
+	}
+
+	//==============================================================================
+	/// 낱말 키: 옮기기는 커서 자리에서(오른쪽은 윈도우만 다음 낱말 앞), 맥은 넓히던 고르기가 고정 끝을 넘지 않는다, 글자가 있는 줄 앞에서는 앞 줄로 넘지 않고
+	/// 낱말 지우기는 줄바꿈 하나를 지운다, 고른 것은 고른 것만 따로 한 묶음으로 지운다, 낱말 지우기 뒤 뒤로 지우기는 그 묶음에 붙는다. (헤드리스 크롬 textarea 와 같다)
+	//==============================================================================
+	#[test]
+	fn word_keys_move_select_and_delete_like_chrome() {
+		let mut engine = Engine::new(EngineConfiguration::new());
+		let (mut node_tree, field_id) = create_field_tree();
+		{
+			let field = get_field(&mut node_tree, field_id);
+			field.set_multiline(true);
+			field.focus();
+			field.set_text("hello world foo\nbar");
+		}
+		run_frame(&mut node_tree, &mut engine);
+		let press = |node_tree: &mut NodeTree, engine: &mut Engine, key: TextInputKey, is_shift: bool| -> (usize, usize) {
+			push_event(engine, key_event(key, is_shift));
+			run_frame(node_tree, engine);
+			let field = get_field(node_tree, field_id);
+			(field.edit_buffer.get_selection_start(), field.edit_buffer.get_cursor_index())
+		};
+		let set_selection = |node_tree: &mut NodeTree, selection_start: usize, cursor_index: usize| {
+			let field = get_field(node_tree, field_id);
+			field.move_cursor(selection_start, false);
+			field.move_cursor(cursor_index, true);
+		};
+		let right_end = if cfg!(target_os = "windows") {
+			12
+		}
+		else {
+			11
+		};
+		set_selection(&mut node_tree, 8, 8);
+		assert_eq!(press(&mut node_tree, &mut engine, TextInputKey::WordLeft, false), (6, 6));
+		assert_eq!(press(&mut node_tree, &mut engine, TextInputKey::WordRight, false), (right_end, right_end));
+		// 고른 것이 있어도 커서(focus)에서 찾는다.
+		set_selection(&mut node_tree, 2, 8);
+		assert_eq!(press(&mut node_tree, &mut engine, TextInputKey::WordRight, false), (right_end, right_end));
+		set_selection(&mut node_tree, 8, 2);
+		assert_eq!(press(&mut node_tree, &mut engine, TextInputKey::WordLeft, false), (0, 0));
+		// 넓히기: 맥은 고정 끝을 넘으면 고정 끝에서 멈춘다.
+		set_selection(&mut node_tree, 8, 8);
+		assert_eq!(press(&mut node_tree, &mut engine, TextInputKey::WordLeft, true), (8, 6));
+		let across_anchor = if cfg!(target_os = "macos") {
+			(8, 8)
+		}
+		else {
+			(8, right_end)
+		};
+		assert_eq!(press(&mut node_tree, &mut engine, TextInputKey::WordRight, true), across_anchor);
+		// 글자가 있는 줄 앞: 왼쪽 낱말은 그대로, 낱말 지우기는 줄바꿈 하나.
+		set_selection(&mut node_tree, 16, 16);
+		assert_eq!(press(&mut node_tree, &mut engine, TextInputKey::WordLeft, false), (16, 16));
+		assert_eq!(press(&mut node_tree, &mut engine, TextInputKey::DeleteWordBackward, false), (15, 15));
+		assert_eq!(get_field(&mut node_tree, field_id).get_text(), "hello world foobar");
+
+		// 되돌리기 묶음: [낱말 지우기 + 뒤로 지우기] / [낱말 지우기]
+		get_field(&mut node_tree, field_id).set_text("one two three");
+		run_frame(&mut node_tree, &mut engine);
+		push_event(&mut engine, key_event(TextInputKey::DeleteWordBackward, false));
+		push_event(&mut engine, key_event(TextInputKey::Backspace, false));
+		push_event(&mut engine, key_event(TextInputKey::DeleteWordBackward, false));
+		run_frame(&mut node_tree, &mut engine);
+		assert_eq!(get_field(&mut node_tree, field_id).get_text(), "one ");
+		push_event(&mut engine, key_event(TextInputKey::Undo, false));
+		run_frame(&mut node_tree, &mut engine);
+		assert_eq!(get_field(&mut node_tree, field_id).get_text(), "one two");
+		push_event(&mut engine, key_event(TextInputKey::Undo, false));
+		run_frame(&mut node_tree, &mut engine);
+		assert_eq!(get_field(&mut node_tree, field_id).get_text(), "one two three");
+
+		// 고른 것은 고른 것만 지우고 따로 한 묶음이다. 그 뒤 친 글자도 새 묶음.
+		set_selection(&mut node_tree, 4, 7);
+		push_event(&mut engine, key_event(TextInputKey::DeleteWordForward, false));
+		push_event(&mut engine, TextInputEventKind::Commit(String::from("x")));
+		run_frame(&mut node_tree, &mut engine);
+		assert_eq!(get_field(&mut node_tree, field_id).get_text(), "one x three");
+		push_event(&mut engine, key_event(TextInputKey::Undo, false));
+		run_frame(&mut node_tree, &mut engine);
+		assert_eq!(get_field(&mut node_tree, field_id).get_text(), "one  three");
+		push_event(&mut engine, key_event(TextInputKey::Undo, false));
+		run_frame(&mut node_tree, &mut engine);
+		assert_eq!(get_field(&mut node_tree, field_id).get_text(), "one two three");
+
+		// 앞으로 낱말 지우기: 맥과 리눅스는 낱말 끝까지, 윈도우는 다음 낱말 앞까지. (여기서는 공백 하나)
+		set_selection(&mut node_tree, 3, 3);
+		push_event(&mut engine, key_event(TextInputKey::DeleteWordForward, false));
+		run_frame(&mut node_tree, &mut engine);
+		let expected_text = if cfg!(target_os = "windows") {
+			"onetwo three"
+		}
+		else {
+			"one three"
+		};
+		assert_eq!(get_field(&mut node_tree, field_id).get_text(), expected_text);
 	}
 
 	//==============================================================================

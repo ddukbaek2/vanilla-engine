@@ -29,7 +29,7 @@
 use crate::base::rect::Rect;
 use crate::base::vector2::Vector2;
 use std::cell::{Cell, RefCell};
-use unicode_properties::{EmojiStatus, GeneralCategoryGroup, UnicodeEmoji, UnicodeGeneralCategory};
+use unicode_properties::{EmojiStatus, GeneralCategory, GeneralCategoryGroup, UnicodeEmoji, UnicodeGeneralCategory};
 use unicode_segmentation::UnicodeSegmentation;
 
 //==============================================================================
@@ -45,6 +45,14 @@ pub enum TextInputKey {
 	Left,
 	/// 커서를 한 글자 오른쪽으로. (is_shift 면 선택을 늘린다)
 	Right,
+	/// 커서를 앞 낱말 앞으로. (윈도우와 리눅스 Ctrl + 왼쪽, 맥 Option + 왼쪽, is_shift 면 선택을 늘린다. 블링크 MoveWordLeft)
+	WordLeft,
+	/// 커서를 낱말 하나 오른쪽으로. (윈도우와 리눅스 Ctrl + 오른쪽, 맥 Option + 오른쪽, is_shift 면 선택을 늘린다. 블링크 MoveWordRight)
+	WordRight,
+	/// 커서 앞 낱말 지우기. (윈도우와 리눅스 Ctrl + Backspace, 맥 Option + Backspace, 선택이 있으면 선택을 지운다. 블링크 DeleteWordBackward)
+	DeleteWordBackward,
+	/// 커서 뒤 낱말 지우기. (윈도우와 리눅스 Ctrl + Delete, 맥 Option + Delete, 선택이 있으면 선택을 지운다. 블링크 DeleteWordForward)
+	DeleteWordForward,
 	/// 줄 앞. (여러 줄 필드는 보이는 줄의 앞, 한 줄 필드는 글 앞. 맥은 Cmd + 왼쪽도, is_shift 면 선택을 늘린다)
 	Home,
 	/// 줄 끝. (여러 줄 필드는 보이는 줄의 끝, 한 줄 필드는 글 끝. 맥은 Cmd + 오른쪽도, is_shift 면 선택을 늘린다)
@@ -990,6 +998,313 @@ pub fn find_backward_deletion_boundary(text: &str, character_index: usize) -> us
 	character_index.saturating_sub(delete_count)
 }
 
+//==============================================================================
+/// 낱말 경계 목록. (크롬 낱말 나누기와 같게)
+/// - ICU 낱말 나누기(segment_words)에 크로미엄 ICU 의 wordbrk.patch 규칙을 더한다. 크롬은 마침표(U+002E, U+FF0E)를 숫자 사이에서만 잇고, 쌍점(U+003A, U+FE55, U+FF1A)은 잇지 않는다.
+///   (웹의 크롬 Intl.Segmenter 는 이미 그렇다)
+///
+/// # 인자
+/// - `text`: 글.
+///
+/// # 돌려줌
+/// 낱말 경계의 문자 자리 목록. (0 과 문자 수를 넣는다, 오름차순)
+///
+/// # 예제
+/// 주소는 마침표에서 나뉘고 소수는 한 낱말이다
+/// ```rust
+/// use vanilla::core::textinput::collect_word_boundaries;
+///
+/// assert_eq!(collect_word_boundaries("www.example.com 3.14"), vec![0, 3, 4, 11, 12, 15, 16, 20]);
+/// ```
+//==============================================================================
+pub fn collect_word_boundaries(text: &str) -> Vec<usize> {
+	let character_list: Vec<char> = text.chars().collect();
+	let mut boundary_list = vec![0, character_list.len()];
+	let mut boundary = 0;
+	for (segment, _) in crate::core::component::text::segment_words(text) {
+		boundary += segment.chars().count();
+		boundary_list.push(boundary);
+	}
+	let is_decimal_digit = |character_index: Option<usize>| -> bool {
+		character_index.and_then(|character_index| character_list.get(character_index)).map(|character| character.general_category() == GeneralCategory::DecimalNumber).unwrap_or(false)
+	};
+	for (character_index, character) in character_list.iter().enumerate() {
+		let is_full_stop = matches!(*character, '\u{2E}' | '\u{FF0E}');
+		let is_colon = matches!(*character, '\u{3A}' | '\u{FE55}' | '\u{FF1A}');
+		if !is_full_stop && !is_colon {
+			continue;
+		}
+		if is_full_stop && is_decimal_digit(character_index.checked_sub(1)) && is_decimal_digit(Some(character_index + 1)) {
+			continue;
+		}
+		boundary_list.push(character_index);
+		boundary_list.push(character_index + 1);
+	}
+	boundary_list.sort_unstable();
+	boundary_list.dedup();
+	boundary_list
+}
+
+//==============================================================================
+/// UTF-16 에서 서로게이트 쌍인 글자인지. (블링크는 UTF-16 단위로 보므로 BMP 밖 글자는 U16_IS_SURROGATE 다)
+//==============================================================================
+fn is_supplementary_character(character: char) -> bool {
+	character as u32 > 0xFFFF
+}
+
+//==============================================================================
+/// 줄바꿈인지. (블링크 position_units_word.cc 의 IsLineBreak: LF, CR)
+//==============================================================================
+fn is_line_break_character(character: char) -> bool {
+	matches!(character, '\n' | '\r')
+}
+
+//==============================================================================
+/// 편집 공백인지. (블링크 editing_utilities.h 의 IsWhitespace: NBSP, 공백, 줄바꿈, 탭)
+//==============================================================================
+fn is_editing_whitespace(character: char) -> bool {
+	matches!(character, '\u{A0}' | ' ' | '\n' | '\t')
+}
+
+//==============================================================================
+/// 양방향 분류가 WS 인지. (유니코드 DerivedBidiClass.txt 의 WS 17 글자, 블링크 SkipWhitespaceIfNeeded 의 kWhiteSpaceNeutral)
+//==============================================================================
+fn is_bidi_whitespace(character: char) -> bool {
+	matches!(character as u32, 0x0C | 0x20 | 0x1680 | 0x2000..=0x200A | 0x2028 | 0x205F | 0x3000)
+}
+
+//==============================================================================
+/// 낱말이 끊기는 글자인지. (블링크 IsWordBreak: 찍히는 글자(ICU u_isprint, 일반 범주 C 가 아님)이면서 편집 공백이 아니거나, 서로게이트, 줄바꿈, 밑줄)
+//==============================================================================
+fn is_word_break_character(character: char) -> bool {
+	is_supplementary_character(character) || is_line_break_character(character) || character == '_' || (character.general_category_group() != GeneralCategoryGroup::Other && !is_editing_whitespace(character))
+}
+
+//==============================================================================
+/// 문장 부호나 기호인지. (블링크 IsWordBoundary: ICU u_ispunct(일반 범주 P), 기호(일반 범주 S), 서로게이트)
+//==============================================================================
+fn is_word_boundary_character(character: char) -> bool {
+	is_supplementary_character(character) || matches!(character.general_category_group(), GeneralCategoryGroup::Punctuation | GeneralCategoryGroup::Symbol)
+}
+
+//==============================================================================
+/// 글자나 숫자인지. (ICU u_isalnum: 일반 범주 L 과 Nd, 서로게이트는 아니다)
+//==============================================================================
+fn is_alphanumeric_character(character: char) -> bool {
+	!is_supplementary_character(character) && (character.general_category_group() == GeneralCategoryGroup::Letter || character.general_category() == GeneralCategory::DecimalNumber)
+}
+
+//==============================================================================
+/// 낱말 자리를 찾는 글 묶음의 시작 목록. (블링크 TextSegments 가 한 번에 보는 글 묶음)
+/// - 크롬 textarea 는 줄바꿈을 br 로 두어, 줄바꿈 뒤에 글자가 오는 자리마다 묶음이 나뉜다. (헤드리스 크롬 158 textarea 의 Option + 화살표 자리와 같다)
+//==============================================================================
+fn collect_word_search_run_starts(character_list: &[char]) -> Vec<usize> {
+	let mut run_start_list = vec![0];
+	for character_index in 1..character_list.len() {
+		if character_list[character_index - 1] == '\n' && character_list[character_index] != '\n' {
+			run_start_list.push(character_index);
+		}
+	}
+	run_start_list
+}
+
+//==============================================================================
+/// 묶음 안의 낱말 경계. (묶음 시작을 0 으로, 0 과 묶음 길이를 넣는다)
+//==============================================================================
+fn collect_run_boundaries(boundary_list: &[usize], run_start: usize, run_end: usize) -> Vec<usize> {
+	let mut run_boundary_list = vec![0];
+	run_boundary_list.extend(boundary_list.iter().filter(|boundary| run_start < **boundary && **boundary < run_end).map(|boundary| boundary - run_start));
+	run_boundary_list.push(run_end - run_start);
+	run_boundary_list
+}
+
+//==============================================================================
+/// 묶음 하나에서 다음 낱말 자리. (블링크 position_units_word.cc 의 NextWordPositionInternal 의 Finder::Find, 없으면 None)
+/// - 윈도우(is_skip_spaces)는 뒤 공백을 건너뛰고, 공백 뒤 문장 부호에서 멈춘다. (WordSkipSpacesPunctuationFix 는 stable)
+//==============================================================================
+fn find_next_word_in_run(run: &[char], boundary_list: &[usize], offset: usize, is_skip_spaces: bool, is_first_time: bool) -> Option<usize> {
+	let length = run.len();
+	let skip_whitespace = |position: usize| -> usize {
+		if is_skip_spaces {
+			for runner in position..length {
+				let character = run[runner];
+				if !(is_editing_whitespace(character) || is_bidi_whitespace(character)) || is_line_break_character(character) {
+					return runner;
+				}
+			}
+		}
+		position
+	};
+	if !is_first_time && offset < length && is_word_break_character(run[offset]) {
+		return Some(skip_whitespace(offset));
+	}
+	if offset >= length {
+		return None;
+	}
+	let mut punctuation_runner: Option<usize> = None;
+	for runner in boundary_list.iter().copied().filter(|boundary| *boundary > offset) {
+		let character = run.get(runner).copied();
+		let previous_character = run[runner - 1];
+		if character.map(is_line_break_character).unwrap_or(false) {
+			return Some(skip_whitespace(punctuation_runner.unwrap_or(runner)));
+		}
+		if let Some(character) = character {
+			if is_word_boundary_character(character) {
+				if is_alphanumeric_character(previous_character) {
+					return Some(skip_whitespace(runner));
+				}
+				if is_skip_spaces && punctuation_runner.is_none() && is_editing_whitespace(previous_character) {
+					punctuation_runner = Some(runner);
+				}
+				continue;
+			}
+		}
+		if let Some(punctuation_runner) = punctuation_runner {
+			return Some(skip_whitespace(punctuation_runner));
+		}
+		if let Some(character) = character {
+			if is_word_break_character(previous_character) || (is_skip_spaces && is_editing_whitespace(previous_character) && is_word_break_character(character)) {
+				return Some(skip_whitespace(runner));
+			}
+		}
+	}
+	if run[length - 1] != '\n' {
+		return Some(length);
+	}
+	None
+}
+
+//==============================================================================
+/// 묶음 하나에서 앞 낱말 자리. (블링크 position_units_word.cc 의 PreviousWordPositionInternal 의 Finder::Find, 없으면 None)
+//==============================================================================
+fn find_previous_word_in_run(run: &[char], boundary_list: &[usize], offset: usize, is_first_time: bool) -> Option<usize> {
+	let length = run.len();
+	if !is_first_time && offset > 0 && offset <= length && is_word_break_character(run[offset - 1]) {
+		return Some(offset);
+	}
+	if offset == 0 || length == 0 {
+		return None;
+	}
+	let mut punctuation_runner: Option<usize> = None;
+	for runner in boundary_list.iter().rev().copied().filter(|boundary| *boundary < offset) {
+		let character = run.get(runner).copied();
+		if let Some(character) = character {
+			if is_word_boundary_character(character) {
+				if runner > 0 && is_alphanumeric_character(run[runner - 1]) {
+					return Some(runner);
+				}
+				punctuation_runner = Some(runner);
+				continue;
+			}
+		}
+		if punctuation_runner.is_some() {
+			return punctuation_runner;
+		}
+		if character.map(is_word_break_character).unwrap_or(false) {
+			return Some(runner);
+		}
+	}
+	Some(0)
+}
+
+//==============================================================================
+/// 다음 낱말 자리. (크롬 오른쪽 낱말 이동과 앞으로 낱말 지우기, 블링크 NextWordPosition)
+/// - 맥과 리눅스는 지금 낱말의 끝("abc| def|"), 윈도우는 뒤 공백을 건너뛴 다음 낱말 앞("abc |def")이다. (editing_behavior.h 의 ShouldSkipSpaceWhenMovingRight)
+/// - 줄 끝에서는 다음 줄 앞으로 간다. 글 끝이면 문자 수다.
+///
+/// # 인자
+/// - `text`: 글.
+/// - `character_index`: 커서의 문자 자리.
+/// - `is_skip_spaces`: 뒤 공백을 건너뛸지. (윈도우면 true)
+///
+/// # 돌려줌
+/// 다음 낱말의 문자 자리.
+///
+/// # 예제
+/// 맥, 리눅스와 윈도우의 오른쪽 낱말 이동
+/// ```rust
+/// use vanilla::core::textinput::find_next_word_position;
+///
+/// assert_eq!(find_next_word_position("abc def", 0, false), 3);
+/// assert_eq!(find_next_word_position("abc def", 0, true), 4);
+/// ```
+//==============================================================================
+pub fn find_next_word_position(text: &str, character_index: usize, is_skip_spaces: bool) -> usize {
+	let character_list: Vec<char> = text.chars().collect();
+	let length = character_list.len();
+	let position = character_index.min(length);
+	let boundary_list = collect_word_boundaries(text);
+	let run_start_list = collect_word_search_run_starts(&character_list);
+	let mut run_index = run_start_list.iter().rposition(|run_start| *run_start <= position).unwrap_or(0);
+	let mut is_first_time = true;
+	while run_index < run_start_list.len() {
+		let run_start = run_start_list[run_index];
+		let run_end = run_start_list.get(run_index + 1).copied().unwrap_or(length);
+		let offset = if is_first_time {
+			position - run_start
+		}
+		else {
+			0
+		};
+		let run_boundary_list = collect_run_boundaries(&boundary_list, run_start, run_end);
+		if let Some(found_index) = find_next_word_in_run(&character_list[run_start..run_end], &run_boundary_list, offset, is_skip_spaces, is_first_time) {
+			return run_start + found_index;
+		}
+		is_first_time = false;
+		run_index += 1;
+	}
+	length
+}
+
+//==============================================================================
+/// 앞 낱말 자리. (크롬 왼쪽 낱말 이동과 뒤로 낱말 지우기, 블링크 PreviousWordPosition, 모든 플랫폼에서 낱말 앞 "|abc |def")
+/// - 크롬 textarea 처럼 글자가 있는 줄의 앞에서는 앞 줄로 넘어가지 않는다. 글 앞이면 0 이다.
+///
+/// # 인자
+/// - `text`: 글.
+/// - `character_index`: 커서의 문자 자리.
+///
+/// # 돌려줌
+/// 앞 낱말의 문자 자리.
+///
+/// # 예제
+/// 왼쪽 낱말 이동
+/// ```rust
+/// use vanilla::core::textinput::find_previous_word_position;
+///
+/// assert_eq!(find_previous_word_position("abc def", 7), 4);
+/// assert_eq!(find_previous_word_position("ab\ncd", 3), 3);
+/// ```
+//==============================================================================
+pub fn find_previous_word_position(text: &str, character_index: usize) -> usize {
+	let character_list: Vec<char> = text.chars().collect();
+	let length = character_list.len();
+	let position = character_index.min(length);
+	let boundary_list = collect_word_boundaries(text);
+	let run_start_list = collect_word_search_run_starts(&character_list);
+	let mut run_index = run_start_list.iter().rposition(|run_start| *run_start <= position).unwrap_or(0);
+	let mut is_first_time = true;
+	loop {
+		let run_start = run_start_list[run_index];
+		let run_end = run_start_list.get(run_index + 1).copied().unwrap_or(length);
+		let offset = if is_first_time {
+			position - run_start
+		}
+		else {
+			run_end - run_start
+		};
+		let run_boundary_list = collect_run_boundaries(&boundary_list, run_start, run_end);
+		if let Some(found_index) = find_previous_word_in_run(&character_list[run_start..run_end], &run_boundary_list, offset, is_first_time) {
+			return run_start + found_index;
+		}
+		if run_index == 0 {
+			return 0;
+		}
+		is_first_time = false;
+		run_index -= 1;
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -1036,6 +1351,67 @@ mod tests {
 		assert!(!is_extended_pictographic('a'));
 		assert!(!is_extended_pictographic('\u{1F3FB}'));
 		assert!(!is_extended_pictographic('\u{1F1F0}'));
+	}
+
+	//==============================================================================
+	/// 낱말 경계와 낱말 자리. (맥과 리눅스는 헤드리스 크롬 158 textarea 에서 Option + 화살표로 잰 자리, 윈도우는 블링크 원문의 예)
+	//==============================================================================
+	#[test]
+	fn word_positions_follow_chrome() {
+		// 크로미엄 ICU 낱말 규칙: 마침표는 숫자 사이에서만, 쌍점은 잇지 않는다. (크롬 Intl.Segmenter 와 같다)
+		assert_eq!(collect_word_boundaries("www.example.com 3.14 a:b"), vec![0, 3, 4, 11, 12, 15, 16, 20, 21, 22, 23, 24]);
+		assert_eq!(collect_word_boundaries(""), vec![0]);
+		// (글, 자리마다 오른쪽 낱말 자리, 자리마다 왼쪽 낱말 자리)
+		let measured_list: [(&str, &[usize], &[usize]); 28] = [
+			("hello world  foo", &[5, 5, 5, 5, 5, 11, 11, 11, 11, 11, 11, 16, 16, 16, 16, 16, 16], &[0, 0, 0, 0, 0, 0, 0, 6, 6, 6, 6, 6, 6, 6, 13, 13, 13]),
+			("word ... more", &[4, 4, 4, 4, 8, 8, 8, 8, 13, 13, 13, 13, 13, 13], &[0, 0, 0, 0, 0, 0, 5, 5, 5, 5, 9, 9, 9, 9]),
+			("word.more, next", &[4, 4, 4, 4, 5, 9, 9, 9, 9, 10, 15, 15, 15, 15, 15, 15], &[0, 0, 0, 0, 0, 4, 5, 5, 5, 5, 9, 9, 11, 11, 11, 11]),
+			("abc\u{1F600}def \u{1F600} ghi", &[3, 3, 3, 4, 7, 7, 7, 9, 9, 13, 13, 13, 13, 13], &[0, 0, 0, 0, 3, 4, 4, 4, 4, 8, 8, 10, 10, 10]),
+			("\u{C548}\u{B155}\u{D558}\u{C138}\u{C694} \u{BC18}\u{AC00}\u{C6CC}\u{C694}", &[5, 5, 5, 5, 5, 10, 10, 10, 10, 10, 10], &[0, 0, 0, 0, 0, 0, 0, 6, 6, 6, 6]),
+			("line1\nline2 x\n\nend", &[5, 5, 5, 5, 5, 6, 11, 11, 11, 11, 11, 13, 13, 14, 15, 18, 18, 18, 18], &[0, 0, 0, 0, 0, 0, 6, 6, 6, 6, 6, 6, 6, 12, 13, 15, 15, 15, 15]),
+			("foo_bar baz-qux 3.14 $100", &[7, 7, 7, 7, 7, 7, 7, 11, 11, 11, 11, 12, 15, 15, 15, 20, 20, 20, 20, 20, 22, 22, 25, 25, 25, 25], &[0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 8, 8, 11, 12, 12, 12, 12, 16, 16, 16, 16, 16, 21, 22, 22, 22]),
+			("  lead   trail  ", &[6, 6, 6, 6, 6, 6, 14, 14, 14, 14, 14, 14, 14, 14, 16, 16, 16], &[0, 0, 0, 2, 2, 2, 2, 2, 2, 2, 9, 9, 9, 9, 9, 9, 9]),
+			("\u{65E5}\u{672C}\u{8A9E}\u{306E}\u{30C6}\u{30AD}\u{30B9}\u{30C8}", &[3, 3, 3, 4, 8, 8, 8, 8, 8], &[0, 0, 0, 0, 3, 4, 4, 4, 4]),
+			("a\u{A0}b c\u{3000}d", &[1, 3, 3, 5, 5, 6, 7, 7], &[0, 0, 0, 2, 2, 4, 5, 6]),
+			("don't stop", &[5, 5, 5, 5, 5, 10, 10, 10, 10, 10, 10], &[0, 0, 0, 0, 0, 0, 0, 6, 6, 6, 6]),
+			("x !!! y", &[1, 5, 5, 5, 5, 7, 7, 7], &[0, 0, 0, 2, 2, 2, 2, 6]),
+			("e\u{301}tude \u{E9}lan", &[6, 6, 6, 6, 6, 6, 11, 11, 11, 11, 11, 11], &[0, 0, 0, 0, 0, 0, 0, 0, 7, 7, 7, 7]),
+			("abc\n", &[3, 3, 3, 4, 4], &[0, 0, 0, 0, 3]),
+			("tab\there\nwin", &[3, 3, 3, 8, 8, 8, 8, 8, 9, 12, 12, 12, 12], &[0, 0, 0, 0, 0, 4, 4, 4, 4, 9, 9, 9, 9]),
+			("a\u{2003}b \u{200B}c", &[1, 2, 3, 6, 6, 6, 6], &[0, 0, 1, 2, 2, 2, 5]),
+			("(foo) [bar]!", &[1, 4, 4, 4, 5, 7, 7, 10, 10, 10, 12, 12, 12], &[0, 0, 1, 1, 1, 4, 4, 6, 7, 7, 7, 10, 10]),
+			("\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467} fam", &[5, 9, 9, 9, 9, 9, 9, 9, 9, 9], &[0, 0, 0, 0, 0, 0, 0, 6, 6, 6]),
+			("ab\n cd", &[2, 2, 6, 6, 6, 6, 6], &[0, 0, 0, 3, 3, 4, 4]),
+			("a\nb\nc", &[1, 2, 3, 4, 5, 5], &[0, 0, 2, 2, 4, 4]),
+			("\nab", &[1, 3, 3, 3], &[0, 1, 1, 1]),
+			("x\n", &[1, 2, 2], &[0, 0, 1]),
+			("ab\n\n\ncd", &[2, 2, 3, 4, 5, 7, 7, 7], &[0, 0, 0, 2, 3, 5, 5, 5]),
+			(" \n a", &[1, 4, 4, 4, 4], &[0, 0, 2, 2, 3]),
+			("a \n\n b", &[1, 2, 3, 6, 6, 6, 6], &[0, 0, 0, 2, 4, 4, 5]),
+			("!\n!", &[1, 2, 3, 3], &[0, 0, 2, 2]),
+			(". \n.x", &[1, 2, 3, 4, 5, 5], &[0, 0, 0, 3, 3, 4]),
+			("x.y!(  \t\n", &[1, 2, 3, 5, 5, 8, 8, 8, 9, 9], &[0, 0, 1, 2, 3, 3, 3, 3, 3, 8]),
+		];
+		for (text, right_list, left_list) in measured_list {
+			for position in collect_grapheme_boundaries(text) {
+				assert_eq!(find_next_word_position(text, position, false), right_list[position], "{:?} {}", text, position);
+				assert_eq!(find_previous_word_position(text, position), left_list[position], "{:?} {}", text, position);
+			}
+		}
+		// 윈도우: editing_behavior.h 의 "abc |def |hij |opq", position_units_word.cc 의 "word ..." 예, 줄바꿈은 건너뛰지 않는다, 글 끝까지 공백이면 건너뛰지 않는다.
+		let follow_chain = |text: &str, step_count: usize| -> Vec<usize> {
+			let mut position = 0;
+			(0..step_count).map(|_| {
+				position = find_next_word_position(text, position, true);
+				position
+			}).collect()
+		};
+		assert_eq!(follow_chain("abc def hij opq", 4), vec![4, 8, 12, 15]);
+		assert_eq!(follow_chain("word ... more", 3), vec![5, 9, 13]);
+		assert_eq!(follow_chain("ab \ncd", 3), vec![3, 4, 6]);
+		assert_eq!(follow_chain("abc   ", 2), vec![3, 6]);
+		assert_eq!(find_next_word_position("x !!! y", 0, true), 2);
+		assert_eq!(find_previous_word_position("abc def hij opq", 15), 12);
 	}
 
 	#[test]

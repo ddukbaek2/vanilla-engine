@@ -183,6 +183,12 @@ fn translate_key(logical_key: &Key, physical_key: PhysicalKey, text: Option<&str
 	let is_shift = modifiers_state.shift_key();
 	let is_control = modifiers_state.control_key() || modifiers_state.super_key();
 	let is_alt = modifiers_state.alt_key();
+	if let Some(word_key) = translate_word_key(logical_key, physical_key, modifiers_state) {
+		return Some(TextInputEventKind::Key {
+			key: word_key,
+			is_shift,
+		});
+	}
 	if is_control && !is_alt {
 		if let Some(movement_key) = translate_modified_movement_key(logical_key, modifiers_state) {
 			return Some(TextInputEventKind::Key {
@@ -296,6 +302,66 @@ fn translate_key(logical_key: &Key, physical_key: PhysicalKey, text: Option<&str
 		return None;
 	}
 	Some(TextInputEventKind::Commit(text.to_string()))
+}
+
+//==============================================================================
+/// 낱말 이동과 지우기 키. (없으면 None)
+/// - 맥이 아니면 블링크 editing_behavior.cc 의 키 표: Ctrl + 왼쪽, 오른쪽(Shift 와 함께면 고르기)은 MoveWordLeft, MoveWordRight, Ctrl + Backspace, Delete 는 DeleteWordBackward, DeleteWordForward.
+/// - 맥은 키 묶음 StandardKeyBinding.dict: Option + 왼쪽, 오른쪽(Shift 와 함께면 고르기)은 moveWordLeft, moveWordRight, Option + Backspace 와 Option + Ctrl + Backspace 는 deleteWordBackward,
+///   Option + Delete 는 deleteWordForward, Option + Ctrl + B, F(Shift 와 함께면 고르기)는 moveWordBackward, moveWordForward.
+//==============================================================================
+fn translate_word_key(logical_key: &Key, physical_key: PhysicalKey, modifiers_state: ModifiersState) -> Option<TextInputKey> {
+	let is_shift = modifiers_state.shift_key();
+	let is_control = modifiers_state.control_key();
+	let named_key = match logical_key {
+		Key::Named(named_key) => {
+			Some(*named_key)
+		}
+		_ => {
+			None
+		}
+	};
+	if cfg!(target_os = "macos") {
+		if !modifiers_state.alt_key() || modifiers_state.super_key() {
+			return None;
+		}
+		if is_control {
+			return match (named_key, physical_key) {
+				(Some(NamedKey::Backspace), _) if !is_shift => {
+					Some(TextInputKey::DeleteWordBackward)
+				}
+				(_, PhysicalKey::Code(KeyCode::KeyB)) => {
+					Some(TextInputKey::WordLeft)
+				}
+				(_, PhysicalKey::Code(KeyCode::KeyF)) => {
+					Some(TextInputKey::WordRight)
+				}
+				_ => {
+					None
+				}
+			};
+		}
+	}
+	else if !is_control || modifiers_state.alt_key() || modifiers_state.super_key() {
+		return None;
+	}
+	match named_key {
+		Some(NamedKey::ArrowLeft) => {
+			Some(TextInputKey::WordLeft)
+		}
+		Some(NamedKey::ArrowRight) => {
+			Some(TextInputKey::WordRight)
+		}
+		Some(NamedKey::Backspace) if !is_shift => {
+			Some(TextInputKey::DeleteWordBackward)
+		}
+		Some(NamedKey::Delete) if !is_shift => {
+			Some(TextInputKey::DeleteWordForward)
+		}
+		_ => {
+			None
+		}
+	}
 }
 
 //==============================================================================
@@ -603,6 +669,38 @@ mod tests {
 			assert_eq!(translate_named(NamedKey::PageUp, KeyCode::PageUp, no_modifiers), Some(TextInputKey::PageUp));
 			assert_eq!(translate_named(NamedKey::Home, KeyCode::Home, ModifiersState::CONTROL), Some(TextInputKey::DocumentStart));
 			assert_eq!(translate_named(NamedKey::End, KeyCode::End, ModifiersState::CONTROL | ModifiersState::SHIFT), Some(TextInputKey::DocumentEnd));
+		}
+	}
+
+	//==============================================================================
+	/// 낱말 키. (윈도우와 리눅스는 블링크 키 표의 Ctrl, 맥은 키 묶음 StandardKeyBinding.dict 의 Option)
+	//==============================================================================
+	#[test]
+	fn translate_word_keys() {
+		let translate = |logical_key: Key, physical_key: KeyCode, modifiers_state: ModifiersState| -> Option<TextInputEventKind> {
+			translate_key(&logical_key, PhysicalKey::Code(physical_key), None, modifiers_state)
+		};
+		let word_modifier = if cfg!(target_os = "macos") {
+			ModifiersState::ALT
+		}
+		else {
+			ModifiersState::CONTROL
+		};
+		assert_eq!(translate(Key::Named(NamedKey::ArrowLeft), KeyCode::ArrowLeft, word_modifier), Some(TextInputEventKind::Key { key: TextInputKey::WordLeft, is_shift: false }));
+		assert_eq!(translate(Key::Named(NamedKey::ArrowRight), KeyCode::ArrowRight, word_modifier | ModifiersState::SHIFT), Some(TextInputEventKind::Key { key: TextInputKey::WordRight, is_shift: true }));
+		assert_eq!(translate(Key::Named(NamedKey::Backspace), KeyCode::Backspace, word_modifier), Some(TextInputEventKind::Key { key: TextInputKey::DeleteWordBackward, is_shift: false }));
+		assert_eq!(translate(Key::Named(NamedKey::Delete), KeyCode::Delete, word_modifier), Some(TextInputEventKind::Key { key: TextInputKey::DeleteWordForward, is_shift: false }));
+		if cfg!(target_os = "macos") {
+			// Option + Ctrl + Backspace 는 deleteWordBackward, Option + Ctrl + B, F 는 moveWordBackward, moveWordForward, Ctrl + 왼쪽은 줄 앞이다.
+			assert_eq!(translate(Key::Named(NamedKey::Backspace), KeyCode::Backspace, ModifiersState::ALT | ModifiersState::CONTROL), Some(TextInputEventKind::Key { key: TextInputKey::DeleteWordBackward, is_shift: false }));
+			assert_eq!(translate(Key::Character("\u{222B}".into()), KeyCode::KeyB, ModifiersState::ALT | ModifiersState::CONTROL), Some(TextInputEventKind::Key { key: TextInputKey::WordLeft, is_shift: false }));
+			assert_eq!(translate(Key::Character("F".into()), KeyCode::KeyF, ModifiersState::ALT | ModifiersState::CONTROL | ModifiersState::SHIFT), Some(TextInputEventKind::Key { key: TextInputKey::WordRight, is_shift: true }));
+			assert_eq!(translate(Key::Named(NamedKey::ArrowLeft), KeyCode::ArrowLeft, ModifiersState::CONTROL), Some(TextInputEventKind::Key { key: TextInputKey::Home, is_shift: false }));
+		}
+		else {
+			// Alt + 왼쪽은 낱말이 아니고, Ctrl + Shift + Backspace, Delete 는 블링크 키 표의 낱말 지우기가 아니다.
+			assert_eq!(translate(Key::Named(NamedKey::ArrowLeft), KeyCode::ArrowLeft, ModifiersState::ALT), Some(TextInputEventKind::Key { key: TextInputKey::Left, is_shift: false }));
+			assert_eq!(translate(Key::Named(NamedKey::Delete), KeyCode::Delete, ModifiersState::CONTROL | ModifiersState::SHIFT), None);
 		}
 	}
 

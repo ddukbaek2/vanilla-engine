@@ -1258,6 +1258,56 @@ fn hide_context_menu() {
 }
 
 //==============================================================================
+/// 캔버스 모드의 낱말 이동과 지우기 키. (없으면 None, 원본 findWordEditCommand, 데스크탑과 같은 키 표)
+/// - 맥이 아니면 블링크 키 표의 Ctrl + 왼쪽, 오른쪽, Backspace, Delete. 맥은 키 묶음의 Option + 왼쪽, 오른쪽, Backspace, Delete 와 Option + Ctrl + Backspace, B, F.
+//==============================================================================
+fn translate_canvas_word_key(keyboard_event: &web_sys::KeyboardEvent) -> Option<TextInputKey> {
+	let key = keyboard_event.key();
+	let is_shift = keyboard_event.shift_key();
+	if is_mac_platform() {
+		if !keyboard_event.alt_key() || keyboard_event.meta_key() {
+			return None;
+		}
+		if keyboard_event.ctrl_key() {
+			if key == "Backspace" && !is_shift {
+				return Some(TextInputKey::DeleteWordBackward);
+			}
+			return match keyboard_event.code().as_str() {
+				"KeyB" => {
+					Some(TextInputKey::WordLeft)
+				}
+				"KeyF" => {
+					Some(TextInputKey::WordRight)
+				}
+				_ => {
+					None
+				}
+			};
+		}
+	}
+	else if !keyboard_event.ctrl_key() || keyboard_event.alt_key() || keyboard_event.meta_key() {
+		return None;
+	}
+	match key.as_str() {
+		"ArrowLeft" => {
+			Some(TextInputKey::WordLeft)
+		}
+		"ArrowRight" => {
+			Some(TextInputKey::WordRight)
+		}
+		"Backspace" if !is_shift => {
+			Some(TextInputKey::DeleteWordBackward)
+		}
+		"Delete" if !is_shift => {
+			Some(TextInputKey::DeleteWordForward)
+		}
+		_ => {
+			None
+		}
+	}
+}
+
+//==============================================================================
 /// 캔버스 모드 키 처리. (use_dominput 이 꺼진 필드가 포커스를 가졌을 때만. 원본 handleCanvasKeydown)
 //==============================================================================
 fn handle_canvas_key_down(event: web_sys::Event) {
@@ -1279,6 +1329,14 @@ fn handle_canvas_key_down(event: web_sys::Event) {
 	}
 	let key = keyboard_event.key();
 	let is_shift = keyboard_event.shift_key();
+	if let Some(word_key) = translate_canvas_word_key(keyboard_event) {
+		event.prevent_default();
+		push_pending_event(0, TextInputEventKind::Key {
+			key: word_key,
+			is_shift,
+		});
+		return;
+	}
 	if keyboard_event.ctrl_key() || keyboard_event.meta_key() {
 		let shortcut_key = match key.to_lowercase().as_str() {
 			"a" => {

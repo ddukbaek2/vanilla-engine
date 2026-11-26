@@ -550,7 +550,7 @@ mod desktop_dialog {
 				TextInputKey::Redo => {
 					self.edit_buffer.redo();
 				}
-				TextInputKey::Enter | TextInputKey::Tab | TextInputKey::Up | TextInputKey::Down | TextInputKey::PageUp | TextInputKey::PageDown | TextInputKey::DocumentStart | TextInputKey::DocumentEnd | TextInputKey::ScrollPageUp | TextInputKey::ScrollPageDown => {
+				TextInputKey::Enter | TextInputKey::Tab | TextInputKey::Up | TextInputKey::Down | TextInputKey::PageUp | TextInputKey::PageDown | TextInputKey::DocumentStart | TextInputKey::DocumentEnd | TextInputKey::ScrollPageUp | TextInputKey::ScrollPageDown | TextInputKey::WordLeft | TextInputKey::WordRight | TextInputKey::DeleteWordBackward | TextInputKey::DeleteWordForward => {
 				}
 			}
 			self.bump_value_revision();
