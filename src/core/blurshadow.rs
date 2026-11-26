@@ -37,6 +37,7 @@ pub(crate) fn css_blur_radius_to_sigma(blur_radius: f32) -> f32 {
 /// # 돌려줌
 /// 시그마. (DIP)
 //==============================================================================
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn views_shadow_blur_to_sigma(shadow_blur: i32) -> f32 {
 	// blur() / 2 는 정수 나눗셈이고, 0.288675f 는 float 를 double 로 넓혀 셈한 뒤 float 로 돌린다.
 	let radius = (shadow_blur / 2) as f64;

@@ -51,7 +51,7 @@
 //==============================================================================
 use crate::base::vector2::Vector2;
 use crate::core::asset::AssetLoadHandle;
-use crate::core::engine::{EngineRunner, PageEvent};
+use crate::core::engine::{Engine, EngineRunner, PageEvent};
 use crate::core::graphic::Graphic;
 use glutin::config::{Config, ConfigTemplateBuilder, GlConfig};
 use glutin::context::{ContextApi, ContextAttributesBuilder, GlProfile, NotCurrentGlContext, PossiblyCurrentContext, Version as GlVersion};
@@ -75,7 +75,7 @@ use crate::core::pointercursor::CursorValue;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use winit::keyboard::PhysicalKey;
-use winit::window::{Icon, Window, WindowId};
+use winit::window::{Icon, Window, WindowAttributes, WindowId};
 
 mod preserveddrawingbuffer;
 mod renderscaler;
@@ -127,17 +127,21 @@ thread_local! {
 //==============================================================================
 pub fn run(engine_runner: EngineRunner) -> Result<(), String> {
 	let is_window_hidden = is_capture_window_hidden();
-	let mut event_loop_builder = EventLoop::builder();
-	#[cfg(target_os = "macos")]
-	if is_window_hidden {
-		use winit::platform::macos::{ActivationPolicy, EventLoopBuilderExtMacOS};
-		event_loop_builder.with_activation_policy(ActivationPolicy::Accessory).with_activate_ignoring_other_apps(false);
-	}
-	let event_loop = event_loop_builder.build().map_err(|error| format!("이벤트 루프 생성 실패: {}", error))?;
+	// Engine::new 가 지어 둔 이벤트 루프와 숨긴 창이 있으면 그것을 쓴다. (이벤트 루프는 프로세스에 하나만 지을 수 있다)
+	let (event_loop, prepared_window_state) = match PREPARED_DESKTOP.with(|prepared_desktop| prepared_desktop.borrow_mut().take()) {
+		Some(prepared_desktop) => {
+			let prepared_desktop = std::mem::ManuallyDrop::into_inner(prepared_desktop);
+			(prepared_desktop.event_loop, prepared_desktop.window_state)
+		}
+		None => {
+			(build_event_loop(is_window_hidden)?, None)
+		}
+	};
 	event_loop.set_control_flow(ControlFlow::Poll);
 	let mut desktop_application = DesktopApplication {
 		engine_runner,
 		window_state: None,
+		prepared_window_state,
 		next_frame_instant: Instant::now(),
 		fatal_error: None,
 		text_input_state: textinput::DesktopTextInputState::new(),
@@ -170,6 +174,212 @@ pub fn run(engine_runner: EngineRunner) -> Result<(), String> {
 			Ok(())
 		}
 	}
+}
+
+//==============================================================================
+/// 이벤트 루프 짓기. (찍기 모드에서 숨긴 창이면 맥은 독 아이콘과 포커스를 가져가지 않는다)
+//==============================================================================
+fn build_event_loop(is_window_hidden: bool) -> Result<EventLoop<()>, String> {
+	let mut event_loop_builder = EventLoop::builder();
+	#[cfg(target_os = "macos")]
+	if is_window_hidden {
+		use winit::platform::macos::{ActivationPolicy, EventLoopBuilderExtMacOS};
+		event_loop_builder.with_activation_policy(ActivationPolicy::Accessory).with_activate_ignoring_other_apps(false);
+	}
+	#[cfg(not(target_os = "macos"))]
+	let _ = is_window_hidden;
+	event_loop_builder.build().map_err(|error| format!("이벤트 루프 생성 실패: {}", error))
+}
+
+//==============================================================================
+/// Engine::new 가 지어 run 에 넘기는 것. (주 스레드의 이벤트 루프와 숨긴 창, GL 컨텍스트)
+//==============================================================================
+struct PreparedDesktop {
+	event_loop: EventLoop<()>,
+	window_state: Option<WindowState>,
+}
+
+thread_local! {
+	/// Engine::new 가 지은 이벤트 루프와 창. (run 이 꺼낸다. winit 이벤트 루프는 프로세스에 하나라 엔진을 버려도 남겨 다음 엔진이 쓴다)
+	/// - run 없이 끝나는 프로세스(문서 예제 같은)에서 스레드 지역 값을 버릴 때 winit 과 AppKit 정리가 이미 버린 값을 만져 멈추므로 버리지 않는다. (ManuallyDrop, 프로세스가 끝나며 운영체제가 거둔다)
+	static PREPARED_DESKTOP: RefCell<Option<std::mem::ManuallyDrop<PreparedDesktop>>> = const { RefCell::new(None) };
+}
+
+//==============================================================================
+/// 엔진을 만들 때 그래픽 짓기. (원본 Engine 생성자의 Graphic, Engine::new 가 부른다)
+/// - 주 스레드에서만 짓는다. 이벤트 루프를 짓고, 그 루프로 창을 숨긴 채 만들어 GL 컨텍스트와 Graphic 을 짓는다. run 은 같은 창을 보이고 그대로 그린다.
+///   (창 없는 컨텍스트를 따로 짓고 넘기는 길보다 네 갈래가 같다: 윈도우 WGL 은 확장을 읽으려면 창이 있어야 하고, 리눅스 EGL 은 winit 연결과 같은 디스플레이여야 창에 붙는다)
+/// - 주 스레드가 아니거나(단위 시험은 이름 붙은 스레드에서 돈다) 이벤트 루프나 GL 을 지을 수 없으면(화면 없는 CI) None 이고, run 이 지금처럼 창을 열 때 짓는다.
+///
+/// # 인자
+/// - `engine`: 갓 만든 엔진. (설정과 애셋 자리를 읽고, 창 손잡이를 넣는다)
+///
+/// # 돌려줌
+/// 지은 그래픽. (못 지으면 None)
+//==============================================================================
+pub(crate) fn prepare_graphic(engine: &mut Engine) -> Option<Graphic> {
+	if std::thread::current().name() != Some("main") {
+		return None;
+	}
+	let is_window_hidden = is_capture_window_hidden();
+	PREPARED_DESKTOP.with(|prepared_desktop| {
+		let mut prepared_desktop = prepared_desktop.borrow_mut();
+		if prepared_desktop.is_none() {
+			let event_loop = build_event_loop(is_window_hidden).ok()?;
+			*prepared_desktop = Some(std::mem::ManuallyDrop::new(PreparedDesktop {
+				event_loop,
+				window_state: None,
+			}));
+		}
+		let prepared_desktop = prepared_desktop.as_mut()?;
+		match &prepared_desktop.window_state {
+			// 앞서 버린 엔진이 지은 창이 남았으면 그 컨텍스트에 그래픽만 새로 짓는다.
+			Some(window_state) => {
+				let graphic = create_graphic(&window_state.context.display(), engine.get_engine_configuration().preserve_drawing_buffer).ok()?;
+				engine.platform_window = Some(window_state.window.clone());
+				Some(graphic)
+			}
+			None => {
+				let (window_state, graphic) = create_window_state(WindowEventLoop::EventLoop(&prepared_desktop.event_loop), engine, false).ok()?;
+				engine.platform_window = Some(window_state.window.clone());
+				prepared_desktop.window_state = Some(window_state);
+				Some(graphic)
+			}
+		}
+	})
+}
+
+//==============================================================================
+/// 창을 지을 이벤트 루프. (Engine::new 의 돌기 전 루프, run 안의 ActiveEventLoop)
+//==============================================================================
+enum WindowEventLoop<'a> {
+	EventLoop(&'a EventLoop<()>),
+	ActiveEventLoop(&'a ActiveEventLoop),
+}
+
+//==============================================================================
+/// 창과 GL 컨텍스트, 그래픽 짓기. (Engine::new 는 숨긴 채, run 은 찍기 모드가 아니면 보이게)
+//==============================================================================
+fn create_window_state(window_event_loop: WindowEventLoop<'_>, engine: &Engine, is_visible: bool) -> Result<(WindowState, Graphic), String> {
+	let engine_configuration = engine.get_engine_configuration();
+	let window_size = if engine_configuration.window_size.x > 0.0 && engine_configuration.window_size.y > 0.0 {
+		engine_configuration.window_size
+	}
+	else {
+		engine_configuration.reference_resolution_size
+	};
+	let mut window_attributes = Window::default_attributes()
+		.with_title(engine_configuration.title.clone())
+		.with_inner_size(LogicalSize::new(window_size.x as f64, window_size.y as f64))
+		.with_resizable(engine_configuration.is_resizable)
+		.with_visible(is_visible)
+		.with_active(is_visible);
+	// 검증용: VANILLA_WINDOW_POSITION=x,y 면 창을 그 자리(물리 픽셀)에 띄운다. (화면 밖에 두고 잴 때)
+	if let Ok(window_position_text) = std::env::var("VANILLA_WINDOW_POSITION") {
+		let position_list: Vec<i32> = window_position_text.split(',').filter_map(|part| part.trim().parse::<i32>().ok()).collect();
+		if position_list.len() == 2 {
+			window_attributes = window_attributes.with_position(winit::dpi::PhysicalPosition::new(position_list[0], position_list[1]));
+		}
+	}
+	if !engine_configuration.window_icon_path.is_empty() {
+		let window_icon_path = engine.resolve_asset_path(&engine_configuration.window_icon_path);
+		match load_window_icon(&window_icon_path) {
+			Ok(window_icon) => {
+				window_attributes = window_attributes.with_window_icon(Some(window_icon));
+			}
+			Err(error) => {
+				eprintln!("Engine: {}", error);
+			}
+		}
+	}
+
+	// 깊이 24 / 스텐실 8 비트에 멀티샘플 4 인 설정. (원본 WebGL 컨텍스트의 기본 depth: true 와 antialias: true, 깊이는 3D 가 쓴다)
+	// - 크롬은 antialias 캔버스를 min(4, GL_MAX_SAMPLES) 표본의 MSAA 로 칠한다. (블링크 DrawingBuffer::Initialize 의 sample_count_, WebglPreferences.msaa_sample_count 기본 4)
+	// - 멀티샘플을 묻지 않으면 맥 CGL 은 멀티샘플 없는 설정 하나만 주어 도형 가장자리가 계단이 된다. 그래서 먼저 4 를 묻고,
+	//   4 이상인 설정이 없으면 묻지 않고 다시 골라 4 에 가까운 것을 쓴다. (크롬도 기기 최대가 4 보다 작으면 그 수로 칠한다)
+	let config_template_builder = ConfigTemplateBuilder::new().with_alpha_size(8).with_depth_size(24).with_stencil_size(8);
+	let build_display = |window_attributes: WindowAttributes, config_template_builder: ConfigTemplateBuilder| {
+		let display_builder = DisplayBuilder::new().with_window_attributes(Some(window_attributes));
+		match window_event_loop {
+			WindowEventLoop::EventLoop(event_loop) => {
+				display_builder.build(event_loop, config_template_builder, pick_config)
+			}
+			WindowEventLoop::ActiveEventLoop(event_loop) => {
+				display_builder.build(event_loop, config_template_builder, pick_config)
+			}
+		}
+	};
+	let (window, gl_config) = match build_display(window_attributes.clone(), config_template_builder.clone().with_multisampling(MULTISAMPLE_COUNT)) {
+		Ok(built) => {
+			built
+		}
+		Err(_) => {
+			build_display(window_attributes, config_template_builder).map_err(|error| format!("GL 설정 고르기 실패: {}", error))?
+		}
+	};
+	let window = window.ok_or_else(|| String::from("창 생성 실패"))?;
+
+	let raw_window_handle = window.window_handle().ok().map(|window_handle| window_handle.as_raw());
+	let gl_display = gl_config.display();
+	let context_attributes = ContextAttributesBuilder::new()
+		.with_context_api(ContextApi::OpenGl(Some(GlVersion::new(3, 3))))
+		.with_profile(GlProfile::Core)
+		.build(raw_window_handle);
+	let not_current_context = unsafe {
+		gl_display.create_context(&gl_config, &context_attributes)
+	}.map_err(|error| format!("GL 3.3 코어 컨텍스트 생성 실패: {}", error))?;
+	let surface_attributes = window.build_surface_attributes(SurfaceAttributesBuilder::<WindowSurface>::new()).map_err(|error| format!("서피스 속성 실패: {}", error))?;
+	let surface = unsafe {
+		gl_display.create_window_surface(&gl_config, &surface_attributes)
+	}.map_err(|error| format!("서피스 생성 실패: {}", error))?;
+	let context = not_current_context.make_current(&surface).map_err(|error| format!("컨텍스트 활성화 실패: {}", error))?;
+
+	// 웨이랜드는 EGL 스왑 간격을 0 으로 두고 수직 동기를 프레임 콜백 맞추개가 맡는다. (메사가 가려진 창에서 스왑 안에 멈추지 않게)
+	#[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
+	let wayland_frame_pacer = waylandframecallback::WaylandFramePacer::new(&window);
+	#[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
+	let is_vertical_sync_paced = wayland_frame_pacer.is_some();
+	#[cfg(not(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android"))))]
+	let is_vertical_sync_paced = false;
+	let use_vertical_sync = engine_configuration.use_vertical_sync && !is_vertical_sync_paced;
+	let swap_interval = if use_vertical_sync {
+		SwapInterval::Wait(NonZeroU32::new(1).expect("one"))
+	}
+	else {
+		SwapInterval::DontWait
+	};
+	if let Err(error) = surface.set_swap_interval(&context, swap_interval) {
+		eprintln!("Engine: 수직 동기 설정 실패: {}", error);
+	}
+	let graphic = create_graphic(&gl_display, engine_configuration.preserve_drawing_buffer)?;
+	let window_state = WindowState {
+		#[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
+		wayland_frame_pacer,
+		window: Rc::new(window),
+		surface,
+		context,
+	};
+	Ok((window_state, graphic))
+}
+
+//==============================================================================
+/// 지금 컨텍스트로 그래픽 짓기. (GL 3.3 코어가 아니면 실패)
+//==============================================================================
+fn create_graphic(gl_display: &glutin::display::Display, preserve_drawing_buffer: bool) -> Result<Graphic, String> {
+	let gl = unsafe {
+		glow::Context::from_loader_function_cstr(|symbol_name| gl_display.get_proc_address(symbol_name) as *const _)
+	};
+	// 3.3 을 청해도 드라이버가 없는 윈도우는 GDI 의 GL 1.1 을 돌려준다. (WGL_ARB_create_context 가 없으면 glutin 이 판을 묻지 않은 컨텍스트를 만든다) 셰이더 함수가 없어 그리기 전에 알린다.
+	let gl_version = glow::HasContext::version(&gl);
+	if gl_version.is_embedded || (gl_version.major, gl_version.minor) < (3, 3) {
+		return Err(format!("OpenGL 3.3 코어가 없다: {}.{} {} (그래픽 드라이버를 깔거나, GPU 가 없는 기계는 메사 llvmpipe 같은 소프트웨어 GL 을 둔다)", gl_version.major, gl_version.minor, gl_version.vendor_info));
+	}
+	// 찍기 모드는 GL 렌더러를 남긴다. (CI 기계가 하드웨어 GL 인지 소프트웨어 GL 인지 기록에서 가른다)
+	if std::env::var("VANILLA_CAPTURE_PATH").is_ok() {
+		let (renderer, version_text) = unsafe { (glow::HasContext::get_parameter_string(&gl, glow::RENDERER), glow::HasContext::get_parameter_string(&gl, glow::VERSION)) };
+		eprintln!("Engine: 찍기 GL 렌더러 {}, 판 {}", renderer, version_text);
+	}
+	Graphic::new(gl, preserve_drawing_buffer)
 }
 
 //==============================================================================
@@ -553,6 +763,8 @@ struct WindowState {
 struct DesktopApplication {
 	engine_runner: EngineRunner,
 	window_state: Option<WindowState>,
+	/// Engine::new 가 숨긴 채 지은 창. (run 의 처음 resumed 에서 보이고 window_state 로 옮긴다)
+	prepared_window_state: Option<WindowState>,
 	next_frame_instant: Instant,
 	fatal_error: Option<String>,
 	text_input_state: textinput::DesktopTextInputState,
@@ -598,119 +810,34 @@ impl DesktopApplication {
 	/// 창과 GL 컨텍스트, 그래픽 만들기.
 	//==============================================================================
 	fn create_window(&mut self, event_loop: &ActiveEventLoop) -> Result<(), String> {
-		let engine = &self.engine_runner.engine;
-		let engine_configuration = engine.get_engine_configuration();
-		let window_size = if engine_configuration.window_size.x > 0.0 && engine_configuration.window_size.y > 0.0 {
-			engine_configuration.window_size
-		}
-		else {
-			engine_configuration.reference_resolution_size
-		};
-		let mut window_attributes = Window::default_attributes()
-			.with_title(engine_configuration.title.clone())
-			.with_inner_size(LogicalSize::new(window_size.x as f64, window_size.y as f64))
-			.with_resizable(engine_configuration.is_resizable)
-			.with_visible(!self.is_window_hidden)
-			.with_active(!self.is_window_hidden);
-		// 검증용: VANILLA_WINDOW_POSITION=x,y 면 창을 그 자리(물리 픽셀)에 띄운다. (화면 밖에 두고 잴 때)
-		if let Ok(window_position_text) = std::env::var("VANILLA_WINDOW_POSITION") {
-			let position_list: Vec<i32> = window_position_text.split(',').filter_map(|part| part.trim().parse::<i32>().ok()).collect();
-			if position_list.len() == 2 {
-				window_attributes = window_attributes.with_position(winit::dpi::PhysicalPosition::new(position_list[0], position_list[1]));
-			}
-		}
-		if !engine_configuration.window_icon_path.is_empty() {
-			let window_icon_path = engine.resolve_asset_path(&engine_configuration.window_icon_path);
-			match load_window_icon(&window_icon_path) {
-				Ok(window_icon) => {
-					window_attributes = window_attributes.with_window_icon(Some(window_icon));
+		let window_state = match self.prepared_window_state.take() {
+			// Engine::new 가 지은 숨긴 창: 보이고(찍기 모드는 숨긴 채), 엔진에 그래픽이 없으면(앞 엔진이 지은 창) 그 컨텍스트로 짓는다.
+			Some(window_state) => {
+				if !self.is_window_hidden {
+					window_state.window.set_visible(true);
+					window_state.window.focus_window();
 				}
-				Err(error) => {
-					eprintln!("Engine: {}", error);
+				if self.engine_runner.get_graphic().is_none() {
+					let preserve_drawing_buffer = self.engine_runner.engine.get_engine_configuration().preserve_drawing_buffer;
+					let graphic = create_graphic(&window_state.context.display(), preserve_drawing_buffer)?;
+					self.engine_runner.attach_graphic(graphic);
 				}
+				window_state
 			}
-		}
-
-		// 깊이 24 / 스텐실 8 비트에 멀티샘플 4 인 설정. (원본 WebGL 컨텍스트의 기본 depth: true 와 antialias: true, 깊이는 3D 가 쓴다)
-		// - 크롬은 antialias 캔버스를 min(4, GL_MAX_SAMPLES) 표본의 MSAA 로 칠한다. (블링크 DrawingBuffer::Initialize 의 sample_count_, WebglPreferences.msaa_sample_count 기본 4)
-		// - 멀티샘플을 묻지 않으면 맥 CGL 은 멀티샘플 없는 설정 하나만 주어 도형 가장자리가 계단이 된다. 그래서 먼저 4 를 묻고,
-		//   4 이상인 설정이 없으면 묻지 않고 다시 골라 4 에 가까운 것을 쓴다. (크롬도 기기 최대가 4 보다 작으면 그 수로 칠한다)
-		let config_template_builder = ConfigTemplateBuilder::new().with_alpha_size(8).with_depth_size(24).with_stencil_size(8);
-		let multisample_display_builder = DisplayBuilder::new().with_window_attributes(Some(window_attributes.clone()));
-		let (window, gl_config) = match multisample_display_builder.build(event_loop, config_template_builder.clone().with_multisampling(MULTISAMPLE_COUNT), pick_config) {
-			Ok(built) => {
-				built
-			}
-			Err(_) => {
-				let display_builder = DisplayBuilder::new().with_window_attributes(Some(window_attributes));
-				display_builder.build(event_loop, config_template_builder, pick_config).map_err(|error| format!("GL 설정 고르기 실패: {}", error))?
+			None => {
+				let (window_state, graphic) = create_window_state(WindowEventLoop::ActiveEventLoop(event_loop), &self.engine_runner.engine, !self.is_window_hidden)?;
+				self.engine_runner.attach_graphic(graphic);
+				window_state
 			}
 		};
-		let window = window.ok_or_else(|| String::from("창 생성 실패"))?;
-
-		let raw_window_handle = window.window_handle().ok().map(|window_handle| window_handle.as_raw());
-		let gl_display = gl_config.display();
-		let context_attributes = ContextAttributesBuilder::new()
-			.with_context_api(ContextApi::OpenGl(Some(GlVersion::new(3, 3))))
-			.with_profile(GlProfile::Core)
-			.build(raw_window_handle);
-		let not_current_context = unsafe {
-			gl_display.create_context(&gl_config, &context_attributes)
-		}.map_err(|error| format!("GL 3.3 코어 컨텍스트 생성 실패: {}", error))?;
-		let surface_attributes = window.build_surface_attributes(SurfaceAttributesBuilder::<WindowSurface>::new()).map_err(|error| format!("서피스 속성 실패: {}", error))?;
-		let surface = unsafe {
-			gl_display.create_window_surface(&gl_config, &surface_attributes)
-		}.map_err(|error| format!("서피스 생성 실패: {}", error))?;
-		let context = not_current_context.make_current(&surface).map_err(|error| format!("컨텍스트 활성화 실패: {}", error))?;
-
-		// 웨이랜드는 EGL 스왑 간격을 0 으로 두고 수직 동기를 프레임 콜백 맞추개가 맡는다. (메사가 가려진 창에서 스왑 안에 멈추지 않게)
-		#[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
-		let wayland_frame_pacer = waylandframecallback::WaylandFramePacer::new(&window);
-		#[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
-		let is_vertical_sync_paced = wayland_frame_pacer.is_some();
-		#[cfg(not(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android"))))]
-		let is_vertical_sync_paced = false;
-		let use_vertical_sync = engine_configuration.use_vertical_sync && !is_vertical_sync_paced;
-		let swap_interval = if use_vertical_sync {
-			SwapInterval::Wait(NonZeroU32::new(1).expect("one"))
-		}
-		else {
-			SwapInterval::DontWait
-		};
-		if let Err(error) = surface.set_swap_interval(&context, swap_interval) {
-			eprintln!("Engine: 수직 동기 설정 실패: {}", error);
-		}
-
-		let gl = unsafe {
-			glow::Context::from_loader_function_cstr(|symbol_name| gl_display.get_proc_address(symbol_name) as *const _)
-		};
-		// 3.3 을 청해도 드라이버가 없는 윈도우는 GDI 의 GL 1.1 을 돌려준다. (WGL_ARB_create_context 가 없으면 glutin 이 판을 묻지 않은 컨텍스트를 만든다) 셰이더 함수가 없어 그리기 전에 알린다.
-		let gl_version = glow::HasContext::version(&gl);
-		if gl_version.is_embedded || (gl_version.major, gl_version.minor) < (3, 3) {
-			return Err(format!("OpenGL 3.3 코어가 없다: {}.{} {} (그래픽 드라이버를 깔거나, GPU 가 없는 기계는 메사 llvmpipe 같은 소프트웨어 GL 을 둔다)", gl_version.major, gl_version.minor, gl_version.vendor_info));
-		}
-		// 찍기 모드는 GL 렌더러를 남긴다. (CI 기계가 하드웨어 GL 인지 소프트웨어 GL 인지 기록에서 가른다)
-		if std::env::var("VANILLA_CAPTURE_PATH").is_ok() {
-			let (renderer, version_text) = unsafe { (glow::HasContext::get_parameter_string(&gl, glow::RENDERER), glow::HasContext::get_parameter_string(&gl, glow::VERSION)) };
-			eprintln!("Engine: 찍기 GL 렌더러 {}, 판 {}", renderer, version_text);
-		}
-		let graphic = Graphic::new(gl, engine_configuration.preserve_drawing_buffer)?;
-
+		let window = window_state.window.clone();
 		#[cfg(target_os = "windows")]
 		{
 			windowsplatform::install_power_broadcast_hook(&window);
 			self.virtual_keyboard_controller = windowsinputpane::VirtualKeyboardController::new(&window);
 		}
-		let window = Rc::new(window);
-		self.engine_runner.attach_graphic(graphic);
-		self.engine_runner.engine.platform_window = Some(window.clone());
-		self.window_state = Some(WindowState {
-			#[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
-			wayland_frame_pacer,
-			window,
-			surface,
-			context,
-		});
+		self.engine_runner.engine.platform_window = Some(window);
+		self.window_state = Some(window_state);
 		self.resize();
 		Ok(())
 	}

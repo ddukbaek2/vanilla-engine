@@ -100,7 +100,7 @@ assert_eq!(engine.get_engine_configuration().maximum_frame_per_second, 30.0);
 - 창이나 GL 컨텍스트를 만들지 못하는 등 플랫폼이 실패하면 `Err(까닭)` 을 돌려줍니다.
 - `run` 은 엔진을 가져가므로 한 번만 부릅니다. 다음 씬부터는 씬 훅이 받은 엔진의 `load_scene` 으로 올립니다.
 
-엔진이 가진 것은 `get_time_manager`, `get_view_manager`, `get_input_manager`, `get_audio_manager`, `get_pointer_cursor` 와 각각의 `_mut` 판, `get_platform`, `get_canvas`(데스크탑은 창, 웹은 캔버스, `run` 전에는 `None`), `get_graphic`(`run` 이 창을 열기 전에는 `None`), `get_engine_configuration` 으로 얻습니다. 원본과 다르게 전역 엔진(`Engine.getEngine()`)이 없고, 씬 훅이 `&mut Engine` 을 인자로 받습니다. 그리기 훅은 `Graphic` 도 인자로 받습니다. 엔진이 든 그래픽을 잠깐 꺼내 넘긴 것이라 그 안에서는 `engine.get_graphic()` 이 `None` 이고 인자의 `graphic` 을 씁니다.
+엔진이 가진 것은 `get_time_manager`, `get_view_manager`, `get_input_manager`, `get_audio_manager`, `get_pointer_cursor` 와 각각의 `_mut` 판, `get_platform`, `get_canvas`(데스크탑은 창, 웹은 캔버스), `get_graphic`(원본 생성자처럼 데스크탑은 `Engine::new` 직후부터 있습니다. 화면 없는 기계, 주 스레드가 아닌 곳, 웹은 `run` 이 창이나 캔버스를 잡기 전에는 `None`), `get_engine_configuration` 으로 얻습니다. 원본과 다르게 전역 엔진(`Engine.getEngine()`)이 없고, 씬 훅이 `&mut Engine` 을 인자로 받습니다. 그리기 훅은 `Graphic` 도 인자로 받습니다. 엔진이 든 그래픽을 잠깐 꺼내 넘긴 것이라 그 안에서는 `engine.get_graphic()` 이 `None` 이고 인자의 `graphic` 을 씁니다.
 
 ## 씬의 생명 주기
 

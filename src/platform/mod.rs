@@ -22,6 +22,8 @@ pub mod desktop;
 #[cfg(not(target_arch = "wasm32"))]
 pub use desktop::{is_coarse_pointer, read_clipboard_text, request_asset_bytes, run, set_cursor, set_cursor_visible, set_title, write_clipboard_text, PlatformWindow};
 #[cfg(not(target_arch = "wasm32"))]
+pub(crate) use desktop::prepare_graphic;
+#[cfg(not(target_arch = "wasm32"))]
 pub use desktop::{read_canvas_client_position, read_client_native_size, read_page_query_value, read_safe_area_insets, save_capture_file};
 
 #[cfg(target_arch = "wasm32")]
