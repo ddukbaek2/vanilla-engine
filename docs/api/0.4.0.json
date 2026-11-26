@@ -29655,8 +29655,8 @@
 					"name": "Engine",
 					"kind": "struct",
 					"summary": {
-						"ko": "엔진.\n- 설정으로 만들고 run 에 첫 씬을 넘겨 돌린다. 씬의 훅은 &mut Engine 을 받아 매니저(시간, 뷰, 입력, 오디오, 커서)와 그래픽(get_graphic, run 이 창을 연 뒤)을 꺼내 쓴다.",
-						"en": "Engine.\n- Created from a configuration and run by passing the first scene to run. Scene hooks receive &mut Engine and take the managers (time, view, input, audio, cursor) and the graphic (get_graphic, after run opens the window) from it."
+						"ko": "엔진.\n- 설정으로 만들고 run 에 첫 씬을 넘겨 돌린다. 씬의 훅은 &mut Engine 을 받아 매니저(시간, 뷰, 입력, 오디오, 커서)와 그래픽(get_graphic, 데스크탑 주 스레드는 Engine::new 직후부터)을 꺼내 쓴다.",
+						"en": ""
 					},
 					"counterpart": {
 						"engine": "vanilla.js",
@@ -29687,8 +29687,8 @@
 								}
 							},
 							"description": {
-								"ko": "생성.\n- 매니저(시간, 뷰, 입력, 커서, 오디오)를 만들고 문서 언어와 meta 를 설정대로 둔다. 창과 GL 은 run 에서 플랫폼이 만든다.",
-								"en": "Constructor.\n- Creates the managers (time, view, input, cursor, audio) and sets the document language and meta as configured. The window and GL are created by the platform in run."
+								"ko": "생성.\n- 매니저(시간, 뷰, 입력, 커서, 오디오)를 만들고 문서 언어와 meta 를 설정대로 둔다.\n- 데스크탑 주 스레드에서는 원본 생성자처럼 그래픽도 짓는다. (이벤트 루프와 숨긴 창, GL 컨텍스트를 만들고 run 이 그 창을 보인다. GL 을 지을 수 없거나 주 스레드가 아니면 run 이 창을 열 때 짓는다) 웹은 run 이 캔버스를 잡을 때 짓는다.",
+								"en": ""
 							},
 							"since": "0.3.2",
 							"source": "src/core/engine.rs",
@@ -30938,8 +30938,8 @@
 							"returns": {
 								"type": "Option<&PlatformWindow>",
 								"description": {
-									"ko": "플랫폼 창 손잡이. (run 으로 창을 만들기 전에는 None)",
-									"en": "Platform window handle. (None before the window is created by run)"
+									"ko": "플랫폼 창 손잡이. (데스크탑 주 스레드는 Engine::new 가 숨긴 채 지은 창, 그 밖에는 run 이 창이나 캔버스를 잡기 전에는 None)",
+									"en": ""
 								}
 							},
 							"description": {
@@ -30968,8 +30968,8 @@
 								}
 							},
 							"description": {
-								"ko": "그래픽. (원본 getGraphic, 씬의 create, initialize, tick 이나 컴포넌트의 tick 에서 GL 자원(텍스처, 렌더 타겟, 셰이더 프로그램, 툰 렌더러 같은)을 짓는다)\n- 플랫폼이 GL 컨텍스트를 만들기 전(run 전, 창 없는 시험)에는 None 이다.\n- 그리기 함수(pre_draw, draw, post_draw, draw_on_load, draw_gizmos)와 with_graphic 의 클로저 안에서는 그래픽을 인자로 내어 주어 None 이다. (그 자리에서는 인자로 받은 graphic 이 이 그래픽이다)",
-								"en": "Graphic. (the original getGraphic, builds GL resources (textures, render targets, shader programs, toon renderers and the like) in the scene's create, initialize and tick or in a component's tick)\n- None before the platform creates the GL context (before run, tests without a window).\n- None inside drawing functions (pre_draw, draw, post_draw, draw_on_load, draw_gizmos) and the with_graphic closure, because the graphic is lent as the argument. (there the graphic argument is this graphic)"
+								"ko": "그래픽. (원본 getGraphic, 씬의 create, initialize, tick 이나 컴포넌트의 tick 에서 GL 자원(텍스처, 렌더 타겟, 셰이더 프로그램, 툰 렌더러 같은)을 짓는다)\n- 원본 생성자처럼 데스크탑은 Engine::new 가 주 스레드에서 숨긴 창과 GL 컨텍스트를 지어 바로 있다. (run 은 그 창을 보인다)\n  GL 을 지을 수 없는 기계(화면 없는 CI 같은)나 주 스레드가 아닌 곳(단위 시험)에서는 run 이 창을 열 때까지 None 이다. 웹은 run 이 캔버스를 잡을 때까지 None 이다.\n- 그리기 함수(pre_draw, draw, post_draw, draw_on_load, draw_gizmos)와 with_graphic 의 클로저 안에서는 그래픽을 인자로 내어 주어 None 이다. (그 자리에서는 인자로 받은 graphic 이 이 그래픽이다)",
+								"en": ""
 							},
 							"since": "0.4.0",
 							"source": "src/core/engine.rs",
@@ -30990,10 +30990,10 @@
 								},
 								{
 									"title": {
-										"ko": "창 없이 만든 엔진에는 그래픽이 없다",
-										"en": "An engine created without a window has no graphic"
+										"ko": "엔진을 만든 직후 run 전에 텍스처를 짓는다 (데스크탑, GL 을 지을 수 없는 기계에서는 None)",
+										"en": ""
 									},
-									"code": "use vanilla::{Engine, EngineConfiguration};\n\nlet engine = Engine::new(EngineConfiguration::new());\nassert!(engine.get_graphic().is_none());",
+									"code": "use vanilla::{Engine, EngineConfiguration, RenderTarget};\n\nlet engine = Engine::new(EngineConfiguration::new());\nif let Some(graphic) = engine.get_graphic() {\n\tlet render_target = RenderTarget::new(graphic.get_gl(), 64, 64, false, None);\n\tassert!(render_target.is_ok());\n}",
 									"language": "rust"
 								}
 							]
@@ -31063,10 +31063,10 @@
 							"examples": [
 								{
 									"title": {
-										"ko": "그래픽이 없으면 클로저를 부르지 않는다",
-										"en": "Without a graphic the closure is not called"
+										"ko": "그래픽이 있을 때만 클로저를 부른다 (데스크탑은 Engine::new 직후부터, GL 을 지을 수 없는 기계에서는 None)",
+										"en": ""
 									},
-									"code": "use vanilla::{Engine, EngineConfiguration};\n\nlet mut engine = Engine::new(EngineConfiguration::new());\nlet result = engine.with_graphic(|_engine, graphic| graphic.get_global_alpha());\nassert!(result.is_none());",
+									"code": "use vanilla::{Engine, EngineConfiguration};\n\nlet mut engine = Engine::new(EngineConfiguration::new());\nlet has_graphic = engine.get_graphic().is_some();\nlet result = engine.with_graphic(|_engine, graphic| graphic.get_global_alpha());\nassert_eq!(result.is_some(), has_graphic);",
 									"language": "rust"
 								},
 								{
@@ -31881,10 +31881,10 @@
 						},
 						{
 							"title": {
-								"ko": "창 없이 엔진을 만들어 매니저와 설정 다루기",
-								"en": "Create an engine without a window and work with the managers and configuration"
+								"ko": "run 전에 엔진을 만들어 매니저와 설정 다루기 (데스크탑 주 스레드는 숨긴 창과 그래픽이 이미 있다)",
+								"en": ""
 							},
-							"code": "use vanilla::{Engine, EngineConfiguration};\n\nlet mut engine = Engine::new(EngineConfiguration::new());\nassert_eq!(engine.get_frame_number(), 1);\nassert!(!engine.get_version_string().is_empty());\nengine.get_time_manager_mut().set_time_scale(0.5);\nassert_eq!(engine.get_time_manager().get_time_scale(), 0.5);\nengine.set_maximum_frame_per_second(30.0);\nassert_eq!(engine.get_maximum_frame_per_second(), 30.0);\nassert!(engine.get_canvas().is_none());",
+							"code": "use vanilla::{Engine, EngineConfiguration};\n\nlet mut engine = Engine::new(EngineConfiguration::new());\nassert_eq!(engine.get_frame_number(), 1);\nassert!(!engine.get_version_string().is_empty());\nengine.get_time_manager_mut().set_time_scale(0.5);\nassert_eq!(engine.get_time_manager().get_time_scale(), 0.5);\nengine.set_maximum_frame_per_second(30.0);\nassert_eq!(engine.get_maximum_frame_per_second(), 30.0);\nassert_eq!(engine.get_canvas().is_some(), engine.get_graphic().is_some());",
 							"language": "rust"
 						}
 					]
@@ -115869,8 +115869,7 @@
 								"en": "Pick shading modes by material name and draw to MRT targets in two passes, opaque and blend"
 							},
 							"code": "use glow::HasContext;\nuse vanilla::{HumanSkinRenderer, Matrix4, RenderTarget, RenderTargetOptions, SkinnedModel, Vector3, SKIN_SHADING_EYE, SKIN_SHADING_HAIR};\n\nfn create_head(gl: &glow::Context, glb_bytes: &[u8]) -> Result<(HumanSkinRenderer, SkinnedModel, RenderTarget), String> {\n\tlet mut human_skin_renderer = HumanSkinRenderer::new(gl)?;\n\tlet mut skinned_model = SkinnedModel::load_from_bytes(gl, glb_bytes, &human_skin_renderer)?;\n\tfor drawable in skinned_model.get_drawable_list() {\n\t\tif drawable.material_name.contains(\"eyeball\") {\n\t\t\thuman_skin_renderer.set_material_shading(&drawable.material, SKIN_SHADING_EYE);\n\t\t}\n\t\telse if drawable.material_name.contains(\"hair\") {\n\t\t\thuman_skin_renderer.set_material_shading(&drawable.material, SKIN_SHADING_HAIR);\n\t\t}\n\t}\n\tskinned_model.update(0.0);\n\tlet options = RenderTargetOptions { color_attachment_count: 4, use_float_color: true, use_depth_texture: true, ..RenderTargetOptions::default() };\n\tlet scene_render_target = RenderTarget::new(gl, 1280, 720, true, Some(options))?;\n\tOk((human_skin_renderer, skinned_model, scene_render_target))\n}\n\nfn render_head(gl: &glow::Context, human_skin_renderer: &HumanSkinRenderer, skinned_model: &mut SkinnedModel, scene_render_target: &RenderTarget) {\n\tlet aspect_ratio = scene_render_target.get_width() as f32 / scene_render_target.get_height() as f32;\n\tlet camera_position = Vector3::create(0.0, 1.6, 0.6);\n\tlet view_matrix = Matrix4::create_look_at(camera_position, Vector3::create(0.0, 1.6, 0.0), Vector3::up());\n\tlet mut view_projection_matrix = Matrix4::create_perspective(0.5, aspect_ratio, 0.05, 10.0);\n\tview_projection_matrix.multiply(&view_matrix);\n\tlet model_matrix = Matrix4::create_identity();\n\n\tscene_render_target.bind(gl);\n\tunsafe {\n\t\tgl.clear_color(0.0, 0.0, 0.0, 0.0);\n\t\tgl.depth_mask(true);\n\t\tgl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);\n\t\tgl.enable(glow::DEPTH_TEST);\n\t}\n\thuman_skin_renderer.draw(gl, skinned_model, view_projection_matrix.get_elements(), model_matrix.get_elements(), camera_position.x, camera_position.y, camera_position.z);\n\tunsafe {\n\t\tgl.enable(glow::BLEND);\n\t\tgl.blend_func_separate(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA, glow::ZERO, glow::ONE);\n\t\tgl.depth_mask(false);\n\t}\n\thuman_skin_renderer.draw_blended(gl, skinned_model, view_projection_matrix.get_elements(), model_matrix.get_elements(), camera_position.x, camera_position.y, camera_position.z);\n\tunsafe {\n\t\tgl.depth_mask(true);\n\t\tgl.disable(glow::BLEND);\n\t}\n}",
-							"language": "rust",
-							"image": "old-face.webp"
+							"language": "rust"
 						}
 					]
 				}
