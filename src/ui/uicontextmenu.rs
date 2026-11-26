@@ -145,7 +145,7 @@ impl UIContextMenu {
 	}
 
 	//==============================================================================
-	/// 메뉴 열기. (position 은 메뉴 왼쪽 위의 뷰 좌표. 행을 다시 만들고 영역 안에 붙여 띄운다)
+	/// 메뉴 열기. (position 은 메뉴 왼쪽 위의 자리, 메뉴 노드(부모 크기의 영역) 밑 로컬 좌표. 행을 다시 만들고 영역 안에 붙여 띄운다)
 	//==============================================================================
 	pub fn show(&mut self, node_tree: &mut NodeTree, position: Vector2, item_list: Vec<UIContextMenuItem>) {
 		let (menu_id, overlay_id, panel_id) = match (self.node_id, self.overlay_node_id, self.panel_node_id) {

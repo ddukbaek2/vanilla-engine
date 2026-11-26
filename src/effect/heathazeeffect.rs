@@ -6,10 +6,8 @@
 //!   노드 영역이 화면 밖으로 나가면 화면 가장자리 픽셀을 늘인다. (CLAMP_TO_EDGE)
 //! - 원본처럼 노드에 붙이는 컴포넌트이고, 붙을 때 노드 content_size 가 비어 있으면 300 x 300 으로 정한다.
 //! - 원본과 다른 점:
-//!   - 떠 온 텍스처는 GL 자원이라 다 쓰면 destroy(graphic) 를 부른다. 원본 destroy() 는 텍스처를 만든 컨텍스트를 쥐고 있어 인자가 없다.
-//!   ```text
-//!     러스트 판은 GL 컨텍스트를 Graphic 만 쥐므로 graphic 을 받는다. (ScreenEffect 와 같다. 부르지 않으면 컨텍스트가 없어질 때까지 남는다)
-//!   ```
+//!   - 떠 온 텍스처는 GL 자원이라 다 쓰면 destroy() 를 부른다. 원본처럼 텍스처를 만든 컨텍스트(약한 손잡이)를 쥐어 인자가 없고,
+//!     컴포넌트가 버려질 때(Drop, 노드를 지우거나 씬을 내릴 때)도 스스로 지운다. (ScreenEffect 와 같다)
 //!   - 줄이 한 번에 그릴 수 있는 정점 수(Graphic 한도)를 넘으면 나눠 그린다. 원본은 배열을 늘려 한 번에 그린다.
 //==============================================================================
 use crate::base::vector2::Vector2;
@@ -19,6 +17,7 @@ use crate::effect::particlesystem::draw_colored_quads_in_chunks;
 use crate::core::node::nodetree::ComponentContext;
 use crate::core::node::worldnode::NodeTransform;
 use glow::HasContext;
+use std::rc::Weak;
 
 /// 붙을 때 content_size 가 비어 있으면 쓰는 크기. (원본 생성자)
 const DEFAULT_CONTENT_SIZE: f32 = 300.0;
@@ -38,6 +37,8 @@ pub struct HeatHazeEffect {
 	capture_texture: Option<GlTexture>,
 	capture_texture_width: i32,
 	capture_texture_height: i32,
+	/// 떠 온 텍스처를 만든 컨텍스트의 약한 손잡이. (destroy 와 Drop 이 쓴다)
+	gl_context: Weak<glow::Context>,
 }
 
 #[crate::reflect]
@@ -55,6 +56,7 @@ impl HeatHazeEffect {
 			capture_texture: None,
 			capture_texture_width: 0,
 			capture_texture_height: 0,
+			gl_context: Weak::new(),
 		}
 	}
 
@@ -115,12 +117,15 @@ impl HeatHazeEffect {
 	}
 
 	//==============================================================================
-	/// GL 자원 해제. (떠 온 텍스처)
+	/// GL 자원 해제. (떠 온 텍스처, 원본 destroy)
+	/// - 버려질 때(Drop)도 스스로 부른다. GL 컨텍스트가 이미 사라졌으면 텍스처도 같이 사라졌으므로 잊기만 한다.
 	//==============================================================================
-	pub fn destroy(&mut self, graphic: &mut Graphic) {
+	pub fn destroy(&mut self) {
 		if let Some(capture_texture) = self.capture_texture.take() {
-			unsafe {
-				graphic.get_gl().delete_texture(capture_texture);
+			if let Some(gl) = self.gl_context.upgrade() {
+				unsafe {
+					gl.delete_texture(capture_texture);
+				}
 			}
 		}
 		self.capture_texture_width = 0;
@@ -130,8 +135,7 @@ impl HeatHazeEffect {
 	//==============================================================================
 	/// 떠 올 텍스처 준비. (크기가 바뀌면 다시 잡는다. 실패하면 None)
 	//==============================================================================
-	fn ensure_capture_texture(&mut self, graphic: &Graphic, width: i32, height: i32) -> Option<GlTexture> {
-		let gl = graphic.get_gl();
+	fn ensure_capture_texture(&mut self, gl: &glow::Context, width: i32, height: i32) -> Option<GlTexture> {
 		if let Some(capture_texture) = self.capture_texture {
 			if self.capture_texture_width == width && self.capture_texture_height == height {
 				return Some(capture_texture);
@@ -162,6 +166,7 @@ impl HeatHazeEffect {
 		self.capture_texture = Some(capture_texture);
 		self.capture_texture_width = width;
 		self.capture_texture_height = height;
+		self.gl_context = crate::core::imagetexturecache::find_gl_context_handle(gl).unwrap_or_default();
 		Some(capture_texture)
 	}
 }
@@ -169,6 +174,15 @@ impl HeatHazeEffect {
 impl Default for HeatHazeEffect {
 	fn default() -> HeatHazeEffect {
 		HeatHazeEffect::new()
+	}
+}
+
+impl Drop for HeatHazeEffect {
+	//==============================================================================
+	/// 버려질 때 GL 자원 해제. (destroy)
+	//==============================================================================
+	fn drop(&mut self) {
+		self.destroy();
 	}
 }
 
@@ -246,7 +260,7 @@ impl Component for HeatHazeEffect {
 		}
 
 		// 떠 오기. (GL 은 아래가 0 이라 텍스처 0 줄이 영역 아래쪽이다)
-		let capture_texture = match self.ensure_capture_texture(graphic, region_width, region_height) {
+		let capture_texture = match self.ensure_capture_texture(graphic.get_gl(), region_width, region_height) {
 			Some(capture_texture) => {
 				capture_texture
 			}
@@ -316,5 +330,28 @@ mod tests {
 		heat_haze_effect.timer += 0.25 * heat_haze_effect.get_speed();
 		assert_eq!(heat_haze_effect.get_timer(), 1.0);
 		assert!((heat_haze_effect.calculate_row_offset(10.0) - 2.0f32.sin() * 5.0).abs() < 0.00001);
+	}
+
+	//==============================================================================
+	/// 떠 온 텍스처는 destroy() 와 버려질 때(Drop) 지우고, 크기가 바뀌면 바꿔 잡는다. 컨텍스트가 먼저 사라져도 패닉 없이 잊는다. (가짜 GL)
+	//==============================================================================
+	#[test]
+	fn capture_texture_is_released() {
+		use crate::core::imagetexturecache::fake_gl::{self, FakeGlObject};
+		let gl = fake_gl::create_context();
+		crate::core::imagetexturecache::register_pixel_read_context(&gl);
+		let mut heat_haze_effect = HeatHazeEffect::new();
+		assert!(heat_haze_effect.ensure_capture_texture(&gl, 32, 16).is_some());
+		assert!(heat_haze_effect.ensure_capture_texture(&gl, 64, 16).is_some());
+		assert_eq!(fake_gl::get_live_count(FakeGlObject::Texture), 1);
+		heat_haze_effect.destroy();
+		assert_eq!(fake_gl::get_live_count(FakeGlObject::Texture), 0);
+		assert!(heat_haze_effect.ensure_capture_texture(&gl, 32, 16).is_some());
+		drop(heat_haze_effect);
+		assert_eq!(fake_gl::get_live_count(FakeGlObject::Texture), 0);
+		let mut orphan_effect = HeatHazeEffect::new();
+		assert!(orphan_effect.ensure_capture_texture(&gl, 8, 8).is_some());
+		drop(gl);
+		drop(orphan_effect);
 	}
 }

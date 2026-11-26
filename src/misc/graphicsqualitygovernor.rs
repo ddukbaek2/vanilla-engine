@@ -8,7 +8,7 @@
 //! - 가벼운 길에서 무엇을 줄일지(그림자, 바깥선, 효과, 그리는 수)는 게임이 is_lite 를 읽어 정한다.
 //! - 주소: apply_search_text 는 쿼리 글("?light", "?a=1&light=0")을 받는다. 원본 URLSearchParams 처럼 읽는다.
 //!   (앞의 ? 하나를 떼고 & 로 나누며 빈 조각은 건너뛰고, 처음 = 에서 이름과 값을 가르고, + 는 빈칸, %XX 는 바이트로 풀어 UTF-8 로 읽는다. 같은 이름이 여럿이면 첫 값)
-//!   apply_page_query 는 웹에서 페이지 주소의 쿼리를 읽는다. 데스크탑은 페이지 주소가 없어 아무것도 하지 않는다. (브라우저 전용)
+//!   apply_page_query 는 웹에서 페이지 주소의 쿼리를 읽는다. 데스크탑은 페이지 주소가 없어 환경 변수 `VANILLA_<이름>`(대문자 뱀꼴, light → `VANILLA_LIGHT`)을 읽는다.
 //==============================================================================
 use crate::core::viewmanager::ViewManager;
 use crate::misc::frameprobe::FrameProbe;
@@ -111,7 +111,7 @@ impl GraphicsQualityGovernor {
 	}
 
 	//==============================================================================
-	/// 페이지 주소의 쿼리로 덮어쓰기. (웹 전용, 데스크탑은 그대로)
+	/// 페이지 주소의 쿼리로 덮어쓰기. (웹은 주소의 쿼리, 데스크탑은 환경 변수 `VANILLA_<이름>` 을 읽는다. 값이 0 이나 false 가 아니면 가벼운 길)
 	//==============================================================================
 	pub fn apply_page_query(&mut self, lite_key: &str) {
 		if let Some(value) = platform::read_page_query_value(lite_key) {

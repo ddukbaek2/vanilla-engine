@@ -44,11 +44,11 @@ pub(crate) fn trim_like_chrome(raw: &RawDecode, bytes: &[u8]) -> Vec<Vec<f32>> {
 			// 첫 블록 시각. (마이크로초, FFmpeg 는 트랙 시간 단위로 반올림한 CodecDelay 를 뺀다)
 			let time_base_nanoseconds = matroska_timing.timecode_scale as f64;
 			let codec_delay_in_track_time_base = round_half_away_from_zero(matroska_timing.codec_delay as f64 / time_base_nanoseconds);
-			let first_timestamp_microseconds = ((matroska_timing.first_block_timecode - codec_delay_in_track_time_base) as f64 * time_base_nanoseconds / 1000.0).round() as i64;
+			let first_timestamp_microseconds = (matroska_timing.first_block_timecode.saturating_sub(codec_delay_in_track_time_base) as f64 * time_base_nanoseconds / 1000.0).round() as i64;
 			// pre-skip 을 버린 뒤의 시각. (AudioTimestampHelper::ComputeTimestamp)
 			let microseconds_per_frame = 1000000.0 / sample_rate;
-			let timestamp_after_pre_skip = first_timestamp_microseconds + (microseconds_per_frame * pre_skip as f64) as i64;
-			let negative_discard = if timestamp_after_pre_skip < 0 { (-timestamp_after_pre_skip as f64 / 1000000.0 * sample_rate).round() as usize } else { 0 };
+			let timestamp_after_pre_skip = first_timestamp_microseconds.saturating_add((microseconds_per_frame * pre_skip as f64) as i64);
+			let negative_discard = if timestamp_after_pre_skip < 0 { (-(timestamp_after_pre_skip as f64) / 1000000.0 * sample_rate).round() as usize } else { 0 };
 			// 블록의 DiscardPadding. (나노초 → 표본(반올림) → 마이크로초(버림) → 프레임(+0.5 버림))
 			let mut end_discard_list = vec![0usize; frame_count_list.len()];
 			for (block_index, discard_padding_nanoseconds) in &matroska_timing.discard_padding_list {
@@ -58,7 +58,7 @@ pub(crate) fn trim_like_chrome(raw: &RawDecode, bytes: &[u8]) -> Vec<Vec<f32>> {
 					end_discard_list[*block_index] = (discard_microseconds as f64 / 1000000.0 * sample_rate + 0.5) as usize;
 				}
 			}
-			(pre_skip + negative_discard, end_discard_list, None)
+			(pre_skip.saturating_add(negative_discard), end_discard_list, None)
 		}
 		("isomp4", _) => {
 			let mp4_timing = read_mp4_timing(bytes);
@@ -82,7 +82,7 @@ pub(crate) fn trim_like_chrome(raw: &RawDecode, bytes: &[u8]) -> Vec<Vec<f32>> {
 				let duration = to_samples(mp4_timing.media_duration as i64);
 				let remainder = to_samples(mp4_timing.itunes_remainder);
 				if duration > remainder {
-					total_limit = Some(duration - remainder - front_discard);
+					total_limit = Some((duration - remainder).saturating_sub(front_discard));
 				}
 			}
 			if raw.codec_name == "aac" {
@@ -223,7 +223,7 @@ fn read_unsigned(bytes: &[u8]) -> u64 {
 }
 
 fn read_signed(bytes: &[u8]) -> i64 {
-	if bytes.is_empty() {
+	if bytes.is_empty() || bytes.len() > 8 {
 		return 0;
 	}
 	let unsigned = read_unsigned(bytes);
@@ -302,7 +302,7 @@ fn read_matroska_timing(bytes: &[u8]) -> MatroskaTiming {
 					if Some(track_number) == audio_track_number && block.len() >= track_length + 3 {
 						let relative_timecode = i16::from_be_bytes([block[track_length], block[track_length + 1]]) as i64;
 						if !is_first_block_found {
-							matroska_timing.first_block_timecode = cluster_timecode + relative_timecode;
+							matroska_timing.first_block_timecode = cluster_timecode.saturating_add(relative_timecode);
 							is_first_block_found = true;
 						}
 						// 레이싱이 있으면 프레임 수만큼 패킷이 나온다. (DiscardPadding 은 블록의 마지막 프레임)
@@ -395,7 +395,7 @@ fn read_mp4_timing(bytes: &[u8]) -> Mp4Timing {
 						if mp4_timing.edit_media_time == 0 {
 							mp4_timing.edit_media_time = media_time;
 						}
-						segment_duration_total += segment_duration;
+						segment_duration_total = segment_duration_total.saturating_add(segment_duration);
 					}
 				}
 				if movie_timescale > 0 && segment_duration_total > 0 {
@@ -449,7 +449,7 @@ fn read_mp4_box(bytes: &[u8], position: usize) -> Option<([u8; 4], &[u8], usize)
 	if box_size < header_size {
 		return None;
 	}
-	let end = (position as u64 + box_size).min(bytes.len() as u64) as usize;
+	let end = (position as u64).saturating_add(box_size).min(bytes.len() as u64) as usize;
 	Some((box_type, &bytes[position + header_size as usize..end], end))
 }
 
@@ -482,5 +482,114 @@ fn read_mp4_header_timescale_and_duration(body: &[u8]) -> (u32, u64) {
 			return (0, 0);
 		}
 		(u32::from_be_bytes([body[12], body[13], body[14], body[15]]), read_unsigned(&body[16..20]) as u64)
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::platform::audio::decode::RawPacket;
+
+	//==============================================================================
+	/// EBML 요소 하나 짓기. (번호 바이트, 몸통, 크기는 1 바이트 가변 정수)
+	//==============================================================================
+	fn create_ebml_element(id_bytes: &[u8], body: &[u8]) -> Vec<u8> {
+		let mut element = id_bytes.to_vec();
+		element.push(0x80 | body.len() as u8);
+		element.extend_from_slice(body);
+		element
+	}
+
+	//==============================================================================
+	/// MP4 상자 하나 짓기.
+	//==============================================================================
+	fn create_mp4_box(box_type: &[u8; 4], body: &[u8]) -> Vec<u8> {
+		let mut mp4_box = ((body.len() + 8) as u32).to_be_bytes().to_vec();
+		mp4_box.extend_from_slice(box_type);
+		mp4_box.extend_from_slice(body);
+		mp4_box
+	}
+
+	//==============================================================================
+	/// 소리 패킷 하나로 된 풀기 결과. (모노 48000)
+	//==============================================================================
+	fn create_raw_decode(format_name: &str, codec_name: &str) -> RawDecode {
+		RawDecode {
+			format_name: String::from(format_name),
+			codec_name: String::from(codec_name),
+			sample_rate: 48000,
+			channel_count: 1,
+			time_base: None,
+			track_delay: None,
+			track_padding: None,
+			opus_pre_skip: 312,
+			packet_list: vec![RawPacket { duration: 960, trim_start: 0, trim_end: 0, planes: vec![vec![0.0; 960]] }],
+		}
+	}
+
+	//==============================================================================
+	/// 부호 있는 EBML 정수: 8 바이트를 넘으면 틀린 값이라 0 이다. (FFmpeg ebml_read_sint 처럼)
+	//==============================================================================
+	#[test]
+	fn read_signed_rejects_long_integers() {
+		assert_eq!(read_signed(&[0xFF]), -1);
+		assert_eq!(read_signed(&[0x01, 0x00]), 256);
+		assert_eq!(read_signed(&[0x80, 0, 0, 0, 0, 0, 0, 0]), i64::MIN);
+		assert_eq!(read_signed(&[0xFF; 9]), 0);
+		assert_eq!(read_signed(&[]), 0);
+	}
+
+	//==============================================================================
+	/// 망가진 WebM: 9 바이트 DiscardPadding, 끝 값 클러스터 시각, 아주 큰 CodecDelay 에도 패닉 없이 다듬는다.
+	//==============================================================================
+	#[test]
+	fn malformed_matroska_does_not_panic() {
+		let track_entry = [create_ebml_element(&[0xD7], &[1]), create_ebml_element(&[0x83], &[2]), create_ebml_element(&[0x56, 0xAA], &[0xFF; 8])].concat();
+		let tracks = create_ebml_element(&[0x16, 0x54, 0xAE, 0x6B], &create_ebml_element(&[0xAE], &track_entry));
+		let block = [0x81, 0x00, 0x00, 0x00];
+		let block_group = [create_ebml_element(&[0xA1], &block), create_ebml_element(&[0x75, 0xA2], &[0x7F; 9])].concat();
+		for cluster_timecode in [[0x80, 0, 0, 0, 0, 0, 0, 0], [0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]] {
+			let cluster_body = [create_ebml_element(&[0xE7], &cluster_timecode), create_ebml_element(&[0xA0], &block_group), create_ebml_element(&[0xA3], &[0x81, 0x7F, 0xFF, 0x00])].concat();
+			let bytes = [tracks.clone(), create_ebml_element(&[0x1F, 0x43, 0xB6, 0x75], &cluster_body)].concat();
+			let matroska_timing = read_matroska_timing(&bytes);
+			assert!(matroska_timing.discard_padding_list.is_empty());
+			let channel_data = trim_like_chrome(&create_raw_decode("matroska", "opus"), &bytes);
+			assert_eq!(channel_data.len(), 1);
+			assert!(channel_data[0].len() <= 960);
+		}
+	}
+
+	//==============================================================================
+	/// 망가진 MP4: 아주 큰 64 비트 상자 크기, 넘치는 편집 길이, 소리 길이보다 큰 iTunSMPB priming 에도 패닉 없이 다듬는다.
+	//==============================================================================
+	#[test]
+	fn malformed_mp4_does_not_panic() {
+		let mut huge_box = vec![0, 0, 0, 1];
+		huge_box.extend_from_slice(b"free");
+		huge_box.extend_from_slice(&u64::MAX.to_be_bytes());
+		assert!(read_mp4_box(&huge_box, 0).is_some());
+		let mut mdhd_body = vec![0u8; 20];
+		mdhd_body[12..16].copy_from_slice(&48000u32.to_be_bytes());
+		mdhd_body[16..20].copy_from_slice(&100u32.to_be_bytes());
+		let mut hdlr_body = vec![0u8; 12];
+		hdlr_body[8..12].copy_from_slice(b"soun");
+		let mdia = create_mp4_box(b"mdia", &[create_mp4_box(b"hdlr", &hdlr_body), create_mp4_box(b"mdhd", &mdhd_body)].concat());
+		let mut smpb_body = b"iTunSMPBdata\0\0\0\x01\0\0\0\0".to_vec();
+		smpb_body.extend_from_slice(b" 00000000 00003000 00000010 0000000000000000\0");
+		let udta = create_mp4_box(b"udta", &smpb_body);
+		let moov = create_mp4_box(b"moov", &[create_mp4_box(b"trak", &mdia), udta].concat());
+		let channel_data = trim_like_chrome(&create_raw_decode("isomp4", "aac"), &moov);
+		assert_eq!(channel_data[0].len(), 0);
+		let mut elst_body = vec![1, 0, 0, 0, 0, 0, 0, 2];
+		for _ in 0..2 {
+			elst_body.extend_from_slice(&u64::MAX.to_be_bytes());
+			elst_body.extend_from_slice(&0i64.to_be_bytes());
+			elst_body.extend_from_slice(&[0, 1, 0, 0]);
+		}
+		let trak = create_mp4_box(b"trak", &[create_mp4_box(b"edts", &create_mp4_box(b"elst", &elst_body)), mdia].concat());
+		let moov = create_mp4_box(b"moov", &[create_mp4_box(b"mvhd", &mdhd_body), trak].concat());
+		let mp4_timing = read_mp4_timing(&moov);
+		assert!(mp4_timing.has_edit_list);
+		assert!(mp4_timing.duration_seconds > 0.0);
 	}
 }

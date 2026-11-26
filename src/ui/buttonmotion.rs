@@ -200,7 +200,7 @@ impl ButtonMotion {
 	}
 
 	//==============================================================================
-	/// 밝힘을 맡는 함수 설정. (None 이면 이 부품이 흰 테 판과 밝힌 바탕 판을 둔다)
+	/// 밝힘을 맡는 함수 설정. (None 이면 이 부품이 바탕 Paint 의 색을 밝히고 draw 가 안쪽 흰 테를 그린다)
 	//==============================================================================
 	pub fn set_lit_handler(&mut self, lit_handler: Option<ButtonLitHandler>) {
 		self.lit_handler = lit_handler.map(|lit_handler| Rc::new(RefCell::new(lit_handler)));
@@ -270,7 +270,12 @@ impl ButtonMotion {
 			return false;
 		}
 		if is_hold_started {
-			self.scroll_hold = if ButtonMotion::is_input_over(context) { Some(scroll_offset) } else { None };
+			self.scroll_hold = if ButtonMotion::is_input_over(context) {
+				Some(scroll_offset)
+			}
+			else {
+				None
+			};
 		}
 		let scroll_hold = match self.scroll_hold {
 			Some(scroll_hold) => {
@@ -303,7 +308,12 @@ impl ButtonMotion {
 			}
 		};
 		let saved_tint_color = *self.pressed_tint_color.get_or_insert(button.get_pressed_tint_color());
-		let tint_color = if is_muted { saved_tint_color.with_alpha(0.0) } else { saved_tint_color };
+		let tint_color = if is_muted {
+			saved_tint_color.with_alpha(0.0)
+		}
+		else {
+			saved_tint_color
+		};
 		button.set_pressed_tint_color(tint_color);
 		self.is_press_tint_muted = is_muted;
 	}
@@ -393,7 +403,7 @@ impl Component for ButtonMotion {
 	}
 
 	//==============================================================================
-	/// 갱신. (단추 상태에 따라 크기를 맞추고, 노드의 가운데를 두고 놓는다)
+	/// 노드 content_size 영역 안에만 그리는지. (밝힌 테는 영역 안쪽에 그려 true)
 	//==============================================================================
 	#[reflect(skip)]
 	fn is_drawn_inside_content(&self) -> bool {
@@ -414,6 +424,9 @@ impl Component for ButtonMotion {
 		graphic.draw_stroke_round_rect(rect, (self.lit_round_size - half_width).max(0.0), LIT_RING_WIDTH);
 	}
 
+	//==============================================================================
+	/// 갱신. (단추 상태에 따라 크기를 맞추고, 노드의 가운데를 두고 놓는다)
+	//==============================================================================
 	fn tick(&mut self, context: &mut ComponentContext, time_delta: f32) {
 		let button_state = match context.get_node().get_component::<UIButton>() {
 			Some(button) => {
@@ -430,7 +443,12 @@ impl Component for ButtonMotion {
 
 		// 꼴은 반응하는 동안만 읽는다. (위 노드를 거슬러 오르므로 가만히 있는 단추는 건너뛴다)
 		let is_reacting = is_pressed || is_hovered || self.was_pressed || self.is_moving || self.is_lit;
-		let motion_style = if is_reacting { self.read_motion_style(context.get_node_tree(), context.get_node_id()) } else { ButtonMotionStyle::Normal };
+		let motion_style = if is_reacting {
+			self.read_motion_style(context.get_node_tree(), context.get_node_id())
+		}
+		else {
+			ButtonMotionStyle::Normal
+		};
 		let motion = motion_style.read_values();
 
 		// 눌렀다 떼었는데 손이 아직 단추 위면 누른 것이라 통 튄다. (밖으로 끌고 나가 뗀 것은 누르지 않은 것)
@@ -449,7 +467,12 @@ impl Component for ButtonMotion {
 		}
 		let is_lit = motion.is_hover_lit && !is_coarse_pointer && (is_hovered || is_pressed);
 		self.place_lit_parts(context, is_lit, is_pressed);
-		let step = if time_delta > 0.0 { (time_delta / seconds).min(1.0) } else { 0.0 };
+		let step = if time_delta > 0.0 {
+			(time_delta / seconds).min(1.0)
+		}
+		else {
+			0.0
+		};
 		self.scale += (target_scale - self.scale) * step;
 		let mut scale = self.scale;
 		if self.release_seconds > 0.0 {

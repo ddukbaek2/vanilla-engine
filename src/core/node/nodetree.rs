@@ -850,22 +850,42 @@ impl NodeTree {
 	//==============================================================================
 	/// 컴포넌트 붙이기. (attach 다음 attach_to_tree 를 불러, 컴포넌트가 자식 노드를 만들 수 있게 한다)
 	/// - UIView 처럼 자식 노드를 만드는 컴포넌트는 이것으로 붙인다. 붙인 컴포넌트를 돌려준다.
-	/// - 원본 addComponent 처럼 자기 자리를 먼저 잡고 붙는다. 붙는 동안 함께 붙인 컴포넌트(UIScrollView 의 Mask 같은 것)는 그 뒤에 온다.
+	/// - 원본 addComponent 처럼 자기 자리를 먼저 잡고, 의존 컴포넌트(require)가 노드에 없으면 같은 길로 붙인 다음 붙는다.
+	/// - 의존 컴포넌트와 붙는 동안 함께 붙인 컴포넌트(UIScrollView 의 Mask 같은 것)는 그 뒤에 온다.
 	//==============================================================================
 	pub fn add_component<T: Component + 'static>(&mut self, node_id: NodeId, component: T) -> Option<&mut T> {
 		if !self.nodes.contains_key(node_id) {
 			return None;
 		}
-		let component_index = self.nodes[node_id].components.len();
-		let placeholder = self.take_placeholder();
-		self.nodes[node_id].components.push(placeholder);
-		let mut boxed_component: Box<dyn Component> = Box::new(component);
-		boxed_component.attach(self.nodes[node_id].get_transform_mut());
-		boxed_component.attach_to_tree(self, node_id);
-		self.restore_component_at(node_id, component_index, boxed_component);
+		let component_index = self.add_boxed_component(node_id, Box::new(component));
 		let added_component = self.nodes.get_mut(node_id)?.components.get_mut(component_index)?;
 		let component_reference: &mut dyn Component = added_component.as_mut();
 		component_reference.as_any_mut().downcast_mut::<T>()
+	}
+
+	//==============================================================================
+	/// 상자에 든 컴포넌트 붙이기. (자리를 먼저 잡고, 의존 컴포넌트를 붙인 다음, attach 와 attach_to_tree)
+	///
+	/// # 돌려줌
+	/// 붙인 컴포넌트의 차례 번호.
+	//==============================================================================
+	fn add_boxed_component(&mut self, node_id: NodeId, mut boxed_component: Box<dyn Component>) -> usize {
+		let component_index = self.nodes[node_id].components.len();
+		let placeholder = self.take_placeholder();
+		self.nodes[node_id].components.push(placeholder);
+		for required_component in boxed_component.require() {
+			let is_present = self.nodes[node_id].components.iter().any(|candidate| {
+				let candidate_reference: &dyn Component = candidate.as_ref();
+				std::any::Any::type_id(candidate_reference.as_any()) == required_component.type_id
+			});
+			if !is_present {
+				self.add_boxed_component(node_id, (required_component.create)());
+			}
+		}
+		boxed_component.attach(self.nodes[node_id].get_transform_mut());
+		boxed_component.attach_to_tree(self, node_id);
+		self.restore_component_at(node_id, component_index, boxed_component);
+		component_index
 	}
 
 	//==============================================================================
@@ -1867,6 +1887,71 @@ mod sibling_tests {
 		assert_eq!(node.get_local_opacity(), 0.25);
 		node.get_or_add_component::<RequiredMarker>();
 		assert!(node.has_component::<RequiredMarker>());
+	}
+
+	#[derive(Default)]
+	struct RequiredTreeMarker {
+		component_base: ComponentBase,
+	}
+
+	impl Component for RequiredTreeMarker {
+		fn get_component_base(&self) -> &ComponentBase {
+			&self.component_base
+		}
+
+		fn get_component_base_mut(&mut self) -> &mut ComponentBase {
+			&mut self.component_base
+		}
+
+		fn get_component_type(&self) -> &'static str {
+			"RequiredTreeMarker"
+		}
+
+		fn require(&self) -> Vec<crate::core::component::RequiredComponent> {
+			vec![crate::core::component::RequiredComponent::of::<RequiredMarker>()]
+		}
+
+		fn attach_to_tree(&mut self, node_tree: &mut NodeTree, node_id: NodeId) {
+			node_tree.create_child(node_id, "required child");
+		}
+	}
+
+	#[derive(Default)]
+	struct NeedsTreeMarker {
+		component_base: ComponentBase,
+	}
+
+	impl Component for NeedsTreeMarker {
+		fn get_component_base(&self) -> &ComponentBase {
+			&self.component_base
+		}
+
+		fn get_component_base_mut(&mut self) -> &mut ComponentBase {
+			&mut self.component_base
+		}
+
+		fn get_component_type(&self) -> &'static str {
+			"NeedsTreeMarker"
+		}
+
+		fn require(&self) -> Vec<crate::core::component::RequiredComponent> {
+			vec![crate::core::component::RequiredComponent::of::<RequiredTreeMarker>()]
+		}
+	}
+
+	//==============================================================================
+	/// 트리로 붙여도 의존 컴포넌트(의존의 의존까지)가 같은 길(attach_to_tree 포함)로 먼저 붙고, 이미 있으면 다시 붙이지 않는다. (원본 addComponent)
+	//==============================================================================
+	#[test]
+	fn tree_add_component_adds_required_components() {
+		let mut node_tree = NodeTree::new();
+		let root_id = node_tree.get_root_id();
+		let node_id = node_tree.create_child(root_id, "node");
+		assert!(node_tree.add_component(node_id, NeedsTreeMarker::default()).is_some());
+		assert!(node_tree.add_component(node_id, NeedsTreeMarker::default()).is_some());
+		let component_type_list: Vec<&str> = node_tree[node_id].get_all_components().iter().map(|component| component.get_component_type()).collect();
+		assert_eq!(component_type_list, vec!["NeedsTreeMarker", "RequiredTreeMarker", "RequiredMarker", "NeedsTreeMarker"]);
+		assert_eq!(node_tree[node_id].get_child_count(), 1);
 	}
 
 	//==============================================================================

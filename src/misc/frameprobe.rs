@@ -53,7 +53,12 @@ impl FrameProbe {
 		if self.elapsed_seconds <= self.warmup_seconds {
 			return false;
 		}
-		let target_frame_per_second = if maximum_frame_per_second > 0.0 { maximum_frame_per_second } else { self.unlimited_target_frame_per_second };
+		let target_frame_per_second = if maximum_frame_per_second > 0.0 {
+			maximum_frame_per_second
+		}
+		else {
+			self.unlimited_target_frame_per_second
+		};
 		let slow_frame_seconds = self.slow_frame_ratio / target_frame_per_second;
 		self.frame_count += 1;
 		if frame_seconds > slow_frame_seconds {
@@ -203,7 +208,12 @@ mod tests {
 		let mut frame_index = 0;
 		let mut is_done = false;
 		while !is_done {
-			let frame_seconds = if frame_index % 3 == 0 { 1.0 / 20.0 } else { 1.0 / 60.0 };
+			let frame_seconds = if frame_index % 3 == 0 {
+				1.0 / 20.0
+			}
+			else {
+				1.0 / 60.0
+			};
 			is_done = frame_probe.measure_frame(frame_seconds, 60.0);
 			frame_index += 1;
 		}

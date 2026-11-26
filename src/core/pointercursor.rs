@@ -130,7 +130,7 @@ impl PointerCursor {
 	}
 
 	//==============================================================================
-	/// 주된 손이 손가락인지. (원본 static isCoarsePointer, CSS 의 pointer: coarse, 데스크탑은 거짓)
+	/// 주된 손이 손가락인지. (원본 static isCoarsePointer, CSS 의 pointer: coarse. 데스크탑은 윈도우 태블릿 모드나 마우스 없는 터치 기기, 리눅스 터치스크린만 있는 기기면 참, 맥은 거짓)
 	//==============================================================================
 	pub fn is_coarse_pointer() -> bool {
 		crate::platform::is_coarse_pointer()

@@ -63,11 +63,31 @@ impl BloomEffect {
 	/// 생성. (패스 2개 + 2x2 렌더 타겟 2장, resize 로 크기를 맞춘다)
 	//==============================================================================
 	pub fn new(gl: &glow::Context) -> Result<BloomEffect, String> {
+		let bright_pass = FullscreenPass::new(gl, BRIGHTPASS_FRAGMENTSHADER_SOURCE)?;
+		let blur_pass = match FullscreenPass::new(gl, BLUR_FRAGMENTSHADER_SOURCE) {
+			Ok(blur_pass) => {
+				blur_pass
+			}
+			Err(error) => {
+				bright_pass.destroy(gl);
+				return Err(error);
+			}
+		};
+		let (ping_render_target, pong_render_target) = match create_render_target_pair(gl, 2, 2, None) {
+			Ok(render_target_pair) => {
+				render_target_pair
+			}
+			Err(error) => {
+				bright_pass.destroy(gl);
+				blur_pass.destroy(gl);
+				return Err(error);
+			}
+		};
 		Ok(BloomEffect {
-			bright_pass: FullscreenPass::new(gl, BRIGHTPASS_FRAGMENTSHADER_SOURCE)?,
-			blur_pass: FullscreenPass::new(gl, BLUR_FRAGMENTSHADER_SOURCE)?,
-			ping_render_target: RenderTarget::new(gl, 2, 2, false, None)?,
-			pong_render_target: RenderTarget::new(gl, 2, 2, false, None)?,
+			bright_pass,
+			blur_pass,
+			ping_render_target,
+			pong_render_target,
 			threshold_start: 0.5,
 			threshold_end: 0.95,
 			iteration_count: 2,
@@ -172,8 +192,7 @@ impl BloomEffect {
 		let width = self.ping_render_target.get_width().max(1);
 		let height = self.ping_render_target.get_height().max(1);
 		let options = RenderTargetOptions { use_float_color, ..RenderTargetOptions::default() };
-		let ping_render_target = RenderTarget::new(gl, width, height, false, Some(options))?;
-		let pong_render_target = RenderTarget::new(gl, width, height, false, Some(options))?;
+		let (ping_render_target, pong_render_target) = create_render_target_pair(gl, width, height, Some(options))?;
 		self.ping_render_target.destroy(gl);
 		self.pong_render_target.destroy(gl);
 		self.ping_render_target = ping_render_target;
@@ -231,5 +250,67 @@ impl BloomEffect {
 	//==============================================================================
 	pub fn get_pong_render_target(&self) -> &RenderTarget {
 		&self.pong_render_target
+	}
+}
+
+//==============================================================================
+/// 주고받는 렌더 타겟 한 쌍 생성. (깊이 없음)
+///
+/// # 돌려줌
+/// (핑, 퐁). 둘째를 못 지으면 먼저 지은 첫째를 지우고 Err.
+//==============================================================================
+fn create_render_target_pair(gl: &glow::Context, width: i32, height: i32, options: Option<RenderTargetOptions>) -> Result<(RenderTarget, RenderTarget), String> {
+	let mut ping_render_target = RenderTarget::new(gl, width, height, false, options)?;
+	match RenderTarget::new(gl, width, height, false, options) {
+		Ok(pong_render_target) => {
+			Ok((ping_render_target, pong_render_target))
+		}
+		Err(error) => {
+			ping_render_target.destroy(gl);
+			Err(error)
+		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::core::imagetexturecache::fake_gl::{self, FakeGlObject};
+
+	//==============================================================================
+	/// 지은 GL 객체 수. (텍스처, 프레임버퍼, 프로그램, 버텍스 어레이)
+	//==============================================================================
+	fn read_live_counts() -> [usize; 4] {
+		[fake_gl::get_live_count(FakeGlObject::Texture), fake_gl::get_live_count(FakeGlObject::Framebuffer), fake_gl::get_live_count(FakeGlObject::Program), fake_gl::get_live_count(FakeGlObject::VertexArray)]
+	}
+
+	//==============================================================================
+	/// 생성이나 실수 컬러 바꾸기가 중간에 실패해도 먼저 지은 GL 객체를 지우고, 바꾸기 실패는 예전 판을 그대로 둔다. (가짜 GL)
+	//==============================================================================
+	#[test]
+	fn failure_deletes_partially_created_objects() {
+		let gl = fake_gl::create_context();
+		fake_gl::fail_after(FakeGlObject::Shader, 2);
+		assert!(BloomEffect::new(&gl).is_err());
+		assert_eq!(read_live_counts(), [0, 0, 0, 0]);
+
+		let gl = fake_gl::create_context();
+		fake_gl::fail_after(FakeGlObject::Framebuffer, 1);
+		assert!(BloomEffect::new(&gl).is_err());
+		assert_eq!(read_live_counts(), [0, 0, 0, 0]);
+
+		let gl = fake_gl::create_context();
+		let mut bloom_effect = BloomEffect::new(&gl).expect("bloom effect");
+		assert_eq!(read_live_counts(), [2, 2, 2, 2]);
+		fake_gl::fail_after(FakeGlObject::Framebuffer, 1);
+		assert!(bloom_effect.set_use_float_color(&gl, true).is_err());
+		assert_eq!(read_live_counts(), [2, 2, 2, 2]);
+		assert!(!bloom_effect.get_use_float_color());
+		fake_gl::fail_after(FakeGlObject::Framebuffer, 2);
+		bloom_effect.set_use_float_color(&gl, true).expect("float color");
+		assert!(bloom_effect.get_use_float_color());
+		assert_eq!(read_live_counts(), [2, 2, 2, 2]);
+		bloom_effect.destroy(&gl);
+		assert_eq!(read_live_counts(), [0, 0, 0, 0]);
 	}
 }

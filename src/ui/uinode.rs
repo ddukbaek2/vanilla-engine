@@ -396,12 +396,13 @@ impl UINode {
 
 	//==============================================================================
 	/// 사용자 제약 추가. (솔버가 있으면 바로 건다)
+	/// - 솔버가 받지 않으면(이미 더한 제약, 모순 제약) 그 오류를 돌려주고 목록에도 남기지 않는다.
 	//==============================================================================
 	pub fn add_constraint(&mut self, constraint: &LayoutConstraint) -> Result<(), LayoutError> {
-		self.user_constraints.push(constraint.clone());
 		if let Some(solver) = self.solver.as_ref() {
 			solver.add_constraint(constraint)?;
 		}
+		self.user_constraints.push(constraint.clone());
 		Ok(())
 	}
 
@@ -804,5 +805,26 @@ mod tests {
 
 		label.set_solver(None).expect("detach");
 		assert!(!solver.has_constraint(&label.get_constraints()[0]));
+	}
+
+	//==============================================================================
+	/// 솔버가 받지 않은 제약은 목록에 남지 않아, 다시 솔버를 걸 때 같은 오류로 멈추지 않고 뒤 제약까지 걸린다.
+	//==============================================================================
+	#[test]
+	fn rejected_constraint_is_not_kept() {
+		let solver = LayoutSolver::new();
+		let mut node = UINode::new();
+		node.set_solver(Some(solver.clone())).expect("solver");
+		let width_constraint = node.width_anchor().equal_to(100);
+		node.add_constraint(&width_constraint).expect("width");
+		assert_eq!(node.add_constraint(&width_constraint), Err(LayoutError::DuplicateConstraint));
+		assert_eq!(node.add_constraint(&node.width_anchor().equal_to(50)), Err(LayoutError::UnsatisfiableConstraint));
+		let height_constraint = node.height_anchor().equal_to(40);
+		node.add_constraint(&height_constraint).expect("height");
+		assert_eq!(node.get_constraints().len(), 2);
+		let next_solver = LayoutSolver::new();
+		node.set_solver(Some(next_solver.clone())).expect("next solver");
+		assert!(next_solver.has_constraint(&width_constraint));
+		assert!(next_solver.has_constraint(&height_constraint));
 	}
 }

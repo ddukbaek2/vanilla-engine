@@ -16,22 +16,39 @@ pub struct ShaderProgram {
 
 impl ShaderProgram {
 	//==============================================================================
-	/// 생성. (컴파일 / 링크 실패면 로그를 담은 오류)
+	/// 생성. (컴파일 / 링크 실패면 로그를 담은 오류, 그때까지 지은 셰이더와 프로그램은 지운다)
 	//==============================================================================
 	pub fn new(gl: &glow::Context, vertex_shader_source: &str, fragment_shader_source: &str) -> Result<ShaderProgram, String> {
 		ShaderProgram::create_with_attribute_locations(gl, vertex_shader_source, fragment_shader_source, &[])
 	}
 
 	//==============================================================================
-	/// 어트리뷰트 위치를 링크 전에 고정해 생성. (원본 생성자의 attribute_location_table 인자, 다른 프로그램의 버텍스 어레이를 함께 쓸 때)
+	/// 어트리뷰트 위치를 링크 전에 고정해 생성. (원본 생성자의 attributeLocationTable 인자, 다른 프로그램의 버텍스 어레이를 함께 쓸 때)
 	//==============================================================================
 	pub fn create_with_attribute_locations(gl: &glow::Context, vertex_shader_source: &str, fragment_shader_source: &str, attribute_location_list: &[(&str, u32)]) -> Result<ShaderProgram, String> {
 		let desktop_vertex_shader_source = convert_to_desktop_source(vertex_shader_source);
 		let desktop_fragment_shader_source = convert_to_desktop_source(fragment_shader_source);
 		unsafe {
 			let vertex_shader = compile_shader(gl, glow::VERTEX_SHADER, &desktop_vertex_shader_source)?;
-			let fragment_shader = compile_shader(gl, glow::FRAGMENT_SHADER, &desktop_fragment_shader_source)?;
-			let program = gl.create_program()?;
+			let fragment_shader = match compile_shader(gl, glow::FRAGMENT_SHADER, &desktop_fragment_shader_source) {
+				Ok(fragment_shader) => {
+					fragment_shader
+				}
+				Err(error) => {
+					gl.delete_shader(vertex_shader);
+					return Err(error);
+				}
+			};
+			let program = match gl.create_program() {
+				Ok(program) => {
+					program
+				}
+				Err(error) => {
+					gl.delete_shader(vertex_shader);
+					gl.delete_shader(fragment_shader);
+					return Err(error);
+				}
+			};
 			gl.attach_shader(program, vertex_shader);
 			gl.attach_shader(program, fragment_shader);
 			for (attribute_name, attribute_location) in attribute_location_list {
@@ -139,4 +156,33 @@ unsafe fn compile_shader(gl: &glow::Context, shader_type: u32, source: &str) -> 
 		return Err(format!("셰이더 컴파일 실패: {}", shader_info_log));
 	}
 	Ok(shader)
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+	use super::*;
+	use crate::core::imagetexturecache::fake_gl::{self, FakeGlObject};
+
+	//==============================================================================
+	/// 프래그먼트 셰이더나 프로그램을 못 지으면 먼저 지은 셰이더를 지운다. (가짜 GL)
+	//==============================================================================
+	#[test]
+	fn failure_deletes_created_shaders() {
+		let gl = fake_gl::create_context();
+		fake_gl::fail_after(FakeGlObject::Shader, 1);
+		assert!(ShaderProgram::new(&gl, "", "").is_err());
+		assert_eq!(fake_gl::get_live_count(FakeGlObject::Shader), 0);
+		let gl = fake_gl::create_context();
+		fake_gl::fail_after(FakeGlObject::Program, 0);
+		assert!(ShaderProgram::new(&gl, "", "").is_err());
+		assert_eq!(fake_gl::get_live_count(FakeGlObject::Shader), 0);
+		let gl = fake_gl::create_context();
+		let shader_program = ShaderProgram::new(&gl, "", "").expect("shader program");
+		assert_eq!(fake_gl::get_live_count(FakeGlObject::Shader), 0);
+		assert_eq!(fake_gl::get_live_count(FakeGlObject::Program), 1);
+		unsafe {
+			gl.delete_program(shader_program.get_program());
+		}
+		assert_eq!(fake_gl::get_live_count(FakeGlObject::Program), 0);
+	}
 }

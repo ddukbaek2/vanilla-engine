@@ -123,7 +123,12 @@ impl UIProgressRing {
 			let to = closed_points[point_index];
 			let segment_length = to.distance(from);
 			if walked_length + segment_length >= target_length {
-				let segment_ratio = if segment_length > 0.0 { (target_length - walked_length) / segment_length } else { 0.0 };
+				let segment_ratio = if segment_length > 0.0 {
+					(target_length - walked_length) / segment_length
+				}
+				else {
+					0.0
+				};
 				partial_points.push(Vector2::create(from.x + (to.x - from.x) * segment_ratio, from.y + (to.y - from.y) * segment_ratio));
 				return partial_points;
 			}

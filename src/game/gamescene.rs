@@ -1851,9 +1851,7 @@ mod tests {
 		assert_eq!(reported_scene_base.get_loading_progress_state().get_progress(), 1.0);
 		assert!(!reported_scene_base.get_scene_base().are_tracked_assets_finished());
 	}
-	//==============================================================================
-	/// game_scene! 으로 만든 씬: 바탕이 resize 에서 게임 영역 기준과 레이아웃을 하고 씬의 layout 을 부른다. 첫 tick 에도 layout 이 불린다.
-	//==============================================================================
+
 	struct LayoutCountScene {
 		game_scene_base: GameSceneBase,
 		layout_count: u32,
@@ -1880,6 +1878,9 @@ mod tests {
 
 	crate::game_scene!(LayoutCountScene);
 
+	//==============================================================================
+	/// game_scene! 으로 만든 씬: 바탕이 resize 에서 게임 영역 기준과 레이아웃을 하고 씬의 layout 을 부른다. 첫 tick 에도 layout 이 불린다.
+	//==============================================================================
 	#[test]
 	fn game_scene_macro_calls_base_and_hooks() {
 		use crate::core::scene::Scene;

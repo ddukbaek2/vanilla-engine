@@ -181,11 +181,12 @@ impl Localization {
 
 	//==============================================================================
 	/// 지금 언어가 오른쪽에서 왼쪽으로 쓰는 언어인지. (글자를 그 방향으로 굽고 배치를 좌우로 뒤집을 때)
+	/// - set_right_to_left 처럼 소문자로, 밑줄은 하이픈으로 읽은 첫 조각을 본다. ("ar_EG" 도 ar)
 	//==============================================================================
 	pub fn is_right_to_left() -> bool {
 		with_state(|state| {
-			let primary_code = state.language_code.split('-').next().unwrap_or("");
-			state.right_to_left_languages.contains(primary_code)
+			let primary_code = state.language_code.to_lowercase().replace('_', "-").split('-').next().unwrap_or("").to_string();
+			state.right_to_left_languages.contains(&primary_code)
 		})
 	}
 
@@ -518,15 +519,15 @@ fn convert_locale_to_language_tag(locale_name: &str) -> String {
 }
 
 //==============================================================================
-// 시험. (전역 상태가 스레드마다 따로라 시험끼리 섞이지 않는다)
-//==============================================================================
-//==============================================================================
 /// 정규식 \s 에 드는 빈칸인지. (유니코드 빈칸과 BOM)
 //==============================================================================
 fn is_pattern_whitespace(character: char) -> bool {
 	character.is_whitespace() || character == '\u{feff}'
 }
 
+//==============================================================================
+// 시험. (전역 상태가 스레드마다 따로라 시험끼리 섞이지 않는다)
+//==============================================================================
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -547,6 +548,24 @@ mod tests {
 		assert_eq!(Localization::read_layout_text_align(TextAlign::Left), TextAlign::Right);
 		assert_eq!(Localization::read_layout_text_align(TextAlign::Right), TextAlign::Left);
 		assert_eq!(Localization::read_layout_text_align(TextAlign::Center), TextAlign::Center);
+	}
+
+	//==============================================================================
+	/// 밑줄 태그와 대문자 언어 코드도 첫 조각으로 오른쪽에서 왼쪽 언어를 가린다. (set_right_to_left 와 같은 읽기)
+	//==============================================================================
+	#[test]
+	fn right_to_left_reads_underscore_tag() {
+		Localization::clear();
+		Localization::set_language("ar_EG");
+		assert!(Localization::is_right_to_left());
+		Localization::set_language("HE-IL");
+		assert!(Localization::is_right_to_left());
+		Localization::set_language("en_US");
+		assert!(!Localization::is_right_to_left());
+		Localization::set_right_to_left("EN_us", true);
+		assert!(Localization::is_right_to_left());
+		Localization::set_right_to_left("en", false);
+		assert!(!Localization::is_right_to_left());
 	}
 
 	//==============================================================================
