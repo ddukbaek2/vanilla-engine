@@ -22,7 +22,7 @@ use crate::core::graphic::{BlendMode, GlTexture, Graphic, FLOATS_PER_VERTEX};
 use crate::core::image::Image;
 use crate::core::node::nodetree::ComponentContext;
 use crate::core::node::worldnode::NodeTransform;
-use crate::experimental::tilemap::tilemaplayer::{TilemapChunk, TilemapLayer};
+use crate::experimental::tilemap::tilemaplayer::{TilemapChunk, TilemapLayer, DEFAULT_CHUNK_SIZE};
 use crate::experimental::tilemap::tileset::{TileCollisionShape, TileFillMode, TileRenderSize, Tileset};
 use crate::misc::grid::GridCell;
 use std::rc::Rc;
@@ -1062,7 +1062,21 @@ impl Tilemap {
 	/// 새 층.
 	//==============================================================================
 	pub fn create_layer(&mut self, name: &str) -> &mut TilemapLayer {
-		let layer_index = self.add_layer(TilemapLayer::new(name));
+		self.create_layer_with_chunk_size(name, DEFAULT_CHUNK_SIZE)
+	}
+
+	//==============================================================================
+	/// 덩이 크기를 정해 새 층 만들어 넣기. (원본 createLayer(name, chunkSize))
+	///
+	/// # 인자
+	/// - `name`: 이름.
+	/// - `chunk_size`: 덩이 한 변의 칸 수. (1 보다 작으면 1)
+	///
+	/// # 돌려줌
+	/// 새 층.
+	//==============================================================================
+	pub fn create_layer_with_chunk_size(&mut self, name: &str, chunk_size: i32) -> &mut TilemapLayer {
+		let layer_index = self.add_layer(TilemapLayer::create_with_chunk_size(name, chunk_size));
 		&mut self.layers[layer_index]
 	}
 

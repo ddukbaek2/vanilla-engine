@@ -13,6 +13,7 @@ use crate::core::node::nodetree::ComponentContext;
 
 //==============================================================================
 /// 화면 자리를 WebAudio 자리로. ((x / pixels_per_unit, -y / pixels_per_unit, depth))
+/// - 원본처럼 f64 로 나눈 뒤 f32 로 반올림한다. (원본 fround(x / pixelsPerUnit), 배율과 깊이도 원본 number 처럼 f64)
 ///
 /// # 인자
 /// - `view_position`: 화면(뷰) 좌표의 자리. (아래가 +Y, 픽셀)
@@ -31,8 +32,8 @@ use crate::core::node::nodetree::ComponentContext;
 /// assert_eq!(position, Vector3::create(2.0, -1.0, 0.0));
 /// ```
 //==============================================================================
-pub fn convert_view_position_to_audio_position(view_position: Vector2, pixels_per_unit: f32, depth: f32) -> Vector3 {
-	Vector3::create(view_position.x / pixels_per_unit, -view_position.y / pixels_per_unit, depth)
+pub fn convert_view_position_to_audio_position(view_position: Vector2, pixels_per_unit: f64, depth: f64) -> Vector3 {
+	Vector3::create((f64::from(view_position.x) / pixels_per_unit) as f32, (-f64::from(view_position.y) / pixels_per_unit) as f32, depth as f32)
 }
 
 //==============================================================================
@@ -57,7 +58,7 @@ pub fn convert_view_position_to_audio_position(view_position: Vector2, pixels_pe
 pub struct AudioSource2D {
 	component_base: ComponentBase,
 	player: Option<SpatialAudioPlayer>,
-	pixels_per_unit: f32,
+	pixels_per_unit: f64,
 }
 
 impl AudioSource2D {
@@ -106,12 +107,22 @@ impl AudioSource2D {
 	}
 
 	//==============================================================================
+	/// 플레이어 떼기. (원본 setPlayer(null), 뗀 플레이어를 돌려준다)
+	///
+	/// # 돌려줌
+	/// 넣었던 플레이어. (없으면 None)
+	//==============================================================================
+	pub fn take_player(&mut self) -> Option<SpatialAudioPlayer> {
+		self.player.take()
+	}
+
+	//==============================================================================
 	/// WebAudio 한 단위의 픽셀 수 설정. (0 보다 크고 유한해야 받는다)
 	///
 	/// # 인자
 	/// - `pixels_per_unit`: 한 단위가 몇 픽셀인지. (기본 1, 거리 모델의 기준과 최대 거리가 이 단위다)
 	//==============================================================================
-	pub fn set_pixels_per_unit(&mut self, pixels_per_unit: f32) {
+	pub fn set_pixels_per_unit(&mut self, pixels_per_unit: f64) {
 		if pixels_per_unit.is_finite() && pixels_per_unit > 0.0 {
 			self.pixels_per_unit = pixels_per_unit;
 		}
@@ -123,7 +134,7 @@ impl AudioSource2D {
 	/// # 돌려줌
 	/// 한 단위가 몇 픽셀인지. (기본 1)
 	//==============================================================================
-	pub fn get_pixels_per_unit(&self) -> f32 {
+	pub fn get_pixels_per_unit(&self) -> f64 {
 		self.pixels_per_unit
 	}
 }
@@ -226,5 +237,30 @@ mod tests {
 		let up = listener.get_up();
 		assert!((up.x - 1.0).abs() < 1e-6 && up.y.abs() < 1e-6);
 		assert_eq!(listener.get_forward(), Vector3::create(0.0, 0.0, -1.0));
+		assert!(node_tree[listener_id].get_component_mut::<AudioListener2D>().expect("listener").get_listener_mut().is_some());
+		assert!(node_tree[listener_id].get_component_mut::<AudioListener2D>().expect("listener").take_listener().is_some());
+		assert!(node_tree[listener_id].get_component::<AudioListener2D>().expect("listener").get_listener().is_none());
+		assert!(node_tree[source_id].get_component_mut::<AudioSource2D>().expect("source").take_player().is_some());
+	}
+
+	//==============================================================================
+	// 화면 자리 바꾸기는 원본처럼 f64 로 나눈 뒤 f32 로 반올림한다. (f32 끼리 나누면 23.333332, 원본 시험과 같은 값)
+	//==============================================================================
+	#[test]
+	fn view_position_divides_in_f64() {
+		let position = convert_view_position_to_audio_position(Vector2::create(7.0, 7.0), 0.3, 1.0 / 3.0);
+		assert_eq!(position, Vector3::create(23.333334, -23.333334, 0.33333334));
+	}
+
+	//==============================================================================
+	// 크롬처럼 길이 0 의 사이 각은 0 이다. (fmin(NaN, 1) 이 1, chrome_spatial.json 의 static_same_position_cone, hrtf_listener_forward_parallel_up_44100)
+	//==============================================================================
+	#[test]
+	fn zero_length_angles_follow_chrome() {
+		use super::super::{calculate_azimuth_elevation, calculate_cone_gain};
+		let origin = Vector3::create(0.0, 0.0, 0.0);
+		assert_eq!(calculate_cone_gain(origin, Vector3::create(1.0, 0.0, 0.0), origin, 30.0, 90.0, 0.1), 1.0);
+		let (azimuth, elevation) = calculate_azimuth_elevation(Vector3::create(2.0, 1.0, -1.0), origin, Vector3::create(0.0, 1.0, 0.0), Vector3::create(0.0, 1.0, 0.0));
+		assert_eq!((azimuth, elevation), (0.0, 90.0));
 	}
 }

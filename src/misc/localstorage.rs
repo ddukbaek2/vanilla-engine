@@ -1019,7 +1019,7 @@ fn is_java_script_whitespace(character: char) -> bool {
 //==============================================================================
 /// 글 → 숫자. (원본 Number(text): 앞뒤 JS 빈칸을 떼고, 빈 글은 0, 0x / 0o / 0b 정수, 부호 붙은 십진 표기와 Infinity, 그 밖은 NaN)
 //==============================================================================
-fn parse_number(text: &str) -> f64 {
+pub(crate) fn parse_number(text: &str) -> f64 {
 	let trimmed_text = text.trim_matches(is_java_script_whitespace);
 	if trimmed_text.is_empty() {
 		return 0.0;

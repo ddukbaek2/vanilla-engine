@@ -4,6 +4,7 @@
 //! - 가장 작은 꼭짓점(min_x, min_y)과 가장 큰 꼭짓점(max_x, max_y)으로 적는다. 동적 AABB 나무와 2D 물리가 쓴다.
 //! - 값은 원본 자바스크립트 수와 같은 f64 다. (두 엔진의 물리 결과를 같게 하려고)
 //==============================================================================
+use crate::experimental::jsmath::{js_max, js_min};
 
 //==============================================================================
 /// 축 정렬 경계 상자.
@@ -81,7 +82,7 @@ impl AABB2D {
 	/// 둘을 모두 담는 가장 작은 상자.
 	//==============================================================================
 	pub fn combine(first: &AABB2D, second: &AABB2D) -> AABB2D {
-		AABB2D::create(first.min_x.min(second.min_x), first.min_y.min(second.min_y), first.max_x.max(second.max_x), first.max_y.max(second.max_y))
+		AABB2D::create(js_min(first.min_x, second.min_x), js_min(first.min_y, second.min_y), js_max(first.max_x, second.max_x), js_max(first.max_y, second.max_y))
 	}
 
 	//==============================================================================

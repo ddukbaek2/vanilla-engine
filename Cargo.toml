@@ -54,6 +54,8 @@ unicode-properties = { version = "0.1", default-features = false, features = ["e
 unicode-script = "0.5"
 # JsonAsset 이 JSON 을 푼다. (원본 JSON.parse 자리) 객체 키는 적힌 차례를 지킨다. (UIDocument 가 원본 JSON.stringify 와 같은 차례로 쓴다)
 serde_json = { version = "1", features = ["preserve_order"] }
+# 초안 SaveGameManager::save 가 Serialize 를 받는다. (serde_json 이 이미 쓰는 크레이트, derive 는 켜지 않는다)
+serde = { version = "1", default-features = false, features = ["std"] }
 # FBX 압축 배열(zlib deflate)을 푼다. (원본 DecompressionStream 자리, 순수 러스트 miniz_oxide 기본 백엔드라 wasm32 에서도 돈다)
 flate2 = "1"
 # 이미지 해석. (원본은 브라우저가 푸는 형식을 모두 받는다. png, jpeg, webp, gif(첫 장), bmp, ico. 웹은 브라우저가 먼저 푼다)

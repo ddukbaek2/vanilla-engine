@@ -707,7 +707,7 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn panner_matches_chrome_offline_rendering() {
-		let result_list = compare_with_chrome_rendering("chrome_spatial.json", 9, 1e-6);
+		let result_list = compare_with_chrome_rendering("chrome_spatial.json", 10, 1e-6);
 		let maximum_difference = result_list.iter().map(|(_, difference, _)| *difference).fold(0.0f64, f64::max);
 		println!("PannerNode 크롬과 가장 큰 차이: {:e}", maximum_difference);
 	}
@@ -719,7 +719,7 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn hrtf_panner_matches_chrome_offline_rendering() {
-		let result_list = compare_with_chrome_rendering("chrome_spatial_hrtf.json", 8, 1e-6);
+		let result_list = compare_with_chrome_rendering("chrome_spatial_hrtf.json", 9, 1e-6);
 		for (name, difference, energy_ratio) in result_list.iter() {
 			println!("HRTF {}: 가장 큰 차이 {:e}, 제곱합 상대 차이 {:e}", name, difference, energy_ratio);
 		}
