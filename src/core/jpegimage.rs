@@ -16,6 +16,8 @@
 //!   표시가 없으면 성분 번호 1, 2, 3 이 YCbCr, 'R', 'G', 'B' 가 RGB, 그 밖은 YCbCr. 성분 4 개는 Adobe transform 0 이 CMYK, 그 밖과 표시 없음은 YCCK 와 CMYK.
 //! - 양자화 표는 성분이 처음 든 스캔에서 묶는다. (libjpeg-turbo jdinput.c latch_quant_tables 처럼)
 //! - 무손실(SOF3, 8 비트): T.81 Annex H 의 예측 1 ~ 7 과 점 변환. libjpeg-turbo 는 무손실에서 손실 있는 색 바꾸기를 하지 않아(jdcolor.c) RGB 와 CMYK 만 풀린다.
+//! - 빠르게: 허프만은 11 비트 미리 보기 표와 AC 부호, 크기 비트를 한 번에 푸는 표, 0xFF 가 없는 8 바이트를 한꺼번에 넣는 64 비트 비트 버퍼. 역 DCT 는 32 비트로 넘치지 않는 블록을
+//!   8 갈래 한꺼번에(자동 벡터화), 늘리기와 색 바꾸기는 줄마다 묶어 바로 RGBA 로 쓴다(그림 크기의 성분 평면을 따로 두지 않는다). 모두 같은 정수 셈과 같은 비트 차례라 결과는 비트까지 같다.
 //! - EXIF 방향(APP1 의 IFD0 태그 0x0112)은 크롬처럼 건다. 색 프로필(APP2 ICC)은 core/colorprofile.rs 가 바꾼다.
 //! - 크롬이 크기만 읽고 풀지 못하는 것(12 비트와 16 비트, 산술 부호 SOF9 ~ SOF11, 회색과 YCbCr 무손실)은 그 크기의 투명한 그림이다. 크롬 158 은 onload 뒤 Canvas2D 에 아무것도 그리지 않고
 //!   WebGL texImage2D 는 INVALID_VALUE 로 올리지 않는다. (크롬 빌드는 jpeg_read_scanlines 의 8 비트만 쓰고 jdarith.c 를 넣지 않는다) 첫 스캔 앞에서 잘린 파일은 크롬처럼 실패다.
@@ -43,15 +45,18 @@ const ZIGZAG_TO_NATURAL: [usize; 64] = [
 	35, 42, 49, 56, 57, 50, 43, 36, 29, 22, 15, 23, 30, 37, 44, 51, 58, 59, 52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 63,
 ];
 
-const FAST_BITS: u32 = 9;
+const FAST_BITS: u32 = 11;
 
 //==============================================================================
-/// 허프만 표. (T.81 Annex C 의 코드 만들기, 9 비트 미리 보기 표)
+/// 허프만 표. (T.81 Annex C 의 코드 만들기, FAST_BITS(11) 비트 미리 보기 표)
 //==============================================================================
 #[derive(Clone)]
 struct HuffmanTable {
-	/// (길이 << 8) | 값. 0 이면 9 비트보다 긴 부호.
-	fast_lookup: Vec<u16>,
+	/// (길이 << 8) | 값. 0 이면 FAST_BITS 보다 긴 부호.
+	fast_lookup: Box<[u16; 1 << FAST_BITS]>,
+	/// AC 부호와 그 뒤 크기 비트가 함께 FAST_BITS 안에 드는 것. (값 << 16) | (런 << 8) | (부호 길이 << 4) | 크기, 0 이면 느린 길.
+	/// 크기가 0 인 기호(EOB, ZRL)는 넣지 않는다. 같은 비트를 같은 차례로 읽어 값이 느린 길과 같다.
+	fast_ac: Box<[i32; 1 << FAST_BITS]>,
 	max_code: [i32; 18],
 	value_offset: [i32; 18],
 	values: Vec<u8>,
@@ -59,7 +64,7 @@ struct HuffmanTable {
 
 impl HuffmanTable {
 	fn create(code_counts: &[u8; 16], values: &[u8]) -> Result<HuffmanTable, String> {
-		let mut fast_lookup = vec![0u16; 1 << FAST_BITS];
+		let mut fast_lookup = Box::new([0u16; 1 << FAST_BITS]);
 		let mut max_code = [-1i32; 18];
 		let mut value_offset = [0i32; 18];
 		let mut code = 0i32;
@@ -90,7 +95,24 @@ impl HuffmanTable {
 			code <<= 1;
 		}
 		max_code[17] = i32::MAX;
-		Ok(HuffmanTable { fast_lookup, max_code, value_offset, values: values.to_vec() })
+		let mut fast_ac = Box::new([0i32; 1 << FAST_BITS]);
+		for (peek, entry) in fast_ac.iter_mut().enumerate() {
+			let lookup = fast_lookup[peek];
+			if lookup == 0 {
+				continue;
+			}
+			let code_length = (lookup >> 8) as u32;
+			let symbol = lookup as u8;
+			let run = (symbol >> 4) as i32;
+			let size = (symbol & 15) as u32;
+			if size == 0 || code_length + size > FAST_BITS {
+				continue;
+			}
+			let raw = ((peek as u32) >> (FAST_BITS - code_length - size)) & ((1 << size) - 1);
+			let value = if raw < (1 << (size - 1)) { raw as i32 - (1 << size) + 1 } else { raw as i32 };
+			*entry = (value << 16) | (run << 8) | ((code_length as i32) << 4) | size as i32;
+		}
+		Ok(HuffmanTable { fast_lookup, fast_ac, max_code, value_offset, values: values.to_vec() })
 	}
 }
 
@@ -113,6 +135,20 @@ impl<'a> BitReader<'a> {
 	}
 
 	fn fill(&mut self) {
+		// 빠른 길: 다음 8 바이트에 0xFF 가 없으면 들어갈 만큼 한꺼번에 넣는다. (한 바이트씩 넣는 아래 길과 같은 비트)
+		if !self.is_marker_reached && self.bit_count <= 56 && self.position + 8 <= self.data.len() {
+			let word = u64::from_be_bytes(self.data[self.position..self.position + 8].try_into().unwrap_or([0xff; 8]));
+			let inverted = !word;
+			let has_marker_byte = (inverted.wrapping_sub(0x0101_0101_0101_0101) & !inverted & 0x8080_8080_8080_8080) != 0;
+			if !has_marker_byte {
+				let byte_count = (56 - self.bit_count) / 8 + 1;
+				let chunk = if byte_count == 8 { word } else { word >> (64 - byte_count * 8) };
+				self.bits |= chunk << (64 - self.bit_count - byte_count * 8);
+				self.bit_count += byte_count * 8;
+				self.position += byte_count as usize;
+				return;
+			}
+		}
 		while self.bit_count <= 56 {
 			let mut byte = 0u32;
 			if !self.is_marker_reached && self.position >= self.data.len() {
@@ -514,16 +550,16 @@ pub(crate) fn decode_jpeg(bytes: &[u8]) -> Result<DecodedJpeg, String> {
 		// 무손실은 손실 있는 색 바꾸기를 하지 않는다. (jdcolor.c jinit_color_deconverter 가 RGBA 는 RGB 에서만, CMYK 는 CMYK 에서만 받는다) 크롬은 투명한 그림이다.
 		return Ok(DecodedJpeg { width: width as u32, height: height as u32, pixels: vec![0u8; width * height * 4], orientation });
 	}
-	let mut plane_list: Vec<Vec<u8>> = Vec::with_capacity(component_list.len());
-	for component in component_list.iter() {
+	let transformed_list: Vec<Vec<u8>> = if is_lossless { Vec::new() } else { component_list.iter().map(inverse_transform_component).collect() };
+	let sources: Vec<SamplePlane> = component_list.iter().enumerate().map(|(index, component)| {
 		if is_lossless {
-			plane_list.push(upsample_component(component, &component.lossless_samples, component.downsampled_width, false, width, height, max_horizontal_sampling, max_vertical_sampling));
-			continue;
+			SamplePlane { component, plane: &component.lossless_samples, stride: component.downsampled_width, is_fancy: false }
 		}
-		let sample_plane = inverse_transform_component(component);
-		plane_list.push(upsample_component(component, &sample_plane, component.used_blocks_per_line * 8, true, width, height, max_horizontal_sampling, max_vertical_sampling));
-	}
-	let pixels = convert_color(&plane_list, width * height, color_transform);
+		else {
+			SamplePlane { component, plane: &transformed_list[index], stride: component.used_blocks_per_line * 8, is_fancy: true }
+		}
+	}).collect();
+	let pixels = convert_rows(&sources, width, height, max_horizontal_sampling, max_vertical_sampling, color_transform);
 	Ok(DecodedJpeg { width: width as u32, height: height as u32, pixels, orientation })
 }
 
@@ -662,10 +698,10 @@ fn decode_scan(bytes: &[u8], position: usize, component_list: &mut [Component], 
 			return Err(String::from("JPEG AC 허프만 표가 없다"));
 		}
 	}
-	let empty_table = HuffmanTable { fast_lookup: vec![0; 1 << FAST_BITS], max_code: [-1; 18], value_offset: [0; 18], values: Vec::new() };
+	let empty_table = HuffmanTable { fast_lookup: Box::new([0; 1 << FAST_BITS]), fast_ac: Box::new([0; 1 << FAST_BITS]), max_code: [-1; 18], value_offset: [0; 18], values: Vec::new() };
 	let mut end_of_band_run = 0u32;
 	let decode_block = |reader: &mut BitReader, component: &mut Component, block_index: usize, dc_table: &HuffmanTable, ac_table: &HuffmanTable, end_of_band_run: &mut u32| {
-		let block = &mut component.coefficients[block_index * 64..block_index * 64 + 64];
+		let block: &mut [i16; 64] = (&mut component.coefficients[block_index * 64..block_index * 64 + 64]).try_into().expect("블록은 64 개");
 		if !scan.is_progressive {
 			let size = reader.decode(dc_table) as u32;
 			let difference = reader.receive_extend(size.min(16));
@@ -673,6 +709,26 @@ fn decode_scan(bytes: &[u8], position: usize, component_list: &mut [Component], 
 			block[0] = component.dc_predictor as i16;
 			let mut index = 1usize;
 			while index < 64 {
+				if reader.bit_count < 16 {
+					reader.fill();
+				}
+				let fast = ac_table.fast_ac[(reader.bits >> (64 - FAST_BITS)) as usize];
+				if fast != 0 {
+					let code_length = ((fast >> 4) & 15) as u32;
+					index += ((fast >> 8) & 255) as usize;
+					if index > 63 {
+						// 느린 길처럼 부호만 읽고 크기 비트는 읽지 않는다
+						reader.bits <<= code_length;
+						reader.bit_count -= code_length;
+						break;
+					}
+					let length = code_length + (fast & 15) as u32;
+					reader.bits <<= length;
+					reader.bit_count -= length;
+					block[ZIGZAG_TO_NATURAL[index] & 63] = (fast >> 16) as i16;
+					index += 1;
+					continue;
+				}
 				let symbol = reader.decode(ac_table);
 				let run = (symbol >> 4) as usize;
 				let size = (symbol & 15) as u32;
@@ -995,10 +1051,116 @@ fn descale(value: i64, shift: u32) -> i64 {
 	(value + (1i64 << (shift - 1))) >> shift
 }
 
+/// 32 비트 셈이 넘치지 않는 입력 크기. (두 번의 1 차원 셈 모두 가장 큰 합이 178219 x 입력 + 반올림이라 12049 아래면 2^31 안에 든다)
+const NARROW_INPUT_LIMIT: i32 = 12000;
+
 //==============================================================================
 /// 정수 역 DCT 한 블록. (jpeg_idct_islow 의 셈, 범위 밖은 자른다)
 //==============================================================================
+/// - AC 가 모두 0 이면 한 값으로 채운다. (아래 셈에서 열과 줄의 빠른 길이 내는 값과 같다)
+/// - 역양자화한 계수와 첫 번째 셈의 결과가 NARROW_INPUT_LIMIT 안이면 32 비트로 8 열(8 줄)을 한꺼번에 셈한다(자동 벡터화). 같은 정수 셈이라 64 비트 셈과 비트까지 같다. 밖이면 64 비트 셈.
 fn inverse_transform_block(block: &[i16], quantization_table: &[u16; 64], output: &mut [u8], output_offset: usize, output_stride: usize) {
+	let block: &[i16; 64] = block.try_into().expect("블록은 64 개");
+	if block[1..].iter().fold(0i16, |accumulated, value| accumulated | *value) == 0 {
+		let dc_value = (block[0] as i64 * quantization_table[0] as i64) << PASS1_BITS;
+		let sample = (descale(dc_value, PASS1_BITS + 3) + 128).clamp(0, 255) as u8;
+		for row in 0..8 {
+			output[output_offset + row * output_stride..output_offset + row * output_stride + 8].fill(sample);
+		}
+		return;
+	}
+	let mut input = [[0i32; 8]; 8];
+	let mut largest = 0i32;
+	for row in 0..8 {
+		for column in 0..8 {
+			let value = block[row * 8 + column] as i32 * quantization_table[row * 8 + column] as i32;
+			input[row][column] = value;
+			largest = largest.max(value.wrapping_abs());
+		}
+	}
+	// i16 x u16 는 i32 안이다. wrapping_abs 는 i32::MIN 에서만 음수라 아래 비교가 64 비트 길로 보낸다
+	if !(0..=NARROW_INPUT_LIMIT).contains(&largest) {
+		inverse_transform_block_wide(block, quantization_table, output, output_offset, output_stride);
+		return;
+	}
+	let workspace = inverse_transform_lanes(&input, CONST_BITS - PASS1_BITS);
+	let mut transposed = [[0i32; 8]; 8];
+	let mut largest = 0i32;
+	for row in 0..8 {
+		for column in 0..8 {
+			transposed[column][row] = workspace[row][column];
+			largest = largest.max(workspace[row][column].abs());
+		}
+	}
+	if largest > NARROW_INPUT_LIMIT {
+		inverse_transform_block_wide(block, quantization_table, output, output_offset, output_stride);
+		return;
+	}
+	let samples = inverse_transform_lanes(&transposed, CONST_BITS + PASS1_BITS + 3);
+	for row in 0..8 {
+		let output_row = &mut output[output_offset + row * output_stride..output_offset + row * output_stride + 8];
+		for (column, sample) in output_row.iter_mut().enumerate() {
+			*sample = (samples[column][row] + 128).clamp(0, 255) as u8;
+		}
+	}
+}
+
+//==============================================================================
+/// 1 차원 역 DCT 를 8 갈래에 한꺼번에. (input[k][갈래] 가 k 번째 계수, 돌려준 [k][갈래] 가 k 번째 표본, shift 로 반올림해 나눈다)
+//==============================================================================
+#[inline(always)]
+fn inverse_transform_lanes(input: &[[i32; 8]; 8], shift: u32) -> [[i32; 8]; 8] {
+	let mut output = [[0i32; 8]; 8];
+	let round = 1i32 << (shift - 1);
+	for lane in 0..8 {
+		let z2 = input[2][lane];
+		let z3 = input[6][lane];
+		let z1 = (z2 + z3) * FIX_0_541196100 as i32;
+		let tmp2 = z1 + z3 * -(FIX_1_847759065 as i32);
+		let tmp3 = z1 + z2 * FIX_0_765366865 as i32;
+		let tmp0 = (input[0][lane] + input[4][lane]) << CONST_BITS;
+		let tmp1 = (input[0][lane] - input[4][lane]) << CONST_BITS;
+		let tmp10 = tmp0 + tmp3;
+		let tmp13 = tmp0 - tmp3;
+		let tmp11 = tmp1 + tmp2;
+		let tmp12 = tmp1 - tmp2;
+		let y7 = input[7][lane];
+		let y5 = input[5][lane];
+		let y3 = input[3][lane];
+		let y1 = input[1][lane];
+		let z1 = y7 + y1;
+		let z2 = y5 + y3;
+		let z3 = y7 + y3;
+		let z4 = y5 + y1;
+		let z5 = (z3 + z4) * FIX_1_175875602 as i32;
+		let odd_tmp0 = y7 * FIX_0_298631336 as i32;
+		let odd_tmp1 = y5 * FIX_2_053119869 as i32;
+		let odd_tmp2 = y3 * FIX_3_072711026 as i32;
+		let odd_tmp3 = y1 * FIX_1_501321110 as i32;
+		let z1 = z1 * -(FIX_0_899976223 as i32);
+		let z2 = z2 * -(FIX_2_562915447 as i32);
+		let z3 = z3 * -(FIX_1_961570560 as i32) + z5;
+		let z4 = z4 * -(FIX_0_390180644 as i32) + z5;
+		let odd0 = odd_tmp0 + z1 + z3;
+		let odd1 = odd_tmp1 + z2 + z4;
+		let odd2 = odd_tmp2 + z2 + z3;
+		let odd3 = odd_tmp3 + z1 + z4;
+		output[0][lane] = (tmp10 + odd3 + round) >> shift;
+		output[7][lane] = (tmp10 - odd3 + round) >> shift;
+		output[1][lane] = (tmp11 + odd2 + round) >> shift;
+		output[6][lane] = (tmp11 - odd2 + round) >> shift;
+		output[2][lane] = (tmp12 + odd1 + round) >> shift;
+		output[5][lane] = (tmp12 - odd1 + round) >> shift;
+		output[3][lane] = (tmp13 + odd0 + round) >> shift;
+		output[4][lane] = (tmp13 - odd0 + round) >> shift;
+	}
+	output
+}
+
+//==============================================================================
+/// 정수 역 DCT 한 블록의 64 비트 셈. (큰 계수의 길)
+//==============================================================================
+fn inverse_transform_block_wide(block: &[i16], quantization_table: &[u16; 64], output: &mut [u8], output_offset: usize, output_stride: usize) {
 	let mut workspace = [0i64; 64];
 	for column in 0..8 {
 		let coefficient = |row: usize| -> i64 { block[row * 8 + column] as i64 * quantization_table[row * 8 + column] as i64 };
@@ -1103,89 +1265,95 @@ fn inverse_transform_component(component: &Component) -> Vec<u8> {
 }
 
 //==============================================================================
-/// 성분을 그림 크기로 늘린다. (jdsample.c 의 고르기와 셈)
+/// 줄이기 전 성분 평면 하나. (역 DCT 결과나 무손실 표본)
 //==============================================================================
-/// - 무손실은 블록이 한 표본이라 부드러운 늘리기를 쓰지 않는다. (do_fancy 는 _min_DCT_scaled_size > 1 일 때만)
-#[allow(clippy::too_many_arguments)]
-fn upsample_component(component: &Component, plane: &[u8], stride: usize, is_fancy: bool, width: usize, height: usize, max_horizontal_sampling: usize, max_vertical_sampling: usize) -> Vec<u8> {
+struct SamplePlane<'a> {
+	component: &'a Component,
+	plane: &'a [u8],
+	stride: usize,
+	/// 부드러운 늘리기. (무손실은 블록이 한 표본이라 쓰지 않는다, do_fancy 는 _min_DCT_scaled_size > 1 일 때만)
+	is_fancy: bool,
+}
+
+//==============================================================================
+/// 줄 하나를 늘리는 데 쓰는 자리. (그림마다 한 번 잡아 줄마다 되쓴다)
+//==============================================================================
+struct RowScratch {
+	column_sum: Vec<i32>,
+	row: Vec<u8>,
+}
+
+//==============================================================================
+/// 성분의 출력 줄 y 를 그림 폭으로 늘린다. (jdsample.c 의 고르기와 셈)
+//==============================================================================
+/// - 가로 두 배(h2v1)는 3:1 에 반올림 +1, +2, 가로세로 두 배(h2v2)는 세로 3:1 합을 가로 3:1 로 섞어 +8, +7 뒤 16 으로 나누고, 세로 두 배(h1v2)는 +1, +2 뒤 4 로 나눈다.
+/// - 폭이 2 이하면 h2v1, h2v2 는 되풀이, 그 밖의 정수 배는 되풀이, 정수 배가 아니면 가까운 표본. 위 가장자리는 첫 줄, 아래는 마지막 실제 줄, 오른쪽은 마지막 칸을 되쓴다.
+fn upsample_row<'a>(source: &SamplePlane<'a>, y: usize, width: usize, max_horizontal_sampling: usize, max_vertical_sampling: usize, scratch: &'a mut RowScratch) -> &'a [u8] {
+	let component = source.component;
+	let plane = source.plane;
+	let stride = source.stride;
 	let source_width = component.downsampled_width;
 	let source_height = component.downsampled_height;
 	let horizontal_ratio = max_horizontal_sampling / component.horizontal_sampling;
 	let vertical_ratio = max_vertical_sampling / component.vertical_sampling;
 	let is_integral = max_horizontal_sampling % component.horizontal_sampling == 0 && max_vertical_sampling % component.vertical_sampling == 0;
-	let mut output = vec![0u8; width * height];
-	let sample = |x: usize, y: usize| -> i32 { plane[y.min(source_height - 1) * stride + x.min(source_width - 1)] as i32 };
+	let row_at = |source_y: usize| -> &'a [u8] { &plane[source_y.min(source_height - 1) * stride..][..source_width] };
 	if !is_integral {
-		// 정수 배가 아니면 libjpeg 은 풀지 않는다. (JERR_FRACT_SAMPLE_NOTIMPL) 가까운 것으로 늘린다.
-		for y in 0..height {
-			for x in 0..width {
-				output[y * width + x] = sample(x * component.horizontal_sampling / max_horizontal_sampling, y * component.vertical_sampling / max_vertical_sampling) as u8;
-			}
+		let source_row = row_at(y * component.vertical_sampling / max_vertical_sampling);
+		for (x, output) in scratch.row[..width].iter_mut().enumerate() {
+			*output = source_row[(x * component.horizontal_sampling / max_horizontal_sampling).min(source_width - 1)];
 		}
-		return output;
+		return &scratch.row[..width];
 	}
 	match (horizontal_ratio, vertical_ratio) {
-		(1, 1) => {
-			for y in 0..height {
-				output[y * width..y * width + width].copy_from_slice(&plane[y * stride..y * stride + width]);
+		(1, 1) => &plane[y * stride..y * stride + width],
+		(2, 1) if source.is_fancy && source_width > 2 => {
+			let source_row = row_at(y);
+			let doubled = &mut scratch.row[..source_width * 2];
+			doubled[0] = source_row[0];
+			doubled[source_width * 2 - 1] = source_row[source_width - 1];
+			for index in 1..source_width {
+				doubled[index * 2] = ((source_row[index] as i32 * 3 + source_row[index - 1] as i32 + 1) >> 2) as u8;
+				doubled[index * 2 - 1] = ((source_row[index - 1] as i32 * 3 + source_row[index] as i32 + 2) >> 2) as u8;
 			}
+			&scratch.row[..width]
 		}
-		(2, 1) if is_fancy && source_width > 2 => {
-			for y in 0..height {
-				let row = &plane[y * stride..y * stride + source_width];
-				let mut doubled = vec![0u8; source_width * 2];
-				doubled[0] = row[0];
-				doubled[source_width * 2 - 1] = row[source_width - 1];
-				for index in 0..source_width {
-					let this = row[index] as i32 * 3;
-					if index > 0 {
-						doubled[index * 2] = ((this + row[index - 1] as i32 + 1) >> 2) as u8;
-					}
-					if index + 1 < source_width {
-						doubled[index * 2 + 1] = ((this + row[index + 1] as i32 + 2) >> 2) as u8;
-					}
-				}
-				output[y * width..y * width + width].copy_from_slice(&doubled[..width]);
+		(1, 2) if source.is_fancy => {
+			let source_y = y >> 1;
+			let (neighbor_y, bias) = if y & 1 == 0 { (source_y.saturating_sub(1), 1) } else { ((source_y + 1).min(source_height - 1), 2) };
+			let this_row = row_at(source_y);
+			let neighbor_row = row_at(neighbor_y);
+			for ((output, this), neighbor) in scratch.row[..width].iter_mut().zip(this_row.iter()).zip(neighbor_row.iter()) {
+				*output = ((*this as i32 * 3 + *neighbor as i32 + bias) >> 2) as u8;
 			}
+			&scratch.row[..width]
 		}
-		(1, 2) if is_fancy => {
-			for y in 0..height {
-				let source_y = y >> 1;
-				let (neighbor_y, bias) = if y & 1 == 0 { (source_y.saturating_sub(1), 1) } else { ((source_y + 1).min(source_height - 1), 2) };
-				for x in 0..width {
-					output[y * width + x] = ((sample(x, source_y) * 3 + sample(x, neighbor_y) + bias) >> 2) as u8;
-				}
+		(2, 2) if source.is_fancy && source_width > 2 => {
+			let source_y = y >> 1;
+			let neighbor_y = if y & 1 == 0 { source_y.saturating_sub(1) } else { (source_y + 1).min(source_height - 1) };
+			let this_row = row_at(source_y);
+			let neighbor_row = row_at(neighbor_y);
+			let column_sum = &mut scratch.column_sum[..source_width];
+			for ((sum, this), neighbor) in column_sum.iter_mut().zip(this_row.iter()).zip(neighbor_row.iter()) {
+				*sum = *this as i32 * 3 + *neighbor as i32;
 			}
-		}
-		(2, 2) if is_fancy && source_width > 2 => {
-			let mut column_sum = vec![0i32; source_width];
-			let mut doubled = vec![0u8; source_width * 2];
-			for y in 0..height {
-				let source_y = y >> 1;
-				let neighbor_y = if y & 1 == 0 { source_y.saturating_sub(1) } else { (source_y + 1).min(source_height - 1) };
-				let this_row = &plane[source_y.min(source_height - 1) * stride..][..source_width];
-				let neighbor_row = &plane[neighbor_y * stride..][..source_width];
-				for ((sum, this), neighbor) in column_sum.iter_mut().zip(this_row.iter()).zip(neighbor_row.iter()) {
-					*sum = *this as i32 * 3 + *neighbor as i32;
-				}
-				doubled[0] = ((column_sum[0] * 4 + 8) >> 4) as u8;
-				doubled[source_width * 2 - 1] = ((column_sum[source_width - 1] * 4 + 7) >> 4) as u8;
-				for index in 1..source_width {
-					doubled[index * 2] = ((column_sum[index] * 3 + column_sum[index - 1] + 8) >> 4) as u8;
-					doubled[index * 2 - 1] = ((column_sum[index - 1] * 3 + column_sum[index] + 7) >> 4) as u8;
-				}
-				output[y * width..y * width + width].copy_from_slice(&doubled[..width]);
+			let doubled = &mut scratch.row[..source_width * 2];
+			doubled[0] = ((column_sum[0] * 4 + 8) >> 4) as u8;
+			doubled[source_width * 2 - 1] = ((column_sum[source_width - 1] * 4 + 7) >> 4) as u8;
+			for (pair, sums) in doubled[1..source_width * 2 - 1].chunks_exact_mut(2).zip(column_sum.windows(2)) {
+				pair[0] = ((sums[0] * 3 + sums[1] + 7) >> 4) as u8;
+				pair[1] = ((sums[1] * 3 + sums[0] + 8) >> 4) as u8;
 			}
+			&scratch.row[..width]
 		}
 		_ => {
-			for y in 0..height {
-				for x in 0..width {
-					output[y * width + x] = sample(x / horizontal_ratio, y / vertical_ratio) as u8;
-				}
+			let source_row = row_at(y / vertical_ratio);
+			for (x, output) in scratch.row[..width].iter_mut().enumerate() {
+				*output = source_row[(x / horizontal_ratio).min(source_width - 1)];
 			}
+			&scratch.row[..width]
 		}
 	}
-	output
 }
 
 const SCALE_BITS: u32 = 16;
@@ -1196,78 +1364,63 @@ const FIX_1_77200: i32 = 116130;
 const FIX_0_71414: i32 = 46802;
 const FIX_0_34414: i32 = 22554;
 
-struct YCbCrTable {
-	cr_red: [i32; 256],
-	cb_blue: [i32; 256],
-	cr_green: [i32; 256],
-	cb_green: [i32; 256],
-}
-
-fn create_ycbcr_table() -> YCbCrTable {
-	let mut table = YCbCrTable { cr_red: [0; 256], cb_blue: [0; 256], cr_green: [0; 256], cb_green: [0; 256] };
-	for index in 0..256 {
-		let x = index as i32 - 128;
-		table.cr_red[index] = (FIX_1_40200 * x + ONE_HALF) >> SCALE_BITS;
-		table.cb_blue[index] = (FIX_1_77200 * x + ONE_HALF) >> SCALE_BITS;
-		table.cr_green[index] = -FIX_0_71414 * x;
-		table.cb_green[index] = -FIX_0_34414 * x + ONE_HALF;
-	}
-	table
-}
-
-#[inline]
-fn ycbcr_to_rgb(table: &YCbCrTable, y: u8, cb: u8, cr: u8) -> [u8; 3] {
+//==============================================================================
+/// YCbCr 을 RGB 로. (jdcolor.c 의 16 비트 표와 같은 셈을 표 없이 바로 한다, 줄 단위로 자동 벡터화된다)
+//==============================================================================
+#[inline(always)]
+fn ycbcr_to_rgb(y: u8, cb: u8, cr: u8) -> [u8; 3] {
 	let y = y as i32;
-	let cb = cb as usize;
-	let cr = cr as usize;
+	let cb = cb as i32 - 128;
+	let cr = cr as i32 - 128;
 	[
-		(y + table.cr_red[cr]).clamp(0, 255) as u8,
-		(y + ((table.cb_green[cb] + table.cr_green[cr]) >> SCALE_BITS)).clamp(0, 255) as u8,
-		(y + table.cb_blue[cb]).clamp(0, 255) as u8,
+		(y + ((FIX_1_40200 * cr + ONE_HALF) >> SCALE_BITS)).clamp(0, 255) as u8,
+		(y + ((-FIX_0_34414 * cb + ONE_HALF - FIX_0_71414 * cr) >> SCALE_BITS)).clamp(0, 255) as u8,
+		(y + ((FIX_1_77200 * cb + ONE_HALF) >> SCALE_BITS)).clamp(0, 255) as u8,
 	]
 }
 
 //==============================================================================
-/// 성분 평면을 RGBA 로. (jdcolor.c 의 표와 블링크 SetPixel<JCS_CMYK>)
+/// 성분 평면을 줄마다 늘려 바로 RGBA 로. (jdcolor.c 의 셈과 블링크 SetPixel<JCS_CMYK>, 늘린 성분 평면을 그림 크기로 따로 두지 않는다)
 //==============================================================================
-fn convert_color(plane_list: &[Vec<u8>], pixel_count: usize, color_transform: ColorTransform) -> Vec<u8> {
-	let mut pixels = vec![255u8; pixel_count * 4];
-	let table = create_ycbcr_table();
-	let output = pixels.as_chunks_mut::<4>().0;
-	match color_transform {
-		ColorTransform::Gray => {
-			for (pixel, gray) in output.iter_mut().zip(plane_list[0].iter()) {
-				pixel[0] = *gray;
-				pixel[1] = *gray;
-				pixel[2] = *gray;
-			}
+fn convert_rows(sources: &[SamplePlane], width: usize, height: usize, max_horizontal_sampling: usize, max_vertical_sampling: usize, color_transform: ColorTransform) -> Vec<u8> {
+	let mut pixels = vec![0u8; width * height * 4];
+	let row_capacity = sources.iter().map(|source| source.component.downsampled_width * 2).max().unwrap_or(0).max(width);
+	let mut scratch_list: Vec<RowScratch> = sources.iter().map(|source| RowScratch { column_sum: vec![0; source.component.downsampled_width], row: vec![0; row_capacity] }).collect();
+	for (y, output_row) in pixels.chunks_exact_mut(width * 4).enumerate() {
+		let mut rows: [&[u8]; 4] = [&[]; 4];
+		for ((row, source), scratch) in rows.iter_mut().zip(sources.iter()).zip(scratch_list.iter_mut()) {
+			*row = upsample_row(source, y, width, max_horizontal_sampling, max_vertical_sampling, scratch);
 		}
-		ColorTransform::Rgb => {
-			for (index, pixel) in output.iter_mut().enumerate() {
-				pixel[0] = plane_list[0][index];
-				pixel[1] = plane_list[1][index];
-				pixel[2] = plane_list[2][index];
-			}
-		}
-		ColorTransform::YCbCr => {
-			for (((pixel, y), cb), cr) in output.iter_mut().zip(plane_list[0].iter()).zip(plane_list[1].iter()).zip(plane_list[2].iter()) {
-				let rgb = ycbcr_to_rgb(&table, *y, *cb, *cr);
-				pixel[..3].copy_from_slice(&rgb);
-			}
-		}
-		ColorTransform::Cmyk | ColorTransform::Ycck => {
-			for (index, pixel) in output.iter_mut().enumerate() {
-				let cmy = if color_transform == ColorTransform::Ycck {
-					let rgb = ycbcr_to_rgb(&table, plane_list[0][index], plane_list[1][index], plane_list[2][index]);
-					[255 - rgb[0], 255 - rgb[1], 255 - rgb[2]]
+		let output = output_row.as_chunks_mut::<4>().0;
+		match color_transform {
+			ColorTransform::Gray => {
+				for (pixel, gray) in output.iter_mut().zip(rows[0].iter()) {
+					*pixel = [*gray, *gray, *gray, 255];
 				}
-				else {
-					[plane_list[0][index], plane_list[1][index], plane_list[2][index]]
-				};
-				let black = plane_list[3][index] as u32;
-				pixel[0] = (cmy[0] as u32 * black / 255) as u8;
-				pixel[1] = (cmy[1] as u32 * black / 255) as u8;
-				pixel[2] = (cmy[2] as u32 * black / 255) as u8;
+			}
+			ColorTransform::Rgb => {
+				for (((pixel, red), green), blue) in output.iter_mut().zip(rows[0].iter()).zip(rows[1].iter()).zip(rows[2].iter()) {
+					*pixel = [*red, *green, *blue, 255];
+				}
+			}
+			ColorTransform::YCbCr => {
+				for (((pixel, luma), cb), cr) in output.iter_mut().zip(rows[0].iter()).zip(rows[1].iter()).zip(rows[2].iter()) {
+					let rgb = ycbcr_to_rgb(*luma, *cb, *cr);
+					*pixel = [rgb[0], rgb[1], rgb[2], 255];
+				}
+			}
+			ColorTransform::Cmyk | ColorTransform::Ycck => {
+				for (index, pixel) in output.iter_mut().enumerate() {
+					let cmy = if color_transform == ColorTransform::Ycck {
+						let rgb = ycbcr_to_rgb(rows[0][index], rows[1][index], rows[2][index]);
+						[255 - rgb[0], 255 - rgb[1], 255 - rgb[2]]
+					}
+					else {
+						[rows[0][index], rows[1][index], rows[2][index]]
+					};
+					let black = rows[3][index] as u32;
+					*pixel = [(cmy[0] as u32 * black / 255) as u8, (cmy[1] as u32 * black / 255) as u8, (cmy[2] as u32 * black / 255) as u8, 255];
+				}
 			}
 		}
 	}
@@ -1361,11 +1514,40 @@ mod tests {
 		let mut output = [0u8; 64];
 		inverse_transform_block(&block, &table, &mut output, 0, 8);
 		assert!(output.iter().all(|value| *value == 138));
-		let ycbcr_table = create_ycbcr_table();
-		assert_eq!(ycbcr_to_rgb(&ycbcr_table, 128, 128, 128), [128, 128, 128]);
-		assert_eq!(ycbcr_to_rgb(&ycbcr_table, 76, 85, 255), [254, 0, 0]);
-		assert_eq!(ycbcr_table.cr_red[255], 178);
-		assert_eq!(ycbcr_table.cb_blue[0], -227);
+		assert_eq!(ycbcr_to_rgb(128, 128, 128), [128, 128, 128]);
+		assert_eq!(ycbcr_to_rgb(76, 85, 255), [254, 0, 0]);
+		// jdcolor.c 표의 Cr_r_tab[255], Cb_b_tab[0]
+		assert_eq!(ycbcr_to_rgb(0, 128, 255), [178, 0, 0]);
+		assert_eq!(ycbcr_to_rgb(255, 0, 128), [255, 255, 28]);
+	}
+
+	/// 32 비트 역 DCT 가 64 비트 셈과 비트까지 같은지. (넘침 경계 가까이와 그 밖, 64 비트 길로 넘기는 큰 계수까지)
+	#[test]
+	fn narrow_inverse_transform_matches_wide() {
+		let mut seed = 0x2545f4914f6cdd1du64;
+		let mut next = move || {
+			seed ^= seed << 13;
+			seed ^= seed >> 7;
+			seed ^= seed << 17;
+			seed
+		};
+		for round in 0..20000 {
+			let mut block = [0i16; 64];
+			let mut table = [1u16; 64];
+			let magnitude = [8i64, 64, 512, 2048, 12000, 32767][round % 6];
+			let quantization_limit = [1u64, 4, 16, 255, 65535][(round / 6) % 5];
+			for index in 0..64 {
+				if index == 0 || next() % 3 == 0 {
+					block[index] = ((next() % (2 * magnitude as u64 + 1)) as i64 - magnitude) as i16;
+				}
+				table[index] = (1 + next() % quantization_limit) as u16;
+			}
+			let mut narrow = [0u8; 64];
+			let mut wide = [0u8; 64];
+			inverse_transform_block(&block, &table, &mut narrow, 0, 8);
+			inverse_transform_block_wide(&block, &table, &mut wide, 0, 8);
+			assert_eq!(narrow, wide, "{:?} {:?}", block, table);
+		}
 	}
 
 	/// EXIF 방향 읽기와 돌리기. (6 은 시계 90 도, 8 은 반시계 90 도)

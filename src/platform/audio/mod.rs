@@ -27,6 +27,8 @@ mod mixer;
 mod oscillator;
 #[cfg(not(target_arch = "wasm32"))]
 mod panner;
+#[cfg(not(target_arch = "wasm32"))]
+mod threadpriority;
 /// PannerNode 셈. (초안, 데스크탑 믹서와 experimental::spatialaudio 가 같이 쓴다)
 pub(crate) mod pannermath;
 #[cfg(not(target_arch = "wasm32"))]
