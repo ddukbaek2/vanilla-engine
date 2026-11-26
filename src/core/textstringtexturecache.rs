@@ -34,6 +34,7 @@
 //! - Graphic 없이 재기(measure_text_without_graphic): 원본은 어디서든 공용 2D 캔버스로 글을 잰다. 러스트 판은 글꼴을 등록할 때마다
 //!   글꼴 목록(Rc)을 스레드 하나의 전역에 알려 두고, 그 목록으로 잰다. UI 레이아웃이 그리기 전에 글 줄 수를 알아야 할 때 쓴다. (UIConfirmWindow)
 //==============================================================================
+use crate::base::color::Color;
 use crate::core::textshaping::{self, FontFaceDescriptors, LoadedFont, RegisteredFontFace, ResolvedFontFace, ShapedText, ShapingDirection};
 use unicode_segmentation::UnicodeSegmentation;
 use glow::HasContext;
@@ -202,13 +203,21 @@ pub fn measure_text_without_graphic(font_string: &str, text: &str) -> Option<Tex
 /// - 데스크탑만. 글꼴이 하나도 없거나 아직 등록한 캐시가 없으면 None 이다.
 //==============================================================================
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn rasterize_text_without_graphic(text: &str, font_string: &str, bake_scale: f32, padding: i32, direction: ShapingDirection) -> Option<TextRaster> {
+pub(crate) fn rasterize_text_without_graphic(text: &str, font_string: &str, bake_scale: f32, padding: i32, direction: ShapingDirection, color: Color) -> Option<TextRaster> {
 	SHARED_MEASURE_CACHE.with(|shared_measure_cache_cell| {
 		let shared_measure_cache = shared_measure_cache_cell.borrow();
-		shared_measure_cache.as_ref()?.rasterize_text(text, font_string, bake_scale, padding, direction)
+		shared_measure_cache.as_ref()?.rasterize_text_with_color(text, font_string, bake_scale, padding, direction, color)
 	})
 }
 
+/// 흰 글자 색. (원본처럼 흰색으로 굽고 그릴 때 색을 곱하는 글의 감마 전보정 밝기)
+const WHITE_LUMINANCE_COLOR: [u8; 3] = [255, 255, 255];
+/// 서브픽셀 자리 반올림 몫. (스키아 SkPackedGlyphID::kSubpixelRound, 1/8)
+#[cfg(target_os = "macos")]
+const SUBPIXEL_ROUND: f32 = 0.125;
+/// 서브픽셀 자리의 단계 수. (스키아 kSubPixelPosLen 2 비트)
+#[cfg(target_os = "macos")]
+const SUBPIXEL_STEP_COUNT: f32 = 4.0;
 /// 캐시 상한. (원본과 같음)
 const MAXIMUM_ENTRY_COUNT: usize = 512;
 /// 글 재기 캐시 상한. (원본과 같음)
@@ -1633,6 +1642,42 @@ impl TextStringTextureCache {
 	/// 래스터. 글이 비었거나 데스크탑에서 그릴 얼굴이 하나도 없으면 None.
 	//==============================================================================
 	pub fn rasterize_text(&self, text: &str, font_string: &str, bake_scale: f32, padding: i32, direction: ShapingDirection) -> Option<TextRaster> {
+		self.rasterize_text_with_color(text, font_string, bake_scale, padding, direction, Color::white())
+	}
+
+	//==============================================================================
+	/// 글자 색을 알려 글의 모양만 래스터로 받기. (rasterize_text 와 같고, 맥 데스크탑은 크롬처럼 글자 색 밝기로 덮인 정도를 감마 전보정한다)
+	/// - 원본이 글 색 그대로 Canvas2D 에 굽는 쪽(그림자를 깐 글, 2D 캔버스의 fillText)이 쓴다. 흰색으로 굽고 색을 곱하는 글은 rasterize_text 와 같다.
+	///
+	/// # 인자
+	/// - `text`: 글.
+	/// - `font_string`: 폰트 문자열. (Canvas2D font 꼴, parse_font_string)
+	/// - `bake_scale`: 굽는 배율. (글자 크기에 곱한다)
+	/// - `padding`: 가장자리 여백. (픽셀, 1 보다 작으면 1)
+	/// - `direction`: 문단 방향.
+	/// - `color`: 글자 색. (알파는 쓰지 않는다, 그라데이션이나 패턴으로 칠하면 원본 스키아처럼 회색 0.5)
+	///
+	/// # 돌려줌
+	/// 래스터. 글이 비었거나 데스크탑에서 그릴 얼굴이 하나도 없으면 None.
+	///
+	/// # 예제
+	/// 검은 글의 덮인 정도 받기
+	/// ```rust
+	/// use vanilla::core::textstringtexturecache::TextStringTextureCache;
+	/// use vanilla::platform::find_fallback_font_file;
+	/// use vanilla::{Color, ShapingDirection};
+	///
+	/// if let Some(source) = find_fallback_font_file("A", 400, false, false) {
+	/// 	let mut text_string_texture_cache = TextStringTextureCache::new();
+	/// 	text_string_texture_cache.set_default_font(false, std::fs::read(&source.path).expect("font file")).expect("font");
+	/// 	let text_raster = text_string_texture_cache.rasterize_text_with_color("Ag", "24px default", 1.0, 2, ShapingDirection::LeftToRight, Color::black()).expect("raster");
+	/// 	assert_eq!(text_raster.coverage.len(), (text_raster.width * text_raster.height) as usize);
+	/// 	assert!(text_raster.coverage.iter().any(|value| *value == 255));
+	/// }
+	/// ```
+	//==============================================================================
+	pub fn rasterize_text_with_color(&self, text: &str, font_string: &str, bake_scale: f32, padding: i32, direction: ShapingDirection, color: Color) -> Option<TextRaster> {
+		let luminance_color = [(color.red * 255.0).round().clamp(0.0, 255.0) as u8, (color.green * 255.0).round().clamp(0.0, 255.0) as u8, (color.blue * 255.0).round().clamp(0.0, 255.0) as u8];
 		if text.is_empty() {
 			return None;
 		}
@@ -1649,7 +1694,7 @@ impl TextStringTextureCache {
 				return None;
 			}
 		}
-		let laid_out_text = lay_out_text(&face_list, &font_description, text, font_description.font_size * bake_scale, direction, padding.max(1))?;
+		let laid_out_text = lay_out_text(&face_list, &font_description, text, font_description.font_size * bake_scale, direction, padding.max(1), luminance_color)?;
 		Some(TextRaster {
 			coverage: laid_out_text.coverage,
 			color_pixels: laid_out_text.color_pixels,
@@ -1720,7 +1765,8 @@ impl TextStringTextureCache {
 		let mut minimum_bottom = i32::MAX;
 		let mut glyph_raster_list: Vec<(textshaping::GlyphRaster, i32, i32)> = Vec::new();
 		for shaped_glyph in &shaped_text.glyph_list {
-			let glyph_raster = match rasterize_shaped_glyph(&face_list, &font_description, character, shaped_glyph, font_size) {
+			let (integer_x, subpixel_x, integer_y) = split_glyph_position(shaped_glyph.position_x, shaped_glyph.position_y);
+			let glyph_raster = match rasterize_shaped_glyph(&face_list, &font_description, character, shaped_glyph, font_size, subpixel_x, WHITE_LUMINANCE_COLOR) {
 				Some(glyph_raster) => {
 					glyph_raster
 				}
@@ -1728,8 +1774,8 @@ impl TextStringTextureCache {
 					continue;
 				}
 			};
-			let left_x = shaped_glyph.position_x.round() as i32 + glyph_raster.left_x;
-			let top_y = shaped_glyph.position_y.round() as i32 + glyph_raster.top_y;
+			let left_x = integer_x + glyph_raster.left_x;
+			let top_y = integer_y + glyph_raster.top_y;
 			minimum_x = minimum_x.min(left_x);
 			maximum_x = maximum_x.max(left_x + glyph_raster.width);
 			maximum_top = maximum_top.max(top_y);
@@ -1761,7 +1807,7 @@ impl TextStringTextureCache {
 			for glyph_y in 0..glyph_raster.height {
 				for glyph_x in 0..glyph_raster.width {
 					let index = ((offset_y + glyph_y) * width + offset_x + glyph_x) as usize;
-					coverage[index] = coverage[index].max(glyph_raster.coverage[(glyph_y * glyph_raster.width + glyph_x) as usize]);
+					coverage[index] = blend_coverage(coverage[index], glyph_raster.coverage[(glyph_y * glyph_raster.width + glyph_x) as usize]);
 				}
 			}
 		}
@@ -1965,7 +2011,7 @@ impl TextStringTextureCache {
 		};
 		let padding = stroke_radius.ceil() as i32 + 1;
 		let pixel_size = font_description.font_size * bake_scale;
-		let laid_out_text = lay_out_text(&face_list, &font_description, text, pixel_size, direction, padding)?;
+		let laid_out_text = lay_out_text(&face_list, &font_description, text, pixel_size, direction, padding, WHITE_LUMINANCE_COLOR)?;
 		let mut coverage = laid_out_text.coverage;
 		let mut color_pixels = laid_out_text.color_pixels;
 		let bitmap_width = laid_out_text.width;
@@ -2014,7 +2060,8 @@ impl Default for TextStringTextureCache {
 //==============================================================================
 /// 글을 모양 짓고 글리프를 래스터해 한 장에 놓기. (외곽선, 그림자 몫의 여백 padding)
 //==============================================================================
-fn lay_out_text(face_list: &[ResolvedFontFace], font_description: &FontDescription, text: &str, pixel_size: f32, direction: ShapingDirection, padding: i32) -> Option<LaidOutText> {
+#[allow(clippy::too_many_arguments)]
+fn lay_out_text(face_list: &[ResolvedFontFace], font_description: &FontDescription, text: &str, pixel_size: f32, direction: ShapingDirection, padding: i32, luminance_color: [u8; 3]) -> Option<LaidOutText> {
 	let system_font_measure = create_system_font_measure(font_description, pixel_size);
 	let shaped_text: ShapedText = textshaping::shape_text(face_list, text, pixel_size, direction, system_font_measure.as_deref());
 	let advance_width = shaped_text.advance_width;
@@ -2027,7 +2074,8 @@ fn lay_out_text(face_list: &[ResolvedFontFace], font_description: &FontDescripti
 	let mut top_extent: f32 = font_ascent;
 	let mut bottom_extent: f32 = font_descent;
 	for shaped_glyph in &shaped_text.glyph_list {
-		let glyph_raster = match rasterize_shaped_glyph(face_list, font_description, text, shaped_glyph, pixel_size) {
+		let (integer_x, subpixel_x, integer_y) = split_glyph_position(shaped_glyph.position_x, shaped_glyph.position_y);
+		let glyph_raster = match rasterize_shaped_glyph(face_list, font_description, text, shaped_glyph, pixel_size, subpixel_x, luminance_color) {
 			Some(glyph_raster) => {
 				glyph_raster
 			}
@@ -2035,8 +2083,8 @@ fn lay_out_text(face_list: &[ResolvedFontFace], font_description: &FontDescripti
 				continue;
 			}
 		};
-		let left_x = shaped_glyph.position_x.round() as i32 + glyph_raster.left_x;
-		let top_y = shaped_glyph.position_y.round() as i32 + glyph_raster.top_y;
+		let left_x = integer_x + glyph_raster.left_x;
+		let top_y = integer_y + glyph_raster.top_y;
 		minimum_x = minimum_x.min(left_x as f32);
 		maximum_x = maximum_x.max((left_x + glyph_raster.width) as f32);
 		top_extent = top_extent.max(top_y as f32);
@@ -2052,7 +2100,7 @@ fn lay_out_text(face_list: &[ResolvedFontFace], font_description: &FontDescripti
 		return None;
 	}
 
-	// 겹치는 곳은 큰 값. 색 글리프는 따로 색 층에 얹는다.
+	// 겹치는 곳은 원본 캔버스처럼 뒤 글리프를 위에 얹는다. (src-over) 색 글리프는 따로 색 층에 얹는다.
 	let mut coverage = vec![0u8; (width * height) as usize];
 	let mut color_pixels: Option<Vec<u8>> = None;
 	let origin_x_integer = origin_x as i32;
@@ -2075,7 +2123,7 @@ fn lay_out_text(face_list: &[ResolvedFontFace], font_description: &FontDescripti
 				}
 				let glyph_value = glyph_raster.coverage[(glyph_y * glyph_raster.width + glyph_x) as usize];
 				let bitmap_index = (bitmap_y * width + bitmap_x) as usize;
-				coverage[bitmap_index] = coverage[bitmap_index].max(glyph_value);
+				coverage[bitmap_index] = blend_coverage(coverage[bitmap_index], glyph_value);
 			}
 		}
 	}
@@ -2131,7 +2179,8 @@ fn rasterize_system_font_text(font_description: &FontDescription, text: &str, ba
 //==============================================================================
 /// 모양 지은 글리프 하나 래스터. (시스템 글꼴 조각은 브라우저 캔버스로, 비었으면 None)
 //==============================================================================
-fn rasterize_shaped_glyph(face_list: &[ResolvedFontFace], font_description: &FontDescription, text: &str, shaped_glyph: &textshaping::ShapedGlyph, pixel_size: f32) -> Option<textshaping::GlyphRaster> {
+#[allow(clippy::too_many_arguments)]
+fn rasterize_shaped_glyph(face_list: &[ResolvedFontFace], font_description: &FontDescription, text: &str, shaped_glyph: &textshaping::ShapedGlyph, pixel_size: f32, subpixel_x: f32, luminance_color: [u8; 3]) -> Option<textshaping::GlyphRaster> {
 	if shaped_glyph.face_index == textshaping::SYSTEM_FACE_INDEX {
 		#[cfg(target_arch = "wasm32")]
 		{
@@ -2143,11 +2192,39 @@ fn rasterize_shaped_glyph(face_list: &[ResolvedFontFace], font_description: &Fon
 			return None;
 		}
 	}
-	let glyph_raster = textshaping::rasterize_glyph(&face_list[shaped_glyph.face_index], shaped_glyph.glyph_index, pixel_size);
+	let glyph_raster = textshaping::rasterize_glyph_at(&face_list[shaped_glyph.face_index], shaped_glyph.glyph_index, pixel_size, subpixel_x, luminance_color);
 	if glyph_raster.width == 0 || glyph_raster.height == 0 {
 		return None;
 	}
 	Some(glyph_raster)
+}
+
+//==============================================================================
+/// 덮인 정도 위에 덮인 정도 얹기. (원본 캔버스가 글리프 마스크를 차례로 칠하는 src-over, 8 비트로 반올림)
+//==============================================================================
+fn blend_coverage(destination: u8, source: u8) -> u8 {
+	((source as u32 * 255 + destination as u32 * (255 - source as u32) + 127) / 255) as u8
+}
+
+//==============================================================================
+/// 글리프 자리를 정수 자리와 서브픽셀 몫으로 나누기. ((정수 x, 서브픽셀 x, 정수 y), y 는 위가 양수)
+/// - 맥: 크롬 스키아처럼 x 에 1/8 을 더해 내린 것이 정수 자리이고 나머지를 1/4 단위로 내린 것이 서브픽셀 몫이다. y 는 아래가 양수인 기기 좌표에서 1/2 을 더해 내린다.
+///   (SkGlyphPositionRoundingSpec 의 가로 정렬 글: halfAxisSampleFreq (1/8, 1/2), SkPackedGlyphID 의 서브픽셀 2 비트, SubRunContainer 의 floor)
+/// - 그 밖의 데스크탑은 둘 다 반올림하고 서브픽셀 몫이 없다.
+//==============================================================================
+fn split_glyph_position(position_x: f32, position_y: f32) -> (i32, f32, i32) {
+	#[cfg(target_os = "macos")]
+	{
+		let rounded_x = position_x + SUBPIXEL_ROUND;
+		let integer_x = rounded_x.floor();
+		let subpixel_x = (((rounded_x - integer_x) * SUBPIXEL_STEP_COUNT).floor() / SUBPIXEL_STEP_COUNT).min(1.0 - 1.0 / SUBPIXEL_STEP_COUNT);
+		let integer_y = -((-position_y + 0.5).floor());
+		(integer_x as i32, subpixel_x, integer_y as i32)
+	}
+	#[cfg(not(target_os = "macos"))]
+	{
+		(position_x.round() as i32, 0.0, position_y.round() as i32)
+	}
 }
 
 //==============================================================================

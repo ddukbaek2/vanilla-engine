@@ -104,6 +104,8 @@ const WHEEL_LINE_PIXEL_SIZE: f32 = 40.0;
 /// 두 프레임 사이에 벽시계가 단조 시계보다 이만큼 넘게 더 흐르면 시스템이 잠들었다 깬 것으로 본다. (초, 맥과 리눅스)
 #[cfg(not(target_os = "windows"))]
 const SYSTEM_SLEEP_GAP_SECONDS: f64 = 2.0;
+/// 기본 프레임버퍼의 멀티샘플 표본 수. (크롬 WebGL antialias 의 표본 수 기본값, 블링크 WebglPreferences.msaa_sample_count)
+const MULTISAMPLE_COUNT: u8 = 4;
 
 thread_local! {
 	/// 창 안에서 캔버스의 왼쪽 위. (논리 좌표, 캔버스 비 상한으로 가운데에 둘 때만 0 이 아니다)
@@ -629,10 +631,21 @@ impl DesktopApplication {
 			}
 		}
 
-		// 깊이 24 / 스텐실 8 비트가 있는 설정 가운데 멀티샘플 4 에 가까운 것. (원본 WebGL 컨텍스트의 기본 depth: true 와 안티에일리어싱 자리, 깊이는 3D 가 쓴다)
+		// 깊이 24 / 스텐실 8 비트에 멀티샘플 4 인 설정. (원본 WebGL 컨텍스트의 기본 depth: true 와 antialias: true, 깊이는 3D 가 쓴다)
+		// - 크롬은 antialias 캔버스를 min(4, GL_MAX_SAMPLES) 표본의 MSAA 로 칠한다. (블링크 DrawingBuffer::Initialize 의 sample_count_, WebglPreferences.msaa_sample_count 기본 4)
+		// - 멀티샘플을 묻지 않으면 맥 CGL 은 멀티샘플 없는 설정 하나만 주어 도형 가장자리가 계단이 된다. 그래서 먼저 4 를 묻고,
+		//   4 이상인 설정이 없으면 묻지 않고 다시 골라 4 에 가까운 것을 쓴다. (크롬도 기기 최대가 4 보다 작으면 그 수로 칠한다)
 		let config_template_builder = ConfigTemplateBuilder::new().with_alpha_size(8).with_depth_size(24).with_stencil_size(8);
-		let display_builder = DisplayBuilder::new().with_window_attributes(Some(window_attributes));
-		let (window, gl_config) = display_builder.build(event_loop, config_template_builder, pick_config).map_err(|error| format!("GL 설정 고르기 실패: {}", error))?;
+		let multisample_display_builder = DisplayBuilder::new().with_window_attributes(Some(window_attributes.clone()));
+		let (window, gl_config) = match multisample_display_builder.build(event_loop, config_template_builder.clone().with_multisampling(MULTISAMPLE_COUNT), pick_config) {
+			Ok(built) => {
+				built
+			}
+			Err(_) => {
+				let display_builder = DisplayBuilder::new().with_window_attributes(Some(window_attributes));
+				display_builder.build(event_loop, config_template_builder, pick_config).map_err(|error| format!("GL 설정 고르기 실패: {}", error))?
+			}
+		};
 		let window = window.ok_or_else(|| String::from("창 생성 실패"))?;
 
 		let raw_window_handle = window.window_handle().ok().map(|window_handle| window_handle.as_raw());
@@ -1421,7 +1434,7 @@ fn is_capture_window_hidden() -> bool {
 }
 
 //==============================================================================
-/// GL 설정 고르기. (스텐실 8 비트 이상, 멀티샘플은 4 에 가까운 것)
+/// GL 설정 고르기. (스텐실 8 비트 이상, 멀티샘플은 4 에 가까운 것, 4 를 넘으면 작은 쪽)
 //==============================================================================
 fn pick_config(configs: Box<dyn Iterator<Item = Config> + '_>) -> Config {
 	let config_list: Vec<Config> = configs.collect();

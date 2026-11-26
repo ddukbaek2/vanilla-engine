@@ -466,7 +466,8 @@ impl ShadowText {
 			// 밑줄은 기준선 아래로 내려가므로 여유를 더 둔다.
 			padding += ((font_size * 0.25 + 2.0) * bake_scale).ceil() as i32;
 		}
-		let mut text_raster = graphic.get_text_string_texture_cache().rasterize_text(&self.text, &font_string, bake_scale, padding, self.resolve_shaping_text_direction().to_shaping_direction())?;
+		// 원본은 글 색 그대로 Canvas2D 에 굽는다. (맥 데스크탑은 그 색 밝기로 감마 전보정)
+		let mut text_raster = graphic.get_text_string_texture_cache().rasterize_text_with_color(&self.text, &font_string, bake_scale, padding, self.resolve_shaping_text_direction().to_shaping_direction(), self.text_color)?;
 		self.draw_decoration_lines(&mut text_raster, font_size, bake_scale);
 		let image = match text_raster.color_pixels.as_ref() {
 			Some(color_pixels) => {
