@@ -43,4 +43,5 @@ pub mod textshaping;
 pub(crate) mod avifimage;
 #[cfg(target_os = "macos")]
 pub(crate) mod maskgamma;
+pub(crate) mod blurshadow;
 pub(crate) mod colorprofile;

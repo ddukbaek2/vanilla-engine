@@ -10,6 +10,7 @@ use crate::base::color::Color;
 use crate::base::pivot::Pivot;
 use crate::base::rect::Rect;
 use crate::base::vector2::Vector2;
+use crate::core::blurshadow::{views_shadow_blur_to_sigma, BlurredRoundRectShadow};
 use crate::core::browseruitext::{read_browser_ui_text, BrowserUiText};
 use crate::core::component::{Component, ComponentBase};
 use crate::core::graphic::{Graphic, TextAlign, TextBaseline};
@@ -89,6 +90,8 @@ pub(crate) struct UIInputFieldQuickMenu {
 	button_list: Vec<QuickMenuButton>,
 	size: Vector2,
 	pressed_button_index: Option<usize>,
+	/// 그림자 두 겹의 구운 그림.
+	shadow_list: [BlurredRoundRectShadow; 2],
 }
 
 impl UIInputFieldQuickMenu {
@@ -140,6 +143,7 @@ impl UIInputFieldQuickMenu {
 			button_list,
 			size: Vector2::create(left, QUICK_MENU_BUTTON_MINIMUM_HEIGHT),
 			pressed_button_index: None,
+			shadow_list: Default::default(),
 		}
 	}
 
@@ -235,14 +239,10 @@ impl Component for UIInputFieldQuickMenu {
 	fn draw(&mut self, _transform: &NodeTransform, graphic: &mut Graphic) {
 		graphic.push_state();
 		let menu_rect = Rect::create(0.0, 0.0, self.size.x, self.size.y);
-		// 표준 그림자. (메뉴와 같은 겹친 둥근 사각형으로 갈음한다)
-		for (blur_size, layer_alpha) in [(8.0f32, 0.2f32), (12.0f32, 0.1f32)] {
-			let step_count = 3;
-			for step_index in 0..step_count {
-				let spread = blur_size * 0.5 * (step_index as f32 + 1.0) / step_count as f32;
-				graphic.set_fill_color(Color::create(60.0 / 255.0, 64.0 / 255.0, 67.0 / 255.0, layer_alpha / step_count as f32));
-				graphic.draw_round_rect(Rect::create(-spread, 2.0 - spread, menu_rect.size.x + spread * 2.0, menu_rect.size.y + spread * 2.0), QUICK_MENU_CORNER_RADIUS + spread);
-			}
+		// 표준 그림자. (BubbleBorder STANDARD_SHADOW 에 높이를 주지 않은 두 겹, 질문 창과 같은 값을 views 시그마의 가우스로)
+		for (shadow_index, (shadow_blur, shadow_alpha)) in [(8, 0x33u8), (12, 0x1Au8)].iter().enumerate() {
+			let shadow_color = Color::create(60.0 / 255.0, 64.0 / 255.0, 67.0 / 255.0, *shadow_alpha as f32 / 255.0);
+			self.shadow_list[shadow_index].draw(graphic, menu_rect, QUICK_MENU_CORNER_RADIUS, Vector2::create(0.0, 2.0), views_shadow_blur_to_sigma(*shadow_blur), shadow_color);
 		}
 		graphic.set_fill_color(COLOR_MENU_BACKGROUND);
 		graphic.draw_round_rect(menu_rect, QUICK_MENU_CORNER_RADIUS);

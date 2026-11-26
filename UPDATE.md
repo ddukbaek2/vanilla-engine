@@ -1,6 +1,8 @@
 # 업데이트 기록
 
 # 아직 release 에 합치지 않은 것 (release 에 합칠 때 패치 판을 하나 올려 매긴다)
+- 데스크탑 질문 창, 문맥 메뉴, 터치 빠른 메뉴의 그림자: 겹친 둥근 사각형으로 갈음하던 것을 크롬과 같은 가우스 흐림으로 그린다. 문맥 메뉴는 원본 CSS box-shadow 0 4px 16px rgba(0, 0, 0, 0.18) 을 블링크처럼 시그마 8(흐림 반경의 반)로, 질문 창과 빠른 메뉴는 크롬 views BubbleBorder 의 두 겹(아래로 2, 흐림 8 과 12, #3C4043 알파 0x33 과 0x1A)을 ui/gfx 의 RadiusToSigma(blur / 2) 시그마로. 둥근 사각형을 CPU 로 구워(기기 배율, 같은 값이면 다시 쓰기) 그린다. 맥에서 문맥 메뉴 오른쪽 그림자 단면이 헤드리스 크롬의 원본 DOM 메뉴와 1/255 안에서 같다
+  - 옮기는 법: 없다. 그림자 모양만 바뀐다.
 - 초안 타일맵 칸 크기와 배치 셈 f64(experimental::tilemap): Tilemap.set_tile_size, get_tile_width, get_tile_height, set_hex_side_length, get_hex_side_length 가 u32 에서 f64 로 바뀌고, 배치 셈(칸 자리, 칸을 감싸는 사각형, 칸 그리는 자리와 배율)이 원본처럼 f64 다. TiledMapReader 가 Tiled 의 칸 크기와 육각 변 길이를 자르지 않는다. (지금까지 16.5 가 16) 육각의 반 나누기는 원본 Math.trunc 처럼 0 쪽으로 자르고, 엔진 Vector2, Rect, 그리기에 넘기는 곳에서만 f32 로 바꾼다. 타일셋 격자 크기, 충돌 모양, 층 오프셋은 아직 f32 와 u32 다.
   - 옮기는 법: tilemap.set_tile_size(16, 16) 은 set_tile_size(16.0, 16.0) 으로, get_tile_width() 를 u32 로 쓰던 곳은 f64 로 받는다.
 - 초안 타일맵 읽기(experimental::tilemap): TiledMapReader::read_map, read_layer_data, decompress 가 원본 readMap, readLayerData, decompress 처럼 async 다. 엔진 작업(Engine::spawn_task, spawn_scene_task) 안에서 await 한다. 바깥 타일셋 손잡이는 Fn(&str) -> Promise<Option<Value>> 로, 원본처럼 프로미스를 돌려줘 .tsj 를 받아 오는 동안 기다린다. (가진 JSON 이면 Promise::resolved) 바깥 타일셋, 층, 덩이를 원본과 같은 차례로 기다린다. flate2 는 그 자리에서 풀고 결과를 퓨처로 돌려준다.
