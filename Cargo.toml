@@ -53,7 +53,8 @@ unicode-properties = { version = "0.1", default-features = false, features = ["e
 # 글자의 문자(Script). (크롬 캔버스의 낱말 나누기가 한중일 기호 가운데 Common, Inherited 를 따로 끊지 않는다. rustybuzz 와 usvg 가 이미 쓰는 판)
 unicode-script = "0.5"
 # JsonAsset 이 JSON 을 푼다. (원본 JSON.parse 자리) 객체 키는 적힌 차례를 지킨다. (UIDocument 가 원본 JSON.stringify 와 같은 차례로 쓴다)
-serde_json = { version = "1", features = ["preserve_order"] }
+# float_roundtrip 은 소수를 원본 JSON.parse 처럼 가장 가까운 f64 로 읽는다. (끄면 마지막 자리가 하나 어긋날 수 있다, 예: 123456789012345680000)
+serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }
 # 초안 SaveGameManager::save 가 Serialize 를 받는다. (serde_json 이 이미 쓰는 크레이트, derive 는 켜지 않는다)
 serde = { version = "1", default-features = false, features = ["std"] }
 # FBX 압축 배열(zlib deflate)을 푼다. (원본 DecompressionStream 자리, 순수 러스트 miniz_oxide 기본 백엔드라 wasm32 에서도 돈다)
