@@ -6,6 +6,8 @@
 //! - 형(MIME)을 아는 바이트(data: 주소)는 load_from_memory_with_mime_type 으로 푼다. 브라우저처럼 형이 image/svg+xml 일 때만 SVG 이고, 그 밖은 내용으로 가린다.
 //!   형을 모르는 바이트(파일)는 load_from_memory 가 내용으로 SVG 까지 가린다. (데스크탑에는 응답의 형이 없다)
 //! - sniff_image_mime_type: WHATWG MIME 스니핑의 그림 표(ICO, CUR, BMP, GIF, WebP, PNG, JPEG)에 AVIF 를 더해 내용으로 형을 고른다. (데스크탑 Material 이 응답의 형 대신 쓴다)
+//! - 색 프로필: 크롬처럼 그림에 박힌 색 공간(PNG 의 cICP, iCCP, gAMA 와 cHRM, JPEG 의 APP2 ICC, WebP 의 ICCP, AVIF 의 colr)을 sRGB 로 바꾼다. (core/colorprofile.rs)
+//!   원본은 WebGL texImage2D 때 브라우저가 바꾼다. 3D 재질(graphics3d/material.rs)은 원본의 createImageBitmap(colorSpaceConversion "none")처럼 바꾸지 않는다.
 //! - 픽셀은 프리멀티플라이드 알파 RGBA 로 들고 있다. (원본은 텍스처에 올릴 때 UNPACK_PREMULTIPLY_ALPHA 로 같은 일을 한다)
 //! - Rc 로 나눠 쓰고, GPU 텍스처는 Graphic 의 ImageTextureCache 가 처음 그릴 때 만든다.
 //! - GPU 에 올린 뒤에는 CPU 픽셀을 놓아 메모리를 돌려준다. (원본은 브라우저가 HTMLImageElement 를 들고 있다)
@@ -148,6 +150,11 @@ impl Image {
 		let width = rgba_image.width();
 		let height = rgba_image.height();
 		let straight_pixels = rgba_image.into_raw();
+		if let Some(color_profile) = read_embedded_color_profile(bytes) {
+			if color_profile.needs_conversion() {
+				return Ok(Image::create_from_premultiplied_pixels(width, height, color_profile.convert_to_srgb_premultiplied(&straight_pixels)));
+			}
+		}
 		Ok(Image::create_from_pixels(width, height, straight_pixels))
 	}
 
@@ -358,6 +365,26 @@ pub fn sniff_image_mime_type(bytes: &[u8]) -> Option<&'static str> {
 		return Some("image/avif");
 	}
 	None
+}
+
+//==============================================================================
+/// 그림에 박힌 색 프로필. (크롬처럼 PNG 는 cICP, iCCP, sRGB, gAMA, cHRM, JPEG 는 APP2 ICC, WebP 는 ICCP, 그 밖과 없으면 None)
+//==============================================================================
+fn read_embedded_color_profile(bytes: &[u8]) -> Option<crate::core::colorprofile::EmbeddedColorProfile> {
+	match sniff_image_mime_type(bytes) {
+		Some("image/png") => {
+			crate::core::colorprofile::read_png_color_profile(bytes)
+		}
+		Some("image/jpeg") => {
+			crate::core::colorprofile::read_jpeg_color_profile(bytes)
+		}
+		Some("image/webp") => {
+			crate::core::colorprofile::read_webp_color_profile(bytes)
+		}
+		_ => {
+			None
+		}
+	}
 }
 
 //==============================================================================

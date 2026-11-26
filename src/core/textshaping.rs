@@ -6,6 +6,9 @@
 //!     고르기는 CSS Fonts 의 차례(기울기 → 굵기)를 따르고, 같은 굵기와 기울기의 얼굴들은 글자 범위로 나눠 그린다. 나중에 올린 얼굴이 먼저다.
 //!   - 양방향 정렬: unicode-bidi (UAX #9). 문단 방향은 굽는 쪽이 준다. (원본 canvas.direction)
 //!   - 모양 짓기: rustybuzz (HarfBuzz 를 옮긴 것). 아랍어 글자 잇기, 합자, 커닝, 결합 부호 자리를 브라우저처럼 잡는다.
+//!     크롬 HarfBuzzFace::GetScaledFont 처럼 자리 배율을 글자 크기의 16.16 고정 소수로 건다. rustybuzz 0.20.1 에는 배율이 없어 저장소의 third_party/rustybuzz 에
+//!     hb_font_set_scale(Face::set_scale)을 더한 판을 둔다. 글꼴 단위 값은 em_scale, 가변 GPOS 델타는 em_scalef 로 그 배율에서 반올림하고,
+//!     축 값은 HarfBuzz hb_ot_var_normalize_coords 처럼 정규화한다. 같이 둔 third_party/ttf-parser 는 짝 커닝(PairPos 꼴 1)의 장치 표 기준을 바로잡은 판이다.
 //!   - 래스터: fontdue 의 글리프 번호 래스터. 굵은 얼굴이 없으면 가짜 굵게, 기울인 얼굴이 없으면 가짜 기울임을 글리프마다 입힌다.
 //!     색 글리프(sbix, CBDT, COLR)는 colorglyph.rs 가 제 색으로 그린다. 크롬처럼 가짜 기울임은 입히고 가짜 굵게는 입히지 않는다.
 //! - 이모지 표시: VS16(FE0F), Emoji_Presentation 글자, 피부색 조정자, 국기, 키캡, 태그 묶음은 색 글리프를 가진 얼굴을 먼저 고른다. 그 밖(VS15 포함)은 색이 아닌 얼굴을 먼저.
@@ -61,6 +64,9 @@ pub const SYNTHETIC_ITALIC_SKEW: f32 = 0.25;
 /// 가짜 굵게 두께 표. (글자 크기 → 크기에 곱할 비율, Skia kStdFakeBoldInterpKeys / Values)
 const SYNTHETIC_BOLD_SIZE_KEYS: [f32; 2] = [9.0, 36.0];
 const SYNTHETIC_BOLD_SIZE_RATIOS: [f32; 2] = [1.0 / 24.0, 1.0 / 32.0];
+
+/// HarfBuzz 자리의 1 픽셀. (크롬은 hb_position_t 를 16.16 고정 소수로 쓴다, skia_text_metrics.h 의 kHbPosition1)
+const HARFBUZZ_POSITION_ONE: f32 = 65536.0;
 
 /// 굵게로 보는 굵기의 문턱. (Blink kBoldThreshold)
 pub const BOLD_WEIGHT_THRESHOLD: u16 = 600;
@@ -1729,12 +1735,16 @@ pub fn shape_text(face_list: &[ResolvedFontFace], text: &str, pixel_size: f32, d
 					rustybuzz::Direction::LeftToRight
 				});
 				unicode_buffer.guess_segment_properties();
-				let sized_shaping_face = face.font.create_sized_shaping_face(pixel_size);
+				// 크롬 HarfBuzzFace::GetScaledFont 처럼 자리 배율을 글자 크기의 16.16 고정 소수로 건다. (SkiaScalarToHarfBuzzPosition)
+				// 글꼴 단위 값은 HarfBuzz 의 em_scale 로, 가변 글꼴의 GPOS 델타는 em_scalef 로 이 배율에서 반올림된다.
+				let mut sized_shaping_face = face.font.create_sized_shaping_face(pixel_size);
+				let harfbuzz_scale = (pixel_size * HARFBUZZ_POSITION_ONE) as i32;
+				sized_shaping_face.set_scale(harfbuzz_scale, harfbuzz_scale);
 				let glyph_buffer = rustybuzz::shape(&sized_shaping_face, &[], unicode_buffer);
-				let scale = pixel_size / face.font.units_per_em * face.font.read_advance_scale(pixel_size);
+				let scale = face.font.read_advance_scale(pixel_size) / HARFBUZZ_POSITION_ONE;
 				let is_integer_advance = face.font.is_integer_advance();
-				// trak 자간. (글자 묶음의 첫 글리프에 더한다, HarfBuzz 의 foreach_grapheme 자리를 묶음 번호(cluster)가 바뀌는 글리프로 본다)
-				let tracking = face.font.read_horizontal_tracking(pixel_size) * scale;
+				// trak 자간. (글자 묶음의 첫 글리프에 더한다, HarfBuzz 의 foreach_grapheme 자리를 묶음 번호(cluster)가 바뀌는 글리프로 본다. HarfBuzz 처럼 em_scalef_x 로 배율에서 반올림한다)
+				let tracking = (face.font.read_horizontal_tracking(pixel_size) * (harfbuzz_scale as f32 / face.font.units_per_em)).round() * scale;
 				let mut previous_cluster: Option<u32> = None;
 				for (glyph_info, glyph_position) in glyph_buffer.glyph_infos().iter().zip(glyph_buffer.glyph_positions().iter()) {
 					shaped_text.glyph_list.push(ShapedGlyph {

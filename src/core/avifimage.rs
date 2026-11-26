@@ -2,8 +2,13 @@
 //! AVIF 그림 풀기. (데스크탑, core/image.rs 가 부른다)
 //! - 원본은 브라우저가 AVIF 를 푼다. (크롬은 libavif 를 러스트로 옮긴 CrabbyAvif 와 dav1d) 웹 판도 브라우저가 푼다. 데스크탑은 순수 러스트로 푼다.
 //!   HEIF 상자는 여기서 읽고(libavif src/read.c 와 같은 규칙), AV1 은 dav1d 를 러스트로 옮긴 rav1d 가 YUV 로 푼다.
+//! - 읽는 곳: 크롬 CrabbyAvif 의 Source::Auto 처럼 ftyp 의 주 상표가 avis 면 트랙, avif 면 주 그림 항목, 그 밖은 트랙이 있으면 트랙이다.
+//!   움직이는 그림도 첫 장만 푼다. 크롬은 Canvas2D drawImage(BitmapImage::ImageForDefaultFrame 이 움직임을 끈다)와 WebGL texImage2D(ImageExtractor 가 0 번 장을 다시 푼다)에서 늘 첫 장을 쓴다.
 //! - 상자: meta 의 pitm(주 그림), iinf(항목 형 av01, grid), iloc(자료 자리, 파일 안과 idat 안), iref(auxl, dimg, prem), iprp 의 ipco 와 ipma(auxC, colr, irot, imir, clap).
-//!   - 색 정보: libavif 처럼 주 그림에 colr(nclx)이 있으면 그 matrix_coefficients 와 full_range_flag 를, 없으면 AV1 순서 머리의 것을 쓴다.
+//!   트랙은 moov 의 trak: tkhd, tref(auxl, prem), mdia 의 hdlr(pict, vide, auxv)와 stbl(stsd 의 av01 과 그 안의 colr, auxi, clap, irot, imir, stco, co64, stsc, stsz)에서 첫 표본을 꺼낸다.
+//!   - 색 정보: CrabbyAvif 처럼 colr 의 nclx 가 있으면 그 원색, 전달 특성, 행렬 계수, 범위를, 없으면 첫 표본의 AV1 순서 머리의 것을 쓴다.
+//!   - 색 프로필: 크롬 AVIFImageDecoder 처럼 colr 의 ICC(prof, rICC)가 있으면 그것을, 없으면 nclx 의 원색과 전달 특성(ui/gfx ColorSpace 의 꼴)을 sRGB 로 바꾼다. (core/colorprofile.rs)
+//!     높은 비트 깊이는 크롬처럼 반정밀 값으로 바꾼다. ICC 를 읽지 못하거나 색과 맞지 않는 프로필, 크롬이 SkColorSpace 로 못 바꾸는 nclx(전달 특성 9, 10, 11, 12)는 크롬처럼 실패다.
 //!   - grid: 타일(dimg 차례)을 YUV 로 풀어 줄과 칸으로 이어 붙이고 출력 크기로 자른 뒤 한 번에 RGB 로 바꾼다. (libavif 처럼)
 //!   - 알파: 주 그림을 auxl 로 가리키고 auxC 가 urn:mpeg:mpegB:cicp:systems:auxiliary:alpha 나 urn:mpeg:hevc:2015:auxid:1 인 항목. (libavif isAlphaURN 의 둘)
 //!     주 그림이 prem 으로 알파를 가리키면 색이 이미 알파로 곱해진 것이라 그대로 프리멀티플라이드 픽셀로 쓴다.
@@ -15,10 +20,11 @@
 //!   - 범위: 제한 범위면 Y 는 (v - 16 x 2^(깊이-8)) / (219 x 2^(깊이-8)), Cb, Cr 은 (v - 2^(깊이-1)) / (224 x 2^(깊이-8)). 전체 범위면 최댓값으로 나눈다.
 //!   - 4:2:0, 4:2:2 의 크로마는 libavif 의 양선형(가장 가까운 것 9/16, 같은 줄과 같은 칸의 이웃 3/16 씩, 대각 1/16)으로 늘린다. 가장자리는 가장 가까운 것을 되풀이한다.
 //!   - 알파 그림은 전체 범위로 읽는다.
-//! - 원본(크롬)과 다른 것: 색 프로필(ICC, nclx 의 원색과 전달 특성) 변환을 하지 않는다. (image 크레이트로 푸는 PNG, JPEG 도 색 프로필을 걸지 않는다)
-//!   움직이는 AVIF(avis)는 정지 그림 항목(pitm)만 푼다. (브라우저는 움직인다) 게인 맵(HDR)은 쓰지 않는다.
+//! - 원본(크롬)과 다른 것: YUV 를 RGB 로 바꾸는 셈이 libavif 의 기준 실수 셈이다. (크롬의 WebGL 과 CPU 캔버스 길은 libyuv 의 정수 셈이라 8 비트에서 한두 단계 다르고, GPU 캔버스 길과는 같다)
+//!   색이 알파로 곱해진(prem) 그림의 색 프로필은 바꾸지 않는다. 게인 맵(HDR)과 줄인 꼴(mif3 의 mini 상자)은 쓰지 않는다.
 //! - rav1d 의 asm 은 끈 채 쓴다. (Cargo.toml)
 //==============================================================================
+use crate::core::colorprofile::{get_avif_color_space, round_to_half, EmbeddedColorProfile};
 use crate::core::image::Image;
 use rav1d::include::dav1d::data::Dav1dData;
 use rav1d::include::dav1d::dav1d::{Dav1dContext, Dav1dSettings};
@@ -47,6 +53,9 @@ struct DecodedAv1Picture {
 	/// 크로마를 가로, 세로로 줄인 단계. (4:2:0 은 (1, 1), 4:2:2 는 (1, 0), 4:4:4 는 (0, 0))
 	chroma_shift: (usize, usize),
 	is_monochrome: bool,
+	/// 순서 머리의 CICP. (원색, 전달 특성, 행렬 계수, colr 의 nclx 가 있으면 그것으로 바꾼다)
+	color_primaries: u32,
+	transfer_characteristics: u32,
 	matrix_coefficients: u32,
 	is_full_range: bool,
 	/// Y, Cb, Cr 평면. (줄 사이 빈칸 없이, 크로마는 줄인 크기, 흑백이면 Cb, Cr 은 비어 있다)
@@ -95,8 +104,9 @@ struct HeifItemReference {
 }
 
 //==============================================================================
-/// 항목 성질. (ipco 의 상자 하나, 쓰는 것만)
+/// 항목 성질. (ipco 의 상자 하나, 트랙은 표본 설명 안의 상자, 쓰는 것만)
 //==============================================================================
+#[derive(Clone)]
 enum HeifItemProperty {
 	/// auxC 의 보조 형.
 	AuxiliaryType(String),
@@ -104,11 +114,15 @@ enum HeifItemProperty {
 	Rotation(u8),
 	/// imir 의 axis. (0 은 위아래, 1 은 좌우를 바꾼다)
 	Mirror(u8),
-	/// colr 의 nclx. (matrix_coefficients, full_range_flag)
+	/// colr 의 nclx. (colour_primaries, transfer_characteristics, matrix_coefficients, full_range_flag)
 	ColorInformation {
+		color_primaries: u32,
+		transfer_characteristics: u32,
 		matrix_coefficients: u32,
 		is_full_range: bool,
 	},
+	/// colr 의 prof, rICC. (ICC 프로필 바이트)
+	IccProfile(Vec<u8>),
 	/// clap 의 너비, 높이, 가로 자리, 세로 자리. (분자, 분모, 자리는 부호 있는 분자)
 	CleanAperture {
 		width: (u32, u32),
@@ -246,10 +260,9 @@ fn split_full_box(content: &[u8]) -> Result<(u8, u32, &[u8]), String> {
 }
 
 //==============================================================================
-/// meta 상자 읽기. (pitm, iinf, iloc, iref, iprp, idat)
+/// meta 상자 내용 읽기. (pitm, iinf, iloc, iref, iprp, idat)
 //==============================================================================
-fn read_heif_meta(file_bytes: &[u8]) -> Result<HeifMeta<'_>, String> {
-	let meta_content = split_boxes(file_bytes)?.into_iter().find(|(box_type, _)| box_type == b"meta").map(|(_, content)| content).ok_or_else(|| String::from("AVIF 에 meta 상자가 없습니다."))?;
+fn read_heif_meta(meta_content: &[u8]) -> Result<HeifMeta<'_>, String> {
 	let (_, _, meta_body) = split_full_box(meta_content)?;
 	let mut meta = HeifMeta {
 		primary_item_id: 0,
@@ -415,19 +428,29 @@ fn read_item_property(property_type: &[u8; 4], property_body: &[u8]) -> Result<H
 	match property_type {
 		b"colr" => {
 			let mut reader = BoxReader::new(property_body);
-			if &reader.read_four_character_code()? != b"nclx" {
+			let color_type = reader.read_four_character_code()?;
+			if &color_type == b"rICC" || &color_type == b"prof" {
+				let icc_bytes = reader.read_remaining();
+				if icc_bytes.is_empty() {
+					return Err(String::from("AVIF colr 의 ICC 프로필이 비었습니다."));
+				}
+				return Ok(HeifItemProperty::IccProfile(icc_bytes.to_vec()));
+			}
+			if &color_type != b"nclx" {
 				return Ok(HeifItemProperty::Other);
 			}
-			reader.read_u16()?;
-			reader.read_u16()?;
+			let color_primaries = reader.read_u16()? as u32;
+			let transfer_characteristics = reader.read_u16()? as u32;
 			let matrix_coefficients = reader.read_u16()? as u32;
 			let is_full_range = (reader.read_u8()? & 0x80) != 0;
 			Ok(HeifItemProperty::ColorInformation {
+				color_primaries,
+				transfer_characteristics,
 				matrix_coefficients,
 				is_full_range,
 			})
 		}
-		b"auxC" => {
+		b"auxC" | b"auxi" => {
 			let (_, _, body) = split_full_box(property_body)?;
 			let type_bytes = body.split(|byte| *byte == 0).next().unwrap_or(&[]);
 			Ok(HeifItemProperty::AuxiliaryType(String::from_utf8_lossy(type_bytes).into_owned()))
@@ -592,6 +615,8 @@ impl HeifMeta<'_> {
 			bit_depth: first_tile.bit_depth,
 			chroma_shift: first_tile.chroma_shift,
 			is_monochrome: first_tile.is_monochrome,
+			color_primaries: first_tile.color_primaries,
+			transfer_characteristics: first_tile.transfer_characteristics,
 			matrix_coefficients: first_tile.matrix_coefficients,
 			is_full_range: first_tile.is_full_range,
 			plane_list: [Vec::new(), Vec::new(), Vec::new()],
@@ -623,33 +648,192 @@ impl HeifMeta<'_> {
 }
 
 //==============================================================================
-/// AVIF 풀기. (주 그림을 RGB 로, 알파 그림이 있으면 알파로 만들고 clap, irot, imir 를 건다. 못 풀면 까닭)
+/// 풀어 낸 AVIF 의 첫 장. (색 그림, 알파 그림, 색 그림의 성질, 색이 알파로 곱해졌는지)
+//==============================================================================
+struct DecodedAvifFrame {
+	color_picture: DecodedAv1Picture,
+	alpha_picture: Option<DecodedAv1Picture>,
+	property_list: Vec<HeifItemProperty>,
+	is_premultiplied: bool,
+}
+
+//==============================================================================
+/// AVIF 풀기. (첫 장을 RGB 로, 알파 그림이 있으면 알파로 만들고 색 프로필을 sRGB 로 바꾼 뒤 clap, irot, imir 를 건다. 못 풀면 까닭)
+/// - 크롬 CrabbyAvif 의 Source::Auto 처럼 주 상표가 avis 면 트랙, avif 면 주 그림 항목(pitm), 그 밖은 트랙이 있으면 트랙이다.
+/// - 상표에 avif 가 있으면 meta 가, avis 가 있으면 moov 가 있어야 한다. (avif 상표와 meta 가 함께 있으면 moov 는 없어도 된다)
+/// - 움직이는 그림도 첫 장만 푼다. 크롬은 Canvas2D drawImage 와 WebGL texImage2D 에서 늘 첫 장을 쓴다.
 //==============================================================================
 pub(crate) fn decode_avif(bytes: &[u8]) -> Result<Rc<Image>, String> {
-	let meta = read_heif_meta(bytes)?;
-	let mut color_picture = meta.decode_item_picture(bytes, meta.primary_item_id)?;
-	let property_list = meta.get_item_property_list(meta.primary_item_id);
-	for property in property_list.iter() {
-		if let HeifItemProperty::ColorInformation { matrix_coefficients, is_full_range } = property {
-			color_picture.matrix_coefficients = *matrix_coefficients;
-			color_picture.is_full_range = *is_full_range;
-		}
+	let top_box_list = split_boxes(bytes)?;
+	let file_type_content = top_box_list.iter().find(|(box_type, _)| box_type == b"ftyp").map(|(_, content)| *content).ok_or_else(|| String::from("AVIF 에 ftyp 상자가 없습니다."))?;
+	let mut file_type_reader = BoxReader::new(file_type_content);
+	let major_brand = file_type_reader.read_four_character_code()?;
+	file_type_reader.read_u32()?;
+	let compatible_brand_list: Vec<[u8; 4]> = file_type_reader.read_remaining().chunks_exact(4).map(|brand| [brand[0], brand[1], brand[2], brand[3]]).collect();
+	let has_brand = |brand: &[u8; 4]| -> bool {
+		&major_brand == brand || compatible_brand_list.contains(brand)
+	};
+	let meta_content = top_box_list.iter().find(|(box_type, _)| box_type == b"meta").map(|(_, content)| *content);
+	let movie_content = top_box_list.iter().find(|(box_type, _)| box_type == b"moov").map(|(_, content)| *content);
+	if has_brand(b"avif") && meta_content.is_none() {
+		return Err(String::from("AVIF 에 meta 상자가 없습니다."));
 	}
+	if has_brand(b"avis") && movie_content.is_none() && (!has_brand(b"avif") || meta_content.is_none()) {
+		return Err(String::from("AVIF 에 moov 상자가 없습니다."));
+	}
+	let track_list = match movie_content {
+		Some(movie_content) => {
+			read_movie_box(movie_content)?
+		}
+		None => {
+			Vec::new()
+		}
+	};
+	let is_track_source = if &major_brand == b"avis" {
+		true
+	}
+	else if &major_brand == b"avif" {
+		false
+	}
+	else {
+		!track_list.is_empty()
+	};
+	let frame = if is_track_source {
+		decode_track_first_frame(bytes, &track_list)?
+	}
+	else {
+		let meta_content = meta_content.ok_or_else(|| String::from("AVIF 에 meta 상자가 없습니다."))?;
+		decode_primary_item(bytes, meta_content)?
+	};
+	create_avif_image(frame)
+}
+
+//==============================================================================
+/// 주 그림 항목 풀기. (pitm 의 항목, auxl 로 가리키는 알파 항목, prem)
+//==============================================================================
+fn decode_primary_item(file_bytes: &[u8], meta_content: &[u8]) -> Result<DecodedAvifFrame, String> {
+	let meta = read_heif_meta(meta_content)?;
+	let color_picture = meta.decode_item_picture(file_bytes, meta.primary_item_id)?;
+	let property_list: Vec<HeifItemProperty> = meta.get_item_property_list(meta.primary_item_id).into_iter().cloned().collect();
 	let alpha_item_id = meta.find_alpha_item_id();
 	let alpha_picture = match alpha_item_id {
 		Some(alpha_item_id) => {
-			let alpha_picture = meta.decode_item_picture(bytes, alpha_item_id)?;
-			if alpha_picture.width != color_picture.width || alpha_picture.height != color_picture.height {
-				return Err(String::from("AVIF 알파 그림의 크기가 다릅니다."));
-			}
-			Some(alpha_picture)
+			Some(meta.decode_item_picture(file_bytes, alpha_item_id)?)
 		}
 		None => {
 			None
 		}
 	};
 	let is_premultiplied = alpha_item_id.map(|alpha_item_id| meta.is_premultiplied(alpha_item_id)).unwrap_or(false);
-	let mut pixels = convert_to_rgba_pixels(&color_picture, alpha_picture.as_ref());
+	Ok(DecodedAvifFrame {
+		color_picture,
+		alpha_picture,
+		property_list,
+		is_premultiplied,
+	})
+}
+
+//==============================================================================
+/// 트랙의 첫 장 풀기. (CrabbyAvif 처럼 색 트랙은 auxl 이 없는 첫 그림 트랙, 알파 트랙은 색 트랙을 auxl 로 가리키고 auxi 가 알파 형이거나 없는 트랙)
+//==============================================================================
+fn decode_track_first_frame(file_bytes: &[u8], track_list: &[AvifTrack]) -> Result<DecodedAvifFrame, String> {
+	let color_track = track_list.iter().find(|track| track.is_color_track()).ok_or_else(|| String::from("AVIF 에 그림 트랙이 없습니다."))?;
+	let color_picture = decode_av1_picture(color_track.read_first_sample(file_bytes)?)?;
+	let alpha_track = track_list.iter().find(|track| track.is_auxiliary_track_for(color_track.track_id) && track.is_alpha_track());
+	let alpha_picture = match alpha_track {
+		Some(alpha_track) => {
+			Some(decode_av1_picture(alpha_track.read_first_sample(file_bytes)?)?)
+		}
+		None => {
+			None
+		}
+	};
+	let is_premultiplied = match alpha_track {
+		Some(alpha_track) => {
+			color_track.premultiplied_by_track_id == Some(alpha_track.track_id)
+		}
+		None => {
+			false
+		}
+	};
+	Ok(DecodedAvifFrame {
+		color_picture,
+		alpha_picture,
+		property_list: color_track.get_sample_property_list().to_vec(),
+		is_premultiplied,
+	})
+}
+
+//==============================================================================
+/// 풀어 낸 첫 장으로 그림 짓기. (colr 의 nclx 가 있으면 순서 머리 CICP 대신 쓰고, ICC 가 있으면 그것을, 없으면 nclx 의 원색과 전달 특성을 색 프로필로)
+/// - 크롬 AVIFImageDecoder: ICC 를 읽지 못하거나 색 그림과 맞지 않는 프로필(흑백은 회색이나 RGB, 그 밖은 RGB), SkColorSpace 로 못 바꾸는 nclx 면 그림 풀기에 실패한다.
+/// - 원색과 전달 특성이 모두 미지정(2)이고 ICC 가 없으면 바꾸지 않는다.
+/// - 높은 비트 깊이는 크롬처럼 반정밀로 풀어 바꾼다. 색이 알파로 곱해진(prem) 그림은 바꾸지 않는다.
+//==============================================================================
+fn create_avif_image(frame: DecodedAvifFrame) -> Result<Rc<Image>, String> {
+	let DecodedAvifFrame { mut color_picture, alpha_picture, property_list, is_premultiplied } = frame;
+	if let Some(alpha_picture) = alpha_picture.as_ref() {
+		if alpha_picture.width != color_picture.width || alpha_picture.height != color_picture.height {
+			return Err(String::from("AVIF 알파 그림의 크기가 다릅니다."));
+		}
+	}
+	let mut nclx_count = 0;
+	let mut icc_bytes: Option<&[u8]> = None;
+	let mut icc_count = 0;
+	for property in property_list.iter() {
+		match property {
+			HeifItemProperty::ColorInformation { color_primaries, transfer_characteristics, matrix_coefficients, is_full_range } => {
+				nclx_count += 1;
+				color_picture.color_primaries = *color_primaries;
+				color_picture.transfer_characteristics = *transfer_characteristics;
+				color_picture.matrix_coefficients = *matrix_coefficients;
+				color_picture.is_full_range = *is_full_range;
+			}
+			HeifItemProperty::IccProfile(bytes) => {
+				icc_count += 1;
+				icc_bytes = Some(bytes);
+			}
+			_ => {
+			}
+		}
+	}
+	if nclx_count > 1 || icc_count > 1 {
+		return Err(String::from("AVIF 에 같은 꼴의 colr 가 둘 넘게 있습니다."));
+	}
+	let color_profile = match icc_bytes {
+		Some(icc_bytes) => {
+			let color_profile = EmbeddedColorProfile::from_icc_bytes(icc_bytes).ok_or_else(|| String::from("AVIF 의 ICC 프로필을 읽지 못했습니다."))?;
+			let is_matching = if color_picture.is_monochrome { color_profile.is_gray() || color_profile.is_rgb() } else { color_profile.is_rgb() };
+			if !is_matching {
+				return Err(String::from("AVIF 의 ICC 프로필이 색 공간과 맞지 않습니다."));
+			}
+			Some(color_profile)
+		}
+		None => {
+			if color_picture.color_primaries != 2 || color_picture.transfer_characteristics != 2 {
+				let color_space = get_avif_color_space(color_picture.color_primaries as u16, color_picture.transfer_characteristics as u16, color_picture.matrix_coefficients as u16, color_picture.is_monochrome).ok_or_else(|| String::from("AVIF 의 색 공간을 바꿀 수 없습니다."))?;
+				Some(EmbeddedColorProfile::from_color_space(color_space))
+			}
+			else {
+				None
+			}
+		}
+	};
+	let is_color_premultiplied = alpha_picture.is_some() && is_premultiplied;
+	let (mut pixels, is_pixels_premultiplied) = match color_profile.filter(|color_profile| color_profile.needs_conversion() && !is_color_premultiplied) {
+		Some(color_profile) => {
+			if color_picture.bit_depth > 8 {
+				let half_float_pixels: Vec<f32> = convert_to_rgba_float_pixels(&color_picture, alpha_picture.as_ref()).into_iter().map(round_to_half).collect();
+				(color_profile.convert_half_float_to_srgb_premultiplied(&half_float_pixels), true)
+			}
+			else {
+				(color_profile.convert_to_srgb_premultiplied(&convert_to_rgba_pixels(&color_picture, alpha_picture.as_ref())), true)
+			}
+		}
+		None => {
+			(convert_to_rgba_pixels(&color_picture, alpha_picture.as_ref()), is_color_premultiplied)
+		}
+	};
 	let mut width = color_picture.width;
 	let mut height = color_picture.height;
 	for property in property_list.iter() {
@@ -674,12 +858,292 @@ pub(crate) fn decode_avif(bytes: &[u8]) -> Result<Rc<Image>, String> {
 			mirror_pixels(&mut pixels, width, height, *axis);
 		}
 	}
-	if alpha_picture.is_some() && is_premultiplied {
+	if is_pixels_premultiplied {
 		Ok(Image::create_from_premultiplied_pixels(width as u32, height as u32, pixels))
 	}
 	else {
 		Ok(Image::create_from_pixels(width as u32, height as u32, pixels))
 	}
+}
+
+//==============================================================================
+/// 트랙 하나. (CrabbyAvif Track 가운데 첫 장을 푸는 데 쓰는 것)
+//==============================================================================
+struct AvifTrack {
+	track_id: u32,
+	/// tref 의 auxl 이 가리키는 트랙. (비었으면 색 트랙이 될 수 있다)
+	auxiliary_for_track_id_list: Vec<u32>,
+	/// tref 의 prem 이 가리키는 트랙. (색이 그 알파로 곱해졌다)
+	premultiplied_by_track_id: Option<u32>,
+	handler_type: [u8; 4],
+	/// 표본 설명. (형 이름과 av01 의 성질)
+	sample_description_list: Vec<([u8; 4], Vec<HeifItemProperty>)>,
+	chunk_offset_list: Vec<u64>,
+	/// stsc 의 (첫 덩이 번호, 덩이의 표본 수). (번호는 1 부터)
+	sample_to_chunk_list: Vec<(u32, u32)>,
+	/// stsz 의 고정 크기. (0 이면 sample_size_list)
+	fixed_sample_size: u32,
+	sample_size_list: Vec<u32>,
+}
+
+impl AvifTrack {
+	//==============================================================================
+	/// 그림 처리기 트랙인지. (pict, vide, auxv)
+	//==============================================================================
+	fn is_video_handler(&self) -> bool {
+		&self.handler_type == b"pict" || &self.handler_type == b"vide" || &self.handler_type == b"auxv"
+	}
+
+	//==============================================================================
+	/// AV1 표본이 있는지. (트랙 번호가 0 이 아니고 덩이가 있고 av01 표본 설명이 있다)
+	//==============================================================================
+	fn has_av1_samples(&self) -> bool {
+		self.track_id != 0 && !self.chunk_offset_list.is_empty() && self.sample_description_list.iter().any(|(format, _)| format == b"av01")
+	}
+
+	//==============================================================================
+	/// 색 트랙인지. (CrabbyAvif is_color)
+	//==============================================================================
+	fn is_color_track(&self) -> bool {
+		self.is_video_handler() && self.has_av1_samples() && self.auxiliary_for_track_id_list.is_empty()
+	}
+
+	//==============================================================================
+	/// 그 트랙의 보조 트랙인지. (CrabbyAvif is_aux)
+	//==============================================================================
+	fn is_auxiliary_track_for(&self, color_track_id: u32) -> bool {
+		self.is_video_handler() && self.has_av1_samples() && self.auxiliary_for_track_id_list.contains(&color_track_id)
+	}
+
+	//==============================================================================
+	/// 알파 트랙인지. (auxi 의 보조 형이 알파 형이면, auxi 가 없으면 알파로 본다)
+	//==============================================================================
+	fn is_alpha_track(&self) -> bool {
+		for property in self.get_sample_property_list().iter() {
+			if let HeifItemProperty::AuxiliaryType(auxiliary_type) = property {
+				return ALPHA_AUXILIARY_TYPE_LIST.contains(&auxiliary_type.as_str());
+			}
+		}
+		true
+	}
+
+	//==============================================================================
+	/// 첫 av01 표본 설명의 성질. (colr, auxi, clap, irot, imir)
+	//==============================================================================
+	fn get_sample_property_list(&self) -> &[HeifItemProperty] {
+		self.sample_description_list.iter().find(|(format, _)| format == b"av01").map(|(_, property_list)| property_list.as_slice()).unwrap_or(&[])
+	}
+
+	//==============================================================================
+	/// 첫 표본의 바이트. (표본이 있는 첫 덩이의 자리, 크기는 첫 표본 크기)
+	//==============================================================================
+	fn read_first_sample<'a>(&self, file_bytes: &'a [u8]) -> Result<&'a [u8], String> {
+		for (chunk_index, chunk_offset) in self.chunk_offset_list.iter().enumerate() {
+			let sample_count = self.sample_to_chunk_list.iter().rev().find(|(first_chunk, _)| *first_chunk as usize <= chunk_index + 1).map(|(_, samples_per_chunk)| *samples_per_chunk).unwrap_or(0);
+			if sample_count == 0 {
+				continue;
+			}
+			let sample_size = if self.fixed_sample_size > 0 { self.fixed_sample_size } else { *self.sample_size_list.first().ok_or_else(|| String::from("AVIF 트랙의 표본 크기가 없습니다."))? } as usize;
+			if sample_size == 0 {
+				return Err(String::from("AVIF 트랙의 표본 크기가 0 입니다."));
+			}
+			let start = *chunk_offset as usize;
+			let end = start.checked_add(sample_size).filter(|end| *end <= file_bytes.len()).ok_or_else(|| String::from("AVIF 트랙의 표본이 파일 밖입니다."))?;
+			return Ok(&file_bytes[start..end]);
+		}
+		Err(String::from("AVIF 트랙에 표본이 없습니다."))
+	}
+}
+
+//==============================================================================
+/// moov 읽기. (trak 마다, 트랙이 없거나 그림 트랙의 크기가 0 이면 Err)
+//==============================================================================
+fn read_movie_box(movie_content: &[u8]) -> Result<Vec<AvifTrack>, String> {
+	let mut track_list: Vec<AvifTrack> = Vec::new();
+	for (box_type, content) in split_boxes(movie_content)? {
+		if &box_type == b"trak" {
+			let (track, width, height) = read_track_box(content)?;
+			if track.is_video_handler() && (width == 0 || height == 0) {
+				return Err(String::from("AVIF 트랙의 크기가 0 입니다."));
+			}
+			track_list.push(track);
+		}
+	}
+	if track_list.is_empty() {
+		return Err(String::from("AVIF 의 moov 에 트랙이 없습니다."));
+	}
+	Ok(track_list)
+}
+
+//==============================================================================
+/// trak 읽기. (tkhd 의 번호와 크기, tref 의 auxl 과 prem, mdia 의 hdlr 와 stbl, 트랙과 너비, 높이)
+//==============================================================================
+fn read_track_box(track_content: &[u8]) -> Result<(AvifTrack, u32, u32), String> {
+	let mut track = AvifTrack {
+		track_id: 0,
+		auxiliary_for_track_id_list: Vec::new(),
+		premultiplied_by_track_id: None,
+		handler_type: [0; 4],
+		sample_description_list: Vec::new(),
+		chunk_offset_list: Vec::new(),
+		sample_to_chunk_list: Vec::new(),
+		fixed_sample_size: 0,
+		sample_size_list: Vec::new(),
+	};
+	let mut size: Option<(u32, u32)> = None;
+	for (box_type, content) in split_boxes(track_content)? {
+		match &box_type {
+			b"tkhd" => {
+				if size.is_some() {
+					return Err(String::from("AVIF trak 에 tkhd 가 둘입니다."));
+				}
+				let (version, _, body) = split_full_box(content)?;
+				let mut reader = BoxReader::new(body);
+				let time_size = if version == 1 { 8 } else if version == 0 { 4 } else { return Err(String::from("AVIF tkhd 의 판을 모릅니다.")) };
+				reader.read_unsigned(time_size)?;
+				reader.read_unsigned(time_size)?;
+				track.track_id = reader.read_u32()?;
+				reader.read_u32()?;
+				reader.read_unsigned(time_size)?;
+				reader.read_bytes(8 + 2 + 2 + 2 + 2 + 36)?;
+				let width = reader.read_u32()? >> 16;
+				let height = reader.read_u32()? >> 16;
+				size = Some((width, height));
+			}
+			b"tref" => {
+				for (reference_type, reference_content) in split_boxes(content)? {
+					let mut reader = BoxReader::new(reference_content);
+					if &reference_type == b"auxl" {
+						loop {
+							track.auxiliary_for_track_id_list.push(reader.read_u32()?);
+							if reference_content.len() - reader.position < 4 {
+								break;
+							}
+						}
+					}
+					else if &reference_type == b"prem" {
+						if track.premultiplied_by_track_id.is_some() || reference_content.len() >= 8 {
+							return Err(String::from("AVIF 트랙의 prem 이 둘입니다."));
+						}
+						track.premultiplied_by_track_id = Some(reader.read_u32()?);
+					}
+				}
+			}
+			b"mdia" => {
+				read_media_box(content, &mut track)?;
+			}
+			_ => {
+			}
+		}
+	}
+	let (width, height) = size.ok_or_else(|| String::from("AVIF trak 에 tkhd 가 없습니다."))?;
+	Ok((track, width, height))
+}
+
+//==============================================================================
+/// mdia 읽기. (hdlr 의 처리기 형, minf 의 stbl)
+//==============================================================================
+fn read_media_box(media_content: &[u8], track: &mut AvifTrack) -> Result<(), String> {
+	for (box_type, content) in split_boxes(media_content)? {
+		match &box_type {
+			b"hdlr" => {
+				let (_, _, body) = split_full_box(content)?;
+				let mut reader = BoxReader::new(body);
+				reader.read_u32()?;
+				track.handler_type = reader.read_four_character_code()?;
+			}
+			b"minf" => {
+				for (information_type, information_content) in split_boxes(content)? {
+					if &information_type == b"stbl" {
+						read_sample_table_box(information_content, track)?;
+					}
+				}
+			}
+			_ => {
+			}
+		}
+	}
+	Ok(())
+}
+
+//==============================================================================
+/// stbl 읽기. (stsd 의 표본 설명, stco 와 co64 의 덩이 자리, stsc, stsz)
+//==============================================================================
+fn read_sample_table_box(sample_table_content: &[u8], track: &mut AvifTrack) -> Result<(), String> {
+	for (box_type, content) in split_boxes(sample_table_content)? {
+		match &box_type {
+			b"stsd" => {
+				let (_, _, body) = split_full_box(content)?;
+				let mut reader = BoxReader::new(body);
+				reader.read_u32()?;
+				for (format, entry_content) in split_boxes(reader.read_remaining())? {
+					let mut property_list: Vec<HeifItemProperty> = Vec::new();
+					if &format == b"av01" {
+						// SampleEntry 8 바이트와 VisualSampleEntry 70 바이트 뒤에 av1C, colr, auxi, clap, irot, imir 가 온다.
+						if entry_content.len() < 78 {
+							return Err(String::from("AVIF 표본 설명이 짧습니다."));
+						}
+						let mut has_codec_configuration = false;
+						for (property_type, property_body) in split_boxes(&entry_content[78..])? {
+							if &property_type == b"av1C" {
+								has_codec_configuration = true;
+							}
+							property_list.push(read_item_property(&property_type, property_body)?);
+						}
+						if !has_codec_configuration {
+							return Err(String::from("AVIF 표본 설명에 av1C 가 없습니다."));
+						}
+					}
+					track.sample_description_list.push((format, property_list));
+				}
+			}
+			b"stco" | b"co64" => {
+				let (_, _, body) = split_full_box(content)?;
+				let mut reader = BoxReader::new(body);
+				let entry_count = reader.read_u32()?;
+				let offset_size = if &box_type == b"co64" { 8 } else { 4 };
+				for _ in 0..entry_count {
+					track.chunk_offset_list.push(reader.read_unsigned(offset_size)?);
+				}
+			}
+			b"stsc" => {
+				let (_, _, body) = split_full_box(content)?;
+				let mut reader = BoxReader::new(body);
+				let entry_count = reader.read_u32()?;
+				for entry_index in 0..entry_count {
+					let first_chunk = reader.read_u32()?;
+					let samples_per_chunk = reader.read_u32()?;
+					let sample_description_index = reader.read_u32()?;
+					let is_increasing = match track.sample_to_chunk_list.last() {
+						Some((previous_first_chunk, _)) => {
+							first_chunk > *previous_first_chunk
+						}
+						None => {
+							true
+						}
+					};
+					if (entry_index == 0 && first_chunk != 1) || !is_increasing || sample_description_index == 0 {
+						return Err(String::from("AVIF stsc 가 틀렸습니다."));
+					}
+					track.sample_to_chunk_list.push((first_chunk, samples_per_chunk));
+				}
+			}
+			b"stsz" => {
+				let (_, _, body) = split_full_box(content)?;
+				let mut reader = BoxReader::new(body);
+				track.fixed_sample_size = reader.read_u32()?;
+				let sample_count = reader.read_u32()?;
+				if track.fixed_sample_size == 0 {
+					for _ in 0..sample_count {
+						track.sample_size_list.push(reader.read_u32()?);
+					}
+				}
+			}
+			_ => {
+			}
+		}
+	}
+	Ok(())
 }
 
 //==============================================================================
@@ -867,13 +1331,13 @@ unsafe fn copy_decoded_picture(picture: &Dav1dPicture) -> Result<DecodedAv1Pictu
 	else {
 		(0, 0)
 	};
-	let (matrix_coefficients, is_full_range) = match picture.seq_hdr {
+	let (color_primaries, transfer_characteristics, matrix_coefficients, is_full_range) = match picture.seq_hdr {
 		Some(sequence_header) => {
 			let sequence_header = unsafe { sequence_header.as_ref() };
-			(sequence_header.mtrx, sequence_header.color_range != 0)
+			(sequence_header.pri, sequence_header.trc, sequence_header.mtrx, sequence_header.color_range != 0)
 		}
 		None => {
-			(DAV1D_MC_BT601, true)
+			(2, 2, DAV1D_MC_BT601, true)
 		}
 	};
 	let mut decoded_picture = DecodedAv1Picture {
@@ -882,6 +1346,8 @@ unsafe fn copy_decoded_picture(picture: &Dav1dPicture) -> Result<DecodedAv1Pictu
 		bit_depth,
 		chroma_shift,
 		is_monochrome,
+		color_primaries,
+		transfer_characteristics,
 		matrix_coefficients,
 		is_full_range,
 		plane_list: [Vec::new(), Vec::new(), Vec::new()],
@@ -980,9 +1446,31 @@ fn read_upsampled_chroma(picture: &DecodedAv1Picture, plane: &[u16], column: usi
 }
 
 //==============================================================================
-/// YUV 를 8 비트 RGBA 로. (libavif avifImageYUVToRGB 의 기준 셈, 알파 그림이 없으면 불투명)
+/// YUV 를 8 비트 RGBA 로. (0 과 1 사이로 자른 값을 반올림한다)
 //==============================================================================
 fn convert_to_rgba_pixels(picture: &DecodedAv1Picture, alpha_picture: Option<&DecodedAv1Picture>) -> Vec<u8> {
+	let mut pixels: Vec<u8> = Vec::with_capacity(picture.width * picture.height * 4);
+	visit_rgba_values(picture, alpha_picture, |value| {
+		pixels.push((value * 255.0).round() as u8);
+	});
+	pixels
+}
+
+//==============================================================================
+/// YUV 를 0 과 1 사이 실수 RGBA 로. (높은 비트 깊이 그림의 색 프로필 바꾸기, 크롬은 반정밀로 푼다)
+//==============================================================================
+fn convert_to_rgba_float_pixels(picture: &DecodedAv1Picture, alpha_picture: Option<&DecodedAv1Picture>) -> Vec<f32> {
+	let mut pixels: Vec<f32> = Vec::with_capacity(picture.width * picture.height * 4);
+	visit_rgba_values(picture, alpha_picture, |value| {
+		pixels.push(value);
+	});
+	pixels
+}
+
+//==============================================================================
+/// YUV 를 RGBA 값으로 차례로 넘기기. (libavif avifImageYUVToRGB 의 기준 셈, 0 과 1 사이로 자른 R, G, B, A 차례, 알파 그림이 없으면 불투명)
+//==============================================================================
+fn visit_rgba_values(picture: &DecodedAv1Picture, alpha_picture: Option<&DecodedAv1Picture>, mut visit: impl FnMut(f32)) {
 	let maximum_value = ((1u32 << picture.bit_depth) - 1) as f32;
 	let depth_scale = (1u32 << (picture.bit_depth - 8)) as f32;
 	let (bias_y, range_y, range_uv) = if picture.is_full_range {
@@ -997,10 +1485,6 @@ fn convert_to_rgba_pixels(picture: &DecodedAv1Picture, alpha_picture: Option<&De
 	let (luma_red, luma_blue) = read_luma_coefficients(picture.matrix_coefficients);
 	let luma_green = 1.0 - luma_red - luma_blue;
 	let alpha_maximum_value = alpha_picture.map(|alpha_picture| ((1u32 << alpha_picture.bit_depth) - 1) as f32).unwrap_or(1.0);
-	let to_byte = |value: f32| -> u8 {
-		(value.clamp(0.0, 1.0) * 255.0).round() as u8
-	};
-	let mut pixels: Vec<u8> = Vec::with_capacity(picture.width * picture.height * 4);
 	for row in 0..picture.height {
 		for column in 0..picture.width {
 			let luma = (picture.plane_list[0][row * picture.width + column] as f32 - bias_y) / range_y;
@@ -1031,19 +1515,18 @@ fn convert_to_rgba_pixels(picture: &DecodedAv1Picture, alpha_picture: Option<&De
 			};
 			let alpha = match alpha_picture {
 				Some(alpha_picture) => {
-					to_byte(alpha_picture.plane_list[0][row * alpha_picture.width + column] as f32 / alpha_maximum_value)
+					alpha_picture.plane_list[0][row * alpha_picture.width + column] as f32 / alpha_maximum_value
 				}
 				None => {
-					255
+					1.0
 				}
 			};
-			pixels.push(to_byte(red));
-			pixels.push(to_byte(green));
-			pixels.push(to_byte(blue));
-			pixels.push(alpha);
+			visit(red.clamp(0.0, 1.0));
+			visit(green.clamp(0.0, 1.0));
+			visit(blue.clamp(0.0, 1.0));
+			visit(alpha.clamp(0.0, 1.0));
 		}
 	}
-	pixels
 }
 
 #[cfg(test)]
@@ -1073,6 +1556,31 @@ mod tests {
 		"02082088f4b994a73de0238a59755ae1db1c30e8a235bb7ab20bfea46b7594a596ab50ee863d36f1dcca4806059d80701f3f55c50a4e443606c4e5f27b9f936bd57fd97d1f43db62b9d612000a0e0000",
 		"000c47fffefffc081010342032301001848002082088f4b994a31843dc984dafd95461599d3bb542678be7a813a503e23dda21dd83ce0d3041d217381cf012000a0e0000000c47fffefffc0810103420",
 		"32301001848002082088f4b994a31843dc984dafd95461599d3bb542678be7a813a503e23dda21dd83ce0d3041d217381cf0",
+	);
+
+	/// ffmpeg(SVT-AV1)가 쓴 64 x 48 움직이는 AVIF 세 장(빨강, 초록, 파랑, 0.5 초씩), 주 상표 avis. (pitm 항목은 둘째 장을 가리키게 고쳤다)
+	const ANIMATED_AVIF_HEX: &str = concat!(
+		"0000002c66747970617669730000000061766973617669666d73663169736f386d6966316d6961664d413142000000f96d657461000000000000002f68646c7200000000000000007069637400000000",
+		"00000000000000005069637475726548616e646c6572000000000e7069746d0000000000010000001e696c6f630000000044000001000100000001000003f1000000250000002869696e660000000000",
+		"010000001a696e6665020000000001000061763031436f6c6f72000000006a697072700000004b6970636f00000014697370650000000000000040000000300000001070697869000000000308080800",
+		"00000c6176314381000c0000000013636f6c726e636c78000200020002000000001769706d610000000000000001000104010283040000029f6d6f6f760000006c6d7668640000000000000000000000",
+		"00000003e8000005dc0001000001000000000000000000000000010000000000000000000000000000000100000000000000000000000000004000000000000000000000000000000000000000000000",
+		"0000000000000000020000022b7472616b00000068746b6864010000030000000000000000000000000000000000000001000000007fffffffffffffff00000000000000000000000000000000000100",
+		"000000000000000000000000000001000000000000000000000000000040000000004000000030000000000024656474730000001c656c73740000000100000001000005dc0000000000010000000001",
+		"976d646961000000206d646864000000000000000000000000000040000000600055c400000000002f68646c720000000000000000706963740000000000000000000000005069637475726548616e64",
+		"6c657200000001406d696e6600000014766d68640000000100000000000000000000002464696e660000001c6472656600000000000000010000000c75726c2000000001000001007374626c0000009c",
+		"7374736400000000000000010000008c61763031000000000000000100000000000000000000000000000000004000300048000000480000000000000001174c61766336322e32382e313032206c6962",
+		"73767461763100000000000000000018ffff0000000c6176314381000c000000000a6669656c0100000000107061737000000001000000010000001063637374000000007c0000000000001873747473",
+		"000000000000000100000003000020000000001c737473630000000000000001000000010000000300000001000000147374737a000000000000002500000003000000147374636f0000000000000001",
+		"000003cc000000776d6461740a0b02000004957fbc2af9004032161000c60069a30c1049104baf48d27a6bd646c95b03600a0b02000004957fbc2af9004032161004c60069a30c10491054a03024874d",
+		"2a2be56317400a0b02000004957fbc2af9004032161008c60069a30c1049104baf48cc6279eecf6802d080",
+	);
+	/// ffmpeg 가 쓴 8 x 8 회색(128) AVIF, colr nclx 를 9, 16, 1, 전체 범위(BT.2020 원색, PQ)로 고쳤다.
+	const GRAY_PQ_AVIF_HEX: &str = concat!(
+		"00000020667479706176696600000000617669666d6966316d6961664d413142000000f96d657461000000000000002f68646c7200000000000000007069637400000000000000000000000050696374",
+		"75726548616e646c6572000000000e7069746d0000000000010000001e696c6f63000000004400000100010000000100000121000000140000002869696e660000000000010000001a696e6665020000",
+		"000001000061763031436f6c6f72000000006a697072700000004b6970636f0000001469737065000000000000000800000008000000107069786900000000030808080000000c6176314381000c0000",
+		"000013636f6c726e636c78000900100001800000001769706d610000000000000001000104010283040000001c6d6461740a0a0200000548bf1abe421032061000800090c0",
 	);
 
 	//==============================================================================
@@ -1120,6 +1628,47 @@ mod tests {
 		assert_pixel_near(read_pixel(&grid_image, 1099, 63), [0, 0, 0, 255]);
 		// 잘린 파일은 실패다.
 		assert!(Image::load_from_memory(&alpha_bytes[..alpha_bytes.len() / 2]).is_err());
+	}
+
+	//==============================================================================
+	/// 움직이는 AVIF 는 크롬 158 처럼 첫 장을 푼다. 주 상표 avis 는 트랙의 첫 표본(빨강), avif 는 주 그림 항목(초록), 그 밖은 트랙이 있으면 트랙이고, 트랙만 있어도 푼다.
+	//==============================================================================
+	#[test]
+	fn decode_animated_first_frame() {
+		let animated_bytes = decode_hex(ANIMATED_AVIF_HEX);
+		assert_eq!(&animated_bytes[44 + 4..44 + 8], b"meta");
+		assert_eq!(&animated_bytes[20..24], b"avif");
+		let track_image = Image::load_from_memory(&animated_bytes).expect("avis");
+		assert_eq!((track_image.get_width(), track_image.get_height()), (64, 48));
+		assert_pixel_near(read_pixel(&track_image, 10, 10), [254, 0, 0, 255]);
+		let mut item_bytes = animated_bytes.clone();
+		item_bytes[8..12].copy_from_slice(b"avif");
+		assert_pixel_near(read_pixel(&Image::load_from_memory(&item_bytes).expect("avif 상표"), 10, 10), [0, 255, 2, 255]);
+		let mut other_brand_bytes = animated_bytes.clone();
+		other_brand_bytes[8..12].copy_from_slice(b"mif1");
+		assert_pixel_near(read_pixel(&Image::load_from_memory(&other_brand_bytes).expect("mif1 상표"), 10, 10), [254, 0, 0, 255]);
+		let mut tracks_only_bytes = animated_bytes.clone();
+		tracks_only_bytes[44 + 4..44 + 8].copy_from_slice(b"free");
+		// 상표에 avif 가 있으면 meta 가 있어야 한다.
+		assert!(Image::load_from_memory(&tracks_only_bytes).is_err());
+		tracks_only_bytes[20..24].copy_from_slice(b"avio");
+		assert_pixel_near(read_pixel(&Image::load_from_memory(&tracks_only_bytes).expect("트랙만"), 10, 10), [254, 0, 0, 255]);
+	}
+
+	//==============================================================================
+	/// colr nclx 의 원색과 전달 특성을 sRGB 로 바꾼다. (PQ 의 회색 128 은 크롬 158 WebGL 에서 181) 크롬이 SkColorSpace 로 못 바꾸는 전달 특성 11 은 실패다.
+	//==============================================================================
+	#[test]
+	fn convert_nclx_color_space() {
+		let pq_bytes = decode_hex(GRAY_PQ_AVIF_HEX);
+		assert_eq!(read_pixel(&Image::load_from_memory(&pq_bytes).expect("pq"), 3, 3), [181, 181, 181, 255]);
+		let nclx_position = pq_bytes.windows(4).position(|window| window == b"nclx").expect("nclx");
+		let mut srgb_bytes = pq_bytes.clone();
+		srgb_bytes[nclx_position + 4..nclx_position + 8].copy_from_slice(&[0, 1, 0, 13]);
+		assert_eq!(read_pixel(&Image::load_from_memory(&srgb_bytes).expect("srgb"), 3, 3), [128, 128, 128, 255]);
+		let mut unsupported_bytes = pq_bytes.clone();
+		unsupported_bytes[nclx_position + 6..nclx_position + 8].copy_from_slice(&[0, 11]);
+		assert!(Image::load_from_memory(&unsupported_bytes).is_err());
 	}
 
 	//==============================================================================

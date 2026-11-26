@@ -2030,7 +2030,7 @@ No notice is required for these. They are listed so that the origin of the code 
 ### rustybuzz 0.20.1
 
 - License: `MIT`
-- Source: crates.io, <https://github.com/harfbuzz/rustybuzz>
+- Source: local path, <https://github.com/harfbuzz/rustybuzz>
 - Copyright: Copyright (c) HarfBuzz developers
 - Copyright: Copyright (c) 2020 Yevhenii Reizner
 - License text: [T74 MIT](#t74)
@@ -2456,7 +2456,7 @@ No notice is required for these. They are listed so that the origin of the code 
 ### ttf-parser 0.25.1
 
 - License: `MIT OR Apache-2.0`, used under `MIT`
-- Source: crates.io, <https://github.com/harfbuzz/ttf-parser>
+- Source: local path, <https://github.com/harfbuzz/ttf-parser>
 - Copyright: Copyright (c) 2018 Yevhenii Reizner
 - License text: [T149 MIT](#t149)
 

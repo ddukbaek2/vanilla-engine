@@ -388,6 +388,8 @@ pub struct FontDescription {
 	/// 목록의 첫 이름.
 	pub family_name: String,
 	/// 쉼표로 이은 이름 목록. (앞 이름부터 찾는다)
+	/// - 따옴표 친 이름이 일반 이름(serif, sans-serif, cursive, fantasy, monospace, system-ui, -webkit-body, math)과 같은 글자면 따옴표를 남긴다. ("'monospace'" → "\"monospace\"")
+	///   크롬처럼 따옴표 친 것은 그 이름의 글꼴로, 따옴표 없는 것은 일반 이름으로 찾는다.
 	pub family_name_list: Vec<String>,
 }
 
@@ -793,7 +795,7 @@ impl TextStringTextureCache {
 		self.entry_table.retain(|_, cached_text_entry_list| {
 			cached_text_entry_list.retain(|cached_text_entry| {
 				let font_description = parse_font_string(&cached_text_entry.font_string);
-				let is_affected = font_description.family_name_list.iter().any(|family_name| family_name.to_lowercase() == family_key) && font_face_descriptors.contains_any_character(&cached_text_entry.text);
+				let is_affected = font_description.family_name_list.iter().any(|family_name| read_registered_family_key(family_name).as_deref() == Some(family_key)) && font_face_descriptors.contains_any_character(&cached_text_entry.text);
 				if is_affected {
 					pending_deleted_texture_list.push(cached_text_entry.entry.texture);
 					removed_count += 1;
@@ -1836,14 +1838,25 @@ impl TextStringTextureCache {
 	fn resolve_face_list(&self, font_description: &FontDescription) -> Vec<ResolvedFontFace> {
 		let mut face_list: Vec<ResolvedFontFace> = Vec::new();
 		let mut used_system_family_list: Vec<String> = Vec::new();
+		// 목록의 마지막 일반 이름(serif, sans-serif, cursive, fantasy, monospace, -webkit-body)이 -webkit-body 면 올린 얼굴이 없는 이름은 모두 표준 글꼴로 찾는다.
+		// (크롬 ConvertFontFamily 가 그것을 FontDescription 의 일반 이름으로 두고, FontSelector::FamilyNameFromSettings 가 어느 이름이든 표준 글꼴을 돌려준다)
+		let last_generic_family = font_description.family_name_list.iter().rev().find(|family_name| matches!(family_name.to_ascii_lowercase().as_str(), "serif" | "sans-serif" | "cursive" | "fantasy" | "monospace" | "-webkit-body"));
+		let is_body_family = last_generic_family.is_some_and(|family_name| family_name.eq_ignore_ascii_case("-webkit-body"));
 		for family_name in &font_description.family_name_list {
-			let family_key = family_name.to_lowercase();
-			if let Some(family_face_list) = self.font_family_table.get(&family_key) {
-				let family_face_reference_list: Vec<&RegisteredFontFace> = family_face_list.iter().collect();
-				textshaping::select_font_faces(&family_face_reference_list, font_description.font_weight, font_description.is_italic, &mut face_list);
-				continue;
+			if let Some(registered_family_key) = read_registered_family_key(family_name) {
+				if let Some(family_face_list) = self.font_family_table.get(&registered_family_key) {
+					let family_face_reference_list: Vec<&RegisteredFontFace> = family_face_list.iter().collect();
+					textshaping::select_font_faces(&family_face_reference_list, font_description.font_weight, font_description.is_italic, &mut face_list);
+					continue;
+				}
 			}
-			// 올리지 않은 이름은 운영체제 글꼴에서 찾는다. (데스크탑, 사슬을 켰을 때)
+			// 올리지 않은 이름은 운영체제 글꼴에서 찾는다. (데스크탑, 사슬을 켰을 때. 따옴표 친 일반 이름은 따옴표째 찾아 글꼴 이름이 된다)
+			let family_key = if is_body_family {
+				String::from("-webkit-body")
+			}
+			else {
+				family_name.to_lowercase()
+			};
 			if !used_system_family_list.contains(&family_key) && self.append_system_family_faces(&family_key, font_description.font_weight, font_description.is_italic, &mut face_list) {
 				used_system_family_list.push(family_key);
 			}
@@ -1902,7 +1915,14 @@ impl TextStringTextureCache {
 				return;
 			}
 			for family_name in &font_description.family_name_list {
-				let family_key = family_name.to_lowercase();
+				let family_key = match read_registered_family_key(family_name) {
+					Some(family_key) => {
+						family_key
+					}
+					None => {
+						continue;
+					}
+				};
 				let character_set = match table.get_mut(&family_key) {
 					Some(character_set) => {
 						character_set
@@ -3690,6 +3710,7 @@ fn read_css_math_number(value: CssMathValue) -> f64 {
 
 //==============================================================================
 /// CSS 글꼴 이름 목록 읽기. ("'A B', C D, sans-serif" → ["A B", "C D", "sans-serif"], 비었거나 틀리면 None)
+/// - 따옴표 친 이름이 일반 이름과 같은 글자면 따옴표째 둔다. ("'monospace'" → "\"monospace\"", 크롬은 따옴표 친 이름을 글꼴 이름으로 본다)
 //==============================================================================
 fn parse_css_family_list(family_list_text: &str) -> Option<Vec<String>> {
 	let mut family_name_list: Vec<String> = Vec::new();
@@ -3721,7 +3742,12 @@ fn parse_css_family_list(family_list_text: &str) -> Option<Vec<String>> {
 				if !matches!(characters.peek(), None | Some(',')) {
 					return None;
 				}
-				quoted_name
+				if is_generic_family_keyword(&quoted_name) {
+					format!("\"{}\"", quoted_name)
+				}
+				else {
+					quoted_name
+				}
 			}
 			_ => {
 				let mut unquoted_text = String::new();
@@ -3753,6 +3779,29 @@ fn parse_css_family_list(family_list_text: &str) -> Option<Vec<String>> {
 		}
 	}
 	Some(family_name_list)
+}
+
+//==============================================================================
+/// 따옴표 없이 적으면 일반 이름이 되는 낱말인지. (블링크 ConsumeGenericFamily 의 serif 부터 math 까지, 대소문자를 가리지 않는다)
+//==============================================================================
+fn is_generic_family_keyword(family_name: &str) -> bool {
+	matches!(family_name.to_ascii_lowercase().as_str(), "serif" | "sans-serif" | "cursive" | "fantasy" | "monospace" | "system-ui" | "-webkit-body" | "math")
+}
+
+//==============================================================================
+/// 이름 목록의 이름 하나로 올린 글꼴 얼굴을 찾는 열쇠. (따옴표 없는 일반 이름이면 None)
+/// - 크롬 CSSFontSelector::GetFontData 는 일반 이름에 @font-face 와 FontFace 를 찾지 않는다. 따옴표 친 일반 이름은 그 이름의 얼굴을 찾는다.
+/// - 맥 크롬은 BlinkMacSystemFont 를 이름 "system-ui" 로 바꿔 찾는다. (style_builder_converter.cc 의 ConvertFontFamily)
+//==============================================================================
+fn read_registered_family_key(family_name: &str) -> Option<String> {
+	if is_generic_family_keyword(family_name) {
+		return None;
+	}
+	let family_key = create_family_key(family_name);
+	if cfg!(target_os = "macos") && family_key == "blinkmacsystemfont" {
+		return Some(String::from("system-ui"));
+	}
+	Some(family_key)
 }
 
 //==============================================================================
@@ -4028,7 +4077,8 @@ mod tests {
 
 	//==============================================================================
 	/// 맥 시스템 UI 글꼴(SFNS)의 광학 크기와 자간 표, 크롬이 모르는 이름: 맥 크롬 158 Canvas2D 의 measureText 값과 같다. (맥만, SFNS 가 있을 때)
-	/// - system-ui 와 BlinkMacSystemFont 는 opsz 축을 글자 크기로 걸고(17 ~ 96 으로 자른다) trak 표의 자간을 더한다. 8 ~ 128px, 굵기 300, 400, 700.
+	/// - system-ui 와 BlinkMacSystemFont 는 opsz 축을 글자 크기로 걸고(17 ~ 96 으로 자른다) trak 표의 자간을 더한다. 8 ~ 128px, 굵기 300, 400, 700 과 기울임(SFNSItalic).
+	/// - 글자 자리는 크롬 HarfBuzz 처럼 16.16 배율로 셈해 가변 GPOS 델타가 크롬과 같다. (축 값 정규화, 짝 커닝의 장치 표도 하프버즈와 같다) 크롬 값과 1/10000 px 안.
 	/// - -apple-system 은 크롬이 모르는 이름이라 다음 이름으로 넘어간다. (사슬에서는 Apple SD Gothic Neo, 표준 글꼴과 같은 값)
 	//==============================================================================
 	#[cfg(target_os = "macos")]
@@ -4042,16 +4092,22 @@ mod tests {
 		text_string_texture_cache.set_system_font_chain(system_font_description.family_name_list);
 		text_string_texture_cache.set_system_font_fallback_enabled(true);
 		let size_list = [8.0, 10.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 20.0, 21.0, 24.0, 28.0, 32.0, 40.0, 48.0, 64.0, 96.0, 128.0];
-		let chrome_width_table: [(&str, [f32; 19]); 3] = [
-			("", [63.7253, 77.417, 90.6504, 96.9858, 103.3525, 109.563, 115.8672, 121.5151, 128.1933, 139.6937, 145.7919, 164.9744, 192.8008, 219.8438, 272.6172, 325.6406, 430.1875, 640.0313, 853.375]),
-			("bold ", [67.7136, 82.4023, 96.6328, 103.4668, 110.332, 117.041, 123.8438, 129.9902, 137.2324, 149.9121, 156.7002, 178.0313, 208.3184, 237.5781, 294.7852, 352.2422, 465.6563, 693.2344, 924.3125]),
-			("300 ", [62.7253, 76.1669, 89.1503, 95.3608, 101.6025, 107.6879, 113.8671, 119.39, 125.9276, 137.0099, 142.8173, 161.0497, 187.9336, 214.2813, 265.6641, 317.2969, 419.0625, 623.3438, 831.125]),
+		let text_list = ["Hello World Wifi", "AVATAR Type Wolf"];
+		let chrome_width_table: [(&str, usize, [f32; 19]); 8] = [
+			("", 0, [63.72534, 77.41699, 90.65039, 96.98584, 103.35254, 109.56299, 115.86719, 121.51514, 128.19327, 139.69373, 145.7919, 164.97443, 192.80078, 219.84375, 272.61719, 325.64062, 430.1875, 640.03125, 853.375]),
+			("bold ", 0, [67.71362, 82.40234, 96.63281, 103.4668, 110.33203, 117.04102, 123.84375, 129.99023, 137.23242, 149.91211, 156.7002, 178.03125, 208.31836, 237.57812, 294.78516, 352.24219, 465.65625, 693.23438, 924.3125]),
+			("300 ", 0, [62.7253, 76.16693, 89.15031, 95.36076, 101.60246, 107.6879, 113.8671, 119.39003, 125.92758, 137.00986, 142.81726, 161.04968, 187.93359, 214.28125, 265.66406, 317.29688, 419.0625, 623.34375, 831.125]),
+			("italic ", 0, [64.14722, 77.94434, 91.2832, 97.67139, 104.09082, 110.354, 116.71094, 122.41162, 129.26233, 141.24557, 147.69449, 168.30789, 197.12109, 224.78125, 278.78906, 333.04688, 440.0625, 654.84375, 873.125]),
+			("", 1, [72.66284, 88.58887, 104.05664, 111.50928, 118.99316, 126.3208, 133.74219, 140.50732, 148.23708, 161.60435, 168.54726, 190.06213, 221.60742, 252.76562, 313.76953, 375.02344, 496.03125, 738.79688, 985.0625]),
+			("bold ", 1, [77.35034, 94.44824, 111.08789, 119.12646, 127.19629, 135.10986, 143.11719, 150.46826, 158.83867, 173.59828, 181.2612, 205.15698, 239.49023, 273.20312, 339.31641, 405.67969, 536.90625, 800.10938, 1066.8125]),
+			("300 ", 1, [71.70775, 87.39499, 102.62398, 109.95724, 117.32175, 124.52998, 131.83199, 138.47772, 146.0793, 159.06029, 165.68126, 186.27104, 216.92474, 247.41397, 307.07996, 366.99597, 485.32794, 722.74194, 963.65588]),
+			("italic ", 1, [73.67847, 89.8584, 105.58008, 113.15967, 120.77051, 128.2251, 135.77344, 142.66553, 150.56776, 164.32457, 171.44641, 193.79195, 226.07812, 257.875, 320.15625, 382.6875, 506.25, 754.125, 1005.5]),
 		];
-		for (weight_prefix, chrome_width_list) in chrome_width_table {
+		for (style_prefix, text_index, chrome_width_list) in chrome_width_table {
 			for (size_index, font_size) in size_list.iter().enumerate() {
-				let font_string = format!("{}{}px system-ui", weight_prefix, font_size);
-				let width = text_string_texture_cache.measure_text(&font_string, "Hello World Wifi").width;
-				assert!((width - chrome_width_list[size_index]).abs() < 0.02, "{} {} {}", font_string, width, chrome_width_list[size_index]);
+				let font_string = format!("{}{}px system-ui", style_prefix, font_size);
+				let width = text_string_texture_cache.measure_text(&font_string, text_list[text_index]).width;
+				assert!((width - chrome_width_list[size_index]).abs() < 0.0001, "{} {} {} {}", font_string, text_list[text_index], width, chrome_width_list[size_index]);
 			}
 		}
 		let measure_width = |font_string: &str| -> f32 {
@@ -4125,6 +4181,51 @@ mod tests {
 			let font_string = format!("16px {}", family_name);
 			assert!((measure_width(&font_string, "Hello World Wifi") - latin_width).abs() < 0.01, "{} {}", font_string, measure_width(&font_string, "Hello World Wifi"));
 			assert!((measure_width(&font_string, "가나다라") - korean_width).abs() < 0.01, "{} {}", font_string, measure_width(&font_string, "가나다라"));
+		}
+	}
+
+	//==============================================================================
+	/// 따옴표 친 일반 이름: 따옴표를 남겨 글꼴 이름으로 읽는다. (따옴표 없는 것은 일반 이름, 일반 이름이 아닌 이름은 따옴표를 뗀다)
+	//==============================================================================
+	#[test]
+	fn quoted_generic_family_keeps_quotes() {
+		let font_description = parse_font_string("16px 'monospace', \"Serif\", monospace, 'Menlo', -webkit-body");
+		assert_eq!(font_description.family_name_list, vec!["\"monospace\"", "\"Serif\"", "monospace", "Menlo", "-webkit-body"]);
+		assert_eq!(read_registered_family_key("\"monospace\""), Some(String::from("monospace")));
+		assert_eq!(read_registered_family_key("MONOSPACE"), None);
+		assert_eq!(read_registered_family_key("Menlo"), Some(String::from("menlo")));
+	}
+
+	//==============================================================================
+	/// 따옴표 친 일반 이름과 올린 얼굴, -webkit-body: 맥 크롬 158 (화면 언어 한국어)의 measureText 값과 같다. (맥만, 화면 언어가 한국어이고 Georgia 가 있을 때)
+	/// - 따옴표 친 'monospace', 'serif' 는 그 이름의 글꼴이 없어 표준 글꼴(Apple SD Gothic Neo)이고, 'system-ui' 는 맥 크롬 FontCache 처럼 시스템 UI 글꼴이다.
+	/// - 마지막 일반 이름이 -webkit-body 면 앞 이름(Menlo, serif)도 표준 글꼴이다. (FontSelector::FamilyNameFromSettings)
+	/// - Georgia 를 monospace, system-ui, Menlo, -webkit-body 이름으로 올리면 따옴표 친 이름과 보통 이름만 그것을 쓰고, 따옴표 없는 일반 이름은 쓰지 않는다. (CSSFontSelector::GetFontData)
+	//==============================================================================
+	#[cfg(target_os = "macos")]
+	#[test]
+	fn quoted_generic_family_matches_chrome_on_macos() {
+		let georgia_path = std::path::Path::new("/System/Library/Fonts/Supplemental/Georgia.ttf");
+		if crate::platform::desktop::systemfont::read_browser_locale() != "ko" || !georgia_path.exists() || crate::platform::find_family_font_file("Apple SD Gothic Neo", 400, false).is_none() {
+			return;
+		}
+		let mut text_string_texture_cache = TextStringTextureCache::new();
+		let system_font_description = parse_font_string(&format!("10px {}", crate::base::platform::SYSTEM_FONT_STRING));
+		text_string_texture_cache.set_system_font_chain(system_font_description.family_name_list);
+		text_string_texture_cache.set_system_font_fallback_enabled(true);
+		let before_width_list: [(&str, f32); 14] = [("16px monospace", 154.125), ("16px 'monospace'", 109.07187), ("16px \"MONOSPACE\"", 109.07187), ("16px 'monospace', monospace", 154.125), ("16px 'monospace', serif", 124.09744), ("16px 'serif'", 109.07187), ("16px 'cursive'", 109.07187), ("16px 'math'", 109.07187), ("16px 'system-ui'", 115.86719), ("16px -webkit-body", 109.07187), ("16px '-webkit-body'", 109.07187), ("16px Menlo, -webkit-body", 109.07187), ("16px serif, -webkit-body", 109.07187), ("16px -webkit-body, serif", 109.07187)];
+		for (font_string, chrome_width) in before_width_list {
+			let width = text_string_texture_cache.measure_text(font_string, "Hello World Wifi").width;
+			assert!((width - chrome_width).abs() < 0.001, "{} {} {}", font_string, width, chrome_width);
+		}
+		let georgia_bytes = std::fs::read(georgia_path).expect("Georgia");
+		for family_name in ["monospace", "system-ui", "Menlo", "-webkit-body"] {
+			text_string_texture_cache.register_font_face(family_name, FontFaceDescriptors::new(), georgia_bytes.clone()).expect("register");
+		}
+		let after_width_list: [(&str, f32); 10] = [("16px monospace", 154.125), ("16px 'monospace'", 121.01563), ("16px 'monospace', monospace", 121.01563), ("16px system-ui", 115.86719), ("16px 'system-ui'", 121.01563), ("16px BlinkMacSystemFont", 121.01563), ("16px -webkit-body", 109.07187), ("16px '-webkit-body'", 121.01563), ("16px Menlo, -webkit-body", 121.01563), ("16px serif, -webkit-body", 109.07187)];
+		for (font_string, chrome_width) in after_width_list {
+			let width = text_string_texture_cache.measure_text(font_string, "Hello World Wifi").width;
+			assert!((width - chrome_width).abs() < 0.001, "{} {} {}", font_string, width, chrome_width);
 		}
 	}
 
