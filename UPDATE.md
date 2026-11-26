@@ -14,7 +14,7 @@
   - src/experimental/collection/*.js → src/base/collection/*.js (러스트는 표준 Vec, HashMap 같은 것이 맡아 없다)
   - src/experimental/camera.js → src/deprecated/camera.js (원본도 폐기 예정, 러스트는 Camera2D 가 덮어 없다)
   - src/experimental/aabb.js, transform2d.js, graphics/gl2d.js, graphics/webgl2.js (죽은 코드) → src/deprecated/ (러스트에는 없다)
-- experimental: vanilla::experimental 모듈(src/experimental/mod.rs)을 새로 두었다. 0.4.0 뒤 기능의 초안 자리다. (원본 import.js 의 Experimental 이름 공간 자리) 초안은 API 가 바뀔 수 있다. 초안: tilemap, spatialaudio, savegame, skeleton2d, 그 밖의 초안은 합치는 대로 더한다
+- experimental: vanilla::experimental 모듈(src/experimental/mod.rs)을 새로 두었다. 0.4.0 뒤 기능의 초안 자리다. (원본 import.js 의 Experimental 이름 공간 자리) 초안은 API 가 바뀔 수 있다. 초안: tilemap, spatialaudio, savegame, skeleton2d, physics2d, spatial
 - experimental 초안, 타일맵(vanilla::experimental::tilemap, vanilla.js 와 같은 초안): Tileset, TilemapLayer(16 x 16 덩이, 끝없는 지도), Tilemap 컴포넌트(정사각, 아이소, 엇갈림, 육각 배치, 덩이마다 화면 밖 거르기와 묶어 그리기, Chunk 와 Individual, TileFlag, 칸의 충돌 모양), RuleTile(유니티 RuleTile 규칙), TiledMapReader(Tiled JSON .tmj, .tsj, base64, zlib, gzip 은 flate2). 예제 tilemapshowcase(원본 예제와 화소 차이 평균 0.015, 충돌 선 가장자리만 다르다)
 - format_compact_number: 반올림한 글이 1000 이 되면 다음 단위로 올린다. (999999 는 "1000K" 가 아니라 "1M", 원본도 같이 고쳤다)
 - Platform::get_safe_area_rect: 너비와 높이를 0 이상으로 자른다. area_size 는 CSS 픽셀 크기다. (원본 getSafeAreaRect 를 CSS 픽셀로 고친 것과 같다)
@@ -71,6 +71,7 @@
 - UIListView::set_horizontal: 바뀌면 다음 tick 에 스크롤 영역을 다시 재고 보이는 항목을 새 축에 다시 놓는다. (원본도 같게 고쳤다)
 - 문서 글을 코드에 맞췄다: ShaderProgram(원본 이름 attributeLocationTable), Mask(NodeTree::draw_node 가 자른다), TweenProperty::get_name(첫 글자 소문자), ButtonMotion(tick 과 is_drawn_inside_content 머리, set_lit_handler), GraphicsQualityGovernor(데스크탑은 환경 변수 `VANILLA_<이름>`), FixedStepper::new, PointerCursor::is_coarse_pointer(윈도우 태블릿, 리눅스 터치), ViewManager 렌더 배율 상한(데스크탑도 쓴다), AudioBus::get_gain_node(데스크탑 Rc<MixerGainNode>), UIWindow(as_any, dispose, set_dim_color, set_panel_color), UIContextMenu::show 의 좌표, ui 모듈 머리, README 애셋 로딩 예제 이름(C-CASE)
 - experimental: vanilla::experimental 모듈(src/experimental/mod.rs)을 새로 두었다. 0.4.0 뒤 기능의 초안 자리다. (원본 import.js 의 Experimental 이름 공간 자리) 초안은 API 가 바뀔 수 있다. 지금은 비어 있다
+- experimental 초안, 2D 물리와 공간 나누기(vanilla::experimental::physics2d, spatial): 원본 vanilla.js 의 Experimental 초안과 같은 API, 같은 셈이다. PhysicsWorld2D (강체 정적, 운동학, 동적, 모양 원, 캡슐, 선분, 볼록 다각형, 사슬, 관절 거리, 회전, 용접, 바퀴, 분류, 마스크, 무리 거르기, 센서, 닿음과 센서 사건, 광선과 점, 상자, 모양 질의, 하위 걸음과 웜 스타트의 부드러운 걸음 풀이기, 섬째 잠자기, advance 의 고정 걸음과 그리기 보간), RigidBody2D 컴포넌트(Rc<RefCell<PhysicsWorld2D>>), PhysicsDebugDraw2D, DynamicTree<T>, AABB2D, f64 벡터 PhysicsVector2. 셈은 f64 와 직접 짠 삼각 함수라 원본과 결과가 비트까지 같다. (시험 comparison_matches_vanilla_js 가 원본이 쓴 덤프와 견준다, 예제 physics2d)
 - 이름을 러스트 규칙(Rust API Guidelines C-CASE)으로 바꿨다. 함수, 메서드, 변수, 필드, 모듈은 snake_case, 열거 값은 UpperCamelCase, 연관 상수는 SCREAMING_SNAKE_CASE. (setFillColor → set_fill_color, Colors::white → Colors::WHITE, Pivot::topLeft → Pivot::TOP_LEFT, ButtonState::normal → ButtonState::Normal) 이름 경고를 끄던 #![allow(non_snake_case)] 등을 lib.rs 와 예제에서 뺐다. 엔진을 쓰는 코드는 같은 규칙으로 이름을 바꿔야 한다. (공개 API 를 바꾸는 일이다) 바꾼 곳 11,071 군데, 동작은 같다. (cargo test 252 통과, 데스크탑과 웹 빌드 경고 0, 예제 화면이 전과 같음)
 - README: macOS(애플 실리콘) 데스크탑에서 확인함을 적었다
 - 외계행성 광부 키우기가 게임 쪽에 따로 만들어 쓰던 범용 기능을 엔진으로 옮긴다. (vanilla.js 에 먼저 넣은 것과 같은 기능, 게임의 콘텐츠 구현은 가져오지 않는다)

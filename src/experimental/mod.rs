@@ -8,3 +8,5 @@ pub mod tilemap;
 pub mod spatialaudio;
 pub mod savegame;
 pub mod skeleton2d;
+pub mod physics2d;
+pub mod spatial;

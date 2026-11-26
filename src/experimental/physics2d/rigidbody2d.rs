@@ -1,0 +1,202 @@
+//==============================================================================
+//! 강체 컴포넌트. (노드를 2D 물리 몸에 잇는다)
+//! - 초안: 0.4.0 뒤 기능, API 가 바뀔 수 있다. 원본 src/experimental/physics2d/rigidbody2d.js 와 같은 API 다.
+//! - set_body(world, body_id) 로 월드의 몸 하나를 맡으면, tick 마다 몸의 자리와 돌림을 노드의 로컬 자리와 돌림(도)에 넣는다. (유니티 Rigidbody2D 가 Transform 을 움직이는 것과 같다)
+//!   몸이 노드를 움직이고 노드가 몸을 움직이지는 않는다. 노드를 옮기려면 몸의 set_transform 을 부른다.
+//! - 월드 좌표가 노드 부모의 좌표와 같다고 본다. 물리 노드들은 월드 공간 하나를 맡은 부모 아래에 둔다.
+//! - 보간을 켜면(기본) 월드의 지난 advance 몫으로 앞 걸음과 지금 걸음 사이를 섞는다.
+//! - 원본과 다른 점: 월드는 씬과 컴포넌트가 함께 쓰도록 `Rc<RefCell<PhysicsWorld2D>>` 로 받는다.
+//!   원본 setBody 는 붙은 노드를 바로 몸 자리에 두고, 러스트는 노드에 붙을 때(attach)와 tick 에서 둔다.
+//==============================================================================
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use super::physicsid2d::BodyId2D;
+use super::physicsworld2d::PhysicsWorld2D;
+use crate::core::component::{Component, ComponentBase};
+use crate::core::node::nodetree::ComponentContext;
+use crate::core::node::worldnode::NodeTransform;
+
+//==============================================================================
+/// 강체 컴포넌트.
+///
+/// # 예제
+/// 떨어지는 상자 노드
+/// ```rust
+/// use std::cell::RefCell;
+/// use std::rc::Rc;
+/// use vanilla::{Engine, EngineConfiguration, NodeTree};
+/// use vanilla::experimental::physics2d::{BodyDefinition2D, BodyType2D, PhysicsVector2, PhysicsWorld2D, Polygon2D, RigidBody2D, ShapeDefinition2D, WorldDefinition2D};
+///
+/// let world = Rc::new(RefCell::new(PhysicsWorld2D::new(&WorldDefinition2D::new(50.0))));
+/// let mut body_definition = BodyDefinition2D::new();
+/// body_definition.body_type = BodyType2D::Dynamic;
+/// body_definition.position = PhysicsVector2::create(640.0, 100.0);
+/// let body_id = world.borrow_mut().create_body(&body_definition);
+/// world.borrow_mut().create_shape(body_id, &ShapeDefinition2D::new(), Polygon2D::make_box(40.0, 40.0));
+///
+/// let engine = Engine::new(EngineConfiguration::new());
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.get_root_id();
+/// let box_id = node_tree.create_child(root_id, "box");
+/// let mut rigid_body = RigidBody2D::new();
+/// rigid_body.set_body(world.clone(), body_id);
+/// node_tree[box_id].add_component(rigid_body);
+/// for _ in 0..30 {
+/// 	world.borrow_mut().advance(1.0 / 60.0);
+/// 	node_tree.tick(&engine, 1.0 / 60.0);
+/// }
+/// assert!(node_tree[box_id].get_local_position().y > 100.0);
+/// ```
+//==============================================================================
+pub struct RigidBody2D {
+	component_base: ComponentBase,
+	world: Option<Rc<RefCell<PhysicsWorld2D>>>,
+	body_id: Option<BodyId2D>,
+	is_interpolation_enabled: bool,
+}
+
+impl Default for RigidBody2D {
+	//==============================================================================
+	/// 기본값. (new 와 같다)
+	//==============================================================================
+	fn default() -> RigidBody2D {
+		RigidBody2D::new()
+	}
+}
+
+impl RigidBody2D {
+	//==============================================================================
+	/// 생성. (맡은 몸 없음, 보간 켬)
+	///
+	/// # 돌려줌
+	/// 새 컴포넌트.
+	//==============================================================================
+	pub fn new() -> RigidBody2D {
+		RigidBody2D {
+			component_base: ComponentBase::new(),
+			world: None,
+			body_id: None,
+			is_interpolation_enabled: true,
+		}
+	}
+
+	//==============================================================================
+	/// 맡을 몸 설정.
+	///
+	/// # 인자
+	/// - `world`: 몸이 든 월드.
+	/// - `body_id`: 맡을 몸.
+	//==============================================================================
+	pub fn set_body(&mut self, world: Rc<RefCell<PhysicsWorld2D>>, body_id: BodyId2D) {
+		self.world = Some(world);
+		self.body_id = Some(body_id);
+	}
+
+	//==============================================================================
+	/// 월드 반환.
+	///
+	/// # 돌려줌
+	/// 몸이 든 월드. (없으면 None)
+	//==============================================================================
+	pub fn get_world(&self) -> Option<Rc<RefCell<PhysicsWorld2D>>> {
+		self.world.clone()
+	}
+
+	//==============================================================================
+	/// 몸 아이디 반환.
+	///
+	/// # 돌려줌
+	/// 맡은 몸. (없으면 None)
+	//==============================================================================
+	pub fn get_body_id(&self) -> Option<BodyId2D> {
+		self.body_id
+	}
+
+	//==============================================================================
+	/// 보간을 쓸지 설정.
+	///
+	/// # 인자
+	/// - `is_interpolation_enabled`: 보간을 쓸지.
+	//==============================================================================
+	pub fn set_interpolation_enabled(&mut self, is_interpolation_enabled: bool) {
+		self.is_interpolation_enabled = is_interpolation_enabled;
+	}
+
+	//==============================================================================
+	/// 보간을 쓰는지.
+	///
+	/// # 돌려줌
+	/// 보간을 쓰면 true.
+	//==============================================================================
+	pub fn is_interpolation_enabled(&self) -> bool {
+		self.is_interpolation_enabled
+	}
+
+	//==============================================================================
+	/// 노드를 몸 자리에 두기. (alpha 는 보간 몫, 몸이 없으면 그대로 둔다)
+	///
+	/// # 인자
+	/// - `transform`: 노드 트랜스폼.
+	/// - `alpha`: 앞 걸음과 지금 걸음 사이 몫. (1 이면 지금 걸음)
+	//==============================================================================
+	pub fn synchronize_node(&self, transform: &mut NodeTransform, alpha: f64) {
+		let (Some(world), Some(body_id)) = (self.world.as_ref(), self.body_id) else {
+			return;
+		};
+		let world = world.borrow();
+		let Some(body) = world.get_body(body_id) else {
+			return;
+		};
+		let position = body.get_interpolated_position(alpha);
+		let angle = body.get_interpolated_angle(alpha);
+		transform.set_local_position(position.to_vector2());
+		transform.set_local_rotation((angle * 180.0 / std::f64::consts::PI) as f32);
+	}
+}
+
+impl Component for RigidBody2D {
+	//==============================================================================
+	/// 공통 상태 반환.
+	//==============================================================================
+	fn get_component_base(&self) -> &ComponentBase {
+		&self.component_base
+	}
+
+	//==============================================================================
+	/// 공통 상태 반환. (변경용)
+	//==============================================================================
+	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
+		&mut self.component_base
+	}
+
+	//==============================================================================
+	/// 컴포넌트 이름.
+	//==============================================================================
+	fn get_component_type(&self) -> &'static str {
+		"RigidBody2D"
+	}
+
+	//==============================================================================
+	/// 붙음. (노드를 바로 몸 자리에 둔다)
+	//==============================================================================
+	fn attach(&mut self, transform: &mut NodeTransform) {
+		self.synchronize_node(transform, 1.0);
+	}
+
+	//==============================================================================
+	/// 갱신. (몸의 자리와 돌림을 노드에 넣는다)
+	//==============================================================================
+	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f32) {
+		let Some(world) = self.world.as_ref() else {
+			return;
+		};
+		let alpha = if self.is_interpolation_enabled {
+			world.borrow().get_interpolation_alpha()
+		}
+		else {
+			1.0
+		};
+		self.synchronize_node(context.get_transform_mut(), alpha);
+	}
+}
