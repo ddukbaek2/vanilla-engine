@@ -11,6 +11,60 @@
   - src/experimental/collection/*.js → src/base/collection/*.js (러스트는 표준 Vec, HashMap 같은 것이 맡아 없다)
   - src/experimental/camera.js → src/deprecated/camera.js (원본도 폐기 예정, 러스트는 Camera2D 가 덮어 없다)
   - src/experimental/aabb.js, transform2d.js, graphics/gl2d.js, graphics/webgl2.js (죽은 코드) → src/deprecated/ (러스트에는 없다)
+- format_compact_number: 반올림한 글이 1000 이 되면 다음 단위로 올린다. (999999 는 "1000K" 가 아니라 "1M", 원본도 같이 고쳤다)
+- Platform::get_safe_area_rect: 너비와 높이를 0 이상으로 자른다. area_size 는 CSS 픽셀 크기다. (원본 getSafeAreaRect 를 CSS 픽셀로 고친 것과 같다)
+- UIDocument: 등록하지 않은 노드 종류를 읽으면 WorldNode 로 읽고 경고를 낸다. (컴포넌트처럼, 원본도 같이) 원본에 registerEditorTypes 와 다시 읽을 때 생성자가 만든 것에 채우기가 생겨 두 엔진의 문서 읽기가 같다
+- Color: to_rgba_string, to_hex_string 이 성분을 0 ~ 255, rgba 의 알파를 0 ~ 1 로 잘라 적는다. (원본 toByteComponent 와 같게, 전에는 1.5 가 "17f" 였다) 담는 성분은 원본처럼 자르지 않는다. (HDR 색) create_from_rgba 는 원본 createFromRGBA 의 정규식과 같은 것을 읽는다. (rgb 로 시작, 정수 r, g, b, 알파는 parseFloat 처럼, ")(" 처럼 괄호가 뒤집힌 글에서 패닉하던 것도 고쳤다)
+- UIScrollBar: 자동 숨김이 노드를 끄지 않고 보이지 않게만 한다. (끄면 tick 이 멈춰 다시 나오지 않았다, 원본도 같이 고쳤다) is_auto_hidden() 추가
+- RenderTarget::new, resize: 중간에 GL 객체를 못 만들면 그때까지 지은 것을 지우고 크기를 0 으로 둔다. (새던 것)
+- 문서 글: 이름 바꾸기 때 snake_case 로 바뀐 원본 JS 이름(원본 playTone, audioContext, Graphic.drawNode 같은 것 105 곳)과 셰이더 유니폼 이름(modelMatrix, tintColor, globalAlpha), Canvas2D 이름을 원본 이름으로 되돌렸다
+- 가이드: 13 장 Animator, 14 장 ScreenEffect 와 HeatHazeEffect 의 destroy(), 19 장 VisualAsset 과 Visual::create_node 를 바뀐 API 에 맞췄다
+- Sprite: 뒤집기(set_horizontal_flip, set_vertical_flip)가 내용 영역 밖(음의 크기 쪽)에 그리던 것을 내용 영역 안에서 거울처럼 뒤집게 고쳤다. 조각, 나인 슬라이스, 타일 모두 뒤집힌다. 뒤집어도 is_drawn_inside_content 가 참이라 화면 밖 거르기를 받는다. (원본과 같게)
+- Graphic.draw_polyline, draw_line, draw_line_loop, draw_convex_polygon: 정점 버퍼가 차면 쌓인 것을 그리고 이어 적는다. 전에는 683 번째 선분(볼록 다각형은 1366 번째 삼각형)부터 버렸다.
+- AudioPlayer.get_time: 재생 중에 오디오 컨텍스트 시계(웹 currentTime, 데스크탑 믹서 시계)로 흐른다. 재생 빠르기를 곱하고, 루프면 길이로 되감고, 아니면 길이에서 멈춘다. 멈췄거나 끝났으면 set_time 의 시작 위치다. (원본과 같게)
+- 웹 오디오: 멈춘 AudioContext 를 깨우는 동안 stop 하거나 다시 play 하면 늦게 끝난 지난 요청이 소리를 내던 것을 고쳤다. (재생 요청 번호)
+- 웹: 키, 마우스, 손가락, 페이지 사건이 프레임 안에서 다시 들어와도(게임 코드의 dispatchEvent, focus() 같은 것) 멈추지 않는다. 전에는 keydown, keyup, blur 가 RefCell 을 또 빌려 wasm 이 unreachable 로 멈췄고, 마우스, 손가락, 페이지 사건은 그 사건을 버렸다(mouseup 을 버리면 단추가 눌린 채 남았다). 바로 빌릴 수 있으면 그 자리에서, 못 빌리면 줄에 쌓았다가 프레임 콜백 끝에 온 차례대로 처리한다. (platform/eventqueue.rs)
+- 웹: EngineConfiguration.title 이 비어 있지 않고 기본값("바닐라엔진", 데스크탑 창 제목)이 아니면 원본처럼 시작할 때 문서 제목(document.title)에 쓴다.
+- ParticleSystem: 루프 이음매(되풀이 경계)의 버스트가 첫 주기에만 터지던 것을 고쳤다. 0 초 버스트와 경계 바로 앞 버스트도 주기마다 터지고, 한 프레임에 여러 주기를 건너면 그 수만큼 터진다. (원본과 같게)
+- ParticleSystem.apply_description: 서술의 imageDataUrl(파티클 편집기가 고른 그림의 data: 주소)을 읽어 입자 이미지로 건다. 데스크탑은 그 자리에서 풀고, 웹은 브라우저가 다 풀면 그린다. (null 이나 빈 글이면 그림을 뗀다)
+- FontAsset.load(engine, asset_path): 새로 더했다. 원본 load 처럼 파일 이름에서 확장자를 뗀 것을 패밀리 이름으로 load_font 한다.
+- JsonAsset.load: 돌려준 손잡이를 await 하면 JSON 해석이 실패해도 실패로 끝난다. (원본 JsonAsset.load 의 거부, 받기 실패는 전에도 실패였다) 옮기는 법: 해석 실패에도 Ok 로 끝난다고 보던 코드는 Err 를 받는다. await 하지 않고 is_finished 와 get_data 로 보는 쪽(SpriteAtlas 등)은 그대로다.
+- 문서: InputManager.set_touch_pressed(Moved 는 누른 동안 켜짐), Engine 의 데스크탑 가려짐(최소화, 앱 멈춤, 웨이랜드 프레임 콜백도 Hidden), load_scene_async(같은 프레임 create 전에 내릴 때만 풀리지 않는다), Scene::initialize(맡긴 것이 없어도 create 뒤 0.3 초) 를 실제에 맞췄다.
+- UISnapScrollView: set_snap_to_nearest, set_velocity_threshold 가 값만 들고 스냅 계산에 쓰이지 않았다. (원본도 같았다) 이제 한 칸 모드(기본)는 놓을 때 드래그 속도가 set_velocity_threshold(기본 200, 오프셋의 초당 픽셀) 이상이면 끈 거리와 상관없이 속도 방향으로 한 칸 넘기고, 아니면 지금처럼 set_page_change_threshold 비율로 정한다. set_snap_to_nearest(true) 는 끄는 동안 칸 범위를 자르지 않고, 놓으면 가장 가까운 칸으로 간다. get_drag_velocity() 를 더했다. (원본 getDragVelocity, 인스펙터 기대값 inspector_getters.json 에도 더함)
+- UILineChart: set_max_sample_count 로 상한을 줄이면 이미 든 표본을 오래된 것부터 버린다. (원본과 같게 고침)
+- DevTools: Settings 의 Show FPS 를 켜면 패널을 닫아도 창 왼쪽 위에 "FPS 값" 상자를 그린다. (원본과 같게, canvas native 좌표, 패널이 보이면 패널 위에)
+- 문서 주석: LayoutTerm(원본의 변수 없는 항은 솔버가 건너뜀), UIView(원본 setBackgroundColor(null) 자리는 알파 0 색), NodeLayout(anchored_position 은 원본과 같게 build 때 건다), UIScrollBar(썸 색 차이 줄을 뺌, 원본을 (1, 1, 1, 0.6) 으로 맞춤)
+- 시험: zero_value_terms_add_nothing, fast_short_drag_flings_one_page, snap_to_nearest_crosses_pages, line_chart_max_sample_count_trims_oldest, background_color_can_be_cleared, image_asset_gives_its_image, anchored_position_follows_call_order, language_list_without_aliases_is_accepted, frame_per_second_overlay_text_and_box
+- UIInputField 커서와 지우기: 원본처럼 왼쪽, 오른쪽 화살표와 Delete 는 글자 묶음(확장 자소 묶음) 단위, 뒤로 지우기는 블링크 BackspaceStateMachine(코드 포인트 하나, 이모지 묶음과 CR LF 는 통째로)이다. 선택이 있을 때 Shift 없는 화살표는 선택의 앞, 뒤로 접는다. 누른 자리는 글자 묶음 경계에만 선다. (core/textinput.rs 의 find_previous_grapheme_boundary, find_next_grapheme_boundary, collect_grapheme_boundaries, find_backward_deletion_boundary, TextEditBuffer::delete_range)
+- UIInputField 최대 길이: 넣기는 블링크 입력 칸처럼 넣는 글을 남은 UTF-16 길이까지만 넣는다. (전에는 값 전체를 잘랐다)
+- UIInputField 여러 줄과 Pane 의 line-height normal: 글꼴 크기의 1.2 배 대신 크롬 SimpleFontData 처럼 첫째 글꼴의 위아래 길이와 줄 사이를 반올림해 더한다. (리눅스는 USE_TYPO_METRICS 면 typo 아니면 hhea, 맥은 hhea 와 Times, Helvetica, Courier 의 15% 보정, 윈도우는 DirectWrite 의 win 값. 웹은 브라우저가 놓은 줄 높이) textstringtexturecache::measure_normal_line_height_without_graphic, LoadedFont::calculate_normal_line_height 추가.
+- 맥 키 묶음: Home, End 는 크롬 맥처럼 커서를 두고 처음과 끝으로 넘기고(넘길 것이 없으면 줄 앞과 끝), Shift 와 함께면 글 앞과 끝까지 고른다. PageUp, PageDown 은 커서를 두고 한 화면만큼 넘기고(Option 과 함께면 옮기기, Shift 와 함께면 고르기), Ctrl + 왼쪽, 오른쪽은 줄 앞과 끝이다. TextInputKey 에 ScrollToDocumentStart, ScrollToDocumentEnd, ScrollPageUp, ScrollPageDown 을 더했다. (TextInputKey 를 match 하는 코드는 새 갈래를 넣는다)
+- UIInputField 두 번, 세 번 누르기: DOM 입력을 흉내 내는 필드(use_dom_input, 여러 줄)는 크롬처럼 마우스로 두 번 누르면 낱말(윈도우는 뒤 공백까지), 세 번 누르면 문단을 고르고 끌면 그 단위로 넓힌다. 이어 누르기는 크롬 aura 처럼 500ms(맥은 NSEvent.doubleClickInterval) 안, 가로 세로 2 DIP 안이다. 웹은 mousedown 의 detail 이다. (TextInput::set_pointer_click_count, get_pointer_click_count, systemfont::read_double_click_seconds 추가)
+- Pane(데스크탑): flex-wrap(wrap, wrap-reverse), flex-flow, align-content, row-gap, column-gap(gap 의 두 값), white-space 와 text-overflow: ellipsis 를 읽는다. 줄넘김은 CSS Flexbox 9.3, 9.4 대로 줄을 모으고 align-content: stretch 로 늘인다. (헤드리스 크롬과 같은 자리) 블록 안의 높이 auto 줄넘김 flex 는 그 폭에서 모은 줄 높이다.
+- Pane(데스크탑)과 여러 줄 UIInputField 의 스크롤 막대: 크롬처럼 윈도우, 리눅스는 자리를 차지하는 Fluent 막대(두께 15, thin 10, 단추 18, 썸 9), 맥은 시스템 설정(NSScroller.preferredScrollerStyle)이 얹는 막대면 얹는 썸, 클래식이면 자리를 차지하는 막대(두께 15, thin 11)다. scrollbar-width 와 scrollbar-color 의 길 색을 읽는다. (web/pane.rs 의 read_classic_scrollbar_metrics, calculate_classic_thumb_span, systemfont::is_overlay_scrollbar_preferred 추가)
+- 웹 숨은 입력과 DOM 문맥 메뉴의 자리: 원본처럼 문서 스크롤을 더한다. (페이지를 스크롤하면 어긋나던 버그)
+- Animator: 원본처럼 정석 상태 기계로 완성. AnimationState 에 set_speed, get_speed, set_loop(Option, None 이면 클립을 따름), is_loop, get_duration, get_normalized_time, get_frame_index. AnimationTransition 에 set_exit_time, get_exit_time, set_duration, get_duration, set_can_transition_to_self, can_transition_to_self, add_condition(이름, AnimationConditionMode, 기준 값), get_conditions, is_exit_time_reached, from 이 None 이면 어느 상태에서나(Any State). 새 AnimationConditionMode, AnimationCondition(lib.rs 에서도 내보냄). Animator 에 set_float, get_float, set_integer, get_integer, set_bool, get_bool, set_trigger, reset_trigger, get_trigger, play, find_transition, start_transition, is_condition_satisfied, get_current_state_index, get_current_normalized_time, get_current_frame, is_in_transition, get_next_state_index, get_next_normalized_time, get_next_frame, get_transition_weight. 같은 시나리오에서 원본과 같은 상태 차례, 가중치, 프레임을 낸다. 옮기는 법: set_property, get_property, get_properties(serde_json::Value)는 없어졌다. set_float, set_integer, set_bool, set_trigger 와 그 게터로 바꾼다. get_animation, get_animation_mut(안의 Animation)도 없어졌다. AnimationTransition 은 조건 목록을 들어 이제 Copy 가 아니다.
+- VisualAsset: load 가 경로만 적고 바로 끝나던 것을 원본처럼 고침. load(엔진, 경로)가 바이트를 부탁하고, 바이트가 오면 비주얼 에디터 문서 꼴(JSON 객체, root 객체)을 보아 맞으면 읽힌 것이고 그 글을 든 Visual 을 담는다. create_visual_from_text, load_from_bytes, unload 추가. 옮기는 법: load(경로) 는 load(엔진, 경로) 로 바꾼다.
+- Visual: set_document_text, get_document_text, create_node(UIDocument, 노드 트리) 추가. 문서로 새 노드 트리를 지어 뿌리의 로컬 위치를 location 으로 둔다. (문서가 없으면 Ok(None), 꼴이 틀리면 Err)
+- SkinnedModel: 애니메이션 FBX 에 채널이 있는 스택이 여럿이면 스택마다 "클립 이름/스택 이름" 클립이 된다. (원본과 같이 고침, 전에는 모두 같은 이름이라 play_animation 이 마지막 것만 틀었다)
+- HumanSkinRenderer: 텍스처 유닛 주석의 눈 홍채 차례를 바로잡음. (12 홍채 노멀, 13 홍채 색, 동작은 원래 맞았다)
+- SkinnedModel: upload_meshes_and_materials 를 다시 부르면 예전 드로어블의 버텍스 어레이, 버퍼, 모프 텍스처, 머티리얼이 남아 새던 것을 원본과 같이 고침. (먼저 destroy) upload_wireframe_indices 도 이미 올린 선 버퍼를 지우고 새로 올린다.
+- Timeline: 공개 함수 인자에 쓰이던 핸들러 꼴 별칭 TimelineEventHandler, TimelineMarkerHandler, TimelineCompleteHandler, TimelineTargetResolver 를 공개하고 lib.rs 에서 내보냄. TIMELINE_EASING_NAMES 문서의 이름 꼴을 실제와 같게 "<종류>.<in|out|inOut>" 로.
+- ImageTextureCache::get_texture: 픽셀 길이가 너비x높이x4 가 아닌 그림은 GL 에 넘기지 않는다. 다른 캐시가 올리며 픽셀을 놓은 그림은 그 텍스처에서 되읽어 올리고, 되읽지도 못하면 올리지 않고 None 이다. (빈 배열을 너비, 높이와 함께 tex_image_2d 에 넘겨 GL 이 배열 밖을 읽던 것)
+- Image::create_from_premultiplied_pixels, Image::create_from_pixels: 픽셀 길이가 너비x높이x4 가 아니면 패닉한다. (원본 ImageData 가 길이가 틀리면 예외를 던지는 것과 같다)
+- BloomEffect: new 와 set_use_float_color 가 중간에 실패하면 먼저 지은 패스와 렌더 타겟을 지운다. set_use_float_color 실패는 예전 판을 그대로 둔다. (GL 객체가 새던 것)
+- Material::create_from_description: 중간 이미지를 풀지 못하면 그때까지 지은 텍스처를 지우고 오류를 돌려준다. (원본도 같게 고쳤다)
+- ShaderProgram::new, create_with_attribute_locations: 프래그먼트 셰이더나 프로그램을 짓지 못하면 먼저 지은 셰이더를 지운다. (원본도 같게 고쳤다)
+- NodeTree::add_component: 원본 addComponent 처럼 의존 컴포넌트(require)가 노드에 없으면 같은 길(attach, attach_to_tree)로 먼저 붙인다. 지금까지는 WorldNode::add_component 만 붙였다
+- TextStringTextureCache: unregister_font_face, set_font_face_order, get_font_face_count, watch_unresolved_family_characters, take_unresolved_family_characters 도 register_font_face 처럼 이름의 감싼 따옴표를 떼고 찾는다. (따옴표째 올린 이름을 못 찾던 것)
+- Localization::is_right_to_left: set_right_to_left 처럼 소문자로, 밑줄을 하이픈으로 읽는다. ("ar_EG" 를 오른쪽에서 왼쪽 언어로 못 잡던 것, 원본도 같게 고쳤다)
+- DynamicFont::rebuild_atlas: 굽지 못하는 글자는 건너뛰고 나머지를 굽는다. 하나도 굽지 못하면 아틀라스를 그대로 둔다. (글자 하나에 묶음 전체가 안 구워지던 것)
+- UINode::add_constraint: 솔버가 받지 않은 제약(이미 더한 것, 모순)은 목록에 남기지 않는다. (다음 set_solver 가 같은 오류로 멈춰 뒤 제약이 안 걸리던 것, 원본도 같게 고쳤다)
+- 소리 풀기(WebM, MP4 다듬기): 8 바이트를 넘는 EBML 부호 정수, 끝 값 클러스터 시각과 CodecDelay, 아주 큰 MP4 상자 크기와 편집 길이, 소리보다 긴 iTunSMPB priming 에서 넘침 패닉이 나던 것을 막았다. (망가진 파일도 패닉 없이 다듬는다)
+- ScreenEffect::destroy, HeatHazeEffect::destroy: graphic 을 받지 않는다. (원본 destroy() 와 같다) 처음 GL 자원을 만들 때 컨텍스트의 약한 손잡이를 쥐어, destroy 와 버려질 때(Drop, 노드를 지우거나 씬을 내릴 때) 스스로 GL 자원을 푼다. 옮기는 법: `screen_effect.destroy(graphic)` → `screen_effect.destroy()`, 씬을 내릴 때 부르지 않아도 풀린다. (공개 API 가 바뀐다) ScreenEffect 가 렌더 대상을 짓다 중간에 실패하면 먼저 지은 것을 지운다
+- UISpinner::calculate_dot_opacity: 점이 없으면(dot_count 0) 0 나누기로 NaN 이 되지 않는다. (원본도 같게 고쳤다)
+- UIListView::set_horizontal: 바뀌면 다음 tick 에 스크롤 영역을 다시 재고 보이는 항목을 새 축에 다시 놓는다. (원본도 같게 고쳤다)
+- 문서 글을 코드에 맞췄다: ShaderProgram(원본 이름 attributeLocationTable), Mask(NodeTree::draw_node 가 자른다), TweenProperty::get_name(첫 글자 소문자), ButtonMotion(tick 과 is_drawn_inside_content 머리, set_lit_handler), GraphicsQualityGovernor(데스크탑은 환경 변수 `VANILLA_<이름>`), FixedStepper::new, PointerCursor::is_coarse_pointer(윈도우 태블릿, 리눅스 터치), ViewManager 렌더 배율 상한(데스크탑도 쓴다), AudioBus::get_gain_node(데스크탑 Rc<MixerGainNode>), UIWindow(as_any, dispose, set_dim_color, set_panel_color), UIContextMenu::show 의 좌표, ui 모듈 머리, README 애셋 로딩 예제 이름(C-CASE)
 - experimental: vanilla::experimental 모듈(src/experimental/mod.rs)을 새로 두었다. 0.4.0 뒤 기능의 초안 자리다. (원본 import.js 의 Experimental 이름 공간 자리) 초안은 API 가 바뀔 수 있다. 지금은 비어 있다
 - 이름을 러스트 규칙(Rust API Guidelines C-CASE)으로 바꿨다. 함수, 메서드, 변수, 필드, 모듈은 snake_case, 열거 값은 UpperCamelCase, 연관 상수는 SCREAMING_SNAKE_CASE. (setFillColor → set_fill_color, Colors::white → Colors::WHITE, Pivot::topLeft → Pivot::TOP_LEFT, ButtonState::normal → ButtonState::Normal) 이름 경고를 끄던 #![allow(non_snake_case)] 등을 lib.rs 와 예제에서 뺐다. 엔진을 쓰는 코드는 같은 규칙으로 이름을 바꿔야 한다. (공개 API 를 바꾸는 일이다) 바꾼 곳 11,071 군데, 동작은 같다. (cargo test 252 통과, 데스크탑과 웹 빌드 경고 0, 예제 화면이 전과 같음)
 - README: macOS(애플 실리콘) 데스크탑에서 확인함을 적었다
