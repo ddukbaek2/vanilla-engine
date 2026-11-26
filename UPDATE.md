@@ -1,6 +1,7 @@
 # 업데이트 기록
 
 # 아직 release 에 합치지 않은 것 (release 에 합칠 때 패치 판을 하나 올려 매긴다)
+- AVIF 의 YUV 를 RGB 로 바꾸는 셈(데스크탑): 크롬 158 처럼(AVIFImageDecoder 가 부르는 CrabbyAvif crabby_avifImageYUVToRGB, libyuv 기능) libyuv 가 받는 꼴(BT.601, 미지정, BT.709, BT.2020 NCL, 크로마 NCL 행렬의 8, 10, 12 비트)은 libyuv 의 정수 셈(YuvPixel, YPixel, 두 배 크로마 늘리기)으로, 그 밖은 libavif 실수 셈(값마다 나눈 뒤 크로마를 섞는 차례로 고침)으로 바꾼다. 높은 비트 깊이는 크롬 WebGL 처럼 16 비트로 담아 libyuv HalfFloatPlane 이 가수를 자른 반정밀로 푼다. 알파는 곧은 알파로 푼 뒤 반올림으로 곱한다. 크롬 158 WebGL texImage2D 와 시험 그림 19 장이 비트까지 같다. (지금까지는 libavif 실수 셈이라 1~23 단계 달랐다) 그림 픽셀이 한두 단계 바뀐다
 - FBX 재질 여럿: 메시 하나에 재질이 여럿인 FBX(LayerElementMaterial 의 Materials, MappingInformationType ByPolygon 이나 AllSame)를 폴리곤의 재질 번호대로 부분 메시로 나눠 재질마다 드로어블 하나로 그린다. (three.js FBXLoader 의 그룹, 유니티와 언리얼의 서브메시) 지금까지는 재질 번호를 폴리곤 순번이 아니라 폴리곤 정점 순번으로 찾았고, 메시마다 소유 노드의 첫 재질 하나로만 그려 Quaternius 마네킹(M_Main, M_Joints)이 온통 주황이었다. 새 SkinnedModel::split_fbx_corners_by_material 과 FbxCornerArrays, FBX MeshDescription 과 드로어블의 material_name 이 FBX Material 이름(glb 처럼), FbxMaterial.name. 원본과 같다. 단위 시험 multiple_materials_split_by_polygon, mannequin_fbx_materials_from_examples(원본과 같은 삼각형 수 5732, 8012). 문서 그림 model-viewer, 셰이더 해시를 바꾼 뒤의 effect-gallery, shader-sprite, screen-effect 다시 찍음(같은 크기, cwebp -q 85).
   - 옮기는 법: FBX 모델의 드로어블 목록이 재질 수만큼 늘어난다. 드로어블 0 하나가 메시 전체라고 기대하던 코드는 material_name 이나 material_index 로 찾는다.
 - 크레이트 라이선스 파일: vanilla-engine-macros, vanilla-engine-apidoc, vanilla-engine-licenses 에도 뿌리와 같은 LICENSE(저작권자 vanillapunch)를 두고 include 에 넣어 cargo package 꾸러미에 실린다. apidoc, licenses 에 authors 를 적고, licenses 는 SPDX 전문 texts 도 싣는다.
