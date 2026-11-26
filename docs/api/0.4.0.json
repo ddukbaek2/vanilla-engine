@@ -34881,11 +34881,21 @@
 								}
 							],
 							"description": {
-								"ko": "글꼴 설정. (원본 font, CSS font 줄임 꼴. 엔진 글자 캐시가 읽는다)",
-								"en": "Sets the font. (the original font, CSS font shorthand. Read by the engine glyph cache)"
+								"ko": "글꼴 설정. (원본 font, CSS font 줄임 꼴. 크롬처럼 틀린 글은 무시하고, 엔진 글자 캐시가 읽는다)\n- 크기는 이때 픽셀로 센다. 상대 크기(em, %, larger 같은)는 문서에 붙이지 않은 캔버스처럼 10px sans-serif 에 댄다.\n- CSS 전역 낱말(inherit 같은), 줄높이만 있는 글, 크기나 이름이 없는 글은 틀린 글이다. 시스템 글꼴 낱말(caption 같은)은 받는다.",
+								"en": "Sets the font. (the original font, CSS font shorthand. Invalid strings are ignored like Chrome; read by the engine glyph cache)\n- The size is resolved to pixels at this point. Relative sizes (em, %, larger and the like) are relative to 10px sans-serif, like a canvas not attached to the document.\n- CSS-wide keywords (inherit and the like), a line height alone, and strings without a size or a family are invalid. System font keywords (caption and the like) are accepted."
 							},
 							"since": "0.4.0",
-							"source": "src/core/canvas2d/desktop_canvas.rs"
+							"source": "src/core/canvas2d/desktop_canvas.rs",
+							"examples": [
+								{
+									"title": {
+										"ko": "받은 글꼴은 크롬이 직렬화한 꼴로 읽히고, 틀린 글은 앞 값을 남긴다",
+										"en": "An accepted font reads back in Chrome's serialized form, and an invalid string keeps the previous value"
+									},
+									"code": "use vanilla::Canvas2D;\n\nlet mut canvas = Canvas2D::new(8, 8);\ncanvas.set_font(\"BOLD 12pt 'Noto Sans', SANS-SERIF\");\nassert_eq!(canvas.get_font(), \"bold 16px \\\"Noto Sans\\\", sans-serif\");\ncanvas.set_font(\"italic 2em/1.5 serif\");\nassert_eq!(canvas.get_font(), \"italic 20px serif\");\ncanvas.set_font(\"inherit\");\nassert_eq!(canvas.get_font(), \"italic 20px serif\");",
+									"language": "rust"
+								}
+							]
 						},
 						{
 							"kind": "method",
@@ -34895,8 +34905,8 @@
 							"returns": {
 								"type": "String",
 								"description": {
-									"ko": "글꼴. (CSS font 줄임 꼴, 처음 \"10px sans-serif\")",
-									"en": "Font. (CSS font shorthand, initially \"10px sans-serif\")"
+									"ko": "글꼴. (크롬 font 게터의 직렬화: \"italic \", \"bold \" 나 굵기 수, \"small-caps \", 크기 px, 이름 목록. 처음 \"10px sans-serif\")",
+									"en": "Font. (serialized like Chrome's font getter: \"italic \", \"bold \" or the weight number, \"small-caps \", the size in px, the family list. Initially \"10px sans-serif\")"
 								}
 							},
 							"description": {
@@ -36267,11 +36277,90 @@
 								}
 							],
 							"description": {
-								"ko": "픽셀 쓰기. (원본 putImageData: 자르기, 투명도, 합치기, 그림자 없이 그대로 바꾼다)",
-								"en": "Writes pixels. (the original putImageData: replaces them as is, without clip, alpha, compositing or shadow)"
+								"ko": "픽셀 쓰기. (원본 putImageData: 자르기, 투명도, 합치기, 그림자 없이 그대로 바꾼다)\n- 곧은 RGBA 를 크롬처럼 (색 x 알파 + 127) / 255 로 프리멀티플라이해 담는다.\n- 폭이나 높이가 0 이거나 i32 를 넘거나, data 가 폭 x 높이 x 4 바이트가 아니면 쓰지 않는다. (원본 new ImageData 가 받지 않는 픽셀 묶음)",
+								"en": "Writes pixels. (the original putImageData: replaces them as is, without clip, alpha, compositing or shadow)\n- Straight RGBA is premultiplied as (color x alpha + 127) / 255, like Chrome.\n- Nothing is written when the width or height is 0 or exceeds i32, or when data is not width x height x 4 bytes. (pixel data the original new ImageData does not accept)"
 							},
 							"since": "0.4.0",
 							"source": "src/core/canvas2d/desktop_canvas.rs"
+						},
+						{
+							"kind": "method",
+							"name": "put_image_data_region",
+							"signature": "pub fn put_image_data_region(&mut self, image_data: &ImageData, destination_x: i32, destination_y: i32, dirty_x: i32, dirty_y: i32, dirty_width: i32, dirty_height: i32)",
+							"params": [
+								{
+									"name": "image_data",
+									"type": "&ImageData",
+									"description": {
+										"ko": "쓸 픽셀 묶음. (프리멀티플라이하지 않은 RGBA)",
+										"en": "Pixel data to write. (non-premultiplied RGBA)"
+									}
+								},
+								{
+									"name": "destination_x",
+									"type": "i32",
+									"description": {
+										"ko": "픽셀 묶음 왼쪽이 놓일 자리. (캔버스 픽셀, 변환을 받지 않는다)",
+										"en": "Where the left of the pixel data goes. (canvas pixels, not affected by the transform)"
+									}
+								},
+								{
+									"name": "destination_y",
+									"type": "i32",
+									"description": {
+										"ko": "픽셀 묶음 위가 놓일 자리. (캔버스 픽셀, 변환을 받지 않는다)",
+										"en": "Where the top of the pixel data goes. (canvas pixels, not affected by the transform)"
+									}
+								},
+								{
+									"name": "dirty_x",
+									"type": "i32",
+									"description": {
+										"ko": "쓸 사각형 왼쪽. (픽셀 묶음 픽셀)",
+										"en": "Left of the rectangle to write. (pixel data pixels)"
+									}
+								},
+								{
+									"name": "dirty_y",
+									"type": "i32",
+									"description": {
+										"ko": "쓸 사각형 위. (픽셀 묶음 픽셀)",
+										"en": "Top of the rectangle to write. (pixel data pixels)"
+									}
+								},
+								{
+									"name": "dirty_width",
+									"type": "i32",
+									"description": {
+										"ko": "쓸 사각형 폭. (음수면 왼쪽으로)",
+										"en": "Width of the rectangle to write. (leftward if negative)"
+									}
+								},
+								{
+									"name": "dirty_height",
+									"type": "i32",
+									"description": {
+										"ko": "쓸 사각형 높이. (음수면 위로)",
+										"en": "Height of the rectangle to write. (upward if negative)"
+									}
+								}
+							],
+							"description": {
+								"ko": "픽셀 묶음의 한 사각형만 쓰기. (원본 putImageData 의 dirtyX, dirtyY, dirtyWidth, dirtyHeight 꼴, 크롬 base_rendering_context_2d.cc 의 셈)\n- 폭 x 높이가 i32 를 넘으면 쓰지 않는다. 음수 폭과 높이는 시작을 그만큼 옮겨 뒤집고(시작이 음수였으면 0), 픽셀 묶음과 캔버스 밖은 자른다.",
+								"en": "Writes only one rectangle of the pixel data. (the dirtyX, dirtyY, dirtyWidth, dirtyHeight form of the original putImageData, computed like Chrome's base_rendering_context_2d.cc)\n- Nothing is written when width x height exceeds i32. A negative width or height flips the rectangle by moving its start by that amount (0 if the start was negative), and parts outside the pixel data and the canvas are clipped."
+							},
+							"since": "0.4.0",
+							"source": "src/core/canvas2d/desktop_canvas.rs",
+							"examples": [
+								{
+									"title": {
+										"ko": "2 x 2 픽셀 묶음의 오른쪽 아래 한 픽셀만 쓰기",
+										"en": "Writing only the bottom-right pixel of 2 x 2 pixel data"
+									},
+									"code": "use vanilla::{Canvas2D, ImageData};\n\nlet mut image_data = ImageData::new(2, 2);\nimage_data.data.copy_from_slice(&[255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255]);\n\nlet mut canvas = Canvas2D::new(4, 4);\ncanvas.put_image_data_region(&image_data, 1, 1, 2, 2, -1, -1);\nassert_eq!(canvas.get_image_data(2, 2, 1, 1).data, vec![255, 255, 255, 255]);\nassert_eq!(canvas.get_image_data(1, 1, 1, 1).data, vec![0, 0, 0, 0]);",
+									"language": "rust"
+								}
+							]
 						},
 						{
 							"kind": "method",
@@ -37573,8 +37662,8 @@
 								}
 							],
 							"description": {
-								"ko": "글꼴 설정. (원본 font)",
-								"en": "Sets the font. (the original font)"
+								"ko": "글꼴 설정. (원본 font, CSS font 줄임 꼴. 브라우저가 읽고 틀린 글은 무시한다)",
+								"en": "Sets the font. (the original font, CSS font shorthand. The browser parses it and ignores invalid strings)"
 							},
 							"since": "0.4.0",
 							"source": "src/core/canvas2d/web_canvas.rs"
@@ -37587,8 +37676,8 @@
 							"returns": {
 								"type": "String",
 								"description": {
-									"ko": "글꼴. (CSS font 줄임 꼴, 처음 \"10px sans-serif\")",
-									"en": "Font. (CSS font shorthand, initially \"10px sans-serif\")"
+									"ko": "글꼴. (브라우저 font 게터의 직렬화: \"italic \", \"bold \" 나 굵기 수, \"small-caps \", 크기 px, 이름 목록. 처음 \"10px sans-serif\")",
+									"en": "Font. (serialized like the browser's font getter: \"italic \", \"bold \" or the weight number, \"small-caps \", the size in px, the family list. Initially \"10px sans-serif\")"
 								}
 							},
 							"description": {
@@ -38959,8 +39048,77 @@
 								}
 							],
 							"description": {
-								"ko": "픽셀 쓰기. (원본 putImageData: 자르기, 투명도, 합치기, 그림자 없이 그대로 바꾼다)",
-								"en": "Writes pixels. (the original putImageData: replaces them as is, without clip, alpha, compositing or shadow)"
+								"ko": "픽셀 쓰기. (원본 putImageData: 자르기, 투명도, 합치기, 그림자 없이 그대로 바꾼다)\n- 폭이나 높이가 0 이거나 i32 를 넘거나, data 가 폭 x 높이 x 4 바이트가 아니면 쓰지 않는다. (브라우저 new ImageData 가 받지 않는다)",
+								"en": "Writes pixels. (the original putImageData: replaces them as is, without clip, alpha, compositing or shadow)\n- Nothing is written when the width or height is 0 or exceeds i32, or when data is not width x height x 4 bytes. (the browser's new ImageData does not accept it)"
+							},
+							"since": "0.4.0",
+							"source": "src/core/canvas2d/web_canvas.rs"
+						},
+						{
+							"kind": "method",
+							"name": "put_image_data_region",
+							"signature": "pub fn put_image_data_region(&mut self, image_data: &ImageData, destination_x: i32, destination_y: i32, dirty_x: i32, dirty_y: i32, dirty_width: i32, dirty_height: i32)",
+							"params": [
+								{
+									"name": "image_data",
+									"type": "&ImageData",
+									"description": {
+										"ko": "쓸 픽셀 묶음. (프리멀티플라이하지 않은 RGBA)",
+										"en": "Pixel data to write. (non-premultiplied RGBA)"
+									}
+								},
+								{
+									"name": "destination_x",
+									"type": "i32",
+									"description": {
+										"ko": "픽셀 묶음 왼쪽이 놓일 자리. (캔버스 픽셀, 변환을 받지 않는다)",
+										"en": "Where the left of the pixel data goes. (canvas pixels, not affected by the transform)"
+									}
+								},
+								{
+									"name": "destination_y",
+									"type": "i32",
+									"description": {
+										"ko": "픽셀 묶음 위가 놓일 자리. (캔버스 픽셀, 변환을 받지 않는다)",
+										"en": "Where the top of the pixel data goes. (canvas pixels, not affected by the transform)"
+									}
+								},
+								{
+									"name": "dirty_x",
+									"type": "i32",
+									"description": {
+										"ko": "쓸 사각형 왼쪽. (픽셀 묶음 픽셀)",
+										"en": "Left of the rectangle to write. (pixel data pixels)"
+									}
+								},
+								{
+									"name": "dirty_y",
+									"type": "i32",
+									"description": {
+										"ko": "쓸 사각형 위. (픽셀 묶음 픽셀)",
+										"en": "Top of the rectangle to write. (pixel data pixels)"
+									}
+								},
+								{
+									"name": "dirty_width",
+									"type": "i32",
+									"description": {
+										"ko": "쓸 사각형 폭. (음수면 왼쪽으로)",
+										"en": "Width of the rectangle to write. (leftward if negative)"
+									}
+								},
+								{
+									"name": "dirty_height",
+									"type": "i32",
+									"description": {
+										"ko": "쓸 사각형 높이. (음수면 위로)",
+										"en": "Height of the rectangle to write. (upward if negative)"
+									}
+								}
+							],
+							"description": {
+								"ko": "픽셀 묶음의 한 사각형만 쓰기. (원본 putImageData 의 dirtyX, dirtyY, dirtyWidth, dirtyHeight 꼴)\n- 폭 x 높이가 i32 를 넘으면 쓰지 않는다. 음수 폭과 높이는 시작을 그만큼 옮겨 뒤집고(시작이 음수였으면 0), 픽셀 묶음과 캔버스 밖은 자른다.",
+								"en": "Writes only one rectangle of the pixel data. (the dirtyX, dirtyY, dirtyWidth, dirtyHeight form of the original putImageData)\n- Nothing is written when width x height exceeds i32. A negative width or height flips the rectangle by moving its start by that amount (0 if the start was negative), and parts outside the pixel data and the canvas are clipped."
 							},
 							"since": "0.4.0",
 							"source": "src/core/canvas2d/web_canvas.rs"
