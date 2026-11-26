@@ -5097,8 +5097,14 @@ mod tests {
 		run_frame(&mut node_tree, &mut engine);
 		let field = get_field(&mut node_tree, field_id);
 		let line_height = field.get_line_height();
-		let maximum_scroll_top = (line_height * 5.0 + 8.0 - 60.0).max(0.0);
-		assert!((field.get_scroll_top() - maximum_scroll_top).abs() < 0.01);
+		// 글 끝 커서 보이기는 블링크 RevealSelection 처럼 맥은 가운데 맞춤이라 끝(아래 안쪽 여백까지), 그 밖은 가장자리 맞춤이라 커서 아래가 보이는 데까지다.
+		let expected_scroll_top = if cfg!(target_os = "macos") {
+			(line_height * 5.0 + 8.0 - 60.0).max(0.0)
+		}
+		else {
+			(line_height * 5.0 + 4.0 - 60.0).max(0.0)
+		};
+		assert!((field.get_scroll_top() - expected_scroll_top).abs() < 0.01, "스크롤 {} / 기대 {} (줄 높이 {})", field.get_scroll_top(), expected_scroll_top, line_height);
 	}
 
 	//==============================================================================

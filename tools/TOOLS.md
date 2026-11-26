@@ -47,6 +47,19 @@ cargo run -p vanilla-engine-apidoc -- <판> --gaps [--only <경로 앞>] [--excl
 - 가이드(docs/guide/<판>/ko/*.md)의 rust 코드 칸은 이 크레이트의 라이브러리 자리(tools/apidoc/src/lib.rs)가 doctest 로 검사한다. 장 목록 tools/apidoc/src/guide.rs 는 첫 줄(자료 쓰기)이 장 파일마다 include_str 문서 속성으로 다시 쓰고 --check 가 맞는지 본다. (빌드 스크립트로 짓지 않는 것은 여러 작업 사본이 빌드 폴더를 같이 쓰면 빌드 스크립트 결과가 다른 사본의 것으로 덮여서다) `cargo test --doc -p vanilla-engine-apidoc` (장 하나는 `-- Guide08Drawing` 처럼 파일 이름을 이은 이름으로 거른다) en 가이드의 코드 칸은 ko 와 같아야 한다. (--check)
 - 가이드(docs/guide/<판>/ko, en)와 업데이트(docs/update/<판>.ko.md, .en.md)는 손으로 옮긴다. 업데이트 ko 는 UPDATE.md 의 그 판 절이다.
 
+## CI (플랫폼 확인)
+GitHub Actions 의 `.github/workflows/platforms.yml` 이 dev, release, `ci-*` 브랜치에 올릴 때와 PR 에서 돈다. (공개 저장소라 무료)
+- 데스크탑 셋: 윈도우 서버(windows-latest), 우분투(ubuntu-latest, X11 은 Xvfb, 웨이랜드는 weston headless), 인텔 맥(macos-26-intel). 원본 vanilla.js 의 dev 를 옆에 받는다. (예제 애셋과 견줄 페이지)
+  - `cargo test --workspace`, `cargo build --examples`, 데스크탑 플랫폼 시험(`cargo test --test desktopplatform -- --ignored`, 같은 기계의 크롬이 찍은 `tests/assets/systemfont/chromemeasure.cjs` 값과 견준다)
+  - 예제 찍기: GPU 가 없어 메사 llvmpipe 소프트웨어 GL 로 그린다. (리눅스는 Xvfb 의 GLX 와 웨이랜드 EGL, 윈도우는 llvmpipe 만 든 메사 opengl32.dll 을 예제 실행 파일 옆에 둔다)
+  - 소리: 가상 장치(LABSN/sound-ci-helpers: 리눅스 PulseAudio, 윈도우 VB-CABLE, 맥 Background Music)로 audiotone 을 돌리고, `tests/assets/*/chrome*.cjs` 로 그 기계의 크롬 기대값을 다시 찍어 `cargo test --lib matches_chrome` 으로 견준다.
+  - 원본 예제 견주기: 원본 예제 페이지를 헤드리스 크롬(WebGL 은 SwiftShader)으로 찍어 러스트 예제 그림과 화소 차이를 낸다.
+  - 리눅스 라이브러리 시험이 신호로 죽으면 gdb 로 다시 돌려 죽은 스레드(시험 이름)와 백트레이스를 남긴다.
+  - 결과(그림, 로그, 크롬 값)는 `platforms-<이름표>` 아티팩트로 올린다.
+- 웹: `cargo build --target wasm32-unknown-unknown --examples`
+- `.github/scripts/captureexamples.cjs <저장 폴더> <이름표> [예제,...]`: 빌드한 `target/debug/examples` 를 찍기 모드(VANILLA_CAPTURE_PATH, VANILLA_CAPTURE_FRAMES, VANILLA_CAPTURE_EXIT)로 돌려 그림과 로그, `<이름표>_capture.json` 을 남긴다. 원본과 같은 장면의 예제는 원본 쿼리와 같은 값의 환경 변수를 준다. (PHYSICS2D_PRESTEP 같은) VANILLA_CI_CAPTURE_TIMEOUT 은 예제마다의 제한 시간 상한(초)이다.
+- `.github/scripts/chromecompare.cjs <vanilla.js 폴더> <그림 폴더> <이름표>`: 원본 예제 다섯(toonstyle, toonmaterial, skeleton2d, physics2d, tilemapshowcase)을 같은 크기와 기기 배율로 찍어 RGB 평균 절대 차이(0 ~ 1), 가장 큰 차이, 2 와 16 을 넘는 화소 몫, 차이 그림(4 배)을 남긴다. puppeteer-core 와 pngjs 를 NODE_PATH 로 준다.
+
 ## licenses
 제3자 라이선스 고지 모음 THIRD_PARTY_LICENSES.md 를 짓는 도구. (워크스페이스 크레이트 vanilla-engine-licenses, serde_json 만 씀, cargo-about 같은 바깥 도구 없이 cargo metadata 와 각 크레이트의 라이선스 파일을 읽는다)
 ```bash

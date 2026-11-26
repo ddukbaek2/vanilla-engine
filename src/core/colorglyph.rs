@@ -5,6 +5,7 @@
 //! - 비트맵: sbix (애플 컬러 이모지), CBDT/CBLC (노토 컬러 이모지 비트맵 판)의 PNG 와 프리멀티플라이드 BGRA 를 꺼내 풀고 글자 크기에 맞춘다.
 //!   판은 그 글리프를 가진 판 가운데 글자 크기 이상인 가장 작은 것, 없으면 가장 큰 것이다. (애플 컬러 이모지는 판마다 빠진 글리프가 있다) 줄일 때는 넓이 평균, 키울 때는 두 점 사이 섞기다.
 //!   자리는 판의 픽셀 단위 자리 값(그림의 왼쪽 아래가 펜 원점에서 떨어진 거리)을 글자 크기 비로 옮긴 것이다.
+//!   비트맵만 있는 CBDT 글꼴의 전진폭과 픽셀 상자는 크롬 리눅스(FreeType 과 스키아)처럼 판의 글리프 수치(정수 전진폭)와 그림 상자를 글자 크기 비로 옮긴다. (read_bitmap_glyph_advance, read_bitmap_glyph_bounds)
 //! - 윤곽: COLR/CPAL v0 (층마다 윤곽 하나를 한 색으로)과 v1 (그라데이션, 변환, 자르기, 합성). ttf-parser 의 Painter 로 받아 직접 칠한다.
 //!   윤곽은 곡선을 선분으로 펴서 넓이 누적 방식(font-rs 와 같은 방식, 0 이 아닌 감김)으로 덮인 정도를 셈한다.
 //!   칠은 한 색, 선형(세 점), 두 원 사이 방사, 스윕 그라데이션을 픽셀 가운데에서 셈한다. 색 줄의 끝 밖은 Pad, Repeat, Reflect 를 따르고 색은 곧은 알파로 섞는다.
@@ -175,6 +176,164 @@ fn read_raster_image<'a>(face: &'a Face, glyph_index: u16, pixels_per_em: u16) -
 		}
 	}
 	best_image
+}
+
+//==============================================================================
+/// 비트맵 색 글리프의 픽셀 상자. (sbix, CBDT 그림의 자리와 크기를 글자 크기 비로 옮겨 바깥 정수로 넓힌 것, 스키아 FreeType 의 비트맵 글리프 상자)
+///
+/// # 인자
+/// - `face`: 글꼴 얼굴.
+/// - `glyph_index`: 글리프 번호.
+/// - `pixel_size`: 글자 크기. (픽셀)
+///
+/// # 돌려줌
+/// (왼쪽, 아래, 너비, 높이). (픽셀, 위가 양수) 그 글리프의 그림이 없으면 None.
+//==============================================================================
+pub fn read_bitmap_glyph_bounds(face: &Face<'_>, glyph_index: u16, pixel_size: f32) -> Option<(i32, i32, i32, i32)> {
+	if pixel_size <= 0.0 {
+		return None;
+	}
+	let pixels_per_em = (pixel_size.ceil() as u32).clamp(1, u16::MAX as u32) as u16;
+	let raster_image = read_raster_image(face, glyph_index, pixels_per_em)?;
+	if raster_image.width == 0 || raster_image.height == 0 {
+		return None;
+	}
+	let scale = pixel_size / raster_image.pixels_per_em.max(1) as f32;
+	let left_x = (raster_image.x as f32 * scale).floor() as i32;
+	let bottom_y = (raster_image.y as f32 * scale).floor() as i32;
+	let right_x = ((raster_image.x as f32 + raster_image.width as f32) * scale).ceil() as i32;
+	let top_y = ((raster_image.y as f32 + raster_image.height as f32) * scale).ceil() as i32;
+	Some((left_x, bottom_y, right_x - left_x, top_y - bottom_y))
+}
+
+//==============================================================================
+/// CBDT 비트맵 글리프의 전진폭. (CBLC 판의 글리프 수치에 적힌 정수 전진폭을 글자 크기 비로 옮긴 값)
+/// - 크롬 리눅스는 비트맵만 있는 글꼴을 FreeType 으로 연다. FreeType 은 판 크기의 글리프 수치(smallGlyphMetrics, bigGlyphMetrics 의 advance)를 전진폭으로 주고,
+///   스키아(SkFontHost_FreeType)가 글자 크기 / 판 크기를 곱한다. 판은 글자 크기 이상인 가장 작은 것, 없으면 가장 큰 것이다. (chooseBitmapStrike)
+/// - CBDT 그림 꼴 17(작은 수치), 18(큰 수치), 19(CBLC 색인 꼴 2, 5 의 큰 수치)을 읽는다.
+///
+/// # 인자
+/// - `face`: 글꼴 얼굴.
+/// - `glyph_index`: 글리프 번호.
+/// - `pixel_size`: 글자 크기. (픽셀)
+///
+/// # 돌려줌
+/// 전진폭. (픽셀) CBLC, CBDT 표가 없거나, 그 글리프가 어느 판에도 없거나, 표가 깨졌으면 None.
+//==============================================================================
+pub fn read_bitmap_glyph_advance(face: &Face<'_>, glyph_index: u16, pixel_size: f32) -> Option<f32> {
+	let location_table = face.raw_face().table(rustybuzz::ttf_parser::Tag::from_bytes(b"CBLC"))?;
+	let data_table = face.raw_face().table(rustybuzz::ttf_parser::Tag::from_bytes(b"CBDT"))?;
+	let read_u8 = |data: &[u8], offset: usize| -> Option<u8> {
+		data.get(offset).copied()
+	};
+	let read_u16 = |data: &[u8], offset: usize| -> Option<u16> {
+		Some(u16::from_be_bytes([*data.get(offset)?, *data.get(offset + 1)?]))
+	};
+	let read_u32 = |data: &[u8], offset: usize| -> Option<u32> {
+		Some(u32::from_be_bytes([*data.get(offset)?, *data.get(offset + 1)?, *data.get(offset + 2)?, *data.get(offset + 3)?]))
+	};
+	// 그 글리프를 가진 판 가운데 글자 크기 이상인 가장 작은 것, 없으면 가장 큰 것. (BitmapSize 48 바이트: 색인 목록 자리, 크기, 개수, ..., 첫 글리프, 끝 글리프, ppemX, ppemY)
+	let size_count = read_u32(location_table, 4)? as usize;
+	let mut best_size: Option<(usize, u8)> = None;
+	for size_index in 0..size_count.min(256) {
+		let size_offset = 8 + size_index * 48;
+		let start_glyph_index = read_u16(location_table, size_offset + 40)?;
+		let end_glyph_index = read_u16(location_table, size_offset + 42)?;
+		let pixels_per_em = read_u8(location_table, size_offset + 45)?;
+		if glyph_index < start_glyph_index || glyph_index > end_glyph_index || pixels_per_em == 0 {
+			continue;
+		}
+		let is_better = match best_size {
+			Some((_, best_pixels_per_em)) => {
+				if best_pixels_per_em as f32 >= pixel_size {
+					pixels_per_em as f32 >= pixel_size && pixels_per_em < best_pixels_per_em
+				}
+				else {
+					pixels_per_em > best_pixels_per_em
+				}
+			}
+			None => {
+				true
+			}
+		};
+		if is_better {
+			best_size = Some((size_offset, pixels_per_em));
+		}
+	}
+	let (size_offset, pixels_per_em) = best_size?;
+	let list_offset = read_u32(location_table, size_offset)? as usize;
+	let subtable_count = read_u32(location_table, size_offset + 8)? as usize;
+	for subtable_index in 0..subtable_count.min(65536) {
+		let record_offset = list_offset + subtable_index * 8;
+		let first_glyph_index = read_u16(location_table, record_offset)?;
+		let last_glyph_index = read_u16(location_table, record_offset + 2)?;
+		if glyph_index < first_glyph_index || glyph_index > last_glyph_index {
+			continue;
+		}
+		let subtable_offset = list_offset + read_u32(location_table, record_offset + 4)? as usize;
+		let index_format = read_u16(location_table, subtable_offset)?;
+		let image_format = read_u16(location_table, subtable_offset + 2)?;
+		let image_data_offset = read_u32(location_table, subtable_offset + 4)? as usize;
+		let glyph_number = (glyph_index - first_glyph_index) as usize;
+		// 색인 꼴마다 글리프 그림의 자리와 (꼴 2, 5 는) 색인에 든 큰 수치의 전진폭.
+		let (glyph_data_offset, index_advance) = match index_format {
+			1 => {
+				(image_data_offset + read_u32(location_table, subtable_offset + 8 + glyph_number * 4)? as usize, None)
+			}
+			2 => {
+				let image_size = read_u32(location_table, subtable_offset + 8)? as usize;
+				(image_data_offset + image_size * glyph_number, Some(read_u8(location_table, subtable_offset + 12 + 4)?))
+			}
+			3 => {
+				(image_data_offset + read_u16(location_table, subtable_offset + 8 + glyph_number * 2)? as usize, None)
+			}
+			4 => {
+				let glyph_count = read_u32(location_table, subtable_offset + 8)? as usize;
+				let mut found_offset = None;
+				for pair_index in 0..glyph_count {
+					let pair_offset = subtable_offset + 12 + pair_index * 4;
+					if read_u16(location_table, pair_offset)? == glyph_index {
+						found_offset = Some(image_data_offset + read_u16(location_table, pair_offset + 2)? as usize);
+						break;
+					}
+				}
+				(found_offset?, None)
+			}
+			5 => {
+				let image_size = read_u32(location_table, subtable_offset + 8)? as usize;
+				let index_advance = read_u8(location_table, subtable_offset + 12 + 4)?;
+				let glyph_count = read_u32(location_table, subtable_offset + 20)? as usize;
+				let mut found_number = None;
+				for array_index in 0..glyph_count {
+					if read_u16(location_table, subtable_offset + 24 + array_index * 2)? == glyph_index {
+						found_number = Some(array_index);
+						break;
+					}
+				}
+				(image_data_offset + image_size * found_number?, Some(index_advance))
+			}
+			_ => {
+				return None;
+			}
+		};
+		// CBDT 그림 꼴: 17 은 작은 수치(높이, 너비, 왼쪽, 위, 전진폭), 18 은 큰 수치(높이, 너비, 가로 왼쪽, 가로 위, 가로 전진폭, ...), 19 는 색인의 큰 수치.
+		let advance = match image_format {
+			17 => {
+				read_u8(data_table, glyph_data_offset + 4)?
+			}
+			18 => {
+				read_u8(data_table, glyph_data_offset + 4)?
+			}
+			19 => {
+				index_advance?
+			}
+			_ => {
+				return None;
+			}
+		};
+		return Some(advance as f32 * pixel_size / pixels_per_em as f32);
+	}
+	None
 }
 
 //==============================================================================

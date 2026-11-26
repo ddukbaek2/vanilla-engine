@@ -499,7 +499,13 @@ cargo run --release --example modelviewer
 - vanilla.js 의 원본 200 파일 가운데 182 파일을 옮겼습니다. (같은 이름 176, 다른 파일에 합친 것 6) 18 파일은 빈 파일, 죽은 코드, 러스트 표준이 맡는 것(컬렉션, 객체 모델 도우미)이라 일부러 옮기지 않았습니다. 목록과 까닭은 [ARCHITECTURE.md](ARCHITECTURE.md) 9장에 있습니다.
 - `vanilla::experimental` 은 0.4.0 뒤 기능의 초안 자리입니다. (vanilla.js 의 `Experimental` 이름 공간과 같은 자리, API 가 바뀔 수 있습니다) 다 자란 기능은 제자리 모듈로 옮겨 바로 내보냅니다. 지금은 비어 있습니다.
 - 두 엔진은 기능 차이를 두지 않습니다. 언어나 플랫폼 때문에 정말 맞출 수 없는 것과 러스트에 맞게 정한 꼴은 [ARCHITECTURE.md](ARCHITECTURE.md) 10장에 모았습니다.
-- 윈도우 11 데스크탑, macOS(애플 실리콘) 데스크탑, 크롬에서 돌려 확인했습니다. 윈도우와 리눅스의 시스템 글꼴 갈래(DirectWrite, fontconfig), 리눅스 손가락 판정, 윈도우 터치 키보드(InputPane), 웨이랜드 프레임 콜백의 가려짐과 수직 동기는 그 대상으로 컴파일해 본 것까지입니다. 리눅스와 실제 모바일 기기는 아직 돌려 보지 않았습니다.
+- 윈도우 11 데스크탑, macOS(애플 실리콘) 데스크탑, 크롬에서 돌려 확인했습니다.
+- GitHub Actions 의 플랫폼 확인(`.github/workflows/platforms.yml`)이 윈도우 서버 2025, 우분투 26.04(X11 은 Xvfb, 웨이랜드는 weston headless), 인텔 맥(macOS 26)에서 시험을 돌리고 예제를 찍습니다. GPU 가 없는 기계라 윈도우와 리눅스는 메사 llvmpipe 소프트웨어 GL 로 그리고, 소리는 가상 장치(PulseAudio, VB-CABLE, Background Music)로 냅니다. 견주는 것은 모두 같은 기계의 크롬입니다.
+  - 시스템 글꼴과 대체 글꼴(DirectWrite, fontconfig, CoreText): 크롬 Canvas2D measureText 의 전진폭과 위아래 길이 (`tests/desktopplatform.rs`)
+  - 소리 해석, 믹서, 비프, PannerNode(HRTF 포함): 크롬 OfflineAudioContext
+  - 원본 예제 다섯(toonstyle, toonmaterial, skeleton2d, physics2d, tilemapshowcase): 헤드리스 크롬 그림과의 화소 차이
+  - 남은 차이는 대체 글꼴 고르기입니다. ([ARCHITECTURE.md](ARCHITECTURE.md) 9장)
+- 윈도우 터치 키보드(InputPane)와 리눅스 손가락 판정의 터치스크린 갈래는 터치 장치가 없어 돌려 보지 못했습니다. 실제 모바일 기기도 아직입니다.
 
 ## 코드 스타일
 
@@ -513,6 +519,7 @@ cargo run --release --example modelviewer
 ## 개발 환경
 
 - Windows 11 Pro, macOS(애플 실리콘)
+- CI: GitHub Actions 의 윈도우 서버 2025, 우분투 26.04, 인텔 맥 macOS 26 ([tools/TOOLS.md](tools/TOOLS.md) 의 CI 절)
 - Rust 1.100.0
 - 쓰는 크레이트는 [외부 의존성](#외부-의존성) 에 정리했습니다
 

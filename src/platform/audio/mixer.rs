@@ -1022,10 +1022,34 @@ mod tests {
 	/// 크롬(158) OfflineAudioContext 와 같은 그래프를 그려 견준다. (tests/assets/mixer/chromemixer.cjs 가 찍은 chrome_mixer.json)
 	/// - 소스(같은 표본율과 다른 표본율, 빠르기, 루프, 시작 위치, stop(when)), 플레이어 GainNode, StereoPannerNode(모노와 스테레오, 0 포함), 버스 GainNode, 섞기.
 	/// - AudioParam 자동화(value 대입, setValueAtTime, linearRamp, exponentialRamp, setTarget, cancel)와 그리는 도중 지금 gain.value 에서 줄여 끄기, 새 음악 올리기.
+	/// - 자동화의 exp, pow 는 크롬도 엔진도 운영체제의 수학 라이브러리라 기계마다 끝자리가 다르다. 기대값을 찍은 운영체제와 CPU 가 같으면 제곱합을 1e-6, 다르면 1e-5 (상대) 안으로 본다.
+	///   (애플 실리콘 맥 크롬 158 의 기대값과 윈도우 x64 는 줄여 끄는 그래프에서 1.1e-6 다르고, 그 기계의 크롬과는 1e-6 안이다)
 	//==============================================================================
 	#[test]
 	fn mixer_matches_chrome_offline_rendering() {
 		let json: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/assets/mixer/chrome_mixer.json")).expect("chrome_mixer.json")).expect("json");
+		let platform = match std::env::consts::OS {
+			"windows" => {
+				"win32"
+			}
+			"macos" => {
+				"darwin"
+			}
+			other => {
+				other
+			}
+		};
+		let architecture = if cfg!(target_arch = "aarch64") {
+			"arm64"
+		}
+		else if cfg!(target_arch = "x86_64") {
+			"x64"
+		}
+		else {
+			"ia32"
+		};
+		let is_same_machine = json["platform"].as_str() == Some(platform) && json["architecture"].as_str() == Some(architecture);
+		let energy_tolerance = if is_same_machine { 1e-6 } else { 1e-5 };
 		let buffer_sample_rate = json["bufferSampleRate"].as_f64().unwrap();
 		let buffer_length = json["bufferLength"].as_u64().unwrap() as usize;
 		let render_length = json["renderLength"].as_u64().unwrap() as usize;
@@ -1129,7 +1153,7 @@ mod tests {
 				}
 				let energy: f64 = (0..render_length).map(|index| (output[index * 2 + channel_index] as f64).powi(2)).sum();
 				let expected_energy = test_case["energy"][channel_index].as_f64().unwrap();
-				assert!((energy - expected_energy).abs() <= expected_energy * 1e-6 + 1e-9, "{} 채널 {} 제곱합: {} / {}", name, channel_index, energy, expected_energy);
+				assert!((energy - expected_energy).abs() <= expected_energy * energy_tolerance + 1e-9, "{} 채널 {} 제곱합: {} / {}", name, channel_index, energy, expected_energy);
 			}
 		}
 	}

@@ -13,6 +13,7 @@
 //! - 글꼴은 원본 document.fonts 처럼 이름 하나 아래에 얼굴(굵기, 기울기, 글자 범위)을 여럿 올린다. (register_font_face)
 //!   고르기는 CSS 의 차례를 따르고, 기울인 얼굴이 없으면 가짜 기울임(기울기 1/4), 굵은 얼굴이 없으면 가짜 굵게를 글리프마다 입힌다. (textshaping.rs)
 //! - 이름의 얼굴들에 없는 글자는 기본 폰트, 시스템 글꼴 사슬, 표준 글꼴(데스크탑, 크롬의 -webkit-standard), 대체 폰트 순으로 찾는다. (브라우저의 글꼴 대체와 같은 자리)
+//!   이름 목록에서 얼굴을 하나도 찾지 못하면(default 가 아닌 없는 이름뿐이면) 크롬처럼 표준 글꼴을 기본 폰트보다 먼저 둔다.
 //!   데스크탑 시스템 글꼴 사슬(set_system_font_chain)은 원본 SYSTEM_FONT_STRING 의 이름을 운영체제 글꼴에서 찾은 것이고, 켜면 폰트 문자열의 올리지 않은 이름도
 //!   운영체제 글꼴에서 찾는다. 얼굴은 그 굵기와 기울기의 글자를 처음 쓸 때 읽는다. (platform/desktop/systemfont.rs)
 //!   대체 글꼴은 운영체제가 고른다. (set_system_font_fallback_enabled, 굵게를 청하면 굵은 얼굴을 따로 묻는다) 후보 파일을 주면(add_fallback_font_candidate) 그것을 먼저 쓴다.
@@ -858,7 +859,7 @@ impl TextStringTextureCache {
 		let font = Rc::new(load_font(font_bytes)?);
 		self.face_order_number += 1;
 		self.fallback_face_list.borrow_mut().push(RegisteredFontFace {
-			descriptors: FontFaceDescriptors::new(),
+			descriptors: FontFaceDescriptors { is_system_fallback: true, ..FontFaceDescriptors::new() },
 			font,
 			order_number: self.face_order_number,
 		});
@@ -1169,6 +1170,7 @@ impl TextStringTextureCache {
 			match load_system_font_face(&mut state.shared_bytes_table, &source, font_description.font_weight, font_description.is_italic) {
 				Ok(mut registered_font_face) => {
 					registered_font_face.descriptors.source_key = read_fallback_source_key(&source);
+					registered_font_face.descriptors.is_system_fallback = true;
 					let is_duplicate = state.fallback_face_list.iter().any(|face| Rc::ptr_eq(face.font.get_font_bytes(), registered_font_face.font.get_font_bytes()) && face.font.get_face_index() == registered_font_face.font.get_face_index() && face.descriptors == registered_font_face.descriptors);
 					if !is_duplicate {
 						state.fallback_face_list.push(registered_font_face);
@@ -1255,7 +1257,7 @@ impl TextStringTextureCache {
 				}
 			};
 			self.fallback_face_list.borrow_mut().push(RegisteredFontFace {
-				descriptors: FontFaceDescriptors::new(),
+				descriptors: FontFaceDescriptors { is_system_fallback: true, ..FontFaceDescriptors::new() },
 				font,
 				order_number: 0,
 			});
@@ -1834,6 +1836,7 @@ impl TextStringTextureCache {
 
 	//==============================================================================
 	/// 폰트 문자열에 맞는 얼굴 목록. (이름 목록의 차례로 이름마다 그 얼굴들, 기본 폰트, 시스템 글꼴 사슬, 표준 글꼴, 대체 폰트 차례. 글자마다 앞에서부터 찾는다, 올리지 않은 이름은 넘긴다)
+	/// - 이름 목록에서 얼굴을 하나도 찾지 못하고 default 도 없으면 표준 글꼴이 기본 폰트보다 앞이다. (크롬은 그때 표준 글꼴이 첫 글꼴이다)
 	//==============================================================================
 	fn resolve_face_list(&self, font_description: &FontDescription) -> Vec<ResolvedFontFace> {
 		let mut face_list: Vec<ResolvedFontFace> = Vec::new();
@@ -1861,6 +1864,10 @@ impl TextStringTextureCache {
 				used_system_family_list.push(family_key);
 			}
 		}
+		// 이름 목록에서 얼굴을 하나도 찾지 못했으면 크롬처럼 표준 글꼴이 첫 글꼴이다. (FontFallbackList 는 목록이 다 떨어지면 -webkit-standard 를 쓴다, 엔진 기본 글꼴 이름 default 는 넘긴다)
+		if face_list.is_empty() && !font_description.family_name_list.iter().any(|family_name| family_name.eq_ignore_ascii_case("default")) {
+			self.append_standard_family_faces(font_description, &mut face_list, &mut used_system_family_list);
+		}
 		let default_face_reference_list: Vec<&RegisteredFontFace> = self.default_face_list.iter().collect();
 		textshaping::select_font_faces(&default_face_reference_list, font_description.font_weight, font_description.is_italic, &mut face_list);
 		// 기본 글꼴 사슬. (원본 SYSTEM_FONT_STRING 의 차례)
@@ -1873,19 +1880,7 @@ impl TextStringTextureCache {
 				used_system_family_list.push(family_key);
 			}
 		}
-		// 표준 글꼴. (크롬 FontFallbackList 는 이름 목록이 다 떨어지면 화면 언어의 표준 글꼴(-webkit-standard)을 쓴다. 데스크탑, 이름 찾기를 켰을 때)
-		#[cfg(not(target_arch = "wasm32"))]
-		{
-			let is_lookup_enabled = self.system_font_state.borrow().is_lookup_enabled;
-			if is_lookup_enabled {
-				if let Some(standard_family_name) = crate::platform::desktop::systemfont::resolve_generic_family_name(crate::platform::desktop::systemfont::GenericFamily::Standard) {
-					let standard_family_key = standard_family_name.to_lowercase();
-					if !used_system_family_list.contains(&standard_family_key) && self.append_system_family_faces(&standard_family_key, font_description.font_weight, font_description.is_italic, &mut face_list) {
-						used_system_family_list.push(standard_family_key);
-					}
-				}
-			}
-		}
+		self.append_standard_family_faces(font_description, &mut face_list, &mut used_system_family_list);
 		for fallback_face in self.fallback_face_list.borrow().iter() {
 			let fallback_face_reference_list = [fallback_face];
 			textshaping::select_font_faces(&fallback_face_reference_list, font_description.font_weight, font_description.is_italic, &mut face_list);
@@ -1903,6 +1898,28 @@ impl TextStringTextureCache {
 			textshaping::select_font_faces(&group_face_list, font_description.font_weight, font_description.is_italic, &mut face_list);
 		}
 		face_list
+	}
+
+	//==============================================================================
+	/// 표준 글꼴의 얼굴 더하기. (크롬 FontFallbackList 는 이름 목록이 다 떨어지면 화면 언어의 표준 글꼴(-webkit-standard)을 쓴다. 데스크탑, 이름 찾기를 켰을 때, 이미 더한 이름은 넘긴다)
+	//==============================================================================
+	fn append_standard_family_faces(&self, font_description: &FontDescription, face_list: &mut Vec<ResolvedFontFace>, used_system_family_list: &mut Vec<String>) {
+		#[cfg(not(target_arch = "wasm32"))]
+		{
+			let is_lookup_enabled = self.system_font_state.borrow().is_lookup_enabled;
+			if is_lookup_enabled {
+				if let Some(standard_family_name) = crate::platform::desktop::systemfont::resolve_generic_family_name(crate::platform::desktop::systemfont::GenericFamily::Standard) {
+					let standard_family_key = standard_family_name.to_lowercase();
+					if !used_system_family_list.contains(&standard_family_key) && self.append_system_family_faces(&standard_family_key, font_description.font_weight, font_description.is_italic, face_list) {
+						used_system_family_list.push(standard_family_key);
+					}
+				}
+			}
+		}
+		#[cfg(target_arch = "wasm32")]
+		{
+			let _ = (font_description, face_list, used_system_family_list);
+		}
 	}
 
 	//==============================================================================
@@ -1973,7 +1990,12 @@ impl TextStringTextureCache {
 			}
 			if let Some(last_resort_family_name) = crate::platform::desktop::systemfont::read_last_resort_family_name() {
 				let family_key = last_resort_family_name.to_lowercase();
+				let first_face_index = face_list.len();
 				self.append_system_family_faces(&family_key, font_description.font_weight, font_description.is_italic, face_list);
+				// 마지막 대체 글꼴은 대체 단계다. (이름 목록처럼 먼저 고르면 리눅스 DejaVu Sans 의 흑백 😀 가 색 이모지보다 앞선다)
+				for face in face_list[first_face_index..].iter_mut() {
+					face.descriptors.is_system_fallback = true;
+				}
 			}
 		}
 		#[cfg(target_arch = "wasm32")]
@@ -3828,17 +3850,10 @@ fn decompress_web_font(font_bytes: Vec<u8>) -> Result<Vec<u8>, String> {
 }
 
 //==============================================================================
-/// 줄 높이 값. (위로 올라간 길이, 아래로 내려간 길이. 둘 다 양수)
+/// 줄 높이 값. (위로 올라간 길이, 아래로 내려간 길이. 둘 다 양수, 크롬 캔버스 TextMetrics 의 fontBoundingBoxAscent, fontBoundingBoxDescent 와 같은 셈)
 //==============================================================================
 fn read_line_metrics(font: &LoadedFont, pixel_size: f32) -> (f32, f32) {
-	match font.raster_font.horizontal_line_metrics(pixel_size) {
-		Some(line_metrics) => {
-			(line_metrics.ascent, -line_metrics.descent)
-		}
-		None => {
-			(pixel_size * 0.8, pixel_size * 0.2)
-		}
-	}
+	font.calculate_font_bounding_box(pixel_size)
 }
 
 //==============================================================================
@@ -4079,7 +4094,7 @@ mod tests {
 	/// 맥 시스템 UI 글꼴(SFNS)의 광학 크기와 자간 표, 크롬이 모르는 이름: 맥 크롬 158 Canvas2D 의 measureText 값과 같다. (맥만, SFNS 가 있을 때)
 	/// - system-ui 와 BlinkMacSystemFont 는 opsz 축을 글자 크기로 걸고(17 ~ 96 으로 자른다) trak 표의 자간을 더한다. 8 ~ 128px, 굵기 300, 400, 700 과 기울임(SFNSItalic).
 	/// - 글자 자리는 크롬 HarfBuzz 처럼 16.16 배율로 셈해 가변 GPOS 델타가 크롬과 같다. (축 값 정규화, 짝 커닝의 장치 표도 하프버즈와 같다) 크롬 값과 1/10000 px 안.
-	/// - -apple-system 은 크롬이 모르는 이름이라 다음 이름으로 넘어간다. (사슬에서는 Apple SD Gothic Neo, 표준 글꼴과 같은 값)
+	/// - -apple-system 은 크롬이 모르는 이름이라 다음 이름으로 넘어간다. (사슬에서는 Apple SD Gothic Neo, 하나뿐이면 화면 언어의 표준 글꼴)
 	//==============================================================================
 	#[cfg(target_os = "macos")]
 	#[test]
@@ -4114,8 +4129,11 @@ mod tests {
 			text_string_texture_cache.measure_text(font_string, "Hello World Wifi").width
 		};
 		assert!((measure_width("16px BlinkMacSystemFont") - 115.867).abs() < 0.01);
+		// -apple-system 하나뿐이면 맞는 이름이 없어 화면 언어의 표준 글꼴이다. (한국어 Apple SD Gothic Neo, 영어 Times)
+		if let Some(standard_family_name) = crate::platform::desktop::systemfont::resolve_generic_family_name(crate::platform::desktop::systemfont::GenericFamily::Standard) {
+			assert!((measure_width("16px -apple-system") - measure_width(&format!("16px '{}'", standard_family_name))).abs() < 0.001);
+		}
 		if crate::platform::find_family_font_file("Apple SD Gothic Neo", 400, false).is_some() {
-			assert!((measure_width("16px -apple-system") - measure_width("16px 'Apple SD Gothic Neo'")).abs() < 0.001);
 			assert!((measure_width("16px default") - 109.072).abs() < 0.01);
 		}
 	}

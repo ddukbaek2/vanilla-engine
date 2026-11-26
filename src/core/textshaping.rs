@@ -11,8 +11,10 @@
 //!     축 값은 HarfBuzz hb_ot_var_normalize_coords 처럼 정규화한다. 같이 둔 third_party/ttf-parser 는 짝 커닝(PairPos 꼴 1)의 장치 표 기준을 바로잡은 판이다.
 //!   - 래스터: fontdue 의 글리프 번호 래스터. 굵은 얼굴이 없으면 가짜 굵게, 기울인 얼굴이 없으면 가짜 기울임을 글리프마다 입힌다.
 //!     색 글리프(sbix, CBDT, COLR)는 colorglyph.rs 가 제 색으로 그린다. 크롬처럼 가짜 기울임은 입히고 가짜 굵게는 입히지 않는다.
-//! - 이모지 표시: VS16(FE0F), Emoji_Presentation 글자, 피부색 조정자, 국기, 키캡, 태그 묶음은 색 글리프를 가진 얼굴을 먼저 고른다. 그 밖(VS15 포함)은 색이 아닌 얼굴을 먼저.
+//! - 이모지 표시: 이름 목록의 얼굴은 색과 상관없이 글리프가 있으면 먼저 쓰고, 운영체제 대체 글꼴 단계에서 VS16(FE0F), Emoji_Presentation 글자, 피부색 조정자, 국기, 키캡, 태그 묶음은
+//!   색 글리프를 가진 얼굴을, 그 밖(VS15 포함)은 색이 아닌 얼굴을 먼저 고른다. 이형 선택자가 붙은 묶음은 이름 목록에서도 그 표시에 맞는 얼굴만 받는다.
 //!   크롬은 지정한 글꼴에 흑백 ❤ 가 있어도 ❤️ (FE0F) 는 색 이모지 글꼴로, 맨 ❤ 는 지정한 글꼴로 그린다. (맥 크롬에서 Canvas2D 로 확인)
+//!   리눅스 크롬 157 은 "16px DejaVu Sans" 의 맨 😀 를 DejaVu Sans 의 흑백 글리프로 그린다. (CI 의 measureText)
 //! - 가짜 기울임과 가짜 굵게는 Chromium 이 Skia 에 주는 값과 같다:
 //!   기울기 1/4 (font_platform_data.cc 의 setSkewX(-SK_Scalar1 / 4)), 굵게는 글자 크기의 1/24 (9px 이하) ~ 1/32 (36px 이상) 두께로 윤곽을 칠해 넓힌다.
 //!   (Skia SkTextFormatParams.h 의 kStdFakeBoldInterpKeys / Values) 둘 다 전진폭은 그대로다.
@@ -120,6 +122,8 @@ pub struct FontFaceDescriptors {
 	pub unicode_range_list: Vec<(u32, u32)>,
 	/// 얼굴 열쇠. (기본 빈 글)
 	pub source_key: String,
+	/// 운영체제가 고른 대체 글꼴의 얼굴인지. (대체 폰트와 마지막 대체 글꼴도, 글자마다 이름 목록의 얼굴을 다 본 뒤에 보는 대체 단계, 이모지 표시는 이 단계에서 색 글리프 얼굴을 먼저 고른다. 기본 false)
+	pub is_system_fallback: bool,
 }
 
 impl FontFaceDescriptors {
@@ -136,6 +140,7 @@ impl FontFaceDescriptors {
 			is_italic: false,
 			unicode_range_list: Vec::new(),
 			source_key: String::new(),
+			is_system_fallback: false,
 		}
 	}
 
@@ -665,6 +670,21 @@ impl LoadedFont {
 	}
 
 	//==============================================================================
+	/// 비트맵 그림만 있는 색 글꼴인지. (CBDT 나 sbix 가 있고 윤곽 표(glyf, CFF, CFF2)가 없는 글꼴, 맥 CoreText 로 그리는 글꼴은 아니다)
+	/// - 크롬 리눅스(FreeType 과 스키아)처럼 전진폭과 픽셀 상자를 판의 글리프 수치와 그림 상자로 셈한다. (colorglyph::read_bitmap_glyph_advance, read_bitmap_glyph_bounds)
+	///
+	/// # 돌려줌
+	/// 비트맵만 있으면 true.
+	//==============================================================================
+	pub fn is_bitmap_only_font(&self) -> bool {
+		if self.is_core_text_raster {
+			return false;
+		}
+		let tables = self.get_shaping_face().tables();
+		(tables.cbdt.is_some() || tables.sbix.is_some()) && tables.glyf.is_none() && tables.cff.is_none() && tables.cff2.is_none()
+	}
+
+	//==============================================================================
 	/// 전진폭을 정수 픽셀로 반올림하는지. (맥 색 이모지, 크롬 measureText 가 13px 에서 16, 17px 에서 21 처럼 정수를 준다)
 	///
 	/// # 돌려줌
@@ -710,11 +730,58 @@ impl LoadedFont {
 	/// 줄 높이. (px, 정수)
 	//==============================================================================
 	pub fn calculate_normal_line_height(&self, pixel_size: f32) -> f32 {
-		let shaping_face = self.get_shaping_face();
 		let scale = pixel_size / self.units_per_em.max(1.0);
+		let (ascender, descender, line_gap) = self.read_vertical_metric_units();
+		let mut ascent = (ascender * scale).round();
+		let descent = (-descender * scale).round();
+		let line_gap = (line_gap * scale).round();
+		if self.is_ascent_adjusted_family() {
+			ascent += ((ascent + descent) * 0.15 + 0.5).floor();
+		}
+		ascent + descent + line_gap
+	}
+
+	//==============================================================================
+	/// 캔버스의 글꼴 위아래 길이. (크롬 FontMetrics::AscentDescentWithHacks 에 캔버스가 켜는 subpixel_ascent_descent 를 준 값, TextMetrics 의 fontBoundingBoxAscent, fontBoundingBoxDescent)
+	/// - 운영체제마다 읽는 표는 calculate_normal_line_height 와 같다.
+	/// - 위아래 길이를 각각 반올림한다. 위가 3px 보다 작거나 위 + 아래가 2px 보다 작은 작은 글꼴은 반올림하지 않는다. (crbug.com/338908, 글자 기준선 종류마다 기준선이 같아지지 않게)
+	/// - 맥은 Times, Helvetica, Courier 의 위 길이에 (위 + 아래) 의 15% 를 반올림해 더한다.
+	/// - 리눅스의 VDMX 표와 서브픽셀 자리의 아래 길이 빌리기는 FreeType 바이트코드 힌팅(full, normal)과 서브픽셀 자리를 켰을 때만이라, 크롬 리눅스 기본(slight 힌팅, 서브픽셀 자리 꺼짐)처럼 보지 않는다.
+	///
+	/// # 인자
+	/// - `pixel_size`: 글자 크기. (px)
+	///
+	/// # 돌려줌
+	/// (위 길이, 아래 길이). (px, 둘 다 양수, 글자 크기가 0 이면 둘 다 0)
+	//==============================================================================
+	pub fn calculate_font_bounding_box(&self, pixel_size: f32) -> (f32, f32) {
+		if pixel_size <= 0.0 {
+			return (0.0, 0.0);
+		}
+		let scale = pixel_size / self.units_per_em.max(1.0);
+		let (ascender, descender, _) = self.read_vertical_metric_units();
+		let raw_ascent = ascender * scale;
+		let raw_descent = -descender * scale;
+		let (mut ascent, descent) = if raw_ascent < 3.0 || raw_ascent + raw_descent < 2.0 {
+			(raw_ascent, raw_descent)
+		}
+		else {
+			(raw_ascent.round(), raw_descent.round())
+		};
+		if self.is_ascent_adjusted_family() {
+			ascent += ((ascent + descent) * 0.15 + 0.5).floor();
+		}
+		(ascent, descent)
+	}
+
+	//==============================================================================
+	/// 크롬이 Skia 에서 받는 글꼴 세로 수치. (글꼴 단위의 위, 아래(음수), 줄 사이. 운영체제마다 읽는 표는 calculate_normal_line_height 의 설명)
+	//==============================================================================
+	fn read_vertical_metric_units(&self) -> (f32, f32, f32) {
+		let shaping_face = self.get_shaping_face();
 		let font_tables = shaping_face.tables();
 		let horizontal_header = font_tables.hhea;
-		let (ascender, descender, line_gap) = if cfg!(target_os = "macos") && (horizontal_header.ascender != 0 || horizontal_header.descender != 0) {
+		if cfg!(target_os = "macos") && (horizontal_header.ascender != 0 || horizontal_header.descender != 0) {
 			(horizontal_header.ascender as f32, horizontal_header.descender as f32, horizontal_header.line_gap as f32)
 		}
 		else if cfg!(target_os = "windows") {
@@ -732,32 +799,32 @@ impl LoadedFont {
 		}
 		else {
 			(shaping_face.ascender() as f32, shaping_face.descender() as f32, shaping_face.line_gap() as f32)
-		};
-		let mut ascent = (ascender * scale).round();
-		let descent = (-descender * scale).round();
-		let line_gap = (line_gap * scale).round();
-		if cfg!(target_os = "macos") {
-			// 이름 표의 글꼴 모음 이름. (맥 글꼴은 맥 로먼 글자만 있기도 해 그 바이트를 그대로 견준다)
-			let is_adjusted_family = shaping_face.names().into_iter().any(|name| {
-				if name.name_id != rustybuzz::ttf_parser::name_id::FAMILY {
-					return false;
-				}
-				let family_name = if name.is_unicode() {
-					name.to_string()
-				}
-				else if name.platform_id == rustybuzz::ttf_parser::PlatformId::Macintosh && name.encoding_id == 0 {
-					String::from_utf8(name.name.to_vec()).ok()
-				}
-				else {
-					None
-				};
-				matches!(family_name.as_deref(), Some("Times") | Some("Helvetica") | Some("Courier"))
-			});
-			if is_adjusted_family {
-				ascent += ((ascent + descent) * 0.15 + 0.5).floor();
-			}
 		}
-		ascent + descent + line_gap
+	}
+
+	//==============================================================================
+	/// 맥 크롬이 위 길이를 고치는 글꼴인지. (이름 표의 글꼴 모음 이름이 Times, Helvetica, Courier, 맥이 아니면 늘 false)
+	//==============================================================================
+	fn is_ascent_adjusted_family(&self) -> bool {
+		if !cfg!(target_os = "macos") {
+			return false;
+		}
+		// 이름 표의 글꼴 모음 이름. (맥 글꼴은 맥 로먼 글자만 있기도 해 그 바이트를 그대로 견준다)
+		self.get_shaping_face().names().into_iter().any(|name| {
+			if name.name_id != rustybuzz::ttf_parser::name_id::FAMILY {
+				return false;
+			}
+			let family_name = if name.is_unicode() {
+				name.to_string()
+			}
+			else if name.platform_id == rustybuzz::ttf_parser::PlatformId::Macintosh && name.encoding_id == 0 {
+				String::from_utf8(name.name.to_vec()).ok()
+			}
+			else {
+				None
+			};
+			matches!(family_name.as_deref(), Some("Times") | Some("Helvetica") | Some("Courier"))
+		})
 	}
 
 	//==============================================================================
@@ -840,6 +907,9 @@ impl LoadedFont {
 					(0, 0, 0, 0)
 				}
 			};
+		}
+		if self.is_bitmap_only_font() {
+			return colorglyph::read_bitmap_glyph_bounds(self.get_shaping_face(), glyph_index, pixel_size).unwrap_or((0, 0, 0, 0));
 		}
 		let metrics = self.raster_font.metrics_indexed(glyph_index, pixel_size);
 		(metrics.xmin, metrics.ymin, metrics.width as i32, metrics.height as i32)
@@ -1373,8 +1443,12 @@ pub struct ShapedText {
 //==============================================================================
 /// 글자 묶음에 쓸 얼굴 고르기. (묶음의 글자를 모두 가진 첫 얼굴, 없으면 첫 글자를 가진 첫 얼굴, 그것도 없으면 0)
 /// - 브라우저처럼 결합 부호까지 한 얼굴로 그린다. 이음 문자, 이형 선택자처럼 보이지 않는 글자는 따지지 않는다.
-/// - 이모지 표시 묶음은 첫 글자를 색 글리프로 가진 얼굴을, 글 표시 묶음은 첫 글자를 색이 아닌 글리프로 가진 얼굴을 같은 조건 안에서 먼저 고른다. (is_emoji_presentation)
-///   차례: 글자를 모두 가지고 색이 맞는 얼굴 → 글자를 모두 가진 얼굴 → 첫 글자를 가지고 색이 맞는 얼굴 → 첫 글자를 가진 얼굴.
+/// - 크롬 FontFallbackIterator 처럼 이름 목록의 얼굴(운영체제 대체 글꼴이 아닌 것)을 먼저 본다. 색인지는 따지지 않는다.
+///   다만 이형 선택자가 붙은 묶음(❤️ 의 FE0F, FE0E)은 그 표시에 맞는 얼굴만 받는다. (크롬은 글꼴에 이형 글리프가 없으면 다음 글꼴로 넘어간다)
+/// - 운영체제 대체 글꼴의 얼굴(FontFaceDescriptors 의 is_system_fallback)에서는 이모지 표시 묶음은 첫 글자를 색 글리프로 가진 얼굴을,
+///   글 표시 묶음은 색이 아닌 글리프로 가진 얼굴을 같은 조건 안에서 먼저 고른다. (is_emoji_presentation, 크롬의 이모지 우선 글꼴 단계)
+///   차례: 이름 목록에서 글자를 모두 가진 얼굴 → 대체에서 글자를 모두 가지고 색이 맞는 얼굴 → 대체에서 글자를 모두 가진 얼굴
+///   → 이름 목록에서 첫 글자를 가진 얼굴 → 대체에서 첫 글자를 가지고 색이 맞는 얼굴 → 대체에서 첫 글자를 가진 얼굴.
 //==============================================================================
 fn select_face_index(face_list: &[ResolvedFontFace], grapheme: &str) -> Option<usize> {
 	let base_character = grapheme.chars().next()?;
@@ -1388,23 +1462,38 @@ fn select_face_index(face_list: &[ResolvedFontFace], grapheme: &str) -> Option<u
 	let is_color_matched = |face: &ResolvedFontFace| -> bool {
 		face.font.has_color_character(base_character) == is_color_wanted
 	};
-	if grapheme.chars().nth(1).is_some() {
-		let has_all_characters = |face: &ResolvedFontFace| -> bool {
-			grapheme.chars().filter(|character| !is_ignorable(*character)).all(|character| has_character(face, character))
-		};
+	let has_presentation_selector = grapheme.contains('\u{FE0F}') || grapheme.contains('\u{FE0E}');
+	let is_list_face_accepted = |face: &ResolvedFontFace| -> bool {
+		!face.descriptors.is_system_fallback && (!has_presentation_selector || is_color_matched(face))
+	};
+	let has_all_characters = |face: &ResolvedFontFace| -> bool {
+		grapheme.chars().filter(|character| !is_ignorable(*character)).all(|character| has_character(face, character))
+	};
+	let is_multiple_character = grapheme.chars().nth(1).is_some();
+	if is_multiple_character {
 		for (face_index, face) in face_list.iter().enumerate() {
-			if has_all_characters(face) && is_color_matched(face) {
+			if is_list_face_accepted(face) && has_all_characters(face) {
 				return Some(face_index);
 			}
 		}
 		for (face_index, face) in face_list.iter().enumerate() {
-			if has_all_characters(face) {
+			if face.descriptors.is_system_fallback && has_all_characters(face) && is_color_matched(face) {
+				return Some(face_index);
+			}
+		}
+		for (face_index, face) in face_list.iter().enumerate() {
+			if face.descriptors.is_system_fallback && has_all_characters(face) {
 				return Some(face_index);
 			}
 		}
 	}
 	for (face_index, face) in face_list.iter().enumerate() {
-		if has_character(face, base_character) && is_color_matched(face) {
+		if is_list_face_accepted(face) && has_character(face, base_character) {
+			return Some(face_index);
+		}
+	}
+	for (face_index, face) in face_list.iter().enumerate() {
+		if face.descriptors.is_system_fallback && has_character(face, base_character) && is_color_matched(face) {
 			return Some(face_index);
 		}
 	}
@@ -1743,6 +1832,7 @@ pub fn shape_text(face_list: &[ResolvedFontFace], text: &str, pixel_size: f32, d
 				let glyph_buffer = rustybuzz::shape(&sized_shaping_face, &[], unicode_buffer);
 				let scale = face.font.read_advance_scale(pixel_size) / HARFBUZZ_POSITION_ONE;
 				let is_integer_advance = face.font.is_integer_advance();
+				let is_bitmap_only_font = face.font.is_bitmap_only_font();
 				// trak 자간. (글자 묶음의 첫 글리프에 더한다, HarfBuzz 의 foreach_grapheme 자리를 묶음 번호(cluster)가 바뀌는 글리프로 본다. HarfBuzz 처럼 em_scalef_x 로 배율에서 반올림한다)
 				let tracking = (face.font.read_horizontal_tracking(pixel_size) * (harfbuzz_scale as f32 / face.font.units_per_em)).round() * scale;
 				let mut previous_cluster: Option<u32> = None;
@@ -1763,6 +1853,16 @@ pub fn shape_text(face_list: &[ResolvedFontFace], text: &str, pixel_size: f32, d
 					else {
 						glyph_position.x_advance as f32 * scale
 					};
+					// 비트맵만 있는 글꼴은 판의 글리프 수치 전진폭에 모양 짓기가 더한 몫(GPOS)을 얹는다. (크롬의 HarfBuzz 는 스키아가 준 전진폭에서 시작한다)
+					if is_bitmap_only_font {
+						let shaping_face = face.font.get_shaping_face();
+						let glyph_id = rustybuzz::ttf_parser::GlyphId(glyph_info.glyph_id as u16);
+						if let (Some(bitmap_advance), Some(font_advance)) = (colorglyph::read_bitmap_glyph_advance(shaping_face, glyph_id.0, pixel_size), shaping_face.glyph_hor_advance(glyph_id)) {
+							// hmtx 전진폭을 모양 짓기와 같은 16.16 배율로 옮겨(HarfBuzz em_scale) 모양 짓기가 더한 몫만 남긴다.
+							let scaled_font_advance = (font_advance as f32 * harfbuzz_scale as f32 / face.font.units_per_em).round() as i32;
+							advance = bitmap_advance + (glyph_position.x_advance - scaled_font_advance) as f32 * scale;
+						}
+					}
 					if previous_cluster != Some(glyph_info.cluster) {
 						advance += tracking;
 						previous_cluster = Some(glyph_info.cluster);
@@ -2452,7 +2552,8 @@ mod tests {
 	}
 
 	//==============================================================================
-	/// 얼굴 고르기: ❤️ 는 색 글리프 얼굴로, 맨 ❤ 는 흑백 얼굴로. 시스템 조각을 쓸 수 있으면(웹) 색 얼굴이 없을 때 ❤️ 는 브라우저 조각으로.
+	/// 얼굴 고르기: 대체 단계에서 ❤️ 는 색 글리프 얼굴로, 맨 ❤ 는 흑백 얼굴로. 시스템 조각을 쓸 수 있으면(웹) 색 얼굴이 없을 때 ❤️ 는 브라우저 조각으로.
+	/// 이름 목록의 흑백 얼굴은 맨 ❤ 를 그리고 ❤️ 는 넘긴다.
 	/// (운영체제가 고른 ❤ 의 흑백 대체 글꼴과 색 이모지 글꼴이 있을 때만 본다, 맥은 ZapfDingbats 와 Apple Color Emoji)
 	//==============================================================================
 	#[test]
@@ -2482,8 +2583,10 @@ mod tests {
 				return;
 			}
 		};
-		let create_face = |font: LoadedFont| ResolvedFontFace { font: Rc::new(font), descriptors: FontFaceDescriptors::new(), is_synthetic_bold: false, is_synthetic_italic: false };
-		let face_list = vec![create_face(text_font), create_face(color_font)];
+		let create_face = |font: Rc<LoadedFont>, is_system_fallback: bool| ResolvedFontFace { font, descriptors: FontFaceDescriptors { is_system_fallback, ..FontFaceDescriptors::new() }, is_synthetic_bold: false, is_synthetic_italic: false };
+		let text_font = Rc::new(text_font);
+		let color_font = Rc::new(color_font);
+		let face_list = vec![create_face(text_font.clone(), true), create_face(color_font.clone(), true)];
 		let emoji_shaped_text = shape_text(&face_list, "\u{2764}\u{FE0F}", 32.0, ShapingDirection::LeftToRight, None);
 		assert_eq!(emoji_shaped_text.glyph_list[0].face_index, 1);
 		let text_shaped_text = shape_text(&face_list, "\u{2764}", 32.0, ShapingDirection::LeftToRight, None);
@@ -2498,6 +2601,10 @@ mod tests {
 		let text_face_list = vec![face_list[0].clone()];
 		let system_shaped_text = shape_text(&text_face_list, "\u{2764}\u{FE0F}", 32.0, ShapingDirection::LeftToRight, Some(&system_font_measure));
 		assert_eq!(system_shaped_text.glyph_list[0].face_index, SYSTEM_FACE_INDEX);
+		// 이름 목록의 흑백 글꼴은 맨 ❤ 를 그리고, ❤️ 는 이형 글리프가 없어 대체의 색 글꼴로 넘긴다. (크롬 맥 Canvas2D)
+		let list_face_list = vec![create_face(text_font, false), create_face(color_font, true)];
+		assert_eq!(shape_text(&list_face_list, "\u{2764}", 32.0, ShapingDirection::LeftToRight, None).glyph_list[0].face_index, 0);
+		assert_eq!(shape_text(&list_face_list, "\u{2764}\u{FE0F}", 32.0, ShapingDirection::LeftToRight, None).glyph_list[0].face_index, 1);
 	}
 
 	//==============================================================================

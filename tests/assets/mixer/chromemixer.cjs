@@ -7,6 +7,7 @@
 // - 원본 SoundSystem 의 자동화(value 대입, setValueAtTime, linearRampToValueAtTime, exponentialRampToValueAtTime, setTargetAtTime,
 //   cancelScheduledValues, stop(when))와, 그리는 도중 suspend 로 멈춰 지금 gain.value 에서 줄여 끄기(fadeOutEffects, fadeOutMusic)와 새 음악 올리기를 한다.
 // - 소리는 산수로만 짓는다. (사인 같은 초월 함수는 플랫폼마다 끝자리가 다를 수 있어 쓰지 않는다)
+// - 크롬의 자동화(exponentialRamp, setTarget)는 운영체제의 exp, pow 를 불러 기계마다 끝자리가 다르다. 어느 운영체제와 CPU 의 크롬인지 platform, architecture 에 적는다. (node 의 process.platform, process.arch)
 //==============================================================================
 const fs = require("fs");
 const path = require("path");
@@ -189,7 +190,9 @@ const chromePathList = [
 		return output;
 	});
 	result.chrome = await browser.version();
+	result.platform = process.platform;
+	result.architecture = process.arch;
 	fs.writeFileSync(outputPath, JSON.stringify(result));
 	await browser.close();
-	console.log(`${result.chrome}: ${result.cases.length} 그래프 → ${outputPath}`);
+	console.log(`${result.chrome} (${result.platform} ${result.architecture}): ${result.cases.length} 그래프 → ${outputPath}`);
 })();

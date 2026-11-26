@@ -684,6 +684,11 @@ impl DesktopApplication {
 		let gl = unsafe {
 			glow::Context::from_loader_function_cstr(|symbol_name| gl_display.get_proc_address(symbol_name) as *const _)
 		};
+		// 3.3 을 청해도 드라이버가 없는 윈도우는 GDI 의 GL 1.1 을 돌려준다. (WGL_ARB_create_context 가 없으면 glutin 이 판을 묻지 않은 컨텍스트를 만든다) 셰이더 함수가 없어 그리기 전에 알린다.
+		let gl_version = glow::HasContext::version(&gl);
+		if gl_version.is_embedded || (gl_version.major, gl_version.minor) < (3, 3) {
+			return Err(format!("OpenGL 3.3 코어가 없다: {}.{} {} (그래픽 드라이버를 깔거나, GPU 가 없는 기계는 메사 llvmpipe 같은 소프트웨어 GL 을 둔다)", gl_version.major, gl_version.minor, gl_version.vendor_info));
+		}
 		let graphic = Graphic::new(gl, engine_configuration.preserve_drawing_buffer)?;
 
 		#[cfg(target_os = "windows")]
