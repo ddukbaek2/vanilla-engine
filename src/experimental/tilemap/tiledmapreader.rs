@@ -301,9 +301,9 @@ impl TiledMapReader {
 			}
 		};
 		tilemap.set_orientation(orientation);
-		tilemap.set_tile_size(TiledMapReader::read_number(map_data, "tilewidth", 32.0) as u32, TiledMapReader::read_number(map_data, "tileheight", 32.0) as u32);
+		tilemap.set_tile_size(TiledMapReader::read_number(map_data, "tilewidth", 32.0), TiledMapReader::read_number(map_data, "tileheight", 32.0));
 		tilemap.set_map_size(TiledMapReader::read_number(map_data, "width", 0.0) as u32, TiledMapReader::read_number(map_data, "height", 0.0) as u32);
-		tilemap.set_hex_side_length(TiledMapReader::read_number(map_data, "hexsidelength", 0.0) as u32);
+		tilemap.set_hex_side_length(TiledMapReader::read_number(map_data, "hexsidelength", 0.0));
 		tilemap.set_stagger_axis(if TiledMapReader::read_string(map_data, "staggeraxis", "y") == "x" {
 			TilemapStaggerAxis::X
 		}
@@ -961,7 +961,7 @@ mod tests {
 		poll_ready(TiledMapReader::read_map(&read_asset_json(&asset_directory_path, "hexagonal.tmj"), &mut hexagonal_tilemap, "assets/hexagonal.tmj", Some(&read_tileset))).expect("hexagonal map");
 		let hexagonal_layer = hexagonal_tilemap.get_layer(0).expect("ground");
 		let hexagonal_bounds = hexagonal_layer.read_cell_bounds();
-		assert_eq!((hexagonal_tilemap.get_orientation(), hexagonal_tilemap.get_hex_side_length(), hexagonal_tilemap.get_stagger_axis()), (TilemapOrientation::Hexagonal, 16, TilemapStaggerAxis::Y));
+		assert_eq!((hexagonal_tilemap.get_orientation(), hexagonal_tilemap.get_hex_side_length(), hexagonal_tilemap.get_stagger_axis()), (TilemapOrientation::Hexagonal, 16.0, TilemapStaggerAxis::Y));
 		assert_eq!((hexagonal_layer.get_tile_count(), hexagonal_bounds.size.x, hexagonal_bounds.size.y), (48, 8.0, 6.0));
 		assert_eq!(hexagonal_layer.get_tile(4, 1), 6 | TileFlag::DIAGONAL_FLIP | TileFlag::HEXAGONAL_ROTATION_120);
 	}

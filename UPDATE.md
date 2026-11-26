@@ -1,6 +1,8 @@
 # 업데이트 기록
 
 # 아직 release 에 합치지 않은 것 (release 에 합칠 때 패치 판을 하나 올려 매긴다)
+- 초안 타일맵 칸 크기와 배치 셈 f64(experimental::tilemap): Tilemap.set_tile_size, get_tile_width, get_tile_height, set_hex_side_length, get_hex_side_length 가 u32 에서 f64 로 바뀌고, 배치 셈(칸 자리, 칸을 감싸는 사각형, 칸 그리는 자리와 배율)이 원본처럼 f64 다. TiledMapReader 가 Tiled 의 칸 크기와 육각 변 길이를 자르지 않는다. (지금까지 16.5 가 16) 육각의 반 나누기는 원본 Math.trunc 처럼 0 쪽으로 자르고, 엔진 Vector2, Rect, 그리기에 넘기는 곳에서만 f32 로 바꾼다. 타일셋 격자 크기, 충돌 모양, 층 오프셋은 아직 f32 와 u32 다.
+  - 옮기는 법: tilemap.set_tile_size(16, 16) 은 set_tile_size(16.0, 16.0) 으로, get_tile_width() 를 u32 로 쓰던 곳은 f64 로 받는다.
 - 초안 타일맵 읽기(experimental::tilemap): TiledMapReader::read_map, read_layer_data, decompress 가 원본 readMap, readLayerData, decompress 처럼 async 다. 엔진 작업(Engine::spawn_task, spawn_scene_task) 안에서 await 한다. 바깥 타일셋 손잡이는 Fn(&str) -> Promise<Option<Value>> 로, 원본처럼 프로미스를 돌려줘 .tsj 를 받아 오는 동안 기다린다. (가진 JSON 이면 Promise::resolved) 바깥 타일셋, 층, 덩이를 원본과 같은 차례로 기다린다. flate2 는 그 자리에서 풀고 결과를 퓨처로 돌려준다.
   - 옮기는 법: TiledMapReader::read_map(..)? 는 작업 안에서 TiledMapReader::read_map(..).await? 로, |경로| Some(json) 손잡이는 |경로| Promise::resolved(Some(json)) 로 바꾼다. examples/tilemapshowcase 가 initialize 에서 spawn_scene_task 로 읽고 build_maps 로 노드를 짓는다.
 - 초안 물리 사용자 값(experimental::physics2d): 몸, 모양, 관절과 그 정의의 user_data 가 u64 에서 PhysicsUserData2D(Rc<dyn Any> 를 감쌈, 기본은 빈 값)로 바뀌었다. 원본 userData 처럼 아무 값을 붙이고(PhysicsUserData2D::new(값), get::<T>()), 견줌(==)은 같은 값을 가리키는지(Rc::ptr_eq)라 원본 객체 참조의 === 와 같은 뜻이다. get_user_data 는 &PhysicsUserData2D 를 돌려준다. 정의 구조체(BodyDefinition2D, ShapeDefinition2D, 관절 정의 넷)는 Copy 가 아니다. (Clone 은 그대로)

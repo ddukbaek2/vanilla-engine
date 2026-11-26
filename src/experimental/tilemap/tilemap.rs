@@ -11,6 +11,8 @@
 //! - 충돌 모양은 물리에 기대지 않는다. read_cell_collision_shapes 가 칸마다 뒤집기, 돌리기, 오프셋을 건 지도 좌표 모양(TileCollisionShape)을 돌려준다.
 //! - 원본과 다른 점: 타일셋과 층을 값으로 가진다. (원본은 객체 참조라 여러 지도가 같은 타일셋을 나눠 쓴다, 러스트는 Tileset 을 clone 한다)
 //!   타일셋, 층 번호를 못 찾으면 None 이다. (원본은 -1, null) 애니메이션 시계는 f64 다.
+//! - 칸 크기, 육각 변 길이, 배치 셈(칸 자리, 칸을 감싸는 사각형, 칸 그리는 자리)은 원본처럼 f64 이고 Tiled 값을 자르지 않는다. (16.5 는 16.5, 반 나누기는 원본 Math.trunc 처럼 0 쪽으로)
+//!   엔진 Vector2, Rect, 그리기에 넘기는 곳에서만 f32 로 바꾼다. 타일셋 격자 크기, 충돌 모양, 층 오프셋은 아직 f32 와 u32 다.
 //==============================================================================
 // 옮긴 원문: libtiled 의 렌더러 셈에서 옮김, BSD-2-Clause, THIRD_PARTY_LICENSES.md
 use crate::base::color::Color;
@@ -126,26 +128,33 @@ pub enum TilemapRenderMode {
 }
 
 //==============================================================================
-/// 배치 셈에 쓰는 값. (Tiled HexagonalRenderer::RenderParams 를 함께 셈한다)
+/// 배치 셈(f64)의 사각형을 엔진 Rect(f32)로. (엔진 그리기에 넘기는 경계에서만 f32 로 바꾼다)
+//==============================================================================
+fn create_layout_rect(x: f64, y: f64, width: f64, height: f64) -> Rect {
+	Rect::create(x as f32, y as f32, width as f32, height as f32)
+}
+
+//==============================================================================
+/// 배치 셈에 쓰는 값. (Tiled HexagonalRenderer::RenderParams 를 함께 셈한다, 원본처럼 f64 이고 반 나누기는 Math.trunc 와 같이 0 쪽으로 자른다)
 //==============================================================================
 #[derive(Clone, Copy, Debug)]
 struct TilemapLayout {
 	orientation: TilemapOrientation,
-	tile_width: f32,
-	tile_height: f32,
+	tile_width: f64,
+	tile_height: f64,
 	render_order: TilemapRenderOrder,
-	origin_x: f32,
-	half_tile_width: f32,
+	origin_x: f64,
+	half_tile_width: f64,
 	is_stagger_x: bool,
 	is_stagger_even: bool,
-	side_length_x: f32,
-	side_length_y: f32,
-	side_offset_x: f32,
-	side_offset_y: f32,
-	column_width: f32,
-	row_height: f32,
-	hexagon_tile_width: f32,
-	hexagon_tile_height: f32,
+	side_length_x: f64,
+	side_length_y: f64,
+	side_offset_x: f64,
+	side_offset_y: f64,
+	column_width: f64,
+	row_height: f64,
+	hexagon_tile_width: f64,
+	hexagon_tile_height: f64,
 }
 
 impl TilemapLayout {
@@ -167,47 +176,47 @@ impl TilemapLayout {
 	//==============================================================================
 	/// 칸을 감싸는 사각형의 왼쪽 위 X. (지도 좌표)
 	//==============================================================================
-	fn read_cell_left(&self, column: i32, row: i32) -> f32 {
+	fn read_cell_left(&self, column: i32, row: i32) -> f64 {
 		if self.orientation == TilemapOrientation::Isometric {
-			return (column - row) as f32 * self.tile_width / 2.0 + self.origin_x - self.half_tile_width;
+			return (column - row) as f64 * self.tile_width / 2.0 + self.origin_x - self.half_tile_width;
 		}
 		if self.is_hexagonal_family() {
 			if self.is_stagger_x {
-				return column as f32 * self.column_width;
+				return column as f64 * self.column_width;
 			}
-			let mut left = column as f32 * (self.hexagon_tile_width + self.side_length_x);
+			let mut left = column as f64 * (self.hexagon_tile_width + self.side_length_x);
 			if self.is_staggered_index(row) {
 				left += self.column_width;
 			}
 			return left;
 		}
-		column as f32 * self.tile_width
+		column as f64 * self.tile_width
 	}
 
 	//==============================================================================
 	/// 칸을 감싸는 사각형의 왼쪽 위 Y. (지도 좌표)
 	//==============================================================================
-	fn read_cell_top(&self, column: i32, row: i32) -> f32 {
+	fn read_cell_top(&self, column: i32, row: i32) -> f64 {
 		if self.orientation == TilemapOrientation::Isometric {
-			return (column + row) as f32 * self.tile_height / 2.0;
+			return (column + row) as f64 * self.tile_height / 2.0;
 		}
 		if self.is_hexagonal_family() {
 			if !self.is_stagger_x {
-				return row as f32 * self.row_height;
+				return row as f64 * self.row_height;
 			}
-			let mut top = row as f32 * (self.hexagon_tile_height + self.side_length_y);
+			let mut top = row as f64 * (self.hexagon_tile_height + self.side_length_y);
 			if self.is_staggered_index(column) {
 				top += self.row_height;
 			}
 			return top;
 		}
-		row as f32 * self.tile_height
+		row as f64 * self.tile_height
 	}
 
 	//==============================================================================
 	/// 칸을 감싸는 사각형의 너비.
 	//==============================================================================
-	fn read_cell_width(&self) -> f32 {
+	fn read_cell_width(&self) -> f64 {
 		if self.is_hexagonal_family() {
 			return self.hexagon_tile_width;
 		}
@@ -217,7 +226,7 @@ impl TilemapLayout {
 	//==============================================================================
 	/// 칸을 감싸는 사각형의 높이.
 	//==============================================================================
-	fn read_cell_height(&self) -> f32 {
+	fn read_cell_height(&self) -> f64 {
 		if self.is_hexagonal_family() {
 			return self.hexagon_tile_height;
 		}
@@ -229,10 +238,10 @@ impl TilemapLayout {
 	//==============================================================================
 	fn read_cell_range_bounds(&self, column: i32, row: i32, column_count: i32, row_count: i32) -> Rect {
 		if self.orientation == TilemapOrientation::Isometric {
-			let side = (column_count + row_count) as f32;
-			let left = (column - (row + row_count)) as f32 * self.tile_width / 2.0 + self.origin_x;
-			let top = (column + row) as f32 * self.tile_height / 2.0;
-			return Rect::create(left, top, side * self.tile_width / 2.0, side * self.tile_height / 2.0);
+			let side = (column_count + row_count) as f64;
+			let left = (column - (row + row_count)) as f64 * self.tile_width / 2.0 + self.origin_x;
+			let top = (column + row) as f64 * self.tile_height / 2.0;
+			return create_layout_rect(left, top, side * self.tile_width / 2.0, side * self.tile_height / 2.0);
 		}
 		if self.is_hexagonal_family() {
 			let mut left = self.read_cell_left(column, row);
@@ -240,27 +249,27 @@ impl TilemapLayout {
 			let width;
 			let mut height;
 			if self.is_stagger_x {
-				width = column_count as f32 * self.column_width + self.side_offset_x;
-				height = row_count as f32 * (self.hexagon_tile_height + self.side_length_y);
+				width = column_count as f64 * self.column_width + self.side_offset_x;
+				height = row_count as f64 * (self.hexagon_tile_height + self.side_length_y);
 				if column_count > 1 {
 					height += self.row_height;
 					if self.is_staggered_index(column) {
 						top -= self.row_height;
 					}
 				}
-				return Rect::create(left, top, width, height);
+				return create_layout_rect(left, top, width, height);
 			}
-			let mut width_value = column_count as f32 * (self.hexagon_tile_width + self.side_length_x);
-			height = row_count as f32 * self.row_height + self.side_offset_y;
+			let mut width_value = column_count as f64 * (self.hexagon_tile_width + self.side_length_x);
+			height = row_count as f64 * self.row_height + self.side_offset_y;
 			if row_count > 1 {
 				width_value += self.column_width;
 				if self.is_staggered_index(row) {
 					left -= self.column_width;
 				}
 			}
-			return Rect::create(left, top, width_value, height);
+			return create_layout_rect(left, top, width_value, height);
 		}
-		Rect::create(column as f32 * self.tile_width, row as f32 * self.tile_height, column_count as f32 * self.tile_width, row_count as f32 * self.tile_height)
+		create_layout_rect(column as f64 * self.tile_width, row as f64 * self.tile_height, column_count as f64 * self.tile_width, row_count as f64 * self.tile_height)
 	}
 
 	//==============================================================================
@@ -356,17 +365,17 @@ impl TilemapLayout {
 //==============================================================================
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct TilePlacement {
-	source_x: f32,
-	source_y: f32,
-	source_width: f32,
-	source_height: f32,
-	scale_x: f32,
-	scale_y: f32,
-	center_x: f32,
-	center_y: f32,
+	source_x: f64,
+	source_y: f64,
+	source_width: f64,
+	source_height: f64,
+	scale_x: f64,
+	scale_y: f64,
+	center_x: f64,
+	center_y: f64,
 	is_horizontal_flip: bool,
 	is_vertical_flip: bool,
-	rotation: f32,
+	rotation: f64,
 }
 
 impl TilePlacement {
@@ -387,17 +396,17 @@ impl TilePlacement {
 		else {
 			1.0
 		};
-		let half_width = (self.source_width * self.scale_x * 0.5 * horizontal_sign) as f64;
-		let half_height = (self.source_height * self.scale_y * 0.5 * vertical_sign) as f64;
+		let half_width = self.source_width * self.scale_x * 0.5 * horizontal_sign;
+		let half_height = self.source_height * self.scale_y * 0.5 * vertical_sign;
 		let mut cos_rotation = 1.0f64;
 		let mut sin_rotation = 0.0f64;
 		if self.rotation != 0.0 {
-			let radian = (self.rotation as f64).to_radians();
+			let radian = self.rotation.to_radians();
 			cos_rotation = radian.cos();
 			sin_rotation = radian.sin();
 		}
-		let center_x = self.center_x as f64;
-		let center_y = self.center_y as f64;
+		let center_x = self.center_x;
+		let center_y = self.center_y;
 		let left_top_x = (-half_width * cos_rotation + half_height * sin_rotation + center_x) as f32;
 		let left_top_y = (-half_width * sin_rotation - half_height * cos_rotation + center_y) as f32;
 		let right_top_x = (half_width * cos_rotation + half_height * sin_rotation + center_x) as f32;
@@ -406,10 +415,10 @@ impl TilePlacement {
 		let left_bottom_y = (-half_width * sin_rotation + half_height * cos_rotation + center_y) as f32;
 		let right_bottom_x = (half_width * cos_rotation - half_height * sin_rotation + center_x) as f32;
 		let right_bottom_y = (half_width * sin_rotation + half_height * cos_rotation + center_y) as f32;
-		let left_u = self.source_x / image_width;
-		let top_v = self.source_y / image_height;
-		let right_u = (self.source_x + self.source_width) / image_width;
-		let bottom_v = (self.source_y + self.source_height) / image_height;
+		let left_u = (self.source_x / image_width as f64) as f32;
+		let top_v = (self.source_y / image_height as f64) as f32;
+		let right_u = ((self.source_x + self.source_width) / image_width as f64) as f32;
+		let bottom_v = ((self.source_y + self.source_height) / image_height as f64) as f32;
 		[
 			left_top_x, left_top_y, left_u, top_v,
 			right_top_x, right_top_y, right_u, top_v,
@@ -446,7 +455,7 @@ struct TilemapDrawState {
 ///
 /// let mut tilemap = Tilemap::new();
 /// tilemap.set_orientation(TilemapOrientation::Isometric);
-/// tilemap.set_tile_size(64, 32);
+/// tilemap.set_tile_size(64.0, 32.0);
 /// tilemap.set_map_size(10, 10);
 /// let center = tilemap.cell_to_map_center(2, 3);
 /// let cell = tilemap.map_position_to_cell(center.x, center.y);
@@ -484,7 +493,7 @@ struct TilemapDrawState {
 /// 	fn initialize(&mut self, _engine: &mut Engine) {
 /// 		let image = Image::load(std::path::Path::new("terrain.png")).expect("terrain image");
 /// 		let mut tilemap = Tilemap::new();
-/// 		tilemap.set_tile_size(16, 16);
+/// 		tilemap.set_tile_size(16.0, 16.0);
 /// 		tilemap.add_tileset(Tileset::create_grid(image, 16, 16, 1, 2), 0);
 /// 		let layer = tilemap.create_layer("ground");
 /// 		for row in 0..6 {
@@ -511,9 +520,9 @@ struct TilemapDrawState {
 pub struct Tilemap {
 	component_base: ComponentBase,
 	orientation: TilemapOrientation,
-	tile_width: u32,
-	tile_height: u32,
-	hex_side_length: u32,
+	tile_width: f64,
+	tile_height: f64,
+	hex_side_length: f64,
 	stagger_axis: TilemapStaggerAxis,
 	stagger_index: TilemapStaggerIndex,
 	render_order: TilemapRenderOrder,
@@ -540,9 +549,9 @@ impl Tilemap {
 		Tilemap {
 			component_base: ComponentBase::new(),
 			orientation: TilemapOrientation::Orthogonal,
-			tile_width: 32,
-			tile_height: 32,
-			hex_side_length: 0,
+			tile_width: 32.0,
+			tile_height: 32.0,
+			hex_side_length: 0.0,
 			stagger_axis: TilemapStaggerAxis::Y,
 			stagger_index: TilemapStaggerIndex::Odd,
 			render_order: TilemapRenderOrder::RightDown,
@@ -702,12 +711,12 @@ impl Tilemap {
 	/// 배치 셈에 쓰는 값 모으기.
 	//==============================================================================
 	fn create_layout(&self) -> TilemapLayout {
-		let tile_width = self.tile_width as i32;
-		let tile_height = self.tile_height as i32;
-		let hex_side_length = self.hex_side_length as i32;
+		let tile_width = self.tile_width;
+		let tile_height = self.tile_height;
+		let hex_side_length = self.hex_side_length;
 		let is_stagger_x = self.stagger_axis == TilemapStaggerAxis::X;
-		let mut side_length_x = 0;
-		let mut side_length_y = 0;
+		let mut side_length_x = 0.0;
+		let mut side_length_y = 0.0;
 		if self.orientation == TilemapOrientation::Hexagonal {
 			if is_stagger_x {
 				side_length_x = hex_side_length;
@@ -716,27 +725,27 @@ impl Tilemap {
 				side_length_y = hex_side_length;
 			}
 		}
-		let side_offset_x = (tile_width - side_length_x) / 2;
-		let side_offset_y = (tile_height - side_length_y) / 2;
+		let side_offset_x = ((tile_width - side_length_x) / 2.0).trunc();
+		let side_offset_y = ((tile_height - side_length_y) / 2.0).trunc();
 		let column_width = side_offset_x + side_length_x;
 		let row_height = side_offset_y + side_length_y;
 		TilemapLayout {
 			orientation: self.orientation,
-			tile_width: tile_width as f32,
-			tile_height: tile_height as f32,
+			tile_width,
+			tile_height,
 			render_order: self.render_order,
-			origin_x: ((self.row_count as i64 * tile_width as i64) / 2) as f32,
-			half_tile_width: (tile_width / 2) as f32,
+			origin_x: (self.row_count as f64 * tile_width / 2.0).trunc(),
+			half_tile_width: (tile_width / 2.0).trunc(),
 			is_stagger_x,
 			is_stagger_even: self.stagger_index == TilemapStaggerIndex::Even,
-			side_length_x: side_length_x as f32,
-			side_length_y: side_length_y as f32,
-			side_offset_x: side_offset_x as f32,
-			side_offset_y: side_offset_y as f32,
-			column_width: column_width as f32,
-			row_height: row_height as f32,
-			hexagon_tile_width: (column_width + side_offset_x) as f32,
-			hexagon_tile_height: (row_height + side_offset_y) as f32,
+			side_length_x,
+			side_length_y,
+			side_offset_x,
+			side_offset_y,
+			column_width,
+			row_height,
+			hexagon_tile_width: column_width + side_offset_x,
+			hexagon_tile_height: row_height + side_offset_y,
 		}
 	}
 
@@ -767,7 +776,7 @@ impl Tilemap {
 	/// - `tile_width`: 칸 너비. (픽셀, 아이소는 마름모 너비)
 	/// - `tile_height`: 칸 높이. (픽셀, 아이소는 마름모 높이)
 	//==============================================================================
-	pub fn set_tile_size(&mut self, tile_width: u32, tile_height: u32) {
+	pub fn set_tile_size(&mut self, tile_width: f64, tile_height: f64) {
 		self.tile_width = tile_width;
 		self.tile_height = tile_height;
 	}
@@ -778,7 +787,7 @@ impl Tilemap {
 	/// # 돌려줌
 	/// 칸 너비. (픽셀, 처음은 32)
 	//==============================================================================
-	pub fn get_tile_width(&self) -> u32 {
+	pub fn get_tile_width(&self) -> f64 {
 		self.tile_width
 	}
 
@@ -788,7 +797,7 @@ impl Tilemap {
 	/// # 돌려줌
 	/// 칸 높이. (픽셀, 처음은 32)
 	//==============================================================================
-	pub fn get_tile_height(&self) -> u32 {
+	pub fn get_tile_height(&self) -> f64 {
 		self.tile_height
 	}
 
@@ -798,7 +807,7 @@ impl Tilemap {
 	/// # 인자
 	/// - `hex_side_length`: 곧은 변 길이. (픽셀, Y 축으로 엇갈리면 세로 변, X 축이면 가로 변)
 	//==============================================================================
-	pub fn set_hex_side_length(&mut self, hex_side_length: u32) {
+	pub fn set_hex_side_length(&mut self, hex_side_length: f64) {
 		self.hex_side_length = hex_side_length;
 	}
 
@@ -808,7 +817,7 @@ impl Tilemap {
 	/// # 돌려줌
 	/// 곧은 변 길이. (픽셀, 처음은 0)
 	//==============================================================================
-	pub fn get_hex_side_length(&self) -> u32 {
+	pub fn get_hex_side_length(&self) -> f64 {
 		self.hex_side_length
 	}
 
@@ -1223,7 +1232,7 @@ impl Tilemap {
 	//==============================================================================
 	pub fn cell_to_map_position(&self, column: i32, row: i32) -> Vector2 {
 		let layout = self.create_layout();
-		Vector2::create(layout.read_cell_left(column, row), layout.read_cell_top(column, row))
+		Vector2::create(layout.read_cell_left(column, row) as f32, layout.read_cell_top(column, row) as f32)
 	}
 
 	//==============================================================================
@@ -1240,7 +1249,7 @@ impl Tilemap {
 		let layout = self.create_layout();
 		let left = layout.read_cell_left(column, row);
 		let top = layout.read_cell_top(column, row);
-		Vector2::create(left + layout.read_cell_width() / 2.0, top + layout.read_cell_height() / 2.0)
+		Vector2::create((left + layout.read_cell_width() / 2.0) as f32, (top + layout.read_cell_height() / 2.0) as f32)
 	}
 
 	//==============================================================================
@@ -1313,16 +1322,16 @@ impl Tilemap {
 		let offset_list: [(i32, i32); 4];
 		if layout.is_stagger_x {
 			reference_column = reference_column * 2 + stagger_addition;
-			let left = (layout.side_length_x as i32 / 2) as f64;
+			let left = (layout.side_length_x / 2.0).trunc();
 			let center_x = left + column_width;
-			let center_y = (layout.hexagon_tile_height as i32 / 2) as f64;
+			let center_y = (layout.hexagon_tile_height / 2.0).trunc();
 			center_list = [(left, center_y), (center_x, center_y - row_height), (center_x, center_y + row_height), (center_x + column_width, center_y)];
 			offset_list = [(0, 0), (1, -1), (1, 0), (2, 0)];
 		}
 		else {
 			reference_row = reference_row * 2 + stagger_addition;
-			let top = (layout.side_length_y as i32 / 2) as f64;
-			let center_x = (layout.hexagon_tile_width as i32 / 2) as f64;
+			let top = (layout.side_length_y / 2.0).trunc();
+			let center_x = (layout.hexagon_tile_width / 2.0).trunc();
 			let center_y = top + row_height;
 			center_list = [(center_x, top), (center_x - column_width, center_y), (center_x + column_width, center_y), (center_x, center_y + row_height)];
 			offset_list = [(0, 0), (-1, 1), (0, 1), (0, 2)];
@@ -1438,10 +1447,10 @@ impl Tilemap {
 		let mut source_width = 0.0;
 		let mut source_height = 0.0;
 		if let Some(image_rect) = tileset.get_tile_image_rect(tile_id) {
-			source_x = image_rect.position.x;
-			source_y = image_rect.position.y;
-			source_width = image_rect.size.x;
-			source_height = image_rect.size.y;
+			source_x = image_rect.position.x as f64;
+			source_y = image_rect.position.y as f64;
+			source_width = image_rect.size.x as f64;
+			source_height = image_rect.size.y as f64;
 		}
 		else if !tileset.has_own_tile_image(tile_id) && tileset.get_columns() > 0 {
 			let columns = tileset.get_columns();
@@ -1449,14 +1458,14 @@ impl Tilemap {
 			let tile_height = tileset.get_tile_height();
 			let margin = tileset.get_margin();
 			let spacing = tileset.get_spacing();
-			source_x = (margin + (tile_id % columns) * (tile_width + spacing)) as f32;
-			source_y = (margin + (tile_id / columns) * (tile_height + spacing)) as f32;
-			source_width = tile_width as f32;
-			source_height = tile_height as f32;
+			source_x = (margin + (tile_id % columns) * (tile_width + spacing)) as f64;
+			source_y = (margin + (tile_id / columns) * (tile_height + spacing)) as f64;
+			source_width = tile_width as f64;
+			source_height = tile_height as f64;
 		}
 		else if let Some(tile_image) = tileset.get_tile_image(tile_id) {
-			source_width = tile_image.get_width() as f32;
-			source_height = tile_image.get_height() as f32;
+			source_width = tile_image.get_width() as f64;
+			source_height = tile_image.get_height() as f64;
 		}
 		if source_width <= 0.0 || source_height <= 0.0 {
 			return None;
@@ -1481,8 +1490,8 @@ impl Tilemap {
 		let cell_left = layout.read_cell_left(column, row);
 		let cell_bottom = layout.read_cell_top(column, row) + layout.read_cell_height();
 		let tile_offset = tileset.get_tile_offset();
-		let mut center_x = cell_left + render_width / 2.0 + tile_offset.x * scale_x;
-		let mut center_y = cell_bottom - render_height / 2.0 + tile_offset.y * scale_y;
+		let mut center_x = cell_left + render_width / 2.0 + tile_offset.x as f64 * scale_x;
+		let mut center_y = cell_bottom - render_height / 2.0 + tile_offset.y as f64 * scale_y;
 
 		// 뒤집기와 돌리기.
 		let is_flag_horizontal = (tile_flags & TileFlag::HORIZONTAL_FLIP) != 0;
@@ -1612,10 +1621,10 @@ impl Tilemap {
 			1.0
 		};
 		let mut transform_matrix = TransformMatrix::identity();
-		transform_matrix.translate(layer_offset.x + placement.center_x, layer_offset.y + placement.center_y);
-		transform_matrix.rotate(placement.rotation.to_radians());
-		transform_matrix.scale(placement.scale_x * horizontal_sign, placement.scale_y * vertical_sign);
-		transform_matrix.translate(-placement.source_width / 2.0, -placement.source_height / 2.0);
+		transform_matrix.translate((layer_offset.x as f64 + placement.center_x) as f32, (layer_offset.y as f64 + placement.center_y) as f32);
+		transform_matrix.rotate(placement.rotation.to_radians() as f32);
+		transform_matrix.scale((placement.scale_x * horizontal_sign as f64) as f32, (placement.scale_y * vertical_sign as f64) as f32);
+		transform_matrix.translate((-placement.source_width / 2.0) as f32, (-placement.source_height / 2.0) as f32);
 		for collision_shape in collision_shapes.iter() {
 			shape_list.push(collision_shape.create_transformed(&transform_matrix));
 		}
@@ -1627,9 +1636,9 @@ impl Tilemap {
 	fn read_draw_margin(&self, layout: &TilemapLayout) -> f32 {
 		let mut draw_margin = layout.tile_width.max(layout.tile_height);
 		for tileset in self.tilesets.iter() {
-			draw_margin = draw_margin.max(tileset.read_maximum_tile_extent());
+			draw_margin = draw_margin.max(tileset.read_maximum_tile_extent() as f64);
 		}
-		draw_margin
+		draw_margin as f32
 	}
 
 	//==============================================================================
@@ -1956,7 +1965,7 @@ mod tests {
 	#[test]
 	fn orthogonal_and_isometric_coordinates() {
 		let mut orthogonal_map = Tilemap::new();
-		orthogonal_map.set_tile_size(16, 16);
+		orthogonal_map.set_tile_size(16.0, 16.0);
 		orthogonal_map.set_map_size(18, 12);
 		assert_eq!(orthogonal_map.cell_to_map_position(3, 2), Vector2::create(48.0, 32.0));
 		assert_eq!(orthogonal_map.map_position_to_cell(-1.0, -1.0), GridCell::create(-1, -1));
@@ -1964,7 +1973,7 @@ mod tests {
 
 		let mut isometric_map = Tilemap::new();
 		isometric_map.set_orientation(TilemapOrientation::Isometric);
-		isometric_map.set_tile_size(64, 32);
+		isometric_map.set_tile_size(64.0, 32.0);
 		isometric_map.set_map_size(10, 10);
 		let center = isometric_map.cell_to_map_center(2, 3);
 		assert_eq!(isometric_map.cell_to_map_position(2, 3), Vector2::create(256.0, 80.0));
@@ -1981,8 +1990,8 @@ mod tests {
 	fn hexagonal_coordinates() {
 		let mut hexagonal_map = Tilemap::new();
 		hexagonal_map.set_orientation(TilemapOrientation::Hexagonal);
-		hexagonal_map.set_tile_size(32, 32);
-		hexagonal_map.set_hex_side_length(16);
+		hexagonal_map.set_tile_size(32.0, 32.0);
+		hexagonal_map.set_hex_side_length(16.0);
 		hexagonal_map.set_map_size(8, 6);
 		let center = hexagonal_map.cell_to_map_center(1, 1);
 		assert_eq!(hexagonal_map.cell_to_map_position(1, 1), Vector2::create(48.0, 24.0));
@@ -2007,7 +2016,7 @@ mod tests {
 	fn staggered_coordinates() {
 		let mut staggered_map = Tilemap::new();
 		staggered_map.set_orientation(TilemapOrientation::Staggered);
-		staggered_map.set_tile_size(64, 32);
+		staggered_map.set_tile_size(64.0, 32.0);
 		staggered_map.set_map_size(6, 8);
 		let center = staggered_map.cell_to_map_center(1, 1);
 		assert_eq!(staggered_map.cell_to_map_position(1, 1), Vector2::create(96.0, 16.0));
@@ -2025,7 +2034,7 @@ mod tests {
 	fn chunk_culling() {
 		let image = Image::create_from_pixels(144, 54, vec![0; 144 * 54 * 4]);
 		let mut draw_map = Tilemap::new();
-		draw_map.set_tile_size(16, 16);
+		draw_map.set_tile_size(16.0, 16.0);
 		draw_map.add_tileset(Tileset::create_grid(image, 16, 16, 1, 2), 0);
 		let layer = draw_map.create_layer("ground");
 		for row in 0..4 {
@@ -2059,7 +2068,7 @@ mod tests {
 		tileset.set_spacing(2);
 		tileset.fit_grid_to_image_size(144, 54);
 		let mut tilemap = Tilemap::new();
-		tilemap.set_tile_size(16, 16);
+		tilemap.set_tile_size(16.0, 16.0);
 		let layout = tilemap.create_layout();
 		let rotated_tile = Tilemap::rotate_tile(11, 1);
 		let placement = Tilemap::read_tile_placement(&layout, &tileset, 10, Tilemap::read_tile_flags(rotated_tile), 2, 1).expect("placement");
@@ -2085,7 +2094,7 @@ mod tests {
 		ellipse_shape.rotation = 30.0;
 		collision_tileset.set_tile_collision_shapes(9, &[ellipse_shape]);
 		let mut collision_map = Tilemap::new();
-		collision_map.set_tile_size(16, 16);
+		collision_map.set_tile_size(16.0, 16.0);
 		collision_map.add_tileset(collision_tileset, 0);
 		let layer = collision_map.create_layer("walls");
 		layer.set_offset(Vector2::create(4.0, -2.0));
@@ -2104,5 +2113,24 @@ mod tests {
 		point_matrix.translate(10.0, 20.0);
 		point_matrix.scale(2.0, 3.0);
 		assert_shape(&TileCollisionShape::create_point(3.0, 4.0).create_transformed(&point_matrix), TileCollisionShapeKind::Point, [16.0, 32.0, 0.0, 0.0, 0.0, 0.0], &[]);
+	}
+
+	//==============================================================================
+	/// 칸 크기를 자르지 않는다. (원본처럼 f64, Tiled 의 16.5 는 16.5, 육각의 반 나누기는 Math.trunc 처럼)
+	//==============================================================================
+	#[test]
+	fn fractional_tile_size_is_kept() {
+		let mut tilemap = Tilemap::new();
+		tilemap.set_tile_size(16.5, 10.25);
+		assert_eq!((tilemap.get_tile_width(), tilemap.get_tile_height()), (16.5, 10.25));
+		let position = tilemap.cell_to_map_position(2, 3);
+		assert_eq!((position.x, position.y), (33.0, 30.75));
+		let mut hexagonal_map = Tilemap::new();
+		hexagonal_map.set_orientation(TilemapOrientation::Hexagonal);
+		hexagonal_map.set_tile_size(33.0, 33.0);
+		hexagonal_map.set_hex_side_length(16.5);
+		// 원본: sideOffsetY = Math.trunc((33 - 16.5) / 2) = 8, rowHeight = 24.5, 홀수 행은 columnWidth(16) 만큼 오른쪽.
+		let hexagon_position = hexagonal_map.cell_to_map_position(0, 1);
+		assert_eq!((hexagon_position.x, hexagon_position.y), (16.0, 24.5));
 	}
 }

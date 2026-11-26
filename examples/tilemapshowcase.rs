@@ -180,7 +180,7 @@ impl TilemapShowcaseScene {
 	//==============================================================================
 	fn create_flip_strip(node_tree: &mut NodeTree, root_id: NodeId, orthogonal_tilemap: &Tilemap) {
 		let mut strip_map = Tilemap::new();
-		strip_map.set_tile_size(16, 16);
+		strip_map.set_tile_size(16.0, 16.0);
 		strip_map.set_map_size(12, 3);
 		if let Some(terrain_tileset) = orthogonal_tilemap.get_tileset(0) {
 			strip_map.add_tileset(terrain_tileset.clone(), 1);
