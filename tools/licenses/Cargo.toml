@@ -1,0 +1,11 @@
+[package]
+name = "vanilla-engine-licenses"
+version = "0.3.2"
+description = "바닐라엔진(Vanilla Engine)의 제3자 라이선스 모음 짓기. cargo metadata 와 각 크레이트의 라이선스 파일에서 THIRD_PARTY_LICENSES.md 를 쓴다. 게임 저장소에서도 돌린다"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[dependencies]
+# cargo metadata 읽기. (엔진과 같은 판, 키 차례를 지킨다)
+serde_json = { version = "1", features = ["preserve_order"] }

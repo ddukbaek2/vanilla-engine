@@ -3,6 +3,8 @@ name = "vanilla-engine-macros"
 version = "0.3.2"
 description = "바닐라엔진(Vanilla Engine)의 절차 매크로. 컴포넌트의 get, is, set 함수를 모아 원본 vanilla.js 의 런타임 반사와 같은 일을 하는 코드를 컴파일 때 짓는다"
 edition = "2021"
+# 저작권자. (LICENSE 의 Copyright 줄과 같다, 라이선스 파일이 없는 크레이트 꾸러미의 고지에 쓰인다)
+authors = ["vanillapunch"]
 license = "MIT"
 repository = "https://github.com/ddukbaek2/vanilla-engine"
 
