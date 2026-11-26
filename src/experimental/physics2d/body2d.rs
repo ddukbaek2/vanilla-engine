@@ -2,12 +2,13 @@
 //! 2D 물리의 몸. (강체)
 //! - 초안: 0.4.0 뒤 기능, API 가 바뀔 수 있다. 원본 src/experimental/physics2d/body2d.js 와 같은 API, 같은 셈이다.
 //! - 자리는 몸의 원점, 속도는 질량 중심의 속도다. (Box2D, 유니티 Rigidbody2D 와 같다)
-//! - 원본과 다른 점: 사용자 값은 u64 다. 벡터는 f64 의 PhysicsVector2 다.
+//! - 원본과 다른 점: 사용자 값은 PhysicsUserData2D(Rc<dyn Any>, 견줌은 같은 값을 가리키는지)다. 벡터는 f64 의 PhysicsVector2 다.
 //==============================================================================
 // 옮긴 원문: Box2D 3 의 셈에서 옮김, MIT, THIRD_PARTY_LICENSES.md
 use crate::experimental::jsmath::js_max;
 use super::physicsid2d::{BodyId2D, ShapeId2D};
 use super::physicsmath2d::{PhysicsMath2D, Rotation2D};
+use super::physicsuserdata2d::PhysicsUserData2D;
 use super::physicsvector2::PhysicsVector2;
 
 //==============================================================================
@@ -38,7 +39,7 @@ pub enum BodyType2D {
 /// assert_eq!(body_definition.gravity_scale, 1.0);
 /// ```
 //==============================================================================
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct BodyDefinition2D {
 	/// 종류. (기본 정적)
 	pub body_type: BodyType2D,
@@ -63,7 +64,7 @@ pub struct BodyDefinition2D {
 	/// 돌지 않게 할지. (기본 false)
 	pub is_fixed_rotation: bool,
 	/// 사용자 값.
-	pub user_data: u64,
+	pub user_data: PhysicsUserData2D,
 }
 
 impl Default for BodyDefinition2D {
@@ -95,7 +96,7 @@ impl BodyDefinition2D {
 			enable_sleep: true,
 			is_awake: true,
 			is_fixed_rotation: false,
-			user_data: 0,
+			user_data: PhysicsUserData2D::default(),
 		}
 	}
 }
@@ -158,7 +159,7 @@ pub struct Body2D {
 	pub(crate) is_mass_dirty: bool,
 	pub(crate) maximum_extent: f64,
 	pub(crate) shape_id_list: Vec<ShapeId2D>,
-	pub(crate) user_data: u64,
+	pub(crate) user_data: PhysicsUserData2D,
 	pub(crate) solver_index: usize,
 	pub(crate) island_parent: usize,
 }
@@ -207,7 +208,7 @@ impl Body2D {
 			is_mass_dirty: false,
 			maximum_extent: 0.0,
 			shape_id_list: Vec::new(),
-			user_data: 0,
+			user_data: PhysicsUserData2D::default(),
 			solver_index: NO_INDEX,
 			island_parent: NO_INDEX,
 		}
@@ -796,7 +797,7 @@ impl Body2D {
 	/// # 인자
 	/// - `user_data`: 사용자 값.
 	//==============================================================================
-	pub fn set_user_data(&mut self, user_data: u64) {
+	pub fn set_user_data(&mut self, user_data: PhysicsUserData2D) {
 		self.user_data = user_data;
 	}
 
@@ -806,7 +807,7 @@ impl Body2D {
 	/// # 돌려줌
 	/// 사용자 값.
 	//==============================================================================
-	pub fn get_user_data(&self) -> u64 {
-		self.user_data
+	pub fn get_user_data(&self) -> &PhysicsUserData2D {
+		&self.user_data
 	}
 }

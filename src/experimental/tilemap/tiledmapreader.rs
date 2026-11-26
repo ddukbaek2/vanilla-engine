@@ -7,20 +7,25 @@
 //!   타일셋의 격자와 그림 모음, 타일 오프셋, 그리는 크기, 채우기, 타일 애니메이션, 타일 충돌 모양(타일의 objectgroup), 층 섞기(mode).
 //! - 범위 밖: zstd 압축(Err), oblique 배치(Err), 그림 층, 물체 템플릿, 왕 셋(wangsets), 시차(parallax), 투명색(transparentcolor), 타일셋 격자의 아이소 방향.
 //! - 그림은 읽지 않는다. 타일셋에 그림 경로만 적고, collect_image_paths 로 경로를 모아 읽은 뒤 attach_images 로 건다.
-//! - 원본과 다른 점: 원본 readMap 은 zlib, gzip 을 브라우저 DecompressionStream 으로 풀어서 비동기다. 러스트 판은 flate2 로 그 자리에서 끝난다.
-//!   던지는 대신 Err(글) 을 돌려준다. (글은 원본 Error 글과 같다)
+//! - read_map, read_layer_data, decompress 는 원본처럼 async 다. (원본은 브라우저 DecompressionStream, 러스트 판은 flate2 로 그 자리에서 풀고 결과를 퓨처로 돌려준다)
+//!   엔진 실행기(Engine::spawn_task, spawn_scene_task) 안에서 await 하고, 바깥 타일셋 손잡이는 원본의 프로미스 자리에 엔진 Promise 를 돌려준다.
+//!   (바로 가진 JSON 이면 Promise::resolved) 바깥 타일셋, 층, 덩이를 원본과 같은 차례로 기다린다.
+//! - 원본과 다른 점: 던지는 대신 Err(글) 을 돌려준다. (글은 원본 Error 글과 같다)
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::rect::Rect;
 use crate::base::vector2::Vector2;
 use crate::core::graphic::BlendMode;
 use crate::core::image::Image;
+use crate::core::task::Promise;
 use crate::misc::localstorage::parse_number;
 use crate::experimental::tilemap::tilemap::{Tilemap, TilemapOrientation, TilemapRenderOrder, TilemapStaggerAxis, TilemapStaggerIndex};
 use crate::experimental::tilemap::tilemaplayer::TilemapLayer;
 use crate::experimental::tilemap::tileset::{TileAnimationFrame, TileCollisionShape, TileCollisionShapeKind, TileFillMode, TileRenderSize, Tileset};
 use serde_json::{Map, Value};
+use std::future::Future;
 use std::io::Read;
+use std::pin::Pin;
 use std::rc::Rc;
 
 //==============================================================================
@@ -227,6 +232,9 @@ fn read_tile_value(value: f64) -> u32 {
 /// # 예제
 /// 지도 JSON 을 읽어 타일맵 채우기
 /// ```rust
+/// use std::future::Future;
+/// use std::pin::pin;
+/// use std::task::{Context, Poll, Waker};
 /// use vanilla::experimental::tilemap::{TiledMapReader, Tilemap};
 ///
 /// let map_data = serde_json::json!({
@@ -240,7 +248,14 @@ fn read_tile_value(value: f64) -> u32 {
 /// 	]
 /// });
 /// let mut tilemap = Tilemap::new();
-/// let tiled_map = TiledMapReader::read_map(&map_data, &mut tilemap, "maps/field.tmj", None).expect("map");
+/// // In a game, await this inside an engine task. Here it finishes on the first poll (no external tileset or compression).
+/// let tiled_map = {
+/// 	let read_future = pin!(TiledMapReader::read_map(&map_data, &mut tilemap, "maps/field.tmj", None));
+/// 	match read_future.poll(&mut Context::from_waker(Waker::noop())) {
+/// 		Poll::Ready(read_result) => read_result.expect("map"),
+/// 		Poll::Pending => panic!("pending"),
+/// 	}
+/// };
 /// assert_eq!((tilemap.get_layer_count(), tilemap.get_layer(0).expect("layer").get_tile(1, 1)), (1, 2147483653));
 /// assert_eq!(tiled_map.properties["music"], "field");
 /// assert_eq!(tiled_map.object_layers[0].objects[0].name, "player");
@@ -253,18 +268,19 @@ impl TiledMapReader {
 	//==============================================================================
 	/// 지도 읽기.
 	/// - tilemap 의 배치, 칸 크기, 지도 크기를 정하고 타일셋과 타일 층을 더한다. (이미 있던 층과 타일셋 뒤에 더한다)
-	/// - 바깥 타일셋(source)은 read_tileset_handler(지도 경로에서 푼 경로) 가 돌려준 JSON 으로 읽는다.
+	/// - 바깥 타일셋(source)은 read_tileset_handler(지도 경로에서 푼 경로) 가 돌려준 Promise 가 풀린 JSON 으로 읽는다.
+	/// - async 다. (원본 readMap 과 같다, 엔진 작업 안에서 await)
 	///
 	/// # 인자
 	/// - `map_data`: 지도 JSON 을 푼 값.
 	/// - `tilemap`: 채울 타일맵.
 	/// - `map_path`: 지도 파일 경로. (타일셋과 그림의 상대 경로를 푸는 기준)
-	/// - `read_tileset_handler`: 바깥 타일셋 경로를 받아 그 JSON 을 돌려주는 함수. (없으면 None)
+	/// - `read_tileset_handler`: 바깥 타일셋 경로를 받아 그 JSON 의 Promise 를 돌려주는 함수. (없으면 None, 가진 JSON 은 Promise::resolved)
 	///
 	/// # 돌려줌
 	/// 지도 속성, 배경색, 물체 층. 지원하지 않는 배치나 압축, 바깥 타일셋을 못 읽으면 Err.
 	//==============================================================================
-	pub fn read_map(map_data: &Value, tilemap: &mut Tilemap, map_path: &str, read_tileset_handler: Option<&dyn Fn(&str) -> Option<Value>>) -> Result<TiledMap, String> {
+	pub async fn read_map(map_data: &Value, tilemap: &mut Tilemap, map_path: &str, read_tileset_handler: Option<&dyn Fn(&str) -> Promise<Option<Value>>>) -> Result<TiledMap, String> {
 		let mut tiled_map = TiledMap::new();
 		let orientation_name = TiledMapReader::read_string(map_data, "orientation", "orthogonal");
 		let orientation = match orientation_name {
@@ -324,7 +340,14 @@ impl TiledMapReader {
 				let source_path = TiledMapReader::read_string(tileset_entry, "source", "");
 				let tileset = if !source_path.is_empty() {
 					let tileset_path = TiledMapReader::resolve_path(map_path, source_path);
-					let tileset_data = read_tileset_handler.and_then(|read_tileset| read_tileset(&tileset_path));
+					let tileset_data = match read_tileset_handler {
+						Some(read_tileset) => {
+							read_tileset(&tileset_path).await
+						}
+						None => {
+							None
+						}
+					};
 					match tileset_data {
 						Some(tileset_data) => {
 							TiledMapReader::read_tileset(&tileset_data, &tileset_path)
@@ -350,103 +373,105 @@ impl TiledMapReader {
 			color: Color::white(),
 		};
 		if let Some(layer_entry_list) = map_data.get("layers").and_then(Value::as_array) {
-			TiledMapReader::read_layer_list(layer_entry_list, tilemap, &mut tiled_map, group_state)?;
+			TiledMapReader::read_layer_list(layer_entry_list, tilemap, &mut tiled_map, group_state).await?;
 		}
 		Ok(tiled_map)
 	}
 
 	//==============================================================================
-	/// 층 목록 읽기. (묶음 층은 그 값을 곱하고 더해 아래로 내린다)
+	/// 층 목록 읽기. (async, 묶음 층은 그 값을 곱하고 더해 아래로 내린다, 묶음이 스스로를 부르니 퓨처를 상자에 담는다)
 	//==============================================================================
-	fn read_layer_list(layer_entry_list: &[Value], tilemap: &mut Tilemap, tiled_map: &mut TiledMap, group_state: GroupState) -> Result<(), String> {
-		for layer_entry in layer_entry_list.iter() {
-			let layer_type = TiledMapReader::read_string(layer_entry, "type", "");
-			let offset_x = group_state.offset_x + TiledMapReader::read_number(layer_entry, "offsetx", 0.0) as f32;
-			let offset_y = group_state.offset_y + TiledMapReader::read_number(layer_entry, "offsety", 0.0) as f32;
-			let opacity = group_state.opacity * TiledMapReader::read_number(layer_entry, "opacity", 1.0) as f32;
-			let is_visible = group_state.is_visible && layer_entry.get("visible").and_then(Value::as_bool) != Some(false);
-			let mut color = group_state.color;
-			if let Some(tint_color) = TiledMapReader::parse_color(TiledMapReader::read_string(layer_entry, "tintcolor", "")) {
-				color = Color::create(color.red * tint_color.red, color.green * tint_color.green, color.blue * tint_color.blue, color.alpha * tint_color.alpha);
+	fn read_layer_list<'a>(layer_entry_list: &'a [Value], tilemap: &'a mut Tilemap, tiled_map: &'a mut TiledMap, group_state: GroupState) -> Pin<Box<dyn Future<Output = Result<(), String>> + 'a>> {
+		Box::pin(async move {
+			for layer_entry in layer_entry_list.iter() {
+				let layer_type = TiledMapReader::read_string(layer_entry, "type", "");
+				let offset_x = group_state.offset_x + TiledMapReader::read_number(layer_entry, "offsetx", 0.0) as f32;
+				let offset_y = group_state.offset_y + TiledMapReader::read_number(layer_entry, "offsety", 0.0) as f32;
+				let opacity = group_state.opacity * TiledMapReader::read_number(layer_entry, "opacity", 1.0) as f32;
+				let is_visible = group_state.is_visible && layer_entry.get("visible").and_then(Value::as_bool) != Some(false);
+				let mut color = group_state.color;
+				if let Some(tint_color) = TiledMapReader::parse_color(TiledMapReader::read_string(layer_entry, "tintcolor", "")) {
+					color = Color::create(color.red * tint_color.red, color.green * tint_color.green, color.blue * tint_color.blue, color.alpha * tint_color.alpha);
+				}
+				let name = TiledMapReader::read_string(layer_entry, "name", "");
+				let properties = TiledMapReader::read_properties(layer_entry);
+				match layer_type {
+					"tilelayer" => {
+						let mut layer = TilemapLayer::new(name);
+						layer.set_visible(is_visible);
+						layer.set_opacity(opacity);
+						layer.set_color(color);
+						layer.set_offset(Vector2::create(offset_x, offset_y));
+						let mode_name = TiledMapReader::read_string(layer_entry, "mode", "normal");
+						let blend_mode_name = match mode_name {
+							"normal" => {
+								"source-over"
+							}
+							"add" => {
+								"lighter"
+							}
+							_ => {
+								mode_name
+							}
+						};
+						layer.set_blend_mode(BlendMode::from_name(blend_mode_name).unwrap_or(BlendMode::Normal));
+						for (property_name, property_value) in properties.iter() {
+							layer.set_property(property_name, property_value.clone());
+						}
+						let encoding = TiledMapReader::read_string(layer_entry, "encoding", "csv");
+						let compression = TiledMapReader::read_string(layer_entry, "compression", "");
+						if let Some(chunk_entry_list) = layer_entry.get("chunks").and_then(Value::as_array) {
+							for chunk_entry in chunk_entry_list.iter() {
+								let chunk_width = TiledMapReader::read_number(chunk_entry, "width", 0.0) as i32;
+								let chunk_height = TiledMapReader::read_number(chunk_entry, "height", 0.0) as i32;
+								let chunk_x = TiledMapReader::read_number(chunk_entry, "x", 0.0) as i32;
+								let chunk_y = TiledMapReader::read_number(chunk_entry, "y", 0.0) as i32;
+								let chunk_data = chunk_entry.get("data").unwrap_or(&Value::Null);
+								let chunk_tile_list = TiledMapReader::read_layer_data(chunk_data, encoding, compression, (chunk_width * chunk_height).max(0) as usize).await?;
+								layer.set_tiles(chunk_x, chunk_y, chunk_width, chunk_height, &chunk_tile_list);
+							}
+						}
+						else {
+							let layer_width = TiledMapReader::read_number(layer_entry, "width", 0.0) as i32;
+							let layer_height = TiledMapReader::read_number(layer_entry, "height", 0.0) as i32;
+							let layer_data = layer_entry.get("data").unwrap_or(&Value::Null);
+							let tile_list = TiledMapReader::read_layer_data(layer_data, encoding, compression, (layer_width * layer_height).max(0) as usize).await?;
+							layer.set_tiles(0, 0, layer_width, layer_height, &tile_list);
+						}
+						tilemap.add_layer(layer);
+					}
+					"objectgroup" => {
+						let mut object_layer = TiledObjectLayer::new();
+						object_layer.name = String::from(name);
+						object_layer.is_visible = is_visible;
+						object_layer.opacity = opacity;
+						object_layer.offset = Vector2::create(offset_x, offset_y);
+						object_layer.properties = properties;
+						if let Some(object_entry_list) = layer_entry.get("objects").and_then(Value::as_array) {
+							for object_entry in object_entry_list.iter() {
+								object_layer.objects.push(TiledMapReader::read_object(object_entry));
+							}
+						}
+						tiled_map.object_layers.push(object_layer);
+					}
+					"group" => {
+						let child_state = GroupState {
+							offset_x,
+							offset_y,
+							opacity,
+							is_visible,
+							color,
+						};
+						if let Some(child_entry_list) = layer_entry.get("layers").and_then(Value::as_array) {
+							TiledMapReader::read_layer_list(child_entry_list, tilemap, tiled_map, child_state).await?;
+						}
+					}
+					_ => {
+					}
+				}
 			}
-			let name = TiledMapReader::read_string(layer_entry, "name", "");
-			let properties = TiledMapReader::read_properties(layer_entry);
-			match layer_type {
-				"tilelayer" => {
-					let mut layer = TilemapLayer::new(name);
-					layer.set_visible(is_visible);
-					layer.set_opacity(opacity);
-					layer.set_color(color);
-					layer.set_offset(Vector2::create(offset_x, offset_y));
-					let mode_name = TiledMapReader::read_string(layer_entry, "mode", "normal");
-					let blend_mode_name = match mode_name {
-						"normal" => {
-							"source-over"
-						}
-						"add" => {
-							"lighter"
-						}
-						_ => {
-							mode_name
-						}
-					};
-					layer.set_blend_mode(BlendMode::from_name(blend_mode_name).unwrap_or(BlendMode::Normal));
-					for (property_name, property_value) in properties.iter() {
-						layer.set_property(property_name, property_value.clone());
-					}
-					let encoding = TiledMapReader::read_string(layer_entry, "encoding", "csv");
-					let compression = TiledMapReader::read_string(layer_entry, "compression", "");
-					if let Some(chunk_entry_list) = layer_entry.get("chunks").and_then(Value::as_array) {
-						for chunk_entry in chunk_entry_list.iter() {
-							let chunk_width = TiledMapReader::read_number(chunk_entry, "width", 0.0) as i32;
-							let chunk_height = TiledMapReader::read_number(chunk_entry, "height", 0.0) as i32;
-							let chunk_x = TiledMapReader::read_number(chunk_entry, "x", 0.0) as i32;
-							let chunk_y = TiledMapReader::read_number(chunk_entry, "y", 0.0) as i32;
-							let chunk_data = chunk_entry.get("data").unwrap_or(&Value::Null);
-							let chunk_tile_list = TiledMapReader::read_layer_data(chunk_data, encoding, compression, (chunk_width * chunk_height).max(0) as usize)?;
-							layer.set_tiles(chunk_x, chunk_y, chunk_width, chunk_height, &chunk_tile_list);
-						}
-					}
-					else {
-						let layer_width = TiledMapReader::read_number(layer_entry, "width", 0.0) as i32;
-						let layer_height = TiledMapReader::read_number(layer_entry, "height", 0.0) as i32;
-						let layer_data = layer_entry.get("data").unwrap_or(&Value::Null);
-						let tile_list = TiledMapReader::read_layer_data(layer_data, encoding, compression, (layer_width * layer_height).max(0) as usize)?;
-						layer.set_tiles(0, 0, layer_width, layer_height, &tile_list);
-					}
-					tilemap.add_layer(layer);
-				}
-				"objectgroup" => {
-					let mut object_layer = TiledObjectLayer::new();
-					object_layer.name = String::from(name);
-					object_layer.is_visible = is_visible;
-					object_layer.opacity = opacity;
-					object_layer.offset = Vector2::create(offset_x, offset_y);
-					object_layer.properties = properties;
-					if let Some(object_entry_list) = layer_entry.get("objects").and_then(Value::as_array) {
-						for object_entry in object_entry_list.iter() {
-							object_layer.objects.push(TiledMapReader::read_object(object_entry));
-						}
-					}
-					tiled_map.object_layers.push(object_layer);
-				}
-				"group" => {
-					let child_state = GroupState {
-						offset_x,
-						offset_y,
-						opacity,
-						is_visible,
-						color,
-					};
-					if let Some(child_entry_list) = layer_entry.get("layers").and_then(Value::as_array) {
-						TiledMapReader::read_layer_list(child_entry_list, tilemap, tiled_map, child_state)?;
-					}
-				}
-				_ => {
-				}
-			}
-		}
-		Ok(())
+			Ok(())
+		})
 	}
 
 	//==============================================================================
@@ -607,9 +632,9 @@ impl TiledMapReader {
 	/// - `tile_count`: 있어야 할 칸 수. (모자라면 0 으로 채운다)
 	///
 	/// # 돌려줌
-	/// 타일 값. (행 차례) base64 가 틀리거나 압축을 풀지 못하면 Err.
+	/// 타일 값. (행 차례) base64 가 틀리거나 압축을 풀지 못하면 Err. (async, 원본 readLayerData 와 같다)
 	//==============================================================================
-	pub fn read_layer_data(data: &Value, encoding: &str, compression: &str, tile_count: usize) -> Result<Vec<u32>, String> {
+	pub async fn read_layer_data(data: &Value, encoding: &str, compression: &str, tile_count: usize) -> Result<Vec<u32>, String> {
 		let mut tile_list = vec![0u32; tile_count];
 		if let Some(value_list) = data.as_array() {
 			for (tile_index, value) in value_list.iter().take(tile_count).enumerate() {
@@ -627,7 +652,7 @@ impl TiledMapReader {
 		};
 		if encoding == "base64" {
 			let encoded_bytes = TiledMapReader::decode_base64(data_text)?;
-			let bytes = TiledMapReader::decompress(&encoded_bytes, compression)?;
+			let bytes = TiledMapReader::decompress(&encoded_bytes, compression).await?;
 			for (tile_index, tile_bytes) in bytes.chunks_exact(4).take(tile_count).enumerate() {
 				tile_list[tile_index] = u32::from_le_bytes([tile_bytes[0], tile_bytes[1], tile_bytes[2], tile_bytes[3]]);
 			}
@@ -660,9 +685,9 @@ impl TiledMapReader {
 	/// - `compression`: "", "zlib", "gzip". ("zstd" 와 그 밖은 범위 밖)
 	///
 	/// # 돌려줌
-	/// 푼 바이트. (압축이 없으면 그대로) 범위 밖 압축이거나 풀지 못하면 Err.
+	/// 푼 바이트. (압축이 없으면 그대로) 범위 밖 압축이거나 풀지 못하면 Err. (async, 원본 decompress 와 같다, 러스트 판은 그 자리에서 풀어 퓨처로 돌려준다)
 	//==============================================================================
-	pub fn decompress(bytes: &[u8], compression: &str) -> Result<Vec<u8>, String> {
+	pub async fn decompress(bytes: &[u8], compression: &str) -> Result<Vec<u8>, String> {
 		let mut decompressed_bytes: Vec<u8> = Vec::new();
 		let read_result = match compression {
 			"" => {
@@ -859,7 +884,24 @@ impl TiledMapReader {
 mod tests {
 	use super::*;
 	use crate::experimental::tilemap::tilemap::TileFlag;
+	use std::cell::RefCell;
 	use std::path::PathBuf;
+	use std::task::{Context, Poll, Waker};
+
+	//==============================================================================
+	/// 퓨처를 한 번 폴링해 결과 받기. (바깥 타일셋 Promise 가 이미 풀렸고 flate2 가 그 자리에서 풀어 첫 폴링에 끝난다)
+	//==============================================================================
+	fn poll_ready<F: Future>(future: F) -> F::Output {
+		let mut future = std::pin::pin!(future);
+		match future.as_mut().poll(&mut Context::from_waker(Waker::noop())) {
+			Poll::Ready(output) => {
+				output
+			}
+			Poll::Pending => {
+				panic!("첫 폴링에 끝나지 않았다");
+			}
+		}
+	}
 
 	//==============================================================================
 	/// 예제 자산 폴더. (tests/assets/tilemap, 원본 저장소 examples/tilemapshowcase/assets 의 지도와 타일셋 JSON 사본, 원본을 고치면 같이 옮긴다)
@@ -882,13 +924,13 @@ mod tests {
 	#[test]
 	fn read_example_maps() {
 		let asset_directory_path = find_asset_directory();
-		let read_tileset = |tileset_path: &str| -> Option<Value> {
+		let read_tileset = |tileset_path: &str| -> Promise<Option<Value>> {
 			let file_name = tileset_path.rsplit('/').next().unwrap_or(tileset_path);
-			Some(read_asset_json(&asset_directory_path, file_name))
+			Promise::resolved(Some(read_asset_json(&asset_directory_path, file_name)))
 		};
 
 		let mut orthogonal_tilemap = Tilemap::new();
-		let orthogonal_tiled_map = TiledMapReader::read_map(&read_asset_json(&asset_directory_path, "orthogonal.tmj"), &mut orthogonal_tilemap, "assets/orthogonal.tmj", Some(&read_tileset)).expect("orthogonal map");
+		let orthogonal_tiled_map = poll_ready(TiledMapReader::read_map(&read_asset_json(&asset_directory_path, "orthogonal.tmj"), &mut orthogonal_tilemap, "assets/orthogonal.tmj", Some(&read_tileset))).expect("orthogonal map");
 		assert_eq!((orthogonal_tilemap.get_layer_count(), orthogonal_tilemap.get_tilesets().len()), (3, 3));
 		assert_eq!([0, 1, 2].map(|tileset_index| orthogonal_tilemap.get_tileset_first_gid(tileset_index)), [1, 25, 27]);
 		assert_eq!(orthogonal_tilemap.get_layer(0).expect("ground").get_tile(13, 7), 4);
@@ -910,13 +952,13 @@ mod tests {
 		assert_eq!(TiledMapReader::collect_image_paths(&orthogonal_tilemap), vec!["assets/terrain.png", "assets/trees.png", "assets/chest.png", "assets/sign.png"]);
 
 		let mut isometric_tilemap = Tilemap::new();
-		TiledMapReader::read_map(&read_asset_json(&asset_directory_path, "isometric.tmj"), &mut isometric_tilemap, "assets/isometric.tmj", Some(&read_tileset)).expect("isometric map");
+		poll_ready(TiledMapReader::read_map(&read_asset_json(&asset_directory_path, "isometric.tmj"), &mut isometric_tilemap, "assets/isometric.tmj", Some(&read_tileset))).expect("isometric map");
 		assert_eq!(isometric_tilemap.get_orientation(), TilemapOrientation::Isometric);
 		assert_eq!((isometric_tilemap.get_layer(0).expect("ground").get_tile(3, 0), isometric_tilemap.get_layer(0).expect("ground").get_tile(6, 6), isometric_tilemap.get_layer(1).expect("blocks").get_tile(0, 5)), (8, 2, 4));
 		assert_eq!(isometric_tilemap.get_tileset(0).expect("isometric").read_animated_tile_id(1, 500.0), 2);
 
 		let mut hexagonal_tilemap = Tilemap::new();
-		TiledMapReader::read_map(&read_asset_json(&asset_directory_path, "hexagonal.tmj"), &mut hexagonal_tilemap, "assets/hexagonal.tmj", Some(&read_tileset)).expect("hexagonal map");
+		poll_ready(TiledMapReader::read_map(&read_asset_json(&asset_directory_path, "hexagonal.tmj"), &mut hexagonal_tilemap, "assets/hexagonal.tmj", Some(&read_tileset))).expect("hexagonal map");
 		let hexagonal_layer = hexagonal_tilemap.get_layer(0).expect("ground");
 		let hexagonal_bounds = hexagonal_layer.read_cell_bounds();
 		assert_eq!((hexagonal_tilemap.get_orientation(), hexagonal_tilemap.get_hex_side_length(), hexagonal_tilemap.get_stagger_axis()), (TilemapOrientation::Hexagonal, 16, TilemapStaggerAxis::Y));
@@ -965,15 +1007,15 @@ mod tests {
 			]
 		});
 		let mut tilemap = Tilemap::new();
-		TiledMapReader::read_map(&map_data, &mut tilemap, "", None).expect("encoded map");
+		poll_ready(TiledMapReader::read_map(&map_data, &mut tilemap, "", None)).expect("encoded map");
 		let zlib_layer = tilemap.get_layer(0).expect("zlib");
 		assert_eq!([zlib_layer.get_tile(0, 0), zlib_layer.get_tile(1, 0), zlib_layer.get_tile(0, 1), zlib_layer.get_tile(1, 1)], tile_list);
 		let gzip_layer = tilemap.get_layer(1).expect("gzip");
 		assert_eq!((gzip_layer.get_tile(-15, 0), gzip_layer.get_tile(-16, 1)), (0x8000_0002, 3));
 		assert_eq!((gzip_layer.get_offset().x, gzip_layer.get_opacity(), gzip_layer.get_color()), (5.0, 0.25, Color::create(1.0, 0.0, 0.0, 1.0)));
-		let zstd_result = TiledMapReader::read_layer_data(&Value::String(String::from("AAAA")), "base64", "zstd", 1);
+		let zstd_result = poll_ready(TiledMapReader::read_layer_data(&Value::String(String::from("AAAA")), "base64", "zstd", 1));
 		assert_eq!(zstd_result, Err(String::from("TiledMapReader: unsupported compression zstd")));
-		assert!(TiledMapReader::read_map(&serde_json::json!({ "orientation": "oblique" }), &mut Tilemap::new(), "", None).is_err());
+		assert!(poll_ready(TiledMapReader::read_map(&serde_json::json!({ "orientation": "oblique" }), &mut Tilemap::new(), "", None)).is_err());
 	}
 
 	//==============================================================================
@@ -995,24 +1037,62 @@ mod tests {
 	//==============================================================================
 	#[test]
 	fn layer_values_blend_and_errors_match_original() {
-		let array_tiles = TiledMapReader::read_layer_data(&serde_json::json!([1.5, -1, 4294967296u64, "5", 7, 4294967295u64]), "csv", "", 7).expect("array");
+		let array_tiles = poll_ready(TiledMapReader::read_layer_data(&serde_json::json!([1.5, -1, 4294967296u64, "5", 7, 4294967295u64]), "csv", "", 7)).expect("array");
 		assert_eq!(array_tiles, vec![0, 0, 0, 0, 7, 4294967295, 0]);
-		let text_tiles = TiledMapReader::read_layer_data(&Value::String(" 0x10 ,1e1,-3,2.5,abc,,\t9\n".to_string()), "csv", "", 7).expect("csv");
+		let text_tiles = poll_ready(TiledMapReader::read_layer_data(&Value::String(" 0x10 ,1e1,-3,2.5,abc,,\t9\n".to_string()), "csv", "", 7)).expect("csv");
 		assert_eq!(text_tiles, vec![16, 10, 0, 0, 0, 0, 9]);
 		assert_eq!(TiledMapReader::decode_base64("@@@@"), Err("TiledMapReader: invalid base64".to_string()));
-		assert_eq!(TiledMapReader::decompress(&[1, 2, 3, 4], "zlib"), Err("TiledMapReader: cannot decompress zlib".to_string()));
+		assert_eq!(poll_ready(TiledMapReader::decompress(&[1, 2, 3, 4], "zlib")), Err("TiledMapReader: cannot decompress zlib".to_string()));
 		let blend_map = serde_json::json!({ "orientation": "orthogonal", "width": 1, "height": 1, "tilewidth": 16, "tileheight": 16, "layers": [
 			{ "type": "tilelayer", "name": "a", "width": 1, "height": 1, "data": [0], "mode": "unknown-mode" },
 			{ "type": "tilelayer", "name": "b", "width": 1, "height": 1, "data": [0], "mode": "add" },
 			{ "type": "tilelayer", "name": "c", "width": 1, "height": 1, "data": [0], "mode": "multiply" },
 		], "tilesets": [] });
 		let mut blend_tilemap = Tilemap::new();
-		TiledMapReader::read_map(&blend_map, &mut blend_tilemap, "blend.tmj", None).expect("blend map");
+		poll_ready(TiledMapReader::read_map(&blend_map, &mut blend_tilemap, "blend.tmj", None)).expect("blend map");
 		let blend_name_list: Vec<&str> = (0..3).map(|layer_index| blend_tilemap.get_layer(layer_index).expect("layer").get_blend_mode().get_name()).collect();
 		assert_eq!(blend_name_list, vec!["source-over", "lighter", "multiply"]);
 		let mut chunk_tilemap = Tilemap::new();
 		assert_eq!(chunk_tilemap.create_layer("a").get_chunk_size(), 16);
 		assert_eq!(chunk_tilemap.create_layer_with_chunk_size("b", 8).get_chunk_size(), 8);
 		assert_eq!(chunk_tilemap.create_layer_with_chunk_size("c", 0).get_chunk_size(), 1);
+	}
+
+	//==============================================================================
+	/// 바깥 타일셋 Promise 가 풀릴 때까지 read_map 이 기다린다. (원본 readMap 이 readTilesetHandler 의 Promise 를 await 하는 것과 같다)
+	//==============================================================================
+	#[test]
+	fn read_map_waits_tileset_promise() {
+		let map_data = serde_json::json!({
+			"orientation": "orthogonal", "width": 1, "height": 1, "tilewidth": 16, "tileheight": 16,
+			"tilesets": [{ "firstgid": 1, "source": "props.tsj" }],
+			"layers": [{ "type": "tilelayer", "name": "ground", "width": 1, "height": 1, "data": [1] }]
+		});
+		let resolver_slot = RefCell::new(None);
+		let path_list = RefCell::new(Vec::new());
+		let read_tileset = |tileset_path: &str| -> Promise<Option<Value>> {
+			path_list.borrow_mut().push(tileset_path.to_string());
+			let (tileset_promise, tileset_resolver) = Promise::create();
+			*resolver_slot.borrow_mut() = Some(tileset_resolver);
+			tileset_promise
+		};
+		let mut tilemap = Tilemap::new();
+		{
+			let mut read_future = std::pin::pin!(TiledMapReader::read_map(&map_data, &mut tilemap, "maps/field.tmj", Some(&read_tileset)));
+			let mut context = Context::from_waker(Waker::noop());
+			assert!(read_future.as_mut().poll(&mut context).is_pending());
+			let tileset_resolver = resolver_slot.borrow_mut().take().expect("resolver");
+			tileset_resolver.resolve(Some(serde_json::json!({ "name": "props", "tilewidth": 16, "tileheight": 16, "tilecount": 1, "columns": 1, "image": "props.png", "imagewidth": 16, "imageheight": 16 })));
+			match read_future.as_mut().poll(&mut context) {
+				Poll::Ready(read_result) => {
+					read_result.expect("map");
+				}
+				Poll::Pending => {
+					panic!("풀린 뒤에도 기다린다");
+				}
+			}
+		}
+		assert_eq!(*path_list.borrow(), vec![String::from("maps/props.tsj")]);
+		assert_eq!((tilemap.get_tilesets().len(), tilemap.get_layer(0).expect("layer").get_tile(0, 0)), (1, 1));
 	}
 }

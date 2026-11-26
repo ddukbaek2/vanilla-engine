@@ -1,13 +1,14 @@
 //==============================================================================
 //! 2D 물리의 관절. (거리, 회전, 용접, 바퀴)
 //! - 초안: 0.4.0 뒤 기능, API 가 바뀔 수 있다. 원본 src/experimental/physics2d/joint2d.js 와 같은 API, 같은 셈이다.
-//! - 원본과 다른 점: 정의의 몸 아이디는 Option 이다. (원본은 null) 사용자 값은 u64 다.
+//! - 원본과 다른 점: 정의의 몸 아이디는 Option 이다. (원본은 null) 사용자 값은 PhysicsUserData2D(Rc<dyn Any>, 견줌은 같은 값을 가리키는지)다.
 //==============================================================================
 // 옮긴 원문: Box2D 3 의 셈에서 옮김, MIT, THIRD_PARTY_LICENSES.md
 use crate::experimental::jsmath::{js_max, js_min};
 use super::body2d::{Body2D, NO_INDEX};
 use super::physicsid2d::{BodyId2D, JointId2D};
 use super::physicsmath2d::PhysicsMath2D;
+use super::physicsuserdata2d::PhysicsUserData2D;
 use super::physicsvector2::PhysicsVector2;
 use super::solver2d::{make_softness, read_solver_body, write_solver_velocity, Softness, SolverBody, StepContext};
 
@@ -56,7 +57,7 @@ pub enum JointType2D {
 /// assert!((world[bob_id].get_position().length() - 3.0).abs() < 0.01);
 /// ```
 //==============================================================================
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct DistanceJointDefinition2D {
 	/// 첫 몸.
 	pub body_id_a: Option<BodyId2D>,
@@ -83,7 +84,7 @@ pub struct DistanceJointDefinition2D {
 	/// 두 몸끼리 부딪힐지. (기본 false)
 	pub collide_connected: bool,
 	/// 사용자 값.
-	pub user_data: u64,
+	pub user_data: PhysicsUserData2D,
 }
 
 impl Default for DistanceJointDefinition2D {
@@ -116,7 +117,7 @@ impl DistanceJointDefinition2D {
 			min_length: 0.0,
 			max_length: HUGE_LENGTH,
 			collide_connected: false,
-			user_data: 0,
+			user_data: PhysicsUserData2D::default(),
 		}
 	}
 }
@@ -149,7 +150,7 @@ impl DistanceJointDefinition2D {
 /// assert!((world[wheel_id].get_angular_velocity() - 2.0).abs() < 1e-6);
 /// ```
 //==============================================================================
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct RevoluteJointDefinition2D {
 	/// 첫 몸.
 	pub body_id_a: Option<BodyId2D>,
@@ -182,7 +183,7 @@ pub struct RevoluteJointDefinition2D {
 	/// 두 몸끼리 부딪힐지. (기본 false)
 	pub collide_connected: bool,
 	/// 사용자 값.
-	pub user_data: u64,
+	pub user_data: PhysicsUserData2D,
 }
 
 impl Default for RevoluteJointDefinition2D {
@@ -218,7 +219,7 @@ impl RevoluteJointDefinition2D {
 			lower_angle: 0.0,
 			upper_angle: 0.0,
 			collide_connected: false,
-			user_data: 0,
+			user_data: PhysicsUserData2D::default(),
 		}
 	}
 }
@@ -251,7 +252,7 @@ impl RevoluteJointDefinition2D {
 /// assert!(world[second_id].get_position().y.abs() < 0.01);
 /// ```
 //==============================================================================
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct WeldJointDefinition2D {
 	/// 첫 몸.
 	pub body_id_a: Option<BodyId2D>,
@@ -274,7 +275,7 @@ pub struct WeldJointDefinition2D {
 	/// 두 몸끼리 부딪힐지. (기본 false)
 	pub collide_connected: bool,
 	/// 사용자 값.
-	pub user_data: u64,
+	pub user_data: PhysicsUserData2D,
 }
 
 impl Default for WeldJointDefinition2D {
@@ -305,7 +306,7 @@ impl WeldJointDefinition2D {
 			angular_hertz: 0.0,
 			angular_damping_ratio: 0.0,
 			collide_connected: false,
-			user_data: 0,
+			user_data: PhysicsUserData2D::default(),
 		}
 	}
 }
@@ -327,7 +328,7 @@ impl WeldJointDefinition2D {
 /// assert!(joint_definition.enable_spring);
 /// ```
 //==============================================================================
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct WheelJointDefinition2D {
 	/// 차체 몸.
 	pub body_id_a: Option<BodyId2D>,
@@ -360,7 +361,7 @@ pub struct WheelJointDefinition2D {
 	/// 두 몸끼리 부딪힐지. (기본 false)
 	pub collide_connected: bool,
 	/// 사용자 값.
-	pub user_data: u64,
+	pub user_data: PhysicsUserData2D,
 }
 
 impl Default for WheelJointDefinition2D {
@@ -396,7 +397,7 @@ impl WheelJointDefinition2D {
 			lower_translation: 0.0,
 			upper_translation: 0.0,
 			collide_connected: false,
-			user_data: 0,
+			user_data: PhysicsUserData2D::default(),
 		}
 	}
 }
@@ -442,7 +443,7 @@ pub struct Joint2D {
 	pub(crate) local_anchor_b_y: f64,
 	pub(crate) reference_angle: f64,
 	pub(crate) collide_connected: bool,
-	pub(crate) user_data: u64,
+	pub(crate) user_data: PhysicsUserData2D,
 	pub(crate) is_wake_requested: bool,
 	pub(crate) length: f64,
 	pub(crate) min_length: f64,
@@ -513,7 +514,7 @@ impl Joint2D {
 			local_anchor_b_y: 0.0,
 			reference_angle: 0.0,
 			collide_connected: false,
-			user_data: 0,
+			user_data: PhysicsUserData2D::default(),
 			is_wake_requested: false,
 			length: 1.0,
 			min_length: 0.0,
@@ -857,7 +858,7 @@ impl Joint2D {
 	/// # 인자
 	/// - `user_data`: 사용자 값.
 	//==============================================================================
-	pub fn set_user_data(&mut self, user_data: u64) {
+	pub fn set_user_data(&mut self, user_data: PhysicsUserData2D) {
 		self.user_data = user_data;
 	}
 
@@ -867,8 +868,8 @@ impl Joint2D {
 	/// # 돌려줌
 	/// 사용자 값.
 	//==============================================================================
-	pub fn get_user_data(&self) -> u64 {
-		self.user_data
+	pub fn get_user_data(&self) -> &PhysicsUserData2D {
+		&self.user_data
 	}
 }
 

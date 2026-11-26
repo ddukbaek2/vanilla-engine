@@ -1,6 +1,12 @@
 # 업데이트 기록
 
 # 아직 release 에 합치지 않은 것 (release 에 합칠 때 패치 판을 하나 올려 매긴다)
+- 초안 타일맵 읽기(experimental::tilemap): TiledMapReader::read_map, read_layer_data, decompress 가 원본 readMap, readLayerData, decompress 처럼 async 다. 엔진 작업(Engine::spawn_task, spawn_scene_task) 안에서 await 한다. 바깥 타일셋 손잡이는 Fn(&str) -> Promise<Option<Value>> 로, 원본처럼 프로미스를 돌려줘 .tsj 를 받아 오는 동안 기다린다. (가진 JSON 이면 Promise::resolved) 바깥 타일셋, 층, 덩이를 원본과 같은 차례로 기다린다. flate2 는 그 자리에서 풀고 결과를 퓨처로 돌려준다.
+  - 옮기는 법: TiledMapReader::read_map(..)? 는 작업 안에서 TiledMapReader::read_map(..).await? 로, |경로| Some(json) 손잡이는 |경로| Promise::resolved(Some(json)) 로 바꾼다. examples/tilemapshowcase 가 initialize 에서 spawn_scene_task 로 읽고 build_maps 로 노드를 짓는다.
+- 초안 물리 사용자 값(experimental::physics2d): 몸, 모양, 관절과 그 정의의 user_data 가 u64 에서 PhysicsUserData2D(Rc<dyn Any> 를 감쌈, 기본은 빈 값)로 바뀌었다. 원본 userData 처럼 아무 값을 붙이고(PhysicsUserData2D::new(값), get::<T>()), 견줌(==)은 같은 값을 가리키는지(Rc::ptr_eq)라 원본 객체 참조의 === 와 같은 뜻이다. get_user_data 는 &PhysicsUserData2D 를 돌려준다. 정의 구조체(BodyDefinition2D, ShapeDefinition2D, 관절 정의 넷)는 Copy 가 아니다. (Clone 은 그대로)
+  - 옮기는 법: user_data = 7 은 user_data = PhysicsUserData2D::new(7u64) 로, get_user_data() 로 받은 수는 get_user_data().get::<u64>() 로 읽는다. 정의를 *로 복사하던 코드는 .clone() 을 부른다.
+- 초안 2D 뼈대(experimental::skeleton2d): 두 엔진 모두 '인스턴스를 지은 자료는 고치지 않는다' 로 정했다. 러스트는 Rc<Skeleton2DData> 로 나눠 들어 이미 그렇고, 원본은 인스턴스를 지을 때 자료를 얼려 세터가 던진다. 그래서 뼈, 슬롯, IK 인스턴스가 자료를 복사해 드는 것이 원본의 참조와 결과가 같다. (머리 주석의 '원본과 다른 점' 에서 뺐다)
+- 초안 공간 소리(experimental::spatialaudio): pan_equal_power_sample(방위각, 입력 채널 수, 왼쪽, 오른쪽) 을 공개한다. 데스크탑 믹서의 PannerNode 가 쓰는 표본 하나 섞기이고, 원본 panEqualPowerSample 과 같다. (원본 시험이 이 짝으로 크롬과 견준다)
 - 컴포넌트 찾기: get_component, get_components, has_component, get_or_add_component, remove_component, NodeTree.with_component_mut 이 원본 instanceof 처럼 품은 기반 타입으로도 찾는다. Component::get_base_component(_mut) 가 품은 기반(원본 상위 클래스)을 알리고, ShaderSprite 는 Sprite 와 Paint 로, UIButton 은 UIControl 과 UIView 로, RichText 는 Text 로 찾힌다. (그 밖에 Sprite, UIControl, UIDraggable, UISlider, UIToggleButton, UIScrollView, UISnapScrollView, UIImageView, UIProgressView, UILabel) `dyn Component` 에 is_instance_of, as_instance_of(_mut) 을 둔다.
   - 옮기는 법: get_component::<Sprite>() 가 ShaderSprite 도, get_component::<UIView>() 가 위젯의 품은 UIView 도 돌려준다. 정확히 그 타입만 찾던 코드는 as_any().downcast_ref 로 본다. remove_component::<Paint>() 는 Sprite 같은 하위 타입도 뗀다.
 - DevTools: 트리의 Type 칸과 인스펙터 type 이 원본 constructor.name 처럼 노드 종류 이름(FloatingText, UIWindow 같은)이다. UIDocument.get_node_type_name(node) 를 둔다. DevTools 가 처음 드는 문서에 register_editor_types 를 부른다.
