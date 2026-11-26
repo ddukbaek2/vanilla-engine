@@ -94,6 +94,9 @@ impl PhysicsUserData2D {
 }
 
 impl PartialEq for PhysicsUserData2D {
+	//==============================================================================
+	/// 둘 다 비었거나 같은 값(Rc 가 같은 자리)을 가리키면 같다. (원본의 === 와 같다)
+	//==============================================================================
 	fn eq(&self, other: &PhysicsUserData2D) -> bool {
 		match (&self.value, &other.value) {
 			(None, None) => true,
@@ -104,6 +107,9 @@ impl PartialEq for PhysicsUserData2D {
 }
 
 impl fmt::Debug for PhysicsUserData2D {
+	//==============================================================================
+	/// 비었으면 PhysicsUserData2D(null), 값이 있으면 그 자리 주소를 적는다.
+	//==============================================================================
 	fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match &self.value {
 			None => formatter.write_str("PhysicsUserData2D(null)"),

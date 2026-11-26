@@ -63,7 +63,7 @@ serde = { version = "1", default-features = false, features = ["std"] }
 # FBX 압축 배열(zlib deflate)을 푼다. (원본 DecompressionStream 자리, 순수 러스트 miniz_oxide 기본 백엔드라 wasm32 에서도 돈다)
 flate2 = "1"
 # 이미지 해석. (원본은 브라우저가 푸는 형식을 모두 받는다. png, jpeg, webp, gif(첫 장), bmp, ico. 웹은 브라우저가 먼저 푼다)
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif", "bmp", "ico"] }
+image = { version = "0.25", default-features = false, features = ["png", "webp", "gif", "bmp", "ico"] }
 # PNG 의 색 청크(cICP, iCCP, sRGB, gAMA, cHRM) 읽기. (크롬의 스키아 SkPngRustCodec 도 같은 png 0.18 로 읽는다. image 가 이미 쓰는 같은 판이라 더 받는 크레이트가 없다)
 png = "0.18"
 # 노드 핸들. (세대 번호가 붙은 키로 씬의 노드 저장소를 가리킨다)

@@ -161,8 +161,8 @@ pub(crate) struct FallbackBase<'a> {
 	/// 첫 글꼴이 올린 글꼴이면 그 바이트와 얼굴 번호. (맥은 이 글꼴로 CoreText 대체를 묻는다)
 	#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 	pub primary_font_bytes: Option<(&'a [u8], u32)>,
-	/// 폰트 문자열의 첫 이름. (크롬 FontDescription::Family().FamilyName(), 윈도우가 굵게나 기울임의 보통 얼굴과 DirectWrite 대체의 바탕 이름으로 쓴다)
-	#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+	/// 폰트 문자열의 첫 이름. (크롬 FontDescription::Family().FamilyName(), 윈도우와 리눅스가 굵게나 기울임의 보통 얼굴을 찾는 이름, 윈도우는 DirectWrite 대체의 바탕 이름으로도 쓴다)
+	#[cfg_attr(not(any(target_os = "windows", all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))), allow(dead_code))]
 	pub first_family_name: &'a str,
 	/// 폰트 문자열의 일반 이름(목록의 마지막 일반 이름)이 monospace 인지. (윈도우 스크립트 표가 아랍어, 히브리어에 Courier New 를 준다)
 	#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
@@ -173,7 +173,7 @@ pub(crate) struct FallbackBase<'a> {
 /// 첫 글꼴과 폰트 문자열을 바탕으로 대체 글꼴 파일 찾기. (크롬 FontCache::PlatformFallbackFontForCharacter)
 /// - 맥: 첫 글꼴의 CTFont 에서 CTFontCreateForString, 청한 굵기와 기울기로 같은 글꼴의 얼굴을 다시 고른다. (font_cache_mac.mm)
 /// - 윈도우: 굵게나 기울임이면 첫 이름의 보통 얼굴, 블링크의 문자별 글꼴 표, 넓은 글꼴 목록, DirectWrite 차례. (font_cache_skia_win.cc, font_fallback_win.cc)
-/// - 리눅스: fontconfig. (첫 글꼴과 상관없이 글자로 고른다, font_cache_linux.cc)
+/// - 리눅스: 굵게나 기울임이면 첫 이름의 보통 얼굴, 그다음 fontconfig 에 굵기와 기울기 없이 글자로 묻는다. (font_cache_linux.cc, font_fallback_linux.cc)
 //==============================================================================
 pub(crate) fn find_fallback_font_file_for_base(text: &str, weight: u16, is_italic: bool, is_color_wanted: bool, base: &FallbackBase) -> Option<FontFileSource> {
 	if text.is_empty() {
@@ -1292,6 +1292,13 @@ mod platform_font {
 	/// - system-ui 는 fontconfig 의 sans 로 찾는다. (크롬 리눅스는 데스크탑 설정의 UI 글꼴 이름을 쓴다, 그 이름을 읽지 않으므로 기본 sans 로 갈음한다)
 	//==============================================================================
 	pub fn find_family_font_file(family_name: &str, weight: u16, is_italic: bool) -> Option<FontFileSource> {
+		match_family_font_file(family_name, weight, is_italic, None)
+	}
+
+	//==============================================================================
+	/// 글꼴 이름으로 파일 찾기. (find_family_font_file 과 같은 차례, `character` 를 주면 고른 얼굴이 그 글자를 가질 때만, 크롬 FontPlatformData::FontContainsCharacter)
+	//==============================================================================
+	fn match_family_font_file(family_name: &str, weight: u16, is_italic: bool, character: Option<u32>) -> Option<FontFileSource> {
 		let library = read_library()?;
 		let lookup_family_name = if family_name.eq_ignore_ascii_case("system-ui") {
 			"sans"
@@ -1322,6 +1329,11 @@ mod platform_font {
 			};
 			is_family_matched = found_family_name.eq_ignore_ascii_case(&post_config_family_name) || found_family_name.eq_ignore_ascii_case(lookup_family_name) || is_metric_compatible_replacement(lookup_family_name, &found_family_name);
 			family_index += 1;
+		}
+		if let (true, Some(character)) = (is_family_matched, character) {
+			let mut font_character_set = std::ptr::null_mut();
+			let charset_result = unsafe { (library.FcPatternGetCharSet)(matched_pattern, FC_CHARSET.as_ptr(), 0, &mut font_character_set) };
+			is_family_matched = charset_result == FcResultMatch && !font_character_set.is_null() && unsafe { (library.FcCharSetHasChar)(font_character_set, character) } != 0;
 		}
 		let font_file_source = if is_family_matched {
 			read_pattern_file(library, matched_pattern)
@@ -1377,10 +1389,21 @@ mod platform_font {
 	}
 
 	//==============================================================================
-	/// 첫 글꼴을 바탕으로 대체 글꼴 파일 찾기. (크롬 리눅스 font_cache_linux.cc 는 첫 글꼴과 상관없이 fontconfig 에 글자로 묻는다)
+	/// 첫 글꼴을 바탕으로 대체 글꼴 파일 찾기. (크롬 리눅스 font_cache_linux.cc 의 PlatformFallbackFontForCharacter 차례)
+	/// - 1. 굵게(600 이상)나 기울임을 청했으면 폰트 문자열 첫 이름의 보통 얼굴이 글자를 가질 때 그것. (font_cache_skia.cc FallbackOnStandardFontStyle, 그리는 쪽이 가짜 굵게와 기울임을 입힌다)
+	/// - 2. fontconfig 에 글자로 묻는다. 청한 굵기와 기울기를 패턴에 넣지 않는다. (gfx::GetFallbackFontForChar 의 CreateFcFontSetForLocale 는 FC_LANG, FC_SCALABLE 만 넣고 FcDefaultSubstitute 가 보통 굵기, 바로 선 얼굴을 채운다)
+	///   그래서 굵게를 청해도 보통 얼굴 파일을 받고, 그 얼굴이 굵지 않으면 가짜 굵게, 기울지 않았으면 가짜 기울임으로 그린다. (SetSyntheticBold, SetSyntheticItalic)
 	//==============================================================================
-	pub fn find_fallback_font_file_for_base(text: &str, weight: u16, is_italic: bool, is_color_wanted: bool, _base: &super::FallbackBase) -> Option<FontFileSource> {
-		find_fallback_font_file(text, weight, is_italic, is_color_wanted)
+	pub fn find_fallback_font_file_for_base(text: &str, weight: u16, is_italic: bool, is_color_wanted: bool, base: &super::FallbackBase) -> Option<FontFileSource> {
+		let character = text.chars().next()?;
+		let first_family_name = base.first_family_name.trim();
+		let first_family_name = first_family_name.strip_prefix('"').and_then(|family_name| family_name.strip_suffix('"')).unwrap_or(first_family_name);
+		if !is_color_wanted && (is_italic || weight >= crate::core::textshaping::BOLD_WEIGHT_THRESHOLD) && !first_family_name.is_empty() {
+			if let Some(font_file_source) = match_family_font_file(first_family_name, 400, false, Some(character as u32)) {
+				return Some(font_file_source);
+			}
+		}
+		find_fallback_font_file(text, 400, false, is_color_wanted)
 	}
 }
 
