@@ -6,9 +6,7 @@
 //! - 원본과 다른 것:
 //!   - 상태는 문자열 대신 PopupMotionState 열거형이다.
 //!   - options 객체는 PopupMotionOptions 구조체다. 열림 / 닫힘 알림은 인자 없는 `Box<dyn FnMut()>` 다.
-//!   ```text
 //!     (노드를 바꿔야 하는 UIDialog 는 알림 대신 tick 앞뒤의 상태를 비교해 처리한다)
-//!   ```
 //==============================================================================
 
 //==============================================================================
@@ -16,14 +14,34 @@
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PopupMotionState {
+	/// 닫힘. (배율 0, 가림 0)
 	Closed,
+	/// 여는 중. (배율이 0.45 에서 1.18 로 부풀었다가 1 로)
 	Opening,
+	/// 열림. (배율 1, 가림 1, 이때만 조작할 수 있다)
 	Open,
+	/// 닫는 중. (배율이 1.08 로 부풀었다가 0.08 로)
 	Closing,
 }
 
 //==============================================================================
 /// 전환기 설정. (원본 options = { open_duration = 0.32, close_duration = 0.22 })
+///
+/// # 예제
+/// 등장 시간만 줄이기
+/// ```rust
+/// use vanilla::{PopupMotion, PopupMotionOptions, PopupMotionState};
+///
+/// let options = PopupMotionOptions {
+/// 	open_duration: 0.2,
+/// 	..PopupMotionOptions::default()
+/// };
+/// assert_eq!(options.close_duration, 0.22);
+/// let mut popup_motion = PopupMotion::create_with_options(options);
+/// popup_motion.open();
+/// popup_motion.tick(0.2);
+/// assert_eq!(popup_motion.get_state(), PopupMotionState::Open);
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PopupMotionOptions {
@@ -52,6 +70,44 @@ pub type PopupMotionEvent = Box<dyn FnMut()>;
 
 //==============================================================================
 /// 팝업 전환기.
+///
+/// # 예제
+/// 판의 배율과 막의 알파에 걸기
+/// ```rust
+/// use std::cell::Cell;
+/// use std::rc::Rc;
+/// use vanilla::{Color, NodeTree, Paint, PopupMotion, PopupMotionState, Vector2};
+///
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.get_root_id();
+/// let dim_id = node_tree.create_child(root_id, "Dim");
+/// node_tree[dim_id].add_component(Paint::create_with_color(Color::create(0.0, 0.0, 0.0, 0.0)));
+/// let panel_id = node_tree.create_child(root_id, "Panel");
+/// let opened_count = Rc::new(Cell::new(0));
+/// let opened_count_for_event = opened_count.clone();
+/// let mut popup_motion = PopupMotion::new();
+/// popup_motion.set_opened_event(Box::new(move || {
+/// 	opened_count_for_event.set(opened_count_for_event.get() + 1);
+/// }));
+///
+/// popup_motion.open();
+/// for _frame_index in 0..30 {
+/// 	popup_motion.tick(1.0 / 60.0);
+/// 	let scale = popup_motion.get_scale();
+/// 	node_tree[panel_id].set_local_scale(Vector2::create(scale, scale));
+/// 	let dim_paint = node_tree[dim_id].get_component_mut::<Paint>().expect("paint");
+/// 	dim_paint.set_color(Color::create(0.0, 0.0, 0.0, 0.5 * popup_motion.get_dim_ratio()));
+/// }
+/// assert_eq!(popup_motion.get_state(), PopupMotionState::Open);
+/// assert_eq!(opened_count.get(), 1);
+/// assert!(popup_motion.is_interactive());
+/// assert_eq!(node_tree[panel_id].get_local_scale(), Vector2::create(1.0, 1.0));
+///
+/// popup_motion.close();
+/// popup_motion.tick(0.3);
+/// assert!(!popup_motion.is_visible());
+/// assert_eq!(popup_motion.get_scale(), 0.0);
+/// ```
 //==============================================================================
 pub struct PopupMotion {
 	state: PopupMotionState,
@@ -66,6 +122,9 @@ pub struct PopupMotion {
 impl PopupMotion {
 	//==============================================================================
 	/// 생성. (기본 시간)
+	///
+	/// # 돌려줌
+	/// 닫힌 새 전환기. (등장 0.32 초, 퇴장 0.22 초)
 	//==============================================================================
 	pub fn new() -> PopupMotion {
 		PopupMotion::create_with_options(PopupMotionOptions::default())
@@ -73,6 +132,12 @@ impl PopupMotion {
 
 	//==============================================================================
 	/// 설정으로 생성.
+	///
+	/// # 인자
+	/// - `options`: 등장, 퇴장 시간.
+	///
+	/// # 돌려줌
+	/// 닫힌 새 전환기.
 	//==============================================================================
 	pub fn create_with_options(options: PopupMotionOptions) -> PopupMotion {
 		PopupMotion {
@@ -138,6 +203,9 @@ impl PopupMotion {
 
 	//==============================================================================
 	/// 갱신. (등장 / 퇴장 시간이 다 차면 다음 상태로 넘기고 알린다)
+	///
+	/// # 인자
+	/// - `time_delta`: 지난 시간. (초, 여는 중이나 닫는 중일 때만 쌓는다)
 	//==============================================================================
 	pub fn tick(&mut self, time_delta: f32) {
 		if self.state == PopupMotionState::Opening {
@@ -158,6 +226,9 @@ impl PopupMotion {
 
 	//==============================================================================
 	/// 지금 배율 반환.
+	///
+	/// # 돌려줌
+	/// 판에 걸 배율. (닫힘 0, 열림 1, 여는 중 0.45 에서 1.18 을 거쳐 1, 닫는 중 1 에서 1.08 을 거쳐 0.08)
 	//==============================================================================
 	pub fn get_scale(&self) -> f32 {
 		match self.state {
@@ -191,6 +262,9 @@ impl PopupMotion {
 
 	//==============================================================================
 	/// 어둡게 가리는 비율 반환. (0 ~ 1)
+	///
+	/// # 돌려줌
+	/// 막의 알파에 곱할 비율. (0 ~ 1, 여는 동안 0 에서 1 로, 닫는 동안 1 에서 0 으로 고르게)
 	//==============================================================================
 	pub fn get_dim_ratio(&self) -> f32 {
 		match self.state {
@@ -211,6 +285,9 @@ impl PopupMotion {
 
 	//==============================================================================
 	/// 조작 가능 여부. (완전히 열린 뒤에만 참)
+	///
+	/// # 돌려줌
+	/// 열림 상태면 true.
 	//==============================================================================
 	pub fn is_interactive(&self) -> bool {
 		self.state == PopupMotionState::Open
@@ -218,6 +295,9 @@ impl PopupMotion {
 
 	//==============================================================================
 	/// 상태 반환.
+	///
+	/// # 돌려줌
+	/// 지금 상태.
 	//==============================================================================
 	pub fn get_state(&self) -> PopupMotionState {
 		self.state
@@ -225,6 +305,9 @@ impl PopupMotion {
 
 	//==============================================================================
 	/// 보이는 중인지. (닫힘이 아니면 참)
+	///
+	/// # 돌려줌
+	/// 닫힘 상태가 아니면 true.
 	//==============================================================================
 	pub fn is_visible(&self) -> bool {
 		self.state != PopupMotionState::Closed
@@ -232,6 +315,9 @@ impl PopupMotion {
 
 	//==============================================================================
 	/// 즉시 전환 설정. (연출 없는 UI 톤)
+	///
+	/// # 인자
+	/// - `is_instant_enabled`: 연출 없이 open, close 에서 바로 바꾸려면 true. (기본 false, 이미 여는 중이거나 닫는 중인 전환은 tick 으로 이어진다)
 	//==============================================================================
 	pub fn set_instant_enabled(&mut self, is_instant_enabled: bool) {
 		self.is_instant_enabled = is_instant_enabled;
@@ -239,6 +325,9 @@ impl PopupMotion {
 
 	//==============================================================================
 	/// 즉시 전환 여부.
+	///
+	/// # 돌려줌
+	/// 즉시 전환이면 true.
 	//==============================================================================
 	pub fn is_instant_enabled(&self) -> bool {
 		self.is_instant_enabled
@@ -246,6 +335,9 @@ impl PopupMotion {
 
 	//==============================================================================
 	/// 열림 알림 설정.
+	///
+	/// # 인자
+	/// - `opened_event`: 열림 상태가 될 때 부를 함수. (즉시 전환이면 open 안에서 바로 불린다)
 	//==============================================================================
 	pub fn set_opened_event(&mut self, opened_event: PopupMotionEvent) {
 		self.opened_event = Some(opened_event);
@@ -253,6 +345,9 @@ impl PopupMotion {
 
 	//==============================================================================
 	/// 닫힘 알림 설정.
+	///
+	/// # 인자
+	/// - `closed_event`: 닫힘 상태가 될 때 부를 함수. (즉시 전환이면 close 안에서 바로 불린다)
 	//==============================================================================
 	pub fn set_closed_event(&mut self, closed_event: PopupMotionEvent) {
 		self.closed_event = Some(closed_event);
@@ -260,6 +355,9 @@ impl PopupMotion {
 }
 
 impl Default for PopupMotion {
+	//==============================================================================
+	/// 기본값. (PopupMotion::new 와 같다)
+	//==============================================================================
 	fn default() -> PopupMotion {
 		PopupMotion::new()
 	}

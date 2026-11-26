@@ -12,16 +12,36 @@ use crate::base::vector2::Vector2;
 
 //==============================================================================
 /// 칸 좌표. (원본 { column, row })
+///
+/// # 예제
+/// 월드 좌표와 칸 좌표 오가기
+/// ```rust
+/// use vanilla::{Grid, GridCell, Vector2};
+///
+/// let cell = Grid::to_cell(70.0, 31.9, 32.0);
+/// assert_eq!(cell, GridCell::create(2, 0));
+/// assert_eq!(Grid::to_world_center(cell.column, cell.row, 32.0), Vector2::create(80.0, 16.0));
+/// assert_eq!(Grid::to_cell(-1.0, 0.0, 32.0), GridCell::create(-1, 0));
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct GridCell {
+	/// 가로 칸 번호. (왼쪽이 0, 바깥은 음수)
 	pub column: i32,
+	/// 세로 칸 번호. (위가 0, 바깥은 음수)
 	pub row: i32,
 }
 
 impl GridCell {
 	//==============================================================================
 	/// 생성.
+	///
+	/// # 인자
+	/// - `column`: 가로 칸 번호.
+	/// - `row`: 세로 칸 번호.
+	///
+	/// # 돌려줌
+	/// 그 칸 좌표.
 	//==============================================================================
 	pub const fn create(column: i32, row: i32) -> GridCell {
 		GridCell {
@@ -36,12 +56,38 @@ pub(crate) const NEIGHBOR_OFFSETS: [(i32, i32); 4] = [(1, 0), (-1, 0), (0, 1), (
 
 //==============================================================================
 /// 그리드 유틸. (정적 함수 묶음)
+///
+/// # 예제
+/// 벽으로 나뉜 구역 세기
+/// ```rust
+/// use vanilla::{Grid, GridCell};
+///
+/// let map_rows = ["..#..", "..#..", "###..", "....."];
+/// let is_passable = |column: i32, row: i32| map_rows[row as usize].as_bytes()[column as usize] != b'#';
+///
+/// let top_left_area = Grid::flood_fill(5, 4, GridCell::create(0, 0), is_passable);
+/// assert_eq!(top_left_area.len(), 4);
+/// assert_eq!(top_left_area[0], GridCell::create(0, 0));
+///
+/// assert!(Grid::is_all_connected(5, 4, GridCell::create(4, 3), is_passable, 11));
+/// assert!(Grid::flood_fill(5, 4, GridCell::create(2, 0), is_passable).is_empty());
+/// ```
 //==============================================================================
 pub struct Grid;
 
 impl Grid {
 	//==============================================================================
 	/// 플러드필. (시작 칸에서 상하좌우로 이어지는 통과 가능한 칸들을 모두 방문한 순서대로 돌려준다)
+	/// - 콜백은 격자 안의 칸으로만 부른다. 스택으로 돌아 깊이 우선 차례다.
+	///
+	/// # 인자
+	/// - `column_count`: 가로 칸 수.
+	/// - `row_count`: 세로 칸 수.
+	/// - `start`: 시작 칸.
+	/// - `is_passable_handler`: (column, row) 칸을 지날 수 있으면 true 를 돌려주는 함수.
+	///
+	/// # 돌려줌
+	/// 닿은 칸 목록. (시작 칸이 맨 앞) 시작 칸이 격자 밖이거나 막혀 있으면 빈 목록.
 	//==============================================================================
 	pub fn flood_fill(column_count: i32, row_count: i32, start: GridCell, mut is_passable_handler: impl FnMut(i32, i32) -> bool) -> Vec<GridCell> {
 		let mut visited_list: Vec<GridCell> = Vec::new();
@@ -78,6 +124,16 @@ impl Grid {
 
 	//==============================================================================
 	/// 연결성 검사. (시작 칸에서 닿는 칸 수가 expected_count 와 같은지. 예: 모든 부품이 코어와 붙어 있는지)
+	///
+	/// # 인자
+	/// - `column_count`: 가로 칸 수.
+	/// - `row_count`: 세로 칸 수.
+	/// - `start`: 시작 칸. (예: 코어 자리)
+	/// - `is_passable_handler`: (column, row) 칸을 지날 수 있으면 true 를 돌려주는 함수.
+	/// - `expected_count`: 모두 이어져 있으면 닿아야 할 칸 수. (예: 부품 수)
+	///
+	/// # 돌려줌
+	/// flood_fill 로 닿은 칸 수가 expected_count 와 같으면 true.
 	//==============================================================================
 	pub fn is_all_connected(column_count: i32, row_count: i32, start: GridCell, is_passable_handler: impl FnMut(i32, i32) -> bool, expected_count: usize) -> bool {
 		let visited_list = Grid::flood_fill(column_count, row_count, start, is_passable_handler);
@@ -87,6 +143,31 @@ impl Grid {
 	//==============================================================================
 	/// 사각형-타일 충돌 검사. (월드 사각형이 걸치는 타일을 돌며 막힌 타일과 겹치면 true)
 	/// - 이동 판정에서 "이동 뒤 자리가 장애물과 겹치면 취소" 하는 데 쓴다.
+	/// - 오른쪽, 아래 끝이 타일 경계에 딱 맞으면 그 다음 타일은 걸치지 않는다. 위에서 아래, 왼쪽에서 오른쪽 차례로 묻고 처음 막힌 타일에서 멈춘다.
+	///
+	/// # 인자
+	/// - `world_rect`: 검사할 월드 사각형.
+	/// - `tile_size`: 타일 한 변의 길이. (월드 단위)
+	/// - `is_blocked_handler`: (column, row) 타일이 막혔으면 true 를 돌려주는 함수. (음수 칸도 묻는다)
+	///
+	/// # 돌려줌
+	/// 걸치는 타일 가운데 막힌 것이 있으면 true.
+	///
+	/// # 예제
+	/// 움직인 뒤 벽과 겹치면 움직임 취소
+	/// ```rust
+	/// use vanilla::{Grid, Rect, Vector2};
+	///
+	/// let is_blocked = |column: i32, _row: i32| column >= 3;
+	/// let mut hero_position = Vector2::create(40.0, 0.0);
+	/// let hero_size = Vector2::create(24.0, 24.0);
+	/// let next_position = Vector2::create(hero_position.x + 40.0, hero_position.y);
+	/// let next_rect = Rect::create(next_position.x, next_position.y, hero_size.x, hero_size.y);
+	/// if !Grid::test_rect_overlap(next_rect, 32.0, is_blocked) {
+	/// 	hero_position = next_position;
+	/// }
+	/// assert_eq!(hero_position, Vector2::create(40.0, 0.0));
+	/// ```
 	//==============================================================================
 	pub fn test_rect_overlap(world_rect: Rect, tile_size: f32, mut is_blocked_handler: impl FnMut(i32, i32) -> bool) -> bool {
 		// 원본(JS number)처럼 f64 로 셈한다. (f32 로는 큰 좌표에서 0.000001 을 빼도 값이 그대로라 다음 칸까지 걸친다)
@@ -111,6 +192,14 @@ impl Grid {
 
 	//==============================================================================
 	/// 월드 좌표 → 타일 좌표.
+	///
+	/// # 인자
+	/// - `world_x`: 월드 x.
+	/// - `world_y`: 월드 y.
+	/// - `tile_size`: 타일 한 변의 길이. (월드 단위)
+	///
+	/// # 돌려줌
+	/// 그 점이 든 칸. (내림하므로 음수 좌표는 음수 칸)
 	//==============================================================================
 	pub fn to_cell(world_x: f32, world_y: f32, tile_size: f32) -> GridCell {
 		let column = (world_x as f64 / tile_size as f64).floor() as i32;
@@ -120,6 +209,14 @@ impl Grid {
 
 	//==============================================================================
 	/// 타일 좌표 → 타일 가운데 월드 좌표.
+	///
+	/// # 인자
+	/// - `column`: 가로 칸 번호.
+	/// - `row`: 세로 칸 번호.
+	/// - `tile_size`: 타일 한 변의 길이. (월드 단위)
+	///
+	/// # 돌려줌
+	/// 그 칸 가운데의 월드 좌표.
 	//==============================================================================
 	pub fn to_world_center(column: i32, row: i32, tile_size: f32) -> Vector2 {
 		let world_x = (column as f32 + 0.5) * tile_size;

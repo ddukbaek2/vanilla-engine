@@ -1,41 +1,41 @@
 //==============================================================================
-// 소리 표로 다루는 배경음악과 효과음. (vanilla.js core/soundsystem.js 의 SoundSystem)
-// - AudioManager 와 AudioAsset 을 쓴다. 소리를 합성하지 않고 파일만 튼다.
-// - 소리 표의 줄마다 SoundRow { id, paths, volume, minimum_interval, is_music, maximum_voices, pitch_variation, play_seconds, fade_out_seconds }.
-//   paths: 같은 소리를 여러 번 녹음한 무리. 낼 때마다 받아 둔 것 가운데 하나를 고르고 바로 앞과 같은 것은 고르지 않는다.
-//   minimum_interval: 같은 소리를 다시 낼 수 있는 간격. (초, 한꺼번에 몰려 시끄럽지 않게)
-//   maximum_voices: 같은 소리가 한꺼번에 날 수 있는 수. (넘으면 가장 오래된 것을 끊는다, None 이면 효과음 전체의 수까지, 0 이면 원본처럼 하나)
-//   pitch_variation: 낼 때마다 음 높이를 흔드는 비. (0.05 면 ±5%)
-//   play_seconds, fade_out_seconds: 효과음을 앞의 play_seconds 초만 틀고 fade_out_seconds 초 동안 줄여 끈다. (0 이면 끝까지)
-// - 크기: 배경음악 = 음악 크기 × 음악의 비 × 소리의 크기, 효과음 = 효과음 크기 × 소리의 크기 × 부를 때의 크기.
-//   음악과 효과음의 크기는 버스(get_music_bus, get_effect_bus 의 AudioBus)에 걸고, 바꿀 때 0.05 초를 시간 상수로 따라간다. (원본 setTargetAtTime)
-//   버스는 첫 누름 뒤에 만든다. (그 전에는 None) 버스로 만든 플레이어(AudioBus::create_audio_player)도 설정 크기와 음소거를 따른다.
-// - 배경음악은 틀어 달라고 한 것(get_music_id)을 기억해 두고, 받기 전이거나 첫 누름 전이면 그때 튼다. ("" 이면 끈다)
-//   겹쳐 바꿀 수 있고(fade_seconds), 멈췄던 자리를 소리마다 기억해 이어 틀 수 있다. (is_resumed) 첫 파일을 받지 못했으면 틀지 않는다.
-// - 음소거는 설정한 크기보다 먼저다. 아래 가운데 하나라도 맞으면 소리가 나지 않는다.
-//   바깥의 음소거(set_external_mute_provider, 플랫폼 SDK 나 광고), 사용자의 음소거(set_user_muted), 페이지가 가려짐(다른 탭, 앱 전환),
-//   터치가 주된 기기에서 창이 포커스를 잃음(blur). 아이폰은 페이지가 가려졌다는 알림이 앱이 내려간 뒤에 와서 오디오가 멈추지 못한 채 얼어
-//   마지막 소리 조각이 되풀이되는데, 포커스를 잃는 알림은 그보다 먼저 온다. 데스크탑(마우스)은 캔버스 바깥을 누를 때도 포커스를 잃어 따르지 않는다.
-//   포커스가 돌아오거나 화면을 누르거나 페이지가 다시 보이면 풀린다.
-// - 음소거인 동안은 AudioContext 도 멈춘다. (풀리면 깨운다) 아이폰은 돌던 AudioContext 를 앱 전환이나 전면 광고가 가로채면 돌아와서 깨워도
-//   소리가 나지 않아, 그 전에 스스로 멈춰 둔다. 풀린 뒤에도 돌지 않으면 0.5 초마다 다시 깨워 본다.
-// - 허락하면(set_autoplay_allowed_provider, 주지 않으면 허락) 누르기 전에도 첫 update 에서 한 번 깨워 본다. 막히면 엔진이 첫 누름에 깨운다.
-//   첫 누름(user gesture) 전이거나 AudioContext 가 돌지 않을 때는 효과음을 내지 않는다. (멈춘 동안 부른 소리가 깨어날 때 한꺼번에 나지 않게)
-// - 소리 파일은 놀이를 막지 않게 뒤에서 받는다. (웹은 디코딩이 끝나면 난다) 못 받은 소리는 나지 않을 뿐이다.
-// - 시각: 같은 소리 간격과 다시 깨우기 간격은 원본 performance.now() 처럼 벽시계(web_time::Instant), 크기 따라가기와 줄이기,
-//   음악의 멈춘 자리는 원본처럼 AudioContext 시계(AudioManager::get_context_time)로 센다.
-// - 함께 쓰는 소리: set_sound_system, read_sound_system. (원본 모듈 변수, 스레드 하나에 하나)
-// - 원본과 다른 것:
-//   - 만들 때 AudioManager 대신 엔진을 받는다. 원본은 document 와 window 에 리스너를 다는데, 러스트 판은 엔진의 페이지 이벤트(PageEvent)로 받기 때문이다.
-//     이벤트가 온 그 자리에서는 AudioContext 를 멈추거나 깨우고(소리가 바로 멎는다), 효과음 끊기는 다음 update 에서 한다.
-//   - load_sounds, load_sound 는 애셋 폴더 기준 경로를 풀 엔진을 받는다. (원본은 브라우저가 페이지 주소로 푼다) 데스크탑은 그 자리에서 읽는다.
-//     load_sounds 는 원본처럼 await 할 수 있는 SoundLoadHandle 을 돌려준다. (걸어 둔 소리를 다 받거나 실패할 때까지 기다린다, wait_for_load().await 도 같다)
-//   - 크기 바꾸기와 줄이기는 원본처럼 GainNode 의 AudioParam 자동화(value 대입, setValueAtTime, linearRampToValueAtTime, setTargetAtTime,
-//     cancelScheduledValues)와 source.stop(when)으로 소리 장치에 맡긴다. 웹은 WebAudio 에, 데스크탑은 믹서(크로미엄과 같은 셈)에 건다.
-//     원본 { source, gainNode } 자리는 버스로 만든 AudioPlayer 하나이고, 끝난 소리(원본 onended)는 update 에서 목록에서 뺀다.
-//     원본처럼 버스의 set_volume, mute 로 건 값은 SoundSystem 이 크기를 다시 걸 때까지 간다.
-//   - 무리에서 고르기와 음 높이 흔들기는 원본 Math.random 자리인 엔진 math::random(처음 쓸 때 시각으로 씨앗을 정한다)을 쓴다.
-//   - add_sound_asset(파일로 받지 않는 소리 더하기)과 get_effect_voice_count 는 러스트 판에서 먼저 만들었다. (원본에도 같은 이름으로 넣었다)
+//! 소리 표로 다루는 배경음악과 효과음. (vanilla.js core/soundsystem.js 의 SoundSystem)
+//! - AudioManager 와 AudioAsset 을 쓴다. 소리를 합성하지 않고 파일만 튼다.
+//! - 소리 표의 줄마다 SoundRow { id, paths, volume, minimum_interval, is_music, maximum_voices, pitch_variation, play_seconds, fade_out_seconds }.
+//!   paths: 같은 소리를 여러 번 녹음한 무리. 낼 때마다 받아 둔 것 가운데 하나를 고르고 바로 앞과 같은 것은 고르지 않는다.
+//!   minimum_interval: 같은 소리를 다시 낼 수 있는 간격. (초, 한꺼번에 몰려 시끄럽지 않게)
+//!   maximum_voices: 같은 소리가 한꺼번에 날 수 있는 수. (넘으면 가장 오래된 것을 끊는다, None 이면 효과음 전체의 수까지, 0 이면 원본처럼 하나)
+//!   pitch_variation: 낼 때마다 음 높이를 흔드는 비. (0.05 면 ±5%)
+//!   play_seconds, fade_out_seconds: 효과음을 앞의 play_seconds 초만 틀고 fade_out_seconds 초 동안 줄여 끈다. (0 이면 끝까지)
+//! - 크기: 배경음악 = 음악 크기 × 음악의 비 × 소리의 크기, 효과음 = 효과음 크기 × 소리의 크기 × 부를 때의 크기.
+//!   음악과 효과음의 크기는 버스(get_music_bus, get_effect_bus 의 AudioBus)에 걸고, 바꿀 때 0.05 초를 시간 상수로 따라간다. (원본 setTargetAtTime)
+//!   버스는 첫 누름 뒤에 만든다. (그 전에는 None) 버스로 만든 플레이어(AudioBus::create_audio_player)도 설정 크기와 음소거를 따른다.
+//! - 배경음악은 틀어 달라고 한 것(get_music_id)을 기억해 두고, 받기 전이거나 첫 누름 전이면 그때 튼다. ("" 이면 끈다)
+//!   겹쳐 바꿀 수 있고(fade_seconds), 멈췄던 자리를 소리마다 기억해 이어 틀 수 있다. (is_resumed) 첫 파일을 받지 못했으면 틀지 않는다.
+//! - 음소거는 설정한 크기보다 먼저다. 아래 가운데 하나라도 맞으면 소리가 나지 않는다.
+//!   바깥의 음소거(set_external_mute_provider, 플랫폼 SDK 나 광고), 사용자의 음소거(set_user_muted), 페이지가 가려짐(다른 탭, 앱 전환),
+//!   터치가 주된 기기에서 창이 포커스를 잃음(blur). 아이폰은 페이지가 가려졌다는 알림이 앱이 내려간 뒤에 와서 오디오가 멈추지 못한 채 얼어
+//!   마지막 소리 조각이 되풀이되는데, 포커스를 잃는 알림은 그보다 먼저 온다. 데스크탑(마우스)은 캔버스 바깥을 누를 때도 포커스를 잃어 따르지 않는다.
+//!   포커스가 돌아오거나 화면을 누르거나 페이지가 다시 보이면 풀린다.
+//! - 음소거인 동안은 AudioContext 도 멈춘다. (풀리면 깨운다) 아이폰은 돌던 AudioContext 를 앱 전환이나 전면 광고가 가로채면 돌아와서 깨워도
+//!   소리가 나지 않아, 그 전에 스스로 멈춰 둔다. 풀린 뒤에도 돌지 않으면 0.5 초마다 다시 깨워 본다.
+//! - 허락하면(set_autoplay_allowed_provider, 주지 않으면 허락) 누르기 전에도 첫 update 에서 한 번 깨워 본다. 막히면 엔진이 첫 누름에 깨운다.
+//!   첫 누름(user gesture) 전이거나 AudioContext 가 돌지 않을 때는 효과음을 내지 않는다. (멈춘 동안 부른 소리가 깨어날 때 한꺼번에 나지 않게)
+//! - 소리 파일은 놀이를 막지 않게 뒤에서 받는다. (웹은 디코딩이 끝나면 난다) 못 받은 소리는 나지 않을 뿐이다.
+//! - 시각: 같은 소리 간격과 다시 깨우기 간격은 원본 performance.now() 처럼 벽시계(web_time::Instant), 크기 따라가기와 줄이기,
+//!   음악의 멈춘 자리는 원본처럼 AudioContext 시계(AudioManager::get_context_time)로 센다.
+//! - 함께 쓰는 소리: set_sound_system, read_sound_system. (원본 모듈 변수, 스레드 하나에 하나)
+//! - 원본과 다른 것:
+//!   - 만들 때 AudioManager 대신 엔진을 받는다. 원본은 document 와 window 에 리스너를 다는데, 러스트 판은 엔진의 페이지 이벤트(PageEvent)로 받기 때문이다.
+//!     이벤트가 온 그 자리에서는 AudioContext 를 멈추거나 깨우고(소리가 바로 멎는다), 효과음 끊기는 다음 update 에서 한다.
+//!   - load_sounds, load_sound 는 애셋 폴더 기준 경로를 풀 엔진을 받는다. (원본은 브라우저가 페이지 주소로 푼다) 데스크탑은 그 자리에서 읽는다.
+//!     load_sounds 는 원본처럼 await 할 수 있는 SoundLoadHandle 을 돌려준다. (걸어 둔 소리를 다 받거나 실패할 때까지 기다린다, wait_for_load().await 도 같다)
+//!   - 크기 바꾸기와 줄이기는 원본처럼 GainNode 의 AudioParam 자동화(value 대입, setValueAtTime, linearRampToValueAtTime, setTargetAtTime,
+//!     cancelScheduledValues)와 source.stop(when)으로 소리 장치에 맡긴다. 웹은 WebAudio 에, 데스크탑은 믹서(크로미엄과 같은 셈)에 건다.
+//!     원본 { source, gainNode } 자리는 버스로 만든 AudioPlayer 하나이고, 끝난 소리(원본 onended)는 update 에서 목록에서 뺀다.
+//!     원본처럼 버스의 set_volume, mute 로 건 값은 SoundSystem 이 크기를 다시 걸 때까지 간다.
+//!   - 무리에서 고르기와 음 높이 흔들기는 원본 Math.random 자리인 엔진 math::random(처음 쓸 때 시각으로 씨앗을 정한다)을 쓴다.
+//!   - add_sound_asset(파일로 받지 않는 소리 더하기)과 get_effect_voice_count 는 러스트 판에서 먼저 만들었다. (원본에도 같은 이름으로 넣었다)
 //==============================================================================
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -52,7 +52,26 @@ use crate::platform::audio::{self as audio_backend, GainAutomation};
 use crate::resource::audioasset::{AudioAsset, AudioLoadHandle};
 
 //==============================================================================
-// 소리 받기 손잡이. (SoundSystem::load_sounds 가 돌려준다. 원본 loadSounds 의 Promise 자리, 걸어 둔 소리 애셋을 나눠 든다)
+/// 소리 받기 손잡이. (SoundSystem::load_sounds 가 돌려준다. 원본 loadSounds 의 Promise 자리, 걸어 둔 소리 애셋을 나눠 든다)
+/// - 그대로 await 하면 걸어 둔 소리를 다 받거나 실패할 때까지 기다린다. (못 받은 소리는 건너뛰고, 돌려주는 값은 없다)
+///
+/// # 예제
+/// 받기를 다 기다린 뒤 배경음악 틀기
+/// ```rust,no_run
+/// use std::cell::RefCell;
+/// use std::rc::Rc;
+/// use vanilla::{Engine, EngineConfiguration, SoundRow, SoundSystem};
+///
+/// let mut engine = Engine::new(EngineConfiguration::new());
+/// let sound_table = vec![SoundRow::create_music("field", "tests/assets/audio/vorbis_stereo.ogg", 0.6)];
+/// let sound_system = Rc::new(RefCell::new(SoundSystem::new(&engine, sound_table)));
+/// let sound_load_handle = sound_system.borrow_mut().load_sounds(&engine);
+/// let task_sound_system = sound_system.clone();
+/// engine.spawn_task(move |_engine_context| async move {
+/// 	sound_load_handle.await;
+/// 	task_sound_system.borrow_mut().play_music("field", 0.5, false);
+/// });
+/// ```
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct SoundLoadHandle {
@@ -64,7 +83,7 @@ impl std::future::IntoFuture for SoundLoadHandle {
 	type IntoFuture = SoundLoadFuture;
 
 	//==============================================================================
-	// 손잡이를 그대로 await 하기.
+	/// 손잡이를 그대로 await 하기.
 	//==============================================================================
 	fn into_future(self) -> SoundLoadFuture {
 		SoundLoadFuture {
@@ -74,7 +93,24 @@ impl std::future::IntoFuture for SoundLoadHandle {
 }
 
 //==============================================================================
-// 소리 받기를 기다리는 퓨처. (다 받거나 실패할 때까지, 원본처럼 못 받은 소리는 건너뛴다)
+/// 소리 받기를 기다리는 퓨처. (다 받거나 실패할 때까지, 원본처럼 못 받은 소리는 건너뛴다)
+/// - SoundLoadHandle 을 await 하거나 SoundSystem::wait_for_load 가 돌려준다. 엔진 작업 안에서 await 한다.
+///
+/// # 예제
+/// 못 받은 파일이 섞여 있어도 끝난다 (데스크탑은 그 자리에서 읽어 첫 폴링에 끝난다)
+/// ```rust
+/// use vanilla::{Engine, EngineConfiguration, SoundRow, SoundSystem};
+///
+/// let mut engine = Engine::new(EngineConfiguration::new());
+/// let hit_row = SoundRow::create_effect("hit", &["tests/assets/audio/wav_s16_stereo.wav", "tests/assets/audio/missing.wav"], 0.8);
+/// let mut sound_system = SoundSystem::new(&engine, vec![hit_row.clone()]);
+/// sound_system.load_sound(&engine, &hit_row);
+/// let sound_load_future = sound_system.wait_for_load();
+/// let task_handle = engine.spawn_task(|_engine_context| async move {
+/// 	sound_load_future.await;
+/// });
+/// assert!(task_handle.is_finished());
+/// ```
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct SoundLoadFuture {
@@ -85,7 +121,7 @@ impl std::future::Future for SoundLoadFuture {
 	type Output = ();
 
 	//==============================================================================
-	// 다 끝났는지 보기. (아직이면 다음 프레임에 다시 본다)
+	/// 다 끝났는지 보기. (아직이면 다음 프레임에 다시 본다)
 	//==============================================================================
 	fn poll(self: std::pin::Pin<&mut SoundLoadFuture>, context: &mut std::task::Context<'_>) -> std::task::Poll<()> {
 		if self.audio_load_handle_list.iter().all(|audio_load_handle| audio_load_handle.is_finished()) {
@@ -96,43 +132,79 @@ impl std::future::Future for SoundLoadFuture {
 	}
 }
 
-// 효과음을 동시에 낼 수 있는 수. (넘으면 가장 오래된 것을 끊는다)
+/// 효과음을 동시에 낼 수 있는 수. (넘으면 가장 오래된 것을 끊는다)
 const EFFECT_VOICE_COUNT: usize = 12;
-// 음소거가 아닌데 AudioContext 가 돌지 않을 때 다시 깨워 보는 간격. (초)
+/// 음소거가 아닌데 AudioContext 가 돌지 않을 때 다시 깨워 보는 간격. (초)
 const CONTEXT_RESUME_RETRY_INTERVAL: f64 = 0.5;
-// 크기를 바꿀 때 따라가는 시간. (초, 툭 끊기지 않게)
+/// 크기를 바꿀 때 따라가는 시간. (초, 툭 끊기지 않게)
 const VOLUME_SMOOTHING_SECONDS: f64 = 0.05;
-// 효과음을 좌우로 나누는 가장 큰 값. (-1 ~ 1)
+/// 효과음을 좌우로 나누는 가장 큰 값. (-1 ~ 1)
 const MAXIMUM_PAN: f32 = 1.0;
-// 이 크기 이하의 효과음은 내지 않는다.
+/// 이 크기 이하의 효과음은 내지 않는다.
 const MINIMUM_EFFECT_VOLUME: f32 = 0.001;
-// 줄여 끈 효과음을 다 줄어든 뒤 멈추기까지 남기는 틈. (초)
+/// 줄여 끈 효과음을 다 줄어든 뒤 멈추기까지 남기는 틈. (초)
 const EFFECT_STOP_MARGIN_SECONDS: f64 = 0.02;
 
 thread_local! {
-	// 함께 쓰는 소리. (set_sound_system 으로 정한다)
+	/// 함께 쓰는 소리. (set_sound_system 으로 정한다)
 	static CURRENT_SOUND_SYSTEM: RefCell<Option<Rc<RefCell<SoundSystem>>>> = const { RefCell::new(None) };
 }
 
 //==============================================================================
-// 소리 표의 한 줄.
+/// 소리 표의 한 줄.
+/// - create_effect, create_music 으로 만들고 나머지 칸은 필드에 바로 쓴다.
+///
+/// # 예제
+/// 녹음 무리가 있는 효과음과 배경음악
+/// ```rust
+/// use vanilla::SoundRow;
+///
+/// let mut hit_row = SoundRow::create_effect("hit", &["tests/assets/audio/wav_s16_stereo.wav", "tests/assets/audio/mp3_stereo.mp3"], 0.8);
+/// hit_row.minimum_interval = 0.05;
+/// hit_row.maximum_voices = Some(3);
+/// hit_row.pitch_variation = 0.05;
+/// assert_eq!(hit_row.paths.len(), 2);
+/// assert!(!hit_row.is_music);
+///
+/// let field_row = SoundRow::create_music("field", "tests/assets/audio/vorbis_stereo.ogg", 0.6);
+/// assert!(field_row.is_music);
+/// assert_eq!(field_row.paths, vec![String::from("tests/assets/audio/vorbis_stereo.ogg")]);
+/// assert_eq!(field_row.maximum_voices, None);
+/// ```
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct SoundRow {
+	/// 소리 이름. (play_effect, play_music 에 넘기는 id)
 	pub id: String,
+	/// 같은 소리를 여러 번 녹음한 무리의 파일 경로. (애셋 폴더 기준, 효과음은 낼 때마다 받아 둔 것 가운데 바로 앞과 다른 것을 고르고, 배경음악은 첫 파일만 튼다)
 	pub paths: Vec<String>,
+	/// 소리의 크기. (0 ~ 1, 효과음은 부를 때의 크기와 곱한 뒤 0 ~ 1 로 다듬는다)
 	pub volume: f32,
+	/// 같은 효과음을 다시 낼 수 있는 간격. (초, 0 이면 막지 않는다)
 	pub minimum_interval: f32,
+	/// 배경음악 줄인지. (load_sounds 가 효과음을 먼저, 배경음악을 나중에 받는다)
 	pub is_music: bool,
+	/// 같은 효과음이 한꺼번에 날 수 있는 수. (넘으면 가장 오래된 것을 끊는다, None 이면 효과음 전체의 수 12 까지, 0 이면 하나)
 	pub maximum_voices: Option<usize>,
+	/// 낼 때마다 음 높이를 흔드는 비. (0.05 면 ±5%, 0 이면 흔들지 않는다)
 	pub pitch_variation: f32,
+	/// 효과음을 앞에서부터 틀 시간. (초, 0 이면 끝까지)
 	pub play_seconds: f32,
+	/// play_seconds 뒤에 줄여 끄는 시간. (초, play_seconds 가 0 이면 쓰지 않는다)
 	pub fade_out_seconds: f32,
 }
 
 impl SoundRow {
 	//==============================================================================
-	// 효과음 한 줄. (나머지 칸은 기본)
+	/// 효과음 한 줄. (나머지 칸은 기본)
+	///
+	/// # 인자
+	/// - `id`: 소리 이름.
+	/// - `paths`: 같은 소리를 녹음한 파일 경로들. (애셋 폴더 기준)
+	/// - `volume`: 소리의 크기. (0 ~ 1)
+	///
+	/// # 돌려줌
+	/// 효과음 줄. (minimum_interval, pitch_variation, play_seconds, fade_out_seconds 는 0, maximum_voices 는 None)
 	//==============================================================================
 	pub fn create_effect(id: &str, paths: &[&str], volume: f32) -> SoundRow {
 		SoundRow {
@@ -149,7 +221,15 @@ impl SoundRow {
 	}
 
 	//==============================================================================
-	// 배경음악 한 줄.
+	/// 배경음악 한 줄.
+	///
+	/// # 인자
+	/// - `id`: 소리 이름.
+	/// - `path`: 음악 파일 경로. (애셋 폴더 기준)
+	/// - `volume`: 소리의 크기. (0 ~ 1)
+	///
+	/// # 돌려줌
+	/// 배경음악 줄. (is_music 이 true, 경로 하나, 나머지 칸은 create_effect 와 같다)
 	//==============================================================================
 	pub fn create_music(id: &str, path: &str, volume: f32) -> SoundRow {
 		let mut sound_row = SoundRow::create_effect(id, &[path], volume);
@@ -159,7 +239,7 @@ impl SoundRow {
 }
 
 //==============================================================================
-// 나고 있는 효과음 하나. (원본 { soundId, source, gainNode, startTime }, 원본도 startTime 은 읽지 않아 뺐다)
+/// 나고 있는 효과음 하나. (원본 { soundId, source, gainNode, startTime }, 원본도 startTime 은 읽지 않아 뺐다)
 //==============================================================================
 struct EffectVoice {
 	sound_id: String,
@@ -167,21 +247,21 @@ struct EffectVoice {
 }
 
 //==============================================================================
-// 틀고 있는 배경음악 하나. (원본 { soundId, source, gain, startTime, offset, duration })
+/// 틀고 있는 배경음악 하나. (원본 { soundId, source, gain, startTime, offset, duration })
 //==============================================================================
 struct MusicVoice {
 	sound_id: String,
 	audio_player: AudioPlayer,
-	// 튼 때. (컨텍스트 시계 초)
+	/// 튼 때. (컨텍스트 시계 초)
 	start_time: f64,
-	// 튼 자리와 소리 길이. (초)
+	/// 튼 자리와 소리 길이. (초)
 	offset: f64,
 	duration: f64,
 }
 
 
 //==============================================================================
-// 페이지 이벤트 리스너와 나눠 드는 음소거 상태. (이벤트가 온 그 자리에서 AudioContext 를 멈추거나 깨운다)
+/// 페이지 이벤트 리스너와 나눠 드는 음소거 상태. (이벤트가 온 그 자리에서 AudioContext 를 멈추거나 깨운다)
 //==============================================================================
 struct SoundMuteState {
 	external_mute_provider: Option<Rc<dyn Fn() -> bool>>,
@@ -190,14 +270,14 @@ struct SoundMuteState {
 	is_blur_mute_enabled: bool,
 	is_window_blurred: bool,
 	is_context_paused: bool,
-	// 이벤트로 음소거가 되어 다음 update 에서 효과음을 끊을 차례인지.
+	/// 이벤트로 음소거가 되어 다음 update 에서 효과음을 끊을 차례인지.
 	is_stop_effects_requested: bool,
 	audio_manager_state: Rc<RefCell<AudioManagerState>>,
 }
 
 impl SoundMuteState {
 	//==============================================================================
-	// 지금 음소거여야 하는지. (바깥의 음소거, 사용자의 음소거, 페이지 가려짐, 창이 포커스를 잃음)
+	/// 지금 음소거여야 하는지. (바깥의 음소거, 사용자의 음소거, 페이지 가려짐, 창이 포커스를 잃음)
 	//==============================================================================
 	fn read_muted(&self) -> bool {
 		let is_platform_muted = match &self.external_mute_provider {
@@ -212,7 +292,7 @@ impl SoundMuteState {
 	}
 
 	//==============================================================================
-	// 음소거인 동안 AudioContext 멈추기와 풀리면 깨우기. (바뀔 때만, 첫 누름 전에는 AudioContext 가 없어 하지 않는다)
+	/// 음소거인 동안 AudioContext 멈추기와 풀리면 깨우기. (바뀔 때만, 첫 누름 전에는 AudioContext 가 없어 하지 않는다)
 	//==============================================================================
 	fn apply_context_pause(&mut self) {
 		let audio_manager_state = self.audio_manager_state.clone();
@@ -233,7 +313,7 @@ impl SoundMuteState {
 	}
 
 	//==============================================================================
-	// 페이지 이벤트. (원본 생성자의 visibilitychange, blur, focus, pointerdown 리스너)
+	/// 페이지 이벤트. (원본 생성자의 visibilitychange, blur, focus, pointerdown 리스너)
 	//==============================================================================
 	fn handle_page_event(&mut self, page_event: PageEvent) {
 		let was_muted = self.read_muted();
@@ -265,49 +345,142 @@ impl SoundMuteState {
 	}
 }
 
+//==============================================================================
+/// 소리 표로 다루는 배경음악과 효과음. (원본 SoundSystem, 엔진의 AudioManager 를 나눠 들고 페이지 이벤트로 음소거한다)
+/// - 매 프레임 update 를 부른다. 버스는 첫 누름 뒤의 update 에서 만든다.
+///
+/// # 예제
+/// 만들고 크기 정하기 (소리 장치는 첫 update 에서 연다)
+/// ```rust
+/// use vanilla::{Engine, EngineConfiguration, SoundRow, SoundSystem};
+///
+/// let engine = Engine::new(EngineConfiguration::new());
+/// let sound_table = vec![
+/// 	SoundRow::create_effect("hit", &["tests/assets/audio/wav_s16_stereo.wav"], 0.8),
+/// 	SoundRow::create_music("field", "tests/assets/audio/vorbis_stereo.ogg", 0.6),
+/// ];
+/// let mut sound_system = SoundSystem::new(&engine, sound_table);
+/// sound_system.set_music_volume(0.5);
+/// sound_system.set_sound_effect_volume(2.0);
+/// assert_eq!(sound_system.get_music_volume(), 0.5);
+/// assert_eq!(sound_system.get_sound_effect_volume(), 1.0);
+/// assert!(sound_system.get_music_bus().is_none());
+/// assert_eq!(sound_system.get_music_id(), "");
+/// ```
+///
+/// 씬에서 배경음악을 틀고 누르면 효과음 내기
+/// ```rust,no_run
+/// use vanilla::{Engine, EngineConfiguration, Scene, SceneBase, SoundRow, SoundSystem, Vector2};
+///
+/// struct MainScene {
+/// 	scene_base: SceneBase,
+/// 	sound_system: Option<SoundSystem>,
+/// }
+///
+/// impl Scene for MainScene {
+/// 	fn get_scene_base(&self) -> &SceneBase {
+/// 		&self.scene_base
+/// 	}
+///
+/// 	fn get_scene_base_mut(&mut self) -> &mut SceneBase {
+/// 		&mut self.scene_base
+/// 	}
+///
+/// 	fn create(&mut self, engine: &mut Engine) {
+/// 		let sound_table = vec![
+/// 			SoundRow::create_effect("hit", &["tests/assets/audio/wav_s16_stereo.wav"], 0.8),
+/// 			SoundRow::create_music("field", "tests/assets/audio/vorbis_stereo.ogg", 0.6),
+/// 		];
+/// 		let mut sound_system = SoundSystem::new(engine, sound_table);
+/// 		sound_system.load_sounds(engine);
+/// 		sound_system.play_music("field", 1.0, false);
+/// 		self.sound_system = Some(sound_system);
+/// 	}
+///
+/// 	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+/// 		self.scene_base.tick(engine, time_delta);
+/// 		if let Some(sound_system) = &mut self.sound_system {
+/// 			sound_system.update();
+/// 		}
+/// 	}
+///
+/// 	fn touch_press(&mut self, _engine: &mut Engine, _view_input_position: Vector2) {
+/// 		if let Some(sound_system) = &mut self.sound_system {
+/// 			sound_system.play_effect("hit", 1.0, 0.0);
+/// 		}
+/// 	}
+/// }
+///
+/// let engine = Engine::new(EngineConfiguration::new());
+/// let main_scene = MainScene {
+/// 	scene_base: SceneBase::new(),
+/// 	sound_system: None,
+/// };
+/// engine.run(Box::new(main_scene)).unwrap();
+/// ```
+//==============================================================================
 pub struct SoundSystem {
 	autoplay_allowed_provider: Option<Rc<dyn Fn() -> bool>>,
 	audio_manager: AudioManager,
 	sound_by_id: HashMap<String, SoundRow>,
-	// 받은 소리. (무리의 차례대로, 못 받은 것은 None)
+	/// 받은 소리. (무리의 차례대로, 못 받은 것은 None)
 	asset_by_id: HashMap<String, Vec<Option<Rc<AudioAsset>>>>,
 	last_play_time_by_id: HashMap<String, f64>,
 	last_variant_by_id: HashMap<String, usize>,
-	// 배경음악과 효과음의 버스. (원본 #musicBus, #effectBus, 첫 누름 전에는 None)
+	/// 배경음악과 효과음의 버스. (원본 #musicBus, #effectBus, 첫 누름 전에는 None)
 	music_bus: Option<AudioBus>,
 	effect_bus: Option<AudioBus>,
-	// 나고 있는 효과음. (원본 #voices)
+	/// 나고 있는 효과음. (원본 #voices)
 	voice_list: Vec<EffectVoice>,
-	// 줄여 끄는 중인 효과음. (원본은 목록에서 빼고 소리 장치가 끝까지 줄인 뒤 멈춘다. 러스트 판은 플레이어를 버리면 소리가 멎어 끝날 때까지 든다)
+	/// 줄여 끄는 중인 효과음. (원본은 목록에서 빼고 소리 장치가 끝까지 줄인 뒤 멈춘다. 러스트 판은 플레이어를 버리면 소리가 멎어 끝날 때까지 든다)
 	releasing_voice_list: Vec<EffectVoice>,
-	// 틀어 달라고 한 배경음악. (없으면 "")
+	/// 틀어 달라고 한 배경음악. (없으면 "")
 	music_id: String,
 	music_fade_seconds: f32,
 	is_music_resumed: bool,
 	playing_music: Option<MusicVoice>,
-	// 줄여 끄는 중인 배경음악. (끝날 때까지 든다)
+	/// 줄여 끄는 중인 배경음악. (끝날 때까지 든다)
 	fading_music_list: Vec<MusicVoice>,
 	music_position_by_id: HashMap<String, f64>,
 	music_volume: f32,
 	music_scale: f32,
 	sound_effect_volume: f32,
-	// 소리의 길에 건 음소거.
+	/// 소리의 길에 건 음소거.
 	is_muted: bool,
 	is_autoplay_tried: bool,
 	last_context_resume_time: f64,
 	mute_state: Rc<RefCell<SoundMuteState>>,
-	// 엔진이 약한 참조로 들어 SoundSystem 이 사는 동안만 부른다.
+	/// 엔진이 약한 참조로 들어 SoundSystem 이 사는 동안만 부른다.
 	_page_event_listener: PageEventListener,
 	clock_origin: Instant,
-	// 시험에서 시계를 앞으로 돌리는 초.
+	/// 시험에서 시계를 앞으로 돌리는 초.
 	#[cfg(test)]
 	test_time_offset: f64,
 }
 
 impl SoundSystem {
 	//==============================================================================
-	// 생성. (소리 표를 받는다, 받기는 load_sounds 가 한다, 창이 포커스를 잃으면 음소거할지는 지금의 주된 손으로 정한다)
-	// - 엔진의 AudioManager 를 나눠 들고 페이지 이벤트 리스너를 단다.
+	/// 생성. (소리 표를 받는다, 받기는 load_sounds 가 한다, 창이 포커스를 잃으면 음소거할지는 지금의 주된 손으로 정한다)
+	/// - 엔진의 AudioManager 를 나눠 들고 페이지 이벤트 리스너를 단다.
+	///
+	/// # 인자
+	/// - `engine`: AudioManager 를 나눠 주고 페이지 이벤트를 보낼 엔진. (페이지가 가려졌는지도 여기서 읽는다)
+	/// - `sound_table`: 소리 표. (같은 id 는 뒤의 줄이 이긴다)
+	///
+	/// # 돌려줌
+	/// 새 소리 체계. (아무것도 받지 않았고 버스도 없다, 크기는 모두 1)
+	///
+	/// # 예제
+	/// 빈 표로 만들고 나중에 줄 더하기
+	/// ```rust
+	/// use vanilla::{Engine, EngineConfiguration, SoundRow, SoundSystem};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let mut sound_system = SoundSystem::new(&engine, Vec::new());
+	/// sound_system.add_sounds(vec![SoundRow::create_effect("coin", &["tests/assets/audio/wav_s16_stereo.wav"], 1.0)]);
+	/// assert_eq!(sound_system.get_effect_voice_count(), 0);
+	/// assert!(!sound_system.is_user_muted());
+	/// ```
 	//==============================================================================
 	pub fn new(engine: &Engine, sound_table: Vec<SoundRow>) -> SoundSystem {
 		let audio_manager = engine.get_audio_manager().clone();
@@ -362,7 +535,7 @@ impl SoundSystem {
 	}
 
 	//==============================================================================
-	// 벽시계. (초, 원본 performance.now() / 1000 자리)
+	/// 벽시계. (초, 원본 performance.now() / 1000 자리)
 	//==============================================================================
 	fn read_now(&self) -> f64 {
 		let now = self.clock_origin.elapsed().as_secs_f64();
@@ -372,14 +545,17 @@ impl SoundSystem {
 	}
 
 	//==============================================================================
-	// AudioContext 시계. (초, 원본 audioContext.currentTime)
+	/// AudioContext 시계. (초, 원본 audioContext.currentTime)
 	//==============================================================================
 	fn read_context_time(&self) -> f64 {
 		self.audio_manager.get_context_time()
 	}
 
 	//==============================================================================
-	// 소리 표의 줄 더하기. (같은 id 는 바꾼다, 받기는 load_sounds 가 한다)
+	/// 소리 표의 줄 더하기. (같은 id 는 바꾼다, 받기는 load_sounds 가 한다)
+	///
+	/// # 인자
+	/// - `sound_table`: 더할 줄들. (같은 id 의 줄이 있으면 바꾼다)
 	//==============================================================================
 	pub fn add_sounds(&mut self, sound_table: Vec<SoundRow>) {
 		for sound_row in sound_table {
@@ -388,137 +564,246 @@ impl SoundSystem {
 	}
 
 	//==============================================================================
-	// 바깥의 음소거를 읽는 함수 설정. (플랫폼 SDK 의 음소거, 보상형 광고를 보이는 동안 등, 매 프레임과 페이지 이벤트 때 읽는다, None 이면 없음)
+	/// 바깥의 음소거를 읽는 함수 설정. (플랫폼 SDK 의 음소거, 보상형 광고를 보이는 동안 등, 매 프레임과 페이지 이벤트 때 읽는다, None 이면 없음)
+	///
+	/// # 인자
+	/// - `external_mute_provider`: 음소거여야 하면 true 를 돌려주는 함수. (None 이면 바깥 음소거를 보지 않는다)
+	///
+	/// # 예제
+	/// 광고를 보이는 동안 음소거
+	/// ```rust
+	/// use std::cell::Cell;
+	/// use std::rc::Rc;
+	/// use vanilla::{Engine, EngineConfiguration, SoundSystem};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let mut sound_system = SoundSystem::new(&engine, Vec::new());
+	/// let is_advertisement_showing = Rc::new(Cell::new(false));
+	/// let is_advertisement_showing_for_provider = is_advertisement_showing.clone();
+	/// sound_system.set_external_mute_provider(Some(Rc::new(move || is_advertisement_showing_for_provider.get())));
+	/// assert!(!sound_system.read_muted());
+	/// is_advertisement_showing.set(true);
+	/// assert!(sound_system.read_muted());
+	/// ```
 	//==============================================================================
 	pub fn set_external_mute_provider(&mut self, external_mute_provider: Option<Rc<dyn Fn() -> bool>>) {
 		self.mute_state.borrow_mut().external_mute_provider = external_mute_provider;
 	}
 
 	//==============================================================================
-	// 바깥의 음소거를 읽는 함수 반환.
+	/// 바깥의 음소거를 읽는 함수 반환.
+	///
+	/// # 돌려줌
+	/// 설정한 함수. (없으면 None)
 	//==============================================================================
 	pub fn get_external_mute_provider(&self) -> Option<Rc<dyn Fn() -> bool>> {
 		self.mute_state.borrow().external_mute_provider.clone()
 	}
 
 	//==============================================================================
-	// 누르기 전에 깨워 봐도 되는지 읽는 함수 설정. (웹뷰가 막는 플랫폼이면 false 를 돌려주는 함수, None 이면 허락, 첫 update 에서 한 번 읽는다)
+	/// 누르기 전에 깨워 봐도 되는지 읽는 함수 설정. (웹뷰가 막는 플랫폼이면 false 를 돌려주는 함수, None 이면 허락, 첫 update 에서 한 번 읽는다)
+	///
+	/// # 인자
+	/// - `autoplay_allowed_provider`: 깨워 봐도 되면 true 를 돌려주는 함수. (None 이면 허락)
+	///
+	/// # 예제
+	/// 누르기 전에는 깨우지 않기 (첫 update 전에 건다)
+	/// ```rust
+	/// use std::rc::Rc;
+	/// use vanilla::{Engine, EngineConfiguration, SoundSystem};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let mut sound_system = SoundSystem::new(&engine, Vec::new());
+	/// sound_system.set_autoplay_allowed_provider(Some(Rc::new(|| false)));
+	/// let autoplay_allowed_provider = sound_system.get_autoplay_allowed_provider().unwrap();
+	/// assert!(!autoplay_allowed_provider());
+	/// ```
 	//==============================================================================
 	pub fn set_autoplay_allowed_provider(&mut self, autoplay_allowed_provider: Option<Rc<dyn Fn() -> bool>>) {
 		self.autoplay_allowed_provider = autoplay_allowed_provider;
 	}
 
 	//==============================================================================
-	// 누르기 전에 깨워 봐도 되는지 읽는 함수 반환.
+	/// 누르기 전에 깨워 봐도 되는지 읽는 함수 반환.
+	///
+	/// # 돌려줌
+	/// 설정한 함수. (없으면 None, 허락으로 친다)
 	//==============================================================================
 	pub fn get_autoplay_allowed_provider(&self) -> Option<Rc<dyn Fn() -> bool>> {
 		self.autoplay_allowed_provider.clone()
 	}
 
 	//==============================================================================
-	// 엔진의 AudioManager. (나눠 든 손잡이)
+	/// 엔진의 AudioManager. (나눠 든 손잡이)
+	///
+	/// # 돌려줌
+	/// 엔진과 같은 AudioContext 를 보는 AudioManager.
 	//==============================================================================
 	pub fn get_audio_manager(&self) -> &AudioManager {
 		&self.audio_manager
 	}
 
 	//==============================================================================
-	// 배경음악과 효과음의 버스. (원본 getMusicBus, getEffectBus, 첫 누름 전에는 None)
+	/// 배경음악과 효과음의 버스. (원본 getMusicBus, getEffectBus, 첫 누름 전에는 None)
+	///
+	/// # 돌려줌
+	/// 배경음악 버스. (첫 누름 뒤의 update 전이거나 AudioContext 를 만들지 못했으면 None)
 	//==============================================================================
 	pub fn get_music_bus(&self) -> Option<&AudioBus> {
 		self.music_bus.as_ref()
 	}
 
+	//==============================================================================
+	/// 효과음 버스. (원본 getEffectBus, 첫 누름 전에는 None)
+	///
+	/// # 돌려줌
+	/// 효과음 버스. (첫 누름 뒤의 update 전이거나 AudioContext 를 만들지 못했으면 None)
+	//==============================================================================
 	pub fn get_effect_bus(&self) -> Option<&AudioBus> {
 		self.effect_bus.as_ref()
 	}
 
 	//==============================================================================
-	// 틀어 달라고 한 배경음악. (없으면 "")
+	/// 틀어 달라고 한 배경음악. (없으면 "")
+	///
+	/// # 돌려줌
+	/// 틀어 달라고 한 배경음악 id. (없으면 "")
 	//==============================================================================
 	pub fn get_music_id(&self) -> &str {
 		&self.music_id
 	}
 
 	//==============================================================================
-	// 설정의 음악 크기.
+	/// 설정의 음악 크기.
+	///
+	/// # 돌려줌
+	/// 설정의 음악 크기. (0 ~ 1, 처음은 1)
 	//==============================================================================
 	pub fn get_music_volume(&self) -> f32 {
 		self.music_volume
 	}
 
 	//==============================================================================
-	// 음악의 비. (멈춤 창의 반 크기 등)
+	/// 음악의 비. (멈춤 창의 반 크기 등)
+	///
+	/// # 돌려줌
+	/// 음악의 비. (0 ~ 1, 처음은 1)
 	//==============================================================================
 	pub fn get_music_scale(&self) -> f32 {
 		self.music_scale
 	}
 
 	//==============================================================================
-	// 설정의 효과음 크기.
+	/// 설정의 효과음 크기.
+	///
+	/// # 돌려줌
+	/// 설정의 효과음 크기. (0 ~ 1, 처음은 1)
 	//==============================================================================
 	pub fn get_sound_effect_volume(&self) -> f32 {
 		self.sound_effect_volume
 	}
 
 	//==============================================================================
-	// 사용자의 음소거 단추를 눌러 두었는지.
+	/// 사용자의 음소거 단추를 눌러 두었는지.
+	///
+	/// # 돌려줌
+	/// 사용자 음소거를 걸어 두었으면 true.
 	//==============================================================================
 	pub fn is_user_muted(&self) -> bool {
 		self.mute_state.borrow().is_user_muted
 	}
 
 	//==============================================================================
-	// 페이지가 가려져 있는지.
+	/// 페이지가 가려져 있는지.
+	///
+	/// # 돌려줌
+	/// 페이지가 가려져 있으면 true. (만들 때 엔진의 상태에서 시작해 페이지 이벤트로 바뀐다)
 	//==============================================================================
 	pub fn is_page_hidden(&self) -> bool {
 		self.mute_state.borrow().is_page_hidden
 	}
 
 	//==============================================================================
-	// 창이 포커스를 잃으면 음소거하는지. (터치가 주된 기기)
+	/// 창이 포커스를 잃으면 음소거하는지. (터치가 주된 기기)
+	///
+	/// # 돌려줌
+	/// 터치가 주된 기기라 포커스를 잃으면 음소거하면 true. (만들 때 정한다)
 	//==============================================================================
 	pub fn is_blur_mute_enabled(&self) -> bool {
 		self.mute_state.borrow().is_blur_mute_enabled
 	}
 
 	//==============================================================================
-	// 창이 포커스를 잃었는지. (음소거하는 기기에서만 true)
+	/// 창이 포커스를 잃었는지. (음소거하는 기기에서만 true)
+	///
+	/// # 돌려줌
+	/// 포커스를 잃어 음소거 중이면 true.
 	//==============================================================================
 	pub fn is_window_blurred(&self) -> bool {
 		self.mute_state.borrow().is_window_blurred
 	}
 
 	//==============================================================================
-	// 음소거로 AudioContext 를 멈춰 두었는지.
+	/// 음소거로 AudioContext 를 멈춰 두었는지.
+	///
+	/// # 돌려줌
+	/// 음소거로 AudioContext 를 멈춰 두었으면 true.
 	//==============================================================================
 	pub fn is_context_paused(&self) -> bool {
 		self.mute_state.borrow().is_context_paused
 	}
 
 	//==============================================================================
-	// 마지막으로 다시 깨워 본 때. (초, 아직 없으면 -무한대)
+	/// 마지막으로 다시 깨워 본 때. (초, 아직 없으면 -무한대)
+	///
+	/// # 돌려줌
+	/// 마지막으로 다시 깨워 본 때. (SoundSystem 을 만든 때부터 센 벽시계 초, 아직 없으면 f64::NEG_INFINITY)
 	//==============================================================================
 	pub fn get_last_context_resume_time(&self) -> f64 {
 		self.last_context_resume_time
 	}
 
 	//==============================================================================
-	// 지금 음소거여야 하는지. (플랫폼의 음소거, 사용자의 음소거 단추, 페이지가 가려짐, 창이 포커스를 잃음, 설정한 크기보다 먼저이다)
+	/// 지금 음소거여야 하는지. (플랫폼의 음소거, 사용자의 음소거 단추, 페이지가 가려짐, 창이 포커스를 잃음, 설정한 크기보다 먼저이다)
+	///
+	/// # 돌려줌
+	/// 하나라도 맞아 음소거여야 하면 true.
 	//==============================================================================
 	pub fn read_muted(&self) -> bool {
 		self.mute_state.borrow().read_muted()
 	}
 
 	//==============================================================================
-	// AudioContext 가 돌고 있는지. (돌지 않으면 소리를 내지 않는다)
+	/// AudioContext 가 돌고 있는지. (돌지 않으면 소리를 내지 않는다)
+	///
+	/// # 돌려줌
+	/// AudioContext 가 있고 돌고 있으면 true.
 	//==============================================================================
 	pub fn is_context_running(&self) -> bool {
 		self.audio_manager.is_context_running()
 	}
 
 	//==============================================================================
-	// 소리 받기. (효과음을 먼저, 배경음악을 나중에, 못 받은 소리는 건너뛴다, 이미 받은 것은 다시 받지 않는다, 애셋 폴더 기준 경로)
+	/// 소리 받기. (효과음을 먼저, 배경음악을 나중에, 못 받은 소리는 건너뛴다, 이미 받은 것은 다시 받지 않는다, 애셋 폴더 기준 경로)
+	/// - 끝에 update 를 한 번 부른다. (데스크탑은 이때 소리 장치를 연다)
+	///
+	/// # 인자
+	/// - `engine`: 애셋 폴더 기준 경로를 풀 엔진.
+	///
+	/// # 돌려줌
+	/// 걸어 둔 모든 소리 애셋(앞서 받은 것까지)을 기다리는 손잡이. (await 하면 다 받거나 실패할 때까지 기다린다)
+	///
+	/// # 예제
+	/// 받기 전에 틀어 달라고 해 두면 받은 뒤 튼다
+	/// ```rust,no_run
+	/// use vanilla::{Engine, EngineConfiguration, SoundRow, SoundSystem};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let mut sound_system = SoundSystem::new(&engine, vec![SoundRow::create_music("field", "tests/assets/audio/vorbis_stereo.ogg", 0.6)]);
+	/// sound_system.play_music("field", 0.0, false);
+	/// sound_system.load_sounds(&engine);
+	/// assert_eq!(sound_system.get_music_id(), "field");
+	/// ```
 	//==============================================================================
 	pub fn load_sounds(&mut self, engine: &Engine) -> SoundLoadHandle {
 		let mut effect_row_list = Vec::new();
@@ -544,15 +829,32 @@ impl SoundSystem {
 	}
 
 	//==============================================================================
-	// 걸어 둔 소리 애셋의 읽기 손잡이. (나눠 든다)
+	/// 걸어 둔 소리 애셋의 읽기 손잡이. (나눠 든다)
 	//==============================================================================
 	fn collect_audio_load_handles(&self) -> Vec<AudioLoadHandle> {
 		self.asset_by_id.values().flat_map(|asset_list| asset_list.iter().flatten()).map(|audio_asset| audio_asset.get_load_handle()).collect()
 	}
 
 	//==============================================================================
-	// 받기를 건 소리가 다 끝나기를 기다리는 퓨처. (원본 await loadSounds() 의 await 자리, load_sounds 뒤에 엔진 작업 안에서 await 한다)
-	// - 부를 때 든 소리 애셋을 나눠 들어 소리 체계를 빌리지 않는다. 못 받은 소리는 건너뛴다. (원본처럼 거부되지 않는다)
+	/// 받기를 건 소리가 다 끝나기를 기다리는 퓨처. (원본 await loadSounds() 의 await 자리, load_sounds 뒤에 엔진 작업 안에서 await 한다)
+	/// - 부를 때 든 소리 애셋을 나눠 들어 소리 체계를 빌리지 않는다. 못 받은 소리는 건너뛴다. (원본처럼 거부되지 않는다)
+	///
+	/// # 돌려줌
+	/// 부를 때 걸려 있는 소리 애셋을 다 받거나 실패하면 끝나는 퓨처. (걸린 것이 없으면 바로 끝난다)
+	///
+	/// # 예제
+	/// 받기를 건 소리가 없으면 첫 폴링에 끝난다
+	/// ```rust
+	/// use vanilla::{Engine, EngineConfiguration, SoundRow, SoundSystem};
+	///
+	/// let mut engine = Engine::new(EngineConfiguration::new());
+	/// let sound_system = SoundSystem::new(&engine, vec![SoundRow::create_effect("hit", &["tests/assets/audio/wav_s16_stereo.wav"], 1.0)]);
+	/// let sound_load_future = sound_system.wait_for_load();
+	/// let task_handle = engine.spawn_task(|_engine_context| async move {
+	/// 	sound_load_future.await;
+	/// });
+	/// assert!(task_handle.is_finished());
+	/// ```
 	//==============================================================================
 	pub fn wait_for_load(&self) -> SoundLoadFuture {
 		SoundLoadFuture {
@@ -561,7 +863,12 @@ impl SoundSystem {
 	}
 
 	//==============================================================================
-	// 소리 하나 받기. (무리면 모두, 못 받은 것은 None 으로 두고 알린 뒤 건너뛴다)
+	/// 소리 하나 받기. (무리면 모두, 못 받은 것은 None 으로 두고 알린 뒤 건너뛴다)
+	/// - 소리 표에는 더하지 않는다. (play_effect, play_music 은 표에 있는 id 만 낸다) 같은 id 로 받아 둔 것은 바꾼다.
+	///
+	/// # 인자
+	/// - `engine`: 애셋 폴더 기준 경로를 풀 엔진.
+	/// - `sound_row`: 받을 소리 줄. (paths 를 모두 받는다)
 	//==============================================================================
 	pub fn load_sound(&mut self, engine: &Engine, sound_row: &SoundRow) {
 		let mut asset_list = Vec::new();
@@ -580,14 +887,35 @@ impl SoundSystem {
 	}
 
 	//==============================================================================
-	// 소리 애셋 직접 더하기. (메모리에서 지은 소리처럼 파일로 받지 않는 것, 같은 id 의 녹음 무리에 덧붙인다)
+	/// 소리 애셋 직접 더하기. (메모리에서 지은 소리처럼 파일로 받지 않는 것, 같은 id 의 녹음 무리에 덧붙인다)
+	///
+	/// # 인자
+	/// - `sound_id`: 덧붙일 소리 id. (소리 표에 그 id 의 줄이 있어야 난다)
+	/// - `audio_asset`: 더할 소리 애셋. (읽힌 것만 고른다)
+	///
+	/// # 예제
+	/// 메모리의 바이트로 읽은 소리 더하기
+	/// ```rust
+	/// use std::rc::Rc;
+	/// use vanilla::{AudioAsset, Engine, EngineConfiguration, SoundRow, SoundSystem};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let mut sound_system = SoundSystem::new(&engine, vec![SoundRow::create_effect("chime", &[], 1.0)]);
+	/// let audio_asset = Rc::new(AudioAsset::new());
+	/// let bytes = std::fs::read("tests/assets/audio/wav_s16_stereo.wav").unwrap();
+	/// assert!(audio_asset.load_from_bytes(bytes).get_load_error().is_none());
+	/// sound_system.add_sound_asset("chime", audio_asset);
+	/// ```
 	//==============================================================================
 	pub fn add_sound_asset(&mut self, sound_id: &str, audio_asset: Rc<AudioAsset>) {
 		self.asset_by_id.entry(String::from(sound_id)).or_default().push(Some(audio_asset));
 	}
 
 	//==============================================================================
-	// 설정의 음악 크기. (0 ~ 1)
+	/// 설정의 음악 크기. (0 ~ 1)
+	///
+	/// # 인자
+	/// - `music_volume`: 음악 크기. (0 ~ 1 로 자르고, 유한한 수가 아니면 0)
 	//==============================================================================
 	pub fn set_music_volume(&mut self, music_volume: f32) {
 		self.music_volume = clamp_sound_volume(music_volume);
@@ -595,7 +923,23 @@ impl SoundSystem {
 	}
 
 	//==============================================================================
-	// 음악의 비. (0 ~ 1, 멈춤 창이 떠 있는 동안 반 크기처럼 설정과 따로 줄일 때)
+	/// 음악의 비. (0 ~ 1, 멈춤 창이 떠 있는 동안 반 크기처럼 설정과 따로 줄일 때)
+	///
+	/// # 인자
+	/// - `music_scale`: 음악 크기에 곱할 비. (0 ~ 1 로 자르고, 유한한 수가 아니면 0)
+	///
+	/// # 예제
+	/// 멈춤 창이 떠 있는 동안 반 크기
+	/// ```rust
+	/// use vanilla::{Engine, EngineConfiguration, SoundSystem};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let mut sound_system = SoundSystem::new(&engine, Vec::new());
+	/// sound_system.set_music_volume(0.8);
+	/// sound_system.set_music_scale(0.5);
+	/// assert_eq!(sound_system.get_music_volume(), 0.8);
+	/// assert_eq!(sound_system.get_music_volume() * sound_system.get_music_scale(), 0.4);
+	/// ```
 	//==============================================================================
 	pub fn set_music_scale(&mut self, music_scale: f32) {
 		self.music_scale = clamp_sound_volume(music_scale);
@@ -603,7 +947,10 @@ impl SoundSystem {
 	}
 
 	//==============================================================================
-	// 설정의 효과음 크기. (0 ~ 1)
+	/// 설정의 효과음 크기. (0 ~ 1)
+	///
+	/// # 인자
+	/// - `sound_effect_volume`: 효과음 크기. (0 ~ 1 로 자르고, 유한한 수가 아니면 0)
 	//==============================================================================
 	pub fn set_sound_effect_volume(&mut self, sound_effect_volume: f32) {
 		self.sound_effect_volume = clamp_sound_volume(sound_effect_volume);
@@ -611,7 +958,10 @@ impl SoundSystem {
 	}
 
 	//==============================================================================
-	// 사용자의 음소거 단추. (음악과 효과음을 한꺼번에)
+	/// 사용자의 음소거 단추. (음악과 효과음을 한꺼번에)
+	///
+	/// # 인자
+	/// - `is_user_muted`: true 면 음소거, false 면 풀기. (다른 음소거가 남아 있으면 그대로 음소거)
 	//==============================================================================
 	pub fn set_user_muted(&mut self, is_user_muted: bool) {
 		self.mute_state.borrow_mut().is_user_muted = is_user_muted;
@@ -620,9 +970,28 @@ impl SoundSystem {
 	}
 
 	//==============================================================================
-	// 배경음악 틀기. (반복한다, "" 이면 끈다, 받기 전이거나 첫 누름 전이면 그때 튼다)
-	// - fade_seconds 동안 앞 음악은 줄고 새 음악은 0 에서 오른다. (0 이면 바로)
-	// - is_resumed 면 그 음악을 멈췄던 자리에서 잇는다. (아니면 처음부터)
+	/// 배경음악 틀기. (반복한다, "" 이면 끈다, 받기 전이거나 첫 누름 전이면 그때 튼다)
+	/// - fade_seconds 동안 앞 음악은 줄고 새 음악은 0 에서 오른다. (0 이면 바로)
+	/// - is_resumed 면 그 음악을 멈췄던 자리에서 잇는다. (아니면 처음부터)
+	///
+	/// # 인자
+	/// - `sound_id`: 틀 배경음악 id. ("" 이면 끈다, 지금 틀어 달라고 한 것과 같으면 아무것도 하지 않는다)
+	/// - `fade_seconds`: 겹쳐 바꾸는 시간. (초, 0 이면 바로, 음수는 0)
+	/// - `is_resumed`: true 면 그 음악을 멈췄던 자리에서 잇는다. (멈춘 자리는 소리마다 기억한다)
+	///
+	/// # 예제
+	/// 전투에 들어갈 때 1 초 겹쳐 바꾸고, 나올 때 필드 음악을 멈췄던 자리에서 잇기
+	/// ```rust,no_run
+	/// use vanilla::SoundSystem;
+	///
+	/// fn enter_battle(sound_system: &mut SoundSystem) {
+	/// 	sound_system.play_music("battle", 1.0, false);
+	/// }
+	///
+	/// fn leave_battle(sound_system: &mut SoundSystem) {
+	/// 	sound_system.play_music("field", 1.0, true);
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn play_music(&mut self, sound_id: &str, fade_seconds: f32, is_resumed: bool) {
 		if sound_id == self.music_id {
@@ -635,8 +1004,23 @@ impl SoundSystem {
 	}
 
 	//==============================================================================
-	// 효과음 내기. (음소거, 첫 누름 전, 받기 전, 다시 낼 간격 안이면 내지 않는다)
-	// - volume: 이번의 크기. (0 ~ 1, 소리의 크기와 설정의 효과음 크기에 곱한다)  pan: 좌우. (-1 왼쪽 ~ 1 오른쪽, 0 가운데)
+	/// 효과음 내기. (음소거, 첫 누름 전, 받기 전, 다시 낼 간격 안이면 내지 않는다)
+	/// - volume: 이번의 크기. (0 ~ 1, 소리의 크기와 설정의 효과음 크기에 곱한다)  pan: 좌우. (-1 왼쪽 ~ 1 오른쪽, 0 가운데)
+	///
+	/// # 인자
+	/// - `sound_id`: 낼 효과음 id. (소리 표에 있고 받아 둔 것)
+	/// - `volume`: 이번의 크기. (0 ~ 1, 소리의 크기와 곱해 0 ~ 1 로 자르고 0.001 이하면 내지 않는다)
+	/// - `pan`: 좌우. (-1 왼쪽 ~ 1 오른쪽, 0 가운데, 범위 밖은 자르고 유한한 수가 아니면 0)
+	///
+	/// # 예제
+	/// 화면 왼쪽에서 맞은 소리를 반 크기로
+	/// ```rust,no_run
+	/// use vanilla::SoundSystem;
+	///
+	/// fn play_hit(sound_system: &mut SoundSystem) {
+	/// 	sound_system.play_effect("hit", 0.5, -0.8);
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn play_effect(&mut self, sound_id: &str, volume: f32, pan: f32) {
 		let effect_bus = match &self.effect_bus {
@@ -721,7 +1105,7 @@ impl SoundSystem {
 	}
 
 	//==============================================================================
-	// 무리에서 하나 고르기. (받은 것 가운데 바로 앞과 다른 것, 하나뿐이면 그것, 없으면 None)
+	/// 무리에서 하나 고르기. (받은 것 가운데 바로 앞과 다른 것, 하나뿐이면 그것, 없으면 None)
 	//==============================================================================
 	fn pick_variant(&mut self, sound_id: &str, asset_list: &[Option<Rc<AudioAsset>>]) -> Option<Rc<AudioAsset>> {
 		let loaded_index_list: Vec<usize> = asset_list
@@ -747,7 +1131,7 @@ impl SoundSystem {
 	}
 
 	//==============================================================================
-	// 나는 효과음을 그 수까지 줄이기. (오래된 것부터 끊음, sound_id 가 "" 이면 모든 효과음)
+	/// 나는 효과음을 그 수까지 줄이기. (오래된 것부터 끊음, sound_id 가 "" 이면 모든 효과음)
 	//==============================================================================
 	fn trim_voices(&mut self, sound_id: &str, keep_count: usize) {
 		let matching_count = self.voice_list.iter().filter(|voice| sound_id.is_empty() || voice.sound_id == sound_id).count();
@@ -763,8 +1147,23 @@ impl SoundSystem {
 	}
 
 	//==============================================================================
-	// 나는 효과음을 줄여 끄기. (sound_id 가 "" 이면 모든 효과음, 줄이는 초가 0 이면 바로 끊음)
-	// - 원본처럼 지금 크기에서 0 으로 줄이고 목록에서 뺀다. (앞만 트는 소리가 줄어드는 중이어도 지금 크기에서 새로 줄인다)
+	/// 나는 효과음을 줄여 끄기. (sound_id 가 "" 이면 모든 효과음, 줄이는 초가 0 이면 바로 끊음)
+	/// - 원본처럼 지금 크기에서 0 으로 줄이고 목록에서 뺀다. (앞만 트는 소리가 줄어드는 중이어도 지금 크기에서 새로 줄인다)
+	///
+	/// # 인자
+	/// - `sound_id`: 줄여 끌 효과음 id. ("" 이면 모든 효과음)
+	/// - `fade_seconds`: 줄이는 시간. (초, 0 이하이거나 AudioContext 가 없으면 바로 끊는다)
+	///
+	/// # 예제
+	/// 장면이 바뀔 때 모든 효과음을 0.3 초 동안 줄여 끄기
+	/// ```rust,no_run
+	/// use vanilla::SoundSystem;
+	///
+	/// fn leave_stage(sound_system: &mut SoundSystem) {
+	/// 	sound_system.fade_out_effects("", 0.3);
+	/// 	assert_eq!(sound_system.get_effect_voice_count(), 0);
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn fade_out_effects(&mut self, sound_id: &str, fade_seconds: f32) {
 		let clamped_fade_seconds = fade_seconds.max(0.0) as f64;
@@ -793,7 +1192,7 @@ impl SoundSystem {
 	}
 
 	//==============================================================================
-	// 나는 효과음을 모두 끊기. (멈춤 창이 뜰 때 등)
+	/// 나는 효과음을 모두 끊기. (멈춤 창이 뜰 때 등)
 	//==============================================================================
 	pub fn stop_effects(&mut self) {
 		for voice in self.voice_list.iter_mut() {
@@ -803,14 +1202,17 @@ impl SoundSystem {
 	}
 
 	//==============================================================================
-	// 나는 효과음 수. (줄여 끄는 중인 것은 빼고)
+	/// 나는 효과음 수. (줄여 끄는 중인 것은 빼고)
+	///
+	/// # 돌려줌
+	/// 나고 있는 효과음 수. (끝난 것은 update 가 목록에서 뺀다)
 	//==============================================================================
 	pub fn get_effect_voice_count(&self) -> usize {
 		self.voice_list.len()
 	}
 
 	//==============================================================================
-	// 매 프레임. (첫 누름 뒤 소리의 길 만들기, 플랫폼의 음소거 따르기, 배경음악 틀기, 크기 걸기)
+	/// 매 프레임. (첫 누름 뒤 소리의 길 만들기, 플랫폼의 음소거 따르기, 배경음악 틀기, 크기 걸기)
 	//==============================================================================
 	pub fn update(&mut self) {
 		self.try_autoplay();
@@ -827,8 +1229,8 @@ impl SoundSystem {
 	}
 
 	//==============================================================================
-	// 다시 깨워 보기. (음소거가 아닌데 AudioContext 가 돌지 않으면 CONTEXT_RESUME_RETRY_INTERVAL 마다)
-	// - 아이폰은 앱으로 돌아온 순간(다시 보임)에 부른 resume() 을 오디오가 아직 돌아오기 전이라 듣지 않는 일이 있다.
+	/// 다시 깨워 보기. (음소거가 아닌데 AudioContext 가 돌지 않으면 CONTEXT_RESUME_RETRY_INTERVAL 마다)
+	/// - 아이폰은 앱으로 돌아온 순간(다시 보임)에 부른 resume() 을 오디오가 아직 돌아오기 전이라 듣지 않는 일이 있다.
 	//==============================================================================
 	fn retry_context_resume(&mut self) {
 		let is_context_paused = self.is_context_paused();
@@ -844,7 +1246,7 @@ impl SoundSystem {
 	}
 
 	//==============================================================================
-	// 누르기 전에 깨워 보기. (허락할 때 처음 한 번, 웹뷰가 막으면 AudioContext 가 멈춘 채로 남고 첫 누름에 엔진이 깨운다)
+	/// 누르기 전에 깨워 보기. (허락할 때 처음 한 번, 웹뷰가 막으면 AudioContext 가 멈춘 채로 남고 첫 누름에 엔진이 깨운다)
 	//==============================================================================
 	fn try_autoplay(&mut self) {
 		if self.is_autoplay_tried {
@@ -861,7 +1263,7 @@ impl SoundSystem {
 	}
 
 	//==============================================================================
-	// 소리의 길 만들기. (첫 누름 뒤 한 번, AudioContext 를 그 전에 만들지 않게, 버스를 만들 때 AudioContext 도 만든다)
+	/// 소리의 길 만들기. (첫 누름 뒤 한 번, AudioContext 를 그 전에 만들지 않게, 버스를 만들 때 AudioContext 도 만든다)
 	//==============================================================================
 	fn ensure_players(&mut self) {
 		if self.effect_bus.is_some() {
@@ -881,7 +1283,7 @@ impl SoundSystem {
 	}
 
 	//==============================================================================
-	// 크기 적용. (음소거면 0, 원본처럼 버스 gain 에 setTargetAtTime(크기, 지금, 0.05))
+	/// 크기 적용. (음소거면 0, 원본처럼 버스 gain 에 setTargetAtTime(크기, 지금, 0.05))
 	//==============================================================================
 	fn apply_volumes(&mut self) {
 		let (Some(music_bus), Some(effect_bus)) = (&self.music_bus, &self.effect_bus) else {
@@ -894,7 +1296,7 @@ impl SoundSystem {
 	}
 
 	//==============================================================================
-	// 음소거 적용. (바뀔 때만, 음소거가 되면 나는 효과음을 끊음)
+	/// 음소거 적용. (바뀔 때만, 음소거가 되면 나는 효과음을 끊음)
 	//==============================================================================
 	fn apply_mute(&mut self) {
 		if self.effect_bus.is_none() {
@@ -912,15 +1314,15 @@ impl SoundSystem {
 	}
 
 	//==============================================================================
-	// 음소거인 동안 AudioContext 멈추기와 풀리면 깨우기. (바뀔 때만, 첫 누름 전에는 AudioContext 가 없어 하지 않는다)
+	/// 음소거인 동안 AudioContext 멈추기와 풀리면 깨우기. (바뀔 때만, 첫 누름 전에는 AudioContext 가 없어 하지 않는다)
 	//==============================================================================
 	fn apply_context_pause(&mut self) {
 		self.mute_state.borrow_mut().apply_context_pause();
 	}
 
 	//==============================================================================
-	// 배경음악 틀기와 바꾸기. (AudioContext 가 돌고 받아 둔 것만, 음소거 중에도 소리 없이 돌아 풀면 이어 들린다)
-	// - 바꾸라고 하면 앞 음악은 곧바로 줄이기 시작하고(멈춘 자리를 기억), 새 음악은 받아 두었으면 0 에서 올린다.
+	/// 배경음악 틀기와 바꾸기. (AudioContext 가 돌고 받아 둔 것만, 음소거 중에도 소리 없이 돌아 풀면 이어 들린다)
+	/// - 바꾸라고 하면 앞 음악은 곧바로 줄이기 시작하고(멈춘 자리를 기억), 새 음악은 받아 두었으면 0 에서 올린다.
 	//==============================================================================
 	fn update_music(&mut self) {
 		let music_bus = match &self.music_bus {
@@ -995,7 +1397,7 @@ impl SoundSystem {
 	}
 
 	//==============================================================================
-	// 틀던 배경음악을 줄여 끄기. (fade_seconds 동안, 다 줄어든 때의 자리를 기억)
+	/// 틀던 배경음악을 줄여 끄기. (fade_seconds 동안, 다 줄어든 때의 자리를 기억)
 	//==============================================================================
 	fn fade_out_music(&mut self, mut playing_music: MusicVoice, fade_seconds: f64) {
 		let context_time = self.read_context_time();
@@ -1020,7 +1422,7 @@ impl SoundSystem {
 	}
 
 	//==============================================================================
-	// 끝난 소리 치우기. (원본 onended 가 목록에서 빼는 자리, 크기와 멈춤은 소리 장치가 자동화대로 한다)
+	/// 끝난 소리 치우기. (원본 onended 가 목록에서 빼는 자리, 크기와 멈춤은 소리 장치가 자동화대로 한다)
 	//==============================================================================
 	fn update_voices(&mut self) {
 		self.voice_list.retain(|voice| voice.audio_player.is_playing());
@@ -1030,7 +1432,7 @@ impl SoundSystem {
 }
 
 //==============================================================================
-// 0 ~ 1 로 다듬기. (유한한 수가 아니면 0, 원본 clampVolume)
+/// 0 ~ 1 로 다듬기. (유한한 수가 아니면 0, 원본 clampVolume)
 //==============================================================================
 fn clamp_sound_volume(volume: f32) -> f32 {
 	if !volume.is_finite() {
@@ -1040,7 +1442,28 @@ fn clamp_sound_volume(volume: f32) -> f32 {
 }
 
 //==============================================================================
-// 함께 쓰는 소리 정하기. (None 이면 비운다)
+/// 함께 쓰는 소리 정하기. (None 이면 비운다)
+///
+/// # 인자
+/// - `sound_system`: 함께 쓸 소리 체계. (None 이면 비운다, 스레드마다 따로 든다)
+///
+/// # 예제
+/// 정해 두고 다른 곳에서 읽어 쓰기
+/// ```rust
+/// use std::cell::RefCell;
+/// use std::rc::Rc;
+/// use vanilla::{read_sound_system, set_sound_system, Engine, EngineConfiguration, SoundSystem};
+///
+/// let engine = Engine::new(EngineConfiguration::new());
+/// let sound_system = Rc::new(RefCell::new(SoundSystem::new(&engine, Vec::new())));
+/// set_sound_system(Some(sound_system.clone()));
+/// if let Some(shared_sound_system) = read_sound_system() {
+/// 	shared_sound_system.borrow_mut().set_sound_effect_volume(0.5);
+/// }
+/// assert_eq!(sound_system.borrow().get_sound_effect_volume(), 0.5);
+/// set_sound_system(None);
+/// assert!(read_sound_system().is_none());
+/// ```
 //==============================================================================
 pub fn set_sound_system(sound_system: Option<Rc<RefCell<SoundSystem>>>) {
 	CURRENT_SOUND_SYSTEM.with(|current_sound_system| {
@@ -1049,7 +1472,10 @@ pub fn set_sound_system(sound_system: Option<Rc<RefCell<SoundSystem>>>) {
 }
 
 //==============================================================================
-// 함께 쓰는 소리. (아직 없으면 None)
+/// 함께 쓰는 소리. (아직 없으면 None)
+///
+/// # 돌려줌
+/// 이 스레드에 set_sound_system 으로 정한 소리 체계. (정하지 않았거나 비웠으면 None)
 //==============================================================================
 pub fn read_sound_system() -> Option<Rc<RefCell<SoundSystem>>> {
 	CURRENT_SOUND_SYSTEM.with(|current_sound_system| current_sound_system.borrow().clone())
@@ -1062,7 +1488,7 @@ mod tests {
 	use std::cell::Cell;
 
 	//==============================================================================
-	// 무음 WAV. (16 비트 모노 8000 Hz, sample_count 개)
+	/// 무음 WAV. (16 비트 모노 8000 Hz, sample_count 개)
 	//==============================================================================
 	fn create_silent_wav(sample_count: u32) -> Vec<u8> {
 		let data_size = sample_count * 2;
@@ -1084,7 +1510,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 읽힌 무음 소리 애셋. (seconds 초)
+	/// 읽힌 무음 소리 애셋. (seconds 초)
 	//==============================================================================
 	fn create_silent_asset(seconds: f32) -> Rc<AudioAsset> {
 		let audio_asset = Rc::new(AudioAsset::new());
@@ -1093,6 +1519,9 @@ mod tests {
 		audio_asset
 	}
 
+	//==============================================================================
+	/// 같은 소리 간격과 수 제한. (간격 안에서는 내지 않고, maximum_voices 를 넘으면 오래된 것을 끊는다, 0 이면 하나만)
+	//==============================================================================
 	#[test]
 	fn interval_and_voice_limit() {
 		let engine = Engine::new(EngineConfiguration::new());
@@ -1134,8 +1563,8 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 줄여 끄기: 목록에서 빠지고 지금 gain.value 에서 0 으로 줄인 뒤 멈춘다. (자동화와 stop(when)은 소리 장치가 한다, 셈은 platform/audio 시험이 크롬과 견준다)
-	// - 줄여 끄는 소리는 stop_effects 로도 끊기지 않고, 멈춘 뒤 update 가 치운다.
+	/// 줄여 끄기: 목록에서 빠지고 지금 gain.value 에서 0 으로 줄인 뒤 멈춘다. (자동화와 stop(when)은 소리 장치가 한다, 셈은 platform/audio 시험이 크롬과 견준다)
+	/// - 줄여 끄는 소리는 stop_effects 로도 끊기지 않고, 멈춘 뒤 update 가 치운다.
 	//==============================================================================
 	#[test]
 	fn fade_out_moves_voice_to_release_until_stopped() {
@@ -1163,7 +1592,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 누르기 전에 깨워 보기는 첫 update 에서 한 번만 허락을 묻는다.
+	/// 누르기 전에 깨워 보기는 첫 update 에서 한 번만 허락을 묻는다.
 	//==============================================================================
 	#[test]
 	fn autoplay_provider_is_asked_once() {
@@ -1182,8 +1611,8 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 페이지 이벤트: 가려지면 음소거, 터치가 주된 기기에서 포커스를 잃으면 음소거, 누르거나 포커스를 얻거나 다시 보이면 풀린다.
-	// - 마우스가 주된 기기(데스크탑)는 포커스를 잃어도 음소거하지 않는다.
+	/// 페이지 이벤트: 가려지면 음소거, 터치가 주된 기기에서 포커스를 잃으면 음소거, 누르거나 포커스를 얻거나 다시 보이면 풀린다.
+	/// - 마우스가 주된 기기(데스크탑)는 포커스를 잃어도 음소거하지 않는다.
 	//==============================================================================
 	#[test]
 	fn page_events_mute_and_unmute() {
@@ -1235,7 +1664,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 가려졌다 다시 보이는 사이에 update 가 없어도 내던 효과음은 끊긴다. (원본은 가려지는 순간 끊는다)
+	/// 가려졌다 다시 보이는 사이에 update 가 없어도 내던 효과음은 끊긴다. (원본은 가려지는 순간 끊는다)
 	//==============================================================================
 	#[test]
 	fn hidden_page_stops_effects() {
@@ -1256,7 +1685,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 배경음악: 받기 전에 틀어 달라고 하면 기억했다가 받으면 튼다, "" 면 끈다, 멈췄던 자리에서 잇는다, 첫 파일을 못 받았으면 틀지 않는다.
+	/// 배경음악: 받기 전에 틀어 달라고 하면 기억했다가 받으면 튼다, "" 면 끈다, 멈췄던 자리에서 잇는다, 첫 파일을 못 받았으면 틀지 않는다.
 	//==============================================================================
 	#[test]
 	fn music_request_waits_and_resumes() {
@@ -1309,7 +1738,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 크기는 0 ~ 1, 수가 아니면 0. (원본 clampVolume) 함께 쓰는 소리는 정한 것을 돌려준다.
+	/// 크기는 0 ~ 1, 수가 아니면 0. (원본 clampVolume) 함께 쓰는 소리는 정한 것을 돌려준다.
 	//==============================================================================
 	#[test]
 	fn volume_setters_clamp_and_shared_sound_system() {
@@ -1331,7 +1760,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 버스는 첫 update 뒤에 생긴다. 버스의 크기 칸은 SoundSystem 이 건드리지 않는다. (설정 크기는 버스 gain 의 setTargetAtTime 으로 소리 장치가 따라간다)
+	/// 버스는 첫 update 뒤에 생긴다. 버스의 크기 칸은 SoundSystem 이 건드리지 않는다. (설정 크기는 버스 gain 의 setTargetAtTime 으로 소리 장치가 따라간다)
 	//==============================================================================
 	#[test]
 	fn buses_follow_volume_settings() {

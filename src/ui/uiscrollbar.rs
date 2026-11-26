@@ -4,10 +4,8 @@
 //! - 매 tick 대상의 오프셋 / 콘텐트 크기 / 보이는 영역을 읽어 썸 위치와 크기를 맞춘다.
 //! - 원본과 다른 것:
 //!   - 원본 UIScrollBar 는 WorldNode 를 상속한 노드이고, 트랙 Paint 와 썸 노드(Paint)를 자기 아래에 만든다.
-//!   ```text
 //!     러스트 판은 노드에 붙는 컴포넌트이고, 트랙과 썸을 직접 그린다. (썸 노드 없이 썸 사각형과 켜짐만 든다)
 //!     썸 상태는 원본 썸 노드처럼 처음은 켜진 0 크기이고, 끌 때 사각형을 그대로 둔다. (get_thumb_rect 도 원본 getThumbRect 처럼 처음은 0 크기 사각형)
-//!   ```
 //!   - 대상은 스크롤 뷰 컴포넌트 대신 UIScrollView 가 붙은 노드의 핸들이다. (set_scroll_view / get_scroll_view)
 //!   - 트랙 누름 자리와 썸 안 판정은 노드 행렬의 역으로 바꾼 로컬 좌표로 한다. (원본은 월드 위치를 뺀다. 회전 / 크기가 없으면 같다)
 //! - UI 문서(UIDocument)는 register_node_type 으로 등록하면 원본 노드 꼴로 쓰고 읽는다. (노드 type "UIScrollBar", 트랙 Paint, 썸 노드, uidocument.rs 의 UIDocumentNode)
@@ -32,7 +30,9 @@ const SCROLLBAR_ROUND_SIZE: f32 = 4.0;
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ScrollBarAxis {
+	/// 가로. (썸이 왼쪽 오른쪽으로 움직이고 오프셋 x 를 바꾼다)
 	Horizontal,
+	/// 세로. (썸이 위아래로 움직이고 오프셋 y 를 바꾼다)
 	Vertical,
 }
 
@@ -64,6 +64,27 @@ struct ThumbMetrics {
 
 //==============================================================================
 /// 스크롤바.
+/// - 대상 스크롤 뷰 노드의 오프셋, 콘텐트 크기, 보이는 영역을 매 tick 읽어 썸을 맞춘다. 썸이나 트랙을 끌면 대상 오프셋을 바로 바꾼다.
+///
+/// # 예제
+/// 스크롤 뷰가 만든 세로 스크롤바의 썸
+/// ```rust
+/// use vanilla::{Engine, EngineConfiguration, NodeTree, Pivot, Rect, UIScrollBar, UIScrollView, Vector2};
+///
+/// let engine = Engine::new(EngineConfiguration::new());
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.get_root_id();
+/// let scroll_id = node_tree.create_child(root_id, "scroll");
+/// node_tree[scroll_id].set_pivot(Pivot::TOP_LEFT);
+/// node_tree[scroll_id].set_content_size(Vector2::create(200.0, 112.0));
+/// let scroll_view = node_tree.add_component(scroll_id, UIScrollView::new()).expect("scroll view");
+/// scroll_view.set_scroll_content_size(Vector2::create(200.0, 448.0));
+/// let scroll_bar_id = UIScrollView::set_shows_vertical_scroll_bar_in_tree(&mut node_tree, scroll_id, true).expect("scroll bar");
+/// node_tree.tick(&engine, 0.016);
+///
+/// let scroll_bar = node_tree[scroll_bar_id].get_component::<UIScrollBar>().expect("scroll bar");
+/// assert_eq!(scroll_bar.get_thumb_rect(), Some(Rect::create(0.0, 0.0, 12.0, 25.0)));
+/// ```
 //==============================================================================
 pub struct UIScrollBar {
 	component_base: ComponentBase,
@@ -87,6 +108,36 @@ pub struct UIScrollBar {
 impl UIScrollBar {
 	//==============================================================================
 	/// 생성. (세로, 트랙 옅은 검정, 썸 반투명 흰색, 썸 최소 길이 24, 자동 숨김)
+	/// - 트리에 붙이려면 node_tree.add_component 를 쓴다. (붙을 때 피봇, 앵커를 왼쪽 위로 두고 interactable 을 켠다)
+	///
+	/// # 돌려줌
+	/// 대상이 없는 새 스크롤바.
+	///
+	/// # 예제
+	/// 스크롤 뷰 아래에 가로 스크롤바를 직접 붙이기
+	/// ```rust
+	/// use vanilla::{Engine, EngineConfiguration, NodeTree, Pivot, Rect, ScrollBarAxis, UIScrollBar, UIScrollView, Vector2};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let scroll_id = node_tree.create_child(root_id, "scroll");
+	/// node_tree[scroll_id].set_pivot(Pivot::TOP_LEFT);
+	/// node_tree[scroll_id].set_content_size(Vector2::create(200.0, 100.0));
+	/// let scroll_view = node_tree.add_component(scroll_id, UIScrollView::new()).expect("scroll view");
+	/// scroll_view.set_scroll_content_size(Vector2::create(800.0, 100.0));
+	///
+	/// let scroll_bar_id = node_tree.create_child(scroll_id, "bar");
+	/// let mut scroll_bar = UIScrollBar::new();
+	/// scroll_bar.set_axis(ScrollBarAxis::Horizontal);
+	/// scroll_bar.set_scroll_view(Some(scroll_id));
+	/// node_tree.add_component(scroll_bar_id, scroll_bar);
+	/// node_tree[scroll_bar_id].set_rect(0.0, 92.0, 200.0, 8.0);
+	/// node_tree.tick(&engine, 0.016);
+	///
+	/// let scroll_bar = node_tree[scroll_bar_id].get_component::<UIScrollBar>().expect("scroll bar");
+	/// assert_eq!(scroll_bar.get_thumb_rect(), Some(Rect::create(0.0, 0.0, 50.0, 8.0)));
+	/// ```
 	//==============================================================================
 	pub fn new() -> UIScrollBar {
 		UIScrollBar {
@@ -108,6 +159,9 @@ impl UIScrollBar {
 
 	//==============================================================================
 	/// 대상 스크롤 뷰 설정. (UIScrollView 가 붙은 노드)
+	///
+	/// # 인자
+	/// - `scroll_view_node_id`: UIScrollView 가 붙은 노드. None 이면 대상이 없어 썸을 끄고 터치를 받지 않는다.
 	//==============================================================================
 	pub fn set_scroll_view(&mut self, scroll_view_node_id: Option<NodeId>) {
 		self.scroll_view_node_id = scroll_view_node_id;
@@ -115,6 +169,9 @@ impl UIScrollBar {
 
 	//==============================================================================
 	/// 대상 스크롤 뷰 반환. (TouchRecognizer 가 자기 스크롤 뷰로 드래그를 넘기지 않으려고 읽는다)
+	///
+	/// # 돌려줌
+	/// 대상 스크롤 뷰 노드. 정하지 않았으면 None.
 	//==============================================================================
 	pub fn get_scroll_view(&self) -> Option<NodeId> {
 		self.scroll_view_node_id
@@ -122,6 +179,9 @@ impl UIScrollBar {
 
 	//==============================================================================
 	/// 축 설정.
+	///
+	/// # 인자
+	/// - `axis`: 썸이 움직일 축. (기본 세로)
 	//==============================================================================
 	pub fn set_axis(&mut self, axis: ScrollBarAxis) {
 		self.axis = axis;
@@ -129,6 +189,9 @@ impl UIScrollBar {
 
 	//==============================================================================
 	/// 축 반환.
+	///
+	/// # 돌려줌
+	/// 지금 축.
 	//==============================================================================
 	pub fn get_axis(&self) -> ScrollBarAxis {
 		self.axis
@@ -136,6 +199,9 @@ impl UIScrollBar {
 
 	//==============================================================================
 	/// 트랙 색 설정.
+	///
+	/// # 인자
+	/// - `color`: 트랙(바탕) 색. (기본 (0, 0, 0, 0.15))
 	//==============================================================================
 	pub fn set_track_color(&mut self, color: impl Into<Color>) {
 		self.track_color = color.into();
@@ -143,6 +209,9 @@ impl UIScrollBar {
 
 	//==============================================================================
 	/// 썸 색 설정.
+	///
+	/// # 인자
+	/// - `color`: 썸 색. (기본 (1, 1, 1, 0.6))
 	//==============================================================================
 	pub fn set_thumb_color(&mut self, color: impl Into<Color>) {
 		self.thumb_color = color.into();
@@ -150,6 +219,9 @@ impl UIScrollBar {
 
 	//==============================================================================
 	/// 트랙 색 반환. (원본은 트랙 Paint 컴포넌트의 색이다. 러스트 판은 직접 그려 색을 든다)
+	///
+	/// # 돌려줌
+	/// 트랙 색.
 	//==============================================================================
 	pub fn get_track_color(&self) -> Color {
 		self.track_color
@@ -157,6 +229,9 @@ impl UIScrollBar {
 
 	//==============================================================================
 	/// 썸 색 반환. (원본은 썸 노드 Paint 컴포넌트의 색이다)
+	///
+	/// # 돌려줌
+	/// 썸 색.
 	//==============================================================================
 	pub fn get_thumb_color(&self) -> Color {
 		self.thumb_color
@@ -179,6 +254,9 @@ impl UIScrollBar {
 
 	//==============================================================================
 	/// 썸 최소 길이 설정.
+	///
+	/// # 인자
+	/// - `min_thumb_size`: 썸이 축 방향으로 가질 가장 짧은 길이. (픽셀, 기본 24) 보이는 비율로 셈한 길이가 이보다 짧으면 이 길이를 쓴다.
 	//==============================================================================
 	pub fn set_min_thumb_size(&mut self, min_thumb_size: f32) {
 		self.min_thumb_size = min_thumb_size;
@@ -187,6 +265,9 @@ impl UIScrollBar {
 	//==============================================================================
 	/// 자동 숨김 설정. (콘텐트가 보이는 영역에 들어오면 트랙까지 숨긴다)
 	/// - 노드는 켜 둔 채 보이지 않게만 해, 콘텐트가 길어지거나 자동 숨김을 끄면 다음 tick 에 다시 보인다.
+	///
+	/// # 인자
+	/// - `auto_hide`: true 면 스크롤할 것이 없을 때 스크롤바 노드를 끈다. (기본 true) false 면 썸만 끄고 트랙은 그린다.
 	//==============================================================================
 	pub fn set_auto_hide(&mut self, auto_hide: bool) {
 		self.auto_hide = auto_hide;
@@ -212,6 +293,27 @@ impl UIScrollBar {
 
 	//==============================================================================
 	/// 지금 썸 사각형. (스크롤바 노드 영역 안, 썸이 꺼져 있으면 None)
+	///
+	/// # 돌려줌
+	/// 썸 사각형. (스크롤바 노드의 로컬 좌표, 픽셀) 대상이 없거나 스크롤할 것이 없어 썸이 꺼졌으면 None. 첫 tick 전에는 켜진 0 크기 사각형이다.
+	///
+	/// # 예제
+	/// 대상이 없으면 tick 뒤 썸이 꺼진다
+	/// ```rust
+	/// use vanilla::{Engine, EngineConfiguration, NodeTree, Rect, UIScrollBar};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let scroll_bar_id = node_tree.create_child(root_id, "bar");
+	/// node_tree.add_component(scroll_bar_id, UIScrollBar::new());
+	/// let scroll_bar = node_tree[scroll_bar_id].get_component::<UIScrollBar>().expect("scroll bar");
+	/// assert_eq!(scroll_bar.get_thumb_rect(), Some(Rect::create(0.0, 0.0, 0.0, 0.0)));
+	///
+	/// node_tree.tick(&engine, 0.016);
+	/// let scroll_bar = node_tree[scroll_bar_id].get_component::<UIScrollBar>().expect("scroll bar");
+	/// assert_eq!(scroll_bar.get_thumb_rect(), None);
+	/// ```
 	//==============================================================================
 	pub fn get_thumb_rect(&self) -> Option<Rect> {
 		if !self.is_thumb_active {
@@ -406,6 +508,9 @@ impl UIScrollBar {
 }
 
 impl Default for UIScrollBar {
+	//==============================================================================
+	/// 기본값. (new 와 같다)
+	//==============================================================================
 	fn default() -> UIScrollBar {
 		UIScrollBar::new()
 	}
@@ -413,14 +518,23 @@ impl Default for UIScrollBar {
 
 #[crate::reflect]
 impl Component for UIScrollBar {
+	//==============================================================================
+	/// 컴포넌트 공통 상태 반환.
+	//==============================================================================
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base
 	}
 
+	//==============================================================================
+	/// 컴포넌트 공통 상태 반환. (변경용)
+	//==============================================================================
 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 		&mut self.component_base
 	}
 
+	//==============================================================================
+	/// 컴포넌트 종류 이름. ("UIScrollBar")
+	//==============================================================================
 	fn get_component_type(&self) -> &'static str {
 		"UIScrollBar"
 	}
@@ -435,10 +549,16 @@ impl Component for UIScrollBar {
 		scroll_bar_node.set_interactable(true);
 	}
 
+	//==============================================================================
+	/// 갱신. (대상 스크롤 상태로 썸을 맞춘다)
+	//==============================================================================
 	fn tick(&mut self, context: &mut ComponentContext, _time_delta: f32) {
 		self.update_thumb(context);
 	}
 
+	//==============================================================================
+	/// 내용 영역 안에 그리는지. (늘 true)
+	//==============================================================================
 	fn is_drawn_inside_content(&self) -> bool {
 		true
 	}
@@ -526,10 +646,16 @@ impl Component for UIScrollBar {
 		UIScrollView::set_scroll_offset_in_tree(node_tree, scroll_view_node_id, new_offset);
 	}
 
+	//==============================================================================
+	/// 터치 뗌. (끌기를 끝낸다)
+	//==============================================================================
 	fn touch_release(&mut self, _context: &mut ComponentContext, _view_input_position: Vector2) {
 		self.is_dragging_thumb = false;
 	}
 
+	//==============================================================================
+	/// 터치 취소. (끌기를 끝낸다)
+	//==============================================================================
 	fn touch_cancel(&mut self, _context: &mut ComponentContext, _view_input_position: Vector2) {
 		self.is_dragging_thumb = false;
 	}

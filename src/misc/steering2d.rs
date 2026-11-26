@@ -9,6 +9,22 @@ use crate::base::vector2::Vector2;
 
 //==============================================================================
 /// 2D 조향 유틸. (정적 함수 묶음)
+/// - 상태가 없다. 매 프레임 목표 속도를 받아 위치에 time_delta 를 곱해 더한다.
+///
+/// # 예제
+/// 목표 쪽으로 한 걸음
+/// ```rust
+/// use vanilla::{Steering2D, Vector2};
+///
+/// let mut position = Vector2::create(0.0, 0.0);
+/// let target_position = Vector2::create(30.0, 40.0);
+/// let velocity = Steering2D::seek(position, target_position, 10.0);
+/// assert!((velocity.x - 6.0).abs() < 0.0001);
+/// assert!((velocity.y - 8.0).abs() < 0.0001);
+/// let time_delta = 0.5;
+/// position = position.add(velocity.multiply_scalar(time_delta));
+/// assert!((position.x - 3.0).abs() < 0.0001);
+/// ```
 //==============================================================================
 pub struct Steering2D;
 
@@ -18,6 +34,14 @@ impl Steering2D {
 
 	//==============================================================================
 	/// 목표를 향해 다가가는 속도. (거의 같은 자리면 0)
+	///
+	/// # 인자
+	/// - `position`: 지금 위치.
+	/// - `target_position`: 목표 위치.
+	/// - `speed`: 속력. (돌려줄 벡터의 길이, 초당 거리)
+	///
+	/// # 돌려줌
+	/// 목표 쪽으로 길이가 speed 인 속도 벡터. 두 위치 사이 거리가 0.000001 보다 작으면 (0, 0).
 	//==============================================================================
 	pub fn seek(position: Vector2, target_position: Vector2, speed: f32) -> Vector2 {
 		let difference_x = target_position.x - position.x;
@@ -33,6 +57,29 @@ impl Steering2D {
 	/// 사거리를 유지하며 선회하는 속도.
 	/// - 사거리보다 멀면 접근, 가까우면 후퇴 성분을 섞고, 접선 방향으로 sin 파형 좌우 선회를 더해 살아 있는 움직임을 만든다.
 	/// - elapsed_seconds 는 선회 위상에 쓰는 누적 시간이다.
+	///
+	/// # 인자
+	/// - `position`: 지금 위치.
+	/// - `target_position`: 목표 위치.
+	/// - `preferred_range`: 유지할 거리. (거리 오차를 이 값으로 나눠 -1 ~ 1 로 자른다)
+	/// - `speed`: 속력. (돌려줄 벡터의 길이)
+	/// - `elapsed_seconds`: 누적 시간. (초, 선회 파형 sin(elapsed_seconds * strafe_rate) 의 위상)
+	/// - `strafe_rate`: 선회 파형 각속도. (라디안/초, 보통 DEFAULT_STRAFE_RATE)
+	///
+	/// # 돌려줌
+	/// 길이가 speed 인 속도 벡터. 두 위치가 거의 같으면 (speed, 0), 사거리에 있고 선회 성분도 0 이면 (0, 0).
+	///
+	/// # 예제
+	/// 멀면 다가가고 가까우면 물러난다
+	/// ```rust
+	/// use vanilla::{Steering2D, Vector2};
+	///
+	/// let target_position = Vector2::create(100.0, 0.0);
+	/// let far_velocity = Steering2D::orbit_at_range(Vector2::create(-200.0, 0.0), target_position, 100.0, 5.0, 0.0, Steering2D::DEFAULT_STRAFE_RATE);
+	/// assert!((far_velocity.x - 5.0).abs() < 0.0001);
+	/// let near_velocity = Steering2D::orbit_at_range(Vector2::create(50.0, 0.0), target_position, 100.0, 5.0, 0.0, Steering2D::DEFAULT_STRAFE_RATE);
+	/// assert!((near_velocity.x + 5.0).abs() < 0.0001);
+	/// ```
 	//==============================================================================
 	pub fn orbit_at_range(position: Vector2, target_position: Vector2, preferred_range: f32, speed: f32, elapsed_seconds: f32, strafe_rate: f32) -> Vector2 {
 		let difference_x = target_position.x - position.x;

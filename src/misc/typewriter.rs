@@ -21,20 +21,67 @@ use unicode_segmentation::UnicodeSegmentation;
 
 //==============================================================================
 /// 타자기 대상. (글 설정, 글 반환, 보일 글자 수 설정. -1 이면 전체)
+/// - Text 가 구현한다. 다른 글 그리기도 이것을 구현하면 Typewriter 로 드러낼 수 있다.
+///
+/// # 예제
+/// 보일 글자 수만 기억하는 대상
+/// ```rust
+/// use vanilla::{Typewriter, TypewriterOptions, TypewriterTarget};
+///
+/// struct CountingLabel {
+/// 	text: String,
+/// 	visible_character_count: i32,
+/// }
+///
+/// impl TypewriterTarget for CountingLabel {
+/// 	fn set_text(&mut self, text: &str) {
+/// 		self.text = text.to_string();
+/// 	}
+///
+/// 	fn get_text(&self) -> &str {
+/// 		&self.text
+/// 	}
+///
+/// 	fn set_visible_character_count(&mut self, visible_character_count: i32) {
+/// 		self.visible_character_count = visible_character_count;
+/// 	}
+/// }
+///
+/// let mut label = CountingLabel {
+/// 	text: String::new(),
+/// 	visible_character_count: -1,
+/// };
+/// let mut typewriter = Typewriter::new(TypewriterOptions {
+/// 	characters_per_second: 10.0,
+/// 	..TypewriterOptions::default()
+/// });
+/// typewriter.start(&mut label, Some("hello"));
+/// typewriter.tick(&mut label, 0.25);
+/// assert_eq!(label.visible_character_count, 2);
+/// ```
 //==============================================================================
 pub trait TypewriterTarget {
 	//==============================================================================
 	/// 글 설정.
+	///
+	/// # 인자
+	/// - `text`: 새 글.
 	//==============================================================================
 	fn set_text(&mut self, text: &str);
 
 	//==============================================================================
 	/// 글 반환.
+	///
+	/// # 돌려줌
+	/// 지금 글 전체. (보일 글자 수와 상관없다)
 	//==============================================================================
 	fn get_text(&self) -> &str;
 
 	//==============================================================================
 	/// 보일 글자 수 설정. (-1 이면 전체)
+	///
+	/// # 인자
+	/// - `visible_character_count`: 앞에서부터 보일 글자 묶음 수. (-1 이면 전체)
 	//==============================================================================
 	fn set_visible_character_count(&mut self, visible_character_count: i32);
 }
@@ -64,6 +111,20 @@ impl TypewriterTarget for Text {
 
 //==============================================================================
 /// 타자기 설정. (원본 options = { characters_per_second = 30, fast_forward_multiplier = 8 })
+///
+/// # 예제
+/// 속도만 바꾸기
+/// ```rust
+/// use vanilla::{Typewriter, TypewriterOptions};
+///
+/// let typewriter_options = TypewriterOptions {
+/// 	characters_per_second: 20.0,
+/// 	..TypewriterOptions::default()
+/// };
+/// assert_eq!(typewriter_options.fast_forward_multiplier, 8.0);
+/// let typewriter = Typewriter::new(typewriter_options);
+/// assert!(typewriter.is_finished());
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TypewriterOptions {
@@ -92,6 +153,36 @@ type CompleteEvent = Box<dyn FnMut()>;
 
 //==============================================================================
 /// 타자기 연출기.
+/// - start 로 대상과 글을 넘기고, 매 프레임 tick 에 같은 대상을 넘긴다. 입력이 오면 끝났으면 다음 대사로, 아니면 skip_to_end.
+///
+/// # 예제
+/// 노드의 Text 에 대사 드러내기
+/// ```rust
+/// use vanilla::{NodeTree, Text, Typewriter, TypewriterOptions};
+///
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.get_root_id();
+/// let label_id = node_tree.create_child(root_id, "label");
+/// node_tree[label_id].add_component(Text::new());
+///
+/// let mut typewriter = Typewriter::new(TypewriterOptions {
+/// 	characters_per_second: 30.0,
+/// 	..TypewriterOptions::default()
+/// });
+/// let label = node_tree[label_id].get_component_mut::<Text>().unwrap();
+/// typewriter.start(label, Some("Hello. The adventure begins."));
+/// typewriter.tick(label, 0.1);
+/// assert_eq!(label.get_visible_character_count(), 3);
+///
+/// if typewriter.is_finished() {
+/// 	typewriter.start(label, Some("Next line."));
+/// }
+/// else {
+/// 	typewriter.skip_to_end(label);
+/// }
+/// assert!(typewriter.is_finished());
+/// assert_eq!(label.get_visible_character_count(), -1);
+/// ```
 //==============================================================================
 pub struct Typewriter {
 	full_characters: Vec<String>,
@@ -107,6 +198,12 @@ pub struct Typewriter {
 impl Typewriter {
 	//==============================================================================
 	/// 생성. (처음에는 끝난 상태)
+	///
+	/// # 인자
+	/// - `options`: 초당 글자 수와 빨리 감기 배율.
+	///
+	/// # 돌려줌
+	/// 글이 없고 끝난 상태인 새 타자기.
 	//==============================================================================
 	pub fn new(options: TypewriterOptions) -> Typewriter {
 		Typewriter {
@@ -123,6 +220,11 @@ impl Typewriter {
 
 	//==============================================================================
 	/// 시작. (text 를 넘기면 대상의 글도 바꾼다. 없으면 대상의 지금 글을 쓴다. 빈 글이면 바로 끝난 상태)
+	/// - 대상의 보일 글자 수를 0 으로 하고 빨리 감기를 끈다. 빈 글이면 -1(전체)로 둔다. 완료 알림은 부르지 않는다.
+	///
+	/// # 인자
+	/// - `target`: 글을 드러낼 대상.
+	/// - `text`: 새로 넣을 글. None 이면 대상의 지금 글.
 	//==============================================================================
 	pub fn start(&mut self, target: &mut dyn TypewriterTarget, text: Option<&str>) {
 		if let Some(text) = text {
@@ -140,6 +242,33 @@ impl Typewriter {
 
 	//==============================================================================
 	/// 갱신. (쌓인 만큼 글자를 드러내고, 새로 드러난 글자마다 알린다. 다 드러나면 끝낸다)
+	/// - 끝난 뒤에는 아무것도 하지 않는다. 다 드러나면 보일 글자 수를 -1 로 하고 완료를 알린다.
+	///
+	/// # 인자
+	/// - `target`: start 에 넘긴 대상.
+	/// - `time_delta`: 지난 시간. (초, 초당 글자 수 * 배율 * time_delta 만큼 쌓는다)
+	///
+	/// # 예제
+	/// 드러난 글자마다 알림 받기
+	/// ```rust
+	/// use std::cell::RefCell;
+	/// use std::rc::Rc;
+	/// use vanilla::{Text, Typewriter, TypewriterOptions};
+	///
+	/// let revealed_list = Rc::new(RefCell::new(Vec::new()));
+	/// let revealed_list_for_event = revealed_list.clone();
+	/// let mut label = Text::new();
+	/// let mut typewriter = Typewriter::new(TypewriterOptions {
+	/// 	characters_per_second: 10.0,
+	/// 	..TypewriterOptions::default()
+	/// });
+	/// typewriter.set_character_revealed_event(move |character, character_index| {
+	/// 	revealed_list_for_event.borrow_mut().push((character.to_string(), character_index));
+	/// });
+	/// typewriter.start(&mut label, Some("abc"));
+	/// typewriter.tick(&mut label, 0.25);
+	/// assert_eq!(*revealed_list.borrow(), vec![(String::from("a"), 0), (String::from("b"), 1)]);
+	/// ```
 	//==============================================================================
 	pub fn tick(&mut self, target: &mut dyn TypewriterTarget, time_delta: f32) {
 		if self.is_finished {
@@ -171,6 +300,10 @@ impl Typewriter {
 
 	//==============================================================================
 	/// 곧바로 끝까지 드러내기. (드러나지 않은 글자의 공개 알림은 부르지 않는다)
+	/// - 끝난 상태면 아무것도 하지 않는다. 아니면 보일 글자 수를 -1 로 하고 완료를 알린다.
+	///
+	/// # 인자
+	/// - `target`: start 에 넘긴 대상.
 	//==============================================================================
 	pub fn skip_to_end(&mut self, target: &mut dyn TypewriterTarget) {
 		if self.is_finished {
@@ -193,6 +326,9 @@ impl Typewriter {
 
 	//==============================================================================
 	/// 끝났는지.
+	///
+	/// # 돌려줌
+	/// 글을 다 드러냈거나 아직 start 하지 않았으면 true.
 	//==============================================================================
 	pub fn is_finished(&self) -> bool {
 		self.is_finished
@@ -200,6 +336,9 @@ impl Typewriter {
 
 	//==============================================================================
 	/// 빨리 감기 설정. (누르고 있는 동안 등)
+	///
+	/// # 인자
+	/// - `is_fast_forward`: true 면 속도에 빨리 감기 배율을 곱한다. (start 하면 false 로 돌아간다)
 	//==============================================================================
 	pub fn set_fast_forward(&mut self, is_fast_forward: bool) {
 		self.is_fast_forward = is_fast_forward;
@@ -207,6 +346,9 @@ impl Typewriter {
 
 	//==============================================================================
 	/// 속도 설정. (초당 글자 수)
+	///
+	/// # 인자
+	/// - `characters_per_second`: 초당 드러낼 글자 묶음 수.
 	//==============================================================================
 	pub fn set_characters_per_second(&mut self, characters_per_second: f32) {
 		self.characters_per_second = characters_per_second;
@@ -214,6 +356,9 @@ impl Typewriter {
 
 	//==============================================================================
 	/// 글자 공개 알림 설정. (글자, 번호)
+	///
+	/// # 인자
+	/// - `character_revealed_event`: 글자가 드러날 때마다 부를 함수. 그 글자 묶음과 0 부터 센 번호를 받는다.
 	//==============================================================================
 	pub fn set_character_revealed_event(&mut self, character_revealed_event: impl FnMut(&str, usize) + 'static) {
 		self.character_revealed_event = Some(Box::new(character_revealed_event));
@@ -221,6 +366,9 @@ impl Typewriter {
 
 	//==============================================================================
 	/// 완료 알림 설정.
+	///
+	/// # 인자
+	/// - `complete_event`: 다 드러나거나 skip_to_end 할 때 부를 함수.
 	//==============================================================================
 	pub fn set_complete_event(&mut self, complete_event: impl FnMut() + 'static) {
 		self.complete_event = Some(Box::new(complete_event));

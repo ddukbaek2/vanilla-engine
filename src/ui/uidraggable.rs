@@ -34,6 +34,32 @@ pub type UIDraggablePositionEvent = Box<dyn FnMut(&mut UIDraggable, &mut Compone
 
 //==============================================================================
 /// 드래그 가능 컴포넌트.
+///
+/// # 예제
+/// 놓을 자리에 놓으면 눌러앉고, 아니면 제자리로 돌아가는 카드
+/// ```rust
+/// use vanilla::{ComponentContext, Engine, EngineConfiguration, NodeTree, TouchKind, UIDraggable, Vector2};
+///
+/// let engine = Engine::new(EngineConfiguration::new());
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.get_root_id();
+/// let card_id = node_tree.create_child(root_id, "Card");
+/// node_tree[card_id].set_local_position(Vector2::create(100.0, 100.0));
+/// node_tree[card_id].set_content_size(Vector2::create(50.0, 50.0));
+/// let draggable = node_tree.add_component(card_id, UIDraggable::new()).expect("draggable");
+/// draggable.set_snap_back_enabled(true);
+/// draggable.set_drag_end_event(Box::new(|draggable: &mut UIDraggable, context: &mut ComponentContext, view_position: Vector2| {
+/// 	if view_position.x > 300.0 {
+/// 		draggable.settle_here(context.get_node_tree_mut());
+/// 	}
+/// }));
+/// node_tree.dispatch_touch(card_id, &engine, TouchKind::Press, Vector2::create(100.0, 100.0));
+/// node_tree.dispatch_touch(card_id, &engine, TouchKind::Moved, Vector2::create(400.0, 100.0));
+/// node_tree.dispatch_touch(card_id, &engine, TouchKind::Release, Vector2::create(400.0, 100.0));
+/// node_tree.tick(&engine, 0.5);
+/// assert_eq!(node_tree[card_id].get_local_position(), Vector2::create(400.0, 100.0));
+/// assert_eq!(node_tree[card_id].get_component::<UIDraggable>().expect("draggable").get_home_position(), Some(Vector2::create(400.0, 100.0)));
+/// ```
 //==============================================================================
 pub struct UIDraggable {
 	ui_control: UIControl,
@@ -53,6 +79,9 @@ pub struct UIDraggable {
 impl UIDraggable {
 	//==============================================================================
 	/// 생성. (복귀 꺼짐, 복귀 속도 14)
+	///
+	/// # 돌려줌
+	/// 붙기 전의 드래그 컴포넌트.
 	//==============================================================================
 	pub fn new() -> UIDraggable {
 		UIDraggable {
@@ -72,6 +101,9 @@ impl UIDraggable {
 
 	//==============================================================================
 	/// 품은 컨트롤 반환.
+	///
+	/// # 돌려줌
+	/// 품은 UIControl.
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn get_uicontrol(&self) -> &UIControl {
@@ -80,6 +112,9 @@ impl UIDraggable {
 
 	//==============================================================================
 	/// 품은 컨트롤 반환. (변경용)
+	///
+	/// # 돌려줌
+	/// 품은 UIControl.
 	//==============================================================================
 	pub fn get_uicontrol_mut(&mut self) -> &mut UIControl {
 		&mut self.ui_control
@@ -87,6 +122,9 @@ impl UIDraggable {
 
 	//==============================================================================
 	/// 컨텐트 노드 핸들.
+	///
+	/// # 돌려줌
+	/// 컨텐트 노드. (트리에 붙기 전이면 None)
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn get_content(&self) -> Option<NodeId> {
@@ -95,6 +133,9 @@ impl UIDraggable {
 
 	//==============================================================================
 	/// 배경색 설정.
+	///
+	/// # 인자
+	/// - `background_color`: 배경색. (품은 UIControl 이 그린다)
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn set_background_color(&mut self, background_color: impl Into<Color>) {
@@ -157,6 +198,9 @@ impl UIDraggable {
 
 	//==============================================================================
 	/// 지금 자리에 눌러앉기. (끝 이벤트에서 놓기에 성공했을 때 부른다. 복귀를 멈춘다)
+	///
+	/// # 인자
+	/// - `node_tree`: 드래그 노드가 든 노드 트리. (지금 로컬 자리를 제자리로 삼는다, 끝 이벤트 안에서는 context.get_node_tree_mut())
 	//==============================================================================
 	pub fn settle_here(&mut self, node_tree: &mut NodeTree) {
 		if let Some(node) = self.node_id.and_then(|node_id| node_tree.get_node(node_id)) {
@@ -167,6 +211,9 @@ impl UIDraggable {
 
 	//==============================================================================
 	/// 제자리로 바로 되돌리기.
+	///
+	/// # 인자
+	/// - `node_tree`: 드래그 노드가 든 노드 트리. (잡은 적이 없으면 자리는 그대로이고 복귀만 멈춘다)
 	//==============================================================================
 	pub fn snap_home(&mut self, node_tree: &mut NodeTree) {
 		if let Some(home_position) = self.home_position {
@@ -179,6 +226,9 @@ impl UIDraggable {
 
 	//==============================================================================
 	/// 놓으면 제자리로 돌아갈지 설정.
+	///
+	/// # 인자
+	/// - `is_snap_back_enabled`: 놓으면 제자리로 미끄러져 돌아가면 true. (기본 false)
 	//==============================================================================
 	pub fn set_snap_back_enabled(&mut self, is_snap_back_enabled: bool) {
 		self.is_snap_back_enabled = is_snap_back_enabled;
@@ -186,6 +236,30 @@ impl UIDraggable {
 
 	//==============================================================================
 	/// 복귀 속도 설정. (초당 남은 거리를 줄이는 비율 계수)
+	///
+	/// # 인자
+	/// - `snap_back_speed`: 복귀 속도. (tick 마다 남은 거리의 속도 x 초 몫만큼 다가가고, 그 몫이 1 을 넘으면 바로 닿는다. 기본 14)
+	///
+	/// # 예제
+	/// 속도 10 이면 0.05 초에 남은 거리의 반을 간다
+	/// ```rust
+	/// use vanilla::{Engine, EngineConfiguration, NodeTree, TouchKind, UIDraggable, Vector2};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let card_id = node_tree.create_child(root_id, "Card");
+	/// node_tree[card_id].set_local_position(Vector2::create(100.0, 100.0));
+	/// if let Some(draggable) = node_tree.add_component(card_id, UIDraggable::new()) {
+	/// 	draggable.set_snap_back_enabled(true);
+	/// 	draggable.set_snap_back_speed(10.0);
+	/// }
+	/// node_tree.dispatch_touch(card_id, &engine, TouchKind::Press, Vector2::create(100.0, 100.0));
+	/// node_tree.dispatch_touch(card_id, &engine, TouchKind::Moved, Vector2::create(200.0, 100.0));
+	/// node_tree.dispatch_touch(card_id, &engine, TouchKind::Release, Vector2::create(200.0, 100.0));
+	/// node_tree.tick(&engine, 0.05);
+	/// assert!((node_tree[card_id].get_local_position().x - 150.0).abs() < 0.001);
+	/// ```
 	//==============================================================================
 	pub fn set_snap_back_speed(&mut self, snap_back_speed: f32) {
 		self.snap_back_speed = snap_back_speed;
@@ -193,6 +267,9 @@ impl UIDraggable {
 
 	//==============================================================================
 	/// 시작 이벤트 설정.
+	///
+	/// # 인자
+	/// - `drag_start_event`: 눌러 잡을 때 부르는 이벤트. (잡기 전 자리를 기억한 뒤)
 	//==============================================================================
 	pub fn set_drag_start_event(&mut self, drag_start_event: UIDraggableEvent) {
 		self.drag_start_event = Some(drag_start_event);
@@ -200,6 +277,9 @@ impl UIDraggable {
 
 	//==============================================================================
 	/// 이동 이벤트 설정.
+	///
+	/// # 인자
+	/// - `drag_move_event`: 끄는 동안 움직일 때마다 부르는 이벤트. (노드를 옮긴 뒤, 터치의 뷰 좌표를 받는다)
 	//==============================================================================
 	pub fn set_drag_move_event(&mut self, drag_move_event: UIDraggablePositionEvent) {
 		self.drag_move_event = Some(drag_move_event);
@@ -207,6 +287,9 @@ impl UIDraggable {
 
 	//==============================================================================
 	/// 끝 이벤트 설정.
+	///
+	/// # 인자
+	/// - `drag_end_event`: 놓거나 터치가 취소되면 부르는 이벤트. (터치의 뷰 좌표를 받는다, 복귀를 켰으면 돌아가기 시작한 뒤라 settle_here 로 멈춘다)
 	//==============================================================================
 	pub fn set_drag_end_event(&mut self, drag_end_event: UIDraggablePositionEvent) {
 		self.drag_end_event = Some(drag_end_event);
@@ -214,6 +297,9 @@ impl UIDraggable {
 
 	//==============================================================================
 	/// 끄는 중인지.
+	///
+	/// # 돌려줌
+	/// 눌러 잡은 뒤 놓기 전이면 true.
 	//==============================================================================
 	pub fn is_dragging(&self) -> bool {
 		self.is_dragging
@@ -221,6 +307,9 @@ impl UIDraggable {
 
 	//==============================================================================
 	/// 돌아가는 중인지.
+	///
+	/// # 돌려줌
+	/// 제자리로 미끄러지는 중이면 true. (0.5 픽셀 안에 들면 false)
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn is_returning(&self) -> bool {
@@ -229,6 +318,9 @@ impl UIDraggable {
 
 	//==============================================================================
 	/// 잡기 전 로컬 자리. (한 번도 잡지 않았으면 None)
+	///
+	/// # 돌려줌
+	/// 제자리. (마지막으로 잡기 전 로컬 자리, settle_here 뒤에는 눌러앉은 자리, 잡은 적이 없으면 None)
 	//==============================================================================
 	pub fn get_home_position(&self) -> Option<Vector2> {
 		self.home_position
@@ -236,6 +328,9 @@ impl UIDraggable {
 }
 
 impl Default for UIDraggable {
+	//==============================================================================
+	/// 기본값. (UIDraggable::new 와 같다)
+	//==============================================================================
 	fn default() -> UIDraggable {
 		UIDraggable::new()
 	}
@@ -243,14 +338,23 @@ impl Default for UIDraggable {
 
 #[crate::reflect]
 impl Component for UIDraggable {
+	//==============================================================================
+	/// 컴포넌트 공통 칸 반환. (품은 UIControl 의 것)
+	//==============================================================================
 	fn get_component_base(&self) -> &ComponentBase {
 		self.ui_control.get_component_base()
 	}
 
+	//==============================================================================
+	/// 컴포넌트 공통 칸 반환. (변경용)
+	//==============================================================================
 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 		self.ui_control.get_component_base_mut()
 	}
 
+	//==============================================================================
+	/// 컴포넌트 타입 이름. ("Draggable")
+	//==============================================================================
 	fn get_component_type(&self) -> &'static str {
 		"Draggable"
 	}
@@ -294,10 +398,16 @@ impl Component for UIDraggable {
 		}
 	}
 
+	//==============================================================================
+	/// 출력. (품은 UIControl 이 배경을 그린다)
+	//==============================================================================
 	fn draw(&mut self, transform: &NodeTransform, graphic: &mut Graphic) {
 		self.ui_control.draw(transform, graphic);
 	}
 
+	//==============================================================================
+	/// 컨텐트 안에 그리는지. (true)
+	//==============================================================================
 	#[reflect(skip)]
 	fn is_drawn_inside_content(&self) -> bool {
 		true

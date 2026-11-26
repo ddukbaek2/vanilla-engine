@@ -1,28 +1,28 @@
 //==============================================================================
-// 표본율 바꾸기. (크로미엄 media/base/sinc_resampler.cc 를 옮긴 것, Chromium Authors BSD-3-Clause)
-// - 크롬 decodeAudioData 는 푼 소리를 컨텍스트 표본율로 바꾼다. (Blink AudioBus::TryCreateBySampleRateConverting)
-//   채널마다 request_frames 64(커널 32 탭)로 SincResampler 를 만들고, 원본을 차례로 넘긴 뒤 모자라면 0 으로 채운다.
-//   결과 길이는 (int)(원본 길이 / (원본 표본율 / 새 표본율)) 이다.
-// - 합은 크롬이 고르는 길과 같은 차례로 더한다. (aarch64 는 NEON 4 줄, x86_64 는 AVX2 와 FMA 가 있으면 8 줄 FMA, 없으면 SSE 4 줄, 그 밖은 차례대로)
-//   크롬과 견준 기대값은 애플 실리콘(NEON) 맥에서 뽑았고, x86 의 두 갈래는 실기에서 돌려 보지 못했다.
+//! 표본율 바꾸기. (크로미엄 media/base/sinc_resampler.cc 를 옮긴 것, Chromium Authors BSD-3-Clause)
+//! - 크롬 decodeAudioData 는 푼 소리를 컨텍스트 표본율로 바꾼다. (Blink AudioBus::TryCreateBySampleRateConverting)
+//!   채널마다 request_frames 64(커널 32 탭)로 SincResampler 를 만들고, 원본을 차례로 넘긴 뒤 모자라면 0 으로 채운다.
+//!   결과 길이는 (int)(원본 길이 / (원본 표본율 / 새 표본율)) 이다.
+//! - 합은 크롬이 고르는 길과 같은 차례로 더한다. (aarch64 는 NEON 4 줄, x86_64 는 AVX2 와 FMA 가 있으면 8 줄 FMA, 없으면 SSE 4 줄, 그 밖은 차례대로)
+//!   크롬과 견준 기대값은 애플 실리콘(NEON) 맥에서 뽑았고, x86 의 두 갈래는 실기에서 돌려 보지 못했다.
 //==============================================================================
 
-// 커널 크기. (request_frames 64 는 1.5 커널(96)보다 작아 kMinKernelSize)
+/// 커널 크기. (request_frames 64 는 1.5 커널(96)보다 작아 kMinKernelSize)
 const KERNEL_SIZE: usize = 32;
-// 커널 사이 오프셋 수. (kKernelOffsetCount)
+/// 커널 사이 오프셋 수. (kKernelOffsetCount)
 const KERNEL_OFFSET_COUNT: usize = 32;
-// 한 번에 읽는 프레임 수. (Blink 가 넘기는 request_frames)
+/// 한 번에 읽는 프레임 수. (Blink 가 넘기는 request_frames)
 const REQUEST_FRAMES: usize = 64;
 
 //==============================================================================
-// SincResampler.
+/// SincResampler.
 //==============================================================================
 struct SincResampler {
 	io_sample_rate_ratio: f64,
 	virtual_source_index: f64,
 	is_buffer_primed: bool,
 	block_size: usize,
-	// r0 의 시작 자리. (input_buffer 안, r1 = 0, r2 = KERNEL_SIZE / 2)
+	/// r0 의 시작 자리. (input_buffer 안, r1 = 0, r2 = KERNEL_SIZE / 2)
 	r0_offset: usize,
 	r3_offset: usize,
 	kernel_storage: Vec<f32>,
@@ -31,7 +31,7 @@ struct SincResampler {
 
 impl SincResampler {
 	//==============================================================================
-	// 생성. (크롬 생성자와 InitializeKernel, Flush)
+	/// 생성. (크롬 생성자와 InitializeKernel, Flush)
 	//==============================================================================
 	fn new(io_sample_rate_ratio: f64) -> SincResampler {
 		let mut sinc_resampler = SincResampler {
@@ -50,7 +50,7 @@ impl SincResampler {
 	}
 
 	//==============================================================================
-	// 영역 다시 잡기. (UpdateRegions)
+	/// 영역 다시 잡기. (UpdateRegions)
 	//==============================================================================
 	fn update_regions(&mut self, is_second_load: bool) {
 		self.r0_offset = if is_second_load { KERNEL_SIZE } else { KERNEL_SIZE / 2 };
@@ -60,7 +60,7 @@ impl SincResampler {
 	}
 
 	//==============================================================================
-	// 커널 짓기. (InitializeKernel, 블랙먼 창을 씌운 싱크)
+	/// 커널 짓기. (InitializeKernel, 블랙먼 창을 씌운 싱크)
 	//==============================================================================
 	fn initialize_kernel(&mut self) {
 		const ALPHA: f64 = 0.16;
@@ -84,7 +84,7 @@ impl SincResampler {
 	}
 
 	//==============================================================================
-	// 바꾸기. (Resample, read 는 받은 칸을 원본으로 채운다)
+	/// 바꾸기. (Resample, read 는 받은 칸을 원본으로 채운다)
 	//==============================================================================
 	fn resample(&mut self, destination: &mut [f32], read: &mut dyn FnMut(&mut [f32])) {
 		let mut remaining_frame_count = destination.len();
@@ -126,13 +126,16 @@ impl SincResampler {
 }
 
 //==============================================================================
-// 합성곱. (크롬이 그 CPU 에서 고르는 Convolve_* 와 같은 차례로 더한다)
+/// 합성곱. (크롬이 그 CPU 에서 고르는 Convolve_* 와 같은 차례로 더한다)
 //==============================================================================
 #[cfg(target_arch = "aarch64")]
 fn convolve(input: &[f32], kernel1: &[f32], kernel2: &[f32], kernel_interpolation_factor: f64) -> f32 {
 	convolve_four_lanes(input, kernel1, kernel2, kernel_interpolation_factor)
 }
 
+//==============================================================================
+/// 합성곱. (x86_64: AVX2 와 FMA 가 있으면 8 줄 묶음, 없으면 4 줄 합)
+//==============================================================================
 #[cfg(target_arch = "x86_64")]
 fn convolve(input: &[f32], kernel1: &[f32], kernel2: &[f32], kernel_interpolation_factor: f64) -> f32 {
 	if std::arch::is_x86_feature_detected!("avx2") && std::arch::is_x86_feature_detected!("fma") {
@@ -143,6 +146,9 @@ fn convolve(input: &[f32], kernel1: &[f32], kernel2: &[f32], kernel_interpolatio
 	}
 }
 
+//==============================================================================
+/// 합성곱. (그 밖의 CPU: 두 합을 차례로 더한 뒤 섞는다)
+//==============================================================================
 #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
 fn convolve(input: &[f32], kernel1: &[f32], kernel2: &[f32], kernel_interpolation_factor: f64) -> f32 {
 	let mut sum1 = 0.0f32;
@@ -155,7 +161,7 @@ fn convolve(input: &[f32], kernel1: &[f32], kernel2: &[f32], kernel_interpolatio
 }
 
 //==============================================================================
-// 4 줄 합. (Convolve_SSE, Convolve_NEON: 줄마다 곱해 더하고, 두 합을 (1 - f), f 로 섞은 뒤 (0 + 2) + (1 + 3))
+/// 4 줄 합. (Convolve_SSE, Convolve_NEON: 줄마다 곱해 더하고, 두 합을 (1 - f), f 로 섞은 뒤 (0 + 2) + (1 + 3))
 //==============================================================================
 #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 fn convolve_four_lanes(input: &[f32], kernel1: &[f32], kernel2: &[f32], kernel_interpolation_factor: f64) -> f32 {
@@ -179,7 +185,7 @@ fn convolve_four_lanes(input: &[f32], kernel1: &[f32], kernel2: &[f32], kernel_i
 }
 
 //==============================================================================
-// 8 줄 FMA 합. (Convolve_AVX2: 줄마다 fmadd, 위아래 128 비트를 더한 4 줄을 SSE 처럼 섞고 모은다)
+/// 8 줄 FMA 합. (Convolve_AVX2: 줄마다 fmadd, 위아래 128 비트를 더한 4 줄을 SSE 처럼 섞고 모은다)
 //==============================================================================
 #[cfg(target_arch = "x86_64")]
 fn convolve_eight_lanes_fused(input: &[f32], kernel1: &[f32], kernel2: &[f32], kernel_interpolation_factor: f64) -> f32 {
@@ -205,7 +211,7 @@ fn convolve_eight_lanes_fused(input: &[f32], kernel1: &[f32], kernel2: &[f32], k
 }
 
 //==============================================================================
-// 한 채널의 표본율 바꾸기. (Blink TryCreateBySampleRateConverting 의 채널 하나, 같은 표본율이면 그대로)
+/// 한 채널의 표본율 바꾸기. (Blink TryCreateBySampleRateConverting 의 채널 하나, 같은 표본율이면 그대로)
 //==============================================================================
 pub(crate) fn resample_channel(source: &[f32], source_sample_rate: f64, destination_sample_rate: f64) -> Vec<f32> {
 	if source_sample_rate == destination_sample_rate {
@@ -233,6 +239,9 @@ pub(crate) fn resample_channel(source: &[f32], source_sample_rate: f64, destinat
 mod tests {
 	use super::*;
 
+	//==============================================================================
+	/// 다시 뽑은 길이가 블링크와 같다. (48000 에서 44100, 8000 에서 44100, 같은 표본율은 그대로)
+	//==============================================================================
 	#[test]
 	fn resample_length_matches_blink() {
 		assert_eq!(resample_channel(&vec![0.5; 2880], 48000.0, 44100.0).len(), 2645);
@@ -241,6 +250,9 @@ mod tests {
 		assert_eq!(resample_channel(&[0.25, 0.5], 44100.0, 44100.0), vec![0.25, 0.5]);
 	}
 
+	//==============================================================================
+	/// 고른 값은 다시 뽑아도 그 값이다. (0.01 안)
+	//==============================================================================
 	#[test]
 	fn resample_keeps_constant_level() {
 		let output = resample_channel(&vec![0.5; 4800], 48000.0, 44100.0);

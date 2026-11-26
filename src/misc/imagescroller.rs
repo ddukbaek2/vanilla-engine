@@ -15,6 +15,39 @@ use std::rc::Rc;
 
 //==============================================================================
 /// 이미지 스크롤러.
+/// - 스크롤 위치가 늘면 그림은 오른쪽(가로), 아래(세로)로 흘러간다.
+///
+/// # 예제
+/// 왼쪽으로 흐르는 배경의 첫 타일 자리
+/// ```rust
+/// use vanilla::{Image, ImageScroller, Rect, Vector2};
+///
+/// let mut image_scroller = ImageScroller::new();
+/// image_scroller.set_image(Some(Image::create_from_pixels(100, 100, vec![255u8; 100 * 100 * 4])));
+/// image_scroller.set_view_rect(Rect::create(10.0, 20.0, 300.0, 200.0));
+/// image_scroller.set_horizontal_scroll_speed(-50.0);
+/// image_scroller.tick(1.0);
+/// assert_eq!(image_scroller.get_scroll_position(), Vector2::create(-50.0, 0.0));
+/// assert_eq!(image_scroller.calculate_tile_start(100.0, 100.0), Vector2::create(-40.0, 20.0));
+/// ```
+///
+/// 씬에서 배경 흘려 그리기
+/// ```rust,no_run
+/// use vanilla::{Engine, Graphic, ImageScroller, Rect};
+///
+/// fn create_background(engine: &Engine) -> ImageScroller {
+/// 	let mut image_scroller = ImageScroller::new();
+/// 	image_scroller.set_image(engine.load_image("examples/assets/atlas/icons.png").ok());
+/// 	image_scroller.set_view_rect(Rect::create(0.0, 0.0, 1280.0, 720.0));
+/// 	image_scroller.set_vertical_scroll_speed(40.0);
+/// 	image_scroller
+/// }
+///
+/// fn draw_background(image_scroller: &mut ImageScroller, graphic: &mut Graphic, time_delta: f32) {
+/// 	image_scroller.tick(time_delta);
+/// 	image_scroller.draw(graphic);
+/// }
+/// ```
 //==============================================================================
 #[derive(Clone, Default)]
 pub struct ImageScroller {
@@ -27,6 +60,9 @@ pub struct ImageScroller {
 impl ImageScroller {
 	//==============================================================================
 	/// 생성. (이미지 없음, 영역 0, 멈춤)
+	///
+	/// # 돌려줌
+	/// 이미지가 없고 스크롤 위치와 속도가 0 인 스크롤러.
 	//==============================================================================
 	pub fn new() -> ImageScroller {
 		ImageScroller {
@@ -39,6 +75,9 @@ impl ImageScroller {
 
 	//==============================================================================
 	/// 갱신. (속도만큼 스크롤 위치를 옮긴다)
+	///
+	/// # 인자
+	/// - `time_delta`: 지난 프레임부터 흐른 시간. (초)
 	//==============================================================================
 	pub fn tick(&mut self, time_delta: f32) {
 		self.scroll_position.x += self.scroll_speed.x * time_delta;
@@ -47,6 +86,13 @@ impl ImageScroller {
 
 	//==============================================================================
 	/// 첫 타일의 시작 좌표. (스크롤 위치를 이미지 크기로 나눈 나머지만큼 당긴다. 좌표는 정수로 내려 틈을 막는다)
+	///
+	/// # 인자
+	/// - `image_width`: 이미지 너비. (픽셀, 0 이면 나머지가 NaN 이다)
+	/// - `image_height`: 이미지 높이. (픽셀, 0 이면 나머지가 NaN 이다)
+	///
+	/// # 돌려줌
+	/// 첫 타일의 왼쪽 위 좌표. (보이는 영역 왼쪽 위와 같거나 이미지 한 장 안쪽만큼 앞)
 	//==============================================================================
 	pub fn calculate_tile_start(&self, image_width: f32, image_height: f32) -> Vector2 {
 		let remainder_x = (self.scroll_position.x % image_width).floor();
@@ -68,6 +114,10 @@ impl ImageScroller {
 
 	//==============================================================================
 	/// 출력. (보이는 영역으로 자르고, 1.5 픽셀씩 겹쳐 그려 타일 사이 틈을 가린다)
+	/// - 이미지가 없거나 너비, 높이가 0 이면 그리지 않는다.
+	///
+	/// # 인자
+	/// - `graphic`: 그릴 그래픽. (보이는 영역과 같은 좌표계)
 	//==============================================================================
 	pub fn draw(&self, graphic: &mut Graphic) {
 		let image = match &self.image {
@@ -108,6 +158,9 @@ impl ImageScroller {
 
 	//==============================================================================
 	/// 이미지 설정. (None 이면 그리지 않는다)
+	///
+	/// # 인자
+	/// - `image`: 깔 이미지. None 이면 그리지 않는다.
 	//==============================================================================
 	pub fn set_image(&mut self, image: Option<Rc<Image>>) {
 		self.image = image;
@@ -115,6 +168,10 @@ impl ImageScroller {
 
 	//==============================================================================
 	/// 이미지 애셋의 이미지로 설정. (아직 읽히지 않았으면 None)
+	/// - 부를 때의 이미지를 한 번 가져온다. 나중에 애셋이 다 읽혀도 저절로 바뀌지 않는다.
+	///
+	/// # 인자
+	/// - `image_asset`: 이미지를 꺼낼 애셋.
 	//==============================================================================
 	pub fn set_image_asset(&mut self, image_asset: &mut ImageAsset) {
 		self.image = image_asset.get_image();
@@ -122,6 +179,9 @@ impl ImageScroller {
 
 	//==============================================================================
 	/// 이미지 반환.
+	///
+	/// # 돌려줌
+	/// 깔린 이미지의 참조. 없으면 None.
 	//==============================================================================
 	pub fn get_image(&self) -> Option<&Rc<Image>> {
 		self.image.as_ref()
@@ -129,6 +189,9 @@ impl ImageScroller {
 
 	//==============================================================================
 	/// 보이는 영역 설정. (부른 쪽 좌표계)
+	///
+	/// # 인자
+	/// - `rect`: 타일을 깔고 자를 영역.
 	//==============================================================================
 	pub fn set_view_rect(&mut self, rect: Rect) {
 		self.view_rect = rect;
@@ -136,6 +199,9 @@ impl ImageScroller {
 
 	//==============================================================================
 	/// 보이는 영역 반환.
+	///
+	/// # 돌려줌
+	/// 타일을 깔고 자를 영역.
 	//==============================================================================
 	pub fn get_view_rect(&self) -> Rect {
 		self.view_rect
@@ -143,6 +209,9 @@ impl ImageScroller {
 
 	//==============================================================================
 	/// 세로 스크롤 속도 설정. (초당 픽셀)
+	///
+	/// # 인자
+	/// - `speed`: 세로 속도. (초당 픽셀, + 면 그림이 아래로 흐른다)
 	//==============================================================================
 	pub fn set_vertical_scroll_speed(&mut self, speed: f32) {
 		self.scroll_speed.y = speed;
@@ -150,6 +219,9 @@ impl ImageScroller {
 
 	//==============================================================================
 	/// 가로 스크롤 속도 설정. (초당 픽셀)
+	///
+	/// # 인자
+	/// - `speed`: 가로 속도. (초당 픽셀, + 면 그림이 오른쪽으로 흐른다)
 	//==============================================================================
 	pub fn set_horizontal_scroll_speed(&mut self, speed: f32) {
 		self.scroll_speed.x = speed;
@@ -157,6 +229,9 @@ impl ImageScroller {
 
 	//==============================================================================
 	/// 스크롤 속도 반환.
+	///
+	/// # 돌려줌
+	/// 가로(x), 세로(y) 속도. (초당 픽셀, 복사본)
 	//==============================================================================
 	pub fn get_scroll_speed(&self) -> Vector2 {
 		self.scroll_speed
@@ -164,6 +239,9 @@ impl ImageScroller {
 
 	//==============================================================================
 	/// 스크롤 위치 설정.
+	///
+	/// # 인자
+	/// - `position`: 스크롤 위치. (픽셀, 이미지 크기로 나눈 나머지만 그림에 보인다)
 	//==============================================================================
 	pub fn set_scroll_position(&mut self, position: Vector2) {
 		self.scroll_position = position;
@@ -171,6 +249,9 @@ impl ImageScroller {
 
 	//==============================================================================
 	/// 스크롤 위치 반환.
+	///
+	/// # 돌려줌
+	/// 지금 스크롤 위치. (픽셀, 복사본)
 	//==============================================================================
 	pub fn get_scroll_position(&self) -> Vector2 {
 		self.scroll_position

@@ -77,6 +77,25 @@ const SCENE_LOAD_EXTRA_WAIT_SECONDS: f64 = 0.3;
 
 //==============================================================================
 /// 엔진 설정.
+/// - EngineConfiguration::new() 의 기본값에서 필요한 칸만 바꿔 Engine::new 에 넘긴다.
+///
+/// # 예제
+/// 기준 해상도, 뷰 스케일 모드, 애셋 폴더 정하기
+/// ```rust
+/// use std::path::PathBuf;
+/// use vanilla::{Engine, EngineConfiguration, Vector2, ViewScaleMode};
+///
+/// let mut engine_configuration = EngineConfiguration::new();
+/// engine_configuration.title = String::from("My Game");
+/// engine_configuration.reference_resolution_size = Vector2::create(1920.0, 1080.0);
+/// engine_configuration.view_scale_mode = ViewScaleMode::StretchShortExpandLong;
+/// engine_configuration.asset_directory_paths = vec![PathBuf::from("examples/assets")];
+/// engine_configuration.maximum_frame_per_second = 60.0;
+/// assert!(engine_configuration.use_vertical_sync);
+/// let engine = Engine::new(engine_configuration);
+/// assert_eq!(engine.get_engine_configuration().title, "My Game");
+/// assert_eq!(engine.resolve_asset_path("atlas/icons.png"), PathBuf::from("examples/assets/atlas/icons.png"));
+/// ```
 //==============================================================================
 pub struct EngineConfiguration {
 	/// 기준 해상도. (뷰 스케일 모드가 none 이 아니면 씬은 이 좌표계로 그린다)
@@ -149,6 +168,9 @@ pub struct EngineConfiguration {
 impl EngineConfiguration {
 	//==============================================================================
 	/// 생성.
+	///
+	/// # 돌려줌
+	/// 기본 설정. (기준 해상도 1280x720, StretchShort, 제목 바닐라엔진, 창 크기 0(기준 해상도), 크기 바꾸기 켬, 수직 동기 켬, 최대 FPS 0(제한 없음), 개발자 도구 켬, 캔버스 id mainCanvas, 나머지는 끔이거나 빈 값)
 	//==============================================================================
 	pub fn new() -> EngineConfiguration {
 		EngineConfiguration {
@@ -184,6 +206,9 @@ impl EngineConfiguration {
 }
 
 impl Default for EngineConfiguration {
+	//==============================================================================
+	/// 기본값. (EngineConfiguration::new 와 같다)
+	//==============================================================================
 	fn default() -> EngineConfiguration {
 		EngineConfiguration::new()
 	}
@@ -225,6 +250,53 @@ enum PendingFontOperation {
 
 //==============================================================================
 /// 엔진.
+/// - 설정으로 만들고 run 에 첫 씬을 넘겨 돌린다. 씬의 훅은 &mut Engine 을 받아 매니저(시간, 뷰, 입력, 오디오, 커서)를 꺼내 쓴다.
+///
+/// # 예제
+/// 첫 씬으로 엔진 돌리기 (examples/quickstart.rs)
+/// ```rust,no_run
+/// use vanilla::{Engine, EngineConfiguration, Scene, SceneBase, Vector2};
+///
+/// struct MainScene {
+/// 	scene_base: SceneBase,
+/// }
+///
+/// impl Scene for MainScene {
+/// 	fn get_scene_base(&self) -> &SceneBase {
+/// 		&self.scene_base
+/// 	}
+///
+/// 	fn get_scene_base_mut(&mut self) -> &mut SceneBase {
+/// 		&mut self.scene_base
+/// 	}
+/// }
+///
+/// let mut engine_configuration = EngineConfiguration::new();
+/// engine_configuration.auto_resize_on_window_resize = true;
+/// engine_configuration.reference_resolution_size = Vector2::create(1280.0, 720.0);
+/// let engine = Engine::new(engine_configuration);
+/// let main_scene = MainScene {
+/// 	scene_base: SceneBase::new(),
+/// };
+/// if let Err(error) = engine.run(Box::new(main_scene)) {
+/// 	eprintln!("{}", error);
+/// 	std::process::exit(1);
+/// }
+/// ```
+///
+/// 창 없이 엔진을 만들어 매니저와 설정 다루기
+/// ```rust
+/// use vanilla::{Engine, EngineConfiguration};
+///
+/// let mut engine = Engine::new(EngineConfiguration::new());
+/// assert_eq!(engine.get_frame_number(), 1);
+/// assert!(!engine.get_version_string().is_empty());
+/// engine.get_time_manager_mut().set_time_scale(0.5);
+/// assert_eq!(engine.get_time_manager().get_time_scale(), 0.5);
+/// engine.set_maximum_frame_per_second(30.0);
+/// assert_eq!(engine.get_maximum_frame_per_second(), 30.0);
+/// assert!(engine.get_canvas().is_none());
+/// ```
 //==============================================================================
 pub struct Engine {
 	engine_configuration: EngineConfiguration,
@@ -268,6 +340,13 @@ pub struct Engine {
 impl Engine {
 	//==============================================================================
 	/// 생성.
+	/// - 매니저(시간, 뷰, 입력, 커서, 오디오)를 만들고 문서 언어와 meta 를 설정대로 둔다. 창과 GL 은 run 에서 플랫폼이 만든다.
+	///
+	/// # 인자
+	/// - `engine_configuration`: 엔진 설정. (엔진이 소유한다, get_engine_configuration 으로 읽는다)
+	///
+	/// # 돌려줌
+	/// 새 엔진. (프레임 번호 1, 씬 없음)
 	//==============================================================================
 	pub fn new(engine_configuration: EngineConfiguration) -> Engine {
 		let reference_resolution_size = engine_configuration.reference_resolution_size;
@@ -307,6 +386,9 @@ impl Engine {
 
 	//==============================================================================
 	/// 개발자 도구로 노드 검사하기 부탁. (크롬 문맥 메뉴의 검사 자리. 그 노드를 가진 씬의 DevTools 가 다음 tick 에 열고 고른다)
+	///
+	/// # 인자
+	/// - `node_id`: 검사할 노드. (앞서 부탁한 노드는 바꾼다)
 	//==============================================================================
 	pub fn request_dev_tools_inspect(&self, node_id: crate::core::node::nodetree::NodeId) {
 		self.dev_tools_inspect_request.set(Some(node_id));
@@ -327,6 +409,12 @@ impl Engine {
 	//==============================================================================
 	/// 알림 창. (원본 window.alert, 확인만 있다. 손잡이는 확인하면 끝난다)
 	/// - 웹은 브라우저 창이 닫힐 때까지 막고 끝난 손잡이를 돌려준다. 데스크탑은 엔진이 그린 창을 띄우고, 닫힐 때까지 씬을 갱신하지 않는다. (core/modaldialog.rs)
+	///
+	/// # 인자
+	/// - `message`: 창에 보일 글.
+	///
+	/// # 돌려줌
+	/// 질문 창 손잡이. (확인하면 끝난다)
 	//==============================================================================
 	pub fn alert(&mut self, message: &str) -> ModalDialogHandle {
 		self.show_modal_dialog(ModalDialogKind::Alert, message, "")
@@ -334,6 +422,12 @@ impl Engine {
 
 	//==============================================================================
 	/// 확인 창. (원본 window.confirm, 손잡이의 is_confirmed 가 원본이 돌려주는 값)
+	///
+	/// # 인자
+	/// - `message`: 창에 보일 글.
+	///
+	/// # 돌려줌
+	/// 질문 창 손잡이. (확인이나 취소로 답하면 끝난다)
 	//==============================================================================
 	pub fn confirm(&mut self, message: &str) -> ModalDialogHandle {
 		self.show_modal_dialog(ModalDialogKind::Confirm, message, "")
@@ -341,6 +435,13 @@ impl Engine {
 
 	//==============================================================================
 	/// 입력 창. (원본 window.prompt(message, default), 손잡이의 get_prompt_text 가 원본이 돌려주는 값, 취소는 None)
+	///
+	/// # 인자
+	/// - `message`: 창에 보일 글.
+	/// - `default_value`: 입력 칸에 처음 넣어 둘 글. (데스크탑은 모두 고른 채로 초점을 받는다)
+	///
+	/// # 돌려줌
+	/// 질문 창 손잡이. (확인이나 취소로 답하면 끝난다)
 	//==============================================================================
 	pub fn prompt(&mut self, message: &str, default_value: &str) -> ModalDialogHandle {
 		self.show_modal_dialog(ModalDialogKind::Prompt, message, default_value)
@@ -348,6 +449,12 @@ impl Engine {
 
 	//==============================================================================
 	/// 알림 창을 띄우고 닫힐 때 풀리는 Promise. (원본 window.alert 를 await 꼴로)
+	///
+	/// # 인자
+	/// - `message`: 창에 보일 글.
+	///
+	/// # 돌려줌
+	/// 창이 닫히면 풀리는 Promise.
 	//==============================================================================
 	pub fn alert_async(&mut self, message: &str) -> Promise<()> {
 		let (alert_promise, alert_resolver) = Promise::create();
@@ -359,6 +466,27 @@ impl Engine {
 
 	//==============================================================================
 	/// 확인 창을 띄우고 답하면 풀리는 Promise. (원본 window.confirm 이 돌려주는 값)
+	///
+	/// # 인자
+	/// - `message`: 창에 보일 글.
+	///
+	/// # 돌려줌
+	/// 답하면 풀리는 Promise. (확인이면 true, 취소면 false)
+	///
+	/// # 예제
+	/// 엔진 작업에서 물어보고 답에 따라 끝내기
+	/// ```rust,no_run
+	/// use vanilla::Engine;
+	///
+	/// fn ask_exit(engine: &mut Engine) {
+	/// 	engine.spawn_task(|mut engine_context| async move {
+	/// 		let is_confirmed = engine_context.with(|engine| engine.confirm_async("Exit?")).await;
+	/// 		if is_confirmed {
+	/// 			engine_context.with(|engine| engine.exit_application());
+	/// 		}
+	/// 	});
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn confirm_async(&mut self, message: &str) -> Promise<bool> {
 		let (confirm_promise, confirm_resolver) = Promise::create();
@@ -370,6 +498,13 @@ impl Engine {
 
 	//==============================================================================
 	/// 입력 창을 띄우고 답하면 풀리는 Promise. (원본 window.prompt 가 돌려주는 값, 취소는 원본 null 자리의 None)
+	///
+	/// # 인자
+	/// - `message`: 창에 보일 글.
+	/// - `default_value`: 입력 칸에 처음 넣어 둘 글.
+	///
+	/// # 돌려줌
+	/// 답하면 풀리는 Promise. (확인이면 입력한 글, 취소면 None)
 	//==============================================================================
 	pub fn prompt_async(&mut self, message: &str, default_value: &str) -> Promise<Option<String>> {
 		let (prompt_promise, prompt_resolver) = Promise::create();
@@ -405,6 +540,9 @@ impl Engine {
 
 	//==============================================================================
 	/// 질문 창이 떠 있는지. (데스크탑만 참이 될 수 있다. 떠 있는 동안 엔진은 씬을 갱신하지 않는다)
+	///
+	/// # 돌려줌
+	/// 떠 있거나 기다리는 질문 창이 있으면 true. (웹은 늘 false)
 	//==============================================================================
 	pub fn is_modal_dialog_open(&self) -> bool {
 		#[cfg(target_arch = "wasm32")]
@@ -445,6 +583,12 @@ impl Engine {
 	/// 시작.
 	/// - 데스크탑: 창을 닫거나 exit_application 을 부를 때까지 돌아오지 않는다.
 	/// - 웹: 캔버스와 WebGL2 를 잡고 request_animation_frame 을 걸어 둔 뒤 바로 돌아온다.
+	///
+	/// # 인자
+	/// - `scene`: 첫 씬. (load_scene 으로 불러온다)
+	///
+	/// # 돌려줌
+	/// 정상으로 끝나면 Ok. (데스크탑은 창이 닫혀 이벤트 루프가 끝날 때, 웹은 프레임을 걸어 둔 뒤 바로) 이벤트 루프나 창, GL 컨텍스트를 만들지 못하는 등 플랫폼이 실패하면 Err(까닭).
 	//==============================================================================
 	pub fn run(self, scene: Box<dyn Scene>) -> Result<(), String> {
 		platform::run(EngineRunner::new(self, scene))
@@ -452,6 +596,13 @@ impl Engine {
 
 	//==============================================================================
 	/// 씬 불러오기. (이번 프레임이 끝난 뒤 목록에 더한다. unload_scene 에 넘길 핸들을 돌려준다)
+	/// - 목록에 더할 때 create 를 부르고 루트를 뷰 크기로 맞춘다. 맡긴 애셋과 작업이 다 끝나고 0.3 초 뒤 initialize 를 부른다.
+	///
+	/// # 인자
+	/// - `scene`: 불러올 씬. (엔진이 소유한다)
+	///
+	/// # 돌려줌
+	/// 그 씬의 핸들. (1 부터 매긴다)
 	//==============================================================================
 	pub fn load_scene(&mut self, mut scene: Box<dyn Scene>) -> SceneId {
 		self.next_scene_number += 1;
@@ -465,6 +616,33 @@ impl Engine {
 	/// 씬 하나 내리기. (이번 프레임이 끝난 뒤 finalize, unload 를 부르고, unload 가 맡긴 작업이 끝나면 목록에서 뺀다. 없는 핸들이면 아무것도 하지 않는다)
 	/// - 핸들(SceneId)이나 원본처럼 씬(씬 공통 상태 &SceneBase)을 받는다.
 	/// - 그 씬의 작업이 남았으면 다 끝날 때까지 씬 값을 살려 두고, 다 끝나면 destroy 를 부르고 버린다.
+	///
+	/// # 인자
+	/// - `scene`: 내릴 씬의 핸들(SceneId)이나 씬 공통 상태(&SceneBase).
+	///
+	/// # 예제
+	/// 씬 스스로 내리기
+	/// ```rust,no_run
+	/// use vanilla::{Engine, Scene, SceneBase, Vector2};
+	///
+	/// struct PopupScene {
+	/// 	scene_base: SceneBase,
+	/// }
+	///
+	/// impl Scene for PopupScene {
+	/// 	fn get_scene_base(&self) -> &SceneBase {
+	/// 		&self.scene_base
+	/// 	}
+	///
+	/// 	fn get_scene_base_mut(&mut self) -> &mut SceneBase {
+	/// 		&mut self.scene_base
+	/// 	}
+	///
+	/// 	fn touch_release(&mut self, engine: &mut Engine, _view_input_position: Vector2) {
+	/// 		engine.unload_scene(&self.scene_base);
+	/// 	}
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn unload_scene(&mut self, scene: impl Into<SceneId>) {
 		self.pending_unload_scene_id_list.push(scene.into());
@@ -480,6 +658,26 @@ impl Engine {
 	//==============================================================================
 	/// 씬 불러오기. (원본 await SceneManager.loadScene(scene), initialize 까지 끝나면 그 씬의 핸들로 풀리는 Promise 를 돌려준다)
 	/// - 불러오기는 load_scene 과 같다. 같은 프레임에 create 전에 그 씬을 내리면 풀리지 않는다. (create 뒤에 내리면 initialize 까지 마치고 풀린다)
+	///
+	/// # 인자
+	/// - `scene`: 불러올 씬. (엔진이 소유한다)
+	///
+	/// # 돌려줌
+	/// initialize 가 끝나면 그 씬의 핸들로 풀리는 Promise.
+	///
+	/// # 예제
+	/// 다음 씬을 불러 다 되면 지금 씬 내리기
+	/// ```rust,no_run
+	/// use vanilla::{Engine, Scene, SceneId};
+	///
+	/// fn change_scene(engine: &mut Engine, current_scene_id: SceneId, next_scene: Box<dyn Scene>) {
+	/// 	engine.spawn_task(move |mut engine_context| async move {
+	/// 		let next_scene_id = engine_context.with(|engine| engine.load_scene_async(next_scene)).await;
+	/// 		engine_context.with(|engine| engine.unload_scene_async(current_scene_id)).await;
+	/// 		println!("{:?}", next_scene_id);
+	/// 	});
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn load_scene_async(&mut self, mut scene: Box<dyn Scene>) -> Promise<SceneId> {
 		let (load_promise, load_resolver) = Promise::create();
@@ -491,6 +689,12 @@ impl Engine {
 	//==============================================================================
 	/// 씬 하나 내리기. (원본 await SceneManager.unloadScene(scene), 내리기가 끝나면 풀리는 Promise 를 돌려준다. 없는 핸들이어도 풀린다)
 	/// - 이번 프레임 끝에 finalize, unload 를 부르고, unload 가 track_task 로 맡긴 작업까지 끝나면 목록에서 뺀 뒤 푼다.
+	///
+	/// # 인자
+	/// - `scene`: 내릴 씬의 핸들(SceneId)이나 씬 공통 상태(&SceneBase).
+	///
+	/// # 돌려줌
+	/// 내리기가 끝나면 풀리는 Promise.
 	//==============================================================================
 	pub fn unload_scene_async(&mut self, scene: impl Into<SceneId>) -> Promise<()> {
 		let scene_id = scene.into();
@@ -502,6 +706,9 @@ impl Engine {
 
 	//==============================================================================
 	/// 모든 씬 내리기. (원본 await SceneManager.unloadAllScenes(), 그때의 모든 씬의 내리기가 끝나면 풀리는 Promise 를 돌려준다)
+	///
+	/// # 돌려줌
+	/// 그때 불러와 있던 모든 씬의 내리기가 끝나면 풀리는 Promise.
 	//==============================================================================
 	pub fn unload_all_scenes_async(&mut self) -> Promise<()> {
 		let (unload_promise, unload_resolver) = Promise::create();
@@ -514,6 +721,27 @@ impl Engine {
 	/// 엔진 작업 맡기기. (씬과 따로 사는 async 작업, 작업 함수가 받은 EngineContext 의 with 안에서 엔진을 빌린다)
 	/// - 원본 async 함수를 부를 때처럼 이 자리에서 첫 await 까지 돌고, 남은 것은 깨어날 때마다 프레임의 폴링 차례에 돈다.
 	/// - 돌려준 손잡이로 끝났는지 묻거나 await 한다.
+	///
+	/// # 인자
+	/// - `task_function`: EngineContext 를 받아 퓨처를 돌려주는 함수. (보통 `|mut engine_context| async move { ... }`, 퓨처는 Send 가 아니어도 된다)
+	///
+	/// # 돌려줌
+	/// 작업 손잡이. (첫 구간에서 끝났으면 이미 끝난 손잡이)
+	///
+	/// # 예제
+	/// 첫 await 까지는 맡기는 자리에서 돈다
+	/// ```rust
+	/// use vanilla::{Engine, EngineConfiguration};
+	///
+	/// let mut engine = Engine::new(EngineConfiguration::new());
+	/// let task_handle = engine.spawn_task(|mut engine_context| async move {
+	/// 	engine_context.with(|engine| {
+	/// 		engine.set_maximum_frame_per_second(30.0);
+	/// 	});
+	/// });
+	/// assert!(task_handle.is_finished());
+	/// assert_eq!(engine.get_maximum_frame_per_second(), 30.0);
+	/// ```
 	//==============================================================================
 	pub fn spawn_task<F, TaskFuture>(&mut self, task_function: F) -> TaskHandle
 	where
@@ -529,6 +757,45 @@ impl Engine {
 	///   (이 자리의 첫 구간에서는 그래픽이 없어 with_graphic 이 None 이다)
 	/// - 씬을 내려도 원본처럼 이어 돈다. (씬 값은 작업이 다 끝날 때까지 산다) load_scene 전의 씬이면 첫 구간만 돌고 버린다.
 	/// - 불러오기 작업이면 create 에서 씬의 track_task 로 맡겨 끝날 때까지 initialize 를 미룬다. (unload 에서 맡기면 내리기 끝을 미룬다)
+	///
+	/// # 인자
+	/// - `scene`: 작업을 맡기는 씬. (보통 훅 안의 self)
+	/// - `task_function`: `SceneContext<S>` 를 받아 퓨처를 돌려주는 함수. (보통 `|mut scene_context| async move { ... }`)
+	///
+	/// # 돌려줌
+	/// 작업 손잡이. (track_task 에 넘기거나 await 한다)
+	///
+	/// # 예제
+	/// 씬 작업에서 애셋을 기다려 씬에 넣기
+	/// ```rust,no_run
+	/// use vanilla::{Engine, Scene, SceneBase, SceneContext};
+	///
+	/// struct StageScene {
+	/// 	scene_base: SceneBase,
+	/// 	stage_bytes: Vec<u8>,
+	/// }
+	///
+	/// impl Scene for StageScene {
+	/// 	fn get_scene_base(&self) -> &SceneBase {
+	/// 		&self.scene_base
+	/// 	}
+	///
+	/// 	fn get_scene_base_mut(&mut self) -> &mut SceneBase {
+	/// 		&mut self.scene_base
+	/// 	}
+	///
+	/// 	fn create(&mut self, engine: &mut Engine) {
+	/// 		let task_handle = engine.spawn_scene_task(self, |mut scene_context: SceneContext<StageScene>| async move {
+	/// 			let load_handle = scene_context.with(|_scene, engine| engine.request_asset_bytes("examples/assets/scenedocument.scene.json"));
+	/// 			let stage_bytes = load_handle.await.map(|bytes| bytes.to_vec()).unwrap_or_default();
+	/// 			scene_context.with(|scene, _engine| {
+	/// 				scene.stage_bytes = stage_bytes;
+	/// 			});
+	/// 		});
+	/// 		self.scene_base.track_task(&task_handle);
+	/// 	}
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn spawn_scene_task<S, F, TaskFuture>(&mut self, scene: &mut S, task_function: F) -> TaskHandle
 	where
@@ -541,6 +808,22 @@ impl Engine {
 
 	//==============================================================================
 	/// 엔진 작업을 다음 폴링 차례로 맡기기. (&Engine 만 있는 자리, 컴포넌트 문맥처럼. 다음 프레임의 폴링 차례에 처음 돈다)
+	///
+	/// # 인자
+	/// - `task_function`: EngineContext 를 받아 퓨처를 돌려주는 함수.
+	///
+	/// # 돌려줌
+	/// 작업 손잡이. (다음 폴링 차례 전에는 끝나지 않은 손잡이)
+	///
+	/// # 예제
+	/// 맡긴 자리에서는 돌지 않는다
+	/// ```rust
+	/// use vanilla::{Engine, EngineConfiguration};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let task_handle = engine.spawn_deferred_task(|_engine_context| async move {});
+	/// assert!(!task_handle.is_finished());
+	/// ```
 	//==============================================================================
 	pub fn spawn_deferred_task<F, TaskFuture>(&self, task_function: F) -> TaskHandle
 	where
@@ -552,6 +835,14 @@ impl Engine {
 
 	//==============================================================================
 	/// 씬 작업을 다음 폴링 차례로 맡기기. (&Engine 과 &씬만 있는 자리, 다음 프레임의 폴링 차례에 처음 돈다)
+	/// - 그 씬이 다음 폴링 차례에 불러온 씬 목록에도 살려 둔 씬 목록에도 없으면 작업을 버린다.
+	///
+	/// # 인자
+	/// - `scene`: 작업을 맡기는 씬.
+	/// - `task_function`: `SceneContext<S>` 를 받아 퓨처를 돌려주는 함수.
+	///
+	/// # 돌려줌
+	/// 작업 손잡이. (다음 폴링 차례 전에는 끝나지 않은 손잡이)
 	//==============================================================================
 	pub fn spawn_deferred_scene_task<S, F, TaskFuture>(&self, scene: &S, task_function: F) -> TaskHandle
 	where
@@ -567,6 +858,9 @@ impl Engine {
 	/// 불러온 모든 씬의 핸들. (원본 SceneManager.getAllLoadedScenes, 불러온 차례, 로딩 중인 씬도 든다)
 	/// - 원본은 씬 객체를 돌려준다. 러스트 판은 씬마다 &mut Engine 을 받아 도는 동안 다른 씬을 빌릴 수 없어서 핸들을 돌려준다.
 	///   load_scene 한 프레임이 끝나 create 가 불린 씬부터 들고, 내린 씬은 빠진다.
+	///
+	/// # 돌려줌
+	/// 불러온 씬의 핸들 목록. (불러온 차례)
 	//==============================================================================
 	pub fn get_all_loaded_scenes(&self) -> &[SceneId] {
 		&self.loaded_scene_id_list
@@ -574,6 +868,12 @@ impl Engine {
 
 	//==============================================================================
 	/// 애셋 경로 찾기. (설정의 애셋 폴더 후보에서 처음 있는 것, 없으면 첫 후보 기준)
+	///
+	/// # 인자
+	/// - `relative_path`: 애셋 폴더 기준 상대 경로.
+	///
+	/// # 돌려줌
+	/// 파일이 있는 첫 후보 폴더의 경로. (어디에도 없으면 첫 후보 기준 경로, 후보가 없으면 상대 경로 그대로)
 	//==============================================================================
 	pub fn resolve_asset_path(&self, relative_path: &str) -> PathBuf {
 		for asset_directory_path in &self.engine_configuration.asset_directory_paths {
@@ -594,6 +894,24 @@ impl Engine {
 
 	//==============================================================================
 	/// 이미지 애셋 읽기. (원본 new ImageAsset() + load(path))
+	/// - "data:" 주소도 받는다. (주소의 형으로 푼다)
+	///
+	/// # 인자
+	/// - `relative_path`: 애셋 폴더 기준 상대 경로나 "data:" 주소.
+	///
+	/// # 돌려줌
+	/// 읽은 이미지. 파일을 못 읽거나 풀지 못하면 Err(까닭).
+	///
+	/// # 예제
+	/// 저장소의 아틀라스 그림 읽기
+	/// ```rust
+	/// use vanilla::{Engine, EngineConfiguration};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let image = engine.load_image("examples/assets/atlas/icons.png").unwrap();
+	/// assert!(image.get_width() > 0);
+	/// assert!(engine.load_image("examples/assets/missing.png").is_err());
+	/// ```
 	//==============================================================================
 	pub fn load_image(&self, relative_path: &str) -> Result<Rc<Image>, String> {
 		if crate::base::dataurl::is_data_url(relative_path) {
@@ -609,6 +927,25 @@ impl Engine {
 	/// - 데스크탑: 애셋 폴더 후보에서 파일을 찾아 그 자리에서 읽고 끝낸다.
 	/// - 웹: asset_base_url + 상대 경로를 fetch 하고, 받으면 끝낸다. (그 사이 프레임은 계속 돈다)
 	/// - "data:" 주소는 원본 fetch 처럼 주소 그대로 푼다. (데스크탑은 그 자리에서 base/dataurl.rs 로 풀고 형을 응답 형으로 둔다, 웹은 기준 주소를 붙이지 않고 fetch)
+	///
+	/// # 인자
+	/// - `relative_path`: 애셋 폴더 기준 상대 경로나 "data:" 주소.
+	///
+	/// # 돌려줌
+	/// 읽기 손잡이. (읽히면 바이트, 실패하면 까닭을 든다. await 할 수 있다)
+	///
+	/// # 예제
+	/// 파일과 data: 주소 읽기 (데스크탑은 그 자리에서 끝난다)
+	/// ```rust
+	/// use vanilla::{Engine, EngineConfiguration};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let load_handle = engine.request_asset_bytes("examples/assets/atlas/icons.json");
+	/// assert!(load_handle.is_loaded());
+	/// let data_load_handle = engine.request_asset_bytes("data:text/plain,hello");
+	/// assert_eq!(data_load_handle.get_bytes().unwrap().as_slice(), b"hello");
+	/// assert!(engine.request_asset_bytes("examples/assets/missing.json").is_failed());
+	/// ```
 	//==============================================================================
 	pub fn request_asset_bytes(&self, relative_path: &str) -> AssetLoadHandle {
 		self.request_asset_bytes_with_cache(relative_path, false)
@@ -616,6 +953,13 @@ impl Engine {
 
 	//==============================================================================
 	/// 애셋 바이트 부탁. (is_no_cache 면 웹은 브라우저 캐시를 쓰지 않고 다시 확인한다, 원본 TextAsset.setNoCache)
+	///
+	/// # 인자
+	/// - `relative_path`: 애셋 폴더 기준 상대 경로나 "data:" 주소.
+	/// - `is_no_cache`: true 면 웹은 브라우저 캐시를 쓰지 않는다. (데스크탑은 늘 파일을 읽어 상관없다)
+	///
+	/// # 돌려줌
+	/// 읽기 손잡이.
 	//==============================================================================
 	pub fn request_asset_bytes_with_cache(&self, relative_path: &str, is_no_cache: bool) -> AssetLoadHandle {
 		let load_handle = AssetLoadHandle::create_pending(relative_path);
@@ -625,6 +969,22 @@ impl Engine {
 
 	//==============================================================================
 	/// 애셋 바이트 부탁. (이미 만든 읽기 손잡이를 끝낸다. AssetLoader 가 미리 나눠 준 손잡이를 차례가 오면 채울 때 쓴다)
+	///
+	/// # 인자
+	/// - `relative_path`: 애셋 폴더 기준 상대 경로나 "data:" 주소.
+	/// - `load_handle`: 끝낼 읽기 손잡이. (AssetLoadHandle::create_pending 으로 만든 것)
+	///
+	/// # 예제
+	/// 미리 나눠 준 손잡이를 나중에 채우기
+	/// ```rust
+	/// use vanilla::{AssetLoadHandle, Engine, EngineConfiguration};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let load_handle = AssetLoadHandle::create_pending("examples/assets/atlas/icons.json");
+	/// assert!(!load_handle.is_finished());
+	/// engine.request_asset_bytes_into("examples/assets/atlas/icons.json", &load_handle);
+	/// assert!(load_handle.is_loaded());
+	/// ```
 	//==============================================================================
 	pub fn request_asset_bytes_into(&self, relative_path: &str, load_handle: &AssetLoadHandle) {
 		self.request_asset_bytes_into_with_cache(relative_path, load_handle, false);
@@ -670,6 +1030,14 @@ impl Engine {
 
 	//==============================================================================
 	/// 글꼴 바이트가 오면 이름으로 등록해 달라고 맡기기. (FontAsset 이 부른다. 등록은 프레임 시작에 한다, 올리면 끝나는 손잡이를 돌려준다)
+	///
+	/// # 인자
+	/// - `family`: 글꼴 이름. (글자를 그릴 때 쓰는 이름)
+	/// - `is_bold`: true 면 굵기 700 얼굴, false 면 400 얼굴로 올린다.
+	/// - `load_handle`: 글꼴 파일 바이트의 읽기 손잡이.
+	///
+	/// # 돌려줌
+	/// 글꼴 목록에 올리면(또는 받기나 올리기에 실패하면) 끝나는 손잡이.
 	//==============================================================================
 	pub fn register_font_when_loaded(&mut self, family: &str, is_bold: bool, load_handle: AssetLoadHandle) -> FontLoadHandle {
 		self.register_font_face_when_loaded(family, FontFaceDescriptors::create_with_bold(is_bold), load_handle)
@@ -679,6 +1047,14 @@ impl Engine {
 	/// 글꼴 얼굴 바이트가 오면 서술자(굵기, 기울기, 글자 범위)대로 이름 아래에 올려 달라고 맡기기. (원본 new FontFace(family, url, descriptors) + document.fonts.add)
 	/// - 서술자의 source_key 가 비었으면 읽기 손잡이의 경로를 쓴다.
 	/// - 돌려준 손잡이는 글꼴 목록에 올리면(또는 받기나 올리기에 실패하면) 끝난다. (원본 await fontFace.load() 와 document.fonts.add 자리)
+	///
+	/// # 인자
+	/// - `family`: 글꼴 이름.
+	/// - `font_face_descriptors`: 굵기, 기울기, 글자 범위, 얼굴 열쇠. (열쇠가 비었으면 읽기 손잡이의 경로)
+	/// - `load_handle`: 글꼴 파일 바이트의 읽기 손잡이.
+	///
+	/// # 돌려줌
+	/// 글꼴 목록에 올리면(또는 받기나 올리기에 실패하면) 끝나는 손잡이.
 	//==============================================================================
 	pub fn register_font_face_when_loaded(&mut self, family: &str, mut font_face_descriptors: FontFaceDescriptors, load_handle: AssetLoadHandle) -> FontLoadHandle {
 		if font_face_descriptors.source_key.is_empty() {
@@ -691,6 +1067,11 @@ impl Engine {
 
 	//==============================================================================
 	/// 글꼴 얼굴 지우기 맡기기. (원본 document.fonts.delete, 열쇠는 등록할 때의 source_key 또는 경로)
+	/// - 아직 바이트를 기다리는 같은 얼굴의 등록은 바로 뺀다. (이름은 대소문자를 가리지 않는다) 지우기는 다음 프레임 시작에 한다.
+	///
+	/// # 인자
+	/// - `family`: 글꼴 이름.
+	/// - `source_key`: 지울 얼굴의 열쇠.
 	//==============================================================================
 	pub fn unregister_font_face(&mut self, family: &str, source_key: &str) {
 		self.pending_font_registration_list.retain(|(pending_family, font_face_descriptors, _)| !(pending_family.eq_ignore_ascii_case(family) && font_face_descriptors.source_key == source_key));
@@ -699,6 +1080,10 @@ impl Engine {
 
 	//==============================================================================
 	/// 한 이름의 얼굴 차례 정하기 맡기기. (얼굴 열쇠 목록, 뒤가 먼저 그린다, TextStringTextureCache.set_font_face_order)
+	///
+	/// # 인자
+	/// - `family`: 글꼴 이름.
+	/// - `source_key_list`: 얼굴 열쇠 목록. (뒤의 얼굴이 먼저 그린다, 다음 프레임 시작에 건다)
 	//==============================================================================
 	pub fn set_font_face_order(&mut self, family: &str, source_key_list: Vec<String>) {
 		self.pending_font_operation_list.push(PendingFontOperation::Order(family.to_string(), source_key_list));
@@ -713,6 +1098,9 @@ impl Engine {
 
 	//==============================================================================
 	/// 아직 바이트가 오지 않은 글꼴 얼굴 수. (UI 글꼴이 기다릴 때 본다)
+	///
+	/// # 돌려줌
+	/// 등록을 기다리는 글꼴 얼굴 수. (바이트를 기다리는 것과 다음 프레임 시작에 올릴 것)
 	//==============================================================================
 	pub fn get_pending_font_face_count(&self) -> usize {
 		self.pending_font_registration_list.len()
@@ -722,6 +1110,24 @@ impl Engine {
 	/// 오디오 애셋 읽기. (원본 new AudioAsset() + load(path), 애셋 폴더 기준 경로나 "data:" 주소)
 	/// - 데스크탑: 그 자리에서 읽고 디코딩한다. 실패하면 Err. data: 주소는 형을 보지 않고 바이트를 내용으로 가려 푼다. (원본 decodeAudioData 와 같다)
 	/// - 웹: fetch 와 디코딩을 걸어 두고 바로 애셋을 돌려준다. 끝나면 is_loaded() 가 참이 된다. (실패는 get_load_error())
+	///
+	/// # 인자
+	/// - `relative_path`: 애셋 폴더 기준 상대 경로나 "data:" 주소.
+	///
+	/// # 돌려줌
+	/// 오디오 애셋. 데스크탑은 읽기나 디코딩에 실패하면 Err(까닭). (웹은 그 자리에서 실패한 것만 Err)
+	///
+	/// # 예제
+	/// 소리 파일을 읽어 길이 보기 (데스크탑은 그 자리에서 디코딩한다)
+	/// ```rust
+	/// use vanilla::{Engine, EngineConfiguration};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let audio_asset = engine.load_audio_asset("tests/assets/audio/wav_s16_stereo.wav").unwrap();
+	/// assert!(audio_asset.is_loaded());
+	/// assert!(audio_asset.get_duration() > 0.0);
+	/// assert!(engine.load_audio_asset("tests/assets/audio/missing.wav").is_err());
+	/// ```
 	//==============================================================================
 	pub fn load_audio_asset(&self, relative_path: &str) -> Result<Rc<AudioAsset>, String> {
 		let audio_asset = Rc::new(AudioAsset::new());
@@ -733,6 +1139,12 @@ impl Engine {
 
 	//==============================================================================
 	/// 오디오 애셋 경로 풀기. (데스크탑은 애셋 폴더 후보에서 찾은 경로, 웹은 asset_base_url + 상대 경로, 웹의 data: 주소는 그대로)
+	///
+	/// # 인자
+	/// - `relative_path`: 애셋 폴더 기준 상대 경로.
+	///
+	/// # 돌려줌
+	/// 읽을 경로. (웹은 주소를 경로 꼴에 담는다)
 	//==============================================================================
 	pub fn resolve_audio_asset_path(&self, relative_path: &str) -> PathBuf {
 		#[cfg(not(target_arch = "wasm32"))]
@@ -773,6 +1185,9 @@ impl Engine {
 
 	//==============================================================================
 	/// 종료 요청 여부.
+	///
+	/// # 돌려줌
+	/// exit_application 을 불렀으면 true.
 	//==============================================================================
 	pub fn is_exit_requested(&self) -> bool {
 		self.is_exit_requested
@@ -780,6 +1195,9 @@ impl Engine {
 
 	//==============================================================================
 	/// 커서 보이기 설정.
+	///
+	/// # 인자
+	/// - `is_visible`: false 면 창이나 캔버스 위에서 마우스 커서를 숨긴다. (플랫폼이 붙이기 전에는 아무것도 하지 않는다)
 	//==============================================================================
 	pub fn set_visible_cursor(&self, is_visible: bool) {
 		platform::set_cursor_visible(self.platform_window.as_ref(), is_visible);
@@ -794,6 +1212,9 @@ impl Engine {
 
 	//==============================================================================
 	/// 캔버스. (원본 getCanvas, 웹은 그리는 캔버스 요소, 데스크탑은 창, 플랫폼이 붙이기 전에는 None)
+	///
+	/// # 돌려줌
+	/// 플랫폼 창 손잡이. (run 으로 창을 만들기 전에는 None)
 	//==============================================================================
 	pub fn get_canvas(&self) -> Option<&PlatformWindow> {
 		self.platform_window.as_ref()
@@ -803,6 +1224,9 @@ impl Engine {
 	/// 글자 입력칸이 포커스되어 있는지. (원본 isTextInputFocused, 웹은 문서의 초점이 글자 input, textarea, contenteditable 이면 참)
 	/// - 원본의 엔진 입력 필드는 숨긴 DOM input 에 초점을 두어 여기서 참이 된다. 데스크탑에는 문서가 없어 엔진 입력 필드의 포커스를 본다.
 	///   (입력 매니저의 is_typing_in_text_field 와 같다)
+	///
+	/// # 돌려줌
+	/// 글자 입력칸에 초점이 있으면 true.
 	//==============================================================================
 	pub fn is_text_input_focused(&self) -> bool {
 		self.input_manager.is_typing_in_text_field()
@@ -810,6 +1234,9 @@ impl Engine {
 
 	//==============================================================================
 	/// 창 제목 설정.
+	///
+	/// # 인자
+	/// - `title`: 새 창 제목. (웹은 문서 제목, 데스크탑은 창이 생기기 전에는 아무것도 하지 않는다)
 	//==============================================================================
 	pub fn set_title(&self, title: &str) {
 		platform::set_title(self.platform_window.as_ref(), title);
@@ -817,6 +1244,9 @@ impl Engine {
 
 	//==============================================================================
 	/// 시스템 클립보드에 글 쓰기. (데스크탑 arboard, 웹 navigator.clipboard.writeText. 원본 UIInputField.writeClipboard 자리)
+	///
+	/// # 인자
+	/// - `text`: 쓸 글.
 	//==============================================================================
 	pub fn write_clipboard_text(&self, text: &str) {
 		platform::write_clipboard_text(text);
@@ -824,6 +1254,9 @@ impl Engine {
 
 	//==============================================================================
 	/// 시스템 클립보드 글 읽기. (데스크탑만 그 자리에서 읽는다. 웹은 비동기라 None 이고 read_clipboard_text_with_callback 으로 읽는다)
+	///
+	/// # 돌려줌
+	/// 클립보드 글. (웹, 또는 클립보드를 못 읽으면 None)
 	//==============================================================================
 	pub fn read_clipboard_text(&self) -> Option<String> {
 		platform::read_clipboard_text()
@@ -832,6 +1265,21 @@ impl Engine {
 	//==============================================================================
 	/// 시스템 클립보드 글을 읽어 콜백에 넘기기. (원본 UIInputField.readClipboard 가 돌려주는 Promise 의 then 자리, 못 읽거나 거부되면 빈 글)
 	/// - 웹은 navigator.clipboard.readText 가 끝난 뒤 부르고, 데스크탑은 그 자리에서 읽어 바로 부른다.
+	///
+	/// # 인자
+	/// - `callback`: 읽은 글을 받는 함수. (못 읽거나 거부되면 빈 글)
+	///
+	/// # 예제
+	/// 붙여넣을 글 읽기
+	/// ```rust,no_run
+	/// use vanilla::Engine;
+	///
+	/// fn paste_text(engine: &Engine) {
+	/// 	engine.read_clipboard_text_with_callback(|clipboard_text| {
+	/// 		println!("{}", clipboard_text);
+	/// 	});
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn read_clipboard_text_with_callback(&self, callback: impl FnOnce(String) + 'static) {
 		platform::read_clipboard_text_with_callback(Box::new(callback));
@@ -840,6 +1288,22 @@ impl Engine {
 	//==============================================================================
 	/// 시스템 클립보드 글 읽기. (원본 await engine.readClipboardText(), 클립보드가 없거나 거부되면 원본 null 자리의 None)
 	/// - 웹은 navigator.clipboard.readText 가 끝난 뒤, 데스크탑은 그 자리에서 읽어 풀린다.
+	///
+	/// # 돌려줌
+	/// 클립보드 글로 풀리는 Promise. (클립보드가 없거나 거부되면 None)
+	///
+	/// # 예제
+	/// 엔진 작업에서 클립보드 글 기다리기
+	/// ```rust,no_run
+	/// use vanilla::Engine;
+	///
+	/// fn paste_text(engine: &mut Engine) {
+	/// 	engine.spawn_task(|mut engine_context| async move {
+	/// 		let clipboard_text = engine_context.with(|engine| engine.read_clipboard_text_async()).await;
+	/// 		println!("{}", clipboard_text.unwrap_or_default());
+	/// 	});
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn read_clipboard_text_async(&self) -> Promise<Option<String>> {
 		let (clipboard_promise, clipboard_resolver) = Promise::create();
@@ -849,6 +1313,12 @@ impl Engine {
 		clipboard_promise
 	}
 
+	//==============================================================================
+	/// 엔진 설정 반환.
+	///
+	/// # 돌려줌
+	/// Engine::new 에 넘긴 설정. (set_maximum_frame_per_second 가 바꾼 최대 FPS 도 여기에 있다)
+	//==============================================================================
 	pub fn get_engine_configuration(&self) -> &EngineConfiguration {
 		&self.engine_configuration
 	}
@@ -856,6 +1326,21 @@ impl Engine {
 	//==============================================================================
 	/// 최대 FPS 설정. (실행 중에 바꿀 수 있다, 0 이면 제한하지 않는다. 0 보다 작거나 유한하지 않으면 0)
 	/// - EngineConfiguration.maximum_frame_per_second 에 적는다. 플랫폼이 프레임마다 그 값을 읽어 다음 프레임부터 따른다.
+	///
+	/// # 인자
+	/// - `maximum_frame_per_second`: 초당 최대 프레임 수. (0 이면 제한 없음)
+	///
+	/// # 예제
+	/// 실행 중에 30 FPS 로 묶고, 잘못된 값은 제한 없음으로
+	/// ```rust
+	/// use vanilla::{Engine, EngineConfiguration};
+	///
+	/// let mut engine = Engine::new(EngineConfiguration::new());
+	/// engine.set_maximum_frame_per_second(30.0);
+	/// assert_eq!(engine.get_maximum_frame_per_second(), 30.0);
+	/// engine.set_maximum_frame_per_second(-5.0);
+	/// assert_eq!(engine.get_maximum_frame_per_second(), 0.0);
+	/// ```
 	//==============================================================================
 	pub fn set_maximum_frame_per_second(&mut self, maximum_frame_per_second: f32) {
 		if !maximum_frame_per_second.is_finite() || maximum_frame_per_second < 0.0 {
@@ -867,48 +1352,99 @@ impl Engine {
 
 	//==============================================================================
 	/// 최대 FPS 반환. (0 이면 제한하지 않음)
+	///
+	/// # 돌려줌
+	/// 초당 최대 프레임 수. (기본 0)
 	//==============================================================================
 	pub fn get_maximum_frame_per_second(&self) -> f32 {
 		self.engine_configuration.maximum_frame_per_second
 	}
 
+	//==============================================================================
+	/// 시간 관리자.
+	///
+	/// # 돌려줌
+	/// 엔진의 시간 관리자. (프레임 간격, 누적 시간, 초당 프레임 수)
+	//==============================================================================
 	pub fn get_time_manager(&self) -> &TimeManager {
 		&self.time_manager
 	}
 
+	//==============================================================================
+	/// 시간 관리자. (변경용)
+	///
+	/// # 돌려줌
+	/// 엔진의 시간 관리자. (시간 배율, 프레임 간격 상한을 바꾼다)
+	//==============================================================================
 	pub fn get_time_manager_mut(&mut self) -> &mut TimeManager {
 		&mut self.time_manager
 	}
 
+	//==============================================================================
+	/// 뷰 매니저.
+	///
+	/// # 돌려줌
+	/// 엔진의 뷰 매니저. (뷰 크기, 뷰 영역, 세이프 에어리어)
+	//==============================================================================
 	pub fn get_view_manager(&self) -> &ViewManager {
 		&self.view_manager
 	}
 
+	//==============================================================================
+	/// 뷰 매니저. (변경용)
+	///
+	/// # 돌려줌
+	/// 엔진의 뷰 매니저. (뷰 스케일 모드, 렌더 배율 상한 같은 설정을 바꾼다)
+	//==============================================================================
 	pub fn get_view_manager_mut(&mut self) -> &mut ViewManager {
 		&mut self.view_manager
 	}
 
+	//==============================================================================
+	/// 입력 매니저.
+	///
+	/// # 돌려줌
+	/// 엔진의 입력 매니저. (키, 마우스, 터치, 휠)
+	//==============================================================================
 	pub fn get_input_manager(&self) -> &InputManager {
 		&self.input_manager
 	}
 
+	//==============================================================================
+	/// 입력 매니저. (변경용)
+	///
+	/// # 돌려줌
+	/// 엔진의 입력 매니저.
+	//==============================================================================
 	pub fn get_input_manager_mut(&mut self) -> &mut InputManager {
 		&mut self.input_manager
 	}
 
 	//==============================================================================
 	/// 마우스 커서. (켜면 프레임 끝마다 창이나 캔버스의 커서를 정한다)
+	///
+	/// # 돌려줌
+	/// 엔진의 마우스 커서. (단추는 &Engine 으로 mark_over_button 을 부른다)
 	//==============================================================================
 	pub fn get_pointer_cursor(&self) -> &PointerCursor {
 		&self.pointer_cursor
 	}
 
+	//==============================================================================
+	/// 마우스 커서. (변경용)
+	///
+	/// # 돌려줌
+	/// 엔진의 마우스 커서. (켜기, 화면 커서, 그림 커서를 정한다)
+	//==============================================================================
 	pub fn get_pointer_cursor_mut(&mut self) -> &mut PointerCursor {
 		&mut self.pointer_cursor
 	}
 
 	//==============================================================================
 	/// 주된 손이 손가락인지. (CSS 의 pointer: coarse, 데스크탑은 크로미엄처럼 윈도우 태블릿과 리눅스 터치스크린 기기에서 참)
+	///
+	/// # 돌려줌
+	/// 주된 손이 손가락이면 true. (맥은 늘 false)
 	//==============================================================================
 	pub fn is_coarse_pointer(&self) -> bool {
 		platform::is_coarse_pointer()
@@ -916,6 +1452,9 @@ impl Engine {
 
 	//==============================================================================
 	/// 오디오 매니저. (메서드가 &self 라 컴포넌트가 받는 &Engine 으로도 플레이어를 만들 수 있다)
+	///
+	/// # 돌려줌
+	/// 엔진의 오디오 매니저.
 	//==============================================================================
 	pub fn get_audio_manager(&self) -> &AudioManager {
 		&self.audio_manager
@@ -923,17 +1462,29 @@ impl Engine {
 
 	//==============================================================================
 	/// 오디오 매니저. (가변)
+	///
+	/// # 돌려줌
+	/// 엔진의 오디오 매니저.
 	//==============================================================================
 	pub fn get_audio_manager_mut(&mut self) -> &mut AudioManager {
 		&mut self.audio_manager
 	}
 
+	//==============================================================================
+	/// 플랫폼 정보. (원본 Platform, 운영체제와 브라우저 종류)
+	///
+	/// # 돌려줌
+	/// 엔진을 만들 때 읽은 플랫폼 정보.
+	//==============================================================================
 	pub fn get_platform(&self) -> &Platform {
 		&self.platform
 	}
 
 	//==============================================================================
 	/// 페이지가 가려져 있는지. (다른 탭, 앱 전환, 창이 가려짐. 데스크탑은 창 가림(맥, X11), 최소화(윈도우), 앱 멈춤, 웨이랜드 프레임 콜백이 3 초 넘게 오지 않음)
+	///
+	/// # 돌려줌
+	/// 마지막 페이지 이벤트가 Hidden 이면 true. (Visible 이 오면 false, 처음 false)
 	//==============================================================================
 	pub fn is_page_hidden(&self) -> bool {
 		self.is_page_hidden
@@ -941,6 +1492,32 @@ impl Engine {
 
 	//==============================================================================
 	/// 페이지 이벤트 리스너 더하기. (리스너를 버리면 더 부르지 않는다, &Engine 으로도 더할 수 있다)
+	///
+	/// # 인자
+	/// - `page_event_listener`: 더할 리스너. (엔진은 약한 참조로 든다, 부른 쪽이 살려 둔다)
+	///
+	/// # 예제
+	/// 가려짐과 포커스 이벤트 받기
+	/// ```rust
+	/// use std::cell::RefCell;
+	/// use std::rc::Rc;
+	/// use vanilla::{Engine, EngineConfiguration, PageEvent, PageEventListener};
+	///
+	/// let mut engine = Engine::new(EngineConfiguration::new());
+	/// let received_list: Rc<RefCell<Vec<PageEvent>>> = Rc::new(RefCell::new(Vec::new()));
+	/// let listener_received_list = received_list.clone();
+	/// let page_event_listener: PageEventListener = Rc::new(RefCell::new(move |page_event: PageEvent| {
+	/// 	listener_received_list.borrow_mut().push(page_event);
+	/// }));
+	/// engine.add_page_event_listener(&page_event_listener);
+	/// engine.dispatch_page_event(PageEvent::Hidden);
+	/// assert!(engine.is_page_hidden());
+	/// engine.dispatch_page_event(PageEvent::Visible);
+	/// assert_eq!(*received_list.borrow(), vec![PageEvent::Hidden, PageEvent::Visible]);
+	/// engine.remove_page_event_listener(&page_event_listener);
+	/// engine.dispatch_page_event(PageEvent::Focused);
+	/// assert_eq!(received_list.borrow().len(), 2);
+	/// ```
 	//==============================================================================
 	pub fn add_page_event_listener(&self, page_event_listener: &PageEventListener) {
 		self.page_event_listener_list.borrow_mut().push(Rc::downgrade(page_event_listener));
@@ -948,6 +1525,9 @@ impl Engine {
 
 	//==============================================================================
 	/// 페이지 이벤트 리스너 빼기. (같은 리스너를 더 부르지 않는다, 버린 리스너도 빠진다)
+	///
+	/// # 인자
+	/// - `page_event_listener`: 뺄 리스너. (add_page_event_listener 에 넘긴 것)
 	//==============================================================================
 	pub fn remove_page_event_listener(&self, page_event_listener: &PageEventListener) {
 		let target_listener = Rc::downgrade(page_event_listener);
@@ -957,6 +1537,9 @@ impl Engine {
 	//==============================================================================
 	/// 페이지 이벤트 알리기. (플랫폼이 부르고, 원본처럼 게임이 불러도 된다. 가려짐을 적고 살아 있는 리스너에 그 자리에서 넘긴다)
 	/// - 리스너가 다른 일로 빌려져 있으면 그 리스너는 이번 이벤트를 건너뛴다.
+	///
+	/// # 인자
+	/// - `page_event`: 알릴 이벤트. (Hidden 이면 가려짐을 적고 Visible 이면 지운다)
 	//==============================================================================
 	pub fn dispatch_page_event(&mut self, page_event: PageEvent) {
 		match page_event {
@@ -983,11 +1566,20 @@ impl Engine {
 
 	//==============================================================================
 	/// 지금 프레임의 번호. (원본처럼 첫 프레임이 1, 검증용 화면 저장의 프레임 번호도 이것)
+	///
+	/// # 돌려줌
+	/// 지금 프레임 번호. (프레임이 끝날 때마다 1 씩 는다)
 	//==============================================================================
 	pub fn get_frame_number(&self) -> u64 {
 		self.frame_number
 	}
 
+	//==============================================================================
+	/// 엔진 판 글.
+	///
+	/// # 돌려줌
+	/// 엔진 판. ("0.3.2" 꼴)
+	//==============================================================================
 	pub fn get_version_string(&self) -> String {
 		self.version.to_string()
 	}
@@ -996,6 +1588,22 @@ impl Engine {
 	/// 검증용 화면 저장 요청. (그 프레임을 다 그린 뒤 화면의 PNG 바이트를 넘긴다, 원본 requestFrameCapture 는 PNG data URL 을 프로미스로 넘긴다)
 	/// - 이미 지난 번호면 이번(프레임 사이에 부르면 다음) 프레임을 저장한다.
 	/// - 주소 쿼리(웹 ?capture=120,240&captureName=shot_{frame}.png&captureExit=1)와 환경 변수(데스크탑 VANILLA_CAPTURE_*)로도 건다.
+	///
+	/// # 인자
+	/// - `frame_number`: 저장할 프레임 번호. (지난 번호면 지금 프레임)
+	/// - `capture_handler`: 그 프레임 화면의 PNG 바이트를 받는 함수.
+	///
+	/// # 예제
+	/// 120 번째 프레임을 파일로 저장하기
+	/// ```rust,no_run
+	/// use vanilla::Engine;
+	///
+	/// fn capture_frame(engine: &mut Engine) {
+	/// 	engine.request_frame_capture(120, Box::new(|png_bytes: &[u8]| {
+	/// 		std::fs::write("capture_120.png", png_bytes).unwrap();
+	/// 	}));
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn request_frame_capture(&mut self, frame_number: u64, capture_handler: FrameCaptureHandler) {
 		let target_frame_number = frame_number.max(self.frame_number);
@@ -1004,6 +1612,12 @@ impl Engine {
 
 	//==============================================================================
 	/// 검증용 화면 저장 요청. (원본 await engine.requestFrameCapture(번호), 그 프레임을 다 그린 화면의 PNG 바이트로 풀리는 Promise. 원본은 PNG data URL)
+	///
+	/// # 인자
+	/// - `frame_number`: 저장할 프레임 번호. (지난 번호면 지금 프레임)
+	///
+	/// # 돌려줌
+	/// 그 프레임 화면의 PNG 바이트로 풀리는 Promise.
 	//==============================================================================
 	pub fn request_frame_capture_async(&mut self, frame_number: u64) -> Promise<Vec<u8>> {
 		let (capture_promise, capture_resolver) = Promise::create();
@@ -1064,6 +1678,30 @@ impl CaptureRequest {
 
 //==============================================================================
 /// 엔진 실행자. (엔진, 그래픽, 씬 목록을 들고 프레임을 돈다. 플랫폼이 들고 부른다)
+/// - 게임 코드는 직접 만들지 않는다. Engine::run 이 엔진과 첫 씬으로 만들어 플랫폼에 넘긴다.
+///
+/// # 예제
+/// Engine::run 이 실행자를 만들어 돈다
+/// ```rust,no_run
+/// use vanilla::{Engine, EngineConfiguration, Scene, SceneBase};
+///
+/// struct MainScene {
+/// 	scene_base: SceneBase,
+/// }
+///
+/// impl Scene for MainScene {
+/// 	fn get_scene_base(&self) -> &SceneBase {
+/// 		&self.scene_base
+/// 	}
+///
+/// 	fn get_scene_base_mut(&mut self) -> &mut SceneBase {
+/// 		&mut self.scene_base
+/// 	}
+/// }
+///
+/// let engine = Engine::new(EngineConfiguration::new());
+/// engine.run(Box::new(MainScene { scene_base: SceneBase::new() })).unwrap();
+/// ```
 //==============================================================================
 pub struct EngineRunner {
 	pub(crate) engine: Engine,
@@ -1813,26 +2451,44 @@ mod tests {
 	}
 
 	impl Scene for CountingScene {
+		//==============================================================================
+		/// 씬 공통 상태 반환.
+		//==============================================================================
 		fn get_scene_base(&self) -> &SceneBase {
 			&self.scene_base
 		}
 
+		//==============================================================================
+		/// 씬 공통 상태 반환. (변경용)
+		//==============================================================================
 		fn get_scene_base_mut(&mut self) -> &mut SceneBase {
 			&mut self.scene_base
 		}
 
+		//==============================================================================
+		/// 생성. (create 수를 센다)
+		//==============================================================================
 		fn create(&mut self, _engine: &mut Engine) {
 			self.create_count.set(self.create_count.get() + 1);
 		}
 
+		//==============================================================================
+		/// 해제. (destroy 수를 센다)
+		//==============================================================================
 		fn destroy(&mut self, _engine: &mut Engine) {
 			self.destroy_count.set(self.destroy_count.get() + 1);
 		}
 
+		//==============================================================================
+		/// 페이지 프로세스 복원. (복원 수에 100 을 더한다)
+		//==============================================================================
 		fn on_page_process_restored(&mut self, _engine: &mut Engine) {
 			self.restore_count.set(self.restore_count.get() + 100);
 		}
 
+		//==============================================================================
+		/// 페이지 가시성 복원. (복원 수에 1 을 더한다)
+		//==============================================================================
 		fn on_page_visibility_restored(&mut self, _engine: &mut Engine) {
 			self.restore_count.set(self.restore_count.get() + 1);
 		}
@@ -1973,38 +2629,65 @@ mod tests {
 	}
 
 	impl Scene for RecordingScene {
+		//==============================================================================
+		/// 씬 공통 상태 반환.
+		//==============================================================================
 		fn get_scene_base(&self) -> &SceneBase {
 			&self.scene_base
 		}
 
+		//==============================================================================
+		/// 씬 공통 상태 반환. (변경용)
+		//==============================================================================
 		fn get_scene_base_mut(&mut self) -> &mut SceneBase {
 			&mut self.scene_base
 		}
 
+		//==============================================================================
+		/// 종료처리. (finalize 를 적는다)
+		//==============================================================================
 		fn finalize(&mut self, _engine: &mut Engine) {
 			self.record_list.borrow_mut().push("finalize");
 		}
 
+		//==============================================================================
+		/// 로딩 해제. (unload 를 적는다)
+		//==============================================================================
 		fn unload(&mut self, _engine: &mut Engine) {
 			self.record_list.borrow_mut().push("unload");
 		}
 
+		//==============================================================================
+		/// 해제. (destroy 를 적는다)
+		//==============================================================================
 		fn destroy(&mut self, _engine: &mut Engine) {
 			self.record_list.borrow_mut().push("destroy");
 		}
 
+		//==============================================================================
+		/// 터치 누름. (press 를 적는다)
+		//==============================================================================
 		fn touch_press(&mut self, _engine: &mut Engine, _view_input_position: Vector2) {
 			self.record_list.borrow_mut().push("press");
 		}
 
+		//==============================================================================
+		/// 터치 이동. (move 를 적는다)
+		//==============================================================================
 		fn touch_move(&mut self, _engine: &mut Engine, _view_input_position: Vector2) {
 			self.record_list.borrow_mut().push("move");
 		}
 
+		//==============================================================================
+		/// 터치 뗌. (release 를 적는다)
+		//==============================================================================
 		fn touch_release(&mut self, _engine: &mut Engine, _view_input_position: Vector2) {
 			self.record_list.borrow_mut().push("release");
 		}
 
+		//==============================================================================
+		/// 마우스 휠. (wheel 을 적는다)
+		//==============================================================================
 		fn touch_wheel(&mut self, _engine: &mut Engine, _view_input_position: Vector2, _wheel_delta: Vector2) {
 			self.record_list.borrow_mut().push("wheel");
 		}
@@ -2067,14 +2750,23 @@ mod tests {
 	}
 
 	impl Scene for AsyncLoadScene {
+		//==============================================================================
+		/// 씬 공통 상태 반환.
+		//==============================================================================
 		fn get_scene_base(&self) -> &SceneBase {
 			&self.scene_base
 		}
 
+		//==============================================================================
+		/// 씬 공통 상태 반환. (변경용)
+		//==============================================================================
 		fn get_scene_base_mut(&mut self) -> &mut SceneBase {
 			&mut self.scene_base
 		}
 
+		//==============================================================================
+		/// 생성. (불러오기 작업을 맡겨 첫 구간에서 한 단계, 다음 프레임에 한 단계 센다)
+		//==============================================================================
 		fn create(&mut self, engine: &mut Engine) {
 			let load_task_handle = engine.spawn_scene_task(self, |mut scene_context| async move {
 				let load_handle = AssetLoadHandle::create_pending("stage.json");
@@ -2092,6 +2784,9 @@ mod tests {
 			self.scene_base.track_task(&load_task_handle);
 		}
 
+		//==============================================================================
+		/// 초기화. (초기화 수를 세고 오래 도는 작업을 맡긴다)
+		//==============================================================================
 		fn initialize(&mut self, engine: &mut Engine) {
 			self.initialize_count += 1;
 			let long_promise = self.long_promise.take().expect("기다릴 Promise");
@@ -2104,6 +2799,9 @@ mod tests {
 			*self.long_task_handle.borrow_mut() = Some(long_task_handle);
 		}
 
+		//==============================================================================
+		/// 로딩 해제. (기다릴 Promise 가 있으면 내리기 작업을 맡긴다)
+		//==============================================================================
 		fn unload(&mut self, engine: &mut Engine) {
 			if let Some(unload_promise) = self.unload_promise.take() {
 				let unload_task_handle = engine.spawn_scene_task(self, move |_scene_context| async move {
@@ -2113,6 +2811,9 @@ mod tests {
 			}
 		}
 
+		//==============================================================================
+		/// 해제. (destroy 수를 센다)
+		//==============================================================================
 		fn destroy(&mut self, _engine: &mut Engine) {
 			self.destroy_count.set(self.destroy_count.get() + 1);
 		}
@@ -2309,6 +3010,9 @@ mod tests {
 	#[cfg(not(target_arch = "wasm32"))]
 	#[test]
 	fn data_url_assets_load_on_desktop() {
+		//==============================================================================
+		/// 바이트를 base64 글로. (시험용 data: 주소를 만든다, 끝은 = 로 채운다)
+		//==============================================================================
 		fn encode_base64(bytes: &[u8]) -> String {
 			const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 			let mut text = String::new();

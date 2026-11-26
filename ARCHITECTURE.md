@@ -11,7 +11,7 @@ vanilla.js 를 러스트로 옮긴 엔진의 구성과 소유 구조를 정리�
 Cargo.toml           워크스페이스 (엔진 크레이트와 macros/)
 macros/              반사 절차 매크로 #[reflect] (vanilla-engine-macros, 엔진이 vanilla::reflect 로 다시 내보낸다)
 src/lib.rs           공개 API 를 다시 내보낸다 (원본 import.js 자리)
-src/animation/       Timeline, Animator, Action (원본 experimental/animation, experimental/action)
+src/animation/       Timeline, Animator, Action
 src/base/            엔진을 모르는 기반 타입 (수학, 색, 식별자, 플랫폼 정보, Format, FiniteStateMachine, ObjectPool, SeededRandom, Timer, Version, wait(Wait.seconds, nextFrame))
 src/core/            엔진 본체 (Engine, 매니저, Scene, 노드 트리, Graphic, Component, reflection(반사 값과 트레이트), 애셋 꼴, 트윈, Animation, Frame)
                      async: task(스레드 하나짜리 실행기, EngineContext, SceneContext, TaskHandle, Promise)
@@ -37,6 +37,7 @@ src/ui/              UIView, UIControl, UILabel, UIButton, UIToggleButton, UISli
                      UIDialog, UIToast, UISpinner, UIContextMenu, UIChart, UIDraggable, UIHitArea, PopupMotion, ButtonMotion, ToastMotion, UIScale,
                      UIWindow, UIWindowLayer, UIConfirmWindow, UIDocument, UINode, UIScene(UISceneBase), autolayout(LayoutSolver 등)
 src/game/            GameSceneBase, GameScene 트레이트와 game_scene! (원본 GameScene: 로딩 화면, 터치 라우팅, 세이프 에어리어, 크기 바뀌면 다시 놓기, 페이드, 놀이 입력, 개발자 도구)
+src/experimental/    0.4.0 뒤 기능의 초안 (원본 import.js 의 Experimental 이름 공간 자리, API 가 바뀔 수 있다)
 src/web/             WebSocketClient (ewebsock, 데스크탑과 웹), Pane (화면 분할 패널, 웹은 DOM 요소 pane/dompane, 데스크탑은 엔진 노드 pane/nodepane)
 src/platform/        창, GL 컨텍스트, 입력 이벤트, 프레임 루프, 화면 넘기기, 애셋 바이트 읽기, 오디오 백엔드
   desktop.rs         winit 0.30 + glutin 0.32 (OpenGL 3.3 코어)
@@ -159,10 +160,10 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
 - 기본 프레임버퍼에 그릴 때는 알파를 쓰지 않는다(`apply_color_mask`, 원본에 없음). 원본과 웹은 캔버스가 `alpha: false` 라 화면 알파가 늘 1 이고, 데스크탑 기본 프레임버퍼도 프레임 첫머리에 알파를 1 로 비운 뒤 그대로 두어 DST_ALPHA 를 쓰는 모드와 셰이더 섞기가 웹과 같게 나온다. 렌더 타겟에는 알파도 쓰고, GL 을 밖에 내줄 때는 모두 쓰는 마스크로 되돌린다.
 - 묶어 그리기와 거르기는 `set_batching_enabled`, `set_culling_enabled` 로 끈다.
 - 3D 렌더 타겟은 멀티샘플(RenderTargetOptions.sample_count, 기기가 받는 수로 줄임)과 깊이 비트(16, 24)를 받는다. 툰 3D 의 HDR 마무리(ToonPostProcess)는 멀티샘플, 실수 판(못 쓰는 기기는 RGBA8 LDR 길), 다단 블룸(MultiLevelBloomEffect), 색 보정을 건다.
-- 툰 셰이딩은 그늘 램프다. (원본과 같은 셰이더) 빛을 받는 몫 x(반 램버트 기본, shade_offset 을 더하고 해는 그림자를 곱함)를 칸마다 자리, 색, 부드러움(fwidth 로 막음)인 램프나 램프 텍스처에 대어, 해는 램프 색을 통째로, 채움 빛과 점광과 스포트라이트는 램프의 밝기 단계를 받는다. 하이라이트와 림은 0.5 를 가른 단단한 꼴에서 부드러운 꼴까지, 림은 더한다. 색 = 바탕색 x irradiance + specular x specularMask + rim x rimMask + 빛남, 그 뒤 매트캡. 노멀은 역행렬의 전치로 옮긴다.
+- 툰 셰이딩은 그늘 램프다. (원본과 같은 셰이더) 빛을 받는 몫 x(반 램버트 기본, shade_offset 을 더하고 해는 그림자를 곱함)를 칸마다 자리, 색, 부드러움(fwidth 로 막음)인 램프나 램프 텍스처에 대어, 해는 램프 색을 통째로, 채움 빛과 점광과 스포트라이트는 램프의 밝기 단계를 받는다. 하이라이트와 림은 0.5 를 가른 단단한 꼴에서 부드러운 꼴까지, 림은 더한다. 색 = 바탕색 x irradiance + specular x specularMask + rim x rimMask + 빛남, 그 뒤 매트캡. 노멀은 역행렬의 전치로 옮긴다. 점광과 스포트라이트 그림자는 ShadowAtlas(점광은 큐브 여섯 칸, 스포트라이트는 원근 한 칸)를 set_local_shadows 로 받아 그 빛의 x 에 곱한다. 색마다 빛 색 쓰기, 빛 세기 막기, 그늘 쪽 림, 천사 고리(보기 노멀 x 와 2 번 UV 의 y, 카메라 기울임을 되돌림)는 유니티 툰 셰이더 소스의 식이다. 아틀라스 칸은 URP 기본처럼 1024 에서 다 들어갈 때까지 반씩 줄인다.
 - 툰 바깥선은 두 가지이고 함께 써도 된다. (원본과 같은 셰이더)
   - 껍데기(inverted hull): MeshBuilder 가 같은 자리의 노멀을 모아 평균한 쪽으로 민 굵기를 짓고, ToonRenderer 가 바탕 자리에서 그리기마다의 굵기 배와 거리 배(set_outline_distance_scale)만큼 밀어 뒷면만 그린다. 색은 그리기마다(outline_color).
-  - 화면 공간(ToonScreenOutline): 불투명한 모형을 같은 행렬로 한 번 더 그려 선의 판(노멀 팔면체 접기, 선 번호 14 비트, 꼴 2 비트, 깊이 24)을 짓고, 화소와 바로 이웃 넷 사이 경계마다 한 번 보아 선이면 경계 가운데를 씨앗(RGBA16UI, 반 화소 단위)으로 쓴다. 바깥 선은 빈 곳, 다른 번호, 서로의 접평면에서 깊이 문턱보다 떨어진 같은 번호. 꺾임 선은 같은 번호에서 두 노멀이 꺾임 각보다 벌어진 곳. 씨앗을 점프 플러딩(걸음 k, k/2, ..., 1)으로 퍼뜨리고, 그리는 영역 화소마다 선의 판 2x2 칸의 씨앗까지 거리로 clamp(굵기 / 2 - 거리 + 0.5, 0, 1) 만큼 섞는다. 선이 화소 사이에 서므로 띠와 평행한 둘째 선이 없고, 줄인 선의 판에서도 끊기지 않는다. 그리기 줄(ToonDrawQueue::set_screen_outline)에 맡기면 선의 판은 몸 앞에, 섞기는 바깥선 껍데기 뒤에 한다.
+  - 화면 공간(ToonScreenOutline): 불투명한 모형을 같은 행렬로 한 번 더 그려 선의 판(노멀 팔면체 접기, 선 번호 14 비트, 꼴 2 비트, 깊이 24)을 짓고, 화소와 바로 이웃 넷 사이 경계마다 한 번 보아 선이면 경계 가운데를 씨앗(RGBA16UI, 반 화소 단위)으로 쓴다. 바깥 선은 빈 곳, 다른 번호, 서로의 접평면에서 깊이 문턱보다 떨어진 같은 번호. 꺾임 선은 같은 번호에서 두 노멀이 꺾임 각보다 벌어진 곳. 씨앗을 점프 플러딩(걸음 k, k/2, ..., 1)으로 퍼뜨리고, 그리는 영역 화소마다 선의 판 2x2 칸의 씨앗까지 거리로 clamp(굵기 / 2 - 거리 + 0.5, 0, 1) 만큼 섞는다. 선이 화소 사이에 서므로 띠와 평행한 둘째 선이 없다. 선의 판과 씨앗은 그리는 영역 해상도이고 set_resolution_scale 은 점프 플러딩 판만 줄여(모으기 패스) 줄여도 계단과 점선이 없다. 그리기 줄(ToonDrawQueue::set_screen_outline)에 맡기면 선의 판은 몸 앞에, 섞기는 바깥선 껍데기 뒤에 한다.
 
 ## 7. 애셋
 
@@ -189,9 +190,9 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
 
 ## 9. 원본과의 대응
 
-2026-11-26 dev 기준으로 원본 `src/` 의 .js 200 파일 가운데 182 파일을 옮겼고, 18 파일은 일부러 옮기지 않았다. (원본 파일마다 같은 이름의 .rs 가 있는지 보고, 없는 것은 러스트 파일 머리 주석의 원본 경로로 찾아 셌다)
+2026-11-26 dev 기준으로 원본 `src/` 의 .js 200 파일 가운데 182 파일을 옮겼고, 18 파일은 일부러 옮기지 않았다. (원본 파일마다 같은 이름의 .rs 가 있는지 보고, 없는 것은 러스트 파일 머리 주석의 원본 경로로 찾아 셌다. 0.4.0 뒤 기능의 초안 자리 src/experimental 은 두 엔진에 같이 두고 셈에서 뺀다)
 
-- 같은 이름으로 옮긴 것 176 파일. 폴더는 러스트 판에 맞게 바꾼 곳이 있다. (core/graphic/* 는 core/, experimental/graphics 는 graphics3d/, experimental/animation 과 action.js 는 animation/, experimental/indicator.js 와 visual/visual.js 는 misc/, experimental/bunchasset.js 와 visual/visualasset.js 는 resource/, experimental/graphics/fullscreenpass.js 는 core/)
+- 같은 이름으로 옮긴 것 176 파일. 폴더는 원본과 같다. (graphics3d/, graphics3d/toon/, animation/, misc/, resource/, core/fullscreenpass) 원본 core/graphic/* 만 러스트 판에서 core/ 바로 아래에 있다.
 - 다른 파일에 합친 것 6 파일:
   - base/node.js, core/node/componentnode.js, core/node/transformnode.js: 노드 종류가 하나라 core/node/worldnode.rs 와 nodetree.rs 에 합쳤다.
   - core/scenemanager.js: 엔진이 씬을 들고 있어 core/engine.rs 와 core/scene.rs 에 합쳤다. (load_scene, unload_scene, get_all_loaded_scenes)
@@ -199,9 +200,9 @@ async/await: 엔진은 외부 런타임 없이 스레드 하나짜리 실행기(
   - resource/jsonasset.js: resource/textasset.rs 에 TextAsset 과 함께 둔다.
 - 일부러 옮기지 않은 것 18 파일:
   - 빈 파일이거나 아무 일도 하지 않는 것 4: base/calculator.js(0 을 돌려주는 빈 함수), core/layer.js(빈 스텁), core/resources.js(0 바이트), misc/uibuilder.js(NodeLayout 으로 대체됐다는 주석 한 줄)
-  - 죽은 코드 5: experimental/aabb.js, experimental/transform2d.js(파일 전체가 주석), experimental/graphics/gl2d.js(내보내는 것 없음), experimental/graphics/webgl2.js(import 경로가 깨져 쓰이지 않음), deprecated/anchoredworldmnode.js(폐기, import.js 에서도 막아 둠)
-  - 러스트 언어와 표준이 맡는 것 8: base/object.js, base/reflection.js(createGUID 만 base/identifier.rs 의 create_guid 로 옮겼다), base/singleton.js, experimental/collection 의 dictionary.js, list.js, queue.js, set.js, stack.js. 트레이트, Any, enum, Vec, HashMap 이 같은 일을 한다.
-  - 다른 기능이 덮는 것 1: experimental/camera.js. 회전과 begin/end 를 Camera2D(misc/camera2d.rs)에 넣어 그 기능을 모두 덮는다.
+  - 죽은 코드 5: deprecated/aabb.js, deprecated/transform2d.js(파일 전체가 주석), deprecated/gl2d.js(내보내는 것 없음), deprecated/webgl2.js(내보내지 않아 쓰이지 않음), deprecated/anchoredworldmnode.js(폐기, import.js 에서도 막아 둠)
+  - 러스트 언어와 표준이 맡는 것 8: base/object.js, base/reflection.js(createGUID 만 base/identifier.rs 의 create_guid 로 옮겼다), base/singleton.js, base/collection 의 dictionary.js, list.js, queue.js, set.js, stack.js. 트레이트, Any, enum, Vec, HashMap 이 같은 일을 한다.
+  - 다른 기능이 덮는 것 1: deprecated/camera.js. (원본도 폐기 예정) 회전과 begin/end 를 Camera2D(misc/camera2d.rs)에 넣어 그 기능을 모두 덮는다.
 - 러스트에만 있는 파일은 플랫폼 층(platform/ 아래 23 파일, mod.rs 빼고), 글자 모양 짓기와 색 글리프(core/textshaping.rs, core/colorglyph.rs), 그림 풀기(core/image.rs, core/avifimage.rs), 글 입력 줄(core/textinput.rs), 노드 저장소(core/node/nodetree.rs), async 실행기(core/task.rs), 브라우저 자리(core/canvas2d.rs 와 그 아래 둘, core/modaldialog.rs, core/browseruitext.rs, misc/storagetext.rs, ui/uiinputfieldmenu.rs)다. 원본에서는 브라우저가 하는 일이다. (web/pane.js 는 web/pane.rs 와 그 아래 dompane.rs, nodepane.rs 로 나눴다)
 - 옮기며 바꾼 쓰임새:
   - GameScene, UIScene 의 덮어쓰기는 GameScene, UIScene 트레이트와 game_scene!, ui_scene! 매크로다. 바탕이 resize, layout, post_draw 를 스스로 부른다. (game/gamescene.rs)

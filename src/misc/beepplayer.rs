@@ -14,6 +14,17 @@
 //!   데스크탑: 믹서에 같은 그래프(크롬과 같은 셈의 OscillatorNode → GainNode AudioParam 자동화 → 출력)를 짓는다. (platform/audio/oscillator.rs, mixer.rs)
 //! - 원본과 다른 점:
 //!   파형 이름은 문자열 대신 BeepWaveform, 시퀀스의 톤은 BeepTone 이다. 프리셋 이름은 원본처럼 문자열이다.
+//!
+//! # 예제
+//! 엔진의 오디오 매니저로 확인음 내기
+//! ```rust,no_run
+//! use vanilla::{BeepPlayer, Engine};
+//!
+//! fn play_confirm(engine: &Engine) {
+//! 	let beep_player = BeepPlayer::new(engine.get_audio_manager(), BeepPlayer::DEFAULT_VOLUME);
+//! 	beep_player.play_preset("confirm");
+//! }
+//! ```
 //==============================================================================
 use crate::core::audiomanager::{resume_audio_manager_state, AudioManager, AudioManagerState};
 use crate::platform::audio as audio_backend;
@@ -25,14 +36,32 @@ use std::rc::Rc;
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BeepWaveform {
+	/// 사인파. (원본 "sine")
 	Sine,
+	/// 사각파. (원본 "square")
 	Square,
+	/// 톱니파. (원본 "sawtooth")
 	Sawtooth,
+	/// 삼각파. (원본 "triangle")
 	Triangle,
 }
 
 //==============================================================================
 /// 시퀀스의 톤 하나. (원본 { frequency, duration, waveform?, volume_scale? })
+///
+/// # 예제
+/// 기본 톤과 파형을 정한 톤
+/// ```rust
+/// use vanilla::{BeepTone, BeepWaveform};
+///
+/// let tone = BeepTone::create(440.0, 0.1);
+/// assert_eq!(tone.waveform, BeepWaveform::Sine);
+/// assert_eq!(tone.volume_scale, 1.0);
+///
+/// let buzz_tone = BeepTone::create_with_waveform(220.0, 0.14, BeepWaveform::Square, 0.7);
+/// assert_eq!(buzz_tone.frequency, 220.0);
+/// assert_eq!(buzz_tone.waveform, BeepWaveform::Square);
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BeepTone {
@@ -40,6 +69,7 @@ pub struct BeepTone {
 	pub frequency: f32,
 	/// 길이. (초)
 	pub duration: f64,
+	/// 파형.
 	pub waveform: BeepWaveform,
 	/// 이 톤만의 음량 배율.
 	pub volume_scale: f32,
@@ -48,6 +78,13 @@ pub struct BeepTone {
 impl BeepTone {
 	//==============================================================================
 	/// 생성. (사인파, 배율 1. 원본에서 waveform, volume_scale 을 비운 꼴)
+	///
+	/// # 인자
+	/// - `frequency`: 주파수. (Hz)
+	/// - `duration`: 길이. (초)
+	///
+	/// # 돌려줌
+	/// 사인파, 음량 배율 1 인 톤.
 	//==============================================================================
 	pub const fn create(frequency: f32, duration: f64) -> BeepTone {
 		BeepTone {
@@ -60,6 +97,15 @@ impl BeepTone {
 
 	//==============================================================================
 	/// 파형과 배율까지 정해 생성.
+	///
+	/// # 인자
+	/// - `frequency`: 주파수. (Hz)
+	/// - `duration`: 길이. (초)
+	/// - `waveform`: 파형.
+	/// - `volume_scale`: 이 톤만의 음량 배율. (재생기 음량에 곱한다)
+	///
+	/// # 돌려줌
+	/// 받은 값을 그대로 든 톤.
 	//==============================================================================
 	pub const fn create_with_waveform(frequency: f32, duration: f64, waveform: BeepWaveform, volume_scale: f32) -> BeepTone {
 		BeepTone {
@@ -140,6 +186,59 @@ pub(crate) struct BeepSchedule {
 
 //==============================================================================
 /// 절차적 비프 재생기.
+///
+/// # 예제
+/// 누를 때마다 프리셋 효과음 내기
+/// ```rust,no_run
+/// use vanilla::{BeepPlayer, Engine, EngineConfiguration, Scene, SceneBase, Vector2};
+///
+/// struct MainScene {
+/// 	scene_base: SceneBase,
+/// 	beep_player: Option<BeepPlayer>,
+/// }
+///
+/// impl Scene for MainScene {
+/// 	fn get_scene_base(&self) -> &SceneBase {
+/// 		&self.scene_base
+/// 	}
+///
+/// 	fn get_scene_base_mut(&mut self) -> &mut SceneBase {
+/// 		&mut self.scene_base
+/// 	}
+///
+/// 	fn create(&mut self, engine: &mut Engine) {
+/// 		self.beep_player = Some(BeepPlayer::new(engine.get_audio_manager(), 0.3));
+/// 	}
+///
+/// 	fn touch_press(&mut self, _engine: &mut Engine, _view_input_position: Vector2) {
+/// 		if let Some(beep_player) = &self.beep_player {
+/// 			beep_player.play_preset("confirm");
+/// 		}
+/// 	}
+/// }
+///
+/// let engine_configuration = EngineConfiguration::new();
+/// let engine = Engine::new(engine_configuration);
+/// let main_scene = MainScene {
+/// 	scene_base: SceneBase::new(),
+/// 	beep_player: None,
+/// };
+/// engine.run(Box::new(main_scene)).unwrap();
+/// ```
+///
+/// 음량과 음소거 (음소거 중에는 소리 장치를 건드리지 않는다)
+/// ```rust
+/// use vanilla::{AudioManager, BeepPlayer};
+///
+/// let audio_manager = AudioManager::new();
+/// let mut beep_player = BeepPlayer::new(&audio_manager, BeepPlayer::DEFAULT_VOLUME);
+/// beep_player.set_volume(1.5);
+/// assert_eq!(beep_player.get_volume(), 1.0);
+///
+/// beep_player.set_muted(true);
+/// assert!(beep_player.is_muted());
+/// beep_player.play_preset("success");
+/// ```
 //==============================================================================
 pub struct BeepPlayer {
 	audio_manager_state: Rc<RefCell<AudioManagerState>>,
@@ -153,6 +252,13 @@ impl BeepPlayer {
 
 	//==============================================================================
 	/// 생성. (volume: 0 ~ 1. 원본처럼 매니저를 참조로 든다)
+	///
+	/// # 인자
+	/// - `audio_manager`: 소리를 낼 오디오 매니저. (engine.get_audio_manager(), 상태를 같이 든다)
+	/// - `volume`: 기본 음량. (0 ~ 1, 여기서는 자르지 않고 그대로 둔다, 원본 기본값 DEFAULT_VOLUME)
+	///
+	/// # 돌려줌
+	/// 음소거가 꺼진 새 재생기.
 	//==============================================================================
 	pub fn new(audio_manager: &AudioManager, volume: f32) -> BeepPlayer {
 		let audio_manager_state = audio_manager.get_shared_state();
@@ -167,6 +273,25 @@ impl BeepPlayer {
 	/// 단일 톤 재생.
 	/// - frequency: 주파수(Hz), duration_seconds: 길이(초), delay_seconds: 시작 지연(초), volume_scale: 이 톤만의 음량 배율.
 	/// - 컨텍스트가 없거나 돌고 있지 않으면 아무것도 하지 않는다.
+	/// - 음소거 중이면 컨텍스트를 깨우지도 않고 돌아간다. 아니면 먼저 컨텍스트를 재개한다. (데스크탑은 소리 장치를 이때 연다)
+	///
+	/// # 인자
+	/// - `frequency`: 주파수. (Hz)
+	/// - `duration_seconds`: 길이. (초)
+	/// - `waveform`: 파형.
+	/// - `delay_seconds`: 시작 지연. (초, 지금부터)
+	/// - `volume_scale`: 이 톤만의 음량 배율. (기본 음량에 곱한다, 곱이 0.0001 보다 작으면 0.0001)
+	///
+	/// # 예제
+	/// 0.2 초 뒤에 낮은 사각파 한 번
+	/// ```rust,no_run
+	/// use vanilla::{BeepPlayer, BeepWaveform, Engine};
+	///
+	/// fn play_low_buzz(engine: &Engine) {
+	/// 	let beep_player = BeepPlayer::new(engine.get_audio_manager(), BeepPlayer::DEFAULT_VOLUME);
+	/// 	beep_player.play_tone(220.0, 0.1, BeepWaveform::Square, 0.2, 0.7);
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn play_tone(&self, frequency: f32, duration_seconds: f64, waveform: BeepWaveform, delay_seconds: f64, volume_scale: f32) {
 		if self.is_muted {
@@ -183,6 +308,21 @@ impl BeepPlayer {
 
 	//==============================================================================
 	/// 톤 시퀀스 재생. (차례로 이어 튼다)
+	/// - 톤마다 앞 톤들의 길이 합만큼 늦춰 시작한다. (간격 없음)
+	///
+	/// # 인자
+	/// - `tone_list`: 차례로 이어 틀 톤 목록. (길이는 초)
+	///
+	/// # 예제
+	/// 도미솔 세 음을 이어 틀기
+	/// ```rust,no_run
+	/// use vanilla::{BeepPlayer, BeepTone, Engine};
+	///
+	/// fn play_chord_arpeggio(engine: &Engine) {
+	/// 	let beep_player = BeepPlayer::new(engine.get_audio_manager(), BeepPlayer::DEFAULT_VOLUME);
+	/// 	beep_player.play_sequence(&[BeepTone::create(523.0, 0.1), BeepTone::create(659.0, 0.1), BeepTone::create(784.0, 0.2)]);
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn play_sequence(&self, tone_list: &[BeepTone]) {
 		let mut delay_seconds = 0.0;
@@ -194,6 +334,9 @@ impl BeepPlayer {
 
 	//==============================================================================
 	/// 프리셋 재생. ("click" | "confirm" | "cancel" | "error" | "success" | "warning" | "notification", 모르는 이름은 click)
+	///
+	/// # 인자
+	/// - `preset_name`: 프리셋 이름. (대소문자를 가린다)
 	//==============================================================================
 	pub fn play_preset(&self, preset_name: &str) {
 		match preset_name {
@@ -230,6 +373,9 @@ impl BeepPlayer {
 
 	//==============================================================================
 	/// 기본 음량 설정. (0 ~ 1)
+	///
+	/// # 인자
+	/// - `volume`: 기본 음량. (0 ~ 1 로 자른다)
 	//==============================================================================
 	pub fn set_volume(&mut self, volume: f32) {
 		self.volume = volume.clamp(0.0, 1.0);
@@ -237,6 +383,9 @@ impl BeepPlayer {
 
 	//==============================================================================
 	/// 기본 음량 반환.
+	///
+	/// # 돌려줌
+	/// 기본 음량. (set_volume 을 거쳤으면 0 ~ 1)
 	//==============================================================================
 	pub fn get_volume(&self) -> f32 {
 		self.volume
@@ -244,6 +393,9 @@ impl BeepPlayer {
 
 	//==============================================================================
 	/// 음소거 설정.
+	///
+	/// # 인자
+	/// - `is_muted`: 참이면 소리를 내지 않는다.
 	//==============================================================================
 	pub fn set_muted(&mut self, is_muted: bool) {
 		self.is_muted = is_muted;
@@ -251,6 +403,9 @@ impl BeepPlayer {
 
 	//==============================================================================
 	/// 음소거 여부.
+	///
+	/// # 돌려줌
+	/// 음소거 중이면 true.
 	//==============================================================================
 	pub fn is_muted(&self) -> bool {
 		self.is_muted

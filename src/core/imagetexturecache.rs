@@ -116,6 +116,37 @@ struct ImageTextureEntry {
 	is_mipmap: bool,
 }
 
+//==============================================================================
+/// 이미지 텍스처 캐시. (이미지마다 GPU 텍스처 하나, Graphic 이 하나 들고 처음 그릴 때 올린다)
+/// - 이미지를 `Weak` 로 들어, 이미지가 사라지면 sweep 이 텍스처를 지운다. (Graphic 은 600 프레임마다 부른다)
+///
+/// # 예제
+/// 빈 캐시
+/// ```rust
+/// use vanilla::core::imagetexturecache::ImageTextureCache;
+///
+/// let image_texture_cache = ImageTextureCache::new();
+/// assert_eq!(image_texture_cache.get_texture_count(), 0);
+/// ```
+///
+/// 텍스처를 올리고 이미지가 사라진 뒤 치우기
+/// ```rust,no_run
+/// use std::path::Path;
+/// use vanilla::{Graphic, Image};
+/// use vanilla::core::imagetexturecache::ImageTextureCache;
+///
+/// fn upload(graphic: &Graphic, image_texture_cache: &mut ImageTextureCache) -> Result<(), String> {
+/// 	let image = Image::load(Path::new("examples/assets/atlas/icons.png"))?;
+/// 	let texture = image_texture_cache.get_texture(graphic.get_gl(), &image, true, false);
+/// 	assert!(texture.is_some());
+/// 	assert!(!image.has_pixels());
+/// 	drop(image);
+/// 	image_texture_cache.sweep(graphic.get_gl());
+/// 	assert_eq!(image_texture_cache.get_texture_count(), 0);
+/// 	Ok(())
+/// }
+/// ```
+//==============================================================================
 pub struct ImageTextureCache {
 	entry_table: HashMap<u64, ImageTextureEntry>,
 }
@@ -123,6 +154,9 @@ pub struct ImageTextureCache {
 impl ImageTextureCache {
 	//==============================================================================
 	/// 생성.
+	///
+	/// # 돌려줌
+	/// 빈 캐시.
 	//==============================================================================
 	pub fn new() -> ImageTextureCache {
 		ImageTextureCache {
@@ -152,6 +186,15 @@ impl ImageTextureCache {
 	/// 이미지의 텍스처 반환. (없으면 올리고 CPU 픽셀을 놓는다, 필터 설정이 바뀌었으면 다시 건다)
 	/// - 다른 캐시가 올리며 픽셀을 놓은 그림은 그 텍스처에서 되읽어 올린다.
 	/// - 픽셀 길이가 너비x높이x4 가 아니면(되읽지도 못하면) 올리지 않고 None.
+	///
+	/// # 인자
+	/// - `gl`: 텍스처를 만들 GL 컨텍스트.
+	/// - `image`: 텍스처를 받을 이미지. (처음 올릴 때 CPU 픽셀을 놓는다, set_pixels_retained(true) 면 남긴다)
+	/// - `is_smoothing`: true 면 LINEAR, false 면 NEAREST 필터.
+	/// - `is_mipmap`: true 면 줄일 때 밉맵 필터를 쓴다. (밉맵은 올릴 때 늘 만든다)
+	///
+	/// # 돌려줌
+	/// 이미지의 텍스처. GL 텍스처를 만들지 못하면 None.
 	//==============================================================================
 	pub fn get_texture(&mut self, gl: &glow::Context, image: &Rc<Image>, is_smoothing: bool, is_mipmap: bool) -> Option<crate::core::graphic::GlTexture> {
 		let instance_id = image.get_instance_id();
@@ -209,6 +252,9 @@ impl ImageTextureCache {
 
 	//==============================================================================
 	/// 원본 이미지가 사라진 텍스처 지우기.
+	///
+	/// # 인자
+	/// - `gl`: 텍스처를 만든 GL 컨텍스트.
 	//==============================================================================
 	pub fn sweep(&mut self, gl: &glow::Context) {
 		self.entry_table.retain(|_, entry| {
@@ -224,6 +270,9 @@ impl ImageTextureCache {
 
 	//==============================================================================
 	/// 올라가 있는 텍스처 수.
+	///
+	/// # 돌려줌
+	/// 캐시에 든 텍스처 수. (이미지가 사라졌어도 sweep 전이면 센다)
 	//==============================================================================
 	pub fn get_texture_count(&self) -> usize {
 		self.entry_table.len()
@@ -231,6 +280,9 @@ impl ImageTextureCache {
 }
 
 impl Default for ImageTextureCache {
+	//==============================================================================
+	/// 빈 캐시 생성. (new 와 같다)
+	//==============================================================================
 	fn default() -> ImageTextureCache {
 		ImageTextureCache::new()
 	}

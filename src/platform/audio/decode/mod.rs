@@ -1,13 +1,13 @@
 //==============================================================================
-// 소리 해석. (데스크탑, 원본이 쓰는 크롬 decodeAudioData 와 같게)
-// - 크롬(158)은 FFmpeg 로 디먹스하고 FLAC, MP3, PCM, Vorbis 를 symphonia 로, Opus 를 libopus 로, AAC 를 FFmpeg 로 푼다. (media/filters/audio_file_reader.cc)
-//   여기서는 디먹스도 symphonia 0.6 의 풀기(wav, ogg, mkv(webm), isomp4(m4a), flac, mp3, adts)로 하고,
-//   FLAC, MP3, PCM, Vorbis 는 크롬과 같은 symphonia 해석기, Opus 는 opus.rs(opus-pure),
-//   AAC 는 aac.rs 가 AAC-LC 2 채널까지 symphonia, HE-AAC 와 3 채널 이상은 oxideav-aac 로 푼다.
-// - 꼴은 내용으로 가린다. (decodeAudioData 처럼 형(MIME)이나 확장자를 보지 않는다. symphonia 의 탐지)
-// - 차례: 패킷마다 풀기 → 크롬처럼 앞뒤 다듬기(trim.rs) → 정수 표본을 크롬 식으로 실수로 → 채널마다 원본 DECODE_SAMPLE_RATE(44100)로 바꾸기(resample.rs)
-//   → WebAudio 스피커 규칙으로 1 채널이나 2 채널로 내리기. (크롬은 AudioBuffer 를 채널 그대로 두고 그릴 때 내린다. 뒤 노드가 모두 선형이라 미리 내려도 같다.
-//   모노는 StereoPanner 식이 달라 모노로 둔다)
+//! 소리 해석. (데스크탑, 원본이 쓰는 크롬 decodeAudioData 와 같게)
+//! - 크롬(158)은 FFmpeg 로 디먹스하고 FLAC, MP3, PCM, Vorbis 를 symphonia 로, Opus 를 libopus 로, AAC 를 FFmpeg 로 푼다. (media/filters/audio_file_reader.cc)
+//!   여기서는 디먹스도 symphonia 0.6 의 풀기(wav, ogg, mkv(webm), isomp4(m4a), flac, mp3, adts)로 하고,
+//!   FLAC, MP3, PCM, Vorbis 는 크롬과 같은 symphonia 해석기, Opus 는 opus.rs(opus-pure),
+//!   AAC 는 aac.rs 가 AAC-LC 2 채널까지 symphonia, HE-AAC 와 3 채널 이상은 oxideav-aac 로 푼다.
+//! - 꼴은 내용으로 가린다. (decodeAudioData 처럼 형(MIME)이나 확장자를 보지 않는다. symphonia 의 탐지)
+//! - 차례: 패킷마다 풀기 → 크롬처럼 앞뒤 다듬기(trim.rs) → 정수 표본을 크롬 식으로 실수로 → 채널마다 원본 DECODE_SAMPLE_RATE(44100)로 바꾸기(resample.rs)
+//!   → WebAudio 스피커 규칙으로 1 채널이나 2 채널로 내리기. (크롬은 AudioBuffer 를 채널 그대로 두고 그릴 때 내린다. 뒤 노드가 모두 선형이라 미리 내려도 같다.
+//!   모노는 StereoPanner 식이 달라 모노로 둔다)
 //==============================================================================
 mod aac;
 mod opus;
@@ -26,7 +26,7 @@ use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 
 //==============================================================================
-// 코덱 등록표. (symphonia 가 켠 해석기와 엔진 Opus 해석기)
+/// 코덱 등록표. (symphonia 가 켠 해석기와 엔진 Opus 해석기)
 //==============================================================================
 fn get_codec_registry() -> &'static CodecRegistry {
 	static CODEC_REGISTRY: OnceLock<CodecRegistry> = OnceLock::new();
@@ -39,11 +39,11 @@ fn get_codec_registry() -> &'static CodecRegistry {
 	})
 }
 
-// 푼 소리의 표본율. (원본 audioasset.js DECODE_SAMPLE_RATE, OfflineAudioContext(1, 1, 44100) 로 풀어 이 표본율이 된다)
+/// 푼 소리의 표본율. (원본 audioasset.js DECODE_SAMPLE_RATE, OfflineAudioContext(1, 1, 44100) 로 풀어 이 표본율이 된다)
 pub(crate) const DECODE_SAMPLE_RATE: u32 = 44100;
 
 //==============================================================================
-// 푼 소리. (크롬 AudioBuffer 를 스피커 규칙으로 1 채널이나 2 채널로 내린 것)
+/// 푼 소리. (크롬 AudioBuffer 를 스피커 규칙으로 1 채널이나 2 채널로 내린 것)
 //==============================================================================
 pub(crate) struct DecodedAudio {
 	pub sample_rate: u32,
@@ -51,6 +51,9 @@ pub(crate) struct DecodedAudio {
 }
 
 impl DecodedAudio {
+	//==============================================================================
+	/// 프레임 수. (첫 채널의 길이, 채널이 없으면 0, 시험)
+	//==============================================================================
 	#[cfg(test)]
 	pub(crate) fn get_frame_count(&self) -> usize {
 		self.channel_data.first().map(|channel| channel.len()).unwrap_or(0)
@@ -58,7 +61,7 @@ impl DecodedAudio {
 }
 
 //==============================================================================
-// 소리 파일 바이트 풀기. (크롬 decodeAudioData 와 같은 길이, 채널, 표본)
+/// 소리 파일 바이트 풀기. (크롬 decodeAudioData 와 같은 길이, 채널, 표본)
 //==============================================================================
 pub(crate) fn decode_audio_data(bytes: &[u8]) -> Result<DecodedAudio, String> {
 	let channel_list = decode_audio_channels(bytes)?;
@@ -69,7 +72,7 @@ pub(crate) fn decode_audio_data(bytes: &[u8]) -> Result<DecodedAudio, String> {
 }
 
 //==============================================================================
-// 크롬 AudioBuffer 와 같은 채널들. (내리기 전, DECODE_SAMPLE_RATE)
+/// 크롬 AudioBuffer 와 같은 채널들. (내리기 전, DECODE_SAMPLE_RATE)
 //==============================================================================
 fn decode_audio_channels(bytes: &[u8]) -> Result<Vec<Vec<f32>>, String> {
 	let raw = decode_raw(bytes)?;
@@ -81,10 +84,10 @@ fn decode_audio_channels(bytes: &[u8]) -> Result<Vec<Vec<f32>>, String> {
 }
 
 //==============================================================================
-// WebAudio 스피커 규칙으로 1 채널이나 2 채널로 내리기. (Web Audio API 4.5 Channel Up-Mixing and Down-Mixing)
-// - 1: 모노 그대로, 2: 그대로, 4(쿼드): L = 0.5 * (L + SL), R = 0.5 * (R + SR),
-//   6(5.1): L = L + sqrt(0.5) * (C + SL), R = R + sqrt(0.5) * (C + SR), 그 밖(3, 5, 7, 8 ...)은 discrete 로 앞 두 채널.
-// - 채널 차례는 크로미엄 배치다. (L R C LFE SL SR, 쿼드 L R SL SR)
+/// WebAudio 스피커 규칙으로 1 채널이나 2 채널로 내리기. (Web Audio API 4.5 Channel Up-Mixing and Down-Mixing)
+/// - 1: 모노 그대로, 2: 그대로, 4(쿼드): L = 0.5 * (L + SL), R = 0.5 * (R + SR),
+///   6(5.1): L = L + sqrt(0.5) * (C + SL), R = R + sqrt(0.5) * (C + SR), 그 밖(3, 5, 7, 8 ...)은 discrete 로 앞 두 채널.
+/// - 채널 차례는 크로미엄 배치다. (L R C LFE SL SR, 쿼드 L R SL SR)
 //==============================================================================
 pub(crate) fn down_mix_channels(mut channel_list: Vec<Vec<f32>>) -> Vec<Vec<f32>> {
 	let half_root = std::f32::consts::FRAC_1_SQRT_2;
@@ -112,7 +115,7 @@ pub(crate) fn down_mix_channels(mut channel_list: Vec<Vec<f32>>) -> Vec<Vec<f32>
 }
 
 //==============================================================================
-// 패킷 하나를 다듬지 않고 푼 것. (symphonia 가 매긴 길이와 다듬기 값을 함께 든다)
+/// 패킷 하나를 다듬지 않고 푼 것. (symphonia 가 매긴 길이와 다듬기 값을 함께 든다)
 //==============================================================================
 pub(crate) struct RawPacket {
 	pub duration: u64,
@@ -122,10 +125,10 @@ pub(crate) struct RawPacket {
 }
 
 //==============================================================================
-// 다듬지 않고 푼 소리 전체.
+/// 다듬지 않고 푼 소리 전체.
 //==============================================================================
 pub(crate) struct RawDecode {
-	// symphonia 의 풀기와 해석기 이름. (wave, ogg, matroska, isomp4, mp3, aac, flac / pcm_*, flac, mp3, vorbis, aac, opus)
+	/// symphonia 의 풀기와 해석기 이름. (wave, ogg, matroska, isomp4, mp3, aac, flac / pcm_*, flac, mp3, vorbis, aac, opus)
 	pub format_name: String,
 	pub codec_name: String,
 	pub sample_rate: u32,
@@ -133,16 +136,16 @@ pub(crate) struct RawDecode {
 	pub time_base: Option<(u32, u32)>,
 	pub track_delay: Option<u32>,
 	pub track_padding: Option<u32>,
-	// OpusHead 의 pre-skip. (Opus 가 아니면 0)
+	/// OpusHead 의 pre-skip. (Opus 가 아니면 0)
 	pub opus_pre_skip: u32,
 	pub packet_list: Vec<RawPacket>,
 }
 
 //==============================================================================
-// 표본을 실수로. (크롬 media/filters/symphonia_decoder_bridge.rs 가 넘기는 꼴과 media/base/audio_sample_types.h FixedSampleTypeTraits::To)
-// - 정수는 0 보다 작으면 (0 - 최소)로, 아니면 (최대 - 0)으로 나눈다. (s16 은 -32768 과 32767)
-// - S24 는 32 비트로 8 비트 올려 32 비트 식으로, S32 는 원본이 16 비트 이하면(FLAC) 16 비트로 내려(>> 16) 16 비트 식으로.
-// - MP3 의 실수는 -1 ~ 1 로 자르고 NaN 은 0 이다.
+/// 표본을 실수로. (크롬 media/filters/symphonia_decoder_bridge.rs 가 넘기는 꼴과 media/base/audio_sample_types.h FixedSampleTypeTraits::To)
+/// - 정수는 0 보다 작으면 (0 - 최소)로, 아니면 (최대 - 0)으로 나눈다. (s16 은 -32768 과 32767)
+/// - S24 는 32 비트로 8 비트 올려 32 비트 식으로, S32 는 원본이 16 비트 이하면(FLAC) 16 비트로 내려(>> 16) 16 비트 식으로.
+/// - MP3 의 실수는 -1 ~ 1 로 자르고 NaN 은 0 이다.
 //==============================================================================
 fn copy_planes(buffer: &GenericAudioBufferRef<'_>, bits_per_sample: Option<u32>, is_clamped: bool) -> Vec<Vec<f32>> {
 	macro_rules! convert_planes {
@@ -227,8 +230,8 @@ fn copy_planes(buffer: &GenericAudioBufferRef<'_>, bits_per_sample: Option<u32>,
 }
 
 //==============================================================================
-// 다듬지 않고 풀기. (symphonia 로 디먹스해 패킷마다 풀고, 다듬기는 trim.rs 가 크롬처럼 한다)
-// - 풀기 오류가 난 패킷은 크롬 SymphoniaAudioDecoder 처럼 버리고 이어 가되, 두 번 잇따르면 실패로 친다.
+/// 다듬지 않고 풀기. (symphonia 로 디먹스해 패킷마다 풀고, 다듬기는 trim.rs 가 크롬처럼 한다)
+/// - 풀기 오류가 난 패킷은 크롬 SymphoniaAudioDecoder 처럼 버리고 이어 가되, 두 번 잇따르면 실패로 친다.
 //==============================================================================
 pub(crate) fn decode_raw(bytes: &[u8]) -> Result<RawDecode, String> {
 	let media_source_stream = MediaSourceStream::new(Box::new(Cursor::new(bytes.to_vec())), Default::default());
@@ -306,13 +309,13 @@ pub(crate) fn decode_raw(bytes: &[u8]) -> Result<RawDecode, String> {
 mod tests {
 	use super::*;
 
-	// 시험 소리. (tests/assets/audio, tools 없이 ffmpeg 6.0 과 맥 afconvert 로 만든 수 KB 짜리)
+	/// 시험 소리. (tests/assets/audio, tools 없이 ffmpeg 6.0 과 맥 afconvert 로 만든 수 KB 짜리)
 	const AUDIO_ASSET_DIRECTORY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/assets/audio");
 
 	//==============================================================================
-	// 크롬(158) decodeAudioData 의 결과와 견준다. (tests/assets/audio/chromedecode.cjs 가 찍은 chrome_decode.json)
-	// - 길이와 채널 수는 같아야 하고, 정한 자리의 표본은 2e-6 안, 채널마다 제곱합은 1e-5 (상대) 안.
-	//   FLAC, MP3, PCM, Vorbis 는 크롬과 같은 symphonia 라 비트까지 같고, Opus(libopus 와 opus-pure)와 AAC(FFmpeg 와 symphonia, oxideav-aac)는 1.5e-7 안팎으로 다르다.
+	/// 크롬(158) decodeAudioData 의 결과와 견준다. (tests/assets/audio/chromedecode.cjs 가 찍은 chrome_decode.json)
+	/// - 길이와 채널 수는 같아야 하고, 정한 자리의 표본은 2e-6 안, 채널마다 제곱합은 1e-5 (상대) 안.
+	///   FLAC, MP3, PCM, Vorbis 는 크롬과 같은 symphonia 라 비트까지 같고, Opus(libopus 와 opus-pure)와 AAC(FFmpeg 와 symphonia, oxideav-aac)는 1.5e-7 안팎으로 다르다.
 	//==============================================================================
 	#[test]
 	fn decode_matches_chrome() {
@@ -339,7 +342,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 꼴마다 첫 표본과 길이, 내린 채널. (decode_audio_data 가 엔진에 넘기는 것)
+	/// 꼴마다 첫 표본과 길이, 내린 채널. (decode_audio_data 가 엔진에 넘기는 것)
 	//==============================================================================
 	#[test]
 	fn decode_audio_data_down_mixes_like_webaudio() {
@@ -376,7 +379,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	// 소리가 아닌 바이트는 실패.
+	/// 소리가 아닌 바이트는 실패.
 	//==============================================================================
 	#[test]
 	fn decode_rejects_unknown_bytes() {

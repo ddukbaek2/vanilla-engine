@@ -17,15 +17,52 @@ use crate::base::vector3::Vector3;
 
 //==============================================================================
 /// 동차 좌표 점. (원본 transform_point 가 돌려주는 { x, y, z, w }, 원근 나누기는 호출자가 한다)
+///
+/// # 예제
+/// 원근 투영 뒤 깊이 구하기
+/// ```rust
+/// use vanilla::{math, Matrix4};
+///
+/// let projection = Matrix4::create_perspective(math::PI * 0.5, 2.0, 1.0, 3.0);
+/// let clip_point = projection.transform_point(0.0, 0.0, -3.0);
+/// assert_eq!(clip_point.w, 3.0);
+/// assert_eq!(clip_point.z / clip_point.w, 1.0);
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct TransformedPoint {
+	/// 변환한 x. (원근 나누기 전)
 	pub x: f32,
+	/// 변환한 y. (원근 나누기 전)
 	pub y: f32,
+	/// 변환한 z. (원근 나누기 전)
 	pub z: f32,
+	/// 동차 좌표 w. (원근 나누기에 쓴다, 아핀 변환이면 1)
 	pub w: f32,
 }
 
+//==============================================================================
+/// 4x4 변환 행렬. (열 우선, 오른손 좌표계, 기본값은 단위 행렬)
+/// - translate, rotate_x, scale 같은 누적 함수는 자신을 바꾸고, create_... 함수는 새 행렬을 돌려준다.
+///
+/// # 예제
+/// 모델 행렬로 점을 옮기고 역행렬로 되돌리기
+/// ```rust
+/// use vanilla::{Matrix4, Vector3};
+///
+/// let mut model = Matrix4::create_translation(1.0, 2.0, 3.0);
+/// model.scale(2.0, 2.0, 2.0);
+/// let point = model.transform_point(1.0, 1.0, 1.0);
+/// assert_eq!((point.x, point.y, point.z, point.w), (3.0, 4.0, 5.0, 1.0));
+///
+/// let inverse = Matrix4::create_inverse(&model);
+/// let back = inverse.transform_point(point.x, point.y, point.z);
+/// assert_eq!((back.x, back.y, back.z), (1.0, 1.0, 1.0));
+///
+/// let view = Matrix4::create_look_at(Vector3::create(0.0, 0.0, 5.0), Vector3::zero(), Vector3::up());
+/// assert_eq!(view, Matrix4::create_translation(0.0, 0.0, -5.0));
+/// ```
+//==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Matrix4 {
 	/// 열 우선 요소 배열. (elements[column * 4 + row])
@@ -51,6 +88,9 @@ impl Matrix4 {
 
 	//==============================================================================
 	/// 다른 행렬로부터 복사.
+	///
+	/// # 인자
+	/// - `other`: 복사해 올 행렬.
 	//==============================================================================
 	pub fn copy_from(&mut self, other: &Matrix4) {
 		self.elements = other.elements;
@@ -58,6 +98,20 @@ impl Matrix4 {
 
 	//==============================================================================
 	/// 다른 행렬을 오른쪽에 곱해 누적한다. (this = this x other)
+	///
+	/// # 인자
+	/// - `other`: 오른쪽에 곱할 행렬. (점에는 other 변환이 먼저 걸린다)
+	///
+	/// # 예제
+	/// 이동 x 크기는 크기를 먼저 건다
+	/// ```rust
+	/// use vanilla::Matrix4;
+	///
+	/// let mut matrix = Matrix4::create_translation(1.0, 2.0, 3.0);
+	/// matrix.multiply(&Matrix4::create_scale(2.0, 2.0, 2.0));
+	/// let point = matrix.transform_point(1.0, 0.0, 0.0);
+	/// assert_eq!((point.x, point.y, point.z), (3.0, 2.0, 3.0));
+	/// ```
 	//==============================================================================
 	pub fn multiply(&mut self, other: &Matrix4) {
 		let elements = &self.elements;
@@ -77,6 +131,11 @@ impl Matrix4 {
 
 	//==============================================================================
 	/// 이동 변환을 누적한다. (로컬 공간 오른쪽 곱)
+	///
+	/// # 인자
+	/// - `x`: x 이동량.
+	/// - `y`: y 이동량.
+	/// - `z`: z 이동량.
 	//==============================================================================
 	pub fn translate(&mut self, x: f32, y: f32, z: f32) {
 		let translation_matrix = Matrix4::create_translation(x, y, z);
@@ -85,6 +144,9 @@ impl Matrix4 {
 
 	//==============================================================================
 	/// X 축 회전 변환을 누적한다. (라디안, 로컬 공간 오른쪽 곱)
+	///
+	/// # 인자
+	/// - `radian`: 회전 각. (라디안, 양수면 +Y 를 +Z 쪽으로 돌린다)
 	//==============================================================================
 	pub fn rotate_x(&mut self, radian: f32) {
 		let rotation_matrix = Matrix4::create_rotation_x(radian);
@@ -93,6 +155,9 @@ impl Matrix4 {
 
 	//==============================================================================
 	/// Y 축 회전 변환을 누적한다. (라디안, 로컬 공간 오른쪽 곱)
+	///
+	/// # 인자
+	/// - `radian`: 회전 각. (라디안, 양수면 +Z 를 +X 쪽으로 돌린다)
 	//==============================================================================
 	pub fn rotate_y(&mut self, radian: f32) {
 		let rotation_matrix = Matrix4::create_rotation_y(radian);
@@ -101,6 +166,9 @@ impl Matrix4 {
 
 	//==============================================================================
 	/// Z 축 회전 변환을 누적한다. (라디안, 로컬 공간 오른쪽 곱)
+	///
+	/// # 인자
+	/// - `radian`: 회전 각. (라디안, 양수면 +X 를 +Y 쪽으로 돌린다)
 	//==============================================================================
 	pub fn rotate_z(&mut self, radian: f32) {
 		let rotation_matrix = Matrix4::create_rotation_z(radian);
@@ -109,6 +177,11 @@ impl Matrix4 {
 
 	//==============================================================================
 	/// 크기 변환을 누적한다. (로컬 공간 오른쪽 곱)
+	///
+	/// # 인자
+	/// - `x`: x 배율. (1 이면 그대로)
+	/// - `y`: y 배율.
+	/// - `z`: z 배율.
 	//==============================================================================
 	pub fn scale(&mut self, x: f32, y: f32, z: f32) {
 		let scale_matrix = Matrix4::create_scale(x, y, z);
@@ -117,6 +190,14 @@ impl Matrix4 {
 
 	//==============================================================================
 	/// 점을 변환한다. (w 성분까지 돌려주고, 원근 나누기는 호출자가 한다)
+	///
+	/// # 인자
+	/// - `x`: 점의 x.
+	/// - `y`: 점의 y.
+	/// - `z`: 점의 z.
+	///
+	/// # 돌려줌
+	/// matrix x (x, y, z, 1) 의 동차 좌표. (w 로 나누지 않은 값)
 	//==============================================================================
 	pub fn transform_point(&self, x: f32, y: f32, z: f32) -> TransformedPoint {
 		let elements = &self.elements;
@@ -129,6 +210,24 @@ impl Matrix4 {
 
 	//==============================================================================
 	/// 방향을 변환한다. (이동 성분은 빼고 회전과 크기만 적용한다)
+	///
+	/// # 인자
+	/// - `x`: 방향의 x.
+	/// - `y`: 방향의 y.
+	/// - `z`: 방향의 z.
+	///
+	/// # 돌려줌
+	/// 변환한 방향. (길이를 다시 맞추지 않는다)
+	///
+	/// # 예제
+	/// 이동은 방향에 걸리지 않는다
+	/// ```rust
+	/// use vanilla::{Matrix4, Vector3};
+	///
+	/// let mut matrix = Matrix4::create_translation(10.0, 0.0, 0.0);
+	/// matrix.scale(2.0, 2.0, 2.0);
+	/// assert_eq!(matrix.transform_direction(0.0, 1.0, 0.0), Vector3::create(0.0, 2.0, 0.0));
+	/// ```
 	//==============================================================================
 	pub fn transform_direction(&self, x: f32, y: f32, z: f32) -> Vector3 {
 		let elements = &self.elements;
@@ -140,6 +239,9 @@ impl Matrix4 {
 
 	//==============================================================================
 	/// 열 우선 요소 배열을 돌려준다. (고칠 때는 elements 필드를 직접 쓴다)
+	///
+	/// # 돌려줌
+	/// 열 우선 요소 16 개의 읽기 참조.
 	//==============================================================================
 	pub fn get_elements(&self) -> &[f32; 16] {
 		&self.elements
@@ -147,6 +249,9 @@ impl Matrix4 {
 
 	//==============================================================================
 	/// 셰이더 mat4 (열 우선) 배열로 기록한다.
+	///
+	/// # 인자
+	/// - `array`: 옮겨 쓸 배열. (열 우선 16 개)
 	//==============================================================================
 	pub fn write_to_array(&self, array: &mut [f32; 16]) {
 		array.copy_from_slice(&self.elements);
@@ -154,6 +259,22 @@ impl Matrix4 {
 
 	//==============================================================================
 	/// 큰 배열의 offset 자리부터 16 개를 기록한다. (원본 joint_matrix_array.set(elements, joint_index * 16) 자리)
+	///
+	/// # 인자
+	/// - `array`: 옮겨 쓸 큰 배열. (길이가 offset + 16 보다 짧으면 패닉)
+	/// - `offset`: 쓰기 시작할 자리. (요소 번호, 관절 번호 x 16 같은)
+	///
+	/// # 예제
+	/// 관절 행렬 배열의 두 번째 칸에 쓰기
+	/// ```rust
+	/// use vanilla::Matrix4;
+	///
+	/// let joint_matrix = Matrix4::create_translation(7.0, 8.0, 9.0);
+	/// let mut joint_matrix_array = vec![0.0f32; 32];
+	/// joint_matrix.write_to_slice(&mut joint_matrix_array, 16);
+	/// assert_eq!(&joint_matrix_array[16..32], &joint_matrix.elements[..]);
+	/// assert_eq!(joint_matrix_array[0], 0.0);
+	/// ```
 	//==============================================================================
 	pub fn write_to_slice(&self, array: &mut [f32], offset: usize) {
 		array[offset..offset + 16].copy_from_slice(&self.elements);
@@ -161,6 +282,9 @@ impl Matrix4 {
 
 	//==============================================================================
 	/// 단위 행렬을 만든다.
+	///
+	/// # 돌려줌
+	/// 단위 행렬.
 	//==============================================================================
 	pub const fn create_identity() -> Matrix4 {
 		Matrix4 {
@@ -170,6 +294,14 @@ impl Matrix4 {
 
 	//==============================================================================
 	/// 이동 행렬을 만든다.
+	///
+	/// # 인자
+	/// - `x`: x 이동량.
+	/// - `y`: y 이동량.
+	/// - `z`: z 이동량.
+	///
+	/// # 돌려줌
+	/// 이동 행렬. (elements 12, 13, 14 에 x, y, z)
 	//==============================================================================
 	pub fn create_translation(x: f32, y: f32, z: f32) -> Matrix4 {
 		let mut matrix = Matrix4::create_identity();
@@ -181,6 +313,12 @@ impl Matrix4 {
 
 	//==============================================================================
 	/// X 축 회전 행렬을 만든다. (라디안)
+	///
+	/// # 인자
+	/// - `radian`: 회전 각. (라디안, 양수면 +Y 를 +Z 쪽으로 돌린다)
+	///
+	/// # 돌려줌
+	/// X 축 회전 행렬.
 	//==============================================================================
 	pub fn create_rotation_x(radian: f32) -> Matrix4 {
 		let cosine = radian.cos();
@@ -195,6 +333,12 @@ impl Matrix4 {
 
 	//==============================================================================
 	/// Y 축 회전 행렬을 만든다. (라디안)
+	///
+	/// # 인자
+	/// - `radian`: 회전 각. (라디안, 양수면 +Z 를 +X 쪽으로 돌린다)
+	///
+	/// # 돌려줌
+	/// Y 축 회전 행렬.
 	//==============================================================================
 	pub fn create_rotation_y(radian: f32) -> Matrix4 {
 		let cosine = radian.cos();
@@ -209,6 +353,23 @@ impl Matrix4 {
 
 	//==============================================================================
 	/// Z 축 회전 행렬을 만든다. (라디안)
+	///
+	/// # 인자
+	/// - `radian`: 회전 각. (라디안, 양수면 +X 를 +Y 쪽으로 돌린다)
+	///
+	/// # 돌려줌
+	/// Z 축 회전 행렬.
+	///
+	/// # 예제
+	/// 90 도 돌리면 +X 가 +Y 로 간다
+	/// ```rust
+	/// use vanilla::{math, Matrix4};
+	///
+	/// let rotation = Matrix4::create_rotation_z(math::degree_to_radian(90.0));
+	/// let rotated = rotation.transform_direction(1.0, 0.0, 0.0);
+	/// assert!(rotated.x.abs() < 1e-6);
+	/// assert!((rotated.y - 1.0).abs() < 1e-6);
+	/// ```
 	//==============================================================================
 	pub fn create_rotation_z(radian: f32) -> Matrix4 {
 		let cosine = radian.cos();
@@ -223,6 +384,25 @@ impl Matrix4 {
 
 	//==============================================================================
 	/// 쿼터니언 회전 행렬을 만든다. (단위 쿼터니언을 가정한다)
+	///
+	/// # 인자
+	/// - `quaternion`: 회전 쿼터니언. (길이 1 로 정규화한 것)
+	///
+	/// # 돌려줌
+	/// 회전 행렬. (이동 성분은 0)
+	///
+	/// # 예제
+	/// Z 축 오일러 쿼터니언은 Z 축 회전 행렬과 같다
+	/// ```rust
+	/// use vanilla::{Matrix4, Quaternion};
+	///
+	/// let quaternion = Quaternion::create_from_euler(0.0, 0.0, 0.5);
+	/// let from_quaternion = Matrix4::create_rotation_from_quaternion(quaternion);
+	/// let from_angle = Matrix4::create_rotation_z(0.5);
+	/// for index in 0..16 {
+	/// 	assert!((from_quaternion.elements[index] - from_angle.elements[index]).abs() < 1e-5);
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn create_rotation_from_quaternion(quaternion: Quaternion) -> Matrix4 {
 		let x = quaternion.x;
@@ -245,6 +425,14 @@ impl Matrix4 {
 
 	//==============================================================================
 	/// 크기 행렬을 만든다.
+	///
+	/// # 인자
+	/// - `x`: x 배율.
+	/// - `y`: y 배율.
+	/// - `z`: z 배율.
+	///
+	/// # 돌려줌
+	/// 크기 행렬.
 	//==============================================================================
 	pub fn create_scale(x: f32, y: f32, z: f32) -> Matrix4 {
 		let mut matrix = Matrix4::create_identity();
@@ -256,6 +444,25 @@ impl Matrix4 {
 
 	//==============================================================================
 	/// 원근 투영 행렬을 만든다. (세로 시야각 라디안, OpenGL 식 깊이 -1 ~ 1)
+	///
+	/// # 인자
+	/// - `field_of_view_radian`: 세로 시야각. (라디안)
+	/// - `aspect_ratio`: 가로 나누기 세로 비.
+	/// - `near_distance`: 카메라에서 가까운 면까지 거리. (카메라는 -Z 를 본다)
+	/// - `far_distance`: 카메라에서 먼 면까지 거리.
+	///
+	/// # 돌려줌
+	/// 원근 투영 행렬. (가까운 면은 깊이 -1, 먼 면은 깊이 1 로 간다)
+	///
+	/// # 예제
+	/// 가까운 면의 점은 깊이 -1
+	/// ```rust
+	/// use vanilla::{math, Matrix4};
+	///
+	/// let projection = Matrix4::create_perspective(math::degree_to_radian(90.0), 2.0, 1.0, 3.0);
+	/// let near_point = projection.transform_point(0.0, 0.0, -1.0);
+	/// assert_eq!(near_point.z / near_point.w, -1.0);
+	/// ```
 	//==============================================================================
 	pub fn create_perspective(field_of_view_radian: f32, aspect_ratio: f32, near_distance: f32, far_distance: f32) -> Matrix4 {
 		let focal_length = 1.0 / (field_of_view_radian / 2.0).tan();
@@ -272,6 +479,27 @@ impl Matrix4 {
 
 	//==============================================================================
 	/// 직교 투영 행렬을 만든다. (OpenGL glOrtho 와 같은 식)
+	///
+	/// # 인자
+	/// - `left`: 왼쪽 면의 x.
+	/// - `right`: 오른쪽 면의 x.
+	/// - `bottom`: 아래 면의 y.
+	/// - `top`: 위 면의 y.
+	/// - `near_distance`: 카메라에서 가까운 면까지 거리. (카메라는 -Z 를 본다)
+	/// - `far_distance`: 카메라에서 먼 면까지 거리.
+	///
+	/// # 돌려줌
+	/// 직교 투영 행렬. (상자 안을 -1 ~ 1 로 옮긴다)
+	///
+	/// # 예제
+	/// 상자 모서리는 (1, 1, 1) 로 간다
+	/// ```rust
+	/// use vanilla::Matrix4;
+	///
+	/// let projection = Matrix4::create_orthographic(0.0, 4.0, 0.0, 2.0, 1.0, 5.0);
+	/// let corner = projection.transform_point(4.0, 2.0, -5.0);
+	/// assert_eq!((corner.x, corner.y, corner.z, corner.w), (1.0, 1.0, 1.0, 1.0));
+	/// ```
 	//==============================================================================
 	pub fn create_orthographic(left: f32, right: f32, bottom: f32, top: f32, near_distance: f32, far_distance: f32) -> Matrix4 {
 		let mut matrix = Matrix4 { elements: [0.0; 16] };
@@ -288,6 +516,24 @@ impl Matrix4 {
 
 	//==============================================================================
 	/// 시점 행렬을 만든다. (eye_position 에서 target_position 을 바라보는 뷰 행렬, 뒤쪽 축 = 눈 - 대상)
+	///
+	/// # 인자
+	/// - `eye_position`: 눈(카메라) 위치.
+	/// - `target_position`: 바라볼 점. (eye_position 과 같으면 쓸 수 없는 행렬이 된다)
+	/// - `up_direction`: 위쪽 방향. (보통 Vector3::up(), 시선과 나란하면 오른쪽 축이 (0, 0, 0) 이 되어 쓸 수 없는 행렬이 된다)
+	///
+	/// # 돌려줌
+	/// 월드 좌표를 뷰 좌표로 바꾸는 행렬. (대상은 -Z 쪽에 놓인다)
+	///
+	/// # 예제
+	/// (0, 0, 5) 에서 원점 보기
+	/// ```rust
+	/// use vanilla::{Matrix4, Vector3};
+	///
+	/// let view = Matrix4::create_look_at(Vector3::create(0.0, 0.0, 5.0), Vector3::zero(), Vector3::up());
+	/// let target_in_view = view.transform_point(0.0, 0.0, 0.0);
+	/// assert_eq!((target_in_view.x, target_in_view.y, target_in_view.z), (0.0, 0.0, -5.0));
+	/// ```
 	//==============================================================================
 	pub fn create_look_at(eye_position: Vector3, target_position: Vector3, up_direction: Vector3) -> Matrix4 {
 		let eye_to_target = eye_position.subtract(target_position);
@@ -319,6 +565,27 @@ impl Matrix4 {
 
 	//==============================================================================
 	/// 역행렬을 만든다. (일반 4x4 여인수 전개, 행렬식이 0 이면 단위 행렬)
+	///
+	/// # 인자
+	/// - `matrix`: 뒤집을 행렬.
+	///
+	/// # 돌려줌
+	/// 역행렬. 행렬식이 0 이면 단위 행렬.
+	///
+	/// # 예제
+	/// 되돌리기와 뒤집을 수 없는 행렬
+	/// ```rust
+	/// use vanilla::Matrix4;
+	///
+	/// let mut matrix = Matrix4::create_translation(1.0, 2.0, 3.0);
+	/// matrix.scale(2.0, 4.0, 8.0);
+	/// let inverse = Matrix4::create_inverse(&matrix);
+	/// let point = inverse.transform_point(1.0, 2.0, 3.0);
+	/// assert_eq!((point.x, point.y, point.z), (0.0, 0.0, 0.0));
+	///
+	/// let singular = Matrix4 { elements: [0.0; 16] };
+	/// assert_eq!(Matrix4::create_inverse(&singular), Matrix4::create_identity());
+	/// ```
 	//==============================================================================
 	pub fn create_inverse(matrix: &Matrix4) -> Matrix4 {
 		let source_elements = &matrix.elements;

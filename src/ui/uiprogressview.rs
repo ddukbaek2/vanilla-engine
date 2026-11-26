@@ -32,6 +32,23 @@ crate::core::reflection::impl_reflect_names!(ProgressDirection, [
 
 //==============================================================================
 /// 진행률 표시.
+///
+/// # 예제
+/// 체력 바
+/// ```rust
+/// use vanilla::{NodeTree, ProgressDirection, UIProgressView, Vector2};
+///
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.get_root_id();
+/// let bar_id = node_tree.create_child(root_id, "HealthBar");
+/// node_tree[bar_id].set_content_size(Vector2::create(200.0, 12.0));
+/// let progress_view = node_tree.add_component(bar_id, UIProgressView::new()).expect("progress");
+/// progress_view.set_range(0.0, 120.0);
+/// progress_view.set_value(90.0);
+/// progress_view.set_corner_radius(6.0);
+/// assert_eq!(progress_view.get_ratio(), 0.75);
+/// assert_eq!(progress_view.get_direction(), ProgressDirection::Horizontal);
+/// ```
 //==============================================================================
 pub struct UIProgressView {
 	ui_view: UIView,
@@ -49,6 +66,9 @@ pub struct UIProgressView {
 impl UIProgressView {
 	//==============================================================================
 	/// 생성. (값 0, 범위 0 ~ 1, 트랙 회색, 채움 파랑)
+	///
+	/// # 돌려줌
+	/// 붙기 전의 진행률 표시. (가로 방향, 반대편 값 없음)
 	//==============================================================================
 	pub fn new() -> UIProgressView {
 		let mut ui_view = UIView::new();
@@ -68,6 +88,9 @@ impl UIProgressView {
 
 	//==============================================================================
 	/// 품은 뷰 반환.
+	///
+	/// # 돌려줌
+	/// 품은 UIView.
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn get_uiview(&self) -> &UIView {
@@ -76,6 +99,9 @@ impl UIProgressView {
 
 	//==============================================================================
 	/// 품은 뷰 반환. (변경용)
+	///
+	/// # 돌려줌
+	/// 품은 UIView.
 	//==============================================================================
 	pub fn get_uiview_mut(&mut self) -> &mut UIView {
 		&mut self.ui_view
@@ -83,6 +109,9 @@ impl UIProgressView {
 
 	//==============================================================================
 	/// 컨텐트 노드 핸들.
+	///
+	/// # 돌려줌
+	/// 컨텐트 노드. (트리에 붙기 전이면 None)
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn get_content(&self) -> Option<NodeId> {
@@ -91,6 +120,9 @@ impl UIProgressView {
 
 	//==============================================================================
 	/// 배경색 설정. (트랙 색)
+	///
+	/// # 인자
+	/// - `background_color`: 트랙 색. (기본 `Color::create(0.7, 0.7, 0.7, 1.0)`)
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn set_background_color(&mut self, background_color: impl Into<Color>) {
@@ -99,6 +131,9 @@ impl UIProgressView {
 
 	//==============================================================================
 	/// 배경색 반환. (트랙 색)
+	///
+	/// # 돌려줌
+	/// 트랙 색.
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn get_background_color(&self) -> Color {
@@ -120,6 +155,9 @@ impl UIProgressView {
 
 	//==============================================================================
 	/// 0 ~ 1 비율 반환.
+	///
+	/// # 돌려줌
+	/// 범위 안에서 값의 자리. (0 ~ 1, 최대값이 최소값보다 크지 않으면 0)
 	//==============================================================================
 	pub fn get_ratio(&self) -> f32 {
 		let range = self.max_value - self.min_value;
@@ -132,6 +170,9 @@ impl UIProgressView {
 
 	//==============================================================================
 	/// 값 설정. (범위로 자른다)
+	///
+	/// # 인자
+	/// - `value`: 값. (최소값 ~ 최대값으로 자른다)
 	//==============================================================================
 	pub fn set_value(&mut self, value: f32) {
 		self.value = math::clamp(value, self.min_value, self.max_value);
@@ -139,6 +180,9 @@ impl UIProgressView {
 
 	//==============================================================================
 	/// 값 반환.
+	///
+	/// # 돌려줌
+	/// 값. (기본 0)
 	//==============================================================================
 	pub fn get_value(&self) -> f32 {
 		self.value
@@ -146,6 +190,25 @@ impl UIProgressView {
 
 	//==============================================================================
 	/// 범위 설정. (지금 값을 새 범위로 다시 자른다)
+	/// - 반대편 값은 다시 자르지 않는다. (원본과 같음, 그릴 때 비율을 0 ~ 1 로 자른다)
+	///
+	/// # 인자
+	/// - `min_value`: 최소값. (비율 0 자리)
+	/// - `max_value`: 최대값. (비율 1 자리)
+	///
+	/// # 예제
+	/// 범위를 바꾸면 값이 새 범위로 잘린다
+	/// ```rust
+	/// use vanilla::UIProgressView;
+	///
+	/// let mut progress_view = UIProgressView::new();
+	/// progress_view.set_value(0.8);
+	/// progress_view.set_range(0.0, 0.5);
+	/// assert_eq!(progress_view.get_value(), 0.5);
+	/// progress_view.set_range(10.0, 20.0);
+	/// assert_eq!(progress_view.get_value(), 10.0);
+	/// assert_eq!(progress_view.get_ratio(), 0.0);
+	/// ```
 	//==============================================================================
 	pub fn set_range(&mut self, min_value: f32, max_value: f32) {
 		self.min_value = min_value;
@@ -156,6 +219,9 @@ impl UIProgressView {
 
 	//==============================================================================
 	/// 최소값 반환.
+	///
+	/// # 돌려줌
+	/// 최소값. (기본 0)
 	//==============================================================================
 	pub fn get_min_value(&self) -> f32 {
 		self.min_value
@@ -163,6 +229,9 @@ impl UIProgressView {
 
 	//==============================================================================
 	/// 최대값 반환.
+	///
+	/// # 돌려줌
+	/// 최대값. (기본 1)
 	//==============================================================================
 	pub fn get_max_value(&self) -> f32 {
 		self.max_value
@@ -170,6 +239,25 @@ impl UIProgressView {
 
 	//==============================================================================
 	/// 반대편 값 설정. (None 이면 끔. 범위로 자른다)
+	///
+	/// # 인자
+	/// - `secondary_value`: 진행 방향의 반대쪽 끝에서 차오르는 두 번째 채움의 값. (None 이면 그리지 않는다)
+	///
+	/// # 예제
+	/// 대전 게이지의 반대편
+	/// ```rust
+	/// use vanilla::UIProgressView;
+	///
+	/// let mut progress_view = UIProgressView::new();
+	/// progress_view.set_range(0.0, 100.0);
+	/// progress_view.set_value(40.0);
+	/// progress_view.set_secondary_value(Some(35.0));
+	/// assert_eq!(progress_view.get_secondary_value(), Some(35.0));
+	/// progress_view.set_secondary_value(Some(150.0));
+	/// assert_eq!(progress_view.get_secondary_value(), Some(100.0));
+	/// progress_view.set_secondary_value(None);
+	/// assert_eq!(progress_view.get_secondary_value(), None);
+	/// ```
 	//==============================================================================
 	pub fn set_secondary_value(&mut self, secondary_value: Option<f32>) {
 		self.secondary_value = secondary_value.map(|value| math::clamp(value, self.min_value, self.max_value));
@@ -177,6 +265,9 @@ impl UIProgressView {
 
 	//==============================================================================
 	/// 반대편 값 반환.
+	///
+	/// # 돌려줌
+	/// 반대편 값. (끈 상태면 None, 기본 None)
 	//==============================================================================
 	pub fn get_secondary_value(&self) -> Option<f32> {
 		self.secondary_value
@@ -184,6 +275,9 @@ impl UIProgressView {
 
 	//==============================================================================
 	/// 반대편 채움 색 설정.
+	///
+	/// # 인자
+	/// - `color`: 반대편 채움 색. (기본 `Color::create(0.94, 0.33, 0.31, 1.0)`)
 	//==============================================================================
 	pub fn set_secondary_fill_color(&mut self, color: impl Into<Color>) {
 		self.secondary_fill_color = color.into();
@@ -191,6 +285,9 @@ impl UIProgressView {
 
 	//==============================================================================
 	/// 반대편 채움 색 반환.
+	///
+	/// # 돌려줌
+	/// 반대편 채움 색.
 	//==============================================================================
 	pub fn get_secondary_fill_color(&self) -> Color {
 		self.secondary_fill_color
@@ -198,6 +295,9 @@ impl UIProgressView {
 
 	//==============================================================================
 	/// 트랙 색 설정. (배경색)
+	///
+	/// # 인자
+	/// - `color`: 트랙 색. (set_background_color 와 같다)
 	//==============================================================================
 	pub fn set_track_color(&mut self, color: impl Into<Color>) {
 		self.ui_view.set_background_color(color);
@@ -205,6 +305,9 @@ impl UIProgressView {
 
 	//==============================================================================
 	/// 트랙 색 반환. (배경색)
+	///
+	/// # 돌려줌
+	/// 트랙 색.
 	//==============================================================================
 	pub fn get_track_color(&self) -> Color {
 		self.ui_view.get_background_color()
@@ -212,6 +315,9 @@ impl UIProgressView {
 
 	//==============================================================================
 	/// 채움 색 설정.
+	///
+	/// # 인자
+	/// - `color`: 채움 색. (기본 `Color::create(0.23, 0.51, 0.96, 1.0)`)
 	//==============================================================================
 	pub fn set_fill_color(&mut self, color: impl Into<Color>) {
 		self.fill_color = color.into();
@@ -219,6 +325,9 @@ impl UIProgressView {
 
 	//==============================================================================
 	/// 채움 색 반환.
+	///
+	/// # 돌려줌
+	/// 채움 색.
 	//==============================================================================
 	pub fn get_fill_color(&self) -> Color {
 		self.fill_color
@@ -226,6 +335,9 @@ impl UIProgressView {
 
 	//==============================================================================
 	/// 둥근 모서리 반지름 설정.
+	///
+	/// # 인자
+	/// - `corner_radius`: 트랙과 채움의 모서리 반지름. (0 이하면 각진 사각형, 기본 0)
 	//==============================================================================
 	pub fn set_corner_radius(&mut self, corner_radius: f32) {
 		self.corner_radius = corner_radius;
@@ -233,6 +345,9 @@ impl UIProgressView {
 
 	//==============================================================================
 	/// 둥근 모서리 반지름 반환.
+	///
+	/// # 돌려줌
+	/// 모서리 반지름. (기본 0)
 	//==============================================================================
 	pub fn get_corner_radius(&self) -> f32 {
 		self.corner_radius
@@ -240,6 +355,9 @@ impl UIProgressView {
 
 	//==============================================================================
 	/// 방향 설정.
+	///
+	/// # 인자
+	/// - `direction`: 진행 방향. (Horizontal 은 왼쪽에서, Vertical 은 아래에서 채운다. 반대편 값은 그 반대쪽 끝에서)
 	//==============================================================================
 	pub fn set_direction(&mut self, direction: ProgressDirection) {
 		self.direction = direction;
@@ -247,6 +365,9 @@ impl UIProgressView {
 
 	//==============================================================================
 	/// 방향 반환.
+	///
+	/// # 돌려줌
+	/// 진행 방향. (기본 Horizontal)
 	//==============================================================================
 	pub fn get_direction(&self) -> ProgressDirection {
 		self.direction
@@ -254,6 +375,9 @@ impl UIProgressView {
 }
 
 impl Default for UIProgressView {
+	//==============================================================================
+	/// 기본값. (UIProgressView::new 와 같다)
+	//==============================================================================
 	fn default() -> UIProgressView {
 		UIProgressView::new()
 	}
@@ -261,27 +385,45 @@ impl Default for UIProgressView {
 
 #[crate::reflect]
 impl Component for UIProgressView {
+	//==============================================================================
+	/// 컴포넌트 공통 칸 반환. (품은 UIView 의 것)
+	//==============================================================================
 	fn get_component_base(&self) -> &ComponentBase {
 		self.ui_view.get_component_base()
 	}
 
+	//==============================================================================
+	/// 컴포넌트 공통 칸 반환. (변경용)
+	//==============================================================================
 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 		self.ui_view.get_component_base_mut()
 	}
 
+	//==============================================================================
+	/// 컴포넌트 타입 이름. ("UIProgressView")
+	//==============================================================================
 	fn get_component_type(&self) -> &'static str {
 		"UIProgressView"
 	}
 
+	//==============================================================================
+	/// 트리에 붙음. (품은 UIView 의 컨텐트 노드를 만든다)
+	//==============================================================================
 	fn attach_to_tree(&mut self, node_tree: &mut NodeTree, node_id: NodeId) {
 		self.ui_view.create_content_node(node_tree, node_id);
 	}
 
+	//==============================================================================
+	/// tick 이 필요한지. (돌 일이 없어 false)
+	//==============================================================================
 	#[reflect(skip)]
 	fn is_tick_needed(&self) -> bool {
 		false
 	}
 
+	//==============================================================================
+	/// 컨텐트 안에 그리는지. (true)
+	//==============================================================================
 	#[reflect(skip)]
 	fn is_drawn_inside_content(&self) -> bool {
 		true

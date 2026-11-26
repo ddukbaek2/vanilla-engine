@@ -19,6 +19,32 @@ use std::cell::{Cell, Ref, RefCell};
 use std::path::Path;
 use std::rc::Rc;
 
+//==============================================================================
+/// 이미지. (프리멀티플라이드 알파 RGBA 픽셀과 크기, `Rc<Image>` 로 나눠 쓴다)
+/// - GPU 텍스처는 Graphic 이 처음 그릴 때 올리고, 올린 뒤에는 CPU 픽셀을 놓는다. (set_pixels_retained(true) 면 남긴다)
+///
+/// # 예제
+/// 파일에서 읽기
+/// ```rust
+/// use std::path::Path;
+/// use vanilla::Image;
+///
+/// let image = Image::load(Path::new("examples/assets/atlas/icons.png")).unwrap();
+/// assert_eq!((image.get_width(), image.get_height()), (128, 128));
+/// assert!(image.has_pixels());
+/// assert_eq!(image.get_pixels().len(), 128 * 128 * 4);
+/// ```
+///
+/// 코드로 만든 픽셀은 알파를 곱해 든다
+/// ```rust
+/// use vanilla::Image;
+///
+/// let image = Image::create_from_pixels(2, 1, vec![255, 0, 0, 255, 255, 255, 255, 128]);
+/// assert_eq!(&image.get_pixels()[0..4], &[255, 0, 0, 255]);
+/// assert_eq!(&image.get_pixels()[4..8], &[128, 128, 128, 128]);
+/// assert_ne!(image.get_instance_id(), Image::create_from_pixels(1, 1, vec![0, 0, 0, 0]).get_instance_id());
+/// ```
+//==============================================================================
 pub struct Image {
 	instance_id: u64,
 	width: u32,
@@ -34,6 +60,12 @@ pub struct Image {
 impl Image {
 	//==============================================================================
 	/// 파일에서 읽기. (load_from_memory 의 형식, 데스크탑은 읽은 파일을 리소스 사용량에 적는다)
+	///
+	/// # 인자
+	/// - `path`: 읽을 그림 파일 경로.
+	///
+	/// # 돌려줌
+	/// 읽어 푼 그림. 파일을 읽지 못하거나 풀지 못하면 그 까닭을 담은 Err.
 	//==============================================================================
 	pub fn load(path: &Path) -> Result<Rc<Image>, String> {
 		let bytes = std::fs::read(path).map_err(|error| format!("이미지 읽기 실패 ({}): {}", path.display(), error))?;
@@ -47,6 +79,23 @@ impl Image {
 	//==============================================================================
 	/// 메모리에서 읽기. (PNG, JPEG, WebP, GIF 의 첫 장, BMP, ICO. 데스크탑은 SVG 와 AVIF 도)
 	/// - 웹은 애셋을 받을 때 브라우저가 먼저 풀어 손잡이에 둔다. (platform/web.rs, 브라우저가 푸는 형식 모두) 여기는 그 밖의 바이트를 푼다.
+	///
+	/// # 인자
+	/// - `bytes`: 그림 파일의 바이트.
+	///
+	/// # 돌려줌
+	/// 푼 그림. 형식을 모르거나 풀지 못하면 그 까닭을 담은 Err.
+	///
+	/// # 예제
+	/// 파일 바이트로 풀기
+	/// ```rust
+	/// use vanilla::Image;
+	///
+	/// let bytes = std::fs::read("examples/assets/atlas/icons.png").unwrap();
+	/// let image = Image::load_from_memory(&bytes).unwrap();
+	/// assert_eq!(image.get_width(), 128);
+	/// assert!(Image::load_from_memory(b"not an image").is_err());
+	/// ```
 	//==============================================================================
 	pub fn load_from_memory(bytes: &[u8]) -> Result<Rc<Image>, String> {
 		#[cfg(not(target_arch = "wasm32"))]
@@ -61,6 +110,13 @@ impl Image {
 	//==============================================================================
 	/// 형을 아는 바이트 읽기. (브라우저처럼 형이 image/svg+xml 이면 SVG, 그 밖은 내용으로 가린 래스터. data: 주소의 그림)
 	/// - 웹은 SVG 를 브라우저가 푼다. (여기서는 Err)
+	///
+	/// # 인자
+	/// - `bytes`: 그림의 바이트.
+	/// - `mime_type`: 그림의 형. ("image/png" 처럼, ; 뒤의 매개 변수와 대소문자는 보지 않는다)
+	///
+	/// # 돌려줌
+	/// 푼 그림. 풀지 못하면 그 까닭을 담은 Err. (형이 image/svg+xml 이 아니면 형을 보지 않고 내용으로 가린다)
 	//==============================================================================
 	pub fn load_from_memory_with_mime_type(bytes: &[u8], mime_type: &str) -> Result<Rc<Image>, String> {
 		let mime_essence = mime_type.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
@@ -100,6 +156,9 @@ impl Image {
 	///
 	/// # 패닉
 	/// `pixels` 길이가 `width * height * 4` 가 아니면. (원본 `ImageData` 가 길이가 틀리면 예외를 던지는 것과 같다)
+	///
+	/// # 돌려줌
+	/// 새 그림. (새 인스턴스 식별자)
 	//==============================================================================
 	pub fn create_from_premultiplied_pixels(width: u32, height: u32, pixels: Vec<u8>) -> Rc<Image> {
 		assert_pixel_length(width, height, pixels.len());
@@ -118,6 +177,9 @@ impl Image {
 	///
 	/// # 패닉
 	/// `straight_pixels` 길이가 `width * height * 4` 가 아니면.
+	///
+	/// # 돌려줌
+	/// 새 그림. (새 인스턴스 식별자)
 	//==============================================================================
 	pub fn create_from_pixels(width: u32, height: u32, straight_pixels: Vec<u8>) -> Rc<Image> {
 		assert_pixel_length(width, height, straight_pixels.len());
@@ -140,12 +202,18 @@ impl Image {
 
 	//==============================================================================
 	/// 인스턴스 식별자.
+	///
+	/// # 돌려줌
+	/// 만들 때 받은 식별자. (그림마다 다르다, 텍스처 캐시의 열쇠)
 	//==============================================================================
 	pub fn get_instance_id(&self) -> u64 {
 		self.instance_id
 	}
 
 	//==============================================================================
+	/// 너비. (픽셀)
+	///
+	/// # 돌려줌
 	/// 너비. (픽셀)
 	//==============================================================================
 	pub fn get_width(&self) -> u32 {
@@ -154,6 +222,9 @@ impl Image {
 
 	//==============================================================================
 	/// 높이. (픽셀)
+	///
+	/// # 돌려줌
+	/// 높이. (픽셀)
 	//==============================================================================
 	pub fn get_height(&self) -> u32 {
 		self.height
@@ -161,6 +232,9 @@ impl Image {
 
 	//==============================================================================
 	/// 프리멀티플라이드 RGBA 픽셀. (GPU 에 올린 뒤 놓았으면 빈 배열, has_pixels 로 가린다)
+	///
+	/// # 돌려줌
+	/// 픽셀 바이트를 빌린 것. (위 줄부터 RGBA, 놓았으면 빈 배열)
 	//==============================================================================
 	pub fn get_pixels(&self) -> Ref<'_, [u8]> {
 		Ref::map(self.pixels.borrow(), |pixels| pixels.as_slice())
@@ -168,6 +242,9 @@ impl Image {
 
 	//==============================================================================
 	/// CPU 픽셀을 들고 있는지. (GPU 에 올린 뒤 놓았으면 false)
+	///
+	/// # 돌려줌
+	/// 픽셀 배열이 비지 않았으면 true.
 	//==============================================================================
 	pub fn has_pixels(&self) -> bool {
 		!self.pixels.borrow().is_empty()
@@ -175,6 +252,9 @@ impl Image {
 
 	//==============================================================================
 	/// GPU 에 올린 뒤에도 CPU 픽셀을 남길지 설정. (기본 false. 픽셀을 다시 읽는 그림이 켠다)
+	///
+	/// # 인자
+	/// - `is_pixels_retained`: true 면 GPU 에 올린 뒤에도 CPU 픽셀을 남긴다.
 	//==============================================================================
 	pub fn set_pixels_retained(&self, is_pixels_retained: bool) {
 		self.is_pixels_retained.set(is_pixels_retained);
@@ -182,6 +262,9 @@ impl Image {
 
 	//==============================================================================
 	/// GPU 에 올린 뒤에도 CPU 픽셀을 남기는지.
+	///
+	/// # 돌려줌
+	/// 남기게 했으면 true. (처음 false)
 	//==============================================================================
 	pub fn is_pixels_retained(&self) -> bool {
 		self.is_pixels_retained.get()
@@ -224,6 +307,23 @@ fn assert_pixel_length(width: u32, height: u32, pixel_length: usize) {
 
 //==============================================================================
 /// 내용으로 그림 형 고르기. (WHATWG MIME 스니핑 6.1 의 그림 표에 AVIF 를 더한 것, 모르면 None)
+///
+/// # 인자
+/// - `bytes`: 그림 파일의 앞부분 바이트.
+///
+/// # 돌려줌
+/// "image/x-icon", "image/bmp", "image/gif", "image/webp", "image/png", "image/jpeg", "image/avif" 가운데 하나. 맞는 것이 없으면 None. (SVG 는 가리지 않는다)
+///
+/// # 예제
+/// 파일 머리로 형 고르기
+/// ```rust
+/// use vanilla::core::image::sniff_image_mime_type;
+///
+/// let png_bytes = std::fs::read("examples/assets/atlas/icons.png").unwrap();
+/// assert_eq!(sniff_image_mime_type(&png_bytes), Some("image/png"));
+/// assert_eq!(sniff_image_mime_type(b"GIF89a"), Some("image/gif"));
+/// assert_eq!(sniff_image_mime_type(b"plain text"), None);
+/// ```
 //==============================================================================
 pub fn sniff_image_mime_type(bytes: &[u8]) -> Option<&'static str> {
 	if bytes.starts_with(&[0x00, 0x00, 0x01, 0x00]) || bytes.starts_with(&[0x00, 0x00, 0x02, 0x00]) {

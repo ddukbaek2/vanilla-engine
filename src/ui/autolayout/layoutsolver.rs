@@ -16,13 +16,9 @@
 //! - 원본과 다른 것:
 //!   - 원본은 객체 하나를 여러 UINode 와 UIScene 이 같이 쥔다. 러스트 판은 `Rc<RefCell>` 을 품은 값싼 Clone 핸들이고 함수는 모두 &self 다.
 //!   - 원본이 예외를 던지는 곳(겹친 제약, 만족할 수 없는 required 제약, 모르는 제약과 편집 변수, required 편집 강도,
-//!   ```text
-//!     솔버 안의 실패)은 Result<(), LayoutError> 를 돌려준다. 문구는 원본과 같되 긴 줄표는 쌍점으로 바꿨다.
-//!   ```
+//!     솔버 안의 실패)은 `Result<(), LayoutError>` 를 돌려준다. 문구는 원본과 같되 긴 줄표는 쌍점으로 바꿨다.
 //!   - 원본의 Map 가운데 차례가 고르는 심볼을 바꾸는 행 맵은 넣은 차례를 지키는 LayoutSymbolMap 이다.
-//!   ```text
 //!     차례를 보지 않는 제약, 변수, 편집 변수 맵은 HashMap 이다.
-//!   ```
 //!   - 원본 LayoutTag 의 null 심볼은 무효 심볼(LayoutSymbol::invalid)이다. (Kiwi 와 같다)
 //==============================================================================
 use std::cell::RefCell;
@@ -174,6 +170,40 @@ struct LayoutSolverData {
 
 //==============================================================================
 /// 제약 솔버. (복제해도 같은 솔버를 가리킨다)
+///
+/// # 예제
+/// x == 10, y == x + 20 풀기
+/// ```rust
+/// use vanilla::{LayoutExpression, LayoutSolver, LayoutVariable};
+///
+/// # fn main() -> Result<(), vanilla::LayoutError> {
+/// let solver = LayoutSolver::new();
+/// let x = LayoutVariable::new("x");
+/// let y = LayoutVariable::new("y");
+/// solver.add_constraint(&LayoutExpression::from_variable(&x).equal_to(10))?;
+/// solver.add_constraint(&LayoutExpression::from_variable(&y).equal_to(LayoutExpression::from_variable(&x).add(20)))?;
+/// solver.update_variables();
+/// assert!((x.get_value() - 10.0).abs() < 1e-9);
+/// assert!((y.get_value() - 30.0).abs() < 1e-9);
+/// # Ok(())
+/// # }
+/// ```
+///
+/// 움직이는 입력(끌기 등)은 편집 변수로
+/// ```rust
+/// use vanilla::{LayoutExpression, LayoutSolver, LayoutStrength, LayoutVariable};
+///
+/// # fn main() -> Result<(), vanilla::LayoutError> {
+/// let solver = LayoutSolver::new();
+/// let x = LayoutVariable::new("x");
+/// solver.add_constraint(&LayoutExpression::from_variable(&x).less_than_or_equal_to(100))?;
+/// solver.add_edit_variable(&x, LayoutStrength::STRONG)?;
+/// solver.suggest_value(&x, 50.0)?;
+/// solver.update_variables();
+/// assert!((x.get_value() - 50.0).abs() < 1e-9);
+/// # Ok(())
+/// # }
+/// ```
 //==============================================================================
 #[derive(Clone)]
 pub struct LayoutSolver {
@@ -183,6 +213,9 @@ pub struct LayoutSolver {
 impl LayoutSolver {
 	//==============================================================================
 	/// 생성.
+	///
+	/// # 돌려줌
+	/// 제약이 없는 새 솔버 핸들. (복제하면 같은 솔버를 가리킨다)
 	//==============================================================================
 	pub fn new() -> LayoutSolver {
 		LayoutSolver {
@@ -200,6 +233,30 @@ impl LayoutSolver {
 
 	//==============================================================================
 	/// 제약 추가.
+	///
+	/// # 인자
+	/// - `constraint`: 걸 제약. (솔버가 핸들을 복제해 쥔다)
+	///
+	/// # 돌려줌
+	/// 걸었으면 Ok(()).
+	/// - 같은 제약(같은 핸들이나 그 복제)을 이미 걸었으면 Err(DuplicateConstraint).
+	/// - required 제약을 만족할 수 없으면 Err(UnsatisfiableConstraint). 부등식이 그렇게 실패하면 솔버 안이 되돌려지지 않는다. (원본, Kiwi 와 같다)
+	/// - 최적화가 실패하면 Err(UnboundedObjective) 나 Err(OptimizeLimitExceeded).
+	///
+	/// # 예제
+	/// 겹친 제약과 모순 제약의 오류
+	/// ```rust
+	/// use vanilla::{LayoutError, LayoutExpression, LayoutSolver, LayoutVariable};
+	///
+	/// let solver = LayoutSolver::new();
+	/// let x = LayoutVariable::new("x");
+	/// let constraint = LayoutExpression::from_variable(&x).equal_to(10);
+	/// assert_eq!(solver.add_constraint(&constraint), Ok(()));
+	/// assert_eq!(solver.add_constraint(&constraint.clone()), Err(LayoutError::DuplicateConstraint));
+	/// let conflict = LayoutExpression::from_variable(&x).equal_to(20);
+	/// assert_eq!(solver.add_constraint(&conflict), Err(LayoutError::UnsatisfiableConstraint));
+	/// assert!(!solver.has_constraint(&conflict));
+	/// ```
 	//==============================================================================
 	pub fn add_constraint(&self, constraint: &LayoutConstraint) -> Result<(), LayoutError> {
 		self.data.borrow_mut().add_constraint(constraint)?;
@@ -208,6 +265,14 @@ impl LayoutSolver {
 
 	//==============================================================================
 	/// 제약 제거.
+	///
+	/// # 인자
+	/// - `constraint`: 뺄 제약. (건 핸들이나 그 복제)
+	///
+	/// # 돌려줌
+	/// 뺐으면 Ok(()).
+	/// - 걸지 않은 제약이면 Err(UnknownConstraint). (식이 같아도 따로 만든 제약은 모르는 제약이다)
+	/// - marker 가 떠날 행을 못 찾으면 Err(RemoveConstraintFailed), 최적화가 실패하면 Err(UnboundedObjective) 나 Err(OptimizeLimitExceeded).
 	//==============================================================================
 	pub fn remove_constraint(&self, constraint: &LayoutConstraint) -> Result<(), LayoutError> {
 		self.data.borrow_mut().remove_constraint(constraint)
@@ -215,6 +280,12 @@ impl LayoutSolver {
 
 	//==============================================================================
 	/// 제약이 등록되어 있는지. (핸들이 가리키는 제약으로 가린다)
+	///
+	/// # 인자
+	/// - `constraint`: 볼 제약.
+	///
+	/// # 돌려줌
+	/// 걸려 있으면 true.
 	//==============================================================================
 	pub fn has_constraint(&self, constraint: &LayoutConstraint) -> bool {
 		self.data.borrow().constraint_tags.contains_key(constraint)
@@ -222,6 +293,16 @@ impl LayoutSolver {
 
 	//==============================================================================
 	/// 편집 변수 추가. (suggest_value 를 쓰기 전에 꼭 등록한다. strength 는 REQUIRED 보다 작아야 한다)
+	///
+	/// # 인자
+	/// - `variable`: 편집 변수로 쓸 변수.
+	/// - `strength`: 바라는 값을 지킬 강도. (0 ~ REQUIRED 로 자른 값이 REQUIRED 보다 작아야 한다)
+	///
+	/// # 돌려줌
+	/// 등록했으면 Ok(()).
+	/// - 이미 편집 변수면 Err(DuplicateEditVariable).
+	/// - 자른 강도가 REQUIRED 면 Err(BadRequiredStrength).
+	/// - 안에서 거는 편집 제약(variable == 바라는 값, 처음 바라는 값은 0)이 실패하면 add_constraint 의 오류.
 	//==============================================================================
 	pub fn add_edit_variable(&self, variable: &LayoutVariable, strength: f64) -> Result<(), LayoutError> {
 		self.data.borrow_mut().add_edit_variable(variable, strength)
@@ -229,6 +310,12 @@ impl LayoutSolver {
 
 	//==============================================================================
 	/// 편집 변수 제거.
+	///
+	/// # 인자
+	/// - `variable`: 뺄 편집 변수.
+	///
+	/// # 돌려줌
+	/// 뺐으면 Ok(()). 편집 변수가 아니면 Err(UnknownEditVariable). 편집 제약을 빼다 실패하면 remove_constraint 의 오류.
 	//==============================================================================
 	pub fn remove_edit_variable(&self, variable: &LayoutVariable) -> Result<(), LayoutError> {
 		self.data.borrow_mut().remove_edit_variable(variable)
@@ -236,6 +323,12 @@ impl LayoutSolver {
 
 	//==============================================================================
 	/// 편집 변수로 등록되어 있는지.
+	///
+	/// # 인자
+	/// - `variable`: 볼 변수.
+	///
+	/// # 돌려줌
+	/// 편집 변수로 등록되어 있으면 true.
 	//==============================================================================
 	pub fn has_edit_variable(&self, variable: &LayoutVariable) -> bool {
 		self.data.borrow().edit_infos.contains_key(variable)
@@ -244,6 +337,36 @@ impl LayoutSolver {
 	//==============================================================================
 	/// 편집 변수에 바라는 값을 준다. (끌기 갱신 등)
 	/// - 솔버는 되도록 그 값을 지키되 다른 제약과 부딪히면 강도에 따라 양보한다.
+	///
+	/// # 인자
+	/// - `variable`: 편집 변수. (add_edit_variable 로 등록한 것)
+	/// - `value`: 바라는 값.
+	///
+	/// # 돌려줌
+	/// 반영했으면 Ok(()). (변수 값은 update_variables 뒤에 바뀐다)
+	/// - 편집 변수가 아니면 Err(UnknownEditVariable).
+	/// - dual optimize 가 실패하면 Err(DualOptimizeFailed) 나 Err(DualOptimizeLimitExceeded).
+	///
+	/// # 예제
+	/// 끌기로 값을 옮기되 required 제약에서 멈춘다
+	/// ```rust
+	/// use vanilla::{LayoutExpression, LayoutSolver, LayoutStrength, LayoutVariable};
+	///
+	/// # fn main() -> Result<(), vanilla::LayoutError> {
+	/// let solver = LayoutSolver::new();
+	/// let x = LayoutVariable::new("x");
+	/// solver.add_constraint(&LayoutExpression::from_variable(&x).less_than_or_equal_to(100))?;
+	/// solver.add_edit_variable(&x, LayoutStrength::STRONG)?;
+	/// for drag_value in [30.0, 60.0, 150.0] {
+	/// 	solver.suggest_value(&x, drag_value)?;
+	/// 	solver.update_variables();
+	/// }
+	/// assert!((x.get_value() - 100.0).abs() < 1e-9);
+	/// solver.remove_edit_variable(&x)?;
+	/// assert!(!solver.has_edit_variable(&x));
+	/// # Ok(())
+	/// # }
+	/// ```
 	//==============================================================================
 	pub fn suggest_value(&self, variable: &LayoutVariable, value: f64) -> Result<(), LayoutError> {
 		self.data.borrow_mut().suggest_value(variable, value)
@@ -258,6 +381,9 @@ impl LayoutSolver {
 }
 
 impl Default for LayoutSolver {
+	//==============================================================================
+	/// 생성. (LayoutSolver::new 와 같다)
+	//==============================================================================
 	fn default() -> LayoutSolver {
 		LayoutSolver::new()
 	}

@@ -1,5 +1,5 @@
 //==============================================================================
-// 툰 화면 공간 바깥선. (vanilla.js experimental/graphics/toon/toonscreenoutline.js 의 ToonScreenOutline)
+// 툰 화면 공간 바깥선. (vanilla.js graphics3d/toon/toonscreenoutline.js 의 ToonScreenOutline)
 // - 노멀, 선 번호, 깊이를 선의 판에 그리고, 바로 이웃 사이의 경계에서 선을 잡아 점프 플러딩으로 넓힌 뒤 거리로 덮는 몫을 셈해 섞는다.
 // - 선의 판: ToonRenderer 의 create_mesh 결과를 같은 행렬로 한 번 더 그려 노멀(팔면체 접기), 선 번호(14 비트), 꼴(바깥 선, 꺾임 선을 켤지)과 깊이를 쓴다.
 // - 잡기: 화소와 바로 이웃 넷 사이의 경계마다 한 번 본다. 선은 화소가 아니라 화소 사이의 경계 가운데에 선다. (같은 경계를 두 번 긋지 않는다)
@@ -11,7 +11,7 @@
 // - 모형마다: ToonLineDrawOptions 의 has_screen_outline 이 false 면 그 모형은 선을 내지 않고 뒤의 선만 가린다. has_crease_line 이 false 면 꺾임 선만 끈다.
 // - 굵기: set_width 와 set_crease 의 굵기는 선 하나의 굵기다. (경계를 가운데로 양쪽에 반씩) 단위는 ToonOutlineWidthUnit, 한 픽셀 밑으로 내리지 않는다.
 // - 깊이: 투영 행렬로 직교와 원근을 가리고, 깊이를 보기 공간 자리로 풀어 견준다. (화면 사각형처럼 클립 x, y 를 옮긴 투영도 된다)
-// - 값: set_resolution_scale 로 선의 판을 그리는 영역의 몫으로 줄인다. (폰의 가벼운 길)
+// - 값: set_resolution_scale 로 넓히기(점프 플러딩) 판을 줄인다. (폰의 가벼운 길) 선의 판과 씨앗은 그리는 영역 해상도라 줄여도 선 자리는 그대로다.
 // - 사용: 매 프레임 begin_line_ids(gl, 보기, 투영) → draw_mesh / draw_mesh_instanced → end_line_ids(gl) (씨앗과 넓히기까지 셈) → 툰 몸 그리기 → draw_outline(gl).
 //   begin_line_ids 는 그때의 뷰포트를 그리는 영역으로 적어 두고, 선의 판을 그 크기에 맞춰 짓는다. end_line_ids 와 draw_outline 이 프레임버퍼, 뷰포트, 상태를 돌린다.
 //   ToonDrawQueue::set_screen_outline 으로 맡기면 그리기 줄이 이 차례를 스스로 한다. (엔진 2D 그리기 사이에 끼울 때, 그 전에 Graphic 의 묶음을 내보내고 끝에 restore_render_state)
@@ -71,17 +71,22 @@ impl Default for ToonLineDrawOptions<'_> {
 }
 
 //==============================================================================
-// 선의 판. (노멀과 번호 RGBA8 과 깊이 24, 씨앗 RGBA16UI 둘, seed_index 는 넓히기를 마친 쪽)
+// 선의 판. (그리는 영역 해상도의 노멀과 번호 RGBA8, 깊이 24, 씨앗 RGBA16UI, 넓히기 판 RGBA16UI 둘, jump_flood_index 는 넓히기를 마친 쪽)
 //==============================================================================
 pub struct ToonLineTarget {
 	pub framebuffer: GlFramebuffer,
 	pub line_texture: GlTexture,
 	pub depth_texture: GlTexture,
-	pub seed_framebuffers: [GlFramebuffer; 2],
-	pub seed_textures: [GlTexture; 2],
-	pub seed_index: usize,
+	pub seed_framebuffer: GlFramebuffer,
+	pub seed_texture: GlTexture,
+	pub jump_flood_framebuffers: [GlFramebuffer; 2],
+	pub jump_flood_textures: [GlTexture; 2],
+	pub jump_flood_index: usize,
 	pub width: i32,
 	pub height: i32,
+	/// 넓히기 판 크기. (픽셀)
+	pub jump_flood_width: i32,
+	pub jump_flood_height: i32,
 }
 
 //==============================================================================
@@ -124,6 +129,7 @@ struct SavedState {
 pub struct ToonScreenOutline {
 	line_program: ShaderProgram,
 	seed_program: ShaderProgram,
+	seed_gather_program: ShaderProgram,
 	jump_flood_program: ShaderProgram,
 	composite_program: ShaderProgram,
 	empty_vertex_array: GlVertexArray,
@@ -216,8 +222,8 @@ impl ToonScreenOutline {
 	//==============================================================================
 	// 셰이더 소스. ((정점, 조각) 네 벌: 번호, 씨앗, 넓히기, 섞기)
 	//==============================================================================
-	pub fn read_program_sources() -> [(&'static str, &'static str); 4] {
-		[(LINE_VERTEX_SHADER, LINE_FRAGMENT_SHADER), (SCREEN_TRIANGLE_VERTEX_SHADER, SEED_FRAGMENT_SHADER), (SCREEN_TRIANGLE_VERTEX_SHADER, JUMP_FLOOD_FRAGMENT_SHADER), (SCREEN_TRIANGLE_VERTEX_SHADER, COMPOSITE_FRAGMENT_SHADER)]
+	pub fn read_program_sources() -> [(&'static str, &'static str); 5] {
+		[(LINE_VERTEX_SHADER, LINE_FRAGMENT_SHADER), (SCREEN_TRIANGLE_VERTEX_SHADER, SEED_FRAGMENT_SHADER), (SCREEN_TRIANGLE_VERTEX_SHADER, SEED_GATHER_FRAGMENT_SHADER), (SCREEN_TRIANGLE_VERTEX_SHADER, JUMP_FLOOD_FRAGMENT_SHADER), (SCREEN_TRIANGLE_VERTEX_SHADER, COMPOSITE_FRAGMENT_SHADER)]
 	}
 
 	//==============================================================================
@@ -226,12 +232,14 @@ impl ToonScreenOutline {
 	pub fn new(gl: &glow::Context) -> Result<ToonScreenOutline, String> {
 		let line_program = ShaderProgram::create_with_attribute_locations(gl, LINE_VERTEX_SHADER, LINE_FRAGMENT_SHADER, &TOON_ATTRIBUTE_LOCATIONS)?;
 		let seed_program = ShaderProgram::new(gl, SCREEN_TRIANGLE_VERTEX_SHADER, SEED_FRAGMENT_SHADER)?;
+		let seed_gather_program = ShaderProgram::new(gl, SCREEN_TRIANGLE_VERTEX_SHADER, SEED_GATHER_FRAGMENT_SHADER)?;
 		let jump_flood_program = ShaderProgram::new(gl, SCREEN_TRIANGLE_VERTEX_SHADER, JUMP_FLOOD_FRAGMENT_SHADER)?;
 		let composite_program = ShaderProgram::new(gl, SCREEN_TRIANGLE_VERTEX_SHADER, COMPOSITE_FRAGMENT_SHADER)?;
 		let empty_vertex_array = unsafe { gl.create_vertex_array()? };
 		Ok(ToonScreenOutline {
 			line_program,
 			seed_program,
+			seed_gather_program,
 			jump_flood_program,
 			composite_program,
 			empty_vertex_array,
@@ -295,7 +303,7 @@ impl ToonScreenOutline {
 	}
 
 	//==============================================================================
-	// 선의 판 해상도 몫 설정. (그리는 영역에 대한 몫 0.25 ~ 1, 선은 그리는 영역에서 거리로 섞어 끊기지 않는다)
+	// 넓히기 판의 해상도 몫 설정. (그리는 영역에 대한 몫 0.25 ~ 1, 선의 판과 씨앗은 그리는 영역 해상도로 잡고 점프 플러딩만 줄인 판에서 해서, 줄여도 계단과 점선이 없다)
 	//==============================================================================
 	pub fn set_resolution_scale(&mut self, resolution_scale: f32) {
 		self.resolution_scale = resolution_scale.clamp(0.25, 1.0);
@@ -368,9 +376,11 @@ impl ToonScreenOutline {
 		});
 		self.drawn_distance_sum = 0.0;
 		self.drawn_distance_count = 0;
-		let width = ((viewport[2] as f32 * self.resolution_scale).ceil() as i32).max(1);
-		let height = ((viewport[3] as f32 * self.resolution_scale).ceil() as i32).max(1);
-		let framebuffer = match self.read_line_target(gl, width, height) {
+		let width = viewport[2].max(1);
+		let height = viewport[3].max(1);
+		let jump_flood_width = ((width as f32 * self.resolution_scale).ceil() as i32).max(1);
+		let jump_flood_height = ((height as f32 * self.resolution_scale).ceil() as i32).max(1);
+		let framebuffer = match self.read_line_target(gl, width, height, jump_flood_width, jump_flood_height) {
 			Some(line_target) => {
 				line_target.framebuffer
 			}
@@ -521,7 +531,7 @@ impl ToonScreenOutline {
 			gl.disable(glow::BLEND);
 
 			// 1. 씨앗 고르기.
-			gl.bind_framebuffer(glow::FRAMEBUFFER, Some(line_target.seed_framebuffers[0]));
+			gl.bind_framebuffer(glow::FRAMEBUFFER, Some(line_target.seed_framebuffer));
 			seed_program.use_program(gl);
 			gl.active_texture(glow::TEXTURE0 + LINE_TEXTURE_UNIT);
 			gl.bind_texture(glow::TEXTURE_2D, Some(line_target.line_texture));
@@ -540,15 +550,28 @@ impl ToonScreenOutline {
 			gl.active_texture(glow::TEXTURE0 + DEPTH_TEXTURE_UNIT);
 			gl.bind_texture(glow::TEXTURE_2D, None);
 
-			// 2. 점프 플러딩. (그리는 영역 굵기의 반과 덮는 몫의 반 픽셀, 섞을 때 보는 2x2 칸만큼)
+			// 2. 넓히기 판으로 모으기. (줄인 판이면 칸마다 가장 가까운 씨앗)
+			let point_scale_x = line_target.width as f32 / line_target.jump_flood_width as f32;
+			let point_scale_y = line_target.height as f32 / line_target.jump_flood_height as f32;
+			let seed_gather_program = &self.seed_gather_program;
+			gl.viewport(0, 0, line_target.jump_flood_width, line_target.jump_flood_height);
+			gl.bind_framebuffer(glow::FRAMEBUFFER, Some(line_target.jump_flood_framebuffers[0]));
+			seed_gather_program.use_program(gl);
+			gl.active_texture(glow::TEXTURE0 + LINE_TEXTURE_UNIT);
+			gl.bind_texture(glow::TEXTURE_2D, Some(line_target.seed_texture));
+			gl.uniform_1_i32(seed_gather_program.get_uniform_location(gl, "seedTexture").as_ref(), LINE_TEXTURE_UNIT as i32);
+			gl.uniform_2_f32(seed_gather_program.get_uniform_location(gl, "pointScale").as_ref(), point_scale_x, point_scale_y);
+			gl.draw_arrays(glow::TRIANGLES, 0, 3);
+
+			// 3. 점프 플러딩. (그리는 영역 굵기의 반과 덮는 몫의 반 픽셀을 넓히기 판 칸으로, 섞을 때 보는 2x2 칸만큼 더)
 			jump_flood_program.use_program(gl);
 			gl.uniform_1_i32(jump_flood_program.get_uniform_location(gl, "seedTexture").as_ref(), LINE_TEXTURE_UNIT as i32);
-			let line_scale = line_target.height as f32 / frame.viewport[3].max(1) as f32;
-			let reach = (line_widths[0].max(line_widths[1]) * 0.5 + 0.5) * line_scale + 1.0;
+			gl.uniform_2_f32(jump_flood_program.get_uniform_location(gl, "pointScale").as_ref(), point_scale_x, point_scale_y);
+			let reach = (line_widths[0].max(line_widths[1]) * 0.5 + 0.5) / point_scale_x.min(point_scale_y) + 1.5;
 			for step_size in read_jump_flood_steps(reach) {
-				gl.bind_framebuffer(glow::FRAMEBUFFER, Some(line_target.seed_framebuffers[1 - seed_index]));
+				gl.bind_framebuffer(glow::FRAMEBUFFER, Some(line_target.jump_flood_framebuffers[1 - seed_index]));
 				gl.active_texture(glow::TEXTURE0 + LINE_TEXTURE_UNIT);
-				gl.bind_texture(glow::TEXTURE_2D, Some(line_target.seed_textures[seed_index]));
+				gl.bind_texture(glow::TEXTURE_2D, Some(line_target.jump_flood_textures[seed_index]));
 				gl.uniform_1_i32(jump_flood_program.get_uniform_location(gl, "stepSize").as_ref(), step_size);
 				gl.draw_arrays(glow::TRIANGLES, 0, 3);
 				seed_index = 1 - seed_index;
@@ -558,7 +581,7 @@ impl ToonScreenOutline {
 			gl.active_texture(glow::TEXTURE0);
 			gl.bind_vertex_array(None);
 		}
-		line_target.seed_index = seed_index;
+		line_target.jump_flood_index = seed_index;
 		self.restore_state(gl);
 	}
 
@@ -566,9 +589,9 @@ impl ToonScreenOutline {
 	// 바깥선 긋기. (넓힌 씨앗 판으로 begin_line_ids 때의 그리는 영역에 섞는다, 깊이는 보지도 쓰지도 않는다, 스텐실은 그대로)
 	//==============================================================================
 	pub fn draw_outline(&mut self, gl: &glow::Context) {
-		let (frame, seed_texture) = match (self.frame, self.line_target.as_ref()) {
+		let (frame, seed_texture, point_scale) = match (self.frame, self.line_target.as_ref()) {
 			(Some(frame), Some(line_target)) => {
-				(frame, line_target.seed_textures[line_target.seed_index])
+				(frame, line_target.jump_flood_textures[line_target.jump_flood_index], [line_target.width as f32 / line_target.jump_flood_width as f32, line_target.height as f32 / line_target.jump_flood_height as f32])
 			}
 			_ => {
 				return;
@@ -593,6 +616,7 @@ impl ToonScreenOutline {
 			let location = |name: &str| composite_program.get_uniform_location(gl, name);
 			gl.uniform_1_i32(location("seedTexture").as_ref(), LINE_TEXTURE_UNIT as i32);
 			gl.uniform_4_f32(location("viewportRect").as_ref(), viewport[0] as f32, viewport[1] as f32, viewport[2].max(1) as f32, viewport[3].max(1) as f32);
+			gl.uniform_2_f32(location("pointScale").as_ref(), point_scale[0], point_scale[1]);
 			gl.uniform_2_f32(location("lineWidths").as_ref(), line_widths[0], line_widths[1]);
 			gl.uniform_1_f32(location("creaseOpacity").as_ref(), self.crease_opacity);
 			gl.uniform_4_f32(location("outlineColor").as_ref(), color[0], color[1], color[2], color[3]);
@@ -653,35 +677,36 @@ impl ToonScreenOutline {
 	//==============================================================================
 	// 선의 판 읽기. (크기가 바뀌면 다시 지음, 짓지 못하면 None)
 	//==============================================================================
-	fn read_line_target(&mut self, gl: &glow::Context, width: i32, height: i32) -> Option<&ToonLineTarget> {
-		let is_same_size = matches!(self.line_target.as_ref(), Some(line_target) if line_target.width == width && line_target.height == height);
+	fn read_line_target(&mut self, gl: &glow::Context, width: i32, height: i32, jump_flood_width: i32, jump_flood_height: i32) -> Option<&ToonLineTarget> {
+		let is_same_size = matches!(self.line_target.as_ref(), Some(line_target) if line_target.width == width && line_target.height == height && line_target.jump_flood_width == jump_flood_width && line_target.jump_flood_height == jump_flood_height);
 		if !is_same_size {
 			self.delete_line_target(gl);
-			self.line_target = ToonScreenOutline::create_line_target(gl, width, height);
+			self.line_target = ToonScreenOutline::create_line_target(gl, width, height, jump_flood_width, jump_flood_height);
 		}
 		self.line_target.as_ref()
 	}
 
 	//==============================================================================
-	// 선의 판 짓기. (노멀과 번호 RGBA8 과 깊이 24, 씨앗 RGBA16UI 둘, 앞의 프레임버퍼와 텍스처는 돌린다)
+	// 선의 판 짓기. (그리는 영역 해상도의 노멀과 번호 RGBA8, 깊이 24, 씨앗 RGBA16UI, 넓히기 판 RGBA16UI 둘, 앞의 프레임버퍼와 텍스처는 돌린다)
 	//==============================================================================
-	fn create_line_target(gl: &glow::Context, width: i32, height: i32) -> Option<ToonLineTarget> {
+	fn create_line_target(gl: &glow::Context, width: i32, height: i32, jump_flood_width: i32, jump_flood_height: i32) -> Option<ToonLineTarget> {
 		unsafe {
 			let previous_framebuffer = crate::graphics3d::read_framebuffer_binding(gl);
 			let previous_texture = crate::graphics3d::read_texture_binding(gl);
-			let create_texture = |internal_format: u32, format: u32, data_type: u32| -> Option<GlTexture> {
+			let create_texture = |internal_format: u32, format: u32, data_type: u32, texture_width: i32, texture_height: i32| -> Option<GlTexture> {
 				let texture = gl.create_texture().ok()?;
 				gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-				gl.tex_image_2d(glow::TEXTURE_2D, 0, internal_format as i32, width, height, 0, format, data_type, glow::PixelUnpackData::Slice(None));
+				gl.tex_image_2d(glow::TEXTURE_2D, 0, internal_format as i32, texture_width, texture_height, 0, format, data_type, glow::PixelUnpackData::Slice(None));
 				gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
 				gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
 				gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
 				gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
 				Some(texture)
 			};
-			let line_texture = create_texture(glow::RGBA8, glow::RGBA, glow::UNSIGNED_BYTE)?;
-			let depth_texture = create_texture(glow::DEPTH_COMPONENT24, glow::DEPTH_COMPONENT, glow::UNSIGNED_INT)?;
-			let seed_textures = [create_texture(glow::RGBA16UI, glow::RGBA_INTEGER, glow::UNSIGNED_SHORT)?, create_texture(glow::RGBA16UI, glow::RGBA_INTEGER, glow::UNSIGNED_SHORT)?];
+			let line_texture = create_texture(glow::RGBA8, glow::RGBA, glow::UNSIGNED_BYTE, width, height)?;
+			let depth_texture = create_texture(glow::DEPTH_COMPONENT24, glow::DEPTH_COMPONENT, glow::UNSIGNED_INT, width, height)?;
+			let seed_texture = create_texture(glow::RGBA16UI, glow::RGBA_INTEGER, glow::UNSIGNED_SHORT, width, height)?;
+			let jump_flood_textures = [create_texture(glow::RGBA16UI, glow::RGBA_INTEGER, glow::UNSIGNED_SHORT, jump_flood_width, jump_flood_height)?, create_texture(glow::RGBA16UI, glow::RGBA_INTEGER, glow::UNSIGNED_SHORT, jump_flood_width, jump_flood_height)?];
 			gl.bind_texture(glow::TEXTURE_2D, previous_texture);
 			let create_framebuffer = |color_texture: GlTexture, depth_texture: Option<GlTexture>| -> Option<(GlFramebuffer, bool)> {
 				let framebuffer = gl.create_framebuffer().ok()?;
@@ -693,11 +718,25 @@ impl ToonScreenOutline {
 				Some((framebuffer, gl.check_framebuffer_status(glow::FRAMEBUFFER) == glow::FRAMEBUFFER_COMPLETE))
 			};
 			let (framebuffer, is_line_complete) = create_framebuffer(line_texture, Some(depth_texture))?;
-			let (first_seed_framebuffer, is_first_complete) = create_framebuffer(seed_textures[0], None)?;
-			let (second_seed_framebuffer, is_second_complete) = create_framebuffer(seed_textures[1], None)?;
+			let (seed_framebuffer, is_seed_complete) = create_framebuffer(seed_texture, None)?;
+			let (first_jump_flood_framebuffer, is_first_complete) = create_framebuffer(jump_flood_textures[0], None)?;
+			let (second_jump_flood_framebuffer, is_second_complete) = create_framebuffer(jump_flood_textures[1], None)?;
 			gl.bind_framebuffer(glow::FRAMEBUFFER, previous_framebuffer);
-			let line_target = ToonLineTarget { framebuffer, line_texture, depth_texture, seed_framebuffers: [first_seed_framebuffer, second_seed_framebuffer], seed_textures, seed_index: 0, width, height };
-			if !is_line_complete || !is_first_complete || !is_second_complete {
+			let line_target = ToonLineTarget {
+				framebuffer,
+				line_texture,
+				depth_texture,
+				seed_framebuffer,
+				seed_texture,
+				jump_flood_framebuffers: [first_jump_flood_framebuffer, second_jump_flood_framebuffer],
+				jump_flood_textures,
+				jump_flood_index: 0,
+				width,
+				height,
+				jump_flood_width,
+				jump_flood_height,
+			};
+			if !is_line_complete || !is_seed_complete || !is_first_complete || !is_second_complete {
 				ToonScreenOutline::delete_target_objects(gl, &line_target);
 				return None;
 			}
@@ -720,13 +759,15 @@ impl ToonScreenOutline {
 	fn delete_target_objects(gl: &glow::Context, line_target: &ToonLineTarget) {
 		unsafe {
 			gl.delete_framebuffer(line_target.framebuffer);
-			for seed_framebuffer in line_target.seed_framebuffers {
-				gl.delete_framebuffer(seed_framebuffer);
+			gl.delete_framebuffer(line_target.seed_framebuffer);
+			for jump_flood_framebuffer in line_target.jump_flood_framebuffers {
+				gl.delete_framebuffer(jump_flood_framebuffer);
 			}
 			gl.delete_texture(line_target.line_texture);
 			gl.delete_texture(line_target.depth_texture);
-			for seed_texture in line_target.seed_textures {
-				gl.delete_texture(seed_texture);
+			gl.delete_texture(line_target.seed_texture);
+			for jump_flood_texture in line_target.jump_flood_textures {
+				gl.delete_texture(jump_flood_texture);
 			}
 		}
 	}
@@ -804,6 +845,7 @@ impl ToonScreenOutline {
 			gl.delete_vertex_array(self.empty_vertex_array);
 			gl.delete_program(self.line_program.get_program());
 			gl.delete_program(self.seed_program.get_program());
+			gl.delete_program(self.seed_gather_program.get_program());
 			gl.delete_program(self.jump_flood_program.get_program());
 			gl.delete_program(self.composite_program.get_program());
 		}
@@ -1014,11 +1056,11 @@ void main() {
 }
 ";
 
-const JUMP_FLOOD_FRAGMENT_SHADER: &str = "#version 300 es
+const SEED_GATHER_FRAGMENT_SHADER: &str = "#version 300 es
 precision highp float;
 precision highp int;
 uniform highp usampler2D seedTexture;
-uniform int stepSize;
+uniform vec2 pointScale;
 out uvec4 fragmentSeed;
 const uint NO_SEED = 65535u;
 float readSeedDistance(vec2 point, uvec2 seed) {
@@ -1037,7 +1079,60 @@ float readSeedDistance(vec2 point, uvec2 seed) {
 void main() {
 	ivec2 size = textureSize(seedTexture, 0);
 	ivec2 pixel = ivec2(gl_FragCoord.xy);
-	vec2 point = vec2(pixel);
+	vec2 point = (vec2(pixel) + 0.5) * pointScale - 0.5;
+	ivec2 start = ivec2(floor(vec2(pixel) * pointScale));
+	ivec2 end = min(ivec2(ceil((vec2(pixel) + 1.0) * pointScale)), size);
+	uvec4 best = uvec4(NO_SEED);
+	float bestContour = 1.0e9;
+	float bestCrease = 1.0e9;
+	for (int offsetY = 0; offsetY < 5; ++offsetY) {
+		for (int offsetX = 0; offsetX < 5; ++offsetX) {
+			ivec2 samplePixel = start + ivec2(offsetX, offsetY);
+			if (samplePixel.x >= end.x || samplePixel.y >= end.y) {
+				continue;
+			}
+			uvec4 seed = texelFetch(seedTexture, samplePixel, 0);
+			float contourDistance = readSeedDistance(point, seed.xy);
+			if (contourDistance < bestContour) {
+				bestContour = contourDistance;
+				best.xy = seed.xy;
+			}
+			float creaseDistance = readSeedDistance(point, seed.zw);
+			if (creaseDistance < bestCrease) {
+				bestCrease = creaseDistance;
+				best.zw = seed.zw;
+			}
+		}
+	}
+	fragmentSeed = best;
+}
+";
+
+const JUMP_FLOOD_FRAGMENT_SHADER: &str = "#version 300 es
+precision highp float;
+precision highp int;
+uniform highp usampler2D seedTexture;
+uniform int stepSize;
+uniform vec2 pointScale;
+out uvec4 fragmentSeed;
+const uint NO_SEED = 65535u;
+float readSeedDistance(vec2 point, uvec2 seed) {
+	if (seed.x == NO_SEED) {
+		return 1.0e9;
+	}
+	vec2 offset = abs(point - vec2(seed) * 0.5);
+	if ((seed.x & 1u) == 1u) {
+		offset.y = max(offset.y - 0.5, 0.0);
+	}
+	else {
+		offset.x = max(offset.x - 0.5, 0.0);
+	}
+	return length(offset);
+}
+void main() {
+	ivec2 size = textureSize(seedTexture, 0);
+	ivec2 pixel = ivec2(gl_FragCoord.xy);
+	vec2 point = (vec2(pixel) + 0.5) * pointScale - 0.5;
 	uvec4 best = uvec4(NO_SEED);
 	float bestContour = 1.0e9;
 	float bestCrease = 1.0e9;
@@ -1069,6 +1164,7 @@ precision highp float;
 precision highp int;
 uniform highp usampler2D seedTexture;
 uniform vec4 viewportRect;
+uniform vec2 pointScale;
 uniform vec2 lineWidths;
 uniform float creaseOpacity;
 uniform vec4 outlineColor;
@@ -1090,10 +1186,9 @@ float readSeedDistance(vec2 point, uvec2 seed, vec2 toOutput) {
 }
 void main() {
 	ivec2 size = textureSize(seedTexture, 0);
-	vec2 toLine = vec2(size) / viewportRect.zw;
-	vec2 toOutput = viewportRect.zw / vec2(size);
-	vec2 point = (gl_FragCoord.xy - viewportRect.xy) * toLine - 0.5;
-	ivec2 basePixel = ivec2(floor(point));
+	vec2 toOutput = vec2(1.0);
+	vec2 point = gl_FragCoord.xy - viewportRect.xy - 0.5;
+	ivec2 basePixel = ivec2(floor((point + 0.5) / pointScale - 0.5));
 	float contourDistance = 1.0e9;
 	float creaseDistance = 1.0e9;
 	for (int offsetY = 0; offsetY <= 1; ++offsetY) {

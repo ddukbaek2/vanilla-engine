@@ -11,11 +11,35 @@
 //==============================================================================
 use crate::base::math;
 
+//==============================================================================
+/// 쿼터니언. (3차원 회전, x, y, z, w 를 공개 필드로 둔 Copy 값, 기본값은 단위 쿼터니언)
+///
+/// # 예제
+/// 두 회전 사이를 구면 보간하기
+/// ```rust
+/// use vanilla::{math, Matrix4, Quaternion};
+///
+/// let start = Quaternion::identity();
+/// let end = Quaternion::create_from_euler(0.0, math::PI * 0.5, 0.0);
+/// let middle = Quaternion::slerp(start, end, 0.5);
+/// let expected = Quaternion::create_from_euler(0.0, math::PI * 0.25, 0.0);
+/// assert!((middle.y - expected.y).abs() < 1e-5);
+/// assert!((middle.w - expected.w).abs() < 1e-5);
+///
+/// let rotation_matrix = Matrix4::create_rotation_from_quaternion(middle);
+/// let forward = rotation_matrix.transform_direction(0.0, 0.0, 1.0);
+/// assert!((forward.x - forward.z).abs() < 1e-5);
+/// ```
+//==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Quaternion {
+	/// 벡터부 x. (회전 축 x 에 sin(각 / 2) 를 곱한 값)
 	pub x: f32,
+	/// 벡터부 y. (회전 축 y 에 sin(각 / 2) 를 곱한 값)
 	pub y: f32,
+	/// 벡터부 z. (회전 축 z 에 sin(각 / 2) 를 곱한 값)
 	pub z: f32,
+	/// 실수부. (cos(각 / 2))
 	pub w: f32,
 }
 
@@ -31,6 +55,15 @@ impl Default for Quaternion {
 impl Quaternion {
 	//==============================================================================
 	/// 생성.
+	///
+	/// # 인자
+	/// - `x`: 벡터부 x.
+	/// - `y`: 벡터부 y.
+	/// - `z`: 벡터부 z.
+	/// - `w`: 실수부.
+	///
+	/// # 돌려줌
+	/// (x, y, z, w) 쿼터니언. (정규화하지 않는다)
 	//==============================================================================
 	pub const fn create(x: f32, y: f32, z: f32, w: f32) -> Quaternion {
 		Quaternion { x, y, z, w }
@@ -38,6 +71,9 @@ impl Quaternion {
 
 	//==============================================================================
 	/// 단위 쿼터니언. (0, 0, 0, 1)
+	///
+	/// # 돌려줌
+	/// 회전이 없는 쿼터니언.
 	//==============================================================================
 	pub const fn identity() -> Quaternion {
 		Quaternion { x: 0.0, y: 0.0, z: 0.0, w: 1.0 }
@@ -45,6 +81,12 @@ impl Quaternion {
 
 	//==============================================================================
 	/// 대입.
+	///
+	/// # 인자
+	/// - `x`: 넣을 벡터부 x.
+	/// - `y`: 넣을 벡터부 y.
+	/// - `z`: 넣을 벡터부 z.
+	/// - `w`: 넣을 실수부.
 	//==============================================================================
 	pub fn set(&mut self, x: f32, y: f32, z: f32, w: f32) {
 		self.x = x;
@@ -55,6 +97,9 @@ impl Quaternion {
 
 	//==============================================================================
 	/// 정규화. (길이가 0 이하이면 단위 쿼터니언)
+	///
+	/// # 돌려줌
+	/// 길이가 1 인 새 쿼터니언. 길이가 0 이하이면 단위 쿼터니언.
 	//==============================================================================
 	pub fn normalize(&self) -> Quaternion {
 		let length = (self.x * self.x + self.y * self.y + self.z * self.z + self.w * self.w).sqrt();
@@ -66,6 +111,23 @@ impl Quaternion {
 
 	//==============================================================================
 	/// 곱하기. (해밀턴 곱 this x other, this 회전 뒤에 other 회전을 로컬로 누적한다)
+	///
+	/// # 인자
+	/// - `other`: 오른쪽에 곱할 쿼터니언. (점에는 other 회전이 먼저 걸린다)
+	///
+	/// # 돌려줌
+	/// self x other 인 새 쿼터니언. (정규화하지 않는다)
+	///
+	/// # 예제
+	/// Z 축 90 도를 두 번 곱하면 180 도
+	/// ```rust
+	/// use vanilla::{math, Quaternion};
+	///
+	/// let quarter_turn = Quaternion::create_from_euler(0.0, 0.0, math::PI * 0.5);
+	/// let half_turn = quarter_turn.multiply(quarter_turn);
+	/// assert!((half_turn.z - 1.0).abs() < 1e-6);
+	/// assert!(half_turn.w.abs() < 1e-6);
+	/// ```
 	//==============================================================================
 	pub fn multiply(&self, other: Quaternion) -> Quaternion {
 		let result_x = self.w * other.x + self.x * other.w + self.y * other.z - self.z * other.y;
@@ -77,6 +139,30 @@ impl Quaternion {
 
 	//==============================================================================
 	/// 오일러 각으로 만든다. (XYZ 순서 라디안, qX x qY x qZ 와 같다)
+	///
+	/// # 인자
+	/// - `x_radian`: X 축 회전 각. (라디안)
+	/// - `y_radian`: Y 축 회전 각. (라디안)
+	/// - `z_radian`: Z 축 회전 각. (라디안)
+	///
+	/// # 돌려줌
+	/// 세 축 회전을 합친 단위 쿼터니언. (점에는 Z, Y, X 순서로 걸린다)
+	///
+	/// # 예제
+	/// 축마다 만든 쿼터니언을 X, Y, Z 차례로 곱한 것과 같다
+	/// ```rust
+	/// use vanilla::Quaternion;
+	///
+	/// let from_euler = Quaternion::create_from_euler(0.3, -0.7, 1.1);
+	/// let quaternion_x = Quaternion::create_from_euler(0.3, 0.0, 0.0);
+	/// let quaternion_y = Quaternion::create_from_euler(0.0, -0.7, 0.0);
+	/// let quaternion_z = Quaternion::create_from_euler(0.0, 0.0, 1.1);
+	/// let multiplied = quaternion_x.multiply(quaternion_y).multiply(quaternion_z);
+	/// assert!((from_euler.x - multiplied.x).abs() < 1e-5);
+	/// assert!((from_euler.y - multiplied.y).abs() < 1e-5);
+	/// assert!((from_euler.z - multiplied.z).abs() < 1e-5);
+	/// assert!((from_euler.w - multiplied.w).abs() < 1e-5);
+	/// ```
 	//==============================================================================
 	pub fn create_from_euler(x_radian: f32, y_radian: f32, z_radian: f32) -> Quaternion {
 		let half_x = x_radian * 0.5;
@@ -98,6 +184,26 @@ impl Quaternion {
 
 	//==============================================================================
 	/// 구면 선형 보간. (최단 경로, 거의 같은 방향이면 선형 보간 뒤 정규화한다)
+	///
+	/// # 인자
+	/// - `from`: 시작 회전.
+	/// - `to`: 끝 회전. (from 과 내적이 음수면 부호를 뒤집어 짧은 쪽으로 간다)
+	/// - `normalized_time`: 보간 비율. (0 이면 from, 1 이면 to 와 같은 회전)
+	///
+	/// # 돌려줌
+	/// 보간한 회전. (정규화해 돌려준다)
+	///
+	/// # 예제
+	/// 부호가 반대인 끝 회전도 짧은 쪽으로 간다
+	/// ```rust
+	/// use vanilla::Quaternion;
+	///
+	/// let diagonal_component = std::f32::consts::FRAC_1_SQRT_2;
+	/// let to = Quaternion::create(0.0, 0.0, -diagonal_component, -diagonal_component);
+	/// let middle = Quaternion::slerp(Quaternion::identity(), to, 0.5);
+	/// assert!((middle.z - 0.38268343).abs() < 1e-5);
+	/// assert!((middle.w - 0.9238795).abs() < 1e-5);
+	/// ```
 	//==============================================================================
 	pub fn slerp(from: Quaternion, to: Quaternion, normalized_time: f32) -> Quaternion {
 		let mut dot_product = from.x * to.x + from.y * to.y + from.z * to.z + from.w * to.w;

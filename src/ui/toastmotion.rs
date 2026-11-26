@@ -40,9 +40,13 @@ pub type ToastApplyTextHandler = Box<dyn FnMut(&mut ComponentContext, &str)>;
 //==============================================================================
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ToastPhase {
+	/// 숨음. (노드는 끄지 않고 보이지 않게만 둔다)
 	Hidden,
+	/// 나오는 중. (미끄러져 들어오며 보이고 살짝 커졌다 돌아온다)
 	Enter,
+	/// 머무는 중. (머무는 초를 센다)
 	Stay,
+	/// 사라지는 중. (떠오르며 투명해진다)
 	Exit,
 }
 
@@ -56,6 +60,23 @@ crate::core::reflection::impl_reflect_names!(ToastPhase, [
 
 //==============================================================================
 /// 알림 머무는 시간. (긴 글이면 20 자마다 0.5 초를 더하고 4 초까지)
+///
+/// # 인자
+/// - `text`: 알림 글. (글자 수는 char 로 센다)
+/// - `base_seconds`: 기본 머무는 시간. (초)
+///
+/// # 돌려줌
+/// 머무는 시간. (초, 20 자를 넘은 글자를 20 자마다 올림해 0.5 초씩 더하고, 4 초를 넘지 않는다. base_seconds 가 4 초보다 길어도 4)
+///
+/// # 예제
+/// 글 길이에 따른 머무는 초
+/// ```rust
+/// use vanilla::read_toast_seconds;
+///
+/// assert_eq!(read_toast_seconds("Saved", 2.0), 2.0);
+/// assert_eq!(read_toast_seconds(&"a".repeat(45), 2.0), 3.0);
+/// assert_eq!(read_toast_seconds(&"a".repeat(400), 2.0), 4.0);
+/// ```
 //==============================================================================
 pub fn read_toast_seconds(text: &str, base_seconds: f32) -> f32 {
 	let character_count = text.chars().count();
@@ -63,6 +84,44 @@ pub fn read_toast_seconds(text: &str, base_seconds: f32) -> f32 {
 	(base_seconds + extra_steps as f32 * LONG_TEXT_EXTRA_SECONDS).max(base_seconds).min(MAXIMUM_STAY_SECONDS)
 }
 
+//==============================================================================
+/// 알림 모션. (게임이 만든 알림 노드에 붙어, show 로 띄우면 나오고 머물다 사라지는 움직임을 맡는다)
+///
+/// # 예제
+/// 게임이 만든 알림 노드 띄우기
+/// ```rust
+/// use vanilla::{attach_toast_motion, ComponentContext, Engine, EngineConfiguration, NodeTree, Text, ToastMotion, ToastPhase, Vector2};
+///
+/// let engine = Engine::new(EngineConfiguration::new());
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.get_root_id();
+/// let toast_id = node_tree.create_child(root_id, "Toast");
+/// node_tree[toast_id].set_local_position(Vector2::create(640.0, 80.0));
+/// node_tree[toast_id].set_content_size(Vector2::create(320.0, 48.0));
+/// node_tree[toast_id].add_component(Text::create_with_text("", 24.0));
+/// node_tree[toast_id].set_visible(false);
+/// let toast_motion = attach_toast_motion(&mut node_tree, toast_id, -1.0).expect("toast motion");
+/// toast_motion.set_apply_text_handler(Box::new(|context: &mut ComponentContext, text: &str| {
+/// 	if let Some(text_component) = context.get_node_mut().get_component_mut::<Text>() {
+/// 		text_component.set_text(text);
+/// 	}
+/// }));
+/// toast_motion.show("Saved", 1.0);
+/// assert!(toast_motion.is_showing());
+///
+/// node_tree.tick(&engine, 0.016);
+/// assert!(node_tree[toast_id].is_visible());
+/// assert_eq!(node_tree[toast_id].get_component::<Text>().expect("text").get_text(), "Saved");
+/// let toast_motion = node_tree[toast_id].get_component::<ToastMotion>().expect("toast motion");
+/// assert_eq!(toast_motion.get_phase(), ToastPhase::Enter);
+///
+/// for _frame_index in 0..120 {
+/// 	node_tree.tick(&engine, 1.0 / 60.0);
+/// }
+/// assert!(!node_tree[toast_id].is_visible());
+/// assert_eq!(node_tree[toast_id].get_local_position(), Vector2::create(640.0, 80.0));
+/// ```
+//==============================================================================
 pub struct ToastMotion {
 	component_base: ComponentBase,
 	enter_side: f32,
@@ -84,6 +143,12 @@ pub struct ToastMotion {
 impl ToastMotion {
 	//==============================================================================
 	/// 생성. (들어오는 쪽: -1 이면 위에서, 1 이면 아래에서)
+	///
+	/// # 인자
+	/// - `enter_side`: 들어오는 쪽. (-1 이면 위에서, 1 이면 아래에서, 미끄러지는 거리 10 에 곱한다)
+	///
+	/// # 돌려줌
+	/// 숨은 새 모션. (노드에 붙일 때는 attach_toast_motion 을 쓴다)
 	//==============================================================================
 	pub fn new(enter_side: f32) -> ToastMotion {
 		ToastMotion {
@@ -106,6 +171,9 @@ impl ToastMotion {
 
 	//==============================================================================
 	/// 노드에 글을 넣는 함수 설정.
+	///
+	/// # 인자
+	/// - `apply_text_handler`: 글이 나오기 시작할 때 문맥과 글을 받아 노드에 넣을 함수. (같은 노드의 UILabel 이나 Text 는 문맥의 노드에서 찾는다)
 	//==============================================================================
 	pub fn set_apply_text_handler(&mut self, apply_text_handler: ToastApplyTextHandler) {
 		self.apply_text_handler = Some(apply_text_handler);
@@ -113,6 +181,10 @@ impl ToastMotion {
 
 	//==============================================================================
 	/// 띄우기 요청. (다음 tick 에서 띄운다, 떠 있는 다른 글은 빨리 비킨 뒤 띄운다)
+	///
+	/// # 인자
+	/// - `text`: 띄울 글. (떠 있는 글과 같고 사라지는 중이 아니면 머무는 시간만 다시 채우고 통 튄다)
+	/// - `seconds`: 머무는 시간. (초, 나오는 시간과 사라지는 시간은 빼고, read_toast_seconds 로 글 길이에 맞출 수 있다)
 	//==============================================================================
 	pub fn show(&mut self, text: &str, seconds: f32) {
 		self.requested = Some((String::from(text), seconds));
@@ -129,6 +201,9 @@ impl ToastMotion {
 
 	//==============================================================================
 	/// 떠 있는지. (나오는 중, 머무는 중, 사라지는 중, 띄우기 요청이 있음)
+	///
+	/// # 돌려줌
+	/// 숨음 단계가 아니거나 띄우기 요청이 있으면 true.
 	//==============================================================================
 	pub fn is_showing(&self) -> bool {
 		self.phase != ToastPhase::Hidden || self.requested.is_some()
@@ -136,6 +211,9 @@ impl ToastMotion {
 
 	//==============================================================================
 	/// 단계 반환.
+	///
+	/// # 돌려줌
+	/// 지금 단계.
 	//==============================================================================
 	pub fn get_phase(&self) -> ToastPhase {
 		self.phase
@@ -143,6 +221,9 @@ impl ToastMotion {
 
 	//==============================================================================
 	/// 들어오는 쪽 설정.
+	///
+	/// # 인자
+	/// - `enter_side`: 들어오는 쪽. (-1 이면 위에서, 1 이면 아래에서)
 	//==============================================================================
 	pub fn set_enter_side(&mut self, enter_side: f32) {
 		self.enter_side = enter_side;
@@ -230,6 +311,14 @@ impl ToastMotion {
 
 //==============================================================================
 /// 알림 노드에 모션 붙이기. (들어오는 쪽을 정하고 붙인 ToastMotion 을 돌려준다, 원본 attachToastMotion)
+///
+/// # 인자
+/// - `node_tree`: 노드 트리.
+/// - `node_id`: 알림 노드.
+/// - `enter_side`: 들어오는 쪽. (-1 이면 위에서, 1 이면 아래에서)
+///
+/// # 돌려줌
+/// 붙인 ToastMotion. 노드가 없으면 None.
 //==============================================================================
 pub fn attach_toast_motion(node_tree: &mut NodeTree, node_id: NodeId, enter_side: f32) -> Option<&mut ToastMotion> {
 	node_tree.add_component(node_id, ToastMotion::new(enter_side))
@@ -237,14 +326,23 @@ pub fn attach_toast_motion(node_tree: &mut NodeTree, node_id: NodeId, enter_side
 
 #[crate::reflect]
 impl Component for ToastMotion {
+	//==============================================================================
+	/// 컴포넌트 공통 칸 반환.
+	//==============================================================================
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base
 	}
 
+	//==============================================================================
+	/// 컴포넌트 공통 칸 반환. (변경용)
+	//==============================================================================
 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 		&mut self.component_base
 	}
 
+	//==============================================================================
+	/// 컴포넌트 종류 이름 반환. ("ToastMotion")
+	//==============================================================================
 	fn get_component_type(&self) -> &'static str {
 		"ToastMotion"
 	}
@@ -320,6 +418,9 @@ impl Component for ToastMotion {
 mod tests {
 	use super::*;
 
+	//==============================================================================
+	/// 긴 글은 20 자마다 0.5 초 더 머물고 4 초를 넘지 않는다.
+	//==============================================================================
 	#[test]
 	fn long_text_stays_longer() {
 		assert_eq!(read_toast_seconds("짧은 글", 2.0), 2.0);

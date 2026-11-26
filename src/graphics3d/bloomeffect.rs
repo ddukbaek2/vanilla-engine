@@ -1,5 +1,5 @@
 //==============================================================================
-//! 블룸 이펙트. (원본 experimental/graphics/bloomeffect.js)
+//! 블룸 이펙트. (원본 graphics3d/bloomeffect.js)
 //! - 밝은 영역 추출 → 하프 해상도 가우시안 블러 핑퐁. render() 결과 텍스처를 최종 합성 패스에서 가산하는 방식으로 쓴다.
 //! - 셰이더와 패스 순서, 기본값(임계 0.5 ~ 0.95, 반복 2)은 원본과 같다.
 //! - 주고받는 판은 기본 RGBA8 이라 1 을 넘는 밝은 값이 잘린다. set_use_float_color(true) 면 RGBA16F 로 지어 HDR 값을 그대로 흐린다.
@@ -11,7 +11,7 @@ use crate::graphics3d::rendertarget::{RenderTarget, RenderTargetOptions};
 use glow::HasContext;
 
 //==============================================================================
-/// 전역 상수 목록.
+// 전역 상수 목록.
 //==============================================================================
 /// 밝은 영역 추출 패스. (씬 → 하프 해상도)
 const BRIGHTPASS_FRAGMENTSHADER_SOURCE: &str = "#version 300 es
@@ -47,6 +47,30 @@ void main() {
 
 //==============================================================================
 /// 블룸 이펙트.
+///
+/// # 예제
+/// 씬 렌더 타겟에서 블룸을 만들고 결과를 합성 패스의 1 번 유닛에 묶기
+/// ```rust,no_run
+/// use glow::HasContext;
+/// use vanilla::{BloomEffect, RenderTarget};
+///
+/// fn create_bloom(gl: &glow::Context) -> Result<BloomEffect, String> {
+/// 	let mut bloom_effect = BloomEffect::new(gl)?;
+/// 	bloom_effect.set_threshold(0.7, 0.95);
+/// 	Ok(bloom_effect)
+/// }
+///
+/// fn render_bloom(gl: &glow::Context, bloom_effect: &mut BloomEffect, scene_render_target: &RenderTarget) -> Result<(), String> {
+/// 	bloom_effect.resize(gl, scene_render_target.get_width(), scene_render_target.get_height())?;
+/// 	bloom_effect.render(gl, scene_render_target.get_color_texture(0));
+/// 	unsafe {
+/// 		gl.active_texture(glow::TEXTURE1);
+/// 		gl.bind_texture(glow::TEXTURE_2D, bloom_effect.get_result_texture());
+/// 		gl.active_texture(glow::TEXTURE0);
+/// 	}
+/// 	Ok(())
+/// }
+/// ```
 //==============================================================================
 pub struct BloomEffect {
 	bright_pass: FullscreenPass,
@@ -61,6 +85,12 @@ pub struct BloomEffect {
 impl BloomEffect {
 	//==============================================================================
 	/// 생성. (패스 2개 + 2x2 렌더 타겟 2장, resize 로 크기를 맞춘다)
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트. (Graphic::get_gl 로 꺼낸다)
+	///
+	/// # 돌려줌
+	/// 새 블룸 이펙트. (임계 0.5 ~ 0.95, 반복 2, RGBA8 판) 셰이더 컴파일이나 GL 객체 만들기에 실패하면 Err(오류 글).
 	//==============================================================================
 	pub fn new(gl: &glow::Context) -> Result<BloomEffect, String> {
 		let bright_pass = FullscreenPass::new(gl, BRIGHTPASS_FRAGMENTSHADER_SOURCE)?;
@@ -96,6 +126,14 @@ impl BloomEffect {
 
 	//==============================================================================
 	/// 크기 변경. (씬 해상도 기준, 내부는 하프 해상도)
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트.
+	/// - `scene_width`: 씬 가로 크기. (픽셀, 판은 그 절반, 최소 1)
+	/// - `scene_height`: 씬 세로 크기. (픽셀, 판은 그 절반, 최소 1)
+	///
+	/// # 돌려줌
+	/// 판을 맞췄으면 Ok. 다시 짓다 GL 객체를 못 만들면 Err(GL 의 오류 글).
 	//==============================================================================
 	pub fn resize(&mut self, gl: &glow::Context, scene_width: i32, scene_height: i32) -> Result<(), String> {
 		let half_width = (scene_width >> 1).max(1);
@@ -108,6 +146,10 @@ impl BloomEffect {
 	//==============================================================================
 	/// 블룸 렌더링. (호출 후 결과는 get_result_texture())
 	/// - 부수 효과: 깊이/블렌드 비활성, TEXTURE0 활성, 프레임버퍼 바인드가 변경된다.
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트.
+	/// - `scene_color_texture`: 밝은 영역을 뽑을 씬 컬러 텍스처. (보통 씬 RenderTarget 의 get_color_texture(0))
 	//==============================================================================
 	pub fn render(&self, gl: &glow::Context, scene_color_texture: Option<GlTexture>) {
 		unsafe {
@@ -162,6 +204,9 @@ impl BloomEffect {
 
 	//==============================================================================
 	/// 결과 텍스처 반환. (render() 이후)
+	///
+	/// # 돌려줌
+	/// 블러를 마친 텍스처. (핑 판의 컬러, 씬의 절반 크기) destroy 뒤면 None.
 	//==============================================================================
 	pub fn get_result_texture(&self) -> Option<GlTexture> {
 		self.ping_render_target.get_color_texture(0)
@@ -169,6 +214,10 @@ impl BloomEffect {
 
 	//==============================================================================
 	/// 추출 임계값 설정. (씬 밝기 특성에 맞게 조정)
+	///
+	/// # 인자
+	/// - `threshold_start`: 뽑기 시작 밝기. (세 채널 가운데 가장 큰 값, 이보다 어두우면 뽑지 않는다, 기본 0.5)
+	/// - `threshold_end`: 다 뽑는 밝기. (이보다 밝으면 그대로, 사이는 smoothstep, 기본 0.95)
 	//==============================================================================
 	pub fn set_threshold(&mut self, threshold_start: f32, threshold_end: f32) {
 		self.threshold_start = threshold_start;
@@ -177,6 +226,9 @@ impl BloomEffect {
 
 	//==============================================================================
 	/// 블러 반복 횟수 설정.
+	///
+	/// # 인자
+	/// - `iteration_count`: 가로와 세로 블러 한 쌍을 되풀이할 횟수. (기본 2, 0 이면 밝은 영역 뽑기만)
 	//==============================================================================
 	pub fn set_iteration_count(&mut self, iteration_count: u32) {
 		self.iteration_count = iteration_count;
@@ -184,6 +236,27 @@ impl BloomEffect {
 
 	//==============================================================================
 	/// 실수 컬러 설정. (true 면 주고받는 판을 RGBA16F 로 다시 지어 1 을 넘는 밝은 값이 잘리지 않는다, 기본 false 는 RGBA8, 같으면 그대로)
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트.
+	/// - `use_float_color`: true 면 RGBA16F, false 면 RGBA8.
+	///
+	/// # 돌려줌
+	/// 바꿨거나 이미 같으면 Ok. 새 판을 못 지으면 Err(GL 의 오류 글, 앞의 판은 그대로 둔다).
+	///
+	/// # 예제
+	/// HDR 씬에서 1 을 넘는 빛을 잘리지 않게 흐리기
+	/// ```rust,no_run
+	/// use vanilla::BloomEffect;
+	///
+	/// fn create_hdr_bloom(gl: &glow::Context) -> Result<BloomEffect, String> {
+	/// 	let mut bloom_effect = BloomEffect::new(gl)?;
+	/// 	bloom_effect.set_use_float_color(gl, true)?;
+	/// 	bloom_effect.set_threshold(1.0, 1.5);
+	/// 	assert!(bloom_effect.get_use_float_color());
+	/// 	Ok(bloom_effect)
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn set_use_float_color(&mut self, gl: &glow::Context, use_float_color: bool) -> Result<(), String> {
 		if self.get_use_float_color() == use_float_color {
@@ -202,6 +275,9 @@ impl BloomEffect {
 
 	//==============================================================================
 	/// 실수 컬러 사용 여부 반환.
+	///
+	/// # 돌려줌
+	/// 판이 RGBA16F 면 true, RGBA8 이면 false.
 	//==============================================================================
 	pub fn get_use_float_color(&self) -> bool {
 		self.ping_render_target.get_use_float_color()
@@ -209,6 +285,9 @@ impl BloomEffect {
 
 	//==============================================================================
 	/// 블러 반복 횟수 반환.
+	///
+	/// # 돌려줌
+	/// 블러 반복 횟수.
 	//==============================================================================
 	pub fn get_iteration_count(&self) -> u32 {
 		self.iteration_count
@@ -216,6 +295,9 @@ impl BloomEffect {
 
 	//==============================================================================
 	/// 파괴. (GL 리소스 해제)
+	///
+	/// # 인자
+	/// - `gl`: 만들 때 쓴 GL 컨텍스트.
 	//==============================================================================
 	pub fn destroy(&mut self, gl: &glow::Context) {
 		self.ping_render_target.destroy(gl);
@@ -226,6 +308,9 @@ impl BloomEffect {
 
 	//==============================================================================
 	/// 밝은 영역 추출 패스 반환.
+	///
+	/// # 돌려줌
+	/// 밝은 영역 추출 패스. (유니폼 sceneTexture, thresholdRange)
 	//==============================================================================
 	pub fn get_bright_pass(&self) -> &FullscreenPass {
 		&self.bright_pass
@@ -233,6 +318,9 @@ impl BloomEffect {
 
 	//==============================================================================
 	/// 블러 패스 반환.
+	///
+	/// # 돌려줌
+	/// 9 탭 가우시안 블러 패스. (유니폼 sourceTexture, blurDirection)
 	//==============================================================================
 	pub fn get_blur_pass(&self) -> &FullscreenPass {
 		&self.blur_pass
@@ -240,6 +328,9 @@ impl BloomEffect {
 
 	//==============================================================================
 	/// 핑 렌더 타겟 반환. (최종 결과 보관)
+	///
+	/// # 돌려줌
+	/// 핑 렌더 타겟. (밝은 영역과 세로 블러를 받는 판, 결과 텍스처의 주인)
 	//==============================================================================
 	pub fn get_ping_render_target(&self) -> &RenderTarget {
 		&self.ping_render_target
@@ -247,6 +338,9 @@ impl BloomEffect {
 
 	//==============================================================================
 	/// 퐁 렌더 타겟 반환.
+	///
+	/// # 돌려줌
+	/// 퐁 렌더 타겟. (가로 블러를 받는 판)
 	//==============================================================================
 	pub fn get_pong_render_target(&self) -> &RenderTarget {
 		&self.pong_render_target

@@ -26,6 +26,32 @@ use crate::core::sharedbakecache;
 /// 구운 그림의 가장자리 여유. (안티앨리어싱, 픽셀)
 const BAKE_PADDING: i32 = 2;
 
+//==============================================================================
+/// 그림자를 깐 그림 컴포넌트. (그림 밑에 그 모양의 그림자를 깐 모습을 한 장으로 구워 그린다)
+/// - 그림(또는 그림 안의 조각)을 노드 content_size 안에 비를 지켜 가장 크게, 가운데로 놓는다.
+/// - 노드의 불투명도가 그림과 그림자에 한 장째로 먹는다. 그림 색을 주면 그림을 그 색 한 빛의 모양으로 칠한다.
+/// - 처음은 그림 없음, 그림 색 없음, 검은 그림자, 내림 0, 번짐 0.
+///
+/// # 예제
+/// 아이콘 밑에 흐린 그림자 깔기
+/// ```rust
+/// use vanilla::{Color, Image, NodeTree, ShadowImage, Vector2};
+///
+/// let icon = Image::create_from_pixels(32, 32, vec![255u8; 32 * 32 * 4]);
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.get_root_id();
+/// let icon_id = node_tree.create_child(root_id, "Icon");
+/// node_tree[icon_id].set_content_size(Vector2::create(64.0, 64.0));
+/// let shadow_image = node_tree.add_component(icon_id, ShadowImage::new()).unwrap();
+/// shadow_image.set_image(Some(icon.clone()), None);
+/// shadow_image.set_shadow(Color::black().with_alpha(0.5), 2.0, 4.0);
+///
+/// let shadow_image = node_tree[icon_id].get_component::<ShadowImage>().unwrap();
+/// assert!(shadow_image.get_image().is_some());
+/// assert!(icon.is_pixels_retained());
+/// assert!(shadow_image.get_bake_image().is_none());
+/// ```
+//==============================================================================
 pub struct ShadowImage {
 	component_base: ComponentBase,
 	image: Option<Rc<Image>>,
@@ -102,6 +128,9 @@ fn resample_image(image: &Image, source_rect: [f32; 4], target_width: i32, targe
 impl ShadowImage {
 	//==============================================================================
 	/// 생성.
+	///
+	/// # 돌려줌
+	/// 그림이 없고 검은 그림자(내림 0, 번짐 0)인 새 컴포넌트.
 	//==============================================================================
 	pub fn new() -> ShadowImage {
 		ShadowImage {
@@ -123,6 +152,13 @@ impl ShadowImage {
 
 	//==============================================================================
 	/// 출력.
+	/// - 그림이 없거나, 조각이나 노드 크기가 0 이하면 그리지 않는다.
+	/// - 굽는 배율, 그림, 조각, 색, 그림자, 노드 크기가 지난번과 다르면 다시 굽는다. 그림의 CPU 픽셀을 아직 되읽지 못했으면 이번에는 그리지 않고 다음에 다시 굽는다.
+	/// - 구운 한 장은 그림자 여백만큼 넓어서 그림 자리보다 왼쪽 위로 여백만큼 당겨 그린다.
+	///
+	/// # 인자
+	/// - `transform`: 그릴 노드 트랜스폼. (content_size 를 읽는다)
+	/// - `graphic`: 그릴 그래픽. (노드 트랜스폼이 걸린 상태, 굽는 배율과 텍스처 되읽기에 쓴다)
 	//==============================================================================
 	pub fn draw_shadow_image(&mut self, transform: &NodeTransform, graphic: &mut Graphic) {
 		let image = match &self.image {
@@ -258,6 +294,26 @@ impl ShadowImage {
 
 	//==============================================================================
 	/// 그림 설정. (조각을 주지 않으면 그림 전체)
+	/// - 받은 그림은 다시 구울 때 픽셀을 읽으므로 GPU 에 올린 뒤에도 CPU 픽셀을 남기게 한다. (Image::set_pixels_retained(true))
+	///
+	/// # 인자
+	/// - `image`: 그릴 그림. (None 이면 그리지 않는다)
+	/// - `image_rect`: 그림 안의 조각. (픽셀, 그림 왼쪽 위 기준, None 이면 그림 전체)
+	///
+	/// # 예제
+	/// 시트의 오른쪽 칸만 그리기
+	/// ```rust
+	/// use vanilla::{Image, Rect, ShadowImage};
+	///
+	/// let sheet = Image::create_from_pixels(64, 32, vec![255u8; 64 * 32 * 4]);
+	/// let mut shadow_image = ShadowImage::new();
+	/// shadow_image.set_image(Some(sheet), Some(Rect::create(32.0, 0.0, 32.0, 32.0)));
+	/// assert_eq!(shadow_image.get_image_rect(), Some(Rect::create(32.0, 0.0, 32.0, 32.0)));
+	///
+	/// shadow_image.set_image(None, None);
+	/// assert!(shadow_image.get_image().is_none());
+	/// assert_eq!(shadow_image.get_image_rect(), None);
+	/// ```
 	//==============================================================================
 	pub fn set_image(&mut self, image: Option<Rc<Image>>, image_rect: Option<Rect>) {
 		if let Some(image) = &image {
@@ -270,6 +326,9 @@ impl ShadowImage {
 
 	//==============================================================================
 	/// 그림 반환.
+	///
+	/// # 돌려줌
+	/// 그리는 그림. 정하지 않았으면 None.
 	//==============================================================================
 	pub fn get_image(&self) -> Option<&Rc<Image>> {
 		self.image.as_ref()
@@ -277,6 +336,9 @@ impl ShadowImage {
 
 	//==============================================================================
 	/// 그림 안의 조각 반환. (None 이면 그림 전체)
+	///
+	/// # 돌려줌
+	/// 그림 안의 조각. (픽셀, None 이면 그림 전체)
 	//==============================================================================
 	pub fn get_image_rect(&self) -> Option<Rect> {
 		self.image_rect
@@ -284,6 +346,9 @@ impl ShadowImage {
 
 	//==============================================================================
 	/// 그림을 한 빛으로 칠할 색 설정. (None 이면 그림 그대로)
+	///
+	/// # 인자
+	/// - `image_color`: 그림 모양을 칠할 색. (알파는 그림 알파에 곱한다, None 이면 그림 색 그대로, 처음 None)
 	//==============================================================================
 	pub fn set_image_color(&mut self, image_color: Option<Color>) {
 		self.image_color = image_color;
@@ -291,6 +356,9 @@ impl ShadowImage {
 
 	//==============================================================================
 	/// 그림을 한 빛으로 칠할 색 반환.
+	///
+	/// # 돌려줌
+	/// 그림 모양을 칠할 색. 그림 색 그대로면 None.
 	//==============================================================================
 	pub fn get_image_color(&self) -> Option<Color> {
 		self.image_color
@@ -298,6 +366,9 @@ impl ShadowImage {
 
 	//==============================================================================
 	/// 그림 경로 설정. (UI 문서가 적고 읽는다)
+	///
+	/// # 인자
+	/// - `image_path`: 그림 경로. (적어 두기만 하고 그림을 읽지 않는다)
 	//==============================================================================
 	pub fn set_image_path(&mut self, image_path: &str) {
 		self.image_path = String::from(image_path);
@@ -305,6 +376,9 @@ impl ShadowImage {
 
 	//==============================================================================
 	/// 그림 경로 반환. (정하지 않았으면 빈 글. UI 문서는 Sprite 처럼 imagePath 로 따로 적으므로 반사 저장 속성에서 뺀다)
+	///
+	/// # 돌려줌
+	/// 그림 경로. (정하지 않았으면 빈 글)
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn get_image_path(&self) -> &str {
@@ -313,6 +387,11 @@ impl ShadowImage {
 
 	//==============================================================================
 	/// 그림자 설정. (색과 불투명도는 색의 알파로, 아래로 내려가는 만큼, 번지는 만큼, 둘 다 내용 크기 단위)
+	///
+	/// # 인자
+	/// - `shadow_color`: 그림자 색. (Color 또는 "#rrggbb" 같은 문자열, 알파가 불투명도, 처음 검정)
+	/// - `shadow_offset`: 그림자가 아래로 내려가는 만큼. (노드 좌표, 처음 0)
+	/// - `shadow_blur`: 그림자가 번지는 만큼. (노드 좌표, 0 보다 작으면 0, 처음 0)
 	//==============================================================================
 	pub fn set_shadow(&mut self, shadow_color: impl Into<Color>, shadow_offset: f32, shadow_blur: f32) {
 		self.shadow_color = shadow_color.into();
@@ -322,6 +401,9 @@ impl ShadowImage {
 
 	//==============================================================================
 	/// 구운 그림 반환. (아직 굽지 않았으면 None, 원본 getBakeCanvas)
+	///
+	/// # 돌려줌
+	/// 마지막으로 구운 그림. (그림자 여백을 둘러 굽는 배율로 구운 한 장) 아직 굽지 않았으면 None.
 	//==============================================================================
 	#[reflect(name = "BakeCanvas")]
 	pub fn get_bake_image(&self) -> Option<&Rc<Image>> {
@@ -330,6 +412,9 @@ impl ShadowImage {
 }
 
 impl Default for ShadowImage {
+	//==============================================================================
+	/// 기본값. (new 와 같다)
+	//==============================================================================
 	fn default() -> ShadowImage {
 		ShadowImage::new()
 	}
@@ -337,28 +422,46 @@ impl Default for ShadowImage {
 
 #[crate::reflect]
 impl Component for ShadowImage {
+	//==============================================================================
+	/// 공통 상태 반환.
+	//==============================================================================
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base
 	}
 
+	//==============================================================================
+	/// 공통 상태 반환. (변경용)
+	//==============================================================================
 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 		&mut self.component_base
 	}
 
+	//==============================================================================
+	/// 컴포넌트 이름. ("ShadowImage")
+	//==============================================================================
 	fn get_component_type(&self) -> &'static str {
 		"ShadowImage"
 	}
 
+	//==============================================================================
+	/// tick 이 할 일이 있는지. (그리기만 하므로 false)
+	//==============================================================================
 	#[reflect(skip)]
 	fn is_tick_needed(&self) -> bool {
 		false
 	}
 
+	//==============================================================================
+	/// 노드 content_size 영역 안에만 그리는지. (true, 그림자 여백은 calculate_drawn_rect 가 더한다)
+	//==============================================================================
 	#[reflect(skip)]
 	fn is_drawn_inside_content(&self) -> bool {
 		true
 	}
 
+	//==============================================================================
+	/// 화면 밖 거르기에 쓰는, 실제로 그리는 사각형. (content 영역에 그림자 여백(번짐, 아래로 내림)을 더한다, content_size 가 0 이하면 None)
+	//==============================================================================
 	fn calculate_drawn_rect(&mut self, transform: &NodeTransform, graphic: &mut Graphic) -> Option<Rect> {
 		// 그림은 content 안에 들지만 구운 한 장은 그림자 여백(번짐, 아래로 내림)만큼 넓다. (bake 와 같은 셈)
 		let content_size = transform.get_content_size();
@@ -371,6 +474,9 @@ impl Component for ShadowImage {
 		Some(Rect::create(-padding, -padding, content_size.x + padding * 2.0, content_size.y + padding * 2.0 + offset))
 	}
 
+	//==============================================================================
+	/// 출력. (draw_shadow_image)
+	//==============================================================================
 	fn draw(&mut self, transform: &NodeTransform, graphic: &mut Graphic) {
 		self.draw_shadow_image(transform, graphic);
 	}

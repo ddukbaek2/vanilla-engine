@@ -64,19 +64,40 @@ fn get_particle_gradient_image() -> Rc<Image> {
 
 //==============================================================================
 /// 터치 입자.
+/// - TouchEffect 가 목록으로 든다. 값만 담는 구조체다.
+///
+/// # 예제
+/// 입자 하나의 값
+/// ```rust
+/// use vanilla::{TouchParticle, Vector2};
+///
+/// let mut particle = TouchParticle::new();
+/// particle.position = Vector2::create(40.0, 30.0);
+/// particle.radius = 20.0;
+/// assert_eq!(particle.life, particle.max_life);
+/// assert_eq!(particle.velocity, Vector2::zero());
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TouchParticle {
+	/// 가운데 위치. (노드 영역 좌표, 픽셀)
 	pub position: Vector2,
+	/// 속도. (픽셀/초)
 	pub velocity: Vector2,
+	/// 남은 수명. (TouchEffect 에서 1 로 시작해 초당 2.5 씩 줄고, 0 이하면 빠진다)
 	pub life: f32,
+	/// 처음 수명. (그릴 때 투명도는 life / max_life)
 	pub max_life: f32,
+	/// 반지름. (픽셀)
 	pub radius: f32,
 }
 
 impl TouchParticle {
 	//==============================================================================
 	/// 생성. (제자리, 수명 1, 반지름 0)
+	///
+	/// # 돌려줌
+	/// 위치와 속도가 0, 수명과 처음 수명이 1, 반지름이 0 인 입자.
 	//==============================================================================
 	pub fn new() -> TouchParticle {
 		TouchParticle {
@@ -100,6 +121,25 @@ impl Default for TouchParticle {
 
 //==============================================================================
 /// 터치 효과 컴포넌트.
+/// - 누를 때 create_touch_particle 을 부르면 tick 에서 입자를 줄이고 draw 에서 더하기 블렌드로 그린다.
+///
+/// # 예제
+/// 노드에 붙이고 누른 자리에 입자 만들기
+/// ```rust
+/// use vanilla::{NodeTree, Pivot, TouchEffect};
+///
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.get_root_id();
+/// let touch_effect_id = node_tree.create_child(root_id, "TouchEffect");
+/// node_tree[touch_effect_id].set_pivot(Pivot::TOP_LEFT);
+/// node_tree[touch_effect_id].add_component(TouchEffect::new());
+///
+/// let touch_effect = node_tree[touch_effect_id].get_component_mut::<TouchEffect>().unwrap();
+/// touch_effect.create_touch_particle(120.0, 80.0);
+/// assert_eq!(touch_effect.get_particle_count(), 1);
+/// touch_effect.update_touch_particles(0.5);
+/// assert_eq!(touch_effect.get_particle_count(), 0);
+/// ```
 //==============================================================================
 pub struct TouchEffect {
 	component_base: ComponentBase,
@@ -112,6 +152,9 @@ pub struct TouchEffect {
 impl TouchEffect {
 	//==============================================================================
 	/// 생성.
+	///
+	/// # 돌려줌
+	/// 입자가 없는 새 터치 효과.
 	//==============================================================================
 	pub fn new() -> TouchEffect {
 		TouchEffect {
@@ -123,6 +166,10 @@ impl TouchEffect {
 
 	//==============================================================================
 	/// 터치 입자 만들기. (노드 영역 좌표, ±5 픽셀 흩뿌림, ±60 픽셀/초 속도, 반지름 10 ~ 35)
+	///
+	/// # 인자
+	/// - `x`: 누른 자리 x. (노드 영역 좌표, 픽셀)
+	/// - `y`: 누른 자리 y. (노드 영역 좌표, 픽셀)
 	//==============================================================================
 	pub fn create_touch_particle(&mut self, x: f32, y: f32) {
 		let mut particle = TouchParticle::new();
@@ -136,6 +183,9 @@ impl TouchEffect {
 
 	//==============================================================================
 	/// 터치 입자 갱신. (수명이 초당 2.5 씩 줄고, 다 되면 뺀다)
+	///
+	/// # 인자
+	/// - `time_delta`: 지난 시간. (초, 위치는 속도 * time_delta 만큼 움직인다)
 	//==============================================================================
 	pub fn update_touch_particles(&mut self, time_delta: f32) {
 		let mut particle_index = self.touch_particles.len();
@@ -153,6 +203,10 @@ impl TouchEffect {
 
 	//==============================================================================
 	/// 터치 입자 출력. (흰색 그라디언트를 입자 색으로 틴트하고, 남은 수명만큼 흐리게)
+	/// - 블렌드는 바꾸지 않는다. (컴포넌트로 그릴 때는 push_transform 이 더하기로 바꾼다)
+	///
+	/// # 인자
+	/// - `graphic`: 그릴 그래픽. (이미지 틴트와 전역 알파는 그린 뒤 되돌린다)
 	//==============================================================================
 	pub fn draw_touch_particles(&self, graphic: &mut Graphic) {
 		if self.touch_particles.is_empty() {
@@ -175,6 +229,9 @@ impl TouchEffect {
 
 	//==============================================================================
 	/// 살아 있는 입자 수. (러스트 판에서 더한 것)
+	///
+	/// # 돌려줌
+	/// 수명이 남은 입자 수.
 	//==============================================================================
 	pub fn get_particle_count(&self) -> usize {
 		self.touch_particles.len()

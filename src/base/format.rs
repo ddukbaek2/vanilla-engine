@@ -15,6 +15,18 @@
 //!   리눅스 LANGUAGE / LC_ALL / LC_MESSAGES / LANG. 그것도 표에 없으면 en-US)
 //!   (원본은 틀린 태그면 RangeError 를 던진다. 러스트 판은 던지지 않고 표에 없는 태그처럼 쓴다)
 //! - fraction_digits 는 원본 toFixed 처럼 0 ~ 100 이 맞다. 넘겨도 던지지 않고 그 자릿수로 낸다.
+//!
+//! # 예제
+//! 점수, 재화, 시간 표기
+//! ```rust
+//! use vanilla::format;
+//!
+//! assert_eq!(format::format_number(12480.0, "en-US"), "12,480");
+//! assert_eq!(format::format_number_with_unit(1200000.0, " G", "ko-KR"), "1,200,000 G");
+//! assert_eq!(format::format_compact_number(5600000.0, 1), "5.6M");
+//! assert_eq!(format::format_padded_number(7.0, 3, 0.0, 999.0), "007");
+//! assert_eq!(format::format_minutes_seconds(75.0), "1:15");
+//! ```
 //==============================================================================
 
 /// 라틴 숫자 모양.
@@ -193,6 +205,24 @@ const NUMBER_LOCALES: &[NumberLocale] = &[
 
 //==============================================================================
 /// 천 단위 구분 기호를 붙여 반환. (12480 -> "12,480", 원본 기본 locale 은 "en-US")
+///
+/// # 인자
+/// - `value`: 표기할 수.
+/// - `locale`: 언어 태그. ("en-US", "ko-KR" 처럼, 대소문자를 가리지 않는다. 표에 없으면 시스템 언어, 그것도 표에 없으면 en-US 로 쓴다)
+///
+/// # 돌려줌
+/// 로캘 표기 글. (소수는 0 ~ 3 자리로 반 올림하고 끝의 0 은 뺀다. NaN 은 로캘의 NaN 글, 무한대는 ∞)
+///
+/// # 예제
+/// 로캘마다 다른 소수점과 묶음 기호
+/// ```rust
+/// use vanilla::format;
+///
+/// assert_eq!(format::format_number(1234.5678, "en-US"), "1,234.568");
+/// assert_eq!(format::format_number(1234567.891, "de-DE"), "1.234.567,891");
+/// assert_eq!(format::format_number(123456789.123, "hi-IN"), "12,34,56,789.123");
+/// assert_eq!(format::format_number(-0.0001, "en-US"), "-0");
+/// ```
 //==============================================================================
 pub fn format_number(value: f64, locale: &str) -> String {
 	let number_locale = find_number_locale(locale);
@@ -201,6 +231,14 @@ pub fn format_number(value: f64, locale: &str) -> String {
 
 //==============================================================================
 /// 천 단위 구분 + 단위 접미사. (1200000, "원" -> "1,200,000원", 원본 기본 locale 은 "ko-KR")
+///
+/// # 인자
+/// - `value`: 표기할 수.
+/// - `unit_suffix`: 뒤에 붙일 단위 글. (사이에 공백을 넣지 않는다)
+/// - `locale`: 언어 태그. (format_number 와 같다)
+///
+/// # 돌려줌
+/// format_number 의 글 뒤에 unit_suffix 를 붙인 글.
 //==============================================================================
 pub fn format_number_with_unit(value: f64, unit_suffix: &str, locale: &str) -> String {
 	let number_text = format_number(value, locale);
@@ -210,6 +248,26 @@ pub fn format_number_with_unit(value: f64, unit_suffix: &str, locale: &str) -> S
 //==============================================================================
 /// 큰 수를 짧게 줄여 반환. (1234 -> "1.2K", 5600000 -> "5.6M", 원본 기본 fraction_digits 는 1)
 /// - 반올림한 글이 1000 이 되면 Intl 의 compact 표기처럼 다음 단위로 올린다. (999999 -> "1M")
+///
+/// # 인자
+/// - `value`: 표기할 수. (음수는 절대값을 줄여 앞에 - 를 붙인다)
+/// - `fraction_digits`: 줄인 수의 소수 자릿수. (끝의 0 은 뺀다, 절대값이 1000 미만이면 쓰지 않는다)
+///
+/// # 돌려줌
+/// 절대값이 1000 이상이면 K, 1000000 이상이면 M, 1000000000 이상이면 B 를 붙여 줄인 글. 1000 미만은 String(수) 꼴 그대로다.
+/// (반올림은 toFixed 꼴이고, 반올림해 1000 이 되면 다음 단위로 올려 999999 는 "1M", NaN 은 "NaN")
+///
+/// # 예제
+/// 단위 경계와 반올림
+/// ```rust
+/// use vanilla::format;
+///
+/// assert_eq!(format::format_compact_number(1234.0, 1), "1.2K");
+/// assert_eq!(format::format_compact_number(1234567890.0, 2), "1.23B");
+/// assert_eq!(format::format_compact_number(-1234.0, 1), "-1.2K");
+/// assert_eq!(format::format_compact_number(999.5, 1), "999.5");
+/// assert_eq!(format::format_compact_number(999999.0, 1), "1M");
+/// ```
 //==============================================================================
 pub fn format_compact_number(value: f64, fraction_digits: usize) -> String {
 	let absolute_value = value.abs();
@@ -240,6 +298,26 @@ pub fn format_compact_number(value: f64, fraction_digits: usize) -> String {
 /// 값을 범위로 자르고 자릿수를 0 으로 채워 반환. (7세그먼트 카운터 표기 등)
 /// - format_padded_number(7.0, 3, ..) -> "007", format_padded_number(-5.0, 3, ..) -> "-05"
 /// - 원본 기본 범위는 minimum_value = f64::NEG_INFINITY, maximum_value = f64::INFINITY
+///
+/// # 인자
+/// - `value`: 표기할 수.
+/// - `digit_count`: 전체 자릿수. (음수면 - 기호도 한 자리로 센다)
+/// - `minimum_value`: 아래 끝. (끝 없이 쓰려면 f64::NEG_INFINITY)
+/// - `maximum_value`: 위 끝. (끝 없이 쓰려면 f64::INFINITY)
+///
+/// # 돌려줌
+/// 범위로 자르고 앞을 0 으로 채운 글. (자릿수보다 길면 자르지 않는다. 소수, NaN, 지수 꼴도 String(수) 글을 그대로 채운다, 값이나 끝이 NaN 이면 NaN)
+///
+/// # 예제
+/// 세 자리 카운터
+/// ```rust
+/// use vanilla::format;
+///
+/// assert_eq!(format::format_padded_number(7.0, 3, f64::NEG_INFINITY, f64::INFINITY), "007");
+/// assert_eq!(format::format_padded_number(-5.0, 3, f64::NEG_INFINITY, f64::INFINITY), "-05");
+/// assert_eq!(format::format_padded_number(1234.0, 3, -99.0, 999.0), "999");
+/// assert_eq!(format::format_padded_number(-1234.0, 3, -99.0, 999.0), "-99");
+/// ```
 //==============================================================================
 pub fn format_padded_number(value: f64, digit_count: usize, minimum_value: f64, maximum_value: f64) -> String {
 	let clamped_value = minimum_with_nan(maximum_value, maximum_with_nan(minimum_value, value));
@@ -252,6 +330,12 @@ pub fn format_padded_number(value: f64, digit_count: usize, minimum_value: f64, 
 
 //==============================================================================
 /// 초를 "분:초" 표기로 반환. (75 -> "1:15")
+///
+/// # 인자
+/// - `total_seconds`: 전체 시간. (초, 소수는 버리고 음수는 0 으로 친다)
+///
+/// # 돌려줌
+/// "분:초" 글. (초는 두 자리, 분은 60 을 넘어도 그대로. NaN 은 "NaN:NaN")
 //==============================================================================
 pub fn format_minutes_seconds(total_seconds: f64) -> String {
 	let floored_seconds = maximum_with_nan(0.0, total_seconds.floor());

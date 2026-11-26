@@ -26,3 +26,5 @@ serde_json = { version = "1", features = ["preserve_order"] }
 [dev-dependencies]
 # 가이드 코드 칸이 엔진을 vanilla 로 쓴다.
 vanilla-engine = { path = "../.." }
+# 가이드 3D 장의 코드 칸이 GL 상태를 glow 로 직접 건다. (엔진이 쓰는 같은 판)
+glow = "0.18"

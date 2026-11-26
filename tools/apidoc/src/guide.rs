@@ -1,0 +1,47 @@
+//==============================================================================
+//! 가이드 doctest 장 목록. (`cargo run -p vanilla-engine-apidoc -- <판>` 이 docs/guide/<판>/ko 에서 다시 쓴다, 손으로 고치지 않는다)
+//==============================================================================
+#[doc = include_str!("../../../docs/guide/0.4.0/ko/05-project-setup.md")]
+pub struct Guide05ProjectSetup;
+#[doc = include_str!("../../../docs/guide/0.4.0/ko/06-engine-and-scenes.md")]
+pub struct Guide06EngineAndScenes;
+#[doc = include_str!("../../../docs/guide/0.4.0/ko/07-nodes-and-components.md")]
+pub struct Guide07NodesAndComponents;
+#[doc = include_str!("../../../docs/guide/0.4.0/ko/08-drawing.md")]
+pub struct Guide08Drawing;
+#[doc = include_str!("../../../docs/guide/0.4.0/ko/09-input.md")]
+pub struct Guide09Input;
+#[doc = include_str!("../../../docs/guide/0.4.0/ko/10-assets.md")]
+pub struct Guide10Assets;
+#[doc = include_str!("../../../docs/guide/0.4.0/ko/11-sound.md")]
+pub struct Guide11Sound;
+#[doc = include_str!("../../../docs/guide/0.4.0/ko/12-ui.md")]
+pub struct Guide12Ui;
+#[doc = include_str!("../../../docs/guide/0.4.0/ko/13-tweens-and-timelines.md")]
+pub struct Guide13TweensAndTimelines;
+#[doc = include_str!("../../../docs/guide/0.4.0/ko/14-particles.md")]
+pub struct Guide14Particles;
+#[doc = include_str!("../../../docs/guide/0.4.0/ko/15-3d.md")]
+pub struct Guide153d;
+#[doc = include_str!("../../../docs/guide/0.4.0/ko/16-storage.md")]
+pub struct Guide16Storage;
+#[doc = include_str!("../../../docs/guide/0.4.0/ko/17-localization.md")]
+pub struct Guide17Localization;
+#[doc = include_str!("../../../docs/guide/0.4.0/ko/18-dev-tools.md")]
+pub struct Guide18DevTools;
+#[doc = include_str!("../../../docs/guide/0.4.0/ko/19-authoring-tools.md")]
+pub struct Guide19AuthoringTools;
+#[doc = include_str!("../../../docs/guide/0.4.0/ko/20-reflection.md")]
+pub struct Guide20Reflection;
+#[doc = include_str!("../../../docs/guide/0.4.0/ko/21-async-await.md")]
+pub struct Guide21AsyncAwait;
+#[doc = include_str!("../../../docs/guide/0.4.0/ko/22-porting-from-vanillajs.md")]
+pub struct Guide22PortingFromVanillajs;
+#[doc = include_str!("../../../docs/guide/0.4.0/ko/architecture.md")]
+pub struct GuideArchitecture;
+#[doc = include_str!("../../../docs/guide/0.4.0/ko/getting-started.md")]
+pub struct GuideGettingStarted;
+#[doc = include_str!("../../../docs/guide/0.4.0/ko/overview.md")]
+pub struct GuideOverview;
+#[doc = include_str!("../../../docs/guide/0.4.0/ko/tools.md")]
+pub struct GuideTools;

@@ -7,6 +7,24 @@
 //==============================================================================
 use crate::base::vector2::Vector2;
 
+//==============================================================================
+/// 회전된 바운딩 박스. (2D, 꼭짓점 4 개를 차례로 이은 볼록 사각형)
+///
+/// # 예제
+/// 점 판정과 겹침 판정
+/// ```rust
+/// use vanilla::{Vector2, OBB};
+///
+/// let mut square = OBB::new();
+/// square.set_edges([Vector2::create(0.0, 0.0), Vector2::create(10.0, 0.0), Vector2::create(10.0, 10.0), Vector2::create(0.0, 10.0)]);
+/// let mut diamond = OBB::new();
+/// diamond.set_edges([Vector2::create(5.0, -2.0), Vector2::create(12.0, 5.0), Vector2::create(5.0, 12.0), Vector2::create(-2.0, 5.0)]);
+///
+/// assert!(square.contains(Vector2::create(5.0, 5.0)));
+/// assert!(!square.contains(Vector2::create(11.0, 5.0)));
+/// assert!(square.overlaps(&diamond));
+/// ```
+//==============================================================================
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct OBB {
@@ -17,6 +35,9 @@ pub struct OBB {
 impl OBB {
 	//==============================================================================
 	/// 생성. (꼭짓점은 모두 (0, 0))
+	///
+	/// # 돌려줌
+	/// 꼭짓점 4 개가 모두 (0, 0) 인 OBB.
 	//==============================================================================
 	pub fn new() -> OBB {
 		OBB { edges: [Vector2::zero(); 4] }
@@ -24,6 +45,24 @@ impl OBB {
 
 	//==============================================================================
 	/// 점이 안에 있는지. (반직선 교차 판정)
+	///
+	/// # 인자
+	/// - `view_position`: 판정할 점. (꼭짓점과 같은 좌표계)
+	///
+	/// # 돌려줌
+	/// 안에 있으면 true. (축 정렬 사각형이면 왼쪽, 위 변 위의 점은 안, 오른쪽, 아래 변 위의 점은 밖)
+	///
+	/// # 예제
+	/// 변 위의 점
+	/// ```rust
+	/// use vanilla::{Vector2, OBB};
+	///
+	/// let mut square = OBB::new();
+	/// square.set_edges([Vector2::create(0.0, 0.0), Vector2::create(10.0, 0.0), Vector2::create(10.0, 10.0), Vector2::create(0.0, 10.0)]);
+	/// assert!(square.contains(Vector2::create(0.0, 5.0)));
+	/// assert!(!square.contains(Vector2::create(10.0, 5.0)));
+	/// assert!(!square.contains(Vector2::create(5.0, 10.0)));
+	/// ```
 	//==============================================================================
 	pub fn contains(&self, view_position: Vector2) -> bool {
 		let edges = self.get_edges();
@@ -46,6 +85,27 @@ impl OBB {
 
 	//==============================================================================
 	/// 다른 OBB 와 겹치는지. (분리축 정리, 두 사각형의 모든 변 법선에 투영해 본다)
+	///
+	/// # 인자
+	/// - `other`: 겹침을 볼 OBB.
+	///
+	/// # 돌려줌
+	/// 겹치거나 맞닿으면 true. 두 사각형의 변 법선 가운데 하나라도 분리축이면 false.
+	///
+	/// # 예제
+	/// 맞닿은 두 사각형과 떨어진 사각형
+	/// ```rust
+	/// use vanilla::{Vector2, OBB};
+	///
+	/// let mut left = OBB::new();
+	/// left.set_edges([Vector2::create(0.0, 0.0), Vector2::create(10.0, 0.0), Vector2::create(10.0, 10.0), Vector2::create(0.0, 10.0)]);
+	/// let mut right = OBB::new();
+	/// right.set_edges([Vector2::create(10.0, 0.0), Vector2::create(20.0, 0.0), Vector2::create(20.0, 10.0), Vector2::create(10.0, 10.0)]);
+	/// let mut far = OBB::new();
+	/// far.set_edges([Vector2::create(30.0, 0.0), Vector2::create(40.0, 0.0), Vector2::create(40.0, 10.0), Vector2::create(30.0, 10.0)]);
+	/// assert!(left.overlaps(&right));
+	/// assert!(!left.overlaps(&far));
+	/// ```
 	//==============================================================================
 	pub fn overlaps(&self, other: &OBB) -> bool {
 		let edges = self.get_edges();
@@ -70,6 +130,9 @@ impl OBB {
 
 	//==============================================================================
 	/// 꼭짓점 목록 설정.
+	///
+	/// # 인자
+	/// - `edges`: 꼭짓점 4 개. (차례로 이으면 볼록 사각형이 되는 순서)
 	//==============================================================================
 	pub fn set_edges(&mut self, edges: [Vector2; 4]) {
 		self.edges = edges;
@@ -77,6 +140,9 @@ impl OBB {
 
 	//==============================================================================
 	/// 꼭짓점 목록 반환.
+	///
+	/// # 돌려줌
+	/// 꼭짓점 4 개의 읽기 참조.
 	//==============================================================================
 	pub fn get_edges(&self) -> &[Vector2; 4] {
 		&self.edges

@@ -17,20 +17,14 @@
 //!   컨텍스트는 복제할 수 없고 with 가 &mut self 를 받아서, 한 작업 안에서 with 를 겹쳐 부르는 코드는 컴파일되지 않는다.
 //! - 건전성: 폴링하는 동안만 스레드 지역 칸(TASK_ACCESS)에 엔진, 그래픽, 그 작업의 씬을 가리키는 포인터를 둔다.
 //!   1. 포인터는 실행기가 &mut 로 쥔 엔진, 그래픽, 씬 목록의 한 칸에서 만든다. 폴링이 끝날 때까지 실행기는 그 &mut 를 다시 쓰지 않고,
-//!   ```text
 //!      폴링이 끝나면(패닉으로 풀릴 때도) 칸을 앞의 값으로 되돌린다. 그래서 포인터는 쓰는 동안 늘 살아 있고, 실행기 쪽 빌림과 겹치지 않는다.
 //!      맡기는 자리의 첫 폴링은 spawn 이 받은 &mut Engine 과 &mut 씬에서 만든다. (그래픽은 그 자리에 없어 with_graphic 이 None)
 //!      &mut Engine 은 with 안에서만 얻으므로 그때 칸은 비어 있고, 첫 폴링이 끝나면 다시 빈 칸으로 돌린다.
-//!   ```
 //!   2. 엔진(EngineRunner.engine), 그래픽(EngineRunner.graphic), 씬(EngineRunner 의 씬 목록 한 칸)은 서로 다른 값이라 겹치지 않는다.
-//!   ```text
 //!      (spawn 이 받은 씬과 엔진도 빌림 검사기가 서로 다른 값임을 보장한다)
 //!      폴링하는 작업 목록은 엔진에서 꺼내 둔 지역 값이라 엔진을 빌려도 닿지 않는다. (그동안 맡긴 새 작업은 엔진의 따로 둔 목록에 쌓인다)
-//!   ```
 //!   3. with 는 칸에서 포인터를 꺼내(take) 쓰고 끝나면 되돌린다. 그동안 칸이 비어 있어서, 어떤 길로든 두 번째 &mut 를 만들 수 없다.
-//!   ```text
 //!      (작업 바깥에서 부르거나, 안에서 겹쳐 부르거나, 다른 씬의 컨텍스트를 몰래 넘겨 부르면 이중 빌림 대신 까닭을 적은 패닉이 난다)
-//!   ```
 //!   4. 씬은 Any 로 그 컨텍스트의 타입인지 확인하고, 씬 핸들이 그 작업의 씬인지도 확인한다.
 //! - 씬을 내려도 원본처럼 그 씬의 작업은 이어 돈다. 엔진은 작업이 남은 씬 값을 작업이 다 끝날 때까지 살려 두고(목록에서는 빠져 tick, draw 를 받지 않는다)
 //!   with 는 그 씬을 계속 준다. 작업이 다 끝나면 destroy 를 부르고 버린다.
@@ -195,6 +189,39 @@ impl std::fmt::Debug for TaskState {
 /// 작업 손잡이. (spawn_task, spawn_scene_task 가 돌려준다. 원본 async 함수가 돌려주는 Promise 자리)
 /// - 끝났는지 묻거나(is_finished), 다른 작업에서 await 하거나, 씬이 track_task 로 맡겨 다 끝날 때까지 initialize 를 미룬다.
 /// - 작업을 버렸을 때(그 씬을 내렸을 때)도 끝난 것으로 친다.
+///
+/// # 예제
+/// 기다릴 것이 없는 작업은 맡기는 자리에서 끝나고, Promise 를 기다리는 작업은 남는다
+/// ```rust
+/// use vanilla::{Engine, EngineConfiguration, Promise, TaskHandle};
+///
+/// let mut engine = Engine::new(EngineConfiguration::new());
+/// let finished_task_handle: TaskHandle = engine.spawn_task(|_engine_context| async move {});
+/// assert!(finished_task_handle.is_finished());
+///
+/// let (promise, promise_resolver) = Promise::<u32>::create();
+/// let waiting_task_handle = engine.spawn_task(|_engine_context| async move {
+/// 	let value = promise.await;
+/// 	println!("{}", value);
+/// });
+/// assert!(!waiting_task_handle.is_finished());
+/// promise_resolver.resolve(7);
+/// ```
+///
+/// 다른 작업이 끝나기를 await 하기
+/// ```rust,no_run
+/// use vanilla::{wait, Engine};
+///
+/// fn spawn_chain(engine: &mut Engine) {
+/// 	let first_task_handle = engine.spawn_task(|_engine_context| async move {
+/// 		wait::seconds(1.0).await;
+/// 	});
+/// 	engine.spawn_task(move |_engine_context| async move {
+/// 		first_task_handle.await;
+/// 		println!("after first task");
+/// 	});
+/// }
+/// ```
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct TaskHandle {
@@ -204,6 +231,9 @@ pub struct TaskHandle {
 impl TaskHandle {
 	//==============================================================================
 	/// 끝났는지. (다 돌았거나 버려졌거나)
+	///
+	/// # 돌려줌
+	/// 작업이 다 돌았거나 버려졌으면 true.
 	//==============================================================================
 	pub fn is_finished(&self) -> bool {
 		self.task_state.is_finished.get()
@@ -507,6 +537,26 @@ pub(crate) fn with_polling_graphic<R>(graphic_function: impl FnOnce(&mut Graphic
 //==============================================================================
 /// 엔진 작업의 컨텍스트. (Engine::spawn_task 가 작업 함수에 넘긴다. with 안에서만 엔진을 빌린다)
 /// - 복제할 수 없고 스레드를 건너지 않는다.
+///
+/// # 예제
+/// 애셋 바이트를 부탁하고 기다리기 (데스크탑은 그 자리에서 읽어 맡기는 자리의 첫 폴링에 끝난다)
+/// ```rust
+/// use std::cell::Cell;
+/// use std::rc::Rc;
+/// use vanilla::{Engine, EngineConfiguration, EngineContext};
+///
+/// let mut engine = Engine::new(EngineConfiguration::new());
+/// let byte_count = Rc::new(Cell::new(0));
+/// let task_byte_count = byte_count.clone();
+/// let task_handle = engine.spawn_task(move |mut engine_context: EngineContext| async move {
+/// 	let load_handle = engine_context.with(|engine| engine.request_asset_bytes("examples/assets/atlas/icons.json"));
+/// 	if let Ok(bytes) = load_handle.await {
+/// 		task_byte_count.set(bytes.len());
+/// 	}
+/// });
+/// assert!(task_handle.is_finished());
+/// assert!(byte_count.get() > 0);
+/// ```
 //==============================================================================
 pub struct EngineContext {
 	_not_send: PhantomData<*const ()>,
@@ -525,6 +575,12 @@ impl EngineContext {
 	//==============================================================================
 	/// 엔진 빌리기. (클로저가 도는 동안만, 클로저 안에서는 await 할 수 없다)
 	/// - 엔진이 이 작업을 폴링하는 동안에만 부를 수 있다. (다른 곳에서 부르면 패닉)
+	///
+	/// # 인자
+	/// - `engine_function`: 엔진을 받아 일하는 클로저. (돌려준 값을 그대로 돌려준다, 참조는 담을 수 없다)
+	///
+	/// # 돌려줌
+	/// 클로저가 돌려준 값.
 	//==============================================================================
 	#[track_caller]
 	pub fn with<R>(&mut self, engine_function: impl FnOnce(&mut Engine) -> R) -> R {
@@ -536,6 +592,13 @@ impl EngineContext {
 
 	//==============================================================================
 	/// 엔진과 그래픽 빌리기. (GL 이 있어야 하는 일, 그래픽을 붙이기 전이면 None)
+	/// - with 처럼 엔진이 이 작업을 폴링하는 동안에만 부를 수 있다. (다른 곳에서 부르면 패닉)
+	///
+	/// # 인자
+	/// - `graphic_function`: 엔진과 그래픽을 받아 일하는 클로저.
+	///
+	/// # 돌려줌
+	/// 클로저가 돌려준 값. (그래픽이 없어 클로저를 부르지 않았으면 None, 맡기는 자리의 첫 구간도 None)
 	//==============================================================================
 	#[track_caller]
 	pub fn with_graphic<R>(&mut self, graphic_function: impl FnOnce(&mut Engine, &mut Graphic) -> R) -> Option<R> {
@@ -550,6 +613,36 @@ impl EngineContext {
 /// 씬 작업의 컨텍스트. (Engine::spawn_scene_task 가 작업 함수에 넘긴다. with 안에서만 그 씬과 엔진을 빌린다)
 /// - 씬은 S 타입 그대로 받는다. (원본 async 함수 안의 this 자리)
 /// - 복제할 수 없고 스레드를 건너지 않는다.
+///
+/// # 예제
+/// 씬 작업에서 1 초 기다린 뒤 씬 값 바꾸기
+/// ```rust,no_run
+/// use vanilla::{wait, Engine, Scene, SceneBase, SceneContext};
+///
+/// struct TitleScene {
+/// 	scene_base: SceneBase,
+/// 	is_logo_shown: bool,
+/// }
+///
+/// impl Scene for TitleScene {
+/// 	fn get_scene_base(&self) -> &SceneBase {
+/// 		&self.scene_base
+/// 	}
+///
+/// 	fn get_scene_base_mut(&mut self) -> &mut SceneBase {
+/// 		&mut self.scene_base
+/// 	}
+///
+/// 	fn initialize(&mut self, engine: &mut Engine) {
+/// 		engine.spawn_scene_task(self, |mut scene_context: SceneContext<TitleScene>| async move {
+/// 			wait::seconds(1.0).await;
+/// 			scene_context.with(|scene, _engine| {
+/// 				scene.is_logo_shown = true;
+/// 			});
+/// 		});
+/// 	}
+/// }
+/// ```
 //==============================================================================
 pub struct SceneContext<S: Scene + 'static> {
 	scene_id: SceneId,
@@ -569,6 +662,9 @@ impl<S: Scene + 'static> SceneContext<S> {
 
 	//==============================================================================
 	/// 이 작업의 씬 핸들.
+	///
+	/// # 돌려줌
+	/// 작업을 맡긴 씬의 핸들. (load_scene 전에 맡겼으면 어느 씬도 가리키지 않는 핸들)
 	//==============================================================================
 	pub fn get_scene_id(&self) -> SceneId {
 		self.scene_id
@@ -577,6 +673,12 @@ impl<S: Scene + 'static> SceneContext<S> {
 	//==============================================================================
 	/// 씬과 엔진 빌리기. (클로저가 도는 동안만, 클로저 안에서는 await 할 수 없다)
 	/// - 엔진이 이 작업을 폴링하는 동안에만 부를 수 있다. (다른 곳에서 부르면 패닉)
+	///
+	/// # 인자
+	/// - `scene_function`: 그 씬(S 타입)과 엔진을 받아 일하는 클로저. (참조는 돌려줄 값에 담을 수 없다)
+	///
+	/// # 돌려줌
+	/// 클로저가 돌려준 값.
 	//==============================================================================
 	#[track_caller]
 	pub fn with<R>(&mut self, scene_function: impl FnOnce(&mut S, &mut Engine) -> R) -> R {
@@ -604,6 +706,13 @@ impl<S: Scene + 'static> SceneContext<S> {
 
 	//==============================================================================
 	/// 씬과 엔진과 그래픽 빌리기. (GL 이 있어야 하는 일, 그래픽을 붙이기 전이면 None)
+	/// - with 처럼 엔진이 이 작업을 폴링하는 동안에만 부를 수 있다. (다른 곳에서 부르면 패닉)
+	///
+	/// # 인자
+	/// - `graphic_function`: 그 씬과 엔진과 그래픽을 받아 일하는 클로저.
+	///
+	/// # 돌려줌
+	/// 클로저가 돌려준 값. (그래픽이 없어 클로저를 부르지 않았으면 None, 맡기는 자리의 첫 구간도 None)
 	//==============================================================================
 	#[track_caller]
 	pub fn with_graphic<R>(&mut self, graphic_function: impl FnOnce(&mut S, &mut Engine, &mut Graphic) -> R) -> Option<R> {
@@ -791,6 +900,34 @@ struct PromiseState<T> {
 /// - 콜백으로 끝을 알리는 API 를 await 할 수 있게 바꿀 때 쓴다. (read_clipboard_text_async, request_frame_capture_async 같은 것)
 /// - 실패할 수 있는 일은 `Promise<Result<T, E>>` 로 두고 resolve(Ok(값)) 또는 reject(까닭)로 푼다. (원본 reject 와 await 의 예외 자리)
 /// - 손잡이를 버리고 풀지 않으면 원본처럼 끝나지 않는다.
+///
+/// # 예제
+/// 풀기 전에는 기다리고, 풀면 그 값으로 끝난다
+/// ```rust
+/// use std::future::Future;
+/// use std::pin::Pin;
+/// use std::task::{Context, Poll, Waker};
+/// use vanilla::Promise;
+///
+/// let (mut promise, promise_resolver) = Promise::<u32>::create();
+/// let mut context = Context::from_waker(Waker::noop());
+/// assert_eq!(Pin::new(&mut promise).poll(&mut context), Poll::Pending);
+/// promise_resolver.resolve(7);
+/// assert_eq!(Pin::new(&mut promise).poll(&mut context), Poll::Ready(7));
+/// ```
+///
+/// 콜백 API 를 await 할 수 있게 바꾸기
+/// ```rust,no_run
+/// use vanilla::{Engine, Promise};
+///
+/// fn read_clipboard_promise(engine: &Engine) -> Promise<String> {
+/// 	let (clipboard_promise, clipboard_resolver) = Promise::create();
+/// 	engine.read_clipboard_text_with_callback(move |clipboard_text| {
+/// 		clipboard_resolver.resolve(clipboard_text);
+/// 	});
+/// 	clipboard_promise
+/// }
+/// ```
 //==============================================================================
 pub struct Promise<T> {
 	promise_state: Rc<RefCell<PromiseState<T>>>,
@@ -798,6 +935,20 @@ pub struct Promise<T> {
 
 //==============================================================================
 /// Promise 를 푸는 손잡이. (원본 resolve 함수 자리, 한 번만 풀 수 있게 resolve 가 손잡이를 가져간다)
+///
+/// # 예제
+/// 실패할 수 있는 일을 reject 로 풀기
+/// ```rust
+/// use std::future::Future;
+/// use std::pin::Pin;
+/// use std::task::{Context, Poll, Waker};
+/// use vanilla::{Promise, PromiseResolver};
+///
+/// let (mut promise, promise_resolver): (Promise<Result<u32, String>>, PromiseResolver<Result<u32, String>>) = Promise::create();
+/// promise_resolver.reject(String::from("timeout"));
+/// let mut context = Context::from_waker(Waker::noop());
+/// assert_eq!(Pin::new(&mut promise).poll(&mut context), Poll::Ready(Err(String::from("timeout"))));
+/// ```
 //==============================================================================
 pub struct PromiseResolver<T> {
 	promise_state: Rc<RefCell<PromiseState<T>>>,
@@ -806,6 +957,9 @@ pub struct PromiseResolver<T> {
 impl<T> Promise<T> {
 	//==============================================================================
 	/// 생성. (퓨처와 푸는 손잡이를 짝으로 준다)
+	///
+	/// # 돌려줌
+	/// (기다릴 Promise, 푸는 손잡이) 짝.
 	//==============================================================================
 	pub fn create() -> (Promise<T>, PromiseResolver<T>) {
 		let promise_state = Rc::new(RefCell::new(PromiseState {
@@ -823,6 +977,12 @@ impl<T> Promise<T> {
 
 	//==============================================================================
 	/// 이미 풀린 Promise. (원본 Promise.resolve(값))
+	///
+	/// # 인자
+	/// - `value`: 풀린 값.
+	///
+	/// # 돌려줌
+	/// 처음 폴링에 그 값으로 끝나는 Promise.
 	//==============================================================================
 	pub fn resolved(value: T) -> Promise<T> {
 		let (promise, promise_resolver) = Promise::create();
@@ -834,6 +994,9 @@ impl<T> Promise<T> {
 impl<T> PromiseResolver<T> {
 	//==============================================================================
 	/// 풀기. (기다리는 작업을 깨운다. 빌림을 놓은 뒤 깨워서, 깨우는 쪽이 바로 폴링해도 겹쳐 빌리지 않는다)
+	///
+	/// # 인자
+	/// - `value`: Promise 가 끝날 값. (손잡이를 가져가 한 번만 풀 수 있다)
 	//==============================================================================
 	pub fn resolve(self, value: T) {
 		let waker = {
@@ -850,6 +1013,9 @@ impl<T> PromiseResolver<T> {
 impl<T, E> PromiseResolver<Result<T, E>> {
 	//==============================================================================
 	/// 실패로 풀기. (원본 reject(까닭) 자리, `Promise<Result<T, E>>` 가 Err(까닭)으로 끝난다)
+	///
+	/// # 인자
+	/// - `error`: 실패 까닭. (Err 로 감싸 푼다)
 	//==============================================================================
 	pub fn reject(self, error: E) {
 		self.resolve(Err(error));
@@ -929,10 +1095,16 @@ mod tests {
 	}
 
 	impl Scene for CounterScene {
+		//==============================================================================
+		/// 씬 공통 상태 반환.
+		//==============================================================================
 		fn get_scene_base(&self) -> &SceneBase {
 			&self.scene_base
 		}
 
+		//==============================================================================
+		/// 씬 공통 상태 반환. (변경용)
+		//==============================================================================
 		fn get_scene_base_mut(&mut self) -> &mut SceneBase {
 			&mut self.scene_base
 		}

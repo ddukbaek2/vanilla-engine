@@ -5,6 +5,29 @@
 //!   열쇠가 바뀌어 다른 것을 쥐거나 컴포넌트가 사라지면 Rc 가 놓인다. 캐시만 쥔 것(Rc::strong_count 가 1)이 아무도 쓰지 않는 것이다.
 //! - 아무도 쓰지 않는 것은 바로 버리지 않고 남겨 둔다. (같은 모양이 곧 다시 오면 굽지 않는다) 새로 담을 때 MAXIMUM_IDLE_BAKE_COUNT 를 넘었으면 오래 안 쓴 것부터 버린다.
 //! - 굽지 못한 것(None)은 담지 않는다. 엔진은 한 스레드에서 돌아 캐시는 스레드 하나의 전역이다.
+//!
+//! # 예제
+//! 같은 열쇠는 한 번만 굽고 같은 그림을 나눠 쓴다
+//! ```rust
+//! use std::rc::Rc;
+//! use vanilla::core::sharedbakecache::{acquire_shared_bake, read_shared_bake_count};
+//!
+//! let mut bake_count = 0;
+//! let first_bake = acquire_shared_bake("label|16px|Hello", || {
+//! 	bake_count += 1;
+//! 	Some(Rc::new(String::from("Hello")))
+//! }).unwrap();
+//! let second_bake = acquire_shared_bake("label|16px|Hello", || {
+//! 	bake_count += 1;
+//! 	Some(Rc::new(String::from("Hello")))
+//! }).unwrap();
+//! assert_eq!(bake_count, 1);
+//! assert!(Rc::ptr_eq(&first_bake, &second_bake));
+//! assert_eq!(read_shared_bake_count(), (1, 0));
+//! drop(first_bake);
+//! drop(second_bake);
+//! assert_eq!(read_shared_bake_count(), (1, 1));
+//! ```
 //==============================================================================
 use std::any::Any;
 use std::cell::RefCell;
@@ -34,6 +57,13 @@ thread_local! {
 //==============================================================================
 /// 구운 그림 쥐기. (열쇠에 구운 것이 있으면 그것을, 없으면 create_bake 로 구워 담고 준다, 원본 acquireSharedBake)
 /// - 돌려준 Rc 를 쥐고 있는 동안은 버리지 않는다. 열쇠가 같으면 종류(T)도 같아야 한다. (종류가 다르면 새로 굽고 바꿔 담는다)
+///
+/// # 인자
+/// - `bake_key`: 열쇠. (모양을 가르는 글, 같으면 같은 그림)
+/// - `create_bake`: 열쇠에 담긴 것이 없을 때만 부르는 굽기 함수. (None 을 돌려주면 담지 않는다)
+///
+/// # 돌려줌
+/// 담긴 그림이나 새로 구운 그림. 굽기 함수가 None 을 돌려주면 None.
 //==============================================================================
 pub fn acquire_shared_bake<T: 'static>(bake_key: &str, create_bake: impl FnOnce() -> Option<Rc<T>>) -> Option<Rc<T>> {
 	let cached_bake = SHARED_BAKE_STATE.with(|shared_bake_state| {
@@ -78,6 +108,9 @@ fn evict_idle_bakes(shared_bake_state: &mut SharedBakeState) {
 
 //==============================================================================
 /// 지금 들고 있는 구운 그림 수와 그 가운데 아무도 쓰지 않는 수. (시험과 통계용, 원본 readSharedBakeCount)
+///
+/// # 돌려줌
+/// (담긴 수, 그 가운데 캐시만 쥔 수). (캐시만 쥔 것은 `Rc::strong_count` 가 1 인 것)
 //==============================================================================
 pub fn read_shared_bake_count() -> (usize, usize) {
 	SHARED_BAKE_STATE.with(|shared_bake_state| {

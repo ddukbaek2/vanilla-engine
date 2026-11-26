@@ -24,11 +24,27 @@ use crate::core::node::worldnode::NodeTransform;
 
 //==============================================================================
 /// 띄우기 설정. (원본 options = { color?, font_size = 22, rise = 46, duration = 0.8, jitter = 10, bold = true })
+///
+/// # 예제
+/// 기본값에서 색과 높이만 바꾸기
+/// ```rust
+/// use vanilla::{Color, FloatingTextOptions};
+///
+/// let options = FloatingTextOptions {
+/// 	color: Color::create(1.0, 0.4, 0.4, 1.0),
+/// 	rise: 60.0,
+/// 	..FloatingTextOptions::default()
+/// };
+/// assert_eq!(options.font_size, 22.0);
+/// assert_eq!(options.duration, 0.8);
+/// assert!(options.is_bold);
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FloatingTextOptions {
 	/// 글자 색. (기본 흰색)
 	pub color: Color,
+	/// 글자 크기. (픽셀, 기본 22)
 	pub font_size: f32,
 	/// 떠오르는 높이. (픽셀)
 	pub rise: f32,
@@ -36,6 +52,7 @@ pub struct FloatingTextOptions {
 	pub duration: f32,
 	/// 가로로 흩뿌리는 폭. (±픽셀)
 	pub jitter: f32,
+	/// 굵게 그릴지. (기본 true)
 	pub is_bold: bool,
 }
 
@@ -69,6 +86,28 @@ struct FloatingTextItem {
 
 //==============================================================================
 /// 떠오르는 텍스트 관리 컴포넌트.
+/// - 띄운 라벨은 duration 동안 rise 만큼 감속하며 떠오르고 흐려진다. 다 끝난 라벨 노드는 꺼 두었다가 다음 spawn 이 다시 쓴다.
+///
+/// # 예제
+/// 데미지 숫자 띄우기
+/// ```rust
+/// use vanilla::{Color, Engine, EngineConfiguration, FloatingText, FloatingTextOptions, NodeTree, Text, Vector2};
+///
+/// let engine = Engine::new(EngineConfiguration::new());
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.get_root_id();
+/// let floating_text_id = FloatingText::create(&mut node_tree, root_id);
+/// let options = FloatingTextOptions {
+/// 	color: Color::create(1.0, 0.4, 0.4, 1.0),
+/// 	..FloatingTextOptions::default()
+/// };
+/// let label_id = FloatingText::spawn(&mut node_tree, floating_text_id, "-120", Vector2::create(100.0, 200.0), options).unwrap();
+/// assert_eq!(node_tree[label_id].get_component::<Text>().unwrap().get_text(), "-120");
+///
+/// node_tree.tick(&engine, 1.0);
+/// assert!(!node_tree[label_id].is_active());
+/// assert_eq!(node_tree[floating_text_id].get_component::<FloatingText>().unwrap().get_active_count(), 0);
+/// ```
 //==============================================================================
 pub struct FloatingText {
 	component_base: ComponentBase,
@@ -80,6 +119,10 @@ pub struct FloatingText {
 impl FloatingText {
 	//==============================================================================
 	/// 생성.
+	/// - 노드에 붙이지 않은 컴포넌트다. 보통은 노드까지 만들어 붙이는 create 를 쓴다.
+	///
+	/// # 돌려줌
+	/// 떠 있는 항목이 없는 컴포넌트.
 	//==============================================================================
 	pub fn new() -> FloatingText {
 		FloatingText {
@@ -91,6 +134,13 @@ impl FloatingText {
 
 	//==============================================================================
 	/// 노드 만들기. (parent_id 밑에 "FloatingText" 노드를 만들고 컴포넌트를 붙인다. 원본 new FloatingText() + add_child)
+	///
+	/// # 인자
+	/// - `node_tree`: 노드를 만들 트리.
+	/// - `parent_id`: 부모 노드. (보통 씬 뿌리)
+	///
+	/// # 돌려줌
+	/// 만든 노드. (spawn, clear 에 넘긴다)
 	//==============================================================================
 	pub fn create(node_tree: &mut NodeTree, parent_id: NodeId) -> NodeId {
 		let floating_text_node_id = node_tree.create_child(parent_id, "FloatingText");
@@ -100,6 +150,17 @@ impl FloatingText {
 
 	//==============================================================================
 	/// 텍스트 띄우기. (쉬는 라벨 노드가 있으면 다시 쓰고, 없으면 만든다. 띄운 라벨 노드를 돌려준다)
+	/// - 새 라벨 노드는 FloatingText 노드의 자식이고, 가운데 피봇, 240x40, Text 컴포넌트를 단다.
+	///
+	/// # 인자
+	/// - `node_tree`: 라벨 노드를 만들거나 다시 쓸 트리.
+	/// - `floating_text_node_id`: FloatingText 컴포넌트가 붙은 노드. (create 가 돌려준 것)
+	/// - `text`: 띄울 글.
+	/// - `world_position`: 띄울 자리. (FloatingText 노드 안의 지역 좌표, 가로는 ±jitter 안에서 무작위로 흩뿌린다)
+	/// - `options`: 색, 크기, 높이, 시간, 흩뿌림, 굵게.
+	///
+	/// # 돌려줌
+	/// 띄운 라벨 노드. 노드가 없거나 FloatingText 컴포넌트가 없으면 None.
 	//==============================================================================
 	pub fn spawn(node_tree: &mut NodeTree, floating_text_node_id: NodeId, text: &str, world_position: Vector2, options: FloatingTextOptions) -> Option<NodeId> {
 		node_tree.get_node(floating_text_node_id)?.get_component::<FloatingText>()?;
@@ -169,6 +230,9 @@ impl FloatingText {
 
 	//==============================================================================
 	/// 떠 있는 항목 수 반환.
+	///
+	/// # 돌려줌
+	/// 아직 떠오르는 중인 라벨 수.
 	//==============================================================================
 	pub fn get_active_count(&self) -> usize {
 		self.active_list.len()
@@ -176,6 +240,11 @@ impl FloatingText {
 
 	//==============================================================================
 	/// 모두 지우기. (떠 있는 라벨을 끄고 쉬는 목록으로 돌린다)
+	/// - 노드를 지우지 않는다. 밖에서 지운 라벨은 목록에서만 뺀다. 컴포넌트가 없으면 아무것도 하지 않는다.
+	///
+	/// # 인자
+	/// - `node_tree`: 라벨 노드가 든 트리.
+	/// - `floating_text_node_id`: FloatingText 컴포넌트가 붙은 노드.
 	//==============================================================================
 	pub fn clear(node_tree: &mut NodeTree, floating_text_node_id: NodeId) {
 		let active_list = match node_tree.get_node_mut(floating_text_node_id).and_then(|node| node.get_component_mut::<FloatingText>()) {

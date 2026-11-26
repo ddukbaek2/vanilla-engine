@@ -21,6 +21,31 @@ type LandedEvent = Box<dyn FnMut()>;
 
 //==============================================================================
 /// 플랫포머 물리 컴포넌트.
+/// - tick 마다 integrate 로 다음 위치를 구해 노드 로컬 위치에 넣는다.
+///
+/// # 예제
+/// 노드에 붙여 떨어뜨리고 바닥에서 뛰기
+/// ```rust
+/// use vanilla::{Engine, EngineConfiguration, NodeTree, PlatformerBody, Vector2};
+///
+/// let engine = Engine::new(EngineConfiguration::new());
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.get_root_id();
+/// let hero_id = node_tree.create_child(root_id, "hero");
+/// node_tree[hero_id].set_local_position(Vector2::create(100.0, 0.0));
+/// let body = node_tree[hero_id].add_component(PlatformerBody::new());
+/// body.set_ground_y(560.0);
+/// body.set_horizontal_bounds(Some(40.0), Some(920.0));
+///
+/// for _ in 0..60 {
+/// 	node_tree.tick(&engine, 1.0 / 60.0);
+/// }
+/// assert_eq!(node_tree[hero_id].get_local_position().y, 560.0);
+/// let body = node_tree[hero_id].get_component_mut::<PlatformerBody>().unwrap();
+/// assert!(body.is_grounded());
+/// body.set_velocity_x(300.0);
+/// assert!(body.jump(-720.0));
+/// ```
 //==============================================================================
 pub struct PlatformerBody {
 	component_base: ComponentBase,
@@ -37,6 +62,9 @@ pub struct PlatformerBody {
 impl PlatformerBody {
 	//==============================================================================
 	/// 생성. (중력 초당 2000, 바닥 0, 경계 없음, 공중)
+	///
+	/// # 돌려줌
+	/// 속도가 0 인 새 플랫포머 물리.
 	//==============================================================================
 	pub fn new() -> PlatformerBody {
 		PlatformerBody {
@@ -54,6 +82,27 @@ impl PlatformerBody {
 	//==============================================================================
 	/// 한 걸음 적분. (속도에 중력 → 위치 → 접지 → 경계. 다음 위치를 돌려준다)
 	/// - tick 이 부른다. 노드 없이도 시험할 수 있게 떼어 냈다.
+	/// - 바닥에 닿으면 세로 속도를 0 으로 하고, 공중에 있다가 닿은 순간이면 착지 알림을 부른다.
+	///
+	/// # 인자
+	/// - `current_position`: 지금 위치. (부모 영역 기준 로컬 좌표, 아래쪽이 +Y)
+	/// - `time_delta`: 지난 시간. (초)
+	///
+	/// # 돌려줌
+	/// 다음 위치. (y 는 바닥 높이를 넘지 않고, x 는 좌우 경계 안으로 자른다)
+	///
+	/// # 예제
+	/// 노드 없이 한 걸음 적분하기
+	/// ```rust
+	/// use vanilla::{PlatformerBody, Vector2};
+	///
+	/// let mut body = PlatformerBody::new();
+	/// body.set_ground_y(100.0);
+	/// let next_position = body.integrate(Vector2::create(0.0, 0.0), 0.1);
+	/// assert_eq!(next_position, Vector2::create(0.0, 20.0));
+	/// assert_eq!(body.get_velocity().y, 200.0);
+	/// assert!(!body.is_grounded());
+	/// ```
 	//==============================================================================
 	pub fn integrate(&mut self, current_position: Vector2, time_delta: f32) -> Vector2 {
 		self.velocity = Vector2::create(self.velocity.x, self.velocity.y + self.gravity * time_delta);
@@ -93,6 +142,12 @@ impl PlatformerBody {
 
 	//==============================================================================
 	/// 도약. (접지 중일 때만, 위쪽이 음수 속도. 뛰었으면 true)
+	///
+	/// # 인자
+	/// - `jump_speed`: 세로 속도로 넣을 값. (픽셀/초, 위로 뛰려면 음수)
+	///
+	/// # 돌려줌
+	/// 접지 중이라 뛰었으면 true. 공중이면 false 이고 속도를 바꾸지 않는다.
 	//==============================================================================
 	pub fn jump(&mut self, jump_speed: f32) -> bool {
 		if !self.is_grounded {
@@ -105,6 +160,9 @@ impl PlatformerBody {
 
 	//==============================================================================
 	/// 가로 속도 설정.
+	///
+	/// # 인자
+	/// - `velocity_x`: 가로 속도. (픽셀/초, 오른쪽이 +)
 	//==============================================================================
 	pub fn set_velocity_x(&mut self, velocity_x: f32) {
 		self.velocity = Vector2::create(velocity_x, self.velocity.y);
@@ -112,6 +170,9 @@ impl PlatformerBody {
 
 	//==============================================================================
 	/// 세로 속도 설정.
+	///
+	/// # 인자
+	/// - `velocity_y`: 세로 속도. (픽셀/초, 아래쪽이 +)
 	//==============================================================================
 	pub fn set_velocity_y(&mut self, velocity_y: f32) {
 		self.velocity = Vector2::create(self.velocity.x, velocity_y);
@@ -119,6 +180,9 @@ impl PlatformerBody {
 
 	//==============================================================================
 	/// 속도 반환.
+	///
+	/// # 돌려줌
+	/// 지금 속도. (픽셀/초)
 	//==============================================================================
 	pub fn get_velocity(&self) -> Vector2 {
 		self.velocity
@@ -126,6 +190,9 @@ impl PlatformerBody {
 
 	//==============================================================================
 	/// 중력 설정. (초당 속도 변화량)
+	///
+	/// # 인자
+	/// - `gravity`: 중력. (픽셀/초², 아래쪽이 +, 기본 2000)
 	//==============================================================================
 	pub fn set_gravity(&mut self, gravity: f32) {
 		self.gravity = gravity;
@@ -133,6 +200,9 @@ impl PlatformerBody {
 
 	//==============================================================================
 	/// 중력 반환.
+	///
+	/// # 돌려줌
+	/// 지금 중력. (픽셀/초²)
 	//==============================================================================
 	pub fn get_gravity(&self) -> f32 {
 		self.gravity
@@ -140,6 +210,9 @@ impl PlatformerBody {
 
 	//==============================================================================
 	/// 바닥 높이 설정. (부모 영역 기준 로컬 Y)
+	///
+	/// # 인자
+	/// - `ground_y`: 바닥 높이. (로컬 Y, 이 값 아래로 내려가지 않는다)
 	//==============================================================================
 	pub fn set_ground_y(&mut self, ground_y: f32) {
 		self.ground_y = ground_y;
@@ -147,6 +220,9 @@ impl PlatformerBody {
 
 	//==============================================================================
 	/// 바닥 높이 반환.
+	///
+	/// # 돌려줌
+	/// 지금 바닥 높이. (로컬 Y)
 	//==============================================================================
 	pub fn get_ground_y(&self) -> f32 {
 		self.ground_y
@@ -154,6 +230,10 @@ impl PlatformerBody {
 
 	//==============================================================================
 	/// 좌우 이동 경계 설정. (None 이면 그 쪽은 막지 않는다)
+	///
+	/// # 인자
+	/// - `left_bound`: 왼쪽 경계. (로컬 X, 이보다 작아지지 않는다)
+	/// - `right_bound`: 오른쪽 경계. (로컬 X, 이보다 커지지 않는다)
 	//==============================================================================
 	pub fn set_horizontal_bounds(&mut self, left_bound: Option<f32>, right_bound: Option<f32>) {
 		self.left_bound = left_bound;
@@ -162,6 +242,9 @@ impl PlatformerBody {
 
 	//==============================================================================
 	/// 접지 중인지.
+	///
+	/// # 돌려줌
+	/// 지난 적분에서 바닥에 닿아 있었으면 true. 뛰면 false 가 된다.
 	//==============================================================================
 	pub fn is_grounded(&self) -> bool {
 		self.is_grounded
@@ -169,6 +252,30 @@ impl PlatformerBody {
 
 	//==============================================================================
 	/// 착지 알림 설정. (공중에서 바닥에 닿는 순간)
+	///
+	/// # 인자
+	/// - `landed_event`: 착지할 때 부를 함수. (앞의 알림은 바꾼다)
+	///
+	/// # 예제
+	/// 착지 횟수 세기
+	/// ```rust
+	/// use std::cell::Cell;
+	/// use std::rc::Rc;
+	/// use vanilla::{PlatformerBody, Vector2};
+	///
+	/// let landed_count = Rc::new(Cell::new(0));
+	/// let landed_count_for_event = landed_count.clone();
+	/// let mut body = PlatformerBody::new();
+	/// body.set_ground_y(10.0);
+	/// body.set_landed_event(move || {
+	/// 	landed_count_for_event.set(landed_count_for_event.get() + 1);
+	/// });
+	/// let mut position = Vector2::zero();
+	/// for _ in 0..30 {
+	/// 	position = body.integrate(position, 0.1);
+	/// }
+	/// assert_eq!(landed_count.get(), 1);
+	/// ```
 	//==============================================================================
 	pub fn set_landed_event(&mut self, landed_event: impl FnMut() + 'static) {
 		self.landed_event = Some(Box::new(landed_event));

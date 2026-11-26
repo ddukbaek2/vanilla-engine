@@ -70,6 +70,54 @@ pub(crate) fn resume_audio_manager_state(state_cell: &Rc<RefCell<AudioManagerSta
 
 //==============================================================================
 /// 오디오 매니저.
+/// - 엔진이 하나 들고, 씬과 컴포넌트는 engine.get_audio_manager() 로 빌려 플레이어와 버스를 만든다.
+///
+/// # 예제
+/// 만든 직후에는 AudioContext 가 없다
+/// ```rust
+/// use vanilla::AudioManager;
+///
+/// let audio_manager = AudioManager::new();
+/// assert!(!audio_manager.has_audio_context());
+/// assert!(audio_manager.get_audio_context().is_none());
+/// assert_eq!(audio_manager.get_context_time(), 0.0);
+/// ```
+///
+/// 씬에서 소리 하나 틀기
+/// ```rust,no_run
+/// use vanilla::{AudioPlayer, Engine, EngineConfiguration, Scene, SceneBase};
+///
+/// struct MainScene {
+/// 	scene_base: SceneBase,
+/// 	audio_player: Option<AudioPlayer>,
+/// }
+///
+/// impl Scene for MainScene {
+/// 	fn get_scene_base(&self) -> &SceneBase {
+/// 		&self.scene_base
+/// 	}
+///
+/// 	fn get_scene_base_mut(&mut self) -> &mut SceneBase {
+/// 		&mut self.scene_base
+/// 	}
+///
+/// 	fn create(&mut self, engine: &mut Engine) {
+/// 		let audio_asset = engine.load_audio_asset("tests/assets/audio/wav_s16_stereo.wav").unwrap();
+/// 		let mut audio_player = engine.get_audio_manager().create_audio_player();
+/// 		audio_player.set_audio_asset(audio_asset);
+/// 		audio_player.set_volume(0.5);
+/// 		audio_player.play(false);
+/// 		self.audio_player = Some(audio_player);
+/// 	}
+/// }
+///
+/// let engine = Engine::new(EngineConfiguration::new());
+/// let main_scene = MainScene {
+/// 	scene_base: SceneBase::new(),
+/// 	audio_player: None,
+/// };
+/// engine.run(Box::new(main_scene)).unwrap();
+/// ```
 //==============================================================================
 #[derive(Clone)]
 pub struct AudioManager {
@@ -79,6 +127,9 @@ pub struct AudioManager {
 impl AudioManager {
 	//==============================================================================
 	/// 생성. (AudioContext 는 아직 만들지 않는다)
+	///
+	/// # 돌려줌
+	/// 새 오디오 매니저. (소리 장치는 플레이어나 버스를 처음 만들 때, 또는 user gesture 뒤 resume_context 에서 연다)
 	//==============================================================================
 	pub fn new() -> AudioManager {
 		let platform_state = audio_backend::create_audio_platform_state();
@@ -100,6 +151,9 @@ impl AudioManager {
 
 	//==============================================================================
 	/// user gesture 이후인지 여부. (데스크탑은 늘 참)
+	///
+	/// # 돌려줌
+	/// user gesture 가 있었으면 true. (웹은 mark_user_gesture 를 부르기 전까지 false)
 	//==============================================================================
 	pub fn has_user_gesture(&self) -> bool {
 		self.state.borrow().has_user_gesture
@@ -117,6 +171,9 @@ impl AudioManager {
 
 	//==============================================================================
 	/// 오디오 플레이어 생성. (AudioContext 가 없으면 만든다. 만들지 못하면 소리 없는 플레이어)
+	///
+	/// # 돌려줌
+	/// 출력으로 소리를 내는 새 플레이어. (부른 쪽이 소유하고, 버리면 소리도 멈춘다)
 	//==============================================================================
 	pub fn create_audio_player(&self) -> AudioPlayer {
 		AudioPlayer::new(self, None)
@@ -124,6 +181,24 @@ impl AudioManager {
 
 	//==============================================================================
 	/// 오디오 버스 생성. (AudioContext 가 없으면 만든다. 만들지 못하면 소리 없는 버스)
+	///
+	/// # 돌려줌
+	/// 출력에 이은 새 버스. (부른 쪽이 소유한다)
+	///
+	/// # 예제
+	/// 배경음악 버스로 트는 플레이어
+	/// ```rust,no_run
+	/// use vanilla::Engine;
+	///
+	/// fn play_music(engine: &Engine) {
+	/// 	let music_bus = engine.get_audio_manager().create_audio_bus();
+	/// 	music_bus.set_volume(0.6);
+	/// 	let mut music_player = music_bus.create_audio_player();
+	/// 	let audio_asset = engine.load_audio_asset("tests/assets/audio/vorbis_stereo.ogg").unwrap();
+	/// 	music_player.set_audio_asset(audio_asset);
+	/// 	music_player.play(true);
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn create_audio_bus(&self) -> AudioBus {
 		AudioBus::new(self)
@@ -131,6 +206,9 @@ impl AudioManager {
 
 	//==============================================================================
 	/// AudioContext 가 있고 돌고 있는지. (SoundSystem 이 소리를 낼지 정할 때)
+	///
+	/// # 돌려줌
+	/// AudioContext 가 있고 멈춰 있지 않으면 true. (웹은 state 가 "running" 일 때)
 	//==============================================================================
 	pub fn is_context_running(&self) -> bool {
 		self.state.borrow().is_context_running()
@@ -138,6 +216,9 @@ impl AudioManager {
 
 	//==============================================================================
 	/// AudioContext 시계. (초, 원본 audio_context.currentTime, AudioContext 가 없으면 0)
+	///
+	/// # 돌려줌
+	/// AudioContext 를 만든 뒤 흐른 소리 시간. (초, AudioContext 가 없으면 0)
 	//==============================================================================
 	pub fn get_context_time(&self) -> f64 {
 		audio_backend::get_audio_context_time(&self.state.borrow())
@@ -145,6 +226,20 @@ impl AudioManager {
 
 	//==============================================================================
 	/// AudioContext. (원본 getAudioContext, 아직 만들지 않았으면 None, 빌린 동안 매니저의 다른 함수를 부르지 않는다)
+	///
+	/// # 돌려줌
+	/// 빌린 AudioContext. (아직 만들지 않았거나 만들지 못했으면 None)
+	///
+	/// # 예제
+	/// 표본율 읽기 (빌린 것은 바로 놓는다)
+	/// ```rust,no_run
+	/// use vanilla::AudioManager;
+	///
+	/// fn read_sample_rate(audio_manager: &AudioManager) -> Option<f32> {
+	/// 	let audio_context = audio_manager.get_audio_context()?;
+	/// 	Some(audio_context.sample_rate())
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn get_audio_context(&self) -> Option<std::cell::Ref<'_, AudioContext>> {
 		std::cell::Ref::filter_map(self.state.borrow(), |state| state.audio_context.as_ref()).ok()
@@ -152,6 +247,9 @@ impl AudioManager {
 
 	//==============================================================================
 	/// AudioContext 가 만들어져 있는지. (원본 getAudioContext() !== null 자리)
+	///
+	/// # 돌려줌
+	/// AudioContext 가 있으면 true.
 	//==============================================================================
 	pub fn has_audio_context(&self) -> bool {
 		self.state.borrow().audio_context.is_some()
@@ -166,6 +264,9 @@ impl AudioManager {
 }
 
 impl Default for AudioManager {
+	//==============================================================================
+	/// 기본값. (AudioManager::new 와 같다)
+	//==============================================================================
 	fn default() -> AudioManager {
 		AudioManager::new()
 	}

@@ -1,5 +1,5 @@
 //==============================================================================
-//! 비주얼 애셋. (원본 experimental/visual/visualasset.js 의 VisualAsset, 비주얼 에디터가 저장한 문서 파일을 읽어 Visual 을 만든다)
+//! 비주얼 애셋. (원본 resource/visualasset.js 의 VisualAsset, 비주얼 에디터가 저장한 문서 파일을 읽어 Visual 을 만든다)
 //! - 파일은 비주얼 에디터(vanilla.js tools/visualeditor)가 저장하는 UIDocument JSON 이다. (씬 *.scene.json, 프리팹 *.prefab.json, { version, root, frameSize? })
 //! - load 가 엔진의 애셋 받기로 바이트를 부탁한다. 바이트가 오면 처음 볼 때 JSON 객체이고 root 객체가 있는지 보고, 맞으면 읽힌 것이고 그 글을 든 Visual 을 담는다.
 //!   받기에 실패하거나 문서 꼴이 아니면 읽히지 않은 것이다. (원본은 load 가 거부된다)

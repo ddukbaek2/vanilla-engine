@@ -6,10 +6,8 @@
 //!   - 무효 심볼은 번호 0 하나를 같이 쓴다. (원본은 invalid() 마다 번호를 새로 붙인다. 무효 심볼은 키로 쓰이지 않아 결과는 같다)
 //!   - 원본 setType 은 쓰는 곳이 없고 Copy 값에서는 뜻이 달라져서 옮기지 않았다.
 //!   - LayoutSymbolMap 은 러스트 판에 더한 것이다. 원본이 행과 셀에 쓰는 Map 처럼 넣은 차례를 지킨다.
-//!   ```text
 //!     (지웠다 다시 넣으면 맨 뒤로 가고, 있는 키의 값을 바꾸면 자리를 지킨다) 솔버가 셀과 행을 도는 차례가
 //!     어느 심볼을 고를지 정하므로 원본과 같은 차례로 돈다.
-//!   ```
 //==============================================================================
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -22,6 +20,21 @@ static NEXT_SYMBOL_ID: AtomicU64 = AtomicU64::new(1);
 
 //==============================================================================
 /// 솔버 안의 심볼.
+/// - 솔버 안에서 쓰는 값이다. 사용자 코드는 보통 LayoutVariable 과 LayoutSolver 만 쓴다.
+///
+/// # 예제
+/// 번호로 가리는 심볼
+/// ```rust
+/// use vanilla::ui::autolayout::layoutsymbol::LayoutSymbol;
+/// use vanilla::ui::autolayout::layoutsymboltype::LayoutSymbolType;
+///
+/// let first = LayoutSymbol::new(LayoutSymbolType::External);
+/// let second = LayoutSymbol::new(LayoutSymbolType::External);
+/// assert_ne!(first, second);
+/// assert_eq!(first, first.clone());
+/// assert!(LayoutSymbol::invalid().is_invalid());
+/// assert_eq!(LayoutSymbol::invalid().get_id(), 0);
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug)]
 pub struct LayoutSymbol {
@@ -32,6 +45,12 @@ pub struct LayoutSymbol {
 impl LayoutSymbol {
 	//==============================================================================
 	/// 생성. (새 번호를 붙인다)
+	///
+	/// # 인자
+	/// - `symbol_type`: 심볼 종류.
+	///
+	/// # 돌려줌
+	/// 새 번호(1 부터 하나씩 늘어난다)를 붙인 심볼.
 	//==============================================================================
 	pub fn new(symbol_type: LayoutSymbolType) -> LayoutSymbol {
 		let id = NEXT_SYMBOL_ID.fetch_add(1, Ordering::Relaxed);
@@ -43,6 +62,9 @@ impl LayoutSymbol {
 
 	//==============================================================================
 	/// 무효 심볼.
+	///
+	/// # 돌려줌
+	/// 번호 0, 종류 Invalid 인 심볼. (늘 같은 값)
 	//==============================================================================
 	pub fn invalid() -> LayoutSymbol {
 		LayoutSymbol {
@@ -53,6 +75,9 @@ impl LayoutSymbol {
 
 	//==============================================================================
 	/// 번호 반환.
+	///
+	/// # 돌려줌
+	/// 번호. (무효 심볼은 0)
 	//==============================================================================
 	pub fn get_id(&self) -> u64 {
 		self.id
@@ -60,6 +85,9 @@ impl LayoutSymbol {
 
 	//==============================================================================
 	/// 종류 반환.
+	///
+	/// # 돌려줌
+	/// 종류.
 	//==============================================================================
 	pub fn get_type(&self) -> LayoutSymbolType {
 		self.symbol_type
@@ -67,6 +95,9 @@ impl LayoutSymbol {
 
 	//==============================================================================
 	/// 무효 심볼인지.
+	///
+	/// # 돌려줌
+	/// 종류가 Invalid 면 true.
 	//==============================================================================
 	pub fn is_invalid(&self) -> bool {
 		self.get_type() == LayoutSymbolType::Invalid
@@ -101,6 +132,29 @@ const COMPACT_REMOVED_COUNT: usize = 16;
 /// 넣은 차례를 지키는 심볼 키 맵. (원본 `Map<LayoutSymbol, V>` 자리)
 /// - 칸 목록(Vec)에 넣은 차례대로 두고, 번호에서 칸 번호를 찾는 해시 맵으로 바로 찾는다.
 /// - 지우면 칸을 비워 두고, 빈 칸이 많아지면 차례를 지킨 채 당겨 채운다.
+///
+/// # 예제
+/// 넣은 차례를 지키는 맵
+/// ```rust
+/// use vanilla::ui::autolayout::layoutsymbol::{LayoutSymbol, LayoutSymbolMap};
+/// use vanilla::ui::autolayout::layoutsymboltype::LayoutSymbolType;
+///
+/// let first = LayoutSymbol::new(LayoutSymbolType::Slack);
+/// let second = LayoutSymbol::new(LayoutSymbolType::Error);
+/// let mut map = LayoutSymbolMap::new();
+/// map.insert(first, 1.0);
+/// map.insert(second, 2.0);
+/// map.insert(first, 10.0);
+/// let values: Vec<f64> = map.iter().map(|(_, value)| *value).collect();
+/// assert_eq!(values, vec![10.0, 2.0]);
+///
+/// assert_eq!(map.remove(&first), Some(10.0));
+/// map.insert(first, 3.0);
+/// let values: Vec<f64> = map.iter().map(|(_, value)| *value).collect();
+/// assert_eq!(values, vec![2.0, 3.0]);
+/// assert_eq!(map.len(), 2);
+/// assert_eq!(map.get(&LayoutSymbol::invalid()), None);
+/// ```
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct LayoutSymbolMap<V> {
@@ -112,6 +166,9 @@ pub struct LayoutSymbolMap<V> {
 impl<V> LayoutSymbolMap<V> {
 	//==============================================================================
 	/// 생성.
+	///
+	/// # 돌려줌
+	/// 빈 맵.
 	//==============================================================================
 	pub fn new() -> LayoutSymbolMap<V> {
 		LayoutSymbolMap {
@@ -123,6 +180,9 @@ impl<V> LayoutSymbolMap<V> {
 
 	//==============================================================================
 	/// 들어 있는 수.
+	///
+	/// # 돌려줌
+	/// 들어 있는 키 수. (지운 칸은 세지 않는다)
 	//==============================================================================
 	pub fn len(&self) -> usize {
 		self.indices.len()
@@ -130,6 +190,9 @@ impl<V> LayoutSymbolMap<V> {
 
 	//==============================================================================
 	/// 비었는지.
+	///
+	/// # 돌려줌
+	/// 키가 하나도 없으면 true.
 	//==============================================================================
 	pub fn is_empty(&self) -> bool {
 		self.indices.is_empty()
@@ -137,6 +200,12 @@ impl<V> LayoutSymbolMap<V> {
 
 	//==============================================================================
 	/// 키가 있는지.
+	///
+	/// # 인자
+	/// - `symbol`: 찾을 키.
+	///
+	/// # 돌려줌
+	/// 키가 있으면 true.
 	//==============================================================================
 	pub fn contains_key(&self, symbol: &LayoutSymbol) -> bool {
 		self.indices.contains_key(&symbol.id)
@@ -144,6 +213,12 @@ impl<V> LayoutSymbolMap<V> {
 
 	//==============================================================================
 	/// 값 찾기.
+	///
+	/// # 인자
+	/// - `symbol`: 찾을 키.
+	///
+	/// # 돌려줌
+	/// 값의 참조. 키가 없으면 None.
 	//==============================================================================
 	pub fn get(&self, symbol: &LayoutSymbol) -> Option<&V> {
 		let index = *self.indices.get(&symbol.id)?;
@@ -159,6 +234,12 @@ impl<V> LayoutSymbolMap<V> {
 
 	//==============================================================================
 	/// 값 찾기. (바꿀 수 있게)
+	///
+	/// # 인자
+	/// - `symbol`: 찾을 키.
+	///
+	/// # 돌려줌
+	/// 바꿀 수 있는 값의 참조. 키가 없으면 None.
 	//==============================================================================
 	pub fn get_mut(&mut self, symbol: &LayoutSymbol) -> Option<&mut V> {
 		let index = *self.indices.get(&symbol.id)?;
@@ -174,6 +255,10 @@ impl<V> LayoutSymbolMap<V> {
 
 	//==============================================================================
 	/// 넣기. (있는 키는 자리를 지킨 채 값만 바꾸고, 새 키는 맨 뒤에 붙인다)
+	///
+	/// # 인자
+	/// - `symbol`: 키.
+	/// - `value`: 넣을 값.
 	//==============================================================================
 	pub fn insert(&mut self, symbol: LayoutSymbol, value: V) {
 		if let Some(&index) = self.indices.get(&symbol.id) {
@@ -186,6 +271,12 @@ impl<V> LayoutSymbolMap<V> {
 
 	//==============================================================================
 	/// 지우기. (지운 값을 돌려준다)
+	///
+	/// # 인자
+	/// - `symbol`: 지울 키.
+	///
+	/// # 돌려줌
+	/// 지운 값. 키가 없으면 None.
 	//==============================================================================
 	pub fn remove(&mut self, symbol: &LayoutSymbol) -> Option<V> {
 		let index = self.indices.remove(&symbol.id)?;
@@ -215,6 +306,9 @@ impl<V> LayoutSymbolMap<V> {
 
 	//==============================================================================
 	/// 넣은 차례로 돌기.
+	///
+	/// # 돌려줌
+	/// (키, 값의 참조) 를 넣은 차례로 내는 반복자.
 	//==============================================================================
 	pub fn iter(&self) -> impl Iterator<Item = (LayoutSymbol, &V)> {
 		self.entries.iter().filter_map(|entry| {
@@ -231,6 +325,9 @@ impl<V> LayoutSymbolMap<V> {
 
 	//==============================================================================
 	/// 넣은 차례로 돌기. (값을 바꿀 수 있게)
+	///
+	/// # 돌려줌
+	/// (키, 바꿀 수 있는 값의 참조) 를 넣은 차례로 내는 반복자.
 	//==============================================================================
 	pub fn iter_mut(&mut self) -> impl Iterator<Item = (LayoutSymbol, &mut V)> {
 		self.entries.iter_mut().filter_map(|entry| {
@@ -260,6 +357,9 @@ impl<V> LayoutSymbolMap<V> {
 }
 
 impl<V> Default for LayoutSymbolMap<V> {
+	//==============================================================================
+	/// 빈 맵 생성. (LayoutSymbolMap::new 와 같다)
+	//==============================================================================
 	fn default() -> LayoutSymbolMap<V> {
 		LayoutSymbolMap::new()
 	}

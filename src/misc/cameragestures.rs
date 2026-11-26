@@ -4,9 +4,7 @@
 //!   - 마우스 오른쪽 단추를 누른 채 끌기: 가로로 끈 만큼 돌리고(캔버스 너비만큼이 한 바퀴), 세로로 끈 만큼 기울인다. 끌지 않고 떼면 오른쪽 클릭이다.
 //!   - 마우스 가운데 단추를 누른 채 끌기: 민다.
 //!   - 두 손가락: 같은 쪽으로 끌면 밀고, 오므리고 벌리면 두 손가락 가운데를 두고 키우고 줄이고, 비틀기 문턱을 넘게 비틀면 돌린다. (오므려 키우다가 조금씩 도는 것을 막는다)
-//!   ```text
 //!     원본처럼 모든 손가락을 뗄 때까지 손짓이 이어진다. 한 손가락만 남으면 움직임을 쓰지 않고, 손가락 수가 바뀌면 그 자리를 새 기준으로 잡는다.
-//!   ```
 //! - 휠은 엔진이 넘긴다. 여기서는 Ctrl 을 눌렀는지만 적어 둔다. (is_last_wheel_ctrl, 노트북 터치패드의 오므리기도 Ctrl 휠로 온다)
 //! - 마지막 손이 손가락인지(is_touch_input, 처음에는 기기가 손가락이 주된 입력인지)도 읽는다. 손가락을 뗀 뒤 흉내 낸 마우스를 무시하는 시간(set_thresholds 의 넷째 인자, 처음 800 밀리초) 안의
 //!   마우스 움직임과 누름은 손을 바꾸지 않고, 그때 누른 오른쪽, 가운데 단추는 뗄 때까지 손짓을 시작하지 않는다.
@@ -24,6 +22,46 @@ use crate::core::inputmanager::{InputManager, MouseButton};
 use crate::core::viewmanager::ViewManager;
 use crate::platform;
 
+//==============================================================================
+/// 카메라 손짓. (마우스 오른쪽, 가운데 단추 끌기와 두 손가락으로 돌리기, 기울이기, 밀기, 키우기)
+/// - 매 프레임 update 로 입력을 읽고, 모인 양을 take_pan, take_rotation, take_tilt, take_zoom 으로 꺼내 카메라에 건다.
+///
+/// # 예제
+/// 손짓으로 2D 카메라 움직이기
+/// ```rust,no_run
+/// use vanilla::{Camera2D, CameraGestures, Engine, Scene, SceneBase};
+///
+/// struct MapScene {
+/// 	scene_base: SceneBase,
+/// 	camera: Camera2D,
+/// 	camera_gestures: CameraGestures,
+/// }
+///
+/// impl Scene for MapScene {
+/// 	fn get_scene_base(&self) -> &SceneBase {
+/// 		&self.scene_base
+/// 	}
+///
+/// 	fn get_scene_base_mut(&mut self) -> &mut SceneBase {
+/// 		&mut self.scene_base
+/// 	}
+///
+/// 	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+/// 		self.scene_base.tick(engine, time_delta);
+/// 		self.camera_gestures.update(engine.get_input_manager(), engine.get_view_manager());
+/// 		let pan = self.camera_gestures.take_pan();
+/// 		self.camera.pan_by_screen(pan.x, pan.y);
+/// 		let zoom = self.camera_gestures.take_zoom();
+/// 		if let Some(zoom_anchor) = self.camera_gestures.get_zoom_anchor() {
+/// 			self.camera.zoom_at(zoom_anchor, zoom);
+/// 		}
+/// 		let rotation = self.camera_gestures.take_rotation();
+/// 		self.camera.set_rotation(self.camera.get_rotation() + rotation.to_degrees());
+/// 		self.camera.tick(time_delta);
+/// 	}
+/// }
+/// ```
+//==============================================================================
 pub struct CameraGestures {
 	twist_start_radians: f32,
 	tilt_per_half_height_radians: f32,
@@ -64,6 +102,11 @@ pub struct CameraGestures {
 impl CameraGestures {
 	//==============================================================================
 	/// 생성.
+	/// - 비틀기 문턱 15 도, 캔버스 높이 반만큼 끌 때 기울기 35 도, 오른쪽 클릭 거리 8 픽셀, 흉내 낸 마우스 시간 800 밀리초.
+	/// - 마지막 손은 기기가 손가락이 주된 입력인지(is_coarse_pointer)로 시작한다.
+	///
+	/// # 돌려줌
+	/// 모인 양이 없는(밀기 0, 돌리기 0, 기울이기 0, 키우기 1) 새 손짓.
 	//==============================================================================
 	pub fn new() -> CameraGestures {
 		CameraGestures {
@@ -100,6 +143,33 @@ impl CameraGestures {
 
 	//==============================================================================
 	/// 매 프레임 입력 읽기. (씬의 tick 에서 부른다)
+	/// - 마우스 자리와 손가락 자리는 캔버스 논리 좌표로 읽는다. 오른쪽 끌기의 돌리기는 캔버스 너비만큼이 한 바퀴(2π 라디안)다.
+	///
+	/// # 인자
+	/// - `input_manager`: 마우스 단추, 마우스 자리, 손가락 목록, 휠의 Ctrl 을 읽을 입력 매니저.
+	/// - `view_manager`: 캔버스 크기와 기준 해상도 배율을 읽을 뷰 매니저.
+	///
+	/// # 예제
+	/// 오른쪽 단추로 캔버스 너비의 4 분의 1 을 끌면 4 분의 1 바퀴
+	/// ```rust
+	/// use vanilla::{CameraGestures, InputManager, MouseButton, Vector2, ViewManager, ViewScaleMode};
+	///
+	/// let mut view_manager = ViewManager::new(Vector2::create(800.0, 600.0), ViewScaleMode::ReferenceResolution);
+	/// view_manager.calculate_view_rect(800, 600, 1.0);
+	/// let mut input_manager = InputManager::new();
+	/// let mut camera_gestures = CameraGestures::new();
+	///
+	/// input_manager.set_canvas_native_input_position(Vector2::create(100.0, 300.0));
+	/// input_manager.set_mouse_button_down(MouseButton::Right, true);
+	/// camera_gestures.update(&input_manager, &view_manager);
+	/// assert!(camera_gestures.is_gesture_active());
+	/// input_manager.update_frame_snapshot();
+	///
+	/// input_manager.set_canvas_native_input_position(Vector2::create(300.0, 300.0));
+	/// camera_gestures.update(&input_manager, &view_manager);
+	/// assert!((camera_gestures.take_rotation() - std::f32::consts::FRAC_PI_2).abs() < 0.0001);
+	/// assert_eq!(camera_gestures.read_mouse_drag_cursor(), "grabbing");
+	/// ```
 	//==============================================================================
 	pub fn update(&mut self, input_manager: &InputManager, view_manager: &ViewManager) {
 		let mouse_position = input_manager.get_canvas_native_input_position();
@@ -235,6 +305,9 @@ impl CameraGestures {
 
 	//==============================================================================
 	/// 마지막 손이 손가락인지. (처음에는 기기가 손가락이 주된 입력인지로)
+	///
+	/// # 돌려줌
+	/// 마지막 손이 손가락이면 true, 마우스면 false.
 	//==============================================================================
 	pub fn is_touch_input(&self) -> bool {
 		self.is_touch_input
@@ -242,6 +315,9 @@ impl CameraGestures {
 
 	//==============================================================================
 	/// 기기가 손가락이 주된 입력인지. (폰과 태블릿, 원본 matchMedia("(pointer: coarse)"))
+	///
+	/// # 돌려줌
+	/// 주된 손이 손가락이면 true. (부를 때마다 플랫폼에 묻는다, 맥은 늘 false)
 	//==============================================================================
 	pub fn is_coarse_pointer(&self) -> bool {
 		platform::is_coarse_pointer()
@@ -249,6 +325,9 @@ impl CameraGestures {
 
 	//==============================================================================
 	/// 마지막 휠이 Ctrl 을 누른 휠이었는지. (휠로 밀기를 켰어도 그 휠은 키우기다)
+	///
+	/// # 돌려줌
+	/// 마지막 update 에서 읽은 휠이 Ctrl 휠이면 true.
 	//==============================================================================
 	pub fn is_last_wheel_ctrl(&self) -> bool {
 		self.is_last_wheel_ctrl
@@ -256,6 +335,12 @@ impl CameraGestures {
 
 	//==============================================================================
 	/// 캔버스 논리 픽셀 하나가 뷰 단위로 얼마인지.
+	///
+	/// # 인자
+	/// - `view_manager`: 기준 해상도 배율을 읽을 뷰 매니저.
+	///
+	/// # 돌려줌
+	/// 1 / 기준 해상도 배율. 배율이 0 이하이면 1.
 	//==============================================================================
 	pub fn read_units_per_canvas_pixel(view_manager: &ViewManager) -> f32 {
 		let target_resolution_scale = view_manager.get_target_resolution_scale();
@@ -267,6 +352,9 @@ impl CameraGestures {
 
 	//==============================================================================
 	/// 손짓 중인지. (오른쪽이나 가운데 단추를 누르고 있거나 두 손가락, 이때 엔진의 누름은 놀이에 쓰지 않는다)
+	///
+	/// # 돌려줌
+	/// 손짓 중이면 true. (두 손가락 손짓은 모든 손가락을 뗄 때까지 이어진다)
 	//==============================================================================
 	pub fn is_gesture_active(&self) -> bool {
 		self.is_right_button_down || self.is_middle_button_down || self.is_multi_touch
@@ -274,6 +362,9 @@ impl CameraGestures {
 
 	//==============================================================================
 	/// 마우스로 끄는 동안의 커서 이름. (돌리거나 미는 중이면 grabbing, 오른쪽 단추를 누르고 아직 끌지 않았으면 grab, 아니면 빈 글)
+	///
+	/// # 돌려줌
+	/// "grabbing", "grab", "" 가운데 하나.
 	//==============================================================================
 	pub fn read_mouse_drag_cursor(&self) -> &'static str {
 		if self.is_middle_button_down || (self.is_right_button_down && self.is_right_dragged) {
@@ -287,6 +378,9 @@ impl CameraGestures {
 
 	//==============================================================================
 	/// 모인 밀기 꺼내기. (뷰 단위, 꺼내면 비운다)
+	///
+	/// # 돌려줌
+	/// 지난번 꺼낸 뒤 모인 밀기. (뷰 단위, 손이나 커서가 움직인 쪽이 +)
 	//==============================================================================
 	pub fn take_pan(&mut self) -> Vector2 {
 		let pan = self.pan;
@@ -296,6 +390,9 @@ impl CameraGestures {
 
 	//==============================================================================
 	/// 모인 돌리기 꺼내기. (라디안, 꺼내면 비운다)
+	///
+	/// # 돌려줌
+	/// 지난번 꺼낸 뒤 모인 돌리기. (라디안)
 	//==============================================================================
 	pub fn take_rotation(&mut self) -> f32 {
 		let rotation = self.rotation;
@@ -305,6 +402,9 @@ impl CameraGestures {
 
 	//==============================================================================
 	/// 모인 기울이기 꺼내기. (라디안, + 가 위에서 보는 쪽, 꺼내면 비운다)
+	///
+	/// # 돌려줌
+	/// 지난번 꺼낸 뒤 모인 기울이기. (라디안, 위로 끌면 +)
 	//==============================================================================
 	pub fn take_tilt(&mut self) -> f32 {
 		let tilt = self.tilt;
@@ -314,6 +414,9 @@ impl CameraGestures {
 
 	//==============================================================================
 	/// 모인 키우기 꺼내기. (곱할 비, 꺼내면 1)
+	///
+	/// # 돌려줌
+	/// 지난번 꺼낸 뒤 모인 키우기 비. (1 보다 크면 벌린 것, 손짓이 없었으면 1)
 	//==============================================================================
 	pub fn take_zoom(&mut self) -> f32 {
 		let zoom = self.zoom;
@@ -323,6 +426,9 @@ impl CameraGestures {
 
 	//==============================================================================
 	/// 키우기의 가운데. (뷰 좌표, 두 손가락 가운데, 없으면 None)
+	///
+	/// # 돌려줌
+	/// 마지막으로 두 손가락을 움직인 프레임의 가운데. (뷰 좌표) 아직 그런 프레임이 없었으면 None. (손가락을 떼도 지우지 않는다)
 	//==============================================================================
 	pub fn get_zoom_anchor(&self) -> Option<Vector2> {
 		self.zoom_anchor
@@ -330,6 +436,9 @@ impl CameraGestures {
 
 	//==============================================================================
 	/// 오른쪽 클릭이 있었는지 꺼내기. (끌지 않고 뗀 오른쪽 단추, 꺼내면 지운다)
+	///
+	/// # 돌려줌
+	/// 지난번 꺼낸 뒤 오른쪽 클릭이 있었으면 true.
 	//==============================================================================
 	pub fn take_right_click(&mut self) -> bool {
 		let is_right_clicked = self.is_right_clicked;
@@ -339,6 +448,9 @@ impl CameraGestures {
 
 	//==============================================================================
 	/// 돌리기를 놓았는지 꺼내기. (꺼내면 지운다)
+	///
+	/// # 돌려줌
+	/// 지난번 꺼낸 뒤 오른쪽 단추를 떼었거나 두 손가락 손짓이 끝났으면 true.
 	//==============================================================================
 	pub fn take_rotation_released(&mut self) -> bool {
 		let is_rotation_released = self.is_rotation_released;
@@ -348,6 +460,12 @@ impl CameraGestures {
 
 	//==============================================================================
 	/// 문턱 설정. (비틀기를 시작하는 각도, 캔버스 높이의 반만큼 끌 때 기울어지는 각도, 오른쪽 클릭으로 보는 거리, 흉내 낸 마우스를 무시하는 밀리초)
+	///
+	/// # 인자
+	/// - `twist_start_radians`: 두 손가락 비틀기가 이만큼 넘어야 돌리기를 시작한다. (라디안, 처음 15 도)
+	/// - `tilt_per_half_height_radians`: 오른쪽 단추로 캔버스 높이의 반만큼 세로로 끌 때 기울어지는 각도. (라디안, 처음 35 도)
+	/// - `right_click_distance`: 누른 자리에서 이만큼 안에서 떼면 오른쪽 클릭이다. (캔버스 논리 픽셀, 처음 8)
+	/// - `compatibility_mouse_milliseconds`: 손가락 사건 뒤 흉내 낸 마우스를 무시하는 시간. (밀리초, 처음 800, 0 이면 무시하지 않는다)
 	//==============================================================================
 	pub fn set_thresholds(&mut self, twist_start_radians: f32, tilt_per_half_height_radians: f32, right_click_distance: f32, compatibility_mouse_milliseconds: f32) {
 		self.twist_start_radians = twist_start_radians;
@@ -358,6 +476,9 @@ impl CameraGestures {
 }
 
 impl Default for CameraGestures {
+	//==============================================================================
+	/// 기본값. (new 와 같다)
+	//==============================================================================
 	fn default() -> CameraGestures {
 		CameraGestures::new()
 	}

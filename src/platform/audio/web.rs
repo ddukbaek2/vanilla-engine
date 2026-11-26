@@ -1,23 +1,39 @@
 //==============================================================================
-// 웹 오디오 백엔드. (wasm32, WebAudio 를 web-sys 로 직접 부른다)
-// - 원본 audiomanager.js, audioplayer.js, audioasset.js, beepplayer.js 의 WebAudio 호출을 그대로 옮겼다.
-// - AudioContext: 원본처럼 AudioContext, 없으면 webkitAudioContext. user gesture 뒤에 만든다. (create_audio_player 는 그 전에도 만든다)
-// - resume: "suspended" 나 "interrupted"(iOS WebKit 의 비표준 상태) 일 때만 resume() 하고 거부는 넘긴다.
-//   상태는 문자열로 읽는다. (web-sys 의 AudioContextState 에 "interrupted" 가 없다)
-// - iOS 시계 확인: 원본 verify_context_clock 그대로. (2026-10-22 03:41, iOS 26.6.2 버전업 대응)
-//   복원 뒤 "running" 인데 0.5초 동안 current_time 이 실제 시간의 1/4 보다 덜 흐르면 suspend() 후 resume() 하고 다시 확인한다.
-//   그 resume() 이 거부되면 같은 간격 뒤 resume_context() 로 다시 복원한다. 한 번에 하나만 돈다.
-// - 디코딩: 원본처럼 OfflineAudioContext(1, 1, 44100) 로 한다. 없으면 잠시 쓰는 AudioContext 로 하고 닫는다.
-// - 컨텍스트 멈춤: 원본 SoundSystem.applyContextPause 처럼 "running" 일 때만 suspend() 하고, 거부되면 알리고 넘긴다.
-// - 좌우(pan): 원본 SoundSystem.playEffect 처럼 0 이 아니면 StereoPannerNode 를 GainNode 와 출력 사이에 끼운다. (createStereoPanner 가 없으면 끼우지 않는다)
-// - 버스: 원본 AudioBus 처럼 출력에 이은 GainNode 하나다. 버스로 만든 플레이어는 GainNode 를 출력 대신 버스의 GainNode 에 잇는다.
-// - 플레이어의 내보낼 곳(AudioOutputNode): 원본 AudioPlayer 생성자의 outputNode 처럼 AudioNode 를 받아 플레이어의 GainNode 를 잇는다. (없으면 출력)
-// - fetch 응답이 실패 코드면 원본처럼 디코딩 전에 실패로 친다.
-// - 비동기: 프로미스는 wasm-bindgen-futures 의 spawn_local 과 JsFuture 로 기다린다. (원본 then / await 자리)
-//   콜백은 매니저나 플레이어의 상태를 Weak 로 들어, 그 사이 버려졌으면 아무것도 하지 않는다.
-// - 원본과 다른 점:
-//   플레이어를 버리면 재생 중인 소스 노드를 멈추고 GainNode 를 뗀다. (onended 콜백이 버려진 클로저를 부르지 않게)
-//   일시 중단 상태에서 play 한 뒤 재개를 기다리는 사이 다른 소스가 시작됐으면 그것을 멈추고 튼다. (원본은 둘 다 운다)
+//! 웹 오디오 백엔드. (wasm32, WebAudio 를 web-sys 로 직접 부른다)
+//! - 원본 audiomanager.js, audioplayer.js, audioasset.js, beepplayer.js 의 WebAudio 호출을 그대로 옮겼다.
+//! - AudioContext: 원본처럼 AudioContext, 없으면 webkitAudioContext. user gesture 뒤에 만든다. (create_audio_player 는 그 전에도 만든다)
+//! - resume: "suspended" 나 "interrupted"(iOS WebKit 의 비표준 상태) 일 때만 resume() 하고 거부는 넘긴다.
+//!   상태는 문자열로 읽는다. (web-sys 의 AudioContextState 에 "interrupted" 가 없다)
+//! - iOS 시계 확인: 원본 verify_context_clock 그대로. (2026-10-22 03:41, iOS 26.6.2 버전업 대응)
+//!   복원 뒤 "running" 인데 0.5초 동안 current_time 이 실제 시간의 1/4 보다 덜 흐르면 suspend() 후 resume() 하고 다시 확인한다.
+//!   그 resume() 이 거부되면 같은 간격 뒤 resume_context() 로 다시 복원한다. 한 번에 하나만 돈다.
+//! - 디코딩: 원본처럼 OfflineAudioContext(1, 1, 44100) 로 한다. 없으면 잠시 쓰는 AudioContext 로 하고 닫는다.
+//! - 컨텍스트 멈춤: 원본 SoundSystem.applyContextPause 처럼 "running" 일 때만 suspend() 하고, 거부되면 알리고 넘긴다.
+//! - 좌우(pan): 원본 SoundSystem.playEffect 처럼 0 이 아니면 StereoPannerNode 를 GainNode 와 출력 사이에 끼운다. (createStereoPanner 가 없으면 끼우지 않는다)
+//! - 버스: 원본 AudioBus 처럼 출력에 이은 GainNode 하나다. 버스로 만든 플레이어는 GainNode 를 출력 대신 버스의 GainNode 에 잇는다.
+//! - 플레이어의 내보낼 곳(AudioOutputNode): 원본 AudioPlayer 생성자의 outputNode 처럼 AudioNode 를 받아 플레이어의 GainNode 를 잇는다. (없으면 출력)
+//! - fetch 응답이 실패 코드면 원본처럼 디코딩 전에 실패로 친다.
+//! - 비동기: 프로미스는 wasm-bindgen-futures 의 spawn_local 과 JsFuture 로 기다린다. (원본 then / await 자리)
+//!   콜백은 매니저나 플레이어의 상태를 Weak 로 들어, 그 사이 버려졌으면 아무것도 하지 않는다.
+//! - 원본과 다른 점:
+//!   플레이어를 버리면 재생 중인 소스 노드를 멈추고 GainNode 를 뗀다. (onended 콜백이 버려진 클로저를 부르지 않게)
+//!   일시 중단 상태에서 play 한 뒤 재개를 기다리는 사이 다른 소스가 시작됐으면 그것을 멈추고 튼다. (원본은 둘 다 운다)
+//!
+//! # 예제
+//! fetch 와 디코딩이 끝나기를 기다린 뒤 길이 보기 (웹은 끝나야 버퍼가 생긴다, 데스크탑에서도 같은 코드가 돈다)
+//! ```rust,no_run
+//! use std::rc::Rc;
+//! use vanilla::{AudioAsset, Engine, EngineConfiguration};
+//!
+//! let mut engine = Engine::new(EngineConfiguration::new());
+//! let audio_asset = Rc::new(AudioAsset::new());
+//! let audio_load_handle = audio_asset.load_from_asset(&engine, "tests/assets/audio/wav_s16_stereo.wav");
+//! engine.spawn_task(move |_engine_context| async move {
+//! 	if audio_load_handle.await.is_ok() {
+//! 		assert!(audio_asset.get_duration() > 0.0);
+//! 	}
+//! });
+//! ```
 //==============================================================================
 use super::GainAutomation;
 use crate::core::audiomanager::{resume_audio_manager_state, AudioManagerState};
@@ -30,36 +46,36 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::{spawn_local, JsFuture};
 
-// 공유 오디오 컨텍스트.
+/// 공유 오디오 컨텍스트.
 pub type AudioContext = web_sys::AudioContext;
-// 디코딩한 소리.
+/// 디코딩한 소리.
 pub type AudioBuffer = web_sys::AudioBuffer;
-// 버스의 GainNode. (원본 AudioBus.getGainNode)
+/// 버스의 GainNode. (원본 AudioBus.getGainNode)
 pub type AudioGainNode = web_sys::GainNode;
-// 플레이어가 소리를 내보낼 곳. (원본 AudioPlayer 생성자의 outputNode, 플레이어의 GainNode 를 거기에 잇는다. AudioGainNode 의 as_deref 나 다른 AudioNode)
+/// 플레이어가 소리를 내보낼 곳. (원본 AudioPlayer 생성자의 outputNode, 플레이어의 GainNode 를 거기에 잇는다. AudioGainNode 의 as_deref 나 다른 AudioNode)
 pub type AudioOutputNode<'a> = &'a web_sys::AudioNode;
 
-// 브라우저는 첫 user gesture 전에 AudioContext 를 만들면 경고를 띄운다.
+/// 브라우저는 첫 user gesture 전에 AudioContext 를 만들면 경고를 띄운다.
 pub const HAS_USER_GESTURE_AT_START: bool = false;
-// OfflineAudioContext 로 디코딩할 때의 샘플레이트. (재생하는 AudioContext 의 샘플레이트가 다르면 재생할 때 맞춰진다)
+/// OfflineAudioContext 로 디코딩할 때의 샘플레이트. (재생하는 AudioContext 의 샘플레이트가 다르면 재생할 때 맞춰진다)
 const DECODE_SAMPLE_RATE: f32 = 44100.0;
-// iOS 에서 복원 뒤 시계(current_time)가 흐르는지 보는 간격. (초, 2026-10-22 03:41, iOS 26.6.2 버전업 대응)
+/// iOS 에서 복원 뒤 시계(current_time)가 흐르는지 보는 간격. (초, 2026-10-22 03:41, iOS 26.6.2 버전업 대응)
 const CONTEXT_CLOCK_CHECK_INTERVAL: f64 = 0.5;
-// 그 간격 동안 시계가 이 비율보다 덜 흐르면 멈춘 것으로 본다. (2026-10-22 03:41, iOS 26.6.2 버전업 대응)
+/// 그 간격 동안 시계가 이 비율보다 덜 흐르면 멈춘 것으로 본다. (2026-10-22 03:41, iOS 26.6.2 버전업 대응)
 const CONTEXT_CLOCK_MINIMUM_RATIO: f64 = 0.25;
 
 //==============================================================================
-// 매니저가 드는 백엔드 상태.
+/// 매니저가 드는 백엔드 상태.
 //==============================================================================
 pub struct AudioPlatformState {
-	// iOS(iPadOS 포함) 인지.
+	/// iOS(iPadOS 포함) 인지.
 	is_ios: bool,
-	// 시계 확인이 돌고 있는지. (한 번에 하나만)
+	/// 시계 확인이 돌고 있는지. (한 번에 하나만)
 	is_verifying_context_clock: bool,
 }
 
 //==============================================================================
-// 백엔드 상태 생성. (iOS 판별)
+/// 백엔드 상태 생성. (iOS 판별)
 //==============================================================================
 pub fn create_audio_platform_state() -> AudioPlatformState {
 	AudioPlatformState {
@@ -69,7 +85,7 @@ pub fn create_audio_platform_state() -> AudioPlatformState {
 }
 
 //==============================================================================
-// iOS(iPadOS 포함) 판별. (원본 platform.js 의 platform_name 순서 + 데스크탑 모드 iPad 는 터치 지점 수로)
+/// iOS(iPadOS 포함) 판별. (원본 platform.js 의 platform_name 순서 + 데스크탑 모드 iPad 는 터치 지점 수로)
 //==============================================================================
 fn detect_ios() -> bool {
 	let window = match web_sys::window() {
@@ -93,7 +109,7 @@ fn detect_ios() -> bool {
 }
 
 //==============================================================================
-// 전역 이름으로 생성자를 불러 객체를 만든다. (webkit 접두 생성자)
+/// 전역 이름으로 생성자를 불러 객체를 만든다. (webkit 접두 생성자)
 //==============================================================================
 fn construct_global(global_name: &str, argument_list: &js_sys::Array) -> Option<JsValue> {
 	let window = web_sys::window()?;
@@ -103,7 +119,7 @@ fn construct_global(global_name: &str, argument_list: &js_sys::Array) -> Option<
 }
 
 //==============================================================================
-// 오디오 컨텍스트 생성. (AudioContext, 없으면 webkitAudioContext)
+/// 오디오 컨텍스트 생성. (AudioContext, 없으면 webkitAudioContext)
 //==============================================================================
 pub fn create_audio_context(_audio_platform_state: &mut AudioPlatformState) -> Option<AudioContext> {
 	match web_sys::AudioContext::new() {
@@ -119,7 +135,7 @@ pub fn create_audio_context(_audio_platform_state: &mut AudioPlatformState) -> O
 }
 
 //==============================================================================
-// 오디오 컨텍스트 상태 문자열. ("suspended", "running", "closed", iOS 의 "interrupted")
+/// 오디오 컨텍스트 상태 문자열. ("suspended", "running", "closed", iOS 의 "interrupted")
 //==============================================================================
 fn get_audio_context_state_name(audio_context: &AudioContext) -> String {
 	match js_sys::Reflect::get(audio_context, &JsValue::from_str("state")) {
@@ -133,7 +149,7 @@ fn get_audio_context_state_name(audio_context: &AudioContext) -> String {
 }
 
 //==============================================================================
-// 오디오 컨텍스트 시계. (초, audio_context.currentTime, 컨텍스트가 없으면 0)
+/// 오디오 컨텍스트 시계. (초, audio_context.currentTime, 컨텍스트가 없으면 0)
 //==============================================================================
 pub fn get_audio_context_time(state: &AudioManagerState) -> f64 {
 	match &state.audio_context {
@@ -147,14 +163,14 @@ pub fn get_audio_context_time(state: &AudioManagerState) -> f64 {
 }
 
 //==============================================================================
-// 오디오 컨텍스트 상태가 "running" 인지.
+/// 오디오 컨텍스트 상태가 "running" 인지.
 //==============================================================================
 fn is_context_state_running(audio_context: &AudioContext) -> bool {
 	get_audio_context_state_name(audio_context) == "running"
 }
 
 //==============================================================================
-// 오디오 컨텍스트가 있고 돌고 있는지. (원본 audio_context !== null && state === "running")
+/// 오디오 컨텍스트가 있고 돌고 있는지. (원본 audio_context !== null && state === "running")
 //==============================================================================
 pub fn is_audio_context_running(state: &AudioManagerState) -> bool {
 	match &state.audio_context {
@@ -168,7 +184,7 @@ pub fn is_audio_context_running(state: &AudioManagerState) -> bool {
 }
 
 //==============================================================================
-// 지금 시각. (초, performance.now())
+/// 지금 시각. (초, performance.now())
 //==============================================================================
 fn get_performance_seconds() -> f64 {
 	let performance = web_sys::window().and_then(|window| window.performance());
@@ -183,7 +199,7 @@ fn get_performance_seconds() -> f64 {
 }
 
 //==============================================================================
-// 문서가 보이는지. (document.visibilityState === "visible")
+/// 문서가 보이는지. (document.visibilityState === "visible")
 //==============================================================================
 fn is_document_visible() -> bool {
 	let document = web_sys::window().and_then(|window| window.document());
@@ -198,7 +214,7 @@ fn is_document_visible() -> bool {
 }
 
 //==============================================================================
-// 몇 초 뒤에 한 번 부른다. (setTimeout)
+/// 몇 초 뒤에 한 번 부른다. (setTimeout)
 //==============================================================================
 fn set_timeout_seconds(delay_seconds: f64, callback: impl FnOnce() + 'static) {
 	let window = match web_sys::window() {
@@ -215,9 +231,9 @@ fn set_timeout_seconds(delay_seconds: f64, callback: impl FnOnce() + 'static) {
 }
 
 //==============================================================================
-// 오디오 컨텍스트 재개. (user gesture 뒤, 컨텍스트가 있을 때 AudioManager 가 부른다)
-// - "suspended" 나 "interrupted" 일 때만 재개를 시도한다. 거부되면 다음 호출에서 다시 하므로 넘긴다.
-// - iOS 는 복원된 뒤 "running" 이어도 시계가 멈춰 소리가 나지 않는 일이 있어 확인한다.
+/// 오디오 컨텍스트 재개. (user gesture 뒤, 컨텍스트가 있을 때 AudioManager 가 부른다)
+/// - "suspended" 나 "interrupted" 일 때만 재개를 시도한다. 거부되면 다음 호출에서 다시 하므로 넘긴다.
+/// - iOS 는 복원된 뒤 "running" 이어도 시계가 멈춰 소리가 나지 않는 일이 있어 확인한다.
 //==============================================================================
 pub fn resume_audio_context(state_cell: &Rc<RefCell<AudioManagerState>>) {
 	let (audio_context, is_ios) = {
@@ -257,13 +273,13 @@ pub fn resume_audio_context(state_cell: &Rc<RefCell<AudioManagerState>>) {
 }
 
 //==============================================================================
-// 재생하기 전에 멈춘 컨텍스트 깨우기. (웹은 AudioPlayerBackend::start_playback 이 원본처럼 "suspended" 면 resume() 을 기다렸다 틀어 할 일이 없다)
+/// 재생하기 전에 멈춘 컨텍스트 깨우기. (웹은 AudioPlayerBackend::start_playback 이 원본처럼 "suspended" 면 resume() 을 기다렸다 틀어 할 일이 없다)
 //==============================================================================
 pub fn resume_audio_context_before_playback(_state_cell: &Rc<RefCell<AudioManagerState>>) {
 }
 
 //==============================================================================
-// 오디오 컨텍스트 멈춤. ("running" 일 때만 suspend(), 거부되면 알린다)
+/// 오디오 컨텍스트 멈춤. ("running" 일 때만 suspend(), 거부되면 알린다)
 //==============================================================================
 pub fn suspend_audio_context(state_cell: &Rc<RefCell<AudioManagerState>>) {
 	let audio_context = match &state_cell.borrow().audio_context {
@@ -294,10 +310,10 @@ pub fn suspend_audio_context(state_cell: &Rc<RefCell<AudioManagerState>>) {
 }
 
 //==============================================================================
-// 복원 뒤 시계 확인. (iOS 전용, 원본 verify_context_clock)
-// - CONTEXT_CLOCK_CHECK_INTERVAL 동안 current_time 이 흐르는지 보고, 멈춰 있으면 suspend() 후 resume() 하고 다시 확인한다.
-// - 그 resume() 이 거부되면 같은 간격 뒤 resume_context() 로 다시 복원한다.
-// - 페이지가 가려지거나 컨텍스트가 "running" 이 아니게 되면 그만둔다.
+/// 복원 뒤 시계 확인. (iOS 전용, 원본 verify_context_clock)
+/// - CONTEXT_CLOCK_CHECK_INTERVAL 동안 current_time 이 흐르는지 보고, 멈춰 있으면 suspend() 후 resume() 하고 다시 확인한다.
+/// - 그 resume() 이 거부되면 같은 간격 뒤 resume_context() 로 다시 복원한다.
+/// - 페이지가 가려지거나 컨텍스트가 "running" 이 아니게 되면 그만둔다.
 //==============================================================================
 fn verify_context_clock(state_cell: &Rc<RefCell<AudioManagerState>>, audio_context: AudioContext) {
 	{
@@ -355,7 +371,7 @@ fn verify_context_clock(state_cell: &Rc<RefCell<AudioManagerState>>, audio_conte
 }
 
 //==============================================================================
-// suspend() 후 resume(). (둘 다 이루어지면 참)
+/// suspend() 후 resume(). (둘 다 이루어지면 참)
 //==============================================================================
 async fn restart_audio_context(audio_context: &AudioContext) -> bool {
 	let suspend_promise = match audio_context.suspend() {
@@ -381,13 +397,13 @@ async fn restart_audio_context(audio_context: &AudioContext) -> bool {
 }
 
 //==============================================================================
-// 플레이어 하나의 재생 상태. (onended 콜백과 재개 뒤 콜백이 같이 본다)
+/// 플레이어 하나의 재생 상태. (onended 콜백과 재개 뒤 콜백이 같이 본다)
 //==============================================================================
 struct PlaybackState {
 	audio_source: Option<web_sys::AudioBufferSourceNode>,
-	// 소스가 시작하기 전(컨텍스트를 깨우는 동안)에 받은 stop(when). (시작할 때 건다)
+	/// 소스가 시작하기 전(컨텍스트를 깨우는 동안)에 받은 stop(when). (시작할 때 건다)
 	pending_stop_time: Option<f64>,
-	// 지금 소스의 onended 콜백. (소스를 바꾸거나 멈출 때 떼고 버린다)
+	/// 지금 소스의 onended 콜백. (소스를 바꾸거나 멈출 때 떼고 버린다)
 	ended_callback: Option<Closure<dyn FnMut()>>,
 	is_playing: bool,
 	/// 재생 요청 번호. (재생과 정지마다 늘려, 컨텍스트를 깨우는 동안 늦게 끝난 지난 요청이 소리를 내지 않게 한다)
@@ -396,7 +412,7 @@ struct PlaybackState {
 
 impl PlaybackState {
 	//==============================================================================
-	// 지금 소스를 멈추고 뗀다. (onended 를 먼저 비워 콜백이 오지 않게 한다)
+	/// 지금 소스를 멈추고 뗀다. (onended 를 먼저 비워 콜백이 오지 않게 한다)
 	//==============================================================================
 	fn stop_source(&mut self) {
 		self.pending_stop_time = None;
@@ -410,14 +426,14 @@ impl PlaybackState {
 }
 
 //==============================================================================
-// 플레이어 하나의 소리 내는 부분. (원본 AudioPlayer 의 audio_context, gain_node, audio_source)
+/// 플레이어 하나의 소리 내는 부분. (원본 AudioPlayer 의 audio_context, gain_node, audio_source)
 //==============================================================================
 pub struct AudioPlayerBackend {
 	audio_context: Option<AudioContext>,
 	gain_node: Option<web_sys::GainNode>,
-	// 소리를 내보내는 곳. (출력이나 버스의 GainNode, 좌우 노드를 끼울 때 그 뒤에 잇는다)
+	/// 소리를 내보내는 곳. (출력이나 버스의 GainNode, 좌우 노드를 끼울 때 그 뒤에 잇는다)
 	output_node: Option<web_sys::AudioNode>,
-	// 좌우 노드. (StereoPannerNode, 0 이 아닌 좌우를 처음 걸 때 만든다)
+	/// 좌우 노드. (StereoPannerNode, 0 이 아닌 좌우를 처음 걸 때 만든다)
 	panner_node: Option<web_sys::AudioNode>,
 	playback_state: Rc<RefCell<PlaybackState>>,
 	playback_rate: f64,
@@ -425,7 +441,7 @@ pub struct AudioPlayerBackend {
 
 impl AudioPlayerBackend {
 	//==============================================================================
-	// 생성. (컨텍스트가 있으면 GainNode 를 만들어 내보낼 곳에 잇는다, 내보낼 곳이 없으면 출력. 원본 AudioPlayer 생성자)
+	/// 생성. (컨텍스트가 있으면 GainNode 를 만들어 내보낼 곳에 잇는다, 내보낼 곳이 없으면 출력. 원본 AudioPlayer 생성자)
 	//==============================================================================
 	pub fn create(state: &mut AudioManagerState, output_node: Option<AudioOutputNode<'_>>) -> AudioPlayerBackend {
 		let audio_context = state.audio_context.clone();
@@ -444,7 +460,7 @@ impl AudioPlayerBackend {
 	}
 
 	//==============================================================================
-	// 소리 없는 플레이어 생성. (시험)
+	/// 소리 없는 플레이어 생성. (시험)
 	//==============================================================================
 	#[cfg(test)]
 	pub fn create_silent() -> AudioPlayerBackend {
@@ -452,7 +468,7 @@ impl AudioPlayerBackend {
 	}
 
 	//==============================================================================
-	// 내보낼 곳을 정해 생성. (컨텍스트와 내보낼 곳이 있으면 GainNode 를 만들어 거기에 잇는다)
+	/// 내보낼 곳을 정해 생성. (컨텍스트와 내보낼 곳이 있으면 GainNode 를 만들어 거기에 잇는다)
 	//==============================================================================
 	fn create_with_output(audio_context: Option<AudioContext>, output_node: Option<web_sys::AudioNode>) -> AudioPlayerBackend {
 		let mut gain_node = None;
@@ -479,21 +495,21 @@ impl AudioPlayerBackend {
 	}
 
 	//==============================================================================
-	// 소리를 낼 수 있는지. (원본 audio_context && gain_node)
+	/// 소리를 낼 수 있는지. (원본 audio_context && gain_node)
 	//==============================================================================
 	pub fn is_available(&self) -> bool {
 		self.audio_context.is_some() && self.gain_node.is_some()
 	}
 
 	//==============================================================================
-	// 재생 중인 소스를 멈춘다. (재생 여부 플래그는 그대로, 원본 play 의 앞부분)
+	/// 재생 중인 소스를 멈춘다. (재생 여부 플래그는 그대로, 원본 play 의 앞부분)
 	//==============================================================================
 	pub fn stop_source(&mut self) {
 		self.playback_state.borrow_mut().stop_source();
 	}
 
 	//==============================================================================
-	// 정지.
+	/// 정지.
 	//==============================================================================
 	pub fn stop(&mut self) {
 		let mut playback_state = self.playback_state.borrow_mut();
@@ -504,8 +520,8 @@ impl AudioPlayerBackend {
 	}
 
 	//==============================================================================
-	// 재생 시작. (컨텍스트가 일시 중단돼 있으면 재개한 뒤에 튼다)
-	// - 깨우는 동안 stop 이나 다른 재생이 오면 요청 번호가 바뀌어 이 요청은 틀지 않는다. (재개를 거부하면 틀지 않는다)
+	/// 재생 시작. (컨텍스트가 일시 중단돼 있으면 재개한 뒤에 튼다)
+	/// - 깨우는 동안 stop 이나 다른 재생이 오면 요청 번호가 바뀌어 이 요청은 틀지 않는다. (재개를 거부하면 틀지 않는다)
 	//==============================================================================
 	pub fn start_playback(&mut self, audio_buffer: &AudioBuffer, is_loop: bool, time: f64) {
 		let (audio_context, gain_node) = match (&self.audio_context, &self.gain_node) {
@@ -550,14 +566,14 @@ impl AudioPlayerBackend {
 	}
 
 	//==============================================================================
-	// 재생 빠르기 설정. (1 이면 그대로, 음 높이도 같이 바뀐다, 다음 재생부터)
+	/// 재생 빠르기 설정. (1 이면 그대로, 음 높이도 같이 바뀐다, 다음 재생부터)
 	//==============================================================================
 	pub fn set_playback_rate(&mut self, playback_rate: f64) {
 		self.playback_rate = playback_rate;
 	}
 
 	//==============================================================================
-	// 좌우 설정. (-1 왼쪽 ~ 1 오른쪽, 0 이 아니면 GainNode → StereoPannerNode → 출력으로 잇는다)
+	/// 좌우 설정. (-1 왼쪽 ~ 1 오른쪽, 0 이 아니면 GainNode → StereoPannerNode → 출력으로 잇는다)
 	//==============================================================================
 	pub fn set_pan(&mut self, pan: f32) {
 		if self.panner_node.is_none() && pan != 0.0 {
@@ -572,7 +588,7 @@ impl AudioPlayerBackend {
 	}
 
 	//==============================================================================
-	// StereoPannerNode 를 만들어 GainNode 와 내보낼 곳(출력이나 버스) 사이에 끼운다. (createStereoPanner 가 없으면 None)
+	/// StereoPannerNode 를 만들어 GainNode 와 내보낼 곳(출력이나 버스) 사이에 끼운다. (createStereoPanner 가 없으면 None)
 	//==============================================================================
 	fn create_panner_node(&self) -> Option<web_sys::AudioNode> {
 		let audio_context = self.audio_context.as_ref()?;
@@ -587,7 +603,7 @@ impl AudioPlayerBackend {
 	}
 
 	//==============================================================================
-	// 음량 설정. (gain_node.gain.value)
+	/// 음량 설정. (gain_node.gain.value)
 	//==============================================================================
 	pub fn set_gain(&mut self, gain: f32) {
 		if let Some(gain_node) = &self.gain_node {
@@ -597,7 +613,7 @@ impl AudioPlayerBackend {
 	}
 
 	//==============================================================================
-	// 음량 자동화. (원본 gain.setValueAtTime 들)
+	/// 음량 자동화. (원본 gain.setValueAtTime 들)
 	//==============================================================================
 	pub fn apply_gain_automation(&mut self, automation: GainAutomation) {
 		if let Some(gain_node) = &self.gain_node {
@@ -606,14 +622,14 @@ impl AudioPlayerBackend {
 	}
 
 	//==============================================================================
-	// 지금 음량. (원본 gain.value 읽기)
+	/// 지금 음량. (원본 gain.value 읽기)
 	//==============================================================================
 	pub fn get_gain_value(&self) -> f32 {
 		self.gain_node.as_ref().map(|gain_node| gain_node.gain().value()).unwrap_or(0.0)
 	}
 
 	//==============================================================================
-	// 그 시각에 소스를 멈춘다. (원본 source.stop(when), 아직 시작 전이면 시작할 때 건다)
+	/// 그 시각에 소스를 멈춘다. (원본 source.stop(when), 아직 시작 전이면 시작할 때 건다)
 	//==============================================================================
 	pub fn stop_source_at_time(&mut self, time: f64) {
 		let mut playback_state = self.playback_state.borrow_mut();
@@ -629,7 +645,7 @@ impl AudioPlayerBackend {
 	}
 
 	//==============================================================================
-	// 재생 중인지. (start_playback 에서 참, onended 나 stop 에서 거짓)
+	/// 재생 중인지. (start_playback 에서 참, onended 나 stop 에서 거짓)
 	//==============================================================================
 	pub fn is_playing(&self) -> bool {
 		self.playback_state.borrow().is_playing
@@ -638,7 +654,7 @@ impl AudioPlayerBackend {
 
 impl Drop for AudioPlayerBackend {
 	//==============================================================================
-	// 버릴 때 소스를 멈추고 GainNode 를 뗀다.
+	/// 버릴 때 소스를 멈추고 GainNode 를 뗀다.
 	//==============================================================================
 	fn drop(&mut self) {
 		self.playback_state.borrow_mut().stop_source();
@@ -652,7 +668,7 @@ impl Drop for AudioPlayerBackend {
 }
 
 //==============================================================================
-// 버스 하나의 소리 모으는 부분. (원본 AudioBus 의 audio_context, gain_node. 출력에 이은 GainNode 하나)
+/// 버스 하나의 소리 모으는 부분. (원본 AudioBus 의 audio_context, gain_node. 출력에 이은 GainNode 하나)
 //==============================================================================
 pub struct AudioBusBackend {
 	audio_context: Option<AudioContext>,
@@ -661,7 +677,7 @@ pub struct AudioBusBackend {
 
 impl AudioBusBackend {
 	//==============================================================================
-	// 생성. (컨텍스트가 있으면 GainNode 를 만들어 출력에 잇는다)
+	/// 생성. (컨텍스트가 있으면 GainNode 를 만들어 출력에 잇는다)
 	//==============================================================================
 	pub fn create(state: &mut AudioManagerState) -> AudioBusBackend {
 		let audio_context = state.audio_context.clone();
@@ -680,14 +696,14 @@ impl AudioBusBackend {
 	}
 
 	//==============================================================================
-	// 소리를 모을 수 있는지. (원본 audio_context && gain_node)
+	/// 소리를 모을 수 있는지. (원본 audio_context && gain_node)
 	//==============================================================================
 	pub fn is_available(&self) -> bool {
 		self.audio_context.is_some() && self.gain_node.is_some()
 	}
 
 	//==============================================================================
-	// 음량 설정. (gain_node.gain.value)
+	/// 음량 설정. (gain_node.gain.value)
 	//==============================================================================
 	pub fn set_gain(&mut self, gain: f32) {
 		if let Some(gain_node) = &self.gain_node {
@@ -697,7 +713,7 @@ impl AudioBusBackend {
 	}
 
 	//==============================================================================
-	// 음량 자동화. (원본 SoundSystem 이 버스 gain 에 거는 setTargetAtTime 들)
+	/// 음량 자동화. (원본 SoundSystem 이 버스 gain 에 거는 setTargetAtTime 들)
 	//==============================================================================
 	pub fn apply_gain_automation(&mut self, automation: GainAutomation) {
 		if let Some(gain_node) = &self.gain_node {
@@ -706,7 +722,7 @@ impl AudioBusBackend {
 	}
 
 	//==============================================================================
-	// 이 버스로 트는 플레이어 백엔드 생성. (플레이어의 GainNode 를 버스의 GainNode 에 잇는다, 버스가 소리 없으면 소리 없는 플레이어)
+	/// 이 버스로 트는 플레이어 백엔드 생성. (플레이어의 GainNode 를 버스의 GainNode 에 잇는다, 버스가 소리 없으면 소리 없는 플레이어)
 	//==============================================================================
 	pub fn create_player_backend(&mut self) -> AudioPlayerBackend {
 		let output_node = self.gain_node.clone().map(|gain_node| {
@@ -717,7 +733,7 @@ impl AudioBusBackend {
 	}
 
 	//==============================================================================
-	// 버스의 GainNode. (원본 getGainNode, 컨텍스트가 없을 때 만든 버스는 None)
+	/// 버스의 GainNode. (원본 getGainNode, 컨텍스트가 없을 때 만든 버스는 None)
 	//==============================================================================
 	pub fn get_gain_node(&self) -> Option<&AudioGainNode> {
 		self.gain_node.as_ref()
@@ -726,7 +742,7 @@ impl AudioBusBackend {
 
 impl Drop for AudioBusBackend {
 	//==============================================================================
-	// 버릴 때 GainNode 를 출력에서 뗀다.
+	/// 버릴 때 GainNode 를 출력에서 뗀다.
 	//==============================================================================
 	fn drop(&mut self) {
 		if let Some(gain_node) = &self.gain_node {
@@ -736,7 +752,7 @@ impl Drop for AudioBusBackend {
 }
 
 //==============================================================================
-// 소스 노드를 만들어 튼다. (원본 start_playback)
+/// 소스 노드를 만들어 튼다. (원본 start_playback)
 //==============================================================================
 fn start_source(playback_state_cell: &Rc<RefCell<PlaybackState>>, audio_context: &AudioContext, gain_node: &web_sys::GainNode, audio_buffer: &AudioBuffer, is_loop: bool, time: f64, playback_rate: f64) {
 	let audio_source = match audio_context.create_buffer_source() {
@@ -782,7 +798,7 @@ fn start_source(playback_state_cell: &Rc<RefCell<PlaybackState>>, audio_context:
 }
 
 //==============================================================================
-// AudioParam 에 자동화 걸기. (원본 setValueAtTime 들, 거부는 넘긴다)
+/// AudioParam 에 자동화 걸기. (원본 setValueAtTime 들, 거부는 넘긴다)
 //==============================================================================
 fn apply_gain_automation_to_param(gain_parameter: &web_sys::AudioParam, automation: GainAutomation) {
 	let _ = match automation {
@@ -805,21 +821,21 @@ fn apply_gain_automation_to_param(gain_parameter: &web_sys::AudioParam, automati
 }
 
 //==============================================================================
-// 경로를 주소 글로. (애셋 폴더 기준 상대 주소, 역슬래시는 슬래시로)
+/// 경로를 주소 글로. (애셋 폴더 기준 상대 주소, 역슬래시는 슬래시로)
 //==============================================================================
 fn path_to_url(asset_path: &Path) -> String {
 	asset_path.to_string_lossy().replace('\\', "/")
 }
 
 //==============================================================================
-// 자바스크립트 오류를 글로.
+/// 자바스크립트 오류를 글로.
 //==============================================================================
 fn describe_js_error(error: JsValue) -> String {
 	format!("{:?}", error)
 }
 
 //==============================================================================
-// 파일 읽기. (fetch 와 디코딩을 걸어 두고 바로 돌아온다. 끝나면 애셋이 채워진다)
+/// 파일 읽기. (fetch 와 디코딩을 걸어 두고 바로 돌아온다. 끝나면 애셋이 채워진다)
 //==============================================================================
 pub fn load_audio_file(audio_asset: &Rc<AudioAsset>, asset_path: &Path) -> Result<(), String> {
 	let asset_url = path_to_url(asset_path);
@@ -842,7 +858,7 @@ pub fn load_audio_file(audio_asset: &Rc<AudioAsset>, asset_path: &Path) -> Resul
 }
 
 //==============================================================================
-// 메모리에서 읽기. (디코딩을 걸어 두고 바로 돌아온다)
+/// 메모리에서 읽기. (디코딩을 걸어 두고 바로 돌아온다)
 //==============================================================================
 pub fn load_audio_bytes(audio_asset: &Rc<AudioAsset>, bytes: Vec<u8>) -> Result<(), String> {
 	let byte_array = js_sys::Uint8Array::from(bytes.as_slice());
@@ -864,7 +880,7 @@ pub fn load_audio_bytes(audio_asset: &Rc<AudioAsset>, bytes: Vec<u8>) -> Result<
 }
 
 //==============================================================================
-// fetch 응답을 받아 디코딩한다.
+/// fetch 응답을 받아 디코딩한다.
 //==============================================================================
 async fn fetch_audio_buffer(fetch_promise: js_sys::Promise) -> Result<AudioBuffer, String> {
 	let response_value = JsFuture::from(fetch_promise).await.map_err(describe_js_error)?;
@@ -879,8 +895,8 @@ async fn fetch_audio_buffer(fetch_promise: js_sys::Promise) -> Result<AudioBuffe
 }
 
 //==============================================================================
-// 디코딩. (OfflineAudioContext 로. 스피커를 잡지 않고, user gesture 전에 만들어도 경고가 없으며,
-//  여러 애셋을 한꺼번에 받아도 실시간 AudioContext 의 개수 제한에 걸리지 않는다. 없으면 잠시 쓰는 AudioContext 로 하고 닫는다)
+/// 디코딩. (OfflineAudioContext 로. 스피커를 잡지 않고, user gesture 전에 만들어도 경고가 없으며,
+///  여러 애셋을 한꺼번에 받아도 실시간 AudioContext 의 개수 제한에 걸리지 않는다. 없으면 잠시 쓰는 AudioContext 로 하고 닫는다)
 //==============================================================================
 async fn decode_array_buffer(array_buffer: &js_sys::ArrayBuffer) -> Result<AudioBuffer, String> {
 	if let Ok(offline_audio_context) = web_sys::OfflineAudioContext::new_with_number_of_channels_and_length_and_sample_rate(1, 1, DECODE_SAMPLE_RATE) {
@@ -905,14 +921,14 @@ async fn decode_array_buffer(array_buffer: &js_sys::ArrayBuffer) -> Result<Audio
 }
 
 //==============================================================================
-// 버퍼의 재생 시간. (초)
+/// 버퍼의 재생 시간. (초)
 //==============================================================================
 pub fn get_audio_buffer_duration(audio_buffer: &AudioBuffer) -> f64 {
 	audio_buffer.duration()
 }
 
 //==============================================================================
-// 파형을 오실레이터 타입으로.
+/// 파형을 오실레이터 타입으로.
 //==============================================================================
 fn to_oscillator_type(beep_waveform: BeepWaveform) -> web_sys::OscillatorType {
 	match beep_waveform {
@@ -932,7 +948,7 @@ fn to_oscillator_type(beep_waveform: BeepWaveform) -> web_sys::OscillatorType {
 }
 
 //==============================================================================
-// 비프 톤 하나 재생. (원본 play_tone 의 OscillatorNode + GainNode 스케줄링)
+/// 비프 톤 하나 재생. (원본 play_tone 의 OscillatorNode + GainNode 스케줄링)
 //==============================================================================
 pub fn play_beep_tone(state: &mut AudioManagerState, beep_envelope: &BeepEnvelope) {
 	let audio_context = match &state.audio_context {

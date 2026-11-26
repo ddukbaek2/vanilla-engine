@@ -1,5 +1,5 @@
 //==============================================================================
-//! 스킨드 모델. (원본 experimental/graphics/skinnedmodel.js)
+//! 스킨드 모델. (원본 graphics3d/skinnedmodel.js)
 //! - 모델 인스턴스, 메시/본/스킨/머티리얼/애니메이션 데이터 + 포즈 상태. 렌더링은 SkinnedModelRenderer 가 맡는다.
 //! - GLB(바이너리 glTF)와 바이너리 FBX 를 공통 중립 스키마(MeshDescription + MaterialDescription)로 해석해 GL 리소스를 구성한다.
 //!   (임포터는 파싱만 → 중립 스키마 → 공용 GL 업로드 upload_meshes_and_materials)
@@ -7,7 +7,6 @@
 //! - 애니메이션 크로스페이드와 조인트 회전 오프셋(절차 포즈 가공), 모프 가중치(glTF weights / 프로그램)를 원본처럼 지원한다.
 //! - 원본과 다른 것:
 //!   - 원본은 async 이고 URL 을 fetch 한다(loadFromUrl, 바이트는 loadFromBytes). 러스트 판의 바이트 함수
-//!   ```text
 //!     load_from_bytes / load_from_fbx_bytes / add_animations_from_fbx_bytes 는 그 자리에서 끝난다.
 //!     URL 함수 load_from_url / load_from_fbx_url 은 ImageAsset 처럼 엔진의 애셋 받기(데스크탑은 애셋 폴더 후보, 웹은 asset_base_url 에서 fetch)로
 //!     바이트를 부탁하고 받기 손잡이(SkinnedModelLoadHandle)를 돌려준다. 다 받으면 손잡이의 create_model(gl, 렌더러)이 모델을 짓는다. (await 없는 꼴)
@@ -15,23 +14,40 @@
 //!     다 받으면 작업을 폴링하는 엔진의 GL 로 모델을 짓는다. (렌더러는 부를 때 셰이더 프로그램만 나눠 들어 빌리지 않는다)
 //!     add_animations_from_fbx_url 은 받기를 부탁하고 await 할 수 있는 AnimationLoadHandle 을 돌려준다. 원본처럼 await 가 끝날 때는 클립이 이미 더해져 있다.
 //!     (클립 목록을 손잡이와 나눠 들어, 다 받으면 await 하는 퓨처나 다음 update, play_animation 가운데 먼저 닿는 쪽이 더한다. 원본처럼 받은 차례로 더한다)
-//!   ```
 //!   - GL 을 쓰는 함수는 gl 을 받는다. update(delta_time) 는 GL 을 쓰지 않는다. 원본 update 6단계(바뀐 모프 타깃 업로드)는
-//!   ```text
 //!     렌더러의 draw / draw_depth / draw_wireframe 가 upload_pending_morph_targets 로 대신한다. (그래서 그리기 함수가 &mut 모델을 받는다)
 //!     덕분에 씬의 tick 에서 update 를 부를 수 있다.
-//!   ```
 //!   - 원본 노드 / 드로어블 / 스킨 / 클립 객체는 SkinnedModelNode / Drawable / Skin / AnimationClip 구조체다.
-//!   ```text
-//!     드로어블의 머티리얼은 Rc<Material> 이다. 클립은 인덱스로 가리키고, sample_animation 도 클립 인덱스를 받는다.
+//!     드로어블의 머티리얼은 `Rc<Material>` 이다. 클립은 인덱스로 가리키고, sample_animation 도 클립 인덱스를 받는다.
 //!     upload_wireframe_indices / upload_morph_targets 는 원본의 드로어블 객체 대신 드로어블 인덱스를 받는다. (모델을 &mut 로 빌린 채 드로어블을 넘길 수 없어서다)
-//!   ```
 //!   - 드로어블의 mesh_description 은 모프 타깃을 morph_target_list 로 옮긴 뒤라 morph_targets 가 비어 있다. (큰 델타 배열을 두 벌 들지 않는다)
 //!   - 원본처럼 노드 matrix 와 CUBICSPLINE 보간, 프리미티브 mode 는 보지 않는다. FBX 는 원본처럼 스킨이 붙은 메시만 그린다.
 //!   - destroy 가 지우는 머티리얼: 원본은 이 모델이 업로드에서 지은 것을 지운다. 러스트 판은 그 가운데 다른 곳에서 Rc 로 쥐지 않은 것만 지운다.
-//!   ```text
 //!     (참조 수를 셀 수 있어서다, 자바스크립트에는 참조 수가 없다)
-//!   ```
+//!
+//! # 예제
+//! GL 없이 glTF 내용을 해석하고 포즈 계산하기 (스킨 없는 메시는 노드 자신이 조인트인 합성 스킨으로)
+//! ```rust
+//! use serde_json::json;
+//! use vanilla::SkinnedModel;
+//!
+//! let positions: [f32; 9] = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+//! let binary_buffer: Vec<u8> = positions.iter().flat_map(|value| value.to_le_bytes()).collect();
+//! let json = json!({
+//! 	"scenes": [{ "nodes": [0] }],
+//! 	"nodes": [{ "name": "Triangle", "mesh": 0, "translation": [0.0, 2.0, 0.0] }],
+//! 	"meshes": [{ "primitives": [{ "attributes": { "POSITION": 0 } }] }],
+//! 	"accessors": [{ "bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3" }],
+//! 	"bufferViews": [{ "buffer": 0, "byteOffset": 0, "byteLength": 36 }]
+//! });
+//! let mut skinned_model = SkinnedModel::create_without_shader_program();
+//! let (mesh_description_list, material_description_list) = skinned_model.interpret_content(&json, &binary_buffer).unwrap();
+//! assert_eq!(mesh_description_list.len(), 1);
+//! assert!(material_description_list.is_empty());
+//! skinned_model.update(0.0);
+//! let joint_matrix_array = &skinned_model.get_skin_list()[0].joint_matrix_array;
+//! assert_eq!(joint_matrix_array[13], 2.0);
+//! ```
 //==============================================================================
 use crate::base::matrix4::Matrix4;
 use crate::base::quaternion::Quaternion;
@@ -53,7 +69,7 @@ use std::rc::Rc;
 use std::task::{Context, Poll};
 
 //==============================================================================
-/// 전역 상수 목록.
+// 전역 상수 목록.
 //==============================================================================
 /// GLB 머리와 청크 타입.
 const GLB_MAGIC: u32 = 0x46546c67;
@@ -62,8 +78,11 @@ const GLB_CHUNKTYPE_BINARY: u32 = 0x004e4942;
 
 /// 접근자 컴포넌트 타입. (원본 COMPONENT_ARRAY_TABLE 의 키)
 pub const COMPONENT_TYPE_UNSIGNED_BYTE: u32 = 5121;
+/// 부호 없는 16비트 정수. (glTF componentType 5123)
 pub const COMPONENT_TYPE_UNSIGNED_SHORT: u32 = 5123;
+/// 부호 없는 32비트 정수. (glTF componentType 5125)
 pub const COMPONENT_TYPE_UNSIGNED_INT: u32 = 5125;
+/// 32비트 실수. (glTF componentType 5126)
 pub const COMPONENT_TYPE_FLOAT: u32 = 5126;
 
 /// 모프 타깃 텍스처 가로 크기. (정점 델타를 실수 텍스처에 행 단위로 적재, 버텍스 셰이더가 gl_VertexID 로 조회)
@@ -77,15 +96,25 @@ pub const MORPH_TARGET_MAXIMUM: usize = 96;
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum AnimationPath {
+	/// 이동. (키마다 x, y, z 3개)
 	Translation,
+	/// 회전. (키마다 쿼터니언 x, y, z, w 4개)
 	Rotation,
+	/// 크기. (키마다 x, y, z 3개)
 	Scale,
+	/// 모프 가중치. (키마다 모프 타깃 수만큼)
 	Weights,
 }
 
 impl AnimationPath {
 	//==============================================================================
 	/// glTF 경로 문자열로부터. (모르는 경로면 None)
+	///
+	/// # 인자
+	/// - `path_name`: glTF 채널 경로. ("translation", "rotation", "scale", "weights", 대소문자까지 같아야 한다)
+	///
+	/// # 돌려줌
+	/// 맞는 경로. 모르는 문자열이면 None.
 	//==============================================================================
 	pub fn from_name(path_name: &str) -> Option<AnimationPath> {
 		match path_name {
@@ -110,39 +139,108 @@ impl AnimationPath {
 
 //==============================================================================
 /// 모델 노드. (본 계층 + 포즈 상태, 원본 node_list 원소)
+///
+/// # 예제
+/// 이름으로 노드를 찾아 월드 위치 읽기 (update 뒤의 값)
+/// ```rust
+/// use vanilla::{SkinnedModel, SkinnedModelNode};
+///
+/// fn find_world_position(skinned_model: &SkinnedModel, node_name: &str) -> Option<[f32; 3]> {
+/// 	let node: &SkinnedModelNode = skinned_model.get_node_list().iter().find(|node| node.name == node_name)?;
+/// 	let elements = node.world_matrix.elements;
+/// 	Some([elements[12], elements[13], elements[14]])
+/// }
+///
+/// let skinned_model = SkinnedModel::create_without_shader_program();
+/// assert_eq!(find_world_position(&skinned_model, "Head"), None);
+/// ```
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct SkinnedModelNode {
+	/// 노드 이름. (glTF 노드 name, FBX 는 Model 이름 그대로, 없으면 빈 문자열)
 	pub name: String,
+	/// 자식 노드 인덱스 목록.
 	pub child_indices: Vec<usize>,
+	/// glTF 메시 인덱스. (메시가 없거나 FBX 면 None)
 	pub mesh_index: Option<usize>,
+	/// 스킨 인덱스. (skin_list 안의 자리, 스킨 없는 glTF 메시 노드에는 합성 스킨이 붙는다. 없으면 None)
 	pub skin_index: Option<usize>,
+	/// 기본 포즈 이동. (update 가 매번 이 값에서 시작한다)
 	pub base_translation: [f32; 3],
+	/// 기본 포즈 회전. (FBX 는 사전 회전까지 곱한 것)
 	pub base_rotation: Quaternion,
+	/// 기본 포즈 크기.
 	pub base_scale: [f32; 3],
+	/// 지금 포즈 이동. (마지막 update 가 기본 포즈에 클립을 샘플링한 값)
 	pub current_translation: [f32; 3],
+	/// 지금 포즈 회전. (조인트 회전 오프셋까지 곱한 값)
 	pub current_rotation: Quaternion,
+	/// 지금 포즈 크기.
 	pub current_scale: [f32; 3],
+	/// 모델 공간 월드 행렬. (update 가 루트부터 계산한다, 루트에 닿지 않는 노드는 그대로)
 	pub world_matrix: Matrix4,
 }
 
 //==============================================================================
 /// 스킨. (조인트 노드 인덱스 + 역바인드 행렬 + 셰이더로 올릴 조인트 행렬 배열)
+///
+/// # 예제
+/// 조인트 행렬 배열에서 조인트 하나의 행렬 꺼내기
+/// ```rust
+/// use vanilla::{Matrix4, Skin};
+///
+/// fn read_joint_matrix(skin: &Skin, joint_index: usize) -> Option<Matrix4> {
+/// 	let elements = skin.joint_matrix_array.get(joint_index * 16..joint_index * 16 + 16)?;
+/// 	let mut matrix = Matrix4::create_identity();
+/// 	matrix.elements.copy_from_slice(elements);
+/// 	Some(matrix)
+/// }
+///
+/// let skin = Skin {
+/// 	joint_node_indices: vec![0],
+/// 	inverse_bind_matrices: vec![Matrix4::create_identity()],
+/// 	joint_matrix_array: Matrix4::create_translation(1.0, 2.0, 3.0).get_elements().to_vec(),
+/// };
+/// assert_eq!(read_joint_matrix(&skin, 0).unwrap().elements[13], 2.0);
+/// assert!(read_joint_matrix(&skin, 1).is_none());
+/// ```
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct Skin {
+	/// 조인트마다 노드 인덱스. (노드가 없는 조인트는 usize::MAX 로 두고 단위 행렬을 쓴다)
 	pub joint_node_indices: Vec<usize>,
+	/// 조인트마다 역바인드 행렬. (joint_node_indices 와 같은 자리)
 	pub inverse_bind_matrices: Vec<Matrix4>,
+	/// 셰이더로 올릴 조인트 행렬. (조인트마다 열 우선 16개, 월드 x 역바인드, update 가 채운다)
 	pub joint_matrix_array: Vec<f32>,
 }
 
 //==============================================================================
 /// 모프 타깃. (정점별 위치 델타 + 선택 노멀 델타)
+///
+/// # 예제
+/// 정점 2개짜리 타깃을 모프 텍스처 텍셀로 펼치기
+/// ```rust
+/// use vanilla::{MorphTarget, SkinnedModel};
+///
+/// let morph_target = MorphTarget {
+/// 	name: String::from("smile"),
+/// 	position_deltas: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+/// 	normal_deltas: None,
+/// };
+/// let (texture_width, rows_per_target, texel_data) = SkinnedModel::build_morph_texel_data(&[morph_target], 2);
+/// assert_eq!((texture_width, rows_per_target), (2, 1));
+/// assert_eq!(texel_data.len(), 2 * 2 * 4);
+/// assert_eq!(&texel_data[0..8], &[1.0, 2.0, 3.0, 0.0, 4.0, 5.0, 6.0, 0.0]);
+/// ```
 //==============================================================================
 #[derive(Clone, Debug, PartialEq)]
 pub struct MorphTarget {
+	/// 타깃 이름. (glTF mesh.extras.targetNames, 없으면 "target0" 꼴)
 	pub name: String,
+	/// 정점마다 위치 델타. (x, y, z 3개씩)
 	pub position_deltas: Vec<f32>,
+	/// 정점마다 노멀 델타. (3개씩, 없으면 None)
 	pub normal_deltas: Option<Vec<f32>>,
 }
 
@@ -151,12 +249,17 @@ pub struct MorphTarget {
 //==============================================================================
 #[derive(Clone, Debug, PartialEq)]
 pub enum IndexArray {
+	/// 16비트 인덱스. (GL UNSIGNED_SHORT)
 	UnsignedShort(Vec<u16>),
+	/// 32비트 인덱스. (GL UNSIGNED_INT)
 	UnsignedInt(Vec<u32>),
 }
 
 impl IndexArray {
 	//==============================================================================
+	/// 인덱스 개수.
+	///
+	/// # 돌려줌
 	/// 인덱스 개수.
 	//==============================================================================
 	pub fn len(&self) -> usize {
@@ -172,6 +275,9 @@ impl IndexArray {
 
 	//==============================================================================
 	/// 비었는지.
+	///
+	/// # 돌려줌
+	/// 비었으면 true.
 	//==============================================================================
 	pub fn is_empty(&self) -> bool {
 		self.len() == 0
@@ -179,6 +285,12 @@ impl IndexArray {
 
 	//==============================================================================
 	/// 인덱스 하나 반환.
+	///
+	/// # 인자
+	/// - `position`: 인덱스 자리. (0 부터, 밖이면 패닉)
+	///
+	/// # 돌려줌
+	/// 그 자리의 인덱스 값.
 	//==============================================================================
 	pub fn get(&self, position: usize) -> usize {
 		match self {
@@ -193,6 +305,9 @@ impl IndexArray {
 
 	//==============================================================================
 	/// GL 원소 타입. (UNSIGNED_SHORT / UNSIGNED_INT)
+	///
+	/// # 돌려줌
+	/// glow::UNSIGNED_SHORT 나 glow::UNSIGNED_INT.
 	//==============================================================================
 	pub fn get_gl_component_type(&self) -> u32 {
 		match self {
@@ -225,15 +340,22 @@ impl IndexArray {
 //==============================================================================
 #[derive(Clone, Debug, PartialEq)]
 pub enum AccessorArray {
+	/// 부호 없는 8비트. (componentType 5121)
 	UnsignedByte(Vec<u8>),
+	/// 부호 없는 16비트. (componentType 5123)
 	UnsignedShort(Vec<u16>),
+	/// 부호 없는 32비트. (componentType 5125)
 	UnsignedInt(Vec<u32>),
+	/// 32비트 실수. (componentType 5126)
 	Float(Vec<f32>),
 }
 
 impl AccessorArray {
 	//==============================================================================
 	/// 원소(컴포넌트) 개수.
+	///
+	/// # 돌려줌
+	/// 컴포넌트 개수. (원소 수 x 원소당 컴포넌트 수)
 	//==============================================================================
 	pub fn len(&self) -> usize {
 		match self {
@@ -254,6 +376,9 @@ impl AccessorArray {
 
 	//==============================================================================
 	/// 비었는지.
+	///
+	/// # 돌려줌
+	/// 비었으면 true.
 	//==============================================================================
 	pub fn is_empty(&self) -> bool {
 		self.len() == 0
@@ -261,6 +386,9 @@ impl AccessorArray {
 
 	//==============================================================================
 	/// 컴포넌트 타입. (5121 / 5123 / 5125 / 5126)
+	///
+	/// # 돌려줌
+	/// glTF 컴포넌트 타입 번호. (COMPONENT_TYPE_UNSIGNED_BYTE 같은 상수)
 	//==============================================================================
 	pub fn get_component_type(&self) -> u32 {
 		match self {
@@ -281,6 +409,9 @@ impl AccessorArray {
 
 	//==============================================================================
 	/// 실수 목록으로. (원본 new Float32Array(typedArray), 정수는 정규화하지 않고 값 그대로)
+	///
+	/// # 돌려줌
+	/// f32 로 바꾼 새 목록.
 	//==============================================================================
 	pub fn to_float_list(&self) -> Vec<f32> {
 		match self {
@@ -301,6 +432,9 @@ impl AccessorArray {
 
 	//==============================================================================
 	/// 16비트 정수 목록으로. (원본 new Uint16Array(typedArray))
+	///
+	/// # 돌려줌
+	/// u16 으로 바꾼 새 목록. (u32 는 아래 16비트만 남고, 실수는 소수점 아래를 버리고 0 ~ 65535 로 자른다)
 	//==============================================================================
 	pub fn to_unsigned_short_list(&self) -> Vec<u16> {
 		match self {
@@ -321,6 +455,9 @@ impl AccessorArray {
 
 	//==============================================================================
 	/// 인덱스 배열로. (원본: Uint8 은 Uint16 으로 넓히고 나머지는 그대로)
+	///
+	/// # 돌려줌
+	/// 인덱스 배열. (UnsignedInt 는 32비트 그대로, 나머지는 16비트)
 	//==============================================================================
 	pub fn to_index_array(&self) -> IndexArray {
 		match self {
@@ -337,75 +474,239 @@ impl AccessorArray {
 //==============================================================================
 /// 중립 메시 서술. (원본 mesh_description, 순수 CPU 배열)
 /// - joints / weights 는 정점마다 4개, material_index 가 None 이면 기본 머티리얼, node_index 는 모프 가중치 채널의 대상 노드.
+///
+/// # 예제
+/// 스킨 없는 glTF 삼각형의 서술 (합성 스킨 하나에 가중치 1)
+/// ```rust
+/// use serde_json::json;
+/// use vanilla::SkinnedModel;
+///
+/// let positions: [f32; 9] = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+/// let binary_buffer: Vec<u8> = positions.iter().flat_map(|value| value.to_le_bytes()).collect();
+/// let json = json!({
+/// 	"scenes": [{ "nodes": [0] }],
+/// 	"nodes": [{ "name": "Triangle", "mesh": 0 }],
+/// 	"meshes": [{ "primitives": [{ "attributes": { "POSITION": 0 } }] }],
+/// 	"accessors": [{ "bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3" }],
+/// 	"bufferViews": [{ "buffer": 0, "byteOffset": 0, "byteLength": 36 }]
+/// });
+/// let mut skinned_model = SkinnedModel::create_without_shader_program();
+/// let (mesh_description_list, _material_description_list) = skinned_model.interpret_content(&json, &binary_buffer).unwrap();
+/// let mesh_description = &mesh_description_list[0];
+/// assert_eq!(mesh_description.positions.len(), 9);
+/// assert!(mesh_description.normals.is_none());
+/// assert!(mesh_description.indices.is_none());
+/// assert_eq!(&mesh_description.weights[0..4], &[1.0, 0.0, 0.0, 0.0]);
+/// assert_eq!(mesh_description.material_index, None);
+/// assert_eq!(skinned_model.get_skin_list()[mesh_description.skin_index].joint_node_indices, vec![0]);
+/// ```
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct MeshDescription {
+	/// 정점 위치. (정점마다 x, y, z)
 	pub positions: Vec<f32>,
+	/// 정점 노멀. (3개씩, None 이면 업로드할 때 스무스 노멀을 지어 쓴다)
 	pub normals: Option<Vec<f32>>,
+	/// 정점 UV. (2개씩, 없으면 None)
 	pub texture_coordinates: Option<Vec<f32>>,
+	/// 정점마다 조인트 4개. (스킨 joint_node_indices 안의 자리)
 	pub joints: Vec<u16>,
+	/// 정점마다 조인트 가중치 4개. (0 ~ 1)
 	pub weights: Vec<f32>,
+	/// 삼각형 인덱스. (None 이면 정점 3개씩 삼각형으로 그린다)
 	pub indices: Option<IndexArray>,
+	/// 쓰는 스킨 인덱스. (모델 skin_list 안의 자리)
 	pub skin_index: usize,
+	/// 머티리얼 서술 인덱스. (None 이면 기본 머티리얼)
 	pub material_index: Option<usize>,
+	/// 머티리얼 이름. (glTF materials 의 name, FBX 는 빈 문자열)
 	pub material_name: String,
+	/// 이 메시를 가진 노드 인덱스. (모프 가중치 채널의 대상, 없으면 None)
 	pub node_index: Option<usize>,
+	/// 모프 타깃 목록.
 	pub morph_targets: Vec<MorphTarget>,
+	/// 타깃마다 기본 가중치. (glTF 노드나 메시의 weights, 없으면 0)
 	pub morph_weights: Vec<f32>,
 }
 
 //==============================================================================
 /// 드로어블. (원본 drawable_list 원소, 버텍스 어레이, 인덱스, 스킨, 머티리얼 참조, 모프 상태)
+///
+/// # 예제
+/// 머티리얼 이름으로 드로어블 자리 찾기 (set_material 에 넘길 자리)
+/// ```rust
+/// use vanilla::SkinnedModel;
+///
+/// fn find_drawable_index(skinned_model: &SkinnedModel, material_name: &str) -> Option<usize> {
+/// 	skinned_model.get_drawable_list().iter().position(|drawable| drawable.material_name == material_name)
+/// }
+///
+/// let skinned_model = SkinnedModel::create_without_shader_program();
+/// assert_eq!(find_drawable_index(&skinned_model, "Body"), None);
+/// ```
 //==============================================================================
 pub struct Drawable {
+	/// 버텍스 어레이. (정점 버퍼와 인덱스 버퍼를 묶은 것)
 	pub vertex_array: GlVertexArray,
+	/// 정점 버퍼 목록. (셰이더가 쓰는 어트리뷰트만)
 	pub vertex_buffer_list: Vec<GlBuffer>,
+	/// 인덱스로 그리는지. (false 면 drawArrays)
 	pub is_indexed: bool,
+	/// 인덱스 버퍼. (인덱스가 없으면 None)
 	pub index_buffer: Option<GlBuffer>,
+	/// 인덱스 개수.
 	pub index_count: usize,
+	/// 인덱스 GL 타입. (UNSIGNED_SHORT 나 UNSIGNED_INT, 인덱스가 없으면 0)
 	pub index_component_type: u32,
+	/// 인덱스 버퍼 시작 바이트. (업로드는 0 으로 둔다)
 	pub index_byte_offset: i32,
+	/// 와이어프레임 선 인덱스 버퍼. (처음 draw_wireframe 할 때 짓는다, 그 전에는 None)
 	pub wireframe_index_buffer: Option<GlBuffer>,
+	/// 선 인덱스 개수. (모서리 수 x 2)
 	pub wireframe_index_count: usize,
+	/// 선 인덱스 GL 타입. (정점이 65535 개를 넘으면 UNSIGNED_INT)
 	pub wireframe_index_component_type: u32,
+	/// 정점 개수.
 	pub vertex_count: usize,
+	/// 머티리얼. (같은 모델의 다른 드로어블이나 다른 곳과 Rc 로 나눠 들 수 있다)
 	pub material: Rc<Material>,
+	/// 머티리얼 이름. (MeshDescription 의 material_name)
 	pub material_name: String,
+	/// 쓰는 스킨 인덱스.
 	pub skin_index: usize,
+	/// 메시를 가진 노드 인덱스. (모프 가중치 채널의 대상)
 	pub node_index: Option<usize>,
+	/// 업로드한 메시 서술. (모프 타깃은 morph_target_list 로 옮겨 비어 있다)
 	pub mesh_description: MeshDescription,
+	/// 모프 타깃 목록. (MORPH_TARGET_MAXIMUM 개까지)
 	pub morph_target_list: Vec<MorphTarget>,
+	/// 타깃마다 가중치. (morph_target_list 와 같은 자리)
 	pub morph_weights: Vec<f32>,
+	/// 모프 델타 텍스처. (RGBA32F, 타깃이 없거나 올리기 전이면 None)
 	pub morph_texture: Option<GlTexture>,
+	/// 타깃 블록 하나의 행 수. (위치 블록과 노멀 블록이 각각 이만큼)
 	pub morph_rows_per_target: i32,
+	/// 모프 텍스처 가로. (텍셀, 정점 수를 1 ~ 2048 로 자른 값)
 	pub morph_texture_width: i32,
+	/// 모프 타깃을 다시 올려야 하는지. (렌더러가 그리기 전에 upload_pending_morph_targets 로 올린다)
 	pub is_morph_dirty: bool,
 }
 
 //==============================================================================
 /// 애니메이션 채널. (노드 인덱스 + 경로 + 시간/값 커브 + 키프레임 커서)
+///
+/// # 예제
+/// 클립에서 회전 채널만 세기
+/// ```rust
+/// use vanilla::{AnimationClip, AnimationPath};
+/// use vanilla::graphics3d::skinnedmodel::AnimationChannel;
+///
+/// let animation_clip = AnimationClip {
+/// 	name: String::from("Rise"),
+/// 	duration: 2.0,
+/// 	channels: vec![AnimationChannel {
+/// 		node_index: 0,
+/// 		path: AnimationPath::Translation,
+/// 		times: vec![0.0, 2.0],
+/// 		values: vec![0.0, 0.0, 0.0, 0.0, 4.0, 0.0],
+/// 		cursor: 0,
+/// 	}],
+/// };
+/// let rotation_channel_count = animation_clip.channels.iter().filter(|channel| channel.path == AnimationPath::Rotation).count();
+/// assert_eq!(rotation_channel_count, 0);
+/// assert_eq!(animation_clip.channels[0].times.last().copied(), Some(animation_clip.duration));
+/// ```
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct AnimationChannel {
+	/// 대상 노드 인덱스.
 	pub node_index: usize,
+	/// 채널 경로.
 	pub path: AnimationPath,
+	/// 키 시간 목록. (초, 오름차순)
 	pub times: Vec<f32>,
+	/// 키마다 값. (이동과 크기는 3개, 회전은 쿼터니언 4개, 모프 가중치는 타깃 수만큼)
 	pub values: Vec<f32>,
+	/// 키프레임 커서. (지난 샘플링의 키 자리, 시간이 뒤로 가면 0 부터 다시 찾는다)
 	pub cursor: usize,
 }
 
 //==============================================================================
 /// 애니메이션 클립.
+///
+/// # 예제
+/// 가장 긴 클립 이름 찾기
+/// ```rust
+/// use vanilla::SkinnedModel;
+///
+/// fn find_longest_clip_name(skinned_model: &SkinnedModel) -> Option<String> {
+/// 	let animation_list = skinned_model.get_animation_list();
+/// 	let longest_clip = animation_list.iter().max_by(|left, right| left.duration.total_cmp(&right.duration))?;
+/// 	Some(longest_clip.name.clone())
+/// }
+///
+/// let skinned_model = SkinnedModel::create_without_shader_program();
+/// assert_eq!(find_longest_clip_name(&skinned_model), None);
+/// ```
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct AnimationClip {
+	/// 클립 이름. (glTF 애니메이션 name, FBX 는 스택 이름이나 붙일 때 준 이름)
 	pub name: String,
+	/// 길이. (초, 채널 마지막 키 시간 가운데 가장 큰 것, 이 길이로 반복한다)
 	pub duration: f32,
+	/// 채널 목록.
 	pub channels: Vec<AnimationChannel>,
 }
 
 //==============================================================================
 /// 스킨드 모델.
+///
+/// # 예제
+/// 클립 둘이 든 glTF 를 해석하고 1초 크로스페이드로 넘기기 (GL 없이 포즈만)
+/// ```rust
+/// use serde_json::json;
+/// use vanilla::SkinnedModel;
+///
+/// let float_values: [f32; 23] = [
+/// 	0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0,
+/// 	0.0, 2.0,
+/// 	0.0, 0.0, 0.0, 0.0, 4.0, 0.0,
+/// 	0.0, 1.0, 0.0, 0.0, 1.0, 0.0,
+/// ];
+/// let binary_buffer: Vec<u8> = float_values.iter().flat_map(|value| value.to_le_bytes()).collect();
+/// let json = json!({
+/// 	"scenes": [{ "nodes": [0] }],
+/// 	"nodes": [{ "name": "Triangle", "mesh": 0 }],
+/// 	"meshes": [{ "primitives": [{ "attributes": { "POSITION": 0 } }] }],
+/// 	"accessors": [
+/// 		{ "bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3" },
+/// 		{ "bufferView": 1, "componentType": 5126, "count": 2, "type": "SCALAR" },
+/// 		{ "bufferView": 2, "componentType": 5126, "count": 2, "type": "VEC3" },
+/// 		{ "bufferView": 3, "componentType": 5126, "count": 2, "type": "VEC3" }
+/// 	],
+/// 	"bufferViews": [
+/// 		{ "buffer": 0, "byteOffset": 0, "byteLength": 36 },
+/// 		{ "buffer": 0, "byteOffset": 36, "byteLength": 8 },
+/// 		{ "buffer": 0, "byteOffset": 44, "byteLength": 24 },
+/// 		{ "buffer": 0, "byteOffset": 68, "byteLength": 24 }
+/// 	],
+/// 	"animations": [
+/// 		{ "name": "Rise", "samplers": [{ "input": 1, "output": 2 }], "channels": [{ "sampler": 0, "target": { "node": 0, "path": "translation" } }] },
+/// 		{ "name": "Hold", "samplers": [{ "input": 1, "output": 3 }], "channels": [{ "sampler": 0, "target": { "node": 0, "path": "translation" } }] }
+/// 	]
+/// });
+/// let mut skinned_model = SkinnedModel::create_without_shader_program();
+/// skinned_model.interpret_content(&json, &binary_buffer).unwrap();
+/// assert_eq!(skinned_model.get_animation_name_list(), vec![String::from("Rise"), String::from("Hold")]);
+/// skinned_model.update(1.0);
+/// assert_eq!(skinned_model.get_node_list()[0].current_translation, [0.0, 2.0, 0.0]);
+/// skinned_model.play_animation("Hold", 1.0);
+/// skinned_model.update(0.5);
+/// assert_eq!(skinned_model.get_node_list()[0].current_translation, [0.0, 2.0, 0.0]);
+/// skinned_model.update(0.5);
+/// assert_eq!(skinned_model.get_node_list()[0].current_translation, [0.0, 1.0, 0.0]);
+/// ```
 //==============================================================================
 pub struct SkinnedModel {
 	shader_program: Option<Rc<ShaderProgram>>,
@@ -468,6 +769,23 @@ impl AnimationLoad {
 //==============================================================================
 /// 애니메이션 FBX 받기 손잡이. (SkinnedModel::add_animations_from_fbx_url 이 돌려준다. 원본 addAnimationsFromFbxUrl 의 Promise 자리)
 /// - await 하면 다 받아 클립을 모델에 더할 때까지 기다린다. 받기나 파싱에 실패하면 까닭으로 끝난다. (원본 reject)
+///
+/// # 예제
+/// 걷기 클립을 붙이고 다 붙은 뒤 틀기
+/// ```rust,no_run
+/// use std::cell::RefCell;
+/// use std::rc::Rc;
+/// use vanilla::{Engine, SkinnedModel};
+///
+/// fn add_walk_clip(engine: &mut Engine, skinned_model: Rc<RefCell<SkinnedModel>>) {
+/// 	let animation_load_handle = skinned_model.borrow_mut().add_animations_from_fbx_url(engine, "anims/walk.fbx", "Walk", true);
+/// 	engine.spawn_task(move |_engine_context| async move {
+/// 		if animation_load_handle.await.is_ok() {
+/// 			skinned_model.borrow_mut().play_animation("Walk", 0.25);
+/// 		}
+/// 	});
+/// }
+/// ```
 //==============================================================================
 #[derive(Clone)]
 pub struct AnimationLoadHandle {
@@ -477,6 +795,9 @@ pub struct AnimationLoadHandle {
 impl AnimationLoadHandle {
 	//==============================================================================
 	/// 바이트 읽기 손잡이. (씬에 맡길 때)
+	///
+	/// # 돌려줌
+	/// FBX 바이트 읽기 손잡이. (SceneBase::track_load_handle 에 넘긴다)
 	//==============================================================================
 	pub fn get_load_handle(&self) -> &AssetLoadHandle {
 		self.animation_load.fbx_load_handle.get_load_handle()
@@ -484,6 +805,9 @@ impl AnimationLoadHandle {
 
 	//==============================================================================
 	/// 끝났는지. (클립을 더했거나 실패했거나)
+	///
+	/// # 돌려줌
+	/// 클립을 더했거나 받기, 파싱에 실패했으면 true. (바이트를 다 받아도 update, play_animation, await 가운데 하나가 더하기 전에는 false)
 	//==============================================================================
 	pub fn is_finished(&self) -> bool {
 		self.animation_load.apply_result.borrow().is_some()
@@ -501,6 +825,22 @@ impl std::fmt::Debug for AnimationLoadHandle {
 
 //==============================================================================
 /// 애니메이션 FBX 받기를 기다리는 퓨처. (다 받으면 클립을 더하고 끝난다)
+///
+/// # 예제
+/// 손잡이를 퓨처로 바꿔 실패 까닭 받기
+/// ```rust,no_run
+/// use std::future::IntoFuture;
+/// use vanilla::{AnimationLoadFuture, Engine, SkinnedModel};
+///
+/// fn request_idle_clip(engine: &mut Engine, skinned_model: &mut SkinnedModel) {
+/// 	let animation_load_future: AnimationLoadFuture = skinned_model.add_animations_from_fbx_url(engine, "anims/idle.fbx", "Idle", false).into_future();
+/// 	engine.spawn_task(move |_engine_context| async move {
+/// 		if let Err(error_message) = animation_load_future.await {
+/// 			eprintln!("{}", error_message);
+/// 		}
+/// 	});
+/// }
+/// ```
 //==============================================================================
 #[derive(Clone)]
 pub struct AnimationLoadFuture {
@@ -609,6 +949,68 @@ enum SkinnedModelFileFormat {
 /// 모델 받기 손잡이. (SkinnedModel::load_from_url, load_from_fbx_url 이 돌려준다. 원본 loadFromUrl, loadFromFbxUrl 의 Promise 자리)
 /// - 씬은 get_load_handle 을 SceneBase::track_load_handle 로 맡겨 다 받을 때까지 initialize 를 미룰 수 있다.
 /// - 모델은 GL 이 있는 자리에서 create_model(gl, 렌더러)로 짓는다.
+///
+/// # 예제
+/// 씬이 받기를 맡기고 GL 이 있는 draw 에서 렌더러와 모델을 짓는다
+/// ```rust,no_run
+/// use vanilla::{Engine, Graphic, Scene, SceneBase, SkinnedModel, SkinnedModelLoadHandle, SkinnedModelRenderer};
+///
+/// struct CharacterScene {
+/// 	scene_base: SceneBase,
+/// 	model_load_handle: Option<SkinnedModelLoadHandle>,
+/// 	skinned_model_renderer: Option<SkinnedModelRenderer>,
+/// 	skinned_model: Option<SkinnedModel>,
+/// }
+///
+/// impl Scene for CharacterScene {
+/// 	fn get_scene_base(&self) -> &SceneBase {
+/// 		&self.scene_base
+/// 	}
+///
+/// 	fn get_scene_base_mut(&mut self) -> &mut SceneBase {
+/// 		&mut self.scene_base
+/// 	}
+///
+/// 	fn create(&mut self, engine: &mut Engine) {
+/// 		let model_load_handle = SkinnedModel::load_from_url(engine, "fox.glb");
+/// 		self.scene_base.track_load_handle(model_load_handle.get_load_handle());
+/// 		self.model_load_handle = Some(model_load_handle);
+/// 	}
+///
+/// 	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+/// 		self.scene_base.tick(engine, time_delta);
+/// 		if let Some(skinned_model) = &mut self.skinned_model {
+/// 			skinned_model.update(time_delta);
+/// 		}
+/// 	}
+///
+/// 	fn draw(&mut self, _engine: &mut Engine, graphic: &mut Graphic) {
+/// 		let gl = graphic.get_gl();
+/// 		if self.skinned_model_renderer.is_none() {
+/// 			self.skinned_model_renderer = SkinnedModelRenderer::new(gl, None, None).ok();
+/// 		}
+/// 		let model_result = match (&self.skinned_model_renderer, &self.model_load_handle) {
+/// 			(Some(skinned_model_renderer), Some(model_load_handle)) => {
+/// 				model_load_handle.create_model(gl, skinned_model_renderer)
+/// 			}
+/// 			_ => {
+/// 				None
+/// 			}
+/// 		};
+/// 		if let Some(model_result) = model_result {
+/// 			self.model_load_handle = None;
+/// 			match model_result {
+/// 				Ok(skinned_model) => {
+/// 					self.skinned_model = Some(skinned_model);
+/// 				}
+/// 				Err(error_message) => {
+/// 					eprintln!("{}", error_message);
+/// 				}
+/// 			}
+/// 		}
+/// 	}
+/// }
+/// ```
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct SkinnedModelLoadHandle {
@@ -619,6 +1021,9 @@ pub struct SkinnedModelLoadHandle {
 impl SkinnedModelLoadHandle {
 	//==============================================================================
 	/// 바이트 읽기 손잡이. (씬에 맡길 때)
+	///
+	/// # 돌려줌
+	/// 바이트 읽기 손잡이. (SceneBase::track_load_handle 에 넘긴다)
 	//==============================================================================
 	pub fn get_load_handle(&self) -> &AssetLoadHandle {
 		&self.load_handle
@@ -626,6 +1031,9 @@ impl SkinnedModelLoadHandle {
 
 	//==============================================================================
 	/// 끝났는지. (받았거나 실패했거나)
+	///
+	/// # 돌려줌
+	/// 받기가 끝났으면(받았거나 실패했으면) true.
 	//==============================================================================
 	pub fn is_finished(&self) -> bool {
 		self.load_handle.is_finished()
@@ -633,6 +1041,14 @@ impl SkinnedModelLoadHandle {
 
 	//==============================================================================
 	/// 받은 바이트로 모델 짓기. (받는 중이면 None, 받기나 해석에 실패하면 Err. 원본 문구 "SkinnedModel load failed: url")
+	/// - 끝난 뒤에는 부를 때마다 받은 바이트로 모델을 새로 짓는다. (GL 객체도 새로 만든다)
+	///
+	/// # 인자
+	/// - `gl`: 모델을 지을 GL 컨텍스트. (graphic.get_gl())
+	/// - `skinned_model_renderer`: 셰이더 프로그램을 나눠 줄 렌더러.
+	///
+	/// # 돌려줌
+	/// 받는 중이면 None. 끝났으면 지은 모델, 받기에 실패하면 Err("SkinnedModel load failed: 경로", FBX 는 "FbxLoader load failed: 경로"), 해석이나 업로드에 실패하면 그 Err.
 	//==============================================================================
 	pub fn create_model(&self, gl: &glow::Context, skinned_model_renderer: &SkinnedModelRenderer) -> Option<Result<SkinnedModel, String>> {
 		if !self.load_handle.is_finished() {
@@ -712,6 +1128,12 @@ impl SkinnedModelLoadHandle {
 impl SkinnedModel {
 	//==============================================================================
 	/// 생성. (셰이더 프로그램은 렌더러의 템플릿, renderer.get_shader_program())
+	///
+	/// # 인자
+	/// - `shader_program`: 업로드와 그리기에 쓸 셰이더 프로그램. (renderer.get_shader_program())
+	///
+	/// # 돌려줌
+	/// 노드, 드로어블, 클립이 없는 빈 모델. (재생 속도 1)
 	//==============================================================================
 	pub fn new(shader_program: Rc<ShaderProgram>) -> SkinnedModel {
 		let mut skinned_model = SkinnedModel::create_without_shader_program();
@@ -721,6 +1143,9 @@ impl SkinnedModel {
 
 	//==============================================================================
 	/// 셰이더 없이 생성. (해석과 포즈 계산만 하는 모델, upload_meshes_and_materials 는 오류)
+	///
+	/// # 돌려줌
+	/// 셰이더 없는 빈 모델. (interpret_content, interpret_fbx_content, update 는 되고 upload_meshes_and_materials 는 Err)
 	//==============================================================================
 	pub fn create_without_shader_program() -> SkinnedModel {
 		SkinnedModel {
@@ -744,6 +1169,26 @@ impl SkinnedModel {
 
 	//==============================================================================
 	/// 바이트로부터 로드. (GLB 바이너리 glTF, 원본 정적 loadFromUrl 의 fetch 뒤 부분)
+	///
+	/// # 인자
+	/// - `gl`: 모델을 지을 GL 컨텍스트.
+	/// - `bytes`: GLB 파일 바이트 전체.
+	/// - `skinned_model_renderer`: 셰이더 프로그램을 나눠 줄 렌더러.
+	///
+	/// # 돌려줌
+	/// 업로드까지 마친 모델. (클립이 있으면 첫 클립을 재생 중으로 둔다) GLB 가 아니거나 해석, 업로드에 실패하면 Err.
+	///
+	/// # 예제
+	/// GLB 바이트로 모델을 짓고 기본 포즈 계산하기
+	/// ```rust,no_run
+	/// use vanilla::{SkinnedModel, SkinnedModelRenderer};
+	///
+	/// fn create_model(gl: &glow::Context, skinned_model_renderer: &SkinnedModelRenderer, glb_bytes: &[u8]) -> Result<SkinnedModel, String> {
+	/// 	let mut skinned_model = SkinnedModel::load_from_bytes(gl, glb_bytes, skinned_model_renderer)?;
+	/// 	skinned_model.update(0.0);
+	/// 	Ok(skinned_model)
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn load_from_bytes(gl: &glow::Context, bytes: &[u8], skinned_model_renderer: &SkinnedModelRenderer) -> Result<SkinnedModel, String> {
 		SkinnedModel::load_from_bytes_with_shader_program(gl, bytes, skinned_model_renderer.get_shader_program())
@@ -751,6 +1196,27 @@ impl SkinnedModel {
 
 	//==============================================================================
 	/// 바이트로부터 로드. (바이너리 FBX, 원본 정적 loadFromFbxUrl 의 fetch 뒤 부분)
+	///
+	/// # 인자
+	/// - `gl`: 모델을 지을 GL 컨텍스트.
+	/// - `bytes`: 바이너리 FBX 파일 바이트 전체.
+	/// - `skinned_model_renderer`: 셰이더 프로그램을 나눠 줄 렌더러.
+	///
+	/// # 돌려줌
+	/// 업로드까지 마친 모델. (스킨이 붙은 메시만 드로어블이 된다) 파싱, 해석, 업로드에 실패하면 Err.
+	///
+	/// # 예제
+	/// 캐릭터 FBX 에 애니메이션 FBX 를 본 이름으로 붙여 틀기
+	/// ```rust,no_run
+	/// use vanilla::{SkinnedModel, SkinnedModelRenderer};
+	///
+	/// fn create_character(gl: &glow::Context, skinned_model_renderer: &SkinnedModelRenderer, character_bytes: &[u8], walk_bytes: &[u8]) -> Result<SkinnedModel, String> {
+	/// 	let mut skinned_model = SkinnedModel::load_from_fbx_bytes(gl, character_bytes, skinned_model_renderer)?;
+	/// 	skinned_model.add_animations_from_fbx_bytes(walk_bytes, "Walk", true)?;
+	/// 	skinned_model.play_animation("Walk", 0.0);
+	/// 	Ok(skinned_model)
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn load_from_fbx_bytes(gl: &glow::Context, bytes: &[u8], skinned_model_renderer: &SkinnedModelRenderer) -> Result<SkinnedModel, String> {
 		SkinnedModel::load_from_fbx_bytes_with_shader_program(gl, bytes, skinned_model_renderer.get_shader_program())
@@ -777,6 +1243,13 @@ impl SkinnedModel {
 
 	//==============================================================================
 	/// 애셋 경로(웹은 URL)로부터 받기 부탁. (GLB, 원본 정적 loadFromUrl, 다 받으면 손잡이의 create_model 이 짓는다)
+	///
+	/// # 인자
+	/// - `engine`: 바이트를 부탁할 엔진.
+	/// - `url`: GLB 애셋 경로. (데스크탑은 애셋 폴더 후보 기준 상대 경로, 웹은 asset_base_url 기준 주소)
+	///
+	/// # 돌려줌
+	/// 받기 손잡이. (다 받으면 create_model 로 짓는다)
 	//==============================================================================
 	pub fn load_from_url(engine: &Engine, url: &str) -> SkinnedModelLoadHandle {
 		SkinnedModelLoadHandle {
@@ -787,6 +1260,13 @@ impl SkinnedModel {
 
 	//==============================================================================
 	/// 애셋 경로(웹은 URL)로부터 받기 부탁. (바이너리 FBX, 원본 정적 loadFromFbxUrl)
+	///
+	/// # 인자
+	/// - `engine`: 바이트를 부탁할 엔진.
+	/// - `url`: 바이너리 FBX 애셋 경로. (데스크탑은 애셋 폴더 후보 기준 상대 경로, 웹은 asset_base_url 기준 주소)
+	///
+	/// # 돌려줌
+	/// 받기 손잡이. (다 받으면 create_model 로 짓는다)
 	//==============================================================================
 	pub fn load_from_fbx_url(engine: &Engine, url: &str) -> SkinnedModelLoadHandle {
 		SkinnedModelLoadHandle {
@@ -798,6 +1278,36 @@ impl SkinnedModel {
 	//==============================================================================
 	/// 애셋 경로(웹은 URL)로부터 모델 받기. (GLB, 원본 await SkinnedModel.loadFromUrl(gl, url, renderer), 엔진 작업 안에서 await 한다)
 	/// - 다 받으면 작업을 폴링하는 엔진의 GL 로 짓는다. 렌더러는 지금 셰이더 프로그램만 나눠 들어, 퓨처가 렌더러를 빌리지 않는다.
+	///
+	/// # 인자
+	/// - `engine`: 바이트를 부탁할 엔진.
+	/// - `url`: GLB 애셋 경로.
+	/// - `skinned_model_renderer`: 셰이더 프로그램을 나눠 줄 렌더러.
+	///
+	/// # 돌려줌
+	/// 엔진 작업 안에서 await 하는 퓨처. 받기에 실패하면 Err("SkinnedModel load failed: 경로"), 그래픽이 붙은 엔진의 작업 밖에서 폴링하면 Err, 해석이나 업로드에 실패하면 그 Err.
+	///
+	/// # 예제
+	/// 엔진 작업에서 모델을 받아 나눠 든 자리에 넣기
+	/// ```rust,no_run
+	/// use std::cell::RefCell;
+	/// use std::rc::Rc;
+	/// use vanilla::{Engine, SkinnedModel, SkinnedModelRenderer};
+	///
+	/// fn start_model_load(engine: &mut Engine, skinned_model_renderer: &SkinnedModelRenderer, model_slot: Rc<RefCell<Option<SkinnedModel>>>) {
+	/// 	let model_future = SkinnedModel::load_from_url_async(engine, "fox.glb", skinned_model_renderer);
+	/// 	engine.spawn_task(move |_engine_context| async move {
+	/// 		match model_future.await {
+	/// 			Ok(skinned_model) => {
+	/// 				*model_slot.borrow_mut() = Some(skinned_model);
+	/// 			}
+	/// 			Err(error_message) => {
+	/// 				eprintln!("{}", error_message);
+	/// 			}
+	/// 		}
+	/// 	});
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn load_from_url_async(engine: &Engine, url: &str, skinned_model_renderer: &SkinnedModelRenderer) -> impl Future<Output = Result<SkinnedModel, String>> + 'static {
 		SkinnedModel::load_from_url(engine, url).create_model_when_loaded(skinned_model_renderer.get_shader_program())
@@ -805,6 +1315,14 @@ impl SkinnedModel {
 
 	//==============================================================================
 	/// 애셋 경로(웹은 URL)로부터 모델 받기. (바이너리 FBX, 원본 await SkinnedModel.loadFromFbxUrl(gl, url, renderer))
+	///
+	/// # 인자
+	/// - `engine`: 바이트를 부탁할 엔진.
+	/// - `url`: 바이너리 FBX 애셋 경로.
+	/// - `skinned_model_renderer`: 셰이더 프로그램을 나눠 줄 렌더러.
+	///
+	/// # 돌려줌
+	/// 엔진 작업 안에서 await 하는 퓨처. 받기에 실패하면 Err("FbxLoader load failed: 경로"), 그래픽이 붙은 엔진의 작업 밖에서 폴링하면 Err, 파싱, 해석, 업로드에 실패하면 그 Err.
 	//==============================================================================
 	pub fn load_from_fbx_url_async(engine: &Engine, url: &str, skinned_model_renderer: &SkinnedModelRenderer) -> impl Future<Output = Result<SkinnedModel, String>> + 'static {
 		SkinnedModel::load_from_fbx_url(engine, url).create_model_when_loaded(skinned_model_renderer.get_shader_program())
@@ -812,6 +1330,35 @@ impl SkinnedModel {
 
 	//==============================================================================
 	/// GLB 청크 읽기. (머리 확인 + JSON 청크 + BIN 청크, GL 무관)
+	///
+	/// # 인자
+	/// - `bytes`: GLB 파일 바이트 전체.
+	///
+	/// # 돌려줌
+	/// (glTF JSON, BIN 청크 바이트). 머리가 glTF 가 아니거나, 청크가 파일 밖을 가리키거나, JSON 이 깨졌거나, JSON 과 BIN 청크 가운데 하나라도 없으면 Err.
+	///
+	/// # 예제
+	/// 손으로 감싼 GLB 에서 JSON 과 BIN 꺼내기
+	/// ```rust
+	/// use vanilla::SkinnedModel;
+	///
+	/// let json_bytes = br#"{"asset":{"version":"2.0"}}"#;
+	/// let binary_bytes = [1u8, 2, 3, 4];
+	/// let mut glb_bytes = Vec::new();
+	/// glb_bytes.extend_from_slice(b"glTF");
+	/// glb_bytes.extend_from_slice(&2u32.to_le_bytes());
+	/// glb_bytes.extend_from_slice(&((12 + 8 + json_bytes.len() + 8 + binary_bytes.len()) as u32).to_le_bytes());
+	/// glb_bytes.extend_from_slice(&(json_bytes.len() as u32).to_le_bytes());
+	/// glb_bytes.extend_from_slice(b"JSON");
+	/// glb_bytes.extend_from_slice(json_bytes);
+	/// glb_bytes.extend_from_slice(&(binary_bytes.len() as u32).to_le_bytes());
+	/// glb_bytes.extend_from_slice(b"BIN\0");
+	/// glb_bytes.extend_from_slice(&binary_bytes);
+	/// let (json, binary_buffer) = SkinnedModel::read_glb_chunks(&glb_bytes).unwrap();
+	/// assert_eq!(json["asset"]["version"], "2.0");
+	/// assert_eq!(binary_buffer, vec![1, 2, 3, 4]);
+	/// assert!(SkinnedModel::read_glb_chunks(b"not a glb").is_err());
+	/// ```
 	//==============================================================================
 	pub fn read_glb_chunks(bytes: &[u8]) -> Result<(Value, Vec<u8>), String> {
 		if read_uint32(bytes, 0) != Some(GLB_MAGIC) {
@@ -849,6 +1396,13 @@ impl SkinnedModel {
 
 	//==============================================================================
 	/// GLB 바이너리 해석. (청크 읽기 → 내용 해석 → GL 업로드)
+	///
+	/// # 인자
+	/// - `gl`: 업로드할 GL 컨텍스트.
+	/// - `bytes`: GLB 파일 바이트 전체.
+	///
+	/// # 돌려줌
+	/// 다 되면 Ok. 청크 읽기, 해석, 업로드의 Err.
 	//==============================================================================
 	pub fn parse_binary(&mut self, gl: &glow::Context, bytes: &[u8]) -> Result<(), String> {
 		let (json, binary_buffer) = SkinnedModel::read_glb_chunks(bytes)?;
@@ -857,6 +1411,14 @@ impl SkinnedModel {
 
 	//==============================================================================
 	/// glTF 내용 해석. (노드 / 스킨 / 메시 / 애니메이션 / 텍스처 → GL 업로드)
+	///
+	/// # 인자
+	/// - `gl`: 업로드할 GL 컨텍스트.
+	/// - `json`: glTF JSON 전체.
+	/// - `binary_buffer`: BIN 청크 바이트.
+	///
+	/// # 돌려줌
+	/// 다 되면 Ok. 해석이나 업로드의 Err.
 	//==============================================================================
 	pub fn parse_content(&mut self, gl: &glow::Context, json: &Value, binary_buffer: &[u8]) -> Result<(), String> {
 		let (mesh_description_list, material_description_list) = self.interpret_content(json, binary_buffer)?;
@@ -865,6 +1427,14 @@ impl SkinnedModel {
 
 	//==============================================================================
 	/// glTF 내용 해석. (GL 무관, 노드 / 스킨 / 애니메이션을 채우고 중립 메시 / 머티리얼 서술을 돌려준다)
+	/// - 모델의 노드, 루트, 스킨, 클립을 이 내용으로 바꾼다. 클립이 있으면 첫 클립을 재생 중으로 둔다.
+	///
+	/// # 인자
+	/// - `json`: glTF JSON 전체.
+	/// - `binary_buffer`: BIN 청크 바이트.
+	///
+	/// # 돌려줌
+	/// (메시 서술 목록, 머티리얼 서술 목록). 노드나 씬이 없거나, 없는 메시를 가리키거나, 프리미티브에 POSITION 이 없거나, 스킨 메시에 JOINTS_0 이나 WEIGHTS_0 이 없거나, 접근자를 읽을 수 없으면 Err.
 	//==============================================================================
 	pub fn interpret_content(&mut self, json: &Value, binary_buffer: &[u8]) -> Result<(Vec<MeshDescription>, Vec<MaterialDescription>), String> {
 		// 노드 구성.
@@ -1152,6 +1722,13 @@ impl SkinnedModel {
 
 	//==============================================================================
 	/// FBX 중간 표현 해석. (노드/스킨/메시/텍스처/애니메이션 → 기존 스키닝 파이프라인)
+	///
+	/// # 인자
+	/// - `gl`: 업로드할 GL 컨텍스트.
+	/// - `scene_data`: FbxLoader 가 낸 중간 표현.
+	///
+	/// # 돌려줌
+	/// 다 되면 Ok. 업로드의 Err.
 	//==============================================================================
 	pub fn parse_fbx_content(&mut self, gl: &glow::Context, scene_data: &FbxSceneData) -> Result<(), String> {
 		let (mesh_description_list, material_description_list) = self.interpret_fbx_content(scene_data)?;
@@ -1160,6 +1737,13 @@ impl SkinnedModel {
 
 	//==============================================================================
 	/// FBX 중간 표현 해석. (GL 무관, 노드 / 스킨 / 애니메이션을 채우고 중립 메시 / 머티리얼 서술을 돌려준다)
+	/// - 모델의 노드, 루트, 스킨, 클립을 이 내용으로 바꾼다. 클립이 있으면 첫 클립을 재생 중으로 둔다.
+	///
+	/// # 인자
+	/// - `scene_data`: FbxLoader 가 낸 중간 표현.
+	///
+	/// # 돌려줌
+	/// (메시 서술 목록, 머티리얼 서술 목록). (지오메트리가 이어진 스킨 디포머마다 메시 하나, 지금은 Err 를 내지 않는다)
 	//==============================================================================
 	pub fn interpret_fbx_content(&mut self, scene_data: &FbxSceneData) -> Result<(Vec<MeshDescription>, Vec<MaterialDescription>), String> {
 		// 노드 구성. (오일러 도 → 쿼터니언, 사전회전 우측 누적)
@@ -1367,6 +1951,11 @@ impl SkinnedModel {
 	/// - 동일 스켈레톤을 전제로, 채널을 현재 모델의 노드 인덱스로 재지정해 클립을 추가한다.
 	/// - ignore_translation: 루트 모션이 박힌 클립에서 이동 채널을 버린다. (게임 로직이 위치를 제어할 때)
 	/// - clip_name: 채널이 있는 스택이 하나면 이 이름, 여럿이면 스택마다 "이 이름/스택 이름" 이다.
+	///
+	/// # 인자
+	/// - `scene_data`: 애니메이션 FBX 의 중간 표현.
+	/// - `clip_name`: 더할 클립 이름. (스택이 여럿이면 모두 이 이름이 된다)
+	/// - `ignore_translation`: true 면 이동 채널을 버린다.
 	//==============================================================================
 	pub fn add_animations_from_fbx_scene_data(&mut self, scene_data: &FbxSceneData, clip_name: &str, ignore_translation: bool) {
 		let mut added_clip_list = convert_fbx_scene_animations(&self.create_node_index_by_name(), scene_data, clip_name, ignore_translation);
@@ -1386,6 +1975,24 @@ impl SkinnedModel {
 
 	//==============================================================================
 	/// 애니메이션 FBX 추가. (바이트, 원본 addAnimationsFromFbxUrl 의 fetch 뒤 부분)
+	///
+	/// # 인자
+	/// - `bytes`: 애니메이션 FBX 파일 바이트 전체.
+	/// - `clip_name`: 더할 클립 이름.
+	/// - `ignore_translation`: true 면 이동 채널을 버린다.
+	///
+	/// # 돌려줌
+	/// 더했으면 Ok. 파싱에 실패하면 클립을 더하지 않고 Err.
+	///
+	/// # 예제
+	/// FBX 가 아닌 바이트는 클립 없이 Err
+	/// ```rust
+	/// use vanilla::SkinnedModel;
+	///
+	/// let mut skinned_model = SkinnedModel::create_without_shader_program();
+	/// assert!(skinned_model.add_animations_from_fbx_bytes(b"not an fbx", "Walk", true).is_err());
+	/// assert!(skinned_model.get_animation_name_list().is_empty());
+	/// ```
 	//==============================================================================
 	pub fn add_animations_from_fbx_bytes(&mut self, bytes: &[u8], clip_name: &str, ignore_translation: bool) -> Result<(), String> {
 		let scene_data = FbxLoader::new().parse(bytes)?;
@@ -1398,6 +2005,16 @@ impl SkinnedModel {
 	/// - await 하면 다 받아 클립을 더할 때까지 기다린다. (원본처럼 await 가 끝날 때는 클립이 이미 더해져 있다)
 	///   await 하지 않아도 다 받은 뒤 다음 update 나 play_animation 에서 더한다. 받은 차례로 더한다. (원본 async 함수가 끝나는 차례)
 	/// - 받기나 파싱에 실패하면 클립을 더하지 않고 오류를 찍고, await 는 까닭으로 끝난다. (원본은 Promise 가 거부된다)
+	/// - 노드 이름은 부르는 때의 노드로 맞춘다. 모델을 지은 뒤에 부른다.
+	///
+	/// # 인자
+	/// - `engine`: 바이트를 부탁할 엔진.
+	/// - `url`: 애니메이션 FBX 애셋 경로.
+	/// - `clip_name`: 더할 클립 이름.
+	/// - `ignore_translation`: true 면 이동 채널을 버린다.
+	///
+	/// # 돌려줌
+	/// await 할 수 있는 받기 손잡이. (버려도 모델이 들고 있어 클립은 더해진다)
 	//==============================================================================
 	pub fn add_animations_from_fbx_url(&mut self, engine: &Engine, url: &str, clip_name: &str, ignore_translation: bool) -> AnimationLoadHandle {
 		let animation_load_handle = AnimationLoadHandle {
@@ -1424,6 +2041,14 @@ impl SkinnedModel {
 	//==============================================================================
 	/// 중립 메시/머티리얼 서술 업로드. (공용, Material 생성 + 버텍스 어레이/드로어블 구성)
 	/// - 예전 드로어블의 GL 리소스와 다른 곳에서 쓰지 않는 머티리얼은 먼저 지운다. (destroy, 다시 불러도 새지 않는다)
+	///
+	/// # 인자
+	/// - `gl`: 업로드할 GL 컨텍스트.
+	/// - `mesh_description_list`: 메시 서술 목록.
+	/// - `material_description_list`: 머티리얼 서술 목록. (material_index 가 가리키는 자리)
+	///
+	/// # 돌려줌
+	/// 다 되면 Ok. 셰이더 없이 만든 모델이거나, 머티리얼이나 GL 객체를 지을 수 없으면 Err.
 	//==============================================================================
 	pub fn upload_meshes_and_materials(&mut self, gl: &glow::Context, mesh_description_list: Vec<MeshDescription>, material_description_list: Vec<MaterialDescription>) -> Result<(), String> {
 		let shader_program = match &self.shader_program {
@@ -1542,6 +2167,13 @@ impl SkinnedModel {
 	/// 와이어프레임 인덱스 업로드. (삼각형 인덱스 → 중복 없는 모서리 선 인덱스, 비인덱스 메시는 삼각형별 3변)
 	/// - 드로어블의 버텍스 어레이와 무관한 별도 엘리먼트 버퍼. 렌더러가 선 출력 시 잠시 바꿔 끼운다.
 	/// - 이미 올린 선 버퍼가 있으면 지우고 새로 올린다.
+	///
+	/// # 인자
+	/// - `gl`: 업로드할 GL 컨텍스트.
+	/// - `drawable_index`: 드로어블 자리.
+	///
+	/// # 돌려줌
+	/// 올렸으면 Ok. 드로어블이 없거나 버퍼를 지을 수 없으면 Err.
 	//==============================================================================
 	pub fn upload_wireframe_indices(&mut self, gl: &glow::Context, drawable_index: usize) -> Result<(), String> {
 		let drawable = self.drawable_list.get_mut(drawable_index).ok_or_else(|| format!("SkinnedModel: drawable {} not found.", drawable_index))?;
@@ -1573,6 +2205,25 @@ impl SkinnedModel {
 
 	//==============================================================================
 	/// 와이어프레임 모서리 목록 만들기. (GL 무관, 인덱스 쌍 목록)
+	///
+	/// # 인자
+	/// - `triangle_indices`: 삼각형 인덱스. (None 이면 정점 3개씩 삼각형)
+	/// - `vertex_count`: 정점 개수.
+	///
+	/// # 돌려줌
+	/// 선 인덱스 쌍 목록. (작은 인덱스, 큰 인덱스 차례, 겹친 모서리는 한 번만)
+	///
+	/// # 예제
+	/// 사각형(삼각형 두 개)의 모서리 5개
+	/// ```rust
+	/// use vanilla::SkinnedModel;
+	/// use vanilla::graphics3d::skinnedmodel::IndexArray;
+	///
+	/// let quad_indices = IndexArray::UnsignedShort(vec![0, 1, 2, 2, 1, 3]);
+	/// let edge_list = SkinnedModel::build_wireframe_edge_list(Some(&quad_indices), 4);
+	/// assert_eq!(edge_list, vec![0, 1, 1, 2, 0, 2, 1, 3, 2, 3]);
+	/// assert_eq!(SkinnedModel::build_wireframe_edge_list(None, 3), vec![0, 1, 1, 2, 2, 0]);
+	/// ```
 	//==============================================================================
 	pub fn build_wireframe_edge_list(triangle_indices: Option<&IndexArray>, vertex_count: usize) -> Vec<usize> {
 		let mut edge_list = Vec::new();
@@ -1610,6 +2261,13 @@ impl SkinnedModel {
 	//==============================================================================
 	/// 모프 타깃 업로드. (드로어블의 델타 목록 → RGBA32F 텍스처, 타깃마다 위치 블록 + 노멀 블록)
 	/// - 텍셀 인덱스 = 정점 인덱스. 블록 시작 행 = 타깃 인덱스 x 2 x 타깃당 행 수.
+	///
+	/// # 인자
+	/// - `gl`: 업로드할 GL 컨텍스트.
+	/// - `drawable_index`: 드로어블 자리.
+	///
+	/// # 돌려줌
+	/// 올렸으면 Ok. (타깃이 없으면 텍스처를 지우고 Ok) 드로어블이 없거나 텍스처를 지을 수 없으면 Err.
 	//==============================================================================
 	pub fn upload_morph_targets(&mut self, gl: &glow::Context, drawable_index: usize) -> Result<(), String> {
 		let drawable = self.drawable_list.get_mut(drawable_index).ok_or_else(|| format!("SkinnedModel: drawable {} not found.", drawable_index))?;
@@ -1652,6 +2310,13 @@ impl SkinnedModel {
 
 	//==============================================================================
 	/// 모프 텍셀 데이터 만들기. (GL 무관, 텍스처 가로, 타깃당 행 수, RGBA 실수 배열)
+	///
+	/// # 인자
+	/// - `morph_target_list`: 모프 타깃 목록.
+	/// - `vertex_count`: 정점 개수.
+	///
+	/// # 돌려줌
+	/// (텍스처 가로, 타깃당 행 수, RGBA 실수 배열). (가로는 정점 수를 1 ~ 2048 로 자른 값, 높이는 행 수 x 2 x 타깃 수, 알파는 0)
 	//==============================================================================
 	pub fn build_morph_texel_data(morph_target_list: &[MorphTarget], vertex_count: usize) -> (usize, usize, Vec<f32>) {
 		let target_count = morph_target_list.len();
@@ -1680,6 +2345,10 @@ impl SkinnedModel {
 
 	//==============================================================================
 	/// 바뀐 모프 타깃 업로드. (원본 update 6단계, 추가/변경된 드로어블만, 렌더러가 그리기 전에 부른다)
+	/// - 올리다 실패한 드로어블은 오류를 찍고 다시 올리지 않는다.
+	///
+	/// # 인자
+	/// - `gl`: 업로드할 GL 컨텍스트.
 	//==============================================================================
 	pub fn upload_pending_morph_targets(&mut self, gl: &glow::Context) {
 		for drawable_index in 0..self.drawable_list.len() {
@@ -1694,6 +2363,35 @@ impl SkinnedModel {
 
 	//==============================================================================
 	/// 모프 타깃 추가. (프로그램 생성, 정점별 위치 델타 [+ 노멀 델타], 다음 그리기 전에 업로드)
+	///
+	/// # 인자
+	/// - `drawable_index`: 드로어블 자리.
+	/// - `target_name`: 타깃 이름. (set_morph_weight 가 이 이름으로 찾는다)
+	/// - `position_deltas`: 정점마다 위치 델타. (정점 수 x 3 개여야 한다)
+	/// - `normal_deltas`: 정점마다 노멀 델타. (None 이면 노멀은 그대로)
+	///
+	/// # 돌려줌
+	/// 더했으면 Ok. (가중치 0 으로 시작) 드로어블이 없거나, 타깃이 이미 MORPH_TARGET_MAXIMUM 개이거나, 델타 개수가 맞지 않으면 Err.
+	///
+	/// # 예제
+	/// 첫 드로어블의 정점을 모두 위로 올리는 타깃을 더하고 반만 걸기 (드로어블이 없으면 Err)
+	/// ```rust
+	/// use vanilla::SkinnedModel;
+	///
+	/// fn add_lift_target(skinned_model: &mut SkinnedModel) -> Result<(), String> {
+	/// 	let vertex_count = skinned_model.get_drawable_list().first().map(|drawable| drawable.vertex_count).unwrap_or(0);
+	/// 	let mut position_deltas = vec![0.0; vertex_count * 3];
+	/// 	for vertex_index in 0..vertex_count {
+	/// 		position_deltas[vertex_index * 3 + 1] = 0.1;
+	/// 	}
+	/// 	skinned_model.add_morph_target(0, "Lift", position_deltas, None)?;
+	/// 	skinned_model.set_morph_weight("Lift", 0.5);
+	/// 	Ok(())
+	/// }
+	///
+	/// let mut skinned_model = SkinnedModel::create_without_shader_program();
+	/// assert!(add_lift_target(&mut skinned_model).is_err());
+	/// ```
 	//==============================================================================
 	pub fn add_morph_target(&mut self, drawable_index: usize, target_name: &str, position_deltas: Vec<f32>, normal_deltas: Option<Vec<f32>>) -> Result<(), String> {
 		let drawable = self.drawable_list.get_mut(drawable_index).ok_or_else(|| format!("SkinnedModel: drawable {} not found.", drawable_index))?;
@@ -1711,6 +2409,10 @@ impl SkinnedModel {
 
 	//==============================================================================
 	/// 모프 가중치 설정. (이름 일치 타깃 전부, 드로어블 여러 개가 같은 이름을 가질 수 있음)
+	///
+	/// # 인자
+	/// - `target_name`: 타깃 이름. (이름이 같은 타깃 모두)
+	/// - `weight`: 가중치. (0 = 없음, 1 = 델타 그대로, 자르지 않는다)
 	//==============================================================================
 	pub fn set_morph_weight(&mut self, target_name: &str, weight: f32) {
 		for drawable in self.drawable_list.iter_mut() {
@@ -1724,6 +2426,12 @@ impl SkinnedModel {
 
 	//==============================================================================
 	/// 모프 가중치 반환. (첫 일치 타깃, 없으면 0)
+	///
+	/// # 인자
+	/// - `target_name`: 타깃 이름.
+	///
+	/// # 돌려줌
+	/// 처음 맞는 타깃의 가중치. 없으면 0.
 	//==============================================================================
 	pub fn get_morph_weight(&self, target_name: &str) -> f32 {
 		for drawable in self.drawable_list.iter() {
@@ -1738,6 +2446,13 @@ impl SkinnedModel {
 
 	//==============================================================================
 	/// 머티리얼 교체. (드로어블 단위, 외부 텍스처로 만든 머티리얼 인스턴스 적용)
+	///
+	/// # 인자
+	/// - `drawable_index`: 드로어블 자리.
+	/// - `material`: 바꿔 낄 머티리얼.
+	///
+	/// # 돌려줌
+	/// 바꿨으면 Ok. 드로어블이 없으면 Err.
 	//==============================================================================
 	pub fn set_material(&mut self, drawable_index: usize, material: Rc<Material>) -> Result<(), String> {
 		let drawable = self.drawable_list.get_mut(drawable_index).ok_or_else(|| format!("SkinnedModel: drawable {} not found.", drawable_index))?;
@@ -1747,6 +2462,23 @@ impl SkinnedModel {
 
 	//==============================================================================
 	/// 스무스 노멀 생성. (노멀 미보유 메시, 바인드 포즈 기준, 스키닝 회전은 셰이더에서 적용)
+	///
+	/// # 인자
+	/// - `positions`: 정점 위치. (3개씩)
+	/// - `indices`: 삼각형 인덱스. (None 이면 정점 3개씩 삼각형)
+	///
+	/// # 돌려줌
+	/// 정점마다 단위 노멀. (positions 와 같은 길이, 면 노멀을 넓이 가중으로 더해 정규화한다. 삼각형에 쓰이지 않은 정점은 0)
+	///
+	/// # 예제
+	/// xy 평면 위 반시계 삼각형은 +Z
+	/// ```rust
+	/// use vanilla::SkinnedModel;
+	///
+	/// let positions = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+	/// let normals = SkinnedModel::generate_smooth_normals(&positions, None);
+	/// assert_eq!(normals, vec![0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0]);
+	/// ```
 	//==============================================================================
 	pub fn generate_smooth_normals(positions: &[f32], indices: Option<&IndexArray>) -> Vec<f32> {
 		let mut normals = vec![0.0f32; positions.len()];
@@ -1803,6 +2535,17 @@ impl SkinnedModel {
 
 	//==============================================================================
 	/// 실수형 어트리뷰트 바인드. (신규 버퍼 생성 + 포인터 설정, 셰이더가 안 쓰는 어트리뷰트면 None)
+	/// - 지금 묶인 버텍스 어레이에 붙는다.
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트.
+	/// - `shader_program`: 어트리뷰트 위치를 찾을 셰이더.
+	/// - `attribute_name`: 어트리뷰트 이름. (vertexPosition 같은 것)
+	/// - `data_array`: 정점 자료.
+	/// - `component_count`: 정점당 성분 수. (1 ~ 4)
+	///
+	/// # 돌려줌
+	/// 새로 지은 정점 버퍼. 셰이더가 그 어트리뷰트를 쓰지 않으면 Ok(None), 버퍼를 지을 수 없으면 Err.
 	//==============================================================================
 	pub fn bind_float_attribute(gl: &glow::Context, shader_program: &ShaderProgram, attribute_name: &str, data_array: &[f32], component_count: i32) -> Result<Option<GlBuffer>, String> {
 		let attribute_location = match shader_program.get_attribute_location(gl, attribute_name) {
@@ -1825,6 +2568,17 @@ impl SkinnedModel {
 
 	//==============================================================================
 	/// 정수형 어트리뷰트 바인드. (조인트 인덱스, 셰이더가 안 쓰는 어트리뷰트면 None)
+	/// - 지금 묶인 버텍스 어레이에 붙는다. 셰이더에서는 정수 어트리뷰트(uvec4 같은)로 읽는다.
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트.
+	/// - `shader_program`: 어트리뷰트 위치를 찾을 셰이더.
+	/// - `attribute_name`: 어트리뷰트 이름. (vertexJoints 같은 것)
+	/// - `data_array`: u16 정점 자료.
+	/// - `component_count`: 정점당 성분 수. (1 ~ 4)
+	///
+	/// # 돌려줌
+	/// 새로 지은 정점 버퍼. 셰이더가 그 어트리뷰트를 쓰지 않으면 Ok(None), 버퍼를 지을 수 없으면 Err.
 	//==============================================================================
 	pub fn bind_integer_attribute(gl: &glow::Context, shader_program: &ShaderProgram, attribute_name: &str, data_array: &[u16], component_count: i32) -> Result<Option<GlBuffer>, String> {
 		let attribute_location = match shader_program.get_attribute_location(gl, attribute_name) {
@@ -1847,6 +2601,10 @@ impl SkinnedModel {
 
 	//==============================================================================
 	/// 애니메이션 재생. (크로스페이드, 같은 이름이 여럿이면 원본처럼 마지막 것, 원본 fade_duration 기본값 0.25. 다 받은 애니메이션 FBX 의 클립을 먼저 더한다)
+	///
+	/// # 인자
+	/// - `animation_name`: 틀 클립 이름. (없는 이름이거나 지금 클립과 같으면 무시)
+	/// - `fade_duration`: 크로스페이드 시간. (초, 0 이면 다음 update 에서 바로 바뀐다)
 	//==============================================================================
 	pub fn play_animation(&mut self, animation_name: &str, fade_duration: f32) {
 		self.apply_finished_animation_loads();
@@ -1876,6 +2634,11 @@ impl SkinnedModel {
 
 	//==============================================================================
 	/// 애니메이션 샘플링. (클립 인덱스, 현재 노드 포즈에 가중 블렌딩)
+	///
+	/// # 인자
+	/// - `animation_index`: 클립 인덱스. (밖이면 무시)
+	/// - `time`: 클립 시간. (초, 클립 길이로 나눈 나머지로 반복한다)
+	/// - `blend_weight`: 섞는 비율. (0 ~ 1, 0 이면 지금 포즈 그대로, 1 이면 클립 값)
 	//==============================================================================
 	pub fn sample_animation(&mut self, animation_index: usize, time: f32, blend_weight: f32) {
 		let mut animation_list = self.animation_list.borrow_mut();
@@ -1892,6 +2655,9 @@ impl SkinnedModel {
 
 	//==============================================================================
 	/// 갱신. (다 받은 애니메이션 FBX 의 클립 더하기 → 시간 전진 → 포즈 샘플링 → 월드/조인트 행렬 계산, GL 무관)
+	///
+	/// # 인자
+	/// - `delta_time`: 지난 시간. (초, 클립 시간에는 재생 속도를 곱하고 크로스페이드 시간에는 곱하지 않는다)
 	//==============================================================================
 	pub fn update(&mut self, delta_time: f32) {
 		self.apply_finished_animation_loads();
@@ -1994,6 +2760,21 @@ impl SkinnedModel {
 
 	//==============================================================================
 	/// 조인트 회전 오프셋 설정. (이름 부분 일치 노드에 로컬 회전 누적)
+	///
+	/// # 인자
+	/// - `joint_name_part`: 노드 이름에 든 글자. (부분 일치, 맞는 노드 모두)
+	/// - `offset_rotation`: 샘플링한 로컬 회전 뒤에 곱할 회전. (같은 노드에 다시 주면 바꾼다)
+	///
+	/// # 예제
+	/// 이름에 Head 가 든 노드를 Y 축으로 30도 더 돌리기
+	/// ```rust
+	/// use vanilla::{Quaternion, SkinnedModel};
+	///
+	/// let mut skinned_model = SkinnedModel::create_without_shader_program();
+	/// skinned_model.set_joint_rotation_offset("Head", Quaternion::create_from_euler(0.0, 30.0f32.to_radians(), 0.0));
+	/// skinned_model.update(0.0);
+	/// skinned_model.clear_joint_rotation_offsets();
+	/// ```
 	//==============================================================================
 	pub fn set_joint_rotation_offset(&mut self, joint_name_part: &str, offset_rotation: Quaternion) {
 		for node_index in 0..self.node_list.len() {
@@ -2020,6 +2801,9 @@ impl SkinnedModel {
 
 	//==============================================================================
 	/// 애니메이션 이름 목록 반환.
+	///
+	/// # 돌려줌
+	/// 클립 이름 목록. (클립 차례, 같은 이름이 여럿일 수 있다)
 	//==============================================================================
 	pub fn get_animation_name_list(&self) -> Vec<String> {
 		self.animation_list.borrow().iter().map(|animation| animation.name.clone()).collect()
@@ -2027,6 +2811,9 @@ impl SkinnedModel {
 
 	//==============================================================================
 	/// 재생 속도 설정.
+	///
+	/// # 인자
+	/// - `time_scale`: 재생 속도 배수. (기본 1, 0 이면 멈춘다, 크로스페이드 시간에는 걸리지 않는다)
 	//==============================================================================
 	pub fn set_time_scale(&mut self, time_scale: f32) {
 		self.time_scale = time_scale;
@@ -2034,6 +2821,9 @@ impl SkinnedModel {
 
 	//==============================================================================
 	/// 셰이더 프로그램 반환. (셰이더 없이 만든 모델이면 None)
+	///
+	/// # 돌려줌
+	/// 업로드에 쓰는 셰이더 프로그램. 셰이더 없이 만든 모델이면 None.
 	//==============================================================================
 	pub fn get_shader_program(&self) -> Option<&Rc<ShaderProgram>> {
 		self.shader_program.as_ref()
@@ -2041,6 +2831,9 @@ impl SkinnedModel {
 
 	//==============================================================================
 	/// 노드 목록 반환.
+	///
+	/// # 돌려줌
+	/// 노드 목록. (노드 인덱스 차례)
 	//==============================================================================
 	pub fn get_node_list(&self) -> &[SkinnedModelNode] {
 		&self.node_list
@@ -2048,6 +2841,9 @@ impl SkinnedModel {
 
 	//==============================================================================
 	/// 노드 목록 반환. (변경용, 원본은 살아 있는 배열을 내준다)
+	///
+	/// # 돌려줌
+	/// 바꿀 수 있는 노드 목록. (base_ 값을 바꾸면 다음 update 부터 기본 포즈가 바뀐다)
 	//==============================================================================
 	pub fn get_node_list_mut(&mut self) -> &mut [SkinnedModelNode] {
 		&mut self.node_list
@@ -2055,6 +2851,9 @@ impl SkinnedModel {
 
 	//==============================================================================
 	/// 루트 노드 인덱스 목록 반환.
+	///
+	/// # 돌려줌
+	/// 루트 노드 인덱스 목록.
 	//==============================================================================
 	pub fn get_root_node_indices(&self) -> &[usize] {
 		&self.root_node_indices
@@ -2062,6 +2861,9 @@ impl SkinnedModel {
 
 	//==============================================================================
 	/// 스킨 목록 반환.
+	///
+	/// # 돌려줌
+	/// 스킨 목록. (조인트 행렬은 마지막 update 의 것)
 	//==============================================================================
 	pub fn get_skin_list(&self) -> &[Skin] {
 		&self.skin_list
@@ -2069,6 +2871,9 @@ impl SkinnedModel {
 
 	//==============================================================================
 	/// 드로어블 목록 반환.
+	///
+	/// # 돌려줌
+	/// 드로어블 목록. (업로드 전이나 셰이더 없이 만든 모델이면 비어 있다)
 	//==============================================================================
 	pub fn get_drawable_list(&self) -> &[Drawable] {
 		&self.drawable_list
@@ -2076,6 +2881,9 @@ impl SkinnedModel {
 
 	//==============================================================================
 	/// 드로어블 목록 반환. (변경용)
+	///
+	/// # 돌려줌
+	/// 바꿀 수 있는 드로어블 목록.
 	//==============================================================================
 	pub fn get_drawable_list_mut(&mut self) -> &mut [Drawable] {
 		&mut self.drawable_list
@@ -2083,6 +2891,9 @@ impl SkinnedModel {
 
 	//==============================================================================
 	/// 애니메이션 클립 목록 반환. (길이, 채널 보기. 애니메이션 FBX 받기 손잡이와 나눠 드는 목록이라 빌린 값으로 준다)
+	///
+	/// # 돌려줌
+	/// 클립 목록을 빌린 값. (`Ref` 를 든 동안 await 중인 AnimationLoadFuture 는 클립을 더하지 못하고 기다린다)
 	//==============================================================================
 	pub fn get_animation_list(&self) -> std::cell::Ref<'_, [AnimationClip]> {
 		std::cell::Ref::map(self.animation_list.borrow(), |animation_list| animation_list.as_slice())
@@ -2090,6 +2901,9 @@ impl SkinnedModel {
 
 	//==============================================================================
 	/// 파괴. (GL 리소스 해제, 다른 곳에서도 쓰는 머티리얼은 남긴다)
+	///
+	/// # 인자
+	/// - `gl`: 드로어블을 지은 GL 컨텍스트.
 	//==============================================================================
 	pub fn destroy(&mut self, gl: &glow::Context) {
 		let mut destroyed_material_list: Vec<*const Material> = Vec::new();
@@ -2227,6 +3041,25 @@ fn sample_animation_clip(animation: &mut AnimationClip, node_list: &mut [Skinned
 
 //==============================================================================
 /// FBX 오일러(도) → 쿼터니언. (eEulerXYZ = X 먼저 적용, 열벡터 기준 Rz x Ry x Rx 합성)
+///
+/// # 인자
+/// - `x_degree`: X 축 회전. (도)
+/// - `y_degree`: Y 축 회전. (도)
+/// - `z_degree`: Z 축 회전. (도)
+///
+/// # 돌려줌
+/// X, Y, Z 차례로 적용한 회전.
+///
+/// # 예제
+/// X 90도 뒤 Z 90도: +X 축이 +Y 로 간다
+/// ```rust
+/// use vanilla::Matrix4;
+/// use vanilla::graphics3d::skinnedmodel::create_quaternion_from_fbx_euler;
+///
+/// let rotation = create_quaternion_from_fbx_euler(90.0, 0.0, 90.0);
+/// let rotated_x = Matrix4::create_rotation_from_quaternion(rotation).transform_direction(1.0, 0.0, 0.0);
+/// assert!((rotated_x.y - 1.0).abs() < 1.0e-5);
+/// ```
 //==============================================================================
 pub fn create_quaternion_from_fbx_euler(x_degree: f64, y_degree: f64, z_degree: f64) -> Quaternion {
 	let degree_to_radian = std::f64::consts::PI / 180.0;
@@ -2277,6 +3110,29 @@ fn convert_fbx_animation_channels(scene_data: &FbxSceneData, fbx_animation: &Fbx
 
 //==============================================================================
 /// 접근자 CPU 읽기. (촘촘한 배치 + 인터리브(byte_stride) 배치 + 희소(sparse) 접근자 지원)
+///
+/// # 인자
+/// - `json`: glTF JSON 전체.
+/// - `binary_buffer`: BIN 청크 바이트.
+/// - `accessor_index`: 접근자 인덱스.
+///
+/// # 돌려줌
+/// 컴포넌트 타입 그대로의 배열. (정규화하지 않는다, bufferView 가 없는 접근자는 0 으로 채운다) 접근자가 없거나, 타입을 모르거나, 버퍼 밖을 가리키면 Err.
+///
+/// # 예제
+/// 실수 VEC2 접근자 하나 읽기
+/// ```rust
+/// use serde_json::json;
+/// use vanilla::graphics3d::skinnedmodel::{read_accessor_array, AccessorArray};
+///
+/// let binary_buffer: Vec<u8> = [0.5f32, 1.0, 1.5, 2.0].iter().flat_map(|value| value.to_le_bytes()).collect();
+/// let json = json!({
+/// 	"accessors": [{ "bufferView": 0, "componentType": 5126, "count": 2, "type": "VEC2" }],
+/// 	"bufferViews": [{ "buffer": 0, "byteOffset": 0, "byteLength": 16 }]
+/// });
+/// assert_eq!(read_accessor_array(&json, &binary_buffer, 0), Ok(AccessorArray::Float(vec![0.5, 1.0, 1.5, 2.0])));
+/// assert!(read_accessor_array(&json, &binary_buffer, 1).is_err());
+/// ```
 //==============================================================================
 pub fn read_accessor_array(json: &Value, binary_buffer: &[u8], accessor_index: usize) -> Result<AccessorArray, String> {
 	let accessor = json["accessors"].get(accessor_index).ok_or_else(|| format!("SkinnedModel: accessor {} not found.", accessor_index))?;

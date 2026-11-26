@@ -1,5 +1,5 @@
 //==============================================================================
-//! 비주얼 컴포넌트. (원본 experimental/visual/visual.js 의 Visual, 비주얼 에디터 문서를 정한 자리에 노드 트리로 짓는다)
+//! 비주얼 컴포넌트. (원본 misc/visual.js 의 Visual, 비주얼 에디터 문서를 정한 자리에 노드 트리로 짓는다)
 //! - 문서는 비주얼 에디터(vanilla.js tools/visualeditor)가 저장하는 UIDocument JSON 글이다. ({ version, root, frameSize? }, 씬과 프리팹 모두)
 //!   VisualAsset 이 파일을 읽어 문서를 든 Visual 을 만든다.
 //! - create_node 가 문서의 노드 트리를 새로 지어 뿌리의 로컬 위치를 location 으로 둔다. (부르는 쪽이 원하는 부모에 붙인다, 부를 때마다 새 트리)

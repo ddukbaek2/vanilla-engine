@@ -15,6 +15,12 @@ const NEAR_ZERO_EPSILON: f64 = 1e-8;
 
 //==============================================================================
 /// 부동소수가 0 에 가까운지. (Kiwi 의 nearZero 와 같다)
+///
+/// # 인자
+/// - `value`: 볼 값.
+///
+/// # 돌려줌
+/// 절댓값이 1e-8 보다 작으면 true.
 //==============================================================================
 pub fn near_zero(value: f64) -> bool {
 	if value < 0.0 {
@@ -27,6 +33,25 @@ pub fn near_zero(value: f64) -> bool {
 
 //==============================================================================
 /// 솔버 안의 행.
+/// - 솔버 안에서 쓰는 값이다. 사용자 코드는 보통 LayoutVariable 과 LayoutSolver 만 쓴다.
+///
+/// # 예제
+/// 10 + 2x + 4s = 0 을 x 에 대해 풀기
+/// ```rust
+/// use vanilla::ui::autolayout::layoutrow::LayoutRow;
+/// use vanilla::ui::autolayout::layoutsymbol::LayoutSymbol;
+/// use vanilla::ui::autolayout::layoutsymboltype::LayoutSymbolType;
+///
+/// let x = LayoutSymbol::new(LayoutSymbolType::External);
+/// let slack = LayoutSymbol::new(LayoutSymbolType::Slack);
+/// let mut row = LayoutRow::new(10.0);
+/// row.insert_symbol(x, 2.0);
+/// row.insert_symbol(slack, 4.0);
+/// row.solve_for(x);
+/// assert_eq!(row.get_constant(), -5.0);
+/// assert_eq!(row.coefficient_for(slack), -2.0);
+/// assert_eq!(row.coefficient_for(x), 0.0);
+/// ```
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct LayoutRow {
@@ -37,6 +62,12 @@ pub struct LayoutRow {
 impl LayoutRow {
 	//==============================================================================
 	/// 생성. (constant 는 처음 상수항)
+	///
+	/// # 인자
+	/// - `constant`: 처음 상수항.
+	///
+	/// # 돌려줌
+	/// 셀이 없는 새 행.
 	//==============================================================================
 	pub fn new(constant: f64) -> LayoutRow {
 		LayoutRow {
@@ -47,6 +78,9 @@ impl LayoutRow {
 
 	//==============================================================================
 	/// 셀 맵 반환.
+	///
+	/// # 돌려줌
+	/// 셀 맵(심볼 -> 계수, 넣은 차례)의 참조.
 	//==============================================================================
 	pub fn get_cells(&self) -> &LayoutSymbolMap<f64> {
 		&self.cells
@@ -54,6 +88,9 @@ impl LayoutRow {
 
 	//==============================================================================
 	/// 상수항 반환.
+	///
+	/// # 돌려줌
+	/// 상수항.
 	//==============================================================================
 	pub fn get_constant(&self) -> f64 {
 		self.constant
@@ -61,6 +98,9 @@ impl LayoutRow {
 
 	//==============================================================================
 	/// 상수항 설정.
+	///
+	/// # 인자
+	/// - `constant`: 새 상수항.
 	//==============================================================================
 	pub fn set_constant(&mut self, constant: f64) {
 		self.constant = constant;
@@ -68,6 +108,12 @@ impl LayoutRow {
 
 	//==============================================================================
 	/// 상수항에 값을 더한다. (새 상수항을 돌려준다)
+	///
+	/// # 인자
+	/// - `value`: 상수항에 더할 값.
+	///
+	/// # 돌려줌
+	/// 더한 뒤의 상수항.
 	//==============================================================================
 	pub fn add_constant(&mut self, value: f64) -> f64 {
 		let new_constant = self.get_constant() + value;
@@ -77,6 +123,10 @@ impl LayoutRow {
 
 	//==============================================================================
 	/// 심볼의 계수에 coefficient 를 더한다. (결과가 0 에 가까우면 셀에서 지운다)
+	///
+	/// # 인자
+	/// - `symbol`: 계수를 더할 심볼. (셀에 없으면 계수 0 에서 시작한다)
+	/// - `coefficient`: 더할 계수.
 	//==============================================================================
 	pub fn insert_symbol(&mut self, symbol: LayoutSymbol, coefficient: f64) {
 		let previous = self.coefficient_for(symbol);
@@ -91,6 +141,10 @@ impl LayoutRow {
 
 	//==============================================================================
 	/// 다른 행에 coefficient 를 곱해 이 행에 더한다.
+	///
+	/// # 인자
+	/// - `other_row`: 더할 행. (상수항과 셀 모두)
+	/// - `coefficient`: other_row 에 곱할 수.
 	//==============================================================================
 	pub fn insert_row(&mut self, other_row: &LayoutRow, coefficient: f64) {
 		let other_constant = other_row.get_constant();
@@ -102,6 +156,9 @@ impl LayoutRow {
 
 	//==============================================================================
 	/// 심볼 지우기.
+	///
+	/// # 인자
+	/// - `symbol`: 지울 심볼. (셀에 없으면 그대로)
 	//==============================================================================
 	pub fn remove_symbol(&mut self, symbol: LayoutSymbol) {
 		self.cells.remove(&symbol);
@@ -121,6 +178,9 @@ impl LayoutRow {
 	/// 행을 subject 에 대해 푼다.
 	/// - subject 의 셀을 지우고, 남은 셀과 상수항에 -1 / subject 계수를 곱한다. (Kiwi 관례)
 	/// - subject 가 셀에 없으면 부르는 쪽의 실수다.
+	///
+	/// # 인자
+	/// - `subject`: 풀 심볼. (셀에 있어야 한다. 없으면 0 으로 나눠 상수항과 계수가 무한대나 NaN 이 된다)
 	//==============================================================================
 	pub fn solve_for(&mut self, subject: LayoutSymbol) {
 		let subject_coefficient = self.coefficient_for(subject);
@@ -134,6 +194,10 @@ impl LayoutRow {
 
 	//==============================================================================
 	/// lhs = rhs 꼴로 둔 행을 rhs 에 대해 다시 푼다. (lhs 를 -1 로 넣고 rhs 로 푼다)
+	///
+	/// # 인자
+	/// - `lhs`: 왼쪽 심볼. (계수 -1 로 더한다)
+	/// - `rhs`: 다시 풀 심볼.
 	//==============================================================================
 	pub fn solve_for_pair(&mut self, lhs: LayoutSymbol, rhs: LayoutSymbol) {
 		self.insert_symbol(lhs, -1.0);
@@ -142,6 +206,12 @@ impl LayoutRow {
 
 	//==============================================================================
 	/// 심볼의 계수 반환. (없으면 0)
+	///
+	/// # 인자
+	/// - `symbol`: 찾을 심볼.
+	///
+	/// # 돌려줌
+	/// 계수. 셀에 없으면 0.
 	//==============================================================================
 	pub fn coefficient_for(&self, symbol: LayoutSymbol) -> f64 {
 		match self.cells.get(&symbol) {
@@ -156,6 +226,10 @@ impl LayoutRow {
 
 	//==============================================================================
 	/// symbol 을 substitution_row 로 바꿔 넣는다. (symbol 이 없으면 그대로)
+	///
+	/// # 인자
+	/// - `symbol`: 바꿀 심볼.
+	/// - `substitution_row`: symbol 자리에 넣을 행. (symbol 의 계수를 곱해 더한다)
 	//==============================================================================
 	pub fn substitute(&mut self, symbol: LayoutSymbol, substitution_row: &LayoutRow) {
 		let coefficient = match self.cells.remove(&symbol) {

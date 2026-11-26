@@ -1,5 +1,5 @@
 //==============================================================================
-//! 화면 공간 앰비언트 오클루전. (원본 experimental/graphics/ambientocclusioneffect.js)
+//! 화면 공간 앰비언트 오클루전. (원본 graphics3d/ambientocclusioneffect.js)
 //! - 깊이 + 노멀 버퍼 → 반구 표본 차폐 → 깊이 인식 블러. 결과는 get_result_texture() 의 r 채널 가시율(1 = 차폐 없음).
 //! - render() 입력은 본 패스의 깊이 텍스처와 월드 노멀 텍스처(알파 = 커버리지), 카메라의 뷰 회전 / 투영 파라미터.
 //! - GLSL 과 커널, 기본값(반경 0.03, 강도 1, 바이어스 0.002, 배율 0.5)은 원본과 같다. 원본 ${SAMPLE_COUNT} 는 숫자 16 으로 옮겼다.
@@ -11,7 +11,7 @@ use crate::graphics3d::rendertarget::{RenderTarget, RenderTargetOptions};
 use glow::HasContext;
 
 //==============================================================================
-/// 전역 상수 목록.
+// 전역 상수 목록.
 //==============================================================================
 /// 반구 표본 수. (프래그먼트마다 회전 노이즈로 흩는다, 셰이더의 16 과 같아야 한다)
 pub const SAMPLE_COUNT: usize = 16;
@@ -115,6 +115,30 @@ void main() {
 
 //==============================================================================
 /// 화면 공간 앰비언트 오클루전.
+/// - 판 셋(차폐, 핑, 퐁)은 RGBA16F 다. 차폐 판의 r 은 가시율, g 는 선형 깊이다.
+///
+/// # 예제
+/// 노멀을 1 번 어태치먼트에, 깊이를 깊이 텍스처에 그린 씬에서 가시율 만들기
+/// ```rust,no_run
+/// use vanilla::{AmbientOcclusionEffect, Camera3D, RenderTarget, RenderTargetOptions};
+///
+/// fn create_resources(gl: &glow::Context) -> Result<(RenderTarget, AmbientOcclusionEffect), String> {
+/// 	let options = RenderTargetOptions { color_attachment_count: 2, use_float_color: true, use_depth_texture: true, ..RenderTargetOptions::default() };
+/// 	let scene_render_target = RenderTarget::new(gl, 1280, 720, true, Some(options))?;
+/// 	let mut ambient_occlusion_effect = AmbientOcclusionEffect::new(gl)?;
+/// 	ambient_occlusion_effect.set_parameters(0.05, 1.2, 0.002);
+/// 	ambient_occlusion_effect.set_scale(0.5);
+/// 	ambient_occlusion_effect.resize(gl, 1280, 720)?;
+/// 	Ok((scene_render_target, ambient_occlusion_effect))
+/// }
+///
+/// fn render_occlusion(gl: &glow::Context, ambient_occlusion_effect: &AmbientOcclusionEffect, scene_render_target: &RenderTarget, camera: &Camera3D) {
+/// 	let view_matrix = camera.get_view_matrix();
+/// 	ambient_occlusion_effect.render(gl, scene_render_target.get_depth_texture(), scene_render_target.get_color_texture(1), view_matrix.get_elements(), camera.get_field_of_view(), camera.get_aspect_ratio(), camera.get_near_distance(), camera.get_far_distance());
+/// 	let visibility_texture = ambient_occlusion_effect.get_result_texture();
+/// 	assert!(visibility_texture.is_some());
+/// }
+/// ```
 //==============================================================================
 pub struct AmbientOcclusionEffect {
 	occlusion_pass: FullscreenPass,
@@ -132,6 +156,12 @@ pub struct AmbientOcclusionEffect {
 impl AmbientOcclusionEffect {
 	//==============================================================================
 	/// 생성. (패스 2개 + 반정밀 실수 타겟 3장, resize 로 크기를 맞춘다)
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트. (Graphic::get_gl 로 꺼낸다)
+	///
+	/// # 돌려줌
+	/// 새 이펙트. (반경 0.03, 강도 1, 바이어스 0.002, 배율 0.5, 커널까지 셈한 것) 셰이더 컴파일이나 판 만들기에 실패하면 Err(오류 글).
 	//==============================================================================
 	pub fn new(gl: &glow::Context) -> Result<AmbientOcclusionEffect, String> {
 		let float_color_options = RenderTargetOptions {
@@ -163,6 +193,26 @@ impl AmbientOcclusionEffect {
 
 	//==============================================================================
 	/// 표본 커널 만들기. (GL 무관, 황금각 나선, 높이 고르게, 크기 0.15 ~ 1 제곱 분포)
+	///
+	/// # 돌려줌
+	/// 표본 SAMPLE_COUNT(16) 개의 x, y, z 를 차례로 이은 배열. (z 가 양수인 반구 안, 표본 길이는 0.15 ~ 1)
+	///
+	/// # 예제
+	/// 모든 표본이 반지름 1 의 위쪽 반구 안에 든다
+	/// ```rust
+	/// use vanilla::graphics3d::ambientocclusioneffect::SAMPLE_COUNT;
+	/// use vanilla::AmbientOcclusionEffect;
+	///
+	/// let sample_kernel = AmbientOcclusionEffect::build_sample_kernel();
+	/// assert_eq!(sample_kernel.len(), SAMPLE_COUNT * 3);
+	/// for sample_index in 0..SAMPLE_COUNT {
+	/// 	let x = sample_kernel[sample_index * 3];
+	/// 	let y = sample_kernel[sample_index * 3 + 1];
+	/// 	let z = sample_kernel[sample_index * 3 + 2];
+	/// 	assert!(z > 0.0);
+	/// 	assert!((x * x + y * y + z * z).sqrt() <= 1.0 + 1.0e-5);
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn build_sample_kernel() -> [f32; SAMPLE_COUNT * 3] {
 		let mut sample_kernel = [0.0f32; SAMPLE_COUNT * 3];
@@ -182,6 +232,14 @@ impl AmbientOcclusionEffect {
 
 	//==============================================================================
 	/// 크기 변경. (본 패스 해상도, 내부는 축소 배율 적용)
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트.
+	/// - `width`: 본 패스 가로 크기. (픽셀, 판은 배율을 곱해 내림, 최소 1)
+	/// - `height`: 본 패스 세로 크기. (픽셀, 판은 배율을 곱해 내림, 최소 1)
+	///
+	/// # 돌려줌
+	/// 판을 맞췄으면 Ok. 다시 짓다 GL 객체를 못 만들면 Err(GL 의 오류 글).
 	//==============================================================================
 	pub fn resize(&mut self, gl: &glow::Context, width: i32, height: i32) -> Result<(), String> {
 		let scaled_width = ((width as f32 * self.scale).floor() as i32).max(1);
@@ -196,6 +254,17 @@ impl AmbientOcclusionEffect {
 	/// 차폐 렌더링. (차폐 → 가로 블러 → 세로 블러, 결과는 get_result_texture())
 	/// - view_matrix_elements 는 뷰 행렬 원소(열 우선 4x4), field_of_view_radian 은 세로 시야각.
 	/// - 부수 효과: 깊이/블렌드 비활성, TEXTURE0 활성, 프레임버퍼 바인드가 변경된다.
+	/// - 깊이는 0 번, 노멀은 2 번 유닛에 묶었다가 2 번은 끝에 풀어 둔다.
+	///
+	/// # 인자
+	/// - `gl`: GL 컨텍스트.
+	/// - `depth_texture`: 본 패스의 깊이 텍스처. (하드웨어 깊이 0 ~ 1, 1 이면 하늘로 보고 가림 없음)
+	/// - `normal_texture`: 월드 노멀 텍스처. (rgb 에 -1 ~ 1 노멀을 그대로, 알파 0.5 밑은 빈 곳으로 보고 가림 없음)
+	/// - `view_matrix_elements`: 뷰 행렬 원소. (열 우선 4x4, 회전 부분만 쓴다)
+	/// - `field_of_view_radian`: 세로 시야각. (라디안)
+	/// - `aspect_ratio`: 가로 세로 비. (너비 / 높이)
+	/// - `near_distance`: 투영의 가까운 거리. (깊이를 선형으로 풀 때)
+	/// - `far_distance`: 투영의 먼 거리.
 	//==============================================================================
 	pub fn render(&self, gl: &glow::Context, depth_texture: Option<GlTexture>, normal_texture: Option<GlTexture>, view_matrix_elements: &[f32; 16], field_of_view_radian: f32, aspect_ratio: f32, near_distance: f32, far_distance: f32) {
 		unsafe {
@@ -261,6 +330,9 @@ impl AmbientOcclusionEffect {
 
 	//==============================================================================
 	/// 결과 텍스처 반환. (render() 이후, r 가시율)
+	///
+	/// # 돌려줌
+	/// 블러를 마친 가시율 텍스처. (퐁 판, r 이 1 이면 가림 없음, g 는 선형 깊이) destroy 뒤면 None.
 	//==============================================================================
 	pub fn get_result_texture(&self) -> Option<GlTexture> {
 		self.pong_render_target.get_color_texture(0)
@@ -268,6 +340,11 @@ impl AmbientOcclusionEffect {
 
 	//==============================================================================
 	/// 파라미터 설정. (표본 반경(월드) / 강도 / 깊이 바이어스)
+	///
+	/// # 인자
+	/// - `radius`: 표본 반경. (월드 단위, 기본 0.03)
+	/// - `intensity`: 차폐 강도. (가림 몫에 곱한다, 기본 1)
+	/// - `bias`: 깊이 바이어스. (월드 단위, 자기 가림을 막는다, 기본 0.002)
 	//==============================================================================
 	pub fn set_parameters(&mut self, radius: f32, intensity: f32, bias: f32) {
 		self.radius = radius;
@@ -277,6 +354,9 @@ impl AmbientOcclusionEffect {
 
 	//==============================================================================
 	/// 내부 해상도 배율 설정. (resize 전에 호출)
+	///
+	/// # 인자
+	/// - `scale`: 판의 해상도 배율. (본 패스 크기에 곱한다, 기본 0.5, 다음 resize 부터 쓴다)
 	//==============================================================================
 	pub fn set_scale(&mut self, scale: f32) {
 		self.scale = scale;
@@ -284,6 +364,9 @@ impl AmbientOcclusionEffect {
 
 	//==============================================================================
 	/// 파괴. (GL 리소스 해제)
+	///
+	/// # 인자
+	/// - `gl`: 만들 때 쓴 GL 컨텍스트.
 	//==============================================================================
 	pub fn destroy(&mut self, gl: &glow::Context) {
 		self.occlusion_render_target.destroy(gl);
@@ -295,6 +378,9 @@ impl AmbientOcclusionEffect {
 
 	//==============================================================================
 	/// 차폐 패스 반환.
+	///
+	/// # 돌려줌
+	/// 차폐 패스. (깊이와 노멀로 반구 표본 차폐를 셈하는 셰이더)
 	//==============================================================================
 	pub fn get_occlusion_pass(&self) -> &FullscreenPass {
 		&self.occlusion_pass
@@ -302,6 +388,9 @@ impl AmbientOcclusionEffect {
 
 	//==============================================================================
 	/// 블러 패스 반환.
+	///
+	/// # 돌려줌
+	/// 깊이 인식 블러 패스. (가로, 세로 둘 다 이 패스)
 	//==============================================================================
 	pub fn get_blur_pass(&self) -> &FullscreenPass {
 		&self.blur_pass
@@ -309,6 +398,9 @@ impl AmbientOcclusionEffect {
 
 	//==============================================================================
 	/// 차폐 렌더 타겟 반환.
+	///
+	/// # 돌려줌
+	/// 차폐 렌더 타겟. (블러 전 가시율)
 	//==============================================================================
 	pub fn get_occlusion_render_target(&self) -> &RenderTarget {
 		&self.occlusion_render_target
@@ -316,6 +408,9 @@ impl AmbientOcclusionEffect {
 
 	//==============================================================================
 	/// 핑 렌더 타겟 반환. (가로 블러 결과)
+	///
+	/// # 돌려줌
+	/// 핑 렌더 타겟. (가로 블러 결과)
 	//==============================================================================
 	pub fn get_ping_render_target(&self) -> &RenderTarget {
 		&self.ping_render_target
@@ -323,6 +418,9 @@ impl AmbientOcclusionEffect {
 
 	//==============================================================================
 	/// 퐁 렌더 타겟 반환. (최종 결과 보관)
+	///
+	/// # 돌려줌
+	/// 퐁 렌더 타겟. (세로 블러 결과, 결과 텍스처의 주인)
 	//==============================================================================
 	pub fn get_pong_render_target(&self) -> &RenderTarget {
 		&self.pong_render_target
@@ -330,6 +428,9 @@ impl AmbientOcclusionEffect {
 
 	//==============================================================================
 	/// 표본 반경 반환.
+	///
+	/// # 돌려줌
+	/// 표본 반경. (월드 단위)
 	//==============================================================================
 	pub fn get_radius(&self) -> f32 {
 		self.radius
@@ -337,6 +438,9 @@ impl AmbientOcclusionEffect {
 
 	//==============================================================================
 	/// 강도 반환.
+	///
+	/// # 돌려줌
+	/// 차폐 강도.
 	//==============================================================================
 	pub fn get_intensity(&self) -> f32 {
 		self.intensity
@@ -344,6 +448,9 @@ impl AmbientOcclusionEffect {
 
 	//==============================================================================
 	/// 깊이 바이어스 반환.
+	///
+	/// # 돌려줌
+	/// 깊이 바이어스. (월드 단위)
 	//==============================================================================
 	pub fn get_bias(&self) -> f32 {
 		self.bias
@@ -351,6 +458,9 @@ impl AmbientOcclusionEffect {
 
 	//==============================================================================
 	/// 내부 해상도 배율 반환.
+	///
+	/// # 돌려줌
+	/// 판의 해상도 배율.
 	//==============================================================================
 	pub fn get_scale(&self) -> f32 {
 		self.scale

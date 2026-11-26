@@ -15,16 +15,12 @@
 //! - 원본과 다른 점:
 //!   - 받은 JSON 은 수신 콜백이 있으면 그것을 부르고, 없으면 모아 두었다가 take_received_messages 로 꺼낸다. (원본에도 넣었다, 최대 RECEIVED_MESSAGE_LIMIT 개, 넘치면 오래된 것부터 버린다)
 //!   - disconnect 는 원본처럼 그 자리에서는 닫기만 걸고, 끊긴 것은 다음 tick 에 친다. (원본은 onclose 가 뒤에 와서 그때까지 is_connected 가 참이다.
-//!   ```text
 //!     ewebsock 데스크탑은 이쪽에서 닫으면 Closed 사건을 보내지 않아, 그 tick 에 남은 사건을 꺼낸 뒤 끊는다)
-//!   ```
 //!   - 오류 사건은 원본처럼 알리고, 끊긴 것으로 친다. (브라우저는 onerror 뒤에 늘 onclose 가 오고, ewebsock 데스크탑은 오류 뒤 스레드가 끝난다)
 //!   - get_web_socket 은 ewebsock 의 송신기(WsSender)다.
 //!   - 수신 콜백은 `Rc<RefCell>` 에 담는다. get_receive_event 는 그 Rc 를 돌려주고, 부르는 쪽은 borrow_mut 로 빌려 부른다.
 //!   - 데스크탑의 wss:// 는 ewebsock 의 "tls" 기능(tungstenite 의 rustls 와 webpki 뿌리 인증서)으로 연다. rustls 의 암호 공급자는 ring 이고 처음 붙을 때 정한다.
-//!   ```text
 //!     엔진의 tls 기능(기본으로 켜짐)일 때만이다. 끄면 데스크탑은 ws:// 만 열린다.
-//!   ```
 //!   - 바이너리 메시지도 UTF-8 JSON 이면 받는다. (원본에도 넣었다)
 //==============================================================================
 use ewebsock::{WsEvent, WsMessage, WsReceiver, WsSender};
@@ -41,6 +37,57 @@ pub type WebSocketReceiveEvent = Box<dyn FnMut(&Value)>;
 
 //==============================================================================
 /// 웹소켓 통신 처리기.
+/// - 씬이 매 프레임 tick 을 불러 쌓인 사건을 꺼낸다. 받은 JSON 은 수신 콜백이 있으면 콜백이, 없으면 take_received_messages 가 꺼낸다.
+///
+/// # 예제
+/// 씬에서 접속하고 매 프레임 받은 것을 꺼내 답하기 (네트워크가 있어야 해서 컴파일만)
+/// ```rust,no_run
+/// use vanilla::{Engine, Scene, SceneBase, WebSocketClient};
+///
+/// struct LobbyScene {
+/// 	scene_base: SceneBase,
+/// 	web_socket_client: WebSocketClient,
+/// }
+///
+/// impl Scene for LobbyScene {
+/// 	fn get_scene_base(&self) -> &SceneBase {
+/// 		&self.scene_base
+/// 	}
+///
+/// 	fn get_scene_base_mut(&mut self) -> &mut SceneBase {
+/// 		&mut self.scene_base
+/// 	}
+///
+/// 	fn create(&mut self, _engine: &mut Engine) {
+/// 		self.web_socket_client.connect("ws://localhost:8080");
+/// 	}
+///
+/// 	fn tick(&mut self, _engine: &mut Engine, _time_delta: f32) {
+/// 		self.web_socket_client.tick();
+/// 		for message in self.web_socket_client.take_received_messages() {
+/// 			if message["type"] == "ping" {
+/// 				self.web_socket_client.send(&serde_json::json!({ "type": "pong" }));
+/// 			}
+/// 		}
+/// 		self.web_socket_client.send(&serde_json::json!({ "type": "move", "x": 3 }));
+/// 	}
+/// }
+/// ```
+///
+/// 받은 JSON 은 콜백이 없으면 모아 두었다가 꺼낸다 (접속 없이 receive_message 로 넣는다)
+/// ```rust
+/// use vanilla::WebSocketClient;
+///
+/// let mut web_socket_client = WebSocketClient::new();
+/// assert!(!web_socket_client.is_connected());
+/// web_socket_client.send(&serde_json::json!({ "ignored": true }));
+/// web_socket_client.receive_message(serde_json::json!({ "type": "hello", "id": 1 }));
+/// web_socket_client.receive_message(serde_json::json!([1, 2, 3]));
+/// let messages = web_socket_client.take_received_messages();
+/// assert_eq!(messages.len(), 2);
+/// assert_eq!(messages[0]["id"], 1);
+/// assert!(web_socket_client.take_received_messages().is_empty());
+/// ```
 //==============================================================================
 pub struct WebSocketClient {
 	web_socket: Option<WsSender>,
@@ -55,6 +102,9 @@ pub struct WebSocketClient {
 impl WebSocketClient {
 	//==============================================================================
 	/// 생성. (접속 전)
+	///
+	/// # 돌려줌
+	/// 접속 전이고 수신 콜백이 없는 처리기.
 	//==============================================================================
 	pub fn new() -> WebSocketClient {
 		WebSocketClient {
@@ -69,6 +119,10 @@ impl WebSocketClient {
 
 	//==============================================================================
 	/// 접속. (이미 접속돼 있으면 아무것도 하지 않는다. 열리면 다음 tick 들 사이에 is_connected 가 true 가 된다)
+	/// - 소켓을 만들지 못하면 표준 에러에 알리고 아무것도 하지 않는다. 열리지 못하면 tick 이 오류 사건을 보고 끊긴 것으로 친다.
+	///
+	/// # 인자
+	/// - `url`: 접속할 주소. (ws:// 나 wss://, 데스크탑의 wss:// 는 엔진의 tls 기능이 켜져 있을 때만)
 	//==============================================================================
 	pub fn connect(&mut self, url: &str) {
 		if self.is_connected {
@@ -103,6 +157,10 @@ impl WebSocketClient {
 
 	//==============================================================================
 	/// JSON 송신. (접속돼 있을 때만)
+	/// - 글 메시지로 보낸다. 접속 전이면 버린다.
+	///
+	/// # 인자
+	/// - `value`: 보낼 JSON 값.
 	//==============================================================================
 	pub fn send(&mut self, value: &Value) {
 		if !self.is_connected() {
@@ -194,6 +252,10 @@ impl WebSocketClient {
 
 	//==============================================================================
 	/// 받은 JSON 넘기기. (수신 콜백이 있으면 콜백, 없으면 모아 두었다가 take_received_messages 로 꺼낸다, 원본 receiveMessage)
+	/// - 모아 둔 것이 RECEIVED_MESSAGE_LIMIT(1024) 개면 가장 오래된 것을 버린다. 콜백이 이미 빌려져 있으면(콜백 안에서 다시 부르면) 넘기지 않고 버린다.
+	///
+	/// # 인자
+	/// - `value`: 받은 JSON 값. (부르는 쪽이 직접 넣어도 같은 길을 지난다)
 	//==============================================================================
 	pub fn receive_message(&mut self, value: Value) {
 		if let Some(receive_event) = self.get_receive_event() {
@@ -220,6 +282,9 @@ impl WebSocketClient {
 
 	//==============================================================================
 	/// 모아 둔 받은 메시지 꺼내기. (수신 콜백이 없을 때 모인 것, 받은 차례)
+	///
+	/// # 돌려줌
+	/// 모아 둔 JSON 목록. (받은 차례, 꺼내면 비운다)
 	//==============================================================================
 	pub fn take_received_messages(&mut self) -> Vec<Value> {
 		self.received_message_list.drain(..).collect()
@@ -227,6 +292,9 @@ impl WebSocketClient {
 
 	//==============================================================================
 	/// 접속 여부 반환.
+	///
+	/// # 돌려줌
+	/// 열림 사건을 받았고 아직 끊기지 않았으면 true. (disconnect 뒤에도 다음 tick 까지는 true)
 	//==============================================================================
 	pub fn is_connected(&self) -> bool {
 		self.is_connected
@@ -234,6 +302,9 @@ impl WebSocketClient {
 
 	//==============================================================================
 	/// 웹소켓 송신기 반환. (접속 시도 중이거나 접속돼 있을 때)
+	///
+	/// # 돌려줌
+	/// ewebsock 의 송신기. 접속 전이거나 끊겼으면 None.
 	//==============================================================================
 	pub fn get_web_socket(&self) -> Option<&WsSender> {
 		self.web_socket.as_ref()
@@ -241,6 +312,9 @@ impl WebSocketClient {
 
 	//==============================================================================
 	/// 웹소켓 송신기 반환. (변경용, 글이 아닌 메시지를 직접 보낼 때)
+	///
+	/// # 돌려줌
+	/// ewebsock 의 송신기. (변경용) 접속 전이거나 끊겼으면 None.
 	//==============================================================================
 	pub fn get_web_socket_mut(&mut self) -> Option<&mut WsSender> {
 		self.web_socket.as_mut()
@@ -248,6 +322,29 @@ impl WebSocketClient {
 
 	//==============================================================================
 	/// 수신 콜백 설정. (None 이면 받은 메시지를 모아 둔다)
+	///
+	/// # 인자
+	/// - `receive_event`: 받은 JSON 을 넘겨받을 함수. None 이면 끄고 모아 둔다.
+	///
+	/// # 예제
+	/// 콜백이 받으면 모으지 않는다 (씬 상태는 `Rc<RefCell>` 로 나눠 쥔다)
+	/// ```rust
+	/// use std::cell::RefCell;
+	/// use std::rc::Rc;
+	/// use vanilla::WebSocketClient;
+	///
+	/// let score_list: Rc<RefCell<Vec<i64>>> = Rc::new(RefCell::new(Vec::new()));
+	/// let score_list_for_event = score_list.clone();
+	/// let mut web_socket_client = WebSocketClient::new();
+	/// web_socket_client.set_receive_event(Some(Box::new(move |value: &serde_json::Value| {
+	/// 	if let Some(score) = value["score"].as_i64() {
+	/// 		score_list_for_event.borrow_mut().push(score);
+	/// 	}
+	/// })));
+	/// web_socket_client.receive_message(serde_json::json!({ "score": 42 }));
+	/// assert_eq!(*score_list.borrow(), vec![42]);
+	/// assert!(web_socket_client.take_received_messages().is_empty());
+	/// ```
 	//==============================================================================
 	pub fn set_receive_event(&mut self, receive_event: Option<WebSocketReceiveEvent>) {
 		self.receive_event = receive_event.map(|receive_event| Rc::new(RefCell::new(receive_event)));
@@ -255,6 +352,9 @@ impl WebSocketClient {
 
 	//==============================================================================
 	/// 수신 콜백 반환. (부를 때는 borrow_mut 로 빌린다)
+	///
+	/// # 돌려줌
+	/// 수신 콜백을 담은 `Rc<RefCell>`. 없으면 None.
 	//==============================================================================
 	pub fn get_receive_event(&self) -> Option<Rc<RefCell<WebSocketReceiveEvent>>> {
 		self.receive_event.clone()
@@ -262,6 +362,9 @@ impl WebSocketClient {
 }
 
 impl Default for WebSocketClient {
+	//==============================================================================
+	/// 접속 전의 처리기. (new 와 같다)
+	//==============================================================================
 	fn default() -> WebSocketClient {
 		WebSocketClient::new()
 	}

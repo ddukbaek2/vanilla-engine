@@ -1,5 +1,5 @@
 //==============================================================================
-// 툰 그리기 줄. (vanilla.js experimental/graphics/toon/toondrawqueue.js 의 ToonDrawQueue)
+// 툰 그리기 줄. (vanilla.js graphics3d/toon/toondrawqueue.js 의 ToonDrawQueue)
 // - 한 프레임에 그릴 모형을 담아 두었다가 ToonRenderer 로 차례를 맞춰 그린다.
 // - 차례: (화면 공간 바깥선의 선의 판) → 단계 BeforeOpaque → 불투명한 몸 → AfterOpaque → 불투명한 것의 바깥선 껍데기 → 화면 공간 바깥선 → AfterOutline
 //   → 비치는 것(카메라에서 먼 것부터, 깊이는 쓰지 않음) → AfterTransparent.
@@ -15,6 +15,7 @@
 // - 단계 콜백: add_pass(stage, callback) 의 callback(gl, renderer) 를 그 자리에서 부른다. 부른 뒤 렌더러가 프레임의 그리기 상태를 다시 건다.
 // - 인스턴스 묶음(add_mesh_instanced)은 불투명이면 몸과 바깥선을 한 번에 그리고, 비치면 인스턴스 자리의 가운데로 한 덩어리로 정렬한다.
 // - 그림자: draw_shadows(gl, renderer, shadow_map) 가 casts_shadow 가 true 인 불투명한 것만 그림자 깊이로 그린다. draw 보다 먼저 부른다.
+//   점광과 스포트라이트 그림자는 draw_local_shadows(gl, renderer, shadow_atlas) 가 아틀라스의 칸마다 같은 것을 그린다. (렌더러에 set_local_shadows 로 건다)
 // - 사용: 매 프레임 clear() → add_mesh / add_mesh_instanced / add_pass → (draw_shadows) → draw(gl, renderer, camera) 나 draw_with_matrices(gl, renderer, 보기 행렬, 투영 행렬)
 //   draw 는 renderer.begin_frame_with_camera 와 end_frame 을 스스로 부른다. draw_with_matrices 는 begin_frame_with_matrices 를 부른다. (직교 원 행렬 카메라)
 //   화면 사각형(ToonRenderer::set_screen_rect)은 그 전에 건다. clear 는 담은 모형과 단계 콜백을 모두 비운다. (화면 공간 바깥선은 그대로 둔다)
@@ -28,7 +29,7 @@ use glow::HasContext;
 
 use crate::base::matrix4::Matrix4;
 use crate::graphics3d::camera3d::Camera3D;
-use crate::graphics3d::shadowmap::ShadowMap;
+use crate::graphics3d::shadowmap::{ShadowAtlas, ShadowMap};
 use crate::graphics3d::toon::toonmaterial::ToonBlendMode;
 use crate::graphics3d::toon::toonrenderer::{ToonDrawOptions, ToonInstance, ToonMesh, ToonRenderer};
 use crate::graphics3d::toon::toonscreenoutline::{ToonLineDrawOptions, ToonScreenOutline, TOON_SCREEN_OUTLINE_MAXIMUM_LINE_ID};
@@ -173,6 +174,23 @@ impl<'a> ToonDrawQueue<'a> {
 				continue;
 			}
 			ToonDrawQueue::draw_item(gl, renderer, item, item.options);
+		}
+		renderer.end_shadow_pass(gl);
+	}
+
+	//==============================================================================
+	/// 점광과 스포트라이트 그림자 깊이 그리기. (불투명하고 casts_shadow 가 true 인 것을 아틀라스의 칸마다, 앞의 프레임버퍼와 뷰포트는 되돌린다)
+	//==============================================================================
+	pub fn draw_local_shadows(&self, gl: &glow::Context, renderer: &mut ToonRenderer, shadow_atlas: &ShadowAtlas) {
+		renderer.begin_shadow_atlas_pass(gl, shadow_atlas);
+		for tile_index in 0..shadow_atlas.get_tile_count() {
+			renderer.set_shadow_atlas_tile(gl, shadow_atlas, tile_index);
+			for item in self.item_list.iter() {
+				if item.is_transparent || !item.options.casts_shadow {
+					continue;
+				}
+				ToonDrawQueue::draw_item(gl, renderer, item, item.options);
+			}
 		}
 		renderer.end_shadow_pass(gl);
 	}

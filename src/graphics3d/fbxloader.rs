@@ -1,18 +1,40 @@
 //==============================================================================
-//! FBX 로더. (원본 experimental/graphics/fbxloader.js)
+//! FBX 로더. (원본 graphics3d/fbxloader.js)
 //! - 바이너리 FBX → GL 무관 중간 표현(FbxSceneData). 저수준 노드/프로퍼티 파싱 후 오브젝트/커넥션 그래프를 해석해
 //!   노드 계층 / 스키닝 메시 / 머티리얼 / 임베디드 텍스처 / 골격 애니메이션을 뽑는다. 결과는 SkinnedModel 이 GL 리소스로 소비한다.
 //! - 원본처럼 순수 파서다. GL 이나 셰이딩을 모르고, wasm32 에서도 돈다. 압축 배열(deflate, zlib 머리)은 flate2(순수 러스트)로 푼다.
 //! - 원본과 다른 것:
 //!   - 원본은 async 다. (압축 배열을 브라우저 DecompressionStream 으로 풀어서다) 러스트 판은 flate2 로 그 자리에서 끝난다.
-//!   ```text
 //!     원본 loadFromUrl(url) 의 Promise 는 ImageAsset 처럼 받기 손잡이(FbxLoadHandle)다. load_from_url(엔진, 애셋 경로)이 엔진의 애셋 받기
 //!     (데스크탑은 애셋 폴더 후보에서 읽고, 웹은 asset_base_url 에서 fetch)로 바이트를 부탁하고, 다 받으면 get_scene_data 가 파싱한 결과를 돌려준다.
 //!     손잡이는 그대로 await 할 수 있다. (엔진 작업 안에서 FbxLoader::load_from_url(engine, 경로).await 가 원본 await FbxLoader.loadFromUrl(url) 처럼 파싱 결과를 낸다)
-//!   ```
 //!   - 64비트 정수: 원본은 오브젝트 id 처럼 하나로 든 값이 2^53 을 넘으면 BigInt 로 든다. 러스트 판은 i64 다. 배열(키 시간)은 원본이 Number 다.
 //!   - 원본은 순서 있는 Map 을 쓴다. 러스트 판은 넣은 순서를 지키는 FbxObjectMap 으로 같은 순회 순서를 낸다.
 //!   - 원본에서 만들고 쓰지 않는 objectById 와 getDataView / getFileBytes / getTextDecoder 는 옮기지 않았다.
+//!
+//! # 예제
+//! 노드 레코드로 짠 장면을 중간 표현으로 해석
+//! ```rust
+//! use vanilla::graphics3d::fbxloader::{FbxLoader, FbxNodeRecord, FbxPropertyValue};
+//!
+//! fn record(name: &str, properties: Vec<FbxPropertyValue>, children: Vec<FbxNodeRecord>) -> FbxNodeRecord {
+//! 	FbxNodeRecord {
+//! 		name: String::from(name),
+//! 		properties,
+//! 		children,
+//! 	}
+//! }
+//!
+//! let hips = record("Model", vec![FbxPropertyValue::Int64(200), FbxPropertyValue::String(String::from("Hips")), FbxPropertyValue::String(String::from("LimbNode"))], Vec::new());
+//! let root_connection = record("C", vec![FbxPropertyValue::String(String::from("OO")), FbxPropertyValue::Int64(200), FbxPropertyValue::Int64(0)], Vec::new());
+//! let objects = record("Objects", Vec::new(), vec![hips]);
+//! let connections = record("Connections", Vec::new(), vec![root_connection]);
+//! let scene_data = FbxLoader::new().interpret(&[objects, connections]).unwrap();
+//! assert_eq!(scene_data.node_list.len(), 1);
+//! assert!(scene_data.node_list[0].is_bone);
+//! assert_eq!(scene_data.root_node_indices, vec![0]);
+//! assert!(FbxLoader::new().parse(b"; FBX 7.4.0 project file").is_err());
+//! ```
 //==============================================================================
 use crate::core::asset::AssetLoadHandle;
 use crate::core::engine::Engine;
@@ -25,7 +47,7 @@ use std::rc::Rc;
 use std::task::{Context, Poll};
 
 //==============================================================================
-/// 전역 상수 목록.
+// 전역 상수 목록.
 //==============================================================================
 /// FBX 시간 단위. (1초 = 46186158000 ktime)
 pub const FBX_TIME_UNIT: f64 = 46186158000.0;
@@ -38,24 +60,40 @@ const FBX_FOOTER_MARGIN: i64 = 160;
 //==============================================================================
 #[derive(Clone, Debug, PartialEq)]
 pub enum FbxPropertyValue {
+	/// 16비트 정수. (타입 코드 Y)
 	Int16(i16),
+	/// 참거짓. (타입 코드 C, 바이트 하나가 0 이 아니면 true)
 	Boolean(bool),
+	/// 32비트 정수. (타입 코드 I)
 	Int32(i32),
+	/// 32비트 실수. (타입 코드 F)
 	Float32(f32),
+	/// 64비트 실수. (타입 코드 D)
 	Float64(f64),
+	/// 64비트 정수. (타입 코드 L, 오브젝트 id)
 	Int64(i64),
+	/// 32비트 실수 배열. (타입 코드 f)
 	Float32array(Vec<f32>),
+	/// 64비트 실수 배열. (타입 코드 d, 정점 위치 같은 것)
 	Float64array(Vec<f64>),
+	/// 64비트 정수 배열. (타입 코드 l, 키 시간 같은 것)
 	Int64array(Vec<i64>),
+	/// 32비트 정수 배열. (타입 코드 i, 폴리곤 정점 인덱스 같은 것)
 	Int32array(Vec<i32>),
+	/// 참거짓 배열. (타입 코드 b, 원소 바이트 그대로)
 	BooleanArray(Vec<u8>),
+	/// 문자열. (타입 코드 S, UTF-8 로 읽을 수 없는 바이트는 대체 문자로 바꾼다)
 	String(String),
+	/// 날 바이트. (타입 코드 R, 임베디드 이미지 같은 것)
 	Raw(Rc<Vec<u8>>),
 }
 
 impl FbxPropertyValue {
 	//==============================================================================
 	/// 타입 코드 반환. (원본 property.type)
+	///
+	/// # 돌려줌
+	/// 타입 코드 글자. (Y, C, I, F, D, L, f, d, l, i, b, S, R 가운데 하나)
 	//==============================================================================
 	pub fn get_type_code(&self) -> char {
 		match self {
@@ -103,6 +141,9 @@ impl FbxPropertyValue {
 
 	//==============================================================================
 	/// 수 하나로 읽기. (스칼라 타입만, 아니면 None)
+	///
+	/// # 돌려줌
+	/// 스칼라 값을 f64 로 바꾼 것. (Boolean 은 1 이나 0) 배열, 문자열, 날 바이트면 None.
 	//==============================================================================
 	pub fn as_number(&self) -> Option<f64> {
 		match self {
@@ -132,6 +173,9 @@ impl FbxPropertyValue {
 
 	//==============================================================================
 	/// 정수 하나로 읽기. (오브젝트 id 같은 정수 스칼라, 아니면 None)
+	///
+	/// # 돌려줌
+	/// 정수, 실수 스칼라를 i64 로 바꾼 것. (실수는 0 쪽으로 자른다) Boolean, 배열, 문자열, 날 바이트면 None.
 	//==============================================================================
 	pub fn as_integer(&self) -> Option<i64> {
 		match self {
@@ -158,6 +202,9 @@ impl FbxPropertyValue {
 
 	//==============================================================================
 	/// 문자열로 읽기. (S 타입만)
+	///
+	/// # 돌려줌
+	/// 문자열 조각. String 이 아니면 None.
 	//==============================================================================
 	pub fn as_string(&self) -> Option<&str> {
 		match self {
@@ -172,6 +219,9 @@ impl FbxPropertyValue {
 
 	//==============================================================================
 	/// 배열 길이 반환. (배열 타입이 아니면 0)
+	///
+	/// # 돌려줌
+	/// 원소 개수. 배열이 아니면 0.
 	//==============================================================================
 	pub fn get_array_length(&self) -> usize {
 		match self {
@@ -198,6 +248,12 @@ impl FbxPropertyValue {
 
 	//==============================================================================
 	/// 배열 원소 하나를 수로 읽기. (배열 밖이거나 배열이 아니면 None)
+	///
+	/// # 인자
+	/// - `index`: 원소 자리. (0 부터)
+	///
+	/// # 돌려줌
+	/// 그 원소를 f64 로 바꾼 것. 자리가 배열 밖이거나 배열이 아니면 None.
 	//==============================================================================
 	pub fn get_number_at(&self, index: usize) -> Option<f64> {
 		match self {
@@ -224,6 +280,12 @@ impl FbxPropertyValue {
 
 	//==============================================================================
 	/// 배열 원소 하나를 정수로 읽기. (배열 밖이거나 배열이 아니면 None)
+	///
+	/// # 인자
+	/// - `index`: 원소 자리. (0 부터)
+	///
+	/// # 돌려줌
+	/// 그 원소를 i64 로 바꾼 것. (실수는 0 쪽으로 자른다) 자리가 배열 밖이거나 배열이 아니면 None.
 	//==============================================================================
 	pub fn get_integer_at(&self, index: usize) -> Option<i64> {
 		match self {
@@ -250,6 +312,9 @@ impl FbxPropertyValue {
 
 	//==============================================================================
 	/// 수 목록으로 바꾸기. (숫자 배열 타입 무엇이든 f64 로, 아니면 빈 목록)
+	///
+	/// # 돌려줌
+	/// 모든 원소를 f64 로 담은 새 목록. 배열이 아니면 빈 목록.
 	//==============================================================================
 	pub fn to_number_list(&self) -> Vec<f64> {
 		let array_length = self.get_array_length();
@@ -262,6 +327,9 @@ impl FbxPropertyValue {
 
 	//==============================================================================
 	/// 정수 목록으로 바꾸기. (숫자 배열 타입 무엇이든 i64 로, 아니면 빈 목록)
+	///
+	/// # 돌려줌
+	/// 모든 원소를 i64 로 담은 새 목록. (실수는 0 쪽으로 자른다) 배열이 아니면 빈 목록.
 	//==============================================================================
 	pub fn to_integer_list(&self) -> Vec<i64> {
 		let array_length = self.get_array_length();
@@ -275,17 +343,50 @@ impl FbxPropertyValue {
 
 //==============================================================================
 /// 노드 레코드. (원본 { name, properties, children })
+///
+/// # 예제
+/// 자식과 프로퍼티 읽기
+/// ```rust
+/// use vanilla::graphics3d::fbxloader::{FbxNodeRecord, FbxPropertyValue};
+///
+/// let vertices = FbxNodeRecord {
+/// 	name: String::from("Vertices"),
+/// 	properties: vec![FbxPropertyValue::Float64array(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0])],
+/// 	children: Vec::new(),
+/// };
+/// let geometry = FbxNodeRecord {
+/// 	name: String::from("Geometry"),
+/// 	properties: vec![FbxPropertyValue::Int64(100), FbxPropertyValue::String(String::from("Plane")), FbxPropertyValue::String(String::from("Mesh"))],
+/// 	children: vec![vertices],
+/// };
+/// assert_eq!(geometry.get_object_id(), Some(100));
+/// assert_eq!(geometry.get_string_property(2), "Mesh");
+/// assert_eq!(geometry.get_string_property(0), "");
+/// let positions = geometry.find_child("Vertices").and_then(|child| child.get_property(0)).unwrap();
+/// assert_eq!(positions.get_array_length(), 6);
+/// assert_eq!(positions.get_number_at(3), Some(1.0));
+/// assert!(geometry.find_child("Normals").is_none());
+/// ```
 //==============================================================================
 #[derive(Clone, Debug, PartialEq)]
 pub struct FbxNodeRecord {
+	/// 노드 이름. (Objects, Model, Vertices 같은 것)
 	pub name: String,
+	/// 프로퍼티 값 목록. (파일에 적힌 차례)
 	pub properties: Vec<FbxPropertyValue>,
+	/// 자식 노드 레코드 목록.
 	pub children: Vec<FbxNodeRecord>,
 }
 
 impl FbxNodeRecord {
 	//==============================================================================
 	/// 이름이 같은 첫 자식 반환. (원본 children.find)
+	///
+	/// # 인자
+	/// - `child_name`: 찾을 자식 이름. (대소문자까지 같아야 한다)
+	///
+	/// # 돌려줌
+	/// 이름이 같은 첫 자식. 없으면 None.
 	//==============================================================================
 	pub fn find_child(&self, child_name: &str) -> Option<&FbxNodeRecord> {
 		self.children.iter().find(|child| child.name == child_name)
@@ -293,6 +394,12 @@ impl FbxNodeRecord {
 
 	//==============================================================================
 	/// 프로퍼티 반환. (없으면 None)
+	///
+	/// # 인자
+	/// - `property_index`: 프로퍼티 자리. (0 부터)
+	///
+	/// # 돌려줌
+	/// 그 자리의 프로퍼티. 자리가 밖이면 None.
 	//==============================================================================
 	pub fn get_property(&self, property_index: usize) -> Option<&FbxPropertyValue> {
 		self.properties.get(property_index)
@@ -300,6 +407,9 @@ impl FbxNodeRecord {
 
 	//==============================================================================
 	/// 첫 프로퍼티를 정수로 반환. (오브젝트 id)
+	///
+	/// # 돌려줌
+	/// 첫 프로퍼티를 정수로 읽은 값. (as_integer) 프로퍼티가 없거나 정수로 읽을 수 없으면 None.
 	//==============================================================================
 	pub fn get_object_id(&self) -> Option<i64> {
 		self.properties.first().and_then(|property| property.as_integer())
@@ -307,6 +417,12 @@ impl FbxNodeRecord {
 
 	//==============================================================================
 	/// 프로퍼티를 문자열로 반환. (없거나 문자열이 아니면 빈 문자열)
+	///
+	/// # 인자
+	/// - `property_index`: 프로퍼티 자리. (0 부터)
+	///
+	/// # 돌려줌
+	/// 그 자리의 문자열 복사본. 자리가 밖이거나 문자열이 아니면 빈 문자열.
 	//==============================================================================
 	pub fn get_string_property(&self, property_index: usize) -> String {
 		self.properties.get(property_index).and_then(|property| property.as_string()).unwrap_or("").to_string()
@@ -315,6 +431,23 @@ impl FbxNodeRecord {
 
 //==============================================================================
 /// 넣은 순서를 지키는 id 맵. (원본 `Map<number, object>` 자리, 순회 순서가 결과 순서를 정한다)
+///
+/// # 예제
+/// 넣은 차례 그대로 순회 (같은 id 를 다시 넣으면 자리는 그대로, 값만 바뀐다)
+/// ```rust
+/// use vanilla::graphics3d::fbxloader::FbxObjectMap;
+///
+/// let mut object_map = FbxObjectMap::new();
+/// object_map.insert(30, "skin");
+/// object_map.insert(10, "cluster");
+/// object_map.insert(30, "replaced");
+/// assert_eq!(object_map.keys(), &[30, 10]);
+/// assert_eq!(object_map.values(), &["replaced", "cluster"]);
+/// assert_eq!(object_map.get(30), Some(&"replaced"));
+/// assert_eq!(object_map.index_of(10), Some(1));
+/// assert!(!object_map.contains(20));
+/// assert_eq!(object_map.len(), 2);
+/// ```
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct FbxObjectMap<T> {
@@ -335,6 +468,9 @@ impl<T> Default for FbxObjectMap<T> {
 impl<T> FbxObjectMap<T> {
 	//==============================================================================
 	/// 생성. (비어 있음)
+	///
+	/// # 돌려줌
+	/// 빈 맵.
 	//==============================================================================
 	pub fn new() -> FbxObjectMap<T> {
 		FbxObjectMap {
@@ -346,6 +482,10 @@ impl<T> FbxObjectMap<T> {
 
 	//==============================================================================
 	/// 넣기. (원본 Map.set, 이미 있는 id 면 자리를 지키고 값만 바꾼다)
+	///
+	/// # 인자
+	/// - `id`: 오브젝트 id.
+	/// - `value`: 넣을 값. (이미 있는 id 면 그 자리의 값을 바꾼다)
 	//==============================================================================
 	pub fn insert(&mut self, id: i64, value: T) {
 		match self.index_by_id.get(&id) {
@@ -362,6 +502,12 @@ impl<T> FbxObjectMap<T> {
 
 	//==============================================================================
 	/// 값 반환. (원본 Map.get)
+	///
+	/// # 인자
+	/// - `id`: 찾을 오브젝트 id.
+	///
+	/// # 돌려줌
+	/// 그 id 의 값. 없으면 None.
 	//==============================================================================
 	pub fn get(&self, id: i64) -> Option<&T> {
 		self.index_by_id.get(&id).map(|index| &self.value_list[*index])
@@ -369,6 +515,12 @@ impl<T> FbxObjectMap<T> {
 
 	//==============================================================================
 	/// 값 반환. (변경용)
+	///
+	/// # 인자
+	/// - `id`: 찾을 오브젝트 id.
+	///
+	/// # 돌려줌
+	/// 그 id 의 바꿀 수 있는 값. 없으면 None.
 	//==============================================================================
 	pub fn get_mut(&mut self, id: i64) -> Option<&mut T> {
 		match self.index_by_id.get(&id) {
@@ -383,6 +535,12 @@ impl<T> FbxObjectMap<T> {
 
 	//==============================================================================
 	/// 있는지. (원본 Map.has)
+	///
+	/// # 인자
+	/// - `id`: 찾을 오브젝트 id.
+	///
+	/// # 돌려줌
+	/// 있으면 true.
 	//==============================================================================
 	pub fn contains(&self, id: i64) -> bool {
 		self.index_by_id.contains_key(&id)
@@ -390,6 +548,12 @@ impl<T> FbxObjectMap<T> {
 
 	//==============================================================================
 	/// 넣은 순서의 자리 반환. (원본 Array.from(map.keys()).index_of)
+	///
+	/// # 인자
+	/// - `id`: 찾을 오브젝트 id.
+	///
+	/// # 돌려줌
+	/// 처음 넣은 차례의 자리. (0 부터, keys 와 values 의 자리) 없으면 None.
 	//==============================================================================
 	pub fn index_of(&self, id: i64) -> Option<usize> {
 		self.index_by_id.get(&id).copied()
@@ -397,6 +561,9 @@ impl<T> FbxObjectMap<T> {
 
 	//==============================================================================
 	/// id 목록 반환. (넣은 순서)
+	///
+	/// # 돌려줌
+	/// id 목록. (넣은 차례)
 	//==============================================================================
 	pub fn keys(&self) -> &[i64] {
 		&self.id_list
@@ -404,6 +571,9 @@ impl<T> FbxObjectMap<T> {
 
 	//==============================================================================
 	/// 값 목록 반환. (넣은 순서)
+	///
+	/// # 돌려줌
+	/// 값 목록. (넣은 차례, keys 와 같은 자리)
 	//==============================================================================
 	pub fn values(&self) -> &[T] {
 		&self.value_list
@@ -411,6 +581,9 @@ impl<T> FbxObjectMap<T> {
 
 	//==============================================================================
 	/// 값 목록 반환. (변경용)
+	///
+	/// # 돌려줌
+	/// 바꿀 수 있는 값 목록. (넣은 차례)
 	//==============================================================================
 	pub fn values_mut(&mut self) -> &mut [T] {
 		&mut self.value_list
@@ -418,6 +591,9 @@ impl<T> FbxObjectMap<T> {
 
 	//==============================================================================
 	/// (id, 값) 순회. (넣은 순서)
+	///
+	/// # 돌려줌
+	/// (id, 값 참조) 반복자. (넣은 차례)
 	//==============================================================================
 	pub fn iter(&self) -> impl Iterator<Item = (i64, &T)> {
 		self.id_list.iter().copied().zip(self.value_list.iter())
@@ -425,6 +601,9 @@ impl<T> FbxObjectMap<T> {
 
 	//==============================================================================
 	/// 개수 반환.
+	///
+	/// # 돌려줌
+	/// 넣은 id 개수.
 	//==============================================================================
 	pub fn len(&self) -> usize {
 		self.id_list.len()
@@ -432,6 +611,9 @@ impl<T> FbxObjectMap<T> {
 
 	//==============================================================================
 	/// 비었는지.
+	///
+	/// # 돌려줌
+	/// 하나도 없으면 true.
 	//==============================================================================
 	pub fn is_empty(&self) -> bool {
 		self.id_list.is_empty()
@@ -440,127 +622,470 @@ impl<T> FbxObjectMap<T> {
 
 //==============================================================================
 /// 지오메트리. (삼각화 + 노멀/UV 레이어를 코너 단위로 펼친 것 + 원본 정점 매핑)
+///
+/// # 예제
+/// 사각형 폴리곤 하나가 삼각형 두 개(코너 6개)로 펼쳐진다
+/// ```rust
+/// use vanilla::graphics3d::fbxloader::{FbxLoader, FbxNodeRecord, FbxPropertyValue};
+///
+/// fn record(name: &str, properties: Vec<FbxPropertyValue>, children: Vec<FbxNodeRecord>) -> FbxNodeRecord {
+/// 	FbxNodeRecord {
+/// 		name: String::from(name),
+/// 		properties,
+/// 		children,
+/// 	}
+/// }
+///
+/// let geometry = record("Geometry", vec![FbxPropertyValue::Int64(100)], vec![
+/// 	record("Vertices", vec![FbxPropertyValue::Float64array(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0])], Vec::new()),
+/// 	record("PolygonVertexIndex", vec![FbxPropertyValue::Int32array(vec![0, 1, 2, -4])], Vec::new()),
+/// ]);
+/// let objects = record("Objects", Vec::new(), vec![geometry]);
+/// let connections = record("Connections", Vec::new(), Vec::new());
+/// let scene_data = FbxLoader::new().interpret(&[objects, connections]).unwrap();
+/// let geometry = scene_data.geometry_by_id.get(100).unwrap();
+/// assert_eq!(geometry.corner_count, 6);
+/// assert_eq!(geometry.original_vertex_count, 4);
+/// assert_eq!(geometry.original_vertex_indices, vec![0, 1, 2, 0, 2, 3]);
+/// assert_eq!(&geometry.positions[3..6], &[1.0, 0.0, 0.0]);
+/// assert_eq!(geometry.normals, vec![0.0; 18]);
+/// ```
 //==============================================================================
 #[derive(Clone, Debug, Default)]
 pub struct FbxGeometry {
+	/// 코너별 위치. (코너마다 x, y, z, 삼각형 코너 차례)
 	pub positions: Vec<f32>,
+	/// 코너별 노멀. (코너마다 3개, 노멀 레이어가 없으면 0)
 	pub normals: Vec<f32>,
+	/// 코너별 UV. (코너마다 2개, UV 레이어가 없으면 0)
 	pub texture_coordinates: Vec<f32>,
+	/// 코너마다 원본 정점 인덱스. (스킨 가중치를 코너로 펼칠 때 쓴다)
 	pub original_vertex_indices: Vec<i32>,
+	/// 삼각형마다 머티리얼 인덱스. (노드 material_ids 안의 자리, 머티리얼 레이어가 없으면 0)
 	pub material_index_per_triangle: Vec<i32>,
+	/// 코너 개수. (삼각형 수 x 3)
 	pub corner_count: usize,
+	/// 원본 정점 개수. (Vertices 배열 길이 / 3)
 	pub original_vertex_count: usize,
 }
 
 //==============================================================================
 /// 스킨 디포머. (클러스터 목록 + 붙은 지오메트리)
+///
+/// # 예제
+/// 스킨이 클러스터와 지오메트리에 이어진다
+/// ```rust
+/// use vanilla::graphics3d::fbxloader::{FbxLoader, FbxNodeRecord, FbxPropertyValue};
+///
+/// fn record(name: &str, properties: Vec<FbxPropertyValue>, children: Vec<FbxNodeRecord>) -> FbxNodeRecord {
+/// 	FbxNodeRecord {
+/// 		name: String::from(name),
+/// 		properties,
+/// 		children,
+/// 	}
+/// }
+///
+/// fn connect(source_id: i64, destination_id: i64) -> FbxNodeRecord {
+/// 	record("C", vec![FbxPropertyValue::String(String::from("OO")), FbxPropertyValue::Int64(source_id), FbxPropertyValue::Int64(destination_id)], Vec::new())
+/// }
+///
+/// let geometry = record("Geometry", vec![FbxPropertyValue::Int64(100)], vec![
+/// 	record("Vertices", vec![FbxPropertyValue::Float64array(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0])], Vec::new()),
+/// 	record("PolygonVertexIndex", vec![FbxPropertyValue::Int32array(vec![0, 1, -3])], Vec::new()),
+/// ]);
+/// let skin = record("Deformer", vec![FbxPropertyValue::Int64(300), FbxPropertyValue::String(String::from("Skin")), FbxPropertyValue::String(String::from("Skin"))], Vec::new());
+/// let cluster = record("Deformer", vec![FbxPropertyValue::Int64(301), FbxPropertyValue::String(String::from("Cluster")), FbxPropertyValue::String(String::from("Cluster"))], Vec::new());
+/// let objects = record("Objects", Vec::new(), vec![geometry, skin, cluster]);
+/// let connections = record("Connections", Vec::new(), vec![connect(301, 300), connect(300, 100)]);
+/// let scene_data = FbxLoader::new().interpret(&[objects, connections]).unwrap();
+/// let skin_deformer = scene_data.skin_deformer_by_id.get(300).unwrap();
+/// assert_eq!(skin_deformer.cluster_ids, vec![301]);
+/// assert_eq!(skin_deformer.geometry_id, Some(100));
+/// ```
 //==============================================================================
 #[derive(Clone, Debug, Default)]
 pub struct FbxSkinDeformer {
+	/// 이 스킨의 클러스터 id 목록. (커넥션 차례, 클러스터 하나가 본 하나)
 	pub cluster_ids: Vec<i64>,
+	/// 스킨이 붙은 지오메트리 id. (커넥션이 없으면 None)
 	pub geometry_id: Option<i64>,
 }
 
 //==============================================================================
 /// 클러스터. (본별 정점 가중치 + 바인드 역행렬용 링크 변환, 행렬은 열 우선 16개)
+///
+/// # 예제
+/// 클러스터의 정점 가중치와 움직이는 본
+/// ```rust
+/// use vanilla::graphics3d::fbxloader::{FbxLoader, FbxNodeRecord, FbxPropertyValue};
+///
+/// fn record(name: &str, properties: Vec<FbxPropertyValue>, children: Vec<FbxNodeRecord>) -> FbxNodeRecord {
+/// 	FbxNodeRecord {
+/// 		name: String::from(name),
+/// 		properties,
+/// 		children,
+/// 	}
+/// }
+///
+/// let cluster = record("Deformer", vec![FbxPropertyValue::Int64(301), FbxPropertyValue::String(String::from("Cluster")), FbxPropertyValue::String(String::from("Cluster"))], vec![
+/// 	record("Indexes", vec![FbxPropertyValue::Int32array(vec![0, 2])], Vec::new()),
+/// 	record("Weights", vec![FbxPropertyValue::Float64array(vec![1.0, 0.5])], Vec::new()),
+/// ]);
+/// let bone_connection = record("C", vec![FbxPropertyValue::String(String::from("OO")), FbxPropertyValue::Int64(200), FbxPropertyValue::Int64(301)], Vec::new());
+/// let objects = record("Objects", Vec::new(), vec![cluster]);
+/// let connections = record("Connections", Vec::new(), vec![bone_connection]);
+/// let scene_data = FbxLoader::new().interpret(&[objects, connections]).unwrap();
+/// let cluster = scene_data.cluster_by_id.get(301).unwrap();
+/// assert_eq!(cluster.vertex_indices, vec![0, 2]);
+/// assert_eq!(cluster.weights, vec![1.0, 0.5]);
+/// assert_eq!(cluster.bone_node_id, Some(200));
+/// assert!(cluster.transform_link.is_none());
+/// ```
 //==============================================================================
 #[derive(Clone, Debug, Default)]
 pub struct FbxCluster {
+	/// 영향을 받는 원본 정점 인덱스 목록. (Indexes)
 	pub vertex_indices: Vec<i64>,
+	/// 정점마다 가중치. (Weights, vertex_indices 와 같은 자리)
 	pub weights: Vec<f64>,
+	/// 클러스터 Transform 행렬. (열 우선 16개, 그대로 역바인드 행렬로 쓴다. 없으면 None)
 	pub transform: Option<Vec<f64>>,
+	/// 본의 바인드 전역 행렬 TransformLink. (열 우선 16개, transform 이 없을 때 이 역행렬을 역바인드로 쓴다. 없으면 None)
 	pub transform_link: Option<Vec<f64>>,
+	/// 이 클러스터를 움직이는 본 노드 id. (커넥션이 없으면 None)
 	pub bone_node_id: Option<i64>,
 }
 
 //==============================================================================
 /// 비디오. (임베디드 이미지 바이트)
+///
+/// # 예제
+/// 같은 파일을 두 번 참조해 비어 있는 Content 는 먼저 나온 바이트를 나눠 든다
+/// ```rust
+/// use std::rc::Rc;
+/// use vanilla::graphics3d::fbxloader::{FbxLoader, FbxNodeRecord, FbxPropertyValue};
+///
+/// fn record(name: &str, properties: Vec<FbxPropertyValue>, children: Vec<FbxNodeRecord>) -> FbxNodeRecord {
+/// 	FbxNodeRecord {
+/// 		name: String::from(name),
+/// 		properties,
+/// 		children,
+/// 	}
+/// }
+///
+/// fn video(id: i64, file_name: &str, content_bytes: Vec<u8>) -> FbxNodeRecord {
+/// 	record("Video", vec![FbxPropertyValue::Int64(id)], vec![
+/// 		record("RelativeFilename", vec![FbxPropertyValue::String(String::from(file_name))], Vec::new()),
+/// 		record("Content", vec![FbxPropertyValue::Raw(Rc::new(content_bytes))], Vec::new()),
+/// 	])
+/// }
+///
+/// let objects = record("Objects", Vec::new(), vec![video(500, "textures\\skin.png", vec![1, 2, 3]), video(501, "other/skin.png", Vec::new())]);
+/// let connections = record("Connections", Vec::new(), Vec::new());
+/// let scene_data = FbxLoader::new().interpret(&[objects, connections]).unwrap();
+/// let shared_video = scene_data.video_by_id.get(501).unwrap();
+/// assert_eq!(shared_video.filename, "other/skin.png");
+/// assert_eq!(shared_video.content_bytes.as_deref(), Some(&vec![1, 2, 3]));
+/// ```
 //==============================================================================
 #[derive(Clone, Debug, Default)]
 pub struct FbxVideo {
+	/// 임베디드 이미지 바이트. (Content 의 R 값, 비어 있으면 파일 이름이 같은 다른 비디오의 바이트를 나눠 든다. Content 가 없으면 None)
 	pub content_bytes: Option<Rc<Vec<u8>>>,
+	/// 파일 경로. (RelativeFilename 이나 Filename, 없으면 빈 문자열)
 	pub filename: String,
 }
 
 //==============================================================================
 /// 텍스처. (비디오 연결)
+///
+/// # 예제
+/// 텍스처로 이어진 비디오 찾기
+/// ```rust
+/// use vanilla::graphics3d::fbxloader::{FbxLoader, FbxNodeRecord, FbxPropertyValue};
+///
+/// fn record(name: &str, properties: Vec<FbxPropertyValue>, children: Vec<FbxNodeRecord>) -> FbxNodeRecord {
+/// 	FbxNodeRecord {
+/// 		name: String::from(name),
+/// 		properties,
+/// 		children,
+/// 	}
+/// }
+///
+/// let texture = record("Texture", vec![FbxPropertyValue::Int64(501)], vec![
+/// 	record("RelativeFilename", vec![FbxPropertyValue::String(String::from("skin.png"))], Vec::new()),
+/// ]);
+/// let video_connection = record("C", vec![FbxPropertyValue::String(String::from("OO")), FbxPropertyValue::Int64(500), FbxPropertyValue::Int64(501)], Vec::new());
+/// let objects = record("Objects", Vec::new(), vec![texture]);
+/// let connections = record("Connections", Vec::new(), vec![video_connection]);
+/// let scene_data = FbxLoader::new().interpret(&[objects, connections]).unwrap();
+/// let texture = scene_data.texture_by_id.get(501).unwrap();
+/// assert_eq!(texture.filename, "skin.png");
+/// assert_eq!(texture.video_id, Some(500));
+/// ```
 //==============================================================================
 #[derive(Clone, Debug, Default)]
 pub struct FbxTexture {
+	/// 이 텍스처로 이어진 비디오 id. (커넥션이 없으면 None)
 	pub video_id: Option<i64>,
+	/// 파일 경로. (RelativeFilename 이나 FileName, 없으면 빈 문자열)
 	pub filename: String,
 }
 
 //==============================================================================
 /// 머티리얼. (phong 색상/광택 + 슬롯별 텍스처 id)
+///
+/// # 예제
+/// Properties70 의 색과 OP 커넥션의 텍스처 슬롯
+/// ```rust
+/// use vanilla::graphics3d::fbxloader::{FbxLoader, FbxNodeRecord, FbxPropertyValue};
+///
+/// fn record(name: &str, properties: Vec<FbxPropertyValue>, children: Vec<FbxNodeRecord>) -> FbxNodeRecord {
+/// 	FbxNodeRecord {
+/// 		name: String::from(name),
+/// 		properties,
+/// 		children,
+/// 	}
+/// }
+///
+/// fn text(value: &str) -> FbxPropertyValue {
+/// 	FbxPropertyValue::String(String::from(value))
+/// }
+///
+/// let diffuse_record = record("P", vec![text("DiffuseColor"), text("Color"), text(""), text("A"), FbxPropertyValue::Float64(0.8), FbxPropertyValue::Float64(0.2), FbxPropertyValue::Float64(0.1)], Vec::new());
+/// let material = record("Material", vec![FbxPropertyValue::Int64(600)], vec![record("Properties70", Vec::new(), vec![diffuse_record])]);
+/// let texture = record("Texture", vec![FbxPropertyValue::Int64(501)], Vec::new());
+/// let slot_connection = record("C", vec![text("OP"), FbxPropertyValue::Int64(501), FbxPropertyValue::Int64(600), text("DiffuseColor")], Vec::new());
+/// let objects = record("Objects", Vec::new(), vec![material, texture]);
+/// let connections = record("Connections", Vec::new(), vec![slot_connection]);
+/// let scene_data = FbxLoader::new().interpret(&[objects, connections]).unwrap();
+/// let material = scene_data.material_by_id.get(600).unwrap();
+/// assert_eq!(material.diffuse_color, [0.8, 0.2, 0.1]);
+/// assert_eq!(material.shininess, 20.0);
+/// assert_eq!(material.diffuse_texture_id, Some(501));
+/// assert_eq!(material.normal_texture_id, None);
+/// ```
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct FbxMaterial {
+	/// 난반사 색. (RGB, DiffuseColor 나 Diffuse, 없으면 1, 1, 1)
 	pub diffuse_color: [f64; 3],
+	/// 정반사 색. (RGB, SpecularColor 나 Specular, 없으면 0.5, 0.5, 0.5)
 	pub specular_color: [f64; 3],
+	/// 광택 지수. (Shininess 나 ShininessExponent, 없으면 20)
 	pub shininess: f64,
+	/// 난반사 텍스처 id. (OP 커넥션 DiffuseColor, 없으면 None)
 	pub diffuse_texture_id: Option<i64>,
+	/// 노멀 맵 텍스처 id. (OP 커넥션 NormalMap 이나 Bump, 없으면 None)
 	pub normal_texture_id: Option<i64>,
+	/// 정반사 텍스처 id. (OP 커넥션 SpecularColor 나 SpecularFactor, 없으면 None)
 	pub specular_texture_id: Option<i64>,
+	/// 광택 텍스처 id. (OP 커넥션 Shininess 나 ShininessExponent, 없으면 None)
 	pub gloss_texture_id: Option<i64>,
+	/// 불투명도 텍스처 id. (OP 커넥션 TransparentColor 나 TransparencyFactor, 없으면 None)
 	pub opacity_texture_id: Option<i64>,
 }
 
 //==============================================================================
 /// 모델 노드. (계층 + 로컬 변환(오일러 도) + 지오메트리/스킨/머티리얼 소속)
 /// - name 은 원본처럼 FBX 이름 그대로다. ("Hips\u{0}\u{1}Model" 꼴, 본 이름 매칭도 이 문자열로 한다)
+///
+/// # 예제
+/// 루트 본 아래 자식 본 하나와 로컬 이동
+/// ```rust
+/// use vanilla::graphics3d::fbxloader::{FbxLoader, FbxNodeRecord, FbxPropertyValue};
+///
+/// fn record(name: &str, properties: Vec<FbxPropertyValue>, children: Vec<FbxNodeRecord>) -> FbxNodeRecord {
+/// 	FbxNodeRecord {
+/// 		name: String::from(name),
+/// 		properties,
+/// 		children,
+/// 	}
+/// }
+///
+/// fn text(value: &str) -> FbxPropertyValue {
+/// 	FbxPropertyValue::String(String::from(value))
+/// }
+///
+/// fn connect(source_id: i64, destination_id: i64) -> FbxNodeRecord {
+/// 	record("C", vec![text("OO"), FbxPropertyValue::Int64(source_id), FbxPropertyValue::Int64(destination_id)], Vec::new())
+/// }
+///
+/// let translation_record = record("P", vec![text("Lcl Translation"), text("Lcl Translation"), text(""), text("A"), FbxPropertyValue::Float64(0.0), FbxPropertyValue::Float64(10.0), FbxPropertyValue::Float64(0.0)], Vec::new());
+/// let hips = record("Model", vec![FbxPropertyValue::Int64(200), text("Hips"), text("LimbNode")], Vec::new());
+/// let spine = record("Model", vec![FbxPropertyValue::Int64(201), text("Spine"), text("LimbNode")], vec![record("Properties70", Vec::new(), vec![translation_record])]);
+/// let objects = record("Objects", Vec::new(), vec![hips, spine]);
+/// let connections = record("Connections", Vec::new(), vec![connect(200, 0), connect(201, 200)]);
+/// let scene_data = FbxLoader::new().interpret(&[objects, connections]).unwrap();
+/// assert_eq!(scene_data.root_node_indices, vec![0]);
+/// assert_eq!(scene_data.node_list[0].child_indices, vec![1]);
+/// let spine = &scene_data.node_list[1];
+/// assert_eq!(spine.parent_id, Some(200));
+/// assert_eq!(spine.translation, [0.0, 10.0, 0.0]);
+/// assert_eq!(spine.scale, [1.0, 1.0, 1.0]);
+/// ```
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct FbxNode {
+	/// 오브젝트 id.
 	pub id: i64,
+	/// FBX 이름. (Model 의 두 번째 프로퍼티 그대로)
 	pub name: String,
+	/// 본인지. (Model 의 세 번째 프로퍼티가 LimbNode 면 true)
 	pub is_bone: bool,
+	/// 로컬 이동. (Lcl Translation, 없으면 0, 0, 0)
 	pub translation: [f64; 3],
+	/// 로컬 회전. (Lcl Rotation, X, Y, Z 오일러 각 도, 없으면 0, 0, 0)
 	pub rotation_euler_degrees: [f64; 3],
+	/// 사전 회전. (PreRotation, 오일러 각 도, SkinnedModel 이 로컬 회전 앞에 곱한다. 없으면 0, 0, 0)
 	pub pre_rotation_degrees: [f64; 3],
+	/// 로컬 크기. (Lcl Scaling, 없으면 1, 1, 1)
 	pub scale: [f64; 3],
+	/// 이 노드가 가진 지오메트리 id. (없으면 None)
 	pub geometry_id: Option<i64>,
+	/// 이 노드의 지오메트리에 붙은 스킨 id. (없으면 None)
 	pub skin_id: Option<i64>,
+	/// 이 노드에 이어진 머티리얼 id 목록. (커넥션 차례, 지오메트리의 머티리얼 인덱스가 이 목록의 자리다)
 	pub material_ids: Vec<i64>,
+	/// 자식 노드 인덱스 목록. (node_list 안의 자리)
 	pub child_indices: Vec<usize>,
+	/// 부모 노드 id. (루트면 None)
 	pub parent_id: Option<i64>,
 }
 
 //==============================================================================
 /// 애니메이션 채널. (노드 인덱스 + 경로 + 키 시간(초) + 값, 회전은 오일러 도 3성분)
+///
+/// # 예제
+/// 채널의 키를 하나씩 읽기 (키마다 X, Y, Z 3개)
+/// ```rust
+/// use vanilla::AnimationPath;
+/// use vanilla::graphics3d::fbxloader::FbxAnimationChannel;
+///
+/// let channel = FbxAnimationChannel {
+/// 	node_index: 0,
+/// 	path: AnimationPath::Translation,
+/// 	times: vec![0.0, 1.0],
+/// 	values: vec![0.0, 1.0, 0.0, 0.0, 3.0, 0.0],
+/// };
+/// for (key_index, key_time) in channel.times.iter().enumerate() {
+/// 	let key_value = &channel.values[key_index * 3..key_index * 3 + 3];
+/// 	assert_eq!(key_value[1], 1.0 + 2.0 * key_time);
+/// }
+/// ```
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct FbxAnimationChannel {
+	/// 대상 노드 인덱스. (node_list 안의 자리)
 	pub node_index: usize,
+	/// 채널 경로. (Translation, Rotation, Scale 가운데 하나)
 	pub path: AnimationPath,
+	/// 키 시간 목록. (초, 오름차순, X, Y, Z 커브 키 시간의 합집합)
 	pub times: Vec<f32>,
+	/// 키마다 X, Y, Z 값 3개. (회전은 오일러 각 도, 커브가 없는 축은 0, 그 축의 키가 없는 시간은 선형 보간한 값)
 	pub values: Vec<f32>,
 }
 
 //==============================================================================
 /// 애니메이션. (스택 하나)
+///
+/// # 예제
+/// 스택, 레이어, 커브노드, 커브를 잇고 Y 이동 채널 하나를 얻는다
+/// ```rust
+/// use vanilla::AnimationPath;
+/// use vanilla::graphics3d::fbxloader::{FbxLoader, FbxNodeRecord, FbxPropertyValue, FBX_TIME_UNIT};
+///
+/// fn record(name: &str, properties: Vec<FbxPropertyValue>, children: Vec<FbxNodeRecord>) -> FbxNodeRecord {
+/// 	FbxNodeRecord {
+/// 		name: String::from(name),
+/// 		properties,
+/// 		children,
+/// 	}
+/// }
+///
+/// fn text(value: &str) -> FbxPropertyValue {
+/// 	FbxPropertyValue::String(String::from(value))
+/// }
+///
+/// fn connect(connection_type: &str, source_id: i64, destination_id: i64, property_name: &str) -> FbxNodeRecord {
+/// 	record("C", vec![text(connection_type), FbxPropertyValue::Int64(source_id), FbxPropertyValue::Int64(destination_id), text(property_name)], Vec::new())
+/// }
+///
+/// let curve = record("AnimationCurve", vec![FbxPropertyValue::Int64(403)], vec![
+/// 	record("KeyTime", vec![FbxPropertyValue::Int64array(vec![0, FBX_TIME_UNIT as i64])], Vec::new()),
+/// 	record("KeyValueFloat", vec![FbxPropertyValue::Float32array(vec![1.0, 3.0])], Vec::new()),
+/// ]);
+/// let objects = record("Objects", Vec::new(), vec![
+/// 	record("Model", vec![FbxPropertyValue::Int64(200), text("Hips"), text("LimbNode")], Vec::new()),
+/// 	record("AnimationStack", vec![FbxPropertyValue::Int64(400), text("Walk")], Vec::new()),
+/// 	record("AnimationLayer", vec![FbxPropertyValue::Int64(401)], Vec::new()),
+/// 	record("AnimationCurveNode", vec![FbxPropertyValue::Int64(402), text("T")], Vec::new()),
+/// 	curve,
+/// ]);
+/// let connections = record("Connections", Vec::new(), vec![
+/// 	connect("OO", 401, 400, ""),
+/// 	connect("OO", 402, 401, ""),
+/// 	connect("OP", 402, 200, "Lcl Translation"),
+/// 	connect("OP", 403, 402, "d|Y"),
+/// ]);
+/// let scene_data = FbxLoader::new().interpret(&[objects, connections]).unwrap();
+/// let animation = &scene_data.animation_list[0];
+/// assert_eq!(animation.name, "Walk");
+/// assert_eq!(animation.duration, 1.0);
+/// let channel = &animation.channels[0];
+/// assert_eq!(channel.path, AnimationPath::Translation);
+/// assert_eq!(channel.times, vec![0.0, 1.0]);
+/// assert_eq!(channel.values, vec![0.0, 1.0, 0.0, 0.0, 3.0, 0.0]);
+/// ```
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct FbxAnimation {
+	/// 스택 이름. (AnimationStack 의 두 번째 프로퍼티 그대로)
 	pub name: String,
+	/// 길이. (초, 채널마다 마지막 키 시간 가운데 가장 큰 것, 채널이 없으면 0)
 	pub duration: f32,
+	/// 노드와 경로마다 채널 목록. (스택에 든 레이어의 커브노드만)
 	pub channels: Vec<FbxAnimationChannel>,
 }
 
 //==============================================================================
 /// 중간 표현. (원본 scene_data)
+///
+/// # 예제
+/// 이름 앞부분으로 노드 찾기 (FBX 이름은 뒤에 클래스 이름이 붙어 있을 수 있다)
+/// ```rust
+/// use vanilla::graphics3d::fbxloader::FbxSceneData;
+///
+/// fn find_node_index(scene_data: &FbxSceneData, name_prefix: &str) -> Option<usize> {
+/// 	scene_data.node_list.iter().position(|node| node.name.starts_with(name_prefix))
+/// }
+///
+/// let scene_data = FbxSceneData::default();
+/// assert_eq!(find_node_index(&scene_data, "mixamorig:Hips"), None);
+/// assert!(scene_data.root_node_indices.is_empty());
+/// ```
 //==============================================================================
 #[derive(Clone, Debug, Default)]
 pub struct FbxSceneData {
+	/// 모델 노드 목록. (Objects 의 Model 차례)
 	pub node_list: Vec<FbxNode>,
+	/// 노드 id 에서 node_list 자리로 가는 표.
 	pub node_id_to_index: HashMap<i64, usize>,
+	/// 루트 노드 인덱스 목록. (id 0 에 이어진 노드, 커넥션 차례)
 	pub root_node_indices: Vec<usize>,
+	/// 지오메트리. (id 로 찾는다, Objects 차례)
 	pub geometry_by_id: FbxObjectMap<FbxGeometry>,
+	/// 스킨 디포머. (id 로 찾는다)
 	pub skin_deformer_by_id: FbxObjectMap<FbxSkinDeformer>,
+	/// 클러스터. (id 로 찾는다)
 	pub cluster_by_id: FbxObjectMap<FbxCluster>,
+	/// 머티리얼. (id 로 찾는다, 넣은 차례의 자리가 SkinnedModel 머티리얼 서술의 자리다)
 	pub material_by_id: FbxObjectMap<FbxMaterial>,
+	/// 텍스처. (id 로 찾는다)
 	pub texture_by_id: FbxObjectMap<FbxTexture>,
+	/// 비디오. (id 로 찾는다, 임베디드 이미지)
 	pub video_by_id: FbxObjectMap<FbxVideo>,
+	/// 애니메이션 목록. (AnimationStack 마다 하나, Objects 차례)
 	pub animation_list: Vec<FbxAnimation>,
 }
 
@@ -661,6 +1186,48 @@ impl LayerReader<'_> {
 //==============================================================================
 /// FBX 받기 손잡이. (FbxLoader::load_from_url 이 돌려준다. 원본 loadFromUrl 의 Promise 자리)
 /// - 씬은 get_load_handle 을 SceneBase::track_load_handle 로 맡겨 다 받을 때까지 initialize 를 미룰 수 있다.
+///
+/// # 예제
+/// 씬이 받기를 맡기고 initialize 에서 결과 읽기
+/// ```rust,no_run
+/// use vanilla::{Engine, FbxLoadHandle, Scene, SceneBase};
+/// use vanilla::graphics3d::fbxloader::FbxLoader;
+///
+/// struct AnimationScene {
+/// 	scene_base: SceneBase,
+/// 	fbx_load_handle: Option<FbxLoadHandle>,
+/// }
+///
+/// impl Scene for AnimationScene {
+/// 	fn get_scene_base(&self) -> &SceneBase {
+/// 		&self.scene_base
+/// 	}
+///
+/// 	fn get_scene_base_mut(&mut self) -> &mut SceneBase {
+/// 		&mut self.scene_base
+/// 	}
+///
+/// 	fn create(&mut self, engine: &mut Engine) {
+/// 		let fbx_load_handle = FbxLoader::load_from_url(engine, "anims/walk.fbx");
+/// 		self.scene_base.track_load_handle(fbx_load_handle.get_load_handle());
+/// 		self.fbx_load_handle = Some(fbx_load_handle);
+/// 	}
+///
+/// 	fn initialize(&mut self, _engine: &mut Engine) {
+/// 		let scene_data_result = self.fbx_load_handle.as_ref().and_then(|fbx_load_handle| fbx_load_handle.get_scene_data());
+/// 		match scene_data_result {
+/// 			Some(Ok(scene_data)) => {
+/// 				println!("{} animations", scene_data.animation_list.len());
+/// 			}
+/// 			Some(Err(error_message)) => {
+/// 				eprintln!("{}", error_message);
+/// 			}
+/// 			None => {
+/// 			}
+/// 		}
+/// 	}
+/// }
+/// ```
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct FbxLoadHandle {
@@ -670,6 +1237,9 @@ pub struct FbxLoadHandle {
 impl FbxLoadHandle {
 	//==============================================================================
 	/// 바이트 읽기 손잡이. (씬에 맡길 때)
+	///
+	/// # 돌려줌
+	/// 바이트 읽기 손잡이. (SceneBase::track_load_handle 에 넘긴다)
 	//==============================================================================
 	pub fn get_load_handle(&self) -> &AssetLoadHandle {
 		&self.load_handle
@@ -677,6 +1247,9 @@ impl FbxLoadHandle {
 
 	//==============================================================================
 	/// 끝났는지. (받았거나 실패했거나)
+	///
+	/// # 돌려줌
+	/// 받기가 끝났으면(받았거나 실패했으면) true.
 	//==============================================================================
 	pub fn is_finished(&self) -> bool {
 		self.load_handle.is_finished()
@@ -684,6 +1257,23 @@ impl FbxLoadHandle {
 
 	//==============================================================================
 	/// 파싱한 중간 표현. (받는 중이면 None, 받기나 파싱에 실패하면 Err. 원본 문구 "FbxLoader load failed: url")
+	/// - 끝난 뒤에는 부를 때마다 받은 바이트를 다시 파싱한다. 한 번 받아 두고 쓴다.
+	///
+	/// # 돌려줌
+	/// 받는 중이면 None. 끝났으면 파싱한 중간 표현, 받기에 실패하면 Err("FbxLoader load failed: 경로"), 파싱에 실패하면 FbxLoader::parse 의 Err.
+	///
+	/// # 예제
+	/// 없는 파일은 Err 로 끝난다 (데스크탑은 부탁한 자리에서 바로 끝난다)
+	/// ```rust
+	/// use vanilla::{Engine, EngineConfiguration};
+	/// use vanilla::graphics3d::fbxloader::FbxLoader;
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let fbx_load_handle = FbxLoader::load_from_url(&engine, "missing_model.fbx");
+	/// assert!(fbx_load_handle.is_finished());
+	/// let scene_data_result = fbx_load_handle.get_scene_data().unwrap();
+	/// assert_eq!(scene_data_result.err(), Some(String::from("FbxLoader load failed: missing_model.fbx")));
+	/// ```
 	//==============================================================================
 	pub fn get_scene_data(&self) -> Option<Result<FbxSceneData, String>> {
 		if !self.load_handle.is_finished() {
@@ -703,6 +1293,28 @@ impl FbxLoadHandle {
 
 //==============================================================================
 /// FBX 받기를 기다리는 퓨처. (FbxLoadHandle 을 await 하면 된다. 다 받으면 파싱한 결과, 원본 loadFromUrl 의 Promise 가 풀린 값)
+///
+/// # 예제
+/// 엔진 작업 안에서 손잡이를 퓨처로 바꿔 await
+/// ```rust,no_run
+/// use std::future::IntoFuture;
+/// use vanilla::{Engine, FbxLoadFuture};
+/// use vanilla::graphics3d::fbxloader::FbxLoader;
+///
+/// fn start_loading(engine: &mut Engine) {
+/// 	let fbx_load_future: FbxLoadFuture = FbxLoader::load_from_url(engine, "anims/walk.fbx").into_future();
+/// 	engine.spawn_task(move |_engine_context| async move {
+/// 		match fbx_load_future.await {
+/// 			Ok(scene_data) => {
+/// 				println!("{} nodes", scene_data.node_list.len());
+/// 			}
+/// 			Err(error_message) => {
+/// 				eprintln!("{}", error_message);
+/// 			}
+/// 		}
+/// 	});
+/// }
+/// ```
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct FbxLoadFuture {
@@ -744,6 +1356,17 @@ impl IntoFuture for FbxLoadHandle {
 
 //==============================================================================
 /// FBX 로더.
+/// - 바이너리 FBX 만 읽는다. (ASCII FBX 는 Err)
+///
+/// # 예제
+/// 바이너리 FBX 가 아닌 바이트는 Err
+/// ```rust
+/// use vanilla::graphics3d::fbxloader::FbxLoader;
+///
+/// let mut fbx_loader = FbxLoader::new();
+/// let parse_result = fbx_loader.parse(b"; FBX 7.4.0 project file");
+/// assert_eq!(parse_result.err(), Some(String::from("FbxLoader: not a binary FBX file.")));
+/// ```
 //==============================================================================
 pub struct FbxLoader {
 	read_cursor: usize,
@@ -762,6 +1385,9 @@ impl Default for FbxLoader {
 impl FbxLoader {
 	//==============================================================================
 	/// 생성.
+	///
+	/// # 돌려줌
+	/// 새 로더. (파싱할 때마다 파일 처음부터 읽는다)
 	//==============================================================================
 	pub fn new() -> FbxLoader {
 		FbxLoader {
@@ -772,6 +1398,13 @@ impl FbxLoader {
 
 	//==============================================================================
 	/// 애셋 경로(웹은 URL)로부터 받기 부탁. (원본 정적 loadFromUrl, 다 받으면 손잡이의 get_scene_data 가 파싱한다)
+	///
+	/// # 인자
+	/// - `engine`: 바이트를 부탁할 엔진.
+	/// - `url`: FBX 애셋 경로. (데스크탑은 애셋 폴더 후보 기준 상대 경로, 웹은 asset_base_url 기준 주소)
+	///
+	/// # 돌려줌
+	/// 받기 손잡이. (데스크탑은 그 자리에서 읽어 이미 끝나 있다)
 	//==============================================================================
 	pub fn load_from_url(engine: &Engine, url: &str) -> FbxLoadHandle {
 		FbxLoadHandle {
@@ -781,6 +1414,12 @@ impl FbxLoader {
 
 	//==============================================================================
 	/// 파싱. (바이너리 → 중간 표현)
+	///
+	/// # 인자
+	/// - `file_bytes`: 바이너리 FBX 파일 바이트 전체.
+	///
+	/// # 돌려줌
+	/// 중간 표현. 바이너리 FBX 가 아니거나(ASCII FBX 포함), 파일이 잘렸거나, Objects 나 Connections 노드가 없으면 Err.
 	//==============================================================================
 	pub fn parse(&mut self, file_bytes: &[u8]) -> Result<FbxSceneData, String> {
 		let top_node_list = self.parse_node_records(file_bytes)?;
@@ -789,6 +1428,37 @@ impl FbxLoader {
 
 	//==============================================================================
 	/// 최상위 노드 목록 파싱. (머리 확인 + 버전별 오프셋 크기 + 노드 레코드들, 원본 parse 의 앞부분)
+	/// - 버전 7500 부터는 64비트 오프셋으로 읽는다. 끝의 160 바이트 꼬리 앞에서 멈춘다.
+	///
+	/// # 인자
+	/// - `file_bytes`: 바이너리 FBX 파일 바이트 전체.
+	///
+	/// # 돌려줌
+	/// 최상위 노드 레코드 목록. 머리가 "Kaydara FBX Binary" 가 아니거나, 레코드가 파일 밖을 가리키거나, 모르는 프로퍼티 타입이거나, 압축 배열을 풀 수 없으면 Err.
+	///
+	/// # 예제
+	/// 머리와 빈 Objects 노드 하나뿐인 7.4 파일
+	/// ```rust
+	/// use vanilla::graphics3d::fbxloader::FbxLoader;
+	///
+	/// let node_name = b"Objects";
+	/// let mut file_bytes = Vec::new();
+	/// file_bytes.extend_from_slice(b"Kaydara FBX Binary  \x00\x1a\x00");
+	/// file_bytes.extend_from_slice(&7400u32.to_le_bytes());
+	/// let node_end_offset = file_bytes.len() + 13 + node_name.len();
+	/// file_bytes.extend_from_slice(&(node_end_offset as u32).to_le_bytes());
+	/// file_bytes.extend_from_slice(&0u32.to_le_bytes());
+	/// file_bytes.extend_from_slice(&0u32.to_le_bytes());
+	/// file_bytes.push(node_name.len() as u8);
+	/// file_bytes.extend_from_slice(node_name);
+	/// file_bytes.extend_from_slice(&[0u8; 13]);
+	/// file_bytes.extend_from_slice(&[0u8; 160]);
+	/// assert_eq!(FbxLoader::read_version(&file_bytes), Ok(7400));
+	/// let top_node_list = FbxLoader::new().parse_node_records(&file_bytes).unwrap();
+	/// assert_eq!(top_node_list.len(), 1);
+	/// assert_eq!(top_node_list[0].name, "Objects");
+	/// assert!(FbxLoader::new().interpret(&top_node_list).is_err());
+	/// ```
 	//==============================================================================
 	pub fn parse_node_records(&mut self, file_bytes: &[u8]) -> Result<Vec<FbxNodeRecord>, String> {
 		let magic_length = file_bytes.len().min(20);
@@ -816,6 +1486,12 @@ impl FbxLoader {
 
 	//==============================================================================
 	/// FBX 버전 반환. (머리의 버전 번호, 7400 = 7.4)
+	///
+	/// # 인자
+	/// - `file_bytes`: FBX 파일 바이트. (머리가 맞는지는 보지 않는다)
+	///
+	/// # 돌려줌
+	/// 버전 번호. (바이트 23 ~ 26 의 리틀 엔디언 u32) 27 바이트보다 짧으면 Err.
 	//==============================================================================
 	pub fn read_version(file_bytes: &[u8]) -> Result<u32, String> {
 		read_uint32(file_bytes, 23)
@@ -904,6 +1580,27 @@ impl FbxLoader {
 
 	//==============================================================================
 	/// deflate 압축 해제. (zlib 머리가 붙은 deflate, 원본 DecompressionStream("deflate"))
+	///
+	/// # 인자
+	/// - `compressed_bytes`: zlib 머리가 붙은 deflate 바이트.
+	/// - `expected_byte_length`: 풀린 크기 예상. (미리 잡을 용량일 뿐, 풀린 길이와 맞는지 보지 않는다)
+	///
+	/// # 돌려줌
+	/// 풀린 바이트. 압축 자료가 깨졌으면 Err.
+	///
+	/// # 예제
+	/// zlib 으로 누른 바이트 풀기
+	/// ```rust
+	/// use std::io::Write;
+	/// use vanilla::graphics3d::fbxloader::FbxLoader;
+	///
+	/// let original_bytes = vec![7u8; 256];
+	/// let mut zlib_encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+	/// zlib_encoder.write_all(&original_bytes).unwrap();
+	/// let compressed_bytes = zlib_encoder.finish().unwrap();
+	/// assert_eq!(FbxLoader::inflate(&compressed_bytes, original_bytes.len()), Ok(original_bytes));
+	/// assert!(FbxLoader::inflate(&[1, 2, 3], 3).is_err());
+	/// ```
 	//==============================================================================
 	pub fn inflate(compressed_bytes: &[u8], expected_byte_length: usize) -> Result<Vec<u8>, String> {
 		let mut decompressed_bytes = Vec::with_capacity(expected_byte_length);
@@ -995,6 +1692,12 @@ impl FbxLoader {
 
 	//==============================================================================
 	/// 오브젝트/커넥션 그래프 해석. (중간 표현 구성)
+	///
+	/// # 인자
+	/// - `top_node_list`: 최상위 노드 레코드 목록. (parse_node_records 가 돌려준 것)
+	///
+	/// # 돌려줌
+	/// 중간 표현. Objects 나 Connections 노드가 없으면 Err.
 	//==============================================================================
 	pub fn interpret(&self, top_node_list: &[FbxNodeRecord]) -> Result<FbxSceneData, String> {
 		let objects_node = top_node_list.iter().find(|node| node.name == "Objects").ok_or_else(|| String::from("FbxLoader: Objects node not found."))?;
@@ -1331,6 +2034,12 @@ impl FbxLoader {
 
 	//==============================================================================
 	/// 파일 경로에서 파일명 추출. (윈도우/유닉스 구분자 모두 대응)
+	///
+	/// # 인자
+	/// - `file_path`: 파일 경로. (/ 와 \ 구분자 모두)
+	///
+	/// # 돌려줌
+	/// 마지막 구분자 뒤의 파일 이름. (구분자가 없으면 경로 그대로)
 	//==============================================================================
 	pub fn extract_file_name(file_path: &str) -> String {
 		let normalized_path = file_path.replace('\\', "/");

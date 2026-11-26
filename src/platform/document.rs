@@ -12,12 +12,28 @@
 
 //==============================================================================
 /// 문서. (정적 함수 묶음, 원본 전역 document 의 lang 과 meta)
+///
+/// # 예제
+/// 언어와 판 meta 쓰고 읽기
+/// ```rust
+/// use vanilla::Document;
+///
+/// Document::set_language("en");
+/// assert_eq!(Document::get_language(), "en");
+/// Document::set_meta_content("build-version", "1.2.3");
+/// assert_eq!(Document::get_meta_content("build-version"), Some(String::from("1.2.3")));
+/// Document::remove_meta("build-version");
+/// assert_eq!(Document::get_meta_content("build-version"), None);
+/// ```
 //==============================================================================
 pub struct Document;
 
 impl Document {
 	//==============================================================================
 	/// 문서 언어. (원본 document.documentElement.lang, 적지 않았으면 빈 글)
+	///
+	/// # 돌려줌
+	/// 언어 태그. ("ko", "en-US" 같은, 적지 않았으면 빈 글)
 	//==============================================================================
 	pub fn get_language() -> String {
 		platform_document::read_language()
@@ -25,6 +41,9 @@ impl Document {
 
 	//==============================================================================
 	/// 문서 언어 설정. (원본 document.documentElement.lang = 언어 태그)
+	///
+	/// # 인자
+	/// - `language`: 언어 태그. ("ko", "en-US" 같은)
 	//==============================================================================
 	pub fn set_language(language: &str) {
 		platform_document::write_language(language);
@@ -32,6 +51,12 @@ impl Document {
 
 	//==============================================================================
 	/// meta 의 content. (원본 document.querySelector(`meta[name="이름"]`).getAttribute("content"), 그런 meta 가 없으면 None)
+	///
+	/// # 인자
+	/// - `meta_name`: meta 의 name. ("build-version" 같은)
+	///
+	/// # 돌려줌
+	/// 그 이름의 첫 meta 의 content. 그런 meta 가 없으면 None.
 	//==============================================================================
 	pub fn get_meta_content(meta_name: &str) -> Option<String> {
 		platform_document::read_meta_content(meta_name)
@@ -39,6 +64,10 @@ impl Document {
 
 	//==============================================================================
 	/// meta 의 content 설정. (그 이름의 meta 가 없으면 head 끝에 만든다)
+	///
+	/// # 인자
+	/// - `meta_name`: meta 의 name.
+	/// - `content`: 쓸 content.
 	//==============================================================================
 	pub fn set_meta_content(meta_name: &str, content: &str) {
 		platform_document::write_meta_content(meta_name, content);
@@ -46,6 +75,9 @@ impl Document {
 
 	//==============================================================================
 	/// meta 지우기. (그 이름의 첫 meta)
+	///
+	/// # 인자
+	/// - `meta_name`: 지울 meta 의 name. (없으면 아무것도 하지 않는다)
 	//==============================================================================
 	pub fn remove_meta(meta_name: &str) {
 		platform_document::remove_meta(meta_name);

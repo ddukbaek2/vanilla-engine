@@ -3,9 +3,7 @@
 //! - 사용자 코드가 식에 쓰는 변수다. 솔버가 풀고 나서 update_variables 를 부르면 set_value 로 결과가 들어온다.
 //! - 원본과 다른 것:
 //!   - 원본은 객체 하나를 여러 곳(노드, 식, 솔버)이 같이 가리킨다. 러스트 판은 Rc 를 품은 값싼 Clone 핸들이라
-//!   ```text
 //!     복제한 핸들끼리 같은 이름과 값을 본다. 같음과 해시는 원본의 객체 동일성처럼 핸들이 가리키는 변수로 가린다.
-//!   ```
 //!   - 원본에 없는 get_id 로 변수마다 붙는 고유 번호를 읽는다.
 //!   - 이름과 값은 RefCell, Cell 에 두어 &self 로 바꾼다.
 //==============================================================================
@@ -29,6 +27,27 @@ struct LayoutVariableData {
 
 //==============================================================================
 /// 레이아웃 솔버 미지수. (복제해도 같은 변수를 가리킨다)
+///
+/// # 예제
+/// 솔버가 푼 값을 읽기, 복제한 핸들도 같은 값을 본다
+/// ```rust
+/// use vanilla::{LayoutExpression, LayoutSolver, LayoutVariable};
+///
+/// let solver = LayoutSolver::new();
+/// let left = LayoutVariable::new("left");
+/// let width = LayoutVariable::new("width");
+/// let right = LayoutVariable::new("right");
+/// solver.add_constraint(&LayoutExpression::from_variable(&left).equal_to(16)).unwrap();
+/// solver.add_constraint(&LayoutExpression::from_variable(&width).equal_to(200)).unwrap();
+/// solver.add_constraint(&LayoutExpression::from_variable(&right).equal_to(LayoutExpression::from_variable(&left).add(&width))).unwrap();
+/// solver.update_variables();
+/// assert!((right.get_value() - 216.0).abs() < 1e-9);
+///
+/// let shared = right.clone();
+/// assert_eq!(shared, right);
+/// assert_eq!(shared.get_id(), right.get_id());
+/// assert_eq!(shared.get_value(), right.get_value());
+/// ```
 //==============================================================================
 #[derive(Clone)]
 pub struct LayoutVariable {
@@ -38,6 +57,12 @@ pub struct LayoutVariable {
 impl LayoutVariable {
 	//==============================================================================
 	/// 생성. (값은 0)
+	///
+	/// # 인자
+	/// - `name`: 이름. (보이기용, 이름이 같아도 따로 만든 변수는 다르다)
+	///
+	/// # 돌려줌
+	/// 새 고유 번호를 붙인 새 변수 핸들.
 	//==============================================================================
 	pub fn new(name: &str) -> LayoutVariable {
 		let id = NEXT_VARIABLE_ID.fetch_add(1, Ordering::Relaxed);
@@ -52,6 +77,9 @@ impl LayoutVariable {
 
 	//==============================================================================
 	/// 고유 번호 반환.
+	///
+	/// # 돌려줌
+	/// 고유 번호. (1 부터 만든 차례로 하나씩 늘어난다, 복제한 핸들은 같은 번호)
 	//==============================================================================
 	pub fn get_id(&self) -> u64 {
 		self.data.id
@@ -59,6 +87,9 @@ impl LayoutVariable {
 
 	//==============================================================================
 	/// 이름 설정.
+	///
+	/// # 인자
+	/// - `name`: 새 이름. (복제한 핸들 모두에 보인다)
 	//==============================================================================
 	pub fn set_name(&self, name: &str) {
 		*self.data.name.borrow_mut() = name.to_string();
@@ -66,6 +97,9 @@ impl LayoutVariable {
 
 	//==============================================================================
 	/// 이름 반환.
+	///
+	/// # 돌려줌
+	/// 이름의 사본.
 	//==============================================================================
 	pub fn get_name(&self) -> String {
 		self.data.name.borrow().clone()
@@ -73,6 +107,9 @@ impl LayoutVariable {
 
 	//==============================================================================
 	/// 값 설정. (솔버가 부르며 바깥에서 직접 부르는 것은 권하지 않는다)
+	///
+	/// # 인자
+	/// - `value`: 넣을 값.
 	//==============================================================================
 	pub fn set_value(&self, value: f64) {
 		self.data.value.set(value);
@@ -80,6 +117,9 @@ impl LayoutVariable {
 
 	//==============================================================================
 	/// 현재 값 반환. (update_variables 뒤에 맞다)
+	///
+	/// # 돌려줌
+	/// 지금 값. (처음은 0)
 	//==============================================================================
 	pub fn get_value(&self) -> f64 {
 		self.data.value.get()

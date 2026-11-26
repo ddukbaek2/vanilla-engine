@@ -15,6 +15,25 @@
 /// 날짜 시드에 섞는 기본 값. (원본 create_daily_seed / from_date 의 base_seed 기본 인자)
 pub const DAILY_BASE_SEED: u32 = 0x9E3779B1;
 
+//==============================================================================
+/// 시드 난수 생성기. (mulberry32, 같은 시드면 원본과 같은 수열)
+///
+/// # 예제
+/// 같은 시드로 같은 결과 다시 내기
+/// ```rust
+/// use vanilla::SeededRandom;
+///
+/// let mut first_random = SeededRandom::new(12345);
+/// let mut second_random = SeededRandom::new(12345);
+/// for _ in 0..10 {
+/// 	assert_eq!(first_random.next_value(), second_random.next_value());
+/// }
+/// let mut random = SeededRandom::new(42);
+/// let mut card_list = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+/// random.shuffle(&mut card_list);
+/// assert_eq!(card_list, [0, 7, 3, 5, 2, 1, 8, 9, 4, 6]);
+/// ```
+//==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SeededRandom {
 	state: u32,
@@ -32,6 +51,12 @@ impl Default for SeededRandom {
 impl SeededRandom {
 	//==============================================================================
 	/// 생성. (시드가 0 이면 1 을 쓴다)
+	///
+	/// # 인자
+	/// - `seed`: 시드. (0 이면 1)
+	///
+	/// # 돌려줌
+	/// 그 시드를 상태로 둔 생성기.
 	//==============================================================================
 	pub fn new(seed: u32) -> SeededRandom {
 		SeededRandom { state: normalize_seed(seed) }
@@ -39,6 +64,9 @@ impl SeededRandom {
 
 	//==============================================================================
 	/// 시드 재설정. (시드가 0 이면 1 을 쓴다)
+	///
+	/// # 인자
+	/// - `seed`: 새 시드. (0 이면 1)
 	//==============================================================================
 	pub fn set_seed(&mut self, seed: u32) {
 		self.state = normalize_seed(seed);
@@ -46,6 +74,9 @@ impl SeededRandom {
 
 	//==============================================================================
 	/// 현재 내부 상태 반환. (저장, 복원용)
+	///
+	/// # 돌려줌
+	/// 내부 상태. (set_state 로 되돌리면 그 뒤 수열이 같다)
 	//==============================================================================
 	pub fn get_state(&self) -> u32 {
 		self.state
@@ -53,6 +84,21 @@ impl SeededRandom {
 
 	//==============================================================================
 	/// 내부 상태 복원. (0 도 그대로 받는다)
+	///
+	/// # 인자
+	/// - `state`: get_state 로 받아 둔 상태.
+	///
+	/// # 예제
+	/// 상태를 저장했다가 되돌리기
+	/// ```rust
+	/// use vanilla::SeededRandom;
+	///
+	/// let mut random = SeededRandom::new(7);
+	/// let saved_state = random.get_state();
+	/// let first_value = random.next_value();
+	/// random.set_state(saved_state);
+	/// assert_eq!(random.next_value(), first_value);
+	/// ```
 	//==============================================================================
 	pub fn set_state(&mut self, state: u32) {
 		self.state = state;
@@ -60,6 +106,9 @@ impl SeededRandom {
 
 	//==============================================================================
 	/// 0 이상 1 미만의 난수를 돌려준다.
+	///
+	/// # 돌려줌
+	/// 0 이상 1 미만의 실수. (32 비트 값을 2^32 로 나눈 f64, 상태가 한 걸음 나아간다)
 	//==============================================================================
 	pub fn next_value(&mut self) -> f64 {
 		self.state = self.state.wrapping_add(0x6D2B79F5);
@@ -72,6 +121,14 @@ impl SeededRandom {
 
 	//==============================================================================
 	/// min_value 이상 max_value 미만의 실수 난수를 돌려준다.
+	/// - 끝에 f32 로 줄일 때 반올림되어 max_value 와 같은 값이 나올 수 있다. (next_value 가 1 에 아주 가까울 때)
+	///
+	/// # 인자
+	/// - `min_value`: 아래 끝. (포함)
+	/// - `max_value`: 위 끝. (포함하지 않는다)
+	///
+	/// # 돌려줌
+	/// `min_value + (max_value - min_value) * next_value` 를 f64 로 셈한 뒤 f32 로 줄인 값.
 	//==============================================================================
 	pub fn next_range(&mut self, min_value: f32, max_value: f32) -> f32 {
 		let minimum = min_value as f64;
@@ -82,6 +139,27 @@ impl SeededRandom {
 
 	//==============================================================================
 	/// min_value 이상 max_value 이하의 정수 난수를 돌려준다.
+	///
+	/// # 인자
+	/// - `min_value`: 아래 끝. (포함)
+	/// - `max_value`: 위 끝. (포함)
+	///
+	/// # 돌려줌
+	/// min_value 이상 max_value 이하의 정수.
+	///
+	/// # 예제
+	/// 양 끝을 모두 포함하는 주사위
+	/// ```rust
+	/// use vanilla::SeededRandom;
+	///
+	/// let mut random = SeededRandom::new(777);
+	/// let value_list: Vec<i32> = (0..10).map(|_| random.next_int(-5, 5)).collect();
+	/// assert_eq!(value_list, vec![2, -5, -3, -4, 1, -1, -3, 3, 1, 3]);
+	/// for _ in 0..100 {
+	/// 	let dice_value = random.next_int(1, 6);
+	/// 	assert!((1..=6).contains(&dice_value));
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn next_int(&mut self, min_value: i32, max_value: i32) -> i32 {
 		let minimum = min_value as f64;
@@ -92,6 +170,25 @@ impl SeededRandom {
 
 	//==============================================================================
 	/// 배열에서 하나 뽑는다. (비어 있으면 None)
+	///
+	/// # 인자
+	/// - `array`: 뽑을 슬라이스.
+	///
+	/// # 돌려줌
+	/// 뽑은 항목의 참조. 비었으면 None. (비었으면 난수를 쓰지 않는다)
+	///
+	/// # 예제
+	/// 보상 하나 고르기
+	/// ```rust
+	/// use vanilla::SeededRandom;
+	///
+	/// let mut random = SeededRandom::new(42);
+	/// let reward_list = ["gold", "gem", "potion"];
+	/// let reward = random.pick(&reward_list);
+	/// assert!(reward.is_some_and(|reward| reward_list.contains(reward)));
+	/// let empty_list: [&str; 0] = [];
+	/// assert_eq!(random.pick(&empty_list), None);
+	/// ```
 	//==============================================================================
 	pub fn pick<'a, T>(&mut self, array: &'a [T]) -> Option<&'a T> {
 		if array.is_empty() {
@@ -103,6 +200,9 @@ impl SeededRandom {
 
 	//==============================================================================
 	/// 배열을 제자리에서 섞는다. (Fisher-Yates, 원본과 같은 순서로 난수를 쓴다)
+	///
+	/// # 인자
+	/// - `array`: 섞을 슬라이스. (그 자리에서 바뀐다, 길이 - 1 번 난수를 쓴다)
 	//==============================================================================
 	pub fn shuffle<T>(&mut self, array: &mut [T]) {
 		let mut index = array.len();
@@ -115,6 +215,23 @@ impl SeededRandom {
 
 	//==============================================================================
 	/// 날짜 기반 시드를 만든다. (20260831 같은 YYYYMMDD 정수를 섞어, 같은 날짜면 어디서나 같은 시드가 나온다, 0 이면 1)
+	///
+	/// # 인자
+	/// - `date_number`: YYYYMMDD 꼴의 날짜 정수.
+	/// - `base_seed`: 섞을 바탕 시드. (원본 기본값은 DAILY_BASE_SEED, 게임마다 다르게 주면 같은 날에도 다른 시드가 나온다)
+	///
+	/// # 돌려줌
+	/// 시드. (섞은 값이 0 이면 1)
+	///
+	/// # 예제
+	/// 오늘의 시드
+	/// ```rust
+	/// use vanilla::base::seededrandom::DAILY_BASE_SEED;
+	/// use vanilla::SeededRandom;
+	///
+	/// assert_eq!(SeededRandom::create_daily_seed(20261117, DAILY_BASE_SEED), 1951175260);
+	/// assert_eq!(SeededRandom::create_daily_seed(20260831, 12345), 679594006);
+	/// ```
 	//==============================================================================
 	pub fn create_daily_seed(date_number: u32, base_seed: u32) -> u32 {
 		let mixed = base_seed ^ date_number.wrapping_mul(0x9E3779B1);
@@ -123,6 +240,31 @@ impl SeededRandom {
 
 	//==============================================================================
 	/// 날짜의 시드 난수를 만든다. (month 는 1 ~ 12, 원본 getMonth() + 1 자리)
+	///
+	/// # 인자
+	/// - `year`: 연. (2026 같은)
+	/// - `month`: 월. (1 ~ 12)
+	/// - `day`: 일. (1 ~ 31)
+	/// - `base_seed`: 섞을 바탕 시드. (create_daily_seed 와 같다)
+	///
+	/// # 돌려줌
+	/// `create_daily_seed(year * 10000 + month * 100 + day, base_seed)` 를 시드로 만든 생성기.
+	///
+	/// # 예제
+	/// 데일리 챌린지 보드 만들기
+	/// ```rust
+	/// use vanilla::base::seededrandom::DAILY_BASE_SEED;
+	/// use vanilla::SeededRandom;
+	///
+	/// let mut first_random = SeededRandom::from_date(2026, 11, 17, DAILY_BASE_SEED);
+	/// let mut second_random = SeededRandom::from_date(2026, 11, 17, DAILY_BASE_SEED);
+	/// assert_eq!(first_random.get_state(), 1951175260);
+	/// let mut first_board = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+	/// let mut second_board = first_board;
+	/// first_random.shuffle(&mut first_board);
+	/// second_random.shuffle(&mut second_board);
+	/// assert_eq!(first_board, second_board);
+	/// ```
 	//==============================================================================
 	pub fn from_date(year: i32, month: u32, day: u32, base_seed: u32) -> SeededRandom {
 		let date_number = year as i64 * 10000 + month as i64 * 100 + day as i64;

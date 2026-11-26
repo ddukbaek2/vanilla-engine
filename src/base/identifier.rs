@@ -14,6 +14,9 @@ static NEXT_INSTANCE_ID: AtomicU64 = AtomicU64::new(1);
 
 //==============================================================================
 /// 새 인스턴스 식별자. (1 부터, 겹치지 않음)
+///
+/// # 돌려줌
+/// 프로세스 안에서 부를 때마다 1 씩 오르는 번호. (첫 번호 1, 스레드끼리도 겹치지 않는다)
 //==============================================================================
 pub fn create_instance_id() -> u64 {
 	NEXT_INSTANCE_ID.fetch_add(1, Ordering::Relaxed)
@@ -22,6 +25,20 @@ pub fn create_instance_id() -> u64 {
 //==============================================================================
 /// 고유식별자 생성. (원본 createGUID, "0192a3f2-b1c4-4d8e-8f1a-0e5d4c3b2a19")
 /// - 48 비트 밀리초 시각을 16 진수 12 자리로 앞에 두고, 판 4 와 변형 8 ~ b 자리 말고는 난수다. (74 비트)
+///
+/// # 돌려줌
+/// 8-4-4-4-12 꼴의 소문자 16 진수 글. (36 글자, 시계가 유닉스 기준 시각(1970 년)보다 앞이면 시각 자리는 0)
+///
+/// # 예제
+/// UUID 꼴 확인
+/// ```rust
+/// use vanilla::create_guid;
+///
+/// let guid = create_guid();
+/// assert_eq!(guid.len(), 36);
+/// assert_eq!(guid.split('-').map(|part| part.len()).collect::<Vec<usize>>(), vec![8, 4, 4, 4, 12]);
+/// assert_ne!(create_guid(), create_guid());
+/// ```
 //==============================================================================
 pub fn create_guid() -> String {
 	let milliseconds = SystemTime::now().duration_since(UNIX_EPOCH).map(|duration| duration.as_millis() as u64).unwrap_or(0);
@@ -52,6 +69,19 @@ pub fn create_guid() -> String {
 
 //==============================================================================
 /// 차례 번호 발급기. (원본 Identifier)
+///
+/// # 예제
+/// 100 에서 5 씩 늘리고 되돌리기
+/// ```rust
+/// use vanilla::Identifier;
+///
+/// let mut identifier = Identifier::new(100, 5);
+/// assert_eq!(identifier.auto(0), 105);
+/// assert_eq!(identifier.auto(0), 110);
+/// assert_eq!(identifier.auto(1), 111);
+/// identifier.reset();
+/// assert_eq!(identifier.auto(0), 105);
+/// ```
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct Identifier {
@@ -63,6 +93,13 @@ pub struct Identifier {
 impl Identifier {
 	//==============================================================================
 	/// 생성. (처음 번호, 한 번에 늘릴 수, 원본 기본값은 0 과 1)
+	///
+	/// # 인자
+	/// - `initial_serial_number`: 처음 번호. (reset 이 되돌리는 번호, 첫 auto 는 여기에 늘린 값을 돌려준다)
+	/// - `initial_increase_number`: auto(0) 이 한 번에 늘릴 수.
+	///
+	/// # 돌려줌
+	/// 처음 번호에 선 발급기.
 	//==============================================================================
 	pub fn new(initial_serial_number: i64, initial_increase_number: i64) -> Identifier {
 		Identifier {
@@ -81,6 +118,12 @@ impl Identifier {
 
 	//==============================================================================
 	/// 다음 번호. (increase_number 가 0 이 아니면 그만큼, 0 이면 만들 때 정한 수만큼 늘린 뒤 돌려준다)
+	///
+	/// # 인자
+	/// - `increase_number`: 이번에 늘릴 수. (0 이면 만들 때 정한 수)
+	///
+	/// # 돌려줌
+	/// 늘린 뒤의 번호.
 	//==============================================================================
 	pub fn auto(&mut self, increase_number: i64) -> i64 {
 		if increase_number != 0 {
@@ -94,6 +137,9 @@ impl Identifier {
 }
 
 impl Default for Identifier {
+	//==============================================================================
+	/// 처음 번호 0, 늘릴 수 1 인 발급기. (원본 기본 인자)
+	//==============================================================================
 	fn default() -> Identifier {
 		Identifier::new(0, 1)
 	}

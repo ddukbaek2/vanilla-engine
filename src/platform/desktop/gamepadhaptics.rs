@@ -5,16 +5,12 @@
 //! - GCController.controllers() → controller.haptics(GCDeviceHaptics) → createEngineWithLocality 로 CHHapticEngine 을 짓고,
 //!   연속 이벤트(세기, 날카로움) 하나로 된 CHHapticPattern 의 플레이어를 바로 시작한다.
 //!   - 무거운 모터(strong)는 왼손잡이(GCHapticsLocalityLeftHandle), 가벼운 모터(weak)는 오른손잡이(GCHapticsLocalityRightHandle) 엔진에 낸다.
-//!   ```text
 //!     둘 다 대지 않는 패드는 GCHapticsLocalityHandles, 그것도 없으면 GCHapticsLocalityDefault 엔진 하나에 둘 중 큰 세기로 낸다.
-//!   ```
 //!   - 다시 부르면 앞 진동을 멈추고 새로 낸다. 세기나 길이가 0 이면 멈추기만 한다.
 //!   - 연속 이벤트 하나는 30 초까지라 더 길면 30 초짜리를 이어 붙인다.
 //!   - 엔진은 컨트롤러와 손잡이 자리마다 한 번 짓고 담아 둔다. 목록에서 사라진 컨트롤러의 엔진은 버린다.
-//!   ```text
 //!     엔진이 바깥 까닭으로 멈추거나(stoppedHandler) 서버 오류에서 돌아오면(resetHandler) 표시만 해 두고 다음에 떨 때 다시 시작한다.
 //!     시작이나 플레이어가 실패하면 엔진을 버리고 한 번 다시 지어 본다.
-//!   ```
 //! - gilrs 패드와 GCController 짝 맞추기: 이름(gilrs 의 OS 이름과 GCController.vendorName, 대소문자 무시)이 같은 것을 먼저 잇고,
 //!   남은 것은 gilrs 의 연결 차례와 GCController.controllers() 의 차례로 잇는다. (그래서 컨트롤러가 하나면 이름이 달라도 그것을 쓴다)
 //!   GameController 는 제조사, 제품 번호를 공개 API 로 주지 않아 번호로는 맞추지 않는다.
@@ -23,6 +19,16 @@
 //! - GameController 객체는 메인 스레드에서 다룬다. 엔진 프레임(winit 이벤트 루프)이 메인 스레드라 그대로 부르고, 다른 스레드에서 부르면 건너뛴다.
 //! - startWirelessControllerDiscovery 는 새 무선 패드를 짝지을 때 쓰는 것이라 부르지 않는다. 이미 붙은 패드는 controllers() 에 있다.
 //!   GCController.shouldMonitorBackgroundEvents 는 입력을 넘기는 일에 대한 것이고 입력은 gilrs 가 읽으므로 건드리지 않는다.
+//!
+//! # 예제
+//! 패드 하나를 0.2 초 떨고 멈추기 (패드가 있어야 해서 실행하지 않는다, 보통은 GamepadManager.vibrate 가 부른다)
+//! ```rust,no_run
+//! use vanilla::platform;
+//!
+//! let gamepad_name_list = vec![String::from("DualSense Wireless Controller")];
+//! platform::vibrate_gamepads(&gamepad_name_list, 1.0, 0.5, 200);
+//! platform::vibrate_gamepads(&gamepad_name_list, 0.0, 0.0, 0);
+//! ```
 //==============================================================================
 use block2::RcBlock;
 use objc2::rc::Retained;
@@ -123,6 +129,12 @@ fn pair_gamepads_with_controllers(gamepad_name_list: &[String], controller_name_
 //==============================================================================
 /// gilrs 패드들과 짝인 컨트롤러를 떨기. (세기 0 ~ 1, 밀리초. 길이나 세기가 0 이면 멈춘다)
 /// - gamepad_name_list 는 연결된 gilrs 패드의 OS 이름을 연결 차례로 둔 것이다.
+///
+/// # 인자
+/// - `gamepad_name_list`: 떨 gilrs 패드의 OS 이름 목록. (연결 차례, GCController 와 짝을 맞추는 데 쓴다)
+/// - `strong_magnitude`: 무거운 모터(왼쪽 손잡이) 세기. (0 ~ 1)
+/// - `weak_magnitude`: 가벼운 모터(오른쪽 손잡이) 세기. (0 ~ 1)
+/// - `duration_milliseconds`: 떠는 길이. (밀리초, 0 이면 멈추기만 한다)
 //==============================================================================
 pub fn vibrate_gamepads(gamepad_name_list: &[String], strong_magnitude: f32, weak_magnitude: f32, duration_milliseconds: u32) {
 	if MainThreadMarker::new().is_none() {

@@ -6,13 +6,9 @@
 //! - 휠: 원본 TouchRaycaster.touchWheel → UIScrollView.wheel 길. 엔진이 터치 아래 노드부터 부모 쪽으로 wheel 을 묻고, 이 컴포넌트가 받아 쓴다.
 //! - 원본과 다른 것:
 //!   - 원본은 set_scroll_offset / set_scroll_content_size / setShows...ScrollBar 에서 바로 노드를 바꾼다. 러스트 판의 씬 코드는 컴포넌트만 쥐고 있어
-//!   ```text
 //!     값을 정해 두고 다음 tick 에 content 노드와 스크롤바 노드에 반영한다. 같은 프레임에 바로 옮기려면 UIScrollView::set_scroll_offset_in_tree 를 쓴다.
-//!   ```
 //!   - 그래서 get_vertical_scroll_bar / get_horizontal_scroll_bar 는 보이기로 정한 뒤 첫 tick 이 지나야 노드 핸들을 돌려준다.
-//!   ```text
 //!     원본처럼 그 자리에서 스크롤바 노드를 만들고 켜려면 UIScrollView::set_shows_vertical_scroll_bar_in_tree(가로는 horizontal)를 쓴다. (만든 노드 핸들을 돌려준다)
-//!   ```
 //!   - 보이는 영역 크기(호스트 content_size)는 붙을 때와 tick / 터치 / 휠 때 읽어 둔다. 씬 코드에서 정한 오프셋은 다음 tick 에 새 크기로 다시 자른다.
 //!   - 드래그를 위 스크롤 뷰로 넘기는 손짓(원본 TouchRecognizer)은 ui/touchrecognizer.rs 에 따로 있다. 씬이 골라 쓴다.
 //! - 원본 그대로인 버릇: 콘텐트가 영역 안에 들어와 스스로 꺼진(자동 숨김) 스크롤바 노드는 tick 이 돌지 않아 저절로 다시 켜지지 않는다.
@@ -59,6 +55,35 @@ crate::core::reflection::impl_reflect_names!(ScrollMode, [
 
 //==============================================================================
 /// 스크롤 뷰.
+/// - 호스트 content_size 가 보이는 영역이고, content 노드에 붙인 자식들이 오프셋만큼 움직인다. 오프셋은 0 에서 (보이는 크기 - 콘텐트 크기) 사이다.
+///
+/// # 예제
+/// 세로로 긴 목록을 담고 끝까지 내리기
+/// ```rust
+/// use vanilla::{Engine, EngineConfiguration, NodeTree, Pivot, UIScrollView, Vector2};
+///
+/// let engine = Engine::new(EngineConfiguration::new());
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.get_root_id();
+/// let scroll_id = node_tree.create_child(root_id, "scroll");
+/// node_tree[scroll_id].set_pivot(Pivot::TOP_LEFT);
+/// node_tree[scroll_id].set_content_size(Vector2::create(200.0, 100.0));
+/// let scroll_view = node_tree.add_component(scroll_id, UIScrollView::new()).expect("scroll view");
+/// scroll_view.set_scroll_content_size(Vector2::create(200.0, 400.0));
+/// let content_id = scroll_view.get_content().expect("content");
+/// for index in 0..10 {
+/// 	let item_id = node_tree.create_child(content_id, "item");
+/// 	node_tree[item_id].set_pivot(Pivot::TOP_LEFT);
+/// 	node_tree[item_id].set_rect(0.0, index as f32 * 40.0, 200.0, 40.0);
+/// }
+///
+/// let scroll_view = node_tree[scroll_id].get_component_mut::<UIScrollView>().expect("scroll view");
+/// scroll_view.set_scroll_offset(Vector2::create(0.0, -1000.0));
+/// assert_eq!(scroll_view.get_scroll_offset(), Vector2::create(0.0, -300.0));
+/// node_tree.tick(&engine, 0.016);
+/// assert_eq!(node_tree[content_id].get_local_position(), Vector2::create(0.0, -300.0));
+/// assert_eq!(node_tree[content_id].get_content_size(), Vector2::create(200.0, 400.0));
+/// ```
 //==============================================================================
 pub struct UIScrollView {
 	ui_view: UIView,
@@ -92,6 +117,10 @@ pub struct UIScrollView {
 impl UIScrollView {
 	//==============================================================================
 	/// 생성.
+	/// - 노드에 붙일 때는 node_tree.add_component 를 쓴다. (붙을 때 content 노드와 Mask 를 만들고 interactable 을 켠다)
+	///
+	/// # 돌려줌
+	/// 가로 세로 모두 켜진, 오프셋 0, 클램프 모드의 새 스크롤 뷰. (스크롤바 없음, 배경 투명)
 	//==============================================================================
 	pub fn new() -> UIScrollView {
 		UIScrollView {
@@ -125,6 +154,8 @@ impl UIScrollView {
 
 	//==============================================================================
 	/// 품은 뷰 반환.
+	/// # 돌려줌
+	/// 배경색과 content 노드를 든 품은 뷰.
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn get_uiview(&self) -> &UIView {
@@ -133,6 +164,8 @@ impl UIScrollView {
 
 	//==============================================================================
 	/// 품은 뷰 반환. (변경용)
+	/// # 돌려줌
+	/// 품은 뷰의 가변 참조.
 	//==============================================================================
 	pub fn get_uiview_mut(&mut self) -> &mut UIView {
 		&mut self.ui_view
@@ -140,6 +173,8 @@ impl UIScrollView {
 
 	//==============================================================================
 	/// 컨텐트 노드 핸들. (스크롤할 자식 노드를 여기에 붙인다)
+	/// # 돌려줌
+	/// content 노드. 트리에 붙기(node_tree.add_component) 전에는 None.
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn get_content(&self) -> Option<NodeId> {
@@ -148,6 +183,8 @@ impl UIScrollView {
 
 	//==============================================================================
 	/// 배경색 설정.
+	/// # 인자
+	/// - `background_color`: 보이는 영역의 바탕색. (기본 투명 (1, 1, 1, 0), 투명이면 그리지 않는다)
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn set_background_color(&mut self, background_color: impl Into<Color>) {
@@ -156,6 +193,8 @@ impl UIScrollView {
 
 	//==============================================================================
 	/// 배경색 반환.
+	/// # 돌려줌
+	/// 배경색.
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn get_background_color(&self) -> Color {
@@ -165,6 +204,32 @@ impl UIScrollView {
 	//==============================================================================
 	/// 트리 안에서 오프셋을 정하고 content 노드를 바로 옮긴다. (스크롤 뷰가 없거나 지금 꺼내져 있으면 false)
 	/// - 스크롤바가 끌 때, 그리고 씬 코드가 같은 프레임에 바로 옮기고 싶을 때 쓴다.
+	/// # 인자
+	/// - `node_tree`: 스크롤 뷰가 든 노드 트리.
+	/// - `scroll_node_id`: UIScrollView 가 붙은 노드.
+	/// - `offset`: 새 오프셋. (픽셀, 그 노드의 지금 content_size 로 보이는 영역을 다시 읽어 범위로 자른다)
+	///
+	/// # 돌려줌
+	/// 정했으면 true. 노드가 없거나 UIScrollView 가 없으면(그 컴포넌트의 tick 중처럼 꺼내져 있을 때도) false.
+	///
+	/// # 예제
+	/// content 노드를 그 자리에서 옮기기
+	/// ```rust
+	/// use vanilla::{NodeTree, Pivot, UIScrollView, Vector2};
+	///
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let scroll_id = node_tree.create_child(root_id, "scroll");
+	/// node_tree[scroll_id].set_pivot(Pivot::TOP_LEFT);
+	/// node_tree[scroll_id].set_content_size(Vector2::create(200.0, 100.0));
+	/// let scroll_view = node_tree.add_component(scroll_id, UIScrollView::new()).expect("scroll view");
+	/// scroll_view.set_scroll_content_size(Vector2::create(200.0, 400.0));
+	/// let content_id = scroll_view.get_content().expect("content");
+	///
+	/// assert!(UIScrollView::set_scroll_offset_in_tree(&mut node_tree, scroll_id, Vector2::create(0.0, -80.0)));
+	/// assert_eq!(node_tree[content_id].get_local_position(), Vector2::create(0.0, -80.0));
+	/// assert!(!UIScrollView::set_scroll_offset_in_tree(&mut node_tree, root_id, Vector2::zero()));
+	/// ```
 	//==============================================================================
 	pub fn set_scroll_offset_in_tree(node_tree: &mut NodeTree, scroll_node_id: NodeId, offset: Vector2) -> bool {
 		let viewport_size = match node_tree.get_node(scroll_node_id) {
@@ -393,6 +458,10 @@ impl UIScrollView {
 
 	//==============================================================================
 	/// 오프셋 적용. (범위로 자른다. content 노드는 다음 반영 때 옮긴다)
+	/// - set_scroll_offset 과 달리 다음 tick 에 다시 자르지 않는다. (지금 읽어 둔 보이는 영역 크기로만 자른다)
+	///
+	/// # 인자
+	/// - `offset`: 새 오프셋. (픽셀, content 노드의 로컬 위치. x 는 (보이는 너비 - 콘텐트 너비) ~ 0, y 도 같은 꼴로 자른다. 끈 축은 0)
 	//==============================================================================
 	pub fn apply_scroll_offset(&mut self, offset: Vector2) {
 		let minimum_offset = self.calculate_minimum_offset();
@@ -402,6 +471,30 @@ impl UIScrollView {
 
 	//==============================================================================
 	/// 오프셋 설정. (씬 코드용. 다음 tick 에 그때의 영역 크기로 다시 잘라 content 를 옮긴다)
+	/// # 인자
+	/// - `offset`: 새 오프셋. (픽셀, 아래로 내리면 y 가 음수. 지금 영역 크기로 바로 한 번 자른다)
+	///
+	/// # 예제
+	/// 정한 오프셋은 바로 잘리고 content 는 다음 tick 에 옮겨진다
+	/// ```rust
+	/// use vanilla::{Engine, EngineConfiguration, NodeTree, Pivot, UIScrollView, Vector2};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let scroll_id = node_tree.create_child(root_id, "scroll");
+	/// node_tree[scroll_id].set_pivot(Pivot::TOP_LEFT);
+	/// node_tree[scroll_id].set_content_size(Vector2::create(200.0, 100.0));
+	/// let scroll_view = node_tree.add_component(scroll_id, UIScrollView::new()).expect("scroll view");
+	/// scroll_view.set_scroll_content_size(Vector2::create(200.0, 400.0));
+	/// let content_id = scroll_view.get_content().expect("content");
+	///
+	/// scroll_view.set_scroll_offset(Vector2::create(-50.0, -120.0));
+	/// assert_eq!(scroll_view.get_scroll_offset(), Vector2::create(0.0, -120.0));
+	/// assert_eq!(node_tree[content_id].get_local_position(), Vector2::zero());
+	/// node_tree.tick(&engine, 0.016);
+	/// assert_eq!(node_tree[content_id].get_local_position(), Vector2::create(0.0, -120.0));
+	/// ```
 	//==============================================================================
 	pub fn set_scroll_offset(&mut self, offset: Vector2) {
 		self.apply_scroll_offset(offset);
@@ -410,6 +503,8 @@ impl UIScrollView {
 
 	//==============================================================================
 	/// 오프셋 반환. (content 노드의 로컬 위치, 아래로 스크롤하면 y 가 음수)
+	/// # 돌려줌
+	/// 지금 오프셋. (픽셀, 0 이하)
 	//==============================================================================
 	pub fn get_scroll_offset(&self) -> Vector2 {
 		self.scroll_offset
@@ -417,6 +512,8 @@ impl UIScrollView {
 
 	//==============================================================================
 	/// 가로 스크롤 켜기 설정.
+	/// # 인자
+	/// - `is_horizontal`: true 면 가로로 끌고 굴릴 수 있다. (기본 true) false 면 오프셋 x 를 0 으로 자른다.
 	//==============================================================================
 	pub fn set_horizontal(&mut self, is_horizontal: bool) {
 		self.horizontal_enabled = is_horizontal;
@@ -424,6 +521,8 @@ impl UIScrollView {
 
 	//==============================================================================
 	/// 가로 스크롤 켜짐 여부.
+	/// # 돌려줌
+	/// 가로 스크롤이 켜져 있으면 true.
 	//==============================================================================
 	pub fn is_horizontal(&self) -> bool {
 		self.horizontal_enabled
@@ -431,6 +530,8 @@ impl UIScrollView {
 
 	//==============================================================================
 	/// 세로 스크롤 켜기 설정.
+	/// # 인자
+	/// - `is_vertical`: true 면 세로로 끌고 굴릴 수 있다. (기본 true) false 면 오프셋 y 를 0 으로 자른다.
 	//==============================================================================
 	pub fn set_vertical(&mut self, is_vertical: bool) {
 		self.vertical_enabled = is_vertical;
@@ -438,6 +539,8 @@ impl UIScrollView {
 
 	//==============================================================================
 	/// 세로 스크롤 켜짐 여부.
+	/// # 돌려줌
+	/// 세로 스크롤이 켜져 있으면 true.
 	//==============================================================================
 	pub fn is_vertical(&self) -> bool {
 		self.vertical_enabled
@@ -445,6 +548,8 @@ impl UIScrollView {
 
 	//==============================================================================
 	/// 스크롤하지 않는 축으로 끄는 손가락을 누른 노드에 남길지 설정. (기본 false, TouchRecognizer 가 읽는다)
+	/// # 인자
+	/// - `passes_cross_axis_drag`: true 면 한 축만 켠 스크롤 뷰가 다른 축 방향 드래그를 가져가지 않는다. (is_scroll_drag)
 	//==============================================================================
 	pub fn set_passes_cross_axis_drag(&mut self, passes_cross_axis_drag: bool) {
 		self.passes_cross_axis_drag = passes_cross_axis_drag;
@@ -452,6 +557,8 @@ impl UIScrollView {
 
 	//==============================================================================
 	/// 스크롤하지 않는 축으로 끄는 손가락을 누른 노드에 남기는지.
+	/// # 돌려줌
+	/// 남기는 옵션이 켜져 있으면 true.
 	//==============================================================================
 	pub fn is_passing_cross_axis_drag(&self) -> bool {
 		self.passes_cross_axis_drag
@@ -459,6 +566,26 @@ impl UIScrollView {
 
 	//==============================================================================
 	/// 끈 방향이 이 뷰가 가져갈 드래그인지. (스크롤하지 않는 축의 드래그를 남기는 옵션을 켰을 때만 가려낸다)
+	/// # 인자
+	/// - `delta_x`: 끈 거리 x. (픽셀, 부호는 보지 않는다)
+	/// - `delta_y`: 끈 거리 y. (픽셀, 부호는 보지 않는다)
+	///
+	/// # 돌려줌
+	/// 가져갈 드래그면 true. 옵션이 꺼져 있거나 두 축이 다 켜져 있으면 늘 true. 세로만 켰으면 |y| >= |x| 일 때, 가로만 켰으면 |x| >= |y| 일 때 true. 두 축이 다 꺼져 있으면 false.
+	///
+	/// # 예제
+	/// 세로 목록이 가로 드래그를 남기기
+	/// ```rust
+	/// use vanilla::UIScrollView;
+	///
+	/// let mut scroll_view = UIScrollView::new();
+	/// scroll_view.set_horizontal(false);
+	/// assert!(scroll_view.is_scroll_drag(30.0, 2.0));
+	///
+	/// scroll_view.set_passes_cross_axis_drag(true);
+	/// assert!(!scroll_view.is_scroll_drag(30.0, 2.0));
+	/// assert!(scroll_view.is_scroll_drag(2.0, -30.0));
+	/// ```
 	//==============================================================================
 	pub fn is_scroll_drag(&self, delta_x: f32, delta_y: f32) -> bool {
 		if !self.passes_cross_axis_drag {
@@ -480,6 +607,8 @@ impl UIScrollView {
 
 	//==============================================================================
 	/// 드래그 반영량 배율 설정. (1 = 기본, 2 = 두 배 빠르게)
+	/// # 인자
+	/// - `drag_sensitivity`: 끈 거리에 곱할 배율. (기본 1)
 	//==============================================================================
 	pub fn set_drag_sensitivity(&mut self, drag_sensitivity: f32) {
 		self.drag_sensitivity = drag_sensitivity;
@@ -487,6 +616,8 @@ impl UIScrollView {
 
 	//==============================================================================
 	/// 드래그 반영량 배율 반환.
+	/// # 돌려줌
+	/// 드래그 배율.
 	//==============================================================================
 	pub fn get_drag_sensitivity(&self) -> f32 {
 		self.drag_sensitivity
@@ -494,6 +625,8 @@ impl UIScrollView {
 
 	//==============================================================================
 	/// 스크롤 모드 설정.
+	/// # 인자
+	/// - `scroll_mode`: 경계 처리 모드. (기본 ScrollMode::Clamp)
 	//==============================================================================
 	pub fn set_scroll_mode(&mut self, scroll_mode: ScrollMode) {
 		self.scroll_mode = scroll_mode;
@@ -501,6 +634,8 @@ impl UIScrollView {
 
 	//==============================================================================
 	/// 스크롤 모드 반환.
+	/// # 돌려줌
+	/// 지금 스크롤 모드.
 	//==============================================================================
 	pub fn get_scroll_mode(&self) -> ScrollMode {
 		self.scroll_mode
@@ -508,6 +643,8 @@ impl UIScrollView {
 
 	//==============================================================================
 	/// 스크롤 콘텐츠 크기 설정. (보이는 영역보다 커야 스크롤된다. content 노드 크기는 다음 tick 에 맞춘다)
+	/// # 인자
+	/// - `scroll_content_size`: 스크롤할 콘텐트 전체 크기. (픽셀, 기본 (0, 0))
 	//==============================================================================
 	pub fn set_scroll_content_size(&mut self, scroll_content_size: Vector2) {
 		self.scroll_content_size = scroll_content_size;
@@ -516,6 +653,8 @@ impl UIScrollView {
 
 	//==============================================================================
 	/// 스크롤 콘텐츠 크기 반환.
+	/// # 돌려줌
+	/// 콘텐트 전체 크기. (픽셀)
 	//==============================================================================
 	pub fn get_scroll_content_size(&self) -> Vector2 {
 		self.scroll_content_size
@@ -523,6 +662,8 @@ impl UIScrollView {
 
 	//==============================================================================
 	/// 드래그 중인지.
+	/// # 돌려줌
+	/// 눌러 끄는 중이면 true. (떼거나 취소하면 false)
 	//==============================================================================
 	pub fn is_dragging(&self) -> bool {
 		self.is_dragging
@@ -530,6 +671,8 @@ impl UIScrollView {
 
 	//==============================================================================
 	/// 지금 스크롤 속도 반환.
+	/// # 돌려줌
+	/// 스크롤 속도. (픽셀/초) 탄성 모드에서만 셈하고, 클램프 모드는 누를 때 0 으로 비운 뒤 그대로다.
 	//==============================================================================
 	pub fn get_scroll_velocity(&self) -> Vector2 {
 		self.scroll_velocity
@@ -537,6 +680,31 @@ impl UIScrollView {
 
 	//==============================================================================
 	/// 세로 스크롤바 보이기 설정. (true 면 다음 tick 에 호스트의 자식으로 만들어 켠다)
+	/// # 인자
+	/// - `shows`: true 면 보이고 false 면 이미 만든 스크롤바 노드를 끈다. (기본 false)
+	///
+	/// # 예제
+	/// 첫 tick 뒤에 생기는 세로 스크롤바
+	/// ```rust
+	/// use vanilla::{Engine, EngineConfiguration, NodeTree, Pivot, UIScrollView, Vector2};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let scroll_id = node_tree.create_child(root_id, "scroll");
+	/// node_tree[scroll_id].set_pivot(Pivot::TOP_LEFT);
+	/// node_tree[scroll_id].set_content_size(Vector2::create(200.0, 100.0));
+	/// let scroll_view = node_tree.add_component(scroll_id, UIScrollView::new()).expect("scroll view");
+	/// scroll_view.set_scroll_content_size(Vector2::create(200.0, 400.0));
+	/// scroll_view.set_shows_vertical_scroll_bar(true);
+	/// assert!(scroll_view.get_vertical_scroll_bar().is_none());
+	///
+	/// node_tree.tick(&engine, 0.016);
+	/// let scroll_view = node_tree[scroll_id].get_component::<UIScrollView>().expect("scroll view");
+	/// let scroll_bar_id = scroll_view.get_vertical_scroll_bar().expect("scroll bar");
+	/// assert_eq!(scroll_view.get_inner_content_size(), Vector2::create(176.0, 100.0));
+	/// assert_eq!(node_tree[scroll_bar_id].get_content_size(), Vector2::create(12.0, 88.0));
+	/// ```
 	//==============================================================================
 	pub fn set_shows_vertical_scroll_bar(&mut self, shows: bool) {
 		self.shows_vertical_scroll_bar = shows;
@@ -545,6 +713,10 @@ impl UIScrollView {
 
 	//==============================================================================
 	/// 가로 스크롤바 보이기 설정.
+	/// - 세로와 같은 꼴이다. (true 면 다음 tick 에 호스트의 자식으로 만들어 켠다)
+	///
+	/// # 인자
+	/// - `shows`: true 면 보이고 false 면 이미 만든 스크롤바 노드를 끈다. (기본 false)
 	//==============================================================================
 	pub fn set_shows_horizontal_scroll_bar(&mut self, shows: bool) {
 		self.shows_horizontal_scroll_bar = shows;
@@ -553,6 +725,35 @@ impl UIScrollView {
 
 	//==============================================================================
 	/// 세로 스크롤바 보이기 설정을 그 자리에서 노드에 건다. (원본 setShowsVerticalScrollBar 처럼 없으면 호스트의 자식으로 만들고 켜거나 끈다, 스크롤바 노드 핸들)
+	/// # 인자
+	/// - `node_tree`: 스크롤 뷰가 든 노드 트리.
+	/// - `scroll_node_id`: UIScrollView 가 붙은 노드.
+	/// - `shows`: true 면 만들어 켜고 false 면 있는 노드를 끈다.
+	///
+	/// # 돌려줌
+	/// 세로 스크롤바 노드. 노드나 UIScrollView 가 없으면 None. 끄는데 아직 만든 노드가 없어도 None.
+	///
+	/// # 예제
+	/// tick 없이 바로 만들고 끄기
+	/// ```rust
+	/// use vanilla::{NodeTree, Pivot, UIScrollBar, UIScrollView, Vector2};
+	///
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let scroll_id = node_tree.create_child(root_id, "scroll");
+	/// node_tree[scroll_id].set_pivot(Pivot::TOP_LEFT);
+	/// node_tree[scroll_id].set_content_size(Vector2::create(200.0, 100.0));
+	/// node_tree.add_component(scroll_id, UIScrollView::new());
+	///
+	/// let scroll_bar_id = UIScrollView::set_shows_vertical_scroll_bar_in_tree(&mut node_tree, scroll_id, true).expect("scroll bar");
+	/// assert_eq!(node_tree.get_parent_id(scroll_bar_id), Some(scroll_id));
+	/// assert!(node_tree[scroll_bar_id].get_component::<UIScrollBar>().is_some());
+	/// assert!(node_tree[scroll_bar_id].is_active());
+	///
+	/// assert_eq!(UIScrollView::set_shows_vertical_scroll_bar_in_tree(&mut node_tree, scroll_id, false), Some(scroll_bar_id));
+	/// assert!(!node_tree[scroll_bar_id].is_active());
+	/// assert!(UIScrollView::set_shows_horizontal_scroll_bar_in_tree(&mut node_tree, scroll_id, false).is_none());
+	/// ```
 	//==============================================================================
 	pub fn set_shows_vertical_scroll_bar_in_tree(node_tree: &mut NodeTree, scroll_node_id: NodeId, shows: bool) -> Option<NodeId> {
 		UIScrollView::set_shows_scroll_bar_in_tree(node_tree, scroll_node_id, ScrollBarAxis::Vertical, shows)
@@ -560,6 +761,15 @@ impl UIScrollView {
 
 	//==============================================================================
 	/// 가로 스크롤바 보이기 설정을 그 자리에서 노드에 건다. (원본 setShowsHorizontalScrollBar)
+	/// - 세로와 같은 꼴이다. (없으면 호스트의 자식으로 만들고 켜거나 끈다)
+	///
+	/// # 인자
+	/// - `node_tree`: 스크롤 뷰가 든 노드 트리.
+	/// - `scroll_node_id`: UIScrollView 가 붙은 노드.
+	/// - `shows`: true 면 만들어 켜고 false 면 있는 노드를 끈다.
+	///
+	/// # 돌려줌
+	/// 가로 스크롤바 노드. 노드나 UIScrollView 가 없으면 None. 끄는데 아직 만든 노드가 없어도 None.
 	//==============================================================================
 	pub fn set_shows_horizontal_scroll_bar_in_tree(node_tree: &mut NodeTree, scroll_node_id: NodeId, shows: bool) -> Option<NodeId> {
 		UIScrollView::set_shows_scroll_bar_in_tree(node_tree, scroll_node_id, ScrollBarAxis::Horizontal, shows)
@@ -621,6 +831,8 @@ impl UIScrollView {
 
 	//==============================================================================
 	/// 세로 스크롤바 노드 핸들. (꾸밀 때 `node_tree[id].get_component_mut::<UIScrollBar>()`)
+	/// # 돌려줌
+	/// 세로 스크롤바 노드. 아직 만들지 않았으면 None. (set_shows_vertical_scroll_bar 뒤 첫 tick 이 지나야 생긴다)
 	//==============================================================================
 	pub fn get_vertical_scroll_bar(&self) -> Option<NodeId> {
 		self.vertical_scroll_bar_id
@@ -628,6 +840,8 @@ impl UIScrollView {
 
 	//==============================================================================
 	/// 가로 스크롤바 노드 핸들.
+	/// # 돌려줌
+	/// 가로 스크롤바 노드. 아직 만들지 않았으면 None.
 	//==============================================================================
 	pub fn get_horizontal_scroll_bar(&self) -> Option<NodeId> {
 		self.horizontal_scroll_bar_id
@@ -635,6 +849,8 @@ impl UIScrollView {
 
 	//==============================================================================
 	/// 세로 스크롤바가 차지하는 폭. (보이는 중일 때만)
+	/// # 돌려줌
+	/// 보이기로 정했고 노드가 있으면 24 (두께 12 + 여백 6 의 두 배, 픽셀), 아니면 0.
 	//==============================================================================
 	pub fn get_vertical_scroll_bar_reserved_width(&self) -> f32 {
 		if self.shows_vertical_scroll_bar && self.vertical_scroll_bar_id.is_some() {
@@ -647,6 +863,8 @@ impl UIScrollView {
 
 	//==============================================================================
 	/// 가로 스크롤바가 차지하는 높이. (보이는 중일 때만)
+	/// # 돌려줌
+	/// 보이기로 정했고 노드가 있으면 24 (두께 12 + 여백 6 의 두 배, 픽셀), 아니면 0.
 	//==============================================================================
 	pub fn get_horizontal_scroll_bar_reserved_height(&self) -> f32 {
 		if self.shows_horizontal_scroll_bar && self.horizontal_scroll_bar_id.is_some() {
@@ -659,6 +877,8 @@ impl UIScrollView {
 
 	//==============================================================================
 	/// 스크롤바를 뺀, 콘텐트가 그려질 수 있는 보이는 영역 크기.
+	/// # 돌려줌
+	/// 보이는 영역에서 스크롤바 자리를 뺀 크기. (픽셀, 0 아래로 내려가지 않는다. 보이는 영역은 붙을 때와 tick, 터치, 휠 때 읽어 둔 값)
 	//==============================================================================
 	pub fn get_inner_content_size(&self) -> Vector2 {
 		let viewport_size = self.viewport_size;
@@ -669,6 +889,8 @@ impl UIScrollView {
 
 	//==============================================================================
 	/// 휠 스크롤 배율 설정.
+	/// # 인자
+	/// - `wheel_scroll_scale`: 휠 값에 곱할 배율. (기본 1)
 	//==============================================================================
 	pub fn set_wheel_scroll_scale(&mut self, wheel_scroll_scale: f32) {
 		self.wheel_scroll_scale = wheel_scroll_scale;
@@ -744,6 +966,9 @@ impl UIScrollView {
 }
 
 impl Default for UIScrollView {
+	//==============================================================================
+	/// 기본값. (new 와 같다)
+	//==============================================================================
 	fn default() -> UIScrollView {
 		UIScrollView::new()
 	}
@@ -751,23 +976,38 @@ impl Default for UIScrollView {
 
 #[crate::reflect]
 impl Component for UIScrollView {
+	//==============================================================================
+	/// 컴포넌트 공통 상태 반환. (품은 뷰의 것)
+	//==============================================================================
 	fn get_component_base(&self) -> &ComponentBase {
 		self.ui_view.get_component_base()
 	}
 
+	//==============================================================================
+	/// 컴포넌트 공통 상태 반환. (변경용, 품은 뷰의 것)
+	//==============================================================================
 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 		self.ui_view.get_component_base_mut()
 	}
 
+	//==============================================================================
+	/// 컴포넌트 종류 이름. ("ScrollView")
+	//==============================================================================
 	fn get_component_type(&self) -> &'static str {
 		"ScrollView"
 	}
 
+	//==============================================================================
+	/// 휠을 받는지. (늘 true)
+	//==============================================================================
 	#[reflect(skip)]
 	fn is_wheel_receiver(&self) -> bool {
 		true
 	}
 
+	//==============================================================================
+	/// 붙음. (보이는 영역 크기를 읽어 둔다)
+	//==============================================================================
 	fn attach(&mut self, transform: &mut NodeTransform) {
 		self.viewport_size = transform.get_content_size();
 	}
@@ -811,15 +1051,24 @@ impl Component for UIScrollView {
 		self.sync_content_node(context);
 	}
 
+	//==============================================================================
+	/// 출력. (배경)
+	//==============================================================================
 	fn draw(&mut self, transform: &NodeTransform, graphic: &mut Graphic) {
 		self.ui_view.draw_background(transform, graphic);
 	}
 
+	//==============================================================================
+	/// 내용 영역 안에 그리는지. (늘 true)
+	//==============================================================================
 	#[reflect(skip)]
 	fn is_drawn_inside_content(&self) -> bool {
 		true
 	}
 
+	//==============================================================================
+	/// 터치 누름. (드래그 시작, 속도를 비운다)
+	//==============================================================================
 	fn touch_press(&mut self, context: &mut ComponentContext, view_input_position: Vector2) {
 		self.update_viewport_size(context);
 		self.is_dragging = true;
@@ -830,16 +1079,25 @@ impl Component for UIScrollView {
 		self.current_view_input_position = view_input_position;
 	}
 
+	//==============================================================================
+	/// 터치 이동. (자리만 적어 두고 tick 에서 오프셋을 셈한다)
+	//==============================================================================
 	fn touch_move(&mut self, _context: &mut ComponentContext, view_input_position: Vector2) {
 		if self.is_dragging() {
 			self.current_view_input_position = view_input_position;
 		}
 	}
 
+	//==============================================================================
+	/// 터치 뗌. (드래그 끝)
+	//==============================================================================
 	fn touch_release(&mut self, _context: &mut ComponentContext, _view_input_position: Vector2) {
 		self.is_dragging = false;
 	}
 
+	//==============================================================================
+	/// 터치 취소. (드래그 끝)
+	//==============================================================================
 	fn touch_cancel(&mut self, _context: &mut ComponentContext, _view_input_position: Vector2) {
 		self.is_dragging = false;
 	}

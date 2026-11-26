@@ -89,12 +89,55 @@ impl OpenHeap {
 
 //==============================================================================
 /// 그리드 길찾기. (정적 함수 묶음)
+/// - 상태가 없다. find_path 를 바로 부른다.
+///
+/// # 예제
+/// 벽을 돌아가는 길
+/// ```rust
+/// use vanilla::{GridCell, PathFinder};
+///
+/// let map = [
+/// 	"....",
+/// 	".##.",
+/// 	".###",
+/// ];
+/// let is_wall = |column: i32, row: i32| -> bool {
+/// 	map[row as usize].as_bytes()[column as usize] == b'#'
+/// };
+/// let path = PathFinder::find_path(4, 3, GridCell::create(0, 1), GridCell::create(3, 1), is_wall).unwrap();
+/// assert_eq!(path.len(), 5);
+/// assert_eq!(path[0], GridCell::create(0, 0));
+/// assert_eq!(*path.last().unwrap(), GridCell::create(3, 1));
+/// ```
 //==============================================================================
 pub struct PathFinder;
 
 impl PathFinder {
 	//==============================================================================
 	/// 경로 찾기. (시작이나 도착이 밖이거나 도착이 막혔으면 None, 시작과 도착이 같으면 빈 목록)
+	/// - 4방향으로 한 칸에 비용 1 씩 움직이는 최단 경로. 시작 칸이 막혔는지는 보지 않는다.
+	///
+	/// # 인자
+	/// - `column_count`: 그리드 열 수. (칸 번호는 0 ~ column_count - 1)
+	/// - `row_count`: 그리드 행 수. (칸 번호는 0 ~ row_count - 1)
+	/// - `start`: 시작 칸.
+	/// - `goal`: 도착 칸.
+	/// - `is_blocked_handler`: (열, 행) 칸이 막혔으면 true 를 돌려주는 콜백. 그리드 안의 칸에만 부른다.
+	///
+	/// # 돌려줌
+	/// 시작 칸을 빼고 도착 칸까지 이웃끼리 이어진 칸 목록. 길이 없으면 None.
+	///
+	/// # 예제
+	/// 막힌 곳이 없으면 곧은 길, 도착이 막히면 None
+	/// ```rust
+	/// use vanilla::{GridCell, PathFinder};
+	///
+	/// let straight_path = PathFinder::find_path(3, 1, GridCell::create(0, 0), GridCell::create(2, 0), |_, _| false);
+	/// assert_eq!(straight_path, Some(vec![GridCell::create(1, 0), GridCell::create(2, 0)]));
+	///
+	/// let blocked_path = PathFinder::find_path(3, 1, GridCell::create(0, 0), GridCell::create(2, 0), |column, _| column == 2);
+	/// assert!(blocked_path.is_none());
+	/// ```
 	//==============================================================================
 	pub fn find_path(column_count: i32, row_count: i32, start: GridCell, goal: GridCell, mut is_blocked_handler: impl FnMut(i32, i32) -> bool) -> Option<Vec<GridCell>> {
 		let is_inside = |column: i32, row: i32| -> bool {

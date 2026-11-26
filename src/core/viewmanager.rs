@@ -26,18 +26,45 @@ use crate::platform;
 
 //==============================================================================
 /// 세이프 에어리어 인셋. (원본 { top, right, bottom, left })
+/// - set_safe_area_override 에 넘길 때는 CSS 픽셀, get_safe_area_insets 가 돌려줄 때는 뷰 좌표다.
+///
+/// # 예제
+/// 노치를 흉내 낸 강제값을 뷰 좌표로 읽기
+/// ```rust
+/// use vanilla::{SafeAreaInsets, Vector2, ViewManager, ViewScaleMode};
+///
+/// let mut view_manager = ViewManager::new(Vector2::create(1280.0, 720.0), ViewScaleMode::StretchShort);
+/// view_manager.calculate_view_rect(1280, 720, 2.0);
+/// view_manager.set_safe_area_override(Some(SafeAreaInsets::create(44.0, 0.0, 34.0, 0.0)));
+/// let insets = view_manager.get_safe_area_insets();
+/// assert_eq!(insets, SafeAreaInsets::create(88.0, 0.0, 68.0, 0.0));
+/// assert_eq!(insets.top, 88.0);
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct SafeAreaInsets {
+	/// 위 쪽 인셋.
 	pub top: f32,
+	/// 오른쪽 인셋.
 	pub right: f32,
+	/// 아래 쪽 인셋.
 	pub bottom: f32,
+	/// 왼쪽 인셋.
 	pub left: f32,
 }
 
 impl SafeAreaInsets {
 	//==============================================================================
 	/// 생성. (원본 { top, right, bottom, left } 의 차례)
+	///
+	/// # 인자
+	/// - `top`: 위 쪽 인셋.
+	/// - `right`: 오른쪽 인셋.
+	/// - `bottom`: 아래 쪽 인셋.
+	/// - `left`: 왼쪽 인셋.
+	///
+	/// # 돌려줌
+	/// 네 칸을 채운 인셋.
 	//==============================================================================
 	pub const fn create(top: f32, right: f32, bottom: f32, left: f32) -> SafeAreaInsets {
 		SafeAreaInsets {
@@ -54,9 +81,13 @@ impl SafeAreaInsets {
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SafeAreaSide {
+	/// 위 쪽. (원본 "top")
 	Top,
+	/// 오른쪽. (원본 "right")
 	Right,
+	/// 아래 쪽. (원본 "bottom")
 	Bottom,
+	/// 왼쪽. (원본 "left")
 	Left,
 }
 
@@ -83,6 +114,33 @@ pub enum ViewScaleMode {
 	StretchShortExpandLong,
 }
 
+//==============================================================================
+/// 뷰 매니저. (창 크기와 배율, 기준 해상도, 뷰 스케일 모드로 씬이 그리는 뷰 영역을 셈한다, 엔진이 하나 든다)
+///
+/// # 예제
+/// 1600x720 창에 1280x720 기준 해상도를 짧은 축으로 맞추기
+/// ```rust
+/// use vanilla::{Rect, Vector2, ViewManager, ViewScaleMode};
+///
+/// let mut view_manager = ViewManager::new(Vector2::create(1280.0, 720.0), ViewScaleMode::StretchShort);
+/// view_manager.calculate_view_rect(1600, 720, 1.0);
+/// assert_eq!(view_manager.get_canvas_native_size(), Vector2::create(1600.0, 720.0));
+/// assert_eq!(view_manager.get_view_size(), Vector2::create(1280.0, 720.0));
+/// assert_eq!(view_manager.get_view_native_rect(), Rect::create(160.0, 0.0, 1280.0, 720.0));
+/// assert_eq!(view_manager.get_target_resolution_scale(), 1.0);
+/// assert_eq!(view_manager.canvas_position_to_view_position(Vector2::create(160.0, 0.0)), Vector2::zero());
+/// ```
+///
+/// 씬에서 뷰 크기 읽기
+/// ```rust,no_run
+/// use vanilla::{Engine, Vector2};
+///
+/// fn read_view_center(engine: &Engine) -> Vector2 {
+/// 	let view_size = engine.get_view_manager().get_view_size();
+/// 	Vector2::create(view_size.x * 0.5, view_size.y * 0.5)
+/// }
+/// ```
+//==============================================================================
 pub struct ViewManager {
 	device_pixel_ratio: f32,
 	target_resolution_scale: f32,
@@ -104,6 +162,13 @@ pub struct ViewManager {
 impl ViewManager {
 	//==============================================================================
 	/// 생성.
+	///
+	/// # 인자
+	/// - `reference_resolution_size`: 기준 해상도. (씬이 그릴 좌표계의 크기, 픽셀)
+	/// - `view_scale_mode`: 뷰 스케일 모드.
+	///
+	/// # 돌려줌
+	/// 새 뷰 매니저. (배율 1, 크기와 뷰 영역은 0, calculate_view_rect 를 불러야 뷰 영역이 생긴다)
 	//==============================================================================
 	pub fn new(reference_resolution_size: Vector2, view_scale_mode: ViewScaleMode) -> ViewManager {
 		ViewManager {
@@ -124,6 +189,23 @@ impl ViewManager {
 
 	//==============================================================================
 	/// 뷰 영역 계산. (창 크기나 배율이 바뀔 때 엔진이 부른다)
+	/// - 창 안쪽 논리 크기는 물리 픽셀을 배율로 나눠 반올림한 값이다.
+	///
+	/// # 인자
+	/// - `physical_width`: 창 안쪽 너비. (물리 픽셀)
+	/// - `physical_height`: 창 안쪽 높이. (물리 픽셀)
+	/// - `scale_factor`: 창의 배율. (원본 device_pixel_ratio, 0 이하면 1)
+	///
+	/// # 예제
+	/// 배율 2 창에서 가로를 맞추고 세로를 늘리는 모드
+	/// ```rust
+	/// use vanilla::{Vector2, ViewManager, ViewScaleMode};
+	///
+	/// let mut view_manager = ViewManager::new(Vector2::create(1280.0, 720.0), ViewScaleMode::StretchWidthExpandHeight);
+	/// view_manager.calculate_view_rect(1500, 2000, 2.0);
+	/// assert_eq!(view_manager.get_canvas_native_size(), Vector2::create(750.0, 1000.0));
+	/// assert_eq!(view_manager.get_view_size(), Vector2::create(1280.0, 1707.0));
+	/// ```
 	//==============================================================================
 	pub fn calculate_view_rect(&mut self, physical_width: u32, physical_height: u32, scale_factor: f32) {
 		let device_pixel_ratio = if scale_factor > 0.0 {
@@ -218,6 +300,16 @@ impl ViewManager {
 
 	//==============================================================================
 	/// 좌표계 적용.
+	/// - graphic.set_transform(scale_x, skew_y, skew_x, scale_y, translate_x, translate_y) 와 같다. (Canvas2D 의 a, b, c, d, e, f 차례)
+	///
+	/// # 인자
+	/// - `graphic`: 좌표계를 걸 그래픽.
+	/// - `scale_x`: 가로 배율. (행렬의 a)
+	/// - `scale_y`: 세로 배율. (행렬의 d)
+	/// - `skew_x`: 가로 기울임. (행렬의 c)
+	/// - `skew_y`: 세로 기울임. (행렬의 b)
+	/// - `translate_x`: 가로 이동. (그리기 버퍼 픽셀, 행렬의 e)
+	/// - `translate_y`: 세로 이동. (그리기 버퍼 픽셀, 행렬의 f)
 	//==============================================================================
 	pub fn apply_transform(&self, graphic: &mut Graphic, scale_x: f32, scale_y: f32, skew_x: f32, skew_y: f32, translate_x: f32, translate_y: f32) {
 		graphic.set_transform(scale_x, skew_y, skew_x, scale_y, translate_x, translate_y);
@@ -225,6 +317,9 @@ impl ViewManager {
 
 	//==============================================================================
 	/// 화면 전체 영역 적용. (좌표 단위 = canvas_native_size)
+	///
+	/// # 인자
+	/// - `graphic`: 좌표계를 걸 그래픽.
 	//==============================================================================
 	pub fn apply_canvas_native_rect(&self, graphic: &mut Graphic) {
 		let device_pixel_ratio = self.get_device_pixel_ratio();
@@ -233,6 +328,9 @@ impl ViewManager {
 
 	//==============================================================================
 	/// 뷰 영역 적용. (좌표 단위 = get_view_size(), 모드를 가리지 않고 같은 코드로 그린다)
+	///
+	/// # 인자
+	/// - `graphic`: 좌표계를 걸 그래픽.
 	//==============================================================================
 	pub fn apply_view_rect(&self, graphic: &mut Graphic) {
 		let device_pixel_ratio = self.get_device_pixel_ratio();
@@ -247,6 +345,10 @@ impl ViewManager {
 
 	//==============================================================================
 	/// 기준 해상도 재설정.
+	/// - 뷰 영역은 다음 calculate_view_rect 부터 바뀐다.
+	///
+	/// # 인자
+	/// - `reference_resolution_size`: 새 기준 해상도. (픽셀)
 	//==============================================================================
 	pub fn apply_reference_resolution_size(&mut self, reference_resolution_size: Vector2) {
 		self.reference_resolution_size = reference_resolution_size;
@@ -254,6 +356,9 @@ impl ViewManager {
 
 	//==============================================================================
 	/// 배율. (원본 device_pixel_ratio)
+	///
+	/// # 돌려줌
+	/// 창의 배율. (calculate_view_rect 에 넘긴 값, 0 이하였으면 1, 처음 1)
 	//==============================================================================
 	pub fn get_device_pixel_ratio(&self) -> f32 {
 		self.device_pixel_ratio
@@ -261,6 +366,9 @@ impl ViewManager {
 
 	//==============================================================================
 	/// 뷰 스케일 모드 설정. (다음 calculate_view_rect 부터 반영)
+	///
+	/// # 인자
+	/// - `view_scale_mode`: 새 뷰 스케일 모드.
 	//==============================================================================
 	pub fn set_view_scale_mode(&mut self, view_scale_mode: ViewScaleMode) {
 		self.view_scale_mode = view_scale_mode;
@@ -268,6 +376,9 @@ impl ViewManager {
 
 	//==============================================================================
 	/// 뷰 스케일 모드 반환.
+	///
+	/// # 돌려줌
+	/// 지금 뷰 스케일 모드.
 	//==============================================================================
 	pub fn get_view_scale_mode(&self) -> ViewScaleMode {
 		self.view_scale_mode
@@ -275,6 +386,9 @@ impl ViewManager {
 
 	//==============================================================================
 	/// 페이지 전체 크기. (원본 window.innerWidth, innerHeight, 데스크탑은 창 안쪽 논리 크기)
+	///
+	/// # 돌려줌
+	/// 페이지 전체의 논리 크기. (calculate_view_rect 전에는 0)
 	//==============================================================================
 	pub fn get_client_native_size(&self) -> Vector2 {
 		self.client_native_size
@@ -282,6 +396,9 @@ impl ViewManager {
 
 	//==============================================================================
 	/// 창 안쪽 논리 크기.
+	///
+	/// # 돌려줌
+	/// 창 안쪽 크기. (논리 픽셀, 물리 픽셀 / 배율을 반올림, calculate_view_rect 전에는 0)
 	//==============================================================================
 	pub fn get_canvas_native_size(&self) -> Vector2 {
 		self.canvas_native_size
@@ -289,6 +406,9 @@ impl ViewManager {
 
 	//==============================================================================
 	/// 창 안쪽 물리 픽셀 크기.
+	///
+	/// # 돌려줌
+	/// 그리기 버퍼 크기. (물리 픽셀, calculate_view_rect 에 넘긴 값)
 	//==============================================================================
 	pub fn get_canvas_pixel_size(&self) -> Vector2 {
 		self.canvas_pixel_size
@@ -296,6 +416,9 @@ impl ViewManager {
 
 	//==============================================================================
 	/// 기준 해상도.
+	///
+	/// # 돌려줌
+	/// 기준 해상도. (픽셀)
 	//==============================================================================
 	pub fn get_reference_resolution_size(&self) -> Vector2 {
 		self.reference_resolution_size
@@ -303,6 +426,9 @@ impl ViewManager {
 
 	//==============================================================================
 	/// 뷰 크기.
+	///
+	/// # 돌려줌
+	/// 씬이 그리는 좌표계의 크기. (None 모드는 창 안쪽 논리 크기, ExpandHeight 와 ExpandWidth 와 ExpandLong 은 창 비율로 셈한 크기, 그 밖은 기준 해상도)
 	//==============================================================================
 	pub fn get_view_size(&self) -> Vector2 {
 		self.view_size
@@ -310,6 +436,9 @@ impl ViewManager {
 
 	//==============================================================================
 	/// 뷰 영역. (창 안쪽 논리 좌표)
+	///
+	/// # 돌려줌
+	/// 창 안에서 뷰가 차지하는 영역. (논리 픽셀, 남는 여백은 영역 밖)
 	//==============================================================================
 	pub fn get_view_native_rect(&self) -> Rect {
 		self.view_native_rect
@@ -317,6 +446,9 @@ impl ViewManager {
 
 	//==============================================================================
 	/// 기준 해상도 → 화면 배율.
+	///
+	/// # 돌려줌
+	/// 뷰 한 단위가 창 안쪽 논리 픽셀 몇 개인지. (None 과 ReferenceResolution 모드는 1)
 	//==============================================================================
 	pub fn get_target_resolution_scale(&self) -> f32 {
 		self.target_resolution_scale
@@ -326,6 +458,9 @@ impl ViewManager {
 	/// 뷰 한 단위가 화면에서 몇 CSS 픽셀인지. (캔버스의 CSS 높이 / 뷰 높이, 못 재면 1)
 	/// - 뷰의 고정된 쪽은 늘 같은 길이라, 작은 화면(포털의 PC iframe 등)에서는 한 단위가 1 CSS 픽셀보다 한참 작아져 글자가 읽히지 않는다.
 	///   UI 층만 키울 배율을 셈할 때 쓴다. (예: 최소 CSS 배율 / 이 값)
+	///
+	/// # 돌려줌
+	/// 창 안쪽 논리 높이 / 뷰 높이. (둘 가운데 하나라도 0 이하면 1)
 	//==============================================================================
 	pub fn get_css_pixel_scale(&self) -> f32 {
 		let view_size = self.get_view_size();
@@ -341,6 +476,9 @@ impl ViewManager {
 	//==============================================================================
 	/// 렌더 배율 상한 설정. (고DPI 기기에서 캔버스가 지나치게 커지지 않게, 0 이면 제한하지 않는다)
 	/// - 웹은 다음 프레임 첫머리에 캔버스와 뷰 영역을 다시 맞춘다. 데스크탑은 그 배율로 줄인 크기로 그리고 프레임 끝에 창 크기로 늘인다. (desktop/renderscaler.rs)
+	///
+	/// # 인자
+	/// - `max_render_pixel_ratio`: 렌더 배율 상한. (0 이면 제한 없음, 음수는 0 으로 둔다)
 	//==============================================================================
 	pub fn set_max_render_pixel_ratio(&mut self, max_render_pixel_ratio: f32) {
 		self.max_render_pixel_ratio = max_render_pixel_ratio.max(0.0);
@@ -348,6 +486,9 @@ impl ViewManager {
 
 	//==============================================================================
 	/// 렌더 배율 상한 반환.
+	///
+	/// # 돌려줌
+	/// 렌더 배율 상한. (0 이면 제한 없음, 기본 0)
 	//==============================================================================
 	pub fn get_max_render_pixel_ratio(&self) -> f32 {
 		self.max_render_pixel_ratio
@@ -355,6 +496,23 @@ impl ViewManager {
 
 	//==============================================================================
 	/// 장치 배율에 렌더 배율 상한 걸기. (상한이 0 이거나 배율이 상한 이하면 그대로, 웹은 캔버스 크기를, 데스크탑은 그릴 크기를 정할 때 부른다)
+	///
+	/// # 인자
+	/// - `device_pixel_ratio`: 장치 배율.
+	///
+	/// # 돌려줌
+	/// 상한을 건 배율.
+	///
+	/// # 예제
+	/// 상한 2 를 걸면 배율 3 은 2 로
+	/// ```rust
+	/// use vanilla::{Vector2, ViewManager, ViewScaleMode};
+	///
+	/// let mut view_manager = ViewManager::new(Vector2::create(1280.0, 720.0), ViewScaleMode::StretchShort);
+	/// view_manager.set_max_render_pixel_ratio(2.0);
+	/// assert_eq!(view_manager.limit_render_pixel_ratio(3.0), 2.0);
+	/// assert_eq!(view_manager.limit_render_pixel_ratio(1.5), 1.5);
+	/// ```
 	//==============================================================================
 	pub fn limit_render_pixel_ratio(&self, device_pixel_ratio: f32) -> f32 {
 		if self.max_render_pixel_ratio > 0.0 && device_pixel_ratio > self.max_render_pixel_ratio {
@@ -367,6 +525,18 @@ impl ViewManager {
 	/// 종횡비에 맞는 뷰 스케일 모드 자동 선택. (바뀌면 바로 뷰 영역을 다시 셈한다)
 	/// - 화면이 기준 해상도보다 세로로 길면 가로를 고정하고 세로를 늘리고(StretchWidthExpandHeight),
 	///   가로로 길면 세로를 고정하고 가로를 늘린다(StretchHeightExpandWidth). (여러 게임이 복붙하던 로직)
+	///
+	/// # 예제
+	/// 세로로 긴 창은 가로 고정, 세로 늘리기
+	/// ```rust
+	/// use vanilla::{Vector2, ViewManager, ViewScaleMode};
+	///
+	/// let mut view_manager = ViewManager::new(Vector2::create(1280.0, 720.0), ViewScaleMode::StretchShort);
+	/// view_manager.calculate_view_rect(1500, 2000, 2.0);
+	/// view_manager.apply_aspect_view_scale_mode();
+	/// assert_eq!(view_manager.get_view_scale_mode(), ViewScaleMode::StretchWidthExpandHeight);
+	/// assert_eq!(view_manager.get_view_size(), Vector2::create(1280.0, 1707.0));
+	/// ```
 	//==============================================================================
 	pub fn apply_aspect_view_scale_mode(&mut self) {
 		let reference_resolution_size = self.get_reference_resolution_size();
@@ -392,6 +562,9 @@ impl ViewManager {
 
 	//==============================================================================
 	/// 세이프 에어리어 강제값 설정. (CSS 픽셀, 데스크탑에서 노치를 흉내 낼 때, None 이면 풀기)
+	///
+	/// # 인자
+	/// - `insets`: 강제할 인셋. (CSS 픽셀) None 이면 풀고 주소 값이나 CSS 값을 쓴다.
 	//==============================================================================
 	pub fn set_safe_area_override(&mut self, insets: Option<SafeAreaInsets>) {
 		self.safe_area_override = insets;
@@ -401,6 +574,9 @@ impl ViewManager {
 	/// 세이프 에어리어 인셋. (뷰 좌표)
 	/// - 우선순위: set_safe_area_override > 주소 ?safeArea=위,오른쪽,아래,왼쪽 > CSS env(safe-area-inset-*) 실측.
 	/// - CSS 픽셀을 기준 해상도 배율로 나눠 뷰 좌표로 바꾼다.
+	///
+	/// # 돌려줌
+	/// 뷰 좌표의 인셋. (무시할 쪽은 0, 배율이 0 이하면 CSS 픽셀 그대로)
 	//==============================================================================
 	pub fn get_safe_area_insets(&self) -> SafeAreaInsets {
 		let css_insets = match self.safe_area_override {
@@ -449,6 +625,21 @@ impl ViewManager {
 	//==============================================================================
 	/// 무시할 세이프 에어리어 쪽 설정. (get_safe_area_insets 가 그 쪽을 0 으로 돌려준다, 빈 목록이면 모두 쓴다)
 	/// - 플랫폼의 앱이 그 쪽을 이미 비켜 그리는 웹뷰처럼, 어느 쪽을 무시할지는 게임이 정해 넘긴다.
+	///
+	/// # 인자
+	/// - `sides`: 무시할 쪽 목록. (복사해 든다)
+	///
+	/// # 예제
+	/// 위와 왼쪽은 무시하기
+	/// ```rust
+	/// use vanilla::{SafeAreaInsets, SafeAreaSide, Vector2, ViewManager, ViewScaleMode};
+	///
+	/// let mut view_manager = ViewManager::new(Vector2::create(1280.0, 720.0), ViewScaleMode::None);
+	/// view_manager.calculate_view_rect(1280, 720, 1.0);
+	/// view_manager.set_safe_area_override(Some(SafeAreaInsets::create(40.0, 10.0, 30.0, 20.0)));
+	/// view_manager.set_ignored_safe_area_sides(&[SafeAreaSide::Top, SafeAreaSide::Left]);
+	/// assert_eq!(view_manager.get_safe_area_insets(), SafeAreaInsets::create(0.0, 10.0, 30.0, 0.0));
+	/// ```
 	//==============================================================================
 	pub fn set_ignored_safe_area_sides(&mut self, sides: &[SafeAreaSide]) {
 		self.ignored_safe_area_sides = sides.to_vec();
@@ -456,6 +647,9 @@ impl ViewManager {
 
 	//==============================================================================
 	/// 무시할 세이프 에어리어 쪽 반환.
+	///
+	/// # 돌려줌
+	/// 무시할 쪽 목록. (기본 빈 목록)
 	//==============================================================================
 	pub fn get_ignored_safe_area_sides(&self) -> &[SafeAreaSide] {
 		&self.ignored_safe_area_sides
@@ -463,6 +657,12 @@ impl ViewManager {
 
 	//==============================================================================
 	/// 창 안쪽 논리 좌표 → 뷰 좌표.
+	///
+	/// # 인자
+	/// - `canvas_position`: 창 안쪽 논리 좌표. (왼쪽 위 0)
+	///
+	/// # 돌려줌
+	/// 뷰 좌표. (반올림한 값, 배율이 0 이면 (0, 0))
 	//==============================================================================
 	pub fn canvas_position_to_view_position(&self, canvas_position: Vector2) -> Vector2 {
 		let device_pixel_ratio = self.get_device_pixel_ratio();
@@ -480,6 +680,13 @@ impl ViewManager {
 
 	//==============================================================================
 	/// 화면(client) 좌표를 뷰 좌표로. (캔버스의 지금 자리를 빼서 canvas_position_to_view_position 으로 바꾼다)
+	///
+	/// # 인자
+	/// - `client_x`: 화면 x. (논리 픽셀, 웹은 페이지 기준, 데스크탑은 창 안쪽 기준)
+	/// - `client_y`: 화면 y. (논리 픽셀)
+	///
+	/// # 돌려줌
+	/// 뷰 좌표. (반올림한 값)
 	//==============================================================================
 	pub fn convert_client_to_view(&self, client_x: f32, client_y: f32) -> Vector2 {
 		let canvas_client_position = platform::read_canvas_client_position();

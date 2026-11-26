@@ -1,6 +1,17 @@
 # 업데이트 기록
 
 # 아직 release 에 합치지 않은 것 (release 에 합칠 때 패치 판을 하나 올려 매긴다)
+- 폴더: 원본 vanilla.js 가 src/experimental 에 있던 다 자란 기능을 제자리로 옮겨, 두 엔진의 폴더가 같아졌다. 러스트 판은 이미 이 자리였고 모듈 경로(vanilla::graphics3d 같은)는 그대로다. 원본에서 import.js 로 쓰던 게임은 그대로, 파일 경로로 직접 import 하던 게임은 새 경로로 바꾼다. 파일 머리 주석과 ARCHITECTURE 9장의 원본 경로를 새 경로로 고쳤다. (원본의 옛 경로 → 새 경로)
+  - src/experimental/graphics/*.js (3D) → src/graphics3d/*.js (러스트 graphics3d/)
+  - src/experimental/graphics/toon/*.js (툰 3D) → src/graphics3d/toon/*.js (러스트 graphics3d/toon/)
+  - src/experimental/graphics/fullscreenpass.js → src/core/fullscreenpass.js (러스트 core/fullscreenpass.rs)
+  - src/experimental/animation/animator.js, timeline.js, src/experimental/action.js → src/animation/ (러스트 animation/)
+  - src/experimental/indicator.js, visual/visual.js → src/misc/ (러스트 misc/)
+  - src/experimental/bunchasset.js, visual/visualasset.js → src/resource/ (러스트 resource/)
+  - src/experimental/collection/*.js → src/base/collection/*.js (러스트는 표준 Vec, HashMap 같은 것이 맡아 없다)
+  - src/experimental/camera.js → src/deprecated/camera.js (원본도 폐기 예정, 러스트는 Camera2D 가 덮어 없다)
+  - src/experimental/aabb.js, transform2d.js, graphics/gl2d.js, graphics/webgl2.js (죽은 코드) → src/deprecated/ (러스트에는 없다)
+- experimental: vanilla::experimental 모듈(src/experimental/mod.rs)을 새로 두었다. 0.4.0 뒤 기능의 초안 자리다. (원본 import.js 의 Experimental 이름 공간 자리) 초안은 API 가 바뀔 수 있다. 지금은 비어 있다
 - 이름을 러스트 규칙(Rust API Guidelines C-CASE)으로 바꿨다. 함수, 메서드, 변수, 필드, 모듈은 snake_case, 열거 값은 UpperCamelCase, 연관 상수는 SCREAMING_SNAKE_CASE. (setFillColor → set_fill_color, Colors::white → Colors::WHITE, Pivot::topLeft → Pivot::TOP_LEFT, ButtonState::normal → ButtonState::Normal) 이름 경고를 끄던 #![allow(non_snake_case)] 등을 lib.rs 와 예제에서 뺐다. 엔진을 쓰는 코드는 같은 규칙으로 이름을 바꿔야 한다. (공개 API 를 바꾸는 일이다) 바꾼 곳 11,071 군데, 동작은 같다. (cargo test 252 통과, 데스크탑과 웹 빌드 경고 0, 예제 화면이 전과 같음)
 - README: macOS(애플 실리콘) 데스크탑에서 확인함을 적었다
 - 외계행성 광부 키우기가 게임 쪽에 따로 만들어 쓰던 범용 기능을 엔진으로 옮긴다. (vanilla.js 에 먼저 넣은 것과 같은 기능, 게임의 콘텐츠 구현은 가져오지 않는다)
@@ -551,6 +562,25 @@
 - 예제 toonmaterial: 애버런트 몸 셰이딩 식 대조를 뺐다. (게임 하나의 식이고, 엔진 빛 꼴이 정석으로 바뀌어 같은 값이 나오지 않는다) 바위 정점 조각의 노멀 크기 맞춤을 뺐다
 - 예제 toonstyle: 그늘 셋, 단단한 하이라이트, 해 쪽 림, 스포트라이트, 매트캡, TOON_STYLE_SHELL=1 로 껍데기 바깥선. 원본과 견주면 2560x1440 에서 화소 차이 평균 0.004, 8 넘게 다른 화소 0.018% (껍데기 장면은 0.279%, 기하 가장자리의 MSAA 차이)
 - 툰 폴더 파일의 머리 주석을 채웠다. (모든 함수와 공개 칸)
+- 툰을 유니티와 언리얼이 기본으로 갖춘 수준까지 채웠다. (vanilla.js 와 같은 셰이더, 같은 값)
+  - ShadowMap: 지을 때 앞의 텍스처와 프레임버퍼 묶음을 돌린다. (모형 뒤에 지으면 깊이 텍스처가 유닛에 남아 INVALID_OPERATION 이던 것) 빛이 거의 바로 아래나 위로 나아가면 위쪽을 z 축으로 잡는다. (광원 행렬이 깨지던 것)
+  - ShadowAtlas, ShadowAtlasLight, ShadowAtlasLightSource, ShadowAtlasTile, SHADOW_ATLAS_MAXIMUM_LIGHTS: 점광(큐브 여섯 면)과 스포트라이트(원근 한 칸)의 그림자를 깊이 텍스처 한 장에 칸으로. update_lights(&light_set.read_shadow_light_sources()). 받는 자리는 노멀 쪽으로 칸 텍셀 (1 + 3 x (1 - dot(N, L))) 개만큼 밀어 그림자 여드름을 막는다
+  - ToonRenderer: set_local_shadows(Option<&ShadowAtlas>, 세기), begin_shadow_atlas_pass, set_shadow_atlas_tile, set_outline_fade_distance, get_outline_fade_distance, set_light_color_usage, set_shade_rim_light. ToonDrawQueue::draw_local_shadows
+  - ToonPointLight: casts_shadow, shadow_near (기본 false, 0.05). 이름으로 지을 때는 ..ToonPointLight::default()
+  - ToonLightSet: set_light_color_usage(ToonLightColorUsage), set_shade_rim_light, get_shade_rim_light (ToonShadeRimLight), read_shadow_light_sources. 림, 매트캡, 껍데기 바깥선도 기본으로 해의 색을 곱한다. 지금까지 모습은 ToonLightColorUsage { rim: false, matcap: false, outline: false, ..Default }
+  - ToonDrawOptions: outline_offset_z, angel_ring_texture, angel_ring_color, angel_ring_offset_u, angel_ring_offset_v, is_angel_ring_alpha
+  - 2 번 UV: ToonGeometry.uvs1, ToonMeshArrays.uv1_data, add_triangles_with_uvs 의 마지막 인자 uvs1 (공개 API 를 바꿨다, 2 번 UV 가 없으면 None), read_glb_arrays 가 TEXCOORD_1 을 읽는다. read_uv_data
+  - 텍스처 유닛: 점광 그림자 0, 천사 고리 7, 머티리얼 8 ~ 15. TOON_MAXIMUM_MATERIAL_TEXTURES 9 → 8. 유닛 0 은 begin_frame 이 적어 두고 end_frame 이 돌린다
+- ToonScreenOutline: 반 크기 판의 계단을 없앴다. 선의 판과 씨앗은 그리는 영역 해상도, 점프 플러딩만 줄인 판(모으기 패스로 씨앗을 모음), 씨앗 자리는 그리는 영역 화소 좌표. set_resolution_scale 은 넓히기 판의 몫이다. ToonLineTarget: seed_framebuffer, seed_texture, jump_flood_framebuffers, jump_flood_textures, jump_flood_index, jump_flood_width, jump_flood_height. read_program_sources 가 다섯을 준다
+- 예제 toonstyle: 점광과 스포트라이트 그림자, 그늘 쪽 림, 천사 고리, 껍데기 바깥선 사라지기와 카메라 쪽 밀기. 원본과 견주면 화소 차이 평균 0.005 (반 크기 판 0.008, 껍데기 0.163 은 MSAA 차이)
+- 문서: 함수와 타입의 머리 주석(`//====` 두 줄 사이) 설명 줄을 rustdoc 문서 주석(`///`, 파일 머리는 `//!`, 필드와 열거 값은 바로 위 `///`)으로 바꾸고, 공개 API 모두에 설명, `# 인자`, `# 돌려줌`, `# 예제` 를 채웠다. 머리 주석이 없던 함수에도 달았다. 예제 869 개(모듈 44, 구조체와 트레이트 377, 멤버 384, 함수 64)는 `cargo test --doc` 이 컴파일하고 돌린다. (창이나 GL 이 있어야 하는 것은 no_run 으로 컴파일만) 꼴은 CLAUDE.md 의 '문서 주석'. 입력 필드, Pane, Canvas2D, LocalStorage, PersistedStore, storagetext, 툰 3D 는 주석 꼴만 바뀌었고 인자, 돌려줌, 예제는 나중에 채운다
+- tools/apidoc(워크스페이스 크레이트 vanilla-engine-apidoc, syn 과 serde_json 만 쓴다): 문서 주석에서 API 문서 자료 docs/api/<판>.json 을 뽑는다. vanilla.js tools/apidoc.cjs 와 같은 자료 꼴에 클래스의 kind(struct, trait, type), traits, counterpart 를 더했다. --check(꼴 검사와 수 세기, 가이드 ko 와 en 대조), --missing(번역 표에 없는 ko 글), --gaps(문서가 빈 곳), --counterpart(vanilla.js 자료와 이름으로 짝 짓기). since 는 v0.3.2 태그의 소스와 대어 정한다. 쓰는 법은 tools/TOOLS.md
+- docs/api/0.4.0.json(모듈 216, 클래스 496, 멤버 4930, 함수와 상수 354, 열거 89), 영어 번역 표 docs/api/translation.en.json, vanilla.js 와 같은 항목의 짝 표 docs/api/counterpart.0.4.0.json(vanilla.js 쪽 자료가 러스트 짝을 채울 때도 쓴다)
+- 가이드 docs/guide/0.4.0/ko, en: 개요, 빠른 시작, 구조, 도구와 05 프로젝트 시작부터 19 저작 도구까지(원본 vanilla.js 가이드와 같은 장), 러스트 판만의 20 반사 매크로, 21 async/await, 22 원본에서 옮겨 오기. 코드 칸 216 개 가운데 rust 칸은 tools/apidoc 의 라이브러리 자리가 doctest 로 컴파일하고 돌린다. (장 목록 tools/apidoc/src/guide.rs 는 apidoc 이 장 파일마다 include_str 문서 속성으로 다시 쓴다) 업데이트 문서 docs/update/0.4.0.ko.md, .en.md
+- 천사 고리: 카메라 기울임만큼 UV 를 되돌려 돌린다. (vanilla.js 와 같은 셈, read_camera_roll) 카메라를 기울여도 고리가 머리에 붙어 있다
+- 빛 세기 막기: ToonLightSet::set_light_intensity_limited, is_light_intensity_limited (렌더러에도 set_light_intensity_limited). 유니티 툰 셰이더의 Limit Light Intensity 와 같은 셈, 기본 켬. 지금까지 모습은 set_light_intensity_limited(false). 빛 색 쓰기를 끈 색의 세기와 껍데기 바깥선의 해 색도 유니티 툰 셰이더와 같게
+- ShadowAtlas::new(gl, 해상도, 칸 해상도): 칸 크기를 유니티 URP 기본과 같게 칸마다 1024 를 바라고 다 들어가지 않으면 반씩 줄인다. DEFAULT_SHADOW_ATLAS_RESOLUTION (2048), DEFAULT_SHADOW_ATLAS_TILE_RESOLUTION (1024), get_tile_resolution. (new 에 인자가 하나 늘었다)
+- 예제 toonstyle: TOON_STYLE_ROLL 로 카메라를 기울인다. 원본과 견주면 화소 차이 평균 0.005 (기울인 장면 0.005)
 
 # 0.3.2 (2026-11-18)
 - 첫 공개. vanilla.js 를 러스트로 옮겼다. 옮긴 원본은 vanilla.js dev 의 5efe62a(0.3.2 와 그 뒤 dev 커밋 둘)다. 판 번호는 vanilla.js 0.3.2 에서 이어 받고, 그 뒤로는 이 저장소대로 올린다.

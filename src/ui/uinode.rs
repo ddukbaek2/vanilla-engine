@@ -16,19 +16,13 @@
 //!   ```
 //! - 원본과 다른 것:
 //!   - 원본은 TransformNode 를 상속한 따로 된 노드이고 pushTransform 에서 솔버 값으로 옮긴다. 러스트 판은 노드가 WorldNode 하나뿐이라
-//!   ```text
 //!     WorldNode 에 붙는 컴포넌트이고, 솔버 값을 노드의 자리(local_position, 피봇과 앵커는 왼쪽 위)와 content_size 로 옮긴다.
 //!     옮기는 때는 컴포넌트 tick 과 apply_layout_in_tree(UISceneBase 가 솔버를 푼 바로 뒤에 부른다)다. 원본은 그릴 때마다 읽는다.
-//!   ```
 //!   - 원본 getIntrinsicContentSize 는 노드의 컴포넌트 가운데 그 함수가 있는 것(Text, RichText)의 값을 모은다. 러스트 판은 Component::get_intrinsic_content_size 를 모은다.
-//!   ```text
 //!     원본 UILabel 은 글이 바뀔 때 노드의 invalidateIntrinsicContentSize 를 부른다. 러스트 판의 컴포넌트는 노드의 다른 컴포넌트를 부를 수 없어서,
 //!     UINode 가 tick(과 UISceneBase 의 솔버 붙이기)마다 컴포넌트들의 값을 다시 읽어 바뀌었으면 스스로 invalidate 한다.
-//!   ```
 //!   - 원본이 예외를 던지는 곳(솔버의 겹친 제약, 만족할 수 없는 required 제약)은 `Result<(), LayoutError>` 를 돌려준다.
-//!   ```text
 //!     (add_constraint, remove_constraint, set_solver, set_layout_margins, invalidate_intrinsic_content_size)
-//!   ```
 //!   - 앵커는 원본의 게터 속성(leftAnchor) 대신 함수(left_anchor)다. 축 인자는 문자열 대신 LayoutConstraintAxis 열거라 "지원되지 않는 축" 예외가 없다.
 //!   - layout margins guide 는 원본처럼 트리에 들지 않는 UINode 다. 러스트 판은 이 UINode 가 Box 로 품는다.
 //==============================================================================
@@ -52,18 +46,43 @@ pub const NO_INTRINSIC_METRIC: f32 = -1.0;
 
 //==============================================================================
 /// 레이아웃 여백. (UIKit 의 UIView.layoutMargins, 원본 { top, left, bottom, right })
+/// - 만드는 함수의 인자 차례는 위, 왼쪽, 아래, 오른쪽이다.
+///
+/// # 예제
+/// 여백 만들기와 UINode 의 기본 여백
+/// ```rust
+/// use vanilla::{LayoutMargins, UINode};
+///
+/// let margins = LayoutMargins::create(4.0, 12.0, 4.0, 12.0);
+/// assert_eq!(margins.top, 4.0);
+/// assert_eq!(margins.left, 12.0);
+/// assert_eq!(UINode::new().get_layout_margins(), LayoutMargins::create(8.0, 8.0, 8.0, 8.0));
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LayoutMargins {
+	/// 위 여백. (픽셀)
 	pub top: f64,
+	/// 왼쪽 여백. (픽셀)
 	pub left: f64,
+	/// 아래 여백. (픽셀)
 	pub bottom: f64,
+	/// 오른쪽 여백. (픽셀)
 	pub right: f64,
 }
 
 impl LayoutMargins {
 	//==============================================================================
 	/// 생성.
+	///
+	/// # 인자
+	/// - `top`: 위 여백. (픽셀)
+	/// - `left`: 왼쪽 여백. (픽셀)
+	/// - `bottom`: 아래 여백. (픽셀)
+	/// - `right`: 오른쪽 여백. (픽셀)
+	///
+	/// # 돌려줌
+	/// 새 여백.
 	//==============================================================================
 	pub fn create(top: f64, left: f64, bottom: f64, right: f64) -> LayoutMargins {
 		LayoutMargins {
@@ -77,6 +96,37 @@ impl LayoutMargins {
 
 //==============================================================================
 /// UI 노드.
+/// - 노드에 붙는 컴포넌트다. 솔버 변수 8 개와 본질 제약 4 개를 들고, 사용자 제약을 기억해 두었다가 솔버에 건다.
+///
+/// # 예제
+/// 화면 가이드에서 16 픽셀 안쪽에 놓인 제목 띠
+/// ```rust
+/// use vanilla::{LayoutSolver, NodeTree, UINode, Vector2};
+///
+/// let solver = LayoutSolver::new();
+/// let mut screen_node = UINode::new();
+/// screen_node.set_solver(Some(solver.clone())).unwrap();
+/// screen_node.add_constraint(&screen_node.left_anchor().equal_to(0)).unwrap();
+/// screen_node.add_constraint(&screen_node.top_anchor().equal_to(0)).unwrap();
+/// screen_node.add_constraint(&screen_node.width_anchor().equal_to(800)).unwrap();
+/// screen_node.add_constraint(&screen_node.height_anchor().equal_to(600)).unwrap();
+///
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.get_root_id();
+/// let title_id = node_tree.create_child(root_id, "title");
+/// node_tree.add_component(title_id, UINode::new());
+/// node_tree.with_component_mut::<UINode, _>(title_id, |title, _tree| {
+/// 	title.set_solver(Some(solver.clone())).unwrap();
+/// 	title.add_constraint(&title.left_anchor().equal_to(screen_node.left_anchor().add(16))).unwrap();
+/// 	title.add_constraint(&title.top_anchor().equal_to(screen_node.top_anchor().add(16))).unwrap();
+/// 	title.add_constraint(&title.right_anchor().equal_to(screen_node.right_anchor().subtract(16))).unwrap();
+/// 	title.add_constraint(&title.height_anchor().equal_to(48)).unwrap();
+/// });
+/// solver.update_variables();
+/// UINode::apply_layout_in_tree(&mut node_tree, root_id);
+/// assert_eq!(node_tree[title_id].get_local_position(), Vector2::create(16.0, 16.0));
+/// assert_eq!(node_tree[title_id].get_content_size(), Vector2::create(768.0, 48.0));
+/// ```
 //==============================================================================
 pub struct UINode {
 	component_base: ComponentBase,
@@ -107,6 +157,9 @@ pub struct UINode {
 impl UINode {
 	//==============================================================================
 	/// 생성. (본질 제약 4 개를 만든다, hug 250, 압축 저항 750, 여백 8)
+	///
+	/// # 돌려줌
+	/// 솔버가 없는 새 UI 노드. (본질 제약은 지어 두고 솔버를 붙일 때 건다)
 	//==============================================================================
 	pub fn new() -> UINode {
 		let mut ui_node = UINode {
@@ -138,6 +191,9 @@ impl UINode {
 
 	//==============================================================================
 	/// 컨텐트 크기 반환. (솔버가 푼 width, height)
+	///
+	/// # 돌려줌
+	/// (width, height) 의 f32 값. (update_variables 뒤에 맞는 값)
 	//==============================================================================
 	pub fn get_content_size(&self) -> Vector2 {
 		Vector2::create(self.get_width() as f32, self.get_height() as f32)
@@ -146,6 +202,9 @@ impl UINode {
 	//==============================================================================
 	/// 본질 제약 4 개 생성.
 	/// - right == left + width, bottom == top + height, center_x == left + width / 2, center_y == top + height / 2
+	///
+	/// # 돌려줌
+	/// 본질 제약 4 개. (부를 때마다 새로 만든 제약이라 솔버에 건 것과 같은 제약이 아니다)
 	//==============================================================================
 	pub fn build_intrinsic_constraints(&self) -> Vec<LayoutConstraint> {
 		let right_constraint = self.right_anchor().equal_to(self.left_anchor().add(self.width_anchor()));
@@ -158,6 +217,9 @@ impl UINode {
 	//==============================================================================
 	/// intrinsic content size 기반 제약(hug, compression resistance) 생성. (축의 값이 NO_INTRINSIC_METRIC 이면 그 축은 만들지 않는다)
 	/// - hug: width <= intrinsic_width @ hugging, compression: width >= intrinsic_width @ compression resistance
+	///
+	/// # 돌려줌
+	/// 선호가 있는 축마다 hug 와 압축 저항 제약 2 개씩, 0 ~ 4 개. (새로 만든 제약)
 	//==============================================================================
 	pub fn build_intrinsic_size_constraints(&self) -> Vec<LayoutConstraint> {
 		let intrinsic_size = self.get_intrinsic_content_size();
@@ -179,6 +241,9 @@ impl UINode {
 
 	//==============================================================================
 	/// intrinsic content size 반환. (노드 컴포넌트들의 값의 큰 쪽, 마지막으로 읽은 값. 축마다 NO_INTRINSIC_METRIC 이면 선호 없음)
+	///
+	/// # 돌려줌
+	/// 마지막으로 읽은 intrinsic content size. (처음은 두 축 모두 NO_INTRINSIC_METRIC)
 	//==============================================================================
 	pub fn get_intrinsic_content_size(&self) -> Vector2 {
 		self.intrinsic_content_size
@@ -186,6 +251,12 @@ impl UINode {
 
 	//==============================================================================
 	/// 노드 컴포넌트들의 intrinsic content size 모으기. (원본 getIntrinsicContentSize 기본 구현, 정적)
+	///
+	/// # 인자
+	/// - `node`: 컴포넌트를 볼 노드.
+	///
+	/// # 돌려줌
+	/// 컴포넌트들의 get_intrinsic_content_size 를 축마다 큰 쪽으로 모은 값. (모두 선호가 없거나 컴포넌트가 없으면 NO_INTRINSIC_METRIC)
 	//==============================================================================
 	pub fn collect_intrinsic_content_size(node: &WorldNode) -> Vector2 {
 		let mut maximum_width = NO_INTRINSIC_METRIC;
@@ -204,6 +275,28 @@ impl UINode {
 
 	//==============================================================================
 	/// intrinsic content size 를 바꾸고 바뀌었으면 제약을 다시 건다. (UISceneBase 와 tick 이 노드 컴포넌트에서 읽어 부른다)
+	///
+	/// # 인자
+	/// - `intrinsic_content_size`: 새 intrinsic content size. (픽셀, 축마다 NO_INTRINSIC_METRIC 이면 선호 없음)
+	///
+	/// # 돌려줌
+	/// Ok(()). 값이 같으면 아무것도 하지 않는다. 솔버에서 옛 제약을 빼거나 새 제약을 걸다 실패하면 그 LayoutError.
+	///
+	/// # 예제
+	/// 다른 제약이 없으면 너비와 높이가 자연 크기를 따른다
+	/// ```rust
+	/// use vanilla::{LayoutSolver, UINode, Vector2};
+	///
+	/// let solver = LayoutSolver::new();
+	/// let mut label = UINode::new();
+	/// label.set_solver(Some(solver.clone())).unwrap();
+	/// label.add_constraint(&label.left_anchor().equal_to(10)).unwrap();
+	/// label.add_constraint(&label.top_anchor().equal_to(5)).unwrap();
+	/// label.set_intrinsic_content_size(Vector2::create(120.0, 30.0)).unwrap();
+	/// solver.update_variables();
+	/// assert!((label.get_width() - 120.0).abs() < 0.001);
+	/// assert!((label.get_height() - 30.0).abs() < 0.001);
+	/// ```
 	//==============================================================================
 	pub fn set_intrinsic_content_size(&mut self, intrinsic_content_size: Vector2) -> Result<(), LayoutError> {
 		if self.intrinsic_content_size == intrinsic_content_size {
@@ -215,6 +308,9 @@ impl UINode {
 
 	//==============================================================================
 	/// intrinsic content size 무효화. (UIKit 의 invalidateIntrinsicContentSize, 솔버의 옛 제약을 빼고 새 값으로 다시 건다)
+	///
+	/// # 돌려줌
+	/// Ok(()). 솔버가 없으면 제약만 다시 짓는다. 솔버에서 옛 제약을 빼거나 새 제약을 걸다 실패하면 그 LayoutError.
 	//==============================================================================
 	pub fn invalidate_intrinsic_content_size(&mut self) -> Result<(), LayoutError> {
 		if let Some(solver) = self.solver.as_ref() {
@@ -235,6 +331,12 @@ impl UINode {
 
 	//==============================================================================
 	/// content hugging 우선순위 반환. (UIKit 의 contentHuggingPriority(for:))
+	///
+	/// # 인자
+	/// - `axis`: 볼 축.
+	///
+	/// # 돌려줌
+	/// 그 축의 hug 우선순위. (기본 250)
 	//==============================================================================
 	pub fn get_content_hugging_priority(&self, axis: LayoutConstraintAxis) -> f64 {
 		match axis {
@@ -249,6 +351,33 @@ impl UINode {
 
 	//==============================================================================
 	/// content hugging 우선순위 설정. (intrinsic size 제약을 바로 다시 건다)
+	///
+	/// # 인자
+	/// - `priority`: hug 우선순위. (UIKit 꼴 1 ~ 1000, LayoutStrength::from_priority 로 강도가 된다)
+	/// - `axis`: 바꿀 축.
+	///
+	/// # 돌려줌
+	/// Ok(()). intrinsic size 제약을 다시 걸다 실패하면 그 LayoutError.
+	///
+	/// # 예제
+	/// hug 를 바라는 너비(우선순위 500)보다 높이면 자연 너비로 줄어든다
+	/// ```rust
+	/// use vanilla::{LayoutConstraintAxis, LayoutSolver, LayoutStrength, UINode, Vector2};
+	///
+	/// let solver = LayoutSolver::new();
+	/// let mut label = UINode::new();
+	/// label.set_solver(Some(solver.clone())).unwrap();
+	/// label.add_constraint(&label.left_anchor().equal_to(0)).unwrap();
+	/// label.add_constraint(&label.top_anchor().equal_to(0)).unwrap();
+	/// label.set_intrinsic_content_size(Vector2::create(120.0, 30.0)).unwrap();
+	/// label.add_constraint(&label.width_anchor().equal_to(200).with_strength(LayoutStrength::from_priority(500.0))).unwrap();
+	/// solver.update_variables();
+	/// assert!((label.get_width() - 200.0).abs() < 0.001);
+	///
+	/// label.set_content_hugging_priority(600.0, LayoutConstraintAxis::Horizontal).unwrap();
+	/// solver.update_variables();
+	/// assert!((label.get_width() - 120.0).abs() < 0.001);
+	/// ```
 	//==============================================================================
 	pub fn set_content_hugging_priority(&mut self, priority: f64, axis: LayoutConstraintAxis) -> Result<(), LayoutError> {
 		match axis {
@@ -264,6 +393,12 @@ impl UINode {
 
 	//==============================================================================
 	/// content compression resistance 우선순위 반환.
+	///
+	/// # 인자
+	/// - `axis`: 볼 축.
+	///
+	/// # 돌려줌
+	/// 그 축의 압축 저항 우선순위. (기본 750)
 	//==============================================================================
 	pub fn get_content_compression_resistance_priority(&self, axis: LayoutConstraintAxis) -> f64 {
 		match axis {
@@ -278,6 +413,13 @@ impl UINode {
 
 	//==============================================================================
 	/// content compression resistance 우선순위 설정. (intrinsic size 제약을 바로 다시 건다)
+	///
+	/// # 인자
+	/// - `priority`: 압축 저항 우선순위. (UIKit 꼴 1 ~ 1000, LayoutStrength::from_priority 로 강도가 된다)
+	/// - `axis`: 바꿀 축.
+	///
+	/// # 돌려줌
+	/// Ok(()). intrinsic size 제약을 다시 걸다 실패하면 그 LayoutError.
 	//==============================================================================
 	pub fn set_content_compression_resistance_priority(&mut self, priority: f64, axis: LayoutConstraintAxis) -> Result<(), LayoutError> {
 		match axis {
@@ -293,6 +435,9 @@ impl UINode {
 
 	//==============================================================================
 	/// layout margins 반환. (UIKit 의 UIView.layoutMargins)
+	///
+	/// # 돌려줌
+	/// 여백. (기본은 네 쪽 모두 8)
 	//==============================================================================
 	pub fn get_layout_margins(&self) -> LayoutMargins {
 		self.layout_margins
@@ -300,6 +445,12 @@ impl UINode {
 
 	//==============================================================================
 	/// layout margins 설정. (가이드가 이미 있으면 가이드 제약을 바로 다시 건다)
+	///
+	/// # 인자
+	/// - `layout_margins`: 새 여백.
+	///
+	/// # 돌려줌
+	/// Ok(()). 가이드가 아직 없으면 값만 바꾼다. 가이드 제약을 다시 걸다 실패하면 그 LayoutError.
 	//==============================================================================
 	pub fn set_layout_margins(&mut self, layout_margins: LayoutMargins) -> Result<(), LayoutError> {
 		self.layout_margins = layout_margins;
@@ -312,6 +463,29 @@ impl UINode {
 	//==============================================================================
 	/// layout margins guide 반환. (UIKit 의 UIView.layoutMarginsGuide, 처음 부를 때 만들고 여백 제약 4 개를 건다)
 	/// - 가이드는 트리에 들지 않아 그려지지 않고 앵커만 쓴다. 여백 제약이 솔버와 부딪히면 가이드는 만들되 그 제약은 걸리지 않는다.
+	///
+	/// # 돌려줌
+	/// 여백 가이드 UINode 의 참조. (앵커와 변수만 쓴다)
+	///
+	/// # 예제
+	/// 300 x 200 판의 여백 가이드
+	/// ```rust
+	/// use vanilla::{LayoutMargins, LayoutSolver, UINode};
+	///
+	/// let solver = LayoutSolver::new();
+	/// let mut panel = UINode::new();
+	/// panel.set_solver(Some(solver.clone())).unwrap();
+	/// panel.add_constraint(&panel.left_anchor().equal_to(0)).unwrap();
+	/// panel.add_constraint(&panel.top_anchor().equal_to(0)).unwrap();
+	/// panel.add_constraint(&panel.width_anchor().equal_to(300)).unwrap();
+	/// panel.add_constraint(&panel.height_anchor().equal_to(200)).unwrap();
+	/// panel.set_layout_margins(LayoutMargins::create(10.0, 20.0, 10.0, 20.0)).unwrap();
+	/// let guide_left = panel.get_layout_margins_guide().get_left_variable().clone();
+	/// let guide_right = panel.get_layout_margins_guide().get_right_variable().clone();
+	/// solver.update_variables();
+	/// assert!((guide_left.get_value() - 20.0).abs() < 1e-6);
+	/// assert!((guide_right.get_value() - 280.0).abs() < 1e-6);
+	/// ```
 	//==============================================================================
 	pub fn get_layout_margins_guide(&mut self) -> &UINode {
 		if self.layout_margins_guide.is_none() {
@@ -327,6 +501,9 @@ impl UINode {
 
 	//==============================================================================
 	/// layout margins guide 의 여백 제약 4 개를 다시 짓는다. (옛 제약을 빼고 지금 여백으로 지어 다시 건다)
+	///
+	/// # 돌려줌
+	/// Ok(()). 가이드가 없으면 아무것도 하지 않는다. 솔버에서 옛 제약을 빼거나 새 제약을 걸다 실패하면 그 LayoutError.
 	//==============================================================================
 	pub fn rebuild_layout_margins_guide_constraints(&mut self) -> Result<(), LayoutError> {
 		let guide = match self.layout_margins_guide.as_ref() {
@@ -360,6 +537,29 @@ impl UINode {
 
 	//==============================================================================
 	/// 솔버 설정, 변경, 해제. (옛 솔버에서 이 노드의 제약을 모두 빼고 새 솔버에 다시 건다, 가이드도 함께 옮긴다. None 이면 빼기만 한다)
+	///
+	/// # 인자
+	/// - `solver`: 붙일 솔버. (값싼 핸들 복제를 준다) None 이면 옛 솔버에서 떼기만 한다.
+	///
+	/// # 돌려줌
+	/// Ok(()). 옛 솔버에서 제약을 빼거나 새 솔버에 걸다 실패하면 그 LayoutError.
+	///
+	/// # 예제
+	/// 솔버를 붙이면 기억해 둔 제약이 걸리고, 떼면 빠진다
+	/// ```rust
+	/// use vanilla::{LayoutSolver, UINode};
+	///
+	/// let solver = LayoutSolver::new();
+	/// let mut ui_node = UINode::new();
+	/// let width_constraint = ui_node.width_anchor().equal_to(100);
+	/// ui_node.add_constraint(&width_constraint).unwrap();
+	/// assert!(!solver.has_constraint(&width_constraint));
+	/// ui_node.set_solver(Some(solver.clone())).unwrap();
+	/// assert!(solver.has_constraint(&width_constraint));
+	/// ui_node.set_solver(None).unwrap();
+	/// assert!(!solver.has_constraint(&width_constraint));
+	/// assert!(ui_node.get_solver().is_none());
+	/// ```
 	//==============================================================================
 	pub fn set_solver(&mut self, solver: Option<LayoutSolver>) -> Result<(), LayoutError> {
 		if let Some(previous_solver) = self.solver.as_ref() {
@@ -389,6 +589,9 @@ impl UINode {
 
 	//==============================================================================
 	/// 솔버 반환.
+	///
+	/// # 돌려줌
+	/// 붙인 솔버. 없으면 None.
 	//==============================================================================
 	pub fn get_solver(&self) -> Option<&LayoutSolver> {
 		self.solver.as_ref()
@@ -397,6 +600,12 @@ impl UINode {
 	//==============================================================================
 	/// 사용자 제약 추가. (솔버가 있으면 바로 건다)
 	/// - 솔버가 받지 않으면(이미 더한 제약, 모순 제약) 그 오류를 돌려주고 목록에도 남기지 않는다.
+	///
+	/// # 인자
+	/// - `constraint`: 걸 제약. (핸들 복제를 사용자 제약 목록에 두었다가 솔버를 바꿀 때 옮겨 건다)
+	///
+	/// # 돌려줌
+	/// Ok(()). 솔버에 걸다 실패하면 그 LayoutError. (실패해도 사용자 제약 목록에는 남는다)
 	//==============================================================================
 	pub fn add_constraint(&mut self, constraint: &LayoutConstraint) -> Result<(), LayoutError> {
 		if let Some(solver) = self.solver.as_ref() {
@@ -408,6 +617,12 @@ impl UINode {
 
 	//==============================================================================
 	/// 사용자 제약 빼기. (솔버에서도 뺀다)
+	///
+	/// # 인자
+	/// - `constraint`: 뺄 제약. (건 핸들이나 그 복제)
+	///
+	/// # 돌려줌
+	/// Ok(()). 목록에 없거나 솔버에 걸려 있지 않아도 Ok. 솔버에서 빼다 실패하면 그 LayoutError.
 	//==============================================================================
 	pub fn remove_constraint(&mut self, constraint: &LayoutConstraint) -> Result<(), LayoutError> {
 		if let Some(index) = self.user_constraints.iter().position(|candidate| candidate == constraint) {
@@ -423,6 +638,9 @@ impl UINode {
 
 	//==============================================================================
 	/// 등록한 사용자 제약 목록. (사본)
+	///
+	/// # 돌려줌
+	/// 사용자 제약 목록의 사본. (핸들 복제라 솔버에 건 제약과 같은 제약이다)
 	//==============================================================================
 	pub fn get_constraints(&self) -> Vec<LayoutConstraint> {
 		self.user_constraints.clone()
@@ -430,6 +648,9 @@ impl UINode {
 
 	//==============================================================================
 	/// 왼쪽 변수 반환. (식 밖의 쓰임에 변수가 필요할 때)
+	///
+	/// # 돌려줌
+	/// 왼쪽 변수 핸들의 참조.
 	//==============================================================================
 	pub fn get_left_variable(&self) -> &LayoutVariable {
 		&self.left_variable
@@ -437,6 +658,9 @@ impl UINode {
 
 	//==============================================================================
 	/// 오른쪽 변수 반환.
+	///
+	/// # 돌려줌
+	/// 오른쪽 변수 핸들의 참조.
 	//==============================================================================
 	pub fn get_right_variable(&self) -> &LayoutVariable {
 		&self.right_variable
@@ -444,6 +668,9 @@ impl UINode {
 
 	//==============================================================================
 	/// 위 변수 반환.
+	///
+	/// # 돌려줌
+	/// 위 변수 핸들의 참조.
 	//==============================================================================
 	pub fn get_top_variable(&self) -> &LayoutVariable {
 		&self.top_variable
@@ -451,6 +678,9 @@ impl UINode {
 
 	//==============================================================================
 	/// 아래 변수 반환.
+	///
+	/// # 돌려줌
+	/// 아래 변수 핸들의 참조.
 	//==============================================================================
 	pub fn get_bottom_variable(&self) -> &LayoutVariable {
 		&self.bottom_variable
@@ -458,6 +688,9 @@ impl UINode {
 
 	//==============================================================================
 	/// 너비 변수 반환.
+	///
+	/// # 돌려줌
+	/// 너비 변수 핸들의 참조.
 	//==============================================================================
 	pub fn get_width_variable(&self) -> &LayoutVariable {
 		&self.width_variable
@@ -465,6 +698,9 @@ impl UINode {
 
 	//==============================================================================
 	/// 높이 변수 반환.
+	///
+	/// # 돌려줌
+	/// 높이 변수 핸들의 참조.
 	//==============================================================================
 	pub fn get_height_variable(&self) -> &LayoutVariable {
 		&self.height_variable
@@ -472,6 +708,9 @@ impl UINode {
 
 	//==============================================================================
 	/// 가로 중심 변수 반환.
+	///
+	/// # 돌려줌
+	/// 가로 중심 변수 핸들의 참조.
 	//==============================================================================
 	pub fn get_center_x_variable(&self) -> &LayoutVariable {
 		&self.center_x_variable
@@ -479,6 +718,9 @@ impl UINode {
 
 	//==============================================================================
 	/// 세로 중심 변수 반환.
+	///
+	/// # 돌려줌
+	/// 세로 중심 변수 핸들의 참조.
 	//==============================================================================
 	pub fn get_center_y_variable(&self) -> &LayoutVariable {
 		&self.center_y_variable
@@ -486,6 +728,9 @@ impl UINode {
 
 	//==============================================================================
 	/// 왼쪽 앵커 식. (UIKit 의 leftAnchor, 부를 때마다 새 식)
+	///
+	/// # 돌려줌
+	/// 1 * 왼쪽 변수 식.
 	//==============================================================================
 	pub fn left_anchor(&self) -> LayoutExpression {
 		LayoutExpression::from_variable(&self.left_variable)
@@ -493,6 +738,9 @@ impl UINode {
 
 	//==============================================================================
 	/// 오른쪽 앵커 식.
+	///
+	/// # 돌려줌
+	/// 1 * 오른쪽 변수 식. (새 식)
 	//==============================================================================
 	pub fn right_anchor(&self) -> LayoutExpression {
 		LayoutExpression::from_variable(&self.right_variable)
@@ -500,6 +748,9 @@ impl UINode {
 
 	//==============================================================================
 	/// 위 앵커 식.
+	///
+	/// # 돌려줌
+	/// 1 * 위 변수 식. (새 식)
 	//==============================================================================
 	pub fn top_anchor(&self) -> LayoutExpression {
 		LayoutExpression::from_variable(&self.top_variable)
@@ -507,6 +758,9 @@ impl UINode {
 
 	//==============================================================================
 	/// 아래 앵커 식.
+	///
+	/// # 돌려줌
+	/// 1 * 아래 변수 식. (새 식)
 	//==============================================================================
 	pub fn bottom_anchor(&self) -> LayoutExpression {
 		LayoutExpression::from_variable(&self.bottom_variable)
@@ -514,6 +768,9 @@ impl UINode {
 
 	//==============================================================================
 	/// 너비 앵커 식.
+	///
+	/// # 돌려줌
+	/// 1 * 너비 변수 식. (새 식)
 	//==============================================================================
 	pub fn width_anchor(&self) -> LayoutExpression {
 		LayoutExpression::from_variable(&self.width_variable)
@@ -521,6 +778,9 @@ impl UINode {
 
 	//==============================================================================
 	/// 높이 앵커 식.
+	///
+	/// # 돌려줌
+	/// 1 * 높이 변수 식. (새 식)
 	//==============================================================================
 	pub fn height_anchor(&self) -> LayoutExpression {
 		LayoutExpression::from_variable(&self.height_variable)
@@ -528,6 +788,9 @@ impl UINode {
 
 	//==============================================================================
 	/// 가로 중심 앵커 식.
+	///
+	/// # 돌려줌
+	/// 1 * 가로 중심 변수 식. (새 식)
 	//==============================================================================
 	pub fn center_x_anchor(&self) -> LayoutExpression {
 		LayoutExpression::from_variable(&self.center_x_variable)
@@ -535,6 +798,9 @@ impl UINode {
 
 	//==============================================================================
 	/// 세로 중심 앵커 식.
+	///
+	/// # 돌려줌
+	/// 1 * 세로 중심 변수 식. (새 식)
 	//==============================================================================
 	pub fn center_y_anchor(&self) -> LayoutExpression {
 		LayoutExpression::from_variable(&self.center_y_variable)
@@ -542,6 +808,9 @@ impl UINode {
 
 	//==============================================================================
 	/// 시작 앵커 식. (UIKit 의 leadingAnchor, 원본처럼 오른쪽에서 왼쪽을 다루지 않아 늘 left_anchor)
+	///
+	/// # 돌려줌
+	/// left_anchor 와 같은 식.
 	//==============================================================================
 	pub fn leading_anchor(&self) -> LayoutExpression {
 		self.left_anchor()
@@ -549,6 +818,9 @@ impl UINode {
 
 	//==============================================================================
 	/// 끝 앵커 식. (UIKit 의 trailingAnchor, 늘 right_anchor)
+	///
+	/// # 돌려줌
+	/// right_anchor 와 같은 식.
 	//==============================================================================
 	pub fn trailing_anchor(&self) -> LayoutExpression {
 		self.right_anchor()
@@ -556,6 +828,9 @@ impl UINode {
 
 	//==============================================================================
 	/// 첫 기준선 앵커 식. (글이 없는 노드는 top_anchor)
+	///
+	/// # 돌려줌
+	/// top_anchor 와 같은 식.
 	//==============================================================================
 	pub fn first_baseline_anchor(&self) -> LayoutExpression {
 		self.top_anchor()
@@ -563,6 +838,9 @@ impl UINode {
 
 	//==============================================================================
 	/// 마지막 기준선 앵커 식. (글이 없는 노드는 bottom_anchor)
+	///
+	/// # 돌려줌
+	/// bottom_anchor 와 같은 식.
 	//==============================================================================
 	pub fn last_baseline_anchor(&self) -> LayoutExpression {
 		self.bottom_anchor()
@@ -570,6 +848,9 @@ impl UINode {
 
 	//==============================================================================
 	/// 왼쪽 위치. (LayoutSolver::update_variables 뒤에 맞는 값)
+	///
+	/// # 돌려줌
+	/// 왼쪽 변수의 지금 값. (UI 트리 뿌리 좌표계의 절대 위치, 픽셀)
 	//==============================================================================
 	pub fn get_left(&self) -> f64 {
 		self.left_variable.get_value()
@@ -577,6 +858,9 @@ impl UINode {
 
 	//==============================================================================
 	/// 오른쪽 위치.
+	///
+	/// # 돌려줌
+	/// 오른쪽 변수의 지금 값. (절대 위치, 픽셀)
 	//==============================================================================
 	pub fn get_right(&self) -> f64 {
 		self.right_variable.get_value()
@@ -584,6 +868,9 @@ impl UINode {
 
 	//==============================================================================
 	/// 위 위치.
+	///
+	/// # 돌려줌
+	/// 위 변수의 지금 값. (절대 위치, 픽셀)
 	//==============================================================================
 	pub fn get_top(&self) -> f64 {
 		self.top_variable.get_value()
@@ -591,6 +878,9 @@ impl UINode {
 
 	//==============================================================================
 	/// 아래 위치.
+	///
+	/// # 돌려줌
+	/// 아래 변수의 지금 값. (절대 위치, 픽셀)
 	//==============================================================================
 	pub fn get_bottom(&self) -> f64 {
 		self.bottom_variable.get_value()
@@ -598,6 +888,9 @@ impl UINode {
 
 	//==============================================================================
 	/// 너비.
+	///
+	/// # 돌려줌
+	/// 너비 변수의 지금 값. (픽셀)
 	//==============================================================================
 	pub fn get_width(&self) -> f64 {
 		self.width_variable.get_value()
@@ -605,6 +898,9 @@ impl UINode {
 
 	//==============================================================================
 	/// 높이.
+	///
+	/// # 돌려줌
+	/// 높이 변수의 지금 값. (픽셀)
 	//==============================================================================
 	pub fn get_height(&self) -> f64 {
 		self.height_variable.get_value()
@@ -612,6 +908,9 @@ impl UINode {
 
 	//==============================================================================
 	/// 가로 중심 위치.
+	///
+	/// # 돌려줌
+	/// 가로 중심 변수의 지금 값. (절대 위치, 픽셀)
 	//==============================================================================
 	pub fn get_center_x(&self) -> f64 {
 		self.center_x_variable.get_value()
@@ -619,6 +918,9 @@ impl UINode {
 
 	//==============================================================================
 	/// 세로 중심 위치.
+	///
+	/// # 돌려줌
+	/// 세로 중심 변수의 지금 값. (절대 위치, 픽셀)
 	//==============================================================================
 	pub fn get_center_y(&self) -> f64 {
 		self.center_y_variable.get_value()
@@ -644,6 +946,10 @@ impl UINode {
 
 	//==============================================================================
 	/// 노드 아래 모든 UINode 의 솔버 값을 노드에 옮기기. (UISceneBase 가 솔버를 푼 바로 뒤에 부른다, 정적)
+	///
+	/// # 인자
+	/// - `node_tree`: 노드가 든 트리.
+	/// - `node_id`: 옮기기를 시작할 노드. (이 노드와 그 아래 모든 노드)
 	//==============================================================================
 	pub fn apply_layout_in_tree(node_tree: &mut NodeTree, node_id: NodeId) {
 		let parent_left_top = UINode::read_parent_left_top(node_tree, node_id);
@@ -663,6 +969,34 @@ impl UINode {
 
 	//==============================================================================
 	/// 노드 아래 솔버가 없는 UINode 에 솔버를 붙이고 intrinsic content size 를 다시 읽기. (UISceneBase 가 tick 마다 부른다, 원본 attachPendingUINodes)
+	///
+	/// # 인자
+	/// - `node_tree`: 노드가 든 트리.
+	/// - `node_id`: 찾기를 시작할 노드. (이 노드와 그 아래 모든 노드)
+	/// - `solver`: 솔버가 없는 UINode 에 붙일 솔버. (붙이거나 intrinsic content size 를 다시 걸다 생긴 오류는 버린다)
+	///
+	/// # 예제
+	/// 솔버 없이 제약만 걸어 둔 노드에 나중에 솔버를 붙여 놓기
+	/// ```rust
+	/// use vanilla::{LayoutSolver, NodeTree, UINode, Vector2};
+	///
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let box_id = node_tree.create_child(root_id, "box");
+	/// node_tree.add_component(box_id, UINode::new());
+	/// node_tree.with_component_mut::<UINode, _>(box_id, |ui_node, _tree| {
+	/// 	ui_node.add_constraint(&ui_node.left_anchor().equal_to(10)).unwrap();
+	/// 	ui_node.add_constraint(&ui_node.top_anchor().equal_to(20)).unwrap();
+	/// 	ui_node.add_constraint(&ui_node.width_anchor().equal_to(30)).unwrap();
+	/// 	ui_node.add_constraint(&ui_node.height_anchor().equal_to(40)).unwrap();
+	/// });
+	/// let solver = LayoutSolver::new();
+	/// UINode::attach_pending_in_tree(&mut node_tree, root_id, &solver);
+	/// solver.update_variables();
+	/// UINode::apply_layout_in_tree(&mut node_tree, root_id);
+	/// assert_eq!(node_tree[box_id].get_local_position(), Vector2::create(10.0, 20.0));
+	/// assert_eq!(node_tree[box_id].get_content_size(), Vector2::create(30.0, 40.0));
+	/// ```
 	//==============================================================================
 	pub fn attach_pending_in_tree(node_tree: &mut NodeTree, node_id: NodeId, solver: &LayoutSolver) {
 		let has_ui_node = node_tree.get_node(node_id).map(|node| node.get_component::<UINode>().is_some()).unwrap_or(false);
@@ -685,6 +1019,9 @@ impl UINode {
 }
 
 impl Default for UINode {
+	//==============================================================================
+	/// 생성. (UINode::new 와 같다)
+	//==============================================================================
 	fn default() -> UINode {
 		UINode::new()
 	}
@@ -692,14 +1029,23 @@ impl Default for UINode {
 
 #[crate::reflect]
 impl Component for UINode {
+	//==============================================================================
+	/// 컴포넌트 공통 상태 반환.
+	//==============================================================================
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base
 	}
 
+	//==============================================================================
+	/// 컴포넌트 공통 상태 반환. (변경용)
+	//==============================================================================
 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 		&mut self.component_base
 	}
 
+	//==============================================================================
+	/// 컴포넌트 종류 이름 반환. ("UINode")
+	//==============================================================================
 	fn get_component_type(&self) -> &'static str {
 		"UINode"
 	}

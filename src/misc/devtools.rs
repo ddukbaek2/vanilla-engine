@@ -6,48 +6,81 @@
 //! - 타이틀바를 끌어 옮기고, 모서리와 꼭짓점을 끌어 크기를 바꾸고, 가운데 구분선을 끌어 좌우 비율을 바꾼다.
 //! - 트리: 펼치기와 접기, 액티브(A)와 기즈모(G) 칸, 고르기, 끌어 스크롤. 인스펙터: 컴포넌트 머리를 눌러 속성을 펼치고 접는다. (기본 펼침)
 //! - 러스트 판은 씬이 DevTools 를 품고 함수마다 부른다:
-//!   ```text
 //!     tick 에서 dev_tools.tick(engine, node_tree, unscaled_time_delta), post_draw 에서 dev_tools.draw(engine, node_tree, graphic).
 //!     is_visible() && is_pointer_inside_panel(engine) 이면 씬은 그 입력을 노드에 넘기지 않는다. (원본 GameScene.isDevToolsCapturingInput)
-//!   ```
 //! - 원본과 다른 점:
 //!   - 전역 엔진이 없어 원본 setEngine 이 없다. tick, draw, is_pointer_inside_panel 이 엔진을 받는다.
 //!   - 노드 대신 NodeId 로 가리킨다. 루트 목록은 set_root_nodes(`Vec<NodeId>`) 이고, 펼친 노드는 NodeId 집합, 접은 컴포넌트는 (NodeId, 컴포넌트 차례) 집합이다.
-//!   ```text
 //!     지운 노드는 트리와 인스펙터에서 빠지고, 고른 노드가 지워지면 고르지 않은 것으로 돌아간다.
-//!   ```
 //!   - Graphic 은 엔진이 아니라 EngineRunner 가 들어서 tick 에서는 만질 수 없다. 원본이 tick 과 눌림에서 부르는 setForceGizmosVisible 은
-//!   ```text
 //!     바랄 값만 적어 두었다가 다음 draw 첫머리에 Graphic 에 건다. (원본 setEngine 이 거는 false 도 첫 draw 에 건다)
-//!   ```
 //!   - 노드 종류는 WorldNode 하나뿐이라 트리의 Type 칸과 인스펙터의 type 은 늘 "WorldNode" 다.
 //!   - 인스펙터의 컴포넌트 속성은 원본 getComponentProperties 처럼 그 컴포넌트의 get*, is* 게터를 모두 불러 보인다.
-//!   ```text
-//!     원본은 실행 중에 프로토타입을 훑고, 러스트 판은 #[reflect] 매크로가 컴파일 때 지은 목록을 쓴다. (core/reflection.rs, 엔진 컴포넌트는 모두 붙였다)
+//!     원본은 실행 중에 프로토타입을 훑고, 러스트 판은 `#[reflect]` 매크로가 컴파일 때 지은 목록을 쓴다. (core/reflection.rs, 엔진 컴포넌트는 모두 붙였다)
 //!     트리를 받는 게터(원본은 이웃 컴포넌트를 바로 쥐는 것)는 그리기에서 트리를 넘겨 부르고, &mut self 게터가 있는 컴포넌트는 tick 이 트리를 쥐고 읽어 둔 값을 보인다.
 //!     이름은 원본 formatMethodName(getTextColor → textColor, is 로 시작하면 그대로), 값은 원본 formatPropertyValue 꼴이다.
-//!     (수는 toFixed(2), Vector2 는 (x, y), Rect 는 (x, y, 너비, 높이) toFixed(1), Color 는 rgba, null, 노드는 [WorldNode], 배열은 [Array], 그 밖은 [종류 이름])
+//!     (수는 toFixed(2), Vector2 는 (x, y), Rect 는 (x, y, 너비, 높이) toFixed(1), Color 는 rgba, null, 노드는 `[WorldNode]`, 배열은 `[Array]`, 그 밖은 [종류 이름])
 //!     목록과 차례는 원본과 같다. (원본 클래스에 없는 러스트 판의 다시 정의는 빼고, 원본과 이름이 다른 게터는 원본 이름으로 보인다) 원본 getEngine 은 전역 엔진이 없어 없다.
-//!   ```
 //!   - 반사가 없는 컴포넌트(`#[reflect]` 를 붙이지 않은 게임 컴포넌트)는 UIDocument 에 쓰기 함수로 등록했으면 그 저장 키와 값을 보이고,
-//!   ```text
 //!     아니면 종류 이름 아래에 매크로를 붙이라는 "반사 없음" 줄을 보인다. (빠뜨린 것을 알 수 있게)
 //!     게임이 자기 컴포넌트를 등록한 문서는 set_ui_document 로 건다. (또는 get_ui_document_mut 로 등록한다) 이 때 수 넷 배열은 이름에 color 가 들면 rgba, 아니면 사각형으로 본다.
-//!   ```
 //!   - Local Storage 탭의 키 입력, 값 고치기, 지울지 묻기는 원본 window.prompt, window.confirm 자리인 Engine::prompt, Engine::confirm 이다. (core/modaldialog.rs)
-//!   ```text
 //!     웹은 원본처럼 브라우저 창이 그 자리에서 답한다. 데스크탑은 엔진이 그린 같은 질문 창이 떠서 답할 때까지 씬이 멈추고, 답은 다음 tick 에 받는다.
-//!   ```
 //!   - Statistics 의 clientNativeSize 는 ViewManager::get_client_native_size(웹은 페이지 전체 크기, 데스크탑은 창 안쪽 논리 크기)다.
-//!   ```text
 //!     메모리는 웹에서 원본처럼 Chrome 의 performance.memory 를 읽고, 없는 브라우저는 "(N/A)" 다.
 //!     데스크탑은 자바스크립트 힙이 없어 같은 칸에 러스트가 쓰는 시스템 할당자의 힙(쓰는 중, 잡아 둔 것)을 적는다. (platform/desktop.rs read_heap_usage)
 //!     jsHeapSizeLimit 는 V8 이 정한 힙 상한인데 시스템 할당자에는 그런 상한이 없어 "(N/A)" 다. 힙을 못 읽는 OS 는 셋 다 "(N/A)" 다.
 //!     viewScaleMode 는 러스트 열거 이름(StretchHeight 등)으로 적는다.
-//!   ```
 //!   - 화면 비율 가이드는 원본처럼 그때의 좌표계에 기대지 않고 스스로 뷰 좌표계(apply_view_rect)를 걸고 그린다. (원본 GameScene 에서 같은 결과)
 //! - Settings 의 Show FPS 를 켜면 패널을 닫아도 창 왼쪽 위에 지난 1 초의 프레임 수를 그린다. (원본과 같다, canvas native 좌표, 패널이 보이면 패널 위에)
 //! - 옮기지 않은 것: 없음. (원본에서 아무도 부르지 않는 그리기 오류 무시 try/catch 는 러스트에서 필요 없다)
+//!
+//! # 예제
+//! 씬에 개발자 도구 붙이기 (패널 위의 입력은 노드에 넘기지 않는다)
+//! ```rust,no_run
+//! use vanilla::{DevTools, Engine, EngineConfiguration, Graphic, Scene, SceneBase};
+//!
+//! struct MainScene {
+//! 	scene_base: SceneBase,
+//! 	dev_tools: DevTools,
+//! }
+//!
+//! impl Scene for MainScene {
+//! 	fn get_scene_base(&self) -> &SceneBase {
+//! 		&self.scene_base
+//! 	}
+//!
+//! 	fn get_scene_base_mut(&mut self) -> &mut SceneBase {
+//! 		&mut self.scene_base
+//! 	}
+//!
+//! 	fn create(&mut self, _engine: &mut Engine) {
+//! 		self.dev_tools.set_root_nodes(vec![self.scene_base.get_root_id()]);
+//! 	}
+//!
+//! 	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+//! 		let is_capturing_input = self.dev_tools.is_visible() && self.dev_tools.is_pointer_inside_panel(engine);
+//! 		self.scene_base.get_node_tree_mut().tick(engine, time_delta);
+//! 		if !is_capturing_input {
+//! 			self.scene_base.tick_touch(engine);
+//! 		}
+//! 		self.scene_base.tick_tweens(time_delta);
+//! 		let unscaled_time_delta = engine.get_time_manager().get_unscale_delta_time();
+//! 		self.dev_tools.tick(engine, self.scene_base.get_node_tree_mut(), unscaled_time_delta);
+//! 	}
+//!
+//! 	fn post_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+//! 		self.dev_tools.draw(engine, self.scene_base.get_node_tree(), graphic);
+//! 	}
+//! }
+//!
+//! let engine = Engine::new(EngineConfiguration::new());
+//! let main_scene = MainScene {
+//! 	scene_base: SceneBase::new(),
+//! 	dev_tools: DevTools::new(),
+//! };
+//! engine.run(Box::new(main_scene)).unwrap();
+//! ```
 //==============================================================================
 use crate::base::color::Color;
 use crate::base::rect::Rect;
@@ -302,6 +335,32 @@ struct LocalStorageDialogRequest {
 
 //==============================================================================
 /// 개발자 도구 패널.
+/// - 씬이 들고 tick, draw 를 부른다. 패널 좌표는 창 안쪽 논리 좌표(canvas native)다.
+///
+/// # 예제
+/// 노드 하나를 검사하면 패널이 열리고 그 노드를 고른다
+/// ```rust
+/// use vanilla::{DevTools, Engine, EngineConfiguration, NodeTree};
+///
+/// let mut engine = Engine::new(EngineConfiguration::new());
+/// engine.get_view_manager_mut().calculate_view_rect(1280, 720, 1.0);
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.get_root_id();
+/// let group_id = node_tree.create_child(root_id, "group");
+/// let hero_id = node_tree.create_child(group_id, "hero");
+///
+/// let mut dev_tools = DevTools::new();
+/// dev_tools.set_root_nodes(vec![root_id]);
+/// dev_tools.inspect_node(&engine, &node_tree, hero_id);
+/// assert!(dev_tools.is_visible());
+/// assert_eq!(dev_tools.get_active_tab(), 1);
+/// assert_eq!(dev_tools.get_selected_node(), Some(hero_id));
+/// assert!(dev_tools.is_node_expanded(group_id));
+///
+/// let panel_rect = dev_tools.get_panel_rect();
+/// assert_eq!(panel_rect.position.x + panel_rect.size.x, 1280.0);
+/// assert_eq!(panel_rect.position.y + panel_rect.size.y, 720.0);
+/// ```
 //==============================================================================
 pub struct DevTools {
 	root_ids: Vec<NodeId>,
@@ -371,6 +430,10 @@ pub struct DevTools {
 impl DevTools {
 	//==============================================================================
 	/// 생성. (숨긴 채, Node Hierarchy 탭, 저장한 설정을 읽는다)
+	/// - 패널 810x520, 왼쪽 칸 너비 405. 설정은 로컬 스토리지 "hierarchy.settings" 에서 읽고, 없거나 JSON 이 깨졌으면 기본값이다.
+	///
+	/// # 돌려줌
+	/// 루트가 없는 새 개발자 도구. (set_root_nodes 로 트리 루트를 건다)
 	//==============================================================================
 	pub fn new() -> DevTools {
 		let mut dev_tools = DevTools {
@@ -437,6 +500,9 @@ impl DevTools {
 
 	//==============================================================================
 	/// 루트 노드 목록 설정. (루트는 펼친 채로 둔다)
+	///
+	/// # 인자
+	/// - `root_ids`: 트리 맨 위에 보일 노드 목록. (차례대로)
 	//==============================================================================
 	pub fn set_root_nodes(&mut self, root_ids: Vec<NodeId>) {
 		for root_id in root_ids.iter() {
@@ -447,6 +513,9 @@ impl DevTools {
 
 	//==============================================================================
 	/// 표시 여부 반환.
+	///
+	/// # 돌려줌
+	/// 패널이 보이면 true.
 	//==============================================================================
 	pub fn is_visible(&self) -> bool {
 		self.is_visible
@@ -454,6 +523,11 @@ impl DevTools {
 
 	//==============================================================================
 	/// 보이기와 숨기기. (F2 와 같다. 보일 때 패널을 창 오른쪽 아래에 붙이고, 모든 기즈모 설정을 건다)
+	/// - 모든 기즈모 강제 표시는 다음 draw 첫머리에 Graphic 에 건다. 숨길 때는 기다리던 로컬 스토리지 질문을 닫는다.
+	///
+	/// # 인자
+	/// - `engine`: 창 안쪽 논리 크기를 읽을 엔진.
+	/// - `is_visible`: 참이면 보이고, 거짓이면 숨긴다.
 	//==============================================================================
 	pub fn set_visible(&mut self, engine: &Engine, is_visible: bool) {
 		self.is_visible = is_visible;
@@ -471,6 +545,9 @@ impl DevTools {
 
 	//==============================================================================
 	/// 지금 탭 반환. (0 Statistics, 1 Node Hierarchy, 2 Local Storage, 3 Settings)
+	///
+	/// # 돌려줌
+	/// 탭 번호. (0 ~ 3, 처음 1)
 	//==============================================================================
 	pub fn get_active_tab(&self) -> usize {
 		self.active_tab
@@ -478,6 +555,9 @@ impl DevTools {
 
 	//==============================================================================
 	/// 탭 설정. (없는 탭이면 무시)
+	///
+	/// # 인자
+	/// - `tab_index`: 탭 번호. (0 Statistics, 1 Node Hierarchy, 2 Local Storage, 3 Settings, 4 이상은 무시)
 	//==============================================================================
 	pub fn set_active_tab(&mut self, tab_index: usize) {
 		if tab_index < TABS.len() {
@@ -487,6 +567,9 @@ impl DevTools {
 
 	//==============================================================================
 	/// 고른 노드 반환.
+	///
+	/// # 돌려줌
+	/// 인스펙터에 보이는 노드. 고른 것이 없으면 None. (고른 노드가 지워지면 다음 tick 에 None 이 된다)
 	//==============================================================================
 	pub fn get_selected_node(&self) -> Option<NodeId> {
 		self.selected_node_id
@@ -494,6 +577,9 @@ impl DevTools {
 
 	//==============================================================================
 	/// 노드 고르기. (인스펙터 스크롤은 맨 위로)
+	///
+	/// # 인자
+	/// - `node_id`: 고를 노드. None 이면 고르지 않은 것으로 돌린다. (조상을 펼치지는 않는다, 펼치려면 inspect_node)
 	//==============================================================================
 	pub fn set_selected_node(&mut self, node_id: Option<NodeId>) {
 		self.selected_node_id = node_id;
@@ -502,6 +588,12 @@ impl DevTools {
 
 	//==============================================================================
 	/// 트리에서 노드를 펼쳤는지.
+	///
+	/// # 인자
+	/// - `node_id`: 볼 노드.
+	///
+	/// # 돌려줌
+	/// 펼쳤으면 true. (set_root_nodes 로 건 루트는 처음부터 펼쳐 있다)
 	//==============================================================================
 	pub fn is_node_expanded(&self, node_id: NodeId) -> bool {
 		self.expanded_node_ids.contains(&node_id)
@@ -509,6 +601,10 @@ impl DevTools {
 
 	//==============================================================================
 	/// 트리에서 노드 펼치기와 접기.
+	///
+	/// # 인자
+	/// - `node_id`: 펼치거나 접을 노드.
+	/// - `is_expanded`: 참이면 펼치고, 거짓이면 접는다.
 	//==============================================================================
 	pub fn set_node_expanded(&mut self, node_id: NodeId, is_expanded: bool) {
 		if is_expanded {
@@ -521,6 +617,9 @@ impl DevTools {
 
 	//==============================================================================
 	/// 인스펙터가 컴포넌트 속성을 읽을 문서 설정. (게임이 자기 컴포넌트를 등록한 UIDocument 를 걸면 그 컴포넌트의 속성도 보인다)
+	///
+	/// # 인자
+	/// - `ui_document`: 컴포넌트 종류를 등록한 문서. (들고 있던 문서를 바꾼다)
 	//==============================================================================
 	pub fn set_ui_document(&mut self, ui_document: UIDocument) {
 		self.ui_document = ui_document;
@@ -528,6 +627,9 @@ impl DevTools {
 
 	//==============================================================================
 	/// 인스펙터가 컴포넌트 속성을 읽는 문서. (변경용, 컴포넌트 종류를 더 등록할 때)
+	///
+	/// # 돌려줌
+	/// 들고 있는 문서의 가변 참조. (처음은 엔진 컴포넌트만 등록된 UIDocument::new())
 	//==============================================================================
 	pub fn get_ui_document_mut(&mut self) -> &mut UIDocument {
 		&mut self.ui_document
@@ -535,6 +637,9 @@ impl DevTools {
 
 	//==============================================================================
 	/// 패널 영역 반환. (창 안쪽 논리 좌표)
+	///
+	/// # 돌려줌
+	/// 패널 사각형. (창 안쪽 논리 픽셀, 숨겨 있어도 마지막 자리)
 	//==============================================================================
 	pub fn get_panel_rect(&self) -> Rect {
 		Rect::create(self.panel_x, self.panel_y, self.panel_width, self.panel_height)
@@ -542,6 +647,12 @@ impl DevTools {
 
 	//==============================================================================
 	/// 현재 터치 위치가 패널 내부에 있는지 반환.
+	///
+	/// # 인자
+	/// - `engine`: 입력 위치(창 안쪽 논리 좌표)를 읽을 엔진.
+	///
+	/// # 돌려줌
+	/// 패널이 보이고 입력 위치가 패널 안(경계 포함)이면 true. 숨겨 있으면 늘 false.
 	//==============================================================================
 	pub fn is_pointer_inside_panel(&self, engine: &Engine) -> bool {
 		if !self.is_visible {
@@ -555,6 +666,13 @@ impl DevTools {
 
 	//==============================================================================
 	/// 갱신. (F2 토글, 트리 목록, 터치)
+	/// - 검사 부탁(입력 필드 문맥 메뉴의 검사)이 있으면 먼저 그 노드를 검사한다. 숨겨 있으면 F2 만 본다.
+	/// - 보일 때는 지운 노드를 고른 것에서 빼고, 트리 목록과 &mut self 게터 값을 다시 읽고, 로컬 스토리지 질문의 답을 받고, 누름, 끌기, 뗌을 처리한다.
+	///
+	/// # 인자
+	/// - `engine`: 입력과 뷰를 읽고 질문 창을 띄울 엔진.
+	/// - `node_tree`: 트리에 보일 노드 트리. (A, G 칸을 누르면 노드의 액티브와 기즈모를 바꾼다)
+	/// - `_time_delta`: 지난 프레임부터 흐른 시간. (초, 쓰지 않는다. 원본처럼 시간 배율을 거치지 않은 값을 넘긴다)
 	//==============================================================================
 	pub fn tick(&mut self, engine: &mut Engine, node_tree: &mut NodeTree, _time_delta: f32) {
 		// 검사 부탁. (입력 필드 문맥 메뉴의 검사, 크롬이 개발자 도구를 열어 그 요소를 고르는 자리)
@@ -616,6 +734,11 @@ impl DevTools {
 
 	//==============================================================================
 	/// 노드 검사. (보이고, Node Hierarchy 탭으로, 조상을 펼치고 그 노드를 고른다)
+	///
+	/// # 인자
+	/// - `engine`: 패널을 처음 보일 때 창 크기를 읽을 엔진.
+	/// - `node_tree`: 조상을 찾을 노드 트리.
+	/// - `node_id`: 검사할 노드. (그 노드 자신은 펼치지 않는다)
 	//==============================================================================
 	pub fn inspect_node(&mut self, engine: &Engine, node_tree: &NodeTree, node_id: NodeId) {
 		if !self.is_visible {
@@ -1353,6 +1476,12 @@ impl DevTools {
 
 	//==============================================================================
 	/// 출력. (창 안쪽 논리 좌표로 그리고, 끝나면 들어올 때의 그리기 상태로 돌린다)
+	/// - 기다리던 모든 기즈모 강제 표시 값을 먼저 Graphic 에 건다. 숨겨 있으면 그것만 하고 돌아간다.
+	///
+	/// # 인자
+	/// - `engine`: 통계와 뷰 정보를 읽을 엔진.
+	/// - `node_tree`: 트리와 인스펙터에 보일 노드 트리.
+	/// - `graphic`: 그릴 그래픽. (씬의 post_draw 처럼 다른 것을 다 그린 뒤)
 	//==============================================================================
 	pub fn draw(&mut self, engine: &Engine, node_tree: &NodeTree, graphic: &mut Graphic) {
 		if let Some(is_force_gizmos_visible) = self.pending_force_gizmos_visible.take() {
@@ -2148,6 +2277,9 @@ impl DevTools {
 
 	//==============================================================================
 	/// FPS 표시 여부 반환. (Settings 의 Show FPS, 켜지면 draw 가 패널을 닫아도 창 왼쪽 위에 FPS 를 그린다)
+	///
+	/// # 돌려줌
+	/// Settings 탭의 FPS 표시가 켜져 있으면 true. (DevTools 는 스스로 그리지 않는다, 씬이 보고 그린다)
 	//==============================================================================
 	pub fn is_frame_per_second_visible(&self) -> bool {
 		self.is_frame_per_second_visible
@@ -2342,6 +2474,9 @@ impl DevTools {
 }
 
 impl Default for DevTools {
+	//==============================================================================
+	/// 기본값. (new 와 같다)
+	//==============================================================================
 	fn default() -> DevTools {
 		DevTools::new()
 	}
@@ -2656,14 +2791,23 @@ mod tests {
 	}
 
 	impl Component for UnregisteredComponent {
+		//==============================================================================
+		/// 컴포넌트 공통 상태 반환.
+		//==============================================================================
 		fn get_component_base(&self) -> &ComponentBase {
 			&self.component_base
 		}
 
+		//==============================================================================
+		/// 컴포넌트 공통 상태 반환. (변경용)
+		//==============================================================================
 		fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 			&mut self.component_base
 		}
 
+		//==============================================================================
+		/// 종류 이름.
+		//==============================================================================
 		fn get_component_type(&self) -> &'static str {
 			"UnregisteredComponent"
 		}
@@ -2910,11 +3054,17 @@ mod tests {
 
 	#[crate::reflect]
 	impl Probe {
+		//==============================================================================
+		/// 읽을 때마다 하나씩 느는 값. (&mut self 게터)
+		//==============================================================================
 		pub fn get_reading(&mut self) -> usize {
 			self.reading_count += 1;
 			self.reading_count
 		}
 
+		//==============================================================================
+		/// 대상 노드의 이름. (트리를 받는 게터, 대상이 없으면 빈 글)
+		//==============================================================================
 		pub fn get_target_name<'a>(&self, node_tree: &'a NodeTree) -> &'a str {
 			self.target_id.and_then(|target_id| node_tree.get_node(target_id)).map(|target_node| target_node.get_name()).unwrap_or("")
 		}
@@ -2922,14 +3072,23 @@ mod tests {
 
 	#[crate::reflect]
 	impl Component for Probe {
+		//==============================================================================
+		/// 컴포넌트 공통 상태 반환.
+		//==============================================================================
 		fn get_component_base(&self) -> &ComponentBase {
 			&self.component_base
 		}
 
+		//==============================================================================
+		/// 컴포넌트 공통 상태 반환. (변경용)
+		//==============================================================================
 		fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 			&mut self.component_base
 		}
 
+		//==============================================================================
+		/// 종류 이름.
+		//==============================================================================
 		fn get_component_type(&self) -> &'static str {
 			"Probe"
 		}
@@ -2986,7 +3145,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	/// F2 로 오른쪽 아래에 보이고, 트리 줄을 눌러 고르고 펼치고, A, G 칸으로 액티브와 기즈모를 바꾼다.
+	/// F2 로 오른쪽 아래에 보이고, 트리 줄을 눌러 고르고 펼치고, A, G 칸으로 액티브와 기즈모를 바꾸고, 탭과 닫기 단추를 누른다.
 	//==============================================================================
 	#[test]
 	fn tick_toggles_with_f2_and_tree_press_changes_nodes() {

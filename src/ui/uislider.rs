@@ -6,9 +6,7 @@
 //!   - 원본은 draw 안에서 손잡이 노드를 옮긴다. 러스트 판은 그리는 동안 트리를 바꿀 수 없어 tick 에서 옮긴다. (손잡이 노드는 호스트의 자식으로 둔다)
 //!   - 입력 좌표는 원본처럼 호스트 왼쪽 위 모서리 기준이되, 노드 행렬의 역으로 바꿔 크기와 회전까지 따른다. (원본은 모서리 위치만 뺀다)
 //!   - 값 바뀜 이벤트는 슬라이더와 문맥을 받는다. 씬 코드에서 부르는 fire_value_changed 는 다음 tick 에 이벤트를 부른다.
-//!   ```text
-//!     받은 이벤트는 Rc<RefCell> 에 담는다. get_value_changed_event 는 그 Rc 를 돌려주고, 부르는 쪽은 borrow_mut 로 빌려 부른다.
-//!   ```
+//!     받은 이벤트는 `Rc<RefCell>` 에 담는다. get_value_changed_event 는 그 Rc 를 돌려주고, 부르는 쪽은 borrow_mut 로 빌려 부른다.
 //! - attach_to_tree 에서 호스트 노드를 interactable 로 켠다. node_tree.add_component(node_id, UISlider::new()) 로 붙인다.
 //==============================================================================
 use crate::base::color::Color;
@@ -31,6 +29,38 @@ pub type UISliderEvent = Box<dyn FnMut(&mut UISlider, &mut ComponentContext)>;
 
 //==============================================================================
 /// 슬라이더.
+///
+/// # 예제
+/// 음량 슬라이더 만들기
+/// ```rust
+/// use std::cell::Cell;
+/// use std::rc::Rc;
+/// use vanilla::{ComponentContext, Engine, EngineConfiguration, NodeTree, Pivot, TouchKind, UISlider, Vector2};
+///
+/// let engine = Engine::new(EngineConfiguration::new());
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.get_root_id();
+/// let slider_id = node_tree.create_child(root_id, "VolumeSlider");
+/// node_tree[slider_id].set_pivot(Pivot::TOP_LEFT);
+/// node_tree[slider_id].set_local_position(Vector2::create(100.0, 50.0));
+/// node_tree[slider_id].set_content_size(Vector2::create(200.0, 20.0));
+/// let volume = Rc::new(Cell::new(0.0));
+/// let volume_for_event = volume.clone();
+/// let slider = node_tree.add_component(slider_id, UISlider::new()).expect("slider");
+/// slider.set_range(0.0, 100.0);
+/// slider.set_track_thickness(6.0);
+/// slider.set_thumb_radius(10.0);
+/// slider.set_value_changed_event(Box::new(move |slider: &mut UISlider, _context: &mut ComponentContext| {
+/// 	volume_for_event.set(slider.get_value());
+/// }));
+///
+/// node_tree.dispatch_touch(slider_id, &engine, TouchKind::Press, Vector2::create(150.0, 60.0));
+/// assert_eq!(volume.get(), 25.0);
+/// node_tree.dispatch_touch(slider_id, &engine, TouchKind::Moved, Vector2::create(500.0, 60.0));
+/// assert_eq!(volume.get(), 100.0);
+/// node_tree.dispatch_touch(slider_id, &engine, TouchKind::Release, Vector2::create(500.0, 60.0));
+/// assert!(!node_tree[slider_id].get_component::<UISlider>().expect("slider").is_dragging());
+/// ```
 //==============================================================================
 pub struct UISlider {
 	ui_control: UIControl,
@@ -55,6 +85,10 @@ pub struct UISlider {
 impl UISlider {
 	//==============================================================================
 	/// 생성. (값 0, 범위 0 ~ 1, 트랙 회색, 채움 파랑, 손잡이 흰 원 반지름 16)
+	/// - 트리에 붙이려면 node_tree.add_component(node_id, UISlider::new()) 를 쓴다.
+	///
+	/// # 돌려줌
+	/// 가로 방향의 새 슬라이더. (트랙 두께 0, 둥근 모서리 0, 누를 수 있음)
 	//==============================================================================
 	pub fn new() -> UISlider {
 		UISlider {
@@ -79,6 +113,9 @@ impl UISlider {
 
 	//==============================================================================
 	/// 품은 컨트롤 반환.
+	///
+	/// # 돌려줌
+	/// 품은 UIControl.
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn get_uicontrol(&self) -> &UIControl {
@@ -87,6 +124,9 @@ impl UISlider {
 
 	//==============================================================================
 	/// 품은 컨트롤 반환. (변경용)
+	///
+	/// # 돌려줌
+	/// 품은 UIControl.
 	//==============================================================================
 	pub fn get_uicontrol_mut(&mut self) -> &mut UIControl {
 		&mut self.ui_control
@@ -94,6 +134,9 @@ impl UISlider {
 
 	//==============================================================================
 	/// 컨텐트 노드 핸들.
+	///
+	/// # 돌려줌
+	/// 호스트 노드 밑에 만든 컨텐트 노드. 트리에 붙기 전이면 None.
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn get_content(&self) -> Option<NodeId> {
@@ -194,6 +237,9 @@ impl UISlider {
 
 	//==============================================================================
 	/// 0 ~ 1 비율 반환.
+	///
+	/// # 돌려줌
+	/// 값이 범위에서 차지하는 비율. (0 ~ 1, 최대값이 최소값보다 크지 않으면 0)
 	//==============================================================================
 	pub fn get_ratio(&self) -> f32 {
 		let range = self.max_value - self.min_value;
@@ -206,6 +252,9 @@ impl UISlider {
 
 	//==============================================================================
 	/// 값 설정. (범위로 자른다. 이벤트는 부르지 않는다)
+	///
+	/// # 인자
+	/// - `value`: 새 값. (최소값보다 작으면 최소값, 최대값보다 크면 최대값)
 	//==============================================================================
 	pub fn set_value(&mut self, value: f32) {
 		self.value = math::clamp(value, self.min_value, self.max_value);
@@ -213,6 +262,9 @@ impl UISlider {
 
 	//==============================================================================
 	/// 값 반환.
+	///
+	/// # 돌려줌
+	/// 지금 값. (최소값 ~ 최대값)
 	//==============================================================================
 	pub fn get_value(&self) -> f32 {
 		self.value
@@ -220,6 +272,26 @@ impl UISlider {
 
 	//==============================================================================
 	/// 범위 설정. (지금 값을 새 범위로 다시 자른다)
+	///
+	/// # 인자
+	/// - `min_value`: 최소값.
+	/// - `max_value`: 최대값. (최소값보다 커야 한다, 같거나 작으면 비율은 늘 0)
+	///
+	/// # 예제
+	/// 범위를 바꾸면 값도 다시 잘린다
+	/// ```rust
+	/// use vanilla::UISlider;
+	///
+	/// let mut slider = UISlider::new();
+	/// slider.set_range(10.0, 20.0);
+	/// assert_eq!(slider.get_value(), 10.0);
+	/// slider.set_value(17.5);
+	/// assert_eq!(slider.get_ratio(), 0.75);
+	/// slider.set_value(30.0);
+	/// assert_eq!(slider.get_value(), 20.0);
+	/// slider.set_range(0.0, 5.0);
+	/// assert_eq!(slider.get_value(), 5.0);
+	/// ```
 	//==============================================================================
 	pub fn set_range(&mut self, min_value: f32, max_value: f32) {
 		self.min_value = min_value;
@@ -230,6 +302,9 @@ impl UISlider {
 
 	//==============================================================================
 	/// 최소값 반환.
+	///
+	/// # 돌려줌
+	/// 최소값. (기본 0)
 	//==============================================================================
 	pub fn get_min_value(&self) -> f32 {
 		self.min_value
@@ -237,6 +312,9 @@ impl UISlider {
 
 	//==============================================================================
 	/// 최대값 반환.
+	///
+	/// # 돌려줌
+	/// 최대값. (기본 1)
 	//==============================================================================
 	pub fn get_max_value(&self) -> f32 {
 		self.max_value
@@ -244,6 +322,31 @@ impl UISlider {
 
 	//==============================================================================
 	/// 값 바뀜 이벤트를 억지로 부르기. (씬 코드에서 set_value 한 뒤. 다음 tick 에 부른다)
+	///
+	/// # 예제
+	/// 값을 코드로 바꾸고 이벤트 알리기
+	/// ```rust
+	/// use std::cell::Cell;
+	/// use std::rc::Rc;
+	/// use vanilla::{ComponentContext, Engine, EngineConfiguration, NodeTree, UISlider};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let slider_id = node_tree.create_child(root_id, "Slider");
+	/// let changed_count = Rc::new(Cell::new(0));
+	/// let changed_count_for_event = changed_count.clone();
+	/// let slider = node_tree.add_component(slider_id, UISlider::new()).expect("slider");
+	/// slider.set_value_changed_event(Box::new(move |_slider: &mut UISlider, _context: &mut ComponentContext| {
+	/// 	changed_count_for_event.set(changed_count_for_event.get() + 1);
+	/// }));
+	/// slider.set_value(0.5);
+	/// slider.fire_value_changed();
+	/// assert_eq!(changed_count.get(), 0);
+	///
+	/// node_tree.tick(&engine, 0.016);
+	/// assert_eq!(changed_count.get(), 1);
+	/// ```
 	//==============================================================================
 	pub fn fire_value_changed(&mut self) {
 		self.is_value_changed_fire_pending = true;
@@ -251,6 +354,9 @@ impl UISlider {
 
 	//==============================================================================
 	/// 트랙 색 설정.
+	///
+	/// # 인자
+	/// - `color`: 트랙 색. (기본 회색 0.7)
 	//==============================================================================
 	pub fn set_track_color(&mut self, color: impl Into<Color>) {
 		self.track_color = color.into();
@@ -258,6 +364,9 @@ impl UISlider {
 
 	//==============================================================================
 	/// 트랙 색 반환.
+	///
+	/// # 돌려줌
+	/// 트랙 색.
 	//==============================================================================
 	pub fn get_track_color(&self) -> Color {
 		self.track_color
@@ -265,6 +374,9 @@ impl UISlider {
 
 	//==============================================================================
 	/// 채움 색 설정.
+	///
+	/// # 인자
+	/// - `color`: 최소값 쪽 끝부터 지금 값까지 채우는 색. (기본 파랑)
 	//==============================================================================
 	pub fn set_fill_color(&mut self, color: impl Into<Color>) {
 		self.fill_color = color.into();
@@ -272,6 +384,9 @@ impl UISlider {
 
 	//==============================================================================
 	/// 채움 색 반환.
+	///
+	/// # 돌려줌
+	/// 채움 색.
 	//==============================================================================
 	pub fn get_fill_color(&self) -> Color {
 		self.fill_color
@@ -279,6 +394,9 @@ impl UISlider {
 
 	//==============================================================================
 	/// 손잡이 색 설정.
+	///
+	/// # 인자
+	/// - `color`: 손잡이 원의 색. (기본 흰색, 손잡이 노드를 정하면 원을 그리지 않는다)
 	//==============================================================================
 	pub fn set_thumb_color(&mut self, color: impl Into<Color>) {
 		self.thumb_color = color.into();
@@ -286,6 +404,9 @@ impl UISlider {
 
 	//==============================================================================
 	/// 손잡이 색 반환.
+	///
+	/// # 돌려줌
+	/// 손잡이 색.
 	//==============================================================================
 	pub fn get_thumb_color(&self) -> Color {
 		self.thumb_color
@@ -293,6 +414,9 @@ impl UISlider {
 
 	//==============================================================================
 	/// 손잡이 반지름 설정.
+	///
+	/// # 인자
+	/// - `thumb_radius`: 손잡이 원의 반지름. (호스트 content_size 와 같은 단위, 기본 16)
 	//==============================================================================
 	pub fn set_thumb_radius(&mut self, thumb_radius: f32) {
 		self.thumb_radius = thumb_radius;
@@ -300,6 +424,9 @@ impl UISlider {
 
 	//==============================================================================
 	/// 손잡이 반지름 반환.
+	///
+	/// # 돌려줌
+	/// 손잡이 원의 반지름.
 	//==============================================================================
 	pub fn get_thumb_radius(&self) -> f32 {
 		self.thumb_radius
@@ -307,6 +434,9 @@ impl UISlider {
 
 	//==============================================================================
 	/// 트랙 두께 설정. (0 이면 호스트 영역 전체, 아니면 가운데에 그 두께로)
+	///
+	/// # 인자
+	/// - `track_thickness`: 트랙 두께. (호스트 content_size 와 같은 단위, 기본 0)
 	//==============================================================================
 	pub fn set_track_thickness(&mut self, track_thickness: f32) {
 		self.track_thickness = track_thickness;
@@ -314,6 +444,9 @@ impl UISlider {
 
 	//==============================================================================
 	/// 트랙 두께 반환.
+	///
+	/// # 돌려줌
+	/// 트랙 두께. (0 이면 호스트 영역 전체)
 	//==============================================================================
 	pub fn get_track_thickness(&self) -> f32 {
 		self.track_thickness
@@ -321,6 +454,33 @@ impl UISlider {
 
 	//==============================================================================
 	/// 손잡이 노드 설정. (호스트의 자식. 정하면 원 대신 이 노드를 손잡이 자리로 옮긴다)
+	/// - tick 에서 손잡이 노드의 로컬 위치를 (손잡이 중심 - 노드 크기 절반) 에 둔다. (피봇이 왼쪽 위면 가운데가 손잡이 자리에 온다)
+	///
+	/// # 인자
+	/// - `thumb_node_id`: 손잡이로 쓸 노드. (None 이면 원을 그린다)
+	///
+	/// # 예제
+	/// 그림 노드를 손잡이로 쓰기
+	/// ```rust
+	/// use vanilla::{Engine, EngineConfiguration, NodeTree, Pivot, UISlider, Vector2};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let slider_id = node_tree.create_child(root_id, "Slider");
+	/// node_tree[slider_id].set_pivot(Pivot::TOP_LEFT);
+	/// node_tree[slider_id].set_content_size(Vector2::create(200.0, 20.0));
+	/// node_tree.add_component(slider_id, UISlider::new());
+	/// let thumb_id = node_tree.create_child(slider_id, "Thumb");
+	/// node_tree[thumb_id].set_pivot(Pivot::TOP_LEFT);
+	/// node_tree[thumb_id].set_content_size(Vector2::create(10.0, 10.0));
+	/// let slider = node_tree[slider_id].get_component_mut::<UISlider>().expect("slider");
+	/// slider.set_thumb_node(Some(thumb_id));
+	/// slider.set_value(0.5);
+	///
+	/// node_tree.tick(&engine, 0.016);
+	/// assert_eq!(node_tree[thumb_id].get_local_position(), Vector2::create(95.0, 5.0));
+	/// ```
 	//==============================================================================
 	pub fn set_thumb_node(&mut self, thumb_node_id: Option<NodeId>) {
 		self.thumb_node_id = thumb_node_id;
@@ -328,6 +488,9 @@ impl UISlider {
 
 	//==============================================================================
 	/// 손잡이 노드 반환.
+	///
+	/// # 돌려줌
+	/// 손잡이 노드. 정하지 않았으면 None.
 	//==============================================================================
 	pub fn get_thumb_node(&self) -> Option<NodeId> {
 		self.thumb_node_id
@@ -335,6 +498,9 @@ impl UISlider {
 
 	//==============================================================================
 	/// 둥근 모서리 반지름 설정.
+	///
+	/// # 인자
+	/// - `corner_radius`: 트랙과 채움 사각형의 둥근 모서리 반지름. (0 이면 각진 사각형, 기본 0)
 	//==============================================================================
 	pub fn set_corner_radius(&mut self, corner_radius: f32) {
 		self.corner_radius = corner_radius;
@@ -342,6 +508,9 @@ impl UISlider {
 
 	//==============================================================================
 	/// 둥근 모서리 반지름 반환.
+	///
+	/// # 돌려줌
+	/// 둥근 모서리 반지름.
 	//==============================================================================
 	pub fn get_corner_radius(&self) -> f32 {
 		self.corner_radius
@@ -349,6 +518,9 @@ impl UISlider {
 
 	//==============================================================================
 	/// 방향 설정.
+	///
+	/// # 인자
+	/// - `direction`: 방향. (Horizontal 은 왼쪽이 최소값, Vertical 은 아래가 최소값, 기본 Horizontal)
 	//==============================================================================
 	pub fn set_direction(&mut self, direction: ProgressDirection) {
 		self.direction = direction;
@@ -356,6 +528,9 @@ impl UISlider {
 
 	//==============================================================================
 	/// 방향 반환.
+	///
+	/// # 돌려줌
+	/// 지금 방향.
 	//==============================================================================
 	pub fn get_direction(&self) -> ProgressDirection {
 		self.direction
@@ -363,6 +538,9 @@ impl UISlider {
 
 	//==============================================================================
 	/// 값 바뀜 이벤트 설정.
+	///
+	/// # 인자
+	/// - `value_changed_event`: 누르거나 끌어 값이 바뀔 때 부를 함수. (슬라이더와 문맥을 받는다, 같은 값이면 불리지 않고 set_value 로 바꿀 때도 불리지 않는다)
 	//==============================================================================
 	pub fn set_value_changed_event(&mut self, value_changed_event: UISliderEvent) {
 		self.value_changed_event = Some(Rc::new(RefCell::new(value_changed_event)));
@@ -370,6 +548,9 @@ impl UISlider {
 
 	//==============================================================================
 	/// 값 바뀜 이벤트 반환. (부를 때는 borrow_mut 로 빌린다)
+	///
+	/// # 돌려줌
+	/// 건 값 바뀜 이벤트. 걸지 않았으면 None.
 	//==============================================================================
 	pub fn get_value_changed_event(&self) -> Option<Rc<RefCell<UISliderEvent>>> {
 		self.value_changed_event.clone()
@@ -377,6 +558,9 @@ impl UISlider {
 
 	//==============================================================================
 	/// 사용 가능 설정. (끄면 누름을 받지 않는다)
+	///
+	/// # 인자
+	/// - `is_interactable`: 누름을 받으려면 true. (기본 true, 끄더라도 이미 끄는 중인 손가락은 끝까지 따라간다)
 	//==============================================================================
 	pub fn set_interactable(&mut self, is_interactable: bool) {
 		self.is_interactable = is_interactable;
@@ -384,6 +568,9 @@ impl UISlider {
 
 	//==============================================================================
 	/// 사용 가능 여부.
+	///
+	/// # 돌려줌
+	/// 누름을 받으면 true.
 	//==============================================================================
 	pub fn get_interactable(&self) -> bool {
 		self.is_interactable
@@ -391,6 +578,9 @@ impl UISlider {
 
 	//==============================================================================
 	/// 끄는 중인지.
+	///
+	/// # 돌려줌
+	/// 누름부터 뗌이나 취소까지 true.
 	//==============================================================================
 	pub fn is_dragging(&self) -> bool {
 		self.is_dragging
@@ -398,6 +588,9 @@ impl UISlider {
 }
 
 impl Default for UISlider {
+	//==============================================================================
+	/// 기본값. (UISlider::new 와 같다)
+	//==============================================================================
 	fn default() -> UISlider {
 		UISlider::new()
 	}
@@ -405,23 +598,38 @@ impl Default for UISlider {
 
 #[crate::reflect]
 impl Component for UISlider {
+	//==============================================================================
+	/// 컴포넌트 공통 칸 반환. (품은 컨트롤의 것)
+	//==============================================================================
 	fn get_component_base(&self) -> &ComponentBase {
 		self.ui_control.get_component_base()
 	}
 
+	//==============================================================================
+	/// 컴포넌트 공통 칸 반환. (변경용)
+	//==============================================================================
 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 		self.ui_control.get_component_base_mut()
 	}
 
+	//==============================================================================
+	/// 컴포넌트 종류 이름 반환. ("UISlider")
+	//==============================================================================
 	fn get_component_type(&self) -> &'static str {
 		"UISlider"
 	}
 
+	//==============================================================================
+	/// 트리에 붙을 때. (컨텐트 노드를 만들고 호스트 노드를 interactable 로 켠다)
+	//==============================================================================
 	fn attach_to_tree(&mut self, node_tree: &mut NodeTree, node_id: NodeId) {
 		self.ui_control.get_uiview_mut().create_content_node(node_tree, node_id);
 		node_tree[node_id].set_interactable(true);
 	}
 
+	//==============================================================================
+	/// tick 이 필요한지. (손잡이 노드가 있거나 미룬 값 바뀜 이벤트가 있을 때만)
+	//==============================================================================
 	#[reflect(skip)]
 	fn is_tick_needed(&self) -> bool {
 		self.thumb_node_id.is_some() || self.is_value_changed_fire_pending
@@ -504,6 +712,9 @@ impl Component for UISlider {
 		graphic.draw_circle(thumb_center, self.thumb_radius);
 	}
 
+	//==============================================================================
+	/// 터치 누름. (누를 수 있으면 끌기를 시작하고 그 자리로 값을 바꾼다)
+	//==============================================================================
 	fn touch_press(&mut self, context: &mut ComponentContext, view_input_position: Vector2) {
 		if !self.is_interactable {
 			return;
@@ -512,6 +723,9 @@ impl Component for UISlider {
 		self.update_value_from_input(context, view_input_position);
 	}
 
+	//==============================================================================
+	/// 터치 이동. (끄는 중이면 그 자리로 값을 바꾼다)
+	//==============================================================================
 	fn touch_move(&mut self, context: &mut ComponentContext, view_input_position: Vector2) {
 		if !self.is_dragging {
 			return;
@@ -519,6 +733,9 @@ impl Component for UISlider {
 		self.update_value_from_input(context, view_input_position);
 	}
 
+	//==============================================================================
+	/// 터치 뗌. (끄는 중이면 그 자리로 값을 바꾸고 끌기를 끝낸다)
+	//==============================================================================
 	fn touch_release(&mut self, context: &mut ComponentContext, view_input_position: Vector2) {
 		if !self.is_dragging {
 			return;
@@ -527,6 +744,9 @@ impl Component for UISlider {
 		self.is_dragging = false;
 	}
 
+	//==============================================================================
+	/// 터치 취소. (값은 그대로 두고 끌기를 끝낸다)
+	//==============================================================================
 	fn touch_cancel(&mut self, _context: &mut ComponentContext, _view_input_position: Vector2) {
 		self.is_dragging = false;
 	}

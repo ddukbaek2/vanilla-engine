@@ -1,6 +1,6 @@
 //==============================================================================
-/// 리소스. (원본 src/resource: Asset 파생)
-/// - AudioAsset 은 오디오 백엔드(platform/audio)와 붙어 있어서 아직 AssetBase 꼴이 아니다. 읽기는 engine.load_audio_asset.
+//! 리소스. (원본 src/resource: Asset 파생)
+//! - AudioAsset 은 오디오 백엔드(platform/audio)와 붙어 있어서 아직 AssetBase 꼴이 아니다. 읽기는 engine.load_audio_asset.
 //==============================================================================
 pub mod animationclip;
 pub mod audioasset;

@@ -4,11 +4,21 @@
 //!   - KeyboardInput: 편집 키(Backspace, Delete, 화살표, Home, End, Enter, Tab), Ctrl/Cmd + A/C/V/X, KeyEvent.text 의 글자 → 글 입력 줄.
 //!   - Ime: Preedit 는 조합 시작 / 조합 글 / 조합 끝으로, Commit 은 확정 글로 바꾼다. (Preedit 커서는 바이트 자리라 문자 자리로 바꾼다)
 //!   - 프레임마다 지난 프레임 필드 상태를 읽어, 포커스를 가진 필드가 플랫폼 입력(use_dominput)을 쓸 때만 IME 를 켜고 후보 창 자리를 맞춘다.
-//!   ```text
 //!     포커스가 다른 필드로 옮겨 가거나 조합 중에 필드 안을 눌러 필드가 조합 글을 확정하면 IME 를 껐다 켜서 조합을 끊는다.
 //!     (끊긴 조합 글은 필드가 이미 확정했으므로 OS 가 다시 보낸 같은 Commit 은 버린다)
-//!   ```
 //! - 클립보드는 arboard 로 읽고 쓴다. (winit 에 클립보드가 없다. 리눅스는 Clipboard 객체가 살아 있어야 내용이 남아서 스레드에 하나 들고 있는다)
+//!
+//! # 예제
+//! 클립보드에 쓰고 다시 읽기 (시스템 클립보드를 바꿔서 실행하지 않는다)
+//! ```rust,no_run
+//! use vanilla::platform;
+//!
+//! platform::write_clipboard_text("vanilla");
+//! assert_eq!(platform::read_clipboard_text().as_deref(), Some("vanilla"));
+//! platform::read_clipboard_text_with_callback(Box::new(|text: String| {
+//! 	println!("{}", text);
+//! }));
+//! ```
 //==============================================================================
 use crate::base::rect::Rect;
 use crate::core::textinput::{convert_byte_index_to_character_index, TextInput, TextInputEventKind, TextInputKey};
@@ -450,6 +460,10 @@ fn with_clipboard<R>(action: impl FnOnce(&mut arboard::Clipboard) -> R) -> Optio
 
 //==============================================================================
 /// 시스템 클립보드에 글 쓰기.
+/// - 클립보드를 열지 못하면 건너뛰고, 쓰지 못하면 표준 오류에 로그를 낸다.
+///
+/// # 인자
+/// - `text`: 쓸 글.
 //==============================================================================
 pub fn write_clipboard_text(text: &str) {
 	let result = with_clipboard(|clipboard| clipboard.set_text(text.to_string()));
@@ -460,6 +474,9 @@ pub fn write_clipboard_text(text: &str) {
 
 //==============================================================================
 /// 시스템 클립보드 글 읽기. (글이 없거나 읽을 수 없으면 None)
+///
+/// # 돌려줌
+/// 클립보드의 글. 글이 없거나 클립보드를 열거나 읽을 수 없으면 None.
 //==============================================================================
 pub fn read_clipboard_text() -> Option<String> {
 	with_clipboard(|clipboard| clipboard.get_text().ok()).flatten()
@@ -467,6 +484,9 @@ pub fn read_clipboard_text() -> Option<String> {
 
 //==============================================================================
 /// 시스템 클립보드 글을 읽어 콜백에 넘기기. (원본 readClipboard 자리, 데스크탑은 그 자리에서 읽어 바로 부른다. 못 읽으면 빈 글)
+///
+/// # 인자
+/// - `callback`: 읽은 글을 받을 함수. (돌아오기 전에 한 번 불린다)
 //==============================================================================
 pub fn read_clipboard_text_with_callback(callback: Box<dyn FnOnce(String)>) {
 	let text = read_clipboard_text().unwrap_or_default();
@@ -475,6 +495,9 @@ pub fn read_clipboard_text_with_callback(callback: Box<dyn FnOnce(String)>) {
 
 //==============================================================================
 /// 시스템 클립보드 글을 읽어 콜백에 넘기기. (원본 engine.readClipboardText 자리, 데스크탑은 그 자리에서 읽어 바로 부른다. 못 읽으면 None)
+///
+/// # 인자
+/// - `callback`: 읽은 글을 받을 함수. (돌아오기 전에 한 번 불린다, 못 읽으면 None)
 //==============================================================================
 pub fn read_optional_clipboard_text_with_callback(callback: Box<dyn FnOnce(Option<String>)>) {
 	callback(read_clipboard_text());
@@ -511,6 +534,9 @@ mod tests {
 		assert_eq!(undo_by_position, Some(TextInputEventKind::Key { key: TextInputKey::Undo, is_shift: false }));
 	}
 
+	//==============================================================================
+	/// 편집 키와 시프트 화살표 같은 키 바꾸기.
+	//==============================================================================
 	#[test]
 	fn translate_keys() {
 		let no_modifiers = ModifiersState::empty();

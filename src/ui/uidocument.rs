@@ -8,59 +8,39 @@
 //! - 원본과 다른 것:
 //!   - 원본은 정적 클래스와 모듈 전역 표다. 러스트 판은 표를 든 UIDocument 값을 만들어 쓴다. (엔진처럼 전역 상태를 두지 않는다) new 가 엔진 컴포넌트를 등록해 둔다.
 //!   - 원본처럼 쓰기, 읽기 함수(원본 COMPONENT_PROPERTY_TABLE 의 propertyHandler)가 없는 종류는 반사로 쓰고 읽는다. (saveByReflection, loadByReflection)
-//!   ```text
-//!     원본은 실행 중에 객체의 get, is, set 함수를 훑고, 러스트 판은 #[reflect] 매크로가 컴파일 때 지은 목록을 쓴다. (core/reflection.rs)
-//!     반사로 다루는 종류는 #[reflect] 를 붙인 컴포넌트뿐이다. (엔진 컴포넌트는 모두 붙였다) 원본은 모든 객체가 반사된다.
+//!     원본은 실행 중에 객체의 get, is, set 함수를 훑고, 러스트 판은 `#[reflect]` 매크로가 컴파일 때 지은 목록을 쓴다. (core/reflection.rs)
+//!     반사로 다루는 종류는 `#[reflect]` 를 붙인 컴포넌트뿐이다. (엔진 컴포넌트는 모두 붙였다) 원본은 모든 객체가 반사된다.
 //!     원본 표에서 반사로 저장하는 Outline, SoftShade, ShadowText, UIProgressRing 도 반사로 쓰고 읽는다. 원본 반사 결과와 같은 키(머리 대문자: Color, LineWidth,
 //!     GizmoVisible, Enable, ComponentType 등)와 차례다. 원본 ShadowText 의 FontFace 는 글꼴 객체라 적히지 않는다. 러스트 판의 글꼴 이름 글(get_font_family)은
-//!     #[reflect(unsaved)] 로 속성 목록에는 두고 저장에서 뺐다.
-//!   ```
+//!     `#[reflect(unsaved)]` 로 속성 목록에는 두고 저장에서 뺐다.
 //!   - 트리를 받는 반사 세터(UISnapScrollView 의 SnapCurrentIndex 같은 것)도 원본처럼 읽는 그 자리에서 부른다. 읽는 컴포넌트를 트리에서 잠깐 꺼내 읽기 문맥에 트리를 쥐여 준다.
 //!   - &mut self 게터가 있는 컴포넌트는 to_json_text_mut, serialize_node_mut 가 &mut 갈래로 읽어 적는다. (원본 게터에는 &self, &mut self 구별이 없다)
 //!   - 종류 등록: register_component_type(이름, 짓는 함수)은 원본 registerComponentType 이다. (반사로 쓰고 읽는다) 쓰기, 읽기 함수가 따로 있는 종류는
-//!   ```text
 //!     register_component_type_with_handler 로, 위젯(content 노드를 만드는 컴포넌트)은 register_widget_type, register_widget_type_with_handler 로 등록한다.
-//!   ```
 //!   - 등록하지 않은 종류는 원본처럼 읽을 때 건너뛰고(노드 종류는 WorldNode 로 읽고) 경고를 낸다. 쓸 때 type 은 원본처럼 등록한 이름이고, 등록하지 않은 종류는 반사로 적고 type 은 타입 이름이다. (원본 constructor.name)
-//!   ```text
-//!     반사가 없는 컴포넌트(#[reflect] 를 붙이지 않은 게임 컴포넌트)는 적을 수 없어 경고를 내고 뺀다.
-//!   ```
+//!     반사가 없는 컴포넌트(`#[reflect]` 를 붙이지 않은 게임 컴포넌트)는 적을 수 없어 경고를 내고 뺀다.
 //!   - 쓰기, 읽기 함수가 있는 종류도 원본처럼 노드를 가리키는 반사 속성은 따로 { "$nodeRef": 경로 } 로 얹고 읽는다. (saveNodeReferences, loadNodeReferences)
 //!   - ShadowImage 는 원본 표의 끝에도 같은 꼴(imagePath 뒤에 반사 저장 꼴)로 넣어 두 엔진이 같다.
 //!   - 원본 UIImageView 는 붙을 때 호스트에 Sprite 를 붙여 문서에 UIImageView 다음 Sprite 가 적힌다. 러스트 판은 Sprite 를 품어서, 품은 Sprite 를 그 자리에 Sprite 로 적고
-//!   ```text
 //!     읽을 때는 뒤따르는 Sprite 를 품은 Sprite 에 읽는다. (set_component_companions, 원본은 UIImageView 가 붙을 때 붙인 Sprite 에 읽는다)
-//!   ```
 //!   - 원본 노드 종류(WorldNode 하위 클래스, registerNodeType)는 러스트 판에서 노드에 붙는 컴포넌트다. register_node_type 으로 등록하면 원본 문서와 같은 꼴로 쓰고 읽는다:
-//!   ```text
 //!     그 컴포넌트가 붙은 노드의 type 이 그 이름이고 컴포넌트 목록에는 적지 않는다.
 //!     - 원본 노드 생성자처럼 붙을 때 자식과 컴포넌트를 실제로 짓는 종류(UIWindow, UIConfirmWindow, UIDialog, UIDropdown, UIToast, UISpinner, UIContextMenu 등)는
 //!       지은 것이 그대로 적힌다.
 //!     - 스스로 그리는 종류(UIInputField, UIScrollBar)는 UIDocumentNode 가 원본 생성자의 몫을 원본 꼴로 적고, 읽을 때는 그 몫을 설정으로 읽는다.
 //!     - 원본은 숨을 때 노드를 끄지만 러스트 판은 tick 이 돌아야 해서 숨기기만 하는 종류(UIToast)는 UIDocumentNode 가 active 를 원본 뜻으로 바꿔 쓰고 읽는다.
-//!   ```
 //!   - 읽을 때 노드에 이미 있는 컴포넌트와 자식(노드 종류나 위젯이 붙을 때 지은 것, require 로 함께 붙은 것)은 문서의 앞에서부터 차례와 종류(자식은 이름)가 맞으면
-//!   ```text
 //!     그것에 문서 값을 넣고 다시 짓지 않는다. (원본 fillNode 와 같다) 다시 쓰면 같은 문서다.
-//!   ```
 //!   - 원본 에디터(tools/uieditor)는 엔진이 내보내는 모든 Component 와 WorldNode 하위 클래스를 등록해 문서에 적는다. 원본처럼 기본 표에는 없고,
-//!   ```text
 //!     게임이 register_editor_types(원본 registerEditorTypes) 한 줄로 같은 종류(컴포넌트 35, 노드 종류 12)를 등록한다. (종류마다 한 줄로도 된다)
-//!   ```
 //!   - 러스트 판의 노드는 WorldNode 하나다. 노드 종류로 등록한 컴포넌트가 없는 노드의 type 은 늘 "WorldNode" 로 적고, 등록하지 않은 type 은 WorldNode 로 읽는다.
 //!   - 원본 getComponentType(이름 → 생성자)은 생성자를 값으로 돌려줄 수 없어(노드 트리는 구체 타입으로 붙인다) create_component(트리, 노드, 이름)가
-//!   ```text
 //!     그 이름의 컴포넌트를 지어 노드에 붙이고 컴포넌트 차례 번호를 돌려준다. (원본에서 생성자를 받아 addComponent 하는 자리)
-//!   ```
 //!   - 그림 경로(imagePath)는 원본처럼 이미지 해석기(set_image_resolver)로 찾는다. 해석기를 주지 않으면 문서가 든 애셋 창고에서 찾는다.
-//!   ```text
 //!     load_images 가 문서의 imagePath 를 ImageAsset 으로 요청하고(받은 읽기 손잡이는 씬이 track_load_handle 로 맡길 수 있다),
 //!     아직 읽히지 않은 그림은 bind_pending_images 가 다 읽힌 뒤 붙인다. (러스트 애셋은 요청 뒤 나중에 다 읽힌다)
-//!   ```
 //!   - 노드 참조($nodeRef)의 기준 뿌리는 to_json_text, from_json_text 의 뿌리다. serialize_node, deserialize_node 를 바로 부르면 그 노드가 뿌리다.
-//!   ```text
 //!     (원본은 serializeNode 만 부르면 참조를 적지 않고, deserializeNode 만 부르면 참조를 잇지 않는다)
-//!   ```
 //!   - 수는 f32 를 가장 짧은 십진으로 적는다. (0.22 는 0.22, 정수는 소수점 없이) 원본 f64 의 끝자리(0.1 + 0.2 같은)는 f32 로 줄어든다.
 //! - Sprite 의 nineSlice 는 원본이 쓰는 꼴([왼쪽, 위, 왼쪽 + 오른쪽, 위 + 아래], Rect 의 left, top, right, bottom)을 원본처럼 거꾸로 풀어 읽는다.
 //==============================================================================
@@ -127,7 +107,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::rc::Rc;
 
 //==============================================================================
-/// 전역 상수 목록.
+// 전역 상수 목록.
 //==============================================================================
 /// UI 문서 포맷 버전.
 pub const UIDOCUMENT_VERSION: u32 = 1;
@@ -244,15 +224,37 @@ struct UIDocumentNodeType {
 
 //==============================================================================
 /// 원본 노드 생성자가 만드는 컴포넌트와 자식의 문서 값. (그 노드의 components, children 앞에 들어간다)
+/// - UIDocumentNode::save_node_parts 가 돌려주고, UIDocument 가 노드 문서 값의 앞머리에 그대로 넣는다.
+///
+/// # 예제
+/// 썸 자식 하나와 Paint 하나를 든 몫
+/// ```rust
+/// use serde_json::{Map, Value};
+/// use vanilla::ui::uidocument::UIDocumentNodeParts;
+///
+/// let mut node_parts = UIDocumentNodeParts::new();
+/// let mut paint_data = Map::new();
+/// paint_data.insert(String::from("roundSize"), Value::from(4));
+/// paint_data.insert(String::from("type"), Value::from("Paint"));
+/// node_parts.component_data_list.push(paint_data);
+/// node_parts.child_data_list.push(serde_json::json!({ "type": "WorldNode", "name": "thumb" }));
+///
+/// assert_eq!(node_parts.component_data_list[0]["type"], "Paint");
+/// assert_eq!(node_parts.child_data_list[0]["name"], "thumb");
+/// ```
 //==============================================================================
 pub struct UIDocumentNodeParts {
+	/// 노드의 components 앞에 들어갈 컴포넌트 문서 값. (값마다 "type" 키를 스스로 담는다)
 	pub component_data_list: Vec<Map<String, Value>>,
+	/// 노드의 children 앞에 들어갈 자식 노드 문서 값.
 	pub child_data_list: Vec<Value>,
 }
 
 impl UIDocumentNodeParts {
 	//==============================================================================
 	/// 빈 몫. (생성자가 아무것도 만들지 않는 노드 종류)
+	/// # 돌려줌
+	/// 두 목록이 다 빈 몫.
 	//==============================================================================
 	pub fn new() -> UIDocumentNodeParts {
 		UIDocumentNodeParts {
@@ -263,6 +265,9 @@ impl UIDocumentNodeParts {
 }
 
 impl Default for UIDocumentNodeParts {
+	//==============================================================================
+	/// 기본값. (new 와 같다)
+	//==============================================================================
 	fn default() -> UIDocumentNodeParts {
 		UIDocumentNodeParts::new()
 	}
@@ -273,10 +278,87 @@ impl Default for UIDocumentNodeParts {
 /// - 원본은 그 노드의 생성자가 스스로 컴포넌트와 자식을 만들고, 문서에는 그것들이 보통 컴포넌트와 자식으로 적힌다.
 ///   러스트 판의 컴포넌트는 그것을 스스로 그리거나 품으므로, 쓸 때는 원본이 적을 꼴로 적고 읽을 때는 그 몫을 설정으로 읽고 다시 짓지 않는다.
 /// - 생성자가 아무것도 만들지 않는 종류는 빈 구현(impl UIDocumentNode for 타입 {})으로 된다.
+/// # 예제
+/// 원본 생성자가 Paint 를 붙이는 노드 종류를 직접 그리는 컴포넌트로 맡기
+/// ```rust
+/// use serde_json::{Map, Value};
+/// use vanilla::{Color, Component, ComponentBase, NodeId, NodeTree, Paint, UIDocument, UIDocumentSaveContext};
+/// use vanilla::ui::uidocument::{UIDocumentNode, UIDocumentNodeParts};
+///
+/// struct Badge {
+/// 	component_base: ComponentBase,
+/// 	color: Color,
+/// }
+///
+/// impl Component for Badge {
+/// 	fn get_component_base(&self) -> &ComponentBase {
+/// 		&self.component_base
+/// 	}
+///
+/// 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
+/// 		&mut self.component_base
+/// 	}
+///
+/// 	fn get_component_type(&self) -> &'static str {
+/// 		"Badge"
+/// 	}
+/// }
+///
+/// impl UIDocumentNode for Badge {
+/// 	fn save_node_parts(&self, _save_context: &UIDocumentSaveContext, _node_id: NodeId) -> UIDocumentNodeParts {
+/// 		let mut paint_data = Map::new();
+/// 		paint_data.insert(String::from("color"), UIDocument::color_to_array(self.color));
+/// 		paint_data.insert(String::from("type"), Value::from("Paint"));
+/// 		let mut node_parts = UIDocumentNodeParts::new();
+/// 		node_parts.component_data_list.push(paint_data);
+/// 		node_parts
+/// 	}
+///
+/// 	fn load_node_parts(&mut self, component_data_list: &[Value], _child_data_list: &[Value]) -> (usize, usize) {
+/// 		match component_data_list.first().and_then(|component_data| UIDocument::array_to_color(&component_data["color"])) {
+/// 			Some(color) => {
+/// 				self.color = color;
+/// 				(1, 0)
+/// 			}
+/// 			None => {
+/// 				(0, 0)
+/// 			}
+/// 		}
+/// 	}
+/// }
+///
+/// fn create_badge() -> Badge {
+/// 	Badge {
+/// 		component_base: ComponentBase::new(),
+/// 		color: Color::create(1.0, 1.0, 1.0, 1.0),
+/// 	}
+/// }
+///
+/// let mut document = UIDocument::new();
+/// document.register_node_type("Badge", create_badge);
+/// let mut node_tree = NodeTree::new();
+/// let badge_id = node_tree.create_node("badge");
+/// node_tree[badge_id].add_component(create_badge()).color = Color::create(1.0, 0.0, 0.0, 1.0);
+///
+/// let json_text = document.to_json_text(&node_tree, badge_id, false);
+/// let document_data: Value = serde_json::from_str(&json_text).expect("json");
+/// assert_eq!(document_data["root"]["type"], "Badge");
+/// assert_eq!(document_data["root"]["components"][0]["type"], "Paint");
+///
+/// let loaded_id = document.from_json_text(&mut node_tree, &json_text).expect("document");
+/// assert_eq!(node_tree[loaded_id].get_component::<Badge>().expect("badge").color, Color::create(1.0, 0.0, 0.0, 1.0));
+/// assert!(node_tree[loaded_id].get_component::<Paint>().is_none());
+/// ```
 //==============================================================================
 pub trait UIDocumentNode {
 	//==============================================================================
 	/// 원본 노드 생성자가 만드는 컴포넌트와 자식을 문서 꼴로. (node_id 는 이 컴포넌트가 붙은 노드)
+	/// # 인자
+	/// - `_save_context`: 쓰기 문맥. (몫의 컴포넌트 값을 쓸 때 노드 참조 경로의 기준이 된다)
+	/// - `_node_id`: 이 컴포넌트가 붙은 노드.
+	///
+	/// # 돌려줌
+	/// 원본 생성자가 만들었을 컴포넌트와 자식의 문서 값. (기본은 빈 몫)
 	//==============================================================================
 	fn save_node_parts(&self, _save_context: &UIDocumentSaveContext, _node_id: NodeId) -> UIDocumentNodeParts {
 		UIDocumentNodeParts::new()
@@ -284,6 +366,12 @@ pub trait UIDocumentNode {
 
 	//==============================================================================
 	/// 문서의 컴포넌트와 자식 목록 앞머리에서 원본 노드 생성자가 만든 몫을 읽어 넣는다. (읽은 컴포넌트 수와 자식 수, 그 몫은 짓지 않는다)
+	/// # 인자
+	/// - `_component_data_list`: 문서 노드의 components 전체.
+	/// - `_child_data_list`: 문서 노드의 children 전체.
+	///
+	/// # 돌려줌
+	/// (앞에서부터 읽은 컴포넌트 수, 읽은 자식 수). UIDocument 는 그만큼을 짓지 않고 건너뛴다. (기본 (0, 0))
 	//==============================================================================
 	fn load_node_parts(&mut self, _component_data_list: &[Value], _child_data_list: &[Value]) -> (usize, usize) {
 		(0, 0)
@@ -291,6 +379,8 @@ pub trait UIDocumentNode {
 
 	//==============================================================================
 	/// 문서에 적지 않는 content 노드. (러스트 판이 위젯처럼 만드는 것, 원본 노드에는 없다. 그 안의 자식은 contentChildren 으로 적는다)
+	/// # 돌려줌
+	/// 문서에 적지 않을 content 노드. 없으면 None. (기본 None)
 	//==============================================================================
 	fn get_document_content(&self) -> Option<NodeId> {
 		None
@@ -298,6 +388,12 @@ pub trait UIDocumentNode {
 
 	//==============================================================================
 	/// 원본 노드의 active. (원본은 숨을 때 노드를 끄고, 러스트 판은 tick 이 돌아야 해서 끄는 대신 숨기는 종류가 있다. 기본은 노드의 active)
+	/// # 인자
+	/// - `is_node_active`: 노드의 active.
+	/// - `_is_node_visible`: 노드의 보임.
+	///
+	/// # 돌려줌
+	/// 문서에 적을 active.
 	//==============================================================================
 	fn read_document_active(&self, is_node_active: bool, _is_node_visible: bool) -> bool {
 		is_node_active
@@ -305,6 +401,11 @@ pub trait UIDocumentNode {
 
 	//==============================================================================
 	/// 원본 active 를 이 종류의 노드 상태로. (노드의 active 와 바꿀 보임, 기본은 그대로이고 보임은 두다)
+	/// # 인자
+	/// - `is_active`: 문서에 적힌 active.
+	///
+	/// # 돌려줌
+	/// (노드에 넣을 active, 노드에 넣을 보임). 보임이 None 이면 보임을 바꾸지 않는다. (기본 (is_active, None))
 	//==============================================================================
 	fn convert_document_active(&self, is_active: bool) -> (bool, Option<bool>) {
 		(is_active, None)
@@ -342,6 +443,63 @@ enum ImageLookup {
 
 //==============================================================================
 /// 쓰기 문맥. (컴포넌트 쓰기 함수가 받는다. 노드 참조를 뿌리 기준 경로로 적는다)
+/// - 바깥에서 짓지 않는다. register_component_type_with_handler 로 등록한 쓰기 함수와 UIDocumentNode::save_node_parts 가 받는다.
+///
+/// # 예제
+/// 쓰기 함수에서 노드 참조를 경로로 적기
+/// ```rust
+/// use serde_json::{Map, Value};
+/// use vanilla::{Component, ComponentBase, NodeId, NodeTree, UIDocument, UIDocumentLoadContext, UIDocumentSaveContext};
+///
+/// struct Follow {
+/// 	component_base: ComponentBase,
+/// 	target: Option<NodeId>,
+/// }
+///
+/// impl Component for Follow {
+/// 	fn get_component_base(&self) -> &ComponentBase {
+/// 		&self.component_base
+/// 	}
+///
+/// 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
+/// 		&mut self.component_base
+/// 	}
+///
+/// 	fn get_component_type(&self) -> &'static str {
+/// 		"Follow"
+/// 	}
+/// }
+///
+/// fn create_follow() -> Follow {
+/// 	Follow {
+/// 		component_base: ComponentBase::new(),
+/// 		target: None,
+/// 	}
+/// }
+///
+/// fn save_follow(follow: &Follow, save_context: &UIDocumentSaveContext) -> Map<String, Value> {
+/// 	let mut component_data = Map::new();
+/// 	save_context.write_node_reference(&mut component_data, "target", follow.target);
+/// 	component_data
+/// }
+///
+/// fn load_follow(_follow: &mut Follow, _component_data: &Map<String, Value>, _load_context: &mut UIDocumentLoadContext) {
+/// }
+///
+/// let mut document = UIDocument::new();
+/// document.register_component_type_with_handler("Follow", create_follow, save_follow, load_follow);
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.create_node("root");
+/// let leader_id = node_tree.create_child(root_id, "leader");
+/// let follower_id = node_tree.create_child(root_id, "follower");
+/// node_tree[follower_id].add_component(create_follow()).target = Some(leader_id);
+///
+/// let json_text = document.to_json_text(&node_tree, root_id, false);
+/// let document_data: Value = serde_json::from_str(&json_text).expect("json");
+/// let component_data = &document_data["root"]["children"][1]["components"][0];
+/// assert_eq!(component_data["target"]["$nodeRef"], "/leader");
+/// assert_eq!(component_data["type"], "Follow");
+/// ```
 //==============================================================================
 pub struct UIDocumentSaveContext<'a> {
 	node_tree: &'a NodeTree,
@@ -354,6 +512,8 @@ pub struct UIDocumentSaveContext<'a> {
 impl<'a> UIDocumentSaveContext<'a> {
 	//==============================================================================
 	/// 노드 트리.
+	/// # 돌려줌
+	/// 쓰는 중인 노드 트리.
 	//==============================================================================
 	pub fn get_node_tree(&self) -> &NodeTree {
 		self.node_tree
@@ -361,6 +521,8 @@ impl<'a> UIDocumentSaveContext<'a> {
 
 	//==============================================================================
 	/// 쓰는 중인 노드.
+	/// # 돌려줌
+	/// 쓰는 중인 노드. (serialize_component 로 부르면 root_id)
 	//==============================================================================
 	pub fn get_node_id(&self) -> NodeId {
 		self.node_id
@@ -391,6 +553,10 @@ impl<'a> UIDocumentSaveContext<'a> {
 
 	//==============================================================================
 	/// 노드 참조 적기. ({ "$nodeRef": 뿌리 기준 경로 }, None 이거나 뿌리 밖의 노드면 적지 않는다. 원본 saveNodeReferences)
+	/// # 인자
+	/// - `component_data`: 값을 넣을 컴포넌트 문서 값.
+	/// - `property_name`: 넣을 키.
+	/// - `node_id`: 가리킬 노드. None 이거나 뿌리 밖이면 키를 넣지 않는다.
 	//==============================================================================
 	pub fn write_node_reference(&self, component_data: &mut Map<String, Value>, property_name: &str, node_id: Option<NodeId>) {
 		let node_id = match node_id {
@@ -411,6 +577,65 @@ impl<'a> UIDocumentSaveContext<'a> {
 
 //==============================================================================
 /// 읽기 문맥. (컴포넌트 읽기 함수가 받는다. 그림과 노드 참조는 여기에 맡겨 두고 트리를 다 지은 뒤에 넣는다)
+/// - 바깥에서 짓지 않는다. register_component_type_with_handler 로 등록한 읽기 함수가 받는다.
+///
+/// # 예제
+/// 읽기 함수에서 노드 참조를 맡겨 트리를 다 지은 뒤 잇기
+/// ```rust
+/// use serde_json::{Map, Value};
+/// use vanilla::{Component, ComponentBase, NodeId, NodeTree, UIDocument, UIDocumentLoadContext, UIDocumentSaveContext};
+///
+/// struct Follow {
+/// 	component_base: ComponentBase,
+/// 	target: Option<NodeId>,
+/// }
+///
+/// impl Component for Follow {
+/// 	fn get_component_base(&self) -> &ComponentBase {
+/// 		&self.component_base
+/// 	}
+///
+/// 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
+/// 		&mut self.component_base
+/// 	}
+///
+/// 	fn get_component_type(&self) -> &'static str {
+/// 		"Follow"
+/// 	}
+/// }
+///
+/// fn create_follow() -> Follow {
+/// 	Follow {
+/// 		component_base: ComponentBase::new(),
+/// 		target: None,
+/// 	}
+/// }
+///
+/// fn save_follow(follow: &Follow, save_context: &UIDocumentSaveContext) -> Map<String, Value> {
+/// 	let mut component_data = Map::new();
+/// 	save_context.write_node_reference(&mut component_data, "target", follow.target);
+/// 	component_data
+/// }
+///
+/// fn load_follow(_follow: &mut Follow, component_data: &Map<String, Value>, load_context: &mut UIDocumentLoadContext) {
+/// 	load_context.bind_node_reference(component_data.get("target"), |follow: &mut Follow, node_id: NodeId| {
+/// 		follow.target = Some(node_id);
+/// 	});
+/// }
+///
+/// let mut document = UIDocument::new();
+/// document.register_component_type_with_handler("Follow", create_follow, save_follow, load_follow);
+/// let json_text = r#"{"version":1,"root":{"name":"root","children":[
+/// 	{"name":"leader"},
+/// 	{"name":"follower","components":[{"target":{"$nodeRef":"/leader"},"type":"Follow"}]}
+/// ]}}"#;
+/// let mut node_tree = NodeTree::new();
+/// let root_id = document.from_json_text(&mut node_tree, json_text).expect("document");
+///
+/// let leader_id = node_tree.find_child_by_name(root_id, "leader").expect("leader");
+/// let follower_id = node_tree.find_child_by_name(root_id, "follower").expect("follower");
+/// assert_eq!(node_tree[follower_id].get_component::<Follow>().expect("follow").target, Some(leader_id));
+/// ```
 //==============================================================================
 pub struct UIDocumentLoadContext<'a> {
 	node_id: NodeId,
@@ -423,6 +648,8 @@ pub struct UIDocumentLoadContext<'a> {
 impl<'a> UIDocumentLoadContext<'a> {
 	//==============================================================================
 	/// 노드 트리. (읽는 컴포넌트는 트리에서 잠깐 꺼낸 채다. 그 자리에는 빈 자리표가 있다)
+	/// # 돌려줌
+	/// 노드 트리의 가변 참조. (읽는 컴포넌트는 get_component 로 찾을 수 없다)
 	//==============================================================================
 	pub fn get_node_tree_mut(&mut self) -> &mut NodeTree {
 		self.node_tree
@@ -430,6 +657,8 @@ impl<'a> UIDocumentLoadContext<'a> {
 
 	//==============================================================================
 	/// 짓는 중인 노드.
+	/// # 돌려줌
+	/// 읽는 컴포넌트가 붙은 노드.
 	//==============================================================================
 	pub fn get_node_id(&self) -> NodeId {
 		self.node_id
@@ -438,6 +667,9 @@ impl<'a> UIDocumentLoadContext<'a> {
 	//==============================================================================
 	/// 그림 맡기기. (경로의 그림을 찾으면 apply_image 로 이 컴포넌트에 넣는다. 원본 UIDocument.resolveImage + setImage)
 	/// - 지금 찾을 수 있는 그림은 트리를 다 지은 자리에서, 아직 읽히는 그림은 bind_pending_images 에서 넣는다.
+	/// # 인자
+	/// - `image_path`: 그림 경로. (빈 글이면 맡기지 않는다)
+	/// - `apply_image`: 찾은 그림을 컴포넌트에 넣는 함수. (그 자리의 컴포넌트가 T 가 아니면 부르지 않는다)
 	//==============================================================================
 	pub fn bind_image<T: Component + 'static>(&mut self, image_path: &str, apply_image: fn(&mut T, Rc<Image>)) {
 		if image_path.is_empty() {
@@ -457,6 +689,9 @@ impl<'a> UIDocumentLoadContext<'a> {
 
 	//==============================================================================
 	/// 노드 참조 맡기기. (값이 { "$nodeRef": 경로 } 면 트리를 다 지은 뒤 그 노드를 apply_node 로 넣는다. 원본 loadNodeReferences)
+	/// # 인자
+	/// - `stored_value`: 문서의 그 키 값. None 이거나 { "$nodeRef": 경로 } 꼴이 아니면 맡기지 않는다.
+	/// - `apply_node`: 찾은 노드를 컴포넌트에 넣는 함수. (경로의 노드를 찾지 못하거나 그 자리의 컴포넌트가 T 가 아니면 부르지 않는다)
 	//==============================================================================
 	pub fn bind_node_reference<T: Component + 'static>(&mut self, stored_value: Option<&Value>, apply_node: fn(&mut T, NodeId)) {
 		let reference_path = match stored_value.and_then(|value| value.get(NODE_REFERENCE_KEY)).and_then(|value| value.as_str()) {
@@ -497,6 +732,41 @@ impl<'a> UIDocumentLoadContext<'a> {
 
 //==============================================================================
 /// UI 문서. (WorldNode 트리 ↔ JSON 상호 변환)
+/// - 종류 표(컴포넌트 종류, 노드 종류)와 그림 찾기 상태를 든다. 쓸 때는 &self, 읽을 때는 &mut self 다.
+///
+/// # 예제
+/// 러스트에서 지은 트리를 문서 글로 내보내고 다시 읽기
+/// ```rust
+/// use vanilla::{Color, NodeTree, Paint, UIDocument, Vector2};
+///
+/// let mut node_tree = NodeTree::new();
+/// let panel_id = node_tree.create_node("panel");
+/// node_tree[panel_id].set_content_size(Vector2::create(320.0, 200.0));
+/// node_tree[panel_id].add_component(Paint::new()).set_color(Color::create(0.2, 0.4, 0.8, 1.0));
+/// node_tree.create_child(panel_id, "title");
+///
+/// let mut document = UIDocument::new();
+/// let json_text = document.to_json_text(&node_tree, panel_id, true);
+/// let loaded_id = document.from_json_text(&mut node_tree, &json_text).expect("document");
+/// assert_eq!(node_tree[loaded_id].get_content_size(), Vector2::create(320.0, 200.0));
+/// assert_eq!(node_tree[loaded_id].get_component::<Paint>().expect("paint").get_color(), Color::create(0.2, 0.4, 0.8, 1.0));
+/// assert!(node_tree.find_child_by_name(loaded_id, "title").is_some());
+/// assert_eq!(document.to_json_text(&node_tree, loaded_id, true), json_text);
+/// ```
+///
+/// 씬 파일을 읽어 씬 뿌리에 붙이기
+/// ```rust
+/// use vanilla::{NodeTree, UIDocument};
+///
+/// let json_text = std::fs::read_to_string("examples/assets/scenedocument.scene.json").expect("scene file");
+/// let mut node_tree = NodeTree::new();
+/// let mut document = UIDocument::new();
+/// let scene_root_id = document.from_json_text(&mut node_tree, &json_text).expect("document");
+/// let root_id = node_tree.get_root_id();
+/// node_tree.add_child(root_id, scene_root_id);
+/// assert_eq!(node_tree.get_parent_id(scene_root_id), Some(root_id));
+/// assert!(node_tree.find_child_by_name(scene_root_id, "Panel").is_some());
+/// ```
 //==============================================================================
 pub struct UIDocument {
 	component_type_list: Vec<UIDocumentComponentType>,
@@ -509,6 +779,8 @@ pub struct UIDocument {
 impl UIDocument {
 	//==============================================================================
 	/// 생성. (원본 표의 엔진 컴포넌트를 등록해 둔다)
+	/// # 돌려줌
+	/// 엔진 컴포넌트(Paint, Sprite, Text, RichText, Mask, Outline, SoftShade, ShadowText, UIProgressRing, UILabel, UIImageView, UIButton, UIToggleButton, UIProgressView, UISlider, UIScrollView, ShadowImage)를 등록한 새 문서. 노드 종류는 없고 이미지 해석기도 없다.
 	//==============================================================================
 	pub fn new() -> UIDocument {
 		let mut document = UIDocument {
@@ -626,6 +898,64 @@ impl UIDocument {
 	/// 컴포넌트 종류 등록. (원본 registerComponentType, 같은 이름이면 바꾼다)
 	/// - 쓰기, 읽기 함수가 없어 원본처럼 반사로 쓰고 읽는다. (`#[reflect]` 를 붙인 컴포넌트, 붙이지 않았으면 Component 공통 속성만)
 	/// - create_component 로 짓고 node_tree.add_component 로 붙인 뒤 문서 값을 넣는다. (원본처럼 붙인 다음 읽는다) 쓸 때는 값 끝에 "type" 을 더한다.
+	/// # 인자
+	/// - `type_name`: 문서의 "type" 이름. (같은 이름이 있으면 바꾼다)
+	/// - `create_component`: 읽을 때 컴포넌트를 짓는 함수.
+	///
+	/// # 예제
+	/// `#[vanilla::reflect]` 를 붙인 게임 컴포넌트를 등록 한 줄로 쓰고 읽기
+	/// ```rust
+	/// use vanilla::{Component, ComponentBase, NodeTree, UIDocument};
+	///
+	/// struct Spin {
+	/// 	component_base: ComponentBase,
+	/// 	degrees_per_second: f32,
+	/// }
+	///
+	/// #[vanilla::reflect]
+	/// impl Spin {
+	/// 	pub fn new() -> Spin {
+	/// 		Spin {
+	/// 			component_base: ComponentBase::new(),
+	/// 			degrees_per_second: 0.0,
+	/// 		}
+	/// 	}
+	///
+	/// 	pub fn set_degrees_per_second(&mut self, degrees_per_second: f32) {
+	/// 		self.degrees_per_second = degrees_per_second;
+	/// 	}
+	///
+	/// 	pub fn get_degrees_per_second(&self) -> f32 {
+	/// 		self.degrees_per_second
+	/// 	}
+	/// }
+	///
+	/// #[vanilla::reflect]
+	/// impl Component for Spin {
+	/// 	fn get_component_base(&self) -> &ComponentBase {
+	/// 		&self.component_base
+	/// 	}
+	///
+	/// 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
+	/// 		&mut self.component_base
+	/// 	}
+	///
+	/// 	fn get_component_type(&self) -> &'static str {
+	/// 		"Spin"
+	/// 	}
+	/// }
+	///
+	/// let mut document = UIDocument::new();
+	/// document.register_component_type("Spin", Spin::new);
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.create_node("root");
+	/// node_tree[root_id].add_component(Spin::new()).set_degrees_per_second(90.0);
+	///
+	/// let json_text = document.to_json_text(&node_tree, root_id, false);
+	/// assert!(json_text.contains("\"DegreesPerSecond\":90"));
+	/// let loaded_id = document.from_json_text(&mut node_tree, &json_text).expect("document");
+	/// assert_eq!(node_tree[loaded_id].get_component::<Spin>().expect("spin").get_degrees_per_second(), 90.0);
+	/// ```
 	//==============================================================================
 	pub fn register_component_type<T: Component + 'static>(&mut self, type_name: &str, create_component: fn() -> T) {
 		let component_type = UIDocument::create_component_type(type_name, create_component, None, None);
@@ -635,6 +965,64 @@ impl UIDocument {
 	//==============================================================================
 	/// 쓰기, 읽기 함수가 있는 컴포넌트 종류 등록. (원본 COMPONENT_TYPE_TABLE 과 COMPONENT_PROPERTY_TABLE 의 한 줄, 같은 이름이면 바꾼다)
 	/// - save_component 가 돌려준 값 끝에 "type" 을 더해 적는다. 노드를 가리키는 반사 속성은 원본처럼 따로 얹고 읽는다.
+	/// # 인자
+	/// - `type_name`: 문서의 "type" 이름. (같은 이름이 있으면 바꾼다)
+	/// - `create_component`: 읽을 때 컴포넌트를 짓는 함수.
+	/// - `save_component`: 컴포넌트를 문서 값(키 → 값)으로 쓰는 함수. ("type" 은 넣지 않는다)
+	/// - `load_component`: 붙인 컴포넌트에 문서 값을 읽어 넣는 함수. (그림과 노드 참조는 읽기 문맥에 맡긴다)
+	///
+	/// # 예제
+	/// 반사 없이 쓰기, 읽기 함수로 다루는 게임 컴포넌트
+	/// ```rust
+	/// use serde_json::{Map, Value};
+	/// use vanilla::{Component, ComponentBase, NodeTree, UIDocument, UIDocumentLoadContext, UIDocumentSaveContext};
+	///
+	/// struct Spin {
+	/// 	component_base: ComponentBase,
+	/// 	degrees_per_second: f32,
+	/// }
+	///
+	/// impl Component for Spin {
+	/// 	fn get_component_base(&self) -> &ComponentBase {
+	/// 		&self.component_base
+	/// 	}
+	///
+	/// 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
+	/// 		&mut self.component_base
+	/// 	}
+	///
+	/// 	fn get_component_type(&self) -> &'static str {
+	/// 		"Spin"
+	/// 	}
+	/// }
+	///
+	/// fn create_spin() -> Spin {
+	/// 	Spin {
+	/// 		component_base: ComponentBase::new(),
+	/// 		degrees_per_second: 0.0,
+	/// 	}
+	/// }
+	///
+	/// fn save_spin(spin: &Spin, _save_context: &UIDocumentSaveContext) -> Map<String, Value> {
+	/// 	let mut component_data = Map::new();
+	/// 	component_data.insert(String::from("degreesPerSecond"), UIDocument::number_to_value(spin.degrees_per_second));
+	/// 	component_data
+	/// }
+	///
+	/// fn load_spin(spin: &mut Spin, component_data: &Map<String, Value>, _load_context: &mut UIDocumentLoadContext) {
+	/// 	if let Some(degrees_per_second) = component_data.get("degreesPerSecond").and_then(|value| value.as_f64()) {
+	/// 		spin.degrees_per_second = degrees_per_second as f32;
+	/// 	}
+	/// }
+	///
+	/// let mut document = UIDocument::new();
+	/// document.register_component_type_with_handler("Spin", create_spin, save_spin, load_spin);
+	/// let json_text = r#"{"version":1,"root":{"name":"root","components":[{"degreesPerSecond":90,"type":"Spin"}]}}"#;
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = document.from_json_text(&mut node_tree, json_text).expect("document");
+	/// assert_eq!(node_tree[root_id].get_component::<Spin>().expect("spin").degrees_per_second, 90.0);
+	/// assert!(document.to_json_text(&node_tree, root_id, false).contains("{\"degreesPerSecond\":90,\"type\":\"Spin\"}"));
+	/// ```
 	//==============================================================================
 	pub fn register_component_type_with_handler<T: Component + 'static>(&mut self, type_name: &str, create_component: fn() -> T, save_component: fn(&T, &UIDocumentSaveContext) -> Map<String, Value>, load_component: fn(&mut T, &Map<String, Value>, &mut UIDocumentLoadContext)) {
 		let component_type = UIDocument::create_component_type(type_name, create_component, Some(save_component), Some(load_component));
@@ -645,6 +1033,34 @@ impl UIDocument {
 	/// 위젯 종류 등록. (원본의 UIView 계열, 붙을 때 content 노드를 만드는 컴포넌트. 반사로 쓰고 읽는다)
 	/// - read_content 가 돌려준 content 노드는 문서에 적지 않고, 그 안의 자식만 contentChildren 으로 적는다. 읽을 때 위젯이 다시 만든 content 에 붙인다.
 	/// - generated_type_names 는 위젯이 붙을 때 호스트에 스스로 붙이는 컴포넌트 종류다. (원본 require, 문서에 적지 않는다)
+	/// # 인자
+	/// - `type_name`: 문서의 "type" 이름. (같은 이름이 있으면 바꾼다)
+	/// - `create_component`: 읽을 때 위젯을 짓는 함수.
+	/// - `read_content`: 위젯의 content 노드를 돌려주는 함수.
+	/// - `generated_type_names`: 위젯이 붙을 때 호스트에 스스로 붙이는 컴포넌트 종류 이름. (없으면 빈 목록, UIScrollView 는 ["Mask"])
+	///
+	/// # 예제
+	/// UIView 를 위젯으로 등록하면 content 안의 자식이 contentChildren 으로 적힌다
+	/// ```rust
+	/// use serde_json::Value;
+	/// use vanilla::{NodeTree, UIDocument, UIView};
+	///
+	/// let mut document = UIDocument::new();
+	/// document.register_widget_type("UIView", UIView::new, UIView::get_content, &[]);
+	/// let mut node_tree = NodeTree::new();
+	/// let view_id = node_tree.create_node("view");
+	/// let content_id = node_tree.add_component(view_id, UIView::new()).expect("view").get_content().expect("content");
+	/// node_tree.create_child(content_id, "item");
+	///
+	/// let json_text = document.to_json_text(&node_tree, view_id, false);
+	/// let document_data: Value = serde_json::from_str(&json_text).expect("json");
+	/// assert_eq!(document_data["root"]["children"], serde_json::json!([]));
+	/// assert_eq!(document_data["root"]["contentChildren"][0]["name"], "item");
+	///
+	/// let loaded_id = document.from_json_text(&mut node_tree, &json_text).expect("document");
+	/// let loaded_content_id = node_tree[loaded_id].get_component::<UIView>().expect("view").get_content().expect("content");
+	/// assert!(node_tree.find_child_by_name(loaded_content_id, "item").is_some());
+	/// ```
 	//==============================================================================
 	pub fn register_widget_type<T: Component + 'static>(&mut self, type_name: &str, create_component: fn() -> T, read_content: fn(&T) -> Option<NodeId>, generated_type_names: &[&str]) {
 		let component_type = UIDocument::create_widget_type(type_name, create_component, None, None, read_content, generated_type_names);
@@ -653,6 +1069,15 @@ impl UIDocument {
 
 	//==============================================================================
 	/// 쓰기, 읽기 함수가 있는 위젯 종류 등록.
+	/// - register_widget_type 과 같되 반사 대신 save_component, load_component 로 쓰고 읽는다.
+	///
+	/// # 인자
+	/// - `type_name`: 문서의 "type" 이름. (같은 이름이 있으면 바꾼다)
+	/// - `create_component`: 읽을 때 위젯을 짓는 함수.
+	/// - `save_component`: 위젯을 문서 값으로 쓰는 함수. ("type" 은 넣지 않는다)
+	/// - `load_component`: 붙인 위젯에 문서 값을 읽어 넣는 함수.
+	/// - `read_content`: 위젯의 content 노드를 돌려주는 함수.
+	/// - `generated_type_names`: 위젯이 붙을 때 호스트에 스스로 붙이는 컴포넌트 종류 이름.
 	//==============================================================================
 	pub fn register_widget_type_with_handler<T: Component + 'static>(&mut self, type_name: &str, create_component: fn() -> T, save_component: fn(&T, &UIDocumentSaveContext) -> Map<String, Value>, load_component: fn(&mut T, &Map<String, Value>, &mut UIDocumentLoadContext), read_content: fn(&T) -> Option<NodeId>, generated_type_names: &[&str]) {
 		let component_type = UIDocument::create_widget_type(type_name, create_component, Some(save_component), Some(load_component), read_content, generated_type_names);
@@ -664,6 +1089,32 @@ impl UIDocument {
 	/// - 그 컴포넌트가 붙은 노드는 type 을 이 이름으로 적고 컴포넌트 목록에는 그 컴포넌트를 적지 않는다. 읽을 때는 노드를 짓자마자(문서의 노드 값을 넣기 전에) 붙인다.
 	///   (원본은 그 종류의 생성자로 노드를 짓고 노드 값을 넣는다)
 	/// - 원본 생성자가 만드는 컴포넌트와 자식은 UIDocumentNode 가 쓰고 읽는다.
+	/// # 인자
+	/// - `type_name`: 문서 노드의 "type" 이름. (같은 이름이 있으면 바꾼다)
+	/// - `create_component`: 읽을 때 노드를 짓자마자 붙일 컴포넌트를 짓는 함수.
+	///
+	/// # 예제
+	/// UIScrollBar 노드를 원본 노드 꼴(트랙 Paint, 썸 자식)로 쓰고 읽기
+	/// ```rust
+	/// use serde_json::Value;
+	/// use vanilla::{NodeTree, UIDocument, UIScrollBar};
+	///
+	/// let mut document = UIDocument::new();
+	/// document.register_node_type("UIScrollBar", UIScrollBar::new);
+	/// let mut node_tree = NodeTree::new();
+	/// let scroll_bar_id = node_tree.create_node("scrollBar");
+	/// node_tree.add_component(scroll_bar_id, UIScrollBar::new());
+	///
+	/// let json_text = document.to_json_text(&node_tree, scroll_bar_id, false);
+	/// let document_data: Value = serde_json::from_str(&json_text).expect("json");
+	/// assert_eq!(document_data["root"]["type"], "UIScrollBar");
+	/// assert_eq!(document_data["root"]["components"][0]["type"], "Paint");
+	/// assert_eq!(document_data["root"]["children"][0]["name"], "thumb");
+	///
+	/// let loaded_id = document.from_json_text(&mut node_tree, &json_text).expect("document");
+	/// assert!(node_tree[loaded_id].get_component::<UIScrollBar>().is_some());
+	/// assert!(node_tree.get_child_ids(loaded_id).is_empty());
+	/// ```
 	//==============================================================================
 	pub fn register_node_type<T: Component + UIDocumentNode + 'static>(&mut self, type_name: &str, create_component: fn() -> T) {
 		self.insert_node_type::<T>(type_name, create_component, None);
@@ -672,6 +1123,10 @@ impl UIDocument {
 	//==============================================================================
 	/// 노드 종류 등록. (컴포넌트 종류만으로 가리지 못할 때 matches 가 참인 것만 이 노드 종류다. UIConfirmWindow 는 UIWindow 이고 behavior 로 가린다)
 	/// - 가리는 함수가 있는 등록이 없는 등록보다 먼저 맞춰 본다.
+	/// # 인자
+	/// - `type_name`: 문서 노드의 "type" 이름. (같은 이름이 있으면 바꾼다)
+	/// - `create_component`: 읽을 때 노드를 짓자마자 붙일 컴포넌트를 짓는 함수.
+	/// - `matches`: 노드에 붙은 그 타입의 컴포넌트가 이 노드 종류인지 가리는 함수.
 	//==============================================================================
 	pub fn register_node_type_with_match<T: Component + UIDocumentNode + 'static>(&mut self, type_name: &str, create_component: fn() -> T, matches: fn(&T) -> bool) {
 		let match_component: MatchNodeTypeFunction = Box::new(move |component: &dyn Component| {
@@ -877,6 +1332,8 @@ impl UIDocument {
 
 	//==============================================================================
 	/// 지원 컴포넌트 종류 이름 목록. (원본 getComponentTypeNames, 등록 차례)
+	/// # 돌려줌
+	/// 등록한 컴포넌트 종류 이름. (등록 차례, 노드 종류 이름은 들지 않는다)
 	//==============================================================================
 	pub fn get_component_type_names(&self) -> Vec<&str> {
 		self.component_type_list.iter().map(|registered_type| registered_type.type_name.as_str()).collect()
@@ -884,6 +1341,26 @@ impl UIDocument {
 
 	//==============================================================================
 	/// 이름으로 컴포넌트를 지어 노드에 붙인다. (원본 getComponentType 으로 받은 생성자로 짓고 붙이는 자리, 등록하지 않은 이름이면 None)
+	/// # 인자
+	/// - `node_tree`: 노드가 든 트리.
+	/// - `node_id`: 컴포넌트를 붙일 노드.
+	/// - `type_name`: 등록한 컴포넌트 종류 이름.
+	///
+	/// # 돌려줌
+	/// 붙인 컴포넌트의 차례 번호. (그 노드의 컴포넌트 목록 안) 등록하지 않은 이름이거나 노드가 없으면 None.
+	///
+	/// # 예제
+	/// 이름으로 Paint 붙이기
+	/// ```rust
+	/// use vanilla::{NodeTree, Paint, UIDocument};
+	///
+	/// let document = UIDocument::new();
+	/// let mut node_tree = NodeTree::new();
+	/// let node_id = node_tree.create_node("node");
+	/// assert_eq!(document.create_component(&mut node_tree, node_id, "Paint"), Some(0));
+	/// assert!(node_tree[node_id].get_component::<Paint>().is_some());
+	/// assert_eq!(document.create_component(&mut node_tree, node_id, "Unknown"), None);
+	/// ```
 	//==============================================================================
 	pub fn create_component(&self, node_tree: &mut NodeTree, node_id: NodeId, type_name: &str) -> Option<usize> {
 		let component_type = self.component_type_list.iter().find(|registered_type| registered_type.type_name == type_name)?;
@@ -892,6 +1369,33 @@ impl UIDocument {
 
 	//==============================================================================
 	/// 이미지 경로 해석기 등록. (원본 setImageResolver, 경로 → 그림. 등록하면 애셋 창고 대신 이것으로 찾는다)
+	/// # 인자
+	/// - `image_resolver`: 그림 경로를 받아 그림을 돌려주는 함수. None 을 돌려주면 그 그림은 찾지 못한 것이다.
+	///
+	/// # 예제
+	/// 미리 가진 그림을 경로로 넣기
+	/// ```rust
+	/// use std::rc::Rc;
+	/// use vanilla::{Image, NodeTree, Sprite, UIDocument};
+	///
+	/// let star_image = Image::create_from_pixels(1, 1, vec![255, 255, 255, 255]);
+	/// let resolved_image = star_image.clone();
+	/// let mut document = UIDocument::new();
+	/// document.set_image_resolver(move |image_path: &str| {
+	/// 	if image_path == "star.png" {
+	/// 		Some(resolved_image.clone())
+	/// 	}
+	/// 	else {
+	/// 		None
+	/// 	}
+	/// });
+	/// let json_text = r#"{"version":1,"root":{"name":"star","components":[{"imagePath":"star.png","type":"Sprite"}]}}"#;
+	/// let mut node_tree = NodeTree::new();
+	/// let star_id = document.from_json_text(&mut node_tree, json_text).expect("document");
+	/// let sprite = node_tree[star_id].get_component::<Sprite>().expect("sprite");
+	/// assert!(sprite.get_image().is_some_and(|image| Rc::ptr_eq(image, &star_image)));
+	/// assert!(document.resolve_image("missing.png").is_none());
+	/// ```
 	//==============================================================================
 	pub fn set_image_resolver(&mut self, image_resolver: impl FnMut(&str) -> Option<Rc<Image>> + 'static) {
 		self.image_resolver = Some(Box::new(image_resolver));
@@ -899,6 +1403,11 @@ impl UIDocument {
 
 	//==============================================================================
 	/// 이미지 경로 해석. (원본 resolveImage, 찾지 못했거나 아직 읽히는 중이면 None)
+	/// # 인자
+	/// - `image_path`: 찾을 그림 경로.
+	///
+	/// # 돌려줌
+	/// 찾은 그림. 해석기가 None 을 주었거나, 해석기가 없고 load_images 로 요청하지 않았거나 아직 읽히는 중이거나 읽기에 실패했으면 None.
 	//==============================================================================
 	pub fn resolve_image(&mut self, image_path: &str) -> Option<Rc<Image>> {
 		match self.find_image(image_path) {
@@ -949,6 +1458,32 @@ impl UIDocument {
 	/// 문서의 그림 읽기 요청. (imagePath 마다 ImageAsset 을 요청해 창고에 든다. 이미 요청한 경로는 건너뛴다)
 	/// - 새로 요청한 애셋의 읽기 손잡이를 돌려준다. 씬이 create 에서 부르면 track_load_handle 로 맡겨 initialize 를 기다리게 할 수 있다.
 	/// - 데스크탑은 그 자리에서 읽히고, 웹은 나중에 읽힌다. 읽히기 전에 지은 노드의 그림은 bind_pending_images 가 붙인다.
+	/// # 인자
+	/// - `engine`: 애셋을 읽을 엔진. (데스크탑은 EngineConfiguration 의 asset_directory_paths 에서 찾는다)
+	/// - `json_text`: 문서 글.
+	///
+	/// # 돌려줌
+	/// 새로 요청한 애셋의 읽기 손잡이 목록. JSON 이 아니거나 새로 요청할 경로가 없으면 빈 목록.
+	///
+	/// # 예제
+	/// 문서의 그림을 애셋 폴더에서 읽어 붙이기
+	/// ```rust
+	/// use std::path::PathBuf;
+	/// use vanilla::{Engine, EngineConfiguration, NodeTree, Sprite, UIDocument};
+	///
+	/// let mut engine_configuration = EngineConfiguration::new();
+	/// engine_configuration.asset_directory_paths = vec![PathBuf::from("examples/assets")];
+	/// let engine = Engine::new(engine_configuration);
+	/// let json_text = r#"{"version":1,"root":{"name":"icons","components":[{"imagePath":"atlas/icons.png","type":"Sprite"}]}}"#;
+	///
+	/// let mut document = UIDocument::new();
+	/// let load_handle_list = document.load_images(&engine, json_text);
+	/// assert_eq!(load_handle_list.len(), 1);
+	/// let mut node_tree = NodeTree::new();
+	/// let icons_id = document.from_json_text(&mut node_tree, json_text).expect("document");
+	/// assert_eq!(document.bind_pending_images(&mut node_tree), 0);
+	/// assert!(node_tree[icons_id].get_component::<Sprite>().expect("sprite").get_image().is_some());
+	/// ```
 	//==============================================================================
 	pub fn load_images(&mut self, engine: &Engine, json_text: &str) -> Vec<AssetLoadHandle> {
 		let document_data: Value = match serde_json::from_str(json_text) {
@@ -980,6 +1515,11 @@ impl UIDocument {
 	/// 맡아 둔 그림 붙이기. (찾은 그림은 넣고, 아직 읽히는 그림은 남긴다. 남은 수를 돌려준다)
 	/// - from_json_text, deserialize_node 가 끝에 한 번 부른다. 웹처럼 그림이 나중에 읽히면 씬의 tick 에서 남은 수가 0 이 될 때까지 부른다.
 	/// - 찾지 못한 그림(해석기가 None, 애셋이 없거나 실패)은 경고를 내고 버린다. 그 컴포넌트는 원본처럼 그림 없이 남는다.
+	/// # 인자
+	/// - `node_tree`: 그림을 넣을 노드 트리. (맡긴 노드가 지워졌으면 그 그림은 버린다)
+	///
+	/// # 돌려줌
+	/// 아직 읽히는 중이라 남은 그림 수. (0 이면 다 붙였거나 버렸다)
 	//==============================================================================
 	pub fn bind_pending_images(&mut self, node_tree: &mut NodeTree) -> usize {
 		let pending_image_list = std::mem::take(&mut self.pending_image_list);
@@ -1006,6 +1546,32 @@ impl UIDocument {
 
 	//==============================================================================
 	/// 노드 트리 → 문서 데이터. (원본 serializeNode, 노드 참조는 이 노드 기준 경로로 적는다)
+	/// # 인자
+	/// - `node_tree`: 노드가 든 트리.
+	/// - `node_id`: 문서 값으로 쓸 노드. (자손까지)
+	///
+	/// # 돌려줌
+	/// 노드 문서 값. ("version" 머리 없는 노드 객체) 노드가 없으면 Value::Null.
+	///
+	/// # 예제
+	/// 노드를 문서 값으로 떠서 복제본 짓기
+	/// ```rust
+	/// use vanilla::{NodeTree, UIDocument, Vector2};
+	///
+	/// let mut node_tree = NodeTree::new();
+	/// let card_id = node_tree.create_node("card");
+	/// node_tree[card_id].set_content_size(Vector2::create(120.0, 80.0));
+	/// node_tree.create_child(card_id, "icon");
+	///
+	/// let mut document = UIDocument::new();
+	/// let card_data = document.serialize_node(&node_tree, card_id);
+	/// assert_eq!(card_data["name"], "card");
+	/// let copy_id = document.deserialize_node(&mut node_tree, &card_data);
+	/// assert_ne!(copy_id, card_id);
+	/// assert_eq!(node_tree[copy_id].get_content_size(), Vector2::create(120.0, 80.0));
+	/// assert!(node_tree.find_child_by_name(copy_id, "icon").is_some());
+	/// assert_eq!(node_tree.get_parent_id(copy_id), None);
+	/// ```
 	//==============================================================================
 	pub fn serialize_node(&self, node_tree: &NodeTree, node_id: NodeId) -> Value {
 		self.serialize_node_from_root(node_tree, node_id, node_id, None)
@@ -1013,6 +1579,12 @@ impl UIDocument {
 
 	//==============================================================================
 	/// 노드 트리 → 문서 데이터. (&mut self 게터가 있는 컴포넌트는 &mut 갈래로 읽는다. 원본 게터에는 &self, &mut self 구별이 없다)
+	/// # 인자
+	/// - `node_tree`: 노드가 든 트리. (&mut 게터를 부르려고 가변으로 받는다)
+	/// - `node_id`: 문서 값으로 쓸 노드. (자손까지)
+	///
+	/// # 돌려줌
+	/// 노드 문서 값. 노드가 없으면 Value::Null.
 	//==============================================================================
 	pub fn serialize_node_mut(&self, node_tree: &mut NodeTree, node_id: NodeId) -> Value {
 		let prefetched_value_map = UIDocument::prefetch_mutable_values(node_tree, node_id);
@@ -1194,6 +1766,27 @@ impl UIDocument {
 	//==============================================================================
 	/// 컴포넌트 하나 → 문서 데이터. ("type" 은 더하지 않는다. 등록한 종류면 그 꼴로, 등록하지 않았어도 반사가 있으면 반사로. 둘 다 없으면 경고 없이 None)
 	/// - 노드 참조는 root_id 기준 경로로 적는다.
+	/// # 인자
+	/// - `node_tree`: 노드 참조를 찾을 트리.
+	/// - `root_id`: 노드 참조 경로의 기준 뿌리.
+	/// - `component`: 쓸 컴포넌트.
+	///
+	/// # 돌려줌
+	/// 컴포넌트 문서 값. ("type" 없음) 등록하지 않았고 반사도 없으면 None.
+	///
+	/// # 예제
+	/// Paint 하나의 문서 값
+	/// ```rust
+	/// use vanilla::{NodeTree, Paint, UIDocument};
+	///
+	/// let node_tree = NodeTree::new();
+	/// let mut paint = Paint::new();
+	/// paint.set_round_size(8.0);
+	/// let document = UIDocument::new();
+	/// let paint_data = document.serialize_component(&node_tree, node_tree.get_root_id(), &paint).expect("paint data");
+	/// assert_eq!(paint_data["roundSize"], 8);
+	/// assert!(paint_data.get("type").is_none());
+	/// ```
 	//==============================================================================
 	pub fn serialize_component(&self, node_tree: &NodeTree, root_id: NodeId, component: &dyn Component) -> Option<Map<String, Value>> {
 		let save_context = UIDocumentSaveContext {
@@ -1225,6 +1818,11 @@ impl UIDocument {
 
 	//==============================================================================
 	/// 컴포넌트의 편집할 수 있는 속성 목록. (원본 getReflectedProperties, 짝이 맞는 get 또는 is 와 set. 다른 객체를 가리키는 이름은 뺀다)
+	/// # 인자
+	/// - `component`: 속성을 볼 컴포넌트.
+	///
+	/// # 돌려줌
+	/// 반사 속성 목록. (반사 매크로가 지은 차례 뒤에 Component 공통 속성 GizmoVisible, Enable, ComponentType. 반사가 없는 컴포넌트는 공통 속성만)
 	//==============================================================================
 	pub fn get_reflected_properties(component: &dyn Component) -> Vec<ReflectedProperty> {
 		collect_reflected_properties(component).into_iter().filter(|property| !REFLECTED_PROPERTY_EXCLUDE_NAMES.contains(&property.name)).collect()
@@ -1232,6 +1830,12 @@ impl UIDocument {
 
 	//==============================================================================
 	/// 짝이 맞는 get / set 속성으로 컴포넌트 저장. (원본 saveByReflection, 옮길 수 있는 값만 담는다: 수, 불, 글, Color, Vector2, 노드)
+	/// # 인자
+	/// - `component`: 쓸 컴포넌트.
+	/// - `save_context`: 쓰기 문맥. (노드 참조 경로의 기준)
+	///
+	/// # 돌려줌
+	/// 속성 이름(머리 대문자) → 문서 값. ("type" 없음, 저장하지 않는 속성과 옮길 수 없는 값은 뺀다)
 	//==============================================================================
 	pub fn save_by_reflection(component: &dyn Component, save_context: &UIDocumentSaveContext) -> Map<String, Value> {
 		let mut component_data = Map::new();
@@ -1277,6 +1881,10 @@ impl UIDocument {
 	/// 짝이 맞는 get / set 속성으로 컴포넌트 복원. (원본 loadByReflection, 노드 참조는 트리를 다 지은 뒤 잇는다)
 	/// - 원본은 지금 값의 꼴로 받을지 가린다. 러스트 판은 세터의 꼴로 가린다. (core/reflection.rs)
 	/// - 트리를 받는 세터(set_snap_current_index(트리, 칸) 같은 것)도 읽기 문맥의 트리로 원본처럼 그 자리에서 부른다.
+	/// # 인자
+	/// - `component`: 값을 넣을 컴포넌트.
+	/// - `component_data`: 컴포넌트 문서 값. (속성 이름 키)
+	/// - `load_context`: 읽기 문맥. (노드 참조는 여기에 맡긴다)
 	//==============================================================================
 	pub fn load_by_reflection(component: &mut dyn Component, component_data: &Map<String, Value>, load_context: &mut UIDocumentLoadContext) {
 		for property in UIDocument::get_reflected_properties(component) {
@@ -1325,6 +1933,11 @@ impl UIDocument {
 
 	//==============================================================================
 	/// 위젯이 붙인 컴포넌트 종류 이름 모으기. (원본 collectGeneratedComponentTypes, 원본 require 자리는 등록할 때 준 목록)
+	/// # 인자
+	/// - `component_list`: 노드의 컴포넌트 목록.
+	///
+	/// # 돌려줌
+	/// 목록 안의 등록한 위젯들이 스스로 붙이는 컴포넌트 종류 이름 모음.
 	//==============================================================================
 	pub fn collect_generated_component_types(&self, component_list: &[Box<dyn Component>]) -> HashSet<String> {
 		let mut generated_type_set: HashSet<String> = HashSet::new();
@@ -1341,6 +1954,12 @@ impl UIDocument {
 	//==============================================================================
 	/// 문서 데이터 → 노드 트리. (원본 deserializeNode, 어느 부모에도 붙지 않은 노드를 돌려준다)
 	/// - 노드 참조는 이 노드 기준 경로로 잇고, 찾을 수 있는 그림을 넣는다.
+	/// # 인자
+	/// - `node_tree`: 노드를 지을 트리.
+	/// - `node_data`: 노드 문서 값. (serialize_node 꼴, 객체가 아니면 빈 노드 하나를 짓는다)
+	///
+	/// # 돌려줌
+	/// 지은 노드. (어느 부모에도 붙지 않았다)
 	//==============================================================================
 	pub fn deserialize_node(&mut self, node_tree: &mut NodeTree, node_data: &Value) -> NodeId {
 		let mut pending_node_reference_list: Vec<PendingNodeReference> = Vec::new();
@@ -1631,6 +2250,13 @@ impl UIDocument {
 
 	//==============================================================================
 	/// 노드 트리 → JSON 글. (원본 toJsonText, is_pretty 면 탭으로 들여 쓴다)
+	/// # 인자
+	/// - `node_tree`: 노드가 든 트리.
+	/// - `root_id`: 문서의 뿌리 노드. (노드 참조 경로의 기준)
+	/// - `is_pretty`: true 면 탭으로 들여 쓴 여러 줄, false 면 한 줄.
+	///
+	/// # 돌려줌
+	/// 문서 글. ({ "version": 1, "root": 노드 })
 	//==============================================================================
 	pub fn to_json_text(&self, node_tree: &NodeTree, root_id: NodeId, is_pretty: bool) -> String {
 		UIDocument::write_document_text(self.serialize_node_from_root(node_tree, root_id, root_id, None), is_pretty)
@@ -1638,6 +2264,13 @@ impl UIDocument {
 
 	//==============================================================================
 	/// 노드 트리 → JSON 글. (&mut self 게터가 있는 컴포넌트는 &mut 갈래로 읽는다)
+	/// # 인자
+	/// - `node_tree`: 노드가 든 트리. (&mut 게터를 부르려고 가변으로 받는다)
+	/// - `root_id`: 문서의 뿌리 노드.
+	/// - `is_pretty`: true 면 탭으로 들여 쓴 여러 줄, false 면 한 줄.
+	///
+	/// # 돌려줌
+	/// 문서 글.
 	//==============================================================================
 	pub fn to_json_text_mut(&self, node_tree: &mut NodeTree, root_id: NodeId, is_pretty: bool) -> String {
 		let prefetched_value_map = UIDocument::prefetch_mutable_values(node_tree, root_id);
@@ -1663,6 +2296,25 @@ impl UIDocument {
 
 	//==============================================================================
 	/// JSON 글 → 노드 트리. (원본 fromJsonText, 어느 부모에도 붙지 않은 뿌리를 돌려준다. 씬에 보이려면 add_child 로 붙인다)
+	/// # 인자
+	/// - `node_tree`: 노드를 지을 트리.
+	/// - `json_text`: 문서 글.
+	///
+	/// # 돌려줌
+	/// 지은 뿌리 노드. JSON 이 아니거나 "root" 객체가 없으면 Err(까닭 글).
+	///
+	/// # 예제
+	/// 잘못된 문서는 Err
+	/// ```rust
+	/// use vanilla::{NodeTree, UIDocument};
+	///
+	/// let mut node_tree = NodeTree::new();
+	/// let mut document = UIDocument::new();
+	/// assert!(document.from_json_text(&mut node_tree, "{\"version\":1}").is_err());
+	/// assert!(document.from_json_text(&mut node_tree, "not json").is_err());
+	/// let root_id = document.from_json_text(&mut node_tree, r#"{"version":1,"root":{"name":"panel"}}"#).expect("document");
+	/// assert_eq!(node_tree[root_id].get_name(), "panel");
+	/// ```
 	//==============================================================================
 	pub fn from_json_text(&mut self, node_tree: &mut NodeTree, json_text: &str) -> Result<NodeId, String> {
 		let document_data: Value = serde_json::from_str(json_text).map_err(|error| format!("UIDocument: {}", error))?;
@@ -1679,6 +2331,31 @@ impl UIDocument {
 
 	//==============================================================================
 	/// 뿌리 기준 절대 경로 계산. (원본 findNodePath, "/" + 이름들. 뿌리 밖의 노드면 None)
+	/// # 인자
+	/// - `node_tree`: 노드가 든 트리.
+	/// - `root_id`: 경로의 기준 뿌리.
+	/// - `node_id`: 경로를 셀 노드.
+	///
+	/// # 돌려줌
+	/// "/" 로 시작하는 이름 경로. (뿌리 자신은 "/") 뿌리의 자손이 아니면 None.
+	///
+	/// # 예제
+	/// 경로 세기와 경로로 찾기
+	/// ```rust
+	/// use vanilla::{NodeTree, UIDocument};
+	///
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.create_node("root");
+	/// let panel_id = node_tree.create_child(root_id, "panel");
+	/// let button_id = node_tree.create_child(panel_id, "button");
+	/// let outside_id = node_tree.create_node("outside");
+	///
+	/// assert_eq!(UIDocument::find_node_path(&node_tree, root_id, button_id).as_deref(), Some("/panel/button"));
+	/// assert_eq!(UIDocument::find_node_path(&node_tree, root_id, root_id).as_deref(), Some("/"));
+	/// assert_eq!(UIDocument::find_node_path(&node_tree, root_id, outside_id), None);
+	/// assert_eq!(UIDocument::find_node_by_path(&node_tree, root_id, "/panel/button"), Some(button_id));
+	/// assert_eq!(UIDocument::find_node_by_path(&node_tree, root_id, "/panel/missing"), None);
+	/// ```
 	//==============================================================================
 	pub fn find_node_path(node_tree: &NodeTree, root_id: NodeId, node_id: NodeId) -> Option<String> {
 		let mut name_list: Vec<&str> = Vec::new();
@@ -1694,6 +2371,13 @@ impl UIDocument {
 
 	//==============================================================================
 	/// 뿌리 기준 절대 경로로 노드 찾기. (원본 findNodeByPath, 같은 이름이면 앞의 자식)
+	/// # 인자
+	/// - `node_tree`: 노드가 든 트리.
+	/// - `root_id`: 경로의 기준 뿌리.
+	/// - `path_text`: "/이름/이름" 꼴 경로. (앞의 "/" 는 없어도 된다. 빈 글이나 "/" 면 뿌리)
+	///
+	/// # 돌려줌
+	/// 찾은 노드. 이름이 맞는 자식이 없는 조각이 있으면 None.
 	//==============================================================================
 	pub fn find_node_by_path(node_tree: &NodeTree, root_id: NodeId, path_text: &str) -> Option<NodeId> {
 		let trimmed_path = path_text.strip_prefix('/').unwrap_or(path_text);
@@ -1709,6 +2393,22 @@ impl UIDocument {
 
 	//==============================================================================
 	/// 수 → 문서 값. (f32 를 가장 짧은 십진으로, 정수면 소수점 없이. 원본 JSON.stringify 와 같은 글이 나온다. 수가 아니면 null)
+	/// # 인자
+	/// - `number`: 적을 수.
+	///
+	/// # 돌려줌
+	/// JSON 수. (NaN, 무한이면 null)
+	///
+	/// # 예제
+	/// 가장 짧은 십진
+	/// ```rust
+	/// use serde_json::Value;
+	/// use vanilla::UIDocument;
+	///
+	/// assert_eq!(UIDocument::number_to_value(0.22).to_string(), "0.22");
+	/// assert_eq!(UIDocument::number_to_value(24.0).to_string(), "24");
+	/// assert_eq!(UIDocument::number_to_value(f32::NAN), Value::Null);
+	/// ```
 	//==============================================================================
 	pub fn number_to_value(number: f32) -> Value {
 		if !number.is_finite() {
@@ -1739,6 +2439,11 @@ impl UIDocument {
 
 	//==============================================================================
 	/// 색 → 배열. (원본 colorToArray, [r, g, b, a])
+	/// # 인자
+	/// - `color`: 적을 색.
+	///
+	/// # 돌려줌
+	/// [r, g, b, a] 배열. (0 ~ 1 값을 가장 짧은 십진으로)
 	//==============================================================================
 	pub fn color_to_array(color: Color) -> Value {
 		Value::Array(vec![UIDocument::number_to_value(color.red), UIDocument::number_to_value(color.green), UIDocument::number_to_value(color.blue), UIDocument::number_to_value(color.alpha)])
@@ -1746,6 +2451,23 @@ impl UIDocument {
 
 	//==============================================================================
 	/// 배열 → 색. (원본 arrayToColor, 수 넷이 아니면 None)
+	/// # 인자
+	/// - `value`: [r, g, b, a] 꼴 문서 값.
+	///
+	/// # 돌려줌
+	/// 색. 배열이 아니거나 원소가 넷보다 적거나 앞 넷 가운데 수가 아닌 것이 있으면 None. (다섯째부터는 보지 않는다)
+	///
+	/// # 예제
+	/// 색 배열 왕복
+	/// ```rust
+	/// use vanilla::{Color, UIDocument};
+	///
+	/// let color = Color::create(1.0, 0.5, 0.0, 1.0);
+	/// let color_value = UIDocument::color_to_array(color);
+	/// assert_eq!(color_value, serde_json::json!([1, 0.5, 0, 1]));
+	/// assert_eq!(UIDocument::array_to_color(&color_value), Some(color));
+	/// assert_eq!(UIDocument::array_to_color(&serde_json::json!([1, 0.5])), None);
+	/// ```
 	//==============================================================================
 	pub fn array_to_color(value: &Value) -> Option<Color> {
 		let channels = value.as_array()?;
@@ -1761,6 +2483,11 @@ impl UIDocument {
 
 	//==============================================================================
 	/// 벡터 → 배열. ([x, y])
+	/// # 인자
+	/// - `vector`: 적을 벡터.
+	///
+	/// # 돌려줌
+	/// [x, y] 배열.
 	//==============================================================================
 	pub fn vector2_to_array(vector: Vector2) -> Value {
 		Value::Array(vec![UIDocument::number_to_value(vector.x), UIDocument::number_to_value(vector.y)])
@@ -1768,6 +2495,11 @@ impl UIDocument {
 
 	//==============================================================================
 	/// 배열 → 벡터. (수 둘이 아니면 None)
+	/// # 인자
+	/// - `value`: [x, y] 꼴 문서 값.
+	///
+	/// # 돌려줌
+	/// 벡터. 배열이 아니거나 원소가 둘보다 적거나 앞 둘 가운데 수가 아닌 것이 있으면 None. (셋째부터는 보지 않는다)
 	//==============================================================================
 	pub fn array_to_vector2(value: &Value) -> Option<Vector2> {
 		let values = value.as_array()?;
@@ -1781,6 +2513,9 @@ impl UIDocument {
 }
 
 impl Default for UIDocument {
+	//==============================================================================
+	/// 기본값. (new 와 같다, 엔진 컴포넌트를 등록한 문서)
+	//==============================================================================
 	fn default() -> UIDocument {
 		UIDocument::new()
 	}
@@ -2423,10 +3158,16 @@ impl UIDocumentNode for UIDropdown {
 /// UIToast 의 원본 노드 꼴. (원본은 숨을 때 노드를 끈다. 러스트 판은 tick 이 돌아야 해서 노드를 켠 채 숨긴다)
 //==============================================================================
 impl UIDocumentNode for UIToast {
+	//==============================================================================
+	/// 원본 active. (노드가 켜져 있고 보일 때만 true)
+	//==============================================================================
 	fn read_document_active(&self, is_node_active: bool, is_node_visible: bool) -> bool {
 		is_node_active && is_node_visible
 	}
 
+	//==============================================================================
+	/// 원본 active 를 노드 상태로. (노드는 늘 켜고, 원본 active 를 보임으로)
+	//==============================================================================
 	fn convert_document_active(&self, is_active: bool) -> (bool, Option<bool>) {
 		(true, Some(is_active))
 	}
@@ -2454,6 +3195,9 @@ impl UIDocumentNode for TouchEffect {
 /// - 읽을 때는 바탕 색과 둥근 크기, 안내 글과 그 색과 글 크기, 값 색, 켜진 값 라벨의 글(값)을 설정으로 읽는다. 커서 색과 최대 길이는 원본 문서에도 없다.
 //==============================================================================
 impl UIDocumentNode for UIInputField {
+	//==============================================================================
+	/// 원본 생성자 몫 쓰기. (바탕 Paint, 바탕 층, 안내 글과 값 라벨 자식, 오버레이 자식)
+	//==============================================================================
 	fn save_node_parts(&self, save_context: &UIDocumentSaveContext, _node_id: NodeId) -> UIDocumentNodeParts {
 		let mut node_parts = UIDocumentNodeParts::new();
 		node_parts.component_data_list.push(create_part_paint_data(self.get_background_color(), self.get_round_size(), save_context));
@@ -2483,6 +3227,9 @@ impl UIDocumentNode for UIInputField {
 		node_parts
 	}
 
+	//==============================================================================
+	/// 원본 생성자 몫 읽기. (바탕 색과 둥근 크기, 안내 글과 그 색과 글 크기, 값 색과 값, 오버레이 크기)
+	//==============================================================================
 	fn load_node_parts(&mut self, component_data_list: &[Value], child_data_list: &[Value]) -> (usize, usize) {
 		let mut component_count = 0;
 		if let Some(background_data) = find_part_component(component_data_list.first(), "Paint") {
@@ -2533,6 +3280,9 @@ impl UIDocumentNode for UIInputField {
 		(component_count, child_count)
 	}
 
+	//==============================================================================
+	/// 문서에 적지 않는 content 노드. (UIInputField 의 content)
+	//==============================================================================
 	fn get_document_content(&self) -> Option<NodeId> {
 		self.get_content()
 	}
@@ -2544,6 +3294,9 @@ impl UIDocumentNode for UIInputField {
 /// - 읽을 때는 트랙 색과 썸 색을 설정으로 읽는다. 둥근 크기는 원본처럼 4 로 정해져 있다. 대상 스크롤 뷰는 원본 문서에도 없다.
 //==============================================================================
 impl UIDocumentNode for UIScrollBar {
+	//==============================================================================
+	/// 원본 생성자 몫 쓰기. (트랙 Paint, 썸 자식 노드)
+	//==============================================================================
 	fn save_node_parts(&self, save_context: &UIDocumentSaveContext, _node_id: NodeId) -> UIDocumentNodeParts {
 		let mut node_parts = UIDocumentNodeParts::new();
 		node_parts.component_data_list.push(create_part_paint_data(self.get_track_color(), SCROLL_BAR_PART_ROUND_SIZE, save_context));
@@ -2553,6 +3306,9 @@ impl UIDocumentNode for UIScrollBar {
 		node_parts
 	}
 
+	//==============================================================================
+	/// 원본 생성자 몫 읽기. (트랙 색, 썸 색과 썸 사각형, 켜짐)
+	//==============================================================================
 	fn load_node_parts(&mut self, component_data_list: &[Value], child_data_list: &[Value]) -> (usize, usize) {
 		let mut component_count = 0;
 		if let Some(track_data) = find_part_component(component_data_list.first(), "Paint") {
@@ -2925,12 +3681,21 @@ mod tests {
 			degrees_per_second: f32,
 		}
 		impl Component for Spin {
+			//==============================================================================
+			/// 컴포넌트 공통 상태 반환.
+			//==============================================================================
 			fn get_component_base(&self) -> &crate::core::component::ComponentBase {
 				&self.component_base
 			}
+			//==============================================================================
+			/// 컴포넌트 공통 상태 반환. (변경용)
+			//==============================================================================
 			fn get_component_base_mut(&mut self) -> &mut crate::core::component::ComponentBase {
 				&mut self.component_base
 			}
+			//==============================================================================
+			/// 컴포넌트 종류 이름.
+			//==============================================================================
 			fn get_component_type(&self) -> &'static str {
 				"Spin"
 			}
@@ -2996,7 +3761,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	/// 시험용 게임 컴포넌트. (#`[vanilla::reflect]` 를 붙여 등록 한 줄로 쓰고 읽는다)
+	/// 시험용 게임 컴포넌트. (`#[vanilla::reflect]` 를 붙여 등록 한 줄로 쓰고 읽는다)
 	//==============================================================================
 	struct Follower {
 		component_base: crate::core::component::ComponentBase,
@@ -3014,6 +3779,9 @@ mod tests {
 
 	#[vanilla::reflect]
 	impl Follower {
+		//==============================================================================
+		/// 생성.
+		//==============================================================================
 		pub fn new() -> Follower {
 			Follower {
 				component_base: crate::core::component::ComponentBase::new(),
@@ -3030,70 +3798,121 @@ mod tests {
 			}
 		}
 
+		//==============================================================================
+		/// 속도 설정.
+		//==============================================================================
 		pub fn set_speed(&mut self, speed: f32) {
 			self.speed = speed;
 		}
 
+		//==============================================================================
+		/// 속도 반환.
+		//==============================================================================
 		pub fn get_speed(&self) -> f32 {
 			self.speed
 		}
 
+		//==============================================================================
+		/// 이름표 설정.
+		//==============================================================================
 		pub fn set_label(&mut self, label: &str) {
 			self.label = String::from(label);
 		}
 
+		//==============================================================================
+		/// 이름표 반환.
+		//==============================================================================
 		pub fn get_label(&self) -> &str {
 			&self.label
 		}
 
+		//==============================================================================
+		/// 색 설정.
+		//==============================================================================
 		pub fn set_tint(&mut self, tint: impl Into<Color>) {
 			self.tint = tint.into();
 		}
 
+		//==============================================================================
+		/// 색 반환.
+		//==============================================================================
 		pub fn get_tint(&self) -> Color {
 			self.tint
 		}
 
+		//==============================================================================
+		/// 떨어진 거리 설정.
+		//==============================================================================
 		pub fn set_offset(&mut self, offset: Vector2) {
 			self.offset = offset;
 		}
 
+		//==============================================================================
+		/// 떨어진 거리 반환.
+		//==============================================================================
 		pub fn get_offset(&self) -> Vector2 {
 			self.offset
 		}
 
+		//==============================================================================
+		/// 글 정렬 설정.
+		//==============================================================================
 		pub fn set_text_align(&mut self, text_align: TextAlign) {
 			self.text_align = text_align;
 		}
 
+		//==============================================================================
+		/// 글 정렬 반환.
+		//==============================================================================
 		pub fn get_text_align(&self) -> TextAlign {
 			self.text_align
 		}
 
+		//==============================================================================
+		/// 따라갈 노드 설정.
+		//==============================================================================
 		pub fn set_leader(&mut self, leader: Option<NodeId>) {
 			self.leader = leader;
 		}
 
+		//==============================================================================
+		/// 따라갈 노드 반환.
+		//==============================================================================
 		pub fn get_leader(&self) -> Option<NodeId> {
 			self.leader
 		}
 
+		//==============================================================================
+		/// 따라갈 노드 이름. (트리를 받는 게터)
+		//==============================================================================
 		pub fn get_leader_name<'a>(&self, node_tree: &'a NodeTree) -> &'a str {
 			self.leader.and_then(|leader_id| node_tree.get_node(leader_id)).map(|leader_node| leader_node.get_name()).unwrap_or("")
 		}
 
+		//==============================================================================
+		/// 자리 설정. (트리를 받는 세터, 노드 수로 자른다)
+		//==============================================================================
 		pub fn set_slot(&mut self, node_tree: &mut NodeTree, slot: usize) {
 			self.slot = slot.min(node_tree.get_node_count());
 		}
 
+		//==============================================================================
+		/// 자리 반환.
+		//==============================================================================
 		pub fn get_slot(&self) -> usize {
 			self.slot
 		}
 
+		//==============================================================================
+		/// 넓이 캐시 설정.
+		//==============================================================================
 		pub fn set_cached_area(&mut self, cached_area: f32) {
 			self.cached_area = cached_area;
 		}
 
+		//==============================================================================
+		/// 넓이 반환. (&mut self 게터, 처음 읽을 때 셈해 둔다)
+		//==============================================================================
 		pub fn get_cached_area(&mut self) -> f32 {
 			if self.cached_area < 0.0 {
 				self.cached_area = self.offset.x * self.offset.y;
@@ -3101,25 +3920,40 @@ mod tests {
 			self.cached_area
 		}
 
+		//==============================================================================
+		/// 숨긴 값 설정. (반사에서 뺀다)
+		//==============================================================================
 		#[reflect(skip)]
 		pub fn set_secret(&mut self, secret: i32) {
 			self.secret = secret;
 		}
 
+		//==============================================================================
+		/// 숨긴 값 반환. (반사에서 뺀다)
+		//==============================================================================
 		#[reflect(skip)]
 		pub fn get_secret(&self) -> i32 {
 			self.secret
 		}
 
+		//==============================================================================
+		/// 캐시 수 설정.
+		//==============================================================================
 		pub fn set_cache_count(&mut self, cache_count: usize) {
 			self.cache_count = cache_count;
 		}
 
+		//==============================================================================
+		/// 캐시 수 반환. (저장하지 않는다)
+		//==============================================================================
 		#[reflect(transient)]
 		pub fn get_cache_count(&self) -> usize {
 			self.cache_count
 		}
 
+		//==============================================================================
+		/// 따라가는 중인지.
+		//==============================================================================
 		pub fn is_following(&self) -> bool {
 			self.leader.is_some()
 		}
@@ -3127,18 +3961,30 @@ mod tests {
 
 	#[vanilla::reflect]
 	impl Component for Follower {
+		//==============================================================================
+		/// 컴포넌트 공통 상태 반환.
+		//==============================================================================
 		fn get_component_base(&self) -> &crate::core::component::ComponentBase {
 			&self.component_base
 		}
 
+		//==============================================================================
+		/// 컴포넌트 공통 상태 반환. (변경용)
+		//==============================================================================
 		fn get_component_base_mut(&mut self) -> &mut crate::core::component::ComponentBase {
 			&mut self.component_base
 		}
 
+		//==============================================================================
+		/// 컴포넌트 종류 이름.
+		//==============================================================================
 		fn get_component_type(&self) -> &'static str {
 			"Follower"
 		}
 
+		//==============================================================================
+		/// tick 이 필요한지. (늘 false)
+		//==============================================================================
 		fn is_tick_needed(&self) -> bool {
 			false
 		}
@@ -3265,7 +4111,7 @@ mod tests {
 	}
 
 	//==============================================================================
-	/// `#`[reflect]` 를 붙인 게임 컴포넌트는 등록 한 줄로 원본 반사 저장 꼴로 쓰고 읽는다. (노드 참조, impl Into 세터, 원본 글 열거, skip, transient)
+	/// `#[reflect]` 를 붙인 게임 컴포넌트는 등록 한 줄로 원본 반사 저장 꼴로 쓰고 읽는다. (노드 참조, impl Into 세터, 원본 글 열거, skip, transient)
 	//==============================================================================
 	#[test]
 	fn reflected_game_component_round_trip() {

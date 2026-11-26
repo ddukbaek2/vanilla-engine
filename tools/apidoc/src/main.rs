@@ -9,7 +9,7 @@
 //! - counterpart 는 docs/api/counterpart.<판>.json 의 짝(vanilla.js 의 같은 항목)이다. `--counterpart <vanilla.js 의 docs/api/<판>.json>` 으로 그 표를 다시 짓는다.
 //! - 사용:
 //!   ```text
-//!   cargo run -p vanilla-engine-apidoc -- <판> [--date YYYY-MM-DD] [--counterpart <vanilla.js 자료>]   자료 쓰기
+//!   cargo run -p vanilla-engine-apidoc -- <판> [--date YYYY-MM-DD] [--counterpart <vanilla.js 자료>]   자료 쓰기 (가이드 doctest 장 목록 tools/apidoc/src/guide.rs 도)
 //!   cargo run -p vanilla-engine-apidoc -- <판> --check                                         자료 꼴 검사와 수 세기, 가이드 ko 와 en 대조
 //!   cargo run -p vanilla-engine-apidoc -- <판> --missing [--only <경로 앞>]                     번역 표에 없는 ko 글 (JSON 배열)
 //!   cargo run -p vanilla-engine-apidoc -- <판> --gaps [--only <경로 앞>] [--exclude <경로 앞>]   소스에서 문서가 빈 곳
@@ -43,6 +43,8 @@ const SECTION_RETURNS: &str = "# 돌려줌";
 const SECTION_EXAMPLES: &str = "# 예제";
 /// 멤버 종류. (원본 자료와 같은 이름)
 const MEMBER_KINDS: [&str; 5] = ["method", "property", "constructor", "static", "field"];
+/// 원본의 여러 클래스를 합친 타입이 멤버의 짝을 더 찾아볼 원본 클래스. (ARCHITECTURE.md '원본과의 대응': 씬 매니저는 엔진과 씬에, 노드 셋은 NodeTree 와 WorldNode 에, 터치 레이캐스터는 씬에 합쳤다)
+const COUNTERPART_CLASS_ALIASES: [(&str, &[&str]); 3] = [("Engine", &["SceneManager"]), ("SceneBase", &["SceneManager", "TouchRaycaster"]), ("NodeTree", &["WorldNode", "TransformNode", "ComponentNode", "Node"])];
 /// 클래스 자리에 두는 것의 종류. (러스트 struct, trait, 꼴 별칭)
 const CLASS_KINDS: [&str; 3] = ["struct", "trait", "type"];
 
@@ -1594,6 +1596,7 @@ struct CounterpartMember {
 //==============================================================================
 struct CounterpartIndex {
 	classes: HashMap<String, (String, Vec<CounterpartMember>)>,
+	parents: HashMap<String, String>,
 	enums: HashMap<String, (String, Vec<String>)>,
 	functions: HashMap<String, Vec<(String, String, String)>>,
 }
@@ -1604,6 +1607,7 @@ struct CounterpartIndex {
 fn build_counterpart_index(document: &Value) -> CounterpartIndex {
 	let mut index = CounterpartIndex {
 		classes: HashMap::new(),
+		parents: HashMap::new(),
 		enums: HashMap::new(),
 		functions: HashMap::new(),
 	};
@@ -1615,6 +1619,9 @@ fn build_counterpart_index(document: &Value) -> CounterpartIndex {
 				name: member["name"].as_str().unwrap_or("").to_string(),
 				kind: member["kind"].as_str().unwrap_or("").to_string(),
 			}).collect();
+			if let Some(parent) = class["extends"].as_str() {
+				index.parents.entry(class_name.clone()).or_insert(parent.to_string());
+			}
 			index.classes.entry(class_name).or_insert((module_name.clone(), members));
 		}
 		for entry in module["enums"].as_array().into_iter().flatten() {
@@ -1642,21 +1649,38 @@ fn read_module_stem(module_name: &str) -> &str {
 /// 멤버의 짝 찾기. (같은 이름의 camelCase, 밑줄과 대소문자를 뺀 이름, get_ / set_ / is_ / has_ 를 뗀 속성과 필드, new 와 constructor)
 //==============================================================================
 fn find_counterpart_member(member: &Member, candidates: &[CounterpartMember]) -> Option<String> {
-	if member.kind == "constructor" {
+	if let Some(found) = find_counterpart_member_by_name(member.kind, &member.name, candidates) {
+		return Some(found);
+	}
+	for suffix in ["_mut", "_async"] {
+		if let Some(stripped) = member.name.strip_suffix(suffix) {
+			if let Some(found) = find_counterpart_member_by_name(member.kind, stripped, candidates) {
+				return Some(found);
+			}
+		}
+	}
+	None
+}
+
+//==============================================================================
+/// 이름 하나로 멤버의 짝 찾기.
+//==============================================================================
+fn find_counterpart_member_by_name(kind: &str, member_name: &str, candidates: &[CounterpartMember]) -> Option<String> {
+	if kind == "constructor" {
 		if let Some(found) = candidates.iter().find(|candidate| candidate.kind == "constructor") {
 			return Some(found.name.clone());
 		}
 	}
-	let camel = convert_snake_to_camel(&member.name);
+	let camel = convert_snake_to_camel(member_name);
 	if let Some(found) = candidates.iter().find(|candidate| candidate.name == camel) {
 		return Some(found.name.clone());
 	}
-	let normalized = normalize_name(&member.name);
+	let normalized = normalize_name(member_name);
 	if let Some(found) = candidates.iter().find(|candidate| normalize_name(&candidate.name) == normalized) {
 		return Some(found.name.clone());
 	}
 	for prefix in ["get_", "set_", "is_", "has_"] {
-		if let Some(rest) = member.name.strip_prefix(prefix) {
+		if let Some(rest) = member_name.strip_prefix(prefix) {
 			let normalized_rest = normalize_name(rest);
 			if let Some(found) = candidates.iter().find(|candidate| (candidate.kind == "property" || candidate.kind == "field") && normalize_name(&candidate.name) == normalized_rest) {
 				return Some(found.name.clone());
@@ -1693,6 +1717,13 @@ fn build_counterpart_items(modules: &[ModuleEntry], counterpart_document: &Value
 	for module in modules {
 		for class in &module.classes {
 			let base_name = class.name.strip_suffix("Base").unwrap_or(&class.name).to_string();
+			let alias_primary = COUNTERPART_CLASS_ALIASES.iter().find(|(name, _)| *name == class.name).and_then(|(_, aliases)| aliases.first()).map(|alias| alias.to_string()).unwrap_or_default();
+			let base_name = if index.classes.contains_key(&class.name) || index.classes.contains_key(&base_name) {
+				base_name
+			}
+			else {
+				alias_primary
+			};
 			if let Some((other_module, other_members)) = index.classes.get(&class.name).or_else(|| index.classes.get(&base_name)) {
 				let other_class_name = if index.classes.contains_key(&class.name) {
 					class.name.clone()
@@ -1704,8 +1735,34 @@ fn build_counterpart_items(modules: &[ModuleEntry], counterpart_document: &Value
 					push_pair(create_key(&module.name, &class.name, ""), create_key(other_module, &other_class_name, ""));
 				}
 				for member in &class.members {
-					match find_counterpart_member(member, other_members) {
-						Some(other_name) => push_pair(create_key(&module.name, &class.name, &member.name), create_key(other_module, &other_class_name, &other_name)),
+					let mut found: Option<(String, String, String)> = find_counterpart_member(member, other_members).map(|other_name| (other_module.clone(), other_class_name.clone(), other_name));
+					let mut parent_name = index.parents.get(&other_class_name).cloned();
+					let mut depth = 0;
+					while found.is_none() && depth < 8 {
+						let parent = match parent_name {
+							Some(parent) => parent,
+							None => break,
+						};
+						if let Some((parent_module, parent_members)) = index.classes.get(&parent) {
+							found = find_counterpart_member(member, parent_members).map(|other_name| (parent_module.clone(), parent.clone(), other_name));
+						}
+						parent_name = index.parents.get(&parent).cloned();
+						depth += 1;
+					}
+					if found.is_none() {
+						if let Some((_, aliases)) = COUNTERPART_CLASS_ALIASES.iter().find(|(name, _)| *name == class.name) {
+							for alias in aliases.iter() {
+								if let Some((alias_module, alias_members)) = index.classes.get(*alias) {
+									found = find_counterpart_member(member, alias_members).map(|other_name| (alias_module.clone(), alias.to_string(), other_name));
+								}
+								if found.is_some() {
+									break;
+								}
+							}
+						}
+					}
+					match found {
+						Some((found_module, found_class, other_name)) => push_pair(create_key(&module.name, &class.name, &member.name), create_key(&found_module, &found_class, &other_name)),
 						None => unmatched.push(format!("{}::{}", class.name, member.name)),
 					}
 				}
@@ -2416,6 +2473,40 @@ fn find_forbidden_characters(text: &str) -> Vec<usize> {
 }
 
 //==============================================================================
+/// 파일 이름을 가이드 doctest 구조체 이름으로. ("08-drawing" → "Guide08Drawing")
+//==============================================================================
+fn create_guide_struct_name(file_stem: &str) -> String {
+	let mut name = String::from("Guide");
+	for part in file_stem.split(|character: char| !character.is_ascii_alphanumeric()) {
+		let mut characters = part.chars();
+		if let Some(first) = characters.next() {
+			name.push(first.to_ascii_uppercase());
+			name.push_str(characters.as_str());
+		}
+	}
+	name
+}
+
+//==============================================================================
+/// 가이드 doctest 장 목록 글. (tools/apidoc/src/guide.rs, ko 장마다 include_str 를 문서 속성으로 붙인 빈 구조체)
+//==============================================================================
+fn create_guide_test_source(repository_root: &Path, version: &str) -> String {
+	let korean_directory = repository_root.join("docs/guide").join(version).join("ko");
+	let mut names: Vec<String> = fs::read_dir(&korean_directory).map(|entries| entries.flatten().map(|entry| entry.file_name().to_string_lossy().to_string()).filter(|name| name.ends_with(".md")).collect()).unwrap_or_default();
+	names.sort();
+	let mut source = String::new();
+	source.push_str("//==============================================================================\n");
+	source.push_str("//! 가이드 doctest 장 목록. (`cargo run -p vanilla-engine-apidoc -- <판>` 이 docs/guide/<판>/ko 에서 다시 쓴다, 손으로 고치지 않는다)\n");
+	source.push_str("//==============================================================================\n");
+	for name in names {
+		let file_stem = name.trim_end_matches(".md");
+		source.push_str(&format!("#[doc = include_str!(\"../../../docs/guide/{}/ko/{}\")]\n", version, name));
+		source.push_str(&format!("pub struct {};\n", create_guide_struct_name(file_stem)));
+	}
+	source
+}
+
+//==============================================================================
 /// --check: 자료 꼴 검사와 수 세기, 가이드와 업데이트 문서 대조.
 //==============================================================================
 fn run_check(options: &Options, repository_root: &Path, output_path: &Path) -> bool {
@@ -2617,6 +2708,10 @@ fn run_check(options: &Options, repository_root: &Path, output_path: &Path) -> b
 			errors.push(format!("가이드 en/{}: 본문에 한글", name));
 		}
 	}
+	let guide_test_path = repository_root.join("tools/apidoc/src/guide.rs");
+	if fs::read_to_string(&guide_test_path).unwrap_or_default() != create_guide_test_source(repository_root, &options.version) {
+		errors.push(String::from("가이드 doctest 장 목록(tools/apidoc/src/guide.rs)이 장 파일과 다름. (자료를 다시 뽑으면 다시 쓴다)"));
+	}
 	for language in ["ko", "en"] {
 		let update_path = repository_root.join("docs/update").join(format!("{}.{}.md", options.version, language));
 		match fs::read_to_string(&update_path) {
@@ -2774,6 +2869,7 @@ fn main() {
 	let document = create_document_value(&modules, &options.version, &date, &mut translator);
 	fs::create_dir_all(&api_directory).unwrap();
 	fs::write(&output_path, write_json_text(&document)).unwrap();
+	fs::write(repository_root.join("tools/apidoc/src/guide.rs"), create_guide_test_source(&repository_root, &options.version)).unwrap();
 	let class_count: usize = modules.iter().map(|module| module.classes.len()).sum();
 	let member_count: usize = modules.iter().map(|module| module.classes.iter().map(|class| class.members.len()).sum::<usize>() + module.enums.iter().map(|entry| entry.members.len()).sum::<usize>()).sum();
 	let function_count: usize = modules.iter().map(|module| module.functions.len()).sum();

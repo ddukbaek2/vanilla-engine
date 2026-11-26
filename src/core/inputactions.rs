@@ -31,17 +31,66 @@ const MOVE_DOWN_KEYS: [&str; 2] = ["KeyS", "ArrowDown"];
 
 //==============================================================================
 /// 바깥 입력원. (게임이 플랫폼 SDK 의 패드 같은 것을 끼울 때 단다)
+/// - InputActions.update 가 프레임마다 묶어 둔 동작마다 read_action_value 를 부르고, 한 번 read_move_axis 를 부른다.
+///
+/// # 예제
+/// 늘 "confirm" 을 누르고 오른쪽으로 미는 입력원
+/// ```rust
+/// use vanilla::{GamepadKind, InputActionSource, InputActions, InputManager, Vector2};
+///
+/// struct ScriptedSource;
+///
+/// impl InputActionSource for ScriptedSource {
+/// 	fn read_action_value(&mut self, action: &str) -> f32 {
+/// 		if action == "confirm" {
+/// 			1.0
+/// 		}
+/// 		else {
+/// 			0.0
+/// 		}
+/// 	}
+///
+/// 	fn read_move_axis(&mut self) -> Option<Vector2> {
+/// 		Some(Vector2::create(2.0, 0.0))
+/// 	}
+///
+/// 	fn read_gamepad_kind(&mut self) -> Option<GamepadKind> {
+/// 		Some(GamepadKind::Nintendo)
+/// 	}
+/// }
+///
+/// let mut input_manager = InputManager::new();
+/// let mut input_actions = InputActions::new();
+/// input_actions.bind_key("confirm", "Enter");
+/// input_actions.add_source(Box::new(ScriptedSource));
+/// input_actions.update(&mut input_manager, 1.0 / 60.0);
+/// assert!(input_actions.is_pressed("confirm"));
+/// assert_eq!(input_actions.read_move_axis(), Vector2::create(1.0, 0.0));
+/// assert_eq!(input_manager.get_last_gamepad_kind(), GamepadKind::Nintendo);
+/// ```
 //==============================================================================
 pub trait InputActionSource {
 	/// 동작의 값. (0 ~ 1, 0.5 이상이면 눌림, 모르는 동작이면 0)
+	///
+	/// # 인자
+	/// - `action`: 동작 이름. (bind_key 들이나 set_repeat 로 적어 둔 것)
+	///
+	/// # 돌려줌
+	/// 그 동작의 값. (0 ~ 1 로 자르고, 수가 아니면 0 으로 본다)
 	fn read_action_value(&mut self, action: &str) -> f32;
 
 	/// 이동 축. (오른쪽 +x 아래 +y, 길이 1 이하로 자른다, 없으면 None)
+	///
+	/// # 돌려줌
+	/// 이번 프레임의 이동 방향. 이 입력원에 이동 축이 없으면 None. (기본 구현은 None)
 	fn read_move_axis(&mut self) -> Option<Vector2> {
 		None
 	}
 
 	/// 이 입력원이 입력을 넣은 프레임에 마지막 장치로 적을 패드 종류. (None 이면 적지 않는다)
+	///
+	/// # 돌려줌
+	/// 패드 종류. 동작 값이 0.5 이상이거나 이동 축이 죽은 구역보다 길 때만 묻는다. (기본 구현은 None)
 	fn read_gamepad_kind(&mut self) -> Option<GamepadKind> {
 		None
 	}
@@ -79,6 +128,65 @@ struct ActionState {
 
 //==============================================================================
 /// 입력 동작.
+/// - 동작은 bind_key, bind_gamepad_button, bind_axis, set_repeat 가운데 하나로 한 번 적어 둔 것만 갱신한다.
+///
+/// # 예제
+/// 키 하나를 동작에 묶고 한 프레임 갱신하기
+/// ```rust
+/// use vanilla::{InputActions, InputManager, KeyCode};
+///
+/// let mut input_manager = InputManager::new();
+/// let mut input_actions = InputActions::new();
+/// input_actions.bind_key("jump", KeyCode::SPACE);
+/// input_actions.bind_key("jump", KeyCode::W);
+/// input_manager.push_key(KeyCode::W);
+/// input_actions.update(&mut input_manager, 1.0 / 60.0);
+/// assert!(input_actions.is_just_pressed("jump"));
+/// assert_eq!(input_actions.read_value("jump"), 1.0);
+/// assert_eq!(input_actions.read_move_axis().y, -1.0);
+/// ```
+///
+/// 씬에서 엔진의 입력 동작 묶고 읽기
+/// ```rust,no_run
+/// use vanilla::{Engine, EngineConfiguration, GamepadButtonCode, KeyCode, Scene, SceneBase};
+///
+/// struct MainScene {
+/// 	scene_base: SceneBase,
+/// }
+///
+/// impl Scene for MainScene {
+/// 	fn get_scene_base(&self) -> &SceneBase {
+/// 		&self.scene_base
+/// 	}
+///
+/// 	fn get_scene_base_mut(&mut self) -> &mut SceneBase {
+/// 		&mut self.scene_base
+/// 	}
+///
+/// 	fn create(&mut self, engine: &mut Engine) {
+/// 		let input_actions = engine.get_input_manager_mut().get_input_actions_mut();
+/// 		input_actions.bind_key("confirm", KeyCode::ENTER);
+/// 		input_actions.bind_gamepad_button("confirm", GamepadButtonCode::A_CROSS);
+/// 	}
+///
+/// 	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+/// 		self.scene_base.tick(engine, time_delta);
+/// 		let input_actions = engine.get_input_manager().get_input_actions();
+/// 		if input_actions.is_just_pressed("confirm") {
+/// 			println!("confirm");
+/// 		}
+/// 		let move_axis = input_actions.read_move_axis();
+/// 		println!("{} {}", move_axis.x, move_axis.y);
+/// 	}
+/// }
+///
+/// let engine_configuration = EngineConfiguration::new();
+/// let engine = Engine::new(engine_configuration);
+/// let main_scene = MainScene {
+/// 	scene_base: SceneBase::new(),
+/// };
+/// engine.run(Box::new(main_scene)).unwrap();
+/// ```
 //==============================================================================
 pub struct InputActions {
 	key_bindings: HashMap<String, Vec<String>>,
@@ -102,6 +210,9 @@ pub struct InputActions {
 impl InputActions {
 	//==============================================================================
 	/// 생성.
+	///
+	/// # 돌려줌
+	/// 묶은 것이 없는 입력 동작. (죽은 구역 0.2, 축 눌림 기울기 0.5, 글자 입력 중 키 무시 켬)
 	//==============================================================================
 	pub fn new() -> InputActions {
 		InputActions {
@@ -123,6 +234,11 @@ impl InputActions {
 
 	//==============================================================================
 	/// 키 묶기. (KeyboardEvent.code, KeyCode 의 값)
+	/// - 같은 키를 두 번 묶어도 하나다.
+	///
+	/// # 인자
+	/// - `action`: 동작 이름. (게임이 정한 글)
+	/// - `key`: 키 이름. (KeyCode 의 값)
 	//==============================================================================
 	pub fn bind_key(&mut self, action: &str, key: &str) {
 		self.states.entry(action.to_string()).or_default();
@@ -134,6 +250,11 @@ impl InputActions {
 
 	//==============================================================================
 	/// 게임패드 단추 묶기. (GamepadButtonCode, 연결된 패드 모두)
+	/// - 값(read_value)은 그 단추의 아날로그 값이고, 0 이면 1 로 본다.
+	///
+	/// # 인자
+	/// - `action`: 동작 이름.
+	/// - `button_code`: 버튼 번호. (GamepadButtonCode)
 	//==============================================================================
 	pub fn bind_gamepad_button(&mut self, action: &str, button_code: usize) {
 		self.states.entry(action.to_string()).or_default();
@@ -146,6 +267,28 @@ impl InputActions {
 	//==============================================================================
 	/// 게임패드 축의 한쪽 묶기. (GamepadAnalogStickCode, direction 이 양수면 + 쪽, 음수면 - 쪽, 축 Y 는 아래가 +)
 	/// - 그쪽으로 set_axis_press_threshold 만큼 기울면 눌린 것이고, 값(read_value)은 죽은 구역을 뺀 기울기다.
+	///
+	/// # 인자
+	/// - `action`: 동작 이름.
+	/// - `axis_index`: 축 번호. (GamepadAnalogStickCode)
+	/// - `direction`: 볼 쪽. (음수면 - 쪽, 0 이나 양수면 + 쪽, 크기는 쓰지 않는다)
+	///
+	/// # 예제
+	/// 왼쪽 스틱을 왼쪽으로 기울이면 "left"
+	/// ```rust
+	/// use vanilla::{Gamepad, GamepadAnalogStickCode, InputActions, InputManager};
+	///
+	/// let mut input_manager = InputManager::new();
+	/// input_manager.get_gamepad_manager_mut().set_log_enabled(false);
+	/// let mut gamepad = Gamepad::create(0, "Test Pad");
+	/// gamepad.axes[GamepadAnalogStickCode::LEFT_X] = -0.6;
+	/// input_manager.get_gamepad_manager_mut().update_all_gamepads_with_list(vec![Some(gamepad)]);
+	/// let mut input_actions = InputActions::new();
+	/// input_actions.bind_axis("left", GamepadAnalogStickCode::LEFT_X, -1.0);
+	/// input_actions.update(&mut input_manager, 1.0 / 60.0);
+	/// assert!(input_actions.is_pressed("left"));
+	/// assert!((input_actions.read_value("left") - 0.5).abs() < 0.0001);
+	/// ```
 	//==============================================================================
 	pub fn bind_axis(&mut self, action: &str, axis_index: usize, direction: f32) {
 		self.states.entry(action.to_string()).or_default();
@@ -167,6 +310,21 @@ impl InputActions {
 
 	//==============================================================================
 	/// 동작에 묶은 것 모두 풀기. (키 바꾸기 화면에서 다시 묶기 전에, 반복 설정은 남는다)
+	///
+	/// # 인자
+	/// - `action`: 동작 이름.
+	///
+	/// # 예제
+	/// 확인 키를 엔터에서 스페이스로 바꾸기
+	/// ```rust
+	/// use vanilla::{InputActions, KeyCode};
+	///
+	/// let mut input_actions = InputActions::new();
+	/// input_actions.bind_key("confirm", KeyCode::ENTER);
+	/// input_actions.unbind_action("confirm");
+	/// input_actions.bind_key("confirm", KeyCode::SPACE);
+	/// assert_eq!(input_actions.get_bound_keys("confirm"), ["Space"]);
+	/// ```
 	//==============================================================================
 	pub fn unbind_action(&mut self, action: &str) {
 		self.key_bindings.remove(action);
@@ -176,6 +334,12 @@ impl InputActions {
 
 	//==============================================================================
 	/// 동작에 묶은 키 목록. (단추 안내를 그릴 때)
+	///
+	/// # 인자
+	/// - `action`: 동작 이름.
+	///
+	/// # 돌려줌
+	/// 묶은 차례의 키 이름들. 묶은 키가 없으면 빈 조각.
 	//==============================================================================
 	pub fn get_bound_keys(&self, action: &str) -> &[String] {
 		match self.key_bindings.get(action) {
@@ -190,6 +354,33 @@ impl InputActions {
 
 	//==============================================================================
 	/// 누르고 있으면 반복 설정. (기다리는 초 뒤부터 간격 초마다 is_just_pressed 가 참, 간격이 0 이하면 반복을 끈다)
+	/// - 프레임이 길게 끊겨도 반복을 몰아서 하지 않는다.
+	///
+	/// # 인자
+	/// - `action`: 동작 이름.
+	/// - `delay_seconds`: 첫 누름 뒤 반복을 시작할 때까지 기다리는 초. (음수는 0)
+	/// - `interval_seconds`: 반복 간격 초. (0 이하면 반복을 끈다)
+	///
+	/// # 예제
+	/// 1 초 동안 누르고 있으면 첫 누름과 반복 여덟 번
+	/// ```rust
+	/// use vanilla::{InputActions, InputManager, KeyCode};
+	///
+	/// let mut input_manager = InputManager::new();
+	/// let mut input_actions = InputActions::new();
+	/// input_actions.bind_key("right", KeyCode::RIGHT);
+	/// input_actions.set_repeat("right", 0.25, 0.1);
+	/// input_manager.push_key(KeyCode::RIGHT);
+	/// let mut just_pressed_count = 0;
+	/// for _ in 0..60 {
+	/// 	input_actions.update(&mut input_manager, 1.0 / 60.0);
+	/// 	if input_actions.is_just_pressed("right") {
+	/// 		just_pressed_count += 1;
+	/// 	}
+	/// 	input_manager.update_frame_snapshot();
+	/// }
+	/// assert_eq!(just_pressed_count, 9);
+	/// ```
 	//==============================================================================
 	pub fn set_repeat(&mut self, action: &str, delay_seconds: f32, interval_seconds: f32) {
 		self.states.entry(action.to_string()).or_default();
@@ -205,6 +396,9 @@ impl InputActions {
 
 	//==============================================================================
 	/// 죽은 구역 설정. (0 ~ 1 미만, 처음은 0.2)
+	///
+	/// # 인자
+	/// - `dead_zone`: 이보다 덜 기울면 0 으로 보는 길이. (0 ~ 0.99 로 자른다)
 	//==============================================================================
 	pub fn set_dead_zone(&mut self, dead_zone: f32) {
 		self.dead_zone = dead_zone.clamp(0.0, 0.99);
@@ -212,6 +406,9 @@ impl InputActions {
 
 	//==============================================================================
 	/// 죽은 구역.
+	///
+	/// # 돌려줌
+	/// 지금 죽은 구역. (0 ~ 0.99, 처음은 0.2)
 	//==============================================================================
 	pub fn get_dead_zone(&self) -> f32 {
 		self.dead_zone
@@ -219,6 +416,9 @@ impl InputActions {
 
 	//==============================================================================
 	/// 축에 묶은 동작을 눌린 것으로 보는 기울기 설정. (0 ~ 1, 처음은 0.5)
+	///
+	/// # 인자
+	/// - `axis_press_threshold`: 눌림으로 볼 기울기. (죽은 구역을 빼기 전 값, 0 ~ 1 로 자른다)
 	//==============================================================================
 	pub fn set_axis_press_threshold(&mut self, axis_press_threshold: f32) {
 		self.axis_press_threshold = axis_press_threshold.clamp(0.0, 1.0);
@@ -226,6 +426,9 @@ impl InputActions {
 
 	//==============================================================================
 	/// 축에 묶은 동작을 눌린 것으로 보는 기울기.
+	///
+	/// # 돌려줌
+	/// 지금 기울기. (0 ~ 1, 처음은 0.5)
 	//==============================================================================
 	pub fn get_axis_press_threshold(&self) -> f32 {
 		self.axis_press_threshold
@@ -233,6 +436,9 @@ impl InputActions {
 
 	//==============================================================================
 	/// 글자 입력칸에 쓰는 동안 키를 듣지 않을지 설정. (처음은 참)
+	///
+	/// # 인자
+	/// - `is_ignored`: 쓰는 동안 키(동작의 키와 이동 키)를 듣지 않으려면 true.
 	//==============================================================================
 	pub fn set_keys_ignored_while_typing(&mut self, is_ignored: bool) {
 		self.is_keys_ignored_while_typing = is_ignored;
@@ -240,6 +446,9 @@ impl InputActions {
 
 	//==============================================================================
 	/// 글자 입력칸에 쓰는 동안 키를 듣지 않는지.
+	///
+	/// # 돌려줌
+	/// 듣지 않으면 true. (처음은 true)
 	//==============================================================================
 	pub fn is_keys_ignored_while_typing(&self) -> bool {
 		self.is_keys_ignored_while_typing
@@ -247,6 +456,31 @@ impl InputActions {
 
 	//==============================================================================
 	/// 바깥 입력원 더하기. (돌려주는 번호로 remove_source 한다)
+	///
+	/// # 인자
+	/// - `source`: 끼울 입력원.
+	///
+	/// # 돌려줌
+	/// 이 입력원의 번호. (1 부터 더할 때마다 하나씩 커진다)
+	///
+	/// # 예제
+	/// 입력원을 끼웠다 빼기
+	/// ```rust
+	/// use vanilla::{InputActionSource, InputActions};
+	///
+	/// struct SilentSource;
+	///
+	/// impl InputActionSource for SilentSource {
+	/// 	fn read_action_value(&mut self, _action: &str) -> f32 {
+	/// 		0.0
+	/// 	}
+	/// }
+	///
+	/// let mut input_actions = InputActions::new();
+	/// let source_id = input_actions.add_source(Box::new(SilentSource));
+	/// assert!(input_actions.remove_source(source_id));
+	/// assert!(!input_actions.remove_source(source_id));
+	/// ```
 	//==============================================================================
 	pub fn add_source(&mut self, source: Box<dyn InputActionSource>) -> u64 {
 		let source_id = self.next_source_id;
@@ -257,6 +491,12 @@ impl InputActions {
 
 	//==============================================================================
 	/// 바깥 입력원 빼기. (있었으면 true)
+	///
+	/// # 인자
+	/// - `source_id`: add_source 가 돌려준 번호.
+	///
+	/// # 돌려줌
+	/// 그 번호의 입력원이 있어 뺐으면 true, 없으면 false.
 	//==============================================================================
 	pub fn remove_source(&mut self, source_id: u64) -> bool {
 		let source_count = self.sources.len();
@@ -266,6 +506,11 @@ impl InputActions {
 
 	//==============================================================================
 	/// 프레임마다 갱신. (InputManager.tick 이 부른다)
+	/// - 바깥 입력원이 입력을 넣었으면 input_manager 의 마지막 장치를 그 패드로 적는다.
+	///
+	/// # 인자
+	/// - `input_manager`: 키와 게임패드를 읽을 입력 관리자.
+	/// - `time_delta`: 지난 갱신 뒤로 흐른 초. (반복 시간을 센다)
 	//==============================================================================
 	pub fn update(&mut self, input_manager: &mut InputManager, time_delta: f32) {
 		let is_typing = self.is_keys_ignored_while_typing && input_manager.is_typing_in_text_field();
@@ -444,6 +689,12 @@ impl InputActions {
 
 	//==============================================================================
 	/// 동작이 눌려 있는지.
+	///
+	/// # 인자
+	/// - `action`: 동작 이름.
+	///
+	/// # 돌려줌
+	/// 묶은 키, 단추, 축, 바깥 입력원 가운데 하나라도 눌렸으면 true. 모르는 동작이면 false.
 	//==============================================================================
 	pub fn is_pressed(&self, action: &str) -> bool {
 		match self.states.get(action) {
@@ -458,6 +709,12 @@ impl InputActions {
 
 	//==============================================================================
 	/// 이번 프레임에 눌렸는지. (set_repeat 를 건 동작은 반복 때도 참)
+	///
+	/// # 인자
+	/// - `action`: 동작 이름.
+	///
+	/// # 돌려줌
+	/// 지난 갱신에 떼어 있다가 이번 갱신에 눌렸거나 반복이 났으면 true. 모르는 동작이면 false.
 	//==============================================================================
 	pub fn is_just_pressed(&self, action: &str) -> bool {
 		match self.states.get(action) {
@@ -472,6 +729,12 @@ impl InputActions {
 
 	//==============================================================================
 	/// 이번 프레임에 떼어졌는지.
+	///
+	/// # 인자
+	/// - `action`: 동작 이름.
+	///
+	/// # 돌려줌
+	/// 지난 갱신에 눌려 있다가 이번 갱신에 떼어졌으면 true. 모르는 동작이면 false.
 	//==============================================================================
 	pub fn is_just_released(&self, action: &str) -> bool {
 		match self.states.get(action) {
@@ -486,6 +749,12 @@ impl InputActions {
 
 	//==============================================================================
 	/// 동작의 값. (0 ~ 1, 키와 디지털 단추는 1, 트리거와 축은 기운 만큼)
+	///
+	/// # 인자
+	/// - `action`: 동작 이름.
+	///
+	/// # 돌려줌
+	/// 묶은 것 가운데 가장 큰 값. (0 ~ 1, 축은 죽은 구역을 빼고 다시 편 값) 모르는 동작이면 0.
 	//==============================================================================
 	pub fn read_value(&self, action: &str) -> f32 {
 		match self.states.get(action) {
@@ -500,6 +769,27 @@ impl InputActions {
 
 	//==============================================================================
 	/// 두 동작으로 만든 축. (-1 ~ 1, 양쪽 동작의 값의 차)
+	///
+	/// # 인자
+	/// - `negative_action`: - 쪽 동작 이름. ("left" 같은)
+	/// - `positive_action`: + 쪽 동작 이름. ("right" 같은)
+	///
+	/// # 돌려줌
+	/// positive_action 의 값에서 negative_action 의 값을 뺀 것. (둘 다 눌리면 0 에 가깝다)
+	///
+	/// # 예제
+	/// 왼쪽, 오른쪽 동작으로 가로 축 만들기
+	/// ```rust
+	/// use vanilla::{InputActions, InputManager, KeyCode};
+	///
+	/// let mut input_manager = InputManager::new();
+	/// let mut input_actions = InputActions::new();
+	/// input_actions.bind_key("left", KeyCode::LEFT);
+	/// input_actions.bind_key("right", KeyCode::RIGHT);
+	/// input_manager.push_key(KeyCode::LEFT);
+	/// input_actions.update(&mut input_manager, 1.0 / 60.0);
+	/// assert_eq!(input_actions.read_axis("left", "right"), -1.0);
+	/// ```
 	//==============================================================================
 	pub fn read_axis(&self, negative_action: &str, positive_action: &str) -> f32 {
 		self.read_value(positive_action) - self.read_value(negative_action)
@@ -507,6 +797,31 @@ impl InputActions {
 
 	//==============================================================================
 	/// 게임패드 스틱. (연결된 패드 가운데 가장 크게 기운 것, 죽은 구역을 길이로 빼고 길이 1 이하, 오른쪽 +x 아래 +y)
+	/// - 마지막 update 때 적어 둔 값을 읽는다. 축 번호는 0 ~ 3 만 적어 둔다.
+	///
+	/// # 인자
+	/// - `x_axis_index`: 가로 축 번호. (GamepadAnalogStickCode::LEFT_X 나 RIGHT_X)
+	/// - `y_axis_index`: 세로 축 번호. (GamepadAnalogStickCode::LEFT_Y 나 RIGHT_Y)
+	///
+	/// # 돌려줌
+	/// 스틱 방향과 죽은 구역을 뺀 길이. (연결된 패드가 없거나 죽은 구역 안이면 0, 0)
+	///
+	/// # 예제
+	/// 오른쪽 스틱 읽기
+	/// ```rust
+	/// use vanilla::{Gamepad, GamepadAnalogStickCode, InputActions, InputManager};
+	///
+	/// let mut input_manager = InputManager::new();
+	/// input_manager.get_gamepad_manager_mut().set_log_enabled(false);
+	/// let mut gamepad = Gamepad::create(0, "Test Pad");
+	/// gamepad.axes[GamepadAnalogStickCode::RIGHT_Y] = 1.0;
+	/// input_manager.get_gamepad_manager_mut().update_all_gamepads_with_list(vec![Some(gamepad)]);
+	/// let mut input_actions = InputActions::new();
+	/// input_actions.update(&mut input_manager, 1.0 / 60.0);
+	/// let stick = input_actions.read_gamepad_stick(GamepadAnalogStickCode::RIGHT_X, GamepadAnalogStickCode::RIGHT_Y);
+	/// assert_eq!(stick.x, 0.0);
+	/// assert!((stick.y - 1.0).abs() < 0.0001);
+	/// ```
 	//==============================================================================
 	pub fn read_gamepad_stick(&self, x_axis_index: usize, y_axis_index: usize) -> Vector2 {
 		let mut stick_vector = Vector2::zero();
@@ -525,6 +840,24 @@ impl InputActions {
 	//==============================================================================
 	/// 이동 축. (WASD 와 방향키, 왼쪽 스틱, 바깥 입력원의 이동 축 가운데 가장 긴 것, 길이 1 이하, 오른쪽 +x 아래 +y)
 	/// - 키는 대각선도 길이 1 이다. 글자 입력칸에 쓰는 동안은 키를 듣지 않는다.
+	///
+	/// # 돌려줌
+	/// 이동 방향. (길이 0 ~ 1, 마지막 update 때의 값)
+	///
+	/// # 예제
+	/// W 와 D 를 함께 누른 대각선
+	/// ```rust
+	/// use vanilla::{InputActions, InputManager, KeyCode};
+	///
+	/// let mut input_manager = InputManager::new();
+	/// let mut input_actions = InputActions::new();
+	/// input_manager.push_key(KeyCode::W);
+	/// input_manager.push_key(KeyCode::D);
+	/// input_actions.update(&mut input_manager, 1.0 / 60.0);
+	/// let move_axis = input_actions.read_move_axis();
+	/// assert!((move_axis.x - std::f32::consts::FRAC_1_SQRT_2).abs() < 0.0001);
+	/// assert!((move_axis.y + std::f32::consts::FRAC_1_SQRT_2).abs() < 0.0001);
+	/// ```
 	//==============================================================================
 	pub fn read_move_axis(&self) -> Vector2 {
 		let mut move_vector = self.key_move_axis;
@@ -549,6 +882,9 @@ impl InputActions {
 }
 
 impl Default for InputActions {
+	//==============================================================================
+	/// 기본값. (InputActions::new 와 같다)
+	//==============================================================================
 	fn default() -> InputActions {
 		InputActions::new()
 	}
@@ -606,6 +942,9 @@ mod tests {
 	}
 
 	impl InputActionSource for TestSource {
+		//==============================================================================
+		/// "menu" 만 menu_value, 나머지는 0.
+		//==============================================================================
 		fn read_action_value(&mut self, action: &str) -> f32 {
 			if action == "menu" {
 				self.menu_value
@@ -615,10 +954,16 @@ mod tests {
 			}
 		}
 
+		//==============================================================================
+		/// 길이 3 의 아래 방향. (길이 1 로 잘리는지 본다)
+		//==============================================================================
 		fn read_move_axis(&mut self) -> Option<Vector2> {
 			Some(Vector2::create(0.0, 3.0))
 		}
 
+		//==============================================================================
+		/// 늘 닌텐도 패드.
+		//==============================================================================
 		fn read_gamepad_kind(&mut self) -> Option<GamepadKind> {
 			Some(GamepadKind::Nintendo)
 		}

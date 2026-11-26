@@ -21,11 +21,12 @@ cargo run -p vanilla-engine-apidoc -- <판> --gaps [--only <경로 앞>] [--excl
 - date 는 --date, UPDATE.md 의 "# <판> (YYYY-MM-DD)", 이미 있는 자료의 날짜, 오늘(한국 시각) 차례로 정한다.
 - counterpart 는 docs/api/counterpart.<판>.json 의 짝이다. --counterpart 에 vanilla.js 의 자료를 주면 이름으로 짝을 찾아 그 표를 다시 쓴다. (클래스와 열거는 같은 이름, 이름 끝 Base 를 뗀 이름의 멤버도 본다. 멤버는 snake_case 를 camelCase 로, 밑줄과 대소문자를 뺀 이름, get_ / set_ / is_ / has_ 를 뗀 속성과 필드, new 와 constructor. 모듈 함수는 같은 마지막 경로 조각의 모듈을 먼저 고른다) 표는 { engine, counterpartEngine, version, items: [ { "vanilla-engine": { module, class, name }, "vanilla.js": { module, class, name } } ] } 이고, vanilla.js 쪽 자료가 러스트 짝을 채울 때도 쓴다.
 - --missing: 표에 없는 ko 글 목록을 JSON 배열로 낸다. 옮긴 것을 translation.en.json 에 더하고 첫 줄을 다시 돌려 en 빈 칸을 0 으로 만든다.
-- --check: docs/api/<판>.json 의 꼴(설명 칸이 { ko, en } 인지, kind, since, 예제 칸, 예제 코드에 한글)을 검사하고 모듈, 클래스(종류별), 멤버(종류별), 인자, 함수, 열거 수와 짝 수, ko 빈 칸(갈래별), en 빈 칸, 예제 수, since 분포를 찍는다. 필드와 상수의 returns 는 꼴만 담는 칸이라 설명이 비어도 세지 않는다. 가이드는 ko 와 en 의 파일 이름과 코드 칸이 같은지, rust 코드 칸과 en 본문에 한글이 없는지, 업데이트 문서가 있는지, 자료와 문서에 긴 줄표나 가운뎃점이 없는지 본다. 오류가 있으면 끝 코드가 1 이다.
+- 첫 줄은 가이드 doctest 장 목록 tools/apidoc/src/guide.rs 도 다시 쓴다.
+- --check: docs/api/<판>.json 의 꼴(설명 칸이 { ko, en } 인지, kind, since, 예제 칸, 예제 코드에 한글)을 검사하고 모듈, 클래스(종류별), 멤버(종류별), 인자, 함수, 열거 수와 짝 수, ko 빈 칸(갈래별), en 빈 칸, 예제 수, since 분포를 찍는다. 필드와 상수의 returns 는 꼴만 담는 칸이라 설명이 비어도 세지 않는다. 가이드는 ko 와 en 의 파일 이름과 코드 칸이 같은지, rust 코드 칸과 en 본문에 한글이 없는지, 업데이트 문서가 있는지, 가이드 doctest 장 목록이 장 파일과 맞는지, 자료와 문서에 긴 줄표나 가운뎃점이 없는지 본다. 오류가 있으면 끝 코드가 1 이다.
 - --gaps: 소스에서 문서가 빈 곳을 파일마다 찍는다. 공개 API 의 빈 설명(모듈 요약, 클래스 요약, 멤버, 인자, 돌려줌, 열거와 그 값), 없는 인자를 적은 곳, 예제 없는 구조체와 트레이트, 제 예제도 클래스 예제도 없는 모듈, src 의 모든 함수 가운데 문서 주석도 머리 주석도 없는 것. 줄 번호는 이름:줄 로 찍는다.
 - --only, --exclude: --missing, --gaps 가 볼 소스를 저장소 기준 경로의 앞부분으로 거른다. (src/ui/, src/base/rect.rs 처럼, 여러 번 줄 수 있다)
 
 ### 예제 검사
 - API 예제는 문서 주석의 코드 칸이라 `cargo test --doc` 이 엔진에 대고 컴파일하고 돌린다. 창이나 GL 이 있어야 하면 `rust,no_run` 으로 컴파일만 한다.
-- 가이드(docs/guide/<가장 높은 판>/ko/*.md)의 rust 코드 칸은 이 크레이트의 라이브러리 자리(tools/apidoc/src/lib.rs, 목록은 build.rs 가 장 파일마다 짓는다)가 doctest 로 검사한다. `cargo test --doc -p vanilla-engine-apidoc` (장 하나는 `-- Guide08Drawing` 처럼 파일 이름을 이은 이름으로 거른다) en 가이드의 코드 칸은 ko 와 같아야 한다. (--check)
+- 가이드(docs/guide/<판>/ko/*.md)의 rust 코드 칸은 이 크레이트의 라이브러리 자리(tools/apidoc/src/lib.rs)가 doctest 로 검사한다. 장 목록 tools/apidoc/src/guide.rs 는 첫 줄(자료 쓰기)이 장 파일마다 include_str 문서 속성으로 다시 쓰고 --check 가 맞는지 본다. (빌드 스크립트로 짓지 않는 것은 여러 작업 사본이 빌드 폴더를 같이 쓰면 빌드 스크립트 결과가 다른 사본의 것으로 덮여서다) `cargo test --doc -p vanilla-engine-apidoc` (장 하나는 `-- Guide08Drawing` 처럼 파일 이름을 이은 이름으로 거른다) en 가이드의 코드 칸은 ko 와 같아야 한다. (--check)
 - 가이드(docs/guide/<판>/ko, en)와 업데이트(docs/update/<판>.ko.md, .en.md)는 손으로 옮긴다. 업데이트 ko 는 UPDATE.md 의 그 판 절이다.

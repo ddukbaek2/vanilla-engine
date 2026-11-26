@@ -4,6 +4,51 @@
 //! - 원본의 WebGL2 렌더러는 OpenGL 3.3 코어(glow)로, 캔버스와 DOM 이벤트는 창(winit)과 GL 컨텍스트(glutin)로 바꿨다.
 //!   웹(wasm32)으로 빌드하면 원본처럼 캔버스와 WebGL2, request_animation_frame 으로 돈다. (platform/web.rs)
 //! - 이름은 러스트 규칙을 따른다. (함수와 변수는 snake_case, 타입과 열거 값은 UpperCamelCase, 상수는 SCREAMING_SNAKE_CASE, 원본의 setFillColor 는 set_fill_color)
+//! - 쓰는 꼴: Scene 트레이트를 구현한 씬(SceneBase 를 품는다)을 만들어 Engine::new(설정).run(첫 씬) 으로 돌린다. 공개 타입은 대부분 크레이트 뿌리(vanilla::)에서 바로 쓴다.
+//!
+//! # 예제
+//! 씬 하나를 만들어 흰 사각형 하나를 그리기 (창이 떠서 컴파일만, examples/quickstart.rs 와 같다)
+//! ```rust,no_run
+//! use vanilla::{Colors, Engine, EngineConfiguration, Graphic, Rect, Scene, SceneBase, Vector2};
+//!
+//! struct MainScene {
+//! 	scene_base: SceneBase,
+//! }
+//!
+//! impl Scene for MainScene {
+//! 	fn get_scene_base(&self) -> &SceneBase {
+//! 		&self.scene_base
+//! 	}
+//!
+//! 	fn get_scene_base_mut(&mut self) -> &mut SceneBase {
+//! 		&mut self.scene_base
+//! 	}
+//!
+//! 	fn pre_draw(&mut self, engine: &mut Engine, graphic: &mut Graphic) {
+//! 		self.scene_base.draw_scene_background(engine, graphic);
+//! 	}
+//!
+//! 	fn draw(&mut self, _engine: &mut Engine, graphic: &mut Graphic) {
+//! 		graphic.set_fill_color(Colors::WHITE);
+//! 		graphic.draw_rect(Rect::create(100.0, 100.0, 200.0, 120.0));
+//! 	}
+//! }
+//!
+//! fn main() {
+//! 	let mut engine_configuration = EngineConfiguration::new();
+//! 	engine_configuration.title = String::from("Vanilla Engine");
+//! 	engine_configuration.auto_resize_on_window_resize = true;
+//! 	engine_configuration.reference_resolution_size = Vector2::create(1280.0, 720.0);
+//! 	let engine = Engine::new(engine_configuration);
+//! 	let main_scene = MainScene {
+//! 		scene_base: SceneBase::new(),
+//! 	};
+//! 	if let Err(error) = engine.run(Box::new(main_scene)) {
+//! 		eprintln!("{}", error);
+//! 		std::process::exit(1);
+//! 	}
+//! }
+//! ```
 //==============================================================================
 #![allow(clippy::too_many_arguments)]
 
@@ -14,6 +59,7 @@ pub mod animation;
 pub mod base;
 pub mod core;
 pub mod effect;
+pub mod experimental;
 pub mod game;
 pub mod graphics3d;
 pub mod misc;
@@ -92,7 +138,7 @@ pub use crate::graphics3d::ambientocclusioneffect::AmbientOcclusionEffect;
 pub use crate::graphics3d::bloomeffect::BloomEffect;
 pub use crate::graphics3d::material::{ImageDescription, ImageDescriptionLoadFuture, ImageDescriptionOptions, ImageSource, Material, MaterialDescription};
 pub use crate::graphics3d::rendertarget::{RenderTarget, RenderTargetOptions};
-pub use crate::graphics3d::shadowmap::ShadowMap;
+pub use crate::graphics3d::shadowmap::{ShadowAtlas, ShadowAtlasLight, ShadowAtlasLightSource, ShadowAtlasTile, ShadowMap, DEFAULT_SHADOW_ATLAS_RESOLUTION, DEFAULT_SHADOW_ATLAS_TILE_RESOLUTION, SHADOW_ATLAS_MAXIMUM_LIGHTS};
 pub use crate::graphics3d::skinnedmodel::{AnimationClip, AnimationPath, Drawable, MeshDescription, MorphTarget, Skin, SkinnedModel, SkinnedModelNode, MORPH_TARGET_MAXIMUM};
 pub use crate::graphics3d::skinnedmodelrenderer::{SkinnedModelRenderer, MORPH_GLSL};
 pub use crate::graphics3d::subsurfacescatteringeffect::SubsurfaceScatteringEffect;
@@ -239,9 +285,9 @@ pub use crate::graphics3d::toon::toonvfx::ToonBlobShadowOptions;
 pub use crate::base::identifier::create_guid;
 pub use crate::core::component::text::slice_graphemes;
 pub use crate::core::graphic::ImageSmoothingQuality;
-pub use crate::graphics3d::toon::toonlightset::{ToonLightModel, ToonLightSet, ToonPointLight, ToonRimLight, ToonShade, ToonShadeRamp, ToonSpecular, TOON_MAXIMUM_BAND_STEPS, TOON_MAXIMUM_POINT_LIGHTS};
+pub use crate::graphics3d::toon::toonlightset::{ToonLightColorUsage, ToonLightModel, ToonLightSet, ToonPointLight, ToonRimLight, ToonShade, ToonShadeRamp, ToonShadeRimLight, ToonSpecular, TOON_MAXIMUM_BAND_STEPS, TOON_MAXIMUM_POINT_LIGHTS};
 pub use crate::graphics3d::toon::toonmaterial::{ToonBlendMode, ToonBufferUsage, ToonMatcapBlend, ToonInstanceAttribute, ToonInstanceLayout, ToonMaterial, ToonMaterialChunks, TOON_FIRST_INSTANCE_ATTRIBUTE_LOCATION, TOON_INSTANCE_MATRIX_NAME, TOON_INSTANCE_TINT_NAME, TOON_MAXIMUM_INSTANCE_ATTRIBUTES};
-pub use crate::graphics3d::toon::toonrenderer::{compose_toon_program_sources, create_reflection_matrix, read_frame_camera, read_matrix_determinant, read_outline_vertex_data, read_view_rotation, ToonBeforeDrawCallback, ToonFrameCamera, ToonInstanceBuffer, ToonProgramKind, ToonProgramSources, ToonTextureOptions, TOON_MAXIMUM_MATERIAL_TEXTURES};
+pub use crate::graphics3d::toon::toonrenderer::{compose_toon_program_sources, create_reflection_matrix, read_frame_camera, read_matrix_determinant, read_camera_roll, read_outline_vertex_data, read_uv_data, read_view_rotation, ToonBeforeDrawCallback, ToonFrameCamera, ToonInstanceBuffer, ToonProgramKind, ToonProgramSources, ToonTextureOptions, TOON_MAXIMUM_MATERIAL_TEXTURES};
 pub use crate::graphics3d::toon::toondrawqueue::{ToonDrawStage, ToonPassCallback};
 pub use crate::graphics3d::toon::meshbuilder::ToonMaterialRange;
 pub use crate::graphics3d::toon::glbmeshreader::{decode_glb_image, read_glb_images, ToonGlbImage};

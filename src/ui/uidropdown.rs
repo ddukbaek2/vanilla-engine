@@ -15,15 +15,11 @@
 //!   ```
 //! - 원본과 다른 것:
 //!   - 트리를 바꾸는 함수(set_option_list, set_open, set_selected_index)는 트리를 받는다. 씬 코드는 node_tree.with_component_mut 로 부른다.
-//!   ```text
 //!     select_index 는 바뀜 이벤트에 문맥을 넘기려고 문맥을 받는다. (행 단추가 ComponentContext::with_component_mut 로 부른다)
-//!   ```
 //!   - 바뀜 이벤트는 드롭다운과 문맥을 받는다. options 객체는 UIDropdownOptions 구조체다.
 //!   - 행 강조는 펼침 목록의 자식 순서 대신 만든 행 노드 목록으로 고친다. (tick 중에 다시 만들면 지운 행이 잠깐 자식으로 남는다)
 //!   - 화살표 글자는 원본처럼 작은 삼각형(▾ ▴, U+25BE / U+25B4)이다. 기본 글꼴(맑은 고딕, Segoe UI, Arial)에 없는 글자는
-//!   ```text
 //!     크롬처럼 시스템 대체 글꼴로 그린다. (core/textshaping.rs)
-//!   ```
 //!   - 노드 이름은 원본처럼 "DropdownArrow", "DropdownPopup", "DropdownOption{번호}" 다. 호스트 이름은 만든 쪽이 정한다. (create 는 "UIDropdown")
 //==============================================================================
 use crate::base::color::Color;
@@ -41,13 +37,37 @@ const ARROW_CLOSED_TEXT: &str = "▾";
 
 //==============================================================================
 /// 드롭다운 설정. (원본 options = { width = 180, height = 30, option_height = 28, font_size = 12, base_color?, popup_color?, highlight_color?, text_color? })
+///
+/// # 예제
+/// 넓은 머리 단추와 높은 행
+/// ```rust
+/// use vanilla::{NodeTree, UIDropdown, UIDropdownOptions, Vector2};
+///
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.get_root_id();
+/// let options = UIDropdownOptions {
+/// 	width: 220.0,
+/// 	option_height: 32.0,
+/// 	..UIDropdownOptions::default()
+/// };
+/// let dropdown_id = UIDropdown::create(&mut node_tree, root_id, options);
+/// node_tree.with_component_mut::<UIDropdown, _>(dropdown_id, |dropdown, tree| {
+/// 	dropdown.set_option_list(tree, &["Low", "High"]);
+/// });
+/// assert_eq!(node_tree[dropdown_id].get_content_size(), Vector2::create(220.0, 30.0));
+/// let popup_id = node_tree[dropdown_id].get_component::<UIDropdown>().expect("dropdown").get_popup_node().expect("popup");
+/// assert_eq!(node_tree[popup_id].get_content_size(), Vector2::create(220.0, 72.0));
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UIDropdownOptions {
+	/// 머리 단추 가로. (기본 180, 펼침 목록도 같은 가로)
 	pub width: f32,
+	/// 머리 단추 세로. (기본 30)
 	pub height: f32,
 	/// 선택지 행 높이.
 	pub option_height: f32,
+	/// 머리 글과 선택지 글의 크기. (기본 12)
 	pub font_size: f32,
 	/// 머리 단추 바탕색.
 	pub base_color: Color,
@@ -55,6 +75,7 @@ pub struct UIDropdownOptions {
 	pub popup_color: Color,
 	/// 고른 행 강조색.
 	pub highlight_color: Color,
+	/// 머리 글, 화살표, 선택지 글의 색.
 	pub text_color: Color,
 }
 
@@ -83,6 +104,27 @@ pub type UIDropdownEvent = Box<dyn FnMut(&mut UIDropdown, &mut ComponentContext)
 
 //==============================================================================
 /// 드롭다운.
+///
+/// # 예제
+/// 선택지를 넣고 고른 글 읽기
+/// ```rust
+/// use vanilla::{ComponentContext, NodeTree, UIDropdown, UIDropdownOptions, UILabel};
+///
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.get_root_id();
+/// let panel_id = node_tree.create_child(root_id, "Panel");
+/// let dropdown_id = UIDropdown::create(&mut node_tree, panel_id, UIDropdownOptions { width: 180.0, ..UIDropdownOptions::default() });
+/// node_tree.with_component_mut::<UIDropdown, _>(dropdown_id, |dropdown, tree| {
+/// 	dropdown.set_option_list(tree, &["Dark", "Light", "System"]);
+/// 	dropdown.set_selected_index(tree, 1);
+/// });
+/// node_tree[dropdown_id].get_component_mut::<UIDropdown>().expect("dropdown").set_changed_event(Box::new(|dropdown: &mut UIDropdown, _context: &mut ComponentContext| {
+/// 	let _theme_name = dropdown.get_selected_text();
+/// }));
+/// let dropdown = node_tree[dropdown_id].get_component::<UIDropdown>().expect("dropdown");
+/// assert_eq!(dropdown.get_selected_text(), "Light");
+/// assert_eq!(node_tree[dropdown_id].get_component::<UILabel>().expect("header").get_text(), "Light");
+/// ```
 //==============================================================================
 pub struct UIDropdown {
 	component_base: ComponentBase,
@@ -101,6 +143,9 @@ pub struct UIDropdown {
 impl UIDropdown {
 	//==============================================================================
 	/// 생성. (기본 설정)
+	///
+	/// # 돌려줌
+	/// 붙기 전의 드롭다운. (UIDropdownOptions::default, 선택지 없음)
 	//==============================================================================
 	pub fn new() -> UIDropdown {
 		UIDropdown::create_with_options(UIDropdownOptions::default())
@@ -108,6 +153,12 @@ impl UIDropdown {
 
 	//==============================================================================
 	/// 설정으로 생성. (노드에는 node_tree.add_component 로 붙인다)
+	///
+	/// # 인자
+	/// - `options`: 드롭다운 설정.
+	///
+	/// # 돌려줌
+	/// 붙기 전의 드롭다운. (선택지 없음)
 	//==============================================================================
 	pub fn create_with_options(options: UIDropdownOptions) -> UIDropdown {
 		UIDropdown {
@@ -126,6 +177,14 @@ impl UIDropdown {
 
 	//==============================================================================
 	/// 노드 만들기. (parent_id 밑에 "UIDropdown" 노드를 만들어 붙인다. 원본 new UIDropdown(options) + add_child)
+	///
+	/// # 인자
+	/// - `node_tree`: 노드 트리.
+	/// - `parent_id`: 부모 노드.
+	/// - `options`: 드롭다운 설정.
+	///
+	/// # 돌려줌
+	/// 만든 호스트 노드. (머리 단추)
 	//==============================================================================
 	pub fn create(node_tree: &mut NodeTree, parent_id: NodeId, options: UIDropdownOptions) -> NodeId {
 		let dropdown_id = node_tree.create_child(parent_id, "UIDropdown");
@@ -135,6 +194,11 @@ impl UIDropdown {
 
 	//==============================================================================
 	/// 선택지 목록 설정. (펼침 목록 행을 다시 만든다)
+	/// - 고른 번호는 새 목록의 범위로 자른다. 트리에 붙기 전이면 목록만 담아 두고 붙을 때 행을 만든다.
+	///
+	/// # 인자
+	/// - `node_tree`: 드롭다운이 든 노드 트리.
+	/// - `option_list`: 선택지 글 목록. (`&str` 이나 String 조각)
 	//==============================================================================
 	pub fn set_option_list(&mut self, node_tree: &mut NodeTree, option_list: &[impl AsRef<str>]) {
 		self.option_list = option_list.iter().map(|option_text| option_text.as_ref().to_string()).collect();
@@ -194,6 +258,10 @@ impl UIDropdown {
 
 	//==============================================================================
 	/// 고르기. (접고, 머리 글과 강조를 고치고, 바뀌었으면 바뀜 이벤트를 부른다. 문맥은 드롭다운 호스트의 것)
+	///
+	/// # 인자
+	/// - `context`: 드롭다운 호스트 노드의 문맥. (바뀜 이벤트에 넘긴다)
+	/// - `option_index`: 고를 번호. (0 부터, 선택지 수 이상이면 아무 일도 없다)
 	//==============================================================================
 	pub fn select_index(&mut self, context: &mut ComponentContext, option_index: usize) {
 		if option_index >= self.option_list.len() {
@@ -230,6 +298,33 @@ impl UIDropdown {
 
 	//==============================================================================
 	/// 펼침 / 접힘. (펼치면 목록을 트리 뿌리로 옮기고, 접으면 되돌린다)
+	///
+	/// # 인자
+	/// - `node_tree`: 드롭다운이 든 노드 트리.
+	/// - `is_open`: true 면 펼친다. (화살표 글자도 바꾼다)
+	///
+	/// # 예제
+	/// 펼친 동안 목록은 트리 뿌리의 자식이다
+	/// ```rust
+	/// use vanilla::{NodeTree, UIDropdown, UIDropdownOptions, Vector2};
+	///
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let panel_id = node_tree.create_child(root_id, "Panel");
+	/// let dropdown_id = UIDropdown::create(&mut node_tree, panel_id, UIDropdownOptions::default());
+	/// node_tree.with_component_mut::<UIDropdown, _>(dropdown_id, |dropdown, tree| {
+	/// 	dropdown.set_option_list(tree, &["Small", "Large"]);
+	/// 	dropdown.set_open(tree, true);
+	/// });
+	/// let popup_id = node_tree[dropdown_id].get_component::<UIDropdown>().expect("dropdown").get_popup_node().expect("popup");
+	/// assert!(node_tree[popup_id].is_active());
+	/// assert_eq!(node_tree.get_parent_id(popup_id), Some(root_id));
+	/// node_tree.with_component_mut::<UIDropdown, _>(dropdown_id, |dropdown, tree| {
+	/// 	dropdown.set_open(tree, false);
+	/// });
+	/// assert_eq!(node_tree.get_parent_id(popup_id), Some(dropdown_id));
+	/// assert_eq!(node_tree[popup_id].get_local_position(), Vector2::create(0.0, 34.0));
+	/// ```
 	//==============================================================================
 	pub fn set_open(&mut self, node_tree: &mut NodeTree, is_open: bool) {
 		self.is_open = is_open;
@@ -346,6 +441,38 @@ impl UIDropdown {
 
 	//==============================================================================
 	/// 바뀜 이벤트 설정.
+	///
+	/// # 인자
+	/// - `changed_event`: 행을 눌러 고른 번호가 바뀌면 부르는 이벤트. (같은 행을 다시 고르거나 set_selected_index 로 바꾸면 부르지 않는다)
+	///
+	/// # 예제
+	/// 펼친 목록의 행을 누르면 고르고 접힌다
+	/// ```rust
+	/// use std::cell::Cell;
+	/// use std::rc::Rc;
+	/// use vanilla::{ComponentContext, Engine, EngineConfiguration, NodeTree, TouchKind, UIDropdown, UIDropdownOptions, Vector2};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let dropdown_id = UIDropdown::create(&mut node_tree, root_id, UIDropdownOptions::default());
+	/// let changed_count = Rc::new(Cell::new(0));
+	/// let changed_counter = changed_count.clone();
+	/// node_tree.with_component_mut::<UIDropdown, _>(dropdown_id, |dropdown, tree| {
+	/// 	dropdown.set_option_list(tree, &["Easy", "Normal", "Hard"]);
+	/// 	dropdown.set_changed_event(Box::new(move |dropdown: &mut UIDropdown, _context: &mut ComponentContext| {
+	/// 		assert_eq!(dropdown.get_selected_text(), "Hard");
+	/// 		changed_counter.set(changed_counter.get() + 1);
+	/// 	}));
+	/// 	dropdown.set_open(tree, true);
+	/// });
+	/// let row_id = node_tree[dropdown_id].get_component::<UIDropdown>().expect("dropdown").get_option_nodes()[2];
+	/// let row_center = node_tree.convert_node_position_to_view_position(row_id, Vector2::create(86.0, 14.0));
+	/// node_tree.dispatch_touch(row_id, &engine, TouchKind::Press, row_center);
+	/// node_tree.dispatch_touch(row_id, &engine, TouchKind::Release, row_center);
+	/// assert_eq!(changed_count.get(), 1);
+	/// assert!(!node_tree[dropdown_id].get_component::<UIDropdown>().expect("dropdown").is_open());
+	/// ```
 	//==============================================================================
 	pub fn set_changed_event(&mut self, changed_event: UIDropdownEvent) {
 		self.changed_event = Some(changed_event);
@@ -353,6 +480,10 @@ impl UIDropdown {
 
 	//==============================================================================
 	/// 고른 번호 설정. (범위로 자른다. 바뀜 이벤트는 부르지 않는다. 원본과 같음)
+	///
+	/// # 인자
+	/// - `node_tree`: 드롭다운이 든 노드 트리.
+	/// - `selected_index`: 고를 번호. (0 부터, 선택지 수 - 1 을 넘으면 그 값으로 자른다)
 	//==============================================================================
 	pub fn set_selected_index(&mut self, node_tree: &mut NodeTree, selected_index: usize) {
 		self.selected_index = selected_index.min(self.option_list.len().saturating_sub(1));
@@ -362,6 +493,9 @@ impl UIDropdown {
 
 	//==============================================================================
 	/// 고른 번호 반환.
+	///
+	/// # 돌려줌
+	/// 고른 번호. (0 부터, 처음은 0)
 	//==============================================================================
 	pub fn get_selected_index(&self) -> usize {
 		self.selected_index
@@ -369,6 +503,9 @@ impl UIDropdown {
 
 	//==============================================================================
 	/// 고른 글 반환. (선택지가 없으면 빈 글)
+	///
+	/// # 돌려줌
+	/// 고른 선택지의 글. (선택지가 없으면 빈 글)
 	//==============================================================================
 	pub fn get_selected_text(&self) -> &str {
 		self.option_list.get(self.selected_index).map(String::as_str).unwrap_or("")
@@ -376,6 +513,9 @@ impl UIDropdown {
 
 	//==============================================================================
 	/// 선택지 목록 반환.
+	///
+	/// # 돌려줌
+	/// 선택지 글 목록. (set_option_list 의 차례)
 	//==============================================================================
 	pub fn get_option_list(&self) -> &[String] {
 		&self.option_list
@@ -383,6 +523,9 @@ impl UIDropdown {
 
 	//==============================================================================
 	/// 펼쳐져 있는지.
+	///
+	/// # 돌려줌
+	/// 펼쳐져 있으면 true.
 	//==============================================================================
 	pub fn is_open(&self) -> bool {
 		self.is_open
@@ -390,6 +533,9 @@ impl UIDropdown {
 
 	//==============================================================================
 	/// 펼침 목록 노드 핸들. (펼친 동안은 트리 뿌리의 자식)
+	///
+	/// # 돌려줌
+	/// 펼침 목록 노드. (트리에 붙기 전이면 None)
 	//==============================================================================
 	pub fn get_popup_node(&self) -> Option<NodeId> {
 		self.popup_node_id
@@ -397,6 +543,9 @@ impl UIDropdown {
 
 	//==============================================================================
 	/// 선택지 행 노드 핸들 목록.
+	///
+	/// # 돌려줌
+	/// 행 노드. (선택지 차례, set_option_list 마다 다시 만든다)
 	//==============================================================================
 	pub fn get_option_nodes(&self) -> &[NodeId] {
 		&self.row_node_ids
@@ -404,6 +553,9 @@ impl UIDropdown {
 }
 
 impl Default for UIDropdown {
+	//==============================================================================
+	/// 기본값. (UIDropdown::new 와 같다)
+	//==============================================================================
 	fn default() -> UIDropdown {
 		UIDropdown::new()
 	}
@@ -411,14 +563,23 @@ impl Default for UIDropdown {
 
 #[crate::reflect]
 impl Component for UIDropdown {
+	//==============================================================================
+	/// 컴포넌트 공통 칸 반환.
+	//==============================================================================
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base
 	}
 
+	//==============================================================================
+	/// 컴포넌트 공통 칸 반환. (변경용)
+	//==============================================================================
 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 		&mut self.component_base
 	}
 
+	//==============================================================================
+	/// 컴포넌트 타입 이름. ("UIDropdown")
+	//==============================================================================
 	fn get_component_type(&self) -> &'static str {
 		"UIDropdown"
 	}
@@ -489,6 +650,9 @@ impl Component for UIDropdown {
 		}
 	}
 
+	//==============================================================================
+	/// tick 이 필요한지. (돌 일이 없어 false)
+	//==============================================================================
 	fn is_tick_needed(&self) -> bool {
 		false
 	}

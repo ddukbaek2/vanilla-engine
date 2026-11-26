@@ -10,6 +10,22 @@ use crate::base::rect::Rect;
 
 //==============================================================================
 /// 내비게이터 설정. (원본 options = { cross_axis_penalty = 2.5 })
+///
+/// # 예제
+/// 벌점을 낮춰 대각선 항목도 잘 고르게 하기
+/// ```rust
+/// use vanilla::{FocusNavigator, FocusNavigatorOptions, Rect};
+///
+/// let options = FocusNavigatorOptions {
+/// 	cross_axis_penalty: 0.5,
+/// };
+/// let mut focus_navigator = FocusNavigator::new(options);
+/// focus_navigator.add_item("start", Rect::create(0.0, 0.0, 40.0, 40.0));
+/// focus_navigator.add_item("diagonal", Rect::create(100.0, 60.0, 40.0, 40.0));
+/// focus_navigator.add_item("far", Rect::create(200.0, 0.0, 40.0, 40.0));
+/// focus_navigator.set_focused_id(Some("start"));
+/// assert_eq!(focus_navigator.move_focus(1.0, 0.0), Some(String::from("diagonal")));
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FocusNavigatorOptions {
@@ -39,6 +55,24 @@ struct FocusItem {
 
 //==============================================================================
 /// 방향 포커스 내비게이터.
+///
+/// # 예제
+/// 2x2 단추 사이를 화살표로 옮겨 다니기
+/// ```rust
+/// use vanilla::{FocusNavigator, Rect};
+///
+/// let mut focus_navigator = FocusNavigator::default();
+/// focus_navigator.add_item("play", Rect::create(0.0, 0.0, 80.0, 40.0));
+/// focus_navigator.add_item("options", Rect::create(200.0, 0.0, 80.0, 40.0));
+/// focus_navigator.add_item("credits", Rect::create(0.0, 100.0, 80.0, 40.0));
+/// focus_navigator.add_item("quit", Rect::create(200.0, 100.0, 80.0, 40.0));
+///
+/// assert_eq!(focus_navigator.move_focus(0.0, 1.0), Some(String::from("play")));
+/// assert_eq!(focus_navigator.move_focus(1.0, 0.0), Some(String::from("options")));
+/// assert_eq!(focus_navigator.move_focus(0.0, 1.0), Some(String::from("quit")));
+/// assert_eq!(focus_navigator.move_focus(1.0, 0.0), None);
+/// assert_eq!(focus_navigator.get_focused_id(), Some("quit"));
+/// ```
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct FocusNavigator {
@@ -50,6 +84,12 @@ pub struct FocusNavigator {
 impl FocusNavigator {
 	//==============================================================================
 	/// 생성.
+	///
+	/// # 인자
+	/// - `options`: 축 벌점 설정. (FocusNavigatorOptions::default() 는 2.5)
+	///
+	/// # 돌려줌
+	/// 항목과 포커스가 없는 내비게이터.
 	//==============================================================================
 	pub fn new(options: FocusNavigatorOptions) -> FocusNavigator {
 		FocusNavigator {
@@ -61,6 +101,11 @@ impl FocusNavigator {
 
 	//==============================================================================
 	/// 항목 등록.
+	/// - 같은 id 를 다시 넣어도 바꾸지 않고 하나 더 넣는다.
+	///
+	/// # 인자
+	/// - `id`: 항목 이름. (move_focus 와 get_focused_id 가 돌려주는 값)
+	/// - `rect`: 항목 영역. (가운데 점끼리 거리를 잰다, 좌표계는 부르는 쪽이 정한다)
 	//==============================================================================
 	pub fn add_item(&mut self, id: &str, rect: Rect) {
 		self.item_list.push(FocusItem {
@@ -79,6 +124,9 @@ impl FocusNavigator {
 
 	//==============================================================================
 	/// 포커스 정하기.
+	///
+	/// # 인자
+	/// - `id`: 포커스할 항목 이름. None 이면 비운다. (등록하지 않은 이름도 그대로 둔다, 다음 move_focus 가 첫 항목으로 바꾼다)
 	//==============================================================================
 	pub fn set_focused_id(&mut self, id: Option<&str>) {
 		self.focused_id = id.map(|id| id.to_string());
@@ -86,6 +134,9 @@ impl FocusNavigator {
 
 	//==============================================================================
 	/// 지금 포커스 반환.
+	///
+	/// # 돌려줌
+	/// 포커스한 항목 이름. 없으면 None.
 	//==============================================================================
 	pub fn get_focused_id(&self) -> Option<&str> {
 		self.focused_id.as_deref()
@@ -96,6 +147,14 @@ impl FocusNavigator {
 	/// - 포커스가 없으면 방향과 상관없이 가장 왼쪽 위 항목을 고른다.
 	/// - 포커스한 항목이 목록에 없으면 첫 항목을 고른다.
 	/// - 옮길 곳이 없으면 포커스를 그대로 두고 None 을 돌려준다.
+	/// - 후보는 이동 방향 앞쪽(앞으로 간 거리가 0 보다 큰) 항목이고, 점수는 앞으로 간 거리 + 축에서 벗어난 거리 * 벌점이다. (가운데 점끼리)
+	///
+	/// # 인자
+	/// - `direction_x`: 가로 방향. (-1 왼쪽, 0, 1 오른쪽)
+	/// - `direction_y`: 세로 방향. (-1 위, 0, 1 아래)
+	///
+	/// # 돌려줌
+	/// 새로 포커스한 항목 이름. 항목이 하나도 없거나 옮길 곳이 없으면 None.
 	//==============================================================================
 	pub fn move_focus(&mut self, direction_x: f32, direction_y: f32) -> Option<String> {
 		let first_list_item = self.item_list.first()?;

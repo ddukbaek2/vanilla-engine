@@ -3,20 +3,27 @@
 //! - 원본 UIInputField 의 DOM 쪽을 옮긴 것이다. 원본은 필드가 자기 <input> 을 만들고 리스너를 단다.
 //!   러스트 판은 필드가 프레임마다 상태(자리, 값, 선택, 포커스)를 엔진에 올리고, 여기서 attach 한 DOM 입력 필드마다 숨긴 <input> 을 하나씩 맞춘다.
 //!   - 값과 선택은 DOM 이 주인이다. input / compositionstart / compositionupdate / compositionend / Enter keydown / focus / blur 를
-//!   ```text
 //!     그 필드 id 로 글 입력 줄에 넣고(replaceValue, 조합, 포커스), 화살표 같은 네이티브 이동은 프레임마다 선택을 폴링해 넣는다. (원본 tick)
-//!   ```
 //!   - 필드 쪽에서 값이나 커서를 바꾸면(set_text, 누른 자리, 잘라내기) 상태의 value_revision 이 늘고, 여기서 <input> 에 다시 쓴다. (조합 중엔 미룬다)
 //!   - iOS 는 사용자 제스처 안에서 focus() 해야 키보드가 뜬다. 원본처럼 캔버스 touchstart / mousedown(설정하면 touchend)에 동기 핸들러를 달아
-//!   ```text
 //!     지난 프레임 필드 자리로 맞춰 보고 그 자리에서 focus / blur 한다.
-//!   ```
 //!   - 오른쪽 단추 문맥 메뉴는 원본과 같은 모양의 DOM 메뉴다. 항목은 그 필드에 잘라내기 / 복사 키나 붙여 넣을 글로 넣는다.
 //!   - use_dominput 이 꺼진 필드는 원본 캔버스 모드처럼 window keydown 을 편집 키와 글자로 바꿔 넣는다.
 //! - DOM 이벤트 리스너는 엔진을 빌리지 않는다. 대기 줄(PENDING_EVENT_LIST)에 넣고 다음 프레임 시작에 엔진으로 옮긴다.
 //!   (apply_frame 이 부르는 focus() 가 그 자리에서 focus / blur 이벤트를 부르기 때문)
 //! - 원본과 다른 것: 숨긴 <input> 은 필드가 tick 을 도는 동안만 있다. (노드를 끄거나 지우면 함께 빠진다) setTimeout 으로 미루는 커서 옮기기와
 //!   메뉴 닫기 리스너는 원본과 같다.
+//!
+//! # 예제
+//! 클립보드에 쓰고 비동기로 읽기 (웹은 그 자리에서 읽지 못해 콜백으로 받는다)
+//! ```rust,no_run
+//! use vanilla::platform;
+//!
+//! platform::write_clipboard_text("vanilla");
+//! platform::read_clipboard_text_with_callback(Box::new(|text: String| {
+//! 	println!("{}", text);
+//! }));
+//! ```
 //==============================================================================
 use crate::core::engine::Engine;
 use crate::core::textinput::{convert_character_index_to_utf16_index, convert_utf16_index_to_character_index, TextInputEvent, TextInputEventKind, TextInputFieldState, TextInputKey};
@@ -26,7 +33,7 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
 
 //==============================================================================
-/// 전역 상수 목록.
+// 전역 상수 목록.
 //==============================================================================
 /// 숨긴 <input> 의 클래스 이름. (원본과 같음)
 const HIDDEN_INPUT_CLASS_NAME: &str = "uiinputfield-hidden";
@@ -121,6 +128,9 @@ enum HiddenTextElement {
 impl std::ops::Deref for HiddenTextElement {
 	type Target = web_sys::HtmlElement;
 
+	//==============================================================================
+	/// 감싼 글 칸을 HtmlElement 로 빌리기. (값과 선택 함수 밖의 공통 일은 이것으로 한다)
+	//==============================================================================
 	fn deref(&self) -> &web_sys::HtmlElement {
 		match self {
 			HiddenTextElement::Input(input_element) => {
@@ -395,6 +405,9 @@ fn call_clipboard_function(function_name: &str, argument_list: &js_sys::Array) -
 
 //==============================================================================
 /// 시스템 클립보드에 글 쓰기. (navigator.clipboard.writeText, 실패는 무시. 원본 writeClipboard)
+///
+/// # 인자
+/// - `text`: 쓸 글.
 //==============================================================================
 pub fn write_clipboard_text(text: &str) {
 	let argument_list = js_sys::Array::of1(&JsValue::from_str(text));
@@ -407,6 +420,9 @@ pub fn write_clipboard_text(text: &str) {
 
 //==============================================================================
 /// 시스템 클립보드 글 읽기. (웹은 비동기라 그 자리에서 읽지 못한다. read_clipboard_text_with_callback 이나 request_clipboard_paste 로 읽는다)
+///
+/// # 돌려줌
+/// 늘 None.
 //==============================================================================
 pub fn read_clipboard_text() -> Option<String> {
 	None
@@ -414,6 +430,9 @@ pub fn read_clipboard_text() -> Option<String> {
 
 //==============================================================================
 /// 시스템 클립보드 글을 비동기로 읽어 콜백에 넘기기. (원본 readClipboard 의 navigator.clipboard.readText().then, 못 읽거나 거부되면 빈 글)
+///
+/// # 인자
+/// - `callback`: 읽은 글을 받을 함수. (readText 가 끝난 뒤 한 번 불린다)
 //==============================================================================
 pub fn read_clipboard_text_with_callback(callback: Box<dyn FnOnce(String)>) {
 	read_optional_clipboard_text_with_callback(Box::new(move |text: Option<String>| {
@@ -423,6 +442,9 @@ pub fn read_clipboard_text_with_callback(callback: Box<dyn FnOnce(String)>) {
 
 //==============================================================================
 /// 시스템 클립보드 글을 비동기로 읽어 콜백에 넘기기. (원본 engine.readClipboardText, 클립보드가 없거나 거부되면 원본 null 자리의 None)
+///
+/// # 인자
+/// - `callback`: 읽은 글을 받을 함수. (readText 가 끝난 뒤 한 번, navigator.clipboard 가 없으면 그 자리에서 None 으로 불린다)
 //==============================================================================
 pub fn read_optional_clipboard_text_with_callback(callback: Box<dyn FnOnce(Option<String>)>) {
 	let promise = match call_clipboard_function("readText", &js_sys::Array::new()) {

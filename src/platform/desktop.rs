@@ -34,6 +34,20 @@
 //! - 페이지 주소의 쿼리 값(read_page_query_value)은 환경 변수 VANILLA_ 뒤에 이름을 대문자 뱀꼴로 붙인 것으로 읽는다. (safeArea → VANILLA_SAFE_AREA)
 //! - 찍기 모드(VANILLA_CAPTURE_PATH)는 창을 숨기고 돈다. 숨긴 창은 다시 그리기 요청과 수직 동기가 없어 about_to_wait 에서 프레임을 바로 돌고 주사율로 빠르기를 맞춘다.
 //!   가려짐 알림은 받지 않는다. 맥은 독 아이콘과 포커스도 가져가지 않는다. 창을 보려면 VANILLA_CAPTURE_SHOW_WINDOW=1.
+//!
+//! # 예제
+//! 페이지 쿼리 값, 세이프 에어리어, 주된 손 읽기 (데스크탑은 환경 변수, 0, 페이지 없음)
+//! ```rust
+//! use vanilla::platform;
+//!
+//! let quality = platform::read_page_query_value("quality").unwrap_or_else(|| String::from("high"));
+//! let safe_area_insets = platform::read_safe_area_insets();
+//! let is_touch_first = platform::is_coarse_pointer();
+//! println!("{} {:?} {}", quality, safe_area_insets, is_touch_first);
+//! assert_eq!(safe_area_insets, [0.0, 0.0, 0.0, 0.0]);
+//! assert_eq!(platform::read_client_native_size(), None);
+//! assert!(!platform::is_text_field_focused());
+//! ```
 //==============================================================================
 use crate::base::vector2::Vector2;
 use crate::core::asset::AssetLoadHandle;
@@ -102,6 +116,12 @@ thread_local! {
 
 //==============================================================================
 /// 시작. (창을 닫거나 exit_application 을 부를 때까지 돌아오지 않는다)
+///
+/// # 인자
+/// - `engine_runner`: 엔진 실행자. (Engine::run 이 엔진과 첫 씬으로 만들어 넘긴다)
+///
+/// # 돌려줌
+/// 창이 닫히고 이벤트 루프가 끝나면 Ok. 이벤트 루프를 만들거나 돌리지 못했거나 창, GL 컨텍스트를 만들다 실패했으면 Err(까닭 글).
 //==============================================================================
 pub fn run(engine_runner: EngineRunner) -> Result<(), String> {
 	let is_window_hidden = is_capture_window_hidden();
@@ -152,6 +172,10 @@ pub fn run(engine_runner: EngineRunner) -> Result<(), String> {
 
 //==============================================================================
 /// 커서 보이기 설정.
+///
+/// # 인자
+/// - `platform_window`: 창 손잡이. (None 이면 아무것도 하지 않는다)
+/// - `is_visible`: 보이려면 true.
 //==============================================================================
 pub fn set_cursor_visible(platform_window: Option<&PlatformWindow>, is_visible: bool) {
 	if let Some(window) = platform_window {
@@ -162,6 +186,10 @@ pub fn set_cursor_visible(platform_window: Option<&PlatformWindow>, is_visible: 
 //==============================================================================
 /// 커서 모양 설정. (CSS 커서 이름을 winit 커서 아이콘으로, none 이면 감춤, 모르는 이름은 기본 화살표)
 /// - 그림 커서는 만들어 둔 것이 있으면 그것을 건다. 아직 없으면 이벤트 루프가 만들도록 부탁해 두고 그동안은 함께 준 CSS 커서를 쓴다.
+///
+/// # 인자
+/// - `platform_window`: 창 손잡이. (None 이면 아무것도 하지 않는다)
+/// - `cursor_value`: 커서 값. (image_url 이 있으면 그림 커서, 아니면 fallback_name 의 CSS 커서 이름)
 //==============================================================================
 pub fn set_cursor(platform_window: Option<&PlatformWindow>, cursor_value: &CursorValue) {
 	let window = match platform_window {
@@ -247,6 +275,9 @@ pub fn set_cursor(platform_window: Option<&PlatformWindow>, cursor_value: &Curso
 
 //==============================================================================
 /// 주된 손이 손가락인지. (윈도우는 크로미엄처럼 태블릿 모드나 마우스 없는 터치 기기면 참, 리눅스는 크로미엄처럼 마우스, 터치패드 없이 터치스크린만 있으면 참, 맥은 마우스가 주된 손으로 본다)
+///
+/// # 돌려줌
+/// 주된 손이 손가락이면 true. (맥은 늘 false)
 //==============================================================================
 pub fn is_coarse_pointer() -> bool {
 	#[cfg(target_os = "windows")]
@@ -265,6 +296,9 @@ pub fn is_coarse_pointer() -> bool {
 
 //==============================================================================
 /// 문서의 초점이 글자 입력칸에 있는지. (데스크탑에는 문서가 없어 늘 false, 엔진 입력 필드는 입력 매니저가 따로 본다)
+///
+/// # 돌려줌
+/// 늘 false.
 //==============================================================================
 pub fn is_text_field_focused() -> bool {
 	false
@@ -273,6 +307,12 @@ pub fn is_text_field_focused() -> bool {
 //==============================================================================
 /// 페이지 주소의 쿼리 값. (데스크탑에는 주소가 없어 환경 변수 VANILLA_ 뒤에 이름을 대문자 뱀꼴로 붙인 것을 읽는다, 없으면 None)
 /// - safeArea → VANILLA_SAFE_AREA, quality → VANILLA_QUALITY
+///
+/// # 인자
+/// - `name`: 쿼리 이름. (낙타꼴, safeArea 같은)
+///
+/// # 돌려줌
+/// 그 환경 변수의 값. 없거나 유니코드가 아니면 None.
 //==============================================================================
 pub fn read_page_query_value(name: &str) -> Option<String> {
 	std::env::var(convert_query_name_to_variable_name(name)).ok()
@@ -294,6 +334,9 @@ fn convert_query_name_to_variable_name(name: &str) -> String {
 
 //==============================================================================
 /// 화면(client) 좌표에서 캔버스의 왼쪽 위. (데스크탑은 창의 논리 좌표가 client 좌표다, 캔버스 비 상한으로 가운데에 둘 때만 0 이 아니다)
+///
+/// # 돌려줌
+/// 창 안에서 캔버스의 왼쪽 위 자리. (논리 픽셀, 처음은 0, 0)
 //==============================================================================
 pub fn read_canvas_client_position() -> Vector2 {
 	CANVAS_CLIENT_POSITION.with(|canvas_client_position| canvas_client_position.get())
@@ -301,6 +344,13 @@ pub fn read_canvas_client_position() -> Vector2 {
 
 //==============================================================================
 /// 검증용 화면 저장. (파일로 쓴다)
+///
+/// # 인자
+/// - `output_path`: 쓸 파일 경로. (VANILLA_CAPTURE_PATH, 있으면 덮어쓴다)
+/// - `png_bytes`: PNG 파일 바이트.
+///
+/// # 돌려줌
+/// 썼으면 Ok. 파일을 쓰지 못했으면 Err(입출력 오류 글).
 //==============================================================================
 pub fn save_capture_file(output_path: &str, png_bytes: &[u8]) -> Result<(), String> {
 	std::fs::write(output_path, png_bytes).map_err(|error| error.to_string())
@@ -308,6 +358,9 @@ pub fn save_capture_file(output_path: &str, png_bytes: &[u8]) -> Result<(), Stri
 
 //==============================================================================
 /// 페이지 전체 크기. (원본 window.innerWidth, innerHeight, 데스크탑에는 페이지가 없어 None 이고 ViewManager 가 창 안쪽 크기를 쓴다)
+///
+/// # 돌려줌
+/// 늘 None.
 //==============================================================================
 pub fn read_client_native_size() -> Option<Vector2> {
 	None
@@ -335,6 +388,9 @@ fn read_virtual_keyboard_inset() -> f32 {
 /// CSS env(safe-area-inset-*) 세이프 에어리어 인셋. (데스크탑은 0)
 /// - 크롬 데스크탑도 0 이다. 0 이 아닌 인셋은 WebContentsImpl::SetDisplayCutoutSafeArea 로만 들어오는데, 이 함수는 #if BUILDFLAG(IS_ANDROID) 안에 있고
 ///   안드로이드(web_contents_android.cc)만 부른다. 그 밖에는 블링크 기본값 "0px" 이다. (style_environment_variables.cc, 노치가 있는 맥북의 전체 화면도 같다)
+///
+/// # 돌려줌
+/// 늘 [0, 0, 0, 0]. (웹과 같은 차례 위, 오른쪽, 아래, 왼쪽)
 //==============================================================================
 pub fn read_safe_area_insets() -> [f32; 4] {
 	[0.0, 0.0, 0.0, 0.0]
@@ -347,6 +403,20 @@ pub fn read_safe_area_insets() -> [f32; 4] {
 /// - 윈도우: 프로세스 힙의 HeapSummary 의 cbAllocated, cbCommitted.
 /// - 리눅스(glibc): mallinfo2 의 uordblks + hblkhd(쓰는 중, mmap 으로 잡은 큰 덩어리 포함), arena + hblkhd(잡아 둔 것). glibc 2.33 부터라 실행할 때 찾고, 없으면 None.
 /// - 그 밖의 OS 는 None 이다.
+///
+/// # 돌려줌
+/// (쓰는 중인 바이트, 잡아 둔 바이트). 윈도우에서 HeapSummary 가 실패했거나, 리눅스에 mallinfo2 가 없거나, 그 밖의 OS 면 None.
+///
+/// # 예제
+/// 힙 사용량을 메가바이트로 찍기
+/// ```rust
+/// use vanilla::platform::desktop::read_heap_usage;
+///
+/// if let Some((used_bytes, reserved_bytes)) = read_heap_usage() {
+/// 	assert!(used_bytes > 0.0);
+/// 	println!("{:.1} / {:.1} MB", used_bytes / 1048576.0, reserved_bytes / 1048576.0);
+/// }
+/// ```
 //==============================================================================
 pub fn read_heap_usage() -> Option<(f64, f64)> {
 	#[cfg(target_os = "macos")]
@@ -435,6 +505,10 @@ pub fn exit_application() {
 
 //==============================================================================
 /// 창 제목 설정.
+///
+/// # 인자
+/// - `platform_window`: 창 손잡이. (None 이면 아무것도 하지 않는다)
+/// - `title`: 제목 글.
 //==============================================================================
 pub fn set_title(platform_window: Option<&PlatformWindow>, title: &str) {
 	if let Some(window) = platform_window {
@@ -444,6 +518,11 @@ pub fn set_title(platform_window: Option<&PlatformWindow>, title: &str) {
 
 //==============================================================================
 /// 애셋 바이트 읽기. (파일을 그 자리에서 읽고 끝낸다, 파일에는 캐시가 없어 is_no_cache 는 쓰지 않는다. 읽은 파일은 리소스 사용량에 적는다)
+///
+/// # 인자
+/// - `asset_location`: 읽을 파일 경로. (엔진이 애셋 경로로 만든 것)
+/// - `load_handle`: 다 읽으면 바이트나 오류 글로 끝낼 손잡이.
+/// - `_is_no_cache`: 캐시를 거르지 않고 읽을지. (데스크탑은 쓰지 않는다)
 //==============================================================================
 pub fn request_asset_bytes(asset_location: String, load_handle: AssetLoadHandle, _is_no_cache: bool) {
 	let result = std::fs::read(&asset_location).map_err(|error| format!("애셋 읽기 실패 ({}): {}", asset_location, error));

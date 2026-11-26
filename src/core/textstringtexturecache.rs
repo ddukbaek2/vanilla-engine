@@ -62,6 +62,9 @@ fn create_family_key(family_name: &str) -> String {
 //==============================================================================
 /// 이름의 얼굴이 없는 글자 지켜보기 시작. (원본 브라우저는 FontFace 를 document.fonts 에 올려 두면 캔버스가 그 글꼴로 글을 그릴 때 그 글자의 범위에 든 얼굴을 받기 시작한다)
 /// - 러스트 판은 얼굴을 받은 뒤에 올리므로, 지켜보는 이름으로 재거나 구운 글에서 올린 얼굴의 글자 범위에 들지 않은 글자를 모아 받는 쪽(UIFont)이 꺼내 받는다.
+///
+/// # 인자
+/// - `family_name`: 지켜볼 이름. (앞뒤 빈칸은 떼고 대소문자는 가리지 않는다)
 //==============================================================================
 pub fn watch_unresolved_family_characters(family_name: &str) {
 	let family_key = create_family_key(family_name);
@@ -72,6 +75,25 @@ pub fn watch_unresolved_family_characters(family_name: &str) {
 
 //==============================================================================
 /// 지켜보는 이름에서 얼굴이 없던 글자 꺼내기. (꺼내면 비운다, 지켜보지 않는 이름이면 빈 글)
+///
+/// # 인자
+/// - `family_name`: 지켜보는 이름. (앞뒤 빈칸은 떼고 대소문자는 가리지 않는다)
+///
+/// # 돌려줌
+/// 모인 글자를 코드 포인트 차례로 이은 글. (빈칸과 제어 글자는 모으지 않는다)
+///
+/// # 예제
+/// 올린 얼굴이 없는 이름으로 잰 글자 모으기
+/// ```rust
+/// use vanilla::core::textstringtexturecache::{take_unresolved_family_characters, watch_unresolved_family_characters, TextStringTextureCache};
+///
+/// watch_unresolved_family_characters("GameFont");
+/// let text_string_texture_cache = TextStringTextureCache::new();
+/// text_string_texture_cache.measure_text("16px GameFont", "b a");
+/// assert_eq!(take_unresolved_family_characters("gamefont"), "ab");
+/// assert_eq!(take_unresolved_family_characters("GameFont"), "");
+/// assert_eq!(take_unresolved_family_characters("OtherFont"), "");
+/// ```
 //==============================================================================
 pub fn take_unresolved_family_characters(family_name: &str) -> String {
 	let family_key = create_family_key(family_name);
@@ -113,6 +135,29 @@ pub fn measure_normal_line_height_without_graphic(font_string: &str) -> Option<f
 /// Graphic 없이 글 재기. (폰트 문자열과 글, 원본의 공용 캔버스 measureText 자리)
 /// - 그릴 때와 같은 얼굴 고르기와 모양 잇기로 잰다.
 /// - 웹은 브라우저 Canvas2D 로 잰다. 데스크탑은 글꼴이 하나도 없으면 None 이다. (그릴 때도 글이 나오지 않는 상태)
+///
+/// # 인자
+/// - `font_string`: 폰트 문자열. (Canvas2D font 꼴, parse_font_string)
+/// - `text`: 잴 글.
+///
+/// # 돌려줌
+/// 잰 값. (픽셀) 데스크탑에서 이 스레드에 글꼴을 등록한 캐시가 아직 없거나, 그 폰트 문자열로 고를 얼굴이 하나도 없으면 None.
+///
+/// # 예제
+/// 글꼴을 등록한 뒤 Graphic 없이 재기
+/// ```rust
+/// use vanilla::core::textstringtexturecache::{measure_text_without_graphic, TextStringTextureCache};
+/// use vanilla::platform::find_fallback_font_file;
+///
+/// assert!(measure_text_without_graphic("16px default", "Hello").is_none());
+/// if let Some(source) = find_fallback_font_file("A", 400, false, false) {
+/// 	let font_bytes = std::fs::read(&source.path).expect("font file");
+/// 	let mut text_string_texture_cache = TextStringTextureCache::new();
+/// 	text_string_texture_cache.set_default_font(false, font_bytes).expect("font");
+/// 	let text_metrics = measure_text_without_graphic("16px default", "Hello").expect("metrics");
+/// 	assert!(text_metrics.width > 0.0);
+/// }
+/// ```
 //==============================================================================
 pub fn measure_text_without_graphic(font_string: &str, text: &str) -> Option<TextMetrics> {
 	SHARED_MEASURE_CACHE.with(|shared_measure_cache_cell| {
@@ -171,66 +216,159 @@ const ALPHA_THRESHOLD: u8 = 128;
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TextDrawKind {
+	/// 채워 굽기. (원본 fillText)
 	Fill,
+	/// 외곽선으로 굽기. (원본 strokeText, 두께는 line_width)
 	Stroke,
 }
 
 //==============================================================================
 /// 구운 문자열 하나. (길이 단위는 모두 논리 픽셀, 베이크 배율로 나눈 값)
+/// - 텍스처 왼쪽 위는 (펜 x - pen_offset_x, 기준선 y - baseline_offset_y) 에 놓고 quad_width, quad_height 크기로 그린다.
+///
+/// # 예제
+/// 구운 문자열을 펜 자리와 기준선에 놓을 사각형
+/// ```rust,no_run
+/// use vanilla::core::textstringtexturecache::{TextDrawKind, TextStringTextureCache};
+/// use vanilla::{Rect, ShapingDirection};
+///
+/// fn calculate_quad(text_string_texture_cache: &mut TextStringTextureCache, gl: &glow::Context, pen_x: f32, baseline_y: f32) -> Option<Rect> {
+/// 	let entry = text_string_texture_cache.get_entry(gl, TextDrawKind::Fill, "Score", "24px default", 0.0, 2.0, ShapingDirection::LeftToRight)?;
+/// 	Some(Rect::create(pen_x - entry.pen_offset_x, baseline_y - entry.baseline_offset_y, entry.quad_width, entry.quad_height))
+/// }
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug)]
 pub struct TextEntry {
+	/// 구운 텍스처. (흰 글자의 프리멀티플라이드 RGBA, 색 글리프는 제 색)
 	pub texture: crate::core::graphic::GlTexture,
+	/// 전진폭.
 	pub advance_width: f32,
+	/// 글꼴의 기준선 위 길이. (양수)
 	pub font_ascent: f32,
+	/// 글꼴의 기준선 아래 길이. (양수)
 	pub font_descent: f32,
+	/// 텍스처 왼쪽에서 펜 원점까지의 거리.
 	pub pen_offset_x: f32,
+	/// 텍스처 위에서 기준선까지의 거리.
 	pub baseline_offset_y: f32,
+	/// 그릴 사각형 너비. (텍스처 너비를 굽는 배율로 나눈 값)
 	pub quad_width: f32,
+	/// 그릴 사각형 높이. (텍스처 높이를 굽는 배율로 나눈 값)
 	pub quad_height: f32,
 }
 
 //==============================================================================
 /// 글 모양 래스터. (덮인 정도 0 ~ 255, 길이 단위는 굽는 배율을 곱한 픽셀)
 /// - coverage 는 색 글리프를 뺀 글자의 덮인 정도다. 색 글리프(이모지)가 있으면 color_pixels 에 제 색으로 든다. (프리멀티플라이드 RGBA, 같은 크기)
+///
+/// # 예제
+/// 글 모양 래스터 받기
+/// ```rust
+/// use vanilla::core::textstringtexturecache::TextStringTextureCache;
+/// use vanilla::platform::find_fallback_font_file;
+/// use vanilla::ShapingDirection;
+///
+/// if let Some(source) = find_fallback_font_file("A", 400, false, false) {
+/// 	let font_bytes = std::fs::read(&source.path).expect("font file");
+/// 	let mut text_string_texture_cache = TextStringTextureCache::new();
+/// 	text_string_texture_cache.set_default_font(false, font_bytes).expect("font");
+/// 	let text_raster = text_string_texture_cache.rasterize_text("Hi", "20px default", 2.0, 2, ShapingDirection::LeftToRight).expect("raster");
+/// 	assert_eq!(text_raster.coverage.len(), (text_raster.width * text_raster.height) as usize);
+/// 	assert!(text_raster.origin_x >= 2.0);
+/// 	assert!(text_raster.baseline_y > 0.0);
+/// }
+/// ```
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct TextRaster {
+	/// 덮인 정도. (0 ~ 255, width * height 개, 위 줄부터)
 	pub coverage: Vec<u8>,
+	/// 색 글리프 층. (프리멀티플라이드 RGBA, width * height * 4 바이트, 색 글리프가 없으면 None)
 	pub color_pixels: Option<Vec<u8>>,
+	/// 래스터 너비. (픽셀)
 	pub width: i32,
+	/// 래스터 높이. (픽셀)
 	pub height: i32,
+	/// 래스터 왼쪽에서 펜 원점까지의 거리. (픽셀)
 	pub origin_x: f32,
+	/// 래스터 위에서 기준선까지의 거리. (픽셀)
 	pub baseline_y: f32,
+	/// 전진폭. (픽셀)
 	pub advance_width: f32,
+	/// 글꼴의 기준선 위 길이. (픽셀, 양수)
 	pub font_ascent: f32,
+	/// 글꼴의 기준선 아래 길이. (픽셀, 양수)
 	pub font_descent: f32,
 }
 
 //==============================================================================
 /// 문자열 측정 결과. (Canvas2D TextMetrics)
 /// - actual_bounding_box_* 는 펜 원점(왼쪽 정렬, 알파벳 기준선)에서 글리프가 실제로 닿는 거리다. (왼쪽, 위, 아래는 그쪽으로 양수)
+///
+/// # 예제
+/// 글을 재고 실제로 닿는 거리 보기
+/// ```rust
+/// use vanilla::core::textstringtexturecache::TextStringTextureCache;
+/// use vanilla::platform::find_fallback_font_file;
+///
+/// if let Some(source) = find_fallback_font_file("A", 400, false, false) {
+/// 	let font_bytes = std::fs::read(&source.path).expect("font file");
+/// 	let mut text_string_texture_cache = TextStringTextureCache::new();
+/// 	text_string_texture_cache.set_default_font(false, font_bytes).expect("font");
+/// 	let text_metrics = text_string_texture_cache.measure_text("20px default", "Hg");
+/// 	assert!(text_metrics.width > 0.0);
+/// 	assert!(text_metrics.font_ascent > 0.0);
+/// 	assert!(text_metrics.actual_bounding_box_ascent > 0.0);
+/// 	assert!(text_metrics.actual_bounding_box_descent > 0.0);
+/// }
+/// ```
 //==============================================================================
 #[derive(Clone, Copy, Debug, Default)]
 pub struct TextMetrics {
+	/// 전진폭. (픽셀)
 	pub width: f32,
+	/// 글꼴의 기준선 위 길이. (첫 얼굴의 줄 높이 값, 양수)
 	pub font_ascent: f32,
+	/// 글꼴의 기준선 아래 길이. (첫 얼굴의 줄 높이 값, 양수)
 	pub font_descent: f32,
+	/// 펜 원점에서 글리프 왼쪽 끝까지. (왼쪽이 양수)
 	pub actual_bounding_box_left: f32,
+	/// 펜 원점에서 글리프 오른쪽 끝까지. (오른쪽이 양수)
 	pub actual_bounding_box_right: f32,
+	/// 기준선에서 글리프 위 끝까지. (위가 양수)
 	pub actual_bounding_box_ascent: f32,
+	/// 기준선에서 글리프 아래 끝까지. (아래가 양수)
 	pub actual_bounding_box_descent: f32,
 }
 
 //==============================================================================
 /// 폰트 문자열 해석 결과.
 /// - font_weight 는 CSS 굵기다. ("bold" 700, 숫자, 없으면 400) is_bold 는 굵기가 600 이상인지다.
+///
+/// # 예제
+/// 폰트 문자열 해석하기
+/// ```rust
+/// use vanilla::core::textstringtexturecache::parse_font_string;
+///
+/// let font_description = parse_font_string("italic bold 20px \"My Font\", sans-serif");
+/// assert_eq!(font_description.font_size, 20.0);
+/// assert_eq!(font_description.font_weight, 700);
+/// assert!(font_description.is_bold);
+/// assert!(font_description.is_italic);
+/// assert_eq!(font_description.family_name, "My Font");
+/// assert_eq!(font_description.family_name_list, vec!["My Font", "sans-serif"]);
+/// ```
 //==============================================================================
 #[derive(Clone, Debug)]
 pub struct FontDescription {
+	/// 글자 크기. (픽셀)
 	pub font_size: f32,
+	/// CSS 굵기. (1 ~ 1000, 없으면 400)
 	pub font_weight: u16,
+	/// 굵기가 600 이상인지.
 	pub is_bold: bool,
+	/// italic 이나 oblique 인지.
 	pub is_italic: bool,
 	/// 목록의 첫 이름.
 	pub family_name: String,
@@ -241,11 +379,29 @@ pub struct FontDescription {
 //==============================================================================
 /// 글꼴 파일 하나의 얼굴. (데스크탑 시스템 글꼴, platform 이 찾아 준다)
 /// - face_index 를 모르면(맥) post_script_name 으로 모음 안의 얼굴을 찾고, 그것도 없으면 굵기와 기울기로 고른다.
+///
+/// # 예제
+/// 운영체제가 고른 글꼴 파일을 시스템 글꼴 이름의 얼굴 후보로 더하기
+/// ```rust
+/// use vanilla::core::textstringtexturecache::TextStringTextureCache;
+/// use vanilla::platform::find_fallback_font_file;
+///
+/// let mut text_string_texture_cache = TextStringTextureCache::new();
+/// assert!(!text_string_texture_cache.has_system_font());
+/// if let Some(source) = find_fallback_font_file("A", 400, false, false) {
+/// 	assert!(source.path.exists());
+/// 	text_string_texture_cache.add_system_font_candidate("GameSans", 400, false, source);
+/// 	assert!(text_string_texture_cache.has_system_font());
+/// }
+/// ```
 //==============================================================================
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FontFileSource {
+	/// 글꼴 파일 경로.
 	pub path: std::path::PathBuf,
+	/// 글꼴 모음(TTC) 안의 얼굴 번호. (모르면 None)
 	pub face_index: Option<u32>,
+	/// 얼굴의 PostScript 이름. (모르면 None)
 	pub post_script_name: Option<String>,
 }
 
@@ -334,6 +490,27 @@ struct LaidOutText {
 	font_descent: f32,
 }
 
+//==============================================================================
+/// 문자열 텍스처 캐시. (원본 TextStringTextureCache, 글꼴 얼굴 등록, 글 재기, 문자열을 텍스처로 굽기)
+/// - Graphic 이 하나 든다. (get_text_string_texture_cache) 굽기(get_entry)는 GL 이 있어야 하고, 글꼴 등록과 재기와 래스터는 GL 없이 된다.
+///
+/// # 예제
+/// 글꼴을 올리고 글 재기
+/// ```rust
+/// use vanilla::core::textstringtexturecache::TextStringTextureCache;
+/// use vanilla::platform::find_fallback_font_file;
+///
+/// let mut text_string_texture_cache = TextStringTextureCache::new();
+/// assert!(text_string_texture_cache.register_font("GameFont", false, vec![0, 1, 2, 3]).is_err());
+/// if let Some(source) = find_fallback_font_file("A", 400, false, false) {
+/// 	let font_bytes = std::fs::read(&source.path).expect("font file");
+/// 	text_string_texture_cache.register_font("GameFont", false, font_bytes).expect("font");
+/// 	assert_eq!(text_string_texture_cache.get_font_face_count("gamefont"), 1);
+/// 	let text_metrics = text_string_texture_cache.measure_text("20px GameFont", "Hello");
+/// 	assert!(text_metrics.width > 0.0);
+/// }
+/// ```
+//==============================================================================
 pub struct TextStringTextureCache {
 	/// 이름(소문자) → 그 이름의 얼굴들. (원본 document.fonts)
 	font_family_table: HashMap<String, Vec<RegisteredFontFace>>,
@@ -377,6 +554,9 @@ pub struct TextStringTextureCache {
 impl TextStringTextureCache {
 	//==============================================================================
 	/// 생성.
+	///
+	/// # 돌려줌
+	/// 글꼴도 구운 문자열도 없는 캐시. (안티앨리어싱 켬, 다시 굽기 끔, 웹은 브라우저로 굽는다)
 	//==============================================================================
 	pub fn new() -> TextStringTextureCache {
 		TextStringTextureCache {
@@ -423,6 +603,9 @@ impl TextStringTextureCache {
 
 	//==============================================================================
 	/// 브라우저 Canvas2D 로 굽고 재는지. (웹은 원본처럼 늘 참, 데스크탑은 거짓)
+	///
+	/// # 돌려줌
+	/// 웹이면 true, 데스크탑이면 false.
 	//==============================================================================
 	pub fn is_browser_raster(&self) -> bool {
 		self.is_browser_raster
@@ -430,6 +613,14 @@ impl TextStringTextureCache {
 
 	//==============================================================================
 	/// 폰트 등록. (폰트 문자열의 이름으로 찾는다. 대소문자 구분 없음, 굵으면 굵기 700 얼굴, 아니면 400)
+	///
+	/// # 인자
+	/// - `family_name`: 폰트 문자열에서 쓸 이름. (앞뒤 빈칸과 따옴표는 뗀다)
+	/// - `is_bold`: true 면 굵기 700 얼굴, false 면 400 얼굴.
+	/// - `font_bytes`: 글꼴 파일 바이트. (ttf, otf, ttc 는 0 번 얼굴, woff, woff2 는 풀어서 읽는다)
+	///
+	/// # 돌려줌
+	/// 올렸으면 Ok. 글꼴을 읽지 못하면 Err(까닭) 이고 아무것도 바뀌지 않는다.
 	//==============================================================================
 	pub fn register_font(&mut self, family_name: &str, is_bold: bool, font_bytes: Vec<u8>) -> Result<(), String> {
 		self.register_font_face(family_name, FontFaceDescriptors::create_with_bold(is_bold), font_bytes)
@@ -440,6 +631,33 @@ impl TextStringTextureCache {
 	/// - 같은 이름에 같은 열쇠(source_key), 굵기, 기울기의 얼굴이 있으면 바꾼다. 없으면 맨 뒤(가장 먼저 그리는 자리)에 둔다.
 	///   set_font_face_order 로 차례를 정한 이름이면 그 차례에 맞춰 놓는다.
 	/// - set_rebake_text_on_font_load 로 켰으면 그 이름을 쓰는 폰트 문자열로 구웠고 이 얼굴의 글자 범위에 든 글자가 있는 문자열은 버린다. (다음에 그릴 때 이 얼굴로 다시 굽는다)
+	///
+	/// # 인자
+	/// - `family_name`: 이름. (앞뒤 빈칸과 따옴표는 떼고 대소문자는 가리지 않는다)
+	/// - `font_face_descriptors`: 얼굴의 굵기, 기울기, 글자 범위, 열쇠.
+	/// - `font_bytes`: 글꼴 파일 바이트. (ttf, otf, ttc 는 0 번 얼굴, woff, woff2 는 풀어서 읽는다)
+	///
+	/// # 돌려줌
+	/// 올렸으면 Ok. 글꼴을 읽지 못하면 Err(까닭) 이고 아무것도 바뀌지 않는다.
+	///
+	/// # 예제
+	/// 라틴 글자 범위 얼굴 올리고 지우기
+	/// ```rust
+	/// use vanilla::core::textstringtexturecache::TextStringTextureCache;
+	/// use vanilla::platform::find_fallback_font_file;
+	/// use vanilla::FontFaceDescriptors;
+	///
+	/// if let Some(source) = find_fallback_font_file("A", 400, false, false) {
+	/// 	let font_bytes = std::fs::read(&source.path).expect("font file");
+	/// 	let mut text_string_texture_cache = TextStringTextureCache::new();
+	/// 	let mut font_face_descriptors = FontFaceDescriptors::create_from_css("400", "normal", "U+0000-00FF");
+	/// 	font_face_descriptors.source_key = String::from("latin");
+	/// 	text_string_texture_cache.register_font_face("GameFont", font_face_descriptors, font_bytes).expect("font");
+	/// 	assert_eq!(text_string_texture_cache.get_font_face_count("GameFont"), 1);
+	/// 	assert!(text_string_texture_cache.unregister_font_face("GameFont", "latin"));
+	/// 	assert_eq!(text_string_texture_cache.get_font_face_count("GameFont"), 0);
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn register_font_face(&mut self, family_name: &str, font_face_descriptors: FontFaceDescriptors, font_bytes: Vec<u8>) -> Result<(), String> {
 		let font = Rc::new(load_font(font_bytes)?);
@@ -464,6 +682,13 @@ impl TextStringTextureCache {
 
 	//==============================================================================
 	/// 글꼴 얼굴 지우기. (원본 document.fonts.delete, 열쇠가 같은 얼굴 모두, 지운 것이 있으면 true)
+	///
+	/// # 인자
+	/// - `family_name`: 이름. (앞뒤 빈칸은 떼고 대소문자는 가리지 않는다)
+	/// - `source_key`: 지울 얼굴의 열쇠. (FontFaceDescriptors 의 source_key)
+	///
+	/// # 돌려줌
+	/// 지운 얼굴이 있으면 true.
 	//==============================================================================
 	pub fn unregister_font_face(&mut self, family_name: &str, source_key: &str) -> bool {
 		let family_key = create_family_key(family_name);
@@ -492,6 +717,10 @@ impl TextStringTextureCache {
 	/// 한 이름의 얼굴 차례 정하기. (얼굴 열쇠 목록, 뒤가 먼저 그린다. 원본 uifont 가 document.fonts 에서 빼고 차례대로 다시 더하는 것)
 	/// - 목록에 없는 얼굴은 목록의 얼굴보다 뒤로(나중에 그리게) 밀리지 않고 앞에 남는다. 아직 받지 않은 얼굴의 열쇠도 넣어 둘 수 있다. (받으면 그 자리에 놓인다)
 	/// - 차례가 바뀌면 그 이름으로 구운 문자열을 모두 버린다.
+	///
+	/// # 인자
+	/// - `family_name`: 이름. (앞뒤 빈칸은 떼고 대소문자는 가리지 않는다)
+	/// - `source_key_list`: 얼굴 열쇠 목록. (뒤가 먼저 그린다)
 	//==============================================================================
 	pub fn set_font_face_order(&mut self, family_name: &str, source_key_list: &[String]) {
 		let family_key = create_family_key(family_name);
@@ -575,6 +804,13 @@ impl TextStringTextureCache {
 
 	//==============================================================================
 	/// 기본 폰트 설정. (이름을 찾지 못한 폰트 문자열과 글자 대체에 쓴다, 굵으면 굵기 700 얼굴)
+	///
+	/// # 인자
+	/// - `is_bold`: true 면 굵기 700 얼굴, false 면 400 얼굴. (같은 굵기의 기울이지 않은 얼굴은 바꾼다)
+	/// - `font_bytes`: 글꼴 파일 바이트. (ttf, otf, ttc 는 0 번 얼굴, woff, woff2 는 풀어서 읽는다)
+	///
+	/// # 돌려줌
+	/// 설정했으면 Ok. (구운 문자열은 모두 버린다) 글꼴을 읽지 못하면 Err(까닭).
 	//==============================================================================
 	pub fn set_default_font(&mut self, is_bold: bool, font_bytes: Vec<u8>) -> Result<(), String> {
 		let font = Rc::new(load_font(font_bytes)?);
@@ -594,6 +830,12 @@ impl TextStringTextureCache {
 
 	//==============================================================================
 	/// 대체 폰트 추가. (앞 폰트들에 없는 글자를 찾는다)
+	///
+	/// # 인자
+	/// - `font_bytes`: 글꼴 파일 바이트. (ttf, otf, ttc 는 0 번 얼굴, woff, woff2 는 풀어서 읽는다)
+	///
+	/// # 돌려줌
+	/// 더했으면 Ok. (구운 문자열은 모두 버린다) 글꼴을 읽지 못하면 Err(까닭).
 	//==============================================================================
 	pub fn add_fallback_font(&mut self, font_bytes: Vec<u8>) -> Result<(), String> {
 		let font = Rc::new(load_font(font_bytes)?);
@@ -659,6 +901,9 @@ impl TextStringTextureCache {
 
 	//==============================================================================
 	/// 글자 안티앨리어싱 켬 / 끔. (원본 setTextAntialiasEnabled, 바꾼 다음 그리는 글자부터 그 방식으로 굽는다)
+	///
+	/// # 인자
+	/// - `value`: true 면 켠다. (기본 켬)
 	//==============================================================================
 	pub fn set_text_antialias_enabled(&mut self, value: bool) {
 		self.is_text_antialias_enabled = value;
@@ -666,6 +911,9 @@ impl TextStringTextureCache {
 
 	//==============================================================================
 	/// 글자 안티앨리어싱이 켜져 있는지. (원본 isTextAntialiasOn)
+	///
+	/// # 돌려줌
+	/// 켜져 있으면 true.
 	//==============================================================================
 	pub fn is_text_antialias_on(&self) -> bool {
 		self.is_text_antialias_enabled
@@ -673,6 +921,9 @@ impl TextStringTextureCache {
 
 	//==============================================================================
 	/// 글꼴 얼굴을 새로 올리면 그 얼굴의 글자로 구운 문자열을 버릴지 설정. (원본 EngineConfiguration.rebakeTextOnFontLoad, 엔진이 그래픽을 넘겨받을 때 정한다)
+	///
+	/// # 인자
+	/// - `is_rebake_text_on_font_load`: true 면 버린다. (기본 끔)
 	//==============================================================================
 	pub fn set_rebake_text_on_font_load(&mut self, is_rebake_text_on_font_load: bool) {
 		self.is_rebake_text_on_font_load = is_rebake_text_on_font_load;
@@ -680,6 +931,9 @@ impl TextStringTextureCache {
 
 	//==============================================================================
 	/// 글꼴을 등록한 횟수. (등록, 지우기, 차례, 기본 글꼴, 대체 글꼴. 재 둔 글 폭을 다시 잴지 가린다)
+	///
+	/// # 돌려줌
+	/// 등록한 횟수. (new 뒤 0 에서 늘기만 한다)
 	//==============================================================================
 	pub fn get_font_registration_count(&self) -> u64 {
 		self.font_registration_count.get()
@@ -689,6 +943,9 @@ impl TextStringTextureCache {
 	/// 시스템 글꼴 사슬 정하기. (데스크탑, 원본 SYSTEM_FONT_STRING 처럼 기본 폰트 뒤에 이름 차례로 찾는다)
 	/// - 켜면 폰트 문자열의 올리지 않은 이름도 운영체제 글꼴에서 찾는다. ("16px Arial" 이 시스템의 Arial 로 그려진다, 브라우저와 같다)
 	/// - 얼굴은 그 굵기와 기울기의 글자를 처음 그리거나 잴 때 읽는다.
+	///
+	/// # 인자
+	/// - `family_name_list`: 기본 폰트 뒤에 찾을 이름 차례. (대소문자는 가리지 않는다)
 	//==============================================================================
 	pub fn set_system_font_chain(&mut self, family_name_list: Vec<String>) {
 		{
@@ -704,6 +961,12 @@ impl TextStringTextureCache {
 	//==============================================================================
 	/// 시스템 글꼴 이름에 얼굴 후보 파일 더하기. (데스크탑, 그 이름을 사슬 맨 뒤에 둔다. 운영체제에서 찾지 않고 파일을 주는 경우)
 	/// - 얼굴 번호가 없으면 PostScript 이름, 그것도 없으면 청한 굵기와 기울기로 모음 안의 얼굴을 고른다. 가변 글꼴은 굵기를 축 값으로 만든다.
+	///
+	/// # 인자
+	/// - `family_name`: 시스템 글꼴 이름. (앞뒤 빈칸은 떼고 대소문자는 가리지 않는다)
+	/// - `weight`: 이 후보의 굵기. (CSS 굵기 1 ~ 1000)
+	/// - `is_italic`: 기울인 얼굴인지.
+	/// - `source`: 글꼴 파일과 얼굴. (같은 파일, 굵기, 기울기의 후보는 한 번만 든다)
 	//==============================================================================
 	pub fn add_system_font_candidate(&mut self, family_name: &str, weight: u16, is_italic: bool, source: FontFileSource) {
 		{
@@ -729,6 +992,9 @@ impl TextStringTextureCache {
 
 	//==============================================================================
 	/// 운영체제 대체 글꼴 켬 / 끔. (데스크탑, 켜면 어느 글꼴에도 없는 글자를 운영체제가 고른 글꼴로 그린다. 대체 글꼴 후보 파일이 있으면 그것이 먼저다)
+	///
+	/// # 인자
+	/// - `value`: true 면 켠다. (기본 끔)
 	//==============================================================================
 	pub fn set_system_font_fallback_enabled(&mut self, value: bool) {
 		self.system_font_state.borrow_mut().is_fallback_enabled = value;
@@ -739,6 +1005,9 @@ impl TextStringTextureCache {
 
 	//==============================================================================
 	/// 시스템 글꼴 사슬이나 후보가 있는지. (데스크탑)
+	///
+	/// # 돌려줌
+	/// 사슬에 찾은 이름이나 후보가 있는 이름이 있거나, 사슬을 켰고 이름이 하나라도 있으면 true.
 	//==============================================================================
 	pub fn has_system_font(&self) -> bool {
 		let system_font_state = self.system_font_state.borrow();
@@ -899,6 +1168,9 @@ impl TextStringTextureCache {
 	/// 대체 글꼴 후보 파일 더하기. (데스크탑, 원본 브라우저가 글꼴에 없는 글자를 시스템 글꼴로 그리는 자리)
 	/// - 바로 읽지 않는다. 등록된 어느 글꼴에도 없는 글자를 재거나 구울 때 앞의 후보부터 읽어 대체 폰트로 더한다. (큰 한중일 글꼴을 처음에 읽지 않게)
 	/// - 없는 파일, 읽지 못하는 파일은 넘긴다.
+	///
+	/// # 인자
+	/// - `font_path`: 글꼴 파일 경로. (더할 때 색 글리프 표가 있는지만 엿본다)
 	//==============================================================================
 	pub fn add_fallback_font_candidate(&mut self, font_path: std::path::PathBuf) {
 		let has_color_tables = peek_color_font_tables(&font_path);
@@ -1019,6 +1291,9 @@ impl TextStringTextureCache {
 
 	//==============================================================================
 	/// 기본 폰트가 있는지.
+	///
+	/// # 돌려줌
+	/// 기본 폰트 얼굴이 하나라도 있으면 true.
 	//==============================================================================
 	pub fn has_default_font(&self) -> bool {
 		!self.default_face_list.is_empty()
@@ -1026,6 +1301,12 @@ impl TextStringTextureCache {
 
 	//==============================================================================
 	/// 이름에 올린 얼굴 수. (그 이름이 없으면 0)
+	///
+	/// # 인자
+	/// - `family_name`: 이름. (앞뒤 빈칸은 떼고 대소문자는 가리지 않는다)
+	///
+	/// # 돌려줌
+	/// 얼굴 수.
 	//==============================================================================
 	pub fn get_font_face_count(&self, family_name: &str) -> usize {
 		self.font_family_table.get(&create_family_key(family_name)).map(|face_list| face_list.len()).unwrap_or(0)
@@ -1033,6 +1314,32 @@ impl TextStringTextureCache {
 
 	//==============================================================================
 	/// 문자열 측정. (문단 방향은 왼쪽에서 오른쪽, 원본 measureTextMetrics 도 방향을 주지 않는다)
+	///
+	/// # 인자
+	/// - `font_string`: 폰트 문자열. (Canvas2D font 꼴, parse_font_string)
+	/// - `text`: 잴 글.
+	///
+	/// # 돌려줌
+	/// 잰 값. (픽셀) 데스크탑에서 그릴 얼굴이 하나도 없으면 모두 0 이다.
+	///
+	/// # 예제
+	/// 같은 글은 한 번만 잰다
+	/// ```rust
+	/// use vanilla::core::textstringtexturecache::TextStringTextureCache;
+	/// use vanilla::platform::find_fallback_font_file;
+	///
+	/// if let Some(source) = find_fallback_font_file("A", 400, false, false) {
+	/// 	let font_bytes = std::fs::read(&source.path).expect("font file");
+	/// 	let mut text_string_texture_cache = TextStringTextureCache::new();
+	/// 	text_string_texture_cache.set_default_font(false, font_bytes).expect("font");
+	/// 	let small_metrics = text_string_texture_cache.measure_text("20px default", "abc");
+	/// 	text_string_texture_cache.measure_text("20px default", "abc");
+	/// 	assert_eq!(text_string_texture_cache.get_measure_count(), 1);
+	/// 	let large_metrics = text_string_texture_cache.measure_text("40px default", "abc");
+	/// 	assert!(large_metrics.width > small_metrics.width);
+	/// 	assert_eq!(text_string_texture_cache.get_measure_count(), 2);
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn measure_text(&self, font_string: &str, text: &str) -> TextMetrics {
 		// 글꼴이 새로 들어왔으면 잰 것을 비운다.
@@ -1092,6 +1399,9 @@ impl TextStringTextureCache {
 
 	//==============================================================================
 	/// 잰 글 수. (캐시에 든 것, 시험과 통계용)
+	///
+	/// # 돌려줌
+	/// 캐시에 든 잰 글 수. (넘치면 반을 버린다, 상한 2048)
 	//==============================================================================
 	pub fn get_measure_count(&self) -> usize {
 		self.measure_count.get()
@@ -1171,6 +1481,33 @@ impl TextStringTextureCache {
 
 	//==============================================================================
 	/// 구운 문자열 반환. (없으면 굽는다, direction 은 문단 방향. 원본 getEntry 의 textDirection)
+	///
+	/// # 인자
+	/// - `gl`: 텍스처를 만들 GL 컨텍스트.
+	/// - `text_draw_kind`: 굽는 방식.
+	/// - `text`: 구울 글.
+	/// - `font_string`: 폰트 문자열. (Canvas2D font 꼴, parse_font_string)
+	/// - `line_width`: 외곽선 두께. (논리 픽셀, Stroke 로 구울 때만 쓰지만 키에는 늘 든다)
+	/// - `bake_scale`: 굽는 배율. (글자 크기에 곱한 크기로 굽고, TextEntry 의 길이는 이것으로 나눈 값이다)
+	/// - `direction`: 문단 방향.
+	///
+	/// # 돌려줌
+	/// 구운 문자열. (같은 키면 캐시의 것) 글이 비었거나, 데스크탑에서 그릴 얼굴이 하나도 없거나, 텍스처를 만들지 못하면 None.
+	///
+	/// # 예제
+	/// 같은 키로 다시 부르면 굽지 않는다
+	/// ```rust,no_run
+	/// use vanilla::core::textstringtexturecache::{TextDrawKind, TextStringTextureCache};
+	/// use vanilla::ShapingDirection;
+	///
+	/// fn bake_outline(text_string_texture_cache: &mut TextStringTextureCache, gl: &glow::Context) {
+	/// 	let first_entry = text_string_texture_cache.get_entry(gl, TextDrawKind::Stroke, "Hello", "bold 20px default", 3.0, 1.5, ShapingDirection::LeftToRight);
+	/// 	let entry_count = text_string_texture_cache.get_entry_count();
+	/// 	let second_entry = text_string_texture_cache.get_entry(gl, TextDrawKind::Stroke, "Hello", "bold 20px default", 3.0, 1.5, ShapingDirection::LeftToRight);
+	/// 	assert_eq!(text_string_texture_cache.get_entry_count(), entry_count);
+	/// 	assert_eq!(first_entry.map(|entry| entry.texture), second_entry.map(|entry| entry.texture));
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn get_entry(&mut self, gl: &glow::Context, text_draw_kind: TextDrawKind, text: &str, font_string: &str, line_width: f32, bake_scale: f32, direction: ShapingDirection) -> Option<TextEntry> {
 		if text.is_empty() {
@@ -1276,6 +1613,16 @@ impl TextStringTextureCache {
 	//==============================================================================
 	/// 글의 모양만 래스터로 받기. (텍스처로 올리지 않는다, 그림자를 깐 글처럼 따로 굽는 쪽이 쓴다)
 	/// - 웹은 원본처럼 브라우저 Canvas2D 로 받는다. 데스크탑에서 글꼴이 하나도 없으면 None.
+	///
+	/// # 인자
+	/// - `text`: 글.
+	/// - `font_string`: 폰트 문자열. (Canvas2D font 꼴, parse_font_string)
+	/// - `bake_scale`: 굽는 배율. (글자 크기에 곱한다)
+	/// - `padding`: 가장자리 여백. (픽셀, 1 보다 작으면 1)
+	/// - `direction`: 문단 방향.
+	///
+	/// # 돌려줌
+	/// 래스터. 글이 비었거나 데스크탑에서 그릴 얼굴이 하나도 없으면 None.
 	//==============================================================================
 	pub fn rasterize_text(&self, text: &str, font_string: &str, bake_scale: f32, padding: i32, direction: ShapingDirection) -> Option<TextRaster> {
 		if text.is_empty() {
@@ -1311,6 +1658,32 @@ impl TextStringTextureCache {
 	//==============================================================================
 	/// 글리프 하나 래스터. (글자 아틀라스가 쓴다, 글리프 번호는 글자로 찾는다. 웹은 브라우저 Canvas2D 로, 데스크탑에서 글꼴이 하나도 없으면 None)
 	/// - 돌려주는 것: (래스터, 전진폭, 글꼴 위 길이, 글꼴 아래 길이) 길이 단위는 픽셀.
+	///
+	/// # 인자
+	/// - `character`: 글자 묶음 하나. (결합 부호가 붙어 여러 글리프가 되어도 한 장에 모은다)
+	/// - `font_string`: 폰트 문자열. (Canvas2D font 꼴, parse_font_string)
+	///
+	/// # 돌려줌
+	/// (래스터, 전진폭, 글꼴 위 길이, 글꼴 아래 길이). 그릴 글리프가 없으면(빈칸) 빈 래스터. 데스크탑에서 그릴 얼굴이 하나도 없으면 None.
+	///
+	/// # 예제
+	/// 글자 하나의 래스터와 전진폭
+	/// ```rust
+	/// use vanilla::core::textstringtexturecache::TextStringTextureCache;
+	/// use vanilla::platform::find_fallback_font_file;
+	///
+	/// if let Some(source) = find_fallback_font_file("A", 400, false, false) {
+	/// 	let font_bytes = std::fs::read(&source.path).expect("font file");
+	/// 	let mut text_string_texture_cache = TextStringTextureCache::new();
+	/// 	text_string_texture_cache.set_default_font(false, font_bytes).expect("font");
+	/// 	let (glyph_raster, advance_width, font_ascent, _) = text_string_texture_cache.rasterize_character("A", "32px default").expect("glyph");
+	/// 	assert!(glyph_raster.width > 0 && glyph_raster.height > 0);
+	/// 	assert!(advance_width > 0.0 && font_ascent > 0.0);
+	/// 	let (space_raster, space_advance_width, _, _) = text_string_texture_cache.rasterize_character(" ", "32px default").expect("space");
+	/// 	assert_eq!(space_raster.width, 0);
+	/// 	assert!(space_advance_width > 0.0);
+	/// }
+	/// ```
 	//==============================================================================
 	pub fn rasterize_character(&self, character: &str, font_string: &str) -> Option<(textshaping::GlyphRaster, f32, f32, f32)> {
 		let font_description = parse_font_string(font_string);
@@ -1397,6 +1770,9 @@ impl TextStringTextureCache {
 
 	//==============================================================================
 	/// 구운 문자열 수.
+	///
+	/// # 돌려줌
+	/// 캐시에 든 구운 문자열 수. (상한 512)
 	//==============================================================================
 	pub fn get_entry_count(&self) -> usize {
 		self.entry_count
@@ -1601,6 +1977,9 @@ impl TextStringTextureCache {
 }
 
 impl Default for TextStringTextureCache {
+	//==============================================================================
+	/// 기본값. (new 와 같다)
+	//==============================================================================
 	fn default() -> TextStringTextureCache {
 		TextStringTextureCache::new()
 	}
@@ -2090,6 +2469,27 @@ fn find_post_script_face_index(font_bytes: &[u8], post_script_name: &str) -> Opt
 ///   웹은 절대 길이 밖의 크기를 브라우저 캔버스에 넣고 다시 읽어 받는다. (platform/web/systemfont.rs 의 resolve_font_size)
 /// - 크기 뒤는 쉼표로 이은 이름 목록이다. 따옴표 이름은 따옴표를 떼고, 따옴표 없는 이름은 낱말을 빈칸 하나로 잇는다. 그리는 쪽이 목록의 앞 이름부터 찾는다.
 /// - 틀린 문자열(크기나 이름이 없음, 음수 크기, 모르는 낱말)은 캔버스의 처음 값 "10px sans-serif" 로 본다.
+///
+/// # 인자
+/// - `font_string`: 폰트 문자열.
+///
+/// # 돌려줌
+/// 해석 결과. 틀린 문자열이면 크기 10, 굵기 400, 이름 sans-serif.
+///
+/// # 예제
+/// CSS 단위, 줄높이, 틀린 문자열
+/// ```rust
+/// use vanilla::core::textstringtexturecache::parse_font_string;
+///
+/// assert_eq!(parse_font_string("12pt a").font_size, 16.0);
+/// assert_eq!(parse_font_string("1in a").font_size, 96.0);
+/// let line_height_description = parse_font_string("bold 16px/20px a, b");
+/// assert_eq!(line_height_description.font_size, 16.0);
+/// assert_eq!(line_height_description.family_name_list, vec!["a", "b"]);
+/// let invalid_description = parse_font_string("16px");
+/// assert_eq!(invalid_description.font_size, 10.0);
+/// assert_eq!(invalid_description.family_name, "sans-serif");
+/// ```
 //==============================================================================
 pub fn parse_font_string(font_string: &str) -> FontDescription {
 	parse_font_string_strict(font_string).unwrap_or_else(|| FontDescription {
@@ -2252,6 +2652,10 @@ thread_local! {
 
 //==============================================================================
 /// 폰트 문자열의 뷰포트 단위(vw, vh 같은)가 대는 창 크기 정하기. (논리 픽셀, 원본 window.innerWidth / innerHeight 자리. 데스크탑 플랫폼이 창 크기가 바뀔 때 부른다)
+///
+/// # 인자
+/// - `width`: 창 너비. (논리 픽셀)
+/// - `height`: 창 높이. (논리 픽셀)
 //==============================================================================
 pub fn set_font_viewport_size(width: f32, height: f32) {
 	FONT_VIEWPORT_SIZE.with(|viewport_size| viewport_size.set((width, height)));

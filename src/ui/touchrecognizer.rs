@@ -31,6 +31,44 @@ const DELAY_PRESS_SECONDS: f32 = 0.15;
 
 //==============================================================================
 /// 터치 인식기.
+///
+/// # 예제
+/// 씬에서 노드 갱신 뒤 터치를 넘기기
+/// ```rust,no_run
+/// use vanilla::{Engine, EngineConfiguration, Scene, SceneBase, TouchRecognizer};
+///
+/// struct MainScene {
+/// 	scene_base: SceneBase,
+/// 	touch_recognizer: TouchRecognizer,
+/// }
+///
+/// impl Scene for MainScene {
+/// 	fn get_scene_base(&self) -> &SceneBase {
+/// 		&self.scene_base
+/// 	}
+///
+/// 	fn get_scene_base_mut(&mut self) -> &mut SceneBase {
+/// 		&mut self.scene_base
+/// 	}
+///
+/// 	fn tick(&mut self, engine: &mut Engine, time_delta: f32) {
+/// 		self.scene_base.get_node_tree_mut().tick(engine, time_delta);
+/// 		self.touch_recognizer.tick_touch(self.scene_base.get_node_tree_mut(), engine);
+/// 		self.scene_base.tick_tweens(time_delta);
+/// 	}
+/// }
+///
+/// fn main() {
+/// 	let engine = Engine::new(EngineConfiguration::new());
+/// 	let main_scene = MainScene {
+/// 		scene_base: SceneBase::new(),
+/// 		touch_recognizer: TouchRecognizer::new(),
+/// 	};
+/// 	if let Err(error) = engine.run(Box::new(main_scene)) {
+/// 		eprintln!("{}", error);
+/// 	}
+/// }
+/// ```
 //==============================================================================
 pub struct TouchRecognizer {
 	target_id: Option<NodeId>,
@@ -47,6 +85,9 @@ pub struct TouchRecognizer {
 impl TouchRecognizer {
 	//==============================================================================
 	/// 생성.
+	///
+	/// # 돌려줌
+	/// 아무것도 누르지 않은 새 인식기.
 	//==============================================================================
 	pub fn new() -> TouchRecognizer {
 		TouchRecognizer {
@@ -63,6 +104,9 @@ impl TouchRecognizer {
 
 	//==============================================================================
 	/// 이번 프레임의 휠을 받아 쓴 컴포넌트(스크롤 칸 등)가 있었는지. (tick_touch 뒤에 읽는다)
+	///
+	/// # 돌려줌
+	/// 받아 쓴 컴포넌트가 있었거나 mark_wheel_handled 를 불렀으면 true.
 	//==============================================================================
 	pub fn is_wheel_handled(&self) -> bool {
 		self.is_wheel_handled
@@ -70,6 +114,9 @@ impl TouchRecognizer {
 
 	//==============================================================================
 	/// 지금 누름을 받는 노드. (드래그를 넘겼으면 스크롤 뷰 노드)
+	///
+	/// # 돌려줌
+	/// 누름을 받는 노드. 누르고 있지 않거나 누른 자리에 누를 수 있는 노드가 없으면 None.
 	//==============================================================================
 	pub fn get_touch_target(&self) -> Option<NodeId> {
 		if self.is_dragging {
@@ -80,6 +127,9 @@ impl TouchRecognizer {
 
 	//==============================================================================
 	/// 누르고 있는 중인지. (누름부터 뗌이나 취소까지)
+	///
+	/// # 돌려줌
+	/// 누르고 있으면 true. (누른 자리에 노드가 없어도 true)
 	//==============================================================================
 	pub fn is_touching(&self) -> bool {
 		self.is_touching
@@ -87,6 +137,10 @@ impl TouchRecognizer {
 
 	//==============================================================================
 	/// 터치 갱신. (SceneBase::tick_touch 자리. 휠 → 미룬 누름 → 누름 / 이동 / 뗌 / 취소)
+	///
+	/// # 인자
+	/// - `node_tree`: 터치를 보낼 노드 트리.
+	/// - `engine`: 입력과 시간을 읽고 컴포넌트에 넘길 엔진.
 	//==============================================================================
 	pub fn tick_touch(&mut self, node_tree: &mut NodeTree, engine: &Engine) {
 		self.tick_wheel(node_tree, engine);
@@ -95,6 +149,13 @@ impl TouchRecognizer {
 
 	//==============================================================================
 	/// 휠 갱신. (누름과 상관없이 그 자리의 가장 앞 스크롤 칸이나 누를 수 있는 노드부터 부모 쪽으로, NodeTree::dispatch_wheel_at, 받아 썼으면 true)
+	///
+	/// # 인자
+	/// - `node_tree`: 휠을 보낼 노드 트리.
+	/// - `engine`: 입력 자리와 휠 양을 읽을 엔진.
+	///
+	/// # 돌려줌
+	/// 그 자리의 컴포넌트가 휠을 받아 썼으면 true. (이번 프레임에 휠이 없으면 false)
 	//==============================================================================
 	pub fn tick_wheel(&mut self, node_tree: &mut NodeTree, engine: &Engine) -> bool {
 		let input_manager = engine.get_input_manager();
@@ -118,6 +179,10 @@ impl TouchRecognizer {
 
 	//==============================================================================
 	/// 누름 갱신. (미룬 누름 → 누름 / 이동 / 뗌 / 취소)
+	///
+	/// # 인자
+	/// - `node_tree`: 터치를 보낼 노드 트리.
+	/// - `engine`: 입력과 시간을 읽고 컴포넌트에 넘길 엔진. (미룬 누름은 배율을 곱하지 않은 프레임 간격으로 센다)
 	//==============================================================================
 	pub fn tick_pointer(&mut self, node_tree: &mut NodeTree, engine: &Engine) {
 		let elapsed_seconds = engine.get_time_manager().get_unscale_delta_time();
@@ -145,6 +210,12 @@ impl TouchRecognizer {
 
 	//==============================================================================
 	/// 미룬 누름의 남은 시간을 줄이고, 다 되면 누른 노드에 누름을 보낸다. (원본 setTimeout 자리)
+	/// - 그 사이 드래그로 넘어갔으면 보내지 않는다. 미룬 누름이 없으면 아무 일도 없다.
+	///
+	/// # 인자
+	/// - `node_tree`: 누름을 보낼 노드 트리.
+	/// - `engine`: 컴포넌트에 넘길 엔진.
+	/// - `elapsed_seconds`: 지난 시간. (초, 미루는 시간은 0.15 초)
 	//==============================================================================
 	pub fn update_press_delay(&mut self, node_tree: &mut NodeTree, engine: &Engine, elapsed_seconds: f32) {
 		let remain_seconds = match self.press_delay_remain_seconds {
@@ -171,6 +242,12 @@ impl TouchRecognizer {
 
 	//==============================================================================
 	/// 터치 누름. (맞은 노드와 그 부모 쪽 스크롤 뷰를 찾아 두고, 스크롤 뷰가 있으면 누름을 미룬다)
+	/// - 스크롤 뷰가 없으면 맞은 노드에 바로 누름을 보낸다.
+	///
+	/// # 인자
+	/// - `node_tree`: 맞은 노드를 찾고 누름을 보낼 노드 트리.
+	/// - `engine`: 컴포넌트에 넘길 엔진.
+	/// - `view_input_position`: 누른 자리. (뷰 좌표)
 	//==============================================================================
 	pub fn touch_press(&mut self, node_tree: &mut NodeTree, engine: &Engine, view_input_position: Vector2) {
 		let target_id = node_tree.find_topmost_interactable_node(view_input_position);
@@ -204,6 +281,51 @@ impl TouchRecognizer {
 	/// - 드래그를 넘겼으면 스크롤 뷰에만 보낸다.
 	/// - 스크롤 뷰가 있고 임계를 넘으면 넘긴다: 미룬 누름은 버리고(이미 보냈으면 누른 노드에 취소), 스크롤 뷰에 누름(처음 자리) → 이동.
 	/// - 그 밖에는 누른 노드에 이동. (누름을 아직 보내지 않았으면 이동도 보내지 않는다)
+	/// - set_passes_cross_axis_drag(true) 인 스크롤 뷰에서 스크롤하지 않는 축으로 더 끈 손가락은 넘기지 않고, 미룬 누름이 있으면 바로 보낸다.
+	///
+	/// # 인자
+	/// - `node_tree`: 이동을 보낼 노드 트리.
+	/// - `engine`: 컴포넌트에 넘길 엔진.
+	/// - `view_input_position`: 손가락 자리. (뷰 좌표, 처음 누른 자리에서 가로나 세로로 10 을 넘게 움직이면 드래그로 본다)
+	///
+	/// # 예제
+	/// 스크롤 칸 안의 단추 위에서 끌면 스크롤 칸으로 넘기기
+	/// ```rust
+	/// use std::cell::Cell;
+	/// use std::rc::Rc;
+	/// use vanilla::{ComponentContext, Engine, EngineConfiguration, NodeTree, Paint, Pivot, TouchRecognizer, UIButton, UIScrollView, Vector2};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let scroll_id = node_tree.create_child(root_id, "Scroll");
+	/// node_tree[scroll_id].set_pivot(Pivot::TOP_LEFT);
+	/// node_tree[scroll_id].set_content_size(Vector2::create(200.0, 100.0));
+	/// let scroll_view = node_tree.add_component(scroll_id, UIScrollView::new()).expect("scroll view");
+	/// scroll_view.set_scroll_content_size(Vector2::create(200.0, 400.0));
+	/// let content_id = scroll_view.get_content().expect("content");
+	/// let button_id = node_tree.create_child(content_id, "Row");
+	/// node_tree[button_id].set_pivot(Pivot::TOP_LEFT);
+	/// node_tree[button_id].set_content_size(Vector2::create(200.0, 40.0));
+	/// node_tree[button_id].add_component(Paint::new());
+	/// let click_count = Rc::new(Cell::new(0));
+	/// let click_count_for_event = click_count.clone();
+	/// let button = node_tree.add_component(button_id, UIButton::new()).expect("button");
+	/// button.set_click_event(Box::new(move |_button: &mut UIButton, _context: &mut ComponentContext| {
+	/// 	click_count_for_event.set(click_count_for_event.get() + 1);
+	/// }));
+	///
+	/// let mut touch_recognizer = TouchRecognizer::new();
+	/// touch_recognizer.touch_press(&mut node_tree, &engine, Vector2::create(50.0, 30.0));
+	/// touch_recognizer.update_press_delay(&mut node_tree, &engine, 0.2);
+	/// touch_recognizer.touch_move(&mut node_tree, &engine, Vector2::create(50.0, 0.0));
+	/// assert_eq!(touch_recognizer.get_touch_target(), Some(scroll_id));
+	/// node_tree.tick(&engine, 0.016);
+	/// let scroll_offset = node_tree[scroll_id].get_component::<UIScrollView>().expect("scroll view").get_scroll_offset();
+	/// assert_eq!(scroll_offset, Vector2::create(0.0, -30.0));
+	/// touch_recognizer.touch_release(&mut node_tree, &engine, Vector2::create(50.0, 0.0));
+	/// assert_eq!(click_count.get(), 0);
+	/// ```
 	//==============================================================================
 	pub fn touch_move(&mut self, node_tree: &mut NodeTree, engine: &Engine, view_input_position: Vector2) {
 		if self.is_dragging {
@@ -266,6 +388,49 @@ impl TouchRecognizer {
 
 	//==============================================================================
 	/// 터치 뗌. (드래그면 스크롤 뷰에, 아니면 누른 노드에. 미룬 누름이 남았으면 그것을 먼저 보낸다)
+	/// - 보낸 뒤 추적 상태를 비운다.
+	///
+	/// # 인자
+	/// - `node_tree`: 뗌을 보낼 노드 트리.
+	/// - `engine`: 컴포넌트에 넘길 엔진.
+	/// - `view_input_position`: 뗀 자리. (뷰 좌표)
+	///
+	/// # 예제
+	/// 스크롤 칸 안의 단추를 짧게 톡 치기
+	/// ```rust
+	/// use std::cell::Cell;
+	/// use std::rc::Rc;
+	/// use vanilla::{ComponentContext, Engine, EngineConfiguration, NodeTree, Paint, Pivot, TouchRecognizer, UIButton, UIScrollView, Vector2};
+	///
+	/// let engine = Engine::new(EngineConfiguration::new());
+	/// let mut node_tree = NodeTree::new();
+	/// let root_id = node_tree.get_root_id();
+	/// let scroll_id = node_tree.create_child(root_id, "Scroll");
+	/// node_tree[scroll_id].set_pivot(Pivot::TOP_LEFT);
+	/// node_tree[scroll_id].set_content_size(Vector2::create(200.0, 100.0));
+	/// let scroll_view = node_tree.add_component(scroll_id, UIScrollView::new()).expect("scroll view");
+	/// scroll_view.set_scroll_content_size(Vector2::create(200.0, 400.0));
+	/// let content_id = scroll_view.get_content().expect("content");
+	/// let button_id = node_tree.create_child(content_id, "Row");
+	/// node_tree[button_id].set_pivot(Pivot::TOP_LEFT);
+	/// node_tree[button_id].set_content_size(Vector2::create(200.0, 40.0));
+	/// node_tree[button_id].add_component(Paint::new());
+	/// let click_count = Rc::new(Cell::new(0));
+	/// let click_count_for_event = click_count.clone();
+	/// let button = node_tree.add_component(button_id, UIButton::new()).expect("button");
+	/// button.set_click_event(Box::new(move |_button: &mut UIButton, _context: &mut ComponentContext| {
+	/// 	click_count_for_event.set(click_count_for_event.get() + 1);
+	/// }));
+	///
+	/// let mut touch_recognizer = TouchRecognizer::new();
+	/// let tap_position = Vector2::create(50.0, 20.0);
+	/// touch_recognizer.touch_press(&mut node_tree, &engine, tap_position);
+	/// assert_eq!(touch_recognizer.find_ancestor_scroll_view(&node_tree, Some(button_id)), Some(scroll_id));
+	/// assert_eq!(touch_recognizer.get_touch_target(), Some(button_id));
+	/// touch_recognizer.touch_release(&mut node_tree, &engine, tap_position);
+	/// assert_eq!(click_count.get(), 1);
+	/// assert!(!touch_recognizer.is_touching());
+	/// ```
 	//==============================================================================
 	pub fn touch_release(&mut self, node_tree: &mut NodeTree, engine: &Engine, view_input_position: Vector2) {
 		if self.is_dragging {
@@ -287,6 +452,12 @@ impl TouchRecognizer {
 
 	//==============================================================================
 	/// 터치 취소. (미룬 누름이 남았으면 누른 노드에는 취소를 보내지 않는다)
+	/// - 보낸 뒤 추적 상태를 비운다.
+	///
+	/// # 인자
+	/// - `node_tree`: 취소를 보낼 노드 트리.
+	/// - `engine`: 컴포넌트에 넘길 엔진.
+	/// - `view_input_position`: 취소된 자리. (뷰 좌표)
 	//==============================================================================
 	pub fn touch_cancel(&mut self, node_tree: &mut NodeTree, engine: &Engine, view_input_position: Vector2) {
 		if self.is_dragging {
@@ -318,6 +489,13 @@ impl TouchRecognizer {
 	//==============================================================================
 	/// 노드의 부모 쪽에서 UIScrollView(또는 UISnapScrollView)가 붙은 가장 가까운 노드. (없으면 None)
 	/// - 누른 노드가 스크롤바면 자기가 다루는 스크롤 뷰는 빼고 찾는다. (스크롤바 드래그가 그 스크롤 뷰로 넘어가면 안 된다)
+	///
+	/// # 인자
+	/// - `node_tree`: 찾을 노드 트리.
+	/// - `target_id`: 누른 노드. (자신은 보지 않고 부모부터 본다)
+	///
+	/// # 돌려줌
+	/// 가장 가까운 스크롤 뷰 노드. target_id 가 None 이거나 찾지 못하면 None.
 	//==============================================================================
 	pub fn find_ancestor_scroll_view(&self, node_tree: &NodeTree, target_id: Option<NodeId>) -> Option<NodeId> {
 		let target_id = target_id?;
@@ -335,6 +513,9 @@ impl TouchRecognizer {
 }
 
 impl Default for TouchRecognizer {
+	//==============================================================================
+	/// 기본값. (TouchRecognizer::new 와 같다)
+	//==============================================================================
 	fn default() -> TouchRecognizer {
 		TouchRecognizer::new()
 	}

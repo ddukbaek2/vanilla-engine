@@ -13,9 +13,7 @@
 //!   ```
 //! - 원본과 다른 점:
 //!   - 원본은 Sprite 를 상속한다. 러스트 판은 Sprite 를 품고 Deref / DerefMut 로 Sprite 함수(set_image, set_image_rect, set_color ...)를 그대로 부르게 한다.
-//!   ```text
-//!     그래서 get_component::<Sprite>() 로는 찾지 못하고 get_component::<ShaderSprite>() 로 찾는다.
-//!   ```
+//!     그래서 `get_component::<Sprite>()` 로는 찾지 못하고 `get_component::<ShaderSprite>()` 로 찾는다.
 //!   - 효과는 문자열 대신 ShaderSpriteEffect 열거형이다. (원본 문자열 이름은 get_name / from_name)
 //!   - 효과 프로그램 캐시는 원본의 컨텍스트별 WeakMap 대신 Graphic.resolve_shader_program 이 든다.
 //!   - 프로그램 만들기에 실패하면 원본은 예외를 던지고, 러스트 판은 한 번 알리고 효과 없이 Sprite 로 그린다.
@@ -39,61 +37,111 @@ use std::rc::Rc;
 //==============================================================================
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ShaderSpriteEffect {
+	/// 효과 없음. (Sprite 와 같이 그리고 효과 없는 것끼리 묶어 그린다)
 	None,
-	/// --- 색 ---
+	// --- 색 ---
+	/// 실루엣을 단색으로 덮음. (피격 섬광: progress = 세기, color = 덮을 색)
 	Flash,         // 실루엣을 단색으로 덮음. (피격 섬광: progress = 세기, color = 덮을 색)
+	/// 실루엣 단색. (progress = 세기, color = 색: 그림자 / 잔상)
 	Silhouette,    // 실루엣 단색. (progress = 세기, color = 색: 그림자 / 잔상)
+	/// 곱셈 틴트. (progress = 세기, color = 곱할 색)
 	Colorize,      // 곱셈 틴트. (progress = 세기, color = 곱할 색)
+	/// 무채색. (progress = 세기, color = 틴트)
 	Grayscale,     // 무채색. (progress = 세기, color = 틴트)
+	/// 세피아.
 	Sepia,         // 세피아.
+	/// 색 반전.
 	Invert,        // 색 반전.
+	/// 색상 회전. (progress 0 → 1 = 0 → 360도)
 	HueShift,      // 색상 회전. (progress 0 → 1 = 0 → 360도)
+	/// 대비 / 채도 / 밝기. (parameters = `[대비, 채도, 밝기]`, progress = 적용 비율)
 	ColorAdjust,   // 대비 / 채도 / 밝기. (parameters = [대비, 채도, 밝기], progress = 적용 비율)
+	/// 포스터화. (parameters = `[단계 수]`)
 	Posterize,     // 포스터화. (parameters = [단계 수])
+	/// 흑백 문턱. (parameters = `[문턱]`)
 	Threshold,     // 흑백 문턱. (parameters = [문턱])
+	/// 밝기를 두 색 사이로 매핑. (parameters.xyz = 어두운 색, color = 밝은 색)
 	GradientMap,   // 밝기를 두 색 사이로 매핑. (parameters.xyz = 어두운 색, color = 밝은 색)
-	/// --- 외곽 ---
+	// --- 외곽 ---
+	/// 실루엣 바깥 외곽선. (color = 선 색, parameters = `[두께 픽셀]`)
 	Outline,       // 실루엣 바깥 외곽선. (color = 선 색, parameters = [두께 픽셀])
+	/// 실루엣 안쪽 외곽선. (color = 선 색, parameters = `[두께 픽셀]`)
 	InnerOutline,  // 실루엣 안쪽 외곽선. (color = 선 색, parameters = [두께 픽셀])
+	/// 바깥 발광. (color = 빛 색, parameters = `[반지름 픽셀]`)
 	Glow,          // 바깥 발광. (color = 빛 색, parameters = [반지름 픽셀])
+	/// 안쪽 발광. (color = 빛 색, parameters = `[반지름 픽셀]`)
 	InnerGlow,     // 안쪽 발광. (color = 빛 색, parameters = [반지름 픽셀])
+	/// 드롭 섀도. (color = 그림자 색, parameters = `[오프셋 x 픽셀, 오프셋 y 픽셀]`)
 	Shadow,        // 드롭 섀도. (color = 그림자 색, parameters = [오프셋 x 픽셀, 오프셋 y 픽셀])
+	/// 윤곽 검출. (color = 선 색)
 	EdgeDetect,    // 윤곽 검출. (color = 선 색)
+	/// 엠보스.
 	Emboss,        // 엠보스.
+	/// 샤픈.
 	Sharpen,       // 샤픈.
-	/// --- 흐림 ---
+	// --- 흐림 ---
+	/// 가우시안 블러. (parameters = `[반지름 픽셀]`)
 	Blur,          // 가우시안 블러. (parameters = [반지름 픽셀])
+	/// 방향 블러. (parameters = `[방향 x, 방향 y, 길이 픽셀]`)
 	MotionBlur,    // 방향 블러. (parameters = [방향 x, 방향 y, 길이 픽셀])
+	/// 중심 방사 블러. (parameters = `[길이 0 ~ 1]`)
 	RadialBlur,    // 중심 방사 블러. (parameters = [길이 0 ~ 1])
-	/// --- 왜곡 ---
+	// --- 왜곡 ---
+	/// 가로 물결 왜곡. (parameters = `[빈도, 속도, 진폭]`)
 	Wave,          // 가로 물결 왜곡. (parameters = [빈도, 속도, 진폭])
+	/// 깃발 펄럭임. (parameters = `[빈도, 속도, 진폭]`)
 	Flag,          // 깃발 펄럭임. (parameters = [빈도, 속도, 진폭])
+	/// 중심 파문. (parameters = `[빈도, 속도, 진폭]`)
 	Ripple,        // 중심 파문. (parameters = [빈도, 속도, 진폭])
+	/// 아지랑이. (parameters = `[노이즈 배율, 속도, 진폭]`)
 	HeatHaze,      // 아지랑이. (parameters = [노이즈 배율, 속도, 진폭])
+	/// 볼록 / 오목. (parameters = `[세기: 음수면 오목]`)
 	Bulge,         // 볼록 / 오목. (parameters = [세기: 음수면 오목])
+	/// 소용돌이. (parameters = `[회전 수]`)
 	Swirl,         // 소용돌이. (parameters = [회전 수])
+	/// 좌우 대칭. (parameters = `[0 가로 / 1 세로]`)
 	Mirror,        // 좌우 대칭. (parameters = [0 가로 / 1 세로])
+	/// 만화경. (parameters = `[조각 수]`)
 	Kaleidoscope,  // 만화경. (parameters = [조각 수])
+	/// 흔들림. (parameters = `[진폭 픽셀, 초당 변화]`)
 	Jitter,        // 흔들림. (parameters = [진폭 픽셀, 초당 변화])
+	/// 모자이크. (parameters = `[가장 거친 블록 수]`)
 	Pixelate,      // 모자이크. (parameters = [가장 거친 블록 수])
+	/// 가로 줄 어긋남 + 색 분리. (parameters = `[줄 수, 초당 변화, 어긋남 폭]`)
 	Glitch,        // 가로 줄 어긋남 + 색 분리. (parameters = [줄 수, 초당 변화, 어긋남 폭])
+	/// 색수차. (parameters = `[분리 픽셀]`)
 	Chromatic,     // 색수차. (parameters = [분리 픽셀])
-	/// --- 화면 무늬 ---
+	// --- 화면 무늬 ---
+	/// 주사선 + 틴트 + 깜빡임. (color = 틴트, parameters = `[주사선 수, 흐르는 속도]`)
 	Hologram,      // 주사선 + 틴트 + 깜빡임. (color = 틴트, parameters = [주사선 수, 흐르는 속도])
+	/// 주사선. (parameters = `[주사선 수]`)
 	Scanlines,     // 주사선. (parameters = [주사선 수])
+	/// 낡은 필름. (세피아 + 그레인 + 스크래치 + 깜빡임)
 	OldFilm,       // 낡은 필름. (세피아 + 그레인 + 스크래치 + 깜빡임)
+	/// 비네트. (color = 가장자리 색, parameters = `[시작, 끝]`)
 	Vignette,      // 비네트. (color = 가장자리 색, parameters = [시작, 끝])
+	/// 대각선 하이라이트 띠가 지나감. (color = 띠 색, parameters = `[띠 폭]`)
 	Shine,         // 대각선 하이라이트 띠가 지나감. (color = 띠 색, parameters = [띠 폭])
-	/// --- 사라짐 / 드러남 (progress 0 → 1) ---
+	// --- 사라짐 / 드러남 (progress 0 → 1) ---
+	/// 노이즈로 타 들어가며 사라짐. (color = 가장자리 색, parameters = `[노이즈 배율, 가장자리 폭]`)
 	Dissolve,      // 노이즈로 타 들어가며 사라짐. (color = 가장자리 색, parameters = [노이즈 배율, 가장자리 폭])
+	/// 불에 타듯 사라짐. (안쪽 밝은 띠 + 바깥 그을음, parameters = `[노이즈 배율, 띠 폭]`)
 	Burn,          // 불에 타듯 사라짐. (안쪽 밝은 띠 + 바깥 그을음, parameters = [노이즈 배율, 띠 폭])
+	/// 노이즈 알파 페이드. (parameters = `[노이즈 배율, 부드러움]`)
 	NoiseFade,     // 노이즈 알파 페이드. (parameters = [노이즈 배율, 부드러움])
+	/// 블록 단위로 사라짐. (parameters = `[블록 수]`)
 	PixelDissolve, // 블록 단위로 사라짐. (parameters = [블록 수])
+	/// 방향 와이프로 드러남. (parameters = `[방향 x, 방향 y, 부드러움]`)
 	Wipe,          // 방향 와이프로 드러남. (parameters = [방향 x, 방향 y, 부드러움])
+	/// 원형 아이리스로 드러남. (parameters = `[중심 x, 중심 y, 부드러움]`)
 	Iris,          // 원형 아이리스로 드러남. (parameters = [중심 x, 중심 y, 부드러움])
+	/// 마름모 와이프. (parameters = `[부드러움]`)
 	DiamondWipe,   // 마름모 와이프. (parameters = [부드러움])
+	/// 시계 방향 와이프. (parameters = `[부드러움]`)
 	ClockWipe,     // 시계 방향 와이프. (parameters = [부드러움])
+	/// 블라인드. (parameters = `[줄 수, 부드러움]`)
 	Blinds,        // 블라인드. (parameters = [줄 수, 부드러움])
+	/// 체커 보드. (parameters = `[칸 수]`)
 	CheckerWipe,   // 체커 보드. (parameters = [칸 수])
 }
 
@@ -708,6 +756,9 @@ const PROGRAM_GROUP_NAME: &str = "ShaderSprite";
 impl ShaderSpriteEffect {
 	//==============================================================================
 	/// 원본 이름 반환. ("dissolve" 같은 문자열)
+	///
+	/// # 돌려줌
+	/// 원본 효과 이름. (camelCase, 없음은 "none")
 	//==============================================================================
 	pub fn get_name(&self) -> &'static str {
 		EFFECT_NAME_TABLE[*self as usize].1
@@ -715,6 +766,23 @@ impl ShaderSpriteEffect {
 
 	//==============================================================================
 	/// 원본 이름으로 찾기. (모르는 이름이면 None)
+	///
+	/// # 인자
+	/// - `name`: 원본 효과 이름. (대소문자를 가린다, "heatHaze" 처럼 camelCase)
+	///
+	/// # 돌려줌
+	/// 그 이름의 효과. 모르는 이름이면 None.
+	///
+	/// # 예제
+	/// 이름과 효과 오가기
+	/// ```rust
+	/// use vanilla::ShaderSpriteEffect;
+	///
+	/// assert_eq!(ShaderSpriteEffect::from_name("dissolve"), Some(ShaderSpriteEffect::Dissolve));
+	/// assert_eq!(ShaderSpriteEffect::Dissolve.get_name(), "dissolve");
+	/// assert_eq!(ShaderSpriteEffect::from_name("Dissolve"), None);
+	/// assert_eq!(ShaderSpriteEffect::get_effect_list().len(), 50);
+	/// ```
 	//==============================================================================
 	pub fn from_name(name: &str) -> Option<ShaderSpriteEffect> {
 		EFFECT_NAME_TABLE.iter().find(|(_, effect_name)| *effect_name == name).map(|(effect, _)| *effect)
@@ -722,6 +790,9 @@ impl ShaderSpriteEffect {
 
 	//==============================================================================
 	/// 효과 목록 반환. (선언 차례, 원본 Object.keys(ShaderSpriteEffect) 자리)
+	///
+	/// # 돌려줌
+	/// 모든 효과 50 개. (None 이 처음)
 	//==============================================================================
 	pub fn get_effect_list() -> &'static [ShaderSpriteEffect] {
 		&EFFECT_LIST
@@ -746,6 +817,27 @@ fn resolve_effect_program(graphic: &mut Graphic, effect: ShaderSpriteEffect) -> 
 	})
 }
 
+//==============================================================================
+/// 셰이더 스프라이트 컴포넌트.
+/// - Sprite 를 품고 Deref 로 Sprite 함수를 그대로 부른다. 효과가 있으면 효과 프로그램으로 바꿔 끼워 그린다.
+///
+/// # 예제
+/// 이미지 스프라이트에 디졸브 효과를 반쯤 걸기
+/// ```rust
+/// use vanilla::{Image, NodeTree, ShaderSprite, ShaderSpriteEffect};
+///
+/// let image = Image::create_from_pixels(32, 32, vec![255u8; 32 * 32 * 4]);
+/// let mut node_tree = NodeTree::new();
+/// let root_id = node_tree.get_root_id();
+/// let hero_id = node_tree.create_child(root_id, "Hero");
+/// let shader_sprite = node_tree[hero_id].add_component(ShaderSprite::create_with_image(image));
+/// shader_sprite.set_effect(ShaderSpriteEffect::Dissolve);
+/// shader_sprite.set_effect_progress(0.5);
+/// assert_eq!(shader_sprite.get_effect_parameters(), [8.0, 0.08, 0.0, 0.0]);
+/// assert_eq!(shader_sprite.get_effect_progress(), 0.5);
+/// assert!(shader_sprite.get_image().is_some());
+/// ```
+//==============================================================================
 pub struct ShaderSprite {
 	sprite: Sprite,
 	effect: ShaderSpriteEffect,
@@ -760,6 +852,9 @@ pub struct ShaderSprite {
 impl ShaderSprite {
 	//==============================================================================
 	/// 생성.
+	///
+	/// # 돌려줌
+	/// 이미지가 없는 Sprite 를 품은 셰이더 스프라이트. (효과 없음, 진행도 0, 효과 시간 0, 시드 0 ~ 100 무작위, 효과 색 흰색, 파라미터 0)
 	//==============================================================================
 	pub fn new() -> ShaderSprite {
 		ShaderSprite {
@@ -775,6 +870,12 @@ impl ShaderSprite {
 
 	//==============================================================================
 	/// 이미지와 함께 생성.
+	///
+	/// # 인자
+	/// - `image`: 품은 Sprite 에 걸 이미지.
+	///
+	/// # 돌려줌
+	/// 그 이미지를 건 셰이더 스프라이트. (나머지는 new 와 같다)
 	//==============================================================================
 	pub fn create_with_image(image: Rc<Image>) -> ShaderSprite {
 		let mut shader_sprite = ShaderSprite::new();
@@ -784,6 +885,9 @@ impl ShaderSprite {
 
 	//==============================================================================
 	/// 품은 Sprite 반환.
+	///
+	/// # 돌려줌
+	/// 품은 Sprite 의 참조.
 	//==============================================================================
 	#[reflect(skip)]
 	pub fn get_sprite(&self) -> &Sprite {
@@ -792,6 +896,9 @@ impl ShaderSprite {
 
 	//==============================================================================
 	/// 품은 Sprite 반환. (변경용)
+	///
+	/// # 돌려줌
+	/// 품은 Sprite 의 변경 참조.
 	//==============================================================================
 	pub fn get_sprite_mut(&mut self) -> &mut Sprite {
 		&mut self.sprite
@@ -799,6 +906,26 @@ impl ShaderSprite {
 
 	//==============================================================================
 	/// 효과 설정. (효과별 기본 파라미터 / 색으로 되돌린다)
+	/// - 진행도와 효과 시간은 그대로 둔다. 파라미터나 색을 바꾸려면 이것 다음에 부른다.
+	///
+	/// # 인자
+	/// - `effect`: 걸 효과. (None 이면 효과 없이 Sprite 로 그린다)
+	///
+	/// # 예제
+	/// 효과를 고른 뒤 두께와 색 바꾸기
+	/// ```rust
+	/// use vanilla::{Color, ShaderSprite, ShaderSpriteEffect};
+	///
+	/// let mut shader_sprite = ShaderSprite::new();
+	/// shader_sprite.set_effect(ShaderSpriteEffect::Glow);
+	/// assert_eq!(shader_sprite.get_effect_parameters(), [6.0, 0.0, 0.0, 0.0]);
+	/// assert_eq!(shader_sprite.get_effect_color(), Color::create(1.0, 0.85, 0.4, 1.0));
+	/// shader_sprite.set_effect(ShaderSpriteEffect::Outline);
+	/// shader_sprite.set_effect_parameters(4.0, 0.0, 0.0, 0.0);
+	/// shader_sprite.set_effect_color(Color::create(1.0, 0.0, 0.0, 1.0));
+	/// assert_eq!(shader_sprite.get_effect_parameters(), [4.0, 0.0, 0.0, 0.0]);
+	/// assert_eq!(shader_sprite.get_effect(), ShaderSpriteEffect::Outline);
+	/// ```
 	//==============================================================================
 	pub fn set_effect(&mut self, effect: ShaderSpriteEffect) {
 		self.effect = effect;
@@ -808,6 +935,9 @@ impl ShaderSprite {
 
 	//==============================================================================
 	/// 효과 반환.
+	///
+	/// # 돌려줌
+	/// 지금 효과. (기본 None)
 	//==============================================================================
 	pub fn get_effect(&self) -> ShaderSpriteEffect {
 		self.effect
@@ -815,6 +945,9 @@ impl ShaderSprite {
 
 	//==============================================================================
 	/// 진행도 설정. (0 ~ 1)
+	///
+	/// # 인자
+	/// - `effect_progress`: 효과 진행도. (0 ~ 1 로 자른다, 뜻은 효과마다 다르다. 세기나 사라진 정도)
 	//==============================================================================
 	pub fn set_effect_progress(&mut self, effect_progress: f32) {
 		self.effect_progress = effect_progress.clamp(0.0, 1.0);
@@ -822,6 +955,9 @@ impl ShaderSprite {
 
 	//==============================================================================
 	/// 진행도 반환.
+	///
+	/// # 돌려줌
+	/// 효과 진행도. (0 ~ 1)
 	//==============================================================================
 	pub fn get_effect_progress(&self) -> f32 {
 		self.effect_progress
@@ -829,6 +965,9 @@ impl ShaderSprite {
 
 	//==============================================================================
 	/// 효과 시간 설정.
+	///
+	/// # 인자
+	/// - `effect_time`: 효과 시간. (초, 물결이나 깜빡임처럼 움직이는 효과가 쓴다. tick 마다 time_delta 만큼 는다)
 	//==============================================================================
 	pub fn set_effect_time(&mut self, effect_time: f32) {
 		self.effect_time = effect_time;
@@ -836,6 +975,9 @@ impl ShaderSprite {
 
 	//==============================================================================
 	/// 효과 시간 반환.
+	///
+	/// # 돌려줌
+	/// 효과 시간. (초)
 	//==============================================================================
 	pub fn get_effect_time(&self) -> f32 {
 		self.effect_time
@@ -843,6 +985,9 @@ impl ShaderSprite {
 
 	//==============================================================================
 	/// 시드 설정. (같은 노이즈 무늬를 원할 때 고정)
+	///
+	/// # 인자
+	/// - `effect_seed`: 노이즈 씨앗 값. (기본은 생성 때 0 ~ 100 무작위)
 	//==============================================================================
 	pub fn set_effect_seed(&mut self, effect_seed: f32) {
 		self.effect_seed = effect_seed;
@@ -850,6 +995,9 @@ impl ShaderSprite {
 
 	//==============================================================================
 	/// 시드 반환.
+	///
+	/// # 돌려줌
+	/// 노이즈 씨앗 값.
 	//==============================================================================
 	pub fn get_effect_seed(&self) -> f32 {
 		self.effect_seed
@@ -857,6 +1005,9 @@ impl ShaderSprite {
 
 	//==============================================================================
 	/// 효과 색 설정. (Color 또는 "#rrggbb" 같은 문자열)
+	///
+	/// # 인자
+	/// - `color`: 효과 색. (뜻은 효과마다 다르다. 선 색, 빛 색, 틴트 같은 것)
 	//==============================================================================
 	pub fn set_effect_color(&mut self, color: impl Into<Color>) {
 		self.effect_color = color.into();
@@ -864,6 +1015,9 @@ impl ShaderSprite {
 
 	//==============================================================================
 	/// 효과 색 반환.
+	///
+	/// # 돌려줌
+	/// 효과 색. (set_effect 가 효과별 기본 색으로 되돌린다)
 	//==============================================================================
 	pub fn get_effect_color(&self) -> Color {
 		self.effect_color
@@ -871,6 +1025,12 @@ impl ShaderSprite {
 
 	//==============================================================================
 	/// 효과 파라미터 설정. (효과마다 뜻이 다르다. ShaderSpriteEffect 주석 참고, 원본의 y / z / w 기본값 0 은 직접 넘긴다)
+	///
+	/// # 인자
+	/// - `x`: 첫째 파라미터. (Outline 의 두께 픽셀 같은 것)
+	/// - `y`: 둘째 파라미터. (쓰지 않는 효과는 0)
+	/// - `z`: 셋째 파라미터. (쓰지 않는 효과는 0)
+	/// - `w`: 넷째 파라미터. (쓰지 않는 효과는 0)
 	//==============================================================================
 	pub fn set_effect_parameters(&mut self, x: f32, y: f32, z: f32, w: f32) {
 		self.effect_parameters = [x, y, z, w];
@@ -878,6 +1038,9 @@ impl ShaderSprite {
 
 	//==============================================================================
 	/// 효과 파라미터 반환.
+	///
+	/// # 돌려줌
+	/// 파라미터 [x, y, z, w].
 	//==============================================================================
 	pub fn get_effect_parameters(&self) -> [f32; 4] {
 		self.effect_parameters
@@ -885,6 +1048,12 @@ impl ShaderSprite {
 
 	//==============================================================================
 	/// 효과 기본 파라미터 반환. (정적)
+	///
+	/// # 인자
+	/// - `effect`: 효과.
+	///
+	/// # 돌려줌
+	/// 그 효과의 원본 기본 파라미터 [x, y, z, w]. (Glow 는 [6, 0, 0, 0])
 	//==============================================================================
 	pub fn get_default_parameters(effect: ShaderSpriteEffect) -> [f32; 4] {
 		DEFAULT_PARAMETER_TABLE[effect as usize].1
@@ -892,6 +1061,12 @@ impl ShaderSprite {
 
 	//==============================================================================
 	/// 효과 기본 색 반환. (정적)
+	///
+	/// # 인자
+	/// - `effect`: 효과.
+	///
+	/// # 돌려줌
+	/// 그 효과의 원본 기본 색. (색을 쓰지 않는 효과는 흰색)
 	//==============================================================================
 	pub fn get_default_color(effect: ShaderSpriteEffect) -> Color {
 		let default_color = DEFAULT_COLOR_TABLE[effect as usize].1;
@@ -900,6 +1075,9 @@ impl ShaderSprite {
 }
 
 impl Default for ShaderSprite {
+	//==============================================================================
+	/// 기본값. (new 와 같다)
+	//==============================================================================
 	fn default() -> ShaderSprite {
 		ShaderSprite::new()
 	}
@@ -908,12 +1086,18 @@ impl Default for ShaderSprite {
 impl Deref for ShaderSprite {
 	type Target = Sprite;
 
+	//==============================================================================
+	/// 품은 Sprite 로 풀기. (Sprite 함수를 그대로 부르게 한다)
+	//==============================================================================
 	fn deref(&self) -> &Sprite {
 		&self.sprite
 	}
 }
 
 impl DerefMut for ShaderSprite {
+	//==============================================================================
+	/// 품은 Sprite 로 풀기. (변경용)
+	//==============================================================================
 	fn deref_mut(&mut self) -> &mut Sprite {
 		&mut self.sprite
 	}
@@ -921,14 +1105,23 @@ impl DerefMut for ShaderSprite {
 
 #[crate::reflect]
 impl Component for ShaderSprite {
+	//==============================================================================
+	/// 컴포넌트 공통 칸 반환. (품은 Sprite 의 것)
+	//==============================================================================
 	fn get_component_base(&self) -> &ComponentBase {
 		self.sprite.get_component_base()
 	}
 
+	//==============================================================================
+	/// 컴포넌트 공통 칸 반환. (변경용, 품은 Sprite 의 것)
+	//==============================================================================
 	fn get_component_base_mut(&mut self) -> &mut ComponentBase {
 		self.sprite.get_component_base_mut()
 	}
 
+	//==============================================================================
+	/// 컴포넌트 종류 이름 반환. ("ShaderSprite")
+	//==============================================================================
 	fn get_component_type(&self) -> &'static str {
 		"ShaderSprite"
 	}

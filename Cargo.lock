@@ -3351,6 +3351,7 @@ dependencies = [
 name = "vanilla-engine-apidoc"
 version = "0.3.2"
 dependencies = [
+ "glow",
  "proc-macro2",
  "serde_json",
  "syn 2.0.119",
