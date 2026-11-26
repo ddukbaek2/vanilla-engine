@@ -2614,10 +2614,14 @@ struct FallbackBaseInfo {
 }
 
 //==============================================================================
-/// 운영체제 대체 글꼴을 한 이름으로 묶는 열쇠. (글꼴 이름 표의 무리 이름, 없으면 파일 경로. 같은 무리의 굵기 얼굴들이 함께 고른다)
-/// - 윈도우 Tahoma(tahoma.ttf, tahomabd.ttf)나 리눅스 DejaVu Sans 처럼 굵기마다 파일이 다른 글꼴도 한 무리로 묶어, 굵게를 청하면 굵은 얼굴을 고른다.
+/// 운영체제 대체 글꼴을 한 이름으로 묶는 열쇠. (같은 열쇠의 굵기 얼굴들이 함께 고른다)
+/// - 맥, 윈도우: 글꼴 이름 표의 무리 이름, 없으면 파일 경로. 윈도우 Tahoma(tahoma.ttf, tahomabd.ttf)처럼 굵기마다 파일이 다른 글꼴도 한 무리로 묶어, 굵게를 청하면 굵은 얼굴을 고른다.
+/// - 리눅스: 파일 경로. 크롬 리눅스는 fontconfig 가 고른 파일을 그대로 쓰고, 그 얼굴이 굵지 않으면 가짜 굵게로 그린다. (font_cache_linux.cc, 무리로 묶으면 굵은 아랍어에 DejaVuSans-Bold.ttf 를 골라 크롬의 DejaVuSans.ttf 가짜 굵게보다 16px 글에서 16.2px 넓다)
 //==============================================================================
 fn read_fallback_source_key(source: &FontFileSource, registered_font_face: &RegisteredFontFace) -> String {
+	if cfg!(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android"))) {
+		return source.path.to_string_lossy().into_owned();
+	}
 	let family_name = rustybuzz::ttf_parser::Face::parse(registered_font_face.font.get_font_bytes(), registered_font_face.font.get_face_index()).ok().and_then(|face| {
 		let read_name = |name_id: u16| face.names().into_iter().filter(|name| name.name_id == name_id).find_map(|name| name.to_string());
 		read_name(rustybuzz::ttf_parser::name_id::TYPOGRAPHIC_FAMILY).or_else(|| read_name(rustybuzz::ttf_parser::name_id::FAMILY))
