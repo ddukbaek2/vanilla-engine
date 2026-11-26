@@ -515,7 +515,7 @@ assert_eq!(view_manager.get_view_scale_mode(), ViewScaleMode::StretchWidthExpand
 
 `calculate_view_rect` is called by the platform when the window size or scale changes. Calling it directly as in the example above is for testing.
 
-`Graphic`'s transform returns to identity at the start of every frame. Drawn as is, coordinates are physical pixels of the drawing buffer. A scene sets the coordinate system in `pre_draw`.
+Before each scene's `pre_draw` (before `draw_on_load` while loading), the engine sets view coordinates (`apply_view_rect`). These are the same coordinates as the touches a scene receives, so drawing keeps the same size and position on screens with a device pixel ratio of 2 (such as Retina). (same as the original) A scene can change the coordinate system in `pre_draw`; to draw in physical pixels of the drawing buffer, call `graphic.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0)`.
 
 - `view_manager.apply_canvas_native_rect(graphic)`: the whole canvas in logical pixels. Used to fill the background to the canvas edges.
 - `view_manager.apply_view_rect(graphic)`: view coordinates. (0, 0) is the top left of the view and the bottom right is `get_view_size()`. Touch coordinates a scene receives are in these coordinates too.

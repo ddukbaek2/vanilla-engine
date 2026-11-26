@@ -515,7 +515,7 @@ assert_eq!(view_manager.get_view_scale_mode(), ViewScaleMode::StretchWidthExpand
 
 `calculate_view_rect` 는 창 크기나 배율이 바뀔 때 플랫폼이 부릅니다. 위 예제처럼 직접 부르는 것은 시험할 때입니다.
 
-`Graphic` 의 변환은 매 프레임 처음에 단위 행렬로 돌아갑니다. 그대로 그리면 좌표가 그리기 버퍼의 물리 픽셀입니다. 씬은 `pre_draw` 에서 좌표계를 정합니다.
+엔진은 씬마다 `pre_draw` 앞(로딩 중이면 `draw_on_load` 앞)에 뷰 좌표(`apply_view_rect`)를 걸어 둡니다. 씬이 받는 터치 좌표와 같은 좌표라, 기기 픽셀 배율이 2 인 화면(레티나 같은)에서도 같은 크기와 자리로 그려집니다. (원본과 같다) 씬은 `pre_draw` 에서 좌표계를 바꿀 수 있고, 그리기 버퍼의 물리 픽셀로 그리려면 `graphic.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0)` 을 부릅니다.
 
 - `view_manager.apply_canvas_native_rect(graphic)`: 캔버스 전체를 논리 픽셀로. 바탕을 캔버스 끝까지 칠할 때 씁니다.
 - `view_manager.apply_view_rect(graphic)`: 뷰 좌표로. (0, 0) 이 뷰의 왼쪽 위이고 오른쪽 아래가 `get_view_size()` 입니다. 씬이 받는 터치 좌표도 이 좌표입니다.

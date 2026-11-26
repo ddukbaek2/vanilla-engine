@@ -2189,6 +2189,8 @@ impl EngineRunner {
 		graphic.begin_frame_statistics();
 
 		// 씬 처리.
+		// - 씬마다 그리기 앞에 뷰 좌표를 걸어 둔다. (씬이 받는 터치 좌표와 같은 좌표, 기기 픽셀 배율이 1 이 아닌 화면에서도 같은 크기와 자리로 그린다, 원본과 같다)
+		//   캔버스의 실제 픽셀로 그리려면 씬에서 graphic.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0) 을 부른다.
 		let mut scene_list = std::mem::take(&mut self.scene_list);
 		for scene in scene_list.iter_mut() {
 			// 맡긴 애셋을 기다리는 씬은 로딩 화면만. (다 읽혔으면 이번 프레임부터 돈다, 원본처럼 내리는 중이어도 불러오기가 끝나면 initialize 한다)
@@ -2196,6 +2198,7 @@ impl EngineRunner {
 				initialize_scene_if_ready(&mut self.engine, scene.as_mut(), seconds_since_startup);
 			}
 			if !scene.get_scene_base().is_loaded() {
+				self.engine.view_manager.apply_view_rect(graphic);
 				scene.draw_on_load(&mut self.engine, graphic);
 				continue;
 			}
@@ -2207,6 +2210,7 @@ impl EngineRunner {
 			}
 
 			// 출력.
+			self.engine.view_manager.apply_view_rect(graphic);
 			scene.pre_draw(&mut self.engine, graphic);
 			scene.draw(&mut self.engine, graphic);
 			scene.post_draw(&mut self.engine, graphic);
