@@ -16,7 +16,10 @@
 //!     impl Component for Spin { ... }
 //!   ```
 //!   그러면 UIDocument 가 등록된 쓰기, 읽기 함수 없이 Speed 키로 쓰고 읽고(원본 saveByReflection, loadByReflection),
-//!   DevTools 인스펙터가 speed 줄로 보인다. (원본 getComponentProperties) 한쪽만 붙이면 컴파일 에러가 붙일 곳을 알려 준다.
+//!   DevTools 인스펙터가 speed 줄로 보인다. (원본 getComponentProperties)
+//! - 원본은 모든 객체가 반사된다. 러스트 판은 Reflect 를 Component 의 상위 트레이트로 두어 반사 없는 컴포넌트가 생길 수 없다.
+//!   어느 쪽을 빠뜨려도 컴파일 에러가 붙일 곳을 알려 준다. 게터가 없는 타입은 빈 블록 `#[vanilla::reflect] impl Spin {}` 에 붙인다.
+//!   반사를 쓰는 쪽은 `&dyn Component` 를 `&dyn Reflect` 로 올려(트레이트 업캐스팅) 부른다.
 //! - 원본 규칙을 따른다:
 //!   - 게터는 인자 없는 pub get_*, is_* 함수, 저장 속성은 같은 이름의 set_* 이 있는 게터다. 키는 접두어를 뗀 원본 이름이다. (get_line_width → LineWidth)
 //!   - 차례는 정의 차례이고 같은 키는 먼저 나온 것이다. 원본 Component 기반 클래스의 GizmoVisible, Enable, ComponentType 이 끝에 붙는다.
@@ -178,7 +181,7 @@
 //! };
 //! let property_names: Vec<&str> = collect_reflected_properties(&labeled_meter).iter().map(|property| property.name).collect();
 //! assert_eq!(property_names, ["Caption", "Value", "GizmoVisible", "Enable", "ComponentType"]);
-//! let getter_names: Vec<&str> = collect_reflected_getters(&labeled_meter).expect("reflection").iter().map(|getter| getter.name).collect();
+//! let getter_names: Vec<&str> = collect_reflected_getters(&labeled_meter).iter().map(|getter| getter.name).collect();
 //! assert_eq!(getter_names, ["getCaption", "getLabelLength", "getValue"]);
 //! ```
 //==============================================================================
@@ -377,7 +380,7 @@ pub struct ReflectedGetter {
 /// assert_eq!(gauge.get_reflected_value("Missing"), None);
 /// ```
 //==============================================================================
-#[diagnostic::on_unimplemented(message = "`{Self}` 에 반사 구현이 없다", label = "반사 구현이 없는 타입", note = "`impl {Self}` 블록에 #[vanilla::reflect] 를 붙인다")]
+#[diagnostic::on_unimplemented(message = "`{Self}` 에 반사 구현이 없다 (컴포넌트는 반사가 있어야 한다)", label = "반사 구현이 없는 타입", note = "`impl {Self}` 블록에 #[vanilla::reflect] 를 붙인다. 게터가 없으면 빈 블록 `#[vanilla::reflect] impl {Self} {{}}` 에 붙인다")]
 pub trait Reflect {
 	//==============================================================================
 	/// 타입 이름. (원본 constructor.name 자리, 등록하지 않은 컴포넌트를 문서에 쓸 때의 type)
@@ -523,7 +526,7 @@ pub trait Reflect {
 /// label.collect_component_getters(&mut getter_list, &mut anchored_getter_list);
 /// assert_eq!(getter_list[0].name, "isTickNeeded");
 /// assert_eq!(getter_list[0].value, ReflectValue::Boolean(false));
-/// let all_getter_list = collect_reflected_getters(&label).expect("reflection");
+/// let all_getter_list = collect_reflected_getters(&label);
 /// let getter_names: Vec<&str> = all_getter_list.iter().map(|getter| getter.name).collect();
 /// assert_eq!(getter_names, ["isTickNeeded", "getText"]);
 /// ```
@@ -566,7 +569,6 @@ pub const COMPONENT_REFLECTED_PROPERTIES: [ReflectedProperty; 3] = [
 
 //==============================================================================
 /// 컴포넌트의 저장 속성 목록. (원본 collectReflectedProperties: 이 타입의 것 → Component 공통 속성, 같은 키는 앞의 것)
-/// - 반사가 없는 컴포넌트는 공통 속성만이다.
 ///
 /// # 인자
 /// - `component`: 볼 컴포넌트.
@@ -575,14 +577,8 @@ pub const COMPONENT_REFLECTED_PROPERTIES: [ReflectedProperty; 3] = [
 /// 저장 속성 목록. (이 타입의 것 뒤에 GizmoVisible, Enable, ComponentType 가운데 없는 키)
 //==============================================================================
 pub fn collect_reflected_properties(component: &dyn Component) -> Vec<ReflectedProperty> {
-	let mut property_list = match component.get_reflection() {
-		Some(reflection) => {
-			reflection.get_reflected_properties()
-		}
-		None => {
-			Vec::new()
-		}
-	};
+	let reflection: &dyn Reflect = component;
+	let mut property_list = reflection.get_reflected_properties();
 	for base_property in COMPONENT_REFLECTED_PROPERTIES.iter() {
 		if !property_list.iter().any(|property| property.name == base_property.name) {
 			property_list.push(*base_property);
@@ -602,15 +598,19 @@ pub fn collect_reflected_properties(component: &dyn Component) -> Vec<ReflectedP
 /// 속성 값. 이 타입에도 공통 속성에도 없는 키면 None.
 ///
 /// # 예제
-/// 반사가 없는 컴포넌트도 공통 속성은 읽고 넣는다
+/// 게터가 없는 컴포넌트도 공통 속성은 읽고 넣는다
 /// ```rust
 /// use vanilla::core::reflection::{read_reflected_property, write_reflected_property};
-/// use vanilla::{Component, ComponentBase, ReflectValue};
+/// use vanilla::{reflect, Component, ComponentBase, ReflectValue};
 ///
 /// struct Plain {
 /// 	component_base: ComponentBase,
 /// }
 ///
+/// #[reflect]
+/// impl Plain {}
+///
+/// #[reflect]
 /// impl Component for Plain {
 /// # 	fn get_component_base(&self) -> &ComponentBase {
 /// # 		&self.component_base
@@ -635,10 +635,9 @@ pub fn collect_reflected_properties(component: &dyn Component) -> Vec<ReflectedP
 /// ```
 //==============================================================================
 pub fn read_reflected_property(component: &dyn Component, property_name: &str) -> Option<ReflectValue> {
-	if let Some(reflection) = component.get_reflection() {
-		if let Some(value) = reflection.get_reflected_value(property_name) {
-			return Some(value);
-		}
+	let reflection: &dyn Reflect = component;
+	if let Some(value) = reflection.get_reflected_value(property_name) {
+		return Some(value);
 	}
 	match property_name {
 		"GizmoVisible" => {
@@ -667,10 +666,9 @@ pub fn read_reflected_property(component: &dyn Component, property_name: &str) -
 /// 속성 값. 이 타입에도 공통 속성에도 없는 키면 None.
 //==============================================================================
 pub fn read_reflected_property_mut(component: &mut dyn Component, property_name: &str) -> Option<ReflectValue> {
-	if let Some(reflection) = component.get_reflection_mut() {
-		if let Some(value) = reflection.get_reflected_value_mut(property_name) {
-			return Some(value);
-		}
+	let reflection: &mut dyn Reflect = component;
+	if let Some(value) = reflection.get_reflected_value_mut(property_name) {
+		return Some(value);
 	}
 	read_reflected_property(component, property_name)
 }
@@ -687,10 +685,9 @@ pub fn read_reflected_property_mut(component: &mut dyn Component, property_name:
 /// 넣었으면 true. 꼴이 맞지 않거나, 없는 키거나, 세터가 없으면 false.
 //==============================================================================
 pub fn write_reflected_property(component: &mut dyn Component, property_name: &str, value: &ReflectValue) -> bool {
-	if let Some(reflection) = component.get_reflection_mut() {
-		if reflection.set_reflected_value(property_name, value) {
-			return true;
-		}
+	let reflection: &mut dyn Reflect = component;
+	if reflection.set_reflected_value(property_name, value) {
+		return true;
 	}
 	write_component_base_property(component, property_name, value)
 }
@@ -725,10 +722,9 @@ pub fn write_reflected_property(component: &mut dyn Component, property_name: &s
 /// ```
 //==============================================================================
 pub fn write_reflected_property_in_tree(component: &mut dyn Component, node_tree: &mut NodeTree, property_name: &str, value: &ReflectValue) -> bool {
-	if let Some(reflection) = component.get_reflection_mut() {
-		if reflection.set_reflected_value_in_tree(node_tree, property_name, value) {
-			return true;
-		}
+	let reflection: &mut dyn Reflect = component;
+	if reflection.set_reflected_value_in_tree(node_tree, property_name, value) {
+		return true;
 	}
 	write_component_base_property(component, property_name, value)
 }
@@ -753,53 +749,53 @@ fn write_component_base_property(component: &mut dyn Component, property_name: &
 }
 
 //==============================================================================
-/// 컴포넌트의 게터 값 모두. (원본 getComponentProperties, Component 기반 클래스의 것은 빼고 그 타입의 것만. 반사가 없으면 None)
+/// 컴포넌트의 게터 값 모두. (원본 getComponentProperties, Component 기반 클래스의 것은 빼고 그 타입의 것만)
 ///
 /// # 인자
 /// - `component`: 볼 컴포넌트.
 ///
 /// # 돌려줌
-/// 게터 이름과 값 목록. 반사가 없으면 None.
+/// 게터 이름과 값 목록. (게터가 없는 컴포넌트는 빈 목록)
 //==============================================================================
-pub fn collect_reflected_getters(component: &dyn Component) -> Option<Vec<ReflectedGetter>> {
-	let reflection = component.get_reflection()?;
+pub fn collect_reflected_getters(component: &dyn Component) -> Vec<ReflectedGetter> {
+	let reflection: &dyn Reflect = component;
 	let mut getter_list: Vec<ReflectedGetter> = Vec::new();
 	reflection.collect_reflected_getters(&mut getter_list);
-	Some(getter_list)
+	getter_list
 }
 
 //==============================================================================
-/// 컴포넌트의 게터 값 모두. (트리를 받는 게터까지, 반사가 없으면 None)
+/// 컴포넌트의 게터 값 모두. (트리를 받는 게터까지)
 ///
 /// # 인자
 /// - `component`: 볼 컴포넌트.
 /// - `node_tree`: 트리를 받는 게터에 넘길 트리.
 ///
 /// # 돌려줌
-/// 게터 이름과 값 목록. 반사가 없으면 None.
+/// 게터 이름과 값 목록. (게터가 없는 컴포넌트는 빈 목록)
 //==============================================================================
-pub fn collect_reflected_getters_in_tree(component: &dyn Component, node_tree: &NodeTree) -> Option<Vec<ReflectedGetter>> {
-	let reflection = component.get_reflection()?;
+pub fn collect_reflected_getters_in_tree(component: &dyn Component, node_tree: &NodeTree) -> Vec<ReflectedGetter> {
+	let reflection: &dyn Reflect = component;
 	let mut getter_list: Vec<ReflectedGetter> = Vec::new();
 	reflection.collect_reflected_getters_in_tree(node_tree, &mut getter_list);
-	Some(getter_list)
+	getter_list
 }
 
 //==============================================================================
-/// 컴포넌트의 게터 값 모두. (&mut self 게터와 트리를 받는 게터까지. 이 컴포넌트는 트리에서 꺼낸 채로 부른다, NodeTree::with_component_at_mut. 반사가 없으면 None)
+/// 컴포넌트의 게터 값 모두. (&mut self 게터와 트리를 받는 게터까지. 이 컴포넌트는 트리에서 꺼낸 채로 부른다, NodeTree::with_component_at_mut)
 ///
 /// # 인자
 /// - `component`: 볼 컴포넌트. (트리에서 꺼낸 것)
 /// - `node_tree`: 트리를 받는 게터에 넘길 트리.
 ///
 /// # 돌려줌
-/// 게터 이름과 값 목록. 반사가 없으면 None.
+/// 게터 이름과 값 목록. (게터가 없는 컴포넌트는 빈 목록)
 //==============================================================================
-pub fn collect_reflected_getters_mut(component: &mut dyn Component, node_tree: &NodeTree) -> Option<Vec<ReflectedGetter>> {
-	let reflection = component.get_reflection_mut()?;
+pub fn collect_reflected_getters_mut(component: &mut dyn Component, node_tree: &NodeTree) -> Vec<ReflectedGetter> {
+	let reflection: &mut dyn Reflect = component;
 	let mut getter_list: Vec<ReflectedGetter> = Vec::new();
 	reflection.collect_reflected_getters_mut(node_tree, &mut getter_list);
-	Some(getter_list)
+	getter_list
 }
 
 //==============================================================================
@@ -809,10 +805,11 @@ pub fn collect_reflected_getters_mut(component: &mut dyn Component, node_tree: &
 /// - `component`: 볼 컴포넌트.
 ///
 /// # 돌려줌
-/// &mut self 게터가 있으면 true. 반사가 없으면 false.
+/// &mut self 게터가 있으면 true.
 //==============================================================================
 pub fn has_mutable_getters(component: &dyn Component) -> bool {
-	component.get_reflection().map(|reflection| reflection.has_mutable_getters()).unwrap_or(false)
+	let reflection: &dyn Reflect = component;
+	reflection.has_mutable_getters()
 }
 
 //==============================================================================

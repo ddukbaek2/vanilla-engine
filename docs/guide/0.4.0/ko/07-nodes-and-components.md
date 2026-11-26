@@ -267,6 +267,10 @@ struct Badge {
 	component_base: ComponentBase,
 }
 
+#[vanilla::reflect]
+impl Badge {}
+
+#[vanilla::reflect]
 impl Component for Badge {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base
@@ -305,6 +309,7 @@ struct Labeled {
 	label_id: Option<NodeId>,
 }
 
+#[vanilla::reflect]
 impl Component for Labeled {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base
@@ -323,6 +328,7 @@ impl Component for Labeled {
 	}
 }
 
+#[vanilla::reflect]
 impl Labeled {
 	fn rename_label(&self, node_tree: &mut NodeTree, name: &str) {
 		if let Some(label_id) = self.label_id {
@@ -371,6 +377,10 @@ struct Spin {
 	degrees_per_second: f32,
 }
 
+#[vanilla::reflect]
+impl Spin {}
+
+#[vanilla::reflect]
 impl Component for Spin {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base
@@ -398,6 +408,10 @@ struct CrossMark {
 	component_base: ComponentBase,
 }
 
+#[vanilla::reflect]
+impl CrossMark {}
+
+#[vanilla::reflect]
 impl Component for CrossMark {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base
@@ -459,6 +473,10 @@ struct Lifetime {
 	remaining_seconds: f32,
 }
 
+#[vanilla::reflect]
+impl Lifetime {}
+
+#[vanilla::reflect]
 impl Component for Lifetime {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base

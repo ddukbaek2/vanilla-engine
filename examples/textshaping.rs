@@ -57,6 +57,10 @@ struct DynamicFontCounter {
 	elapsed_seconds: f32,
 }
 
+#[vanilla::reflect]
+impl DynamicFontCounter {}
+
+#[vanilla::reflect]
 impl Component for DynamicFontCounter {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base

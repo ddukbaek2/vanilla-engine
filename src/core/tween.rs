@@ -1977,6 +1977,10 @@ mod tests {
 		pinned_position: Vector2,
 	}
 
+	#[crate::reflect]
+	impl PositionPinner {}
+
+	#[crate::reflect]
 	impl Component for PositionPinner {
 		//==============================================================================
 		/// 공통 상태 반환.

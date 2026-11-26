@@ -52,6 +52,7 @@ struct ShapeGallery {
 	line_position_values: Vec<f32>,
 }
 
+#[vanilla::reflect]
 impl ShapeGallery {
 	//==============================================================================
 	// 생성. (선분은 한 번 지어 두고 그릴 때마다 그대로 넘긴다)
@@ -73,6 +74,7 @@ impl ShapeGallery {
 	}
 }
 
+#[vanilla::reflect]
 impl Component for ShapeGallery {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base

@@ -710,6 +710,113 @@ pub fn read_heap_usage() -> Option<(f64, f64)> {
 }
 
 //==============================================================================
+/// 힙 한도. (바이트, 힙이 자랄 수 있는 상한, 못 읽으면 None. 개발자 도구의 메모리 칸, 원본 performance.memory 의 jsHeapSizeLimit 자리)
+/// - 데스크탑에는 자바스크립트 힙의 상한이 없어 운영체제가 이 프로세스의 힙에 허락하는 상한을 읽는다.
+/// - 맥, 리눅스: 프로세스 자료 영역 한도(getrlimit RLIMIT_DATA 의 rlim_cur)가 정해져 있으면 그것, 없으면(무한) 물리 메모리 크기.
+///   (맥은 sysctl hw.memsize, 리눅스는 sysconf 의 _SC_PHYS_PAGES 곱하기 _SC_PAGESIZE)
+/// - 윈도우: GlobalMemoryStatusEx 의 물리 메모리 크기(ullTotalPhys)와 이 프로세스가 쓸 수 있는 가상 주소 크기(ullTotalVirtual) 가운데 작은 것.
+/// - 그 밖의 OS 는 None 이다.
+///
+/// # 돌려줌
+/// 힙 한도 바이트. 운영체제 함수가 실패했거나 그 밖의 OS 면 None.
+///
+/// # 예제
+/// 힙 한도를 메가바이트로 찍기
+/// ```rust
+/// use vanilla::platform::desktop::read_heap_size_limit;
+///
+/// if let Some(limit_bytes) = read_heap_size_limit() {
+/// 	assert!(limit_bytes > 0.0);
+/// 	println!("{:.1} MB", limit_bytes / 1048576.0);
+/// }
+/// ```
+//==============================================================================
+pub fn read_heap_size_limit() -> Option<f64> {
+	#[cfg(any(target_os = "macos", target_os = "linux"))]
+	{
+		#[repr(C)]
+		struct ResourceLimit {
+			current_limit: u64,
+			maximum_limit: u64,
+		}
+		extern "C" {
+			fn getrlimit(resource: std::os::raw::c_int, resource_limit: *mut ResourceLimit) -> std::os::raw::c_int;
+		}
+		// RLIMIT_DATA 는 맥과 리눅스 모두 2 다. 무한(RLIM_INFINITY)은 맥 2^63 - 1, 리눅스 2^64 - 1 이라 2^62 이상을 무한으로 본다.
+		const RESOURCE_LIMIT_DATA: std::os::raw::c_int = 2;
+		const INFINITE_LIMIT_FLOOR: u64 = 1 << 62;
+		let mut resource_limit = ResourceLimit {
+			current_limit: 0,
+			maximum_limit: 0,
+		};
+		let result = unsafe {
+			getrlimit(RESOURCE_LIMIT_DATA, &mut resource_limit)
+		};
+		if result == 0 && resource_limit.current_limit > 0 && resource_limit.current_limit < INFINITE_LIMIT_FLOOR {
+			return Some(resource_limit.current_limit as f64);
+		}
+		read_physical_memory_size()
+	}
+	#[cfg(target_os = "windows")]
+	{
+		use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
+		let mut memory_status: MEMORYSTATUSEX = unsafe {
+			std::mem::zeroed()
+		};
+		memory_status.dwLength = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
+		let is_read = unsafe {
+			GlobalMemoryStatusEx(&mut memory_status)
+		};
+		if is_read == 0 {
+			return None;
+		}
+		Some(memory_status.ullTotalPhys.min(memory_status.ullTotalVirtual) as f64)
+	}
+	#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+	{
+		None
+	}
+}
+
+//==============================================================================
+/// 물리 메모리 크기. (바이트, 못 읽으면 None)
+//==============================================================================
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn read_physical_memory_size() -> Option<f64> {
+	#[cfg(target_os = "macos")]
+	{
+		extern "C" {
+			fn sysctlbyname(name: *const std::os::raw::c_char, old_value: *mut std::ffi::c_void, old_length: *mut usize, new_value: *mut std::ffi::c_void, new_length: usize) -> std::os::raw::c_int;
+		}
+		let mut memory_size: u64 = 0;
+		let mut memory_size_length = std::mem::size_of::<u64>();
+		let result = unsafe {
+			sysctlbyname(c"hw.memsize".as_ptr(), (&mut memory_size as *mut u64).cast(), &mut memory_size_length, std::ptr::null_mut(), 0)
+		};
+		if result != 0 || memory_size == 0 {
+			return None;
+		}
+		Some(memory_size as f64)
+	}
+	#[cfg(target_os = "linux")]
+	{
+		extern "C" {
+			fn sysconf(name: std::os::raw::c_int) -> std::os::raw::c_long;
+		}
+		// 리눅스의 _SC_PAGESIZE 는 30, _SC_PHYS_PAGES 는 85 다.
+		const SYSTEM_CONFIGURATION_PAGE_SIZE: std::os::raw::c_int = 30;
+		const SYSTEM_CONFIGURATION_PHYSICAL_PAGES: std::os::raw::c_int = 85;
+		let (page_size, page_count) = unsafe {
+			(sysconf(SYSTEM_CONFIGURATION_PAGE_SIZE), sysconf(SYSTEM_CONFIGURATION_PHYSICAL_PAGES))
+		};
+		if page_size <= 0 || page_count <= 0 {
+			return None;
+		}
+		Some(page_size as f64 * page_count as f64)
+	}
+}
+
+//==============================================================================
 /// 응용 프로그램 종료. (데스크탑은 엔진의 종료 요청을 보고 이벤트 루프가 끝나므로 따로 할 일이 없다)
 //==============================================================================
 pub fn exit_application() {

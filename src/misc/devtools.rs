@@ -22,15 +22,15 @@
 //!     이름은 원본 formatMethodName(getTextColor → textColor, is 로 시작하면 그대로), 값은 원본 formatPropertyValue 꼴이다.
 //!     (수는 toFixed(2), Vector2 는 (x, y), Rect 는 (x, y, 너비, 높이) toFixed(1), Color 는 rgba, null, 노드는 `[WorldNode]`, 배열은 `[Array]`, 그 밖은 [종류 이름])
 //!     목록과 차례는 원본과 같다. (원본 클래스에 없는 러스트 판의 다시 정의는 빼고, 원본과 이름이 다른 게터는 원본 이름으로 보인다) 원본 getEngine 은 전역 엔진이 없어 없다.
-//!   - 반사가 없는 컴포넌트(`#[reflect]` 를 붙이지 않은 게임 컴포넌트)는 UIDocument 에 쓰기 함수로 등록했으면 그 저장 키와 값을 보이고,
-//!     아니면 종류 이름 아래에 매크로를 붙이라는 "반사 없음" 줄을 보인다. (빠뜨린 것을 알 수 있게)
-//!     게임이 자기 컴포넌트를 등록한 문서는 set_ui_document 로 건다. (또는 get_ui_document_mut 로 등록한다) 이 때 수 넷 배열은 이름에 color 가 들면 rgba, 아니면 사각형으로 본다.
+//!   - 원본처럼 모든 컴포넌트가 반사된다. Reflect 가 Component 의 상위 트레이트라 `#[reflect]` 를 빠뜨린 게임 컴포넌트는 컴파일되지 않는다.
+//!     노드 종류 이름(노드를 가리키는 값)은 UIDocument 에 등록한 이름이다. 게임이 자기 종류를 등록한 문서는 set_ui_document 로 건다. (또는 get_ui_document_mut 로 등록한다)
 //!   - Local Storage 탭의 키 입력, 값 고치기, 지울지 묻기는 원본 window.prompt, window.confirm 자리인 Engine::prompt, Engine::confirm 이다. (core/modaldialog.rs)
 //!     웹은 원본처럼 브라우저 창이 그 자리에서 답한다. 데스크탑은 엔진이 그린 같은 질문 창이 떠서 답할 때까지 씬이 멈추고, 답은 다음 tick 에 받는다.
 //!   - Statistics 의 clientNativeSize 는 ViewManager::get_client_native_size(웹은 페이지 전체 크기, 데스크탑은 창 안쪽 논리 크기)다.
 //!     메모리는 웹에서 원본처럼 Chrome 의 performance.memory 를 읽고, 없는 브라우저는 "(N/A)" 다.
-//!     데스크탑은 자바스크립트 힙이 없어 같은 칸에 러스트가 쓰는 시스템 할당자의 힙(쓰는 중, 잡아 둔 것)을 적는다. (platform/desktop.rs read_heap_usage)
-//!     jsHeapSizeLimit 는 V8 이 정한 힙 상한인데 시스템 할당자에는 그런 상한이 없어 "(N/A)" 다. 힙을 못 읽는 OS 는 셋 다 "(N/A)" 다.
+//!     데스크탑은 자바스크립트 힙이 없어 같은 칸에 같은 뜻의 값을 운영체제 API 로 읽어 적는다. 쓰는 중과 잡아 둔 것은 러스트가 쓰는 시스템 할당자의 힙,
+//!     jsHeapSizeLimit 는 운영체제가 이 프로세스의 힙에 허락하는 상한이다. (platform/desktop.rs read_heap_usage, read_heap_size_limit)
+//!     두 엔진 모두 구하지 못한 칸은 칸마다 "(N/A)" 다. (힙을 못 읽으면 셋 다)
 //!     viewScaleMode 는 러스트 열거 이름(StretchHeight 등)으로 적는다.
 //!   - 화면 비율 가이드는 원본처럼 그때의 좌표계에 기대지 않고 스스로 뷰 좌표계(apply_view_rect)를 걸고 그린다. (원본 GameScene 에서 같은 결과)
 //! - Settings 의 Show FPS 를 켜면 패널을 닫아도 창 왼쪽 위에 지난 1 초의 프레임 수를 그린다. (원본과 같다, canvas native 좌표, 패널이 보이면 패널 위에)
@@ -103,7 +103,6 @@ use std::collections::HashSet;
 use crate::core::modaldialog::{ModalDialogHandle, ModalDialogKind};
 
 /// 반사도 UIDocument 등록도 없는 컴포넌트의 속성 자리 글. (원본은 모든 객체가 반사되어 이런 컴포넌트가 없다)
-const MISSING_REFLECTION_TEXT: &str = "(반사 없음: #[vanilla::reflect] 를 붙이면 보임)";
 
 //==============================================================================
 /// 고정 레이아웃 상수.
@@ -150,9 +149,6 @@ const SETTINGS_ROWS: [(&str, f32); 5] = [
 
 /// 노드 종류 이름. (러스트 판의 노드는 WorldNode 하나다)
 const NODE_TYPE_NAME: &str = "WorldNode";
-
-/// UIDocument 가 노드 참조를 적는 키.
-const NODE_REFERENCE_KEY: &str = "$nodeRef";
 
 //==============================================================================
 /// 색상 상수. (원본 CSS 색, 0 ~ 255)
@@ -1377,7 +1373,7 @@ impl DevTools {
 			if !has_mutable_getters(node_tree[selected_node_id].get_all_components()[component_index].as_ref()) {
 				continue;
 			}
-			let getter_list = node_tree.with_component_at_mut(selected_node_id, component_index, |component, tree| collect_reflected_getters_mut(component, tree)).flatten();
+			let getter_list = node_tree.with_component_at_mut(selected_node_id, component_index, |component, tree| collect_reflected_getters_mut(component, tree));
 			if let Some(getter_list) = getter_list {
 				self.mutable_getter_cache.push((selected_node_id, component_index, getter_list));
 			}
@@ -1446,13 +1442,9 @@ impl DevTools {
 			lines.push(InspectorLine::new(None, "(없음)", COLOR_TEXT_DIM, false, false, false, None, false));
 		}
 		else {
-			let reference_root_id = node_tree.get_root_id();
 			// 노드를 가리키는 값은 원본 constructor.name 처럼 그 노드의 종류 이름으로 보인다. (지워진 노드면 WorldNode)
 			let read_node_type_name = |target_id: NodeId| -> String {
 				node_tree.get_node(target_id).map_or(NODE_TYPE_NAME, |target_node| self.ui_document.get_node_type_name(target_node)).to_string()
-			};
-			let read_reference_type_name = |reference_path: &str| -> String {
-				UIDocument::find_node_by_path(node_tree, reference_root_id, reference_path).map_or_else(|| NODE_TYPE_NAME.to_string(), read_node_type_name)
 			};
 			for (component_index, component) in components.iter().enumerate() {
 				let component_reference = (node_id, component_index);
@@ -1462,41 +1454,20 @@ impl DevTools {
 				// 컴포넌트 헤더.
 				lines.push(InspectorLine::new(None, component.get_component_type(), COLOR_COMPONENT, false, false, true, Some(component_reference), false));
 
-				// 펼쳐진 경우 프로퍼티 목록. (반사가 있으면 원본 getComponentProperties 처럼 모든 게터, 없으면 UIDocument 의 저장 키, 그것도 없으면 종류 이름만)
+				// 펼쳐진 경우 프로퍼티 목록. (원본 getComponentProperties 처럼 모든 게터, 모든 컴포넌트에 반사가 있다)
 				if !is_expanded {
 					continue;
 				}
 				// &mut self 게터가 있으면 tick 이 읽어 둔 값, 아니면 트리를 받는 게터까지 지금 읽는다.
 				let cached_getter_list = self.mutable_getter_cache.iter().find(|(cached_node_id, cached_component_index, _)| *cached_node_id == node_id && *cached_component_index == component_index).map(|(_, _, getter_list)| getter_list.clone());
-				if let Some(getter_list) = cached_getter_list.or_else(|| collect_reflected_getters_in_tree(component.as_ref(), node_tree)) {
-					if getter_list.is_empty() {
-						lines.push(InspectorLine::new(None, "(프로퍼티 없음)", COLOR_TEXT_DIM, false, false, false, None, true));
-					}
-					for getter in getter_list.iter() {
-						let property_name = format_method_name(getter.name);
-						let property_text = format_property_value(&getter.value, &read_node_type_name);
-						lines.push(InspectorLine::new(Some(&property_name), &property_text, COLOR_PROPERTY_VALUE, false, false, false, None, true));
-					}
-					continue;
-				}
-				let component_properties = match self.ui_document.serialize_component(node_tree, reference_root_id, component.as_ref()) {
-					Some(component_properties) => {
-						component_properties
-					}
-					None => {
-						// 반사도 등록도 없으면 속성을 알 길이 없다. 매크로를 빠뜨린 것을 알 수 있게 적는다.
-						lines.push(InspectorLine::new(None, MISSING_REFLECTION_TEXT, COLOR_TEXT_DIM, false, false, false, None, true));
-						continue;
-					}
-				};
-				if component_properties.is_empty() {
+				let getter_list = cached_getter_list.unwrap_or_else(|| collect_reflected_getters_in_tree(component.as_ref(), node_tree));
+				if getter_list.is_empty() {
 					lines.push(InspectorLine::new(None, "(프로퍼티 없음)", COLOR_TEXT_DIM, false, false, false, None, true));
 				}
-				else {
-					for (property_name, property_value) in component_properties.iter() {
-						let property_text = format_document_value(property_name, property_value, &read_reference_type_name);
-						lines.push(InspectorLine::new(Some(property_name), &property_text, COLOR_PROPERTY_VALUE, false, false, false, None, true));
-					}
+				for getter in getter_list.iter() {
+					let property_name = format_method_name(getter.name);
+					let property_text = format_property_value(&getter.value, &read_node_type_name);
+					lines.push(InspectorLine::new(Some(&property_name), &property_text, COLOR_PROPERTY_VALUE, false, false, false, None, true));
 				}
 			}
 		}
@@ -2595,7 +2566,7 @@ fn format_megabytes(bytes: f64) -> String {
 }
 
 //==============================================================================
-/// 자바스크립트 힙 크기. (원본 performance.memory 의 usedJSHeapSize, totalJSHeapSize, jsHeapSizeLimit, 바이트, 상한이 없으면 None)
+/// 자바스크립트 힙 크기. (원본 performance.memory 의 usedJSHeapSize, totalJSHeapSize, jsHeapSizeLimit, 바이트, 상한을 못 구하면 None)
 //==============================================================================
 struct PerformanceMemory {
 	used_heap_size: f64,
@@ -2620,12 +2591,12 @@ fn read_performance_memory() -> Option<PerformanceMemory> {
 	Some(PerformanceMemory {
 		used_heap_size: read_size("usedJSHeapSize")?,
 		total_heap_size: read_size("totalJSHeapSize")?,
-		heap_size_limit: Some(read_size("jsHeapSizeLimit")?),
+		heap_size_limit: read_size("jsHeapSizeLimit"),
 	})
 }
 
 //==============================================================================
-/// 자바스크립트 힙 크기 읽기. (데스크탑에는 자바스크립트 힙이 없어 시스템 할당자의 힙을 읽는다, 상한은 없다. 못 읽는 OS 는 None)
+/// 자바스크립트 힙 크기 읽기. (데스크탑에는 자바스크립트 힙이 없어 시스템 할당자의 힙과 운영체제가 허락하는 힙 한도를 읽는다. 힙을 못 읽는 OS 는 None)
 //==============================================================================
 #[cfg(not(target_arch = "wasm32"))]
 fn read_performance_memory() -> Option<PerformanceMemory> {
@@ -2633,7 +2604,7 @@ fn read_performance_memory() -> Option<PerformanceMemory> {
 	Some(PerformanceMemory {
 		used_heap_size,
 		total_heap_size,
-		heap_size_limit: None,
+		heap_size_limit: crate::platform::desktop::read_heap_size_limit(),
 	})
 }
 
@@ -2723,56 +2694,6 @@ fn create_engine_ui_document() -> UIDocument {
 }
 
 //==============================================================================
-/// 문서 값을 문자열로 포맷. (반사가 없는 컴포넌트의 UIDocument 저장 값, 원본 formatPropertyValue 를 JSON 값에 맞춘 것)
-/// - 수 둘 배열은 벡터, 이름에 color 가 든 수 넷 배열은 rgba, 그 밖의 수 넷 배열은 사각형으로 본다. 수는 원본 toFixed 와 같이 반올림한다.
-/// - 노드 참조({ "$nodeRef": 경로 })는 read_reference_type_name 이 돌려준 그 노드의 종류 이름이다. (원본 constructor.name)
-//==============================================================================
-fn format_document_value(property_name: &str, value: &Value, read_reference_type_name: &dyn Fn(&str) -> String) -> String {
-	match value {
-		Value::Null => {
-			String::from("null")
-		}
-		Value::Bool(boolean_value) => {
-			String::from(format_boolean(*boolean_value))
-		}
-		Value::Number(number_value) => {
-			format_fixed(number_value.as_f64().unwrap_or(0.0), 2)
-		}
-		Value::String(string_value) => {
-			format_quoted_text(string_value)
-		}
-		Value::Array(item_values) => {
-			let numbers: Option<Vec<f64>> = item_values.iter().map(Value::as_f64).collect();
-			match numbers {
-				Some(numbers) if numbers.len() == 2 => {
-					format!("({}, {})", format_fixed(numbers[0], 2), format_fixed(numbers[1], 2))
-				}
-				Some(numbers) if numbers.len() == 4 && property_name.to_lowercase().contains("color") => {
-					let red = (numbers[0] * 255.0).round();
-					let green = (numbers[1] * 255.0).round();
-					let blue = (numbers[2] * 255.0).round();
-					format!("rgba({}, {}, {}, {})", red, green, blue, format_fixed(numbers[3], 2))
-				}
-				Some(numbers) if numbers.len() == 4 => {
-					format!("({}, {}, {}, {})", format_fixed(numbers[0], 1), format_fixed(numbers[1], 1), format_fixed(numbers[2], 1), format_fixed(numbers[3], 1))
-				}
-				_ => {
-					String::from("[Array]")
-				}
-			}
-		}
-		Value::Object(object_value) => {
-			if let Some(reference_path) = object_value.get(NODE_REFERENCE_KEY).and_then(Value::as_str) {
-				format!("[{}]", read_reference_type_name(reference_path))
-			}
-			else {
-				String::from("[Object]")
-			}
-		}
-	}
-}
-
-//==============================================================================
 /// 시험. (데스크탑, 로컬 스토리지는 임시 폴더에 쓴다)
 //==============================================================================
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -2830,6 +2751,10 @@ mod tests {
 		component_base: ComponentBase,
 	}
 
+	#[crate::reflect]
+	impl UnregisteredComponent {}
+
+	#[crate::reflect]
 	impl Component for UnregisteredComponent {
 		//==============================================================================
 		/// 컴포넌트 공통 상태 반환.
@@ -3027,24 +2952,6 @@ mod tests {
 	}
 
 	//==============================================================================
-	/// 반사가 없는 컴포넌트의 문서 값 글. (UIDocument 의 JSON 값)
-	//==============================================================================
-	#[test]
-	fn document_values_are_formatted_like_original() {
-		assert_eq!(format_document_value("enable", &serde_json::json!(true), &|_| String::from("WorldNode")), "true");
-		assert_eq!(format_document_value("roundSize", &serde_json::json!(4), &|_| String::from("WorldNode")), "4.00");
-		assert_eq!(format_document_value("roundSize", &serde_json::json!(0.125), &|_| String::from("WorldNode")), "0.13");
-		assert_eq!(format_document_value("text", &serde_json::json!("hello"), &|_| String::from("WorldNode")), "\"hello\"");
-		assert_eq!(format_document_value("anchor", &serde_json::json!([0.5, 1]), &|_| String::from("WorldNode")), "(0.50, 1.00)");
-		assert_eq!(format_document_value("textColor", &serde_json::json!([1, 0.5, 0, 0.25]), &|_| String::from("WorldNode")), "rgba(255, 128, 0, 0.25)");
-		assert_eq!(format_document_value("nineSlice", &serde_json::json!([1, 2, 3.5, 4]), &|_| String::from("WorldNode")), "(1.0, 2.0, 3.5, 4.0)");
-		assert_eq!(format_document_value("list", &serde_json::json!(["a"]), &|_| String::from("WorldNode")), "[Array]");
-		assert_eq!(format_document_value("target", &serde_json::json!({ "$nodeRef": "a/b" }), &|reference_path| format!("UILabel {}", reference_path)), "[UILabel a/b]");
-		assert_eq!(format_document_value("other", &serde_json::json!({ "x": 1 }), &|_| String::from("WorldNode")), "[Object]");
-		assert_eq!(format_document_value("nothing", &Value::Null, &|_| String::from("WorldNode")), "null");
-	}
-
-	//==============================================================================
 	/// 인스펙터의 type 은 원본 constructor.name 처럼 엔진 노드 종류 이름이다. (FloatingText 를 붙인 노드)
 	//==============================================================================
 	#[test]
@@ -3101,9 +3008,9 @@ mod tests {
 		assert_eq!(header_lines.len(), 2);
 		assert_eq!(header_lines[0].value, "Paint");
 		assert_eq!(header_lines[1].value, "UnregisteredComponent");
-		// 반사도 등록도 없는 컴포넌트는 머리 다음에 매크로를 붙이라는 줄 하나다.
+		// 게터가 없는 게임 컴포넌트도 반사가 있어, 원본처럼 머리 다음에 "(프로퍼티 없음)" 줄 하나다.
 		let last_lines: Vec<&InspectorLine> = dev_tools.cached_inspector_lines.iter().rev().take(2).collect();
-		assert_eq!(last_lines[0].value, MISSING_REFLECTION_TEXT);
+		assert_eq!(last_lines[0].value, "(프로퍼티 없음)");
 		assert!(last_lines[1].is_component_header);
 
 		// Paint 를 접으면 속성 줄이 빠진다.

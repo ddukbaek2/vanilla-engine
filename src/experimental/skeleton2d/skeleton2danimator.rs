@@ -97,6 +97,7 @@ pub struct Skeleton2DAnimator {
 	vertex_positions: Vec<f64>,
 }
 
+#[crate::reflect]
 impl Skeleton2DAnimator {
 	//==============================================================================
 	/// 생성. (자료 없음, 빠르기 1)
@@ -366,6 +367,7 @@ impl Default for Skeleton2DAnimator {
 	}
 }
 
+#[crate::reflect]
 impl Component for Skeleton2DAnimator {
 	//==============================================================================
 	/// 공통 상태 반환.

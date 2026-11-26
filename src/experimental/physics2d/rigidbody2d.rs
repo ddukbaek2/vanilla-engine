@@ -69,6 +69,7 @@ impl Default for RigidBody2D {
 	}
 }
 
+#[crate::reflect]
 impl RigidBody2D {
 	//==============================================================================
 	/// 생성. (맡은 몸 없음, 보간 켬)
@@ -246,6 +247,7 @@ fn synchronize_transform(world: &Rc<RefCell<PhysicsWorld2D>>, body_id: BodyId2D,
 	transform.set_local_rotation((angle * 180.0 / std::f64::consts::PI) as f32);
 }
 
+#[crate::reflect]
 impl Component for RigidBody2D {
 	//==============================================================================
 	/// 공통 상태 반환.

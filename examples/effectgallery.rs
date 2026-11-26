@@ -64,6 +64,10 @@ struct OrbitMover {
 	angle: f32,
 }
 
+#[vanilla::reflect]
+impl OrbitMover {}
+
+#[vanilla::reflect]
 impl Component for OrbitMover {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base
@@ -100,6 +104,10 @@ struct WaveMover {
 	frequency: f32,
 }
 
+#[vanilla::reflect]
+impl WaveMover {}
+
+#[vanilla::reflect]
 impl Component for WaveMover {
 	fn get_component_base(&self) -> &ComponentBase {
 		&self.component_base
