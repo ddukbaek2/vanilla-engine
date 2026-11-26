@@ -1,7 +1,7 @@
 //==============================================================================
 //! 여러 줄 입력 필드의 줄 배치. (크롬 textarea 의 white-space: pre-wrap 과 overflow-wrap: break-word 셈)
 //! - 줄바꿈 문자로 문단을 나누고, 문단은 폭을 넘지 않게 줄 나눔 자리에서 나눈다. 줄 나눔 자리는 크롬이 쓰는 ICU 처럼
-//!   유니코드 줄 나누기(UAX #14)다. (데스크탑은 ICU4X LineSegmenter 의 사전판, 웹 캔버스 모드는 낱말 경계로 갈음한다)
+//!   유니코드 줄 나누기(UAX #14)에 블링크의 빠른 표(아스키, 라틴 1)를 더한 것이다. (ICU4X LineSegmenter 의 사전판, 데스크탑과 웹 캔버스 모드가 같다)
 //! - pre-wrap: 공백은 그대로 두고, 줄 끝 공백은 폭을 넘어도 그 줄에 매달린다. (폭을 잴 때 빼고, 줄에는 남는다)
 //! - break-word: 나눔 자리 없이 한 조각이 폭을 넘으면 글자 묶음 사이에서 나눈다.
 //! - 탭은 다음 탭 자리(탭 크기 x 공백 폭의 배수)까지 민다. (CSS tab-size, 기본 8)
@@ -68,32 +68,140 @@ fn advance_to_tab_stop(x: f32, tab_width: f32) -> f32 {
 }
 
 //==============================================================================
-/// 문단의 줄 나눔 자리. (바이트 자리, 0 과 끝은 빼고 차례대로. 그 자리에서 새 줄이 시작될 수 있다)
+/// 빠른 줄 나눔 표의 글자 범위. (블링크 character_property_data_generator.cc 의 LineBreakData kMinChar, kMaxChar)
 //==============================================================================
-#[cfg(not(target_arch = "wasm32"))]
-fn find_line_break_list(paragraph: &str) -> Vec<usize> {
-	let segmenter = icu_segmenter::LineSegmenter::new_dictionary(Default::default());
-	segmenter.segment_str(paragraph).filter(|break_index| *break_index > 0 && *break_index < paragraph.len()).collect()
+const FAST_LINE_BREAK_MINIMUM_CHAR: u32 = 0x21;
+const FAST_LINE_BREAK_MAXIMUM_CHAR: u32 = 0xFF;
+/// 아스키 표의 글자 범위. (FillAscii 의 ALL_CHAR, '!' 부터 0x7F)
+const ASCII_LINE_BREAK_MAXIMUM_CHAR: u32 = 0x7F;
+const ASCII_LINE_BREAK_CHAR_COUNT: usize = (ASCII_LINE_BREAK_MAXIMUM_CHAR - FAST_LINE_BREAK_MINIMUM_CHAR + 1) as usize;
+
+//==============================================================================
+/// 블링크 아스키 줄 나눔 표. ([앞 글자][뒤 글자] 가 참이면 그 사이에서 나눈다)
+/// - 블링크 LineBreakData::FillAscii 의 차례 그대로 칸을 덮어 짓는다. 여는 괄호 앞(앞 글자에 따라)과 '-', '?' 뒤에서 나누고, 그 밖의 아스키 짝은 나누지 않는다.
+//==============================================================================
+fn build_ascii_line_break_table() -> [[bool; ASCII_LINE_BREAK_CHAR_COUNT]; ASCII_LINE_BREAK_CHAR_COUNT] {
+	let mut table = [[false; ASCII_LINE_BREAK_CHAR_COUNT]; ASCII_LINE_BREAK_CHAR_COUNT];
+	let all_minimum = FAST_LINE_BREAK_MINIMUM_CHAR;
+	let all_maximum = ASCII_LINE_BREAK_MAXIMUM_CHAR;
+	let mut set_pair_value = |first_minimum: u32, first_maximum: u32, second_minimum: u32, second_maximum: u32, value: bool| {
+		for first in first_minimum..=first_maximum {
+			for second in second_minimum..=second_maximum {
+				table[(first - all_minimum) as usize][(second - all_minimum) as usize] = value;
+			}
+		}
+	};
+	let ascii = |character: char| character as u32;
+	set_pair_value(all_minimum, all_maximum, all_minimum, all_maximum, false);
+	for opening in ['(', '<', '[', '{'] {
+		set_pair_value(all_minimum, all_maximum, ascii(opening), ascii(opening), true);
+	}
+	set_pair_value(ascii('-'), ascii('-'), all_minimum, all_maximum, true);
+	set_pair_value(ascii('?'), ascii('?'), all_minimum, all_maximum, true);
+	set_pair_value(ascii('-'), ascii('-'), ascii('$'), ascii('$'), false);
+	set_pair_value(all_minimum, all_maximum, ascii('!'), ascii('!'), false);
+	set_pair_value(ascii('?'), ascii('?'), ascii('"'), ascii('"'), false);
+	set_pair_value(ascii('?'), ascii('?'), ascii('\''), ascii('\''), false);
+	set_pair_value(all_minimum, all_maximum, ascii(')'), ascii(')'), false);
+	set_pair_value(all_minimum, all_maximum, ascii(','), ascii(','), false);
+	set_pair_value(all_minimum, all_maximum, ascii('.'), ascii('.'), false);
+	set_pair_value(all_minimum, all_maximum, ascii('/'), ascii('/'), false);
+	set_pair_value(ascii('-'), ascii('-'), ascii('0'), ascii('9'), false);
+	for closing in [':', ';', '?', ']', '}'] {
+		set_pair_value(all_minimum, all_maximum, ascii(closing), ascii(closing), false);
+	}
+	for (first_minimum, first_maximum) in [('$', '$'), ('\'', '\''), ('(', '('), ('/', '/'), ('0', '9'), ('<', '<'), ('@', '@'), ('A', 'Z'), ('[', '['), ('^', '`'), ('a', 'z'), ('{', '{'), ('\u{7F}', '\u{7F}')] {
+		set_pair_value(ascii(first_minimum), ascii(first_maximum), all_minimum, all_maximum, false);
+	}
+	table
 }
 
 //==============================================================================
-/// 문단의 줄 나눔 자리. (웹 캔버스 모드: 공백 뒤와 낱말 경계로 갈음한다. 웹 DOM 입력의 줄은 브라우저 textarea 가 나눈다)
+/// 블링크 줄 나누기의 공백. (LazyLineBreakIterator::IsBreakableSpace: 공백, 탭, 줄바꿈)
 //==============================================================================
-#[cfg(target_arch = "wasm32")]
+fn is_breakable_space(character: char) -> bool {
+	character == ' ' || character == '\t' || character == '\n'
+}
+
+//==============================================================================
+/// 두 글자만 둔 글에서 ICU 가 그 사이를 나누는지. (블링크 LineBreakData::FillFromIcu 의 짝 값)
+//==============================================================================
+fn is_icu_pair_breakable(segmenter: &icu_segmenter::LineSegmenterBorrowed<'static>, first: char, second: char) -> bool {
+	let mut pair_text = String::new();
+	pair_text.push(first);
+	pair_text.push(second);
+	let first_length = first.len_utf8();
+	segmenter.segment_str(&pair_text).any(|break_index| break_index == first_length)
+}
+
+//==============================================================================
+/// 문단의 줄 나눔 자리. (바이트 자리, 0 과 끝은 빼고 차례대로. 그 자리에서 새 줄이 시작될 수 있다)
+/// - 크롬 textarea 의 줄 나누기(블링크 LazyLineBreakIterator::NextBreakablePosition 의 normal, 공백 뭉치 뒤)와 같은 셈이다. 데스크탑과 웹 캔버스 모드가 같다.
+///   - 공백(공백, 탭) 앞에서는 나누지 않고, 공백 뭉치 뒤에서 나눈다.
+///   - 두 글자가 모두 '!' 부터 0xFF 면 블링크 빠른 표다. 둘 다 아스키면 FillAscii 의 표, 그 밖은 두 글자만 둔 ICU 짝 값이다.
+///     '-' 뒤의 숫자는 '-' 앞 글자가 아스키 영숫자일 때만 나눈다. ('-' 뒤가 0x7F 넘는 글자면 ICU)
+///   - 그 밖은 유니코드 줄 나누기(UAX #14 의 normal 엄격도, ICU4X LineSegmenter 사전판, 크롬 ICU4C 와 같은 규칙과 태국어 같은 글자의 사전)다.
+/// - 블링크 코드를 옮기지 않고, 원문에서 읽은 규칙과 크롬 158 에서 잰 값으로 다시 짰다. (text_break_iterator.cc, character_property_data_generator.cc)
+//==============================================================================
 fn find_line_break_list(paragraph: &str) -> Vec<usize> {
+	use std::sync::OnceLock;
+	static ASCII_LINE_BREAK_TABLE: OnceLock<[[bool; ASCII_LINE_BREAK_CHAR_COUNT]; ASCII_LINE_BREAK_CHAR_COUNT]> = OnceLock::new();
+	let ascii_table = ASCII_LINE_BREAK_TABLE.get_or_init(build_ascii_line_break_table);
+	// 크롬의 ICU 줄 나누기는 lang 이 없으면 뿌리 규칙이고, 작은 가나와 장음 부호(UAX #14 의 CJ) 앞에서 나눈다. (CSS line-break: normal 과 같다, 크롬 158 에서 잼)
+	let mut line_break_options = icu_segmenter::options::LineBreakOptions::default();
+	line_break_options.strictness = Some(icu_segmenter::options::LineBreakStrictness::Normal);
+	let segmenter = icu_segmenter::LineSegmenter::new_dictionary(line_break_options);
+	let icu_break_list: Vec<usize> = segmenter.segment_str(paragraph).collect();
 	let mut break_list: Vec<usize> = Vec::new();
-	let mut byte_index = 0;
-	let mut is_previous_space = false;
-	for (segment, is_word_like) in crate::core::component::text::segment_words(paragraph) {
-		let is_space = !is_word_like && segment.chars().all(char::is_whitespace);
-		if byte_index > 0 && (is_previous_space || (is_word_like && !is_space)) {
-			break_list.push(byte_index);
+	let mut last_last: Option<char> = None;
+	let mut last: Option<char> = None;
+	for (byte_index, current) in paragraph.char_indices() {
+		if let Some(last_character) = last {
+			if !is_breakable_space(current) {
+				if is_breakable_space(last_character) {
+					break_list.push(byte_index);
+				}
+				else {
+					let last_code = last_character as u32;
+					let current_code = current as u32;
+					// 블링크 ShouldBreakFast: 나눔(Some(true)), 나누지 않음(Some(false)), ICU 에 맡김(None)
+					let fast_result = if last_code < FAST_LINE_BREAK_MINIMUM_CHAR || current_code < FAST_LINE_BREAK_MINIMUM_CHAR {
+						Some(false)
+					}
+					else if last_character == '-' && current_code > ASCII_LINE_BREAK_MAXIMUM_CHAR {
+						None
+					}
+					else if last_character == '-' && current.is_ascii_digit() {
+						Some(last_last.map(|character| character.is_ascii_alphanumeric()).unwrap_or(false))
+					}
+					else if last_code <= FAST_LINE_BREAK_MAXIMUM_CHAR && current_code <= FAST_LINE_BREAK_MAXIMUM_CHAR {
+						if last_code <= ASCII_LINE_BREAK_MAXIMUM_CHAR && current_code <= ASCII_LINE_BREAK_MAXIMUM_CHAR {
+							Some(ascii_table[(last_code - FAST_LINE_BREAK_MINIMUM_CHAR) as usize][(current_code - FAST_LINE_BREAK_MINIMUM_CHAR) as usize])
+						}
+						else {
+							Some(is_icu_pair_breakable(&segmenter, last_character, current))
+						}
+					}
+					else {
+						None
+					};
+					let is_breakable = match fast_result {
+						Some(is_breakable) => {
+							is_breakable
+						}
+						None => {
+							icu_break_list.binary_search(&byte_index).is_ok()
+						}
+					};
+					if is_breakable {
+						break_list.push(byte_index);
+					}
+				}
+			}
 		}
-		is_previous_space = is_space;
-		byte_index += segment.len();
+		last_last = last;
+		last = Some(current);
 	}
-	break_list.retain(|break_index| *break_index < paragraph.len());
-	break_list.dedup();
 	break_list
 }
 
@@ -334,6 +442,55 @@ impl TextAreaLayout {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	//==============================================================================
+	/// 줄 나눔 자리가 크롬 textarea 와 같다. (크롬 158 맥, 1px 폭 pre-wrap 칸에서 줄이 바뀌는 첫 글자의 자리를 떠 왔다. 글자 단위)
+	//==============================================================================
+	#[test]
+	fn line_break_list_matches_chrome_textarea() {
+		let case_list: [(&str, &[usize]); 30] = [
+			("hello world foo", &[6, 12]),
+			("state-of-the-art e-mail", &[6, 9, 13, 17, 19]),
+			("a/b http://x.com/a?b=c", &[4, 19]),
+			("(abc) [def] {ghi}", &[6, 12]),
+			("1,000.50 $30 30% 3.14", &[9, 13, 17]),
+			("안녕하세요 반갑습니다", &[1, 2, 3, 4, 6, 7, 8, 9, 10]),
+			("日本語の文章です。終わり", &[1, 2, 3, 4, 5, 6, 7, 9, 10, 11]),
+			("中文句子，测试。", &[1, 2, 3, 5, 6]),
+			("ภาษาไทยเป็นภาษาที่สวยงาม", &[4, 7, 11, 15, 18]),
+			("foo—bar…baz", &[3, 4, 8]),
+			("don't stop", &[6]),
+			("a  b", &[3]),
+			("가나다abc가나", &[1, 2, 3, 6, 7]),
+			("x=1;y=2", &[]),
+			("「こんにちは」と言った", &[2, 3, 4, 5, 7, 8, 9, 10]),
+			("テスト・ケース", &[1, 2, 4, 5, 6]),
+			("a(b)c x)(y z=[1]", &[6, 8, 11, 13]),
+			("foo-123 a-1 -1 1-2", &[4, 8, 10, 12, 15, 17]),
+			("«bonjour» déjà-vu ¿qué?", &[10, 15, 18]),
+			("price: $5, ok! 50%off", &[7, 11, 15]),
+			("tab\there", &[4]),
+			("C++/C# a.b,c;d", &[7]),
+			("über-straße", &[5]),
+			("A&B|C~D", &[]),
+			("привет мир", &[7]),
+			("ABC-DEF?ghi", &[4, 8]),
+			("あ〜い゠う", &[2, 4]),
+			("ぁぃぅ々〻", &[1, 2]),
+			("「中」〜〜", &[]),
+			("a‐b–c—d", &[2, 4, 5, 6]),
+		];
+		let mismatch_list: Vec<String> = case_list.iter().filter_map(|(text, chrome_break_list)| {
+			let char_break_list: Vec<usize> = find_line_break_list(text).into_iter().map(|byte_index| text[..byte_index].chars().count()).collect();
+			if char_break_list == chrome_break_list.to_vec() {
+				None
+			}
+			else {
+				Some(format!("{}: 엔진 {:?}, 크롬 {:?}", text, char_break_list, chrome_break_list))
+			}
+		}).collect();
+		assert!(mismatch_list.is_empty(), "{:#?}", mismatch_list);
+	}
 
 	// 글자마다 10 인 고정폭 재기.
 	fn measure_fixed(text: &str) -> f32 {
