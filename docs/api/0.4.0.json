@@ -81674,6 +81674,25 @@
 					"members": [
 						{
 							"kind": "field",
+							"name": "name",
+							"signature": "pub name: String",
+							"params": [],
+							"returns": {
+								"type": "String",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "머티리얼 이름. (FBX 이름에서 종류 꼬리를 뗀 것, 없으면 빈 문자열)",
+								"en": "Material name. (The FBX name with the type suffix removed, an empty string if none)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/fbxloader.rs"
+						},
+						{
+							"kind": "field",
 							"name": "diffuse_color",
 							"signature": "pub diffuse_color: [f64; 3]",
 							"params": [],
@@ -87205,6 +87224,127 @@
 					]
 				},
 				{
+					"name": "FbxCornerArrays",
+					"kind": "struct",
+					"summary": {
+						"ko": "FBX 코너 배열. (원본 splitFbxCornersByMaterial 의 cornerArrays, 비인덱스 코너마다 값)",
+						"en": "FBX corner arrays. (cornerArrays of the original splitFbxCornersByMaterial, values per non-indexed corner)"
+					},
+					"traits": [
+						"Clone",
+						"Debug",
+						"Default"
+					],
+					"source": "src/graphics3d/skinnedmodel.rs",
+					"members": [
+						{
+							"kind": "field",
+							"name": "positions",
+							"signature": "pub positions: Vec<f32>",
+							"params": [],
+							"returns": {
+								"type": "Vec<f32>",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "코너 위치. (코너마다 x, y, z)",
+								"en": "Corner positions. (x, y, z per corner)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/skinnedmodel.rs"
+						},
+						{
+							"kind": "field",
+							"name": "normals",
+							"signature": "pub normals: Vec<f32>",
+							"params": [],
+							"returns": {
+								"type": "Vec<f32>",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "코너 노멀. (코너마다 3개)",
+								"en": "Corner normals. (3 per corner)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/skinnedmodel.rs"
+						},
+						{
+							"kind": "field",
+							"name": "texture_coordinates",
+							"signature": "pub texture_coordinates: Vec<f32>",
+							"params": [],
+							"returns": {
+								"type": "Vec<f32>",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "코너 UV. (코너마다 2개)",
+								"en": "Corner UVs. (2 per corner)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/skinnedmodel.rs"
+						},
+						{
+							"kind": "field",
+							"name": "joints",
+							"signature": "pub joints: Vec<u16>",
+							"params": [],
+							"returns": {
+								"type": "Vec<u16>",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "코너마다 조인트 4개. (스킨 joint_node_indices 안의 자리)",
+								"en": "4 joints per corner. (Positions in the skin's joint_node_indices)"
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/skinnedmodel.rs"
+						},
+						{
+							"kind": "field",
+							"name": "weights",
+							"signature": "pub weights: Vec<f32>",
+							"params": [],
+							"returns": {
+								"type": "Vec<f32>",
+								"description": {
+									"ko": "",
+									"en": ""
+								}
+							},
+							"description": {
+								"ko": "코너마다 조인트 가중치 4개.",
+								"en": "4 joint weights per corner."
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/skinnedmodel.rs"
+						}
+					],
+					"examples": [
+						{
+							"title": {
+								"ko": "삼각형 하나의 코너 배열 (재질 번호가 하나뿐이면 그대로 돌아온다)",
+								"en": "Corner arrays of one triangle (with only one material number they come back as they are)"
+							},
+							"code": "use vanilla::SkinnedModel;\nuse vanilla::graphics3d::skinnedmodel::FbxCornerArrays;\n\nlet corner_arrays = FbxCornerArrays {\n\tpositions: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0],\n\tnormals: vec![0.0; 9],\n\ttexture_coordinates: vec![0.0; 6],\n\tjoints: vec![0; 12],\n\tweights: vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],\n};\nlet sub_mesh_list = SkinnedModel::split_fbx_corners_by_material(&[3], corner_arrays);\nassert_eq!(sub_mesh_list.len(), 1);\nassert_eq!(sub_mesh_list[0].0, 3);\nassert_eq!(sub_mesh_list[0].1.positions.len(), 9);",
+							"language": "rust"
+						}
+					]
+				},
+				{
 					"name": "MeshDescription",
 					"kind": "struct",
 					"summary": {
@@ -87382,8 +87522,8 @@
 								}
 							},
 							"description": {
-								"ko": "머티리얼 이름. (glTF materials 의 name, FBX 는 빈 문자열)",
-								"en": "Material name. (name in glTF materials, an empty string for FBX)"
+								"ko": "머티리얼 이름. (glTF materials 의 name, FBX 는 Material 이름, 없으면 빈 문자열)",
+								"en": "Material name. (name in glTF materials, the Material name in FBX, an empty string if none)"
 							},
 							"since": "0.3.2",
 							"source": "src/graphics3d/skinnedmodel.rs"
@@ -88727,8 +88867,8 @@
 							"returns": {
 								"type": "Result<(Vec<MeshDescription>, Vec<MaterialDescription>), String>",
 								"description": {
-									"ko": "(메시 서술 목록, 머티리얼 서술 목록). (지오메트리가 이어진 스킨 디포머마다 메시 하나, 지금은 Err 를 내지 않는다)",
-									"en": "(mesh description list, material description list). (one mesh per skin deformer connected to a geometry, currently never returns Err)"
+									"ko": "(메시 서술 목록, 머티리얼 서술 목록). (지오메트리가 이어진 스킨 디포머마다, 그 지오메트리가 쓰는 머티리얼마다 메시 하나, 지금은 Err 를 내지 않는다)",
+									"en": "(Mesh description list, material description list). (One mesh per skin deformer with a connected geometry and per material that geometry uses, currently never returns Err)"
 								}
 							},
 							"description": {
@@ -88996,6 +89136,58 @@
 								"class": "SkinnedModel",
 								"name": "uploadWireframeIndices"
 							}
+						},
+						{
+							"kind": "static",
+							"name": "split_fbx_corners_by_material",
+							"signature": "pub fn split_fbx_corners_by_material(material_index_per_triangle: &[i32], corner_arrays: FbxCornerArrays) -> Vec<(usize, FbxCornerArrays)>",
+							"params": [
+								{
+									"name": "material_index_per_triangle",
+									"type": "&[i32]",
+									"description": {
+										"ko": "삼각형마다 머티리얼 번호. (소유 노드 material_ids 안의 자리, 음수는 0)",
+										"en": "Material number per triangle. (A position in the owner node's material_ids, negative values count as 0)"
+									}
+								},
+								{
+									"name": "corner_arrays",
+									"type": "FbxCornerArrays",
+									"description": {
+										"ko": "코너마다 위치 3, 노멀 3, UV 2, 조인트 4, 가중치 4.",
+										"en": "Per corner: 3 position, 3 normal, 2 UV, 4 joint and 4 weight values."
+									}
+								}
+							],
+							"returns": {
+								"type": "Vec<(usize, FbxCornerArrays)>",
+								"description": {
+									"ko": "(머티리얼 번호, 그 번호의 코너 배열) 목록.",
+									"en": "List of (material number, corner arrays for that number)."
+								}
+							},
+							"description": {
+								"ko": "FBX 코너를 머티리얼별로 나누기. (GL 무관, 비인덱스 코너 배열)\n- 메시 하나에 머티리얼이 여럿이면 머티리얼마다 부분 메시로 나눠 그린다. (three.js FBXLoader 의 그룹, 유니티와 언리얼의 서브메시)\n- 부분 메시는 머티리얼 번호가 작은 것부터, 삼각형 차례는 원래대로. 번호가 하나뿐이면 배열을 그대로 쓴다.",
+								"en": "Split FBX corners by material. (GL independent, non-indexed corner arrays)\n- When one mesh has several materials, it is drawn as one sub-mesh per material. (Groups in three.js FBXLoader, sub-meshes in Unity and Unreal)\n- Sub-meshes come in ascending material number and keep the original triangle order. With only one material number the arrays are used as they are."
+							},
+							"since": "0.4.0",
+							"source": "src/graphics3d/skinnedmodel.rs",
+							"counterpart": {
+								"engine": "vanilla.js",
+								"module": "graphics3d/skinnedmodel",
+								"class": "SkinnedModel",
+								"name": "splitFbxCornersByMaterial"
+							},
+							"examples": [
+								{
+									"title": {
+										"ko": "삼각형 셋 가운데 가운데 것만 재질 1 (부분 메시 둘, 삼각형 2개와 1개)",
+										"en": "Of three triangles only the middle one uses material 1 (two sub-meshes, with 2 triangles and 1)"
+									},
+									"code": "use vanilla::SkinnedModel;\nuse vanilla::graphics3d::skinnedmodel::FbxCornerArrays;\n\nlet corner_count = 9;\nlet corner_arrays = FbxCornerArrays {\n\tpositions: (0..corner_count * 3).map(|index| index as f32).collect(),\n\tnormals: vec![0.0; corner_count * 3],\n\ttexture_coordinates: vec![0.0; corner_count * 2],\n\tjoints: vec![0; corner_count * 4],\n\tweights: vec![0.0; corner_count * 4],\n};\nlet sub_mesh_list = SkinnedModel::split_fbx_corners_by_material(&[0, 1, 0], corner_arrays);\nassert_eq!(sub_mesh_list.len(), 2);\nassert_eq!(sub_mesh_list[0].0, 0);\nassert_eq!(sub_mesh_list[0].1.positions.len() / 9, 2);\nassert_eq!(sub_mesh_list[1].1.positions[0], 9.0);",
+									"language": "rust"
+								}
+							]
 						},
 						{
 							"kind": "static",

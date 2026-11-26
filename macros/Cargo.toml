@@ -7,6 +7,8 @@ edition = "2021"
 authors = ["vanillapunch"]
 license = "MIT"
 repository = "https://github.com/ddukbaek2/vanilla-engine"
+# cargo package 에 싣는 파일. (소스와 라이선스, LICENSE 는 뿌리 LICENSE 와 같은 글)
+include = ["/src/**/*", "/LICENSE"]
 
 # 절차 매크로 크레이트. (게임은 이 크레이트를 직접 의존하지 않고 엔진이 다시 내보낸 vanilla::reflect 를 쓴다)
 [lib]
