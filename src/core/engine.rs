@@ -1794,6 +1794,7 @@ impl Engine {
 /// - VANILLA_CAPTURE_FRAMES: 저장할 프레임 번호, 쉼표로 여럿. (기본 120)
 /// - VANILLA_CAPTURE_EXIT:   1 이면 마지막 저장 뒤 끝낸다.
 /// - VANILLA_CAPTURE_SHOW_WINDOW: 1 이면 창을 보인다. (찍기 모드의 데스크탑 창은 기본으로 숨긴다)
+/// - 찍기 모드는 표준 오류에 프레임마다 "Engine: 찍기 진행 프레임 <번호> / <마지막 번호>, <지난 초> 초" 를, 데스크탑은 처음에 GL 렌더러와 판을 남긴다.
 /// - 웹: ?capture=120,240 (번호, 빈 값이면 120), captureName=파일 이름("{frame}" 은 번호, 기본 capture_{frame}.png), captureExit=1. 내려받기로 저장한다.
 //==============================================================================
 struct CaptureRequest {
@@ -1962,6 +1963,10 @@ impl EngineRunner {
 				return;
 			}
 		};
+		// 찍기 진행. (프레임마다 지난 시간을 남겨, 느린 기계와 멈춘 것을 가른다. .github/scripts/captureexamples.cjs 가 읽는다)
+		if let Some(last_frame_number) = capture_request.frame_numbers.iter().max() {
+			eprintln!("Engine: 찍기 진행 프레임 {} / {}, {:.2} 초", frame_number, last_frame_number, self.start_instant.elapsed().as_secs_f64());
+		}
 		if !capture_request.frame_numbers.contains(&frame_number) {
 			return;
 		}
