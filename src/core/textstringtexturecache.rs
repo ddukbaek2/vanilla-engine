@@ -463,6 +463,8 @@ struct SystemFontState {
 	fallback_face_list: Vec<RegisteredFontFace>,
 	/// 대체 글꼴 얼굴마다 물은 바탕의 열쇠. (fallback_face_list 와 같은 차례, 크롬은 첫 글꼴과 폰트 문자열마다 대체를 따로 고른다)
 	fallback_base_key_list: Vec<String>,
+	/// 운영체제가 준 파일과 얼굴을 읽은 자리. (바탕 열쇠, 준 파일과 얼굴, 굵기, 기울임, fallback_face_list 의 차례. 같은 답이면 다시 읽지 않고 글자 범위만 더한다)
+	fallback_source_memo_list: Vec<(String, FontFileSource, u16, bool, usize)>,
 	/// 읽은 파일 바이트. (같은 파일의 여러 얼굴이 나눠 든다)
 	shared_bytes_table: HashMap<std::path::PathBuf, std::rc::Weak<[u8]>>,
 }
@@ -1130,8 +1132,18 @@ impl TextStringTextureCache {
 				String::new()
 			}
 		};
+		// 대체가 무엇에 따라 달라지는지가 운영체제마다 다르다. (맥은 첫 글꼴, 윈도우는 폰트 문자열의 첫 이름과 monospace, 리눅스는 글자만. 같은 답을 다시 묻지 않는다)
+		let key = if cfg!(target_os = "macos") {
+			primary_identity
+		}
+		else if cfg!(target_os = "windows") {
+			format!("{}\u{1f}{}", first_family_name.to_lowercase(), is_monospace)
+		}
+		else {
+			String::new()
+		};
 		FallbackBaseInfo {
-			key: format!("{}\u{1f}{}\u{1f}{}", primary_identity, first_family_name.to_lowercase(), is_monospace),
+			key,
 			primary_family_name,
 			primary_font,
 			first_family_name,
@@ -1210,28 +1222,39 @@ impl TextStringTextureCache {
 			let grapheme_range_list: Vec<(u32, u32)> = grapheme.chars().map(|grapheme_character| (grapheme_character as u32, grapheme_character as u32)).collect();
 			let mut system_font_state = self.system_font_state.borrow_mut();
 			let state = &mut *system_font_state;
+			let add_range_list = |face: &mut RegisteredFontFace, range_list: &[(u32, u32)]| {
+				for range in range_list {
+					if !face.descriptors.unicode_range_list.contains(range) {
+						face.descriptors.unicode_range_list.push(*range);
+					}
+				}
+			};
+			let memo_position = state.fallback_source_memo_list.iter().find(|(base_key, memo_source, weight, is_italic, _)| *base_key == fallback_base_info.key && *memo_source == source && *weight == font_description.font_weight && *is_italic == font_description.is_italic).map(|memo| memo.4);
+			if let Some(face_position) = memo_position {
+				add_range_list(&mut state.fallback_face_list[face_position], &grapheme_range_list);
+				continue;
+			}
 			match load_system_font_face(&mut state.shared_bytes_table, &source, font_description.font_weight, font_description.is_italic) {
 				Ok(mut registered_font_face) => {
 					registered_font_face.descriptors.source_key = read_fallback_source_key(&source);
 					registered_font_face.descriptors.is_system_fallback = true;
 					// 같은 바탕에서 이미 읽은 같은 얼굴이면 그 얼굴의 글자 범위에 더한다.
-					let loaded_face = state.fallback_face_list.iter_mut().zip(state.fallback_base_key_list.iter()).find(|(face, base_key)| {
-						**base_key == fallback_base_info.key && Rc::ptr_eq(face.font.get_font_bytes(), registered_font_face.font.get_font_bytes()) && face.font.get_face_index() == registered_font_face.font.get_face_index() && face.descriptors.minimum_weight == registered_font_face.descriptors.minimum_weight && face.descriptors.maximum_weight == registered_font_face.descriptors.maximum_weight && face.descriptors.is_italic == registered_font_face.descriptors.is_italic
+					let loaded_position = state.fallback_face_list.iter().zip(state.fallback_base_key_list.iter()).position(|(face, base_key)| {
+						*base_key == fallback_base_info.key && Rc::ptr_eq(face.font.get_font_bytes(), registered_font_face.font.get_font_bytes()) && face.font.get_face_index() == registered_font_face.font.get_face_index() && face.descriptors.minimum_weight == registered_font_face.descriptors.minimum_weight && face.descriptors.maximum_weight == registered_font_face.descriptors.maximum_weight && face.descriptors.is_italic == registered_font_face.descriptors.is_italic
 					});
-					match loaded_face {
-						Some((face, _)) => {
-							for range in grapheme_range_list {
-								if !face.descriptors.unicode_range_list.contains(&range) {
-									face.descriptors.unicode_range_list.push(range);
-								}
-							}
+					let face_position = match loaded_position {
+						Some(face_position) => {
+							add_range_list(&mut state.fallback_face_list[face_position], &grapheme_range_list);
+							face_position
 						}
 						None => {
 							registered_font_face.descriptors.unicode_range_list = grapheme_range_list;
 							state.fallback_face_list.push(registered_font_face);
 							state.fallback_base_key_list.push(fallback_base_info.key.clone());
+							state.fallback_face_list.len() - 1
 						}
-					}
+					};
+					state.fallback_source_memo_list.push((fallback_base_info.key.clone(), source, font_description.font_weight, font_description.is_italic, face_position));
 				}
 				Err(error) => {
 					eprintln!("TextStringTextureCache: {} ({})", error, source.path.display());
@@ -2578,7 +2601,7 @@ fn find_system_fallback_font(grapheme: &str, weight: u16, is_italic: bool, is_co
 //==============================================================================
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 struct FallbackBaseInfo {
-	/// 같은 대체를 나눠 쓰는 열쇠. (첫 글꼴, 첫 이름, monospace)
+	/// 같은 대체를 나눠 쓰는 열쇠. (맥은 첫 글꼴, 윈도우는 첫 이름과 monospace, 리눅스는 빈 글)
 	key: String,
 	/// 첫 글꼴을 운영체제에서 찾은 이름. (시스템 글꼴 이름표의 열쇠, 올린 글꼴이면 None)
 	primary_family_name: Option<String>,
