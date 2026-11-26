@@ -12,6 +12,7 @@
   - src/experimental/camera.js → src/deprecated/camera.js (원본도 폐기 예정, 러스트는 Camera2D 가 덮어 없다)
   - src/experimental/aabb.js, transform2d.js, graphics/gl2d.js, graphics/webgl2.js (죽은 코드) → src/deprecated/ (러스트에는 없다)
 - experimental: vanilla::experimental 모듈(src/experimental/mod.rs)을 새로 두었다. 0.4.0 뒤 기능의 초안 자리다. (원본 import.js 의 Experimental 이름 공간 자리) 초안은 API 가 바뀔 수 있다. 지금은 비어 있다
+- experimental 초안, 2D 물리와 공간 나누기(vanilla::experimental::physics2d, spatial): 원본 vanilla.js 의 Experimental 초안과 같은 API, 같은 셈이다. PhysicsWorld2D (강체 정적, 운동학, 동적, 모양 원, 캡슐, 선분, 볼록 다각형, 사슬, 관절 거리, 회전, 용접, 바퀴, 분류, 마스크, 무리 거르기, 센서, 닿음과 센서 사건, 광선과 점, 상자, 모양 질의, 하위 걸음과 웜 스타트의 부드러운 걸음 풀이기, 섬째 잠자기, advance 의 고정 걸음과 그리기 보간), RigidBody2D 컴포넌트(Rc<RefCell<PhysicsWorld2D>>), PhysicsDebugDraw2D, DynamicTree<T>, AABB2D, f64 벡터 PhysicsVector2. 셈은 f64 와 직접 짠 삼각 함수라 원본과 결과가 비트까지 같다. (시험 comparison_matches_vanilla_js 가 원본이 쓴 덤프와 견준다, 예제 physics2d)
 - 이름을 러스트 규칙(Rust API Guidelines C-CASE)으로 바꿨다. 함수, 메서드, 변수, 필드, 모듈은 snake_case, 열거 값은 UpperCamelCase, 연관 상수는 SCREAMING_SNAKE_CASE. (setFillColor → set_fill_color, Colors::white → Colors::WHITE, Pivot::topLeft → Pivot::TOP_LEFT, ButtonState::normal → ButtonState::Normal) 이름 경고를 끄던 #![allow(non_snake_case)] 등을 lib.rs 와 예제에서 뺐다. 엔진을 쓰는 코드는 같은 규칙으로 이름을 바꿔야 한다. (공개 API 를 바꾸는 일이다) 바꾼 곳 11,071 군데, 동작은 같다. (cargo test 252 통과, 데스크탑과 웹 빌드 경고 0, 예제 화면이 전과 같음)
 - README: macOS(애플 실리콘) 데스크탑에서 확인함을 적었다
 - 외계행성 광부 키우기가 게임 쪽에 따로 만들어 쓰던 범용 기능을 엔진으로 옮긴다. (vanilla.js 에 먼저 넣은 것과 같은 기능, 게임의 콘텐츠 구현은 가져오지 않는다)
